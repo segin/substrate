@@ -9,6 +9,7 @@
 #include <kern/panic.h>
 #include <kern/console.h>
 #include <exec/perso/personality.h>
+#include <pm/pm.h>
 #include <include/sys/thr.h>
 #include <include/sys/acct.h>
 #include <include/sys/file.h>
@@ -338,8 +339,14 @@ int sys_fork(void) {
 }
 
 int sys_vfork(void) {
-    /* Current implementation aliases vfork to fork semantics. */
-    return arch_fork_with_stack(NULL);
+    int child_pid = proc_vfork(current_process, current_thread ? current_thread->syscall_regs : NULL);
+    if (child_pid < 0) {
+        return child_pid;
+    }
+
+    process_t *child = proc_find(child_pid);
+    proc_begin_vfork(child);
+    return child_pid;
 }
 
 extern void isr128(void); 

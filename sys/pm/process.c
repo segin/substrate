@@ -50,6 +50,7 @@ void proc_add_child(process_t *parent, process_t *child);
 void proc_remove_child(process_t *parent, process_t *child);
 static int proc_threads_all_zombie(process_t *proc, thread_t *skip_thread);
 static void proc_release_zombie_resources(process_t *proc);
+static int proc_fork_common(process_t *parent, void *stack, int is_vfork);
 
 void pm_init(void) {
     next_pid = 1;
@@ -130,7 +131,7 @@ process_t *proc_create(int perso_id) {
     return &processes[i];
 }
 
-int proc_fork(process_t *parent, void *stack) {
+static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     process_t *child_proc = proc_create(parent->perso_id);
     if (!child_proc) return -1;
     
@@ -156,6 +157,7 @@ int proc_fork(process_t *parent, void *stack) {
     // Copy parent resources (FDs)
     child_proc->tty = parent->tty;
     child_proc->bitness = parent->bitness;
+    child_proc->vfork_waiter = is_vfork ? current_thread : NULL;
 
     child_proc->fd_bitmap = parent->fd_bitmap;
     for(int j=0; j<MAX_FD; j++) {
@@ -216,6 +218,14 @@ int proc_fork(process_t *parent, void *stack) {
     return sched_fork_thread(child_proc, stack);
 }
 
+int proc_fork(process_t *parent, void *stack) {
+    return proc_fork_common(parent, stack, 0);
+}
+
+int proc_vfork(process_t *parent, void *stack) {
+    return proc_fork_common(parent, stack, 1);
+}
+
 void proc_add_child(process_t *parent, process_t *child) {
     mutex_lock(&proctree_lock);
     child->p_parent = parent;
@@ -242,6 +252,24 @@ void proc_remove_child(process_t *parent, process_t *child) {
 // Shim for syscalls
 int sched_fork_process(process_t *parent, void *stack) {
     return proc_fork(parent, stack);
+}
+
+int proc_begin_vfork(process_t *child) {
+    if (!child || child->vfork_waiter != current_thread) {
+        return 0;
+    }
+
+    sched_sleep(child);
+    return 0;
+}
+
+void proc_vfork_done(process_t *child) {
+    if (!child || !child->vfork_waiter) {
+        return;
+    }
+
+    child->vfork_waiter = NULL;
+    sched_wakeup(child);
 }
 
 int sched_spawn_kernel_process(void (*entry)(void*), void *arg) {
@@ -444,6 +472,8 @@ void proc_exit(int code) {
             proc_idle_wait();
         }
     }
+
+    proc_vfork_done(current_process);
     
     // 1. Set State
     current_process->state = SDYING;

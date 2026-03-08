@@ -30,6 +30,7 @@ struct fs_node;
 typedef struct fs_node fs_node_t;
 struct runqueue;
 struct file;
+struct thread;
 typedef struct file file_t;
 struct pmap;
 struct pgrp;
@@ -71,6 +72,7 @@ typedef struct process {
     struct process *p_parent;     // Parent process
     struct process *p_children;   // Head of children list
     struct process *p_sibling;    // Next sibling (in parent's children list)
+    struct thread *vfork_waiter;  // Parent thread blocked in vfork()
     
     // Accounting & Credentials
     char comm[AC_COMM_LEN];

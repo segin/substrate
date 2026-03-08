@@ -33,6 +33,9 @@ static int wait_for_interrupt_calls;
 static process_t *last_psignal_proc;
 static int last_psignal_sig;
 static void *last_sched_wakeup_chan;
+static void *last_sched_sleep_chan;
+static void *expected_vfork_wakeup_chan;
+static int saw_vfork_wakeup;
 static int pmap_release_calls;
 static const char *last_kprint_msg;
 
@@ -65,7 +68,13 @@ void close_fs(fs_node_t *node) { (void)node; close_fs_calls++; }
 void vm_map_destroy(struct vm_map *map) { (void)map; vm_map_destroy_calls++; }
 void rusage_finalize(process_t *p) { (void)p; rusage_finalize_calls++; }
 void file_close_ptr(file_t *f) { (void)f; file_close_calls++; }
-void sched_wakeup(void *chan) { last_sched_wakeup_chan = chan; }
+void sched_wakeup(void *chan) {
+    last_sched_wakeup_chan = chan;
+    if (chan == expected_vfork_wakeup_chan) {
+        saw_vfork_wakeup = 1;
+    }
+}
+void sched_sleep(void *chan) { last_sched_sleep_chan = chan; }
 void sched_yield(void) { yielded = 1; longjmp(exit_jmp, 1); }
 void host_wait_for_interrupt(void) { wait_for_interrupt_calls++; longjmp(exit_jmp, 1); }
 void kprint(const char *msg) { last_kprint_msg = msg; }
@@ -106,6 +115,9 @@ static void reset_env(void) {
     last_psignal_proc = NULL;
     last_psignal_sig = 0;
     last_sched_wakeup_chan = NULL;
+    last_sched_sleep_chan = NULL;
+    expected_vfork_wakeup_chan = NULL;
+    saw_vfork_wakeup = 0;
     pmap_release_calls = 0;
     last_kprint_msg = NULL;
 
@@ -295,11 +307,59 @@ static void test_init_exit_halts_in_idle_loop(void) {
     assert(last_kprint_msg != NULL);
 }
 
+static void test_vfork_helper_blocks_and_wakes_parent(void) {
+    reset_env();
+
+    process_t *parent = init_proc(1, 50);
+    process_t *child = init_proc(2, 51);
+    thread_t *parent_thread = init_thread(0, 501, parent);
+
+    current_process = parent;
+    current_thread = parent_thread;
+    child->vfork_waiter = parent_thread;
+    expected_vfork_wakeup_chan = child;
+
+    assert(proc_begin_vfork(child) == 0);
+    assert(last_sched_sleep_chan == child);
+
+    proc_vfork_done(child);
+    assert(child->vfork_waiter == NULL);
+    assert(last_sched_wakeup_chan == child);
+    assert(saw_vfork_wakeup == 1);
+}
+
+static void test_proc_exit_wakes_vfork_parent(void) {
+    reset_env();
+
+    process_t *parent = init_proc(1, 60);
+    process_t *child = init_proc(2, 61);
+    thread_t *parent_thread = init_thread(0, 601, parent);
+    thread_t *child_thread = init_thread(1, 602, child);
+
+    child->p_parent = parent;
+    parent->p_children = child;
+    child->vfork_waiter = parent_thread;
+    expected_vfork_wakeup_chan = child;
+
+    current_process = child;
+    current_thread = child_thread;
+
+    if (setjmp(exit_jmp) == 0) {
+        proc_exit(12);
+        assert(!"proc_exit returned");
+    }
+
+    assert(child->vfork_waiter == NULL);
+    assert(saw_vfork_wakeup == 1);
+}
+
 int main(void) {
     test_proc_exit_basic_path();
     test_proc_exit_reparents_to_swapper_when_init_dead();
     test_proc_exit_autoreap_path();
     test_init_exit_halts_in_idle_loop();
+    test_vfork_helper_blocks_and_wakes_parent();
+    test_proc_exit_wakes_vfork_parent();
     puts("host_test_proc_exit: PASS");
     return 0;
 }
