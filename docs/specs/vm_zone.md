@@ -50,9 +50,12 @@ Current slab behavior:
 Substrate's fast path uses small per-CPU buckets:
 - `uc_allocbucket`
 - `uc_freebucket`
+- a shared empty-bucket depot
+- a shared full-bucket depot keyed by owning zone
 
 These buckets act as magazines for low-contention allocation/free traffic.
-When a bucket is empty or full, the allocator falls back to slab lists.
+When a bucket is empty or full, the allocator first consults the shared depot
+before falling back to slab lists.
 
 ### Per-CPU Cache
 Each zone owns a per-CPU `uma_cache_t` array.

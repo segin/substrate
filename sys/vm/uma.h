@@ -79,6 +79,8 @@ typedef void (*uma_reclaim_t)(void);
 struct uma_bucket {
     void    *ub_bucket[UMA_CACHE_BUCKET_SIZE];
     int     ub_cnt;         /* Number of items in bucket */
+    struct uma_bucket *ub_next; /* Next bucket in depot list */
+    uma_zone_t *ub_zone;    /* Owning zone when bucket is full in depot */
 };
 
 struct uma_cache {

@@ -12,6 +12,9 @@
 #include <string.h>
 #include <vm/vm_kmem.h>
 #include <sys/smp.h>
+#ifndef HOST_TEST
+#include <sys/lock.h>
+#endif
 
 static uma_zone_t *uma_zones = NULL;
 
@@ -31,6 +34,12 @@ static bool uma_dynamic_alloc = false;
 #define UMA_BUCKET_POOL_SIZE 64
 static struct uma_bucket uma_bucket_pool[UMA_BUCKET_POOL_SIZE];
 static int uma_bucket_idx = 0;
+static struct uma_bucket *uma_bucket_empty_depot;
+static struct uma_bucket *uma_bucket_full_depot;
+
+#ifndef HOST_TEST
+static spinlock_t uma_bucket_depot_lock;
+#endif
 
 /* Global Slab Hash Table */
 #define UMA_HASH_SHIFT  12
@@ -42,6 +51,18 @@ static uma_slab_t *uma_page_hash[UMA_HASH_SIZE];
 static inline uint32_t uma_hash(void *addr) {
     uintptr_t p = (uintptr_t)addr >> UMA_HASH_SHIFT;
     return (uint32_t)(p & UMA_HASH_MASK);
+}
+
+static inline void uma_bucket_depot_acquire(void) {
+#ifndef HOST_TEST
+    spinlock_acquire(&uma_bucket_depot_lock);
+#endif
+}
+
+static inline void uma_bucket_depot_release(void) {
+#ifndef HOST_TEST
+    spinlock_release(&uma_bucket_depot_lock);
+#endif
 }
 
 static void uma_hash_insert(uma_slab_t *slab) {
@@ -78,7 +99,12 @@ void uma_startup(void) {
     uma_bootstrap_idx = 0;
     uma_bucket_idx = 0;
     uma_zones = NULL;
+    uma_bucket_empty_depot = NULL;
+    uma_bucket_full_depot = NULL;
     memset(uma_page_hash, 0, sizeof(uma_page_hash));
+#ifndef HOST_TEST
+    spinlock_init(&uma_bucket_depot_lock, "uma_bucket_depot");
+#endif
 
     kprint("UMA: subsystem initialized\n");
 }
@@ -95,12 +121,92 @@ void uma_enable_dynamic_alloc(void) {
  * Allocate a bucket from the pool
  */
 static struct uma_bucket *uma_bucket_alloc(void) {
+    struct uma_bucket *b;
+
+    uma_bucket_depot_acquire();
+    if (uma_bucket_empty_depot) {
+        b = uma_bucket_empty_depot;
+        uma_bucket_empty_depot = b->ub_next;
+        uma_bucket_depot_release();
+        b->ub_next = NULL;
+        b->ub_zone = NULL;
+        b->ub_cnt = 0;
+        return b;
+    }
+    uma_bucket_depot_release();
+
     if (uma_bucket_idx >= UMA_BUCKET_POOL_SIZE) {
         return NULL;
     }
-    struct uma_bucket *b = &uma_bucket_pool[uma_bucket_idx++];
+    b = &uma_bucket_pool[uma_bucket_idx++];
     b->ub_cnt = 0;
+    b->ub_next = NULL;
+    b->ub_zone = NULL;
     return b;
+}
+
+static void uma_bucket_put_empty(struct uma_bucket *bucket) {
+    if (!bucket) return;
+    bucket->ub_cnt = 0;
+    bucket->ub_zone = NULL;
+    uma_bucket_depot_acquire();
+    bucket->ub_next = uma_bucket_empty_depot;
+    uma_bucket_empty_depot = bucket;
+    uma_bucket_depot_release();
+}
+
+static void uma_bucket_put_full(uma_zone_t *zone, struct uma_bucket *bucket) {
+    if (!zone || !bucket || bucket->ub_cnt == 0) return;
+    bucket->ub_zone = zone;
+    uma_bucket_depot_acquire();
+    bucket->ub_next = uma_bucket_full_depot;
+    uma_bucket_full_depot = bucket;
+    uma_bucket_depot_release();
+}
+
+static struct uma_bucket *uma_bucket_take_full(uma_zone_t *zone) {
+    struct uma_bucket *bucket = NULL;
+    struct uma_bucket **pp;
+
+    if (!zone) return NULL;
+
+    uma_bucket_depot_acquire();
+    pp = &uma_bucket_full_depot;
+    while (*pp) {
+        if ((*pp)->ub_zone == zone) {
+            bucket = *pp;
+            *pp = bucket->ub_next;
+            bucket->ub_next = NULL;
+            bucket->ub_zone = NULL;
+            break;
+        }
+        pp = &(*pp)->ub_next;
+    }
+    uma_bucket_depot_release();
+    return bucket;
+}
+
+static struct uma_bucket *uma_bucket_detach_full_for_zone(uma_zone_t *zone) {
+    struct uma_bucket *detached = NULL;
+    struct uma_bucket **pp;
+
+    if (!zone) return NULL;
+
+    uma_bucket_depot_acquire();
+    pp = &uma_bucket_full_depot;
+    while (*pp) {
+        struct uma_bucket *bucket = *pp;
+        if (bucket->ub_zone == zone) {
+            *pp = bucket->ub_next;
+            bucket->ub_next = detached;
+            bucket->ub_zone = NULL;
+            detached = bucket;
+            continue;
+        }
+        pp = &(*pp)->ub_next;
+    }
+    uma_bucket_depot_release();
+    return detached;
 }
 
 /*
@@ -682,6 +788,17 @@ void *uma_zalloc(uma_zone_t *zone, int flags) {
                 bucket = cache->uc_allocbucket;
             }
 
+            if (bucket->ub_cnt == 0) {
+                struct uma_bucket *depot_bucket = uma_bucket_take_full(zone);
+                if (depot_bucket) {
+                    if (cache->uc_allocbucket && cache->uc_allocbucket->ub_cnt == 0) {
+                        uma_bucket_put_empty(cache->uc_allocbucket);
+                    }
+                    cache->uc_allocbucket = depot_bucket;
+                    bucket = cache->uc_allocbucket;
+                }
+            }
+
             if (bucket->ub_cnt > 0) {
                 item = bucket->ub_bucket[--bucket->ub_cnt];
                 cache->uc_allocs++;
@@ -765,6 +882,11 @@ void uma_zfree(uma_zone_t *zone, void *item) {
         if (!cache->uc_freebucket) {
             cache->uc_freebucket = uma_bucket_alloc();
         }
+
+        if (cache->uc_freebucket && cache->uc_freebucket->ub_cnt == UMA_CACHE_BUCKET_SIZE) {
+            uma_bucket_put_full(zone, cache->uc_freebucket);
+            cache->uc_freebucket = uma_bucket_alloc();
+        }
         
         if (cache->uc_freebucket && cache->uc_freebucket->ub_cnt < UMA_CACHE_BUCKET_SIZE) {
             cache->uc_freebucket->ub_bucket[cache->uc_freebucket->ub_cnt++] = item;
@@ -799,6 +921,8 @@ void uma_reclaim(void) {
                 while (b->ub_cnt > 0) {
                      uma_zfree_slab(zone, b->ub_bucket[--b->ub_cnt]);
                 }
+                uma_bucket_put_empty(b);
+                cache->uc_allocbucket = NULL;
             }
             
             if (cache->uc_freebucket) {
@@ -806,6 +930,20 @@ void uma_reclaim(void) {
                 while (b->ub_cnt > 0) {
                      uma_zfree_slab(zone, b->ub_bucket[--b->ub_cnt]);
                 }
+                uma_bucket_put_empty(b);
+                cache->uc_freebucket = NULL;
+            }
+        }
+
+        {
+            struct uma_bucket *bucket = uma_bucket_detach_full_for_zone(zone);
+            while (bucket) {
+                struct uma_bucket *next = bucket->ub_next;
+                while (bucket->ub_cnt > 0) {
+                    uma_zfree_slab(zone, bucket->ub_bucket[--bucket->ub_cnt]);
+                }
+                uma_bucket_put_empty(bucket);
+                bucket = next;
             }
         }
 
