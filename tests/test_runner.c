@@ -69,6 +69,11 @@ extern bool test_signal_mask(void);
 extern bool test_signal_delivery_default(void);
 extern bool test_signal_pending_masked_filter(void);
 extern bool test_signal_uncatchable_invariants(void);
+extern bool test_signal_init_protection(void);
+extern bool test_signal_kill_routing(void);
+extern bool test_psignal_thread_selection(void);
+extern bool test_signal_sigcont_clears_stops(void);
+extern bool test_trapsignal_records_thread_context(void);
 
 // VFS Tests
 extern bool test_fd_ref_counting(void);
@@ -214,6 +219,11 @@ test_case_t tests[] = {
     {"sig_deliver", test_signal_delivery_default},
     {"sig_pending", test_signal_pending_masked_filter},
     {"sig_invariants", test_signal_uncatchable_invariants},
+    {"sig_init", test_signal_init_protection},
+    {"sig_kill_route", test_signal_kill_routing},
+    {"sig_psignal_pick", test_psignal_thread_selection},
+    {"sig_sigcont", test_signal_sigcont_clears_stops},
+    {"sig_trapsignal", test_trapsignal_records_thread_context},
     {"fd_refcnt", test_fd_ref_counting},
     {"fd_dup2", test_fd_dup2},
     {"vfs_perm_root", test_vfs_permissions_root},

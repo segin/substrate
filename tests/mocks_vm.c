@@ -254,7 +254,7 @@ void pmap_zero_page(uintptr_t pa) { (void)pa; }
 void pmap_remove(pmap_t pmap, uintptr_t va) { (void)pmap; (void)va; }
 
 struct pgrp *pgrp_find(pid_t pgid) { (void)pgid; return NULL; }
-int pgrp_signal(struct pgrp *pgrp, int sig, int check_session) { (void)pgrp; (void)sig; (void)check_session; return 0; }
+void pgrp_signal(struct pgrp *pgrp, int sig) { (void)pgrp; (void)sig; }
 int pgrp_is_orphaned(struct pgrp *pgrp) { (void)pgrp; return 0; }
 void pgrp_remove_proc(struct process *proc) { (void)proc; }
 int sched_interactivity_boost(thread_t *t) { (void)t; return 0; }

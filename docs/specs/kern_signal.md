@@ -1,38 +1,103 @@
 # Kernel Signal Specification
 
 ## Overview
-Substrate implements a POSIX-like signal mechanism for asynchronous event notification. Signals can be sent to processes or threads and are delivered when the target thread returns to user-mode from an interrupt or system call.
 
-## Signal Delivery
-- **Check:** Before returning to user-mode, the kernel checks `current_thread->sig_pending` against `current_thread->sig_mask`.
-- **Handling:**
-    - `SIG_IGN`: Signal is discarded.
-    - `SIG_DFL`: Default action is performed (Terminate, Core, Ignore, Stop, Continue).
-    - User-mode handler: A stack frame is set up on the user stack, saving the current register state, and the program counter is set to the handler address. (Note: Full delivery is stubbed in the initial prototype).
+Substrate implements process-directed and trap-directed signals with BSD-style
+job control semantics and i386 signal-frame delivery.
+
+The signal path is split into four phases:
+
+1. Generation
+2. Pending-state update
+3. Delivery point selection
+4. User handler or default-action execution
+
+## Generation Paths
+
+The kernel currently generates signals from these sources:
+
+- `sys_kill()` for PID, process-group, and broadcast delivery
+- `psignal()` for process-directed kernel delivery
+- `pgsignal()` / `pgrp_signal()` for process-group delivery
+- `trapsignal()` for synchronous CPU exceptions
+- TTY line discipline for `SIGINT`, `SIGQUIT`, `SIGTSTP`, `SIGTTIN`, `SIGTTOU`,
+  `SIGWINCH`, and `SIGHUP`
+- process exit / stop / continue notifications for `SIGCHLD`
+
+## Delivery Model
+
+### Process-Directed Signals
+
+`psignal()` applies process-directed signals to every thread in the target
+thread group by setting the pending bit on each thread.
+
+It also performs signal-specific policy:
+
+- PID 1 protection for default `SIGKILL`, `SIGTERM`, and `SIGSTOP`
+- `SIGCONT` clears pending stop signals, wakes stopped threads, transitions the
+  process back to `SRUN`, and sets `P_CONTINUED`
+- stop signals clear pending `SIGCONT`
+
+For immediate delivery preference, `psignal()` ranks candidate threads as:
+
+1. running or ready thread with the signal unmasked
+2. interruptible blocked thread with the signal unmasked
+3. any other thread with the signal unmasked
+4. fallback thread
+
+Only interruptible sleepers are woken for asynchronous signal delivery.
+
+### Trap Signals
+
+`trapsignal()` is synchronous. It targets the current faulting thread, stores
+`trap_signo` and `trap_code` on that thread, and marks the signal pending on
+that thread only. If the current thread does not match the target process, the
+kernel falls back to `psignal()`.
+
+## Checking Points
+
+The kernel checks pending signals when returning toward user mode:
+
+- syscall exit path in `sys/arch/i386/syscall.c`
+- interrupt / trap exit paths in `sys/arch/i386/idt.c`
+
+`signal_handle_pending()` does not deliver signals while returning to kernel
+mode. It only acts on a user-mode return frame.
 
 ## Default Actions
-- **Terminate:** `SIGHUP`, `SIGINT`, `SIGKILL`, `SIGPIPE`, `SIGALRM`, `SIGTERM`, `SIGUSR1`, `SIGUSR2`.
-- **Core:** `SIGQUIT`, `SIGILL`, `SIGTRAP`, `SIGABRT`, `SIGBUS`, `SIGFPE`, `SIGSEGV`.
-- **Ignore:** `SIGCHLD`, `SIGWINCH`.
-- **Stop:** `SIGSTOP`, `SIGTSTP`, `SIGTTIN`, `SIGTTOU`.
-- **Continue:** `SIGCONT`.
 
-## API
-### `int sys_sigaction(int sig, const struct sigaction *act, struct sigaction *oact)`
-Sets or retrieves the signal handling action for a specific signal.
+Default-action handling in `signal_handle_pending()` currently covers:
 
-### `int sys_sigprocmask(int how, const uint32_t *set, uint32_t *oset)`
-Modifies the signal mask of the current thread.
+- terminate: `SIGINT`, `SIGTERM`, `SIGSEGV`, `SIGILL`, `SIGFPE`, `SIGKILL`
+- stop: `SIGSTOP`, `SIGTSTP`, `SIGTTIN`, `SIGTTOU`
+- ignore-by-default paths such as `SIGCHLD` and non-stop `SIGCONT`
 
-### `int sys_kill(int pid, int sig)`
-Sends a signal to a process identified by PID.
+Job-control stop signals are ignored for orphaned process groups.
 
-### `int sys_sigpending(uint32_t *set)`
-Returns the set of signals that are pending for delivery to the calling thread.
+## SA_RESTART Behavior
 
-### `int sys_sigsuspend(const uint32_t *mask)`
-Temporarily replaces the signal mask and suspends the thread until a signal is delivered.
+When a thread is returning from a syscall and:
 
-## Constraints
-- `SIGKILL` and `SIGSTOP` cannot be ignored or caught.
-- Signal delivery is only performed when returning to user-mode.
+- `current_thread->in_syscall` is set
+- the interrupted syscall return register contains `-EINTR`
+- the installed handler carries `SA_RESTART`
+
+the kernel restores the original syscall number/return register state and
+rewinds `EIP` by the `int 0x80` instruction width so the syscall is retried on
+return to user mode.
+
+## SIGCHLD Semantics
+
+The kernel currently generates `SIGCHLD` for:
+
+- child exit
+- child stop unless `SA_NOCLDSTOP`
+- child continue unless `SA_NOCLDSTOP`
+
+`wait4()` consumes zombie, stopped, and continued state using the child
+process state plus `P_WAITED` / `P_CONTINUED`.
+
+## Related i386 Frame Layout
+
+The i386 frame layout, trampoline contract, and sigreturn restore rules are
+documented in [arch_i386_signal.md](./arch_i386_signal.md).

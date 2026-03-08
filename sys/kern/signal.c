@@ -424,7 +424,8 @@ void psignal(process_t *p, int sig) {
         if (unmasked) {
             if (t->state == THREAD_RUNNING || t->state == THREAD_READY) {
                 priority = 3;
-            } else if (t->state == THREAD_BLOCKED) {
+            } else if (t->state == THREAD_BLOCKED &&
+                       (t->flags & THREAD_F_INTERRUPTIBLE)) {
                 priority = 2;
             } else {
                 priority = 1;
@@ -437,14 +438,16 @@ void psignal(process_t *p, int sig) {
         }
         
         /* Wake interruptibly-sleeping threads */
-        if (t->state == THREAD_BLOCKED && unmasked) {
+        if (t->state == THREAD_BLOCKED && unmasked &&
+            (t->flags & THREAD_F_INTERRUPTIBLE)) {
             sched_wakeup(&t->sig_pending);
         }
     }
     
     /* If we found a best thread and it's blocked, wake it */
     if (best_thread && best_thread->state == THREAD_BLOCKED && 
-        best_priority > 0) {
+        best_priority > 0 &&
+        (best_thread->flags & THREAD_F_INTERRUPTIBLE)) {
         sched_wakeup(&best_thread->sig_pending);
     }
 }
