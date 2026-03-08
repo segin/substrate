@@ -70,6 +70,8 @@ static const cc_global_t *find_global(const cc_translation_unit_t *tu, const cha
 static int member_base_struct_id(const cc_expr_t *e);
 static const cc_struct_member_t *find_struct_member(const cc_translation_unit_t *tu, int sid, const char *name);
 static const cc_expr_t *unwrap_self_designated_init_list(const cc_expr_t *init_list, const char *member_name);
+static int expr_is_array_object_ref(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
+                                    const cc_expr_t *e);
 
 static int asm_constraint_has(const char *c, char ch) {
     return c != NULL && strchr(c, ch) != NULL;
@@ -689,20 +691,28 @@ static long array_decl_scalar_size_bytes(const cc_translation_unit_t *tu, cc_typ
     return type_size_bytes_with_struct(tu, cur_type, cur_sid);
 }
 
-static long expr_array_step_size_bytes(const cc_translation_unit_t *tu, const cc_expr_t *ptr_expr, long fallback) {
+static long array_dims_step_size_bytes(const cc_translation_unit_t *tu, cc_type_t array_type, int struct_id,
+                                       int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], int dim_start,
+                                       long fallback) {
     long stride = 1;
     long scalar_size;
     int i;
-    long dim;
-    if (ptr_expr == NULL || ptr_expr->array_ndim <= 0) {
+
+    if (array_ndim <= 0) {
         return fallback;
     }
-    scalar_size = array_decl_scalar_size_bytes(tu, ptr_expr->value_type, ptr_expr->struct_id, ptr_expr->array_ndim);
+    if (dim_start < 0) {
+        dim_start = 0;
+    }
+    if (dim_start > array_ndim) {
+        return fallback;
+    }
+    scalar_size = array_decl_scalar_size_bytes(tu, array_type, struct_id, array_ndim);
     if (scalar_size <= 0) {
         return fallback;
     }
-    for (i = 1; i < ptr_expr->array_ndim; ++i) {
-        dim = ptr_expr->array_dims[i];
+    for (i = dim_start; i < array_ndim; ++i) {
+        long dim = array_dims != NULL ? array_dims[i] : 0;
         if (dim <= 0) {
             dim = 1;
         }
@@ -717,33 +727,16 @@ static long expr_array_step_size_bytes(const cc_translation_unit_t *tu, const cc
     return scalar_size * stride;
 }
 
-static long array_decl_step_size_bytes(const cc_translation_unit_t *tu, cc_type_t array_type, int struct_id,
-                                       int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], long fallback) {
-    long scalar_size;
-    long stride = 1;
-    int i;
+static long expr_array_step_size_bytes(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
+                                       const cc_expr_t *ptr_expr, long fallback) {
+    int dim_start;
 
-    if (array_ndim <= 0) {
+    if (ptr_expr == NULL || ptr_expr->array_ndim <= 0) {
         return fallback;
     }
-    scalar_size = array_decl_scalar_size_bytes(tu, array_type, struct_id, array_ndim);
-    if (scalar_size <= 0) {
-        return fallback;
-    }
-    for (i = 1; i < array_ndim; ++i) {
-        long dim = array_dims != NULL ? array_dims[i] : 0;
-        if (dim <= 0) {
-            dim = 1;
-        }
-        if (stride > LONG_MAX / dim) {
-            return fallback;
-        }
-        stride *= dim;
-    }
-    if (scalar_size > LONG_MAX / stride) {
-        return fallback;
-    }
-    return scalar_size * stride;
+    dim_start = expr_is_array_object_ref(tu, vars, var_count, depth, ptr_expr) ? 1 : 0;
+    return array_dims_step_size_bytes(tu, ptr_expr->value_type, ptr_expr->struct_id, ptr_expr->array_ndim,
+                                      ptr_expr->array_dims, dim_start, fallback);
 }
 
 static long expr_decl_array_step_size_bytes(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count,
@@ -762,12 +755,15 @@ static long expr_decl_array_step_size_bytes(const cc_translation_unit_t *tu, var
 
     idx = var_find_visible(vars, var_count, name, depth);
     if (idx >= 0 && vars[idx].array_ndim > 0) {
-        return array_decl_step_size_bytes(tu, vars[idx].type, vars[idx].struct_id, vars[idx].array_ndim,
-                                          vars[idx].array_dims, fallback);
+        int dim_start = is_array_object_decl(vars[idx].type, vars[idx].array_len, vars[idx].array_ndim) ? 1 : 0;
+        return array_dims_step_size_bytes(tu, vars[idx].type, vars[idx].struct_id, vars[idx].array_ndim,
+                                          vars[idx].array_dims, dim_start, fallback);
     }
     g = find_global(tu, name);
     if (g != NULL && g->array_ndim > 0) {
-        return array_decl_step_size_bytes(tu, g->type, g->type_struct_id, g->array_ndim, g->array_dims, fallback);
+        int dim_start = is_array_object_decl(g->type, g->array_len, g->array_ndim) ? 1 : 0;
+        return array_dims_step_size_bytes(tu, g->type, g->type_struct_id, g->array_ndim, g->array_dims, dim_start,
+                                          fallback);
     }
     return fallback;
 }
@@ -976,6 +972,44 @@ static int push_instr(cc_ssa_function_t *f, cc_ssa_instr_t in) {
         f->instr_cap = ncap;
     }
     f->instrs[f->instr_count++] = in;
+    if (in.dst >= 0 && in.dst < f->value_count && f->value_types[in.dst] == CC_VAL_I64 && f->value_is_unsigned != NULL) {
+        switch (in.op) {
+        case CC_SSA_CONST:
+        case CC_SSA_PARAM:
+        case CC_SSA_LOAD:
+        case CC_SSA_ADD:
+        case CC_SSA_SUB:
+        case CC_SSA_MUL:
+        case CC_SSA_DIV:
+        case CC_SSA_AND:
+        case CC_SSA_OR:
+        case CC_SSA_XOR:
+        case CC_SSA_SHL:
+        case CC_SSA_SHR:
+        case CC_SSA_CALL:
+        case CC_SSA_CALLI:
+        case CC_SSA_F2I:
+            f->value_is_unsigned[in.dst] = in.is_unsigned ? 1 : 0;
+            break;
+        case CC_SSA_MOV:
+            if (in.lhs >= 0 && in.lhs < f->value_count) {
+                f->value_is_unsigned[in.dst] = f->value_is_unsigned[in.lhs];
+            }
+            break;
+        case CC_SSA_CMP:
+        case CC_SSA_GADDR:
+        case CC_SSA_LADDR:
+        case CC_SSA_ADDR:
+        case CC_SSA_STR:
+        case CC_SSA_STACKALLOC:
+        case CC_SSA_VA_START:
+            f->value_is_unsigned[in.dst] = 1;
+            break;
+        default:
+            f->value_is_unsigned[in.dst] = 0;
+            break;
+        }
+    }
     return 0;
 }
 
@@ -1156,14 +1190,21 @@ static int new_value(cc_ssa_function_t *f, cc_value_type_t vt) {
             ncap *= 2;
         }
         cc_value_type_t *next = (cc_value_type_t *)realloc(f->value_types, ncap * sizeof(*next));
+        unsigned char *next_unsigned;
         if (next == NULL) {
             return -1;
         }
+        next_unsigned = (unsigned char *)realloc(f->value_is_unsigned, ncap * sizeof(*next_unsigned));
+        if (next_unsigned == NULL) {
+            return -1;
+        }
         f->value_types = next;
+        f->value_is_unsigned = next_unsigned;
         f->value_cap = ncap;
     }
 
     f->value_types[id] = vt;
+    f->value_is_unsigned[id] = 0;
     return id;
 }
 
@@ -1222,6 +1263,13 @@ static cc_value_type_t value_type(const cc_ssa_function_t *f, int v) {
         return CC_VAL_I64;
     }
     return f->value_types[v];
+}
+
+static int value_is_unsigned(const cc_ssa_function_t *f, int v) {
+    if (f == NULL || v < 0 || (size_t)v >= (size_t)f->value_count || f->value_is_unsigned == NULL) {
+        return 0;
+    }
+    return f->value_is_unsigned[v] ? 1 : 0;
 }
 
 static int var_find_visible(var_entry_t *vars, size_t var_count, const char *name, int depth) {
@@ -1712,6 +1760,9 @@ static long sizeof_expr_bytes(const cc_translation_unit_t *tu, var_entry_t *vars
     if (e->kind == CC_EXPR_STR) {
         return string_literal_size_bytes(e->ident);
     }
+    if (e->kind == CC_EXPR_DEREF && e->array_ndim > 0 && is_pointer_type(e->value_type)) {
+        return array_type_size_bytes(tu, e->value_type, e->struct_id, e->array_ndim, e->array_dims);
+    }
     return type_size_bytes_struct(tu, e->value_type, e->struct_id);
 }
 
@@ -1789,49 +1840,6 @@ static int expr_is_array_pointer_chain(const cc_translation_unit_t *tu, var_entr
             return 1;
         }
         return expr_is_array_pointer_chain(tu, vars, var_count, depth, e->rhs);
-    }
-    return 0;
-}
-
-static int expr_decl_array_ndim(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
-                                const cc_expr_t *e) {
-    int idx;
-    const cc_global_t *g;
-    int lnd;
-    int rnd;
-
-    if (e == NULL) {
-        return 0;
-    }
-    if (e->kind == CC_EXPR_IDENT && e->ident != NULL) {
-        idx = var_find_visible(vars, var_count, e->ident, depth);
-        if (idx >= 0) {
-            return vars[idx].array_ndim;
-        }
-        g = find_global(tu, e->ident);
-        if (g != NULL) {
-            return g->array_ndim;
-        }
-        return 0;
-    }
-    if (e->kind == CC_EXPR_MEMBER) {
-        const cc_struct_member_t *m = find_struct_member(tu, member_base_struct_id(e), e->ident);
-        if (m != NULL) {
-            return m->array_ndim;
-        }
-        return e->array_ndim;
-    }
-    if (e->kind == CC_EXPR_CAST) {
-        return expr_decl_array_ndim(tu, vars, var_count, depth, e->lhs);
-    }
-    if (e->kind == CC_EXPR_DEREF) {
-        int nd = expr_decl_array_ndim(tu, vars, var_count, depth, e->lhs);
-        return nd > 0 ? (nd - 1) : 0;
-    }
-    if (e->kind == CC_EXPR_BIN && (e->op == CC_BIN_ADD || e->op == CC_BIN_SUB)) {
-        lnd = expr_decl_array_ndim(tu, vars, var_count, depth, e->lhs);
-        rnd = expr_decl_array_ndim(tu, vars, var_count, depth, e->rhs);
-        return lnd > rnd ? lnd : rnd;
     }
     return 0;
 }
@@ -2213,6 +2221,7 @@ static int cast_value(cc_ssa_function_t *sf, int v, cc_value_type_t dst, cc_diag
 
     if (src == CC_VAL_I64 && dst == CC_VAL_F64) {
         in.op = CC_SSA_I2F;
+        in.is_unsigned = value_is_unsigned(sf, v);
     } else if (src == CC_VAL_F64 && dst == CC_VAL_I64) {
         in.op = CC_SSA_F2I;
     } else {
@@ -2241,6 +2250,8 @@ static int integral_type_bits(cc_type_t t) {
     case CC_TYPE_INT:
     case CC_TYPE_UINT:
         return 32;
+    case CC_TYPE_LONG:
+    case CC_TYPE_ULONG:
     case CC_TYPE_LONG_LONG:
     case CC_TYPE_ULONG_LONG:
         return 64;
@@ -2254,6 +2265,7 @@ static int normalize_integral_value(cc_ssa_function_t *sf, int v, cc_type_t t, c
     int sh;
     int c;
     cc_ssa_instr_t in;
+    int want_unsigned;
 
     if (!is_integral_type(t)) {
         return v;
@@ -2279,11 +2291,29 @@ static int normalize_integral_value(cc_ssa_function_t *sf, int v, cc_type_t t, c
     }
 
     bits = integral_type_bits(t);
-    if (bits <= 0 || bits >= 64) {
+    want_unsigned = is_unsigned_integral_type(t) ? 1 : 0;
+    if (bits <= 0) {
         return v;
     }
+    if (bits >= 64) {
+        if (value_is_unsigned(sf, v) == want_unsigned) {
+            return v;
+        }
+        memset(&in, 0, sizeof(in));
+        in.op = CC_SSA_MOV;
+        in.dst = new_value(sf, CC_VAL_I64);
+        in.lhs = v;
+        if (in.dst < 0 || push_instr(sf, in) != 0) {
+            set_diag(diag, "out of memory retagging integral value");
+            return -1;
+        }
+        if (sf->value_is_unsigned != NULL && in.dst >= 0 && in.dst < sf->value_count) {
+            sf->value_is_unsigned[in.dst] = want_unsigned ? 1 : 0;
+        }
+        return in.dst;
+    }
 
-    if (is_unsigned_integral_type(t)) {
+    if (want_unsigned) {
         unsigned long long mask_u = (1ULL << bits) - 1ULL;
         c = emit_const_i64_instr(sf, (long)mask_u);
         if (c < 0) {
@@ -2291,6 +2321,7 @@ static int normalize_integral_value(cc_ssa_function_t *sf, int v, cc_type_t t, c
         }
         memset(&in, 0, sizeof(in));
         in.op = CC_SSA_AND;
+        in.is_unsigned = 1;
         in.dst = new_value(sf, CC_VAL_I64);
         in.lhs = v;
         in.rhs = c;
@@ -2305,6 +2336,7 @@ static int normalize_integral_value(cc_ssa_function_t *sf, int v, cc_type_t t, c
 
     memset(&in, 0, sizeof(in));
     in.op = CC_SSA_SHL;
+    in.is_unsigned = 0;
     in.dst = new_value(sf, CC_VAL_I64);
     in.lhs = v;
     in.rhs = -1;
@@ -3228,6 +3260,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         in.op = CC_SSA_CONST;
         in.dst = new_value(sf, CC_VAL_I64);
         in.imm = e->int_val;
+        in.is_unsigned = is_unsigned_integral_type(e->value_type) ? 1 : 0;
         if (in.dst < 0 || push_instr(sf, in) != 0) {
             return -1;
         }
@@ -3449,7 +3482,6 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
 
     case CC_EXPR_DEREF:
     {
-        int chain_array_ndim = 0;
         if (e->value_type == CC_TYPE_VOID && e->struct_id >= 0) {
             lhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
             if (lhs < 0) {
@@ -3457,8 +3489,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             return cast_value(sf, lhs, CC_VAL_I64, diag);
         }
-        chain_array_ndim = expr_decl_array_ndim(tu, vars, var_count, depth, e->lhs);
-        if (is_pointer_type(e->value_type) && (e->array_ndim > 0 || chain_array_ndim > 1)) {
+        if (is_pointer_type(e->value_type) && e->array_ndim > 0) {
             lhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
             if (lhs < 0) {
                 return -1;
@@ -3683,8 +3714,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (e->op == CC_BIN_SUB && is_pointer_type(e->lhs->value_type) && is_pointer_type(e->rhs->value_type)) {
             long elem_size = pointer_elem_size_bytes(tu, e->lhs->value_type, e->lhs->struct_id);
             int diffv;
-            long lhs_step = expr_array_step_size_bytes(tu, e->lhs, -1);
-            long rhs_step = expr_array_step_size_bytes(tu, e->rhs, -1);
+            long lhs_step = expr_array_step_size_bytes(tu, vars, var_count, depth, e->lhs, -1);
+            long rhs_step = expr_array_step_size_bytes(tu, vars, var_count, depth, e->rhs, -1);
 
             if (lhs_step > 0) {
                 elem_size = lhs_step;
@@ -3774,7 +3805,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
 
             elem_size = pointer_elem_size_bytes(tu, e->value_type, e->struct_id);
-            elem_size = expr_array_step_size_bytes(tu, ptr_expr, elem_size);
+            elem_size = expr_array_step_size_bytes(tu, vars, var_count, depth, ptr_expr, elem_size);
             elem_size = expr_decl_array_step_size_bytes(tu, vars, var_count, depth, ptr_expr, elem_size);
             if (elem_size <= 0) {
                 set_diag(diag, "unsupported pointer base type in lowering");
@@ -6667,6 +6698,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         in.op = CC_SSA_CONST;
         in.dst = new_value(sf, CC_VAL_I64);
         in.imm = n;
+        in.is_unsigned = 1;
         if (in.dst < 0 || push_instr(sf, in) != 0) {
             return -1;
         }
@@ -9899,7 +9931,7 @@ static int eval_global_addr_symbol_addend(const cc_translation_unit_t *tu, const
                 return -1;
             }
             step = is_pointer_type(e->lhs->value_type) ? pointer_elem_size_bytes(tu, e->lhs->value_type, e->lhs->struct_id) : 1;
-            step = expr_array_step_size_bytes(tu, e->lhs, step);
+            step = expr_array_step_size_bytes(tu, NULL, 0, 0, e->lhs, step);
             if (apply_global_ptr_addend(ladd, iv, step, e->op == CC_BIN_SUB, &ladd) != 0) {
                 free(lsym);
                 return -1;
@@ -9915,7 +9947,7 @@ static int eval_global_addr_symbol_addend(const cc_translation_unit_t *tu, const
                 return -1;
             }
             step = is_pointer_type(e->rhs->value_type) ? pointer_elem_size_bytes(tu, e->rhs->value_type, e->rhs->struct_id) : 1;
-            step = expr_array_step_size_bytes(tu, e->rhs, step);
+            step = expr_array_step_size_bytes(tu, NULL, 0, 0, e->rhs, step);
             if (apply_global_ptr_addend(radd, iv, step, 0, &radd) != 0) {
                 free(rsym);
                 return -1;

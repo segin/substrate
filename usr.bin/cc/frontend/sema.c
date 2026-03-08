@@ -5680,8 +5680,9 @@ fail_decl:
                 set_diag(diag, "duplicate parameter name");
                 goto fail_func;
             }
-            if (vars_push(&vars, &var_count, f->params[j].name, f->params[j].type, f->params[j].type_struct_id, -1, 0,
-                          NULL, f->params[j].storage, 0) != 0) {
+            if (vars_push(&vars, &var_count, f->params[j].name, f->params[j].type, f->params[j].type_struct_id,
+                          f->params[j].array_len, f->params[j].array_ndim, f->params[j].array_dims,
+                          f->params[j].storage, 0) != 0) {
                 set_diag(diag, "out of memory adding parameter");
                 goto fail_func;
             }

@@ -265,6 +265,8 @@ test:
 	/tmp/cc_native_c99_pointer_cmp
 	$(TOP)/usr.bin/cc/cc native_c99_decay.c -o /tmp/cc_native_c99_decay
 	/tmp/cc_native_c99_decay
+	$(TOP)/usr.bin/cc/cc native_c99_ptr_to_array_decay.c -o /tmp/cc_native_c99_ptr_to_array_decay
+	/tmp/cc_native_c99_ptr_to_array_decay
 	$(TOP)/usr.bin/cc/cc native_c99_local_array_decay_addr.c -o /tmp/cc_native_c99_local_array_decay_addr
 	/tmp/cc_native_c99_local_array_decay_addr
 	$(TOP)/usr.bin/cc/cc native_c99_block_scope_shadow.c -o /tmp/cc_native_c99_block_scope_shadow

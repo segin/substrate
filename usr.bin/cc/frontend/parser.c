@@ -3967,6 +3967,40 @@ static int prepend_array_info(long *io_array_len, int *io_array_ndim, long io_ar
     return 0;
 }
 
+static int append_array_info(long *io_array_len, int *io_array_ndim, long io_array_dims[CC_MAX_ARRAY_DIMS],
+                             long inner_array_len, int inner_array_ndim,
+                             const long inner_array_dims[CC_MAX_ARRAY_DIMS]) {
+    int i;
+    int cur_ndim;
+
+    if (io_array_len == NULL || io_array_ndim == NULL || io_array_dims == NULL) {
+        return -1;
+    }
+    if (inner_array_ndim <= 0) {
+        return 0;
+    }
+    cur_ndim = *io_array_ndim;
+    if (cur_ndim + inner_array_ndim > CC_MAX_ARRAY_DIMS) {
+        return -1;
+    }
+    for (i = 0; i < inner_array_ndim; ++i) {
+        io_array_dims[cur_ndim + i] = inner_array_dims != NULL ? inner_array_dims[i] : 0;
+    }
+    *io_array_ndim = cur_ndim + inner_array_ndim;
+    if (*io_array_len >= 0 && inner_array_len >= 0) {
+        if (*io_array_len == 0 || inner_array_len == 0) {
+            *io_array_len = 0;
+        } else if (*io_array_len > LONG_MAX / inner_array_len) {
+            *io_array_len = 0;
+        } else {
+            *io_array_len *= inner_array_len;
+        }
+    } else if (*io_array_len < 0 && cur_ndim == 0 && inner_array_len >= 0) {
+        *io_array_len = inner_array_len;
+    }
+    return 0;
+}
+
 static int tok_is_ident(parser_t *p, const char *s) {
     size_t n = strlen(s);
     return p->tok.kind == TOK_IDENT && p->tok.len == n && strncmp(p->tok.start, s, n) == 0;
@@ -5071,7 +5105,8 @@ static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id,
 
 static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *out_type, char **out_name,
                                   long *out_array_len, int *out_array_ndim,
-                                  long out_array_dims[CC_MAX_ARRAY_DIMS], int *out_saw_restrict) {
+                                  long out_array_dims[CC_MAX_ARRAY_DIMS], int *out_saw_restrict,
+                                  int *out_param_array_decl) {
     cc_type_t ty = base_type;
     int grouped_ptr_decl = 0;
     int saw_restrict = 0;
@@ -5091,6 +5126,9 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
     }
     if (out_saw_restrict != NULL) {
         *out_saw_restrict = 0;
+    }
+    if (out_param_array_decl != NULL) {
+        *out_param_array_decl = 0;
     }
     while (is_ptr_declarator_tok(p->tok.kind)) {
         ty = ptr_of_type(ty);
@@ -5281,6 +5319,9 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
     while (p->tok.kind == TOK_LBRACK) {
         long dim = 0;
         int dim_is_const = 0;
+        if (out_param_array_decl != NULL && !grouped_ptr_decl) {
+            *out_param_array_decl = 1;
+        }
         ty = ptr_of_type(ty);
         if (ty == CC_TYPE_VOID) {
             set_ptr_depth_diag(p, __LINE__);
@@ -5361,6 +5402,15 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
                 return -1;
             }
         }
+    }
+    if (grouped_ptr_decl && decl_array_ndim > 0) {
+        /*
+         * Parameter declarators of the form `(*p)[N]` are pointer objects
+         * whose pointee has array shape metadata. They are not array objects
+         * themselves, so leave array_len negative and keep the dimensions for
+         * later decay and stride calculations.
+         */
+        decl_array_len = -1;
     }
     *out_type = ty;
     if (out_array_len != NULL) {
@@ -9673,13 +9723,20 @@ static int parse_params(parser_t *p, cc_function_t *f, int allow_oldstyle_names)
         int ptype_sid = -1;
         cc_type_t dty;
         char *pname = NULL;
+        long pbase_array_len = -1;
+        int pbase_array_ndim = 0;
+        long pbase_array_dims[CC_MAX_ARRAY_DIMS];
         long darr_len = -1;
         int darr_ndim = 0;
         long darr_dims[CC_MAX_ARRAY_DIMS];
         int param_storage = 0;
         int ptype_restrict = 0;
         int dty_restrict = 0;
+        int pointee_array_decl = 0;
+        int param_array_decl = 0;
+        int decay_array_param = 0;
         char anon_buf[32];
+        memset(pbase_array_dims, 0, sizeof(pbase_array_dims));
         memset(darr_dims, 0, sizeof(darr_dims));
 
         if (p->tok.kind == TOK_ELLIPSIS) {
@@ -9691,13 +9748,41 @@ static int parse_params(parser_t *p, cc_function_t *f, int allow_oldstyle_names)
             break;
         }
 
-        if (parse_declspec(p, &ptype, &ptype_sid, NULL, NULL, NULL, 1, "expected parameter type", NULL,
+        if (parse_declspec(p, &ptype, &ptype_sid, &pbase_array_len, &pbase_array_ndim, pbase_array_dims, 1,
+                           "expected parameter type", NULL,
                            &ptype_restrict, NULL) != 0) {
             return -1;
         }
         param_storage = p->last_storage;
-        if (parse_param_declarator(p, ptype, &dty, &pname, &darr_len, &darr_ndim, darr_dims, &dty_restrict) != 0) {
+        if (parse_param_declarator(p, ptype, &dty, &pname, &darr_len, &darr_ndim, darr_dims, &dty_restrict,
+                                   &param_array_decl) != 0) {
             return -1;
+        }
+        if (pbase_array_ndim > 0) {
+            if (append_array_info(&darr_len, &darr_ndim, darr_dims, pbase_array_len, pbase_array_ndim, pbase_array_dims) !=
+                0) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "array rank > 4 is not yet supported");
+                free(pname);
+                return -1;
+            }
+            pointee_array_decl =
+                (cc_type_pointer_depth(dty) > cc_type_pointer_depth(ptype) && darr_ndim == pbase_array_ndim);
+            if (pointee_array_decl) {
+                darr_len = -1;
+            }
+        }
+        decay_array_param = param_array_decl ||
+                            (pbase_array_ndim > 0 && cc_type_pointer_depth(dty) == cc_type_pointer_depth(ptype));
+        if (decay_array_param && darr_ndim > 0) {
+            int i;
+            --darr_ndim;
+            for (i = 0; i < darr_ndim; ++i) {
+                darr_dims[i] = darr_dims[i + 1];
+            }
+            for (; i < CC_MAX_ARRAY_DIMS; ++i) {
+                darr_dims[i] = 0;
+            }
+            darr_len = -1;
         }
         if ((ptype_restrict || dty_restrict) && !is_pointer_type(dty)) {
             set_diag(p->diag, p->tok.line, p->tok.col, "restrict qualifier requires a pointer parameter type");
