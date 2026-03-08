@@ -425,7 +425,7 @@ void fb_init(multiboot_info_t *mbi) {
                 
                 /* Register FB device */
                 memset(&fb_node, 0, sizeof(fs_node_t));
-                strcpy(fb_node.name, "fb0");
+                strlcpy(fb_node.name, "fb0", sizeof(fb_node.name));
                 fb_node.flags = FS_CHARDEVICE;
                 fb_node.ioctl = fb_fs_ioctl;
                 fb_node.mmap = fb_fs_mmap;
@@ -543,7 +543,7 @@ void fb_init(multiboot_info_t *mbi) {
     
     /* Register /dev/fb0 */
     memset(&fb_node, 0, sizeof(fs_node_t));
-    strcpy(fb_node.name, "fb0");
+    strlcpy(fb_node.name, "fb0", sizeof(fb_node.name));
     fb_node.flags = FS_CHARDEVICE;
     fb_node.ioctl = fb_fs_ioctl;
     fb_node.mmap = fb_fs_mmap;
