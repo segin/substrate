@@ -30,7 +30,7 @@
             - [x] `pmm_watermark_init(start, end)`: initialize allocator with usable range. (REQ: REQ-01-0016)
             - [x] `pmm_watermark_alloc(size, align)`: allocate `size` bytes with alignment. (REQ: REQ-01-0017)
             - [x] `pmm_watermark_used()`: report bytes consumed. (REQ: REQ-01-0018)
-            - [ ] Used for: `vm_page_t` array, initial page tables, kernel stacks. (REQ: REQ-01-0019)
+            - [x] Used for: bootstrap PMM bitmap/page metadata and other early low-memory PMM state before the buddy allocator is live. (REQ: REQ-01-0019)
             - [x] Watermark region clamped to avoid exceeding available low memory. (REQ: REQ-01-0020)
         - [x] **Dynamic Metadata:** (REQ: REQ-01-0021)
             - [x] Calculate `vm_page_t` array size based on actual detected RAM. (REQ: REQ-01-0022)
@@ -365,7 +365,7 @@
                 - [x] Unit: `pmap_copy` partial range with mixed COW/private. (REQ: REQ-01-0320)
                 - [x] Unit: reference/modification tracking — set/clear/test A and D bits. (REQ: REQ-01-0321)
                 - [x] Unit: large page enter/remove (4 MB PSE). (REQ: REQ-01-0322)
-                - [ ] Unit: TLB shootdown — verify `invlpg` called on remote CPUs. (REQ: REQ-01-0323)
+                - [x] Unit: TLB shootdown — verify `invlpg` called on remote CPUs. (REQ: REQ-01-0323)
                 - [x] Property: `pmap_create` always produces valid kernel PDE copies (768–1022 match `kernel_pmap`). (REQ: REQ-01-0324)
                 - [x] Property: `pmap_destroy` reclaims resident pages and page-table backing without PMM leaks. (REQ: REQ-01-0325)
                 - [x] Property: recursive mapping at PDE 1023 is self-consistent. (REQ: REQ-01-0326)
@@ -1052,11 +1052,11 @@
                 - [ ] **System V IPC:** detach shmem, undo semaphores, remove owned msg queues. (REQ: REQ-01-0888)
                 - [ ] **POSIX IPC:** unlink owned semaphores/shared memory. (REQ: REQ-01-0889)
                 - [x] **Futex Cleanup:** process robust list, mark FUTEX_OWNER_DIED, wake waiters. (REQ: REQ-01-0890)
-                - [ ] **Kernel Locks:** release held mutexes, cancel pending lock requests. (REQ: REQ-01-0891)
+                - [x] **Kernel Locks:** release held sleep mutexes, cancel pending lock requests. (REQ: REQ-01-0891)
             - [ ] **Phase 3 — Thread Termination:** (REQ: REQ-01-0892)
                 - [x] Set `t->state = THREAD_ZOMBIE` for each thread. (REQ: REQ-01-0893)
                 - [x] Interrupt non-current threads, wait for zombie state. (REQ: REQ-01-0894)
-                - [ ] Free thread stacks and structures. (REQ: REQ-01-0895)
+                - [x] Free thread stacks and structures. (REQ: REQ-01-0895)
                 - [x] Current thread becomes reaper. (REQ: REQ-01-0896)
             - [x] **Phase 4 — Resource Usage Finalization:** (REQ: REQ-01-0897)
                 - [x] `rusage_finalize(p)`: accumulate thread times. (REQ: REQ-01-0898)
@@ -1087,7 +1087,7 @@
         - [ ] **Edge Cases:** (REQ: REQ-01-0922)
             - [x] Init (PID 1) exit: kernel halts/panics with warning. (REQ: REQ-01-0923)
             - [x] Killed by signal during exit: ignore signals once SDYING. (REQ: REQ-01-0924)
-            - [ ] Locks held during exit: log warning, force release. (REQ: REQ-01-0925)
+            - [x] Locks held during exit: log warning, force release. (REQ: REQ-01-0925)
             - [x] OOM during exit: exit/reap path must not allocate new memory (free-only teardown). (REQ: REQ-01-0926)
             - [x] Vfork child exec/exit: wake blocked parent immediately. (REQ: REQ-01-0927)
             - [x] Thread group exit: all threads terminated on any `exit()`. (REQ: REQ-01-0928)
@@ -1163,7 +1163,7 @@
 - **US-01-0016**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmm_watermark_init(start, end): initialize allocator with usable range so that this capability is implemented with clear verification evidence.
 - **US-01-0017**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmm_watermark_alloc(size, align): allocate size bytes with alignment so that this capability is implemented with clear verification evidence.
 - **US-01-0018**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmm_watermark_used(): report bytes consumed so that this capability is implemented with clear verification evidence.
-- **US-01-0019**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to used for: vm_page_t array, initial page tables, kernel stacks so that this capability is implemented with clear verification evidence.
+- **US-01-0019**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want the bootstrap watermark allocator to feed early PMM metadata state before the buddy allocator is live so that low-memory initialization remains deterministic and verifiable.
 - **US-01-0020**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to watermark region clamped to avoid exceeding available low memory so that this capability is implemented with clear verification evidence.
 - **US-01-0021**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to dynamic Metadata: so that this capability is implemented with clear verification evidence.
 - **US-01-0022**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to calculate vm_page_t array size based on actual detected RAM so that this capability is implemented with clear verification evidence.
@@ -2035,7 +2035,7 @@
 - **US-01-0888**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to system V IPC: detach shmem, undo semaphores, remove owned msg queues so that this capability is implemented with clear verification evidence.
 - **US-01-0889**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pOSIX IPC: unlink owned semaphores/shared memory so that this capability is implemented with clear verification evidence.
 - **US-01-0890**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to futex Cleanup: process robust list, mark FUTEX_OWNER_DIED, wake waiters so that this capability is implemented with clear verification evidence.
-- **US-01-0891**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to kernel Locks: release held mutexes, cancel pending lock requests so that this capability is implemented with clear verification evidence.
+- **US-01-0891**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to kernel locks release held sleep mutexes and cancel pending lock requests so that this capability is implemented with clear verification evidence.
 - **US-01-0892**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phase 3 - Thread Termination: so that this capability is implemented with clear verification evidence.
 - **US-01-0893**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set t->state = THREAD_ZOMBIE for each thread so that this capability is implemented with clear verification evidence.
 - **US-01-0894**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to interrupt non-current threads, wait for zombie state so that this capability is implemented with clear verification evidence.
@@ -2069,7 +2069,7 @@
 - **US-01-0922**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to edge Cases: so that this capability is implemented with clear verification evidence.
 - **US-01-0923**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to init (PID 1) exit: kernel halts/panics with warning so that this capability is implemented with clear verification evidence.
 - **US-01-0924**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to killed by signal during exit: ignore signals once SDYING so that this capability is implemented with clear verification evidence.
-- **US-01-0925**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to locks held during exit: log warning, force release so that this capability is implemented with clear verification evidence.
+- **US-01-0925**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want locks held during exit to log a warning and be force-released so that this capability is implemented with clear verification evidence.
 - **US-01-0926**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want the exit and reap path to avoid allocating new memory so teardown remains safe even under OOM pressure.
 - **US-01-0927**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vfork exit: wake parent immediately so that this capability is implemented with clear verification evidence.
 - **US-01-0928**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to thread group exit: all threads terminated on any exit() so that this capability is implemented with clear verification evidence.
@@ -2207,7 +2207,7 @@
 - **REQ-01-0018** (EARS/Ubiquitous): The Substrate system shall pmm_watermark_used(): report bytes consumed.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0019** (EARS/Ubiquitous): The Substrate system shall used for: vm_page_t array, initial page tables, kernel stacks.
+- **REQ-01-0019** (EARS/Ubiquitous): The Substrate system shall use the bootstrap watermark allocator for early PMM bitmap/page metadata and related low-memory PMM bootstrap state before the runtime buddy allocator is available.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0020** (EARS/Ubiquitous): The Substrate system shall watermark region clamped to avoid exceeding available low memory.
@@ -4823,7 +4823,7 @@
 - **REQ-01-0890** (EARS/Ubiquitous): The Substrate system shall futex Cleanup: process robust list, mark FUTEX_OWNER_DIED, wake waiters.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0891** (EARS/Ubiquitous): The Substrate system shall kernel Locks: release held mutexes, cancel pending lock requests.
+- **REQ-01-0891** (EARS/Ubiquitous): The Substrate system shall release held sleep mutexes and cancel pending lock requests during process exit.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0892** (EARS/Ubiquitous): The Substrate system shall phase 3 - Thread Termination:.
@@ -4925,7 +4925,7 @@
 - **REQ-01-0924** (EARS/Ubiquitous): The Substrate system shall killed by signal during exit: ignore signals once SDYING.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0925** (EARS/Ubiquitous): The Substrate system shall locks held during exit: log warning, force release.
+- **REQ-01-0925** (EARS/Ubiquitous): The Substrate system shall log a warning and force-release held sleep mutexes during process exit.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0926** (EARS/Ubiquitous): The Substrate system shall avoid allocating new memory during process exit and reap, using only free-side teardown operations.

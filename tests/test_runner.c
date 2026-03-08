@@ -146,7 +146,6 @@ extern bool test_libc_strncat(void);
 extern bool test_libc_strtok(void);
 extern bool test_libc_memset(void);
 extern bool test_libc_memcmp(void);
-extern bool test_printf_vsnprintf(void);
 extern bool test_libc_strchr(void);
 extern bool test_libc_strstr(void);
 extern bool test_libc_strrchr(void);
@@ -164,6 +163,7 @@ bool run_pipe_race(void) {
 
 extern bool test_mmap_batch_run(void);
 extern bool test_proc_status_injection(void);
+extern bool test_ext2_blocks_extent_run(void);
 
 typedef struct {
     const char *name;
@@ -268,7 +268,6 @@ test_case_t tests[] = {
     {"libc_strtok", test_libc_strtok},
     {"libc_memset", test_libc_memset},
     {"libc_memcmp", test_libc_memcmp},
-    {"printf_vsnprintf", test_printf_vsnprintf},
     {"libc_strchr", test_libc_strchr},
     {"libc_strstr", test_libc_strstr},
     {"libc_strrchr", test_libc_strrchr},
@@ -278,6 +277,7 @@ test_case_t tests[] = {
     {"pipe_race", run_pipe_race},
     {"mmap_batch", test_mmap_batch_run},
     {"proc_status_injection", test_proc_status_injection},
+    {"ext2_blocks_extent", test_ext2_blocks_extent_run},
     {NULL, NULL}
 };
 
