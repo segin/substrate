@@ -358,8 +358,10 @@ extern void input_sync(void);
 extern void input_unregister_device(void);
 extern void ioapic_get_count(void);
 extern void ioapic_init(void);
+extern void ioapic_irq_to_gsi(void);
 extern void ioapic_mask_all(void);
 extern void ioapic_register(void);
+extern void ioapic_register_isa_override(void);
 extern void ioapic_set_mask(void);
 extern void ioapic_set_routing(void);
 extern void ioapic_set_routing_ex(void);
@@ -1724,6 +1726,8 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&lapic_send_sipi, "lapic_send_sipi" },
     { (uint32_t)(uintptr_t)&lapic_send_nmi, "lapic_send_nmi" },
     { (uint32_t)(uintptr_t)&lapic_send_nmi_all_excl_self, "lapic_send_nmi_all_excl_self" },
+    { (uint32_t)(uintptr_t)&ioapic_irq_to_gsi, "ioapic_irq_to_gsi" },
+    { (uint32_t)(uintptr_t)&ioapic_register_isa_override, "ioapic_register_isa_override" },
     { (uint32_t)(uintptr_t)&ioapic_register, "ioapic_register" },
     { (uint32_t)(uintptr_t)&ioapic_init, "ioapic_init" },
     { (uint32_t)(uintptr_t)&ioapic_get_count, "ioapic_get_count" },
@@ -2921,4 +2925,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1455;
+int ksym_count = 1457;

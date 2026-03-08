@@ -9,6 +9,7 @@
 #include <arch/i386/pmap.h>
 #include <sys/proc.h>
 #include <arch/x86-common/lapic.h>
+#include <arch/x86-common/ioapic.h>
 #include <stdio.h>
 
 // Externs for Scheduler and IDT
@@ -151,12 +152,19 @@ void smp_discover_cores(void) {
     early_uart_print("SMP: MADT found.\n");
 
     // 3. Parse MADT Entries
+    uint32_t lapic_base = *(uint32_t *)((uintptr_t)madt + sizeof(struct acpi_header));
+    lapic_set_base(lapic_base);
+
     uint8_t *p = (uint8_t*)((uintptr_t)madt + sizeof(struct acpi_header) + 8); // Skip Local APIC Addr and Flags
     uint8_t *end = (uint8_t*)((uintptr_t)madt + madt->length);
 
     while (p < end) {
         uint8_t type = p[0];
         uint8_t length = p[1];
+
+        if (length < 2) {
+            break;
+        }
 
         if (type == 0) { // Processor Local APIC
             uint8_t proc_id = p[2];
@@ -175,6 +183,17 @@ void smp_discover_cores(void) {
                     cpu_count++;
                 }
             }
+        } else if (type == 1 && length >= 12 && map_limit == FULL_DIRECTMAP_LIMIT) { // IO APIC
+            uint8_t ioapic_id = p[2];
+            uint32_t ioapic_addr = *((uint32_t *)&p[4]);
+            uint32_t gsi_base = *((uint32_t *)&p[8]);
+            ioapic_register(ioapic_addr, ioapic_id, gsi_base);
+        } else if (type == 2 && length >= 10 && map_limit == FULL_DIRECTMAP_LIMIT) { // Interrupt Source Override
+            uint8_t bus = p[2];
+            uint8_t source_irq = p[3];
+            uint32_t gsi = *((uint32_t *)&p[4]);
+            uint16_t flags = *((uint16_t *)&p[8]);
+            ioapic_register_isa_override(bus, source_irq, gsi, flags);
         }
         p += length;
     }

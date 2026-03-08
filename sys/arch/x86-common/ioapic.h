@@ -37,6 +37,8 @@
 void ioapic_init(uintptr_t base);
 int ioapic_register(uintptr_t base, uint8_t id, uint32_t gsi_base);
 int ioapic_get_count(void);
+void ioapic_register_isa_override(uint8_t bus, uint8_t source_irq, uint32_t gsi, uint16_t flags);
+uint32_t ioapic_irq_to_gsi(uint8_t irq);
 
 // Routing
 void ioapic_set_routing(uint8_t irq, uint8_t vector, uint32_t cpu_id);

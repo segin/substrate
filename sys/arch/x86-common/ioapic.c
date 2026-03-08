@@ -6,6 +6,8 @@
 
 #include <ioapic.h>
 #include <kern/console.h>
+#include <arch/i386/pmap.h>
+#include <stdio.h>
 
 // Maximum number of IO-APICs supported
 #define MAX_IOAPICS 8
@@ -22,6 +24,66 @@ typedef struct {
 // Global IO-APIC array
 static ioapic_t ioapics[MAX_IOAPICS];
 static int ioapic_count = 0;
+
+typedef struct {
+    bool present;
+    uint32_t gsi;
+    uint16_t flags;
+} ioapic_irq_override_t;
+
+static ioapic_irq_override_t isa_overrides[16];
+
+static void ioapic_get_irq_mode(uint8_t irq, uint32_t *polarity, uint32_t *trigger) {
+    *polarity = IOAPIC_POLARITY_HIGH;
+    *trigger = IOAPIC_TRIGGER_EDGE;
+
+    if (irq >= 16 || !isa_overrides[irq].present) {
+        return;
+    }
+
+    uint16_t flags = isa_overrides[irq].flags;
+    switch (flags & 0x3) {
+        case 0x3:
+            *polarity = IOAPIC_POLARITY_LOW;
+            break;
+        default:
+            break;
+    }
+
+    switch ((flags >> 2) & 0x3) {
+        case 0x3:
+            *trigger = IOAPIC_TRIGGER_LEVEL;
+            break;
+        default:
+            break;
+    }
+}
+
+uint32_t ioapic_irq_to_gsi(uint8_t irq) {
+    if (irq < 16 && isa_overrides[irq].present) {
+        return isa_overrides[irq].gsi;
+    }
+    return irq;
+}
+
+void ioapic_register_isa_override(uint8_t bus, uint8_t source_irq, uint32_t gsi, uint16_t flags) {
+    if (bus != 0 || source_irq >= 16) {
+        return;
+    }
+
+    isa_overrides[source_irq].present = true;
+    isa_overrides[source_irq].gsi = gsi;
+    isa_overrides[source_irq].flags = flags;
+
+    char buf[16];
+    kprint("IO-APIC: ISA override IRQ ");
+    sprintf(buf, "%u", source_irq);
+    kprint(buf);
+    kprint(" -> GSI ");
+    sprintf(buf, "%u", gsi);
+    kprint(buf);
+    kprint("\n");
+}
 
 // Read IO-APIC register
 static inline uint32_t ioapic_read(ioapic_t *apic, uint8_t reg) {
@@ -42,6 +104,13 @@ int ioapic_register(uintptr_t base, uint8_t id, uint32_t gsi_base) {
         return -1;
     }
     
+    uintptr_t phys_base = base & ~0xFFFu;
+    if (pmap_enter(pmap_kernel(), phys_base, phys_base,
+                   VM_PROT_READ | VM_PROT_WRITE, PTE_PCD) != 0) {
+        kprint("IO-APIC: Failed to map MMIO page\n");
+        return -1;
+    }
+
     ioapic_t *apic = &ioapics[ioapic_count];
     apic->base = base;
     apic->id = id;
@@ -111,14 +180,18 @@ int ioapic_get_count(void) {
 
 // Set routing for an IRQ
 void ioapic_set_routing(uint8_t irq, uint8_t vector, uint32_t cpu_id) {
-    ioapic_t *apic = ioapic_find_gsi(irq);
+    uint32_t gsi = ioapic_irq_to_gsi(irq);
+    ioapic_t *apic = ioapic_find_gsi(gsi);
     if (!apic) return;
     
-    uint8_t entry = irq - apic->gsi_base;
+    uint8_t entry = gsi - apic->gsi_base;
+    uint32_t polarity;
+    uint32_t trigger;
+    ioapic_get_irq_mode(irq, &polarity, &trigger);
     
     // Build redirection entry
     // Low 32 bits: vector, delivery mode, dest mode, polarity, trigger, mask
-    uint32_t low = vector;  // Fixed delivery, physical mode, active high, edge
+    uint32_t low = vector | polarity | trigger;
     uint32_t high = cpu_id << 24;
     
     ioapic_write(apic, IOREDTBL(entry), low);
@@ -150,10 +223,11 @@ void ioapic_set_routing_ex(uint32_t gsi, uint8_t vector, uint32_t dest_cpu,
 
 // Mask/Unmask an IRQ
 void ioapic_set_mask(uint8_t irq, bool mask) {
-    ioapic_t *apic = ioapic_find_gsi(irq);
+    uint32_t gsi = ioapic_irq_to_gsi(irq);
+    ioapic_t *apic = ioapic_find_gsi(gsi);
     if (!apic) return;
     
-    uint8_t entry = irq - apic->gsi_base;
+    uint8_t entry = gsi - apic->gsi_base;
     
     uint32_t low = ioapic_read(apic, IOREDTBL(entry));
     if (mask) {
@@ -177,4 +251,3 @@ void ioapic_mask_all(void) {
         }
     }
 }
-
