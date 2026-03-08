@@ -109,11 +109,20 @@ int sched_fork_thread(process_t *proc, void *parent_regs) {
     extern void *pmm_alloc_contiguous(size_t);
     // Allocate 2 pages = 8KB contiguous kernel stack
     void *kstack_base = pmm_alloc_contiguous(2);
-    if (!kstack_base) return -1;
+    if (!kstack_base) {
+        t->proc = NULL;
+        t->tid = -1;
+        t->state = THREAD_ZOMBIE;
+        return -1;
+    }
     
     // Stack is at top of these pages (8KB = 0x2000)
     uint32_t *kstack = (uint32_t *)((uint32_t)kstack_base + 0x2000);
+    t->kstack_base = (uintptr_t)kstack_base;
     t->kstack_top = (uintptr_t)kstack;
+    t->kstack_units = 2;
+    t->kstack_type = THREAD_KSTACK_PMM_CONTIG;
+    t->kstack_owned = 1;
 
     // Build IRET frame on child's kernel stack
     // push in reverse order (stack grows down)
@@ -188,6 +197,4 @@ thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void 
 
     return t;
 }
-
-
 

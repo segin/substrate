@@ -109,6 +109,10 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
 
 // Mocks for linking
 int pmap_is_referenced(pmap_t pmap, uintptr_t va) { (void)pmap; (void)va; return 0; }
+int pmap_is_referenced_old(pmap_t pmap, uintptr_t pa) {
+    (void)pmap; (void)pa;
+    return 0;
+}
 
 void pmap_clear_reference(pmap_t pmap, uintptr_t va) { (void)pmap; (void)va; }
 void pmap_clear_reference_old(pmap_t pmap, uintptr_t pa) {

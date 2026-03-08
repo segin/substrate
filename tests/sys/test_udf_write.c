@@ -478,9 +478,103 @@ static void test_udf_truncate_extent_long(void) {
     kprintf("test_udf_truncate_extent_long: PASSED\n");
 }
 
+extern int udf_remove_fid(fs_node_t *dev, struct udf_fe *dir_fe, uint32_t dir_block, const char *name);
+
+static void test_udf_remove_fid(void) {
+    kprintf("Running test_udf_remove_fid...\n");
+
+    /* Reset mock disk */
+    memset(mock_disk, 0, sizeof(mock_disk));
+    write_called = 0;
+
+    /* Setup mock UDF context */
+    udf_ctx.device = &mock_dev;
+    udf_ctx.partition_start = 0;
+
+    /* Create dummy FIDs in sector 1 (dir_block = 1) */
+    uint32_t dir_block = 1;
+    uint8_t *dir_data = mock_disk + dir_block * UDF_SECTOR_SIZE;
+    uint32_t pos = 0;
+
+    /* FID 1: "file1" */
+    struct udf_fid *fid1 = (struct udf_fid *)(dir_data + pos);
+    fid1->tag.tag_id = UDF_TAG_FID;
+    fid1->characteristics = 0;
+    fid1->file_id_length = 6;
+    fid1->impl_use_length = 0;
+    uint32_t fid1_size = 38 + fid1->impl_use_length + fid1->file_id_length;
+    fid1_size = (fid1_size + 3) & ~3;
+    /* First byte is compression ID (8) */
+    char *fname1 = (char *)fid1 + 38;
+    fname1[0] = 8;
+    memcpy(fname1 + 1, "file1", 5);
+    pos += fid1_size;
+
+    /* FID 2: "file2" */
+    struct udf_fid *fid2 = (struct udf_fid *)(dir_data + pos);
+    fid2->tag.tag_id = UDF_TAG_FID;
+    fid2->characteristics = 0;
+    fid2->file_id_length = 6;
+    fid2->impl_use_length = 0;
+    uint32_t fid2_size = 38 + fid2->impl_use_length + fid2->file_id_length;
+    fid2_size = (fid2_size + 3) & ~3;
+    char *fname2 = (char *)fid2 + 38;
+    fname2[0] = 8;
+    memcpy(fname2 + 1, "file2", 5);
+    pos += fid2_size;
+
+    /* FID 3: "file3" */
+    struct udf_fid *fid3 = (struct udf_fid *)(dir_data + pos);
+    fid3->tag.tag_id = UDF_TAG_FID;
+    fid3->characteristics = 0;
+    fid3->file_id_length = 6;
+    fid3->impl_use_length = 0;
+    uint32_t fid3_size = 38 + fid3->impl_use_length + fid3->file_id_length;
+    fid3_size = (fid3_size + 3) & ~3;
+    char *fname3 = (char *)fid3 + 38;
+    fname3[0] = 8;
+    memcpy(fname3 + 1, "file3", 5);
+    pos += fid3_size;
+
+    /* Setup FE for the directory */
+    struct udf_fe dir_fe;
+    memset(&dir_fe, 0, sizeof(dir_fe));
+    dir_fe.info_length = pos; /* Directory length is the total FID sizes */
+
+    /* Remove "file2" */
+    int res = udf_remove_fid(&mock_dev, &dir_fe, dir_block, "file2");
+
+    if (res != 0) {
+        kprintf("test_udf_remove_fid: FAILED (udf_remove_fid returned %d, expected 0)\n", res);
+        return;
+    }
+
+    if (write_called == 0) {
+        kprintf("test_udf_remove_fid: FAILED (device write not called)\n");
+        return;
+    }
+
+    /* Check that file2 was marked deleted */
+    struct udf_fid *disk_fid2 = (struct udf_fid *)(mock_disk + dir_block * UDF_SECTOR_SIZE + fid1_size);
+    if ((disk_fid2->characteristics & UDF_FID_DELETED) == 0) {
+        kprintf("test_udf_remove_fid: FAILED (file2 characteristics not updated: %02x)\n", disk_fid2->characteristics);
+        return;
+    }
+
+    /* Verify removing non-existent file returns -1 */
+    res = udf_remove_fid(&mock_dev, &dir_fe, dir_block, "nonexistent");
+    if (res != -1) {
+        kprintf("test_udf_remove_fid: FAILED (udf_remove_fid returned %d for nonexistent file, expected -1)\n", res);
+        return;
+    }
+
+    kprintf("test_udf_remove_fid: PASSED\n");
+}
+
 void run_udf_write_tests(void) {
     test_udf_allocation_writeback();
     test_udf_large_file_write();
     test_udf_truncate_extent();
     test_udf_truncate_extent_long();
+    test_udf_remove_fid();
 }
