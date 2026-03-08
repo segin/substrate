@@ -138,7 +138,7 @@ static uint32_t input_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t
 
 void input_register_devfs(void) {
     memset(&event_node, 0, sizeof(fs_node_t));
-    strcpy(event_node.name, "input/event0");
+    strlcpy(event_node.name, "input/event0", sizeof(event_node.name));
     event_node.flags = FS_CHARDEVICE;
     event_node.read = &input_read;
     devfs_register_device(&event_node);
