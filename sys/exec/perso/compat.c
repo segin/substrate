@@ -54,64 +54,8 @@ int32_t compat_time32(int32_t *tloc) {
     return t32;
 }
 
-/*
- * TODO: stat structure translation
- *
- * Each foreign personality has a different struct stat layout:
- * - Linux i386: 64 bytes, 16-bit st_ino, 32-bit st_size
- * - FreeBSD 4.x: 96 bytes, 32-bit ino, 64-bit size
- * - NetBSD compat: older layout
- * - SunOS: BSD-derived layout
- *
- * Proper implementation requires:
- * 1. Define each personality's struct stat layout
- * 2. Call native sys_stat() with native struct
- * 3. Copy/translate fields to foreign struct
- *
- * For now, these are placeholders that will FAIL for binaries
- * that inspect struct stat contents (e.g., if they check st_ino).
- */
-
 #include <sys/kern_syscalls.h>
 #include <string.h>
-
-/*
- * compat_stat_stub - Placeholder for personalities where stat layout matches native.
- * Note: These are legacy entry points and should generally be avoided in favor of
- * personality-specific translation layers.
- */
-int compat_stat_stub(const char *path, void *buf) {
-    char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
-    
-    struct stat kbuf;
-    int ret = kern_stat(kpath, &kbuf);
-    if (ret == 0) {
-        if (copyout(&kbuf, buf, sizeof(struct stat)) != 0) return -14;
-    }
-    return ret;
-}
-
-int compat_lstat_stub(const char *path, void *buf) {
-    char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
-    
-    struct stat kbuf;
-    int ret = kern_lstat(kpath, &kbuf);
-    if (ret == 0) {
-        if (copyout(&kbuf, buf, sizeof(struct stat)) != 0) return -14;
-    }
-    return ret;
-}
-
-int compat_fstat_stub(int fd, void *buf) {
-    struct stat kbuf;
-    int ret = kern_fstat(fd, &kbuf);
-    if (ret == 0) {
-        if (copyout(&kbuf, buf, sizeof(struct stat)) != 0) return -14;
-    }
-    return ret;
-}
 
 /* FreeBSD Stat Translation */
 static void translate_stat_to_freebsd(struct stat *native, struct freebsd_stat *fbsd) {

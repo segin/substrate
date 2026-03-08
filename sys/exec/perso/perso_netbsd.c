@@ -12,6 +12,7 @@
 #include <sys/kern_syscalls.h>
 #include <exec/perso/compat.h>
 #include <exec/perso/netbsd/netbsd_syscalls.h>
+#include <exec/perso/netbsd/netbsd_user.h>
 #include <sys/resource.h>
 #include <sys/times.h>
 #include <sys/errno.h>
@@ -84,9 +85,9 @@ static void *netbsd_syscalls[MAX_SYSCALLS] = {
     [NETBSD_SYS_fchflags]       = NULL,            /* fchflags */
     [NETBSD_SYS_sync]           = &sys_sync,
     [NETBSD_SYS_kill]           = &sys_kill,
-    [NETBSD_SYS_compat_stat]    = &sys_stat,       /* compat_stat */
+    [NETBSD_SYS_compat_stat]    = (void *)&netbsd_sys_compat_stat,       /* compat_stat */
     [NETBSD_SYS_getppid]        = &sys_getpid,     /* getppid - maps to getpid for now */
-    [NETBSD_SYS_compat_lstat]   = &sys_lstat,      /* compat_lstat */
+    [NETBSD_SYS_compat_lstat]   = (void *)&netbsd_sys_compat_lstat,      /* compat_lstat */
     [NETBSD_SYS_dup]            = &sys_dup,
     [NETBSD_SYS_pipe]           = &sys_pipe,
     [NETBSD_SYS_getegid]        = &sys_getegid,
@@ -108,7 +109,7 @@ static void *netbsd_syscalls[MAX_SYSCALLS] = {
     [NETBSD_SYS_execve]         = &sys_execve,
     [NETBSD_SYS_umask]          = NULL,            /* umask - not implemented */
     [NETBSD_SYS_chroot]         = &sys_chroot,
-    [NETBSD_SYS_compat_fstat]   = &sys_fstat,      /* compat_fstat */
+    [NETBSD_SYS_compat_fstat]   = (void *)&netbsd_sys_compat_fstat,      /* compat_fstat */
     [NETBSD_SYS_compat_getkern] = NULL,            /* compat_getkern */
     [NETBSD_SYS_getpagesize]    = NULL,            /* getpagesize */
     [NETBSD_SYS_compat_msync]   = NULL,            /* compat_msync */
@@ -170,9 +171,9 @@ static void *netbsd_syscalls[MAX_SYSCALLS] = {
     [NETBSD_SYS_mkdir]          = &sys_mkdir,
     [NETBSD_SYS_rmdir]          = &sys_rmdir,
     [NETBSD_SYS_uname]          = &sys_uname,     /* __sysctl - map to uname */
-    [NETBSD_SYS_stat]           = &sys_stat,
-    [NETBSD_SYS_fstat]          = &sys_fstat,
-    [NETBSD_SYS_lstat]          = &sys_lstat,
+    [NETBSD_SYS_stat]           = (void *)&netbsd_sys_stat,
+    [NETBSD_SYS_fstat]          = (void *)&netbsd_sys_fstat,
+    [NETBSD_SYS_lstat]          = (void *)&netbsd_sys_lstat,
     [NETBSD_SYS_nanosleep]      = &sys_nanosleep,
     [NETBSD_SYS_poll]           = &sys_poll,
     [NETBSD_SYS_getcwd]         = &sys_getcwd,

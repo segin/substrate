@@ -145,10 +145,7 @@ extern void cmdline_get_full(void);
 extern void cmdline_has(void);
 extern void cmdline_init(void);
 extern void coff_load_file(void);
-extern void compat_fstat_stub(void);
 extern void compat_lseek32(void);
-extern void compat_lstat_stub(void);
-extern void compat_stat_stub(void);
 extern void compat_time32(void);
 extern void compress(void);
 extern void console_attach_std_fds(void);
@@ -2523,9 +2520,6 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&openbsd_sys_getrusage, "openbsd_sys_getrusage" },
     { (uint32_t)(uintptr_t)&compat_lseek32, "compat_lseek32" },
     { (uint32_t)(uintptr_t)&compat_time32, "compat_time32" },
-    { (uint32_t)(uintptr_t)&compat_stat_stub, "compat_stat_stub" },
-    { (uint32_t)(uintptr_t)&compat_lstat_stub, "compat_lstat_stub" },
-    { (uint32_t)(uintptr_t)&compat_fstat_stub, "compat_fstat_stub" },
     { (uint32_t)(uintptr_t)&sys_freebsd_stat, "sys_freebsd_stat" },
     { (uint32_t)(uintptr_t)&sys_freebsd_lstat, "sys_freebsd_lstat" },
     { (uint32_t)(uintptr_t)&sys_freebsd_fstat, "sys_freebsd_fstat" },
