@@ -789,39 +789,39 @@
     - [ ] **Synchronization:** (REQ: REQ-01-0613, REQ-01-0657)
 
         - [ ] **Kernel Primitives:** (REQ: REQ-01-0658)
-            - [ ] Spinlocks (with GCC C11 atomic builtins). (REQ: REQ-01-0659)
-            - [ ] Mutexes (backed by sleep queues). (REQ: REQ-01-0660)
-            - [ ] Semaphores (counting, backed by sleep queues). (REQ: REQ-01-0661)
+            - [x] Spinlocks (with GCC C11 atomic builtins). (REQ: REQ-01-0659)
+            - [x] Mutexes (backed by sleep queues). (REQ: REQ-01-0660)
+            - [x] Semaphores (counting, backed by sleep queues). (REQ: REQ-01-0661)
             - [ ] Reader/writer locks. (REQ: REQ-01-0662)
 
-        - [ ] **Userspace Synchronization (Futex):** (REQ: REQ-01-0663)
+        - [x] **Userspace Synchronization (Futex):** (REQ: REQ-01-0663)
 
-            > **Files:** `sys/kern/futex.c`, `sys/kern/futex.h`.
+            > **Files:** `sys/kern/futex.c`, `sys/include/sys/futex.h`.
 
-            - [ ] **Core Operations:** (REQ: REQ-01-0664)
-                - [ ] `FUTEX_WAIT`: atomic compare-and-sleep on user-space word. (REQ: REQ-01-0665)
-                    - [ ] `futex_cmpxchg_user()`: validated userspace CMPXCHG. (REQ: REQ-01-0666)
-                    - [ ] `validate_uaddr()`: ensure address is in user space. (REQ: REQ-01-0667)
-                - [ ] `FUTEX_WAKE`: wake up N waiters on a futex word. (REQ: REQ-01-0668)
-                - [ ] `FUTEX_REQUEUE`: move waiters from one futex to another. (REQ: REQ-01-0669)
-                    - [ ] Atomic compare before requeue (`FUTEX_CMP_REQUEUE`). (REQ: REQ-01-0670)
-            - [ ] **Advanced Features:** (REQ: REQ-01-0489, REQ-01-0671)
-                - [ ] `FUTEX_ROBUST_LIST`: handle owner death. (REQ: REQ-01-0672)
-                    - [ ] `sys_set_robust_list()` / `sys_get_robust_list()`. (REQ: REQ-01-0673)
-                    - [ ] `futex_exit_cleanup()`: walk robust list on process exit. (REQ: REQ-01-0674)
-                    - [ ] Mark owned futexes as `FUTEX_OWNER_DIED`. (REQ: REQ-01-0675)
-                - [ ] `FUTEX_PI`: priority inheritance support. (REQ: REQ-01-0676)
-                    - [ ] `futex_lock_pi()` / `futex_unlock_pi()`. (REQ: REQ-01-0677)
-                    - [ ] `pi_boost_owner()` / `pi_deboost_owner()`. (REQ: REQ-01-0678)
-                    - [ ] Lock holder inherits waiter's priority. (REQ: REQ-01-0679)
-            - [ ] **Performance:** (REQ: REQ-01-0680)
-                - [ ] Hash table bucketing for wait queues (O(1) lookup by address). (REQ: REQ-01-0681)
-                - [ ] Per-bucket spinlocks. (REQ: REQ-01-0682)
+            - [x] **Core Operations:** (REQ: REQ-01-0664)
+                - [x] `FUTEX_WAIT`: compare the expected user-space word value before sleeping on the futex key. (REQ: REQ-01-0665)
+                    - [x] `validate_uaddr()`: ensure address is in user space. (REQ: REQ-01-0667)
+                - [x] `futex_cmpxchg_user()`: validated userspace CMPXCHG helper for PI and owner-death paths. (REQ: REQ-01-0666)
+                - [x] `FUTEX_WAKE`: wake up N waiters on a futex word. (REQ: REQ-01-0668)
+                - [x] `FUTEX_REQUEUE`: move waiters from one futex to another. (REQ: REQ-01-0669)
+                    - [x] Atomic compare before requeue (`FUTEX_CMP_REQUEUE`). (REQ: REQ-01-0670)
+            - [x] **Advanced Features:** (REQ: REQ-01-0489, REQ-01-0671)
+                - [x] `FUTEX_ROBUST_LIST`: handle owner death. (REQ: REQ-01-0672)
+                    - [x] `sys_set_robust_list()` / `sys_get_robust_list()`. (REQ: REQ-01-0673)
+                    - [x] `futex_exit_cleanup()`: walk robust list on process exit. (REQ: REQ-01-0674)
+                    - [x] Mark owned futexes as `FUTEX_OWNER_DIED`. (REQ: REQ-01-0675)
+                - [x] `FUTEX_PI`: priority inheritance support. (REQ: REQ-01-0676)
+                    - [x] `futex_lock_pi()` / `futex_unlock_pi()`. (REQ: REQ-01-0677)
+                    - [x] `pi_boost_owner()` / `pi_deboost_owner()`. (REQ: REQ-01-0678)
+                    - [x] Lock holder inherits waiter's priority. (REQ: REQ-01-0679)
+            - [x] **Performance:** (REQ: REQ-01-0680)
+                - [x] Hash table bucketing for futex wait queues via the sleepq subsystem (O(1) lookup by futex key). (REQ: REQ-01-0681)
+                - [x] Per-bucket spinlocks via the sleepq subsystem. (REQ: REQ-01-0682)
             - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
-                - [ ] Unit: FUTEX_WAIT/WAKE basic handshake. (REQ: REQ-01-0684)
-                - [ ] Unit: FUTEX_REQUEUE moves waiters correctly. (REQ: REQ-01-0685)
-                - [ ] Unit: robust list cleanup on exit. (REQ: REQ-01-0686)
-                - [ ] Unit: PI inheritance — low priority holder boosted. (REQ: REQ-01-0687)
+                - [x] Unit: FUTEX_WAIT/WAKE basic handshake. (REQ: REQ-01-0684)
+                - [x] Unit: FUTEX_REQUEUE moves waiters correctly. (REQ: REQ-01-0685)
+                - [x] Unit: robust list cleanup on exit. (REQ: REQ-01-0686)
+                - [x] Unit: PI inheritance — low priority holder boosted. (REQ: REQ-01-0687)
                 - [ ] Property: no orphaned waiters after process exit. (REQ: REQ-01-0688)
 
         - [ ] **NTSYNC Driver (Windows NT Sync Primitives):** (REQ: REQ-01-0689)
@@ -4145,10 +4145,10 @@
 - **REQ-01-0664** (EARS/Ubiquitous): The Substrate system shall core Operations:.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0665** (EARS/Ubiquitous): The Substrate system shall fUTEX_WAIT: atomic compare-and-sleep on user-space word.
+- **REQ-01-0665** (EARS/Ubiquitous): The Substrate system shall compare the expected user-space futex word value before sleeping on the futex key.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0666** (EARS/Ubiquitous): The Substrate system shall futex_cmpxchg_user(): validated userspace CMPXCHG.
+- **REQ-01-0666** (EARS/Ubiquitous): The Substrate system shall provide `futex_cmpxchg_user()` as a validated userspace CMPXCHG helper for PI and owner-death paths.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0667** (EARS/Ubiquitous): The Substrate system shall validate_uaddr(): ensure address is in user space.
@@ -4193,10 +4193,10 @@
 - **REQ-01-0680** (EARS/Ubiquitous): The Substrate system shall performance:.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0681** (EARS/Ubiquitous): The Substrate system shall hash table bucketing for wait queues (O(1) lookup by address).
+- **REQ-01-0681** (EARS/Ubiquitous): The Substrate system shall provide hashed bucketing for futex wait queues with O(1) lookup by futex key.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0682** (EARS/Ubiquitous): The Substrate system shall per-bucket spinlocks.
+- **REQ-01-0682** (EARS/Ubiquitous): The Substrate system shall protect futex wait-queue buckets with per-bucket spinlocks.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0683** (EARS/Ubiquitous): The Substrate system shall testing:.

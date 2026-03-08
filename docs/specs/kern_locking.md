@@ -1,14 +1,14 @@
-# Kernel Locking Specification (Spinlocks)
+# Kernel Locking Specification
 
 ## Overview
-Spinlocks are the primary synchronization primitive for short-duration mutual exclusion in the Substrate kernel, especially in SMP environments. They use atomic hardware instructions to ensure only one CPU core can hold the lock at a time.
+Substrate provides a small kernel locking set built from spinlocks, sleepqueue-backed mutexes, and counting semaphores.
 
 ## Design
 - **Structure (`spinlock_t`):**
     - `uint32_t locked`: 0 if free, 1 if held.
     - `uint32_t cpu_id`: ID of the core currently holding the lock (for deadlock detection).
     - `const char *name`: Identifier for debugging.
-- **Atomic Operations:** Uses the `xchg` instruction with the `lock` prefix (implicit in `xchg` on x86) to atomically swap the lock state.
+- **Atomic Operations:** Uses GCC atomic builtins on top of x86 atomic instructions.
 - **Deadlock Detection:**
     - Panic if a CPU attempts to acquire a lock it already holds (recursive acquisition).
     - (Future) Support for lock ordering and priority inheritance.
@@ -34,7 +34,9 @@ Mutexes are used for long-duration mutual exclusion. Unlike spinlocks, a thread 
     - `uint32_t locked`: 0 if free, 1 if held.
     - `void *owner`: Pointer to the `thread_t` holding the lock.
     - `const char *name`: Identifier for debugging.
-- **Blocking:** Uses `sched_sleep()` when the lock is contested and `sched_wakeup()` upon release.
+- **Blocking:** Uses `sleepq_add()` to park waiters and `sleepq_wake_one()` on unlock.
+- **Fast path:** uncontended acquisition uses CAS without taking the guard spinlock.
+- **Adaptive spin:** lock acquisition spins briefly while the owner remains runnable before falling back to sleep.
 
 ## API
 ### `void mutex_init(mutex_t *m, const char *name)`
@@ -44,7 +46,7 @@ Initializes a new mutex.
 Acquires the mutex, blocking the thread if it's already held.
 
 ### `void mutex_unlock(mutex_t *m)`
-Releases the mutex and wakes up all waiting threads.
+Releases the mutex and wakes one waiting thread.
 
 ### `bool mutex_is_held(mutex_t *m)`
 Returns true if the current thread holds the mutex.
@@ -57,7 +59,7 @@ Semaphores are synchronization primitives that maintain a counter. They are used
     - `int value`: Current value of the semaphore.
     - `spinlock_t lock`: Protects the `value` field.
     - `const char *name`: Identifier for debugging.
-- **Wait/Post:** Uses `sched_sleep()` when `value <= 0` and `sched_wakeup()` when incrementing `value`.
+- **Wait/Post:** Uses `sleepq_add()` when `value <= 0` and `sleepq_wake_one()` after increment.
 
 ## API
 ### `void sema_init(semaphore_t *s, int value, const char *name)`
@@ -75,3 +77,4 @@ Returns the current value of the semaphore.
 ## Constraints
 - Safe for use in kernel mode.
 - Not safe for interrupt context if it leads to blocking.
+- Reader/writer locks are not implemented in this subsystem yet.
