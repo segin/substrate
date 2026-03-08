@@ -1,0 +1,17 @@
+--- usr.bin/ld/ld.c
++++ usr.bin/ld/ld.c
+@@ -3390,13 +3390,13 @@
+         argv[2] = (char *)in_path;
+
+         for (i = 0; i < ctx->plugin_opt_count; ++i) {
+-            size_t len = strlen("--plugin-opt=") + strlen(ctx->plugin_opts[i]) + 1;
++            size_t len = strlen("--plugin-opt") + strlen(ctx->plugin_opts[i]) + 2;
+             opts[i] = (char *)malloc(len);
+             if (opts[i] == NULL) {
+                 _exit(127);
+             }
+             snprintf(opts[i], len, "--plugin-opt=%s", ctx->plugin_opts[i]);
+-            argv[3 + i] = opts[i];
++            argv[3 + i] = (char *)opts[i];
+         }
+         argv[argc] = NULL;

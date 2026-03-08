@@ -3399,13 +3399,8 @@ static int plugin_materialize_object(const ld_ctx_t *ctx, const char *in_path, c
         argv[2] = (char *)in_path;
 
         for (i = 0; i < ctx->plugin_opt_count; ++i) {
-            size_t len = strlen("--plugin-opt=") + strlen(ctx->plugin_opts[i]) + 1;
-            opts[i] = (char *)malloc(len);
-            if (opts[i] == NULL) {
-                _exit(127);
-            }
-            snprintf(opts[i], len, "--plugin-opt=%s", ctx->plugin_opts[i]);
-            argv[3 + i] = opts[i];
+            argv[3 + i * 2] = (char *)"--plugin-opt";
+            argv[3 + i * 2 + 1] = (char *)ctx->plugin_opts[i];
         }
         argv[argc] = NULL;
 
