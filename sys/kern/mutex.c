@@ -2,6 +2,7 @@
 #include <sys/proc.h>
 #include <kern/sched.h>
 #include <kern/sleepq.h>
+#include <kern/panic.h>
 #include <stddef.h>
 
 void mutex_init(mutex_t *m, const char *name) {
@@ -21,6 +22,10 @@ bool mutex_trylock(mutex_t *m) {
 
 void mutex_lock(mutex_t *m) {
     thread_t *me = current_thread;
+
+    if (m->locked && m->owner == me) {
+        panic("Deadlock: recursive mutex_lock attempted");
+    }
 
     // Fast path: Uncontended optimization
     // Try to grab lock without heavy spinlock first
@@ -82,8 +87,16 @@ void mutex_lock(mutex_t *m) {
 
 void mutex_unlock(mutex_t *m) {
     spinlock_acquire(&m->guard);
-    
-    // Assert m->owner == current_thread
+
+    if (!m->locked) {
+        spinlock_release(&m->guard);
+        panic("Error: unlocking unlocked mutex");
+    }
+    if (m->owner != current_thread) {
+        spinlock_release(&m->guard);
+        panic("Error: mutex unlock by non-owner");
+    }
+
     m->owner = NULL;
     __sync_lock_release(&m->locked);
     

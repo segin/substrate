@@ -1023,7 +1023,7 @@
         - [ ] Cleanup `sleepq.c` formatting and style. (REQ: REQ-01-0865)
         - [x] Remove obsolete `sys/kern/stubs.c`. (REQ: REQ-01-0866)
         - [x] Modularize `sys/kern/lib.c` into `sys/lib/`. (REQ: REQ-01-0867)
-        - [ ] Audit `mutex.c` and `semaphore.c` for race conditions. (REQ: REQ-01-0868)
+        - [x] Audit `mutex.c` and `semaphore.c` for race conditions. (REQ: REQ-01-0868)
         - [x] Fix `sched_smp.c` CPU ID assumption. (REQ: REQ-01-0869)
 
     - [x] **Update Kernel Documentation:** (REQ: REQ-01-0870)
