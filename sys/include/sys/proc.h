@@ -36,6 +36,7 @@ struct pmap;
 struct pgrp;
 struct session;
 struct registers;
+struct mutex;
 
 #define MAX_FD 32
 
@@ -124,6 +125,13 @@ typedef enum {
     THREAD_STOPPED
 } thread_state_t;
 
+typedef enum {
+    THREAD_KSTACK_NONE = 0,
+    THREAD_KSTACK_PMM_BLOCK,
+    THREAD_KSTACK_PMM_CONTIG,
+    THREAD_KSTACK_KMALLOC
+} thread_kstack_type_t;
+
 // Scheduling Classes
 typedef enum {
     SCHED_REALTIME,
@@ -141,7 +149,11 @@ typedef struct thread {
     // CPU Context (Abstracted)
     uintptr_t kstack_ptr; // Kernel Stack Pointer (ESP/RSP)
     uintptr_t kstack_top; // Top of Kernel Stack (for TSS esp0)
+    uintptr_t kstack_base; // Base of owned kernel stack allocation
     uintptr_t instr_ptr;  // Instruction Pointer (EIP/RIP) - for context switching
+    uint32_t  kstack_units; // Pages for PMM stacks, bytes for kmalloc stacks
+    uint8_t   kstack_type; // thread_kstack_type_t
+    uint8_t   kstack_owned; // Nonzero if the scheduler owns the kernel stack
     
     // Scheduling - Basic
     int           priority;
@@ -155,6 +167,7 @@ typedef struct thread {
     uint16_t      time_slice;     // Remaining time slice (ticks)
     uint16_t      time_slice_max; // Full time slice for this priority
     uint32_t      flags;          // Thread flags
+    struct mutex *held_mutexes;   // Sleep mutexes currently owned by this thread
     
 #define THREAD_F_INTERRUPTIBLE 0x0001 // Sleep is interruptible by signals
 #define THREAD_F_NO_PREEMPT    0x0002 // Suppress timer-driven reschedule
