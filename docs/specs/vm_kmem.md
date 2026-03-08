@@ -66,6 +66,14 @@ The returned pointer is immediately after that header.
 
 This means the size argument is part of the allocator contract.
 
+## Reallocation
+`krealloc(ptr, size)` provides a size-recovering resize path for kernel callers:
+- `krealloc(NULL, size)` behaves like `kmalloc(size)`
+- `krealloc(ptr, 0)` frees the original allocation and returns `NULL`
+- small allocations recover their original size from the owning UMA slab/zone
+- large allocations recover their original size from `kmem_large_header_t`
+- resize is implemented as allocate-copy-free, preserving `min(old, new)` bytes
+
 ## Initialization Order
 Current bring-up sequence:
 1. `uma_startup()`

@@ -490,6 +490,45 @@ static uma_slab_t *uma_find_slab(uma_zone_t *zone, void *item) {
     return NULL;
 }
 
+size_t uma_item_size(void *item) {
+    uintptr_t page_addr;
+    uint32_t bucket;
+
+    if (!item) {
+        return 0;
+    }
+
+    page_addr = (uintptr_t)item & ~(uintptr_t)0xFFF;
+    bucket = uma_hash((void *)page_addr);
+
+    for (uma_slab_t *slab = uma_page_hash[bucket]; slab; slab = slab->us_hnext) {
+        uintptr_t slab_start = (uintptr_t)slab->us_data;
+        uintptr_t slab_end = slab_start + slab->us_zone->uz_rsize * slab->us_zone->uz_ipers;
+        uintptr_t ptr = (uintptr_t)item;
+        uintptr_t offset;
+        uintptr_t object_offset;
+
+        if (ptr < slab_start || ptr >= slab_end) {
+            continue;
+        }
+
+        offset = ptr - slab_start;
+        object_offset = offset % slab->us_zone->uz_rsize;
+
+        if ((slab->us_zone->uz_flags & UMA_ZONE_REDZONE) != 0) {
+            if (object_offset != UMA_REDZONE_SIZE) {
+                continue;
+            }
+        } else if (object_offset != 0) {
+            continue;
+        }
+
+        return slab->us_zone->uz_size;
+    }
+
+    return 0;
+}
+
 /*
  * Remove slab from a list
  */

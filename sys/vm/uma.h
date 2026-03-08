@@ -189,6 +189,9 @@ int uma_zone_reserve(uma_zone_t *zone, int count);
 /* Zone statistics */
 void uma_zone_stat(uma_zone_t *zone, uint64_t *allocs, uint64_t *frees, int *cur);
 
+/* Recover the user-visible allocation size for a UMA-managed item. */
+size_t uma_item_size(void *item);
+
 /* Leak detection: report zones with outstanding allocations */
 void uma_leak_report(void);
 

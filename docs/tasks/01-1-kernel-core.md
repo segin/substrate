@@ -626,7 +626,7 @@
         - [ ] **General Allocator (`kmalloc`/`kfree`):** (REQ: REQ-01-0548)
             - [x] Power-of-two zones: back `kmalloc` with UMA zones for sizes 16, 32, 64, ..., 4096. (REQ: REQ-01-0549)
             - [ ] Large allocations: bypass UMA for >4 KB (direct `vm_map` allocation). (REQ: REQ-01-0550)
-            - [ ] `krealloc(ptr, size)`: resize allocation. (REQ: REQ-01-0551)
+            - [x] `krealloc(ptr, size)`: resize allocation. (REQ: REQ-01-0551)
             - [ ] Statistics: track memory usage by `malloc_type` (subsystem). (REQ: REQ-01-0552)
         - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
             - [x] Unit: zone create/alloc/free/destroy lifecycle. (REQ: REQ-01-0554)

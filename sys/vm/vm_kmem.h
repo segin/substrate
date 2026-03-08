@@ -8,6 +8,7 @@
 void kmem_init(void);
 void *kmalloc(size_t size);
 void *kzalloc(size_t size);  /* Allocate and zero memory */
+void *krealloc(void *ptr, size_t size);
 void kfree(void *ptr, size_t size); /* BSD kmem usually requires size for freeing */
 
 /* Statistics */

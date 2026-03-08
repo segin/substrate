@@ -164,6 +164,53 @@ void *kzalloc(size_t size) {
     return ptr;
 }
 
+void *krealloc(void *ptr, size_t size) {
+    size_t old_size;
+    void *new_ptr;
+
+    if (!ptr) {
+        return kmalloc(size);
+    }
+
+    if (size == 0) {
+        old_size = uma_item_size(ptr);
+        if (old_size == 0) {
+            kmem_large_header_t *hdr = (kmem_large_header_t *)ptr - 1;
+            if (hdr->magic == KMEM_LARGE_MAGIC) {
+                old_size = hdr->size;
+            }
+        }
+        if (old_size != 0) {
+            kfree(ptr, old_size);
+        }
+        return NULL;
+    }
+
+    old_size = uma_item_size(ptr);
+    if (old_size == 0) {
+        kmem_large_header_t *hdr = (kmem_large_header_t *)ptr - 1;
+        if (hdr->magic == KMEM_LARGE_MAGIC) {
+            old_size = hdr->size;
+        }
+    }
+    if (old_size == 0) {
+        return NULL;
+    }
+
+    if (old_size == size) {
+        return ptr;
+    }
+
+    new_ptr = kmalloc(size);
+    if (!new_ptr) {
+        return NULL;
+    }
+
+    memcpy(new_ptr, ptr, old_size < size ? old_size : size);
+    kfree(ptr, old_size);
+    return new_ptr;
+}
+
 /*
  * Get allocator statistics
  */
