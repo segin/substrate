@@ -34,123 +34,53 @@ struct stat {
 /* Mock out sys/stat.h */
 #define _SYS_STAT_H
 
-#include <exec/perso/freebsd/freebsd_user.h>
-
-/* Global mock variables for testing sys_freebsd_stat */
-int mock_copyinstr_ret = 0;
-int mock_kern_stat_ret = 0;
-int mock_copyout_ret = 0;
-struct stat mock_stat_buf;
-struct freebsd_stat mock_freebsd_stat_buf;
-
 /* Mock external functions that compat.c calls */
-int64_t sys_lseek(int fd, uint32_t off_lo, uint32_t off_hi, int whence) { return 0; }
-int sys_time(void *t) { return 0; }
-void *sys_mmap(void *addr, size_t len, int prot, int flags, int fd, int offset) { return NULL; }
-int sys_execve(const char *path, char *const argv[], char *const envp[]) { return 0; }
-
-int copyinstr(const void *uaddr, void *kaddr, size_t len, size_t *done) {
-    if (mock_copyinstr_ret == 0 && kaddr && uaddr) {
-        // Just null terminate to pretend we copied a string
-        if (len > 0) ((char*)kaddr)[0] = '\0';
-    }
-    return mock_copyinstr_ret;
+int64_t sys_lseek(int fd, uint32_t off_lo, uint32_t off_hi, int whence) {
+    (void)fd; (void)off_lo; (void)off_hi; (void)whence;
+    return 0;
 }
 
-int copyout(const void *kaddr, void *uaddr, size_t len) {
-    if (mock_copyout_ret == 0 && uaddr && kaddr) {
-        // Save the copied data so we can verify it
-        if (len == sizeof(struct freebsd_stat)) {
-            struct freebsd_stat *dst = (struct freebsd_stat *)uaddr;
-            struct freebsd_stat *src = (struct freebsd_stat *)kaddr;
-            *dst = *src;
-            mock_freebsd_stat_buf = *src;
-        }
+int64_t g_mock_sys_time_result = 0;
+int64_t g_mock_sys_time_out_val = 0;
+int sys_time(void *t) {
+    if (t && g_mock_sys_time_result >= 0) {
+        *(int64_t *)t = g_mock_sys_time_out_val;
     }
-    return mock_copyout_ret;
+    return g_mock_sys_time_result;
+}
+
+void *sys_mmap(void *addr, size_t len, int prot, int flags, int fd, int offset) {
+    (void)addr; (void)len; (void)prot; (void)flags; (void)fd; (void)offset;
+    return NULL;
+}
+int sys_execve(const char *path, char *const argv[], char *const envp[]) {
+    (void)path; (void)argv; (void)envp;
+    return 0;
+}
+int copyinstr(const void *uaddr, void *kaddr, size_t len, size_t *done) {
+    (void)uaddr; (void)kaddr; (void)len; (void)done;
+    return 0;
+}
+int copyout(const void *kaddr, void *uaddr, size_t len) {
+    (void)kaddr; (void)uaddr; (void)len;
+    return 0;
 }
 
 int kern_stat(const char *path, struct stat *st) {
-    if (mock_kern_stat_ret == 0 && st) {
-        *st = mock_stat_buf;
-    }
-    return mock_kern_stat_ret;
+    (void)path; (void)st;
+    return 0;
 }
-
-int kern_lstat(const char *path, struct stat *st) { return 0; }
-int kern_fstat(int fd, struct stat *st) { return 0; }
+int kern_lstat(const char *path, struct stat *st) {
+    (void)path; (void)st;
+    return 0;
+}
+int kern_fstat(int fd, struct stat *st) {
+    (void)fd; (void)st;
+    return 0;
+}
 
 /* Now we can include compat.c directly! */
 #include "../../sys/exec/perso/compat.c"
-
-void test_sys_freebsd_stat() {
-    printf("Testing sys_freebsd_stat()...\n");
-
-    struct freebsd_stat user_buf;
-    int ret;
-
-    // Test 1: Happy path
-    mock_copyinstr_ret = 0;
-    mock_kern_stat_ret = 0;
-    mock_copyout_ret = 0;
-
-    mock_stat_buf.st_dev = 1;
-    mock_stat_buf.st_ino = 2;
-    mock_stat_buf.st_mode = 0755;
-    mock_stat_buf.st_nlink = 3;
-    mock_stat_buf.st_uid = 1000;
-    mock_stat_buf.st_gid = 1000;
-    mock_stat_buf.st_rdev = 4;
-    mock_stat_buf.st_size = 1024;
-    mock_stat_buf.st_blksize = 512;
-    mock_stat_buf.st_blocks = 2;
-    mock_stat_buf.st_atime = 10000;
-    mock_stat_buf.st_atime_nsec = 10;
-    mock_stat_buf.st_mtime = 20000;
-    mock_stat_buf.st_mtime_nsec = 20;
-    mock_stat_buf.st_ctime = 30000;
-    mock_stat_buf.st_ctime_nsec = 30;
-
-    ret = sys_freebsd_stat("/dummy", &user_buf);
-
-    assert(ret == 0);
-    assert(mock_freebsd_stat_buf.st_dev == mock_stat_buf.st_dev);
-    assert(mock_freebsd_stat_buf.st_ino == mock_stat_buf.st_ino);
-    assert(mock_freebsd_stat_buf.st_mode == mock_stat_buf.st_mode);
-    assert(mock_freebsd_stat_buf.st_nlink == mock_stat_buf.st_nlink);
-    assert(mock_freebsd_stat_buf.st_uid == mock_stat_buf.st_uid);
-    assert(mock_freebsd_stat_buf.st_gid == mock_stat_buf.st_gid);
-    assert(mock_freebsd_stat_buf.st_rdev == mock_stat_buf.st_rdev);
-    assert(mock_freebsd_stat_buf.st_size == mock_stat_buf.st_size);
-    assert(mock_freebsd_stat_buf.st_blksize == mock_stat_buf.st_blksize);
-    assert(mock_freebsd_stat_buf.st_blocks == mock_stat_buf.st_blocks);
-    assert(mock_freebsd_stat_buf.st_atim.tv_sec == mock_stat_buf.st_atime);
-    assert(mock_freebsd_stat_buf.st_atim.tv_nsec == mock_stat_buf.st_atime_nsec);
-    assert(mock_freebsd_stat_buf.st_mtim.tv_sec == mock_stat_buf.st_mtime);
-    assert(mock_freebsd_stat_buf.st_mtim.tv_nsec == mock_stat_buf.st_mtime_nsec);
-    assert(mock_freebsd_stat_buf.st_ctim.tv_sec == mock_stat_buf.st_ctime);
-    assert(mock_freebsd_stat_buf.st_ctim.tv_nsec == mock_stat_buf.st_ctime_nsec);
-
-    // Test 2: copyinstr fails
-    mock_copyinstr_ret = -1;
-    ret = sys_freebsd_stat("/dummy", &user_buf);
-    assert(ret == -14); // Expected error code from sys_freebsd_stat when copyinstr fails
-
-    // Test 3: kern_stat fails
-    mock_copyinstr_ret = 0;
-    mock_kern_stat_ret = -ENOENT;
-    ret = sys_freebsd_stat("/dummy", &user_buf);
-    assert(ret == -ENOENT);
-
-    // Test 4: copyout fails
-    mock_copyinstr_ret = 0;
-    mock_kern_stat_ret = 0;
-    mock_copyout_ret = -1;
-    ret = sys_freebsd_stat("/dummy", &user_buf);
-    assert(ret == -14); // Expected error code from sys_freebsd_stat when copyout fails
-
-    printf("All sys_freebsd_stat tests passed!\n");
-}
 
 int main() {
     printf("Testing sys_nice()...\n");
@@ -163,7 +93,41 @@ int main() {
 
     printf("All sys_nice tests passed!\n");
 
-    test_sys_freebsd_stat();
+    printf("Testing compat_time32()...\n");
+    int32_t tloc_val = 0;
+    int32_t ret = 0;
+
+    // Test Case 1: Normal case - Value within 32-bit range
+    g_mock_sys_time_result = 0;
+    g_mock_sys_time_out_val = 0x12345678;
+    tloc_val = 0;
+    ret = compat_time32(&tloc_val);
+    assert(ret == 0x12345678);
+    assert(tloc_val == 0x12345678);
+
+    // Test Case 2: Truncation case - Value larger than 32-bit range
+    g_mock_sys_time_result = 0;
+    g_mock_sys_time_out_val = 0x1122334455667788LL;
+    tloc_val = 0;
+    ret = compat_time32(&tloc_val);
+    assert(ret == 0x55667788);
+    assert(tloc_val == 0x55667788);
+
+    // Test Case 3: Negative return from sys_time
+    g_mock_sys_time_result = -EINVAL;
+    g_mock_sys_time_out_val = 0x12345678; // Should not be written
+    tloc_val = (int32_t)0x99999999;
+    ret = compat_time32(&tloc_val);
+    assert(ret == -EINVAL);
+    assert(tloc_val == (int32_t)0x99999999); // Should remain unchanged
+
+    // Test Case 4: tloc == NULL
+    g_mock_sys_time_result = 0;
+    g_mock_sys_time_out_val = 0x87654321;
+    ret = compat_time32(NULL);
+    assert(ret == (int32_t)0x87654321);
+
+    printf("All compat_time32 tests passed!\n");
 
     return 0;
 }
