@@ -66,6 +66,7 @@ extern bool test_sleepq_requeue(void);
 // Signal Tests
 extern bool test_signal_action(void);
 extern bool test_signal_mask(void);
+extern bool test_signal_suspend_and_wait(void);
 extern bool test_signal_delivery_default(void);
 extern bool test_signal_pending_masked_filter(void);
 extern bool test_signal_uncatchable_invariants(void);
@@ -217,6 +218,7 @@ test_case_t tests[] = {
     {"sleepq_requeue", test_sleepq_requeue},
     {"sig_action", test_signal_action},
     {"sig_mask", test_signal_mask},
+    {"sig_wait", test_signal_suspend_and_wait},
     {"sig_deliver", test_signal_delivery_default},
     {"sig_pending", test_signal_pending_masked_filter},
     {"sig_invariants", test_signal_uncatchable_invariants},

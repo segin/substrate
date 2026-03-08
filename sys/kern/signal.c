@@ -100,9 +100,7 @@ int sys_sigpending(void *set) {
 int kern_sigsuspend(const uint32_t *mask) {
     uint32_t old_mask = current_thread->sig_mask;
     if (mask) {
-        uint32_t kmask;
-        if (copyin(mask, &kmask, sizeof(uint32_t)) != 0) return -14;
-        current_thread->sig_mask = kmask;
+        current_thread->sig_mask = *mask;
     }
     
     // Sleep until a signal arrives

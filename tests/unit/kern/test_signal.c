@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <sys/signal.h>
+#include <sys/time.h>
 #include <sys/proc.h>
 #include <sys/session.h>
 #include <arch/i386/idt.h>
@@ -69,6 +70,38 @@ bool test_signal_mask(void) {
     if (sys_sigprocmask(3, &set, &oset) != 0) return false; // SIG_SETMASK
     if (current_thread->sig_mask != sigmask(SIGTERM)) return false;
     
+    return true;
+}
+
+bool test_signal_suspend_and_wait(void) {
+    sched_init();
+
+    uint32_t old_mask = sigmask(SIGINT);
+    current_thread->sig_mask = old_mask;
+    current_thread->sig_pending = sigmask(SIGUSR1);
+
+    uint32_t suspend_mask = sigmask(SIGINT);
+    if (sys_sigsuspend(&suspend_mask) != -1) return false;
+    if (current_thread->sig_mask != old_mask) return false;
+
+    uint32_t wait_mask = sigmask(SIGUSR1);
+    int sig = 0;
+    current_thread->sig_pending = sigmask(SIGUSR1);
+    if (sys_sigwait(&wait_mask, &sig) != 0) return false;
+    if (sig != SIGUSR1) return false;
+    if (current_thread->sig_pending & sigmask(SIGUSR1)) return false;
+
+    siginfo_t info;
+    memset(&info, 0, sizeof(info));
+    struct timespec zero = {0, 0};
+    current_thread->sig_pending = sigmask(SIGUSR2);
+    uint32_t timed_mask = sigmask(SIGUSR2);
+    if (sys_sigtimedwait(&timed_mask, &info, &zero) != SIGUSR2) return false;
+    if (info.si_signo != SIGUSR2) return false;
+
+    current_thread->sig_pending = 0;
+    if (sys_sigtimedwait(&timed_mask, &info, &zero) != -11) return false;
+
     return true;
 }
 
