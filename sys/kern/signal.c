@@ -552,6 +552,47 @@ void sigexit(process_t *p, int sig) {
     proc_exit(exit_status);
 }
 
+static int signal_can_send(process_t *caller, process_t *target) {
+    if (!target) {
+        return 0;
+    }
+    if (!caller) {
+        return 1;
+    }
+
+    if (caller->uid == 0 || caller->euid == 0) {
+        return 1;
+    }
+
+    return caller->uid == target->uid ||
+           caller->uid == target->euid ||
+           caller->euid == target->uid ||
+           caller->euid == target->euid;
+}
+
+static void signal_record_match(process_t *target, int *matched, int *permitted,
+                                int sig) {
+    if (!target || target->pid <= 0) {
+        return;
+    }
+
+    if (matched) {
+        (*matched)++;
+    }
+
+    if (!signal_can_send(current_process, target)) {
+        return;
+    }
+
+    if (permitted) {
+        (*permitted)++;
+    }
+
+    if (sig != 0) {
+        psignal(target, sig);
+    }
+}
+
 int sys_kill(int pid, int sig) {
     if (sig < 0 || sig > NSIG) return -EINVAL;
 
@@ -567,34 +608,58 @@ int sys_kill(int pid, int sig) {
         }
 
         if (!target) return -ESRCH;
-        if (sig == 0) return 0; // Existence check
-
-        // Permission check
-        if (current_process->uid != 0 && current_process->uid != target->uid) {
+        if (!signal_can_send(current_process, target)) {
             return -EPERM;
         }
 
-        psignal(target, sig);
+        if (sig != 0) {
+            psignal(target, sig);
+        }
         return 0;
     }
     else if (pid == 0) {
         // Send to current process group
         if (!current_process || !current_process->p_pgrp) return -ESRCH;
-        pgsignal(current_process->p_pgrp->pg_id, sig);
+        int permitted = 0;
+        int matched = 0;
+        process_t *member = current_process->p_pgrp->pg_members;
+        while (member) {
+            signal_record_match(member, &matched, &permitted, sig);
+            member = member->p_pgrp_link;
+        }
+        if (matched == 0) return -ESRCH;
+        if (permitted == 0) return -EPERM;
         return 0;
     }
     else if (pid == -1) {
         // Send to all processes (except Init)
+        int permitted = 0;
+        int matched = 0;
         for (int i = 0; i < MAX_PROCS; i++) {
             if (processes[i].pid > 1) {
-                 psignal(&processes[i], sig);
+                 signal_record_match(&processes[i], &matched, &permitted, sig);
             }
         }
+        if (matched == 0) return -ESRCH;
+        if (permitted == 0) return -EPERM;
         return 0;
     }
     else {
         // pid < -1: Send to process group -pid
-        pgsignal(-pid, sig);
+        extern struct pgrp *pgrp_find(int pgid);
+        struct pgrp *pgrp = pgrp_find(-pid);
+        int permitted = 0;
+        int matched = 0;
+
+        if (!pgrp) return -ESRCH;
+
+        process_t *member = pgrp->pg_members;
+        while (member) {
+            signal_record_match(member, &matched, &permitted, sig);
+            member = member->p_pgrp_link;
+        }
+        if (matched == 0) return -ESRCH;
+        if (permitted == 0) return -EPERM;
         return 0;
     }
 }

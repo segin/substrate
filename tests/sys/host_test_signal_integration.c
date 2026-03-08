@@ -38,8 +38,23 @@ void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t 
 }
 struct personality *perso_lookup(int id) { (void)id; return NULL; }
 const char *perso_name(int id) { (void)id; return "test"; }
-struct pgrp *pgrp_find(int pgid) { (void)pgid; return NULL; }
-void pgrp_signal(struct pgrp *pgrp, int sig) { (void)pgrp; (void)sig; }
+struct pgrp *pgrp_find(int pgid) {
+    for (int i = 0; i < MAX_PROCS; i++) {
+        if (processes[i].pid > 0 &&
+            processes[i].p_pgrp &&
+            processes[i].p_pgrp->pg_id == pgid) {
+            return processes[i].p_pgrp;
+        }
+    }
+    return NULL;
+}
+void pgrp_signal(struct pgrp *pgrp, int sig) {
+    process_t *member = pgrp ? pgrp->pg_members : NULL;
+    while (member) {
+        psignal(member, sig);
+        member = member->p_pgrp_link;
+    }
+}
 int pgrp_is_orphaned(struct pgrp *pgrp) { (void)pgrp; return 0; }
 void proc_exit(int status) { proc_exit_called = 1; proc_exit_status = status; }
 
@@ -50,7 +65,6 @@ static void reset_env(void) {
     memset(processes, 0, sizeof(processes));
     proc_exit_called = 0;
     proc_exit_status = 0;
-
     for (int i = 0; i < MAX_PROCS; i++) {
         processes[i].pid = -1;
     }
@@ -107,8 +121,112 @@ static void test_sigint_kills_target_child(void) {
     assert(child->exit_code == SIGINT);
 }
 
+static void test_sys_kill_permission_and_group_routing(void) {
+    process_t *caller;
+    process_t *peer;
+    process_t *other;
+    process_t *init;
+    thread_t *caller_thread;
+    thread_t *peer_thread;
+    thread_t *other_thread;
+    thread_t *init_thread;
+    struct session sess;
+    struct pgrp grp;
+
+    reset_env();
+    memset(&sess, 0, sizeof(sess));
+    memset(&grp, 0, sizeof(grp));
+
+    caller = &processes[0];
+    peer = &processes[1];
+    other = &processes[2];
+    init = &processes[3];
+
+    caller_thread = &threads[0];
+    peer_thread = &threads[1];
+    other_thread = &threads[2];
+    init_thread = &threads[3];
+
+    caller->pid = 20;
+    caller->uid = 1000;
+    caller->euid = 1000;
+    caller->state = SRUN;
+    caller_thread->tid = 200;
+    caller_thread->proc = caller;
+    caller_thread->state = THREAD_RUNNING;
+
+    peer->pid = 21;
+    peer->uid = 1000;
+    peer->euid = 1000;
+    peer->state = SRUN;
+    peer_thread->tid = 201;
+    peer_thread->proc = peer;
+    peer_thread->state = THREAD_READY;
+
+    other->pid = 22;
+    other->uid = 2000;
+    other->euid = 2000;
+    other->state = SRUN;
+    other_thread->tid = 202;
+    other_thread->proc = other;
+    other_thread->state = THREAD_READY;
+
+    init->pid = 1;
+    init->uid = 0;
+    init->euid = 0;
+    init->state = SRUN;
+    init_thread->tid = 203;
+    init_thread->proc = init;
+    init_thread->state = THREAD_READY;
+
+    sess.s_sid = caller->pid;
+    sess.s_leader = caller;
+    grp.pg_id = caller->pid;
+    grp.pg_session = &sess;
+    grp.pg_members = caller;
+    caller->p_pgrp = &grp;
+    caller->p_pgrp_link = peer;
+    peer->p_pgrp = &grp;
+    peer->p_pgrp_link = NULL;
+
+    current_process = caller;
+    current_thread = caller_thread;
+
+    assert(sys_kill(peer->pid, 0) == 0);
+    assert(peer_thread->sig_pending == 0);
+
+    assert(sys_kill(other->pid, 0) == -EPERM);
+    assert(other_thread->sig_pending == 0);
+
+    assert(sys_kill(0, SIGUSR1) == 0);
+    assert(caller_thread->sig_pending & sigmask(SIGUSR1));
+    assert(peer_thread->sig_pending & sigmask(SIGUSR1));
+    assert((other_thread->sig_pending & sigmask(SIGUSR1)) == 0);
+
+    caller_thread->sig_pending = 0;
+    peer_thread->sig_pending = 0;
+
+    assert(sys_kill(-grp.pg_id, SIGUSR2) == 0);
+    assert(caller_thread->sig_pending & sigmask(SIGUSR2));
+    assert(peer_thread->sig_pending & sigmask(SIGUSR2));
+
+    caller_thread->sig_pending = 0;
+    peer_thread->sig_pending = 0;
+    other_thread->sig_pending = 0;
+    init_thread->sig_pending = 0;
+
+    caller->uid = 0;
+    caller->euid = 0;
+    assert(sys_kill(-1, SIGWINCH) == 0);
+    assert(caller_thread->sig_pending & sigmask(SIGWINCH));
+    assert(peer_thread->sig_pending & sigmask(SIGWINCH));
+    assert(other_thread->sig_pending & sigmask(SIGWINCH));
+    assert((init_thread->sig_pending & sigmask(SIGWINCH)) == 0);
+}
+
 int main(void) {
     test_sigint_kills_target_child();
+    test_sys_kill_permission_and_group_routing();
     puts("host_test_signal_integration: PASS");
     return 0;
 }
