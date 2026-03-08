@@ -25,6 +25,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <sys/exec.h>
 
 
 /* Arch-independent syscalls are now in kern/syscall.c */
@@ -102,6 +103,8 @@ void syscall_handler(registers_t *regs) {
     if (current_thread) {
         current_thread->syscall_regs = regs;
     }
+
+    exec_maybe_unpin_current_thread(1);
 
     struct personality *p = perso_lookup(current_process->perso_id);
     if (!p) {

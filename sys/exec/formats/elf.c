@@ -854,8 +854,6 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     if (arg_buffer) kfree(arg_buffer, ARG_MAX_BYTES);
     if (fd >= 0) kern_close(fd);
 
-    exec_unpin_current_thread();
-
     // Jump to userspace - does not return
     extern void jump_to_userspace(uint32_t entry, uint32_t stack);
     jump_to_userspace(entry, sp);

@@ -46,5 +46,6 @@ void exec_register_handler(struct exec_binary_handler *handler);
 int exec_dispatch(const char *path, char *const argv[], char *const envp[]);
 void exec_pin_current_thread(void);
 void exec_unpin_current_thread(void);
+void exec_maybe_unpin_current_thread(int from_user);
 
 #endif /* _SYS_EXEC_H */

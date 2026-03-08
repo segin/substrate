@@ -63,6 +63,13 @@ void exec_unpin_current_thread(void) {
     current_thread->exec_pin_active = 0;
 }
 
+void exec_maybe_unpin_current_thread(int from_user) {
+    if (!from_user) {
+        return;
+    }
+    exec_unpin_current_thread();
+}
+
 /*
  * exec_dispatch
  *

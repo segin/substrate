@@ -227,6 +227,7 @@ extern void elf_execve(void);
 extern void elf_load(void);
 extern void elf_load_file(void);
 extern void exec_dispatch(void);
+extern void exec_maybe_unpin_current_thread(void);
 extern void exec_pin_current_thread(void);
 extern void exec_register_handler(void);
 extern void exec_unpin_current_thread(void);
@@ -2484,6 +2485,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&exec_register_handler, "exec_register_handler" },
     { (uint32_t)(uintptr_t)&exec_pin_current_thread, "exec_pin_current_thread" },
     { (uint32_t)(uintptr_t)&exec_unpin_current_thread, "exec_unpin_current_thread" },
+    { (uint32_t)(uintptr_t)&exec_maybe_unpin_current_thread, "exec_maybe_unpin_current_thread" },
     { (uint32_t)(uintptr_t)&exec_dispatch, "exec_dispatch" },
     { (uint32_t)(uintptr_t)&perso_lookup, "perso_lookup" },
     { (uint32_t)(uintptr_t)&perso_name, "perso_name" },
@@ -2923,4 +2925,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1456;
+int ksym_count = 1457;

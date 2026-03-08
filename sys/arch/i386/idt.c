@@ -23,6 +23,7 @@ idt_ptr_t   idt_ptr;
 #include <drivers/storage/ide/ide.h>
 #include <arch/i386/vm86.h>
 #include <arch/i386/pmap.h>
+#include <sys/exec.h>
 // isr externs are in idt.h now
 
 
@@ -125,6 +126,7 @@ void isr_handler(registers_t *regs) {
     /* Harvest entropy from interrupt timing (TSC) */
     uint64_t tsc;
     __asm__ volatile("rdtsc" : "=A"(tsc));
+    int is_usermode = (regs->cs & 0x3) == 3;
     
     /* Mix TSC and interrupt info into pool (fast, no lock) */
     struct {
@@ -138,13 +140,13 @@ void isr_handler(registers_t *regs) {
     entropy_data.err = regs->err_code;
     
     random_harvest_fast(&entropy_data, sizeof(entropy_data));
+    exec_maybe_unpin_current_thread(is_usermode);
 
     if (regs->int_no == 32) {
         timer_tick();
         
         /* Track user/system time for current process */
         if (current_process) {
-            int is_usermode = (regs->cs & 0x3) == 3;
             rusage_add_tick(current_process, is_usermode);
         }
         
@@ -169,8 +171,6 @@ void isr_handler(registers_t *regs) {
         ide_irq_handler(regs->int_no == 47 ? 15 : 14);
     } else if (regs->int_no < 32) {
         // Exception - check if from user mode or kernel mode
-        int is_usermode = (regs->cs & 0x3) == 3;
-        
         // Fault Recovery (copyin/copyout safe handlers)
         // If a fault occurs in kernel mode while on_fault is set, resume there.
         if (!is_usermode && current_thread && current_thread->on_fault) {
