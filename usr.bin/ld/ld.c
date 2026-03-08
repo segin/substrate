@@ -3326,11 +3326,12 @@ static int plugin_materialize_object(const ld_ctx_t *ctx, const char *in_path, c
 }
 
 static void trim_trailing(char *s) {
-    size_t n;
-    while ((n = strlen(s)) > 0) {
+    size_t n = strlen(s);
+    while (n > 0) {
         char c = s[n - 1];
         if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
             s[n - 1] = '\0';
+            n--;
             continue;
         }
         break;
