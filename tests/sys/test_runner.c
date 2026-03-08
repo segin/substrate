@@ -276,6 +276,8 @@ void run_kernel_tests(void) {
     }
 
     if (all || strcmp(test_arg, "udf") == 0) {
+        extern void run_udf_tests(void);
+        run_udf_tests();
         run_udf_write_tests();
     }
 
