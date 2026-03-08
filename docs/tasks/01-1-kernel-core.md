@@ -1019,7 +1019,7 @@
 
     - [ ] **Kernel Core Maintenance:** (REQ: REQ-01-0862)
         - [x] Refactor `spinlock.c` to use GCC C11 atomic builtins. (REQ: REQ-01-0863)
-        - [ ] Rewrite `swapper.c` idle loop (race-free). (REQ: REQ-01-0864)
+        - [x] Rewrite `swapper.c` idle loop (race-free). (REQ: REQ-01-0864)
         - [x] Cleanup `sleepq.c` private helper structure and null-context guards. (REQ: REQ-01-0865)
         - [x] Remove obsolete `sys/kern/stubs.c`. (REQ: REQ-01-0866)
         - [x] Modularize `sys/kern/lib.c` into `sys/lib/`. (REQ: REQ-01-0867)

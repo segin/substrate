@@ -30,7 +30,7 @@ UNIT_OBJS = $(notdir $(UNIT_SRCS:.c=.o))
 
 MOCKS_OBJ = mocks.o
 
-all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_libc_sysctl test_ext2_remove_perf bench_ext2_readdir test_libpthread_mutex test_pthread_join test_readline test_history test_bc test_libedit host_test_wait_logic host_test_pgrp host_test_proc_tree host_test_proc_exit host_test_tty_jobctl host_test_sync_guards host_test_sleepq_private
+all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_libc_sysctl test_ext2_remove_perf bench_ext2_readdir test_libpthread_mutex test_pthread_join test_readline test_history test_bc test_libedit host_test_wait_logic host_test_pgrp host_test_proc_tree host_test_proc_exit host_test_tty_jobctl host_test_sync_guards host_test_sleepq_private host_test_swapper
 	./test_runner
 	./test_minix
 	./test_ext2_perf
@@ -55,6 +55,7 @@ all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_
 	./host_test_tty_jobctl
 	./host_test_sync_guards
 	./host_test_sleepq_private
+	./host_test_swapper
 
 test_readline: lib/edit/test_readline.c ../lib/edit/readline.c
 	$(CC) $(CFLAGS_COMMON) -I../lib/edit $< -o $@
@@ -81,6 +82,9 @@ host_test_sync_guards: sys/host_test_sync_guards.c ../sys/kern/mutex.c ../sys/ke
 	$(CC) $(CFLAGS_KERN) $< -o $@
 
 host_test_sleepq_private: sys/host_test_sleepq_private.c ../sys/kern/sleepq.c
+	$(CC) $(CFLAGS_KERN) $< -o $@
+
+host_test_swapper: sys/host_test_swapper.c ../sys/kern/swapper.c
 	$(CC) $(CFLAGS_KERN) $< -o $@
 
 # Duplicate rule removed
@@ -200,7 +204,7 @@ string_prefixed.o: ../lib/c/src/string.c
 	objcopy --prefix-symbols=libc_ string_raw.o string_prefixed.o
 
 clean:
-	rm -f *.o test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir test_libpthread_mutex test_pthread_join test_readline test_libedit test_bc host_test_wait_logic host_test_pgrp host_test_proc_tree host_test_proc_exit host_test_tty_jobctl host_test_sync_guards host_test_sleepq_private
+	rm -f *.o test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir test_libpthread_mutex test_pthread_join test_readline test_libedit test_bc host_test_wait_logic host_test_pgrp host_test_proc_tree host_test_proc_exit host_test_tty_jobctl host_test_sync_guards host_test_sleepq_private host_test_swapper
 	$(MAKE) -C sys clean
 	$(MAKE) -C lib/edit clean
 
