@@ -274,6 +274,23 @@ void test_uma_callback_ordering(void) {
     kprint("  PASS\n");
 }
 
+void test_uma_leak_tracking(void) {
+    kprint("Test: leak tracking\n");
+
+    uma_zone_t *zone = uma_zcreate("test-leak", 32, NULL, NULL, NULL, NULL, 0, 0);
+    TEST_ASSERT(zone != NULL, "zone created");
+
+    void *obj = uma_zalloc(zone, M_NOWAIT);
+    TEST_ASSERT(obj != NULL, "alloc succeeded");
+    TEST_ASSERT(uma_zone_check_leaks(zone) == 1, "zone reports outstanding allocation");
+
+    uma_zfree(zone, obj);
+    TEST_ASSERT(uma_zone_check_leaks(zone) == 0, "zone leak count clears after free");
+
+    uma_zdestroy(zone);
+    kprint("  PASS\n");
+}
+
 /* Test slab growth */
 void test_uma_many_allocs(void) {
     kprint("Test: many allocations\n");
@@ -427,6 +444,7 @@ void run_uma_tests(void) {
     test_uma_zero_fill();
     test_uma_ctor_dtor();
     test_uma_callback_ordering();
+    test_uma_leak_tracking();
     test_uma_many_allocs();
     test_uma_limits();
     // test_uma_redzone(); // Causes panic, disabled for now

@@ -621,6 +621,11 @@ void *uma_zalloc(uma_zone_t *zone, int flags) {
             if (bucket->ub_cnt > 0) {
                 item = bucket->ub_bucket[--bucket->ub_cnt];
                 cache->uc_allocs++;
+                zone->uz_allocs++;
+                zone->uz_count++;
+                if (zone->uz_count > zone->uz_max) {
+                    zone->uz_max = zone->uz_count;
+                }
                 goto out;
             }
         }
@@ -700,6 +705,10 @@ void uma_zfree(uma_zone_t *zone, void *item) {
         if (cache->uc_freebucket && cache->uc_freebucket->ub_cnt < UMA_CACHE_BUCKET_SIZE) {
             cache->uc_freebucket->ub_bucket[cache->uc_freebucket->ub_cnt++] = item;
             cache->uc_frees++;
+            zone->uz_frees++;
+            if (zone->uz_count > 0) {
+                zone->uz_count--;
+            }
             return;
         }
     }
