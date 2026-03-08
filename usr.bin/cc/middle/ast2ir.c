@@ -39,10 +39,12 @@ typedef struct {
 typedef struct {
     label_entry_t *labels;
     size_t label_count;
+    size_t label_cap;
     const cc_function_t *fn;
     cc_ssa_module_t *mod;
     hoisted_alloc_entry_t *hoisted_allocs;
     size_t hoisted_alloc_count;
+    size_t hoisted_alloc_cap;
 } lower_ctx_t;
 
 enum {
@@ -56,7 +58,7 @@ enum {
 
 static int emit_trap_instr(cc_ssa_function_t *sf);
 static int emit_global_addr(cc_ssa_function_t *sf, const char *name, cc_diag_t *diag);
-static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars, size_t *var_count,
+static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars, size_t *var_count, size_t *var_cap,
                       const lower_ctx_t *ctx, int depth, int break_label, int continue_label, const cc_stmt_t *s,
                       int *saw_ret, cc_diag_t *diag);
 static int emit_local_storage_alloc(cc_ssa_function_t *sf, long total_size, cc_diag_t *diag);
@@ -845,16 +847,19 @@ static int lower_find_hoisted_alloc(const lower_ctx_t *ctx, const cc_stmt_t *dec
 }
 
 static int append_hoisted_alloc(lower_ctx_t *ctx, const cc_stmt_t *decl, int value, cc_diag_t *diag) {
-    hoisted_alloc_entry_t *next;
     if (ctx == NULL || decl == NULL || value < 0) {
         return -1;
     }
-    next = (hoisted_alloc_entry_t *)realloc(ctx->hoisted_allocs, (ctx->hoisted_alloc_count + 1) * sizeof(*next));
-    if (next == NULL) {
-        set_diag(diag, "out of memory recording hoisted local storage");
-        return -1;
+    if (ctx->hoisted_alloc_count >= ctx->hoisted_alloc_cap) {
+        size_t ncap = ctx->hoisted_alloc_cap == 0 ? 16 : ctx->hoisted_alloc_cap * 2;
+        hoisted_alloc_entry_t *next = (hoisted_alloc_entry_t *)realloc(ctx->hoisted_allocs, ncap * sizeof(*next));
+        if (next == NULL) {
+            set_diag(diag, "out of memory recording hoisted local storage");
+            return -1;
+        }
+        ctx->hoisted_allocs = next;
+        ctx->hoisted_alloc_cap = ncap;
     }
-    ctx->hoisted_allocs = next;
     ctx->hoisted_allocs[ctx->hoisted_alloc_count].decl = decl;
     ctx->hoisted_allocs[ctx->hoisted_alloc_count].value = value;
     ctx->hoisted_alloc_count++;
@@ -885,7 +890,6 @@ static int lower_collect_labels(cc_ssa_function_t *sf, const cc_stmt_t *s, lower
         }
     }
     if (s->kind == CC_STMT_LABEL) {
-        label_entry_t *next;
         if (s->label_name == NULL || s->label_name[0] == '\0') {
             set_diag(diag, "malformed labeled statement in lowering");
             return -1;
@@ -896,12 +900,16 @@ static int lower_collect_labels(cc_ssa_function_t *sf, const cc_stmt_t *s, lower
             }
             return -1;
         }
-        next = (label_entry_t *)realloc(ctx->labels, (ctx->label_count + 1) * sizeof(*next));
-        if (next == NULL) {
-            set_diag(diag, "out of memory collecting labels");
-            return -1;
+        if (ctx->label_count >= ctx->label_cap) {
+            size_t ncap = ctx->label_cap == 0 ? 16 : ctx->label_cap * 2;
+            label_entry_t *next = (label_entry_t *)realloc(ctx->labels, ncap * sizeof(*next));
+            if (next == NULL) {
+                set_diag(diag, "out of memory collecting labels");
+                return -1;
+            }
+            ctx->labels = next;
+            ctx->label_cap = ncap;
         }
-        ctx->labels = next;
         ctx->labels[ctx->label_count].name = xstrdup(s->label_name);
         if (ctx->labels[ctx->label_count].name == NULL) {
             set_diag(diag, "out of memory duplicating label name");
@@ -1172,15 +1180,18 @@ static int new_label(cc_ssa_function_t *f) {
 }
 
 static int append_synth_global(cc_ssa_module_t *m, const cc_ssa_global_t *g) {
-    cc_ssa_global_t *next;
     if (m == NULL || g == NULL) {
         return -1;
     }
-    next = (cc_ssa_global_t *)realloc(m->globals, (m->global_count + 1) * sizeof(*next));
-    if (next == NULL) {
-        return -1;
+    if (m->global_count >= m->global_cap) {
+        size_t ncap = m->global_cap == 0 ? 16 : m->global_cap * 2;
+        cc_ssa_global_t *next = (cc_ssa_global_t *)realloc(m->globals, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        m->globals = next;
+        m->global_cap = ncap;
     }
-    m->globals = next;
     m->globals[m->global_count++] = *g;
     return 0;
 }
@@ -1235,18 +1246,21 @@ static int var_find_visible(var_entry_t *vars, size_t var_count, const char *nam
     return -1;
 }
 
-static int var_define(var_entry_t **vars, size_t *var_count, const char *name, cc_type_t type, int struct_id,
+static int var_define(var_entry_t **vars, size_t *var_count, size_t *var_cap, const char *name, cc_type_t type, int struct_id,
                       long array_len, int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], int value, int depth,
                       int is_static_storage, int is_parameter, const char *static_sym) {
-    var_entry_t *next;
     char *dup;
     char *sym_dup = NULL;
 
-    next = (var_entry_t *)realloc(*vars, (*var_count + 1) * sizeof(*next));
-    if (next == NULL) {
-        return -1;
+    if (*var_count >= *var_cap) {
+        size_t ncap = *var_cap == 0 ? 16 : *var_cap * 2;
+        var_entry_t *next = (var_entry_t *)realloc(*vars, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        *vars = next;
+        *var_cap = ncap;
     }
-    *vars = next;
 
     dup = xstrdup(name);
     if (dup == NULL) {
@@ -6685,6 +6699,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
     case CC_EXPR_STMT: {
         var_entry_t *lvars = NULL;
         size_t lcount = var_count;
+        size_t lcap = var_count;
         size_t j;
         int saw_ret_dummy = 0;
         int outv = -1;
@@ -6740,7 +6755,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 }
                 continue;
             }
-            if (lower_stmt(tu, sf, &lvars, &lcount, ctx, depth + 1, -1, -1, cur, &saw_ret_dummy,
+            if (lower_stmt(tu, sf, &lvars, &lcount, &lcap, ctx, depth + 1, -1, -1, cur, &saw_ret_dummy,
                            diag) != 0) {
                 while (lcount > 0) {
                     lcount--;
@@ -7065,8 +7080,7 @@ static const switch_case_site_t *g_switch_sites = NULL;
 static size_t g_switch_site_count = 0;
 
 static int append_switch_case_site(cc_ssa_function_t *sf, const cc_stmt_t *st, switch_case_site_t **sites,
-                                   size_t *count, int *default_label, cc_diag_t *diag) {
-    switch_case_site_t *next;
+                                   size_t *count, size_t *cap, int *default_label, cc_diag_t *diag) {
     switch_case_site_t site;
     if (st == NULL || (st->kind != CC_STMT_CASE && st->kind != CC_STMT_DEFAULT)) {
         return 0;
@@ -7090,12 +7104,16 @@ static int append_switch_case_site(cc_ssa_function_t *sf, const cc_stmt_t *st, s
         set_diag(diag, "out of memory assigning switch label");
         return -1;
     }
-    next = (switch_case_site_t *)realloc(*sites, (*count + 1) * sizeof(*next));
-    if (next == NULL) {
-        set_diag(diag, "out of memory collecting switch labels");
-        return -1;
+    if (*count >= *cap) {
+        size_t ncap = *cap == 0 ? 16 : *cap * 2;
+        switch_case_site_t *next = (switch_case_site_t *)realloc(*sites, ncap * sizeof(*next));
+        if (next == NULL) {
+            set_diag(diag, "out of memory collecting switch labels");
+            return -1;
+        }
+        *sites = next;
+        *cap = ncap;
     }
-    *sites = next;
     (*sites)[(*count)++] = site;
     if (site.is_default) {
         *default_label = site.label;
@@ -7104,18 +7122,18 @@ static int append_switch_case_site(cc_ssa_function_t *sf, const cc_stmt_t *st, s
 }
 
 static int collect_switch_case_sites_stmt(cc_ssa_function_t *sf, const cc_stmt_t *st, switch_case_site_t **sites,
-                                          size_t *count, int *default_label, cc_diag_t *diag) {
+                                          size_t *count, size_t *cap, int *default_label, cc_diag_t *diag) {
     size_t i;
     if (st == NULL) {
         return 0;
     }
-    if (append_switch_case_site(sf, st, sites, count, default_label, diag) != 0) {
+    if (append_switch_case_site(sf, st, sites, count, cap, default_label, diag) != 0) {
         return -1;
     }
     switch (st->kind) {
     case CC_STMT_BLOCK:
         for (i = 0; i < st->block_count; ++i) {
-            if (collect_switch_case_sites_stmt(sf, &st->block_stmts[i], sites, count, default_label, diag) != 0) {
+            if (collect_switch_case_sites_stmt(sf, &st->block_stmts[i], sites, count, cap, default_label, diag) != 0) {
                 return -1;
             }
         }
@@ -7123,17 +7141,17 @@ static int collect_switch_case_sites_stmt(cc_ssa_function_t *sf, const cc_stmt_t
     case CC_STMT_LABEL:
     case CC_STMT_CASE:
     case CC_STMT_DEFAULT:
-        return collect_switch_case_sites_stmt(sf, st->then_branch, sites, count, default_label, diag);
+        return collect_switch_case_sites_stmt(sf, st->then_branch, sites, count, cap, default_label, diag);
     case CC_STMT_IF:
-        if (collect_switch_case_sites_stmt(sf, st->then_branch, sites, count, default_label, diag) != 0) {
+        if (collect_switch_case_sites_stmt(sf, st->then_branch, sites, count, cap, default_label, diag) != 0) {
             return -1;
         }
-        return collect_switch_case_sites_stmt(sf, st->else_branch, sites, count, default_label, diag);
+        return collect_switch_case_sites_stmt(sf, st->else_branch, sites, count, cap, default_label, diag);
     case CC_STMT_WHILE:
     case CC_STMT_DO:
-        return collect_switch_case_sites_stmt(sf, st->then_branch, sites, count, default_label, diag);
+        return collect_switch_case_sites_stmt(sf, st->then_branch, sites, count, cap, default_label, diag);
     case CC_STMT_FOR:
-        return collect_switch_case_sites_stmt(sf, st->then_branch, sites, count, default_label, diag);
+        return collect_switch_case_sites_stmt(sf, st->then_branch, sites, count, cap, default_label, diag);
     case CC_STMT_SWITCH:
         return 0;
     default:
@@ -7145,12 +7163,13 @@ static int collect_switch_case_sites(cc_ssa_function_t *sf, const cc_stmt_t *bod
                                      size_t *out_count, int *out_default_label, cc_diag_t *diag) {
     switch_case_site_t *sites = NULL;
     size_t count = 0;
+    size_t cap = 0;
     int default_label = -1;
     if (body == NULL) {
         set_diag(diag, "switch lowering requires body");
         return -1;
     }
-    if (collect_switch_case_sites_stmt(sf, body, &sites, &count, &default_label, diag) != 0) {
+    if (collect_switch_case_sites_stmt(sf, body, &sites, &count, &cap, &default_label, diag) != 0) {
         free(sites);
         return -1;
     }
@@ -7773,7 +7792,7 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
     return 0;
 }
 
-static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars, size_t *var_count,
+static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars, size_t *var_count, size_t *var_cap,
                       const lower_ctx_t *ctx, int depth, int break_label, int continue_label, const cc_stmt_t *s,
                       int *saw_ret,
                       cc_diag_t *diag) {
@@ -8210,7 +8229,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 }
             }
 
-            if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id,
+            if (var_define(vars, var_count, var_cap, s->decl_name, s->type, s->type_struct_id,
                            is_array_obj ? s->array_len : -1, is_array_obj ? s->array_ndim : 0,
                            is_array_obj ? s->array_dims : NULL, -1, depth, 1, 0, sym) != 0) {
                 set_diag(diag, "out of memory defining static local variable");
@@ -8248,7 +8267,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     }
                 }
             }
-            if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, -1, 0, NULL, varv, depth, 0, 0,
+            if (var_define(vars, var_count, var_cap, s->decl_name, s->type, s->type_struct_id, -1, 0, NULL, varv, depth, 0, 0,
                            NULL) != 0) {
                 set_diag(diag, "out of memory defining local struct variable");
                 return -1;
@@ -8506,7 +8525,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 }
             }
 
-            if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, s->array_len, s->array_ndim,
+            if (var_define(vars, var_count, var_cap, s->decl_name, s->type, s->type_struct_id, s->array_len, s->array_ndim,
                            s->array_dims, varv, depth, 0, 0, NULL) != 0) {
                 set_diag(diag, "out of memory defining local array variable");
                 return -1;
@@ -8521,7 +8540,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             set_diag(diag, "out of memory allocating local variable value");
             return -1;
         }
-        if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, -1, 0, NULL, varv, depth, 0, 0,
+        if (var_define(vars, var_count, var_cap, s->decl_name, s->type, s->type_struct_id, -1, 0, NULL, varv, depth, 0, 0,
                        NULL) != 0) {
             set_diag(diag, "out of memory defining local variable");
             return -1;
@@ -9143,7 +9162,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         }
         {
             size_t saved = *var_count;
-            if (lower_stmt(tu, sf, vars, var_count, ctx, depth, break_label, continue_label, s->then_branch, saw_ret,
+            if (lower_stmt(tu, sf, vars, var_count, var_cap, ctx, depth, break_label, continue_label, s->then_branch, saw_ret,
                            diag) != 0) {
                 return -1;
             }
@@ -9162,7 +9181,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             }
             {
                 size_t saved = *var_count;
-                if (lower_stmt(tu, sf, vars, var_count, ctx, depth, break_label, continue_label, s->else_branch, saw_ret,
+                if (lower_stmt(tu, sf, vars, var_count, var_cap, ctx, depth, break_label, continue_label, s->else_branch, saw_ret,
                                diag) != 0) {
                     return -1;
                 }
@@ -9207,7 +9226,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         }
         {
             size_t saved = *var_count;
-            if (lower_stmt(tu, sf, vars, var_count, ctx, depth, l_end, l_cond, s->then_branch, saw_ret, diag) != 0) {
+            if (lower_stmt(tu, sf, vars, var_count, var_cap, ctx, depth, l_end, l_cond, s->then_branch, saw_ret, diag) != 0) {
                 return -1;
             }
             while (*var_count > saved) {
@@ -9235,7 +9254,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         }
         {
             size_t saved = *var_count;
-            if (lower_stmt(tu, sf, vars, var_count, ctx, depth, l_end, l_cond, s->then_branch, saw_ret, diag) != 0) {
+            if (lower_stmt(tu, sf, vars, var_count, var_cap, ctx, depth, l_end, l_cond, s->then_branch, saw_ret, diag) != 0) {
                 return -1;
             }
             while (*var_count > saved) {
@@ -9275,13 +9294,13 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             if (s->init_stmt->kind == CC_STMT_BLOCK) {
                 size_t i3;
                 for (i3 = 0; i3 < s->init_stmt->block_count; ++i3) {
-                    if (lower_stmt(tu, sf, vars, var_count, ctx, depth + 1, break_label, continue_label,
+                    if (lower_stmt(tu, sf, vars, var_count, var_cap, ctx, depth + 1, break_label, continue_label,
                                    &s->init_stmt->block_stmts[i3], saw_ret, diag) != 0) {
                         return -1;
                     }
                 }
             } else {
-                if (lower_stmt(tu, sf, vars, var_count, ctx, depth + 1, break_label, continue_label, s->init_stmt,
+                if (lower_stmt(tu, sf, vars, var_count, var_cap, ctx, depth + 1, break_label, continue_label, s->init_stmt,
                                saw_ret, diag) != 0) {
                     return -1;
                 }
@@ -9315,7 +9334,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         }
         {
             size_t body_saved = *var_count;
-            if (lower_stmt(tu, sf, vars, var_count, ctx, for_depth, l_end, l_post, s->then_branch, saw_ret, diag) != 0) {
+            if (lower_stmt(tu, sf, vars, var_count, var_cap, ctx, for_depth, l_end, l_post, s->then_branch, saw_ret, diag) != 0) {
                 return -1;
             }
             while (*var_count > body_saved) {
@@ -9569,7 +9588,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             size_t saved_site_count = g_switch_site_count;
             g_switch_sites = sites;
             g_switch_site_count = site_count;
-            if (lower_stmt(tu, sf, vars, var_count, ctx, depth + 1, l_end, continue_label, s->then_branch, saw_ret,
+            if (lower_stmt(tu, sf, vars, var_count, var_cap, ctx, depth + 1, l_end, continue_label, s->then_branch, saw_ret,
                            diag) != 0) {
                 g_switch_sites = saved_sites;
                 g_switch_site_count = saved_site_count;
@@ -9706,7 +9725,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             return -1;
         }
         if (s->then_branch != NULL) {
-            return lower_stmt(tu, sf, vars, var_count, ctx, depth, break_label, continue_label, s->then_branch,
+            return lower_stmt(tu, sf, vars, var_count, var_cap, ctx, depth, break_label, continue_label, s->then_branch,
                               saw_ret, diag);
         }
         return 0;
@@ -9719,7 +9738,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             child_depth = depth;
         }
         for (j = 0; j < s->block_count; ++j) {
-            if (lower_stmt(tu, sf, vars, var_count, ctx, child_depth, break_label, continue_label, &s->block_stmts[j],
+            if (lower_stmt(tu, sf, vars, var_count, var_cap, ctx, child_depth, break_label, continue_label, &s->block_stmts[j],
                            saw_ret, diag) != 0) {
                 return -1;
             }
@@ -10328,21 +10347,24 @@ static int struct_has_flexible_tail(const cc_struct_def_t *sd) {
     return m->array_ndim > 0 && m->array_dims[m->array_ndim - 1] == 0;
 }
 
-static int append_global_reloc(global_reloc_t **arr, size_t *count, long offset, long size, const char *sym,
+static int append_global_reloc(global_reloc_t **arr, size_t *count, size_t *cap, long offset, long size, const char *sym,
                                cc_diag_t *diag) {
-    global_reloc_t *next;
     char *dup;
 
     if (arr == NULL || count == NULL || sym == NULL || size <= 0) {
         set_diag(diag, "invalid global relocation entry");
         return -1;
     }
-    next = (global_reloc_t *)realloc(*arr, (*count + 1) * sizeof(*next));
-    if (next == NULL) {
-        set_diag(diag, "out of memory allocating global relocation entries");
-        return -1;
+    if (*count >= *cap) {
+        size_t ncap = *cap == 0 ? 16 : *cap * 2;
+        global_reloc_t *next = (global_reloc_t *)realloc(*arr, ncap * sizeof(*next));
+        if (next == NULL) {
+            set_diag(diag, "out of memory allocating global relocation entries");
+            return -1;
+        }
+        *arr = next;
+        *cap = ncap;
     }
-    *arr = next;
     dup = xstrdup(sym);
     if (dup == NULL) {
         set_diag(diag, "out of memory duplicating global relocation symbol");
@@ -10356,21 +10378,24 @@ static int append_global_reloc(global_reloc_t **arr, size_t *count, long offset,
     return 0;
 }
 
-static int append_global_string_reloc(global_reloc_t **arr, size_t *count, long offset, long size, const char *str,
+static int append_global_string_reloc(global_reloc_t **arr, size_t *count, size_t *cap, long offset, long size, const char *str,
                                       cc_diag_t *diag) {
-    global_reloc_t *next;
     char *dup;
 
     if (arr == NULL || count == NULL || str == NULL || size <= 0) {
         set_diag(diag, "invalid global string relocation entry");
         return -1;
     }
-    next = (global_reloc_t *)realloc(*arr, (*count + 1) * sizeof(*next));
-    if (next == NULL) {
-        set_diag(diag, "out of memory allocating global string relocation entries");
-        return -1;
+    if (*count >= *cap) {
+        size_t ncap = *cap == 0 ? 16 : *cap * 2;
+        global_reloc_t *next = (global_reloc_t *)realloc(*arr, ncap * sizeof(*next));
+        if (next == NULL) {
+            set_diag(diag, "out of memory allocating global string relocation entries");
+            return -1;
+        }
+        *arr = next;
+        *cap = ncap;
     }
-    *arr = next;
     dup = xstrdup(str);
     if (dup == NULL) {
         set_diag(diag, "out of memory duplicating global string relocation payload");
@@ -10385,16 +10410,19 @@ static int append_global_string_reloc(global_reloc_t **arr, size_t *count, long 
 }
 
 static int append_global_init_item(cc_ssa_global_t *g, const cc_ssa_global_init_item_t *it, cc_diag_t *diag) {
-    cc_ssa_global_init_item_t *next;
     if (g == NULL || it == NULL) {
         return -1;
     }
-    next = (cc_ssa_global_init_item_t *)realloc(g->init_items, (g->init_item_count + 1) * sizeof(*next));
-    if (next == NULL) {
-        set_diag(diag, "out of memory appending global initializer stream");
-        return -1;
+    if (g->init_item_count >= g->init_item_cap) {
+        size_t ncap = g->init_item_cap == 0 ? 16 : g->init_item_cap * 2;
+        cc_ssa_global_init_item_t *next = (cc_ssa_global_init_item_t *)realloc(g->init_items, ncap * sizeof(*next));
+        if (next == NULL) {
+            set_diag(diag, "out of memory appending global initializer stream");
+            return -1;
+        }
+        g->init_items = next;
+        g->init_item_cap = ncap;
     }
-    g->init_items = next;
     g->init_items[g->init_item_count++] = *it;
     return 0;
 }
@@ -10507,7 +10535,7 @@ static char *global_char_list_to_quoted_string(const cc_translation_unit_t *tu, 
 
 static int store_scalar_global_init(const cc_translation_unit_t *tu, cc_type_t type, int struct_id, long field_size,
                                     const cc_expr_t *expr, unsigned char *buf, long buf_size, long off,
-                                    global_reloc_t **relocs, size_t *reloc_count, cc_diag_t *diag) {
+                                    global_reloc_t **relocs, size_t *reloc_count, size_t *reloc_cap, cc_diag_t *diag) {
     long iv = 0;
     double fv = 0.0;
     int isf = 0;
@@ -10532,7 +10560,7 @@ static int store_scalar_global_init(const cc_translation_unit_t *tu, cc_type_t t
             set_diag(diag, "string scalar initializer requires pointer-sized pointer field");
             return -1;
         }
-        if (append_global_string_reloc(relocs, reloc_count, off, field_size,
+        if (append_global_string_reloc(relocs, reloc_count, reloc_cap, off, field_size,
                                        expr->ident != NULL ? expr->ident : "\"\"", diag) != 0) {
             free(sym);
             return -1;
@@ -10544,7 +10572,7 @@ static int store_scalar_global_init(const cc_translation_unit_t *tu, cc_type_t t
         char *quoted = global_char_list_to_quoted_string(tu, expr->lhs);
         if (quoted != NULL) {
             if (is_pointer_type(type) && field_size == g_pointer_size_bytes) {
-                if (append_global_string_reloc(relocs, reloc_count, off, field_size, quoted, diag) != 0) {
+                if (append_global_string_reloc(relocs, reloc_count, reloc_cap, off, field_size, quoted, diag) != 0) {
                     free(quoted);
                     return -1;
                 }
@@ -10581,7 +10609,7 @@ static int store_scalar_global_init(const cc_translation_unit_t *tu, cc_type_t t
             free(sym);
             return -1;
         }
-        if (append_global_reloc(relocs, reloc_count, off, field_size, sym, diag) != 0) {
+        if (append_global_reloc(relocs, reloc_count, reloc_cap, off, field_size, sym, diag) != 0) {
             free(sym);
             return -1;
         }
@@ -10720,12 +10748,12 @@ static int fill_fixed_char_array_from_string(const cc_expr_t *expr, cc_type_t el
 
 static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int struct_id, const cc_expr_t *init_list,
                                             size_t *cursor, long base, unsigned char *buf, long buf_size,
-                                            global_reloc_t **relocs, size_t *reloc_count, cc_diag_t *diag);
+                                            global_reloc_t **relocs, size_t *reloc_count, size_t *reloc_cap, cc_diag_t *diag);
 
 static int flatten_arraylike_struct_member_from_cursor(const cc_translation_unit_t *tu, const cc_struct_member_t *m,
                                                        const cc_expr_t *src_list, size_t *cursor, long field_off,
                                                        unsigned char *buf, long buf_size, global_reloc_t **relocs,
-                                                       size_t *reloc_count, cc_diag_t *diag) {
+                                                       size_t *reloc_count, size_t *reloc_cap, cc_diag_t *diag) {
     cc_type_t elem_type;
     long elem_size;
     long max_elems;
@@ -10768,7 +10796,7 @@ static int flatten_arraylike_struct_member_from_cursor(const cc_translation_unit
             if (sl != NULL) {
                 size_t sub = 0;
                 if (flatten_struct_init_bytes_cursor(tu, m->type_struct_id, sl, &sub, elem_off, buf, buf_size, relocs,
-                                                     reloc_count, diag) != 0) {
+                                                     reloc_count, reloc_cap, diag) != 0) {
                     return -1;
                 }
                 if (sub < sl->arg_count) {
@@ -10779,7 +10807,7 @@ static int flatten_arraylike_struct_member_from_cursor(const cc_translation_unit
                 continue;
             }
             if (flatten_struct_init_bytes_cursor(tu, m->type_struct_id, src_list, cursor, elem_off, buf, buf_size,
-                                                 relocs, reloc_count, diag) != 0) {
+                                                 relocs, reloc_count, reloc_cap, diag) != 0) {
                 return -1;
             }
             continue;
@@ -10792,7 +10820,7 @@ static int flatten_arraylike_struct_member_from_cursor(const cc_translation_unit
             }
         }
         if (store_scalar_global_init(tu, elem_type, m->type_struct_id, elem_size, elem_expr, buf, buf_size, elem_off,
-                                     relocs, reloc_count, diag) != 0) {
+                                     relocs, reloc_count, reloc_cap, diag) != 0) {
             return -1;
         }
         (*cursor)++;
@@ -10802,7 +10830,7 @@ static int flatten_arraylike_struct_member_from_cursor(const cc_translation_unit
 
 static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int struct_id, const cc_expr_t *init_list,
                                             size_t *cursor, long base, unsigned char *buf, long buf_size,
-                                            global_reloc_t **relocs, size_t *reloc_count, cc_diag_t *diag) {
+                                            global_reloc_t **relocs, size_t *reloc_count, size_t *reloc_cap, cc_diag_t *diag) {
     const cc_struct_def_t *sd;
     size_t i;
     size_t next_member = 0;
@@ -10914,7 +10942,7 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
                         size_t sub = 0;
                         u_off = base + um->offset;
                         if (flatten_struct_init_bytes_cursor(tu, um->type_struct_id, u_nested, &sub, u_off, buf, buf_size,
-                                                             relocs, reloc_count, diag) != 0) {
+                                                             relocs, reloc_count, reloc_cap, diag) != 0) {
                             return -1;
                         }
                         continue;
@@ -10935,7 +10963,7 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
                 }
                 u_off = base + um->offset;
                 if (store_scalar_global_init(tu, um->type, um->type_struct_id, u_size, u_item, buf, buf_size, u_off,
-                                             relocs, reloc_count, diag) != 0) {
+                                             relocs, reloc_count, reloc_cap, diag) != 0) {
                     return -1;
                 }
             }
@@ -10955,7 +10983,7 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
                     consumed_item = 1;
                 }
                 if (flatten_struct_init_bytes_cursor(tu, m->type_struct_id, nested, &sub, field_off, buf, buf_size,
-                                                     relocs, reloc_count, diag) != 0) {
+                                                     relocs, reloc_count, reloc_cap, diag) != 0) {
                     return -1;
                 }
                 if (sub < nested->arg_count) {
@@ -10979,7 +11007,7 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
                 return -1;
             }
             if (flatten_struct_init_bytes_cursor(tu, m->type_struct_id, init_list, &i, field_off, buf, buf_size,
-                                                 relocs, reloc_count, diag) != 0) {
+                                                 relocs, reloc_count, reloc_cap, diag) != 0) {
                 return -1;
             }
             continue;
@@ -10993,7 +11021,7 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
                     consumed_item = 1;
                 }
                 if (flatten_arraylike_struct_member_from_cursor(tu, m, item, &sub, field_off, buf, buf_size, relocs,
-                                                                reloc_count, diag) != 0) {
+                                                                reloc_count, reloc_cap, diag) != 0) {
                     return -1;
                 }
                 if (sub < item->arg_count) {
@@ -11022,7 +11050,7 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
                 continue;
             }
             if (flatten_arraylike_struct_member_from_cursor(tu, m, init_list, &i, field_off, buf, buf_size, relocs,
-                                                            reloc_count, diag) != 0) {
+                                                            reloc_count, reloc_cap, diag) != 0) {
                 return -1;
             }
             continue;
@@ -11050,7 +11078,7 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
             return -1;
         }
         if (store_scalar_global_init(tu, m->type, m->type_struct_id, scalar_size, item, buf, buf_size, field_off,
-                                     relocs, reloc_count, diag) != 0) {
+                                     relocs, reloc_count, reloc_cap, diag) != 0) {
             return -1;
         }
     }
@@ -11060,13 +11088,13 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
 
 static int flatten_struct_init_bytes(const cc_translation_unit_t *tu, int struct_id, const cc_expr_t *init, long base,
                                      unsigned char *buf, long buf_size, global_reloc_t **relocs, size_t *reloc_count,
-                                     cc_diag_t *diag) {
+                                     size_t *reloc_cap, cc_diag_t *diag) {
     size_t cur = 0;
     const cc_struct_def_t *sd = NULL;
     if (tu != NULL && struct_id >= 0 && (size_t)struct_id < tu->struct_count) {
         sd = &tu->structs[struct_id];
     }
-    if (flatten_struct_init_bytes_cursor(tu, struct_id, init, &cur, base, buf, buf_size, relocs, reloc_count, diag) !=
+    if (flatten_struct_init_bytes_cursor(tu, struct_id, init, &cur, base, buf, buf_size, relocs, reloc_count, reloc_cap, diag) !=
         0) {
         return -1;
     }
@@ -11077,7 +11105,7 @@ static int flatten_struct_init_bytes(const cc_translation_unit_t *tu, int struct
 static int flatten_scalar_array_init_cursor(const cc_translation_unit_t *tu, cc_type_t scalar_type, int scalar_struct_id,
                                             const long *dims, int ndim, const cc_expr_t *list, size_t *cursor,
                                             long base, unsigned char *buf, long buf_size, global_reloc_t **relocs,
-                                            size_t *reloc_count, cc_diag_t *diag) {
+                                            size_t *reloc_count, size_t *reloc_cap, cc_diag_t *diag) {
     long scalar_size;
     long i;
 
@@ -11106,7 +11134,7 @@ static int flatten_scalar_array_init_cursor(const cc_translation_unit_t *tu, cc_
                 }
             }
             if (store_scalar_global_init(tu, scalar_type, scalar_struct_id, scalar_size, item, buf, buf_size, elem_off,
-                                         relocs, reloc_count, diag) != 0) {
+                                         relocs, reloc_count, reloc_cap, diag) != 0) {
                 return -1;
             }
             (*cursor)++;
@@ -11146,7 +11174,7 @@ static int flatten_scalar_array_init_cursor(const cc_translation_unit_t *tu, cc_
                 size_t sub_cur = 0;
                 (*cursor)++;
                 if (flatten_scalar_array_init_cursor(tu, scalar_type, scalar_struct_id, dims + 1, ndim - 1, raw,
-                                                     &sub_cur, sub_base, buf, buf_size, relocs, reloc_count, diag) != 0) {
+                                                     &sub_cur, sub_base, buf, buf_size, relocs, reloc_count, reloc_cap, diag) != 0) {
                     return -1;
                 }
                 if (sub_cur < raw->arg_count) {
@@ -11155,7 +11183,7 @@ static int flatten_scalar_array_init_cursor(const cc_translation_unit_t *tu, cc_
                 }
             } else {
                 if (flatten_scalar_array_init_cursor(tu, scalar_type, scalar_struct_id, dims + 1, ndim - 1, list,
-                                                     cursor, sub_base, buf, buf_size, relocs, reloc_count, diag) != 0) {
+                                                     cursor, sub_base, buf, buf_size, relocs, reloc_count, reloc_cap, diag) != 0) {
                     return -1;
                 }
             }
@@ -11383,6 +11411,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             return -1;
         }
         out->global_count = tu->global_count;
+        out->global_cap = tu->global_count;
         for (i = 0; i < tu->global_count; ++i) {
             long init_i = 0;
             double init_f = 0.0;
@@ -11456,6 +11485,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             if (is_struct_global) {
                 global_reloc_t *relocs = NULL;
                 size_t reloc_count = 0;
+                size_t reloc_cap = 0;
                 unsigned char *buf = NULL;
                 long total_size;
                 int any_nonzero = 0;
@@ -11534,7 +11564,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
 
                 if (tu->globals[i].type == CC_TYPE_VOID) {
                     if (flatten_struct_init_bytes(tu, struct_id, struct_init, 0, buf, total_size, &relocs, &reloc_count,
-                                                  diag) != 0) {
+                                                  &reloc_cap, diag) != 0) {
                         if (diag != NULL && strcmp(diag->message, "too many items in struct global initializer") == 0) {
                             snprintf(diag->message, sizeof(diag->message), "too many items in struct global initializer for %s",
                                      tu->globals[i].name);
@@ -11554,7 +11584,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                             size_t sub = 0;
                             cur++;
                             if (flatten_struct_init_bytes_cursor(tu, struct_id, elem_list, &sub, j * struct_size, buf,
-                                                                 total_size, &relocs, &reloc_count, diag) != 0) {
+                                                                 total_size, &relocs, &reloc_count, &reloc_cap, diag) != 0) {
                                 free(buf);
                                 free_global_relocs(relocs, reloc_count);
                                 cc_ssa_module_free(out);
@@ -11570,7 +11600,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                             continue;
                         }
                         if (flatten_struct_init_bytes_cursor(tu, struct_id, struct_init, &cur, j * struct_size, buf, total_size,
-                                                             &relocs, &reloc_count, diag) != 0) {
+                                                             &relocs, &reloc_count, &reloc_cap, diag) != 0) {
                             free(buf);
                             free_global_relocs(relocs, reloc_count);
                             cc_ssa_module_free(out);
@@ -11630,6 +11660,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 cc_ssa_global_t lit;
                 global_reloc_t *relocs = NULL;
                 size_t reloc_count = 0;
+                size_t reloc_cap = 0;
                 unsigned char *buf = NULL;
                 long lit_sid = init->lhs->aux_struct_id;
                 long lit_size;
@@ -11655,7 +11686,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                     return -1;
                 }
                 if (flatten_struct_init_bytes(tu, lit_sid, init->lhs->lhs, 0, buf, lit_size, &relocs, &reloc_count,
-                                              diag) != 0) {
+                                              &reloc_cap, diag) != 0) {
                     if (diag != NULL && strcmp(diag->message, "too many items in struct global initializer") == 0) {
                         snprintf(diag->message, sizeof(diag->message),
                                  "too many items in compound-literal struct initializer for %s", tu->globals[i].name);
@@ -11826,6 +11857,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                         unsigned char *buf = NULL;
                         global_reloc_t *relocs = NULL;
                         size_t reloc_count = 0;
+                        size_t reloc_cap = 0;
                         int any_nonzero = 0;
                         size_t cur = 0;
                         size_t z;
@@ -11887,7 +11919,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                             return -1;
                         }
                         if (flatten_scalar_array_init_cursor(tu, scalar_type, scalar_sid, dims, nd, init, &cur, 0, buf,
-                                                             total_size, &relocs, &reloc_count, diag) != 0) {
+                                                             total_size, &relocs, &reloc_count, &reloc_cap, diag) != 0) {
                             free(buf);
                             free_global_relocs(relocs, reloc_count);
                             cc_ssa_module_free(out);
@@ -11956,6 +11988,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                     return -1;
                 }
                 out->globals[i].init_item_count = init->arg_count;
+            out->globals[i].init_item_cap = init->arg_count;
                 for (j = 0; j < init->arg_count; ++j) {
                     if (eval_global_init_item(tu, init->args[j], &out->globals[i].init_items[j]) != 0) {
                         if (diag != NULL && diag->message[0] == '\0') {
@@ -12103,6 +12136,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         var_entry_t *vars = NULL;
         lower_ctx_t lctx;
         size_t var_count = 0;
+        size_t var_cap = 0;
         size_t j;
         size_t k;
         int saw_ret = 0;
@@ -12259,7 +12293,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 v = agg_addr;
                 sf->param_values[j] = v;
             }
-            if (var_define(&vars, &var_count, af->params[j].name, af->params[j].type, af->params[j].type_struct_id,
+            if (var_define(&vars, &var_count, &var_cap, af->params[j].name, af->params[j].type, af->params[j].type_struct_id,
                            af->params[j].array_len, af->params[j].array_ndim, af->params[j].array_dims, v, 0, 0, 1,
                            NULL) != 0) {
                 set_diag(diag, "out of memory defining parameter variable");
@@ -12286,7 +12320,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         }
 
         for (j = 0; j < af->stmt_count; ++j) {
-            if (lower_stmt(tu, sf, &vars, &var_count, &lctx, 0, -1, -1, &af->stmts[j], &saw_ret, diag) != 0) {
+            if (lower_stmt(tu, sf, &vars, &var_count, &var_cap, &lctx, 0, -1, -1, &af->stmts[j], &saw_ret, diag) != 0) {
                 cc_ssa_module_free(out);
                 return -1;
             }
