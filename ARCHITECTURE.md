@@ -85,6 +85,7 @@ Kernel worker model:
 Boot/init sequencing highlights:
 - `kmain()` parses the kernel command line before runtime console registration so `console=console0|serial0..serial3` can steer bring-up output policy.
 - boot-time Multiboot modules are registered as RAM block devices before root mount, allowing `initrd`-style root selection via `/dev/storage/ram*`.
+- root mount accepts `rootfstype=` as either a single filesystem name, a comma-separated probe list, or `auto`; when unspecified, the i386 boot path probes the registered block-backed root filesystems in kernel order (currently `ext2`, `fat`, `minix`, `udf`).
 - after root mount, the kernel ensures `/dev`, `/proc`, and `/sys` mountpoints exist and mounts `devfs`, `procfs`, and `sysfs` automatically.
 - init is spawned before VM background workers so `PID 1` remains the first userspace process.
 

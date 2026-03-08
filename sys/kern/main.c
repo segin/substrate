@@ -179,6 +179,92 @@ static int parse_console_serial_index(const char *value) {
     return value[6] - '0';
 }
 
+static int root_mount_with_type(const char *device, const char *fstype) {
+    if (!device || !fstype || !*fstype) {
+        return -1;
+    }
+
+    kprint("VFS: Trying root ");
+    kprint(device);
+    kprint(" as ");
+    kprint(fstype);
+    kprint("\n");
+
+    return vfs_mount_legacy(device, "/", fstype, 0, NULL);
+}
+
+static int root_mount_auto(const char *device) {
+    static const char *const root_fstypes[] = {
+        "ext2",
+        "fat",
+        "minix",
+        "udf",
+        NULL
+    };
+
+    for (int i = 0; root_fstypes[i] != NULL; i++) {
+        if (root_mount_with_type(device, root_fstypes[i]) == 0) {
+            return 0;
+        }
+    }
+
+    return -1;
+}
+
+static int root_mount_from_spec(const char *device, const char *spec) {
+    char spec_buf[64];
+    char *cursor;
+
+    if (!device) {
+        return -1;
+    }
+
+    if (!spec || !*spec || strcmp(spec, "auto") == 0) {
+        return root_mount_auto(device);
+    }
+
+    strncpy(spec_buf, spec, sizeof(spec_buf) - 1);
+    spec_buf[sizeof(spec_buf) - 1] = '\0';
+    cursor = spec_buf;
+
+    while (*cursor) {
+        char *entry = cursor;
+
+        while (*cursor && *cursor != ',') {
+            cursor++;
+        }
+        if (*cursor == ',') {
+            *cursor++ = '\0';
+        }
+
+        while (*entry == ' ' || *entry == '\t') {
+            entry++;
+        }
+
+        char *end = entry + strlen(entry);
+        while (end > entry && (end[-1] == ' ' || end[-1] == '\t')) {
+            *--end = '\0';
+        }
+
+        if (!*entry) {
+            continue;
+        }
+
+        if (strcmp(entry, "auto") == 0) {
+            if (root_mount_auto(device) == 0) {
+                return 0;
+            }
+            continue;
+        }
+
+        if (root_mount_with_type(device, entry) == 0) {
+            return 0;
+        }
+    }
+
+    return -1;
+}
+
 static void register_boot_ramdisks(multiboot_info_t *mboot_info);
 static void init_root_fs(void);
 
@@ -414,33 +500,35 @@ static void register_boot_ramdisks(multiboot_info_t *mboot_info) {
 
 static void init_root_fs(void) {
     static const char *pseudo_mounts[] = { "/dev", "/proc", "/sys", NULL };
+    const char *fallback_root = "/dev/storage/ram0";
 
     // Parse root= argument
     char root_dev[64] = {0};
+    char root_type[64] = {0};
+    int have_root_type = (cmdline_get("rootfstype", root_type, sizeof(root_type)) == 0);
     if (cmdline_get("root", root_dev, sizeof(root_dev)) == 0) {
         kprint("Mounting root from: ");
         kprint(root_dev);
         kprint("\n");
-        
-        char root_type[32] = {0};
-        if (cmdline_get("rootfstype", root_type, sizeof(root_type)) != 0) {
-             strcpy(root_type, "ext2");
-        }
-        
-        if (vfs_mount_legacy(root_dev, "/", root_type, 0, NULL) != 0) {
+
+        if (root_mount_from_spec(root_dev, have_root_type ? root_type : NULL) != 0) {
             kprint("VFS: Cannot mount root ");
             kprint(root_dev);
             kprint("\n");
-            
-            kprint("VFS: Trying /dev/storage/ram0\n");
-            if (vfs_mount_legacy("/dev/storage/ram0", "/", "ext2", 0, NULL) != 0) {
-                 panic("not syncing - cannot mount root!");
+
+            kprint("VFS: Trying fallback root ");
+            kprint(fallback_root);
+            kprint("\n");
+            if (root_mount_from_spec(fallback_root, have_root_type ? root_type : NULL) != 0) {
+                panic("not syncing - cannot mount root!");
             }
         }
     } else {
         kprint("VFS: No root= argument specified.\n");
-        kprint("VFS: Trying /dev/storage/ram0\n");
-        if (vfs_mount_legacy("/dev/storage/ram0", "/", "ext2", 0, NULL) != 0) {
+        kprint("VFS: Trying fallback root ");
+        kprint(fallback_root);
+        kprint("\n");
+        if (root_mount_from_spec(fallback_root, have_root_type ? root_type : NULL) != 0) {
             panic("not syncing - cannot mount root!");
         }
     }

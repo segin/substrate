@@ -58,6 +58,24 @@ Block providers and partition scanners are initialized before `init_root_fs()`:
 
 That ordering allows root selection from raw disks, partitions, or ramdisks.
 
+### Root Filesystem Selection Contract
+
+`init_root_fs()` does not assume `ext2` unconditionally anymore.
+
+- if `rootfstype=` is omitted, the kernel probes the supported block-backed root filesystems in kernel order
+- if `rootfstype=auto` is specified, the same ordered probe runs
+- if `rootfstype=` contains a comma-separated list, the kernel tries each named filesystem in the listed order
+- if mounting the requested `root=` fails, the same filesystem selection policy is retried against `/dev/storage/ram0`
+
+The current built-in probe order is:
+
+- `ext2`
+- `fat`
+- `minix`
+- `udf`
+
+`exfat` is intentionally not part of the root probe because the driver is initialized but does not yet register a mountable filesystem implementation.
+
 ### VFS Before Pseudo-Filesystem Mounts
 
 `vfs_init()` runs before root mount and pseudo-fs mountpoint handling.
