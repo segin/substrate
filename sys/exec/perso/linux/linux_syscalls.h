@@ -21,6 +21,8 @@
 #define LINUX_SYS_umount         22
 #define LINUX_SYS_setuid         23
 #define LINUX_SYS_getuid         24
+#define LINUX_SYS_stime          25
+#define LINUX_SYS_alarm          27
 #define LINUX_SYS_fstat          28
 #define LINUX_SYS_access         33
 #define LINUX_SYS_sync           36
@@ -49,6 +51,8 @@
 #define LINUX_SYS_munmap         91
 #define LINUX_SYS_truncate       92
 #define LINUX_SYS_ftruncate      93
+#define LINUX_SYS_setitimer      104
+#define LINUX_SYS_getitimer      105
 #define LINUX_SYS_stat_new       106
 #define LINUX_SYS_lstat_new      107
 #define LINUX_SYS_fstat_new      108

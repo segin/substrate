@@ -15,6 +15,18 @@
 #define PRIO_MIN        -20
 #define PRIO_MAX        20
 
+typedef unsigned long rlim_t;
+
+#define RLIM_INFINITY ((rlim_t)-1)
+
+#define RLIMIT_CORE 0
+#define RLIM_NLIMITS 1
+
+struct rlimit {
+    rlim_t rlim_cur;
+    rlim_t rlim_max;
+};
+
 struct rusage {
     struct timeval ru_utime; /* user time used */
     struct timeval ru_stime; /* system time used */

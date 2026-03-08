@@ -112,9 +112,11 @@ Default-action handling in `signal_handle_pending()` currently covers:
 - ignore-by-default paths such as `SIGCHLD` and non-stop `SIGCONT`
 
 For signals whose native default action carries `SA_CORE`, `sigexit()` now
-invokes the kernel `coredump()` hook before terminating. The current core-file
-writer remains a separate future work item; the signal contract boundary is that
-the hook is invoked and the wait status carries the core-dump bit.
+invokes the kernel `coredump()` hook before terminating when the process core
+limit permits it. If `RLIMIT_CORE` is zero, the hook is skipped and the wait
+status does not carry the core-dump bit. If the hook fails, the process still
+dies from the signal but `WCOREDUMP(status)` remains clear. The current
+persistent core-file writer remains a separate future work item.
 
 Job-control stop signals are ignored for orphaned process groups.
 

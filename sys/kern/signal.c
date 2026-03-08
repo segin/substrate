@@ -11,6 +11,7 @@
 #include <stddef.h>
 #include <pm/pm.h>
 #include <exec/perso/personality.h>
+#include <sys/resource.h>
 #include <sys/time.h>
 #include <kern/time.h>
 #include <sys/kern_syscalls.h>
@@ -79,6 +80,14 @@ static void signal_clear_trap_context(thread_t *t, int sig) {
     t->trap_signo = 0;
     t->trap_code = 0;
     t->trap_addr = 0;
+}
+
+static int signal_core_dump_permitted(process_t *p) {
+    if (!p) {
+        return 0;
+    }
+
+    return p->rlimits[RLIMIT_CORE].rlim_cur != 0;
 }
 
 // Signal System Calls
@@ -590,11 +599,11 @@ void trapsignal(process_t *p, int sig, int code) {
 void sigexit(process_t *p, int sig) {
     if (!p || sig <= 0 || sig > NSIG) return;
     
-    /* Check if core dump is required */
-    int do_core = (sigprop[sig] & SA_CORE) != 0;
-    
-    if (do_core) {
-        coredump(p);
+    int want_core = (sigprop[sig] & SA_CORE) != 0;
+    int dump_core = 0;
+
+    if (want_core && signal_core_dump_permitted(p)) {
+        dump_core = coredump(p) == 0;
     }
     
     /* Set exit status to indicate signal termination:
@@ -602,7 +611,7 @@ void sigexit(process_t *p, int sig) {
      * This makes WIFSIGNALED(status) true and WTERMSIG return sig
      */
     int exit_status = sig & 0x7F; // Signal number in low 7 bits
-    if (do_core) {
+    if (dump_core) {
         exit_status |= 0x80; // Set core dump bit
     }
     

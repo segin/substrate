@@ -2,10 +2,9 @@
 #define _TIME_H_KERN
 
 #include <stdint.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/times.h>
-
-struct itimerval;
 
 // Get current ticks
 uint64_t get_ticks(void);
@@ -18,9 +17,6 @@ time_t get_uptime(void);
 
 // Get uptime in milliseconds since boot (monotonic)
 int64_t get_uptime_ms(void);
-
-// Get current system ticks
-uint64_t get_ticks(void);
 
 // Get system HZ
 uint32_t get_hz(void);
@@ -35,11 +31,9 @@ unsigned int sys_alarm(unsigned int sec);
 int sys_getitimer(int which, struct itimerval *curr_value);
 int sys_setitimer(int which, const struct itimerval *new_value, struct itimerval *old_value);
 
-struct timeval;
 struct timezone;
 int sys_gettimeofday(struct timeval *tv, struct timezone *tz);
 
-struct timespec;
 int sys_clock_gettime(clockid_t clk_id, struct timespec *tp);
 
 clock_t sys_times(struct tms *buf);

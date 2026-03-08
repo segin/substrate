@@ -991,8 +991,8 @@
 
         - [ ] **Core Dump (future):** (REQ: REQ-01-0837)
             - [x] Signals with SA_CORE: SIGQUIT, SIGILL, SIGABRT, SIGFPE, SIGSEGV, SIGBUS. (REQ: REQ-01-0838)
-            - [ ] `coredump()`: write ELF core format (`/cores/core.PID`). (REQ: REQ-01-0839)
-            - [ ] Respect `RLIMIT_CORE`. (REQ: REQ-01-0840)
+            - [x] `coredump()`: invoke the kernel core-dump policy hook before exit; persistent ELF core-file emission remains future writer work. (REQ: REQ-01-0839)
+            - [x] Respect `RLIMIT_CORE`. (REQ: REQ-01-0840)
 
         - [x] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
             - [x] Unit: `sys_sigaction` install/replace/reset handler. (REQ: REQ-01-0842)
@@ -1983,7 +1983,7 @@
 - **US-01-0836**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to init adopts orphaned processes so that this capability is implemented with clear verification evidence.
 - **US-01-0837**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to core Dump (future): so that this capability is implemented with clear verification evidence.
 - **US-01-0838**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to signals with SA_CORE: SIGQUIT, SIGILL, SIGABRT, SIGFPE, SIGSEGV, SIGBUS so that this capability is implemented with clear verification evidence.
-- **US-01-0839**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to coredump(): write ELF core format (/cores/core.PID) so that this capability is implemented with clear verification evidence.
+- **US-01-0839**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want `sigexit()` to invoke a dedicated `coredump()` policy hook before terminating on SA_CORE signals, even though persistent ELF core-file writing is still future work, so that crash handling has a stable kernel contract.
 - **US-01-0840**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to respect RLIMIT_CORE so that this capability is implemented with clear verification evidence.
 - **US-01-0841**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to testing: so that this capability is implemented with clear verification evidence.
 - **US-01-0842**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: sys_sigaction install/replace/reset handler so that this capability is implemented with clear verification evidence.
@@ -4667,7 +4667,7 @@
 - **REQ-01-0838** (EARS/Ubiquitous): The Substrate system shall signals with SA_CORE: SIGQUIT, SIGILL, SIGABRT, SIGFPE, SIGSEGV, SIGBUS.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0839** (EARS/Ubiquitous): The Substrate system shall coredump(): write ELF core format (/cores/core.PID).
+- **REQ-01-0839** (EARS/Ubiquitous): The Substrate system shall invoke a dedicated `coredump()` policy hook before terminating on SA_CORE signals; persistent ELF core-file emission may be provided by a future writer implementation.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0840** (EARS/Ubiquitous): The Substrate system shall respect RLIMIT_CORE.

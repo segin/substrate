@@ -54,6 +54,15 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork);
 static void proc_sysvipc_exit(process_t *proc);
 static void proc_posixipc_exit(process_t *proc);
 
+static void proc_resource_limits_init(process_t *proc) {
+    if (!proc) {
+        return;
+    }
+
+    proc->rlimits[RLIMIT_CORE].rlim_cur = RLIM_INFINITY;
+    proc->rlimits[RLIMIT_CORE].rlim_max = RLIM_INFINITY;
+}
+
 void pm_init(void) {
     next_pid = 1;
     memset(processes, 0, sizeof(processes));
@@ -66,6 +75,7 @@ void pm_init(void) {
     for (int i = 0; i < MAX_PROCS; i++) {
         processes[i].pid = -1;
         proc_timers_init(&processes[i]);
+        proc_resource_limits_init(&processes[i]);
     }
 
     // Create Initial Kernel Process (PID 1? Or 0?)
@@ -128,6 +138,7 @@ process_t *proc_create(int perso_id) {
     processes[i].egid = current_process ? current_process->egid : 0;
     processes[i].suid = current_process ? current_process->suid : 0;
     processes[i].sgid = current_process ? current_process->sgid : 0;
+    proc_resource_limits_init(&processes[i]);
     
     // Initialize rusage structures
     extern void rusage_init(process_t *p);
@@ -197,6 +208,7 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     memcpy(child_proc->sig_actions, parent->sig_actions, sizeof(parent->sig_actions));
     child_proc->sig_catch = parent->sig_catch;
     child_proc->sig_ignore = parent->sig_ignore;
+    memcpy(child_proc->rlimits, parent->rlimits, sizeof(parent->rlimits));
     
     // Copy limits, etc. if implemented
     

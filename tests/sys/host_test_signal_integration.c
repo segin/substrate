@@ -22,6 +22,7 @@ static int proc_exit_called;
 static int proc_exit_status;
 static int coredump_called;
 static int coredump_pid;
+static int coredump_result;
 
 void mutex_init(mutex_t *m, const char *name) { (void)m; (void)name; }
 void mutex_lock(mutex_t *m) { (void)m; }
@@ -66,7 +67,7 @@ void proc_exit(int status) { proc_exit_called = 1; proc_exit_status = status; }
 int coredump(process_t *p) {
     coredump_called++;
     coredump_pid = p ? p->pid : -1;
-    return 0;
+    return coredump_result;
 }
 
 #define HOST_TEST_EXTERNAL_COREDUMP 1
@@ -79,8 +80,11 @@ static void reset_env(void) {
     proc_exit_status = 0;
     coredump_called = 0;
     coredump_pid = -1;
+    coredump_result = 0;
     for (int i = 0; i < MAX_PROCS; i++) {
         processes[i].pid = -1;
+        processes[i].rlimits[RLIMIT_CORE].rlim_cur = RLIM_INFINITY;
+        processes[i].rlimits[RLIMIT_CORE].rlim_max = RLIM_INFINITY;
     }
     for (int i = 0; i < MAX_THREADS; i++) {
         threads[i].tid = -1;
@@ -433,6 +437,73 @@ static void test_sa_core_signal_invokes_coredump_hook(void) {
     assert(WCOREDUMP(proc_exit_status));
 }
 
+static void test_sa_core_signal_respects_rlimit_core_zero(void) {
+    registers_t regs;
+    process_t *proc;
+    thread_t *thread;
+
+    reset_env();
+    memset(&regs, 0, sizeof(regs));
+    regs.cs = 0x1b;
+
+    proc = &processes[0];
+    thread = &threads[0];
+
+    proc->pid = 71;
+    proc->state = SRUN;
+    proc->rlimits[RLIMIT_CORE].rlim_cur = 0;
+    proc->rlimits[RLIMIT_CORE].rlim_max = 0;
+
+    thread->tid = 701;
+    thread->proc = proc;
+    thread->state = THREAD_RUNNING;
+    thread->sig_pending = sigmask(SIGSEGV);
+
+    current_process = proc;
+    current_thread = thread;
+
+    signal_handle_pending(&regs);
+
+    assert(coredump_called == 0);
+    assert(proc_exit_called == 1);
+    assert(WIFSIGNALED(proc_exit_status));
+    assert(WTERMSIG(proc_exit_status) == SIGSEGV);
+    assert(!WCOREDUMP(proc_exit_status));
+}
+
+static void test_sa_core_signal_only_sets_core_bit_on_success(void) {
+    registers_t regs;
+    process_t *proc;
+    thread_t *thread;
+
+    reset_env();
+    memset(&regs, 0, sizeof(regs));
+    regs.cs = 0x1b;
+
+    proc = &processes[0];
+    thread = &threads[0];
+
+    proc->pid = 72;
+    proc->state = SRUN;
+    coredump_result = -1;
+
+    thread->tid = 702;
+    thread->proc = proc;
+    thread->state = THREAD_RUNNING;
+    thread->sig_pending = sigmask(SIGSEGV);
+
+    current_process = proc;
+    current_thread = thread;
+
+    signal_handle_pending(&regs);
+
+    assert(coredump_called == 1);
+    assert(proc_exit_called == 1);
+    assert(WIFSIGNALED(proc_exit_status));
+    assert(WTERMSIG(proc_exit_status) == SIGSEGV);
+    assert(!WCOREDUMP(proc_exit_status));
+}
+
 int main(void) {
     test_sigint_kills_target_child();
     test_sys_kill_permission_and_group_routing();
@@ -441,6 +512,8 @@ int main(void) {
     test_sigkill_resumes_stopped_threads_before_exit();
     test_sigchld_stop_continue_respect_nocldstop();
     test_sa_core_signal_invokes_coredump_hook();
+    test_sa_core_signal_respects_rlimit_core_zero();
+    test_sa_core_signal_only_sets_core_bit_on_success();
     puts("host_test_signal_integration: PASS");
     return 0;
 }
