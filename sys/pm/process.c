@@ -295,8 +295,18 @@ int sched_spawn_kernel_process(void (*entry)(void*), void *arg) {
     
     // 4. Create Thread
     thread_t *t = sched_create_thread(child, entry, stack_top, arg);
-    
-    return t ? t->tid : -1;
+    if (!t) {
+        extern void pmm_free_block(void *p);
+        pmm_free_block(stack);
+        return -1;
+    }
+
+    t->kstack_base = (uintptr_t)stack;
+    t->kstack_units = 1;
+    t->kstack_type = THREAD_KSTACK_PMM_BLOCK;
+    t->kstack_owned = 1;
+
+    return t->tid;
 }
 
 // Close all FDs for a process
@@ -483,10 +493,16 @@ void proc_exit(int code) {
     
     // 1b. Thread Cleanup (Robust Futexes & Pending Signals)
     extern void futex_thread_exit(thread_t *t);
+    extern int mutex_release_owned_by_thread(thread_t *owner);
+    extern void kprint(const char *msg);
     for (int i = 0; i < MAX_THREADS; i++) {
         if (threads[i].tid != -1 && threads[i].proc == current_process) {
             /* Cleanup robust futexes for this thread */
             futex_thread_exit(&threads[i]);
+
+            if (mutex_release_owned_by_thread(&threads[i]) > 0) {
+                kprint("proc_exit: force-releasing mutexes held by exiting thread.\n");
+            }
 
             /* Remove sleepers from sleep queues before they become zombies. */
             sleepq_remove_thread(&threads[i]);
@@ -539,10 +555,6 @@ void proc_exit(int code) {
     
     // 6. Phase 2: POSIX IPC (Placeholders)
     // Unlink any POSIX semaphores/shared memory owned
-    
-    // 7. Phase 2: Locks Held
-    // Release any kernel mutexes held by threads (tracked in thread_t later)
-    // Cancel pending lock requests
     
     // 8. Phase 3: Thread Termination
     // Current thread becomes the "reaper thread"
