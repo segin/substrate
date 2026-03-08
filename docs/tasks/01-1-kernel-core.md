@@ -367,7 +367,7 @@
                 - [x] Unit: large page enter/remove (4 MB PSE). (REQ: REQ-01-0322)
                 - [ ] Unit: TLB shootdown — verify `invlpg` called on remote CPUs. (REQ: REQ-01-0323)
                 - [x] Property: `pmap_create` always produces valid kernel PDE copies (768–1022 match `kernel_pmap`). (REQ: REQ-01-0324)
-                - [ ] Property: `pmap_destroy` frees exactly `resident_count` pages. (REQ: REQ-01-0325)
+                - [x] Property: `pmap_destroy` reclaims resident pages and page-table backing without PMM leaks. (REQ: REQ-01-0325)
                 - [x] Property: recursive mapping at PDE 1023 is self-consistent. (REQ: REQ-01-0326)
                 - [ ] Integration: fork process, write to COW pages, verify isolation in QEMU. (REQ: REQ-01-0327)
                 - [x] Integration: stress test — 100 `pmap_create`/`pmap_destroy` cycles, verify no PMM leak. (REQ: REQ-01-0328)
