@@ -1281,10 +1281,14 @@ bc_num *eval_expr(ast_node_t *n) {
             
             // Evaluates arguments before pushing frame
             int argc = 0;
+            int args_cap = 0;
             bc_num **args = NULL;
             expr_list_t *p = n->call.args;
             while (p) {
-                args = realloc(args, (argc + 1) * sizeof(bc_num*));
+                if (argc >= args_cap) {
+                    args_cap = args_cap == 0 ? 4 : args_cap * 2;
+                    args = realloc(args, args_cap * sizeof(bc_num*));
+                }
                 args[argc++] = eval_expr(p->expr);
                 p = p->next;
             }
