@@ -434,6 +434,12 @@ static long cast_const_integral_value(long value, cc_type_t t) {
     case CC_TYPE_ENUM:
         bits = 32;
         break;
+    case CC_TYPE_LONG:
+    case CC_TYPE_ULONG:
+    case CC_TYPE_LONG_LONG:
+    case CC_TYPE_ULONG_LONG:
+        bits = 64;
+        break;
     default:
         bits = 0;
         break;
@@ -5926,6 +5932,35 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                         return -1;
                     }
                 }
+            } else if (in.op == CC_SSA_CALLI && e->args[i] != NULL && e->args[i]->value_type == CC_TYPE_VOID &&
+                       e->args[i]->struct_id >= 0) {
+                long agg_size = type_size_bytes_with_struct(tu, e->args[i]->value_type, e->args[i]->struct_id);
+                if (agg_size > 0 && agg_size <= g_pointer_size_bytes) {
+                    cc_ssa_instr_t load_in;
+                    av = cast_value(sf, av, CC_VAL_I64, diag);
+                    if (av < 0) {
+                        free(in.sym);
+                        free(in.args);
+                        free(in.call_arg_abi);
+                        return -1;
+                    }
+                    memset(&load_in, 0, sizeof(load_in));
+                    load_in.op = CC_SSA_LOAD;
+                    load_in.dst = new_value(sf, CC_VAL_I64);
+                    load_in.lhs = av;
+                    load_in.rhs = -1;
+                    load_in.imm = agg_size;
+                    load_in.is_unsigned = 1;
+                    if (load_in.dst < 0 || push_instr(sf, load_in) != 0) {
+                        free(in.sym);
+                        free(in.args);
+                        free(in.call_arg_abi);
+                        set_diag(diag, "out of memory lowering indirect small aggregate call argument");
+                        return -1;
+                    }
+                    av = load_in.dst;
+                    want = CC_VAL_I64;
+                }
             } else if (e->args[i] != NULL && e->args[i]->value_type == CC_TYPE_LDOUBLE) {
                 arg_needs_ldouble_abi = 1;
             }
@@ -11376,7 +11411,8 @@ static int should_skip_fn_body_for_codegen(const cc_translation_unit_t *tu, cons
         return 1;
     }
     for (i = 0; i < f->stmt_count; ++i) {
-        if (stmt_calls_named_fn(&f->stmts[i], "__builtin_va_arg_pack")) {
+        if (stmt_calls_named_fn(&f->stmts[i], "__builtin_va_arg_pack") ||
+            stmt_calls_named_fn(&f->stmts[i], "__builtin_va_arg_pack_len")) {
             return 1;
         }
     }

@@ -16,6 +16,8 @@ static const builtin_name_t g_known_builtins[] = {
     {"__builtin_c23_va_copy"},
     {"__builtin_va_arg"},
     {"__builtin_c23_va_arg"},
+    {"__builtin_va_arg_pack"},
+    {"__builtin_va_arg_pack_len"},
     {"__builtin_alloca"},
     {"__builtin_expect"},
     {"__builtin_constant_p"},

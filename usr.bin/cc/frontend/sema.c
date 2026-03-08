@@ -2028,6 +2028,12 @@ static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t 
             case CC_TYPE_ENUM:
                 bits = 32;
                 break;
+            case CC_TYPE_LONG:
+            case CC_TYPE_ULONG:
+            case CC_TYPE_LONG_LONG:
+            case CC_TYPE_ULONG_LONG:
+                bits = 64;
+                break;
             default:
                 bits = 0;
                 break;
