@@ -28,7 +28,8 @@ struct pgrp {
     int             pg_id;          /* Process group ID */
     struct process *pg_members;     /* Head of member list (via p_pgrp_link) */
     struct session *pg_session;     /* Parent session */
-    struct pgrp    *pg_next;        /* Next pgrp in session's list */
+    struct pgrp    *pg_hash_next;   /* Next pgrp in global hash chain */
+    struct pgrp    *pg_sess_next;   /* Next pgrp in owning session */
     int             pg_jobc;        /* Job control counter (# procs with parent in different pgrp) */
 };
 
