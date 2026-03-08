@@ -37,6 +37,12 @@ void mock_exit(int status);
 #define syscall mock_syscall
 #define _exit mock_exit
 
+// We want to mock __sync_lock_test_and_set to simulate contention
+int mock_sync_lock_test_and_set(int *ptr, int val);
+void mock_sync_lock_release(int *ptr);
+#define __sync_lock_test_and_set mock_sync_lock_test_and_set
+#define __sync_lock_release mock_sync_lock_release
+
 // Include the source file
 #include "../pthread.c"
 
@@ -69,6 +75,25 @@ void mock_exit(int status) {
     exit(status);
 }
 
+// Variables to control the behavior of mock_sync_lock_test_and_set
+int spin_count = 0;
+int max_spins = 0;
+
+int mock_sync_lock_test_and_set(int *ptr, int val) {
+    if (spin_count < max_spins) {
+        spin_count++;
+        return 1; // Simulate that the lock is already held
+    }
+    // Simulate successful lock acquisition
+    int old = *ptr;
+    *ptr = val;
+    return old;
+}
+
+void mock_sync_lock_release(int *ptr) {
+    *ptr = 0;
+}
+
 int main() {
     printf("Running host_test_mutex...\n");
 
@@ -80,10 +105,24 @@ int main() {
     assert(ret == 0);
     assert(mutex == 0);
 
-    // Test mutex lock/unlock/destroy
+    // Test mutex lock - success on first try
+    spin_count = 0;
+    max_spins = 0;
     ret = my_pthread_mutex_lock(&mutex);
     assert(ret == 0);
-    assert(mutex == 1); // Mock lock implementation sets to 1
+    assert(mutex == 1);
+
+    ret = my_pthread_mutex_unlock(&mutex);
+    assert(ret == 0);
+    assert(mutex == 0);
+
+    // Test mutex lock - with contention
+    spin_count = 0;
+    max_spins = 5; // Should loop 5 times then succeed
+    ret = my_pthread_mutex_lock(&mutex);
+    assert(ret == 0);
+    assert(mutex == 1);
+    assert(spin_count == 5); // Verify it spun the expected number of times
 
     ret = my_pthread_mutex_unlock(&mutex);
     assert(ret == 0);

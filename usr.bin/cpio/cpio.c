@@ -128,7 +128,7 @@ static int make_parent_dirs(const char *path) {
     char tmp[PATH_MAX];
     size_t i;
     if (strlen(path) >= sizeof(tmp)) return -1;
-    strcpy(tmp, path);
+    snprintf(tmp, sizeof(tmp), "%s", path);
     for (i = 1; tmp[i]; ++i) {
         if (tmp[i] == '/') {
             tmp[i] = '\0';
