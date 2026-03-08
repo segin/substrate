@@ -9,6 +9,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <time.h>
+#include <sys/wait.h>
+#include <errno.h>
+#include <ctype.h>
 
 #define ALLOC(x) (struct x *) calloc(1, sizeof(struct x))
 
