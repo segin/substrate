@@ -12,6 +12,8 @@
 #include <limits.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <sys/wait.h>
+#include <fcntl.h>
 
 #define LD_MAX_SCRIPT_INCLUDE_DEPTH 64
 #define LD_MAX_TRACKED_SYMBOLS 262144U
@@ -3176,41 +3178,106 @@ static int parse_u64_auto(const char *s, uint64_t *out) {
     return 0;
 }
 
-static int run_cmd_first_line(const char *cmd, char *out, size_t out_sz) {
+static int safe_system(const char *cmd_path, char *const argv[]) {
+    pid_t pid;
+    int status;
+    int null_fd;
+
+    pid = fork();
+    if (pid == -1) {
+        return -1;
+    }
+    if (pid == 0) {
+        null_fd = open("/dev/null", O_WRONLY);
+        if (null_fd != -1) {
+            dup2(null_fd, STDOUT_FILENO);
+            dup2(null_fd, STDERR_FILENO);
+            close(null_fd);
+        }
+        execvp(cmd_path, argv);
+        exit(127);
+    }
+    if (waitpid(pid, &status, 0) == -1) {
+        return -1;
+    }
+    if (WIFEXITED(status)) {
+        return WEXITSTATUS(status);
+    }
+    return -1;
+}
+
+static int safe_popen_read(const char *cmd_path, char *const argv[], char *out, size_t out_sz) {
+    int pipefd[2];
+    pid_t pid;
+    int status;
+    int null_fd;
     FILE *fp;
     char *nl;
-    int rc;
 
-    if (cmd == NULL || out == NULL || out_sz == 0) {
+    if (cmd_path == NULL || argv == NULL || out == NULL || out_sz == 0) {
         return -1;
     }
     out[0] = '\0';
-    fp = popen(cmd, "r");
-    if (fp == NULL) {
+
+    if (pipe(pipefd) == -1) {
         return -1;
     }
+
+    pid = fork();
+    if (pid == -1) {
+        close(pipefd[0]);
+        close(pipefd[1]);
+        return -1;
+    }
+
+    if (pid == 0) {
+        close(pipefd[0]);
+        if (pipefd[1] != STDOUT_FILENO) {
+            dup2(pipefd[1], STDOUT_FILENO);
+            close(pipefd[1]);
+        }
+        null_fd = open("/dev/null", O_WRONLY);
+        if (null_fd != -1) {
+            dup2(null_fd, STDERR_FILENO);
+            close(null_fd);
+        }
+        execvp(cmd_path, argv);
+        exit(127);
+    }
+
+    close(pipefd[1]);
+    fp = fdopen(pipefd[0], "r");
+    if (fp == NULL) {
+        close(pipefd[0]);
+        waitpid(pid, &status, 0);
+        return -1;
+    }
+
     if (fgets(out, (int)out_sz, fp) == NULL) {
-        rc = pclose(fp);
-        (void)rc;
+        fclose(fp);
+        waitpid(pid, &status, 0);
         out[0] = '\0';
         return 1;
     }
-    rc = pclose(fp);
-    if (rc != 0) {
-        out[0] = '\0';
-        return -1;
+
+    fclose(fp);
+    waitpid(pid, &status, 0);
+
+    if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+        nl = strchr(out, '\n');
+        if (nl != NULL) {
+            *nl = '\0';
+        }
+        return out[0] != '\0' ? 0 : 1;
     }
-    nl = strchr(out, '\n');
-    if (nl != NULL) {
-        *nl = '\0';
-    }
-    return out[0] != '\0' ? 0 : 1;
+
+    out[0] = '\0';
+    return -1;
 }
 
 static int discover_default_plugin(ld_ctx_t *ctx) {
     static char discovered[PATH_MAX];
     const char *envp;
-    char cmd[256];
     int rc;
 
     if (ctx == NULL || (ctx->plugin_path != NULL && ctx->plugin_path[0] != '\0')) {
@@ -3227,25 +3294,28 @@ static int discover_default_plugin(ld_ctx_t *ctx) {
         return 0;
     }
 
-    snprintf(cmd, sizeof(cmd), "gcc -print-file-name=liblto_plugin.so 2>/dev/null");
-    rc = run_cmd_first_line(cmd, discovered, sizeof(discovered));
-    if (rc == 0 && discovered[0] == '/' && access(discovered, R_OK | X_OK) == 0) {
-        ctx->plugin_path = discovered;
-        return 0;
+    {
+        char *argv[] = {"gcc", "-print-file-name=liblto_plugin.so", NULL};
+        rc = safe_popen_read("gcc", argv, discovered, sizeof(discovered));
+        if (rc == 0 && discovered[0] == '/' && access(discovered, R_OK | X_OK) == 0) {
+            ctx->plugin_path = discovered;
+            return 0;
+        }
     }
 
-    snprintf(cmd, sizeof(cmd), "clang -print-file-name=LLVMgold.so 2>/dev/null");
-    rc = run_cmd_first_line(cmd, discovered, sizeof(discovered));
-    if (rc == 0 && discovered[0] == '/' && access(discovered, R_OK | X_OK) == 0) {
-        ctx->plugin_path = discovered;
-        return 0;
+    {
+        char *argv[] = {"clang", "-print-file-name=LLVMgold.so", NULL};
+        rc = safe_popen_read("clang", argv, discovered, sizeof(discovered));
+        if (rc == 0 && discovered[0] == '/' && access(discovered, R_OK | X_OK) == 0) {
+            ctx->plugin_path = discovered;
+            return 0;
+        }
     }
 
     return 0;
 }
 
 static int plugin_discover_and_handshake(ld_ctx_t *ctx) {
-    char cmd[2048];
     int rc;
 
     if (ctx == NULL || ctx->plugin_checked) {
@@ -3268,25 +3338,28 @@ static int plugin_discover_and_handshake(ld_ctx_t *ctx) {
         fprintf(stderr, "ld: plugin not executable: %s\n", ctx->plugin_path);
         return -1;
     }
-    if (snprintf(cmd, sizeof(cmd), "\"%s\" --version >/dev/null 2>&1", ctx->plugin_path) >= (int)sizeof(cmd)) {
-        fprintf(stderr, "ld: plugin path too long\n");
-        return -1;
+
+    {
+        char *argv[3];
+        argv[0] = (char *)ctx->plugin_path;
+        argv[1] = "--version";
+        argv[2] = NULL;
+
+        rc = safe_system(ctx->plugin_path, argv);
+        if (rc != 0) {
+            fprintf(stderr, "ld: plugin handshake failed for %s\n", ctx->plugin_path);
+            return -1;
+        }
     }
-    rc = system(cmd);
-    if (rc != 0) {
-        fprintf(stderr, "ld: plugin handshake failed for %s\n", ctx->plugin_path);
-        return -1;
-    }
+
     ctx->plugin_checked = 1;
     return 0;
 }
 
 static int plugin_materialize_object(const ld_ctx_t *ctx, const char *in_path, char *out_path, size_t out_path_sz) {
-    char cmd[4096];
-    FILE *fp;
-    char *nl;
-    size_t i, cmd_len;
-    int n;
+    char **argv;
+    size_t i, argc;
+    int rc;
 
     if (out_path == NULL || out_path_sz == 0) {
         return -1;
@@ -3295,32 +3368,40 @@ static int plugin_materialize_object(const ld_ctx_t *ctx, const char *in_path, c
     if (ctx == NULL || ctx->plugin_path == NULL || ctx->plugin_path[0] == '\0' || in_path == NULL) {
         return 0;
     }
-    n = snprintf(cmd, sizeof(cmd), "\"%s\" --materialize \"%s\"", ctx->plugin_path, in_path);
-    if (n < 0 || (size_t)n >= sizeof(cmd)) {
+
+    argv = malloc((4 + ctx->plugin_opt_count) * sizeof(char *));
+    if (argv == NULL) {
         return -1;
     }
-    cmd_len = (size_t)n;
+
+    argc = 0;
+    argv[argc++] = (char *)ctx->plugin_path;
+    argv[argc++] = "--materialize";
+    argv[argc++] = (char *)in_path;
 
     for (i = 0; i < ctx->plugin_opt_count; ++i) {
-        n = snprintf(cmd + cmd_len, sizeof(cmd) - cmd_len, " --plugin-opt=\"%s\"", ctx->plugin_opts[i]);
-        if (n < 0 || (size_t)n >= sizeof(cmd) - cmd_len) {
+        char *opt_arg = malloc(strlen(ctx->plugin_opts[i]) + 15);
+        if (opt_arg == NULL) {
+            while (argc > 3) {
+                free(argv[--argc]);
+            }
+            free(argv);
             return -1;
         }
-        cmd_len += (size_t)n;
+        sprintf(opt_arg, "--plugin-opt=%s", ctx->plugin_opts[i]);
+        argv[argc++] = opt_arg;
     }
-    fp = popen(cmd, "r");
-    if (fp == NULL) {
+    argv[argc] = NULL;
+
+    rc = safe_popen_read(ctx->plugin_path, argv, out_path, out_path_sz);
+
+    for (i = 3; i < argc; ++i) {
+        free(argv[i]);
+    }
+    free(argv);
+
+    if (rc < 0) {
         return -1;
-    }
-    if (fgets(out_path, (int)out_path_sz, fp) == NULL) {
-        pclose(fp);
-        out_path[0] = '\0';
-        return 0;
-    }
-    pclose(fp);
-    nl = strchr(out_path, '\n');
-    if (nl != NULL) {
-        *nl = '\0';
     }
     return out_path[0] != '\0' ? 1 : 0;
 }
