@@ -49,7 +49,8 @@ The current implementation performs:
 
 Notes:
 
-- timer, System V IPC, POSIX IPC, and lock-release phases remain explicit placeholders
+- timer, System V IPC, and POSIX IPC phases remain explicit placeholders
+- tracked sleep mutexes are force-released here; pending mutex waiters are canceled by the existing `sleepq_remove_thread()` pass
 
 ### 4. Child Reparenting
 

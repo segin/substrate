@@ -36,6 +36,7 @@ struct pmap;
 struct pgrp;
 struct session;
 struct registers;
+struct mutex;
 
 #define MAX_FD 32
 
@@ -166,6 +167,7 @@ typedef struct thread {
     uint16_t      time_slice;     // Remaining time slice (ticks)
     uint16_t      time_slice_max; // Full time slice for this priority
     uint32_t      flags;          // Thread flags
+    struct mutex *held_mutexes;   // Sleep mutexes currently owned by this thread
     
 #define THREAD_F_INTERRUPTIBLE 0x0001 // Sleep is interruptible by signals
 #define THREAD_F_NO_PREEMPT    0x0002 // Suppress timer-driven reschedule
