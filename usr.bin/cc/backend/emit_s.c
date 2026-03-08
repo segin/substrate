@@ -42,6 +42,7 @@ static int g_i386_isa_level = 6;
 static int g_i386_has_mmx = 1;
 static int g_i386_has_sse2 = 1;
 static int g_i386_fp_math_mode = 0;
+static unsigned long g_aux_label_serial = 0;
 
 static const char *reg64_to8(const char *r);
 static const char *reg32_to8(const char *r);
@@ -92,6 +93,10 @@ static void set_diag(cc_diag_t *d, const char *msg) {
     d->line = 0;
     d->col = 0;
     snprintf(d->message, sizeof(d->message), "%s", msg);
+}
+
+static unsigned long next_aux_label_id(void) {
+    return g_aux_label_serial++;
 }
 
 static const char *setcc_int_mnemonic(cc_cmp_kind_t k, int is_unsigned) {
@@ -3164,8 +3169,31 @@ static void emit_x86_64_store_fp_indirect(FILE *fp, const cc_ssa_function_t *f, 
 static void emit_x86_64_i2f(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
                             const cc_ssa_instr_t *in) {
     const char *tmp = x86_64_fp_tmp_reg();
-    int rl = int_regs_load(fp, f, lay, ist, in->lhs, -1, -1);
-    fprintf(fp, "\tcvtsi2sdq %s, %s\n", ist->regs[rl], tmp);
+    if (in->is_unsigned) {
+        unsigned long lid = next_aux_label_id();
+        int rax = int_reg_index(ist, "%rax");
+        int rcx = int_reg_index(ist, "%rcx");
+
+        int_regs_flush(fp, f, lay, ist);
+        int_regs_clobber_reg(fp, f, lay, ist, rax);
+        int_regs_clobber_reg(fp, f, lay, ist, rcx);
+        fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(lay, in->lhs));
+        fprintf(fp, "\ttestq %%rax, %%rax\n");
+        fprintf(fp, "\tjns .L__cc_u64tof_small_%lu\n", lid);
+        fprintf(fp, "\tmovq %%rax, %%rcx\n");
+        fprintf(fp, "\tshrq $1, %%rcx\n");
+        fprintf(fp, "\tandq $1, %%rax\n");
+        fprintf(fp, "\torq %%rax, %%rcx\n");
+        fprintf(fp, "\tcvtsi2sdq %%rcx, %s\n", tmp);
+        fprintf(fp, "\taddsd %s, %s\n", tmp, tmp);
+        fprintf(fp, "\tjmp .L__cc_u64tof_done_%lu\n", lid);
+        fprintf(fp, ".L__cc_u64tof_small_%lu:\n", lid);
+        fprintf(fp, "\tcvtsi2sdq %%rax, %s\n", tmp);
+        fprintf(fp, ".L__cc_u64tof_done_%lu:\n", lid);
+    } else {
+        int rl = int_regs_load(fp, f, lay, ist, in->lhs, -1, -1);
+        fprintf(fp, "\tcvtsi2sdq %s, %s\n", ist->regs[rl], tmp);
+    }
     fprintf(fp, "\tmovsd %s, %d(%%rbp)\n", tmp, slot_off(lay, in->dst));
 }
 
@@ -4424,17 +4452,64 @@ static int emit_i386_cmp_int(FILE *fp, const cc_ssa_function_t *f, const slot_la
 static void emit_i386_i2f_sse(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
                               const cc_ssa_instr_t *in) {
     const char *tmp = i386_fp_tmp_reg();
-    int rl = int_regs_load(fp, f, lay, ist, in->lhs, -1, -1);
+    if (in->is_unsigned) {
+        unsigned long lid = next_aux_label_id();
+        int eax = int_reg_index(ist, "%eax");
+        int ecx = int_reg_index(ist, "%ecx");
 
-    fprintf(fp, "\tcvtsi2sdl %s, %s\n", ist->regs[rl], tmp);
+        int_regs_flush(fp, f, lay, ist);
+        int_regs_clobber_reg(fp, f, lay, ist, eax);
+        int_regs_clobber_reg(fp, f, lay, ist, ecx);
+        fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", slot_off(lay, in->lhs));
+        fprintf(fp, "\ttestl %%eax, %%eax\n");
+        fprintf(fp, "\tjns .L__cc_u32tof_small_%lu\n", lid);
+        fprintf(fp, "\tmovl %%eax, %%ecx\n");
+        fprintf(fp, "\tshrl $1, %%ecx\n");
+        fprintf(fp, "\tandl $1, %%eax\n");
+        fprintf(fp, "\torl %%eax, %%ecx\n");
+        fprintf(fp, "\tcvtsi2sdl %%ecx, %s\n", tmp);
+        fprintf(fp, "\taddsd %s, %s\n", tmp, tmp);
+        fprintf(fp, "\tjmp .L__cc_u32tof_done_%lu\n", lid);
+        fprintf(fp, ".L__cc_u32tof_small_%lu:\n", lid);
+        fprintf(fp, "\tcvtsi2sdl %%eax, %s\n", tmp);
+        fprintf(fp, ".L__cc_u32tof_done_%lu:\n", lid);
+    } else {
+        int rl = int_regs_load(fp, f, lay, ist, in->lhs, -1, -1);
+        fprintf(fp, "\tcvtsi2sdl %s, %s\n", ist->regs[rl], tmp);
+    }
     fprintf(fp, "\tmovsd %s, %d(%%ebp)\n", tmp, slot_off(lay, in->dst));
 }
 
 static void emit_i386_i2f_x87(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
                               const cc_ssa_instr_t *in, int scratch_off) {
-    int rl = int_regs_load(fp, f, lay, ist, in->lhs, -1, -1);
-    fprintf(fp, "\tmovl %s, %d(%%ebp)\n", ist->regs[rl], scratch_off);
-    fprintf(fp, "\tfildl %d(%%ebp)\n", scratch_off);
+    if (in->is_unsigned) {
+        unsigned long lid = next_aux_label_id();
+        int eax = int_reg_index(ist, "%eax");
+        int ecx = int_reg_index(ist, "%ecx");
+
+        int_regs_flush(fp, f, lay, ist);
+        int_regs_clobber_reg(fp, f, lay, ist, eax);
+        int_regs_clobber_reg(fp, f, lay, ist, ecx);
+        fprintf(fp, "\tmovl %d(%%ebp), %%eax\n", slot_off(lay, in->lhs));
+        fprintf(fp, "\ttestl %%eax, %%eax\n");
+        fprintf(fp, "\tjns .L__cc_u32tox87_small_%lu\n", lid);
+        fprintf(fp, "\tmovl %%eax, %%ecx\n");
+        fprintf(fp, "\tshrl $1, %%ecx\n");
+        fprintf(fp, "\tandl $1, %%eax\n");
+        fprintf(fp, "\torl %%eax, %%ecx\n");
+        fprintf(fp, "\tmovl %%ecx, %d(%%ebp)\n", scratch_off);
+        fprintf(fp, "\tfildl %d(%%ebp)\n", scratch_off);
+        fprintf(fp, "\tfadd %%st(0), %%st\n");
+        fprintf(fp, "\tjmp .L__cc_u32tox87_done_%lu\n", lid);
+        fprintf(fp, ".L__cc_u32tox87_small_%lu:\n", lid);
+        fprintf(fp, "\tmovl %%eax, %d(%%ebp)\n", scratch_off);
+        fprintf(fp, "\tfildl %d(%%ebp)\n", scratch_off);
+        fprintf(fp, ".L__cc_u32tox87_done_%lu:\n", lid);
+    } else {
+        int rl = int_regs_load(fp, f, lay, ist, in->lhs, -1, -1);
+        fprintf(fp, "\tmovl %s, %d(%%ebp)\n", ist->regs[rl], scratch_off);
+        fprintf(fp, "\tfildl %d(%%ebp)\n", scratch_off);
+    }
     fprintf(fp, "\tfstpl %d(%%ebp)\n", slot_off(lay, in->dst));
 }
 

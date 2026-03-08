@@ -158,6 +158,7 @@ typedef struct {
     size_t instr_cap;
 
     cc_value_type_t *value_types;
+    unsigned char *value_is_unsigned;
     size_t value_cap;
     int value_count;
     int label_count;

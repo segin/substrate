@@ -12,6 +12,9 @@
 #include <string.h>
 #include <vm/vm_kmem.h>
 #include <sys/smp.h>
+#ifndef HOST_TEST
+#include <sys/lock.h>
+#endif
 
 static uma_zone_t *uma_zones = NULL;
 
@@ -31,6 +34,12 @@ static bool uma_dynamic_alloc = false;
 #define UMA_BUCKET_POOL_SIZE 64
 static struct uma_bucket uma_bucket_pool[UMA_BUCKET_POOL_SIZE];
 static int uma_bucket_idx = 0;
+static struct uma_bucket *uma_bucket_empty_depot;
+static struct uma_bucket *uma_bucket_full_depot;
+
+#ifndef HOST_TEST
+static spinlock_t uma_bucket_depot_lock;
+#endif
 
 /* Global Slab Hash Table */
 #define UMA_HASH_SHIFT  12
@@ -42,6 +51,18 @@ static uma_slab_t *uma_page_hash[UMA_HASH_SIZE];
 static inline uint32_t uma_hash(void *addr) {
     uintptr_t p = (uintptr_t)addr >> UMA_HASH_SHIFT;
     return (uint32_t)(p & UMA_HASH_MASK);
+}
+
+static inline void uma_bucket_depot_acquire(void) {
+#ifndef HOST_TEST
+    spinlock_acquire(&uma_bucket_depot_lock);
+#endif
+}
+
+static inline void uma_bucket_depot_release(void) {
+#ifndef HOST_TEST
+    spinlock_release(&uma_bucket_depot_lock);
+#endif
 }
 
 static void uma_hash_insert(uma_slab_t *slab) {
@@ -78,7 +99,12 @@ void uma_startup(void) {
     uma_bootstrap_idx = 0;
     uma_bucket_idx = 0;
     uma_zones = NULL;
+    uma_bucket_empty_depot = NULL;
+    uma_bucket_full_depot = NULL;
     memset(uma_page_hash, 0, sizeof(uma_page_hash));
+#ifndef HOST_TEST
+    spinlock_init(&uma_bucket_depot_lock, "uma_bucket_depot");
+#endif
 
     kprint("UMA: subsystem initialized\n");
 }
@@ -95,12 +121,92 @@ void uma_enable_dynamic_alloc(void) {
  * Allocate a bucket from the pool
  */
 static struct uma_bucket *uma_bucket_alloc(void) {
+    struct uma_bucket *b;
+
+    uma_bucket_depot_acquire();
+    if (uma_bucket_empty_depot) {
+        b = uma_bucket_empty_depot;
+        uma_bucket_empty_depot = b->ub_next;
+        uma_bucket_depot_release();
+        b->ub_next = NULL;
+        b->ub_zone = NULL;
+        b->ub_cnt = 0;
+        return b;
+    }
+    uma_bucket_depot_release();
+
     if (uma_bucket_idx >= UMA_BUCKET_POOL_SIZE) {
         return NULL;
     }
-    struct uma_bucket *b = &uma_bucket_pool[uma_bucket_idx++];
+    b = &uma_bucket_pool[uma_bucket_idx++];
     b->ub_cnt = 0;
+    b->ub_next = NULL;
+    b->ub_zone = NULL;
     return b;
+}
+
+static void uma_bucket_put_empty(struct uma_bucket *bucket) {
+    if (!bucket) return;
+    bucket->ub_cnt = 0;
+    bucket->ub_zone = NULL;
+    uma_bucket_depot_acquire();
+    bucket->ub_next = uma_bucket_empty_depot;
+    uma_bucket_empty_depot = bucket;
+    uma_bucket_depot_release();
+}
+
+static void uma_bucket_put_full(uma_zone_t *zone, struct uma_bucket *bucket) {
+    if (!zone || !bucket || bucket->ub_cnt == 0) return;
+    bucket->ub_zone = zone;
+    uma_bucket_depot_acquire();
+    bucket->ub_next = uma_bucket_full_depot;
+    uma_bucket_full_depot = bucket;
+    uma_bucket_depot_release();
+}
+
+static struct uma_bucket *uma_bucket_take_full(uma_zone_t *zone) {
+    struct uma_bucket *bucket = NULL;
+    struct uma_bucket **pp;
+
+    if (!zone) return NULL;
+
+    uma_bucket_depot_acquire();
+    pp = &uma_bucket_full_depot;
+    while (*pp) {
+        if ((*pp)->ub_zone == zone) {
+            bucket = *pp;
+            *pp = bucket->ub_next;
+            bucket->ub_next = NULL;
+            bucket->ub_zone = NULL;
+            break;
+        }
+        pp = &(*pp)->ub_next;
+    }
+    uma_bucket_depot_release();
+    return bucket;
+}
+
+static struct uma_bucket *uma_bucket_detach_full_for_zone(uma_zone_t *zone) {
+    struct uma_bucket *detached = NULL;
+    struct uma_bucket **pp;
+
+    if (!zone) return NULL;
+
+    uma_bucket_depot_acquire();
+    pp = &uma_bucket_full_depot;
+    while (*pp) {
+        struct uma_bucket *bucket = *pp;
+        if (bucket->ub_zone == zone) {
+            *pp = bucket->ub_next;
+            bucket->ub_next = detached;
+            bucket->ub_zone = NULL;
+            detached = bucket;
+            continue;
+        }
+        pp = &(*pp)->ub_next;
+    }
+    uma_bucket_depot_release();
+    return detached;
 }
 
 /*
@@ -211,11 +317,21 @@ uma_zone_t *uma_zcreate(
         zone->uz_flags |= UMA_ZONE_OFFPAGE;
     }
 
+    if ((zone->uz_flags & UMA_ZONE_OFFPAGE) == 0) {
+        size_t slab_bytes = zone->uz_rsize * zone->uz_ipers + slab_overhead;
+        size_t slack = (slab_bytes < 4096) ? (4096 - slab_bytes) : 0;
+        zone->uz_color_max = (zone->uz_align != 0) ? (slack / zone->uz_align) : 0;
+    } else {
+        zone->uz_color_max = 0;
+    }
+    zone->uz_next_color = 0;
+
     /* Set callbacks */
     zone->uz_ctor = ctor;
     zone->uz_dtor = dtor;
     zone->uz_init = init;
     zone->uz_fini = fini;
+    zone->uz_reclaim = NULL;
     zone->uz_arg = NULL;
     
     /* Initialize per-CPU cache */
@@ -350,9 +466,18 @@ static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
         }
     }
     slab->us_zone = zone;
+    slab->us_offset = 0;
     slab->us_freecount = zone->uz_ipers;
     slab->us_firstfree = 0;
     slab->us_next = NULL;
+
+    if ((zone->uz_flags & UMA_ZONE_OFFPAGE) == 0 && zone->uz_color_max > 0) {
+        slab->us_offset = (uint32_t)(zone->uz_next_color * zone->uz_align);
+        zone->uz_next_color++;
+        if (zone->uz_next_color > zone->uz_color_max) {
+            zone->uz_next_color = 0;
+        }
+    }
     
     /* Insert into global hash */
     uma_hash_insert(slab);
@@ -370,10 +495,10 @@ static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
         slab->us_freelist[i] = (i + 1 < zone->uz_ipers) ? (i + 1) : 0xFF;
     }
     
-    /* Call init callback on each object and initialize redzones */
-    if (zone->uz_init || (zone->uz_flags & UMA_ZONE_REDZONE)) {
+    /* Call init callback and initialize debug patterns on each object. */
+    if (zone->uz_init || (zone->uz_flags & (UMA_ZONE_REDZONE | UMA_ZONE_TRASH))) {
         for (uint32_t i = 0; i < zone->uz_ipers; i++) {
-            void *obj = (void *)((uintptr_t)page + i * zone->uz_rsize);
+            void *obj = (void *)((uintptr_t)page + slab->us_offset + i * zone->uz_rsize);
             void *item = obj;
 
             /* Initialize redzone pattern */
@@ -384,6 +509,10 @@ static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
             
             if (zone->uz_init) {
                 zone->uz_init(item, zone->uz_size, 0);
+            }
+
+            if (zone->uz_flags & UMA_ZONE_TRASH) {
+                uma_debug_poison_free(zone, item);
             }
         }
     }
@@ -398,7 +527,8 @@ static void uma_slab_free(uma_zone_t *zone, uma_slab_t *slab) {
     /* Call fini callback on each object */
     if (zone->uz_fini) {
         for (uint32_t i = 0; i < zone->uz_ipers; i++) {
-            void *obj = (void *)((uintptr_t)slab->us_data + i * zone->uz_rsize);
+            void *obj = (void *)((uintptr_t)slab->us_data + slab->us_offset +
+                                 i * zone->uz_rsize);
             zone->uz_fini(obj, zone->uz_size);
         }
     }
@@ -429,7 +559,8 @@ static void *uma_slab_alloc_item(uma_zone_t *zone, uma_slab_t *slab) {
     if (slab->us_freecount == 0) return NULL;
     
     uint32_t idx = slab->us_firstfree;
-    void *obj = (void *)((uintptr_t)slab->us_data + idx * zone->uz_rsize);
+    void *obj = (void *)((uintptr_t)slab->us_data + slab->us_offset +
+                         idx * zone->uz_rsize);
     
     /* Update free list */
     slab->us_firstfree = slab->us_freelist[idx];
@@ -454,7 +585,8 @@ static void uma_slab_free_item(uma_zone_t *zone, uma_slab_t *slab, void *item) {
     }
     
     /* Calculate index */
-    uint32_t idx = ((uintptr_t)item - (uintptr_t)slab->us_data) / zone->uz_rsize;
+    uint32_t idx = ((uintptr_t)item - ((uintptr_t)slab->us_data + slab->us_offset)) /
+                   zone->uz_rsize;
     
     /* Add to free list */
     slab->us_freelist[idx] = slab->us_firstfree;
@@ -484,6 +616,45 @@ static uma_slab_t *uma_find_slab(uma_zone_t *zone, void *item) {
     }
     
     return NULL;
+}
+
+size_t uma_item_size(void *item) {
+    uintptr_t page_addr;
+    uint32_t bucket;
+
+    if (!item) {
+        return 0;
+    }
+
+    page_addr = (uintptr_t)item & ~(uintptr_t)0xFFF;
+    bucket = uma_hash((void *)page_addr);
+
+    for (uma_slab_t *slab = uma_page_hash[bucket]; slab; slab = slab->us_hnext) {
+        uintptr_t slab_start = (uintptr_t)slab->us_data + slab->us_offset;
+        uintptr_t slab_end = slab_start + slab->us_zone->uz_rsize * slab->us_zone->uz_ipers;
+        uintptr_t ptr = (uintptr_t)item;
+        uintptr_t offset;
+        uintptr_t object_offset;
+
+        if (ptr < slab_start || ptr >= slab_end) {
+            continue;
+        }
+
+        offset = ptr - slab_start;
+        object_offset = offset % slab->us_zone->uz_rsize;
+
+        if ((slab->us_zone->uz_flags & UMA_ZONE_REDZONE) != 0) {
+            if (object_offset != UMA_REDZONE_SIZE) {
+                continue;
+            }
+        } else if (object_offset != 0) {
+            continue;
+        }
+
+        return slab->us_zone->uz_size;
+    }
+
+    return 0;
 }
 
 /*
@@ -618,9 +789,25 @@ void *uma_zalloc(uma_zone_t *zone, int flags) {
                 bucket = cache->uc_allocbucket;
             }
 
+            if (bucket->ub_cnt == 0) {
+                struct uma_bucket *depot_bucket = uma_bucket_take_full(zone);
+                if (depot_bucket) {
+                    if (cache->uc_allocbucket && cache->uc_allocbucket->ub_cnt == 0) {
+                        uma_bucket_put_empty(cache->uc_allocbucket);
+                    }
+                    cache->uc_allocbucket = depot_bucket;
+                    bucket = cache->uc_allocbucket;
+                }
+            }
+
             if (bucket->ub_cnt > 0) {
                 item = bucket->ub_bucket[--bucket->ub_cnt];
                 cache->uc_allocs++;
+                zone->uz_allocs++;
+                zone->uz_count++;
+                if (zone->uz_count > zone->uz_max) {
+                    zone->uz_max = zone->uz_count;
+                }
                 goto out;
             }
         }
@@ -696,10 +883,19 @@ void uma_zfree(uma_zone_t *zone, void *item) {
         if (!cache->uc_freebucket) {
             cache->uc_freebucket = uma_bucket_alloc();
         }
+
+        if (cache->uc_freebucket && cache->uc_freebucket->ub_cnt == UMA_CACHE_BUCKET_SIZE) {
+            uma_bucket_put_full(zone, cache->uc_freebucket);
+            cache->uc_freebucket = uma_bucket_alloc();
+        }
         
         if (cache->uc_freebucket && cache->uc_freebucket->ub_cnt < UMA_CACHE_BUCKET_SIZE) {
             cache->uc_freebucket->ub_bucket[cache->uc_freebucket->ub_cnt++] = item;
             cache->uc_frees++;
+            zone->uz_frees++;
+            if (zone->uz_count > 0) {
+                zone->uz_count--;
+            }
             return;
         }
     }
@@ -726,6 +922,8 @@ void uma_reclaim(void) {
                 while (b->ub_cnt > 0) {
                      uma_zfree_slab(zone, b->ub_bucket[--b->ub_cnt]);
                 }
+                uma_bucket_put_empty(b);
+                cache->uc_allocbucket = NULL;
             }
             
             if (cache->uc_freebucket) {
@@ -733,6 +931,20 @@ void uma_reclaim(void) {
                 while (b->ub_cnt > 0) {
                      uma_zfree_slab(zone, b->ub_bucket[--b->ub_cnt]);
                 }
+                uma_bucket_put_empty(b);
+                cache->uc_freebucket = NULL;
+            }
+        }
+
+        {
+            struct uma_bucket *bucket = uma_bucket_detach_full_for_zone(zone);
+            while (bucket) {
+                struct uma_bucket *next = bucket->ub_next;
+                while (bucket->ub_cnt > 0) {
+                    uma_zfree_slab(zone, bucket->ub_bucket[--bucket->ub_cnt]);
+                }
+                uma_bucket_put_empty(bucket);
+                bucket = next;
             }
         }
 
@@ -743,6 +955,10 @@ void uma_reclaim(void) {
             uma_slab_free(zone, slab);
         }
         zone->uz_free_slabs = NULL;
+
+        if (zone->uz_reclaim) {
+            zone->uz_reclaim();
+        }
     }
 }
 
@@ -784,6 +1000,13 @@ int uma_zone_reserve(uma_zone_t *zone, int count) {
 int uma_zone_check_leaks(uma_zone_t *zone) {
     if (!zone) return 0;
     return zone->uz_count;
+}
+
+void uma_zone_set_reclaim(uma_zone_t *zone, uma_reclaim_t reclaim) {
+    if (!zone) {
+        return;
+    }
+    zone->uz_reclaim = reclaim;
 }
 
 /*

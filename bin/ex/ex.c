@@ -682,18 +682,21 @@ void do_command(buffer_t *b, char *cmd) {
                 if (nxt) total_len += nxt->len;
             }
             char *joined = malloc(total_len + (addr2 - addr1 + 1));
-            joined[0] = '\0';
-            strcat(joined, first->text);
+            size_t cur_len = first->len;
+            memcpy(joined, first->text, cur_len);
+            joined[cur_len] = '\0';
             for (int i = 1; i <= (addr2 - addr1); i++) {
                 line_t *nxt = buf_get_line(b, addr1 + 1);
                 if (nxt) {
                     // Add a space if the previous string doesn't end with a space and the next doesn't start with one
-                    size_t cur_len = strlen(joined);
                     if (cur_len > 0 && joined[cur_len-1] != ' ' && joined[cur_len-1] != '\t' && nxt->text[0] != ' ' && nxt->text[0] != '\t' && nxt->text[0] != ')') {
-                        strcat(joined, " ");
+                        joined[cur_len] = ' ';
+                        cur_len++;
                         total_len++;
                     }
-                    strcat(joined, nxt->text);
+                    memcpy(joined + cur_len, nxt->text, nxt->len);
+                    cur_len += nxt->len;
+                    joined[cur_len] = '\0';
                     buf_delete(b, nxt);
                 }
             }
@@ -763,38 +766,44 @@ void do_command(buffer_t *b, char *cmd) {
                 int matches = 0;
                 // We'll build a new string
                 size_t rep_len = strlen(repl_str);
-                char *new_text = strdup("");
+                size_t new_len = 0;
+                char *new_text = malloc(1);
+                new_text[0] = '\0';
                 
                 while (regexec(&re, search_start, 1, &pm, 0) == 0) {
                     matches++;
                     // append up to match
-                    size_t pre_len = strlen(new_text);
-                    new_text = realloc(new_text, pre_len + pm.rm_so + rep_len + 1);
-                    strncat(new_text, search_start, pm.rm_so);
-                    strcat(new_text, repl_str);
+                    new_text = realloc(new_text, new_len + pm.rm_so + rep_len + 1);
+                    memcpy(new_text + new_len, search_start, pm.rm_so);
+                    new_len += pm.rm_so;
+                    memcpy(new_text + new_len, repl_str, rep_len);
+                    new_len += rep_len;
+                    new_text[new_len] = '\0';
                     
                     search_start += pm.rm_eo;
                     if (!global) break;
                     if (pm.rm_so == pm.rm_eo) {
                         // zero-length match avoidance loop
                         if (*search_start) {
-                            pre_len = strlen(new_text);
-                            new_text = realloc(new_text, pre_len + 2);
-                            new_text[pre_len] = *search_start;
-                            new_text[pre_len+1] = '\0';
+                            new_text = realloc(new_text, new_len + 2);
+                            new_text[new_len] = *search_start;
+                            new_len++;
+                            new_text[new_len] = '\0';
                             search_start++;
                         } else break;
                     }
                 }
                 
                 if (matches > 0) {
-                    size_t pre_len = strlen(new_text);
-                    new_text = realloc(new_text, pre_len + strlen(search_start) + 1);
-                    strcat(new_text, search_start);
+                    size_t rem_len = strlen(search_start);
+                    new_text = realloc(new_text, new_len + rem_len + 1);
+                    memcpy(new_text + new_len, search_start, rem_len);
+                    new_len += rem_len;
+                    new_text[new_len] = '\0';
                     
                     free(l->text);
                     l->text = new_text;
-                    l->len = strlen(new_text);
+                    l->len = new_len;
                     b->modified = 1;
                     b->cur = l;
                 } else {
@@ -865,7 +874,9 @@ void do_command(buffer_t *b, char *cmd) {
             fprintf(stderr, "Shell commands not allowed in secure mode\n");
             return;
         }
-        system(cmd + 1);
+        if (system(cmd + 1) == -1) {
+            perror("system");
+        }
     }
 }
 

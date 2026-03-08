@@ -2,9 +2,13 @@
 #include <sys/proc.h>
 #include <kern/sched.h>
 #include <kern/sleepq.h>
+#include <kern/panic.h>
 #include <stddef.h>
 
 void sema_init(semaphore_t *s, int value, const char *name) {
+    if (value < 0) {
+        panic("Error: semaphore initialized with negative value");
+    }
     s->value = value;
     spinlock_init(&s->lock, name);
     s->name = name;

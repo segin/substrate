@@ -30,6 +30,7 @@ enum personality_type {
     PERS_OPENBSD = 12,
     /* Values >= 128 reserved for non-ELF personalities */
     PERS_SUNOS   = 129,
+    PERS_ELKS    = 130,
     PERS_MAX     = 256
 };
 
@@ -55,6 +56,7 @@ extern struct personality personality_svr4;
 extern struct personality personality_netbsd;
 extern struct personality personality_openbsd;
 extern struct personality personality_solaris;
+extern struct personality personality_elks;
 
 struct personality *perso_lookup(int id);
 const char *perso_name(int id);

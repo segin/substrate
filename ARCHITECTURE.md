@@ -82,6 +82,12 @@ Kernel worker model:
 - `swapper` owns one CPU-bound idle thread per online CPU.
 - VM pressure is handled by a dedicated `pagedaemon` kernel process that sleeps on a wakeup channel and runs pageout work asynchronously.
 
+Boot/init sequencing highlights:
+- `kmain()` parses the kernel command line before runtime console registration so `console=console0|serial0..serial3` can steer bring-up output policy.
+- boot-time Multiboot modules are registered as RAM block devices before root mount, allowing `initrd`-style root selection via `/dev/storage/ram*`.
+- after root mount, the kernel ensures `/dev`, `/proc`, and `/sys` mountpoints exist and mounts `devfs`, `procfs`, and `sysfs` automatically.
+- init is spawned before VM background workers so `PID 1` remains the first userspace process.
+
 ### 5.1 i386 PMAP Model
 
 The i386 PMAP implementation is a two-level paging design:
@@ -117,6 +123,7 @@ TLB management on i386 follows a tiered strategy:
 
 i386 SMP execution model:
 - the kernel currently supports up to `96` CPUs
+- CPU discovery prefers ACPI MADT and falls back to Intel MP tables; validated MP configuration table addresses are cached so later discovery passes do not depend on BIOS page-zero mappings after NULL protection is enabled
 - AP bootstrap uses a copied low-memory trampoline that enters protected mode, loads the live BSP CR4/CR3/CR0 state, enables paging, and jumps into the higher-half C entry point
 - MADT parsing now registers I/O APICs and ISA IRQ-to-GSI overrides before the scheduler starts userspace
 - `execve()` temporarily binds the calling thread to its current CPU and suppresses timer-driven rescheduling until the final userspace handoff, then restores floating scheduling state
@@ -129,7 +136,21 @@ Device namespace policy in `devfs`:
 - Communication character devices self-register under `/dev/comm/*` (for example `/dev/comm/serial0`, `/dev/comm/parallel0`).
 - Nested device paths are accepted only under predeclared subsystem directories (namespace hardening against arbitrary roots like `/dev/notreal/*`).
 
+Console policy:
+- the default screen console remains `console0`
+- `console=serial0..serial3` selects COM1..COM4 respectively for runtime console routing
+- `serial_debug` or `console=serialN` registers the UART backend with the kernel console framework for mirrored output
+
 Execution personalities support native behavior plus Linux/FreeBSD compatibility paths where implemented.
+- Linux signal compatibility is explicit at the ABI edge: Linux signal numbers,
+  sigsets, frame layouts, and optional `sa_restorer` callbacks are translated
+  by the Linux personality without redefining the native Substrate signal
+  contract.
+
+Executable identity policy:
+- `execve()` treats the backing object identity, not the pathname string, as the canonical executable identity
+- the current ELF metadata cache is keyed by filesystem identity plus inode identity and stores immutable image parse results (ELF header, program headers, `PT_INTERP`, AUXV `AT_PHDR` derivation)
+- filesystem implementations are expected to provide stable `fs_node->inode` values; FAT synthesizes stable identities for entries that do not have a useful cluster-backed inode number
 
 Planned x86 Unix personality targets:
 - Substrate native ABI (primary)

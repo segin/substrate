@@ -19,34 +19,51 @@ static fs_node_t *r_node, *w_node;
 int test_pipe_race(void) {
     kprint("Starting pipe basic test...\n");
 
-    pipe_create(&r_node, &w_node);
-    if (!r_node || !w_node) {
-        kprint("Failed to create pipe nodes\n");
-        return -1;
-    }
-
-    // Write some data
-    for (int i = 0; i < TEST_COUNT; i++) {
-        char c = (char)(i % 256);
-        int written = write_fs(w_node, 0, 1, (uint8_t*)&c);
-        if (written != 1) {
-            kprintf("Writer error at %d: wrote %d bytes\n", i, written);
+    for (int iter = 0; iter < 64; iter++) {
+        pipe_create(&r_node, &w_node);
+        if (!r_node || !w_node) {
+            kprint("Failed to create pipe nodes\n");
             return -1;
         }
-    }
 
-    // Read data back
-    for (int i = 0; i < TEST_COUNT; i++) {
-        char c;
-        int read = read_fs(r_node, 0, 1, (uint8_t*)&c);
-        if (read != 1) {
-             kprintf("Reader error at %d: read %d bytes\n", i, read);
-             return -1;
+        // Write some data
+        for (int i = 0; i < TEST_COUNT; i++) {
+            char c = (char)(i % 256);
+            int written = write_fs(w_node, 0, 1, (uint8_t*)&c);
+            if (written != 1) {
+                kprintf("Writer error iter=%d at %d: wrote %d bytes\n", iter, i, written);
+                return -1;
+            }
         }
-        if (c != (char)(i % 256)) {
-            kprintf("Data mismatch at %d: expected %d, got %d\n", i, (int)(char)(i % 256), (int)c);
-            return -1;
+
+        // Read data back
+        for (int i = 0; i < TEST_COUNT; i++) {
+            char c;
+            int read = read_fs(r_node, 0, 1, (uint8_t*)&c);
+            if (read != 1) {
+                 kprintf("Reader error iter=%d at %d: read %d bytes\n", iter, i, read);
+                 return -1;
+            }
+            if (c != (char)(i % 256)) {
+                kprintf("Data mismatch iter=%d at %d: expected %d, got %d\n", iter, i, (int)(char)(i % 256), (int)c);
+                return -1;
+            }
         }
+
+        close_fs(w_node);
+        w_node = NULL;
+
+        {
+            char c = 0;
+            int read = read_fs(r_node, 0, 1, (uint8_t *)&c);
+            if (read != 0) {
+                kprintf("Pipe EOF test failed iter=%d: expected 0, got %d\n", iter, read);
+                return -1;
+            }
+        }
+
+        close_fs(r_node);
+        r_node = NULL;
     }
 
     kprint("Pipe basic test passed successfully.\n");

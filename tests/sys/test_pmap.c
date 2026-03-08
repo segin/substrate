@@ -180,6 +180,43 @@ static void test_memory_leak(void) {
     
     kprint("  PASS\n");
 }
+
+static void test_pmap_destroy_reclaims_mapped_pages(void) {
+    extern size_t pmm_get_used_blocks(void);
+    size_t start_blocks;
+    size_t mapped_blocks;
+
+    kprint("Test: pmap_destroy reclaims mapped pages\n");
+
+    start_blocks = pmm_get_used_blocks();
+
+    pmap_t pmap = pmap_create();
+    TEST_ASSERT(pmap != 0, "mapped_destroy: pmap created");
+
+    void *page0_v = pmm_alloc_block();
+    void *page1_v = pmm_alloc_block();
+    TEST_ASSERT(page0_v != 0 && page1_v != 0, "mapped_destroy: backing pages allocated");
+
+    uint32_t pa0 = (uint32_t)(uintptr_t)page0_v - 0xC0000000;
+    uint32_t pa1 = (uint32_t)(uintptr_t)page1_v - 0xC0000000;
+
+    pmap_activate(pmap);
+    TEST_ASSERT(pmap_enter(pmap, 0x401000, pa0, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_USER, 0) == 0,
+                "mapped_destroy: first mapping created");
+    TEST_ASSERT(pmap_enter(pmap, 0x402000, pa1, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_USER, 0) == 0,
+                "mapped_destroy: second mapping created");
+    TEST_ASSERT(pmap->resident_count == 2, "mapped_destroy: resident_count tracks mapped pages");
+    pmap_activate(pmap_kernel());
+
+    mapped_blocks = pmm_get_used_blocks();
+    TEST_ASSERT(mapped_blocks > start_blocks, "mapped_destroy: PMM usage increased after mappings");
+
+    pmap_destroy(pmap);
+
+    TEST_ASSERT(pmm_get_used_blocks() == start_blocks,
+                "mapped_destroy: destroy reclaimed resident pages and page-table backing");
+    kprint("  PASS\n");
+}
 // Test 5: PSE 4MB Page Support
 void test_pmap_pse(void) {
     kprint("Test: PSE 4MB Mapping\n");
@@ -615,6 +652,7 @@ void run_pmap_tests(void) {
     test_pmap_large_replace();
     test_pmap_large_remove();
     test_memory_leak();
+    test_pmap_destroy_reclaims_mapped_pages();
     
     kprint("\nResults: ");
     kprint("Passed: ");

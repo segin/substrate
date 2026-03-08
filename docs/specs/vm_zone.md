@@ -40,6 +40,8 @@ Current slab behavior:
 - backing memory comes from PMM pages
 - small/medium objects prefer on-page slab metadata
 - large objects use `UMA_ZONE_OFFPAGE`, with slab headers allocated separately
+- on-page slabs rotate a per-slab starting offset when slack permits, so
+  successive slabs color the first object at different cache-set offsets
 - free objects are tracked by an index freelist (`us_freelist`) rather than
   embedding next-pointers in client memory
 - slabs are hashed by backing page address for reverse lookup during free
@@ -48,9 +50,12 @@ Current slab behavior:
 Substrate's fast path uses small per-CPU buckets:
 - `uc_allocbucket`
 - `uc_freebucket`
+- a shared empty-bucket depot
+- a shared full-bucket depot keyed by owning zone
 
 These buckets act as magazines for low-contention allocation/free traffic.
-When a bucket is empty or full, the allocator falls back to slab lists.
+When a bucket is empty or full, the allocator first consults the shared depot
+before falling back to slab lists.
 
 ### Per-CPU Cache
 Each zone owns a per-CPU `uma_cache_t` array.
@@ -91,13 +96,18 @@ general kernel allocator is online.
 ## Debugging / Safety Features
 Supported policy flags include:
 - redzones
-- poison/trash filling
+- poison/trash filling, with free-pattern validation on reallocation to catch
+  use-after-free scribbles
 - leak tracking
 - off-page slab headers
 - malloc-zone tagging
 
 The implementation also keeps a global slab hash so frees can validate that an
 object belongs to the expected zone before returning it.
+
+Zones may also register an optional reclaim callback. `uma_reclaim()` first
+drains bucket/slab caches for each zone, then invokes that zone callback so
+subsystem-specific caches can release additional memory under pressure.
 
 ## Constraints
 - bootstrap zone metadata is finite until dynamic allocation is enabled

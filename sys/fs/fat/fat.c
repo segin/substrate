@@ -6,6 +6,8 @@ static fat_fs_t fat_global_fs;
 static fs_node_t fat_root_node;
 static fat_node_t fat_root_ctx;
 
+#define FAT_ROOT_INO 1ULL
+#define FAT_SYNTH_INO_BASE 0x8000000000000000ULL
 
 
 // Node cache for dynamically allocated nodes
@@ -13,6 +15,29 @@ static fat_node_t fat_node_cache[FAT_NODE_CACHE_SIZE];
 static fs_node_t fat_fs_node_cache[FAT_NODE_CACHE_SIZE];
 static int fat_node_cache_idx = 0;
 static uint8_t fat_root_sector_buf[4096];
+
+static uint32_t fat_cluster_to_sector(fat_fs_t *fs, uint32_t cluster);
+
+static uint64_t fat_make_synth_inode(fat_fs_t *fs, uint32_t dir_cluster,
+                                     uint32_t sector_index,
+                                     uint32_t entry_offset,
+                                     uint32_t first_cluster) {
+    if (first_cluster != 0) {
+        return (uint64_t)first_cluster;
+    }
+
+    if (dir_cluster == 0 && fs->fat_type != 32) {
+        uint64_t slot = ((uint64_t)(fs->root_dir_first_sector + sector_index) << 16) |
+                        (uint64_t)(entry_offset / sizeof(fat_dirent_t));
+        return FAT_SYNTH_INO_BASE | slot;
+    }
+
+    {
+        uint64_t slot = ((uint64_t)(fat_cluster_to_sector(fs, dir_cluster) + sector_index) << 16) |
+                        (uint64_t)(entry_offset / sizeof(fat_dirent_t));
+        return FAT_SYNTH_INO_BASE | slot;
+    }
+}
 
 static uint32_t fat_default_mask(uint8_t attr) {
     uint32_t mask;
@@ -276,7 +301,7 @@ struct dirent *fat_readdir(fs_node_t *node, uint64_t index) {
                     }
 
                     uint32_t cluster_num = ((uint32_t)entry->cluster_high << 16) | entry->cluster_low;
-                    dirent.d_ino = cluster_num;
+                    dirent.d_ino = fat_make_synth_inode(fs, 0, sector_i, i, cluster_num);
                     return &dirent;
                 }
 
@@ -337,7 +362,7 @@ struct dirent *fat_readdir(fs_node_t *node, uint64_t index) {
                 }
                 
                 uint32_t cluster_num = ((uint32_t)entry->cluster_high << 16) | entry->cluster_low;
-                dirent.d_ino = cluster_num;
+                dirent.d_ino = fat_make_synth_inode(fs, ctx->first_cluster, 0, i, cluster_num);
                 return &dirent;
             }
             
@@ -352,7 +377,8 @@ struct dirent *fat_readdir(fs_node_t *node, uint64_t index) {
 }
 
 // Allocate a new node from cache
-static fs_node_t *fat_alloc_node(fat_fs_t *fs, const char *name, uint32_t first_cluster, uint32_t size, uint8_t attr) {
+static fs_node_t *fat_alloc_node(fat_fs_t *fs, const char *name, uint64_t inode,
+                                 uint32_t first_cluster, uint32_t size, uint8_t attr) {
     int idx = fat_node_cache_idx++ % FAT_NODE_CACHE_SIZE;
     
     fat_node_t *ctx = &fat_node_cache[idx];
@@ -367,6 +393,7 @@ static fs_node_t *fat_alloc_node(fat_fs_t *fs, const char *name, uint32_t first_
     strncpy(node->name, name, 127);
     node->name[127] = '\0';
     node->impl = (uint32_t)(uintptr_t)ctx;
+    node->inode = inode;
     node->length = size;
     node->mask = fat_default_mask(attr);
     node->uid = 0;
@@ -430,7 +457,8 @@ fs_node_t *fat_finddir(fs_node_t *node, char *name) {
 
                 if (strcmp(entry_name, name) == 0) {
                     uint32_t cluster_num = ((uint32_t)entry->cluster_high << 16) | entry->cluster_low;
-                    return fat_alloc_node(fs, entry_name, cluster_num, entry->file_size, entry->attr);
+                    uint64_t inode = fat_make_synth_inode(fs, 0, sector_i, i, cluster_num);
+                    return fat_alloc_node(fs, entry_name, inode, cluster_num, entry->file_size, entry->attr);
                 }
 
                 lfn_len = 0;
@@ -492,7 +520,8 @@ fs_node_t *fat_finddir(fs_node_t *node, char *name) {
             if (strcmp(entry_name, name) == 0) {
                 // Found it - create and return node
                 uint32_t cluster_num = ((uint32_t)entry->cluster_high << 16) | entry->cluster_low;
-                return fat_alloc_node(fs, entry_name, cluster_num, entry->file_size, entry->attr);
+                uint64_t inode = fat_make_synth_inode(fs, ctx->first_cluster, 0, i, cluster_num);
+                return fat_alloc_node(fs, entry_name, inode, cluster_num, entry->file_size, entry->attr);
             }
             
             lfn_len = 0;
@@ -591,7 +620,8 @@ fs_node_t *fat_mount(const char *device, uint32_t flags, void *data) {
     fat_root_ctx.attr = FAT_ATTR_DIRECTORY;
     
     memset(&fat_root_node, 0, sizeof(fs_node_t));
-    strcpy(fat_root_node.name, "/");
+    strlcpy(fat_root_node.name, "/", sizeof(fat_root_node.name));
+    fat_root_node.inode = FAT_ROOT_INO;
     fat_root_node.flags = FS_DIRECTORY;
     fat_root_node.mask = fat_default_mask(FAT_ATTR_DIRECTORY);
     fat_root_node.uid = 0;

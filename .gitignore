@@ -37,6 +37,16 @@ bin/*/*
 !bin/*/*.c
 !bin/*/*.h
 !bin/*/*.S
+!bin/*/*.md
+!bin/*/*.txt
+!bin/*/*.sh
+!bin/*/*.pl
+!bin/*/*.py
+!bin/*/*.awk
+!bin/*/*.y
+!bin/*/*.l
+!bin/*/docs/
+!bin/*/docs/**
 !bin/*/src/
 !bin/*/tests/
 !bin/*/tests/**
@@ -48,6 +58,16 @@ sbin/*/*
 !sbin/*/*.c
 !sbin/*/*.h
 !sbin/*/*.S
+!sbin/*/*.md
+!sbin/*/*.txt
+!sbin/*/*.sh
+!sbin/*/*.pl
+!sbin/*/*.py
+!sbin/*/*.awk
+!sbin/*/*.y
+!sbin/*/*.l
+!sbin/*/docs/
+!sbin/*/docs/**
 
 !usr.bin/*/Makefile
 !usr.bin/*/*.c
@@ -102,6 +122,8 @@ kernel.map
 *.profdata
 *.su
 *.lst
+/conftest*
+/.tmp/
 busybox-i486
 root.img
 sys/kernel.efi
@@ -123,6 +145,7 @@ sys/symbols_start.txt
 dist/
 host_dist/
 /.agents/
+/.claude/
 pr_list.txt
 klog
 klog.notrace
@@ -193,12 +216,16 @@ bin/native_test/native_test_standalone
 
 # Stray top-level test binaries
 /test_linux_signals
+/test.bc
 /tests/bench_vm_map
 /tests/reproduce_issue
 /tests/usr.bin/compress/uncompress
+/tests/usr.bin/cc/test_ast2ir_bin
 
 # usr.bin tool binaries
 usr.bin/addr2line/addr2line
+usr.bin/compress/compress
+usr.bin/compress/zcat
 usr.bin/cxxfilt/c++filt
 usr.bin/lex/test_posix
 usr.bin/size/size
@@ -214,8 +241,14 @@ usr.bin/as/arm-as
 usr.man/mandoc.db
 tests/bin/ps/test_ps_state
 /tests/test_libpthread_mutex
+/tests/test_ext2_find_next_zero_bit
+/tests/test_ext2_inode_write
+/tests/test_ext2_read_blocks
 tests/lib/c/test_stdlib
 tests/test_readline
 sys/ksyms_table.c
 sys/ksyms_efi_table.c
 bench_objects/
+vgcore.*
+
+/tests/test_libc_sysctl

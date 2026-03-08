@@ -63,6 +63,29 @@ typedef struct {
     int      _pad[26];
 } siginfo_t;
 
+/*
+ * Native Substrate siginfo si_code contract.
+ *
+ * The native ABI is BSD-shaped. Linux personality code translates the user-
+ * visible signal frame ABI separately and must not assume the native signal
+ * contract is Linux.
+ */
+#define SI_USER        0
+#define SI_KERNEL      1
+
+#define ILL_ILLOPC     1
+#define ILL_PRVOPC     5
+
+#define FPE_INTDIV     1
+
+#define SEGV_MAPERR    1
+#define SEGV_ACCERR    2
+
+#define BUS_ADRALN     1
+
+#define TRAP_BRKPT     1
+#define TRAP_TRACE     2
+
 // Signal bits
 #define sigmask(sig) (1U << ((sig) - 1))
 

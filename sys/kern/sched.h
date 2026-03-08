@@ -40,6 +40,7 @@ void sched_smp_init(int cpu_count);
 void swapper_request_work(void);
 
 /* Thread Creation */
+thread_t *sched_alloc_thread(process_t *proc);
 thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack, void *arg);
 
 /* Fork (Clone Process) */

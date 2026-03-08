@@ -35,16 +35,49 @@ struct stat {
 #define _SYS_STAT_H
 
 /* Mock external functions that compat.c calls */
-int64_t sys_lseek(int fd, uint32_t off_lo, uint32_t off_hi, int whence) { return 0; }
-int sys_time(void *t) { return 0; }
-void *sys_mmap(void *addr, size_t len, int prot, int flags, int fd, int offset) { return NULL; }
-int sys_execve(const char *path, char *const argv[], char *const envp[]) { return 0; }
-int copyinstr(const void *uaddr, void *kaddr, size_t len, size_t *done) { return 0; }
-int copyout(const void *kaddr, void *uaddr, size_t len) { return 0; }
+int64_t sys_lseek(int fd, uint32_t off_lo, uint32_t off_hi, int whence) {
+    (void)fd; (void)off_lo; (void)off_hi; (void)whence;
+    return 0;
+}
 
-int kern_stat(const char *path, struct stat *st) { return 0; }
-int kern_lstat(const char *path, struct stat *st) { return 0; }
-int kern_fstat(int fd, struct stat *st) { return 0; }
+int64_t g_mock_sys_time_result = 0;
+int64_t g_mock_sys_time_out_val = 0;
+int sys_time(void *t) {
+    if (t && g_mock_sys_time_result >= 0) {
+        *(int64_t *)t = g_mock_sys_time_out_val;
+    }
+    return g_mock_sys_time_result;
+}
+
+void *sys_mmap(void *addr, size_t len, int prot, int flags, int fd, int offset) {
+    (void)addr; (void)len; (void)prot; (void)flags; (void)fd; (void)offset;
+    return NULL;
+}
+int sys_execve(const char *path, char *const argv[], char *const envp[]) {
+    (void)path; (void)argv; (void)envp;
+    return 0;
+}
+int copyinstr(const void *uaddr, void *kaddr, size_t len, size_t *done) {
+    (void)uaddr; (void)kaddr; (void)len; (void)done;
+    return 0;
+}
+int copyout(const void *kaddr, void *uaddr, size_t len) {
+    (void)kaddr; (void)uaddr; (void)len;
+    return 0;
+}
+
+int kern_stat(const char *path, struct stat *st) {
+    (void)path; (void)st;
+    return 0;
+}
+int kern_lstat(const char *path, struct stat *st) {
+    (void)path; (void)st;
+    return 0;
+}
+int kern_fstat(int fd, struct stat *st) {
+    (void)fd; (void)st;
+    return 0;
+}
 
 /* Now we can include compat.c directly! */
 #include "../../sys/exec/perso/compat.c"
@@ -59,5 +92,42 @@ int main() {
     assert(sys_nice(100) == -ENOSYS);
 
     printf("All sys_nice tests passed!\n");
+
+    printf("Testing compat_time32()...\n");
+    int32_t tloc_val = 0;
+    int32_t ret = 0;
+
+    // Test Case 1: Normal case - Value within 32-bit range
+    g_mock_sys_time_result = 0;
+    g_mock_sys_time_out_val = 0x12345678;
+    tloc_val = 0;
+    ret = compat_time32(&tloc_val);
+    assert(ret == 0x12345678);
+    assert(tloc_val == 0x12345678);
+
+    // Test Case 2: Truncation case - Value larger than 32-bit range
+    g_mock_sys_time_result = 0;
+    g_mock_sys_time_out_val = 0x1122334455667788LL;
+    tloc_val = 0;
+    ret = compat_time32(&tloc_val);
+    assert(ret == 0x55667788);
+    assert(tloc_val == 0x55667788);
+
+    // Test Case 3: Negative return from sys_time
+    g_mock_sys_time_result = -EINVAL;
+    g_mock_sys_time_out_val = 0x12345678; // Should not be written
+    tloc_val = (int32_t)0x99999999;
+    ret = compat_time32(&tloc_val);
+    assert(ret == -EINVAL);
+    assert(tloc_val == (int32_t)0x99999999); // Should remain unchanged
+
+    // Test Case 4: tloc == NULL
+    g_mock_sys_time_result = 0;
+    g_mock_sys_time_out_val = 0x87654321;
+    ret = compat_time32(NULL);
+    assert(ret == (int32_t)0x87654321);
+
+    printf("All compat_time32 tests passed!\n");
+
     return 0;
 }

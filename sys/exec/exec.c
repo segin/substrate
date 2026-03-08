@@ -15,6 +15,7 @@
 #include <sys/stat.h>
 #include <kern/console.h>
 #include <exec/formats/elf.h>
+#include <exec/formats/elks_aout.h>
 struct thr_param;
 #include <sys/syscall_impl.h>
 #include <sys/kern_syscalls.h>
@@ -127,6 +128,11 @@ int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
         header_buf[2] == 'L' &&
         header_buf[3] == 'F') {
         return elf_execve(fd, path, argv, envp);
+    }
+
+    // Explicit ELKS check if not registered via handler yet (for robustness)
+    if (elks_check_file(path, header_buf, len) == 0) {
+        return elks_load(fd, path, argv, envp);
     }
 
     kern_close(fd);

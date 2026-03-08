@@ -11,10 +11,6 @@
 #include <stdint.h>
 #include <string.h>
 
-#define KMEM_MIN_SHIFT 4   /* 16 bytes minimum */
-#define KMEM_MAX_SHIFT 12  /* 4096 bytes maximum for UMA */
-#define KMEM_ZONES (KMEM_MAX_SHIFT - KMEM_MIN_SHIFT + 1)
-
 /* UMA zones for power-of-two sizes */
 static uma_zone_t *kmem_zones[KMEM_ZONES];
 
@@ -23,8 +19,12 @@ typedef struct kmem_stats {
     uint64_t allocs;
     uint64_t frees;
     uint64_t bytes_allocated;
+    uint64_t bytes_outstanding;
     uint64_t large_allocs;
     uint64_t large_frees;
+    uint64_t large_bytes_requested;
+    uint64_t large_bytes_outstanding;
+    kmem_bucket_stat_t buckets[KMEM_ZONES];
 } kmem_stats_t;
 
 static kmem_stats_t kmem_stats;
@@ -44,6 +44,7 @@ void kmem_init(void) {
     
     for (int i = 0; i < KMEM_ZONES; i++) {
         size_t size = 1 << (i + KMEM_MIN_SHIFT);
+        kmem_stats.buckets[i].bucket_size = size;
         kmem_zones[i] = uma_zcreate(
             kmem_zone_names[i],
             size,
@@ -90,16 +91,23 @@ void *kmalloc(size_t size) {
     
     kmem_stats.allocs++;
     kmem_stats.bytes_allocated += size;
+    kmem_stats.bytes_outstanding += size;
     
     /* Small allocation via UMA zone */
     int idx = kmem_zone_index(size);
     if (idx >= 0) {
         void *result = uma_zalloc(kmem_zones[idx], M_NOWAIT);
         if (!result) {
+            kmem_stats.bytes_outstanding -= size;
             extern void kprint(const char*);
             kprint("kmalloc: uma_zalloc failed for zone ");
             kprint(kmem_zone_names[idx]);
             kprint("\n");
+        } else {
+            kmem_stats.buckets[idx].allocs++;
+            kmem_stats.buckets[idx].bytes_requested += size;
+            kmem_stats.buckets[idx].bytes_outstanding += size;
+            kmem_stats.buckets[idx].objects_outstanding++;
         }
         return result;
     }
@@ -109,9 +117,14 @@ void *kmalloc(size_t size) {
     size_t pages = (total + 4095) / 4096;
     
     void *mem = pmm_alloc_contiguous(pages);
-    if (!mem) return NULL;
+    if (!mem) {
+        kmem_stats.bytes_outstanding -= size;
+        return NULL;
+    }
     
     kmem_stats.large_allocs++;
+    kmem_stats.large_bytes_requested += size;
+    kmem_stats.large_bytes_outstanding += size;
     
     /* Store header */
     kmem_large_header_t *hdr = (kmem_large_header_t *)mem;
@@ -128,10 +141,24 @@ void kfree(void *ptr, size_t size) {
     if (!ptr) return;
     
     kmem_stats.frees++;
+    if (kmem_stats.bytes_outstanding >= size) {
+        kmem_stats.bytes_outstanding -= size;
+    } else {
+        kmem_stats.bytes_outstanding = 0;
+    }
     
     /* Small allocation via UMA zone */
     int idx = kmem_zone_index(size);
     if (idx >= 0) {
+        kmem_stats.buckets[idx].frees++;
+        if (kmem_stats.buckets[idx].bytes_outstanding >= size) {
+            kmem_stats.buckets[idx].bytes_outstanding -= size;
+        } else {
+            kmem_stats.buckets[idx].bytes_outstanding = 0;
+        }
+        if (kmem_stats.buckets[idx].objects_outstanding > 0) {
+            kmem_stats.buckets[idx].objects_outstanding--;
+        }
         uma_zfree(kmem_zones[idx], ptr);
         return;
     }
@@ -151,6 +178,11 @@ void kfree(void *ptr, size_t size) {
     pmm_free_contiguous(hdr, pages);
     
     kmem_stats.large_frees++;
+    if (kmem_stats.large_bytes_outstanding >= hdr->size) {
+        kmem_stats.large_bytes_outstanding -= hdr->size;
+    } else {
+        kmem_stats.large_bytes_outstanding = 0;
+    }
 }
 
 /*
@@ -164,6 +196,53 @@ void *kzalloc(size_t size) {
     return ptr;
 }
 
+void *krealloc(void *ptr, size_t size) {
+    size_t old_size;
+    void *new_ptr;
+
+    if (!ptr) {
+        return kmalloc(size);
+    }
+
+    if (size == 0) {
+        old_size = uma_item_size(ptr);
+        if (old_size == 0) {
+            kmem_large_header_t *hdr = (kmem_large_header_t *)ptr - 1;
+            if (hdr->magic == KMEM_LARGE_MAGIC) {
+                old_size = hdr->size;
+            }
+        }
+        if (old_size != 0) {
+            kfree(ptr, old_size);
+        }
+        return NULL;
+    }
+
+    old_size = uma_item_size(ptr);
+    if (old_size == 0) {
+        kmem_large_header_t *hdr = (kmem_large_header_t *)ptr - 1;
+        if (hdr->magic == KMEM_LARGE_MAGIC) {
+            old_size = hdr->size;
+        }
+    }
+    if (old_size == 0) {
+        return NULL;
+    }
+
+    if (old_size == size) {
+        return ptr;
+    }
+
+    new_ptr = kmalloc(size);
+    if (!new_ptr) {
+        return NULL;
+    }
+
+    memcpy(new_ptr, ptr, old_size < size ? old_size : size);
+    kfree(ptr, old_size);
+    return new_ptr;
+}
+
 /*
  * Get allocator statistics
  */
@@ -171,4 +250,21 @@ void kmem_get_stats(uint64_t *allocs, uint64_t *frees, uint64_t *bytes) {
     if (allocs) *allocs = kmem_stats.allocs;
     if (frees) *frees = kmem_stats.frees;
     if (bytes) *bytes = kmem_stats.bytes_allocated;
+}
+
+void kmem_get_snapshot(kmem_stat_snapshot_t *snapshot) {
+    if (!snapshot) {
+        return;
+    }
+
+    memset(snapshot, 0, sizeof(*snapshot));
+    snapshot->total_allocs = kmem_stats.allocs;
+    snapshot->total_frees = kmem_stats.frees;
+    snapshot->total_bytes_requested = kmem_stats.bytes_allocated;
+    snapshot->total_bytes_outstanding = kmem_stats.bytes_outstanding;
+    snapshot->large_allocs = kmem_stats.large_allocs;
+    snapshot->large_frees = kmem_stats.large_frees;
+    snapshot->large_bytes_requested = kmem_stats.large_bytes_requested;
+    snapshot->large_bytes_outstanding = kmem_stats.large_bytes_outstanding;
+    memcpy(snapshot->buckets, kmem_stats.buckets, sizeof(snapshot->buckets));
 }

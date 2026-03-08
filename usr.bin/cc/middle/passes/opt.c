@@ -94,7 +94,7 @@ static int fold_function(cc_ssa_function_t *f) {
                 in->op = CC_SSA_CONST;
                 in->lhs = -1;
                 in->rhs = -1;
-                in->fimm = (double)src;
+                in->fimm = in->is_unsigned ? (double)(unsigned long)src : (double)src;
                 st[dst].known = 1;
                 st[dst].type = CC_VAL_F64;
                 st[dst].f = in->fimm;

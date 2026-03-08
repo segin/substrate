@@ -175,6 +175,15 @@ typedef struct {
     uint32_t sig[2];
 } linux_sigset_t;
 
+struct linux_sigaction {
+    uint32_t sa_handler;
+    uint32_t sa_flags;
+    uint32_t sa_restorer;
+    linux_sigset_t sa_mask;
+};
+
+#define LINUX_SA_RESTORER 0x04000000
+
 /* Linux stack_t */
 struct linux_stack {
     uint32_t ss_sp;

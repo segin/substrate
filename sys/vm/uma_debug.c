@@ -62,11 +62,11 @@ void uma_debug_check_redzone_impl(uma_zone_t *zone, void *item) {
 void uma_debug_poison_free_impl(uma_zone_t *zone, void *item) {
     if (!(zone->uz_flags & UMA_ZONE_TRASH)) return;
 
-    uint32_t *p = (uint32_t *)item;
-    size_t words = zone->uz_size / sizeof(uint32_t);
-    
-    for (size_t i = 0; i < words; i++) {
-        p[i] = UMA_POISON_FREE;
+    uint8_t *p = (uint8_t *)item;
+    const uint8_t *pattern = (const uint8_t *)&(uint32_t){ UMA_POISON_FREE };
+
+    for (size_t i = 0; i < zone->uz_size; i++) {
+        p[i] = pattern[i % sizeof(uint32_t)];
     }
 }
 
@@ -77,12 +77,22 @@ void uma_debug_poison_alloc_impl(uma_zone_t *zone, void *item) {
     if (!(zone->uz_flags & UMA_ZONE_TRASH)) return;
 
     /* First check if memory still has free pattern (UAF detection) */
-    uint32_t *p = (uint32_t *)item;
-    size_t words = zone->uz_size / sizeof(uint32_t);
-    
+    uint8_t *p = (uint8_t *)item;
+    const uint8_t *pattern = (const uint8_t *)&(uint32_t){ UMA_POISON_FREE };
+
+    for (size_t i = 0; i < zone->uz_size; i++) {
+        if (p[i] != pattern[i % sizeof(uint32_t)]) {
+            kprintf("UMA: POISON VIOLATION in zone '%s' at offset %d\n",
+                    zone->uz_name, (int)i);
+            kprintf("Item: %p\n", item);
+            panic("UMA Poison Violation");
+        }
+    }
+
     /* Fill with alloc pattern */
-    for (size_t i = 0; i < words; i++) {
-        p[i] = UMA_POISON_ALLOC;
+    pattern = (const uint8_t *)&(uint32_t){ UMA_POISON_ALLOC };
+    for (size_t i = 0; i < zone->uz_size; i++) {
+        p[i] = pattern[i % sizeof(uint32_t)];
     }
     
     /* Set up redzones */

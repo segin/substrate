@@ -1,5 +1,6 @@
 #include <vm/uma.h>
 #include <kern/console.h>
+#include <string.h>
 #include "tests.h"
 
 static int tests_passed = 0;
@@ -15,6 +16,28 @@ static int tests_failed = 0;
         tests_passed++; \
     } \
 } while(0)
+
+static uint32_t slab_list_count(uma_slab_t *slab) {
+    uint32_t count = 0;
+
+    while (slab) {
+        count++;
+        slab = slab->us_next;
+    }
+
+    return count;
+}
+
+static uint32_t slab_list_freecount(uma_slab_t *slab) {
+    uint32_t freecount = 0;
+
+    while (slab) {
+        freecount += slab->us_freecount;
+        slab = slab->us_next;
+    }
+
+    return freecount;
+}
 
 static void test_uma_large_alloc(void) {
     /* Create a zone with large items (3000 bytes) */
@@ -160,6 +183,56 @@ static void dtor_test(void *obj, int size, void *arg) {
     dtor_calls++;
 }
 
+static int order_seq = 0;
+static int init_calls = 0;
+static int fini_calls = 0;
+static int order_init_first = 0;
+static int order_ctor_first = 0;
+static int order_dtor_first = 0;
+static int order_fini_first = 0;
+
+static int init_order_test(void *obj, int size, int flags) {
+    (void)obj;
+    (void)size;
+    (void)flags;
+    init_calls++;
+    if (order_init_first == 0) {
+        order_init_first = ++order_seq;
+    }
+    return 0;
+}
+
+static void fini_order_test(void *obj, int size) {
+    (void)obj;
+    (void)size;
+    fini_calls++;
+    if (order_fini_first == 0) {
+        order_fini_first = ++order_seq;
+    }
+}
+
+static int ctor_order_test(void *obj, int size, void *arg, int flags) {
+    (void)obj;
+    (void)size;
+    (void)arg;
+    (void)flags;
+    ctor_calls++;
+    if (order_ctor_first == 0) {
+        order_ctor_first = ++order_seq;
+    }
+    return 0;
+}
+
+static void dtor_order_test(void *obj, int size, void *arg) {
+    (void)obj;
+    (void)size;
+    (void)arg;
+    dtor_calls++;
+    if (order_dtor_first == 0) {
+        order_dtor_first = ++order_seq;
+    }
+}
+
 void test_uma_ctor_dtor(void) {
     kprint("Test: constructor/destructor\n");
     
@@ -176,6 +249,195 @@ void test_uma_ctor_dtor(void) {
     uma_zfree(zone, obj);
     TEST_ASSERT(dtor_calls == 1, "dtor called once");
     
+    uma_zdestroy(zone);
+    kprint("  PASS\n");
+}
+
+void test_uma_callback_ordering(void) {
+    kprint("Test: init/fini/ctor/dtor ordering\n");
+
+    ctor_calls = 0;
+    dtor_calls = 0;
+    init_calls = 0;
+    fini_calls = 0;
+    order_seq = 0;
+    order_init_first = 0;
+    order_ctor_first = 0;
+    order_dtor_first = 0;
+    order_fini_first = 0;
+
+    uma_zone_t *zone = uma_zcreate("test-order", 32,
+                                   ctor_order_test,
+                                   dtor_order_test,
+                                   init_order_test,
+                                   fini_order_test,
+                                   0,
+                                   UMA_ZONE_NOBUCKET);
+    TEST_ASSERT(zone != NULL, "zone created");
+
+    uint32_t ipers = zone->uz_ipers;
+    void *obj = uma_zalloc(zone, M_NOWAIT);
+    TEST_ASSERT(obj != NULL, "alloc succeeded");
+    TEST_ASSERT(init_calls == (int)ipers, "init called once per slab object");
+    TEST_ASSERT(ctor_calls == 1, "ctor called once on allocation");
+    TEST_ASSERT(order_init_first > 0 && order_ctor_first > 0 &&
+                order_init_first < order_ctor_first,
+                "init ran before ctor");
+
+    uma_zfree(zone, obj);
+    TEST_ASSERT(dtor_calls == 1, "dtor called once on free");
+    TEST_ASSERT(fini_calls == 0, "fini deferred until slab free");
+
+    uma_zdestroy(zone);
+    TEST_ASSERT(fini_calls == (int)ipers, "fini called once per slab object");
+    TEST_ASSERT(order_dtor_first > 0 && order_fini_first > 0 &&
+                order_dtor_first < order_fini_first,
+                "dtor ran before fini");
+
+    kprint("  PASS\n");
+}
+
+void test_uma_leak_tracking(void) {
+    kprint("Test: leak tracking\n");
+
+    uma_zone_t *zone = uma_zcreate("test-leak", 32, NULL, NULL, NULL, NULL, 0, 0);
+    TEST_ASSERT(zone != NULL, "zone created");
+
+    void *obj = uma_zalloc(zone, M_NOWAIT);
+    TEST_ASSERT(obj != NULL, "alloc succeeded");
+    TEST_ASSERT(uma_zone_check_leaks(zone) == 1, "zone reports outstanding allocation");
+
+    uma_zfree(zone, obj);
+    TEST_ASSERT(uma_zone_check_leaks(zone) == 0, "zone leak count clears after free");
+
+    uma_zdestroy(zone);
+    kprint("  PASS\n");
+}
+
+void test_uma_percpu_cache_paths(void) {
+    kprint("Test: per-CPU cache hit/miss paths\n");
+
+    uma_zone_t *zone = uma_zcreate("test-cache", 32, NULL, NULL, NULL, NULL, 0, 0);
+    TEST_ASSERT(zone != NULL, "zone created");
+
+    int cpu = smp_get_cpu_id();
+    uma_cache_t *cache = &zone->uz_cpu[cpu];
+    uint64_t alloc_hits_before = cache->uc_allocs;
+    uint64_t free_hits_before = cache->uc_frees;
+
+    void *obj1 = uma_zalloc(zone, M_NOWAIT);
+    TEST_ASSERT(obj1 != NULL, "initial alloc succeeded");
+    TEST_ASSERT(cache->uc_allocs == alloc_hits_before,
+                "initial alloc should miss per-CPU cache");
+
+    uma_zfree(zone, obj1);
+    TEST_ASSERT(cache->uc_frees == free_hits_before + 1,
+                "free should populate per-CPU cache");
+
+    void *obj2 = uma_zalloc(zone, M_NOWAIT);
+    TEST_ASSERT(obj2 == obj1, "alloc reused cached object");
+    TEST_ASSERT(cache->uc_allocs == alloc_hits_before + 1,
+                "alloc should hit per-CPU cache");
+
+    uma_zfree(zone, obj2);
+    uma_zdestroy(zone);
+    kprint("  PASS\n");
+}
+
+void test_uma_slab_freelist_integrity(void) {
+    kprint("Test: slab allocation and free list integrity\n");
+
+    uma_zone_t *zone = uma_zcreate("test-slab", 32, NULL, NULL, NULL, NULL, 0,
+                                   UMA_ZONE_NOBUCKET | UMA_ZONE_NOFREE);
+    TEST_ASSERT(zone != NULL, "zone created");
+
+    uint32_t ipers = zone->uz_ipers;
+    void *objs[128];
+    TEST_ASSERT(ipers > 0 && ipers <= 128, "reasonable items per slab");
+
+    for (uint32_t i = 0; i < ipers; i++) {
+        objs[i] = uma_zalloc(zone, M_NOWAIT);
+        TEST_ASSERT(objs[i] != NULL, "slab alloc succeeded");
+        for (uint32_t j = 0; j < i; j++) {
+            TEST_ASSERT(objs[i] != objs[j], "slab alloc returned duplicate object");
+        }
+    }
+
+    TEST_ASSERT(zone->uz_full_slabs != NULL, "slab moved to full list");
+
+    for (uint32_t i = 0; i < ipers; i++) {
+        uma_zfree(zone, objs[i]);
+    }
+
+    TEST_ASSERT(zone->uz_free_slabs != NULL, "slab moved to free list");
+    TEST_ASSERT(zone->uz_free_slabs->us_freecount == ipers,
+                "free slab reports all items available");
+
+    uint8_t seen[128] = {0};
+    uint32_t idx = zone->uz_free_slabs->us_firstfree;
+    uint32_t count = 0;
+    while (idx != 0xFF) {
+        TEST_ASSERT(idx < ipers, "freelist index in range");
+        TEST_ASSERT(seen[idx] == 0, "freelist index unique");
+        seen[idx] = 1;
+        idx = zone->uz_free_slabs->us_freelist[idx];
+        count++;
+    }
+    TEST_ASSERT(count == ipers, "freelist covers every object");
+
+    uma_zdestroy(zone);
+    kprint("  PASS\n");
+}
+
+void test_uma_capacity_accounting(void) {
+    kprint("Test: total allocated + free = zone capacity\n");
+
+    uma_zone_t *zone = uma_zcreate("test-capacity", 48, NULL, NULL, NULL, NULL, 0,
+                                   UMA_ZONE_NOBUCKET | UMA_ZONE_NOFREE);
+    TEST_ASSERT(zone != NULL, "zone created");
+
+    uint32_t ipers = zone->uz_ipers;
+    void *objs[96];
+    uint32_t alloc_count = ipers + 3;
+    TEST_ASSERT(alloc_count < 96, "allocation count fits local array");
+
+    for (uint32_t i = 0; i < alloc_count; i++) {
+        objs[i] = uma_zalloc(zone, M_NOWAIT);
+        TEST_ASSERT(objs[i] != NULL, "alloc succeeded");
+    }
+
+    for (uint32_t i = 0; i < alloc_count; i += 2) {
+        uma_zfree(zone, objs[i]);
+        objs[i] = NULL;
+    }
+
+    uint32_t slab_count = slab_list_count(zone->uz_full_slabs) +
+                          slab_list_count(zone->uz_part_slabs) +
+                          slab_list_count(zone->uz_free_slabs);
+    uint32_t free_count = slab_list_freecount(zone->uz_full_slabs) +
+                          slab_list_freecount(zone->uz_part_slabs) +
+                          slab_list_freecount(zone->uz_free_slabs);
+
+    TEST_ASSERT(slab_count >= 2, "multiple slabs allocated");
+    TEST_ASSERT(zone->uz_count + free_count == slab_count * ipers,
+                "allocated plus free objects matches total slab capacity");
+
+    for (uint32_t i = 0; i < alloc_count; i++) {
+        if (objs[i] != NULL) {
+            uma_zfree(zone, objs[i]);
+        }
+    }
+
+    slab_count = slab_list_count(zone->uz_full_slabs) +
+                 slab_list_count(zone->uz_part_slabs) +
+                 slab_list_count(zone->uz_free_slabs);
+    free_count = slab_list_freecount(zone->uz_full_slabs) +
+                 slab_list_freecount(zone->uz_part_slabs) +
+                 slab_list_freecount(zone->uz_free_slabs);
+
+    TEST_ASSERT(zone->uz_count == 0, "zone count drained to zero");
+    TEST_ASSERT(free_count == slab_count * ipers, "all slab objects returned to free lists");
+
     uma_zdestroy(zone);
     kprint("  PASS\n");
 }
@@ -287,6 +549,34 @@ void test_uma_dynamic_stress(void) {
     kprint("  PASS\n");
 }
 
+void test_uma_multi_zone_stress(void) {
+    kprint("Test: 10000 alloc/free cycles across multiple zones\n");
+
+    static const size_t sizes[] = { 16, 32, 64, 128, 256 };
+    enum { zone_count = (int)(sizeof(sizes) / sizeof(sizes[0])) };
+    uma_zone_t *zones[zone_count];
+
+    for (int i = 0; i < zone_count; i++) {
+        zones[i] = uma_zcreate("test-stress", sizes[i], NULL, NULL, NULL, NULL, 0, 0);
+        TEST_ASSERT(zones[i] != NULL, "stress zone created");
+    }
+
+    for (int i = 0; i < 10000; i++) {
+        int zone_idx = i % zone_count;
+        void *obj = uma_zalloc(zones[zone_idx], M_NOWAIT);
+        TEST_ASSERT(obj != NULL, "stress alloc succeeded");
+        memset(obj, 0xA5, sizes[zone_idx]);
+        uma_zfree(zones[zone_idx], obj);
+    }
+
+    for (int i = 0; i < zone_count; i++) {
+        TEST_ASSERT(zones[i]->uz_count == 0, "stress zone count returned to zero");
+        uma_zdestroy(zones[i]);
+    }
+
+    kprint("  PASS\n");
+}
+
 /* Test zone limits */
 void test_uma_limits(void) {
     kprint("Test: zone limits\n");
@@ -332,7 +622,13 @@ void run_uma_tests(void) {
     test_uma_alloc_free();
     test_uma_zero_fill();
     test_uma_ctor_dtor();
+    test_uma_callback_ordering();
+    test_uma_leak_tracking();
+    test_uma_percpu_cache_paths();
+    test_uma_slab_freelist_integrity();
+    test_uma_capacity_accounting();
     test_uma_many_allocs();
+    test_uma_multi_zone_stress();
     test_uma_limits();
     // test_uma_redzone(); // Causes panic, disabled for now
     kprint("\nUMA Tests Complete\n");

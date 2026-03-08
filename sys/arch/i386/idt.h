@@ -95,5 +95,7 @@ typedef struct registers {
 void isr_handler(registers_t *regs);
 void syscall_handler(registers_t *regs);
 void signal_handle_pending(registers_t *regs);
+int i386_trap_to_signal(const registers_t *regs, uint32_t cr2, int *sig,
+                        int *code, uintptr_t *addr);
 
 #endif

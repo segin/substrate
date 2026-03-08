@@ -273,21 +273,47 @@ int cur_tok;
 char *tok_str = NULL;
 bc_num *tok_num = NULL;
 int lineno = 1;
+static FILE *lex_file = NULL;
+static const char *lex_string = NULL;
 
 void lex_error(const char *msg) {
     fprintf(stderr, "bc: syntax error at line %d: %s\n", lineno, msg);
     exit(1);
 }
 
+static void lex_set_file(FILE *fp) {
+    lex_file = fp;
+    lex_string = NULL;
+    lineno = 1;
+}
+
+static void lex_set_string(const char *s) {
+    lex_file = NULL;
+    lex_string = s;
+    lineno = 1;
+}
+
 int next_char(void) {
-    int c = getchar();
+    int c;
+    if (lex_string) {
+        if (*lex_string == '\0') return EOF;
+        c = (unsigned char)*lex_string++;
+    } else {
+        FILE *fp = lex_file ? lex_file : stdin;
+        c = fgetc(fp);
+    }
     if (c == '\n') lineno++;
     return c;
 }
 
 void unget_char(int c) {
     if (c == '\n') lineno--;
-    ungetc(c, stdin);
+    if (lex_string) {
+        if (c != EOF) lex_string--;
+        return;
+    }
+    FILE *fp = lex_file ? lex_file : stdin;
+    ungetc(c, fp);
 }
 
 int lex(void) {
@@ -1104,7 +1130,7 @@ void set_arr_val(const char *name, int idx, bc_num *val) {
     g->array[idx] = bc_dup(val);
 }
 
-// TODO eval function
+// Evaluation State
 int is_returning = 0;
 bc_num *ret_val = NULL;
 int is_breaking = 0;
@@ -1255,10 +1281,14 @@ bc_num *eval_expr(ast_node_t *n) {
             
             // Evaluates arguments before pushing frame
             int argc = 0;
+            int args_cap = 0;
             bc_num **args = NULL;
             expr_list_t *p = n->call.args;
             while (p) {
-                args = realloc(args, (argc + 1) * sizeof(bc_num*));
+                if (argc >= args_cap) {
+                    args_cap = args_cap == 0 ? 4 : args_cap * 2;
+                    args = realloc(args, args_cap * sizeof(bc_num*));
+                }
                 args[argc++] = eval_expr(p->expr);
                 p = p->next;
             }
@@ -1462,8 +1492,53 @@ int main(int argc, char **argv) {
     if (!opt_q) {
         printf("bc (Substrate AST Interpreter)\n");
     }
-    
-    // Read stdin
+
+    if (optind < argc) {
+        for (int i = optind; i < argc; i++) {
+            FILE *fp = fopen(argv[i], "r");
+            if (!fp) {
+                perror(argv[i]);
+                return 1;
+            }
+            lex_set_file(fp);
+            lex();
+            while (cur_tok != TOK_EOF) {
+                ast_node_t *n = parse_top_level();
+                if (n) {
+                    eval_stmt(n);
+                    ast_free(n);
+                }
+            }
+            fclose(fp);
+        }
+        return 0;
+    }
+
+    if (isatty(STDIN_FILENO)) {
+        char *line = NULL;
+        size_t cap = 0;
+        ssize_t len;
+
+        while (1) {
+            printf("bc> ");
+            fflush(stdout);
+            len = getline(&line, &cap, stdin);
+            if (len < 0) break;
+            lex_set_string(line);
+            lex();
+            while (cur_tok != TOK_EOF) {
+                ast_node_t *n = parse_top_level();
+                if (n) {
+                    eval_stmt(n);
+                    ast_free(n);
+                }
+            }
+        }
+        free(line);
+        return 0;
+    }
+
+    lex_set_file(stdin);
     lex();
     while (cur_tok != TOK_EOF) {
         ast_node_t *n = parse_top_level();
