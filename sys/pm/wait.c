@@ -6,6 +6,8 @@
 #include <kern/sched.h> // for sched_sleep
 #include <pm/pm.h>
 #include <sys/kern_syscalls.h>
+#include <arch/i386/pmap.h>
+#include <vm/vm_map.h>
 
 /*
  * find_waitable_child: Search for a child matching the wait criteria.
@@ -136,6 +138,14 @@ int kern_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
                 // Clear process group membership
                 extern void pgrp_remove_proc(struct process *proc);
                 pgrp_remove_proc(target);
+
+                if (target->vm_map) {
+                    vm_map_destroy(target->vm_map);
+                    target->vm_map = NULL;
+                } else if (target->pmap && target->pmap != pmap_kernel()) {
+                    pmap_release(target->pmap);
+                }
+                target->pmap = pmap_kernel();
 
                 // Retire all thread slots that belonged to the reaped process.
                 sched_reap_process_threads(target);

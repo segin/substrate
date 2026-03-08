@@ -21,6 +21,7 @@ int sleepq_wake_all(void *chan);
 int sleepq_wake_n(void *chan, int n);
 int sleepq_has_waiters(void *chan);
 int sleepq_requeue(void *src_chan, void *dst_chan, int wake_n, int requeue_n);
+int sleepq_remove_thread(thread_t *t);
 
 /* Private API (for process-private futexes) */
 void sleepq_add_private(void *chan, thread_t *t);

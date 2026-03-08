@@ -822,7 +822,7 @@
                 - [x] Unit: FUTEX_REQUEUE moves waiters correctly. (REQ: REQ-01-0685)
                 - [x] Unit: robust list cleanup on exit. (REQ: REQ-01-0686)
                 - [x] Unit: PI inheritance — low priority holder boosted. (REQ: REQ-01-0687)
-                - [ ] Property: no orphaned waiters after process exit. (REQ: REQ-01-0688)
+                - [x] Property: no orphaned waiters after process exit. (REQ: REQ-01-0688)
 
         - [x] **NTSYNC Driver (Windows NT Sync Primitives):** (REQ: REQ-01-0689)
 
@@ -1040,11 +1040,11 @@
             - [ ] **Phase 1 — State Transition (RUNNING → DYING):** (REQ: REQ-01-0876)
                 - [x] Set `p_state` = SDYING. (REQ: REQ-01-0877)
                 - [x] Record exit status in `p_xstat`. (REQ: REQ-01-0878)
-                - [ ] Prevent further scheduling. (REQ: REQ-01-0879)
+                - [x] Prevent further scheduling. (REQ: REQ-01-0879)
             - [ ] **Phase 2 — Resource Release:** (REQ: REQ-01-0880)
                 - [x] **File Descriptors:** `fd_close_all(p)` — close all, decrement refcounts. (REQ: REQ-01-0881)
                 - [x] **Virtual Memory:** `pmap_release(p->pmap)` — free user page tables, switch to kernel pmap. (REQ: REQ-01-0882)
-                - [ ] **VM Map:** release `vm_map` and all `vm_map_entry` structures. (REQ: REQ-01-0883)
+                - [x] **VM Map:** release `vm_map` and all `vm_map_entry` structures at the safe reap point after switching the exiting thread to the kernel pmap. (REQ: REQ-01-0883)
                 - [x] **CWD / Root:** decrement cwd and root vnode refcounts. (REQ: REQ-01-0884)
                 - [x] **Controlling Terminal:** if session leader, SIGHUP to foreground group, revoke TTY. (REQ: REQ-01-0885)
                 - [x] **Pending Signals:** clear all. (REQ: REQ-01-0886)
@@ -1073,7 +1073,7 @@
                 - [ ] Check for orphaned process groups → SIGHUP + SIGCONT. (REQ: REQ-01-0909)
             - [ ] **Phase 7 — Parent Notification:** (REQ: REQ-01-0910)
                 - [x] `psignal(parent, SIGCHLD)`. (REQ: REQ-01-0911)
-                - [ ] If SA_NOCLDWAIT: auto-reap (no zombie). (REQ: REQ-01-0910)
+                - [x] If SA_NOCLDWAIT: detach from the parent's waitable child list and auto-reap asynchronously once the final thread context is retired. (REQ: REQ-01-0910)
                 - [x] Wake parent on `p_children` channel. (REQ: REQ-01-0913)
             - [ ] **Phase 8 — Zombie State (DYING → ZOMBIE):** (REQ: REQ-01-0914)
                 - [x] Set `p_state` = SZOMB. (REQ: REQ-01-0915)
@@ -1832,7 +1832,7 @@
 - **US-01-0685**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: FUTEX_REQUEUE moves waiters correctly so that this capability is implemented with clear verification evidence.
 - **US-01-0686**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: robust list cleanup on exit so that this capability is implemented with clear verification evidence.
 - **US-01-0687**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: PI inheritance - low priority holder boosted so that this capability is implemented with clear verification evidence.
-- **US-01-0688**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to property: no orphaned waiters after process exit so that this capability is implemented with clear verification evidence.
+- **US-01-0688**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want process exit to remove sleeping threads from sleep queues so that no orphaned waiters remain after teardown.
 - **US-01-0689**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to nTSYNC Driver (Windows NT Sync Primitives): so that this capability is implemented with clear verification evidence.
 - **US-01-0690**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to core Infrastructure: so that this capability is implemented with clear verification evidence.
 - **US-01-0691**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to /dev/ntsync char device with instance-based isolation so that this capability is implemented with clear verification evidence.
@@ -2023,11 +2023,11 @@
 - **US-01-0876**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phase 1 - State Transition (RUNNING → DYING): so that this capability is implemented with clear verification evidence.
 - **US-01-0877**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set p_state = SDYING so that this capability is implemented with clear verification evidence.
 - **US-01-0878**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to record exit status in p_xstat so that this capability is implemented with clear verification evidence.
-- **US-01-0879**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to prevent further scheduling so that this capability is implemented with clear verification evidence.
+- **US-01-0879**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want exiting processes to stop all thread scheduling immediately so that teardown runs without resurrecting dead execution contexts.
 - **US-01-0880**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phase 2 - Resource Release: so that this capability is implemented with clear verification evidence.
 - **US-01-0881**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to file Descriptors: fd_close_all(p) - close all, decrement refcounts so that this capability is implemented with clear verification evidence.
 - **US-01-0882**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to virtual Memory: pmap_release(p->pmap) - free user page tables, switch to kernel pmap so that this capability is implemented with clear verification evidence.
-- **US-01-0883**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vM Map: release vm_map and all vm_map_entry structures so that this capability is implemented with clear verification evidence.
+- **US-01-0883**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want exited processes to release their `vm_map` and `vm_map_entry` structures at the safe reap point after switching to the kernel pmap so that teardown does not destroy the still-current address space.
 - **US-01-0884**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to cWD / Root: decrement cwd and root vnode refcounts so that this capability is implemented with clear verification evidence.
 - **US-01-0885**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to controlling Terminal: if session leader, SIGHUP to foreground group, revoke TTY so that this capability is implemented with clear verification evidence.
 - **US-01-0886**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pending Signals: clear all so that this capability is implemented with clear verification evidence.
@@ -2056,7 +2056,7 @@
 - **US-01-0909**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to check for orphaned process groups → SIGHUP + SIGCONT so that this capability is implemented with clear verification evidence.
 - **US-01-0910**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phase 7 - Parent Notification: so that this capability is implemented with clear verification evidence.
 - **US-01-0911**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to psignal(parent, SIGCHLD) so that this capability is implemented with clear verification evidence.
-- **US-01-0912**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to if SA_NOCLDWAIT: auto-reap (no zombie) so that this capability is implemented with clear verification evidence.
+- **US-01-0912**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want `SA_NOCLDWAIT` children detached from the waitable child list and auto-reaped asynchronously once their final thread context is retired so that parents do not accumulate zombies they cannot wait on.
 - **US-01-0913**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to wake parent on p_children channel so that this capability is implemented with clear verification evidence.
 - **US-01-0914**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phase 8 - Zombie State (DYING → ZOMBIE): so that this capability is implemented with clear verification evidence.
 - **US-01-0915**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set p_state = SZOMB so that this capability is implemented with clear verification evidence.
@@ -4214,7 +4214,7 @@
 - **REQ-01-0687** (EARS/Ubiquitous): The Substrate system shall unit: PI inheritance - low priority holder boosted.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0688** (EARS/Ubiquitous): The Substrate system shall property: no orphaned waiters after process exit.
+- **REQ-01-0688** (EARS/Ubiquitous): The Substrate system shall remove exiting threads from sleep queues so that no orphaned waiters remain after process teardown.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0689** (EARS/Ubiquitous): The Substrate system shall nTSYNC Driver (Windows NT Sync Primitives):.
@@ -4787,7 +4787,7 @@
 - **REQ-01-0878** (EARS/Ubiquitous): The Substrate system shall record exit status in p_xstat.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0879** (EARS/Ubiquitous): The Substrate system shall prevent further scheduling.
+- **REQ-01-0879** (EARS/Ubiquitous): The Substrate system shall prevent further scheduling of all threads that belong to a process once `proc_exit()` begins teardown.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0880** (EARS/Ubiquitous): The Substrate system shall phase 2 - Resource Release:.
@@ -4799,7 +4799,7 @@
 - **REQ-01-0882** (EARS/Ubiquitous): The Substrate system shall virtual Memory: pmap_release(p->pmap) - free user page tables, switch to kernel pmap.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0883** (EARS/Ubiquitous): The Substrate system shall vM Map: release vm_map and all vm_map_entry structures.
+- **REQ-01-0883** (EARS/Ubiquitous): The Substrate system shall release `vm_map` and all `vm_map_entry` structures for an exited process at the safe reap point after switching the exiting thread to the kernel pmap.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0884** (EARS/Ubiquitous): The Substrate system shall cWD / Root: decrement cwd and root vnode refcounts.
@@ -4886,7 +4886,7 @@
 - **REQ-01-0911** (EARS/Ubiquitous): The Substrate system shall psignal(parent, SIGCHLD).
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0912** (EARS/Ubiquitous): When SA_NOCLDWAIT: auto-reap (no zombie), the Substrate system shall satisfy the specified behavior.
+- **REQ-01-0912** (EARS/Ubiquitous): When a parent has `SA_NOCLDWAIT` set, the Substrate system shall detach the child from the parent's waitable child list and auto-reap it asynchronously once its final thread context is retired.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0913** (EARS/Ubiquitous): The Substrate system shall wake parent on p_children channel.

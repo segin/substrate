@@ -19,6 +19,7 @@
 #define P_CONTINUED  0x0001  // Process has been continued (for WCONTINUED)
 #define P_TRACED     0x0002  // Being traced (ptrace)
 #define P_WAITED     0x0004  // Stopped state already reported
+#define P_AUTOREAP   0x0008  // Zombie should be reaped asynchronously
 
 
 typedef uint8_t process_state_t;

@@ -7,6 +7,8 @@
 #include <kern/sched.h>
 #include <sys/wait.h>
 #include <sys/session.h>
+#include <arch/i386/pmap.h>
+#include <vm/vm_map.h>
 
 process_t processes[MAX_PROCS];
 process_t *current_process;
@@ -24,6 +26,8 @@ static thread_t mock_thread;
 
 static int sched_sleep_calls;
 static int sched_sleep_mode;
+static int vm_map_destroy_calls;
+static int pmap_release_calls;
 
 void mutex_init(mutex_t *m, const char *name) { (void)m; (void)name; }
 void mutex_lock(mutex_t *m) { (void)m; }
@@ -48,6 +52,21 @@ void pgrp_remove_proc(struct process *proc) {
 
 void sched_reap_process_threads(process_t *proc) {
     (void)proc;
+}
+
+void vm_map_destroy(vm_map_t *map) {
+    (void)map;
+    vm_map_destroy_calls++;
+}
+
+pmap_t pmap_kernel(void) {
+    return (pmap_t)0xABCDEF00;
+}
+
+void pmap_release(pmap_t pmap) {
+    if (pmap) {
+        pmap_release_calls++;
+    }
 }
 
 void sched_sleep(void *chan) {
@@ -111,6 +130,15 @@ static void setup_mocks(void) {
 
     sched_sleep_calls = 0;
     sched_sleep_mode = 0;
+    vm_map_destroy_calls = 0;
+    pmap_release_calls = 0;
+
+    mock_child1.vm_map = (vm_map_t *)0x11110000;
+    mock_child1.pmap = (pmap_t)0x11112000;
+    mock_child2.vm_map = (vm_map_t *)0x22220000;
+    mock_child2.pmap = (pmap_t)0x22222000;
+    mock_child3.vm_map = (vm_map_t *)0x33330000;
+    mock_child3.pmap = (pmap_t)0x33332000;
 }
 
 static void test_wait_search_and_reap(void) {
@@ -120,6 +148,9 @@ static void test_wait_search_and_reap(void) {
     assert(kern_wait4(101, &status, WNOHANG, NULL) == 101);
     assert(WEXITSTATUS(status) == 10);
     assert(mock_parent.p_children == &mock_child2);
+    assert(vm_map_destroy_calls == 1);
+    assert(mock_child1.vm_map == NULL);
+    assert(mock_child1.pmap == pmap_kernel());
 
     setup_mocks();
     assert(kern_wait4(-1, &status, WNOHANG, NULL) == 101);
@@ -158,6 +189,7 @@ static void test_wait_wnohang_and_blocking(void) {
     assert(mock_child1.p_sibling == &mock_child3);
     assert(mock_child2.pid == -1);
     assert(mock_child2.state == 0);
+    assert(vm_map_destroy_calls == 1);
 
     setup_mocks();
     sched_sleep_mode = 1;

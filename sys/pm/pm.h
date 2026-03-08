@@ -31,5 +31,6 @@ uint8_t proc_get_bitness(process_t *p);
 process_t *proc_find(int pid);
 
 int proc_get_last_pid(void);
+void proc_reap_autoreap_zombies(void);
 
 #endif

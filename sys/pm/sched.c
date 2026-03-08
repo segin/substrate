@@ -103,6 +103,8 @@ static void sched_context_switch(thread_t *prev, thread_t *next) {
 void sched_yield(void) {
     if (!current_thread) return;
 
+    proc_reap_autoreap_zombies();
+
     extern void kprint(const char *);
     extern int percpu_get_cpu_id(void);
     int cpu_id = percpu_get_cpu_id();

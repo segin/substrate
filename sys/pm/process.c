@@ -9,6 +9,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <arch/i386/pmap.h>
+#include <vm/vm_map.h>
 #include <exec/perso/personality.h>
 
 process_t processes[MAX_PROCS];
@@ -37,6 +38,8 @@ extern struct personality personality_native;
 /* Forward declarations */
 void proc_add_child(process_t *parent, process_t *child);
 void proc_remove_child(process_t *parent, process_t *child);
+static int proc_threads_all_zombie(process_t *proc, thread_t *skip_thread);
+static void proc_release_zombie_resources(process_t *proc);
 
 void pm_init(void) {
     next_pid = 1;
@@ -365,6 +368,65 @@ void proc_reparent_children(process_t *p) {
     sched_wakeup(&init->p_children);
 }
 
+static int proc_threads_all_zombie(process_t *proc, thread_t *skip_thread) {
+    for (int i = 0; i < MAX_THREADS; i++) {
+        if (threads[i].tid == -1 || threads[i].proc != proc || &threads[i] == skip_thread) {
+            continue;
+        }
+        if (threads[i].state != THREAD_ZOMBIE) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static void proc_release_zombie_resources(process_t *proc) {
+    if (!proc) {
+        return;
+    }
+
+    if (proc->vm_map) {
+        vm_map_destroy(proc->vm_map);
+        proc->vm_map = NULL;
+    } else if (proc->pmap && proc->pmap != pmap_kernel()) {
+        pmap_release(proc->pmap);
+    }
+
+    if (proc->p_pgrp) {
+        extern void pgrp_remove_proc(struct process *proc);
+        pgrp_remove_proc(proc);
+    }
+
+    proc->pmap = pmap_kernel();
+}
+
+void proc_reap_autoreap_zombies(void) {
+    for (int i = 0; i < MAX_PROCS; i++) {
+        process_t *proc = &processes[i];
+
+        if (proc->pid <= 0 || proc->state != SZOMB || !(proc->p_flag & P_AUTOREAP)) {
+            continue;
+        }
+        if (current_thread && current_thread->proc == proc) {
+            continue;
+        }
+        if (!proc_threads_all_zombie(proc, NULL)) {
+            continue;
+        }
+
+        proc_release_zombie_resources(proc);
+        sched_reap_process_threads(proc);
+
+        proc->pid = -1;
+        proc->ppid = 0;
+        proc->state = 0;
+        proc->p_flag = 0;
+        proc->p_parent = NULL;
+        proc->p_children = NULL;
+        proc->p_sibling = NULL;
+    }
+}
+
 void proc_exit(int code) {
     if (current_process->pid == 1) {
         kprint("Warning: Init process exited. System Halted (idle).\n");
@@ -381,6 +443,9 @@ void proc_exit(int code) {
         if (threads[i].tid != -1 && threads[i].proc == current_process) {
             /* Cleanup robust futexes for this thread */
             futex_thread_exit(&threads[i]);
+
+            /* Remove sleepers from sleep queues before they become zombies. */
+            sleepq_remove_thread(&threads[i]);
             
             /* Clear pending signals - process is dying */
             threads[i].sig_pending = 0;
@@ -411,19 +476,9 @@ void proc_exit(int code) {
         current_process->root_node = NULL;
     }
 
-    if (current_process->vm_map) {
-        extern void vm_map_destroy(struct vm_map *map);
-        // vm_map_destroy(current_process->vm_map);
-        current_process->vm_map = NULL;
-    }
-    
     if (current_process->pmap && current_process->pmap != pmap_kernel()) {
-        pmap_release(current_process->pmap);
-        current_process->pmap = pmap_kernel(); // Switch to kernel map safe fallback?
-        // Actually cr3 switch happens on context switch.
-        // We shouldn't free pmap if we are running on it?
-        // Traditionally, we switch to swapper's pmap or kernel pmap before freeing.
-        // But for now, just decrement ref.
+        pmap_activate(pmap_kernel());
+        current_process->pmap = pmap_kernel();
     }
     
     // 3. Reparent Children
@@ -503,14 +558,9 @@ void proc_exit(int code) {
              extern void psignal(process_t *p, int sig);
              psignal(current_process->p_parent, SIGCHLD);
              
-             // Reparent to Init for automatic reaping
-             process_t *init = &processes[1]; // PID 1
-             if (init != current_process) { // Don't reparent init to itself
-                 proc_remove_child(current_process->p_parent, current_process);
-                 proc_add_child(init, current_process);
-             }
-             // If anyone is waiting on PID 1's child list, wake them.
-             sched_wakeup(&init->p_children);
+             current_process->p_flag |= P_AUTOREAP;
+             proc_remove_child(current_process->p_parent, current_process);
+             current_process->p_parent = NULL;
         } else {
              extern void psignal(process_t *p, int sig);
              psignal(current_process->p_parent, SIGCHLD);

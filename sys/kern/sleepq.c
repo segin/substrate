@@ -98,6 +98,57 @@ static sleepq_t *sleepq_lookup(void *chan, int type, int pid, int hash) {
     return NULL;
 }
 
+static void sleepq_remove(sleepq_t *sq, int hash);
+
+static int sleepq_remove_thread_internal(thread_t *t, int type, int pid) {
+    void *chan;
+    int hash;
+    sleepq_t *sq;
+    thread_t *prev;
+
+    if (!t || !t->wait_chan) {
+        return 0;
+    }
+
+    chan = t->wait_chan;
+    hash = sleepq_hash_func(chan, type, pid);
+    sq_lock(hash);
+
+    sq = sleepq_lookup(chan, type, pid, hash);
+    if (!sq) {
+        sq_unlock(hash);
+        return 0;
+    }
+
+    prev = NULL;
+    thread_t *cur = sq->sq_head;
+    while (cur) {
+        if (cur == t) {
+            if (prev) {
+                prev->next = cur->next;
+            } else {
+                sq->sq_head = cur->next;
+            }
+            if (sq->sq_tail == cur) {
+                sq->sq_tail = prev;
+            }
+            sq->sq_count--;
+            cur->next = NULL;
+            cur->wait_chan = NULL;
+            if (sq->sq_count == 0) {
+                sleepq_remove(sq, hash);
+            }
+            sq_unlock(hash);
+            return 1;
+        }
+        prev = cur;
+        cur = cur->next;
+    }
+
+    sq_unlock(hash);
+    return 0;
+}
+
 // Insert sleep queue into hash table
 static void sleepq_insert(sleepq_t *sq, int hash) {
     sq->sq_next = sleepq_hash[hash];
@@ -431,4 +482,23 @@ int sleepq_requeue_private(void *src_chan, void *dst_chan, int wake_n, int reque
     int pid = sleepq_current_private_pid();
     if (pid < 0) return 0;
     return sleepq_requeue_internal(src_chan, dst_chan, wake_n, requeue_n, SLEEPQ_TYPE_PRIVATE, pid);
+}
+
+int sleepq_remove_thread(thread_t *t) {
+    int pid;
+
+    if (!t || !t->wait_chan) {
+        return 0;
+    }
+
+    if (sleepq_remove_thread_internal(t, SLEEPQ_TYPE_SHARED, 0)) {
+        return 1;
+    }
+
+    pid = (t->proc) ? t->proc->pid : -1;
+    if (pid < 0) {
+        return 0;
+    }
+
+    return sleepq_remove_thread_internal(t, SLEEPQ_TYPE_PRIVATE, pid);
 }
