@@ -49,6 +49,21 @@ int test_pipe_race(void) {
         }
     }
 
+    close_fs(w_node);
+    w_node = NULL;
+
+    {
+        char c = 0;
+        int read = read_fs(r_node, 0, 1, (uint8_t *)&c);
+        if (read != 0) {
+            kprintf("Pipe EOF test failed: expected 0, got %d\n", read);
+            return -1;
+        }
+    }
+
+    close_fs(r_node);
+    r_node = NULL;
+
     kprint("Pipe basic test passed successfully.\n");
     return 0;
 }
