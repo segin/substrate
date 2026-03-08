@@ -56,7 +56,7 @@
         - [x] **Safety & Integration:** (REQ: REQ-01-0042)
             - [x] Fine-grained spinlock for SMP access (`vm_phys_lock`). (REQ: REQ-01-0043)
             - [x] Interrupt disable/restore guards in all API entry points. (REQ: REQ-01-0044)
-            - [ ] Direct interface with `vm_page.c` queues. (REQ: REQ-01-0045)
+            - [x] Direct interface with `vm_page.c` allocation/free paths (`vm_page_alloc`/`vm_page_free` call into `vm_phys`). (REQ: REQ-01-0045)
             - [x] Low memory watermark: warn when free pages drop below threshold. (REQ: REQ-01-0046)
         - [ ] **NUMA-Aware Allocation (deferred):** (REQ: REQ-01-0047)
             - [ ] Per-node free lists. (REQ: REQ-01-0048)
@@ -83,7 +83,7 @@
 
             > **Files:** `sys/vm/vm_page.h`, `sys/vm/vm_page.c`, `sys/vm/phys_mem.c`.
 
-            - [ ] **`vm_page_t` Structure:** (REQ: REQ-01-0067)
+            - [x] **`vm_page_t` Structure:** (REQ: REQ-01-0067)
                 - [x] `phys_addr`: physical address of this page frame. (REQ: REQ-01-0068)
                 - [x] `flags`: state flags (see below). (REQ: REQ-01-0069)
                 - [x] `wire_count`: wired reference count (cannot be paged out while > 0). (REQ: REQ-01-0070)
@@ -101,9 +101,9 @@
                     - [x] `PG_FREE`: page is on free queue. (REQ: REQ-01-0082)
                     - [x] `PG_ZERO`: page is known to be zeroed. (REQ: REQ-01-0083)
                     - [x] `PG_SWAPPED`: page contents are on swap. (REQ: REQ-01-0084)
-                - [ ] **Initialization:** (REQ: REQ-01-0085)
+                - [x] **Initialization:** (REQ: REQ-01-0085)
                     - [x] Allocate `vm_page_t[]` array based on detected RAM (via watermark allocator). (REQ: REQ-01-0086)
-                    - [ ] Initialize all pages as `PG_FREE`, link into free lists. (REQ: REQ-01-0087)
+                    - [x] Initialize usable buddy block heads as `PG_FREE` as ranges are admitted to free lists. (REQ: REQ-01-0087)
                 - [x] **Accessors:** (REQ: REQ-01-0088)
                     - [x] `pmm_get_page(pa)`: PA-to-page lookup (O(1) via array index). (REQ: REQ-01-0089)
                     - [x] `vm_page_to_phys(page)`: page-to-PA conversion. (REQ: REQ-01-0090)
