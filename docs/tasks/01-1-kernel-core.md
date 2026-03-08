@@ -40,8 +40,8 @@
         - [x] **Buddy Allocator:** (REQ: REQ-01-0026)
             - [x] Orders 0–10 (4 KB – 4 MB pages). (REQ: REQ-01-0027)
             - [x] **Free Lists:** per‑order doubly‑linked free page lists. (REQ: REQ-01-0028)
-            - [ ] `vm_phys_alloc_page()`: O(1) single-page allocation from order‑0 free list. (REQ: REQ-01-0029)
-            - [ ] `vm_phys_alloc_contiguous(order)`: allocate 2^order contiguous pages. (REQ: REQ-01-0030)
+            - [x] `vm_phys_alloc_page()`: direct order‑0 free-list fast path when order‑0 pages are available, otherwise split from a higher order. (REQ: REQ-01-0029)
+            - [x] `vm_phys_alloc_contiguous(count)`: allocate a contiguous page run, rounding to the smallest buddy order that can satisfy `count`. (REQ: REQ-01-0030)
             - [x] `vm_phys_free_page(page)`: return page and coalesce with buddy if free. (REQ: REQ-01-0031)
             - [x] `vm_phys_free_contiguous(page, order)`: return and coalesce multi-page block. (REQ: REQ-01-0032)
             - [x] **Buddy Coalescing:** merge adjacent free pages up through orders. (REQ: REQ-01-0033)
@@ -64,7 +64,7 @@
             - [ ] Cross-node fallback when local node exhausted. (REQ: REQ-01-0050)
         - [x] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
             - [x] Unit: watermark allocator — sequential allocations, alignment, exhaustion. (REQ: REQ-01-0052)
-            - [ ] Unit: buddy allocator — alloc/free single pages, verify O(1) behavior. (REQ: REQ-01-0053)
+            - [x] Unit: buddy allocator — alloc/free single pages, verify direct order‑0 fast-path behavior when order‑0 pages are available. (REQ: REQ-01-0053)
             - [x] Unit: buddy coalescing — free adjacent pages, verify order promotion. (REQ: REQ-01-0054)
             - [x] Unit: buddy splitting — exhaust order 0, verify split from higher order. (REQ: REQ-01-0055)
             - [x] Unit: contiguous allocation — various orders, verify alignment. (REQ: REQ-01-0056)
@@ -73,7 +73,7 @@
             - [x] Property: free page count + allocated count = total pages (invariant). (REQ: REQ-01-0059)
             - [x] Property: buddy free list integrity (no cycles, all entries valid). (REQ: REQ-01-0060)
             - [x] Integration: boot with 16 MB, 32 MB, 128 MB, 1 GB, 4 GB RAM in QEMU. (REQ: REQ-01-0061)
-        - [ ] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
+        - [x] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
             - [x] Internal doc: PMM architecture (watermark → buddy transition). (REQ: REQ-01-0063)
             - [x] Internal doc: virtual vs physical address API convention. (REQ: REQ-01-0064)
 
@@ -1174,7 +1174,7 @@
 - **US-01-0027**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to orders 0-10 (4 KB - 4 MB pages) so that this capability is implemented with clear verification evidence.
 - **US-01-0028**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to free Lists: per-order doubly-linked free page lists so that this capability is implemented with clear verification evidence.
 - **US-01-0029**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_phys_alloc_page(): O(1) single-page allocation from order-0 free list so that this capability is implemented with clear verification evidence.
-- **US-01-0030**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_phys_alloc_contiguous(order): allocate 2^order contiguous pages so that this capability is implemented with clear verification evidence.
+- **US-01-0030**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_phys_alloc_contiguous(count): allocate a contiguous page run, rounding to the smallest buddy order that can satisfy count so that this capability is implemented with clear verification evidence.
 - **US-01-0031**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_phys_free_page(page): return page and coalesce with buddy if free so that this capability is implemented with clear verification evidence.
 - **US-01-0032**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_phys_free_contiguous(page, order): return and coalesce multi-page block so that this capability is implemented with clear verification evidence.
 - **US-01-0033**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to buddy Coalescing: merge adjacent free pages up through orders so that this capability is implemented with clear verification evidence.
@@ -2240,7 +2240,7 @@
 - **REQ-01-0029** (EARS/Ubiquitous): The Substrate system shall vm_phys_alloc_page(): O(1) single-page allocation from order-0 free list.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0030** (EARS/Ubiquitous): The Substrate system shall vm_phys_alloc_contiguous(order): allocate 2^order contiguous pages.
+- **REQ-01-0030** (EARS/Ubiquitous): The Substrate system shall vm_phys_alloc_contiguous(count): allocate a contiguous page run, rounding to the smallest buddy order that can satisfy count.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0031** (EARS/Ubiquitous): The Substrate system shall vm_phys_free_page(page): return page and coalesce with buddy if free.

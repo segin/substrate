@@ -222,6 +222,44 @@ static void test_buddy_splitting_from_order1(void) {
     TEST_PASS("buddy_splitting_from_order1");
 }
 
+/* Test: order-0 allocation consumes the current free-list head directly when available */
+static void test_order0_fast_path_head(void) {
+    vm_page_t *drained = NULL;
+    vm_page_t *block;
+    vm_page_t *alloc;
+    uintptr_t head_phys;
+
+    while (vm_phys_get_order_free_count(0) > 0) {
+        vm_page_t *page = vm_phys_alloc_page();
+        TEST_ASSERT(page != NULL, "order0_head: failed draining order 0");
+        page->next = drained;
+        drained = page;
+    }
+
+    block = vm_phys_alloc_contiguous(2);
+    TEST_ASSERT(block != NULL, "order0_head: contiguous seed alloc failed");
+    vm_phys_free_contiguous(block, 2);
+
+    head_phys = vm_phys_get_order_head_phys(0);
+    TEST_ASSERT(head_phys == block->phys_addr + 0x1000,
+                "order0_head: split buddy did not become order-0 head");
+
+    alloc = vm_phys_alloc_page();
+    TEST_ASSERT(alloc != NULL, "order0_head: order-0 alloc failed");
+    TEST_ASSERT(alloc->phys_addr == head_phys,
+                "order0_head: alloc did not consume current order-0 head");
+
+    vm_phys_free_page(alloc);
+
+    while (drained) {
+        vm_page_t *next = drained->next;
+        vm_phys_free_page(drained);
+        drained = next;
+    }
+
+    TEST_PASS("order0_fast_path_head");
+}
+
 /* Test: paddr_to_page returns correct mapping */
 static void test_paddr_to_page(void) {
     vm_page_t *page = vm_phys_alloc_page();
@@ -367,6 +405,7 @@ void test_vm_phys(void) {
     test_realloc_same_page();
     test_buddy_coalescing();
     test_buddy_splitting_from_order1();
+    test_order0_fast_path_head();
     test_paddr_to_page();
     test_pmm_get_page_wrapper();
     test_vm_page_to_phys_accessor();

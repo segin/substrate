@@ -22,6 +22,7 @@ void vm_phys_free_contiguous(vm_page_t *page, size_t count);
 size_t vm_phys_get_free(void);
 size_t vm_phys_get_used(void);
 size_t vm_phys_get_order_free_count(int order);
+uintptr_t vm_phys_get_order_head_phys(int order);
 void vm_phys_mark_used(uintptr_t pa); // For legacy/reservation usage
 int vm_phys_check_integrity(void);
 
