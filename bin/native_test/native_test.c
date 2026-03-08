@@ -53,6 +53,9 @@ static void list_dir(const char *path) {
         return;
     }
     
+    size_t path_len = strlen(path);
+    int needs_slash = (path_len > 0 && path[path_len - 1] != '/');
+
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
         char fullpath[512];
@@ -60,12 +63,19 @@ static void list_dir(const char *path) {
         char mode_str[12];
         char link_target[256];
         
-        /* Build full path */
-        strcpy(fullpath, path);
-        if (path[strlen(path) - 1] != '/') {
-            strcat(fullpath, "/");
+        /* Build full path efficiently */
+        size_t name_len = strlen(entry->d_name);
+        if (path_len + needs_slash + name_len >= sizeof(fullpath)) {
+            continue; /* Skip names that are too long */
         }
-        strcat(fullpath, entry->d_name);
+
+        char *p = fullpath;
+        memcpy(p, path, path_len);
+        p += path_len;
+        if (needs_slash) {
+            *p++ = '/';
+        }
+        memcpy(p, entry->d_name, name_len + 1);
         
         /* Use lstat to detect symlinks (doesn't follow them) */
         if (lstat(fullpath, &st) == 0) {

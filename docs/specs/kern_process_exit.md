@@ -49,7 +49,8 @@ The current implementation performs:
 
 Notes:
 
-- timer, System V IPC, POSIX IPC, and lock-release phases remain explicit placeholders
+- timer, System V IPC, and POSIX IPC phases remain explicit placeholders
+- tracked sleep mutexes are force-released here; pending mutex waiters are canceled by the existing `sleepq_remove_thread()` pass
 
 ### 4. Child Reparenting
 
@@ -98,6 +99,14 @@ Every thread in the exiting thread group is forced to:
 
 and sleepers are woken via the thread object channel.
 
+At final reap time (`wait4()` or async autoreap), the scheduler retires each
+thread slot and releases any scheduler-owned kernel stack backing that thread:
+
+- `fork()` child stacks allocated from PMM contiguous pages are freed
+- scheduler-spawned kernel-process stacks allocated from PMM single pages are freed
+- kmalloc-backed kthread stacks are freed
+- borrowed or CPU-local idle stacks are not freed by the generic reap path
+
 ### 9. Final Context Switch
 
 The current thread calls `sched_yield()` and is not expected to resume execution.
@@ -107,7 +116,7 @@ The current thread calls `sched_yield()` and is not expected to resume execution
 The current kernel splits process death into two stages:
 
 - `proc_exit()`: teardown and transition to waitable zombie
-- `wait4()`: final reap, group removal, thread-slot retirement, and process-slot return to the free pool
+- `wait4()`: final reap, group removal, thread-stack release, thread-slot retirement, and process-slot return to the free pool
 
 This split preserves enough process identity for the present wait implementation, especially for child-list traversal and group-based wait selection.
 

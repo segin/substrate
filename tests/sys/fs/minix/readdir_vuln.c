@@ -219,12 +219,12 @@ int main() {
     struct dirent *d = minix_readdir(&node, 0);
 
     if (d) {
-        printf("readdir returned successfully. Name: %s\n", d->name);
-        if (strlen(d->name) == 30 && d->name[30] == '\0') {
+        printf("readdir returned successfully. Name: %s\n", d->d_name);
+        if (strlen(d->d_name) == 30 && d->d_name[30] == '\0') {
             printf("PASS: Name is correctly truncated and null-terminated.\n");
             return 0;
         } else {
-             printf("FAIL: Name is invalid length: %zu\n", strlen(d->name));
+             printf("FAIL: Name is invalid length: %zu\n", strlen(d->d_name));
              return 1;
         }
     } else {
