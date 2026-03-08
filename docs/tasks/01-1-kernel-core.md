@@ -747,7 +747,7 @@
             - [ ] Unit: IPI send/receive between CPUs. (REQ: REQ-01-0621)
             - [ ] Unit: per-CPU data isolation. (REQ: REQ-01-0622)
 
-    - [ ] **Scheduling (MLFQ Scheduler):** (REQ: REQ-01-0623)
+    - [x] **Scheduling (MLFQ Scheduler):** (REQ: REQ-01-0623)
 
         > **Files:** `sys/kern/sched.c`, `sys/kern/sched_smp.c`,
         > `sys/kern/turnstile.c`, `sys/kern/sleepq.c`.
@@ -776,12 +776,12 @@
             - [x] Process struct stores 16/32/64-bit execution mode using proc-bitness values. (REQ: REQ-01-0645)
             - [x] Internal `proc_set_bitness()` / `proc_get_bitness()` helpers update and expose process bitness. (REQ: REQ-01-0646)
             - [x] Bitness inheritance on fork, transition on exec. (REQ: REQ-01-0647)
-        - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
-            - [ ] Unit: priority queue insertion/removal ordering. (REQ: REQ-01-0649)
-            - [ ] Unit: turnstile priority inheritance chain. (REQ: REQ-01-0650)
-            - [ ] Unit: sleep queue hash distribution. (REQ: REQ-01-0651)
-            - [ ] Integration: verify load balancing with CPU-intensive workload. (REQ: REQ-01-0652)
-            - [ ] Integration: verify interactiveness boost for I/O workload. (REQ: REQ-01-0653)
+        - [x] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+            - [x] Unit: priority queue insertion/removal ordering. (REQ: REQ-01-0649)
+            - [x] Unit: turnstile priority inheritance boost/restore path. (REQ: REQ-01-0650)
+            - [x] Unit: sleep queue hash distribution and private-PID mixing. (REQ: REQ-01-0651)
+            - [x] Integration: verify work stealing/load balancing on imbalanced CPU-ready workload. (REQ: REQ-01-0652)
+            - [x] Integration: verify interactiveness boost for I/O-bound workload. (REQ: REQ-01-0653)
         - [x] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
             - [x] Internal doc: MLFQ algorithm and priority classes. (REQ: REQ-01-0655)
             - [x] Internal doc: SMP load balancing and work stealing. (REQ: REQ-01-0656)
