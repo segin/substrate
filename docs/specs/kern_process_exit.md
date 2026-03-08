@@ -42,6 +42,7 @@ The current implementation performs:
 - `fd_close_all(process)`
 - `close_fs(cwd)`
 - `close_fs(root)` when root differs from the global root
+- `proc_timers_cancel(process)` to zero `ITIMER_REAL`, `ITIMER_VIRTUAL`, and `ITIMER_PROF` state, including the `alarm()` alias on `ITIMER_REAL`
 - switch to `pmap_kernel()` immediately so the exiting thread no longer runs on
   its dying user pmap
 - defer `vm_map_destroy()` / `pmap_release()` to the final reap path in
@@ -49,7 +50,7 @@ The current implementation performs:
 
 Notes:
 
-- timer, System V IPC, and POSIX IPC phases remain explicit placeholders
+- System V IPC and POSIX IPC phases remain explicit placeholders
 - tracked sleep mutexes are force-released here; pending mutex waiters are canceled by the existing `sleepq_remove_thread()` pass
 
 ### 4. Child Reparenting

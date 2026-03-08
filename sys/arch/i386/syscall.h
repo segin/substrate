@@ -32,6 +32,7 @@
 #define SYS_GETUID  24
 #define SYS_STIME   25
 #define SYS_PTRACE  26
+#define SYS_ALARM   27
 #define SYS_ACCESS  33
 #define SYS_SYNC    36
 #define SYS_KILL    37
@@ -58,6 +59,8 @@
 #define SYS_TRUNCATE 92
 #define SYS_FTRUNCATE 93
 #define SYS_SETPRIORITY 96
+#define SYS_SETITIMER 104
+#define SYS_GETITIMER 105
 #define SYS_GETPRIORITY 100
 #define SYS_UMASK   60
 #define SYS_STAT    106

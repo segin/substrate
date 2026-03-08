@@ -47,8 +47,16 @@ void spinlock_init(spinlock_t *lock, const char *name) { (void)lock; (void)name;
 void spinlock_acquire(spinlock_t *lock) { (void)lock; }
 void spinlock_release(spinlock_t *lock) { (void)lock; }
 
-uint32_t get_time(void) { return 0; }
+time_t get_time(void) { return 0; }
 void rusage_init(process_t *p) { memset(&p->rusage, 0, sizeof(p->rusage)); }
+void proc_timers_init(process_t *p) {
+    memset(p->itimer_value_ticks, 0, sizeof(p->itimer_value_ticks));
+    memset(p->itimer_interval_ticks, 0, sizeof(p->itimer_interval_ticks));
+}
+void proc_timers_cancel(process_t *p) {
+    memset(p->itimer_value_ticks, 0, sizeof(p->itimer_value_ticks));
+    memset(p->itimer_interval_ticks, 0, sizeof(p->itimer_interval_ticks));
+}
 pmap_t pmap_kernel(void) { return (pmap_t)0xCAFEB000; }
 pmap_t pmap_fork(pmap_t src) { return src; }
 void pmap_release(pmap_t pmap) { if (pmap) pmap_release_calls++; }

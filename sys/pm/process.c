@@ -12,6 +12,7 @@
 #include <arch/i386/intr.h>
 #include <vm/vm_map.h>
 #include <exec/perso/personality.h>
+#include <kern/time.h>
 
 process_t processes[MAX_PROCS];
 process_t *current_process = NULL;
@@ -32,7 +33,6 @@ static spinlock_t pid_lock;
  */
 mutex_t proctree_lock;
 
-extern uint32_t get_time(void);
 extern fs_node_t *fs_root;
 extern struct personality personality_native;
 
@@ -63,6 +63,7 @@ void pm_init(void) {
     
     for (int i = 0; i < MAX_PROCS; i++) {
         processes[i].pid = -1;
+        proc_timers_init(&processes[i]);
     }
 
     // Create Initial Kernel Process (PID 1? Or 0?)
@@ -129,6 +130,7 @@ process_t *proc_create(int perso_id) {
     // Initialize rusage structures
     extern void rusage_init(process_t *p);
     rusage_init(&processes[i]);
+    proc_timers_init(&processes[i]);
     
     return &processes[i];
 }
@@ -544,9 +546,8 @@ void proc_exit(int code) {
     // 3. Reparent Children
     proc_reparent_children(current_process);
 
-    // 4. Phase 2: Timers (Placeholders - Subsytems incomplete)
-    // Cancel ITIMER_REAL, ITIMER_VIRTUAL, ITIMER_PROF
-    // Cancel any pending alarm()
+    // 4. Phase 2: Timers
+    proc_timers_cancel(current_process);
     
     // 5. Phase 2: System V IPC (Placeholders)
     // Detach from all shared memory segments (shmdt)

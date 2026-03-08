@@ -42,6 +42,7 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_LSEEK] = &sys_lseek,
     [SYS_STIME] = &sys_stime,
     [SYS_PTRACE] = &sys_ptrace,
+    [SYS_ALARM] = &sys_alarm,
     [SYS_GETPID] = &sys_getpid,
     [SYS_MOUNT] = &sys_mount,
     [SYS_UMOUNT] = &sys_umount,
@@ -109,6 +110,8 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_VM_STATS] = &sys_vm_stats,
     [SYS_SETPRIORITY] = &sys_setpriority,
     [SYS_GETPRIORITY] = &sys_getpriority,
+    [SYS_SETITIMER] = &sys_setitimer,
+    [SYS_GETITIMER] = &sys_getitimer,
 };
 
 static const char *native_names[MAX_SYSCALLS] = {
@@ -126,6 +129,7 @@ static const char *native_names[MAX_SYSCALLS] = {
     [SYS_LSEEK] = "lseek",
     [SYS_STIME] = "stime",
     [SYS_PTRACE] = "ptrace",
+    [SYS_ALARM] = "alarm",
     [SYS_GETPID] = "getpid",
     [SYS_MOUNT] = "mount",
     [SYS_UMOUNT] = "umount",
@@ -194,6 +198,8 @@ static const char *native_names[MAX_SYSCALLS] = {
     [SYS_VM_STATS] = "vm_stats",
     [SYS_SETPRIORITY] = "setpriority",
     [SYS_GETPRIORITY] = "getpriority",
+    [SYS_SETITIMER] = "setitimer",
+    [SYS_GETITIMER] = "getitimer",
 };
 
 static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
@@ -212,6 +218,7 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_LSEEK] = { 4, { ARG_INT, ARG_HEX, ARG_HEX, ARG_INT } },
     [SYS_STIME] = { 1, { ARG_PTR } },
     [SYS_PTRACE] = { 4, { ARG_INT, ARG_INT, ARG_PTR, ARG_INT } },
+    [SYS_ALARM] = { 1, { ARG_INT } },
     [SYS_GETPID] = { 0, { 0 } },
     [SYS_MOUNT] = { 5, { ARG_STR, ARG_STR, ARG_STR, ARG_HEX, ARG_PTR } },
     [SYS_UMOUNT] = { 1, { ARG_STR } },
@@ -279,6 +286,8 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_VM_STATS] = { 1, { ARG_PTR } },
     [SYS_SETPRIORITY] = { 3, { ARG_INT, ARG_INT, ARG_INT } },
     [SYS_GETPRIORITY] = { 2, { ARG_INT, ARG_INT } },
+    [SYS_SETITIMER] = { 3, { ARG_INT, ARG_PTR, ARG_PTR } },
+    [SYS_GETITIMER] = { 2, { ARG_INT, ARG_PTR } },
 };
 
 extern void sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);

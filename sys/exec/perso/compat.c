@@ -199,7 +199,6 @@ int sys_nice(int inc) { (void)inc; return -ENOSYS; }
 int sys_mprotect(void *addr, size_t len, int prot) { (void)addr; (void)len; (void)prot; return -ENOSYS; }
 int sys_sigret(void) { return -ENOSYS; }
 int sys_ptrace(int req, int pid, int addr, int data) { (void)req; (void)pid; (void)addr; (void)data; return -ENOSYS; }
-int sys_alarm(unsigned int sec) { (void)sec; return 0; } /* Special case: alarm(0) is success */
 int sys_pause(void) { return -ENOSYS; }
 int sys_utime(const char *path, void *times) { (void)path; (void)times; return -ENOSYS; }
 int sys_statfs(const char *path, void *buf) { (void)path; (void)buf; return -ENOSYS; }

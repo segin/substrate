@@ -22,10 +22,18 @@ void spinlock_init(spinlock_t *lock, const char *name) { (void)lock; (void)name;
 void spinlock_acquire(spinlock_t *lock) { (void)lock; }
 void spinlock_release(spinlock_t *lock) { (void)lock; }
 
-uint32_t get_time(void) { return 0; }
+time_t get_time(void) { return 0; }
 void rusage_init(process_t *p) {
     memset(&p->rusage, 0, sizeof(p->rusage));
     memset(&p->rusage_children, 0, sizeof(p->rusage_children));
+}
+void proc_timers_init(process_t *p) {
+    memset(p->itimer_value_ticks, 0, sizeof(p->itimer_value_ticks));
+    memset(p->itimer_interval_ticks, 0, sizeof(p->itimer_interval_ticks));
+}
+void proc_timers_cancel(process_t *p) {
+    memset(p->itimer_value_ticks, 0, sizeof(p->itimer_value_ticks));
+    memset(p->itimer_interval_ticks, 0, sizeof(p->itimer_interval_ticks));
 }
 
 pmap_t pmap_kernel(void) { return (pmap_t)0xCAFE0000; }
@@ -34,7 +42,9 @@ void pmap_release(pmap_t pmap) { (void)pmap; }
 void pmap_activate(pmap_t pmap) { (void)pmap; }
 
 void *pmm_alloc_block(void) { return NULL; }
+void pmm_free_block(void *ptr) { (void)ptr; }
 void *pmm_alloc_contiguous(size_t pages) { (void)pages; return NULL; }
+int mutex_release_owned_by_thread(thread_t *owner) { (void)owner; return 0; }
 
 void futex_thread_exit(thread_t *t) { (void)t; }
 

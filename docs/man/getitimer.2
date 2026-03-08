@@ -1,0 +1,52 @@
+.TH GETITIMER 2 "March 2026" "Substrate" "System Calls"
+.SH NAME
+getitimer \- read a process interval timer
+.SH LIBRARY
+Substrate libc
+.SH SYNOPSIS
+.nf
+#include <sys/time.h>
+
+int getitimer(int which, struct itimerval *curr_value);
+.fi
+.SH DESCRIPTION
+.BR getitimer ()
+returns the current state of one of the calling process's interval timers in
+.IR curr_value .
+The
+.I which
+argument selects one of:
+.TP
+.B ITIMER_REAL
+Decrements in wall-clock time and delivers
+.B SIGALRM
+on expiry.
+.TP
+.B ITIMER_VIRTUAL
+Decrements only while the process is executing in user mode and delivers
+.B SIGVTALRM
+on expiry.
+.TP
+.B ITIMER_PROF
+Decrements while the process is executing and delivers
+.B SIGPROF
+on expiry.
+.SH RETURN VALUE
+On success,
+.BR getitimer ()
+returns 0.
+On error, it returns -1 and sets
+.BR errno .
+.SH ERRORS
+.TP
+.B EINVAL
+.I which
+is not a supported interval timer.
+.TP
+.B EFAULT
+.I curr_value
+does not reference writable user memory.
+.SH SEE ALSO
+.BR alarm (2),
+.BR setitimer (2),
+.BR signal (2)

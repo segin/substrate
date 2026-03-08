@@ -1048,7 +1048,7 @@
                 - [x] **CWD / Root:** decrement cwd and root vnode refcounts. (REQ: REQ-01-0884)
                 - [x] **Controlling Terminal:** if session leader, SIGHUP to foreground group, revoke TTY. (REQ: REQ-01-0885)
                 - [x] **Pending Signals:** clear all. (REQ: REQ-01-0886)
-                - [ ] **Timers:** cancel ITIMER_REAL/VIRTUAL/PROF and alarm(). (REQ: REQ-01-0887)
+                - [x] **Timers:** cancel ITIMER_REAL/VIRTUAL/PROF and alarm(). (REQ: REQ-01-0887)
                 - [ ] **System V IPC:** detach shmem, undo semaphores, remove owned msg queues. (REQ: REQ-01-0888)
                 - [ ] **POSIX IPC:** unlink owned semaphores/shared memory. (REQ: REQ-01-0889)
                 - [x] **Futex Cleanup:** process robust list, mark FUTEX_OWNER_DIED, wake waiters. (REQ: REQ-01-0890)

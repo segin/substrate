@@ -148,7 +148,7 @@ void isr_handler(registers_t *regs) {
     exec_maybe_unpin_current_thread(is_usermode);
 
     if (regs->int_no == 32) {
-        timer_tick();
+        timer_tick_context(is_usermode);
         
         /* Track user/system time for current process */
         if (current_process) {

@@ -14,6 +14,11 @@
 #include <sys/resource.h>
 
 struct thr_param;
+struct itimerval;
+struct timeval;
+struct timezone;
+struct timespec;
+struct tms;
 
 /* Process management */
 extern int sys_exit(int);
@@ -102,16 +107,18 @@ extern int sys_sigaltstack(const void*, void*);
 extern int sys_sigpending(void*);
 extern int sys_sigsuspend(const void*);
 extern int sys_sigret(void);
-extern int sys_alarm(unsigned int);
+extern unsigned int sys_alarm(unsigned int);
+extern int sys_getitimer(int, struct itimerval *);
+extern int sys_setitimer(int, const struct itimerval *, struct itimerval *);
 extern int sys_pause(void);
 extern int sys_nice(int);
 
 /* Time */
-extern int64_t sys_time(int64_t*);
+extern time_t sys_time(time_t*);
 extern int sys_stime(time_t*);
-extern clock_t sys_times(void*);
+extern clock_t sys_times(struct tms*);
 extern int sys_nanosleep(void*, void*);
-extern int sys_gettimeofday(void*, void*);
+extern int sys_gettimeofday(struct timeval*, struct timezone*);
 
 /* Other */
 extern int sys_uname(void*);

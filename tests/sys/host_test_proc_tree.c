@@ -23,13 +23,24 @@ void spinlock_init(spinlock_t *lock, const char *name) { (void)lock; (void)name;
 void spinlock_acquire(spinlock_t *lock) { (void)lock; }
 void spinlock_release(spinlock_t *lock) { (void)lock; }
 
-uint32_t get_time(void) { return 0; }
+time_t get_time(void) { return 0; }
 void rusage_init(process_t *p) { memset(&p->rusage, 0, sizeof(p->rusage)); }
+void proc_timers_init(process_t *p) {
+    memset(p->itimer_value_ticks, 0, sizeof(p->itimer_value_ticks));
+    memset(p->itimer_interval_ticks, 0, sizeof(p->itimer_interval_ticks));
+}
+void proc_timers_cancel(process_t *p) {
+    memset(p->itimer_value_ticks, 0, sizeof(p->itimer_value_ticks));
+    memset(p->itimer_interval_ticks, 0, sizeof(p->itimer_interval_ticks));
+}
 pmap_t pmap_kernel(void) { return (pmap_t)1; }
 pmap_t pmap_fork(pmap_t src) { return src; }
 void pmap_release(pmap_t pmap) { (void)pmap; }
+void pmap_activate(pmap_t pmap) { (void)pmap; }
 void *pmm_alloc_block(void) { return NULL; }
+void pmm_free_block(void *ptr) { (void)ptr; }
 void *pmm_alloc_contiguous(size_t pages) { (void)pages; return NULL; }
+int mutex_release_owned_by_thread(thread_t *owner) { (void)owner; return 0; }
 int sched_fork_thread(process_t *proc, void *stack) { (void)proc; (void)stack; return -1; }
 thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void *), void *stack, void *arg) {
     (void)proc;
@@ -44,10 +55,16 @@ void close_fs(fs_node_t *node) { (void)node; }
 void rusage_finalize(process_t *p) { (void)p; }
 void file_close_ptr(file_t *f) { (void)f; }
 int sleepq_wake_all(void *chan) { (void)chan; return 0; }
+int sleepq_remove_thread(thread_t *t) { (void)t; return 0; }
+void sched_sleep(void *chan) { (void)chan; }
 void sched_wakeup(void *chan) { (void)chan; }
 void sched_yield(void) {}
+void host_wait_for_interrupt(void) {}
 void kprint(const char *msg) { (void)msg; }
 void tty_hangup(struct tty *tty) { (void)tty; }
+void vm_map_destroy(struct vm_map *map) { (void)map; }
+void pgrp_remove_proc(struct process *proc) { (void)proc; }
+void sched_reap_process_threads(process_t *proc) { (void)proc; }
 
 #include "../../sys/pm/process.c"
 

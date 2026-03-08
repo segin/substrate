@@ -14,6 +14,7 @@ typedef struct sys_procinfo sys_procinfo_t;
 struct timespec;
 struct timeval;
 struct timezone;
+struct itimerval;
 struct tms;
 
 /* Internal kernel versions of syscalls that take kernel pointers */
@@ -65,6 +66,9 @@ int kern_stime(time_t *t);
 int kern_gettimeofday(struct timeval *tv, struct timezone *tz);
 int kern_clock_gettime(clockid_t clk_id, struct timespec *tp);
 clock_t kern_times(struct tms *buf);
+unsigned int kern_alarm(unsigned int sec);
+int kern_getitimer(int which, struct itimerval *curr_value);
+int kern_setitimer(int which, const struct itimerval *new_value, struct itimerval *old_value);
 
 /* Signal related internal versions */
 int kern_sigprocmask(int how, const uint32_t *set, uint32_t *oset);

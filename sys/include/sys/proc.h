@@ -21,6 +21,7 @@
 #define P_WAITED     0x0004  // Stopped state already reported
 #define P_AUTOREAP   0x0008  // Zombie should be reaped asynchronously
 
+#define PROC_ITIMER_COUNT 3
 
 typedef uint8_t process_state_t;
 
@@ -100,6 +101,9 @@ typedef struct process {
     // Memory management
     uint32_t brk;        // Program break (heap end)
     uint32_t brk_start;  // Initial program break
+    uint64_t itimer_value_ticks[PROC_ITIMER_COUNT];
+    uint64_t itimer_interval_ticks[PROC_ITIMER_COUNT];
+    spinlock_t itimer_lock;
     
     // FPU Context
     fpu_context_t fpu_ctx;

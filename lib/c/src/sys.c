@@ -304,6 +304,18 @@ time_t time(time_t *tloc) {
     return (time_t)_syscall1(SYS_TIME, (int)tloc);
 }
 
+unsigned int alarm(unsigned int seconds) {
+    return (unsigned int)_syscall1(SYS_ALARM, seconds);
+}
+
+int getitimer(int which, struct itimerval *curr_value) {
+    return (int)_syscall2(SYS_GETITIMER, which, (int)curr_value);
+}
+
+int setitimer(int which, const struct itimerval *new_value, struct itimerval *old_value) {
+    return (int)_syscall3(SYS_SETITIMER, which, (int)new_value, (int)old_value);
+}
+
 clock_t times(struct tms *buf) {
     return (clock_t)_syscall1(SYS_TIMES, (int)buf);
 }
