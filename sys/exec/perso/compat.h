@@ -14,11 +14,6 @@ int32_t compat_lseek32(int fd, int32_t offset, int whence);
 /* 32-bit time for Y2038-unsafe personalities */
 int32_t compat_time32(int32_t *tloc);
 
-/* Stat function stubs */
-int compat_stat_stub(const char *path, void *buf);
-int compat_lstat_stub(const char *path, void *buf);
-int compat_fstat_stub(int fd, void *buf);
-
 /* FreeBSD-specific translations */
 struct freebsd_stat;
 struct freebsd11_stat;
