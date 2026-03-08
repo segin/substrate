@@ -37,8 +37,10 @@ int udf_add_fid(fs_node_t *dev, struct udf_fe *dir_fe, uint32_t dir_block, const
 // Test infrastructure
 static uint8_t *mock_disk;
 static uint32_t mock_disk_sectors;
+static int mock_fail_sector = -1;
 
 static size_t mock_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+    if (mock_fail_sector != -1 && (int)(offset / UDF_SECTOR_SIZE) == mock_fail_sector) return 0;
     if (offset + size > mock_disk_sectors * UDF_SECTOR_SIZE) return 0;
     memcpy(buffer, mock_disk + offset, size);
     return size;
@@ -231,12 +233,62 @@ void test_vds_crc_mismatch() {
     printf("test_vds_crc_mismatch PASSED\n");
 }
 
+void test_vds_extent_out_of_bounds() {
+    printf("Running test_vds_extent_out_of_bounds...\n");
+    setup_mock_disk(100);
+
+    fs_node_t dev;
+    dev.read = mock_read;
+
+    struct udf_extent_ad vds_extent = { .location = 150, .length = 10 * UDF_SECTOR_SIZE };
+    struct udf_pvd pvd_out;
+    struct udf_pd pd_out;
+    struct udf_lvd lvd_out;
+
+    int ret = udf_read_vds(&dev, &vds_extent, &pvd_out, &pd_out, &lvd_out);
+    assert(ret == -1);
+
+    teardown_mock_disk();
+    printf("test_vds_extent_out_of_bounds PASSED\n");
+}
+
+void test_vds_read_error() {
+    printf("Running test_vds_read_error...\n");
+    setup_mock_disk(100);
+
+    fs_node_t dev;
+    dev.read = mock_read;
+
+    struct udf_extent_ad vds_extent = { .location = 50, .length = 10 * UDF_SECTOR_SIZE };
+    struct udf_pvd pvd_in, pvd_out;
+    struct udf_pd pd_in, pd_out;
+    struct udf_lvd lvd_in, lvd_out;
+
+    memset(&pvd_in, 0, sizeof(pvd_in));
+    memset(&pd_in, 0, sizeof(pd_in));
+    memset(&lvd_in, 0, sizeof(lvd_in));
+
+    write_descriptor(50, UDF_TAG_PRIMARY_VD, &pvd_in, sizeof(pvd_in));
+    write_descriptor(51, UDF_TAG_PARTITION_D, &pd_in, sizeof(pd_in));
+    write_descriptor(52, UDF_TAG_LOGICAL_VD, &lvd_in, sizeof(lvd_in));
+
+    mock_fail_sector = 51;
+    int ret = udf_read_vds(&dev, &vds_extent, &pvd_out, &pd_out, &lvd_out);
+    assert(ret == -1);
+
+    mock_fail_sector = -1;
+    teardown_mock_disk();
+    printf("test_vds_read_error PASSED\n");
+}
+
 int main() {
     test_vds_success();
     test_vds_incomplete();
     test_vds_terminating();
     test_vds_invalid_tag();
     test_vds_crc_mismatch();
+    test_vds_extent_out_of_bounds();
+    test_vds_read_error();
 
     printf("\nAll udf_read_vds tests PASSED!\n");
     return 0;
