@@ -53,6 +53,12 @@ static process_t *alloc_proc(int slot, int pid, int ppid) {
     return proc;
 }
 
+static void assert_group_session_chain(process_t *proc, int sid) {
+    assert(proc->p_pgrp != NULL);
+    assert(proc->p_pgrp->pg_session != NULL);
+    assert(proc->p_pgrp->pg_session->s_sid == sid);
+}
+
 static void test_setsid_and_ids(void) {
     reset_env();
 
@@ -62,10 +68,8 @@ static void test_setsid_and_ids(void) {
 
     assert(sys_setsid() == 10);
     assert(leader->tty == NULL);
-    assert(leader->p_pgrp != NULL);
+    assert_group_session_chain(leader, 10);
     assert(leader->p_pgrp->pg_id == 10);
-    assert(leader->p_pgrp->pg_session != NULL);
-    assert(leader->p_pgrp->pg_session->s_sid == 10);
     assert(sys_getsid(0) == 10);
     assert(sys_getpgid(0) == 10);
 }
@@ -79,17 +83,21 @@ static void test_setpgid_paths(void) {
 
     process_t *child = alloc_proc(1, 21, 20);
     proc_join_pgrp(child, parent->p_pgrp);
+    assert_group_session_chain(parent, 20);
+    assert_group_session_chain(child, 20);
 
     assert(sys_setpgid(21, 0) == 0);
-    assert(child->p_pgrp != NULL);
+    assert_group_session_chain(child, 20);
     assert(child->p_pgrp->pg_id == 21);
     assert(sys_getpgid(21) == 21);
     assert(sys_getsid(21) == 20);
 
     process_t *peer = alloc_proc(2, 22, 20);
     proc_join_pgrp(peer, parent->p_pgrp);
+    assert_group_session_chain(peer, 20);
     assert(sys_setpgid(22, 21) == 0);
     assert(peer->p_pgrp == child->p_pgrp);
+    assert_group_session_chain(peer, 20);
 }
 
 static void test_orphaned_group_signals(void) {

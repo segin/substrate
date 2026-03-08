@@ -20,6 +20,7 @@
 #define TTY_UNLOCK(tty) spinlock_release(&(tty)->lock); intr_restore(_flags)
 
 static struct tty *ttys[64]; // Simple array for now
+void tty_hangup(struct tty *tty);
 
 void tty_default_termios(struct termios *t) {
     if (!t) return;
@@ -620,6 +621,7 @@ int tty_write(struct tty *tty, const char *buf, int len) {
 int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
     if (!tty) return -1;
     int ret = -1;
+    int do_hangup = 0;
 
     TTY_LOCK(tty);
 
@@ -668,19 +670,22 @@ int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
                 ret = -1;
                 break;
             }
-            // If already has ctty and arg!=1, fail?
-            // Simplified: Just set it.
-            if (current_process->tty == NULL || arg == 1) {
-                int cur_sid = current_process->p_pgrp->pg_session->s_sid;
-                int cur_pgrp = current_process->p_pgrp->pg_id;
-                tty->session = cur_sid;
-                tty->pgrp = cur_pgrp;
-                // current_process->tty = fs_node... (Cannot set fs_node here directly without context)
-                // Assuming VFS layer calls this and updates process->tty if success.
-                ret = 0;
+            int cur_sid = current_process->p_pgrp->pg_session->s_sid;
+            int cur_pgrp = current_process->p_pgrp->pg_id;
+
+            /*
+             * The tty must either be unowned, already owned by this session,
+             * or explicitly stolen.
+             */
+            if (tty->session != 0 && tty->session != cur_sid && arg != 1) {
+                ret = -1;
                 break;
             }
-            ret = -1;
+
+            tty->session = cur_sid;
+            tty->pgrp = cur_pgrp;
+            current_process->tty = tty;
+            ret = 0;
             break;
         }
         
@@ -691,9 +696,8 @@ int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
                 cur_sid = current_process->p_pgrp->pg_session->s_sid;
             }
             if (tty->session == cur_sid) {
-                tty->session = 0;
-                tty->pgrp = 0;
-                // current_process->tty = NULL;
+                do_hangup = 1;
+                current_process->tty = NULL;
                 ret = 0;
                 break;
             }
@@ -709,8 +713,12 @@ int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
      * We unlock before calling driver ioctl to allow it to sleep/copyin safely.
      * We assume tty pointer remains valid (held by open file reference).
      */
-    if (ret == -1 && tty->driver->ioctl) {
+    if (ret == -1 && tty->driver && tty->driver->ioctl) {
         ret = tty->driver->ioctl(tty, cmd, (unsigned long)arg);
+    }
+
+    if (ret == 0 && do_hangup) {
+        tty_hangup(tty);
     }
 
     return ret;
