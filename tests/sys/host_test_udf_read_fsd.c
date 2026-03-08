@@ -161,10 +161,59 @@ void test_fsd_invalid_tag() {
     printf("test_fsd_invalid_tag PASSED\n");
 }
 
+void test_fsd_null_dev() {
+    printf("Running test_fsd_null_dev...\n");
+    setup_mock_disk(100);
+
+    struct udf_fs fs;
+    memset(&fs, 0, sizeof(fs));
+    fs.partition_start = 10;
+    fs.sector_size = UDF_SECTOR_SIZE;
+
+    struct udf_lvd lvd;
+    memset(&lvd, 0, sizeof(lvd));
+    lvd.fsd_location.block = 5;
+
+    struct udf_fsd fsd_out;
+
+    int ret = udf_read_fsd(NULL, &fs, &lvd, &fsd_out);
+    assert(ret == -1);
+
+    teardown_mock_disk();
+    printf("test_fsd_null_dev PASSED\n");
+}
+
+void test_fsd_null_read() {
+    printf("Running test_fsd_null_read...\n");
+    setup_mock_disk(100);
+
+    fs_node_t dev;
+    dev.read = NULL;
+
+    struct udf_fs fs;
+    memset(&fs, 0, sizeof(fs));
+    fs.partition_start = 10;
+    fs.sector_size = UDF_SECTOR_SIZE;
+
+    struct udf_lvd lvd;
+    memset(&lvd, 0, sizeof(lvd));
+    lvd.fsd_location.block = 5;
+
+    struct udf_fsd fsd_out;
+
+    int ret = udf_read_fsd(&dev, &fs, &lvd, &fsd_out);
+    assert(ret == -1);
+
+    teardown_mock_disk();
+    printf("test_fsd_null_read PASSED\n");
+}
+
 int main() {
     test_fsd_success();
     test_fsd_read_fail();
     test_fsd_invalid_tag();
+    test_fsd_null_dev();
+    test_fsd_null_read();
 
     printf("\nAll udf_read_fsd tests PASSED!\n");
     return 0;

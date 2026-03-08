@@ -1,3 +1,6 @@
+#define _GNU_SOURCE
+#define _POSIX_C_SOURCE 200809L
+
 #include "cc_frontend.h"
 
 #include <ctype.h>
@@ -1369,6 +1372,7 @@ static int add_builtin_macros(pp_state_t *st) {
     const char *ptrdiff_type = st->target_bits == 32 ? "int" : "long int";
     const char *wchar_type = "int";
     const char *ptr_size = st->target_bits == 32 ? "4" : "8";
+    const char *flt_eval_method = (st->target_bits == 64 || st->target_has_sse2) ? "0" : "2";
     const char *long_max = st->target_bits == 32 ? "2147483647L" : "9223372036854775807L";
     const char *size_max = st->target_bits == 32 ? "4294967295U" : "18446744073709551615UL";
     const char *ptrdiff_max = st->target_bits == 32 ? "2147483647" : "9223372036854775807L";
@@ -1384,6 +1388,12 @@ static int add_builtin_macros(pp_state_t *st) {
     }
     snprintf(stdc_ver, sizeof(stdc_ver), "%dL", st->std_version);
     if (macro_set(&st->macros, "__STDC_VERSION__", 0, 0, NULL, 0, stdc_ver) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__FLT_EVAL_METHOD__", 0, 0, NULL, 0, flt_eval_method) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__FLT_EVAL_METHOD_TS_18661_3__", 0, 0, NULL, 0, flt_eval_method) != 0) {
         return -1;
     }
     if (macro_set(&st->macros, "__GNUC__", 0, 0, NULL, 0, "13") != 0) {
@@ -4759,11 +4769,12 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
         memset(&out, 0, sizeof(out));
         while (expr[i] != '\0') {
             if (is_ident_start((unsigned char)expr[i])) {
+                int at_ident_start = (i == 0 || !is_ident_char((unsigned char)expr[i - 1]));
                 size_t j = i + 1;
                 while (is_ident_char((unsigned char)expr[j])) {
                     j++;
                 }
-                if ((j - i) == 7 && strncmp(expr + i, "defined", 7) == 0) {
+                if (at_ident_start && (j - i) == 7 && strncmp(expr + i, "defined", 7) == 0) {
                     size_t k = j;
                     const char *name_a = NULL;
                     const char *name_b = NULL;
@@ -4824,10 +4835,10 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                     i = k;
                     continue;
                 }
-                if (((j - i) == strlen("__has_include") &&
+                if (at_ident_start && (((j - i) == strlen("__has_include") &&
                      strncmp(expr + i, "__has_include", strlen("__has_include")) == 0) ||
                     ((j - i) == strlen("__has_include_next") &&
-                     strncmp(expr + i, "__has_include_next", strlen("__has_include_next")) == 0)) {
+                     strncmp(expr + i, "__has_include_next", strlen("__has_include_next")) == 0))) {
                     size_t k = j;
                     char inc_spec[PATH_MAX];
                     char inc_path[PATH_MAX];
@@ -4893,7 +4904,7 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                     i = k;
                     continue;
                 }
-                if ((j - i) == strlen("__has_embed") &&
+                if (at_ident_start && (j - i) == strlen("__has_embed") &&
                     strncmp(expr + i, "__has_embed", strlen("__has_embed")) == 0) {
                     size_t k = j;
                     char inc_spec[PATH_MAX];
@@ -4955,7 +4966,7 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                     i = k;
                     continue;
                 }
-                if ((j - i) == strlen("__has_c_attribute") &&
+                if (at_ident_start && (j - i) == strlen("__has_c_attribute") &&
                     strncmp(expr + i, "__has_c_attribute", strlen("__has_c_attribute")) == 0) {
                     size_t k = j;
                     const char *name_a = NULL;
@@ -5015,7 +5026,8 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                     i = k;
                     continue;
                 }
-                if ((j - i) == strlen("__has_feature") && strncmp(expr + i, "__has_feature", strlen("__has_feature")) == 0) {
+                if (at_ident_start &&
+                    (j - i) == strlen("__has_feature") && strncmp(expr + i, "__has_feature", strlen("__has_feature")) == 0) {
                     size_t k = j;
                     const char *name_a = NULL;
                     const char *name_b = NULL;
@@ -5067,7 +5079,7 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                     i = k;
                     continue;
                 }
-                if ((j - i) == strlen("__has_extension") &&
+                if (at_ident_start && (j - i) == strlen("__has_extension") &&
                     strncmp(expr + i, "__has_extension", strlen("__has_extension")) == 0) {
                     size_t k = j;
                     const char *name_a = NULL;
@@ -5120,7 +5132,8 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                     i = k;
                     continue;
                 }
-                if ((j - i) == strlen("__has_builtin") && strncmp(expr + i, "__has_builtin", strlen("__has_builtin")) == 0) {
+                if (at_ident_start &&
+                    (j - i) == strlen("__has_builtin") && strncmp(expr + i, "__has_builtin", strlen("__has_builtin")) == 0) {
                     size_t k = j;
                     const char *name_a = NULL;
                     const char *name_b = NULL;
@@ -5172,7 +5185,7 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                     i = k;
                     continue;
                 }
-                if ((j - i) == strlen("__has_attribute") &&
+                if (at_ident_start && (j - i) == strlen("__has_attribute") &&
                     strncmp(expr + i, "__has_attribute", strlen("__has_attribute")) == 0) {
                     size_t k = j;
                     const char *name_a = NULL;
@@ -5225,7 +5238,7 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                     i = k;
                     continue;
                 }
-                if ((j - i) == strlen("__has_declspec_attribute") &&
+                if (at_ident_start && (j - i) == strlen("__has_declspec_attribute") &&
                     strncmp(expr + i, "__has_declspec_attribute", strlen("__has_declspec_attribute")) == 0) {
                     size_t k = j;
                     const char *name_a = NULL;
@@ -5278,7 +5291,8 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                     i = k;
                     continue;
                 }
-                if ((j - i) == strlen("__has_warning") && strncmp(expr + i, "__has_warning", strlen("__has_warning")) == 0) {
+                if (at_ident_start &&
+                    (j - i) == strlen("__has_warning") && strncmp(expr + i, "__has_warning", strlen("__has_warning")) == 0) {
                     size_t k = j;
                     int has_v = 0;
                     while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
@@ -5332,7 +5346,7 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                     i = k;
                     continue;
                 }
-                if ((j - i) == strlen("__is_identifier") &&
+                if (at_ident_start && (j - i) == strlen("__is_identifier") &&
                     strncmp(expr + i, "__is_identifier", strlen("__is_identifier")) == 0) {
                     size_t k = j;
                     const char *name_a = NULL;
