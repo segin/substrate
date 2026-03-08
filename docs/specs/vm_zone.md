@@ -105,6 +105,10 @@ Supported policy flags include:
 The implementation also keeps a global slab hash so frees can validate that an
 object belongs to the expected zone before returning it.
 
+Zones may also register an optional reclaim callback. `uma_reclaim()` first
+drains bucket/slab caches for each zone, then invokes that zone callback so
+subsystem-specific caches can release additional memory under pressure.
+
 ## Constraints
 - bootstrap zone metadata is finite until dynamic allocation is enabled
 - bucket arrays are statically bounded by `MAX_CPUS`

@@ -331,6 +331,7 @@ uma_zone_t *uma_zcreate(
     zone->uz_dtor = dtor;
     zone->uz_init = init;
     zone->uz_fini = fini;
+    zone->uz_reclaim = NULL;
     zone->uz_arg = NULL;
     
     /* Initialize per-CPU cache */
@@ -954,6 +955,10 @@ void uma_reclaim(void) {
             uma_slab_free(zone, slab);
         }
         zone->uz_free_slabs = NULL;
+
+        if (zone->uz_reclaim) {
+            zone->uz_reclaim();
+        }
     }
 }
 
@@ -995,6 +1000,13 @@ int uma_zone_reserve(uma_zone_t *zone, int count) {
 int uma_zone_check_leaks(uma_zone_t *zone) {
     if (!zone) return 0;
     return zone->uz_count;
+}
+
+void uma_zone_set_reclaim(uma_zone_t *zone, uma_reclaim_t reclaim) {
+    if (!zone) {
+        return;
+    }
+    zone->uz_reclaim = reclaim;
 }
 
 /*

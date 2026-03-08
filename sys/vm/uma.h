@@ -123,6 +123,7 @@ struct uma_zone {
     uma_dtor            uz_dtor;        /* Destructor */
     uma_init            uz_init;        /* One-time init per object */
     uma_fini            uz_fini;        /* One-time fini per object */
+    uma_reclaim_t       uz_reclaim;     /* Optional shrinker callback */
     void                *uz_arg;        /* Argument to ctor/dtor */
     
     /* Flags */
@@ -181,6 +182,9 @@ void uma_zfree(uma_zone_t *zone, void *item);
 
 /* Reclaim memory from all zones */
 void uma_reclaim(void);
+
+/* Install or replace the optional zone shrinker callback. */
+void uma_zone_set_reclaim(uma_zone_t *zone, uma_reclaim_t reclaim);
 
 /* Set zone maximum (0 = unlimited) */
 void uma_zone_set_max(uma_zone_t *zone, int max);

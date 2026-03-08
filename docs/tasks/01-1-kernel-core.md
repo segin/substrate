@@ -588,11 +588,11 @@
                 - [ ] Internal doc: COW shadow chain and collapse algorithm. (REQ: REQ-01-0514)
                 - [ ] Internal doc: pager interface contract. (REQ: REQ-01-0515)
 
-    - [ ] **Kernel Allocator (UMA/Slab):** (REQ: REQ-01-0516)
+    - [x] **Kernel Allocator (UMA/Slab):** (REQ: REQ-01-0516)
 
         > **Files:** `sys/vm/uma_core.c`, `sys/vm/vm_kmem.c`.
 
-        - [ ] **UMA Core (`uma_core.c`):** (REQ: REQ-01-0517)
+        - [x] **UMA Core (`uma_core.c`):** (REQ: REQ-01-0517)
             - [x] Zone creation: `uma_zcreate(name, size, ctor, dtor, init, fini, align, flags)`. (REQ: REQ-01-0518)
             - [x] Zone destruction: `uma_zdestroy(zone)`. (REQ: REQ-01-0519)
             - [x] `uma_zalloc(zone, flags)`: allocate object from zone. (REQ: REQ-01-0520)
@@ -613,8 +613,8 @@
                 - [x] `dtor` callback on free (before fini). (REQ: REQ-01-0535)
                 - [x] `init` once per slab object lifetime. (REQ: REQ-01-0536)
                 - [x] `fini` once when slab freed. (REQ: REQ-01-0537)
-            - [ ] **Reclamation:** (REQ: REQ-01-0538)
-                - [ ] Shrinker callbacks to free unused slabs under memory pressure. (REQ: REQ-01-0539)
+            - [x] **Reclamation:** (REQ: REQ-01-0538)
+                - [x] Shrinker callbacks to free unused slabs under memory pressure. (REQ: REQ-01-0539)
                 - [x] Bucket draining back to slabs. (REQ: REQ-01-0540)
                 - [x] Memory pressure feedback integration with page daemon. (REQ: REQ-01-0541)
         - [x] **Debugging & Safety:** (REQ: REQ-01-0542)
@@ -628,7 +628,7 @@
             - [x] Large allocations: bypass UMA for >4 KB (direct PMM contiguous allocation). (REQ: REQ-01-0550)
             - [x] `krealloc(ptr, size)`: resize allocation. (REQ: REQ-01-0551)
             - [x] Statistics: track memory usage by allocator class (size bucket vs large PMM path). (REQ: REQ-01-0552)
-        - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+        - [x] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
             - [x] Unit: zone create/alloc/free/destroy lifecycle. (REQ: REQ-01-0554)
             - [x] Unit: per-CPU cache hit/miss paths. (REQ: REQ-01-0555)
             - [x] Unit: slab allocation and free list integrity. (REQ: REQ-01-0556)
