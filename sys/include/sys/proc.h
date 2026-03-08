@@ -191,6 +191,7 @@ typedef struct thread {
     // Trap signal info (for SA_SIGINFO from trapsignal)
     int           trap_signo;     // Signal number from trap
     int           trap_code;      // Trap-specific code (si_code)
+    uintptr_t     trap_addr;      // Fault address for siginfo_t.si_addr when applicable
     
     // Robust futex list (for owner death cleanup)
     struct robust_list_head *robust_list;

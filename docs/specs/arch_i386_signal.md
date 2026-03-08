@@ -69,6 +69,14 @@ void handler(int sig, siginfo_t *info, void *ucontext);
 `sys_rt_sigreturn()` restores the machine context from the embedded
 `ucontext_t`, including the saved signal mask.
 
+For synchronous trap delivery, the embedded `siginfo_t` carries:
+
+- `si_signo`: delivered native signal number
+- `si_code`: native Substrate trap code such as `SEGV_MAPERR`,
+  `SEGV_ACCERR`, `FPE_INTDIV`, or `ILL_ILLOPC`
+- `si_addr`: fault address for page faults or faulting `EIP` for instruction
+  traps when available
+
 ## Alternate Signal Stack
 
 If `SA_ONSTACK` is set and the thread has an enabled alternate signal stack,
@@ -92,6 +100,11 @@ Two fixed trampoline entry points are exposed:
 
 The trampolines execute the matching `sigreturn` syscall so user handlers do
 not need to issue those syscalls manually.
+
+Compatibility personalities may use different frame builders and trampoline
+contracts. In particular, the Linux personality emits Linux-compatible
+`sigframe` and `rt_sigframe` layouts while leaving the native Substrate signal
+policy unchanged.
 
 ## Frame Validation
 

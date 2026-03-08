@@ -62,6 +62,16 @@ static void signal_resume_process_threads(process_t *p) {
     }
 }
 
+static void signal_clear_trap_context(thread_t *t, int sig) {
+    if (!t || t->trap_signo != sig) {
+        return;
+    }
+
+    t->trap_signo = 0;
+    t->trap_code = 0;
+    t->trap_addr = 0;
+}
+
 // Signal System Calls
 int kern_sigaction(int sig, const struct sigaction *act, struct sigaction *oact) {
     if (sig <= 0 || sig > NSIG || sig == SIGKILL || sig == SIGSTOP) return -1;
@@ -542,6 +552,7 @@ void trapsignal(process_t *p, int sig, int code) {
         /* Store trap info in thread's pending siginfo for later delivery */
         current_thread->trap_signo = sig;
         current_thread->trap_code = code;
+        current_thread->trap_addr = 0;
         
         /* Set signal pending on this specific thread */
         current_thread->sig_pending |= sigmask(sig);
@@ -747,11 +758,13 @@ void signal_handle_pending(registers_t *regs) {
     struct sigaction *act = &current_process->sig_actions[sig - 1];
 
     if (act->sa_handler == SIG_IGN) {
+        signal_clear_trap_context(current_thread, sig);
         return;
     } else if (act->sa_handler == SIG_DFL) {
         // Default actions
         if (sig == SIGINT || sig == SIGTERM || sig == SIGSEGV || sig == SIGILL || sig == SIGFPE) {
             // Init Protection: PID 1 ignores fatal signals with default action
+            signal_clear_trap_context(current_thread, sig);
             if (current_process->pid == 1) return;
             sigexit(current_process, sig);
             return;
@@ -772,12 +785,13 @@ void signal_handle_pending(registers_t *regs) {
                  !(current_process->p_parent->sig_actions[SIGCHLD-1].sa_flags & SA_NOCLDSTOP)) {
                  psignal(current_process->p_parent, SIGCHLD);
              }
-             
+             signal_clear_trap_context(current_thread, sig);
              sched_yield();
              return;
         }
         
         // Ignore others by default (like SIGCHLD, SIGCONT if not stopped)
+        signal_clear_trap_context(current_thread, sig);
         return;
     }
 
@@ -821,6 +835,7 @@ void signal_handle_pending(registers_t *regs) {
         extern void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t *regs);
         sendsig(handler, sig, old_mask, flags, regs);
     }
+    signal_clear_trap_context(current_thread, sig);
 
     // Set P_CONTINUED was already done in psignal for SIGCONT, 
     // but if we delivered it to a handler, the app is "officially" continued.

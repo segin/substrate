@@ -3,12 +3,13 @@
 ## Overview
 
 Substrate implements process-directed and trap-directed signals with its own
-native contract, currently BSD-shaped for job control and default-action
-behavior, with i386 signal-frame delivery.
+native contract, currently BSD-shaped for job control, default-action
+behavior, and synchronous fault delivery, with i386 signal-frame delivery.
 
 Linux personality support is layered on top of this kernel contract. The
-personality is responsible for exposing Linux ABI entry points and user-visible
-Linux conventions without redefining the native Substrate signal model.
+personality is responsible for exposing Linux signal numbers, frame layouts,
+and sigreturn ABI entry points without redefining the native Substrate signal
+model.
 
 The signal path is split into four phases:
 
@@ -55,9 +56,22 @@ Only interruptible sleepers are woken for asynchronous signal delivery.
 ### Trap Signals
 
 `trapsignal()` is synchronous. It targets the current faulting thread, stores
-`trap_signo` and `trap_code` on that thread, and marks the signal pending on
-that thread only. If the current thread does not match the target process, the
-kernel falls back to `psignal()`.
+`trap_signo`, `trap_code`, and fault address metadata on that thread, and marks
+the signal pending on that thread only. If the current thread does not match
+the target process, the kernel falls back to `psignal()`.
+
+Native i386 exception mapping currently includes:
+
+- divide-by-zero -> `SIGFPE` / `FPE_INTDIV`
+- breakpoint -> `SIGTRAP` / `TRAP_BRKPT`
+- single-step debug trap -> `SIGTRAP` / `TRAP_TRACE`
+- invalid opcode -> `SIGILL` / `ILL_ILLOPC`
+- general-protection fault -> `SIGILL` / `ILL_PRVOPC`
+- page fault -> `SIGSEGV` / `SEGV_MAPERR` or `SEGV_ACCERR`
+
+For page faults, `siginfo_t.si_addr` carries the faulting virtual address. For
+invalid-opcode and protection-fault cases, `si_addr` carries the faulting
+instruction pointer.
 
 ## Checking Points
 
@@ -106,3 +120,18 @@ process state plus `P_WAITED` / `P_CONTINUED`.
 
 The i386 frame layout, trampoline contract, and sigreturn restore rules are
 documented in [arch_i386_signal.md](./arch_i386_signal.md).
+
+## Personality Boundary
+
+Native Substrate signal behavior is the kernel's source of truth:
+
+- BSD-shaped default action and job-control semantics
+- native `sigprop[]` policy
+- native `si_code` namespace for synchronous traps
+
+Compatibility personalities adapt that internal contract at the ABI edge:
+
+- Linux personality remaps signal numbers and builds Linux `sigframe` /
+  `rt_sigframe` layouts
+- FreeBSD personality uses its own legacy frame ABI while preserving native
+  kernel stop/continue/exit policy

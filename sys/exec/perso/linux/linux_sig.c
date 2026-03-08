@@ -31,10 +31,12 @@ static void populate_linux_siginfo(linux_siginfo_t *info, int sig, int code) {
         }
     } else {
         /* Trap/Fault signals */
-        /* If we had fault address, we would set it in _sifields._sigfault._addr */
-        /* Currently native kernel doesn't pass it easily, but simple faults */
-        /* rely on si_code mostly. */
-        info->_sifields._sigfault._addr = NULL;
+        if (current_thread && current_thread->trap_signo == linux_to_native_signal(sig)) {
+            info->_sifields._sigfault._addr =
+                (void *)(uintptr_t)current_thread->trap_addr;
+        } else {
+            info->_sifields._sigfault._addr = NULL;
+        }
     }
 }
 

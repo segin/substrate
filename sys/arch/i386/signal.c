@@ -37,6 +37,49 @@
 #include <arch/i386/signal_arch.h>
 #include <string.h>
 
+int i386_trap_to_signal(const registers_t *regs, uint32_t cr2, int *sig,
+                        int *code, uintptr_t *addr) {
+    if (!regs || !sig || !code || !addr) {
+        return 0;
+    }
+
+    *sig = 0;
+    *code = 0;
+    *addr = 0;
+
+    switch (regs->int_no) {
+        case 0:
+            *sig = SIGFPE;
+            *code = FPE_INTDIV;
+            return 1;
+        case 1:
+            *sig = SIGTRAP;
+            *code = TRAP_TRACE;
+            return 1;
+        case 3:
+            *sig = SIGTRAP;
+            *code = TRAP_BRKPT;
+            return 1;
+        case 6:
+            *sig = SIGILL;
+            *code = ILL_ILLOPC;
+            *addr = regs->eip;
+            return 1;
+        case 13:
+            *sig = SIGILL;
+            *code = ILL_PRVOPC;
+            *addr = regs->eip;
+            return 1;
+        case 14:
+            *sig = SIGSEGV;
+            *code = (regs->err_code & 0x1) ? SEGV_ACCERR : SEGV_MAPERR;
+            *addr = cr2;
+            return 1;
+        default:
+            return 0;
+    }
+}
+
 
 
 /*
@@ -56,8 +99,11 @@ static void populate_siginfo(siginfo_t *info, int sig, int code) {
         info->si_uid = current_process->uid;
     }
     
-    /* For fault signals, si_addr would be set by the trap handler */
-    info->si_addr = NULL;
+    if (current_thread && current_thread->trap_signo == sig) {
+        info->si_addr = (void *)(uintptr_t)current_thread->trap_addr;
+    } else {
+        info->si_addr = NULL;
+    }
     info->si_status = 0;
 }
 
@@ -196,7 +242,11 @@ void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t 
         sif.ucontext_ptr = esp + offsetof(struct siginfo_frame, uc);
         
         /* Populate the siginfo_t structure */
-        populate_siginfo(&sif.info, sig, 0);  /* code = 0 for now, trap handler sets specific codes */
+        if (current_thread && current_thread->trap_signo == sig) {
+            populate_siginfo(&sif.info, sig, current_thread->trap_code);
+        } else {
+            populate_siginfo(&sif.info, sig, SI_USER);
+        }
         
         /* Populate the ucontext_t structure */
         populate_ucontext(&sif.uc, mask, regs);

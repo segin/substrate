@@ -189,10 +189,64 @@ static void test_siginfo_sendsig_and_rt_sigreturn(void) {
     assert(thread.sig_mask == 0x55AA55AAu);
 }
 
+static void test_siginfo_uses_trap_metadata(void) {
+    reset_env();
+
+    thread.trap_signo = SIGSEGV;
+    thread.trap_code = SEGV_ACCERR;
+    thread.trap_addr = 0xDEADBEEFu;
+
+    sendsig((sig_t)0x0804BBBB, SIGSEGV, 0x01020304u, SA_SIGINFO, &regs);
+
+    assert(sigexit_called == 0);
+    assert(regs.eip == 0x0804BBBB);
+
+    struct siginfo_frame *frame = (struct siginfo_frame *)(uintptr_t)regs.useresp;
+    assert(frame->info.si_signo == SIGSEGV);
+    assert(frame->info.si_code == SEGV_ACCERR);
+    assert((uintptr_t)frame->info.si_addr == 0xDEADBEEFu);
+}
+
+static void test_i386_trap_to_signal_mapping(void) {
+    int sig;
+    int code;
+    uintptr_t addr;
+
+    reset_env();
+
+    regs.int_no = 0;
+    assert(i386_trap_to_signal(&regs, 0, &sig, &code, &addr) == 1);
+    assert(sig == SIGFPE);
+    assert(code == FPE_INTDIV);
+    assert(addr == 0);
+
+    regs.int_no = 6;
+    regs.eip = 0x08041234;
+    assert(i386_trap_to_signal(&regs, 0, &sig, &code, &addr) == 1);
+    assert(sig == SIGILL);
+    assert(code == ILL_ILLOPC);
+    assert(addr == 0x08041234u);
+
+    regs.int_no = 14;
+    regs.err_code = 0;
+    assert(i386_trap_to_signal(&regs, 0xCAFEBABEu, &sig, &code, &addr) == 1);
+    assert(sig == SIGSEGV);
+    assert(code == SEGV_MAPERR);
+    assert(addr == 0xCAFEBABEu);
+
+    regs.err_code = 1;
+    assert(i386_trap_to_signal(&regs, 0xFEEDFACEu, &sig, &code, &addr) == 1);
+    assert(sig == SIGSEGV);
+    assert(code == SEGV_ACCERR);
+    assert(addr == 0xFEEDFACEu);
+}
+
 int main(void) {
     setup_user_stack();
     test_legacy_sendsig_and_sigreturn();
     test_siginfo_sendsig_and_rt_sigreturn();
+    test_siginfo_uses_trap_metadata();
+    test_i386_trap_to_signal_mapping();
     puts("host_test_i386_signal: PASS");
     return 0;
 }
