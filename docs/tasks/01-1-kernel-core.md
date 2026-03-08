@@ -1011,11 +1011,11 @@
             - [x] Internal doc: i386 signal frame layout. (REQ: REQ-01-0855)
             - [x] Internal doc: signal checking points and SA_RESTART logic. (REQ: REQ-01-0856)
 
-    - [ ] **Refactor kmain:** (REQ: REQ-01-0857)
-        - [ ] Move early i386 boot code to `sys/arch/i386/early_boot.c`. (REQ: REQ-01-0858)
-        - [ ] Create `init_memory` helper. (REQ: REQ-01-0859)
-        - [ ] Create `init_root_fs` helper. (REQ: REQ-01-0860)
-        - [ ] Clean up `kmain` flow. (REQ: REQ-01-0861)
+    - [x] **Refactor kmain:** (REQ: REQ-01-0857)
+        - [x] Move early i386 boot code to `sys/arch/i386/early_boot.c`. (REQ: REQ-01-0858)
+        - [x] Create `init_memory` helper. (REQ: REQ-01-0859)
+        - [x] Create `init_root_fs` helper. (REQ: REQ-01-0860)
+        - [x] Clean up `kmain` flow. (REQ: REQ-01-0861)
 
     - [ ] **Kernel Core Maintenance:** (REQ: REQ-01-0862)
         - [x] Refactor `spinlock.c` to use GCC C11 atomic builtins. (REQ: REQ-01-0863)

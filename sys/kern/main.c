@@ -179,6 +179,202 @@ static int parse_console_serial_index(const char *value) {
     return value[6] - '0';
 }
 
+static void register_boot_ramdisks(multiboot_info_t *mboot_info);
+static void init_root_fs(void);
+
+static multiboot_info_t *select_boot_info(unsigned long magic, unsigned long addr,
+                                          char **cmdline_out) {
+    multiboot_info_t *mboot_info = (multiboot_info_t *)addr;
+    static multiboot_info_t fake_mbi;
+
+    if (cmdline_out) {
+        *cmdline_out = NULL;
+    }
+
+    if (magic == FREEBSD_LOADER_MAGIC) {
+        memset(&fake_mbi, 0, sizeof(fake_mbi));
+        mboot_info = &fake_mbi;
+        kprint("Booted via FreeBSD loader.\n");
+        return mboot_info;
+    }
+
+    if (magic == MULTIBOOT_BOOTLOADER_MAGIC) {
+        if (cmdline_out && (mboot_info->flags & MULTIBOOT_INFO_CMDLINE)) {
+            *cmdline_out = (char *)VIRTUAL_d(mboot_info->cmdline);
+        }
+        return mboot_info;
+    }
+
+    kprint("Warning: Unknown bootloader magic, assuming raw boot.\n");
+    return NULL;
+}
+
+static int init_cmdline_policy(const char *cmdline) {
+    int cmdline_serial_console = -1;
+    char console_param[32] = {0};
+
+    if (cmdline) {
+        cmdline_init(cmdline);
+    } else {
+        cmdline_init("");
+    }
+    kprint("\n");
+
+    if (cmdline_get("console", console_param, sizeof(console_param)) != 0) {
+        return -1;
+    }
+
+    if (strcmp(console_param, "console0") == 0) {
+        kprint("console=console0: default console configuration.\n");
+        return -1;
+    }
+
+    cmdline_serial_console = parse_console_serial_index(console_param);
+    if (cmdline_serial_console < 0) {
+        kprint("Unknown console= value: ");
+        kprint(console_param);
+        kprint(" (expected console0 or serial0..serial3)\n");
+    }
+
+    return cmdline_serial_console;
+}
+
+static void init_runtime_console(int serial_console) {
+    console_init();
+    hw_text_init();
+
+    if (serial_console >= 0 && uart_select_port((uint32_t)serial_console) == 0) {
+        kprintf("console=serial%d selected (COM%d).\n",
+                serial_console, serial_console + 1);
+    }
+    uart_init();
+
+    if (cmdline_has("serial_debug") || serial_console >= 0) {
+        serial_debug_enabled = 1;
+        console_register(uart_get_console());
+        kprint("Serial Debug Enabled.\n");
+    }
+
+    if (cmdline_has("syscall_trace") || cmdline_has("syscall_log")) {
+        syscall_trace_enabled = 1;
+        kprint("Syscall Tracing Enabled.\n");
+    }
+}
+
+static void init_core_subsystems(multiboot_info_t *mboot_info) {
+    percpu_init();
+
+    gdt_init();
+    kprint("GDT Initialized.\n");
+
+    idt_init();
+
+    extern void fpu_init(void);
+    fpu_init();
+
+    rtc_init();
+    pmap_bootstrap();
+
+    smp_discover_cores();
+
+    lapic_init();
+    lapic_enable(0xFF);
+
+    extern void pmap_map_trampoline(void);
+    pmap_map_trampoline();
+
+    extern void random_init(void);
+    random_init();
+
+    crc32_init();
+
+    geom_init();
+    geom_gpt_init();
+    geom_mbr_init();
+    geom_bsd_init();
+
+    sched_init();
+    kprint("Scheduler Initialized.\n");
+
+    if (smp_get_cpu_count() > 1) {
+        smp_boot_all_aps();
+        sched_smp_init(smp_get_cpu_count());
+    }
+
+    extern void sysctl_init(void);
+    sysctl_init();
+
+    keyboard_init();
+    if (mboot_info) {
+        fb_init(mboot_info);
+    }
+}
+
+static void init_storage_and_vfs(multiboot_info_t *mboot_info) {
+    pci_init();
+    ide_init();
+    virtio_init();
+    register_boot_ramdisks(mboot_info);
+    ntsync_init();
+
+    run_kernel_tests();
+
+    vfs_init();
+    console_register_devfs();
+    init_root_fs();
+}
+
+static void reclaim_bootloader_state(void) {
+    multiboot_info_t *orig_mbi;
+    uint32_t mods_addr = 0;
+    int has_mods = 0;
+
+    pmm_reclaim_setup();
+
+    if (!mboot_orig_addr) {
+        return;
+    }
+
+    orig_mbi = (multiboot_info_t *)mboot_orig_addr;
+    if (orig_mbi->flags & MULTIBOOT_INFO_MODS) {
+        has_mods = 1;
+        mods_addr = orig_mbi->mods_addr;
+    }
+
+    kprint("Freeing Multiboot info: 4K\n");
+    pmm_reclaim_range(mboot_orig_addr, mboot_orig_addr + 4096);
+
+    if (has_mods) {
+        kprint("Freeing Multiboot modules list: 4K\n");
+        pmm_reclaim_range(mods_addr, mods_addr + 4096);
+    }
+}
+
+static void print_boot_diagnostics(void) {
+    char full_cmd[512] = {0};
+
+    if (cmdline_get_full(full_cmd, sizeof(full_cmd)) == 0) {
+        kprint("Boot Args: ");
+        kprint(full_cmd);
+        kprint("\n");
+    }
+
+    if (serial_debug_enabled) {
+        kprint("Serial Debug Enabled.\n");
+    }
+
+    kprint("IDT Initialized.\n");
+}
+
+static void enter_kernel_idle_loop(void) __attribute__((noreturn));
+static void enter_kernel_idle_loop(void) {
+    kprint("Entering main loop...\n");
+    while (1) {
+        sched_yield();
+        __asm__ volatile("sti; hlt");
+    }
+}
+
 static void register_boot_ramdisks(multiboot_info_t *mboot_info) {
     if (!mboot_info) return;
     if (!(mboot_info->flags & MULTIBOOT_INFO_MODS)) return;
@@ -376,223 +572,32 @@ void kmain(unsigned long magic, unsigned long addr) {
     
     early_uart_print("KMAIN START\n");
     mboot_orig_addr = addr;
-    // 0. Setup Kernel Task IMMEDIATELY
+
     early_uart_print("KMAIN: pm_init\n");
     pm_init();
     current_process = &processes[0];
     current_process->pid = 0;
     strcpy(current_process->comm, "(swapper)");
 
-    // 2. Process Multiboot Info EARLY to get cmdline
-    // Note: boot.S already converted 'addr' (mboot_info) to Higher Half Virtual Address.
-    // However, pointers *inside* the struct (like cmdline, mmap_addr) are still PHYSICAL.
-    multiboot_info_t *mboot_info = (multiboot_info_t *)addr;
-    static multiboot_info_t fake_mbi;
+    // boot.S converts the Multiboot info pointer to higher-half virtual, but
+    // pointers inside the structure remain physical until translated here.
+    multiboot_info_t *mboot_info;
     char *cmdline = NULL;
-    int cmdline_serial_console = -1;
-    char console_param[32] = {0};
+    int cmdline_serial_console;
 
-    if (magic == FREEBSD_LOADER_MAGIC) {
-        memset(&fake_mbi, 0, sizeof(fake_mbi));
-        mboot_info = &fake_mbi;
-         kprint("Booted via FreeBSD loader.\n");
-    } else if (magic == MULTIBOOT_BOOTLOADER_MAGIC) {
-        if (mboot_info->flags & MULTIBOOT_INFO_CMDLINE) {
-            // cmdline pointer is physical, convert to virtual
-            cmdline = (char *)VIRTUAL_d(mboot_info->cmdline);
-        }
-    } else {
-         kprint("Warning: Unknown bootloader magic, assuming raw boot.\n");
-         mboot_info = NULL; 
-    }
+    mboot_info = select_boot_info(magic, addr, &cmdline);
+    cmdline_serial_console = init_cmdline_policy(cmdline);
 
-    // 4. Initialize Command Line Parser
-    if (cmdline) {
-        cmdline_init(cmdline);
-    } else {
-        cmdline_init("");
-    }
-    kprint("\n");
-
-    if (cmdline_get("console", console_param, sizeof(console_param)) == 0) {
-        if (strcmp(console_param, "console0") == 0) {
-            kprint("console=console0: default console configuration.\n");
-        } else {
-            cmdline_serial_console = parse_console_serial_index(console_param);
-            if (cmdline_serial_console < 0) {
-                kprint("Unknown console= value: ");
-                kprint(console_param);
-                kprint(" (expected console0 or serial0..serial3)\n");
-            }
-        }
-    }
-
-
-    // SMP Discovery (before memory init so UMA knows CPU count)
     smp_init();
-
-    // Memory Subsystem Init (PMM, VM, UMA)
     init_memory(mboot_info);
+    init_runtime_console(cmdline_serial_console);
 
-    console_init();
-    hw_text_init(); // Registers VGA text console
-    if (cmdline_serial_console >= 0 && uart_select_port((uint32_t)cmdline_serial_console) == 0) {
-        kprintf("console=serial%d selected (COM%d).\n",
-                cmdline_serial_console, cmdline_serial_console + 1);
-    }
-    uart_init(); // Initializes UART hardare
-
-    // Check for serial debug (MUST be after console_init which clears backends)
-    if (cmdline_has("serial_debug") || cmdline_serial_console >= 0) {
-        serial_debug_enabled = 1;
-        console_register(uart_get_console());
-        kprint("Serial Debug Enabled.\n");
-    }
-    
-    if (cmdline_has("syscall_trace") || cmdline_has("syscall_log")) {
-        syscall_trace_enabled = 1;
-        kprint("Syscall Tracing Enabled.\n");
-    }
-
-    // Display kernel ident banner (mirrored if serial_debug_enabled)
     kprint(OS_NAME " kernel v" OS_VERSION " (i386)\n");
-
-    // Initialize per-CPU backing storage before CPU-local GDT/TSS setup.
-    percpu_init();
-
-    // Initialize GDT
-    gdt_init();
-    kprint("GDT Initialized.\n");
-
-    // Initialize IDT immediately after GDT to catch early exceptions
-    idt_init();
-    
-    // Initialize FPU (needs IDT for #NM handler)
-    extern void fpu_init(void);
-    fpu_init();
-
-    // Initialize RTC and set system time
-    rtc_init();
-
-    // Initialize PMAP (Paging) - maps LAPIC and sets up recursive paging
-    pmap_bootstrap();
-
-    // Re-run SMP discovery now that the full higher-half direct map exists.
-    smp_discover_cores();
-
-    // Initialize BSP LAPIC before any SMP bootstrap activity.
-    lapic_init();
-    lapic_enable(0xFF);
-    
-    // Map Signal Trampoline Page (VDSO)
-    extern void pmap_map_trampoline(void);
-    pmap_map_trampoline();
-    
-    // Initialize Random Number Generator
-    extern void random_init(void);
-    random_init();
-
-    // Initialize CRC32 table (used by storage/GPT)
-    crc32_init();
-
-    // Initialize partition detection before block providers enumerate disks.
-    geom_init();
-    geom_gpt_init();
-    geom_mbr_init();
-    geom_bsd_init();
-
-    // Initialize Scheduler
-    sched_init();
-    kprint("Scheduler Initialized.\n");
-
-    if (smp_get_cpu_count() > 1) {
-        smp_boot_all_aps();
-        sched_smp_init(smp_get_cpu_count());
-    }
-
-    // Initialize Sysctl Subsystem
-    extern void sysctl_init(void);
-    sysctl_init();
-    
-    keyboard_init();
-    
-    // Initialize Framebuffer Console (if available) - Defer until paging is up
-    if (mboot_info) {
-        fb_init(mboot_info);
-    }
-    
-
-    // Diagnostic: Print command line
-    char full_cmd[512] = {0};
-    if (cmdline_get_full(full_cmd, sizeof(full_cmd)) == 0) {
-        kprint("Boot Args: ");
-        kprint(full_cmd);
-        kprint("\n");
-    }
-    
-    if (serial_debug_enabled) {
-        kprint("Serial Debug Enabled.\n");
-    }
-    
-    kprint("IDT Initialized.\n");
-
-    // 4. Hardware Discovery - PCI Bus Scan, Storage Controllers
-    pci_init();
-    ide_init();
-    virtio_init();
-    register_boot_ramdisks(mboot_info);
-    ntsync_init();
-    
-    // Run Kernel Tests (if requested via cmdline 'test=...')
-    run_kernel_tests();
-    
-    // Initialize VFS (handles filesystem registration and pseudo-fs mounts)
-    vfs_init();
-    
-    // Register console device in /dev
-    console_register_devfs();
-    
-    // Mount Root Filesystem
-    init_root_fs();
-
-    // Create Init Task
-    // We pass cmdline to it
+    init_core_subsystems(mboot_info);
+    print_boot_diagnostics();
+    init_storage_and_vfs(mboot_info);
     sched_spawn_kernel_process(init_task, cmdline);
-
-    // Start VM background workers after init is created so PID 1 remains init.
     vm_page_late_init();
-
-    // Reclaim early boot code
-    pmm_reclaim_setup();
-    
-    // Reclaim original multiboot info (1 page)
-    // We want to reclaim the ORIGINAL mods_addr from the bootloader.
-    // We must read it from the MBI *before* we reclaim the MBI memory!
-    
-    // Note: mboot_orig_addr is already Virtual (passed from boot.S)
-    multiboot_info_t *orig_mbi = (multiboot_info_t*)mboot_orig_addr;
-    uint32_t mods_addr = 0;
-    int has_mods = 0;
-    
-    if (mboot_orig_addr) {
-        if (orig_mbi->flags & MULTIBOOT_INFO_MODS) {
-            has_mods = 1;
-            mods_addr = orig_mbi->mods_addr;
-        }
-        
-        kprint("Freeing Multiboot info: 4K\n");
-        pmm_reclaim_range(mboot_orig_addr, mboot_orig_addr + 4096);
-    }
-    
-    if (has_mods) {
-        kprint("Freeing Multiboot modules list: 4K\n");
-        pmm_reclaim_range(mods_addr, mods_addr + 4096);
-    }
-
-    kprint("Entering main loop...\n");
-    while (1) {
-        sched_yield();
-        // Halt until next interrupt (power efficient idle)
-        __asm__ volatile("sti; hlt");
-    }
+    reclaim_bootloader_state();
+    enter_kernel_idle_loop();
 }
