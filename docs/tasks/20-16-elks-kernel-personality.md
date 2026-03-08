@@ -11,69 +11,69 @@ Reference: User Request (Step 31552)
 > [!NOTE]
 > ELKS (Embeddable Linux Kernel Subset) is a 16-bit Linux-like OS for 8086/80286. This personality enables running ELKS binaries on Substrate using LDT-based 16-bit protected mode segments.
 
-- [x] **Design & Specification:** (REQ: REQ-20-0001)
-    - [x] Produce ELKS personality specification document. (REQ: REQ-20-0002)
+- [ ] **Design & Specification:** (REQ: REQ-20-0001)
+    - [ ] Produce ELKS personality specification document. (REQ: REQ-20-0002)
         - Files: `docs/personality/elks_spec.md`
         - Tests: N/A (design doc)
         - Docs: `elks_spec.md`
         - Acceptance: Document covers binary format recognition, ABI semantics (syscalls, signal model), data models (near/far pointers), and expected process environment.
-    - [x] Define ELKS syscall table mapping to Substrate equivalents. (REQ: REQ-20-0003)
+    - [ ] Define ELKS syscall table mapping to Substrate equivalents. (REQ: REQ-20-0003)
         - Files: `docs/personality/elks_syscalls.md`, `sys/exec/perso/elks_syscall_table.h`
         - Tests: N/A (design doc)
         - Docs: `elks_syscalls.md`
         - Acceptance: Complete mapping table with supported/unsupported syscalls documented.
-    - [x] Define ELKS signal model and mapping to POSIX signals. (REQ: REQ-20-0004)
+    - [ ] Define ELKS signal model and mapping to POSIX signals. (REQ: REQ-20-0004)
         - Files: `docs/personality/elks_spec.md`
         - Tests: N/A (design doc)
         - Acceptance: Signal numbers and semantics documented.
-    - [x] Define ELKS memory model (tiny/small/medium/compact/large). (REQ: REQ-20-0005)
+    - [ ] Define ELKS memory model (tiny/small/medium/compact/large). (REQ: REQ-20-0005)
         - Files: `docs/personality/elks_spec.md`
         - Tests: N/A (design doc)
         - Acceptance: Each memory model's segment layout documented.
 
-- [x] **Binary Format Recognition:** (REQ: REQ-20-0006)
-    - [x] Implement ELKS a.out binary format detection. (REQ: REQ-20-0007)
+- [ ] **Binary Format Recognition:** (REQ: REQ-20-0006)
+    - [ ] Implement ELKS a.out binary format detection. (REQ: REQ-20-0007)
         - Files: `sys/fs/exec/elks_aout.c`, `sys/fs/exec/elks_aout.h`
         - Tests: unit (magic number detection)
         - Docs: `elks_aout.4` manpage
         - Acceptance: Correctly identify ELKS a.out magic (0x0301 for 8086, 0x0302 for 80286).
-    - [x] Register ELKS loader with exec subsystem. (REQ: REQ-20-0008)
+    - [ ] Register ELKS loader with exec subsystem. (REQ: REQ-20-0008)
         - Files: `sys/fs/exec/exec.c`, `sys/fs/exec/elks_aout.c`
         - Tests: integration (exec ELKS binary triggers loader)
         - Acceptance: ELKS binaries dispatched to elks_load() function.
 
-- [x] **ELKS Exec Loader:** (REQ: REQ-20-0009)
-    - [x] Implement `elks_load()` function for ELKS binary loading. (REQ: REQ-20-0010)
+- [ ] **ELKS Exec Loader:** (REQ: REQ-20-0009)
+    - [ ] Implement `elks_load()` function for ELKS binary loading. (REQ: REQ-20-0010)
         - Files: `sys/fs/exec/elks_aout.c`
         - Tests: unit (load sample ELKS binary into memory)
         - Acceptance: Binary text/data/bss segments loaded correctly.
-    - [x] Allocate 16-bit LDT segments via LDT API for code/data/stack. (REQ: REQ-20-0011)
+    - [ ] Allocate 16-bit LDT segments via LDT API for code/data/stack. (REQ: REQ-20-0011)
         - Files: `sys/fs/exec/elks_aout.c`, `sys/arch/i386/ldt.c`
         - Tests: unit (verify LDT entries created)
         - Acceptance: Separate LDT entries for CS (code), DS (data), SS (stack), ES (extra).
-    - [x] Set up ELKS stack segment with correct base and limit. (REQ: REQ-20-0012)
+    - [ ] Set up ELKS stack segment with correct base and limit. (REQ: REQ-20-0012)
         - Files: `sys/fs/exec/elks_aout.c`
         - Tests: unit (stack segment bounds)
         - Acceptance: Stack limit enforced by hardware; overflow triggers #SS exception.
-    - [x] Set up ELKS data segment with correct base and limit. (REQ: REQ-20-0013)
+    - [ ] Set up ELKS data segment with correct base and limit. (REQ: REQ-20-0013)
         - Files: `sys/fs/exec/elks_aout.c`
         - Tests: unit (data segment bounds)
         - Acceptance: Data accesses beyond limit trigger #GP exception.
-    - [x] Install syscall gateway trampoline for 16-bit to 32-bit transition. (REQ: REQ-20-0014)
+    - [ ] Install syscall gateway trampoline for 16-bit to 32-bit transition. (REQ: REQ-20-0014)
         - Files: `sys/fs/exec/elks_aout.c`, `sys/arch/i386/elks_gate.S`
         - Tests: integration (syscall from 16-bit code reaches kernel)
         - Acceptance: INT 0x80 from 16-bit context transitions to 32-bit kernel handler.
-    - [x] Handle ELKS environment variables and argv setup. (REQ: REQ-20-0015)
+    - [ ] Handle ELKS environment variables and argv setup. (REQ: REQ-20-0015)
         - Files: `sys/fs/exec/elks_aout.c`
         - Tests: integration (argc/argv accessible from ELKS binary)
         - Acceptance: ELKS main() receives correct argc, argv.
-    - [x] Set process bitness to BITNESS_16 on ELKS exec. (REQ: REQ-20-0016)
+    - [ ] Set process bitness to BITNESS_16 on ELKS exec. (REQ: REQ-20-0016)
         - Files: `sys/fs/exec/elks_aout.c`
         - Tests: unit (verify bitness field after exec)
         - Acceptance: `current_process->bitness == BITNESS_16` after ELKS load.
 
-- [x] **Runtime Support & Syscall Translation:** (REQ: REQ-20-0017)
-    - [x] Implement ELKS syscall dispatcher. (REQ: REQ-20-0018)
+- [ ] **Runtime Support & Syscall Translation:** (REQ: REQ-20-0017)
+    - [ ] Implement ELKS syscall dispatcher. (REQ: REQ-20-0018)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: unit (dispatch to correct handler)
         - Acceptance: ELKS syscall numbers correctly mapped to handlers.
