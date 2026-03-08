@@ -365,7 +365,7 @@
                 - [x] Unit: `pmap_copy` partial range with mixed COW/private. (REQ: REQ-01-0320)
                 - [x] Unit: reference/modification tracking — set/clear/test A and D bits. (REQ: REQ-01-0321)
                 - [x] Unit: large page enter/remove (4 MB PSE). (REQ: REQ-01-0322)
-                - [ ] Unit: TLB shootdown — verify `invlpg` called on remote CPUs. (REQ: REQ-01-0323)
+                - [x] Unit: TLB shootdown — verify `invlpg` called on remote CPUs. (REQ: REQ-01-0323)
                 - [x] Property: `pmap_create` always produces valid kernel PDE copies (768–1022 match `kernel_pmap`). (REQ: REQ-01-0324)
                 - [x] Property: `pmap_destroy` reclaims resident pages and page-table backing without PMM leaks. (REQ: REQ-01-0325)
                 - [x] Property: recursive mapping at PDE 1023 is self-consistent. (REQ: REQ-01-0326)
