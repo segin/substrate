@@ -133,5 +133,8 @@ Compatibility personalities adapt that internal contract at the ABI edge:
 
 - Linux personality remaps signal numbers and builds Linux `sigframe` /
   `rt_sigframe` layouts
+- Linux personality also translates `rt_sigaction(2)` / `rt_sigprocmask(2)`
+  signal numbers and sigsets at syscall entry, and preserves Linux
+  `sa_restorer` pointers separately from the native kernel disposition state
 - FreeBSD personality uses its own legacy frame ABI while preserving native
   kernel stop/continue/exit policy

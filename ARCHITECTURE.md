@@ -142,6 +142,10 @@ Console policy:
 - `serial_debug` or `console=serialN` registers the UART backend with the kernel console framework for mirrored output
 
 Execution personalities support native behavior plus Linux/FreeBSD compatibility paths where implemented.
+- Linux signal compatibility is explicit at the ABI edge: Linux signal numbers,
+  sigsets, frame layouts, and optional `sa_restorer` callbacks are translated
+  by the Linux personality without redefining the native Substrate signal
+  contract.
 
 Executable identity policy:
 - `execve()` treats the backing object identity, not the pathname string, as the canonical executable identity

@@ -192,6 +192,15 @@ typedef struct {
     uint32_t sig[2];
 } linux_sigset_t;
 
+struct linux_sigaction {
+    uint32_t sa_handler;
+    uint32_t sa_flags;
+    uint32_t sa_restorer;
+    linux_sigset_t sa_mask;
+};
+
+#define LINUX_SA_RESTORER 0x04000000
+
 /* Linux stack_t */
 struct linux_stack {
     uint32_t ss_sp;
@@ -218,13 +227,60 @@ struct linux_sigframe {
     char     retcode[8];
 };
 
+/* Linux siginfo_t (128 bytes) */
+typedef struct {
+    int si_signo;
+    int si_errno;
+    int si_code;
+
+    union {
+        int _pad[29];
+
+        struct {
+            int _pid;
+            unsigned int _uid;
+        } _kill;
+
+        struct {
+            int _tid;
+            int _overrun;
+            char _pad[sizeof(int) - sizeof(int)];
+            void *_sigval;
+            int _sys_private;
+        } _timer;
+
+        struct {
+            int _pid;
+            unsigned int _uid;
+            void *_sigval;
+        } _rt;
+
+        struct {
+            int _pid;
+            unsigned int _uid;
+            int _status;
+            long _utime;
+            long _stime;
+        } _sigchld;
+
+        struct {
+            void *_addr;
+        } _sigfault;
+
+        struct {
+            long _band;
+            int _fd;
+        } _sigpoll;
+    } _sifields;
+} linux_siginfo_t;
+
 /* Linux rt_sigframe (real-time signals) */
 struct linux_rt_sigframe {
     uint32_t pretcode;
     int32_t  sig;
     uint32_t pinfo;
     uint32_t puc;
-    siginfo_t info; // We'll need to translate siginfo_t
+    linux_siginfo_t info;
     struct linux_ucontext uc;
     char     retcode[8];
 };
@@ -264,5 +320,7 @@ int  linux_sys_sigreturn(void *regs);
 int  linux_sys_rt_sigreturn(void *regs);
 int  linux_domain_to_native(int domain);
 int  native_domain_to_linux(int domain);
+int  native_to_linux_signal(int sig);
+int  linux_to_native_signal(int sig);
 
 #endif /* _LINUX_USER_H */

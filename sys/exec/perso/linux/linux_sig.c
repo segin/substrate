@@ -44,6 +44,12 @@ void linux_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *
     registers_t *regs = (registers_t *)regs_ptr;
     uint32_t esp = regs->useresp;
     int lsig = native_to_linux_signal(sig);
+    uint32_t restorer = 0;
+
+    if (current_process && sig > 0 && sig <= NSIG &&
+        current_process->linux_sig_restorer[sig - 1]) {
+        restorer = (uint32_t)(uintptr_t)current_process->linux_sig_restorer[sig - 1];
+    }
 
     if (flags & SA_SIGINFO) {
         /* rt_sigframe */
@@ -100,7 +106,7 @@ void linux_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *
 
         /* Linux expects a return trampoline */
         /* For now we use the kernel-mapped trampoline if it matches Linux ABI */
-        frame.pretcode = 0xFFFF1010; // RT_SIG_TRAMPOLINE_ADDR
+        frame.pretcode = restorer ? restorer : 0xFFFF1010; // RT_SIG_TRAMPOLINE_ADDR
 
         if (copyout(&frame, (void*)(uintptr_t)esp, sizeof(frame)) != 0) {
             sigexit(current_process, SIGSEGV);
@@ -141,7 +147,7 @@ void linux_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *
         frame.sc.gs = regs->gs;
         frame.sc.oldmask = mask;
 
-        frame.pretcode = 0xFFFF1000; // SIG_TRAMPOLINE_ADDR
+        frame.pretcode = restorer ? restorer : 0xFFFF1000; // SIG_TRAMPOLINE_ADDR
 
         if (copyout(&frame, (void*)(uintptr_t)esp, sizeof(frame)) != 0) {
             sigexit(current_process, SIGSEGV);

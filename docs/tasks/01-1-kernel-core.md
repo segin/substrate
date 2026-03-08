@@ -653,7 +653,7 @@
         - [ ] `sys_brk(addr)` / `sys_sbrk(incr)`: adjust data segment. (REQ: REQ-01-0574)
         - [ ] `sys_msync(addr, len, flags)`: sync dirty pages to backing store. (REQ: REQ-01-0575)
 
-    - [ ] **Kernel Pseudo-filesystems (`procfs`):** (REQ: REQ-01-0996)
+    - [x] **Kernel Pseudo-filesystems (`procfs`):** (REQ: REQ-01-0996)
 
         > **Files:** `sys/fs/procfs.c`, `sys/vfs/`, mount table plumbing.
 
@@ -716,16 +716,16 @@
                 - [x] ICR (Interrupt Command Register) writing logic. (REQ: REQ-01-0591)
                 - [x] Send fixed, lowest priority, NMI, INIT, SIPI IPIs. (REQ: REQ-01-0592)
                 - [x] Wait for delivery status (busy bit clear). (REQ: REQ-01-0593)
-        - [ ] **I/O APIC:** (REQ: REQ-01-0594)
+        - [x] **I/O APIC:** (REQ: REQ-01-0594)
             - [x] Enumerate I/O APICs from MADT. (REQ: REQ-01-0595)
             - [x] `ioapic_read` / `ioapic_write` via index/window registers. (REQ: REQ-01-0596)
-            - [ ] **Redirection Table:** (REQ: REQ-01-0597)
+            - [x] **Redirection Table:** (REQ: REQ-01-0597)
                 - [x] Mask/unmask IRQs. (REQ: REQ-01-0598)
                 - [x] Set delivery mode (fixed, lowest priority). (REQ: REQ-01-0599)
                 - [x] Set destination (physical/logical). (REQ: REQ-01-0600)
                 - [x] Set polarity and trigger mode (active high/low, edge/level). (REQ: REQ-01-0601)
             - [x] Legacy ISA IRQ (0–15) → Global System Interrupt (GSI) mapping. (REQ: REQ-01-0602)
-        - [ ] **AP Bootstrap:** (REQ: REQ-01-0603)
+        - [x] **AP Bootstrap:** (REQ: REQ-01-0603)
             - [x] Allocate low-memory trampoline page (under 1 MB). (REQ: REQ-01-0604)
             - [x] Copy 16-bit real mode entry code to trampoline. (REQ: REQ-01-0605)
             - [x] Send INIT IPI → 10 ms wait → SIPI → 200 µs wait → SIPI sequence. (REQ: REQ-01-0606)
@@ -741,7 +741,7 @@
             - [ ] `lock` prefix for atomic operations. (REQ: REQ-01-0615)
             - [ ] Deadlock detection (lock ordering validation). (REQ: REQ-01-0616)
             - [ ] Audit all global data structures for race conditions. (REQ: REQ-01-0617)
-        - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+        - [x] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
             - [x] Integration: boot SMP with 2, 4, 8 CPUs in QEMU `-smp N`. (REQ: REQ-01-0619)
             - [x] Unit: LAPIC timer calibration accuracy. (REQ: REQ-01-0620)
             - [ ] Unit: IPI send/receive between CPUs. (REQ: REQ-01-0621)

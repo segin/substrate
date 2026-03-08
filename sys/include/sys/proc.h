@@ -61,6 +61,7 @@ typedef struct process {
     
     // Signals
     struct sigaction sig_actions[NSIG];
+    void *linux_sig_restorer[NSIG];
     uint32_t sig_catch;   // Bitmask: signals with custom handlers (not SIG_DFL/SIG_IGN)
     uint32_t sig_ignore;  // Bitmask: signals set to SIG_IGN
     

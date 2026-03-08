@@ -103,7 +103,9 @@ not need to issue those syscalls manually.
 
 Compatibility personalities may use different frame builders and trampoline
 contracts. In particular, the Linux personality emits Linux-compatible
-`sigframe` and `rt_sigframe` layouts while leaving the native Substrate signal
+`sigframe` and `rt_sigframe` layouts, translates Linux signal numbers and
+sigsets at the syscall boundary, and may return through a Linux `sa_restorer`
+callback when one is installed, while leaving the native Substrate signal
 policy unchanged.
 
 ## Frame Validation

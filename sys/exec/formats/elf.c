@@ -184,6 +184,9 @@ static void exec_reset_signals(void) {
             act->sa_flags = 0;
         }
     }
+
+    memset(current_process->linux_sig_restorer, 0,
+           sizeof(current_process->linux_sig_restorer));
     
     // Clear sig_catch bitmask since all caught signals are now SIG_DFL
     current_process->sig_catch = 0;
