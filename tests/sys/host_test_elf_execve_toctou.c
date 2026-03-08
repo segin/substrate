@@ -75,6 +75,8 @@ void kfree(void *ptr, size_t size) {
 // Second pass (copy): returns "longstringthatoverflows"
 static int copyinstr_call_count = 0;
 static int use_toctou_attack = 0;
+static int mock_header_reads = 0;
+static int mock_phdr_reads = 0;
 
 int copyinstr(const void *src, void *dst, size_t maxlen, size_t *len) {
     const char *s = (const char *)src;
@@ -160,7 +162,9 @@ thread_t *current_thread = &mock_thread;
 // Signature must match fs_node_t read function pointer type
 // On host (64-bit), off_t is 64-bit, size_t is 64-bit.
 static size_t mock_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+    (void)node;
     if (offset == 0 && size == sizeof(Elf32_Ehdr)) {
+        mock_header_reads++;
         Elf32_Ehdr *hdr = (Elf32_Ehdr*)buffer;
         memset(hdr, 0, sizeof(*hdr));
         hdr->e_ident[0] = ELFMAG0;
@@ -175,9 +179,21 @@ static size_t mock_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buf
         hdr->e_version = EV_CURRENT;
         hdr->e_entry = 0x08048000;
         hdr->e_phoff = sizeof(Elf32_Ehdr);
-        hdr->e_phnum = 0; // No segments to simplify
+        hdr->e_phnum = 1;
         hdr->e_shentsize = sizeof(Elf32_Shdr);
         hdr->e_phentsize = sizeof(Elf32_Phdr);
+        return size;
+    }
+    if (offset == sizeof(Elf32_Ehdr) && size == sizeof(Elf32_Phdr)) {
+        Elf32_Phdr *phdr = (Elf32_Phdr *)buffer;
+        memset(phdr, 0, sizeof(*phdr));
+        phdr->p_type = PT_LOAD;
+        phdr->p_offset = 0;
+        phdr->p_vaddr = 0x08048000;
+        phdr->p_filesz = 0;
+        phdr->p_memsz = 0;
+        phdr->p_flags = 0x5;
+        mock_phdr_reads++;
         return size;
     }
     // Return zeros for other reads
@@ -259,9 +275,69 @@ static void test_exec_reset_signals(void) {
     assert(current_process->sig_catch == 0);
 }
 
+static void test_elf_cache_uses_mount_inode_identity(void) {
+    elf_image_info_t image;
+    fs_node_t file_a;
+    fs_node_t file_b;
+
+    memset(&file_a, 0, sizeof(file_a));
+    memset(&file_b, 0, sizeof(file_b));
+
+    file_a.flags = FS_FILE;
+    file_a.read = mock_read;
+    file_a.inode = 1234;
+    file_a.mp = (struct mount *)0x11110000;
+    file_a.length = 8192;
+    file_a.mtime = 10;
+    file_a.ctime = 20;
+
+    file_b = file_a;
+    strcpy(file_a.name, "busybox");
+    strcpy(file_b.name, "sh");
+
+    mock_header_reads = 0;
+    mock_phdr_reads = 0;
+
+    assert(elf_get_image_info(&file_a, &image) == 0);
+    assert(mock_header_reads == 1);
+    assert(mock_phdr_reads == 1);
+
+    assert(elf_get_image_info(&file_b, &image) == 0);
+    assert(mock_header_reads == 1);
+    assert(mock_phdr_reads == 1);
+}
+
+static void test_elf_cache_invalidates_on_metadata_change(void) {
+    elf_image_info_t image;
+    fs_node_t file;
+
+    memset(&file, 0, sizeof(file));
+    file.flags = FS_FILE;
+    file.read = mock_read;
+    file.inode = 4321;
+    file.mp = (struct mount *)0x22220000;
+    file.length = 4096;
+    file.mtime = 30;
+    file.ctime = 40;
+
+    mock_header_reads = 0;
+    mock_phdr_reads = 0;
+
+    assert(elf_get_image_info(&file, &image) == 0);
+    assert(mock_header_reads == 1);
+    assert(mock_phdr_reads == 1);
+
+    file.mtime++;
+    assert(elf_get_image_info(&file, &image) == 0);
+    assert(mock_header_reads == 2);
+    assert(mock_phdr_reads == 2);
+}
+
 int main() {
     printf("Running elf_execve TOCTOU test...\n");
     test_exec_reset_signals();
+    test_elf_cache_uses_mount_inode_identity();
+    test_elf_cache_invalidates_on_metadata_change();
 
 #if !defined(__i386__)
     printf("Skipping execve TOCTOU path on non-i386 host build; exec_reset_signals verified.\n");

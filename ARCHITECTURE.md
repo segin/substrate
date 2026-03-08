@@ -143,6 +143,11 @@ Console policy:
 
 Execution personalities support native behavior plus Linux/FreeBSD compatibility paths where implemented.
 
+Executable identity policy:
+- `execve()` treats the backing object identity, not the pathname string, as the canonical executable identity
+- the current ELF metadata cache is keyed by filesystem identity plus inode identity and stores immutable image parse results (ELF header, program headers, `PT_INTERP`, AUXV `AT_PHDR` derivation)
+- filesystem implementations are expected to provide stable `fs_node->inode` values; FAT synthesizes stable identities for entries that do not have a useful cluster-backed inode number
+
 Planned x86 Unix personality targets:
 - Substrate native ABI (primary)
 - Linux

@@ -13,8 +13,155 @@
 #include <sys/signal.h> // For copyin/copyout
 #include <sys/kern_syscalls.h>
 #include <sys/file.h>
+#include <sys/errno.h>
 #include <arch/i386/pmm.h>
 #include <stdio.h>
+
+typedef struct elf_image_info {
+    Elf32_Ehdr ehdr;
+    Elf32_Phdr phdrs[256];
+    uint16_t phnum;
+    int detected_os;
+    uint32_t at_phdr;
+    char interp_path[256];
+    uint32_t interp_len;
+} elf_image_info_t;
+
+typedef struct elf_image_cache_entry {
+    uint8_t valid;
+    uintptr_t fsid;
+    uint64_t ino;
+    off_t length;
+    int64_t mtime;
+    int64_t ctime;
+    elf_image_info_t image;
+} elf_image_cache_entry_t;
+
+#define ELF_IMAGE_CACHE_SIZE 16
+static elf_image_cache_entry_t elf_image_cache[ELF_IMAGE_CACHE_SIZE];
+static uint32_t elf_image_cache_hand;
+
+static void elf_cache_identity(fs_node_t *file, uintptr_t *fsid, uint64_t *ino) {
+    if (file->mp) {
+        *fsid = (uintptr_t)file->mp;
+    } else {
+        *fsid = (uintptr_t)file;
+    }
+    *ino = file->inode ? file->inode : (uint64_t)(uintptr_t)file;
+}
+
+static int elf_detect_osabi(const Elf32_Ehdr *ehdr) {
+    if (!ehdr) {
+        return ELFOSABI_SUBSTRATE;
+    }
+
+    if (ehdr->e_ident[EI_OSABI] == ELFOSABI_FREEBSD) {
+        return ELFOSABI_FREEBSD;
+    }
+    if (ehdr->e_ident[EI_OSABI] == ELFOSABI_LINUX) {
+        return ELFOSABI_LINUX;
+    }
+    return ELFOSABI_SUBSTRATE;
+}
+
+static int elf_cache_matches(const elf_image_cache_entry_t *entry, fs_node_t *file,
+                             uintptr_t fsid, uint64_t ino) {
+    return entry &&
+           entry->valid &&
+           entry->fsid == fsid &&
+           entry->ino == ino &&
+           entry->length == file->length &&
+           entry->mtime == file->mtime &&
+           entry->ctime == file->ctime;
+}
+
+static int elf_read_image_info(fs_node_t *file, elf_image_info_t *image) {
+    if (!file || !file->read || !image) {
+        return -ENOEXEC;
+    }
+
+    memset(image, 0, sizeof(*image));
+
+    if (file->read(file, 0, sizeof(Elf32_Ehdr), (uint8_t *)&image->ehdr) != sizeof(Elf32_Ehdr)) {
+        return -ENOEXEC;
+    }
+
+    if (!elf_check_file(&image->ehdr)) {
+        return -ENOEXEC;
+    }
+
+    if (image->ehdr.e_phnum > (sizeof(image->phdrs) / sizeof(image->phdrs[0]))) {
+        return -ENOEXEC;
+    }
+
+    image->phnum = image->ehdr.e_phnum;
+    image->detected_os = elf_detect_osabi(&image->ehdr);
+
+    for (uint16_t i = 0; i < image->phnum; i++) {
+        uint32_t ph_offset = image->ehdr.e_phoff + i * image->ehdr.e_phentsize;
+        Elf32_Phdr *phdr = &image->phdrs[i];
+
+        if (file->read(file, ph_offset, sizeof(Elf32_Phdr), (uint8_t *)phdr) != sizeof(Elf32_Phdr)) {
+            return -ENOEXEC;
+        }
+
+        if (phdr->p_type == PT_INTERP && phdr->p_filesz > 0) {
+            uint32_t max_read = sizeof(image->interp_path) - 1;
+            uint32_t to_read = (phdr->p_filesz < max_read) ? phdr->p_filesz : max_read;
+            if (file->read(file, phdr->p_offset, to_read, (uint8_t *)image->interp_path) != to_read) {
+                return -ENOEXEC;
+            }
+            image->interp_path[to_read] = '\0';
+            image->interp_len = to_read;
+        }
+
+        if (phdr->p_type == PT_PHDR) {
+            image->at_phdr = phdr->p_vaddr;
+        } else if (image->at_phdr == 0 &&
+                   phdr->p_type == PT_LOAD &&
+                   image->ehdr.e_phoff >= phdr->p_offset &&
+                   image->ehdr.e_phoff < (phdr->p_offset + phdr->p_filesz)) {
+            image->at_phdr = phdr->p_vaddr + (image->ehdr.e_phoff - phdr->p_offset);
+        }
+    }
+
+    if (image->at_phdr == 0) {
+        image->at_phdr = 0x08048000 + image->ehdr.e_phoff;
+    }
+
+    return 0;
+}
+
+static int elf_get_image_info(fs_node_t *file, elf_image_info_t *image) {
+    uintptr_t fsid;
+    uint64_t ino;
+
+    elf_cache_identity(file, &fsid, &ino);
+
+    for (int i = 0; i < ELF_IMAGE_CACHE_SIZE; i++) {
+        if (elf_cache_matches(&elf_image_cache[i], file, fsid, ino)) {
+            *image = elf_image_cache[i].image;
+            return 0;
+        }
+    }
+
+    if (elf_read_image_info(file, image) != 0) {
+        return -ENOEXEC;
+    }
+
+    {
+        elf_image_cache_entry_t *entry = &elf_image_cache[elf_image_cache_hand++ % ELF_IMAGE_CACHE_SIZE];
+        entry->valid = 1;
+        entry->fsid = fsid;
+        entry->ino = ino;
+        entry->length = file->length;
+        entry->mtime = file->mtime;
+        entry->ctime = file->ctime;
+        entry->image = *image;
+    }
+
+    return 0;
+}
 
 /*
  * exec_reset_signals - Reset signal handlers on exec
@@ -88,6 +235,8 @@ int elf_check_file(Elf32_Ehdr *hdr) {
 // Load ELF from file node and prepare for execution
 // Returns entry point address on success, 0 on failure
 uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32_t *interp_len) {
+    elf_image_info_t image;
+    const Elf32_Ehdr *ehdr;
 
     if (interp_len) *interp_len = 0;
 
@@ -95,32 +244,27 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
         kprint("ELF: No file or read function\n");
         return 0;
     }
-    
-    // Read ELF header
-    Elf32_Ehdr ehdr;
-    if (file->read(file, 0, sizeof(Elf32_Ehdr), (uint8_t *)&ehdr) != sizeof(Elf32_Ehdr)) {
-        kprint("ELF: Failed to read header\n");
+
+    if (elf_get_image_info(file, &image) != 0) {
+        kprint("ELF: Failed to read image metadata\n");
         return 0;
     }
-    
-    if (!elf_check_file(&ehdr)) {
-        kprint("ELF: Invalid magic\n");
-        return 0;
-    }
-    
-    if (ehdr.e_type != 2 && ehdr.e_type != 3) { // ET_EXEC or ET_DYN
+
+    ehdr = &image.ehdr;
+
+    if (ehdr->e_type != 2 && ehdr->e_type != 3) { // ET_EXEC or ET_DYN
         kprint("ELF: Not an executable or shared object\n");
         return 0;
     }
     
-    if (!elf_machine_matches_kernel(&ehdr)) {
+    if (!elf_machine_matches_kernel(ehdr)) {
         return 0;
     }
     
     kprint("ELF: Loading executable, entry=0x");
     // Print entry point in hex (simple)
     char hexbuf[16];
-    uint32_t entry = ehdr.e_entry + load_base;
+    uint32_t entry = ehdr->e_entry + load_base;
     uint32_t val = entry;
 
     for (int i = 7; i >= 0; i--) {
@@ -130,9 +274,6 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
     hexbuf[8] = '\0';
     kprint(hexbuf);
     kprint("\n");
-    
-    // Read program headers and load PT_LOAD segments
-    Elf32_Phdr phdr;
     
     // Use pmap_t from vm_map.h/pmap.h
     void *pmap = pmap_kernel();
@@ -150,20 +291,15 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
     (void)tls_vaddr;  // Will be used for debug output
     (void)tls_align;  // Will be used for proper alignment
     
-    for (int i = 0; i < ehdr.e_phnum; i++) {
-        uint32_t ph_offset = ehdr.e_phoff + i * ehdr.e_phentsize;
-        if (file->read(file, ph_offset, sizeof(Elf32_Phdr), (uint8_t *)&phdr) != sizeof(Elf32_Phdr)) {
-            kprint("ELF: Failed to read program header\n");
-            return 0;
-        }
-        
+    for (int i = 0; i < image.phnum; i++) {
+        Elf32_Phdr phdr = image.phdrs[i];
+
         if (phdr.p_type == PT_INTERP) {
-            if (interp_path && interp_len && phdr.p_filesz > 0) {
-                uint32_t to_read = (phdr.p_filesz < *interp_len) ? phdr.p_filesz : (*interp_len - 1);
-                if (file->read(file, phdr.p_offset, to_read, (uint8_t *)interp_path) == to_read) {
-                    interp_path[to_read] = '\0';
-                    *interp_len = to_read;
-                }
+            if (interp_path && interp_len && image.interp_len > 0) {
+                uint32_t to_copy = (image.interp_len < (*interp_len - 1)) ? image.interp_len : (*interp_len - 1);
+                memcpy(interp_path, image.interp_path, to_copy);
+                interp_path[to_copy] = '\0';
+                *interp_len = to_copy;
             }
         }
         
@@ -306,12 +442,7 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
     (void)tls_filesz;
     
     // Detect personality based on OSABI
-    int detected_os = ELFOSABI_SUBSTRATE;
-    if (ehdr.e_ident[EI_OSABI] == ELFOSABI_FREEBSD) {
-        detected_os = ELFOSABI_FREEBSD;
-    } else if (ehdr.e_ident[EI_OSABI] == ELFOSABI_LINUX) {
-        detected_os = ELFOSABI_LINUX;
-    }
+    int detected_os = image.detected_os;
     
     kprint("ELF: Personality: ");
     if (detected_os == ELFOSABI_LINUX) kprint("Linux\n");
@@ -332,7 +463,7 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
         }
         
         // Set Bitness
-        if (ehdr.e_ident[EI_CLASS] == ELFCLASS64) {
+        if (ehdr->e_ident[EI_CLASS] == ELFCLASS64) {
              current_process->bitness = BITNESS_64;
         } else {
              current_process->bitness = BITNESS_32;
@@ -419,7 +550,7 @@ static int exec_copy_args(char *const array[], int count, char **k_array, char *
 
 // Helper to set up the user stack
 static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int argc, char **k_envp, int envc,
-                            uint32_t at_entry, uint32_t at_base, fs_node_t *file) {
+                            uint32_t at_entry, uint32_t at_base, const elf_image_info_t *image) {
     uint32_t user_stack_top = 0xC0000000;
     uint32_t user_stack_size = 256; // 1MB initial user stack
     uint32_t user_stack_base = user_stack_top - (user_stack_size * 0x1000);
@@ -492,36 +623,10 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
     
     sp &= ~15;
 
-    Elf32_Ehdr ehdr;
-    if (file->read(file, 0, sizeof(Elf32_Ehdr), (uint8_t *)&ehdr) != sizeof(Elf32_Ehdr)) {
-        kprint("execve: Failed to re-read header for AUXV\n");
+    if (!image) {
+        kprint("execve: Missing ELF image metadata for AUXV\n");
         return -1;
     }
-    
-    uint32_t at_phdr = 0;
-    Elf32_Phdr phdr_scan;
-    for (int i = 0; i < ehdr.e_phnum; i++) {
-        uint32_t offset = ehdr.e_phoff + i * ehdr.e_phentsize;
-        if (file->read(file, offset, sizeof(Elf32_Phdr), (uint8_t *)&phdr_scan) == sizeof(Elf32_Phdr)) {
-            if (phdr_scan.p_type == 6) { // PT_PHDR
-                at_phdr = phdr_scan.p_vaddr;
-                break;
-            }
-            if (phdr_scan.p_type == PT_LOAD) {
-                if (ehdr.e_phoff >= phdr_scan.p_offset && 
-                    ehdr.e_phoff < (phdr_scan.p_offset + phdr_scan.p_filesz)) {
-                    at_phdr = phdr_scan.p_vaddr + (ehdr.e_phoff - phdr_scan.p_offset);
-                }
-            }
-        }
-    }
-    
-    if (at_phdr == 0) {
-        kprint("execve: Warning - Could not determine AT_PHDR\n");
-        at_phdr = 0x08048000 + ehdr.e_phoff;
-    }
-    
-    // Debug output omitted for brevity...
 
     sp -= 4; STACK_WRITE32(sp, 0);
     sp -= 4; STACK_WRITE32(sp, AT_NULL);
@@ -529,13 +634,13 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
     sp -= 4; STACK_WRITE32(sp, at_entry);
     sp -= 4; STACK_WRITE32(sp, AT_ENTRY);
     
-    sp -= 4; STACK_WRITE32(sp, ehdr.e_phnum);
+    sp -= 4; STACK_WRITE32(sp, image->ehdr.e_phnum);
     sp -= 4; STACK_WRITE32(sp, AT_PHNUM);
     
-    sp -= 4; STACK_WRITE32(sp, ehdr.e_phentsize);
+    sp -= 4; STACK_WRITE32(sp, image->ehdr.e_phentsize);
     sp -= 4; STACK_WRITE32(sp, AT_PHENT);
 
-    sp -= 4; STACK_WRITE32(sp, at_phdr);
+    sp -= 4; STACK_WRITE32(sp, image->at_phdr);
     sp -= 4; STACK_WRITE32(sp, AT_PHDR);
     
     sp -= 4; STACK_WRITE32(sp, 4096);
@@ -631,6 +736,7 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
 // Execute a binary - loads ELF and prepares for userspace transition
 // Returns 0 on success, negative error code on failure
 int elf_execve(int fd, const char *path, char *const argv[], char *const envp[]) {
+    elf_image_info_t image;
     fs_node_t *root = (current_process && current_process->root_node) ? current_process->root_node : fs_root;
     if (!root) {
         if (fd >= 0) kern_close(fd);
@@ -667,6 +773,12 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
         kprint("execve: Not a regular file\n");
         if (fd >= 0) kern_close(fd);
         return -1;
+    }
+
+    if (elf_get_image_info(file, &image) != 0) {
+        kprint("execve: Failed to load executable metadata\n");
+        if (fd >= 0) kern_close(fd);
+        return -ENOEXEC;
     }
 
     // Capture arguments and environment
@@ -808,7 +920,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     set_kernel_stack((uint32_t)current_thread->kstack_top);
 
     uint32_t sp;
-    if (exec_setup_stack(new_pmap, &sp, k_argv, argc, k_envp, envc, main_entry, at_base, file) < 0) {
+    if (exec_setup_stack(new_pmap, &sp, k_argv, argc, k_envp, envc, main_entry, at_base, &image) < 0) {
         goto cleanup;
     }
 
