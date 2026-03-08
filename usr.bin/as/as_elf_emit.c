@@ -2760,11 +2760,11 @@ static const sym_loc_t *find_sym_loc(const sym_loc_t *locs, size_t count, const 
     return NULL;
 }
 
-static int upsert_sym_loc(sym_loc_t **locs, size_t *count, const char *name, elf_section_t *sec, uint64_t off) {
+static int upsert_sym_loc(sym_loc_t **locs, size_t *count, size_t *cap, const char *name, elf_section_t *sec, uint64_t off) {
     sym_loc_t *next;
     size_t i;
 
-    if (locs == NULL || count == NULL || name == NULL) {
+    if (locs == NULL || count == NULL || cap == NULL || name == NULL) {
         return -1;
     }
 
@@ -2776,11 +2776,16 @@ static int upsert_sym_loc(sym_loc_t **locs, size_t *count, const char *name, elf
         }
     }
 
-    next = (sym_loc_t *)realloc(*locs, (*count + 1) * sizeof(*next));
-    if (next == NULL) {
-        return -1;
+    if (*count == *cap) {
+        size_t ncap = *cap == 0 ? 16 : *cap * 2;
+        next = (sym_loc_t *)realloc(*locs, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        *locs = next;
+        *cap = ncap;
     }
-    *locs = next;
+
     (*locs)[*count].name = xstrdup(name);
     if ((*locs)[*count].name == NULL) {
         return -1;
@@ -2898,16 +2903,17 @@ static int find_set_dot_location(emit_ctx_t *ctx, const char *sym_name, const ch
     return -1;
 }
 
-static int collect_symbol_locations(emit_ctx_t *ctx, sym_loc_t **locs, size_t *loc_count) {
+static int collect_symbol_locations(emit_ctx_t *ctx, sym_loc_t **locs, size_t *loc_count, size_t *loc_cap) {
     size_t i;
     sec_buf_vec_t secbufs;
     section_track_t track;
 
-    if (ctx == NULL || locs == NULL || loc_count == NULL) {
+    if (ctx == NULL || locs == NULL || loc_count == NULL || loc_cap == NULL) {
         return -1;
     }
     *locs = NULL;
     *loc_count = 0;
+    *loc_cap = 0;
     memset(&secbufs, 0, sizeof(secbufs));
     if (section_track_init(&track) != 0) {
         return -1;
@@ -2934,10 +2940,11 @@ static int collect_symbol_locations(emit_ctx_t *ctx, sym_loc_t **locs, size_t *l
         cur_sec = section_for_name(ctx, track.current);
 
         for (j = 0; j < st->label_count; ++j) {
-            if (upsert_sym_loc(locs, loc_count, st->labels[j].name, cur_sec, cur_off) != 0) {
+            if (upsert_sym_loc(locs, loc_count, loc_cap, st->labels[j].name, cur_sec, cur_off) != 0) {
                 free_sym_locs(*locs, *loc_count);
                 *locs = NULL;
                 *loc_count = 0;
+                *loc_cap = 0;
                 section_track_free(&track);
                 sec_buf_vec_free(&secbufs);
                 return -1;
@@ -3005,8 +3012,9 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
     size_t i;
     sym_loc_t *locs = NULL;
     size_t loc_count = 0;
+    size_t loc_cap = 0;
 
-    if (collect_symbol_locations(ctx, &locs, &loc_count) != 0) {
+    if (collect_symbol_locations(ctx, &locs, &loc_count, &loc_cap) != 0) {
         return -1;
     }
 
