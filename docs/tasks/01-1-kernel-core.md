@@ -703,18 +703,18 @@
             - [x] Parse ACPI MADT (APIC) to find processor entries. (REQ: REQ-01-0578)
             - [x] Fallback: parse MP Tables (Intel MultiProcessor Spec). (REQ: REQ-01-0579)
             - [x] Record BSP and AP LAPIC IDs. (REQ: REQ-01-0580)
-        - [ ] **Local APIC (LAPIC):** (REQ: REQ-01-0581)
-            - [ ] Map LAPIC MMIO base (default 0xFEE00000). (REQ: REQ-01-0582)
+        - [x] **Local APIC (LAPIC):** (REQ: REQ-01-0581)
+            - [x] Establish and use the LAPIC MMIO base (default 0xFEE00000 on i386 bootstrap mappings). (REQ: REQ-01-0582)
             - [x] Set Spurious Interrupt Vector Register (SVR): enable APIC, set vector. (REQ: REQ-01-0583)
-            - [ ] **Timer:** (REQ: REQ-01-0584)
+            - [x] **Timer:** (REQ: REQ-01-0584)
                 - [x] Calibrate against PIT or ACPI PM Timer. (REQ: REQ-01-0585)
                 - [x] Set Divider Configuration Register (DCR). (REQ: REQ-01-0586)
                 - [x] Periodic mode for scheduler tick. (REQ: REQ-01-0587)
                 - [x] One-shot mode for high-resolution sleeps. (REQ: REQ-01-0588)
             - [x] Error Status Register (ESR) and LVT Error vector. (REQ: REQ-01-0589)
-            - [ ] **IPI (Inter-Processor Interrupt):** (REQ: REQ-01-0590)
+            - [x] **IPI (Inter-Processor Interrupt):** (REQ: REQ-01-0590)
                 - [x] ICR (Interrupt Command Register) writing logic. (REQ: REQ-01-0591)
-                - [ ] Send fixed, lowest priority, NMI, INIT, SIPI IPIs. (REQ: REQ-01-0592)
+                - [x] Send fixed, lowest priority, NMI, INIT, SIPI IPIs. (REQ: REQ-01-0592)
                 - [x] Wait for delivery status (busy bit clear). (REQ: REQ-01-0593)
         - [ ] **I/O APIC:** (REQ: REQ-01-0594)
             - [x] Enumerate I/O APICs from MADT. (REQ: REQ-01-0595)
@@ -743,7 +743,7 @@
             - [ ] Audit all global data structures for race conditions. (REQ: REQ-01-0617)
         - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
             - [x] Integration: boot SMP with 2, 4, 8 CPUs in QEMU `-smp N`. (REQ: REQ-01-0619)
-            - [ ] Unit: LAPIC timer calibration accuracy. (REQ: REQ-01-0620)
+            - [x] Unit: LAPIC timer calibration accuracy. (REQ: REQ-01-0620)
             - [ ] Unit: IPI send/receive between CPUs. (REQ: REQ-01-0621)
             - [ ] Unit: per-CPU data isolation. (REQ: REQ-01-0622)
 
@@ -1726,15 +1726,15 @@
 - **US-01-0579**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to fallback: parse MP Tables (Intel MultiProcessor Spec) so that this capability is implemented with clear verification evidence.
 - **US-01-0580**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to record BSP and AP LAPIC IDs so that this capability is implemented with clear verification evidence.
 - **US-01-0581**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to local APIC (LAPIC): so that this capability is implemented with clear verification evidence.
-- **US-01-0582**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to map LAPIC MMIO base (default 0xFEE00000) so that this capability is implemented with clear verification evidence.
+- **US-01-0582**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to establish and use the LAPIC MMIO base (default 0xFEE00000 on i386 bootstrap mappings) so that this capability is implemented with clear verification evidence.
 - **US-01-0583**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set Spurious Interrupt Vector Register (SVR): enable APIC, set vector so that this capability is implemented with clear verification evidence.
-- **US-01-0584**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to timer: so that this capability is implemented with clear verification evidence.
+- **US-01-0584**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want LAPIC timer facilities so that this capability is implemented with clear verification evidence.
 - **US-01-0585**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to calibrate against PIT or ACPI PM Timer so that this capability is implemented with clear verification evidence.
 - **US-01-0586**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set Divider Configuration Register (DCR) so that this capability is implemented with clear verification evidence.
 - **US-01-0587**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to periodic mode for scheduler tick so that this capability is implemented with clear verification evidence.
 - **US-01-0588**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to one-shot mode for high-resolution sleeps so that this capability is implemented with clear verification evidence.
 - **US-01-0589**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to error Status Register (ESR) and LVT Error vector so that this capability is implemented with clear verification evidence.
-- **US-01-0590**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to iPI (Inter-Processor Interrupt): so that this capability is implemented with clear verification evidence.
+- **US-01-0590**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want LAPIC inter-processor interrupt support so that this capability is implemented with clear verification evidence.
 - **US-01-0591**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to iCR (Interrupt Command Register) writing logic so that this capability is implemented with clear verification evidence.
 - **US-01-0592**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to send fixed, lowest priority, NMI, INIT, SIPI IPIs so that this capability is implemented with clear verification evidence.
 - **US-01-0593**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to wait for delivery status (busy bit clear) so that this capability is implemented with clear verification evidence.
@@ -1764,7 +1764,7 @@
 - **US-01-0617**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to audit all global data structures for race conditions so that this capability is implemented with clear verification evidence.
 - **US-01-0618**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to testing: so that this capability is implemented with clear verification evidence.
 - **US-01-0619**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: boot SMP with 2, 4, 8 CPUs in QEMU -smp N so that this capability is implemented with clear verification evidence.
-- **US-01-0620**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: LAPIC timer calibration accuracy so that this capability is implemented with clear verification evidence.
+- **US-01-0620**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want a unit test for LAPIC timer calibration accuracy so that this capability is implemented with clear verification evidence.
 - **US-01-0621**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: IPI send/receive between CPUs so that this capability is implemented with clear verification evidence.
 - **US-01-0622**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: per-CPU data isolation so that this capability is implemented with clear verification evidence.
 - **US-01-0623**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to scheduling (MLFQ Scheduler): so that this capability is implemented with clear verification evidence.
@@ -3896,13 +3896,13 @@
 - **REQ-01-0581** (EARS/Ubiquitous): The Substrate system shall local APIC (LAPIC):.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0582** (EARS/Ubiquitous): The Substrate system shall map LAPIC MMIO base (default 0xFEE00000).
+- **REQ-01-0582** (EARS/Ubiquitous): The Substrate system shall establish and use the LAPIC MMIO base (default 0xFEE00000 on i386 bootstrap mappings).
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0583** (EARS/Ubiquitous): The Substrate system shall set Spurious Interrupt Vector Register (SVR): enable APIC, set vector.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0584** (EARS/Ubiquitous): The Substrate system shall timer:.
+- **REQ-01-0584** (EARS/Ubiquitous): The Substrate system shall provide LAPIC timer facilities.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0585** (EARS/Ubiquitous): The Substrate system shall calibrate against PIT or ACPI PM Timer.
@@ -3920,7 +3920,7 @@
 - **REQ-01-0589** (EARS/Ubiquitous): The Substrate system shall error Status Register (ESR) and LVT Error vector.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0590** (EARS/Ubiquitous): The Substrate system shall iPI (Inter-Processor Interrupt):.
+- **REQ-01-0590** (EARS/Ubiquitous): The Substrate system shall provide LAPIC inter-processor interrupt support.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0591** (EARS/Ubiquitous): The Substrate system shall iCR (Interrupt Command Register) writing logic.
@@ -4010,7 +4010,7 @@
 - **REQ-01-0619** (EARS/Ubiquitous): The Substrate system shall integration: boot SMP with 2, 4, 8 CPUs in QEMU -smp N.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0620** (EARS/Ubiquitous): The Substrate system shall unit: LAPIC timer calibration accuracy.
+- **REQ-01-0620** (EARS/Ubiquitous): The Substrate system shall provide a unit test for LAPIC timer calibration accuracy.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0621** (EARS/Ubiquitous): The Substrate system shall unit: IPI send/receive between CPUs.
