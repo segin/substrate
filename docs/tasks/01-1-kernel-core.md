@@ -1018,13 +1018,13 @@
         - [ ] Clean up `kmain` flow. (REQ: REQ-01-0861)
 
     - [ ] **Kernel Core Maintenance:** (REQ: REQ-01-0862)
-        - [ ] Refactor `spinlock.c` to use GCC C11 atomic builtins. (REQ: REQ-01-0863)
+        - [x] Refactor `spinlock.c` to use GCC C11 atomic builtins. (REQ: REQ-01-0863)
         - [ ] Rewrite `swapper.c` idle loop (race-free). (REQ: REQ-01-0864)
         - [ ] Cleanup `sleepq.c` formatting and style. (REQ: REQ-01-0865)
-        - [ ] Remove obsolete `sys/kern/stubs.c`. (REQ: REQ-01-0866)
-        - [ ] Modularize `sys/kern/lib.c` into `sys/lib/`. (REQ: REQ-01-0867)
+        - [x] Remove obsolete `sys/kern/stubs.c`. (REQ: REQ-01-0866)
+        - [x] Modularize `sys/kern/lib.c` into `sys/lib/`. (REQ: REQ-01-0867)
         - [ ] Audit `mutex.c` and `semaphore.c` for race conditions. (REQ: REQ-01-0868)
-        - [ ] Fix `sched_smp.c` CPU ID assumption. (REQ: REQ-01-0869)
+        - [x] Fix `sched_smp.c` CPU ID assumption. (REQ: REQ-01-0869)
 
     - [ ] **Update Kernel Documentation:** (REQ: REQ-01-0870)
         - [ ] Document Console/UART subsystem changes. (REQ: REQ-01-0871)
