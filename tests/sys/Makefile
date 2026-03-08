@@ -15,7 +15,7 @@ SRCS += test_nanosleep.c test_reboot.c test_pipe_race.c test_chacha20.c
 
 OBJS = $(SRCS:.c=.o)
 
-HOST_TESTS = host_test_kmem_test host_test_udf_large_write host_test_udf_truncate_expand host_test_minix_vuln host_test_crc32 host_test_compat_lseek32 host_test_elf_execve_toctou host_test_negdi2 host_test_string host_test_div64 host_test_printf_specifiers host_test_printf_vsnprintf host_test_vm_swap host_test_wait_bench host_test_acct_compress host_test_procfs host_test_kern_write host_test_cmdline property_cmdline host_test_perso_netbsd_rusage host_test_input_subsys host_test_compat host_test_udf_read_vds host_test_ntsync_fd host_test_uma_redzone host_test_uma_poison host_test_uma_coloring host_test_uma_depot host_test_uma_reclaim host_test_fat_inode_identity host_test_vm_kmem host_test_smp_discovery host_test_lapic host_test_percpu host_test_sched_ipi host_test_sched_steal host_test_sched_core host_test_futex
+HOST_TESTS = host_test_kmem_test host_test_udf_large_write host_test_udf_truncate_expand host_test_minix_vuln host_test_crc32 host_test_compat_lseek32 host_test_elf_execve_toctou host_test_negdi2 host_test_string host_test_div64 host_test_printf_specifiers host_test_printf_vsnprintf host_test_vm_swap host_test_wait_bench host_test_acct_compress host_test_procfs host_test_kern_write host_test_cmdline property_cmdline host_test_perso_netbsd_rusage host_test_input_subsys host_test_compat host_test_udf_read_vds host_test_ntsync_fd host_test_uma_redzone host_test_uma_poison host_test_uma_coloring host_test_uma_depot host_test_uma_reclaim host_test_fat_inode_identity host_test_vm_kmem host_test_smp_discovery host_test_lapic host_test_percpu host_test_sched_ipi host_test_sched_steal host_test_sched_core host_test_futex host_test_ext2_alloc_inode_block
 
 all: tests.o $(HOST_TESTS)
 
@@ -138,3 +138,6 @@ tests.o: $(OBJS)
 
 clean:
 	rm -f *.o $(HOST_TESTS)
+
+host_test_ext2_alloc_inode_block: host_test_ext2_alloc_inode_block.c
+	$(CC) -g -Wall -DHOST_TEST -I../../sys -I. -idirafter ../../sys/include -idirafter ../../include host_test_ext2_alloc_inode_block.c -o $@
