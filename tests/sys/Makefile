@@ -169,6 +169,9 @@ host_test_pmap_shootdown: host_test_pmap_shootdown.c
 host_test_futex: host_test_futex.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -Imocks -I../../sys -I. -idirafter ../../sys/include -idirafter ../../include host_test_futex.c -o $@
 
+host_test_ext2_get_block_num: host_test_ext2_get_block_num.c
+	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_ext2_get_block_num.c -o $@
+
 property_cmdline: property_cmdline.c
 	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../sys -I. property_cmdline.c ../../sys/kern/cmdline.c -o $@
 
