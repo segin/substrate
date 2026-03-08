@@ -104,8 +104,10 @@ process_t *proc_create(int perso_id) {
         return NULL;
     }
     
-    processes[i].pid = next_pid++;
+    int pid = next_pid++;
     spinlock_release(&pid_lock);
+    memset(&processes[i], 0, sizeof(processes[i]));
+    processes[i].pid = pid;
     processes[i].ppid = current_process ? current_process->pid : 0;
     processes[i].perso_id = perso_id;
     processes[i].root_node = current_process ? current_process->root_node : fs_root;

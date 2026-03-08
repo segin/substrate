@@ -153,6 +153,8 @@ typedef struct {
 fs_node_t *fs_root = NULL;
 process_t mock_process;
 process_t *current_process = &mock_process;
+thread_t mock_thread;
+thread_t *current_thread = &mock_thread;
 
 // Mock file read for elf_load
 // Signature must match fs_node_t read function pointer type
@@ -206,6 +208,18 @@ void vm_map_destroy(vm_map_t *map) {}
 
 // Stub random
 int random_get_bytes(void *buf, size_t len) { return 0; }
+int random_get_bytes_flags(void *buf, size_t len, unsigned int flags) {
+    (void)flags;
+    memset(buf, 0, len);
+    return 0;
+}
+
+int kern_close(int fd) {
+    (void)fd;
+    return 0;
+}
+
+void exec_unpin_current_thread(void) {}
 
 // Stub jump_to_userspace
 void jump_to_userspace(uint32_t entry, uint32_t stack) {
@@ -224,8 +238,35 @@ void set_kernel_stack(uint32_t stack) {}
 // Include elf.c
 #include "../../sys/exec/formats/elf.c"
 
+static void test_exec_reset_signals(void) {
+    memset(&mock_process, 0, sizeof(mock_process));
+    current_process = &mock_process;
+
+    current_process->sig_actions[SIGUSR1 - 1].sa_handler = (sig_t)0x12345678;
+    current_process->sig_actions[SIGUSR1 - 1].sa_mask = sigmask(SIGCHLD);
+    current_process->sig_actions[SIGUSR1 - 1].sa_flags = SA_RESTART | SA_SIGINFO;
+    current_process->sig_actions[SIGUSR2 - 1].sa_handler = SIG_IGN;
+    current_process->sig_ignore = sigmask(SIGUSR2);
+    current_process->sig_catch = sigmask(SIGUSR1);
+
+    exec_reset_signals();
+
+    assert(current_process->sig_actions[SIGUSR1 - 1].sa_handler == SIG_DFL);
+    assert(current_process->sig_actions[SIGUSR1 - 1].sa_mask == 0);
+    assert(current_process->sig_actions[SIGUSR1 - 1].sa_flags == 0);
+    assert(current_process->sig_actions[SIGUSR2 - 1].sa_handler == SIG_IGN);
+    assert(current_process->sig_ignore == sigmask(SIGUSR2));
+    assert(current_process->sig_catch == 0);
+}
+
 int main() {
     printf("Running elf_execve TOCTOU test...\n");
+    test_exec_reset_signals();
+
+#if !defined(__i386__)
+    printf("Skipping execve TOCTOU path on non-i386 host build; exec_reset_signals verified.\n");
+    return 0;
+#endif
 
     // Allocate low memory for argv/envp/strings
     // Use mmap with MAP_32BIT
@@ -273,7 +314,7 @@ int main() {
     // Initialize fs_root
     fs_root = vfs_lookup(NULL, "/");
 
-    int ret = elf_execve("/bin/prog", -1, u_argv, u_envp);
+    int ret = elf_execve(-1, "/bin/prog", u_argv, u_envp);
 
     // If we reach here, it means failure (because success exits in jump_to_userspace)
     if (ret != 0) {

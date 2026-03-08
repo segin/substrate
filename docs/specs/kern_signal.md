@@ -2,8 +2,13 @@
 
 ## Overview
 
-Substrate implements process-directed and trap-directed signals with BSD-style
-job control semantics and i386 signal-frame delivery.
+Substrate implements process-directed and trap-directed signals with its own
+native contract, currently BSD-shaped for job control and default-action
+behavior, with i386 signal-frame delivery.
+
+Linux personality support is layered on top of this kernel contract. The
+personality is responsible for exposing Linux ABI entry points and user-visible
+Linux conventions without redefining the native Substrate signal model.
 
 The signal path is split into four phases:
 

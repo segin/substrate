@@ -969,8 +969,8 @@
             - [x] During handler: block current signal (unless SA_NODEFER) + `sa_mask`. (REQ: REQ-01-0818)
             - [x] Restore original mask in `sys_sigreturn`. (REQ: REQ-01-0819)
             - [ ] **Inheritance:** (REQ: REQ-01-0820)
-                - [ ] `fork()`: child inherits pending signals and mask. (REQ: REQ-01-0821)
-                - [ ] `exec()`: reset all handlers to SIG_DFL (except SIG_IGN). (REQ: REQ-01-0822)
+                - [x] `fork()`: child process inherits handlers/policy; child thread inherits signal mask; pending signals start clear. (REQ: REQ-01-0821)
+                - [x] `exec()`: reset all handlers to SIG_DFL (except SIG_IGN). (REQ: REQ-01-0822)
 
         - [ ] **Signal Checking Points:** (REQ: REQ-01-0823)
             - [x] Return from interrupt/exception: `signal_handle_pending()` if returning to user mode. (REQ: REQ-01-0824)
@@ -1965,7 +1965,7 @@
 - **US-01-0818**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to during handler: block current signal (unless SA_NODEFER) + sa_mask so that this capability is implemented with clear verification evidence.
 - **US-01-0819**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to restore original mask in sys_sigreturn so that this capability is implemented with clear verification evidence.
 - **US-01-0820**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to inheritance: so that this capability is implemented with clear verification evidence.
-- **US-01-0821**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to fork(): child inherits pending signals and mask so that this capability is implemented with clear verification evidence.
+- **US-01-0821**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to fork(): child process inherits handlers/policy; child thread inherits signal mask; pending signals start clear so that this capability is implemented with clear verification evidence.
 - **US-01-0822**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to exec(): reset all handlers to SIG_DFL (except SIG_IGN) so that this capability is implemented with clear verification evidence.
 - **US-01-0823**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to signal Checking Points: so that this capability is implemented with clear verification evidence.
 - **US-01-0824**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to return from interrupt/exception: signal_handle_pending() if returning to user mode so that this capability is implemented with clear verification evidence.
@@ -4613,7 +4613,7 @@
 - **REQ-01-0820** (EARS/Ubiquitous): The Substrate system shall inheritance:.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0821** (EARS/Ubiquitous): The Substrate system shall fork(): child inherits pending signals and mask.
+- **REQ-01-0821** (EARS/Ubiquitous): The Substrate system shall on `fork()` preserve signal handlers and signal-policy state in the child process, copy the parent thread's signal mask into the child thread, and begin the child thread with no pending signals.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0822** (EARS/Ubiquitous): The Substrate system shall exec(): reset all handlers to SIG_DFL (except SIG_IGN).

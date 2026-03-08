@@ -30,7 +30,7 @@ UNIT_OBJS = $(notdir $(UNIT_SRCS:.c=.o))
 
 MOCKS_OBJ = mocks.o
 
-all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_libc_sysctl test_ext2_remove_perf bench_ext2_readdir test_libpthread_mutex test_pthread_join test_readline test_history test_bc test_libedit host_test_wait_logic host_test_pgrp host_test_proc_tree host_test_proc_exit host_test_tty_jobctl host_test_sync_guards host_test_sleepq_private host_test_swapper host_test_rusage host_test_proc_lifecycle host_test_i386_signal host_test_signal_restart host_test_signal_integration
+all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_libc_sysctl test_ext2_remove_perf bench_ext2_readdir test_libpthread_mutex test_pthread_join test_readline test_history test_bc test_libedit host_test_wait_logic host_test_pgrp host_test_proc_tree host_test_proc_exit host_test_tty_jobctl host_test_sync_guards host_test_sleepq_private host_test_swapper host_test_rusage host_test_proc_lifecycle host_test_i386_signal host_test_signal_restart host_test_signal_integration host_test_proc_signal_state
 	./test_runner
 	./test_minix
 	./test_ext2_perf
@@ -61,6 +61,7 @@ all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_
 	./host_test_i386_signal
 	./host_test_signal_restart
 	./host_test_signal_integration
+	./host_test_proc_signal_state
 
 test_readline: lib/edit/test_readline.c ../lib/edit/readline.c
 	$(CC) $(CFLAGS_COMMON) -I../lib/edit $< -o $@
@@ -105,6 +106,9 @@ host_test_signal_restart: sys/host_test_signal_restart.c ../sys/kern/signal.c
 	$(CC) $(CFLAGS_KERN) $< -o $@
 
 host_test_signal_integration: sys/host_test_signal_integration.c ../sys/kern/signal.c
+	$(CC) $(CFLAGS_KERN) $< -o $@
+
+host_test_proc_signal_state: sys/host_test_proc_signal_state.c
 	$(CC) $(CFLAGS_KERN) $< -o $@
 
 # Duplicate rule removed

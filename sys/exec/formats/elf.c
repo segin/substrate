@@ -19,9 +19,10 @@
 /*
  * exec_reset_signals - Reset signal handlers on exec
  *
- * POSIX: On exec(), all signals with handlers are reset to SIG_DFL.
- * Signals set to SIG_IGN remain ignored. Pending signals are cleared.
- * Signal mask is preserved (inherited by new program).
+ * On exec(), all caught signals are reset to SIG_DFL.
+ * Signals set to SIG_IGN remain ignored.
+ * The thread signal mask is preserved across the image change.
+ * Pending-thread signal state is not modified here.
  */
 static void exec_reset_signals(void) {
     if (!current_process) return;
