@@ -468,6 +468,11 @@ uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size, const 
         offset += to_copy;
         size -= to_copy;
     }
+
+    if (offset > inode->i_size) {
+        inode->i_size = offset;
+    }
+
     // Update modification time
     extern int64_t get_time(void);
     inode->i_mtime = (uint32_t)get_time();
