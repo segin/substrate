@@ -1085,7 +1085,7 @@
                 - [x] `acct_process(code)`: write accounting record (command, times, status). (REQ: REQ-01-0921)
 
         - [ ] **Edge Cases:** (REQ: REQ-01-0922)
-            - [ ] Init (PID 1) exit: kernel halts/panics with warning. (REQ: REQ-01-0923)
+            - [x] Init (PID 1) exit: kernel halts/panics with warning. (REQ: REQ-01-0923)
             - [x] Killed by signal during exit: ignore signals once SDYING. (REQ: REQ-01-0924)
             - [ ] Locks held during exit: log warning, force release. (REQ: REQ-01-0925)
             - [ ] OOM during exit: must not allocate (only free). (REQ: REQ-01-0926)

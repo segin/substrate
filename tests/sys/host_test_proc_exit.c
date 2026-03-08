@@ -29,10 +29,12 @@ static int tty_hangup_calls;
 static int vm_map_destroy_calls;
 static int pmap_activate_calls;
 static int pgrp_remove_calls;
+static int wait_for_interrupt_calls;
 static process_t *last_psignal_proc;
 static int last_psignal_sig;
 static void *last_sched_wakeup_chan;
 static int pmap_release_calls;
+static const char *last_kprint_msg;
 
 void mutex_init(mutex_t *m, const char *name) { (void)m; (void)name; }
 void mutex_lock(mutex_t *m) { (void)m; }
@@ -65,7 +67,8 @@ void rusage_finalize(process_t *p) { (void)p; rusage_finalize_calls++; }
 void file_close_ptr(file_t *f) { (void)f; file_close_calls++; }
 void sched_wakeup(void *chan) { last_sched_wakeup_chan = chan; }
 void sched_yield(void) { yielded = 1; longjmp(exit_jmp, 1); }
-void kprint(const char *msg) { (void)msg; }
+void host_wait_for_interrupt(void) { wait_for_interrupt_calls++; longjmp(exit_jmp, 1); }
+void kprint(const char *msg) { last_kprint_msg = msg; }
 void tty_hangup(struct tty *tty) { (void)tty; tty_hangup_calls++; }
 void psignal(process_t *p, int sig) { last_psignal_proc = p; last_psignal_sig = sig; }
 void pgrp_remove_proc(struct process *proc) { if (proc) { proc->p_pgrp = NULL; pgrp_remove_calls++; } }
@@ -99,10 +102,12 @@ static void reset_env(void) {
     vm_map_destroy_calls = 0;
     pmap_activate_calls = 0;
     pgrp_remove_calls = 0;
+    wait_for_interrupt_calls = 0;
     last_psignal_proc = NULL;
     last_psignal_sig = 0;
     last_sched_wakeup_chan = NULL;
     pmap_release_calls = 0;
+    last_kprint_msg = NULL;
 
     for (int i = 0; i < MAX_PROCS; i++) {
         processes[i].pid = -1;
@@ -273,10 +278,28 @@ static void test_proc_exit_autoreap_path(void) {
     assert(threads[0].tid == -1);
 }
 
+static void test_init_exit_halts_in_idle_loop(void) {
+    reset_env();
+
+    process_t *init = init_proc(1, 1);
+    current_process = init;
+    current_thread = init_thread(0, 401, init);
+
+    if (setjmp(exit_jmp) == 0) {
+        proc_exit(1);
+        assert(!"proc_exit returned");
+    }
+
+    assert(yielded == 0);
+    assert(wait_for_interrupt_calls == 1);
+    assert(last_kprint_msg != NULL);
+}
+
 int main(void) {
     test_proc_exit_basic_path();
     test_proc_exit_reparents_to_swapper_when_init_dead();
     test_proc_exit_autoreap_path();
+    test_init_exit_halts_in_idle_loop();
     puts("host_test_proc_exit: PASS");
     return 0;
 }

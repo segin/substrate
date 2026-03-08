@@ -9,6 +9,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <arch/i386/pmap.h>
+#include <arch/i386/intr.h>
 #include <vm/vm_map.h>
 #include <exec/perso/personality.h>
 
@@ -34,6 +35,15 @@ mutex_t proctree_lock;
 extern uint32_t get_time(void);
 extern fs_node_t *fs_root;
 extern struct personality personality_native;
+
+static void proc_idle_wait(void) {
+#ifdef HOST_TEST
+    extern void host_wait_for_interrupt(void);
+    host_wait_for_interrupt();
+#else
+    wait_for_interrupt();
+#endif
+}
 
 /* Forward declarations */
 void proc_add_child(process_t *parent, process_t *child);
@@ -430,7 +440,9 @@ void proc_reap_autoreap_zombies(void) {
 void proc_exit(int code) {
     if (current_process->pid == 1) {
         kprint("Warning: Init process exited. System Halted (idle).\n");
-        while(1) { __asm__ volatile("hlt"); }
+        for (;;) {
+            proc_idle_wait();
+        }
     }
     
     // 1. Set State
