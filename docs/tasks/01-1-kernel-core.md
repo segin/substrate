@@ -30,7 +30,7 @@
             - [x] `pmm_watermark_init(start, end)`: initialize allocator with usable range. (REQ: REQ-01-0016)
             - [x] `pmm_watermark_alloc(size, align)`: allocate `size` bytes with alignment. (REQ: REQ-01-0017)
             - [x] `pmm_watermark_used()`: report bytes consumed. (REQ: REQ-01-0018)
-            - [ ] Used for: `vm_page_t` array, initial page tables, kernel stacks. (REQ: REQ-01-0019)
+            - [x] Used for: bootstrap PMM bitmap/page metadata and other early low-memory PMM state before the buddy allocator is live. (REQ: REQ-01-0019)
             - [x] Watermark region clamped to avoid exceeding available low memory. (REQ: REQ-01-0020)
         - [x] **Dynamic Metadata:** (REQ: REQ-01-0021)
             - [x] Calculate `vm_page_t` array size based on actual detected RAM. (REQ: REQ-01-0022)
@@ -1163,7 +1163,7 @@
 - **US-01-0016**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmm_watermark_init(start, end): initialize allocator with usable range so that this capability is implemented with clear verification evidence.
 - **US-01-0017**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmm_watermark_alloc(size, align): allocate size bytes with alignment so that this capability is implemented with clear verification evidence.
 - **US-01-0018**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmm_watermark_used(): report bytes consumed so that this capability is implemented with clear verification evidence.
-- **US-01-0019**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to used for: vm_page_t array, initial page tables, kernel stacks so that this capability is implemented with clear verification evidence.
+- **US-01-0019**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want the bootstrap watermark allocator to feed early PMM metadata state before the buddy allocator is live so that low-memory initialization remains deterministic and verifiable.
 - **US-01-0020**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to watermark region clamped to avoid exceeding available low memory so that this capability is implemented with clear verification evidence.
 - **US-01-0021**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to dynamic Metadata: so that this capability is implemented with clear verification evidence.
 - **US-01-0022**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to calculate vm_page_t array size based on actual detected RAM so that this capability is implemented with clear verification evidence.
@@ -2207,7 +2207,7 @@
 - **REQ-01-0018** (EARS/Ubiquitous): The Substrate system shall pmm_watermark_used(): report bytes consumed.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0019** (EARS/Ubiquitous): The Substrate system shall used for: vm_page_t array, initial page tables, kernel stacks.
+- **REQ-01-0019** (EARS/Ubiquitous): The Substrate system shall use the bootstrap watermark allocator for early PMM bitmap/page metadata and related low-memory PMM bootstrap state before the runtime buddy allocator is available.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0020** (EARS/Ubiquitous): The Substrate system shall watermark region clamped to avoid exceeding available low memory.
