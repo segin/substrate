@@ -138,6 +138,7 @@ process_t *proc_create(int perso_id) {
     processes[i].egid = current_process ? current_process->egid : 0;
     processes[i].suid = current_process ? current_process->suid : 0;
     processes[i].sgid = current_process ? current_process->sgid : 0;
+    processes[i].umask = current_process ? current_process->umask : 022;
     proc_resource_limits_init(&processes[i]);
     
     // Initialize rusage structures
@@ -209,6 +210,7 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     child_proc->sig_catch = parent->sig_catch;
     child_proc->sig_ignore = parent->sig_ignore;
     memcpy(child_proc->rlimits, parent->rlimits, sizeof(parent->rlimits));
+    child_proc->umask = parent->umask;
     
     // Copy limits, etc. if implemented
     

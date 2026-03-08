@@ -66,4 +66,3 @@
 #define SUNOS_SYS_sigreturn   103
 
 #endif /* _SUNOS_SYSCALLS_H */
-#define SUNOS_SYS_lstat       40

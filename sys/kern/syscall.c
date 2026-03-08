@@ -349,6 +349,22 @@ int64_t sys_lseek(int fd, uint32_t off_lo, uint32_t off_hi, int w) {
     return f->f_offset;
 }
 
+int kern_lseek(int fd, off_t offset, int whence) {
+    return (int)sys_lseek(fd, (uint32_t)offset, (uint32_t)((uint64_t)offset >> 32), whence);
+}
+
+int sys_umask(int newmask) {
+    mode_t oldmask;
+
+    if (!current_process) {
+        return -1;
+    }
+
+    oldmask = current_process->umask;
+    current_process->umask = (uint16_t)(newmask & 0777);
+    return oldmask;
+}
+
 int sys_truncate(const char *path, uint32_t lo, uint32_t hi) {
     char kpath[256];
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14; // EFAULT

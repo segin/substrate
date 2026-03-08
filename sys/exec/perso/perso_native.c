@@ -13,7 +13,6 @@ extern int sys_getsid(int pid);
 extern int sys_setpgid(int pid, int pgid);
 extern int sys_getpgid(int pid);
 extern int sys_getrusage(int who, struct rusage *usage);
-extern clock_t sys_times(void *buf);
 extern int sys_stime(time_t *t);
 extern int sys_ioctl(int fd, uint32_t request, void *arg);
 extern int sys_ptrace(int req, int pid, int addr, int data);

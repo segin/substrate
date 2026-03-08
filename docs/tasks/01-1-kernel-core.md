@@ -357,7 +357,7 @@
                 - [x] Support for multiple aging policies (Clock, LRU approximation). (REQ: REQ-01-0313)
                 - [x] Hardware A/D bit emulation not needed on x86 (native support). (REQ: REQ-01-0314)
 
-            - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+            - [x] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
                 - [x] Unit: `pmap_create` → `pmap_destroy` lifecycle (no leaked pages). (REQ: REQ-01-0316)
                 - [x] Unit: `pmap_enter` + `pmap_extract` round-trip. (REQ: REQ-01-0317)
                 - [x] Unit: `pmap_protect` upgrade and downgrade. (REQ: REQ-01-0318)
@@ -369,7 +369,7 @@
                 - [x] Property: `pmap_create` always produces valid kernel PDE copies (768–1022 match `kernel_pmap`). (REQ: REQ-01-0324)
                 - [x] Property: `pmap_destroy` reclaims resident pages and page-table backing without PMM leaks. (REQ: REQ-01-0325)
                 - [x] Property: recursive mapping at PDE 1023 is self-consistent. (REQ: REQ-01-0326)
-                - [ ] Integration: fork process, write to COW pages, verify isolation in QEMU. (REQ: REQ-01-0327)
+                - [x] Integration: fork process, write to COW pages, verify isolation in QEMU. (REQ: REQ-01-0327)
                 - [x] Integration: stress test — 100 `pmap_create`/`pmap_destroy` cycles, verify no PMM leak. (REQ: REQ-01-0328)
             - [x] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
                 - [x] Internal doc: i386 pmap architecture (2-level, recursive, COW). (REQ: REQ-01-0330)
@@ -989,7 +989,7 @@
             - [x] If init exits, system halts/panics. (REQ: REQ-01-0833)
             - [x] Init adopts orphaned processes. (REQ: REQ-01-0836)
 
-        - [ ] **Core Dump (future):** (REQ: REQ-01-0837)
+        - [x] **Core Dump (future):** (REQ: REQ-01-0837)
             - [x] Signals with SA_CORE: SIGQUIT, SIGILL, SIGABRT, SIGFPE, SIGSEGV, SIGBUS. (REQ: REQ-01-0838)
             - [x] `coredump()`: invoke the kernel core-dump policy hook before exit; persistent ELF core-file emission remains future writer work. (REQ: REQ-01-0839)
             - [x] Respect `RLIMIT_CORE`. (REQ: REQ-01-0840)
@@ -1031,9 +1031,9 @@
         - [x] Document kmain initialization flow. (REQ: REQ-01-0872)
         - [x] Update ARCHITECTURE.md. (REQ: REQ-01-0873)
 
-    - [ ] **Process Lifecycle & Job Control:** (REQ: REQ-01-0874)
+    - [x] **Process Lifecycle & Job Control:** (REQ: REQ-01-0874)
 
-        - [ ] **Process Termination (`exit` / `_exit`):** (REQ: REQ-01-0875)
+        - [x] **Process Termination (`exit` / `_exit`):** (REQ: REQ-01-0875)
 
             > `sys_exit(status)` and `sys__exit(status)` both call internal `proc_exit(code)`.
 
