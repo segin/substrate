@@ -912,7 +912,7 @@
             - [x] **`sys_sigwait(set, sig)`:** synchronous signal consumption (no handler). (REQ: REQ-01-0765)
             - [x] **`sys_sigtimedwait(set, info, timeout)`:** like sigwait with timeout + siginfo. (REQ: REQ-01-0766)
 
-        - [ ] **Signal Generation:** (REQ: REQ-01-0767)
+        - [x] **Signal Generation:** (REQ: REQ-01-0767)
             - [x] `psignal(p, sig)`: send to process. (REQ: REQ-01-0768)
                 - [x] Init protection: block SIGKILL/SIGTERM/SIGSTOP to PID 1. (REQ: REQ-01-0769)
                 - [x] Select best thread for delivery (not masked). (REQ: REQ-01-0770)
@@ -923,7 +923,7 @@
                 - [x] Pass `code` via `siginfo_t` (`si_code`). (REQ: REQ-01-0775)
                 - [x] Sources: page fault → SIGSEGV, div-by-zero → SIGFPE, illegal insn → SIGILL. (REQ: REQ-01-0776)
             - [x] `sigexit(p, sig)`: terminate with signal. (REQ: REQ-01-0777)
-                - [ ] Core dump if SA_CORE: call `coredump()`. (REQ: REQ-01-0778)
+                - [x] Core dump if SA_CORE: call `coredump()`. (REQ: REQ-01-0778)
                 - [x] Set exit status to indicate signal termination. (REQ: REQ-01-0779)
             - [x] **Terminal Signals (TTY):** (REQ: REQ-01-0780)
                 - [x] SIGINT (Ctrl+C), SIGQUIT (Ctrl+\) to foreground pgrp. (REQ: REQ-01-0781)
@@ -994,7 +994,7 @@
             - [ ] `coredump()`: write ELF core format (`/cores/core.PID`). (REQ: REQ-01-0839)
             - [ ] Respect `RLIMIT_CORE`. (REQ: REQ-01-0840)
 
-        - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+        - [x] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
             - [x] Unit: `sys_sigaction` install/replace/reset handler. (REQ: REQ-01-0842)
             - [x] Unit: `sys_sigprocmask` block/unblock/setmask. (REQ: REQ-01-0843)
             - [x] Unit: `sys_kill` to specific PID, pgrp, all. (REQ: REQ-01-0844)

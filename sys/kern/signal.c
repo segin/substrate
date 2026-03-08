@@ -17,6 +17,15 @@
 
 extern thread_t threads[MAX_THREADS];
 
+int coredump(process_t *p);
+
+#ifndef HOST_TEST_EXTERNAL_COREDUMP
+__attribute__((weak)) int coredump(process_t *p) {
+    (void)p;
+    return -1;
+}
+#endif
+
 static void signal_interrupt_thread(thread_t *t) {
     if (!t) {
         return;
@@ -585,10 +594,7 @@ void sigexit(process_t *p, int sig) {
     int do_core = (sigprop[sig] & SA_CORE) != 0;
     
     if (do_core) {
-        /* Call coredump routine if available */
-        extern int coredump(process_t *p); // May not be implemented yet
-        // coredump(p); // Stub - uncomment when coredump is implemented
-        (void)do_core; // Suppress unused warning for now
+        coredump(p);
     }
     
     /* Set exit status to indicate signal termination:

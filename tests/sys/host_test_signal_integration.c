@@ -10,6 +10,7 @@
 #include <pm/pm.h>
 #include <kern/sched.h>
 #include <exec/perso/personality.h>
+#include <sys/wait.h>
 
 thread_t threads[MAX_THREADS];
 process_t processes[MAX_PROCS];
@@ -19,6 +20,8 @@ mutex_t proctree_lock;
 
 static int proc_exit_called;
 static int proc_exit_status;
+static int coredump_called;
+static int coredump_pid;
 
 void mutex_init(mutex_t *m, const char *name) { (void)m; (void)name; }
 void mutex_lock(mutex_t *m) { (void)m; }
@@ -33,7 +36,9 @@ uint64_t get_ticks(void) { return 0; }
 uint32_t get_hz(void) { return 128; }
 int copyin(const void *src, void *dst, size_t size) { memcpy(dst, src, size); return 0; }
 int copyout(const void *src, void *dst, size_t size) { memcpy(dst, src, size); return 0; }
-const uint8_t sigprop[NSIG] = {0};
+const uint8_t sigprop[NSIG] = {
+    [SIGSEGV] = SA_KILL | SA_CORE,
+};
 void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t *regs) {
     (void)handler; (void)sig; (void)mask; (void)flags; (void)regs;
 }
@@ -58,7 +63,13 @@ void pgrp_signal(struct pgrp *pgrp, int sig) {
 }
 int pgrp_is_orphaned(struct pgrp *pgrp) { (void)pgrp; return 0; }
 void proc_exit(int status) { proc_exit_called = 1; proc_exit_status = status; }
+int coredump(process_t *p) {
+    coredump_called++;
+    coredump_pid = p ? p->pid : -1;
+    return 0;
+}
 
+#define HOST_TEST_EXTERNAL_COREDUMP 1
 #include "../../sys/kern/signal.c"
 
 static void reset_env(void) {
@@ -66,6 +77,8 @@ static void reset_env(void) {
     memset(processes, 0, sizeof(processes));
     proc_exit_called = 0;
     proc_exit_status = 0;
+    coredump_called = 0;
+    coredump_pid = -1;
     for (int i = 0; i < MAX_PROCS; i++) {
         processes[i].pid = -1;
     }
@@ -387,6 +400,39 @@ static void test_sigchld_stop_continue_respect_nocldstop(void) {
     assert(parent_thread->sig_pending & sigmask(SIGCHLD));
 }
 
+static void test_sa_core_signal_invokes_coredump_hook(void) {
+    registers_t regs;
+    process_t *proc;
+    thread_t *thread;
+
+    reset_env();
+    memset(&regs, 0, sizeof(regs));
+    regs.cs = 0x1b;
+
+    proc = &processes[0];
+    thread = &threads[0];
+
+    proc->pid = 70;
+    proc->state = SRUN;
+
+    thread->tid = 700;
+    thread->proc = proc;
+    thread->state = THREAD_RUNNING;
+    thread->sig_pending = sigmask(SIGSEGV);
+
+    current_process = proc;
+    current_thread = thread;
+
+    signal_handle_pending(&regs);
+
+    assert(coredump_called == 1);
+    assert(coredump_pid == proc->pid);
+    assert(proc_exit_called == 1);
+    assert(WIFSIGNALED(proc_exit_status));
+    assert(WTERMSIG(proc_exit_status) == SIGSEGV);
+    assert(WCOREDUMP(proc_exit_status));
+}
+
 int main(void) {
     test_sigint_kills_target_child();
     test_sys_kill_permission_and_group_routing();
@@ -394,6 +440,7 @@ int main(void) {
     test_sigstop_stops_entire_process();
     test_sigkill_resumes_stopped_threads_before_exit();
     test_sigchld_stop_continue_respect_nocldstop();
+    test_sa_core_signal_invokes_coredump_hook();
     puts("host_test_signal_integration: PASS");
     return 0;
 }

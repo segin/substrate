@@ -111,6 +111,11 @@ Default-action handling in `signal_handle_pending()` currently covers:
 - stop: `SIGSTOP`, `SIGTSTP`, `SIGTTIN`, `SIGTTOU`
 - ignore-by-default paths such as `SIGCHLD` and non-stop `SIGCONT`
 
+For signals whose native default action carries `SA_CORE`, `sigexit()` now
+invokes the kernel `coredump()` hook before terminating. The current core-file
+writer remains a separate future work item; the signal contract boundary is that
+the hook is invoked and the wait status carries the core-dump bit.
+
 Job-control stop signals are ignored for orphaned process groups.
 
 ## SA_RESTART Behavior
