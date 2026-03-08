@@ -203,7 +203,7 @@
                 - [x] `pmap_zero_page(phys)`: zero a physical page via temporary mapping. (REQ: REQ-01-0174)
                 - [x] `pmap_copy_page(src_phys, dst_phys)`: copy between physical pages. (REQ: REQ-01-0175)
 
-            - [ ] **Context Switch (`pmap_activate`):** (REQ: REQ-01-0176, REQ-01-0350)
+            - [x] **Context Switch (`pmap_activate`):** (REQ: REQ-01-0176, REQ-01-0350)
                 - [x] Load `pmap->pdir_phys` into CR3. (REQ: REQ-01-0177)
                 - [x] Update `curpmap` thread-local pointer. (REQ: REQ-01-0178)
                 - [x] Set TSS ESP0 for kernel stack (scheduler integration). (REQ: REQ-01-0179)
