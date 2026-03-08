@@ -1056,7 +1056,7 @@
             - [ ] **Phase 3 — Thread Termination:** (REQ: REQ-01-0892)
                 - [x] Set `t->state = THREAD_ZOMBIE` for each thread. (REQ: REQ-01-0893)
                 - [x] Interrupt non-current threads, wait for zombie state. (REQ: REQ-01-0894)
-                - [ ] Free thread stacks and structures. (REQ: REQ-01-0895)
+                - [x] Free thread stacks and structures. (REQ: REQ-01-0895)
                 - [x] Current thread becomes reaper. (REQ: REQ-01-0896)
             - [x] **Phase 4 — Resource Usage Finalization:** (REQ: REQ-01-0897)
                 - [x] `rusage_finalize(p)`: accumulate thread times. (REQ: REQ-01-0898)
