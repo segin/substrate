@@ -19,6 +19,9 @@ HOST_TESTS = host_test_kmem_test host_test_udf_large_write host_test_udf_truncat
 
 all: tests.o $(HOST_TESTS)
 
+host_test_ext2_get_blocks_extent: host_test_ext2_get_blocks_extent.c
+	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_ext2_get_blocks_extent.c ../../sys/fs/ext2/ext2.c -o $@
+
 host_test_kmem_test: host_test_kmem_test.c
 	$(CC) -g -Wall -DHOST_TEST -Wno-pointer-to-int-cast -Ikmem_test_mocks host_test_kmem_test.c -o $@
 
