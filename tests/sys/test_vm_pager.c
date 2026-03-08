@@ -7,8 +7,12 @@
 #include <vm/vm_pager.h>
 #include <vm/vm_object.h>
 #include <vm/vm_page.h>
+#include <vm/vm_map.h>
 #include <vm/vm_swap.h>
 #include <vfs/vfs.h>
+#include <sys/proc.h>
+#include <sys/syscall_impl.h>
+#include <arch/i386/pmap.h>
 #include <string.h>
 #include <kern/console.h>
 
@@ -26,8 +30,10 @@ static int tests_failed = 0;
 
 static uint8_t fake_store[4096];
 static uint8_t swap_file_buffer[8 * 4096];
+static int fake_pager_write_calls = 0;
 
 extern struct fs_node *swap_node;
+extern process_t *current_process;
 
 static size_t fake_pager_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     uint8_t *store = (uint8_t *)(uintptr_t)node->impl;
@@ -39,6 +45,7 @@ static size_t fake_pager_read(fs_node_t *node, off_t offset, size_t size, uint8_
 static size_t fake_pager_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     uint8_t *store = (uint8_t *)(uintptr_t)node->impl;
 
+    fake_pager_write_calls++;
     memcpy(store + offset, buffer, size);
     return size;
 }
@@ -220,11 +227,67 @@ void test_vm_swap_pager_full(void) {
     kprint("  PASS\n");
 }
 
+void test_vm_msync_dirty_writeback(void) {
+    fs_node_t fake_file = {0};
+    process_t fake_proc = {0};
+    process_t *saved_process = current_process;
+    pmap_t pmap;
+    vm_map_t *map;
+    vm_object_t *obj;
+    vm_page_t *page;
+
+    kprint("Test: vm_msync dirty writeback\n");
+
+    memset(fake_store, 0, sizeof(fake_store));
+    fake_pager_write_calls = 0;
+    fake_file.impl = (uintptr_t)fake_store;
+    fake_file.read = fake_pager_read;
+    fake_file.write = fake_pager_write;
+
+    pmap = pmap_create();
+    TEST_ASSERT(pmap != 0, "pmap created");
+    map = vm_map_create(pmap, 0x1000, 0x100000);
+    TEST_ASSERT(map != NULL, "map created");
+
+    fake_proc.vm_map = map;
+    fake_proc.pmap = (struct pmap *)pmap;
+    current_process = &fake_proc;
+
+    obj = vm_object_allocate(VM_OBJ_TYPE_VNODE, 0x1000);
+    TEST_ASSERT(obj != NULL, "object allocated");
+    obj->pager = vm_pager_allocate(VM_OBJ_TYPE_VNODE, &fake_file, 0x1000, VM_PROT_READ | VM_PROT_WRITE, 0);
+    TEST_ASSERT(obj->pager != NULL, "pager allocated");
+
+    TEST_ASSERT(vm_map_insert(map, obj, 0, 0x18000, 0x19000,
+                              VM_PROT_READ | VM_PROT_WRITE,
+                              VM_PROT_READ | VM_PROT_WRITE,
+                              VM_INHERIT_COPY) == 0,
+                "map insert succeeded");
+
+    page = vm_page_alloc(obj, 0, 0);
+    TEST_ASSERT(page != NULL, "page allocated");
+    vm_object_add_page(obj, page);
+
+    memset((void *)(uintptr_t)(page->phys_addr + 0xC0000000), 0x6B, 4096);
+    page->flags |= PG_VALID | PG_DIRTY;
+
+    TEST_ASSERT(sys_msync((void *)0x18000, 4096, 0) == 0, "msync succeeded");
+    TEST_ASSERT(fake_pager_write_calls > 0, "msync issued pager writeback");
+    TEST_ASSERT(!(page->flags & PG_DIRTY), "page dirtiness cleared after writeback");
+    TEST_ASSERT(fake_store[0] == 0x6B, "writeback persisted page contents");
+
+    current_process = saved_process;
+    pmap_activate(pmap_kernel());
+    vm_map_destroy(map);
+    kprint("  PASS\n");
+}
+
 void run_vm_pager_tests(void) {
     kprint("\n=== VM Pager Unit Tests ===\n");
     test_vm_pager_lifecycle();
     test_vm_pager_io();
     test_vm_swap_pager_roundtrip();
     test_vm_swap_pager_full();
+    test_vm_msync_dirty_writeback();
     kprint("\nVM Pager Tests Complete\n");
 }

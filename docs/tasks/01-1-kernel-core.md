@@ -563,7 +563,7 @@
             - [ ] **Advanced Features:** (REQ: REQ-01-0489, REQ-01-0671)
                 - [ ] **File-backed mmap (`MAP_FILE`):** (REQ: REQ-01-0490)
                     - [x] Vnode pager triggers VFS `read` on page fault. (REQ: REQ-01-0491)
-                    - [ ] Dirty page tracking and `msync` writeback. (REQ: REQ-01-0492)
+                    - [x] Dirty page tracking and `msync` writeback. (REQ: REQ-01-0492)
                     - [ ] `MAP_PRIVATE`: COW on write (shadow object). (REQ: REQ-01-0493)
                     - [ ] `MAP_SHARED`: write-through to file. (REQ: REQ-01-0494)
                 - [ ] **Reference Counting & Shared Memory:** (REQ: REQ-01-0495)
