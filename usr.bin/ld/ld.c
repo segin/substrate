@@ -12,6 +12,8 @@
 #include <limits.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <sys/wait.h>
+#include <fcntl.h>
 
 #define LD_MAX_SCRIPT_INCLUDE_DEPTH 64
 #define LD_MAX_TRACKED_SYMBOLS 262144U
@@ -3245,8 +3247,8 @@ static int discover_default_plugin(ld_ctx_t *ctx) {
 }
 
 static int plugin_discover_and_handshake(ld_ctx_t *ctx) {
-    char cmd[2048];
-    int rc;
+    int status;
+    pid_t pid;
 
     if (ctx == NULL || ctx->plugin_checked) {
         return 0;
@@ -3268,25 +3270,49 @@ static int plugin_discover_and_handshake(ld_ctx_t *ctx) {
         fprintf(stderr, "ld: plugin not executable: %s\n", ctx->plugin_path);
         return -1;
     }
-    if (snprintf(cmd, sizeof(cmd), "\"%s\" --version >/dev/null 2>&1", ctx->plugin_path) >= (int)sizeof(cmd)) {
-        fprintf(stderr, "ld: plugin path too long\n");
+
+    pid = fork();
+    if (pid < 0) {
+        fprintf(stderr, "ld: fork failed\n");
         return -1;
     }
-    rc = system(cmd);
-    if (rc != 0) {
+
+    if (pid == 0) {
+        int fd = open("/dev/null", O_WRONLY);
+        if (fd >= 0) {
+            dup2(fd, STDOUT_FILENO);
+            dup2(fd, STDERR_FILENO);
+            if (fd > STDERR_FILENO) {
+                close(fd);
+            }
+        }
+
+        char *args[] = {(char *)ctx->plugin_path, "--version", NULL};
+        execv(ctx->plugin_path, args);
+        exit(127);
+    }
+
+    if (waitpid(pid, &status, 0) < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         fprintf(stderr, "ld: plugin handshake failed for %s\n", ctx->plugin_path);
         return -1;
     }
+
     ctx->plugin_checked = 1;
     return 0;
 }
 
 static int plugin_materialize_object(const ld_ctx_t *ctx, const char *in_path, char *out_path, size_t out_path_sz) {
-    char cmd[4096];
     FILE *fp;
     char *nl;
-    size_t i, cmd_len;
-    int n;
+    size_t i;
+    int pfd[2];
+    pid_t pid;
+    int status;
+    char **args;
+    size_t args_cap;
+    size_t args_count;
+    char *plugin_opt_prefix = "--plugin-opt=";
+    char **plugin_opt_args;
 
     if (out_path == NULL || out_path_sz == 0) {
         return -1;
@@ -3295,29 +3321,97 @@ static int plugin_materialize_object(const ld_ctx_t *ctx, const char *in_path, c
     if (ctx == NULL || ctx->plugin_path == NULL || ctx->plugin_path[0] == '\0' || in_path == NULL) {
         return 0;
     }
-    n = snprintf(cmd, sizeof(cmd), "\"%s\" --materialize \"%s\"", ctx->plugin_path, in_path);
-    if (n < 0 || (size_t)n >= sizeof(cmd)) {
+
+    args_cap = 5 + ctx->plugin_opt_count;
+    args = (char **)malloc(args_cap * sizeof(char *));
+    if (args == NULL) {
         return -1;
     }
-    cmd_len = (size_t)n;
+
+    plugin_opt_args = (char **)malloc(ctx->plugin_opt_count * sizeof(char *));
+    if (plugin_opt_args == NULL && ctx->plugin_opt_count > 0) {
+        free(args);
+        return -1;
+    }
+
+    args_count = 0;
+    args[args_count++] = (char *)ctx->plugin_path;
+    args[args_count++] = "--materialize";
+    args[args_count++] = (char *)in_path;
 
     for (i = 0; i < ctx->plugin_opt_count; ++i) {
-        n = snprintf(cmd + cmd_len, sizeof(cmd) - cmd_len, " --plugin-opt=\"%s\"", ctx->plugin_opts[i]);
-        if (n < 0 || (size_t)n >= sizeof(cmd) - cmd_len) {
+        size_t len = strlen(plugin_opt_prefix) + strlen(ctx->plugin_opts[i]) + 1;
+        plugin_opt_args[i] = (char *)malloc(len);
+        if (plugin_opt_args[i] == NULL) {
+            size_t j;
+            for (j = 0; j < i; ++j) {
+                free(plugin_opt_args[j]);
+            }
+            free(plugin_opt_args);
+            free(args);
             return -1;
         }
-        cmd_len += (size_t)n;
+        snprintf(plugin_opt_args[i], len, "%s%s", plugin_opt_prefix, ctx->plugin_opts[i]);
+        args[args_count++] = plugin_opt_args[i];
     }
-    fp = popen(cmd, "r");
-    if (fp == NULL) {
+    args[args_count] = NULL;
+
+    if (pipe(pfd) < 0) {
+        for (i = 0; i < ctx->plugin_opt_count; ++i) free(plugin_opt_args[i]);
+        free(plugin_opt_args);
+        free(args);
         return -1;
     }
+
+    pid = fork();
+    if (pid < 0) {
+        close(pfd[0]);
+        close(pfd[1]);
+        for (i = 0; i < ctx->plugin_opt_count; ++i) free(plugin_opt_args[i]);
+        free(plugin_opt_args);
+        free(args);
+        return -1;
+    }
+
+    if (pid == 0) {
+        close(pfd[0]);
+        if (pfd[1] != STDOUT_FILENO) {
+            dup2(pfd[1], STDOUT_FILENO);
+            close(pfd[1]);
+        }
+        execv(ctx->plugin_path, args);
+        exit(127);
+    }
+
+    close(pfd[1]);
+
+    fp = fdopen(pfd[0], "r");
+    if (fp == NULL) {
+        close(pfd[0]);
+        waitpid(pid, &status, 0);
+        for (i = 0; i < ctx->plugin_opt_count; ++i) free(plugin_opt_args[i]);
+        free(plugin_opt_args);
+        free(args);
+        return -1;
+    }
+
     if (fgets(out_path, (int)out_path_sz, fp) == NULL) {
-        pclose(fp);
+        fclose(fp);
+        waitpid(pid, &status, 0);
         out_path[0] = '\0';
+        for (i = 0; i < ctx->plugin_opt_count; ++i) free(plugin_opt_args[i]);
+        free(plugin_opt_args);
+        free(args);
         return 0;
     }
-    pclose(fp);
+
+    fclose(fp);
+    waitpid(pid, &status, 0);
+
+    for (i = 0; i < ctx->plugin_opt_count; ++i) free(plugin_opt_args[i]);
+    free(plugin_opt_args);
+    free(args);
+
     nl = strchr(out_path, '\n');
     if (nl != NULL) {
         *nl = '\0';
