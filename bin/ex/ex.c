@@ -763,38 +763,44 @@ void do_command(buffer_t *b, char *cmd) {
                 int matches = 0;
                 // We'll build a new string
                 size_t rep_len = strlen(repl_str);
-                char *new_text = strdup("");
+                size_t new_len = 0;
+                char *new_text = malloc(1);
+                new_text[0] = '\0';
                 
                 while (regexec(&re, search_start, 1, &pm, 0) == 0) {
                     matches++;
                     // append up to match
-                    size_t pre_len = strlen(new_text);
-                    new_text = realloc(new_text, pre_len + pm.rm_so + rep_len + 1);
-                    strncat(new_text, search_start, pm.rm_so);
-                    strcat(new_text, repl_str);
+                    new_text = realloc(new_text, new_len + pm.rm_so + rep_len + 1);
+                    memcpy(new_text + new_len, search_start, pm.rm_so);
+                    new_len += pm.rm_so;
+                    memcpy(new_text + new_len, repl_str, rep_len);
+                    new_len += rep_len;
+                    new_text[new_len] = '\0';
                     
                     search_start += pm.rm_eo;
                     if (!global) break;
                     if (pm.rm_so == pm.rm_eo) {
                         // zero-length match avoidance loop
                         if (*search_start) {
-                            pre_len = strlen(new_text);
-                            new_text = realloc(new_text, pre_len + 2);
-                            new_text[pre_len] = *search_start;
-                            new_text[pre_len+1] = '\0';
+                            new_text = realloc(new_text, new_len + 2);
+                            new_text[new_len] = *search_start;
+                            new_len++;
+                            new_text[new_len] = '\0';
                             search_start++;
                         } else break;
                     }
                 }
                 
                 if (matches > 0) {
-                    size_t pre_len = strlen(new_text);
-                    new_text = realloc(new_text, pre_len + strlen(search_start) + 1);
-                    strcat(new_text, search_start);
+                    size_t rem_len = strlen(search_start);
+                    new_text = realloc(new_text, new_len + rem_len + 1);
+                    memcpy(new_text + new_len, search_start, rem_len);
+                    new_len += rem_len;
+                    new_text[new_len] = '\0';
                     
                     free(l->text);
                     l->text = new_text;
-                    l->len = strlen(new_text);
+                    l->len = new_len;
                     b->modified = 1;
                     b->cur = l;
                 } else {
@@ -865,7 +871,9 @@ void do_command(buffer_t *b, char *cmd) {
             fprintf(stderr, "Shell commands not allowed in secure mode\n");
             return;
         }
-        system(cmd + 1);
+        if (system(cmd + 1) == -1) {
+            perror("system");
+        }
     }
 }
 

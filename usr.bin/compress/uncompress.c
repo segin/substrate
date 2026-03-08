@@ -250,19 +250,21 @@ static int process_file(const char *name) {
          * Doesn't check for terminal.
          */
     } else {
-        strncpy(in_name, name, sizeof(in_name)-1);
-        in_name[sizeof(in_name)-1] = '\0';
+        int n = snprintf(in_name, sizeof(in_name), "%s", name);
+        if (n < 0 || (size_t)n >= sizeof(in_name)) {
+            fprintf(stderr, "uncompress: %s: file name too long\n", name);
+            return 1;
+        }
 
         /* Check if input exists */
         if (stat(in_name, &in_sb) < 0) {
             /* Try appending .Z */
-            if (strlen(in_name) + 2 < sizeof(in_name)) {
-                strcat(in_name, ".Z");
-                if (stat(in_name, &in_sb) < 0) {
-                    perror(name);
-                    return 1;
-                }
-            } else {
+            n = snprintf(in_name, sizeof(in_name), "%s.Z", name);
+            if (n < 0 || (size_t)n >= sizeof(in_name)) {
+                fprintf(stderr, "uncompress: %s.Z: file name too long\n", name);
+                return 1;
+            }
+            if (stat(in_name, &in_sb) < 0) {
                 perror(name);
                 return 1;
             }
@@ -280,8 +282,12 @@ static int process_file(const char *name) {
             size_t len = strlen(in_name);
             /* Determine output name */
             if (len > 2 && strcmp(in_name + len - 2, ".Z") == 0) {
-                strncpy(out_name, in_name, len - 2);
-                out_name[len - 2] = '\0';
+                int n = snprintf(out_name, sizeof(out_name), "%.*s", (int)(len - 2), in_name);
+                if (n < 0 || (size_t)n >= sizeof(out_name)) {
+                    fprintf(stderr, "uncompress: %.*s: file name too long\n", (int)(len - 2), in_name);
+                    fclose(in);
+                    return 1;
+                }
             } else {
                 /* If not ending in .Z, standard uncompress complains. */
                 fprintf(stderr, "uncompress: %s: unknown suffix -- ignored\n", in_name);
