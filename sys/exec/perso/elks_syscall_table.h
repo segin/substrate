@@ -25,14 +25,18 @@
 #define ELKS_SYS_stat           18
 #define ELKS_SYS_lseek          19
 #define ELKS_SYS_getpid         20
+#define ELKS_SYS_mount          21
+#define ELKS_SYS_umount         22
 #define ELKS_SYS_setuid         23
 #define ELKS_SYS_getuid         24
+#define ELKS_SYS_stime          25
 #define ELKS_SYS_alarm          27
 #define ELKS_SYS_fstat          28
 #define ELKS_SYS_pause          29
 #define ELKS_SYS_access         33
 #define ELKS_SYS_sync           36
 #define ELKS_SYS_kill           37
+#define ELKS_SYS_rename         38
 #define ELKS_SYS_mkdir          39
 #define ELKS_SYS_rmdir          40
 #define ELKS_SYS_dup            41
@@ -44,6 +48,7 @@
 #define ELKS_SYS_signal         48
 #define ELKS_SYS_ioctl          54
 #define ELKS_SYS_fcntl          55
+#define ELKS_SYS_umask          60
 #define ELKS_SYS_dup2           63
 #define ELKS_SYS_getppid        64
 #define ELKS_SYS_getpgrp        65

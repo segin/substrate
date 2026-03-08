@@ -7,15 +7,17 @@
 #include <sys/proc.h>
 #include <sys/ldt.h>
 #include <vm/vm_map.h>
+#include <vm/vm_kmem.h>
 #include <arch/i386/pmm.h>
 #include <arch/i386/pmap.h>
 #include <vfs/vfs.h>
-#include <lib/lib.h>
 #include <sys/kern_syscalls.h>
 #include <sys/file.h>
 #include <sys/sysctl.h> // For HW_PHYSMEM in future?
+#include <sys/sysinfo.h>
 #include <sys/stat.h>
 #include <sys/fcntl.h>
+#include <kern/panic.h>
 
 #define ELKS_TEXT_BASE 0x10000
 #define ELKS_DATA_BASE 0x20000
@@ -32,6 +34,7 @@ void elks_init_handler(void) {
 }
 
 int elks_check_file(const char *path, const char *header, size_t len) {
+    (void)path;
     if (len < sizeof(struct elks_exec)) return -ENOEXEC;
     
     struct elks_exec *hdr = (struct elks_exec *)header;
@@ -50,6 +53,7 @@ int elks_check_file(const char *path, const char *header, size_t len) {
 }
 
 static int elks_setup_segments(process_t *proc, struct elks_exec *hdr) {
+    (void)hdr;
     /* Allocate LDT if needed */
     if (!proc->ldt) {
         proc->ldt = kmalloc(LDT_ENTRIES * 8);
@@ -92,8 +96,10 @@ static int elks_setup_segments(process_t *proc, struct elks_exec *hdr) {
 
 int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) {
     struct elks_exec hdr;
+    (void)argv;
+    (void)envp;
     
-    if (kern_read(fd, &hdr, sizeof(hdr)) != sizeof(hdr)) {
+    if (kern_read(fd, (char *)&hdr, sizeof(hdr)) != sizeof(hdr)) {
         kern_close(fd);
         return -EIO;
     }

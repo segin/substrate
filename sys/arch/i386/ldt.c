@@ -50,7 +50,8 @@ void ldt_free_process(process_t *proc) {
 }
 
 /* Helper to convert user_desc to gdt_entry_t */
-void fill_ldt_entry(gdt_entry_t *entry, struct user_desc *info) {
+void fill_ldt_entry(void *entry_ptr, struct user_desc *info) {
+    gdt_entry_t *entry = (gdt_entry_t *)entry_ptr;
     uint32_t base = info->base_addr;
     uint32_t limit = info->limit;
     

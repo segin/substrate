@@ -32,6 +32,7 @@ struct process;
 #define SIGVTALRM  26
 #define SIGPROF    27
 #define SIGWINCH   28
+#define SIGSYS     31
 
 typedef void (*sig_t)(int);
 

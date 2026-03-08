@@ -23,8 +23,10 @@ idt_ptr_t   idt_ptr;
 #include <drivers/storage/ide/ide.h>
 #include <arch/i386/vm86.h>
 #include <arch/i386/pmap.h>
+#include <arch/i386/gdt.h>
 #include <sys/exec.h>
 #include <arch/i386/percpu.h>
+#include <exec/perso/personality.h>
 // isr externs are in idt.h now
 
 
@@ -38,6 +40,50 @@ static const char *exception_messages[] = {
     "Reserved", "Reserved", "Reserved", "Reserved", "Reserved",
     "Reserved", "Reserved", "Security Exception", "Reserved"
 };
+
+static uint32_t ldt_entry_base(const gdt_entry_t *entry) {
+    return (uint32_t)entry->base_low |
+           ((uint32_t)entry->base_middle << 16) |
+           ((uint32_t)entry->base_high << 24);
+}
+
+static int elks_decode_softint(registers_t *regs, uint8_t *vector, uintptr_t *addr) {
+    uint16_t selector_index;
+    gdt_entry_t *ldt;
+    uintptr_t linear_ip;
+    uint8_t *ip;
+
+    if (!current_process || current_process->perso_id != PERS_ELKS || !current_process->ldt) {
+        return 0;
+    }
+    if ((regs->cs & 0x4) == 0) {
+        return 0;
+    }
+
+    selector_index = (uint16_t)(regs->cs >> 3);
+    if (selector_index >= (uint16_t)current_process->ldt_entry_count) {
+        return 0;
+    }
+
+    ldt = (gdt_entry_t *)current_process->ldt;
+    linear_ip = (uintptr_t)ldt_entry_base(&ldt[selector_index]) + (uintptr_t)(regs->eip & 0xFFFF);
+    if (linear_ip >= 0xC0000000U) {
+        return 0;
+    }
+
+    ip = (uint8_t *)linear_ip;
+    if (ip[0] != 0xCD) {
+        return 0;
+    }
+
+    if (vector) {
+        *vector = ip[1];
+    }
+    if (addr) {
+        *addr = linear_ip;
+    }
+    return 1;
+}
 
 void idt_init(void) {
     idt_ptr.limit = sizeof(idt_entry_t) * 256 - 1;
@@ -188,6 +234,26 @@ void isr_handler(registers_t *regs) {
         if (regs->int_no == 13 && (regs->eflags & 0x20000)) { // EFLAGS_VM = 0x20000
             vm86_gpf_handler(regs);
             return;
+        }
+
+        if (regs->int_no == 13 && is_usermode && current_process &&
+            current_process->perso_id == PERS_ELKS) {
+            uint8_t softint = 0;
+            uintptr_t softint_addr = 0;
+
+            if (elks_decode_softint(regs, &softint, &softint_addr) && softint == 0x20) {
+                char msg[96];
+
+                sprintf(msg, "ELKS: trapped Minix-86 syscall attempt via INT 0x20 at 0x%08X\n",
+                    (unsigned int)softint_addr);
+                kprint(msg);
+                if (current_thread && current_thread->proc == current_process) {
+                    current_thread->trap_addr = softint_addr;
+                }
+                trapsignal(current_process, SIGSYS, SI_KERNEL);
+                signal_handle_pending(regs);
+                return;
+            }
         }
 
         uint32_t cr2 = 0;
