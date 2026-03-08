@@ -516,10 +516,10 @@
                 - [x] `vm_map_protect(map, start, end, new_prot)`. (REQ: REQ-01-0442)
                 - [x] `vm_map_inherit(map, start, end, inheritance)`. (REQ: REQ-01-0443)
                 - [ ] Entry merging: coalesce adjacent entries with same attributes. (REQ: REQ-01-0444)
-            - [ ] **VM Objects (`vm_object`):** (REQ: REQ-01-0445)
+            - [x] **VM Objects (`vm_object`):** (REQ: REQ-01-0445)
                 - [x] Abstract backing store (anonymous memory, vnode/file, device). (REQ: REQ-01-0446)
                 - [x] `resident_pages`: resident `vm_page_t` collection tracked by page index in the object. (REQ: REQ-01-0447)
-                - [x] `ref_count`: number of map entries referencing this object. (REQ: REQ-01-0448)
+                - [x] `ref_count`: outstanding VM references held by maps, shadow chains, pagers, and callers. (REQ: REQ-01-0448)
                 - [x] `shadow`: pointer to shadow object (for COW chains). (REQ: REQ-01-0449)
                 - [x] `pager`: associated pager (swap, vnode, device, default). (REQ: REQ-01-0450)
                 - [x] `vm_object_allocate(size)`: create anonymous object. (REQ: REQ-01-0451)
@@ -579,8 +579,8 @@
                 - [x] Unit: vm_object create/reference/deallocate/shadow/collapse. (REQ: REQ-01-0505)
                 - [x] Unit: vm_fault resolution for anonymous, file-backed, and COW pages. (REQ: REQ-01-0506)
                 - [x] Unit: swap pager round-trip (page out → page in). (REQ: REQ-01-0507)
-                - [ ] Property: vm_map entries are non-overlapping and sorted. (REQ: REQ-01-0508)
-                - [ ] Property: vm_object refcount reaches 0 only when no entries reference it. (REQ: REQ-01-0509)
+                - [x] Property: vm_map entries are non-overlapping and sorted. (REQ: REQ-01-0508)
+                - [x] Property: vm_object map-owned references are released only after the corresponding map entries are removed or destroyed. (REQ: REQ-01-0509)
                 - [ ] Integration: mmap anonymous memory, write, fork, verify COW isolation. (REQ: REQ-01-0510)
                 - [ ] Integration: mmap file, read, modify, msync, verify on-disk. (REQ: REQ-01-0511)
             - [x] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
@@ -1592,7 +1592,7 @@
 - **US-01-0445**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vM Objects (vm_object): so that this capability is implemented with clear verification evidence.
 - **US-01-0446**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to abstract backing store (anonymous memory, vnode/file, device) so that this capability is implemented with clear verification evidence.
 - **US-01-0447**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to resident_pages: radix tree or hash of vm_page_t by page index so that this capability is implemented with clear verification evidence.
-- **US-01-0448**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to ref_count: number of map entries referencing this object so that this capability is implemented with clear verification evidence.
+- **US-01-0448**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to ref_count: outstanding VM references held by maps, shadow chains, pagers, and callers so that this capability is implemented with clear verification evidence.
 - **US-01-0449**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to shadow: pointer to shadow object (for COW chains) so that this capability is implemented with clear verification evidence.
 - **US-01-0450**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pager: associated pager (swap, vnode, device, default) so that this capability is implemented with clear verification evidence.
 - **US-01-0451**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_object_allocate(size): create anonymous object so that this capability is implemented with clear verification evidence.
@@ -1653,7 +1653,7 @@
 - **US-01-0506**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: vm_fault resolution for anonymous, file-backed, and COW pages so that this capability is implemented with clear verification evidence.
 - **US-01-0507**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: swap pager round-trip (page out → page in) so that this capability is implemented with clear verification evidence.
 - **US-01-0508**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to property: vm_map entries are non-overlapping and sorted so that this capability is implemented with clear verification evidence.
-- **US-01-0509**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to property: vm_object refcount reaches 0 only when no entries reference it so that this capability is implemented with clear verification evidence.
+- **US-01-0509**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to property: vm_object map-owned references are released only after the corresponding map entries are removed or destroyed so that this capability is implemented with clear verification evidence.
 - **US-01-0510**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: mmap anonymous memory, write, fork, verify COW isolation so that this capability is implemented with clear verification evidence.
 - **US-01-0511**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: mmap file, read, modify, msync, verify on-disk so that this capability is implemented with clear verification evidence.
 - **US-01-0512**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to documentation: so that this capability is implemented with clear verification evidence.
@@ -3494,7 +3494,7 @@
 - **REQ-01-0447** (EARS/Ubiquitous): The Substrate system shall resident_pages: radix tree or hash of vm_page_t by page index.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0448** (EARS/Ubiquitous): The Substrate system shall ref_count: number of map entries referencing this object.
+- **REQ-01-0448** (EARS/Ubiquitous): The Substrate system shall track `vm_object->ref_count` as outstanding VM references held by maps, shadow chains, pagers, and callers.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0449** (EARS/Ubiquitous): The Substrate system shall shadow: pointer to shadow object (for COW chains).
@@ -3677,7 +3677,7 @@
 - **REQ-01-0508** (EARS/Ubiquitous): The Substrate system shall property: vm_map entries are non-overlapping and sorted.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0509** (EARS/Ubiquitous): The Substrate system shall property: vm_object refcount reaches 0 only when no entries reference it.
+- **REQ-01-0509** (EARS/Ubiquitous): The Substrate system shall release map-owned `vm_object` references only after the corresponding map entries are removed or destroyed.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0510** (EARS/Ubiquitous): The Substrate system shall integration: mmap anonymous memory, write, fork, verify COW isolation.

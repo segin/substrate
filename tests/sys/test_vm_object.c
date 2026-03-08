@@ -4,8 +4,10 @@
 
 #include <stdint.h>
 #include <vm/vm_object.h>
+#include <vm/vm_map.h>
 #include <vm/vm_kmem.h>
 #include <vm/vm_page.h>
+#include <arch/i386/pmap.h>
 #include <kern/console.h>
 
 static int tests_passed = 0;
@@ -149,6 +151,31 @@ void test_vm_object_collapse(void) {
     kprint("  PASS\n");
 }
 
+void test_vm_object_map_reference_contract(void) {
+    kprint("Test: vm_object map reference contract\n");
+
+    pmap_t pmap = pmap_create();
+    vm_map_t *map = vm_map_create(pmap, 0x1000, 0x200000);
+    vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, 0x2000);
+
+    TEST_ASSERT(map != NULL, "map created");
+    TEST_ASSERT(obj != NULL, "object created");
+
+    vm_object_reference(obj);
+    TEST_ASSERT(obj->ref_count == 2, "extra caller ref held");
+
+    TEST_ASSERT(vm_map_insert(map, obj, 0, 0x20000, 0x22000, 7, 7, VM_INHERIT_COPY) == 0,
+                "insert succeeded");
+    TEST_ASSERT(obj->ref_count == 2, "map consumed caller-owned ref");
+
+    TEST_ASSERT(vm_map_remove(map, 0x20000, 0x22000) == 0, "remove succeeded");
+    TEST_ASSERT(obj->ref_count == 1, "remove released map-owned ref");
+
+    vm_object_deallocate(obj);
+    vm_map_destroy(map);
+    kprint("  PASS\n");
+}
+
 void run_vm_object_tests(void) {
     kprint("\n=== VM Object Unit Tests ===\n");
     test_vm_object_lifecycle();
@@ -156,5 +183,6 @@ void run_vm_object_tests(void) {
     test_vm_object_pages();
     test_vm_object_dynamic_free();
     test_vm_object_collapse();
+    test_vm_object_map_reference_contract();
     kprint("\nVM Object Tests Complete\n");
 }

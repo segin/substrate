@@ -27,6 +27,23 @@ static inline uint64_t rdtsc(void) {
     tests_passed++; \
 } while(0)
 
+static int vm_map_is_sorted_and_non_overlapping(vm_map_t *map) {
+    vm_map_entry_t *header = map->header;
+    uintptr_t last_end = map->min_offset;
+
+    for (vm_map_entry_t *cur = header->next; cur != header; cur = cur->next) {
+        if (cur->start < last_end) {
+            return 0;
+        }
+        if (cur->end <= cur->start) {
+            return 0;
+        }
+        last_end = cur->end;
+    }
+
+    return last_end <= map->max_offset;
+}
+
 // Test 1: Create and destroy vm_map
 void test_vm_map_lifecycle(void) {
     kprint("Test: vm_map lifecycle\n");
@@ -230,6 +247,37 @@ void test_vm_map_benchmark(void) {
     vm_map_destroy(map);
 }
 
+void test_vm_map_property_sorted_non_overlapping(void) {
+    kprint("Test: vm_map property sorted/non-overlapping\n");
+
+    pmap_t pmap = pmap_create();
+    vm_map_t *map = vm_map_create(pmap, 0x1000, 0x200000);
+    TEST_ASSERT(map != NULL, "map created");
+
+    TEST_ASSERT(vm_map_insert(map, NULL, 0, 0x4000, 0x5000, 7, 7, 1) == 0,
+                "insert #1");
+    TEST_ASSERT(vm_map_insert(map, NULL, 0, 0x1000, 0x2000, 7, 7, 1) == 0,
+                "insert #2");
+    TEST_ASSERT(vm_map_insert(map, NULL, 0, 0x8000, 0x9000, 7, 7, 1) == 0,
+                "insert #3");
+    TEST_ASSERT(vm_map_is_sorted_and_non_overlapping(map),
+                "entries sorted after inserts");
+
+    TEST_ASSERT(vm_map_remove(map, 0x4000, 0x5000) == 0, "remove middle");
+    TEST_ASSERT(vm_map_is_sorted_and_non_overlapping(map),
+                "entries sorted after remove");
+
+    TEST_ASSERT(vm_map_insert(map, NULL, 0, 0x4000, 0x4800, 7, 7, 1) == 0,
+                "reinsert left split");
+    TEST_ASSERT(vm_map_insert(map, NULL, 0, 0x5000, 0x5800, 7, 7, 1) == 0,
+                "insert right neighbor");
+    TEST_ASSERT(vm_map_is_sorted_and_non_overlapping(map),
+                "entries sorted after reinserts");
+
+    vm_map_destroy(map);
+    kprint("  PASS\n");
+}
+
 void run_vm_map_tests(void) {
     kprint("\n=== VM Map Unit Tests ===\n");
     
@@ -240,6 +288,7 @@ void run_vm_map_tests(void) {
     test_vm_map_entry_flags();
     test_vm_map_wire();
     test_vm_map_protect_inherit();
+    test_vm_map_property_sorted_non_overlapping();
     test_vm_map_benchmark();
     
     kprint("\nVM Map Tests Complete\n");

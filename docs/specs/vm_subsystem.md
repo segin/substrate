@@ -64,6 +64,12 @@ Implemented fields/behavior:
 - optional `pager`
 - optional `shadow` object and `shadow_offset`
 
+Reference ownership rule:
+
+- `vm_object` references are owned explicitly by maps, shadow chains, pagers, and callers
+- `vm_map_insert()` consumes the caller-owned reference instead of taking an extra one
+- callers that want to retain a handle after insertion must call `vm_object_reference()` before inserting
+
 Implemented API:
 
 - `vm_object_allocate(type, size)`
