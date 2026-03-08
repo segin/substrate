@@ -23,6 +23,7 @@ fs_node_t *fs_root;
 static jmp_buf exit_jmp;
 static int yielded;
 static int vm_map_destroy_calls;
+static int kmalloc_calls;
 
 void mutex_init(mutex_t *m, const char *name) { (void)m; (void)name; }
 void mutex_lock(mutex_t *m) { (void)m; }
@@ -41,6 +42,8 @@ void file_close_ptr(file_t *f) { (void)f; }
 void tty_hangup(struct tty *tty) { (void)tty; }
 void kprint(const char *msg) { (void)msg; }
 void host_wait_for_interrupt(void) { longjmp(exit_jmp, 2); }
+void *kmalloc(size_t size) { (void)size; kmalloc_calls++; return NULL; }
+void kfree(void *ptr, size_t size) { (void)ptr; (void)size; }
 
 pmap_t pmap_kernel(void) { return (pmap_t)0xCAFE0000; }
 pmap_t pmap_fork(pmap_t src) { return src; }
@@ -98,6 +101,7 @@ static void reset_env(void) {
     memset(threads, 0, sizeof(threads));
     yielded = 0;
     vm_map_destroy_calls = 0;
+    kmalloc_calls = 0;
     current_process = NULL;
     current_thread = NULL;
     kernel_process = NULL;
@@ -155,6 +159,8 @@ static void test_no_zombie_leaks_after_reap_cycles(void) {
         assert(parent->p_children == NULL);
         assert(child->pid == -1);
     }
+
+    assert(kmalloc_calls == 0);
 }
 
 static void test_no_zombie_leaks_after_autoreap_cycles(void) {
@@ -190,6 +196,8 @@ static void test_no_zombie_leaks_after_autoreap_cycles(void) {
         assert(child->pid == -1);
         assert(child_thread->tid == -1);
     }
+
+    assert(kmalloc_calls == 0);
 }
 
 static void test_waitpid_job_control_lifecycle(void) {
@@ -227,6 +235,7 @@ static void test_waitpid_job_control_lifecycle(void) {
     assert(WEXITSTATUS(status) == 55);
     assert(parent->p_children == NULL);
     assert(child->pid == -1);
+    assert(kmalloc_calls == 0);
 }
 
 int main(void) {

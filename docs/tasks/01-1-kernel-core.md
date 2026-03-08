@@ -1088,7 +1088,7 @@
             - [x] Init (PID 1) exit: kernel halts/panics with warning. (REQ: REQ-01-0923)
             - [x] Killed by signal during exit: ignore signals once SDYING. (REQ: REQ-01-0924)
             - [ ] Locks held during exit: log warning, force release. (REQ: REQ-01-0925)
-            - [ ] OOM during exit: must not allocate (only free). (REQ: REQ-01-0926)
+            - [x] OOM during exit: exit/reap path must not allocate new memory (free-only teardown). (REQ: REQ-01-0926)
             - [ ] Vfork exit: wake parent immediately. (REQ: REQ-01-0927)
             - [x] Thread group exit: all threads terminated on any `exit()`. (REQ: REQ-01-0928)
 
@@ -2070,7 +2070,7 @@
 - **US-01-0923**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to init (PID 1) exit: kernel halts/panics with warning so that this capability is implemented with clear verification evidence.
 - **US-01-0924**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to killed by signal during exit: ignore signals once SDYING so that this capability is implemented with clear verification evidence.
 - **US-01-0925**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to locks held during exit: log warning, force release so that this capability is implemented with clear verification evidence.
-- **US-01-0926**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to oOM during exit: must not allocate (only free) so that this capability is implemented with clear verification evidence.
+- **US-01-0926**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want the exit and reap path to avoid allocating new memory so teardown remains safe even under OOM pressure.
 - **US-01-0927**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vfork exit: wake parent immediately so that this capability is implemented with clear verification evidence.
 - **US-01-0928**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to thread group exit: all threads terminated on any exit() so that this capability is implemented with clear verification evidence.
 - **US-01-0929**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to wait Subsystem (wait4 / waitpid): so that this capability is implemented with clear verification evidence.
@@ -4928,7 +4928,7 @@
 - **REQ-01-0925** (EARS/Ubiquitous): The Substrate system shall locks held during exit: log warning, force release.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0926** (EARS/Ubiquitous): The Substrate system shall oOM during exit: must not allocate (only free).
+- **REQ-01-0926** (EARS/Ubiquitous): The Substrate system shall avoid allocating new memory during process exit and reap, using only free-side teardown operations.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0927** (EARS/Ubiquitous): The Substrate system shall vfork exit: wake parent immediately.
