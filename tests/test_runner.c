@@ -67,6 +67,8 @@ extern bool test_sleepq_requeue(void);
 extern bool test_signal_action(void);
 extern bool test_signal_mask(void);
 extern bool test_signal_delivery_default(void);
+extern bool test_signal_pending_masked_filter(void);
+extern bool test_signal_uncatchable_invariants(void);
 
 // VFS Tests
 extern bool test_fd_ref_counting(void);
@@ -210,6 +212,8 @@ test_case_t tests[] = {
     {"sig_action", test_signal_action},
     {"sig_mask", test_signal_mask},
     {"sig_deliver", test_signal_delivery_default},
+    {"sig_pending", test_signal_pending_masked_filter},
+    {"sig_invariants", test_signal_uncatchable_invariants},
     {"fd_refcnt", test_fd_ref_counting},
     {"fd_dup2", test_fd_dup2},
     {"vfs_perm_root", test_vfs_permissions_root},

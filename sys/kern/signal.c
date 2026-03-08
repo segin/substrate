@@ -84,7 +84,7 @@ int sys_sigprocmask(int how, const void *set, void *oset) {
 }
 
 int kern_sigpending(uint32_t *set) {
-    if (set) *set = current_thread->sig_pending & current_thread->sig_mask;
+    if (set) *set = current_thread->sig_pending & ~current_thread->sig_mask;
     return 0;
 }
 
@@ -716,4 +716,3 @@ void signal_handle_pending(registers_t *regs) {
     // Set P_CONTINUED was already done in psignal for SIGCONT, 
     // but if we delivered it to a handler, the app is "officially" continued.
 }
-
