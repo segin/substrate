@@ -211,14 +211,34 @@ extern void trampoline_cr0(void);
 extern void trampoline_stack(void);
 extern void trampoline_entry(void);
 
-#define TRAMPOLINE_ADDR 0x8000
+#define SMP_LOWMEM_PAGE_SIZE       0x1000u
+#define SMP_LOWMEM_TRAMP_BASE      0x8000u
+#define SMP_LOWMEM_TRAMP_LIMIT     0x100000u
 
 // Per-AP stack (static for now, should be dynamically allocated per AP)
 static char ap_stacks[MAX_CPUS][4096] __attribute__((aligned(16)));
 static volatile int aps_ready = 0;
+static uint32_t smp_lowmem_cursor = SMP_LOWMEM_TRAMP_BASE;
+static uint32_t smp_trampoline_phys = 0;
 
 static uint32_t trampoline_offset(void *symbol) {
     return (uint32_t)((uintptr_t)symbol - (uintptr_t)&trampoline_start);
+}
+
+static uint32_t smp_alloc_trampoline_page(void) {
+    if (smp_trampoline_phys != 0) {
+        return smp_trampoline_phys;
+    }
+
+    uint32_t phys = (smp_lowmem_cursor + SMP_LOWMEM_PAGE_SIZE - 1) &
+                    ~(SMP_LOWMEM_PAGE_SIZE - 1);
+    if (phys + SMP_LOWMEM_PAGE_SIZE > SMP_LOWMEM_TRAMP_LIMIT) {
+        return 0;
+    }
+
+    smp_lowmem_cursor = phys + SMP_LOWMEM_PAGE_SIZE;
+    smp_trampoline_phys = phys;
+    return phys;
 }
 
 void smp_ap_entry(void) {
@@ -261,17 +281,24 @@ void smp_ap_entry(void) {
 
 // Boot a single AP
 int smp_boot_ap(uint8_t apic_id) {
-    
+    uint32_t trampoline_phys = smp_alloc_trampoline_page();
+    if (trampoline_phys == 0) {
+        kprint("SMP: failed to allocate low-memory trampoline page.\n");
+        return -1;
+    }
+
+    uint8_t *trampoline_va = (uint8_t *)(uintptr_t)P2V(trampoline_phys);
+
     // 1. Copy trampoline to low memory
     size_t len = (uintptr_t)trampoline_end - (uintptr_t)trampoline_start;
-    memcpy((void*)TRAMPOLINE_ADDR, (void*)trampoline_start, len);
+    memcpy(trampoline_va, (void *)trampoline_start, len);
 
     // 2. Patch the copied trampoline with the live paging and stack state.
-    uint32_t *cr3_ptr = (uint32_t*)(TRAMPOLINE_ADDR + trampoline_offset((void*)&trampoline_cr3));
-    uint32_t *cr4_ptr = (uint32_t*)(TRAMPOLINE_ADDR + trampoline_offset((void*)&trampoline_cr4));
-    uint32_t *cr0_ptr = (uint32_t*)(TRAMPOLINE_ADDR + trampoline_offset((void*)&trampoline_cr0));
-    uint32_t *stk_ptr = (uint32_t*)(TRAMPOLINE_ADDR + trampoline_offset((void*)&trampoline_stack));
-    uint32_t *ent_ptr = (uint32_t*)(TRAMPOLINE_ADDR + trampoline_offset((void*)&trampoline_entry));
+    uint32_t *cr3_ptr = (uint32_t *)(trampoline_va + trampoline_offset((void *)&trampoline_cr3));
+    uint32_t *cr4_ptr = (uint32_t *)(trampoline_va + trampoline_offset((void *)&trampoline_cr4));
+    uint32_t *cr0_ptr = (uint32_t *)(trampoline_va + trampoline_offset((void *)&trampoline_cr0));
+    uint32_t *stk_ptr = (uint32_t *)(trampoline_va + trampoline_offset((void *)&trampoline_stack));
+    uint32_t *ent_ptr = (uint32_t *)(trampoline_va + trampoline_offset((void *)&trampoline_entry));
     
     // Find CPU index for this APIC ID
     int cpu_idx = -1;
@@ -328,13 +355,13 @@ int smp_boot_ap(uint8_t apic_id) {
     lapic_timer_delay_ms(10);
     
     // First SIPI
-    lapic_send_sipi(apic_id, TRAMPOLINE_ADDR >> 12);
+    lapic_send_sipi(apic_id, trampoline_phys >> 12);
     
     // Delay 200us
     lapic_timer_delay_us(200);
     
     // Second SIPI (per Intel spec)
-    lapic_send_sipi(apic_id, TRAMPOLINE_ADDR >> 12);
+    lapic_send_sipi(apic_id, trampoline_phys >> 12);
     
     // Wait for AP to signal readiness (timeout 100ms)
     for (int i = 0; i < 100; i++) {

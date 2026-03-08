@@ -726,7 +726,7 @@
                 - [x] Set polarity and trigger mode (active high/low, edge/level). (REQ: REQ-01-0601)
             - [x] Legacy ISA IRQ (0–15) → Global System Interrupt (GSI) mapping. (REQ: REQ-01-0602)
         - [ ] **AP Bootstrap:** (REQ: REQ-01-0603)
-            - [ ] Allocate low-memory trampoline page (under 1 MB). (REQ: REQ-01-0604)
+            - [x] Allocate low-memory trampoline page (under 1 MB). (REQ: REQ-01-0604)
             - [x] Copy 16-bit real mode entry code to trampoline. (REQ: REQ-01-0605)
             - [x] Send INIT IPI → 10 ms wait → SIPI → 200 µs wait → SIPI sequence. (REQ: REQ-01-0606)
             - [x] AP enters protected mode, enables paging, jumps to C entry. (REQ: REQ-01-0607)
