@@ -605,7 +605,7 @@ static fs_node_t *minix_mount(const char *device, uint32_t flags, void *data) {
         return NULL;
     }
 
-    // strcpy(root->name, "minix_root"); // Usually VFS overrides name with mountpoint
+    snprintf(root->name, sizeof(root->name), "minix_root"); // Usually VFS overrides name with mountpoint
     root->unmount = minix_unmount;
     return root; 
 }

@@ -34,9 +34,11 @@ Mutexes are used for long-duration mutual exclusion. Unlike spinlocks, a thread 
     - `uint32_t locked`: 0 if free, 1 if held.
     - `void *owner`: Pointer to the `thread_t` holding the lock.
     - `const char *name`: Identifier for debugging.
+    - `owned_next`: Link used to track all sleep mutexes currently owned by a thread.
 - **Blocking:** Uses `sleepq_add()` to park waiters and `sleepq_wake_one()` on unlock.
 - **Fast path:** uncontended acquisition uses CAS without taking the guard spinlock.
 - **Adaptive spin:** lock acquisition spins briefly while the owner remains runnable before falling back to sleep.
+- **Exit cleanup:** each thread tracks its owned sleep mutexes so process teardown can force-release them and wake one waiter per mutex without allocating memory.
 
 ## API
 ### `void mutex_init(mutex_t *m, const char *name)`
@@ -50,6 +52,9 @@ Releases the mutex and wakes one waiting thread.
 
 ### `bool mutex_is_held(mutex_t *m)`
 Returns true if the current thread holds the mutex.
+
+### `int mutex_release_owned_by_thread(thread_t *owner)`
+Force-releases all tracked sleep mutexes owned by `owner`, waking one waiter per released mutex.
 
 ## Semaphores
 Semaphores are synchronization primitives that maintain a counter. They are used to control access to a shared resource by multiple threads.
