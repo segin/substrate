@@ -354,6 +354,369 @@ static int charclass_match(const regex_charclass *cc, uint32_t cp, int icase, in
 
 static regex_node *parse_regex(parser *p);
 
+static regex_node *parse_group_extended(parser *p) {
+    regex_node *n;
+    parser_get(p);
+    n = parse_regex(p);
+    if (!n) {
+        return NULL;
+    }
+    if (parser_at_end(p) || parser_get(p) != ')') {
+        node_free(n);
+        p->err = REGEX_ERR_SYNTAX;
+        return NULL;
+    }
+    {
+        regex_node *g = node_new(NODE_GROUP);
+        if (!g) {
+            node_free(n);
+            p->err = REGEX_ERR_NOMEM;
+            return NULL;
+        }
+        g->left = n;
+        g->group_id = ++p->capture_count;
+        return g;
+    }
+}
+
+static regex_node *parse_group_basic(parser *p) {
+    regex_node *n;
+    parser_get(p);
+    parser_get(p);
+    n = parse_regex(p);
+    if (!n) {
+        return NULL;
+    }
+    if (parser_at_end(p) || parser_get(p) != '\\' || parser_get(p) != ')') {
+        node_free(n);
+        p->err = REGEX_ERR_SYNTAX;
+        return NULL;
+    }
+    {
+        regex_node *g = node_new(NODE_GROUP);
+        if (!g) {
+            node_free(n);
+            p->err = REGEX_ERR_NOMEM;
+            return NULL;
+        }
+        g->left = n;
+        g->group_id = ++p->capture_count;
+        return g;
+    }
+}
+
+static regex_node *parse_charclass(parser *p) {
+    regex_node *n;
+    regex_charclass *cc;
+    int negate = 0;
+    uint32_t lo;
+    uint32_t hi;
+    uint8_t next;
+
+    parser_get(p);
+    if (parser_at_end(p)) {
+        p->err = REGEX_ERR_SYNTAX;
+        return NULL;
+    }
+
+    if (parser_peek(p) == '^') {
+        negate = 1;
+        parser_get(p);
+    }
+
+    cc = charclass_new(!p->utf8);
+    if (!cc) {
+        p->err = REGEX_ERR_NOMEM;
+        return NULL;
+    }
+    cc->negated = negate;
+
+    while (!parser_at_end(p) && parser_peek(p) != ']') {
+        if (parser_peek(p) == '\\') {
+            parser_get(p);
+            if (parser_at_end(p)) {
+                p->err = REGEX_ERR_SYNTAX;
+                break;
+            }
+            next = parser_get(p);
+            switch (next) {
+            case 'd':
+                if (!charclass_add_range(cc, '0', '9')) {
+                    p->err = REGEX_ERR_NOMEM;
+                }
+                continue;
+            case 'w':
+                if (!charclass_add_range(cc, '0', '9') ||
+                    !charclass_add_range(cc, 'A', 'Z') ||
+                    !charclass_add_range(cc, 'a', 'z') ||
+                    !charclass_add_range(cc, '_', '_')) {
+                    p->err = REGEX_ERR_NOMEM;
+                }
+                continue;
+            case 's':
+                if (!charclass_add_range(cc, ' ', ' ') ||
+                    !charclass_add_range(cc, '\t', '\t') ||
+                    !charclass_add_range(cc, '\n', '\n') ||
+                    !charclass_add_range(cc, '\r', '\r') ||
+                    !charclass_add_range(cc, '\f', '\f') ||
+                    !charclass_add_range(cc, '\v', '\v')) {
+                    p->err = REGEX_ERR_NOMEM;
+                }
+                continue;
+            case 't':
+                if (!charclass_add_range(cc, '\t', '\t')) {
+                    p->err = REGEX_ERR_NOMEM;
+                }
+                continue;
+            case 'n':
+                if (!charclass_add_range(cc, '\n', '\n')) {
+                    p->err = REGEX_ERR_NOMEM;
+                }
+                continue;
+            case 'r':
+                if (!charclass_add_range(cc, '\r', '\r')) {
+                    p->err = REGEX_ERR_NOMEM;
+                }
+                continue;
+            case 'f':
+                if (!charclass_add_range(cc, '\f', '\f')) {
+                    p->err = REGEX_ERR_NOMEM;
+                }
+                continue;
+            case 'v':
+                if (!charclass_add_range(cc, '\v', '\v')) {
+                    p->err = REGEX_ERR_NOMEM;
+                }
+                continue;
+            case 'x':
+                if (!parser_read_hex(p, 2, &lo)) {
+                    p->err = REGEX_ERR_SYNTAX;
+                    break;
+                }
+                if (!charclass_add_range(cc, lo, lo)) {
+                    p->err = REGEX_ERR_NOMEM;
+                }
+                continue;
+            case 'u':
+                if (!parser_read_hex(p, 4, &lo)) {
+                    p->err = REGEX_ERR_SYNTAX;
+                    break;
+                }
+                if (!charclass_add_range(cc, lo, lo)) {
+                    p->err = REGEX_ERR_NOMEM;
+                }
+                continue;
+            case 'U':
+                if (!parser_read_hex(p, 8, &lo)) {
+                    p->err = REGEX_ERR_SYNTAX;
+                    break;
+                }
+                if (!charclass_add_range(cc, lo, lo)) {
+                    p->err = REGEX_ERR_NOMEM;
+                }
+                continue;
+            default:
+                if (!charclass_add_range(cc, next, next)) {
+                    p->err = REGEX_ERR_NOMEM;
+                }
+                continue;
+            }
+        }
+
+        if (!parser_read_codepoint(p, &lo)) {
+            break;
+        }
+        if (!parser_at_end(p) && parser_peek(p) == '-') {
+            size_t save = p->pos;
+            parser_get(p);
+            if (!parser_at_end(p) && parser_peek(p) != ']') {
+                if (!parser_read_codepoint(p, &hi)) {
+                    break;
+                }
+                if (hi < lo) {
+                    uint32_t tmp = lo;
+                    lo = hi;
+                    hi = tmp;
+                }
+                if (!charclass_add_range(cc, lo, hi)) {
+                    p->err = REGEX_ERR_NOMEM;
+                    break;
+                }
+                continue;
+            }
+            p->pos = save;
+        }
+        if (!charclass_add_range(cc, lo, lo)) {
+            p->err = REGEX_ERR_NOMEM;
+            break;
+        }
+    }
+
+    if (p->err != REGEX_OK) {
+        free(cc->ranges);
+        free(cc);
+        return NULL;
+    }
+
+    if (parser_at_end(p) || parser_get(p) != ']') {
+        free(cc->ranges);
+        free(cc);
+        p->err = REGEX_ERR_SYNTAX;
+        return NULL;
+    }
+
+    n = node_new(NODE_CLASS);
+    if (!n) {
+        free(cc->ranges);
+        free(cc);
+        p->err = REGEX_ERR_NOMEM;
+        return NULL;
+    }
+    n->charclass = cc;
+    return n;
+}
+
+static regex_node *parse_escape(parser *p) {
+    regex_node *n;
+    uint32_t cp;
+    uint8_t c;
+
+    parser_get(p);
+    if (parser_at_end(p)) {
+        p->err = REGEX_ERR_SYNTAX;
+        return NULL;
+    }
+    c = parser_get(p);
+    switch (c) {
+    case 'd':
+    case 'w':
+    case 's':
+        n = node_new(NODE_CLASS);
+        if (!n) {
+            p->err = REGEX_ERR_NOMEM;
+            return NULL;
+        }
+        n->charclass = charclass_new(!p->utf8);
+        if (!n->charclass) {
+            p->err = REGEX_ERR_NOMEM;
+            node_free(n);
+            return NULL;
+        }
+        if (c == 'd') {
+            if (!charclass_add_range(n->charclass, '0', '9')) {
+                p->err = REGEX_ERR_NOMEM;
+                node_free(n);
+                return NULL;
+            }
+        } else if (c == 'w') {
+            if (!charclass_add_range(n->charclass, '0', '9') ||
+                !charclass_add_range(n->charclass, 'A', 'Z') ||
+                !charclass_add_range(n->charclass, 'a', 'z') ||
+                !charclass_add_range(n->charclass, '_', '_')) {
+                p->err = REGEX_ERR_NOMEM;
+                node_free(n);
+                return NULL;
+            }
+        } else {
+            if (!charclass_add_range(n->charclass, ' ', ' ') ||
+                !charclass_add_range(n->charclass, '\t', '\t') ||
+                !charclass_add_range(n->charclass, '\n', '\n') ||
+                !charclass_add_range(n->charclass, '\r', '\r') ||
+                !charclass_add_range(n->charclass, '\f', '\f') ||
+                !charclass_add_range(n->charclass, '\v', '\v')) {
+                p->err = REGEX_ERR_NOMEM;
+                node_free(n);
+                return NULL;
+            }
+        }
+        return n;
+    case 't':
+        n = node_new(NODE_LITERAL);
+        if (!n) {
+            p->err = REGEX_ERR_NOMEM;
+            return NULL;
+        }
+        n->literal = '\t';
+        return n;
+    case 'n':
+        n = node_new(NODE_LITERAL);
+        if (!n) {
+            p->err = REGEX_ERR_NOMEM;
+            return NULL;
+        }
+        n->literal = '\n';
+        return n;
+    case 'r':
+        n = node_new(NODE_LITERAL);
+        if (!n) {
+            p->err = REGEX_ERR_NOMEM;
+            return NULL;
+        }
+        n->literal = '\r';
+        return n;
+    case 'f':
+        n = node_new(NODE_LITERAL);
+        if (!n) {
+            p->err = REGEX_ERR_NOMEM;
+            return NULL;
+        }
+        n->literal = '\f';
+        return n;
+    case 'v':
+        n = node_new(NODE_LITERAL);
+        if (!n) {
+            p->err = REGEX_ERR_NOMEM;
+            return NULL;
+        }
+        n->literal = '\v';
+        return n;
+    case 'x':
+        if (!parser_read_hex(p, 2, &cp)) {
+            p->err = REGEX_ERR_SYNTAX;
+            return NULL;
+        }
+        n = node_new(NODE_LITERAL);
+        if (!n) {
+            p->err = REGEX_ERR_NOMEM;
+            return NULL;
+        }
+        n->literal = cp;
+        return n;
+    case 'u':
+        if (!parser_read_hex(p, 4, &cp)) {
+            p->err = REGEX_ERR_SYNTAX;
+            return NULL;
+        }
+        n = node_new(NODE_LITERAL);
+        if (!n) {
+            p->err = REGEX_ERR_NOMEM;
+            return NULL;
+        }
+        n->literal = cp;
+        return n;
+    case 'U':
+        if (!parser_read_hex(p, 8, &cp)) {
+            p->err = REGEX_ERR_SYNTAX;
+            return NULL;
+        }
+        n = node_new(NODE_LITERAL);
+        if (!n) {
+            p->err = REGEX_ERR_NOMEM;
+            return NULL;
+        }
+        n->literal = cp;
+        return n;
+    default:
+        n = node_new(NODE_LITERAL);
+        if (!n) {
+            p->err = REGEX_ERR_NOMEM;
+            return NULL;
+        }
+        n->literal = c;
+        return n;
+    }
+}
+
 static regex_node *parse_atom(parser *p) {
     regex_node *n = NULL;
     uint8_t c;
@@ -366,226 +729,21 @@ static regex_node *parse_atom(parser *p) {
     c = parser_peek(p);
 
     if (p->extended && c == '(') {
-        parser_get(p);
-        n = parse_regex(p);
-        if (!n) {
-            return NULL;
-        }
-        if (parser_at_end(p) || parser_get(p) != ')') {
-            node_free(n);
-            p->err = REGEX_ERR_SYNTAX;
-            return NULL;
-        }
-        {
-            regex_node *g = node_new(NODE_GROUP);
-            if (!g) {
-                node_free(n);
-                p->err = REGEX_ERR_NOMEM;
-                return NULL;
-            }
-            g->left = n;
-            g->group_id = ++p->capture_count;
-            return g;
-        }
+        return parse_group_extended(p);
     }
 
     if (!p->extended && c == '\\') {
         size_t save = p->pos;
         parser_get(p);
         if (!parser_at_end(p) && parser_peek(p) == '(') {
-            parser_get(p);
-            n = parse_regex(p);
-            if (!n) {
-                return NULL;
-            }
-            if (parser_at_end(p) || parser_get(p) != '\\' || parser_get(p) != ')') {
-                node_free(n);
-                p->err = REGEX_ERR_SYNTAX;
-                return NULL;
-            }
-            {
-                regex_node *g = node_new(NODE_GROUP);
-                if (!g) {
-                    node_free(n);
-                    p->err = REGEX_ERR_NOMEM;
-                    return NULL;
-                }
-                g->left = n;
-                g->group_id = ++p->capture_count;
-                return g;
-            }
+            p->pos = save;
+            return parse_group_basic(p);
         }
         p->pos = save;
     }
 
     if (c == '[') {
-        regex_charclass *cc;
-        int negate = 0;
-        uint32_t lo;
-        uint32_t hi;
-        uint8_t next;
-
-        parser_get(p);
-        if (parser_at_end(p)) {
-            p->err = REGEX_ERR_SYNTAX;
-            return NULL;
-        }
-
-        if (parser_peek(p) == '^') {
-            negate = 1;
-            parser_get(p);
-        }
-
-        cc = charclass_new(!p->utf8);
-        if (!cc) {
-            p->err = REGEX_ERR_NOMEM;
-            return NULL;
-        }
-        cc->negated = negate;
-
-        while (!parser_at_end(p) && parser_peek(p) != ']') {
-            if (parser_peek(p) == '\\') {
-                parser_get(p);
-                if (parser_at_end(p)) {
-                    p->err = REGEX_ERR_SYNTAX;
-                    break;
-                }
-                next = parser_get(p);
-                switch (next) {
-                case 'd':
-                    if (!charclass_add_range(cc, '0', '9')) {
-                        p->err = REGEX_ERR_NOMEM;
-                    }
-                    continue;
-                case 'w':
-                    if (!charclass_add_range(cc, '0', '9') ||
-                        !charclass_add_range(cc, 'A', 'Z') ||
-                        !charclass_add_range(cc, 'a', 'z') ||
-                        !charclass_add_range(cc, '_', '_')) {
-                        p->err = REGEX_ERR_NOMEM;
-                    }
-                    continue;
-                case 's':
-                    if (!charclass_add_range(cc, ' ', ' ') ||
-                        !charclass_add_range(cc, '\t', '\t') ||
-                        !charclass_add_range(cc, '\n', '\n') ||
-                        !charclass_add_range(cc, '\r', '\r') ||
-                        !charclass_add_range(cc, '\f', '\f') ||
-                        !charclass_add_range(cc, '\v', '\v')) {
-                        p->err = REGEX_ERR_NOMEM;
-                    }
-                    continue;
-                case 't':
-                    if (!charclass_add_range(cc, '\t', '\t')) {
-                        p->err = REGEX_ERR_NOMEM;
-                    }
-                    continue;
-                case 'n':
-                    if (!charclass_add_range(cc, '\n', '\n')) {
-                        p->err = REGEX_ERR_NOMEM;
-                    }
-                    continue;
-                case 'r':
-                    if (!charclass_add_range(cc, '\r', '\r')) {
-                        p->err = REGEX_ERR_NOMEM;
-                    }
-                    continue;
-                case 'f':
-                    if (!charclass_add_range(cc, '\f', '\f')) {
-                        p->err = REGEX_ERR_NOMEM;
-                    }
-                    continue;
-                case 'v':
-                    if (!charclass_add_range(cc, '\v', '\v')) {
-                        p->err = REGEX_ERR_NOMEM;
-                    }
-                    continue;
-                case 'x':
-                    if (!parser_read_hex(p, 2, &lo)) {
-                        p->err = REGEX_ERR_SYNTAX;
-                        break;
-                    }
-                    if (!charclass_add_range(cc, lo, lo)) {
-                        p->err = REGEX_ERR_NOMEM;
-                    }
-                    continue;
-                case 'u':
-                    if (!parser_read_hex(p, 4, &lo)) {
-                        p->err = REGEX_ERR_SYNTAX;
-                        break;
-                    }
-                    if (!charclass_add_range(cc, lo, lo)) {
-                        p->err = REGEX_ERR_NOMEM;
-                    }
-                    continue;
-                case 'U':
-                    if (!parser_read_hex(p, 8, &lo)) {
-                        p->err = REGEX_ERR_SYNTAX;
-                        break;
-                    }
-                    if (!charclass_add_range(cc, lo, lo)) {
-                        p->err = REGEX_ERR_NOMEM;
-                    }
-                    continue;
-                default:
-                    if (!charclass_add_range(cc, next, next)) {
-                        p->err = REGEX_ERR_NOMEM;
-                    }
-                    continue;
-                }
-            }
-
-            if (!parser_read_codepoint(p, &lo)) {
-                break;
-            }
-            if (!parser_at_end(p) && parser_peek(p) == '-') {
-                size_t save = p->pos;
-                parser_get(p);
-                if (!parser_at_end(p) && parser_peek(p) != ']') {
-                    if (!parser_read_codepoint(p, &hi)) {
-                        break;
-                    }
-                    if (hi < lo) {
-                        uint32_t tmp = lo;
-                        lo = hi;
-                        hi = tmp;
-                    }
-                    if (!charclass_add_range(cc, lo, hi)) {
-                        p->err = REGEX_ERR_NOMEM;
-                        break;
-                    }
-                    continue;
-                }
-                p->pos = save;
-            }
-            if (!charclass_add_range(cc, lo, lo)) {
-                p->err = REGEX_ERR_NOMEM;
-                break;
-            }
-        }
-
-        if (p->err != REGEX_OK) {
-            free(cc->ranges);
-            free(cc);
-            return NULL;
-        }
-
-        if (parser_at_end(p) || parser_get(p) != ']') {
-            free(cc->ranges);
-            free(cc);
-            p->err = REGEX_ERR_SYNTAX;
-            return NULL;
-        }
-
-        n = node_new(NODE_CLASS);
-        if (!n) {
-            free(cc->ranges);
-            free(cc);
-            p->err = REGEX_ERR_NOMEM;
-            return NULL;
-        }
-        n->charclass = cc;
-        return n;
+        return parse_charclass(p);
     }
 
     if (p->extended && c == '|') {
@@ -620,140 +778,7 @@ static regex_node *parse_atom(parser *p) {
     }
 
     if (c == '\\') {
-        parser_get(p);
-        if (parser_at_end(p)) {
-            p->err = REGEX_ERR_SYNTAX;
-            return NULL;
-        }
-        c = parser_get(p);
-        switch (c) {
-        case 'd':
-        case 'w':
-        case 's':
-            n = node_new(NODE_CLASS);
-            if (!n) {
-                p->err = REGEX_ERR_NOMEM;
-                return NULL;
-            }
-            n->charclass = charclass_new(!p->utf8);
-            if (!n->charclass) {
-                p->err = REGEX_ERR_NOMEM;
-                node_free(n);
-                return NULL;
-            }
-            if (c == 'd') {
-                if (!charclass_add_range(n->charclass, '0', '9')) {
-                    p->err = REGEX_ERR_NOMEM;
-                    node_free(n);
-                    return NULL;
-                }
-            } else if (c == 'w') {
-                if (!charclass_add_range(n->charclass, '0', '9') ||
-                    !charclass_add_range(n->charclass, 'A', 'Z') ||
-                    !charclass_add_range(n->charclass, 'a', 'z') ||
-                    !charclass_add_range(n->charclass, '_', '_')) {
-                    p->err = REGEX_ERR_NOMEM;
-                    node_free(n);
-                    return NULL;
-                }
-            } else {
-                if (!charclass_add_range(n->charclass, ' ', ' ') ||
-                    !charclass_add_range(n->charclass, '\t', '\t') ||
-                    !charclass_add_range(n->charclass, '\n', '\n') ||
-                    !charclass_add_range(n->charclass, '\r', '\r') ||
-                    !charclass_add_range(n->charclass, '\f', '\f') ||
-                    !charclass_add_range(n->charclass, '\v', '\v')) {
-                    p->err = REGEX_ERR_NOMEM;
-                    node_free(n);
-                    return NULL;
-                }
-            }
-            return n;
-        case 't':
-            n = node_new(NODE_LITERAL);
-            if (!n) {
-                p->err = REGEX_ERR_NOMEM;
-                return NULL;
-            }
-            n->literal = '\t';
-            return n;
-        case 'n':
-            n = node_new(NODE_LITERAL);
-            if (!n) {
-                p->err = REGEX_ERR_NOMEM;
-                return NULL;
-            }
-            n->literal = '\n';
-            return n;
-        case 'r':
-            n = node_new(NODE_LITERAL);
-            if (!n) {
-                p->err = REGEX_ERR_NOMEM;
-                return NULL;
-            }
-            n->literal = '\r';
-            return n;
-        case 'f':
-            n = node_new(NODE_LITERAL);
-            if (!n) {
-                p->err = REGEX_ERR_NOMEM;
-                return NULL;
-            }
-            n->literal = '\f';
-            return n;
-        case 'v':
-            n = node_new(NODE_LITERAL);
-            if (!n) {
-                p->err = REGEX_ERR_NOMEM;
-                return NULL;
-            }
-            n->literal = '\v';
-            return n;
-        case 'x':
-            if (!parser_read_hex(p, 2, &cp)) {
-                p->err = REGEX_ERR_SYNTAX;
-                return NULL;
-            }
-            n = node_new(NODE_LITERAL);
-            if (!n) {
-                p->err = REGEX_ERR_NOMEM;
-                return NULL;
-            }
-            n->literal = cp;
-            return n;
-        case 'u':
-            if (!parser_read_hex(p, 4, &cp)) {
-                p->err = REGEX_ERR_SYNTAX;
-                return NULL;
-            }
-            n = node_new(NODE_LITERAL);
-            if (!n) {
-                p->err = REGEX_ERR_NOMEM;
-                return NULL;
-            }
-            n->literal = cp;
-            return n;
-        case 'U':
-            if (!parser_read_hex(p, 8, &cp)) {
-                p->err = REGEX_ERR_SYNTAX;
-                return NULL;
-            }
-            n = node_new(NODE_LITERAL);
-            if (!n) {
-                p->err = REGEX_ERR_NOMEM;
-                return NULL;
-            }
-            n->literal = cp;
-            return n;
-        default:
-            n = node_new(NODE_LITERAL);
-            if (!n) {
-                p->err = REGEX_ERR_NOMEM;
-                return NULL;
-            }
-            n->literal = c;
-            return n;
-        }
+        return parse_escape(p);
     }
 
     if (parser_read_codepoint(p, &cp)) {

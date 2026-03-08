@@ -37,6 +37,7 @@ static void *last_sched_sleep_chan;
 static void *expected_vfork_wakeup_chan;
 static int saw_vfork_wakeup;
 static int pmap_release_calls;
+static int mutex_release_calls;
 static const char *last_kprint_msg;
 
 void mutex_init(mutex_t *m, const char *name) { (void)m; (void)name; }
@@ -53,6 +54,7 @@ pmap_t pmap_fork(pmap_t src) { return src; }
 void pmap_release(pmap_t pmap) { if (pmap) pmap_release_calls++; }
 void pmap_activate(pmap_t pmap) { (void)pmap; pmap_activate_calls++; }
 void *pmm_alloc_block(void) { return NULL; }
+void pmm_free_block(void *p) { (void)p; }
 void *pmm_alloc_contiguous(size_t pages) { (void)pages; return NULL; }
 int sched_fork_thread(process_t *proc, void *stack) { (void)proc; (void)stack; return -1; }
 thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void *), void *stack, void *arg) {
@@ -68,6 +70,12 @@ void close_fs(fs_node_t *node) { (void)node; close_fs_calls++; }
 void vm_map_destroy(struct vm_map *map) { (void)map; vm_map_destroy_calls++; }
 void rusage_finalize(process_t *p) { (void)p; rusage_finalize_calls++; }
 void file_close_ptr(file_t *f) { (void)f; file_close_calls++; }
+int mutex_release_owned_by_thread(thread_t *owner) {
+    if (owner) {
+        mutex_release_calls++;
+    }
+    return 0;
+}
 void sched_wakeup(void *chan) {
     last_sched_wakeup_chan = chan;
     if (chan == expected_vfork_wakeup_chan) {
@@ -119,6 +127,7 @@ static void reset_env(void) {
     expected_vfork_wakeup_chan = NULL;
     saw_vfork_wakeup = 0;
     pmap_release_calls = 0;
+    mutex_release_calls = 0;
     last_kprint_msg = NULL;
 
     for (int i = 0; i < MAX_PROCS; i++) {
@@ -204,6 +213,7 @@ static void test_proc_exit_basic_path(void) {
     assert(proc->ppid == parent->pid);
     assert(acct_calls == 1);
     assert(futex_exit_calls == 2);
+    assert(mutex_release_calls == 2);
     assert(file_close_calls == 2);
     assert(close_fs_calls == 2);
     assert(rusage_finalize_calls == 1);

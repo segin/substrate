@@ -382,3 +382,22 @@ void sched_get_loadavg(unsigned long loads[3]) { loads[0] = loads[1] = loads[2] 
 uint32_t sched_count_runnable(void) { return 0; }
 uint32_t sched_count_threads(void) { return 0; }
 int sys_pmap_stats(struct pmap_stats *stats) { return 0; }
+void *vm_phys_alloc_page() { return NULL; }
+void vm_phys_free_page() {}
+int pmap_page_is_referenced(struct vm_page *m) { (void)m; return 0; }
+void pmap_page_clear_reference(struct vm_page *m) { (void)m; }
+void swapper_request_work() {}
+void cpuid_init() {}
+void *blkdev_get() { return NULL; }
+int arch_fork_with_stack() { return -1; }
+void exec_pin_current_thread() {}
+void exec_unpin_current_thread() {}
+void *percpu_get() { return NULL; }
+int percpu_get_cpu_id() { return 0; }
+int sched_can_run_on_cpu() { return 1; }
+
+void vm_map_destroy(vm_map_t *map) { (void)map; }
+void cmdline_get_full(char *buf, size_t buf_len) { if(buf && buf_len > 0) buf[0] = '\0'; }
+
+void wait_for_interrupt() {}
+void host_wait_for_interrupt() {}

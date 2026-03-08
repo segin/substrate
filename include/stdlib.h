@@ -28,6 +28,9 @@ long long strtoll(const char *nptr, char **endptr, int base);
 unsigned long long strtoull(const char *nptr, char **endptr, int base);
 
 char *getenv(const char *name);
+int setenv(const char *name, const char *value, int overwrite);
+int unsetenv(const char *name);
+char *realpath(const char *restrict path, char *restrict resolved_path);
 int system(const char *command);
 
 void quick_exit(int status);

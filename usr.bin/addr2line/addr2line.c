@@ -203,11 +203,13 @@ typedef struct {
     uint8_t has_children;
     dwarf_attr_spec_t *attrs;
     size_t attr_count;
+    size_t attr_capacity;
 } dwarf_abbrev_t;
 
 typedef struct {
     dwarf_abbrev_t *items;
     size_t count;
+    size_t capacity;
 } dwarf_abbrev_table_t;
 
 typedef struct {
@@ -2276,12 +2278,16 @@ static const dwarf_abbrev_t *dwarf_abbrev_lookup(const dwarf_abbrev_table_t *tab
 }
 
 static int dwarf_abbrev_append(dwarf_abbrev_table_t *tab, dwarf_abbrev_t *ab) {
-    dwarf_abbrev_t *next =
-        (dwarf_abbrev_t *)realloc(tab->items, (tab->count + 1u) * sizeof(*next));
-    if (next == NULL) {
-        return -1;
+    if (tab->count >= tab->capacity) {
+        size_t new_cap = tab->capacity == 0 ? 16 : tab->capacity * 2;
+        dwarf_abbrev_t *next =
+            (dwarf_abbrev_t *)realloc(tab->items, new_cap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        tab->items = next;
+        tab->capacity = new_cap;
     }
-    tab->items = next;
     tab->items[tab->count++] = *ab;
     memset(ab, 0, sizeof(*ab));
     return 0;
@@ -2292,12 +2298,16 @@ static int dwarf_abbrev_add_attr(dwarf_abbrev_t *ab,
                                  uint64_t form,
                                  int has_implicit_const,
                                  int64_t implicit_const) {
-    dwarf_attr_spec_t *next =
-        (dwarf_attr_spec_t *)realloc(ab->attrs, (ab->attr_count + 1u) * sizeof(*next));
-    if (next == NULL) {
-        return -1;
+    if (ab->attr_count >= ab->attr_capacity) {
+        size_t new_cap = ab->attr_capacity == 0 ? 8 : ab->attr_capacity * 2;
+        dwarf_attr_spec_t *next =
+            (dwarf_attr_spec_t *)realloc(ab->attrs, new_cap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        ab->attrs = next;
+        ab->attr_capacity = new_cap;
     }
-    ab->attrs = next;
     ab->attrs[ab->attr_count].name = name;
     ab->attrs[ab->attr_count].form = form;
     ab->attrs[ab->attr_count].has_implicit_const = (uint8_t)(has_implicit_const ? 1 : 0);

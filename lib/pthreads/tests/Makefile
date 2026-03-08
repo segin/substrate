@@ -1,7 +1,7 @@
 CC = gcc
 CFLAGS = -Wall -g -DHOST_TEST -I.. -I../../../sys/include -I../../../sys -I../../../include
 
-all: host_test_join host_test_mutex
+all: host_test_join host_test_mutex host_test_trampoline
 
 host_test_join: host_test_join.c
 	$(CC) $(CFLAGS) $< -o $@
@@ -9,5 +9,8 @@ host_test_join: host_test_join.c
 host_test_mutex: host_test_mutex.c
 	$(CC) $(CFLAGS) $< -o $@
 
+host_test_trampoline: host_test_trampoline.c
+	$(CC) $(CFLAGS) $< -o $@
+
 clean:
-	rm -f host_test_join host_test_mutex
+	rm -f host_test_join host_test_mutex host_test_trampoline
