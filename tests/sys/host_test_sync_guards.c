@@ -122,11 +122,36 @@ static void test_semaphore_post_wakes_waiter_path(void) {
     assert(wake_one_calls == 1);
 }
 
+static void test_mutex_force_release_wakes_waiter(void) {
+    mutex_t m;
+    thread_t *owner;
+    thread_t *waiter;
+
+    reset_env();
+    owner = init_thread(0, 1);
+    waiter = init_thread(1, 2);
+
+    current_thread = owner;
+    mutex_init(&m, "exit-release");
+    mutex_lock(&m);
+    assert(owner->held_mutexes == &m);
+
+    sleepq_add(&m, waiter);
+    wake_one_calls = 0;
+
+    assert(mutex_release_owned_by_thread(owner) == 1);
+    assert(m.locked == 0);
+    assert(m.owner == NULL);
+    assert(owner->held_mutexes == NULL);
+    assert(wake_one_calls == 1);
+}
+
 int main(void) {
     test_mutex_unlock_by_non_owner_panics();
     test_mutex_recursive_lock_panics();
     test_semaphore_negative_init_panics();
     test_semaphore_post_wakes_waiter_path();
+    test_mutex_force_release_wakes_waiter();
     puts("host_test_sync_guards: PASS");
     return 0;
 }

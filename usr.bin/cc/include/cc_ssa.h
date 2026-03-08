@@ -134,6 +134,7 @@ typedef struct {
     char *init_sym;
     cc_ssa_global_init_item_t *init_items;
     size_t init_item_count;
+    size_t init_item_cap;
 } cc_ssa_global_t;
 
 typedef struct {
@@ -166,6 +167,7 @@ typedef struct {
 typedef struct {
     cc_ssa_global_t *globals;
     size_t global_count;
+    size_t global_cap;
     cc_ssa_function_t *funcs;
     size_t func_count;
 } cc_ssa_module_t;

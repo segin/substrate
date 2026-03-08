@@ -1209,6 +1209,7 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
 }
 static int parse_register_list(const as_token_t *tokv, size_t n, as_operand_t *op) {
     size_t i;
+    size_t capacity;
 
     if (n < 3 || tokv[0].kind != AS_TOK_PUNCT || strcmp(tokv[0].text, "{") != 0 ||
         tokv[n - 1].kind != AS_TOK_PUNCT || strcmp(tokv[n - 1].text, "}") != 0) {
@@ -1218,15 +1219,23 @@ static int parse_register_list(const as_token_t *tokv, size_t n, as_operand_t *o
     op->kind = AS_OPERAND_REGISTER_LIST;
     op->u.reg_list.regs = NULL;
     op->u.reg_list.count = 0;
+    capacity = 0;
 
     for (i = 1; i + 1 < n; ++i) {
         if (tokv[i].kind == AS_TOK_PUNCT && strcmp(tokv[i].text, ",") == 0) {
             continue;
         }
-        op->u.reg_list.regs = (char **)realloc(op->u.reg_list.regs, (op->u.reg_list.count + 1) * sizeof(char *));
-        if (op->u.reg_list.regs == NULL) {
-            return -1;
+
+        if (op->u.reg_list.count == capacity) {
+            size_t new_cap = capacity == 0 ? 4 : capacity * 2;
+            char **new_regs = (char **)realloc(op->u.reg_list.regs, new_cap * sizeof(char *));
+            if (new_regs == NULL) {
+                return -1;
+            }
+            op->u.reg_list.regs = new_regs;
+            capacity = new_cap;
         }
+
         op->u.reg_list.regs[op->u.reg_list.count] = strip_register_prefix(tokv[i].text);
         if (op->u.reg_list.regs[op->u.reg_list.count] == NULL) {
             return -1;

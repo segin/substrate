@@ -96,6 +96,7 @@ test_unresolved_matrix.sh|LD-E-001 LD-E-002
 test_visibility_resolution.sh|LD-U-005 LD-S-003
 test_symbol_version_resolution.sh|LD-U-005 LD-S-003
 test_section_merge_policy.sh|LD-U-008 LD-S-004
+test_input_section_alignment_preserved.sh|LD-U-008 LD-U-009
 test_comdat_discard.sh|LD-U-004 LD-S-004
 test_orphan_placement.sh|LD-S-004
 test_gc_sections_reachability.sh|LD-E-004

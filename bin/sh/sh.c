@@ -312,18 +312,20 @@ int main(int argc, char **argv, char **envp) {
                 return 1;
             }
             
-            int c;
-            while ((c = fgetc(input)) != EOF) {
-                if (len + 1 >= cap) {
-                    cap *= 2;
-                    buffer = realloc(buffer, cap);
-                    if (!buffer) {
+            size_t nread;
+            while ((nread = fread(buffer + len, 1, cap - len - 1, input)) > 0) {
+                len += nread;
+                if (cap - len < 4096) {
+                    cap = len + 4096;
+                    char *new_buffer = realloc(buffer, cap);
+                    if (!new_buffer) {
                         fprintf(stderr, "%s: Out of memory\n", shell_var_get_name());
+                        free(buffer);
                         run_exit_trap();
                         return 1;
                     }
+                    buffer = new_buffer;
                 }
-                buffer[len++] = c;
             }
             buffer[len] = 0;
             

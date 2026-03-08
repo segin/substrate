@@ -1,3 +1,6 @@
+#define _GNU_SOURCE
+#define _POSIX_C_SOURCE 200809L
+
 #include "cc_driver.h"
 #include "cc_frontend.h"
 #include "cc_pipeline.h"
@@ -1548,9 +1551,7 @@ static int run_emit_ssa_tool(const cc_opts_t *o, const char *self, const char *i
     if (slash != NULL) {
         size_t dlen = (size_t)(slash - self);
         if (dlen + strlen("/ir-verifier") + 1 < sizeof(tool_path)) {
-            memcpy(tool_path, self, dlen);
-            tool_path[dlen] = '\0';
-            strcat(tool_path, "/ir-verifier");
+            snprintf(tool_path, sizeof(tool_path), "%.*s/ir-verifier", (int)dlen, self);
             argv[0] = tool_path;
         } else {
             argv[0] = "ir-verifier";
@@ -1585,9 +1586,7 @@ static int derive_out(const char *in, const char *ext, char out[PATH_MAX]) {
         return -1;
     }
 
-    memcpy(out, base_in, base);
-    out[base] = '\0';
-    strcat(out, ext);
+    snprintf(out, PATH_MAX, "%.*s%s", (int)base, base_in, ext);
     return 0;
 }
 
