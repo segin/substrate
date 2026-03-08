@@ -47,5 +47,6 @@
 #define ELKS_SYS_dup2           63
 #define ELKS_SYS_getppid        64
 #define ELKS_SYS_getpgrp        65
+#define ELKS_SYS_MAX            128
 
 #endif /* _ELKS_SYSCALL_TABLE_H */
