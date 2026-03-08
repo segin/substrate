@@ -19,6 +19,8 @@ mutex_t proctree_lock;
 static int signal_count;
 static int signal_pgrp[8];
 static int signal_sig[8];
+static process_t *last_psignal_proc;
+static int last_psignal_sig;
 
 uint32_t intr_disable(void) { return 0; }
 void intr_restore(uint32_t flags) { (void)flags; }
@@ -48,6 +50,10 @@ int signal_send_group(int pgrp, int sig) {
     signal_count++;
     return 0;
 }
+void psignal(process_t *proc, int sig) {
+    last_psignal_proc = proc;
+    last_psignal_sig = sig;
+}
 
 #include "../../sys/drivers/console/tty.c"
 
@@ -61,6 +67,8 @@ static void reset_env(void) {
     signal_count = 0;
     memset(signal_pgrp, 0, sizeof(signal_pgrp));
     memset(signal_sig, 0, sizeof(signal_sig));
+    last_psignal_proc = NULL;
+    last_psignal_sig = 0;
 }
 
 static process_t *init_proc(int slot, int pid) {
@@ -169,11 +177,40 @@ static void test_tiocpgrp_roundtrip(void) {
     assert(out == 99);
 }
 
+static void test_tiocspgrp_checks_sigttou_for_background_group(void) {
+    reset_env();
+
+    process_t *proc = init_proc(0, 80);
+    thread_t thread;
+    struct pgrp pgrp;
+    struct session sess;
+    struct tty tty;
+    int value = 81;
+
+    memset(&tty, 0, sizeof(tty));
+    memset(&thread, 0, sizeof(thread));
+    init_session_leader(proc, &pgrp, &sess, 80);
+    current_process = proc;
+    current_thread = &thread;
+    tty.session = 80;
+    tty.pgrp = 70;
+
+    assert(tty_ioctl_kern(&tty, TIOCSPGRP, (uintptr_t)&value) == -1);
+    assert(tty.pgrp == 70);
+    assert(last_psignal_proc == proc);
+    assert(last_psignal_sig == SIGTTOU);
+
+    proc->sig_actions[SIGTTOU - 1].sa_handler = SIG_IGN;
+    assert(tty_ioctl_kern(&tty, TIOCSPGRP, (uintptr_t)&value) == 0);
+    assert(tty.pgrp == 81);
+}
+
 int main(void) {
     test_tiocsctty_assigns_owner();
     test_tiocsctty_rejects_foreign_owner_without_steal();
     test_tiocnotty_hangsup_foreground_group();
     test_tiocpgrp_roundtrip();
+    test_tiocspgrp_checks_sigttou_for_background_group();
     puts("host_test_tty_jobctl: PASS");
     return 0;
 }

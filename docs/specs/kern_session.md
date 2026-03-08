@@ -80,7 +80,7 @@ Current implemented tty-side operations:
 
 - `TIOCSCTTY`: assigns the tty to the calling session leader, rejects foreign ownership unless explicit steal is requested, and sets foreground pgrp to the caller's process group
 - `TIOCNOTTY`: when invoked by the owning session, performs tty hangup semantics (`SIGHUP` + `SIGCONT` to the foreground group) and clears tty ownership
-- `TIOCSPGRP` / `TIOCGPGRP`: set and query the foreground process group on the tty
+- `TIOCSPGRP` / `TIOCGPGRP`: set and query the foreground process group on the tty, with `SIGTTOU` enforcement for background callers unless the signal is blocked or ignored
 - `tty_hangup()`: sends `SIGHUP` and `SIGCONT` to the foreground group, then clears tty session ownership
 
 ## Exit-Path Boundary

@@ -1122,7 +1122,7 @@
             - [ ] **Controlling Terminal (CTTY):** (REQ: REQ-01-0955)
                 - [x] `TIOCSCTTY`: assign CTTY (session leader, no existing CTTY, TTY unowned). (REQ: REQ-01-0956)
                 - [x] `TIOCNOTTY`: release CTTY, SIGHUP to foreground group. (REQ: REQ-01-0957)
-                - [ ] `tcsetpgrp` / `tcgetpgrp`: set/get foreground group (SIGTTOU check). (REQ: REQ-01-0958)
+                - [x] `tcsetpgrp` / `tcgetpgrp`: set/get foreground group (SIGTTOU check). (REQ: REQ-01-0958)
             - [x] **Orphaned Process Groups:** (REQ: REQ-01-0959)
                 - [x] Detection: no member with parent in different group of same session. (REQ: REQ-01-0960)
                 - [x] Action: SIGHUP + SIGCONT to stopped members. (REQ: REQ-01-0961)
