@@ -1017,7 +1017,7 @@
         - [x] Create `init_root_fs` helper. (REQ: REQ-01-0860)
         - [x] Clean up `kmain` flow. (REQ: REQ-01-0861)
 
-    - [ ] **Kernel Core Maintenance:** (REQ: REQ-01-0862)
+    - [x] **Kernel Core Maintenance:** (REQ: REQ-01-0862)
         - [x] Refactor `spinlock.c` to use GCC C11 atomic builtins. (REQ: REQ-01-0863)
         - [x] Rewrite `swapper.c` idle loop (race-free). (REQ: REQ-01-0864)
         - [x] Cleanup `sleepq.c` private helper structure and null-context guards. (REQ: REQ-01-0865)
@@ -1037,7 +1037,7 @@
 
             > `sys_exit(status)` and `sys__exit(status)` both call internal `proc_exit(code)`.
 
-            - [ ] **Phase 1 — State Transition (RUNNING → DYING):** (REQ: REQ-01-0876)
+            - [x] **Phase 1 — State Transition (RUNNING → DYING):** (REQ: REQ-01-0876)
                 - [x] Set `p_state` = SDYING. (REQ: REQ-01-0877)
                 - [x] Record exit status in `p_xstat`. (REQ: REQ-01-0878)
                 - [x] Prevent further scheduling. (REQ: REQ-01-0879)
@@ -1058,10 +1058,10 @@
                 - [x] Interrupt non-current threads, wait for zombie state. (REQ: REQ-01-0894)
                 - [ ] Free thread stacks and structures. (REQ: REQ-01-0895)
                 - [x] Current thread becomes reaper. (REQ: REQ-01-0896)
-            - [ ] **Phase 4 — Resource Usage Finalization:** (REQ: REQ-01-0897)
+            - [x] **Phase 4 — Resource Usage Finalization:** (REQ: REQ-01-0897)
                 - [x] `rusage_finalize(p)`: accumulate thread times. (REQ: REQ-01-0898)
                 - [x] Record `ru_utime`, `ru_stime`, `ru_maxrss`, `ru_minflt`, `ru_majflt`, `ru_nvcsw`, `ru_nivcsw`. (REQ: REQ-01-0899)
-            - [ ] **Phase 5 — Orphan Reparenting:** (REQ: REQ-01-0900)
+            - [x] **Phase 5 — Orphan Reparenting:** (REQ: REQ-01-0900)
                 - [x] `proc_reparent_children(p)`: move children to init. (REQ: REQ-01-0901)
                 - [x] Acquire `proctree_lock`. (REQ: REQ-01-0902)
                 - [x] For each child: set `p_parent = init`, move to init's children list. (REQ: REQ-01-0903)
@@ -1078,10 +1078,10 @@
             - [x] **Phase 8 — Zombie State (DYING → ZOMBIE):** (REQ: REQ-01-0914)
                 - [x] Set `p_state` = SZOMB. (REQ: REQ-01-0915)
                 - [x] Only wait-visible identity, exit status/rusage, and final-reap bookkeeping such as parent/pgrp linkage remain valid; active runtime resources must already be released. (REQ: REQ-01-0916)
-            - [ ] **Phase 9 — Final Context Switch:** (REQ: REQ-01-0917)
+            - [x] **Phase 9 — Final Context Switch:** (REQ: REQ-01-0917)
                 - [x] `current_thread->state = THREAD_ZOMBIE`. (REQ: REQ-01-0918)
                 - [x] `sched_yield()` — never returns. (REQ: REQ-01-0919)
-            - [ ] **Accounting:** (REQ: REQ-01-0920)
+            - [x] **Accounting:** (REQ: REQ-01-0920)
                 - [x] `acct_process(code)`: write accounting record (command, times, status). (REQ: REQ-01-0921)
 
         - [ ] **Edge Cases:** (REQ: REQ-01-0922)
