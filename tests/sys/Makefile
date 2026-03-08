@@ -178,5 +178,5 @@ tests.o: $(OBJS)
 clean:
 	rm -f *.o $(HOST_TESTS)
 
-host_test_ext2_readlink: host_test_ext2_readlink.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys -I. -idirafter ../../sys/include -idirafter ../../include host_test_ext2_readlink.c -o $@
+host_test_ext2_alloc_inode_block: host_test_ext2_alloc_inode_block.c
+	$(CC) -g -Wall -DHOST_TEST -I../../sys -I. -idirafter ../../sys/include -idirafter ../../include host_test_ext2_alloc_inode_block.c -o $@
