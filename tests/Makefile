@@ -20,7 +20,7 @@ UNIT_SRCS = unit/drivers/console/test_ansi.c unit/vm/test_kmem.c unit/vm/test_zo
              unit/kern/test_reboot.c \
              unit/vfs/test_fd.c unit/vfs/test_permissions.c unit/vfs/test_chroot.c unit/vfs/test_readdir.c \
              unit/vfs/test_link.c unit/vfs/test_rename.c unit/vfs/test_symlink.c unit/vfs/test_readlink.c \
-             unit/fs/test_fuse.c \
+             unit/fs/test_fuse.c unit/fs/test_ext2_blocks_extent.c \
              unit/kern/prop_sched.c fuzz/fuzz_sched.c \
              unit/perso/test_att.c ../sys/exec/perso/perso_svr3.c ../sys/exec/perso/perso_svr4.c \
              sys/test_sysinfo.c lib/c/test_libc_string_unit.c unit/lib/test_time.c \
@@ -216,6 +216,9 @@ vm_map_host.o: vm_map_host.c
 test_pipe_race.o: ../tests/sys/test_pipe_race.c
 	$(CC) $(CFLAGS_TEST) -c $< -o $@
 test_libc_string_unit.o: lib/c/test_libc_string_unit.c
+	$(CC) $(CFLAGS_TEST) -c $< -o $@
+
+test_ext2_blocks_extent.o: unit/fs/test_ext2_blocks_extent.c
 	$(CC) $(CFLAGS_TEST) -c $< -o $@
 
 %.o: lib/c/%.c
