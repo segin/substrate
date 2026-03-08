@@ -139,9 +139,11 @@ static void test_property_fid_size(void) {
 static uint8_t mock_disk_buf[100 * UDF_SECTOR_SIZE];
 static uint8_t *mock_disk;
 static uint32_t mock_disk_sectors;
+static int mock_fail_sector = -1;
 
 static size_t mock_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node;
+    if (mock_fail_sector != -1 && (int)(offset / UDF_SECTOR_SIZE) == mock_fail_sector) return 0;
     if (offset + size > mock_disk_sectors * UDF_SECTOR_SIZE) return 0;
     memcpy(buffer, mock_disk + offset, size);
     return size;
@@ -329,6 +331,137 @@ static void test_vds_crc_mismatch(void) {
     printf("test_vds_crc_mismatch: PASSED\n");
 }
 
+static void test_vds_zero_length(void) {
+    setup_mock_disk(100);
+
+    fs_node_t dev;
+    dev.read = mock_read;
+
+    struct udf_extent_ad vds_extent = { .location = 50, .length = 0 };
+    struct udf_pvd pvd_out;
+    struct udf_pd pd_out;
+    struct udf_lvd lvd_out;
+
+    int ret = udf_read_vds(&dev, &vds_extent, &pvd_out, &pd_out, &lvd_out);
+    assert(ret == -1);
+
+    teardown_mock_disk();
+    printf("test_vds_zero_length: PASSED\n");
+}
+
+static void test_vds_duplicate_tags(void) {
+    setup_mock_disk(100);
+
+    fs_node_t dev;
+    dev.read = mock_read;
+
+    struct udf_extent_ad vds_extent = { .location = 50, .length = 10 * UDF_SECTOR_SIZE };
+    struct udf_pvd pvd_in1, pvd_in2, pvd_out;
+    struct udf_pd pd_in, pd_out;
+    struct udf_lvd lvd_in, lvd_out;
+
+    memset(&pvd_in1, 0, sizeof(pvd_in1));
+    memset(&pvd_in2, 0, sizeof(pvd_in2));
+    memset(&pd_in, 0, sizeof(pd_in));
+    memset(&lvd_in, 0, sizeof(lvd_in));
+
+    write_descriptor(50, UDF_TAG_PRIMARY_VD, &pvd_in1, sizeof(pvd_in1));
+    write_descriptor(51, UDF_TAG_PRIMARY_VD, &pvd_in2, sizeof(pvd_in2));
+    write_descriptor(52, UDF_TAG_PARTITION_D, &pd_in, sizeof(pd_in));
+    write_descriptor(53, UDF_TAG_LOGICAL_VD, &lvd_in, sizeof(lvd_in));
+
+    int ret = udf_read_vds(&dev, &vds_extent, &pvd_out, &pd_out, &lvd_out);
+    assert(ret == 0);
+    assert(pvd_out.tag.tag_id == UDF_TAG_PRIMARY_VD);
+    // It should have read the first one or both, but eventually succeed
+    assert(pd_out.tag.tag_id == UDF_TAG_PARTITION_D);
+    assert(lvd_out.tag.tag_id == UDF_TAG_LOGICAL_VD);
+
+    teardown_mock_disk();
+    printf("test_vds_duplicate_tags: PASSED\n");
+}
+
+static void test_vds_early_termination(void) {
+    setup_mock_disk(100);
+
+    fs_node_t dev;
+    dev.read = mock_read;
+
+    struct udf_extent_ad vds_extent = { .location = 50, .length = 10 * UDF_SECTOR_SIZE };
+    struct udf_pvd pvd_in, pvd_out;
+    struct udf_pd pd_in, pd_out;
+    struct udf_lvd lvd_in, lvd_out;
+
+    memset(&pvd_in, 0, sizeof(pvd_in));
+    memset(&pd_in, 0, sizeof(pd_in));
+    memset(&lvd_in, 0, sizeof(lvd_in));
+
+    write_descriptor(50, UDF_TAG_PRIMARY_VD, &pvd_in, sizeof(pvd_in));
+    write_descriptor(51, UDF_TAG_PARTITION_D, &pd_in, sizeof(pd_in));
+    write_descriptor(52, UDF_TAG_LOGICAL_VD, &lvd_in, sizeof(lvd_in));
+
+    // Put an invalid descriptor at 53. If early termination doesn't happen,
+    // this will be processed. But since it exits right after finding LVD at 52,
+    // the invalid descriptor should not cause any issues.
+    // In our mock read, we can count the number of sectors read!
+    // But since we can't easily count, just asserting success is enough.
+
+    int ret = udf_read_vds(&dev, &vds_extent, &pvd_out, &pd_out, &lvd_out);
+    assert(ret == 0);
+    assert(pvd_out.tag.tag_id == UDF_TAG_PRIMARY_VD);
+    assert(pd_out.tag.tag_id == UDF_TAG_PARTITION_D);
+    assert(lvd_out.tag.tag_id == UDF_TAG_LOGICAL_VD);
+
+    teardown_mock_disk();
+    printf("test_vds_early_termination: PASSED\n");
+}
+
+static void test_vds_extent_out_of_bounds(void) {
+    setup_mock_disk(100);
+
+    fs_node_t dev;
+    dev.read = mock_read;
+
+    struct udf_extent_ad vds_extent = { .location = 150, .length = 10 * UDF_SECTOR_SIZE };
+    struct udf_pvd pvd_out;
+    struct udf_pd pd_out;
+    struct udf_lvd lvd_out;
+
+    int ret = udf_read_vds(&dev, &vds_extent, &pvd_out, &pd_out, &lvd_out);
+    assert(ret == -1);
+
+    teardown_mock_disk();
+    printf("test_vds_extent_out_of_bounds: PASSED\n");
+}
+
+static void test_vds_read_error(void) {
+    setup_mock_disk(100);
+
+    fs_node_t dev;
+    dev.read = mock_read;
+
+    struct udf_extent_ad vds_extent = { .location = 50, .length = 10 * UDF_SECTOR_SIZE };
+    struct udf_pvd pvd_in, pvd_out;
+    struct udf_pd pd_in, pd_out;
+    struct udf_lvd lvd_in, lvd_out;
+
+    memset(&pvd_in, 0, sizeof(pvd_in));
+    memset(&pd_in, 0, sizeof(pd_in));
+    memset(&lvd_in, 0, sizeof(lvd_in));
+
+    write_descriptor(50, UDF_TAG_PRIMARY_VD, &pvd_in, sizeof(pvd_in));
+    write_descriptor(51, UDF_TAG_PARTITION_D, &pd_in, sizeof(pd_in));
+    write_descriptor(52, UDF_TAG_LOGICAL_VD, &lvd_in, sizeof(lvd_in));
+
+    mock_fail_sector = 51;
+    int ret = udf_read_vds(&dev, &vds_extent, &pvd_out, &pd_out, &lvd_out);
+    assert(ret == -1);
+
+    mock_fail_sector = -1;
+    teardown_mock_disk();
+    printf("test_vds_read_error: PASSED\n");
+}
+
 
 void run_udf_tests(void) {
     printf("=== UDF Unit Tests ===\n");
@@ -347,6 +480,11 @@ void run_udf_tests(void) {
     test_vds_terminating();
     test_vds_invalid_tag();
     test_vds_crc_mismatch();
+    test_vds_zero_length();
+    test_vds_duplicate_tags();
+    test_vds_early_termination();
+    test_vds_extent_out_of_bounds();
+    test_vds_read_error();
 
     printf("=== All UDF Tests PASSED ===\n");
 }

@@ -1,3 +1,6 @@
+#define _GNU_SOURCE
+#define _POSIX_C_SOURCE 200809L
+
 #include "cc_driver.h"
 #include "cc_frontend.h"
 #include "cc_pipeline.h"
