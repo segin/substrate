@@ -178,5 +178,5 @@ tests.o: $(OBJS)
 clean:
 	rm -f *.o $(HOST_TESTS)
 
-host_test_fat_get_next_cluster: host_test_fat_get_next_cluster.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_fat_get_next_cluster.c -o $@
+host_test_ext2_alloc_inode_block: host_test_ext2_alloc_inode_block.c
+	$(CC) -g -Wall -DHOST_TEST -I../../sys -I. -idirafter ../../sys/include -idirafter ../../include host_test_ext2_alloc_inode_block.c -o $@
