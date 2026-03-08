@@ -30,6 +30,7 @@ void mutex_lock(mutex_t *m) { (void)m; }
 void mutex_unlock(mutex_t *m) { (void)m; }
 void sched_yield(void) {}
 void sched_sleep(void *chan) { (void)chan; }
+int sleepq_remove_thread(thread_t *t) { (void)t; return 0; }
 void kprint(const char *msg) { (void)msg; }
 void panic(const char *msg) { (void)msg; assert(!"panic"); }
 uint64_t get_ticks(void) { return 0; }
@@ -143,9 +144,52 @@ static void test_no_restart_leaves_eintr_result_intact(void) {
     assert(current_thread->sig_mask == (sigmask(SIGUSR2) | sigmask(SIGCHLD)));
 }
 
+static void test_reseethand_resets_handler_after_delivery(void) {
+    registers_t regs;
+
+    reset_env();
+    memset(&regs, 0, sizeof(regs));
+    regs.eax = 0;
+    regs.eip = 0x0804B000;
+
+    current_thread->sig_pending = sigmask(SIGUSR1);
+    current_process->sig_actions[SIGUSR1 - 1].sa_handler = (sig_t)0xDEADC0DE;
+    current_process->sig_actions[SIGUSR1 - 1].sa_flags = SA_RESETHAND;
+    current_process->sig_catch = sigmask(SIGUSR1);
+
+    signal_handle_pending(&regs);
+
+    assert(sendsig_calls == 1);
+    assert(current_process->sig_actions[SIGUSR1 - 1].sa_handler == SIG_DFL);
+    assert((current_process->sig_catch & sigmask(SIGUSR1)) == 0);
+}
+
+static void test_nodefer_does_not_self_block_signal(void) {
+    registers_t regs;
+
+    reset_env();
+    memset(&regs, 0, sizeof(regs));
+    regs.eax = 0;
+    regs.eip = 0x0804C000;
+
+    current_thread->sig_mask = sigmask(SIGTERM);
+    current_thread->sig_pending = sigmask(SIGUSR2);
+    current_process->sig_actions[SIGUSR2 - 1].sa_handler = (sig_t)0xCAFED00D;
+    current_process->sig_actions[SIGUSR2 - 1].sa_flags = SA_NODEFER;
+    current_process->sig_actions[SIGUSR2 - 1].sa_mask = sigmask(SIGCHLD);
+
+    signal_handle_pending(&regs);
+
+    assert(sendsig_calls == 1);
+    assert(current_thread->sig_mask == (sigmask(SIGTERM) | sigmask(SIGCHLD)));
+    assert((current_thread->sig_mask & sigmask(SIGUSR2)) == 0);
+}
+
 int main(void) {
     test_sa_restart_rewinds_interrupted_syscall();
     test_no_restart_leaves_eintr_result_intact();
+    test_reseethand_resets_handler_after_delivery();
+    test_nodefer_does_not_self_block_signal();
     puts("host_test_signal_restart: PASS");
     return 0;
 }

@@ -241,12 +241,31 @@ static void test_i386_trap_to_signal_mapping(void) {
     assert(addr == 0xFEEDFACEu);
 }
 
+static void test_onstack_delivery_uses_alt_stack(void) {
+    reset_env();
+
+    thread.sig_alt_stack.ss_sp = user_stack_base + 0x1000;
+    thread.sig_alt_stack.ss_size = 0x1000;
+    thread.sig_alt_stack.ss_flags = 0;
+
+    sendsig((sig_t)0x0804CCCC, SIGUSR1, 0, SA_ONSTACK, &regs);
+
+    assert(sigexit_called == 0);
+    assert(regs.eip == 0x0804CCCC);
+    assert(thread.sig_on_stack == 1);
+    assert(thread.sig_alt_stack.ss_flags & SS_ONSTACK);
+    assert(regs.useresp >= (uint32_t)(uintptr_t)thread.sig_alt_stack.ss_sp);
+    assert(regs.useresp < (uint32_t)(uintptr_t)thread.sig_alt_stack.ss_sp +
+                               thread.sig_alt_stack.ss_size);
+}
+
 int main(void) {
     setup_user_stack();
     test_legacy_sendsig_and_sigreturn();
     test_siginfo_sendsig_and_rt_sigreturn();
     test_siginfo_uses_trap_metadata();
     test_i386_trap_to_signal_mapping();
+    test_onstack_delivery_uses_alt_stack();
     puts("host_test_i386_signal: PASS");
     return 0;
 }
