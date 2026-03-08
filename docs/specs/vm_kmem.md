@@ -90,3 +90,15 @@ That order matters because:
 - API currently requires sized free
 - small allocations are `M_NOWAIT` only in the active implementation
 - large allocations are page-granular and may over-allocate up to almost one page
+
+## Statistics
+The allocator maintains global accounting plus per-class breakdowns:
+- total alloc/free calls
+- total requested bytes and currently outstanding requested bytes
+- per-bucket counters for each UMA size class (`16..4096`)
+- large-allocation counters and outstanding requested bytes for the PMM path
+
+The current design does not use BSD-style `malloc_type` subsystem tagging. The
+authoritative accounting split is allocator class:
+- size bucket for UMA-backed small allocations
+- large contiguous PMM allocations for requests above `4096`
