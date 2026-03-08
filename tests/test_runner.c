@@ -69,6 +69,7 @@ extern bool test_signal_mask(void);
 extern bool test_signal_delivery_default(void);
 extern bool test_signal_pending_masked_filter(void);
 extern bool test_signal_uncatchable_invariants(void);
+extern bool test_signal_altstack(void);
 extern bool test_signal_init_protection(void);
 extern bool test_signal_kill_routing(void);
 extern bool test_psignal_thread_selection(void);
@@ -219,6 +220,7 @@ test_case_t tests[] = {
     {"sig_deliver", test_signal_delivery_default},
     {"sig_pending", test_signal_pending_masked_filter},
     {"sig_invariants", test_signal_uncatchable_invariants},
+    {"sig_altstack", test_signal_altstack},
     {"sig_init", test_signal_init_protection},
     {"sig_kill_route", test_signal_kill_routing},
     {"sig_psignal_pick", test_psignal_thread_selection},

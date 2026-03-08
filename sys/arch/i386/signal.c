@@ -161,6 +161,7 @@ void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t 
         esp = (uint32_t)(uintptr_t)current_thread->sig_alt_stack.ss_sp +
               (uint32_t)current_thread->sig_alt_stack.ss_size;
         current_thread->sig_on_stack = 1;
+        current_thread->sig_alt_stack.ss_flags |= SS_ONSTACK;
     } else {
         /* Use current user stack */
         esp = regs->useresp;
@@ -424,6 +425,7 @@ int sys_sigreturn(void *scp_ptr) {
         
         /* Clear sig_on_stack flag - we're returning from handler */
         current_thread->sig_on_stack = 0;
+        current_thread->sig_alt_stack.ss_flags &= ~SS_ONSTACK;
     }
     
     /*
@@ -536,6 +538,7 @@ int sys_rt_sigreturn(void *ucp_ptr) {
         
         /* Clear sig_on_stack flag - we're returning from handler */
         current_thread->sig_on_stack = 0;
+        current_thread->sig_alt_stack.ss_flags &= ~SS_ONSTACK;
     }
     
     /*

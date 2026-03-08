@@ -115,15 +115,25 @@ int kern_sigsuspend(const uint32_t *mask) {
 }
 
 int kern_sigaltstack(const stack_t *ss, stack_t *oss) {
-    if (oss) *oss = current_thread->sig_alt_stack;
+    if (oss) {
+        *oss = current_thread->sig_alt_stack;
+        if (current_thread->sig_on_stack) {
+            oss->ss_flags |= SS_ONSTACK;
+        } else {
+            oss->ss_flags &= ~SS_ONSTACK;
+        }
+    }
     
     if (ss) {
-        if (current_thread->sig_alt_stack.ss_flags & SS_ONSTACK) return -1; // EPERM/EINVAL
+        if (current_thread->sig_on_stack) return -1; // EPERM/EINVAL
         if (ss->ss_flags & SS_DISABLE) {
+             current_thread->sig_alt_stack.ss_sp = NULL;
+             current_thread->sig_alt_stack.ss_size = 0;
              current_thread->sig_alt_stack.ss_flags = SS_DISABLE;
         } else {
              if (ss->ss_size < MINSIGSTKSZ) return -1; // ENOMEM/EINVAL
              current_thread->sig_alt_stack = *ss;
+             current_thread->sig_alt_stack.ss_flags &= ~(SS_DISABLE | SS_ONSTACK);
         }
     }
     return 0;
