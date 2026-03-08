@@ -419,6 +419,7 @@ typedef struct {
     int depth;
     cc_struct_member_t *members;
     size_t member_count;
+    size_t member_cap;
     long size;
     long align;
     int attr_flags;

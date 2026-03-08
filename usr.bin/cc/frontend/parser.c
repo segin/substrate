@@ -1412,11 +1412,15 @@ static int struct_member_push(parser_t *p, int sid, const char *name, cc_type_t 
             }
         }
     }
-    next = (cc_struct_member_t *)realloc(sd->members, (sd->member_count + 1) * sizeof(*next));
-    if (next == NULL) {
-        return -1;
+    if (sd->member_count == sd->member_cap) {
+        size_t ncap = sd->member_cap == 0 ? 8 : sd->member_cap * 2;
+        next = (cc_struct_member_t *)realloc(sd->members, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        sd->members = next;
+        sd->member_cap = ncap;
     }
-    sd->members = next;
     dup = NULL;
     if (name != NULL) {
         dup = xstrdup_n(name, strlen(name));
