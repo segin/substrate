@@ -11,22 +11,22 @@ Reference: User Request (Step 31552)
 > [!NOTE]
 > ELKS (Embeddable Linux Kernel Subset) is a 16-bit Linux-like OS for 8086/80286. This personality enables running ELKS binaries on Substrate using LDT-based 16-bit protected mode segments.
 
-- [ ] **Design & Specification:** (REQ: REQ-20-0001)
-    - [ ] Produce ELKS personality specification document. (REQ: REQ-20-0002)
+- [x] **Design & Specification:** (REQ: REQ-20-0001)
+    - [x] Produce ELKS personality specification document. (REQ: REQ-20-0002)
         - Files: `docs/personality/elks_spec.md`
         - Tests: N/A (design doc)
         - Docs: `elks_spec.md`
         - Acceptance: Document covers binary format recognition, ABI semantics (syscalls, signal model), data models (near/far pointers), and expected process environment.
-    - [ ] Define ELKS syscall table mapping to Substrate equivalents. (REQ: REQ-20-0003)
+    - [x] Define ELKS syscall table mapping to Substrate equivalents. (REQ: REQ-20-0003)
         - Files: `docs/personality/elks_syscalls.md`, `sys/exec/perso/elks_syscall_table.h`
         - Tests: N/A (design doc)
         - Docs: `elks_syscalls.md`
         - Acceptance: Complete mapping table with supported/unsupported syscalls documented.
-    - [ ] Define ELKS signal model and mapping to POSIX signals. (REQ: REQ-20-0004)
+    - [x] Define ELKS signal model and mapping to POSIX signals. (REQ: REQ-20-0004)
         - Files: `docs/personality/elks_spec.md`
         - Tests: N/A (design doc)
         - Acceptance: Signal numbers and semantics documented.
-    - [ ] Define ELKS memory model (tiny/small/medium/compact/large). (REQ: REQ-20-0005)
+    - [x] Define ELKS memory model (tiny/small/medium/compact/large). (REQ: REQ-20-0005)
         - Files: `docs/personality/elks_spec.md`
         - Tests: N/A (design doc)
         - Acceptance: Each memory model's segment layout documented.
