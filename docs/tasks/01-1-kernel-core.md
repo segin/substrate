@@ -990,7 +990,7 @@
             - [x] Init adopts orphaned processes. (REQ: REQ-01-0836)
 
         - [ ] **Core Dump (future):** (REQ: REQ-01-0837)
-            - [ ] Signals with SA_CORE: SIGQUIT, SIGILL, SIGABRT, SIGFPE, SIGSEGV, SIGBUS. (REQ: REQ-01-0838)
+            - [x] Signals with SA_CORE: SIGQUIT, SIGILL, SIGABRT, SIGFPE, SIGSEGV, SIGBUS. (REQ: REQ-01-0838)
             - [ ] `coredump()`: write ELF core format (`/cores/core.PID`). (REQ: REQ-01-0839)
             - [ ] Respect `RLIMIT_CORE`. (REQ: REQ-01-0840)
 
@@ -1053,7 +1053,7 @@
                 - [x] **POSIX IPC:** invoke a dedicated exit-phase teardown hook; under the current kernel design, no POSIX semaphore/shared-memory ownership model exists yet, so the hook is an explicit no-op until that namespace exists. (REQ: REQ-01-0889)
                 - [x] **Futex Cleanup:** process robust list, mark FUTEX_OWNER_DIED, wake waiters. (REQ: REQ-01-0890)
                 - [x] **Kernel Locks:** release held sleep mutexes, cancel pending lock requests. (REQ: REQ-01-0891)
-            - [ ] **Phase 3 — Thread Termination:** (REQ: REQ-01-0892)
+            - [x] **Phase 3 — Thread Termination:** (REQ: REQ-01-0892)
                 - [x] Set `t->state = THREAD_ZOMBIE` for each thread. (REQ: REQ-01-0893)
                 - [x] Interrupt non-current threads, wait for zombie state. (REQ: REQ-01-0894)
                 - [x] Free thread stacks and structures. (REQ: REQ-01-0895)
@@ -1084,7 +1084,7 @@
             - [x] **Accounting:** (REQ: REQ-01-0920)
                 - [x] `acct_process(code)`: write accounting record (command, times, status). (REQ: REQ-01-0921)
 
-        - [ ] **Edge Cases:** (REQ: REQ-01-0922)
+        - [x] **Edge Cases:** (REQ: REQ-01-0922)
             - [x] Init (PID 1) exit: kernel halts/panics with warning. (REQ: REQ-01-0923)
             - [x] Killed by signal during exit: ignore signals once SDYING. (REQ: REQ-01-0924)
             - [x] Locks held during exit: log warning, force release. (REQ: REQ-01-0925)
