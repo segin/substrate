@@ -211,6 +211,15 @@ uma_zone_t *uma_zcreate(
         zone->uz_flags |= UMA_ZONE_OFFPAGE;
     }
 
+    if ((zone->uz_flags & UMA_ZONE_OFFPAGE) == 0) {
+        size_t slab_bytes = zone->uz_rsize * zone->uz_ipers + slab_overhead;
+        size_t slack = (slab_bytes < 4096) ? (4096 - slab_bytes) : 0;
+        zone->uz_color_max = (zone->uz_align != 0) ? (slack / zone->uz_align) : 0;
+    } else {
+        zone->uz_color_max = 0;
+    }
+    zone->uz_next_color = 0;
+
     /* Set callbacks */
     zone->uz_ctor = ctor;
     zone->uz_dtor = dtor;
@@ -350,9 +359,18 @@ static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
         }
     }
     slab->us_zone = zone;
+    slab->us_offset = 0;
     slab->us_freecount = zone->uz_ipers;
     slab->us_firstfree = 0;
     slab->us_next = NULL;
+
+    if ((zone->uz_flags & UMA_ZONE_OFFPAGE) == 0 && zone->uz_color_max > 0) {
+        slab->us_offset = (uint32_t)(zone->uz_next_color * zone->uz_align);
+        zone->uz_next_color++;
+        if (zone->uz_next_color > zone->uz_color_max) {
+            zone->uz_next_color = 0;
+        }
+    }
     
     /* Insert into global hash */
     uma_hash_insert(slab);
@@ -373,7 +391,7 @@ static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
     /* Call init callback and initialize debug patterns on each object. */
     if (zone->uz_init || (zone->uz_flags & (UMA_ZONE_REDZONE | UMA_ZONE_TRASH))) {
         for (uint32_t i = 0; i < zone->uz_ipers; i++) {
-            void *obj = (void *)((uintptr_t)page + i * zone->uz_rsize);
+            void *obj = (void *)((uintptr_t)page + slab->us_offset + i * zone->uz_rsize);
             void *item = obj;
 
             /* Initialize redzone pattern */
@@ -402,7 +420,8 @@ static void uma_slab_free(uma_zone_t *zone, uma_slab_t *slab) {
     /* Call fini callback on each object */
     if (zone->uz_fini) {
         for (uint32_t i = 0; i < zone->uz_ipers; i++) {
-            void *obj = (void *)((uintptr_t)slab->us_data + i * zone->uz_rsize);
+            void *obj = (void *)((uintptr_t)slab->us_data + slab->us_offset +
+                                 i * zone->uz_rsize);
             zone->uz_fini(obj, zone->uz_size);
         }
     }
@@ -433,7 +452,8 @@ static void *uma_slab_alloc_item(uma_zone_t *zone, uma_slab_t *slab) {
     if (slab->us_freecount == 0) return NULL;
     
     uint32_t idx = slab->us_firstfree;
-    void *obj = (void *)((uintptr_t)slab->us_data + idx * zone->uz_rsize);
+    void *obj = (void *)((uintptr_t)slab->us_data + slab->us_offset +
+                         idx * zone->uz_rsize);
     
     /* Update free list */
     slab->us_firstfree = slab->us_freelist[idx];
@@ -458,7 +478,8 @@ static void uma_slab_free_item(uma_zone_t *zone, uma_slab_t *slab, void *item) {
     }
     
     /* Calculate index */
-    uint32_t idx = ((uintptr_t)item - (uintptr_t)slab->us_data) / zone->uz_rsize;
+    uint32_t idx = ((uintptr_t)item - ((uintptr_t)slab->us_data + slab->us_offset)) /
+                   zone->uz_rsize;
     
     /* Add to free list */
     slab->us_freelist[idx] = slab->us_firstfree;
@@ -502,7 +523,7 @@ size_t uma_item_size(void *item) {
     bucket = uma_hash((void *)page_addr);
 
     for (uma_slab_t *slab = uma_page_hash[bucket]; slab; slab = slab->us_hnext) {
-        uintptr_t slab_start = (uintptr_t)slab->us_data;
+        uintptr_t slab_start = (uintptr_t)slab->us_data + slab->us_offset;
         uintptr_t slab_end = slab_start + slab->us_zone->uz_rsize * slab->us_zone->uz_ipers;
         uintptr_t ptr = (uintptr_t)item;
         uintptr_t offset;

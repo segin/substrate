@@ -96,6 +96,7 @@ struct uma_slab {
     struct uma_slab     *us_hnext;      /* Next slab in hash chain */
     uma_zone_t          *us_zone;       /* Owner zone (for safety) */
     void                *us_data;       /* Base of object memory */
+    uint32_t            us_offset;      /* Coloring offset from slab base */
     uint32_t            us_freecount;   /* Free objects in slab */
     uint32_t            us_firstfree;   /* Index of first free object */
     uint8_t             *us_freelist;   /* Bitmap or free indices */
@@ -112,6 +113,8 @@ struct uma_zone {
     size_t              uz_align;       /* Object alignment */
     size_t              uz_rsize;       /* Real size (with redzone) */
     size_t              uz_ipers;       /* Items per slab */
+    size_t              uz_color_max;   /* Maximum slab coloring offset */
+    size_t              uz_next_color;  /* Next coloring offset to use */
     
     /* Callbacks */
     uma_ctor            uz_ctor;        /* Constructor */

@@ -40,6 +40,8 @@ Current slab behavior:
 - backing memory comes from PMM pages
 - small/medium objects prefer on-page slab metadata
 - large objects use `UMA_ZONE_OFFPAGE`, with slab headers allocated separately
+- on-page slabs rotate a per-slab starting offset when slack permits, so
+  successive slabs color the first object at different cache-set offsets
 - free objects are tracked by an index freelist (`us_freelist`) rather than
   embedding next-pointers in client memory
 - slabs are hashed by backing page address for reverse lookup during free
