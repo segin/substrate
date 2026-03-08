@@ -36,6 +36,7 @@ extern thread_t *current_thread;
 
 /* Scheduler API */
 void sched_init(void);
+void sched_smp_init(int cpu_count);
 void swapper_request_work(void);
 
 /* Thread Creation */
@@ -59,6 +60,9 @@ thread_t *sched_get_thread(int tid);
 void sched_iterate_threads(void (*callback)(thread_t *t, void *arg), void *arg);
 
 void sched_check_timeouts(void);
+int sched_can_run_on_cpu(thread_t *t, int cpu_id);
+int sched_bind_thread(thread_t *t, int cpu_id);
+void sched_unbind_thread(thread_t *t);
 
 /* Load Average */
 #define SI_LOAD_SCALE 2048

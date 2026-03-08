@@ -44,5 +44,7 @@ void exec_register_handler(struct exec_binary_handler *handler);
  * Reads the header once and iterates through handlers.
  */
 int exec_dispatch(const char *path, char *const argv[], char *const envp[]);
+void exec_pin_current_thread(void);
+void exec_unpin_current_thread(void);
 
 #endif /* _SYS_EXEC_H */

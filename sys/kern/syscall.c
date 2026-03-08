@@ -35,6 +35,7 @@
 #include <sys/stat.h>
 #include <sys/errno.h>
 #include <sys/reboot.h>
+#include <sys/exec.h>
 #include <arch/x86-common/io.h>
 #include <string.h>
 #include <stdbool.h>
@@ -1260,7 +1261,10 @@ int sys_execve(const char *f, char *const a[], char *const e[]) {
 }
 
 int kern_execve(const char *f, char *const a[], char *const e[]) {
-    return exec_dispatch(f, a, e);
+    exec_pin_current_thread();
+    int ret = exec_dispatch(f, a, e);
+    exec_unpin_current_thread();
+    return ret;
 }
 
 /* sys_fork and sys_vfork are arch-specific (need registers_t) - in arch/i386/syscall.c */

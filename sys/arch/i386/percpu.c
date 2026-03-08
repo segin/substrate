@@ -9,6 +9,7 @@
 #include <arch/i386/smp.h>
 #include <kern/console.h>
 #include <string.h>
+#include <stdio.h>
 
 // Per-CPU data array
 static struct percpu_data percpu_data_array[MAX_CPUS] __attribute__((aligned(64)));
@@ -58,9 +59,8 @@ void percpu_init_cpu(int cpu_id) {
     pcpu->runqueue_count = 0;
     
     kprint("PERCPU: Initialized CPU ");
-    char buf[4];
-    buf[0] = '0' + (cpu_id % 10);
-    buf[1] = '\0';
+    char buf[16];
+    sprintf(buf, "%d", cpu_id);
     kprint(buf);
     kprint("\n");
 }

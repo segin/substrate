@@ -153,14 +153,19 @@ typedef struct thread {
     uint32_t      flags;          // Thread flags
     
 #define THREAD_F_INTERRUPTIBLE 0x0001 // Sleep is interruptible by signals
-    
+#define THREAD_F_NO_PREEMPT    0x0002 // Suppress timer-driven reschedule
+
     // Scheduling - Runqueue linkage
     struct thread *rq_next;       // Next in runqueue level
     struct thread *rq_prev;       // Prev in runqueue level
     struct runqueue *current_queue; // The runqueue this thread is currently on
     uint32_t       cpu_affinity;  // CPU affinity mask (bitmask)
+    int16_t        bound_cpu;     // Hard CPU binding (-1 = floating)
+    int16_t        exec_saved_bound_cpu; // Saved binding across exec pin window
     uint8_t        on_runqueue;   // Is thread currently on a runqueue?
     uint8_t        needs_resched; // Set by IPI to trigger reschedule
+    uint8_t        exec_pin_active; // Exec path temporarily pinned this thread
+    uint8_t        exec_saved_no_preempt; // Preserve preempt state across exec pin
     
     void         *wait_chan; // Channel thread is sleeping on
     const char   *wait_reason; // Description of wait event

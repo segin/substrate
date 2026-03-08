@@ -79,6 +79,7 @@ Major kernel layers:
 
 Kernel worker model:
 - `swapper` (PID 0) remains the idle/root kernel context.
+- `swapper` owns one CPU-bound idle thread per online CPU.
 - VM pressure is handled by a dedicated `pagedaemon` kernel process that sleeps on a wakeup channel and runs pageout work asynchronously.
 
 ### 5.1 i386 PMAP Model
@@ -113,6 +114,11 @@ TLB management on i386 follows a tiered strategy:
 - SMP invalidation uses LAPIC IPIs to other CPUs plus an acknowledgement barrier
 - kernel mappings use PGE/global bits when supported
 - global flushes use the CR4.PGE toggle path
+
+i386 SMP execution model:
+- the kernel currently supports up to `96` CPUs
+- AP bootstrap uses a copied low-memory trampoline that enters protected mode, loads the live BSP CR4/CR3/CR0 state, enables paging, and jumps into the higher-half C entry point
+- `execve()` temporarily binds the calling thread to its current CPU and suppresses timer-driven rescheduling until the final userspace handoff, then restores floating scheduling state
 
 Device namespace policy in `devfs`:
 - Root pseudo devices remain at `/dev/*` (for example `/dev/null`, `/dev/zero`).

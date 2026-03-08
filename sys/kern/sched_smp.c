@@ -48,9 +48,12 @@ void sched_enqueue(thread_t *t) {
     // Pick CPU based on affinity or load balancing
     int target_cpu = 0;
     
-    if (t->cpu_affinity != 0) {
+    if (t->bound_cpu >= 0 && t->bound_cpu < num_cpus) {
+        target_cpu = t->bound_cpu;
+    } else if (t->cpu_affinity != 0) {
         // Find first allowed CPU in affinity mask
-        for (int i = 0; i < num_cpus; i++) {
+        int affinity_cpus = num_cpus < 32 ? num_cpus : 32;
+        for (int i = 0; i < affinity_cpus; i++) {
             if (t->cpu_affinity & (1U << i)) {
                 target_cpu = i;
                 break;
@@ -211,8 +214,15 @@ thread_t *sched_steal_thread(int target_cpu) {
         int limit = 4;
         
         while (t && limit > 0) {
+            if (t->bound_cpu >= 0 && t->bound_cpu != my_cpu) {
+                t = t->rq_prev;
+                limit--;
+                continue;
+            }
+
             // Check CPU affinity - can we run this thread?
-            if (t->cpu_affinity != 0 && !(t->cpu_affinity & (1U << my_cpu))) {
+            if (t->cpu_affinity != 0 &&
+                (my_cpu >= 32 || !(t->cpu_affinity & (1U << my_cpu)))) {
                 // Thread can't run on our CPU, check next
                 t = t->rq_prev;
                 limit--;

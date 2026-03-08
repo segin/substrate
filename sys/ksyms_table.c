@@ -227,7 +227,9 @@ extern void elf_execve(void);
 extern void elf_load(void);
 extern void elf_load_file(void);
 extern void exec_dispatch(void);
+extern void exec_pin_current_thread(void);
 extern void exec_register_handler(void);
+extern void exec_unpin_current_thread(void);
 extern void exfat_init(void);
 extern void ext2_add_entry(void);
 extern void ext2_alloc_block(void);
@@ -789,6 +791,7 @@ extern void rusage_finalize(void);
 extern void rusage_init(void);
 extern void rusage_update_maxrss(void);
 extern void sched_alloc_thread(void);
+extern void sched_bind_thread(void);
 extern void sched_can_run_on_cpu(void);
 extern void sched_clear_affinity(void);
 extern void sched_count_runnable(void);
@@ -831,6 +834,7 @@ extern void sched_spawn_kernel_process(void);
 extern void sched_steal_thread(void);
 extern void sched_switch(void);
 extern void sched_tick(void);
+extern void sched_unbind_thread(void);
 extern void sched_update_loadavg(void);
 extern void sched_wakeup(void);
 extern void sched_wakeup_n(void);
@@ -1212,7 +1216,12 @@ extern void test_vm_policy_lru(void);
 extern void test_vm_policy_writeback(void);
 extern void timer_tick(void);
 extern void timeval_add(void);
+extern void trampoline_cr0(void);
+extern void trampoline_cr3(void);
+extern void trampoline_cr4(void);
 extern void trampoline_end(void);
+extern void trampoline_entry(void);
+extern void trampoline_stack(void);
 extern void trampoline_start(void);
 extern void trapsignal(void);
 extern void truncate_fs(void);
@@ -1627,6 +1636,11 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&smp_get_cpu_count, "smp_get_cpu_count" },
     { (uint32_t)(uintptr_t)&smp_get_cpu_id, "smp_get_cpu_id" },
     { (uint32_t)(uintptr_t)&trampoline_start, "trampoline_start" },
+    { (uint32_t)(uintptr_t)&trampoline_cr3, "trampoline_cr3" },
+    { (uint32_t)(uintptr_t)&trampoline_cr4, "trampoline_cr4" },
+    { (uint32_t)(uintptr_t)&trampoline_cr0, "trampoline_cr0" },
+    { (uint32_t)(uintptr_t)&trampoline_stack, "trampoline_stack" },
+    { (uint32_t)(uintptr_t)&trampoline_entry, "trampoline_entry" },
     { (uint32_t)(uintptr_t)&fpu_save_context, "fpu_save_context" },
     { (uint32_t)(uintptr_t)&trampoline_end, "trampoline_end" },
     { (uint32_t)(uintptr_t)&fpu_restore_context, "fpu_restore_context" },
@@ -2030,6 +2044,8 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&sched_set_affinity_self, "sched_set_affinity_self" },
     { (uint32_t)(uintptr_t)&sched_get_affinity_self, "sched_get_affinity_self" },
     { (uint32_t)(uintptr_t)&sched_can_run_on_cpu, "sched_can_run_on_cpu" },
+    { (uint32_t)(uintptr_t)&sched_bind_thread, "sched_bind_thread" },
+    { (uint32_t)(uintptr_t)&sched_unbind_thread, "sched_unbind_thread" },
     { (uint32_t)(uintptr_t)&sched_clear_affinity, "sched_clear_affinity" },
     { (uint32_t)(uintptr_t)&sched_migrate_if_needed, "sched_migrate_if_needed" },
     { (uint32_t)(uintptr_t)&runqueue_init, "runqueue_init" },
@@ -2466,6 +2482,8 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&pe_load_file, "pe_load_file" },
     { (uint32_t)(uintptr_t)&coff_load_file, "coff_load_file" },
     { (uint32_t)(uintptr_t)&exec_register_handler, "exec_register_handler" },
+    { (uint32_t)(uintptr_t)&exec_pin_current_thread, "exec_pin_current_thread" },
+    { (uint32_t)(uintptr_t)&exec_unpin_current_thread, "exec_unpin_current_thread" },
     { (uint32_t)(uintptr_t)&exec_dispatch, "exec_dispatch" },
     { (uint32_t)(uintptr_t)&perso_lookup, "perso_lookup" },
     { (uint32_t)(uintptr_t)&perso_name, "perso_name" },
@@ -2905,4 +2923,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1447;
+int ksym_count = 1456;

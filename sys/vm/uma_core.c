@@ -18,7 +18,7 @@ static uma_zone_t *uma_zones = NULL;
 /* Number of CPUs (detected at runtime) */
 static int uma_ncpu = 1;
 
-#define UMA_MAX_CPUS 32
+#define UMA_MAX_CPUS MAX_CPUS
 #define UMA_ZONE_SIZE_MAX (sizeof(uma_zone_t) + (UMA_MAX_CPUS - 1) * sizeof(uma_cache_t))
 
 /* Bootstrap zone pool */

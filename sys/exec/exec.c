@@ -19,6 +19,7 @@ struct thr_param;
 #include <sys/syscall_impl.h>
 #include <sys/kern_syscalls.h>
 #include <sys/fcntl.h>
+#include <kern/sched.h>
 
 static struct exec_binary_handler *exec_handlers = NULL;
 
@@ -28,6 +29,38 @@ void exec_register_handler(struct exec_binary_handler *handler) {
     // Add to head of list (LIFO, so newer handlers can override if needed)
     handler->next = exec_handlers;
     exec_handlers = handler;
+}
+
+void exec_pin_current_thread(void) {
+    if (!current_thread || current_thread->exec_pin_active) {
+        return;
+    }
+
+    int cpu_id = smp_get_cpu_id();
+    if (cpu_id < 0) {
+        cpu_id = 0;
+    }
+
+    current_thread->exec_saved_bound_cpu = current_thread->bound_cpu;
+    current_thread->exec_saved_no_preempt =
+        (current_thread->flags & THREAD_F_NO_PREEMPT) ? 1 : 0;
+    current_thread->bound_cpu = (int16_t)cpu_id;
+    current_thread->flags |= THREAD_F_NO_PREEMPT;
+    current_thread->exec_pin_active = 1;
+}
+
+void exec_unpin_current_thread(void) {
+    if (!current_thread || !current_thread->exec_pin_active) {
+        return;
+    }
+
+    current_thread->bound_cpu = current_thread->exec_saved_bound_cpu;
+    if (!current_thread->exec_saved_no_preempt) {
+        current_thread->flags &= ~THREAD_F_NO_PREEMPT;
+    }
+    current_thread->exec_saved_bound_cpu = -1;
+    current_thread->exec_saved_no_preempt = 0;
+    current_thread->exec_pin_active = 0;
 }
 
 /*

@@ -52,6 +52,10 @@ thread_t *sched_alloc_thread(process_t *proc) {
     threads[i].priority = current_thread ? current_thread->priority : 20;
     threads[i].base_priority = current_thread ? current_thread->base_priority : 20;
     threads[i].sched_class = current_thread ? current_thread->sched_class : SCHED_TIMESHARE;
+    threads[i].bound_cpu = -1;
+    threads[i].exec_saved_bound_cpu = -1;
+    threads[i].exec_pin_active = 0;
+    threads[i].exec_saved_no_preempt = 0;
     
     // Initialize Signals
     threads[i].sig_mask = current_thread ? current_thread->sig_mask : 0;
@@ -97,6 +101,8 @@ void sched_yield(void) {
     if (!current_thread) return;
 
     extern void kprint(const char *);
+    extern int percpu_get_cpu_id(void);
+    int cpu_id = percpu_get_cpu_id();
 
     thread_t *best_thread = NULL;
     int highest_prio = -1;
@@ -105,6 +111,7 @@ void sched_yield(void) {
     // Scan for best thread to run (Generic Policy)
     for (int i = 0; i < MAX_THREADS; i++) {
         if (threads[i].tid == -1 || threads[i].state != THREAD_READY) continue;
+        if (!sched_can_run_on_cpu(&threads[i], cpu_id)) continue;
 
         bool better = false;
         if (!best_thread) {

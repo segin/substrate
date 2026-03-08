@@ -3,6 +3,7 @@
 #include <pm/pm.h>
 #include <sys/acct.h>
 #include <exec/perso/personality.h>
+#include <arch/i386/percpu.h>
 #include <stddef.h>
 #include <stdint.h>
 #include "pmap.h"
@@ -77,9 +78,12 @@ void sched_init(void) {
     t->state = THREAD_RUNNING;
     t->priority = 20;
     t->base_priority = 20;
+    t->bound_cpu = 0;
     
     current_thread = t;
     current_process = &processes[0];
+    THIS_CPU()->current = t;
+    THIS_CPU()->idle = t;
     
     // Ensure we start effectively in kernel pmap (already loaded but helpful for consistency)
     pmap_activate(processes[0].pmap);
@@ -184,8 +188,6 @@ thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void 
 
     return t;
 }
-
-
 
 
 

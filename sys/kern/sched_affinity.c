@@ -15,6 +15,13 @@ extern int percpu_get_cpu_id(void);
 extern void sched_dequeue(thread_t *t);
 extern void sched_enqueue(thread_t *t);
 
+static uint32_t sched_valid_affinity_mask(void) {
+    if (num_cpus >= 32) {
+        return 0xFFFFFFFFu;
+    }
+    return (1U << num_cpus) - 1;
+}
+
 // Set CPU affinity mask for a thread
 // mask: bitmask of allowed CPUs (bit N = CPU N allowed)
 // Returns: 0 on success, -1 on error
@@ -27,7 +34,7 @@ int sched_set_affinity(int tid, uint32_t mask) {
     if (mask == 0) return -1;
     
     // Check that mask only includes valid CPUs
-    uint32_t valid_mask = (1U << num_cpus) - 1;
+    uint32_t valid_mask = sched_valid_affinity_mask();
     if ((mask & valid_mask) == 0) return -1;
     
     // Apply mask
@@ -45,7 +52,7 @@ uint32_t sched_get_affinity(int tid) {
     
     // Return mask, or all CPUs if unset
     if (t->cpu_affinity == 0) {
-        return (1U << num_cpus) - 1;  // All CPUs allowed
+        return sched_valid_affinity_mask();  // All CPUs allowed
     }
     return t->cpu_affinity;
 }
@@ -68,17 +75,38 @@ uint32_t sched_get_affinity_self(void) {
 int sched_can_run_on_cpu(thread_t *t, int cpu_id) {
     if (!t) return 0;
     if (cpu_id < 0 || cpu_id >= num_cpus) return 0;
+
+    if (t->bound_cpu >= 0) {
+        return t->bound_cpu == cpu_id;
+    }
     
     // No affinity set = can run anywhere
     if (t->cpu_affinity == 0) return 1;
+
+    if (cpu_id >= 32) return 0;
     
     // Check bit in mask
     return (t->cpu_affinity & (1U << cpu_id)) != 0;
 }
 
+int sched_bind_thread(thread_t *t, int cpu_id) {
+    if (!t) return -1;
+    if (cpu_id < 0 || cpu_id >= num_cpus) return -1;
+    t->bound_cpu = (int16_t)cpu_id;
+    return 0;
+}
+
+void sched_unbind_thread(thread_t *t) {
+    if (!t) return;
+    t->bound_cpu = -1;
+}
+
 // Clear affinity (allow all CPUs)
 int sched_clear_affinity(int tid) {
-    return sched_set_affinity(tid, 0);
+    thread_t *t = sched_get_thread(tid);
+    if (!t) return -1;
+    t->cpu_affinity = 0;
+    return 0;
 }
 
 // Migrate thread to a different CPU if needed

@@ -150,7 +150,9 @@ void isr_handler(registers_t *regs) {
         
         if (regs->int_no >= 40) outb(0xA0, 0x20);
         outb(0x20, 0x20);
-        sched_yield();
+        if (!current_thread || !(current_thread->flags & THREAD_F_NO_PREEMPT)) {
+            sched_yield();
+        }
         signal_handle_pending(regs);
         return;
     }

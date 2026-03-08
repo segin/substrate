@@ -8,6 +8,7 @@
 #include <vm/vm_map.h>
 #include <vm/vm_kmem.h>
 #include <exec/perso/personality.h>
+#include <sys/exec.h>
 #include <sys/random.h>
 #include <sys/signal.h> // For copyin/copyout
 #include <sys/kern_syscalls.h>
@@ -853,6 +854,8 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     if (arg_buffer) kfree(arg_buffer, ARG_MAX_BYTES);
     if (fd >= 0) kern_close(fd);
 
+    exec_unpin_current_thread();
+
     // Jump to userspace - does not return
     extern void jump_to_userspace(uint32_t entry, uint32_t stack);
     jump_to_userspace(entry, sp);
@@ -866,6 +869,7 @@ cleanup:
     if (k_envp) kfree(k_envp, (envc + 1) * sizeof(char*));
     if (arg_buffer) kfree(arg_buffer, ARG_MAX_BYTES);
     if (fd >= 0) kern_close(fd);
+    exec_unpin_current_thread();
     return error_code;
 }
 

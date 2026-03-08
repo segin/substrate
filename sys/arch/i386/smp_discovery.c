@@ -6,8 +6,10 @@
 #include <stdint.h>
 #include <arch/i386/percpu.h>
 #include <arch/i386/gdt.h>
+#include <arch/i386/pmap.h>
 #include <sys/proc.h>
 #include <arch/x86-common/lapic.h>
+#include <stdio.h>
 
 // Externs for Scheduler and IDT
 extern process_t processes[];
@@ -27,16 +29,30 @@ extern void tss_flush(void);
 // GDT Flush (defined in gdt.c/isr.S)
 extern void gdt_flush(uint32_t);
 
-#define P2V(x) ((void*)((uintptr_t)(x) + 0xC0000000))
 /*
  * Early boot page tables in boot.S map only the first 16MB into the higher
  * half direct-map window (0xC0000000 + phys). ACPI pointers outside this
  * range must not be dereferenced during early SMP discovery.
  */
 #define EARLY_DIRECTMAP_LIMIT 0x01000000u
+#define FULL_DIRECTMAP_LIMIT  0x3EC00000u
 
 cpu_info_t cpus[MAX_CPUS];
 int cpu_count = 0;
+
+static void smp_emit_u32(void (*emit)(const char *), uint32_t value) {
+    char buf[16];
+    sprintf(buf, "%u", value);
+    emit(buf);
+}
+
+static uint32_t smp_discovery_map_limit(void) {
+    pmap_t kpmap = pmap_kernel();
+    if (kpmap && kpmap->pdir_phys) {
+        return FULL_DIRECTMAP_LIMIT;
+    }
+    return EARLY_DIRECTMAP_LIMIT;
+}
 
 // ACPI Structure Definitions (Simplified)
 struct rsdp_desc {
@@ -59,10 +75,9 @@ struct acpi_header {
     uint32_t creator_revision;
 } __attribute__((packed));
 
-#define P2V(x) ((void*)((uintptr_t)(x) + 0xC0000000))
-
 void smp_discover_cores(void) {
     early_uart_print("SMP: Discovering cores...\n");
+    uint32_t map_limit = smp_discovery_map_limit();
     
     // Default to 1 CPU (Bootstrap Processor)
     cpu_count = 1;
@@ -76,10 +91,7 @@ void smp_discover_cores(void) {
     bsp_id = (*lapic_id_reg) >> 24;
 
     early_uart_print("SMP: BSP LAPIC ID: ");
-    char bsp_buf[4];
-    bsp_buf[0] = '0' + (bsp_id % 10);
-    bsp_buf[1] = '\0';
-    early_uart_print(bsp_buf);
+    smp_emit_u32(early_uart_print, bsp_id);
     early_uart_print("\n");
 
     cpus[0].lapic_id = bsp_id;
@@ -104,7 +116,7 @@ void smp_discover_cores(void) {
 
     // 2. Locate MADT
     // rsdp->rsdt_addr is physical, convert to virtual
-    if (rsdp->rsdt_addr >= EARLY_DIRECTMAP_LIMIT) {
+    if (rsdp->rsdt_addr >= map_limit) {
         early_uart_print("SMP: RSDT above early map, falling back to UP.\n");
         return;
     }
@@ -121,7 +133,7 @@ void smp_discover_cores(void) {
     struct acpi_header *madt = NULL;
     for (int i = 0; i < entries; i++) {
         // ptrs[i] contains physical address of a table
-        if (ptrs[i] >= EARLY_DIRECTMAP_LIMIT) {
+        if (ptrs[i] >= map_limit) {
             continue;
         }
         struct acpi_header *h = (struct acpi_header*)P2V(ptrs[i]);
@@ -167,25 +179,28 @@ void smp_discover_cores(void) {
         p += length;
     }
 
-    char buf[32];
-    char *c = buf + 31;
-    *c = 0;
-    int n = cpu_count;
-    do { *--c = '0' + (n % 10); n /= 10; } while(n);
-
     early_uart_print("SMP: Detected CPU count: ");
-    early_uart_print(c);
+    smp_emit_u32(early_uart_print, (uint32_t)cpu_count);
     early_uart_print("\n");
 }
 
 extern void trampoline_start(void);
 extern void trampoline_end(void);
+extern void trampoline_cr3(void);
+extern void trampoline_cr4(void);
+extern void trampoline_cr0(void);
+extern void trampoline_stack(void);
+extern void trampoline_entry(void);
 
 #define TRAMPOLINE_ADDR 0x8000
 
 // Per-AP stack (static for now, should be dynamically allocated per AP)
 static char ap_stacks[MAX_CPUS][4096] __attribute__((aligned(16)));
 static volatile int aps_ready = 0;
+
+static uint32_t trampoline_offset(void *symbol) {
+    return (uint32_t)((uintptr_t)symbol - (uintptr_t)&trampoline_start);
+}
 
 void smp_ap_entry(void) {
     // 1. Initialize AP-local state (GDT, TSS, IDT)
@@ -210,10 +225,7 @@ void smp_ap_entry(void) {
     kprint("SMP: AP Core online (LAPIC ID: ");
     // Get and print LAPIC ID
     uint32_t id = lapic_get_id();
-    char buf[4];
-    buf[0] = '0' + (id % 10);
-    buf[1] = '\0';
-    kprint(buf);
+    smp_emit_u32(kprint, id);
     kprint(")\n");
     
     // Enable LAPIC on this AP
@@ -235,10 +247,12 @@ int smp_boot_ap(uint8_t apic_id) {
     size_t len = (uintptr_t)trampoline_end - (uintptr_t)trampoline_start;
     memcpy((void*)TRAMPOLINE_ADDR, (void*)trampoline_start, len);
 
-    // 2. Set stack and entry point in trampoline
-    // Find offsets (they're at the end of the trampoline)
-    uint32_t *stk_ptr = (uint32_t*)(TRAMPOLINE_ADDR + len - 8);
-    uint32_t *ent_ptr = (uint32_t*)(TRAMPOLINE_ADDR + len - 4);
+    // 2. Patch the copied trampoline with the live paging and stack state.
+    uint32_t *cr3_ptr = (uint32_t*)(TRAMPOLINE_ADDR + trampoline_offset((void*)&trampoline_cr3));
+    uint32_t *cr4_ptr = (uint32_t*)(TRAMPOLINE_ADDR + trampoline_offset((void*)&trampoline_cr4));
+    uint32_t *cr0_ptr = (uint32_t*)(TRAMPOLINE_ADDR + trampoline_offset((void*)&trampoline_cr0));
+    uint32_t *stk_ptr = (uint32_t*)(TRAMPOLINE_ADDR + trampoline_offset((void*)&trampoline_stack));
+    uint32_t *ent_ptr = (uint32_t*)(TRAMPOLINE_ADDR + trampoline_offset((void*)&trampoline_entry));
     
     // Find CPU index for this APIC ID
     int cpu_idx = -1;
@@ -270,11 +284,19 @@ int smp_boot_ap(uint8_t apic_id) {
         idle->priority = 0;
         idle->sched_class = SCHED_IDLE;
         idle->proc = &processes[0]; // Ensure it belongs to kernel process
+        idle->bound_cpu = cpu_idx;
 
         pcpu->idle = idle;
         pcpu->current = idle;
     }
 
+    uint32_t cr0, cr4;
+    __asm__ volatile("mov %%cr0, %0" : "=r"(cr0));
+    __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+
+    *cr3_ptr = pmap_kernel()->pdir_phys;
+    *cr4_ptr = cr4;
+    *cr0_ptr = cr0;
     *stk_ptr = (uint32_t)&ap_stacks[cpu_idx][4096];
     *ent_ptr = (uint32_t)smp_ap_entry;
 
@@ -306,10 +328,7 @@ int smp_boot_ap(uint8_t apic_id) {
     }
     
     kprint("SMP: AP ");
-    char buf[4];
-    buf[0] = '0' + (apic_id % 10);
-    buf[1] = '\0';
-    kprint(buf);
+    smp_emit_u32(kprint, apic_id);
     kprint(" did not respond!\n");
     return -1;
 }
@@ -317,22 +336,23 @@ int smp_boot_ap(uint8_t apic_id) {
 // Boot all APs
 void smp_boot_all_aps(void) {
     kprint("SMP: Booting ");
-    char buf[4];
     int ap_count = cpu_count - 1;  // Exclude BSP
-    buf[0] = '0' + (ap_count % 10);
-    buf[1] = '\0';
-    kprint(buf);
+    smp_emit_u32(kprint, (uint32_t)ap_count);
     kprint(" Application Processor(s)...\n");
     
     for (int i = 1; i < cpu_count; i++) {  // Skip BSP (index 0)
         smp_boot_ap(cpus[i].lapic_id);
     }
-    
+
+    cpu_count = aps_ready + 1;  // BSP + online APs
+
     kprint("SMP: ");
-    buf[0] = '0' + (aps_ready % 10);
-    buf[1] = '\0';
-    kprint(buf);
+    smp_emit_u32(kprint, (uint32_t)aps_ready);
     kprint(" AP(s) online.\n");
+
+    kprint("SMP: Brought up ");
+    smp_emit_u32(kprint, (uint32_t)cpu_count);
+    kprint(" CPU(s)!\n");
 }
 
 void smp_init(void) {

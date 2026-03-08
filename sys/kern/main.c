@@ -24,9 +24,11 @@
 #include <arch/i386/pmm.h>
 #include <arch/i386/pmap.h>
 #include <arch/i386/pci.h>
+#include <arch/i386/percpu.h>
 #include <arch/i386/smp.h>
 #include <arch/i386/syscall.h>
 #include <arch/i386/fpu/fpu_emu.h>
+#include <arch/x86-common/lapic.h>
 #include <arch/x86-common/rtc.h>
 #include <arch/x86-common/multiboot.h>
 #include <sys/freebsd_boot.h>
@@ -455,6 +457,9 @@ void kmain(unsigned long magic, unsigned long addr) {
     // Display kernel ident banner (mirrored if serial_debug_enabled)
     kprint(OS_NAME " kernel v" OS_VERSION " (i386)\n");
 
+    // Initialize per-CPU backing storage before CPU-local GDT/TSS setup.
+    percpu_init();
+
     // Initialize GDT
     gdt_init();
     kprint("GDT Initialized.\n");
@@ -471,6 +476,13 @@ void kmain(unsigned long magic, unsigned long addr) {
 
     // Initialize PMAP (Paging) - maps LAPIC and sets up recursive paging
     pmap_bootstrap();
+
+    // Re-run SMP discovery now that the full higher-half direct map exists.
+    smp_discover_cores();
+
+    // Initialize BSP LAPIC before any SMP bootstrap activity.
+    lapic_init();
+    lapic_enable(0xFF);
     
     // Map Signal Trampoline Page (VDSO)
     extern void pmap_map_trampoline(void);
@@ -492,6 +504,11 @@ void kmain(unsigned long magic, unsigned long addr) {
     // Initialize Scheduler
     sched_init();
     kprint("Scheduler Initialized.\n");
+
+    if (smp_get_cpu_count() > 1) {
+        smp_boot_all_aps();
+        sched_smp_init(smp_get_cpu_count());
+    }
 
     // Start VM background workers now that kernel threads can run.
     vm_page_late_init();
