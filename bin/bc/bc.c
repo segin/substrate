@@ -1130,7 +1130,7 @@ void set_arr_val(const char *name, int idx, bc_num *val) {
     g->array[idx] = bc_dup(val);
 }
 
-// TODO eval function
+// Evaluation State
 int is_returning = 0;
 bc_num *ret_val = NULL;
 int is_breaking = 0;
