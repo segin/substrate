@@ -350,11 +350,11 @@
                 - [x] `pmap_check(pmap)`: consistency verification (detect leaked pages, orphan PTs). (REQ: REQ-01-0307)
                 - [x] Export stats via syscall (`sys_pmap_stats`). (REQ: REQ-01-0308)
 
-            - [ ] **Page Aging Algorithm Integration:** (REQ: REQ-01-0309)
+            - [x] **Page Aging Algorithm Integration:** (REQ: REQ-01-0309)
                 - [x] Periodic scanning of all resident pages. (REQ: REQ-01-0310)
                 - [x] Decrement age counter if not referenced. (REQ: REQ-01-0311)
                 - [x] Pages with age 0 become eviction candidates. (REQ: REQ-01-0312)
-                - [ ] Support for multiple aging policies (Clock, LRU approximation). (REQ: REQ-01-0313)
+                - [x] Support for multiple aging policies (Clock, LRU approximation). (REQ: REQ-01-0313)
                 - [x] Hardware A/D bit emulation not needed on x86 (native support). (REQ: REQ-01-0314)
 
             - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)

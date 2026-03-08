@@ -244,6 +244,44 @@ static void test_age_scan_deactivates_cold_page(void) {
     TEST_PASS("age_scan_deactivates_cold_page");
 }
 
+/* Test: policy switch changes active-page scan behavior */
+static void test_page_policy_switching(void) {
+    vm_page_t *clock_page = vm_page_alloc(NULL, 0, 0);
+    vm_page_t *lru_page = vm_page_alloc(NULL, 0, 0);
+    vm_page_policy_t saved_policy = vm_page_get_policy();
+
+    TEST_ASSERT(clock_page != NULL && lru_page != NULL,
+                "policy_switch: alloc failed");
+
+    clock_page->flags &= ~PG_BUSY;
+    lru_page->flags &= ~PG_BUSY;
+
+    vm_page_set_policy(VM_PAGE_POLICY_CLOCK);
+    vm_page_activate(clock_page);
+    clock_page->age = 2;
+    TEST_ASSERT(vm_pageout_scan(1) == 1,
+                "policy_switch: CLOCK should deactivate cold page immediately");
+    TEST_ASSERT(clock_page->flags & PG_INACTIVE,
+                "policy_switch: CLOCK page not inactive");
+
+    vm_page_set_policy(VM_PAGE_POLICY_LRU_APPROX);
+    vm_page_activate(lru_page);
+    lru_page->age = 2;
+    TEST_ASSERT(vm_pageout_scan(1) == 0,
+                "policy_switch: LRU should keep page active on first scan");
+    TEST_ASSERT((lru_page->flags & PG_ACTIVE) != 0 && lru_page->age == 1,
+                "policy_switch: LRU did not decrement age in place");
+    TEST_ASSERT(vm_pageout_scan(1) == 1,
+                "policy_switch: LRU should deactivate page on second scan");
+    TEST_ASSERT(lru_page->flags & PG_INACTIVE,
+                "policy_switch: LRU page not inactive after second scan");
+
+    vm_page_set_policy(saved_policy);
+    vm_page_free(clock_page);
+    vm_page_free(lru_page);
+    TEST_PASS("page_policy_switching");
+}
+
 /* Property: no page appears on two queues simultaneously */
 static void test_queue_integrity_checker(void) {
     vm_page_t *active = vm_page_alloc(NULL, 0, 0);
@@ -428,6 +466,7 @@ void test_vm_page_queue(void) {
     test_inactive_age0_evictable();
     test_get_stats();
     test_age_scan_deactivates_cold_page();
+    test_page_policy_switching();
     test_pageout_threshold_trigger();
     test_queue_integrity_checker();
     test_queue_accounting_invariant();

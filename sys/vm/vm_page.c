@@ -37,6 +37,7 @@ static uint32_t vm_stat_reactivations = 0;
 
 // Wakeup flag for daemon
 static volatile int vm_pages_needed = 0;
+static vm_page_policy_t vm_page_policy = VM_PAGE_POLICY_CLOCK;
 
 void vm_page_init(void) {
 	// Initialize queues
@@ -214,6 +215,19 @@ int vm_page_check_queues(void) {
 	return 1;
 }
 
+void vm_page_set_policy(vm_page_policy_t policy) {
+	if (policy != VM_PAGE_POLICY_CLOCK &&
+	    policy != VM_PAGE_POLICY_LRU_APPROX) {
+		return;
+	}
+
+	vm_page_policy = policy;
+}
+
+vm_page_policy_t vm_page_get_policy(void) {
+	return vm_page_policy;
+}
+
 static void vm_page_tune_thresholds(void) {
 	size_t total_pages = vm_phys_get_free() + vm_phys_get_used();
 
@@ -256,7 +270,9 @@ static void vm_pagedaemon(void *arg) {
 	for (;;) {
 		uint64_t deadline = get_ticks() + get_hz();
 		sched_sleep_until((void *)&vm_pages_needed, deadline);
-		vm_page_age_scan();
+		if (vm_page_policy == VM_PAGE_POLICY_LRU_APPROX) {
+			vm_page_age_scan();
+		}
 		if (vm_pages_needed || vm_page_should_pageout()) {
 			vm_pageout();
 		}
@@ -547,9 +563,7 @@ void vm_page_unhold(vm_page_t *m) {
 	// still be cached in inactive queue for potential reuse
 }
 
-// LRU scanner: Walk active queue and move unreferenced pages to inactive
-// Returns number of pages deactivated
-int vm_pageout_scan(int max_scan) {
+static int vm_pageout_scan_clock(int max_scan) {
 	int scanned = 0;
 	int deactivated = 0;
 
@@ -586,6 +600,52 @@ int vm_pageout_scan(int max_scan) {
 	}
 
 	return(deactivated);
+}
+
+static int vm_pageout_scan_lru(int max_scan) {
+	int scanned = 0;
+	int deactivated = 0;
+	vm_page_t *m = active_queue;
+
+	while (m && scanned < max_scan) {
+		vm_page_t *next = m->next;
+		scanned++;
+
+		if (m->wire_count > 0) {
+			m = next;
+			continue;
+		}
+
+		if (pmap_page_is_referenced(m)) {
+			pmap_page_clear_reference(m);
+			m->age = VM_PAGE_AGE_MAX;
+			dequeue(&active_queue, m);
+			enqueue(&active_queue, m);
+			m->flags |= PG_ACTIVE;
+		} else if (m->age > 1) {
+			m->age--;
+		} else {
+			m->age = 0;
+			dequeue(&active_queue, m);
+			m->flags &= ~PG_ACTIVE;
+			enqueue(&inactive_queue, m);
+			m->flags |= PG_INACTIVE;
+			deactivated++;
+		}
+
+		m = next;
+	}
+
+	return deactivated;
+}
+
+// Active queue scanner: CLOCK by default, or age-based LRU approximation when selected.
+int vm_pageout_scan(int max_scan) {
+	if (vm_page_policy == VM_PAGE_POLICY_LRU_APPROX) {
+		return vm_pageout_scan_lru(max_scan);
+	}
+
+	return vm_pageout_scan_clock(max_scan);
 }
 
 // ==================== Page Daemon ====================
