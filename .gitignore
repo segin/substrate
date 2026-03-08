@@ -224,6 +224,8 @@ bin/native_test/native_test_standalone
 
 # usr.bin tool binaries
 usr.bin/addr2line/addr2line
+usr.bin/compress/compress
+usr.bin/compress/zcat
 usr.bin/cxxfilt/c++filt
 usr.bin/lex/test_posix
 usr.bin/size/size
@@ -239,6 +241,9 @@ usr.bin/as/arm-as
 usr.man/mandoc.db
 tests/bin/ps/test_ps_state
 /tests/test_libpthread_mutex
+/tests/test_ext2_find_next_zero_bit
+/tests/test_ext2_inode_write
+/tests/test_ext2_read_blocks
 tests/lib/c/test_stdlib
 tests/test_readline
 sys/ksyms_table.c
