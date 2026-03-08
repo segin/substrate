@@ -1004,7 +1004,7 @@
             - [x] Unit: SA_RESTART — interrupted syscall restarted. (REQ: REQ-01-0848)
             - [x] Unit: SA_SIGINFO — extended frame with siginfo + ucontext. (REQ: REQ-01-0849)
             - [x] Property: SIGKILL/SIGSTOP cannot be caught, blocked, or ignored (verify invariant). (REQ: REQ-01-0850)
-            - [ ] Integration: fork, send SIGINT to child, verify termination. (REQ: REQ-01-0851)
+            - [x] Integration: fork, send SIGINT to child, verify termination. (REQ: REQ-01-0851)
             - [x] Integration: job control stop/continue cycle. (REQ: REQ-01-0852)
         - [ ] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
             - [x] Internal doc: signal lifecycle (generation → delivery → handler → sigreturn). (REQ: REQ-01-0854)
