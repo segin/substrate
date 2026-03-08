@@ -127,6 +127,7 @@ static int is_x86_register_name(const char *s) {
         "rip", "eip", "ip",
         "cs", "ds", "es", "fs", "gs", "ss",
         "st", "mm0", "mm1", "mm2", "mm3", "mm4", "mm5", "mm6", "mm7",
+        "bnd0", "bnd1", "bnd2", "bnd3",
     };
     size_t i;
 
@@ -164,6 +165,17 @@ static int is_x86_register_name(const char *s) {
             return 1;
         }
     }
+    if (((s[0] == 'c' || s[0] == 'C' || s[0] == 'd' || s[0] == 'D' || s[0] == 't' || s[0] == 'T') &&
+         (s[1] == 'r' || s[1] == 'R') && isdigit((unsigned char)s[2])) ||
+        ((s[0] == 'd' || s[0] == 'D') && (s[1] == 'b' || s[1] == 'B') && isdigit((unsigned char)s[2]))) {
+        const char *p = s + 2;
+        while (isdigit((unsigned char)*p)) {
+            ++p;
+        }
+        if (*p == '\0') {
+            return 1;
+        }
+    }
     if (s[0] == 'k' && isdigit((unsigned char)s[1])) {
         const char *p = s + 1;
         while (isdigit((unsigned char)*p)) {
@@ -174,6 +186,40 @@ static int is_x86_register_name(const char *s) {
         }
     }
     return 0;
+}
+
+static int is_x86_segment_selector_name(const char *s) {
+    return s != NULL &&
+           (strcmp(s, "cs") == 0 || strcmp(s, "ds") == 0 || strcmp(s, "es") == 0 ||
+            strcmp(s, "fs") == 0 || strcmp(s, "gs") == 0 || strcmp(s, "ss") == 0);
+}
+
+static int token_looks_like_segment_prefix(const char *tok) {
+    size_t n;
+    const char *base;
+    char tmp[8];
+
+    if (tok == NULL) {
+        return 0;
+    }
+    n = strlen(tok);
+    if (n < 2 || tok[n - 1] != ':') {
+        return 0;
+    }
+    base = tok;
+    if (*base == '%') {
+        base++;
+    }
+    n = strlen(base);
+    if (n < 2 || base[n - 1] != ':') {
+        return 0;
+    }
+    if (n - 1 >= sizeof(tmp)) {
+        return 0;
+    }
+    memcpy(tmp, base, n - 1);
+    tmp[n - 1] = '\0';
+    return is_x86_segment_selector_name(tmp);
 }
 
 static int is_arm_like_register_name(const char *s) {
@@ -547,6 +593,14 @@ static int tokenize_line(const char *file, unsigned line_no, const char *line, i
         if (line[i] == '\0') {
             break;
         }
+        if (strncmp(line + i, "{vex}", 6) == 0) {
+            i += 6;
+            continue;
+        }
+        if (strncmp(line + i, "{evex}", 7) == 0) {
+            i += 7;
+            continue;
+        }
         if (is_punct_delim((unsigned char)line[i])) {
             char punct[2];
 
@@ -651,7 +705,7 @@ static int tokenize_line(const char *file, unsigned line_no, const char *line, i
             memcpy(tok, line + start, n);
             tok[n] = '\0';
 
-            if (n > 0 && tok[n - 1] == ':') {
+            if (n > 0 && tok[n - 1] == ':' && token_looks_like_segment_prefix(tok) == 0) {
                 tok[n - 1] = '\0';
                 kind = AS_TOK_LABEL;
             } else {
@@ -731,6 +785,16 @@ static int lex_file_internal(lex_ctx_t *ctx, const char *path, unsigned depth) {
 
         for (i = 0; i < line_tokens.count; ++i) {
             as_token_t *t = &line_tokens.items[i];
+            if (i + 2 < line_tokens.count &&
+                line_tokens.items[i].kind == AS_TOK_PUNCT &&
+                strcmp(line_tokens.items[i].text, "{") == 0 &&
+                (line_tokens.items[i + 1].kind == AS_TOK_IDENTIFIER || line_tokens.items[i + 1].kind == AS_TOK_REGISTER) &&
+                line_tokens.items[i + 2].kind == AS_TOK_PUNCT &&
+                strcmp(line_tokens.items[i + 2].text, "}") == 0 &&
+                (strcmp(line_tokens.items[i + 1].text, "vex") == 0 || strcmp(line_tokens.items[i + 1].text, "evex") == 0)) {
+                i += 2;
+                continue;
+            }
             if (as_token_vec_push(ctx->out, t->kind, t->text, t->file, t->line, t->col) != 0) {
                 set_err(ctx, "%s:%u: out of memory", path, line_no);
                 as_token_vec_free(&line_tokens);
@@ -804,6 +868,32 @@ int as_lex_file(const char *path, const as_lexer_cfg_t *cfg, as_token_vec_t *out
     }
 
     rc = lex_file_internal(&ctx, path, 0);
+    if (rc == 0 && out != NULL && out->items != NULL) {
+        size_t i;
+        size_t w = 0;
+
+        for (i = 0; i < out->count; ++i) {
+            if (i + 2 < out->count &&
+                out->items[i].kind == AS_TOK_PUNCT &&
+                strcmp(out->items[i].text, "{") == 0 &&
+                (out->items[i + 1].kind == AS_TOK_IDENTIFIER || out->items[i + 1].kind == AS_TOK_REGISTER) &&
+                out->items[i + 2].kind == AS_TOK_PUNCT &&
+                strcmp(out->items[i + 2].text, "}") == 0 &&
+                (strcmp(out->items[i + 1].text, "vex") == 0 || strcmp(out->items[i + 1].text, "evex") == 0)) {
+                as_token_free(&out->items[i]);
+                as_token_free(&out->items[i + 1]);
+                as_token_free(&out->items[i + 2]);
+                i += 2;
+                continue;
+            }
+            if (w != i) {
+                out->items[w] = out->items[i];
+                memset(&out->items[i], 0, sizeof(out->items[i]));
+            }
+            ++w;
+        }
+        out->count = w;
+    }
 
     while (ctx.include_stack_count > 0) {
         free(ctx.include_stack[ctx.include_stack_count - 1]);

@@ -300,6 +300,22 @@ static int is_x86_register_text(const char *s) {
         }
         return *p == '\0';
     }
+    if (strncasecmp(s, "bnd", 3) == 0 && isdigit((unsigned char)s[3])) {
+        p = s + 3;
+        while (isdigit((unsigned char)*p)) {
+            ++p;
+        }
+        return *p == '\0';
+    }
+    if (((s[0] == 'c' || s[0] == 'C' || s[0] == 'd' || s[0] == 'D' || s[0] == 't' || s[0] == 'T') &&
+         (s[1] == 'r' || s[1] == 'R') && isdigit((unsigned char)s[2])) ||
+        ((s[0] == 'd' || s[0] == 'D') && (s[1] == 'b' || s[1] == 'B') && isdigit((unsigned char)s[2]))) {
+        p = s + 2;
+        while (isdigit((unsigned char)*p)) {
+            ++p;
+        }
+        return *p == '\0';
+    }
     if (s[0] == 'r' && isdigit((unsigned char)s[1])) {
         p = s + 1;
         while (isdigit((unsigned char)*p)) {
@@ -1572,6 +1588,9 @@ static int prefix_flag_for(const char *s, char **segment_override) {
     if (streq_ci(s, "lock")) {
         return AS_PREFIX_LOCK;
     }
+    if (streq_ci(s, "bnd")) {
+        return AS_PREFIX_REPNE;
+    }
     if (streq_ci(s, "rep")) {
         return AS_PREFIX_REP;
     }
@@ -1583,6 +1602,12 @@ static int prefix_flag_for(const char *s, char **segment_override) {
     }
     if (streq_ci(s, "rex") || streq_ci(s, "rex.w") || streq_ci(s, "rex.r") || streq_ci(s, "rex.x") || streq_ci(s, "rex.b")) {
         return AS_PREFIX_REX;
+    }
+    if (streq_ci(s, "data16")) {
+        return AS_PREFIX_DATA16;
+    }
+    if (streq_ci(s, "addr16")) {
+        return AS_PREFIX_ADDR16;
     }
 
     if (streq_ci(s, "cs") || streq_ci(s, "%cs") || streq_ci(s, "ds") || streq_ci(s, "%ds") || streq_ci(s, "es") ||
@@ -1608,6 +1633,14 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
 
     i = 0;
     while (i < n) {
+        if (i + 2 < n &&
+            tokv[i].text != NULL && strcmp(tokv[i].text, "{") == 0 &&
+            tokv[i + 1].text != NULL &&
+            tokv[i + 2].text != NULL && strcmp(tokv[i + 2].text, "}") == 0 &&
+            (streq_ci(tokv[i + 1].text, "vex") || streq_ci(tokv[i + 1].text, "evex"))) {
+            i += 3;
+            continue;
+        }
         int pf = prefix_flag_for(tokv[i].text, &in.segment_override);
         if (pf == 0) {
             break;
@@ -1709,6 +1742,13 @@ static int parse_line_tokens(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
     }
 
     i = 0;
+    while (i + 2 < n &&
+           tokv[i].text != NULL && strcmp(tokv[i].text, "{") == 0 &&
+           tokv[i + 1].text != NULL &&
+           tokv[i + 2].text != NULL && strcmp(tokv[i + 2].text, "}") == 0 &&
+           (streq_ci(tokv[i + 1].text, "vex") || streq_ci(tokv[i + 1].text, "evex"))) {
+        i += 3;
+    }
     while (i < n && tokv[i].kind == AS_TOK_LABEL) {
         if (push_label(st, tokv[i].text, tokv[i].file, tokv[i].line) != 0) {
             return -1;
@@ -1864,6 +1904,7 @@ int as_parse_tokens(const as_token_vec_t *tokens, const as_parser_cfg_t *cfg,
     i = 0;
     while (i < tokens->count) {
         size_t j = i + 1;
+        size_t start = i;
         as_stmt_t st;
 
         while (j < tokens->count && tokens->items[j].line == tokens->items[i].line &&
@@ -1871,9 +1912,17 @@ int as_parse_tokens(const as_token_vec_t *tokens, const as_parser_cfg_t *cfg,
             j++;
         }
 
-        if (parse_line_tokens(&ctx, tokens->items + i, j - i, &st) != 0) {
+        while (start + 2 < j &&
+               tokens->items[start].text != NULL && strcmp(tokens->items[start].text, "{") == 0 &&
+               tokens->items[start + 1].text != NULL &&
+               tokens->items[start + 2].text != NULL && strcmp(tokens->items[start + 2].text, "}") == 0 &&
+               (streq_ci(tokens->items[start + 1].text, "vex") || streq_ci(tokens->items[start + 1].text, "evex"))) {
+            start += 3;
+        }
+
+        if (parse_line_tokens(&ctx, tokens->items + start, j - start, &st) != 0) {
             if (ctx.errbuf != NULL && ctx.errbuf_sz > 0 && ctx.errbuf[0] == '\0') {
-                set_err(&ctx, "%s:%u: parse error", tokens->items[i].file, tokens->items[i].line);
+                set_err(&ctx, "%s:%u: parse error", tokens->items[start].file, tokens->items[start].line);
             }
             free_stmt(&st);
             free_local_defs(&ctx.local_defs);

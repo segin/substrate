@@ -752,6 +752,10 @@ static int collect_instruction_refs(sym_ctx_t *ctx, const as_stmt_t *st) {
     return 0;
 }
 
+static int is_numeric_local_label_name(const char *name) {
+    return name != NULL && name[0] >= '0' && name[0] <= '9' && name[1] == '\0';
+}
+
 int as_symtab_build(const as_parse_result_t *parsed, as_symtab_t *tab,
                     char *errbuf, size_t errbuf_sz) {
     sym_ctx_t ctx;
@@ -776,8 +780,12 @@ int as_symtab_build(const as_parse_result_t *parsed, as_symtab_t *tab,
 
         for (j = 0; j < st->label_count; ++j) {
             const as_label_def_t *l = &st->labels[j];
-            as_symbol_t *sym = get_or_create_symbol(&ctx, l->name);
+            as_symbol_t *sym;
             int rc;
+            if (is_numeric_local_label_name(l->name)) {
+                continue;
+            }
+            sym = get_or_create_symbol(&ctx, l->name);
             if (sym == NULL) {
                 set_err(&ctx, "%s:%u: out of memory", st->file, st->line);
                 return -1;

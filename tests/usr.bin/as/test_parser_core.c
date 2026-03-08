@@ -169,6 +169,24 @@ static void verify_x86(const char *path) {
         fail("intel qword ptr qualifier parse failed");
     }
 
+    st = find_instr(&parsed, 19, "insb");
+    if (st == NULL || st->u.instr.syntax_intel != 0 || st->u.instr.operand_count != 2 ||
+        st->u.instr.operands[0].kind != AS_OPERAND_MEMORY || st->u.instr.operands[1].kind != AS_OPERAND_MEMORY ||
+        st->u.instr.operands[1].u.mem.segment_reg == NULL ||
+        strcmp(st->u.instr.operands[1].u.mem.segment_reg, "es") != 0 ||
+        st->u.instr.operands[1].u.mem.base_reg == NULL || strcmp(st->u.instr.operands[1].u.mem.base_reg, "edi") != 0) {
+        fail("att insb segment destination parse failed");
+    }
+
+    st = find_instr(&parsed, 20, "outsb");
+    if (st == NULL || st->u.instr.syntax_intel != 0 || st->u.instr.operand_count != 2 ||
+        st->u.instr.operands[0].kind != AS_OPERAND_MEMORY || st->u.instr.operands[1].kind != AS_OPERAND_MEMORY ||
+        st->u.instr.operands[0].u.mem.segment_reg == NULL ||
+        strcmp(st->u.instr.operands[0].u.mem.segment_reg, "ds") != 0 ||
+        st->u.instr.operands[0].u.mem.base_reg == NULL || strcmp(st->u.instr.operands[0].u.mem.base_reg, "esi") != 0) {
+        fail("att outsb segment source parse failed");
+    }
+
     as_parse_result_free(&parsed);
     as_token_vec_free(&toks);
 }

@@ -119,6 +119,8 @@ typedef struct {
 #define AS_PREFIX_REPNE (1u << 3)
 #define AS_PREFIX_SEG_OVERRIDE (1u << 4)
 #define AS_PREFIX_REX (1u << 5)
+#define AS_PREFIX_DATA16 (1u << 6)
+#define AS_PREFIX_ADDR16 (1u << 7)
 
 typedef struct {
     char *mnemonic;

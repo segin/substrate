@@ -24,6 +24,9 @@ mov %gs:4(%ebx), %ecx
 .intel_syntax noprefix
 mov ax, word ptr [ebx + 2]
 mov eax, qword ptr [ebx + 16]
+.att_syntax prefix
+insb (%dx),%es:(%edi)
+outsb %ds:(%esi),(%dx)
 SRC
 
 cat > "$TMP/arm.s" <<'SRC'
