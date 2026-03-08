@@ -30,7 +30,7 @@ UNIT_OBJS = $(notdir $(UNIT_SRCS:.c=.o))
 
 MOCKS_OBJ = mocks.o
 
-all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_libc_sysctl test_ext2_remove_perf bench_ext2_readdir test_libpthread_mutex test_pthread_join test_readline test_history test_bc test_libedit
+all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_libc_sysctl test_ext2_remove_perf bench_ext2_readdir test_libpthread_mutex test_pthread_join test_readline test_history test_bc test_libedit host_test_wait_logic
 	./test_runner
 	./test_minix
 	./test_ext2_perf
@@ -48,12 +48,16 @@ all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_
 	./test_readline
 	./test_libedit
 	./test_bc
+	./host_test_wait_logic
 
 test_readline: lib/edit/test_readline.c ../lib/edit/readline.c
 	$(CC) $(CFLAGS_COMMON) -I../lib/edit $< -o $@
 
 test_libedit: lib/edit/test_editline.c ../lib/edit/editline.c
 	$(CC) $(CFLAGS_COMMON) -I../include -I../lib/edit $< ../lib/edit/editline.c -o $@
+
+host_test_wait_logic: sys/host_test_wait_logic.c
+	$(CC) $(CFLAGS_KERN) $< -o $@
 
 # Duplicate rule removed
 
@@ -172,7 +176,7 @@ string_prefixed.o: ../lib/c/src/string.c
 	objcopy --prefix-symbols=libc_ string_raw.o string_prefixed.o
 
 clean:
-	rm -f *.o test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir test_libpthread_mutex test_pthread_join test_readline test_libedit test_bc
+	rm -f *.o test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir test_libpthread_mutex test_pthread_join test_readline test_libedit test_bc host_test_wait_logic
 	$(MAKE) -C sys clean
 	$(MAKE) -C lib/edit clean
 
