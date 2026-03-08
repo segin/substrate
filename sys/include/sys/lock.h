@@ -44,4 +44,23 @@ void sema_wait(semaphore_t *s);
 void sema_post(semaphore_t *s);
 int  sema_getvalue(semaphore_t *s);
 
+// Reader/writer lock
+typedef struct {
+    spinlock_t lock;
+    uint32_t readers;
+    uint32_t writer;
+    uint32_t waiting_writers;
+    void *owner; // thread_t* for write ownership
+    const char *name;
+} rwlock_t;
+
+void rwlock_init(rwlock_t *rw, const char *name);
+void rw_rlock(rwlock_t *rw);
+bool rw_try_rlock(rwlock_t *rw);
+void rw_runlock(rwlock_t *rw);
+void rw_wlock(rwlock_t *rw);
+bool rw_try_wlock(rwlock_t *rw);
+void rw_wunlock(rwlock_t *rw);
+bool rw_wowned(rwlock_t *rw);
+
 #endif

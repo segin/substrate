@@ -1,7 +1,7 @@
 # Kernel Locking Specification
 
 ## Overview
-Substrate provides a small kernel locking set built from spinlocks, sleepqueue-backed mutexes, and counting semaphores.
+Substrate provides a small kernel locking set built from spinlocks, sleepqueue-backed mutexes, counting semaphores, and sleepqueue-backed reader/writer locks.
 
 ## Design
 - **Structure (`spinlock_t`):**
@@ -74,7 +74,47 @@ Increments the semaphore value and wakes up one waiting thread.
 ### `int sema_getvalue(semaphore_t *s)`
 Returns the current value of the semaphore.
 
+## Reader/Writer Locks
+Reader/writer locks allow concurrent shared readers or one exclusive writer.
+
+## Design
+- **Structure (`rwlock_t`):**
+    - `spinlock_t lock`: Protects the lock state.
+    - `uint32_t readers`: Current shared-reader count.
+    - `uint32_t writer`: Nonzero while an exclusive writer holds the lock.
+    - `uint32_t waiting_writers`: Count of queued writers.
+    - `void *owner`: Pointer to the writer thread while write-held.
+    - `const char *name`: Identifier for debugging.
+- **Policy:** writer-preferred. New readers block while an exclusive owner is active or queued writers are waiting.
+- **Blocking:** readers sleep on the reader wait channel; writers sleep on the writer wait channel.
+- **Wakeup:** last reader wakes one queued writer; writer unlock wakes a queued writer first, otherwise wakes all readers.
+
+## API
+### `void rwlock_init(rwlock_t *rw, const char *name)`
+Initializes a new reader/writer lock.
+
+### `void rw_rlock(rwlock_t *rw)`
+Acquires the lock in shared mode, blocking behind active or queued writers.
+
+### `void rw_runlock(rwlock_t *rw)`
+Releases one shared reader reference.
+
+### `void rw_wlock(rwlock_t *rw)`
+Acquires the lock in exclusive mode.
+
+### `void rw_wunlock(rwlock_t *rw)`
+Releases the exclusive writer and wakes the next waiter set according to writer preference.
+
+### `bool rw_try_rlock(rwlock_t *rw)`
+Attempts a non-blocking shared acquisition.
+
+### `bool rw_try_wlock(rwlock_t *rw)`
+Attempts a non-blocking exclusive acquisition.
+
+### `bool rw_wowned(rwlock_t *rw)`
+Returns true if the current thread owns the lock in exclusive mode.
+
 ## Constraints
 - Safe for use in kernel mode.
 - Not safe for interrupt context if it leads to blocking.
-- Reader/writer locks are not implemented in this subsystem yet.
+- Reader/writer locks currently provide writer preference and exclusive-owner checks, but do not yet include upgrade/downgrade operations.

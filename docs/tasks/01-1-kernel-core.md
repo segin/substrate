@@ -786,13 +786,13 @@
             - [x] Internal doc: MLFQ algorithm and priority classes. (REQ: REQ-01-0655)
             - [x] Internal doc: SMP load balancing and work stealing. (REQ: REQ-01-0656)
 
-    - [ ] **Synchronization:** (REQ: REQ-01-0613, REQ-01-0657)
+    - [x] **Synchronization:** (REQ: REQ-01-0613, REQ-01-0657)
 
-        - [ ] **Kernel Primitives:** (REQ: REQ-01-0658)
+        - [x] **Kernel Primitives:** (REQ: REQ-01-0658)
             - [x] Spinlocks (with GCC C11 atomic builtins). (REQ: REQ-01-0659)
             - [x] Mutexes (backed by sleep queues). (REQ: REQ-01-0660)
             - [x] Semaphores (counting, backed by sleep queues). (REQ: REQ-01-0661)
-            - [ ] Reader/writer locks. (REQ: REQ-01-0662)
+            - [x] Reader/writer locks. (REQ: REQ-01-0662)
 
         - [x] **Userspace Synchronization (Futex):** (REQ: REQ-01-0663)
 
@@ -817,7 +817,7 @@
             - [x] **Performance:** (REQ: REQ-01-0680)
                 - [x] Hash table bucketing for futex wait queues via the sleepq subsystem (O(1) lookup by futex key). (REQ: REQ-01-0681)
                 - [x] Per-bucket spinlocks via the sleepq subsystem. (REQ: REQ-01-0682)
-            - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+            - [x] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
                 - [x] Unit: FUTEX_WAIT/WAKE basic handshake. (REQ: REQ-01-0684)
                 - [x] Unit: FUTEX_REQUEUE moves waiters correctly. (REQ: REQ-01-0685)
                 - [x] Unit: robust list cleanup on exit. (REQ: REQ-01-0686)
