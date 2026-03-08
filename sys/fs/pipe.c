@@ -6,13 +6,12 @@
 #include <string.h>
 #include <stddef.h>
 #include <sys/lock.h>
-#include <sys/errno.h>
 #include <kern/sleepq.h>
 
 #define PIPE_SIZE 4096
 
 typedef struct {
-    uint8_t  buffer[PIPE_SIZE];
+    uint8_t *buffer;
     uint32_t head;
     uint32_t tail;
     uint32_t count;
@@ -131,13 +130,27 @@ static void pipe_close(fs_node_t *node) {
     kfree(node, sizeof(*node));
 
     if (free_pipe) {
+        kfree(p->buffer, PIPE_SIZE);
         kfree(p, sizeof(*p));
     }
 }
 
 void pipe_create(fs_node_t **read_node, fs_node_t **write_node) {
     pipe_t *p = (pipe_t *)kmalloc(sizeof(pipe_t));
+    if (!p) {
+        *read_node = NULL;
+        *write_node = NULL;
+        return;
+    }
     memset(p, 0, sizeof(pipe_t));
+    p->buffer = (uint8_t *)kmalloc(PIPE_SIZE);
+    if (!p->buffer) {
+        kfree(p, sizeof(*p));
+        *read_node = NULL;
+        *write_node = NULL;
+        return;
+    }
+    memset(p->buffer, 0, PIPE_SIZE);
     p->wait_read = &p->head;
     p->wait_write = &p->tail;
     mutex_init(&p->lock, "pipe_lock");
@@ -146,13 +159,36 @@ void pipe_create(fs_node_t **read_node, fs_node_t **write_node) {
 
     pipe_endpoint_t *read_ep = (pipe_endpoint_t *)kmalloc(sizeof(pipe_endpoint_t));
     pipe_endpoint_t *write_ep = (pipe_endpoint_t *)kmalloc(sizeof(pipe_endpoint_t));
+    fs_node_t *rn = NULL;
+    fs_node_t *wn = NULL;
+    if (!read_ep || !write_ep) {
+        if (read_ep) kfree(read_ep, sizeof(*read_ep));
+        if (write_ep) kfree(write_ep, sizeof(*write_ep));
+        kfree(p->buffer, PIPE_SIZE);
+        kfree(p, sizeof(*p));
+        *read_node = NULL;
+        *write_node = NULL;
+        return;
+    }
     memset(read_ep, 0, sizeof(*read_ep));
     memset(write_ep, 0, sizeof(*write_ep));
     read_ep->pipe = p;
     write_ep->pipe = p;
     write_ep->is_writer = 1;
 
-    fs_node_t *rn = (fs_node_t *)kmalloc(sizeof(fs_node_t));
+    rn = (fs_node_t *)kmalloc(sizeof(fs_node_t));
+    wn = (fs_node_t *)kmalloc(sizeof(fs_node_t));
+    if (!rn || !wn) {
+        if (rn) kfree(rn, sizeof(*rn));
+        if (wn) kfree(wn, sizeof(*wn));
+        kfree(read_ep, sizeof(*read_ep));
+        kfree(write_ep, sizeof(*write_ep));
+        kfree(p->buffer, PIPE_SIZE);
+        kfree(p, sizeof(*p));
+        *read_node = NULL;
+        *write_node = NULL;
+        return;
+    }
     memset(rn, 0, sizeof(fs_node_t));
     strncpy(rn->name, "pipe_read", sizeof(rn->name) - 1);
     rn->name[sizeof(rn->name) - 1] = '\0';
@@ -161,7 +197,6 @@ void pipe_create(fs_node_t **read_node, fs_node_t **write_node) {
     rn->close = &pipe_close;
     rn->impl = (uintptr_t)read_ep;
 
-    fs_node_t *wn = (fs_node_t *)kmalloc(sizeof(fs_node_t));
     memset(wn, 0, sizeof(fs_node_t));
     strncpy(wn->name, "pipe_write", sizeof(wn->name) - 1);
     wn->name[sizeof(wn->name) - 1] = '\0';
