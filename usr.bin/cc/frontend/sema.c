@@ -1641,6 +1641,15 @@ typedef enum {
     BUILTIN_MEMCPY_CHK,
     BUILTIN_MEMMOVE_CHK,
     BUILTIN_MEMSET_CHK,
+    BUILTIN_HUGE_VAL,
+    BUILTIN_HUGE_VALF,
+    BUILTIN_HUGE_VALL,
+    BUILTIN_INF,
+    BUILTIN_INFF,
+    BUILTIN_INFL,
+    BUILTIN_NANF,
+    BUILTIN_NAN,
+    BUILTIN_NANL,
     BUILTIN_SYNC_FETCH_ADD,
     BUILTIN_SYNC_FETCH_SUB,
     BUILTIN_SYNC_SUB_AND_FETCH,
@@ -1763,6 +1772,33 @@ static builtin_kind_t builtin_kind(const char *name) {
     }
     if (strcmp(name, "__builtin___memset_chk") == 0) {
         return BUILTIN_MEMSET_CHK;
+    }
+    if (strcmp(name, "__builtin_huge_val") == 0) {
+        return BUILTIN_HUGE_VAL;
+    }
+    if (strcmp(name, "__builtin_huge_valf") == 0) {
+        return BUILTIN_HUGE_VALF;
+    }
+    if (strcmp(name, "__builtin_huge_vall") == 0) {
+        return BUILTIN_HUGE_VALL;
+    }
+    if (strcmp(name, "__builtin_inf") == 0) {
+        return BUILTIN_INF;
+    }
+    if (strcmp(name, "__builtin_inff") == 0) {
+        return BUILTIN_INFF;
+    }
+    if (strcmp(name, "__builtin_infl") == 0) {
+        return BUILTIN_INFL;
+    }
+    if (strcmp(name, "__builtin_nanf") == 0 || strcmp(name, "__builtin_nansf") == 0) {
+        return BUILTIN_NANF;
+    }
+    if (strcmp(name, "__builtin_nan") == 0 || strcmp(name, "__builtin_nans") == 0) {
+        return BUILTIN_NAN;
+    }
+    if (strcmp(name, "__builtin_nanl") == 0 || strcmp(name, "__builtin_nansl") == 0) {
+        return BUILTIN_NANL;
     }
     if (strcmp(name, "__sync_fetch_and_add") == 0) {
         return BUILTIN_SYNC_FETCH_ADD;
@@ -1898,7 +1934,7 @@ static long array_type_size_bytes(const cc_translation_unit_t *tu, cc_type_t t, 
     if (is_pointer_type(t)) {
         for (i = 0; i < array_ndim; ++i) {
             elem_type = ptr_base_type(elem_type);
-            if (elem_struct_id >= 0 && elem_type != CC_TYPE_VOID) {
+            if (elem_struct_id >= 0 && elem_type != CC_TYPE_VOID && !is_pointer_type(elem_type)) {
                 elem_struct_id = -1;
             }
         }
@@ -2662,6 +2698,30 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 return -1;
             }
             e->value_type = CC_TYPE_VOID;
+            e->struct_id = -1;
+            return 0;
+        }
+        if (bk == BUILTIN_HUGE_VAL || bk == BUILTIN_HUGE_VALF || bk == BUILTIN_HUGE_VALL ||
+            bk == BUILTIN_INF || bk == BUILTIN_INFF || bk == BUILTIN_INFL) {
+            if (e->arg_count != 0) {
+                set_diag(diag, "floating huge-value/infinity builtin expects no arguments");
+                return -1;
+            }
+            e->value_type = (bk == BUILTIN_HUGE_VALF || bk == BUILTIN_INFF) ? CC_TYPE_FLOAT :
+                            (bk == BUILTIN_HUGE_VALL || bk == BUILTIN_INFL) ? CC_TYPE_LDOUBLE : CC_TYPE_DOUBLE;
+            e->struct_id = -1;
+            return 0;
+        }
+        if (bk == BUILTIN_NANF || bk == BUILTIN_NAN || bk == BUILTIN_NANL) {
+            if (e->arg_count != 1) {
+                set_diag(diag, "floating NaN builtin expects exactly 1 argument");
+                return -1;
+            }
+            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            e->value_type = (bk == BUILTIN_NANF) ? CC_TYPE_FLOAT :
+                            (bk == BUILTIN_NANL) ? CC_TYPE_LDOUBLE : CC_TYPE_DOUBLE;
             e->struct_id = -1;
             return 0;
         }
@@ -4323,6 +4383,9 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
             next_member = struct_next_init_member(sd, member_idx);
         }
         if (sd->has_flexible_array && member_idx + 1 == sd->member_count) {
+            if (vars == NULL) {
+                continue;
+            }
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message),
                          "flexible array member cannot be initialized for %s",
@@ -4616,6 +4679,15 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             if (vars_find_depth(*vars, *var_count, s->decl_name, depth) >= 0) {
                 set_diag(diag, "duplicate local/parameter name");
                 return -1;
+            }
+            if (s->array_bound_expr != NULL) {
+                if (check_expr(tu, s->array_bound_expr, *vars, *var_count, depth, diag) != 0) {
+                    return -1;
+                }
+                if (!is_integral_type(s->array_bound_expr->value_type)) {
+                    set_diag(diag, "variable-length array bound must be an integer expression");
+                    return -1;
+                }
             }
             if (vars_push(vars, var_count, s->decl_name, s->type, s->type_struct_id, s->array_len, s->array_ndim,
                           s->array_dims, s->storage, depth) != 0) {

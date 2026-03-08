@@ -690,7 +690,7 @@ static long array_decl_scalar_size_bytes(const cc_translation_unit_t *tu, cc_typ
             return -1;
         }
         cur_type = ptr_base_type(cur_type);
-        if (cur_type != CC_TYPE_VOID) {
+        if (cur_type != CC_TYPE_VOID && !is_pointer_type(cur_type)) {
             cur_sid = -1;
         }
     }
@@ -736,11 +736,40 @@ static long array_dims_step_size_bytes(const cc_translation_unit_t *tu, cc_type_
 static long expr_array_step_size_bytes(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
                                        const cc_expr_t *ptr_expr, long fallback) {
     int dim_start;
+    cc_type_t array_type;
+    long dims[CC_MAX_ARRAY_DIMS];
 
+    if (ptr_expr != NULL && ptr_expr->kind == CC_EXPR_ADDR && ptr_expr->lhs != NULL) {
+        return expr_array_step_size_bytes(tu, vars, var_count, depth, ptr_expr->lhs, fallback);
+    }
+    if (ptr_expr != NULL && ptr_expr->kind == CC_EXPR_CAST && ptr_expr->lhs != NULL) {
+        return expr_array_step_size_bytes(tu, vars, var_count, depth, ptr_expr->lhs, fallback);
+    }
+    if (ptr_expr != NULL && ptr_expr->kind == CC_EXPR_BIN &&
+        (ptr_expr->op == CC_BIN_ADD || ptr_expr->op == CC_BIN_SUB) && is_pointer_type(ptr_expr->value_type)) {
+        if (ptr_expr->lhs != NULL && is_pointer_type(ptr_expr->lhs->value_type)) {
+            return expr_array_step_size_bytes(tu, vars, var_count, depth, ptr_expr->lhs, fallback);
+        }
+        if (ptr_expr->rhs != NULL && is_pointer_type(ptr_expr->rhs->value_type)) {
+            return expr_array_step_size_bytes(tu, vars, var_count, depth, ptr_expr->rhs, fallback);
+        }
+    }
     if (ptr_expr == NULL || ptr_expr->array_ndim <= 0) {
         return fallback;
     }
+    if (ptr_expr->array_ndim > 1 && ptr_expr->array_dims[0] == 0 && is_pointer_type(ptr_expr->value_type)) {
+        memset(dims, 0, sizeof(dims));
+        memcpy(dims, ptr_expr->array_dims + 1, (size_t)(ptr_expr->array_ndim - 1) * sizeof(dims[0]));
+        array_type = ptr_base_type(ptr_expr->value_type);
+        return array_dims_step_size_bytes(tu, array_type, ptr_expr->struct_id, ptr_expr->array_ndim - 1, dims, 0,
+                                          fallback);
+    }
     dim_start = expr_is_array_object_ref(tu, vars, var_count, depth, ptr_expr) ? 1 : 0;
+    if (dim_start == 0 && is_pointer_type(ptr_expr->value_type)) {
+        array_type = ptr_base_type(ptr_expr->value_type);
+        return array_dims_step_size_bytes(tu, array_type, ptr_expr->struct_id, ptr_expr->array_ndim, ptr_expr->array_dims,
+                                          0, fallback);
+    }
     return array_dims_step_size_bytes(tu, ptr_expr->value_type, ptr_expr->struct_id, ptr_expr->array_ndim,
                                       ptr_expr->array_dims, dim_start, fallback);
 }
@@ -750,6 +779,7 @@ static long expr_decl_array_step_size_bytes(const cc_translation_unit_t *tu, var
     int idx;
     const cc_global_t *g;
     const char *name;
+    cc_type_t array_type;
 
     if (ptr_expr == NULL) {
         return fallback;
@@ -761,13 +791,25 @@ static long expr_decl_array_step_size_bytes(const cc_translation_unit_t *tu, var
 
     idx = var_find_visible(vars, var_count, name, depth);
     if (idx >= 0 && vars[idx].array_ndim > 0) {
-        int dim_start = is_array_object_decl(vars[idx].type, vars[idx].array_len, vars[idx].array_ndim) ? 1 : 0;
+        int is_array_obj = is_array_object_decl(vars[idx].type, vars[idx].array_len, vars[idx].array_ndim);
+        int dim_start = is_array_obj ? 1 : 0;
+        if (!is_array_obj && is_pointer_type(ptr_expr->value_type)) {
+            array_type = ptr_base_type(ptr_expr->value_type);
+            return array_dims_step_size_bytes(tu, array_type, ptr_expr->struct_id, vars[idx].array_ndim,
+                                              vars[idx].array_dims, 0, fallback);
+        }
         return array_dims_step_size_bytes(tu, vars[idx].type, vars[idx].struct_id, vars[idx].array_ndim,
                                           vars[idx].array_dims, dim_start, fallback);
     }
     g = find_global(tu, name);
     if (g != NULL && g->array_ndim > 0) {
-        int dim_start = is_array_object_decl(g->type, g->array_len, g->array_ndim) ? 1 : 0;
+        int is_array_obj = is_array_object_decl(g->type, g->array_len, g->array_ndim);
+        int dim_start = is_array_obj ? 1 : 0;
+        if (!is_array_obj && is_pointer_type(ptr_expr->value_type)) {
+            array_type = ptr_base_type(ptr_expr->value_type);
+            return array_dims_step_size_bytes(tu, array_type, ptr_expr->struct_id, g->array_ndim, g->array_dims, 0,
+                                              fallback);
+        }
         return array_dims_step_size_bytes(tu, g->type, g->type_struct_id, g->array_ndim, g->array_dims, dim_start,
                                           fallback);
     }
@@ -1689,7 +1731,7 @@ static long array_type_size_bytes(const cc_translation_unit_t *tu, cc_type_t t, 
     if (is_pointer_type(t)) {
         for (i = 0; i < array_ndim; ++i) {
             elem_type = ptr_base_type(elem_type);
-            if (elem_struct_id >= 0 && elem_type != CC_TYPE_VOID) {
+            if (elem_struct_id >= 0 && elem_type != CC_TYPE_VOID && !is_pointer_type(elem_type)) {
                 elem_struct_id = -1;
             }
         }
@@ -1720,7 +1762,10 @@ static long sizeof_expr_bytes(const cc_translation_unit_t *tu, var_entry_t *vars
         int idx = var_find_visible(vars, var_count, e->ident, depth);
         if (idx >= 0) {
             if (!vars[idx].is_parameter) {
-                long n = array_size_bytes(tu, vars[idx].type, vars[idx].struct_id, vars[idx].array_len);
+                long n = vars[idx].array_ndim > 0
+                             ? array_type_size_bytes(tu, vars[idx].type, vars[idx].struct_id, vars[idx].array_ndim,
+                                                     vars[idx].array_dims)
+                             : array_size_bytes(tu, vars[idx].type, vars[idx].struct_id, vars[idx].array_len);
                 if (n > 0) {
                     return n;
                 }
@@ -1728,7 +1773,9 @@ static long sizeof_expr_bytes(const cc_translation_unit_t *tu, var_entry_t *vars
         } else {
             const cc_global_t *g = find_global(tu, e->ident);
             if (g != NULL) {
-                long n = array_size_bytes(tu, g->type, g->type_struct_id, g->array_len);
+                long n = g->array_ndim > 0 ? array_type_size_bytes(tu, g->type, g->type_struct_id, g->array_ndim,
+                                                                   g->array_dims)
+                                           : array_size_bytes(tu, g->type, g->type_struct_id, g->array_len);
                 if (is_pointer_type(g->type) && g->array_len <= 0 && g->init != NULL) {
                     cc_type_t elem_type = ptr_base_type(g->type);
                     int elem_sid = (elem_type == CC_TYPE_VOID) ? g->type_struct_id : -1;
@@ -1824,6 +1871,12 @@ static int expr_is_array_object_ref(const cc_translation_unit_t *tu, var_entry_t
             return 1;
         }
     }
+    if (e->kind == CC_EXPR_DEREF && is_pointer_type(e->value_type) && e->array_ndim > 0) {
+        return 1;
+    }
+    if (e->kind == CC_EXPR_ADDR && e->lhs != NULL) {
+        return expr_is_array_object_ref(tu, vars, var_count, depth, e->lhs);
+    }
     if (e->kind == CC_EXPR_CAST && e->lhs != NULL) {
         return expr_is_array_object_ref(tu, vars, var_count, depth, e->lhs);
     }
@@ -1890,6 +1943,9 @@ typedef enum {
     BUILTIN_HUGE_VAL,
     BUILTIN_HUGE_VALF,
     BUILTIN_HUGE_VALL,
+    BUILTIN_INF,
+    BUILTIN_INFF,
+    BUILTIN_INFL,
     BUILTIN_NANF,
     BUILTIN_NAN,
     BUILTIN_NANL,
@@ -2019,13 +2075,22 @@ static builtin_kind_t builtin_kind(const char *name) {
     if (strcmp(name, "__builtin_huge_vall") == 0) {
         return BUILTIN_HUGE_VALL;
     }
-    if (strcmp(name, "__builtin_nanf") == 0) {
+    if (strcmp(name, "__builtin_inf") == 0) {
+        return BUILTIN_INF;
+    }
+    if (strcmp(name, "__builtin_inff") == 0) {
+        return BUILTIN_INFF;
+    }
+    if (strcmp(name, "__builtin_infl") == 0) {
+        return BUILTIN_INFL;
+    }
+    if (strcmp(name, "__builtin_nanf") == 0 || strcmp(name, "__builtin_nansf") == 0) {
         return BUILTIN_NANF;
     }
-    if (strcmp(name, "__builtin_nan") == 0) {
+    if (strcmp(name, "__builtin_nan") == 0 || strcmp(name, "__builtin_nans") == 0) {
         return BUILTIN_NAN;
     }
-    if (strcmp(name, "__builtin_nanl") == 0) {
+    if (strcmp(name, "__builtin_nanl") == 0 || strcmp(name, "__builtin_nansl") == 0) {
         return BUILTIN_NANL;
     }
     if (strcmp(name, "__sync_fetch_and_add") == 0) {
@@ -2114,6 +2179,9 @@ static int stmt_needs_hoisted_alloc(const cc_stmt_t *s) {
     }
     if (s->type == CC_TYPE_VOID && s->type_struct_id >= 0) {
         return 1;
+    }
+    if (s->array_bound_expr != NULL) {
+        return 0;
     }
     return is_array_object_decl(s->type, s->array_len, s->array_ndim);
 }
@@ -4617,9 +4685,10 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             return lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[0], diag);
         }
-        if (bk == BUILTIN_HUGE_VAL || bk == BUILTIN_HUGE_VALF || bk == BUILTIN_HUGE_VALL) {
+        if (bk == BUILTIN_HUGE_VAL || bk == BUILTIN_HUGE_VALF || bk == BUILTIN_HUGE_VALL ||
+            bk == BUILTIN_INF || bk == BUILTIN_INFF || bk == BUILTIN_INFL) {
             (void)e;
-            return emit_const_f64_instr(sf, HUGE_VAL);
+            return emit_const_f64_instr(sf, INFINITY);
         }
         if (bk == BUILTIN_NANF || bk == BUILTIN_NAN || bk == BUILTIN_NANL) {
             return emit_const_f64_instr(sf, NAN);
@@ -4930,6 +4999,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 if (overflow_op == 2) {
                     int z = emit_const_i64_instr(sf, 0);
                     int cmp_nz;
+                    int cmp_z;
+                    int safe_bv;
                     int qv;
                     int cmp_ne;
                     if (z < 0) {
@@ -4947,11 +5018,31 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     }
                     cmp_nz = bin.dst;
                     memset(&bin, 0, sizeof(bin));
+                    bin.op = CC_SSA_CMP;
+                    bin.cmp_kind = CC_CMP_EQ;
+                    bin.is_unsigned = 1;
+                    bin.dst = new_value(sf, CC_VAL_I64);
+                    bin.lhs = bv;
+                    bin.rhs = z;
+                    if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                        return -1;
+                    }
+                    cmp_z = bin.dst;
+                    memset(&bin, 0, sizeof(bin));
+                    bin.op = CC_SSA_OR;
+                    bin.dst = new_value(sf, CC_VAL_I64);
+                    bin.lhs = bv;
+                    bin.rhs = cmp_z;
+                    if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                        return -1;
+                    }
+                    safe_bv = bin.dst;
+                    memset(&bin, 0, sizeof(bin));
                     bin.op = CC_SSA_DIV;
                     bin.is_unsigned = 1;
                     bin.dst = new_value(sf, CC_VAL_I64);
                     bin.lhs = rv;
-                    bin.rhs = bv;
+                    bin.rhs = safe_bv;
                     if (bin.dst < 0 || push_instr(sf, bin) != 0) {
                         return -1;
                     }
@@ -4992,6 +5083,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             } else if (overflow_op == 2) {
                 int z = emit_const_i64_instr(sf, 0);
                 int cmp_nz;
+                int cmp_z;
+                int safe_bv;
                 int qv;
                 int cmp_eq;
                 int not_eq;
@@ -5009,10 +5102,29 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 }
                 cmp_nz = bin.dst;
                 memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_CMP;
+                bin.cmp_kind = CC_CMP_EQ;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = bv;
+                bin.rhs = z;
+                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                cmp_z = bin.dst;
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_OR;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = bv;
+                bin.rhs = cmp_z;
+                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                safe_bv = bin.dst;
+                memset(&bin, 0, sizeof(bin));
                 bin.op = CC_SSA_DIV;
                 bin.dst = new_value(sf, CC_VAL_I64);
                 bin.lhs = rv;
-                bin.rhs = bv;
+                bin.rhs = safe_bv;
                 if (bin.dst < 0 || push_instr(sf, bin) != 0) {
                     return -1;
                 }
@@ -6053,6 +6165,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                         if (emit_memcpy_instr(sf, saddr, rhs, mem_size, diag) != 0) {
                             return -1;
                         }
+                        return saddr;
                     } else {
                         memset(&in, 0, sizeof(in));
                         in.op = CC_SSA_STORE;
@@ -6102,6 +6215,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     if (emit_memcpy_instr(sf, vars[idx].value, rhs, mem_size, diag) != 0) {
                         return -1;
                     }
+                    return vars[idx].value;
                 } else {
                     rhs = normalize_float_value(sf, rhs, vars[idx].type, diag);
                     if (rhs < 0) {
@@ -6159,6 +6273,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     if (emit_memcpy_instr(sf, gaddr, rhs, mem_size, diag) != 0) {
                         return -1;
                     }
+                    return gaddr;
                 } else {
                     memset(&in, 0, sizeof(in));
                     in.op = CC_SSA_STORE;
@@ -6213,7 +6328,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 if (emit_memcpy_instr(sf, ptrv, rhs, mem_size, diag) != 0) {
                     return -1;
                 }
-                return rhs;
+                return ptrv;
             }
             memset(&in, 0, sizeof(in));
             in.op = CC_SSA_STORE;
@@ -6628,6 +6743,9 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return -1;
             }
             if (cast_src->kind == CC_EXPR_INIT_LIST) {
+                if (emit_memset_instr(sf, dst_ptr, 0, sz, diag) != 0) {
+                    return -1;
+                }
                 if (lower_struct_init_to_ptr(tu, sf, ctx, vars, var_count, depth, dst_ptr, e->aux_struct_id, cast_src,
                                              diag) != 0) {
                     return -1;
@@ -8327,12 +8445,95 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         }
         if (is_array_object_decl(s->type, s->array_len, s->array_ndim)) {
             cc_ssa_instr_t st_in;
+            cc_ssa_instr_t call_in;
             cc_type_t elem_type = ptr_base_type(s->type);
-            long elem_size = array_decl_scalar_size_bytes(tu, s->type, s->type_struct_id, s->array_ndim);
+            long elem_size;
             long arr_elems = s->array_len > 0 ? s->array_len : 1;
-            long total_size;
+            long total_size = array_type_size_bytes(tu, s->type, s->type_struct_id, s->array_ndim, s->array_dims);
             int prealloc = lower_find_hoisted_alloc(ctx, s);
+            int is_runtime_vla = 0;
 
+            if (arr_elems <= 0) {
+                arr_elems = 1;
+            }
+            if (total_size <= 0) {
+                if (s->array_bound_expr != NULL && s->array_ndim == 1) {
+                    int bound_v;
+                    int elem_v;
+                    int bytes_v;
+
+                    elem_size = array_decl_scalar_size_bytes(tu, s->type, s->type_struct_id, s->array_ndim);
+                    if (elem_size <= 0) {
+                        elem_size = type_size_bytes_with_struct(tu, elem_type, s->type_struct_id);
+                    }
+                    if (elem_size <= 0) {
+                        set_diag(diag, "unsupported variable-length array element type in lowering");
+                        return -1;
+                    }
+                    bound_v = lower_expr(tu, sf, ctx, *vars, *var_count, depth, s->array_bound_expr, diag);
+                    if (bound_v < 0) {
+                        return -1;
+                    }
+                    bound_v = cast_value(sf, bound_v, CC_VAL_I64, diag);
+                    if (bound_v < 0) {
+                        return -1;
+                    }
+                    bytes_v = bound_v;
+                    if (elem_size != 1) {
+                        elem_v = emit_const_i64_instr(sf, elem_size);
+                        if (elem_v < 0) {
+                            return -1;
+                        }
+                        memset(&st_in, 0, sizeof(st_in));
+                        st_in.op = CC_SSA_MUL;
+                        st_in.dst = new_value(sf, CC_VAL_I64);
+                        st_in.lhs = bound_v;
+                        st_in.rhs = elem_v;
+                        if (st_in.dst < 0 || push_instr(sf, st_in) != 0) {
+                            set_diag(diag, "out of memory lowering variable-length array size");
+                            return -1;
+                        }
+                        bytes_v = st_in.dst;
+                    }
+                    memset(&call_in, 0, sizeof(call_in));
+                    call_in.op = CC_SSA_CALL;
+                    call_in.call_is_variadic = 0;
+                    call_in.sym = xstrdup(is_freestanding_mode() ? "kmalloc" : "malloc");
+                    call_in.arg_count = 1;
+                    call_in.args = (int *)calloc(1, sizeof(*call_in.args));
+                    call_in.dst = new_value(sf, CC_VAL_I64);
+                    if (call_in.sym == NULL || call_in.args == NULL || call_in.dst < 0) {
+                        free(call_in.sym);
+                        free(call_in.args);
+                        set_diag(diag, "out of memory lowering variable-length array allocation");
+                        return -1;
+                    }
+                    call_in.args[0] = bytes_v;
+                    if (push_instr(sf, call_in) != 0) {
+                        free(call_in.sym);
+                        free(call_in.args);
+                        set_diag(diag, "out of memory emitting variable-length array allocation");
+                        return -1;
+                    }
+                    varv = call_in.dst;
+                    is_runtime_vla = 1;
+                } else {
+                    char msg[256];
+                    snprintf(msg, sizeof(msg),
+                             "invalid local array size in lowering (type=%d struct_id=%d ndim=%d dims=%ld,%ld,%ld,%ld len=%ld)",
+                             (int)s->type, s->type_struct_id, s->array_ndim, s->array_dims[0], s->array_dims[1],
+                             s->array_dims[2], s->array_dims[3], s->array_len);
+                    set_diag(diag, msg);
+                    return -1;
+                }
+            }
+            if (!is_runtime_vla && total_size % arr_elems != 0) {
+                set_diag(diag, "unsupported local array element stride in lowering");
+                return -1;
+            }
+            if (!is_runtime_vla) {
+                elem_size = total_size / arr_elems;
+            }
             if (elem_size <= 0) {
                 elem_size = type_size_bytes_with_struct(tu, elem_type, s->type_struct_id);
             }
@@ -8340,21 +8541,11 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 set_diag(diag, "unsupported local array element type in lowering");
                 return -1;
             }
-            if (arr_elems <= 0) {
-                arr_elems = 1;
-            }
-            if (elem_size > LONG_MAX / arr_elems) {
-                set_diag(diag, "local array size overflow in lowering");
-                return -1;
-            }
-            total_size = elem_size * arr_elems;
-            if (total_size <= 0) {
-                set_diag(diag, "invalid local array size in lowering");
-                return -1;
-            }
-            varv = prealloc >= 0 ? prealloc : emit_local_storage_alloc(sf, total_size, diag);
-            if (varv < 0) {
-                return -1;
+            if (!is_runtime_vla) {
+                varv = prealloc >= 0 ? prealloc : emit_local_storage_alloc(sf, total_size, diag);
+                if (varv < 0) {
+                    return -1;
+                }
             }
 
             if (s->expr != NULL) {
@@ -10076,6 +10267,34 @@ static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_
         }
     case CC_EXPR_CAST:
         return eval_global_init_expr(tu, e->lhs, out_i, out_f, out_is_float, out_sym);
+    case CC_EXPR_CALL:
+        if (e->ident != NULL) {
+            if ((strcmp(e->ident, "__builtin_huge_val") == 0 || strcmp(e->ident, "__builtin_huge_valf") == 0 ||
+                 strcmp(e->ident, "__builtin_huge_vall") == 0 || strcmp(e->ident, "__builtin_inf") == 0 ||
+                 strcmp(e->ident, "__builtin_inff") == 0 || strcmp(e->ident, "__builtin_infl") == 0) &&
+                e->arg_count == 0) {
+                *out_i = 0;
+                *out_f = INFINITY;
+                *out_is_float = 1;
+                if (out_sym != NULL) {
+                    *out_sym = NULL;
+                }
+                return 0;
+            }
+            if ((strcmp(e->ident, "__builtin_nanf") == 0 || strcmp(e->ident, "__builtin_nan") == 0 ||
+                 strcmp(e->ident, "__builtin_nanl") == 0 || strcmp(e->ident, "__builtin_nansf") == 0 ||
+                 strcmp(e->ident, "__builtin_nans") == 0 || strcmp(e->ident, "__builtin_nansl") == 0) &&
+                e->arg_count == 1) {
+                *out_i = 0;
+                *out_f = NAN;
+                *out_is_float = 1;
+                if (out_sym != NULL) {
+                    *out_sym = NULL;
+                }
+                return 0;
+            }
+        }
+        return -1;
     case CC_EXPR_SIZEOF: {
         long n;
         if (e->lhs != NULL) {
@@ -10393,6 +10612,187 @@ static int struct_has_flexible_tail(const cc_struct_def_t *sd) {
     }
     m = &sd->members[sd->member_count - 1];
     return m->array_ndim > 0 && m->array_dims[m->array_ndim - 1] == 0;
+}
+
+static long struct_scalar_slots_for_init(const cc_translation_unit_t *tu, int struct_id, int depth) {
+    const cc_struct_def_t *sd;
+    long slots = 0;
+    size_t i;
+
+    if (tu == NULL || struct_id < 0 || (size_t)struct_id >= tu->struct_count || depth > 32) {
+        return -1;
+    }
+    sd = &tu->structs[struct_id];
+    for (i = 0; i < sd->member_count; ++i) {
+        const cc_struct_member_t *m = &sd->members[i];
+        if (sd->has_flexible_array && i + 1 == sd->member_count) {
+            continue;
+        }
+        if (is_array_object_decl(m->type, m->array_len, m->array_ndim)) {
+            long cnt = m->array_len > 0 ? m->array_len : 1;
+            cc_type_t elem = ptr_base_type(m->type);
+            if (elem == CC_TYPE_VOID && m->type_struct_id >= 0) {
+                long sub = struct_scalar_slots_for_init(tu, m->type_struct_id, depth + 1);
+                if (sub < 0 || cnt > LONG_MAX / sub || slots > LONG_MAX - cnt * sub) {
+                    return -1;
+                }
+                slots += cnt * sub;
+            } else {
+                if (slots > LONG_MAX - cnt) {
+                    return -1;
+                }
+                slots += cnt;
+            }
+            continue;
+        }
+        if (m->type == CC_TYPE_VOID && m->type_struct_id >= 0) {
+            long sub = struct_scalar_slots_for_init(tu, m->type_struct_id, depth + 1);
+            if (sub < 0 || slots > LONG_MAX - sub) {
+                return -1;
+            }
+            slots += sub;
+            continue;
+        }
+        if (slots == LONG_MAX) {
+            return -1;
+        }
+        slots++;
+    }
+    return slots > 0 ? slots : 1;
+}
+
+static long infer_struct_array_len_from_init_list(const cc_translation_unit_t *tu, int struct_id, const cc_expr_t *init) {
+    long slots;
+    size_t cur = 0;
+    long elems = 0;
+
+    if (tu == NULL || init == NULL || init->kind != CC_EXPR_INIT_LIST) {
+        return -1;
+    }
+    slots = struct_scalar_slots_for_init(tu, struct_id, 0);
+    if (slots <= 0) {
+        return -1;
+    }
+    while (cur < init->arg_count) {
+        const cc_expr_t *raw = init->args[cur];
+        if (raw != NULL && raw->kind == CC_EXPR_INIT_LIST) {
+            elems++;
+            cur++;
+            continue;
+        }
+        if (raw != NULL && raw->kind == CC_EXPR_CAST && raw->aux_type == CC_TYPE_VOID && raw->aux_struct_id == struct_id &&
+            raw->lhs != NULL && raw->lhs->kind == CC_EXPR_INIT_LIST) {
+            elems++;
+            cur++;
+            continue;
+        }
+        {
+            long consumed = 0;
+            while (cur < init->arg_count && consumed < slots) {
+                const cc_expr_t *it = init->args[cur];
+                if (consumed > 0 && it != NULL && it->kind == CC_EXPR_INIT_LIST) {
+                    break;
+                }
+                consumed++;
+                cur++;
+            }
+            if (consumed == 0) {
+                cur++;
+            }
+            elems++;
+        }
+    }
+    return elems > 0 ? elems : 1;
+}
+
+static long infer_flexible_array_member_elems(const cc_translation_unit_t *tu, const cc_struct_member_t *m,
+                                              const cc_expr_t *item) {
+    cc_type_t elem_type;
+    long elem_size;
+    unsigned long *units = NULL;
+    size_t unit_count = 0;
+    int wide;
+    long elems = -1;
+
+    if (tu == NULL || m == NULL || item == NULL) {
+        return -1;
+    }
+    elem_type = ptr_base_type(m->type);
+    elem_size = array_decl_scalar_size_bytes(tu, m->type, m->type_struct_id, m->array_ndim);
+    if (elem_size <= 0) {
+        elem_size = pointer_elem_size_bytes(tu, m->type, m->type_struct_id);
+    }
+    if (elem_size <= 0) {
+        return -1;
+    }
+    if (item->kind == CC_EXPR_STR) {
+        wide = (item->aux_type == CC_TYPE_INT || item->aux_type == CC_TYPE_UINT || item->aux_type == CC_TYPE_LONG_LONG ||
+                item->aux_type == CC_TYPE_ULONG_LONG);
+        if (decode_string_units(item, wide, &units, &unit_count) != 0) {
+            free(units);
+            return -1;
+        }
+        free(units);
+        elems = (long)unit_count;
+    } else if (elem_type == CC_TYPE_VOID && m->type_struct_id >= 0 && item->kind == CC_EXPR_INIT_LIST) {
+        elems = infer_struct_array_len_from_init_list(tu, m->type_struct_id, item);
+    } else if (item->kind == CC_EXPR_INIT_LIST) {
+        elems = (long)item->arg_count;
+    } else {
+        elems = 1;
+    }
+    return elems > 0 ? elems : -1;
+}
+
+static long infer_flexible_struct_tail_extra_bytes(const cc_translation_unit_t *tu, int struct_id, const cc_expr_t *init_list) {
+    const cc_struct_def_t *sd;
+    size_t i;
+    size_t next_member = 0;
+
+    if (tu == NULL || struct_id < 0 || (size_t)struct_id >= tu->struct_count || init_list == NULL ||
+        init_list->kind != CC_EXPR_INIT_LIST) {
+        return 0;
+    }
+    sd = &tu->structs[struct_id];
+    if (!struct_has_flexible_tail(sd) || sd->member_count == 0) {
+        return 0;
+    }
+    for (i = 0; i < init_list->arg_count; ++i) {
+        const cc_expr_t *raw = init_list->args[i];
+        const cc_expr_t *item = raw;
+        size_t member_idx = next_member;
+        const cc_struct_member_t *m;
+        int raw_is_designator =
+            (raw != NULL && raw->kind == CC_EXPR_MEMBER && raw->lhs == NULL && raw->rhs != NULL && raw->ident != NULL);
+        if (raw_is_designator) {
+            int didx = find_struct_member_index_by_name(sd, raw->ident);
+            if (didx < 0) {
+                continue;
+            }
+            member_idx = (size_t)didx;
+            item = raw->rhs;
+        }
+        if (member_idx >= sd->member_count) {
+            break;
+        }
+        m = &sd->members[member_idx];
+        if (!sd->is_union) {
+            next_member = struct_next_init_member_index(sd, member_idx);
+        }
+        if (member_idx + 1 == sd->member_count && struct_has_flexible_tail(sd)) {
+            long elem_size = array_decl_scalar_size_bytes(tu, m->type, m->type_struct_id, m->array_ndim);
+            long elems;
+            if (elem_size <= 0) {
+                elem_size = pointer_elem_size_bytes(tu, m->type, m->type_struct_id);
+            }
+            elems = infer_flexible_array_member_elems(tu, m, item);
+            if (elem_size <= 0 || elems <= 0 || elems > LONG_MAX / elem_size) {
+                return -1;
+            }
+            return elems * elem_size;
+        }
+    }
+    return 0;
 }
 
 static int append_global_reloc(global_reloc_t **arr, size_t *count, long offset, long size, const char *sym,
@@ -10807,11 +11207,23 @@ static int flatten_arraylike_struct_member_from_cursor(const cc_translation_unit
     if (elem_size <= 0) {
         elem_size = pointer_elem_size_bytes(tu, m->type, m->type_struct_id);
     }
-    if (elem_size <= 0 || m->size <= 0) {
+    if (elem_size <= 0) {
         set_diag(diag, "invalid array-like struct member extent");
         return -1;
     }
-    max_elems = m->array_len > 0 ? m->array_len : (m->size / elem_size);
+    if (m->array_len > 0) {
+        max_elems = m->array_len;
+    } else if (m->size > 0) {
+        max_elems = m->size / elem_size;
+    } else if (buf_size > field_off) {
+        max_elems = (buf_size - field_off) / elem_size;
+    } else {
+        max_elems = 0;
+    }
+    if (max_elems <= 0) {
+        set_diag(diag, "invalid array-like struct member extent");
+        return -1;
+    }
     for (j = 0; j < max_elems && *cursor < src_list->arg_count; ++j) {
         const cc_expr_t *raw = src_list->args[*cursor];
         long elem_off = field_off + j * elem_size;
@@ -11560,6 +11972,15 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                     }
                 }
                 total_size = struct_size * struct_elems;
+                if (struct_elems == 1 && struct_has_flexible_tail(&tu->structs[struct_id])) {
+                    long flex_extra = infer_flexible_struct_tail_extra_bytes(tu, struct_id, struct_init);
+                    if (flex_extra < 0 || total_size > LONG_MAX - flex_extra) {
+                        set_diag(diag, "invalid flexible-array struct global object size");
+                        cc_ssa_module_free(out);
+                        return -1;
+                    }
+                    total_size += flex_extra;
+                }
                 if (total_size <= 0) {
                     set_diag(diag, "invalid struct global object size");
                     cc_ssa_module_free(out);
@@ -11845,6 +12266,13 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                                 cc_ssa_module_free(out);
                                 return -1;
                             }
+                            if (ssym != NULL && out->globals[i].type == CC_TYPE_BOOL) {
+                                free(ssym);
+                                ssym = NULL;
+                                sv = 1;
+                                sf = 1.0;
+                                s_is_float = 0;
+                            }
                             out->globals[i].init_i = sv;
                             out->globals[i].init_f = sf;
                             out->globals[i].init_is_float = s_is_float;
@@ -12088,6 +12516,13 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 free(init_sym);
                 cc_ssa_module_free(out);
                 return -1;
+            }
+            if (init_sym != NULL && out->globals[i].type == CC_TYPE_BOOL) {
+                free(init_sym);
+                init_sym = NULL;
+                init_i = 1;
+                init_f = 1.0;
+                init_is_float = 0;
             }
             out->globals[i].has_init = (init != NULL) && !force_bss_zero;
             if (out->globals[i].has_init && !out->globals[i].init_is_string && !out->globals[i].init_is_symbol) {
