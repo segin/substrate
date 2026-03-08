@@ -359,6 +359,55 @@ static elf_err_t append_section_data(struct elf_section *dst, const uint8_t *src
     return ELF_OK;
 }
 
+static elf_err_t align_merged_section(struct elf_section *dst, uint64_t align, uint64_t *base_out) {
+    uint64_t base;
+    uint64_t pad;
+
+    if (dst == NULL) {
+        return ELF_ERR_STATE;
+    }
+    if (align <= 1) {
+        if (base_out != NULL) {
+            *base_out = dst->type == SHT_NOBITS ? dst->size : dst->data_size;
+        }
+        return ELF_OK;
+    }
+
+    base = dst->type == SHT_NOBITS ? dst->size : dst->data_size;
+    pad = base % align;
+    if (pad == 0) {
+        if (base_out != NULL) {
+            *base_out = base;
+        }
+        return ELF_OK;
+    }
+    pad = align - pad;
+
+    if (dst->type == SHT_NOBITS) {
+        dst->size += pad;
+        if (base_out != NULL) {
+            *base_out = dst->size;
+        }
+        return ELF_OK;
+    }
+
+    {
+        uint8_t *buf = (uint8_t *)realloc(dst->data, dst->data_size + pad);
+        if (buf == NULL) {
+            return ELF_ERR_OOM;
+        }
+        memset(buf + dst->data_size, 0, (size_t)pad);
+        dst->data = buf;
+        dst->owns_data = 1;
+        dst->data_size += (size_t)pad;
+        dst->size = dst->data_size;
+        if (base_out != NULL) {
+            *base_out = dst->data_size;
+        }
+    }
+    return ELF_OK;
+}
+
 static elf_err_t replace_section_data(struct elf_section *dst, const struct elf_section *src) {
     uint8_t *copy = NULL;
 
@@ -561,15 +610,18 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
             }
             sec_bases[j] = 0;
         } else {
-            err = append_section_data(dst, src->data, src->data_size, &sec_bases[j]);
+            err = align_merged_section(dst, src->addralign, &sec_bases[j]);
+            if (err != ELF_OK) {
+                free(sec_discard);
+                return err;
+            }
+            err = append_section_data(dst, src->data, src->data_size, NULL);
             if (err != ELF_OK) {
                 free(sec_discard);
                 return err;
             }
             if (src->type == SHT_NOBITS && src->size > 0) {
-                uint64_t old_sz = dst->size;
                 dst->size += src->size;
-                sec_bases[j] = old_sz;
             }
         }
         sec_included[j] = 1;
