@@ -388,22 +388,22 @@ static void pmm_report_memory_stats(void) {
     uint64_t usable_gb = usable_mb / 1024;
     
     if (usable_gb > 0) {
-        sprintf(buf, "Total usable RAM: %lu MB (%lu GB)\n", 
+        snprintf(buf, sizeof(buf), "Total usable RAM: %lu MB (%lu GB)\n",
                 (unsigned long)usable_mb, (unsigned long)usable_gb);
     } else {
-        sprintf(buf, "Total usable RAM: %lu MB\n", (unsigned long)usable_mb);
+        snprintf(buf, sizeof(buf), "Total usable RAM: %lu MB\n", (unsigned long)usable_mb);
     }
     kprint(buf);
     
     /* Report reserved RAM if significant */
     if (pmm_total_reserved_ram > 0) {
         uint64_t reserved_mb = pmm_total_reserved_ram / (1024 * 1024);
-        sprintf(buf, "Reserved RAM: %lu MB\n", (unsigned long)reserved_mb);
+        snprintf(buf, sizeof(buf), "Reserved RAM: %lu MB\n", (unsigned long)reserved_mb);
         kprint(buf);
     }
     
     /* Report detected regions */
-    sprintf(buf, "Memory regions detected: %d\n", pmm_region_count);
+    snprintf(buf, sizeof(buf), "Memory regions detected: %d\n", pmm_region_count);
     kprint(buf);
 }
 
@@ -1057,7 +1057,7 @@ void pmm_dump_mmap(uint32_t mmap_addr, uint32_t mmap_length) {
         uint64_t start = mmap->addr;
         uint64_t end = mmap->addr + mmap->len - 1;
         
-        sprintf(buf, " [0x%08x%08x - 0x%08x%08x] %s\n", 
+        snprintf(buf, sizeof(buf), " [0x%08x%08x - 0x%08x%08x] %s\n",
             (uint32_t)(start >> 32), (uint32_t)(start & 0xFFFFFFFF),
             (uint32_t)(end >> 32), (uint32_t)(end & 0xFFFFFFFF),
             type_str);
@@ -1198,7 +1198,7 @@ void pmm_dump_e820(const e820_entry_t *map, uint32_t count) {
         uint64_t start = map[i].addr;
         uint64_t end = map[i].addr + map[i].len - 1;
         
-        sprintf(buf, " [0x%08x%08x - 0x%08x%08x] %s\n", 
+        snprintf(buf, sizeof(buf), " [0x%08x%08x - 0x%08x%08x] %s\n",
             (uint32_t)(start >> 32), (uint32_t)(start & 0xFFFFFFFF),
             (uint32_t)(end >> 32), (uint32_t)(end & 0xFFFFFFFF),
             type_str);
