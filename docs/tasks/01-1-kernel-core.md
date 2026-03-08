@@ -1001,7 +1001,7 @@
             - [x] Unit: `psignal` thread selection (prefer unmasked). (REQ: REQ-01-0845)
             - [x] Unit: `sendsig` frame construction and `sigreturn` restoration. (REQ: REQ-01-0846)
             - [x] Unit: SIGCONT clears pending SIGTSTP/SIGTTIN/SIGTTOU. (REQ: REQ-01-0847)
-            - [ ] Unit: SA_RESTART — interrupted syscall restarted. (REQ: REQ-01-0848)
+            - [x] Unit: SA_RESTART — interrupted syscall restarted. (REQ: REQ-01-0848)
             - [x] Unit: SA_SIGINFO — extended frame with siginfo + ucontext. (REQ: REQ-01-0849)
             - [x] Property: SIGKILL/SIGSTOP cannot be caught, blocked, or ignored (verify invariant). (REQ: REQ-01-0850)
             - [ ] Integration: fork, send SIGINT to child, verify termination. (REQ: REQ-01-0851)
