@@ -981,7 +981,7 @@
             - [x] SIGKILL: cannot be caught/blocked/ignored; terminates immediately; wake stopped threads. (REQ: REQ-01-0828)
             - [x] SIGSTOP: cannot be caught/blocked/ignored; stops all threads. (REQ: REQ-01-0829)
             - [x] SIGCONT: resume stopped process; clear pending stops; deliver to handler if installed; set P_CONTINUED. (REQ: REQ-01-0830)
-            - [ ] SIGCHLD: sent on child exit/stop/continue; SA_NOCLDSTOP/SA_NOCLDWAIT semantics. (REQ: REQ-01-0831)
+            - [x] SIGCHLD: sent on child exit/stop/continue; SA_NOCLDSTOP/SA_NOCLDWAIT semantics. (REQ: REQ-01-0831)
             - [x] Job control stops (SIGTSTP/SIGTTIN/SIGTTOU): can be caught/ignored; orphaned pgrps ignore. (REQ: REQ-01-0832)
 
         - [ ] **PID 1 (Init) Protection:** (REQ: REQ-01-0833)

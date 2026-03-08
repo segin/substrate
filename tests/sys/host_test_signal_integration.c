@@ -339,12 +339,61 @@ static void test_sigkill_resumes_stopped_threads_before_exit(void) {
     assert(peer->state == THREAD_READY);
 }
 
+static void test_sigchld_stop_continue_respect_nocldstop(void) {
+    registers_t regs;
+    process_t *parent;
+    process_t *child;
+    thread_t *parent_thread;
+    thread_t *child_thread;
+
+    reset_env();
+    memset(&regs, 0, sizeof(regs));
+    regs.cs = 0x1b;
+
+    parent = &processes[0];
+    child = &processes[1];
+    parent_thread = &threads[0];
+    child_thread = &threads[1];
+
+    parent->pid = 60;
+    parent->state = SRUN;
+    parent_thread->tid = 600;
+    parent_thread->proc = parent;
+    parent_thread->state = THREAD_RUNNING;
+
+    child->pid = 61;
+    child->p_parent = parent;
+    child->state = SRUN;
+    child_thread->tid = 601;
+    child_thread->proc = child;
+    child_thread->state = THREAD_RUNNING;
+    child_thread->sig_pending = sigmask(SIGSTOP);
+
+    current_process = child;
+    current_thread = child_thread;
+
+    signal_handle_pending(&regs);
+    assert(parent_thread->sig_pending & sigmask(SIGCHLD));
+
+    parent_thread->sig_pending = 0;
+    parent->sig_actions[SIGCHLD - 1].sa_flags = SA_NOCLDSTOP;
+    psignal(child, SIGCONT);
+    assert((parent_thread->sig_pending & sigmask(SIGCHLD)) == 0);
+
+    parent->sig_actions[SIGCHLD - 1].sa_flags = 0;
+    child->state = SSTOP;
+    child_thread->state = THREAD_STOPPED;
+    psignal(child, SIGCONT);
+    assert(parent_thread->sig_pending & sigmask(SIGCHLD));
+}
+
 int main(void) {
     test_sigint_kills_target_child();
     test_sys_kill_permission_and_group_routing();
     test_psignal_interrupts_generic_sleep();
     test_sigstop_stops_entire_process();
     test_sigkill_resumes_stopped_threads_before_exit();
+    test_sigchld_stop_continue_respect_nocldstop();
     puts("host_test_signal_integration: PASS");
     return 0;
 }
