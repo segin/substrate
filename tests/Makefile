@@ -30,7 +30,7 @@ UNIT_OBJS = $(notdir $(UNIT_SRCS:.c=.o))
 
 MOCKS_OBJ = mocks.o
 
-all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir test_libpthread_mutex test_pthread_join test_readline test_history test_bc test_libedit
+all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_libc_sysctl test_ext2_remove_perf bench_ext2_readdir test_libpthread_mutex test_pthread_join test_readline test_history test_bc test_libedit
 	./test_runner
 	./test_minix
 	./test_ext2_perf
@@ -69,6 +69,9 @@ test_history:
 test_libc_assert: lib/c/test_assert.c ../lib/c/src/assert.c
 	$(CC) $(CFLAGS_COMMON) -fno-builtin lib/c/test_assert.c -o $@
 
+test_libc_sysctl: lib/c/test_sysctl.c
+	$(CC) $(CFLAGS_COMMON) -fno-builtin -I../include lib/c/test_sysctl.c -o $@
+
 test_libc_ctype: lib/c/test_ctype.c ../lib/c/src/ctype.c
 	$(CC) $(CFLAGS_COMMON) -fno-builtin lib/c/test_ctype.c -o $@
 
@@ -94,9 +97,6 @@ test_libc_time: lib/c/test_time_standalone.c ../lib/c/src/time/time.c
 
 test_libc_stdlib: lib/c/test_stdlib.c ../lib/c/src/stdlib.c
 	$(CC) $(CFLAGS_COMMON) -fno-builtin lib/c/test_stdlib.c -o $@
-
-test_libc_assert: lib/c/test_assert.c ../lib/c/src/assert.c
-	$(CC) $(CFLAGS_COMMON) -fno-builtin lib/c/test_assert.c -o $@
 
 # Rules for objects
 %.o: ../sys/vm/%.c

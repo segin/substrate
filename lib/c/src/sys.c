@@ -17,6 +17,7 @@
 #include <sys/ioctl.h>
 #include <sys/resource.h>
 #include <termios.h>
+#include <sys/sysctl.h>
 
 extern int64_t _syscall0(int);
 extern int64_t _syscall1(int, int);
@@ -425,4 +426,73 @@ int getpriority(int which, id_t who) {
 
 int setpriority(int which, id_t who, int prio) {
     return (int)_syscall3(SYS_SETPRIORITY, which, who, prio);
+}
+
+int sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
+    int ret = (int)_syscall6(SYS_SYSCTL, (int)name, (int)namelen, (int)oldp, (int)oldlenp, (int)newp, (int)newlen);
+    if (ret < 0) {
+        errno = -ret;
+        return -1;
+    }
+    return 0;
+}
+
+int sysctlnametomib(const char *name, int *mibp, size_t *sizep) {
+    int mib[] = { CTL_SYSCTL, CTL_SYSCTL_NAME2OID };
+    int ret;
+
+    if (!name || !sizep) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    // First, get the required size
+    ret = sysctl(mib, 2, NULL, sizep, (void *)name, strlen(name) + 1);
+    if (ret == -1) {
+        return -1;
+    }
+
+    // If buffer is provided, get the actual MIB
+    if (mibp) {
+        ret = sysctl(mib, 2, mibp, sizep, (void *)name, strlen(name) + 1);
+        if (ret == -1) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+int sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
+    int *mib = NULL;
+    size_t mibsize = 0;
+    int ret;
+
+    if (!name) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    // Get the MIB from the name
+    ret = sysctlnametomib(name, NULL, &mibsize);
+    if (ret == -1) {
+        return -1;
+    }
+
+    mib = malloc(mibsize);
+    if (!mib) {
+        errno = ENOMEM;
+        return -1;
+    }
+
+    ret = sysctlnametomib(name, mib, &mibsize);
+    if (ret == -1) {
+        free(mib);
+        return -1;
+    }
+
+    // Call sysctl with the MIB
+    ret = sysctl(mib, mibsize / sizeof(int), oldp, oldlenp, newp, newlen);
+    free(mib);
+    return ret;
 }
