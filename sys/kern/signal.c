@@ -28,6 +28,40 @@ static void signal_interrupt_thread(thread_t *t) {
     t->state = THREAD_READY;
 }
 
+static void signal_stop_process_threads(process_t *p, const char *reason) {
+    if (!p) {
+        return;
+    }
+
+    for (int i = 0; i < MAX_THREADS; i++) {
+        if (threads[i].tid == -1 || threads[i].proc != p) {
+            continue;
+        }
+        threads[i].state = THREAD_STOPPED;
+        threads[i].wait_reason = reason;
+    }
+    p->state = SSTOP;
+}
+
+static void signal_resume_process_threads(process_t *p) {
+    if (!p) {
+        return;
+    }
+
+    for (int i = 0; i < MAX_THREADS; i++) {
+        if (threads[i].tid == -1 || threads[i].proc != p) {
+            continue;
+        }
+        if (threads[i].state == THREAD_STOPPED) {
+            threads[i].state = THREAD_READY;
+            threads[i].wait_reason = NULL;
+        }
+    }
+    if (p->state == SSTOP) {
+        p->state = SRUN;
+    }
+}
+
 // Signal System Calls
 int kern_sigaction(int sig, const struct sigaction *act, struct sigaction *oact) {
     if (sig <= 0 || sig > NSIG || sig == SIGKILL || sig == SIGSTOP) return -1;
@@ -385,14 +419,11 @@ void psignal(process_t *p, int sig) {
         for (int i = 0; i < MAX_THREADS; i++) {
             if (threads[i].tid != -1 && threads[i].proc == p) {
                 threads[i].sig_pending &= ~stop_mask;
-                if (threads[i].state == THREAD_STOPPED) {
-                    threads[i].state = THREAD_READY;
-                }
             }
         }
 
         if (p->state == SSTOP) {
-            p->state = SRUN;
+            signal_resume_process_threads(p);
             p->p_flag |= P_CONTINUED;
             /* Notify parent if not SA_NOCLDSTOP */
             if (p->p_parent && 
@@ -708,13 +739,7 @@ void signal_handle_pending(registers_t *regs) {
 
     // Special Handling: SIGKILL always terminates immediately
     if (sig == SIGKILL) {
-        // Wake all stopped threads before terminating (if any were stopped)
-        extern void psignal(process_t *p, int sig);
-        // Resending SIGCONT would wake them, but sigexit handles cleanup.
-        // POSIX requires SIGKILL to work on stopped processes.
-        if (current_process->state == SSTOP) {
-            current_process->state = SRUN;
-        }
+        signal_resume_process_threads(current_process);
         sigexit(current_process, SIGKILL);
         return; // Should not reach
     }
@@ -740,11 +765,7 @@ void signal_handle_pending(registers_t *regs) {
                  return;
              }
 
-             // Stop the thread and process
-             // kprint("Process stopped by signal\n");
-             current_thread->state = THREAD_STOPPED;
-             current_process->state = SSTOP;
-             current_thread->wait_reason = "Signal";
+             signal_stop_process_threads(current_process, "Signal");
              
              // Notify parent if not SA_NOCLDSTOP
              if (current_process->p_parent && 

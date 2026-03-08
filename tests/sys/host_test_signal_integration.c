@@ -258,10 +258,93 @@ static void test_psignal_interrupts_generic_sleep(void) {
     assert(thread->sig_pending & sigmask(SIGUSR1));
 }
 
+static void test_sigstop_stops_entire_process(void) {
+    registers_t regs;
+    process_t *parent;
+    process_t *proc;
+    thread_t *leader;
+    thread_t *peer;
+
+    reset_env();
+    memset(&regs, 0, sizeof(regs));
+    regs.cs = 0x1b;
+
+    parent = &processes[0];
+    proc = &processes[1];
+    leader = &threads[0];
+    peer = &threads[1];
+
+    parent->pid = 40;
+    parent->state = SRUN;
+
+    proc->pid = 41;
+    proc->p_parent = parent;
+    proc->state = SRUN;
+
+    leader->tid = 400;
+    leader->proc = proc;
+    leader->state = THREAD_RUNNING;
+    leader->sig_pending = sigmask(SIGSTOP);
+
+    peer->tid = 401;
+    peer->proc = proc;
+    peer->state = THREAD_READY;
+
+    current_process = proc;
+    current_thread = leader;
+
+    signal_handle_pending(&regs);
+
+    assert(proc->state == SSTOP);
+    assert(leader->state == THREAD_STOPPED);
+    assert(peer->state == THREAD_STOPPED);
+    assert(leader->wait_reason != NULL);
+}
+
+static void test_sigkill_resumes_stopped_threads_before_exit(void) {
+    registers_t regs;
+    process_t *proc;
+    thread_t *leader;
+    thread_t *peer;
+
+    reset_env();
+    memset(&regs, 0, sizeof(regs));
+    regs.cs = 0x1b;
+
+    proc = &processes[0];
+    leader = &threads[0];
+    peer = &threads[1];
+
+    proc->pid = 50;
+    proc->state = SSTOP;
+
+    leader->tid = 500;
+    leader->proc = proc;
+    leader->state = THREAD_STOPPED;
+    leader->sig_pending = sigmask(SIGKILL);
+
+    peer->tid = 501;
+    peer->proc = proc;
+    peer->state = THREAD_STOPPED;
+
+    current_process = proc;
+    current_thread = leader;
+
+    signal_handle_pending(&regs);
+
+    assert(proc_exit_called == 1);
+    assert(proc_exit_status == SIGKILL);
+    assert(proc->state == SRUN);
+    assert(leader->state == THREAD_READY);
+    assert(peer->state == THREAD_READY);
+}
+
 int main(void) {
     test_sigint_kills_target_child();
     test_sys_kill_permission_and_group_routing();
     test_psignal_interrupts_generic_sleep();
+    test_sigstop_stops_entire_process();
+    test_sigkill_resumes_stopped_threads_before_exit();
     puts("host_test_signal_integration: PASS");
     return 0;
 }
