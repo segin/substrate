@@ -363,6 +363,7 @@ struct cc_stmt {
     int is_synthetic_block;
     char *decl_name;
     char *label_name;
+    cc_expr_t *array_bound_expr;
     cc_expr_t *expr;
     cc_stmt_t *init_stmt;
     cc_expr_t *init_expr;

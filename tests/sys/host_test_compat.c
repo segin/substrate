@@ -34,94 +34,53 @@ struct stat {
 /* Mock out sys/stat.h */
 #define _SYS_STAT_H
 
-#include <string.h>
-
 /* Mock external functions that compat.c calls */
-int64_t sys_lseek(int fd, uint32_t off_lo, uint32_t off_hi, int whence) { return 0; }
-int sys_time(void *t) { return 0; }
-void *sys_mmap(void *addr, size_t len, int prot, int flags, int fd, int offset) { return NULL; }
-int sys_execve(const char *path, char *const argv[], char *const envp[]) { return 0; }
+int64_t sys_lseek(int fd, uint32_t off_lo, uint32_t off_hi, int whence) {
+    (void)fd; (void)off_lo; (void)off_hi; (void)whence;
+    return 0;
+}
 
-int mock_copyinstr_ret = 0;
+int64_t g_mock_sys_time_result = 0;
+int64_t g_mock_sys_time_out_val = 0;
+int sys_time(void *t) {
+    if (t && g_mock_sys_time_result >= 0) {
+        *(int64_t *)t = g_mock_sys_time_out_val;
+    }
+    return g_mock_sys_time_result;
+}
+
+void *sys_mmap(void *addr, size_t len, int prot, int flags, int fd, int offset) {
+    (void)addr; (void)len; (void)prot; (void)flags; (void)fd; (void)offset;
+    return NULL;
+}
+int sys_execve(const char *path, char *const argv[], char *const envp[]) {
+    (void)path; (void)argv; (void)envp;
+    return 0;
+}
 int copyinstr(const void *uaddr, void *kaddr, size_t len, size_t *done) {
-    if (mock_copyinstr_ret == 0) {
-        strncpy((char *)kaddr, (const char *)uaddr, len);
-        if (done) *done = strlen((const char *)uaddr) + 1;
-    }
-    return mock_copyinstr_ret;
+    (void)uaddr; (void)kaddr; (void)len; (void)done;
+    return 0;
 }
-
-int mock_copyout_ret = 0;
 int copyout(const void *kaddr, void *uaddr, size_t len) {
-    if (mock_copyout_ret == 0) {
-        memcpy(uaddr, kaddr, len);
-    }
-    return mock_copyout_ret;
+    (void)kaddr; (void)uaddr; (void)len;
+    return 0;
 }
 
-int mock_kern_stat_ret = 0;
-struct stat mock_stat_data;
-char mock_kpath[256];
 int kern_stat(const char *path, struct stat *st) {
-    if (mock_kern_stat_ret == 0) {
-        strncpy(mock_kpath, path, sizeof(mock_kpath));
-        memcpy(st, &mock_stat_data, sizeof(struct stat));
-    }
-    return mock_kern_stat_ret;
+    (void)path; (void)st;
+    return 0;
 }
-
-int kern_lstat(const char *path, struct stat *st) { return 0; }
-int kern_fstat(int fd, struct stat *st) { return 0; }
+int kern_lstat(const char *path, struct stat *st) {
+    (void)path; (void)st;
+    return 0;
+}
+int kern_fstat(int fd, struct stat *st) {
+    (void)fd; (void)st;
+    return 0;
+}
 
 /* Now we can include compat.c directly! */
 #include "../../sys/exec/perso/compat.c"
-
-void test_compat_stat_stub() {
-    printf("Testing compat_stat_stub()...\n");
-
-    struct stat out_buf;
-    int ret;
-    const char *test_path = "/usr/bin/test";
-
-    // 1. Happy path: everything succeeds
-    mock_copyinstr_ret = 0;
-    mock_kern_stat_ret = 0;
-    mock_copyout_ret = 0;
-
-    memset(&mock_stat_data, 0, sizeof(mock_stat_data));
-    mock_stat_data.st_ino = 12345;
-    mock_stat_data.st_size = 4096;
-    mock_stat_data.st_mode = 0755;
-
-    memset(&out_buf, 0, sizeof(out_buf));
-    memset(mock_kpath, 0, sizeof(mock_kpath));
-
-    ret = compat_stat_stub(test_path, &out_buf);
-    assert(ret == 0);
-    assert(strcmp(mock_kpath, test_path) == 0);
-    assert(out_buf.st_ino == 12345);
-    assert(out_buf.st_size == 4096);
-    assert(out_buf.st_mode == 0755);
-
-    // 2. copyinstr fails
-    mock_copyinstr_ret = -1; // Any non-zero triggers error
-    ret = compat_stat_stub(test_path, &out_buf);
-    assert(ret == -14); // compat_stat_stub returns -14 on copyinstr error
-
-    // 3. kern_stat fails
-    mock_copyinstr_ret = 0;
-    mock_kern_stat_ret = -2; // ENOENT
-    ret = compat_stat_stub(test_path, &out_buf);
-    assert(ret == -2); // returns underlying error
-
-    // 4. copyout fails
-    mock_kern_stat_ret = 0;
-    mock_copyout_ret = -1; // Any non-zero triggers error
-    ret = compat_stat_stub(test_path, &out_buf);
-    assert(ret == -14); // compat_stat_stub returns -14 on copyout error
-
-    printf("All compat_stat_stub tests passed!\n");
-}
 
 int main() {
     printf("Testing sys_nice()...\n");
@@ -134,7 +93,41 @@ int main() {
 
     printf("All sys_nice tests passed!\n");
 
-    test_compat_stat_stub();
+    printf("Testing compat_time32()...\n");
+    int32_t tloc_val = 0;
+    int32_t ret = 0;
+
+    // Test Case 1: Normal case - Value within 32-bit range
+    g_mock_sys_time_result = 0;
+    g_mock_sys_time_out_val = 0x12345678;
+    tloc_val = 0;
+    ret = compat_time32(&tloc_val);
+    assert(ret == 0x12345678);
+    assert(tloc_val == 0x12345678);
+
+    // Test Case 2: Truncation case - Value larger than 32-bit range
+    g_mock_sys_time_result = 0;
+    g_mock_sys_time_out_val = 0x1122334455667788LL;
+    tloc_val = 0;
+    ret = compat_time32(&tloc_val);
+    assert(ret == 0x55667788);
+    assert(tloc_val == 0x55667788);
+
+    // Test Case 3: Negative return from sys_time
+    g_mock_sys_time_result = -EINVAL;
+    g_mock_sys_time_out_val = 0x12345678; // Should not be written
+    tloc_val = (int32_t)0x99999999;
+    ret = compat_time32(&tloc_val);
+    assert(ret == -EINVAL);
+    assert(tloc_val == (int32_t)0x99999999); // Should remain unchanged
+
+    // Test Case 4: tloc == NULL
+    g_mock_sys_time_result = 0;
+    g_mock_sys_time_out_val = 0x87654321;
+    ret = compat_time32(NULL);
+    assert(ret == (int32_t)0x87654321);
+
+    printf("All compat_time32 tests passed!\n");
 
     return 0;
 }

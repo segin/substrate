@@ -15,6 +15,7 @@
 #include <stdatomic.h>
 #include <limits.h>
 #include <errno.h>
+#include <sys/wait.h>
 
 void exit(int status) {
     _exit(status);
@@ -475,8 +476,17 @@ char *getenv(const char *name) {
 
 int system(const char *command) {
     if (!command) return 1;
-    // Stub
-    return -1;
+
+    pid_t pid = fork();
+    if (pid == -1) return -1;
+    if (pid == 0) {
+        execl("/bin/sh", "sh", "-c", command, (char *)NULL);
+        _exit(127);
+    }
+
+    int status;
+    if (waitpid(pid, &status, 0) == -1) return -1;
+    return status;
 }
 
 int abs(int j) { return j < 0 ? -j : j; }

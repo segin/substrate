@@ -290,43 +290,46 @@ void bc_print_base(bc_num *n, int obase) {
     
     if (n->sign < 0) printf("-");
     
-    // Integer part conversion
-    // Copy integer part... (simple truncation for now)
-    // To truncate, we divide by 10^scale or similar if we supported floating point ops well.
-    // For now, if it's obase > 10, handle integers via successive division.
-    // TODO: implement full obase fractional conversion
-    if (n->scale > 0) {
-        bc_warn("libbc: obase > 10 for fractional numbers not fully implemented");
-        bc_print(n);
-        return;
-    }
-    
     bc_num *copy = bc_dup(n);
     copy->sign = 1;
-    copy->scale = 0; // Truncate fractional part for integer obase conversion
+    copy->scale = 0; // Treat digits as integer
+
+    bc_num *ten = bc_from_long(10);
+    bc_num *sc = bc_from_long(n->scale);
+    bc_num *pow10 = bc_pow(ten, sc);
+    bc_free(ten);
+    bc_free(sc);
+
+    int old_scale = bc_scale;
+    bc_scale = 0;
+
+    bc_num *int_part = bc_div(copy, pow10);
+    bc_num *frac_int = bc_mod(copy, pow10);
+    bc_free(copy);
+
     bc_num *base = bc_from_long(obase);
     
-    // Collect digits
+    // Collect integer digits
     int max_digits = 1024;
     int *out_digits = malloc(max_digits * sizeof(int));
     int ds = 0;
     
-    int old_scale = bc_scale;
-    bc_scale = 0;
-    
-    while (!bc_is_zero(copy)) {
-        bc_num *q = bc_div(copy, base);
-        bc_num *r = bc_mod(copy, base);
-        // Extract remainder integer
-        int rem = (int)bc_num_to_long(r);
-        if (ds < max_digits) out_digits[ds++] = rem;
-        bc_free(copy);
-        bc_free(r);
-        copy = q;
+    bc_num *curr_int = int_part; // Transfer ownership
+    if (bc_is_zero(curr_int)) {
+        if (ds < max_digits) out_digits[ds++] = 0;
+        bc_free(curr_int);
+    } else {
+        while (!bc_is_zero(curr_int)) {
+            bc_num *q = bc_div(curr_int, base);
+            bc_num *r = bc_mod(curr_int, base);
+            int rem = (int)bc_num_to_long(r);
+            if (ds < max_digits) out_digits[ds++] = rem;
+            bc_free(curr_int);
+            bc_free(r);
+            curr_int = q;
+        }
+        bc_free(curr_int); // Free the final quotient which was 0
     }
-    bc_free(copy);
-    bc_free(base);
-    bc_scale = old_scale;
     
     for (int i = ds - 1; i >= 0; i--) {
         if (obase <= 16) {
@@ -338,6 +341,39 @@ void bc_print_base(bc_num *n, int obase) {
         }
     }
     free(out_digits);
+
+    // Fractional part
+    if (n->scale > 0) {
+        printf(".");
+        int digits_to_print = old_scale > n->scale ? old_scale : n->scale;
+
+        bc_num *curr_frac_int = frac_int; // keep ownership
+        for (int i = 0; i < digits_to_print; i++) {
+            bc_num *prod = bc_mul(curr_frac_int, base);
+            bc_num *d_num = bc_div(prod, pow10);
+            bc_num *new_frac_int = bc_mod(prod, pow10);
+
+            int d = bc_num_to_long(d_num);
+            if (obase <= 16) {
+                if (d < 10) printf("%d", d);
+                else printf("%c", 'A' + (d - 10));
+            } else {
+                printf(" %02d", d);
+            }
+
+            bc_free(curr_frac_int);
+            curr_frac_int = new_frac_int;
+            bc_free(prod);
+            bc_free(d_num);
+        }
+        bc_free(curr_frac_int);
+    } else {
+        bc_free(frac_int);
+    }
+
+    bc_free(base);
+    bc_free(pow10);
+    bc_scale = old_scale;
 }
 
 bc_num *bc_dup(bc_num *src) {

@@ -472,11 +472,12 @@ static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id,
 static int infer_expr_type(parser_t *p, const cc_expr_t *e, cc_type_t *out_type, int *out_struct_id);
 static cc_expr_t *parse_expr(parser_t *p);
 static cc_expr_t *parse_cond(parser_t *p);
+static cc_expr_t *parse_unary(parser_t *p);
 static cc_expr_t *new_bin_expr(cc_binop_t op, cc_expr_t *lhs, cc_expr_t *rhs);
 static void free_expr(cc_expr_t *e);
 static void free_stmt(cc_stmt_t *s);
 static int eval_const_array_bound_expr(parser_t *p, const cc_expr_t *e, long *out);
-static int parse_array_extent(parser_t *p, long *out_n, int *out_const_n);
+static int parse_array_extent(parser_t *p, long *out_n, int *out_const_n, cc_expr_t **out_bound_expr);
 static int parse_params(parser_t *p, cc_function_t *f, int allow_oldstyle_names);
 static int can_parse_oldstyle_param_names(parser_t *p);
 static int parse_function(parser_t *p, cc_function_t *f);
@@ -2461,7 +2462,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                             long n = 1;
                             int const_extent = 0;
                             int empty_extent = (peek_kind(p) == TOK_RBRACK);
-                            if (parse_array_extent(p, &n, &const_extent) != 0) {
+                            if (parse_array_extent(p, &n, &const_extent, NULL) != 0) {
                                 free(mname);
                                 return -1;
                             }
@@ -3837,7 +3838,7 @@ static int eval_const_array_bound_expr(parser_t *p, const cc_expr_t *e, long *ou
     }
 }
 
-static int parse_array_extent(parser_t *p, long *out_n, int *out_const_n) {
+static int parse_array_extent(parser_t *p, long *out_n, int *out_const_n, cc_expr_t **out_bound_expr) {
     cc_expr_t *bound = NULL;
     long n = 1;
     int is_const = 0;
@@ -3847,6 +3848,9 @@ static int parse_array_extent(parser_t *p, long *out_n, int *out_const_n) {
     }
     if (next_tok(p) != 0) {
         return -1;
+    }
+    if (out_bound_expr != NULL) {
+        *out_bound_expr = NULL;
     }
     if (p->tok.kind == TOK_RBRACK) {
         if (expect(p, TOK_RBRACK, "expected ']' after array declarator") != 0) {
@@ -3866,8 +3870,75 @@ static int parse_array_extent(parser_t *p, long *out_n, int *out_const_n) {
             is_const = 1;
         }
     }
-    free_expr(bound);
     if (expect(p, TOK_RBRACK, "expected ']' after array declarator") != 0) {
+        free_expr(bound);
+        return -1;
+    }
+    if (is_const) {
+        free_expr(bound);
+        bound = NULL;
+    } else if (out_bound_expr == NULL) {
+        free_expr(bound);
+        bound = NULL;
+    } else {
+        *out_bound_expr = bound;
+    }
+    *out_n = is_const ? n : (n > 0 ? n : 1);
+    *out_const_n = is_const;
+    return 0;
+}
+
+static int parse_param_array_extent(parser_t *p, long *out_n, int *out_const_n, int *io_saw_restrict) {
+    long n = 1;
+    int is_const = 0;
+    cc_expr_t *bound;
+
+    if (p == NULL || out_n == NULL || out_const_n == NULL || p->tok.kind != TOK_LBRACK) {
+        return -1;
+    }
+    if (next_tok(p) != 0) {
+        return -1;
+    }
+    while (p->tok.kind == TOK_KW_STATIC || p->tok.kind == TOK_KW_CONST || p->tok.kind == TOK_KW_VOLATILE ||
+           p->tok.kind == TOK_KW_RESTRICT) {
+        if (p->tok.kind == TOK_KW_RESTRICT && io_saw_restrict != NULL) {
+            *io_saw_restrict = 1;
+        }
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+    }
+    if (p->tok.kind == TOK_RBRACK) {
+        if (expect(p, TOK_RBRACK, "expected ']' after parameter array declarator") != 0) {
+            return -1;
+        }
+        *out_n = 1;
+        *out_const_n = 0;
+        return 0;
+    }
+    if (p->tok.kind == TOK_STAR) {
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+        if (expect(p, TOK_RBRACK, "expected ']' after parameter array declarator") != 0) {
+            return -1;
+        }
+        *out_n = 1;
+        *out_const_n = 0;
+        return 0;
+    }
+
+    bound = parse_expr(p);
+    if (bound == NULL) {
+        return -1;
+    }
+    if (eval_const_array_bound_expr(p, bound, &n) == 0) {
+        if (n > 0 || (parser_is_gnu_mode() && n == 0)) {
+            is_const = 1;
+        }
+    }
+    free_expr(bound);
+    if (expect(p, TOK_RBRACK, "expected ']' after parameter array declarator") != 0) {
         return -1;
     }
     *out_n = is_const ? n : (n > 0 ? n : 1);
@@ -3876,15 +3947,19 @@ static int parse_array_extent(parser_t *p, long *out_n, int *out_const_n) {
 }
 
 static int parse_array_suffix(parser_t *p, cc_type_t *io_type, long *out_array_len, int *out_array_ndim,
-                              long out_array_dims[CC_MAX_ARRAY_DIMS]) {
+                              long out_array_dims[CC_MAX_ARRAY_DIMS], cc_expr_t **out_vla_bound) {
     long arr_len = -1;
     int arr_ndim = 0;
     int saw_incomplete_dim = 0;
     long dims[CC_MAX_ARRAY_DIMS];
     memset(dims, 0, sizeof(dims));
+    if (out_vla_bound != NULL) {
+        *out_vla_bound = NULL;
+    }
     while (p->tok.kind == TOK_LBRACK) {
         long n = 1;
         int saw_const_n = 0;
+        cc_expr_t *bound_expr = NULL;
         cc_type_t ty = ptr_of_type(*io_type);
         if (ty == CC_TYPE_VOID) {
             /*
@@ -3894,7 +3969,7 @@ static int parse_array_suffix(parser_t *p, cc_type_t *io_type, long *out_array_l
             ty = *io_type;
         }
         *io_type = ty;
-        if (parse_array_extent(p, &n, &saw_const_n) != 0) {
+        if (parse_array_extent(p, &n, &saw_const_n, &bound_expr) != 0) {
             return -1;
         }
         if (saw_const_n) {
@@ -3917,9 +3992,17 @@ static int parse_array_suffix(parser_t *p, cc_type_t *io_type, long *out_array_l
         }
         if (arr_ndim >= CC_MAX_ARRAY_DIMS) {
             set_diag(p->diag, p->tok.line, p->tok.col, "array rank > 4 is not yet supported");
+            free_expr(bound_expr);
             return -1;
         }
         dims[arr_ndim++] = saw_const_n ? n : 0;
+        if (!saw_const_n && bound_expr != NULL) {
+            if (out_vla_bound != NULL && *out_vla_bound == NULL && arr_ndim == 1) {
+                *out_vla_bound = bound_expr;
+            } else {
+                free_expr(bound_expr);
+            }
+        }
     }
     if (out_array_len != NULL) {
         *out_array_len = arr_len;
@@ -5008,7 +5091,7 @@ static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id,
         int suffix_array_ndim = 0;
         long suffix_array_dims[CC_MAX_ARRAY_DIMS];
         memset(suffix_array_dims, 0, sizeof(suffix_array_dims));
-        if (parse_array_suffix(p, &ty, &suffix_array_len, &suffix_array_ndim, suffix_array_dims) != 0) {
+        if (parse_array_suffix(p, &ty, &suffix_array_len, &suffix_array_ndim, suffix_array_dims, NULL) != 0) {
             return -1;
         }
         if (prepend_array_info(&decl_array_len, &decl_array_ndim, decl_array_dims, suffix_array_len, suffix_array_ndim,
@@ -5069,7 +5152,7 @@ static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id,
             int suffix_array_ndim = 0;
             long suffix_array_dims[CC_MAX_ARRAY_DIMS];
             memset(suffix_array_dims, 0, sizeof(suffix_array_dims));
-            if (parse_array_suffix(p, &ty, &suffix_array_len, &suffix_array_ndim, suffix_array_dims) != 0) {
+            if (parse_array_suffix(p, &ty, &suffix_array_len, &suffix_array_ndim, suffix_array_dims, NULL) != 0) {
                 return -1;
             }
             if (prepend_array_info(&decl_array_len, &decl_array_ndim, decl_array_dims, suffix_array_len,
@@ -5185,8 +5268,6 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
             }
         }
         while (p->tok.kind == TOK_LBRACK) {
-            long dim = 0;
-            int dim_is_const = 0;
             ty = ptr_of_type(ty);
             if (ty == CC_TYPE_VOID) {
                 set_ptr_depth_diag(p, __LINE__);
@@ -5194,62 +5275,36 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
                 *out_name = NULL;
                 return -1;
             }
-            if (next_tok(p) != 0) {
-                free(*out_name);
-                *out_name = NULL;
-                return -1;
-            }
-            if (p->tok.kind == TOK_NUM && !p->tok.is_float && peek_kind(p) == TOK_RBRACK && p->tok.num > 0) {
-                dim = p->tok.num;
-                dim_is_const = 1;
-                if (next_tok(p) != 0) {
+            {
+                long dim = 1;
+                int dim_is_const = 0;
+                if (parse_param_array_extent(p, &dim, &dim_is_const, &saw_restrict) != 0) {
                     free(*out_name);
                     *out_name = NULL;
                     return -1;
                 }
-            }
-            while (p->tok.kind != TOK_RBRACK) {
-                if (p->tok.kind == TOK_EOF) {
-                    set_diag(p->diag, p->tok.line, p->tok.col, "unterminated parameter array declarator");
+                if (decl_array_ndim >= CC_MAX_ARRAY_DIMS) {
+                    set_diag(p->diag, p->tok.line, p->tok.col, "array rank > 4 is not yet supported");
                     free(*out_name);
                     *out_name = NULL;
                     return -1;
                 }
-                if (p->tok.kind == TOK_KW_RESTRICT) {
-                    saw_restrict = 1;
-                }
-                if (next_tok(p) != 0) {
-                    free(*out_name);
-                    *out_name = NULL;
-                    return -1;
-                }
-            }
-            if (expect(p, TOK_RBRACK, "expected ']' after parameter array declarator") != 0) {
-                free(*out_name);
-                *out_name = NULL;
-                return -1;
-            }
-            if (decl_array_ndim >= CC_MAX_ARRAY_DIMS) {
-                set_diag(p->diag, p->tok.line, p->tok.col, "array rank > 4 is not yet supported");
-                free(*out_name);
-                *out_name = NULL;
-                return -1;
-            }
-            decl_array_dims[decl_array_ndim++] = dim_is_const ? dim : 0;
-            if (dim_is_const) {
-                if (decl_array_len < 0) {
-                    decl_array_len = dim;
-                } else if (decl_array_len == 0 || dim == 0) {
-                    decl_array_len = 0;
-                } else if (decl_array_len > LONG_MAX / dim) {
+                decl_array_dims[decl_array_ndim++] = dim_is_const ? dim : 0;
+                if (dim_is_const) {
+                    if (decl_array_len < 0) {
+                        decl_array_len = dim;
+                    } else if (decl_array_len == 0 || dim == 0) {
+                        decl_array_len = 0;
+                    } else if (decl_array_len > LONG_MAX / dim) {
+                        decl_array_len = 0;
+                    } else {
+                        decl_array_len *= dim;
+                    }
+                } else if (decl_array_len < 0) {
                     decl_array_len = 0;
                 } else {
-                    decl_array_len *= dim;
+                    decl_array_len = 0;
                 }
-            } else if (decl_array_len < 0) {
-                decl_array_len = 0;
-            } else {
-                decl_array_len = 0;
             }
         }
         if (expect(p, TOK_RPAREN, "expected ')' in parameter declarator") != 0) {
@@ -5262,6 +5317,33 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
                 free(*out_name);
                 *out_name = NULL;
                 return -1;
+            }
+        }
+    }
+    if (!grouped_ptr_decl && *out_name == NULL && p->tok.kind == TOK_LPAREN) {
+        parser_t q = *p;
+        q.diag = NULL;
+        if (next_tok(&q) == 0 && q.tok.kind == TOK_IDENT) {
+            const char *name_start = q.tok.start;
+            size_t name_len = q.tok.len;
+            if (next_tok(&q) == 0 && q.tok.kind == TOK_RPAREN) {
+                if (next_tok(p) != 0) {
+                    return -1;
+                }
+                *out_name = xstrdup_n(name_start, name_len);
+                if (*out_name == NULL) {
+                    return -1;
+                }
+                if (next_tok(p) != 0) {
+                    free(*out_name);
+                    *out_name = NULL;
+                    return -1;
+                }
+                if (expect(p, TOK_RPAREN, "expected ')' in parameter declarator") != 0) {
+                    free(*out_name);
+                    *out_name = NULL;
+                    return -1;
+                }
             }
         }
     }
@@ -5317,8 +5399,6 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
         }
     }
     while (p->tok.kind == TOK_LBRACK) {
-        long dim = 0;
-        int dim_is_const = 0;
         if (out_param_array_decl != NULL && !grouped_ptr_decl) {
             *out_param_array_decl = 1;
         }
@@ -5329,62 +5409,36 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
             *out_name = NULL;
             return -1;
         }
-        if (next_tok(p) != 0) {
-            free(*out_name);
-            *out_name = NULL;
-            return -1;
-        }
-        if (p->tok.kind == TOK_NUM && !p->tok.is_float && peek_kind(p) == TOK_RBRACK && p->tok.num > 0) {
-            dim = p->tok.num;
-            dim_is_const = 1;
-            if (next_tok(p) != 0) {
+        {
+            long dim = 1;
+            int dim_is_const = 0;
+            if (parse_param_array_extent(p, &dim, &dim_is_const, &saw_restrict) != 0) {
                 free(*out_name);
                 *out_name = NULL;
                 return -1;
             }
-        }
-        while (p->tok.kind != TOK_RBRACK) {
-            if (p->tok.kind == TOK_EOF) {
-                set_diag(p->diag, p->tok.line, p->tok.col, "unterminated parameter array declarator");
+            if (decl_array_ndim >= CC_MAX_ARRAY_DIMS) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "array rank > 4 is not yet supported");
                 free(*out_name);
                 *out_name = NULL;
                 return -1;
             }
-            if (p->tok.kind == TOK_KW_RESTRICT) {
-                saw_restrict = 1;
-            }
-            if (next_tok(p) != 0) {
-                free(*out_name);
-                *out_name = NULL;
-                return -1;
-            }
-        }
-        if (expect(p, TOK_RBRACK, "expected ']' after parameter array declarator") != 0) {
-            free(*out_name);
-            *out_name = NULL;
-            return -1;
-        }
-        if (decl_array_ndim >= CC_MAX_ARRAY_DIMS) {
-            set_diag(p->diag, p->tok.line, p->tok.col, "array rank > 4 is not yet supported");
-            free(*out_name);
-            *out_name = NULL;
-            return -1;
-        }
-        decl_array_dims[decl_array_ndim++] = dim_is_const ? dim : 0;
-        if (dim_is_const) {
-            if (decl_array_len < 0) {
-                decl_array_len = dim;
-            } else if (decl_array_len == 0 || dim == 0) {
-                decl_array_len = 0;
-            } else if (decl_array_len > LONG_MAX / dim) {
+            decl_array_dims[decl_array_ndim++] = dim_is_const ? dim : 0;
+            if (dim_is_const) {
+                if (decl_array_len < 0) {
+                    decl_array_len = dim;
+                } else if (decl_array_len == 0 || dim == 0) {
+                    decl_array_len = 0;
+                } else if (decl_array_len > LONG_MAX / dim) {
+                    decl_array_len = 0;
+                } else {
+                    decl_array_len *= dim;
+                }
+            } else if (decl_array_len < 0) {
                 decl_array_len = 0;
             } else {
-                decl_array_len *= dim;
+                decl_array_len = 0;
             }
-        } else if (decl_array_len < 0) {
-            decl_array_len = 0;
-        } else {
-            decl_array_len = 0;
         }
     }
     while (p->tok.kind == TOK_LPAREN) {
@@ -5477,6 +5531,7 @@ static void free_stmt(cc_stmt_t *s) {
     free(s->label_name);
     free(s->attr_section);
     free(s->attr_alias);
+    free_expr(s->array_bound_expr);
     free_expr(s->expr);
     free(s->asm_template);
     for (i = 0; i < s->asm_output_count; ++i) {
@@ -6297,6 +6352,8 @@ static cc_expr_t *parse_generic_expr(parser_t *p) {
     return result;
 }
 
+static cc_expr_t *parse_unary(parser_t *p);
+
 static cc_expr_t *parse_primary(parser_t *p) {
     cc_expr_t *e;
 
@@ -6304,7 +6361,13 @@ static cc_expr_t *parse_primary(parser_t *p) {
         if (next_tok(p) != 0) {
             return NULL;
         }
-        return parse_primary(p);
+        /*
+         * GNU __extension__ can prefix any expression, including casts such as
+         * `__extension__ (void)({ ... })`. Re-enter unary parsing so cast
+         * recognition still runs instead of dropping straight to primary-only
+         * parsing.
+         */
+        return parse_unary(p);
     }
 
     if (p->tok.kind == TOK_NUM) {
@@ -6423,6 +6486,8 @@ static cc_expr_t *parse_primary(parser_t *p) {
 
     if (p->tok.kind == TOK_IDENT) {
         cc_type_t typedef_bty = CC_TYPE_VOID;
+        int var_idx = var_find_visible_n(p, p->tok.start, p->tok.len);
+        int eidx = -1;
         int is_typedef_name =
             typedef_find_visible_n(p, p->tok.start, p->tok.len) >= 0 ||
             builtin_typedef_type_n(p->tok.start, p->tok.len, &typedef_bty);
@@ -6466,13 +6531,12 @@ static cc_expr_t *parse_primary(parser_t *p) {
             }
             return e;
         }
-        if (is_typedef_name) {
+        if (var_idx < 0) {
+            eidx = enum_const_find_visible_n(p, p->tok.start, p->tok.len);
+        }
+        if (is_typedef_name && var_idx < 0 && eidx < 0) {
             set_diag(p->diag, p->tok.line, p->tok.col, "expected expression");
             return NULL;
-        }
-        int eidx = -1;
-        if (var_find_visible_n(p, p->tok.start, p->tok.len) < 0) {
-            eidx = enum_const_find_visible_n(p, p->tok.start, p->tok.len);
         }
         if (eidx >= 0) {
             e = new_expr(CC_EXPR_INT);
@@ -7114,6 +7178,13 @@ static int clone_stmt(const cc_stmt_t *src, cc_stmt_t *dst) {
             return -1;
         }
     }
+    if (src->array_bound_expr != NULL) {
+        dst->array_bound_expr = clone_expr(src->array_bound_expr);
+        if (dst->array_bound_expr == NULL) {
+            free_stmt(dst);
+            return -1;
+        }
+    }
     if (src->asm_template != NULL) {
         dst->asm_template = xstrdup_n(src->asm_template, strlen(src->asm_template));
         if (dst->asm_template == NULL) {
@@ -7705,7 +7776,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
                 int arr_ndim = 0;
                 long arr_dims[CC_MAX_ARRAY_DIMS];
                 memset(arr_dims, 0, sizeof(arr_dims));
-                if (parse_array_suffix(p, &e->aux_type, &arr_len, &arr_ndim, arr_dims) != 0) {
+                if (parse_array_suffix(p, &e->aux_type, &arr_len, &arr_ndim, arr_dims, NULL) != 0) {
                     free_expr(e);
                     return NULL;
                 }
@@ -8402,7 +8473,7 @@ static int __attribute__((unused)) parse_decl_stmt(parser_t *p, cc_stmt_t *s, in
         decl_attrs_clear(&decl_attrs);
         return -1;
     }
-    if (parse_array_suffix(p, &s->type, &suffix_array_len, &suffix_array_ndim, suffix_array_dims) != 0) {
+    if (parse_array_suffix(p, &s->type, &suffix_array_len, &suffix_array_ndim, suffix_array_dims, NULL) != 0) {
         decl_attrs_clear(&decl_attrs);
         return -1;
     }
@@ -8530,6 +8601,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         long inner_array_len = -1;
         int inner_array_ndim = 0;
         long inner_array_dims[CC_MAX_ARRAY_DIMS];
+        cc_expr_t *inner_vla_bound = NULL;
         decl_attrs_t suffix_attrs;
         decl_attrs_t merged_attrs;
         memset(&s, 0, sizeof(s));
@@ -8681,7 +8753,8 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                     return -1;
                 }
             }
-            if (parse_array_suffix(p, &s.type, &inner_array_len, &inner_array_ndim, inner_array_dims) != 0) {
+            if (parse_array_suffix(p, &s.type, &inner_array_len, &inner_array_ndim, inner_array_dims,
+                                   &inner_vla_bound) != 0) {
                 free_stmt(&s);
                 return -1;
             }
@@ -8720,8 +8793,11 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             int suffix_array_ndim = 0;
             int pointee_array_decl = 0;
             long suffix_array_dims[CC_MAX_ARRAY_DIMS];
+            cc_expr_t *suffix_vla_bound = NULL;
             memset(suffix_array_dims, 0, sizeof(suffix_array_dims));
-            if (parse_array_suffix(p, &s.type, &suffix_array_len, &suffix_array_ndim, suffix_array_dims) != 0) {
+            if (parse_array_suffix(p, &s.type, &suffix_array_len, &suffix_array_ndim, suffix_array_dims,
+                                   &suffix_vla_bound) != 0) {
+                free_expr(inner_vla_bound);
                 free_stmt(&s);
                 return -1;
             }
@@ -8729,10 +8805,22 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                                    inner_array_dims) != 0 ||
                 prepend_array_info(&s.array_len, &s.array_ndim, s.array_dims, suffix_array_len, suffix_array_ndim,
                                    suffix_array_dims) != 0) {
+                free_expr(inner_vla_bound);
+                free_expr(suffix_vla_bound);
                 set_diag(p->diag, p->tok.line, p->tok.col, "array rank > 4 is not yet supported");
                 free_stmt(&s);
                 return -1;
             }
+            if (s.array_ndim == 1 && s.array_dims[0] == 0) {
+                s.array_bound_expr = inner_vla_bound != NULL ? inner_vla_bound : suffix_vla_bound;
+                if (s.array_bound_expr == inner_vla_bound) {
+                    suffix_vla_bound = NULL;
+                } else {
+                    inner_vla_bound = NULL;
+                }
+            }
+            free_expr(inner_vla_bound);
+            free_expr(suffix_vla_bound);
             /*
              * Only plain pointer-to-array declarators (`(*p)[N]`) should be
              * treated as scalar pointer objects with pointee-shape metadata.
@@ -8757,17 +8845,25 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             long suffix_array_len = -1;
             int suffix_array_ndim = 0;
             long suffix_array_dims[CC_MAX_ARRAY_DIMS];
+            cc_expr_t *suffix_vla_bound = NULL;
             memset(suffix_array_dims, 0, sizeof(suffix_array_dims));
-            if (parse_array_suffix(p, &s.type, &suffix_array_len, &suffix_array_ndim, suffix_array_dims) != 0) {
+            if (parse_array_suffix(p, &s.type, &suffix_array_len, &suffix_array_ndim, suffix_array_dims,
+                                   &suffix_vla_bound) != 0) {
                 free_stmt(&s);
                 return -1;
             }
             if (prepend_array_info(&s.array_len, &s.array_ndim, s.array_dims, suffix_array_len, suffix_array_ndim,
                                    suffix_array_dims) != 0) {
+                free_expr(suffix_vla_bound);
                 set_diag(p->diag, p->tok.line, p->tok.col, "array rank > 4 is not yet supported");
                 free_stmt(&s);
                 return -1;
             }
+            if (s.array_ndim == 1 && s.array_dims[0] == 0) {
+                s.array_bound_expr = suffix_vla_bound;
+                suffix_vla_bound = NULL;
+            }
+            free_expr(suffix_vla_bound);
             if ((base_saw_restrict || decl_saw_restrict) && !is_pointer_type(s.type)) {
                 set_diag(p->diag, p->tok.line, p->tok.col, "restrict qualifier requires a pointer type");
                 free_stmt(&s);
