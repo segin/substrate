@@ -31,6 +31,7 @@ typedef struct {
     int is_function;
     int is_variadic;
     char **params;
+    size_t *param_lens;
     size_t param_count;
     char *body;
 } pp_macro_t;
@@ -516,6 +517,7 @@ static void macro_free_item(pp_macro_t *m) {
         free(m->params[i]);
     }
     free(m->params);
+    free(m->param_lens);
     free(m->body);
     memset(m, 0, sizeof(*m));
 }
@@ -537,7 +539,8 @@ static int macro_clone_item(const pp_macro_t *src, pp_macro_t *dst) {
     }
     if (src->param_count > 0) {
         dst->params = (char **)calloc(src->param_count, sizeof(*dst->params));
-        if (dst->params == NULL) {
+        dst->param_lens = (size_t *)calloc(src->param_count, sizeof(*dst->param_lens));
+        if (dst->params == NULL || dst->param_lens == NULL) {
             macro_free_item(dst);
             return -1;
         }
@@ -547,6 +550,7 @@ static int macro_clone_item(const pp_macro_t *src, pp_macro_t *dst) {
                 macro_free_item(dst);
                 return -1;
             }
+            dst->param_lens[i] = src->param_lens[i];
         }
     }
     return 0;
@@ -698,6 +702,16 @@ static int macro_set(pp_macro_table_t *t, const char *name, int is_function, int
     if (m->name == NULL || m->body == NULL) {
         macro_free_item(m);
         return -1;
+    }
+    if (param_count > 0 && params != NULL) {
+        m->param_lens = (size_t *)calloc(param_count, sizeof(*m->param_lens));
+        if (m->param_lens == NULL) {
+            macro_free_item(m);
+            return -1;
+        }
+        for (size_t i = 0; i < param_count; ++i) {
+            m->param_lens[i] = strlen(params[i]);
+        }
     }
     return 0;
 }
@@ -3629,7 +3643,7 @@ static char *replace_params(const pp_macro_t *m, char **raw_args, char **exp_arg
                 for (ident_end = ident_start + 1; is_ident_char((unsigned char)m->body[ident_end]); ++ident_end) {
                 }
                 for (pidx = 0; pidx < m->param_count; ++pidx) {
-                    if (strlen(m->params[pidx]) == (ident_end - ident_start) &&
+                    if (m->param_lens[pidx] == (ident_end - ident_start) &&
                         strncmp(m->body + ident_start, m->params[pidx], ident_end - ident_start) == 0) {
                         char *quoted =
                             stringify_macro_arg(pidx < arg_count && raw_args[pidx] != NULL ? raw_args[pidx] : "");
@@ -3668,7 +3682,7 @@ static char *replace_params(const pp_macro_t *m, char **raw_args, char **exp_arg
                 j++;
             }
             for (k = 0; k < m->param_count; ++k) {
-                if (strlen(m->params[k]) == (j - i) && strncmp(m->body + i, m->params[k], j - i) == 0) {
+                if (m->param_lens[k] == (j - i) && strncmp(m->body + i, m->params[k], j - i) == 0) {
                     if (k < arg_count) {
                         size_t l = i;
                         size_t r = j;
