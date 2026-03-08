@@ -744,8 +744,8 @@
         - [x] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
             - [x] Integration: boot SMP with 2, 4, 8 CPUs in QEMU `-smp N`. (REQ: REQ-01-0619)
             - [x] Unit: LAPIC timer calibration accuracy. (REQ: REQ-01-0620)
-            - [ ] Unit: IPI send/receive between CPUs. (REQ: REQ-01-0621)
-            - [ ] Unit: per-CPU data isolation. (REQ: REQ-01-0622)
+            - [x] Unit: IPI send/receive between CPUs. (REQ: REQ-01-0621)
+            - [x] Unit: per-CPU data isolation. (REQ: REQ-01-0622)
 
     - [x] **Scheduling (MLFQ Scheduler):** (REQ: REQ-01-0623)
 
