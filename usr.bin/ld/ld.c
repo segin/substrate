@@ -14,6 +14,8 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/wait.h>
+#include <fcntl.h>
 
 #define LD_MAX_SCRIPT_INCLUDE_DEPTH 64
 #define LD_MAX_TRACKED_SYMBOLS 262144U
@@ -3351,6 +3353,7 @@ static int plugin_discover_and_handshake(ld_ctx_t *ctx) {
         fprintf(stderr, "ld: plugin handshake failed for %s\n", ctx->plugin_path);
         return -1;
     }
+
     ctx->plugin_checked = 1;
     return 0;
 }
