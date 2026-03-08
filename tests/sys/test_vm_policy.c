@@ -3,10 +3,16 @@
  */
 
 #include <stdint.h>
+#include <string.h>
+#include <arch/i386/pmap.h>
 #include <vm/vm_page.h>
 #include <vm/vm_object.h>
 #include <vm/vm_pager.h>
+#include <exec/perso/personality.h>
+#include <sys/proc.h>
 #include <kern/console.h>
+#include <kern/sched.h>
+#include <pm/pm.h>
 #include <vm/phys_mem.h>
 
 static int tests_passed = 0;
@@ -196,11 +202,111 @@ void test_vm_pageout_launders_before_scanning_active(void) {
     kprint("  PASS\n");
 }
 
+void test_vm_pageout_oom_kills_largest_user_process(void) {
+    vm_page_thresholds_t thresholds;
+    vm_page_t *pressure = NULL;
+    process_t *small;
+    process_t *large;
+    process_t *kproc;
+    process_t *init;
+    thread_t *small_thread;
+    thread_t *large_thread;
+    thread_t *kernel_thread;
+    thread_t *init_thread = NULL;
+    struct pmap small_pmap;
+    struct pmap large_pmap;
+    struct pmap kernel_pmap;
+
+    kprint("Test: vm_pageout_oom_kills_largest_user_process\n");
+
+    vm_page_get_thresholds(&thresholds);
+
+    small = proc_create(PERS_NATIVE);
+    large = proc_create(PERS_NATIVE);
+    kproc = proc_create(PERS_NATIVE);
+    TEST_ASSERT(small != NULL && large != NULL && kproc != NULL,
+                "oom_kill: proc_create failed");
+
+    small_thread = sched_alloc_thread(small);
+    large_thread = sched_alloc_thread(large);
+    kernel_thread = sched_alloc_thread(kproc);
+    TEST_ASSERT(small_thread != NULL && large_thread != NULL && kernel_thread != NULL,
+                "oom_kill: sched_alloc_thread failed");
+
+    memset(&small_pmap, 0, sizeof(small_pmap));
+    memset(&large_pmap, 0, sizeof(large_pmap));
+    memset(&kernel_pmap, 0, sizeof(kernel_pmap));
+
+    small->state = SRUN;
+    large->state = SRUN;
+    kproc->state = SRUN;
+    small->is_kernel_task = 0;
+    large->is_kernel_task = 0;
+    kproc->is_kernel_task = 1;
+    small->pmap = &small_pmap;
+    large->pmap = &large_pmap;
+    kproc->pmap = &kernel_pmap;
+    small_pmap.resident_count = 8;
+    large_pmap.resident_count = 32;
+    kernel_pmap.resident_count = 128;
+
+    small_thread->state = THREAD_READY;
+    large_thread->state = THREAD_READY;
+    kernel_thread->state = THREAD_READY;
+    small_thread->sig_mask = 0;
+    large_thread->sig_mask = 0;
+    kernel_thread->sig_mask = 0;
+    small_thread->sig_pending = 0;
+    large_thread->sig_pending = 0;
+    kernel_thread->sig_pending = 0;
+
+    init = proc_find(1);
+    if (init) {
+        for (int i = 0; i < MAX_THREADS; i++) {
+            if (threads[i].tid != -1 && threads[i].proc == init) {
+                init_thread = &threads[i];
+                break;
+            }
+        }
+    }
+
+    while (vm_phys_get_free() > thresholds.free_min - 1) {
+        vm_page_t *page = vm_phys_alloc_page();
+        TEST_ASSERT(page != NULL, "oom_kill: pressure alloc failed");
+        page->next = pressure;
+        pressure = page;
+    }
+
+    vm_pageout();
+
+    TEST_ASSERT(large_thread->sig_pending & sigmask(SIGKILL),
+                "oom_kill: largest user process not selected");
+    TEST_ASSERT(!(small_thread->sig_pending & sigmask(SIGKILL)),
+                "oom_kill: smaller user process killed");
+    TEST_ASSERT(!(kernel_thread->sig_pending & sigmask(SIGKILL)),
+                "oom_kill: kernel task selected");
+    if (init_thread) {
+        TEST_ASSERT(!(init_thread->sig_pending & sigmask(SIGKILL)),
+                    "oom_kill: init selected");
+    }
+
+    small_thread->tid = -1;
+    large_thread->tid = -1;
+    kernel_thread->tid = -1;
+    small->pid = -1;
+    large->pid = -1;
+    kproc->pid = -1;
+    free_phys_page_list(pressure);
+
+    kprint("  PASS\n");
+}
+
 void run_vm_policy_tests(void) {
     kprint("\n=== VM Policy Tests ===\n");
     test_vm_policy_lru();
     test_vm_policy_writeback();
     test_vm_pageout_prefers_inactive_then_active();
     test_vm_pageout_launders_before_scanning_active();
+    test_vm_pageout_oom_kills_largest_user_process();
     kprint("\nVM Policy Tests Complete\n");
 }

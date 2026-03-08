@@ -143,7 +143,7 @@
                     - [x] `vm_page_launder()`: write dirty pages to backing store. (REQ: REQ-01-0123)
                     - [x] `vm_page_try_to_free()`: attempt to free clean inactive pages. (REQ: REQ-01-0124)
                     - [x] Priority-based scanning phases: Inactive → Laundry → Active. (REQ: REQ-01-0125)
-                    - [ ] OOM killer hook: kill process if cannot free memory. (REQ: REQ-01-0126)
+                    - [x] OOM killer hook: kill process if cannot free memory. (REQ: REQ-01-0126)
                 - [x] **Thresholds:** (REQ: REQ-01-0127)
                     - [x] `vm_page_free_min`: absolute minimum free pages (16 default; panic below). (REQ: REQ-01-0128)
                     - [x] `vm_page_free_target`: target free pages (64 default; daemon sleeps above). (REQ: REQ-01-0129)

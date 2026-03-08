@@ -9,9 +9,12 @@
 #include <kern/time.h>
 #include <kern/sched.h>
 #include <pm/pm.h>
+#include <sys/signal.h>
 #include <stddef.h>
 #include <string.h>
+#include <vm/vm_area.h>
 #include <vm/phys_mem.h>
+#include <vm/vm_map.h>
 
 // System Page Queues
 static vm_page_t *active_queue = NULL;
@@ -74,6 +77,100 @@ static int queue_contains(vm_page_t *head, vm_page_t *target) {
 		}
 	}
 	return 0;
+}
+
+static int vm_page_process_has_live_threads(process_t *proc) {
+	if (!proc) {
+		return 0;
+	}
+
+	for (int i = 0; i < MAX_THREADS; i++) {
+		if (threads[i].tid == -1 || threads[i].proc != proc) {
+			continue;
+		}
+		if (threads[i].state != THREAD_ZOMBIE) {
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
+static uint32_t vm_page_oom_score(process_t *proc) {
+	uint32_t score = 0;
+
+	if (!proc) {
+		return 0;
+	}
+
+	if (proc->pmap && proc->pmap != pmap_kernel()) {
+		score = proc->pmap->resident_count;
+	}
+
+	if (score == 0 && proc->vm_map) {
+		score = (uint32_t)((proc->vm_map->size + 4095) / 4096);
+	}
+
+	if (score == 0) {
+		for (struct vm_area *area = proc->vm_areas; area; area = area->next) {
+			if (area->vm_end > area->vm_start) {
+				score += (uint32_t)(((uintptr_t)area->vm_end - (uintptr_t)area->vm_start + 4095) / 4096);
+			}
+		}
+	}
+
+	if (score == 0) {
+		score = 1;
+	}
+
+	return score;
+}
+
+static process_t *vm_page_select_oom_victim(void) {
+	process_t *victim = NULL;
+	uint32_t best_score = 0;
+
+	for (int i = 0; i < MAX_PROCS; i++) {
+		process_t *proc = &processes[i];
+		uint32_t score;
+
+		if (proc->pid <= 1) {
+			continue;
+		}
+		if (proc->is_kernel_task) {
+			continue;
+		}
+		if (proc->state == SDYING || proc->state == SZOMB) {
+			continue;
+		}
+		if (!vm_page_process_has_live_threads(proc)) {
+			continue;
+		}
+
+		score = vm_page_oom_score(proc);
+		if (!victim || score > best_score ||
+		    (score == best_score && proc->pid > victim->pid)) {
+			victim = proc;
+			best_score = score;
+		}
+	}
+
+	return victim;
+}
+
+static int vm_page_oom_kill(void) {
+	process_t *victim = vm_page_select_oom_victim();
+	uint32_t score;
+
+	if (!victim) {
+		return 0;
+	}
+
+	score = vm_page_oom_score(victim);
+	kprintf("OOM: killing pid %d (%s), score=%u pages\n",
+	    victim->pid, victim->comm, score);
+	psignal(victim, SIGKILL);
+	return 1;
 }
 
 int vm_page_check_queues(void) {
@@ -647,8 +744,11 @@ void vm_pageout(void) {
 
 	// Panic if critically low
 	if(vm_phys_get_free() < (size_t)vm_page_free_min) {
-		kprint("PANIC: Out of memory!\n");
-		// OOM killer would go here
+		if (!vm_page_oom_kill()) {
+			kprint("PANIC: Out of memory!\n");
+		} else {
+			vm_pages_needed = 1;
+		}
 	}
 }
 
