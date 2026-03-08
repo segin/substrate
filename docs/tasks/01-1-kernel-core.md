@@ -975,7 +975,7 @@
         - [ ] **Signal Checking Points:** (REQ: REQ-01-0823)
             - [x] Return from interrupt/exception: `signal_handle_pending()` if returning to user mode. (REQ: REQ-01-0824)
             - [x] Return from syscall: check pending, return EINTR if interruptible. (REQ: REQ-01-0825)
-            - [ ] Sleep wakeup: `sched_sleep()` returns on signal (EINTR). (REQ: REQ-01-0826)
+            - [x] Sleep wakeup: interruptible `sched_sleep()` callers are resumed on signal with `EINTR` state. (REQ: REQ-01-0826)
 
         - [ ] **Special Signal Handling:** (REQ: REQ-01-0827)
             - [ ] SIGKILL: cannot be caught/blocked/ignored; terminates immediately; wake stopped threads. (REQ: REQ-01-0828)

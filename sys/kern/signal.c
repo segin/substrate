@@ -4,6 +4,7 @@
 #include <sys/session.h>
 #include <sys/errno.h>
 #include <kern/sched.h>
+#include <kern/sleepq.h>
 #include <arch/i386/idt.h>
 #include <kern/console.h>
 #include <kern/panic.h>
@@ -15,6 +16,17 @@
 #include <sys/kern_syscalls.h>
 
 extern thread_t threads[MAX_THREADS];
+
+static void signal_interrupt_thread(thread_t *t) {
+    if (!t) {
+        return;
+    }
+
+    sleepq_remove_thread(t);
+    t->sleep_status = -EINTR;
+    t->wait_chan = NULL;
+    t->state = THREAD_READY;
+}
 
 // Signal System Calls
 int kern_sigaction(int sig, const struct sigaction *act, struct sigaction *oact) {
@@ -448,7 +460,7 @@ void psignal(process_t *p, int sig) {
         /* Wake interruptibly-sleeping threads */
         if (t->state == THREAD_BLOCKED && unmasked &&
             (t->flags & THREAD_F_INTERRUPTIBLE)) {
-            sched_wakeup(&t->sig_pending);
+            signal_interrupt_thread(t);
         }
     }
     
@@ -456,7 +468,7 @@ void psignal(process_t *p, int sig) {
     if (best_thread && best_thread->state == THREAD_BLOCKED && 
         best_priority > 0 &&
         (best_thread->flags & THREAD_F_INTERRUPTIBLE)) {
-        sched_wakeup(&best_thread->sig_pending);
+        signal_interrupt_thread(best_thread);
     }
 }
 

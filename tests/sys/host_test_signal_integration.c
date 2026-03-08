@@ -26,6 +26,7 @@ void mutex_unlock(mutex_t *m) { (void)m; }
 void sched_yield(void) {}
 void sched_sleep(void *chan) { (void)chan; }
 void sched_wakeup(void *chan) { (void)chan; }
+int sleepq_remove_thread(thread_t *t) { (void)t; return 0; }
 void kprint(const char *msg) { (void)msg; }
 void panic(const char *msg) { (void)msg; assert(!"panic"); }
 uint64_t get_ticks(void) { return 0; }
@@ -224,9 +225,43 @@ static void test_sys_kill_permission_and_group_routing(void) {
     assert((init_thread->sig_pending & sigmask(SIGWINCH)) == 0);
 }
 
+static void test_psignal_interrupts_generic_sleep(void) {
+    process_t *proc;
+    thread_t *thread;
+    int wait_chan = 0;
+
+    reset_env();
+
+    proc = &processes[0];
+    thread = &threads[0];
+
+    proc->pid = 30;
+    proc->uid = 1000;
+    proc->euid = 1000;
+    proc->state = SRUN;
+
+    thread->tid = 300;
+    thread->proc = proc;
+    thread->state = THREAD_BLOCKED;
+    thread->flags = THREAD_F_INTERRUPTIBLE;
+    thread->wait_chan = &wait_chan;
+    thread->sleep_status = 0;
+
+    current_process = proc;
+    current_thread = thread;
+
+    psignal(proc, SIGUSR1);
+
+    assert(thread->state == THREAD_READY);
+    assert(thread->wait_chan == NULL);
+    assert(thread->sleep_status == -EINTR);
+    assert(thread->sig_pending & sigmask(SIGUSR1));
+}
+
 int main(void) {
     test_sigint_kills_target_child();
     test_sys_kill_permission_and_group_routing();
+    test_psignal_interrupts_generic_sleep();
     puts("host_test_signal_integration: PASS");
     return 0;
 }
