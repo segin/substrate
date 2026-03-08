@@ -5,6 +5,7 @@
 #include <pm/pm.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 thread_t threads[MAX_THREADS];
 // Generation counters for each thread slot to enable O(1) TID lookup.
@@ -243,5 +244,25 @@ void sched_iterate_threads(void (*callback)(thread_t *t, void *arg), void *arg) 
         if (threads[i].tid != -1) {
             callback(&threads[i], arg);
         }
+    }
+}
+
+void sched_reap_process_threads(process_t *proc) {
+    if (!proc) {
+        return;
+    }
+
+    for (int i = 0; i < MAX_THREADS; i++) {
+        if (threads[i].tid == -1 || threads[i].proc != proc) {
+            continue;
+        }
+
+        /*
+         * The process is already waitable and no thread in this group should
+         * remain schedulable or visible after the parent reaps it.
+         */
+        memset(&threads[i], 0, sizeof(thread_t));
+        threads[i].tid = -1;
+        threads[i].state = THREAD_ZOMBIE;
     }
 }

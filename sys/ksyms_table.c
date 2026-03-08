@@ -827,6 +827,7 @@ extern void sched_migrate_if_needed(void);
 extern void sched_needs_load_balance(void);
 extern void sched_periodic_balance(void);
 extern void sched_pick_next(void);
+extern void sched_reap_process_threads(void);
 extern void sched_set_affinity(void);
 extern void sched_set_affinity_self(void);
 extern void sched_set_priority(void);
@@ -2128,6 +2129,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&sched_wakeup, "sched_wakeup" },
     { (uint32_t)(uintptr_t)&sched_wakeup_n, "sched_wakeup_n" },
     { (uint32_t)(uintptr_t)&sched_iterate_threads, "sched_iterate_threads" },
+    { (uint32_t)(uintptr_t)&sched_reap_process_threads, "sched_reap_process_threads" },
     { (uint32_t)(uintptr_t)&kern_wait4, "kern_wait4" },
     { (uint32_t)(uintptr_t)&sys_wait4, "sys_wait4" },
     { (uint32_t)(uintptr_t)&session_alloc, "session_alloc" },
@@ -2929,4 +2931,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1459;
+int ksym_count = 1460;

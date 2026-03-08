@@ -136,6 +136,9 @@ int kern_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
                 // Clear process group membership
                 extern void pgrp_remove_proc(struct process *proc);
                 pgrp_remove_proc(target);
+
+                // Retire all thread slots that belonged to the reaped process.
+                sched_reap_process_threads(target);
                 
                 // Free Process Slot
                 target->pid = -1;
