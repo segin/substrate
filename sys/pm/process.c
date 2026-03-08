@@ -295,8 +295,18 @@ int sched_spawn_kernel_process(void (*entry)(void*), void *arg) {
     
     // 4. Create Thread
     thread_t *t = sched_create_thread(child, entry, stack_top, arg);
-    
-    return t ? t->tid : -1;
+    if (!t) {
+        extern void pmm_free_block(void *p);
+        pmm_free_block(stack);
+        return -1;
+    }
+
+    t->kstack_base = (uintptr_t)stack;
+    t->kstack_units = 1;
+    t->kstack_type = THREAD_KSTACK_PMM_BLOCK;
+    t->kstack_owned = 1;
+
+    return t->tid;
 }
 
 // Close all FDs for a process
