@@ -644,6 +644,7 @@ static int lex_ident_or_keyword(cc_lexer_t *lx, cc_token_t *out, size_t line, si
 
 static int lex_char_literal(cc_lexer_t *lx, cc_token_t *out, size_t line, size_t col, int c) {
     long v = 0;
+    int is_plain = c == '\'';
     if (c != '\'') {
         lx_adv(lx);
     }
@@ -720,6 +721,10 @@ static int lex_char_literal(cc_lexer_t *lx, cc_token_t *out, size_t line, size_t
     }
     if (lx_peek(lx) == '\'') {
         lx_adv(lx);
+    }
+    if (is_plain && (unsigned long)v <= 0xffUL) {
+        signed char sc = (signed char)(unsigned char)v;
+        v = (long)sc;
     }
     out->kind = TOK_NUM;
     out->num = v;
