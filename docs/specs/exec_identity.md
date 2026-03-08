@@ -23,6 +23,8 @@ Current behavior:
 - ext2/minix already use on-disk inode numbers directly
 - FAT synthesizes stable inode values for entries that do not have a useful
   cluster-based identity, such as zero-cluster files and FAT12/16 root entries
+- that synthesized FAT identity is deterministic from directory slot location
+  when no cluster-backed inode value exists
 
 The kernel uses that identity in `execve()` rather than the original pathname.
 
