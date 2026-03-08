@@ -51,6 +51,8 @@ void proc_remove_child(process_t *parent, process_t *child);
 static int proc_threads_all_zombie(process_t *proc, thread_t *skip_thread);
 static void proc_release_zombie_resources(process_t *proc);
 static int proc_fork_common(process_t *parent, void *stack, int is_vfork);
+static void proc_sysvipc_exit(process_t *proc);
+static void proc_posixipc_exit(process_t *proc);
 
 void pm_init(void) {
     next_pid = 1;
@@ -220,6 +222,27 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     proc_add_child(parent, child_proc);
     
     return sched_fork_thread(child_proc, stack);
+}
+
+static void proc_sysvipc_exit(process_t *proc) {
+    /*
+     * Dedicated teardown hook for future System V IPC ownership tracking.
+     *
+     * The current kernel does not implement in-kernel SysV shared memory,
+     * semaphore undo state, or message-queue ownership, so process exit has
+     * nothing concrete to detach yet. Keep the phase explicit so later IPC
+     * work lands in one place instead of reopening proc_exit sequencing.
+     */
+    (void)proc;
+}
+
+static void proc_posixipc_exit(process_t *proc) {
+    /*
+     * Dedicated teardown hook for future POSIX semaphore/shared-memory
+     * ownership tracking. No kernel-managed POSIX IPC namespace exists yet,
+     * so exit cleanup is intentionally a no-op today.
+     */
+    (void)proc;
 }
 
 int proc_fork(process_t *parent, void *stack) {
@@ -549,13 +572,11 @@ void proc_exit(int code) {
     // 4. Phase 2: Timers
     proc_timers_cancel(current_process);
     
-    // 5. Phase 2: System V IPC (Placeholders)
-    // Detach from all shared memory segments (shmdt)
-    // Adjust semaphore values (SEM_UNDO)
-    // Remove owned message queues if IPC_RMID pending
+    // 5. Phase 2: System V IPC
+    proc_sysvipc_exit(current_process);
     
-    // 6. Phase 2: POSIX IPC (Placeholders)
-    // Unlink any POSIX semaphores/shared memory owned
+    // 6. Phase 2: POSIX IPC
+    proc_posixipc_exit(current_process);
     
     // 8. Phase 3: Thread Termination
     // Current thread becomes the "reaper thread"

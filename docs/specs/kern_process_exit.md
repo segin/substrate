@@ -43,6 +43,7 @@ The current implementation performs:
 - `close_fs(cwd)`
 - `close_fs(root)` when root differs from the global root
 - `proc_timers_cancel(process)` to zero `ITIMER_REAL`, `ITIMER_VIRTUAL`, and `ITIMER_PROF` state, including the `alarm()` alias on `ITIMER_REAL`
+- `proc_sysvipc_exit(process)` and `proc_posixipc_exit(process)` as explicit teardown hook points
 - switch to `pmap_kernel()` immediately so the exiting thread no longer runs on
   its dying user pmap
 - defer `vm_map_destroy()` / `pmap_release()` to the final reap path in
@@ -50,7 +51,7 @@ The current implementation performs:
 
 Notes:
 
-- System V IPC and POSIX IPC phases remain explicit placeholders
+- the current SysV/POSIX IPC teardown hooks are intentional no-ops because no kernel-managed ownership model for those IPC namespaces exists yet
 - tracked sleep mutexes are force-released here; pending mutex waiters are canceled by the existing `sleepq_remove_thread()` pass
 
 ### 4. Child Reparenting

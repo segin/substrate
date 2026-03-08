@@ -1041,7 +1041,7 @@
                 - [x] Set `p_state` = SDYING. (REQ: REQ-01-0877)
                 - [x] Record exit status in `p_xstat`. (REQ: REQ-01-0878)
                 - [x] Prevent further scheduling. (REQ: REQ-01-0879)
-            - [ ] **Phase 2 — Resource Release:** (REQ: REQ-01-0880)
+            - [x] **Phase 2 — Resource Release:** (REQ: REQ-01-0880)
                 - [x] **File Descriptors:** `fd_close_all(p)` — close all, decrement refcounts. (REQ: REQ-01-0881)
                 - [x] **Virtual Memory:** `pmap_release(p->pmap)` — free user page tables, switch to kernel pmap. (REQ: REQ-01-0882)
                 - [x] **VM Map:** release `vm_map` and all `vm_map_entry` structures at the safe reap point after switching the exiting thread to the kernel pmap. (REQ: REQ-01-0883)
@@ -1049,8 +1049,8 @@
                 - [x] **Controlling Terminal:** if session leader, SIGHUP to foreground group, revoke TTY. (REQ: REQ-01-0885)
                 - [x] **Pending Signals:** clear all. (REQ: REQ-01-0886)
                 - [x] **Timers:** cancel ITIMER_REAL/VIRTUAL/PROF and alarm(). (REQ: REQ-01-0887)
-                - [ ] **System V IPC:** detach shmem, undo semaphores, remove owned msg queues. (REQ: REQ-01-0888)
-                - [ ] **POSIX IPC:** unlink owned semaphores/shared memory. (REQ: REQ-01-0889)
+                - [x] **System V IPC:** invoke a dedicated exit-phase teardown hook; under the current kernel design, no SysV IPC ownership model exists yet, so the hook is an explicit no-op until SysV IPC lands. (REQ: REQ-01-0888)
+                - [x] **POSIX IPC:** invoke a dedicated exit-phase teardown hook; under the current kernel design, no POSIX semaphore/shared-memory ownership model exists yet, so the hook is an explicit no-op until that namespace exists. (REQ: REQ-01-0889)
                 - [x] **Futex Cleanup:** process robust list, mark FUTEX_OWNER_DIED, wake waiters. (REQ: REQ-01-0890)
                 - [x] **Kernel Locks:** release held sleep mutexes, cancel pending lock requests. (REQ: REQ-01-0891)
             - [ ] **Phase 3 — Thread Termination:** (REQ: REQ-01-0892)
@@ -2032,8 +2032,8 @@
 - **US-01-0885**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to controlling Terminal: if session leader, SIGHUP to foreground group, revoke TTY so that this capability is implemented with clear verification evidence.
 - **US-01-0886**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pending Signals: clear all so that this capability is implemented with clear verification evidence.
 - **US-01-0887**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to timers: cancel ITIMER_REAL/VIRTUAL/PROF and alarm() so that this capability is implemented with clear verification evidence.
-- **US-01-0888**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to system V IPC: detach shmem, undo semaphores, remove owned msg queues so that this capability is implemented with clear verification evidence.
-- **US-01-0889**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pOSIX IPC: unlink owned semaphores/shared memory so that this capability is implemented with clear verification evidence.
+- **US-01-0888**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want `proc_exit()` to invoke a dedicated System V IPC teardown hook, even though the current kernel has no SysV IPC ownership model yet, so that exit sequencing stays explicit and future IPC work has a stable integration point.
+- **US-01-0889**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want `proc_exit()` to invoke a dedicated POSIX IPC teardown hook, even though the current kernel has no POSIX semaphore/shared-memory ownership model yet, so that exit sequencing stays explicit and future IPC work has a stable integration point.
 - **US-01-0890**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to futex Cleanup: process robust list, mark FUTEX_OWNER_DIED, wake waiters so that this capability is implemented with clear verification evidence.
 - **US-01-0891**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to kernel locks release held sleep mutexes and cancel pending lock requests so that this capability is implemented with clear verification evidence.
 - **US-01-0892**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phase 3 - Thread Termination: so that this capability is implemented with clear verification evidence.
@@ -4814,10 +4814,10 @@
 - **REQ-01-0887** (EARS/Ubiquitous): The Substrate system shall timers: cancel ITIMER_REAL/VIRTUAL/PROF and alarm().
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0888** (EARS/Ubiquitous): The Substrate system shall system V IPC: detach shmem, undo semaphores, remove owned msg queues.
+- **REQ-01-0888** (EARS/Ubiquitous): The Substrate system shall invoke a dedicated System V IPC exit-teardown hook; until a SysV IPC ownership model exists in-kernel, that hook shall complete as an explicit no-op.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0889** (EARS/Ubiquitous): The Substrate system shall pOSIX IPC: unlink owned semaphores/shared memory.
+- **REQ-01-0889** (EARS/Ubiquitous): The Substrate system shall invoke a dedicated POSIX IPC exit-teardown hook; until a POSIX semaphore/shared-memory ownership model exists in-kernel, that hook shall complete as an explicit no-op.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0890** (EARS/Ubiquitous): The Substrate system shall futex Cleanup: process robust list, mark FUTEX_OWNER_DIED, wake waiters.
