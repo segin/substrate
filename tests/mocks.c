@@ -17,7 +17,7 @@ void keyboard_handler(void *regs) { (void)regs; }
 void mouse_handler(void *regs) { (void)regs; }
 
 // FS init mocks
-void ext2_init() {}
+__attribute__((weak)) void ext2_init() {}
 void fat_init() {}
 void exfat_init() {}
 void minix_init() {}
@@ -359,7 +359,45 @@ void uma_zone_set_max(uma_zone_t *zone, int max) { (void)zone; (void)max; }
 uint32_t pmm_get_total_memory(void) { return 0; }
 uint32_t pmm_get_free_memory(void) { return 0; }
 void cmdline_get(char *buf, size_t buf_len) { buf[0] = '\0'; }
+
+void swapper_request_work(void) {}
+int pmap_page_is_referenced(struct vm_page *m) { (void)m; return 0; }
+void pmap_page_clear_reference(struct vm_page *m) { (void)m; }
+void *vm_phys_alloc_page(void) { return NULL; }
+void vm_phys_free_page(void *p) { (void)p; }
+void cpuid_init(void) {}
+void *blkdev_get(void) { return NULL; }
+void arch_fork_with_stack(void) {}
+void exec_pin_current_thread(void) {}
+void exec_unpin_current_thread(void) {}
+char mock_percpu_data[8192];
+void *percpu_get(void) { return &mock_percpu_data; }
+int percpu_get_cpu_id(void) { return 0; }
+int sched_can_run_on_cpu(void) { return 1; }
+void host_wait_for_interrupt(void) {}
+void vm_map_destroy(vm_map_t *map) { (void)map; }
+void cmdline_get_full(void) {}
+
 void sched_get_loadavg(unsigned long loads[3]) { loads[0] = loads[1] = loads[2] = 0; }
 uint32_t sched_count_runnable(void) { return 0; }
 uint32_t sched_count_threads(void) { return 0; }
 int sys_pmap_stats(struct pmap_stats *stats) { return 0; }
+void *vm_phys_alloc_page() { return NULL; }
+void vm_phys_free_page() {}
+int pmap_page_is_referenced(struct vm_page *m) { (void)m; return 0; }
+void pmap_page_clear_reference(struct vm_page *m) { (void)m; }
+void swapper_request_work() {}
+void cpuid_init() {}
+void *blkdev_get() { return NULL; }
+int arch_fork_with_stack() { return -1; }
+void exec_pin_current_thread() {}
+void exec_unpin_current_thread() {}
+void *percpu_get() { return NULL; }
+int percpu_get_cpu_id() { return 0; }
+int sched_can_run_on_cpu() { return 1; }
+
+void vm_map_destroy(vm_map_t *map) { (void)map; }
+void cmdline_get_full(char *buf, size_t buf_len) { if(buf && buf_len > 0) buf[0] = '\0'; }
+
+void wait_for_interrupt() {}
+void host_wait_for_interrupt() {}
