@@ -290,20 +290,8 @@ void bc_print_base(bc_num *n, int obase) {
     
     if (n->sign < 0) printf("-");
     
-    // Integer part conversion
-    // Copy integer part... (simple truncation for now)
-    // To truncate, we divide by 10^scale or similar if we supported floating point ops well.
-    // For now, if it's obase > 10, handle integers via successive division.
-    // TODO: implement full obase fractional conversion
-    if (n->scale > 0) {
-        bc_warn("libbc: obase > 10 for fractional numbers not fully implemented");
-        bc_print(n);
-        return;
-    }
-    
-    bc_num *copy = bc_dup(n);
-    copy->sign = 1;
-    copy->scale = 0; // Truncate fractional part for integer obase conversion
+    bc_num *int_part = bc_truncate(n);
+    int_part->sign = 1; // Work with positive integer part
     bc_num *base = bc_from_long(obase);
     
     // Collect digits
@@ -314,6 +302,7 @@ void bc_print_base(bc_num *n, int obase) {
     int old_scale = bc_scale;
     bc_scale = 0;
     
+    bc_num *copy = int_part;
     while (!bc_is_zero(copy)) {
         bc_num *q = bc_div(copy, base);
         bc_num *r = bc_mod(copy, base);
@@ -324,20 +313,103 @@ void bc_print_base(bc_num *n, int obase) {
         bc_free(r);
         copy = q;
     }
-    bc_free(copy);
+    bc_free(copy); // Free the final zero result
     bc_free(base);
     bc_scale = old_scale;
     
-    for (int i = ds - 1; i >= 0; i--) {
-        if (obase <= 16) {
-            int d = out_digits[i];
-            if (d < 10) printf("%d", d);
-            else printf("%c", 'A' + (d - 10));
-        } else {
-            printf(" %02d", out_digits[i]);
+    if (ds == 0) {
+        if (n->scale == 0) {
+            if (obase <= 16) printf("0");
+            else printf(" 00");
+        }
+        // If scale > 0, we print nothing for the integer part (e.g. .1F97 instead of 0.1F97)
+    } else {
+        for (int i = ds - 1; i >= 0; i--) {
+            if (obase <= 16) {
+                int d = out_digits[i];
+                if (d < 10) printf("%d", d);
+                else printf("%c", 'A' + (d - 10));
+            } else {
+                printf(" %02d", out_digits[i]);
+            }
         }
     }
     free(out_digits);
+
+    if (n->scale > 0) {
+        printf(".");
+        bc_num *t = bc_truncate(n); // re-extract with original sign
+        bc_num *frac_part = bc_sub(n, t);
+        bc_free(t);
+
+        frac_part->sign = 1;
+        bc_num *ob = bc_from_long(obase);
+        bc_num *f = frac_part;
+
+        int saved_scale = bc_scale;
+
+        for (int i = 0; i < n->scale; i++) {
+            bc_scale = n->scale;
+            bc_num *val = bc_mul(f, ob);
+            bc_num *val_int = bc_truncate(val);
+
+            int digit = (int)bc_num_to_long(val_int);
+
+            if (obase <= 16) {
+                if (digit < 10) printf("%d", digit);
+                else printf("%c", 'A' + (digit - 10));
+            } else {
+                printf(" %02d", digit);
+            }
+
+            bc_scale = val->scale;
+            bc_num *next_f = bc_sub(val, val_int);
+
+            bc_free(f);
+            bc_free(val);
+            bc_free(val_int);
+            f = next_f;
+        }
+        bc_free(f);
+        bc_free(ob);
+
+        bc_scale = saved_scale;
+    }
+}
+
+bc_num *bc_truncate(bc_num *n) {
+    bc_num *res = bc_dup(n);
+    if (res->scale == 0) return res;
+
+    int b100_shift = res->scale / 2;
+    int b10_rem = res->scale % 2;
+
+    if (res->len <= b100_shift) {
+        res->len = 0;
+        res->sign = 0;
+        res->scale = 0;
+        memset(res->digits, 0, res->cap);
+        return res;
+    }
+
+    int new_len = res->len - b100_shift;
+    memmove(res->digits, res->digits + b100_shift, new_len);
+    memset(res->digits + new_len, 0, res->cap - new_len);
+    res->len = new_len;
+
+    if (b10_rem) {
+        int carry = 0;
+        for (int i = res->len - 1; i >= 0; i--) {
+            int val = res->digits[i] + carry * 100;
+            res->digits[i] = val / 10;
+            carry = val % 10;
+        }
+        bc_trim(res);
+    }
+    res->scale = 0;
+    if (res->len == 0) res->sign = 0;
+
+    return res;
 }
 
 bc_num *bc_dup(bc_num *src) {

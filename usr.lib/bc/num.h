@@ -34,6 +34,7 @@ void bc_print_base(bc_num *n, int obase);
 void bc_expsize(bc_num *n, int needed);
 void bc_trim(bc_num *n);
 bc_num *bc_align_scale(bc_num *a, bc_num *b, bc_num **a_aligned, bc_num **b_aligned); // Returns max_scale
+bc_num *bc_truncate(bc_num *n);
 
 // Configuration Variables (used by bc/dc)
 extern int bc_scale;
