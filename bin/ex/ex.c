@@ -682,18 +682,21 @@ void do_command(buffer_t *b, char *cmd) {
                 if (nxt) total_len += nxt->len;
             }
             char *joined = malloc(total_len + (addr2 - addr1 + 1));
-            joined[0] = '\0';
-            strcat(joined, first->text);
+            size_t cur_len = first->len;
+            memcpy(joined, first->text, cur_len);
+            joined[cur_len] = '\0';
             for (int i = 1; i <= (addr2 - addr1); i++) {
                 line_t *nxt = buf_get_line(b, addr1 + 1);
                 if (nxt) {
                     // Add a space if the previous string doesn't end with a space and the next doesn't start with one
-                    size_t cur_len = strlen(joined);
                     if (cur_len > 0 && joined[cur_len-1] != ' ' && joined[cur_len-1] != '\t' && nxt->text[0] != ' ' && nxt->text[0] != '\t' && nxt->text[0] != ')') {
-                        strcat(joined, " ");
+                        joined[cur_len] = ' ';
+                        cur_len++;
                         total_len++;
                     }
-                    strcat(joined, nxt->text);
+                    memcpy(joined + cur_len, nxt->text, nxt->len);
+                    cur_len += nxt->len;
+                    joined[cur_len] = '\0';
                     buf_delete(b, nxt);
                 }
             }

@@ -298,7 +298,7 @@ void mem_init(void) {
     }
 
     memset(&mem_node, 0, sizeof(fs_node_t));
-    strcpy(mem_node.name, "mem");
+    strlcpy(mem_node.name, "mem", sizeof(mem_node.name));
     mem_node.flags = FS_CHARDEVICE;
     mem_node.read = &mem_read;
     mem_node.write = &mem_write;

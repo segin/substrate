@@ -1,7 +1,21 @@
 #ifndef _ERRNO_H
 #define _ERRNO_H
 
+#if defined(__linux__)
+int *__errno_location(void);
+#define errno (*__errno_location())
+#elif defined(__FreeBSD__) || defined(__DragonFly__)
+int *__error(void);
+#define errno (*__error())
+#elif defined(__NetBSD__)
+int *__errno(void);
+#define errno (*__errno())
+#elif defined(__OpenBSD__)
+int *__errno(void);
+#define errno (*__errno())
+#else
 extern int errno;
+#endif
 
 #define EPERM        1  /* Operation not permitted */
 #define ENOENT       2  /* No such file or directory */
