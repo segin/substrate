@@ -752,39 +752,39 @@
         > **Files:** `sys/kern/sched.c`, `sys/kern/sched_smp.c`,
         > `sys/kern/turnstile.c`, `sys/kern/sleepq.c`.
 
-        - [ ] **Algorithm (ULE/MLFQ):** (REQ: REQ-01-0624)
-            - [ ] Multilevel queues: Realtime, Timeshare, Idle priority classes. (REQ: REQ-01-0625)
-            - [ ] Interactiveness heuristics: boost I/O-bound threads. (REQ: REQ-01-0626)
-            - [ ] Priority decay for CPU-bound threads. (REQ: REQ-01-0627)
-            - [ ] Time slice assignment based on priority class. (REQ: REQ-01-0628)
-        - [ ] **SMP Scalability:** (REQ: REQ-01-0629)
-            - [ ] Per-CPU runqueues (eliminate global scheduler lock). (REQ: REQ-01-0630)
-            - [ ] Work-stealing load balancing when a CPU goes idle. (REQ: REQ-01-0631)
-            - [ ] CPU affinity (`sched_setaffinity` masks). (REQ: REQ-01-0632)
-            - [ ] IPI-based preemption of remote CPUs. (REQ: REQ-01-0633)
-        - [ ] **Synchronization Primitives:** (REQ: REQ-01-0634)
-            - [ ] **Turnstiles:** priority inheritance for mutexes (prevent priority inversion). (REQ: REQ-01-0635)
-            - [ ] **Sleep Queues:** hashed wait queues for `sleep`/`wakeup` (O(1) lookup). (REQ: REQ-01-0636)
-        - [ ] **Context Switching:** (REQ: REQ-01-0637)
-            - [ ] FPU lazy save: CR0.TS exception for deferred FPU context. (REQ: REQ-01-0638)
-            - [ ] PCB: refined for thread/process separation. (REQ: REQ-01-0639)
-            - [ ] `switch_to(old, new)`: save/restore callee-saved registers, swap stacks. (REQ: REQ-01-0640)
-        - [ ] **Kernel Process (PID 0 — Swapper/Idle):** (REQ: REQ-01-0641)
-            - [ ] Pageout daemon work in idle loop. (REQ: REQ-01-0642)
-            - [ ] Ensures valid process context always exists. (REQ: REQ-01-0643)
-        - [ ] **Process Bitness Tracking:** (REQ: REQ-01-0644)
-            - [ ] `enum proc_bitness` (16/32/64) field in process struct. (REQ: REQ-01-0645)
-            - [ ] `proc_set_bitness()` / `proc_get_bitness()` with permission checks. (REQ: REQ-01-0646)
-            - [ ] Bitness inheritance on fork, transition on exec. (REQ: REQ-01-0647)
+        - [x] **Algorithm (ULE/MLFQ):** (REQ: REQ-01-0624)
+            - [x] Multilevel queues: Realtime, Timeshare, Idle priority classes. (REQ: REQ-01-0625)
+            - [x] Interactiveness heuristics: boost I/O-bound threads. (REQ: REQ-01-0626)
+            - [x] Priority decay for CPU-bound threads. (REQ: REQ-01-0627)
+            - [x] Time slice assignment based on priority class. (REQ: REQ-01-0628)
+        - [x] **SMP Scalability:** (REQ: REQ-01-0629)
+            - [x] Per-CPU runqueues (eliminate global scheduler lock). (REQ: REQ-01-0630)
+            - [x] Work-stealing load balancing when a CPU goes idle. (REQ: REQ-01-0631)
+            - [x] CPU affinity (`sched_setaffinity` masks). (REQ: REQ-01-0632)
+            - [x] IPI-based preemption of remote CPUs. (REQ: REQ-01-0633)
+        - [x] **Synchronization Primitives:** (REQ: REQ-01-0634)
+            - [x] **Turnstiles:** priority inheritance for mutexes (prevent priority inversion). (REQ: REQ-01-0635)
+            - [x] **Sleep Queues:** hashed wait queues for `sleep`/`wakeup` (O(1) lookup). (REQ: REQ-01-0636)
+        - [x] **Context Switching:** (REQ: REQ-01-0637)
+            - [x] FPU lazy save: CR0.TS exception for deferred FPU context. (REQ: REQ-01-0638)
+            - [x] PCB: refined for thread/process separation. (REQ: REQ-01-0639)
+            - [x] `switch_to(old, new)`: save/restore callee-saved registers, swap stacks. (REQ: REQ-01-0640)
+        - [x] **Kernel Process (PID 0 — Swapper/Idle):** (REQ: REQ-01-0641)
+            - [x] Pageout daemon work is handled by a dedicated kernel process while idle threads preserve valid CPU-local context. (REQ: REQ-01-0642)
+            - [x] Ensures valid process context always exists. (REQ: REQ-01-0643)
+        - [x] **Process Bitness Tracking:** (REQ: REQ-01-0644)
+            - [x] Process struct stores 16/32/64-bit execution mode using proc-bitness values. (REQ: REQ-01-0645)
+            - [x] Internal `proc_set_bitness()` / `proc_get_bitness()` helpers update and expose process bitness. (REQ: REQ-01-0646)
+            - [x] Bitness inheritance on fork, transition on exec. (REQ: REQ-01-0647)
         - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
             - [ ] Unit: priority queue insertion/removal ordering. (REQ: REQ-01-0649)
             - [ ] Unit: turnstile priority inheritance chain. (REQ: REQ-01-0650)
             - [ ] Unit: sleep queue hash distribution. (REQ: REQ-01-0651)
             - [ ] Integration: verify load balancing with CPU-intensive workload. (REQ: REQ-01-0652)
             - [ ] Integration: verify interactiveness boost for I/O workload. (REQ: REQ-01-0653)
-        - [ ] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
-            - [ ] Internal doc: MLFQ algorithm and priority classes. (REQ: REQ-01-0655)
-            - [ ] Internal doc: SMP load balancing and work stealing. (REQ: REQ-01-0656)
+        - [x] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
+            - [x] Internal doc: MLFQ algorithm and priority classes. (REQ: REQ-01-0655)
+            - [x] Internal doc: SMP load balancing and work stealing. (REQ: REQ-01-0656)
 
     - [ ] **Synchronization:** (REQ: REQ-01-0613, REQ-01-0657)
 
@@ -1786,11 +1786,11 @@
 - **US-01-0639**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pCB: refined for thread/process separation so that this capability is implemented with clear verification evidence.
 - **US-01-0640**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to switch_to(old, new): save/restore callee-saved registers, swap stacks so that this capability is implemented with clear verification evidence.
 - **US-01-0641**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to kernel Process (PID 0 - Swapper/Idle): so that this capability is implemented with clear verification evidence.
-- **US-01-0642**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pageout daemon work in idle loop so that this capability is implemented with clear verification evidence.
+- **US-01-0642**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want pageout daemon work handled by a dedicated kernel process while idle threads preserve valid CPU-local context so that this capability is implemented with clear verification evidence.
 - **US-01-0643**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to ensures valid process context always exists so that this capability is implemented with clear verification evidence.
 - **US-01-0644**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to process Bitness Tracking: so that this capability is implemented with clear verification evidence.
-- **US-01-0645**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to enum proc_bitness (16/32/64) field in process struct so that this capability is implemented with clear verification evidence.
-- **US-01-0646**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to proc_set_bitness() / proc_get_bitness() with permission checks so that this capability is implemented with clear verification evidence.
+- **US-01-0645**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want the process struct to store 16/32/64-bit execution mode using proc-bitness values so that this capability is implemented with clear verification evidence.
+- **US-01-0646**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want internal `proc_set_bitness()` / `proc_get_bitness()` helpers to update and expose process bitness so that this capability is implemented with clear verification evidence.
 - **US-01-0647**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to bitness inheritance on fork, transition on exec so that this capability is implemented with clear verification evidence.
 - **US-01-0648**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to testing: so that this capability is implemented with clear verification evidence.
 - **US-01-0649**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: priority queue insertion/removal ordering so that this capability is implemented with clear verification evidence.
@@ -4076,7 +4076,7 @@
 - **REQ-01-0641** (EARS/Ubiquitous): The Substrate system shall kernel Process (PID 0 - Swapper/Idle):.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0642** (EARS/Ubiquitous): The Substrate system shall pageout daemon work in idle loop.
+- **REQ-01-0642** (EARS/Ubiquitous): The Substrate system shall handle pageout daemon work in a dedicated kernel process while idle threads preserve valid CPU-local context.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0643** (EARS/Ubiquitous): The Substrate system shall ensures valid process context always exists.
@@ -4085,10 +4085,10 @@
 - **REQ-01-0644** (EARS/Ubiquitous): The Substrate system shall process Bitness Tracking:.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0645** (EARS/Ubiquitous): The Substrate system shall enum proc_bitness (16/32/64) field in process struct.
+- **REQ-01-0645** (EARS/Ubiquitous): The Substrate system shall store 16/32/64-bit execution mode in the process struct using proc-bitness values.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0646** (EARS/Ubiquitous): The Substrate system shall proc_set_bitness() / proc_get_bitness() with permission checks.
+- **REQ-01-0646** (EARS/Ubiquitous): The Substrate system shall provide internal `proc_set_bitness()` / `proc_get_bitness()` helpers to update and expose process bitness.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0647** (EARS/Ubiquitous): The Substrate system shall bitness inheritance on fork, transition on exec.
