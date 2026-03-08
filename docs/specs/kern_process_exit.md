@@ -42,12 +42,13 @@ The current implementation performs:
 - `fd_close_all(process)`
 - `close_fs(cwd)`
 - `close_fs(root)` when root differs from the global root
-- `pmap_release(process->pmap)` followed by fallback to `pmap_kernel()`
-- `vm_map` pointer nulling
+- switch to `pmap_kernel()` immediately so the exiting thread no longer runs on
+  its dying user pmap
+- defer `vm_map_destroy()` / `pmap_release()` to the final reap path in
+  `wait4()` or async autoreap once the zombie is no longer visible to the parent
 
 Notes:
 
-- `vm_map_destroy()` is not yet invoked even though the pointer is cleared
 - timer, System V IPC, POSIX IPC, and lock-release phases remain explicit placeholders
 
 ### 4. Child Reparenting
@@ -85,7 +86,8 @@ If a parent exists:
 
 Current boundary:
 
-- `SA_NOCLDWAIT` handling is not yet true auto-reap semantics and remains an open work item
+- `SA_NOCLDWAIT` children are detached from the parent's waitable child list and
+  reclaimed asynchronously after all thread contexts retire
 - final process-group removal still happens during `wait4()` reap, not in `proc_exit()`
 
 ### 8. Final Thread Retirement
@@ -108,3 +110,16 @@ The current kernel splits process death into two stages:
 - `wait4()`: final reap, group removal, thread-slot retirement, and process-slot return to the free pool
 
 This split preserves enough process identity for the present wait implementation, especially for child-list traversal and group-based wait selection.
+
+During the zombie window, the kernel guarantees only wait-visible state and
+final-reap bookkeeping remain meaningful:
+
+- `pid`, `ppid`, `exit_code`, and `rusage`
+- parent linkage needed for `wait4()` traversal when the process is still
+  waitable
+- process-group/session linkage that must survive until final reap for
+  group-based wait and orphan checks
+
+Active runtime resources such as file descriptors, cwd/root references, tty
+ownership, pending signals, and user-execution mappings are already torn down
+before the process becomes waitable as `SZOMB`.

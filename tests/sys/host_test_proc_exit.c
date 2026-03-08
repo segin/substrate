@@ -200,6 +200,8 @@ static void test_proc_exit_basic_path(void) {
     assert(yielded == 1);
     assert(proc->state == SZOMB);
     assert(proc->exit_code == 42);
+    assert(proc->pid == 21);
+    assert(proc->ppid == parent->pid);
     assert(acct_calls == 1);
     assert(futex_exit_calls == 2);
     assert(file_close_calls == 2);
@@ -212,8 +214,13 @@ static void test_proc_exit_basic_path(void) {
     assert(proc->tty == NULL);
     assert(proc->cwd_node == NULL);
     assert(proc->root_node == NULL);
+    assert(proc->fd_bitmap == 0);
+    assert(proc->fds[0] == NULL);
+    assert(proc->fds[1] == NULL);
     assert(proc->vm_map == (struct vm_map *)0x3333);
     assert(proc->pmap == pmap_kernel());
+    assert(proc->p_parent == parent);
+    assert(proc->p_pgrp == &pgrp);
     assert(child->p_parent == init);
     assert(init->p_children == child);
     assert(last_psignal_proc == parent);

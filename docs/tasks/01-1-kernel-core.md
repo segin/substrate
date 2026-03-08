@@ -1071,13 +1071,13 @@
                 - [x] Remove from process group; free `struct pgrp` if last member at the final reap point, preserving zombie pgrp identity until `wait4()` or auto-reap completes. (REQ: REQ-01-0907)
                 - [x] If session leader: SIGHUP to foreground, revoke TTY, mark no leader. (REQ: REQ-01-0906)
                 - [x] Check for orphaned process groups → SIGHUP + SIGCONT when process-group membership is dropped at the final reap point. (REQ: REQ-01-0909)
-            - [ ] **Phase 7 — Parent Notification:** (REQ: REQ-01-0910)
+            - [x] **Phase 7 — Parent Notification:** (REQ: REQ-01-0910)
                 - [x] `psignal(parent, SIGCHLD)`. (REQ: REQ-01-0911)
                 - [x] If SA_NOCLDWAIT: detach from the parent's waitable child list and auto-reap asynchronously once the final thread context is retired. (REQ: REQ-01-0910)
                 - [x] Wake parent on `p_children` channel. (REQ: REQ-01-0913)
-            - [ ] **Phase 8 — Zombie State (DYING → ZOMBIE):** (REQ: REQ-01-0914)
+            - [x] **Phase 8 — Zombie State (DYING → ZOMBIE):** (REQ: REQ-01-0914)
                 - [x] Set `p_state` = SZOMB. (REQ: REQ-01-0915)
-                - [ ] Only pid, ppid, xstat, rusage remain valid. (REQ: REQ-01-0916)
+                - [x] Only wait-visible identity, exit status/rusage, and final-reap bookkeeping such as parent/pgrp linkage remain valid; active runtime resources must already be released. (REQ: REQ-01-0916)
             - [ ] **Phase 9 — Final Context Switch:** (REQ: REQ-01-0917)
                 - [x] `current_thread->state = THREAD_ZOMBIE`. (REQ: REQ-01-0918)
                 - [x] `sched_yield()` — never returns. (REQ: REQ-01-0919)
@@ -1127,7 +1127,7 @@
                 - [x] Detection: no member with parent in different group of same session. (REQ: REQ-01-0960)
                 - [x] Action: SIGHUP + SIGCONT to stopped members. (REQ: REQ-01-0961)
 
-        - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+        - [x] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
             - [x] Unit: proc_exit phases 1–9 ordering and resource cleanup. (REQ: REQ-01-0963)
             - [x] Unit: wait4 search logic (specific, any, pgrp). (REQ: REQ-01-0964)
             - [x] Unit: WNOHANG returns 0 / ECHILD correctly. (REQ: REQ-01-0965)
@@ -1135,7 +1135,7 @@
             - [x] Unit: setsid / setpgid / TIOCSCTTY / TIOCNOTTY. (REQ: REQ-01-0967)
             - [x] Unit: orphaned pgrp detection and SIGHUP+SIGCONT delivery. (REQ: REQ-01-0968)
             - [x] Property: no zombie leaks (all zombies eventually reaped or auto-reaped). (REQ: REQ-01-0969)
-            - [ ] Integration: fork → exec → exit → waitpid cycle. (REQ: REQ-01-0970)
+            - [x] Integration: fork → exec → exit → waitpid cycle. (REQ: REQ-01-0970)
             - [x] Integration: job control stop/continue with waitpid WUNTRACED/WCONTINUED. (REQ: REQ-01-0971)
         - [x] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
             - [x] Internal doc: process exit 9-phase teardown. (REQ: REQ-01-0973)
@@ -2060,7 +2060,7 @@
 - **US-01-0913**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to wake parent on p_children channel so that this capability is implemented with clear verification evidence.
 - **US-01-0914**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phase 8 - Zombie State (DYING → ZOMBIE): so that this capability is implemented with clear verification evidence.
 - **US-01-0915**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set p_state = SZOMB so that this capability is implemented with clear verification evidence.
-- **US-01-0916**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to only pid, ppid, xstat, rusage remain valid so that this capability is implemented with clear verification evidence.
+- **US-01-0916**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to preserve only wait-visible identity, exit status/rusage, and final-reap bookkeeping across the zombie window so that active runtime resources are already torn down before `wait4()` or auto-reap.
 - **US-01-0917**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phase 9 - Final Context Switch: so that this capability is implemented with clear verification evidence.
 - **US-01-0918**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to current_thread->state = THREAD_ZOMBIE so that this capability is implemented with clear verification evidence.
 - **US-01-0919**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sched_yield() - never returns so that this capability is implemented with clear verification evidence.
@@ -4898,7 +4898,7 @@
 - **REQ-01-0915** (EARS/Ubiquitous): The Substrate system shall set p_state = SZOMB.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0916** (EARS/Ubiquitous): The Substrate system shall only pid, ppid, xstat, rusage remain valid.
+- **REQ-01-0916** (EARS/Ubiquitous): The Substrate system shall preserve only wait-visible identity, exit status/rusage, and final-reap bookkeeping across the zombie window; active runtime resources shall already be released before `wait4()` or auto-reap completes.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0917** (EARS/Ubiquitous): The Substrate system shall phase 9 - Final Context Switch:.
