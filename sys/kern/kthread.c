@@ -23,6 +23,11 @@ int kthread_create(void (*func)(void *), void *arg, thread_t **tdp, const char *
         return -1;
     }
 
+    t->kstack_base = (uintptr_t)stack;
+    t->kstack_units = 4096;
+    t->kstack_type = THREAD_KSTACK_KMALLOC;
+    t->kstack_owned = 1;
+
     // 4. (Optional) set thread name
     (void)name;
 

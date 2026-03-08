@@ -11,6 +11,8 @@
 #include <string.h>
 #include <limits.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 #define LD_MAX_SCRIPT_INCLUDE_DEPTH 64
@@ -3176,78 +3178,81 @@ static int parse_u64_auto(const char *s, uint64_t *out) {
     return 0;
 }
 
-#include <sys/wait.h>
-#include <fcntl.h>
-
-static int run_cmd_first_line(const char *cmd, char *const argv[], char *out, size_t out_sz) {
-    int pfd[2];
+static int run_cmd_first_line(char *const argv[], char *out, size_t out_sz) {
+    int pipefd[2];
     pid_t pid;
-    FILE *fp;
-    char *nl;
     int status;
     int rc = -1;
+    ssize_t nread;
+    char *nl;
 
-    if (cmd == NULL || argv == NULL || out == NULL || out_sz == 0) {
+    if (argv == NULL || argv[0] == NULL || out == NULL || out_sz == 0) {
         return -1;
     }
     out[0] = '\0';
 
-    if (pipe(pfd) != 0) {
+    if (pipe(pipefd) == -1) {
         return -1;
     }
 
     pid = fork();
-    if (pid < 0) {
-        close(pfd[0]);
-        close(pfd[1]);
+    if (pid == -1) {
+        close(pipefd[0]);
+        close(pipefd[1]);
         return -1;
     }
 
     if (pid == 0) {
-        close(pfd[0]);
-        if (pfd[1] != STDOUT_FILENO) {
-            dup2(pfd[1], STDOUT_FILENO);
-            close(pfd[1]);
+        close(pipefd[0]);
+        if (pipefd[1] != STDOUT_FILENO) {
+            dup2(pipefd[1], STDOUT_FILENO);
+            close(pipefd[1]);
         }
+
         int devnull = open("/dev/null", O_WRONLY);
-        if (devnull >= 0) {
+        if (devnull != -1) {
             dup2(devnull, STDERR_FILENO);
-            close(devnull);
+            if (devnull != STDERR_FILENO) {
+                close(devnull);
+            }
         }
-        execvp(cmd, argv);
+
+        execvp(argv[0], argv);
         _exit(127);
     }
 
-    close(pfd[1]);
-    fp = fdopen(pfd[0], "r");
-    if (fp != NULL) {
-        if (fgets(out, (int)out_sz, fp) != NULL) {
-            rc = 0;
+    close(pipefd[1]);
+
+    do {
+        nread = read(pipefd[0], out, out_sz - 1);
+    } while (nread == -1 && errno == EINTR);
+
+    if (nread > 0) {
+        out[nread] = '\0';
+        nl = strchr(out, '\n');
+        if (nl != NULL) {
+            *nl = '\0';
         }
-        fclose(fp);
+        rc = out[0] != '\0' ? 0 : 1;
     } else {
-        close(pfd[0]);
+        out[0] = '\0';
+        rc = 1;
     }
 
+    close(pipefd[0]);
     while (waitpid(pid, &status, 0) == -1) {
         if (errno != EINTR) {
+            out[0] = '\0';
             return -1;
         }
     }
+
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         out[0] = '\0';
         return -1;
     }
-    if (rc != 0) {
-        out[0] = '\0';
-        return 1;
-    }
 
-    nl = strchr(out, '\n');
-    if (nl != NULL) {
-        *nl = '\0';
-    }
-    return out[0] != '\0' ? 0 : 1;
+    return rc;
 }
 
 static int discover_default_plugin(ld_ctx_t *ctx) {
@@ -3270,8 +3275,8 @@ static int discover_default_plugin(ld_ctx_t *ctx) {
     }
 
     {
-        char *const argv[] = {"gcc", "-print-file-name=liblto_plugin.so", NULL};
-        rc = run_cmd_first_line("gcc", argv, discovered, sizeof(discovered));
+        char *gcc_args[] = {"gcc", "-print-file-name=liblto_plugin.so", NULL};
+        rc = run_cmd_first_line(gcc_args, discovered, sizeof(discovered));
         if (rc == 0 && discovered[0] == '/' && access(discovered, R_OK | X_OK) == 0) {
             ctx->plugin_path = discovered;
             return 0;
@@ -3279,8 +3284,8 @@ static int discover_default_plugin(ld_ctx_t *ctx) {
     }
 
     {
-        char *const argv[] = {"clang", "-print-file-name=LLVMgold.so", NULL};
-        rc = run_cmd_first_line("clang", argv, discovered, sizeof(discovered));
+        char *clang_args[] = {"clang", "-print-file-name=LLVMgold.so", NULL};
+        rc = run_cmd_first_line(clang_args, discovered, sizeof(discovered));
         if (rc == 0 && discovered[0] == '/' && access(discovered, R_OK | X_OK) == 0) {
             ctx->plugin_path = discovered;
             return 0;
@@ -3291,6 +3296,7 @@ static int discover_default_plugin(ld_ctx_t *ctx) {
 }
 
 static int plugin_discover_and_handshake(ld_ctx_t *ctx) {
+    int rc;
     pid_t pid;
     int status;
 
@@ -3316,21 +3322,20 @@ static int plugin_discover_and_handshake(ld_ctx_t *ctx) {
     }
 
     pid = fork();
-    if (pid < 0) {
-        fprintf(stderr, "ld: fork failed for plugin handshake\n");
+    if (pid == -1) {
         return -1;
     }
 
     if (pid == 0) {
         int devnull = open("/dev/null", O_WRONLY);
-        if (devnull >= 0) {
+        if (devnull != -1) {
             dup2(devnull, STDOUT_FILENO);
             dup2(devnull, STDERR_FILENO);
             close(devnull);
         }
 
-        char *const argv[] = { (char *)ctx->plugin_path, "--version", NULL };
-        execvp(ctx->plugin_path, argv);
+        char *args[] = {(char *)ctx->plugin_path, "--version", NULL};
+        execv(ctx->plugin_path, args);
         _exit(127);
     }
 
@@ -3340,8 +3345,9 @@ static int plugin_discover_and_handshake(ld_ctx_t *ctx) {
             return -1;
         }
     }
+    rc = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+    if (rc != 0) {
         fprintf(stderr, "ld: plugin handshake failed for %s\n", ctx->plugin_path);
         return -1;
     }
@@ -3351,15 +3357,14 @@ static int plugin_discover_and_handshake(ld_ctx_t *ctx) {
 }
 
 static int plugin_materialize_object(const ld_ctx_t *ctx, const char *in_path, char *out_path, size_t out_path_sz) {
-    int pfd[2];
+    char *argv[3 + 32 + 1];
+    char *plugin_opt_args[32];
+    size_t i, argc;
+    int pipefd[2];
     pid_t pid;
-    FILE *fp;
-    char *nl;
-    size_t i;
     int status;
-    int argc;
-    char **argv;
-    char **opts;
+    ssize_t nread;
+    char *nl;
 
     if (out_path == NULL || out_path_sz == 0) {
         return -1;
@@ -3369,83 +3374,106 @@ static int plugin_materialize_object(const ld_ctx_t *ctx, const char *in_path, c
         return 0;
     }
 
-    if (pipe(pfd) != 0) {
-        return -1;
+    memset(plugin_opt_args, 0, sizeof(plugin_opt_args));
+    argc = 0;
+    argv[argc++] = (char *)ctx->plugin_path;
+    argv[argc++] = "--materialize";
+    argv[argc++] = (char *)in_path;
+
+    for (i = 0; i < ctx->plugin_opt_count; ++i) {
+        if (argc + 1 >= sizeof(argv) / sizeof(argv[0])) {
+            goto fail;
+        }
+        size_t len = strlen("--plugin-opt=") + strlen(ctx->plugin_opts[i]) + 1;
+        plugin_opt_args[i] = (char *)malloc(len);
+        if (plugin_opt_args[i] == NULL) {
+            goto fail;
+        }
+        snprintf(plugin_opt_args[i], len, "--plugin-opt=%s", ctx->plugin_opts[i]);
+        argv[argc++] = plugin_opt_args[i];
+    }
+    argv[argc] = NULL;
+
+    if (pipe(pipefd) == -1) {
+        goto fail;
     }
 
     pid = fork();
-    if (pid < 0) {
-        close(pfd[0]);
-        close(pfd[1]);
-        return -1;
+    if (pid == -1) {
+        close(pipefd[0]);
+        close(pipefd[1]);
+        goto fail;
     }
 
     if (pid == 0) {
-        close(pfd[0]);
-        if (pfd[1] != STDOUT_FILENO) {
-            dup2(pfd[1], STDOUT_FILENO);
-            close(pfd[1]);
+        close(pipefd[0]);
+        if (pipefd[1] != STDOUT_FILENO) {
+            dup2(pipefd[1], STDOUT_FILENO);
+            close(pipefd[1]);
         }
 
-        argc = 3 + ctx->plugin_opt_count;
-        opts = (char **)malloc(ctx->plugin_opt_count * sizeof(char *));
-        argv = (char **)malloc((argc + 1) * sizeof(char *));
-        if (argv == NULL || (ctx->plugin_opt_count > 0 && opts == NULL)) {
-            _exit(127);
-        }
-
-        argv[0] = (char *)ctx->plugin_path;
-        argv[1] = (char *)"--materialize";
-        argv[2] = (char *)in_path;
-
-        for (i = 0; i < ctx->plugin_opt_count; ++i) {
-            size_t len = strlen("--plugin-opt=") + strlen(ctx->plugin_opts[i]) + 1;
-            opts[i] = (char *)malloc(len);
-            if (opts[i] == NULL) {
-                _exit(127);
+        int devnull = open("/dev/null", O_WRONLY);
+        if (devnull != -1) {
+            dup2(devnull, STDERR_FILENO);
+            if (devnull != STDERR_FILENO) {
+                close(devnull);
             }
-            snprintf(opts[i], len, "--plugin-opt=%s", ctx->plugin_opts[i]);
-            argv[3 + i] = opts[i];
         }
-        argv[argc] = NULL;
 
-        execvp(ctx->plugin_path, argv);
+        execv(ctx->plugin_path, argv);
         _exit(127);
     }
 
-    close(pfd[1]);
-    fp = fdopen(pfd[0], "r");
-    if (fp != NULL) {
-        if (fgets(out_path, (int)out_path_sz, fp) == NULL) {
-            out_path[0] = '\0';
+    close(pipefd[1]);
+
+    do {
+        nread = read(pipefd[0], out_path, out_path_sz - 1);
+    } while (nread == -1 && errno == EINTR);
+
+    if (nread > 0) {
+        out_path[nread] = '\0';
+        nl = strchr(out_path, '\n');
+        if (nl != NULL) {
+            *nl = '\0';
         }
-        fclose(fp);
     } else {
-        close(pfd[0]);
+        out_path[0] = '\0';
     }
 
-    if (waitpid(pid, &status, 0) == -1) {
+    close(pipefd[0]);
+    while (waitpid(pid, &status, 0) == -1) {
+        if (errno != EINTR) {
+            out_path[0] = '\0';
+            goto fail;
+        }
+    }
+
+    for (i = 0; i < ctx->plugin_opt_count; ++i) {
+        free(plugin_opt_args[i]);
+    }
+
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         out_path[0] = '\0';
         return -1;
     }
 
-    if (out_path[0] == '\0') {
-        return 0;
-    }
-
-    nl = strchr(out_path, '\n');
-    if (nl != NULL) {
-        *nl = '\0';
-    }
     return out_path[0] != '\0' ? 1 : 0;
+
+fail:
+    for (i = 0; i < ctx->plugin_opt_count; ++i) {
+        free(plugin_opt_args[i]);
+    }
+    out_path[0] = '\0';
+    return -1;
 }
 
 static void trim_trailing(char *s) {
-    size_t n;
-    while ((n = strlen(s)) > 0) {
+    size_t n = strlen(s);
+    while (n > 0) {
         char c = s[n - 1];
         if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
             s[n - 1] = '\0';
+            n--;
             continue;
         }
         break;

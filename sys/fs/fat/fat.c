@@ -620,7 +620,7 @@ fs_node_t *fat_mount(const char *device, uint32_t flags, void *data) {
     fat_root_ctx.attr = FAT_ATTR_DIRECTORY;
     
     memset(&fat_root_node, 0, sizeof(fs_node_t));
-    strcpy(fat_root_node.name, "/");
+    strlcpy(fat_root_node.name, "/", sizeof(fat_root_node.name));
     fat_root_node.inode = FAT_ROOT_INO;
     fat_root_node.flags = FS_DIRECTORY;
     fat_root_node.mask = fat_default_mask(FAT_ATTR_DIRECTORY);

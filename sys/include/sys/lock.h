@@ -18,12 +18,15 @@ bool spinlock_try_acquire(spinlock_t *lock);
 void spinlock_release(spinlock_t *lock);
 bool spinlock_is_held(spinlock_t *lock);
 
+struct thread;
+
 // Sleep Mutex
-typedef struct {
+typedef struct mutex {
     uint32_t locked;
     spinlock_t guard; // Protects wait queue/sleep state
     void     *owner; // thread_t*
     const char *name;
+    struct mutex *owned_next; // Next mutex in owner thread's held list
 } mutex_t;
 
 void mutex_init(mutex_t *m, const char *name);
@@ -31,6 +34,7 @@ void mutex_lock(mutex_t *m);
 bool mutex_trylock(mutex_t *m);
 void mutex_unlock(mutex_t *m);
 bool mutex_is_held(mutex_t *m);
+int  mutex_release_owned_by_thread(struct thread *owner);
 
 // Semaphore
 typedef struct {
