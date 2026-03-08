@@ -160,6 +160,56 @@ static void dtor_test(void *obj, int size, void *arg) {
     dtor_calls++;
 }
 
+static int order_seq = 0;
+static int init_calls = 0;
+static int fini_calls = 0;
+static int order_init_first = 0;
+static int order_ctor_first = 0;
+static int order_dtor_first = 0;
+static int order_fini_first = 0;
+
+static int init_order_test(void *obj, int size, int flags) {
+    (void)obj;
+    (void)size;
+    (void)flags;
+    init_calls++;
+    if (order_init_first == 0) {
+        order_init_first = ++order_seq;
+    }
+    return 0;
+}
+
+static void fini_order_test(void *obj, int size) {
+    (void)obj;
+    (void)size;
+    fini_calls++;
+    if (order_fini_first == 0) {
+        order_fini_first = ++order_seq;
+    }
+}
+
+static int ctor_order_test(void *obj, int size, void *arg, int flags) {
+    (void)obj;
+    (void)size;
+    (void)arg;
+    (void)flags;
+    ctor_calls++;
+    if (order_ctor_first == 0) {
+        order_ctor_first = ++order_seq;
+    }
+    return 0;
+}
+
+static void dtor_order_test(void *obj, int size, void *arg) {
+    (void)obj;
+    (void)size;
+    (void)arg;
+    dtor_calls++;
+    if (order_dtor_first == 0) {
+        order_dtor_first = ++order_seq;
+    }
+}
+
 void test_uma_ctor_dtor(void) {
     kprint("Test: constructor/destructor\n");
     
@@ -177,6 +227,50 @@ void test_uma_ctor_dtor(void) {
     TEST_ASSERT(dtor_calls == 1, "dtor called once");
     
     uma_zdestroy(zone);
+    kprint("  PASS\n");
+}
+
+void test_uma_callback_ordering(void) {
+    kprint("Test: init/fini/ctor/dtor ordering\n");
+
+    ctor_calls = 0;
+    dtor_calls = 0;
+    init_calls = 0;
+    fini_calls = 0;
+    order_seq = 0;
+    order_init_first = 0;
+    order_ctor_first = 0;
+    order_dtor_first = 0;
+    order_fini_first = 0;
+
+    uma_zone_t *zone = uma_zcreate("test-order", 32,
+                                   ctor_order_test,
+                                   dtor_order_test,
+                                   init_order_test,
+                                   fini_order_test,
+                                   0,
+                                   UMA_ZONE_NOBUCKET);
+    TEST_ASSERT(zone != NULL, "zone created");
+
+    uint32_t ipers = zone->uz_ipers;
+    void *obj = uma_zalloc(zone, M_NOWAIT);
+    TEST_ASSERT(obj != NULL, "alloc succeeded");
+    TEST_ASSERT(init_calls == (int)ipers, "init called once per slab object");
+    TEST_ASSERT(ctor_calls == 1, "ctor called once on allocation");
+    TEST_ASSERT(order_init_first > 0 && order_ctor_first > 0 &&
+                order_init_first < order_ctor_first,
+                "init ran before ctor");
+
+    uma_zfree(zone, obj);
+    TEST_ASSERT(dtor_calls == 1, "dtor called once on free");
+    TEST_ASSERT(fini_calls == 0, "fini deferred until slab free");
+
+    uma_zdestroy(zone);
+    TEST_ASSERT(fini_calls == (int)ipers, "fini called once per slab object");
+    TEST_ASSERT(order_dtor_first > 0 && order_fini_first > 0 &&
+                order_dtor_first < order_fini_first,
+                "dtor ran before fini");
+
     kprint("  PASS\n");
 }
 
@@ -332,6 +426,7 @@ void run_uma_tests(void) {
     test_uma_alloc_free();
     test_uma_zero_fill();
     test_uma_ctor_dtor();
+    test_uma_callback_ordering();
     test_uma_many_allocs();
     test_uma_limits();
     // test_uma_redzone(); // Causes panic, disabled for now
