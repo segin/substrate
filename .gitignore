@@ -250,3 +250,5 @@ sys/ksyms_table.c
 sys/ksyms_efi_table.c
 bench_objects/
 vgcore.*
+
+/tests/test_libc_sysctl
