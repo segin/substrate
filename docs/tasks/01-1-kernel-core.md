@@ -625,7 +625,7 @@
             - [x] **`uma_find_slab()` Optimization:** replace O(N) linear search with hash table. (REQ: REQ-01-0547)
         - [ ] **General Allocator (`kmalloc`/`kfree`):** (REQ: REQ-01-0548)
             - [x] Power-of-two zones: back `kmalloc` with UMA zones for sizes 16, 32, 64, ..., 4096. (REQ: REQ-01-0549)
-            - [ ] Large allocations: bypass UMA for >4 KB (direct `vm_map` allocation). (REQ: REQ-01-0550)
+            - [x] Large allocations: bypass UMA for >4 KB (direct PMM contiguous allocation). (REQ: REQ-01-0550)
             - [x] `krealloc(ptr, size)`: resize allocation. (REQ: REQ-01-0551)
             - [ ] Statistics: track memory usage by `malloc_type` (subsystem). (REQ: REQ-01-0552)
         - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
@@ -1694,7 +1694,7 @@
 - **US-01-0547**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to uma_find_slab() Optimization: replace O(N) linear search with hash table so that this capability is implemented with clear verification evidence.
 - **US-01-0548**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to general Allocator (kmalloc/kfree): so that this capability is implemented with clear verification evidence.
 - **US-01-0549**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to power-of-two zones: back kmalloc with UMA zones for sizes 16, 32, 64, ..., 4096 so that this capability is implemented with clear verification evidence.
-- **US-01-0550**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to large allocations: bypass UMA for >4 KB (direct vm_map allocation) so that this capability is implemented with clear verification evidence.
+- **US-01-0550**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to large allocations: bypass UMA for >4 KB (direct PMM contiguous allocation) so that this capability is implemented with clear verification evidence.
 - **US-01-0551**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to krealloc(ptr, size): resize allocation so that this capability is implemented with clear verification evidence.
 - **US-01-0552**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to statistics: track memory usage by malloc_type (subsystem) so that this capability is implemented with clear verification evidence.
 - **US-01-0553**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to testing: so that this capability is implemented with clear verification evidence.
@@ -3800,7 +3800,7 @@
 - **REQ-01-0549** (EARS/Ubiquitous): The Substrate system shall power-of-two zones: back kmalloc with UMA zones for sizes 16, 32, 64, ..., 4096.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0550** (EARS/Ubiquitous): The Substrate system shall large allocations: bypass UMA for >4 KB (direct vm_map allocation).
+- **REQ-01-0550** (EARS/Ubiquitous): The Substrate system shall large allocations: bypass UMA for >4 KB (direct PMM contiguous allocation).
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0551** (EARS/Ubiquitous): The Substrate system shall krealloc(ptr, size): resize allocation.
