@@ -93,11 +93,11 @@ Reference: User Request (Step 31552)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: unit (heap expansion within segment)
         - Acceptance: `brk` accepts and returns a 16-bit data-segment offset and rejects requests beyond the ELKS data-segment limit.
-    - [ ] Implement ELKS sys_fork translation. (REQ: REQ-20-0023)
+    - [x] Implement ELKS sys_fork translation. (REQ: REQ-20-0023)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: integration (fork returns in both parent and child)
         - Acceptance: Child inherits LDT segments correctly.
-    - [ ] Implement ELKS sys_execve translation. (REQ: REQ-20-0024)
+    - [x] Implement ELKS sys_execve translation. (REQ: REQ-20-0024)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: integration (exec another ELKS binary)
         - Acceptance: LDT segments properly replaced on exec.

@@ -3,9 +3,11 @@
 #include <exec/formats/elks_aout.h>
 #include <sys/errno.h>
 #include <sys/syscall_impl.h>
+#include <sys/kern_syscalls.h>
 #include <sys/ldt.h>
 #include <kern/console.h>
 #include <sys/proc.h>
+#include <vm/vm_kmem.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -49,6 +51,242 @@ static int elks_ds_base_limit(uintptr_t *base_out, uint32_t *limit_out) {
     if (limit_out) {
         *limit_out = ldt_entry_limit(&ldt[ELKS_LDT_DS_INDEX]);
     }
+    return 0;
+}
+
+static int elks_ds_span(uint32_t offset, size_t size, uintptr_t *linear_out) {
+    uintptr_t base = 0;
+    uint32_t limit = 0;
+    uint32_t max_offset;
+    int ret;
+
+    ret = elks_ds_base_limit(&base, &limit);
+    if (ret != 0) {
+        return ret;
+    }
+
+    max_offset = limit + 1U;
+    if (offset > max_offset) {
+        return -EFAULT;
+    }
+    if (size > 0) {
+        if (offset == max_offset) {
+            return -EFAULT;
+        }
+        if (size - 1U > (size_t)(limit - offset)) {
+            return -EFAULT;
+        }
+    }
+
+    if (linear_out) {
+        *linear_out = base + (uintptr_t)(uint16_t)offset;
+    }
+    return 0;
+}
+
+static void elks_free_vector(char **vec) {
+    size_t i;
+    size_t count;
+
+    if (!vec) {
+        return;
+    }
+
+    count = 0;
+    while (vec[count]) {
+        count++;
+    }
+    for (i = 0; i < count; i++) {
+        size_t len = strlen(vec[i]) + 1U;
+        kfree(vec[i], len);
+    }
+    kfree(vec, (count + 1U) * sizeof(char *));
+}
+
+static int elks_copy_exec_image_string(const uint8_t *base, uint32_t bytes,
+                                       uint16_t rel, char **out) {
+    size_t len = 0;
+    char *copy;
+
+    if (!base || !out || rel >= bytes) {
+        return -EFAULT;
+    }
+
+    while ((uint32_t)(rel + len) < bytes && base[rel + len] != '\0') {
+        len++;
+    }
+    if ((uint32_t)(rel + len) >= bytes) {
+        return -EFAULT;
+    }
+
+    copy = kmalloc(len + 1U);
+    if (!copy) {
+        return -ENOMEM;
+    }
+    memcpy(copy, base + rel, len + 1U);
+    *out = copy;
+    return 0;
+}
+
+static int elks_copy_ds_string(uint32_t offset, char **out) {
+    uintptr_t linear = 0;
+    uintptr_t base = 0;
+    uint32_t limit = 0;
+    size_t maxlen;
+    size_t len = 0;
+    const char *src;
+    char *copy;
+    int ret;
+
+    if (!out) {
+        return -EINVAL;
+    }
+
+    ret = elks_ds_span(offset, 1, &linear);
+    if (ret != 0) {
+        return ret;
+    }
+    ret = elks_ds_base_limit(&base, &limit);
+    if (ret != 0) {
+        return ret;
+    }
+
+    maxlen = (size_t)(limit - offset) + 1U;
+    src = (const char *)(uintptr_t)linear;
+    while (len < maxlen && src[len] != '\0') {
+        len++;
+    }
+    if (len == maxlen) {
+        return -EFAULT;
+    }
+
+    copy = kmalloc(len + 1U);
+    if (!copy) {
+        return -ENOMEM;
+    }
+    memcpy(copy, src, len + 1U);
+    *out = copy;
+    return 0;
+}
+
+static int elks_unpack_exec_stack(uint32_t stack_off, uint32_t stack_bytes,
+                                  char ***argv_out, char ***envp_out) {
+    uintptr_t linear = 0;
+    const uint8_t *base;
+    uint16_t argc = 0;
+    size_t cursor = 0;
+    size_t i;
+    size_t envc = 0;
+    char **argv = NULL;
+    char **envp = NULL;
+    int ret;
+
+    if (!argv_out || !envp_out) {
+        return -EINVAL;
+    }
+    *argv_out = NULL;
+    *envp_out = NULL;
+
+    if (stack_off == 0 || stack_bytes == 0) {
+        argv = kmalloc(sizeof(char *));
+        envp = kmalloc(sizeof(char *));
+        if (!argv || !envp) {
+            if (argv) {
+                kfree(argv, sizeof(char *));
+            }
+            if (envp) {
+                kfree(envp, sizeof(char *));
+            }
+            return -ENOMEM;
+        }
+        argv[0] = NULL;
+        envp[0] = NULL;
+        *argv_out = argv;
+        *envp_out = envp;
+        return 0;
+    }
+
+    ret = elks_ds_span(stack_off, stack_bytes, &linear);
+    if (ret != 0) {
+        return ret;
+    }
+
+    base = (const uint8_t *)(uintptr_t)linear;
+    if (stack_bytes < sizeof(uint16_t)) {
+        return -EFAULT;
+    }
+
+    memcpy(&argc, base, sizeof(argc));
+    cursor = sizeof(uint16_t);
+    if (cursor + ((size_t)argc + 1U) * sizeof(uint16_t) > stack_bytes) {
+        return -EFAULT;
+    }
+
+    argv = kmalloc(((size_t)argc + 1U) * sizeof(char *));
+    if (!argv) {
+        return -ENOMEM;
+    }
+    memset(argv, 0, ((size_t)argc + 1U) * sizeof(char *));
+
+    for (i = 0; i < argc; i++, cursor += sizeof(uint16_t)) {
+        uint16_t rel = 0;
+
+        memcpy(&rel, base + cursor, sizeof(rel));
+        ret = elks_copy_exec_image_string(base, stack_bytes, rel, &argv[i]);
+        if (ret != 0) {
+            elks_free_vector(argv);
+            return ret;
+        }
+    }
+
+    {
+        uint16_t terminator = 0;
+
+        memcpy(&terminator, base + cursor, sizeof(terminator));
+        cursor += sizeof(uint16_t);
+        if (terminator != 0) {
+            elks_free_vector(argv);
+            return -EFAULT;
+        }
+    }
+
+    while (cursor + sizeof(uint16_t) <= stack_bytes) {
+        uint16_t rel = 0;
+
+        memcpy(&rel, base + cursor, sizeof(rel));
+        cursor += sizeof(uint16_t);
+        if (rel == 0) {
+            break;
+        }
+        envc++;
+    }
+    if (cursor > stack_bytes) {
+        elks_free_vector(argv);
+        return -EFAULT;
+    }
+
+    envp = kmalloc((envc + 1U) * sizeof(char *));
+    if (!envp) {
+        elks_free_vector(argv);
+        return -ENOMEM;
+    }
+    memset(envp, 0, (envc + 1U) * sizeof(char *));
+
+    cursor = sizeof(uint16_t) + ((size_t)argc + 1U) * sizeof(uint16_t);
+    for (i = 0; i < envc; i++, cursor += sizeof(uint16_t)) {
+        uint16_t rel = 0;
+
+        memcpy(&rel, base + cursor, sizeof(rel));
+        ret = elks_copy_exec_image_string(base, stack_bytes, rel, &envp[i]);
+        if (ret != 0) {
+            elks_free_vector(argv);
+            elks_free_vector(envp);
+            return ret;
+        }
+    }
+
+    *argv_out = argv;
+    *envp_out = envp;
     return 0;
 }
 
@@ -149,10 +387,46 @@ static int elks_sys_brk(uint32_t brk_off, uint32_t unused1, uint32_t unused2,
     return (int)(current - base);
 }
 
+static int elks_sys_fork(uint32_t unused0, uint32_t unused1, uint32_t unused2,
+                         uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                         uint32_t unused6, uint32_t unused7) {
+    (void)unused0; (void)unused1; (void)unused2; (void)unused3;
+    (void)unused4; (void)unused5; (void)unused6; (void)unused7;
+    return sys_fork();
+}
+
+static int elks_sys_execve(uint32_t path_off, uint32_t stack_off, uint32_t stack_bytes,
+                           uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                           uint32_t unused6, uint32_t unused7) {
+    char *path = NULL;
+    char **argv = NULL;
+    char **envp = NULL;
+    int ret;
+
+    (void)unused3; (void)unused4; (void)unused5; (void)unused6; (void)unused7;
+
+    ret = elks_copy_ds_string(path_off, &path);
+    if (ret != 0) {
+        return ret;
+    }
+
+    ret = elks_unpack_exec_stack(stack_off, stack_bytes, &argv, &envp);
+    if (ret != 0) {
+        kfree(path, strlen(path) + 1U);
+        return ret;
+    }
+
+    ret = kern_execve(path, argv, envp);
+    elks_free_vector(argv);
+    elks_free_vector(envp);
+    kfree(path, strlen(path) + 1U);
+    return ret;
+}
+
 /* ELKS Syscall Table */
 static void *elks_syscall_table[ELKS_SYS_MAX] = {
     [ELKS_SYS_exit]    = (void *)&elks_sys_exit,
-    [ELKS_SYS_fork]    = (void *)&sys_fork,
+    [ELKS_SYS_fork]    = (void *)&elks_sys_fork,
     [ELKS_SYS_read]    = (void *)&elks_sys_read,
     [ELKS_SYS_write]   = (void *)&elks_sys_write,
     [ELKS_SYS_open]    = (void *)&elks_sys_open,
@@ -161,7 +435,7 @@ static void *elks_syscall_table[ELKS_SYS_MAX] = {
     [ELKS_SYS_creat]   = (void *)&sys_creat,
     [ELKS_SYS_link]    = (void *)&sys_link,
     [ELKS_SYS_unlink]  = (void *)&sys_unlink,
-    [ELKS_SYS_execve]  = (void *)&sys_execve,
+    [ELKS_SYS_execve]  = (void *)&elks_sys_execve,
     [ELKS_SYS_chdir]   = (void *)&sys_chdir,
     [ELKS_SYS_time]    = (void *)&sys_time,
     [ELKS_SYS_mknod]   = (void *)&sys_mknod,

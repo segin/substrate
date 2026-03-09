@@ -1,6 +1,9 @@
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
 #include <sys/proc.h>
 #include <sys/ldt.h>
@@ -15,6 +18,12 @@ static uintptr_t last_ptr;
 static int last_i0;
 static int last_i1;
 static char last_log[128];
+static char last_exec_path[128];
+static char last_exec_argv0[128];
+static char last_exec_argv1[128];
+static char last_exec_env0[128];
+static uint8_t *ds_mem;
+static size_t ds_mem_size;
 
 #define sys_exit   stub_sys_exit
 #define sys_fork   stub_sys_fork
@@ -61,10 +70,11 @@ static char last_log[128];
 #define sys_dup2   stub_sys_dup2
 #define sys_getppid stub_sys_getppid
 #define sys_getpgrp stub_sys_getpgrp
+#define kern_execve stub_kern_execve
 #define kprint      stub_kprint
 
 int stub_sys_exit(int a) { last_name = "exit"; last_i0 = a; return 11; }
-int stub_sys_fork(void) { return -1; }
+int stub_sys_fork(void) { last_name = "fork"; return 12; }
 int stub_sys_read(int a, char *b, int c) { last_name = "read"; last_i0 = a; last_ptr = (uintptr_t)b; last_i1 = c; return 22; }
 int stub_sys_write(int a, const char *b, int c) { last_name = "write"; last_i0 = a; last_ptr = (uintptr_t)b; last_i1 = c; return 33; }
 int stub_sys_open(const char *a, int b, int c) { last_name = "open"; last_ptr = (uintptr_t)a; last_i0 = b; last_i1 = c; return 44; }
@@ -108,18 +118,40 @@ int stub_sys_stat(const char *a, void *b) { (void)a; (void)b; return -1; }
 int stub_sys_dup2(int a, int b) { (void)a; (void)b; return -1; }
 int stub_sys_getppid(void) { return -1; }
 int stub_sys_getpgrp(void) { return -1; }
+int stub_kern_execve(const char *path, char *const argv[], char *const envp[]) {
+    last_name = "execve";
+    strncpy(last_exec_path, path ? path : "", sizeof(last_exec_path) - 1);
+    last_exec_path[sizeof(last_exec_path) - 1] = '\0';
+    strncpy(last_exec_argv0, (argv && argv[0]) ? argv[0] : "", sizeof(last_exec_argv0) - 1);
+    last_exec_argv0[sizeof(last_exec_argv0) - 1] = '\0';
+    strncpy(last_exec_argv1, (argv && argv[1]) ? argv[1] : "", sizeof(last_exec_argv1) - 1);
+    last_exec_argv1[sizeof(last_exec_argv1) - 1] = '\0';
+    strncpy(last_exec_env0, (envp && envp[0]) ? envp[0] : "", sizeof(last_exec_env0) - 1);
+    last_exec_env0[sizeof(last_exec_env0) - 1] = '\0';
+    return 77;
+}
 void stub_kprint(const char *msg) {
     strncpy(last_log, msg ? msg : "", sizeof(last_log) - 1);
     last_log[sizeof(last_log) - 1] = '\0';
 }
+void *kmalloc(size_t size) { return malloc(size); }
+void kfree(void *ptr, size_t size) { (void)size; free(ptr); }
 
 #include "../../sys/exec/perso/perso_elks.c"
 
 static void setup_ds(process_t *proc, gdt_entry_t *ldt, size_t size) {
+    uint32_t base;
+
     memset(proc, 0, sizeof(*proc));
     memset(ldt, 0, sizeof(gdt_entry_t) * 4);
+    memset(ds_mem, 0, size);
+
+    base = (uint32_t)(uintptr_t)ds_mem;
 
     ldt[ELKS_LDT_DS_INDEX].limit_low = (uint16_t)(size - 1U);
+    ldt[ELKS_LDT_DS_INDEX].base_low = (uint16_t)(base & 0xFFFFU);
+    ldt[ELKS_LDT_DS_INDEX].base_middle = (uint8_t)((base >> 16) & 0xFFU);
+    ldt[ELKS_LDT_DS_INDEX].base_high = (uint8_t)((base >> 24) & 0xFFU);
     ldt[ELKS_LDT_DS_INDEX].access = 0xF2U;
     ldt[ELKS_LDT_DS_INDEX].granularity = 0x00U;
 
@@ -132,12 +164,27 @@ int main(void) {
     thread_t thread;
     gdt_entry_t ldt[4];
     int (*fn)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
+    uintptr_t ds_base;
+
+    ds_mem_size = 4096;
+#ifdef MAP_32BIT
+    ds_mem = mmap(NULL, ds_mem_size, PROT_READ | PROT_WRITE,
+                  MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+#else
+    ds_mem = mmap(NULL, ds_mem_size, PROT_READ | PROT_WRITE,
+                  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+#endif
+    if (ds_mem == MAP_FAILED) {
+        perror("mmap");
+        return 1;
+    }
 
     memset(&thread, 0, sizeof(thread));
-    setup_ds(&proc, ldt, 256);
+    setup_ds(&proc, ldt, ds_mem_size);
     current_process = &proc;
     current_thread = &thread;
     elks_personality_init();
+    ds_base = (uintptr_t)ds_mem;
 
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_exit];
     if (fn(7, 0, 0, 0, 0, 0, 0, 0) != 11 || strcmp(last_name, "exit") != 0 || last_i0 != 7) {
@@ -147,21 +194,22 @@ int main(void) {
 
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_read];
     if (fn(3, 0x20, 5, 0, 0, 0, 0, 0) != 22 || strcmp(last_name, "read") != 0 ||
-        last_i0 != 3 || last_ptr != 0x20U || last_i1 != 5) {
+        last_i0 != 3 || last_ptr != ds_base + 0x20U || last_i1 != 5) {
         fprintf(stderr, "FAIL: ELKS read wrapper wrong\n");
         return 1;
     }
 
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_write];
     if (fn(4, 0x20, 5, 0, 0, 0, 0, 0) != 33 || strcmp(last_name, "write") != 0 ||
-        last_i0 != 4 || last_ptr != 0x20U || last_i1 != 5) {
+        last_i0 != 4 || last_ptr != ds_base + 0x20U || last_i1 != 5) {
         fprintf(stderr, "FAIL: ELKS write wrapper wrong\n");
         return 1;
     }
 
+    strcpy((char *)(ds_mem + 0x40), "/tmp/file");
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_open];
     if (fn(0x40, 1, 2, 0, 0, 0, 0, 0) != 44 || strcmp(last_name, "open") != 0 ||
-        last_ptr != 0x40U || last_i0 != 1 || last_i1 != 2) {
+        last_ptr != ds_base + 0x40U || last_i0 != 1 || last_i1 != 2) {
         fprintf(stderr, "FAIL: ELKS open wrapper wrong\n");
         return 1;
     }
@@ -174,18 +222,58 @@ int main(void) {
 
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_waitpid];
     if (fn(12, 0x30, 7, 0, 0, 0, 0, 0) != 66 || strcmp(last_name, "waitpid") != 0 ||
-        last_i0 != 12 || last_ptr != 0x30U || last_i1 != 7) {
+        last_i0 != 12 || last_ptr != ds_base + 0x30U || last_i1 != 7) {
         fprintf(stderr, "FAIL: ELKS waitpid wrapper wrong\n");
         return 1;
     }
 
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_brk];
-    if (fn(0x60, 0, 0, 0, 0, 0, 0, 0) != 0x60 || strcmp(last_name, "brk") != 0 || last_ptr != 0x60U) {
+    if (fn(0x60, 0, 0, 0, 0, 0, 0, 0) != 0x60 || strcmp(last_name, "brk") != 0 ||
+        last_ptr != ds_base + 0x60U) {
         fprintf(stderr, "FAIL: ELKS brk wrapper wrong\n");
         return 1;
     }
-    if (fn(0x200, 0, 0, 0, 0, 0, 0, 0) != -ENOMEM) {
+    if (fn(0x2000, 0, 0, 0, 0, 0, 0, 0) != -ENOMEM) {
         fprintf(stderr, "FAIL: ELKS brk bounds check wrong\n");
+        return 1;
+    }
+
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_fork];
+    if (fn(0, 0, 0, 0, 0, 0, 0, 0) != 12 || strcmp(last_name, "fork") != 0) {
+        fprintf(stderr, "FAIL: ELKS fork wrapper wrong\n");
+        return 1;
+    }
+
+    strcpy((char *)(ds_mem + 0x20), "/bin/sh");
+    {
+        uint16_t *stack = (uint16_t *)(void *)(ds_mem + 0x80);
+        char *strings = (char *)(ds_mem + 0x80 + 12);
+
+        stack[0] = 2;
+        stack[1] = 12;
+        stack[2] = 15;
+        stack[3] = 0;
+        stack[4] = 18;
+        stack[5] = 0;
+
+        strcpy(strings + 0, "sh");
+        strcpy(strings + 3, "-c");
+        strcpy(strings + 6, "TERM=ansi");
+    }
+    memset(last_exec_path, 0, sizeof(last_exec_path));
+    memset(last_exec_argv0, 0, sizeof(last_exec_argv0));
+    memset(last_exec_argv1, 0, sizeof(last_exec_argv1));
+    memset(last_exec_env0, 0, sizeof(last_exec_env0));
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_execve];
+    if (fn(0x20, 0x80, 32, 0, 0, 0, 0, 0) != 77 || strcmp(last_name, "execve") != 0) {
+        fprintf(stderr, "FAIL: ELKS execve wrapper wrong return path\n");
+        return 1;
+    }
+    if (strcmp(last_exec_path, "/bin/sh") != 0 ||
+        strcmp(last_exec_argv0, "sh") != 0 ||
+        strcmp(last_exec_argv1, "-c") != 0 ||
+        strcmp(last_exec_env0, "TERM=ansi") != 0) {
+        fprintf(stderr, "FAIL: ELKS execve stack decoding wrong\n");
         return 1;
     }
 
@@ -201,6 +289,7 @@ int main(void) {
         return 1;
     }
 
+    munmap(ds_mem, ds_mem_size);
     puts("host_test_perso_elks: ok");
     return 0;
 }
