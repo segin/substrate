@@ -43,20 +43,20 @@ Reference: User Request (Step 31552)
         - Acceptance: ELKS binaries dispatched to elks_load() function.
 
 - [ ] **ELKS Exec Loader:** (REQ: REQ-20-0009)
-    - [ ] Implement `elks_load()` function for ELKS binary loading. (REQ: REQ-20-0010)
-        - Files: `sys/fs/exec/elks_aout.c`
+    - [x] Implement `elks_load()` function for ELKS binary loading. (REQ: REQ-20-0010)
+        - Files: `sys/exec/formats/elks_aout.c`
         - Tests: unit (load sample ELKS binary into memory)
         - Acceptance: Binary text/data/bss segments loaded correctly.
     - [ ] Allocate 16-bit LDT segments via LDT API for code/data/stack. (REQ: REQ-20-0011)
-        - Files: `sys/fs/exec/elks_aout.c`, `sys/arch/i386/ldt.c`
+        - Files: `sys/exec/formats/elks_aout.c`, `sys/arch/i386/ldt.c`
         - Tests: unit (verify LDT entries created)
         - Acceptance: Separate LDT entries for CS (code), DS (data), SS (stack), ES (extra).
     - [ ] Set up ELKS stack segment with correct base and limit. (REQ: REQ-20-0012)
-        - Files: `sys/fs/exec/elks_aout.c`
+        - Files: `sys/exec/formats/elks_aout.c`
         - Tests: unit (stack segment bounds)
         - Acceptance: Stack limit enforced by hardware; overflow triggers #SS exception.
     - [ ] Set up ELKS data segment with correct base and limit. (REQ: REQ-20-0013)
-        - Files: `sys/fs/exec/elks_aout.c`
+        - Files: `sys/exec/formats/elks_aout.c`
         - Tests: unit (data segment bounds)
         - Acceptance: Data accesses beyond limit trigger #GP exception.
     - [ ] Install syscall gateway trampoline for 16-bit to 32-bit transition. (REQ: REQ-20-0014)
