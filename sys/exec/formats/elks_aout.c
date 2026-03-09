@@ -167,6 +167,7 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     }
     
     // Setup LDT
+    ldt_free_process(current_process);
     if (elks_setup_segments(current_process, &plan) != 0) {
         return -ENOMEM;
     }

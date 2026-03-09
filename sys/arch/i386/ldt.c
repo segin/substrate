@@ -41,9 +41,33 @@ void ldt_init_process(process_t *proc) {
     proc->ldt_entry_count = 0;
 }
 
+int ldt_clone_process(process_t *dst, const process_t *src) {
+    size_t bytes;
+
+    if (!dst || !src) {
+        return -EINVAL;
+    }
+
+    ldt_free_process(dst);
+    if (!src->ldt || src->ldt_entry_count <= 0) {
+        return 0;
+    }
+
+    bytes = (size_t)src->ldt_entry_count * LDT_ENTRY_SIZE;
+    dst->ldt = kmalloc(bytes);
+    if (!dst->ldt) {
+        dst->ldt_entry_count = 0;
+        return -ENOMEM;
+    }
+
+    memcpy(dst->ldt, src->ldt, bytes);
+    dst->ldt_entry_count = src->ldt_entry_count;
+    return 0;
+}
+
 void ldt_free_process(process_t *proc) {
     if (proc->ldt) {
-        kfree(proc->ldt, LDT_ENTRIES * 8);
+        kfree(proc->ldt, (size_t)proc->ldt_entry_count * LDT_ENTRY_SIZE);
         proc->ldt = NULL;
         proc->ldt_entry_count = 0;
     }

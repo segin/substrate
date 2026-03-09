@@ -170,6 +170,15 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     } else {
         child_proc->pmap = NULL; // Kernel process (shouldn't fork)
     }
+
+    if (ldt_clone_process(child_proc, parent) != 0) {
+        if (child_proc->pmap) {
+            pmap_release(child_proc->pmap);
+            child_proc->pmap = NULL;
+        }
+        child_proc->pid = -1;
+        return -1;
+    }
     
     // Copy cwd_node
     child_proc->cwd_node = parent->cwd_node;

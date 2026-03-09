@@ -119,7 +119,7 @@ Reference: User Request (Step 31552)
         - Acceptance: `LDT[seg].base + offset` is validated and computed correctly, with out-of-bounds offsets rejected.
 
 - [ ] **Resource Isolation & Signal Handling:** (REQ: REQ-20-0029)
-    - [ ] Ensure ELKS processes have isolated LDT (not shared with other processes). (REQ: REQ-20-0030)
+    - [x] Ensure ELKS processes have isolated LDT (not shared with other processes). (REQ: REQ-20-0030)
         - Files: `sys/arch/i386/ldt.c`, `sys/pm/process.c`
         - Tests: unit (verify LDT per-process)
         - Acceptance: Each ELKS process gets private LDT.
@@ -142,7 +142,7 @@ Reference: User Request (Step 31552)
         - Files: `sys/arch/i386/ldt.c`, `sys/pm/process.c`
         - Tests: unit (no leaked LDT entries after exit)
         - Acceptance: All LDT entries freed when ELKS process exits.
-    - [ ] Implement LDT duplication on fork. (REQ: REQ-20-0036)
+    - [x] Implement LDT duplication on fork. (REQ: REQ-20-0036)
         - Files: `sys/arch/i386/ldt.c`, `sys/pm/fork.c`
         - Tests: unit (child gets copy of LDT)
         - Acceptance: Child LDT is independent copy of parent LDT.
