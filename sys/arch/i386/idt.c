@@ -152,7 +152,7 @@ void idt_init(void) {
     idt_set_gate(45, (uint32_t)isr45, 0x08, 0x8E);
     idt_set_gate(46, (uint32_t)isr46, 0x08, 0x8E);
     idt_set_gate(47, (uint32_t)isr47, 0x08, 0x8E);
-    idt_set_gate(0x80, (uint32_t)isr128, 0x08, 0xEE); // DPL=3
+    idt_set_gate(0x80, (uint32_t)isr128, 0x08, IDT_FLAG_USER_INT_GATE);
 
     idt_flush((uint32_t)&idt_ptr);
 }

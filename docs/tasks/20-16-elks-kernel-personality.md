@@ -59,10 +59,10 @@ Reference: User Request (Step 31552)
         - Files: `sys/exec/formats/elks_aout.c`, `sys/exec/formats/elks_aout.h`
         - Tests: unit (data segment bounds)
         - Acceptance: Data accesses beyond limit trigger #GP exception.
-    - [ ] Install syscall gateway trampoline for 16-bit to 32-bit transition. (REQ: REQ-20-0014)
-        - Files: `sys/fs/exec/elks_aout.c`, `sys/arch/i386/elks_gate.S`
-        - Tests: integration (syscall from 16-bit code reaches kernel)
-        - Acceptance: INT 0x80 from 16-bit context transitions to 32-bit kernel handler.
+    - [x] Route ELKS `INT 0x80` through the standard user-callable i386 syscall gate. (REQ: REQ-20-0014)
+        - Files: `sys/arch/i386/idt.c`, `sys/arch/i386/syscall.c`, `sys/arch/i386/syscall_abi.h`
+        - Tests: unit (ELKS register ABI extraction)
+        - Acceptance: `INT 0x80` from an LDT-backed 16-bit ELKS context reaches the kernel syscall handler using ELKS argument order `BX, CX, DX, DI, SI`.
     - [ ] Handle ELKS environment variables and argv setup. (REQ: REQ-20-0015)
         - Files: `sys/fs/exec/elks_aout.c`
         - Tests: integration (argc/argv accessible from ELKS binary)

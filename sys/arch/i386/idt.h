@@ -22,6 +22,11 @@ struct idt_ptr_struct {
 
 typedef struct idt_ptr_struct idt_ptr_t;
 
+#define IDT_FLAG_PRESENT        0x80
+#define IDT_FLAG_DPL3           0x60
+#define IDT_FLAG_INT32_GATE     0x0E
+#define IDT_FLAG_USER_INT_GATE  (IDT_FLAG_PRESENT | IDT_FLAG_DPL3 | IDT_FLAG_INT32_GATE)
+
 void idt_init(void);
 void idt_set_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags);
 

@@ -2,6 +2,7 @@
 
 #include <arch/i386/syscall.h>
 #include <arch/i386/idt.h>
+#include <arch/i386/syscall_abi.h>
 
 /* NetBSD-style kernel internal includes */
 #include <kern/sched.h>
@@ -128,30 +129,7 @@ void syscall_handler(registers_t *regs) {
     }
 
     uint32_t args[8];
-    memset(args, 0, sizeof(args));
-
-
-    // Detect ABI (FreeBSD/Native i386 uses stack passing)
-    if (p && p->name && (strcmp(p->name, "FreeBSD") == 0 || strcmp(p->name, "substrate") == 0 || strcmp(p->name, "AT&T UNIX SVR4") == 0)) {
-        // FreeBSD/Native args are on stack just above return address (ESP+4)
-        uint32_t *user_stack = (uint32_t *)(uintptr_t)regs->useresp;
-        args[0] = user_stack[1];
-        args[1] = user_stack[2];
-        args[2] = user_stack[3];
-        args[3] = user_stack[4];
-        args[4] = user_stack[5];
-        args[5] = user_stack[6];
-        args[6] = user_stack[7];
-        args[7] = user_stack[8];
-    } else {
-        // Default / Linux ABI (Registers)
-        args[0] = regs->ebx;
-        args[1] = regs->ecx;
-        args[2] = regs->edx;
-        args[3] = regs->esi;
-        args[4] = regs->edi;
-        args[5] = regs->ebp;
-    }
+    i386_extract_syscall_args(p, regs, args);
 
     if (syscall_trace_enabled) {
         char buf[512];
@@ -351,5 +329,5 @@ int sys_vfork(void) {
 
 extern void isr128(void); 
 void syscall_init(void) {
-    idt_set_gate(0x80, (uint32_t)isr128, 0x08, 0x8E);
+    idt_set_gate(0x80, (uint32_t)isr128, 0x08, IDT_FLAG_USER_INT_GATE);
 }
