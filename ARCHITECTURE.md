@@ -175,6 +175,20 @@ Planned x86 Unix personality targets:
 - ELKS (16-bit Linux-like) personality
 - Minix `a.out` compatibility path
 
+ELKS personality contract:
+- ELKS binaries are recognized as Minix-style 16-bit `a.out` images and loaded
+  through a private per-process LDT.
+- ELKS execution runs as a 16-bit protected-mode personality (`BITNESS_16`),
+  not VM86.
+- ELKS syscalls use `INT 0x80` with the ELKS register argument order
+  `BX, CX, DX, DI, SI`.
+- ELKS `signal()` / `kill()` are translated at the personality edge, and
+  signal delivery uses the ELKS libc callback convention: the kernel pushes a
+  far-return frame for `_signal_cbhandler(sig)` on the ELKS user stack and
+  resumes the interrupted `CS:IP` via `lret $2`.
+- `INT 0x20` from ELKS userspace is treated as a Minix-86 trap attempt, logged,
+  and converted into `SIGSYS`.
+
 ## 6. Userland and Libraries
 
 Userland is split by role:

@@ -227,7 +227,7 @@ Reference: User Request (Step 31552)
         - Tests: N/A (documentation)
         - Docs: `ELKS-compat.4`
         - Acceptance: Documents known limitations and unsupported features.
-    - [ ] Add ELKS personality to ARCHITECTURE.md. (REQ: REQ-20-0058)
+    - [x] Add ELKS personality to ARCHITECTURE.md. (REQ: REQ-20-0058)
         - Files: `ARCHITECTURE.md`
         - Tests: N/A (documentation)
         - Acceptance: ELKS personality architecture documented.
