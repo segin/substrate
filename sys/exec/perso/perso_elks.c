@@ -19,6 +19,24 @@ static int elks_ds_pointer(uint32_t offset, uintptr_t *linear_out) {
                                          linear_out);
 }
 
+static int elks_ds_base_limit(uintptr_t *base_out, uint32_t *limit_out) {
+    gdt_entry_t *ldt;
+
+    if (!current_process || !current_process->ldt ||
+        current_process->ldt_entry_count <= (int)ELKS_LDT_DS_INDEX) {
+        return -EFAULT;
+    }
+
+    ldt = (gdt_entry_t *)current_process->ldt;
+    if (base_out) {
+        *base_out = (uintptr_t)ldt_entry_base(&ldt[ELKS_LDT_DS_INDEX]);
+    }
+    if (limit_out) {
+        *limit_out = ldt_entry_limit(&ldt[ELKS_LDT_DS_INDEX]);
+    }
+    return 0;
+}
+
 static int elks_sys_exit(uint32_t status, uint32_t unused1, uint32_t unused2,
                          uint32_t unused3, uint32_t unused4, uint32_t unused5,
                          uint32_t unused6, uint32_t unused7) {
@@ -71,6 +89,34 @@ static int elks_sys_close(uint32_t fd, uint32_t unused1, uint32_t unused2,
     return sys_close((int)fd);
 }
 
+static int elks_sys_brk(uint32_t brk_off, uint32_t unused1, uint32_t unused2,
+                        uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                        uint32_t unused6, uint32_t unused7) {
+    uintptr_t base = 0;
+    uint32_t limit = 0;
+    uintptr_t linear = 0;
+    uintptr_t current = 0;
+    int ret;
+
+    (void)unused1; (void)unused2; (void)unused3; (void)unused4;
+    (void)unused5; (void)unused6; (void)unused7;
+
+    ret = elks_ds_base_limit(&base, &limit);
+    if (ret != 0) {
+        return ret;
+    }
+    if (brk_off > (limit + 1U)) {
+        return -ENOMEM;
+    }
+
+    linear = base + (uintptr_t)(uint16_t)brk_off;
+    current = (uintptr_t)sys_brk((uint32_t)linear);
+    if (current < base) {
+        return -ENOMEM;
+    }
+    return (int)(current - base);
+}
+
 /* ELKS Syscall Table */
 static void *elks_syscall_table[ELKS_SYS_MAX] = {
     [ELKS_SYS_exit]    = (void *)&elks_sys_exit,
@@ -107,7 +153,7 @@ static void *elks_syscall_table[ELKS_SYS_MAX] = {
     [ELKS_SYS_dup]     = (void *)&sys_dup,
     [ELKS_SYS_pipe]    = (void *)&sys_pipe,
     [ELKS_SYS_times]   = (void *)&sys_times,
-    [ELKS_SYS_brk]     = (void *)&sys_brk,
+    [ELKS_SYS_brk]     = (void *)&elks_sys_brk,
     [ELKS_SYS_setgid]  = (void *)&sys_setgid,
     [ELKS_SYS_getgid]  = (void *)&sys_getgid,
     [ELKS_SYS_signal]  = (void *)&sys_signal,

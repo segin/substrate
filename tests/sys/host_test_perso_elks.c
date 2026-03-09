@@ -95,7 +95,7 @@ int stub_sys_rmdir(const char *a) { (void)a; return -1; }
 int stub_sys_dup(int a) { (void)a; return -1; }
 int stub_sys_pipe(int *a) { (void)a; return -1; }
 clock_t stub_sys_times(struct tms *a) { (void)a; return 0; }
-int stub_sys_brk(uint32_t a) { (void)a; return -1; }
+int stub_sys_brk(uint32_t a) { last_name = "brk"; last_ptr = a; return (int)a; }
 int stub_sys_setgid(int a) { (void)a; return -1; }
 int stub_sys_getgid(void) { return -1; }
 int stub_sys_signal(int a, void *b) { (void)a; (void)b; return -1; }
@@ -160,6 +160,16 @@ int main(void) {
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_close];
     if (fn(9, 0, 0, 0, 0, 0, 0, 0) != 55 || strcmp(last_name, "close") != 0 || last_i0 != 9) {
         fprintf(stderr, "FAIL: ELKS close wrapper wrong\n");
+        return 1;
+    }
+
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_brk];
+    if (fn(0x60, 0, 0, 0, 0, 0, 0, 0) != 0x60 || strcmp(last_name, "brk") != 0 || last_ptr != 0x60U) {
+        fprintf(stderr, "FAIL: ELKS brk wrapper wrong\n");
+        return 1;
+    }
+    if (fn(0x200, 0, 0, 0, 0, 0, 0, 0) != -ENOMEM) {
+        fprintf(stderr, "FAIL: ELKS brk bounds check wrong\n");
         return 1;
     }
 

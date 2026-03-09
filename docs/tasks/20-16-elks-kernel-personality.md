@@ -89,10 +89,10 @@ Reference: User Request (Step 31552)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: unit (near-pointer translation into native open/close)
         - Acceptance: File operations work with VFS.
-    - [ ] Implement ELKS sys_brk translation (16-bit heap). (REQ: REQ-20-0022)
+    - [x] Implement ELKS sys_brk translation (16-bit heap). (REQ: REQ-20-0022)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: unit (heap expansion within segment)
-        - Acceptance: brk works within data segment limit.
+        - Acceptance: `brk` accepts and returns a 16-bit data-segment offset and rejects requests beyond the ELKS data-segment limit.
     - [ ] Implement ELKS sys_fork translation. (REQ: REQ-20-0023)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: integration (fork returns in both parent and child)
