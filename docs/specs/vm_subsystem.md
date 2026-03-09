@@ -153,7 +153,7 @@ Implemented behaviors:
 Current design note:
 
 - the machine-independent VM path supports shadow objects and pager-backed faults
-- `vm_map_fork()` currently implements COW by sharing the backing object and downgrading parent protections rather than constructing a new shadow object per entry during fork
+- `vm_map_fork()` now constructs distinct parent and child shadow objects for `VM_INHERIT_COPY` entries, then downgrades the parent PTEs to force later write faults through the shadow chain
 
 ## User Memory Syscall Contract
 

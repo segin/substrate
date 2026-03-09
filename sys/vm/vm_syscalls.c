@@ -129,64 +129,6 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
         return (void *)-1;
     }
 
-    if (file) {
-        return (void *)v_addr;
-    }
-
-    // Allocate and map pages
-    // NOTE: pmm_alloc_block() returns virtual address (kernel direct mapping)
-    #define MMAP_BATCH_SIZE 64
-    uintptr_t pa_batch[MMAP_BATCH_SIZE];
-    int batch_idx = 0;
-    uintptr_t batch_va_start = v_addr;
-
-    for (uintptr_t va = v_addr; va < v_addr + aligned_length; va += 0x1000) {
-        // If batch is full, commit it
-        if (batch_idx == MMAP_BATCH_SIZE) {
-            pmap_enter_batch(p->pmap ? (pmap_t)p->pmap : pmap_kernel(), batch_va_start, batch_idx, pa_batch, vm_prot, 0);
-            batch_idx = 0;
-            batch_va_start = va;
-        }
-
-        void *pa_virt = pmm_alloc_block();  // Returns virtual address
-        if (!pa_virt) {
-            // Partial failure - pages before this are mapped
-            // Cleanup pages in current pending batch
-            for (int i = 0; i < batch_idx; i++) {
-                void *cleanup_kvirt = (void *)(pa_batch[i] + 0xC0000000);
-                pmm_free_block(cleanup_kvirt);
-            }
-
-            // Cleanup previously committed batches
-            for (uintptr_t cleanup_va = v_addr; cleanup_va < batch_va_start; cleanup_va += 0x1000) {
-                uint32_t pa = pmap_extract(p->pmap ? (pmap_t)p->pmap : pmap_kernel(), cleanup_va);
-                if (pa) {
-                    void *cleanup_kvirt = (void *)(pa + 0xC0000000);
-                    pmm_free_block(cleanup_kvirt);
-                    pmap_remove(p->pmap ? (pmap_t)p->pmap : pmap_kernel(), cleanup_va);
-                }
-            }
-            // Remove the vm_map entry
-            vm_map_remove(map, v_addr, v_addr + aligned_length);
-
-            return (void *)-1;
-        }
-
-        // Zero the page - pa_virt is already virtual
-        memset(pa_virt, 0, 0x1000);
-
-        // Convert virtual to physical for pmap_enter
-        uint32_t pa_phys = (uint32_t)(uintptr_t)pa_virt - 0xC0000000;
-
-        // Add to batch
-        pa_batch[batch_idx++] = pa_phys;
-    }
-
-    // Flush remaining batch
-    if (batch_idx > 0) {
-        pmap_enter_batch(p->pmap ? (pmap_t)p->pmap : pmap_kernel(), batch_va_start, batch_idx, pa_batch, vm_prot, 0);
-    }
-
     return (void *)v_addr;
 }
 
@@ -208,11 +150,7 @@ int sys_munmap(void *addr, size_t length) {
 
 #include <string.h>
 
-extern int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t flags);
-extern int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_list, uint32_t prot, uint32_t flags);
 extern pmap_t pmap_kernel(void);
-extern void *pmm_alloc_block(void);
-extern void pmm_free_block(void *p);
 
 void *sys_brk(void *addr) {
     if (!current_process) return NULL;

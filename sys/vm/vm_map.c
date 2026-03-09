@@ -949,12 +949,25 @@ vm_map_t *vm_map_fork(vm_map_t *src_map, pmap_t dst_pmap) {
         } else if (src_entry->inheritance == VM_INHERIT_COPY) {
             // Copy-on-Write
             if (obj) {
-                obj->flags |= VM_OBJ_COPY;
-                new_obj = obj;
-                vm_object_reference(new_obj);
-                
-                // Downgrade protection in parent to ensure COW trap happens
-                pmap_protect(src_map->pmap, src_entry->start, src_entry->end, src_entry->protection & ~VM_PROT_WRITE);
+                vm_object_t *parent_shadow = vm_object_shadow(obj);
+                vm_object_t *child_shadow = vm_object_shadow(obj);
+                if (!parent_shadow || !child_shadow) {
+                    if (parent_shadow) vm_object_deallocate(parent_shadow);
+                    if (child_shadow) vm_object_deallocate(child_shadow);
+                    vm_map_destroy(dst_map);
+                    return NULL;
+                }
+
+                src_entry->object = parent_shadow;
+                src_entry->flags |= VME_NEEDS_COPY;
+                new_obj = child_shadow;
+
+                // Parent entry no longer owns the original object directly.
+                vm_object_deallocate(obj);
+
+                // Downgrade protection in parent to ensure COW trap happens.
+                pmap_protect(src_map->pmap, src_entry->start, src_entry->end,
+                             src_entry->protection & ~VM_PROT_WRITE);
             }
         } else if (src_entry->inheritance == VM_INHERIT_ZERO) {
             // Child gets new zero-filled object
