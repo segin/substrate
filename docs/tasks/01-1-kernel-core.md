@@ -567,7 +567,7 @@
                     - [x] `MAP_PRIVATE`: COW on write (shadow object). (REQ: REQ-01-0493)
                     - [x] `MAP_SHARED`: write-through to file. (REQ: REQ-01-0494)
                 - [ ] **Reference Counting & Shared Memory:** (REQ: REQ-01-0495)
-                    - [ ] `vm_page_t` refcounts: track mappings to each physical frame. (REQ: REQ-01-0496)
+                    - [x] `vm_page_t` refcounts: track mappings to each physical frame. (REQ: REQ-01-0496)
                     - [x] `vm_object` refcounts: track regions sharing backing store. (REQ: REQ-01-0497)
                     - [x] `MAP_SHARED` write-through for multi-process shared memory. (REQ: REQ-01-0498)
             - [ ] **Lazy Faulting:** (REQ: REQ-01-0499)

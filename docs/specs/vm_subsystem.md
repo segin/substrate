@@ -161,7 +161,7 @@ Current `sys_mmap()` behavior in `sys/vm/vm_syscalls.c`:
 
 - lengths are rounded up to page size before insertion
 - `MAP_FIXED` requires a page-aligned address and removes any existing mapping in the target range first
-- anonymous mappings allocate zero-filled pages eagerly today
+- anonymous mappings are lazy: `mmap()` installs the `vm_map` entry and first access allocates a zero-filled page through `vm_fault()`
 - file-backed mappings are lazy and pager-backed
 
 Current file-backed mapping contract:

@@ -212,9 +212,11 @@ static void test_pmap_destroy_reclaims_mapped_pages(void) {
     TEST_ASSERT(mapped_blocks > start_blocks, "mapped_destroy: PMM usage increased after mappings");
 
     pmap_destroy(pmap);
+    pmm_free_block(page0_v);
+    pmm_free_block(page1_v);
 
     TEST_ASSERT(pmm_get_used_blocks() == start_blocks,
-                "mapped_destroy: destroy reclaimed resident pages and page-table backing");
+                "mapped_destroy: destroy released mapping refs and page-table backing");
     kprint("  PASS\n");
 }
 // Test 5: PSE 4MB Page Support
@@ -298,6 +300,46 @@ void test_pmap_mapping_counters(void) {
 
     pmap_activate(pmap_kernel());
     pmm_free_block(page_v);
+    pmap_destroy(pmap);
+    kprint("  PASS\n");
+}
+
+void test_pmap_page_refcounts_follow_mappings(void) {
+    kprint("Test: pmap page refcounts track mappings\n");
+
+    pmap_t pmap = pmap_create();
+    TEST_ASSERT(pmap != 0, "pmap created");
+
+    void *page0_v = pmm_alloc_block();
+    void *page1_v = pmm_alloc_block();
+    TEST_ASSERT(page0_v != 0 && page1_v != 0, "backing pages allocated");
+
+    uint32_t va = 0x405000;
+    uint32_t pa0 = (uint32_t)(uintptr_t)page0_v - 0xC0000000;
+    uint32_t pa1 = (uint32_t)(uintptr_t)page1_v - 0xC0000000;
+    vm_page_t *page0 = pmm_get_page(pa0);
+    vm_page_t *page1 = pmm_get_page(pa1);
+
+    TEST_ASSERT(page0 != NULL && page1 != NULL, "vm_page records available");
+    TEST_ASSERT(page0->ref_count == 1, "page0 starts with allocator refcount");
+    TEST_ASSERT(page1->ref_count == 1, "page1 starts with allocator refcount");
+
+    pmap_activate(pmap);
+    TEST_ASSERT(pmap_enter(pmap, va, pa0, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_USER, 0) == 0,
+                "initial mapping created");
+    TEST_ASSERT(page0->ref_count == 2, "map adds page0 mapping refcount");
+
+    TEST_ASSERT(pmap_enter(pmap, va, pa1, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_USER, 0) == 0,
+                "mapping replaced with page1");
+    TEST_ASSERT(page0->ref_count == 1, "replace drops page0 mapping refcount");
+    TEST_ASSERT(page1->ref_count == 2, "replace adds page1 mapping refcount");
+
+    pmap_remove(pmap, va);
+    TEST_ASSERT(page1->ref_count == 1, "remove drops page1 mapping refcount");
+
+    pmap_activate(pmap_kernel());
+    pmm_free_block(page0_v);
+    pmm_free_block(page1_v);
     pmap_destroy(pmap);
     kprint("  PASS\n");
 }
@@ -642,6 +684,7 @@ void run_pmap_tests(void) {
     test_pmap_check();
     test_pmap_dump();
     test_pmap_mapping_counters();
+    test_pmap_page_refcounts_follow_mappings();
     test_pmap_growkernel_sync();
     test_pge_detection();
     test_pge_global_flush();

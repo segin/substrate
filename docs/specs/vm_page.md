@@ -8,7 +8,7 @@ A `vm_page` tracks the state of a single physical page of memory. It serves as t
     - `phys_addr`: canonical physical address of the tracked frame.
     - `flags`: state and writeback bits for queueing, validity, and swap/writeback lifecycle.
     - `wire_count`: pin count; pages with a non-zero wire count cannot be reclaimed.
-    - `ref_count`: sharing/reference count used by PMM and COW paths.
+    - `ref_count`: page hold count. One hold comes from the allocator/object lifecycle, and each live PMAP mapping adds one additional hold.
     - `order`: buddy allocator order for free-list membership and coalescing.
     - `object` + `pindex`: owning VM object and per-object page index.
     - `pv_list`: reverse-mapping chain of `(pmap, va)` users of the page.
@@ -29,6 +29,7 @@ A `vm_page` tracks the state of a single physical page of memory. It serves as t
     - `laundry_queue`: dirty pages waiting for writeback completion
 - **Identity:** Each page is identified by its `phys_addr` and its relationship to a `vm_object` + `pindex`.
 - **Reverse mappings:** `pv_entry` chains associate a physical page with each `(pmap, va)` mapping so the PMAP layer can answer reference/dirty questions and resolve COW faults.
+- **Mapping holds:** PMAP insert/remove paths keep `ref_count` aligned with `pv_list`, so replacing or removing a mapping drops exactly one mapping hold without transferring ownership of the underlying page.
 - **Bootstrap path:** PMM allocates the `vm_page_t[]` database during early boot, initializes each slot with canaries and `phys_addr`, then seeds the buddy free lists from accepted usable physical ranges.
 
 ## API

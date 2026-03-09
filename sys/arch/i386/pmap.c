@@ -408,14 +408,14 @@ void pmap_destroy(pmap_t pmap) {
             for (int j = 0; j < 1024; j++) {
                 if (pt[j] & PTE_P) {
                     uint32_t page_phys = pt[j] & ~0xFFF;
+                    uintptr_t va = ((uintptr_t)i << 22) | ((uintptr_t)j << 12);
                     
-                    // Edge case: Validate page address before freeing
+                    // Edge case: Validate page address before dropping the mapping reference
                     if (page_phys != 0 && !(page_phys & 0xFFF)) {
-                        // Don't free kernel pages (>= 0xC0000000 virtual)
-                        if (page_phys < 0x40000000) {  // Reasonable upper bound for user pages
-                            // Use vm_phys_free_page via pmm_free_block
-                            // Our updated vm_phys_free_page handles refcounts
-                            pmm_free_block((void *)(uintptr_t)(page_phys + 0xC0000000));
+                        vm_page_t *page = pmm_get_page(page_phys);
+                        if (page) {
+                            pv_remove(page, pmap, va);
+                            vm_page_unhold(page);
                         }
                     }
                 }
@@ -525,7 +525,7 @@ pmap_t pmap_fork(pmap_t src_pmap) {
             uint32_t pa = src_pte & PTE_FRAME;
             vm_page_t *page = pmm_get_page(pa);
             if (page) {
-                __sync_fetch_and_add(&page->ref_count, 1);
+                vm_page_hold(page);
                 pv_insert(page, dst_pmap, ((uint32_t)pdi << 22) | ((uint32_t)pti << 12));
             }
             
@@ -619,18 +619,22 @@ int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t 
 
     uint32_t *pt = V_PT(pdi);
     uint32_t old_pte = pt[pti];
+    uint32_t old_pa = old_pte & PTE_FRAME;
+    uint32_t new_pa = pa & 0xFFFFF000;
     if (old_pte & PTE_P) {
         vm_page_t *old_page = pmm_get_page(old_pte & PTE_FRAME);
-        if (old_page) {
+        if (old_page && old_pa != new_pa) {
             pv_remove(old_page, pmap, va);
+            vm_page_unhold(old_page);
         }
     } else {
         pmap_count_map_add(pmap, 1);
     }
 
-    pt[pti] = (pa & 0xFFFFF000) | pte_flags;
-    vm_page_t *new_page = pmm_get_page(pa & 0xFFFFF000);
-    if (new_page) {
+    pt[pti] = new_pa | pte_flags;
+    vm_page_t *new_page = pmm_get_page(new_pa);
+    if (new_page && old_pa != new_pa) {
+        vm_page_hold(new_page);
         pv_insert(new_page, pmap, va);
     }
     pmap_invalidate_page(va);
@@ -690,18 +694,22 @@ int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_l
         }
 
         uint32_t old_pte = pt[pti];
+        uint32_t old_pa = old_pte & PTE_FRAME;
+        uint32_t new_pa = pa & 0xFFFFF000;
         if (old_pte & PTE_P) {
             vm_page_t *old_page = pmm_get_page(old_pte & PTE_FRAME);
-            if (old_page) {
+            if (old_page && old_pa != new_pa) {
                 pv_remove(old_page, pmap, va);
+                vm_page_unhold(old_page);
             }
         } else {
             pmap_count_map_add(pmap, 1);
         }
 
-        pt[pti] = (pa & 0xFFFFF000) | pte_flags;
-        vm_page_t *new_page = pmm_get_page(pa & 0xFFFFF000);
-        if (new_page) {
+        pt[pti] = new_pa | pte_flags;
+        vm_page_t *new_page = pmm_get_page(new_pa);
+        if (new_page && old_pa != new_pa) {
+            vm_page_hold(new_page);
             pv_insert(new_page, pmap, va);
         }
     }
@@ -862,11 +870,26 @@ void pmap_remove(pmap_t pmap, uintptr_t va) {
     vm_page_t *page = pmm_get_page(pt[pti] & PTE_FRAME);
     if (page) {
         pv_remove(page, pmap, va);
+        vm_page_unhold(page);
     }
     pt[pti] = 0;
     pmap_count_map_remove(pmap, 1);
     pmap_invalidate_page(va);
     pmap_reclaim_empty_pt(pmap, pdi);
+}
+
+static int pmap_page_mapping_count(vm_page_t *page) {
+    int count = 0;
+
+    if (!page) {
+        return 0;
+    }
+
+    for (struct pv_entry *pv = page->pv_list; pv != NULL; pv = pv->next) {
+        count++;
+    }
+
+    return count;
 }
 
 // Kernel-only fast path: no pmap/locking overhead
@@ -972,7 +995,7 @@ int pmap_protect(pmap_t pmap, uintptr_t sva, uintptr_t eva, uint32_t prot) {
         if (!was_writable && wants_writable) {
             uint32_t pa = old_pte & 0xFFFFF000;
             vm_page_t *page = pmm_get_page(pa);
-            if (page && page->ref_count > 1) {
+            if (page && pmap_page_mapping_count(page) > 1) {
                 // COW page - caller must handle copy-on-write first
                 // Return special value to signal COW needed
                 return -11; // -EAGAIN: COW copy required
@@ -1108,7 +1131,7 @@ int pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, uintptr_t sva, uintptr_t eva, in
 
             // Increment reference count on the shared physical page
             if (page) {
-                __sync_fetch_and_add(&page->ref_count, 1);
+                vm_page_hold(page);
                 pv_insert(page, dst_pmap, va);
             }
             
@@ -1657,7 +1680,7 @@ int pmap_fault(uint32_t err_code, uint32_t cr2) {
         // 3. Update mappings
         // Decrement ref count of old page
         if (page_old->ref_count > 1) {
-            __sync_fetch_and_sub(&page_old->ref_count, 1);
+            vm_page_unhold(page_old);
         } else {
              // Optimization: If ref_count == 1, steal the page?
              // But we already allocated a new one. 
