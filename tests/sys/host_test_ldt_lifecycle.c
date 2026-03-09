@@ -53,14 +53,18 @@ static void fill_entry(gdt_entry_t *entry, uint32_t base, uint32_t limit, uint8_
 int main(void) {
     process_t parent;
     process_t child;
+    process_t replaced;
     gdt_entry_t *parent_ldt;
     gdt_entry_t *child_ldt;
     size_t bytes = 4U * sizeof(gdt_entry_t);
+    size_t old_bytes = 2U * sizeof(gdt_entry_t);
 
     memset(&parent, 0, sizeof(parent));
     memset(&child, 0, sizeof(child));
+    memset(&replaced, 0, sizeof(replaced));
     ldt_init_process(&parent);
     ldt_init_process(&child);
+    ldt_init_process(&replaced);
 
     parent.ldt_entry_count = 4;
     parent.ldt = kmalloc(bytes);
@@ -114,8 +118,34 @@ int main(void) {
         fprintf(stderr, "FAIL: second ldt_clone_process failed\n");
         return 1;
     }
+
+    if (ldt_alloc_process(&replaced, 2) != 0) {
+        fprintf(stderr, "FAIL: initial ldt_alloc_process failed\n");
+        return 1;
+    }
+    ((gdt_entry_t *)replaced.ldt)[0].base_low = 0x1234U;
+    last_kfree_size = 0;
+    if (ldt_alloc_process(&replaced, 6) != 0) {
+        fprintf(stderr, "FAIL: replacement ldt_alloc_process failed\n");
+        return 1;
+    }
+    if (replaced.ldt_entry_count != 6) {
+        fprintf(stderr, "FAIL: replacement LDT entry count mismatch\n");
+        return 1;
+    }
+    if (last_kfree_size != old_bytes) {
+        fprintf(stderr, "FAIL: replacement LDT freed wrong size %lu\n",
+                (unsigned long)last_kfree_size);
+        return 1;
+    }
+    if (((gdt_entry_t *)replaced.ldt)[0].base_low != 0) {
+        fprintf(stderr, "FAIL: replacement LDT was not zeroed\n");
+        return 1;
+    }
+
     ldt_free_process(&parent);
     ldt_free_process(&child);
+    ldt_free_process(&replaced);
 
     puts("host_test_ldt_lifecycle: ok");
     return 0;

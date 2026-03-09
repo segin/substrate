@@ -38,12 +38,8 @@ int elks_check_file(const char *path, const char *header, size_t len) {
 static int elks_setup_segments(process_t *proc, const struct elks_load_plan *plan) {
     struct elks_segment_layout layout;
 
-    /* Allocate LDT if needed */
-    if (!proc->ldt) {
-        proc->ldt = kmalloc(LDT_ENTRIES * 8);
-        if (!proc->ldt) return -ENOMEM;
-        memset(proc->ldt, 0, LDT_ENTRIES * 8);
-        proc->ldt_entry_count = LDT_ENTRIES;
+    if (ldt_alloc_process(proc, LDT_ENTRIES) != 0) {
+        return -ENOMEM;
     }
     memset(&layout, 0, sizeof(layout));
     elks_build_segment_layout(plan, &layout);
@@ -167,7 +163,6 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     }
     
     // Setup LDT
-    ldt_free_process(current_process);
     if (elks_setup_segments(current_process, &plan) != 0) {
         return -ENOMEM;
     }

@@ -146,7 +146,7 @@ Reference: User Request (Step 31552)
         - Files: `sys/arch/i386/ldt.c`, `sys/pm/fork.c`
         - Tests: unit (child gets copy of LDT)
         - Acceptance: Child LDT is independent copy of parent LDT.
-    - [ ] Implement LDT replacement on exec. (REQ: REQ-20-0037)
+    - [x] Implement LDT replacement on exec. (REQ: REQ-20-0037)
         - Files: `sys/arch/i386/ldt.c`, `sys/fs/exec/exec.c`
         - Tests: unit (old LDT freed, new LDT installed)
         - Acceptance: exec clears old LDT and installs new one.

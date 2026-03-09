@@ -41,8 +41,29 @@ void ldt_init_process(process_t *proc) {
     proc->ldt_entry_count = 0;
 }
 
+int ldt_alloc_process(process_t *proc, unsigned int entry_count) {
+    size_t bytes;
+
+    if (!proc || entry_count == 0 || entry_count > LDT_ENTRIES) {
+        return -EINVAL;
+    }
+
+    ldt_free_process(proc);
+    bytes = (size_t)entry_count * LDT_ENTRY_SIZE;
+    proc->ldt = kmalloc(bytes);
+    if (!proc->ldt) {
+        proc->ldt_entry_count = 0;
+        return -ENOMEM;
+    }
+
+    memset(proc->ldt, 0, bytes);
+    proc->ldt_entry_count = (int)entry_count;
+    return 0;
+}
+
 int ldt_clone_process(process_t *dst, const process_t *src) {
     size_t bytes;
+    int ret;
 
     if (!dst || !src) {
         return -EINVAL;
@@ -54,14 +75,12 @@ int ldt_clone_process(process_t *dst, const process_t *src) {
     }
 
     bytes = (size_t)src->ldt_entry_count * LDT_ENTRY_SIZE;
-    dst->ldt = kmalloc(bytes);
-    if (!dst->ldt) {
-        dst->ldt_entry_count = 0;
-        return -ENOMEM;
+    ret = ldt_alloc_process(dst, (unsigned int)src->ldt_entry_count);
+    if (ret != 0) {
+        return ret;
     }
 
     memcpy(dst->ldt, src->ldt, bytes);
-    dst->ldt_entry_count = src->ldt_entry_count;
     return 0;
 }
 
@@ -145,10 +164,7 @@ int sys_modify_ldt(int func, void *ptr, unsigned long bytecount) {
     
     /* Lazy allocate LDT if needed */
     if (!current_process->ldt) {
-        current_process->ldt = kmalloc(LDT_ENTRIES * 8);
-        if (!current_process->ldt) return -ENOMEM;
-        memset(current_process->ldt, 0, LDT_ENTRIES * 8);
-        current_process->ldt_entry_count = LDT_ENTRIES;
+        if (ldt_alloc_process(current_process, LDT_ENTRIES) != 0) return -ENOMEM;
     }
     
     gdt_entry_t *ldt = (gdt_entry_t *)current_process->ldt;
