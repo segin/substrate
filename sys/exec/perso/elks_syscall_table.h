@@ -2,8 +2,11 @@
 #define _ELKS_SYSCALL_TABLE_H
 
 /*
- * ELKS (Embeddable Linux Kernel Subset) Syscall Table Mapping
- * Used by the ELKS personality driver to translate 16-bit syscalls.
+ * ELKS syscall numbers used by the Substrate ELKS personality.
+ *
+ * This table follows the ELKS/elksemu 16-bit userspace numbering that the
+ * personality contract targets. Slots not defined here are reserved and are
+ * expected to return -ENOSYS until explicitly implemented.
  */
 
 #define ELKS_SYS_exit           1

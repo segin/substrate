@@ -3,7 +3,7 @@
 > This file was seeded from `TASKS.md` using a fork-copy (rename+restore) workflow to preserve lineage.
 > Source span in original monolith: lines 10551-10810.
 
-## Reimplemented Checklist (All Open)
+## Reimplemented Checklist
 
 ### 16. ELKS Kernel Personality (16-bit LDT-based Execution)
 Reference: User Request (Step 31552)
@@ -11,34 +11,34 @@ Reference: User Request (Step 31552)
 > [!NOTE]
 > ELKS (Embeddable Linux Kernel Subset) is a 16-bit Linux-like OS for 8086/80286. This personality enables running ELKS binaries on Substrate using LDT-based 16-bit protected mode segments.
 
-- [ ] **Design & Specification:** (REQ: REQ-20-0001)
-    - [ ] Produce ELKS personality specification document. (REQ: REQ-20-0002)
+- [x] **Design & Specification:** (REQ: REQ-20-0001)
+    - [x] Produce ELKS personality specification document. (REQ: REQ-20-0002)
         - Files: `docs/personality/elks_spec.md`
         - Tests: N/A (design doc)
         - Docs: `elks_spec.md`
-        - Acceptance: Document covers binary format recognition, ABI semantics (syscalls, signal model), data models (near/far pointers), and expected process environment.
-    - [ ] Define ELKS syscall table mapping to Substrate equivalents. (REQ: REQ-20-0003)
+        - Acceptance: Document covers Minix-style ELKS `a.out` recognition, the `INT 0x80` ABI, the `INT 0x20` Minix trap contract, near/far pointer rules, and the expected 16-bit process environment.
+    - [x] Define ELKS syscall table mapping to Substrate equivalents. (REQ: REQ-20-0003)
         - Files: `docs/personality/elks_syscalls.md`, `sys/exec/perso/elks_syscall_table.h`
         - Tests: N/A (design doc)
         - Docs: `elks_syscalls.md`
-        - Acceptance: Complete mapping table with supported/unsupported syscalls documented.
-    - [ ] Define ELKS signal model and mapping to POSIX signals. (REQ: REQ-20-0004)
+        - Acceptance: Complete mapping table documents direct, translated, partial, and unsupported ELKS syscall slots against Substrate kernel entry points.
+    - [x] Define ELKS signal model and mapping to POSIX signals. (REQ: REQ-20-0004)
         - Files: `docs/personality/elks_spec.md`
         - Tests: N/A (design doc)
-        - Acceptance: Signal numbers and semantics documented.
-    - [ ] Define ELKS memory model (tiny/small/medium/compact/large). (REQ: REQ-20-0005)
+        - Acceptance: ELKS smallsig numbering, unsupported signal numbers, and translation to native Substrate signals are documented.
+    - [x] Define ELKS memory model (tiny/small/medium/compact/large). (REQ: REQ-20-0005)
         - Files: `docs/personality/elks_spec.md`
         - Tests: N/A (design doc)
-        - Acceptance: Each memory model's segment layout documented.
+        - Acceptance: Each 16-bit memory model's segment layout, pointer-width expectations, and Substrate support target are documented.
 
 - [ ] **Binary Format Recognition:** (REQ: REQ-20-0006)
     - [ ] Implement ELKS a.out binary format detection. (REQ: REQ-20-0007)
-        - Files: `sys/fs/exec/elks_aout.c`, `sys/fs/exec/elks_aout.h`
+        - Files: `sys/exec/formats/elks_aout.c`, `sys/exec/formats/elks_aout.h`
         - Tests: unit (magic number detection)
         - Docs: `elks_aout.4` manpage
-        - Acceptance: Correctly identify ELKS a.out magic (0x0301 for 8086, 0x0302 for 80286).
+        - Acceptance: Correctly identify ELKS Minix-style type values `0x04100301`, `0x04200301`, and `0x04300301`, including supplemental-header variants.
     - [ ] Register ELKS loader with exec subsystem. (REQ: REQ-20-0008)
-        - Files: `sys/fs/exec/exec.c`, `sys/fs/exec/elks_aout.c`
+        - Files: `sys/exec/exec.c`, `sys/exec/formats/elks_aout.c`
         - Tests: integration (exec ELKS binary triggers loader)
         - Acceptance: ELKS binaries dispatched to elks_load() function.
 
