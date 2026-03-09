@@ -105,10 +105,10 @@ Reference: User Request (Step 31552)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: unit (ELKS status-pointer translation)
         - Acceptance: ELKS `waitpid` translates the optional status pointer from the data segment and passes the native wait options unchanged.
-    - [ ] Implement ELKS signal syscalls (sys_signal, sys_kill). (REQ: REQ-20-0026)
+    - [x] Implement ELKS signal syscalls (sys_signal, sys_kill). (REQ: REQ-20-0026)
         - Files: `sys/exec/perso/perso_elks.c`
-        - Tests: integration (signal delivery)
-        - Acceptance: Signals delivered and handlers invoked.
+        - Tests: unit (signal-number and handler translation)
+        - Acceptance: `kill` translates ELKS smallsig numbers into native kernel signals, and `signal` installs ELKS default/ignore/custom dispositions without exposing native pointer conventions.
     - [x] Return ENOSYS for unsupported ELKS syscalls with kernel log. (REQ: REQ-20-0027)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: unit (verify ENOSYS return)

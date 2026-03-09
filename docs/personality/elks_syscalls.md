@@ -55,7 +55,7 @@ Undefined slots not listed in the active table are reserved and shall return
 | 29 | `pause` | `sys_pause` | Direct | Signal-restart behavior remains personality-specific. |
 | 33 | `access` | `sys_access` | Translate | ELKS path pointer translation required. |
 | 36 | `sync` | `sys_sync` | Direct | No ELKS-specific payload marshaling. |
-| 37 | `kill` | `sys_kill` | Translate | ELKS smallsig numbers must be translated to native signals. |
+| 37 | `kill` | `sys_kill` | Translate | ELKS smallsig numbers are translated at the personality edge before entering native signal routing. |
 | 38 | `rename` | none yet in table | Unsupported | Reserved in numbering; personality shall return `-ENOSYS` until explicitly wired. |
 | 39 | `mkdir` | `sys_mkdir` | Translate | ELKS path-pointer and mode marshaling required. |
 | 40 | `rmdir` | `sys_rmdir` | Translate | ELKS path pointer translation required. |
@@ -65,7 +65,7 @@ Undefined slots not listed in the active table are reserved and shall return
 | 45 | `brk` | `sys_brk` | Partial | Must be bounded to the ELKS data/heap contract. |
 | 46 | `setgid` | `sys_setgid` | Translate | GID width translation required. |
 | 47 | `getgid` | `sys_getgid` | Translate | GID width translation required. |
-| 48 | `signal` | `sys_signal` | Partial | Requires ELKS signal-number and handler-frame translation. |
+| 48 | `signal` | `kern_sigaction` | Translate | ELKS smallsig numbers and default/ignore/custom handler conventions are translated at the personality edge; 16-bit handler entry/return remains a separate delivery contract. |
 | 54 | `ioctl` | `sys_ioctl` | Partial | Requires ELKS tty ioctl-number and structure translation. |
 | 55 | `fcntl` | `sys_fcntl` | Partial | Requires ELKS flag/cmd translation. |
 | 60 | `umask` | `sys_umask` | Translate | ELKS mode-width handling required. |

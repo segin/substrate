@@ -22,6 +22,28 @@ static int elks_ds_pointer(uint32_t offset, uintptr_t *linear_out) {
                                          linear_out);
 }
 
+static int elks_to_native_signal(int sig) {
+    switch (sig) {
+        case 1:  return SIGHUP;
+        case 2:  return SIGINT;
+        case 3:  return SIGQUIT;
+        case 4:  return SIGWINCH;
+        case 5:  return SIGSTOP;
+        case 6:  return SIGABRT;
+        case 7:  return SIGTSTP;
+        case 8:  return SIGCONT;
+        case 9:  return SIGKILL;
+        case 10: return SIGUSR1;
+        case 11: return SIGSEGV;
+        case 12: return SIGCHLD;
+        case 13: return SIGPIPE;
+        case 14: return SIGALRM;
+        case 15: return SIGTERM;
+        case 16: return 23; /* kernel urgent-I/O slot (native SIGURG semantics) */
+        default: return -EINVAL;
+    }
+}
+
 static int elks_sys_unimplemented(uint32_t unused0, uint32_t unused1, uint32_t unused2,
                                   uint32_t unused3, uint32_t unused4, uint32_t unused5,
                                   uint32_t unused6, uint32_t unused7) {
@@ -423,6 +445,68 @@ static int elks_sys_execve(uint32_t path_off, uint32_t stack_off, uint32_t stack
     return ret;
 }
 
+static int elks_sys_kill(uint32_t pid, uint32_t sig, uint32_t unused2,
+                         uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                         uint32_t unused6, uint32_t unused7) {
+    int native_sig;
+
+    (void)unused2; (void)unused3; (void)unused4; (void)unused5;
+    (void)unused6; (void)unused7;
+
+    native_sig = elks_to_native_signal((int)sig);
+    if (native_sig < 0) {
+        return native_sig;
+    }
+    return sys_kill((int)pid, native_sig);
+}
+
+static int elks_sys_signal(uint32_t sig, uint32_t handler_off, uint32_t handler_sel,
+                           uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                           uint32_t unused6, uint32_t unused7) {
+    struct sigaction act;
+    struct sigaction oldact;
+    uintptr_t linear = 0;
+    int native_sig;
+    int ret;
+
+    (void)unused3; (void)unused4; (void)unused5; (void)unused6; (void)unused7;
+
+    native_sig = elks_to_native_signal((int)sig);
+    if (native_sig < 0) {
+        return native_sig;
+    }
+
+    memset(&act, 0, sizeof(act));
+    memset(&oldact, 0, sizeof(oldact));
+    if (handler_off == 0 && handler_sel == 0) {
+        act.sa_handler = SIG_DFL;
+    } else if (handler_off == 1 && handler_sel == 0) {
+        act.sa_handler = SIG_IGN;
+    } else {
+        ret = ldt_translate_selector_offset(current_process->ldt,
+                                            (unsigned int)current_process->ldt_entry_count,
+                                            (uint16_t)handler_sel,
+                                            (uint16_t)handler_off,
+                                            &linear);
+        if (ret != 0) {
+            return ret;
+        }
+        act.sa_handler = (sig_t)(uintptr_t)linear;
+    }
+
+    ret = kern_sigaction(native_sig, &act, &oldact);
+    if (ret != 0) {
+        return ret;
+    }
+    if (oldact.sa_handler == SIG_DFL) {
+        return 0;
+    }
+    if (oldact.sa_handler == SIG_IGN) {
+        return 1;
+    }
+    return 2;
+}
+
 /* ELKS Syscall Table */
 static void *elks_syscall_table[ELKS_SYS_MAX] = {
     [ELKS_SYS_exit]    = (void *)&elks_sys_exit,
@@ -453,7 +537,7 @@ static void *elks_syscall_table[ELKS_SYS_MAX] = {
     [ELKS_SYS_pause]   = (void *)&sys_pause,
     [ELKS_SYS_access]  = (void *)&sys_access,
     [ELKS_SYS_sync]    = (void *)&sys_sync,
-    [ELKS_SYS_kill]    = (void *)&sys_kill,
+    [ELKS_SYS_kill]    = (void *)&elks_sys_kill,
     [ELKS_SYS_mkdir]   = (void *)&sys_mkdir,
     [ELKS_SYS_rmdir]   = (void *)&sys_rmdir,
     [ELKS_SYS_dup]     = (void *)&sys_dup,
@@ -462,7 +546,7 @@ static void *elks_syscall_table[ELKS_SYS_MAX] = {
     [ELKS_SYS_brk]     = (void *)&elks_sys_brk,
     [ELKS_SYS_setgid]  = (void *)&sys_setgid,
     [ELKS_SYS_getgid]  = (void *)&sys_getgid,
-    [ELKS_SYS_signal]  = (void *)&sys_signal,
+    [ELKS_SYS_signal]  = (void *)&elks_sys_signal,
     [ELKS_SYS_ioctl]   = (void *)&sys_ioctl,
     [ELKS_SYS_fcntl]   = (void *)&sys_fcntl,
     [ELKS_SYS_umask]   = (void *)&sys_umask,

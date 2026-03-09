@@ -22,6 +22,11 @@ static char last_exec_path[128];
 static char last_exec_argv0[128];
 static char last_exec_argv1[128];
 static char last_exec_env0[128];
+static int last_sigaction_sig;
+static sig_t last_sigaction_handler;
+static int last_kill_pid;
+static int last_kill_sig;
+static struct sigaction stub_oldact;
 static uint8_t *ds_mem;
 static size_t ds_mem_size;
 
@@ -70,6 +75,7 @@ static size_t ds_mem_size;
 #define sys_dup2   stub_sys_dup2
 #define sys_getppid stub_sys_getppid
 #define sys_getpgrp stub_sys_getpgrp
+#define kern_sigaction stub_kern_sigaction
 #define kern_execve stub_kern_execve
 #define kprint      stub_kprint
 
@@ -101,7 +107,7 @@ int stub_sys_fstat(int a, void *b) { (void)a; (void)b; return -1; }
 int stub_sys_pause(void) { return -1; }
 int stub_sys_access(const char *a, int b) { (void)a; (void)b; return -1; }
 int stub_sys_sync(void) { return 0; }
-int stub_sys_kill(int a, int b) { (void)a; (void)b; return -1; }
+int stub_sys_kill(int a, int b) { last_kill_pid = a; last_kill_sig = b; return 99; }
 int stub_sys_mkdir(const char *a, int b) { (void)a; (void)b; return -1; }
 int stub_sys_rmdir(const char *a) { (void)a; return -1; }
 int stub_sys_dup(int a) { (void)a; return -1; }
@@ -118,6 +124,14 @@ int stub_sys_stat(const char *a, void *b) { (void)a; (void)b; return -1; }
 int stub_sys_dup2(int a, int b) { (void)a; (void)b; return -1; }
 int stub_sys_getppid(void) { return -1; }
 int stub_sys_getpgrp(void) { return -1; }
+int stub_kern_sigaction(int sig, const struct sigaction *act, struct sigaction *oact) {
+    last_sigaction_sig = sig;
+    last_sigaction_handler = act ? act->sa_handler : SIG_ERR;
+    if (oact) {
+        *oact = stub_oldact;
+    }
+    return 0;
+}
 int stub_kern_execve(const char *path, char *const argv[], char *const envp[]) {
     last_name = "execve";
     strncpy(last_exec_path, path ? path : "", sizeof(last_exec_path) - 1);
@@ -155,6 +169,13 @@ static void setup_ds(process_t *proc, gdt_entry_t *ldt, size_t size) {
     ldt[ELKS_LDT_DS_INDEX].access = 0xF2U;
     ldt[ELKS_LDT_DS_INDEX].granularity = 0x00U;
 
+    ldt[ELKS_LDT_CS_INDEX].limit_low = (uint16_t)(size - 1U);
+    ldt[ELKS_LDT_CS_INDEX].base_low = (uint16_t)(base & 0xFFFFU);
+    ldt[ELKS_LDT_CS_INDEX].base_middle = (uint8_t)((base >> 16) & 0xFFU);
+    ldt[ELKS_LDT_CS_INDEX].base_high = (uint8_t)((base >> 24) & 0xFFU);
+    ldt[ELKS_LDT_CS_INDEX].access = 0xFAU;
+    ldt[ELKS_LDT_CS_INDEX].granularity = 0x00U;
+
     proc->ldt = ldt;
     proc->ldt_entry_count = 4;
 }
@@ -165,6 +186,7 @@ int main(void) {
     gdt_entry_t ldt[4];
     int (*fn)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
     uintptr_t ds_base;
+    uint16_t cs_sel = (uint16_t)((ELKS_LDT_CS_INDEX << 3) | 4U | 3U);
 
     ds_mem_size = 4096;
 #ifdef MAP_32BIT
@@ -274,6 +296,55 @@ int main(void) {
         strcmp(last_exec_argv1, "-c") != 0 ||
         strcmp(last_exec_env0, "TERM=ansi") != 0) {
         fprintf(stderr, "FAIL: ELKS execve stack decoding wrong\n");
+        return 1;
+    }
+
+    last_kill_pid = -1;
+    last_kill_sig = -1;
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_kill];
+    if (fn(77, 2, 0, 0, 0, 0, 0, 0) != 99 ||
+        last_kill_pid != 77 || last_kill_sig != SIGINT) {
+        fprintf(stderr, "FAIL: ELKS kill translation wrong\n");
+        return 1;
+    }
+    if (fn(77, 99, 0, 0, 0, 0, 0, 0) != -EINVAL) {
+        fprintf(stderr, "FAIL: ELKS kill invalid signal translation wrong\n");
+        return 1;
+    }
+
+    stub_oldact.sa_handler = SIG_DFL;
+    last_sigaction_sig = -1;
+    last_sigaction_handler = SIG_ERR;
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_signal];
+    if (fn(2, 0, 0, 0, 0, 0, 0, 0) != 0 ||
+        last_sigaction_sig != SIGINT ||
+        last_sigaction_handler != SIG_DFL) {
+        fprintf(stderr, "FAIL: ELKS signal(SIG_DFL) translation wrong\n");
+        return 1;
+    }
+
+    stub_oldact.sa_handler = SIG_IGN;
+    last_sigaction_sig = -1;
+    last_sigaction_handler = SIG_ERR;
+    if (fn(3, 1, 0, 0, 0, 0, 0, 0) != 1 ||
+        last_sigaction_sig != SIGQUIT ||
+        last_sigaction_handler != SIG_IGN) {
+        fprintf(stderr, "FAIL: ELKS signal(SIG_IGN) translation wrong\n");
+        return 1;
+    }
+
+    stub_oldact.sa_handler = (sig_t)(uintptr_t)(ds_base + 0x88U);
+    last_sigaction_sig = -1;
+    last_sigaction_handler = SIG_ERR;
+    if (fn(14, 0x44, cs_sel, 0, 0, 0, 0, 0) != 2 ||
+        last_sigaction_sig != SIGALRM ||
+        (uintptr_t)last_sigaction_handler != ds_base + 0x44U) {
+        fprintf(stderr, "FAIL: ELKS custom signal handler translation wrong\n");
+        return 1;
+    }
+
+    if (fn(16, 0, 0, 0, 0, 0, 0, 0) != 2) {
+        fprintf(stderr, "FAIL: ELKS SIGURG disposition translation wrong\n");
         return 1;
     }
 
