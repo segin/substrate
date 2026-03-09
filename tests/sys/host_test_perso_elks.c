@@ -14,6 +14,7 @@ static const char *last_name;
 static uintptr_t last_ptr;
 static int last_i0;
 static int last_i1;
+static char last_log[128];
 
 #define sys_exit   stub_sys_exit
 #define sys_fork   stub_sys_fork
@@ -60,6 +61,7 @@ static int last_i1;
 #define sys_dup2   stub_sys_dup2
 #define sys_getppid stub_sys_getppid
 #define sys_getpgrp stub_sys_getpgrp
+#define kprint      stub_kprint
 
 int stub_sys_exit(int a) { last_name = "exit"; last_i0 = a; return 11; }
 int stub_sys_fork(void) { return -1; }
@@ -106,6 +108,10 @@ int stub_sys_stat(const char *a, void *b) { (void)a; (void)b; return -1; }
 int stub_sys_dup2(int a, int b) { (void)a; (void)b; return -1; }
 int stub_sys_getppid(void) { return -1; }
 int stub_sys_getpgrp(void) { return -1; }
+void stub_kprint(const char *msg) {
+    strncpy(last_log, msg ? msg : "", sizeof(last_log) - 1);
+    last_log[sizeof(last_log) - 1] = '\0';
+}
 
 #include "../../sys/exec/perso/perso_elks.c"
 
@@ -123,12 +129,15 @@ static void setup_ds(process_t *proc, gdt_entry_t *ldt, size_t size) {
 
 int main(void) {
     process_t proc;
+    thread_t thread;
     gdt_entry_t ldt[4];
     int (*fn)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
 
+    memset(&thread, 0, sizeof(thread));
     setup_ds(&proc, ldt, 256);
     current_process = &proc;
-    current_thread = NULL;
+    current_thread = &thread;
+    elks_personality_init();
 
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_exit];
     if (fn(7, 0, 0, 0, 0, 0, 0, 0) != 11 || strcmp(last_name, "exit") != 0 || last_i0 != 7) {
@@ -177,6 +186,18 @@ int main(void) {
     }
     if (fn(0x200, 0, 0, 0, 0, 0, 0, 0) != -ENOMEM) {
         fprintf(stderr, "FAIL: ELKS brk bounds check wrong\n");
+        return 1;
+    }
+
+    current_thread->syscall_num = 127;
+    memset(last_log, 0, sizeof(last_log));
+    fn = (void *)personality_elks.syscall_table[127];
+    if (fn(0, 0, 0, 0, 0, 0, 0, 0) != -ENOSYS) {
+        fprintf(stderr, "FAIL: ELKS unsupported syscall did not return ENOSYS\n");
+        return 1;
+    }
+    if (strstr(last_log, "unsupported syscall") == NULL) {
+        fprintf(stderr, "FAIL: ELKS unsupported syscall did not log\n");
         return 1;
     }
 

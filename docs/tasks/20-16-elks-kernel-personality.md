@@ -109,7 +109,7 @@ Reference: User Request (Step 31552)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: integration (signal delivery)
         - Acceptance: Signals delivered and handlers invoked.
-    - [ ] Return ENOSYS for unsupported ELKS syscalls with kernel log. (REQ: REQ-20-0027)
+    - [x] Return ENOSYS for unsupported ELKS syscalls with kernel log. (REQ: REQ-20-0027)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: unit (verify ENOSYS return)
         - Acceptance: Unsupported syscalls return -ENOSYS without crashing.

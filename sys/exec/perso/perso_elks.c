@@ -6,6 +6,7 @@
 #include <sys/ldt.h>
 #include <kern/console.h>
 #include <sys/proc.h>
+#include <stdio.h>
 #include <string.h>
 
 static int elks_ds_pointer(uint32_t offset, uintptr_t *linear_out) {
@@ -17,6 +18,20 @@ static int elks_ds_pointer(uint32_t offset, uintptr_t *linear_out) {
                                          (uint16_t)((ELKS_LDT_DS_INDEX << 3) | 4U | 3U),
                                          (uint16_t)offset,
                                          linear_out);
+}
+
+static int elks_sys_unimplemented(uint32_t unused0, uint32_t unused1, uint32_t unused2,
+                                  uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                                  uint32_t unused6, uint32_t unused7) {
+    char buf[96];
+    unsigned int nr = current_thread ? current_thread->syscall_num : 0U;
+
+    (void)unused0; (void)unused1; (void)unused2; (void)unused3;
+    (void)unused4; (void)unused5; (void)unused6; (void)unused7;
+
+    sprintf(buf, "ELKS: unsupported syscall %u\n", nr);
+    kprint(buf);
+    return -ENOSYS;
 }
 
 static int elks_ds_base_limit(uintptr_t *base_out, uint32_t *limit_out) {
@@ -182,6 +197,21 @@ static void *elks_syscall_table[ELKS_SYS_MAX] = {
     [ELKS_SYS_getppid] = (void *)&sys_getppid,
     [ELKS_SYS_getpgrp] = (void *)&sys_getpgrp,
 };
+
+void elks_personality_init(void) {
+    static int initialized = 0;
+    unsigned int i;
+
+    if (initialized) {
+        return;
+    }
+    for (i = 0; i < ELKS_SYS_MAX; i++) {
+        if (!elks_syscall_table[i]) {
+            elks_syscall_table[i] = (void *)&elks_sys_unimplemented;
+        }
+    }
+    initialized = 1;
+}
 
 static const char *elks_syscall_names[ELKS_SYS_MAX] = {
     [ELKS_SYS_exit]    = "exit",

@@ -11,6 +11,7 @@ extern struct personality personality_svr4;
 
 extern struct personality personality_sunos;
 extern struct personality personality_elks;
+extern void elks_personality_init(void);
 
 static struct personality *personalities[PERS_MAX] = {
     [PERS_NATIVE]  = &personality_native,
@@ -27,6 +28,9 @@ static struct personality *personalities[PERS_MAX] = {
 
 struct personality *perso_lookup(int id) {
     if (id < 0 || id >= PERS_MAX) return NULL;
+    if (id == PERS_ELKS) {
+        elks_personality_init();
+    }
     return personalities[id];
 }
 
