@@ -234,29 +234,34 @@ jump_to_userspace:
     # Jump to user mode
     iret
 
-# void jump_to_elks(uint32_t entry_point, uint32_t user_stack, uint32_t cs, uint32_t ds)
+# void jump_to_elks(uint32_t entry_point, uint32_t user_stack, uint32_t cs,
+#                   uint32_t ds, uint32_t ss, uint32_t es)
 .global jump_to_elks
 jump_to_elks:
     # [esp+4] = entry_point
     # [esp+8] = user_stack
     # [esp+12] = cs_selector
     # [esp+16] = ds_selector
+    # [esp+20] = ss_selector
+    # [esp+24] = es_selector
     
     mov 4(%esp), %ecx   # entry_point
     mov 8(%esp), %edx   # user_stack
     mov 12(%esp), %eax  # cs_selector
     mov 16(%esp), %ebx  # ds_selector
+    mov 20(%esp), %esi  # ss_selector
+    mov 24(%esp), %edi  # es_selector
     
     cli
     
     # Set data segments
     mov %bx, %ds
-    mov %bx, %es
+    mov %di, %es
     mov %bx, %fs
     mov %bx, %gs
     
     # Build IRET frame
-    push %ebx           # User SS (same as DS)
+    push %esi           # User SS
     push %edx           # User ESP
     pushf
     pop %edx
@@ -270,6 +275,8 @@ jump_to_elks:
     xor %ebx, %ebx
     xor %ecx, %ecx
     xor %edx, %edx
+    xor %esi, %esi
+    xor %edi, %edi
     
     iret
 

@@ -47,7 +47,7 @@ Reference: User Request (Step 31552)
         - Files: `sys/exec/formats/elks_aout.c`
         - Tests: unit (load sample ELKS binary into memory)
         - Acceptance: Binary text/data/bss segments loaded correctly.
-    - [ ] Allocate 16-bit LDT segments via LDT API for code/data/stack. (REQ: REQ-20-0011)
+    - [x] Allocate 16-bit LDT segments via LDT API for code/data/stack. (REQ: REQ-20-0011)
         - Files: `sys/exec/formats/elks_aout.c`, `sys/arch/i386/ldt.c`
         - Tests: unit (verify LDT entries created)
         - Acceptance: Separate LDT entries for CS (code), DS (data), SS (stack), ES (extra).

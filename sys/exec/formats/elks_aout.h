@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <sys/ldt.h>
 
 /*
  * ELKS uses the Minix-style 16-bit a.out header layout consumed by elksemu.
@@ -68,6 +69,22 @@ struct elks_load_plan {
     uint16_t brk_offset;
     uint16_t stack_top;
     uint8_t combined;
+};
+
+#define ELKS_LDT_CS_INDEX  0U
+#define ELKS_LDT_DS_INDEX  1U
+#define ELKS_LDT_SS_INDEX  2U
+#define ELKS_LDT_ES_INDEX  3U
+
+struct elks_segment_layout {
+    struct user_desc cs;
+    struct user_desc ds;
+    struct user_desc ss;
+    struct user_desc es;
+    uint16_t cs_sel;
+    uint16_t ds_sel;
+    uint16_t ss_sel;
+    uint16_t es_sel;
 };
 
 static inline int elks_header_type_valid(uint32_t type) {
@@ -224,6 +241,50 @@ static inline int elks_build_load_plan(const struct elks_exec *hdr,
     plan->brk_offset = (uint16_t)(hdr->dseg + hdr->bseg);
     plan->stack_top = (uint16_t)len;
     return 1;
+}
+
+static inline void elks_init_data_segment_desc(struct user_desc *desc,
+                                               unsigned int entry_number,
+                                               uint32_t base,
+                                               uint16_t limit) {
+    desc->entry_number = entry_number;
+    desc->base_addr = base;
+    desc->limit = limit ? (uint32_t)(limit - 1U) : 0U;
+    desc->seg_32bit = 0;
+    desc->contents = 0;
+    desc->read_exec_only = 0;
+    desc->limit_in_pages = 0;
+    desc->seg_not_present = 0;
+    desc->useable = 1;
+}
+
+static inline void elks_build_segment_layout(const struct elks_load_plan *plan,
+                                             struct elks_segment_layout *layout) {
+    if (!plan || !layout) {
+        return;
+    }
+
+    layout->cs.entry_number = ELKS_LDT_CS_INDEX;
+    layout->cs.base_addr = plan->text_base;
+    layout->cs.limit = plan->text_limit ? (uint32_t)(plan->text_limit - 1U) : 0U;
+    layout->cs.seg_32bit = 0;
+    layout->cs.contents = 2;
+    layout->cs.read_exec_only = 0;
+    layout->cs.limit_in_pages = 0;
+    layout->cs.seg_not_present = 0;
+    layout->cs.useable = 1;
+
+    elks_init_data_segment_desc(&layout->ds, ELKS_LDT_DS_INDEX,
+                                plan->data_base, plan->data_limit);
+    elks_init_data_segment_desc(&layout->ss, ELKS_LDT_SS_INDEX,
+                                plan->data_base, plan->data_limit);
+    elks_init_data_segment_desc(&layout->es, ELKS_LDT_ES_INDEX,
+                                plan->data_base, plan->data_limit);
+
+    layout->cs_sel = (uint16_t)((ELKS_LDT_CS_INDEX << 3) | 4U | 3U);
+    layout->ds_sel = (uint16_t)((ELKS_LDT_DS_INDEX << 3) | 4U | 3U);
+    layout->ss_sel = (uint16_t)((ELKS_LDT_SS_INDEX << 3) | 4U | 3U);
+    layout->es_sel = (uint16_t)((ELKS_LDT_ES_INDEX << 3) | 4U | 3U);
 }
 
 /* Prototypes */

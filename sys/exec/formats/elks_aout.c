@@ -36,6 +36,8 @@ int elks_check_file(const char *path, const char *header, size_t len) {
 }
 
 static int elks_setup_segments(process_t *proc, const struct elks_load_plan *plan) {
+    struct elks_segment_layout layout;
+
     /* Allocate LDT if needed */
     if (!proc->ldt) {
         proc->ldt = kmalloc(LDT_ENTRIES * 8);
@@ -43,35 +45,13 @@ static int elks_setup_segments(process_t *proc, const struct elks_load_plan *pla
         memset(proc->ldt, 0, LDT_ENTRIES * 8);
         proc->ldt_entry_count = LDT_ENTRIES;
     }
-    
-    // Selector 0: CS
-    struct user_desc cs_desc;
-    memset(&cs_desc, 0, sizeof(cs_desc));
-    cs_desc.entry_number = 0;
-    cs_desc.base_addr = plan->text_base;
-    cs_desc.limit = plan->text_limit ? (uint32_t)(plan->text_limit - 1) : 0;
-    cs_desc.seg_32bit = 0;   // 16-bit
-    cs_desc.contents = 2;    // Code
-    cs_desc.read_exec_only = 0;
-    cs_desc.limit_in_pages = 0;
-    cs_desc.seg_not_present = 0;
-    cs_desc.useable = 1;
-    
-    // Selector 1: DS/SS
-    struct user_desc ds_desc;
-    memset(&ds_desc, 0, sizeof(ds_desc));
-    ds_desc.entry_number = 1;
-    ds_desc.base_addr = plan->data_base;
-    ds_desc.limit = plan->data_limit ? (uint32_t)(plan->data_limit - 1) : 0;
-    ds_desc.seg_32bit = 0;   // 16-bit
-    ds_desc.contents = 0;    // Data
-    ds_desc.read_exec_only = 0;
-    ds_desc.limit_in_pages = 0;
-    ds_desc.seg_not_present = 0;
-    ds_desc.useable = 1;
-    
-    fill_ldt_entry((uint8_t*)proc->ldt + 0*8, &cs_desc);
-    fill_ldt_entry((uint8_t*)proc->ldt + 1*8, &ds_desc);
+    memset(&layout, 0, sizeof(layout));
+    elks_build_segment_layout(plan, &layout);
+
+    fill_ldt_entry((uint8_t *)proc->ldt + ELKS_LDT_CS_INDEX * 8, &layout.cs);
+    fill_ldt_entry((uint8_t *)proc->ldt + ELKS_LDT_DS_INDEX * 8, &layout.ds);
+    fill_ldt_entry((uint8_t *)proc->ldt + ELKS_LDT_SS_INDEX * 8, &layout.ss);
+    fill_ldt_entry((uint8_t *)proc->ldt + ELKS_LDT_ES_INDEX * 8, &layout.es);
     
     return 0;
 }
@@ -203,18 +183,20 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     // Stack setup (simplified for now)
     // 16-bit stack points to end of Data segment
     uint32_t user_sp = plan.stack_top ? plan.stack_top : 0xFFFE;
+    struct elks_segment_layout layout;
     
     kprint("ELKS: Loaded binary, jumping to 16-bit mode\n");
     
-    extern void jump_to_elks(uint32_t entry, uint32_t stack, uint32_t cs, uint32_t ds);
-    
-    // Selectors: index << 3 | LDT=4 | RPL=3
-    uint32_t cs_sel = (0 << 3) | 4 | 3;
-    uint32_t ds_sel = (1 << 3) | 4 | 3;
+    memset(&layout, 0, sizeof(layout));
+    elks_build_segment_layout(&plan, &layout);
+
+    extern void jump_to_elks(uint32_t entry, uint32_t stack, uint32_t cs,
+                             uint32_t ds, uint32_t ss, uint32_t es);
     
     kern_close(fd);
     
-    jump_to_elks(hdr.entry, user_sp, cs_sel, ds_sel);
+    jump_to_elks(hdr.entry, user_sp, layout.cs_sel, layout.ds_sel,
+                 layout.ss_sel, layout.es_sel);
     
     panic("jump_to_elks returned!");
     return 0;
