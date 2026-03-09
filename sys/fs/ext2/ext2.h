@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <vfs/vfs.h>
 #include <sys/lock.h>
+#include <sys/stat.h>
 
 // EXT2 Magic Number
 #define EXT2_SUPER_MAGIC 0xEF53
@@ -200,6 +201,7 @@ size_t ext2_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t
 struct dirent *ext2_readdir(fs_node_t *node, uint64_t index);
 fs_node_t *ext2_finddir(fs_node_t *node, char *name);
 int ext2_readlink(fs_node_t *node, char *buf, size_t size);
+int ext2_truncate(fs_node_t *node, off_t length);
 
 // Helpers
 int ext2_find_next_zero_bit(void *bitmap, uint32_t total_bits, uint32_t start, uint32_t end, uint32_t *found_idx);

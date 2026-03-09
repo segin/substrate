@@ -35,6 +35,7 @@
 #include <sys/param.h>
 #include <sys/stat.h>
 #include <sys/errno.h>
+#include <sys/fcntl.h>
 #include <sys/reboot.h>
 #include <sys/exec.h>
 #include <arch/x86-common/io.h>
@@ -67,6 +68,47 @@ static int cloned_node_file_close(struct file *fp, struct thread *td) {
 static struct fileops cloned_node_fileops = {
     .fo_close = cloned_node_file_close,
 };
+
+static int kern_resolve_parent(const char *path, fs_node_t **parent_out, const char **name_out) {
+    const char *last_slash;
+    fs_node_t *root;
+    fs_node_t *cwd;
+    fs_node_t *parent;
+    char dir[256];
+
+    if (!path || !parent_out || !name_out) return -EINVAL;
+
+    root = current_process->root_node ? current_process->root_node : fs_root;
+    cwd = current_process->cwd_node ? current_process->cwd_node : root;
+    last_slash = NULL;
+    for (const char *p = path; *p; p++) {
+        if (*p == '/') {
+            last_slash = p;
+        }
+    }
+
+    if (!last_slash) {
+        parent = cwd;
+        *name_out = path;
+    } else if (last_slash == path) {
+        parent = root;
+        *name_out = path + 1;
+    } else {
+        size_t dirlen = (size_t)(last_slash - path);
+        if (dirlen >= sizeof(dir)) return -ENAMETOOLONG;
+        memcpy(dir, path, dirlen);
+        dir[dirlen] = '\0';
+        parent = vfs_lookup((path[0] == '/') ? root : cwd, dir);
+        *name_out = last_slash + 1;
+    }
+
+    if (!parent) return -ENOENT;
+    if (((parent->flags & 0x7) != FS_DIRECTORY)) return -ENOTDIR;
+    if (!(*name_out)[0]) return -EINVAL;
+
+    *parent_out = parent;
+    return 0;
+}
 
 static fs_node_t *vfs_prepare_open_node(fs_node_t *node, struct file **f_out) {
     if (!node || !f_out || !*f_out) {
@@ -256,6 +298,7 @@ int sys_open(const char *path, int flags, int mode) {
 }
 
 int kern_open(const char *path, int flags, int mode) {
+    const char *create_name = NULL;
     (void)mode;
     if (!path) return -EFAULT;
     
@@ -275,8 +318,39 @@ int kern_open(const char *path, int flags, int mode) {
     }
 
     if (!node) {
+        fs_node_t *parent = NULL;
+        int error;
+
+        if (!(flags & O_CREAT)) {
+            proc_clear_fd(current_process, fd);
+            return -ENOENT;
+        }
+
+        error = kern_resolve_parent(path, &parent, &create_name);
+        if (error != 0) {
+            proc_clear_fd(current_process, fd);
+            return error;
+        }
+
+        error = mknod_fs(parent, create_name,
+                         (uint16_t)(S_IFREG | ((mode & 0777) & ~current_process->umask)), 0);
+        if (error != 0) {
+            proc_clear_fd(current_process, fd);
+            return error;
+        }
+
+        if (path[0] == '/') {
+            node = vfs_lookup(root, path);
+        } else {
+            node = vfs_lookup(cwd, path);
+        }
+        if (!node) {
+            proc_clear_fd(current_process, fd);
+            return -ENOENT;
+        }
+    } else if ((flags & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL)) {
         proc_clear_fd(current_process, fd);
-        return -ENOENT;
+        return -EEXIST;
     }
 
     file_t *f = file_alloc();
@@ -299,6 +373,19 @@ int kern_open(const char *path, int flags, int mode) {
 
     proc_set_fd(current_process, fd, f);
     open_fs(open_node, 1, 0); // Open read/write?
+    if ((flags & O_TRUNC) && ((flags & O_ACCMODE) != O_RDONLY) &&
+        ((open_node->flags & 0x7) == FS_FILE)) {
+        int error = truncate_fs(open_node, 0);
+        if (error != 0) {
+            proc_clear_fd(current_process, fd);
+            file_close_ptr(f);
+            return error;
+        }
+        f->f_offset = 0;
+    }
+    if (flags & O_APPEND) {
+        f->f_offset = open_node->length;
+    }
 
     return fd;
 }
@@ -1286,7 +1373,11 @@ int kern_execve(const char *f, char *const a[], char *const e[]) {
 extern int sys_fork(void);
 extern int sys_vfork(void);
 
-int sys_mknod(const char *p, int m, int d) { (void)p; (void)m; (void)d; return 0; }
+int sys_mknod(const char *p, int m, int d) {
+    char kpath[256];
+    if (copyinstr(p, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    return vfs_mknod(kpath, (uint16_t)m, (uint32_t)d);
+}
 
 int vfs_mount_legacy(const char *device, const char *path, const char *type, uint32_t flags, void *data);
 int vfs_unmount_legacy(const char *path);

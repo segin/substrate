@@ -172,8 +172,8 @@ Reference: User Request (Step 31552)
         - Files: `tests/elks/sleep.S`, `tests/elks/Makefile`
         - Tests: emulation (run in QEMU, verify delay)
         - Acceptance: Process sleeps for specified duration.
-    - [ ] Create ELKS file I/O test binary. (REQ: REQ-20-0044)
-        - Files: `tests/elks/fileio.c`, `tests/elks/Makefile`
+    - [x] Create ELKS file I/O test binary. (REQ: REQ-20-0044)
+        - Files: `tests/elks/fileio.S`, `tests/elks/Makefile`
         - Tests: emulation (run in QEMU, verify file created)
         - Acceptance: File created, written, read, and deleted correctly.
     - [ ] Create ELKS fork test binary. (REQ: REQ-20-0045)

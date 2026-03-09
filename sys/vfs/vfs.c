@@ -563,6 +563,13 @@ int unlink_fs(fs_node_t *node, const char *name) {
     return -1;
 }
 
+int mknod_fs(fs_node_t *node, const char *name, uint16_t mode, uint32_t dev) {
+    if (node && node->mknod) {
+        return node->mknod(node, name, mode, dev);
+    }
+    return -1;
+}
+
 void *mmap_fs(fs_node_t *node, void *addr, size_t length, int prot, int flags, off_t offset) {
     if (node && node->mmap) {
         return node->mmap(node, addr, length, prot, flags, offset);
