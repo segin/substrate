@@ -497,14 +497,14 @@
             > **Architecture:** BSD/Mach-inspired VM with vm_map → vm_map_entry →
             > vm_object → vm_page hierarchy. Shadow objects for COW.
 
-            - [ ] **VM Map (`vm_map`):** (REQ: REQ-01-0426)
+            - [x] **VM Map (`vm_map`):** (REQ: REQ-01-0426)
                 - [x] `vm_map` structure representing a process's virtual address space. (REQ: REQ-01-0427)
                 - [x] Self-adjusting tree of `vm_map_entry` for virtual-address lookup by VA, with a red-black tree of holes for free-space search. (REQ: REQ-01-0428)
                 - [x] Linked list of entries for sequential traversal. (REQ: REQ-01-0429)
                 - [x] `vm_map_create(pmap, min, max)`: create new map. (REQ: REQ-01-0430)
                 - [x] `vm_map_destroy(map)`: tear down entire map. (REQ: REQ-01-0431)
-                - [ ] `vm_map_lock` / `vm_map_unlock`: reader/writer locking. (REQ: REQ-01-0432)
-            - [ ] **VM Map Entries (`vm_map_entry`):** (REQ: REQ-01-0433)
+                - [x] `vm_map_lock` / `vm_map_unlock`: reader/writer locking. (REQ: REQ-01-0432)
+            - [x] **VM Map Entries (`vm_map_entry`):** (REQ: REQ-01-0433)
                 - [x] Represent contiguous virtual regions (text, data, stack, mmap). (REQ: REQ-01-0434)
                 - [x] Fields: `start`, `end`, `offset`, `protection`, `max_protection`. (REQ: REQ-01-0435)
                 - [x] `object`: backing `vm_object` (anonymous or vnode-backed). (REQ: REQ-01-0436)
@@ -515,7 +515,7 @@
                 - [x] `vm_map_lookup(map, va, &entry)`: find entry containing VA. (REQ: REQ-01-0441)
                 - [x] `vm_map_protect(map, start, end, new_prot)`. (REQ: REQ-01-0442)
                 - [x] `vm_map_inherit(map, start, end, inheritance)`. (REQ: REQ-01-0443)
-                - [ ] Entry merging: coalesce adjacent entries with same attributes. (REQ: REQ-01-0444)
+                - [x] Entry merging: coalesce adjacent entries with same attributes. (REQ: REQ-01-0444)
             - [x] **VM Objects (`vm_object`):** (REQ: REQ-01-0445)
                 - [x] Abstract backing store (anonymous memory, vnode/file, device). (REQ: REQ-01-0446)
                 - [x] `resident_pages`: resident `vm_page_t` collection tracked by page index in the object. (REQ: REQ-01-0447)
@@ -641,7 +641,7 @@
             - [x] Internal doc: UMA architecture (zone → slab → magazine → per-CPU cache). (REQ: REQ-01-0563)
             - [x] Internal doc: `kmalloc` power-of-two zone selection. (REQ: REQ-01-0564)
 
-    - [ ] **User Memory Syscalls:** (REQ: REQ-01-0565)
+    - [x] **User Memory Syscalls:** (REQ: REQ-01-0565)
         - [x] `sys_mmap(addr, len, prot, flags, fd, offset)`: map memory. (REQ: REQ-01-0566)
             - [x] `MAP_ANONYMOUS`: zero-fill anonymous mapping. (REQ: REQ-01-0567)
             - [x] `MAP_PRIVATE`: file-backed COW mapping. (REQ: REQ-01-0568)

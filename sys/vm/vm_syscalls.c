@@ -264,10 +264,20 @@ int sys_msync(void *addr, size_t length, int flags) {
     vm_map_t *map = current_process->vm_map;
     uintptr_t start = (uintptr_t)addr & ~0xFFF;
     uintptr_t end = ((uintptr_t)addr + length + 0xFFF) & ~0xFFF;
+    vm_map_lock_read(map);
     
     // Walk the range and flush dirty pages
     for (uintptr_t va = start; va < end; va += 0x1000) {
-        vm_map_entry_t *entry = vm_map_lookup(map, va);
+        vm_map_entry_t *entry = NULL;
+        for (vm_map_entry_t *cur = map->header->next; cur != map->header; cur = cur->next) {
+            if (va >= cur->start && va < cur->end) {
+                entry = cur;
+                break;
+            }
+            if (va < cur->start) {
+                break;
+            }
+        }
         if (!entry || !entry->object) continue;
         
         uint64_t pindex = (va - entry->start + entry->offset) / 4096;
@@ -281,6 +291,7 @@ int sys_msync(void *addr, size_t length, int flags) {
             }
         }
     }
-    
+
+    vm_map_unlock_read(map);
     return 0;
 }

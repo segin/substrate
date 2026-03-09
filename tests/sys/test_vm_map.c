@@ -278,6 +278,40 @@ void test_vm_map_property_sorted_non_overlapping(void) {
     kprint("  PASS\n");
 }
 
+void test_vm_map_merge_adjacent(void) {
+    kprint("Test: vm_map merge adjacent entries\n");
+
+    pmap_t pmap = pmap_create();
+    vm_map_t *map = vm_map_create(pmap, 0x1000, 0x200000);
+    vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, 0x3000);
+
+    TEST_ASSERT(map != NULL, "map created");
+    TEST_ASSERT(obj != NULL, "object created");
+    TEST_ASSERT(vm_map_insert(map, obj, 0, 0x4000, 0x5000,
+                              VM_PROT_READ | VM_PROT_WRITE,
+                              VM_PROT_ALL,
+                              VM_INHERIT_COPY) == 0,
+                "insert left");
+
+    vm_object_reference(obj);
+    TEST_ASSERT(vm_map_insert(map, obj, 0x1000, 0x5000, 0x6000,
+                              VM_PROT_READ | VM_PROT_WRITE,
+                              VM_PROT_ALL,
+                              VM_INHERIT_COPY) == 0,
+                "insert right");
+
+    TEST_ASSERT(map->nentries == 1, "adjacent entries merged");
+
+    vm_map_entry_t *entry = vm_map_lookup(map, 0x4800);
+    TEST_ASSERT(entry != NULL, "merged entry found");
+    TEST_ASSERT(entry->start == 0x4000, "merged start");
+    TEST_ASSERT(entry->end == 0x6000, "merged end");
+    TEST_ASSERT(entry->offset == 0, "merged offset preserved");
+
+    vm_map_destroy(map);
+    kprint("  PASS\n");
+}
+
 void run_vm_map_tests(void) {
     kprint("\n=== VM Map Unit Tests ===\n");
     
@@ -289,6 +323,7 @@ void run_vm_map_tests(void) {
     test_vm_map_wire();
     test_vm_map_protect_inherit();
     test_vm_map_property_sorted_non_overlapping();
+    test_vm_map_merge_adjacent();
     test_vm_map_benchmark();
     
     kprint("\nVM Map Tests Complete\n");

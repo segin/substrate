@@ -15,6 +15,8 @@ typedef struct vm_map_hole {
     bool is_red;
 } vm_map_hole_t;
 
+static void vm_map_splay(vm_map_t *map, uintptr_t va);
+
 static vm_map_entry_t *alloc_entry(void) {
     return kmalloc(sizeof(vm_map_entry_t));
 }
@@ -48,6 +50,111 @@ static void update_max_gap(vm_map_hole_t *node) {
 
 static void free_entry(vm_map_entry_t *entry) {
     kfree(entry, sizeof(vm_map_entry_t));
+}
+
+static void vm_map_tree_insert(vm_map_t *map, vm_map_entry_t *entry) {
+    if (!map->root) {
+        map->root = entry;
+        entry->left = entry->right = NULL;
+        return;
+    }
+
+    vm_map_splay(map, entry->start);
+    if (entry->start < map->root->start) {
+        entry->left = map->root->left;
+        entry->right = map->root;
+        map->root->left = NULL;
+        map->root = entry;
+    } else {
+        entry->right = map->root->right;
+        entry->left = map->root;
+        map->root->right = NULL;
+        map->root = entry;
+    }
+}
+
+static void vm_map_tree_remove(vm_map_t *map, vm_map_entry_t *entry) {
+    vm_map_splay(map, entry->start);
+    if (map->root != entry) {
+        return;
+    }
+
+    vm_map_entry_t *left = entry->left;
+    vm_map_entry_t *right = entry->right;
+    if (!left) {
+        map->root = right;
+        return;
+    }
+
+    map->root = left;
+    vm_map_splay(map, entry->start);
+    map->root->right = right;
+}
+
+static bool vm_map_entries_mergeable(vm_map_entry_t *left, vm_map_entry_t *right) {
+    if (!left || !right || left->end != right->start) {
+        return false;
+    }
+    if (left->object != right->object ||
+        left->protection != right->protection ||
+        left->max_protection != right->max_protection ||
+        left->inheritance != right->inheritance ||
+        left->flags != right->flags ||
+        left->wire_count != right->wire_count) {
+        return false;
+    }
+
+    if (left->object) {
+        uint64_t expected = left->offset + (left->end - left->start);
+        if (right->offset != expected) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static vm_map_entry_t *vm_map_try_merge_entry(vm_map_t *map, vm_map_entry_t *entry) {
+    vm_map_entry_t *header = map->header;
+
+    if (!entry || entry == header) {
+        return entry;
+    }
+
+    vm_map_entry_t *prev = entry->prev;
+    if (prev != header && vm_map_entries_mergeable(prev, entry)) {
+        prev->end = entry->end;
+        prev->next = entry->next;
+        entry->next->prev = prev;
+        if (map->hint == entry) {
+            map->hint = prev;
+        }
+        vm_map_tree_remove(map, entry);
+        map->nentries--;
+        if (entry->object) {
+            vm_object_deallocate(entry->object);
+        }
+        free_entry(entry);
+        entry = prev;
+    }
+
+    vm_map_entry_t *next = entry->next;
+    if (next != header && vm_map_entries_mergeable(entry, next)) {
+        entry->end = next->end;
+        entry->next = next->next;
+        next->next->prev = entry;
+        if (map->hint == next) {
+            map->hint = entry;
+        }
+        vm_map_tree_remove(map, next);
+        map->nentries--;
+        if (next->object) {
+            vm_object_deallocate(next->object);
+        }
+        free_entry(next);
+    }
+
+    return entry;
 }
 
 // RB-Tree Implementation for Holes
@@ -472,6 +579,7 @@ void vm_map_init(vm_map_t *map, pmap_t pmap, uintptr_t min, uintptr_t max) {
     map->max_offset = max;
     map->nentries = 0;
     map->size = 0;
+    rwlock_init(&map->lock, "vm_map");
     
     // Setup sentinel header
     vm_map_entry_t *sentinel = alloc_entry();
@@ -512,6 +620,22 @@ vm_map_t *vm_map_create(pmap_t pmap, uintptr_t min, uintptr_t max) {
     // Initialize hint to header to match vm_map_init logic
     map->hint = map->header;
     return map;
+}
+
+void vm_map_lock(vm_map_t *map) {
+    rw_wlock(&map->lock);
+}
+
+void vm_map_unlock(vm_map_t *map) {
+    rw_wunlock(&map->lock);
+}
+
+void vm_map_lock_read(vm_map_t *map) {
+    rw_rlock(&map->lock);
+}
+
+void vm_map_unlock_read(vm_map_t *map) {
+    rw_runlock(&map->lock);
 }
 
 static void vm_map_splay(vm_map_t *map, uintptr_t va) {
@@ -599,10 +723,12 @@ static bool vm_map_lookup_entry(vm_map_t *map, uintptr_t va, vm_map_entry_t **en
 
 int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset, uintptr_t start, uintptr_t end, uint8_t prot, uint8_t max_prot, uint8_t inheritance) {
     vm_map_entry_t *prev_entry;
-    
+    vm_map_lock(map);
+
     // Check for overlap and consume free space
     // We replace the linear overlap check with hole_consume
     if (hole_consume(map, start, end) != 0) {
+        vm_map_unlock(map);
         return -1; // Overlap or allocation failure
     }
     
@@ -621,6 +747,7 @@ int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset, uintptr
     if (!new_entry) {
         // Restore hole?
         hole_insert(map, start, end);
+        vm_map_unlock(map);
         return -1;
     }
     
@@ -643,44 +770,32 @@ int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset, uintptr
     prev_entry->next = new_entry;
     
     map->hint = new_entry;
-
-    // Insert into splay tree
-    if (!map->root) {
-        map->root = new_entry;
-        new_entry->left = new_entry->right = NULL;
-    } else {
-        vm_map_splay(map, start);
-        if (start < map->root->start) {
-            new_entry->left = map->root->left;
-            new_entry->right = map->root;
-            map->root->left = NULL;
-            map->root = new_entry;
-        } else {
-            new_entry->right = map->root->right;
-            new_entry->left = map->root;
-            map->root->right = NULL;
-            map->root = new_entry;
-        }
-    }
+    vm_map_tree_insert(map, new_entry);
 
     map->nentries++;
     map->size += (end - start);
+    vm_map_try_merge_entry(map, new_entry);
+    vm_map_unlock(map);
     return 0;
 }
 
 int vm_map_find_space(vm_map_t *map, uintptr_t *addr, size_t length) {
     // Use the holes tree to find the first fit in O(log M)
+    vm_map_lock_read(map);
     vm_map_hole_t *hole = hole_find_space(map->holes_root, length);
     if (hole) {
         *addr = hole->start;
+        vm_map_unlock_read(map);
         return 0;
     }
+    vm_map_unlock_read(map);
     return -1; // No space found
 }
 
 int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
     vm_map_entry_t *cur, *tmp;
     vm_map_entry_t *header = map->header;
+    vm_map_lock(map);
     
     for (cur = header->next; cur != header; ) {
         tmp = cur->next;
@@ -690,20 +805,7 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
             if (map->hint == cur) map->hint = cur->prev;
             cur->prev->next = cur->next;
             cur->next->prev = cur->prev;
-
-            // Remove from splay tree
-            vm_map_splay(map, cur->start);
-            if (map->root == cur) {
-                vm_map_entry_t *left = cur->left;
-                vm_map_entry_t *right = cur->right;
-                if (!left) {
-                    map->root = right;
-                } else {
-                    map->root = left;
-                    vm_map_splay(map, cur->start); // Splay max of left to root
-                    map->root->right = right;
-                }
-            }
+            vm_map_tree_remove(map, cur);
 
             map->nentries--;
             map->size -= (cur->end - cur->start);
@@ -717,7 +819,10 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
         } else if (cur->start < start && cur->end > end) {
             // Split entry
             vm_map_entry_t *new_entry = alloc_entry();
-            if (!new_entry) return -1;
+            if (!new_entry) {
+                vm_map_unlock(map);
+                return -1;
+            }
 
             // Initialize new entry (right part)
             new_entry->start = end;
@@ -742,25 +847,7 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
             new_entry->next = cur->next;
             cur->next->prev = new_entry;
             cur->next = new_entry;
-
-            // Insert into splay tree
-            vm_map_splay(map, new_entry->start);
-            if (!map->root) { // Should not happen as cur is in tree
-                map->root = new_entry;
-                new_entry->left = new_entry->right = NULL;
-            } else {
-                if (new_entry->start < map->root->start) {
-                    new_entry->left = map->root->left;
-                    new_entry->right = map->root;
-                    map->root->left = NULL;
-                    map->root = new_entry;
-                } else {
-                    new_entry->right = map->root->right;
-                    new_entry->left = map->root;
-                    map->root->right = NULL;
-                    map->root = new_entry;
-                }
-            }
+            vm_map_tree_insert(map, new_entry);
 
             // Adjust original entry (left part)
             cur->end = start;
@@ -795,6 +882,7 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
         
         cur = tmp;
     }
+    vm_map_unlock(map);
     return 0;
 }
 
@@ -846,6 +934,7 @@ void vm_map_destroy(vm_map_t *map) {
 // Change protection on a range of addresses
 int vm_map_protect(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t prot) {
     vm_map_entry_t *header = map->header;
+    vm_map_lock(map);
     
     for (vm_map_entry_t *cur = header->next; cur != header; cur = cur->next) {
         if (cur->start >= end)
@@ -854,8 +943,10 @@ int vm_map_protect(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t prot) 
             continue;
             
         // Check if requested protection exceeds max
-        if ((prot & ~cur->max_protection) != 0)
+        if ((prot & ~cur->max_protection) != 0) {
+            vm_map_unlock(map);
             return -1;
+        }
             
         cur->protection = prot;
         
@@ -864,13 +955,23 @@ int vm_map_protect(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t prot) 
         uintptr_t re = (cur->end < end) ? cur->end : end;
         pmap_protect(map->pmap, rs, re, prot);
     }
+    for (vm_map_entry_t *cur = header->next; cur != header; cur = cur->next) {
+        if (cur->start >= end)
+            break;
+        if (cur->end <= start)
+            continue;
+        cur = vm_map_try_merge_entry(map, cur);
+    }
+    vm_map_unlock(map);
     return 0;
 }
 
 int vm_map_inherit(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t inheritance) {
     vm_map_entry_t *header = map->header;
+    vm_map_lock(map);
 
     if (inheritance > VM_INHERIT_ZERO) {
+        vm_map_unlock(map);
         return -1;
     }
 
@@ -885,12 +986,23 @@ int vm_map_inherit(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t inheri
         cur->inheritance = inheritance;
     }
 
+    for (vm_map_entry_t *cur = header->next; cur != header; cur = cur->next) {
+        if (cur->start >= end) {
+            break;
+        }
+        if (cur->end <= start) {
+            continue;
+        }
+        cur = vm_map_try_merge_entry(map, cur);
+    }
+    vm_map_unlock(map);
     return 0;
 }
 
 // Wire pages in a range (make unpageable)
 int vm_map_wire(vm_map_t *map, uintptr_t start, uintptr_t end) {
     vm_map_entry_t *header = map->header;
+    vm_map_lock(map);
     
     for (vm_map_entry_t *cur = header->next; cur != header; cur = cur->next) {
         if (cur->start >= end)
@@ -901,12 +1013,14 @@ int vm_map_wire(vm_map_t *map, uintptr_t start, uintptr_t end) {
         cur->wire_count++;
         cur->flags |= VME_WIRED;
     }
+    vm_map_unlock(map);
     return 0;
 }
 
 // Unwire pages in a range
 int vm_map_unwire(vm_map_t *map, uintptr_t start, uintptr_t end) {
     vm_map_entry_t *header = map->header;
+    vm_map_lock(map);
     
     for (vm_map_entry_t *cur = header->next; cur != header; cur = cur->next) {
         if (cur->start >= end)
@@ -920,6 +1034,14 @@ int vm_map_unwire(vm_map_t *map, uintptr_t start, uintptr_t end) {
                 cur->flags &= ~VME_WIRED;
         }
     }
+    for (vm_map_entry_t *cur = header->next; cur != header; cur = cur->next) {
+        if (cur->start >= end)
+            break;
+        if (cur->end <= start)
+            continue;
+        cur = vm_map_try_merge_entry(map, cur);
+    }
+    vm_map_unlock(map);
     return 0;
 }
 
@@ -930,6 +1052,7 @@ vm_map_t *vm_map_fork(vm_map_t *src_map, pmap_t dst_pmap) {
     
     vm_map_entry_t *src_entry;
     vm_map_entry_t *header = src_map->header;
+    vm_map_lock(src_map);
     
     for (src_entry = header->next; src_entry != header; src_entry = src_entry->next) {
         vm_object_t *obj = src_entry->object;
@@ -954,6 +1077,7 @@ vm_map_t *vm_map_fork(vm_map_t *src_map, pmap_t dst_pmap) {
                 if (!parent_shadow || !child_shadow) {
                     if (parent_shadow) vm_object_deallocate(parent_shadow);
                     if (child_shadow) vm_object_deallocate(child_shadow);
+                    vm_map_unlock(src_map);
                     vm_map_destroy(dst_map);
                     return NULL;
                 }
@@ -975,6 +1099,7 @@ vm_map_t *vm_map_fork(vm_map_t *src_map, pmap_t dst_pmap) {
         }
         
         if (vm_map_insert(dst_map, new_obj, new_offset, src_entry->start, src_entry->end, src_entry->protection, src_entry->max_protection, src_entry->inheritance) != 0) {
+            vm_map_unlock(src_map);
             vm_map_destroy(dst_map);
             return NULL;
         }
@@ -985,6 +1110,8 @@ vm_map_t *vm_map_fork(vm_map_t *src_map, pmap_t dst_pmap) {
             dst_entry->flags = src_entry->flags & ~VME_WIRED; 
         }
     }
+
+    vm_map_unlock(src_map);
     
     return dst_map;
 }

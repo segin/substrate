@@ -53,23 +53,39 @@ static void page_zero(uintptr_t pa) {
 
 int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
     uintptr_t page_va = va & ~0xFFF;
+    int result = VM_FAULT_ERROR;
+    vm_map_entry_t *entry = NULL;
     
     // 1. Find the map entry
-    vm_map_entry_t *entry = vm_map_lookup(map, va);
-    if (!entry) return VM_FAULT_ERROR;
+    vm_map_lock_read(map);
+    for (vm_map_entry_t *cur = map->header->next; cur != map->header; cur = cur->next) {
+        if (va >= cur->start && va < cur->end) {
+            entry = cur;
+            break;
+        }
+        if (va < cur->start) {
+            break;
+        }
+    }
+    if (!entry) {
+        goto out;
+    }
 
     // 2. Check protection
-    if ((entry->max_protection & prot) != prot)
-        return VM_FAULT_ERROR;
+    if ((entry->max_protection & prot) != prot) {
+        goto out;
+    }
     if ((entry->protection & prot) != prot) {
         if ((prot & VM_PROT_WRITE) == 0 || entry->inheritance == VM_INHERIT_SHARE) {
-            return VM_FAULT_ERROR;
+            goto out;
         }
     }
 
     // 3. Resolve page against the object chain
     vm_object_t *first_obj = entry->object;
-    if (!first_obj) return VM_FAULT_ERROR;
+    if (!first_obj) {
+        goto out;
+    }
     
     vm_object_t *obj = first_obj;
     vm_page_t *m = NULL;
@@ -85,7 +101,9 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
         uint64_t fill_pindex = source.object ? source.pindex : pindex;
 
         m = vm_page_alloc(fill_obj, fill_pindex, 0);
-        if (!m) return VM_FAULT_ERROR;
+        if (!m) {
+            goto out;
+        }
 
         if (fill_obj->pager && vm_pager_has_page(fill_obj->pager, fill_pindex)) {
             vm_page_t *pages[2] = { m, NULL };
@@ -112,11 +130,11 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
                     count = 1;
                     if (vm_pager_get_pages(fill_obj->pager, &m, 1, true) != 0) {
                         vm_page_free(m);
-                        return VM_FAULT_ERROR;
+                        goto out;
                     }
                 } else {
                     vm_page_free(m);
-                    return VM_FAULT_ERROR;
+                    goto out;
                 }
             }
             
@@ -144,7 +162,9 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
     if ((prot & VM_PROT_WRITE) && (entry->inheritance != VM_INHERIT_SHARE) &&
         (obj != first_obj || obj->ref_count > 1)) {
         vm_page_t *new_m = vm_page_alloc(first_obj, offset / 4096, 0);
-        if (!new_m) return VM_FAULT_ERROR;
+        if (!new_m) {
+            goto out;
+        }
 
         page_copy(m->phys_addr, new_m->phys_addr);
         new_m->flags |= PG_VALID | PG_DIRTY;
@@ -166,7 +186,12 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
     }
 
     int err = pmap_enter(map->pmap, page_va, m->phys_addr, enter_prot, 0);
-    if (err < 0) return VM_FAULT_ERROR;
+    if (err < 0) {
+        goto out;
+    }
 
-    return VM_FAULT_SUCCESS;
+    result = VM_FAULT_SUCCESS;
+out:
+    vm_map_unlock_read(map);
+    return result;
 }

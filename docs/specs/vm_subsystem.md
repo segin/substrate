@@ -20,6 +20,7 @@ The current hierarchy is:
 - a splay tree of entries for lookup locality
 - a red-black tree of free holes for first-fit free-space search
 - the associated machine-dependent `pmap`
+- a map-local reader/writer lock for structural updates and read-side traversal
 
 ## `vm_map` Contract
 
@@ -49,8 +50,9 @@ Current design note:
 
 - entry lookup uses a splay tree, not a red-black tree
 - hole lookup uses a red-black tree keyed by free ranges
-- map-level reader/writer locking is not implemented yet
-- automatic coalescing of adjacent entries is not implemented yet
+- `vm_map_lock()` / `vm_map_unlock()` provide writer exclusion and
+  `vm_map_lock_read()` / `vm_map_unlock_read()` provide read-side traversal protection
+- adjacent entries with matching object identity, contiguous object offset, and identical mapping attributes are coalesced automatically
 
 ## `vm_object` Contract
 

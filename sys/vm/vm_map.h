@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <vm/vm_page.h>
 #include <arch/i386/pmap.h> // Note: This should ideally be abstracted
+#include <sys/lock.h>
 
 // Forward declarations
 struct vm_object;
@@ -55,14 +56,16 @@ typedef struct vm_map {
     size_t size;            // Total virtual size
     uintptr_t min_offset;   // Lower bound of map
     uintptr_t max_offset;   // Upper bound of map
-    
-    // Lock for synchronization
-    // mutex_t lock; 
+    rwlock_t lock;          // Synchronize readers/writers of the map
 } vm_map_t;
 
 // API
 void vm_map_init(vm_map_t *map, pmap_t pmap, uintptr_t min, uintptr_t max);
 vm_map_t *vm_map_create(pmap_t pmap, uintptr_t min, uintptr_t max);
+void vm_map_lock(vm_map_t *map);
+void vm_map_unlock(vm_map_t *map);
+void vm_map_lock_read(vm_map_t *map);
+void vm_map_unlock_read(vm_map_t *map);
 int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset, uintptr_t start, uintptr_t end, uint8_t prot, uint8_t max_prot, uint8_t inheritance);
 int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end);
 int vm_map_find_space(vm_map_t *map, uintptr_t *addr, size_t length);
