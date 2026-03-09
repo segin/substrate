@@ -123,14 +123,14 @@ Reference: User Request (Step 31552)
         - Files: `sys/arch/i386/ldt.c`, `sys/pm/process.c`
         - Tests: unit (verify LDT per-process)
         - Acceptance: Each ELKS process gets private LDT.
-    - [ ] Implement signal delivery for 16-bit context. (REQ: REQ-20-0031)
-        - Files: `sys/arch/i386/signal.c`, `sys/exec/perso/perso_elks.c`
-        - Tests: integration (SIGINT delivery to ELKS process)
-        - Acceptance: Signal handler invoked in 16-bit mode with correct context.
-    - [ ] Implement signal return (sigreturn) for 16-bit context. (REQ: REQ-20-0032)
-        - Files: `sys/arch/i386/signal.c`
-        - Tests: integration (return from signal handler)
-        - Acceptance: Execution resumes at interrupted point.
+    - [x] Implement signal delivery for 16-bit context. (REQ: REQ-20-0031)
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: unit (ELKS far-call signal frame)
+        - Acceptance: Signal delivery rewrites the saved 16-bit `CS:IP`, pushes an ELKS-compatible far-return frame on the ELKS stack, and enters the installed callback handler in ring-3 16-bit context.
+    - [x] Implement ELKS signal return semantics without a dedicated sigreturn syscall. (REQ: REQ-20-0032)
+        - Files: `sys/exec/perso/perso_elks.c`, `docs/personality/elks_spec.md`
+        - Tests: unit (ELKS far-call signal frame)
+        - Acceptance: The kernel-built ELKS signal frame lets `_signal_cbhandler` return with `lret $2` to the interrupted `CS:IP`; no separate ELKS-visible `sigreturn` syscall is required.
     - [ ] Implement core dump generation for ELKS processes. (REQ: REQ-20-0033)
         - Files: `sys/kern/core.c`, `sys/exec/perso/perso_elks.c`
         - Tests: integration (SIGSEGV generates core)

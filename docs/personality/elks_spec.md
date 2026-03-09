@@ -206,6 +206,21 @@ ELKS signal delivery requires a 16-bit user-visible signal frame and a matching
 16-bit signal-return path. The ELKS personality shall not reuse the native
 i386, Linux, or BSD signal-frame layouts verbatim.
 
+For the ELKS libc contract Substrate targets, the kernel enters the installed
+callback handler as if it had been reached by a far call. The ELKS user stack
+shall contain, in order:
+
+- return IP
+- return CS
+- 16-bit signal number
+
+This matches `_signal_cbhandler(sig)` in ELKS libc, which completes delivery
+with `lret $2`.
+
+Substrate shall not expose a separate ELKS-visible `sigreturn` syscall for this
+path. Return from the signal callback is part of the ELKS far-return frame
+contract, not a native i386 `sigreturn` ABI clone.
+
 ### 6.3 Unsupported native-only signals
 
 Signals with no ELKS-visible number in the smallsig ABI are personality-local

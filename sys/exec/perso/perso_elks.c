@@ -5,6 +5,7 @@
 #include <sys/syscall_impl.h>
 #include <sys/kern_syscalls.h>
 #include <sys/ldt.h>
+#include <arch/i386/idt.h>
 #include <kern/console.h>
 #include <sys/proc.h>
 #include <vm/vm_kmem.h>
@@ -42,6 +43,45 @@ static int elks_to_native_signal(int sig) {
         case 16: return 23; /* kernel urgent-I/O slot (native SIGURG semantics) */
         default: return -EINVAL;
     }
+}
+
+struct elks_signal_frame {
+    uint16_t ret_ip;
+    uint16_t ret_cs;
+    uint16_t sig;
+};
+
+static int elks_linear_to_far_code(uintptr_t linear, uint16_t *selector_out, uint16_t *offset_out) {
+    const gdt_entry_t *ldt;
+    unsigned int i;
+
+    if (!current_process || !current_process->ldt || !selector_out || !offset_out) {
+        return -EINVAL;
+    }
+
+    ldt = (const gdt_entry_t *)current_process->ldt;
+    for (i = 0; i < (unsigned int)current_process->ldt_entry_count; i++) {
+        const gdt_entry_t *entry = &ldt[i];
+        uint32_t base;
+        uint32_t limit;
+
+        if ((entry->access & 0x80U) == 0 || (entry->access & 0x10U) == 0 ||
+            (entry->access & 0x08U) == 0) {
+            continue;
+        }
+
+        base = ldt_entry_base(entry);
+        limit = ldt_entry_limit(entry);
+        if (linear < (uintptr_t)base || linear > (uintptr_t)(base + limit)) {
+            continue;
+        }
+
+        *selector_out = (uint16_t)((i << 3) | 4U | 3U);
+        *offset_out = (uint16_t)(linear - (uintptr_t)base);
+        return 0;
+    }
+
+    return -EINVAL;
 }
 
 static int elks_sys_unimplemented(uint32_t unused0, uint32_t unused1, uint32_t unused2,
@@ -507,6 +547,56 @@ static int elks_sys_signal(uint32_t sig, uint32_t handler_off, uint32_t handler_
     return 2;
 }
 
+static void elks_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs_ptr) {
+    registers_t *regs = (registers_t *)regs_ptr;
+    struct elks_signal_frame frame;
+    uintptr_t stack_linear = 0;
+    uint16_t sp;
+    uint16_t handler_sel = 0;
+    uint16_t handler_off = 0;
+    int ret;
+
+    (void)mask;
+    (void)flags;
+
+    if (!regs || !current_process || !current_process->ldt) {
+        return;
+    }
+
+    ret = elks_linear_to_far_code((uintptr_t)handler, &handler_sel, &handler_off);
+    if (ret != 0) {
+        sigexit(current_process, SIGSEGV);
+        return;
+    }
+
+    sp = (uint16_t)regs->useresp;
+    if (sp < sizeof(frame)) {
+        sigexit(current_process, SIGSEGV);
+        return;
+    }
+    sp = (uint16_t)(sp - sizeof(frame));
+
+    ret = ldt_translate_selector_offset(current_process->ldt,
+                                        (unsigned int)current_process->ldt_entry_count,
+                                        (uint16_t)regs->ss,
+                                        sp,
+                                        &stack_linear);
+    if (ret != 0) {
+        sigexit(current_process, SIGSEGV);
+        return;
+    }
+
+    frame.ret_ip = (uint16_t)regs->eip;
+    frame.ret_cs = (uint16_t)regs->cs;
+    frame.sig = (uint16_t)sig;
+    memcpy((void *)(uintptr_t)stack_linear, &frame, sizeof(frame));
+
+    regs->useresp = sp;
+    regs->eip = handler_off;
+    regs->cs = handler_sel;
+    regs->eflags &= ~(1U << 10);
+}
+
 /* ELKS Syscall Table */
 static void *elks_syscall_table[ELKS_SYS_MAX] = {
     [ELKS_SYS_exit]    = (void *)&elks_sys_exit,
@@ -590,7 +680,7 @@ struct personality personality_elks = {
     .syscall_table = elks_syscall_table,
     .syscall_names = elks_syscall_names,
     .syscall_count = ELKS_SYS_MAX,
-    .sendsig = NULL, // To be implemented
+    .sendsig = elks_sendsig,
     .sigreturn = NULL,
     .rt_sigreturn = NULL
 };

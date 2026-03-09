@@ -26,6 +26,7 @@ static int last_sigaction_sig;
 static sig_t last_sigaction_handler;
 static int last_kill_pid;
 static int last_kill_sig;
+static int last_sigexit_sig;
 static struct sigaction stub_oldact;
 static uint8_t *ds_mem;
 static size_t ds_mem_size;
@@ -76,6 +77,7 @@ static size_t ds_mem_size;
 #define sys_getppid stub_sys_getppid
 #define sys_getpgrp stub_sys_getpgrp
 #define kern_sigaction stub_kern_sigaction
+#define sigexit stub_sigexit
 #define kern_execve stub_kern_execve
 #define kprint      stub_kprint
 
@@ -132,6 +134,10 @@ int stub_kern_sigaction(int sig, const struct sigaction *act, struct sigaction *
     }
     return 0;
 }
+void stub_sigexit(process_t *p, int sig) {
+    (void)p;
+    last_sigexit_sig = sig;
+}
 int stub_kern_execve(const char *path, char *const argv[], char *const envp[]) {
     last_name = "execve";
     strncpy(last_exec_path, path ? path : "", sizeof(last_exec_path) - 1);
@@ -176,6 +182,13 @@ static void setup_ds(process_t *proc, gdt_entry_t *ldt, size_t size) {
     ldt[ELKS_LDT_CS_INDEX].access = 0xFAU;
     ldt[ELKS_LDT_CS_INDEX].granularity = 0x00U;
 
+    ldt[ELKS_LDT_SS_INDEX].limit_low = (uint16_t)(size - 1U);
+    ldt[ELKS_LDT_SS_INDEX].base_low = (uint16_t)(base & 0xFFFFU);
+    ldt[ELKS_LDT_SS_INDEX].base_middle = (uint8_t)((base >> 16) & 0xFFU);
+    ldt[ELKS_LDT_SS_INDEX].base_high = (uint8_t)((base >> 24) & 0xFFU);
+    ldt[ELKS_LDT_SS_INDEX].access = 0xF2U;
+    ldt[ELKS_LDT_SS_INDEX].granularity = 0x00U;
+
     proc->ldt = ldt;
     proc->ldt_entry_count = 4;
 }
@@ -187,6 +200,7 @@ int main(void) {
     int (*fn)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
     uintptr_t ds_base;
     uint16_t cs_sel = (uint16_t)((ELKS_LDT_CS_INDEX << 3) | 4U | 3U);
+    uint16_t ss_sel = (uint16_t)((ELKS_LDT_SS_INDEX << 3) | 4U | 3U);
 
     ds_mem_size = 4096;
 #ifdef MAP_32BIT
@@ -346,6 +360,40 @@ int main(void) {
     if (fn(16, 0, 0, 0, 0, 0, 0, 0) != 2) {
         fprintf(stderr, "FAIL: ELKS SIGURG disposition translation wrong\n");
         return 1;
+    }
+
+    {
+        registers_t regs;
+        uint16_t *words;
+
+        memset(&regs, 0, sizeof(regs));
+        memset(ds_mem + 0x180, 0, 16);
+        last_sigexit_sig = 0;
+        regs.eip = 0x1234;
+        regs.cs = cs_sel;
+        regs.useresp = 0x0186;
+        regs.ss = ss_sel;
+        regs.eflags = 0x00000602U | (1U << 10);
+
+        personality_elks.sendsig((void *)(uintptr_t)(ds_base + 0x0044U), 14, 0, 0, &regs);
+        if (last_sigexit_sig != 0) {
+            fprintf(stderr, "FAIL: ELKS sendsig faulted\n");
+            return 1;
+        }
+        if (regs.eip != 0x0044U || regs.cs != cs_sel || regs.useresp != 0x0180U) {
+            fprintf(stderr, "FAIL: ELKS sendsig register rewrite wrong\n");
+            return 1;
+        }
+        if (regs.eflags & (1U << 10)) {
+            fprintf(stderr, "FAIL: ELKS sendsig did not clear DF\n");
+            return 1;
+        }
+
+        words = (uint16_t *)(void *)(ds_mem + 0x0180);
+        if (words[0] != 0x1234U || words[1] != cs_sel || words[2] != 14U) {
+            fprintf(stderr, "FAIL: ELKS sendsig frame wrong\n");
+            return 1;
+        }
     }
 
     current_thread->syscall_num = 127;
