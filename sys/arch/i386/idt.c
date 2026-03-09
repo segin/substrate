@@ -29,6 +29,31 @@ idt_ptr_t   idt_ptr;
 #include <exec/perso/personality.h>
 // isr externs are in idt.h now
 
+enum {
+    IDT_VECTOR_COUNT = 256,
+    IDT_EXCEPTION_BASE = 0,
+    IDT_EXCEPTION_COUNT = 32,
+    IDT_IRQ_BASE = 32,
+    IDT_IRQ_COUNT = 16,
+    IDT_SYSCALL_VECTOR = 0x80,
+    KERNEL_CODE_SELECTOR = 0x08,
+    IDT_FLAG_KERNEL_INT_GATE = IDT_FLAG_PRESENT | IDT_FLAG_INT32_GATE,
+
+    PIC_MASTER_CMD = 0x20,
+    PIC_MASTER_DATA = 0x21,
+    PIC_SLAVE_CMD = 0xA0,
+    PIC_SLAVE_DATA = 0xA1,
+    PIC_EOI = 0x20,
+    PIC_ICW1_INIT = 0x10,
+    PIC_ICW1_ICW4 = 0x01,
+    PIC_ICW4_8086 = 0x01,
+    PIC_MASTER_REMAP_BASE = IDT_IRQ_BASE,
+    PIC_SLAVE_REMAP_BASE = IDT_IRQ_BASE + 8,
+    PIC_MASTER_CASCADE_IRQ = 0x04,
+    PIC_SLAVE_CASCADE_ID = 0x02,
+
+    CPU_EFLAGS_VM = 0x20000
+};
 
 static const char *exception_messages[] = {
     "Division By Zero", "Debug", "Non Maskable Interrupt", "Breakpoint",
@@ -42,16 +67,20 @@ static const char *exception_messages[] = {
 };
 
 static void pic_remap(void) {
-    outb(0x20, 0x11);
-    outb(0x21, 0x20);
-    outb(0x21, 0x04);
-    outb(0x21, 0x01);
-    outb(0xA0, 0x11);
-    outb(0xA1, 0x28);
-    outb(0xA1, 0x02);
-    outb(0xA1, 0x01);
-    outb(0x21, 0x00);
-    outb(0xA1, 0x00);
+    /*
+     * Reprogram the legacy 8259 PIC so hardware IRQs land at 32..47 instead
+     * of colliding with CPU exceptions at 0..31.
+     */
+    outb(PIC_MASTER_CMD, PIC_ICW1_INIT | PIC_ICW1_ICW4);
+    outb(PIC_MASTER_DATA, PIC_MASTER_REMAP_BASE);
+    outb(PIC_MASTER_DATA, PIC_MASTER_CASCADE_IRQ);
+    outb(PIC_MASTER_DATA, PIC_ICW4_8086);
+    outb(PIC_SLAVE_CMD, PIC_ICW1_INIT | PIC_ICW1_ICW4);
+    outb(PIC_SLAVE_DATA, PIC_SLAVE_REMAP_BASE);
+    outb(PIC_SLAVE_DATA, PIC_SLAVE_CASCADE_ID);
+    outb(PIC_SLAVE_DATA, PIC_ICW4_8086);
+    outb(PIC_MASTER_DATA, 0x00);
+    outb(PIC_SLAVE_DATA, 0x00);
 }
 
 static void idt_install_range(uint8_t first_vector, const void *const *handlers,
@@ -78,15 +107,22 @@ void idt_init(void) {
         isr40, isr41, isr42, isr43, isr44, isr45, isr46, isr47
     };
 
-    idt_ptr.limit = sizeof(idt_entry_t) * 256 - 1;
+    /*
+     * The IDT is a dense 256-entry table covering CPU exceptions, remapped
+     * PIC IRQs, and user-callable software gates such as INT 0x80.
+     */
+    idt_ptr.limit = sizeof(idt_entry_t) * IDT_VECTOR_COUNT - 1;
     idt_ptr.base  = (uint32_t)&idt_entries;
 
-    memset(&idt_entries, 0, sizeof(idt_entry_t) * 256);
+    memset(&idt_entries, 0, sizeof(idt_entry_t) * IDT_VECTOR_COUNT);
 
     pic_remap();
-    idt_install_range(0, exception_handlers, 32, 0x08, 0x8E);
-    idt_install_range(32, irq_handlers, 16, 0x08, 0x8E);
-    idt_set_gate(0x80, (uint32_t)isr128, 0x08, IDT_FLAG_USER_INT_GATE);
+    idt_install_range(IDT_EXCEPTION_BASE, exception_handlers,
+                      IDT_EXCEPTION_COUNT, KERNEL_CODE_SELECTOR, IDT_FLAG_KERNEL_INT_GATE);
+    idt_install_range(IDT_IRQ_BASE, irq_handlers,
+                      IDT_IRQ_COUNT, KERNEL_CODE_SELECTOR, IDT_FLAG_KERNEL_INT_GATE);
+    idt_set_gate(IDT_SYSCALL_VECTOR, (uint32_t)isr128,
+                 KERNEL_CODE_SELECTOR, IDT_FLAG_USER_INT_GATE);
 
     idt_flush((uint32_t)&idt_ptr);
 }
@@ -125,7 +161,7 @@ void isr_handler(registers_t *regs) {
     random_harvest_fast(&entropy_data, sizeof(entropy_data));
     exec_maybe_unpin_current_thread(is_usermode);
 
-    if (regs->int_no == 32) {
+    if (regs->int_no == IDT_IRQ_BASE) {
         timer_tick_context(is_usermode);
         
         /* Track user/system time for current process */
@@ -133,8 +169,8 @@ void isr_handler(registers_t *regs) {
             rusage_add_tick(current_process, is_usermode);
         }
         
-        if (regs->int_no >= 40) outb(0xA0, 0x20);
-        outb(0x20, 0x20);
+        if (regs->int_no >= PIC_SLAVE_REMAP_BASE) outb(PIC_SLAVE_CMD, PIC_EOI);
+        outb(PIC_MASTER_CMD, PIC_EOI);
         if (!current_thread || !(current_thread->flags & THREAD_F_NO_PREEMPT)) {
             sched_yield();
         }
@@ -163,7 +199,7 @@ void isr_handler(registers_t *regs) {
         }
 
         // VM86 Mode Check for GPF (13)
-        if (regs->int_no == 13 && (regs->eflags & 0x20000)) { // EFLAGS_VM = 0x20000
+        if (regs->int_no == 13 && (regs->eflags & CPU_EFLAGS_VM)) {
             vm86_gpf_handler(regs);
             return;
         }
