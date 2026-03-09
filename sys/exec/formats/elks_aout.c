@@ -182,7 +182,7 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     
     // Stack setup (simplified for now)
     // 16-bit stack points to end of Data segment
-    uint32_t user_sp = plan.stack_top ? plan.stack_top : 0xFFFE;
+    uint32_t user_sp = elks_initial_stack_pointer(&plan);
     struct elks_segment_layout layout;
     
     kprint("ELKS: Loaded binary, jumping to 16-bit mode\n");
@@ -195,7 +195,7 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     
     kern_close(fd);
     
-    jump_to_elks(hdr.entry, user_sp, layout.cs_sel, layout.ds_sel,
+    jump_to_elks(hdr.entry, user_sp ? user_sp : 0xFFFE, layout.cs_sel, layout.ds_sel,
                  layout.ss_sel, layout.es_sel);
     
     panic("jump_to_elks returned!");

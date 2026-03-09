@@ -51,8 +51,8 @@ Reference: User Request (Step 31552)
         - Files: `sys/exec/formats/elks_aout.c`, `sys/arch/i386/ldt.c`
         - Tests: unit (verify LDT entries created)
         - Acceptance: Separate LDT entries for CS (code), DS (data), SS (stack), ES (extra).
-    - [ ] Set up ELKS stack segment with correct base and limit. (REQ: REQ-20-0012)
-        - Files: `sys/exec/formats/elks_aout.c`
+    - [x] Set up ELKS stack segment with correct base and limit. (REQ: REQ-20-0012)
+        - Files: `sys/exec/formats/elks_aout.c`, `sys/exec/formats/elks_aout.h`
         - Tests: unit (stack segment bounds)
         - Acceptance: Stack limit enforced by hardware; overflow triggers #SS exception.
     - [ ] Set up ELKS data segment with correct base and limit. (REQ: REQ-20-0013)

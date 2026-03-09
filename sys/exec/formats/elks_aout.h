@@ -87,6 +87,20 @@ struct elks_segment_layout {
     uint16_t es_sel;
 };
 
+static inline uint16_t elks_initial_stack_pointer(const struct elks_load_plan *plan) {
+    if (!plan || plan->stack_top == 0) {
+        return 0;
+    }
+    return (uint16_t)(plan->stack_top & ~1U);
+}
+
+static inline uint32_t elks_stack_segment_limit(const struct elks_load_plan *plan) {
+    if (!plan || plan->data_limit == 0) {
+        return 0;
+    }
+    return (uint32_t)(plan->data_limit - 1U);
+}
+
 static inline int elks_header_type_valid(uint32_t type) {
     return type == ELKS_COMBID ||
            type == ELKS_SPLITID ||
@@ -239,7 +253,7 @@ static inline int elks_build_load_plan(const struct elks_exec *hdr,
     plan->text_limit = plan->combined ? (uint16_t)len : hdr->tseg;
     plan->data_limit = (uint16_t)len;
     plan->brk_offset = (uint16_t)(hdr->dseg + hdr->bseg);
-    plan->stack_top = (uint16_t)len;
+    plan->stack_top = (uint16_t)(len & ~1U);
     return 1;
 }
 
@@ -278,6 +292,7 @@ static inline void elks_build_segment_layout(const struct elks_load_plan *plan,
                                 plan->data_base, plan->data_limit);
     elks_init_data_segment_desc(&layout->ss, ELKS_LDT_SS_INDEX,
                                 plan->data_base, plan->data_limit);
+    layout->ss.limit = elks_stack_segment_limit(plan);
     elks_init_data_segment_desc(&layout->es, ELKS_LDT_ES_INDEX,
                                 plan->data_base, plan->data_limit);
 
