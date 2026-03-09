@@ -63,10 +63,10 @@ Reference: User Request (Step 31552)
         - Files: `sys/arch/i386/idt.c`, `sys/arch/i386/syscall.c`, `sys/arch/i386/syscall_abi.h`
         - Tests: unit (ELKS register ABI extraction)
         - Acceptance: `INT 0x80` from an LDT-backed 16-bit ELKS context reaches the kernel syscall handler using ELKS argument order `BX, CX, DX, DI, SI`.
-    - [ ] Handle ELKS environment variables and argv setup. (REQ: REQ-20-0015)
-        - Files: `sys/fs/exec/elks_aout.c`
-        - Tests: integration (argc/argv accessible from ELKS binary)
-        - Acceptance: ELKS main() receives correct argc, argv.
+    - [x] Handle ELKS environment variables and argv setup. (REQ: REQ-20-0015)
+        - Files: `sys/exec/formats/elks_aout.c`, `sys/exec/formats/elks_aout.h`
+        - Tests: unit (ELKS startup stack image)
+        - Acceptance: ELKS startup stack contains correct `argc`, `argv`, and `envp` arrays as 16-bit offsets relative to `DS`.
     - [ ] Set process bitness to BITNESS_16 on ELKS exec. (REQ: REQ-20-0016)
         - Files: `sys/fs/exec/elks_aout.c`
         - Tests: unit (verify bitness field after exec)

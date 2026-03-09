@@ -60,8 +60,7 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     struct elks_exec hdr;
     struct elks_supl_hdr suph;
     struct elks_load_plan plan;
-    (void)argv;
-    (void)envp;
+    size_t argv_envp_bytes;
     
     if (kern_read(fd, (char *)&hdr, sizeof(hdr)) != sizeof(hdr)) {
         kern_close(fd);
@@ -69,6 +68,11 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     }
     memset(&suph, 0, sizeof(suph));
     memset(&plan, 0, sizeof(plan));
+    argv_envp_bytes = elks_stack_image_bytes(argv, envp);
+    if (argv_envp_bytes > 0xFFFFU) {
+        kern_close(fd);
+        return -E2BIG;
+    }
     if (!elks_header_recognized(&hdr, sizeof(hdr))) {
         kern_close(fd);
         return -ENOEXEC;
@@ -85,7 +89,7 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
             return -EIO;
         }
     }
-    if (!elks_build_load_plan(&hdr, &suph, 0, &plan)) {
+    if (!elks_build_load_plan(&hdr, &suph, (uint16_t)argv_envp_bytes, &plan)) {
         kern_close(fd);
         return -ENOEXEC;
     }
@@ -182,13 +186,19 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     
     // Stack setup (simplified for now)
     // 16-bit stack points to end of Data segment
-    uint32_t user_sp = elks_initial_stack_pointer(&plan);
+    uint16_t initial_sp = 0;
+    uint32_t user_sp;
     struct elks_segment_layout layout;
     
     kprint("ELKS: Loaded binary, jumping to 16-bit mode\n");
     
     memset(&layout, 0, sizeof(layout));
     elks_build_segment_layout(&plan, &layout);
+    if (!elks_build_stack_image((uint8_t *)(uintptr_t)plan.data_base, &plan,
+                                argv, envp, &initial_sp)) {
+        return -E2BIG;
+    }
+    user_sp = initial_sp;
 
     extern void jump_to_elks(uint32_t entry, uint32_t stack, uint32_t cs,
                              uint32_t ds, uint32_t ss, uint32_t es);

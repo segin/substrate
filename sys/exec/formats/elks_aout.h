@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <string.h>
 #include <sys/ldt.h>
 
 /*
@@ -106,6 +107,90 @@ static inline uint32_t elks_data_segment_limit(const struct elks_load_plan *plan
         return 0;
     }
     return (uint32_t)(plan->data_limit - 1U);
+}
+
+static inline size_t elks_string_vector_count(char *const vec[]) {
+    size_t count = 0;
+
+    if (!vec) {
+        return 0;
+    }
+    while (vec[count]) {
+        count++;
+    }
+    return count;
+}
+
+static inline size_t elks_string_vector_bytes(char *const vec[]) {
+    size_t bytes = 0;
+    size_t i;
+
+    if (!vec) {
+        return 0;
+    }
+    for (i = 0; vec[i]; i++) {
+        bytes += strlen(vec[i]) + 1U;
+    }
+    return bytes;
+}
+
+static inline size_t elks_stack_image_bytes(char *const argv[], char *const envp[]) {
+    size_t argc = elks_string_vector_count(argv);
+    size_t envc = elks_string_vector_count(envp);
+    size_t ptr_bytes = (1U + argc + 1U + envc + 1U) * sizeof(uint16_t);
+
+    return ptr_bytes + elks_string_vector_bytes(argv) + elks_string_vector_bytes(envp);
+}
+
+static inline int elks_build_stack_image(uint8_t *segment,
+                                         const struct elks_load_plan *plan,
+                                         char *const argv[],
+                                         char *const envp[],
+                                         uint16_t *initial_sp_out) {
+    size_t argc = elks_string_vector_count(argv);
+    size_t envc = elks_string_vector_count(envp);
+    size_t image_bytes = elks_stack_image_bytes(argv, envp);
+    uint16_t sp;
+    uint16_t cursor;
+    size_t i;
+    uint16_t *ptrs;
+
+    if (!segment || !plan) {
+        return 0;
+    }
+
+    sp = elks_initial_stack_pointer(plan);
+    if (sp == 0 || image_bytes > sp) {
+        return 0;
+    }
+
+    sp = (uint16_t)((sp - image_bytes) & ~1U);
+    ptrs = (uint16_t *)(void *)(segment + sp);
+    cursor = (uint16_t)(sp + ((1U + argc + 1U + envc + 1U) * sizeof(uint16_t)));
+
+    *ptrs++ = (uint16_t)argc;
+    for (i = 0; i < argc; i++) {
+        size_t len = strlen(argv[i]) + 1U;
+
+        *ptrs++ = cursor;
+        memcpy(segment + cursor, argv[i], len);
+        cursor = (uint16_t)(cursor + len);
+    }
+    *ptrs++ = 0;
+
+    for (i = 0; i < envc; i++) {
+        size_t len = strlen(envp[i]) + 1U;
+
+        *ptrs++ = cursor;
+        memcpy(segment + cursor, envp[i], len);
+        cursor = (uint16_t)(cursor + len);
+    }
+    *ptrs++ = 0;
+
+    if (initial_sp_out) {
+        *initial_sp_out = sp;
+    }
+    return 1;
 }
 
 static inline int elks_header_type_valid(uint32_t type) {
