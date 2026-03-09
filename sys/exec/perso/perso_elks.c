@@ -51,6 +51,63 @@ struct elks_signal_frame {
     uint16_t sig;
 };
 
+static int elks_decode_softint(registers_t *regs, uint8_t *vector, uintptr_t *addr) {
+    uintptr_t linear_ip;
+    uint8_t *ip;
+
+    if (!regs || !current_process || current_process->perso_id != PERS_ELKS ||
+        !current_process->ldt) {
+        return 0;
+    }
+    if (ldt_translate_selector_offset(current_process->ldt,
+                                      (unsigned int)current_process->ldt_entry_count,
+                                      (uint16_t)regs->cs,
+                                      (uint16_t)regs->eip,
+                                      &linear_ip) != 0) {
+        return 0;
+    }
+    if (linear_ip >= 0xC0000000U) {
+        return 0;
+    }
+
+    ip = (uint8_t *)(uintptr_t)linear_ip;
+    if (ip[0] != 0xCD) {
+        return 0;
+    }
+
+    if (vector) {
+        *vector = ip[1];
+    }
+    if (addr) {
+        *addr = linear_ip;
+    }
+    return 1;
+}
+
+static int elks_handle_trap(void *regs_ptr) {
+    registers_t *regs = (registers_t *)regs_ptr;
+    uint8_t softint = 0;
+    uintptr_t softint_addr = 0;
+    char msg[96];
+
+    if (!regs || regs->int_no != 13 || !current_process ||
+        current_process->perso_id != PERS_ELKS) {
+        return 0;
+    }
+    if (!elks_decode_softint(regs, &softint, &softint_addr) || softint != 0x20) {
+        return 0;
+    }
+
+    sprintf(msg, "ELKS: trapped Minix-86 syscall attempt via INT 0x20 at 0x%08X\n",
+            (unsigned int)softint_addr);
+    kprint(msg);
+    if (current_thread && current_thread->proc == current_process) {
+        current_thread->trap_addr = softint_addr;
+    }
+    trapsignal(current_process, SIGSYS, SI_KERNEL);
+    return 1;
+}
+
 static int elks_linear_to_far_code(uintptr_t linear, uint16_t *selector_out, uint16_t *offset_out) {
     const gdt_entry_t *ldt;
     unsigned int i;
@@ -682,5 +739,6 @@ struct personality personality_elks = {
     .syscall_count = ELKS_SYS_MAX,
     .sendsig = elks_sendsig,
     .sigreturn = NULL,
-    .rt_sigreturn = NULL
+    .rt_sigreturn = NULL,
+    .handle_trap = elks_handle_trap
 };

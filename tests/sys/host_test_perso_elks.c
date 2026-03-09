@@ -78,6 +78,7 @@ static size_t ds_mem_size;
 #define sys_getpgrp stub_sys_getpgrp
 #define kern_sigaction stub_kern_sigaction
 #define sigexit stub_sigexit
+#define trapsignal stub_trapsignal
 #define kern_execve stub_kern_execve
 #define kprint      stub_kprint
 
@@ -136,6 +137,11 @@ int stub_kern_sigaction(int sig, const struct sigaction *act, struct sigaction *
 }
 void stub_sigexit(process_t *p, int sig) {
     (void)p;
+    last_sigexit_sig = sig;
+}
+void stub_trapsignal(process_t *p, int sig, int code) {
+    (void)p;
+    (void)code;
     last_sigexit_sig = sig;
 }
 int stub_kern_execve(const char *path, char *const argv[], char *const envp[]) {

@@ -46,6 +46,9 @@ struct personality {
     void (*sendsig)(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
     int (*sigreturn)(void *regs);
     int (*rt_sigreturn)(void *regs);
+
+    /* Optional user-exception hook. Return nonzero when fully handled. */
+    int (*handle_trap)(void *regs);
 };
 
 extern struct personality personality_native;
