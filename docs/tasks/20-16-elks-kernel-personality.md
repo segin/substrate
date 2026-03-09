@@ -168,8 +168,8 @@ Reference: User Request (Step 31552)
         - Files: `tests/elks/hello.S`, `tests/elks/Makefile`, `tests/elks/mkelks.py`
         - Tests: emulation (run in QEMU, verify output)
         - Acceptance: "Hello, ELKS!" printed to console.
-    - [ ] Create ELKS sleep test binary. (REQ: REQ-20-0043)
-        - Files: `tests/elks/sleep.c`, `tests/elks/Makefile`
+    - [x] Create ELKS sleep test binary. (REQ: REQ-20-0043)
+        - Files: `tests/elks/sleep.S`, `tests/elks/Makefile`
         - Tests: emulation (run in QEMU, verify delay)
         - Acceptance: Process sleeps for specified duration.
     - [ ] Create ELKS file I/O test binary. (REQ: REQ-20-0044)

@@ -118,14 +118,14 @@ void syscall_handler(registers_t *regs) {
         regs->eax = -38; // ENOSYS
         return;
     }
-    uint32_t syscall_num = regs->eax;
+    uint32_t syscall_num = (p->id == PERS_ELKS) ? (uint16_t)regs->eax : regs->eax;
     uint32_t saved_edx = regs->edx;
 
     // Track syscall for SA_RESTART support
     if (current_thread) {
         current_thread->in_syscall = 1;
         current_thread->syscall_num = syscall_num;
-        current_thread->syscall_orig_eax = regs->eax;
+        current_thread->syscall_orig_eax = syscall_num;
     }
 
     uint32_t args[8];
@@ -241,17 +241,17 @@ void syscall_handler(registers_t *regs) {
     }
     
     // Check if syscall number is out of range
-    if (regs->eax >= p->syscall_count) {
+    if (syscall_num >= p->syscall_count) {
         if (syscall_trace_enabled) {
             char buf[64];
-            sprintf(buf, "SYSCALL: Out of range #%u\n", (unsigned int)regs->eax);
+            sprintf(buf, "SYSCALL: Out of range #%u\n", (unsigned int)syscall_num);
             kprint(buf);
         }
         regs->eax = -38; // ENOSYS
         return;
     }
     
-    void *location = p->syscall_table[regs->eax];
+    void *location = p->syscall_table[syscall_num];
     
     if (!location) {
         if (syscall_trace_enabled) kprint("SYSCALL: Not Implemented\n");
@@ -264,7 +264,11 @@ void syscall_handler(registers_t *regs) {
     
     // Dispatch
     int64_t ret = func(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
-    regs->eax = (uint32_t)(ret & 0xFFFFFFFF);
+    if (p->id == PERS_ELKS) {
+        regs->eax = (uint16_t)ret;
+    } else {
+        regs->eax = (uint32_t)(ret & 0xFFFFFFFF);
+    }
     /*
      * Linux i386 int 0x80 stubs may rely on EDX being preserved across
      * 32-bit syscalls (for xchg-based EBX save/restore sequences).
@@ -273,6 +277,8 @@ void syscall_handler(registers_t *regs) {
      */
     if (p->id == PERS_LINUX) {
         regs->edx = saved_edx;
+    } else if (p->id == PERS_ELKS) {
+        regs->edx = (uint16_t)regs->edx;
     } else {
         regs->edx = (uint32_t)((ret >> 32) & 0xFFFFFFFF);
     }

@@ -33,11 +33,11 @@ static inline void i386_extract_syscall_args(const struct personality *p,
     }
 
     if (p && p->id == PERS_ELKS) {
-        args[0] = regs->ebx;
-        args[1] = regs->ecx;
-        args[2] = regs->edx;
-        args[3] = regs->edi;
-        args[4] = regs->esi;
+        args[0] = (uint16_t)regs->ebx;
+        args[1] = (uint16_t)regs->ecx;
+        args[2] = (uint16_t)regs->edx;
+        args[3] = (uint16_t)regs->edi;
+        args[4] = (uint16_t)regs->esi;
         return;
     }
 
