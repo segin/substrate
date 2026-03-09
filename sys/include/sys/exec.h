@@ -38,6 +38,7 @@ struct exec_binary_handler {
  * Handlers are tried in the order registered (LIFO or priority based in future).
  */
 void exec_register_handler(struct exec_binary_handler *handler);
+void exec_init(void);
 
 /*
  * Dispatch execution to a matching handler.
@@ -47,5 +48,9 @@ int exec_dispatch(const char *path, char *const argv[], char *const envp[]);
 void exec_pin_current_thread(void);
 void exec_unpin_current_thread(void);
 void exec_maybe_unpin_current_thread(int from_user);
+
+#ifdef HOST_TEST
+int exec_handler_registered(const char *name);
+#endif
 
 #endif /* _SYS_EXEC_H */

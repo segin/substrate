@@ -37,7 +37,7 @@ Reference: User Request (Step 31552)
         - Tests: unit (magic number detection)
         - Docs: `elks_aout.4` manpage
         - Acceptance: Correctly identify ELKS Minix-style type values `0x04100301`, `0x04200301`, and `0x04300301`, including supplemental-header variants.
-    - [ ] Register ELKS loader with exec subsystem. (REQ: REQ-20-0008)
+    - [x] Register ELKS loader with exec subsystem. (REQ: REQ-20-0008)
         - Files: `sys/exec/exec.c`, `sys/exec/formats/elks_aout.c`
         - Tests: integration (exec ELKS binary triggers loader)
         - Acceptance: ELKS binaries dispatched to elks_load() function.

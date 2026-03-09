@@ -24,6 +24,10 @@ struct thr_param;
 
 static struct exec_binary_handler *exec_handlers = NULL;
 
+void exec_init(void) {
+    elks_init_handler();
+}
+
 void exec_register_handler(struct exec_binary_handler *handler) {
     if (!handler) return;
     
@@ -31,6 +35,22 @@ void exec_register_handler(struct exec_binary_handler *handler) {
     handler->next = exec_handlers;
     exec_handlers = handler;
 }
+
+#ifdef HOST_TEST
+int exec_handler_registered(const char *name) {
+    struct exec_binary_handler *h;
+
+    if (!name) {
+        return 0;
+    }
+    for (h = exec_handlers; h; h = h->next) {
+        if (h->name && strcmp(h->name, name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+#endif
 
 void exec_pin_current_thread(void) {
     if (!current_thread || current_thread->exec_pin_active) {
@@ -128,11 +148,6 @@ int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
         header_buf[2] == 'L' &&
         header_buf[3] == 'F') {
         return elf_execve(fd, path, argv, envp);
-    }
-
-    // Explicit ELKS check if not registered via handler yet (for robustness)
-    if (elks_check_file(path, header_buf, len) == 0) {
-        return elks_load(fd, path, argv, envp);
     }
 
     kern_close(fd);

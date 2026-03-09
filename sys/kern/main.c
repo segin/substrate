@@ -38,6 +38,7 @@
 #include <sys/crc32.h>
 #include <vm/vm_page.h>
 #include <vfs/vfs.h>
+#include <sys/exec.h>
 #include <exec/formats/elf.h>
 #include <fs/procfs.h>
 #include <fs/sysfs.h>
@@ -371,6 +372,7 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
 
     extern void random_init(void);
     random_init();
+    exec_init();
 
     crc32_init();
 
