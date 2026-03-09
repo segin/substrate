@@ -10,6 +10,7 @@
 #include <arch/i386/fpu/fpu_emu.h>
 
 #include <sys/proc.h>
+#include <sys/ldt.h>
 #include <arch/i386/fpu/fpu_emu.h>
 
 idt_entry_t idt_entries[256] __attribute__((aligned(16)));
@@ -41,32 +42,20 @@ static const char *exception_messages[] = {
     "Reserved", "Reserved", "Security Exception", "Reserved"
 };
 
-static uint32_t ldt_entry_base(const gdt_entry_t *entry) {
-    return (uint32_t)entry->base_low |
-           ((uint32_t)entry->base_middle << 16) |
-           ((uint32_t)entry->base_high << 24);
-}
-
 static int elks_decode_softint(registers_t *regs, uint8_t *vector, uintptr_t *addr) {
-    uint16_t selector_index;
-    gdt_entry_t *ldt;
     uintptr_t linear_ip;
     uint8_t *ip;
 
     if (!current_process || current_process->perso_id != PERS_ELKS || !current_process->ldt) {
         return 0;
     }
-    if ((regs->cs & 0x4) == 0) {
+    if (ldt_translate_selector_offset(current_process->ldt,
+                                      (unsigned int)current_process->ldt_entry_count,
+                                      (uint16_t)regs->cs,
+                                      (uint16_t)regs->eip,
+                                      &linear_ip) != 0) {
         return 0;
     }
-
-    selector_index = (uint16_t)(regs->cs >> 3);
-    if (selector_index >= (uint16_t)current_process->ldt_entry_count) {
-        return 0;
-    }
-
-    ldt = (gdt_entry_t *)current_process->ldt;
-    linear_ip = (uintptr_t)ldt_entry_base(&ldt[selector_index]) + (uintptr_t)(regs->eip & 0xFFFF);
     if (linear_ip >= 0xC0000000U) {
         return 0;
     }

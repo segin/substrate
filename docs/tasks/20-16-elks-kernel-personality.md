@@ -113,10 +113,10 @@ Reference: User Request (Step 31552)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: unit (verify ENOSYS return)
         - Acceptance: Unsupported syscalls return -ENOSYS without crashing.
-    - [ ] Implement 16:16 far pointer to linear address conversion. (REQ: REQ-20-0028)
-        - Files: `sys/exec/perso/perso_elks.c`, `sys/arch/i386/ldt.c`
+    - [x] Implement 16:16 far pointer to linear address conversion. (REQ: REQ-20-0028)
+        - Files: `sys/include/sys/ldt.h`, `sys/arch/i386/idt.c`
         - Tests: unit (segment:offset to linear)
-        - Acceptance: `LDT[seg].base + offset` computed correctly.
+        - Acceptance: `LDT[seg].base + offset` is validated and computed correctly, with out-of-bounds offsets rejected.
 
 - [ ] **Resource Isolation & Signal Handling:** (REQ: REQ-20-0029)
     - [ ] Ensure ELKS processes have isolated LDT (not shared with other processes). (REQ: REQ-20-0030)
