@@ -150,7 +150,7 @@ Reference: User Request (Step 31552)
         - Files: `sys/arch/i386/ldt.c`, `sys/fs/exec/exec.c`
         - Tests: unit (old LDT freed, new LDT installed)
         - Acceptance: exec clears old LDT and installs new one.
-    - [ ] Add LDT entry validation to prevent privilege escalation. (REQ: REQ-20-0038)
+    - [x] Add LDT entry validation to prevent privilege escalation. (REQ: REQ-20-0038)
         - Files: `sys/arch/i386/ldt.c`
         - Tests: fuzz (malformed LDT entries)
         - Acceptance: DPL must be 3; conforming code segments rejected; call gates rejected.
@@ -158,7 +158,7 @@ Reference: User Request (Step 31552)
         - Files: `sys/arch/i386/switch.S`, `sys/kern/sched.c`
         - Tests: unit (LLDT loaded correctly)
         - Acceptance: LDTR loaded with correct selector on context switch.
-    - [ ] Add kernel log warnings for suspicious LDT usage patterns. (REQ: REQ-20-0040)
+    - [x] Add kernel log warnings for suspicious LDT usage patterns. (REQ: REQ-20-0040)
         - Files: `sys/arch/i386/ldt.c`
         - Tests: unit (warning logged)
         - Acceptance: Unusual patterns (many allocations, odd limits) logged.

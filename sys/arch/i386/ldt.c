@@ -7,9 +7,53 @@
 #include <vm/vm_kmem.h>
 #include <kern/console.h>
 #include <arch/i386/gdt.h>
+#include <stdio.h>
 
 /* GDT index 7 is reserved for the active process LDT */
 #define GDT_LDT_INDEX 7
+
+static int ldt_desc_is_clear(const struct user_desc *info) {
+    return info &&
+           info->base_addr == 0 &&
+           info->limit == 0 &&
+           info->contents == 0 &&
+           info->seg_not_present == 1 &&
+           info->seg_32bit == 0 &&
+           info->limit_in_pages == 0;
+}
+
+static int ldt_validate_user_desc(const struct user_desc *info) {
+    if (!info) {
+        return -EINVAL;
+    }
+    if (info->entry_number >= LDT_ENTRIES) {
+        return -EINVAL;
+    }
+    if (ldt_desc_is_clear(info)) {
+        return 0;
+    }
+    if (info->contents > 2) {
+        return -EINVAL;
+    }
+    return 0;
+}
+
+static void ldt_warn_suspicious(const struct user_desc *info) {
+    char buf[128];
+
+    if (!info || ldt_desc_is_clear(info)) {
+        return;
+    }
+    if (info->entry_number < 256 &&
+        ((info->limit_in_pages == 0 && (info->limit & 0x0FU) == 0) ||
+         (info->limit_in_pages != 0 && (info->limit & 0x01U) == 0))) {
+        return;
+    }
+
+    sprintf(buf, "LDT: suspicious entry=%u limit=0x%x pages=%u\n",
+            info->entry_number, info->limit, info->limit_in_pages ? 1U : 0U);
+    kprint(buf);
+}
 
 void ldt_activate(process_t *proc) {
     if (!proc || !proc->ldt) {
@@ -158,9 +202,8 @@ int sys_modify_ldt(int func, void *ptr, unsigned long bytecount) {
         return -EFAULT;
     }
     
-    if (info.entry_number >= LDT_ENTRIES) {
-        return -EINVAL;
-    }
+    if (ldt_validate_user_desc(&info) != 0) return -EINVAL;
+    ldt_warn_suspicious(&info);
     
     /* Lazy allocate LDT if needed */
     if (!current_process->ldt) {
@@ -169,8 +212,7 @@ int sys_modify_ldt(int func, void *ptr, unsigned long bytecount) {
     
     gdt_entry_t *ldt = (gdt_entry_t *)current_process->ldt;
     
-    if (info.base_addr == 0 && info.limit == 0 && info.contents == 0 && 
-        info.seg_not_present == 1 && info.seg_32bit == 0 && info.limit_in_pages == 0) {
+    if (ldt_desc_is_clear(&info)) {
         /* Clear entry */
         memset(&ldt[info.entry_number], 0, 8);
     } else {

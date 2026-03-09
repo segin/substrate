@@ -10,6 +10,7 @@ process_t *current_process;
 thread_t *current_thread;
 
 static size_t last_kfree_size;
+static char last_log[128];
 
 void *kmalloc(size_t size) {
     return calloc(1, size);
@@ -38,6 +39,11 @@ void gdt_set_gate(int num, uint32_t base, uint32_t limit, uint8_t access, uint8_
     (void)gran;
 }
 
+void kprint(const char *msg) {
+    strncpy(last_log, msg ? msg : "", sizeof(last_log) - 1);
+    last_log[sizeof(last_log) - 1] = '\0';
+}
+
 #include "../../sys/arch/i386/ldt.c"
 
 static void fill_entry(gdt_entry_t *entry, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran) {
@@ -62,6 +68,7 @@ int main(void) {
     memset(&parent, 0, sizeof(parent));
     memset(&child, 0, sizeof(child));
     memset(&replaced, 0, sizeof(replaced));
+    memset(last_log, 0, sizeof(last_log));
     ldt_init_process(&parent);
     ldt_init_process(&child);
     ldt_init_process(&replaced);
@@ -141,6 +148,40 @@ int main(void) {
     if (((gdt_entry_t *)replaced.ldt)[0].base_low != 0) {
         fprintf(stderr, "FAIL: replacement LDT was not zeroed\n");
         return 1;
+    }
+
+    current_process = &replaced;
+    {
+        struct user_desc bad;
+        struct user_desc suspicious;
+
+        memset(&bad, 0, sizeof(bad));
+        bad.entry_number = 1;
+        bad.base_addr = 0x12340000U;
+        bad.limit = 0x123U;
+        bad.seg_32bit = 1;
+        bad.contents = 3;
+        if (sys_modify_ldt(LDT_WRITE, &bad, sizeof(bad)) != -EINVAL) {
+            fprintf(stderr, "FAIL: invalid LDT descriptor contents accepted\n");
+            return 1;
+        }
+
+        memset(&suspicious, 0, sizeof(suspicious));
+        suspicious.entry_number = 512;
+        suspicious.base_addr = 0x56780000U;
+        suspicious.limit = 0x123U;
+        suspicious.seg_32bit = 1;
+        suspicious.contents = 0;
+        suspicious.useable = 1;
+        memset(last_log, 0, sizeof(last_log));
+        if (sys_modify_ldt(LDT_WRITE, &suspicious, sizeof(suspicious)) != 0) {
+            fprintf(stderr, "FAIL: suspicious but valid LDT descriptor rejected\n");
+            return 1;
+        }
+        if (strstr(last_log, "suspicious") == NULL) {
+            fprintf(stderr, "FAIL: suspicious LDT descriptor did not log warning\n");
+            return 1;
+        }
     }
 
     ldt_free_process(&parent);
