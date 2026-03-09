@@ -1453,129 +1453,6 @@ static int emit_x86_64_1byte_regfield_memop(unsigned char opcode, unsigned reg_f
     return 0;
 }
 
-static int emit_i386_1byte_regfield_memop(unsigned char opcode, unsigned reg_field, const as_mem_operand_t *mem,
-                                          unsigned char *out, size_t out_cap, size_t *out_len) {
-    as_x86_reg_t base;
-    as_x86_reg_t index;
-    unsigned base_reg = 0;
-    unsigned index_reg = 4;
-    unsigned scale_bits = 0;
-    long long disp = 0;
-    int has_disp = 0;
-    int has_base = 0;
-    int has_index = 0;
-    int disp_only = 0;
-    unsigned char modrm;
-    unsigned char mod;
-    unsigned char sib = 0;
-    int need_sib = 0;
-    size_t pos = 0;
-
-    if (mem == NULL || out == NULL || out_len == NULL || out_cap < 10) {
-        return -1;
-    }
-    if (emit_seg_override_byte(out, out_cap, &pos, mem->segment_reg) != 0) {
-        return -1;
-    }
-    if (mem->base_reg != NULL) {
-        if (parse_x86_reg(mem->base_reg, &base) != 0 || ((unsigned)base & 8u) != 0u) {
-            return -1;
-        }
-        base_reg = (unsigned)base & 7u;
-        has_base = 1;
-    }
-    if (mem->index_reg != NULL) {
-        if (parse_x86_reg(mem->index_reg, &index) != 0 || ((unsigned)index & 8u) != 0u || index == AS_X86_REG_ESP) {
-            return -1;
-        }
-        index_reg = (unsigned)index & 7u;
-        has_index = 1;
-    }
-    {
-        unsigned scale = (unsigned)(mem->scale > 0 ? mem->scale : 1);
-
-        if (scale == 8u) {
-            scale_bits = 3u;
-        } else if (scale == 4u) {
-            scale_bits = 2u;
-        } else if (scale == 2u) {
-            scale_bits = 1u;
-        } else {
-            scale_bits = 0u;
-        }
-    }
-    if (mem->disp != NULL) {
-        if (eval_expr_const(mem->disp, &disp) != 0) {
-            if (expr_has_symbol(mem->disp)) {
-                disp = 0;
-            } else {
-                return -1;
-            }
-        }
-        has_disp = 1;
-    }
-    if (!has_base && !has_index) {
-        disp_only = 1;
-        has_disp = 1;
-    }
-
-    if (disp_only) {
-        out[pos++] = opcode;
-        out[pos++] = (unsigned char)(((reg_field & 7u) << 3) | 5u);
-        out[pos++] = (unsigned char)(disp & 0xff);
-        out[pos++] = (unsigned char)((disp >> 8) & 0xff);
-        out[pos++] = (unsigned char)((disp >> 16) & 0xff);
-        out[pos++] = (unsigned char)((disp >> 24) & 0xff);
-        *out_len = pos;
-        return 0;
-    }
-    if (has_index && !has_base) {
-        sib = (unsigned char)((scale_bits << 6) | ((index_reg & 7u) << 3) | 5u);
-        out[pos++] = opcode;
-        out[pos++] = (unsigned char)(((reg_field & 7u) << 3) | 4u);
-        out[pos++] = sib;
-        out[pos++] = (unsigned char)(disp & 0xff);
-        out[pos++] = (unsigned char)((disp >> 8) & 0xff);
-        out[pos++] = (unsigned char)((disp >> 16) & 0xff);
-        out[pos++] = (unsigned char)((disp >> 24) & 0xff);
-        *out_len = pos;
-        return 0;
-    }
-
-    need_sib = has_index || base_reg == 4u;
-    if (!has_disp && base_reg == 5u) {
-        has_disp = 1;
-        disp = 0;
-    }
-    if (!has_disp) {
-        mod = 0;
-    } else if (disp >= -128 && disp <= 127) {
-        mod = 1;
-    } else {
-        mod = 2;
-    }
-    if (need_sib) {
-        sib = (unsigned char)((scale_bits << 6) | ((index_reg & 7u) << 3) | (base_reg & 7u));
-    }
-
-    out[pos++] = opcode;
-    modrm = (unsigned char)((mod << 6) | ((reg_field & 7u) << 3) | (need_sib ? 4u : (base_reg & 7u)));
-    out[pos++] = modrm;
-    if (need_sib) {
-        out[pos++] = sib;
-    }
-    if (mod == 2) {
-        out[pos++] = (unsigned char)(disp & 0xff);
-        out[pos++] = (unsigned char)((disp >> 8) & 0xff);
-        out[pos++] = (unsigned char)((disp >> 16) & 0xff);
-        out[pos++] = (unsigned char)((disp >> 24) & 0xff);
-    } else if (mod == 1) {
-        out[pos++] = (unsigned char)((int8_t)disp);
-    }
-    *out_len = pos;
-    return 0;
-}
-
 static int emit_i386_stmt_prefixes(const as_instruction_t *insn, unsigned char *out, size_t out_cap, size_t *out_len) {
     size_t pos = 0;
 
@@ -1608,25 +1485,6 @@ static int emit_i386_stmt_prefixes(const as_instruction_t *insn, unsigned char *
     return 0;
 }
 
-static int emit_i386_prefixed_1byte_regfield_memop(const as_instruction_t *insn, unsigned char opcode, unsigned reg_field,
-                                                   const as_mem_operand_t *mem, unsigned char *out, size_t out_cap,
-                                                   size_t *out_len) {
-    size_t pos = 0;
-    size_t body_len = 0;
-
-    if (insn == NULL || out == NULL || out_len == NULL) {
-        return -1;
-    }
-    if (emit_i386_stmt_prefixes(insn, out, out_cap, &pos) != 0) {
-        return -1;
-    }
-    if (emit_i386_1byte_regfield_memop(opcode, reg_field, mem, out + pos, out_cap - pos, &body_len) != 0) {
-        return -1;
-    }
-    *out_len = pos + body_len;
-    return 0;
-}
-
 static int emit_i386_prefixed_1byte_rm(const as_instruction_t *insn, unsigned char opcode, unsigned reg_field,
                                        const as_operand_t *rm_op, unsigned char *out, size_t out_cap, size_t *out_len) {
     size_t pos = 0;
@@ -1646,6 +1504,17 @@ static int emit_i386_prefixed_1byte_rm(const as_instruction_t *insn, unsigned ch
     }
     *out_len = pos;
     return 0;
+}
+
+static int emit_i386_prefixed_1byte_x87_mem(const as_instruction_t *insn, unsigned char opcode, unsigned reg_field,
+                                            const as_operand_t *op, unsigned char *out, size_t out_cap, size_t *out_len) {
+    if (op == NULL) {
+        return -1;
+    }
+    if (op->kind == AS_OPERAND_REGISTER || op->kind == AS_OPERAND_COPROCESSOR) {
+        return -1;
+    }
+    return emit_i386_prefixed_1byte_rm(insn, opcode, reg_field, op, out, out_cap, out_len);
 }
 
 static int emit_i386_vex2_kmovw(const as_operand_t *src, unsigned dst_k, unsigned char *out, size_t out_cap, size_t *out_len) {
@@ -2008,112 +1877,262 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return 0;
     }
     if (strcmp(mnbuf, "fldl") == 0) {
-        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
+        if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
-        return emit_i386_prefixed_1byte_regfield_memop(insn, 0xdd, 0u, &a->u.mem, out, out_cap, out_len);
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdd, 0u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "flds") == 0) {
-        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
+        if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
-        return emit_i386_prefixed_1byte_regfield_memop(insn, 0xd9, 0u, &a->u.mem, out, out_cap, out_len);
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd9, 0u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "fldt") == 0) {
-        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
+        if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
-        return emit_i386_prefixed_1byte_regfield_memop(insn, 0xdb, 5u, &a->u.mem, out, out_cap, out_len);
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdb, 5u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "fstpl") == 0) {
-        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
+        if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
-        return emit_i386_prefixed_1byte_regfield_memop(insn, 0xdd, 3u, &a->u.mem, out, out_cap, out_len);
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdd, 3u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "fstps") == 0) {
-        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
+        if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
-        return emit_i386_prefixed_1byte_regfield_memop(insn, 0xd9, 3u, &a->u.mem, out, out_cap, out_len);
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd9, 3u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "fstpt") == 0) {
-        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
+        if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
-        return emit_i386_prefixed_1byte_regfield_memop(insn, 0xdb, 7u, &a->u.mem, out, out_cap, out_len);
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdb, 7u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "faddl") == 0) {
-        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
+        if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
-        return emit_i386_prefixed_1byte_regfield_memop(insn, 0xdc, 0u, &a->u.mem, out, out_cap, out_len);
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdc, 0u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "fadds") == 0) {
+        if (insn->operand_count != 1 || a == NULL) {
+            return -1;
+        }
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd8, 0u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "fsubl") == 0) {
-        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
+        if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
-        return emit_i386_prefixed_1byte_regfield_memop(insn, 0xdc, 4u, &a->u.mem, out, out_cap, out_len);
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdc, 4u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "fsubs") == 0) {
+        if (insn->operand_count != 1 || a == NULL) {
+            return -1;
+        }
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd8, 4u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "fsubrs") == 0) {
+        if (insn->operand_count != 1 || a == NULL) {
+            return -1;
+        }
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd8, 5u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "fsubrl") == 0) {
+        if (insn->operand_count != 1 || a == NULL) {
+            return -1;
+        }
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdc, 5u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "fmull") == 0) {
-        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
+        if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
-        return emit_i386_prefixed_1byte_regfield_memop(insn, 0xdc, 1u, &a->u.mem, out, out_cap, out_len);
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdc, 1u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "fmuls") == 0) {
+        if (insn->operand_count != 1 || a == NULL) {
+            return -1;
+        }
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd8, 1u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "fdivl") == 0) {
-        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
+        if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
-        return emit_i386_prefixed_1byte_regfield_memop(insn, 0xdc, 6u, &a->u.mem, out, out_cap, out_len);
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdc, 6u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "fdivs") == 0) {
+        if (insn->operand_count != 1 || a == NULL) {
+            return -1;
+        }
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd8, 6u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "fdivrs") == 0) {
+        if (insn->operand_count != 1 || a == NULL) {
+            return -1;
+        }
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd8, 7u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "fdivrl") == 0) {
+        if (insn->operand_count != 1 || a == NULL) {
+            return -1;
+        }
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdc, 7u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "fcoms") == 0) {
-        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
+        if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
-        return emit_i386_prefixed_1byte_regfield_memop(insn, 0xd8, 2u, &a->u.mem, out, out_cap, out_len);
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd8, 2u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "fcomps") == 0) {
-        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
+        if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
-        return emit_i386_prefixed_1byte_regfield_memop(insn, 0xd8, 3u, &a->u.mem, out, out_cap, out_len);
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd8, 3u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "fcoml") == 0) {
-        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
+        if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
-        return emit_i386_prefixed_1byte_regfield_memop(insn, 0xdc, 2u, &a->u.mem, out, out_cap, out_len);
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdc, 2u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "fcompl") == 0) {
-        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
+        if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
-        return emit_i386_prefixed_1byte_regfield_memop(insn, 0xdc, 3u, &a->u.mem, out, out_cap, out_len);
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdc, 3u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "fildl") == 0) {
-        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
+        if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
-        return emit_i386_prefixed_1byte_regfield_memop(insn, 0xdb, 0u, &a->u.mem, out, out_cap, out_len);
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdb, 0u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "filds") == 0) {
+        if (insn->operand_count != 1 || a == NULL) {
+            return -1;
+        }
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdf, 0u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "fildll") == 0) {
+        if (insn->operand_count != 1 || a == NULL) {
+            return -1;
+        }
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdf, 5u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "fistl") == 0) {
+        if (insn->operand_count != 1 || a == NULL) {
+            return -1;
+        }
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdb, 2u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "fistpl") == 0) {
-        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
+        if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
-        return emit_i386_prefixed_1byte_regfield_memop(insn, 0xdb, 3u, &a->u.mem, out, out_cap, out_len);
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdb, 3u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "fists") == 0) {
+        if (insn->operand_count != 1 || a == NULL) {
+            return -1;
+        }
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdf, 2u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "fistps") == 0) {
+        if (insn->operand_count != 1 || a == NULL) {
+            return -1;
+        }
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdf, 3u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "fistpll") == 0) {
+        if (insn->operand_count != 1 || a == NULL) {
+            return -1;
+        }
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdf, 7u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "fisttpl") == 0) {
+        if (insn->operand_count != 1 || a == NULL) {
+            return -1;
+        }
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdb, 1u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "fisttpll") == 0) {
+        if (insn->operand_count != 1 || a == NULL) {
+            return -1;
+        }
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdd, 1u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "fldcw") == 0) {
-        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
+        if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
-        return emit_i386_prefixed_1byte_regfield_memop(insn, 0xd9, 5u, &a->u.mem, out, out_cap, out_len);
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd9, 5u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "fnstcw") == 0) {
-        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
+        if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
-        return emit_i386_prefixed_1byte_regfield_memop(insn, 0xd9, 7u, &a->u.mem, out, out_cap, out_len);
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd9, 7u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "fsts") == 0) {
+        if (insn->operand_count != 1 || a == NULL) {
+            return -1;
+        }
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd9, 2u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "fldenv") == 0) {
+        if (insn->operand_count != 1 || a == NULL) {
+            return -1;
+        }
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd9, 4u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "fnstenv") == 0) {
+        if (insn->operand_count != 1 || a == NULL) {
+            return -1;
+        }
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd9, 6u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "frstor") == 0) {
+        if (insn->operand_count != 1 || a == NULL) {
+            return -1;
+        }
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdd, 4u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "fnsave") == 0) {
+        if (insn->operand_count != 1 || a == NULL) {
+            return -1;
+        }
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdd, 6u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "ficoml") == 0) {
+        if (insn->operand_count != 1 || a == NULL) {
+            return -1;
+        }
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xda, 2u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "ficompl") == 0) {
+        if (insn->operand_count != 1 || a == NULL) {
+            return -1;
+        }
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xda, 3u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "ficoms") == 0) {
+        if (insn->operand_count != 1 || a == NULL) {
+            return -1;
+        }
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xde, 2u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "ficomps") == 0) {
+        if (insn->operand_count != 1 || a == NULL) {
+            return -1;
+        }
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xde, 3u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "pxor") == 0 || strcmp(mnbuf, "movdqa") == 0) {
         unsigned char opcode = strcmp(mnbuf, "pxor") == 0 ? 0xef : 0x6f;
