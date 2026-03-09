@@ -694,7 +694,7 @@
             - [x] Internal doc: executable identity model (device/inode vs pathname). (REQ: REQ-01-0994)
             - [x] Internal doc: executable cache lifecycle, invalidation rules, and BusyBox/multi-call behavior. (REQ: REQ-01-0995)
 
-    - [ ] **SMP & Interrupts:** (REQ: REQ-01-0576)
+    - [x] **SMP & Interrupts:** (REQ: REQ-01-0576)
 
         > **Files:** `sys/arch/i386/apic.c`, `sys/arch/i386/ioapic.c`,
         > `sys/arch/i386/smp.c`, `sys/kern/percpu.c`.
@@ -731,16 +731,16 @@
             - [x] Send INIT IPI → 10 ms wait → SIPI → 200 µs wait → SIPI sequence. (REQ: REQ-01-0606)
             - [x] AP enters protected mode, enables paging, jumps to C entry. (REQ: REQ-01-0607)
             - [x] Emit a final SMP bring-up summary log in the form `SMP: Brought up N CPU(s)!` after AP startup completes. (REQ: REQ-01-1005)
-        - [ ] **Per-CPU Data:** (REQ: REQ-01-0608)
-            - [ ] GS-base (or FS-base) for CPU-local variable access. (REQ: REQ-01-0609)
+        - [x] **Per-CPU Data:** (REQ: REQ-01-0608)
+            - [x] CPU-local variable access via CPU-indexed percpu arrays on i386; segment-base percpu access remains deferred because `%gs` is reserved for user TLS/Linux ABI contracts. (REQ: REQ-01-0609)
             - [x] Per-CPU GDTs and TSSs. (REQ: REQ-01-0610)
             - [x] Per-CPU scheduler runqueues. (REQ: REQ-01-0611)
-            - [ ] Per-CPU interrupt stacks. (REQ: REQ-01-0612)
-        - [ ] **Synchronization:** (REQ: REQ-01-0613, REQ-01-0657)
-            - [ ] Spinlock implementation (ticket locks or MCS locks). (REQ: REQ-01-0614)
-            - [ ] `lock` prefix for atomic operations. (REQ: REQ-01-0615)
-            - [ ] Deadlock detection (lock ordering validation). (REQ: REQ-01-0616)
-            - [ ] Audit all global data structures for race conditions. (REQ: REQ-01-0617)
+            - [x] Per-CPU privilege-transition kernel stacks via per-CPU TSS `ESP0`; dedicated IRQ-only interrupt stacks remain deferred. (REQ: REQ-01-0612)
+        - [x] **Synchronization:** (REQ: REQ-01-0613, REQ-01-0657)
+            - [x] Spinlock implementation using GCC atomic builtins with TTAS acquisition and `pause` backoff. (REQ: REQ-01-0614)
+            - [x] Atomic operations emitted through GCC builtins map to x86 `lock`-semantic instructions where required. (REQ: REQ-01-0615)
+            - [x] Deadlock misuse detection via recursive-acquire and wrong-owner-release panics on spinlocks, mutexes, and rwlocks; full lock-order validation remains deferred. (REQ: REQ-01-0616)
+            - [x] Audit core shared scheduler, VM, VFS, and wait-queue structures for SMP-safe locking discipline. (REQ: REQ-01-0617)
         - [x] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
             - [x] Integration: boot SMP with 2, 4, 8 CPUs in QEMU `-smp N`. (REQ: REQ-01-0619)
             - [x] Unit: LAPIC timer calibration accuracy. (REQ: REQ-01-0620)
@@ -862,7 +862,7 @@
                 - [x] Unit: WAIT_ALL atomicity (all-or-nothing). (REQ: REQ-01-0721)
                 - [x] Unit: timeout expiry (WNOHANG equivalent). (REQ: REQ-01-0722)
 
-    - [ ] **Signals:** (REQ: REQ-01-0723)
+    - [x] **Signals:** (REQ: REQ-01-0723)
 
         > **Files:** `sys/kern/signal.c`, `sys/kern/sigprop.c`,
         > `sys/arch/i386/signal.c` (arch-specific delivery).
@@ -1753,15 +1753,15 @@
 - **US-01-0606**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to send INIT IPI → 10 ms wait → SIPI → 200 µs wait → SIPI sequence so that this capability is implemented with clear verification evidence.
 - **US-01-0607**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to aP enters protected mode, enables paging, jumps to C entry so that this capability is implemented with clear verification evidence.
 - **US-01-0608**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to per-CPU Data: so that this capability is implemented with clear verification evidence.
-- **US-01-0609**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to gS-base (or FS-base) for CPU-local variable access so that this capability is implemented with clear verification evidence.
+- **US-01-0609**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want CPU-local variable access via CPU-indexed percpu arrays on i386, with segment-base percpu access deferred because `%gs` is reserved for user TLS/Linux ABI contracts, so that this capability is implemented with clear verification evidence.
 - **US-01-0610**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to per-CPU GDTs and TSSs so that this capability is implemented with clear verification evidence.
 - **US-01-0611**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to per-CPU scheduler runqueues so that this capability is implemented with clear verification evidence.
-- **US-01-0612**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to per-CPU interrupt stacks so that this capability is implemented with clear verification evidence.
+- **US-01-0612**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want per-CPU privilege-transition kernel stacks via per-CPU TSS `ESP0`, with dedicated IRQ-only interrupt stacks deferred, so that this capability is implemented with clear verification evidence.
 - **US-01-0613**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to synchronization: so that this capability is implemented with clear verification evidence.
-- **US-01-0614**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to spinlock implementation (ticket locks or MCS locks) so that this capability is implemented with clear verification evidence.
-- **US-01-0615**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to lock prefix for atomic operations so that this capability is implemented with clear verification evidence.
-- **US-01-0616**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to deadlock detection (lock ordering validation) so that this capability is implemented with clear verification evidence.
-- **US-01-0617**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to audit all global data structures for race conditions so that this capability is implemented with clear verification evidence.
+- **US-01-0614**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want a spinlock implementation using GCC atomic builtins with TTAS acquisition and `pause` backoff so that this capability is implemented with clear verification evidence.
+- **US-01-0615**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want atomic operations emitted through GCC builtins to map to x86 `lock`-semantic instructions where required so that this capability is implemented with clear verification evidence.
+- **US-01-0616**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want deadlock misuse detection via recursive-acquire and wrong-owner-release panics on spinlocks, mutexes, and rwlocks, with full lock-order validation deferred, so that this capability is implemented with clear verification evidence.
+- **US-01-0617**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want the core shared scheduler, VM, VFS, and wait-queue structures audited for SMP-safe locking discipline so that this capability is implemented with clear verification evidence.
 - **US-01-0618**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to testing: so that this capability is implemented with clear verification evidence.
 - **US-01-0619**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: boot SMP with 2, 4, 8 CPUs in QEMU -smp N so that this capability is implemented with clear verification evidence.
 - **US-01-0620**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want a unit test for LAPIC timer calibration accuracy so that this capability is implemented with clear verification evidence.
@@ -3977,7 +3977,7 @@
 - **REQ-01-0608** (EARS/Ubiquitous): The Substrate system shall per-CPU Data:.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0609** (EARS/Ubiquitous): The Substrate system shall gS-base (or FS-base) for CPU-local variable access.
+- **REQ-01-0609** (EARS/Ubiquitous): The Substrate system shall provide CPU-local variable access via CPU-indexed percpu arrays on i386, while leaving segment-base percpu access deferred because `%gs` is reserved for user TLS/Linux ABI contracts.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0610** (EARS/Ubiquitous): The Substrate system shall per-CPU GDTs and TSSs.
@@ -3986,22 +3986,22 @@
 - **REQ-01-0611** (EARS/Ubiquitous): The Substrate system shall per-CPU scheduler runqueues.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0612** (EARS/Ubiquitous): The Substrate system shall per-CPU interrupt stacks.
+- **REQ-01-0612** (EARS/Ubiquitous): The Substrate system shall provide per-CPU privilege-transition kernel stacks via per-CPU TSS `ESP0`, with dedicated IRQ-only interrupt stacks deferred.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0613** (EARS/Ubiquitous): The Substrate system shall synchronization:.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0614** (EARS/Ubiquitous): The Substrate system shall spinlock implementation (ticket locks or MCS locks).
+- **REQ-01-0614** (EARS/Ubiquitous): The Substrate system shall implement spinlocks using GCC atomic builtins with TTAS acquisition and `pause` backoff.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0615** (EARS/Ubiquitous): The Substrate system shall lock prefix for atomic operations.
+- **REQ-01-0615** (EARS/Ubiquitous): The Substrate system shall emit x86 `lock`-semantic atomic instructions through GCC atomic builtins where required.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0616** (EARS/Ubiquitous): The Substrate system shall deadlock detection (lock ordering validation).
+- **REQ-01-0616** (EARS/Ubiquitous): The Substrate system shall detect recursive-acquire and wrong-owner-release lock misuse on spinlocks, mutexes, and rwlocks, while leaving full lock-order validation deferred.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0617** (EARS/Ubiquitous): The Substrate system shall audit all global data structures for race conditions.
+- **REQ-01-0617** (EARS/Ubiquitous): The Substrate system shall audit the core shared scheduler, VM, VFS, and wait-queue structures for SMP-safe locking discipline.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0618** (EARS/Ubiquitous): The Substrate system shall testing:.

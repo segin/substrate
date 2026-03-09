@@ -8,10 +8,12 @@ Substrate provides a small kernel locking set built from spinlocks, sleepqueue-b
     - `uint32_t locked`: 0 if free, 1 if held.
     - `uint32_t cpu_id`: ID of the core currently holding the lock (for deadlock detection).
     - `const char *name`: Identifier for debugging.
-- **Atomic Operations:** Uses GCC atomic builtins on top of x86 atomic instructions.
+- **Atomic Operations:** Uses GCC atomic builtins on top of x86 atomic instructions. The current spinlock is a test-and-test-and-set lock with `pause` backoff, not a ticket or MCS lock.
 - **Deadlock Detection:**
     - Panic if a CPU attempts to acquire a lock it already holds (recursive acquisition).
-    - (Future) Support for lock ordering and priority inheritance.
+    - Panic if a CPU attempts to release a spinlock it does not own.
+    - Mutexes and rwlocks also reject recursive exclusive acquisition and wrong-owner unlock.
+    - Full lock-order graph validation remains future work.
 
 ## API
 ### `void spinlock_init(spinlock_t *lock, const char *name)`
