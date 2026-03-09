@@ -65,7 +65,9 @@ void test_pmap_large_replace(void) {
 
     // 4. Attempt to replace with Large Page at 0x400000
     // This requires freeing the underlying Page Table
-    uint32_t pa_large = 0x400000; // Align to 4MB
+    void *large_v = pmm_alloc_contiguous(1024);
+    TEST_ASSERT(large_v != 0, "pmm_alloc_contiguous(1024) succeeded");
+    uint32_t pa_large = (uint32_t)(uintptr_t)large_v - 0xC0000000;
     ret = pmap_enter_large(pmap, va, pa_large, VM_PROT_READ | VM_PROT_WRITE, 0);
 
     TEST_ASSERT(ret == 0, "pmap_enter_large should succeed (replace PT)");
@@ -83,6 +85,8 @@ void test_pmap_large_replace(void) {
 
     // 7. Destroy pmap
     pmap_destroy(pmap);
+    pmm_free_block(page_v);
+    pmm_free_contiguous(large_v, 1024);
 
     kprint("  PASS\n");
 }
@@ -224,13 +228,15 @@ void test_pmap_pse(void) {
     kprint("Test: PSE 4MB Mapping\n");
     pmap_t pmap = pmap_create();
     TEST_ASSERT(pmap != 0, "pmap created");
+    void *large_v = pmm_alloc_contiguous(1024);
+    TEST_ASSERT(large_v != 0, "large page backing allocated");
 
     // Activate pmap (required for pmap_enter_large)
     pmap_activate(pmap);
 
     // Try valid 4MB alignment
     uint32_t va = 0x800000; // 8MB
-    uint32_t pa = 0x400000; // 4MB
+    uint32_t pa = (uint32_t)(uintptr_t)large_v - 0xC0000000;
     int ret = pmap_enter_large(pmap, va, pa, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_USER, 0);
     TEST_ASSERT(ret == 0, "pmap_enter_large valid alignment");
 
@@ -245,6 +251,7 @@ void test_pmap_pse(void) {
     pmap_activate(pmap_kernel());
 
     pmap_destroy(pmap);
+    pmm_free_contiguous(large_v, 1024);
     kprint("  PASS\n");
 }
 
@@ -613,13 +620,17 @@ void test_pmap_copy_mixed(void) {
 
 // Test: large page remove path
 void test_pmap_large_remove(void) {
-    kprint("Test: pmap_remove large page\n");
+    kprint("Test: pmap_remove large page demotion\n");
 
     pmap_t pmap = pmap_create();
     TEST_ASSERT(pmap != 0, "pmap created");
 
     uint32_t va = 0x800000;
-    uint32_t pa = 0x400000;
+    void *large_v = pmm_alloc_contiguous(1024);
+    TEST_ASSERT(large_v != 0, "large page backing allocated");
+    uint32_t pa = (uint32_t)(uintptr_t)large_v - 0xC0000000;
+    uint32_t pdi = PD_INDEX(va);
+    uint32_t *pt;
 
     pmap_activate(pmap);
     TEST_ASSERT(pmap_enter_large(pmap, va, pa, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_USER, 0) == 0,
@@ -627,10 +638,51 @@ void test_pmap_large_remove(void) {
     TEST_ASSERT(pmap_extract(pmap, va) == pa, "large mapping visible");
 
     pmap_remove(pmap, va);
-    TEST_ASSERT(pmap_extract(pmap, va) == 0, "large mapping removed");
+    TEST_ASSERT(!(V_PD[pdi] & PTE_PS), "large mapping demoted to PT");
+    TEST_ASSERT(pmap_extract(pmap, va) == 0, "target page removed");
+    TEST_ASSERT(pmap_extract(pmap, va + 0x1000) == pa + 0x1000, "adjacent page preserved");
+
+    pt = V_PT(pdi);
+    TEST_ASSERT(!(pt[PT_INDEX(va)] & PTE_P), "target PTE cleared");
+    TEST_ASSERT(pt[PT_INDEX(va + 0x1000)] & PTE_P, "adjacent PTE still present");
 
     pmap_activate(pmap_kernel());
     pmap_destroy(pmap);
+    pmm_free_contiguous(large_v, 1024);
+    kprint("  PASS\n");
+}
+
+void test_pmap_large_protect_demote(void) {
+    kprint("Test: pmap_protect large page demotion\n");
+
+    pmap_t pmap = pmap_create();
+    TEST_ASSERT(pmap != 0, "pmap created");
+
+    uint32_t va = 0xC00000;
+    void *large_v = pmm_alloc_contiguous(1024);
+    TEST_ASSERT(large_v != 0, "large page backing allocated");
+    uint32_t pa = (uint32_t)(uintptr_t)large_v - 0xC0000000;
+    uint32_t pdi = PD_INDEX(va);
+    uint32_t *pt;
+
+    pmap_activate(pmap);
+    TEST_ASSERT(pmap_enter_large(pmap, va, pa, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_USER, 0) == 0,
+                "large mapping created");
+    TEST_ASSERT(V_PD[pdi] & PTE_PS, "large PDE present before protect");
+
+    TEST_ASSERT(pmap_protect(pmap, va, va + 0x1000, VM_PROT_READ) == 0,
+                "protect succeeded");
+    TEST_ASSERT(!(V_PD[pdi] & PTE_PS), "large mapping demoted on partial protect");
+
+    pt = V_PT(pdi);
+    TEST_ASSERT(!(pt[PT_INDEX(va)] & PTE_W), "target PTE write bit cleared");
+    TEST_ASSERT(pt[PT_INDEX(va + 0x1000)] & PTE_W, "adjacent page remains writable");
+    TEST_ASSERT(pmap_extract(pmap, va) == pa, "target physical mapping preserved");
+    TEST_ASSERT(pmap_extract(pmap, va + 0x1000) == pa + 0x1000, "adjacent physical mapping preserved");
+
+    pmap_activate(pmap_kernel());
+    pmap_destroy(pmap);
+    pmm_free_contiguous(large_v, 1024);
     kprint("  PASS\n");
 }
 
@@ -694,6 +746,7 @@ void run_pmap_tests(void) {
     test_pmap_copy_mixed();
     test_pmap_large_replace();
     test_pmap_large_remove();
+    test_pmap_large_protect_demote();
     test_memory_leak();
     test_pmap_destroy_reclaims_mapped_pages();
     

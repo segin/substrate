@@ -10,6 +10,8 @@ The `pmap` layer is the machine-dependent part of the virtual memory system. It 
 - **Kernel PDE propagation:** i386 pmaps copy kernel PDEs at creation time and `pmap_growkernel()` propagates newly allocated kernel PDEs into already-existing pmaps when kernel mappings expand into a previously unused PDE.
 - **Per-pmap accounting:** i386 pmaps track resident, wired, and mapped page counts plus fault/COW statistics alongside the underlying page-directory state.
 - **Per-page mapping holds:** i386 PMAP insert/remove/fork paths maintain both reverse mappings (`pv_list`) and one `vm_page.ref_count` hold per live mapping. `pmap_destroy()` tears down those mapping holds but does not claim ownership of the underlying data pages.
+- **Large-page support (i386):** i386 supports 4 MB PSE mappings through `pmap_enter_large()`. Partial `pmap_remove()` and `pmap_protect()` operations demote a 4 MB PDE into a normal 1024-entry 4 KB page table before applying the subrange change.
+- **Large-page tracking:** i386 large-page mappings are tracked as 1024 constituent 4 KB mappings for PV/refcount purposes so teardown and later demotion preserve reverse-mapping integrity.
 
 ## API
 ### `void pmap_bootstrap(void)` (i386) / `void pmap_init(void)` (x86_64)
@@ -30,6 +32,10 @@ Switches the CPU to the specified address space (reloads CR3).
 ### `void pmap_growkernel(uintptr_t va)`
 Copies the kernel PDE covering `va` into every existing non-kernel pmap after the kernel allocates a new shared kernel page table.
 
+### `int pmap_enter_large(pmap_t pmap, uint64_t va, uint64_t pa, uint64_t prot, uint32_t flags)`
+Creates a 4 MB i386 PSE mapping when both `va` and `pa` are 4 MB aligned and the target `pmap` is active.
+
 ## Constraints
-- Does not currently support Large Pages (2MB/4MB/1GB).
+- i386 supports 4 MB PSE pages only. Promotion of 1024 4 KB mappings back into a 4 MB mapping is still deferred.
+- x86_64 large-page support (2 MB / 1 GB) remains future work.
 - Recursive paging addresses are hardcoded based on the selected index.

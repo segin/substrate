@@ -52,6 +52,8 @@ static void pmap_reclaim_empty_pt(pmap_t pmap, uint32_t pdi);
 static uint32_t pmap_count_active(void);
 static void pmap_count_map_add(pmap_t pmap, uint32_t pages);
 static void pmap_count_map_remove(pmap_t pmap, uint32_t pages);
+static void pmap_large_track_range(pmap_t pmap, uintptr_t va, uintptr_t pa, int add);
+static int pmap_demote_large_page(pmap_t pmap, uint32_t pdi);
 
 
 // Helper to increment stats (global + pmap)
@@ -126,6 +128,70 @@ static void pmap_count_map_remove(pmap_t pmap, uint32_t pages) {
 
     if (pmap->mapped_count >= pages) pmap->mapped_count -= pages;
     else pmap->mapped_count = 0;
+}
+
+static void pmap_large_track_range(pmap_t pmap, uintptr_t va, uintptr_t pa, int add) {
+    for (uint32_t i = 0; i < 1024; i++) {
+        uintptr_t page_va = va + (i * 0x1000);
+        uintptr_t page_pa = pa + (i * 0x1000);
+        vm_page_t *page = pmm_get_page(page_pa);
+
+        if (!page) {
+            continue;
+        }
+
+        if (add) {
+            vm_page_hold(page);
+            pv_insert(page, pmap, page_va);
+        } else {
+            pv_remove(page, pmap, page_va);
+            vm_page_unhold(page);
+        }
+    }
+}
+
+static int pmap_demote_large_page(pmap_t pmap, uint32_t pdi) {
+    uint32_t pde;
+    uint32_t large_pa;
+    uint32_t pte_flags = PTE_P;
+    void *pt_virt;
+    uint32_t pt_phys;
+    uint32_t *pt;
+
+    if (!pmap) {
+        return -1;
+    }
+
+    pde = V_PD[pdi];
+    if (!(pde & PTE_P) || !(pde & PTE_PS)) {
+        return -1;
+    }
+
+    pt_virt = pmm_alloc_block();
+    if (!pt_virt) {
+        return -1;
+    }
+
+    pt_phys = (uint32_t)(uintptr_t)pt_virt - 0xC0000000;
+    pt = (uint32_t *)pt_virt;
+    large_pa = pde & 0xFFC00000;
+
+    if (pde & PTE_W) pte_flags |= PTE_W;
+    if (pde & PTE_U) pte_flags |= PTE_U;
+    if (pde & PTE_G) pte_flags |= PTE_G;
+    if (pde & PTE_PWT) pte_flags |= PTE_PWT;
+    if (pde & PTE_PCD) pte_flags |= PTE_PCD;
+    if (pde & PTE_A) pte_flags |= PTE_A;
+    if (pde & PTE_D) pte_flags |= PTE_D;
+
+    for (uint32_t i = 0; i < 1024; i++) {
+        pt[i] = (large_pa + (i * 0x1000)) | pte_flags;
+    }
+
+    V_PD[pdi] = pt_phys | PTE_P | PTE_W | ((pde & PTE_U) ? PTE_U : 0);
+    pmap_invalidate_page((uint32_t)V_PT(pdi));
+    pmap_invalidate_page((uintptr_t)pdi << 22);
+    return 0;
 }
 
 void pmap_bootstrap(void) {
@@ -393,6 +459,14 @@ void pmap_destroy(pmap_t pmap) {
     // 2. Free all user page tables (entries 0-767, user space only)
     for (int i = 0; i < 768; i++) {
         if (pd[i] & PTE_P) {
+            if (pd[i] & PTE_PS) {
+                uintptr_t va_base = (uintptr_t)i << 22;
+                uintptr_t pa_base = pd[i] & 0xFFC00000;
+                pmap_large_track_range(pmap, va_base, pa_base, 0);
+                pd[i] = 0;
+                continue;
+            }
+
             // Get page table physical address
             uint32_t pt_phys = pd[i] & ~0xFFF;
             
@@ -765,6 +839,8 @@ void pmap_map_trampoline(void) {
 int pmap_enter_large(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t flags) {
     (void)flags;
     uint32_t removed = 0;
+    uintptr_t old_large_pa = 0;
+    int had_large_mapping = 0;
     
     // Validate alignment (4MB)
     if ((va & 0x3FFFFF) || (pa & 0x3FFFFF)) return -1;
@@ -779,7 +855,8 @@ int pmap_enter_large(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uin
     // Check if existing mapping is conflicting
     if (V_PD[pdi] & PTE_P) {
         if (V_PD[pdi] & PTE_PS) {
-            // Already a large page, just overwrite
+            had_large_mapping = 1;
+            old_large_pa = V_PD[pdi] & 0xFFC00000;
         } else {
             // It's a page table. Replace it with a large page.
             // 1. Get physical address of the page table
@@ -793,12 +870,10 @@ int pmap_enter_large(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uin
                 if (pt[i] & PTE_P) {
                     uint32_t page_phys = pt[i] & PTE_FRAME;
                     removed++;
-
-                    // Validate page address before freeing
-                    // Use vm_phys_free_page via pmm_get_page to handle HighMem and refcounts safely
                     vm_page_t *page = pmm_get_page(page_phys);
                     if (page) {
-                        vm_phys_free_page(page);
+                        pv_remove(page, pmap, va + ((uintptr_t)i * 0x1000));
+                        vm_page_unhold(page);
                     }
                 }
             }
@@ -836,6 +911,12 @@ int pmap_enter_large(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uin
 
     // Write PDE
     V_PD[pdi] = pa | pde_flags;
+    if (had_large_mapping && old_large_pa != pa) {
+        pmap_large_track_range(pmap, va, old_large_pa, 0);
+    }
+    if (!had_large_mapping || old_large_pa != pa) {
+        pmap_large_track_range(pmap, va, pa, 1);
+    }
     
     // Invalidate broad range (4MB) - INVLPG only invalidates one 4KB page usually?
     // Usage of INVLPG on a large page address should invalidate the TLB entry for that large page.
@@ -856,12 +937,9 @@ void pmap_remove(pmap_t pmap, uintptr_t va) {
     
     // Check for Large Page
     if (V_PD[pdi] & PTE_PS) {
-        // Align VA to 4MB boundary for check (optional but safe)
-        // Remove the entire 4MB mapping
-        V_PD[pdi] = 0;
-        pmap_count_map_remove(pmap, 1024);
-        pmap_invalidate_page(va); // INVLPG invalidates the large page entry
-        return;
+        if (pmap_demote_large_page(pmap, pdi) != 0) {
+            return;
+        }
     }
     
     uint32_t *pt = V_PT(pdi);
@@ -980,6 +1058,12 @@ int pmap_protect(pmap_t pmap, uintptr_t sva, uintptr_t eva, uint32_t prot) {
         
         // Skip if page table not present
         if (!(V_PD[pdi] & PTE_P)) continue;
+
+        if (V_PD[pdi] & PTE_PS) {
+            if (pmap_demote_large_page(pmap, pdi) != 0) {
+                return -1;
+            }
+        }
         
         uint32_t *pt = V_PT(pdi);
         
