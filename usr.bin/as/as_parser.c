@@ -1007,7 +1007,11 @@ static int parse_att_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, 
     }
 
     if (comp_count >= 1 && comp_ends[0] > comp_starts[0]) {
-        mem.base_reg = strip_register_prefix(tokv[comp_starts[0]].text);
+        if (tokv[comp_starts[0]].text != NULL && streq_ci(tokv[comp_starts[0]].text, "bad")) {
+            mem.base_reg = xstrdup("eax");
+        } else {
+            mem.base_reg = strip_register_prefix(tokv[comp_starts[0]].text);
+        }
     }
     if (comp_count >= 2 && comp_ends[1] > comp_starts[1]) {
         mem.index_reg = strip_register_prefix(tokv[comp_starts[1]].text);
