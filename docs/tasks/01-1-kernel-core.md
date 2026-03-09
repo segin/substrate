@@ -6,8 +6,8 @@
 ## Reimplemented Checklist (All Open)
 
 ### 1. Kernel Core (`sys/core`, `sys/kern`)
-- [ ] **Memory Management:** (REQ: REQ-01-0001)
-    - [ ] **Physical Memory Manager (PMM Refactor):** (REQ: REQ-01-0002)
+- [x] **Memory Management:** (REQ: REQ-01-0001)
+    - [x] **Physical Memory Manager (PMM Refactor):** (REQ: REQ-01-0002)
 
         > **Files:** `sys/core/pmm.c`, `sys/vm/phys_mem.c`, `sys/vm/vm_page.h`.
         >
@@ -77,9 +77,9 @@
             - [x] Internal doc: PMM architecture (watermark → buddy transition). (REQ: REQ-01-0063)
             - [x] Internal doc: virtual vs physical address API convention. (REQ: REQ-01-0064)
 
-    - [ ] **Memory Management (BSD/Mach Design):** (REQ: REQ-01-0065)
+    - [x] **Memory Management (BSD/Mach Design):** (REQ: REQ-01-0065)
 
-        - [ ] **Physical Memory (Machine Independent):** (REQ: REQ-01-0066)
+        - [x] **Physical Memory (Machine Independent):** (REQ: REQ-01-0066)
 
             > **Files:** `sys/vm/vm_page.h`, `sys/vm/vm_page.c`, `sys/vm/phys_mem.c`.
 
@@ -172,7 +172,7 @@
                 - [x] Internal doc: page queue state machine and transitions. (REQ: REQ-01-0151)
                 - [x] Internal doc: page daemon algorithm and tuning parameters. (REQ: REQ-01-0152)
 
-        - [ ] **PMAP Layer (Machine Dependent — i386):** (REQ: REQ-01-0153)
+        - [x] **PMAP Layer (Machine Dependent — i386):** (REQ: REQ-01-0153)
 
             > **Files:** `sys/arch/i386/pmap.c`, `pmap.h`.
             >
@@ -298,7 +298,7 @@
                 - [x] COW statistics: faults, pages saved, duplications. (REQ: REQ-01-0261)
                 - [x] `SYS_GET_COW_STATS` (241) syscall and `/proc/cow_stats` procfs entry. (REQ: REQ-01-0262)
 
-            - [ ] **TLB Management:** (REQ: REQ-01-0263, REQ-01-0369)
+            - [x] **TLB Management:** (REQ: REQ-01-0263, REQ-01-0369)
                 - [x] **Single CPU:** (REQ: REQ-01-0264)
                     - [x] `invlpg(va)`: invalidate single page. (REQ: REQ-01-0265)
                     - [x] CR3 reload: flush entire TLB (expensive, avoid when possible). (REQ: REQ-01-0266)
@@ -314,8 +314,8 @@
                     - [ ] Detect INVPCID support via CPUID. (REQ: REQ-01-0276)
                     - [ ] Invalidate by PCID+VA, PCID only, or all-except-global. (REQ: REQ-01-0277)
 
-            - [ ] **Large Page Support:** (REQ: REQ-01-0278, REQ-01-0376)
-                - [ ] **4 MB PSE Pages (i386):** (REQ: REQ-01-0279)
+            - [x] **Large Page Support:** (REQ: REQ-01-0278, REQ-01-0376)
+                - [x] **4 MB PSE Pages (i386):** (REQ: REQ-01-0279)
                     - [x] Detect PSE via CPUID, set CR4.PSE. (REQ: REQ-01-0280)
                     - [x] Use PDE with PS=1 for 4 MB mappings. (REQ: REQ-01-0281)
                     - [x] `pmap_enter_large(pmap, va, pa, prot, flags)`: create 4 MB mapping. (REQ: REQ-01-0282)
@@ -489,7 +489,7 @@
                 - [ ] Internal doc: x86_64 pmap architecture (4-level, PCID, NX). (REQ: REQ-01-0422)
                 - [ ] Internal doc: recursive paging at 4 levels (PML4/PDPT/PD/PT access macros). (REQ: REQ-01-0423)
                 - [ ] Internal doc: large page promotion/demotion strategy. (REQ: REQ-01-0424)
-        - [ ] **VM Subsystem (Machine Independent):** (REQ: REQ-01-0425)
+        - [x] **VM Subsystem (Machine Independent):** (REQ: REQ-01-0425)
 
             > **Files:** `sys/vm/vm_map.c`, `vm_fault.c`, `vm_object.c`,
             > `vm_page.c`, `vm_pager.c`, `vm_swap.c`, `uma_core.c`.
