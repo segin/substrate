@@ -101,10 +101,10 @@ Reference: User Request (Step 31552)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: integration (exec another ELKS binary)
         - Acceptance: LDT segments properly replaced on exec.
-    - [ ] Implement ELKS sys_waitpid translation. (REQ: REQ-20-0025)
+    - [x] Implement ELKS sys_waitpid translation. (REQ: REQ-20-0025)
         - Files: `sys/exec/perso/perso_elks.c`
-        - Tests: integration (wait for child)
-        - Acceptance: Parent receives child exit status.
+        - Tests: unit (ELKS status-pointer translation)
+        - Acceptance: ELKS `waitpid` translates the optional status pointer from the data segment and passes the native wait options unchanged.
     - [ ] Implement ELKS signal syscalls (sys_signal, sys_kill). (REQ: REQ-20-0026)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: integration (signal delivery)

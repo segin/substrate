@@ -89,6 +89,23 @@ static int elks_sys_close(uint32_t fd, uint32_t unused1, uint32_t unused2,
     return sys_close((int)fd);
 }
 
+static int elks_sys_waitpid(uint32_t pid, uint32_t status_off, uint32_t options,
+                            uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                            uint32_t unused6, uint32_t unused7) {
+    uintptr_t linear = 0;
+    int *status_ptr = NULL;
+
+    (void)unused3; (void)unused4; (void)unused5; (void)unused6; (void)unused7;
+
+    if (status_off != 0) {
+        if (elks_ds_pointer(status_off, &linear) != 0) {
+            return -EFAULT;
+        }
+        status_ptr = (int *)(uintptr_t)linear;
+    }
+    return sys_waitpid((int)pid, status_ptr, (int)options);
+}
+
 static int elks_sys_brk(uint32_t brk_off, uint32_t unused1, uint32_t unused2,
                         uint32_t unused3, uint32_t unused4, uint32_t unused5,
                         uint32_t unused6, uint32_t unused7) {
@@ -125,7 +142,7 @@ static void *elks_syscall_table[ELKS_SYS_MAX] = {
     [ELKS_SYS_write]   = (void *)&elks_sys_write,
     [ELKS_SYS_open]    = (void *)&elks_sys_open,
     [ELKS_SYS_close]   = (void *)&elks_sys_close,
-    [ELKS_SYS_waitpid] = (void *)&sys_waitpid,
+    [ELKS_SYS_waitpid] = (void *)&elks_sys_waitpid,
     [ELKS_SYS_creat]   = (void *)&sys_creat,
     [ELKS_SYS_link]    = (void *)&sys_link,
     [ELKS_SYS_unlink]  = (void *)&sys_unlink,

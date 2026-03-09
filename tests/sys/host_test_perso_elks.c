@@ -67,7 +67,7 @@ int stub_sys_read(int a, char *b, int c) { last_name = "read"; last_i0 = a; last
 int stub_sys_write(int a, const char *b, int c) { last_name = "write"; last_i0 = a; last_ptr = (uintptr_t)b; last_i1 = c; return 33; }
 int stub_sys_open(const char *a, int b, int c) { last_name = "open"; last_ptr = (uintptr_t)a; last_i0 = b; last_i1 = c; return 44; }
 int stub_sys_close(int a) { last_name = "close"; last_i0 = a; return 55; }
-int stub_sys_waitpid(int a, int *b, int c) { (void)a; (void)b; (void)c; return -1; }
+int stub_sys_waitpid(int a, int *b, int c) { last_name = "waitpid"; last_i0 = a; last_ptr = (uintptr_t)b; last_i1 = c; return 66; }
 int stub_sys_creat(const char *a, int b) { (void)a; (void)b; return -1; }
 int stub_sys_link(const char *a, const char *b) { (void)a; (void)b; return -1; }
 int stub_sys_unlink(const char *a) { (void)a; return -1; }
@@ -160,6 +160,13 @@ int main(void) {
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_close];
     if (fn(9, 0, 0, 0, 0, 0, 0, 0) != 55 || strcmp(last_name, "close") != 0 || last_i0 != 9) {
         fprintf(stderr, "FAIL: ELKS close wrapper wrong\n");
+        return 1;
+    }
+
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_waitpid];
+    if (fn(12, 0x30, 7, 0, 0, 0, 0, 0) != 66 || strcmp(last_name, "waitpid") != 0 ||
+        last_i0 != 12 || last_ptr != 0x30U || last_i1 != 7) {
+        fprintf(stderr, "FAIL: ELKS waitpid wrapper wrong\n");
         return 1;
     }
 
