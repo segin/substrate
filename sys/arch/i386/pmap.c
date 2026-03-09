@@ -254,8 +254,16 @@ void pmap_bootstrap(void) {
             kernel_page_directory[pt_idx] = pt_phys | PTE_P | PTE_W;
         }
 
-        // Also map to Higher Half (0xC0000000+)
-        kernel_page_directory[768 + pt_idx] = pt_phys | PTE_P | PTE_W;
+        // Map the first higher-half 4MB window as a single large page so the
+        // kernel image itself benefits from PSE even while low identity PTs
+        // stay in place for early boot and NULL-page control.
+        if (pt_idx == 0 && has_pse) {
+            kernel_page_directory[768] = 0x00000000 | PTE_P | PTE_W | PTE_PS |
+                ((kernel_pte_flags & PTE_G) ? PTE_G : 0);
+        } else {
+            // Also map to Higher Half (0xC0000000+)
+            kernel_page_directory[768 + pt_idx] = pt_phys | PTE_P | PTE_W;
+        }
     }
     
     // Recursive Mapping: Last entry points to PD itself

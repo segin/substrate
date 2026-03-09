@@ -441,6 +441,27 @@ void test_pge_global_flush(void) {
     kprint("  PASS\n");
 }
 
+void test_kernel_bootstrap_large_page(void) {
+    kprint("Test: kernel bootstrap large page\n");
+
+    uint32_t cr4;
+    __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+
+    if (!(cr4 & 0x10)) {
+        kprint("  SKIP (PSE disabled)\n");
+        return;
+    }
+
+    TEST_ASSERT((pmap_kernel()->pdir[768] & PTE_PS) != 0,
+                "kernel higher-half bootstrap PDE uses 4MB page");
+    TEST_ASSERT((pmap_kernel()->pdir[768] & PTE_FRAME) == 0,
+                "kernel large bootstrap PDE maps physical 0");
+    TEST_ASSERT(pmap_extract(pmap_kernel(), 0xC0100000) == 0x00100000,
+                "kernel text window is reachable through large-page direct map");
+
+    kprint("  PASS\n");
+}
+
 // Test: reference/modify tracking helpers
 void test_pmap_refmod_tracking(void) {
     kprint("Test: pmap ref/modify tracking\n");
@@ -739,6 +760,7 @@ void run_pmap_tests(void) {
     test_pmap_page_refcounts_follow_mappings();
     test_pmap_growkernel_sync();
     test_pge_detection();
+    test_kernel_bootstrap_large_page();
     test_pge_global_flush();
     test_pmap_refmod_tracking();
     test_pmap_protect_rw();

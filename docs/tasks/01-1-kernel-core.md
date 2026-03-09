@@ -320,7 +320,7 @@
                     - [x] Use PDE with PS=1 for 4 MB mappings. (REQ: REQ-01-0281)
                     - [x] `pmap_enter_large(pmap, va, pa, prot, flags)`: create 4 MB mapping. (REQ: REQ-01-0282)
                     - [x] Align VA and PA to 4 MB boundary. (REQ: REQ-01-0283)
-                    - [ ] Use for kernel text/data to reduce TLB pressure. (REQ: REQ-01-0284)
+                    - [x] Use for kernel text/data to reduce TLB pressure. (REQ: REQ-01-0284)
                     - [x] Demotion: split 4 MB page into 1024 × 4 KB on partial unmap/protect. (REQ: REQ-01-0285)
                     - [ ] Promotion: coalesce 1024 aligned 4 KB pages into 4 MB (deferred). (REQ: REQ-01-0286)
                 - [ ] **2 MB / 1 GB Pages (x86_64 — see x86_64 PMAP below).** (REQ: REQ-01-0287)

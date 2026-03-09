@@ -98,6 +98,7 @@ The i386 PMAP implementation is a two-level paging design:
 - per-process user PDEs in slots `0..767`
 - shared kernel PDEs in slots `768..1022`
 - bootstrap direct map of physical `0..1004MB` in the higher half, with PDE 1019 reserved for LAPIC MMIO
+- when PSE is available, the first higher-half 4MB window (`0xC0000000..0xC03FFFFF`) is installed as a single large PDE so the kernel image/text/data execute inside a 4MB mapping from the first paging handoff
 
 Address-space layout is fixed:
 - user virtual address space: `0x00000000..0xBFFFFFFF`
