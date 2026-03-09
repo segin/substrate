@@ -486,9 +486,9 @@
                 - [ ] Property: PML4 entries 256–511 always match `kernel_pmap`. (REQ: REQ-01-0419)
                 - [ ] Integration: boot x86_64 kernel, verify user processes get isolated address spaces. (REQ: REQ-01-0420)
             - [x] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
-                - [ ] Internal doc: x86_64 pmap architecture (4-level, PCID, NX). (REQ: REQ-01-0422)
-                - [ ] Internal doc: recursive paging at 4 levels (PML4/PDPT/PD/PT access macros). (REQ: REQ-01-0423)
-                - [ ] Internal doc: large page promotion/demotion strategy. (REQ: REQ-01-0424)
+                - [x] Internal doc: x86_64 pmap architecture (4-level, PCID, NX). (REQ: REQ-01-0422)
+                - [x] Internal doc: recursive paging at 4 levels (PML4/PDPT/PD/PT access macros). (REQ: REQ-01-0423)
+                - [x] Internal doc: large page promotion/demotion strategy. (REQ: REQ-01-0424)
         - [x] **VM Subsystem (Machine Independent):** (REQ: REQ-01-0425)
 
             > **Files:** `sys/vm/vm_map.c`, `vm_fault.c`, `vm_object.c`,
