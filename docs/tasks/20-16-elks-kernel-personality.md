@@ -164,8 +164,8 @@ Reference: User Request (Step 31552)
         - Acceptance: Unusual patterns (many allocations, odd limits) logged.
 
 - [ ] **Testing & Validation:** (REQ: REQ-20-0041)
-    - [ ] Create ELKS hello world test binary. (REQ: REQ-20-0042)
-        - Files: `tests/elks/hello.S`, `tests/elks/Makefile`
+    - [x] Create ELKS hello world test binary. (REQ: REQ-20-0042)
+        - Files: `tests/elks/hello.S`, `tests/elks/Makefile`, `tests/elks/mkelks.py`
         - Tests: emulation (run in QEMU, verify output)
         - Acceptance: "Hello, ELKS!" printed to console.
     - [ ] Create ELKS sleep test binary. (REQ: REQ-20-0043)

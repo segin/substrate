@@ -39,6 +39,7 @@
 #include <vm/vm_page.h>
 #include <vfs/vfs.h>
 #include <sys/exec.h>
+#include <sys/kern_syscalls.h>
 #include <exec/formats/elf.h>
 #include <fs/procfs.h>
 #include <fs/sysfs.h>
@@ -615,7 +616,7 @@ void kinit_task(void *arg) {
         kprint(init_path);
         kprint("\n");
         char *init_argv[] = { init_path, NULL };
-        if (elf_execve(-1, init_path, init_argv, init_envp) == 0) {
+        if (kern_execve(init_path, init_argv, init_envp) == 0) {
             goto exec_success;
         }
         panic("kinit: Requested init failed.");
@@ -632,7 +633,7 @@ void kinit_task(void *arg) {
     };
     for (int i = 0; init_paths[i] != NULL; i++) {
         char *default_argv[] = { (char *)init_paths[i], NULL };
-        if (elf_execve(-1, init_paths[i], default_argv, init_envp) == 0) {
+        if (kern_execve(init_paths[i], default_argv, init_envp) == 0) {
             goto exec_success;
         }
     }

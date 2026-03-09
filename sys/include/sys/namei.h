@@ -85,6 +85,7 @@ struct nameidata {
  * Initialization macros
  */
 #define NDINIT(ndp, op, flags, segflg, namep) do { \
+    *(ndp) = (struct nameidata){0}; \
     (ndp)->ni_cnd.cn_nameiop = (op); \
     (ndp)->ni_cnd.cn_flags = (flags); \
     (ndp)->ni_segflg = (segflg); \

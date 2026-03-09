@@ -21,6 +21,7 @@ struct thr_param;
 #include <sys/kern_syscalls.h>
 #include <sys/fcntl.h>
 #include <kern/sched.h>
+#include <stdio.h>
 
 static struct exec_binary_handler *exec_handlers = NULL;
 
@@ -131,7 +132,14 @@ int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
         if (h->check && h->check(path, header_buf, len) == 0) {
             // Match found!
             if (h->load) {
-                return h->load(fd, path, argv, envp);
+                int ret = h->load(fd, path, argv, envp);
+                if (ret != 0) {
+                    char buf[96];
+                    snprintf(buf, sizeof(buf), "exec: handler %s failed for %s (%d)\n",
+                             h->name ? h->name : "(unnamed)", path, ret);
+                    kprint(buf);
+                }
+                return ret;
             }
         }
         h = h->next;
@@ -150,6 +158,11 @@ int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
         return elf_execve(fd, path, argv, envp);
     }
 
+    {
+        char buf[96];
+        snprintf(buf, sizeof(buf), "exec: no handler matched %s\n", path);
+        kprint(buf);
+    }
     kern_close(fd);
     return -ENOEXEC;
 }

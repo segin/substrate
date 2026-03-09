@@ -18,6 +18,8 @@
 #include <sys/stat.h>
 #include <sys/fcntl.h>
 #include <kern/panic.h>
+#include <kern/arch.h>
+#include <vm/vm_map.h>
 
 static struct exec_binary_handler elks_handler = {
     .name = "ELKS a.out",
@@ -25,6 +27,17 @@ static struct exec_binary_handler elks_handler = {
     .load = elks_load,
     .next = NULL
 };
+
+static int elks_fail(int fd, int err, const char *msg) {
+    if (msg) {
+        kprint(msg);
+        kprint("\n");
+    }
+    if (fd >= 0) {
+        kern_close(fd);
+    }
+    return err;
+}
 
 void elks_init_handler(void) {
     exec_register_handler(&elks_handler);
@@ -58,44 +71,46 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     struct elks_load_plan plan;
     size_t argv_envp_bytes;
     
+    kprint("ELKS: loading ");
+    kprint(path ? path : "(null)");
+    kprint("\n");
+
+    if (fd >= 0 && fd < MAX_FD && current_process && current_process->fds[fd]) {
+        current_process->fds[fd]->f_offset = 0;
+    } else {
+        kern_lseek(fd, 0, 0);
+    }
     if (kern_read(fd, (char *)&hdr, sizeof(hdr)) != sizeof(hdr)) {
-        kern_close(fd);
-        return -EIO;
+        return elks_fail(fd, -EIO, "ELKS: failed to read executable header");
     }
     memset(&suph, 0, sizeof(suph));
     memset(&plan, 0, sizeof(plan));
     argv_envp_bytes = elks_stack_image_bytes(argv, envp);
     if (argv_envp_bytes > 0xFFFFU) {
-        kern_close(fd);
-        return -E2BIG;
+        return elks_fail(fd, -E2BIG, "ELKS: argv/envp image exceeds 16-bit segment");
     }
     if (!elks_header_recognized(&hdr, sizeof(hdr))) {
-        kern_close(fd);
-        return -ENOEXEC;
+        return elks_fail(fd, -ENOEXEC, "ELKS: header not recognized");
     }
     if (hdr.hlen > sizeof(hdr)) {
         size_t extra = (size_t)hdr.hlen - sizeof(hdr);
 
         if (extra > sizeof(suph)) {
-            kern_close(fd);
-            return -ENOEXEC;
+            return elks_fail(fd, -ENOEXEC, "ELKS: supplemental header too large");
         }
         if (kern_read(fd, (char *)&suph, extra) != (int)extra) {
-            kern_close(fd);
-            return -EIO;
+            return elks_fail(fd, -EIO, "ELKS: failed to read supplemental header");
         }
     }
     if (!elks_build_load_plan(&hdr, &suph, (uint16_t)argv_envp_bytes, &plan)) {
-        kern_close(fd);
-        return -ENOEXEC;
+        return elks_fail(fd, -ENOEXEC, "ELKS: invalid load plan");
     }
     
     // Create new address space
     extern pmap_t pmap_create(void);
     pmap_t pmap = pmap_create();
     if (!pmap) {
-        kern_close(fd);
-        return -ENOMEM;
+        return elks_fail(fd, -ENOMEM, "ELKS: failed to create pmap");
     }
     
     current_process->pmap = (struct pmap*)pmap;
@@ -107,7 +122,9 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
          va < plan.text_base + ((plan.text_limit + 0x0FFFU) & ~0x0FFFU);
          va += 0x1000) {
         void *pa = pmm_alloc_block();
-        if (!pa) return -ENOMEM;
+        if (!pa) {
+            return elks_fail(fd, -ENOMEM, "ELKS: failed to allocate text page");
+        }
         uint32_t pa_phys = (uint32_t)pa - 0xC0000000;
         pmap_enter(pmap, va, pa_phys, VM_PROT_READ | VM_PROT_EXEC | VM_PROT_WRITE, 0);
         memset(pa, 0, 0x1000);
@@ -118,7 +135,9 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
              va < plan.data_base + ((plan.data_limit + 0x0FFFU) & ~0x0FFFU);
              va += 0x1000) {
             void *pa = pmm_alloc_block();
-            if (!pa) return -ENOMEM;
+            if (!pa) {
+                return elks_fail(fd, -ENOMEM, "ELKS: failed to allocate data page");
+            }
             uint32_t pa_phys = (uint32_t)pa - 0xC0000000;
             pmap_enter(pmap, va, pa_phys, VM_PROT_READ | VM_PROT_WRITE, 0);
             memset(pa, 0, 0x1000);
@@ -130,7 +149,9 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
              va < plan.fartext_base + ((plan.fartext_size + 0x0FFFU) & ~0x0FFFU);
              va += 0x1000) {
             void *pa = pmm_alloc_block();
-            if (!pa) return -ENOMEM;
+            if (!pa) {
+                return elks_fail(fd, -ENOMEM, "ELKS: failed to allocate far text page");
+            }
             uint32_t pa_phys = (uint32_t)pa - 0xC0000000;
             pmap_enter(pmap, va, pa_phys, VM_PROT_READ | VM_PROT_EXEC | VM_PROT_WRITE, 0);
             memset(pa, 0, 0x1000);
@@ -141,14 +162,14 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     if (plan.text_size > 0) {
         kern_lseek(fd, (off_t)plan.text_file_offset, 0);
         if (kern_read(fd, (void *)plan.text_base, plan.text_size) != (int)plan.text_size) {
-            return -EIO;
+            return elks_fail(fd, -EIO, "ELKS: failed to read text segment");
         }
     }
 
     if (plan.fartext_size > 0) {
         kern_lseek(fd, (off_t)plan.fartext_file_offset, 0);
         if (kern_read(fd, (void *)plan.fartext_base, plan.fartext_size) != (int)plan.fartext_size) {
-            return -EIO;
+            return elks_fail(fd, -EIO, "ELKS: failed to read far text segment");
         }
     }
 
@@ -157,18 +178,23 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
 
         kern_lseek(fd, (off_t)plan.data_file_offset, 0);
         if (kern_read(fd, (void *)data_load_base, plan.data_size) != (int)plan.data_size) {
-            return -EIO;
+            return elks_fail(fd, -EIO, "ELKS: failed to read data segment");
         }
         memset((void *)(uintptr_t)(data_load_base + plan.data_size), 0, plan.bss_size);
     }
     
     // Setup LDT
     if (elks_setup_segments(current_process, &plan) != 0) {
-        return -ENOMEM;
+        return elks_fail(fd, -ENOMEM, "ELKS: failed to allocate or populate LDT");
     }
     ldt_activate(current_process);
     
     elks_apply_exec_state(current_process, &plan, path);
+    if (current_process->vm_map) {
+        vm_map_destroy(current_process->vm_map);
+    }
+    current_process->vm_map = vm_map_create(pmap, 0, 0xC0000000U);
+    arch_set_kernel_stack((uintptr_t)current_thread->kstack_top);
     
     // Stack setup (simplified for now)
     // 16-bit stack points to end of Data segment
@@ -182,7 +208,7 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     elks_build_segment_layout(&plan, &layout);
     if (!elks_build_stack_image((uint8_t *)(uintptr_t)plan.data_base, &plan,
                                 argv, envp, &initial_sp)) {
-        return -E2BIG;
+        return elks_fail(fd, -E2BIG, "ELKS: failed to build startup stack image");
     }
     user_sp = initial_sp;
 
