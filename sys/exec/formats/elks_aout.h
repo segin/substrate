@@ -4,6 +4,9 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
+#include <exec/perso/personality.h>
+#include <sys/sysinfo.h>
+#include <sys/proc.h>
 #include <sys/ldt.h>
 
 /*
@@ -191,6 +194,31 @@ static inline int elks_build_stack_image(uint8_t *segment,
         *initial_sp_out = sp;
     }
     return 1;
+}
+
+static inline void elks_apply_exec_state(process_t *proc,
+                                         const struct elks_load_plan *plan,
+                                         const char *path) {
+    const char *name = path ? path : "";
+    const char *p;
+
+    if (!proc || !plan) {
+        return;
+    }
+
+    proc->perso_id = PERS_ELKS;
+    proc->bitness = BITNESS_16;
+    proc->brk_start = plan->data_base + plan->brk_offset;
+    proc->brk = proc->brk_start;
+
+    for (p = name; *p; p++) {
+        if (*p == '/') {
+            name = p + 1;
+        }
+    }
+
+    strncpy(proc->comm, name, sizeof(proc->comm) - 1);
+    proc->comm[sizeof(proc->comm) - 1] = '\0';
 }
 
 static inline int elks_header_type_valid(uint32_t type) {

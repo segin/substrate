@@ -172,17 +172,7 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     }
     ldt_activate(current_process);
     
-    // Set Personality and Bitness
-    current_process->perso_id = PERS_ELKS;
-    current_process->bitness = BITNESS_16;
-    
-    current_process->brk_start = plan.data_base + plan.brk_offset;
-    current_process->brk = current_process->brk_start;
-    
-    // Set up process name
-    const char *name = path;
-    for (const char *p = path; *p; p++) if (*p == '/') name = p + 1;
-    strncpy(current_process->comm, name, sizeof(current_process->comm) - 1);
+    elks_apply_exec_state(current_process, &plan, path);
     
     // Stack setup (simplified for now)
     // 16-bit stack points to end of Data segment

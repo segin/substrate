@@ -67,10 +67,10 @@ Reference: User Request (Step 31552)
         - Files: `sys/exec/formats/elks_aout.c`, `sys/exec/formats/elks_aout.h`
         - Tests: unit (ELKS startup stack image)
         - Acceptance: ELKS startup stack contains correct `argc`, `argv`, and `envp` arrays as 16-bit offsets relative to `DS`.
-    - [ ] Set process bitness to BITNESS_16 on ELKS exec. (REQ: REQ-20-0016)
-        - Files: `sys/fs/exec/elks_aout.c`
-        - Tests: unit (verify bitness field after exec)
-        - Acceptance: `current_process->bitness == BITNESS_16` after ELKS load.
+    - [x] Set process bitness to BITNESS_16 on ELKS exec. (REQ: REQ-20-0016)
+        - Files: `sys/exec/formats/elks_aout.c`, `sys/exec/formats/elks_aout.h`
+        - Tests: unit (verify ELKS exec state helper)
+        - Acceptance: ELKS exec applies `PERS_ELKS`, `BITNESS_16`, the initial `brk`, and the basename-derived process name before userspace handoff.
 
 - [ ] **Runtime Support & Syscall Translation:** (REQ: REQ-20-0017)
     - [ ] Implement ELKS syscall dispatcher. (REQ: REQ-20-0018)
