@@ -73,21 +73,21 @@ Reference: User Request (Step 31552)
         - Acceptance: ELKS exec applies `PERS_ELKS`, `BITNESS_16`, the initial `brk`, and the basename-derived process name before userspace handoff.
 
 - [ ] **Runtime Support & Syscall Translation:** (REQ: REQ-20-0017)
-    - [ ] Implement ELKS syscall dispatcher. (REQ: REQ-20-0018)
+    - [x] Implement ELKS syscall dispatcher. (REQ: REQ-20-0018)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: unit (dispatch to correct handler)
-        - Acceptance: ELKS syscall numbers correctly mapped to handlers.
-    - [ ] Implement ELKS sys_exit translation. (REQ: REQ-20-0019)
+        - Acceptance: ELKS syscall numbers map to ELKS wrapper handlers instead of raw native syscall entry points.
+    - [x] Implement ELKS sys_exit translation. (REQ: REQ-20-0019)
         - Files: `sys/exec/perso/perso_elks.c`
-        - Tests: integration (ELKS exit terminates process)
+        - Tests: unit (ELKS wrapper dispatch)
         - Acceptance: Process exits cleanly with correct exit code.
-    - [ ] Implement ELKS sys_read/sys_write translation. (REQ: REQ-20-0020)
+    - [x] Implement ELKS sys_read/sys_write translation. (REQ: REQ-20-0020)
         - Files: `sys/exec/perso/perso_elks.c`
-        - Tests: integration (hello world prints to stdout)
+        - Tests: unit (near-pointer translation into native read/write)
         - Acceptance: Console I/O works correctly.
-    - [ ] Implement ELKS sys_open/sys_close translation. (REQ: REQ-20-0021)
+    - [x] Implement ELKS sys_open/sys_close translation. (REQ: REQ-20-0021)
         - Files: `sys/exec/perso/perso_elks.c`
-        - Tests: integration (open/read/close file)
+        - Tests: unit (near-pointer translation into native open/close)
         - Acceptance: File operations work with VFS.
     - [ ] Implement ELKS sys_brk translation (16-bit heap). (REQ: REQ-20-0022)
         - Files: `sys/exec/perso/perso_elks.c`

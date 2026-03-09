@@ -37,7 +37,7 @@ struct process;
 void ldt_init_process(struct process *proc);
 void ldt_free_process(struct process *proc);
 void ldt_activate(struct process *proc);
-int sys_modify_ldt(int func, struct user_desc *ptr, unsigned long bytecount);
+int sys_modify_ldt(int func, void *ptr, unsigned long bytecount);
 void fill_ldt_entry(void *entry, struct user_desc *info);
 
 static inline uint32_t ldt_entry_base(const void *entry_ptr) {

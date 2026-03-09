@@ -85,7 +85,7 @@ void fill_ldt_entry(void *entry_ptr, struct user_desc *info) {
     entry->access = access;
 }
 
-int sys_modify_ldt(int func, struct user_desc *ptr, unsigned long bytecount) {
+int sys_modify_ldt(int func, void *ptr, unsigned long bytecount) {
     if (func == LDT_READ) {
         unsigned int actual_size = current_process->ldt_entry_count * LDT_ENTRY_SIZE;
         unsigned int copy_size = (bytecount < actual_size) ? bytecount : actual_size;

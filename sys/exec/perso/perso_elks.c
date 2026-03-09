@@ -1,19 +1,84 @@
 #include <exec/perso/personality.h>
 #include <exec/perso/elks_syscall_table.h>
+#include <exec/formats/elks_aout.h>
 #include <sys/errno.h>
 #include <sys/syscall_impl.h>
+#include <sys/ldt.h>
 #include <kern/console.h>
 #include <sys/proc.h>
 #include <string.h>
 
+static int elks_ds_pointer(uint32_t offset, uintptr_t *linear_out) {
+    if (!current_process || !current_process->ldt) {
+        return -EFAULT;
+    }
+    return ldt_translate_selector_offset(current_process->ldt,
+                                         (unsigned int)current_process->ldt_entry_count,
+                                         (uint16_t)((ELKS_LDT_DS_INDEX << 3) | 4U | 3U),
+                                         (uint16_t)offset,
+                                         linear_out);
+}
+
+static int elks_sys_exit(uint32_t status, uint32_t unused1, uint32_t unused2,
+                         uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                         uint32_t unused6, uint32_t unused7) {
+    (void)unused1; (void)unused2; (void)unused3; (void)unused4;
+    (void)unused5; (void)unused6; (void)unused7;
+    return sys_exit((int)status);
+}
+
+static int elks_sys_read(uint32_t fd, uint32_t buf_off, uint32_t count,
+                         uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                         uint32_t unused6, uint32_t unused7) {
+    uintptr_t linear = 0;
+    (void)unused3; (void)unused4; (void)unused5; (void)unused6; (void)unused7;
+
+    if (elks_ds_pointer(buf_off, &linear) != 0) {
+        return -EFAULT;
+    }
+    return sys_read((int)fd, (char *)(uintptr_t)linear, (int)count);
+}
+
+static int elks_sys_write(uint32_t fd, uint32_t buf_off, uint32_t count,
+                          uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                          uint32_t unused6, uint32_t unused7) {
+    uintptr_t linear = 0;
+    (void)unused3; (void)unused4; (void)unused5; (void)unused6; (void)unused7;
+
+    if (elks_ds_pointer(buf_off, &linear) != 0) {
+        return -EFAULT;
+    }
+    return sys_write((int)fd, (const char *)(uintptr_t)linear, (int)count);
+}
+
+static int elks_sys_open(uint32_t path_off, uint32_t flags, uint32_t mode,
+                         uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                         uint32_t unused6, uint32_t unused7) {
+    uintptr_t linear = 0;
+    (void)unused3; (void)unused4; (void)unused5; (void)unused6; (void)unused7;
+
+    if (elks_ds_pointer(path_off, &linear) != 0) {
+        return -EFAULT;
+    }
+    return sys_open((const char *)(uintptr_t)linear, (int)flags, (int)mode);
+}
+
+static int elks_sys_close(uint32_t fd, uint32_t unused1, uint32_t unused2,
+                          uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                          uint32_t unused6, uint32_t unused7) {
+    (void)unused1; (void)unused2; (void)unused3; (void)unused4;
+    (void)unused5; (void)unused6; (void)unused7;
+    return sys_close((int)fd);
+}
+
 /* ELKS Syscall Table */
 static void *elks_syscall_table[ELKS_SYS_MAX] = {
-    [ELKS_SYS_exit]    = (void *)&sys_exit,
+    [ELKS_SYS_exit]    = (void *)&elks_sys_exit,
     [ELKS_SYS_fork]    = (void *)&sys_fork,
-    [ELKS_SYS_read]    = (void *)&sys_read,
-    [ELKS_SYS_write]   = (void *)&sys_write,
-    [ELKS_SYS_open]    = (void *)&sys_open,
-    [ELKS_SYS_close]   = (void *)&sys_close,
+    [ELKS_SYS_read]    = (void *)&elks_sys_read,
+    [ELKS_SYS_write]   = (void *)&elks_sys_write,
+    [ELKS_SYS_open]    = (void *)&elks_sys_open,
+    [ELKS_SYS_close]   = (void *)&elks_sys_close,
     [ELKS_SYS_waitpid] = (void *)&sys_waitpid,
     [ELKS_SYS_creat]   = (void *)&sys_creat,
     [ELKS_SYS_link]    = (void *)&sys_link,
