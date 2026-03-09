@@ -24,6 +24,7 @@ static jmp_buf exit_jmp;
 static int yielded;
 static int vm_map_destroy_calls;
 static int kmalloc_calls;
+static int ldt_free_calls;
 
 void mutex_init(mutex_t *m, const char *name) { (void)m; (void)name; }
 void mutex_lock(mutex_t *m) { (void)m; }
@@ -52,6 +53,27 @@ void kprint(const char *msg) { (void)msg; }
 void host_wait_for_interrupt(void) { longjmp(exit_jmp, 2); }
 void *kmalloc(size_t size) { (void)size; kmalloc_calls++; return NULL; }
 void kfree(void *ptr, size_t size) { (void)ptr; (void)size; }
+void ldt_init_process(process_t *p) {
+    if (p) {
+        p->ldt = NULL;
+        p->ldt_entry_count = 0;
+    }
+}
+int ldt_clone_process(process_t *dst, const process_t *src) {
+    if (!dst || !src) {
+        return -1;
+    }
+    dst->ldt = src->ldt ? (void *)0xD1D10000 : NULL;
+    dst->ldt_entry_count = src->ldt ? src->ldt_entry_count : 0;
+    return 0;
+}
+void ldt_free_process(process_t *p) {
+    if (p && p->ldt) {
+        ldt_free_calls++;
+        p->ldt = NULL;
+        p->ldt_entry_count = 0;
+    }
+}
 
 pmap_t pmap_kernel(void) { return (pmap_t)0xCAFE0000; }
 pmap_t pmap_fork(pmap_t src) { return src; }
@@ -112,6 +134,7 @@ static void reset_env(void) {
     yielded = 0;
     vm_map_destroy_calls = 0;
     kmalloc_calls = 0;
+    ldt_free_calls = 0;
     current_process = NULL;
     current_thread = NULL;
     kernel_process = NULL;
@@ -162,15 +185,19 @@ static void test_no_zombie_leaks_after_reap_cycles(void) {
         child->p_parent = parent;
         child->vm_map = (vm_map_t *)(uintptr_t)(0x1000 + i);
         child->pmap = (pmap_t)(uintptr_t)(0x2000 + i);
+        child->ldt = (void *)(uintptr_t)(0x3000 + i);
+        child->ldt_entry_count = 4;
         parent->p_children = child;
 
         assert(kern_wait4(-1, &status, 0, NULL) == expected_pid);
         assert(WEXITSTATUS(status) == i);
         assert(parent->p_children == NULL);
         assert(child->pid == -1);
+        assert(child->ldt == NULL);
     }
 
     assert(kmalloc_calls == 0);
+    assert(ldt_free_calls == 8);
 }
 
 static void test_no_zombie_leaks_after_autoreap_cycles(void) {
@@ -187,6 +214,8 @@ static void test_no_zombie_leaks_after_autoreap_cycles(void) {
         child->p_parent = parent;
         child->vm_map = (vm_map_t *)(uintptr_t)(0x3000 + i);
         child->pmap = (pmap_t)(uintptr_t)(0x4000 + i);
+        child->ldt = (void *)(uintptr_t)(0x5000 + i);
+        child->ldt_entry_count = 4;
         parent->p_children = child;
         current_process = child;
         current_thread = child_thread;
@@ -205,9 +234,11 @@ static void test_no_zombie_leaks_after_autoreap_cycles(void) {
         assert(parent->p_children == NULL);
         assert(child->pid == -1);
         assert(child_thread->tid == -1);
+        assert(child->ldt == NULL);
     }
 
     assert(kmalloc_calls == 0);
+    assert(ldt_free_calls == 8);
 }
 
 static void test_waitpid_job_control_lifecycle(void) {

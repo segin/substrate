@@ -138,10 +138,10 @@ Reference: User Request (Step 31552)
         - Acceptance: Core dump includes 16-bit register state and segment info.
 
 - [ ] **Safety & Cleanup (LDT Lifecycle):** (REQ: REQ-20-0034)
-    - [ ] Implement LDT cleanup on process exit. (REQ: REQ-20-0035)
+    - [x] Implement LDT cleanup on the process exit-to-reap path. (REQ: REQ-20-0035)
         - Files: `sys/arch/i386/ldt.c`, `sys/pm/process.c`
-        - Tests: unit (no leaked LDT entries after exit)
-        - Acceptance: All LDT entries freed when ELKS process exits.
+        - Tests: unit (no leaked LDT entries after exit/reap)
+        - Acceptance: All LDT entries freed when an ELKS process completes the exit/reap lifecycle.
     - [x] Implement LDT duplication on fork. (REQ: REQ-20-0036)
         - Files: `sys/arch/i386/ldt.c`, `sys/pm/fork.c`
         - Tests: unit (child gets copy of LDT)
@@ -439,7 +439,7 @@ Reference: User Request (Step 31552)
 - **REQ-20-0034** (EARS/Ubiquitous): The Substrate system shall safety & Cleanup (LDT Lifecycle):.
   - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-20-0035** (EARS/Ubiquitous): The Substrate system shall implement LDT cleanup on process exit.
+- **REQ-20-0035** (EARS/Ubiquitous): The Substrate system shall implement LDT cleanup on the process exit-to-reap path.
   - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-20-0036** (EARS/Ubiquitous): The Substrate system shall implement LDT duplication on fork.
