@@ -566,15 +566,15 @@
                     - [x] Dirty page tracking and `msync` writeback. (REQ: REQ-01-0492)
                     - [x] `MAP_PRIVATE`: COW on write (shadow object). (REQ: REQ-01-0493)
                     - [x] `MAP_SHARED`: write-through to file. (REQ: REQ-01-0494)
-                - [ ] **Reference Counting & Shared Memory:** (REQ: REQ-01-0495)
+                - [x] **Reference Counting & Shared Memory:** (REQ: REQ-01-0495)
                     - [x] `vm_page_t` refcounts: track mappings to each physical frame. (REQ: REQ-01-0496)
                     - [x] `vm_object` refcounts: track regions sharing backing store. (REQ: REQ-01-0497)
                     - [x] `MAP_SHARED` write-through for multi-process shared memory. (REQ: REQ-01-0498)
-            - [ ] **Lazy Faulting:** (REQ: REQ-01-0499)
+            - [x] **Lazy Faulting:** (REQ: REQ-01-0499)
                     - [x] Demand paging: allocate frames only on access (zero-fill on demand). (REQ: REQ-01-0500)
                     - [x] Prefaulting: heuristic to load surrounding pages during I/O. (REQ: REQ-01-0466, REQ-01-0501)
-                    - [ ] Read-ahead for sequential file access patterns. (REQ: REQ-01-0502)
-            - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+                    - [x] Simple read-ahead: prefetch the next pager-backed page on sequential faults when available. (REQ: REQ-01-0502)
+            - [x] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
                 - [x] Unit: vm_map insert/remove/lookup/protect. (REQ: REQ-01-0504)
                 - [x] Unit: vm_object create/reference/deallocate/shadow/collapse. (REQ: REQ-01-0505)
                 - [x] Unit: vm_fault resolution for anonymous, file-backed, and COW pages. (REQ: REQ-01-0506)
@@ -3656,7 +3656,7 @@
 - **REQ-01-0501** (EARS/Ubiquitous): The Substrate system shall prefaulting: heuristic to load surrounding pages during I/O.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0502** (EARS/Ubiquitous): The Substrate system shall read-ahead for sequential file access patterns.
+- **REQ-01-0502** (EARS/Ubiquitous): The Substrate system shall prefetch the next pager-backed page on sequential faults when it is available from the backing object.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0503** (EARS/Ubiquitous): The Substrate system shall testing:.
