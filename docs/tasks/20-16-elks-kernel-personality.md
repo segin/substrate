@@ -176,12 +176,12 @@ Reference: User Request (Step 31552)
         - Files: `tests/elks/fileio.S`, `tests/elks/Makefile`
         - Tests: emulation (run in QEMU, verify file created)
         - Acceptance: File created, written, read, and deleted correctly.
-    - [ ] Create ELKS fork test binary. (REQ: REQ-20-0045)
-        - Files: `tests/elks/fork.c`, `tests/elks/Makefile`
+    - [x] Create ELKS fork test binary. (REQ: REQ-20-0045)
+        - Files: `tests/elks/fork.S`, `tests/elks/Makefile`
         - Tests: emulation (run in QEMU)
         - Acceptance: Parent and child both print distinct messages.
-    - [ ] Create automated test harness for ELKS binaries. (REQ: REQ-20-0046)
-        - Files: `tests/elks/run_tests.sh`, `tests/elks/harness.c`
+    - [x] Create automated test harness for ELKS binaries. (REQ: REQ-20-0046)
+        - Files: `tests/elks/run_tests.sh`
         - Tests: CI integration
         - Acceptance: All ELKS tests pass in automated pipeline.
     - [ ] Add ELKS syscall fuzzing tests. (REQ: REQ-20-0047)

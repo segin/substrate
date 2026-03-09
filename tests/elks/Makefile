@@ -6,7 +6,7 @@ OBJCOPY = ia16-elf-objcopy
 ELKS_BUILD = $(CURDIR)/build
 MKELKS = $(CURDIR)/mkelks.py
 
-PROGRAMS = hello_elks sleep_elks fileio_elks
+PROGRAMS = hello_elks sleep_elks fileio_elks fork_elks
 
 .PHONY: all clean
 
