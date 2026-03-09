@@ -52,6 +52,7 @@ typedef struct {
 static const char *first_symbol_in_expr(const as_expr_t *e);
 static int parse_symbol_addend_arg(const char *arg, char **sym_out, int64_t *add_out);
 static as_x86_seg_t map_seg(const char *s);
+static int emit_seg_override_byte(unsigned char *out, size_t out_cap, size_t *pos_io, const char *segment_reg);
 
 static void set_err(emit_ctx_t *ctx, const char *fmt, ...) {
     va_list ap;
@@ -596,9 +597,6 @@ static int emit_i386_modrm_rm_operand(unsigned reg_field, const as_operand_t *rm
         int has_disp = 0;
         long long disp = 0;
 
-        if (mem->segment_reg != NULL) {
-            return -1;
-        }
         if (mem->base_reg != NULL) {
             if (parse_x86_reg(mem->base_reg, &base) != 0 || ((unsigned)base & 8u) != 0u) {
                 return -1;
@@ -704,9 +702,18 @@ static int emit_i386_prefixed_0f_rm(unsigned char prefix, unsigned char opcode2,
                                     const as_operand_t *rm_op, unsigned char *out,
                                     size_t out_cap, size_t *out_len) {
     size_t pos = 0;
+    const char *seg_override = NULL;
 
     if (out == NULL || out_len == NULL || rm_op == NULL || out_cap < 8) {
         return -1;
+    }
+    if (rm_op->kind == AS_OPERAND_MEMORY) {
+        seg_override = rm_op->u.mem.segment_reg;
+    }
+    if (seg_override != NULL) {
+        if (emit_seg_override_byte(out, out_cap, &pos, seg_override) != 0) {
+            return -1;
+        }
     }
     if (prefix != 0) {
         out[pos++] = prefix;
@@ -1488,12 +1495,21 @@ static int emit_i386_stmt_prefixes(const as_instruction_t *insn, unsigned char *
 static int emit_i386_prefixed_1byte_rm(const as_instruction_t *insn, unsigned char opcode, unsigned reg_field,
                                        const as_operand_t *rm_op, unsigned char *out, size_t out_cap, size_t *out_len) {
     size_t pos = 0;
+    const char *seg_override = NULL;
 
     if (insn == NULL || rm_op == NULL || out == NULL || out_len == NULL) {
         return -1;
     }
     if (emit_i386_stmt_prefixes(insn, out, out_cap, &pos) != 0) {
         return -1;
+    }
+    if (rm_op->kind == AS_OPERAND_MEMORY && insn->segment_override == NULL) {
+        seg_override = rm_op->u.mem.segment_reg;
+    }
+    if (seg_override != NULL) {
+        if (emit_seg_override_byte(out, out_cap, &pos, seg_override) != 0) {
+            return -1;
+        }
     }
     if (pos >= out_cap) {
         return -1;
@@ -1659,6 +1675,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
     unsigned xr;
     unsigned xm;
     unsigned stidx;
+    unsigned stsrc;
+    unsigned stdst;
 
     if (out_len != NULL) {
         *out_len = 0;
@@ -1805,12 +1823,85 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return 0;
     }
+    if (strcmp(mnbuf, "fld") == 0) {
+        if (insn->operand_count != 1 || a == NULL || operand_st_index(a, &stidx) != 0) {
+            return -1;
+        }
+        out[0] = 0xd9;
+        out[1] = (unsigned char)(0xc0u + (stidx & 7u));
+        if (out_len != NULL) *out_len = 2;
+        return 0;
+    }
+    if (strcmp(mnbuf, "fxch") == 0) {
+        if (insn->operand_count != 1 || a == NULL || operand_st_index(a, &stidx) != 0) {
+            return -1;
+        }
+        out[0] = 0xd9;
+        out[1] = (unsigned char)(0xc8u + (stidx & 7u));
+        if (out_len != NULL) *out_len = 2;
+        return 0;
+    }
+    if (strcmp(mnbuf, "fnop") == 0 || strcmp(mnbuf, "fchs") == 0 || strcmp(mnbuf, "f2xm1") == 0 || strcmp(mnbuf, "fprem") == 0) {
+        unsigned char op2;
+        if (insn->operand_count != 0) {
+            return -1;
+        }
+        if (strcmp(mnbuf, "fnop") == 0) op2 = 0xd0;
+        else if (strcmp(mnbuf, "fchs") == 0) op2 = 0xe0;
+        else if (strcmp(mnbuf, "f2xm1") == 0) op2 = 0xf0;
+        else op2 = 0xf8;
+        out[0] = 0xd9;
+        out[1] = op2;
+        if (out_len != NULL) *out_len = 2;
+        return 0;
+    }
+    if (strcmp(mnbuf, "fcmovb") == 0 || strcmp(mnbuf, "fcmove") == 0 || strcmp(mnbuf, "fcmovbe") == 0 || strcmp(mnbuf, "fcmovu") == 0 ||
+        strcmp(mnbuf, "fcmovnb") == 0 || strcmp(mnbuf, "fcmovne") == 0 || strcmp(mnbuf, "fcmovnbe") == 0 || strcmp(mnbuf, "fcmovnu") == 0 ||
+        strcmp(mnbuf, "fucomi") == 0 || strcmp(mnbuf, "fcomi") == 0) {
+        unsigned char op1;
+        unsigned char base;
+        if (insn->operand_count != 2 || a == NULL || b == NULL || operand_st_index(a, &stsrc) != 0 || operand_st_index(b, &stdst) != 0 ||
+            stdst != 0) {
+            return -1;
+        }
+        if (strcmp(mnbuf, "fcmovb") == 0) { op1 = 0xda; base = 0xc0; }
+        else if (strcmp(mnbuf, "fcmove") == 0) { op1 = 0xda; base = 0xc8; }
+        else if (strcmp(mnbuf, "fcmovbe") == 0) { op1 = 0xda; base = 0xd0; }
+        else if (strcmp(mnbuf, "fcmovu") == 0) { op1 = 0xda; base = 0xd8; }
+        else if (strcmp(mnbuf, "fcmovnb") == 0) { op1 = 0xdb; base = 0xc0; }
+        else if (strcmp(mnbuf, "fcmovne") == 0) { op1 = 0xdb; base = 0xc8; }
+        else if (strcmp(mnbuf, "fcmovnbe") == 0) { op1 = 0xdb; base = 0xd0; }
+        else if (strcmp(mnbuf, "fcmovnu") == 0) { op1 = 0xdb; base = 0xd8; }
+        else if (strcmp(mnbuf, "fucomi") == 0) { op1 = 0xdb; base = 0xe8; }
+        else { op1 = 0xdb; base = 0xf0; }
+        out[0] = op1;
+        out[1] = (unsigned char)(base + (stsrc & 7u));
+        if (out_len != NULL) *out_len = 2;
+        return 0;
+    }
     if (strcmp(mnbuf, "fadd") == 0 || strcmp(mnbuf, "fmul") == 0 || strcmp(mnbuf, "fcom") == 0 || strcmp(mnbuf, "fcomp") == 0 ||
         strcmp(mnbuf, "fsub") == 0 || strcmp(mnbuf, "fsubr") == 0 || strcmp(mnbuf, "fdiv") == 0 || strcmp(mnbuf, "fdivr") == 0) {
         unsigned stsrc;
         unsigned stdst;
         unsigned char base;
-
+        if (insn->operand_count == 1 && a != NULL) {
+            if (operand_st_index(a, &stsrc) != 0) {
+                return -1;
+            }
+            if (strcmp(mnbuf, "fcom") == 0) {
+                out[0] = 0xd8;
+                out[1] = (unsigned char)(0xd0u + (stsrc & 7u));
+                if (out_len != NULL) *out_len = 2;
+                return 0;
+            }
+            if (strcmp(mnbuf, "fcomp") == 0) {
+                out[0] = 0xd8;
+                out[1] = (unsigned char)(0xd8u + (stsrc & 7u));
+                if (out_len != NULL) *out_len = 2;
+                return 0;
+            }
+            return -1;
+        }
         if (insn->operand_count != 2 || a == NULL || b == NULL || operand_st_index(a, &stsrc) != 0 || operand_st_index(b, &stdst) != 0 ||
             stdst != 0) {
             return -1;
@@ -1840,6 +1931,20 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (out_len != NULL) {
             *out_len = 2;
         }
+        return 0;
+    }
+    if (strcmp(mnbuf, "ffree") == 0 || strcmp(mnbuf, "fst") == 0 || strcmp(mnbuf, "fucom") == 0 || strcmp(mnbuf, "fucomp") == 0) {
+        unsigned char base;
+        if (insn->operand_count != 1 || a == NULL || operand_st_index(a, &stidx) != 0) {
+            return -1;
+        }
+        if (strcmp(mnbuf, "ffree") == 0) base = 0xc0;
+        else if (strcmp(mnbuf, "fst") == 0) base = 0xd0;
+        else if (strcmp(mnbuf, "fucom") == 0) base = 0xe0;
+        else base = 0xe8;
+        out[0] = 0xdd;
+        out[1] = (unsigned char)(base + (stidx & 7u));
+        if (out_len != NULL) *out_len = 2;
         return 0;
     }
     if (strcmp(mnbuf, "fucompp") == 0) {
@@ -2097,6 +2202,30 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             return -1;
         }
         return emit_i386_prefixed_1byte_x87_mem(insn, 0xd9, 6u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "fiaddl") == 0) {
+        if (insn->operand_count != 1 || a == NULL) return -1;
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xda, 0u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "fimull") == 0) {
+        if (insn->operand_count != 1 || a == NULL) return -1;
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xda, 1u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "fisubl") == 0) {
+        if (insn->operand_count != 1 || a == NULL) return -1;
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xda, 4u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "fisubrl") == 0) {
+        if (insn->operand_count != 1 || a == NULL) return -1;
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xda, 5u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "fidivl") == 0) {
+        if (insn->operand_count != 1 || a == NULL) return -1;
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xda, 6u, a, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "fidivrl") == 0) {
+        if (insn->operand_count != 1 || a == NULL) return -1;
+        return emit_i386_prefixed_1byte_x87_mem(insn, 0xda, 7u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "frstor") == 0) {
         if (insn->operand_count != 1 || a == NULL) {
