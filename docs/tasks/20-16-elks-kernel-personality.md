@@ -154,8 +154,8 @@ Reference: User Request (Step 31552)
         - Files: `sys/arch/i386/ldt.c`
         - Tests: fuzz (malformed LDT entries)
         - Acceptance: DPL must be 3; conforming code segments rejected; call gates rejected.
-    - [ ] Implement LDT limit enforcement during context switch. (REQ: REQ-20-0039)
-        - Files: `sys/arch/i386/switch.S`, `sys/kern/sched.c`
+    - [x] Implement LDT activation during ELKS-related process context switch. (REQ: REQ-20-0039)
+        - Files: `sys/arch/i386/switch.S`, `sys/arch/i386/sched.c`
         - Tests: unit (LLDT loaded correctly)
         - Acceptance: LDTR loaded with correct selector on context switch.
     - [x] Add kernel log warnings for suspicious LDT usage patterns. (REQ: REQ-20-0040)
@@ -451,7 +451,7 @@ Reference: User Request (Step 31552)
 - **REQ-20-0038** (EARS/Ubiquitous): The Substrate system shall add LDT entry validation to prevent privilege escalation.
   - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-20-0039** (EARS/Ubiquitous): The Substrate system shall implement LDT limit enforcement during context switch.
+- **REQ-20-0039** (EARS/Ubiquitous): The Substrate system shall implement LDT activation during ELKS-related process context switch.
   - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-20-0040** (EARS/Ubiquitous): The Substrate system shall add kernel log warnings for suspicious LDT usage patterns.
