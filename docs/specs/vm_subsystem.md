@@ -154,3 +154,21 @@ Current design note:
 
 - the machine-independent VM path supports shadow objects and pager-backed faults
 - `vm_map_fork()` currently implements COW by sharing the backing object and downgrading parent protections rather than constructing a new shadow object per entry during fork
+
+## User Memory Syscall Contract
+
+Current `sys_mmap()` behavior in `sys/vm/vm_syscalls.c`:
+
+- lengths are rounded up to page size before insertion
+- `MAP_FIXED` requires a page-aligned address and removes any existing mapping in the target range first
+- anonymous mappings allocate zero-filled pages eagerly today
+- file-backed mappings are lazy and pager-backed
+
+Current file-backed mapping contract:
+
+- `MAP_SHARED` creates a vnode-backed `vm_object` with a vnode pager attached directly to the entry
+- `MAP_PRIVATE` creates a top-level shadow object over a vnode-backed pager object
+- file-backed mappings do not prepopulate resident pages during `mmap`; faults populate from the pager path
+- private file mappings do not write back through `msync()` because the top-level private shadow object has no pager
+- shared file mappings write back dirty resident pages through the vnode pager on `msync()`
+- a fork of a `MAP_SHARED` file mapping shares the same backing `vm_object`, so resident pages remain physically shared across parent and child

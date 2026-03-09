@@ -5,6 +5,41 @@
 #include <arch/i386/pmap.h>
 #include <stddef.h>
 
+typedef struct vm_fault_source {
+    vm_object_t *object;
+    uint64_t pindex;
+    vm_page_t *page;
+} vm_fault_source_t;
+
+static vm_fault_source_t vm_fault_resolve_source(vm_object_t *first_obj, uint64_t base_pindex) {
+    vm_fault_source_t source = {0};
+    vm_object_t *obj = first_obj;
+    uint64_t pindex = base_pindex;
+
+    while (obj) {
+        vm_page_t *page = vm_object_lookup_page(obj, pindex);
+        if (page) {
+            source.object = obj;
+            source.pindex = pindex;
+            source.page = page;
+            return source;
+        }
+
+        if (!source.object && obj->pager && vm_pager_has_page(obj->pager, pindex)) {
+            source.object = obj;
+            source.pindex = pindex;
+        }
+
+        if (!obj->shadow) {
+            break;
+        }
+
+        pindex += obj->shadow_offset / 4096;
+        obj = obj->shadow;
+    }
+
+    return source;
+}
 
 // Helper to copy a page (Optimized with pmap_copy_page)
 static void page_copy(uintptr_t src_pa, uintptr_t dst_pa) {
@@ -40,66 +75,28 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
     vm_page_t *m = NULL;
     uint64_t offset = (page_va - entry->start) + entry->offset;
     uint64_t pindex = offset / 4096;
-    
-    // Walk shadow chain
-    while (obj) {
-        m = vm_object_lookup_page(obj, pindex);
-        if (m) break;
-        
-        // Move to backing object
-        if (obj->shadow) {
-            pindex += obj->shadow_offset / 4096; // Adjust index for shadow
-            obj = obj->shadow;
-        } else {
-            break; // No more objects
-        }
-    }
-    
-    // 4. Handle Copy-on-Write (COW) fault
-    // If we want to WRITE, and the page is in a shared object (ref_count > 1) 
-    // OR it's not in the top-level object, we need to copy it.
-    bool needs_copy = false;
-    if ((prot & VM_PROT_WRITE) && (entry->inheritance != VM_INHERIT_SHARE)) {
-        if (m && (obj != first_obj || obj->ref_count > 1)) {
-            needs_copy = true;
-        } else if (!m && first_obj->ref_count > 1) {
-            // Allocate new page in first_obj, potentially zero-filled if no backing
-            // If we fall through to allocation, ensure it's private
-        }
-    }
+    vm_fault_source_t source = vm_fault_resolve_source(first_obj, pindex);
+    obj = source.object ? source.object : first_obj;
+    m = source.page;
 
-    if (m && needs_copy) {
-        // Allocate new page in top-level object
-        vm_page_t *new_m = vm_page_alloc(first_obj, (offset / 4096), 0);
-        if (!new_m) return VM_FAULT_ERROR;
-        
-        page_copy(m->phys_addr, new_m->phys_addr);
-        new_m->flags |= PG_VALID | PG_DIRTY;
-        
-        // Decrement refcount on original shared page
-        vm_page_unhold(m);
-        
-        m = new_m; // Use the new page
-        vm_object_add_page(first_obj, m);
-    }
-    
-    // 5. Page not present - allocate it
+    // 4. Page not resident yet - page it in or zero-fill it.
     if (!m) {
-        // If we found nothing in the chain, allocate in top-level
-        pindex = offset / 4096;
-        m = vm_page_alloc(first_obj, pindex, 0);
+        vm_object_t *fill_obj = source.object ? source.object : first_obj;
+        uint64_t fill_pindex = source.object ? source.pindex : pindex;
+
+        m = vm_page_alloc(fill_obj, fill_pindex, 0);
         if (!m) return VM_FAULT_ERROR;
 
-        if (first_obj->pager && vm_pager_has_page(first_obj->pager, pindex)) {
+        if (fill_obj->pager && vm_pager_has_page(fill_obj->pager, fill_pindex)) {
             vm_page_t *pages[2] = { m, NULL };
             int count = 1;
 
             // Prefaulting: Try to read next page too
-            uint64_t next_idx = pindex + 1;
-            if (vm_pager_has_page(first_obj->pager, next_idx)) {
+            uint64_t next_idx = fill_pindex + 1;
+            if (vm_pager_has_page(fill_obj->pager, next_idx)) {
                 // Check if not resident
-                if (!vm_object_lookup_page(first_obj, next_idx)) {
-                     vm_page_t *m2 = vm_page_alloc(first_obj, next_idx, 0);
+                if (!vm_object_lookup_page(fill_obj, next_idx)) {
+                     vm_page_t *m2 = vm_page_alloc(fill_obj, next_idx, 0);
                      if (m2) {
                          pages[1] = m2;
                          count++;
@@ -107,13 +104,13 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
                 }
             }
 
-            if (vm_pager_get_pages(first_obj->pager, pages, count, true) != 0) {
+            if (vm_pager_get_pages(fill_obj->pager, pages, count, true) != 0) {
                 // Pager failed (IO error?)
                 // If double fetch failed, try just the single urgent page
                 if (count > 1) {
                     vm_page_free(pages[1]);
                     count = 1;
-                    if (vm_pager_get_pages(first_obj->pager, &m, 1, true) != 0) {
+                    if (vm_pager_get_pages(fill_obj->pager, &m, 1, true) != 0) {
                         vm_page_free(m);
                         return VM_FAULT_ERROR;
                     }
@@ -127,10 +124,10 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
             // Add prefaulted page if successful
             if (count > 1 && pages[1]) {
                 pages[1]->flags |= PG_VALID;
-                vm_object_add_page(first_obj, pages[1]);
+                vm_object_add_page(fill_obj, pages[1]);
                 vm_page_deactivate(pages[1]); // Move to inactive queue immediately (heuristically)
             }
-        } else if (first_obj->type == VM_OBJ_TYPE_DEFAULT) {
+        } else if (fill_obj->type == VM_OBJ_TYPE_DEFAULT) {
             page_zero(m->phys_addr);
             m->flags |= PG_ZERO | PG_VALID;
         } else {
@@ -139,19 +136,33 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
             page_zero(m->phys_addr);
             m->flags |= PG_ZERO | PG_VALID;
         }
-        vm_object_add_page(first_obj, m);
+        vm_object_add_page(fill_obj, m);
+        obj = fill_obj;
     }
-    
+
+    // 5. Handle Copy-on-Write faults after we have a source page.
+    if ((prot & VM_PROT_WRITE) && (entry->inheritance != VM_INHERIT_SHARE) &&
+        (obj != first_obj || obj->ref_count > 1)) {
+        vm_page_t *new_m = vm_page_alloc(first_obj, offset / 4096, 0);
+        if (!new_m) return VM_FAULT_ERROR;
+
+        page_copy(m->phys_addr, new_m->phys_addr);
+        new_m->flags |= PG_VALID | PG_DIRTY;
+        vm_object_add_page(first_obj, new_m);
+
+        m = new_m;
+        obj = first_obj;
+    }
+
     // 6. Enter mapping
-    // If it's a COW mapping (read-only view of shared page), reduce permissions
-    // If it's a COW mapping (read-only view of shared page), reduce permissions
     uint8_t enter_prot = entry->protection;
     if ((prot & VM_PROT_WRITE) && (entry->max_protection & VM_PROT_WRITE) &&
         (entry->inheritance != VM_INHERIT_SHARE)) {
         enter_prot |= VM_PROT_WRITE;
     }
-    if ((prot & VM_PROT_WRITE) == 0 && (obj->ref_count > 1) && (entry->inheritance != VM_INHERIT_SHARE)) {
-       enter_prot &= ~VM_PROT_WRITE; // Force Read-Only for COW
+    if ((entry->inheritance != VM_INHERIT_SHARE) &&
+        ((obj != first_obj) || ((prot & VM_PROT_WRITE) == 0 && obj->ref_count > 1))) {
+        enter_prot &= ~VM_PROT_WRITE;
     }
 
     int err = pmap_enter(map->pmap, page_va, m->phys_addr, enter_prot, 0);

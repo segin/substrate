@@ -1,6 +1,7 @@
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
 #include <vm/vm_fault.h>
+#include <vm/vm_pager.h>
 #include <sys/proc.h>
 #include <sys/file.h>
 #include <vfs/vfs.h>
@@ -21,22 +22,73 @@
 #define MAP_FIXED     0x010
 #define MAP_ANONYMOUS 0x020
 
+static int mmap_validate_flags(int flags) {
+    int sharing = flags & (MAP_SHARED | MAP_PRIVATE);
+    return sharing == MAP_SHARED || sharing == MAP_PRIVATE;
+}
+
+static vm_object_t *mmap_create_file_object(fs_node_t *node, size_t length, uint32_t vm_prot,
+                                            int flags, uint64_t offset) {
+    vm_object_t *obj;
+
+    if (!node) {
+        return NULL;
+    }
+
+    if (flags & MAP_SHARED) {
+        obj = vm_object_allocate(VM_OBJ_TYPE_VNODE, length);
+        if (!obj) {
+            return NULL;
+        }
+        obj->handle = node;
+        obj->pager = vm_pager_allocate(VM_OBJ_TYPE_VNODE, node, length, vm_prot, offset);
+        if (!obj->pager) {
+            vm_object_deallocate(obj);
+            return NULL;
+        }
+        return obj;
+    }
+
+    vm_object_t *backing = vm_object_allocate(VM_OBJ_TYPE_VNODE, length);
+    if (!backing) {
+        return NULL;
+    }
+    backing->handle = node;
+    backing->pager = vm_pager_allocate(VM_OBJ_TYPE_VNODE, node, length, vm_prot, offset);
+    if (!backing->pager) {
+        vm_object_deallocate(backing);
+        return NULL;
+    }
+
+    obj = vm_object_shadow(backing);
+    if (!obj) {
+        vm_object_deallocate(backing);
+        return NULL;
+    }
+
+    vm_object_deallocate(backing);
+    return obj;
+}
+
 // User Memory System Calls
 
 void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t offset) {
     process_t *p = current_process;
     if (!p || !p->vm_map) return (void *)-1;
     if (length == 0) return (void *)-1;
+    if (!mmap_validate_flags(flags)) return (void *)-1;
 
     vm_map_t *map = p->vm_map;
     uintptr_t v_addr = (uintptr_t)addr;
+    size_t aligned_length = (length + 0xFFF) & ~0xFFF;
 
     // Find virtual address space
     if (v_addr == 0 || !(flags & MAP_FIXED)) {
-        if (vm_map_find_space(map, &v_addr, length) != 0) return (void *)-1;
+        if (vm_map_find_space(map, &v_addr, aligned_length) != 0) return (void *)-1;
     } else {
+        if (v_addr & 0xFFF) return (void *)-1;
         // MAP_FIXED: Unmap existing mappings in the range
-        if (vm_map_remove(map, v_addr, v_addr + length) != 0) {
+        if (vm_map_remove(map, v_addr, v_addr + aligned_length) != 0) {
             return (void *)-1;
         }
     }
@@ -47,26 +99,12 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
     if (prot & PROT_WRITE) vm_prot |= VM_PROT_WRITE;
     if (prot & PROT_EXEC)  vm_prot |= VM_PROT_EXEC;
 
-    // Create VM object for tracking
-    vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, length);
-    if (!obj) return (void *)-1;
-
-    // Determine inheritance based on sharing
-    uint8_t inheritance = VM_INHERIT_COPY;
-    if (flags & MAP_SHARED) {
-        inheritance = VM_INHERIT_SHARE;
-    }
-
-    if (vm_map_insert(map, obj, 0, v_addr, v_addr + length, vm_prot, vm_prot, inheritance) != 0) {
-        vm_object_deallocate(obj);
-        return (void *)-1;
-    }
-
     // Determine if file-backed or anonymous
     file_t *file = NULL;
     if (!(flags & MAP_ANONYMOUS) && fd >= 0 && fd < MAX_FD) {
         file = p->fds[fd];
     }
+    if (!(flags & MAP_ANONYMOUS) && (!file || !file->f_data)) return (void *)-1;
 
     // Check for device-specific mmap handler
     if (file && file->f_data && ((fs_node_t*)file->f_data)->mmap) {
@@ -74,16 +112,35 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
         return ((fs_node_t*)file->f_data)->mmap((fs_node_t*)file->f_data, addr, length, prot, flags, offset);
     }
 
+    // Create VM object for tracking
+    vm_object_t *obj;
+    if (file) {
+        obj = mmap_create_file_object((fs_node_t *)file->f_data, aligned_length, vm_prot, flags, offset);
+    } else {
+        obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, aligned_length);
+    }
+    if (!obj) return (void *)-1;
+
+    // Determine inheritance based on sharing
+    uint8_t inheritance = (flags & MAP_SHARED) ? VM_INHERIT_SHARE : VM_INHERIT_COPY;
+
+    if (vm_map_insert(map, obj, 0, v_addr, v_addr + aligned_length, vm_prot, vm_prot, inheritance) != 0) {
+        vm_object_deallocate(obj);
+        return (void *)-1;
+    }
+
+    if (file) {
+        return (void *)v_addr;
+    }
+
     // Allocate and map pages
     // NOTE: pmm_alloc_block() returns virtual address (kernel direct mapping)
-    uint64_t file_offset = offset;
-
     #define MMAP_BATCH_SIZE 64
     uintptr_t pa_batch[MMAP_BATCH_SIZE];
     int batch_idx = 0;
     uintptr_t batch_va_start = v_addr;
 
-    for (uintptr_t va = v_addr; va < v_addr + length; va += 0x1000) {
+    for (uintptr_t va = v_addr; va < v_addr + aligned_length; va += 0x1000) {
         // If batch is full, commit it
         if (batch_idx == MMAP_BATCH_SIZE) {
             pmap_enter_batch(p->pmap ? (pmap_t)p->pmap : pmap_kernel(), batch_va_start, batch_idx, pa_batch, vm_prot, 0);
@@ -110,24 +167,13 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
                 }
             }
             // Remove the vm_map entry
-            vm_map_remove(map, v_addr, v_addr + length);
+            vm_map_remove(map, v_addr, v_addr + aligned_length);
 
             return (void *)-1;
         }
 
         // Zero the page - pa_virt is already virtual
         memset(pa_virt, 0, 0x1000);
-
-        // If file-backed, read data into page
-        if (file && file->f_data && ((fs_node_t*)file->f_data)->read) {
-            uint32_t bytes_to_read = 0x1000;
-            // Clamp to remaining length
-            if (va + 0x1000 > v_addr + length) {
-                bytes_to_read = (v_addr + length) - va;
-            }
-            ((fs_node_t*)file->f_data)->read((fs_node_t*)file->f_data, file_offset, bytes_to_read, (uint8_t *)pa_virt);
-            file_offset += bytes_to_read;
-        }
 
         // Convert virtual to physical for pmap_enter
         uint32_t pa_phys = (uint32_t)(uintptr_t)pa_virt - 0xC0000000;
@@ -271,9 +317,6 @@ void *sys_brk(void *addr) {
 #define MS_SYNC       2
 #define MS_INVALIDATE 4
 
-// Forward declarations for pager
-extern int vm_pager_put_pages(void *pager, void **pages, int count, bool sync);
-
 int sys_msync(void *addr, size_t length, int flags) {
     if (!current_process || !current_process->vm_map) return -1;
     if (length == 0) return 0;
@@ -295,7 +338,8 @@ int sys_msync(void *addr, size_t length, int flags) {
         if (m && (m->flags & PG_DIRTY)) {
             // Write back via pager
             if (entry->object->pager) {
-                vm_pager_put_pages(entry->object->pager, (void**)&m, 1, true);
+                vm_page_t *pages[1] = { m };
+                vm_pager_put_pages(entry->object->pager, pages, 1, true);
             }
         }
     }
