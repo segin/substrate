@@ -7,6 +7,7 @@
 #include <pm/pm.h>
 #include <sys/kern_syscalls.h>
 #include <arch/i386/pmap.h>
+#include <sys/ldt.h>
 #include <vm/vm_map.h>
 
 /*
@@ -146,6 +147,7 @@ int kern_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
                     pmap_release(target->pmap);
                 }
                 target->pmap = pmap_kernel();
+                ldt_free_process(target);
 
                 // Retire all thread slots that belonged to the reaped process.
                 sched_reap_process_threads(target);

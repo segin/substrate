@@ -9,6 +9,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <arch/i386/pmap.h>
+#include <sys/ldt.h>
 #include <arch/i386/intr.h>
 #include <vm/vm_map.h>
 #include <exec/perso/personality.h>
@@ -120,6 +121,7 @@ process_t *proc_create(int perso_id) {
     int pid = next_pid++;
     spinlock_release(&pid_lock);
     memset(&processes[i], 0, sizeof(processes[i]));
+    ldt_init_process(&processes[i]);
     processes[i].pid = pid;
     processes[i].ppid = current_process ? current_process->pid : 0;
     processes[i].perso_id = perso_id;
@@ -485,6 +487,8 @@ static void proc_release_zombie_resources(process_t *proc) {
         extern void pgrp_remove_proc(struct process *proc);
         pgrp_remove_proc(proc);
     }
+
+    ldt_free_process(proc);
 
     proc->pmap = pmap_kernel();
 }
