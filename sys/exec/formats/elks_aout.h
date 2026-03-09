@@ -101,6 +101,13 @@ static inline uint32_t elks_stack_segment_limit(const struct elks_load_plan *pla
     return (uint32_t)(plan->data_limit - 1U);
 }
 
+static inline uint32_t elks_data_segment_limit(const struct elks_load_plan *plan) {
+    if (!plan || plan->data_limit == 0) {
+        return 0;
+    }
+    return (uint32_t)(plan->data_limit - 1U);
+}
+
 static inline int elks_header_type_valid(uint32_t type) {
     return type == ELKS_COMBID ||
            type == ELKS_SPLITID ||
@@ -290,11 +297,13 @@ static inline void elks_build_segment_layout(const struct elks_load_plan *plan,
 
     elks_init_data_segment_desc(&layout->ds, ELKS_LDT_DS_INDEX,
                                 plan->data_base, plan->data_limit);
+    layout->ds.limit = elks_data_segment_limit(plan);
     elks_init_data_segment_desc(&layout->ss, ELKS_LDT_SS_INDEX,
                                 plan->data_base, plan->data_limit);
     layout->ss.limit = elks_stack_segment_limit(plan);
     elks_init_data_segment_desc(&layout->es, ELKS_LDT_ES_INDEX,
                                 plan->data_base, plan->data_limit);
+    layout->es.limit = elks_data_segment_limit(plan);
 
     layout->cs_sel = (uint16_t)((ELKS_LDT_CS_INDEX << 3) | 4U | 3U);
     layout->ds_sel = (uint16_t)((ELKS_LDT_DS_INDEX << 3) | 4U | 3U);

@@ -55,8 +55,8 @@ Reference: User Request (Step 31552)
         - Files: `sys/exec/formats/elks_aout.c`, `sys/exec/formats/elks_aout.h`
         - Tests: unit (stack segment bounds)
         - Acceptance: Stack limit enforced by hardware; overflow triggers #SS exception.
-    - [ ] Set up ELKS data segment with correct base and limit. (REQ: REQ-20-0013)
-        - Files: `sys/exec/formats/elks_aout.c`
+    - [x] Set up ELKS data segment with correct base and limit. (REQ: REQ-20-0013)
+        - Files: `sys/exec/formats/elks_aout.c`, `sys/exec/formats/elks_aout.h`
         - Tests: unit (data segment bounds)
         - Acceptance: Data accesses beyond limit trigger #GP exception.
     - [ ] Install syscall gateway trampoline for 16-bit to 32-bit transition. (REQ: REQ-20-0014)
