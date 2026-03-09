@@ -856,7 +856,7 @@ static int is_rel_mnemonic(const char *mn) {
     if (mn == NULL || mn[0] == '\0') {
         return 0;
     }
-    if (streq_ci(mn, "call") || streq_ci(mn, "jmp")) {
+    if (streq_ci(mn, "call") || streq_ci(mn, "jmp") || streq_ci(mn, "xbegin")) {
         return 1;
     }
     if ((mn[0] == 'j' || mn[0] == 'J') && mn[1] != '\0') {
@@ -1136,6 +1136,22 @@ static int parse_mmx_reg(const char *name, unsigned *out) {
     return 0;
 }
 
+static int parse_k_reg(const char *name, unsigned *out) {
+    const char *p = name;
+
+    if (p == NULL || out == NULL) {
+        return -1;
+    }
+    while (*p == '%' || isspace((unsigned char)*p)) {
+        ++p;
+    }
+    if ((p[0] == 'k' || p[0] == 'K') && p[1] >= '0' && p[1] <= '7' && p[2] == '\0') {
+        *out = (unsigned)(p[1] - '0');
+        return 0;
+    }
+    return -1;
+}
+
 static int parse_st_index(const char *s, unsigned *out) {
     const char *p;
     unsigned v = 0;
@@ -1147,7 +1163,14 @@ static int parse_st_index(const char *s, unsigned *out) {
     while (*p == '%' || isspace((unsigned char)*p)) {
         ++p;
     }
-    if (!(p[0] == 's' || p[0] == 'S') || !(p[1] == 't' || p[1] == 'T') || p[2] != '(') {
+    if (!(p[0] == 's' || p[0] == 'S') || !(p[1] == 't' || p[1] == 'T')) {
+        return -1;
+    }
+    if (p[2] == '\0') {
+        *out = 0;
+        return 0;
+    }
+    if (p[2] != '(') {
         return -1;
     }
     p += 3;
@@ -1625,6 +1648,80 @@ static int emit_i386_prefixed_1byte_rm(const as_instruction_t *insn, unsigned ch
     return 0;
 }
 
+static int emit_i386_vex2_kmovw(const as_operand_t *src, unsigned dst_k, unsigned char *out, size_t out_cap, size_t *out_len) {
+    size_t pos = 0;
+
+    if (src == NULL || out == NULL || out_len == NULL || out_cap < 8 || dst_k > 7u) {
+        return -1;
+    }
+    out[pos++] = 0xc5;
+    out[pos++] = 0xf8;
+    out[pos++] = 0x90;
+    if (emit_i386_modrm_rm_operand(dst_k, src, out, out_cap, &pos) != 0) {
+        return -1;
+    }
+    *out_len = pos;
+    return 0;
+}
+
+static int emit_i386_vex_klogic(const char *mnemonic, unsigned src_rm_k, unsigned src_vvvv_k, unsigned dst_k,
+                                unsigned char *out, size_t out_cap, size_t *out_len) {
+    unsigned char opcode;
+    unsigned char vex_p1;
+    char last;
+    int pp = 0;
+    int use_vex3 = 0;
+
+    if (mnemonic == NULL || out == NULL || out_len == NULL || out_cap < 5 || src_rm_k > 7u || src_vvvv_k > 7u || dst_k > 7u) {
+        return -1;
+    }
+    if (strncmp(mnemonic, "kandn", 5) == 0) opcode = 0x42;
+    else if (strncmp(mnemonic, "kand", 4) == 0) opcode = 0x41;
+    else if (strncmp(mnemonic, "kor", 3) == 0) opcode = 0x45;
+    else if (strncmp(mnemonic, "kxnor", 5) == 0) opcode = 0x46;
+    else if (strncmp(mnemonic, "kxor", 4) == 0) opcode = 0x47;
+    else if (strncmp(mnemonic, "kadd", 4) == 0) opcode = 0x4a;
+    else if (strncmp(mnemonic, "kunpck", 6) == 0) opcode = 0x4b;
+    else return -1;
+
+    last = mnemonic[strlen(mnemonic) - 1];
+    if (last == 'b' || last == 'd') {
+        pp = 1;
+    }
+    if (last == 'q' || last == 'd') {
+        use_vex3 = 1;
+    }
+    vex_p1 = (unsigned char)(0x80u | (((~src_vvvv_k) & 0xfu) << 3) | 0x04u | (unsigned)pp);
+    if (use_vex3) {
+        out[0] = 0xc4;
+        out[1] = 0xe1;
+        out[2] = vex_p1;
+        out[3] = opcode;
+        out[4] = (unsigned char)(0xc0u | ((dst_k & 7u) << 3) | (src_rm_k & 7u));
+        *out_len = 5;
+        return 0;
+    }
+    out[0] = 0xc5;
+    out[1] = vex_p1;
+    out[2] = opcode;
+    out[3] = (unsigned char)(0xc0u | ((dst_k & 7u) << 3) | (src_rm_k & 7u));
+    *out_len = 4;
+    return 0;
+}
+
+static int operand_st_index(const as_operand_t *op, unsigned *out) {
+    if (op == NULL || out == NULL) {
+        return -1;
+    }
+    if (op->kind == AS_OPERAND_COPROCESSOR) {
+        return parse_st_index(op->u.coproc, out);
+    }
+    if (op->kind == AS_OPERAND_REGISTER) {
+        return parse_st_index(op->u.reg, out);
+    }
+    return -1;
+}
+
 static int emit_x86_64_xmm_regop(unsigned char prefix, unsigned char opcode, unsigned dst_xmm, unsigned src_xmm,
                                  unsigned char *out, size_t out_cap, size_t *out_len) {
     unsigned char rex;
@@ -1763,6 +1860,43 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             return emit_i386_prefixed_1byte_rm(insn, 0x8e, seg_field, src, out, out_cap, out_len);
         }
     }
+    if (strcmp(mnbuf, "kmovw") == 0) {
+        unsigned kd;
+
+        if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
+            parse_k_reg(dst->u.reg, &kd) != 0) {
+            return -1;
+        }
+        return emit_i386_vex2_kmovw(src, kd, out, out_cap, out_len);
+    }
+    if (strncmp(mnbuf, "kand", 4) == 0 || strncmp(mnbuf, "kor", 3) == 0 || strncmp(mnbuf, "kxor", 4) == 0 ||
+        strncmp(mnbuf, "kxnor", 5) == 0 || strncmp(mnbuf, "kadd", 4) == 0 || strncmp(mnbuf, "kunpck", 6) == 0) {
+        const as_operand_t *op_rm;
+        const as_operand_t *op_vvvv;
+        const as_operand_t *op_dst;
+        unsigned krm;
+        unsigned kvvvv;
+        unsigned kdst;
+
+        if (insn->operand_count != 3) {
+            return -1;
+        }
+        if (intel_syntax) {
+            op_dst = &insn->operands[0];
+            op_vvvv = &insn->operands[1];
+            op_rm = &insn->operands[2];
+        } else {
+            op_rm = &insn->operands[0];
+            op_vvvv = &insn->operands[1];
+            op_dst = &insn->operands[2];
+        }
+        if (op_rm->kind != AS_OPERAND_REGISTER || op_vvvv->kind != AS_OPERAND_REGISTER || op_dst->kind != AS_OPERAND_REGISTER ||
+            parse_k_reg(op_rm->u.reg, &krm) != 0 || parse_k_reg(op_vvvv->u.reg, &kvvvv) != 0 ||
+            parse_k_reg(op_dst->u.reg, &kdst) != 0) {
+            return -1;
+        }
+        return emit_i386_vex_klogic(mnbuf, krm, kvvvv, kdst, out, out_cap, out_len);
+    }
     if ((strcmp(mnbuf, "push") == 0 || strcmp(mnbuf, "pop") == 0) && insn->operand_count == 1 && a != NULL &&
         a->kind == AS_OPERAND_REGISTER) {
         as_x86_seg_t seg;
@@ -1797,6 +1931,31 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         out[0] = 0xd9;
         out[1] = 0xe8;
+        if (out_len != NULL) {
+            *out_len = 2;
+        }
+        return 0;
+    }
+    if (strcmp(mnbuf, "fadd") == 0 || strcmp(mnbuf, "fmul") == 0 || strcmp(mnbuf, "fcom") == 0 || strcmp(mnbuf, "fcomp") == 0 ||
+        strcmp(mnbuf, "fsub") == 0 || strcmp(mnbuf, "fsubr") == 0 || strcmp(mnbuf, "fdiv") == 0 || strcmp(mnbuf, "fdivr") == 0) {
+        unsigned stsrc;
+        unsigned stdst;
+        unsigned char base;
+
+        if (insn->operand_count != 2 || a == NULL || b == NULL || operand_st_index(a, &stsrc) != 0 || operand_st_index(b, &stdst) != 0 ||
+            stdst != 0) {
+            return -1;
+        }
+        if (strcmp(mnbuf, "fadd") == 0) base = 0xc0;
+        else if (strcmp(mnbuf, "fmul") == 0) base = 0xc8;
+        else if (strcmp(mnbuf, "fcom") == 0) base = 0xd0;
+        else if (strcmp(mnbuf, "fcomp") == 0) base = 0xd8;
+        else if (strcmp(mnbuf, "fsub") == 0) base = 0xe0;
+        else if (strcmp(mnbuf, "fsubr") == 0) base = 0xe8;
+        else if (strcmp(mnbuf, "fdiv") == 0) base = 0xf0;
+        else base = 0xf8;
+        out[0] = 0xd8;
+        out[1] = (unsigned char)(base + (stsrc & 7u));
         if (out_len != NULL) {
             *out_len = 2;
         }

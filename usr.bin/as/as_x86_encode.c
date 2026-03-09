@@ -1133,6 +1133,46 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         if (insn->op_count != 0 || emit8(&ctx, 0x9f) != 0) {
             return -1;
         }
+    } else if (streq_ci(insn->mnemonic, "xabort")) {
+        if (insn->op_count != 1 || a->kind != AS_X86_OP_IMM || emit8(&ctx, 0xc6) != 0 || emit8(&ctx, 0xf8) != 0 ||
+            emit8(&ctx, (uint8_t)a->u.imm) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "xbegin")) {
+        if (insn->op_count != 1 || a->kind != AS_X86_OP_REL || emit8(&ctx, 0xc7) != 0 || emit8(&ctx, 0xf8) != 0 ||
+            emit32(&ctx, (uint32_t)a->u.rel) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "int3")) {
+        if (insn->op_count != 0 || emit8(&ctx, 0xcc) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "into")) {
+        if (insn->op_count != 0 || emit8(&ctx, 0xce) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "iret") || streq_ci(insn->mnemonic, "iretw")) {
+        if (insn->op_count != 0 || emit8(&ctx, 0xcf) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "xlat") || streq_ci(insn->mnemonic, "xlatb")) {
+        if (insn->op_count != 1 || emit8(&ctx, 0xd7) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "lret") || streq_ci(insn->mnemonic, "retf") || streq_ci(insn->mnemonic, "lretw")) {
+        if (insn->op_count == 0) {
+            if (emit8(&ctx, 0xcb) != 0) {
+                return -1;
+            }
+        } else if (insn->op_count == 1 && a->kind == AS_X86_OP_IMM) {
+            if (emit8(&ctx, 0xca) != 0 || emit8(&ctx, (uint8_t)(a->u.imm & 0xff)) != 0 ||
+                emit8(&ctx, (uint8_t)((a->u.imm >> 8) & 0xff)) != 0) {
+                return -1;
+            }
+        } else {
+            set_err(&ctx, "unsupported lret form");
+            return -1;
+        }
     } else if (streq_ci(insn->mnemonic, "ret")) {
         if (emit8(&ctx, 0xc3) != 0) {
             return -1;
