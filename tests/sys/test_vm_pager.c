@@ -12,6 +12,7 @@
 #include <vm/vm_swap.h>
 #include <vfs/vfs.h>
 #include <sys/file.h>
+#include <arch/i386/pmm.h>
 #include <sys/proc.h>
 #include <sys/syscall_impl.h>
 #include <sys/mman.h>
@@ -229,6 +230,59 @@ void test_vm_swap_pager_full(void) {
     vm_object_deallocate(obj);
     vm_pager_deallocate(pager);
     TEST_ASSERT(vm_swapoff() == 0, "swapoff after full test succeeded");
+    kprint("  PASS\n");
+}
+
+void test_vm_device_fault_mapping(void) {
+    process_t fake_proc = {0};
+    process_t *saved_process = current_process;
+    pmap_t pmap;
+    vm_map_t *map;
+    vm_object_t *obj;
+    void *device_page;
+    uintptr_t device_phys;
+
+    kprint("Test: vm_device pager fault mapping\n");
+
+    device_page = pmm_alloc_block();
+    TEST_ASSERT(device_page != NULL, "device backing page allocated");
+    device_phys = (uintptr_t)device_page - 0xC0000000;
+    memset(device_page, 0xD2, 4096);
+
+    pmap = pmap_create();
+    TEST_ASSERT(pmap != 0, "pmap created");
+    map = vm_map_create(pmap, 0x1000, 0x100000);
+    TEST_ASSERT(map != NULL, "map created");
+
+    fake_proc.vm_map = map;
+    fake_proc.pmap = (struct pmap *)pmap;
+    current_process = &fake_proc;
+    pmap_activate(pmap);
+
+    obj = vm_object_allocate(VM_OBJ_TYPE_DEVICE, 0x1000);
+    TEST_ASSERT(obj != NULL, "device object allocated");
+    obj->pager = vm_pager_allocate(VM_OBJ_TYPE_DEVICE, (void *)device_phys, 0x1000,
+                                   VM_PROT_READ | VM_PROT_WRITE | VM_PROT_USER, 0);
+    TEST_ASSERT(obj->pager != NULL, "device pager allocated");
+    TEST_ASSERT(vm_pager_has_page(obj->pager, 0), "device pager reports mapped page");
+
+    TEST_ASSERT(vm_map_insert(map, obj, 0, 0x1A000, 0x1B000,
+                              VM_PROT_READ | VM_PROT_WRITE | VM_PROT_USER,
+                              VM_PROT_READ | VM_PROT_WRITE | VM_PROT_USER,
+                              VM_INHERIT_NONE) == 0,
+                "device map insert succeeded");
+
+    TEST_ASSERT(vm_fault(map, 0x1A000, VM_PROT_READ) == VM_FAULT_SUCCESS,
+                "device fault succeeded");
+    TEST_ASSERT(pmap_extract(pmap, 0x1A000) == device_phys,
+                "device mapping uses requested physical page");
+    TEST_ASSERT(*(volatile uint8_t *)0x1A000 == 0xD2,
+                "mapped device page is readable");
+
+    current_process = saved_process;
+    pmap_activate(pmap_kernel());
+    vm_map_destroy(map);
+    pmm_free_block(device_page);
     kprint("  PASS\n");
 }
 
@@ -454,6 +508,7 @@ void run_vm_pager_tests(void) {
     test_vm_pager_io();
     test_vm_swap_pager_roundtrip();
     test_vm_swap_pager_full();
+    test_vm_device_fault_mapping();
     test_vm_msync_dirty_writeback();
     test_vm_mmap_file_private_cow();
     test_vm_mmap_file_shared_fork_visibility();

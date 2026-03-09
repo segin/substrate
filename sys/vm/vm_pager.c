@@ -2,6 +2,13 @@
 #include <vm/vm_kmem.h>
 #include <stddef.h>
 
+typedef struct vm_device_pager {
+    vm_pager_t base;
+    uintptr_t phys_base;
+    size_t size;
+    uint8_t prot;
+} vm_device_pager_t;
+
 vm_pager_t *vm_pager_allocate(vm_object_type_t type, void *handle, size_t size, uint8_t prot, uint64_t offset) {
     vm_pager_t *pager = kmalloc(sizeof(vm_pager_t));
     if (!pager) return NULL;
@@ -92,6 +99,44 @@ static int stub_getput(struct vm_pager *pager, vm_page_t *m, bool sync) {
     return -1; // Not implemented
 }
 
+static struct vm_pager *device_alloc(void *handle, size_t size, uint8_t prot, uint64_t offset) {
+    vm_device_pager_t *pager = kmalloc(sizeof(vm_device_pager_t));
+    if (!pager) {
+        return NULL;
+    }
+
+    pager->base.priv = NULL;
+    pager->phys_base = (uintptr_t)handle + (uintptr_t)offset;
+    pager->size = size;
+    pager->prot = prot;
+    return &pager->base;
+}
+
+static void device_dealloc(struct vm_pager *pager) {
+    kfree(pager, sizeof(vm_device_pager_t));
+}
+
+static bool device_haspage(struct vm_pager *pager, uint64_t pindex) {
+    vm_device_pager_t *device = (vm_device_pager_t *)pager;
+    return ((uintptr_t)pindex * 4096) < device->size;
+}
+
+bool vm_pager_device_phys(vm_pager_t *pager, uint64_t pindex, uintptr_t *phys_out) {
+    vm_device_pager_t *device;
+
+    if (!pager || pager->ops != &device_pager_ops || !phys_out) {
+        return false;
+    }
+
+    device = (vm_device_pager_t *)pager;
+    if (!device_haspage(pager, pindex)) {
+        return false;
+    }
+
+    *phys_out = device->phys_base + ((uintptr_t)pindex * 4096);
+    return true;
+}
+
 // VNode Pager: File-backed memory mapping
 // pager->priv contains a pointer to the fs_node_t
 
@@ -160,8 +205,9 @@ vm_pager_ops_t vnode_pager_ops = {
 };
 
 vm_pager_ops_t device_pager_ops = {
-    .alloc = stub_alloc,
-    .dealloc = stub_dealloc,
-    .getpage = stub_getput, // Device usually mapped, not paged
-    .putpage = stub_getput
+    .alloc = device_alloc,
+    .dealloc = device_dealloc,
+    .getpage = stub_getput, // Device mappings are faulted directly to physical pages
+    .putpage = stub_getput,
+    .haspage = device_haspage
 };

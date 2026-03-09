@@ -10,6 +10,7 @@
 #include <sys/lock.h>
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
+#include <vm/vm_pager.h>
 
 #ifndef MAP_FIXED
 #define MAP_FIXED 0x010
@@ -197,6 +198,7 @@ static size_t mem_write(fs_node_t *node, off_t offset, size_t size, const uint8_
 static void *mem_mmap(fs_node_t *node, void *addr, size_t length, int prot, int flags, off_t offset) {
     (void)node;
     process_t *p = current_process;
+    vm_object_t *obj;
 
     /* Policy Checks */
     if (!mem_allow && p->euid != 0) return (void*)-1;
@@ -208,12 +210,14 @@ static void *mem_mmap(fs_node_t *node, void *addr, size_t length, int prot, int 
 
     vm_map_t *map = p->vm_map;
     uintptr_t v_addr = (uintptr_t)addr;
+    size_t aligned_length = (length + PMM_BLOCK_SIZE - 1) & ~(PMM_BLOCK_SIZE - 1);
 
     /* Find space */
     if (v_addr == 0 || !(flags & MAP_FIXED)) {
-        if (vm_map_find_space(map, &v_addr, length) != 0) return (void *)-1;
+        if (vm_map_find_space(map, &v_addr, aligned_length) != 0) return (void *)-1;
     } else {
-        if (vm_map_remove(map, v_addr, v_addr + length) != 0) return (void *)-1;
+        if (v_addr & (PMM_BLOCK_SIZE - 1)) return (void *)-1;
+        if (vm_map_remove(map, v_addr, v_addr + aligned_length) != 0) return (void *)-1;
     }
 
     /* Translate protections */
@@ -224,28 +228,18 @@ static void *mem_mmap(fs_node_t *node, void *addr, size_t length, int prot, int 
     /* Device mappings are usually user accessible if mmapped */
     vm_prot |= VM_PROT_USER;
 
-    /*
-     * Insert dummy entry to reserve VA space.
-     * We use a NULL object because we manage the mapping manually via pmap.
-     * This means the VM system thinks it's valid but handles no faults (we pre-map).
-     */
-    if (vm_map_insert(map, NULL, 0, v_addr, v_addr + length, vm_prot, vm_prot, VM_INHERIT_NONE) != 0) {
+    obj = vm_object_allocate(VM_OBJ_TYPE_DEVICE, aligned_length);
+    if (!obj) {
         return (void *)-1;
     }
-
-    /* Map pages */
-    uintptr_t pa = (uintptr_t)offset;
-    for (uintptr_t va = v_addr; va < v_addr + length; va += PMM_BLOCK_SIZE, pa += PMM_BLOCK_SIZE) {
-        /*
-         * Note: pmap_enter expects physical address.
-         * We verify 'pa' is valid if necessary, or rely on hardware to fault if it's MMIO/invalid.
-         * For standard RAM, should be fine.
-         */
-        if (pmap_enter(p->pmap, va, pa, vm_prot, PTE_U | PTE_P | ((vm_prot & VM_PROT_WRITE)?PTE_W:0)) < 0) {
-            /* Error: Unmap what we did */
-            vm_map_remove(map, v_addr, v_addr + length);
-            return (void*)-1;
-        }
+    obj->pager = vm_pager_allocate(VM_OBJ_TYPE_DEVICE, (void *)(uintptr_t)offset, aligned_length, vm_prot, 0);
+    if (!obj->pager) {
+        vm_object_deallocate(obj);
+        return (void *)-1;
+    }
+    if (vm_map_insert(map, obj, 0, v_addr, v_addr + aligned_length, vm_prot, vm_prot, VM_INHERIT_NONE) != 0) {
+        vm_object_deallocate(obj);
+        return (void *)-1;
     }
 
     return (void*)v_addr;

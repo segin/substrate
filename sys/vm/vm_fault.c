@@ -91,6 +91,25 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
     vm_page_t *m = NULL;
     uint64_t offset = (page_va - entry->start) + entry->offset;
     uint64_t pindex = offset / 4096;
+
+    if (first_obj->type == VM_OBJ_TYPE_DEVICE && first_obj->pager) {
+        uintptr_t device_phys;
+        uint8_t enter_prot = entry->protection;
+
+        if ((prot & VM_PROT_WRITE) && (entry->max_protection & VM_PROT_WRITE)) {
+            enter_prot |= VM_PROT_WRITE;
+        }
+        if (!vm_pager_device_phys(first_obj->pager, pindex, &device_phys)) {
+            goto out;
+        }
+        if (pmap_enter(map->pmap, page_va, device_phys, enter_prot, 0) < 0) {
+            goto out;
+        }
+
+        result = VM_FAULT_SUCCESS;
+        goto out;
+    }
+
     vm_fault_source_t source = vm_fault_resolve_source(first_obj, pindex);
     obj = source.object ? source.object : first_obj;
     m = source.page;

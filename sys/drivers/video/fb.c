@@ -13,8 +13,12 @@
 #include <kern/console.h>
 #include <sys/fb.h>
 #include <sys/file.h>
+#include <sys/mman.h>
 #include <sys/proc.h>
 #include <vfs/vfs.h>
+#include <vm/vm_map.h>
+#include <vm/vm_object.h>
+#include <vm/vm_pager.h>
 
 #include <arch/i386/pmap.h>
 
@@ -328,22 +332,50 @@ static int fb_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
 }
 
 static void *fb_fs_mmap(fs_node_t *node, void *addr, size_t length, int prot, int flags, off_t offset) {
-    (void)node; (void)prot; (void)flags;
+    vm_object_t *obj;
+    vm_map_t *map;
+    uintptr_t virt = (uintptr_t)addr;
+    size_t aligned_length;
+    uint32_t vm_prot = 0;
 
     uint32_t fb_size = fb.pitch * fb.height;
     if (offset + length > fb_size) return (void *)-1;
+    if ((offset & 0xFFF) != 0) return (void *)-1;
 
-    uintptr_t phys_base = (uintptr_t)fb.addr;
-    uintptr_t phys = phys_base + (uintptr_t)offset;
-    uintptr_t virt = (uintptr_t)addr;
+    aligned_length = (length + 0xFFF) & ~0xFFFU;
+    map = current_process->vm_map;
+    if (!map) return (void *)-1;
 
-    uint32_t pte_flags = PTE_P | PTE_U | PTE_W;
-
-    for (size_t i = 0; i < length; i += 0x1000) {
-        pmap_enter(current_process->pmap, virt + i, phys + i, 0, pte_flags);
+    if (virt == 0 || !(flags & MAP_FIXED)) {
+        if (vm_map_find_space(map, &virt, aligned_length) != 0) return (void *)-1;
+    } else {
+        if ((virt & 0xFFF) != 0) return (void *)-1;
+        if (vm_map_remove(map, virt, virt + aligned_length) != 0) return (void *)-1;
     }
 
-    return addr;
+    if (prot & VM_PROT_READ)  vm_prot |= VM_PROT_READ;
+    if (prot & VM_PROT_WRITE) vm_prot |= VM_PROT_WRITE;
+    if (prot & VM_PROT_EXEC)  vm_prot |= VM_PROT_EXEC;
+    vm_prot |= VM_PROT_USER;
+
+    obj = vm_object_allocate(VM_OBJ_TYPE_DEVICE, aligned_length);
+    if (!obj) return (void *)-1;
+    obj->pager = vm_pager_allocate(VM_OBJ_TYPE_DEVICE,
+                                   (void *)((uintptr_t)fb.addr + (uintptr_t)offset),
+                                   aligned_length,
+                                   vm_prot,
+                                   0);
+    if (!obj->pager) {
+        vm_object_deallocate(obj);
+        return (void *)-1;
+    }
+    if (vm_map_insert(map, obj, 0, virt, virt + aligned_length, vm_prot, vm_prot, VM_INHERIT_NONE) != 0) {
+        vm_object_deallocate(obj);
+        return (void *)-1;
+    }
+
+    (void)node;
+    return (void *)virt;
 }
 
 static fs_node_t fb_node;

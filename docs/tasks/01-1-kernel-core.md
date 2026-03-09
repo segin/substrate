@@ -545,12 +545,12 @@
                 - [x] On write fault: allocate new page, copy contents, update PTE. (REQ: REQ-01-0467)
                 - [x] Decrement original page refcount. (REQ: REQ-01-0258, REQ-01-0472)
                 - [x] Shadow chain collapse: when shadow has all pages, absorb parent. (REQ: REQ-01-0473)
-            - [ ] **Swap Subsystem:** (REQ: REQ-01-0474)
-                - [ ] **Swap Pager (`vm_pager`):** (REQ: REQ-01-0475)
+            - [x] **Swap Subsystem:** (REQ: REQ-01-0474)
+                - [x] **Swap Pager (`vm_pager`):** (REQ: REQ-01-0475)
                     - [x] Generic pager interface: `vm_pager_allocate/get_pages/put_pages/has_page`. (REQ: REQ-01-0476)
                     - [x] Swap pager: move pages to/from swap backing store. (REQ: REQ-01-0477)
                     - [x] Vnode pager: read/write file-backed pages via VFS. (REQ: REQ-01-0478)
-                    - [ ] Device pager: direct mapping of device memory (framebuffer, MMIO). (REQ: REQ-01-0479)
+                    - [x] Device pager: fault-driven direct mapping of device memory (framebuffer, MMIO). (REQ: REQ-01-0479)
                     - [x] Anonymous default-object faults zero-fill pages on demand. (REQ: REQ-01-0480)
                 - [x] **Backing Store (`vm_swap`):** (REQ: REQ-01-0481)
                     - [x] Support swap files and raw block-device swap backends. (REQ: REQ-01-0482)
@@ -1623,7 +1623,7 @@
 - **US-01-0476**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want a generic pager interface through `vm_pager_allocate/get_pages/put_pages/has_page` so that this capability is implemented with clear verification evidence.
 - **US-01-0477**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want the swap pager to move pages to and from swap backing store so that this capability is implemented with clear verification evidence.
 - **US-01-0478**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vnode pager: read/write file-backed pages via VFS so that this capability is implemented with clear verification evidence.
-- **US-01-0479**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to device pager: direct mapping of device memory (framebuffer, MMIO) so that this capability is implemented with clear verification evidence.
+- **US-01-0479**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want fault-driven device-pager mappings for device memory (framebuffer, MMIO) so that these mappings integrate with the VM fault path instead of ad-hoc eager PTE installation.
 - **US-01-0480**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want anonymous default-object faults to zero-fill pages on demand so that this capability is implemented with clear verification evidence.
 - **US-01-0481**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to backing Store (vm_swap): so that this capability is implemented with clear verification evidence.
 - **US-01-0482**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to support swap files and raw block-device swap backends so that this capability is implemented with clear verification evidence.
@@ -3587,7 +3587,7 @@
 - **REQ-01-0478** (EARS/Ubiquitous): The Substrate system shall vnode pager: read/write file-backed pages via VFS.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0479** (EARS/Ubiquitous): The Substrate system shall device pager: direct mapping of device memory (framebuffer, MMIO).
+- **REQ-01-0479** (EARS/Ubiquitous): The Substrate system shall provide a device pager that resolves framebuffer and MMIO mappings through the VM fault path by directly mapping the requested device physical pages.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0480** (EARS/Ubiquitous): The Substrate system shall zero-fill anonymous default-object pages on demand when no pager-backed contents exist.

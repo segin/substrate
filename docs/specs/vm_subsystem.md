@@ -123,7 +123,10 @@ Current swap pager / backing-store contract:
 Current device pager note:
 
 - `VM_OBJ_TYPE_DEVICE` is recognized by the generic pager allocator
-- the current device pager implementation remains a placeholder and does not yet provide real MMIO/framebuffer fault service
+- a device pager instance records a physical base, mapping length, and protection mask
+- `/dev/mem` and `/dev/fb0` install `VM_OBJ_TYPE_DEVICE` mappings backed by that pager instead of eagerly entering PTEs
+- `vm_fault()` resolves a device-backed fault by translating `pindex` to the requested physical page and inserting it directly into the target `pmap`
+- device-backed mappings do not populate a resident `vm_page_t` in the object; the pager is authoritative for the physical mapping target
 
 Current vnode pager contract:
 
@@ -142,7 +145,7 @@ Current vnode pager contract:
 3. walk the shadow chain looking for a resident page
 4. resolve copy-on-write when a write targets a shared backing page
 5. allocate a new page if none is resident
-6. either zero-fill the page or fetch it from the pager
+6. either zero-fill the page, fetch it from the pager, or resolve a direct device physical page through the device pager
 7. map the result through `pmap_enter`
 
 Implemented behaviors:
@@ -165,6 +168,7 @@ Current `sys_mmap()` behavior in `sys/vm/vm_syscalls.c`:
 - `MAP_FIXED` requires a page-aligned address and removes any existing mapping in the target range first
 - anonymous mappings are lazy: `mmap()` installs the `vm_map` entry and first access allocates a zero-filled page through `vm_fault()`
 - file-backed mappings are lazy and pager-backed
+- device-backed mappings installed by kernel character devices are also lazy and fault-driven
 
 Current file-backed mapping contract:
 
