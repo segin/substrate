@@ -3,29 +3,29 @@
 #include <string.h>
 
 struct elks_exec {
-    uint8_t  a_magic[2];
-    uint8_t  a_flags;
-    uint8_t  a_cpu;
-    uint8_t  a_hdrlen;
-    uint8_t  a_unused;
-    uint16_t a_version;
-    uint32_t a_text;
-    uint32_t a_data;
-    uint32_t a_bss;
-    uint32_t a_entry;
-    uint32_t a_total;
-    uint32_t a_syms;
+    uint32_t type;
+    uint8_t  hlen;
+    uint8_t  reserved1;
+    uint16_t version;
+    uint16_t tseg;
+    uint16_t reserved2;
+    uint16_t dseg;
+    uint16_t reserved3;
+    uint16_t bseg;
+    uint16_t reserved4;
+    uint32_t entry;
+    uint16_t chmem;
+    uint16_t minstack;
+    uint32_t syms;
 };
 
 int main() {
     struct elks_exec hdr;
     memset(&hdr, 0, sizeof(hdr));
     
-    hdr.a_magic[0] = 0x01;
-    hdr.a_magic[1] = 0x03;
-    hdr.a_flags = 0x10; // Executable
-    hdr.a_cpu = 0x10;   // 8086
-    hdr.a_hdrlen = sizeof(hdr);
+    hdr.type = 0x04100301u;
+    hdr.hlen = sizeof(hdr);
+    hdr.version = 1;
     
     // 16-bit code:
     // B8 04 00    mov ax, 4
@@ -50,8 +50,12 @@ int main() {
         'H', 'e', 'l', 'l', 'o', ',', ' ', 'E', 'L', 'K', 'S', '!', '\n'
     };
     
-    hdr.a_text = sizeof(code);
-    hdr.a_total = 0x10000; // 64KB total
+    hdr.tseg = sizeof(code);
+    hdr.dseg = 0;
+    hdr.bseg = 0;
+    hdr.entry = 0;
+    hdr.chmem = 0;
+    hdr.minstack = 4096;
     
     FILE *f = fopen("hello_elks", "wb");
     fwrite(&hdr, 1, sizeof(hdr), f);

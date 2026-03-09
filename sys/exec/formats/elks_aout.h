@@ -5,33 +5,83 @@
 #include <stddef.h>
 
 /*
- * ELKS a.out header structure (MINIX-style)
- * Based on traditional 16-bit a.out formats.
+ * ELKS uses the Minix-style 16-bit a.out header layout consumed by elksemu.
+ * The first four bytes are a little-endian type value, not a standalone
+ * 16-bit magic/CPU pair.
  */
-
-struct elks_exec {
-    uint8_t  a_magic[2];    /* Magic number */
-    uint8_t  a_flags;       /* Header flags */
-    uint8_t  a_cpu;         /* CPU type (0x01=8086, 0x02=80286) */
-    uint8_t  a_hdrlen;      /* Header length */
-    uint8_t  a_unused;
-    uint16_t a_version;     /* Version */
-    uint32_t a_text;        /* Text size */
-    uint32_t a_data;        /* Data size */
-    uint32_t a_bss;         /* BSS size */
-    uint32_t a_entry;       /* Entry point */
-    uint32_t a_total;       /* Total memory required */
-    uint32_t a_syms;        /* Symbol table size */
+struct __attribute__((packed)) elks_exec {
+    uint32_t type;
+    uint8_t  hlen;
+    uint8_t  reserved1;
+    uint16_t version;
+    uint16_t tseg;
+    uint16_t reserved2;
+    uint16_t dseg;
+    uint16_t reserved3;
+    uint16_t bseg;
+    uint16_t reserved4;
+    uint32_t entry;
+    uint16_t chmem;
+    uint16_t minstack;
+    uint32_t syms;
 };
 
-/* Magic numbers */
-#define ELKS_MAG0 0x01
-#define ELKS_MAG1 0x03
-/* Note: The task mentioned 0x0301/0x0302 as magic, which often means 
-   little-endian 0x01, 0x03 or similar. */
+struct __attribute__((packed)) elks_supl_hdr {
+    uint32_t msh_trsize;
+    uint32_t msh_drsize;
+    uint32_t msh_tbase;
+    uint32_t msh_dbase;
+    uint16_t esh_ftseg;
+    uint16_t esh_reserved1;
+    uint32_t esh_ftrsize;
+    uint32_t esh_reserved2;
+    uint32_t esh_reserved3;
+};
 
-#define ELKS_CPU_8086  1
-#define ELKS_CPU_80286 2
+#define ELKS_COMBID               0x04100301UL
+#define ELKS_SPLITID              0x04200301UL
+#define ELKS_SPLITID_AHISTORICAL  0x04300301UL
+
+#define ELKS_MINIX_HDR_SIZE  ((uint8_t)sizeof(struct elks_exec))
+#define ELKS_RELOC_HDR_SIZE  ((uint8_t)(sizeof(struct elks_exec) + 16))
+#define ELKS_FARTEXT_HDR_SIZE ((uint8_t)sizeof(struct elks_exec) + (uint8_t)sizeof(struct elks_supl_hdr))
+
+static inline int elks_header_type_valid(uint32_t type) {
+    return type == ELKS_COMBID ||
+           type == ELKS_SPLITID ||
+           type == ELKS_SPLITID_AHISTORICAL;
+}
+
+static inline int elks_header_hlen_valid(uint8_t hlen) {
+    return hlen == ELKS_MINIX_HDR_SIZE ||
+           hlen == ELKS_RELOC_HDR_SIZE ||
+           hlen == ELKS_FARTEXT_HDR_SIZE;
+}
+
+static inline int elks_header_recognized(const void *header, size_t len) {
+    const struct elks_exec *hdr = (const struct elks_exec *)header;
+
+    if (!header || len < sizeof(struct elks_exec)) {
+        return 0;
+    }
+    if (!elks_header_type_valid(hdr->type)) {
+        return 0;
+    }
+    if (!elks_header_hlen_valid(hdr->hlen)) {
+        return 0;
+    }
+    if (hdr->hlen > len) {
+        return 0;
+    }
+    if (hdr->tseg == 0) {
+        return 0;
+    }
+    if (hdr->version != 0 && hdr->version != 1) {
+        return 0;
+    }
+
+    return 1;
+}
 
 /* Prototypes */
 struct exec_binary_handler;

@@ -35,24 +35,10 @@ void elks_init_handler(void) {
 
 int elks_check_file(const char *path, const char *header, size_t len) {
     (void)path;
-    if (len < sizeof(struct elks_exec)) return -ENOEXEC;
-    
-    struct elks_exec *hdr = (struct elks_exec *)header;
-    
-    // Check magic (0x01 0x03 for 0x0301 little-endian)
-    if (hdr->a_magic[0] != ELKS_MAG0 || hdr->a_magic[1] != ELKS_MAG1) {
-        return -ENOEXEC;
-    }
-    
-    // Check CPU type
-    if (hdr->a_cpu != ELKS_CPU_8086 && hdr->a_cpu != ELKS_CPU_80286) {
-        return -ENOEXEC;
-    }
-    
-    return 0; // Match
+    return elks_header_recognized(header, len) ? 0 : -ENOEXEC;
 }
 
-static int elks_setup_segments(process_t *proc, struct elks_exec *hdr) {
+static int elks_setup_segments(process_t *proc, const struct elks_exec *hdr) {
     (void)hdr;
     /* Allocate LDT if needed */
     if (!proc->ldt) {
@@ -135,17 +121,17 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     }
     
     // Read Text segment
-    if (hdr.a_text > 0) {
-        kern_lseek(fd, hdr.a_hdrlen, 0); // SEEK_SET
-        if (kern_read(fd, (void*)ELKS_TEXT_BASE, hdr.a_text) != (int)hdr.a_text) {
+    if (hdr.tseg > 0) {
+        kern_lseek(fd, hdr.hlen, 0); // SEEK_SET
+        if (kern_read(fd, (void*)ELKS_TEXT_BASE, hdr.tseg) != (int)hdr.tseg) {
             return -EIO;
         }
     }
     
     // Read Data segment
-    if (hdr.a_data > 0) {
-        kern_lseek(fd, hdr.a_hdrlen + hdr.a_text, 0);
-        if (kern_read(fd, (void*)ELKS_DATA_BASE, hdr.a_data) != (int)hdr.a_data) {
+    if (hdr.dseg > 0) {
+        kern_lseek(fd, hdr.hlen + hdr.tseg, 0);
+        if (kern_read(fd, (void*)ELKS_DATA_BASE, hdr.dseg) != (int)hdr.dseg) {
             return -EIO;
         }
     }
@@ -181,7 +167,7 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     
     kern_close(fd);
     
-    jump_to_elks(hdr.a_entry, user_sp, cs_sel, ds_sel);
+    jump_to_elks(hdr.entry, user_sp, cs_sel, ds_sel);
     
     panic("jump_to_elks returned!");
     return 0;

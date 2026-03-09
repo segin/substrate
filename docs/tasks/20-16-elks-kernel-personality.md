@@ -32,7 +32,7 @@ Reference: User Request (Step 31552)
         - Acceptance: Each 16-bit memory model's segment layout, pointer-width expectations, and Substrate support target are documented.
 
 - [ ] **Binary Format Recognition:** (REQ: REQ-20-0006)
-    - [ ] Implement ELKS a.out binary format detection. (REQ: REQ-20-0007)
+    - [x] Implement ELKS a.out binary format detection. (REQ: REQ-20-0007)
         - Files: `sys/exec/formats/elks_aout.c`, `sys/exec/formats/elks_aout.h`
         - Tests: unit (magic number detection)
         - Docs: `elks_aout.4` manpage
