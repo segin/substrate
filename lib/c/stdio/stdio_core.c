@@ -5,26 +5,25 @@
 #include <errno.h>
 #include <string.h>
 
-#define SEEK_SET 0
-#define SEEK_CUR 1
-#define SEEK_END 2
-
-#define BUFSIZ 1024
-
 static FILE *g_file_list_head = NULL;
 
 // Helper to flush buffer
 static int __fflush_write(FILE *f) {
-    if (f->pos > f->buffer) {
-        size_t len = f->pos - f->buffer;
-        ssize_t written = write(f->fd, f->buffer, len);
-        if (written < 0) {
-            f->error = 1;
-            return EOF;
-        }
-        f->pos = f->buffer;
-    }
-    return 0;
+	if(f->pos > f->buffer) {
+		size_t len = f->pos - f->buffer;
+		unsigned char *p = f->buffer;
+		while(len > 0) {
+			ssize_t written = write(f->fd, p, len);
+			if(written < 0) {
+				f->error = 1;
+				return EOF;
+			}
+			p += written;
+			len -= written;
+		}
+		f->pos = f->buffer;
+	}
+	return 0;
 }
 
 FILE *fdopen(int fd, const char *mode) {
@@ -68,28 +67,24 @@ FILE *fdopen(int fd, const char *mode) {
 }
 
 FILE *fopen(const char *path, const char *mode) {
-    int flags = 0;
-    int acc_mode = 0666;
-    
-    const char *p = mode;
-    int rw = 0;
-    int create = 0;
-    int trunc = 0;
-    int append = 0;
-    
-    if (*p == 'r') { rw = O_RDONLY; } 
-    else if (*p == 'w') { rw = O_WRONLY; create = O_CREAT; trunc = O_TRUNC; } 
-    else if (*p == 'a') { rw = O_WRONLY; create = O_CREAT; append = O_APPEND; } 
-    else return NULL;
-    
-    if (strchr(mode, '+')) rw = O_RDWR;
-    
-    flags = rw | create | trunc | append;
-    
-    int fd = open(path, flags, acc_mode);
-    if (fd < 0) return NULL;
-    
-    return fdopen(fd, mode);
+	int flags = 0;
+	int acc_mode = 0666;
+	int rw = 0, create = 0, trunc = 0, append = 0, excl = 0;
+
+	if(mode[0] == 'r') { rw = O_RDONLY; }
+	else if(mode[0] == 'w') { rw = O_WRONLY; create = O_CREAT; trunc = O_TRUNC; }
+	else if(mode[0] == 'a') { rw = O_WRONLY; create = O_CREAT; append = O_APPEND; }
+	else return NULL;
+
+	if(strchr(mode, '+')) rw = O_RDWR;
+	if(strchr(mode, 'x')) excl = O_EXCL; // C11 exclusive create
+
+	flags = rw | create | trunc | append | excl;
+
+	int fd = open(path, flags, acc_mode);
+	if(fd < 0) return NULL;
+
+	return fdopen(fd, mode);
 }
 
 int fclose(FILE *stream) {
@@ -113,26 +108,108 @@ int fclose(FILE *stream) {
 }
 
 int fflush(FILE *stream) {
-    if (!stream) {
-        int ret = 0;
-        FILE *current = g_file_list_head;
-        while (current) {
-            if (fflush(current) == EOF) {
-                ret = EOF;
-            }
-            current = current->next;
-        }
-        return ret;
-    }
+	if(!stream) {
+		int ret = 0;
+		FILE *current = g_file_list_head;
+		while(current) {
+			if(fflush(current) == EOF) ret = EOF;
+			current = current->next;
+		}
+		return ret;
+	}
+	if(stream->flags == O_RDONLY) {
+		stream->pos = stream->buffer;
+		stream->limit = stream->buffer;
+		return 0;
+	}
+	return __fflush_write(stream);
+}
 
-    if (stream->flags == O_RDONLY) {
-        // Purge read buffer
-        stream->pos = stream->buffer;
-        stream->limit = stream->buffer;
-        return 0;
-    } else {
-        return __fflush_write(stream);
-    }
+int setvbuf(FILE *stream, char *buf, int mode, size_t size) {
+	if(!stream) return -1;
+	if(mode != _IOFBF && mode != _IOLBF && mode != _IONBF) return -1;
+
+	fflush(stream);
+
+	if(mode == _IONBF) {
+		stream->mode = _IONBF;
+		return 0;
+	}
+
+	if(buf) {
+		if(stream->own_buffer) free(stream->buffer);
+		stream->buffer = (unsigned char *)buf;
+		stream->buf_end = (unsigned char *)buf + size;
+		stream->own_buffer = 0;
+	} else if(size > 0 && size != (size_t)(stream->buf_end - stream->buffer)) {
+		unsigned char *newbuf = malloc(size);
+		if(!newbuf) return -1;
+		if(stream->own_buffer) free(stream->buffer);
+		stream->buffer = newbuf;
+		stream->buf_end = newbuf + size;
+		stream->own_buffer = 1;
+	}
+	stream->pos = stream->buffer;
+	stream->limit = stream->buffer;
+	stream->mode = mode;
+	return 0;
+}
+
+void setbuf(FILE *stream, char *buf) {
+	setvbuf(stream, buf, buf ? _IOFBF : _IONBF, BUFSIZ);
+}
+
+void setlinebuf(FILE *stream) {
+	setvbuf(stream, NULL, _IOLBF, 0);
+}
+
+FILE *freopen(const char *path, const char *mode, FILE *stream) {
+	if(!stream) return NULL;
+
+	fflush(stream);
+	close(stream->fd);
+
+	if(!path) {
+		// C99: change mode of existing fd — not fully implementable without fcntl
+		return NULL;
+	}
+
+	int flags = 0;
+	int rw = 0, create = 0, trunc = 0, append = 0, excl = 0;
+
+	if(mode[0] == 'r') { rw = O_RDONLY; }
+	else if(mode[0] == 'w') { rw = O_WRONLY; create = O_CREAT; trunc = O_TRUNC; }
+	else if(mode[0] == 'a') { rw = O_WRONLY; create = O_CREAT; append = O_APPEND; }
+	else return NULL;
+
+	if(strchr(mode, '+')) rw = O_RDWR;
+	if(strchr(mode, 'x')) excl = O_EXCL;
+
+	flags = rw | create | trunc | append | excl;
+
+	int fd = open(path, flags, 0666);
+	if(fd < 0) return NULL;
+
+	stream->fd = fd;
+	stream->flags = rw;
+	stream->error = 0;
+	stream->eof = 0;
+	stream->pos = stream->buffer;
+	stream->limit = stream->buffer;
+	stream->has_unget = 0;
+
+	return stream;
+}
+
+int fcloseall(void) {
+	int ret = 0;
+	FILE *current = g_file_list_head;
+	while(current) {
+		FILE *next = current->next;
+		if(fclose(current) == EOF) ret = EOF;
+		current = next;
+	}
+	return ret;
 }
 
 size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream) {
@@ -221,23 +298,43 @@ size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
 }
 
 int fseek(FILE *stream, long offset, int whence) {
-    fflush(stream);
-    // Reset internal pointers
-    stream->pos = stream->limit = stream->buffer;
-    stream->has_unget = 0;
-    stream->eof = 0;
-    
-    off_t ret = lseek(stream->fd, offset, whence); // Need lseek wrapper in unistd
-    if (ret == -1) {
-        stream->error = 1;
-        return -1;
-    }
-    return 0;
+	fflush(stream);
+	stream->pos = stream->limit = stream->buffer;
+	stream->has_unget = 0;
+	stream->eof = 0;
+
+	off_t ret = lseek(stream->fd, offset, whence);
+	if(ret == -1) {
+		stream->error = 1;
+		return -1;
+	}
+	return 0;
 }
 
 long ftell(FILE *stream) {
-    return lseek(stream->fd, 0, SEEK_CUR); // Doesn't account for buffer! 
-    // Correct impl needs to subtract (limit - pos) for read, or add (pos - buffer) for write
+	long pos = lseek(stream->fd, 0, SEEK_CUR);
+	if(pos == -1) return -1;
+
+	if(stream->flags == O_RDONLY || (stream->flags & O_RDWR)) {
+		// Read mode: subtract unread buffered data
+		pos -= (stream->limit - stream->pos);
+		if(stream->has_unget) pos--;
+	} else {
+		// Write mode: add buffered but unflushed data
+		pos += (stream->pos - stream->buffer);
+	}
+	return pos;
+}
+
+int fgetpos(FILE *stream, fpos_t *pos) {
+	long p = ftell(stream);
+	if(p == -1) return -1;
+	*pos = (fpos_t)p;
+	return 0;
+}
+
+int fsetpos(FILE *stream, const fpos_t *pos) {
+	return fseek(stream, (long)*pos, SEEK_SET);
 }
 
 void rewind(FILE *stream) {
@@ -336,3 +433,28 @@ ssize_t getline(char **lineptr, size_t *n, FILE *stream) {
 }
 
 int remove(const char *pathname) { return unlink(pathname); }
+
+FILE *tmpfile(void) {
+	static int tmpfile_counter = 0;
+	char name[L_tmpnam + 16];
+
+	for(int i = 0; i < 100; i++) {
+		snprintf(name, sizeof(name), "/tmp/.tmpf.%d.%d", getpid(), tmpfile_counter++);
+		int fd = open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
+		if(fd >= 0) {
+			unlink(name); // Delete on close
+			FILE *f = fdopen(fd, "w+");
+			if(!f) { close(fd); return NULL; }
+			return f;
+		}
+	}
+	return NULL;
+}
+
+char *tmpnam(char *s) {
+	static char buf[L_tmpnam];
+	static int counter = 0;
+	char *p = s ? s : buf;
+	snprintf(p, L_tmpnam, "/tmp/tmp.%d.%d", getpid(), counter++);
+	return p;
+}

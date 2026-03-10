@@ -82,6 +82,7 @@ int fclose(FILE *stream);
 int fflush(FILE *stream);
 void setbuf(FILE *stream, char *buf);
 int setvbuf(FILE *stream, char *buf, int mode, size_t size);
+void setlinebuf(FILE *stream);
 
 size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream);
 size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream);
@@ -101,6 +102,9 @@ int remove(const char *pathname);
 int rename(const char *oldpath, const char *newpath);
 FILE *tmpfile(void);
 char *tmpnam(char *s);
+int fcloseall(void);
+
+void __stdio_init(void);
 
 #define fileno(f) ((f)->fd)
 
