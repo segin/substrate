@@ -293,6 +293,16 @@ static int is_x86_register_text(const char *s) {
         }
         return *p == '\0';
     }
+    if (strncmp(s, "mm", 2) == 0) {
+        if (!isdigit((unsigned char)s[2])) {
+            return 0;
+        }
+        p = s + 2;
+        while (isdigit((unsigned char)*p)) {
+            ++p;
+        }
+        return *p == '\0';
+    }
     if (s[0] == 'k' && isdigit((unsigned char)s[1])) {
         p = s + 1;
         while (isdigit((unsigned char)*p)) {
@@ -366,6 +376,18 @@ static int intel_mem_size_bits(const char *s) {
     }
     if (streq_ci(s, "qword")) {
         return 64;
+    }
+    if (streq_ci(s, "mmword")) {
+        return 64;
+    }
+    if (streq_ci(s, "fword")) {
+        return 48;
+    }
+    if (streq_ci(s, "tbyte")) {
+        return 80;
+    }
+    if (streq_ci(s, "oword")) {
+        return 128;
     }
     if (streq_ci(s, "xmmword")) {
         return 128;
@@ -1227,6 +1249,91 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
     out_op->u.mem = mem;
     return 0;
 }
+
+static int parse_intel_absolute_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, as_operand_t *out_op) {
+    as_mem_operand_t mem;
+    as_token_t fake_tok;
+    size_t i;
+    int bits;
+
+    if (ctx == NULL || tokv == NULL || out_op == NULL || n == 0) {
+        return -1;
+    }
+
+    memset(&mem, 0, sizeof(mem));
+    mem.scale = 1;
+
+    i = 0;
+    bits = intel_mem_size_bits(tokv[i].text);
+    if (bits == 0)
+        return -1;
+    mem.size_bits = bits;
+    ++i;
+
+    if (i < n && streq_ci(tokv[i].text, "ptr"))
+        ++i;
+
+    if (i < n && tokv[i].text != NULL) {
+        const char *colon = strchr(tokv[i].text, ':');
+        if (colon != NULL) {
+            size_t seg_len = (size_t)(colon - tokv[i].text);
+            char *seg = (char *)malloc(seg_len + 1);
+            if (seg == NULL)
+                return -1;
+            memcpy(seg, tokv[i].text, seg_len);
+            seg[seg_len] = '\0';
+            if (is_x86_segment_text(seg)) {
+                mem.segment_reg = strip_register_prefix(seg);
+                free(seg);
+                if (mem.segment_reg == NULL)
+                    return -1;
+                if (colon[1] != '\0') {
+                    fake_tok = tokv[i];
+                    fake_tok.text = (char *)colon + 1;
+                    fake_tok.kind = (isdigit((unsigned char)colon[1]) || colon[1] == '-' || colon[1] == '+') ?
+                                        AS_TOK_IMMEDIATE :
+                                        AS_TOK_IDENTIFIER;
+                    mem.disp = parse_expression_from_tokens(ctx, &fake_tok, 1);
+                    if (mem.disp == NULL)
+                        goto bad;
+                    out_op->kind = AS_OPERAND_MEMORY;
+                    out_op->u.mem = mem;
+                    return 0;
+                }
+                ++i;
+            } else {
+                free(seg);
+            }
+        }
+    }
+
+    if (i < n && (tokv[i].kind == AS_TOK_REGISTER || tokv[i].kind == AS_TOK_LABEL) && is_x86_segment_text(tokv[i].text)) {
+        mem.segment_reg = strip_register_prefix(tokv[i].text);
+        if (mem.segment_reg == NULL)
+            return -1;
+        ++i;
+        if (i < n && strcmp(tokv[i].text, ":") == 0)
+            ++i;
+    }
+
+    if (i >= n)
+        goto bad;
+
+    mem.disp = parse_expression_from_tokens(ctx, tokv + i, n - i);
+    if (mem.disp == NULL)
+        goto bad;
+
+    out_op->kind = AS_OPERAND_MEMORY;
+    out_op->u.mem = mem;
+    return 0;
+
+bad:
+    free(mem.base_reg);
+    free(mem.index_reg);
+    free(mem.segment_reg);
+    free_expr(mem.disp);
+    return -1;
+}
 static int parse_register_list(const as_token_t *tokv, size_t n, as_operand_t *op) {
     size_t i;
     size_t capacity;
@@ -1378,6 +1485,9 @@ static int parse_operand_slice(parse_ctx_t *ctx, const as_token_t *tokv, size_t 
         return 0;
     }
     if (has_lbr && parse_intel_memory(ctx, tokv, n, op) == 0) {
+        return 0;
+    }
+    if (parse_intel_absolute_memory(ctx, tokv, n, op) == 0) {
         return 0;
     }
 
