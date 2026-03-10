@@ -194,11 +194,11 @@ Reference: User Request (Step 31552)
         - Acceptance: Out-of-range ELKS user-memory access traps and tears the process down cleanly without a kernel panic; the current i386 path manifests as a user fault reported by the kernel trap path.
 
 - [ ] **Sample ELKS Userland & Build Scripts:** (REQ: REQ-20-0049)
-    - [ ] Add ELKS cross-compiler toolchain setup script. (REQ: REQ-20-0050)
+    - [x] Add ELKS cross-compiler toolchain setup script. (REQ: REQ-20-0050)
         - Files: `tools/elks/setup_toolchain.sh`
-        - Tests: N/A (build script)
+        - Tests: shell syntax (`sh -n tools/elks/setup_toolchain.sh`)
         - Docs: `tools/elks/README.md`
-        - Acceptance: Script downloads/builds ia16-elf-gcc toolchain.
+        - Acceptance: Script bootstraps the pinned `ia16-elf` binutils/GCC toolchain used by the ELKS smoke binaries and documents the install prefix plus host prerequisites.
     - [ ] Add sample ELKS shell (minimal). (REQ: REQ-20-0051)
         - Files: `tests/elks/minish.c`, `tests/elks/Makefile`
         - Tests: emulation (run commands in QEMU)
