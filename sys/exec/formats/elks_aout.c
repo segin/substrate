@@ -18,9 +18,14 @@
 #include <sys/sysinfo.h>
 #include <sys/stat.h>
 #include <sys/fcntl.h>
+#include <sys/copy.h>
 #include <kern/panic.h>
 #include <kern/arch.h>
 #include <vm/vm_map.h>
+
+#define ELKS_ARG_MAX_BYTES (32 * 1024)
+#define ELKS_ARG_MAX_COUNT 4096
+
 static struct exec_binary_handler elks_handler = {
     .name = "ELKS a.out",
     .check = elks_check_file,
@@ -41,6 +46,144 @@ static int SUB_NODISCARD elks_fail(int fd, int err, const char *msg) {
 
 void elks_init_handler(void) {
     exec_register_handler(&elks_handler);
+}
+
+static int elks_is_user_ptr(const void *ptr) {
+    return (uintptr_t)ptr < 0xC0000000U;
+}
+
+static int elks_capture_ptr(char *const array[], int index, char **out) {
+    if (elks_is_user_ptr(array)) {
+        return copyin(&array[index], out, sizeof(char *));
+    }
+    *out = array[index];
+    return 0;
+}
+
+static void elks_free_kernel_vector(char **vec) {
+    size_t i;
+
+    if (!vec) {
+        return;
+    }
+    for (i = 0; vec[i]; i++) {
+        size_t len = strlen(vec[i]) + 1U;
+        kfree(vec[i], len);
+    }
+    kfree(vec, (i + 1U) * sizeof(char *));
+}
+
+static int elks_count_vector(char *const array[], int *count_out) {
+    int count = 0;
+
+    while (count < ELKS_ARG_MAX_COUNT) {
+        char *item;
+
+        if (!array) {
+            break;
+        }
+        if (elks_capture_ptr(array, count, &item) != 0) {
+            return -EFAULT;
+        }
+        if (!item) {
+            break;
+        }
+        count++;
+        if (count > (int)(ELKS_ARG_MAX_BYTES / 4)) {
+            return -E2BIG;
+        }
+    }
+    *count_out = count;
+    return 0;
+}
+
+static int elks_dup_vector(char *const src[], char ***out_vec) {
+    char **dst = NULL;
+    int count = 0;
+    int ret;
+    int i;
+
+    *out_vec = NULL;
+    ret = elks_count_vector(src, &count);
+    if (ret != 0) {
+        return ret;
+    }
+
+    dst = kmalloc(((size_t)count + 1U) * sizeof(char *));
+    if (!dst) {
+        return -ENOMEM;
+    }
+    memset(dst, 0, ((size_t)count + 1U) * sizeof(char *));
+
+    for (i = 0; i < count; i++) {
+        char *item;
+        size_t copied_len = 0;
+        char *copy;
+
+        if (elks_capture_ptr(src, i, &item) != 0) {
+            ret = -EFAULT;
+            goto fail;
+        }
+        if (!item) {
+            break;
+        }
+
+        if (elks_is_user_ptr(item)) {
+            ret = copyinstr(item, NULL, ELKS_ARG_MAX_BYTES, &copied_len);
+            if (ret != 0) {
+                ret = (ret == ENAMETOOLONG) ? -E2BIG : -EFAULT;
+                goto fail;
+            }
+        } else {
+            copied_len = strlen(item) + 1U;
+        }
+
+        copy = kmalloc(copied_len);
+        if (!copy) {
+            ret = -ENOMEM;
+            goto fail;
+        }
+
+        if (elks_is_user_ptr(item)) {
+            ret = copyinstr(item, copy, copied_len, NULL);
+            if (ret != 0) {
+                kfree(copy, copied_len);
+                ret = (ret == ENAMETOOLONG) ? -E2BIG : -EFAULT;
+                goto fail;
+            }
+        } else {
+            memcpy(copy, item, copied_len);
+        }
+
+        dst[i] = copy;
+    }
+
+    *out_vec = dst;
+    return 0;
+
+fail:
+    elks_free_kernel_vector(dst);
+    return ret;
+}
+
+static int elks_dup_exec_vectors(char *const argv[], char *const envp[],
+                                 char ***kargv_out, char ***kenvp_out) {
+    int ret;
+
+    *kargv_out = NULL;
+    *kenvp_out = NULL;
+
+    ret = elks_dup_vector(argv, kargv_out);
+    if (ret != 0) {
+        return ret;
+    }
+    ret = elks_dup_vector(envp, kenvp_out);
+    if (ret != 0) {
+        elks_free_kernel_vector(*kargv_out);
+        *kargv_out = NULL;
+        return ret;
+    }
+    return 0;
 }
 
 int SUB_NODISCARD SUB_NONNULL(2)
@@ -72,7 +215,10 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     struct elks_exec hdr;
     struct elks_supl_hdr suph;
     struct elks_load_plan plan;
+    char **kargv = NULL;
+    char **kenvp = NULL;
     size_t argv_envp_bytes;
+    int ret;
     
     kprint("ELKS: loading ");
     kprint(path ? path : "(null)");
@@ -94,17 +240,27 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     }
     memset(&suph, 0, sizeof(suph));
     memset(&plan, 0, sizeof(plan));
-    argv_envp_bytes = elks_stack_image_bytes(argv, envp);
+    ret = elks_dup_exec_vectors(argv, envp, &kargv, &kenvp);
+    if (ret != 0) {
+        return elks_fail(fd, ret, "ELKS: failed to copy exec argument vectors");
+    }
+    argv_envp_bytes = elks_stack_image_bytes(kargv, kenvp);
     if (argv_envp_bytes > 0xFFFFU) {
+        elks_free_kernel_vector(kargv);
+        elks_free_kernel_vector(kenvp);
         return elks_fail(fd, -E2BIG, "ELKS: argv/envp image exceeds 16-bit segment");
     }
     if (!elks_header_recognized(&hdr, sizeof(hdr))) {
+        elks_free_kernel_vector(kargv);
+        elks_free_kernel_vector(kenvp);
         return elks_fail(fd, -ENOEXEC, "ELKS: header not recognized");
     }
     if (hdr.hlen > sizeof(hdr)) {
         size_t extra = (size_t)hdr.hlen - sizeof(hdr);
 
         if (extra > sizeof(suph)) {
+            elks_free_kernel_vector(kargv);
+            elks_free_kernel_vector(kenvp);
             return elks_fail(fd, -ENOEXEC, "ELKS: supplemental header too large");
         }
         {
@@ -112,12 +268,16 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
             int status = elks_read_exact_status(rc, extra);
 
             if (status != 0) {
+                elks_free_kernel_vector(kargv);
+                elks_free_kernel_vector(kenvp);
                 return elks_fail(fd, status == -ENOEXEC ? -ENOEXEC : -EIO,
                                  "ELKS: failed to read supplemental header");
             }
         }
     }
     if (!elks_build_load_plan(&hdr, &suph, (uint16_t)argv_envp_bytes, &plan)) {
+        elks_free_kernel_vector(kargv);
+        elks_free_kernel_vector(kenvp);
         return elks_fail(fd, -ENOEXEC, "ELKS: invalid load plan");
     }
     
@@ -125,6 +285,8 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     extern pmap_t pmap_create(void);
     pmap_t pmap = pmap_create();
     if (!pmap) {
+        elks_free_kernel_vector(kargv);
+        elks_free_kernel_vector(kenvp);
         return elks_fail(fd, -ENOMEM, "ELKS: failed to create pmap");
     }
     
@@ -138,6 +300,8 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
          va += 0x1000) {
         void *pa = pmm_alloc_block();
         if (!pa) {
+            elks_free_kernel_vector(kargv);
+            elks_free_kernel_vector(kenvp);
             return elks_fail(fd, -ENOMEM, "ELKS: failed to allocate text page");
         }
         uint32_t pa_phys = (uint32_t)pa - 0xC0000000;
@@ -151,6 +315,8 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
              va += 0x1000) {
             void *pa = pmm_alloc_block();
             if (!pa) {
+                elks_free_kernel_vector(kargv);
+                elks_free_kernel_vector(kenvp);
                 return elks_fail(fd, -ENOMEM, "ELKS: failed to allocate data page");
             }
             uint32_t pa_phys = (uint32_t)pa - 0xC0000000;
@@ -165,6 +331,8 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
              va += 0x1000) {
             void *pa = pmm_alloc_block();
             if (!pa) {
+                elks_free_kernel_vector(kargv);
+                elks_free_kernel_vector(kenvp);
                 return elks_fail(fd, -ENOMEM, "ELKS: failed to allocate far text page");
             }
             uint32_t pa_phys = (uint32_t)pa - 0xC0000000;
@@ -181,6 +349,8 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
             int status = elks_read_exact_status(rc, plan.text_size);
 
             if (status != 0) {
+                elks_free_kernel_vector(kargv);
+                elks_free_kernel_vector(kenvp);
                 return elks_fail(fd, status == -ENOEXEC ? -ENOEXEC : -EIO,
                                  "ELKS: failed to read text segment");
             }
@@ -194,6 +364,8 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
             int status = elks_read_exact_status(rc, plan.fartext_size);
 
             if (status != 0) {
+                elks_free_kernel_vector(kargv);
+                elks_free_kernel_vector(kenvp);
                 return elks_fail(fd, status == -ENOEXEC ? -ENOEXEC : -EIO,
                                  "ELKS: failed to read far text segment");
             }
@@ -209,6 +381,8 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
             int status = elks_read_exact_status(rc, plan.data_size);
 
             if (status != 0) {
+                elks_free_kernel_vector(kargv);
+                elks_free_kernel_vector(kenvp);
                 return elks_fail(fd, status == -ENOEXEC ? -ENOEXEC : -EIO,
                                  "ELKS: failed to read data segment");
             }
@@ -218,6 +392,8 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     
     // Setup LDT
     if (elks_setup_segments(current_process, &plan) != 0) {
+        elks_free_kernel_vector(kargv);
+        elks_free_kernel_vector(kenvp);
         return elks_fail(fd, -ENOMEM, "ELKS: failed to allocate or populate LDT");
     }
     ldt_activate(current_process);
@@ -240,7 +416,9 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     memset(&layout, 0, sizeof(layout));
     elks_build_segment_layout(&plan, &layout);
     if (!elks_build_stack_image((uint8_t *)(uintptr_t)plan.data_base, &plan,
-                                argv, envp, &initial_sp)) {
+                                kargv, kenvp, &initial_sp)) {
+        elks_free_kernel_vector(kargv);
+        elks_free_kernel_vector(kenvp);
         return elks_fail(fd, -E2BIG, "ELKS: failed to build startup stack image");
     }
     user_sp = initial_sp;
@@ -248,6 +426,8 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     extern void jump_to_elks(uint32_t entry, uint32_t stack, uint32_t cs,
                              uint32_t ds, uint32_t ss, uint32_t es);
     
+    elks_free_kernel_vector(kargv);
+    elks_free_kernel_vector(kenvp);
     kern_close(fd);
     
     jump_to_elks(hdr.entry, user_sp ? user_sp : 0xFFFE, layout.cs_sel, layout.ds_sel,

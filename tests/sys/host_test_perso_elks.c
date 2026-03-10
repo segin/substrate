@@ -50,6 +50,7 @@ static size_t ds_mem_size;
 
 #define sys_exit   stub_sys_exit
 #define sys_fork   stub_sys_fork
+#define sys_vfork  stub_sys_vfork
 #define sys_read   stub_sys_read
 #define sys_write  stub_sys_write
 #define sys_open   stub_sys_open
@@ -113,6 +114,7 @@ static size_t ds_mem_size;
 
 int stub_sys_exit(int a) { last_name = "exit"; last_i0 = a; return 11; }
 int stub_sys_fork(void) { last_name = "fork"; return 12; }
+int stub_sys_vfork(void) { last_name = "vfork"; return 13; }
 int stub_sys_read(int a, char *b, int c) { last_name = "read"; last_i0 = a; last_ptr = (uintptr_t)b; last_i1 = c; return 22; }
 int stub_sys_write(int a, const char *b, int c) { last_name = "write"; last_i0 = a; last_ptr = (uintptr_t)b; last_i1 = c; return 33; }
 int stub_sys_open(const char *a, int b, int c) { last_name = "open"; last_ptr = (uintptr_t)a; last_i0 = b; last_i1 = c; return 44; }
@@ -582,6 +584,12 @@ int main(void) {
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_fork];
     if (fn(0, 0, 0, 0, 0, 0, 0, 0) != 12 || strcmp(last_name, "fork") != 0) {
         fprintf(stderr, "FAIL: ELKS fork wrapper wrong\n");
+        return 1;
+    }
+
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_vfork];
+    if (fn(0, 0, 0, 0, 0, 0, 0, 0) != 13 || strcmp(last_name, "vfork") != 0) {
+        fprintf(stderr, "FAIL: ELKS vfork wrapper wrong\n");
         return 1;
     }
 

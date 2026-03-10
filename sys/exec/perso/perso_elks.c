@@ -1118,6 +1118,14 @@ static int elks_sys_fork(uint32_t unused0, uint32_t unused1, uint32_t unused2,
     return sys_fork();
 }
 
+static int elks_sys_vfork(uint32_t unused0, uint32_t unused1, uint32_t unused2,
+                          uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                          uint32_t unused6, uint32_t unused7) {
+    (void)unused0; (void)unused1; (void)unused2; (void)unused3;
+    (void)unused4; (void)unused5; (void)unused6; (void)unused7;
+    return sys_vfork();
+}
+
 static int elks_sys_execve(uint32_t path_off, uint32_t stack_off, uint32_t stack_bytes,
                            uint32_t unused3, uint32_t unused4, uint32_t unused5,
                            uint32_t unused6, uint32_t unused7) {
@@ -1607,6 +1615,7 @@ static void elks_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, 
 static void *elks_syscall_table[ELKS_SYS_MAX] = {
     [ELKS_SYS_exit]    = (void *)&elks_sys_exit,
     [ELKS_SYS_fork]    = (void *)&elks_sys_fork,
+    [ELKS_SYS_vfork]   = (void *)&elks_sys_vfork,
     [ELKS_SYS_read]    = (void *)&elks_sys_read,
     [ELKS_SYS_write]   = (void *)&elks_sys_write,
     [ELKS_SYS_open]    = (void *)&elks_sys_open,
@@ -1674,6 +1683,7 @@ void elks_personality_init(void) {
 static const char *elks_syscall_names[ELKS_SYS_MAX] = {
     [ELKS_SYS_exit]    = "exit",
     [ELKS_SYS_fork]    = "fork",
+    [ELKS_SYS_vfork]   = "vfork",
     [ELKS_SYS_read]    = "read",
     [ELKS_SYS_write]   = "write",
     [ELKS_SYS_open]    = "open",

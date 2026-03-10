@@ -37,6 +37,7 @@
 #define ELKS_SYS_alarm          27
 #define ELKS_SYS_fstat          28
 #define ELKS_SYS_pause          29
+#define ELKS_SYS_vfork          32
 #define ELKS_SYS_access         33
 #define ELKS_SYS_sync           36
 #define ELKS_SYS_kill           37
