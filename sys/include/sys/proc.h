@@ -120,6 +120,7 @@ typedef struct process {
     // LDT support
     void        *ldt;             // Pointer to LDT entries (gdt_entry_t*)
     int          ldt_entry_count; // Number of entries in LDT
+    spinlock_t   ldt_lock;        // Protects LDT pointer/count replacement
     
     // Resource limits, FDs, etc. would go here
 } process_t;

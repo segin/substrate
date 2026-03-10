@@ -12,6 +12,116 @@
 /* GDT index 7 is reserved for the active process LDT */
 #define GDT_LDT_INDEX 7
 
+static void ldt_load_selector(uint16_t selector) {
+#ifndef HOST_TEST
+    __asm__ volatile("lldt %0" : : "r"(selector));
+#else
+    (void)selector;
+#endif
+}
+
+static void ldt_activate_locked(process_t *proc) {
+    if (!proc || !proc->ldt) {
+        ldt_load_selector(0);
+        return;
+    }
+
+    /*
+     * The caller holds proc->ldt_lock, so proc->ldt and
+     * proc->ldt_entry_count remain stable while the active descriptor is
+     * rewritten and LDTR is reloaded.
+     */
+    gdt_set_gate(GDT_LDT_INDEX,
+                 (uint32_t)(uintptr_t)proc->ldt,
+                 (uint32_t)(proc->ldt_entry_count * LDT_ENTRY_SIZE) - 1U,
+                 0x82,
+                 0x40);
+    ldt_load_selector((uint16_t)(GDT_LDT_INDEX << 3));
+}
+
+static void ldt_swap_process(process_t *proc,
+                             void *new_ldt,
+                             int new_entry_count,
+                             void **old_ldt_out,
+                             int *old_entry_count_out) {
+    if (!proc) {
+        return;
+    }
+
+    spinlock_acquire(&proc->ldt_lock);
+    if (old_ldt_out) {
+        *old_ldt_out = proc->ldt;
+    }
+    if (old_entry_count_out) {
+        *old_entry_count_out = proc->ldt_entry_count;
+    }
+    proc->ldt = new_ldt;
+    proc->ldt_entry_count = new_entry_count;
+    spinlock_release(&proc->ldt_lock);
+}
+
+static int ldt_install_process(process_t *proc, void *new_ldt, unsigned int entry_count) {
+    void *old_ldt = NULL;
+    int old_entry_count = 0;
+
+    if (!proc) {
+        return -EINVAL;
+    }
+
+    ldt_swap_process(proc, new_ldt, (int)entry_count, &old_ldt, &old_entry_count);
+    if (old_ldt) {
+        kfree(old_ldt, (size_t)old_entry_count * LDT_ENTRY_SIZE);
+    }
+    return 0;
+}
+
+static int ldt_ensure_process(process_t *proc, unsigned int entry_count) {
+    void *new_ldt;
+    void *old_ldt;
+    int old_entry_count;
+    size_t bytes;
+
+    if (!proc || entry_count == 0 || entry_count > LDT_ENTRIES) {
+        return -EINVAL;
+    }
+
+    for (;;) {
+        spinlock_acquire(&proc->ldt_lock);
+        old_ldt = proc->ldt;
+        old_entry_count = proc->ldt_entry_count;
+        if (old_entry_count >= (int)entry_count) {
+            spinlock_release(&proc->ldt_lock);
+            return 0;
+        }
+        spinlock_release(&proc->ldt_lock);
+
+        bytes = (size_t)entry_count * LDT_ENTRY_SIZE;
+        new_ldt = kmalloc(bytes);
+        if (!new_ldt) {
+            return -ENOMEM;
+        }
+        memset(new_ldt, 0, bytes);
+
+        spinlock_acquire(&proc->ldt_lock);
+        if (proc->ldt != old_ldt || proc->ldt_entry_count != old_entry_count) {
+            spinlock_release(&proc->ldt_lock);
+            kfree(new_ldt, bytes);
+            continue;
+        }
+        if (old_ldt && old_entry_count > 0) {
+            memcpy(new_ldt, old_ldt, (size_t)old_entry_count * LDT_ENTRY_SIZE);
+        }
+        proc->ldt = new_ldt;
+        proc->ldt_entry_count = (int)entry_count;
+        spinlock_release(&proc->ldt_lock);
+
+        if (old_ldt) {
+            kfree(old_ldt, (size_t)old_entry_count * LDT_ENTRY_SIZE);
+        }
+        return 0;
+    }
+}
+
 static int ldt_desc_is_clear(const struct user_desc *info) {
     return info &&
            info->base_addr == 0 &&
@@ -56,83 +166,89 @@ static void ldt_warn_suspicious(const struct user_desc *info) {
 }
 
 void ldt_activate(process_t *proc) {
-    if (!proc || !proc->ldt) {
-        /* Deactivate LDT by loading a null selector */
-#ifndef HOST_TEST
-        __asm__ volatile("lldt %0" : : "r"((uint16_t)0));
-#endif
+    if (!proc) {
+        ldt_load_selector(0);
         return;
     }
-
-    uint32_t base = (uint32_t)proc->ldt;
-    uint32_t limit = (proc->ldt_entry_count * 8) - 1;
-
-    /* 
-     * LDT descriptor in GDT:
-     * Access: 0x82 (Present=1, DPL=0, Type=0x2(LDT))
-     * Granularity: 0x40 (32-bit, Byte granularity)
-     */
-    gdt_set_gate(GDT_LDT_INDEX, base, limit, 0x82, 0x40);
-
-    /* Load LDTR with selector (Index 7, GDT, RPL 0) = 0x38 */
-#ifndef HOST_TEST
-    __asm__ volatile("lldt %0" : : "r"((uint16_t)(GDT_LDT_INDEX << 3)));
-#endif
+    spinlock_acquire(&proc->ldt_lock);
+    ldt_activate_locked(proc);
+    spinlock_release(&proc->ldt_lock);
 }
 
 void ldt_init_process(process_t *proc) {
     proc->ldt = NULL;
     proc->ldt_entry_count = 0;
+    spinlock_init(&proc->ldt_lock, "ldt");
 }
 
 int ldt_alloc_process(process_t *proc, unsigned int entry_count) {
     size_t bytes;
+    void *new_ldt;
 
     if (!proc || entry_count == 0 || entry_count > LDT_ENTRIES) {
         return -EINVAL;
     }
 
-    ldt_free_process(proc);
     bytes = (size_t)entry_count * LDT_ENTRY_SIZE;
-    proc->ldt = kmalloc(bytes);
-    if (!proc->ldt) {
-        proc->ldt_entry_count = 0;
+    new_ldt = kmalloc(bytes);
+    if (!new_ldt) {
         return -ENOMEM;
     }
 
-    memset(proc->ldt, 0, bytes);
-    proc->ldt_entry_count = (int)entry_count;
-    return 0;
+    memset(new_ldt, 0, bytes);
+    return ldt_install_process(proc, new_ldt, entry_count);
 }
 
 int ldt_clone_process(process_t *dst, const process_t *src) {
+    void *new_ldt;
+    const process_t *src_proc = src;
+    int src_entry_count;
     size_t bytes;
-    int ret;
 
     if (!dst || !src) {
         return -EINVAL;
     }
 
-    ldt_free_process(dst);
-    if (!src->ldt || src->ldt_entry_count <= 0) {
-        return 0;
-    }
+    for (;;) {
+        spinlock_acquire((spinlock_t *)&src_proc->ldt_lock);
+        if (!src_proc->ldt || src_proc->ldt_entry_count <= 0) {
+            spinlock_release((spinlock_t *)&src_proc->ldt_lock);
+            ldt_free_process(dst);
+            return 0;
+        }
+        src_entry_count = src_proc->ldt_entry_count;
+        spinlock_release((spinlock_t *)&src_proc->ldt_lock);
 
-    bytes = (size_t)src->ldt_entry_count * LDT_ENTRY_SIZE;
-    ret = ldt_alloc_process(dst, (unsigned int)src->ldt_entry_count);
-    if (ret != 0) {
-        return ret;
-    }
+        bytes = (size_t)src_entry_count * LDT_ENTRY_SIZE;
+        new_ldt = kmalloc(bytes);
+        if (!new_ldt) {
+            return -ENOMEM;
+        }
 
-    memcpy(dst->ldt, src->ldt, bytes);
-    return 0;
+        spinlock_acquire((spinlock_t *)&src_proc->ldt_lock);
+        if (!src_proc->ldt || src_proc->ldt_entry_count != src_entry_count) {
+            spinlock_release((spinlock_t *)&src_proc->ldt_lock);
+            kfree(new_ldt, bytes);
+            continue;
+        }
+        memcpy(new_ldt, src_proc->ldt, bytes);
+        spinlock_release((spinlock_t *)&src_proc->ldt_lock);
+
+        return ldt_install_process(dst, new_ldt, (unsigned int)src_entry_count);
+    }
 }
 
 void ldt_free_process(process_t *proc) {
-    if (proc->ldt) {
-        kfree(proc->ldt, (size_t)proc->ldt_entry_count * LDT_ENTRY_SIZE);
-        proc->ldt = NULL;
-        proc->ldt_entry_count = 0;
+    void *old_ldt = NULL;
+    int old_entry_count = 0;
+
+    if (!proc) {
+        return;
+    }
+
+    ldt_swap_process(proc, NULL, 0, &old_ldt, &old_entry_count);
+    if (old_ldt) {
+        kfree(old_ldt, (size_t)old_entry_count * LDT_ENTRY_SIZE);
     }
 }
 
@@ -174,13 +290,46 @@ void fill_ldt_entry(void *entry_ptr, struct user_desc *info) {
 
 int sys_modify_ldt(int func, void *ptr, unsigned long bytecount) {
     if (func == LDT_READ) {
-        unsigned int actual_size = current_process->ldt_entry_count * LDT_ENTRY_SIZE;
-        unsigned int copy_size = (bytecount < actual_size) ? bytecount : actual_size;
+        void *tmp = NULL;
+        void *ldt_ptr;
+        unsigned int actual_size;
+        unsigned int copy_size;
 
-        if (copy_size > 0 && current_process->ldt) {
-            if (copyout(current_process->ldt, ptr, copy_size)) {
+        for (;;) {
+            spinlock_acquire(&current_process->ldt_lock);
+            ldt_ptr = current_process->ldt;
+            actual_size = (unsigned int)current_process->ldt_entry_count * LDT_ENTRY_SIZE;
+            copy_size = (bytecount < actual_size) ? (unsigned int)bytecount : actual_size;
+            spinlock_release(&current_process->ldt_lock);
+
+            if (copy_size == 0 || !ldt_ptr) {
+                return 0;
+            }
+
+            tmp = kmalloc(copy_size);
+            if (!tmp) {
+                return -ENOMEM;
+            }
+
+            spinlock_acquire(&current_process->ldt_lock);
+            if (current_process->ldt == ldt_ptr &&
+                (unsigned int)current_process->ldt_entry_count * LDT_ENTRY_SIZE == actual_size) {
+                memcpy(tmp, ldt_ptr, copy_size);
+                spinlock_release(&current_process->ldt_lock);
+                break;
+            }
+            spinlock_release(&current_process->ldt_lock);
+
+            kfree(tmp, copy_size);
+            tmp = NULL;
+        }
+
+        if (copy_size > 0 && tmp) {
+            if (copyout(tmp, ptr, copy_size)) {
+                kfree(tmp, copy_size);
                 return -EFAULT;
             }
+            kfree(tmp, copy_size);
         }
         return copy_size;
     }
@@ -206,22 +355,27 @@ int sys_modify_ldt(int func, void *ptr, unsigned long bytecount) {
     ldt_warn_suspicious(&info);
     
     /* Lazy allocate LDT if needed */
-    if (!current_process->ldt) {
-        if (ldt_alloc_process(current_process, LDT_ENTRIES) != 0) return -ENOMEM;
+    for (;;) {
+        if (ldt_ensure_process(current_process, LDT_ENTRIES) != 0) {
+            return -ENOMEM;
+        }
+
+        spinlock_acquire(&current_process->ldt_lock);
+        gdt_entry_t *ldt = (gdt_entry_t *)current_process->ldt;
+        if (ldt && info.entry_number < (unsigned int)current_process->ldt_entry_count) {
+            if (ldt_desc_is_clear(&info)) {
+                /* Clear entry */
+                memset(&ldt[info.entry_number], 0, 8);
+            } else {
+                /* Set entry */
+                fill_ldt_entry(&ldt[info.entry_number], &info);
+            }
+            
+            /* If we modified the LDT, we need to reload LDTR if it's the current one */
+            ldt_activate_locked(current_process);
+            spinlock_release(&current_process->ldt_lock);
+            return 0;
+        }
+        spinlock_release(&current_process->ldt_lock);
     }
-    
-    gdt_entry_t *ldt = (gdt_entry_t *)current_process->ldt;
-    
-    if (ldt_desc_is_clear(&info)) {
-        /* Clear entry */
-        memset(&ldt[info.entry_number], 0, 8);
-    } else {
-        /* Set entry */
-        fill_ldt_entry(&ldt[info.entry_number], &info);
-    }
-    
-    /* If we modified the LDT, we need to reload LDTR if it's the current one */
-    ldt_activate(current_process);
-    
-    return 0;
 }

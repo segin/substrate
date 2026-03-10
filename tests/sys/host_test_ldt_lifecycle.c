@@ -12,6 +12,39 @@ thread_t *current_thread;
 static size_t last_kfree_size;
 static char last_log[128];
 
+uint32_t lapic_get_id(void) {
+    return 0;
+}
+
+void spinlock_init(spinlock_t *lock, const char *name) {
+    lock->locked = 0;
+    lock->cpu_id = 0xFFFFFFFFU;
+    lock->name = name;
+}
+
+void spinlock_acquire(spinlock_t *lock) {
+    while (__atomic_exchange_n(&lock->locked, 1U, __ATOMIC_ACQUIRE)) {
+    }
+    lock->cpu_id = lapic_get_id();
+}
+
+bool spinlock_try_acquire(spinlock_t *lock) {
+    if (__atomic_exchange_n(&lock->locked, 1U, __ATOMIC_ACQUIRE) == 0U) {
+        lock->cpu_id = lapic_get_id();
+        return true;
+    }
+    return false;
+}
+
+void spinlock_release(spinlock_t *lock) {
+    lock->cpu_id = 0xFFFFFFFFU;
+    __atomic_store_n(&lock->locked, 0U, __ATOMIC_RELEASE);
+}
+
+bool spinlock_is_held(spinlock_t *lock) {
+    return lock->locked && lock->cpu_id == lapic_get_id();
+}
+
 void *kmalloc(size_t size) {
     return calloc(1, size);
 }

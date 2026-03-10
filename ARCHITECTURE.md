@@ -178,6 +178,9 @@ Planned x86 Unix personality targets:
 ELKS personality contract:
 - ELKS binaries are recognized as Minix-style 16-bit `a.out` images and loaded
   through a private per-process LDT.
+- Per-process ELKS LDT state is serialized by a dedicated process lock so LDT
+  growth, replacement, clone, free, and activation see a coherent descriptor
+  table under multi-threaded activity.
 - ELKS execution runs as a 16-bit protected-mode personality (`BITNESS_16`),
   not VM86.
 - ELKS syscalls use `INT 0x80` with the ELKS register argument order

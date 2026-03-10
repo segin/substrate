@@ -246,10 +246,10 @@ Reference: User Request (Step 31552)
         - Files: `sys/exec/formats/elks_aout.c`
         - Tests: fuzz (truncated binary files)
         - Acceptance: Truncated ELKS headers and segment reads are rejected with `ENOEXEC`, while hard read failures continue to surface as I/O errors.
-    - [ ] Audit ldt.c for race conditions in multi-threaded allocation. (REQ: REQ-20-0063)
+    - [x] Audit ldt.c for race conditions in multi-threaded allocation. (REQ: REQ-20-0063)
         - Files: `sys/arch/i386/ldt.c`
-        - Tests: stress (concurrent LDT alloc/free)
-        - Acceptance: No corrupted LDT state under contention.
+        - Tests: host stress (`tests/sys/host_test_ldt_race.c`)
+        - Acceptance: Concurrent LDT allocation, clone, readback, activation, and free/replace paths preserve coherent pointer/count state without descriptor overruns or allocator corruption.
     - [ ] Refactor LDT allocation to use UMA zone for efficiency. (REQ: REQ-20-0064)
         - Files: `sys/arch/i386/ldt.c`
         - Tests: unit (allocation performance)
