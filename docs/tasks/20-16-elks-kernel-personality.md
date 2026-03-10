@@ -204,9 +204,9 @@ Reference: User Request (Step 31552)
         - Tests: emulation (run commands in QEMU)
         - Acceptance: Basic command execution works.
     - [x] Add sample ELKS cat utility. (REQ: REQ-20-0052)
-        - Files: `tests/elks/cat.c`, `tests/elks/Makefile`
-        - Tests: emulation
-        - Acceptance: File contents displayed correctly.
+        - Files: `tests/elks/cat.c`, `tests/elks/Makefile`, `tests/elks/run_tests.sh`
+        - Tests: emulation (`tests/elks/run_tests.sh cat_elks`)
+        - Acceptance: File contents displayed correctly from a staged file on a disposable ELKS smoke image.
     - [ ] Add sample ELKS ls utility. (REQ: REQ-20-0053)
         - Files: `tests/elks/ls.c`, `tests/elks/Makefile`
         - Tests: emulation
