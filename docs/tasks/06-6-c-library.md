@@ -1647,6 +1647,52 @@
             - [ ] Man pages: `crypt(3)`, `crypt_gensalt(3)`. (REQ: REQ-06-1236)
             - [ ] Man pages: `passwd(5)`, `group(5)`. (REQ: REQ-06-1237)
 
+- [ ] **POSIX.1-2024 Gap Closure Audit:** (REQ: REQ-06-1238)
+    - [ ] **Foundational Headers & ABI Macros:** (REQ: REQ-06-1239)
+        - [ ] Add complete header contracts for `<assert.h>`, `<ctype.h>`, `<errno.h>`, `<inttypes.h>`, `<libgen.h>`, `<limits.h>`, `<setjmp.h>`, `<signal.h>`, `<stdint.h>`, `<stdbool.h>`, `<stddef.h>`, `<stdarg.h>`, `<wchar.h>`, and `<wctype.h>`, including required feature-test and visibility rules. (REQ: REQ-06-1240)
+        - [ ] Add compile-time conformance tests for mandatory types, macros, `va_list`, `jmp_buf`, `sigset_t`, `locale_t`, `wint_t`, and `wctype_t` exposure. (REQ: REQ-06-1241)
+    - [ ] **Supplemental `<stdio.h>` Interfaces:** (REQ: REQ-06-1242)
+        - [ ] Add process, stream, and terminal helpers: `ctermid()`, `fileno()`, `popen()`, `pclose()`, `renameat()`. (REQ: REQ-06-1243)
+        - [ ] Add POSIX.1-2024 memory and delimiter stream APIs: `fmemopen()`, `open_memstream()`, `open_wmemstream()`, `getline()`, `getdelim()`. (REQ: REQ-06-1244)
+        - [ ] Add stream locking and unlocked I/O APIs: `flockfile()`, `ftrylockfile()`, `funlockfile()`, `getc_unlocked()`, `getchar_unlocked()`, `putc_unlocked()`, `putchar_unlocked()`, `clearerr_unlocked()`, `feof_unlocked()`, `ferror_unlocked()`, `fflush_unlocked()`, `fgets_unlocked()`. (REQ: REQ-06-1245)
+        - [ ] Add tests and man pages for the supplemental stdio interfaces. (REQ: REQ-06-1246)
+    - [ ] **Allocation, Conversion, and Environment (`<stdlib.h>`):** (REQ: REQ-06-1247)
+        - [ ] Add heap and aligned allocation APIs: `malloc()`, `calloc()`, `realloc()`, `free()`, `aligned_alloc()`, `posix_memalign()`. (REQ: REQ-06-1248)
+        - [ ] Add conversion and arithmetic helpers: `atoi()`, `atol()`, `atoll()`, `atof()`, `strtol()`, `strtoll()`, `strtoul()`, `strtoull()`, `strtod()`, `strtof()`, `strtold()`, `a64l()`, `l64a()`, `abs()`, `labs()`, `llabs()`, `div()`, `ldiv()`, `lldiv()`. (REQ: REQ-06-1249)
+        - [ ] Add runtime environment and termination APIs: `getenv()`, `setenv()`, `unsetenv()`, `putenv()`, `atexit()`, `exit()`, `_Exit()`, `abort()`, `system()`. (REQ: REQ-06-1250)
+        - [ ] Add POSIX/XSI pseudorandom interfaces: `rand()`, `srand()`, `rand_r()`, `drand48()`, `erand48()`, `jrand48()`, `lcong48()`, `lrand48()`, `mrand48()`, `nrand48()`, `seed48()`, `srand48()`. (REQ: REQ-06-1251)
+        - [ ] Add tests and man pages for allocation, conversion, environment, and pseudorandom APIs. (REQ: REQ-06-1252)
+    - [ ] **`<string.h>` and Narrow Character Completion:** (REQ: REQ-06-1253)
+        - [ ] Add missing byte/string primitives: `memccpy()`, `memchr()`, `memcmp()`, `memmove()`, `memset()`, `memset_explicit()`, `stpcpy()`, `stpncpy()`, `strdup()`, `strndup()`, `strlcpy()`, `strlcat()`, `strnlen()`. (REQ: REQ-06-1254)
+        - [ ] Add reentrant and locale-sensitive helpers: `strtok_r()`, `strerror_r()`, `strerror_l()`, `strsignal()`. (REQ: REQ-06-1255)
+        - [ ] Add narrow classification and mapping APIs from `<ctype.h>`, including the full `is*()` family plus `tolower()` and `toupper()`. (REQ: REQ-06-1256)
+        - [ ] Add tests and man pages for the missing narrow string/memory/classification interfaces. (REQ: REQ-06-1257)
+    - [ ] **Locale and Internationalization:** (REQ: REQ-06-1258)
+        - [ ] Add locale management interfaces: `setlocale()`, `localeconv()`, `newlocale()`, `duplocale()`, `freelocale()`, `uselocale()`, `nl_langinfo()`. (REQ: REQ-06-1259)
+        - [ ] Add internationalization and catalog APIs: `catopen()`, `catgets()`, `catclose()`, `iconv_open()`, `iconv()`, `iconv_close()`, `strfmon()`. (REQ: REQ-06-1260)
+        - [ ] Add basename/dirname path helpers from `<libgen.h>` and ensure locale-dependent behavior is documented. (REQ: REQ-06-1261)
+        - [ ] Add tests and man pages for locale, langinfo, message catalog, iconv, and libgen interfaces. (REQ: REQ-06-1262)
+    - [ ] **Multibyte and Wide-Character Libraries:** (REQ: REQ-06-1263)
+        - [ ] Add multibyte state/conversion APIs: `mblen()`, `mbrlen()`, `mbrtowc()`, `mbsinit()`, `mbsrtowcs()`, `mbsnrtowcs()`, `mbstowcs()`, `mbtowc()`, `wcrtomb()`, `wcsrtombs()`, `wcstombs()`, `wctomb()`. (REQ: REQ-06-1264)
+        - [ ] Add wide string and wide memory APIs: `wcpcpy()`, `wcpncpy()`, `wcscasecmp()`, `wcsncasecmp()`, `wcsdup()`, `wcsnlen()`, `wcstok()`, `wmemchr()`, `wmemcmp()`, `wmemcpy()`, `wmemmove()`, `wmemset()`. (REQ: REQ-06-1265)
+        - [ ] Add wide classification and mapping APIs from `<wctype.h>`, including `isw*()`, `tow*()`, `wctrans()`, and `wctype()`. (REQ: REQ-06-1266)
+        - [ ] Add tests and man pages for multibyte, wide-string, and wide-classification interfaces. (REQ: REQ-06-1267)
+    - [ ] **Date, Time, and Calendar Library:** (REQ: REQ-06-1268)
+        - [ ] Add broken-down time conversion and formatting APIs: `asctime()`, `asctime_r()`, `ctime()`, `ctime_r()`, `gmtime()`, `gmtime_r()`, `localtime()`, `localtime_r()`, `mktime()`, `difftime()`, `strftime()`, `strptime()`, `wcsftime()`. (REQ: REQ-06-1269)
+        - [ ] Add C23/POSIX time acquisition helpers exposed through libc headers where applicable, including `timespec_get()` and `timespec_getres()`. (REQ: REQ-06-1270)
+        - [ ] Add tests and man pages for time conversion, formatting, parsing, and calendaring APIs. (REQ: REQ-06-1271)
+    - [ ] **Pattern Matching, Expansion, and Filesystem Walkers:** (REQ: REQ-06-1272)
+        - [ ] Add regular expression APIs: `regcomp()`, `regexec()`, `regerror()`, `regfree()`. (REQ: REQ-06-1273)
+        - [ ] Add shell-style pattern and expansion APIs: `fnmatch()`, `glob()`, `globfree()`, `wordexp()`, `wordfree()`, `getsubopt()`. (REQ: REQ-06-1274)
+        - [ ] Add tree-walk APIs: `ftw()` and `nftw()`. (REQ: REQ-06-1275)
+        - [ ] Add tests and man pages for regex, fnmatch, glob, wordexp, and filesystem walk interfaces. (REQ: REQ-06-1276)
+    - [ ] **Search, Spawn, Non-local Jump, and PTY/Path Utilities:** (REQ: REQ-06-1277)
+        - [ ] Add search/sort/table APIs: `bsearch()`, `qsort()`, `hcreate()`, `hdestroy()`, `hsearch()`, `insque()`, `lfind()`, `lsearch()`, `remque()`, `tdelete()`, `tfind()`, `tsearch()`, `twalk()`. (REQ: REQ-06-1278)
+        - [ ] Add `posix_spawn()` / `posix_spawnp()` plus the full `<spawn.h>` file-actions and attribute API families. (REQ: REQ-06-1279)
+        - [ ] Add non-local jump and assertion interfaces: `setjmp()`, `longjmp()`, `sigsetjmp()`, `siglongjmp()`, `assert()`. (REQ: REQ-06-1280)
+        - [ ] Add terminal/path/temp helpers: `grantpt()`, `mkdtemp()`, `posix_openpt()`, `ptsname()`, `realpath()`, `ttyname()`, `ttyname_r()`, `unlockpt()`. (REQ: REQ-06-1281)
+        - [ ] Add tests and man pages for search, spawn, jump, assertion, and PTY/path utilities. (REQ: REQ-06-1282)
+
 
 ## User Stories
 
@@ -2887,6 +2933,51 @@
 - **US-06-1235**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man pages: getspnam(3), shadow(5) so that this capability is implemented with clear verification evidence.
 - **US-06-1236**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man pages: crypt(3), crypt_gensalt(3) so that this capability is implemented with clear verification evidence.
 - **US-06-1237**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man pages: passwd(5), group(5) so that this capability is implemented with clear verification evidence.
+- **US-06-1238**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to POSIX.1-2024 gap closure audit so that this capability is implemented with clear verification evidence.
+- **US-06-1239**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to foundational headers & ABI macros so that this capability is implemented with clear verification evidence.
+- **US-06-1240**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add complete header contracts for `<assert.h>`, `<ctype.h>`, `<errno.h>`, `<inttypes.h>`, `<libgen.h>`, `<limits.h>`, `<setjmp.h>`, `<signal.h>`, `<stdint.h>`, `<stdbool.h>`, `<stddef.h>`, `<stdarg.h>`, `<wchar.h>`, and `<wctype.h>`, including required feature-test and visibility rules so that this capability is implemented with clear verification evidence.
+- **US-06-1241**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add compile-time conformance tests for mandatory types, macros, `va_list`, `jmp_buf`, `sigset_t`, `locale_t`, `wint_t`, and `wctype_t` exposure so that this capability is implemented with clear verification evidence.
+- **US-06-1242**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to supplemental `<stdio.h>` interfaces so that this capability is implemented with clear verification evidence.
+- **US-06-1243**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add process, stream, and terminal helpers: `ctermid()`, `fileno()`, `popen()`, `pclose()`, `renameat()` so that this capability is implemented with clear verification evidence.
+- **US-06-1244**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add POSIX.1-2024 memory and delimiter stream APIs: `fmemopen()`, `open_memstream()`, `open_wmemstream()`, `getline()`, `getdelim()` so that this capability is implemented with clear verification evidence.
+- **US-06-1245**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add stream locking and unlocked I/O APIs: `flockfile()`, `ftrylockfile()`, `funlockfile()`, `getc_unlocked()`, `getchar_unlocked()`, `putc_unlocked()`, `putchar_unlocked()`, `clearerr_unlocked()`, `feof_unlocked()`, `ferror_unlocked()`, `fflush_unlocked()`, `fgets_unlocked()` so that this capability is implemented with clear verification evidence.
+- **US-06-1246**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add tests and man pages for the supplemental stdio interfaces so that this capability is implemented with clear verification evidence.
+- **US-06-1247**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to allocation, conversion, and environment (`<stdlib.h>`) so that this capability is implemented with clear verification evidence.
+- **US-06-1248**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add heap and aligned allocation APIs: `malloc()`, `calloc()`, `realloc()`, `free()`, `aligned_alloc()`, `posix_memalign()` so that this capability is implemented with clear verification evidence.
+- **US-06-1249**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add conversion and arithmetic helpers: `atoi()`, `atol()`, `atoll()`, `atof()`, `strtol()`, `strtoll()`, `strtoul()`, `strtoull()`, `strtod()`, `strtof()`, `strtold()`, `a64l()`, `l64a()`, `abs()`, `labs()`, `llabs()`, `div()`, `ldiv()`, `lldiv()` so that this capability is implemented with clear verification evidence.
+- **US-06-1250**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add runtime environment and termination APIs: `getenv()`, `setenv()`, `unsetenv()`, `putenv()`, `atexit()`, `exit()`, `_Exit()`, `abort()`, `system()` so that this capability is implemented with clear verification evidence.
+- **US-06-1251**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add POSIX/XSI pseudorandom interfaces: `rand()`, `srand()`, `rand_r()`, `drand48()`, `erand48()`, `jrand48()`, `lcong48()`, `lrand48()`, `mrand48()`, `nrand48()`, `seed48()`, `srand48()` so that this capability is implemented with clear verification evidence.
+- **US-06-1252**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add tests and man pages for allocation, conversion, environment, and pseudorandom APIs so that this capability is implemented with clear verification evidence.
+- **US-06-1253**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<string.h>` and narrow character completion so that this capability is implemented with clear verification evidence.
+- **US-06-1254**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add missing byte/string primitives: `memccpy()`, `memchr()`, `memcmp()`, `memmove()`, `memset()`, `memset_explicit()`, `stpcpy()`, `stpncpy()`, `strdup()`, `strndup()`, `strlcpy()`, `strlcat()`, `strnlen()` so that this capability is implemented with clear verification evidence.
+- **US-06-1255**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add reentrant and locale-sensitive helpers: `strtok_r()`, `strerror_r()`, `strerror_l()`, `strsignal()` so that this capability is implemented with clear verification evidence.
+- **US-06-1256**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add narrow classification and mapping APIs from `<ctype.h>`, including the full `is*()` family plus `tolower()` and `toupper()` so that this capability is implemented with clear verification evidence.
+- **US-06-1257**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add tests and man pages for the missing narrow string/memory/classification interfaces so that this capability is implemented with clear verification evidence.
+- **US-06-1258**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to locale and internationalization so that this capability is implemented with clear verification evidence.
+- **US-06-1259**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add locale management interfaces: `setlocale()`, `localeconv()`, `newlocale()`, `duplocale()`, `freelocale()`, `uselocale()`, `nl_langinfo()` so that this capability is implemented with clear verification evidence.
+- **US-06-1260**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add internationalization and catalog APIs: `catopen()`, `catgets()`, `catclose()`, `iconv_open()`, `iconv()`, `iconv_close()`, `strfmon()` so that this capability is implemented with clear verification evidence.
+- **US-06-1261**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add basename/dirname path helpers from `<libgen.h>` and ensure locale-dependent behavior is documented so that this capability is implemented with clear verification evidence.
+- **US-06-1262**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add tests and man pages for locale, langinfo, message catalog, iconv, and libgen interfaces so that this capability is implemented with clear verification evidence.
+- **US-06-1263**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to multibyte and wide-character libraries so that this capability is implemented with clear verification evidence.
+- **US-06-1264**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add multibyte state/conversion APIs: `mblen()`, `mbrlen()`, `mbrtowc()`, `mbsinit()`, `mbsrtowcs()`, `mbsnrtowcs()`, `mbstowcs()`, `mbtowc()`, `wcrtomb()`, `wcsrtombs()`, `wcstombs()`, `wctomb()` so that this capability is implemented with clear verification evidence.
+- **US-06-1265**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add wide string and wide memory APIs: `wcpcpy()`, `wcpncpy()`, `wcscasecmp()`, `wcsncasecmp()`, `wcsdup()`, `wcsnlen()`, `wcstok()`, `wmemchr()`, `wmemcmp()`, `wmemcpy()`, `wmemmove()`, `wmemset()` so that this capability is implemented with clear verification evidence.
+- **US-06-1266**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add wide classification and mapping APIs from `<wctype.h>`, including `isw*()`, `tow*()`, `wctrans()`, and `wctype()` so that this capability is implemented with clear verification evidence.
+- **US-06-1267**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add tests and man pages for multibyte, wide-string, and wide-classification interfaces so that this capability is implemented with clear verification evidence.
+- **US-06-1268**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to date, time, and calendar library so that this capability is implemented with clear verification evidence.
+- **US-06-1269**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add broken-down time conversion and formatting APIs: `asctime()`, `asctime_r()`, `ctime()`, `ctime_r()`, `gmtime()`, `gmtime_r()`, `localtime()`, `localtime_r()`, `mktime()`, `difftime()`, `strftime()`, `strptime()`, `wcsftime()` so that this capability is implemented with clear verification evidence.
+- **US-06-1270**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add C23/POSIX time acquisition helpers exposed through libc headers where applicable, including `timespec_get()` and `timespec_getres()` so that this capability is implemented with clear verification evidence.
+- **US-06-1271**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add tests and man pages for time conversion, formatting, parsing, and calendaring APIs so that this capability is implemented with clear verification evidence.
+- **US-06-1272**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to pattern matching, expansion, and filesystem walkers so that this capability is implemented with clear verification evidence.
+- **US-06-1273**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add regular expression APIs: `regcomp()`, `regexec()`, `regerror()`, `regfree()` so that this capability is implemented with clear verification evidence.
+- **US-06-1274**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add shell-style pattern and expansion APIs: `fnmatch()`, `glob()`, `globfree()`, `wordexp()`, `wordfree()`, `getsubopt()` so that this capability is implemented with clear verification evidence.
+- **US-06-1275**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add tree-walk APIs: `ftw()` and `nftw()` so that this capability is implemented with clear verification evidence.
+- **US-06-1276**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add tests and man pages for regex, fnmatch, glob, wordexp, and filesystem walk interfaces so that this capability is implemented with clear verification evidence.
+- **US-06-1277**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to search, spawn, non-local jump, and PTY/path utilities so that this capability is implemented with clear verification evidence.
+- **US-06-1278**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add search/sort/table APIs: `bsearch()`, `qsort()`, `hcreate()`, `hdestroy()`, `hsearch()`, `insque()`, `lfind()`, `lsearch()`, `remque()`, `tdelete()`, `tfind()`, `tsearch()`, `twalk()` so that this capability is implemented with clear verification evidence.
+- **US-06-1279**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add `posix_spawn()` / `posix_spawnp()` plus the full `<spawn.h>` file-actions and attribute API families so that this capability is implemented with clear verification evidence.
+- **US-06-1280**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add non-local jump and assertion interfaces: `setjmp()`, `longjmp()`, `sigsetjmp()`, `siglongjmp()`, `assert()` so that this capability is implemented with clear verification evidence.
+- **US-06-1281**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add terminal/path/temp helpers: `grantpt()`, `mkdtemp()`, `posix_openpt()`, `ptsname()`, `realpath()`, `ttyname()`, `ttyname_r()`, `unlockpt()` so that this capability is implemented with clear verification evidence.
+- **US-06-1282**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add tests and man pages for search, spawn, jump, assertion, and PTY/path utilities so that this capability is implemented with clear verification evidence.
 
 ## INCOSE/EARS Requirements
 
@@ -6599,5 +6690,140 @@
   - Context: 6. C Library (`lib/c`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-06-1237** (EARS/Ubiquitous): The Substrate system shall man pages: passwd(5), group(5).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1238** (EARS/Ubiquitous): The Substrate system shall POSIX.1-2024 gap closure audit.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1239** (EARS/Ubiquitous): The Substrate system shall foundational headers & ABI macros.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1240** (EARS/Ubiquitous): The Substrate system shall add complete header contracts for `<assert.h>`, `<ctype.h>`, `<errno.h>`, `<inttypes.h>`, `<libgen.h>`, `<limits.h>`, `<setjmp.h>`, `<signal.h>`, `<stdint.h>`, `<stdbool.h>`, `<stddef.h>`, `<stdarg.h>`, `<wchar.h>`, and `<wctype.h>`, including required feature-test and visibility rules.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1241** (EARS/Ubiquitous): The Substrate system shall add compile-time conformance tests for mandatory types, macros, `va_list`, `jmp_buf`, `sigset_t`, `locale_t`, `wint_t`, and `wctype_t` exposure.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1242** (EARS/Ubiquitous): The Substrate system shall supplemental `<stdio.h>` interfaces.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1243** (EARS/Ubiquitous): The Substrate system shall add process, stream, and terminal helpers: `ctermid()`, `fileno()`, `popen()`, `pclose()`, `renameat()`.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1244** (EARS/Ubiquitous): The Substrate system shall add POSIX.1-2024 memory and delimiter stream APIs: `fmemopen()`, `open_memstream()`, `open_wmemstream()`, `getline()`, `getdelim()`.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1245** (EARS/Ubiquitous): The Substrate system shall add stream locking and unlocked I/O APIs: `flockfile()`, `ftrylockfile()`, `funlockfile()`, `getc_unlocked()`, `getchar_unlocked()`, `putc_unlocked()`, `putchar_unlocked()`, `clearerr_unlocked()`, `feof_unlocked()`, `ferror_unlocked()`, `fflush_unlocked()`, `fgets_unlocked()`.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1246** (EARS/Ubiquitous): The Substrate system shall add tests and man pages for the supplemental stdio interfaces.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1247** (EARS/Ubiquitous): The Substrate system shall allocation, conversion, and environment (`<stdlib.h>`).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1248** (EARS/Ubiquitous): The Substrate system shall add heap and aligned allocation APIs: `malloc()`, `calloc()`, `realloc()`, `free()`, `aligned_alloc()`, `posix_memalign()`.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1249** (EARS/Ubiquitous): The Substrate system shall add conversion and arithmetic helpers: `atoi()`, `atol()`, `atoll()`, `atof()`, `strtol()`, `strtoll()`, `strtoul()`, `strtoull()`, `strtod()`, `strtof()`, `strtold()`, `a64l()`, `l64a()`, `abs()`, `labs()`, `llabs()`, `div()`, `ldiv()`, `lldiv()`.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1250** (EARS/Ubiquitous): The Substrate system shall add runtime environment and termination APIs: `getenv()`, `setenv()`, `unsetenv()`, `putenv()`, `atexit()`, `exit()`, `_Exit()`, `abort()`, `system()`.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1251** (EARS/Ubiquitous): The Substrate system shall add POSIX/XSI pseudorandom interfaces: `rand()`, `srand()`, `rand_r()`, `drand48()`, `erand48()`, `jrand48()`, `lcong48()`, `lrand48()`, `mrand48()`, `nrand48()`, `seed48()`, `srand48()`.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1252** (EARS/Ubiquitous): The Substrate system shall add tests and man pages for allocation, conversion, environment, and pseudorandom APIs.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1253** (EARS/Ubiquitous): The Substrate system shall `<string.h>` and narrow character completion.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1254** (EARS/Ubiquitous): The Substrate system shall add missing byte/string primitives: `memccpy()`, `memchr()`, `memcmp()`, `memmove()`, `memset()`, `memset_explicit()`, `stpcpy()`, `stpncpy()`, `strdup()`, `strndup()`, `strlcpy()`, `strlcat()`, `strnlen()`.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1255** (EARS/Ubiquitous): The Substrate system shall add reentrant and locale-sensitive helpers: `strtok_r()`, `strerror_r()`, `strerror_l()`, `strsignal()`.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1256** (EARS/Ubiquitous): The Substrate system shall add narrow classification and mapping APIs from `<ctype.h>`, including the full `is*()` family plus `tolower()` and `toupper()`.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1257** (EARS/Ubiquitous): The Substrate system shall add tests and man pages for the missing narrow string/memory/classification interfaces.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1258** (EARS/Ubiquitous): The Substrate system shall locale and internationalization.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1259** (EARS/Ubiquitous): The Substrate system shall add locale management interfaces: `setlocale()`, `localeconv()`, `newlocale()`, `duplocale()`, `freelocale()`, `uselocale()`, `nl_langinfo()`.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1260** (EARS/Ubiquitous): The Substrate system shall add internationalization and catalog APIs: `catopen()`, `catgets()`, `catclose()`, `iconv_open()`, `iconv()`, `iconv_close()`, `strfmon()`.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1261** (EARS/Ubiquitous): The Substrate system shall add basename/dirname path helpers from `<libgen.h>` and ensure locale-dependent behavior is documented.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1262** (EARS/Ubiquitous): The Substrate system shall add tests and man pages for locale, langinfo, message catalog, iconv, and libgen interfaces.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1263** (EARS/Ubiquitous): The Substrate system shall multibyte and wide-character libraries.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1264** (EARS/Ubiquitous): The Substrate system shall add multibyte state/conversion APIs: `mblen()`, `mbrlen()`, `mbrtowc()`, `mbsinit()`, `mbsrtowcs()`, `mbsnrtowcs()`, `mbstowcs()`, `mbtowc()`, `wcrtomb()`, `wcsrtombs()`, `wcstombs()`, `wctomb()`.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1265** (EARS/Ubiquitous): The Substrate system shall add wide string and wide memory APIs: `wcpcpy()`, `wcpncpy()`, `wcscasecmp()`, `wcsncasecmp()`, `wcsdup()`, `wcsnlen()`, `wcstok()`, `wmemchr()`, `wmemcmp()`, `wmemcpy()`, `wmemmove()`, `wmemset()`.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1266** (EARS/Ubiquitous): The Substrate system shall add wide classification and mapping APIs from `<wctype.h>`, including `isw*()`, `tow*()`, `wctrans()`, and `wctype()`.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1267** (EARS/Ubiquitous): The Substrate system shall add tests and man pages for multibyte, wide-string, and wide-classification interfaces.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1268** (EARS/Ubiquitous): The Substrate system shall date, time, and calendar library.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1269** (EARS/Ubiquitous): The Substrate system shall add broken-down time conversion and formatting APIs: `asctime()`, `asctime_r()`, `ctime()`, `ctime_r()`, `gmtime()`, `gmtime_r()`, `localtime()`, `localtime_r()`, `mktime()`, `difftime()`, `strftime()`, `strptime()`, `wcsftime()`.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1270** (EARS/Ubiquitous): The Substrate system shall add C23/POSIX time acquisition helpers exposed through libc headers where applicable, including `timespec_get()` and `timespec_getres()`.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1271** (EARS/Ubiquitous): The Substrate system shall add tests and man pages for time conversion, formatting, parsing, and calendaring APIs.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1272** (EARS/Ubiquitous): The Substrate system shall pattern matching, expansion, and filesystem walkers.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1273** (EARS/Ubiquitous): The Substrate system shall add regular expression APIs: `regcomp()`, `regexec()`, `regerror()`, `regfree()`.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1274** (EARS/Ubiquitous): The Substrate system shall add shell-style pattern and expansion APIs: `fnmatch()`, `glob()`, `globfree()`, `wordexp()`, `wordfree()`, `getsubopt()`.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1275** (EARS/Ubiquitous): The Substrate system shall add tree-walk APIs: `ftw()` and `nftw()`.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1276** (EARS/Ubiquitous): The Substrate system shall add tests and man pages for regex, fnmatch, glob, wordexp, and filesystem walk interfaces.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1277** (EARS/Ubiquitous): The Substrate system shall search, spawn, non-local jump, and PTY/path utilities.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1278** (EARS/Ubiquitous): The Substrate system shall add search/sort/table APIs: `bsearch()`, `qsort()`, `hcreate()`, `hdestroy()`, `hsearch()`, `insque()`, `lfind()`, `lsearch()`, `remque()`, `tdelete()`, `tfind()`, `tsearch()`, `twalk()`.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1279** (EARS/Ubiquitous): The Substrate system shall add `posix_spawn()` / `posix_spawnp()` plus the full `<spawn.h>` file-actions and attribute API families.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1280** (EARS/Ubiquitous): The Substrate system shall add non-local jump and assertion interfaces: `setjmp()`, `longjmp()`, `sigsetjmp()`, `siglongjmp()`, `assert()`.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1281** (EARS/Ubiquitous): The Substrate system shall add terminal/path/temp helpers: `grantpt()`, `mkdtemp()`, `posix_openpt()`, `ptsname()`, `realpath()`, `ttyname()`, `ttyname_r()`, `unlockpt()`.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1282** (EARS/Ubiquitous): The Substrate system shall add tests and man pages for search, spawn, jump, assertion, and PTY/path utilities.
   - Context: 6. C Library (`lib/c`)
   - Verification: design review + implementation evidence + test/doc update.
