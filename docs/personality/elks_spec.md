@@ -168,6 +168,30 @@ segment layout. The ELKS personality shall reject heap growth beyond the
 personality-visible data-space contract rather than silently exposing native
 32-bit process address-space behavior.
 
+### 5.5 `/dev/kmem` compatibility contract
+
+ELKS process-inspection tools expect `/dev/kmem` to expose ELKS kernel-internal
+structures through `MEM_GET*` ioctls plus offset-based `lseek`/`read`
+operations.
+
+Substrate shall keep native `/dev/kmem` semantics unchanged for native and
+other personalities. For ELKS processes only, the ELKS personality may
+intercept `/dev/kmem` file-descriptor operations and present a synthetic
+ELKS-shaped kernel snapshot instead.
+
+The minimum supported compatibility contract is:
+
+- `MEM_GETDS` returning a personality-defined synthetic data-segment base
+- `MEM_GETTASK` returning the offset of the exported task table inside that
+  synthetic image
+- `MEM_GETMAXTASKS` returning the number of exported task slots
+- offset-based `read` access over the synthetic image for task, segment, stack,
+  and related inspection data consumed by upstream ELKS `ps`
+
+Ioctls that require direct far-pointer dereference into real kernel memory are
+not part of the minimum supported compatibility surface unless explicitly
+emulated.
+
 ## 6. Signal ABI Contract
 
 Substrate's native signal semantics remain the native kernel contract. ELKS

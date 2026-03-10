@@ -1,5 +1,6 @@
 #include <exec/perso/personality.h>
 #include <exec/perso/elks_syscall_table.h>
+#include <exec/perso/elks_kmem.h>
 #include <exec/formats/elks_aout.h>
 #include <sys/errno.h>
 #include <sys/core.h>
@@ -14,8 +15,11 @@
 #include <vfs/vfs.h>
 #include <sys/file.h>
 #include <sys/proc.h>
+#include <sys/session.h>
 #include <sys/dirent.h>
 #include <sys/stat.h>
+#include <pm/pm.h>
+#include <kern/time.h>
 #include <vm/vm_kmem.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -95,6 +99,354 @@ struct elks_timezone {
     int16_t tz_minuteswest;
     int16_t tz_dsttime;
 } __attribute__((packed, aligned(2)));
+
+#define ELKS_KMEM_RDEV               (((1U << 8) | 2U))
+#define ELKS_KMEM_IMAGE_CAP          32768U
+#define ELKS_KMEM_JIFFIES_OFFSET     0x0000U
+#define ELKS_KMEM_TASKS_OFFSET       0x0100U
+#define ELKS_KMEM_TASK_SIZE          0x033CU
+#define ELKS_KMEM_TASK_SLOT_SIZE     0x0372U
+#define ELKS_KMEM_TASK_STATE         0x0000U
+#define ELKS_KMEM_TASK_STATE_LEGACY  0x0022U
+#define ELKS_KMEM_TASK_PID           0x0002U
+#define ELKS_KMEM_TASK_PID_LEGACY    0x000EU
+#define ELKS_KMEM_TASK_PPID          0x0004U
+#define ELKS_KMEM_TASK_PPID_LEGACY   0x0010U
+#define ELKS_KMEM_TASK_PGRP          0x0006U
+#define ELKS_KMEM_TASK_PGRP_LEGACY   0x0012U
+#define ELKS_KMEM_TASK_UID           0x000AU
+#define ELKS_KMEM_TASK_UID_LEGACY    0x0016U
+#define ELKS_KMEM_TASK_TTY           0x001CU
+#define ELKS_KMEM_TASK_TTY_LEGACY    0x0076U
+#define ELKS_KMEM_TASK_T_INODE       0x0026U
+#define ELKS_KMEM_TASK_MM            0x0044U
+#define ELKS_KMEM_TASK_MM_LEGACY     0x006CU
+#define ELKS_KMEM_TASK_MM_ALT        0x003EU
+#define ELKS_KMEM_TASK_AVERAGE       0x009CU
+#define ELKS_KMEM_TASK_AVERAGE_LEGACY 0x0094U
+#define ELKS_KMEM_TASK_AVERAGE_ALT   0x0096U
+#define ELKS_KMEM_TASK_T_ENDDATA     0x0092U
+#define ELKS_KMEM_TASK_T_ENDDATA_LEGACY 0x0004U
+#define ELKS_KMEM_TASK_T_ENDDATA_ALT 0x008CU
+#define ELKS_KMEM_TASK_T_ENDBRK      0x0094U
+#define ELKS_KMEM_TASK_T_ENDBRK_LEGACY 0x0006U
+#define ELKS_KMEM_TASK_T_ENDBRK_ALT  0x008EU
+#define ELKS_KMEM_TASK_T_BEGSTACK    0x0096U
+#define ELKS_KMEM_TASK_T_BEGSTACK_LEGACY 0x0008U
+#define ELKS_KMEM_TASK_T_BEGSTACK_ALT 0x0090U
+#define ELKS_KMEM_TASK_KSTACK_MAGIC  0x00A4U
+#define ELKS_KMEM_TASK_KSTACK_MAGIC_ALT 0x009EU
+#define ELKS_KMEM_TASK_T_REGS_SP     0x0338U
+#define ELKS_KMEM_TASK_T_REGS_SP_LEGACY 0x036EU
+#define ELKS_KMEM_TASK_T_REGS_SP_ALT 0x036EU
+#define ELKS_KMEM_TASK_T_REGS_SS     0x033AU
+#define ELKS_KMEM_TASK_T_REGS_SS_LEGACY 0x0370U
+#define ELKS_KMEM_TASK_T_REGS_SS_ALT 0x0370U
+#define ELKS_KMEM_SEG_SIZE           0x0010U
+#define ELKS_KMEM_SEG_BASE           0x0008U
+#define ELKS_KMEM_SEG_SIZE_OFF       0x000AU
+#define ELKS_KMEM_CMDLINE_SIZE       0x0050U
+#define ELKS_KMEM_TTY_SIZE           0x0080U
+#define ELKS_KMEM_TTY_MINOR_LEGACY   0x0002U
+#define ELKS_KMEM_TTY_MINOR          0x0018U
+#define ELKS_KSTACK_MAGIC            0x5476U
+#define ELKS_TASK_RUNNING            0U
+#define ELKS_TASK_INTERRUPTIBLE      1U
+#define ELKS_TASK_UNINTERRUPTIBLE    2U
+#define ELKS_TASK_WAITING            3U
+#define ELKS_TASK_STOPPED            4U
+#define ELKS_TASK_ZOMBIE             5U
+#define ELKS_TASK_EXITING            6U
+#define ELKS_TASK_UNUSED             7U
+#define ELKS_SEG_CODE                0U
+#define ELKS_SEG_DATA                1U
+
+static void elks_kmem_put16(uint8_t *buf, uint32_t off, uint16_t value) {
+    buf[off + 0U] = (uint8_t)(value & 0xFFU);
+    buf[off + 1U] = (uint8_t)((value >> 8) & 0xFFU);
+}
+
+static void elks_kmem_put32(uint8_t *buf, uint32_t off, uint32_t value) {
+    buf[off + 0U] = (uint8_t)(value & 0xFFU);
+    buf[off + 1U] = (uint8_t)((value >> 8) & 0xFFU);
+    buf[off + 2U] = (uint8_t)((value >> 16) & 0xFFU);
+    buf[off + 3U] = (uint8_t)((value >> 24) & 0xFFU);
+}
+
+static int elks_is_kmem_fd(int fd) {
+    file_t *f;
+    fs_node_t *node;
+
+    if (!current_process || fd < 0 || fd >= MAX_FD) {
+        return 0;
+    }
+    f = current_process->fds[fd];
+    if (!f || !f->f_data) {
+        return 0;
+    }
+    node = (fs_node_t *)f->f_data;
+    if ((node->flags & 0x7U) != FS_CHARDEVICE) {
+        return 0;
+    }
+    return (uint32_t)node->rdev == ELKS_KMEM_RDEV;
+}
+
+static process_t *elks_active_process(void) {
+    if (current_thread && current_thread->proc && current_thread->proc->pid >= 0) {
+        return current_thread->proc;
+    }
+    if (current_process && current_process->pid >= 0) {
+        return current_process;
+    }
+    return NULL;
+}
+
+static int elks_proc_visible(const process_t *proc) {
+    if (!proc || proc->pid < 0) {
+        return 0;
+    }
+    if (proc == elks_active_process()) {
+        return 1;
+    }
+    if (proc->is_kernel_task || proc->pmap || proc->p_parent ||
+        proc->comm[0] != '\0' || proc->exec_path[0] != '\0') {
+        return 1;
+    }
+    return 0;
+}
+
+static uint16_t elks_map_proc_state(const process_t *proc) {
+    if (!elks_proc_visible(proc)) {
+        return ELKS_TASK_UNUSED;
+    }
+
+    switch (proc->state) {
+        case SSTOP:
+            return ELKS_TASK_STOPPED;
+        case SZOMB:
+            return ELKS_TASK_ZOMBIE;
+        case SDYING:
+            return ELKS_TASK_EXITING;
+        case SSLEEP:
+            return ELKS_TASK_INTERRUPTIBLE;
+        case SIDL:
+            return ELKS_TASK_WAITING;
+        case SRUN:
+        default:
+            return ELKS_TASK_RUNNING;
+    }
+}
+
+static const char *elks_proc_name(const process_t *proc) {
+    const char *name;
+    const char *cursor;
+
+    if (!proc) {
+        return "unknown";
+    }
+    name = NULL;
+    if (proc->exec_path[0] != '\0') {
+        for (cursor = proc->exec_path; *cursor != '\0'; cursor++) {
+            if (*cursor == '/') {
+                name = cursor;
+            }
+        }
+    }
+    if (name && name[1] != '\0') {
+        return name + 1;
+    }
+    if (proc->comm[0] != '\0') {
+        return proc->comm;
+    }
+    return "unknown";
+}
+
+static int elks_kmem_append_region(uint32_t *cursor, uint32_t size, uint32_t align,
+                                   uint32_t *off_out) {
+    uint32_t off;
+
+    if (!cursor || !off_out || align == 0U) {
+        return -EINVAL;
+    }
+    off = (*cursor + (align - 1U)) & ~(align - 1U);
+    if (off > ELKS_KMEM_IMAGE_CAP || size > (ELKS_KMEM_IMAGE_CAP - off)) {
+        return -ENOMEM;
+    }
+    *cursor = off + size;
+    *off_out = off;
+    return 0;
+}
+
+static void elks_kmem_emit_task(uint8_t *buf, uint32_t task_off, const process_t *proc,
+                                uint32_t *cursor) {
+    const char *name = elks_proc_name(proc);
+    size_t name_len = strlen(name) + 1U;
+    uint32_t code_seg_off = 0;
+    uint32_t data_seg_off = 0;
+    uint32_t tty_off = 0;
+    uint32_t stack_off = 0;
+    uint16_t t_enddata = 0x0080U;
+    uint16_t t_endbrk = 0x00A0U;
+    uint16_t t_sp = 0;
+    uint16_t dseg_size_paras;
+    uint16_t cseg_size_paras = 0x0040U;
+    uint16_t avg = 0;
+
+    memset(buf + task_off, 0, ELKS_KMEM_TASK_SLOT_SIZE);
+    if (!elks_proc_visible(proc)) {
+        buf[task_off + ELKS_KMEM_TASK_STATE] = (uint8_t)ELKS_TASK_UNUSED;
+        buf[task_off + ELKS_KMEM_TASK_STATE_LEGACY] = (uint8_t)ELKS_TASK_UNUSED;
+        return;
+    }
+
+    if (elks_kmem_append_region(cursor, ELKS_KMEM_SEG_SIZE, 2U, &code_seg_off) != 0 ||
+        elks_kmem_append_region(cursor, ELKS_KMEM_SEG_SIZE, 2U, &data_seg_off) != 0) {
+        buf[task_off + ELKS_KMEM_TASK_STATE] = (uint8_t)ELKS_TASK_UNUSED;
+        buf[task_off + ELKS_KMEM_TASK_STATE_LEGACY] = (uint8_t)ELKS_TASK_UNUSED;
+        return;
+    }
+
+    if (proc->tty != NULL &&
+        elks_kmem_append_region(cursor, ELKS_KMEM_TTY_SIZE, 2U, &tty_off) != 0) {
+        tty_off = 0;
+    }
+
+    if (name_len < ELKS_KMEM_CMDLINE_SIZE) {
+        name_len = ELKS_KMEM_CMDLINE_SIZE;
+    }
+    if (elks_kmem_append_region(cursor, (uint32_t)(8U + name_len), 2U, &stack_off) != 0) {
+        buf[task_off + ELKS_KMEM_TASK_STATE] = (uint8_t)ELKS_TASK_UNUSED;
+        buf[task_off + ELKS_KMEM_TASK_STATE_LEGACY] = (uint8_t)ELKS_TASK_UNUSED;
+        return;
+    }
+
+    dseg_size_paras = (uint16_t)(((stack_off + 8U + (uint32_t)name_len + 15U) >> 4) + 1U);
+    t_sp = (uint16_t)stack_off;
+    avg = (uint16_t)((proc->utime + proc->stime) & 0xFFFFU);
+
+    buf[task_off + ELKS_KMEM_TASK_STATE] = (uint8_t)elks_map_proc_state(proc);
+    buf[task_off + ELKS_KMEM_TASK_STATE_LEGACY] = (uint8_t)elks_map_proc_state(proc);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_PID, (uint16_t)proc->pid);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_PID_LEGACY, (uint16_t)proc->pid);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_PPID, (uint16_t)proc->ppid);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_PPID_LEGACY, (uint16_t)proc->ppid);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_PGRP,
+                    (uint16_t)(proc->p_pgrp ? proc->p_pgrp->pg_id : proc->pid));
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_PGRP_LEGACY,
+                    (uint16_t)(proc->p_pgrp ? proc->p_pgrp->pg_id : proc->pid));
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_UID, (uint16_t)proc->uid);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_UID_LEGACY, (uint16_t)proc->uid);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_TTY, (uint16_t)tty_off);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_TTY_LEGACY, (uint16_t)tty_off);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_T_INODE, (uint16_t)(proc->pid & 0xFFFFU));
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_MM + (ELKS_SEG_CODE * 2U),
+                    (uint16_t)code_seg_off);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_MM + (ELKS_SEG_DATA * 2U),
+                    (uint16_t)data_seg_off);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_MM_ALT + (ELKS_SEG_CODE * 2U),
+                    (uint16_t)code_seg_off);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_MM_ALT + (ELKS_SEG_DATA * 2U),
+                    (uint16_t)data_seg_off);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_MM_LEGACY + (ELKS_SEG_CODE * 2U),
+                    (uint16_t)code_seg_off);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_MM_LEGACY + (ELKS_SEG_DATA * 2U),
+                    (uint16_t)data_seg_off);
+    elks_kmem_put32(buf, task_off + ELKS_KMEM_TASK_AVERAGE, (uint32_t)avg);
+    elks_kmem_put32(buf, task_off + ELKS_KMEM_TASK_AVERAGE_LEGACY, (uint32_t)avg);
+    elks_kmem_put32(buf, task_off + ELKS_KMEM_TASK_AVERAGE_ALT, (uint32_t)avg);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_T_ENDDATA, t_enddata);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_T_ENDDATA_LEGACY, t_enddata);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_T_ENDDATA_ALT, t_enddata);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_T_ENDBRK, t_endbrk);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_T_ENDBRK_LEGACY, t_endbrk);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_T_ENDBRK_ALT, t_endbrk);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_T_BEGSTACK, (uint16_t)stack_off);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_T_BEGSTACK_LEGACY, (uint16_t)stack_off);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_T_BEGSTACK_ALT, (uint16_t)stack_off);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_KSTACK_MAGIC, ELKS_KSTACK_MAGIC);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_KSTACK_MAGIC_ALT, ELKS_KSTACK_MAGIC);
+    elks_kmem_put16(buf, task_off + 0x009AU, ELKS_KSTACK_MAGIC);
+    elks_kmem_put16(buf, task_off + 0x00A0U, ELKS_KSTACK_MAGIC);
+    elks_kmem_put16(buf, task_off + 0x00A2U, ELKS_KSTACK_MAGIC);
+    elks_kmem_put16(buf, task_off + 0x00A6U, ELKS_KSTACK_MAGIC);
+    elks_kmem_put16(buf, task_off + 0x00A8U, ELKS_KSTACK_MAGIC);
+    elks_kmem_put16(buf, task_off + 0x00AAU, ELKS_KSTACK_MAGIC);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_T_REGS_SP, t_sp);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_T_REGS_SP_LEGACY, t_sp);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_T_REGS_SP_ALT, t_sp);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_T_REGS_SS, 0U);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_T_REGS_SS_LEGACY, 0U);
+    elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_T_REGS_SS_ALT, 0U);
+
+    elks_kmem_put16(buf, code_seg_off + ELKS_KMEM_SEG_BASE, 0U);
+    elks_kmem_put16(buf, code_seg_off + ELKS_KMEM_SEG_SIZE_OFF, cseg_size_paras);
+    elks_kmem_put16(buf, data_seg_off + ELKS_KMEM_SEG_BASE, 0U);
+    elks_kmem_put16(buf, data_seg_off + ELKS_KMEM_SEG_SIZE_OFF, dseg_size_paras);
+
+    if (tty_off != 0U && proc->tty != NULL) {
+        elks_kmem_put16(buf, tty_off + ELKS_KMEM_TTY_MINOR_LEGACY, 0U);
+        elks_kmem_put16(buf, tty_off + ELKS_KMEM_TTY_MINOR, 0U);
+    }
+
+    elks_kmem_put16(buf, stack_off, 1U);
+    elks_kmem_put16(buf, stack_off + 2U, (uint16_t)(stack_off + 6U));
+    elks_kmem_put16(buf, stack_off + 4U, 0U);
+    memcpy(buf + stack_off + 4U, name, strlen(name) + 1U);
+    memcpy(buf + stack_off + 6U, name, strlen(name) + 1U);
+    memcpy(buf + stack_off + 8U, name, strlen(name) + 1U);
+}
+
+static int elks_kmem_build_snapshot(uint8_t **buf_out, size_t *size_out) {
+    uint8_t *buf;
+    uint32_t cursor = ELKS_KMEM_TASKS_OFFSET + (MAX_PROCS * ELKS_KMEM_TASK_SLOT_SIZE);
+    const process_t *exported[MAX_PROCS];
+    process_t *active = elks_active_process();
+    int exported_count = 0;
+    int i;
+
+    if (!buf_out || !size_out) {
+        return -EINVAL;
+    }
+
+    buf = kmalloc(ELKS_KMEM_IMAGE_CAP);
+    if (!buf) {
+        return -ENOMEM;
+    }
+    memset(buf, 0, ELKS_KMEM_IMAGE_CAP);
+    elks_kmem_put32(buf, ELKS_KMEM_JIFFIES_OFFSET, (uint32_t)get_ticks());
+
+    memset(exported, 0, sizeof(exported));
+    if (elks_proc_visible(active)) {
+        exported[exported_count++] = active;
+    }
+    for (i = 0; i < MAX_PROCS && exported_count < MAX_PROCS; i++) {
+        const process_t *proc = &processes[i];
+        int seen = 0;
+        int j;
+
+        if (!elks_proc_visible(proc)) {
+            continue;
+        }
+        for (j = 0; j < exported_count; j++) {
+            if (exported[j] == proc) {
+                seen = 1;
+                break;
+            }
+        }
+        if (!seen) {
+            exported[exported_count++] = proc;
+        }
+    }
+
+    for (i = 0; i < MAX_PROCS; i++) {
+        elks_kmem_emit_task(buf, ELKS_KMEM_TASKS_OFFSET + (i * ELKS_KMEM_TASK_SLOT_SIZE),
+                            i < exported_count ? exported[i] : NULL, &cursor);
+    }
+
+    *buf_out = buf;
+    *size_out = (size_t)cursor;
+    return 0;
+}
 
 static void elks_translate_stat(struct elks_stat *dst, const struct stat *src) {
     if (!dst || !src) {
@@ -482,10 +834,32 @@ static int elks_sys_read(uint32_t fd, uint32_t buf_off, uint32_t count,
                          uint32_t unused3, uint32_t unused4, uint32_t unused5,
                          uint32_t unused6, uint32_t unused7) {
     uintptr_t linear = 0;
+    uint8_t *kmem = NULL;
+    size_t kmem_size = 0;
+    size_t avail;
+    size_t to_copy;
+    int ret;
     (void)unused3; (void)unused4; (void)unused5; (void)unused6; (void)unused7;
 
     if (elks_ds_pointer(buf_off, &linear) != 0) {
         return -EFAULT;
+    }
+    if (elks_is_kmem_fd((int)fd)) {
+        ret = elks_kmem_build_snapshot(&kmem, &kmem_size);
+        if (ret != 0) {
+            return ret;
+        }
+        if (current_process->fds[fd]->f_offset < 0 ||
+            (size_t)current_process->fds[fd]->f_offset >= kmem_size) {
+            kfree(kmem, ELKS_KMEM_IMAGE_CAP);
+            return 0;
+        }
+        avail = kmem_size - (size_t)current_process->fds[fd]->f_offset;
+        to_copy = (size_t)count < avail ? (size_t)count : avail;
+        memcpy((void *)(uintptr_t)linear, kmem + current_process->fds[fd]->f_offset, to_copy);
+        current_process->fds[fd]->f_offset += (off_t)to_copy;
+        kfree(kmem, ELKS_KMEM_IMAGE_CAP);
+        return (int)to_copy;
     }
     return sys_read((int)fd, (char *)(uintptr_t)linear, (int)count);
 }
@@ -543,6 +917,68 @@ static int elks_sys_close(uint32_t fd, uint32_t unused1, uint32_t unused2,
     (void)unused1; (void)unused2; (void)unused3; (void)unused4;
     (void)unused5; (void)unused6; (void)unused7;
     return sys_close((int)fd);
+}
+
+static int elks_sys_lseek(uint32_t fd, uint32_t pos_off, uint32_t whence,
+                          uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                          uint32_t unused6, uint32_t unused7) {
+    file_t *f;
+    uint8_t *kmem = NULL;
+    size_t kmem_size = 0;
+    uintptr_t linear = 0;
+    int32_t pos = 0;
+    off_t off;
+    int64_t result;
+    int ret;
+
+    (void)unused3; (void)unused4; (void)unused5; (void)unused6; (void)unused7;
+
+    if (elks_ds_span(pos_off, sizeof(pos), &linear) != 0) {
+        return -EFAULT;
+    }
+    memcpy(&pos, (const void *)(uintptr_t)linear, sizeof(pos));
+    off = (off_t)pos;
+
+    if (!elks_is_kmem_fd((int)fd)) {
+        result = sys_lseek((int)fd, (uint32_t)off, (uint32_t)(((uint64_t)off) >> 32), (int)whence);
+        if (result < 0) {
+            return (int)result;
+        }
+        pos = (int32_t)result;
+        memcpy((void *)(uintptr_t)linear, &pos, sizeof(pos));
+        return 0;
+    }
+    if (fd >= MAX_FD || !current_process || !(f = current_process->fds[fd])) {
+        return -EBADF;
+    }
+
+    ret = elks_kmem_build_snapshot(&kmem, &kmem_size);
+    if (ret != 0) {
+        return ret;
+    }
+
+    switch (whence) {
+        case 0:
+            break;
+        case 1:
+            off += f->f_offset;
+            break;
+        case 2:
+            off += (off_t)kmem_size;
+            break;
+        default:
+            kfree(kmem, ELKS_KMEM_IMAGE_CAP);
+            return -EINVAL;
+    }
+    if (off < 0) {
+        kfree(kmem, ELKS_KMEM_IMAGE_CAP);
+        return -EINVAL;
+    }
+    f->f_offset = off;
+    pos = (int32_t)f->f_offset;
+    memcpy((void *)(uintptr_t)linear, &pos, sizeof(pos));
+    kfree(kmem, ELKS_KMEM_IMAGE_CAP);
+    return 0;
 }
 
 static int elks_sys_unlink(uint32_t path_off, uint32_t unused1, uint32_t unused2,
@@ -1041,6 +1477,34 @@ static int elks_sys_ioctl(uint32_t fd, uint32_t request, uint32_t arg_off,
         arg = (void *)(uintptr_t)linear;
     }
 
+    if (elks_is_kmem_fd((int)fd)) {
+        switch (request) {
+            case ELKS_MEM_GETDS:
+                if (!arg) {
+                    return -EFAULT;
+                }
+                *(uint16_t *)arg = 0U;
+                return 0;
+            case ELKS_MEM_GETTASK:
+                if (!arg) {
+                    return -EFAULT;
+                }
+                *(uint16_t *)arg = (uint16_t)ELKS_KMEM_TASKS_OFFSET;
+                return 0;
+            case ELKS_MEM_GETMAXTASKS:
+                if (!arg) {
+                    return -EFAULT;
+                }
+                *(uint16_t *)arg = (uint16_t)MAX_PROCS;
+                return 0;
+            case ELKS_MEM_GETUPTIME:
+            case ELKS_MEM_GETJIFFADDR:
+                return -EINVAL;
+            default:
+                return -EINVAL;
+        }
+    }
+
     switch (request) {
         case TCGETS: {
             struct termios native;
@@ -1157,7 +1621,7 @@ static void *elks_syscall_table[ELKS_SYS_MAX] = {
     [ELKS_SYS_mknod]   = (void *)&sys_mknod,
     [ELKS_SYS_chmod]   = (void *)&sys_chmod,
     [ELKS_SYS_chown]   = (void *)&sys_lchown,
-    [ELKS_SYS_lseek]   = (void *)&sys_lseek,
+    [ELKS_SYS_lseek]   = (void *)&elks_sys_lseek,
     [ELKS_SYS_getpid]  = (void *)&elks_sys_getpid,
     [ELKS_SYS_mount]   = (void *)&sys_mount,
     [ELKS_SYS_umount]  = (void *)&sys_umount,

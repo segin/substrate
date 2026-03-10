@@ -192,6 +192,11 @@ ELKS personality contract:
   signal delivery uses the ELKS libc callback convention: the kernel pushes a
   far-return frame for `_signal_cbhandler(sig)` on the ELKS user stack and
   resumes the interrupted `CS:IP` via `lret $2`.
+- ELKS `/dev/kmem` compatibility is personality-scoped rather than native:
+  ELKS processes opening native `/dev/kmem` are given an ELKS-shaped synthetic
+  task snapshot through intercepted `ioctl`, `lseek`, and `read` operations so
+  upstream ELKS process-inspection tools can run without changing native
+  `/dev/kmem` semantics.
 - `INT 0x20` from ELKS userspace is treated as a Minix-86 trap attempt, logged,
   and converted into `SIGSYS`.
 

@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include <sys/proc.h>
+#include <pm/pm.h>
 #include <sys/ldt.h>
 #include <sys/stat.h>
 #include <sys/file.h>
@@ -19,6 +20,7 @@
 
 process_t *current_process;
 thread_t *current_thread;
+process_t processes[MAX_PROCS];
 
 static const char *last_name;
 static uintptr_t last_ptr;
@@ -107,6 +109,7 @@ static size_t ds_mem_size;
 #define trapsignal stub_trapsignal
 #define kern_execve stub_kern_execve
 #define kprint      stub_kprint
+#define get_ticks   stub_get_ticks
 
 int stub_sys_exit(int a) { last_name = "exit"; last_i0 = a; return 11; }
 int stub_sys_fork(void) { last_name = "fork"; return 12; }
@@ -253,6 +256,7 @@ void stub_kprint(const char *msg) {
     strncpy(last_log, msg ? msg : "", sizeof(last_log) - 1);
     last_log[sizeof(last_log) - 1] = '\0';
 }
+uint64_t stub_get_ticks(void) { return 0x12345678ULL; }
 void core_capture_trapframe(process_t *p, const registers_t *regs) { (void)p; (void)regs; }
 void *kmalloc(size_t size) { return malloc(size); }
 void kfree(void *ptr, size_t size) { (void)size; free(ptr); }
@@ -260,7 +264,9 @@ void kfree(void *ptr, size_t size) { (void)size; free(ptr); }
 #include "../../sys/exec/perso/perso_elks.c"
 
 static file_t stub_file;
+static file_t stub_kmem_file;
 static fs_node_t stub_dir_node;
+static fs_node_t stub_kmem_node;
 static struct dirent stub_dirent;
 
 int stub_kern_stat(const char *path, struct stat *buf) {
@@ -372,16 +378,40 @@ int main(void) {
     }
 
     memset(&thread, 0, sizeof(thread));
+    memset(processes, 0, sizeof(processes));
+    for (int i = 0; i < MAX_PROCS; i++) {
+        processes[i].pid = -1;
+    }
     setup_ds(&proc, ldt, ds_mem_size);
     current_process = &proc;
     current_thread = &thread;
     elks_personality_init();
     ds_base = (uintptr_t)ds_mem;
     memset(&stub_file, 0, sizeof(stub_file));
+    memset(&stub_kmem_file, 0, sizeof(stub_kmem_file));
     memset(&stub_dir_node, 0, sizeof(stub_dir_node));
+    memset(&stub_kmem_node, 0, sizeof(stub_kmem_node));
     stub_dir_node.readdir = readdir_fs;
+    stub_kmem_node.flags = FS_CHARDEVICE;
+    stub_kmem_node.rdev = (1U << 8) | 2U;
     stub_file.f_data = &stub_dir_node;
+    stub_kmem_file.f_data = &stub_kmem_node;
     proc.fds[3] = &stub_file;
+    proc.fds[4] = &stub_kmem_file;
+    strcpy(proc.comm, "ps");
+    strcpy(proc.exec_path, "/perso/elks/bin/ps");
+    proc.pid = 7;
+    proc.ppid = 1;
+    proc.uid = 42;
+    proc.state = SRUN;
+    processes[0] = proc;
+    processes[0].fds[3] = &stub_file;
+    processes[0].fds[4] = &stub_kmem_file;
+    strcpy(processes[1].comm, "kinit");
+    processes[1].pid = 1;
+    processes[1].ppid = 0;
+    processes[1].uid = 0;
+    processes[1].state = SSLEEP;
 
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_exit];
     if (fn(7, 0, 0, 0, 0, 0, 0, 0) != 11 || strcmp(last_name, "exit") != 0 || last_i0 != 7) {
@@ -441,6 +471,56 @@ int main(void) {
             fprintf(stderr, "FAIL: ELKS ioctl winsize translation wrong\n");
             return 1;
         }
+    }
+
+    memset(ds_mem + 0x150, 0, 16);
+    if (fn(4, ELKS_MEM_GETDS, 0x150, 0, 0, 0, 0, 0) != 0 ||
+        *(uint16_t *)(void *)(ds_mem + 0x150) != 0) {
+        fprintf(stderr, "FAIL: ELKS MEM_GETDS emulation wrong\n");
+        return 1;
+    }
+    memset(ds_mem + 0x152, 0, 16);
+    if (fn(4, ELKS_MEM_GETMAXTASKS, 0x152, 0, 0, 0, 0, 0) != 0 ||
+        *(uint16_t *)(void *)(ds_mem + 0x152) != MAX_PROCS) {
+        fprintf(stderr, "FAIL: ELKS MEM_GETMAXTASKS emulation wrong\n");
+        return 1;
+    }
+    memset(ds_mem + 0x154, 0, 16);
+    if (fn(4, ELKS_MEM_GETTASK, 0x154, 0, 0, 0, 0, 0) != 0 ||
+        *(uint16_t *)(void *)(ds_mem + 0x154) != ELKS_KMEM_TASKS_OFFSET) {
+        fprintf(stderr, "FAIL: ELKS MEM_GETTASK emulation wrong\n");
+        return 1;
+    }
+    if (fn(4, ELKS_MEM_GETUPTIME, 0x154, 0, 0, 0, 0, 0) != -EINVAL) {
+        fprintf(stderr, "FAIL: ELKS MEM_GETUPTIME should be rejected\n");
+        return 1;
+    }
+    *(int32_t *)(void *)(ds_mem + 0x158) = (int32_t)ELKS_KMEM_TASKS_OFFSET;
+    if (((int (*)(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t))
+         personality_elks.syscall_table[ELKS_SYS_lseek])(4, 0x158, 0, 0, 0, 0, 0, 0) != 0 ||
+        *(int32_t *)(void *)(ds_mem + 0x158) != (int32_t)ELKS_KMEM_TASKS_OFFSET) {
+        fprintf(stderr, "FAIL: ELKS kmem lseek emulation wrong\n");
+        return 1;
+    }
+    memset(ds_mem + 0x360, 0, ELKS_KMEM_TASK_SLOT_SIZE);
+    if (((int (*)(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t))
+         personality_elks.syscall_table[ELKS_SYS_read])(4, 0x360, ELKS_KMEM_TASK_SLOT_SIZE, 0, 0, 0, 0, 0) !=
+        ELKS_KMEM_TASK_SLOT_SIZE) {
+        fprintf(stderr, "FAIL: ELKS kmem read emulation wrong\n");
+        return 1;
+    }
+    if (*(uint8_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_STATE) != ELKS_TASK_RUNNING ||
+        *(uint16_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_PID) != 7 ||
+        *(uint16_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_KSTACK_MAGIC) != ELKS_KSTACK_MAGIC ||
+        *(uint8_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_STATE_LEGACY) != ELKS_TASK_RUNNING ||
+        *(uint16_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_PID_LEGACY) != 7 ||
+        *(uint16_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_PGRP_LEGACY) != 7 ||
+        *(uint16_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_UID_LEGACY) != 42 ||
+        *(uint16_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_MM_LEGACY) == 0 ||
+        *(uint16_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_T_BEGSTACK_LEGACY) == 0 ||
+        *(uint16_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_KSTACK_MAGIC_ALT) != ELKS_KSTACK_MAGIC) {
+        fprintf(stderr, "FAIL: ELKS kmem task image wrong\n");
+        return 1;
     }
 
     strcpy((char *)(ds_mem + 0x40), "/tmp/file");
