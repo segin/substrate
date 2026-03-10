@@ -5393,7 +5393,10 @@ static int try_encode_x86_bmi2_stmt(const as_instruction_t *in, int intel_syntax
     as_x86_bmi2_insn_t bmi2;
 
     if (in == NULL || code == NULL || code_len == NULL || encerr == NULL || encerr_sz == 0 || in->mnemonic == NULL ||
-        !streq_ci(in->mnemonic, "bzhi")) {
+        (!streq_ci(in->mnemonic, "bzhi") && !streq_ci(in->mnemonic, "mulx") &&
+         !streq_ci(in->mnemonic, "pdep") && !streq_ci(in->mnemonic, "pext") &&
+         !streq_ci(in->mnemonic, "sarx") && !streq_ci(in->mnemonic, "shlx") &&
+         !streq_ci(in->mnemonic, "shrx"))) {
         return -1;
     }
 

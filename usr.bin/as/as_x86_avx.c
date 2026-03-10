@@ -220,6 +220,10 @@ static const avx_promoted_desc_t *lookup_promoted(const char *mnemonic) {
         {"vpdpbusds", 0x51, AS_VEX_MAP_0F38, AS_VEX_PP_66},
         {"vpdpwssd", 0x52, AS_VEX_MAP_0F38, AS_VEX_PP_66},
         {"vpdpwssds", 0x53, AS_VEX_MAP_0F38, AS_VEX_PP_66},
+        {"vpdpbsud", 0x50, AS_VEX_MAP_0F38, AS_VEX_PP_F3},
+        {"vpdpbsuds", 0x51, AS_VEX_MAP_0F38, AS_VEX_PP_F3},
+        {"vpdpbssd", 0x50, AS_VEX_MAP_0F38, AS_VEX_PP_F2},
+        {"vpdpbssds", 0x51, AS_VEX_MAP_0F38, AS_VEX_PP_F2},
         {"vpshufb", 0x00, AS_VEX_MAP_0F38, AS_VEX_PP_66},
         {"vphaddw", 0x01, AS_VEX_MAP_0F38, AS_VEX_PP_66},
         {"vphaddd", 0x02, AS_VEX_MAP_0F38, AS_VEX_PP_66},
@@ -247,6 +251,11 @@ static const avx_promoted_desc_t *lookup_promoted(const char *mnemonic) {
         {"vpmaxuw", 0x3e, AS_VEX_MAP_0F38, AS_VEX_PP_66},
         {"vpmaxud", 0x3f, AS_VEX_MAP_0F38, AS_VEX_PP_66},
         {"vpmulld", 0x40, AS_VEX_MAP_0F38, AS_VEX_PP_66},
+        {"vgf2p8mulb", 0xcf, AS_VEX_MAP_0F38, AS_VEX_PP_66},
+        {"vaesenc", 0xdc, AS_VEX_MAP_0F38, AS_VEX_PP_66},
+        {"vaesenclast", 0xdd, AS_VEX_MAP_0F38, AS_VEX_PP_66},
+        {"vaesdec", 0xde, AS_VEX_MAP_0F38, AS_VEX_PP_66},
+        {"vaesdeclast", 0xdf, AS_VEX_MAP_0F38, AS_VEX_PP_66},
     };
     size_t i;
 
