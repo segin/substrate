@@ -237,30 +237,6 @@ static uint16_t elks_map_proc_state(const process_t *proc) {
     }
 }
 
-static const char *elks_proc_name(const process_t *proc) {
-    const char *name;
-    const char *cursor;
-
-    if (!proc) {
-        return "unknown";
-    }
-    name = NULL;
-    if (proc->exec_path[0] != '\0') {
-        for (cursor = proc->exec_path; *cursor != '\0'; cursor++) {
-            if (*cursor == '/') {
-                name = cursor;
-            }
-        }
-    }
-    if (name && name[1] != '\0') {
-        return name + 1;
-    }
-    if (proc->comm[0] != '\0') {
-        return proc->comm;
-    }
-    return "unknown";
-}
-
 static int elks_kmem_append_region(uint32_t *cursor, uint32_t size, uint32_t align,
                                    uint32_t *off_out) {
     uint32_t off;
@@ -279,8 +255,9 @@ static int elks_kmem_append_region(uint32_t *cursor, uint32_t size, uint32_t ali
 
 static void elks_kmem_emit_task(uint8_t *buf, uint32_t task_off, const process_t *proc,
                                 uint32_t *cursor) {
-    const char *name = elks_proc_name(proc);
-    size_t name_len = strlen(name) + 1U;
+    char cmdline[PROC_CMDLINE_MAX];
+    size_t cmdline_bytes;
+    size_t cmd_argc;
     uint32_t code_seg_off = 0;
     uint32_t data_seg_off = 0;
     uint32_t tty_off = 0;
@@ -311,16 +288,21 @@ static void elks_kmem_emit_task(uint8_t *buf, uint32_t task_off, const process_t
         tty_off = 0;
     }
 
-    if (name_len < ELKS_KMEM_CMDLINE_SIZE) {
-        name_len = ELKS_KMEM_CMDLINE_SIZE;
+    cmdline_bytes = proc_emit_cmdline(proc, cmdline, sizeof(cmdline), &cmd_argc);
+    if (cmdline_bytes < ELKS_KMEM_CMDLINE_SIZE) {
+        cmdline_bytes = ELKS_KMEM_CMDLINE_SIZE;
     }
-    if (elks_kmem_append_region(cursor, (uint32_t)(8U + name_len), 2U, &stack_off) != 0) {
+    if (elks_kmem_append_region(cursor,
+                                (uint32_t)(((cmd_argc + 2U) * sizeof(uint16_t)) + cmdline_bytes),
+                                2U, &stack_off) != 0) {
         buf[task_off + ELKS_KMEM_TASK_STATE] = (uint8_t)ELKS_TASK_UNUSED;
         buf[task_off + ELKS_KMEM_TASK_STATE_LEGACY] = (uint8_t)ELKS_TASK_UNUSED;
         return;
     }
 
-    dseg_size_paras = (uint16_t)(((stack_off + 8U + (uint32_t)name_len + 15U) >> 4) + 1U);
+    dseg_size_paras = (uint16_t)(((stack_off +
+                                   ((uint32_t)(cmd_argc + 2U) * sizeof(uint16_t)) +
+                                   (uint32_t)cmdline_bytes + 15U) >> 4) + 1U);
     t_sp = (uint16_t)stack_off;
     avg = (uint16_t)((proc->utime + proc->stime) & 0xFFFFU);
 
@@ -388,20 +370,23 @@ static void elks_kmem_emit_task(uint8_t *buf, uint32_t task_off, const process_t
         elks_kmem_put16(buf, tty_off + ELKS_KMEM_TTY_MINOR, 0U);
     }
 
-    /*
-     * Legacy ELKS ps/kmem readers expect a tiny argv block:
-     *   argc=1
-     *   argv[0] -> inline command string
-     *   argv[1] = NULL
-     *
-     * The command string itself must start after the NULL terminator slot.
-     * Writing it at stack_off+4 corrupts argv[1] and produces names like
-     * "shsh" or "swswapper" when readers start at the legacy string slot.
-     */
-    elks_kmem_put16(buf, stack_off, 1U);
-    elks_kmem_put16(buf, stack_off + 2U, (uint16_t)(stack_off + 6U));
-    elks_kmem_put16(buf, stack_off + 4U, 0U);
-    memcpy(buf + stack_off + 6U, name, strlen(name) + 1U);
+    {
+        uint32_t ptr_off = stack_off + 2U;
+        uint32_t str_off = stack_off + ((uint32_t)(cmd_argc + 2U) * sizeof(uint16_t));
+        size_t i;
+        size_t str_cursor = 0;
+
+        elks_kmem_put16(buf, stack_off, (uint16_t)cmd_argc);
+        for (i = 0; i < cmd_argc; i++) {
+            size_t arg_len = strnlen(cmdline + str_cursor, cmdline_bytes - str_cursor) + 1U;
+
+            elks_kmem_put16(buf, ptr_off + (uint32_t)(i * sizeof(uint16_t)),
+                            (uint16_t)(str_off + str_cursor));
+            memcpy(buf + str_off + str_cursor, cmdline + str_cursor, arg_len);
+            str_cursor += arg_len;
+        }
+        elks_kmem_put16(buf, ptr_off + (uint32_t)(cmd_argc * sizeof(uint16_t)), 0U);
+    }
 }
 
 static int elks_kmem_build_snapshot(uint8_t **buf_out, size_t *size_out) {

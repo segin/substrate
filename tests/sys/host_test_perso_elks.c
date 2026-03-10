@@ -262,6 +262,82 @@ uint64_t stub_get_ticks(void) { return 0x12345678ULL; }
 void core_capture_trapframe(process_t *p, const registers_t *regs) { (void)p; (void)regs; }
 void *kmalloc(size_t size) { return malloc(size); }
 void kfree(void *ptr, size_t size) { (void)size; free(ptr); }
+void proc_capture_cmdline(process_t *p, char *const argv[]) {
+    size_t used = 0;
+    int i;
+
+    if (!p) {
+        return;
+    }
+    p->cmdline_tail_len = 0;
+    p->cmdline_tail_argc = 0;
+    memset(p->cmdline_tail, 0, sizeof(p->cmdline_tail));
+    if (!argv) {
+        return;
+    }
+    for (i = 1; argv[i] != NULL && used < sizeof(p->cmdline_tail); i++) {
+        size_t avail = sizeof(p->cmdline_tail) - used;
+        size_t copy_len;
+
+        if (avail <= 1U) {
+            break;
+        }
+        copy_len = strnlen(argv[i], avail - 1U);
+        memcpy(p->cmdline_tail + used, argv[i], copy_len);
+        p->cmdline_tail[used + copy_len] = '\0';
+        used += copy_len + 1U;
+        p->cmdline_tail_len = (uint16_t)used;
+        p->cmdline_tail_argc++;
+        if (argv[i][copy_len] != '\0') {
+            break;
+        }
+    }
+}
+size_t proc_emit_cmdline(const process_t *p, char *buf, size_t buf_len, size_t *argc_out) {
+    size_t limit;
+    size_t written;
+    size_t argc;
+    size_t cursor;
+    const char *name = (p && p->comm[0] != '\0') ? p->comm : "unknown";
+    size_t name_len;
+
+    if (argc_out) {
+        *argc_out = 0;
+    }
+    if (!p || !buf || buf_len == 0) {
+        return 0;
+    }
+    limit = buf_len > PROC_CMDLINE_MAX ? PROC_CMDLINE_MAX : buf_len;
+    name_len = strnlen(name, limit - 1U);
+    memcpy(buf, name, name_len);
+    buf[name_len] = '\0';
+    written = name_len + 1U;
+    argc = 1U;
+    cursor = 0;
+    while (cursor < p->cmdline_tail_len && written < limit) {
+        size_t avail = limit - written;
+        size_t stored_len;
+        size_t copy_len;
+
+        if (avail <= 1U) {
+            break;
+        }
+        stored_len = strnlen(p->cmdline_tail + cursor, (size_t)p->cmdline_tail_len - cursor);
+        copy_len = stored_len > (avail - 1U) ? (avail - 1U) : stored_len;
+        memcpy(buf + written, p->cmdline_tail + cursor, copy_len);
+        buf[written + copy_len] = '\0';
+        written += copy_len + 1U;
+        argc++;
+        if (copy_len != stored_len) {
+            break;
+        }
+        cursor += stored_len + 1U;
+    }
+    if (argc_out) {
+        *argc_out = argc;
+    }
+    return written;
+}
 
 #include "../../sys/exec/perso/perso_elks.c"
 
@@ -361,6 +437,8 @@ int main(void) {
     process_t proc;
     thread_t thread;
     gdt_entry_t ldt[4];
+    char long_arg[PROC_CMDLINE_MAX + 32];
+    char *kmem_argv[] = { (char *)"ps", (char *)"-l", long_arg, NULL };
     int (*fn)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
     uintptr_t ds_base;
     uint16_t cs_sel = (uint16_t)((ELKS_LDT_CS_INDEX << 3) | 4U | 3U);
@@ -402,6 +480,9 @@ int main(void) {
     proc.fds[4] = &stub_kmem_file;
     strcpy(proc.comm, "ps");
     strcpy(proc.exec_path, "/perso/elks/bin/ps");
+    memset(long_arg, 'x', sizeof(long_arg) - 1U);
+    long_arg[sizeof(long_arg) - 1U] = '\0';
+    proc_capture_cmdline(&proc, kmem_argv);
     proc.pid = 7;
     proc.ppid = 1;
     proc.uid = 42;
@@ -531,17 +612,24 @@ int main(void) {
         fprintf(stderr, "FAIL: ELKS kmem stack lseek wrong\n");
         return 1;
     }
-    memset(ds_mem + 0x460, 0, 0x40);
+    memset(ds_mem + 0x460, 0, 0x220);
     if (((int (*)(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t))
-         personality_elks.syscall_table[ELKS_SYS_read])(4, 0x460, 0x40, 0, 0, 0, 0, 0) != 0x40) {
+         personality_elks.syscall_table[ELKS_SYS_read])(4, 0x460, 0x220, 0, 0, 0, 0, 0) != 0x220) {
         fprintf(stderr, "FAIL: ELKS kmem stack read wrong\n");
         return 1;
     }
-    if (*(uint16_t *)(void *)(ds_mem + 0x460) != 1 ||
+    if (*(uint16_t *)(void *)(ds_mem + 0x460) != 3 ||
         *(uint16_t *)(void *)(ds_mem + 0x460 + 2) !=
-            *(uint16_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_T_BEGSTACK_LEGACY) + 6 ||
-        *(uint16_t *)(void *)(ds_mem + 0x460 + 4) != 0 ||
-        strcmp((char *)(void *)(ds_mem + 0x460 + 6), "ps") != 0) {
+            *(uint16_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_T_BEGSTACK_LEGACY) + 10 ||
+        *(uint16_t *)(void *)(ds_mem + 0x460 + 4) !=
+            *(uint16_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_T_BEGSTACK_LEGACY) + 13 ||
+        *(uint16_t *)(void *)(ds_mem + 0x460 + 6) !=
+            *(uint16_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_T_BEGSTACK_LEGACY) + 16 ||
+        *(uint16_t *)(void *)(ds_mem + 0x460 + 8) != 0 ||
+        strcmp((char *)(void *)(ds_mem + 0x460 + 10), "ps") != 0 ||
+        strcmp((char *)(void *)(ds_mem + 0x460 + 13), "-l") != 0 ||
+        strnlen((char *)(void *)(ds_mem + 0x460 + 16), 0x220 - 16) != 505 ||
+        ((char *)(void *)(ds_mem + 0x460 + 16))[0] != 'x') {
         fprintf(stderr, "FAIL: ELKS kmem command image wrong\n");
         return 1;
     }

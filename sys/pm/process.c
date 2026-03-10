@@ -56,6 +56,134 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork);
 static void proc_sysvipc_exit(process_t *proc);
 static void proc_posixipc_exit(process_t *proc);
 
+static const char *proc_cmdline_name(const process_t *proc) {
+    const char *name;
+    const char *cursor;
+
+    if (!proc) {
+        return "unknown";
+    }
+    if (proc->comm[0] != '\0') {
+        return proc->comm;
+    }
+    name = proc->exec_path;
+    for (cursor = proc->exec_path; *cursor != '\0'; cursor++) {
+        if (*cursor == '/') {
+            name = cursor + 1;
+        }
+    }
+    if (name[0] != '\0') {
+        return name;
+    }
+    return "unknown";
+}
+
+void proc_capture_cmdline(process_t *proc, char *const argv[]) {
+    size_t used;
+    int i;
+
+    if (!proc) {
+        return;
+    }
+
+    proc->cmdline_tail_len = 0;
+    proc->cmdline_tail_argc = 0;
+    memset(proc->cmdline_tail, 0, sizeof(proc->cmdline_tail));
+
+    if (!argv) {
+        return;
+    }
+
+    used = 0;
+    for (i = 1; argv[i] != NULL && used < sizeof(proc->cmdline_tail); i++) {
+        size_t avail = sizeof(proc->cmdline_tail) - used;
+        size_t copy_len;
+
+        if (avail <= 1U) {
+            break;
+        }
+
+        copy_len = strnlen(argv[i], avail - 1U);
+        memcpy(proc->cmdline_tail + used, argv[i], copy_len);
+        proc->cmdline_tail[used + copy_len] = '\0';
+        used += copy_len + 1U;
+        proc->cmdline_tail_len = (uint16_t)used;
+        proc->cmdline_tail_argc++;
+
+        if (argv[i][copy_len] != '\0') {
+            break;
+        }
+    }
+}
+
+size_t proc_emit_cmdline(const process_t *proc, char *buf, size_t buf_len, size_t *argc_out) {
+    const char *name;
+    size_t limit;
+    size_t written;
+    size_t argc;
+    size_t name_len;
+    size_t cursor;
+
+    if (argc_out) {
+        *argc_out = 0;
+    }
+    if (!proc || !buf || buf_len == 0) {
+        return 0;
+    }
+
+    limit = buf_len;
+    if (limit > PROC_CMDLINE_MAX) {
+        limit = PROC_CMDLINE_MAX;
+    }
+
+    name = proc_cmdline_name(proc);
+    name_len = strnlen(name, limit - 1U);
+    memcpy(buf, name, name_len);
+    buf[name_len] = '\0';
+    written = name_len + 1U;
+    argc = 1U;
+
+    if (written >= limit) {
+        if (argc_out) {
+            *argc_out = argc;
+        }
+        return limit;
+    }
+
+    cursor = 0;
+    while (cursor < proc->cmdline_tail_len && written < limit) {
+        size_t avail = limit - written;
+        size_t stored_len;
+        size_t copy_len;
+
+        if (avail <= 1U) {
+            break;
+        }
+
+        stored_len = strnlen(proc->cmdline_tail + cursor,
+                             (size_t)proc->cmdline_tail_len - cursor);
+        copy_len = stored_len;
+        if (copy_len > avail - 1U) {
+            copy_len = avail - 1U;
+        }
+
+        memcpy(buf + written, proc->cmdline_tail + cursor, copy_len);
+        buf[written + copy_len] = '\0';
+        written += copy_len + 1U;
+        argc++;
+
+        if (copy_len != stored_len) {
+            break;
+        }
+        cursor += stored_len + 1U;
+    }
+
+    if (argc_out) {
+        *argc_out = argc;
+    }
+    return written;
+}
+
 static void proc_resource_limits_init(process_t *proc) {
     if (!proc) {
         return;
@@ -191,6 +319,9 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     }
     strncpy(child_proc->cwd_path, parent->cwd_path, sizeof(child_proc->cwd_path) - 1);
     child_proc->cwd_path[sizeof(child_proc->cwd_path) - 1] = '\0';
+    child_proc->cmdline_tail_len = parent->cmdline_tail_len;
+    child_proc->cmdline_tail_argc = parent->cmdline_tail_argc;
+    memcpy(child_proc->cmdline_tail, parent->cmdline_tail, sizeof(child_proc->cmdline_tail));
     
     // Copy parent resources (FDs)
     child_proc->tty = parent->tty;

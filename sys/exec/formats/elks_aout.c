@@ -19,6 +19,7 @@
 #include <sys/stat.h>
 #include <sys/fcntl.h>
 #include <sys/copy.h>
+#include <pm/pm.h>
 #include <kern/panic.h>
 #include <kern/arch.h>
 #include <vm/vm_map.h>
@@ -399,6 +400,7 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     ldt_activate(current_process);
     
     elks_apply_exec_state(current_process, &plan, path);
+    proc_capture_cmdline(current_process, kargv);
     if (current_process->vm_map) {
         vm_map_destroy(current_process->vm_map);
     }

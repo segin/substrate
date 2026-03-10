@@ -21,6 +21,8 @@ void proc_vfork_done(process_t *child);
 
 void proc_set_bitness(process_t *p, uint8_t bitness);
 uint8_t proc_get_bitness(process_t *p);
+void proc_capture_cmdline(process_t *p, char *const argv[]);
+size_t proc_emit_cmdline(const process_t *p, char *buf, size_t buf_len, size_t *argc_out);
 
 /*
  * proc_find - Find a process by PID

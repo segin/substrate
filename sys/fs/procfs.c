@@ -666,15 +666,11 @@ static size_t proc_pid_stat_read(fs_node_t *node, off_t offset, size_t size, uin
 static size_t proc_pid_cmdline_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     int pid = node->inode;
     process_t *p = proc_find(pid);
-    if (!p) return 0;
+    char cmdline[PROC_CMDLINE_MAX];
+    size_t total_len;
 
-    /*
-     * /proc/<pid>/cmdline is NUL-separated argv with trailing NUL.
-     * We currently only expose argv[0] from comm, but must still include
-     * the terminator so userland parsers do not read stale bytes.
-     */
-    size_t comm_len = strnlen(p->comm, AC_COMM_LEN);
-    size_t total_len = comm_len + 1; /* include trailing '\0' */
+    if (!p) return 0;
+    total_len = proc_emit_cmdline(p, cmdline, sizeof(cmdline), NULL);
 
     if ((size_t)offset >= total_len) return 0;
 
@@ -682,21 +678,7 @@ static size_t proc_pid_cmdline_read(fs_node_t *node, off_t offset, size_t size, 
     if ((size_t)offset + read_len > total_len) {
         read_len = total_len - (size_t)offset;
     }
-
-    size_t copied = 0;
-    if ((size_t)offset < comm_len) {
-        size_t part = read_len;
-        if ((size_t)offset + part > comm_len) {
-            part = comm_len - (size_t)offset;
-        }
-        memcpy(buffer, p->comm + (size_t)offset, part);
-        copied = part;
-    }
-
-    if (copied < read_len) {
-        memset(buffer + copied, 0, read_len - copied);
-    }
-
+    memcpy(buffer, cmdline + (size_t)offset, read_len);
     return read_len;
 }
 

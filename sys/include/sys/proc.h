@@ -1,6 +1,7 @@
 #ifndef _SYS_PROC_H
 #define _SYS_PROC_H
 
+#include <stddef.h>
 #include <stdint.h>
 #include <sys/acct.h>
 #include <sys/signal.h>
@@ -22,6 +23,7 @@
 #define P_AUTOREAP   0x0008  // Zombie should be reaped asynchronously
 
 #define PROC_ITIMER_COUNT 3
+#define PROC_CMDLINE_MAX  512
 
 typedef uint8_t process_state_t;
 
@@ -101,6 +103,9 @@ typedef struct process {
     fs_node_t *cwd_node; // Current working directory
     char exec_path[256];
     char cwd_path[256];
+    uint16_t cmdline_tail_len;
+    uint16_t cmdline_tail_argc;
+    char cmdline_tail[PROC_CMDLINE_MAX];
     
     // Memory management
     uint32_t brk;        // Program break (heap end)
