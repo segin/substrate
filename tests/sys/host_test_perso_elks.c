@@ -524,6 +524,27 @@ int main(void) {
         fprintf(stderr, "FAIL: ELKS kmem task image wrong\n");
         return 1;
     }
+    *(int32_t *)(void *)(ds_mem + 0x158) =
+        (int32_t)*(uint16_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_T_BEGSTACK_LEGACY);
+    if (((int (*)(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t))
+         personality_elks.syscall_table[ELKS_SYS_lseek])(4, 0x158, 0, 0, 0, 0, 0, 0) != 0) {
+        fprintf(stderr, "FAIL: ELKS kmem stack lseek wrong\n");
+        return 1;
+    }
+    memset(ds_mem + 0x460, 0, 0x40);
+    if (((int (*)(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t))
+         personality_elks.syscall_table[ELKS_SYS_read])(4, 0x460, 0x40, 0, 0, 0, 0, 0) != 0x40) {
+        fprintf(stderr, "FAIL: ELKS kmem stack read wrong\n");
+        return 1;
+    }
+    if (*(uint16_t *)(void *)(ds_mem + 0x460) != 1 ||
+        *(uint16_t *)(void *)(ds_mem + 0x460 + 2) !=
+            *(uint16_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_T_BEGSTACK_LEGACY) + 6 ||
+        *(uint16_t *)(void *)(ds_mem + 0x460 + 4) != 0 ||
+        strcmp((char *)(void *)(ds_mem + 0x460 + 6), "ps") != 0) {
+        fprintf(stderr, "FAIL: ELKS kmem command image wrong\n");
+        return 1;
+    }
 
     strcpy((char *)(ds_mem + 0x40), "/tmp/file");
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_open];

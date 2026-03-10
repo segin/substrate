@@ -388,12 +388,20 @@ static void elks_kmem_emit_task(uint8_t *buf, uint32_t task_off, const process_t
         elks_kmem_put16(buf, tty_off + ELKS_KMEM_TTY_MINOR, 0U);
     }
 
+    /*
+     * Legacy ELKS ps/kmem readers expect a tiny argv block:
+     *   argc=1
+     *   argv[0] -> inline command string
+     *   argv[1] = NULL
+     *
+     * The command string itself must start after the NULL terminator slot.
+     * Writing it at stack_off+4 corrupts argv[1] and produces names like
+     * "shsh" or "swswapper" when readers start at the legacy string slot.
+     */
     elks_kmem_put16(buf, stack_off, 1U);
     elks_kmem_put16(buf, stack_off + 2U, (uint16_t)(stack_off + 6U));
     elks_kmem_put16(buf, stack_off + 4U, 0U);
-    memcpy(buf + stack_off + 4U, name, strlen(name) + 1U);
     memcpy(buf + stack_off + 6U, name, strlen(name) + 1U);
-    memcpy(buf + stack_off + 8U, name, strlen(name) + 1U);
 }
 
 static int elks_kmem_build_snapshot(uint8_t **buf_out, size_t *size_out) {
