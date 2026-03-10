@@ -70,6 +70,7 @@ void sched_init(void) {
     processes[0].root_node = fs_root;
     processes[0].is_kernel_task = 1;
     processes[0].pmap = pmap_kernel(); // Use Kernel PMAP
+    ldt_init_process(&processes[0]);
     
     extern char *strcpy(char *, const char *);
     strcpy(processes[0].comm, "swapper");
@@ -197,4 +198,3 @@ thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void 
 
     return t;
 }
-

@@ -270,6 +270,10 @@ void ldt_activate(process_t *proc) {
         ldt_load_selector(0);
         return;
     }
+    if (!proc->ldt || proc->ldt_entry_count <= 0) {
+        ldt_load_selector(0);
+        return;
+    }
     spinlock_acquire(&proc->ldt_lock);
     ldt_activate_locked(proc);
     spinlock_release(&proc->ldt_lock);

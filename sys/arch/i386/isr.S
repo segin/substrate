@@ -204,12 +204,13 @@ jump_to_userspace:
     # NOW turn off interrupts
     cli
     
-    # Set DS/ES/FS to user data segment, GS to TLS segment
+    # A freshly exec'd image must not inherit a stale TLS selector from the
+    # previous process image. Start all user data segments on the flat user
+    # data selector; userland will install TLS explicitly via set_thread_area.
     mov $0x23, %ax
     mov %ax, %ds
     mov %ax, %es  
     mov %ax, %fs
-    mov $0x33, %ax    # TLS segment (GDT entry 6 | RPL 3)
     mov %ax, %gs
     
     # Build IRET stack frame (in order pushed):

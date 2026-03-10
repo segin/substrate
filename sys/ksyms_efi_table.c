@@ -542,6 +542,7 @@ extern void linux_sys__llseek(void);
 extern void linux_sys_fstat(void);
 extern void linux_sys_fstat64(void);
 extern void linux_sys_ftruncate(void);
+extern void linux_sys_getcwd(void);
 extern void linux_sys_kill(void);
 extern void linux_sys_lseek(void);
 extern void linux_sys_lstat(void);
@@ -2679,6 +2680,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&linux_sys_stat64, "linux_sys_stat64" },
     { (uint32_t)(uintptr_t)&linux_sys_lstat64, "linux_sys_lstat64" },
     { (uint32_t)(uintptr_t)&linux_sys_fstat64, "linux_sys_fstat64" },
+    { (uint32_t)(uintptr_t)&linux_sys_getcwd, "linux_sys_getcwd" },
     { (uint32_t)(uintptr_t)&linux_sendsig, "linux_sendsig" },
     { (uint32_t)(uintptr_t)&linux_sys_sigreturn, "linux_sys_sigreturn" },
     { (uint32_t)(uintptr_t)&linux_sys_rt_sigreturn, "linux_sys_rt_sigreturn" },
@@ -3117,4 +3119,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1553;
+int ksym_count = 1554;
