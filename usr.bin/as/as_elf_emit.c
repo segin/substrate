@@ -5219,6 +5219,19 @@ static int convert_operand_x86_evex(const as_operand_t *op, const char *mnemonic
     return convert_operand_x86(op, mnemonic, dst, is64, intel_syntax, errbuf, errbuf_sz);
 }
 
+static int operand_is_stmt_immediate(const as_operand_t *op, int intel_syntax) {
+    if (op == NULL) {
+        return 0;
+    }
+    if (op->kind != AS_OPERAND_IMMEDIATE && op->kind != AS_OPERAND_LABEL_REF) {
+        return 0;
+    }
+    if (intel_syntax) {
+        return 1;
+    }
+    return op->raw != NULL && (op->raw[0] == '$' || op->raw[0] == '#');
+}
+
 static int try_encode_x86_avx_stmt(const as_instruction_t *in, int intel_syntax, unsigned char *code, size_t code_cap,
                                    size_t *code_len, char *encerr, size_t encerr_sz) {
     as_x86_avx_insn_t avx;
@@ -5600,8 +5613,8 @@ static int try_encode_x86_avx512dq_generic_stmt(const as_instruction_t *in, int 
             return -1;
         }
     } else if (in->operand_count == 3 &&
-               ((intel_syntax && (in->operands[2].kind == AS_OPERAND_IMMEDIATE || in->operands[2].kind == AS_OPERAND_LABEL_REF)) ||
-                (!intel_syntax && (in->operands[0].kind == AS_OPERAND_IMMEDIATE || in->operands[0].kind == AS_OPERAND_LABEL_REF)))) {
+               ((intel_syntax && operand_is_stmt_immediate(&in->operands[2], intel_syntax)) ||
+                (!intel_syntax && operand_is_stmt_immediate(&in->operands[0], intel_syntax)))) {
         dst_i = intel_syntax ? 0u : 2u;
         src2_i = intel_syntax ? 1u : 1u;
         imm_i = intel_syntax ? 2u : 0u;
@@ -5648,6 +5661,162 @@ static int try_encode_x86_avx512dq_generic_stmt(const as_instruction_t *in, int 
     }
 
     return as_x86_encode_avx512dq(&ev, code, code_cap, code_len, encerr, encerr_sz);
+}
+
+static int try_encode_x86_avx512bw_generic_stmt(const as_instruction_t *in, int intel_syntax, unsigned char *code,
+                                                size_t code_cap, size_t *code_len, char *encerr, size_t encerr_sz) {
+    as_x86_avx512bw_insn_t ev;
+    size_t dst_i;
+    size_t src1_i;
+    size_t src2_i;
+    size_t imm_i;
+    long long immv;
+
+    if (in == NULL || code == NULL || code_len == NULL || encerr == NULL || encerr_sz == 0 || in->mnemonic == NULL ||
+        (in->mnemonic[0] != 'v' && in->mnemonic[0] != 'V')) {
+        return -1;
+    }
+
+    memset(&ev, 0, sizeof(ev));
+    ev.mnemonic = in->mnemonic;
+    ev.vector_bits = infer_avx_vector_bits(in);
+    ev.rounding_mode = -1;
+
+    if (in->operand_count == 2) {
+        dst_i = intel_syntax ? 0u : 1u;
+        src2_i = intel_syntax ? 1u : 0u;
+        ev.op_count = 2;
+        if (convert_operand_x86_evex(&in->operands[dst_i], in->mnemonic, &ev.op1, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+            convert_operand_x86_evex(&in->operands[src2_i], in->mnemonic, &ev.op2, 0, intel_syntax, encerr, encerr_sz) != 0) {
+            return -1;
+        }
+    } else if (in->operand_count == 3 &&
+               ((intel_syntax && operand_is_stmt_immediate(&in->operands[2], intel_syntax)) ||
+                (!intel_syntax && operand_is_stmt_immediate(&in->operands[0], intel_syntax)))) {
+        dst_i = intel_syntax ? 0u : 2u;
+        src2_i = intel_syntax ? 1u : 1u;
+        imm_i = intel_syntax ? 2u : 0u;
+        if ((in->operands[imm_i].kind != AS_OPERAND_IMMEDIATE && in->operands[imm_i].kind != AS_OPERAND_LABEL_REF) ||
+            eval_expr_const(in->operands[imm_i].u.expr, &immv) != 0 || immv < 0 || immv > 255) {
+            return -1;
+        }
+        ev.has_imm8 = 1;
+        ev.imm8 = (uint8_t)immv;
+        ev.op_count = 2;
+        if (convert_operand_x86_evex(&in->operands[dst_i], in->mnemonic, &ev.op1, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+            convert_operand_x86_evex(&in->operands[src2_i], in->mnemonic, &ev.op2, 0, intel_syntax, encerr, encerr_sz) != 0) {
+            return -1;
+        }
+    } else if (in->operand_count == 3) {
+        dst_i = intel_syntax ? 0u : 2u;
+        src1_i = intel_syntax ? 1u : 1u;
+        src2_i = intel_syntax ? 2u : 0u;
+        ev.op_count = 3;
+        if (convert_operand_x86_evex(&in->operands[dst_i], in->mnemonic, &ev.op1, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+            convert_operand_x86_evex(&in->operands[src1_i], in->mnemonic, &ev.op2, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+            convert_operand_x86_evex(&in->operands[src2_i], in->mnemonic, &ev.op3, 0, intel_syntax, encerr, encerr_sz) != 0) {
+            return -1;
+        }
+    } else if (in->operand_count == 4) {
+        dst_i = intel_syntax ? 0u : 3u;
+        src1_i = intel_syntax ? 1u : 2u;
+        src2_i = intel_syntax ? 2u : 1u;
+        imm_i = intel_syntax ? 3u : 0u;
+        if ((in->operands[imm_i].kind != AS_OPERAND_IMMEDIATE && in->operands[imm_i].kind != AS_OPERAND_LABEL_REF) ||
+            eval_expr_const(in->operands[imm_i].u.expr, &immv) != 0 || immv < 0 || immv > 255) {
+            return -1;
+        }
+        ev.has_imm8 = 1;
+        ev.imm8 = (uint8_t)immv;
+        ev.op_count = 3;
+        if (convert_operand_x86_evex(&in->operands[dst_i], in->mnemonic, &ev.op1, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+            convert_operand_x86_evex(&in->operands[src1_i], in->mnemonic, &ev.op2, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+            convert_operand_x86_evex(&in->operands[src2_i], in->mnemonic, &ev.op3, 0, intel_syntax, encerr, encerr_sz) != 0) {
+            return -1;
+        }
+    } else {
+        return -1;
+    }
+
+    return as_x86_encode_avx512bw(&ev, code, code_cap, code_len, encerr, encerr_sz);
+}
+
+static int try_encode_x86_avx512f_generic_stmt(const as_instruction_t *in, int intel_syntax, unsigned char *code,
+                                               size_t code_cap, size_t *code_len, char *encerr, size_t encerr_sz) {
+    as_x86_avx512f_insn_t ev;
+    size_t dst_i;
+    size_t src1_i;
+    size_t src2_i;
+    size_t imm_i;
+    long long immv;
+
+    if (in == NULL || code == NULL || code_len == NULL || encerr == NULL || encerr_sz == 0 || in->mnemonic == NULL ||
+        (in->mnemonic[0] != 'v' && in->mnemonic[0] != 'V')) {
+        return -1;
+    }
+
+    memset(&ev, 0, sizeof(ev));
+    ev.mnemonic = in->mnemonic;
+    ev.vector_bits = infer_avx_vector_bits(in);
+    ev.rounding_mode = -1;
+
+    if (in->operand_count == 2) {
+        dst_i = intel_syntax ? 0u : 1u;
+        src2_i = intel_syntax ? 1u : 0u;
+        ev.op_count = 2;
+        if (convert_operand_x86_evex(&in->operands[dst_i], in->mnemonic, &ev.op1, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+            convert_operand_x86_evex(&in->operands[src2_i], in->mnemonic, &ev.op2, 0, intel_syntax, encerr, encerr_sz) != 0) {
+            return -1;
+        }
+    } else if (in->operand_count == 3 &&
+               ((intel_syntax && operand_is_stmt_immediate(&in->operands[2], intel_syntax)) ||
+                (!intel_syntax && operand_is_stmt_immediate(&in->operands[0], intel_syntax)))) {
+        dst_i = intel_syntax ? 0u : 2u;
+        src2_i = intel_syntax ? 1u : 1u;
+        imm_i = intel_syntax ? 2u : 0u;
+        if ((in->operands[imm_i].kind != AS_OPERAND_IMMEDIATE && in->operands[imm_i].kind != AS_OPERAND_LABEL_REF) ||
+            eval_expr_const(in->operands[imm_i].u.expr, &immv) != 0 || immv < 0 || immv > 255) {
+            return -1;
+        }
+        ev.has_imm8 = 1;
+        ev.imm8 = (uint8_t)immv;
+        ev.op_count = 2;
+        if (convert_operand_x86_evex(&in->operands[dst_i], in->mnemonic, &ev.op1, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+            convert_operand_x86_evex(&in->operands[src2_i], in->mnemonic, &ev.op2, 0, intel_syntax, encerr, encerr_sz) != 0) {
+            return -1;
+        }
+    } else if (in->operand_count == 3) {
+        dst_i = intel_syntax ? 0u : 2u;
+        src1_i = intel_syntax ? 1u : 1u;
+        src2_i = intel_syntax ? 2u : 0u;
+        ev.op_count = 3;
+        if (convert_operand_x86_evex(&in->operands[dst_i], in->mnemonic, &ev.op1, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+            convert_operand_x86_evex(&in->operands[src1_i], in->mnemonic, &ev.op2, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+            convert_operand_x86_evex(&in->operands[src2_i], in->mnemonic, &ev.op3, 0, intel_syntax, encerr, encerr_sz) != 0) {
+            return -1;
+        }
+    } else if (in->operand_count == 4) {
+        dst_i = intel_syntax ? 0u : 3u;
+        src1_i = intel_syntax ? 1u : 2u;
+        src2_i = intel_syntax ? 2u : 1u;
+        imm_i = intel_syntax ? 3u : 0u;
+        if ((in->operands[imm_i].kind != AS_OPERAND_IMMEDIATE && in->operands[imm_i].kind != AS_OPERAND_LABEL_REF) ||
+            eval_expr_const(in->operands[imm_i].u.expr, &immv) != 0 || immv < 0 || immv > 255) {
+            return -1;
+        }
+        ev.has_imm8 = 1;
+        ev.imm8 = (uint8_t)immv;
+        ev.op_count = 3;
+        if (convert_operand_x86_evex(&in->operands[dst_i], in->mnemonic, &ev.op1, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+            convert_operand_x86_evex(&in->operands[src1_i], in->mnemonic, &ev.op2, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+            convert_operand_x86_evex(&in->operands[src2_i], in->mnemonic, &ev.op3, 0, intel_syntax, encerr, encerr_sz) != 0) {
+            return -1;
+        }
+    } else {
+        return -1;
+    }
+
+    return as_x86_encode_avx512f(&ev, code, code_cap, code_len, encerr, encerr_sz);
 }
 
 static int try_encode_x86_bmi1_stmt(const as_instruction_t *in, int intel_syntax, unsigned char *code, size_t code_cap,
@@ -6101,7 +6270,15 @@ static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigne
         return 0;
     }
     if (!cfg->is_64 &&
+        try_encode_x86_avx512bw_generic_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0) {
+        return 0;
+    }
+    if (!cfg->is_64 &&
         try_encode_x86_avx512dq_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0) {
+        return 0;
+    }
+    if (!cfg->is_64 &&
+        try_encode_x86_avx512f_generic_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0) {
         return 0;
     }
     if (!cfg->is_64 && try_encode_x86_avx_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0) {
