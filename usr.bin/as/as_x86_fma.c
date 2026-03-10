@@ -25,6 +25,41 @@ static int set_err(char *errbuf, size_t errbuf_sz, const char *fmt, ...) {
     return -1;
 }
 
+static uint8_t imm8_with_implicit_reg(as_x86_reg_t reg) {
+    return (uint8_t)(((((unsigned)reg & 7u) | 0x8u) << 4));
+}
+
+static int encode_vex_with_imm8(as_x86_reg_t modrm_reg, as_x86_reg_t src1,
+                                const as_x86_operand_t *src2, uint8_t opcode,
+                                as_vex_map_t map, as_vex_pp_t pp, int vex_w, int vex_l,
+                                uint8_t imm8, uint8_t *out, size_t out_cap, size_t *out_len,
+                                char *errbuf, size_t errbuf_sz) {
+    as_x86_vex_insn_t vex;
+    size_t n = 0;
+
+    memset(&vex, 0, sizeof(vex));
+    vex.opcode = opcode;
+    vex.map = map;
+    vex.pp = pp;
+    vex.vex_w = vex_w;
+    vex.vex_l = vex_l;
+    vex.dst = modrm_reg;
+    vex.src1 = src1;
+    vex.src2 = *src2;
+
+    if (as_x86_encode_vex_3op(&vex, out, out_cap, &n, errbuf, errbuf_sz) != 0) {
+        return -1;
+    }
+    if (n >= out_cap) {
+        return set_err(errbuf, errbuf_sz, "encoding overflow");
+    }
+    out[n++] = imm8;
+    if (out_len != NULL) {
+        *out_len = n;
+    }
+    return 0;
+}
+
 static size_t ascii_lower_copy(char *dst, size_t dst_cap, const char *src) {
     size_t i;
 
@@ -82,6 +117,21 @@ int as_x86_encode_fma(const as_x86_fma_insn_t *insn, uint8_t *out, size_t out_ca
     int vex_w = 0;
     int vex_l = 0;
     as_x86_vex_insn_t vex;
+    static const struct {
+        const char *name;
+        uint8_t opcode;
+    } fma4[] = {
+        {"vfmaddsubps", 0x5c}, {"vfmaddsubpd", 0x5d},
+        {"vfmsubaddps", 0x5e}, {"vfmsubaddpd", 0x5f},
+        {"vfmaddps", 0x68},    {"vfmaddpd", 0x69},
+        {"vfmaddss", 0x6a},    {"vfmaddsd", 0x6b},
+        {"vfmsubps", 0x6c},    {"vfmsubpd", 0x6d},
+        {"vfmsubss", 0x6e},    {"vfmsubsd", 0x6f},
+        {"vfnmaddps", 0x78},   {"vfnmaddpd", 0x79},
+        {"vfnmaddss", 0x7a},   {"vfnmaddsd", 0x7b},
+        {"vfnmsubps", 0x7c},   {"vfnmsubpd", 0x7d},
+        {"vfnmsubss", 0x7e},   {"vfnmsubsd", 0x7f},
+    };
 
     if (out_len != NULL) {
         *out_len = 0;
@@ -92,6 +142,29 @@ int as_x86_encode_fma(const as_x86_fma_insn_t *insn, uint8_t *out, size_t out_ca
 
     if (insn == NULL || out == NULL || insn->mnemonic == NULL) {
         return -1;
+    }
+
+    if (insn->op_count == 4) {
+        for (i = 0; i < sizeof(fma4) / sizeof(fma4[0]); ++i) {
+            if (strcmp(insn->mnemonic, fma4[i].name) == 0) {
+                if (insn->op1.kind != AS_X86_OP_REG || insn->op2.kind != AS_X86_OP_REG ||
+                    insn->op3.kind == AS_X86_OP_NONE || !insn->has_imm_reg) {
+                    return -1;
+                }
+                if (insn->vector_bits == 128) {
+                    vex_l = 0;
+                } else if (insn->vector_bits == 256) {
+                    vex_l = 1;
+                } else {
+                    return -1;
+                }
+                return encode_vex_with_imm8(insn->op1.u.reg, insn->op2.u.reg, &insn->op3,
+                                            fma4[i].opcode, AS_VEX_MAP_0F3A, AS_VEX_PP_66, insn->vex_w,
+                                            vex_l, imm8_with_implicit_reg(insn->imm_reg), out,
+                                            out_cap, out_len, errbuf, errbuf_sz);
+            }
+        }
+        return set_err(errbuf, errbuf_sz, "unsupported FMA mnemonic: %s", insn->mnemonic);
     }
 
     if (insn->op_count != 3 || insn->op1.kind != AS_X86_OP_REG ||

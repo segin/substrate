@@ -12,6 +12,7 @@ typedef enum {
     DQ_FORM_RRI,
     DQ_FORM_RRRI,
     DQ_FORM_EXTRACT,
+    DQ_FORM_KCMP,
 } dq_form_t;
 
 typedef struct {
@@ -178,6 +179,16 @@ static int encode_desc(const dq_desc_t *desc, const as_x86_avx512dq_insn_t *insn
         ev.src2 = insn->op1;
         break;
 
+    case DQ_FORM_KCMP:
+        if (insn->op_count != 3 || insn->op1.kind != AS_X86_OP_REG || insn->op2.kind != AS_X86_OP_REG ||
+            insn->op3.kind == AS_X86_OP_NONE) {
+            return -1;
+        }
+        ev.dst = insn->op1.u.reg;
+        ev.src1 = insn->op2.u.reg;
+        ev.src2 = insn->op3;
+        break;
+
     default:
         return -1;
     }
@@ -208,12 +219,20 @@ int as_x86_encode_avx512dq(const as_x86_avx512dq_insn_t *insn, uint8_t *out, siz
         {"vcvtqq2pd", DQ_FORM_RR, 0xe6, AS_EVEX_MAP_0F, AS_EVEX_PP_F3, 1, -1, 0, 0, 0},
         {"vcvtuqq2ps", DQ_FORM_RR, 0x7a, AS_EVEX_MAP_0F, AS_EVEX_PP_F2, 1, -1, 0, 0, 0},
         {"vcvtuqq2pd", DQ_FORM_RR, 0x7a, AS_EVEX_MAP_0F, AS_EVEX_PP_F3, 1, -1, 0, 0, 0},
+        {"vprord", DQ_FORM_RRI, 0x72, AS_EVEX_MAP_0F, AS_EVEX_PP_66, 0, -1, 1, 0, 0},
+        {"vprorq", DQ_FORM_RRI, 0x72, AS_EVEX_MAP_0F, AS_EVEX_PP_66, 1, -1, 1, 0, 0},
+        {"vprorvd", DQ_FORM_RRR, 0x14, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 0, -1, 0, 0, 0},
+        {"vprolvd", DQ_FORM_RRR, 0x15, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 0, -1, 0, 0, 0},
+        {"vprorvq", DQ_FORM_RRR, 0x14, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 1, -1, 0, 0, 0},
+        {"vprolvq", DQ_FORM_RRR, 0x15, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 1, -1, 0, 0, 0},
 
         {"vpmullq", DQ_FORM_RRR, 0x40, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 1, -1, 0, 0, 0},
         {"vpmovm2d", DQ_FORM_RR, 0x38, AS_EVEX_MAP_0F38, AS_EVEX_PP_F3, 0, -1, 0, 0, 0},
         {"vpmovm2q", DQ_FORM_RR, 0x38, AS_EVEX_MAP_0F38, AS_EVEX_PP_F3, 1, -1, 0, 0, 0},
         {"vpmovd2m", DQ_FORM_RR, 0x39, AS_EVEX_MAP_0F38, AS_EVEX_PP_F3, 0, -1, 0, 0, 0},
         {"vpmovq2m", DQ_FORM_RR, 0x39, AS_EVEX_MAP_0F38, AS_EVEX_PP_F3, 1, -1, 0, 0, 0},
+        {"vpcmpeqq", DQ_FORM_KCMP, 0x29, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 1, -1, 0, 0, 0},
+        {"vpcmpgtq", DQ_FORM_KCMP, 0x37, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 1, -1, 0, 0, 0},
 
         {"vinserti64x2", DQ_FORM_RRRI, 0x38, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 1, -1, 1, 0, 0},
         {"vextracti64x2", DQ_FORM_EXTRACT, 0x39, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 1, -1, 1, 0, 0},

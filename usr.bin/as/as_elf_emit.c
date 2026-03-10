@@ -5,6 +5,9 @@
 #include "as_x86_bmi1.h"
 #include "as_x86_bmi2.h"
 #include "as_x86_fma.h"
+#include "as_x86_avx512f.h"
+#include "as_x86_avx512bw.h"
+#include "as_x86_avx512dq.h"
 #include "as_x86_sse3.h"
 #include "as_x86_ssse3.h"
 #include "as_x86_sse41.h"
@@ -5190,6 +5193,32 @@ static unsigned infer_avx_vector_bits(const as_instruction_t *in) {
     return 128;
 }
 
+static int parse_avx_implicit_reg(const char *name, as_x86_reg_t *out) {
+    unsigned vr;
+
+    if (name == NULL || out == NULL) {
+        return -1;
+    }
+    if (parse_xmm_reg(name, &vr) == 0 || parse_ymm_reg(name, &vr) == 0) {
+        *out = (as_x86_reg_t)vr;
+        return 0;
+    }
+    return -1;
+}
+
+static int convert_operand_x86_evex(const as_operand_t *op, const char *mnemonic, as_x86_operand_t *dst, int is64,
+                                    int intel_syntax, char *errbuf, size_t errbuf_sz) {
+    unsigned kr;
+
+    if (op != NULL && op->kind == AS_OPERAND_REGISTER && parse_k_reg(op->u.reg, &kr) == 0) {
+        memset(dst, 0, sizeof(*dst));
+        dst->kind = AS_X86_OP_REG;
+        dst->u.reg = (as_x86_reg_t)kr;
+        return 0;
+    }
+    return convert_operand_x86(op, mnemonic, dst, is64, intel_syntax, errbuf, errbuf_sz);
+}
+
 static int try_encode_x86_avx_stmt(const as_instruction_t *in, int intel_syntax, unsigned char *code, size_t code_cap,
                                    size_t *code_len, char *encerr, size_t encerr_sz) {
     as_x86_avx_insn_t avx;
@@ -5209,6 +5238,60 @@ static int try_encode_x86_avx_stmt(const as_instruction_t *in, int intel_syntax,
 
     if (in->operand_count == 0) {
         avx.op_count = 0;
+    } else if (in->operand_count == 4 &&
+               (streq_ci(in->mnemonic, "vblendvps") || streq_ci(in->mnemonic, "vblendvpd") ||
+                streq_ci(in->mnemonic, "vpblendvb"))) {
+        size_t immreg_i = intel_syntax ? 3u : 0u;
+
+        dst_i = intel_syntax ? 0u : 3u;
+        src1_i = intel_syntax ? 1u : 2u;
+        src2_i = intel_syntax ? 2u : 1u;
+        avx.op_count = 4;
+        avx.has_imm_reg = 1;
+        if (convert_operand_x86(&in->operands[dst_i], in->mnemonic, &avx.op1, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+            convert_operand_x86(&in->operands[src1_i], in->mnemonic, &avx.op2, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+            convert_operand_x86(&in->operands[src2_i], in->mnemonic, &avx.op3, 0, intel_syntax, encerr, encerr_sz) != 0) {
+            return -1;
+        }
+        if (in->operands[immreg_i].kind != AS_OPERAND_REGISTER ||
+            parse_avx_implicit_reg(in->operands[immreg_i].u.reg, &avx.imm_reg) != 0) {
+            return -1;
+        }
+    } else if (in->operand_count == 5 &&
+               (streq_ci(in->mnemonic, "vpermil2ps") || streq_ci(in->mnemonic, "vpermil2pd"))) {
+        long long immv;
+        size_t immreg_i = intel_syntax ? 3u : 1u;
+
+        dst_i = intel_syntax ? 0u : 4u;
+        src1_i = intel_syntax ? 1u : 3u;
+        src2_i = intel_syntax ? 2u : 2u;
+        imm_i = intel_syntax ? 4u : 0u;
+        if (!intel_syntax &&
+            in->operands[2].kind == AS_OPERAND_REGISTER &&
+            in->operands[3].kind == AS_OPERAND_REGISTER &&
+            streq_ci(in->operands[2].u.reg, in->operands[3].u.reg)) {
+            src1_i = 2u;
+            src2_i = 1u;
+            immreg_i = 3u;
+            avx.vex_w = 1;
+        }
+        if ((in->operands[imm_i].kind != AS_OPERAND_IMMEDIATE && in->operands[imm_i].kind != AS_OPERAND_LABEL_REF) ||
+            eval_expr_const(in->operands[imm_i].u.expr, &immv) != 0 || immv < 0 || immv > 255) {
+            return -1;
+        }
+        avx.imm8 = (uint8_t)immv;
+        avx.has_imm8 = 1;
+        avx.op_count = 4;
+        avx.has_imm_reg = 1;
+        if (convert_operand_x86(&in->operands[dst_i], in->mnemonic, &avx.op1, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+            convert_operand_x86(&in->operands[src1_i], in->mnemonic, &avx.op2, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+            convert_operand_x86(&in->operands[src2_i], in->mnemonic, &avx.op3, 0, intel_syntax, encerr, encerr_sz) != 0) {
+            return -1;
+        }
+        if (in->operands[immreg_i].kind != AS_OPERAND_REGISTER ||
+            parse_avx_implicit_reg(in->operands[immreg_i].u.reg, &avx.imm_reg) != 0) {
+            return -1;
+        }
     } else if (in->operand_count == 2) {
         dst_i = intel_syntax ? 0u : 1u;
         src2_i = intel_syntax ? 1u : 0u;
@@ -5321,6 +5404,7 @@ static int try_encode_x86_fma_stmt(const as_instruction_t *in, int intel_syntax,
     size_t dst_i;
     size_t src1_i;
     size_t src2_i;
+    size_t immreg_i = 0;
 
     if (in == NULL || code == NULL || code_len == NULL || encerr == NULL || encerr_sz == 0 || in->mnemonic == NULL ||
         (in->mnemonic[0] != 'v' && in->mnemonic[0] != 'V')) {
@@ -5329,24 +5413,241 @@ static int try_encode_x86_fma_stmt(const as_instruction_t *in, int intel_syntax,
     if (strncmp(in->mnemonic + 1, "fm", 2) != 0 && strncmp(in->mnemonic + 1, "fnm", 3) != 0) {
         return -1;
     }
-    if (in->operand_count != 3) {
+    if (in->operand_count != 3 && in->operand_count != 4) {
         return -1;
     }
 
     memset(&fma, 0, sizeof(fma));
     fma.mnemonic = in->mnemonic;
     fma.vector_bits = infer_avx_vector_bits(in);
-    fma.op_count = 3;
-    dst_i = intel_syntax ? 0u : 2u;
-    src1_i = 1u;
-    src2_i = intel_syntax ? 2u : 0u;
+    if (in->operand_count == 4) {
+        fma.op_count = 4;
+        dst_i = intel_syntax ? 0u : 3u;
+        src1_i = intel_syntax ? 1u : 2u;
+        src2_i = intel_syntax ? 2u : 1u;
+        immreg_i = intel_syntax ? 3u : 0u;
+        if (!intel_syntax &&
+            in->operands[1].kind == AS_OPERAND_REGISTER &&
+            in->operands[2].kind == AS_OPERAND_REGISTER &&
+            streq_ci(in->operands[1].u.reg, in->operands[2].u.reg)) {
+            src1_i = 1u;
+            src2_i = 0u;
+            immreg_i = 2u;
+            fma.vex_w = 1;
+        }
+    } else {
+        fma.op_count = 3;
+        dst_i = intel_syntax ? 0u : 2u;
+        src1_i = 1u;
+        src2_i = intel_syntax ? 2u : 0u;
+    }
     if (convert_operand_x86(&in->operands[dst_i], in->mnemonic, &fma.op1, 0, intel_syntax, encerr, encerr_sz) != 0 ||
         convert_operand_x86(&in->operands[src1_i], in->mnemonic, &fma.op2, 0, intel_syntax, encerr, encerr_sz) != 0 ||
         convert_operand_x86(&in->operands[src2_i], in->mnemonic, &fma.op3, 0, intel_syntax, encerr, encerr_sz) != 0) {
         return -1;
     }
+    if (in->operand_count == 4) {
+        fma.has_imm_reg = 1;
+        if (in->operands[immreg_i].kind != AS_OPERAND_REGISTER ||
+            parse_avx_implicit_reg(in->operands[immreg_i].u.reg, &fma.imm_reg) != 0) {
+            return -1;
+        }
+    }
 
     return as_x86_encode_fma(&fma, code, code_cap, code_len, encerr, encerr_sz);
+}
+
+static int try_encode_x86_avx512f_stmt(const as_instruction_t *in, int intel_syntax, unsigned char *code, size_t code_cap,
+                                       size_t *code_len, char *encerr, size_t encerr_sz) {
+    as_x86_avx512f_insn_t ev;
+    size_t dst_i;
+    size_t src1_i;
+    size_t src2_i;
+    size_t imm_i;
+    long long immv;
+    unsigned kop;
+
+    if (in == NULL || code == NULL || code_len == NULL || encerr == NULL || encerr_sz == 0 || in->mnemonic == NULL ||
+        (in->mnemonic[0] != 'v' && in->mnemonic[0] != 'V')) {
+        return -1;
+    }
+    if (in->operand_count != 3 && in->operand_count != 4) {
+        return -1;
+    }
+    memset(&ev, 0, sizeof(ev));
+    ev.mnemonic = in->mnemonic;
+    ev.vector_bits = infer_avx_vector_bits(in);
+    ev.op_count = 3;
+    ev.rounding_mode = -1;
+    dst_i = intel_syntax ? 0u : (in->operand_count == 4 ? 3u : 2u);
+    if (in->operands[dst_i].kind != AS_OPERAND_REGISTER || parse_k_reg(in->operands[dst_i].u.reg, &kop) != 0) {
+        return -1;
+    }
+    ev.opmask = (uint8_t)kop;
+    if (in->operand_count == 4) {
+        src1_i = intel_syntax ? 1u : 2u;
+        src2_i = intel_syntax ? 2u : 1u;
+        imm_i = intel_syntax ? 3u : 0u;
+        if ((in->operands[imm_i].kind != AS_OPERAND_IMMEDIATE && in->operands[imm_i].kind != AS_OPERAND_LABEL_REF) ||
+            eval_expr_const(in->operands[imm_i].u.expr, &immv) != 0 || immv < 0 || immv > 255) {
+            return -1;
+        }
+        ev.has_imm8 = 1;
+        ev.imm8 = (uint8_t)immv;
+    } else {
+        src1_i = intel_syntax ? 1u : 1u;
+        src2_i = intel_syntax ? 2u : 0u;
+    }
+    if (convert_operand_x86_evex(&in->operands[dst_i], in->mnemonic, &ev.op1, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+        convert_operand_x86_evex(&in->operands[src1_i], in->mnemonic, &ev.op2, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+        convert_operand_x86_evex(&in->operands[src2_i], in->mnemonic, &ev.op3, 0, intel_syntax, encerr, encerr_sz) != 0) {
+        return -1;
+    }
+    return as_x86_encode_avx512f(&ev, code, code_cap, code_len, encerr, encerr_sz);
+}
+
+static int try_encode_x86_avx512bw_stmt(const as_instruction_t *in, int intel_syntax, unsigned char *code, size_t code_cap,
+                                        size_t *code_len, char *encerr, size_t encerr_sz) {
+    as_x86_avx512bw_insn_t ev;
+    size_t dst_i;
+    size_t src1_i;
+    size_t src2_i;
+    unsigned kop;
+
+    if (in == NULL || code == NULL || code_len == NULL || encerr == NULL || encerr_sz == 0 || in->mnemonic == NULL ||
+        (in->mnemonic[0] != 'v' && in->mnemonic[0] != 'V') || in->operand_count != 3) {
+        return -1;
+    }
+
+    memset(&ev, 0, sizeof(ev));
+    ev.mnemonic = in->mnemonic;
+    ev.vector_bits = infer_avx_vector_bits(in);
+    ev.op_count = 3;
+    ev.rounding_mode = -1;
+    dst_i = intel_syntax ? 0u : 2u;
+    if (in->operands[dst_i].kind != AS_OPERAND_REGISTER || parse_k_reg(in->operands[dst_i].u.reg, &kop) != 0) {
+        return -1;
+    }
+    ev.opmask = (uint8_t)kop;
+    src1_i = intel_syntax ? 1u : 1u;
+    src2_i = intel_syntax ? 2u : 0u;
+    if (convert_operand_x86_evex(&in->operands[dst_i], in->mnemonic, &ev.op1, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+        convert_operand_x86_evex(&in->operands[src1_i], in->mnemonic, &ev.op2, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+        convert_operand_x86_evex(&in->operands[src2_i], in->mnemonic, &ev.op3, 0, intel_syntax, encerr, encerr_sz) != 0) {
+        return -1;
+    }
+    return as_x86_encode_avx512bw(&ev, code, code_cap, code_len, encerr, encerr_sz);
+}
+
+static int try_encode_x86_avx512dq_stmt(const as_instruction_t *in, int intel_syntax, unsigned char *code, size_t code_cap,
+                                        size_t *code_len, char *encerr, size_t encerr_sz) {
+    as_x86_avx512dq_insn_t ev;
+    size_t dst_i;
+    size_t src1_i;
+    size_t src2_i;
+    unsigned kop;
+
+    if (in == NULL || code == NULL || code_len == NULL || encerr == NULL || encerr_sz == 0 || in->mnemonic == NULL ||
+        (in->mnemonic[0] != 'v' && in->mnemonic[0] != 'V') || in->operand_count != 3) {
+        return -1;
+    }
+
+    memset(&ev, 0, sizeof(ev));
+    ev.mnemonic = in->mnemonic;
+    ev.vector_bits = infer_avx_vector_bits(in);
+    ev.op_count = 3;
+    ev.rounding_mode = -1;
+    dst_i = intel_syntax ? 0u : 2u;
+    if (in->operands[dst_i].kind != AS_OPERAND_REGISTER || parse_k_reg(in->operands[dst_i].u.reg, &kop) != 0) {
+        return -1;
+    }
+    ev.opmask = (uint8_t)kop;
+    src1_i = intel_syntax ? 1u : 1u;
+    src2_i = intel_syntax ? 2u : 0u;
+    if (convert_operand_x86_evex(&in->operands[dst_i], in->mnemonic, &ev.op1, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+        convert_operand_x86_evex(&in->operands[src1_i], in->mnemonic, &ev.op2, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+        convert_operand_x86_evex(&in->operands[src2_i], in->mnemonic, &ev.op3, 0, intel_syntax, encerr, encerr_sz) != 0) {
+        return -1;
+    }
+    return as_x86_encode_avx512dq(&ev, code, code_cap, code_len, encerr, encerr_sz);
+}
+
+static int try_encode_x86_avx512dq_generic_stmt(const as_instruction_t *in, int intel_syntax, unsigned char *code,
+                                                size_t code_cap, size_t *code_len, char *encerr, size_t encerr_sz) {
+    as_x86_avx512dq_insn_t ev;
+    size_t dst_i;
+    size_t src1_i;
+    size_t src2_i;
+    size_t imm_i;
+    long long immv;
+
+    if (in == NULL || code == NULL || code_len == NULL || encerr == NULL || encerr_sz == 0 || in->mnemonic == NULL ||
+        (in->mnemonic[0] != 'v' && in->mnemonic[0] != 'V')) {
+        return -1;
+    }
+
+    memset(&ev, 0, sizeof(ev));
+    ev.mnemonic = in->mnemonic;
+    ev.vector_bits = infer_avx_vector_bits(in);
+    ev.rounding_mode = -1;
+
+    if (in->operand_count == 2) {
+        dst_i = intel_syntax ? 0u : 1u;
+        src2_i = intel_syntax ? 1u : 0u;
+        ev.op_count = 2;
+        if (convert_operand_x86_evex(&in->operands[dst_i], in->mnemonic, &ev.op1, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+            convert_operand_x86_evex(&in->operands[src2_i], in->mnemonic, &ev.op2, 0, intel_syntax, encerr, encerr_sz) != 0) {
+            return -1;
+        }
+    } else if (in->operand_count == 3 &&
+               ((intel_syntax && (in->operands[2].kind == AS_OPERAND_IMMEDIATE || in->operands[2].kind == AS_OPERAND_LABEL_REF)) ||
+                (!intel_syntax && (in->operands[0].kind == AS_OPERAND_IMMEDIATE || in->operands[0].kind == AS_OPERAND_LABEL_REF)))) {
+        dst_i = intel_syntax ? 0u : 2u;
+        src2_i = intel_syntax ? 1u : 1u;
+        imm_i = intel_syntax ? 2u : 0u;
+        if ((in->operands[imm_i].kind != AS_OPERAND_IMMEDIATE && in->operands[imm_i].kind != AS_OPERAND_LABEL_REF) ||
+            eval_expr_const(in->operands[imm_i].u.expr, &immv) != 0 || immv < 0 || immv > 255) {
+            return -1;
+        }
+        ev.has_imm8 = 1;
+        ev.imm8 = (uint8_t)immv;
+        ev.op_count = 2;
+        if (convert_operand_x86_evex(&in->operands[dst_i], in->mnemonic, &ev.op1, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+            convert_operand_x86_evex(&in->operands[src2_i], in->mnemonic, &ev.op2, 0, intel_syntax, encerr, encerr_sz) != 0) {
+            return -1;
+        }
+    } else if (in->operand_count == 3) {
+        dst_i = intel_syntax ? 0u : 2u;
+        src1_i = intel_syntax ? 1u : 1u;
+        src2_i = intel_syntax ? 2u : 0u;
+        ev.op_count = 3;
+        if (convert_operand_x86_evex(&in->operands[dst_i], in->mnemonic, &ev.op1, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+            convert_operand_x86_evex(&in->operands[src1_i], in->mnemonic, &ev.op2, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+            convert_operand_x86_evex(&in->operands[src2_i], in->mnemonic, &ev.op3, 0, intel_syntax, encerr, encerr_sz) != 0) {
+            return -1;
+        }
+    } else if (in->operand_count == 4) {
+        dst_i = intel_syntax ? 0u : 3u;
+        src1_i = intel_syntax ? 1u : 2u;
+        src2_i = intel_syntax ? 2u : 1u;
+        imm_i = intel_syntax ? 3u : 0u;
+        if ((in->operands[imm_i].kind != AS_OPERAND_IMMEDIATE && in->operands[imm_i].kind != AS_OPERAND_LABEL_REF) ||
+            eval_expr_const(in->operands[imm_i].u.expr, &immv) != 0 || immv < 0 || immv > 255) {
+            return -1;
+        }
+        ev.has_imm8 = 1;
+        ev.imm8 = (uint8_t)immv;
+        ev.op_count = 3;
+        if (convert_operand_x86_evex(&in->operands[dst_i], in->mnemonic, &ev.op1, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+            convert_operand_x86_evex(&in->operands[src1_i], in->mnemonic, &ev.op2, 0, intel_syntax, encerr, encerr_sz) != 0 ||
+            convert_operand_x86_evex(&in->operands[src2_i], in->mnemonic, &ev.op3, 0, intel_syntax, encerr, encerr_sz) != 0) {
+            return -1;
+        }
+    } else {
+        return -1;
+    }
+
+    return as_x86_encode_avx512dq(&ev, code, code_cap, code_len, encerr, encerr_sz);
 }
 
 static int try_encode_x86_bmi1_stmt(const as_instruction_t *in, int intel_syntax, unsigned char *code, size_t code_cap,
@@ -5791,6 +6092,18 @@ static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigne
     if (!cfg->is_64 && emit_i386_special(&st->u.instr, intel_syntax, code, code_cap, code_len) == 0) {
         return 0;
     }
+    if (!cfg->is_64 &&
+        try_encode_x86_avx512f_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0) {
+        return 0;
+    }
+    if (!cfg->is_64 &&
+        try_encode_x86_avx512bw_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0) {
+        return 0;
+    }
+    if (!cfg->is_64 &&
+        try_encode_x86_avx512dq_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0) {
+        return 0;
+    }
     if (!cfg->is_64 && try_encode_x86_avx_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0) {
         return 0;
     }
@@ -5804,6 +6117,10 @@ static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigne
         return 0;
     }
     if (!cfg->is_64 && try_encode_x86_bmi2_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0) {
+        return 0;
+    }
+    if (!cfg->is_64 &&
+        try_encode_x86_avx512dq_generic_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0) {
         return 0;
     }
     if (cfg->is_64) {

@@ -15,6 +15,9 @@ typedef struct {
     as_x86_operand_t op1;
     as_x86_operand_t op2;
     as_x86_operand_t op3;
+    int has_imm_reg;
+    as_x86_reg_t imm_reg;
+    int vex_w;
     unsigned vector_bits;
     size_t op_count;
 } as_x86_fma_insn_t;

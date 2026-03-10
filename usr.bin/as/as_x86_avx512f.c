@@ -600,6 +600,8 @@ int as_x86_encode_avx512f(const as_x86_avx512f_insn_t *insn, uint8_t *out, size_
         {"vrndscalesd", AVX512F_FORM_RRRI, 0x0b, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 1, 0, 1, 0, 0, 0},
         {"vcmpps", AVX512F_FORM_KCMP, 0xc2, AS_EVEX_MAP_0F, AS_EVEX_PP_NONE, 0, -1, 1, 0, 0, 0},
         {"vcmppd", AVX512F_FORM_KCMP, 0xc2, AS_EVEX_MAP_0F, AS_EVEX_PP_66, 1, -1, 1, 0, 0, 0},
+        {"vpcmpgtd", AVX512F_FORM_KCMP, 0x66, AS_EVEX_MAP_0F, AS_EVEX_PP_66, 0, -1, 0, 0, 0, 0},
+        {"vpcmpeqd", AVX512F_FORM_KCMP, 0x76, AS_EVEX_MAP_0F, AS_EVEX_PP_66, 0, -1, 0, 0, 0, 0},
         {"vpcmpd", AVX512F_FORM_KCMP, 0x1f, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 0, -1, 1, 0, 0, 0},
         {"vpcmpq", AVX512F_FORM_KCMP, 0x1f, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 1, -1, 1, 0, 0, 0},
         {"vpcmpud", AVX512F_FORM_KCMP, 0x1e, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 0, -1, 1, 0, 0, 0},

@@ -60,6 +60,10 @@ static int vector_bits_to_l(unsigned vector_bits, int *vex_l) {
     return -1;
 }
 
+static uint8_t imm8_with_implicit_reg(uint8_t imm8_low, as_x86_reg_t reg) {
+    return (uint8_t)((imm8_low & 0x0fu) | ((((unsigned)reg & 7u) | 0x8u) << 4));
+}
+
 static int encode_vex_with_optional_imm(as_x86_reg_t modrm_reg, as_x86_reg_t src1,
                                         const as_x86_operand_t *src2, uint8_t opcode,
                                         as_vex_map_t map, as_vex_pp_t pp, int vex_w, int vex_l,
@@ -251,6 +255,8 @@ static const avx_promoted_desc_t *lookup_promoted(const char *mnemonic) {
         {"vpmaxuw", 0x3e, AS_VEX_MAP_0F38, AS_VEX_PP_66},
         {"vpmaxud", 0x3f, AS_VEX_MAP_0F38, AS_VEX_PP_66},
         {"vpmulld", 0x40, AS_VEX_MAP_0F38, AS_VEX_PP_66},
+        {"vpmadd52luq", 0xb4, AS_VEX_MAP_0F38, AS_VEX_PP_66},
+        {"vpmadd52huq", 0xb5, AS_VEX_MAP_0F38, AS_VEX_PP_66},
         {"vgf2p8mulb", 0xcf, AS_VEX_MAP_0F38, AS_VEX_PP_66},
         {"vaesenc", 0xdc, AS_VEX_MAP_0F38, AS_VEX_PP_66},
         {"vaesenclast", 0xdd, AS_VEX_MAP_0F38, AS_VEX_PP_66},
@@ -274,7 +280,22 @@ static const avx_promoted_desc_t *lookup_promoted_imm(const char *mnemonic) {
         {"vcmppd", 0xc2, AS_VEX_MAP_0F, AS_VEX_PP_66},
         {"vcmpss", 0xc2, AS_VEX_MAP_0F, AS_VEX_PP_F3},
         {"vcmpsd", 0xc2, AS_VEX_MAP_0F, AS_VEX_PP_F2},
+        {"vroundss", 0x0a, AS_VEX_MAP_0F3A, AS_VEX_PP_66},
+        {"vroundsd", 0x0b, AS_VEX_MAP_0F3A, AS_VEX_PP_66},
+        {"vblendps", 0x0c, AS_VEX_MAP_0F3A, AS_VEX_PP_66},
+        {"vblendpd", 0x0d, AS_VEX_MAP_0F3A, AS_VEX_PP_66},
+        {"vpblendw", 0x0e, AS_VEX_MAP_0F3A, AS_VEX_PP_66},
+        {"vpalignr", 0x0f, AS_VEX_MAP_0F3A, AS_VEX_PP_66},
+        {"vpinsrb", 0x20, AS_VEX_MAP_0F3A, AS_VEX_PP_66},
+        {"vinsertps", 0x21, AS_VEX_MAP_0F3A, AS_VEX_PP_66},
+        {"vpinsrd", 0x22, AS_VEX_MAP_0F3A, AS_VEX_PP_66},
         {"vpinsrw", 0xc4, AS_VEX_MAP_0F, AS_VEX_PP_66},
+        {"vdpps", 0x40, AS_VEX_MAP_0F3A, AS_VEX_PP_66},
+        {"vdppd", 0x41, AS_VEX_MAP_0F3A, AS_VEX_PP_66},
+        {"vmpsadbw", 0x42, AS_VEX_MAP_0F3A, AS_VEX_PP_66},
+        {"vpclmulqdq", 0x44, AS_VEX_MAP_0F3A, AS_VEX_PP_66},
+        {"vgf2p8affineqb", 0xce, AS_VEX_MAP_0F3A, AS_VEX_PP_66},
+        {"vgf2p8affineinvqb", 0xcf, AS_VEX_MAP_0F3A, AS_VEX_PP_66},
         {"vshufps", 0xc6, AS_VEX_MAP_0F, AS_VEX_PP_NONE},
         {"vshufpd", 0xc6, AS_VEX_MAP_0F, AS_VEX_PP_66},
     };
@@ -331,6 +352,46 @@ int as_x86_encode_avx(const as_x86_avx_insn_t *insn, uint8_t *out, size_t out_ca
         return encode_vex_with_optional_imm(insn->op1.u.reg, insn->op2.u.reg, &insn->op3,
                                             promoted_imm->opcode, promoted_imm->map,
                                             promoted_imm->pp, 0, vex_l, 1, insn->imm8,
+                                            out, out_cap, out_len, errbuf, errbuf_sz);
+    }
+
+    if (streq_ci(insn->mnemonic, "vpermil2ps") || streq_ci(insn->mnemonic, "vpermil2pd")) {
+        if (insn->op_count != 4 || insn->op1.kind != AS_X86_OP_REG ||
+            insn->op2.kind != AS_X86_OP_REG || insn->op3.kind == AS_X86_OP_NONE ||
+            !insn->has_imm8 || !insn->has_imm_reg ||
+            vector_bits_to_l(insn->vector_bits, &vex_l) != 0) {
+            return -1;
+        }
+
+        return encode_vex_with_optional_imm(insn->op1.u.reg, insn->op2.u.reg, &insn->op3,
+                                            streq_ci(insn->mnemonic, "vpermil2ps") ? 0x48 : 0x49,
+                                            AS_VEX_MAP_0F3A, AS_VEX_PP_66, insn->vex_w, vex_l, 1,
+                                            imm8_with_implicit_reg(insn->imm8, insn->imm_reg),
+                                            out, out_cap, out_len, errbuf, errbuf_sz);
+    }
+
+    if (streq_ci(insn->mnemonic, "vblendvps") || streq_ci(insn->mnemonic, "vblendvpd") ||
+        streq_ci(insn->mnemonic, "vpblendvb")) {
+        uint8_t opcode;
+
+        if (insn->op_count != 4 || insn->op1.kind != AS_X86_OP_REG ||
+            insn->op2.kind != AS_X86_OP_REG || insn->op3.kind == AS_X86_OP_NONE ||
+            insn->has_imm8 || !insn->has_imm_reg ||
+            vector_bits_to_l(insn->vector_bits, &vex_l) != 0) {
+            return -1;
+        }
+
+        if (streq_ci(insn->mnemonic, "vblendvps")) {
+            opcode = 0x4a;
+        } else if (streq_ci(insn->mnemonic, "vblendvpd")) {
+            opcode = 0x4b;
+        } else {
+            opcode = 0x4c;
+        }
+
+        return encode_vex_with_optional_imm(insn->op1.u.reg, insn->op2.u.reg, &insn->op3,
+                                            opcode, AS_VEX_MAP_0F3A, AS_VEX_PP_66, 0, vex_l,
+                                            1, imm8_with_implicit_reg(0, insn->imm_reg),
                                             out, out_cap, out_len, errbuf, errbuf_sz);
     }
 
