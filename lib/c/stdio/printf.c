@@ -507,3 +507,17 @@ int vfprintf(FILE *stream, const char *format, va_list ap) {
     fwrite(buf, 1, ret, stream);
     return ret;
 }
+
+int vdprintf(int fd, const char *format, va_list ap) {
+    char buf[4096];
+    int ret = vsnprintf(buf, sizeof(buf), format, ap);
+    if(ret > 0) write(fd, buf, ret);
+    return ret;
+}
+
+int dprintf(int fd, const char *format, ...) {
+    va_list ap; va_start(ap, format);
+    int ret = vdprintf(fd, format, ap);
+    va_end(ap);
+    return ret;
+}

@@ -337,6 +337,33 @@ int fsetpos(FILE *stream, const fpos_t *pos) {
 	return fseek(stream, (long)*pos, SEEK_SET);
 }
 
+int fseeko(FILE *stream, off_t offset, int whence) {
+	fflush(stream);
+	stream->pos = stream->limit = stream->buffer;
+	stream->has_unget = 0;
+	stream->eof = 0;
+
+	off_t ret = lseek(stream->fd, offset, whence);
+	if(ret == -1) {
+		stream->error = 1;
+		return -1;
+	}
+	return 0;
+}
+
+off_t ftello(FILE *stream) {
+	off_t pos = lseek(stream->fd, 0, SEEK_CUR);
+	if(pos == -1) return -1;
+
+	if(stream->flags == O_RDONLY || (stream->flags & O_RDWR)) {
+		pos -= (stream->limit - stream->pos);
+		if(stream->has_unget) pos--;
+	} else {
+		pos += (stream->pos - stream->buffer);
+	}
+	return pos;
+}
+
 void rewind(FILE *stream) {
     fseek(stream, 0, SEEK_SET);
     clearerr(stream);
@@ -378,7 +405,9 @@ int getchar(void) { return fgetc(stdin); }
 int putchar(int c) { return fputc(c, stdout); }
 
 int fputs(const char *s, FILE *stream) {
-    return fwrite(s, 1, strlen(s), stream);
+	size_t len = strlen(s);
+	if(fwrite(s, 1, len, stream) != len) return EOF;
+	return 0;
 }
 
 int puts(const char *s) {

@@ -55,6 +55,8 @@ int vsprintf(char *str, const char *format, va_list ap);
 int vsnprintf(char *str, size_t size, const char *format, va_list ap);
 int vasprintf(char **strp, const char *format, va_list ap);
 int asprintf(char **strp, const char *format, ...);
+int dprintf(int fd, const char *format, ...);
+int vdprintf(int fd, const char *format, va_list ap);
 
 int scanf(const char *format, ...);
 int fscanf(FILE *stream, const char *format, ...);
@@ -92,6 +94,8 @@ long ftell(FILE *stream);
 void rewind(FILE *stream);
 int fgetpos(FILE *stream, fpos_t *pos);
 int fsetpos(FILE *stream, const fpos_t *pos);
+int fseeko(FILE *stream, off_t offset, int whence);
+off_t ftello(FILE *stream);
 
 void clearerr(FILE *stream);
 int feof(FILE *stream);
