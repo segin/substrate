@@ -217,12 +217,12 @@ Reference: User Request (Step 31552)
         - Acceptance: `make -C tests/elks` builds all ELKS test binaries.
 
 - [ ] **Documentation:** (REQ: REQ-20-0055)
-    - [ ] Create personality-elks(7) developer guide. (REQ: REQ-20-0056)
+    - [x] Create personality-elks(7) developer guide. (REQ: REQ-20-0056)
         - Files: `docs/man/man7/personality-elks.7`
         - Tests: N/A (documentation)
         - Docs: `personality-elks.7`
         - Acceptance: Covers architecture, limitations, and usage.
-    - [ ] Create ELKS-compat(4) compatibility notes. (REQ: REQ-20-0057)
+    - [x] Create ELKS-compat(4) compatibility notes. (REQ: REQ-20-0057)
         - Files: `docs/man/man4/ELKS-compat.4`
         - Tests: N/A (documentation)
         - Docs: `ELKS-compat.4`
@@ -231,11 +231,11 @@ Reference: User Request (Step 31552)
         - Files: `ARCHITECTURE.md`
         - Tests: N/A (documentation)
         - Acceptance: ELKS personality architecture documented.
-    - [ ] Add ELKS syscall reference table. (REQ: REQ-20-0059)
+    - [x] Add ELKS syscall reference table. (REQ: REQ-20-0059)
         - Files: `docs/personality/elks_syscall_ref.md`
         - Tests: N/A (documentation)
         - Acceptance: All syscalls listed with support status.
-    - [ ] Document LDT API usage for personality developers. (REQ: REQ-20-0060)
+    - [x] Document LDT API usage for personality developers. (REQ: REQ-20-0060)
         - Files: `docs/kernel/ldt_api.md`
         - Tests: N/A (documentation)
         - Acceptance: API documented with examples.

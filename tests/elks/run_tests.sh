@@ -69,7 +69,6 @@ stage_binary "$SCRIPT_DIR/hello_elks" /bin/hello_elks
 stage_binary "$SCRIPT_DIR/sleep_elks" /bin/sleep_elks
 stage_binary "$SCRIPT_DIR/fileio_elks" /bin/fileio_elks
 stage_binary "$SCRIPT_DIR/fork_elks" /bin/fork_elks
-
 run_case hello_elks "Hello, ELKS!"
 run_case sleep_elks "Slept, ELKS!"
 run_case fileio_elks "ELKS file io"
