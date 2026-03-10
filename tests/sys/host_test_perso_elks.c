@@ -7,6 +7,7 @@
 
 #include <sys/proc.h>
 #include <sys/ldt.h>
+#include <sys/termios.h>
 #include <sys/times.h>
 #include <arch/i386/idt.h>
 #include <exec/formats/elks_aout.h>
@@ -74,6 +75,7 @@ static size_t ds_mem_size;
 #define sys_getgid stub_sys_getgid
 #define sys_signal stub_sys_signal
 #define sys_ioctl  stub_sys_ioctl
+#define kern_ioctl stub_kern_ioctl
 #define sys_fcntl  stub_sys_fcntl
 #define sys_umask  stub_sys_umask
 #define sys_stat   stub_sys_stat
@@ -135,6 +137,33 @@ int stub_sys_setgid(int a) { (void)a; return -1; }
 int stub_sys_getgid(void) { return -1; }
 int stub_sys_signal(int a, void *b) { (void)a; (void)b; return -1; }
 int stub_sys_ioctl(int a, uint32_t b, void *c) { (void)a; (void)b; (void)c; return -1; }
+int stub_kern_ioctl(int a, uint32_t b, void *c) {
+    last_name = "ioctl";
+    last_i0 = a;
+    last_i1 = (int)b;
+    last_ptr = (uintptr_t)c;
+
+    if (b == TCGETS && c) {
+        struct termios *t = (struct termios *)c;
+
+        memset(t, 0, sizeof(*t));
+        t->c_iflag = ICRNL;
+        t->c_oflag = ONLCR;
+        t->c_cflag = B9600 | CS8 | CREAD;
+        t->c_lflag = ISIG | ICANON | ECHO;
+        t->c_line = 7;
+        t->c_cc[VINTR] = 3;
+        t->c_cc[VEOF] = 4;
+    } else if (b == TIOCGWINSZ && c) {
+        struct winsize *ws = (struct winsize *)c;
+
+        ws->ws_row = 24;
+        ws->ws_col = 80;
+        ws->ws_xpixel = 0;
+        ws->ws_ypixel = 0;
+    }
+    return 0;
+}
 int stub_sys_fcntl(int a, int b, int c) { (void)a; (void)b; (void)c; return -1; }
 int stub_sys_umask(int a) { (void)a; return -1; }
 int stub_sys_stat(const char *a, void *b) { (void)a; (void)b; return -1; }
@@ -261,6 +290,40 @@ int main(void) {
         last_i0 != 4 || last_ptr != ds_base + 0x20U || last_i1 != 5) {
         fprintf(stderr, "FAIL: ELKS write wrapper wrong\n");
         return 1;
+    }
+
+    memset(ds_mem + 0x100, 0, 64);
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_ioctl];
+    if (fn(1, TCGETS, 0x100, 0, 0, 0, 0, 0) != 0 || strcmp(last_name, "ioctl") != 0 ||
+        last_i0 != 1 || last_i1 != TCGETS) {
+        fprintf(stderr, "FAIL: ELKS ioctl TCGETS wrapper wrong\n");
+        return 1;
+    }
+    {
+        struct elks_termios *t = (struct elks_termios *)(void *)(ds_mem + 0x100);
+
+        if (t->c_iflag != ICRNL || t->c_oflag != ONLCR ||
+            t->c_cflag != (B9600 | CS8 | CREAD) ||
+            t->c_lflag != (ISIG | ICANON | ECHO) ||
+            t->c_line != 7 || t->c_cc[VINTR] != 3 || t->c_cc[VEOF] != 4) {
+            fprintf(stderr, "FAIL: ELKS ioctl TCGETS translation wrong\n");
+            return 1;
+        }
+    }
+
+    memset(ds_mem + 0x140, 0, sizeof(struct winsize));
+    if (fn(1, TIOCGWINSZ, 0x140, 0, 0, 0, 0, 0) != 0 || strcmp(last_name, "ioctl") != 0 ||
+        last_i0 != 1 || last_i1 != TIOCGWINSZ || last_ptr != ds_base + 0x140U) {
+        fprintf(stderr, "FAIL: ELKS ioctl winsize wrapper wrong\n");
+        return 1;
+    }
+    {
+        struct winsize *ws = (struct winsize *)(void *)(ds_mem + 0x140);
+
+        if (ws->ws_row != 24 || ws->ws_col != 80) {
+            fprintf(stderr, "FAIL: ELKS ioctl winsize translation wrong\n");
+            return 1;
+        }
     }
 
     strcpy((char *)(ds_mem + 0x40), "/tmp/file");

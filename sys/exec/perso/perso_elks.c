@@ -3,6 +3,7 @@
 #include <exec/formats/elks_aout.h>
 #include <sys/errno.h>
 #include <sys/core.h>
+#include <sys/termios.h>
 #include <sys/syscall_impl.h>
 #include <sys/kern_syscalls.h>
 #include <sys/compiler.h>
@@ -53,6 +54,44 @@ struct elks_signal_frame {
     uint16_t ret_cs;
     uint16_t sig;
 };
+
+#define ELKS_NCCS 17
+
+struct elks_termios {
+    tcflag_t c_iflag;
+    tcflag_t c_oflag;
+    tcflag_t c_cflag;
+    tcflag_t c_lflag;
+    cc_t c_line;
+    cc_t c_cc[ELKS_NCCS];
+};
+
+static void elks_termios_from_native(struct elks_termios *dst, const struct termios *src) {
+    size_t i;
+
+    memset(dst, 0, sizeof(*dst));
+    dst->c_iflag = src->c_iflag;
+    dst->c_oflag = src->c_oflag;
+    dst->c_cflag = src->c_cflag;
+    dst->c_lflag = src->c_lflag;
+    dst->c_line = src->c_line;
+    for (i = 0; i < ELKS_NCCS; i++) {
+        dst->c_cc[i] = src->c_cc[i];
+    }
+}
+
+static void elks_termios_to_native(struct termios *dst, const struct elks_termios *src) {
+    size_t i;
+
+    dst->c_iflag = src->c_iflag;
+    dst->c_oflag = src->c_oflag;
+    dst->c_cflag = src->c_cflag;
+    dst->c_lflag = src->c_lflag;
+    dst->c_line = src->c_line;
+    for (i = 0; i < ELKS_NCCS; i++) {
+        dst->c_cc[i] = src->c_cc[i];
+    }
+}
 
 static int elks_decode_softint(registers_t *regs, uint8_t *vector, uintptr_t *addr) {
     uintptr_t linear_ip;
@@ -645,6 +684,61 @@ static int elks_sys_signal(uint32_t sig, uint32_t handler_off, uint32_t handler_
     return 2;
 }
 
+static int elks_sys_ioctl(uint32_t fd, uint32_t request, uint32_t arg_off,
+                          uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                          uint32_t unused6, uint32_t unused7) {
+    uintptr_t linear = 0;
+    void *arg = NULL;
+
+    (void)unused3; (void)unused4; (void)unused5; (void)unused6; (void)unused7;
+
+    if (arg_off != 0) {
+        if (elks_ds_pointer(arg_off, &linear) != 0) {
+            return -EFAULT;
+        }
+        arg = (void *)(uintptr_t)linear;
+    }
+
+    switch (request) {
+        case TCGETS: {
+            struct termios native;
+            struct elks_termios elks;
+            int ret;
+
+            if (!arg) {
+                return -EFAULT;
+            }
+            ret = kern_ioctl((int)fd, request, &native);
+            if (ret != 0) {
+                return ret;
+            }
+            elks_termios_from_native(&elks, &native);
+            memcpy(arg, &elks, sizeof(elks));
+            return 0;
+        }
+        case TCSETS:
+        case TCSETSW:
+        case TCSETSF: {
+            struct termios native;
+            struct elks_termios elks;
+            int ret;
+
+            if (!arg) {
+                return -EFAULT;
+            }
+            memcpy(&elks, arg, sizeof(elks));
+            ret = kern_ioctl((int)fd, TCGETS, &native);
+            if (ret != 0) {
+                return ret;
+            }
+            elks_termios_to_native(&native, &elks);
+            return kern_ioctl((int)fd, request, &native);
+        }
+        default:
+            return kern_ioctl((int)fd, request, arg);
+    }
+}
+
 static void elks_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs_ptr) {
     registers_t *regs = (registers_t *)regs_ptr;
     struct elks_signal_frame frame;
@@ -747,7 +841,7 @@ static void *elks_syscall_table[ELKS_SYS_MAX] = {
     [ELKS_SYS_setgid]  = (void *)&sys_setgid,
     [ELKS_SYS_getgid]  = (void *)&sys_getgid,
     [ELKS_SYS_signal]  = (void *)&elks_sys_signal,
-    [ELKS_SYS_ioctl]   = (void *)&sys_ioctl,
+    [ELKS_SYS_ioctl]   = (void *)&elks_sys_ioctl,
     [ELKS_SYS_fcntl]   = (void *)&sys_fcntl,
     [ELKS_SYS_umask]   = (void *)&sys_umask,
     [ELKS_SYS_stat]    = (void *)&sys_stat,
