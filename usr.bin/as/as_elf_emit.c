@@ -3242,8 +3242,21 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_0f_rm(0x00, 0xe7, xr, dst_op, out, out_cap, out_len);
     }
+    if (strcmp(mnbuf, "movdq2q") == 0) {
+        if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
+            parse_mmx_reg(dst->u.reg, &xr) != 0) {
+            return -1;
+        }
+        if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
+            return -1;
+        }
+        return emit_i386_prefixed_0f_rm(0xf2, 0xd6, xr, src, out, out_cap, out_len);
+    }
     if (strcmp(mnbuf, "cvttpd2dq") == 0) {
         return emit_i386_prefixed_xmm_srcdst_rm(0x66, 0xe6, src, dst, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "cvtpd2dq") == 0) {
+        return emit_i386_prefixed_xmm_srcdst_rm(0xf2, 0xe6, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movntdq") == 0) {
         const as_operand_t *src_op;
