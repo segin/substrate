@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,10 +8,13 @@
 
 #include <sys/proc.h>
 #include <sys/ldt.h>
+#include <sys/stat.h>
+#include <sys/file.h>
 #include <sys/termios.h>
 #include <sys/times.h>
 #include <arch/i386/idt.h>
 #include <exec/formats/elks_aout.h>
+#include <vfs/vfs.h>
 
 process_t *current_process;
 thread_t *current_thread;
@@ -34,6 +38,9 @@ static struct sigaction stub_oldact;
 static uint8_t *ds_mem;
 static size_t ds_mem_size;
 
+#define ELKS_TEST_NCCS 17
+#define ELKS_TEST_TERMIOS_BYTES offsetof(struct termios, c_cc[ELKS_TEST_NCCS])
+
 #define sys_exit   stub_sys_exit
 #define sys_fork   stub_sys_fork
 #define sys_read   stub_sys_read
@@ -54,6 +61,7 @@ static size_t ds_mem_size;
 #define sys_lchown stub_sys_lchown
 #define sys_lseek  stub_sys_lseek
 #define sys_getpid stub_sys_getpid
+#define sys_geteuid stub_sys_geteuid
 #define sys_mount  stub_sys_mount
 #define sys_umount stub_sys_umount
 #define sys_setuid stub_sys_setuid
@@ -73,6 +81,7 @@ static size_t ds_mem_size;
 #define sys_brk    stub_sys_brk
 #define sys_setgid stub_sys_setgid
 #define sys_getgid stub_sys_getgid
+#define sys_getegid stub_sys_getegid
 #define sys_signal stub_sys_signal
 #define sys_ioctl  stub_sys_ioctl
 #define kern_ioctl stub_kern_ioctl
@@ -82,6 +91,10 @@ static size_t ds_mem_size;
 #define sys_dup2   stub_sys_dup2
 #define sys_getppid stub_sys_getppid
 #define sys_getpgrp stub_sys_getpgrp
+#define kern_stat  stub_kern_stat
+#define kern_lstat stub_kern_lstat
+#define kern_fstat stub_kern_fstat
+#define kern_readlink stub_kern_readlink
 #define kern_sigaction stub_kern_sigaction
 #define sigexit stub_sigexit
 #define trapsignal stub_trapsignal
@@ -115,11 +128,12 @@ int stub_sys_mknod(const char *a, int b, int c) { (void)a; (void)b; (void)c; ret
 int stub_sys_chmod(const char *a, int b) { (void)a; (void)b; return -1; }
 int stub_sys_lchown(const char *a, int b, int c) { (void)a; (void)b; (void)c; return -1; }
 int64_t stub_sys_lseek(int a, uint32_t b, uint32_t c, int d) { (void)a; (void)b; (void)c; (void)d; return -1; }
-int stub_sys_getpid(void) { return -1; }
+int stub_sys_getpid(void) { return 321; }
 int stub_sys_mount(const char *a, const char *b, const char *c, unsigned long d, void *e) { (void)a; (void)b; (void)c; (void)d; (void)e; return -1; }
 int stub_sys_umount(const char *a) { (void)a; return -1; }
 int stub_sys_setuid(int a) { (void)a; return -1; }
-int stub_sys_getuid(void) { return -1; }
+int stub_sys_getuid(void) { return 123; }
+int stub_sys_geteuid(void) { return 124; }
 int stub_sys_stime(time_t *a) { (void)a; return -1; }
 unsigned int stub_sys_alarm(unsigned int a) { (void)a; return 0; }
 int stub_sys_fstat(int a, void *b) { (void)a; (void)b; return -1; }
@@ -132,9 +146,20 @@ int stub_sys_rmdir(const char *a) { (void)a; return -1; }
 int stub_sys_dup(int a) { (void)a; return -1; }
 int stub_sys_pipe(int *a) { (void)a; return -1; }
 clock_t stub_sys_times(struct tms *a) { (void)a; return 0; }
-int stub_sys_brk(uint32_t a) { last_name = "brk"; last_ptr = a; return (int)a; }
+int stub_sys_brk(uint32_t a) {
+    last_name = "brk";
+    last_ptr = a;
+    if (current_process) {
+        if (a >= current_process->brk_start) {
+            current_process->brk = a;
+        }
+        return (int)current_process->brk;
+    }
+    return (int)a;
+}
 int stub_sys_setgid(int a) { (void)a; return -1; }
-int stub_sys_getgid(void) { return -1; }
+int stub_sys_getgid(void) { return 223; }
+int stub_sys_getegid(void) { return 224; }
 int stub_sys_signal(int a, void *b) { (void)a; (void)b; return -1; }
 int stub_sys_ioctl(int a, uint32_t b, void *c) { (void)a; (void)b; (void)c; return -1; }
 int stub_kern_ioctl(int a, uint32_t b, void *c) {
@@ -168,7 +193,7 @@ int stub_sys_fcntl(int a, int b, int c) { (void)a; (void)b; (void)c; return -1; 
 int stub_sys_umask(int a) { (void)a; return -1; }
 int stub_sys_stat(const char *a, void *b) { (void)a; (void)b; return -1; }
 int stub_sys_dup2(int a, int b) { (void)a; (void)b; return -1; }
-int stub_sys_getppid(void) { return -1; }
+int stub_sys_getppid(void) { return 654; }
 int stub_sys_getpgrp(void) { return -1; }
 int stub_kern_sigaction(int sig, const struct sigaction *act, struct sigaction *oact) {
     last_sigaction_sig = sig;
@@ -209,6 +234,60 @@ void kfree(void *ptr, size_t size) { (void)size; free(ptr); }
 
 #include "../../sys/exec/perso/perso_elks.c"
 
+static file_t stub_file;
+static fs_node_t stub_dir_node;
+static struct dirent stub_dirent;
+
+int stub_kern_stat(const char *path, struct stat *buf) {
+    (void)path;
+    memset(buf, 0, sizeof(*buf));
+    buf->st_dev = 5;
+    buf->st_ino = 0x11223344U;
+    buf->st_mode = 0120644;
+    buf->st_nlink = 2;
+    buf->st_uid = 10;
+    buf->st_gid = 11;
+    buf->st_rdev = 7;
+    buf->st_size = 1234;
+    buf->st_atime = 1;
+    buf->st_mtime = 2;
+    buf->st_ctime = 3;
+    return 0;
+}
+
+int stub_kern_lstat(const char *path, struct stat *buf) {
+    return stub_kern_stat(path, buf);
+}
+
+int stub_kern_fstat(int fd, struct stat *buf) {
+    (void)fd;
+    return stub_kern_stat(NULL, buf);
+}
+
+int stub_kern_readlink(const char *pathname, char *buf, size_t bufsiz) {
+    static const char target[] = "/target";
+    size_t len = sizeof(target) - 1U;
+
+    (void)pathname;
+    if (bufsiz < len) {
+        len = bufsiz;
+    }
+    memcpy(buf, target, len);
+    return (int)len;
+}
+
+struct dirent *readdir_fs(fs_node_t *node, uint64_t index) {
+    (void)node;
+    if (index != 0) {
+        return NULL;
+    }
+    memset(&stub_dirent, 0, sizeof(stub_dirent));
+    stub_dirent.d_ino = 0xAABBCCDDU;
+    stub_dirent.d_namlen = 4;
+    strcpy(stub_dirent.d_name, "init");
+    return &stub_dirent;
+}
+
 static void setup_ds(process_t *proc, gdt_entry_t *ldt, size_t size) {
     uint32_t base;
 
@@ -241,6 +320,8 @@ static void setup_ds(process_t *proc, gdt_entry_t *ldt, size_t size) {
 
     proc->ldt = ldt;
     proc->ldt_entry_count = 4;
+    proc->brk_start = base + 0x200U;
+    proc->brk = proc->brk_start;
 }
 
 int main(void) {
@@ -271,6 +352,11 @@ int main(void) {
     current_thread = &thread;
     elks_personality_init();
     ds_base = (uintptr_t)ds_mem;
+    memset(&stub_file, 0, sizeof(stub_file));
+    memset(&stub_dir_node, 0, sizeof(stub_dir_node));
+    stub_dir_node.readdir = readdir_fs;
+    stub_file.f_data = &stub_dir_node;
+    proc.fds[3] = &stub_file;
 
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_exit];
     if (fn(7, 0, 0, 0, 0, 0, 0, 0) != 11 || strcmp(last_name, "exit") != 0 || last_i0 != 7) {
@@ -293,6 +379,8 @@ int main(void) {
     }
 
     memset(ds_mem + 0x100, 0, 64);
+    memset(ds_mem + 0x100, 0, ELKS_TEST_TERMIOS_BYTES + 1U);
+    ds_mem[0x100 + ELKS_TEST_TERMIOS_BYTES] = 0xA5;
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_ioctl];
     if (fn(1, TCGETS, 0x100, 0, 0, 0, 0, 0) != 0 || strcmp(last_name, "ioctl") != 0 ||
         last_i0 != 1 || last_i1 != TCGETS) {
@@ -300,13 +388,17 @@ int main(void) {
         return 1;
     }
     {
-        struct elks_termios *t = (struct elks_termios *)(void *)(ds_mem + 0x100);
+        struct termios *t = (struct termios *)(void *)(ds_mem + 0x100);
 
         if (t->c_iflag != ICRNL || t->c_oflag != ONLCR ||
             t->c_cflag != (B9600 | CS8 | CREAD) ||
             t->c_lflag != (ISIG | ICANON | ECHO) ||
             t->c_line != 7 || t->c_cc[VINTR] != 3 || t->c_cc[VEOF] != 4) {
             fprintf(stderr, "FAIL: ELKS ioctl TCGETS translation wrong\n");
+            return 1;
+        }
+        if (ds_mem[0x100 + ELKS_TEST_TERMIOS_BYTES] != 0xA5) {
+            fprintf(stderr, "FAIL: ELKS ioctl TCGETS overflowed caller buffer\n");
             return 1;
         }
     }
@@ -347,8 +439,32 @@ int main(void) {
         return 1;
     }
 
+    *(uint16_t *)(void *)(ds_mem + 0x10) = 0;
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_getpid];
+    if (fn(0x10, 0, 0, 0, 0, 0, 0, 0) != 321 ||
+        *(uint16_t *)(void *)(ds_mem + 0x10) != 654) {
+        fprintf(stderr, "FAIL: ELKS getpid/getppid translation wrong\n");
+        return 1;
+    }
+
+    *(uint16_t *)(void *)(ds_mem + 0x12) = 0;
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_getuid];
+    if (fn(0x12, 0, 0, 0, 0, 0, 0, 0) != 123 ||
+        *(uint16_t *)(void *)(ds_mem + 0x12) != 124) {
+        fprintf(stderr, "FAIL: ELKS getuid/euid translation wrong\n");
+        return 1;
+    }
+
+    *(uint16_t *)(void *)(ds_mem + 0x14) = 0;
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_getgid];
+    if (fn(0x14, 0, 0, 0, 0, 0, 0, 0) != 223 ||
+        *(uint16_t *)(void *)(ds_mem + 0x14) != 224) {
+        fprintf(stderr, "FAIL: ELKS getgid/egid translation wrong\n");
+        return 1;
+    }
+
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_brk];
-    if (fn(0x60, 0, 0, 0, 0, 0, 0, 0) != 0x60 || strcmp(last_name, "brk") != 0 ||
+    if (fn(0x60, 0, 0, 0, 0, 0, 0, 0) != 0x200 || strcmp(last_name, "brk") != 0 ||
         last_ptr != ds_base + 0x60U) {
         fprintf(stderr, "FAIL: ELKS brk wrapper wrong\n");
         return 1;
@@ -409,6 +525,69 @@ int main(void) {
     if (fn(77, 99, 0, 0, 0, 0, 0, 0) != -EINVAL) {
         fprintf(stderr, "FAIL: ELKS kill invalid signal translation wrong\n");
         return 1;
+    }
+
+    strcpy((char *)(ds_mem + 0x180), "/tmp/link");
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_stat];
+    if (fn(0x180, 0x1C0, 0, 0, 0, 0, 0, 0) != 0) {
+        fprintf(stderr, "FAIL: ELKS stat wrapper wrong return path\n");
+        return 1;
+    }
+    {
+        struct elks_stat *st = (struct elks_stat *)(void *)(ds_mem + 0x1C0);
+        if (st->st_ino != 0x11223344U || st->st_mode != 0120644 ||
+            st->st_size != 1234 || st->st_ctime != 3) {
+            fprintf(stderr, "FAIL: ELKS stat translation wrong\n");
+            return 1;
+        }
+    }
+
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_lstat];
+    if (fn(0x180, 0x200, 0, 0, 0, 0, 0, 0) != 0) {
+        fprintf(stderr, "FAIL: ELKS lstat wrapper wrong return path\n");
+        return 1;
+    }
+
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_fstat];
+    if (fn(9, 0x240, 0, 0, 0, 0, 0, 0) != 0) {
+        fprintf(stderr, "FAIL: ELKS fstat wrapper wrong return path\n");
+        return 1;
+    }
+
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_readlink];
+    memset(ds_mem + 0x280, 0, 16);
+    if (fn(0x180, 0x280, 16, 0, 0, 0, 0, 0) != 7 ||
+        strcmp((char *)(ds_mem + 0x280), "/target") != 0) {
+        fprintf(stderr, "FAIL: ELKS readlink translation wrong\n");
+        return 1;
+    }
+
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_readdir];
+    memset(ds_mem + 0x2C0, 0, sizeof(struct elks_dirent));
+    if (fn(3, 0x2C0, 1, 0, 0, 0, 0, 0) != 1) {
+        fprintf(stderr, "FAIL: ELKS readdir wrapper wrong return path\n");
+        return 1;
+    }
+    {
+        struct elks_dirent *de = (struct elks_dirent *)(void *)(ds_mem + 0x2C0);
+        if (de->d_ino != 0xAABBCCDDU || de->d_offset != 1 ||
+            de->d_namlen != 4 || strcmp(de->d_name, "init") != 0) {
+            fprintf(stderr, "FAIL: ELKS readdir translation wrong\n");
+            return 1;
+        }
+    }
+
+    *(uint16_t *)(void *)(ds_mem + 0x300) = 0;
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_sbrk];
+    {
+        int rc = fn(0x20, 0x300, 0, 0, 0, 0, 0, 0);
+        uint16_t oldbrk = *(uint16_t *)(void *)(ds_mem + 0x300);
+
+        if (rc != 0 || oldbrk != 0x200 || proc.brk != proc.brk_start + 0x20U) {
+            fprintf(stderr, "FAIL: ELKS sbrk translation wrong rc=%d old=0x%x brk=0x%x start=0x%x\n",
+                    rc, oldbrk, proc.brk, proc.brk_start);
+            return 1;
+        }
     }
 
     stub_oldact.sa_handler = SIG_DFL;

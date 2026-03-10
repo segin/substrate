@@ -25,6 +25,7 @@
 #define ELKS_SYS_mknod          14
 #define ELKS_SYS_chmod          15
 #define ELKS_SYS_chown          16
+#define ELKS_SYS_brk            17
 #define ELKS_SYS_stat           18
 #define ELKS_SYS_lseek          19
 #define ELKS_SYS_getpid         20
@@ -45,16 +46,24 @@
 #define ELKS_SYS_dup            41
 #define ELKS_SYS_pipe           42
 #define ELKS_SYS_times          43
-#define ELKS_SYS_brk            45
+#define ELKS_SYS_dup2           45
 #define ELKS_SYS_setgid         46
 #define ELKS_SYS_getgid         47
 #define ELKS_SYS_signal         48
+#define ELKS_SYS_fcntl          50
 #define ELKS_SYS_ioctl          54
-#define ELKS_SYS_fcntl          55
+#define ELKS_SYS_reboot         55
+#define ELKS_SYS_lstat          57
+#define ELKS_SYS_symlink        58
+#define ELKS_SYS_readlink       59
 #define ELKS_SYS_umask          60
-#define ELKS_SYS_dup2           63
-#define ELKS_SYS_getppid        64
-#define ELKS_SYS_getpgrp        65
+#define ELKS_SYS_settimeofday   61
+#define ELKS_SYS_gettimeofday   62
+#define ELKS_SYS_select         63
+#define ELKS_SYS_readdir        64
+#define ELKS_SYS_sbrk           69
 #define ELKS_SYS_MAX            128
+
+#define ELKS_SYS_getppid        ELKS_SYS_getpid
 
 #endif /* _ELKS_SYSCALL_TABLE_H */

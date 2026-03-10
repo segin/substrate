@@ -10,8 +10,13 @@
 #include <sys/ldt.h>
 #include <arch/i386/idt.h>
 #include <kern/console.h>
+#include <vfs/vfs.h>
+#include <sys/file.h>
 #include <sys/proc.h>
+#include <sys/dirent.h>
+#include <sys/stat.h>
 #include <vm/vm_kmem.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -56,41 +61,47 @@ struct elks_signal_frame {
 };
 
 #define ELKS_NCCS 17
+#define ELKS_TERMIOS_BYTES offsetof(struct termios, c_cc[ELKS_NCCS])
+#define ELKS_MAXNAMLEN 26
 
-struct elks_termios {
-    tcflag_t c_iflag;
-    tcflag_t c_oflag;
-    tcflag_t c_cflag;
-    tcflag_t c_lflag;
-    cc_t c_line;
-    cc_t c_cc[ELKS_NCCS];
-};
+struct elks_stat {
+    uint16_t st_dev;
+    uint32_t st_ino;
+    uint16_t st_mode;
+    uint16_t st_nlink;
+    uint16_t st_uid;
+    uint16_t st_gid;
+    uint16_t st_rdev;
+    int32_t st_size;
+    uint32_t st_atime;
+    uint32_t st_mtime;
+    uint32_t st_ctime;
+} __attribute__((packed, aligned(2)));
 
-static void elks_termios_from_native(struct elks_termios *dst, const struct termios *src) {
-    size_t i;
+struct elks_dirent {
+    uint32_t d_ino;
+    int32_t d_offset;
+    uint16_t d_namlen;
+    char d_name[ELKS_MAXNAMLEN + 1];
+} __attribute__((packed, aligned(2)));
+
+static void elks_translate_stat(struct elks_stat *dst, const struct stat *src) {
+    if (!dst || !src) {
+        return;
+    }
 
     memset(dst, 0, sizeof(*dst));
-    dst->c_iflag = src->c_iflag;
-    dst->c_oflag = src->c_oflag;
-    dst->c_cflag = src->c_cflag;
-    dst->c_lflag = src->c_lflag;
-    dst->c_line = src->c_line;
-    for (i = 0; i < ELKS_NCCS; i++) {
-        dst->c_cc[i] = src->c_cc[i];
-    }
-}
-
-static void elks_termios_to_native(struct termios *dst, const struct elks_termios *src) {
-    size_t i;
-
-    dst->c_iflag = src->c_iflag;
-    dst->c_oflag = src->c_oflag;
-    dst->c_cflag = src->c_cflag;
-    dst->c_lflag = src->c_lflag;
-    dst->c_line = src->c_line;
-    for (i = 0; i < ELKS_NCCS; i++) {
-        dst->c_cc[i] = src->c_cc[i];
-    }
+    dst->st_dev = (uint16_t)src->st_dev;
+    dst->st_ino = (uint32_t)src->st_ino;
+    dst->st_mode = (uint16_t)src->st_mode;
+    dst->st_nlink = (uint16_t)src->st_nlink;
+    dst->st_uid = (uint16_t)src->st_uid;
+    dst->st_gid = (uint16_t)src->st_gid;
+    dst->st_rdev = (uint16_t)src->st_rdev;
+    dst->st_size = (int32_t)src->st_size;
+    dst->st_atime = (uint32_t)src->st_atime;
+    dst->st_mtime = (uint32_t)src->st_mtime;
+    dst->st_ctime = (uint32_t)src->st_ctime;
 }
 
 static int elks_decode_softint(registers_t *regs, uint8_t *vector, uintptr_t *addr) {
@@ -558,6 +569,72 @@ static int elks_sys_waitpid(uint32_t pid, uint32_t status_off, uint32_t options,
     return sys_waitpid((int)pid, status_ptr, (int)options);
 }
 
+static int elks_sys_getpid(uint32_t ppid_off, uint32_t unused1, uint32_t unused2,
+                           uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                           uint32_t unused6, uint32_t unused7) {
+    uintptr_t linear = 0;
+    int pid;
+
+    (void)unused1; (void)unused2; (void)unused3; (void)unused4;
+    (void)unused5; (void)unused6; (void)unused7;
+
+    pid = sys_getpid();
+    if (pid < 0) {
+        return pid;
+    }
+    if (ppid_off != 0) {
+        if (elks_ds_pointer(ppid_off, &linear) != 0) {
+            return -EFAULT;
+        }
+        *(uint16_t *)(uintptr_t)linear = (uint16_t)sys_getppid();
+    }
+    return pid;
+}
+
+static int elks_sys_getuid(uint32_t euid_off, uint32_t unused1, uint32_t unused2,
+                           uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                           uint32_t unused6, uint32_t unused7) {
+    uintptr_t linear = 0;
+    int uid;
+
+    (void)unused1; (void)unused2; (void)unused3; (void)unused4;
+    (void)unused5; (void)unused6; (void)unused7;
+
+    uid = sys_getuid();
+    if (uid < 0) {
+        return uid;
+    }
+    if (euid_off != 0) {
+        if (elks_ds_pointer(euid_off, &linear) != 0) {
+            return -EFAULT;
+        }
+        *(uint16_t *)(uintptr_t)linear = (uint16_t)sys_geteuid();
+    }
+    return uid;
+}
+
+static int elks_sys_getgid(uint32_t egid_off, uint32_t unused1, uint32_t unused2,
+                           uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                           uint32_t unused6, uint32_t unused7) {
+    uintptr_t linear = 0;
+    int gid;
+
+    (void)unused1; (void)unused2; (void)unused3; (void)unused4;
+    (void)unused5; (void)unused6; (void)unused7;
+
+    gid = sys_getgid();
+    if (gid < 0) {
+        return gid;
+    }
+    if (egid_off != 0) {
+        if (elks_ds_pointer(egid_off, &linear) != 0) {
+            return -EFAULT;
+        }
+        *(uint16_t *)(uintptr_t)linear = (uint16_t)sys_getegid();
+    }
+    return gid;
+}
+
 static int elks_sys_brk(uint32_t brk_off, uint32_t unused1, uint32_t unused2,
                         uint32_t unused3, uint32_t unused4, uint32_t unused5,
                         uint32_t unused6, uint32_t unused7) {
@@ -620,6 +697,191 @@ static int elks_sys_execve(uint32_t path_off, uint32_t stack_off, uint32_t stack
     elks_free_vector(envp);
     kfree(path, strlen(path) + 1U);
     return ret;
+}
+
+static int elks_do_stat_path(uint32_t path_off, uint32_t stat_off, int follow_links) {
+    char *path = NULL;
+    uintptr_t linear = 0;
+    struct stat native;
+    struct elks_stat elks;
+    int ret;
+
+    ret = elks_copy_ds_string(path_off, &path);
+    if (ret != 0) {
+        return ret;
+    }
+    if (elks_ds_span(stat_off, sizeof(elks), &linear) != 0) {
+        kfree(path, strlen(path) + 1U);
+        return -EFAULT;
+    }
+
+    ret = follow_links ? kern_stat(path, &native) : kern_lstat(path, &native);
+    if (ret == 0) {
+        elks_translate_stat(&elks, &native);
+        memcpy((void *)(uintptr_t)linear, &elks, sizeof(elks));
+    }
+    kfree(path, strlen(path) + 1U);
+    return ret;
+}
+
+static int elks_sys_stat(uint32_t path_off, uint32_t stat_off, uint32_t unused2,
+                         uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                         uint32_t unused6, uint32_t unused7) {
+    (void)unused2; (void)unused3; (void)unused4; (void)unused5;
+    (void)unused6; (void)unused7;
+    return elks_do_stat_path(path_off, stat_off, 1);
+}
+
+static int elks_sys_lstat(uint32_t path_off, uint32_t stat_off, uint32_t unused2,
+                          uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                          uint32_t unused6, uint32_t unused7) {
+    (void)unused2; (void)unused3; (void)unused4; (void)unused5;
+    (void)unused6; (void)unused7;
+    return elks_do_stat_path(path_off, stat_off, 0);
+}
+
+static int elks_sys_fstat(uint32_t fd, uint32_t stat_off, uint32_t unused2,
+                          uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                          uint32_t unused6, uint32_t unused7) {
+    uintptr_t linear = 0;
+    struct stat native;
+    struct elks_stat elks;
+    int ret;
+
+    (void)unused2; (void)unused3; (void)unused4; (void)unused5;
+    (void)unused6; (void)unused7;
+
+    if (elks_ds_span(stat_off, sizeof(elks), &linear) != 0) {
+        return -EFAULT;
+    }
+    ret = kern_fstat((int)fd, &native);
+    if (ret == 0) {
+        elks_translate_stat(&elks, &native);
+        memcpy((void *)(uintptr_t)linear, &elks, sizeof(elks));
+    }
+    return ret;
+}
+
+static int elks_sys_readlink(uint32_t path_off, uint32_t buf_off, uint32_t bufsiz,
+                             uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                             uint32_t unused6, uint32_t unused7) {
+    char *path = NULL;
+    char *buf = NULL;
+    uintptr_t linear = 0;
+    int ret;
+
+    (void)unused3; (void)unused4; (void)unused5; (void)unused6; (void)unused7;
+
+    ret = elks_copy_ds_string(path_off, &path);
+    if (ret != 0) {
+        return ret;
+    }
+    if (bufsiz == 0) {
+        kfree(path, strlen(path) + 1U);
+        return 0;
+    }
+    if (elks_ds_span(buf_off, (size_t)bufsiz, &linear) != 0) {
+        kfree(path, strlen(path) + 1U);
+        return -EFAULT;
+    }
+
+    buf = kmalloc((size_t)bufsiz);
+    if (!buf) {
+        kfree(path, strlen(path) + 1U);
+        return -ENOMEM;
+    }
+    ret = kern_readlink(path, buf, (size_t)bufsiz);
+    if (ret >= 0) {
+        memcpy((void *)(uintptr_t)linear, buf, (size_t)ret);
+    }
+    kfree(buf, (size_t)bufsiz);
+    kfree(path, strlen(path) + 1U);
+    return ret;
+}
+
+static int elks_sys_readdir(uint32_t fd, uint32_t buf_off, uint32_t count,
+                            uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                            uint32_t unused6, uint32_t unused7) {
+    uintptr_t linear = 0;
+    file_t *f;
+    fs_node_t *node;
+    struct dirent *d;
+    struct elks_dirent out;
+    size_t name_len = 0;
+
+    (void)unused3; (void)unused4; (void)unused5; (void)unused6; (void)unused7;
+
+    if (count == 0) {
+        return 0;
+    }
+    if (fd >= MAX_FD) {
+        return -EBADF;
+    }
+    f = current_process->fds[fd];
+    if (!f || !f->f_data) {
+        return -EBADF;
+    }
+    node = (fs_node_t *)f->f_data;
+    if (!node->readdir) {
+        return -ENOTDIR;
+    }
+    if (elks_ds_span(buf_off, sizeof(out), &linear) != 0) {
+        return -EFAULT;
+    }
+
+    d = readdir_fs(node, f->f_offset);
+    if (!d) {
+        return 0;
+    }
+
+    memset(&out, 0, sizeof(out));
+    out.d_ino = (uint32_t)d->d_ino;
+    out.d_offset = (int32_t)(f->f_offset + 1);
+    while (d->d_name[name_len] != '\0' && name_len < ELKS_MAXNAMLEN) {
+        out.d_name[name_len] = d->d_name[name_len];
+        name_len++;
+    }
+    out.d_name[name_len] = '\0';
+    out.d_namlen = (uint16_t)name_len;
+    memcpy((void *)(uintptr_t)linear, &out, sizeof(out));
+    f->f_offset++;
+    return 1;
+}
+
+static int elks_sys_sbrk(uint32_t increment, uint32_t oldbrk_off, uint32_t unused2,
+                         uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                         uint32_t unused6, uint32_t unused7) {
+    uintptr_t base = 0;
+    uint32_t limit = 0;
+    uintptr_t old_brk;
+    uintptr_t new_brk;
+    uintptr_t linear = 0;
+    int32_t delta = (int16_t)increment;
+    int ret;
+
+    (void)unused2; (void)unused3; (void)unused4; (void)unused5;
+    (void)unused6; (void)unused7;
+
+    ret = elks_ds_base_limit(&base, &limit);
+    if (ret != 0) {
+        return ret;
+    }
+    if (oldbrk_off == 0 || elks_ds_span(oldbrk_off, sizeof(uint16_t), &linear) != 0) {
+        return -EFAULT;
+    }
+
+    old_brk = (uintptr_t)current_process->brk;
+    new_brk = old_brk + delta;
+    if (new_brk < base || (new_brk - base) > (uintptr_t)(limit + 1U)) {
+        return -ENOMEM;
+    }
+    (void)sys_brk((uint32_t)new_brk);
+    if ((uintptr_t)current_process->brk != new_brk) {
+        return -ENOMEM;
+    }
+
+    *(uint16_t *)(uintptr_t)linear = (uint16_t)(old_brk - base);
+    return 0;
 }
 
 static int elks_sys_kill(uint32_t pid, uint32_t sig, uint32_t unused2,
@@ -702,7 +964,6 @@ static int elks_sys_ioctl(uint32_t fd, uint32_t request, uint32_t arg_off,
     switch (request) {
         case TCGETS: {
             struct termios native;
-            struct elks_termios elks;
             int ret;
 
             if (!arg) {
@@ -712,26 +973,23 @@ static int elks_sys_ioctl(uint32_t fd, uint32_t request, uint32_t arg_off,
             if (ret != 0) {
                 return ret;
             }
-            elks_termios_from_native(&elks, &native);
-            memcpy(arg, &elks, sizeof(elks));
+            memcpy(arg, &native, ELKS_TERMIOS_BYTES);
             return 0;
         }
         case TCSETS:
         case TCSETSW:
         case TCSETSF: {
             struct termios native;
-            struct elks_termios elks;
             int ret;
 
             if (!arg) {
                 return -EFAULT;
             }
-            memcpy(&elks, arg, sizeof(elks));
             ret = kern_ioctl((int)fd, TCGETS, &native);
             if (ret != 0) {
                 return ret;
             }
-            elks_termios_to_native(&native, &elks);
+            memcpy(&native, arg, ELKS_TERMIOS_BYTES);
             return kern_ioctl((int)fd, request, &native);
         }
         default:
@@ -820,14 +1078,14 @@ static void *elks_syscall_table[ELKS_SYS_MAX] = {
     [ELKS_SYS_chmod]   = (void *)&sys_chmod,
     [ELKS_SYS_chown]   = (void *)&sys_lchown,
     [ELKS_SYS_lseek]   = (void *)&sys_lseek,
-    [ELKS_SYS_getpid]  = (void *)&sys_getpid,
+    [ELKS_SYS_getpid]  = (void *)&elks_sys_getpid,
     [ELKS_SYS_mount]   = (void *)&sys_mount,
     [ELKS_SYS_umount]  = (void *)&sys_umount,
     [ELKS_SYS_setuid]  = (void *)&sys_setuid,
-    [ELKS_SYS_getuid]  = (void *)&sys_getuid,
+    [ELKS_SYS_getuid]  = (void *)&elks_sys_getuid,
     [ELKS_SYS_stime]   = (void *)&sys_stime,
     [ELKS_SYS_alarm]   = (void *)&sys_alarm,
-    [ELKS_SYS_fstat]   = (void *)&sys_fstat,
+    [ELKS_SYS_fstat]   = (void *)&elks_sys_fstat,
     [ELKS_SYS_pause]   = (void *)&sys_pause,
     [ELKS_SYS_access]  = (void *)&sys_access,
     [ELKS_SYS_sync]    = (void *)&sys_sync,
@@ -839,15 +1097,17 @@ static void *elks_syscall_table[ELKS_SYS_MAX] = {
     [ELKS_SYS_times]   = (void *)&sys_times,
     [ELKS_SYS_brk]     = (void *)&elks_sys_brk,
     [ELKS_SYS_setgid]  = (void *)&sys_setgid,
-    [ELKS_SYS_getgid]  = (void *)&sys_getgid,
+    [ELKS_SYS_getgid]  = (void *)&elks_sys_getgid,
     [ELKS_SYS_signal]  = (void *)&elks_sys_signal,
-    [ELKS_SYS_ioctl]   = (void *)&elks_sys_ioctl,
     [ELKS_SYS_fcntl]   = (void *)&sys_fcntl,
+    [ELKS_SYS_ioctl]   = (void *)&elks_sys_ioctl,
+    [ELKS_SYS_lstat]   = (void *)&elks_sys_lstat,
+    [ELKS_SYS_readlink] = (void *)&elks_sys_readlink,
     [ELKS_SYS_umask]   = (void *)&sys_umask,
-    [ELKS_SYS_stat]    = (void *)&sys_stat,
+    [ELKS_SYS_stat]    = (void *)&elks_sys_stat,
     [ELKS_SYS_dup2]    = (void *)&sys_dup2,
-    [ELKS_SYS_getppid] = (void *)&sys_getppid,
-    [ELKS_SYS_getpgrp] = (void *)&sys_getpgrp,
+    [ELKS_SYS_readdir] = (void *)&elks_sys_readdir,
+    [ELKS_SYS_sbrk]    = (void *)&elks_sys_sbrk,
 };
 
 void elks_personality_init(void) {
