@@ -4,6 +4,7 @@
 #include <sys/errno.h>
 #include <sys/core.h>
 #include <sys/termios.h>
+#include <sys/time.h>
 #include <sys/syscall_impl.h>
 #include <sys/kern_syscalls.h>
 #include <sys/compiler.h>
@@ -83,6 +84,16 @@ struct elks_dirent {
     int32_t d_offset;
     uint16_t d_namlen;
     char d_name[ELKS_MAXNAMLEN + 1];
+} __attribute__((packed, aligned(2)));
+
+struct elks_timeval {
+    int32_t tv_sec;
+    int32_t tv_usec;
+} __attribute__((packed, aligned(2)));
+
+struct elks_timezone {
+    int16_t tz_minuteswest;
+    int16_t tz_dsttime;
 } __attribute__((packed, aligned(2)));
 
 static void elks_translate_stat(struct elks_stat *dst, const struct stat *src) {
@@ -884,6 +895,75 @@ static int elks_sys_sbrk(uint32_t increment, uint32_t oldbrk_off, uint32_t unuse
     return 0;
 }
 
+static int elks_sys_settimeofday(uint32_t tv_off, uint32_t tz_off, uint32_t unused2,
+                                 uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                                 uint32_t unused6, uint32_t unused7) {
+    struct elks_timeval etv;
+    struct timeval ntv;
+    uintptr_t linear = 0;
+    int ret;
+
+    (void)tz_off;
+    (void)unused2; (void)unused3; (void)unused4; (void)unused5;
+    (void)unused6; (void)unused7;
+
+    if (tv_off == 0) {
+        return -EFAULT;
+    }
+    ret = elks_ds_span(tv_off, sizeof(etv), &linear);
+    if (ret != 0) {
+        return ret;
+    }
+
+    memcpy(&etv, (const void *)(uintptr_t)linear, sizeof(etv));
+    ntv.tv_sec = (time_t)etv.tv_sec;
+    ntv.tv_usec = (suseconds_t)etv.tv_usec;
+    return kern_stime(&ntv.tv_sec);
+}
+
+static int elks_sys_gettimeofday(uint32_t tv_off, uint32_t tz_off, uint32_t unused2,
+                                 uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                                 uint32_t unused6, uint32_t unused7) {
+    struct timeval ntv;
+    struct timezone ntz;
+    struct elks_timeval etv;
+    struct elks_timezone etz;
+    uintptr_t linear = 0;
+    int ret;
+
+    (void)unused2; (void)unused3; (void)unused4; (void)unused5;
+    (void)unused6; (void)unused7;
+
+    memset(&ntv, 0, sizeof(ntv));
+    memset(&ntz, 0, sizeof(ntz));
+    ret = kern_gettimeofday(&ntv, tz_off ? &ntz : NULL);
+    if (ret != 0) {
+        return ret;
+    }
+
+    if (tv_off != 0) {
+        ret = elks_ds_span(tv_off, sizeof(etv), &linear);
+        if (ret != 0) {
+            return ret;
+        }
+        etv.tv_sec = (int32_t)ntv.tv_sec;
+        etv.tv_usec = (int32_t)ntv.tv_usec;
+        memcpy((void *)(uintptr_t)linear, &etv, sizeof(etv));
+    }
+
+    if (tz_off != 0) {
+        ret = elks_ds_span(tz_off, sizeof(etz), &linear);
+        if (ret != 0) {
+            return ret;
+        }
+        etz.tz_minuteswest = (int16_t)ntz.tz_minuteswest;
+        etz.tz_dsttime = (int16_t)ntz.tz_dsttime;
+        memcpy((void *)(uintptr_t)linear, &etz, sizeof(etz));
+    }
+
+    return 0;
+}
+
 static int elks_sys_kill(uint32_t pid, uint32_t sig, uint32_t unused2,
                          uint32_t unused3, uint32_t unused4, uint32_t unused5,
                          uint32_t unused6, uint32_t unused7) {
@@ -1084,6 +1164,7 @@ static void *elks_syscall_table[ELKS_SYS_MAX] = {
     [ELKS_SYS_setuid]  = (void *)&sys_setuid,
     [ELKS_SYS_getuid]  = (void *)&elks_sys_getuid,
     [ELKS_SYS_stime]   = (void *)&sys_stime,
+    [ELKS_SYS_settimeofday] = (void *)&elks_sys_settimeofday,
     [ELKS_SYS_alarm]   = (void *)&sys_alarm,
     [ELKS_SYS_fstat]   = (void *)&elks_sys_fstat,
     [ELKS_SYS_pause]   = (void *)&sys_pause,
@@ -1103,6 +1184,7 @@ static void *elks_syscall_table[ELKS_SYS_MAX] = {
     [ELKS_SYS_ioctl]   = (void *)&elks_sys_ioctl,
     [ELKS_SYS_lstat]   = (void *)&elks_sys_lstat,
     [ELKS_SYS_readlink] = (void *)&elks_sys_readlink,
+    [ELKS_SYS_gettimeofday] = (void *)&elks_sys_gettimeofday,
     [ELKS_SYS_umask]   = (void *)&sys_umask,
     [ELKS_SYS_stat]    = (void *)&elks_sys_stat,
     [ELKS_SYS_dup2]    = (void *)&sys_dup2,

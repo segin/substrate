@@ -193,24 +193,24 @@ Reference: User Request (Step 31552)
         - Tests: unit (access beyond segment limit)
         - Acceptance: Out-of-range ELKS user-memory access traps and tears the process down cleanly without a kernel panic; the current i386 path manifests as a user fault reported by the kernel trap path.
 
-- [ ] **Sample ELKS Userland & Build Scripts:** (REQ: REQ-20-0049)
+- [x] **Upstream ELKS Userland & Build Scripts:** (REQ: REQ-20-0049)
     - [x] Add ELKS cross-compiler toolchain setup script. (REQ: REQ-20-0050)
         - Files: `tools/elks/setup_toolchain.sh`
         - Tests: shell syntax (`sh -n tools/elks/setup_toolchain.sh`)
         - Docs: `tools/elks/README.md`
         - Acceptance: Script bootstraps the pinned `ia16-elf` binutils/GCC toolchain used by the ELKS smoke binaries and documents the install prefix plus host prerequisites.
-    - [ ] Add sample ELKS shell (minimal). (REQ: REQ-20-0051)
-        - Files: `tests/elks/minish.c`, `tests/elks/Makefile`
-        - Tests: emulation (run commands in QEMU)
-        - Acceptance: Basic command execution works.
+    - [x] Add upstream ELKS shell prompt smoke. (REQ: REQ-20-0051)
+        - Files: `tests/elks/run_tests.sh`
+        - Tests: emulation (`tests/elks/run_tests.sh upstream_sh_prompt_elks`)
+        - Acceptance: QEMU booting `init=/perso/elks/bin/sh` reaches the upstream ELKS `# ` prompt on the staged root image without a kernel fault.
     - [x] Add sample ELKS cat utility. (REQ: REQ-20-0052)
         - Files: `tests/elks/cat.c`, `tests/elks/Makefile`, `tests/elks/run_tests.sh`
         - Tests: emulation (`tests/elks/run_tests.sh cat_elks`)
         - Acceptance: File contents displayed correctly from a staged file on a disposable ELKS smoke image.
-    - [ ] Add sample ELKS ls utility. (REQ: REQ-20-0053)
-        - Files: `tests/elks/ls.c`, `tests/elks/Makefile`
-        - Tests: emulation
-        - Acceptance: Directory listing displayed.
+    - [x] Add upstream ELKS ls smoke. (REQ: REQ-20-0053)
+        - Files: `tests/elks/run_tests.sh`
+        - Tests: emulation (`tests/elks/run_tests.sh upstream_ls_elks`)
+        - Acceptance: QEMU booting `init=/perso/elks/bin/ls` prints the root directory listing from `/perso/elks` system image content on the staged root image.
     - [x] Add ELKS binary build Makefile. (REQ: REQ-20-0054)
         - Files: `tests/elks/Makefile`
         - Tests: N/A (build script)
@@ -317,11 +317,11 @@ Reference: User Request (Step 31552)
 - **US-20-0046**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to create automated test harness for ELKS binaries so that this capability is implemented with clear verification evidence.
 - **US-20-0047**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add ELKS syscall fuzzing tests so that this capability is implemented with clear verification evidence.
 - **US-20-0048**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add LDT bounds violation tests so that this capability is implemented with clear verification evidence.
-- **US-20-0049**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to sample ELKS Userland & Build Scripts: so that this capability is implemented with clear verification evidence.
+- **US-20-0049**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to upstream ELKS Userland & Build Scripts: so that this capability is implemented with clear verification evidence.
 - **US-20-0050**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add ELKS cross-compiler toolchain setup script so that this capability is implemented with clear verification evidence.
-- **US-20-0051**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add sample ELKS shell (minimal) so that this capability is implemented with clear verification evidence.
+- **US-20-0051**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add upstream ELKS shell prompt smoke so that this capability is implemented with clear verification evidence.
 - **US-20-0052**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add sample ELKS cat utility so that this capability is implemented with clear verification evidence.
-- **US-20-0053**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add sample ELKS ls utility so that this capability is implemented with clear verification evidence.
+- **US-20-0053**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add upstream ELKS ls smoke so that this capability is implemented with clear verification evidence.
 - **US-20-0054**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want a single ELKS test-binary Makefile that builds both assembly and C test programs so that future ELKS validation artifacts share one reproducible build path.
 - **US-20-0055**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to documentation: so that this capability is implemented with clear verification evidence.
 - **US-20-0056**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to create personality-elks(7) developer guide so that this capability is implemented with clear verification evidence.
@@ -482,19 +482,19 @@ Reference: User Request (Step 31552)
 - **REQ-20-0048** (EARS/Ubiquitous): The Substrate system shall add LDT bounds violation tests.
   - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-20-0049** (EARS/Ubiquitous): The Substrate system shall sample ELKS Userland & Build Scripts:.
+- **REQ-20-0049** (EARS/Ubiquitous): The Substrate system shall support upstream ELKS userland and build-script validation.
   - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-20-0050** (EARS/Ubiquitous): The Substrate system shall add ELKS cross-compiler toolchain setup script.
   - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-20-0051** (EARS/Ubiquitous): The Substrate system shall add sample ELKS shell (minimal).
+- **REQ-20-0051** (EARS/Ubiquitous): The Substrate system shall provide an upstream ELKS shell prompt smoke test.
   - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-20-0052** (EARS/Ubiquitous): The Substrate system shall add sample ELKS cat utility.
   - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-20-0053** (EARS/Ubiquitous): The Substrate system shall add sample ELKS ls utility.
+- **REQ-20-0053** (EARS/Ubiquitous): The Substrate system shall provide an upstream ELKS ls smoke test.
   - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-20-0054** (EARS/Ubiquitous): The Substrate system shall provide an ELKS test-binary Makefile that builds all current in-tree ELKS test binaries and supports both assembly and C ELKS test sources.

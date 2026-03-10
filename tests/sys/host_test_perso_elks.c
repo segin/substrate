@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #include <sys/file.h>
 #include <sys/termios.h>
+#include <sys/time.h>
 #include <sys/times.h>
 #include <arch/i386/idt.h>
 #include <exec/formats/elks_aout.h>
@@ -34,6 +35,10 @@ static sig_t last_sigaction_handler;
 static int last_kill_pid;
 static int last_kill_sig;
 static int last_sigexit_sig;
+static time_t stub_clock_sec = 123456789;
+static suseconds_t stub_clock_usec = 654321;
+static int stub_tz_minuteswest;
+static int stub_tz_dsttime;
 static struct sigaction stub_oldact;
 static uint8_t *ds_mem;
 static size_t ds_mem_size;
@@ -96,6 +101,8 @@ static size_t ds_mem_size;
 #define kern_fstat stub_kern_fstat
 #define kern_readlink stub_kern_readlink
 #define kern_sigaction stub_kern_sigaction
+#define kern_gettimeofday stub_kern_gettimeofday
+#define kern_stime stub_kern_stime
 #define sigexit stub_sigexit
 #define trapsignal stub_trapsignal
 #define kern_execve stub_kern_execve
@@ -201,6 +208,24 @@ int stub_kern_sigaction(int sig, const struct sigaction *act, struct sigaction *
     if (oact) {
         *oact = stub_oldact;
     }
+    return 0;
+}
+int stub_kern_gettimeofday(struct timeval *tv, struct timezone *tz) {
+    if (tv) {
+        tv->tv_sec = stub_clock_sec;
+        tv->tv_usec = stub_clock_usec;
+    }
+    if (tz) {
+        tz->tz_minuteswest = stub_tz_minuteswest;
+        tz->tz_dsttime = stub_tz_dsttime;
+    }
+    return 0;
+}
+int stub_kern_stime(time_t *t) {
+    if (!t) {
+        return -1;
+    }
+    stub_clock_sec = *t;
     return 0;
 }
 void stub_sigexit(process_t *p, int sig) {
@@ -588,6 +613,29 @@ int main(void) {
                     rc, oldbrk, proc.brk, proc.brk_start);
             return 1;
         }
+    }
+
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_gettimeofday];
+    memset(ds_mem + 0x320, 0, 12);
+    stub_clock_sec = 0x11223344;
+    stub_clock_usec = 0x00556677;
+    stub_tz_minuteswest = 42;
+    stub_tz_dsttime = 3;
+    if (fn(0x320, 0x328, 0, 0, 0, 0, 0, 0) != 0 ||
+        *(int32_t *)(void *)(ds_mem + 0x320) != 0x11223344 ||
+        *(int32_t *)(void *)(ds_mem + 0x324) != 0x00556677 ||
+        *(int16_t *)(void *)(ds_mem + 0x328) != 42 ||
+        *(int16_t *)(void *)(ds_mem + 0x32A) != 3) {
+        fprintf(stderr, "FAIL: ELKS gettimeofday translation wrong\n");
+        return 1;
+    }
+
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_settimeofday];
+    *(int32_t *)(void *)(ds_mem + 0x330) = 0x01020304;
+    *(int32_t *)(void *)(ds_mem + 0x334) = 12345;
+    if (fn(0x330, 0, 0, 0, 0, 0, 0, 0) != 0 || stub_clock_sec != 0x01020304) {
+        fprintf(stderr, "FAIL: ELKS settimeofday translation wrong\n");
+        return 1;
     }
 
     stub_oldact.sa_handler = SIG_DFL;
