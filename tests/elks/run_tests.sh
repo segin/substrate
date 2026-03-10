@@ -17,7 +17,7 @@ TIMEOUT_BIN=${TIMEOUT_BIN:-timeout}
 QEMU_TIMEOUT=${QEMU_TIMEOUT:-35}
 LOG_DIR=${LOG_DIR:-"$SCRIPT_DIR/logs"}
 WORK_ROOTFS_IMG=${WORK_ROOTFS_IMG:-"$LOG_DIR/rootfs.img"}
-DEFAULT_CASES="hello_elks sleep_elks fileio_elks fork_elks bounds_test_elks cat_elks"
+DEFAULT_CASES="hello_elks sleep_elks fileio_elks fork_elks bounds_test_elks cat_elks fuzz_syscalls_elks"
 
 if [ "$#" -gt 0 ]; then
     CASES="$*"
@@ -90,6 +90,7 @@ stage_binary "$SCRIPT_DIR/fileio_elks" /bin/fileio_elks
 stage_binary "$SCRIPT_DIR/fork_elks" /bin/fork_elks
 stage_binary "$SCRIPT_DIR/bounds_test_elks" /bin/bounds_test_elks
 stage_binary "$SCRIPT_DIR/cat_elks" /bin/cat_elks
+stage_binary "$SCRIPT_DIR/fuzz_syscalls_elks" /bin/fuzz_syscalls_elks
 
 if want_case cat_elks; then
     cat_input=$LOG_DIR/cat_input.txt
@@ -115,4 +116,7 @@ if want_case bounds_test_elks; then
 fi
 if want_case cat_elks; then
     run_case cat_elks "ELKS cat sample"
+fi
+if want_case fuzz_syscalls_elks; then
+    run_case fuzz_syscalls_elks "ELKS fuzz done"
 fi

@@ -184,10 +184,10 @@ Reference: User Request (Step 31552)
         - Files: `tests/elks/run_tests.sh`
         - Tests: CI integration
         - Acceptance: All ELKS tests pass in automated pipeline.
-    - [ ] Add ELKS syscall fuzzing tests. (REQ: REQ-20-0047)
-        - Files: `tests/elks/fuzz_syscalls.c`
-        - Tests: fuzz (random syscall args)
-        - Acceptance: No kernel panics; all invalid calls return errors.
+    - [x] Add ELKS syscall fuzzing tests. (REQ: REQ-20-0047)
+        - Files: `tests/elks/fuzz_syscalls.S`
+        - Tests: fuzz/emulation (`tests/elks/run_tests.sh fuzz_syscalls_elks`)
+        - Acceptance: No kernel panics; unsupported syscall numbers and invalid syscall arguments return errors while the ELKS process reaches the `ELKS fuzz done` completion marker.
     - [x] Add ELKS user-memory bounds fault tests. (REQ: REQ-20-0048)
         - Files: `tests/elks/bounds_test.S`
         - Tests: unit (access beyond segment limit)
