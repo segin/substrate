@@ -99,6 +99,8 @@ typedef struct process {
     
     struct tty *tty;      // Controlling Terminal
     fs_node_t *cwd_node; // Current working directory
+    char exec_path[256];
+    char cwd_path[256];
     
     // Memory management
     uint32_t brk;        // Program break (heap end)

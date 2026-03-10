@@ -1508,6 +1508,10 @@ int kern_chdir(const char *path) {
     if ((node->flags & 0x7) != FS_DIRECTORY) return -1;
     
     current_process->cwd_node = node;
+    if (kern_getcwd(current_process->cwd_path, sizeof(current_process->cwd_path)) != 0) {
+        strncpy(current_process->cwd_path, "/", sizeof(current_process->cwd_path) - 1);
+        current_process->cwd_path[sizeof(current_process->cwd_path) - 1] = '\0';
+    }
     return 0;
 }
 
@@ -1520,6 +1524,10 @@ int kern_fchdir(int fd) {
     if ((node->flags & 0x7) != FS_DIRECTORY) return -1;
     
     current_process->cwd_node = node;
+    if (kern_getcwd(current_process->cwd_path, sizeof(current_process->cwd_path)) != 0) {
+        strncpy(current_process->cwd_path, "/", sizeof(current_process->cwd_path) - 1);
+        current_process->cwd_path[sizeof(current_process->cwd_path) - 1] = '\0';
+    }
     return 0;
 }
 

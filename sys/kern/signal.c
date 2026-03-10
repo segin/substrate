@@ -777,8 +777,14 @@ void signal_handle_pending(registers_t *regs) {
         return;
     } else if (act->sa_handler == SIG_DFL) {
         // Default actions
-        if (sig == SIGINT || sig == SIGTERM || sig == SIGSEGV || sig == SIGILL || sig == SIGFPE) {
-            // Init Protection: PID 1 ignores fatal signals with default action
+        if (sig == SIGSEGV || sig == SIGILL || sig == SIGFPE || sig == SIGBUS || sig == SIGTRAP) {
+            signal_clear_trap_context(current_thread, sig);
+            sigexit(current_process, sig);
+            return;
+        }
+
+        if (sig == SIGINT || sig == SIGTERM) {
+            // Init Protection: PID 1 ignores external fatal signals with default action
             signal_clear_trap_context(current_thread, sig);
             if (current_process->pid == 1) return;
             sigexit(current_process, sig);
