@@ -10,6 +10,7 @@
 
 #include <sys/types.h>
 #include <stddef.h>
+#include <stdint.h>
 
 __BEGIN_DECLS
 
@@ -36,7 +37,7 @@ __BEGIN_DECLS
  * Thread-safety: Safe. No static mutable buffers. Errno preserved per thread.
  * Reentrancy: Reentrant. Can be called recursively from signal handlers.
  */
-int sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
+int sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
 
 /**
  * sysctlbyname - Query or modify kernel parameters using ASCII name
@@ -67,6 +68,66 @@ int sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size
  * Reentrancy: Reentrant. Can be called recursively from signal handlers.
  */
 int sysctlnametomib(const char *name, int *mibp, size_t *sizep);
+
+/*
+ * sysctl metadata types and flags
+ */
+
+#define CTLTYPE         0xf     /* Mask for the type */
+#define CTLTYPE_NODE    1       /* name is a node */
+#define CTLTYPE_INT     2       /* name describes an integer */
+#define CTLTYPE_STRING  3       /* name describes a string */
+#define CTLTYPE_QUAD    4       /* name describes a 64-bit number */
+#define CTLTYPE_OPAQUE  5       /* name describes a structure */
+#define CTLTYPE_STRUCT  CTLTYPE_OPAQUE  /* name describes a structure */
+#define CTLTYPE_UINT    6       /* name describes an unsigned integer */
+
+#define CTLFLAG_RD      0x80000000  /* Allow reads of variable */
+#define CTLFLAG_WR      0x40000000  /* Allow writes to the variable */
+#define CTLFLAG_RW      (CTLFLAG_RD|CTLFLAG_WR)
+#define CTLFLAG_NOLOCK  0x20000000  /* XXX Don't Lock */
+#define CTLFLAG_ANYBODY 0x10000000  /* All users can set this */
+#define CTLFLAG_SECURE  0x08000000  /* Permit set only if securelevel<=0 */
+#define CTLFLAG_PRISON  0x04000000  /* Prisoned roots can fiddle */
+#define CTLFLAG_DYN     0x02000000  /* Dynamic oid - can be freed */
+#define CTLFLAG_SKIP    0x01000000  /* System tunable, but not a sysctl */
+#define CTLMASK_SECURE  0x00F00000  /* Secure level */
+#define CTLFLAG_TUN     0x00080000  /* Default value is loaded from getenv() */
+#define CTLFLAG_RDTUN   (CTLFLAG_RD|CTLFLAG_TUN)
+
+#ifdef __STDC_VERSION__
+#if __STDC_VERSION__ >= 201112L
+_Static_assert(CTLTYPE_NODE == 1, "ABI: CTLTYPE_NODE must be 1");
+_Static_assert(CTLTYPE_INT == 2, "ABI: CTLTYPE_INT must be 2");
+_Static_assert(CTLTYPE_STRING == 3, "ABI: CTLTYPE_STRING must be 3");
+_Static_assert(CTLTYPE_QUAD == 4, "ABI: CTLTYPE_QUAD must be 4");
+_Static_assert(CTLTYPE_OPAQUE == 5, "ABI: CTLTYPE_OPAQUE must be 5");
+_Static_assert(CTLTYPE_UINT == 6, "ABI: CTLTYPE_UINT must be 6");
+#endif
+#endif
+
+/*
+ * sysctl helper functions (libc extensions)
+ *
+ * These helpers provide typed access and memory-safe dynamic buffer
+ * allocation for sysctl parameters. They handle the underlying sizing,
+ * retry loops, and type validation/bounds checking to prevent overflows
+ * and partial updates.
+ *
+ * Thread-safety: Safe. Uses no static state.
+ * Reentrancy: Reentrant.
+ */
+int sysctl_int(const int *name, unsigned int namelen, int *oldp, int *newp);
+int sysctlbyname_int(const char *name, int *oldp, int *newp);
+int sysctl_uint(const int *name, unsigned int namelen, unsigned int *oldp, unsigned int *newp);
+int sysctlbyname_uint(const char *name, unsigned int *oldp, unsigned int *newp);
+int sysctl_quad(const int *name, unsigned int namelen, uint64_t *oldp, uint64_t *newp);
+int sysctlbyname_quad(const char *name, uint64_t *oldp, uint64_t *newp);
+int sysctl_string(const int *name, unsigned int namelen, char *oldp, size_t *oldlenp, const char *newp);
+int sysctlbyname_string(const char *name, char *oldp, size_t *oldlenp, const char *newp);
+
+void *sysctl_get_buf(const int *name, unsigned int namelen, size_t *lenp);
+void *sysctlbyname_get_buf(const char *name, size_t *lenp);
 
 /*
  * Top-level sysctl identifiers (CTL_*)
@@ -196,8 +257,8 @@ int sysctlnametomib(const char *name, int *mibp, size_t *sizep);
  * structures and types do not change unexpectedly, preserving ABI stability.
  */
 
-/* Verify that u_int is 32-bit */
-_Static_assert(sizeof(u_int) == 4, "u_int must be 32-bit");
+/* Verify that unsigned int is 32-bit */
+_Static_assert(sizeof(unsigned int) == 4, "unsigned int must be 32-bit");
 
 /* Verify that int is 32-bit */
 _Static_assert(sizeof(int) == 4, "int must be 32-bit");

@@ -1,0 +1,82 @@
+.\" sysctl.3 - sysctl library function
+.TH SYSCTL 3 "March 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+sysctl, sysctl_int, sysctl_uint, sysctl_quad, sysctl_string, sysctl_get_buf \- get or set system information
+.SH LIBRARY
+.B libc
+.SH SYNOPSIS
+.B #include <sys/sysctl.h>
+.PP
+.BI "int sysctl(int *" name ", unsigned int " namelen ", void *" oldp ", size_t *" oldlenp ", void *" newp ", size_t " newlen ");"
+.PP
+.BI "int sysctl_int(const int *" name ", unsigned int " namelen ", int *" oldp ", int *" newp ");"
+.PP
+.BI "int sysctl_uint(const int *" name ", unsigned int " namelen ", unsigned int *" oldp ", unsigned int *" newp ");"
+.PP
+.BI "int sysctl_quad(const int *" name ", unsigned int " namelen ", uint64_t *" oldp ", uint64_t *" newp ");"
+.PP
+.BI "int sysctl_string(const int *" name ", unsigned int " namelen ", char *" oldp ", size_t *" oldlenp ", const char *" newp ");"
+.PP
+.BI "void *sysctl_get_buf(const int *" name ", unsigned int " namelen ", size_t *" lenp ");"
+.SH DESCRIPTION
+The
+.BR sysctl ()
+function retrieves or sets kernel state via a Management Information Base (MIB) path.
+The
+.I name
+argument is an array of
+.I namelen
+integers identifying the parameter.
+If
+.I oldp
+is non-NULL, the current value is copied there and
+.I *oldlenp
+is updated with the actual size.
+If
+.I newp
+is non-NULL, the value is set from the
+.I newlen
+bytes at that address.
+.PP
+The typed convenience helpers
+.RB ( sysctl_int (),
+.BR sysctl_uint (),
+.BR sysctl_quad ())
+perform size validation automatically, returning
+.B EINVAL
+if the kernel returns a size that does not match the expected type.
+.PP
+.BR sysctl_string ()
+handles NUL-terminated string parameters.
+.PP
+.BR sysctl_get_buf ()
+probes the required size, allocates a buffer, and retrieves the data
+in a retry loop (up to 5 attempts) to handle concurrent size changes.
+The caller must
+.BR free (3)
+the returned buffer.
+.SH RETURN VALUE
+.BR sysctl ()
+and the typed helpers return 0 on success, or \-1 on error (with
+.I errno
+set).
+.PP
+.BR sysctl_get_buf ()
+returns a pointer to the allocated buffer on success, or NULL on error.
+.SH ERRORS
+.TP
+.B EINVAL
+Invalid MIB path, namelen out of range [1, CTL_MAXNAME], or type size mismatch.
+.TP
+.B ENOMEM
+Insufficient memory for buffer allocation.
+.TP
+.B ENOENT
+The named parameter does not exist.
+.SH NOTES
+All functions are thread-safe and reentrant.
+No static mutable state is used.
+.SH SEE ALSO
+.BR sysctlbyname (3),
+.BR sysctlnametomib (3),
+.BR sysctl (2)
