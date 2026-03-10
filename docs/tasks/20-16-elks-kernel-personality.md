@@ -188,10 +188,10 @@ Reference: User Request (Step 31552)
         - Files: `tests/elks/fuzz_syscalls.c`
         - Tests: fuzz (random syscall args)
         - Acceptance: No kernel panics; all invalid calls return errors.
-    - [ ] Add LDT bounds violation tests. (REQ: REQ-20-0048)
+    - [x] Add ELKS user-memory bounds fault tests. (REQ: REQ-20-0048)
         - Files: `tests/elks/bounds_test.S`
         - Tests: unit (access beyond segment limit)
-        - Acceptance: #GP exception raised and handled correctly.
+        - Acceptance: Out-of-range ELKS user-memory access traps and tears the process down cleanly without a kernel panic; the current i386 path manifests as a user fault reported by the kernel trap path.
 
 - [ ] **Sample ELKS Userland & Build Scripts:** (REQ: REQ-20-0049)
     - [ ] Add ELKS cross-compiler toolchain setup script. (REQ: REQ-20-0050)

@@ -20,7 +20,6 @@
 #include <kern/panic.h>
 #include <kern/arch.h>
 #include <vm/vm_map.h>
-
 static struct exec_binary_handler elks_handler = {
     .name = "ELKS a.out",
     .check = elks_check_file,
@@ -50,8 +49,9 @@ int elks_check_file(const char *path, const char *header, size_t len) {
 
 static int elks_setup_segments(process_t *proc, const struct elks_load_plan *plan) {
     struct elks_segment_layout layout;
+    unsigned int entry_count = ELKS_LDT_ES_INDEX + 1U;
 
-    if (ldt_alloc_process(proc, LDT_ENTRIES) != 0) {
+    if (ldt_alloc_process(proc, entry_count) != 0) {
         return -ENOMEM;
     }
     memset(&layout, 0, sizeof(layout));

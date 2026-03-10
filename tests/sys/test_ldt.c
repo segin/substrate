@@ -5,7 +5,6 @@
 #include <string.h>
 #include "tests.h"
 
-extern int sys_modify_ldt(int func, struct user_desc *ptr, unsigned long bytecount);
 extern void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint32_t offset);
 extern int sys_munmap(void *addr, size_t length);
 

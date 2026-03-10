@@ -10,7 +10,7 @@ LDFLAGS = -melf_i386 -Ttext 0x0 -e _start -nostdlib
 ELKS_BUILD = $(CURDIR)/build
 MKELKS = $(CURDIR)/mkelks.py
 
-ASM_SOURCES = hello.S sleep.S fileio.S fork.S
+ASM_SOURCES = hello.S sleep.S fileio.S fork.S bounds_test.S
 C_SOURCES =
 
 ASM_PROGRAMS = $(ASM_SOURCES:.S=_elks)
