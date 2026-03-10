@@ -1,12 +1,21 @@
 PYTHON = python3
+CC = ia16-elf-gcc
 AS = ia16-elf-as
 LD = ia16-elf-ld
 OBJCOPY = ia16-elf-objcopy
 
+CFLAGS = -Os -ffreestanding -fno-pic -m16 -mcmodel=small
+LDFLAGS = -melf_i386 -Ttext 0x0 -e _start -nostdlib
+
 ELKS_BUILD = $(CURDIR)/build
 MKELKS = $(CURDIR)/mkelks.py
 
-PROGRAMS = hello_elks sleep_elks fileio_elks fork_elks
+ASM_SOURCES = hello.S sleep.S fileio.S fork.S
+C_SOURCES =
+
+ASM_PROGRAMS = $(ASM_SOURCES:.S=_elks)
+C_PROGRAMS = $(C_SOURCES:.c=_elks)
+PROGRAMS = $(ASM_PROGRAMS) $(C_PROGRAMS)
 
 .PHONY: all clean
 
@@ -18,8 +27,11 @@ $(ELKS_BUILD):
 $(ELKS_BUILD)/%.o: %.S | $(ELKS_BUILD)
 	$(AS) -o $@ $<
 
+$(ELKS_BUILD)/%.o: %.c | $(ELKS_BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
 $(ELKS_BUILD)/%.elf: $(ELKS_BUILD)/%.o | $(ELKS_BUILD)
-	$(LD) -melf_i386 -Ttext 0x0 -e _start -nostdlib -o $@ $<
+	$(LD) $(LDFLAGS) -o $@ $<
 
 $(ELKS_BUILD)/%.bin: $(ELKS_BUILD)/%.elf | $(ELKS_BUILD)
 	$(OBJCOPY) -O binary $< $@

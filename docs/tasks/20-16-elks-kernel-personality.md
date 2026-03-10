@@ -211,10 +211,10 @@ Reference: User Request (Step 31552)
         - Files: `tests/elks/ls.c`, `tests/elks/Makefile`
         - Tests: emulation
         - Acceptance: Directory listing displayed.
-    - [ ] Add ELKS binary build Makefile. (REQ: REQ-20-0054)
+    - [x] Add ELKS binary build Makefile. (REQ: REQ-20-0054)
         - Files: `tests/elks/Makefile`
         - Tests: N/A (build script)
-        - Acceptance: `make -C tests/elks` builds all ELKS test binaries.
+        - Acceptance: `make -C tests/elks` builds all current in-tree ELKS test binaries and the Makefile supports both assembly and C ELKS test sources.
 
 - [ ] **Documentation:** (REQ: REQ-20-0055)
     - [x] Create personality-elks(7) developer guide. (REQ: REQ-20-0056)
@@ -321,7 +321,7 @@ Reference: User Request (Step 31552)
 - **US-20-0051**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add sample ELKS shell (minimal) so that this capability is implemented with clear verification evidence.
 - **US-20-0052**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add sample ELKS cat utility so that this capability is implemented with clear verification evidence.
 - **US-20-0053**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add sample ELKS ls utility so that this capability is implemented with clear verification evidence.
-- **US-20-0054**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add ELKS binary build Makefile so that this capability is implemented with clear verification evidence.
+- **US-20-0054**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want a single ELKS test-binary Makefile that builds both assembly and C test programs so that future ELKS validation artifacts share one reproducible build path.
 - **US-20-0055**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to documentation: so that this capability is implemented with clear verification evidence.
 - **US-20-0056**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to create personality-elks(7) developer guide so that this capability is implemented with clear verification evidence.
 - **US-20-0057**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to create ELKS-compat(4) compatibility notes so that this capability is implemented with clear verification evidence.
@@ -496,7 +496,7 @@ Reference: User Request (Step 31552)
 - **REQ-20-0053** (EARS/Ubiquitous): The Substrate system shall add sample ELKS ls utility.
   - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-20-0054** (EARS/Ubiquitous): The Substrate system shall add ELKS binary build Makefile.
+- **REQ-20-0054** (EARS/Ubiquitous): The Substrate system shall provide an ELKS test-binary Makefile that builds all current in-tree ELKS test binaries and supports both assembly and C ELKS test sources.
   - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-20-0055** (EARS/Ubiquitous): The Substrate system shall documentation:.
