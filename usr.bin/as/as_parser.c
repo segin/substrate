@@ -451,6 +451,9 @@ static int is_coprocessor_text(const char *s) {
     if (s == NULL || s[0] == '\0') {
         return 0;
     }
+    if (streq_ci(s, "st")) {
+        return 1;
+    }
     if (!(s[0] == 'p' || s[0] == 'P' || s[0] == 'c' || s[0] == 'C')) {
         return 0;
     }
@@ -1478,6 +1481,28 @@ static int parse_operand_slice(parse_ctx_t *ctx, const as_token_t *tokv, size_t 
         return 0;
     }
 
+    /*
+     * x87 stack-register spellings must be recognized before the Intel
+     * absolute-memory parser, otherwise st(0) is misread as memory.
+     */
+    if (n == 1 && tokv[0].kind == AS_TOK_IDENTIFIER && streq_ci(tokv[0].text, "st")) {
+        op->kind = AS_OPERAND_COPROCESSOR;
+        op->u.coproc = xstrdup("st");
+        return op->u.coproc != NULL ? 0 : -1;
+    }
+    if (n == 4 &&
+        (tokv[0].kind == AS_TOK_REGISTER || tokv[0].kind == AS_TOK_IDENTIFIER) &&
+        (streq_ci(tokv[0].text, "%st") || streq_ci(tokv[0].text, "st")) &&
+        tokv[1].kind == AS_TOK_PUNCT && strcmp(tokv[1].text, "(") == 0 &&
+        (tokv[2].kind == AS_TOK_IMMEDIATE || tokv[2].kind == AS_TOK_IDENTIFIER) &&
+        tokv[3].kind == AS_TOK_PUNCT && strcmp(tokv[3].text, ")") == 0) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "st(%s)", tokv[2].text);
+        op->kind = AS_OPERAND_COPROCESSOR;
+        op->u.coproc = xstrdup(buf);
+        return op->u.coproc != NULL ? 0 : -1;
+    }
+
     has_lparen = find_punct(tokv, n, "(") >= 0;
     has_lbr = find_punct(tokv, n, "[") >= 0;
 
@@ -1500,22 +1525,6 @@ static int parse_operand_slice(parse_ctx_t *ctx, const as_token_t *tokv, size_t 
     if (n == 1 && is_coprocessor_text(tokv[0].text)) {
         op->kind = AS_OPERAND_COPROCESSOR;
         op->u.coproc = xstrdup(tokv[0].text);
-        return op->u.coproc != NULL ? 0 : -1;
-    }
-
-    /*
-     * x87 stack-register operand spelling used by AT&T syntax, e.g. %st(0).
-     */
-    if (n == 4 &&
-        (tokv[0].kind == AS_TOK_REGISTER || tokv[0].kind == AS_TOK_IDENTIFIER) &&
-        (streq_ci(tokv[0].text, "%st") || streq_ci(tokv[0].text, "st")) &&
-        tokv[1].kind == AS_TOK_PUNCT && strcmp(tokv[1].text, "(") == 0 &&
-        (tokv[2].kind == AS_TOK_IMMEDIATE || tokv[2].kind == AS_TOK_IDENTIFIER) &&
-        tokv[3].kind == AS_TOK_PUNCT && strcmp(tokv[3].text, ")") == 0) {
-        char buf[32];
-        snprintf(buf, sizeof(buf), "st(%s)", tokv[2].text);
-        op->kind = AS_OPERAND_COPROCESSOR;
-        op->u.coproc = xstrdup(buf);
         return op->u.coproc != NULL ? 0 : -1;
     }
 
