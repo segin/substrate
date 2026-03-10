@@ -4,6 +4,7 @@
 #include <string.h>
 #include <kern/console.h>
 #include <exec/perso/personality.h>
+#include <sys/compiler.h>
 #include <sys/proc.h>
 #include <sys/ldt.h>
 #include <vm/vm_map.h>
@@ -27,7 +28,7 @@ static struct exec_binary_handler elks_handler = {
     .next = NULL
 };
 
-static int elks_fail(int fd, int err, const char *msg) {
+static int SUB_NODISCARD elks_fail(int fd, int err, const char *msg) {
     if (msg) {
         kprint(msg);
         kprint("\n");
@@ -42,12 +43,14 @@ void elks_init_handler(void) {
     exec_register_handler(&elks_handler);
 }
 
-int elks_check_file(const char *path, const char *header, size_t len) {
+int SUB_NODISCARD SUB_NONNULL(2)
+elks_check_file(const char *path, const char *header, size_t len) {
     (void)path;
     return elks_header_recognized(header, len) ? 0 : -ENOEXEC;
 }
 
-static int elks_setup_segments(process_t *proc, const struct elks_load_plan *plan) {
+static int SUB_NODISCARD SUB_NONNULL(1, 2)
+elks_setup_segments(process_t *proc, const struct elks_load_plan *plan) {
     struct elks_segment_layout layout;
     unsigned int entry_count = ELKS_LDT_ES_INDEX + 1U;
 

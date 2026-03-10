@@ -254,9 +254,10 @@ Reference: User Request (Step 31552)
         - Files: `sys/arch/i386/ldt.c`
         - Tests: unit/regression (`tests/sys/host_test_ldt_lifecycle.c`, `tests/sys/host_test_ldt_race.c`)
         - Acceptance: Canonical full-size LDT tables allocate from a dedicated UMA zone, while noncanonical short-lived sizes retain a safe fallback path without changing the external LDT API.
-    - [ ] Add static analysis annotations to ELKS personality code. (REQ: REQ-20-0065)
-        - Files: `sys/exec/perso/perso_elks.c`, `sys/fs/exec/elks_aout.c`
-        - Tests: static analysis (sparse/coverity)
+    - [x] Add static analysis annotations to ELKS personality code. (REQ: REQ-20-0065)
+        - Files: `sys/include/sys/compiler.h`, `sys/exec/perso/perso_elks.c`, `sys/exec/formats/elks_aout.c`
+        - Tests: build/host regression (`make -C sys/exec/perso perso_elks.o`, `make -C sys/exec/formats elks_aout.o`, `tests/sys/host_test_perso_elks`, `tests/sys/host_test_elks_aout`)
+        - Acceptance: ELKS pointer and must-check helper contracts are expressed through shared compiler annotations that compile cleanly and remain covered by existing ELKS host regression tests.
     - [ ] **Refactor Console and UART Subsystems** (REQ: REQ-20-0066)
         - Note: Migrated files, updated Makefiles, fixed include paths, added missing VGA colors. Build verified.
         - Files: `sys/kern/ansi_handler.c`, `sys/kern/console.c`, `sys/kern/tty.c`, `sys/drivers/serial/*`

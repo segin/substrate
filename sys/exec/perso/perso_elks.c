@@ -5,6 +5,7 @@
 #include <sys/core.h>
 #include <sys/syscall_impl.h>
 #include <sys/kern_syscalls.h>
+#include <sys/compiler.h>
 #include <sys/ldt.h>
 #include <arch/i386/idt.h>
 #include <kern/console.h>
@@ -13,7 +14,8 @@
 #include <stdio.h>
 #include <string.h>
 
-static int elks_ds_pointer(uint32_t offset, uintptr_t *linear_out) {
+static int SUB_NODISCARD SUB_NONNULL(2)
+elks_ds_pointer(uint32_t offset, uintptr_t *linear_out) {
     if (!current_process || !current_process->ldt) {
         return -EFAULT;
     }
@@ -24,7 +26,7 @@ static int elks_ds_pointer(uint32_t offset, uintptr_t *linear_out) {
                                          linear_out);
 }
 
-static int elks_to_native_signal(int sig) {
+static int SUB_PURE elks_to_native_signal(int sig) {
     switch (sig) {
         case 1:  return SIGHUP;
         case 2:  return SIGINT;
@@ -109,11 +111,12 @@ static int elks_handle_trap(void *regs_ptr) {
     return 1;
 }
 
-static int elks_linear_to_far_code(uintptr_t linear, uint16_t *selector_out, uint16_t *offset_out) {
+static int SUB_NODISCARD SUB_NONNULL(2, 3)
+elks_linear_to_far_code(uintptr_t linear, uint16_t *selector_out, uint16_t *offset_out) {
     const gdt_entry_t *ldt;
     unsigned int i;
 
-    if (!current_process || !current_process->ldt || !selector_out || !offset_out) {
+    if (!current_process || !current_process->ldt) {
         return -EINVAL;
     }
 
@@ -223,12 +226,13 @@ static void elks_free_vector(char **vec) {
     kfree(vec, (count + 1U) * sizeof(char *));
 }
 
-static int elks_copy_exec_image_string(const uint8_t *base, uint32_t bytes,
-                                       uint16_t rel, char **out) {
+static int SUB_NODISCARD SUB_NONNULL(1, 4)
+elks_copy_exec_image_string(const uint8_t *base, uint32_t bytes,
+                            uint16_t rel, char **out) {
     size_t len = 0;
     char *copy;
 
-    if (!base || !out || rel >= bytes) {
+    if (rel >= bytes) {
         return -EFAULT;
     }
 
@@ -248,7 +252,8 @@ static int elks_copy_exec_image_string(const uint8_t *base, uint32_t bytes,
     return 0;
 }
 
-static int elks_copy_ds_string(uint32_t offset, char **out) {
+static int SUB_NODISCARD SUB_NONNULL(2)
+elks_copy_ds_string(uint32_t offset, char **out) {
     uintptr_t linear = 0;
     uintptr_t base = 0;
     uint32_t limit = 0;
@@ -257,10 +262,6 @@ static int elks_copy_ds_string(uint32_t offset, char **out) {
     const char *src;
     char *copy;
     int ret;
-
-    if (!out) {
-        return -EINVAL;
-    }
 
     ret = elks_ds_span(offset, 1, &linear);
     if (ret != 0) {
@@ -289,8 +290,9 @@ static int elks_copy_ds_string(uint32_t offset, char **out) {
     return 0;
 }
 
-static int elks_unpack_exec_stack(uint32_t stack_off, uint32_t stack_bytes,
-                                  char ***argv_out, char ***envp_out) {
+static int SUB_NODISCARD SUB_NONNULL(3, 4)
+elks_unpack_exec_stack(uint32_t stack_off, uint32_t stack_bytes,
+                       char ***argv_out, char ***envp_out) {
     uintptr_t linear = 0;
     const uint8_t *base;
     uint16_t argc = 0;
@@ -301,9 +303,6 @@ static int elks_unpack_exec_stack(uint32_t stack_off, uint32_t stack_bytes,
     char **envp = NULL;
     int ret;
 
-    if (!argv_out || !envp_out) {
-        return -EINVAL;
-    }
     *argv_out = NULL;
     *envp_out = NULL;
 
