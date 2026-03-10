@@ -35,9 +35,18 @@ struct stat {
 #define _SYS_STAT_H
 
 /* Mock external functions that compat.c calls */
+static int mock_sys_lseek_fd;
+static uint32_t mock_sys_lseek_off_lo;
+static uint32_t mock_sys_lseek_off_hi;
+static int mock_sys_lseek_whence;
+static int64_t mock_sys_lseek_return;
+
 int64_t sys_lseek(int fd, uint32_t off_lo, uint32_t off_hi, int whence) {
-    (void)fd; (void)off_lo; (void)off_hi; (void)whence;
-    return 0;
+    mock_sys_lseek_fd = fd;
+    mock_sys_lseek_off_lo = off_lo;
+    mock_sys_lseek_off_hi = off_hi;
+    mock_sys_lseek_whence = whence;
+    return mock_sys_lseek_return;
 }
 
 int64_t g_mock_sys_time_result = 0;
@@ -81,6 +90,38 @@ int kern_fstat(int fd, struct stat *st) {
 
 /* Now we can include compat.c directly! */
 #include "../../sys/exec/perso/compat.c"
+
+static void test_compat_lseek32(void) {
+    printf("Testing compat_lseek32()...\n");
+
+    mock_sys_lseek_return = 1024;
+    assert(compat_lseek32(5, 100, 0) == 1024);
+    assert(mock_sys_lseek_fd == 5);
+    assert(mock_sys_lseek_off_lo == 100);
+    assert(mock_sys_lseek_off_hi == 0);
+    assert(mock_sys_lseek_whence == 0);
+
+    mock_sys_lseek_return = 512;
+    assert(compat_lseek32(6, -100, 1) == 512);
+    assert(mock_sys_lseek_fd == 6);
+    assert(mock_sys_lseek_off_lo == (uint32_t)-100);
+    assert(mock_sys_lseek_off_hi == 0xFFFFFFFFu);
+    assert(mock_sys_lseek_whence == 1);
+
+    mock_sys_lseek_return = 0x80000000LL;
+    assert(compat_lseek32(5, 100, 0) == -1);
+
+    mock_sys_lseek_return = 0x7FFFFFFFLL;
+    assert(compat_lseek32(5, 100, 0) == 0x7FFFFFFF);
+
+    mock_sys_lseek_return = -0x80000001LL;
+    assert(compat_lseek32(5, 100, 0) == -1);
+
+    mock_sys_lseek_return = -0x80000000LL;
+    assert(compat_lseek32(5, 100, 0) == (int32_t)-0x80000000LL);
+
+    printf("All compat_lseek32 tests passed!\n");
+}
 
 int main() {
     printf("Testing sys_nice()...\n");
@@ -128,6 +169,7 @@ int main() {
     assert(ret == (int32_t)0x87654321);
 
     printf("All compat_time32 tests passed!\n");
+    test_compat_lseek32();
 
     return 0;
 }
