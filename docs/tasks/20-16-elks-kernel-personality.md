@@ -250,10 +250,10 @@ Reference: User Request (Step 31552)
         - Files: `sys/arch/i386/ldt.c`
         - Tests: host stress (`tests/sys/host_test_ldt_race.c`)
         - Acceptance: Concurrent LDT allocation, clone, readback, activation, and free/replace paths preserve coherent pointer/count state without descriptor overruns or allocator corruption.
-    - [ ] Refactor LDT allocation to use UMA zone for efficiency. (REQ: REQ-20-0064)
+    - [x] Refactor LDT allocation to use UMA zone for efficiency. (REQ: REQ-20-0064)
         - Files: `sys/arch/i386/ldt.c`
-        - Tests: unit (allocation performance)
-        - Acceptance: LDT allocation O(1) via UMA zone.
+        - Tests: unit/regression (`tests/sys/host_test_ldt_lifecycle.c`, `tests/sys/host_test_ldt_race.c`)
+        - Acceptance: Canonical full-size LDT tables allocate from a dedicated UMA zone, while noncanonical short-lived sizes retain a safe fallback path without changing the external LDT API.
     - [ ] Add static analysis annotations to ELKS personality code. (REQ: REQ-20-0065)
         - Files: `sys/exec/perso/perso_elks.c`, `sys/fs/exec/elks_aout.c`
         - Tests: static analysis (sparse/coverity)

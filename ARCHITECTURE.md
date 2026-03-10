@@ -181,6 +181,9 @@ ELKS personality contract:
 - Per-process ELKS LDT state is serialized by a dedicated process lock so LDT
   growth, replacement, clone, free, and activation see a coherent descriptor
   table under multi-threaded activity.
+- Canonical full-size LDT tables are backed by a dedicated UMA zone, with a
+  fallback path retained for short transitional tables created during loader
+  and clone/grow operations.
 - ELKS execution runs as a 16-bit protected-mode personality (`BITNESS_16`),
   not VM86.
 - ELKS syscalls use `INT 0x80` with the ELKS register argument order

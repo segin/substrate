@@ -11,6 +11,7 @@
 typedef struct process {
     void *ldt;
     int ldt_entry_count;
+    uint8_t ldt_is_uma;
     spinlock_t ldt_lock;
 } process_t;
 

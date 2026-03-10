@@ -8,9 +8,92 @@
 #include <kern/console.h>
 #include <arch/i386/gdt.h>
 #include <stdio.h>
+#ifndef HOST_TEST
+#include <vm/uma.h>
+#endif
 
 /* GDT index 7 is reserved for the active process LDT */
 #define GDT_LDT_INDEX 7
+
+#ifndef HOST_TEST
+static uma_zone_t *ldt_full_zone;
+
+static void ldt_zone_ensure_init(void) {
+    static volatile int init_lock = 0;
+
+    if (ldt_full_zone) {
+        return;
+    }
+
+    while (__sync_lock_test_and_set(&init_lock, 1)) {
+        while (__atomic_load_n(&init_lock, __ATOMIC_RELAXED)) {
+            __asm__ volatile("pause");
+        }
+    }
+
+    if (!ldt_full_zone) {
+        ldt_full_zone = uma_zcreate("ldt-full",
+                                    LDT_ENTRIES * LDT_ENTRY_SIZE,
+                                    NULL,
+                                    NULL,
+                                    NULL,
+                                    NULL,
+                                    16,
+                                    UMA_ZONE_ZINIT | UMA_ZONE_NOBUCKET);
+    }
+
+    __sync_lock_release(&init_lock);
+}
+#endif
+
+static void *ldt_alloc_storage(unsigned int entry_count, uint8_t *is_uma_out) {
+    size_t bytes;
+    void *ptr;
+
+    if (is_uma_out) {
+        *is_uma_out = 0;
+    }
+
+#ifndef HOST_TEST
+    if (entry_count == LDT_ENTRIES) {
+        ldt_zone_ensure_init();
+        if (ldt_full_zone) {
+            ptr = uma_zalloc(ldt_full_zone, M_NOWAIT | M_ZERO);
+            if (ptr) {
+                if (is_uma_out) {
+                    *is_uma_out = 1;
+                }
+                return ptr;
+            }
+        }
+    }
+#endif
+
+    bytes = (size_t)entry_count * LDT_ENTRY_SIZE;
+    ptr = kmalloc(bytes);
+    if (!ptr) {
+        return NULL;
+    }
+    memset(ptr, 0, bytes);
+    return ptr;
+}
+
+static void ldt_free_storage(void *ldt, int entry_count, uint8_t is_uma) {
+    if (!ldt) {
+        return;
+    }
+
+#ifndef HOST_TEST
+    if (is_uma && ldt_full_zone && entry_count == LDT_ENTRIES) {
+        uma_zfree(ldt_full_zone, ldt);
+        return;
+    }
+#else
+    (void)is_uma;
+#endif
+
+    kfree(ldt, (size_t)entry_count * LDT_ENTRY_SIZE);
+}
 
 static void ldt_load_selector(uint16_t selector) {
 #ifndef HOST_TEST
@@ -42,8 +125,10 @@ static void ldt_activate_locked(process_t *proc) {
 static void ldt_swap_process(process_t *proc,
                              void *new_ldt,
                              int new_entry_count,
+                             uint8_t new_is_uma,
                              void **old_ldt_out,
-                             int *old_entry_count_out) {
+                             int *old_entry_count_out,
+                             uint8_t *old_is_uma_out) {
     if (!proc) {
         return;
     }
@@ -55,22 +140,36 @@ static void ldt_swap_process(process_t *proc,
     if (old_entry_count_out) {
         *old_entry_count_out = proc->ldt_entry_count;
     }
+    if (old_is_uma_out) {
+        *old_is_uma_out = proc->ldt_is_uma;
+    }
     proc->ldt = new_ldt;
     proc->ldt_entry_count = new_entry_count;
+    proc->ldt_is_uma = new_is_uma;
     spinlock_release(&proc->ldt_lock);
 }
 
-static int ldt_install_process(process_t *proc, void *new_ldt, unsigned int entry_count) {
+static int ldt_install_process(process_t *proc,
+                               void *new_ldt,
+                               unsigned int entry_count,
+                               uint8_t new_is_uma) {
     void *old_ldt = NULL;
     int old_entry_count = 0;
+    uint8_t old_is_uma = 0;
 
     if (!proc) {
         return -EINVAL;
     }
 
-    ldt_swap_process(proc, new_ldt, (int)entry_count, &old_ldt, &old_entry_count);
+    ldt_swap_process(proc,
+                     new_ldt,
+                     (int)entry_count,
+                     new_is_uma,
+                     &old_ldt,
+                     &old_entry_count,
+                     &old_is_uma);
     if (old_ldt) {
-        kfree(old_ldt, (size_t)old_entry_count * LDT_ENTRY_SIZE);
+        ldt_free_storage(old_ldt, old_entry_count, old_is_uma);
     }
     return 0;
 }
@@ -79,7 +178,8 @@ static int ldt_ensure_process(process_t *proc, unsigned int entry_count) {
     void *new_ldt;
     void *old_ldt;
     int old_entry_count;
-    size_t bytes;
+    uint8_t new_is_uma;
+    uint8_t old_is_uma;
 
     if (!proc || entry_count == 0 || entry_count > LDT_ENTRIES) {
         return -EINVAL;
@@ -95,17 +195,15 @@ static int ldt_ensure_process(process_t *proc, unsigned int entry_count) {
         }
         spinlock_release(&proc->ldt_lock);
 
-        bytes = (size_t)entry_count * LDT_ENTRY_SIZE;
-        new_ldt = kmalloc(bytes);
+        new_ldt = ldt_alloc_storage(entry_count, &new_is_uma);
         if (!new_ldt) {
             return -ENOMEM;
         }
-        memset(new_ldt, 0, bytes);
 
         spinlock_acquire(&proc->ldt_lock);
         if (proc->ldt != old_ldt || proc->ldt_entry_count != old_entry_count) {
             spinlock_release(&proc->ldt_lock);
-            kfree(new_ldt, bytes);
+            ldt_free_storage(new_ldt, (int)entry_count, new_is_uma);
             continue;
         }
         if (old_ldt && old_entry_count > 0) {
@@ -113,10 +211,12 @@ static int ldt_ensure_process(process_t *proc, unsigned int entry_count) {
         }
         proc->ldt = new_ldt;
         proc->ldt_entry_count = (int)entry_count;
+        old_is_uma = proc->ldt_is_uma;
+        proc->ldt_is_uma = new_is_uma;
         spinlock_release(&proc->ldt_lock);
 
         if (old_ldt) {
-            kfree(old_ldt, (size_t)old_entry_count * LDT_ENTRY_SIZE);
+            ldt_free_storage(old_ldt, old_entry_count, old_is_uma);
         }
         return 0;
     }
@@ -178,31 +278,31 @@ void ldt_activate(process_t *proc) {
 void ldt_init_process(process_t *proc) {
     proc->ldt = NULL;
     proc->ldt_entry_count = 0;
+    proc->ldt_is_uma = 0;
     spinlock_init(&proc->ldt_lock, "ldt");
 }
 
 int ldt_alloc_process(process_t *proc, unsigned int entry_count) {
-    size_t bytes;
     void *new_ldt;
+    uint8_t new_is_uma;
 
     if (!proc || entry_count == 0 || entry_count > LDT_ENTRIES) {
         return -EINVAL;
     }
 
-    bytes = (size_t)entry_count * LDT_ENTRY_SIZE;
-    new_ldt = kmalloc(bytes);
+    new_ldt = ldt_alloc_storage(entry_count, &new_is_uma);
     if (!new_ldt) {
         return -ENOMEM;
     }
 
-    memset(new_ldt, 0, bytes);
-    return ldt_install_process(proc, new_ldt, entry_count);
+    return ldt_install_process(proc, new_ldt, entry_count, new_is_uma);
 }
 
 int ldt_clone_process(process_t *dst, const process_t *src) {
     void *new_ldt;
     const process_t *src_proc = src;
     int src_entry_count;
+    uint8_t new_is_uma;
     size_t bytes;
 
     if (!dst || !src) {
@@ -220,7 +320,7 @@ int ldt_clone_process(process_t *dst, const process_t *src) {
         spinlock_release((spinlock_t *)&src_proc->ldt_lock);
 
         bytes = (size_t)src_entry_count * LDT_ENTRY_SIZE;
-        new_ldt = kmalloc(bytes);
+        new_ldt = ldt_alloc_storage((unsigned int)src_entry_count, &new_is_uma);
         if (!new_ldt) {
             return -ENOMEM;
         }
@@ -234,21 +334,22 @@ int ldt_clone_process(process_t *dst, const process_t *src) {
         memcpy(new_ldt, src_proc->ldt, bytes);
         spinlock_release((spinlock_t *)&src_proc->ldt_lock);
 
-        return ldt_install_process(dst, new_ldt, (unsigned int)src_entry_count);
+        return ldt_install_process(dst, new_ldt, (unsigned int)src_entry_count, new_is_uma);
     }
 }
 
 void ldt_free_process(process_t *proc) {
     void *old_ldt = NULL;
     int old_entry_count = 0;
+    uint8_t old_is_uma = 0;
 
     if (!proc) {
         return;
     }
 
-    ldt_swap_process(proc, NULL, 0, &old_ldt, &old_entry_count);
+    ldt_swap_process(proc, NULL, 0, 0, &old_ldt, &old_entry_count, &old_is_uma);
     if (old_ldt) {
-        kfree(old_ldt, (size_t)old_entry_count * LDT_ENTRY_SIZE);
+        ldt_free_storage(old_ldt, old_entry_count, old_is_uma);
     }
 }
 
