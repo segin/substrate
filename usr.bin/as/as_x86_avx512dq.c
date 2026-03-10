@@ -250,10 +250,13 @@ int as_x86_encode_avx512dq(const as_x86_avx512dq_insn_t *insn, uint8_t *out, siz
         {"vp2intersectq", DQ_FORM_KCMP, 0x68, AS_EVEX_MAP_0F38, AS_EVEX_PP_F2, 1, -1, 0, 0, 0},
 
         {"vinserti64x2", DQ_FORM_RRRI, 0x38, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 1, -1, 1, 0, 0},
+        {"vinserti32x4", DQ_FORM_RRRI, 0x38, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 0, -1, 1, 0, 0},
         {"vextracti64x2", DQ_FORM_EXTRACT, 0x39, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 1, -1, 1, 0, 0},
         {"vinserti32x8", DQ_FORM_RRRI, 0x3a, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 0, -1, 1, 0, 0},
+        {"vinserti64x4", DQ_FORM_RRRI, 0x3a, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 1, -1, 1, 0, 0},
         {"vextracti32x8", DQ_FORM_EXTRACT, 0x3b, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 0, -1, 1, 0, 0},
 
+        {"valignq", DQ_FORM_RRRI, 0x03, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 1, -1, 1, 0, 0},
         {"vrangeps", DQ_FORM_RRRI, 0x50, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 0, -1, 1, 0, 0},
         {"vrangepd", DQ_FORM_RRRI, 0x50, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 1, -1, 1, 0, 0},
         {"vrangess", DQ_FORM_RRRI, 0x51, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 0, 0, 1, 0, 0},
@@ -262,6 +265,8 @@ int as_x86_encode_avx512dq(const as_x86_avx512dq_insn_t *insn, uint8_t *out, siz
         {"vreducepd", DQ_FORM_RRI, 0x56, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 1, -1, 1, 0, 0},
         {"vreducess", DQ_FORM_RRRI, 0x57, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 0, 0, 1, 0, 0},
         {"vreducesd", DQ_FORM_RRRI, 0x57, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 1, 0, 1, 0, 0},
+        {"vpshldq", DQ_FORM_RRRI, 0x71, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 1, -1, 1, 0, 0},
+        {"vpshrdq", DQ_FORM_RRRI, 0x73, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 1, -1, 1, 0, 0},
         {"vfpclassps", DQ_FORM_RRI, 0x66, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 0, -1, 1, 0, 0},
         {"vfpclasspd", DQ_FORM_RRI, 0x66, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 1, -1, 1, 0, 0},
         {"vfpclassss", DQ_FORM_RRI, 0x67, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 0, 0, 1, 0, 0},

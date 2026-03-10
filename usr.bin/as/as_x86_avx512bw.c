@@ -198,6 +198,8 @@ int as_x86_encode_avx512bw(const as_x86_avx512bw_insn_t *insn, uint8_t *out, siz
         {"vpsllvw", BW_FORM_RRR, 0x12, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 1, -1, 0, 0},
         {"vpsrlvw", BW_FORM_RRR, 0x10, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 1, -1, 0, 0},
         {"vpsravw", BW_FORM_RRR, 0x11, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 1, -1, 0, 0},
+        {"vpshldw", BW_FORM_RRRI, 0x70, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 1, -1, 1, 0},
+        {"vpshrdw", BW_FORM_RRRI, 0x72, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 1, -1, 1, 0},
         {"vpshldvw", BW_FORM_RRR, 0x70, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 1, -1, 0, 0},
         {"vpshrdvw", BW_FORM_RRR, 0x72, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 1, -1, 0, 0},
         {"vdbpsadbw", BW_FORM_RRRI, 0x42, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 0, -1, 1, 0},

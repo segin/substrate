@@ -1076,7 +1076,9 @@ static int is_rel_mnemonic(const char *mn) {
     if (mn == NULL || mn[0] == '\0') {
         return 0;
     }
-    if (streq_ci(mn, "call") || streq_ci(mn, "jmp") || streq_ci(mn, "xbegin")) {
+    if (streq_ci(mn, "call") || streq_ci(mn, "jmp") || streq_ci(mn, "xbegin") ||
+        streq_ci(mn, "loop") || streq_ci(mn, "loope") || streq_ci(mn, "loopz") ||
+        streq_ci(mn, "loopne") || streq_ci(mn, "loopnz")) {
         return 1;
     }
     if ((mn[0] == 'j' || mn[0] == 'J') && mn[1] != '\0') {
@@ -4345,15 +4347,51 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         else regf = 3u;
         return emit_i386_prefixed_0f_rm(0x00, 0x18, regf, a, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "pfcmpge") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
-            parse_mmx_reg(dst->u.reg, &xr) != 0) {
-            return -1;
+    {
+        static const struct {
+            const char *mnemonic;
+            unsigned char imm8;
+        } ops[] = {
+            {"pfcmpge", 0x90},
+            {"pi2fw", 0x0c},
+            {"pi2fd", 0x0d},
+            {"pf2iw", 0x1c},
+            {"pf2id", 0x1d},
+            {"pfnacc", 0x8a},
+            {"pfpnacc", 0x8e},
+            {"pfmin", 0x94},
+            {"pfrcp", 0x96},
+            {"pfrsqrt", 0x97},
+            {"pfsub", 0x9a},
+            {"pfadd", 0x9e},
+            {"pfcmpgt", 0xa0},
+            {"pfmax", 0xa4},
+            {"pfrcpit1", 0xa6},
+            {"pfrsqit1", 0xa7},
+            {"pfsubr", 0xaa},
+            {"pfacc", 0xae},
+            {"pfcmpeq", 0xb0},
+            {"pfmul", 0xb4},
+            {"pfrcpit2", 0xb6},
+            {"pmulhrw", 0xb7},
+            {"pswapd", 0xbb},
+            {"pavgusb", 0xbf},
+        };
+        size_t i;
+
+        for (i = 0; i < sizeof(ops) / sizeof(ops[0]); ++i) {
+            if (strcmp(mnbuf, ops[i].mnemonic) != 0) {
+                continue;
+            }
+            if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
+                parse_mmx_reg(dst->u.reg, &xr) != 0) {
+                return -1;
+            }
+            if (src->kind == AS_OPERAND_REGISTER && parse_mmx_reg(src->u.reg, &xm) != 0) {
+                return -1;
+            }
+            return emit_i386_3dnow_rm(xr, src, ops[i].imm8, out, out_cap, out_len);
         }
-        if (src->kind == AS_OPERAND_REGISTER && parse_mmx_reg(src->u.reg, &xm) != 0) {
-            return -1;
-        }
-        return emit_i386_3dnow_rm(xr, src, 0x90, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "prefetchwt1") == 0) {
         if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {

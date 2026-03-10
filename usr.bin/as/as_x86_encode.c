@@ -1216,6 +1216,28 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         if (emit8(&ctx, 0xc3) != 0) {
             return -1;
         }
+    } else if (streq_ci(insn->mnemonic, "loop") || streq_ci(insn->mnemonic, "loope") ||
+               streq_ci(insn->mnemonic, "loopz") || streq_ci(insn->mnemonic, "loopne") ||
+               streq_ci(insn->mnemonic, "loopnz") || streq_ci(insn->mnemonic, "jecxz")) {
+        uint8_t opcode;
+        int32_t rel;
+
+        if (!(insn->op_count == 1 && a->kind == AS_X86_OP_REL)) {
+            set_err(&ctx, "unsupported loop form");
+            return -1;
+        }
+        rel = a->u.rel;
+        if (rel < -128 || rel > 127) {
+            set_err(&ctx, "loop target out of range");
+            return -1;
+        }
+        if (streq_ci(insn->mnemonic, "loop")) opcode = 0xe2;
+        else if (streq_ci(insn->mnemonic, "loope") || streq_ci(insn->mnemonic, "loopz")) opcode = 0xe1;
+        else if (streq_ci(insn->mnemonic, "loopne") || streq_ci(insn->mnemonic, "loopnz")) opcode = 0xe0;
+        else opcode = 0xe3;
+        if (emit8(&ctx, opcode) != 0 || emit8(&ctx, (uint8_t)rel) != 0) {
+            return -1;
+        }
     } else if (encode_jcc_rel32(&ctx, insn->mnemonic, (insn->op_count == 1 && a->kind == AS_X86_OP_REL) ? a->u.rel : 0) == 0) {
         if (!(insn->op_count == 1 && a->kind == AS_X86_OP_REL)) {
             set_err(&ctx, "unsupported jcc form");
