@@ -1495,6 +1495,7 @@ int kern_chdir(const char *path) {
     
     fs_node_t *node = NULL;
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *old_cwd = current_process->cwd_node;
     
     if (path[0] == '/') {
         node = vfs_lookup(root, path);
@@ -1506,11 +1507,15 @@ int kern_chdir(const char *path) {
     
     if (!node) return -1;
     if ((node->flags & 0x7) != FS_DIRECTORY) return -1;
-    
+
+    open_fs(node, 1, 0);
     current_process->cwd_node = node;
     if (kern_getcwd(current_process->cwd_path, sizeof(current_process->cwd_path)) != 0) {
         strncpy(current_process->cwd_path, "/", sizeof(current_process->cwd_path) - 1);
         current_process->cwd_path[sizeof(current_process->cwd_path) - 1] = '\0';
+    }
+    if (old_cwd && old_cwd != node) {
+        close_fs(old_cwd);
     }
     return 0;
 }
@@ -1521,12 +1526,17 @@ int kern_fchdir(int fd) {
     if (!f || !f->f_data) return -1;
     
     fs_node_t *node = (fs_node_t*)f->f_data;
+    fs_node_t *old_cwd = current_process->cwd_node;
     if ((node->flags & 0x7) != FS_DIRECTORY) return -1;
-    
+
+    open_fs(node, 1, 0);
     current_process->cwd_node = node;
     if (kern_getcwd(current_process->cwd_path, sizeof(current_process->cwd_path)) != 0) {
         strncpy(current_process->cwd_path, "/", sizeof(current_process->cwd_path) - 1);
         current_process->cwd_path[sizeof(current_process->cwd_path) - 1] = '\0';
+    }
+    if (old_cwd && old_cwd != node) {
+        close_fs(old_cwd);
     }
     return 0;
 }

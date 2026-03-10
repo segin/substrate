@@ -1,7 +1,9 @@
 #include "linux_user.h"
 #include <sys/kern_syscalls.h>
+#include <sys/copy.h>
 #include <string.h>
 #include <sys/errno.h>
+#include <vm/vm_kmem.h>
 
 /* Linux stat translation: native -> linux_stat */
 int linux_sys_stat(const char *path, struct linux_stat *buf) {
@@ -186,4 +188,36 @@ int linux_sys_fstat64(int fd, struct linux_stat64 *buf) {
     
     if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -14;
     return 0;
+}
+
+int linux_sys_getcwd(char *buf, size_t size) {
+    char *kbuf;
+    size_t len;
+    int ret;
+
+    if (!buf) return -14;
+    if (size == 0) return -22;
+    if (size > 4096) size = 4096;
+
+    kbuf = kmalloc(size);
+    if (!kbuf) return -12;
+
+    ret = kern_getcwd(kbuf, size);
+    if (ret < 0) {
+        kfree(kbuf, size);
+        return ret;
+    }
+
+    len = strlen(kbuf) + 1;
+    if (len > size) {
+        kfree(kbuf, size);
+        return -34;
+    }
+    if (copyout(kbuf, buf, len) != 0) {
+        kfree(kbuf, size);
+        return -14;
+    }
+
+    kfree(kbuf, size);
+    return (int)len;
 }

@@ -9,7 +9,7 @@
 #define _LINUX_USER_H
 
 
-
+#include <stddef.h>
 #include <stdint.h>
 #include <sys/signal.h>
 
@@ -143,6 +143,7 @@ int linux_sys_fstat(int fd, struct linux_stat *buf);
 int linux_sys_stat64(const char *path, struct linux_stat64 *buf);
 int linux_sys_lstat64(const char *path, struct linux_stat64 *buf);
 int linux_sys_fstat64(int fd, struct linux_stat64 *buf);
+int linux_sys_getcwd(char *buf, size_t size);
 
 /* Linux Syscall Wrappers */
 struct linux_mmap_arg_struct {

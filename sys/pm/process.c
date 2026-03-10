@@ -14,6 +14,7 @@
 #include <vm/vm_map.h>
 #include <exec/perso/personality.h>
 #include <kern/time.h>
+#include <vfs/vfs.h>
 
 process_t processes[MAX_PROCS];
 process_t *current_process = NULL;
@@ -126,6 +127,9 @@ process_t *proc_create(int perso_id) {
     processes[i].ppid = current_process ? current_process->pid : 0;
     processes[i].perso_id = perso_id;
     processes[i].root_node = current_process ? current_process->root_node : fs_root;
+    if (processes[i].root_node && processes[i].root_node != fs_root) {
+        open_fs(processes[i].root_node, 1, 0);
+    }
     processes[i].next_fd = 0; // Reset FD hint
     processes[i].fd_bitmap = 0;
     for(int j=0; j<MAX_FD; j++) processes[i].fds[j] = 0;
@@ -182,6 +186,11 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     
     // Copy cwd_node
     child_proc->cwd_node = parent->cwd_node;
+    if (child_proc->cwd_node) {
+        open_fs(child_proc->cwd_node, 1, 0);
+    }
+    strncpy(child_proc->cwd_path, parent->cwd_path, sizeof(child_proc->cwd_path) - 1);
+    child_proc->cwd_path[sizeof(child_proc->cwd_path) - 1] = '\0';
     
     // Copy parent resources (FDs)
     child_proc->tty = parent->tty;

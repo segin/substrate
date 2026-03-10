@@ -160,6 +160,10 @@ extern void console_write(void);
 extern void copyin(void);
 extern void copyinstr(void);
 extern void copyout(void);
+extern void core_capture_trapframe(void);
+extern void core_last_record(void);
+extern void core_prepare_dump(void);
+extern void coredump(void);
 extern void cpuid_init(void);
 extern void crc32(void);
 extern void crc32_init(void);
@@ -256,6 +260,7 @@ extern void ext2_read_inode(void);
 extern void ext2_readdir(void);
 extern void ext2_readlink(void);
 extern void ext2_remove_entry(void);
+extern void ext2_truncate(void);
 extern void ext2_write_block(void);
 extern void ext2_write_inode(void);
 extern void fat_file_read(void);
@@ -560,6 +565,7 @@ extern void memcpy(void);
 extern void memmove(void);
 extern void memset(void);
 extern void minix_init(void);
+extern void mknod_fs(void);
 extern void mmap_fs(void);
 extern void mock_kfree(void);
 extern void mock_kmalloc(void);
@@ -1908,6 +1914,10 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&ksym_resolve, "ksym_resolve" },
     { (uint32_t)(uintptr_t)&ksym_print, "ksym_print" },
     { (uint32_t)(uintptr_t)&ksym_init, "ksym_init" },
+    { (uint32_t)(uintptr_t)&core_prepare_dump, "core_prepare_dump" },
+    { (uint32_t)(uintptr_t)&core_capture_trapframe, "core_capture_trapframe" },
+    { (uint32_t)(uintptr_t)&core_last_record, "core_last_record" },
+    { (uint32_t)(uintptr_t)&coredump, "coredump" },
     { (uint32_t)(uintptr_t)&spinlock_init, "spinlock_init" },
     { (uint32_t)(uintptr_t)&spinlock_acquire, "spinlock_acquire" },
     { (uint32_t)(uintptr_t)&spinlock_try_acquire, "spinlock_try_acquire" },
@@ -2475,6 +2485,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&symlink_fs, "symlink_fs" },
     { (uint32_t)(uintptr_t)&link_fs, "link_fs" },
     { (uint32_t)(uintptr_t)&unlink_fs, "unlink_fs" },
+    { (uint32_t)(uintptr_t)&mknod_fs, "mknod_fs" },
     { (uint32_t)(uintptr_t)&mmap_fs, "mmap_fs" },
     { (uint32_t)(uintptr_t)&poll_fs, "poll_fs" },
     { (uint32_t)(uintptr_t)&vfs_mkdir, "vfs_mkdir" },
@@ -2562,6 +2573,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&ext2_free_block, "ext2_free_block" },
     { (uint32_t)(uintptr_t)&ext2_alloc_inode, "ext2_alloc_inode" },
     { (uint32_t)(uintptr_t)&ext2_free_inode, "ext2_free_inode" },
+    { (uint32_t)(uintptr_t)&ext2_truncate, "ext2_truncate" },
     { (uint32_t)(uintptr_t)&ext2_add_entry, "ext2_add_entry" },
     { (uint32_t)(uintptr_t)&ext2_remove_entry, "ext2_remove_entry" },
     { (uint32_t)(uintptr_t)&fat_get_next_cluster, "fat_get_next_cluster" },
@@ -3057,8 +3069,8 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&vnode_pager_ops, "vnode_pager_ops" },
     { (uint32_t)(uintptr_t)&device_pager_ops, "device_pager_ops" },
     { (uint32_t)(uintptr_t)&sysctl_debug_test_uid, "sysctl_debug_test_uid" },
-    { (uint32_t)(uintptr_t)&idt_entries, "idt_entries" },
     { (uint32_t)(uintptr_t)&stack_top, "stack_top" },
+    { (uint32_t)(uintptr_t)&idt_entries, "idt_entries" },
     { (uint32_t)(uintptr_t)&idt_ptr, "idt_ptr" },
     { (uint32_t)(uintptr_t)&curpmap, "curpmap" },
     { (uint32_t)(uintptr_t)&cpus, "cpus" },
@@ -3105,4 +3117,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1547;
+int ksym_count = 1553;
