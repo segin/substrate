@@ -70,8 +70,14 @@ stage_binary "$SCRIPT_DIR/sleep_elks" /bin/sleep_elks
 stage_binary "$SCRIPT_DIR/fileio_elks" /bin/fileio_elks
 stage_binary "$SCRIPT_DIR/fork_elks" /bin/fork_elks
 stage_binary "$SCRIPT_DIR/bounds_test_elks" /bin/bounds_test_elks
+stage_binary "$SCRIPT_DIR/cat_elks" /bin/cat_elks
+cat_input=$LOG_DIR/cat_input.txt
+printf 'ELKS cat sample\n' > "$cat_input"
+debugfs -w -R "rm /elks-cat.txt" "$ROOTFS_IMG" >/dev/null 2>&1 || true
+debugfs -w -R "write $cat_input /elks-cat.txt" "$ROOTFS_IMG" >/dev/null
 run_case hello_elks "Hello, ELKS!"
 run_case sleep_elks "Slept, ELKS!"
 run_case fileio_elks "ELKS file io"
 run_case fork_elks "ELKS child" "ELKS parent"
 run_case bounds_test_elks "Page Fault (in user process)" "Warning: Init process exited. System Halted (idle)."
+run_case cat_elks "ELKS cat sample"

@@ -203,7 +203,7 @@ Reference: User Request (Step 31552)
         - Files: `tests/elks/minish.c`, `tests/elks/Makefile`
         - Tests: emulation (run commands in QEMU)
         - Acceptance: Basic command execution works.
-    - [ ] Add sample ELKS cat utility. (REQ: REQ-20-0052)
+    - [x] Add sample ELKS cat utility. (REQ: REQ-20-0052)
         - Files: `tests/elks/cat.c`, `tests/elks/Makefile`
         - Tests: emulation
         - Acceptance: File contents displayed correctly.
