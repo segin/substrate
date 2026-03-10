@@ -60,6 +60,7 @@
 #define LINUX_SYS_uname          122
 #define LINUX_SYS_getpgid        132
 #define LINUX_SYS_fchdir         133
+#define LINUX_SYS__llseek        140
 #define LINUX_SYS_getdents       141
 #define LINUX_SYS_nanosleep      162
 #define LINUX_SYS_poll           168

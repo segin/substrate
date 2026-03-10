@@ -136,16 +136,29 @@ static void ide_wait_bsy(uint8_t channel) {
     }
 }
 
-/* Wait for DRQ to set */
-static void ide_wait_drq(uint8_t channel) {
+static int ide_wait_drq(uint8_t channel) {
     uint64_t start = get_uptime_ms();
     int spins = 0;
     int yield_count = 0;
-    while (!(ide_read_reg(channel, ATA_REG_STATUS) & ATA_SR_DRQ)) {
-        if (get_uptime_ms() - start > 1000) {
-            kprint("ide: timeout waiting for DRQ\n");
-            break;
+
+    for (;;) {
+        uint8_t status = ide_read_reg(channel, ATA_REG_STATUS);
+        if (status & ATA_SR_DRQ) {
+            return 0;
         }
+
+        if (status & (ATA_SR_ERR | ATA_SR_DF)) {
+            uint8_t error = ide_read_reg(channel, ATA_REG_ERROR);
+            kprintf("ide: DRQ failed status=%02x error=%02x\n", status, error);
+            return -1;
+        }
+
+        if (get_uptime_ms() - start > 1000) {
+            uint8_t error = ide_read_reg(channel, ATA_REG_ERROR);
+            kprintf("ide: timeout waiting for DRQ status=%02x error=%02x\n", status, error);
+            return -1;
+        }
+
         if (spins++ > 1000) {
             if (yield_count++ < 100) {
                 sched_yield();
@@ -537,7 +550,9 @@ int ide_read_sectors(uint16_t bus, uint8_t drive, uint32_t lba,
     uint16_t *buf = (uint16_t *)buffer;
     for (int i = 0; i < count; i++) {
         ide_wait_bsy(channel);
-        ide_wait_drq(channel);
+        if (ide_wait_drq(channel) < 0) {
+            return -1;
+        }
         insw(bus + ATA_REG_DATA, buf, 256);
         buf += 256;
     }
@@ -562,7 +577,9 @@ int ide_read_sectors_ext(uint16_t bus, uint8_t drive, uint64_t lba,
     uint16_t *buf = (uint16_t *)buffer;
     for (int i = 0; i < count; i++) {
         ide_wait_bsy(channel);
-        ide_wait_drq(channel);
+        if (ide_wait_drq(channel) < 0) {
+            return -1;
+        }
         insw(bus + ATA_REG_DATA, buf, 256);
         buf += 256;
     }
@@ -584,7 +601,9 @@ int ide_write_sectors(uint16_t bus, uint8_t drive, uint32_t lba,
     const uint16_t *buf = (const uint16_t *)buffer;
     for (int i = 0; i < count; i++) {
         ide_wait_bsy(channel);
-        ide_wait_drq(channel);
+        if (ide_wait_drq(channel) < 0) {
+            return -1;
+        }
         outsw(bus + ATA_REG_DATA, buf, 256);
         buf += 256;
     }
@@ -609,7 +628,9 @@ int ide_write_sectors_ext(uint16_t bus, uint8_t drive, uint64_t lba,
     const uint16_t *buf = (const uint16_t *)buffer;
     for (int i = 0; i < count; i++) {
         ide_wait_bsy(channel);
-        ide_wait_drq(channel);
+        if (ide_wait_drq(channel) < 0) {
+            return -1;
+        }
         outsw(bus + ATA_REG_DATA, buf, 256);
         buf += 256;
     }
@@ -643,7 +664,9 @@ int ide_identify(uint16_t bus, uint8_t drive, void *buffer) {
         return -2;  /* Not ATA (might be ATAPI) */
     }
 
-    ide_wait_drq(channel);
+    if (ide_wait_drq(channel) < 0) {
+        return -1;
+    }
 
     insw(bus + ATA_REG_DATA, buffer, 256);
     return 0;
@@ -663,7 +686,9 @@ int ide_identify_atapi(uint16_t bus, uint8_t drive, void *buffer) {
     if (status == 0) return -1;
 
     ide_wait_bsy(channel);
-    ide_wait_drq(channel);
+    if (ide_wait_drq(channel) < 0) {
+        return -1;
+    }
 
     insw(bus + ATA_REG_DATA, buffer, 256);
     return 0;
