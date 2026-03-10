@@ -639,6 +639,40 @@ pmap_t pmap_fork(pmap_t src_pmap) {
 // Active pmap
 pmap_t curpmap = NULL;
 
+struct pmap_activation_state {
+    pmap_t prev_pmap;
+    uint32_t prev_cr3;
+    int switched;
+};
+
+static struct pmap_activation_state pmap_activate_for_update(pmap_t pmap) {
+    struct pmap_activation_state state;
+
+    state.prev_pmap = curpmap;
+    state.prev_cr3 = pmap_hal_read_cr3();
+    state.switched = 0;
+
+    if (pmap && state.prev_cr3 != pmap->pdir_phys) {
+        pmap_activate(pmap);
+        state.switched = 1;
+    }
+
+    return state;
+}
+
+static void pmap_restore_after_update(struct pmap_activation_state *state) {
+    if (!state || !state->switched) {
+        return;
+    }
+
+    if (state->prev_pmap) {
+        pmap_activate(state->prev_pmap);
+    } else {
+        curpmap = NULL;
+        pmap_hal_write_cr3(state->prev_cr3);
+    }
+}
+
 void pmap_activate(pmap_t pmap) {
     if (!pmap) return;
 
@@ -660,10 +694,13 @@ void pmap_activate(pmap_t pmap) {
 
 int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t flags) {
     (void)flags;
-    // Must be active address space to use recursive mapping
-    uint32_t cr3;
-    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
-    if (pmap->pdir_phys != cr3) return -1;
+    struct pmap_activation_state activation;
+
+    if (!pmap) {
+        return -1;
+    }
+
+    activation = pmap_activate_for_update(pmap);
 
     uint32_t pdi = PD_INDEX(va);
     uint32_t pti = PT_INDEX(va);
@@ -671,7 +708,10 @@ int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t 
     // Allocate page table on demand if not present
     if (!(V_PD[pdi] & PTE_P)) {
         void *pt_virt = pmm_alloc_block();
-        if (!pt_virt) return -1;
+        if (!pt_virt) {
+            pmap_restore_after_update(&activation);
+            return -1;
+        }
         // Convert virtual to physical for PDE (pmm_alloc_block returns virtual)
         uint32_t pt_phys = (uint32_t)(uintptr_t)pt_virt - 0xC0000000;
         // PDE always gets W and U so PT can control actual permissions
@@ -720,15 +760,19 @@ int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t 
         pv_insert(new_page, pmap, va);
     }
     pmap_invalidate_page(va);
+    pmap_restore_after_update(&activation);
     return 0;
 }
 
 int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_list, uint32_t prot, uint32_t flags) {
     (void)flags;
-    // Must be active address space to use recursive mapping
-    uint32_t cr3;
-    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
-    if (pmap->pdir_phys != cr3) return -1;
+    struct pmap_activation_state activation;
+
+    if (!pmap) {
+        return -1;
+    }
+
+    activation = pmap_activate_for_update(pmap);
 
     uint32_t last_pdi = (uint32_t)-1;
     uint32_t *pt = NULL;
@@ -745,7 +789,10 @@ int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_l
             // Allocate page table on demand if not present
             if (!(V_PD[pdi] & PTE_P)) {
                 void *pt_virt = pmm_alloc_block();
-                if (!pt_virt) return -1;
+                if (!pt_virt) {
+                    pmap_restore_after_update(&activation);
+                    return -1;
+                }
                 // Convert virtual to physical for PDE (pmm_alloc_block returns virtual)
                 uint32_t pt_phys = (uint32_t)(uintptr_t)pt_virt - 0xC0000000;
                 // PDE always gets W and U so PT can control actual permissions
@@ -805,6 +852,7 @@ int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_l
         }
     }
 
+    pmap_restore_after_update(&activation);
     return 0;
 }
 
