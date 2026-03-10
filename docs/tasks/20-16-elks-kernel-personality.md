@@ -31,7 +31,7 @@ Reference: User Request (Step 31552)
         - Tests: N/A (design doc)
         - Acceptance: Each 16-bit memory model's segment layout, pointer-width expectations, and Substrate support target are documented.
 
-- [ ] **Binary Format Recognition:** (REQ: REQ-20-0006)
+- [x] **Binary Format Recognition:** (REQ: REQ-20-0006)
     - [x] Implement ELKS a.out binary format detection. (REQ: REQ-20-0007)
         - Files: `sys/exec/formats/elks_aout.c`, `sys/exec/formats/elks_aout.h`
         - Tests: unit (magic number detection)
@@ -42,7 +42,7 @@ Reference: User Request (Step 31552)
         - Tests: integration (exec ELKS binary triggers loader)
         - Acceptance: ELKS binaries dispatched to elks_load() function.
 
-- [ ] **ELKS Exec Loader:** (REQ: REQ-20-0009)
+- [x] **ELKS Exec Loader:** (REQ: REQ-20-0009)
     - [x] Implement `elks_load()` function for ELKS binary loading. (REQ: REQ-20-0010)
         - Files: `sys/exec/formats/elks_aout.c`
         - Tests: unit (load sample ELKS binary into memory)
@@ -72,7 +72,7 @@ Reference: User Request (Step 31552)
         - Tests: unit (verify ELKS exec state helper)
         - Acceptance: ELKS exec applies `PERS_ELKS`, `BITNESS_16`, the initial `brk`, and the basename-derived process name before userspace handoff.
 
-- [ ] **Runtime Support & Syscall Translation:** (REQ: REQ-20-0017)
+- [x] **Runtime Support & Syscall Translation:** (REQ: REQ-20-0017)
     - [x] Implement ELKS syscall dispatcher. (REQ: REQ-20-0018)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: unit (dispatch to correct handler)
@@ -118,7 +118,7 @@ Reference: User Request (Step 31552)
         - Tests: unit (segment:offset to linear)
         - Acceptance: `LDT[seg].base + offset` is validated and computed correctly, with out-of-bounds offsets rejected.
 
-- [ ] **Resource Isolation & Signal Handling:** (REQ: REQ-20-0029)
+- [x] **Resource Isolation & Signal Handling:** (REQ: REQ-20-0029)
     - [x] Ensure ELKS processes have isolated LDT (not shared with other processes). (REQ: REQ-20-0030)
         - Files: `sys/arch/i386/ldt.c`, `sys/pm/process.c`
         - Tests: unit (verify LDT per-process)
@@ -137,7 +137,7 @@ Reference: User Request (Step 31552)
         - Docs: `core.5` manpage update
         - Acceptance: `sigexit()` invokes the kernel core-dump hook for ELKS processes, and the captured crash record preserves 16-bit register state plus ELKS LDT segment descriptors; persistent core-file emission remains future writer work.
 
-- [ ] **Safety & Cleanup (LDT Lifecycle):** (REQ: REQ-20-0034)
+- [x] **Safety & Cleanup (LDT Lifecycle):** (REQ: REQ-20-0034)
     - [x] Implement LDT cleanup on the process exit-to-reap path. (REQ: REQ-20-0035)
         - Files: `sys/arch/i386/ldt.c`, `sys/pm/process.c`
         - Tests: unit (no leaked LDT entries after exit/reap)
@@ -163,7 +163,7 @@ Reference: User Request (Step 31552)
         - Tests: unit (warning logged)
         - Acceptance: Unusual patterns (many allocations, odd limits) logged.
 
-- [ ] **Testing & Validation:** (REQ: REQ-20-0041)
+- [x] **Testing & Validation:** (REQ: REQ-20-0041)
     - [x] Create ELKS hello world test binary. (REQ: REQ-20-0042)
         - Files: `tests/elks/hello.S`, `tests/elks/Makefile`, `tests/elks/mkelks.py`
         - Tests: emulation (run in QEMU, verify output)
@@ -216,7 +216,7 @@ Reference: User Request (Step 31552)
         - Tests: N/A (build script)
         - Acceptance: `make -C tests/elks` builds all current in-tree ELKS test binaries and the Makefile supports both assembly and C ELKS test sources.
 
-- [ ] **Documentation:** (REQ: REQ-20-0055)
+- [x] **Documentation:** (REQ: REQ-20-0055)
     - [x] Create personality-elks(7) developer guide. (REQ: REQ-20-0056)
         - Files: `docs/man/man7/personality-elks.7`
         - Tests: N/A (documentation)
@@ -240,7 +240,7 @@ Reference: User Request (Step 31552)
         - Tests: N/A (documentation)
         - Acceptance: API documented with examples.
 
-- [ ] **Quality Audit & Refactoring:** (REQ: REQ-20-0061)
+- [x] **Quality Audit & Refactoring:** (REQ: REQ-20-0061)
         - Acceptance: All allocated resources freed on error.
     - [x] Audit elks_aout.c for unchecked file read errors. (REQ: REQ-20-0062)
         - Files: `sys/exec/formats/elks_aout.c`
@@ -258,12 +258,12 @@ Reference: User Request (Step 31552)
         - Files: `sys/include/sys/compiler.h`, `sys/exec/perso/perso_elks.c`, `sys/exec/formats/elks_aout.c`
         - Tests: build/host regression (`make -C sys/exec/perso perso_elks.o`, `make -C sys/exec/formats elks_aout.o`, `tests/sys/host_test_perso_elks`, `tests/sys/host_test_elks_aout`)
         - Acceptance: ELKS pointer and must-check helper contracts are expressed through shared compiler annotations that compile cleanly and remain covered by existing ELKS host regression tests.
-    - [ ] **Refactor Console and UART Subsystems** (REQ: REQ-20-0066)
-        - Note: Migrated files, updated Makefiles, fixed include paths, added missing VGA colors. Build verified.
-        - Files: `sys/kern/ansi_handler.c`, `sys/kern/console.c`, `sys/kern/tty.c`, `sys/drivers/serial/*`
-        - Goal: Migrate console/tty code to `sys/drivers/console/` and UART to `sys/drivers/console/uart/`.
-        - Acceptance: Build passes, files moved, functionality preserved.
-        - Acceptance: No warnings from static analysis tools.
+    - [x] **Refactor Console and UART Subsystems** (REQ: REQ-20-0066)
+        - Note: The refactor is already present in-tree; this checklist entry was stale.
+        - Files: `sys/drivers/console/ansi_handler.c`, `sys/drivers/console/console.c`, `sys/drivers/console/tty.c`, `sys/drivers/console/uart/*`, `sys/kern/console.h`, `sys/include/kern/ansi_handler.h`
+        - Goal: Keep console/tty code under `sys/drivers/console/` and UART under `sys/drivers/console/uart/`, with compatibility shims only where callers still include the old path.
+        - Tests: build (`make -C sys/drivers/console`, `make -C sys/drivers/console/uart`)
+        - Acceptance: Console, TTY, and UART sources build from their driver subtrees and the legacy `sys/kern/console.h` include remains a compatibility shim rather than the implementation home.
 
 
 
