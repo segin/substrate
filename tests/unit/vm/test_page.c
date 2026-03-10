@@ -1,6 +1,7 @@
 #include <vm/vm_page.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <string.h>
 
 /*
  * VM Page Unit Tests

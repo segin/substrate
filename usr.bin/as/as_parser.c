@@ -1595,6 +1595,12 @@ static int prefix_flag_for(const char *s, char **segment_override) {
     if (streq_ci(s, "bnd")) {
         return AS_PREFIX_REPNE;
     }
+    if (streq_ci(s, "xacquire")) {
+        return AS_PREFIX_REPNE;
+    }
+    if (streq_ci(s, "xrelease")) {
+        return AS_PREFIX_REP;
+    }
     if (streq_ci(s, "rep")) {
         return AS_PREFIX_REP;
     }

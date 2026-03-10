@@ -30,7 +30,7 @@ UNIT_OBJS = $(notdir $(UNIT_SRCS:.c=.o))
 
 MOCKS_OBJ = mocks.o
 
-all: test_runner test_minix test_ext2_perf test_ext2_read_blocks test_ext2_find_next_zero_bit test_ext2_inode_write test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_libc_sysctl test_ext2_remove_perf bench_ext2_readdir test_ext2_write_block test_libpthread_mutex test_pthread_join test_readline test_history test_bc test_libedit host_test_wait_logic host_test_pgrp host_test_proc_tree host_test_proc_exit host_test_tty_jobctl host_test_sync_guards host_test_sleepq_private host_test_swapper host_test_rusage host_test_proc_lifecycle host_test_i386_signal host_test_linux_signal host_test_signal_restart host_test_signal_integration host_test_proc_signal_state host_test_rwlock host_test_fork_exec_wait test_getpagesize
+all: test_runner test_minix test_ext2_perf test_ext2_read_blocks test_ext2_find_next_zero_bit test_ext2_inode_write test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_libc_sysctl test_ext2_remove_perf bench_ext2_readdir test_ext2_write_block test_libpthread_mutex test_pthread_join test_readline test_history test_bc test_libedit host_test_wait_logic host_test_pgrp host_test_proc_tree host_test_proc_exit host_test_tty_jobctl host_test_sync_guards host_test_sleepq_private host_test_swapper host_test_rusage host_test_proc_lifecycle host_test_i386_signal host_test_linux_signal host_test_signal_restart host_test_signal_integration host_test_proc_signal_state host_test_rwlock host_test_fork_exec_wait test_getpagesize test_libc_stdio test_libc_printf test_libc_scanf
 	./test_runner
 	./test_minix
 	./test_ext2_find_next_zero_bit
@@ -43,6 +43,9 @@ all: test_runner test_minix test_ext2_perf test_ext2_read_blocks test_ext2_find_
 	./test_libc_stdlib
 	./test_libc_ctype
 	./test_libc_assert
+	./test_libc_stdio
+	./test_libc_printf
+	./test_libc_scanf
 	./test_ext2_remove_perf
 	./bench_ext2_readdir
 	./test_ext2_write_block
@@ -183,6 +186,32 @@ test_libc_time: lib/c/test_time_standalone.c ../lib/c/src/time/time.c
 
 test_libc_stdlib: lib/c/test_stdlib.c ../lib/c/src/stdlib.c
 	$(CC) $(CFLAGS_COMMON) -fno-builtin lib/c/test_stdlib.c -o $@
+
+libc_stdio_prefixed.o: ../lib/c/stdio/stdio_core.c ../lib/c/stdio/stdstreams.c ../lib/c/stdio/printf.c ../lib/c/stdio/scanf.c ../lib/c/src/stdlib.c ../lib/c/src/string.c ../lib/c/src/ctype.c symbols.map
+	$(CC) $(CFLAGS_COMMON) -m32 -fno-builtin -I../lib/c/include -I../include -I../sys -c ../lib/c/stdio/stdio_core.c -o stdio_core_raw.o
+	$(CC) $(CFLAGS_COMMON) -m32 -fno-builtin -I../lib/c/include -I../include -I../sys -c ../lib/c/stdio/stdstreams.c -o stdstreams_raw.o
+	$(CC) $(CFLAGS_COMMON) -m32 -fno-builtin -I../lib/c/include -I../include -I../sys -c ../lib/c/stdio/printf.c -o printf_raw.o
+	$(CC) $(CFLAGS_COMMON) -m32 -fno-builtin -I../lib/c/include -I../include -I../sys -c ../lib/c/stdio/scanf.c -o scanf_raw.o
+	$(CC) $(CFLAGS_COMMON) -m32 -fno-builtin -I../lib/c/include -I../include -I../sys -c ../lib/c/src/stdlib.c -o stdlib_raw.o
+	$(CC) $(CFLAGS_COMMON) -m32 -fno-builtin -I../lib/c/include -I../include -I../sys -c ../lib/c/src/string.c -o string_raw.o
+	$(CC) $(CFLAGS_COMMON) -m32 -fno-builtin -I../lib/c/include -I../include -I../sys -c ../lib/c/src/ctype.c -o ctype_raw.o
+	$(LD) -m elf_i386 -r stdio_core_raw.o stdstreams_raw.o printf_raw.o scanf_raw.o stdlib_raw.o string_raw.o ctype_raw.o -o stdio_combined_raw.o
+	objcopy --redefine-syms=symbols.map stdio_combined_raw.o $@
+
+test_libc_stdio: lib/c/unit/test_stdio.c libc_stdio_prefixed.o
+	$(CC) $(CFLAGS_COMMON) -m32 $^ -o $@
+
+test_libc_printf: lib/c/unit/test_printf.c libc_stdio_prefixed.o
+	$(CC) $(CFLAGS_COMMON) -m32 $^ -o $@
+
+test_libc_scanf: lib/c/unit/test_scanf.c libc_stdio_prefixed.o
+	$(CC) $(CFLAGS_COMMON) -m32 $^ -o $@
+
+test_libc_prop_stdio: lib/c/property/prop_stdio.c libc_stdio_prefixed.o
+	$(CC) $(CFLAGS_COMMON) -m32 $^ -o $@
+
+test_libc_fuzz_scanf: lib/c/fuzz/fuzz_scanf.c libc_stdio_prefixed.o
+	$(CC) $(CFLAGS_COMMON) -m32 $^ -o $@
 
 # Rules for objects
 %.o: ../sys/vm/%.c

@@ -1,0 +1,99 @@
+.\" scanf.3 - scanf library function family
+.TH SCANF 3 "March 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+scanf, fscanf, sscanf, vscanf, vfscanf, vsscanf \- input format conversion
+.SH LIBRARY
+.B libc
+.SH SYNOPSIS
+.B #include <stdio.h>
+.B #include <stdarg.h>
+.PP
+.BI "int scanf(const char *" format ", ...);"
+.PP
+.BI "int fscanf(FILE *" stream ", const char *" format ", ...);"
+.PP
+.BI "int sscanf(const char *" str ", const char *" format ", ...);"
+.PP
+.BI "int vscanf(const char *" format ", va_list " ap ");"
+.PP
+.BI "int vfscanf(FILE *" stream ", const char *" format ", va_list " ap ");"
+.PP
+.BI "int vsscanf(const char *" str ", const char *" format ", va_list " ap ");"
+.SH DESCRIPTION
+The
+.BR scanf ()
+family of functions scans input according to a
+.I format
+as described below.
+This format may contain
+.I "conversion specifiers" ;
+the results from such conversions, if any, are stored in the locations pointed to by the
+.I "pointer arguments"
+that follow
+.I format .
+.PP
+.BR fscanf ()
+reads input from the stream pointer
+.IR stream .
+.PP
+.BR sscanf ()
+reads its input from the character string pointed to by
+.IR str .
+.PP
+.BR vscanf (),
+.BR vfscanf (),
+and
+.BR vsscanf ()
+are equivalent to
+.BR scanf (),
+.BR fscanf (),
+and
+.BR sscanf ()
+respectively, except that they are called with a
+.I va_list
+instead of a variable number of arguments.
+.SH CONVERSIONS
+The format string consists of a sequence of directives which describe how to process the sequence of input characters.
+If a directive fails, no further input is read, and
+.BR scanf ()
+returns.
+A directive is one of the following:
+.IP \(bu 3
+A sequence of white-space characters (space, tab, newline, etc.; see
+.BR isspace (3)).
+This directive matches any amount of white space, including none, in the input.
+.IP \(bu 3
+An ordinary character (i.e., one other than white space or '%').
+This character must exactly match the next character of input.
+.IP \(bu 3
+A conversion specification, which commences with a '%' (percent) character.
+A sequence of characters from the input is converted according to this specification, and the result is placed in the corresponding pointer argument.
+.PP
+Conversion specifications follow this format:
+.PP
+.RS 4
+%[*] [width] [length] type
+.RE
+.PP
+The optional '*' character indicates assignment suppression: the input is consumed but not stored.
+The optional decimal integer
+.I width
+specifies the maximum number of characters to be read for this conversion.
+The
+.I length
+modifiers (e.g.,
+.BR l ,
+.BR ll ,
+.BR h ,
+.BR hh )
+specify the size of the destination.
+.SH RETURN VALUE
+These functions return the number of input items successfully matched and assigned, which can be fewer than provided for, or even zero in the event of an early matching failure.
+The value
+.B EOF
+is returned if the end of input is reached before the first conversion or matching failure occurred.
+.SH SEE ALSO
+.BR printf (3),
+.BR strtol (3),
+.BR strtod (3),
+.BR isspace (3)

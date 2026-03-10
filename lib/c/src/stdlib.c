@@ -456,9 +456,69 @@ long long atoll(const char *nptr) {
     return strtoll(nptr, NULL, 10);
 }
 
+double strtod(const char *nptr, char **endptr) {
+    const char *s = nptr;
+    double val = 0.0;
+    int sign = 1;
+
+    while (isspace((unsigned char)*s)) s++;
+    if (*s == '-') { sign = -1; s++; }
+    else if (*s == '+') s++;
+
+    while (isdigit((unsigned char)*s)) {
+        val = val * 10.0 + (*s - '0');
+        s++;
+    }
+
+    if (*s == '.') {
+        s++;
+        double fraction = 0.1;
+        while (isdigit((unsigned char)*s)) {
+            val += (*s - '0') * fraction;
+            fraction /= 10.0;
+            s++;
+        }
+    }
+
+    if (*s == 'e' || *s == 'E') {
+        s++;
+        int exp_sign = 1;
+        if (*s == '-') { exp_sign = -1; s++; }
+        else if (*s == '+') s++;
+        
+        int exp_val = 0;
+        while (isdigit((unsigned char)*s)) {
+            exp_val = exp_val * 10 + (*s - '0');
+            s++;
+        }
+        
+        double factor = 1.0;
+        double base = 10.0;
+        int e = exp_val;
+        while (e > 0) {
+            if (e % 2 == 1) factor *= base;
+            base *= base;
+            e /= 2;
+        }
+        
+        if (exp_sign == -1) val /= factor;
+        else val *= factor;
+    }
+
+    if (endptr) *endptr = (char *)s;
+    return val * sign;
+}
+
+float strtof(const char *nptr, char **endptr) {
+    return (float)strtod(nptr, endptr);
+}
+
+long double strtold(const char *nptr, char **endptr) {
+    return (long double)strtod(nptr, endptr);
+}
+
 double atof(const char *nptr) {
-    (void)nptr;
-    return 0.0;
+    return strtod(nptr, NULL);
 }
 
 extern char **environ;

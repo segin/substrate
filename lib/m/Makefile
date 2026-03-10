@@ -1,7 +1,7 @@
 include ../../Makefile.inc
 CFLAGS += -I../../include
 
-SRCS = src/math.c src/fpclassify.c
+SRCS = src/math.c src/fpclassify.c src/fenv.c
 OBJS = $(SRCS:.c=.o)
 
 all: libm.a
