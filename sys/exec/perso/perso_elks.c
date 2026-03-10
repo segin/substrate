@@ -444,13 +444,36 @@ static int elks_sys_write(uint32_t fd, uint32_t buf_off, uint32_t count,
 static int elks_sys_open(uint32_t path_off, uint32_t flags, uint32_t mode,
                          uint32_t unused3, uint32_t unused4, uint32_t unused5,
                          uint32_t unused6, uint32_t unused7) {
-    uintptr_t linear = 0;
+    char *path = NULL;
+    int ret;
+
     (void)unused3; (void)unused4; (void)unused5; (void)unused6; (void)unused7;
 
-    if (elks_ds_pointer(path_off, &linear) != 0) {
-        return -EFAULT;
+    ret = elks_copy_ds_string(path_off, &path);
+    if (ret != 0) {
+        return ret;
     }
-    return sys_open((const char *)(uintptr_t)linear, (int)flags, (int)mode);
+    ret = kern_open(path, (int)flags, (int)mode);
+    kfree(path, strlen(path) + 1U);
+    return ret;
+}
+
+static int elks_sys_creat(uint32_t path_off, uint32_t mode, uint32_t unused2,
+                          uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                          uint32_t unused6, uint32_t unused7) {
+    char *path = NULL;
+    int ret;
+
+    (void)unused2; (void)unused3; (void)unused4; (void)unused5;
+    (void)unused6; (void)unused7;
+
+    ret = elks_copy_ds_string(path_off, &path);
+    if (ret != 0) {
+        return ret;
+    }
+    ret = kern_open(path, 0x40 | 0x01 | 0x08, (int)mode);
+    kfree(path, strlen(path) + 1U);
+    return ret;
 }
 
 static int elks_sys_close(uint32_t fd, uint32_t unused1, uint32_t unused2,
@@ -459,6 +482,24 @@ static int elks_sys_close(uint32_t fd, uint32_t unused1, uint32_t unused2,
     (void)unused1; (void)unused2; (void)unused3; (void)unused4;
     (void)unused5; (void)unused6; (void)unused7;
     return sys_close((int)fd);
+}
+
+static int elks_sys_unlink(uint32_t path_off, uint32_t unused1, uint32_t unused2,
+                           uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                           uint32_t unused6, uint32_t unused7) {
+    char *path = NULL;
+    int ret;
+
+    (void)unused1; (void)unused2; (void)unused3; (void)unused4;
+    (void)unused5; (void)unused6; (void)unused7;
+
+    ret = elks_copy_ds_string(path_off, &path);
+    if (ret != 0) {
+        return ret;
+    }
+    ret = kern_unlink(path);
+    kfree(path, strlen(path) + 1U);
+    return ret;
 }
 
 static int elks_sys_waitpid(uint32_t pid, uint32_t status_off, uint32_t options,
@@ -663,9 +704,9 @@ static void *elks_syscall_table[ELKS_SYS_MAX] = {
     [ELKS_SYS_open]    = (void *)&elks_sys_open,
     [ELKS_SYS_close]   = (void *)&elks_sys_close,
     [ELKS_SYS_waitpid] = (void *)&elks_sys_waitpid,
-    [ELKS_SYS_creat]   = (void *)&sys_creat,
+    [ELKS_SYS_creat]   = (void *)&elks_sys_creat,
     [ELKS_SYS_link]    = (void *)&sys_link,
-    [ELKS_SYS_unlink]  = (void *)&sys_unlink,
+    [ELKS_SYS_unlink]  = (void *)&elks_sys_unlink,
     [ELKS_SYS_execve]  = (void *)&elks_sys_execve,
     [ELKS_SYS_chdir]   = (void *)&sys_chdir,
     [ELKS_SYS_time]    = (void *)&sys_time,
