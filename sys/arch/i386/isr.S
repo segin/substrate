@@ -199,7 +199,7 @@ jump_to_userspace:
     #   [esp+4]  = entry_point
     #   [esp+8]  = user_stack
     mov 4(%esp), %ecx
-    mov 8(%esp), %edx
+    mov 8(%esp), %ebx
     
     # NOW turn off interrupts
     cli
@@ -216,7 +216,7 @@ jump_to_userspace:
     # Build IRET stack frame (in order pushed):
     # SS, ESP, EFLAGS, CS, EIP
     push $0x23          # User SS
-    push %edx           # User ESP (loaded earlier)
+    push %ebx           # User ESP (loaded earlier)
     pushf               # EFLAGS
     pop %eax
     
@@ -228,9 +228,17 @@ jump_to_userspace:
     push $0x1B          # User CS
     push %ecx           # User EIP (loaded earlier)
 
-    # Linux i386 process entry ABI: %edx carries rtld_fini callback.
-    # Kernel-launched processes must provide NULL unless dynamic loader set it.
+    # A freshly exec'd image must not inherit arbitrary general-purpose
+    # register contents from the previous process image.
+    # Linux i386 only defines %edx = rtld_fini on entry; kernel-launched
+    # processes provide NULL there unless a dynamic linker arranged otherwise.
+    xor %eax, %eax
+    xor %ebx, %ebx
+    xor %ecx, %ecx
     xor %edx, %edx
+    xor %esi, %esi
+    xor %edi, %edi
+    xor %ebp, %ebp
     
     # Jump to user mode
     iret
