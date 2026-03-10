@@ -3172,7 +3172,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (insn->operand_count != 2) {
             return -1;
         }
-        if (strcmp(mnbuf, "movdir64b") == 0) {
+        if (strcmp(mnbuf, "movdir64b") == 0 || strcmp(mnbuf, "enqcmd") == 0) {
             if (intel_syntax) {
                 reg_op = &insn->operands[0];
                 mem_op = &insn->operands[1];
@@ -3575,7 +3575,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (insn->operand_count != 2) {
             return -1;
         }
-        if (strcmp(mnbuf, "movdir64b") == 0) {
+        if (strcmp(mnbuf, "movdir64b") == 0 || strcmp(mnbuf, "enqcmd") == 0) {
             if (intel_syntax) {
                 reg_op = &insn->operands[0];
                 mem_op = &insn->operands[1];
@@ -3852,6 +3852,35 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_legacy_simd_rm_imm8(0x66, 0x73, strcmp(mnbuf, "psrldq") == 0 ? 3u : 7u,
                                              dst_op, (unsigned char)immv, out, out_cap, out_len);
+    }
+    if (strcmp(mnbuf, "pshuflw") == 0 || strcmp(mnbuf, "pshufhw") == 0) {
+        const as_operand_t *imm_op;
+        const as_operand_t *src_op;
+        const as_operand_t *dst_op;
+        long long immv;
+
+        if (insn->operand_count != 3) {
+            return -1;
+        }
+        if (intel_syntax) {
+            dst_op = &insn->operands[0];
+            src_op = &insn->operands[1];
+            imm_op = &insn->operands[2];
+        } else {
+            imm_op = &insn->operands[0];
+            src_op = &insn->operands[1];
+            dst_op = &insn->operands[2];
+        }
+        if ((imm_op->kind != AS_OPERAND_IMMEDIATE && imm_op->kind != AS_OPERAND_LABEL_REF) ||
+            eval_expr_const(imm_op->u.expr, &immv) != 0 || immv < 0 || immv > 255 ||
+            dst_op->kind != AS_OPERAND_REGISTER || parse_xmm_reg(dst_op->u.reg, &xr) != 0) {
+            return -1;
+        }
+        if (src_op->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src_op->u.reg, &xm) != 0) {
+            return -1;
+        }
+        return emit_i386_legacy_simd_rm_imm8(strcmp(mnbuf, "pshuflw") == 0 ? 0xf2 : 0xf3, 0x70, xr,
+                                             src_op, (unsigned char)immv, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movhlps") == 0) {
         if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
