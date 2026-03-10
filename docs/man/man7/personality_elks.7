@@ -66,7 +66,9 @@ Current limitations include:
 .IP \(bu 2
 incomplete syscall coverage outside the active translated table
 .IP \(bu
-no completed ELKS core-dump path
+ELKS crash handling currently captures 16-bit register and LDT-segment state
+through the generic kernel core-dump hook; persistent core-file emission is not
+yet implemented
 .IP \(bu
 incomplete fault-isolation validation for LDT bounds violations
 .IP \(bu

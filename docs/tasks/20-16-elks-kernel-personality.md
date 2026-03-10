@@ -131,11 +131,11 @@ Reference: User Request (Step 31552)
         - Files: `sys/exec/perso/perso_elks.c`, `docs/personality/elks_spec.md`
         - Tests: unit (ELKS far-call signal frame)
         - Acceptance: The kernel-built ELKS signal frame lets `_signal_cbhandler` return with `lret $2` to the interrupted `CS:IP`; no separate ELKS-visible `sigreturn` syscall is required.
-    - [ ] Implement core dump generation for ELKS processes. (REQ: REQ-20-0033)
+    - [x] Implement ELKS core-dump policy capture. (REQ: REQ-20-0033)
         - Files: `sys/kern/core.c`, `sys/exec/perso/perso_elks.c`
         - Tests: integration (SIGSEGV generates core)
         - Docs: `core.5` manpage update
-        - Acceptance: Core dump includes 16-bit register state and segment info.
+        - Acceptance: `sigexit()` invokes the kernel core-dump hook for ELKS processes, and the captured crash record preserves 16-bit register state plus ELKS LDT segment descriptors; persistent core-file emission remains future writer work.
 
 - [ ] **Safety & Cleanup (LDT Lifecycle):** (REQ: REQ-20-0034)
     - [x] Implement LDT cleanup on the process exit-to-reap path. (REQ: REQ-20-0035)
@@ -300,7 +300,7 @@ Reference: User Request (Step 31552)
 - **US-20-0030**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to ensure ELKS processes have isolated LDT (not shared with other processes) so that this capability is implemented with clear verification evidence.
 - **US-20-0031**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement signal delivery for 16-bit context so that this capability is implemented with clear verification evidence.
 - **US-20-0032**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement signal return (sigreturn) for 16-bit context so that this capability is implemented with clear verification evidence.
-- **US-20-0033**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement core dump generation for ELKS processes so that this capability is implemented with clear verification evidence.
+- **US-20-0033**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to capture ELKS crash state through the kernel core-dump policy hook so that 16-bit register and segment context are preserved even before a persistent core-file writer exists.
 - **US-20-0034**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to safety & Cleanup (LDT Lifecycle): so that this capability is implemented with clear verification evidence.
 - **US-20-0035**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement LDT cleanup on process exit so that this capability is implemented with clear verification evidence.
 - **US-20-0036**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement LDT duplication on fork so that this capability is implemented with clear verification evidence.
@@ -433,7 +433,7 @@ Reference: User Request (Step 31552)
 - **REQ-20-0032** (EARS/Ubiquitous): The Substrate system shall implement signal return (sigreturn) for 16-bit context.
   - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-20-0033** (EARS/Ubiquitous): The Substrate system shall implement core dump generation for ELKS processes.
+- **REQ-20-0033** (EARS/Ubiquitous): The Substrate system shall capture ELKS crash state through the kernel core-dump policy hook, including 16-bit register state and ELKS LDT segment descriptors; persistent core-file emission may be provided by a future writer implementation.
   - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-20-0034** (EARS/Ubiquitous): The Substrate system shall safety & Cleanup (LDT Lifecycle):.

@@ -42,7 +42,8 @@ return
 ELKS file I/O has been smoke-tested on ext2 root. Other filesystems have not
 been validated as an ELKS compatibility target.
 .IP \(bu
-The ELKS core-dump path is not implemented.
+ELKS core handling currently captures in-kernel crash state through the generic
+core-dump policy hook; persistent core-file emission is not yet implemented.
 .IP \(bu
 The LDT bounds-violation validation item is not complete. Current bounds-fault
 testing still exposes an unresolved fault-handling issue.

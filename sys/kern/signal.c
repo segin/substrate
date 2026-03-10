@@ -11,21 +11,13 @@
 #include <stddef.h>
 #include <pm/pm.h>
 #include <exec/perso/personality.h>
+#include <sys/core.h>
 #include <sys/resource.h>
 #include <sys/time.h>
 #include <kern/time.h>
 #include <sys/kern_syscalls.h>
 
 extern thread_t threads[MAX_THREADS];
-
-int coredump(process_t *p);
-
-#ifndef HOST_TEST_EXTERNAL_COREDUMP
-__attribute__((weak)) int coredump(process_t *p) {
-    (void)p;
-    return -1;
-}
-#endif
 
 static void signal_interrupt_thread(thread_t *t) {
     if (!t) {
@@ -603,6 +595,7 @@ void sigexit(process_t *p, int sig) {
     int dump_core = 0;
 
     if (want_core && signal_core_dump_permitted(p)) {
+        core_prepare_dump(p, sig);
         dump_core = coredump(p) == 0;
     }
     
@@ -778,6 +771,7 @@ void signal_handle_pending(registers_t *regs) {
     } else if (act->sa_handler == SIG_DFL) {
         // Default actions
         if (sig == SIGSEGV || sig == SIGILL || sig == SIGFPE || sig == SIGBUS || sig == SIGTRAP) {
+            core_capture_trapframe(current_process, regs);
             signal_clear_trap_context(current_thread, sig);
             sigexit(current_process, sig);
             return;

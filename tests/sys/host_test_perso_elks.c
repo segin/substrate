@@ -8,6 +8,7 @@
 #include <sys/proc.h>
 #include <sys/ldt.h>
 #include <sys/times.h>
+#include <arch/i386/idt.h>
 #include <exec/formats/elks_aout.h>
 
 process_t *current_process;
@@ -22,6 +23,7 @@ static char last_exec_path[128];
 static char last_exec_argv0[128];
 static char last_exec_argv1[128];
 static char last_exec_env0[128];
+static char last_path_arg[128];
 static int last_sigaction_sig;
 static sig_t last_sigaction_handler;
 static int last_kill_pid;
@@ -37,10 +39,12 @@ static size_t ds_mem_size;
 #define sys_write  stub_sys_write
 #define sys_open   stub_sys_open
 #define sys_close  stub_sys_close
+#define kern_open  stub_kern_open
 #define sys_waitpid stub_sys_waitpid
 #define sys_creat  stub_sys_creat
 #define sys_link   stub_sys_link
 #define sys_unlink stub_sys_unlink
+#define kern_unlink stub_kern_unlink
 #define sys_execve stub_sys_execve
 #define sys_chdir  stub_sys_chdir
 #define sys_time   stub_sys_time
@@ -88,10 +92,20 @@ int stub_sys_read(int a, char *b, int c) { last_name = "read"; last_i0 = a; last
 int stub_sys_write(int a, const char *b, int c) { last_name = "write"; last_i0 = a; last_ptr = (uintptr_t)b; last_i1 = c; return 33; }
 int stub_sys_open(const char *a, int b, int c) { last_name = "open"; last_ptr = (uintptr_t)a; last_i0 = b; last_i1 = c; return 44; }
 int stub_sys_close(int a) { last_name = "close"; last_i0 = a; return 55; }
+int stub_kern_open(const char *a, int b, int c) {
+    strncpy(last_path_arg, a ? a : "", sizeof(last_path_arg) - 1);
+    last_path_arg[sizeof(last_path_arg) - 1] = '\0';
+    return stub_sys_open(a, b, c);
+}
 int stub_sys_waitpid(int a, int *b, int c) { last_name = "waitpid"; last_i0 = a; last_ptr = (uintptr_t)b; last_i1 = c; return 66; }
 int stub_sys_creat(const char *a, int b) { (void)a; (void)b; return -1; }
 int stub_sys_link(const char *a, const char *b) { (void)a; (void)b; return -1; }
 int stub_sys_unlink(const char *a) { (void)a; return -1; }
+int stub_kern_unlink(const char *a) {
+    strncpy(last_path_arg, a ? a : "", sizeof(last_path_arg) - 1);
+    last_path_arg[sizeof(last_path_arg) - 1] = '\0';
+    return stub_sys_unlink(a);
+}
 int stub_sys_execve(const char *a, char **b, char **c) { (void)a; (void)b; (void)c; return -1; }
 int stub_sys_chdir(const char *a) { (void)a; return -1; }
 time_t stub_sys_time(time_t *a) { (void)a; return 0; }
@@ -160,6 +174,7 @@ void stub_kprint(const char *msg) {
     strncpy(last_log, msg ? msg : "", sizeof(last_log) - 1);
     last_log[sizeof(last_log) - 1] = '\0';
 }
+void core_capture_trapframe(process_t *p, const registers_t *regs) { (void)p; (void)regs; }
 void *kmalloc(size_t size) { return malloc(size); }
 void kfree(void *ptr, size_t size) { (void)size; free(ptr); }
 
@@ -251,7 +266,7 @@ int main(void) {
     strcpy((char *)(ds_mem + 0x40), "/tmp/file");
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_open];
     if (fn(0x40, 1, 2, 0, 0, 0, 0, 0) != 44 || strcmp(last_name, "open") != 0 ||
-        last_ptr != ds_base + 0x40U || last_i0 != 1 || last_i1 != 2) {
+        strcmp(last_path_arg, "/tmp/file") != 0 || last_i0 != 1 || last_i1 != 2) {
         fprintf(stderr, "FAIL: ELKS open wrapper wrong\n");
         return 1;
     }
@@ -306,6 +321,7 @@ int main(void) {
     memset(last_exec_argv0, 0, sizeof(last_exec_argv0));
     memset(last_exec_argv1, 0, sizeof(last_exec_argv1));
     memset(last_exec_env0, 0, sizeof(last_exec_env0));
+    memset(last_path_arg, 0, sizeof(last_path_arg));
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_execve];
     if (fn(0x20, 0x80, 32, 0, 0, 0, 0, 0) != 77 || strcmp(last_name, "execve") != 0) {
         fprintf(stderr, "FAIL: ELKS execve wrapper wrong return path\n");

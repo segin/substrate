@@ -2,6 +2,7 @@
 #include <exec/perso/elks_syscall_table.h>
 #include <exec/formats/elks_aout.h>
 #include <sys/errno.h>
+#include <sys/core.h>
 #include <sys/syscall_impl.h>
 #include <sys/kern_syscalls.h>
 #include <sys/ldt.h>
@@ -663,12 +664,20 @@ static void elks_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, 
 
     ret = elks_linear_to_far_code((uintptr_t)handler, &handler_sel, &handler_off);
     if (ret != 0) {
+        current_thread->trap_signo = SIGSEGV;
+        current_thread->trap_code = SI_KERNEL;
+        current_thread->trap_addr = regs->eip;
+        core_capture_trapframe(current_process, regs);
         sigexit(current_process, SIGSEGV);
         return;
     }
 
     sp = (uint16_t)regs->useresp;
     if (sp < sizeof(frame)) {
+        current_thread->trap_signo = SIGSEGV;
+        current_thread->trap_code = SI_KERNEL;
+        current_thread->trap_addr = regs->useresp;
+        core_capture_trapframe(current_process, regs);
         sigexit(current_process, SIGSEGV);
         return;
     }
@@ -680,6 +689,10 @@ static void elks_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, 
                                         sp,
                                         &stack_linear);
     if (ret != 0) {
+        current_thread->trap_signo = SIGSEGV;
+        current_thread->trap_code = SI_KERNEL;
+        current_thread->trap_addr = regs->useresp;
+        core_capture_trapframe(current_process, regs);
         sigexit(current_process, SIGSEGV);
         return;
     }

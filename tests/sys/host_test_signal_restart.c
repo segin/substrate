@@ -43,6 +43,7 @@ void sched_wakeup(void *chan) { (void)chan; }
 struct pgrp *pgrp_find(int pgid) { (void)pgid; return NULL; }
 void pgrp_signal(struct pgrp *pgrp, int sig) { (void)pgrp; (void)sig; }
 int pgrp_is_orphaned(struct pgrp *pgrp) { (void)pgrp; return 0; }
+int coredump(process_t *p) { (void)p; return 0; }
 
 struct personality *perso_lookup(int id) {
     return (id == (int)test_personality.id) ? &test_personality : NULL;

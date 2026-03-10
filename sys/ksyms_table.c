@@ -162,6 +162,10 @@ extern void console_write(void);
 extern void copyin(void);
 extern void copyinstr(void);
 extern void copyout(void);
+extern void core_capture_trapframe(void);
+extern void core_last_record(void);
+extern void core_prepare_dump(void);
+extern void coredump(void);
 extern void cpuid_init(void);
 extern void crc32(void);
 extern void crc32_init(void);
@@ -1914,6 +1918,10 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&ksym_resolve, "ksym_resolve" },
     { (uint32_t)(uintptr_t)&ksym_print, "ksym_print" },
     { (uint32_t)(uintptr_t)&ksym_init, "ksym_init" },
+    { (uint32_t)(uintptr_t)&core_prepare_dump, "core_prepare_dump" },
+    { (uint32_t)(uintptr_t)&core_capture_trapframe, "core_capture_trapframe" },
+    { (uint32_t)(uintptr_t)&core_last_record, "core_last_record" },
+    { (uint32_t)(uintptr_t)&coredump, "coredump" },
     { (uint32_t)(uintptr_t)&spinlock_init, "spinlock_init" },
     { (uint32_t)(uintptr_t)&spinlock_acquire, "spinlock_acquire" },
     { (uint32_t)(uintptr_t)&spinlock_try_acquire, "spinlock_try_acquire" },
@@ -3113,4 +3121,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1551;
+int ksym_count = 1555;
