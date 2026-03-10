@@ -80,8 +80,14 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     } else {
         kern_lseek(fd, 0, 0);
     }
-    if (kern_read(fd, (char *)&hdr, sizeof(hdr)) != sizeof(hdr)) {
-        return elks_fail(fd, -EIO, "ELKS: failed to read executable header");
+    {
+        int rc = kern_read(fd, (char *)&hdr, sizeof(hdr));
+        int status = elks_read_exact_status(rc, sizeof(hdr));
+
+        if (status != 0) {
+            return elks_fail(fd, status == -ENOEXEC ? -ENOEXEC : -EIO,
+                             "ELKS: failed to read executable header");
+        }
     }
     memset(&suph, 0, sizeof(suph));
     memset(&plan, 0, sizeof(plan));
@@ -98,8 +104,14 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
         if (extra > sizeof(suph)) {
             return elks_fail(fd, -ENOEXEC, "ELKS: supplemental header too large");
         }
-        if (kern_read(fd, (char *)&suph, extra) != (int)extra) {
-            return elks_fail(fd, -EIO, "ELKS: failed to read supplemental header");
+        {
+            int rc = kern_read(fd, (char *)&suph, extra);
+            int status = elks_read_exact_status(rc, extra);
+
+            if (status != 0) {
+                return elks_fail(fd, status == -ENOEXEC ? -ENOEXEC : -EIO,
+                                 "ELKS: failed to read supplemental header");
+            }
         }
     }
     if (!elks_build_load_plan(&hdr, &suph, (uint16_t)argv_envp_bytes, &plan)) {
@@ -161,15 +173,27 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     // Read Text segment
     if (plan.text_size > 0) {
         kern_lseek(fd, (off_t)plan.text_file_offset, 0);
-        if (kern_read(fd, (void *)plan.text_base, plan.text_size) != (int)plan.text_size) {
-            return elks_fail(fd, -EIO, "ELKS: failed to read text segment");
+        {
+            int rc = kern_read(fd, (void *)plan.text_base, plan.text_size);
+            int status = elks_read_exact_status(rc, plan.text_size);
+
+            if (status != 0) {
+                return elks_fail(fd, status == -ENOEXEC ? -ENOEXEC : -EIO,
+                                 "ELKS: failed to read text segment");
+            }
         }
     }
 
     if (plan.fartext_size > 0) {
         kern_lseek(fd, (off_t)plan.fartext_file_offset, 0);
-        if (kern_read(fd, (void *)plan.fartext_base, plan.fartext_size) != (int)plan.fartext_size) {
-            return elks_fail(fd, -EIO, "ELKS: failed to read far text segment");
+        {
+            int rc = kern_read(fd, (void *)plan.fartext_base, plan.fartext_size);
+            int status = elks_read_exact_status(rc, plan.fartext_size);
+
+            if (status != 0) {
+                return elks_fail(fd, status == -ENOEXEC ? -ENOEXEC : -EIO,
+                                 "ELKS: failed to read far text segment");
+            }
         }
     }
 
@@ -177,8 +201,14 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
         uint32_t data_load_base = plan.combined ? (plan.text_base + plan.text_size) : plan.data_base;
 
         kern_lseek(fd, (off_t)plan.data_file_offset, 0);
-        if (kern_read(fd, (void *)data_load_base, plan.data_size) != (int)plan.data_size) {
-            return elks_fail(fd, -EIO, "ELKS: failed to read data segment");
+        {
+            int rc = kern_read(fd, (void *)data_load_base, plan.data_size);
+            int status = elks_read_exact_status(rc, plan.data_size);
+
+            if (status != 0) {
+                return elks_fail(fd, status == -ENOEXEC ? -ENOEXEC : -EIO,
+                                 "ELKS: failed to read data segment");
+            }
         }
         memset((void *)(uintptr_t)(data_load_base + plan.data_size), 0, plan.bss_size);
     }

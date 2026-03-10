@@ -70,6 +70,19 @@ int main(void) {
         return 1;
     }
 
+    if (elks_read_exact_status((int)sizeof(hdr), sizeof(hdr)) != 0) {
+        fprintf(stderr, "FAIL: exact ELKS read did not pass\n");
+        return 1;
+    }
+    if (elks_read_exact_status((int)sizeof(hdr) - 1, sizeof(hdr)) != -ENOEXEC) {
+        fprintf(stderr, "FAIL: truncated ELKS read did not map to ENOEXEC\n");
+        return 1;
+    }
+    if (elks_read_exact_status(-EIO, sizeof(hdr)) != -EIO) {
+        fprintf(stderr, "FAIL: ELKS read helper lost hard read error\n");
+        return 1;
+    }
+
     hdr.hlen = ELKS_FARTEXT_HDR_SIZE;
     if (!elks_header_recognized(&hdr, ELKS_FARTEXT_HDR_SIZE)) {
         fprintf(stderr, "FAIL: far-text header variant rejected\n");

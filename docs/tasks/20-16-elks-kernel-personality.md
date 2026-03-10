@@ -242,10 +242,10 @@ Reference: User Request (Step 31552)
 
 - [ ] **Quality Audit & Refactoring:** (REQ: REQ-20-0061)
         - Acceptance: All allocated resources freed on error.
-    - [ ] Audit elks_aout.c for unchecked file read errors. (REQ: REQ-20-0062)
-        - Files: `sys/fs/exec/elks_aout.c`
+    - [x] Audit elks_aout.c for unchecked file read errors. (REQ: REQ-20-0062)
+        - Files: `sys/exec/formats/elks_aout.c`
         - Tests: fuzz (truncated binary files)
-        - Acceptance: Truncated binaries rejected with ENOEXEC.
+        - Acceptance: Truncated ELKS headers and segment reads are rejected with `ENOEXEC`, while hard read failures continue to surface as I/O errors.
     - [ ] Audit ldt.c for race conditions in multi-threaded allocation. (REQ: REQ-20-0063)
         - Files: `sys/arch/i386/ldt.c`
         - Tests: stress (concurrent LDT alloc/free)

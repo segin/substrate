@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
+#include <sys/errno.h>
 #include <exec/perso/personality.h>
 #include <sys/sysinfo.h>
 #include <sys/proc.h>
@@ -262,6 +263,16 @@ static inline int elks_header_recognized(const void *header, size_t len) {
     }
 
     return 1;
+}
+
+static inline int elks_read_exact_status(int rc, size_t expected) {
+    if (rc < 0) {
+        return rc;
+    }
+    if ((size_t)rc != expected) {
+        return -ENOEXEC;
+    }
+    return 0;
 }
 
 static inline int elks_supl_header_valid(const struct elks_supl_hdr *suph) {
