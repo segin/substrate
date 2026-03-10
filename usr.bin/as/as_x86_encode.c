@@ -985,6 +985,26 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x35) != 0) {
             return -1;
         }
+    } else if (streq_ci(insn->mnemonic, "wrmsr")) {
+        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x30) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "rdtsc")) {
+        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x31) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "rdmsr")) {
+        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x32) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "rdpmc")) {
+        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x33) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "getsec")) {
+        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x37) != 0) {
+            return -1;
+        }
     } else if (streq_ci(insn->mnemonic, "bswap")) {
         if (insn->op_count != 1 || a->kind != AS_X86_OP_REG) {
             set_err(&ctx, "unsupported bswap form");
@@ -1373,6 +1393,38 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         if (insn->op_count != 2 || a->kind != AS_X86_OP_REG || !is_reg_or_mem(b) ||
             emit8(&ctx, 0x0f) != 0 || emit8(&ctx, op2) != 0 || modrm_sib_disp(&ctx, a->u.reg, b) != 0) {
             set_err(&ctx, "unsupported %s form", insn->mnemonic);
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "cmovo") || streq_ci(insn->mnemonic, "cmovno") ||
+               streq_ci(insn->mnemonic, "cmovb") || streq_ci(insn->mnemonic, "cmovae") ||
+               streq_ci(insn->mnemonic, "cmove") || streq_ci(insn->mnemonic, "cmovne") ||
+               streq_ci(insn->mnemonic, "cmovbe") || streq_ci(insn->mnemonic, "cmova") ||
+               streq_ci(insn->mnemonic, "cmovs") || streq_ci(insn->mnemonic, "cmovns") ||
+               streq_ci(insn->mnemonic, "cmovp") || streq_ci(insn->mnemonic, "cmovnp") ||
+               streq_ci(insn->mnemonic, "cmovl") || streq_ci(insn->mnemonic, "cmovge") ||
+               streq_ci(insn->mnemonic, "cmovle") || streq_ci(insn->mnemonic, "cmovg")) {
+        uint8_t op2;
+        if (insn->op_count != 2 || a->kind != AS_X86_OP_REG || !is_reg_or_mem(b)) {
+            set_err(&ctx, "unsupported %s form", insn->mnemonic);
+            return -1;
+        }
+        if (streq_ci(insn->mnemonic, "cmovo")) op2 = 0x40;
+        else if (streq_ci(insn->mnemonic, "cmovno")) op2 = 0x41;
+        else if (streq_ci(insn->mnemonic, "cmovb")) op2 = 0x42;
+        else if (streq_ci(insn->mnemonic, "cmovae")) op2 = 0x43;
+        else if (streq_ci(insn->mnemonic, "cmove")) op2 = 0x44;
+        else if (streq_ci(insn->mnemonic, "cmovne")) op2 = 0x45;
+        else if (streq_ci(insn->mnemonic, "cmovbe")) op2 = 0x46;
+        else if (streq_ci(insn->mnemonic, "cmova")) op2 = 0x47;
+        else if (streq_ci(insn->mnemonic, "cmovs")) op2 = 0x48;
+        else if (streq_ci(insn->mnemonic, "cmovns")) op2 = 0x49;
+        else if (streq_ci(insn->mnemonic, "cmovp")) op2 = 0x4a;
+        else if (streq_ci(insn->mnemonic, "cmovnp")) op2 = 0x4b;
+        else if (streq_ci(insn->mnemonic, "cmovl")) op2 = 0x4c;
+        else if (streq_ci(insn->mnemonic, "cmovge")) op2 = 0x4d;
+        else if (streq_ci(insn->mnemonic, "cmovle")) op2 = 0x4e;
+        else op2 = 0x4f;
+        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, op2) != 0 || modrm_sib_disp(&ctx, a->u.reg, b) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "clts")) {
