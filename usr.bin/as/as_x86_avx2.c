@@ -230,7 +230,7 @@ int as_x86_encode_avx2(const as_x86_avx2_insn_t *insn, uint8_t *out, size_t out_
 
         if (insn->op_count != 3 || insn->op1.kind != AS_X86_OP_REG ||
             insn->op2.kind != AS_X86_OP_REG || insn->op3.kind == AS_X86_OP_NONE ||
-            insn->has_imm8 || insn->vector_bits != 256) {
+            insn->has_imm8 || vector_bits_to_l(insn->vector_bits, &vex_l) != 0) {
             return -1;
         }
 
@@ -253,7 +253,7 @@ int as_x86_encode_avx2(const as_x86_avx2_insn_t *insn, uint8_t *out, size_t out_
         }
 
         return encode_vex_with_optional_imm(insn->op1.u.reg, insn->op2.u.reg, &insn->op3,
-                                            opcode, AS_VEX_MAP_0F38, AS_VEX_PP_66, vex_w, 1,
+                                            opcode, AS_VEX_MAP_0F38, AS_VEX_PP_66, vex_w, vex_l,
                                             0, 0, out, out_cap, out_len, errbuf, errbuf_sz);
     }
 
@@ -290,21 +290,21 @@ int as_x86_encode_avx2(const as_x86_avx2_insn_t *insn, uint8_t *out, size_t out_
         int vex_w = streq_ci(insn->mnemonic, "vpmaskmovq") ? 1 : 0;
 
         if (insn->op_count != 3 || insn->op2.kind != AS_X86_OP_REG || insn->has_imm8 ||
-            insn->vector_bits != 256) {
+            vector_bits_to_l(insn->vector_bits, &vex_l) != 0) {
             return -1;
         }
 
         if (insn->op1.kind == AS_X86_OP_REG && insn->op3.kind == AS_X86_OP_MEM) {
             return encode_vex_with_optional_imm(insn->op1.u.reg, insn->op2.u.reg,
                                                 &insn->op3, load_opcode, AS_VEX_MAP_0F38,
-                                                AS_VEX_PP_66, vex_w, 1, 0, 0, out, out_cap,
+                                                AS_VEX_PP_66, vex_w, vex_l, 0, 0, out, out_cap,
                                                 out_len, errbuf, errbuf_sz);
         }
 
         if (insn->op1.kind == AS_X86_OP_MEM && insn->op3.kind == AS_X86_OP_REG) {
             return encode_vex_with_optional_imm(insn->op3.u.reg, insn->op2.u.reg,
                                                 &insn->op1, store_opcode, AS_VEX_MAP_0F38,
-                                                AS_VEX_PP_66, vex_w, 1, 0, 0, out, out_cap,
+                                                AS_VEX_PP_66, vex_w, vex_l, 0, 0, out, out_cap,
                                                 out_len, errbuf, errbuf_sz);
         }
 
