@@ -12,7 +12,7 @@ ifeq ($(ARCH),i386)
 		--change-section-vma .bss-0xBFC00000
 endif
 
-.PHONY: all clean install arch_kernel core kern pm drivers fs exec vfs exec_perso vm multiboot freebsd zimage efi tests klib
+.PHONY: all clean install arch_kernel core kern pm drivers fs exec vfs exec_perso vm multiboot freebsd zimage efi tests klib floppy
 
 all: kernel.bin kernel.efi kernel.multiboot kernel.freebsd kernel.zimage
 	@echo "Kernel build complete (all formats)."
@@ -74,6 +74,10 @@ kernel.zimage: kernel.bin
 	objcopy -O binary kernel.bin kernel.raw
 	arch/$(ARCH)/mkzimage.py arch/$(ARCH)/zimage_header.bin kernel.raw kernel.zimage
 	rm -f kernel.raw
+
+kernel.flp: kernel.zimage
+	@echo "Building floppy image..."
+	arch/$(ARCH)/floppy/mkfloppy.py kernel.zimage kernel.flp
 
 kernel.efi: arch_kernel klib kern pm drivers fs exec vfs exec_perso vm tests
 	# First pass for EFI kernel
@@ -192,7 +196,8 @@ clean:
 	$(MAKE) -C exec/perso clean
 	$(MAKE) -C vm clean
 	$(MAKE) -C lib clean
-	rm -f kernel.bin kernel.zimage kernel.tmp kernel_efi.tmp ksyms_table.c ksyms_table.o ksyms_efi_table.c ksyms_efi_table.o kernel_efi.elf kernel.efi kernel.multiboot kernel.freebsd
+	rm -f kernel.bin kernel.zimage kernel.flp kernel.tmp kernel_efi.tmp ksyms_table.c ksyms_table.o ksyms_efi_table.c ksyms_efi_table.o kernel_efi.elf kernel.efi kernel.multiboot kernel.freebsd
+	rm -f arch/$(ARCH)/floppy/stage1.bin arch/$(ARCH)/floppy/stage2.bin
 
 tests:
 	$(MAKE) -C ../tests/sys tests.o

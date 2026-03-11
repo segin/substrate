@@ -20,6 +20,7 @@ zimage_start:
 .set ZIMG_SCRATCH_RAMDISK,  0x0504
 .set ZIMG_SCRATCH_RDSIZE,   0x0508
 .set ZIMG_SCRATCH_CODE32,   0x050C
+.set ZIMG_SCRATCH_MMAPLEN,  0x0510
 
 .org 0x1F1
 setup_sects: .byte 0
@@ -81,6 +82,40 @@ setup_start:
     movl %eax, %es:ZIMG_SCRATCH_CODE32
 
     /*
+     * Build a Multiboot-format mmap by querying BIOS E820 while we are still
+     * in real mode. The kernel PMM relies on this to seed more than the tiny
+     * bootstrap allocator window.
+     */
+    movw $MBI_MMAP_SEG, %ax
+    movw %ax, %es
+    xorw %si, %si
+    xorl %ebx, %ebx
+    xorl %ebp, %ebp
+
+e820_loop:
+    movw %si, %di
+    addw $4, %di
+    movl $0x00000014, %es:(%si)    # Multiboot entry payload size
+    movl $0x0000E820, %eax
+    movl $0x534D4150, %edx         # 'SMAP'
+    movl $20, %ecx
+    int $0x15
+    jc e820_done
+    cmpl $0x534D4150, %eax
+    jne e820_done
+
+    addw $24, %si
+    addw $24, %bp
+    testl %ebx, %ebx
+    jnz e820_loop
+
+e820_done:
+    xorw %ax, %ax
+    movw %ax, %es
+    movzwl %bp, %eax
+    movl %eax, %es:ZIMG_SCRATCH_MMAPLEN
+
+    /*
      * Build an absolute far pointer to pm_entry. Once CR0.PE is set, a jump to
      * the raw symbol offset would land near address 0 instead of the actual
      * loaded setup image.
@@ -124,12 +159,15 @@ pm_entry:
     movl $32, %ecx                 # 32 dwords = 128 bytes
     rep stosl
 
-    movl $0x00000004, %eax         # MULTIBOOT_INFO_CMDLINE
+    movl $0x00000044, %eax         # MULTIBOOT_INFO_CMDLINE | MULTIBOOT_INFO_MEM_MAP
     movl $MBI_ADDR, %edi
     movl %eax, 0(%edi)
 
     movl ZIMG_SCRATCH_CMDLINE, %eax
     movl %eax, 16(%edi)            # multiboot_info_t.cmdline
+    movl ZIMG_SCRATCH_MMAPLEN, %eax
+    movl %eax, 44(%edi)            # multiboot_info_t.mmap_length
+    movl $MBI_MMAP_ADDR, 48(%edi)  # multiboot_info_t.mmap_addr
 
     # If Linux loader provided initrd, expose it as one Multiboot module.
     movl ZIMG_SCRATCH_RDSIZE, %ecx
@@ -139,7 +177,7 @@ pm_entry:
     testl %edx, %edx
     jz 1f
 
-    movl $0x0000000C, 0(%edi)      # MULTIBOOT_INFO_CMDLINE | MULTIBOOT_INFO_MODS
+    movl $0x0000004C, 0(%edi)      # MULTIBOOT_INFO_CMDLINE | MULTIBOOT_INFO_MODS | MULTIBOOT_INFO_MEM_MAP
     movl $1, 20(%edi)              # multiboot_info_t.mods_count
     movl $MBI_MOD_ADDR, 24(%edi)   # multiboot_info_t.mods_addr
     movl %edx, MBI_MOD_ADDR        # module[0].mod_start
@@ -172,4 +210,6 @@ pm_jump_ptr:
 
 .set MBI_ADDR, 0x00080000
 .set MBI_MOD_ADDR, 0x00080100
+.set MBI_MMAP_ADDR, 0x00080200
+.set MBI_MMAP_SEG, (MBI_MMAP_ADDR >> 4)
 .set SETUP_STACK_TOP, 0x0009FC00

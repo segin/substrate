@@ -88,6 +88,7 @@ Boot/init sequencing highlights:
 - root mount accepts `rootfstype=` as either a single filesystem name, a comma-separated probe list, or `auto`; when unspecified, the i386 boot path probes the registered block-backed root filesystems in kernel order (currently `ext2`, `fat`, `minix`, `udf`).
 - after root mount, the kernel ensures `/dev`, `/proc`, and `/sys` mountpoints exist and mounts `devfs`, `procfs`, and `sysfs` automatically.
 - init is spawned before VM background workers so `PID 1` remains the first userspace process.
+- i386 also provides a BIOS floppy boot artifact `sys/kernel.flp`: a fixed-layout 1.44MB image with a two-stage real-mode loader that prompts for a hand-typed kernel command line, falls back to a built-in default boot line when Enter is pressed on an empty prompt, refuses to boot on pre-386 CPUs, loads `kernel.zimage` from the floppy payload, patches the Linux boot header `cmd_line_ptr`, and then transfers control to the normal `zImage` setup entry.
 
 ### 5.1 i386 PMAP Model
 
