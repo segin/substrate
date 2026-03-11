@@ -10,7 +10,7 @@
  * with cmdline pointer, then jumps to code32_start (kernel _start at 1MB).
  */
 
-# Linux boot header at start of setup/boot sector
+# Legacy entry point at the start of the setup image.
 .global zimage_start
 zimage_start:
     jmp setup_start
@@ -30,8 +30,11 @@ vid_mode:    .word 0
 root_dev:    .word 0
 boot_flag:   .word 0xAA55
 
+# Linux boot protocol header jump field at 0x200.
+.org 0x200
+    jmp setup_start
+
 # Header start at 0x202
-.org 0x202
 header_magic: .ascii "HdrS"
 header_version: .word 0x0203 # 2.03
 realmode_swtch: .long 0
