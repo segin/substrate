@@ -17,7 +17,7 @@ TIMEOUT_BIN=${TIMEOUT_BIN:-timeout}
 QEMU_TIMEOUT=${QEMU_TIMEOUT:-35}
 LOG_DIR=${LOG_DIR:-"$SCRIPT_DIR/logs"}
 WORK_ROOTFS_IMG=${WORK_ROOTFS_IMG:-"$LOG_DIR/rootfs.img"}
-DEFAULT_CASES="hello_elks sleep_elks fileio_elks fork_elks bounds_test_elks cat_elks fuzz_syscalls_elks upstream_ls_elks upstream_uname_elks upstream_df_elks upstream_ps_elks upstream_sh_prompt_elks upstream_sh_ls_elks native_sh_elks_sh"
+DEFAULT_CASES="hello_elks sleep_elks fileio_elks fork_elks bounds_test_elks cat_elks fuzz_syscalls_elks upstream_ls_elks upstream_uname_elks upstream_df_elks upstream_ps_elks upstream_meminfo_elks upstream_sh_prompt_elks upstream_sh_ls_elks native_sh_elks_sh"
 
 if [ "$#" -gt 0 ]; then
     CASES="$*"
@@ -215,6 +215,9 @@ if want_case upstream_df_elks; then
 fi
 if want_case upstream_ps_elks; then
     run_init_case upstream_ps_elks /perso/elks/bin/ps "  PID   GRP  TTY USER STAT CPU  HEAP  FREE   SIZE COMMAND" "ps " "(kinit)"
+fi
+if want_case upstream_meminfo_elks; then
+    run_init_case upstream_meminfo_elks /perso/elks/bin/meminfo "Heap/free" "Memory usage"
 fi
 if want_case upstream_sh_prompt_elks; then
     run_init_case upstream_sh_prompt_elks /perso/elks/bin/sh "# "

@@ -239,6 +239,10 @@ Reference: User Request (Step 31552)
         - Files: `tests/elks/run_tests.sh`, `sys/exec/perso/perso_elks.c`
         - Tests: emulation (`tests/elks/run_tests.sh upstream_ps_elks`)
         - Acceptance: QEMU booting `init=/perso/elks/bin/ps` prints a coherent process table including the ELKS `ps` process and `kinit`, using the synthetic `/dev/kmem` compatibility surface without a kernel fault.
+    - [x] Add upstream ELKS meminfo smoke. (REQ: REQ-20-0074)
+        - Files: `tests/elks/run_tests.sh`, `sys/exec/perso/perso_elks.c`
+        - Tests: emulation (`tests/elks/run_tests.sh upstream_meminfo_elks`)
+        - Acceptance: QEMU booting `init=/perso/elks/bin/meminfo` traverses the synthetic ELKS `/dev/kmem` task, heap, and segment views, prints heap plus memory-usage summaries, and exits without `EINVAL` or a kernel fault.
     - [x] Add ELKS binary build Makefile. (REQ: REQ-20-0054)
         - Files: `tests/elks/Makefile`
         - Tests: N/A (build script)
@@ -357,6 +361,7 @@ Reference: User Request (Step 31552)
 - **US-20-0071**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add upstream ELKS uname smoke so that this capability is implemented with clear verification evidence.
 - **US-20-0072**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement ELKS sys_ustatfs translation so that this capability is implemented with clear verification evidence.
 - **US-20-0073**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add upstream ELKS df smoke so that this capability is implemented with clear verification evidence.
+- **US-20-0074**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add upstream ELKS meminfo smoke so that this capability is implemented with clear verification evidence.
 - **US-20-0054**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want a single ELKS test-binary Makefile that builds both assembly and C test programs so that future ELKS validation artifacts share one reproducible build path.
 - **US-20-0055**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to documentation: so that this capability is implemented with clear verification evidence.
 - **US-20-0056**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to create personality-elks(7) developer guide so that this capability is implemented with clear verification evidence.
@@ -551,6 +556,9 @@ Reference: User Request (Step 31552)
   - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-20-0073** (EARS/Ubiquitous): The Substrate system shall provide an upstream ELKS `df` smoke test.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0074** (EARS/Ubiquitous): The Substrate system shall provide an upstream ELKS `meminfo` smoke test over the synthetic `/dev/kmem` compatibility surface.
   - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-20-0054** (EARS/Ubiquitous): The Substrate system shall provide an ELKS test-binary Makefile that builds all current in-tree ELKS test binaries and supports both assembly and C ELKS test sources.

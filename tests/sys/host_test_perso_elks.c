@@ -48,6 +48,8 @@ static int stub_tz_dsttime;
 static struct sigaction stub_oldact;
 static uint8_t *ds_mem;
 static size_t ds_mem_size;
+static size_t stub_vm_phys_free_pages = 512;
+static size_t stub_vm_phys_used_pages = 256;
 
 #define ELKS_TEST_NCCS 17
 #define ELKS_TEST_TERMIOS_BYTES offsetof(struct termios, c_cc[ELKS_TEST_NCCS])
@@ -279,6 +281,8 @@ uint64_t stub_get_ticks(void) { return 0x12345678ULL; }
 void core_capture_trapframe(process_t *p, const registers_t *regs) { (void)p; (void)regs; }
 void *kmalloc(size_t size) { return malloc(size); }
 void kfree(void *ptr, size_t size) { (void)size; free(ptr); }
+size_t vm_phys_get_free(void) { return stub_vm_phys_free_pages; }
+size_t vm_phys_get_used(void) { return stub_vm_phys_used_pages; }
 void proc_capture_cmdline(process_t *p, char *const argv[]) {
     size_t used = 0;
     int i;
@@ -616,22 +620,48 @@ int main(void) {
         fprintf(stderr, "FAIL: ELKS MEM_GETTASK emulation wrong\n");
         return 1;
     }
-    memset(ds_mem + 0x156, 0xFF, 16);
-    if (fn(4, ELKS_MEM_GETUPTIME, 0x156, 0, 0, 0, 0, 0) != 0 ||
-        *(uint16_t *)(void *)(ds_mem + 0x156) != ELKS_KMEM_JIFFIES_OFFSET) {
+    memset(ds_mem + 0x156, 0, 16);
+    if (fn(4, ELKS_MEM_GETSEGALL, 0x156, 0, 0, 0, 0, 0) != 0 ||
+        *(uint16_t *)(void *)(ds_mem + 0x156) != ELKS_KMEM_SEGALL_OFFSET) {
+        fprintf(stderr, "FAIL: ELKS MEM_GETSEGALL emulation wrong\n");
+        return 1;
+    }
+    memset(ds_mem + 0x158, 0, 16);
+    if (fn(4, ELKS_MEM_GETHEAP, 0x158, 0, 0, 0, 0, 0) != 0 ||
+        *(uint16_t *)(void *)(ds_mem + 0x158) != ELKS_KMEM_HEAPALL_OFFSET) {
+        fprintf(stderr, "FAIL: ELKS MEM_GETHEAP emulation wrong\n");
+        return 1;
+    }
+    memset(ds_mem + 0x170, 0, sizeof(struct elks_mem_usage));
+    if (fn(4, ELKS_MEM_GETUSAGE, 0x170, 0, 0, 0, 0, 0) != 0) {
+        fprintf(stderr, "FAIL: ELKS MEM_GETUSAGE emulation wrong\n");
+        return 1;
+    }
+    {
+        struct elks_mem_usage *mu = (struct elks_mem_usage *)(void *)(ds_mem + 0x170);
+
+        if (mu->main_free != 2048U || mu->main_used != 1024U ||
+            mu->xms_free != 0U || mu->xms_used != 0U) {
+            fprintf(stderr, "FAIL: ELKS MEM_GETUSAGE values wrong\n");
+            return 1;
+        }
+    }
+    memset(ds_mem + 0x15a, 0xFF, 16);
+    if (fn(4, ELKS_MEM_GETUPTIME, 0x15a, 0, 0, 0, 0, 0) != 0 ||
+        *(uint16_t *)(void *)(ds_mem + 0x15a) != ELKS_KMEM_JIFFIES_OFFSET) {
         fprintf(stderr, "FAIL: ELKS MEM_GETUPTIME emulation wrong\n");
         return 1;
     }
-    memset(ds_mem + 0x158, 0xFF, 16);
-    if (fn(4, ELKS_MEM_GETJIFFADDR, 0x158, 0, 0, 0, 0, 0) != 0 ||
-        *(uint16_t *)(void *)(ds_mem + 0x158) != ELKS_KMEM_JIFFIES_OFFSET) {
+    memset(ds_mem + 0x15c, 0xFF, 16);
+    if (fn(4, ELKS_MEM_GETJIFFADDR, 0x15c, 0, 0, 0, 0, 0) != 0 ||
+        *(uint16_t *)(void *)(ds_mem + 0x15c) != ELKS_KMEM_JIFFIES_OFFSET) {
         fprintf(stderr, "FAIL: ELKS MEM_GETJIFFADDR emulation wrong\n");
         return 1;
     }
-    *(int32_t *)(void *)(ds_mem + 0x15c) = (int32_t)ELKS_KMEM_JIFFIES_OFFSET;
+    *(int32_t *)(void *)(ds_mem + 0x160) = (int32_t)ELKS_KMEM_JIFFIES_OFFSET;
     if (((int (*)(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t))
-         personality_elks.syscall_table[ELKS_SYS_lseek])(4, 0x15c, 0, 0, 0, 0, 0, 0) != 0 ||
-        *(int32_t *)(void *)(ds_mem + 0x15c) != (int32_t)ELKS_KMEM_JIFFIES_OFFSET) {
+         personality_elks.syscall_table[ELKS_SYS_lseek])(4, 0x160, 0, 0, 0, 0, 0, 0) != 0 ||
+        *(int32_t *)(void *)(ds_mem + 0x160) != (int32_t)ELKS_KMEM_JIFFIES_OFFSET) {
         fprintf(stderr, "FAIL: ELKS kmem jiffies lseek emulation wrong\n");
         return 1;
     }
@@ -642,10 +672,48 @@ int main(void) {
         fprintf(stderr, "FAIL: ELKS kmem jiffies image wrong\n");
         return 1;
     }
-    *(int32_t *)(void *)(ds_mem + 0x160) = (int32_t)ELKS_KMEM_TASKS_OFFSET;
+    *(int32_t *)(void *)(ds_mem + 0x162) = (int32_t)ELKS_KMEM_SEGALL_OFFSET;
     if (((int (*)(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t))
-         personality_elks.syscall_table[ELKS_SYS_lseek])(4, 0x160, 0, 0, 0, 0, 0, 0) != 0 ||
-        *(int32_t *)(void *)(ds_mem + 0x160) != (int32_t)ELKS_KMEM_TASKS_OFFSET) {
+         personality_elks.syscall_table[ELKS_SYS_lseek])(4, 0x162, 0, 0, 0, 0, 0, 0) != 0 ||
+        *(int32_t *)(void *)(ds_mem + 0x162) != (int32_t)ELKS_KMEM_SEGALL_OFFSET) {
+        fprintf(stderr, "FAIL: ELKS kmem segall lseek wrong\n");
+        return 1;
+    }
+    memset(ds_mem + 0x520, 0, ELKS_KMEM_LIST_SIZE);
+    if (((int (*)(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t))
+         personality_elks.syscall_table[ELKS_SYS_read])(4, 0x520, ELKS_KMEM_LIST_SIZE, 0, 0, 0, 0, 0) !=
+        ELKS_KMEM_LIST_SIZE) {
+        fprintf(stderr, "FAIL: ELKS kmem segall read wrong\n");
+        return 1;
+    }
+    if (*(uint16_t *)(void *)(ds_mem + 0x520 + ELKS_KMEM_LIST_NEXT) == ELKS_KMEM_SEGALL_OFFSET ||
+        *(uint16_t *)(void *)(ds_mem + 0x520 + ELKS_KMEM_LIST_PREV) == ELKS_KMEM_SEGALL_OFFSET) {
+        fprintf(stderr, "FAIL: ELKS kmem segall list empty\n");
+        return 1;
+    }
+    *(int32_t *)(void *)(ds_mem + 0x164) = (int32_t)ELKS_KMEM_HEAPALL_OFFSET;
+    if (((int (*)(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t))
+         personality_elks.syscall_table[ELKS_SYS_lseek])(4, 0x164, 0, 0, 0, 0, 0, 0) != 0 ||
+        *(int32_t *)(void *)(ds_mem + 0x164) != (int32_t)ELKS_KMEM_HEAPALL_OFFSET) {
+        fprintf(stderr, "FAIL: ELKS kmem heapall lseek wrong\n");
+        return 1;
+    }
+    memset(ds_mem + 0x530, 0, ELKS_KMEM_LIST_SIZE);
+    if (((int (*)(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t))
+         personality_elks.syscall_table[ELKS_SYS_read])(4, 0x530, ELKS_KMEM_LIST_SIZE, 0, 0, 0, 0, 0) !=
+        ELKS_KMEM_LIST_SIZE) {
+        fprintf(stderr, "FAIL: ELKS kmem heapall read wrong\n");
+        return 1;
+    }
+    if (*(uint16_t *)(void *)(ds_mem + 0x530 + ELKS_KMEM_LIST_NEXT) == ELKS_KMEM_HEAPALL_OFFSET ||
+        *(uint16_t *)(void *)(ds_mem + 0x530 + ELKS_KMEM_LIST_PREV) == ELKS_KMEM_HEAPALL_OFFSET) {
+        fprintf(stderr, "FAIL: ELKS kmem heapall list empty\n");
+        return 1;
+    }
+    *(int32_t *)(void *)(ds_mem + 0x166) = (int32_t)ELKS_KMEM_TASKS_OFFSET;
+    if (((int (*)(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t))
+         personality_elks.syscall_table[ELKS_SYS_lseek])(4, 0x166, 0, 0, 0, 0, 0, 0) != 0 ||
+        *(int32_t *)(void *)(ds_mem + 0x166) != (int32_t)ELKS_KMEM_TASKS_OFFSET) {
         fprintf(stderr, "FAIL: ELKS kmem lseek emulation wrong\n");
         return 1;
     }
@@ -662,10 +730,10 @@ int main(void) {
         fprintf(stderr, "FAIL: ELKS kmem swapper slot wrong\n");
         return 1;
     }
-    *(int32_t *)(void *)(ds_mem + 0x160) = (int32_t)(ELKS_KMEM_TASKS_OFFSET + ELKS_KMEM_TASK_SLOT_SIZE);
+    *(int32_t *)(void *)(ds_mem + 0x166) = (int32_t)(ELKS_KMEM_TASKS_OFFSET + ELKS_KMEM_TASK_SLOT_SIZE);
     if (((int (*)(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t))
-         personality_elks.syscall_table[ELKS_SYS_lseek])(4, 0x160, 0, 0, 0, 0, 0, 0) != 0 ||
-        *(int32_t *)(void *)(ds_mem + 0x160) != (int32_t)(ELKS_KMEM_TASKS_OFFSET + ELKS_KMEM_TASK_SLOT_SIZE)) {
+         personality_elks.syscall_table[ELKS_SYS_lseek])(4, 0x166, 0, 0, 0, 0, 0, 0) != 0 ||
+        *(int32_t *)(void *)(ds_mem + 0x166) != (int32_t)(ELKS_KMEM_TASKS_OFFSET + ELKS_KMEM_TASK_SLOT_SIZE)) {
         fprintf(stderr, "FAIL: ELKS kmem active-slot lseek wrong\n");
         return 1;
     }
@@ -689,10 +757,10 @@ int main(void) {
         fprintf(stderr, "FAIL: ELKS kmem active task image wrong\n");
         return 1;
     }
-    *(int32_t *)(void *)(ds_mem + 0x164) =
+    *(int32_t *)(void *)(ds_mem + 0x168) =
         (int32_t)*(uint16_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_T_BEGSTACK_LEGACY);
     if (((int (*)(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t))
-         personality_elks.syscall_table[ELKS_SYS_lseek])(4, 0x164, 0, 0, 0, 0, 0, 0) != 0) {
+         personality_elks.syscall_table[ELKS_SYS_lseek])(4, 0x168, 0, 0, 0, 0, 0, 0) != 0) {
         fprintf(stderr, "FAIL: ELKS kmem stack lseek wrong\n");
         return 1;
     }

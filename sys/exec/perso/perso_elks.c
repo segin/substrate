@@ -24,6 +24,7 @@
 #include <kern/time.h>
 #include <kern/cmdline.h>
 #include <vm/vm_kmem.h>
+#include <vm/phys_mem.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
@@ -191,6 +192,12 @@ struct elks_statfs {
 #define ELKS_KMEM_TASKS_OFFSET       0x0100U
 #define ELKS_KMEM_TASK_SIZE          0x033CU
 #define ELKS_KMEM_TASK_SLOT_SIZE     0x0372U
+#define ELKS_KMEM_LIST_SIZE          0x0004U
+#define ELKS_KMEM_LIST_PREV          0x0000U
+#define ELKS_KMEM_LIST_NEXT          0x0002U
+#define ELKS_KMEM_SEGALL_OFFSET      (ELKS_KMEM_TASKS_OFFSET + (MAX_PROCS * ELKS_KMEM_TASK_SLOT_SIZE))
+#define ELKS_KMEM_HEAPALL_OFFSET     (ELKS_KMEM_SEGALL_OFFSET + ELKS_KMEM_LIST_SIZE)
+#define ELKS_KMEM_DYNAMIC_OFFSET     (ELKS_KMEM_HEAPALL_OFFSET + ELKS_KMEM_LIST_SIZE)
 #define ELKS_KMEM_TASK_STATE         0x0000U
 #define ELKS_KMEM_TASK_STATE_LEGACY  0x0022U
 #define ELKS_KMEM_TASK_PID           0x0002U
@@ -228,8 +235,18 @@ struct elks_statfs {
 #define ELKS_KMEM_TASK_T_REGS_SS_LEGACY 0x0370U
 #define ELKS_KMEM_TASK_T_REGS_SS_ALT 0x0370U
 #define ELKS_KMEM_SEG_SIZE           0x0010U
+#define ELKS_KMEM_SEG_ALL            0x0000U
+#define ELKS_KMEM_SEG_FREE           0x0004U
 #define ELKS_KMEM_SEG_BASE           0x0008U
 #define ELKS_KMEM_SEG_SIZE_OFF       0x000AU
+#define ELKS_KMEM_SEG_FLAGS          0x000CU
+#define ELKS_KMEM_SEG_REFCOUNT       0x000DU
+#define ELKS_KMEM_SEG_PID            0x000EU
+#define ELKS_KMEM_HEAP_SIZE          0x000CU
+#define ELKS_KMEM_HEAP_ALL           0x0000U
+#define ELKS_KMEM_HEAP_FREE          0x0004U
+#define ELKS_KMEM_HEAP_SIZE_OFF      0x0008U
+#define ELKS_KMEM_HEAP_TAG           0x000AU
 #define ELKS_KMEM_CMDLINE_SIZE       0x0050U
 #define ELKS_KMEM_TTY_SIZE           0x0080U
 #define ELKS_KMEM_TTY_MINOR_LEGACY   0x0002U
@@ -245,6 +262,27 @@ struct elks_statfs {
 #define ELKS_TASK_UNUSED             7U
 #define ELKS_SEG_CODE                0U
 #define ELKS_SEG_DATA                1U
+#define ELKS_HEAP_TAG_FREE           0x00U
+#define ELKS_HEAP_TAG_SEG            0x01U
+#define ELKS_SEG_FLAG_USED           0x80U
+#define ELKS_SEG_FLAG_CSEG           0x01U
+#define ELKS_SEG_FLAG_DSEG           0x02U
+#define ELKS_PAGE_KB                 4U
+#define ELKS_MEMINFO_KB_MAX          0x7FFFU
+
+struct elks_mem_usage {
+    uint16_t main_free;
+    uint16_t main_used;
+    uint16_t xms_free;
+    uint16_t xms_used;
+} __attribute__((packed, aligned(2)));
+
+struct elks_kmem_task_refs {
+    uint16_t code_seg_off;
+    uint16_t data_seg_off;
+    uint16_t code_heap_off;
+    uint16_t data_heap_off;
+};
 
 static void elks_kmem_put16(uint8_t *buf, uint32_t off, uint16_t value) {
     buf[off + 0U] = (uint8_t)(value & 0xFFU);
@@ -256,6 +294,11 @@ static void elks_kmem_put32(uint8_t *buf, uint32_t off, uint32_t value) {
     buf[off + 1U] = (uint8_t)((value >> 8) & 0xFFU);
     buf[off + 2U] = (uint8_t)((value >> 16) & 0xFFU);
     buf[off + 3U] = (uint8_t)((value >> 24) & 0xFFU);
+}
+
+static void elks_kmem_put_list(uint8_t *buf, uint32_t off, uint16_t prev, uint16_t next) {
+    elks_kmem_put16(buf, off + ELKS_KMEM_LIST_PREV, prev);
+    elks_kmem_put16(buf, off + ELKS_KMEM_LIST_NEXT, next);
 }
 
 static int elks_is_kmem_fd(int fd) {
@@ -350,12 +393,14 @@ static int elks_kmem_append_region(uint32_t *cursor, uint32_t size, uint32_t ali
 }
 
 static void elks_kmem_emit_task(uint8_t *buf, uint32_t task_off, const process_t *proc,
-                                uint32_t *cursor) {
+                                uint32_t *cursor, struct elks_kmem_task_refs *refs) {
     char cmdline[PROC_CMDLINE_MAX];
     size_t cmdline_bytes;
     size_t cmd_argc;
     uint32_t code_seg_off = 0;
     uint32_t data_seg_off = 0;
+    uint32_t code_heap_off = 0;
+    uint32_t data_heap_off = 0;
     uint32_t tty_off = 0;
     uint32_t stack_off = 0;
     uint16_t t_enddata = 0x0080U;
@@ -364,6 +409,12 @@ static void elks_kmem_emit_task(uint8_t *buf, uint32_t task_off, const process_t
     uint16_t dseg_size_paras;
     uint16_t cseg_size_paras = 0x0040U;
     uint16_t avg = 0;
+    uint16_t code_base_paras;
+    uint16_t data_base_paras;
+
+    if (refs) {
+        memset(refs, 0, sizeof(*refs));
+    }
 
     memset(buf + task_off, 0, ELKS_KMEM_TASK_SLOT_SIZE);
     if (!elks_proc_visible(proc)) {
@@ -372,12 +423,16 @@ static void elks_kmem_emit_task(uint8_t *buf, uint32_t task_off, const process_t
         return;
     }
 
-    if (elks_kmem_append_region(cursor, ELKS_KMEM_SEG_SIZE, 2U, &code_seg_off) != 0 ||
-        elks_kmem_append_region(cursor, ELKS_KMEM_SEG_SIZE, 2U, &data_seg_off) != 0) {
+    if (elks_kmem_append_region(cursor, ELKS_KMEM_HEAP_SIZE + ELKS_KMEM_SEG_SIZE, 2U,
+                                &code_heap_off) != 0 ||
+        elks_kmem_append_region(cursor, ELKS_KMEM_HEAP_SIZE + ELKS_KMEM_SEG_SIZE, 2U,
+                                &data_heap_off) != 0) {
         buf[task_off + ELKS_KMEM_TASK_STATE] = (uint8_t)ELKS_TASK_UNUSED;
         buf[task_off + ELKS_KMEM_TASK_STATE_LEGACY] = (uint8_t)ELKS_TASK_UNUSED;
         return;
     }
+    code_seg_off = code_heap_off + ELKS_KMEM_HEAP_SIZE;
+    data_seg_off = data_heap_off + ELKS_KMEM_HEAP_SIZE;
 
     if (proc->tty != NULL &&
         elks_kmem_append_region(cursor, ELKS_KMEM_TTY_SIZE, 2U, &tty_off) != 0) {
@@ -401,6 +456,8 @@ static void elks_kmem_emit_task(uint8_t *buf, uint32_t task_off, const process_t
                                    (uint32_t)cmdline_bytes + 15U) >> 4) + 1U);
     t_sp = (uint16_t)stack_off;
     avg = (uint16_t)((proc->utime + proc->stime) & 0xFFFFU);
+    code_base_paras = (uint16_t)(code_seg_off >> 4);
+    data_base_paras = (uint16_t)(data_seg_off >> 4);
 
     buf[task_off + ELKS_KMEM_TASK_STATE] = (uint8_t)elks_map_proc_state(proc);
     buf[task_off + ELKS_KMEM_TASK_STATE_LEGACY] = (uint8_t)elks_map_proc_state(proc);
@@ -456,10 +513,29 @@ static void elks_kmem_emit_task(uint8_t *buf, uint32_t task_off, const process_t
     elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_T_REGS_SS_LEGACY, 0U);
     elks_kmem_put16(buf, task_off + ELKS_KMEM_TASK_T_REGS_SS_ALT, 0U);
 
-    elks_kmem_put16(buf, code_seg_off + ELKS_KMEM_SEG_BASE, 0U);
+    elks_kmem_put_list(buf, code_heap_off + ELKS_KMEM_HEAP_ALL, 0U, 0U);
+    elks_kmem_put_list(buf, code_heap_off + ELKS_KMEM_HEAP_FREE, 0U, 0U);
+    elks_kmem_put16(buf, code_heap_off + ELKS_KMEM_HEAP_SIZE_OFF, ELKS_KMEM_SEG_SIZE);
+    buf[code_heap_off + ELKS_KMEM_HEAP_TAG] = ELKS_HEAP_TAG_SEG;
+    elks_kmem_put_list(buf, code_seg_off + ELKS_KMEM_SEG_ALL, 0U, 0U);
+    elks_kmem_put_list(buf, code_seg_off + ELKS_KMEM_SEG_FREE, 0U, 0U);
+    elks_kmem_put16(buf, code_seg_off + ELKS_KMEM_SEG_BASE, code_base_paras);
     elks_kmem_put16(buf, code_seg_off + ELKS_KMEM_SEG_SIZE_OFF, cseg_size_paras);
-    elks_kmem_put16(buf, data_seg_off + ELKS_KMEM_SEG_BASE, 0U);
+    buf[code_seg_off + ELKS_KMEM_SEG_FLAGS] = ELKS_SEG_FLAG_USED | ELKS_SEG_FLAG_CSEG;
+    buf[code_seg_off + ELKS_KMEM_SEG_REFCOUNT] = 1U;
+    elks_kmem_put16(buf, code_seg_off + ELKS_KMEM_SEG_PID, (uint16_t)proc->pid);
+
+    elks_kmem_put_list(buf, data_heap_off + ELKS_KMEM_HEAP_ALL, 0U, 0U);
+    elks_kmem_put_list(buf, data_heap_off + ELKS_KMEM_HEAP_FREE, 0U, 0U);
+    elks_kmem_put16(buf, data_heap_off + ELKS_KMEM_HEAP_SIZE_OFF, ELKS_KMEM_SEG_SIZE);
+    buf[data_heap_off + ELKS_KMEM_HEAP_TAG] = ELKS_HEAP_TAG_SEG;
+    elks_kmem_put_list(buf, data_seg_off + ELKS_KMEM_SEG_ALL, 0U, 0U);
+    elks_kmem_put_list(buf, data_seg_off + ELKS_KMEM_SEG_FREE, 0U, 0U);
+    elks_kmem_put16(buf, data_seg_off + ELKS_KMEM_SEG_BASE, data_base_paras);
     elks_kmem_put16(buf, data_seg_off + ELKS_KMEM_SEG_SIZE_OFF, dseg_size_paras);
+    buf[data_seg_off + ELKS_KMEM_SEG_FLAGS] = ELKS_SEG_FLAG_USED | ELKS_SEG_FLAG_DSEG;
+    buf[data_seg_off + ELKS_KMEM_SEG_REFCOUNT] = 1U;
+    elks_kmem_put16(buf, data_seg_off + ELKS_KMEM_SEG_PID, (uint16_t)proc->pid);
 
     if (tty_off != 0U && proc->tty != NULL) {
         elks_kmem_put16(buf, tty_off + ELKS_KMEM_TTY_MINOR_LEGACY, 0U);
@@ -483,15 +559,53 @@ static void elks_kmem_emit_task(uint8_t *buf, uint32_t task_off, const process_t
         }
         elks_kmem_put16(buf, ptr_off + (uint32_t)(cmd_argc * sizeof(uint16_t)), 0U);
     }
+
+    if (refs) {
+        refs->code_seg_off = (uint16_t)code_seg_off;
+        refs->data_seg_off = (uint16_t)data_seg_off;
+        refs->code_heap_off = (uint16_t)code_heap_off;
+        refs->data_heap_off = (uint16_t)data_heap_off;
+    }
+}
+
+static void elks_kmem_link_ring(uint8_t *buf, uint16_t root_off, const uint16_t *nodes, size_t count) {
+    size_t i;
+
+    if (count == 0U) {
+        elks_kmem_put_list(buf, root_off, root_off, root_off);
+        return;
+    }
+
+    elks_kmem_put_list(buf, root_off, nodes[count - 1U], nodes[0]);
+    for (i = 0; i < count; i++) {
+        uint16_t prev = (i == 0U) ? root_off : nodes[i - 1U];
+        uint16_t next = (i + 1U == count) ? root_off : nodes[i + 1U];
+
+        elks_kmem_put_list(buf, nodes[i], prev, next);
+    }
+}
+
+static uint16_t elks_kmem_meminfo_kb(size_t pages) {
+    size_t kb = pages * ELKS_PAGE_KB;
+
+    if (kb > ELKS_MEMINFO_KB_MAX) {
+        kb = ELKS_MEMINFO_KB_MAX;
+    }
+    return (uint16_t)kb;
 }
 
 static int elks_kmem_build_snapshot(uint8_t **buf_out, size_t *size_out) {
     uint8_t *buf;
-    uint32_t cursor = ELKS_KMEM_TASKS_OFFSET + (MAX_PROCS * ELKS_KMEM_TASK_SLOT_SIZE);
+    uint32_t cursor = ELKS_KMEM_DYNAMIC_OFFSET;
     const process_t *exported[MAX_PROCS];
+    struct elks_kmem_task_refs refs[MAX_PROCS];
+    uint16_t seg_nodes[MAX_PROCS * 2U];
+    uint16_t heap_nodes[MAX_PROCS * 2U];
     process_t *active = elks_active_process();
     process_t *swapper = elks_swapper_process();
     int exported_count = 0;
+    size_t seg_count = 0;
+    size_t heap_count = 0;
     int i;
 
     if (!buf_out || !size_out) {
@@ -504,8 +618,11 @@ static int elks_kmem_build_snapshot(uint8_t **buf_out, size_t *size_out) {
     }
     memset(buf, 0, ELKS_KMEM_IMAGE_CAP);
     elks_kmem_put32(buf, ELKS_KMEM_JIFFIES_OFFSET, (uint32_t)get_ticks());
+    elks_kmem_put_list(buf, ELKS_KMEM_SEGALL_OFFSET, ELKS_KMEM_SEGALL_OFFSET, ELKS_KMEM_SEGALL_OFFSET);
+    elks_kmem_put_list(buf, ELKS_KMEM_HEAPALL_OFFSET, ELKS_KMEM_HEAPALL_OFFSET, ELKS_KMEM_HEAPALL_OFFSET);
 
     memset(exported, 0, sizeof(exported));
+    memset(refs, 0, sizeof(refs));
     /*
      * Older installed ELKS userland expects the first task slot to be the
      * reserved idle/swapper slot and starts scanning at slot 1.
@@ -560,8 +677,17 @@ static int elks_kmem_build_snapshot(uint8_t **buf_out, size_t *size_out) {
 
     for (i = 0; i < MAX_PROCS; i++) {
         elks_kmem_emit_task(buf, ELKS_KMEM_TASKS_OFFSET + (i * ELKS_KMEM_TASK_SLOT_SIZE),
-                            i < exported_count ? exported[i] : NULL, &cursor);
+                            i < exported_count ? exported[i] : NULL, &cursor, &refs[i]);
+        if (refs[i].code_seg_off != 0U) {
+            seg_nodes[seg_count++] = refs[i].code_seg_off;
+            seg_nodes[seg_count++] = refs[i].data_seg_off;
+            heap_nodes[heap_count++] = refs[i].code_heap_off;
+            heap_nodes[heap_count++] = refs[i].data_heap_off;
+        }
     }
+
+    elks_kmem_link_ring(buf, (uint16_t)ELKS_KMEM_SEGALL_OFFSET, seg_nodes, seg_count);
+    elks_kmem_link_ring(buf, (uint16_t)ELKS_KMEM_HEAPALL_OFFSET, heap_nodes, heap_count);
 
     *buf_out = buf;
     *size_out = (size_t)cursor;
@@ -1710,6 +1836,18 @@ static int elks_sys_ioctl(uint32_t fd, uint32_t request, uint32_t arg_off,
                 }
                 *(uint16_t *)arg = 0U;
                 return 0;
+            case ELKS_MEM_GETHEAP:
+                if (!arg) {
+                    return -EFAULT;
+                }
+                *(uint16_t *)arg = (uint16_t)ELKS_KMEM_HEAPALL_OFFSET;
+                return 0;
+            case ELKS_MEM_GETSEGALL:
+                if (!arg) {
+                    return -EFAULT;
+                }
+                *(uint16_t *)arg = (uint16_t)ELKS_KMEM_SEGALL_OFFSET;
+                return 0;
             case ELKS_MEM_GETTASK:
                 if (!arg) {
                     return -EFAULT;
@@ -1721,6 +1859,24 @@ static int elks_sys_ioctl(uint32_t fd, uint32_t request, uint32_t arg_off,
                     return -EFAULT;
                 }
                 *(uint16_t *)arg = (uint16_t)MAX_PROCS;
+                return 0;
+            case ELKS_MEM_GETUSAGE:
+                if (!arg) {
+                    return -EFAULT;
+                }
+                {
+                    struct elks_mem_usage *usage = (struct elks_mem_usage *)arg;
+                    uint16_t main_used = elks_kmem_meminfo_kb(vm_phys_get_used());
+                    uint16_t main_free = elks_kmem_meminfo_kb(vm_phys_get_free());
+
+                    if ((uint32_t)main_used + (uint32_t)main_free > ELKS_MEMINFO_KB_MAX) {
+                        main_free = (uint16_t)(ELKS_MEMINFO_KB_MAX - main_used);
+                    }
+                    usage->main_free = main_free;
+                    usage->main_used = main_used;
+                    usage->xms_free = 0U;
+                    usage->xms_used = 0U;
+                }
                 return 0;
             case ELKS_MEM_GETUPTIME:
             case ELKS_MEM_GETJIFFADDR:

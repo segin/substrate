@@ -213,9 +213,11 @@ ELKS personality contract:
   ELKS processes opening native `/dev/kmem` are given an ELKS-shaped synthetic
   task snapshot through intercepted `ioctl`, `lseek`, and `read` operations so
   upstream ELKS process-inspection tools can run without changing native
-  `/dev/kmem` semantics. The exported task-table view reserves slot 0 for the
-  swapper/idle view so older ELKS `ps` binaries that start scanning at slot 1
-  still see the active ELKS process table coherently.
+  `/dev/kmem` semantics. The synthetic image now exports task, `_seg_all`, and
+  `_heap_all` rings plus bounded `MEM_GETUSAGE` accounting so upstream ELKS
+  `ps` and `meminfo` can run coherently. The exported task-table view reserves
+  slot 0 for the swapper/idle view so older ELKS `ps` binaries that start
+  scanning at slot 1 still see the active ELKS process table coherently.
 - `INT 0x20` from ELKS userspace is treated as a Minix-86 trap attempt, logged,
   and converted into `SIGSYS`.
 

@@ -182,11 +182,16 @@ ELKS-shaped kernel snapshot instead.
 The minimum supported compatibility contract is:
 
 - `MEM_GETDS` returning a personality-defined synthetic data-segment base
+- `MEM_GETHEAP` returning the synthetic `_heap_all` list-head offset
+- `MEM_GETSEGALL` returning the synthetic `_seg_all` list-head offset
 - `MEM_GETTASK` returning the offset of the exported task table inside that
   synthetic image
 - `MEM_GETMAXTASKS` returning the number of exported task slots
+- `MEM_GETUSAGE` returning a bounded 16-bit main-memory summary that stays
+  coherent for old ELKS tools on large-memory Substrate systems
 - offset-based `read` access over the synthetic image for task, segment, stack,
-  and related inspection data consumed by upstream ELKS `ps`
+  heap, and related inspection data consumed by upstream ELKS `ps` and
+  `meminfo`
 
 For compatibility with older installed ELKS `ps` binaries that begin scanning
 at task slot 1, the exported synthetic task table reserves slot 0 for the
