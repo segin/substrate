@@ -50,6 +50,9 @@ typedef struct {
     elf_section_t *data_sec;
     emit_sym_t *sym_map;
     size_t sym_count;
+    size_t sym_cap;
+    size_t *sym_index;
+    size_t sym_index_cap;
     char *errbuf;
     size_t errbuf_sz;
 } emit_ctx_t;
@@ -92,6 +95,16 @@ static char *xstrdup(const char *s) {
     }
     memcpy(p, s, n);
     return p;
+}
+
+static size_t hash_name(const char *name) {
+    size_t h = 1469598103934665603ull;
+
+    while (name != NULL && *name != '\0') {
+        h ^= (unsigned char)*name++;
+        h *= 1099511628211ull;
+    }
+    return h;
 }
 
 static char *trim_copy(const char *s) {
@@ -6999,17 +7012,55 @@ static void strip_reloc_modifier(char *name) {
 }
 
 static elf_symbol_t *find_emit_symbol(emit_ctx_t *ctx, const char *name) {
-    size_t i;
+    size_t pos;
 
-    for (i = 0; i < ctx->sym_count; ++i) {
-        if (strcmp(ctx->sym_map[i].name, name) == 0) {
-            return ctx->sym_map[i].sym;
+    if (ctx == NULL || name == NULL || ctx->sym_index == NULL || ctx->sym_index_cap == 0) {
+        return NULL;
+    }
+    pos = hash_name(name) & (ctx->sym_index_cap - 1);
+    while (ctx->sym_index[pos] != 0) {
+        size_t idx = ctx->sym_index[pos] - 1;
+        if (strcmp(ctx->sym_map[idx].name, name) == 0) {
+            return ctx->sym_map[idx].sym;
         }
+        pos = (pos + 1) & (ctx->sym_index_cap - 1);
     }
     return NULL;
 }
 
 static int append_emit_symbol(emit_ctx_t *ctx, const char *name, elf_symbol_t *sym);
+
+static int ensure_emit_symbol_index(emit_ctx_t *ctx) {
+    size_t cap;
+    size_t *slots;
+    size_t i;
+
+    if (ctx == NULL) {
+        return -1;
+    }
+    if (ctx->sym_index_cap != 0 && (ctx->sym_count + 1) * 2 < ctx->sym_index_cap) {
+        return 0;
+    }
+    cap = 64;
+    while (cap <= (ctx->sym_count + 1) * 2) {
+        cap <<= 1;
+    }
+    slots = (size_t *)calloc(cap, sizeof(*slots));
+    if (slots == NULL) {
+        return -1;
+    }
+    for (i = 0; i < ctx->sym_count; ++i) {
+        size_t pos = hash_name(ctx->sym_map[i].name) & (cap - 1);
+        while (slots[pos] != 0) {
+            pos = (pos + 1) & (cap - 1);
+        }
+        slots[pos] = i + 1;
+    }
+    free(ctx->sym_index);
+    ctx->sym_index = slots;
+    ctx->sym_index_cap = cap;
+    return 0;
+}
 
 static elf_symbol_t *ensure_emit_symbol(emit_ctx_t *ctx, const char *name) {
     elf_symbol_t *sym;
@@ -7039,17 +7090,33 @@ static elf_symbol_t *ensure_emit_symbol(emit_ctx_t *ctx, const char *name) {
 
 static int append_emit_symbol(emit_ctx_t *ctx, const char *name, elf_symbol_t *sym) {
     emit_sym_t *next;
+    size_t pos;
 
-    next = (emit_sym_t *)realloc(ctx->sym_map, (ctx->sym_count + 1) * sizeof(*next));
-    if (next == NULL) {
-        return -1;
+    if (ctx->sym_count == ctx->sym_cap) {
+        size_t ncap = ctx->sym_cap == 0 ? 64 : ctx->sym_cap * 2;
+
+        next = (emit_sym_t *)realloc(ctx->sym_map, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        ctx->sym_map = next;
+        ctx->sym_cap = ncap;
     }
-    ctx->sym_map = next;
     ctx->sym_map[ctx->sym_count].name = xstrdup(name);
     ctx->sym_map[ctx->sym_count].sym = sym;
     if (ctx->sym_map[ctx->sym_count].name == NULL) {
         return -1;
     }
+    if (ensure_emit_symbol_index(ctx) != 0) {
+        free(ctx->sym_map[ctx->sym_count].name);
+        ctx->sym_map[ctx->sym_count].name = NULL;
+        return -1;
+    }
+    pos = hash_name(name) & (ctx->sym_index_cap - 1);
+    while (ctx->sym_index[pos] != 0) {
+        pos = (pos + 1) & (ctx->sym_index_cap - 1);
+    }
+    ctx->sym_index[pos] = ctx->sym_count + 1;
     ctx->sym_count++;
     return 0;
 }
@@ -7166,6 +7233,11 @@ typedef struct {
     uint64_t off;
 } sym_loc_t;
 
+typedef struct {
+    size_t *slots;
+    size_t cap;
+} name_index_t;
+
 static void free_sym_locs(sym_loc_t *locs, size_t count) {
     size_t i;
 
@@ -7178,38 +7250,88 @@ static void free_sym_locs(sym_loc_t *locs, size_t count) {
     free(locs);
 }
 
+static void free_name_index(name_index_t *idx) {
+    if (idx == NULL) {
+        return;
+    }
+    free(idx->slots);
+    idx->slots = NULL;
+    idx->cap = 0;
+}
+
+static int ensure_name_index(name_index_t *idx, const sym_loc_t *locs, size_t count) {
+    size_t cap;
+    size_t *slots;
+    size_t i;
+
+    if (idx == NULL) {
+        return -1;
+    }
+    if (idx->cap != 0 && (count + 1) * 2 < idx->cap) {
+        return 0;
+    }
+    cap = 64;
+    while (cap <= (count + 1) * 2) {
+        cap <<= 1;
+    }
+    slots = (size_t *)calloc(cap, sizeof(*slots));
+    if (slots == NULL) {
+        return -1;
+    }
+    for (i = 0; i < count; ++i) {
+        size_t pos = hash_name(locs[i].name) & (cap - 1);
+        while (slots[pos] != 0) {
+            pos = (pos + 1) & (cap - 1);
+        }
+        slots[pos] = i + 1;
+    }
+    free(idx->slots);
+    idx->slots = slots;
+    idx->cap = cap;
+    return 0;
+}
+
 static int is_numeric_local_label_name(const char *name) {
     return name != NULL && name[0] >= '0' && name[0] <= '9' && name[1] == '\0';
 }
 
-static const sym_loc_t *find_sym_loc(const sym_loc_t *locs, size_t count, const char *name) {
-    size_t i;
+static const sym_loc_t *find_sym_loc(const sym_loc_t *locs, const name_index_t *idx, const char *name) {
+    size_t pos;
 
-    if (locs == NULL || name == NULL) {
+    if (locs == NULL || idx == NULL || idx->slots == NULL || idx->cap == 0 || name == NULL) {
         return NULL;
     }
-    for (i = 0; i < count; ++i) {
-        if (strcmp(locs[i].name, name) == 0) {
-            return &locs[i];
+    pos = hash_name(name) & (idx->cap - 1);
+    while (idx->slots[pos] != 0) {
+        size_t hit = idx->slots[pos] - 1;
+        if (strcmp(locs[hit].name, name) == 0) {
+            return &locs[hit];
         }
+        pos = (pos + 1) & (idx->cap - 1);
     }
     return NULL;
 }
 
-static int upsert_sym_loc(sym_loc_t **locs, size_t *count, size_t *cap, const char *name, elf_section_t *sec, uint64_t off) {
+static int upsert_sym_loc(sym_loc_t **locs, size_t *count, size_t *cap, name_index_t *idx,
+                          const char *name, elf_section_t *sec, uint64_t off) {
     sym_loc_t *next;
-    size_t i;
+    size_t pos;
 
-    if (locs == NULL || count == NULL || cap == NULL || name == NULL) {
+    if (locs == NULL || count == NULL || cap == NULL || idx == NULL || name == NULL) {
         return -1;
     }
-
-    for (i = 0; i < *count; ++i) {
-        if (strcmp((*locs)[i].name, name) == 0) {
-            (*locs)[i].sec = sec;
-            (*locs)[i].off = off;
+    if (ensure_name_index(idx, *locs, *count) != 0) {
+        return -1;
+    }
+    pos = hash_name(name) & (idx->cap - 1);
+    while (idx->slots[pos] != 0) {
+        size_t hit = idx->slots[pos] - 1;
+        if (strcmp((*locs)[hit].name, name) == 0) {
+            (*locs)[hit].sec = sec;
+            (*locs)[hit].off = off;
             return 0;
         }
+        pos = (pos + 1) & (idx->cap - 1);
     }
 
     if (*count == *cap) {
@@ -7228,6 +7350,7 @@ static int upsert_sym_loc(sym_loc_t **locs, size_t *count, size_t *cap, const ch
     }
     (*locs)[*count].sec = sec;
     (*locs)[*count].off = off;
+    idx->slots[pos] = *count + 1;
     (*count)++;
     return 0;
 }
@@ -7339,17 +7462,20 @@ static int find_set_dot_location(emit_ctx_t *ctx, const char *sym_name, const ch
     return -1;
 }
 
-static int collect_symbol_locations(emit_ctx_t *ctx, sym_loc_t **locs, size_t *loc_count, size_t *loc_cap) {
+static int collect_symbol_locations(emit_ctx_t *ctx, sym_loc_t **locs, size_t *loc_count, size_t *loc_cap,
+                                    name_index_t *loc_index) {
     size_t i;
     sec_buf_vec_t secbufs;
     section_track_t track;
 
-    if (ctx == NULL || locs == NULL || loc_count == NULL || loc_cap == NULL) {
+    if (ctx == NULL || locs == NULL || loc_count == NULL || loc_cap == NULL || loc_index == NULL) {
         return -1;
     }
     *locs = NULL;
     *loc_count = 0;
     *loc_cap = 0;
+    loc_index->slots = NULL;
+    loc_index->cap = 0;
     memset(&secbufs, 0, sizeof(secbufs));
     if (section_track_init(&track) != 0) {
         return -1;
@@ -7379,8 +7505,9 @@ static int collect_symbol_locations(emit_ctx_t *ctx, sym_loc_t **locs, size_t *l
             if (is_numeric_local_label_name(st->labels[j].name)) {
                 continue;
             }
-            if (upsert_sym_loc(locs, loc_count, loc_cap, st->labels[j].name, cur_sec, cur_off) != 0) {
+            if (upsert_sym_loc(locs, loc_count, loc_cap, loc_index, st->labels[j].name, cur_sec, cur_off) != 0) {
                 free_sym_locs(*locs, *loc_count);
+                free_name_index(loc_index);
                 *locs = NULL;
                 *loc_count = 0;
                 *loc_cap = 0;
@@ -7396,6 +7523,7 @@ static int collect_symbol_locations(emit_ctx_t *ctx, sym_loc_t **locs, size_t *l
             trc = section_track_apply_directive(&track, &st->u.directive);
             if (trc < 0) {
                 free_sym_locs(*locs, *loc_count);
+                free_name_index(loc_index);
                 *locs = NULL;
                 *loc_count = 0;
                 section_track_free(&track);
@@ -7408,6 +7536,7 @@ static int collect_symbol_locations(emit_ctx_t *ctx, sym_loc_t **locs, size_t *l
             drc = append_directive_data(&sb->buf, &st->u.directive);
             if (drc < 0) {
                 free_sym_locs(*locs, *loc_count);
+                free_name_index(loc_index);
                 *locs = NULL;
                 *loc_count = 0;
                 section_track_free(&track);
@@ -7424,6 +7553,7 @@ static int collect_symbol_locations(emit_ctx_t *ctx, sym_loc_t **locs, size_t *l
             char encerr[256];
             if (encode_x86_stmt(ctx->cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
                 free_sym_locs(*locs, *loc_count);
+                free_name_index(loc_index);
                 *locs = NULL;
                 *loc_count = 0;
                 section_track_free(&track);
@@ -7433,6 +7563,7 @@ static int collect_symbol_locations(emit_ctx_t *ctx, sym_loc_t **locs, size_t *l
             }
             if (bytebuf_append(&sb->buf, code, code_len) != 0) {
                 free_sym_locs(*locs, *loc_count);
+                free_name_index(loc_index);
                 *locs = NULL;
                 *loc_count = 0;
                 section_track_free(&track);
@@ -7452,8 +7583,10 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
     sym_loc_t *locs = NULL;
     size_t loc_count = 0;
     size_t loc_cap = 0;
+    name_index_t loc_index;
 
-    if (collect_symbol_locations(ctx, &locs, &loc_count, &loc_cap) != 0) {
+    memset(&loc_index, 0, sizeof(loc_index));
+    if (collect_symbol_locations(ctx, &locs, &loc_count, &loc_cap, &loc_index) != 0) {
         return -1;
     }
 
@@ -7464,18 +7597,22 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
         esym = elf_add_symbol(ctx->obj, s->name, 0, s->size, map_bind(s->bind), map_type(s->type));
         if (esym == NULL) {
             free_sym_locs(locs, loc_count);
+            free_name_index(&loc_index);
             return -1;
         }
         if (elf_symbol_set_visibility(esym, map_vis(s->visibility)) != ELF_OK) {
             free_sym_locs(locs, loc_count);
+            free_name_index(&loc_index);
             return -1;
         }
         if (s->version != NULL && elf_symbol_set_version(esym, 1) != ELF_OK) {
             free_sym_locs(locs, loc_count);
+            free_name_index(&loc_index);
             return -1;
         }
         if (append_emit_symbol(ctx, s->name, esym) != 0) {
             free_sym_locs(locs, loc_count);
+            free_name_index(&loc_index);
             return -1;
         }
     }
@@ -7487,35 +7624,41 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
 
         if (esym == NULL) {
             free_sym_locs(locs, loc_count);
+            free_name_index(&loc_index);
             return -1;
         }
         if (s->is_common) {
             if (elf_symbol_set_shndx(esym, SHN_COMMON) != ELF_OK) {
                 free_sym_locs(locs, loc_count);
+                free_name_index(&loc_index);
                 return -1;
             }
             if (elf_symbol_set_value(esym, s->common_size) != ELF_OK) {
                 free_sym_locs(locs, loc_count);
+                free_name_index(&loc_index);
                 return -1;
             }
         } else if (s->is_absolute) {
             if (elf_symbol_set_shndx(esym, SHN_ABS) != ELF_OK ||
                 elf_symbol_set_value(esym, s->absolute_value) != ELF_OK) {
                 free_sym_locs(locs, loc_count);
+                free_name_index(&loc_index);
                 return -1;
             }
         } else if (s->defined) {
             if (s->alias_target != NULL) {
                 continue;
             }
-            loc = find_sym_loc(locs, loc_count, s->name);
+            loc = find_sym_loc(locs, &loc_index, s->name);
             if (loc != NULL && loc->sec != NULL) {
                 if (elf_symbol_define(esym, loc->sec, loc->off) != ELF_OK) {
                     free_sym_locs(locs, loc_count);
+                    free_name_index(&loc_index);
                     return -1;
                 }
             } else if (ctx->text_sec != NULL && elf_symbol_define(esym, ctx->text_sec, 0) != ELF_OK) {
                 free_sym_locs(locs, loc_count);
+                free_name_index(&loc_index);
                 return -1;
             }
         }
@@ -7534,36 +7677,42 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
         esym = ensure_emit_symbol(ctx, s->name);
         if (esym == NULL) {
             free_sym_locs(locs, loc_count);
+            free_name_index(&loc_index);
             return -1;
         }
         if (s->alias_from_dot) {
-            const sym_loc_t *target_loc = find_sym_loc(locs, loc_count, s->alias_target);
+            const sym_loc_t *target_loc = find_sym_loc(locs, &loc_index, s->alias_target);
             elf_section_t *dot_sec = NULL;
             uint64_t dot_off = 0;
 
             if (target_loc == NULL || target_loc->sec == NULL) {
                 set_err(ctx, "cannot resolve .-expression target for %s", s->name);
                 free_sym_locs(locs, loc_count);
+                free_name_index(&loc_index);
                 return -1;
             }
             if (find_set_dot_location(ctx, s->name, s->def_file, s->def_line, &dot_sec, &dot_off) != 0 || dot_sec == NULL) {
                 set_err(ctx, "cannot resolve current location for %s", s->name);
                 free_sym_locs(locs, loc_count);
+                free_name_index(&loc_index);
                 return -1;
             }
             if (dot_sec != target_loc->sec) {
                 set_err(ctx, "cross-section .-symbol assignment is not supported for %s", s->name);
                 free_sym_locs(locs, loc_count);
+                free_name_index(&loc_index);
                 return -1;
             }
             v = (int64_t)dot_off - (int64_t)target_loc->off + s->alias_addend;
             if (v < 0) {
                 set_err(ctx, "negative absolute value for %s", s->name);
                 free_sym_locs(locs, loc_count);
+                free_name_index(&loc_index);
                 return -1;
             }
             if (elf_symbol_set_shndx(esym, SHN_ABS) != ELF_OK || elf_symbol_set_value(esym, (uint64_t)v) != ELF_OK) {
                 free_sym_locs(locs, loc_count);
+                free_name_index(&loc_index);
                 return -1;
             }
             continue;
@@ -7571,21 +7720,25 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
         target = ensure_emit_symbol(ctx, s->alias_target);
         if (target == NULL) {
             free_sym_locs(locs, loc_count);
+            free_name_index(&loc_index);
             return -1;
         }
         shndx = elf_symbol_shndx(target);
         if (elf_symbol_set_shndx(esym, shndx) != ELF_OK) {
             free_sym_locs(locs, loc_count);
+            free_name_index(&loc_index);
             return -1;
         }
         v = (int64_t)elf_symbol_value(target) + s->alias_addend;
         if (elf_symbol_set_value(esym, (uint64_t)v) != ELF_OK) {
             free_sym_locs(locs, loc_count);
+            free_name_index(&loc_index);
             return -1;
         }
     }
 
     free_sym_locs(locs, loc_count);
+    free_name_index(&loc_index);
     return 0;
 }
 
@@ -8845,6 +8998,7 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
         free(ctx.sym_map[i].name);
     }
     free(ctx.sym_map);
+    free(ctx.sym_index);
     elf_close(ctx.obj);
     return 0;
 
@@ -8853,6 +9007,7 @@ fail:
         free(ctx.sym_map[i].name);
     }
     free(ctx.sym_map);
+    free(ctx.sym_index);
     elf_close(ctx.obj);
     return -1;
 }

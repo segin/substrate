@@ -12,6 +12,57 @@ typedef struct {
     size_t errbuf_sz;
 } sym_ctx_t;
 
+static size_t hash_name(const char *name) {
+    size_t h = 1469598103934665603ull;
+
+    while (name != NULL && *name != '\0') {
+        h ^= (unsigned char)*name++;
+        h *= 1099511628211ull;
+    }
+    return h;
+}
+
+static int symtab_index_rehash(as_symtab_t *tab, size_t cap) {
+    size_t *slots;
+    size_t i;
+
+    if (tab == NULL || cap == 0) {
+        return -1;
+    }
+    slots = (size_t *)calloc(cap, sizeof(*slots));
+    if (slots == NULL) {
+        return -1;
+    }
+    for (i = 0; i < tab->count; ++i) {
+        size_t pos = hash_name(tab->items[i].name) & (cap - 1);
+
+        while (slots[pos] != 0) {
+            pos = (pos + 1) & (cap - 1);
+        }
+        slots[pos] = i + 1;
+    }
+    free(tab->name_index);
+    tab->name_index = slots;
+    tab->name_index_cap = cap;
+    return 0;
+}
+
+static int symtab_index_ensure(as_symtab_t *tab) {
+    size_t cap;
+
+    if (tab == NULL) {
+        return -1;
+    }
+    if (tab->name_index_cap != 0 && (tab->count + 1) * 2 < tab->name_index_cap) {
+        return 0;
+    }
+    cap = 64;
+    while (cap <= (tab->count + 1) * 2) {
+        cap <<= 1;
+    }
+    return symtab_index_rehash(tab, cap);
+}
+
 static int ascii_eq_ci(const char *a, const char *b) {
     unsigned char ca;
     unsigned char cb;
@@ -108,6 +159,8 @@ void as_symtab_init(as_symtab_t *tab) {
     tab->items = NULL;
     tab->count = 0;
     tab->cap = 0;
+    tab->name_index = NULL;
+    tab->name_index_cap = 0;
 }
 
 void as_symtab_free(as_symtab_t *tab) {
@@ -124,18 +177,27 @@ void as_symtab_free(as_symtab_t *tab) {
         free(s->version);
     }
     free(tab->items);
+    free(tab->name_index);
     tab->items = NULL;
     tab->count = 0;
     tab->cap = 0;
+    tab->name_index = NULL;
+    tab->name_index_cap = 0;
 }
 
 static as_symbol_t *find_symbol(as_symtab_t *tab, const char *name) {
-    size_t i;
+    size_t pos;
 
-    for (i = 0; i < tab->count; ++i) {
-        if (strcmp(tab->items[i].name, name) == 0) {
-            return &tab->items[i];
+    if (tab == NULL || name == NULL || tab->name_index == NULL || tab->name_index_cap == 0) {
+        return NULL;
+    }
+    pos = hash_name(name) & (tab->name_index_cap - 1);
+    while (tab->name_index[pos] != 0) {
+        size_t idx = tab->name_index[pos] - 1;
+        if (strcmp(tab->items[idx].name, name) == 0) {
+            return &tab->items[idx];
         }
+        pos = (pos + 1) & (tab->name_index_cap - 1);
     }
     return NULL;
 }
@@ -158,6 +220,9 @@ static as_symbol_t *get_or_create_symbol(sym_ctx_t *ctx, const char *name) {
         ctx->tab->items = next;
         ctx->tab->cap = ncap;
     }
+    if (symtab_index_ensure(ctx->tab) != 0) {
+        return NULL;
+    }
 
     sym = &ctx->tab->items[ctx->tab->count++];
     memset(sym, 0, sizeof(*sym));
@@ -167,6 +232,13 @@ static as_symbol_t *get_or_create_symbol(sym_ctx_t *ctx, const char *name) {
     sym->visibility = AS_SYM_VIS_DEFAULT;
     if (sym->name == NULL) {
         return NULL;
+    }
+    {
+        size_t pos = hash_name(sym->name) & (ctx->tab->name_index_cap - 1);
+        while (ctx->tab->name_index[pos] != 0) {
+            pos = (pos + 1) & (ctx->tab->name_index_cap - 1);
+        }
+        ctx->tab->name_index[pos] = ctx->tab->count;
     }
     return sym;
 }

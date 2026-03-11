@@ -1202,6 +1202,9 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
     }
 
     for (i = (size_t)lbr + 1; i < (size_t)rbr; ++i) {
+        if ((tokv[i].kind == AS_TOK_PUNCT || tokv[i].kind == AS_TOK_OPERATOR) && strcmp(tokv[i].text, "+") == 0) {
+            continue;
+        }
         if (tokv[i].kind != AS_TOK_PUNCT) {
             int parsed = parse_compound_intel_mem_token(ctx, &tokv[i], &mem);
             if (parsed < 0) {

@@ -57,6 +57,8 @@ typedef struct {
     as_symbol_t *items;
     size_t count;
     size_t cap;
+    size_t *name_index;
+    size_t name_index_cap;
 } as_symtab_t;
 
 void as_symtab_init(as_symtab_t *tab);
