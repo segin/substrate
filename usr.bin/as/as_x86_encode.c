@@ -2470,9 +2470,31 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         if (insn->op_count != 0 || emit8(&ctx, 0xc3) != 0) {
             return -1;
         }
+    } else if (streq_ci(insn->mnemonic, "cbtw") || streq_ci(insn->mnemonic, "cbw") ||
+               streq_ci(insn->mnemonic, "cwtl") || streq_ci(insn->mnemonic, "cwde")) {
+        if (insn->op_count != 0 || emit8(&ctx, 0x98) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "cwtd") || streq_ci(insn->mnemonic, "cwd") ||
+               streq_ci(insn->mnemonic, "cltd") || streq_ci(insn->mnemonic, "cdq")) {
+        if (insn->op_count != 0 || emit8(&ctx, 0x99) != 0) {
+            return -1;
+        }
     } else if (streq_ci(insn->mnemonic, "cqto") || streq_ci(insn->mnemonic, "cqo")) {
         rex_w = 1;
         if (insn->op_count != 0 || emit8(&ctx, 0x99) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "fwait")) {
+        if (insn->op_count != 0 || emit8(&ctx, 0x9b) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "pushf")) {
+        if (insn->op_count != 0 || emit8(&ctx, 0x9c) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "popf")) {
+        if (insn->op_count != 0 || emit8(&ctx, 0x9d) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "nop")) {
