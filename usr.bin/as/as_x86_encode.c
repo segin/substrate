@@ -3677,6 +3677,148 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             emit8(&ctx, (uint8_t)c->u.imm) != 0) {
             return -1;
         }
+    } else if (streq_ci(insn->mnemonic, "movnti")) {
+        if (insn->op_count != 2 || a->kind != AS_X86_OP_MEM || b->kind != AS_X86_OP_REG) {
+            set_err(&ctx, "unsupported x86_64 movnti form");
+            return -1;
+        }
+        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xc3) != 0 ||
+            modrm_sib_disp64(&ctx, b->u.reg, a, &rex_r, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "pinsrw")) {
+        if (insn->op_count != 3 || !operand_is_mmx_reg(a) || c->kind != AS_X86_OP_IMM ||
+            (b->kind != AS_X86_OP_MEM && b->kind != AS_X86_OP_REG)) {
+            set_err(&ctx, "unsupported x86_64 pinsrw form");
+            return -1;
+        }
+        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xc4) != 0 ||
+            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0 ||
+            emit8(&ctx, (uint8_t)c->u.imm) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "pextrw")) {
+        if (insn->op_count != 3 || a->kind != AS_X86_OP_REG || !operand_is_mmx_reg(b) || c->kind != AS_X86_OP_IMM) {
+            set_err(&ctx, "unsupported x86_64 pextrw form");
+            return -1;
+        }
+        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xc5) != 0 ||
+            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0 ||
+            emit8(&ctx, (uint8_t)c->u.imm) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "shufps")) {
+        if (insn->op_count != 3 || !operand_is_xmm_reg(a) || c->kind != AS_X86_OP_IMM ||
+            (!operand_is_xmm_reg(b) && b->kind != AS_X86_OP_MEM)) {
+            set_err(&ctx, "unsupported x86_64 shufps form");
+            return -1;
+        }
+        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xc6) != 0 ||
+            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0 ||
+            emit8(&ctx, (uint8_t)c->u.imm) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "cmpxchg8b")) {
+        if (insn->op_count != 1 || a->kind != AS_X86_OP_MEM) {
+            set_err(&ctx, "unsupported x86_64 cmpxchg8b form");
+            return -1;
+        }
+        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xc7) != 0 ||
+            modrm_sib_disp64(&ctx, AS_X86_REG_RCX, a, &rex_r, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "pmovmskb")) {
+        if (insn->op_count != 2 || a->kind != AS_X86_OP_REG || !operand_is_mmx_reg(b)) {
+            set_err(&ctx, "unsupported x86_64 pmovmskb form");
+            return -1;
+        }
+        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xd7) != 0 ||
+            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "movntq")) {
+        if (insn->op_count != 2 || a->kind != AS_X86_OP_MEM || !operand_is_mmx_reg(b)) {
+            set_err(&ctx, "unsupported x86_64 movntq form");
+            return -1;
+        }
+        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xe7) != 0 ||
+            modrm_sib_disp64(&ctx, b->u.reg, a, &rex_r, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "psubusb") || streq_ci(insn->mnemonic, "psubusw") ||
+               streq_ci(insn->mnemonic, "pminub") || streq_ci(insn->mnemonic, "pand") ||
+               streq_ci(insn->mnemonic, "paddusb") || streq_ci(insn->mnemonic, "paddusw") ||
+               streq_ci(insn->mnemonic, "pmaxub") || streq_ci(insn->mnemonic, "pandn") ||
+               streq_ci(insn->mnemonic, "pavgb") || streq_ci(insn->mnemonic, "psraw") ||
+               streq_ci(insn->mnemonic, "psrad") || streq_ci(insn->mnemonic, "pavgw") ||
+               streq_ci(insn->mnemonic, "pmulhuw") || streq_ci(insn->mnemonic, "pmulhw") ||
+               streq_ci(insn->mnemonic, "psubsb") || streq_ci(insn->mnemonic, "psubsw") ||
+               streq_ci(insn->mnemonic, "pminsw") || streq_ci(insn->mnemonic, "por") ||
+               streq_ci(insn->mnemonic, "paddsb") || streq_ci(insn->mnemonic, "paddsw") ||
+               streq_ci(insn->mnemonic, "pmaxsw") || streq_ci(insn->mnemonic, "pxor") ||
+               streq_ci(insn->mnemonic, "psllw") || streq_ci(insn->mnemonic, "pslld") ||
+               streq_ci(insn->mnemonic, "psllq") || streq_ci(insn->mnemonic, "pmuludq") ||
+               streq_ci(insn->mnemonic, "pmaddwd") || streq_ci(insn->mnemonic, "psadbw") ||
+               streq_ci(insn->mnemonic, "psubb") || streq_ci(insn->mnemonic, "psubw") ||
+               streq_ci(insn->mnemonic, "psubd") || streq_ci(insn->mnemonic, "psubq") ||
+               streq_ci(insn->mnemonic, "paddb") || streq_ci(insn->mnemonic, "paddw") ||
+               streq_ci(insn->mnemonic, "paddd")) {
+        uint8_t op2;
+
+        if (streq_ci(insn->mnemonic, "psubusb")) op2 = 0xd8;
+        else if (streq_ci(insn->mnemonic, "psubusw")) op2 = 0xd9;
+        else if (streq_ci(insn->mnemonic, "pminub")) op2 = 0xda;
+        else if (streq_ci(insn->mnemonic, "pand")) op2 = 0xdb;
+        else if (streq_ci(insn->mnemonic, "paddusb")) op2 = 0xdc;
+        else if (streq_ci(insn->mnemonic, "paddusw")) op2 = 0xdd;
+        else if (streq_ci(insn->mnemonic, "pmaxub")) op2 = 0xde;
+        else if (streq_ci(insn->mnemonic, "pandn")) op2 = 0xdf;
+        else if (streq_ci(insn->mnemonic, "pavgb")) op2 = 0xe0;
+        else if (streq_ci(insn->mnemonic, "psraw")) op2 = 0xe1;
+        else if (streq_ci(insn->mnemonic, "psrad")) op2 = 0xe2;
+        else if (streq_ci(insn->mnemonic, "pavgw")) op2 = 0xe3;
+        else if (streq_ci(insn->mnemonic, "pmulhuw")) op2 = 0xe4;
+        else if (streq_ci(insn->mnemonic, "pmulhw")) op2 = 0xe5;
+        else if (streq_ci(insn->mnemonic, "psubsb")) op2 = 0xe8;
+        else if (streq_ci(insn->mnemonic, "psubsw")) op2 = 0xe9;
+        else if (streq_ci(insn->mnemonic, "pminsw")) op2 = 0xea;
+        else if (streq_ci(insn->mnemonic, "por")) op2 = 0xeb;
+        else if (streq_ci(insn->mnemonic, "paddsb")) op2 = 0xec;
+        else if (streq_ci(insn->mnemonic, "paddsw")) op2 = 0xed;
+        else if (streq_ci(insn->mnemonic, "pmaxsw")) op2 = 0xee;
+        else if (streq_ci(insn->mnemonic, "pxor")) op2 = 0xef;
+        else if (streq_ci(insn->mnemonic, "psllw")) op2 = 0xf1;
+        else if (streq_ci(insn->mnemonic, "pslld")) op2 = 0xf2;
+        else if (streq_ci(insn->mnemonic, "psllq")) op2 = 0xf3;
+        else if (streq_ci(insn->mnemonic, "pmuludq")) op2 = 0xf4;
+        else if (streq_ci(insn->mnemonic, "pmaddwd")) op2 = 0xf5;
+        else if (streq_ci(insn->mnemonic, "psadbw")) op2 = 0xf6;
+        else if (streq_ci(insn->mnemonic, "psubb")) op2 = 0xf8;
+        else if (streq_ci(insn->mnemonic, "psubw")) op2 = 0xf9;
+        else if (streq_ci(insn->mnemonic, "psubd")) op2 = 0xfa;
+        else if (streq_ci(insn->mnemonic, "psubq")) op2 = 0xfb;
+        else if (streq_ci(insn->mnemonic, "paddb")) op2 = 0xfc;
+        else if (streq_ci(insn->mnemonic, "paddw")) op2 = 0xfd;
+        else op2 = 0xfe;
+
+        if (insn->op_count != 2 || !operand_is_mmx_reg(a) ||
+            (!operand_is_mmx_reg(b) && b->kind != AS_X86_OP_MEM)) {
+            set_err(&ctx, "unsupported x86_64 %s form", insn->mnemonic);
+            return -1;
+        }
+        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, op2) != 0 ||
+            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "maskmovq")) {
+        if (insn->op_count != 2 || !operand_is_mmx_reg(a) || !operand_is_mmx_reg(b)) {
+            set_err(&ctx, "unsupported x86_64 maskmovq form");
+            return -1;
+        }
+        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xf7) != 0 ||
+            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
     } else if (streq_ci(insn->mnemonic, "cmovo") || streq_ci(insn->mnemonic, "cmovno") ||
                streq_ci(insn->mnemonic, "cmovb") || streq_ci(insn->mnemonic, "cmovae") ||
                streq_ci(insn->mnemonic, "cmove") || streq_ci(insn->mnemonic, "cmovne") ||
