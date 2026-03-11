@@ -17,6 +17,7 @@
 #include <sys/proc.h>
 #include <sys/session.h>
 #include <sys/dirent.h>
+#include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
 #include <pm/pm.h>
@@ -60,6 +61,44 @@ static void elks_copy_cstr(char *dst, size_t dst_size, const char *src) {
     len = strnlen(src, dst_size - 1U);
     memcpy(dst, src, len);
     dst[len] = '\0';
+}
+
+#define ELKS_UF_NOFREESPACE 1U
+#define ELKS_FST_MINIX      1
+#define ELKS_FST_MSDOS      2
+#define ELKS_FST_ROMFS      3
+#define ELKS_FST_OTHER      4
+
+static int elks_mount_fstype(const struct mount *mp) {
+    const char *type;
+
+    if (!mp) {
+        return ELKS_FST_OTHER;
+    }
+    type = mp->mnt_stat.f_fstypename;
+    if (strcmp(type, "minix") == 0) {
+        return ELKS_FST_MINIX;
+    }
+    if (strcmp(type, "fat") == 0 || strcmp(type, "exfat") == 0 || strcmp(type, "msdos") == 0) {
+        return ELKS_FST_MSDOS;
+    }
+    if (strcmp(type, "romfs") == 0) {
+        return ELKS_FST_ROMFS;
+    }
+    return ELKS_FST_OTHER;
+}
+
+static struct mount *elks_mount_by_index(unsigned int index) {
+    struct mount *mp;
+    unsigned int i = 0;
+
+    TAILQ_FOREACH(mp, &mountlist, mnt_list) {
+        if (i == index) {
+            return mp;
+        }
+        i++;
+    }
+    return NULL;
 }
 
 static int SUB_PURE elks_to_native_signal(int sig) {
@@ -131,6 +170,19 @@ struct elks_utsname {
     char release[12];
     char version[48];
     char machine[16];
+} __attribute__((packed, aligned(2)));
+
+struct elks_statfs {
+    int16_t  f_type;
+    uint16_t f_flags;
+    uint16_t f_dev;
+    int32_t  f_bsize;
+    int32_t  f_blocks;
+    int32_t  f_bfree;
+    int32_t  f_bavail;
+    int32_t  f_files;
+    int32_t  f_ffree;
+    char     f_mntonname[32];
 } __attribute__((packed, aligned(2)));
 
 #define ELKS_KMEM_RDEV               (((1U << 8) | 2U))
@@ -1500,6 +1552,46 @@ static int elks_sys_gettimeofday(uint32_t tv_off, uint32_t tz_off, uint32_t unus
     return 0;
 }
 
+static int elks_sys_ustatfs(uint32_t dev, uint32_t statfs_off, uint32_t flags,
+                            uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                            uint32_t unused6, uint32_t unused7) {
+    struct mount *mp;
+    struct elks_statfs elks;
+    uintptr_t linear = 0;
+    int fstype;
+
+    (void)unused3; (void)unused4; (void)unused5; (void)unused6; (void)unused7;
+
+    mp = elks_mount_by_index((unsigned int)dev);
+    if (!mp) {
+        return -EINVAL;
+    }
+    fstype = elks_mount_fstype(mp);
+    if (statfs_off == 0) {
+        return fstype;
+    }
+    if (elks_ds_span(statfs_off, sizeof(elks), &linear) != 0) {
+        return -EFAULT;
+    }
+
+    memset(&elks, 0, sizeof(elks));
+    elks.f_type = (int16_t)fstype;
+    elks.f_flags = (uint16_t)mp->mnt_flag;
+    elks.f_dev = (uint16_t)dev;
+    elks.f_bsize = mp->mnt_stat.f_bsize > 0 ? (int32_t)mp->mnt_stat.f_bsize : 1024;
+    elks.f_blocks = (int32_t)mp->mnt_stat.f_blocks;
+    if ((flags & ELKS_UF_NOFREESPACE) == 0U) {
+        elks.f_bfree = (int32_t)mp->mnt_stat.f_bfree;
+        elks.f_bavail = (int32_t)mp->mnt_stat.f_bavail;
+    }
+    elks.f_files = (int32_t)mp->mnt_stat.f_files;
+    elks.f_ffree = (int32_t)mp->mnt_stat.f_ffree;
+    elks_copy_cstr(elks.f_mntonname, sizeof(elks.f_mntonname),
+                   mp->mnt_stat.f_mntonname[0] ? mp->mnt_stat.f_mntonname : mp->mnt_stat_path);
+    memcpy((void *)(uintptr_t)linear, &elks, sizeof(elks));
+    return 0;
+}
+
 static int elks_sys_uname(uint32_t uts_off, uint32_t unused1, uint32_t unused2,
                           uint32_t unused3, uint32_t unused4, uint32_t unused5,
                           uint32_t unused6, uint32_t unused7) {
@@ -1787,6 +1879,7 @@ static void *elks_syscall_table[ELKS_SYS_MAX] = {
     [ELKS_SYS_lstat]   = (void *)&elks_sys_lstat,
     [ELKS_SYS_readlink] = (void *)&elks_sys_readlink,
     [ELKS_SYS_gettimeofday] = (void *)&elks_sys_gettimeofday,
+    [ELKS_SYS_ustatfs] = (void *)&elks_sys_ustatfs,
     [ELKS_SYS_uname]   = (void *)&elks_sys_uname,
     [ELKS_SYS_umask]   = (void *)&sys_umask,
     [ELKS_SYS_stat]    = (void *)&elks_sys_stat,
@@ -1822,6 +1915,7 @@ static const char *elks_syscall_names[ELKS_SYS_MAX] = {
     [ELKS_SYS_execve]  = "execve",
     [ELKS_SYS_alarm]   = "alarm",
     [ELKS_SYS_kill]    = "kill",
+    [ELKS_SYS_ustatfs] = "ustatfs",
     [ELKS_SYS_uname]   = "uname",
 };
 

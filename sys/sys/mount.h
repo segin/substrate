@@ -71,6 +71,7 @@ TAILQ_HEAD(vnode_list, vnode);
  * maintained on a doubly linked list.
  */
 TAILQ_HEAD(mountlist, mount);
+extern struct mountlist mountlist;
 
 struct mount {
 	TAILQ_ENTRY(mount) mnt_list;		/* mount list */

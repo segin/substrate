@@ -113,6 +113,10 @@ Reference: User Request (Step 31552)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: unit (ELKS utsname structure translation)
         - Acceptance: `uname` populates the ELKS five-field `struct utsname` in the data segment, truncating native Substrate identity strings to ELKS field widths without overrunning the 16-bit caller buffer.
+    - [x] Implement ELKS sys_ustatfs translation. (REQ: REQ-20-0072)
+        - Files: `sys/exec/perso/perso_elks.c`, `sys/sys/mount.h`
+        - Tests: unit (mount-list to ELKS statfs translation)
+        - Acceptance: `ustatfs` accepts mounted-filesystem indices, returns ELKS filesystem-type numbers, and copies an ELKS-width `struct statfs` containing mount-point metadata without exposing native kernel structure layouts.
     - [x] Return ENOSYS for unsupported ELKS syscalls with kernel log. (REQ: REQ-20-0027)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: unit (verify ENOSYS return)
@@ -227,6 +231,10 @@ Reference: User Request (Step 31552)
         - Files: `tests/elks/run_tests.sh`, `sys/exec/perso/perso_elks.c`
         - Tests: emulation (`tests/elks/run_tests.sh upstream_uname_elks`)
         - Acceptance: QEMU booting `init=/perso/elks/bin/uname` prints the ELKS-width `uname` system name derived from the native Substrate identity without a kernel fault.
+    - [x] Add upstream ELKS df smoke. (REQ: REQ-20-0073)
+        - Files: `tests/elks/run_tests.sh`, `sys/exec/perso/perso_elks.c`
+        - Tests: emulation (`tests/elks/run_tests.sh upstream_df_elks`)
+        - Acceptance: QEMU booting `init=/perso/elks/bin/df` enumerates mounted filesystems through `ustatfs`, prints the mount table, and exits without `ENOSYS` or a kernel fault; block-device names may remain blank until ELKS-specific `/dev` aliases are provided.
     - [x] Add upstream ELKS ps smoke. (REQ: REQ-20-0067)
         - Files: `tests/elks/run_tests.sh`, `sys/exec/perso/perso_elks.c`
         - Tests: emulation (`tests/elks/run_tests.sh upstream_ps_elks`)
@@ -347,6 +355,8 @@ Reference: User Request (Step 31552)
 - **US-20-0069**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add native-shell to ELKS-shell handoff smoke so that this capability is implemented with clear verification evidence.
 - **US-20-0070**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement ELKS sys_uname translation so that this capability is implemented with clear verification evidence.
 - **US-20-0071**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add upstream ELKS uname smoke so that this capability is implemented with clear verification evidence.
+- **US-20-0072**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement ELKS sys_ustatfs translation so that this capability is implemented with clear verification evidence.
+- **US-20-0073**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add upstream ELKS df smoke so that this capability is implemented with clear verification evidence.
 - **US-20-0054**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want a single ELKS test-binary Makefile that builds both assembly and C test programs so that future ELKS validation artifacts share one reproducible build path.
 - **US-20-0055**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to documentation: so that this capability is implemented with clear verification evidence.
 - **US-20-0056**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to create personality-elks(7) developer guide so that this capability is implemented with clear verification evidence.
@@ -535,6 +545,12 @@ Reference: User Request (Step 31552)
   - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-20-0071** (EARS/Ubiquitous): The Substrate system shall provide an upstream ELKS `uname` smoke test.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0072** (EARS/Ubiquitous): The Substrate system shall implement ELKS `ustatfs` translation into the ELKS `struct statfs` layout.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0073** (EARS/Ubiquitous): The Substrate system shall provide an upstream ELKS `df` smoke test.
   - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-20-0054** (EARS/Ubiquitous): The Substrate system shall provide an ELKS test-binary Makefile that builds all current in-tree ELKS test binaries and supports both assembly and C ELKS test sources.

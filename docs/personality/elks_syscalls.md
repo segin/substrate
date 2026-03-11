@@ -73,7 +73,7 @@ Undefined slots not listed in the active table are reserved and shall return
 | 64 | `getppid` | `sys_getppid` | Direct | PID width remains ELKS-visible integer width. |
 | 65 | `getpgrp` | `sys_getpgrp` | Direct | Process-group ID width remains ELKS-visible integer width. |
 | 69 | `sbrk` | `sys_brk` | Translate | Returns the prior 16-bit break through an ELKS data-segment pointer while bounding growth to the ELKS data-segment limit. |
-| 70 | `ustatfs` | none yet in table | Unsupported | ELKS `struct statfs` translation and device-to-mount resolution are not wired yet. |
+| 70 | `ustatfs` | personality mount-list wrapper | Partial | Mounted-filesystem indices are translated into ELKS `struct statfs` records, but ELKS flat `/dev` block-device naming is not yet emulated. |
 | 74 | `uname` | `kern_uname` | Translate | Populates the ELKS five-field `struct utsname`, truncating native Substrate identity strings to ELKS field widths. |
 
 ## 3. Reserved or currently unsupported slots

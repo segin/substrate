@@ -9,6 +9,7 @@
 #include <sys/proc.h>
 #include <pm/pm.h>
 #include <sys/ldt.h>
+#include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
 #include <sys/file.h>
@@ -23,6 +24,7 @@
 process_t *current_process;
 thread_t *current_thread;
 process_t processes[MAX_PROCS];
+struct mountlist mountlist;
 
 static const char *last_name;
 static uintptr_t last_ptr;
@@ -452,6 +454,8 @@ int main(void) {
     process_t proc;
     thread_t thread;
     gdt_entry_t ldt[4];
+    struct mount root_mount;
+    struct mount dev_mount;
     char long_arg[PROC_CMDLINE_MAX + 32];
     char *kmem_argv[] = { (char *)"ps", (char *)"-l", long_arg, NULL };
     int (*fn)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
@@ -474,6 +478,8 @@ int main(void) {
 
     memset(&thread, 0, sizeof(thread));
     memset(processes, 0, sizeof(processes));
+    memset(&root_mount, 0, sizeof(root_mount));
+    memset(&dev_mount, 0, sizeof(dev_mount));
     for (int i = 0; i < MAX_PROCS; i++) {
         processes[i].pid = -1;
     }
@@ -481,6 +487,19 @@ int main(void) {
     current_process = &proc;
     current_thread = &thread;
     elks_personality_init();
+    TAILQ_INIT(&mountlist);
+    strcpy(root_mount.mnt_stat.f_fstypename, "ext2");
+    strcpy(root_mount.mnt_stat.f_mntonname, "/");
+    root_mount.mnt_stat.f_blocks = 4096;
+    root_mount.mnt_stat.f_bfree = 1024;
+    root_mount.mnt_stat.f_bavail = 1000;
+    root_mount.mnt_stat.f_files = 256;
+    root_mount.mnt_stat.f_ffree = 128;
+    TAILQ_INSERT_TAIL(&mountlist, &root_mount, mnt_list);
+    strcpy(dev_mount.mnt_stat.f_fstypename, "devfs");
+    strcpy(dev_mount.mnt_stat.f_mntonname, "/dev");
+    dev_mount.mnt_flag = MNT_RDONLY;
+    TAILQ_INSERT_TAIL(&mountlist, &dev_mount, mnt_list);
     ds_base = (uintptr_t)ds_mem;
     memset(&stub_file, 0, sizeof(stub_file));
     memset(&stub_kmem_file, 0, sizeof(stub_kmem_file));
@@ -918,6 +937,35 @@ int main(void) {
             fprintf(stderr, "FAIL: ELKS uname translation wrong\n");
             return 1;
         }
+    }
+
+    memset(ds_mem + 0x380, 0, sizeof(struct elks_statfs));
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_ustatfs];
+    if (fn(0, 0x380, ELKS_UF_NOFREESPACE, 0, 0, 0, 0, 0) != 0) {
+        fprintf(stderr, "FAIL: ELKS ustatfs wrapper returned error\n");
+        return 1;
+    }
+    {
+        struct elks_statfs *s = (struct elks_statfs *)(void *)(ds_mem + 0x380);
+
+        if (s->f_type != ELKS_FST_OTHER ||
+            s->f_flags != 0 ||
+            s->f_dev != 0 ||
+            s->f_bsize != 1024 ||
+            s->f_blocks != 4096 ||
+            s->f_bfree != 0 ||
+            s->f_bavail != 0 ||
+            s->f_files != 256 ||
+            s->f_ffree != 128 ||
+            strcmp(s->f_mntonname, "/") != 0) {
+            fprintf(stderr, "FAIL: ELKS ustatfs translation wrong\n");
+            return 1;
+        }
+    }
+    if (fn(1, 0, 0, 0, 0, 0, 0, 0) != ELKS_FST_OTHER ||
+        fn(99, 0x380, 0, 0, 0, 0, 0, 0) != -EINVAL) {
+        fprintf(stderr, "FAIL: ELKS ustatfs type/error handling wrong\n");
+        return 1;
     }
 
     stub_oldact.sa_handler = SIG_DFL;
