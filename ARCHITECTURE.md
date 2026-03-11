@@ -71,7 +71,8 @@ Kernel source is under `sys/` and remains monolithic.
 Major kernel layers:
 - `sys/arch/`: architecture-specific CPU/MMU/interrupt/bootstrap code
 - `sys/core/`: early init and global kernel startup
-- `sys/kern/`: scheduler, signals, time, synchronization, process core
+- `sys/kern/`: scheduler, signals, time, synchronization, kernel core
+- `sys/pm/`: process manager (process lifecycle, pgrp, rusage, wait)
 - `sys/vm/`: memory management (PMM/PMAP and VM internals)
 - `sys/vfs/` and `sys/fs/`: VFS and filesystem implementations
 - `sys/drivers/`: device drivers

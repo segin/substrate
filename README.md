@@ -27,7 +27,7 @@ That original design intent remains:
 
 ### Kernel
 - Monolithic kernel with primary i386 support and active x86_64 work.
-- Core subsystems: VM/PMM/PMAP, scheduler, process/signal model, VFS, exec personalities.
+- Core subsystems: VM/PMM/PMAP, scheduler, process manager, signal model, VFS, exec personalities.
 - Driver stack includes storage, input, serial, framebuffer/video, and virtualization-facing devices.
 
 ### Userland
