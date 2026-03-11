@@ -17,7 +17,7 @@ TIMEOUT_BIN=${TIMEOUT_BIN:-timeout}
 QEMU_TIMEOUT=${QEMU_TIMEOUT:-35}
 LOG_DIR=${LOG_DIR:-"$SCRIPT_DIR/logs"}
 WORK_ROOTFS_IMG=${WORK_ROOTFS_IMG:-"$LOG_DIR/rootfs.img"}
-DEFAULT_CASES="hello_elks sleep_elks fileio_elks fork_elks bounds_test_elks cat_elks fuzz_syscalls_elks upstream_ls_elks upstream_ps_elks upstream_sh_prompt_elks upstream_sh_ls_elks native_sh_elks_sh"
+DEFAULT_CASES="hello_elks sleep_elks fileio_elks fork_elks bounds_test_elks cat_elks fuzz_syscalls_elks upstream_ls_elks upstream_uname_elks upstream_ps_elks upstream_sh_prompt_elks upstream_sh_ls_elks native_sh_elks_sh"
 
 if [ "$#" -gt 0 ]; then
     CASES="$*"
@@ -206,6 +206,9 @@ if want_case fuzz_syscalls_elks; then
 fi
 if want_case upstream_ls_elks; then
     run_init_case upstream_ls_elks /perso/elks/bin/ls "bin         dev         lost+found  perso       proc        sys"
+fi
+if want_case upstream_uname_elks; then
+    run_init_case upstream_uname_elks /perso/elks/bin/uname "Substra"
 fi
 if want_case upstream_ps_elks; then
     run_init_case upstream_ps_elks /perso/elks/bin/ps "  PID   GRP  TTY USER STAT CPU  HEAP  FREE   SIZE COMMAND" "ps " "(kinit)"

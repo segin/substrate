@@ -10,6 +10,7 @@
 #include <pm/pm.h>
 #include <sys/ldt.h>
 #include <sys/stat.h>
+#include <sys/utsname.h>
 #include <sys/file.h>
 #include <sys/termios.h>
 #include <sys/time.h>
@@ -107,6 +108,7 @@ static size_t ds_mem_size;
 #define kern_sigaction stub_kern_sigaction
 #define kern_gettimeofday stub_kern_gettimeofday
 #define kern_stime stub_kern_stime
+#define kern_uname stub_kern_uname
 #define sigexit stub_sigexit
 #define trapsignal stub_trapsignal
 #define kern_execve stub_kern_execve
@@ -232,6 +234,18 @@ int stub_kern_stime(time_t *t) {
         return -1;
     }
     stub_clock_sec = *t;
+    return 0;
+}
+int stub_kern_uname(struct utsname *buf) {
+    if (!buf) {
+        return -1;
+    }
+    memset(buf, 0, sizeof(*buf));
+    strcpy(buf->sysname, "Substrate");
+    strcpy(buf->nodename, "substrate-host");
+    strcpy(buf->release, "0.1");
+    strcpy(buf->version, "Kernel");
+    strcpy(buf->machine, "i386");
     return 0;
 }
 void stub_sigexit(process_t *p, int sig) {
@@ -885,6 +899,25 @@ int main(void) {
     if (fn(0x330, 0, 0, 0, 0, 0, 0, 0) != 0 || stub_clock_sec != 0x01020304) {
         fprintf(stderr, "FAIL: ELKS settimeofday translation wrong\n");
         return 1;
+    }
+
+    memset(ds_mem + 0x338, 0, sizeof(struct elks_utsname));
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_uname];
+    if (fn(0x338, 0, 0, 0, 0, 0, 0, 0) != 0) {
+        fprintf(stderr, "FAIL: ELKS uname wrapper returned error\n");
+        return 1;
+    }
+    {
+        struct elks_utsname *u = (struct elks_utsname *)(void *)(ds_mem + 0x338);
+
+        if (strcmp(u->sysname, "Substra") != 0 ||
+            strcmp(u->nodename, "substrate-host") != 0 ||
+            strcmp(u->release, "0.1") != 0 ||
+            strcmp(u->version, "Kernel") != 0 ||
+            strcmp(u->machine, "i386") != 0) {
+            fprintf(stderr, "FAIL: ELKS uname translation wrong\n");
+            return 1;
+        }
     }
 
     stub_oldact.sa_handler = SIG_DFL;

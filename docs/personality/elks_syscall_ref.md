@@ -62,6 +62,9 @@ Status meanings:
 | 63 | `dup2` | Partial | Direct mapping exists; no ELKS smoke coverage yet. |
 | 64 | `getppid` | Partial | Direct mapping exists; no ELKS smoke coverage yet. |
 | 65 | `getpgrp` | Partial | Direct mapping exists; no ELKS smoke coverage yet. |
+| 69 | `sbrk` | Working | 16-bit heap growth with old-break copyout is implemented and unit-tested. |
+| 70 | `ustatfs` | Unsupported | ELKS filesystem-stat structure translation is not implemented yet. |
+| 74 | `uname` | Working | The ELKS five-field `utsname` is translated from native Substrate identity strings and smoke-tested with upstream `uname`. |
 
 ## 3. Smoke-tested binaries
 
@@ -80,3 +83,4 @@ These are driven by `tests/elks/run_tests.sh`.
   exposes an unresolved fault-handling bug.
 - Core dump support for ELKS processes is not implemented.
 - Many structure-bearing syscalls still need ELKS-specific layout translation.
+- `ustatfs(70)` is still missing, so upstream `df` remains incomplete.

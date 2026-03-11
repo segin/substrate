@@ -18,6 +18,7 @@
 #include <sys/session.h>
 #include <sys/dirent.h>
 #include <sys/stat.h>
+#include <sys/utsname.h>
 #include <pm/pm.h>
 #include <kern/time.h>
 #include <kern/cmdline.h>
@@ -43,6 +44,22 @@ static int elks_debug_enabled(const char *channel) {
         return 1;
     }
     return channel && cmdline_debug_enabled(channel);
+}
+
+static void elks_copy_cstr(char *dst, size_t dst_size, const char *src) {
+    size_t len;
+
+    if (!dst || dst_size == 0U) {
+        return;
+    }
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+
+    len = strnlen(src, dst_size - 1U);
+    memcpy(dst, src, len);
+    dst[len] = '\0';
 }
 
 static int SUB_PURE elks_to_native_signal(int sig) {
@@ -106,6 +123,14 @@ struct elks_timeval {
 struct elks_timezone {
     int16_t tz_minuteswest;
     int16_t tz_dsttime;
+} __attribute__((packed, aligned(2)));
+
+struct elks_utsname {
+    char sysname[8];
+    char nodename[16];
+    char release[12];
+    char version[48];
+    char machine[16];
 } __attribute__((packed, aligned(2)));
 
 #define ELKS_KMEM_RDEV               (((1U << 8) | 2U))
@@ -1475,6 +1500,39 @@ static int elks_sys_gettimeofday(uint32_t tv_off, uint32_t tz_off, uint32_t unus
     return 0;
 }
 
+static int elks_sys_uname(uint32_t uts_off, uint32_t unused1, uint32_t unused2,
+                          uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                          uint32_t unused6, uint32_t unused7) {
+    struct utsname native;
+    struct elks_utsname elks;
+    uintptr_t linear = 0;
+    int ret;
+
+    (void)unused1; (void)unused2; (void)unused3; (void)unused4;
+    (void)unused5; (void)unused6; (void)unused7;
+
+    if (uts_off == 0) {
+        return -EFAULT;
+    }
+    ret = elks_ds_span(uts_off, sizeof(elks), &linear);
+    if (ret != 0) {
+        return ret;
+    }
+    ret = kern_uname(&native);
+    if (ret != 0) {
+        return ret;
+    }
+
+    memset(&elks, 0, sizeof(elks));
+    elks_copy_cstr(elks.sysname, sizeof(elks.sysname), native.sysname);
+    elks_copy_cstr(elks.nodename, sizeof(elks.nodename), native.nodename);
+    elks_copy_cstr(elks.release, sizeof(elks.release), native.release);
+    elks_copy_cstr(elks.version, sizeof(elks.version), native.version);
+    elks_copy_cstr(elks.machine, sizeof(elks.machine), native.machine);
+    memcpy((void *)(uintptr_t)linear, &elks, sizeof(elks));
+    return 0;
+}
+
 static int elks_sys_kill(uint32_t pid, uint32_t sig, uint32_t unused2,
                          uint32_t unused3, uint32_t unused4, uint32_t unused5,
                          uint32_t unused6, uint32_t unused7) {
@@ -1729,6 +1787,7 @@ static void *elks_syscall_table[ELKS_SYS_MAX] = {
     [ELKS_SYS_lstat]   = (void *)&elks_sys_lstat,
     [ELKS_SYS_readlink] = (void *)&elks_sys_readlink,
     [ELKS_SYS_gettimeofday] = (void *)&elks_sys_gettimeofday,
+    [ELKS_SYS_uname]   = (void *)&elks_sys_uname,
     [ELKS_SYS_umask]   = (void *)&sys_umask,
     [ELKS_SYS_stat]    = (void *)&elks_sys_stat,
     [ELKS_SYS_dup2]    = (void *)&sys_dup2,
@@ -1763,6 +1822,7 @@ static const char *elks_syscall_names[ELKS_SYS_MAX] = {
     [ELKS_SYS_execve]  = "execve",
     [ELKS_SYS_alarm]   = "alarm",
     [ELKS_SYS_kill]    = "kill",
+    [ELKS_SYS_uname]   = "uname",
 };
 
 struct personality personality_elks = {

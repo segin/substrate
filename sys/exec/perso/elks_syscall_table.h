@@ -63,6 +63,7 @@
 #define ELKS_SYS_select         63
 #define ELKS_SYS_readdir        64
 #define ELKS_SYS_sbrk           69
+#define ELKS_SYS_uname          74
 #define ELKS_SYS_MAX            128
 
 #define ELKS_SYS_getppid        ELKS_SYS_getpid
