@@ -302,6 +302,26 @@ int ldt_alloc_process(process_t *proc, unsigned int entry_count) {
     return ldt_install_process(proc, new_ldt, entry_count, new_is_uma);
 }
 
+int ldt_replace_process(process_t *proc, const void *entries, unsigned int entry_count) {
+    void *new_ldt;
+    uint8_t new_is_uma;
+    size_t bytes;
+
+    if (!proc || !entries || entry_count == 0 || entry_count > LDT_ENTRIES) {
+        return -EINVAL;
+    }
+
+    new_ldt = ldt_alloc_storage(entry_count, &new_is_uma);
+    if (!new_ldt) {
+        return -ENOMEM;
+    }
+
+    bytes = (size_t)entry_count * LDT_ENTRY_SIZE;
+    memcpy(new_ldt, entries, bytes);
+
+    return ldt_install_process(proc, new_ldt, entry_count, new_is_uma);
+}
+
 int ldt_clone_process(process_t *dst, const process_t *src) {
     void *new_ldt;
     const process_t *src_proc = src;

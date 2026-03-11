@@ -22,6 +22,7 @@
 #include <pm/pm.h>
 #include <kern/panic.h>
 #include <kern/arch.h>
+#include <kern/cmdline.h>
 #include <vm/vm_map.h>
 
 #define ELKS_ARG_MAX_BYTES (32 * 1024)
@@ -33,6 +34,10 @@ static struct exec_binary_handler elks_handler = {
     .load = elks_load,
     .next = NULL
 };
+
+static int elks_aout_debug_enabled(void) {
+    return cmdline_debug_enabled("perso:elks:aout");
+}
 
 static int SUB_NODISCARD elks_fail(int fd, int err, const char *msg) {
     if (msg) {
@@ -196,20 +201,19 @@ elks_check_file(const char *path, const char *header, size_t len) {
 static int SUB_NODISCARD SUB_NONNULL(1, 2)
 elks_setup_segments(process_t *proc, const struct elks_load_plan *plan) {
     struct elks_segment_layout layout;
+    gdt_entry_t entries[ELKS_LDT_ES_INDEX + 1U];
     unsigned int entry_count = ELKS_LDT_ES_INDEX + 1U;
 
-    if (ldt_alloc_process(proc, entry_count) != 0) {
-        return -ENOMEM;
-    }
     memset(&layout, 0, sizeof(layout));
+    memset(entries, 0, sizeof(entries));
     elks_build_segment_layout(plan, &layout);
 
-    fill_ldt_entry((uint8_t *)proc->ldt + ELKS_LDT_CS_INDEX * 8, &layout.cs);
-    fill_ldt_entry((uint8_t *)proc->ldt + ELKS_LDT_DS_INDEX * 8, &layout.ds);
-    fill_ldt_entry((uint8_t *)proc->ldt + ELKS_LDT_SS_INDEX * 8, &layout.ss);
-    fill_ldt_entry((uint8_t *)proc->ldt + ELKS_LDT_ES_INDEX * 8, &layout.es);
-    
-    return 0;
+    fill_ldt_entry(&entries[ELKS_LDT_CS_INDEX], &layout.cs);
+    fill_ldt_entry(&entries[ELKS_LDT_DS_INDEX], &layout.ds);
+    fill_ldt_entry(&entries[ELKS_LDT_SS_INDEX], &layout.ss);
+    fill_ldt_entry(&entries[ELKS_LDT_ES_INDEX], &layout.es);
+
+    return ldt_replace_process(proc, entries, entry_count);
 }
 
 int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) {
@@ -221,9 +225,11 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     size_t argv_envp_bytes;
     int ret;
     
-    kprint("ELKS: loading ");
-    kprint(path ? path : "(null)");
-    kprint("\n");
+    if (elks_aout_debug_enabled()) {
+        kprint("ELKS: loading ");
+        kprint(path ? path : "(null)");
+        kprint("\n");
+    }
 
     if (fd >= 0 && fd < MAX_FD && current_process && current_process->fds[fd]) {
         current_process->fds[fd]->f_offset = 0;
@@ -413,7 +419,9 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     uint32_t user_sp;
     struct elks_segment_layout layout;
     
-    kprint("ELKS: Loaded binary, jumping to 16-bit mode\n");
+    if (elks_aout_debug_enabled()) {
+        kprint("ELKS: Loaded binary, jumping to 16-bit mode\n");
+    }
     
     memset(&layout, 0, sizeof(layout));
     elks_build_segment_layout(&plan, &layout);
@@ -431,6 +439,15 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     elks_free_kernel_vector(kargv);
     elks_free_kernel_vector(kenvp);
     kern_close(fd);
+
+    /*
+     * ELKS handoff runs after several VFS/kmalloc cleanup paths. Reassert the
+     * freshly built user pmap and LDT immediately before the 16-bit iret so
+     * the first instruction fetch cannot observe stale kernel address-space
+     * state.
+     */
+    pmap_activate((pmap_t)(uintptr_t)current_process->pmap);
+    ldt_activate(current_process);
     
     jump_to_elks(hdr.entry, user_sp ? user_sp : 0xFFFE, layout.cs_sel, layout.ds_sel,
                  layout.ss_sel, layout.es_sel);

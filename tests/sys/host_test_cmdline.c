@@ -116,11 +116,36 @@ void test_cmdline_get(void) {
     printf("PASS\n");
 }
 
+void test_cmdline_debug_enabled(void) {
+    printf("Running test_cmdline_debug_enabled...\n");
+
+    cmdline_init("debug=syscall,elf,perso:elks");
+    assert(cmdline_debug_enabled("syscall"));
+    assert(cmdline_debug_enabled("elf"));
+    assert(cmdline_debug_enabled("perso:elks"));
+    assert(cmdline_debug_enabled("perso:elks:aout"));
+    assert(!cmdline_debug_enabled("perso:linux"));
+    assert(!cmdline_debug_enabled("vm:brk"));
+
+    cmdline_init("debug");
+    assert(cmdline_debug_enabled("syscall"));
+    assert(cmdline_debug_enabled("perso:linux"));
+
+    cmdline_init("foo=bar debug=vm:brk,trap debug=perso:linux");
+    assert(cmdline_debug_enabled("vm:brk"));
+    assert(cmdline_debug_enabled("trap"));
+    assert(cmdline_debug_enabled("perso:linux"));
+    assert(!cmdline_debug_enabled("perso:freebsd"));
+
+    printf("PASS\n");
+}
+
 int main(void) {
     printf("Starting host_test_cmdline...\n");
     test_cmdline_init();
     test_cmdline_has();
     test_cmdline_get();
+    test_cmdline_debug_enabled();
     printf("All tests passed!\n");
     return 0;
 }

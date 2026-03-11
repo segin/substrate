@@ -35,6 +35,12 @@ void test_cmdline_parsing() {
     // Test 5: Not found
     cmdline_init("key=value");
     assert(cmdline_get("missing", buf, 32) == -1);
+
+    // Test 6: Hierarchical debug channels
+    cmdline_init("debug=elf,perso:elks");
+    assert(cmdline_debug_enabled("elf") == 1);
+    assert(cmdline_debug_enabled("perso:elks:aout") == 1);
+    assert(cmdline_debug_enabled("perso:linux") == 0);
 }
 
 void property_test_random_strings() {

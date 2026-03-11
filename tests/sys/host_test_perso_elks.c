@@ -14,6 +14,7 @@
 #include <sys/termios.h>
 #include <sys/time.h>
 #include <sys/times.h>
+#include <kern/cmdline.h>
 #include <arch/i386/idt.h>
 #include <exec/formats/elks_aout.h>
 #include <vfs/vfs.h>
@@ -574,14 +575,36 @@ int main(void) {
         fprintf(stderr, "FAIL: ELKS MEM_GETTASK emulation wrong\n");
         return 1;
     }
-    if (fn(4, ELKS_MEM_GETUPTIME, 0x154, 0, 0, 0, 0, 0) != -EINVAL) {
-        fprintf(stderr, "FAIL: ELKS MEM_GETUPTIME should be rejected\n");
+    memset(ds_mem + 0x156, 0xFF, 16);
+    if (fn(4, ELKS_MEM_GETUPTIME, 0x156, 0, 0, 0, 0, 0) != 0 ||
+        *(uint16_t *)(void *)(ds_mem + 0x156) != ELKS_KMEM_JIFFIES_OFFSET) {
+        fprintf(stderr, "FAIL: ELKS MEM_GETUPTIME emulation wrong\n");
         return 1;
     }
-    *(int32_t *)(void *)(ds_mem + 0x158) = (int32_t)ELKS_KMEM_TASKS_OFFSET;
+    memset(ds_mem + 0x158, 0xFF, 16);
+    if (fn(4, ELKS_MEM_GETJIFFADDR, 0x158, 0, 0, 0, 0, 0) != 0 ||
+        *(uint16_t *)(void *)(ds_mem + 0x158) != ELKS_KMEM_JIFFIES_OFFSET) {
+        fprintf(stderr, "FAIL: ELKS MEM_GETJIFFADDR emulation wrong\n");
+        return 1;
+    }
+    *(int32_t *)(void *)(ds_mem + 0x15c) = (int32_t)ELKS_KMEM_JIFFIES_OFFSET;
     if (((int (*)(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t))
-         personality_elks.syscall_table[ELKS_SYS_lseek])(4, 0x158, 0, 0, 0, 0, 0, 0) != 0 ||
-        *(int32_t *)(void *)(ds_mem + 0x158) != (int32_t)ELKS_KMEM_TASKS_OFFSET) {
+         personality_elks.syscall_table[ELKS_SYS_lseek])(4, 0x15c, 0, 0, 0, 0, 0, 0) != 0 ||
+        *(int32_t *)(void *)(ds_mem + 0x15c) != (int32_t)ELKS_KMEM_JIFFIES_OFFSET) {
+        fprintf(stderr, "FAIL: ELKS kmem jiffies lseek emulation wrong\n");
+        return 1;
+    }
+    memset(ds_mem + 0x1a0, 0, 8);
+    if (((int (*)(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t))
+         personality_elks.syscall_table[ELKS_SYS_read])(4, 0x1a0, 4, 0, 0, 0, 0, 0) != 4 ||
+        *(uint32_t *)(void *)(ds_mem + 0x1a0) != (uint32_t)stub_get_ticks()) {
+        fprintf(stderr, "FAIL: ELKS kmem jiffies image wrong\n");
+        return 1;
+    }
+    *(int32_t *)(void *)(ds_mem + 0x160) = (int32_t)ELKS_KMEM_TASKS_OFFSET;
+    if (((int (*)(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t))
+         personality_elks.syscall_table[ELKS_SYS_lseek])(4, 0x160, 0, 0, 0, 0, 0, 0) != 0 ||
+        *(int32_t *)(void *)(ds_mem + 0x160) != (int32_t)ELKS_KMEM_TASKS_OFFSET) {
         fprintf(stderr, "FAIL: ELKS kmem lseek emulation wrong\n");
         return 1;
     }
@@ -605,10 +628,10 @@ int main(void) {
         fprintf(stderr, "FAIL: ELKS kmem task image wrong\n");
         return 1;
     }
-    *(int32_t *)(void *)(ds_mem + 0x158) =
+    *(int32_t *)(void *)(ds_mem + 0x164) =
         (int32_t)*(uint16_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_T_BEGSTACK_LEGACY);
     if (((int (*)(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t))
-         personality_elks.syscall_table[ELKS_SYS_lseek])(4, 0x158, 0, 0, 0, 0, 0, 0) != 0) {
+         personality_elks.syscall_table[ELKS_SYS_lseek])(4, 0x164, 0, 0, 0, 0, 0, 0) != 0) {
         fprintf(stderr, "FAIL: ELKS kmem stack lseek wrong\n");
         return 1;
     }
@@ -907,6 +930,7 @@ int main(void) {
 
     current_thread->syscall_num = 127;
     memset(last_log, 0, sizeof(last_log));
+    cmdline_init("debug=perso:elks:syscall");
     fn = (void *)personality_elks.syscall_table[127];
     if (fn(0, 0, 0, 0, 0, 0, 0, 0) != -ENOSYS) {
         fprintf(stderr, "FAIL: ELKS unsupported syscall did not return ENOSYS\n");

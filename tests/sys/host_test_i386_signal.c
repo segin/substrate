@@ -227,6 +227,20 @@ static void test_i386_trap_to_signal_mapping(void) {
     assert(code == ILL_ILLOPC);
     assert(addr == 0x08041234u);
 
+    regs.int_no = 12;
+    regs.useresp = 0xBFFFF000u;
+    assert(i386_trap_to_signal(&regs, 0, &sig, &code, &addr) == 1);
+    assert(sig == SIGSEGV);
+    assert(code == SEGV_ACCERR);
+    assert(addr == 0xBFFFF000u);
+
+    regs.int_no = 13;
+    regs.eip = 0x08045555u;
+    assert(i386_trap_to_signal(&regs, 0, &sig, &code, &addr) == 1);
+    assert(sig == SIGSEGV);
+    assert(code == SEGV_ACCERR);
+    assert(addr == 0x08045555u);
+
     regs.int_no = 14;
     regs.err_code = 0;
     assert(i386_trap_to_signal(&regs, 0xCAFEBABEu, &sig, &code, &addr) == 1);
@@ -239,6 +253,13 @@ static void test_i386_trap_to_signal_mapping(void) {
     assert(sig == SIGSEGV);
     assert(code == SEGV_ACCERR);
     assert(addr == 0xFEEDFACEu);
+
+    regs.int_no = 17;
+    regs.eip = 0x08047777u;
+    assert(i386_trap_to_signal(&regs, 0, &sig, &code, &addr) == 1);
+    assert(sig == SIGBUS);
+    assert(code == BUS_ADRALN);
+    assert(addr == 0x08047777u);
 }
 
 static void test_onstack_delivery_uses_alt_stack(void) {

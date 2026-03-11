@@ -183,6 +183,33 @@ int main(void) {
         return 1;
     }
 
+    {
+        gdt_entry_t seeded[3];
+
+        memset(seeded, 0, sizeof(seeded));
+        fill_entry(&seeded[0], 0x00011000U, 0x00FFFU, 0xFAU, 0x40U);
+        fill_entry(&seeded[1], 0x00022000U, 0x01FFFU, 0xF2U, 0x40U);
+        fill_entry(&seeded[2], 0x00033000U, 0x02FFFU, 0xF2U, 0x40U);
+        last_kfree_size = 0;
+        if (ldt_replace_process(&replaced, seeded, 3) != 0) {
+            fprintf(stderr, "FAIL: ldt_replace_process failed\n");
+            return 1;
+        }
+        if (replaced.ldt_entry_count != 3) {
+            fprintf(stderr, "FAIL: ldt_replace_process entry count mismatch\n");
+            return 1;
+        }
+        if (memcmp(replaced.ldt, seeded, sizeof(seeded)) != 0) {
+            fprintf(stderr, "FAIL: ldt_replace_process contents mismatch\n");
+            return 1;
+        }
+        if (last_kfree_size != 6U * sizeof(gdt_entry_t)) {
+            fprintf(stderr, "FAIL: ldt_replace_process freed wrong size %lu\n",
+                    (unsigned long)last_kfree_size);
+            return 1;
+        }
+    }
+
     current_process = &replaced;
     {
         struct user_desc bad;

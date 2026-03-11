@@ -60,20 +60,57 @@ int i386_trap_to_signal(const registers_t *regs, uint32_t cr2, int *sig,
             *sig = SIGTRAP;
             *code = TRAP_BRKPT;
             return 1;
+        case 4:
+            *sig = SIGTRAP;
+            *code = TRAP_TRACE;
+            *addr = regs->eip;
+            return 1;
+        case 5:
+            *sig = SIGSEGV;
+            *code = SEGV_ACCERR;
+            *addr = regs->eip;
+            return 1;
         case 6:
             *sig = SIGILL;
             *code = ILL_ILLOPC;
             *addr = regs->eip;
             return 1;
+        case 9:
+            *sig = SIGSEGV;
+            *code = SEGV_ACCERR;
+            *addr = regs->eip;
+            return 1;
+        case 10:
+        case 11:
+            *sig = SIGSEGV;
+            *code = SEGV_ACCERR;
+            *addr = regs->eip;
+            return 1;
+        case 12:
+            *sig = SIGSEGV;
+            *code = SEGV_ACCERR;
+            *addr = regs->useresp;
+            return 1;
         case 13:
-            *sig = SIGILL;
-            *code = ILL_PRVOPC;
+            *sig = SIGSEGV;
+            *code = SEGV_ACCERR;
             *addr = regs->eip;
             return 1;
         case 14:
             *sig = SIGSEGV;
             *code = (regs->err_code & 0x1) ? SEGV_ACCERR : SEGV_MAPERR;
             *addr = cr2;
+            return 1;
+        case 16:
+        case 19:
+            *sig = SIGFPE;
+            *code = FPE_FLTINV;
+            *addr = regs->eip;
+            return 1;
+        case 17:
+            *sig = SIGBUS;
+            *code = BUS_ADRALN;
+            *addr = regs->eip;
             return 1;
         default:
             return 0;

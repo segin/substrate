@@ -85,13 +85,17 @@ Native i386 exception mapping currently includes:
 - divide-by-zero -> `SIGFPE` / `FPE_INTDIV`
 - breakpoint -> `SIGTRAP` / `TRAP_BRKPT`
 - single-step debug trap -> `SIGTRAP` / `TRAP_TRACE`
+- overflow trap -> `SIGTRAP` / `TRAP_TRACE`
+- bounds / segment / stack faults -> `SIGSEGV` / `SEGV_ACCERR`
 - invalid opcode -> `SIGILL` / `ILL_ILLOPC`
-- general-protection fault -> `SIGILL` / `ILL_PRVOPC`
+- general-protection fault -> `SIGSEGV` / `SEGV_ACCERR`
 - page fault -> `SIGSEGV` / `SEGV_MAPERR` or `SEGV_ACCERR`
+- alignment check -> `SIGBUS` / `BUS_ADRALN`
+- x87 / SIMD floating-point traps -> `SIGFPE` / `FPE_FLTINV`
 
 For page faults, `siginfo_t.si_addr` carries the faulting virtual address. For
-invalid-opcode and protection-fault cases, `si_addr` carries the faulting
-instruction pointer.
+invalid-opcode, segment, and protection-fault cases, `si_addr` carries either
+the faulting instruction pointer or the stack pointer for stack-segment faults.
 
 ## Checking Points
 

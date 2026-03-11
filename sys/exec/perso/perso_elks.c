@@ -20,6 +20,7 @@
 #include <sys/stat.h>
 #include <pm/pm.h>
 #include <kern/time.h>
+#include <kern/cmdline.h>
 #include <vm/vm_kmem.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -35,6 +36,13 @@ elks_ds_pointer(uint32_t offset, uintptr_t *linear_out) {
                                          (uint16_t)((ELKS_LDT_DS_INDEX << 3) | 4U | 3U),
                                          (uint16_t)offset,
                                          linear_out);
+}
+
+static int elks_debug_enabled(const char *channel) {
+    if (cmdline_debug_enabled("perso:elks")) {
+        return 1;
+    }
+    return channel && cmdline_debug_enabled(channel);
 }
 
 static int SUB_PURE elks_to_native_signal(int sig) {
@@ -507,9 +515,11 @@ static int elks_handle_trap(void *regs_ptr) {
         return 0;
     }
 
-    sprintf(msg, "ELKS: trapped Minix-86 syscall attempt via INT 0x20 at 0x%08X\n",
-            (unsigned int)softint_addr);
-    kprint(msg);
+    if (elks_debug_enabled("perso:elks:trap")) {
+        sprintf(msg, "ELKS: trapped Minix-86 syscall attempt via INT 0x20 at 0x%08X\n",
+                (unsigned int)softint_addr);
+        kprint(msg);
+    }
     if (current_thread && current_thread->proc == current_process) {
         current_thread->trap_addr = softint_addr;
     }
@@ -560,8 +570,10 @@ static int elks_sys_unimplemented(uint32_t unused0, uint32_t unused1, uint32_t u
     (void)unused0; (void)unused1; (void)unused2; (void)unused3;
     (void)unused4; (void)unused5; (void)unused6; (void)unused7;
 
-    sprintf(buf, "ELKS: unsupported syscall %u\n", nr);
-    kprint(buf);
+    if (elks_debug_enabled("perso:elks:syscall")) {
+        sprintf(buf, "ELKS: unsupported syscall %u\n", nr);
+        kprint(buf);
+    }
     return -ENOSYS;
 }
 
@@ -1500,7 +1512,11 @@ static int elks_sys_ioctl(uint32_t fd, uint32_t request, uint32_t arg_off,
                 return 0;
             case ELKS_MEM_GETUPTIME:
             case ELKS_MEM_GETJIFFADDR:
-                return -EINVAL;
+                if (!arg) {
+                    return -EFAULT;
+                }
+                *(uint16_t *)arg = (uint16_t)ELKS_KMEM_JIFFIES_OFFSET;
+                return 0;
             default:
                 return -EINVAL;
         }

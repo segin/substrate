@@ -60,7 +60,7 @@ run_case() {
         -accel tcg \
         -icount shift=9 \
         -smp 1 \
-        -append "serial_debug console=serial0 root=/dev/storage/ide0 init=/bin/${binary} syscall_trace" \
+        -append "serial_debug console=serial0 debug=syscall,trap,perso:elks,perso:elks:aout root=/dev/storage/ide0 init=/bin/${binary}" \
         -serial "file:$log_path" \
         -drive "file=$WORK_ROOTFS_IMG,format=raw,if=ide" \
         -display none \
@@ -89,7 +89,7 @@ run_init_case() {
         -accel tcg \
         -icount shift=9 \
         -smp 1 \
-        -append "serial_debug console=serial0 root=/dev/storage/ide0 init=$init_path" \
+        -append "serial_debug console=serial0 debug=trap,perso:elks,perso:elks:aout root=/dev/storage/ide0 init=$init_path" \
         -serial "file:$log_path" \
         -drive "file=$WORK_ROOTFS_IMG,format=raw,if=ide" \
         -display none \
@@ -141,7 +141,7 @@ if want_case fork_elks; then
     run_case fork_elks "ELKS child" "ELKS parent"
 fi
 if want_case bounds_test_elks; then
-    run_case bounds_test_elks "Page Fault (in user process)" "Warning: Init process exited. System Halted (idle)."
+    run_case bounds_test_elks "CORE: captured crash state" "Warning: Init process exited. System Halted (idle)."
 fi
 if want_case cat_elks; then
     run_case cat_elks "ELKS cat sample"

@@ -10,6 +10,7 @@
 #include <string.h>
 #include <arch/i386/pmm.h>
 #include <vm/vm_kmem.h>
+#include <kern/cmdline.h>
 
 // mman.h flag definitions (duplicated here for kernel use)
 #define PROT_NONE  0x0
@@ -158,7 +159,7 @@ void *sys_brk(void *addr) {
     // If querying (addr == 0) or uninitialized
     if (!addr || !current_process->brk_start) {
         extern int syscall_trace_enabled;
-        if (syscall_trace_enabled) {
+        if (syscall_trace_enabled || cmdline_debug_enabled("vm:brk")) {
             extern void kprint(const char*);
             char buf[64];
             char *digits = "0123456789ABCDEF";
@@ -202,7 +203,7 @@ void *sys_brk(void *addr) {
                          pmm_free_block((void*)(pa_batch[k] + 0xC0000000));
                      }
                      extern int syscall_trace_enabled;
-                     if (syscall_trace_enabled) {
+                     if (syscall_trace_enabled || cmdline_debug_enabled("vm:brk")) {
                          extern void kprint(const char*);
                          kprint("BRK: pmm_alloc failed!\n");
                      }
@@ -221,7 +222,7 @@ void *sys_brk(void *addr) {
                                  batch_va_start, batch_count, pa_batch,
                                  VM_PROT_READ | VM_PROT_WRITE, 0) < 0) {
                  extern int syscall_trace_enabled;
-                 if (syscall_trace_enabled) {
+                 if (syscall_trace_enabled || cmdline_debug_enabled("vm:brk")) {
                      extern void kprint(const char*);
                      kprint("BRK: pmap_enter_batch failed!\n");
                  }
@@ -236,7 +237,7 @@ void *sys_brk(void *addr) {
     
     // Debug print for success (restored and gated)
     extern int syscall_trace_enabled;
-    if (syscall_trace_enabled) {
+    if (syscall_trace_enabled || cmdline_debug_enabled("vm:brk")) {
         extern void kprint(const char*);
         char buf[64];
         char *digits = "0123456789ABCDEF";

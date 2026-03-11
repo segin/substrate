@@ -303,7 +303,21 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
         child_proc->pmap = NULL; // Kernel process (shouldn't fork)
     }
 
+    if (parent->vm_map && child_proc->pmap) {
+        child_proc->vm_map = vm_map_fork(parent->vm_map, child_proc->pmap);
+        if (!child_proc->vm_map) {
+            pmap_release(child_proc->pmap);
+            child_proc->pmap = NULL;
+            child_proc->pid = -1;
+            return -1;
+        }
+    }
+
     if (ldt_clone_process(child_proc, parent) != 0) {
+        if (child_proc->vm_map) {
+            vm_map_destroy(child_proc->vm_map);
+            child_proc->vm_map = NULL;
+        }
         if (child_proc->pmap) {
             pmap_release(child_proc->pmap);
             child_proc->pmap = NULL;
@@ -319,9 +333,13 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     }
     strncpy(child_proc->cwd_path, parent->cwd_path, sizeof(child_proc->cwd_path) - 1);
     child_proc->cwd_path[sizeof(child_proc->cwd_path) - 1] = '\0';
+    strncpy(child_proc->exec_path, parent->exec_path, sizeof(child_proc->exec_path) - 1);
+    child_proc->exec_path[sizeof(child_proc->exec_path) - 1] = '\0';
     child_proc->cmdline_tail_len = parent->cmdline_tail_len;
     child_proc->cmdline_tail_argc = parent->cmdline_tail_argc;
     memcpy(child_proc->cmdline_tail, parent->cmdline_tail, sizeof(child_proc->cmdline_tail));
+    child_proc->brk_start = parent->brk_start;
+    child_proc->brk = parent->brk;
     
     // Copy parent resources (FDs)
     child_proc->tty = parent->tty;

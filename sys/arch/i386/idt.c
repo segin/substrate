@@ -222,6 +222,32 @@ void isr_handler(registers_t *regs) {
             }
         }
 
+        if (is_usermode) {
+            int sig = 0;
+            int code = 0;
+            uintptr_t addr = 0;
+
+            if (current_process &&
+                i386_trap_to_signal(regs, cr2, &sig, &code, &addr)) {
+                if (current_thread && current_thread->proc == current_process) {
+                    current_thread->trap_addr = addr;
+                }
+                if (cmdline_debug_enabled("trap")) {
+                    char trapbuf[128];
+                    sprintf(trapbuf,
+                            "TRAP: user exception %u -> signal %d code %d addr 0x%08X\n",
+                            (unsigned int)regs->int_no,
+                            sig,
+                            code,
+                            (unsigned int)addr);
+                    kprint(trapbuf);
+                }
+                trapsignal(current_process, sig, code);
+                signal_handle_pending(regs);
+                return;
+            }
+        }
+
         char buf[256];
         kprint("\nEXCEPTION: ");
         kprint(exception_messages[regs->int_no]);
@@ -258,23 +284,6 @@ void isr_handler(registers_t *regs) {
         }
         
         if (is_usermode) {
-            int sig = 0;
-            int code = 0;
-            uintptr_t addr = 0;
-
-            if (current_process &&
-                i386_trap_to_signal(regs, cr2, &sig, &code, &addr)) {
-                if (current_thread && current_thread->proc == current_process) {
-                    current_thread->trap_addr = addr;
-                }
-                trapsignal(current_process, sig, code);
-                if (current_thread && current_thread->proc == current_process) {
-                    current_thread->trap_addr = addr;
-                }
-                signal_handle_pending(regs);
-                return;
-            }
-
             // User-mode crash - kill the process
             kprint("Killing user process.\n\n");
             if (current_process && current_process->pid == 1) {

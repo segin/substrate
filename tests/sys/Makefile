@@ -39,7 +39,7 @@ host_test_elks_ptr_translation: host_test_elks_ptr_translation.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_elks_ptr_translation.c -o $@
 
 host_test_perso_elks: host_test_perso_elks.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_perso_elks.c -o $@
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_perso_elks.c ../../sys/kern/cmdline.c -o $@
 
 host_test_elks_core: host_test_elks_core.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_elks_core.c -o $@
@@ -60,7 +60,7 @@ host_test_exec_init: host_test_exec_init.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_exec_init.c ../../sys/exec/exec.c -o $@
 
 host_test_elks_aout: host_test_elks_aout.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_elks_aout.c -o $@
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_elks_aout.c ../../sys/kern/cmdline.c -o $@
 
 host_test_itimer: host_test_itimer.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_itimer.c -o $@

@@ -36,6 +36,7 @@ struct user_desc {
 struct process;
 void ldt_init_process(struct process *proc);
 int ldt_alloc_process(struct process *proc, unsigned int entry_count);
+int ldt_replace_process(struct process *proc, const void *entries, unsigned int entry_count);
 void ldt_free_process(struct process *proc);
 int ldt_clone_process(struct process *dst, const struct process *src);
 void ldt_activate(struct process *proc);

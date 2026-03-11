@@ -343,7 +343,8 @@ static void init_runtime_console(int serial_console) {
         kprint("Serial Debug Enabled.\n");
     }
 
-    if (cmdline_has("syscall_trace") || cmdline_has("syscall_log")) {
+    if (cmdline_has("syscall_trace") || cmdline_has("syscall_log") ||
+        cmdline_debug_enabled("syscall")) {
         syscall_trace_enabled = 1;
         kprint("Syscall Tracing Enabled.\n");
     }

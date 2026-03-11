@@ -16,6 +16,7 @@
 #include <sys/errno.h>
 #include <arch/i386/pmm.h>
 #include <pm/pm.h>
+#include <kern/cmdline.h>
 #include <stdio.h>
 
 typedef struct elf_image_info {
@@ -41,6 +42,20 @@ typedef struct elf_image_cache_entry {
 #define ELF_IMAGE_CACHE_SIZE 16
 static elf_image_cache_entry_t elf_image_cache[ELF_IMAGE_CACHE_SIZE];
 static uint32_t elf_image_cache_hand;
+
+static int elf_debug_enabled(void) {
+    return cmdline_debug_enabled("elf");
+}
+
+static int elf_personality_debug_enabled(int detected_os) {
+    if (detected_os == ELFOSABI_LINUX) {
+        return cmdline_debug_enabled("perso:linux");
+    }
+    if (detected_os == ELFOSABI_FREEBSD) {
+        return cmdline_debug_enabled("perso:freebsd");
+    }
+    return cmdline_debug_enabled("perso:native");
+}
 
 static void elf_cache_identity(fs_node_t *file, uintptr_t *fsid, uint64_t *ino) {
     if (file->mp) {
@@ -265,19 +280,22 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
         return 0;
     }
     
-    kprint("ELF: Loading executable, entry=0x");
-    // Print entry point in hex (simple)
     char hexbuf[16];
     uint32_t entry = ehdr->e_entry + load_base;
     uint32_t val = entry;
+    int trace_elf = elf_debug_enabled();
+    int trace_personality = elf_personality_debug_enabled(image.detected_os);
 
-    for (int i = 7; i >= 0; i--) {
-        int nib = (val >> (i * 4)) & 0xF;
-        hexbuf[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
+    if (trace_elf) {
+        kprint("ELF: Loading executable, entry=0x");
+        for (int i = 7; i >= 0; i--) {
+            int nib = (val >> (i * 4)) & 0xF;
+            hexbuf[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
+        }
+        hexbuf[8] = '\0';
+        kprint(hexbuf);
+        kprint("\n");
     }
-    hexbuf[8] = '\0';
-    kprint(hexbuf);
-    kprint("\n");
     
     // Use pmap_t from vm_map.h/pmap.h
     void *pmap = pmap_kernel();
@@ -314,35 +332,39 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
             tls_memsz = phdr.p_memsz;
             tls_align = phdr.p_align ? phdr.p_align : 1;
             has_tls = 1;
-            kprint("ELF: Found TLS segment, memsz=");
-            char tbuf[16];
-            for (int j = 7; j >= 0; j--) {
-                int nib = (tls_memsz >> (j * 4)) & 0xF;
-                tbuf[7 - j] = nib < 10 ? '0' + nib : 'A' + nib - 10;
+            if (trace_elf) {
+                char tbuf[16];
+                kprint("ELF: Found TLS segment, memsz=");
+                for (int j = 7; j >= 0; j--) {
+                    int nib = (tls_memsz >> (j * 4)) & 0xF;
+                    tbuf[7 - j] = nib < 10 ? '0' + nib : 'A' + nib - 10;
+                }
+                tbuf[8] = '\0';
+                kprint(tbuf);
+                kprint("\n");
             }
-            tbuf[8] = '\0';
-            kprint(tbuf);
-            kprint("\n");
         }
         
         if (phdr.p_type == PT_LOAD && phdr.p_memsz > 0) {
-            kprint("ELF: Mapping segment at 0x");
-            val = phdr.p_vaddr;
-            for (int j = 7; j >= 0; j--) {
-                int nib = (val >> (j * 4)) & 0xF;
-                hexbuf[7 - j] = nib < 10 ? '0' + nib : 'A' + nib - 10;
+            if (trace_elf) {
+                kprint("ELF: Mapping segment at 0x");
+                val = phdr.p_vaddr;
+                for (int j = 7; j >= 0; j--) {
+                    int nib = (val >> (j * 4)) & 0xF;
+                    hexbuf[7 - j] = nib < 10 ? '0' + nib : 'A' + nib - 10;
+                }
+                hexbuf[8] = '\0';
+                kprint(hexbuf);
+                kprint(", size=");
+                val = phdr.p_memsz;
+                for (int j = 7; j >= 0; j--) {
+                    int nib = (val >> (j * 4)) & 0xF;
+                    hexbuf[7 - j] = nib < 10 ? '0' + nib : 'A' + nib - 10;
+                }
+                hexbuf[8] = '\0';
+                kprint(hexbuf);
+                kprint("\n");
             }
-            hexbuf[8] = '\0';
-            kprint(hexbuf);
-            kprint(", size=");
-            val = phdr.p_memsz;
-            for (int j = 7; j >= 0; j--) {
-                int nib = (val >> (j * 4)) & 0xF;
-                hexbuf[7 - j] = nib < 10 ? '0' + nib : 'A' + nib - 10;
-            }
-            hexbuf[8] = '\0';
-            kprint(hexbuf);
-            kprint("\n");
             
             // Calculate page-aligned start and end
             uint32_t vaddr = phdr.p_vaddr + load_base;
@@ -448,10 +470,12 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
     // Detect personality based on OSABI
     int detected_os = image.detected_os;
     
-    kprint("ELF: Personality: ");
-    if (detected_os == ELFOSABI_LINUX) kprint("Linux\n");
-    else if (detected_os == ELFOSABI_FREEBSD) kprint("FreeBSD\n");
-    else kprint("Native\n");
+    if (trace_elf || trace_personality) {
+        kprint("ELF: Personality: ");
+        if (detected_os == ELFOSABI_LINUX) kprint("Linux\n");
+        else if (detected_os == ELFOSABI_FREEBSD) kprint("FreeBSD\n");
+        else kprint("Native\n");
+    }
     
     if (current_process) {
         switch (detected_os) {
@@ -865,9 +889,11 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
 
     uint32_t entry = main_entry;
     if (interp_len > 0) {
-        kprint("execve: Loading interpreter: ");
-        kprint(interp_path);
-        kprint("\n");
+        if (elf_debug_enabled() || cmdline_debug_enabled("perso:linux")) {
+            kprint("execve: Loading interpreter: ");
+            kprint(interp_path);
+            kprint("\n");
+        }
 
         if (is_linux_ldso_path(interp_path) && current_process) {
             /*
@@ -931,24 +957,28 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
         goto cleanup;
     }
 
-    kprint("execve: Jumping to userspace, entry=0x");
     char hexbuf[16];
-    uint32_t val = entry;
-    for (int i = 7; i >= 0; i--) {
-        int nib = (val >> (i * 4)) & 0xF;
-        hexbuf[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
+    uint32_t val;
+
+    if (elf_debug_enabled()) {
+        kprint("execve: Jumping to userspace, entry=0x");
+        val = entry;
+        for (int i = 7; i >= 0; i--) {
+            int nib = (val >> (i * 4)) & 0xF;
+            hexbuf[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
+        }
+        hexbuf[8] = '\0';
+        kprint(hexbuf);
+        kprint(", sp=0x");
+        val = sp;
+        for (int i = 7; i >= 0; i--) {
+            int nib = (val >> (i * 4)) & 0xF;
+            hexbuf[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
+        }
+        hexbuf[8] = '\0';
+        kprint(hexbuf);
+        kprint("\n");
     }
-    hexbuf[8] = '\0';
-    kprint(hexbuf);
-    kprint(", sp=0x");
-    val = sp;
-    for (int i = 7; i >= 0; i--) {
-        int nib = (val >> (i * 4)) & 0xF;
-        hexbuf[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
-    }
-    hexbuf[8] = '\0';
-    kprint(hexbuf);
-    kprint("\n");
     
     kprint("execve: Final check - entry=0x");
     val = entry;

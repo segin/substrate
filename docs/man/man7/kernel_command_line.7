@@ -1,0 +1,124 @@
+.TH KERNEL_COMMAND_LINE 7 "March 2026" "Substrate" "Miscellaneous Information Manual"
+.SH NAME
+kernel_command_line \- Substrate kernel command-line parameters
+.SH DESCRIPTION
+Substrate accepts a whitespace-separated kernel command line from the bootloader.
+Parameters are either boolean flags such as
+.B serial_debug
+or key/value pairs such as
+.BR console=serial0 .
+.PP
+The
+.B debug=
+parameter enables named kernel debug channels without forcing every verbose
+path on globally.
+.SH SYNTAX
+.BI debug= channel [ ,channel ... ]
+.PP
+Examples:
+.IP \(bu 2
+.B debug=syscall
+.IP \(bu
+.B debug=elf,perso:linux
+.IP \(bu
+.B debug=trap,perso:elks:aout
+.SH CHANNEL MATCHING
+Channel names are colon-delimited.
+An exact match enables that channel.
+A parent channel enables all descendants.
+.PP
+Examples:
+.IP \(bu 2
+.B debug=perso:elks
+matches
+.B perso:elks
+and
+.B perso:elks:aout
+.IP \(bu
+.B debug=perso
+matches any
+.B perso:*
+channel
+.IP \(bu
+.B debug=all
+or
+.B debug=*
+enables every channel
+.SH CURRENT CHANNELS
+The current in-tree channels are:
+.TP
+.B syscall
+Enable syscall entry/return tracing.
+This is the structured replacement for the legacy
+.B syscall_trace
+and
+.B syscall_log
+boot flags.
+.TP
+.B elf
+Enable verbose ELF loader and exec handoff tracing.
+.TP
+.B trap
+Log user trap-to-signal translations before normal signal delivery.
+.TP
+.B vm:brk
+Enable verbose
+.BR brk (2)
+/
+.BR sbrk (2)
+VM growth diagnostics.
+.TP
+.B perso:linux
+Enable Linux-personality-specific loader diagnostics.
+.TP
+.B perso:elks
+Enable ELKS personality diagnostics broadly.
+This parent channel also enables more specific ELKS channels.
+.TP
+.B perso:elks:aout
+Enable ELKS a.out loader tracing.
+.TP
+.B perso:elks:syscall
+Enable ELKS unsupported-syscall diagnostics.
+.TP
+.B perso:elks:trap
+Enable ELKS Minix trap diagnostics.
+.SH COMPATIBILITY
+The following older boot flags remain supported:
+.TP
+.B syscall_trace
+Equivalent to enabling the
+.B syscall
+channel.
+.TP
+.B syscall_log
+Equivalent to enabling the
+.B syscall
+channel.
+.PP
+.B serial_debug
+is separate from
+.BR debug= .
+It selects serial console mirroring; it does not by itself enable any debug
+channel.
+.SH RELATED PARAMETERS
+.TP
+.B console=console0
+Use the default screen console.
+.TP
+.BI console=serial N
+Route the console through COM\c
+.IR N+1 .
+.TP
+.BI root= device
+Select the root block device.
+.TP
+.BI rootfstype= type [ ,type ... ]
+Select one or more root filesystem probe targets.
+.TP
+.BI init= path
+Select the initial userspace program.
+.SH SEE ALSO
+.BR execve (2),
+.BR signal (2),
+.BR personality_elks (7)

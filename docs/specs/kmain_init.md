@@ -36,7 +36,9 @@ It is intentionally implementation-oriented so kernel work can reason about orde
 
 ### Command Line Before Console Policy
 
-The kernel parses `console=` and related boot flags before runtime console registration so serial-console selection is available during console bring-up.
+The kernel parses `console=`, `debug=`, and related boot flags before runtime
+console registration so serial-console selection and early debug-channel policy
+are available during console bring-up.
 
 ### SMP Before UMA, Then Again After Full Mapping
 

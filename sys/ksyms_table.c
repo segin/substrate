@@ -141,6 +141,7 @@ extern void chacha20_init(void);
 extern void chacha20_rekey(void);
 extern void chacha20_wipe(void);
 extern void close_fs(void);
+extern void cmdline_debug_enabled(void);
 extern void cmdline_get(void);
 extern void cmdline_get_full(void);
 extern void cmdline_has(void);
@@ -537,6 +538,7 @@ extern void ldt_alloc_process(void);
 extern void ldt_clone_process(void);
 extern void ldt_free_process(void);
 extern void ldt_init_process(void);
+extern void ldt_replace_process(void);
 extern void linear_fb_putpixel(void);
 extern void link_fs(void);
 extern void linux_sendsig(void);
@@ -706,8 +708,10 @@ extern void pool_mix_bytes(void);
 extern void proc_add_child(void);
 extern void proc_alloc_fd(void);
 extern void proc_begin_vfork(void);
+extern void proc_capture_cmdline(void);
 extern void proc_clear_fd(void);
 extern void proc_create(void);
+extern void proc_emit_cmdline(void);
 extern void proc_exit(void);
 extern void proc_find(void);
 extern void proc_fork(void);
@@ -1581,6 +1585,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&ldt_activate, "ldt_activate" },
     { (uint32_t)(uintptr_t)&ldt_init_process, "ldt_init_process" },
     { (uint32_t)(uintptr_t)&ldt_alloc_process, "ldt_alloc_process" },
+    { (uint32_t)(uintptr_t)&ldt_replace_process, "ldt_replace_process" },
     { (uint32_t)(uintptr_t)&ldt_clone_process, "ldt_clone_process" },
     { (uint32_t)(uintptr_t)&ldt_free_process, "ldt_free_process" },
     { (uint32_t)(uintptr_t)&fill_ldt_entry, "fill_ldt_entry" },
@@ -1997,6 +2002,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&cmdline_init, "cmdline_init" },
     { (uint32_t)(uintptr_t)&cmdline_has, "cmdline_has" },
     { (uint32_t)(uintptr_t)&cmdline_get, "cmdline_get" },
+    { (uint32_t)(uintptr_t)&cmdline_debug_enabled, "cmdline_debug_enabled" },
     { (uint32_t)(uintptr_t)&cmdline_get_full, "cmdline_get_full" },
     { (uint32_t)(uintptr_t)&debug_dump_processes, "debug_dump_processes" },
     { (uint32_t)(uintptr_t)&sleepq_init, "sleepq_init" },
@@ -2225,6 +2231,8 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&geom_mbr_init, "geom_mbr_init" },
     { (uint32_t)(uintptr_t)&geom_gpt_init, "geom_gpt_init" },
     { (uint32_t)(uintptr_t)&geom_bsd_init, "geom_bsd_init" },
+    { (uint32_t)(uintptr_t)&proc_capture_cmdline, "proc_capture_cmdline" },
+    { (uint32_t)(uintptr_t)&proc_emit_cmdline, "proc_emit_cmdline" },
     { (uint32_t)(uintptr_t)&pm_init, "pm_init" },
     { (uint32_t)(uintptr_t)&proc_find, "proc_find" },
     { (uint32_t)(uintptr_t)&proc_get_last_pid, "proc_get_last_pid" },
@@ -3123,4 +3131,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1556;
+int ksym_count = 1560;
