@@ -4,9 +4,17 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 AS="$ROOT/usr.bin/as/as"
 CORPUS_DIR="$ROOT/tests/usr.bin/as/corpus"
-TMP=${TMPDIR:-/tmp}/as-x86-32-intel-corpus-$$
+TMPROOT=${AS_INTEL_CORPUS_TMPDIR:-${TMPDIR:-/tmp}}
+TMP=${AS_INTEL_CORPUS_TMP:-$TMPROOT/as-x86-32-intel-corpus-$$}
 mkdir -p "$TMP"
-trap 'rm -rf "$TMP"' EXIT INT TERM
+cleanup_tmp() {
+    if [ "${AS_INTEL_CORPUS_KEEP_TMP:-0}" = "1" ]; then
+        echo "note: preserved Intel corpus tempdir: $TMP" >&2
+        return
+    fi
+    rm -rf "$TMP"
+}
+trap cleanup_tmp EXIT INT TERM
 
 to_intel_roundtrip() {
     src=$1
