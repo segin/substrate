@@ -6705,6 +6705,7 @@ static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigne
         const as_operand_t *src_raw = &st->u.instr.operands[op_index[1]];
         long long immv;
         if (dst_raw->kind == AS_OPERAND_REGISTER && src_raw->kind == AS_OPERAND_IMMEDIATE &&
+            src_raw->raw != NULL && (src_raw->raw[0] == '$' || src_raw->raw[0] == '#') &&
             is_x86_low8_reg(dst_raw->u.reg) && eval_expr_const(src_raw->u.expr, &immv) == 0 &&
             (immv < -128 || immv > 255)) {
             fprintf(stderr, "as: warning: %s:%u: immediate truncated to 8 bits\n",
