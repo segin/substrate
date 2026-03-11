@@ -1,4 +1,7 @@
 #include "as_x86_encode.h"
+#include "as_x86_sse3.h"
+#include "as_x86_sse41.h"
+#include "as_x86_ssse3.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -44,6 +47,122 @@ static int streq_ci(const char *a, const char *b) {
         }
     }
     return a[i] == '\0' && b[i] == '\0';
+}
+
+static int is_x86_ssse3_mnemonic(const char *mnemonic) {
+    return streq_ci(mnemonic, "pabsb") || streq_ci(mnemonic, "pabsw") || streq_ci(mnemonic, "pabsd") ||
+           streq_ci(mnemonic, "palignr") || streq_ci(mnemonic, "phaddw") || streq_ci(mnemonic, "phaddd") ||
+           streq_ci(mnemonic, "phaddsw") || streq_ci(mnemonic, "phsubw") || streq_ci(mnemonic, "phsubd") ||
+           streq_ci(mnemonic, "phsubsw") || streq_ci(mnemonic, "pmaddubsw") || streq_ci(mnemonic, "pmulhrsw") ||
+           streq_ci(mnemonic, "pshufb") || streq_ci(mnemonic, "psignb") || streq_ci(mnemonic, "psignw") ||
+           streq_ci(mnemonic, "psignd");
+}
+
+static int is_x86_sse3_mnemonic(const char *mnemonic) {
+    return streq_ci(mnemonic, "addsubpd") || streq_ci(mnemonic, "addsubps") ||
+           streq_ci(mnemonic, "haddpd") || streq_ci(mnemonic, "haddps") ||
+           streq_ci(mnemonic, "hsubpd") || streq_ci(mnemonic, "hsubps") ||
+           streq_ci(mnemonic, "lddqu") || streq_ci(mnemonic, "movddup") ||
+           streq_ci(mnemonic, "movshdup") || streq_ci(mnemonic, "movsldup") ||
+           streq_ci(mnemonic, "fisttp");
+}
+
+static int is_x86_sse41_mnemonic(const char *mnemonic) {
+    return streq_ci(mnemonic, "blendps") || streq_ci(mnemonic, "blendpd") ||
+           streq_ci(mnemonic, "blendvps") || streq_ci(mnemonic, "blendvpd") ||
+           streq_ci(mnemonic, "dpps") || streq_ci(mnemonic, "dppd") ||
+           streq_ci(mnemonic, "extractps") || streq_ci(mnemonic, "insertps") ||
+           streq_ci(mnemonic, "movntdqa") || streq_ci(mnemonic, "mpsadbw") ||
+           streq_ci(mnemonic, "packusdw") || streq_ci(mnemonic, "pblendvb") ||
+           streq_ci(mnemonic, "pblendw") || streq_ci(mnemonic, "pcmpeqq") ||
+           streq_ci(mnemonic, "pextrb") || streq_ci(mnemonic, "pextrd") ||
+           streq_ci(mnemonic, "pextrq") || streq_ci(mnemonic, "pextrw") ||
+           streq_ci(mnemonic, "pinsrb") || streq_ci(mnemonic, "pinsrd") ||
+           streq_ci(mnemonic, "pinsrq") || streq_ci(mnemonic, "pmaxsb") ||
+           streq_ci(mnemonic, "pmaxsd") || streq_ci(mnemonic, "pmaxud") ||
+           streq_ci(mnemonic, "pmaxuw") || streq_ci(mnemonic, "pminsb") ||
+           streq_ci(mnemonic, "pminsd") || streq_ci(mnemonic, "pminud") ||
+           streq_ci(mnemonic, "pminuw") || streq_ci(mnemonic, "pmovsxbw") ||
+           streq_ci(mnemonic, "pmovsxbd") || streq_ci(mnemonic, "pmovsxbq") ||
+           streq_ci(mnemonic, "pmovsxwd") || streq_ci(mnemonic, "pmovsxwq") ||
+           streq_ci(mnemonic, "pmovsxdq") || streq_ci(mnemonic, "pmovzxbw") ||
+           streq_ci(mnemonic, "pmovzxbd") || streq_ci(mnemonic, "pmovzxbq") ||
+           streq_ci(mnemonic, "pmovzxwd") || streq_ci(mnemonic, "pmovzxwq") ||
+           streq_ci(mnemonic, "pmovzxdq") || streq_ci(mnemonic, "pmuldq") ||
+           streq_ci(mnemonic, "pmulld") || streq_ci(mnemonic, "ptest") ||
+           streq_ci(mnemonic, "roundpd") || streq_ci(mnemonic, "roundps") ||
+           streq_ci(mnemonic, "roundsd") || streq_ci(mnemonic, "roundss");
+}
+
+static int try_encode_x86_ssse3_insn(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap, size_t *out_len,
+                                     char *errbuf, size_t errbuf_sz) {
+    as_x86_ssse3_insn_t ss;
+
+    if (insn == NULL || out == NULL) {
+        return -1;
+    }
+    memset(&ss, 0, sizeof(ss));
+    ss.mnemonic = insn->mnemonic;
+    ss.op_count = insn->op_count >= 2 ? 2 : insn->op_count;
+    if (insn->op_count >= 1) {
+        ss.dst = insn->ops[0];
+    }
+    if (insn->op_count >= 2) {
+        ss.src = insn->ops[1];
+    }
+    if (insn->op_count >= 3 && insn->ops[2].kind == AS_X86_OP_IMM) {
+        ss.has_imm8 = 1;
+        ss.imm8 = (uint8_t)insn->ops[2].u.imm;
+    }
+    return as_x86_encode_ssse3(&ss, out, out_cap, out_len, errbuf, errbuf_sz);
+}
+
+static int try_encode_x86_sse3_insn(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap, size_t *out_len,
+                                    char *errbuf, size_t errbuf_sz) {
+    as_x86_sse3_insn_t s3;
+
+    if (insn == NULL || out == NULL) {
+        return -1;
+    }
+    memset(&s3, 0, sizeof(s3));
+    s3.mnemonic = insn->mnemonic;
+    s3.op_count = insn->op_count >= 2 ? 2 : insn->op_count;
+    if (insn->op_count >= 1) {
+        s3.dst = insn->ops[0];
+    }
+    if (insn->op_count >= 2) {
+        s3.src = insn->ops[1];
+    }
+    if (streq_ci(insn->mnemonic, "fisttp")) {
+        if (insn->op_count >= 1 && insn->ops[0].kind == AS_X86_OP_MEM) {
+            s3.width_bits = (int)insn->ops[0].u.mem.size_bits;
+        }
+        s3.op_count = 1;
+    }
+    return as_x86_encode_sse3(&s3, out, out_cap, out_len, errbuf, errbuf_sz);
+}
+
+static int try_encode_x86_sse41_insn(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap, size_t *out_len,
+                                     char *errbuf, size_t errbuf_sz) {
+    as_x86_sse41_insn_t s41;
+
+    if (insn == NULL || out == NULL) {
+        return -1;
+    }
+    memset(&s41, 0, sizeof(s41));
+    s41.mnemonic = insn->mnemonic;
+    s41.op_count = insn->op_count >= 2 ? 2 : insn->op_count;
+    if (insn->op_count >= 1) {
+        s41.dst = insn->ops[0];
+    }
+    if (insn->op_count >= 2) {
+        s41.src = insn->ops[1];
+    }
+    if (insn->op_count >= 3 && insn->ops[2].kind == AS_X86_OP_IMM) {
+        s41.has_imm8 = 1;
+        s41.imm8 = (uint8_t)insn->ops[2].u.imm;
+    }
+    return as_x86_encode_sse41(&s41, out, out_cap, out_len, errbuf, errbuf_sz);
 }
 
 static int emit8(enc_ctx_t *ctx, uint8_t v) {
@@ -1879,6 +1998,16 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
     a = insn->op_count > 0 ? &insn->ops[0] : NULL;
     b = insn->op_count > 1 ? &insn->ops[1] : NULL;
     c = insn->op_count > 2 ? &insn->ops[2] : NULL;
+
+    if (is_x86_sse3_mnemonic(insn->mnemonic)) {
+        return try_encode_x86_sse3_insn(insn, out, out_cap, out_len, errbuf, errbuf_sz);
+    }
+    if (is_x86_sse41_mnemonic(insn->mnemonic)) {
+        return try_encode_x86_sse41_insn(insn, out, out_cap, out_len, errbuf, errbuf_sz);
+    }
+    if (is_x86_ssse3_mnemonic(insn->mnemonic)) {
+        return try_encode_x86_ssse3_insn(insn, out, out_cap, out_len, errbuf, errbuf_sz);
+    }
 
     if (streq_ci(insn->mnemonic, "movabs")) {
         rex_w = 1;
