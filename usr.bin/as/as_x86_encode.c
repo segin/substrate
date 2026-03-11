@@ -3585,6 +3585,15 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
             return -1;
         }
+    } else if (streq_ci(insn->mnemonic, "ud0")) {
+        if (insn->op_count != 2 || a->kind != AS_X86_OP_REG || (b->kind != AS_X86_OP_REG && b->kind != AS_X86_OP_MEM)) {
+            set_err(&ctx, "unsupported x86_64 ud0 form");
+            return -1;
+        }
+        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xff) != 0 ||
+            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
     } else if (streq_ci(insn->mnemonic, "lss") || streq_ci(insn->mnemonic, "lfs") || streq_ci(insn->mnemonic, "lgs")) {
         uint8_t op2 = streq_ci(insn->mnemonic, "lss") ? 0xb2 : (streq_ci(insn->mnemonic, "lfs") ? 0xb4 : 0xb5);
 
@@ -3934,7 +3943,26 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             set_err(&ctx, "unsupported x86_64 ret form");
             return -1;
         }
+    } else if (streq_ci(insn->mnemonic, "lretq")) {
+        rex_w = 1;
+        if (insn->op_count == 0) {
+            if (emit8(&ctx, 0xcb) != 0) {
+                return -1;
+            }
+        } else if (insn->op_count == 1 && a->kind == AS_X86_OP_IMM) {
+            if (emit8(&ctx, 0xca) != 0 || emit16(&ctx, (uint16_t)a->u.imm) != 0) {
+                return -1;
+            }
+        } else {
+            set_err(&ctx, "unsupported x86_64 lretq form");
+            return -1;
+        }
     } else if (streq_ci(insn->mnemonic, "iret") || streq_ci(insn->mnemonic, "iretw")) {
+        if (insn->op_count != 0 || emit8(&ctx, 0xcf) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "iretq")) {
+        rex_w = 1;
         if (insn->op_count != 0 || emit8(&ctx, 0xcf) != 0) {
             return -1;
         }
@@ -3944,6 +3972,11 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         }
     } else if (streq_ci(insn->mnemonic, "cbtw") || streq_ci(insn->mnemonic, "cbw") ||
                streq_ci(insn->mnemonic, "cwtl") || streq_ci(insn->mnemonic, "cwde")) {
+        if (insn->op_count != 0 || emit8(&ctx, 0x98) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "cltq") || streq_ci(insn->mnemonic, "cdqe")) {
+        rex_w = 1;
         if (insn->op_count != 0 || emit8(&ctx, 0x98) != 0) {
             return -1;
         }

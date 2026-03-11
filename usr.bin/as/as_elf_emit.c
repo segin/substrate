@@ -5002,7 +5002,10 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
             return 0;
         }
     }
-    if (insn->prefixes != 0 || insn->segment_override != NULL) {
+    if (insn->segment_override != NULL) {
+        return -1;
+    }
+    if ((insn->prefixes & ~(AS_PREFIX_REX | AS_PREFIX_DATA16)) != 0) {
         return -1;
     }
 
