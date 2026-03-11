@@ -33,15 +33,9 @@ static vm_page_t pmm_page_array_static[PMM_STATIC_METADATA_BLOCKS];
 #define PMM_MAX_USABLE_RANGES 128
 #define PMM_MAX_MODULE_REGIONS 8
 #define PMM_MAX_BOOT_REGIONS 16
-#define PMM_PHYS_VIRT_BASE 0xC0000000U
 #define PMM_BOOTSTRAP_LOWMEM_LIMIT (8U * 1024U * 1024U)
 #define PMM_CONSTRAINED_RAM_LIMIT (4U * 1024U * 1024U)
 #define PMM_PHYS_RAM_CAP 0xC0000000ULL
-/*
- * Higher-half direct map remains contiguous only until the LAPIC slot at
- * 0xFEC00000 (PDE 1019). Keep generic PMM allocations below that mark.
- */
-#define PMM_DIRECTMAP_PHYS_LIMIT 0x3EC00000U
 
 typedef struct pmm_region {
     phys_addr_t start;
@@ -1048,28 +1042,44 @@ uint32_t pmm_get_free_memory(void) {
 
 // Allocation Hooks
 void* pmm_alloc_block(void) {
-    vm_page_t *p = vm_phys_alloc_page();
+    vm_page_t *p = vm_phys_alloc_page_below(PMM_DIRECTMAP_PHYS_LIMIT);
     if (!p) return NULL;
-    return (void*)(uintptr_t)(p->phys_addr + 0xC0000000);
+    return (void*)(uintptr_t)(p->phys_addr + PMM_PHYS_VIRT_BASE);
 }
 
 void pmm_free_block(void* p) {
     uintptr_t v = (uintptr_t)p;
     if (v == 0) return;
-    vm_page_t *page = vm_phys_paddr_to_page(v - 0xC0000000);
+    if (!pmm_virt_is_direct_mapped(v)) {
+        kprint("PMM: ignoring free outside direct-mapped window.\n");
+        return;
+    }
+    vm_page_t *page = vm_phys_paddr_to_page(v - PMM_PHYS_VIRT_BASE);
+    if (!page) {
+        kprint("PMM: ignoring free of unknown direct-mapped page.\n");
+        return;
+    }
     vm_phys_free_page(page);
 }
 
 void* pmm_alloc_contiguous(size_t count) {
-    vm_page_t *p = vm_phys_alloc_contiguous(count);
+    vm_page_t *p = vm_phys_alloc_contiguous_below(count, PMM_DIRECTMAP_PHYS_LIMIT);
     if (!p) return NULL;
-    return (void*)(uintptr_t)(p->phys_addr + 0xC0000000);
+    return (void*)(uintptr_t)(p->phys_addr + PMM_PHYS_VIRT_BASE);
 }
 
 void pmm_free_contiguous(void* p, size_t count) {
      uintptr_t v = (uintptr_t)p;
      if (!v) return;
-     vm_page_t *page = vm_phys_paddr_to_page(v - 0xC0000000);
+     if (!pmm_virt_is_direct_mapped(v)) {
+         kprint("PMM: ignoring contiguous free outside direct-mapped window.\n");
+         return;
+     }
+     vm_page_t *page = vm_phys_paddr_to_page(v - PMM_PHYS_VIRT_BASE);
+     if (!page) {
+         kprint("PMM: ignoring free of unknown direct-mapped range.\n");
+         return;
+     }
      vm_phys_free_contiguous(page, count);
 }
 

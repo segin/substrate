@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <arch/x86-common/e820.h>
 #include <arch/x86-common/multiboot.h>
+#include <sys/param.h>
 
 // Simple Bitmap Physical Memory Manager
 // Assumes 32-bit address space
@@ -12,6 +13,13 @@
 
 #define PMM_BLOCK_SIZE 4096
 #define PMM_BLOCKS_PER_BYTE 8
+#define PMM_PHYS_VIRT_BASE KERN_BASE
+/*
+ * The higher-half direct map is contiguous only until the LAPIC PDE slot.
+ * Generic PMM callers that expect phys+KERN_BASE to be valid must stay below
+ * this physical ceiling.
+ */
+#define PMM_DIRECTMAP_PHYS_LIMIT 0x3EC00000U
 
 typedef uint32_t phys_addr_t;
 
@@ -47,5 +55,14 @@ struct vm_page;
 extern struct vm_page *pmm_page_array;
 extern size_t pmm_total_pages;
 struct vm_page *pmm_get_page(uintptr_t pa);
+
+static inline int pmm_phys_is_direct_mapped(uint32_t pa) {
+    return pa < PMM_DIRECTMAP_PHYS_LIMIT;
+}
+
+static inline int pmm_virt_is_direct_mapped(uintptr_t va) {
+    return va >= PMM_PHYS_VIRT_BASE &&
+           (va - PMM_PHYS_VIRT_BASE) < PMM_DIRECTMAP_PHYS_LIMIT;
+}
 
 #endif

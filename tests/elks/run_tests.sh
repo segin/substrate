@@ -17,7 +17,7 @@ TIMEOUT_BIN=${TIMEOUT_BIN:-timeout}
 QEMU_TIMEOUT=${QEMU_TIMEOUT:-35}
 LOG_DIR=${LOG_DIR:-"$SCRIPT_DIR/logs"}
 WORK_ROOTFS_IMG=${WORK_ROOTFS_IMG:-"$LOG_DIR/rootfs.img"}
-DEFAULT_CASES="hello_elks sleep_elks fileio_elks fork_elks bounds_test_elks cat_elks fuzz_syscalls_elks upstream_ls_elks upstream_ps_elks upstream_sh_prompt_elks"
+DEFAULT_CASES="hello_elks sleep_elks fileio_elks fork_elks bounds_test_elks cat_elks fuzz_syscalls_elks upstream_ls_elks upstream_ps_elks upstream_sh_prompt_elks upstream_sh_ls_elks"
 
 if [ "$#" -gt 0 ]; then
     CASES="$*"
@@ -106,6 +106,61 @@ run_init_case() {
     printf 'PASS %s\n' "$case_name"
 }
 
+run_monitor_case() {
+    case_name=$1
+    init_path=$2
+    send_keys=$3
+    shift 3
+    log_path=$LOG_DIR/$case_name.log
+    mon_path=$LOG_DIR/$case_name.mon
+
+    rm -f "$mon_path"
+    "$QEMU" \
+        -kernel "$KERNEL" \
+        -accel tcg \
+        -icount shift=9 \
+        -smp 1 \
+        -append "serial_debug console=serial0 debug=trap,perso:elks,perso:elks:aout root=/dev/storage/ide0 init=$init_path" \
+        -serial "file:$log_path" \
+        -monitor "unix:$mon_path,server,nowait" \
+        -drive "file=$WORK_ROOTFS_IMG,format=raw,if=ide" \
+        -display none \
+        -no-reboot >/dev/null 2>&1 &
+    qemu_pid=$!
+
+    trap 'kill $qemu_pid >/dev/null 2>&1 || true; wait $qemu_pid >/dev/null 2>&1 || true' EXIT INT TERM
+
+    i=0
+    while [ ! -S "$mon_path" ] && [ $i -lt 50 ]; do
+        sleep 0.1
+        i=$((i + 1))
+    done
+
+    if [ ! -S "$mon_path" ]; then
+        printf 'FAIL %s: monitor socket not ready\n' "$case_name" >&2
+        exit 1
+    fi
+
+    sleep 2
+    {
+        printf '%s\n' "$send_keys"
+        printf 'quit\n'
+    } | socat - UNIX-CONNECT:"$mon_path" >/dev/null 2>&1 || true
+
+    wait $qemu_pid >/dev/null 2>&1 || true
+    trap - EXIT INT TERM
+
+    for pattern in "$@"; do
+        if ! rg -q --fixed-strings "$pattern" "$log_path"; then
+            printf 'FAIL %s: missing "%s"\n' "$case_name" "$pattern" >&2
+            tail -n 120 "$log_path" >&2 || true
+            exit 1
+        fi
+    done
+
+    printf 'PASS %s\n' "$case_name"
+}
+
 mkdir -p "$LOG_DIR"
 require_file "$KERNEL"
 require_file "$ROOTFS_SOURCE_IMG"
@@ -157,4 +212,9 @@ if want_case upstream_ps_elks; then
 fi
 if want_case upstream_sh_prompt_elks; then
     run_init_case upstream_sh_prompt_elks /perso/elks/bin/sh "# "
+fi
+if want_case upstream_sh_ls_elks; then
+    run_monitor_case upstream_sh_ls_elks /perso/elks/bin/sh \
+        "sendkey l\nsendkey s\nsendkey ret" \
+        "# " "bin" "dev" "perso"
 fi

@@ -65,6 +65,10 @@ void *pmm_watermark_alloc(size_t bytes);  // Returns kernel virt addr
 
 ## Addressing Convention
 - `pmm_alloc_block()` and `pmm_alloc_contiguous()` return kernel virtual addresses in the direct map.
+- On i386, those allocators are additionally constrained to the current
+  direct-mapped physical ceiling; pages above that ceiling remain tracked in
+  metadata but are not handed to generic callers that expect `phys + KERN_BASE`
+  to be a valid kernel VA.
 - `pmm_free_block()` and `pmm_free_contiguous()` expect those same virtual addresses.
 - `pmm_get_page(phys_addr)` and `vm_phys_paddr_to_page(phys_addr)` are the physical-address lookup path when code needs the backing `vm_page_t`.
 - Callers handing pages to page tables or hardware must convert the returned kernel virtual address back to a physical address by subtracting the direct-map base.

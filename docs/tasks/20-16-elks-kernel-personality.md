@@ -203,6 +203,10 @@ Reference: User Request (Step 31552)
         - Files: `tests/elks/run_tests.sh`
         - Tests: emulation (`tests/elks/run_tests.sh upstream_sh_prompt_elks`)
         - Acceptance: QEMU booting `init=/perso/elks/bin/sh` reaches the upstream ELKS `# ` prompt on the staged root image without a kernel fault.
+    - [x] Add upstream ELKS shell command-exec smoke. (REQ: REQ-20-0068)
+        - Files: `tests/elks/run_tests.sh`, `sys/arch/i386/pmm.c`, `sys/vm/phys_mem.c`
+        - Tests: emulation (`tests/elks/run_tests.sh upstream_sh_ls_elks`)
+        - Acceptance: QEMU booting `init=/perso/elks/bin/sh`, then typing `ls`, prints the root listing and returns to a live shell without a kernel panic during `execve()` teardown.
     - [x] Add sample ELKS cat utility. (REQ: REQ-20-0052)
         - Files: `tests/elks/cat.c`, `tests/elks/Makefile`, `tests/elks/run_tests.sh`
         - Tests: emulation (`tests/elks/run_tests.sh cat_elks`)

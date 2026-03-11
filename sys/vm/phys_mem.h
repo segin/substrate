@@ -14,8 +14,10 @@ void vm_phys_add_range(uintptr_t start, uintptr_t end); // Add range to buddy al
 
 // Allocation
 vm_page_t *vm_phys_alloc_page(void);
+vm_page_t *vm_phys_alloc_page_below(uintptr_t phys_limit);
 void vm_phys_free_page(vm_page_t *page);
 vm_page_t *vm_phys_alloc_contiguous(size_t count);
+vm_page_t *vm_phys_alloc_contiguous_below(size_t count, uintptr_t phys_limit);
 void vm_phys_free_contiguous(vm_page_t *page, size_t count);
 
 // Diagnostics/Stats

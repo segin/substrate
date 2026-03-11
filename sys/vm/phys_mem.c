@@ -133,6 +133,60 @@ static vm_page_t* vm_phys_alloc_locked(int order) {
     return NULL;
 }
 
+static int vm_phys_block_within_limit(vm_page_t *page, int order, uintptr_t phys_limit) {
+    uintptr_t block_size;
+
+    if (!page || phys_limit == 0) {
+        return 0;
+    }
+
+    block_size = ((uintptr_t)1U << order) * PMM_BLOCK_SIZE;
+    if (page->phys_addr >= phys_limit) {
+        return 0;
+    }
+    if (block_size > (phys_limit - page->phys_addr)) {
+        return 0;
+    }
+    return 1;
+}
+
+static vm_page_t *vm_phys_alloc_locked_below(int order, uintptr_t phys_limit) {
+    if (phys_limit == 0) {
+        return vm_phys_alloc_locked(order);
+    }
+
+    if (order >= PMM_MAX_ORDER) {
+        return NULL;
+    }
+
+    for (int i = order; i < PMM_MAX_ORDER; i++) {
+        vm_page_t *page = vm_phys_free_lists[i];
+
+        while (page && !vm_phys_block_within_limit(page, i, phys_limit)) {
+            page = page->next;
+        }
+
+        if (page) {
+            vm_phys_buddy_dequeue(i, page);
+
+            while (i > order) {
+                i--;
+                uintptr_t buddy_pa = page->phys_addr + (((uintptr_t)1U << i) * PMM_BLOCK_SIZE);
+                vm_page_t *buddy = vm_phys_paddr_to_page(buddy_pa);
+                if (buddy) {
+                    vm_phys_buddy_enqueue(i, buddy);
+                }
+            }
+
+            vm_phys_free_count -= ((size_t)1U << order);
+            vm_phys_prepare_allocated_block(page, order);
+            return page;
+        }
+    }
+
+    return NULL;
+}
+
 static void vm_phys_free_locked(vm_page_t *page, int order) {
     if (!page || order >= PMM_MAX_ORDER) return;
 
@@ -229,6 +283,23 @@ vm_page_t *vm_phys_alloc_page(void) {
     return page;
 }
 
+vm_page_t *vm_phys_alloc_page_below(uintptr_t phys_limit) {
+    uint32_t flags = intr_disable();
+    spinlock_acquire(&vm_phys_lock);
+
+    vm_page_t *page = vm_phys_alloc_locked_below(0, phys_limit);
+    size_t free_left = vm_phys_free_count;
+
+    spinlock_release(&vm_phys_lock);
+    intr_restore(flags);
+
+    if (page && free_left < vm_phys_low_watermark) {
+        vm_page_wakeup_daemon();
+    }
+
+    return page;
+}
+
 void vm_phys_free_page(vm_page_t *page) {
     if (!page) return;
     uint32_t flags = intr_disable();
@@ -272,6 +343,28 @@ vm_page_t *vm_phys_alloc_contiguous(size_t count) {
         vm_page_wakeup_daemon();
     }
     
+    return page;
+}
+
+vm_page_t *vm_phys_alloc_contiguous_below(size_t count, uintptr_t phys_limit) {
+    if (count == 0) return NULL;
+
+    int order = 0;
+    while ((1UL << order) < count) order++;
+
+    uint32_t flags = intr_disable();
+    spinlock_acquire(&vm_phys_lock);
+
+    vm_page_t *page = vm_phys_alloc_locked_below(order, phys_limit);
+    size_t free_left = vm_phys_free_count;
+
+    spinlock_release(&vm_phys_lock);
+    intr_restore(flags);
+
+    if (page && free_left < vm_phys_low_watermark) {
+        vm_page_wakeup_daemon();
+    }
+
     return page;
 }
 
