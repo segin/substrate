@@ -253,3 +253,7 @@ bench_objects/
 vgcore.*
 
 /tests/test_libc_sysctl
+sys/arch/i386/floppy/stage2.bin
+sys/arch/i386/floppy/stage1.bin
+sys/kernel.flp
+tests/sys/property_cmdline
