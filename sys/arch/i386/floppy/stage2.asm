@@ -307,10 +307,7 @@ read_sectors:
     ret
 
 lba_to_chs:
-    push ax
     push bx
-    push dx
-
     xor dx, dx
     mov bx, FLOPPY_SPT * FLOPPY_HEADS
     div bx
@@ -323,10 +320,7 @@ lba_to_chs:
     mov dh, al
     mov cl, ah
     inc cl
-
-    pop dx
     pop bx
-    pop ax
     ret
 
 putc:
