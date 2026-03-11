@@ -73,6 +73,7 @@ typedef struct {
 
 typedef struct {
     as_x86_operand_kind_t kind;
+    unsigned size_bits;
     union {
         as_x86_reg_t reg;
         int64_t imm;

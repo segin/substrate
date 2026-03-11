@@ -397,6 +397,67 @@ static int parse_x86_reg(const char *name, as_x86_reg_t *out) {
     return -1;
 }
 
+static unsigned parse_x86_reg_bits(const char *name) {
+    const char *p;
+    size_t n;
+
+    if (name == NULL) {
+        return 0;
+    }
+    p = name;
+    while (*p == '%') {
+        ++p;
+    }
+    n = strlen(p);
+    if (n == 0) {
+        return 0;
+    }
+    if (streq_ci(p, "al") || streq_ci(p, "ah") || streq_ci(p, "bl") || streq_ci(p, "bh") ||
+        streq_ci(p, "cl") || streq_ci(p, "ch") || streq_ci(p, "dl") || streq_ci(p, "dh") ||
+        streq_ci(p, "sil") || streq_ci(p, "dil") || streq_ci(p, "spl") || streq_ci(p, "bpl") ||
+        (p[0] == 'r' && n >= 3 && p[n - 1] == 'b')) {
+        return 8;
+    }
+    if (streq_ci(p, "ax") || streq_ci(p, "bx") || streq_ci(p, "cx") || streq_ci(p, "dx") ||
+        streq_ci(p, "si") || streq_ci(p, "di") || streq_ci(p, "sp") || streq_ci(p, "bp") ||
+        streq_ci(p, "ip") ||
+        (p[0] == 'r' && n >= 3 && p[n - 1] == 'w')) {
+        return 16;
+    }
+    if (streq_ci(p, "eax") || streq_ci(p, "ebx") || streq_ci(p, "ecx") || streq_ci(p, "edx") ||
+        streq_ci(p, "esi") || streq_ci(p, "edi") || streq_ci(p, "esp") || streq_ci(p, "ebp") ||
+        streq_ci(p, "eip") ||
+        (p[0] == 'r' && n >= 3 && p[n - 1] == 'd')) {
+        return 32;
+    }
+    if (streq_ci(p, "rax") || streq_ci(p, "rbx") || streq_ci(p, "rcx") || streq_ci(p, "rdx") ||
+        streq_ci(p, "rsi") || streq_ci(p, "rdi") || streq_ci(p, "rsp") || streq_ci(p, "rbp") ||
+        streq_ci(p, "rip") ||
+        (p[0] == 'r' && n >= 2 && p[n - 1] >= '0' && p[n - 1] <= '9')) {
+        return 64;
+    }
+    if (p[0] == 'm' && p[1] == 'm' && isdigit((unsigned char)p[2])) {
+        return 64;
+    }
+    if (p[0] == 'x' && p[1] == 'm' && p[2] == 'm' && isdigit((unsigned char)p[3])) {
+        return 128;
+    }
+    if (p[0] == 'y' && p[1] == 'm' && p[2] == 'm' && isdigit((unsigned char)p[3])) {
+        return 256;
+    }
+    if (p[0] == 'z' && p[1] == 'm' && p[2] == 'm' && isdigit((unsigned char)p[3])) {
+        return 512;
+    }
+    if (p[0] == 'k' && isdigit((unsigned char)p[1])) {
+        return 64;
+    }
+    if (streq_ci(p, "cs") || streq_ci(p, "ds") || streq_ci(p, "es") || streq_ci(p, "fs") ||
+        streq_ci(p, "gs") || streq_ci(p, "ss")) {
+        return 16;
+    }
+    return 0;
+}
+
 static int parse_bnd_reg(const char *name, unsigned *out) {
     const char *p = name;
     unsigned v = 0;
@@ -5536,6 +5597,7 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
             snprintf(errbuf, errbuf_sz, "unknown x86 register: %s", op->u.reg != NULL ? op->u.reg : "<null>");
             return -1;
         }
+        dst->size_bits = parse_x86_reg_bits(op->u.reg);
         return 0;
     case AS_OPERAND_COPROCESSOR:
         dst->kind = AS_X86_OP_FPU;
@@ -5544,6 +5606,7 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
                      op->u.coproc != NULL ? op->u.coproc : "<null>");
             return -1;
         }
+        dst->size_bits = 80;
         return 0;
     case AS_OPERAND_IMMEDIATE:
         if (is_rel_mnemonic(mnemonic)) {
@@ -5642,6 +5705,7 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
                 dst->u.mem.disp = 0;
             }
         }
+        dst->size_bits = dst->u.mem.size_bits;
         return 0;
     default:
         snprintf(errbuf, errbuf_sz, "unsupported operand kind for x86 encode");
