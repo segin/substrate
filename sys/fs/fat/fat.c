@@ -18,6 +18,29 @@ static uint8_t fat_root_sector_buf[4096];
 
 static uint32_t fat_cluster_to_sector(fat_fs_t *fs, uint32_t cluster);
 
+static uint8_t fat_ascii_tolower(uint8_t c) {
+    if (c >= 'A' && c <= 'Z') {
+        return (uint8_t)(c - 'A' + 'a');
+    }
+    return c;
+}
+
+static int fat_name_matches(const char *entry_name, const char *lookup_name) {
+    if (!entry_name || !lookup_name) {
+        return 0;
+    }
+
+    while (*entry_name && *lookup_name) {
+        if (fat_ascii_tolower((uint8_t)*entry_name) != fat_ascii_tolower((uint8_t)*lookup_name)) {
+            return 0;
+        }
+        entry_name++;
+        lookup_name++;
+    }
+
+    return *entry_name == '\0' && *lookup_name == '\0';
+}
+
 static uint64_t fat_make_synth_inode(fat_fs_t *fs, uint32_t dir_cluster,
                                      uint32_t sector_index,
                                      uint32_t entry_offset,
@@ -57,8 +80,9 @@ static uint32_t fat_default_mask(uint8_t attr) {
 // Read sectors from device
 static int fat_read_sectors(fat_fs_t *fs, uint32_t sector, uint32_t count, void *buffer) {
     if (!fs->device || !fs->device->read) return -1;
-    off_t offset = (off_t)sector * fs->bpb.bytes_per_sector;
-    size_t size = count * fs->bpb.bytes_per_sector;
+    uint32_t bytes_per_sector = fs->bpb.bytes_per_sector ? fs->bpb.bytes_per_sector : 512;
+    off_t offset = (off_t)sector * bytes_per_sector;
+    size_t size = count * bytes_per_sector;
     size_t read = fs->device->read(fs->device, offset, size, (uint8_t *)buffer);
     return (read == size) ? 0 : -1;
 }
@@ -455,7 +479,7 @@ fs_node_t *fat_finddir(fs_node_t *node, char *name) {
                     fat_parse_short_name(entry->name, entry_name);
                 }
 
-                if (strcmp(entry_name, name) == 0) {
+                if (fat_name_matches(entry_name, name)) {
                     uint32_t cluster_num = ((uint32_t)entry->cluster_high << 16) | entry->cluster_low;
                     uint64_t inode = fat_make_synth_inode(fs, 0, sector_i, i, cluster_num);
                     return fat_alloc_node(fs, entry_name, inode, cluster_num, entry->file_size, entry->attr);
@@ -517,7 +541,7 @@ fs_node_t *fat_finddir(fs_node_t *node, char *name) {
                 fat_parse_short_name(entry->name, entry_name);
             }
             
-            if (strcmp(entry_name, name) == 0) {
+            if (fat_name_matches(entry_name, name)) {
                 // Found it - create and return node
                 uint32_t cluster_num = ((uint32_t)entry->cluster_high << 16) | entry->cluster_low;
                 uint64_t inode = fat_make_synth_inode(fs, ctx->first_cluster, 0, i, cluster_num);
@@ -544,11 +568,24 @@ fs_node_t *fat_mount(const char *device, uint32_t flags, void *data) {
     }
     
     fat_fs_t *fs = &fat_global_fs;
+    memset(fs, 0, sizeof(*fs));
     fs->device = dev;
     
     // Read boot sector
     if (fat_read_sectors(fs, 0, 1, &fs->bpb) != 0) {
         kprint("FAT: Failed to read boot sector\n");
+        return NULL;
+    }
+
+    if (fs->bpb.bytes_per_sector == 0 || fs->bpb.sectors_per_cluster == 0 ||
+        fs->bpb.fat_count == 0 || fs->bpb.reserved_sectors == 0) {
+        kprint("FAT: Invalid BPB\n");
+        return NULL;
+    }
+
+    if ((fs->bpb.bytes_per_sector & (fs->bpb.bytes_per_sector - 1)) != 0 ||
+        fs->bpb.bytes_per_sector < 512 || fs->bpb.bytes_per_sector > 4096) {
+        kprint("FAT: Unsupported sector size\n");
         return NULL;
     }
     
@@ -564,7 +601,18 @@ fs_node_t *fat_mount(const char *device, uint32_t flags, void *data) {
     }
     
     uint32_t total_sectors = (fs->bpb.total_sectors_16 != 0) ? fs->bpb.total_sectors_16 : fs->bpb.total_sectors_32;
-    uint32_t data_sectors = total_sectors - (fs->bpb.reserved_sectors + (fs->bpb.fat_count * fat_size) + root_dir_sectors);
+    if (fat_size == 0 || total_sectors == 0) {
+        kprint("FAT: Invalid FAT geometry\n");
+        return NULL;
+    }
+
+    uint32_t overhead_sectors = fs->bpb.reserved_sectors + (fs->bpb.fat_count * fat_size) + root_dir_sectors;
+    if (total_sectors <= overhead_sectors) {
+        kprint("FAT: Invalid sector layout\n");
+        return NULL;
+    }
+
+    uint32_t data_sectors = total_sectors - overhead_sectors;
     uint32_t total_clusters = data_sectors / fs->bpb.sectors_per_cluster;
     
     // Determine FAT type

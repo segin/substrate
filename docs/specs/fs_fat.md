@@ -21,3 +21,8 @@ Decodes a Long File Name entry into the provided buffer, respecting the maximum 
 - LFN support is currently stubbed.
 - Write support is not yet implemented.
 - UTF-16 to ASCII conversion is not yet functional.
+
+## Root Boot Contract
+- The driver reads sector `0` with a temporary `512`-byte sector size until the BPB has been loaded and validated.
+- BPB geometry must be sane before the mount path performs any derived-sector arithmetic or cluster division.
+- Directory lookup is DOS-style ASCII case-insensitive, so `/bin/sh` resolves `SH` on FAT root media.
