@@ -45,7 +45,8 @@ FREESTANDING_LDFLAGS = -m elf_i386 -nostdlib
 
 # Kernel source tree for internal includes (enables #include <kern/sched.h>)
 KERNEL_SRC = $(TOP)/sys
-KERNEL_CFLAGS = $(FREESTANDING_CFLAGS) -I$(KERNEL_SRC)
+KERNEL_I386_BASELINE_FLAGS = -march=i486 -mtune=i486
+KERNEL_CFLAGS = $(FREESTANDING_CFLAGS) $(KERNEL_I386_BASELINE_FLAGS) -I$(KERNEL_SRC)
 
 # Userland flags (for standard libraries and utils)
 # These will eventually link against our own libc

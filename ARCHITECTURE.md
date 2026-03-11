@@ -92,6 +92,11 @@ Boot/init sequencing highlights:
 
 ### 5.1 i386 PMAP Model
 
+The i386 kernel is compiled to an explicit i486 baseline:
+- kernel C objects use `-march=i486 -mtune=i486`
+- compiler-generated Pentium+ instructions such as `cmov` are not permitted in the core kernel image
+- newer CPU instructions remain isolated to explicit runtime-gated code paths (for example `cpuid`, `rdtsc`, `fxsave`, `rdrand`) and must not execute unless the early CPU feature probe has marked them present
+
 The i386 PMAP implementation is a two-level paging design:
 - page directory + page tables
 - recursive self-map at PDE 1023
@@ -126,6 +131,7 @@ TLB management on i386 follows a tiered strategy:
 
 i386 SMP execution model:
 - the kernel currently supports up to `96` CPUs
+- early CPU feature probing supports pre-CPUID and non-APIC i486-class systems by detecting 486-vs-386 through EFLAGS toggling, refusing to assume `CR4`, and falling back to PIC/UP mode when LAPIC support is absent
 - CPU discovery prefers ACPI MADT and falls back to Intel MP tables; validated MP configuration table addresses are cached so later discovery passes do not depend on BIOS page-zero mappings after NULL protection is enabled
 - AP bootstrap uses a copied low-memory trampoline that enters protected mode, loads the live BSP CR4/CR3/CR0 state, enables paging, and jumps into the higher-half C entry point
 - MADT parsing now registers I/O APICs and ISA IRQ-to-GSI overrides before the scheduler starts userspace

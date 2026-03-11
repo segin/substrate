@@ -1,4 +1,5 @@
 #include <drivers/virtio/virtio.h>
+#include <arch/i386/cpu.h>
 #include <arch/x86-common/io.h>
 #include <kern/geom/geom.h>
 #include <kern/console.h>
@@ -118,12 +119,9 @@ static int virtio_blk_read_sectors(geom_disk_t *disk, uint64_t lba, size_t count
         uint64_t tsc;
     } __attribute__((packed)) entropy_data;
     
-    uint64_t tsc;
-    __asm__ volatile("rdtsc" : "=A"(tsc));
-    
     entropy_data.lba = lba;
     entropy_data.count = count;
-    entropy_data.tsc = tsc;
+    entropy_data.tsc = i386_cpu_cycle_counter();
     
     random_harvest_fast(&entropy_data, sizeof(entropy_data));
 

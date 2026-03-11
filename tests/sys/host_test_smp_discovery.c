@@ -9,6 +9,14 @@
 #include <arch/x86-common/ioapic.h>
 #include <arch/x86-common/lapic.h>
 
+int i386_cpu_has_apic(void) {
+    return 1;
+}
+
+int i386_cpu_has_cr4(void) {
+    return 1;
+}
+
 static uint8_t bios_mem[0x100000];
 static struct pmap mock_kernel_pmap;
 static uint32_t mock_lapic_base;

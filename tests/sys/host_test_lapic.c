@@ -16,6 +16,10 @@ void kprint(const char *s) {
     (void)s;
 }
 
+int i386_cpu_has_apic(void) {
+    return 1;
+}
+
 // Mock Port I/O
 static uint8_t mock_port61_value;
 static int mock_port61_ready_after;

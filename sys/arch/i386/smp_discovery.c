@@ -1,4 +1,5 @@
 #include <arch/i386/smp.h>
+#include <arch/i386/cpu.h>
 #include <sys/smp.h>
 #include <kern/console.h>
 #include <arch/i386/early_boot.h>
@@ -345,6 +346,14 @@ void smp_discover_cores(void) {
     // Default to 1 CPU (Bootstrap Processor)
     cpu_count = 1;
 
+    if (!i386_cpu_has_apic()) {
+        early_uart_print("SMP: CPU/chipset has no local APIC, falling back to UP.\n");
+        cpus[0].lapic_id = 0;
+        cpus[0].processor_id = 0;
+        cpus[0].flags = 1;
+        return;
+    }
+
     // Try to detect BSP LAPIC ID directly from hardware
     // Accessing default LAPIC address (mapped at 0xFEE00000 by boot.S)
     // Note: We assume LAPIC is enabled or at least in a state where ID can be read.
@@ -627,9 +636,11 @@ int smp_boot_ap(uint8_t apic_id) {
         pcpu->current = idle;
     }
 
-    uint32_t cr0, cr4;
+    uint32_t cr0, cr4 = 0;
     __asm__ volatile("mov %%cr0, %0" : "=r"(cr0));
-    __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+    if (i386_cpu_has_cr4()) {
+        __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+    }
 
     *cr3_ptr = pmap_kernel()->pdir_phys;
     *cr4_ptr = cr4;

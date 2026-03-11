@@ -1,3 +1,4 @@
+#include <arch/i386/cpu.h>
 #include <fs/procfs.h>
 #include <sys/smp.h>
 #include <kern/console.h>
@@ -54,6 +55,13 @@ static const struct cpuid_feature_desc cpuid_features[] = {
 static inline void cpuid_leaf(uint32_t leaf, uint32_t subleaf,
                               uint32_t *eax, uint32_t *ebx,
                               uint32_t *ecx, uint32_t *edx) {
+    if (!i386_cpu_has_cpuid()) {
+        *eax = 0;
+        *ebx = 0;
+        *ecx = 0;
+        *edx = 0;
+        return;
+    }
     __asm__ volatile("cpuid"
                      : "=a"(*eax), "=b"(*ebx), "=c"(*ecx), "=d"(*edx)
                      : "a"(leaf), "c"(subleaf));
@@ -73,7 +81,14 @@ static size_t cpuid_appendf(char *buf, size_t size, size_t off, const char *fmt,
 }
 
 static void cpuid_get_vendor(char vendor[13]) {
+    const struct i386_cpu_features *features = i386_cpu_get_features();
     uint32_t eax, ebx, ecx, edx;
+    if (!i386_cpu_has_cpuid()) {
+        strncpy(vendor, features->vendor, 12);
+        vendor[12] = '\0';
+        return;
+    }
+
     cpuid_leaf(0, 0, &eax, &ebx, &ecx, &edx);
 
     memcpy(vendor + 0, &ebx, sizeof(ebx));
@@ -85,6 +100,16 @@ static void cpuid_get_vendor(char vendor[13]) {
 static void cpuid_get_brand(char brand[49]) {
     uint32_t eax, ebx, ecx, edx;
     brand[0] = '\0';
+
+    if (!i386_cpu_has_cpuid()) {
+        if (i386_cpu_get_features()->family >= 4) {
+            strncpy(brand, "i486-compatible CPU", 48);
+        } else {
+            strncpy(brand, "i386-compatible CPU", 48);
+        }
+        brand[48] = '\0';
+        return;
+    }
 
     cpuid_leaf(0x80000000u, 0, &eax, &ebx, &ecx, &edx);
     if (eax < 0x80000004u) {
@@ -130,27 +155,20 @@ static uint32_t cpuid_proc_cpuinfo(char *buf, size_t size, void *opaque) {
     uint32_t eax, ebx, ecx, edx;
     char vendor[13];
     char brand[49];
+    const struct i386_cpu_features *features = i386_cpu_get_features();
 
     cpuid_get_vendor(vendor);
     cpuid_get_brand(brand);
 
-    cpuid_leaf(1, 0, &eax, &ebx, &ecx, &edx);
-
-    uint32_t base_family = (eax >> 8) & 0x0F;
-    uint32_t base_model = (eax >> 4) & 0x0F;
-    uint32_t ext_family = (eax >> 20) & 0xFF;
-    uint32_t ext_model = (eax >> 16) & 0x0F;
-    uint32_t stepping = eax & 0x0F;
-
-    uint32_t family = base_family;
-    if (base_family == 0x0F) {
-        family += ext_family;
+    if (i386_cpu_has_cpuid()) {
+        cpuid_leaf(1, 0, &eax, &ebx, &ecx, &edx);
+    } else {
+        eax = ebx = ecx = edx = 0;
     }
 
-    uint32_t model = base_model;
-    if (base_family == 0x06 || base_family == 0x0F) {
-        model |= (ext_model << 4);
-    }
+    uint32_t family = features->family;
+    uint32_t model = features->model;
+    uint32_t stepping = features->stepping;
 
     const char *model_name = (brand[0] != '\0') ? brand : "Substrate x86 CPU";
 
@@ -180,7 +198,11 @@ static uint32_t cpuid_proc_cpuinfo(char *buf, size_t size, void *opaque) {
 
 void cpuid_init(void) {
     if (procfs_register_entry("cpuinfo", cpuid_proc_cpuinfo, NULL) == 0) {
-        kprint("cpuid: /proc/cpuinfo provider registered\n");
+        if (i386_cpu_has_cpuid()) {
+            kprint("cpuid: /proc/cpuinfo provider registered\n");
+        } else {
+            kprint("cpuid: /proc/cpuinfo provider registered (generic fallback)\n");
+        }
     } else {
         kprint("cpuid: failed to register /proc/cpuinfo provider\n");
     }

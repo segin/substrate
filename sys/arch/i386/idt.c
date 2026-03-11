@@ -1,4 +1,5 @@
 #include <arch/i386/idt.h>
+#include <arch/i386/cpu.h>
 #include <drivers/video/vga.h>
 #include <arch/x86-common/io.h>
 #include <string.h>
@@ -143,8 +144,7 @@ void isr_handler(registers_t *regs) {
     current_process = cpu_thread ? cpu_thread->proc : NULL;
 
     /* Harvest entropy from interrupt timing (TSC) */
-    uint64_t tsc;
-    __asm__ volatile("rdtsc" : "=A"(tsc));
+    uint64_t tsc = i386_cpu_cycle_counter();
     int is_usermode = (regs->cs & 0x3) == 3;
     
     /* Mix TSC and interrupt info into pool (fast, no lock) */

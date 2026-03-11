@@ -15,6 +15,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <arch/i386/cpu.h>
 #include <sys/random.h>
 #include <kern/console.h>
 #include <drivers/storage/blkdev.h>
@@ -994,7 +995,7 @@ void ide_irq_handler(int irq) {
         uint8_t channel;
     } __attribute__((packed)) entropy;
     
-    __asm__ volatile("rdtsc" : "=A"(entropy.tsc));
+    entropy.tsc = i386_cpu_cycle_counter();
     entropy.irq = irq;
     entropy.channel = channel;
     

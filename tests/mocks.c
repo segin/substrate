@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <sys/types.h>
 #include "../sys/arch/i386/pmap.h"
+#include "../sys/arch/i386/cpu.h"
 #include "../sys/vm/vm_map.h"
 
 // VGA/UART Mocks
@@ -389,3 +390,34 @@ void core_capture_trapframe(void *ctx) { (void)ctx; }
 void ldt_init_process(struct process *p) { (void)p; }
 void ldt_clone_process(struct process *parent, struct process *child) { (void)parent; (void)child; }
 void ldt_free_process(struct process *p) { (void)p; }
+void i386_cpu_init_early(void) {}
+static const struct i386_cpu_features mock_cpu_features = {
+    .detected = 1,
+    .is_486_or_newer = 1,
+    .has_cpuid = 1,
+    .has_cr4 = 1,
+    .has_tsc = 1,
+    .has_apic = 1,
+    .has_pse = 1,
+    .has_pae = 1,
+    .has_pge = 1,
+    .has_fxsr = 1,
+};
+const struct i386_cpu_features *i386_cpu_get_features(void) { return &mock_cpu_features; }
+int i386_cpu_is_486_or_newer(void) { return 1; }
+int i386_cpu_has_cpuid(void) { return 1; }
+int i386_cpu_has_cr4(void) { return 1; }
+int i386_cpu_has_tsc(void) { return 1; }
+int i386_cpu_has_apic(void) { return 1; }
+int i386_cpu_has_pse(void) { return 1; }
+int i386_cpu_has_pae(void) { return 1; }
+int i386_cpu_has_pge(void) { return 1; }
+int i386_cpu_has_fxsr(void) { return 1; }
+int i386_cpu_has_pcid(void) { return 0; }
+int i386_cpu_has_rdrand(void) { return 0; }
+int i386_cpu_has_rdseed(void) { return 0; }
+uint64_t i386_cpu_cycle_counter(void) { return 0; }
+void i386_cpu_cycle_counter_split(uint32_t *lo, uint32_t *hi) {
+    if (lo) *lo = 0;
+    if (hi) *hi = 0;
+}

@@ -1,4 +1,5 @@
 #include <arch/i386/pmap.h>
+#include <arch/i386/cpu.h>
 #include <arch/i386/pmap_hal.h>
 #include <arch/i386/pmm.h>
 #include <arch/x86-common/lapic.h>
@@ -202,19 +203,15 @@ void pmap_bootstrap(void) {
         kernel_page_directory[i] = 0; // Not present
     }
 
-    // Check for PGE (Global Pages) support via CPUID
-    uint32_t eax, ebx, ecx, edx;
-    __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(1));
-    int has_pge = (edx >> 13) & 1;  // PGE bit 13 in EDX
-    int has_pse = (edx >> 3) & 1;   // PSE bit 3 in EDX
-    int has_pae = (edx >> 6) & 1;   // PAE bit 6 in EDX
-    pmap_has_pcid = (ecx >> 17) & 1; // PCID bit 17 in ECX
+    int has_pge = i386_cpu_has_pge();
+    int has_pse = i386_cpu_has_pse();
+    int has_pae = i386_cpu_has_pae();
+    pmap_has_pcid = i386_cpu_has_pcid();
 
     if (has_pse) {
-        uint32_t cr4;
-        __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+        uint32_t cr4 = pmap_hal_read_cr4();
         cr4 |= 0x10;  // CR4.PSE bit 4
-        __asm__ volatile("mov %0, %%cr4" :: "r"(cr4));
+        pmap_hal_write_cr4(cr4);
         kprint("PMAP: PSE (4MB Pages) enabled\n");
     }
 
@@ -226,10 +223,9 @@ void pmap_bootstrap(void) {
     if (has_pge) {
         kernel_pte_flags |= PTE_G;  // Mark kernel pages global
         // Enable PGE in CR4
-        uint32_t cr4;
-        __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+        uint32_t cr4 = pmap_hal_read_cr4();
         cr4 |= 0x80;  // CR4.PGE bit 7
-        __asm__ volatile("mov %0, %%cr4" :: "r"(cr4));
+        pmap_hal_write_cr4(cr4);
         kprint("PMAP: PGE (Global Pages) enabled\n");
     }
 
@@ -731,8 +727,7 @@ int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t 
         pte_flags |= PTE_U;  // User accessible if in user space or requested
     }
     if (va >= 0xC0000000) {
-        uint32_t cr4;
-        __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+        uint32_t cr4 = pmap_hal_read_cr4();
         if (cr4 & 0x80) {
             pte_flags |= PTE_G;
         }
@@ -815,8 +810,7 @@ int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_l
             pte_flags |= PTE_U;  // User accessible if in user space or requested
         }
         if (va >= 0xC0000000) {
-            uint32_t cr4;
-            __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+            uint32_t cr4 = pmap_hal_read_cr4();
             if (cr4 & 0x80) {
                 pte_flags |= PTE_G;
             }
@@ -897,6 +891,8 @@ int pmap_enter_large(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uin
     uint32_t removed = 0;
     uintptr_t old_large_pa = 0;
     int had_large_mapping = 0;
+
+    if (!i386_cpu_has_pse()) return -1;
     
     // Validate alignment (4MB)
     if ((va & 0x3FFFFF) || (pa & 0x3FFFFF)) return -1;
@@ -959,8 +955,7 @@ int pmap_enter_large(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uin
     if (va < 0xC0000000) pde_flags |= PTE_U;
     
     // Global flag if supported and kernel space
-    uint32_t cr4;
-    __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+    uint32_t cr4 = pmap_hal_read_cr4();
     if ((cr4 & 0x80) && va >= 0xC0000000) {
         pde_flags |= PTE_G;
     }
@@ -1052,8 +1047,7 @@ void pmap_kenter(uintptr_t va, uintptr_t pa) {
     // Kernel pages: P, W, no U (supervisor only), G if available
     uint32_t pte_flags = PTE_P | PTE_W;
     // Check if PGE is enabled (CR4 bit 7)
-    uint32_t cr4;
-    __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+    uint32_t cr4 = pmap_hal_read_cr4();
     if (cr4 & 0x80) {
         pte_flags |= PTE_G;  // Global page
     }

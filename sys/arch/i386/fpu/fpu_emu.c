@@ -1,4 +1,5 @@
 #include <arch/i386/fpu/fpu_emu.h>
+#include <arch/i386/cpu.h>
 #include <arch/i386/idt.h>
 #include <io.h>
 #include <kern/console.h>
@@ -6,14 +7,18 @@
 
 extern void isr7(void);
 extern process_t *current_process;
+static int fpu_use_fxsave = 0;
 
 // Save FPU context for a process
 void fpu_save_context(struct process *p) {
     if (!p) return;
     
 #ifndef HOST_TEST
-    // Use FXSAVE to save FPU/SSE state
-    __asm__ volatile("fxsave %0" : "=m"(p->fpu_ctx.fpu_state));
+    if (fpu_use_fxsave) {
+        __asm__ volatile("fxsave %0" : "=m"(p->fpu_ctx.fpu_state));
+    } else {
+        __asm__ volatile("fnsave %0" : "=m"(p->fpu_ctx.fpu_state));
+    }
 #endif
 }
 
@@ -22,8 +27,11 @@ void fpu_restore_context(struct process *p) {
     if (!p) return;
     
 #ifndef HOST_TEST
-    // Use FXRSTOR to restore FPU/SSE state
-    __asm__ volatile("fxrstor %0" : : "m"(p->fpu_ctx.fpu_state));
+    if (fpu_use_fxsave) {
+        __asm__ volatile("fxrstor %0" : : "m"(p->fpu_ctx.fpu_state));
+    } else {
+        __asm__ volatile("frstor %0" : : "m"(p->fpu_ctx.fpu_state));
+    }
 #endif
 }
 
@@ -75,6 +83,7 @@ void fpu_init(void) {
     if ((status & 0xFF) == 0) {
         // FPU detected!
         fpu_present = 1;
+        fpu_use_fxsave = i386_cpu_has_fxsr();
         kprint("FPU: Hardware x87 detected\n");
         
         // Configure CR0 for native FPU with lazy switching
@@ -87,9 +96,15 @@ void fpu_init(void) {
         
         // Initialize FPU to known state
         __asm__ volatile("fninit");
+        if (fpu_use_fxsave) {
+            kprint("FPU: Using FXSAVE/FXRSTOR context format\n");
+        } else {
+            kprint("FPU: Using FNSAVE/FRSTOR context format\n");
+        }
     } else {
         // No FPU - enable emulation
         fpu_present = 0;
+        fpu_use_fxsave = 0;
         kprint("FPU: No hardware x87 detected (emulation mode)\n");
         __asm__ volatile("mov %%cr0, %0" : "=r"(cr0));
         cr0 |= 0x04;   // Set EM (emulation)
@@ -101,4 +116,3 @@ void fpu_init(void) {
     // Register INT 7 handler for #NM (Device Not Available)
     idt_set_gate(7, (uint32_t)isr7, 0x08, 0x8E);
 }
-

@@ -1,4 +1,5 @@
 #include <drivers/input/ps2.h>
+#include <arch/i386/cpu.h>
 #include <arch/x86-common/io.h>
 #include <sys/input.h>
 #include <sys/random.h>
@@ -76,7 +77,7 @@ void keyboard_handler(registers_t *regs) {
     
     /* Harvest entropy from keystroke timing and scancode */
     uint32_t entropy_data[2];
-    __asm__ volatile("rdtsc" : "=a"(entropy_data[0]), "=d"(entropy_data[1])); /* TSC for timing */
+    i386_cpu_cycle_counter_split(&entropy_data[0], &entropy_data[1]);
     entropy_data[1] = scancode; /* Mix in scancode */
     random_harvest_fast(entropy_data, sizeof(entropy_data));
     

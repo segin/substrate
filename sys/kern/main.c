@@ -20,6 +20,7 @@
 #include <drivers/storage/ramdisk.h>
 
 #include <arch/i386/idt.h>
+#include <arch/i386/cpu.h>
 #include <arch/i386/gdt.h>
 #include <arch/i386/pmm.h>
 #include <arch/i386/pmap.h>
@@ -351,6 +352,7 @@ static void init_runtime_console(int serial_console) {
 }
 
 static void init_core_subsystems(multiboot_info_t *mboot_info) {
+    i386_cpu_init_early();
     percpu_init();
 
     gdt_init();
@@ -366,8 +368,12 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
 
     smp_discover_cores();
 
-    lapic_init();
-    lapic_enable(0xFF);
+    if (i386_cpu_has_apic()) {
+        lapic_init();
+        lapic_enable(0xFF);
+    } else {
+        kprint("SMP: Running in PIC/UP mode.\n");
+    }
 
     extern void pmap_map_trampoline(void);
     pmap_map_trampoline();
@@ -386,7 +392,7 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
     sched_init();
     kprint("Scheduler Initialized.\n");
 
-    if (smp_get_cpu_count() > 1) {
+    if (i386_cpu_has_apic() && smp_get_cpu_count() > 1) {
         smp_boot_all_aps();
         sched_smp_init(smp_get_cpu_count());
     }

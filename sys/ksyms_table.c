@@ -331,6 +331,22 @@ extern void getnewvnode(void);
 extern void hw_text_console_write_shim(void);
 extern void hw_text_init(void);
 extern void hw_text_set_color(void);
+extern void i386_cpu_cycle_counter(void);
+extern void i386_cpu_cycle_counter_split(void);
+extern void i386_cpu_get_features(void);
+extern void i386_cpu_has_apic(void);
+extern void i386_cpu_has_cpuid(void);
+extern void i386_cpu_has_cr4(void);
+extern void i386_cpu_has_fxsr(void);
+extern void i386_cpu_has_pae(void);
+extern void i386_cpu_has_pcid(void);
+extern void i386_cpu_has_pge(void);
+extern void i386_cpu_has_pse(void);
+extern void i386_cpu_has_rdrand(void);
+extern void i386_cpu_has_rdseed(void);
+extern void i386_cpu_has_tsc(void);
+extern void i386_cpu_init_early(void);
+extern void i386_cpu_is_486_or_newer(void);
 extern void i386_trap_to_signal(void);
 extern void ide_atapi_packet(void);
 extern void ide_atapi_read_capacity(void);
@@ -1811,6 +1827,22 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&percpu_init_cpu, "percpu_init_cpu" },
     { (uint32_t)(uintptr_t)&percpu_init, "percpu_init" },
     { (uint32_t)(uintptr_t)&percpu_get_cpu_id, "percpu_get_cpu_id" },
+    { (uint32_t)(uintptr_t)&i386_cpu_init_early, "i386_cpu_init_early" },
+    { (uint32_t)(uintptr_t)&i386_cpu_get_features, "i386_cpu_get_features" },
+    { (uint32_t)(uintptr_t)&i386_cpu_is_486_or_newer, "i386_cpu_is_486_or_newer" },
+    { (uint32_t)(uintptr_t)&i386_cpu_has_cpuid, "i386_cpu_has_cpuid" },
+    { (uint32_t)(uintptr_t)&i386_cpu_has_cr4, "i386_cpu_has_cr4" },
+    { (uint32_t)(uintptr_t)&i386_cpu_has_tsc, "i386_cpu_has_tsc" },
+    { (uint32_t)(uintptr_t)&i386_cpu_has_apic, "i386_cpu_has_apic" },
+    { (uint32_t)(uintptr_t)&i386_cpu_has_pse, "i386_cpu_has_pse" },
+    { (uint32_t)(uintptr_t)&i386_cpu_has_pae, "i386_cpu_has_pae" },
+    { (uint32_t)(uintptr_t)&i386_cpu_has_pge, "i386_cpu_has_pge" },
+    { (uint32_t)(uintptr_t)&i386_cpu_has_fxsr, "i386_cpu_has_fxsr" },
+    { (uint32_t)(uintptr_t)&i386_cpu_has_pcid, "i386_cpu_has_pcid" },
+    { (uint32_t)(uintptr_t)&i386_cpu_has_rdrand, "i386_cpu_has_rdrand" },
+    { (uint32_t)(uintptr_t)&i386_cpu_has_rdseed, "i386_cpu_has_rdseed" },
+    { (uint32_t)(uintptr_t)&i386_cpu_cycle_counter, "i386_cpu_cycle_counter" },
+    { (uint32_t)(uintptr_t)&i386_cpu_cycle_counter_split, "i386_cpu_cycle_counter_split" },
     { (uint32_t)(uintptr_t)&lapic_set_base, "lapic_set_base" },
     { (uint32_t)(uintptr_t)&lapic_get_base, "lapic_get_base" },
     { (uint32_t)(uintptr_t)&lapic_init, "lapic_init" },
@@ -3131,4 +3163,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1560;
+int ksym_count = 1576;

@@ -1,4 +1,5 @@
 #include <lapic.h>
+#include <arch/i386/cpu.h>
 #include <kern/console.h>
 
 // Default LAPIC physical address (can be overridden by MADT)
@@ -49,6 +50,11 @@ uint32_t lapic_get_base(void) {
 }
 
 void lapic_init(void) {
+    if (!i386_cpu_has_apic()) {
+        kprint("LAPIC: CPU has no local APIC, staying in PIC mode.\n");
+        return;
+    }
+
     kprint("LAPIC: Initializing at physical 0x");
     // Print hex (simple for now)
     char buf[9];

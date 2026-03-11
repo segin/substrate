@@ -1,4 +1,5 @@
 #include <drivers/virtio/virtio.h>
+#include <arch/i386/cpu.h>
 #include <arch/i386/pci.h>
 #include <arch/x86-common/io.h>
 #include <kern/console.h>
@@ -16,7 +17,7 @@ uint16_t virtio_get_io_base(uint8_t bus, uint8_t slot, uint8_t func) {
 
 void virtio_init(void) {
     uint64_t start_tsc, end_tsc;
-    __asm__ volatile("rdtsc" : "=A"(start_tsc));
+    start_tsc = i386_cpu_cycle_counter();
 
     // Use PCI subsystem to find devices instead of rescanning
     pci_device_t *dev = NULL;
@@ -38,7 +39,7 @@ void virtio_init(void) {
         }
     }
 
-    __asm__ volatile("rdtsc" : "=A"(end_tsc));
+    end_tsc = i386_cpu_cycle_counter();
     char perf_buf[128];
     uint32_t diff_lo = (uint32_t)(end_tsc - start_tsc);
     snprintf(perf_buf, sizeof(perf_buf), "VirtIO Scan (Optimized): %u cycles\n", diff_lo);

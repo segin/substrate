@@ -11,6 +11,7 @@
  */
 
 #include <sys/random.h>
+#include <arch/i386/cpu.h>
 #include <kern/random.h>
 #include <kern/console.h>
 #include <kern/sched.h>
@@ -232,27 +233,19 @@ void pool_extract_bytes(struct entropy_pool *pool, void *out, size_t len) {
  */
 
 void random_detect_hwrng(void) {
-    uint32_t eax, ebx, ecx, edx;
-    
     rng_state.has_rdrand = 0;
     rng_state.has_rdseed = 0;
-    
-    /* Check CPUID for feature flags */
-    __asm__ volatile("cpuid"
-        : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
-        : "a"(1), "c"(0));
-    
-    if (ecx & (1 << 30)) {
+
+    if (!i386_cpu_has_cpuid()) {
+        return;
+    }
+
+    if (i386_cpu_has_rdrand()) {
         rng_state.has_rdrand = 1;
         kprint("RNG: RDRAND available\n");
     }
-    
-    /* Check extended features for RDSEED */
-    __asm__ volatile("cpuid"
-        : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
-        : "a"(7), "c"(0));
-    
-    if (ebx & (1 << 18)) {
+
+    if (i386_cpu_has_rdseed()) {
         rng_state.has_rdseed = 1;
         kprint("RNG: RDSEED available\n");
     }

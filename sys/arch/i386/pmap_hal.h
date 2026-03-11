@@ -1,6 +1,7 @@
 #ifndef _PMAP_HAL_H
 #define _PMAP_HAL_H
 
+#include <arch/i386/cpu.h>
 #include <stdint.h>
 
 // ==================== HAL Layer ====================
@@ -22,15 +23,28 @@ static inline void pmap_hal_write_cr3(uint32_t cr3) {
 
 static inline uint32_t pmap_hal_read_cr4(void) {
     uint32_t cr4;
+    if (!i386_cpu_has_cr4()) {
+        return 0;
+    }
     __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
     return cr4;
 }
 
 static inline void pmap_hal_write_cr4(uint32_t cr4) {
+    if (!i386_cpu_has_cr4()) {
+        return;
+    }
     __asm__ volatile("mov %0, %%cr4" :: "r"(cr4));
 }
 
 static inline void pmap_hal_cpuid(uint32_t code, uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *edx) {
+    if (!i386_cpu_has_cpuid()) {
+        *eax = 0;
+        *ebx = 0;
+        *ecx = 0;
+        *edx = 0;
+        return;
+    }
     __asm__ volatile("cpuid"
                      : "=a"(*eax), "=b"(*ebx), "=c"(*ecx), "=d"(*edx)
                      : "a"(code));
