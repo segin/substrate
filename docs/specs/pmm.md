@@ -19,7 +19,9 @@ The PMM manages the physical RAM of the system. It tracks which pages are free a
 - Used to reserve bootstrap metadata such as the PMM bitmap and `vm_page_t` array before the buddy allocator is available.
 
 ### Memory Discovery
-- Initializes from Multiboot `mmap` or BIOS `e820` structures.
+- Initializes from Multiboot `mmap` when available.
+- Falls back to Multiboot `mem_lower` / `mem_upper` totals when the boot path only has legacy BIOS sizing (`E801`, then `AH=88h`).
+- Raw BIOS `e820` parsing remains available for direct firmware-provided maps.
 - Validates and sanitizes memory regions.
 - Reserves kernel text/data/bss regions.
 
@@ -32,7 +34,8 @@ The PMM manages the physical RAM of the system. It tracks which pages are free a
 ### Initialization
 ```c
 void pmm_watermark_init(uint32_t phys_limit);  // Early boot setup
-void pmm_init(uint32_t mmap_addr, uint32_t mmap_length);  // Multiboot
+void pmm_init(uint32_t mmap_addr, uint32_t mmap_length,
+              uint32_t mem_lower_kb, uint32_t mem_upper_kb);  // Multiboot + legacy fallback
 void pmm_init_e820(e820_entry_t *map, uint32_t count);    // Raw e820
 ```
 
@@ -58,6 +61,7 @@ void *pmm_watermark_alloc(size_t bytes);  // Returns kernel virt addr
 - **Transition:** boot starts on the watermark allocator, then `vm_phys_early_init()` and `vm_phys_add_range()` establish the machine-independent buddy allocator and page database.
 - **Global Lock:** Spinlock protects free lists for SMP safety.
 - **Low Memory Safeguards:** Reserves pages below 1MB for BIOS/legacy.
+- **Legacy BIOS Policy:** when only aggregate BIOS totals are available, the kernel reserves the first 1MB conservatively and treats reported extended memory as one usable run above 1MB.
 
 ## Addressing Convention
 - `pmm_alloc_block()` and `pmm_alloc_contiguous()` return kernel virtual addresses in the direct map.

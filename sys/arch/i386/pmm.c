@@ -90,6 +90,8 @@ static size_t pmm_target_bitmap_bytes = 0;
 static size_t pmm_target_page_array_bytes = 0;
 static int pmm_metadata_needs_promotion = 0;
 
+struct pmm_stats_ctx;
+
 typedef struct multiboot_module {
     uint32_t mod_start;
     uint32_t mod_end;
@@ -134,6 +136,8 @@ static void pmm_select_metadata(uint64_t max_phys, uint64_t total_usable,
 static void pmm_mark_watermark_used(void);
 static int pmm_promote_metadata(void);
 static void pmm_reserve_kernel(void);
+static void pmm_seed_legacy_memory(uint32_t mem_lower_kb, uint32_t mem_upper_kb,
+                                   struct pmm_stats_ctx *ctx);
 
 static void pmm_mark_used_range(phys_addr_t start, phys_addr_t end) {
     uint32_t page_start = start & ~(PMM_BLOCK_SIZE - 1);
@@ -736,6 +740,51 @@ static void pmm_cb_stats(phys_addr_t start, phys_addr_t length, void *arg) {
     pmm_add_region(start, end, MULTIBOOT_MEMORY_AVAILABLE);
 }
 
+static void pmm_seed_legacy_memory(uint32_t mem_lower_kb, uint32_t mem_upper_kb,
+                                   struct pmm_stats_ctx *ctx) {
+    uint64_t lower_bytes = (uint64_t)mem_lower_kb * 1024ULL;
+    uint64_t upper_bytes = (uint64_t)mem_upper_kb * 1024ULL;
+    uint64_t usable_start = 0x00100000ULL;
+    uint64_t usable_end = usable_start + upper_bytes;
+
+    if (!ctx) {
+        return;
+    }
+
+    /*
+     * Legacy BIOS fallbacks (E801/AH=88h) only provide aggregate memory sizes,
+     * not a sparse map. Reserve the entire first megabyte conservatively and
+     * treat the reported extended memory as one usable run above 1MB.
+     */
+    if (lower_bytes > 0) {
+        uint64_t reserved_end = lower_bytes;
+        if (reserved_end > 0x00100000ULL) {
+            reserved_end = 0x00100000ULL;
+        }
+        if (reserved_end > 0) {
+            pmm_add_region(0, (phys_addr_t)reserved_end, MULTIBOOT_MEMORY_RESERVED);
+            pmm_total_reserved_ram += reserved_end;
+        }
+    }
+    if (lower_bytes < 0x00100000ULL) {
+        pmm_total_reserved_ram += 0x00100000ULL - lower_bytes;
+    }
+
+    if (mem_upper_kb == 0) {
+        return;
+    }
+
+    if (usable_end > PMM_PHYS_RAM_CAP) {
+        usable_end = PMM_PHYS_RAM_CAP;
+    }
+    if (usable_end <= usable_start) {
+        return;
+    }
+
+    pmm_cb_stats((phys_addr_t)usable_start,
+                 (phys_addr_t)(usable_end - usable_start), ctx);
+}
+
 static void pmm_add_range_excluding_regions(phys_addr_t start, phys_addr_t end) {
     phys_addr_t cursor = start;
 
@@ -928,7 +977,8 @@ void pmm_enable_highmem(void) {
     kprint("PMM: direct-mapped RAM ranges enabled after bootstrap paging.\n");
 }
 
-void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
+void pmm_init(uint32_t mmap_addr, uint32_t mmap_length,
+              uint32_t mem_lower_kb, uint32_t mem_upper_kb) {
     // 0. Initialize kernel bounds first (needed for all subsequent operations)
     pmm_init_kernel_bounds();
     pmm_reset_walk_state();
@@ -941,6 +991,8 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     struct pmm_stats_ctx stats = { .max_phys = 0x1000000, .total_usable = 0 };
     if (mmap_addr && mmap_length) {
         pmm_walk_mmap(mmap_addr, mmap_length, pmm_cb_stats, &stats);
+    } else if (mem_upper_kb || mem_lower_kb) {
+        pmm_seed_legacy_memory(mem_lower_kb, mem_upper_kb, &stats);
     }
     
     /* Save global stats for reporting */
@@ -963,7 +1015,7 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     // 5. Report memory statistics with 64-bit accumulation
     pmm_report_memory_stats();
 
-    if (mmap_addr == 0 || mmap_length == 0) {
+    if ((mmap_addr == 0 || mmap_length == 0) && pmm_usable_range_count == 0) {
         kprint("PMM: Fallback bootstrap allocator.\n");
         // Fallback init...
         // ... (Similar to before)

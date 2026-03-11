@@ -90,6 +90,8 @@ typedef struct multiboot_module {
 static void init_memory(multiboot_info_t *mboot_info) {
     uint32_t mmap_addr = 0;
     uint32_t mmap_length = 0;
+    uint32_t mem_lower = 0;
+    uint32_t mem_upper = 0;
 
     // Dump Memory Map Early
     if (mboot_info && (mboot_info->flags & MULTIBOOT_INFO_MEM_MAP)) {
@@ -109,17 +111,26 @@ static void init_memory(multiboot_info_t *mboot_info) {
         mboot_copy.flags |= MULTIBOOT_INFO_MEM_MAP;
     }
 
+    if (mboot_info && (mboot_info->flags & MULTIBOOT_INFO_MEMORY)) {
+        mem_lower = mboot_info->mem_lower;
+        mem_upper = mboot_info->mem_upper;
+    }
+
     if (mboot_info) {
         pmm_record_boot_info(mboot_info);
     }
 
     // Initialize PMM
     if (mmap_addr) {
-        pmm_init(mmap_addr, mmap_length);
+        pmm_init(mmap_addr, mmap_length, mem_lower, mem_upper);
         kprint("PMM Initialized with Multiboot mmap.\n");
     } else {
-        pmm_init(0, 0); 
-        kprint("PMM Initialized (no mmap).\n");
+        pmm_init(0, 0, mem_lower, mem_upper);
+        if (mem_upper || mem_lower) {
+            kprint("PMM Initialized with legacy BIOS memory sizing.\n");
+        } else {
+            kprint("PMM Initialized (no mmap).\n");
+        }
     }
 
     // Initialize VM subsystem

@@ -20,7 +20,8 @@ typedef void (*pmm_region_callback)(phys_addr_t start, phys_addr_t len, void *ar
 void pmm_walk_mmap(uint32_t mmap_addr, uint32_t mmap_length, pmm_region_callback cb, void *arg);
 void pmm_record_boot_info(const multiboot_info_t *mbi);
 
-void pmm_init(uint32_t mmap_addr, uint32_t mmap_length);
+void pmm_init(uint32_t mmap_addr, uint32_t mmap_length,
+              uint32_t mem_lower_kb, uint32_t mem_upper_kb);
 void pmm_init_e820(e820_entry_t *map, uint32_t count);
 void pmm_enable_highmem(void);
 void* pmm_alloc_block(void);

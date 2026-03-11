@@ -223,7 +223,6 @@ vm_page_t *vm_phys_alloc_page(void) {
     intr_restore(flags);
     
     if (page && free_left < vm_phys_low_watermark) {
-        kprint("PMM: Low memory watermark reached. Waking daemon.\n");
         vm_page_wakeup_daemon();
     }
     
@@ -270,7 +269,6 @@ vm_page_t *vm_phys_alloc_contiguous(size_t count) {
     intr_restore(flags);
     
     if (page && free_left < vm_phys_low_watermark) {
-        kprint("PMM: Low memory watermark reached. Waking daemon.\n");
         vm_page_wakeup_daemon();
     }
     

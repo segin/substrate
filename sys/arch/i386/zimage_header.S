@@ -21,6 +21,13 @@ zimage_start:
 .set ZIMG_SCRATCH_RDSIZE,   0x0508
 .set ZIMG_SCRATCH_CODE32,   0x050C
 .set ZIMG_SCRATCH_MMAPLEN,  0x0510
+.set ZIMG_SCRATCH_MEMLOW,   0x0514
+.set ZIMG_SCRATCH_MEMUPPER, 0x0518
+
+.set MBI_FLAG_MEMORY,  0x00000001
+.set MBI_FLAG_CMDLINE, 0x00000004
+.set MBI_FLAG_MODS,    0x00000008
+.set MBI_FLAG_MEM_MAP, 0x00000040
 
 .org 0x1F1
 setup_sects: .byte 0
@@ -82,6 +89,17 @@ setup_start:
     movl %eax, %es:ZIMG_SCRATCH_CODE32
 
     /*
+     * Record basic memory sizing for old BIOSes that do not implement E820.
+     * mem_lower is always taken from INT 12h (conventional RAM in KB).
+     * mem_upper falls back to E801, then AH=88h if no E820 map is available.
+     */
+    int $0x12
+    movzwl %ax, %eax
+    movl %eax, %es:ZIMG_SCRATCH_MEMLOW
+    xorl %eax, %eax
+    movl %eax, %es:ZIMG_SCRATCH_MEMUPPER
+
+    /*
      * Build a Multiboot-format mmap by querying BIOS E820 while we are still
      * in real mode. The kernel PMM relies on this to seed more than the tiny
      * bootstrap allocator window.
@@ -114,6 +132,38 @@ e820_done:
     movw %ax, %es
     movzwl %bp, %eax
     movl %eax, %es:ZIMG_SCRATCH_MMAPLEN
+
+    testw %bp, %bp
+    jnz memory_probe_done
+
+    movw $0xE801, %ax
+    int $0x15
+    jc memory_probe_88h
+
+    movzwl %ax, %eax
+    movzwl %bx, %ebx
+    testl %eax, %eax
+    jne memory_probe_e801_done
+    testl %ebx, %ebx
+    jne memory_probe_e801_done
+    movzwl %cx, %eax
+    movzwl %dx, %ebx
+
+memory_probe_e801_done:
+    shll $6, %ebx
+    addl %ebx, %eax
+    movl %eax, %es:ZIMG_SCRATCH_MEMUPPER
+    jmp memory_probe_done
+
+memory_probe_88h:
+    xorw %ax, %ax
+    movb $0x88, %ah
+    int $0x15
+    jc memory_probe_done
+    movzwl %ax, %eax
+    movl %eax, %es:ZIMG_SCRATCH_MEMUPPER
+
+memory_probe_done:
 
     /*
      * Build an absolute far pointer to pm_entry. Once CR0.PE is set, a jump to
@@ -159,25 +209,33 @@ pm_entry:
     movl $32, %ecx                 # 32 dwords = 128 bytes
     rep stosl
 
-    movl $0x00000044, %eax         # MULTIBOOT_INFO_CMDLINE | MULTIBOOT_INFO_MEM_MAP
+    movl $(MBI_FLAG_CMDLINE | MBI_FLAG_MEMORY), %eax
     movl $MBI_ADDR, %edi
     movl %eax, 0(%edi)
+    movl ZIMG_SCRATCH_MEMLOW, %eax
+    movl %eax, 4(%edi)             # multiboot_info_t.mem_lower
+    movl ZIMG_SCRATCH_MEMUPPER, %eax
+    movl %eax, 8(%edi)             # multiboot_info_t.mem_upper
 
     movl ZIMG_SCRATCH_CMDLINE, %eax
     movl %eax, 16(%edi)            # multiboot_info_t.cmdline
     movl ZIMG_SCRATCH_MMAPLEN, %eax
+    testl %eax, %eax
+    jz 1f
+    orl $MBI_FLAG_MEM_MAP, 0(%edi)
     movl %eax, 44(%edi)            # multiboot_info_t.mmap_length
     movl $MBI_MMAP_ADDR, 48(%edi)  # multiboot_info_t.mmap_addr
+1:
 
     # If Linux loader provided initrd, expose it as one Multiboot module.
     movl ZIMG_SCRATCH_RDSIZE, %ecx
     testl %ecx, %ecx
-    jz 1f
+    jz 2f
     movl ZIMG_SCRATCH_RAMDISK, %edx
     testl %edx, %edx
-    jz 1f
+    jz 2f
 
-    movl $0x0000004C, 0(%edi)      # MULTIBOOT_INFO_CMDLINE | MULTIBOOT_INFO_MODS | MULTIBOOT_INFO_MEM_MAP
+    orl $MBI_FLAG_MODS, 0(%edi)
     movl $1, 20(%edi)              # multiboot_info_t.mods_count
     movl $MBI_MOD_ADDR, 24(%edi)   # multiboot_info_t.mods_addr
     movl %edx, MBI_MOD_ADDR        # module[0].mod_start
@@ -185,7 +243,7 @@ pm_entry:
     movl %edx, MBI_MOD_ADDR + 4    # module[0].mod_end
     movl $0, MBI_MOD_ADDR + 8      # module[0].cmdline
     movl $0, MBI_MOD_ADDR + 12     # module[0].pad
-1:
+2:
 
     movl $0x2BADB002, %eax         # MULTIBOOT_BOOTLOADER_MAGIC
     movl $MBI_ADDR, %ebx
