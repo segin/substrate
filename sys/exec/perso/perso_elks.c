@@ -209,6 +209,17 @@ static process_t *elks_active_process(void) {
     return NULL;
 }
 
+static process_t *elks_swapper_process(void) {
+    int i;
+
+    for (i = 0; i < MAX_PROCS; i++) {
+        if (processes[i].pid == 0) {
+            return &processes[i];
+        }
+    }
+    return NULL;
+}
+
 static int elks_proc_visible(const process_t *proc) {
     if (!proc || proc->pid < 0) {
         return 0;
@@ -402,6 +413,7 @@ static int elks_kmem_build_snapshot(uint8_t **buf_out, size_t *size_out) {
     uint32_t cursor = ELKS_KMEM_TASKS_OFFSET + (MAX_PROCS * ELKS_KMEM_TASK_SLOT_SIZE);
     const process_t *exported[MAX_PROCS];
     process_t *active = elks_active_process();
+    process_t *swapper = elks_swapper_process();
     int exported_count = 0;
     int i;
 
@@ -417,7 +429,14 @@ static int elks_kmem_build_snapshot(uint8_t **buf_out, size_t *size_out) {
     elks_kmem_put32(buf, ELKS_KMEM_JIFFIES_OFFSET, (uint32_t)get_ticks());
 
     memset(exported, 0, sizeof(exported));
-    if (elks_proc_visible(active)) {
+    /*
+     * Older installed ELKS userland expects the first task slot to be the
+     * reserved idle/swapper slot and starts scanning at slot 1.
+     */
+    if (elks_proc_visible(swapper)) {
+        exported[exported_count++] = swapper;
+    }
+    if (active && active != swapper && elks_proc_visible(active)) {
         exported[exported_count++] = active;
     }
     for (i = 0; i < MAX_PROCS && exported_count < MAX_PROCS; i++) {
@@ -436,6 +455,29 @@ static int elks_kmem_build_snapshot(uint8_t **buf_out, size_t *size_out) {
         }
         if (!seen) {
             exported[exported_count++] = proc;
+        }
+    }
+
+    if (elks_debug_enabled("perso:elks:kmem")) {
+        char msg[128];
+
+        sprintf(msg,
+                "ELKS kmem: current pid=%d comm=%s thread=%d active=%d count=%d\n",
+                current_process ? current_process->pid : -1,
+                current_process ? current_process->comm : "(null)",
+                current_thread ? current_thread->tid : -1,
+                active ? active->pid : -1,
+                exported_count);
+        kprint(msg);
+        for (i = 0; i < exported_count; i++) {
+            sprintf(msg,
+                    "ELKS kmem: slot %d pid=%d state=%d comm=%s kernel=%d\n",
+                    i,
+                    exported[i] ? exported[i]->pid : -1,
+                    exported[i] ? exported[i]->state : -1,
+                    exported[i] ? exported[i]->comm : "(null)",
+                    exported[i] ? exported[i]->is_kernel_task : 0);
+            kprint(msg);
         }
     }
 
@@ -854,6 +896,16 @@ static int elks_sys_read(uint32_t fd, uint32_t buf_off, uint32_t count,
         if (ret != 0) {
             return ret;
         }
+        if (elks_debug_enabled("perso:elks:kmem")) {
+            char msg[128];
+
+            sprintf(msg, "ELKS kmem: read fd=%u off=%u count=%u size=%u\n",
+                    (unsigned int)fd,
+                    (unsigned int)(current_process->fds[fd] ? current_process->fds[fd]->f_offset : 0),
+                    (unsigned int)count,
+                    (unsigned int)kmem_size);
+            kprint(msg);
+        }
         if (current_process->fds[fd]->f_offset < 0 ||
             (size_t)current_process->fds[fd]->f_offset >= kmem_size) {
             kfree(kmem, ELKS_KMEM_IMAGE_CAP);
@@ -980,6 +1032,16 @@ static int elks_sys_lseek(uint32_t fd, uint32_t pos_off, uint32_t whence,
         return -EINVAL;
     }
     f->f_offset = off;
+    if (elks_debug_enabled("perso:elks:kmem")) {
+        char msg[128];
+
+        sprintf(msg, "ELKS kmem: lseek fd=%u whence=%u -> off=%u size=%u\n",
+                (unsigned int)fd,
+                (unsigned int)whence,
+                (unsigned int)f->f_offset,
+                (unsigned int)kmem_size);
+        kprint(msg);
+    }
     pos = (int32_t)f->f_offset;
     memcpy((void *)(uintptr_t)linear, &pos, sizeof(pos));
     kfree(kmem, ELKS_KMEM_IMAGE_CAP);

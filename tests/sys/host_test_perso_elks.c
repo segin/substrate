@@ -488,14 +488,22 @@ int main(void) {
     proc.ppid = 1;
     proc.uid = 42;
     proc.state = SRUN;
-    processes[0] = proc;
-    processes[0].fds[3] = &stub_file;
-    processes[0].fds[4] = &stub_kmem_file;
-    strcpy(processes[1].comm, "kinit");
-    processes[1].pid = 1;
-    processes[1].ppid = 0;
-    processes[1].uid = 0;
-    processes[1].state = SSLEEP;
+    strcpy(processes[0].comm, "swapper");
+    processes[0].pid = 0;
+    processes[0].ppid = 0;
+    processes[0].uid = 0;
+    processes[0].state = SRUN;
+    processes[0].is_kernel_task = 1;
+    processes[1] = proc;
+    processes[1].fds[3] = &stub_file;
+    processes[1].fds[4] = &stub_kmem_file;
+    strcpy(processes[2].comm, "kinit");
+    processes[2].pid = 2;
+    processes[2].ppid = 0;
+    processes[2].uid = 0;
+    processes[2].state = SSLEEP;
+    current_process = &processes[1];
+    current_thread->proc = &processes[1];
 
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_exit];
     if (fn(7, 0, 0, 0, 0, 0, 0, 0) != 11 || strcmp(last_name, "exit") != 0 || last_i0 != 7) {
@@ -615,6 +623,26 @@ int main(void) {
         fprintf(stderr, "FAIL: ELKS kmem read emulation wrong\n");
         return 1;
     }
+    if (*(uint16_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_PID) != 0 ||
+        *(uint16_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_KSTACK_MAGIC) != ELKS_KSTACK_MAGIC ||
+        *(uint16_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_PGRP_LEGACY) != 0) {
+        fprintf(stderr, "FAIL: ELKS kmem swapper slot wrong\n");
+        return 1;
+    }
+    *(int32_t *)(void *)(ds_mem + 0x160) = (int32_t)(ELKS_KMEM_TASKS_OFFSET + ELKS_KMEM_TASK_SLOT_SIZE);
+    if (((int (*)(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t))
+         personality_elks.syscall_table[ELKS_SYS_lseek])(4, 0x160, 0, 0, 0, 0, 0, 0) != 0 ||
+        *(int32_t *)(void *)(ds_mem + 0x160) != (int32_t)(ELKS_KMEM_TASKS_OFFSET + ELKS_KMEM_TASK_SLOT_SIZE)) {
+        fprintf(stderr, "FAIL: ELKS kmem active-slot lseek wrong\n");
+        return 1;
+    }
+    memset(ds_mem + 0x360, 0, ELKS_KMEM_TASK_SLOT_SIZE);
+    if (((int (*)(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t))
+         personality_elks.syscall_table[ELKS_SYS_read])(4, 0x360, ELKS_KMEM_TASK_SLOT_SIZE, 0, 0, 0, 0, 0) !=
+        ELKS_KMEM_TASK_SLOT_SIZE) {
+        fprintf(stderr, "FAIL: ELKS kmem active-slot read wrong\n");
+        return 1;
+    }
     if (*(uint8_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_STATE) != ELKS_TASK_RUNNING ||
         *(uint16_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_PID) != 7 ||
         *(uint16_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_KSTACK_MAGIC) != ELKS_KSTACK_MAGIC ||
@@ -625,7 +653,7 @@ int main(void) {
         *(uint16_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_MM_LEGACY) == 0 ||
         *(uint16_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_T_BEGSTACK_LEGACY) == 0 ||
         *(uint16_t *)(void *)(ds_mem + 0x360 + ELKS_KMEM_TASK_KSTACK_MAGIC_ALT) != ELKS_KSTACK_MAGIC) {
-        fprintf(stderr, "FAIL: ELKS kmem task image wrong\n");
+        fprintf(stderr, "FAIL: ELKS kmem active task image wrong\n");
         return 1;
     }
     *(int32_t *)(void *)(ds_mem + 0x164) =
@@ -828,9 +856,10 @@ int main(void) {
         int rc = fn(0x20, 0x300, 0, 0, 0, 0, 0, 0);
         uint16_t oldbrk = *(uint16_t *)(void *)(ds_mem + 0x300);
 
-        if (rc != 0 || oldbrk != 0x200 || proc.brk != proc.brk_start + 0x20U) {
+        if (rc != 0 || oldbrk != 0x200 ||
+            current_process->brk != current_process->brk_start + 0x20U) {
             fprintf(stderr, "FAIL: ELKS sbrk translation wrong rc=%d old=0x%x brk=0x%x start=0x%x\n",
-                    rc, oldbrk, proc.brk, proc.brk_start);
+                    rc, oldbrk, current_process->brk, current_process->brk_start);
             return 1;
         }
     }

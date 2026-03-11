@@ -83,6 +83,11 @@ Enable ELKS unsupported-syscall diagnostics.
 .TP
 .B perso:elks:trap
 Enable ELKS Minix trap diagnostics.
+.TP
+.B perso:elks:kmem
+Enable ELKS synthetic
+.B /dev/kmem
+snapshot tracing, including exported task-slot order and kmem seek/read offsets.
 .SH COMPATIBILITY
 The following older boot flags remain supported:
 .TP

@@ -188,6 +188,10 @@ The minimum supported compatibility contract is:
 - offset-based `read` access over the synthetic image for task, segment, stack,
   and related inspection data consumed by upstream ELKS `ps`
 
+For compatibility with older installed ELKS `ps` binaries that begin scanning
+at task slot 1, the exported synthetic task table reserves slot 0 for the
+swapper/idle view and places the current userspace ELKS process in a later slot.
+
 Ioctls that require direct far-pointer dereference into real kernel memory are
 not part of the minimum supported compatibility surface unless explicitly
 emulated.
