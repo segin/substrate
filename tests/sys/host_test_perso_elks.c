@@ -28,6 +28,8 @@ struct mountlist mountlist;
 
 static const char *last_name;
 static uintptr_t last_ptr;
+static uintptr_t last_ptr2;
+static uintptr_t last_ptr3;
 static int last_i0;
 static int last_i1;
 static char last_log[128];
@@ -133,7 +135,12 @@ int stub_kern_open(const char *a, int b, int c) {
 }
 int stub_sys_waitpid(int a, int *b, int c) { last_name = "waitpid"; last_i0 = a; last_ptr = (uintptr_t)b; last_i1 = c; return 66; }
 int stub_sys_creat(const char *a, int b) { (void)a; (void)b; return -1; }
-int stub_sys_link(const char *a, const char *b) { (void)a; (void)b; return -1; }
+int stub_sys_link(const char *a, const char *b) {
+    last_name = "link";
+    last_ptr = (uintptr_t)a;
+    last_ptr2 = (uintptr_t)b;
+    return 46;
+}
 int stub_sys_unlink(const char *a) { (void)a; return -1; }
 int stub_kern_unlink(const char *a) {
     strncpy(last_path_arg, a ? a : "", sizeof(last_path_arg) - 1);
@@ -141,30 +148,101 @@ int stub_kern_unlink(const char *a) {
     return stub_sys_unlink(a);
 }
 int stub_sys_execve(const char *a, char **b, char **c) { (void)a; (void)b; (void)c; return -1; }
-int stub_sys_chdir(const char *a) { (void)a; return -1; }
-time_t stub_sys_time(time_t *a) { (void)a; return 0; }
-int stub_sys_mknod(const char *a, int b, int c) { (void)a; (void)b; (void)c; return -1; }
-int stub_sys_chmod(const char *a, int b) { (void)a; (void)b; return -1; }
-int stub_sys_lchown(const char *a, int b, int c) { (void)a; (void)b; (void)c; return -1; }
+int stub_sys_chdir(const char *a) {
+    last_name = "chdir";
+    last_ptr = (uintptr_t)a;
+    return 47;
+}
+time_t stub_sys_time(time_t *a) {
+    last_name = "time";
+    last_ptr = (uintptr_t)a;
+    if (a) {
+        *a = stub_clock_sec;
+    }
+    return stub_clock_sec;
+}
+int stub_sys_mknod(const char *a, int b, int c) {
+    last_name = "mknod";
+    last_ptr = (uintptr_t)a;
+    last_i0 = b;
+    last_i1 = c;
+    return 48;
+}
+int stub_sys_chmod(const char *a, int b) {
+    last_name = "chmod";
+    last_ptr = (uintptr_t)a;
+    last_i0 = b;
+    return 49;
+}
+int stub_sys_lchown(const char *a, int b, int c) {
+    last_name = "chown";
+    last_ptr = (uintptr_t)a;
+    last_i0 = b;
+    last_i1 = c;
+    return 50;
+}
 int64_t stub_sys_lseek(int a, uint32_t b, uint32_t c, int d) { (void)a; (void)b; (void)c; (void)d; return -1; }
 int stub_sys_getpid(void) { return 321; }
-int stub_sys_mount(const char *a, const char *b, const char *c, unsigned long d, void *e) { (void)a; (void)b; (void)c; (void)d; (void)e; return -1; }
-int stub_sys_umount(const char *a) { (void)a; return -1; }
+int stub_sys_mount(const char *a, const char *b, const char *c, unsigned long d, void *e) {
+    last_name = "mount";
+    last_ptr = (uintptr_t)a;
+    last_ptr2 = (uintptr_t)b;
+    last_ptr3 = (uintptr_t)c;
+    last_i0 = (int)d;
+    last_i1 = (int)(uintptr_t)e;
+    return 51;
+}
+int stub_sys_umount(const char *a) {
+    last_name = "umount";
+    last_ptr = (uintptr_t)a;
+    return 52;
+}
 int stub_sys_setuid(int a) { (void)a; return -1; }
 int stub_sys_getuid(void) { return 123; }
 int stub_sys_geteuid(void) { return 124; }
-int stub_sys_stime(time_t *a) { (void)a; return -1; }
+int stub_sys_stime(time_t *a) {
+    last_name = "stime";
+    last_ptr = (uintptr_t)a;
+    if (a) {
+        stub_clock_sec = *a;
+    }
+    return 53;
+}
 unsigned int stub_sys_alarm(unsigned int a) { (void)a; return 0; }
 int stub_sys_fstat(int a, void *b) { (void)a; (void)b; return -1; }
 int stub_sys_pause(void) { return -1; }
-int stub_sys_access(const char *a, int b) { (void)a; (void)b; return -1; }
+int stub_sys_access(const char *a, int b) {
+    last_name = "access";
+    last_ptr = (uintptr_t)a;
+    last_i0 = b;
+    return 54;
+}
 int stub_sys_sync(void) { return 0; }
 int stub_sys_kill(int a, int b) { last_kill_pid = a; last_kill_sig = b; return 99; }
-int stub_sys_mkdir(const char *a, int b) { (void)a; (void)b; return -1; }
-int stub_sys_rmdir(const char *a) { (void)a; return -1; }
+int stub_sys_mkdir(const char *a, int b) {
+    last_name = "mkdir";
+    last_ptr = (uintptr_t)a;
+    last_i0 = b;
+    return 55;
+}
+int stub_sys_rmdir(const char *a) {
+    last_name = "rmdir";
+    last_ptr = (uintptr_t)a;
+    return 56;
+}
 int stub_sys_dup(int a) { (void)a; return -1; }
 int stub_sys_pipe(int *a) { (void)a; return -1; }
-clock_t stub_sys_times(struct tms *a) { (void)a; return 0; }
+clock_t stub_sys_times(struct tms *a) {
+    last_name = "times";
+    last_ptr = (uintptr_t)a;
+    if (a) {
+        a->tms_utime = 1;
+        a->tms_stime = 2;
+        a->tms_cutime = 3;
+        a->tms_cstime = 4;
+    }
+    return 57;
+}
 int stub_sys_brk(uint32_t a) {
     last_name = "brk";
     last_ptr = a;
@@ -404,6 +482,15 @@ int stub_kern_readlink(const char *pathname, char *buf, size_t bufsiz) {
     }
     memcpy(buf, target, len);
     return (int)len;
+}
+
+int kern_pipe(int *fds) {
+    last_name = "pipe";
+    if (fds) {
+        fds[0] = 12;
+        fds[1] = 34;
+    }
+    return 0;
 }
 
 struct dirent *readdir_fs(fs_node_t *node, uint64_t index) {
@@ -798,6 +885,134 @@ int main(void) {
     if (fn(9, 0, 0, 0, 0, 0, 0, 0) != 55 || strcmp(last_name, "close") != 0 || last_i0 != 9) {
         fprintf(stderr, "FAIL: ELKS close wrapper wrong\n");
         return 1;
+    }
+
+    strcpy((char *)(ds_mem + 0x180), "/tmp/old");
+    strcpy((char *)(ds_mem + 0x1a0), "/tmp/new");
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_link];
+    if (fn(0x180, 0x1a0, 0, 0, 0, 0, 0, 0) != 46 || strcmp(last_name, "link") != 0 ||
+        last_ptr != ds_base + 0x180U || last_ptr2 != ds_base + 0x1a0U) {
+        fprintf(stderr, "FAIL: ELKS link wrapper wrong\n");
+        return 1;
+    }
+
+    strcpy((char *)(ds_mem + 0x1c0), "/tmp/cwd");
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_chdir];
+    if (fn(0x1c0, 0, 0, 0, 0, 0, 0, 0) != 47 || strcmp(last_name, "chdir") != 0 ||
+        last_ptr != ds_base + 0x1c0U) {
+        fprintf(stderr, "FAIL: ELKS chdir wrapper wrong\n");
+        return 1;
+    }
+
+    *(time_t *)(void *)(ds_mem + 0x1d0) = 0;
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_time];
+    if (fn(0x1d0, 0, 0, 0, 0, 0, 0, 0) != (int)stub_clock_sec ||
+        strcmp(last_name, "time") != 0 || last_ptr != ds_base + 0x1d0U ||
+        *(time_t *)(void *)(ds_mem + 0x1d0) != stub_clock_sec) {
+        fprintf(stderr, "FAIL: ELKS time wrapper wrong\n");
+        return 1;
+    }
+
+    strcpy((char *)(ds_mem + 0x1e0), "/dev/test");
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_mknod];
+    if (fn(0x1e0, 0600, 7, 0, 0, 0, 0, 0) != 48 || strcmp(last_name, "mknod") != 0 ||
+        last_ptr != ds_base + 0x1e0U || last_i0 != 0600 || last_i1 != 7) {
+        fprintf(stderr, "FAIL: ELKS mknod wrapper wrong\n");
+        return 1;
+    }
+
+    strcpy((char *)(ds_mem + 0x200), "/tmp/mode");
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_chmod];
+    if (fn(0x200, 0644, 0, 0, 0, 0, 0, 0) != 49 || strcmp(last_name, "chmod") != 0 ||
+        last_ptr != ds_base + 0x200U || last_i0 != 0644) {
+        fprintf(stderr, "FAIL: ELKS chmod wrapper wrong\n");
+        return 1;
+    }
+
+    strcpy((char *)(ds_mem + 0x220), "/tmp/owner");
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_chown];
+    if (fn(0x220, 12, 34, 0, 0, 0, 0, 0) != 50 || strcmp(last_name, "chown") != 0 ||
+        last_ptr != ds_base + 0x220U || last_i0 != 12 || last_i1 != 34) {
+        fprintf(stderr, "FAIL: ELKS chown wrapper wrong\n");
+        return 1;
+    }
+
+    strcpy((char *)(ds_mem + 0x240), "/dev/storage/ide0");
+    strcpy((char *)(ds_mem + 0x260), "/mnt");
+    strcpy((char *)(ds_mem + 0x280), "ext2");
+    memset(ds_mem + 0x2a0, 0x5A, 8);
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_mount];
+    if (fn(0x240, 0x260, 0x280, 3, 0x2a0, 0, 0, 0) != 51 || strcmp(last_name, "mount") != 0 ||
+        last_ptr != ds_base + 0x240U || last_ptr2 != ds_base + 0x260U ||
+        last_ptr3 != ds_base + 0x280U || last_i0 != 3 ||
+        last_i1 != (int)(ds_base + 0x2a0U)) {
+        fprintf(stderr, "FAIL: ELKS mount wrapper wrong\n");
+        return 1;
+    }
+
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_umount];
+    if (fn(0x260, 0, 0, 0, 0, 0, 0, 0) != 52 || strcmp(last_name, "umount") != 0 ||
+        last_ptr != ds_base + 0x260U) {
+        fprintf(stderr, "FAIL: ELKS umount wrapper wrong\n");
+        return 1;
+    }
+
+    *(time_t *)(void *)(ds_mem + 0x2c0) = 777;
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_stime];
+    if (fn(0x2c0, 0, 0, 0, 0, 0, 0, 0) != 53 || strcmp(last_name, "stime") != 0 ||
+        last_ptr != ds_base + 0x2c0U || stub_clock_sec != 777) {
+        fprintf(stderr, "FAIL: ELKS stime wrapper wrong\n");
+        return 1;
+    }
+
+    strcpy((char *)(ds_mem + 0x2e0), "/tmp/access");
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_access];
+    if (fn(0x2e0, 4, 0, 0, 0, 0, 0, 0) != 54 || strcmp(last_name, "access") != 0 ||
+        last_ptr != ds_base + 0x2e0U || last_i0 != 4) {
+        fprintf(stderr, "FAIL: ELKS access wrapper wrong\n");
+        return 1;
+    }
+
+    strcpy((char *)(ds_mem + 0x300), "/tmp/newdir");
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_mkdir];
+    if (fn(0x300, 0755, 0, 0, 0, 0, 0, 0) != 55 || strcmp(last_name, "mkdir") != 0 ||
+        last_ptr != ds_base + 0x300U || last_i0 != 0755) {
+        fprintf(stderr, "FAIL: ELKS mkdir wrapper wrong\n");
+        return 1;
+    }
+
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_rmdir];
+    if (fn(0x300, 0, 0, 0, 0, 0, 0, 0) != 56 || strcmp(last_name, "rmdir") != 0 ||
+        last_ptr != ds_base + 0x300U) {
+        fprintf(stderr, "FAIL: ELKS rmdir wrapper wrong\n");
+        return 1;
+    }
+
+    *(uint16_t *)(void *)(ds_mem + 0x320) = 0;
+    *(uint16_t *)(void *)(ds_mem + 0x322) = 0;
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_pipe];
+    if (fn(0x320, 0, 0, 0, 0, 0, 0, 0) != 0 ||
+        *(uint16_t *)(void *)(ds_mem + 0x320) != 12 ||
+        *(uint16_t *)(void *)(ds_mem + 0x322) != 34) {
+        fprintf(stderr, "FAIL: ELKS pipe wrapper wrong\n");
+        return 1;
+    }
+
+    memset(ds_mem + 0x330, 0, sizeof(struct tms));
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_times];
+    if (fn(0x330, 0, 0, 0, 0, 0, 0, 0) != 57 || strcmp(last_name, "times") != 0 ||
+        last_ptr != ds_base + 0x330U) {
+        fprintf(stderr, "FAIL: ELKS times wrapper wrong\n");
+        return 1;
+    }
+    {
+        struct tms *t = (struct tms *)(void *)(ds_mem + 0x330);
+
+        if (t->tms_utime != 1 || t->tms_stime != 2 ||
+            t->tms_cutime != 3 || t->tms_cstime != 4) {
+            fprintf(stderr, "FAIL: ELKS times result wrong\n");
+            return 1;
+        }
     }
 
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_waitpid];

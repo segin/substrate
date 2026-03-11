@@ -1171,6 +1171,22 @@ static int elks_sys_creat(uint32_t path_off, uint32_t mode, uint32_t unused2,
     return ret;
 }
 
+static int elks_sys_link(uint32_t old_off, uint32_t new_off, uint32_t unused2,
+                         uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                         uint32_t unused6, uint32_t unused7) {
+    uintptr_t old_linear = 0;
+    uintptr_t new_linear = 0;
+
+    (void)unused2; (void)unused3; (void)unused4; (void)unused5;
+    (void)unused6; (void)unused7;
+
+    if (elks_ds_pointer(old_off, &old_linear) != 0 ||
+        elks_ds_pointer(new_off, &new_linear) != 0) {
+        return -EFAULT;
+    }
+    return sys_link((const char *)(uintptr_t)old_linear, (const char *)(uintptr_t)new_linear);
+}
+
 static int elks_sys_close(uint32_t fd, uint32_t unused1, uint32_t unused2,
                           uint32_t unused3, uint32_t unused4, uint32_t unused5,
                           uint32_t unused6, uint32_t unused7) {
@@ -1249,6 +1265,136 @@ static int elks_sys_lseek(uint32_t fd, uint32_t pos_off, uint32_t whence,
     memcpy((void *)(uintptr_t)linear, &pos, sizeof(pos));
     kfree(kmem, ELKS_KMEM_IMAGE_CAP);
     return 0;
+}
+
+static int elks_sys_chdir(uint32_t path_off, uint32_t unused1, uint32_t unused2,
+                          uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                          uint32_t unused6, uint32_t unused7) {
+    uintptr_t linear = 0;
+
+    (void)unused1; (void)unused2; (void)unused3; (void)unused4;
+    (void)unused5; (void)unused6; (void)unused7;
+
+    if (elks_ds_pointer(path_off, &linear) != 0) {
+        return -EFAULT;
+    }
+    return sys_chdir((const char *)(uintptr_t)linear);
+}
+
+static int elks_sys_time(uint32_t tloc_off, uint32_t unused1, uint32_t unused2,
+                         uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                         uint32_t unused6, uint32_t unused7) {
+    uintptr_t linear = 0;
+    time_t *tloc = NULL;
+
+    (void)unused1; (void)unused2; (void)unused3; (void)unused4;
+    (void)unused5; (void)unused6; (void)unused7;
+
+    if (tloc_off != 0U) {
+        if (elks_ds_span(tloc_off, sizeof(time_t), &linear) != 0) {
+            return -EFAULT;
+        }
+        tloc = (time_t *)(uintptr_t)linear;
+    }
+    return (int)sys_time(tloc);
+}
+
+static int elks_sys_mknod(uint32_t path_off, uint32_t mode, uint32_t dev,
+                          uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                          uint32_t unused6, uint32_t unused7) {
+    uintptr_t linear = 0;
+
+    (void)unused3; (void)unused4; (void)unused5; (void)unused6; (void)unused7;
+
+    if (elks_ds_pointer(path_off, &linear) != 0) {
+        return -EFAULT;
+    }
+    return sys_mknod((const char *)(uintptr_t)linear, (int)mode, (int)dev);
+}
+
+static int elks_sys_chmod(uint32_t path_off, uint32_t mode, uint32_t unused2,
+                          uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                          uint32_t unused6, uint32_t unused7) {
+    uintptr_t linear = 0;
+
+    (void)unused2; (void)unused3; (void)unused4; (void)unused5;
+    (void)unused6; (void)unused7;
+
+    if (elks_ds_pointer(path_off, &linear) != 0) {
+        return -EFAULT;
+    }
+    return sys_chmod((const char *)(uintptr_t)linear, (int)mode);
+}
+
+static int elks_sys_chown(uint32_t path_off, uint32_t uid, uint32_t gid,
+                          uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                          uint32_t unused6, uint32_t unused7) {
+    uintptr_t linear = 0;
+
+    (void)unused3; (void)unused4; (void)unused5; (void)unused6; (void)unused7;
+
+    if (elks_ds_pointer(path_off, &linear) != 0) {
+        return -EFAULT;
+    }
+    return sys_lchown((const char *)(uintptr_t)linear, (int)uid, (int)gid);
+}
+
+static int elks_sys_mount(uint32_t source_off, uint32_t target_off, uint32_t fstype_off,
+                          uint32_t flags, uint32_t data_off, uint32_t unused5,
+                          uint32_t unused6, uint32_t unused7) {
+    uintptr_t source_linear = 0;
+    uintptr_t target_linear = 0;
+    uintptr_t fstype_linear = 0;
+    uintptr_t data_linear = 0;
+    void *data = NULL;
+
+    (void)unused5; (void)unused6; (void)unused7;
+
+    if (source_off != 0U && elks_ds_pointer(source_off, &source_linear) != 0) {
+        return -EFAULT;
+    }
+    if (elks_ds_pointer(target_off, &target_linear) != 0 ||
+        elks_ds_pointer(fstype_off, &fstype_linear) != 0) {
+        return -EFAULT;
+    }
+    if (data_off != 0U) {
+        if (elks_ds_pointer(data_off, &data_linear) != 0) {
+            return -EFAULT;
+        }
+        data = (void *)(uintptr_t)data_linear;
+    }
+    return sys_mount(source_off ? (const char *)(uintptr_t)source_linear : NULL,
+                     (const char *)(uintptr_t)target_linear,
+                     (const char *)(uintptr_t)fstype_linear,
+                     (unsigned long)flags, data);
+}
+
+static int elks_sys_umount(uint32_t target_off, uint32_t unused1, uint32_t unused2,
+                           uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                           uint32_t unused6, uint32_t unused7) {
+    uintptr_t linear = 0;
+
+    (void)unused1; (void)unused2; (void)unused3; (void)unused4;
+    (void)unused5; (void)unused6; (void)unused7;
+
+    if (elks_ds_pointer(target_off, &linear) != 0) {
+        return -EFAULT;
+    }
+    return sys_umount((const char *)(uintptr_t)linear);
+}
+
+static int elks_sys_stime(uint32_t time_off, uint32_t unused1, uint32_t unused2,
+                          uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                          uint32_t unused6, uint32_t unused7) {
+    uintptr_t linear = 0;
+
+    (void)unused1; (void)unused2; (void)unused3; (void)unused4;
+    (void)unused5; (void)unused6; (void)unused7;
+
+    if (elks_ds_span(time_off, sizeof(time_t), &linear) != 0) {
+        return -EFAULT;
+    }
+    return sys_stime((time_t *)(uintptr_t)linear);
 }
 
 static int elks_sys_unlink(uint32_t path_off, uint32_t unused1, uint32_t unused2,
@@ -1350,6 +1496,90 @@ static int elks_sys_getgid(uint32_t egid_off, uint32_t unused1, uint32_t unused2
         *(uint16_t *)(uintptr_t)linear = (uint16_t)sys_getegid();
     }
     return gid;
+}
+
+static int elks_sys_access(uint32_t path_off, uint32_t mode, uint32_t unused2,
+                           uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                           uint32_t unused6, uint32_t unused7) {
+    uintptr_t linear = 0;
+
+    (void)unused2; (void)unused3; (void)unused4; (void)unused5;
+    (void)unused6; (void)unused7;
+
+    if (elks_ds_pointer(path_off, &linear) != 0) {
+        return -EFAULT;
+    }
+    return sys_access((const char *)(uintptr_t)linear, (int)mode);
+}
+
+static int elks_sys_mkdir(uint32_t path_off, uint32_t mode, uint32_t unused2,
+                          uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                          uint32_t unused6, uint32_t unused7) {
+    uintptr_t linear = 0;
+
+    (void)unused2; (void)unused3; (void)unused4; (void)unused5;
+    (void)unused6; (void)unused7;
+
+    if (elks_ds_pointer(path_off, &linear) != 0) {
+        return -EFAULT;
+    }
+    return sys_mkdir((const char *)(uintptr_t)linear, (int)mode);
+}
+
+static int elks_sys_rmdir(uint32_t path_off, uint32_t unused1, uint32_t unused2,
+                          uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                          uint32_t unused6, uint32_t unused7) {
+    uintptr_t linear = 0;
+
+    (void)unused1; (void)unused2; (void)unused3; (void)unused4;
+    (void)unused5; (void)unused6; (void)unused7;
+
+    if (elks_ds_pointer(path_off, &linear) != 0) {
+        return -EFAULT;
+    }
+    return sys_rmdir((const char *)(uintptr_t)linear);
+}
+
+static int elks_sys_pipe(uint32_t fds_off, uint32_t unused1, uint32_t unused2,
+                         uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                         uint32_t unused6, uint32_t unused7) {
+    uintptr_t linear = 0;
+    int kfds[2];
+    uint16_t elks_fds[2];
+    int ret;
+
+    (void)unused1; (void)unused2; (void)unused3; (void)unused4;
+    (void)unused5; (void)unused6; (void)unused7;
+
+    if (elks_ds_span(fds_off, sizeof(elks_fds), &linear) != 0) {
+        return -EFAULT;
+    }
+    ret = kern_pipe(kfds);
+    if (ret != 0) {
+        return ret;
+    }
+    elks_fds[0] = (uint16_t)kfds[0];
+    elks_fds[1] = (uint16_t)kfds[1];
+    memcpy((void *)(uintptr_t)linear, elks_fds, sizeof(elks_fds));
+    return 0;
+}
+
+static int elks_sys_times(uint32_t buf_off, uint32_t unused1, uint32_t unused2,
+                          uint32_t unused3, uint32_t unused4, uint32_t unused5,
+                          uint32_t unused6, uint32_t unused7) {
+    uintptr_t linear = 0;
+    struct tms *buf = NULL;
+
+    (void)unused1; (void)unused2; (void)unused3; (void)unused4;
+    (void)unused5; (void)unused6; (void)unused7;
+
+    if (buf_off != 0U) {
+        if (elks_ds_span(buf_off, sizeof(struct tms), &linear) != 0) {
+            return -EFAULT;
+        }
+        buf = (struct tms *)(uintptr_t)linear;
+    }
+    return (int)sys_times(buf);
 }
 
 static int elks_sys_brk(uint32_t brk_off, uint32_t unused1, uint32_t unused2,
@@ -1999,33 +2229,33 @@ static void *elks_syscall_table[ELKS_SYS_MAX] = {
     [ELKS_SYS_close]   = (void *)&elks_sys_close,
     [ELKS_SYS_waitpid] = (void *)&elks_sys_waitpid,
     [ELKS_SYS_creat]   = (void *)&elks_sys_creat,
-    [ELKS_SYS_link]    = (void *)&sys_link,
+    [ELKS_SYS_link]    = (void *)&elks_sys_link,
     [ELKS_SYS_unlink]  = (void *)&elks_sys_unlink,
     [ELKS_SYS_execve]  = (void *)&elks_sys_execve,
-    [ELKS_SYS_chdir]   = (void *)&sys_chdir,
-    [ELKS_SYS_time]    = (void *)&sys_time,
-    [ELKS_SYS_mknod]   = (void *)&sys_mknod,
-    [ELKS_SYS_chmod]   = (void *)&sys_chmod,
-    [ELKS_SYS_chown]   = (void *)&sys_lchown,
+    [ELKS_SYS_chdir]   = (void *)&elks_sys_chdir,
+    [ELKS_SYS_time]    = (void *)&elks_sys_time,
+    [ELKS_SYS_mknod]   = (void *)&elks_sys_mknod,
+    [ELKS_SYS_chmod]   = (void *)&elks_sys_chmod,
+    [ELKS_SYS_chown]   = (void *)&elks_sys_chown,
     [ELKS_SYS_lseek]   = (void *)&elks_sys_lseek,
     [ELKS_SYS_getpid]  = (void *)&elks_sys_getpid,
-    [ELKS_SYS_mount]   = (void *)&sys_mount,
-    [ELKS_SYS_umount]  = (void *)&sys_umount,
+    [ELKS_SYS_mount]   = (void *)&elks_sys_mount,
+    [ELKS_SYS_umount]  = (void *)&elks_sys_umount,
     [ELKS_SYS_setuid]  = (void *)&sys_setuid,
     [ELKS_SYS_getuid]  = (void *)&elks_sys_getuid,
-    [ELKS_SYS_stime]   = (void *)&sys_stime,
+    [ELKS_SYS_stime]   = (void *)&elks_sys_stime,
     [ELKS_SYS_settimeofday] = (void *)&elks_sys_settimeofday,
     [ELKS_SYS_alarm]   = (void *)&sys_alarm,
     [ELKS_SYS_fstat]   = (void *)&elks_sys_fstat,
     [ELKS_SYS_pause]   = (void *)&sys_pause,
-    [ELKS_SYS_access]  = (void *)&sys_access,
+    [ELKS_SYS_access]  = (void *)&elks_sys_access,
     [ELKS_SYS_sync]    = (void *)&sys_sync,
     [ELKS_SYS_kill]    = (void *)&elks_sys_kill,
-    [ELKS_SYS_mkdir]   = (void *)&sys_mkdir,
-    [ELKS_SYS_rmdir]   = (void *)&sys_rmdir,
+    [ELKS_SYS_mkdir]   = (void *)&elks_sys_mkdir,
+    [ELKS_SYS_rmdir]   = (void *)&elks_sys_rmdir,
     [ELKS_SYS_dup]     = (void *)&sys_dup,
-    [ELKS_SYS_pipe]    = (void *)&sys_pipe,
-    [ELKS_SYS_times]   = (void *)&sys_times,
+    [ELKS_SYS_pipe]    = (void *)&elks_sys_pipe,
+    [ELKS_SYS_times]   = (void *)&elks_sys_times,
     [ELKS_SYS_brk]     = (void *)&elks_sys_brk,
     [ELKS_SYS_setgid]  = (void *)&sys_setgid,
     [ELKS_SYS_getgid]  = (void *)&elks_sys_getgid,

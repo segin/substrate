@@ -25,33 +25,33 @@ Status meanings:
 | 6 | `close` | Working | Directly wired. |
 | 7 | `waitpid` | Working | Status pointer translation is implemented and smoke-tested. |
 | 8 | `creat` | Working | Smoke-tested through ELKS file-I/O binary on ext2 root. |
-| 9 | `link` | Partial | Personality entry is wired, but no ELKS-specific smoke coverage yet. |
+| 9 | `link` | Partial | Two-path ELKS pointer translation is implemented and host-validated; no dedicated upstream smoke yet. |
 | 10 | `unlink` | Working | 16-bit pathname translation is implemented and smoke-tested. |
 | 11 | `execve` | Working | ELKS packed startup stack decoding and LDT replacement are implemented. |
-| 12 | `chdir` | Partial | Translation path is wired, but no ELKS smoke coverage yet. |
+| 12 | `chdir` | Partial | ELKS pathname translation is implemented and host-validated; no dedicated ELKS smoke yet. |
 | 13 | `time` | Partial | Numbering is reserved in the design, but no ELKS runtime validation yet. |
-| 14 | `mknod` | Partial | Generic syscall entry exists; no ELKS compatibility validation yet. |
-| 15 | `chmod` | Partial | Native syscall exists; no ELKS layout/behavior validation yet. |
-| 16 | `chown` | Partial | Native syscall exists; ELKS-facing validation not complete. |
+| 14 | `mknod` | Partial | ELKS pathname/device marshaling is implemented and host-validated; no upstream smoke yet. |
+| 15 | `chmod` | Partial | ELKS pathname/mode marshaling is implemented and host-validated; no upstream smoke yet. |
+| 16 | `chown` | Partial | ELKS pathname/credential marshaling is implemented and host-validated; no upstream smoke yet. |
 | 18 | `stat` | Partial | Requires ELKS/Minix-shaped `stat` structure translation. |
 | 19 | `lseek` | Partial | Native syscall exists; ELKS width semantics are not fully validated. |
 | 20 | `getpid` | Partial | Expected to work through native return path; not smoke-tested yet. |
-| 21 | `mount` | Unsupported | No completed ELKS ABI contract yet. |
-| 22 | `umount` | Unsupported | No completed ELKS ABI contract yet. |
+| 21 | `mount` | Partial | ELKS string/data-pointer translation is implemented and host-validated, but no upstream mount smoke covers full ELKS mount-option ABI yet. |
+| 22 | `umount` | Partial | ELKS target-path translation is implemented and host-validated; no upstream smoke yet. |
 | 23 | `setuid` | Partial | Native syscall exists; ELKS credential-width validation not complete. |
 | 24 | `getuid` | Partial | Native syscall exists; ELKS credential-width validation not complete. |
 | 25 | `stime` | Unsupported | No completed ELKS ABI contract yet. |
 | 27 | `alarm` | Working | Smoke-tested with ELKS signal delivery. |
 | 28 | `fstat` | Partial | Requires ELKS/Minix-shaped `stat` structure translation. |
 | 29 | `pause` | Working | Smoke-tested with `alarm` and signal delivery. |
-| 33 | `access` | Partial | Native syscall exists; ELKS pathname smoke coverage not complete. |
+| 33 | `access` | Partial | ELKS pathname translation is implemented and host-validated; no dedicated upstream smoke yet. |
 | 36 | `sync` | Partial | Expected direct mapping; no ELKS smoke coverage yet. |
 | 37 | `kill` | Working | ELKS smallsig translation is implemented. |
-| 39 | `mkdir` | Partial | Native path exists; ELKS smoke coverage not complete. |
+| 39 | `mkdir` | Partial | ELKS pathname/mode translation is implemented and host-validated; no dedicated upstream smoke yet. |
 | 40 | `rmdir` | Partial | Native path exists; ELKS smoke coverage not complete. |
 | 41 | `dup` | Partial | Direct mapping exists; no ELKS smoke coverage yet. |
-| 42 | `pipe` | Partial | Pipe syscall exists, but ELKS result-array translation needs explicit validation. |
-| 43 | `times` | Unsupported | No completed ELKS structure translation yet. |
+| 42 | `pipe` | Partial | ELKS 16-bit pipe-fd array marshaling is implemented and host-validated; no upstream pipeline smoke yet. |
+| 43 | `times` | Partial | ELKS `struct tms` translation is implemented and host-validated; no upstream `times` smoke yet. |
 | 45 | `brk` | Working | 16-bit bounded `brk` translation is implemented. |
 | 46 | `setgid` | Partial | Native syscall exists; ELKS width validation not complete. |
 | 47 | `getgid` | Partial | Native syscall exists; ELKS width validation not complete. |
