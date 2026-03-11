@@ -2972,6 +2972,229 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
             return -1;
         }
+    } else if (streq_ci(insn->mnemonic, "movsd")) {
+        if (insn->op_count != 2) {
+            set_err(&ctx, "unsupported x86_64 movsd form");
+            return -1;
+        }
+        if (operand_is_xmm_reg(a) && (operand_is_xmm_reg(b) || b->kind == AS_X86_OP_MEM)) {
+            if (emit8(&ctx, 0xf2) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x10) != 0 ||
+                modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
+                return -1;
+            }
+        } else if (a->kind == AS_X86_OP_MEM && operand_is_xmm_reg(b)) {
+            if (emit8(&ctx, 0xf2) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x11) != 0 ||
+                modrm_sib_disp64(&ctx, b->u.reg, a, &rex_r, &rex_x, &rex_b) != 0) {
+                return -1;
+            }
+        } else {
+            set_err(&ctx, "unsupported x86_64 movsd form");
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "cvtsi2sd")) {
+        if (insn->op_count != 2 || !operand_is_xmm_reg(a) ||
+            (b->kind != AS_X86_OP_REG && b->kind != AS_X86_OP_MEM)) {
+            set_err(&ctx, "unsupported x86_64 cvtsi2sd form");
+            return -1;
+        }
+        if (emit8(&ctx, 0xf2) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x2a) != 0 ||
+            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "movntsd")) {
+        if (insn->op_count != 2 || a->kind != AS_X86_OP_MEM || !operand_is_xmm_reg(b)) {
+            set_err(&ctx, "unsupported x86_64 movntsd form");
+            return -1;
+        }
+        if (emit8(&ctx, 0xf2) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x2b) != 0 ||
+            modrm_sib_disp64(&ctx, b->u.reg, a, &rex_r, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "cvttsd2si") || streq_ci(insn->mnemonic, "cvtsd2si")) {
+        uint8_t op2 = streq_ci(insn->mnemonic, "cvttsd2si") ? 0x2c : 0x2d;
+
+        if (insn->op_count != 2 || a->kind != AS_X86_OP_REG ||
+            (!operand_is_xmm_reg(b) && b->kind != AS_X86_OP_MEM)) {
+            set_err(&ctx, "unsupported x86_64 %s form", insn->mnemonic);
+            return -1;
+        }
+        if (emit8(&ctx, 0xf2) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, op2) != 0 ||
+            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "sqrtsd") || streq_ci(insn->mnemonic, "addsd") ||
+               streq_ci(insn->mnemonic, "mulsd") || streq_ci(insn->mnemonic, "cvtsd2ss") ||
+               streq_ci(insn->mnemonic, "subsd") || streq_ci(insn->mnemonic, "minsd") ||
+               streq_ci(insn->mnemonic, "divsd") || streq_ci(insn->mnemonic, "maxsd")) {
+        uint8_t op2;
+
+        if (streq_ci(insn->mnemonic, "sqrtsd")) op2 = 0x51;
+        else if (streq_ci(insn->mnemonic, "addsd")) op2 = 0x58;
+        else if (streq_ci(insn->mnemonic, "mulsd")) op2 = 0x59;
+        else if (streq_ci(insn->mnemonic, "cvtsd2ss")) op2 = 0x5a;
+        else if (streq_ci(insn->mnemonic, "subsd")) op2 = 0x5c;
+        else if (streq_ci(insn->mnemonic, "minsd")) op2 = 0x5d;
+        else if (streq_ci(insn->mnemonic, "divsd")) op2 = 0x5e;
+        else op2 = 0x5f;
+
+        if (insn->op_count != 2 || !operand_is_xmm_reg(a) ||
+            (!operand_is_xmm_reg(b) && b->kind != AS_X86_OP_MEM)) {
+            set_err(&ctx, "unsupported x86_64 %s form", insn->mnemonic);
+            return -1;
+        }
+        if (emit8(&ctx, 0xf2) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, op2) != 0 ||
+            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "movss")) {
+        if (insn->op_count != 2) {
+            set_err(&ctx, "unsupported x86_64 movss form");
+            return -1;
+        }
+        if (operand_is_xmm_reg(a) && (operand_is_xmm_reg(b) || b->kind == AS_X86_OP_MEM)) {
+            if (emit8(&ctx, 0xf3) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x10) != 0 ||
+                modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
+                return -1;
+            }
+        } else if (a->kind == AS_X86_OP_MEM && operand_is_xmm_reg(b)) {
+            if (emit8(&ctx, 0xf3) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x11) != 0 ||
+                modrm_sib_disp64(&ctx, b->u.reg, a, &rex_r, &rex_x, &rex_b) != 0) {
+                return -1;
+            }
+        } else {
+            set_err(&ctx, "unsupported x86_64 movss form");
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "cvtsi2ss")) {
+        if (insn->op_count != 2 || !operand_is_xmm_reg(a) ||
+            (b->kind != AS_X86_OP_REG && b->kind != AS_X86_OP_MEM)) {
+            set_err(&ctx, "unsupported x86_64 cvtsi2ss form");
+            return -1;
+        }
+        if (emit8(&ctx, 0xf3) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x2a) != 0 ||
+            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "movntss")) {
+        if (insn->op_count != 2 || a->kind != AS_X86_OP_MEM || !operand_is_xmm_reg(b)) {
+            set_err(&ctx, "unsupported x86_64 movntss form");
+            return -1;
+        }
+        if (emit8(&ctx, 0xf3) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x2b) != 0 ||
+            modrm_sib_disp64(&ctx, b->u.reg, a, &rex_r, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "cvttss2si") || streq_ci(insn->mnemonic, "cvtss2si")) {
+        uint8_t op2 = streq_ci(insn->mnemonic, "cvttss2si") ? 0x2c : 0x2d;
+
+        if (insn->op_count != 2 || a->kind != AS_X86_OP_REG ||
+            (!operand_is_xmm_reg(b) && b->kind != AS_X86_OP_MEM)) {
+            set_err(&ctx, "unsupported x86_64 %s form", insn->mnemonic);
+            return -1;
+        }
+        if (emit8(&ctx, 0xf3) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, op2) != 0 ||
+            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "sqrtss") || streq_ci(insn->mnemonic, "rsqrtss") ||
+               streq_ci(insn->mnemonic, "rcpss") || streq_ci(insn->mnemonic, "addss") ||
+               streq_ci(insn->mnemonic, "mulss") || streq_ci(insn->mnemonic, "cvtss2sd") ||
+               streq_ci(insn->mnemonic, "subss") || streq_ci(insn->mnemonic, "minss") ||
+               streq_ci(insn->mnemonic, "divss") || streq_ci(insn->mnemonic, "maxss")) {
+        uint8_t op2;
+
+        if (streq_ci(insn->mnemonic, "sqrtss")) op2 = 0x51;
+        else if (streq_ci(insn->mnemonic, "rsqrtss")) op2 = 0x52;
+        else if (streq_ci(insn->mnemonic, "rcpss")) op2 = 0x53;
+        else if (streq_ci(insn->mnemonic, "addss")) op2 = 0x58;
+        else if (streq_ci(insn->mnemonic, "mulss")) op2 = 0x59;
+        else if (streq_ci(insn->mnemonic, "cvtss2sd")) op2 = 0x5a;
+        else if (streq_ci(insn->mnemonic, "subss")) op2 = 0x5c;
+        else if (streq_ci(insn->mnemonic, "minss")) op2 = 0x5d;
+        else if (streq_ci(insn->mnemonic, "divss")) op2 = 0x5e;
+        else op2 = 0x5f;
+
+        if (insn->op_count != 2 || !operand_is_xmm_reg(a) ||
+            (!operand_is_xmm_reg(b) && b->kind != AS_X86_OP_MEM)) {
+            set_err(&ctx, "unsupported x86_64 %s form", insn->mnemonic);
+            return -1;
+        }
+        if (emit8(&ctx, 0xf3) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, op2) != 0 ||
+            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "pshuflw") || streq_ci(insn->mnemonic, "pshufhw")) {
+        uint8_t prefix = streq_ci(insn->mnemonic, "pshuflw") ? 0xf2 : 0xf3;
+
+        if (insn->op_count != 3 || !operand_is_xmm_reg(a) || c->kind != AS_X86_OP_IMM ||
+            (!operand_is_xmm_reg(b) && b->kind != AS_X86_OP_MEM)) {
+            set_err(&ctx, "unsupported x86_64 %s form", insn->mnemonic);
+            return -1;
+        }
+        if (emit8(&ctx, prefix) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x70) != 0 ||
+            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0 ||
+            emit8(&ctx, (uint8_t)c->u.imm) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "cvttps2dq")) {
+        if (insn->op_count != 2 || !operand_is_xmm_reg(a) ||
+            (!operand_is_xmm_reg(b) && b->kind != AS_X86_OP_MEM)) {
+            set_err(&ctx, "unsupported x86_64 cvttps2dq form");
+            return -1;
+        }
+        if (emit8(&ctx, 0xf3) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x5b) != 0 ||
+            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "movdqu")) {
+        if (insn->op_count != 2) {
+            set_err(&ctx, "unsupported x86_64 movdqu form");
+            return -1;
+        }
+        if (operand_is_xmm_reg(a) && (operand_is_xmm_reg(b) || b->kind == AS_X86_OP_MEM)) {
+            if (emit8(&ctx, 0xf3) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x6f) != 0 ||
+                modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
+                return -1;
+            }
+        } else if (a->kind == AS_X86_OP_MEM && operand_is_xmm_reg(b)) {
+            if (emit8(&ctx, 0xf3) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x7f) != 0 ||
+                modrm_sib_disp64(&ctx, b->u.reg, a, &rex_r, &rex_x, &rex_b) != 0) {
+                return -1;
+            }
+        } else {
+            set_err(&ctx, "unsupported x86_64 movdqu form");
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "cmpss")) {
+        if (insn->op_count != 3 || !operand_is_xmm_reg(a) || c->kind != AS_X86_OP_IMM ||
+            (!operand_is_xmm_reg(b) && b->kind != AS_X86_OP_MEM)) {
+            set_err(&ctx, "unsupported x86_64 cmpss form");
+            return -1;
+        }
+        if (emit8(&ctx, 0xf3) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xc2) != 0 ||
+            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0 ||
+            emit8(&ctx, (uint8_t)c->u.imm) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "movq2dq")) {
+        if (insn->op_count != 2 || !operand_is_xmm_reg(a) || !operand_is_mmx_reg(b)) {
+            set_err(&ctx, "unsupported x86_64 movq2dq form");
+            return -1;
+        }
+        if (emit8(&ctx, 0xf3) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xd6) != 0 ||
+            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "cvtdq2pd")) {
+        if (insn->op_count != 2 || !operand_is_xmm_reg(a) ||
+            (!operand_is_xmm_reg(b) && b->kind != AS_X86_OP_MEM)) {
+            set_err(&ctx, "unsupported x86_64 cvtdq2pd form");
+            return -1;
+        }
+        if (emit8(&ctx, 0xf3) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xe6) != 0 ||
+            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
     } else if (streq_ci(insn->mnemonic, "movmskps")) {
         if (insn->op_count != 2 || a->kind != AS_X86_OP_REG || !operand_is_xmm_reg(b)) {
             set_err(&ctx, "unsupported x86_64 movmskps form");
@@ -4079,6 +4302,44 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
             return -1;
         }
+    } else if (streq_ci(insn->mnemonic, "cvttpd2dq")) {
+        if (insn->op_count != 2 || !operand_is_xmm_reg(a) ||
+            (!operand_is_xmm_reg(b) && b->kind != AS_X86_OP_MEM)) {
+            set_err(&ctx, "unsupported x86_64 cvttpd2dq form");
+            return -1;
+        }
+        if (emit8(&ctx, 0x66) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xe6) != 0 ||
+            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "movdq2q")) {
+        if (insn->op_count != 2 || !operand_is_mmx_reg(a) || !operand_is_xmm_reg(b)) {
+            set_err(&ctx, "unsupported x86_64 movdq2q form");
+            return -1;
+        }
+        if (emit8(&ctx, 0xf2) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xd6) != 0 ||
+            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "cvtpd2dq")) {
+        if (insn->op_count != 2 || !operand_is_xmm_reg(a) ||
+            (!operand_is_xmm_reg(b) && b->kind != AS_X86_OP_MEM)) {
+            set_err(&ctx, "unsupported x86_64 cvtpd2dq form");
+            return -1;
+        }
+        if (emit8(&ctx, 0xf2) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xe6) != 0 ||
+            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "movntdq")) {
+        if (insn->op_count != 2 || a->kind != AS_X86_OP_MEM || !operand_is_xmm_reg(b)) {
+            set_err(&ctx, "unsupported x86_64 movntdq form");
+            return -1;
+        }
+        if (emit8(&ctx, 0x66) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xe7) != 0 ||
+            modrm_sib_disp64(&ctx, b->u.reg, a, &rex_r, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
     } else if (streq_ci(insn->mnemonic, "movntq")) {
         if (insn->op_count != 2 || a->kind != AS_X86_OP_MEM || !operand_is_mmx_reg(b)) {
             set_err(&ctx, "unsupported x86_64 movntq form");
@@ -4157,9 +4418,14 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
             return -1;
         }
-    } else if (streq_ci(insn->mnemonic, "maskmovq")) {
-        if (insn->op_count != 2 || !operand_is_mmx_reg(a) || !operand_is_mmx_reg(b)) {
-            set_err(&ctx, "unsupported x86_64 maskmovq form");
+    } else if (streq_ci(insn->mnemonic, "maskmovq") || streq_ci(insn->mnemonic, "maskmovdqu")) {
+        if (insn->op_count != 2 ||
+            ((streq_ci(insn->mnemonic, "maskmovq") && (!operand_is_mmx_reg(a) || !operand_is_mmx_reg(b))) ||
+             (streq_ci(insn->mnemonic, "maskmovdqu") && (!operand_is_xmm_reg(a) || !operand_is_xmm_reg(b))))) {
+            set_err(&ctx, "unsupported x86_64 %s form", insn->mnemonic);
+            return -1;
+        }
+        if (streq_ci(insn->mnemonic, "maskmovdqu") && emit8(&ctx, 0x66) != 0) {
             return -1;
         }
         if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xf7) != 0 ||
