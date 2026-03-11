@@ -85,7 +85,9 @@ typedef struct {
     as_x86_seg_t seg_override;
     int lock_prefix;
     int rep_prefix;
+    int explicit_rex;
     int rex_w;
+    uint8_t rex_bits;
     int byte_op;
     int operand_size_override;
     int address_size_override;

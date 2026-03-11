@@ -127,6 +127,7 @@ typedef struct {
     char *arm_condition;
     unsigned syntax_intel;
     unsigned prefixes;
+    unsigned rex_bits;
     char *segment_override;
     as_operand_t *operands;
     size_t operand_count;

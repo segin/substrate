@@ -1,6 +1,7 @@
 #include "as_parser.h"
 
 #include <ctype.h>
+#include <stdint.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -543,7 +544,7 @@ static void expr_lex_free_cur(expr_lex_t *lx) {
 static int expr_parse_number(const char *s, size_t *inout_i, long long *out) {
     size_t i = *inout_i;
     int base = 10;
-    long long v = 0;
+    uint64_t v = 0;
     int saw = 0;
 
     if (s[i] == '0' && (s[i + 1] == 'x' || s[i + 1] == 'X')) {
@@ -570,13 +571,13 @@ static int expr_parse_number(const char *s, size_t *inout_i, long long *out) {
             break;
         }
         saw = 1;
-        v = v * base + d;
+        v = v * (uint64_t)base + (uint64_t)d;
         i++;
     }
     if (!saw) {
         return -1;
     }
-    *out = v;
+    *out = (long long)(int64_t)v;
     *inout_i = i;
     return 0;
 }
@@ -2054,6 +2055,8 @@ static int parse_x86_far_immediate_pair(parse_ctx_t *ctx, const as_token_t *tokv
     return 0;
 }
 
+static unsigned rex_bits_for(const char *s);
+
 static int prefix_flag_for(const char *s, char **segment_override) {
     if (streq_ci(s, "lock")) {
         return AS_PREFIX_LOCK;
@@ -2076,13 +2079,13 @@ static int prefix_flag_for(const char *s, char **segment_override) {
     if (streq_ci(s, "repne") || streq_ci(s, "repnz")) {
         return AS_PREFIX_REPNE;
     }
-    if (streq_ci(s, "rex") || streq_ci(s, "rex.w") || streq_ci(s, "rex.r") || streq_ci(s, "rex.x") || streq_ci(s, "rex.b")) {
+    if (streq_ci(s, "rex") || (strncasecmp(s, "rex.", 4) == 0 && rex_bits_for(s) != 0)) {
         return AS_PREFIX_REX;
     }
     if (streq_ci(s, "data16")) {
         return AS_PREFIX_DATA16;
     }
-    if (streq_ci(s, "addr16")) {
+    if (streq_ci(s, "addr16") || streq_ci(s, "addr32")) {
         return AS_PREFIX_ADDR16;
     }
 
@@ -2096,6 +2099,51 @@ static int prefix_flag_for(const char *s, char **segment_override) {
     }
 
     return 0;
+}
+
+static unsigned rex_bits_for(const char *s) {
+    const char *p;
+    unsigned bits = 0;
+
+    if (s == NULL) {
+        return 0;
+    }
+    if (streq_ci(s, "rex")) {
+        return 0;
+    }
+    if (strncasecmp(s, "rex.", 4) != 0) {
+        return 0;
+    }
+    p = s + 4;
+    if (*p == '\0') {
+        return 0;
+    }
+    while (*p != '\0') {
+        unsigned bit;
+
+        switch (tolower((unsigned char)*p)) {
+        case 'w':
+            bit = 0x8u;
+            break;
+        case 'r':
+            bit = 0x4u;
+            break;
+        case 'x':
+            bit = 0x2u;
+            break;
+        case 'b':
+            bit = 0x1u;
+            break;
+        default:
+            return 0;
+        }
+        if ((bits & bit) != 0) {
+            return 0;
+        }
+        bits |= bit;
+        p++;
+    }
+    return bits;
 }
 
 static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, as_stmt_t *st) {
@@ -2122,10 +2170,24 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
             break;
         }
         in.prefixes |= (unsigned)pf;
+        if (pf == AS_PREFIX_REX) {
+            in.rex_bits = rex_bits_for(tokv[i].text);
+        }
         i++;
     }
 
     if (i >= n) {
+        if (n > 0 && prefix_flag_for(tokv[n - 1].text, NULL) == AS_PREFIX_REX) {
+            in.mnemonic = xstrdup(tokv[n - 1].text);
+            if (in.mnemonic == NULL) {
+                free(in.segment_override);
+                return -1;
+            }
+            st->kind = AS_STMT_INSTRUCTION;
+            st->u.instr = in;
+            return 0;
+        }
+        free(in.segment_override);
         return -1;
     }
 
