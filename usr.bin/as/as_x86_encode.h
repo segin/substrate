@@ -55,6 +55,7 @@ typedef enum {
     AS_X86_OP_IMM,
     AS_X86_OP_MEM,
     AS_X86_OP_REL,
+    AS_X86_OP_FPU,
 } as_x86_operand_kind_t;
 
 typedef struct {
@@ -77,6 +78,7 @@ typedef struct {
         int64_t imm;
         int32_t rel;
         as_x86_mem_t mem;
+        unsigned fpu;
     } u;
 } as_x86_operand_t;
 

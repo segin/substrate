@@ -1714,7 +1714,9 @@ static int parse_operand_slice(parse_ctx_t *ctx, const as_token_t *tokv, size_t 
      * x87 stack-register spellings must be recognized before the Intel
      * absolute-memory parser, otherwise st(0) is misread as memory.
      */
-    if (n == 1 && tokv[0].kind == AS_TOK_IDENTIFIER && streq_ci(tokv[0].text, "st")) {
+    if (n == 1 &&
+        (tokv[0].kind == AS_TOK_IDENTIFIER || tokv[0].kind == AS_TOK_REGISTER) &&
+        (streq_ci(tokv[0].text, "st") || streq_ci(tokv[0].text, "%st"))) {
         op->kind = AS_OPERAND_COPROCESSOR;
         op->u.coproc = xstrdup("st");
         return op->u.coproc != NULL ? 0 : -1;

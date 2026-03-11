@@ -4920,7 +4920,7 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
     if (out_len != NULL) {
         *out_len = 0;
     }
-    if (insn == NULL || out == NULL || out_cap < 12) {
+    if (insn == NULL || out == NULL || out_cap < 10) {
         return -1;
     }
     if (normalize_x86_mnemonic(insn->mnemonic, mnbuf, sizeof(mnbuf), NULL) != 0) {
@@ -5534,6 +5534,14 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
         dst->kind = AS_X86_OP_REG;
         if (parse_x86_reg(op->u.reg, &dst->u.reg) != 0) {
             snprintf(errbuf, errbuf_sz, "unknown x86 register: %s", op->u.reg != NULL ? op->u.reg : "<null>");
+            return -1;
+        }
+        return 0;
+    case AS_OPERAND_COPROCESSOR:
+        dst->kind = AS_X86_OP_FPU;
+        if (parse_st_index(op->u.coproc, &dst->u.fpu) != 0) {
+            snprintf(errbuf, errbuf_sz, "unknown x87 register: %s",
+                     op->u.coproc != NULL ? op->u.coproc : "<null>");
             return -1;
         }
         return 0;
