@@ -22,6 +22,7 @@ This is the Substrate operating system project targeting x86 32-bit architecture
 - **PS/2 Subsystem:** Expanded PS/2 controller driver to support dual-channel (Mouse/Aux) operation.
 - **Framebuffer:** Implemented native linear framebuffer driver (`fb.c`) with Multiboot support and bitmap font console. Added Bochs Graphics Adapter (BGA) native driver support via `video=bga`.
 - **Build System:** Root filesystem generation in `dist/`
+- **Root Staging Rule:** `dist/` is only the staged contents of a real Substrate root filesystem. Do not place generic boot media, floppy images, scratch boot artifacts, or unrelated test payloads there; keep those beside the subsystem that builds them unless a different explicit staging path exists.
 - **Test Framework:** Implemented comprehensive kernel test runner (`sys/tests`), integrated into build system, with initial PMAP property tests.
 - **Kernel sprintf Enhancements:** Added printf flags: `-`, `+`, ` `, `#`, `0`, numeric width, and conversions: d/i/u/o/x/X/p/s/c for improved debug output
 - **Process Model Refactor:** Separated Swapper (PID 0) and Init (PID 1). Enforced `PID == Main_TID` invariant. Added Process Group (`pgrp`) and Session support.

@@ -832,28 +832,83 @@ int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
 
 int tty_open(struct tty *tty) {
     if (!tty) return -1;
-    TTY_LOCK(tty);
-    tty->count++;
-    if (tty->driver->open) {
-        int ret = tty->driver->open(tty);
-        if (ret != 0) {
-            tty->count--;
+    for (;;) {
+        TTY_LOCK(tty);
+        if (tty->lifecycle_busy) {
+            TTY_UNLOCK(tty);
+            sched_yield();
+            continue;
         }
+
+        if (tty->driver_active || !tty->driver || !tty->driver->open) {
+            tty->count++;
+            tty->driver_active = 1;
+            TTY_UNLOCK(tty);
+            return 0;
+        }
+
+        tty->lifecycle_busy = 1;
+        tty->count = 1;
         TTY_UNLOCK(tty);
-        return ret;
+
+        {
+            int ret = tty->driver->open(tty);
+
+            TTY_LOCK(tty);
+            tty->lifecycle_busy = 0;
+            if (ret == 0) {
+                tty->driver_active = 1;
+                TTY_UNLOCK(tty);
+                return 0;
+            }
+
+            tty->driver_active = 0;
+            tty->count = 0;
+            TTY_UNLOCK(tty);
+            return ret;
+        }
     }
-    TTY_UNLOCK(tty);
-    return 0;
 }
 
 void tty_close(struct tty *tty) {
     if (!tty) return;
-    TTY_LOCK(tty);
-    tty->count--;
-    if (tty->count <= 0) {
-        if (tty->driver->close) tty->driver->close(tty);
+    for (;;) {
+        int call_driver_close = 0;
+
+        TTY_LOCK(tty);
+        if (tty->count <= 0) {
+            TTY_UNLOCK(tty);
+            return;
+        }
+
+        if (tty->lifecycle_busy) {
+            TTY_UNLOCK(tty);
+            sched_yield();
+            continue;
+        }
+
+        tty->count--;
+        if (tty->count > 0) {
+            TTY_UNLOCK(tty);
+            return;
+        }
+
+        tty->lifecycle_busy = 1;
+        call_driver_close = tty->driver_active && tty->driver && tty->driver->close;
+        tty->driver_active = 0;
+        TTY_UNLOCK(tty);
+
+        if (call_driver_close) {
+            tty->driver->close(tty);
+        }
+
+        {
+            TTY_LOCK(tty);
+            tty->lifecycle_busy = 0;
+            TTY_UNLOCK(tty);
+        }
+        return;
     }
-    TTY_UNLOCK(tty);
 }
 
 /*

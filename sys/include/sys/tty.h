@@ -44,6 +44,8 @@ struct tty {
     struct tty_driver *driver;
     int index; // Device index (e.g., 0 for tty0)
     int count; // Refcount
+    int driver_active; // Driver open callback completed successfully
+    int lifecycle_busy; // Open/close transition in progress
     
     struct termios termios;
     struct winsize winsize;

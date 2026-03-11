@@ -116,16 +116,20 @@ static int console_node_poll(fs_node_t *node, void *waiter) {
 
 static void console_node_open(fs_node_t *node) {
     (void)node;
-    if (console_tty) {
-        tty_open(console_tty);
-    }
+    /*
+     * /dev/console is a singleton façade over the already-installed console
+     * TTY. Opening the vnode must not recurse into TTY open/refcount paths
+     * during early stdio attachment.
+     */
 }
 
 static void console_node_close(fs_node_t *node) {
     (void)node;
-    if (console_tty) {
-        tty_close(console_tty);
-    }
+    /*
+     * Matching close is a no-op for the same reason as open: the backing
+     * console TTY lifetime is owned by the console/video/uart bring-up, not
+     * by transient /dev/console vnode opens.
+     */
 }
 
 static fs_node_t console_node = {

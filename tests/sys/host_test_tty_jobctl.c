@@ -21,6 +21,9 @@ static int signal_pgrp[8];
 static int signal_sig[8];
 static process_t *last_psignal_proc;
 static int last_psignal_sig;
+static int tty_driver_open_count;
+static int tty_driver_close_count;
+static int tty_driver_open_errno;
 
 uint32_t intr_disable(void) { return 0; }
 void intr_restore(uint32_t flags) { (void)flags; }
@@ -69,6 +72,9 @@ static void reset_env(void) {
     memset(signal_sig, 0, sizeof(signal_sig));
     last_psignal_proc = NULL;
     last_psignal_sig = 0;
+    tty_driver_open_count = 0;
+    tty_driver_close_count = 0;
+    tty_driver_open_errno = 0;
 }
 
 static process_t *init_proc(int slot, int pid) {
@@ -87,6 +93,75 @@ static void init_session_leader(process_t *proc, struct pgrp *pgrp, struct sessi
     pgrp->pg_session = sess;
     pgrp->pg_members = proc;
     proc->p_pgrp = pgrp;
+}
+
+static int mock_tty_open(struct tty *tty) {
+    (void)tty;
+    tty_driver_open_count++;
+    return tty_driver_open_errno;
+}
+
+static void mock_tty_close(struct tty *tty) {
+    (void)tty;
+    tty_driver_close_count++;
+}
+
+static void test_tty_open_close_refcounts_driver_transitions(void) {
+    struct tty_driver driver = {
+        .open = mock_tty_open,
+        .close = mock_tty_close,
+    };
+    struct tty *tty;
+
+    reset_env();
+
+    tty = tty_alloc(&driver, 0);
+    assert(tty != NULL);
+
+    assert(tty_open(tty) == 0);
+    assert(tty->count == 1);
+    assert(tty->driver_active == 1);
+    assert(tty_driver_open_count == 1);
+    assert(tty_driver_close_count == 0);
+
+    assert(tty_open(tty) == 0);
+    assert(tty->count == 2);
+    assert(tty_driver_open_count == 1);
+
+    tty_close(tty);
+    assert(tty->count == 1);
+    assert(tty->driver_active == 1);
+    assert(tty_driver_close_count == 0);
+
+    tty_close(tty);
+    assert(tty->count == 0);
+    assert(tty->driver_active == 0);
+    assert(tty_driver_close_count == 1);
+
+    tty_free(tty);
+}
+
+static void test_tty_open_failure_restores_state(void) {
+    struct tty_driver driver = {
+        .open = mock_tty_open,
+        .close = mock_tty_close,
+    };
+    struct tty *tty;
+
+    reset_env();
+    tty_driver_open_errno = -5;
+
+    tty = tty_alloc(&driver, 1);
+    assert(tty != NULL);
+
+    assert(tty_open(tty) == -5);
+    assert(tty->count == 0);
+    assert(tty->driver_active == 0);
+    assert(tty->lifecycle_busy == 0);
+    assert(tty_driver_open_count == 1);
+    assert(tty_driver_close_count == 0);
+
+    tty_free(tty);
 }
 
 static void test_tiocsctty_assigns_owner(void) {
@@ -206,6 +281,8 @@ static void test_tiocspgrp_checks_sigttou_for_background_group(void) {
 }
 
 int main(void) {
+    test_tty_open_close_refcounts_driver_transitions();
+    test_tty_open_failure_restores_state();
     test_tiocsctty_assigns_owner();
     test_tiocsctty_rejects_foreign_owner_without_steal();
     test_tiocnotty_hangsup_foreground_group();

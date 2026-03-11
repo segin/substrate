@@ -64,6 +64,11 @@ dist/        target root filesystem staging
 host_dist/   host install staging for native validation tools
 ```
 
+`dist/` is reserved for the contents of a real Substrate target root filesystem.
+Boot media artifacts such as `sys/kernel.flp`, ad hoc boot disks, and scratch
+bring-up images are not architecture-level rootfs staging and must not be
+stored under `dist/` unless they are themselves installed files inside `/`.
+
 ## 5. Kernel Architecture
 
 Kernel source is under `sys/` and remains monolithic.
