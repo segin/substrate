@@ -5115,12 +5115,24 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
         unsigned char modrm;
 
         if (src->kind == AS_OPERAND_REGISTER && dst->kind == AS_OPERAND_REGISTER &&
-            parse_x86_sysreg(src->u.reg, "cr", 15u, &sr) == 0 && parse_x86_reg(dst->u.reg, &gr) == 0) {
-            return emit_x86_64_0f_sysreg_mov(0x20, sr, (unsigned)gr, out, out_cap, out_len);
+            parse_x86_reg(dst->u.reg, &gr) == 0 &&
+            (parse_x86_sysreg(src->u.reg, "cr", 15u, &sr) == 0 ||
+             parse_x86_sysreg(src->u.reg, "db", 15u, &sr) == 0 ||
+             parse_x86_sysreg(src->u.reg, "dr", 15u, &sr) == 0)) {
+            if (parse_x86_sysreg(src->u.reg, "cr", 15u, &sr) == 0) {
+                return emit_x86_64_0f_sysreg_mov(0x20, sr, (unsigned)gr, out, out_cap, out_len);
+            }
+            return emit_x86_64_0f_sysreg_mov(0x21, sr, (unsigned)gr, out, out_cap, out_len);
         }
         if (src->kind == AS_OPERAND_REGISTER && dst->kind == AS_OPERAND_REGISTER &&
-            parse_x86_reg(src->u.reg, &gr) == 0 && parse_x86_sysreg(dst->u.reg, "cr", 15u, &sr) == 0) {
-            return emit_x86_64_0f_sysreg_mov(0x22, sr, (unsigned)gr, out, out_cap, out_len);
+            parse_x86_reg(src->u.reg, &gr) == 0 &&
+            (parse_x86_sysreg(dst->u.reg, "cr", 15u, &sr) == 0 ||
+             parse_x86_sysreg(dst->u.reg, "db", 15u, &sr) == 0 ||
+             parse_x86_sysreg(dst->u.reg, "dr", 15u, &sr) == 0)) {
+            if (parse_x86_sysreg(dst->u.reg, "cr", 15u, &sr) == 0) {
+                return emit_x86_64_0f_sysreg_mov(0x22, sr, (unsigned)gr, out, out_cap, out_len);
+            }
+            return emit_x86_64_0f_sysreg_mov(0x23, sr, (unsigned)gr, out, out_cap, out_len);
         }
         if (src->kind == AS_OPERAND_REGISTER && parse_seg_reg_text(src->u.reg, &seg) == 0 &&
             seg_reg_field(seg, &seg_field) == 0) {
@@ -5171,6 +5183,50 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
                 return emit_x86_64_1byte_regfield_memop(0x8e, seg_field, &src->u.mem, out, out_cap, out_len);
             }
         }
+    }
+    if ((strcmp(mnbuf, "push") == 0 || strcmp(mnbuf, "pop") == 0) && insn->operand_count == 1 && a != NULL &&
+        a->kind == AS_OPERAND_REGISTER) {
+        as_x86_seg_t seg;
+
+        if (parse_seg_reg_text(a->u.reg, &seg) != 0) {
+            return -1;
+        }
+        if (strcmp(mnbuf, "push") == 0) {
+            if (seg == AS_X86_SEG_FS) {
+                out[0] = 0x0f;
+                out[1] = 0xa0;
+                if (out_len != NULL) {
+                    *out_len = 2;
+                }
+                return 0;
+            }
+            if (seg == AS_X86_SEG_GS) {
+                out[0] = 0x0f;
+                out[1] = 0xa8;
+                if (out_len != NULL) {
+                    *out_len = 2;
+                }
+                return 0;
+            }
+            return -1;
+        }
+        if (seg == AS_X86_SEG_FS) {
+            out[0] = 0x0f;
+            out[1] = 0xa1;
+            if (out_len != NULL) {
+                *out_len = 2;
+            }
+            return 0;
+        }
+        if (seg == AS_X86_SEG_GS) {
+            out[0] = 0x0f;
+            out[1] = 0xa9;
+            if (out_len != NULL) {
+                *out_len = 2;
+            }
+            return 0;
+        }
+        return -1;
     }
     if (strcmp(mnbuf, "fldl") == 0) {
         if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
