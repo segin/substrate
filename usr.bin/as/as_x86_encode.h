@@ -33,6 +33,10 @@ typedef enum {
     AS_X86_REG_R13 = 13,
     AS_X86_REG_R14 = 14,
     AS_X86_REG_R15 = 15,
+    AS_X86_REG_AH = 16,
+    AS_X86_REG_CH = 17,
+    AS_X86_REG_DH = 18,
+    AS_X86_REG_BH = 19,
 } as_x86_reg_t;
 
 typedef enum {

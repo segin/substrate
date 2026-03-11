@@ -153,7 +153,11 @@ static int encode_desc(const dq_desc_t *desc, const as_x86_avx512dq_insn_t *insn
             return -1;
         }
         ev.dst = insn->op1.u.reg;
-        ev.src1 = AS_X86_REG_RAX;
+        if (streq_ci(desc->mnemonic, "vprold") || streq_ci(desc->mnemonic, "vprolq")) {
+            ev.src1 = AS_X86_REG_RCX;
+        } else {
+            ev.src1 = AS_X86_REG_RAX;
+        }
         ev.src2 = insn->op2;
         break;
 
@@ -220,7 +224,9 @@ int as_x86_encode_avx512dq(const as_x86_avx512dq_insn_t *insn, uint8_t *out, siz
         {"vcvtuqq2ps", DQ_FORM_RR, 0x7a, AS_EVEX_MAP_0F, AS_EVEX_PP_F2, 1, -1, 0, 0, 0},
         {"vcvtuqq2pd", DQ_FORM_RR, 0x7a, AS_EVEX_MAP_0F, AS_EVEX_PP_F3, 1, -1, 0, 0, 0},
         {"vprord", DQ_FORM_RRI, 0x72, AS_EVEX_MAP_0F, AS_EVEX_PP_66, 0, -1, 1, 0, 0},
+        {"vprold", DQ_FORM_RRI, 0x72, AS_EVEX_MAP_0F, AS_EVEX_PP_66, 0, -1, 1, 0, 0},
         {"vprorq", DQ_FORM_RRI, 0x72, AS_EVEX_MAP_0F, AS_EVEX_PP_66, 1, -1, 1, 0, 0},
+        {"vprolq", DQ_FORM_RRI, 0x72, AS_EVEX_MAP_0F, AS_EVEX_PP_66, 1, -1, 1, 0, 0},
         {"vprorvd", DQ_FORM_RRR, 0x14, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 0, -1, 0, 0, 0},
         {"vprolvd", DQ_FORM_RRR, 0x15, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 0, -1, 0, 0, 0},
         {"vprorvq", DQ_FORM_RRR, 0x14, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 1, -1, 0, 0, 0},

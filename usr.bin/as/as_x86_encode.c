@@ -85,7 +85,34 @@ static int reg_is_exact_low3(const as_x86_operand_t *op, as_x86_reg_t reg) {
     if (op == NULL || op->kind != AS_X86_OP_REG) {
         return 0;
     }
+    if (op->u.reg >= AS_X86_REG_AH || reg >= AS_X86_REG_AH) {
+        return op->u.reg == reg;
+    }
     return (((unsigned)op->u.reg) & 7u) == (((unsigned)reg) & 7u);
+}
+
+static int is_high8_reg(as_x86_reg_t r) {
+    return r == AS_X86_REG_AH || r == AS_X86_REG_CH ||
+           r == AS_X86_REG_DH || r == AS_X86_REG_BH;
+}
+
+static uint8_t reg_code3(as_x86_reg_t r) {
+    switch (r) {
+    case AS_X86_REG_AH:
+        return 4;
+    case AS_X86_REG_CH:
+        return 5;
+    case AS_X86_REG_DH:
+        return 6;
+    case AS_X86_REG_BH:
+        return 7;
+    default:
+        return (uint8_t)(r & 7);
+    }
+}
+
+static int is_dx_port_operand(const as_x86_operand_t *op) {
+    return reg_is_exact_low3(op, AS_X86_REG_EDX) || mem_is_single_base_reg(op, AS_X86_REG_EDX);
 }
 
 static int mem_operand_bits(const as_x86_operand_t *op) {
@@ -106,6 +133,31 @@ static int merge_string_op_bits(const as_x86_operand_t *a, const as_x86_operand_
         return ab;
     }
     return bb;
+}
+
+static int default_string_op_bits(const as_x86_insn_t *insn) {
+    if (insn == NULL) {
+        return 0;
+    }
+    if (insn->byte_op) {
+        return 8;
+    }
+    if (insn->operand_size_override) {
+        return 16;
+    }
+    if (insn->rex_w) {
+        return 64;
+    }
+    return 32;
+}
+
+static int resolved_string_op_bits(const as_x86_insn_t *insn, const as_x86_operand_t *a, const as_x86_operand_t *b) {
+    int bits = merge_string_op_bits(a, b);
+
+    if (bits != 0) {
+        return bits;
+    }
+    return default_string_op_bits(insn);
 }
 
 static int is_disp8(int32_t v) {
@@ -152,7 +204,7 @@ static int modrm_sib_disp(enc_ctx_t *ctx, uint8_t reg_field, const as_x86_operan
     uint8_t modrm;
 
     if (rm_op->kind == AS_X86_OP_REG) {
-        modrm = (uint8_t)(0xc0u | ((reg_field & 7u) << 3) | (uint8_t)(rm_op->u.reg & 7));
+        modrm = (uint8_t)(0xc0u | (reg_code3((as_x86_reg_t)reg_field) << 3) | reg_code3(rm_op->u.reg));
         return emit8(ctx, modrm);
     }
 
@@ -240,7 +292,7 @@ static int modrm_sib_disp(enc_ctx_t *ctx, uint8_t reg_field, const as_x86_operan
             sib = (uint8_t)((scale_bits << 6) | (index_bits << 3) | base_bits);
         }
 
-        modrm = (uint8_t)((mod << 6) | ((reg_field & 7u) << 3) | rm);
+        modrm = (uint8_t)((mod << 6) | (reg_code3((as_x86_reg_t)reg_field) << 3) | rm);
         if (emit8(ctx, modrm) != 0) {
             return -1;
         }
@@ -260,15 +312,21 @@ static int modrm_sib_disp(enc_ctx_t *ctx, uint8_t reg_field, const as_x86_operan
 }
 
 static uint8_t reg_low3(as_x86_reg_t r) {
-    return (uint8_t)(r & 7);
+    return reg_code3(r);
 }
 
 static uint8_t reg_ext(as_x86_reg_t r) {
+    if (is_high8_reg(r)) {
+        return 0;
+    }
     return (uint8_t)((r >> 3) & 1);
 }
 
 static int needs_rex_low8(as_x86_reg_t r) {
     uint8_t lo = reg_low3(r);
+    if (is_high8_reg(r)) {
+        return 0;
+    }
     if (reg_ext(r)) {
         return 1;
     }
@@ -387,7 +445,7 @@ static int modrm_sib_disp64(enc_ctx_t *ctx, as_x86_reg_t reg_field, const as_x86
             sib = (uint8_t)((scale_bits(m->scale) << 6) | (index_bits << 3) | base_bits);
         }
 
-        modrm = (uint8_t)((mod << 6) | (reg_low3(reg_field) << 3) | rm);
+        modrm = (uint8_t)((mod << 6) | (reg_code3(reg_field) << 3) | rm);
         if (emit8(ctx, modrm) != 0) {
             return -1;
         }
@@ -479,26 +537,14 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
     if (streq_ci(insn->mnemonic, "mov")) {
         if (insn->byte_op) {
             if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && b->kind == AS_X86_OP_IMM) {
-                if ((a->u.reg & 7) > 3) {
-                    set_err(&ctx, "unsupported i386 8-bit register in movb");
-                    return -1;
-                }
                 if (emit8(&ctx, (uint8_t)(0xb0 | (a->u.reg & 7))) != 0 || emit8(&ctx, (uint8_t)b->u.imm) != 0) {
                     return -1;
                 }
             } else if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && is_reg_or_mem(b)) {
-                if ((a->u.reg & 7) > 3) {
-                    set_err(&ctx, "unsupported i386 8-bit register in movb");
-                    return -1;
-                }
                 if (encode_reg_rm_pair(&ctx, 0x8a, a, b, 0) != 0) {
                     return -1;
                 }
             } else if (insn->op_count == 2 && is_reg_or_mem(a) && b->kind == AS_X86_OP_REG) {
-                if ((b->u.reg & 7) > 3) {
-                    set_err(&ctx, "unsupported i386 8-bit register in movb");
-                    return -1;
-                }
                 if (encode_reg_rm_pair(&ctx, 0x88, a, b, 1) != 0) {
                     return -1;
                 }
@@ -622,20 +668,11 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
                 ext = 7;
             }
         }
-
         if (insn->op_count == 2 && is_reg_or_mem(a) && b->kind == AS_X86_OP_REG) {
-            if (insn->byte_op && (b->u.reg & 7) > 3) {
-                set_err(&ctx, "unsupported i386 8-bit register in ALU op");
-                return -1;
-            }
             if (encode_reg_rm_pair(&ctx, op_rm_reg, a, b, 1) != 0) {
                 return -1;
             }
         } else if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && is_reg_or_mem(b)) {
-            if (insn->byte_op && (a->u.reg & 7) > 3) {
-                set_err(&ctx, "unsupported i386 8-bit register in ALU op");
-                return -1;
-            }
             if (encode_reg_rm_pair(&ctx, op_reg_rm, a, b, 0) != 0) {
                 return -1;
             }
@@ -779,7 +816,7 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             set_err(&ctx, "unsupported movs form");
             return -1;
         }
-        bits = merge_string_op_bits(a, b);
+        bits = resolved_string_op_bits(insn, a, b);
         if (bits == 8) {
             if (emit8(&ctx, 0xa4) != 0) return -1;
         } else if (bits == 16) {
@@ -827,7 +864,7 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
                 set_err(&ctx, "unsupported cmps form");
                 return -1;
             }
-            bits = merge_string_op_bits(a, b);
+            bits = resolved_string_op_bits(insn, a, b);
             if (bits == 8) {
                 if (emit8(&ctx, 0xa6) != 0) return -1;
             } else if (bits == 16) {
@@ -859,6 +896,9 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
                 return -1;
             }
             bits = mem_operand_bits(b);
+            if (bits == 0) {
+                bits = default_string_op_bits(insn);
+            }
             if (bits == 8) {
                 if (emit8(&ctx, 0xac) != 0) return -1;
             } else if (bits == 16) {
@@ -890,6 +930,9 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
                 return -1;
             }
             bits = mem_operand_bits(b);
+            if (bits == 0) {
+                bits = default_string_op_bits(insn);
+            }
             if (bits == 8) {
                 if (emit8(&ctx, 0xae) != 0) return -1;
             } else if (bits == 16) {
@@ -908,7 +951,7 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
 
         if (insn->op_count != 2 ||
             !mem_is_single_base_reg(a, AS_X86_REG_EDI) ||
-            !reg_is_exact_low3(b, AS_X86_REG_EDX)) {
+            !is_dx_port_operand(b)) {
             set_err(&ctx, "unsupported ins form");
             return -1;
         }
@@ -929,7 +972,7 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         if (insn->op_count != 0 &&
             !(insn->op_count == 2 &&
               mem_is_single_base_reg(a, AS_X86_REG_EDI) &&
-              reg_is_exact_low3(b, AS_X86_REG_EDX))) {
+              is_dx_port_operand(b))) {
             set_err(&ctx, "unsupported insb form");
             return -1;
         }
@@ -940,7 +983,7 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         if (insn->op_count != 0 &&
             !(insn->op_count == 2 &&
               mem_is_single_base_reg(a, AS_X86_REG_EDI) &&
-              reg_is_exact_low3(b, AS_X86_REG_EDX))) {
+              is_dx_port_operand(b))) {
             set_err(&ctx, "unsupported insw form");
             return -1;
         }
@@ -951,7 +994,7 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         if (insn->op_count != 0 &&
             !(insn->op_count == 2 &&
               mem_is_single_base_reg(a, AS_X86_REG_EDI) &&
-              reg_is_exact_low3(b, AS_X86_REG_EDX))) {
+              is_dx_port_operand(b))) {
             set_err(&ctx, "unsupported insd form");
             return -1;
         }
@@ -962,7 +1005,7 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         int bits = insn->byte_op ? 8 : 0;
 
         if (insn->op_count != 2 ||
-            !reg_is_exact_low3(a, AS_X86_REG_EDX) ||
+            !is_dx_port_operand(a) ||
             !mem_is_single_base_reg(b, AS_X86_REG_ESI)) {
             set_err(&ctx, "unsupported outs form");
             return -1;
@@ -983,7 +1026,7 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
     } else if (streq_ci(insn->mnemonic, "outsb")) {
         if (insn->op_count != 0 &&
             !(insn->op_count == 2 &&
-              reg_is_exact_low3(a, AS_X86_REG_EDX) &&
+              is_dx_port_operand(a) &&
               mem_is_single_base_reg(b, AS_X86_REG_ESI))) {
             set_err(&ctx, "unsupported outsb form");
             return -1;
@@ -994,7 +1037,7 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
     } else if (streq_ci(insn->mnemonic, "outsw")) {
         if (insn->op_count != 0 &&
             !(insn->op_count == 2 &&
-              reg_is_exact_low3(a, AS_X86_REG_EDX) &&
+              is_dx_port_operand(a) &&
               mem_is_single_base_reg(b, AS_X86_REG_ESI))) {
             set_err(&ctx, "unsupported outsw form");
             return -1;
@@ -1005,7 +1048,7 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
     } else if (streq_ci(insn->mnemonic, "outsd") || streq_ci(insn->mnemonic, "outsl")) {
         if (insn->op_count != 0 &&
             !(insn->op_count == 2 &&
-              reg_is_exact_low3(a, AS_X86_REG_EDX) &&
+              is_dx_port_operand(a) &&
               mem_is_single_base_reg(b, AS_X86_REG_ESI))) {
             set_err(&ctx, "unsupported outsd form");
             return -1;
@@ -1200,11 +1243,20 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "bound")) {
-        if (insn->op_count != 2 || a->kind != AS_X86_OP_REG || b->kind != AS_X86_OP_MEM) {
+        if (insn->op_count != 2) {
             set_err(&ctx, "unsupported bound form");
             return -1;
         }
-        if (emit8(&ctx, 0x62) != 0 || modrm_sib_disp(&ctx, a->u.reg, b) != 0) {
+        if (a->kind == AS_X86_OP_REG && b->kind == AS_X86_OP_MEM) {
+            if (emit8(&ctx, 0x62) != 0 || modrm_sib_disp(&ctx, a->u.reg, b) != 0) {
+                return -1;
+            }
+        } else if (a->kind == AS_X86_OP_MEM && b->kind == AS_X86_OP_REG) {
+            if (emit8(&ctx, 0x62) != 0 || modrm_sib_disp(&ctx, b->u.reg, a) != 0) {
+                return -1;
+            }
+        } else {
+            set_err(&ctx, "unsupported bound form");
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "les") || streq_ci(insn->mnemonic, "lds")) {
@@ -1338,6 +1390,10 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         if (insn->op_count != 0 || emit8(&ctx, 0xce) != 0) {
             return -1;
         }
+    } else if (streq_ci(insn->mnemonic, "salc")) {
+        if (insn->op_count != 0 || emit8(&ctx, 0xd6) != 0) {
+            return -1;
+        }
     } else if (streq_ci(insn->mnemonic, "iret") || streq_ci(insn->mnemonic, "iretw")) {
         if (insn->op_count != 0 || emit8(&ctx, 0xcf) != 0) {
             return -1;
@@ -1408,10 +1464,6 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
 
         if (insn->op_count != 1 || (a->kind != AS_X86_OP_REG && a->kind != AS_X86_OP_MEM)) {
             set_err(&ctx, "unsupported setcc form");
-            return -1;
-        }
-        if (a->kind == AS_X86_OP_REG && (a->u.reg & 7) > 3) {
-            set_err(&ctx, "unsupported i386 8-bit register in setcc");
             return -1;
         }
         for (i = 0; i < sizeof(ccmap) / sizeof(ccmap[0]); ++i) {
@@ -1492,8 +1544,13 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "in")) {
-        if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && b->kind == AS_X86_OP_IMM && a->u.reg == AS_X86_REG_EAX) {
-            if (emit8(&ctx, 0xe5) != 0 || emit8(&ctx, (uint8_t)b->u.imm) != 0) {
+        if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && b->kind == AS_X86_OP_IMM && (a->u.reg & 7) == AS_X86_REG_EAX) {
+            if (emit8(&ctx, insn->byte_op ? 0xe4 : 0xe5) != 0 || emit8(&ctx, (uint8_t)b->u.imm) != 0) {
+                return -1;
+            }
+        } else if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && b->kind == AS_X86_OP_REG &&
+                   (a->u.reg & 7) == AS_X86_REG_EAX && (b->u.reg & 7) == AS_X86_REG_EDX) {
+            if (emit8(&ctx, insn->byte_op ? 0xec : 0xed) != 0) {
                 return -1;
             }
         } else {
@@ -1501,8 +1558,13 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "out")) {
-        if (insn->op_count == 2 && a->kind == AS_X86_OP_IMM && b->kind == AS_X86_OP_REG && b->u.reg == AS_X86_REG_EAX) {
-            if (emit8(&ctx, 0xe7) != 0 || emit8(&ctx, (uint8_t)a->u.imm) != 0) {
+        if (insn->op_count == 2 && a->kind == AS_X86_OP_IMM && b->kind == AS_X86_OP_REG && (b->u.reg & 7) == AS_X86_REG_EAX) {
+            if (emit8(&ctx, insn->byte_op ? 0xe6 : 0xe7) != 0 || emit8(&ctx, (uint8_t)a->u.imm) != 0) {
+                return -1;
+            }
+        } else if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && b->kind == AS_X86_OP_REG &&
+                   (a->u.reg & 7) == AS_X86_REG_EDX && (b->u.reg & 7) == AS_X86_REG_EAX) {
+            if (emit8(&ctx, insn->byte_op ? 0xee : 0xef) != 0) {
                 return -1;
             }
         } else {
@@ -1515,10 +1577,10 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             set_err(&ctx, "unsupported sldt form");
             return -1;
         }
-    } else if (streq_ci(insn->mnemonic, "sgdt") || streq_ci(insn->mnemonic, "sgdtl") ||
-               streq_ci(insn->mnemonic, "sidt") || streq_ci(insn->mnemonic, "sidtl") ||
-               streq_ci(insn->mnemonic, "lgdt") || streq_ci(insn->mnemonic, "lgdtl") ||
-               streq_ci(insn->mnemonic, "lidt") || streq_ci(insn->mnemonic, "lidtl") ||
+    } else if (streq_ci(insn->mnemonic, "sgdt") || streq_ci(insn->mnemonic, "sgdtl") || streq_ci(insn->mnemonic, "sgdtd") ||
+               streq_ci(insn->mnemonic, "sidt") || streq_ci(insn->mnemonic, "sidtl") || streq_ci(insn->mnemonic, "sidtd") ||
+               streq_ci(insn->mnemonic, "lgdt") || streq_ci(insn->mnemonic, "lgdtl") || streq_ci(insn->mnemonic, "lgdtd") ||
+               streq_ci(insn->mnemonic, "lidt") || streq_ci(insn->mnemonic, "lidtl") || streq_ci(insn->mnemonic, "lidtd") ||
                streq_ci(insn->mnemonic, "smsw") || streq_ci(insn->mnemonic, "lmsw") ||
                streq_ci(insn->mnemonic, "invlpg")) {
         uint8_t ext;
@@ -1526,10 +1588,10 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             set_err(&ctx, "unsupported %s form", insn->mnemonic);
             return -1;
         }
-        if (streq_ci(insn->mnemonic, "sgdt") || streq_ci(insn->mnemonic, "sgdtl")) ext = 0;
-        else if (streq_ci(insn->mnemonic, "sidt") || streq_ci(insn->mnemonic, "sidtl")) ext = 1;
-        else if (streq_ci(insn->mnemonic, "lgdt") || streq_ci(insn->mnemonic, "lgdtl")) ext = 2;
-        else if (streq_ci(insn->mnemonic, "lidt") || streq_ci(insn->mnemonic, "lidtl")) ext = 3;
+        if (streq_ci(insn->mnemonic, "sgdt") || streq_ci(insn->mnemonic, "sgdtl") || streq_ci(insn->mnemonic, "sgdtd")) ext = 0;
+        else if (streq_ci(insn->mnemonic, "sidt") || streq_ci(insn->mnemonic, "sidtl") || streq_ci(insn->mnemonic, "sidtd")) ext = 1;
+        else if (streq_ci(insn->mnemonic, "lgdt") || streq_ci(insn->mnemonic, "lgdtl") || streq_ci(insn->mnemonic, "lgdtd")) ext = 2;
+        else if (streq_ci(insn->mnemonic, "lidt") || streq_ci(insn->mnemonic, "lidtl") || streq_ci(insn->mnemonic, "lidtd")) ext = 3;
         else if (streq_ci(insn->mnemonic, "smsw")) ext = 4;
         else if (streq_ci(insn->mnemonic, "lmsw")) ext = 6;
         else ext = 7;

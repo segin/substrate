@@ -341,7 +341,8 @@ static int is_x86_register_text(const char *s) {
         streq_ci(s, "eax") || streq_ci(s, "ebx") || streq_ci(s, "ecx") || streq_ci(s, "edx") ||
         streq_ci(s, "esi") || streq_ci(s, "edi") || streq_ci(s, "esp") || streq_ci(s, "ebp") ||
         streq_ci(s, "ax") || streq_ci(s, "bx") || streq_ci(s, "cx") || streq_ci(s, "dx") ||
-        streq_ci(s, "al") || streq_ci(s, "bl") || streq_ci(s, "cl") || streq_ci(s, "dl") ||
+        streq_ci(s, "al") || streq_ci(s, "ah") || streq_ci(s, "bl") || streq_ci(s, "bh") ||
+        streq_ci(s, "cl") || streq_ci(s, "ch") || streq_ci(s, "dl") || streq_ci(s, "dh") ||
         streq_ci(s, "sil") || streq_ci(s, "dil") || streq_ci(s, "spl") || streq_ci(s, "bpl") ||
         streq_ci(s, "cs") || streq_ci(s, "ds") || streq_ci(s, "es") || streq_ci(s, "fs") || streq_ci(s, "gs") ||
         streq_ci(s, "ss") || streq_ci(s, "rip") || streq_ci(s, "eip")) {
@@ -1084,7 +1085,8 @@ static int parse_intel_index_scale_token(parse_ctx_t *ctx, const as_token_t *tok
     }
     memcpy(left, s, left_n);
     left[left_n] = '\0';
-    if (!is_x86_register_text(left) && !is_arm_register_text(left)) {
+    if (!is_x86_register_text(left) && !is_arm_register_text(left) &&
+        !streq_ci(left, "eiz") && !streq_ci(left, "riz")) {
         free(left);
         return -1;
     }
@@ -1107,12 +1109,19 @@ static int parse_intel_index_scale_token(parse_ctx_t *ctx, const as_token_t *tok
         return -1;
     }
 
-    *index_reg_out = strip_register_prefix(left);
     *scale_out = (int)sc->value;
+    if (streq_ci(left, "eiz") || streq_ci(left, "riz")) {
+        *index_reg_out = NULL;
+    } else {
+        *index_reg_out = strip_register_prefix(left);
+    }
     free_expr(sc);
     free(left);
-    return *index_reg_out != NULL ? 0 : -1;
+    return 0;
 }
+
+static as_expr_t *parse_single_expr_text(parse_ctx_t *ctx, const as_token_t *tok, const char *text);
+static int parse_compound_intel_mem_token(parse_ctx_t *ctx, const as_token_t *tok, as_mem_operand_t *mem);
 
 static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, as_operand_t *out_op) {
     int lbr;
@@ -1193,14 +1202,33 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
     }
 
     for (i = (size_t)lbr + 1; i < (size_t)rbr; ++i) {
+        if (tokv[i].kind != AS_TOK_PUNCT) {
+            int parsed = parse_compound_intel_mem_token(ctx, &tokv[i], &mem);
+            if (parsed < 0) {
+                free(disp_toks);
+                free(mem.base_reg);
+                free(mem.index_reg);
+                free(mem.segment_reg);
+                free_expr(mem.disp);
+                return -1;
+            }
+            if (parsed > 0) {
+                continue;
+            }
+        }
         if (mem.index_reg == NULL && tokv[i].kind != AS_TOK_PUNCT &&
             parse_intel_index_scale_token(ctx, &tokv[i], &mem.index_reg, &mem.scale) == 0) {
             continue;
         }
-        if ((tokv[i].kind == AS_TOK_REGISTER || is_x86_register_text(tokv[i].text) || is_arm_register_text(tokv[i].text)) &&
+        if ((tokv[i].kind == AS_TOK_REGISTER || is_x86_register_text(tokv[i].text) || is_arm_register_text(tokv[i].text) ||
+             streq_ci(tokv[i].text, "eiz") || streq_ci(tokv[i].text, "riz")) &&
             i + 2 < (size_t)rbr && tokv[i + 1].kind == AS_TOK_OPERATOR && strcmp(tokv[i + 1].text, "*") == 0) {
             if (mem.index_reg == NULL) {
                 mem.index_reg = strip_register_prefix(tokv[i].text);
+            }
+            if (streq_ci(tokv[i].text, "eiz") || streq_ci(tokv[i].text, "riz")) {
+                free(mem.index_reg);
+                mem.index_reg = NULL;
             }
             if (tokv[i + 2].kind == AS_TOK_IMMEDIATE || tokv[i + 2].kind == AS_TOK_IDENTIFIER) {
                 as_expr_t *sc = parse_expression_from_tokens(ctx, tokv + i + 2, 1);
@@ -1215,11 +1243,17 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
 
         if ((tokv[i].kind == AS_TOK_REGISTER || is_x86_register_text(tokv[i].text) || is_arm_register_text(tokv[i].text)) &&
             mem.base_reg == NULL) {
+            if (streq_ci(tokv[i].text, "eiz") || streq_ci(tokv[i].text, "riz")) {
+                continue;
+            }
             mem.base_reg = strip_register_prefix(tokv[i].text);
             continue;
         }
         if ((tokv[i].kind == AS_TOK_REGISTER || is_x86_register_text(tokv[i].text) || is_arm_register_text(tokv[i].text)) &&
             mem.index_reg == NULL) {
+            if (streq_ci(tokv[i].text, "eiz") || streq_ci(tokv[i].text, "riz")) {
+                continue;
+            }
             mem.index_reg = strip_register_prefix(tokv[i].text);
             continue;
         }
@@ -1337,6 +1371,198 @@ bad:
     free_expr(mem.disp);
     return -1;
 }
+
+static as_expr_t *parse_single_expr_text(parse_ctx_t *ctx, const as_token_t *tok, const char *text) {
+    as_token_t fake;
+
+    if (ctx == NULL || tok == NULL || text == NULL || text[0] == '\0') {
+        return NULL;
+    }
+    memset(&fake, 0, sizeof(fake));
+    fake.kind = (isdigit((unsigned char)text[0]) || text[0] == '-' || text[0] == '+') ?
+                    AS_TOK_IMMEDIATE :
+                    AS_TOK_IDENTIFIER;
+    fake.text = (char *)text;
+    fake.file = tok->file;
+    fake.line = tok->line;
+    return parse_expression_from_tokens(ctx, &fake, 1);
+}
+
+static int append_intel_mem_disp_term(parse_ctx_t *ctx, const as_token_t *tok, as_mem_operand_t *mem,
+                                      const char *text, size_t len, int negate) {
+    as_expr_t *term;
+    as_expr_t *node;
+    char *tmp;
+
+    if (ctx == NULL || tok == NULL || mem == NULL || text == NULL || len == 0) {
+        return -1;
+    }
+    tmp = (char *)malloc(len + (negate ? 2 : 1));
+    if (tmp == NULL) {
+        return -1;
+    }
+    if (negate) {
+        tmp[0] = '-';
+        memcpy(tmp + 1, text, len);
+        tmp[len + 1] = '\0';
+    } else {
+        memcpy(tmp, text, len);
+        tmp[len] = '\0';
+    }
+    term = parse_single_expr_text(ctx, tok, tmp);
+    free(tmp);
+    if (term == NULL) {
+        return -1;
+    }
+    if (mem->disp == NULL) {
+        mem->disp = term;
+        return 0;
+    }
+    node = new_expr(AS_EXPR_BINARY, tok);
+    if (node == NULL) {
+        free_expr(term);
+        return -1;
+    }
+    node->op = AS_EXPR_OP_ADD;
+    node->lhs = mem->disp;
+    node->rhs = term;
+    mem->disp = node;
+    return 0;
+}
+
+static int parse_compound_intel_mem_token(parse_ctx_t *ctx, const as_token_t *tok, as_mem_operand_t *mem) {
+    const char *s;
+    const char *p;
+    int handled = 0;
+
+    if (ctx == NULL || tok == NULL || mem == NULL || tok->text == NULL) {
+        return -1;
+    }
+    s = tok->text;
+    if (*s == '%') {
+        ++s;
+    }
+
+    if (strchr(s, '+') == NULL && strchr(s, '-') == NULL && strchr(s, '*') == NULL) {
+        return 0;
+    }
+
+    p = s;
+    while (*p != '\0') {
+        const char *term;
+        const char *star;
+        size_t len;
+        int negate = 0;
+
+        if (*p == '+') {
+            ++p;
+        } else if (*p == '-') {
+            negate = 1;
+            ++p;
+        }
+        if (*p == '\0') {
+            return -1;
+        }
+        term = p;
+        while (*p != '\0' && *p != '+' && *p != '-') {
+            ++p;
+        }
+        len = (size_t)(p - term);
+        if (len == 0) {
+            return -1;
+        }
+        star = memchr(term, '*', len);
+        if (star != NULL) {
+            size_t reg_len = (size_t)(star - term);
+            size_t scale_len = len - reg_len - 1;
+            char *reg_text;
+            char *scale_text;
+            char *end = NULL;
+            long scale;
+
+            if (reg_len == 0 || scale_len == 0) {
+                return -1;
+            }
+            reg_text = (char *)malloc(reg_len + 1);
+            scale_text = (char *)malloc(scale_len + 1);
+            if (reg_text == NULL || scale_text == NULL) {
+                free(reg_text);
+                free(scale_text);
+                return -1;
+            }
+            memcpy(reg_text, term, reg_len);
+            reg_text[reg_len] = '\0';
+            memcpy(scale_text, star + 1, scale_len);
+            scale_text[scale_len] = '\0';
+            scale = strtol(scale_text, &end, 10);
+            if (!negate && (is_x86_register_text(reg_text) || streq_ci(reg_text, "eiz") || streq_ci(reg_text, "riz")) &&
+                *scale_text != '\0' && end != scale_text &&
+                *end == '\0' && (scale == 1 || scale == 2 || scale == 4 || scale == 8)) {
+                handled = 1;
+                if (!streq_ci(reg_text, "eiz") && !streq_ci(reg_text, "riz")) {
+                    if (mem->index_reg != NULL) {
+                        free(reg_text);
+                        free(scale_text);
+                        return -1;
+                    }
+                    mem->index_reg = strip_register_prefix(reg_text);
+                    if (mem->index_reg == NULL) {
+                        free(reg_text);
+                        free(scale_text);
+                        return -1;
+                    }
+                    mem->scale = (int)scale;
+                }
+            } else if (append_intel_mem_disp_term(ctx, tok, mem, term, len, negate) != 0) {
+                free(reg_text);
+                free(scale_text);
+                return -1;
+            } else {
+                handled = 1;
+            }
+            free(reg_text);
+            free(scale_text);
+            continue;
+        }
+        if (!negate) {
+            char *reg_text = (char *)malloc(len + 1);
+            if (reg_text == NULL) {
+                return -1;
+            }
+            memcpy(reg_text, term, len);
+            reg_text[len] = '\0';
+            if (is_x86_register_text(reg_text) || is_arm_register_text(reg_text) ||
+                streq_ci(reg_text, "eiz") || streq_ci(reg_text, "riz")) {
+                handled = 1;
+                if (!streq_ci(reg_text, "eiz") && !streq_ci(reg_text, "riz")) {
+                    if (mem->base_reg == NULL) {
+                        mem->base_reg = strip_register_prefix(reg_text);
+                    } else if (mem->index_reg == NULL) {
+                        mem->index_reg = strip_register_prefix(reg_text);
+                        mem->scale = 1;
+                    } else {
+                        free(reg_text);
+                        return -1;
+                    }
+                    if ((mem->base_reg == NULL && mem->index_reg == NULL) ||
+                        (mem->base_reg != NULL && mem->base_reg[0] == '\0') ||
+                        (mem->index_reg != NULL && mem->index_reg[0] == '\0')) {
+                        free(reg_text);
+                        return -1;
+                    }
+                }
+                free(reg_text);
+                continue;
+            }
+            free(reg_text);
+        }
+        if (append_intel_mem_disp_term(ctx, tok, mem, term, len, negate) != 0) {
+            return -1;
+        }
+        handled = 1;
+    }
+    return handled;
+}
 static int parse_register_list(const as_token_t *tokv, size_t n, as_operand_t *op) {
     size_t i;
     size_t capacity;
@@ -1433,7 +1659,6 @@ static int parse_operand_slice(parse_ctx_t *ctx, const as_token_t *tokv, size_t 
     if (op->raw == NULL) {
         return -1;
     }
-
     /*
      * AT&T indirect operands may be prefixed with '*', e.g. call *%r11 or
      * jmp *foo(%rip). Parse the inner operand normally.
@@ -1707,6 +1932,125 @@ static int parse_arm_condition(as_instruction_t *in) {
     return 0;
 }
 
+static int is_x86_far_imm_mnemonic(const char *mnemonic) {
+    size_t n;
+
+    if (mnemonic == NULL) {
+        return 0;
+    }
+    if (streq_ci(mnemonic, "call") || streq_ci(mnemonic, "jmp") ||
+        streq_ci(mnemonic, "lcall") || streq_ci(mnemonic, "ljmp")) {
+        return 1;
+    }
+    n = strlen(mnemonic);
+    if (n == 5 && (strncasecmp(mnemonic, "call", 4) == 0 || strncasecmp(mnemonic, "lcal", 4) == 0)) {
+        return 1;
+    }
+    if (n == 4 && (strncasecmp(mnemonic, "jmp", 3) == 0 || strncasecmp(mnemonic, "ljm", 3) == 0)) {
+        return 1;
+    }
+    return 0;
+}
+
+static int rewrite_x86_far_imm_mnemonic(char **mnemonic_io) {
+    const char *mnemonic;
+    char repl[16];
+    size_t n;
+
+    if (mnemonic_io == NULL || *mnemonic_io == NULL) {
+        return -1;
+    }
+    mnemonic = *mnemonic_io;
+    if (streq_ci(mnemonic, "call")) {
+        strcpy(repl, "lcall");
+    } else if (streq_ci(mnemonic, "jmp")) {
+        strcpy(repl, "ljmp");
+    } else if (streq_ci(mnemonic, "lcall") || streq_ci(mnemonic, "ljmp")) {
+        return 0;
+    } else {
+        n = strlen(mnemonic);
+        if (n == 5 && strncasecmp(mnemonic, "call", 4) == 0) {
+            snprintf(repl, sizeof(repl), "lcall%c", mnemonic[4]);
+        } else if (n == 4 && strncasecmp(mnemonic, "jmp", 3) == 0) {
+            snprintf(repl, sizeof(repl), "ljmp%c", mnemonic[3]);
+        } else if (n == 6 && strncasecmp(mnemonic, "lcall", 5) == 0) {
+            return 0;
+        } else if (n == 5 && strncasecmp(mnemonic, "ljmp", 4) == 0) {
+            return 0;
+        } else {
+            return -1;
+        }
+    }
+    free(*mnemonic_io);
+    *mnemonic_io = xstrdup(repl);
+    return *mnemonic_io != NULL ? 0 : -1;
+}
+
+static int parse_x86_far_immediate_pair(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
+                                        as_operand_t *offset_op, as_operand_t *segment_op) {
+    size_t colon = (size_t)-1;
+    size_t j;
+    as_expr_t *lhs;
+    as_expr_t *rhs;
+
+    if (ctx == NULL || tokv == NULL || n == 0 || offset_op == NULL || segment_op == NULL) {
+        return -1;
+    }
+    for (j = 0; j < n; ++j) {
+        if ((tokv[j].kind == AS_TOK_OPERATOR || tokv[j].kind == AS_TOK_PUNCT) &&
+            strcmp(tokv[j].text, ":") == 0) {
+            colon = j;
+            break;
+        }
+    }
+    if (colon == (size_t)-1 && n == 1) {
+        const char *c = strchr(tokv[0].text, ':');
+        as_token_t lhs_tok;
+        as_token_t rhs_tok;
+        char *lhs_text;
+        if (c == NULL || c == tokv[0].text || c[1] == '\0') {
+            return -1;
+        }
+        lhs_text = strndup(tokv[0].text, (size_t)(c - tokv[0].text));
+        if (lhs_text == NULL) {
+            return -1;
+        }
+        memset(&lhs_tok, 0, sizeof(lhs_tok));
+        memset(&rhs_tok, 0, sizeof(rhs_tok));
+        lhs_tok.kind = (isdigit((unsigned char)lhs_text[0]) || lhs_text[0] == '-' || lhs_text[0] == '+') ?
+                       AS_TOK_IMMEDIATE : AS_TOK_IDENTIFIER;
+        lhs_tok.text = lhs_text;
+        lhs_tok.file = tokv[0].file;
+        lhs_tok.line = tokv[0].line;
+        rhs_tok.kind = (isdigit((unsigned char)c[1]) || c[1] == '-' || c[1] == '+') ?
+                       AS_TOK_IMMEDIATE : AS_TOK_IDENTIFIER;
+        rhs_tok.text = (char *)(c + 1);
+        rhs_tok.file = tokv[0].file;
+        rhs_tok.line = tokv[0].line;
+        lhs = parse_expression_from_tokens(ctx, &lhs_tok, 1);
+        rhs = parse_expression_from_tokens(ctx, &rhs_tok, 1);
+        free(lhs_text);
+    } else {
+        if (colon == (size_t)-1 || colon == 0 || colon + 1 >= n) {
+            return -1;
+        }
+        lhs = parse_expression_from_tokens(ctx, tokv, colon);
+        rhs = parse_expression_from_tokens(ctx, tokv + colon + 1, n - colon - 1);
+    }
+    if (lhs == NULL || rhs == NULL) {
+        free_expr(lhs);
+        free_expr(rhs);
+        return -1;
+    }
+    memset(offset_op, 0, sizeof(*offset_op));
+    memset(segment_op, 0, sizeof(*segment_op));
+    offset_op->kind = AS_OPERAND_IMMEDIATE;
+    offset_op->u.expr = rhs;
+    segment_op->kind = AS_OPERAND_IMMEDIATE;
+    segment_op->u.expr = lhs;
+    return 0;
+}
+
 static int prefix_flag_for(const char *s, char **segment_override) {
     if (streq_ci(s, "lock")) {
         return AS_PREFIX_LOCK;
@@ -1822,6 +2166,45 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                 if (ctx->cfg != NULL && ctx->cfg->arch == AS_PARSER_ARCH_ARM && in.operand_count > 0 &&
                     is_shift_keyword(tokv[start].text) && parse_shift_suffix(ctx, &in.operands[in.operand_count - 1], tokv + start, i - start) == 0) {
                     /* Shift suffix consumed by previous operand. */
+                } else if (ctx->cfg != NULL && ctx->cfg->arch == AS_PARSER_ARCH_X86 &&
+                           in.operand_count == 0 && is_x86_far_imm_mnemonic(in.mnemonic)) {
+                    as_operand_t off_op;
+                    as_operand_t seg_op;
+
+                    memset(&off_op, 0, sizeof(off_op));
+                    memset(&seg_op, 0, sizeof(seg_op));
+                    if (parse_x86_far_immediate_pair(ctx, tokv + start, i - start, &off_op, &seg_op) == 0) {
+                        if (rewrite_x86_far_imm_mnemonic(&in.mnemonic) != 0 ||
+                            add_operand(&in, &off_op) != 0 ||
+                            add_operand(&in, &seg_op) != 0) {
+                            free_operand(&off_op);
+                            free_operand(&seg_op);
+                            free(in.mnemonic);
+                            free(in.arm_condition);
+                            free(in.segment_override);
+                            return -1;
+                        }
+                    } else {
+                        if (parse_operand_slice(ctx, tokv + start, i - start, &op) != 0) {
+                            char *bad = join_tokens(tokv + start, i - start, 0);
+                            set_err(ctx, "%s:%u: invalid operand '%s'",
+                                    tokv[start].file != NULL ? tokv[start].file : "<input>",
+                                    tokv[start].line,
+                                    bad != NULL ? bad : "<unknown>");
+                            free(bad);
+                            free(in.mnemonic);
+                            free(in.arm_condition);
+                            free(in.segment_override);
+                            return -1;
+                        }
+                        if (add_operand(&in, &op) != 0) {
+                            free_operand(&op);
+                            free(in.mnemonic);
+                            free(in.arm_condition);
+                            free(in.segment_override);
+                            return -1;
+                        }
+                    }
                 } else {
                     if (parse_operand_slice(ctx, tokv + start, i - start, &op) != 0) {
                         char *bad = join_tokens(tokv + start, i - start, 0);
