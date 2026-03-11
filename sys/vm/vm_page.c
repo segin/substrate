@@ -9,6 +9,7 @@
 #include <kern/time.h>
 #include <kern/sched.h>
 #include <pm/pm.h>
+#include <sys/param.h>
 #include <sys/signal.h>
 #include <stddef.h>
 #include <string.h>
@@ -320,6 +321,28 @@ static struct pv_entry pv_pool[PV_POOL_SIZE];
 static struct pv_entry *pv_free_list = NULL;
 static int pv_pool_initialized = 0;
 
+static int pv_entry_ptr_sane(const struct pv_entry *entry) {
+    uintptr_t addr = (uintptr_t)entry;
+
+    if (!entry) {
+        return 1;
+    }
+
+    if (addr < KERN_BASE) {
+        return 0;
+    }
+
+    if (addr >= 0xFF000000U) {
+        return 0;
+    }
+
+    if (addr & (sizeof(void *) - 1)) {
+        return 0;
+    }
+
+    return 1;
+}
+
 static void pv_pool_init(void) {
 	if(pv_pool_initialized) return;
 	for(int i = 0; i < PV_POOL_SIZE; i++) {
@@ -367,6 +390,10 @@ static void pv_free(struct pv_entry *entry) {
 void pv_insert(vm_page_t *page, struct pmap *pmap, uintptr_t va) {
 	if(!page || !pmap) return;
 
+	if (!pv_entry_ptr_sane(page->pv_list)) {
+		page->pv_list = NULL;
+	}
+
 	struct pv_entry *entry = pv_alloc();
 	if(!entry) {
 		kprint("pv_insert: out of pv_entry structs!\n");
@@ -382,8 +409,17 @@ void pv_insert(vm_page_t *page, struct pmap *pmap, uintptr_t va) {
 void pv_remove(vm_page_t *page, struct pmap *pmap, uintptr_t va) {
 	if(!page) return;
 
+	if (!pv_entry_ptr_sane(page->pv_list)) {
+		page->pv_list = NULL;
+		return;
+	}
+
 	struct pv_entry **pp = &page->pv_list;
 	while(*pp) {
+		if (!pv_entry_ptr_sane(*pp)) {
+			*pp = NULL;
+			return;
+		}
 		struct pv_entry *entry = *pp;
 		if(entry->pmap == pmap && entry->va == va) {
 			*pp = entry->next;
@@ -397,8 +433,17 @@ void pv_remove(vm_page_t *page, struct pmap *pmap, uintptr_t va) {
 void pv_remove_all(vm_page_t *page) {
 	if(!page) return;
 
+	if (!pv_entry_ptr_sane(page->pv_list)) {
+		page->pv_list = NULL;
+		return;
+	}
+
 	struct pv_entry *entry = page->pv_list;
 	while(entry) {
+		if (!pv_entry_ptr_sane(entry)) {
+			page->pv_list = NULL;
+			return;
+		}
 		struct pv_entry *next = entry->next;
 		pv_free(entry);
 		entry = next;

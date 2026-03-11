@@ -23,6 +23,7 @@
 #include <kern/time.h>
 #include <kern/sched.h>
 #include <intr.h>
+#include <pm/pm.h>
 
 /*
  * ============================================================
@@ -115,6 +116,38 @@ static inline void ide_bm_write32(uint8_t channel, uint8_t reg, uint32_t data) {
  */
 
 /* Wait for BSY to clear */
+static int ide_can_block_wait(void) {
+    if (!current_thread || !current_process) {
+        return 0;
+    }
+
+    /*
+     * Early boot and kernel-task bring-up still exercise fragile context
+     * switch paths. Keep IDE polling local until we are in ordinary
+     * userspace or a later kernel worker.
+     */
+    if (current_process->is_kernel_task && current_process->pid <= 1) {
+        return 0;
+    }
+
+    return 1;
+}
+
+static inline void ide_wait_backoff(int *yield_count) {
+    if (ide_can_block_wait()) {
+        if ((*yield_count)++ < 100) {
+            sched_yield();
+        } else {
+            sched_sleep_until(NULL, get_ticks() + 1);
+        }
+        return;
+    }
+
+    for (int i = 0; i < 64; i++) {
+        __asm__ volatile("pause");
+    }
+}
+
 static void ide_wait_bsy(uint8_t channel) {
     uint64_t start = get_uptime_ms();
     int spins = 0;
@@ -125,11 +158,7 @@ static void ide_wait_bsy(uint8_t channel) {
                 kprint("ide: timeout waiting for BSY\n");
                 break;
             }
-            if (yield_count++ < 100) {
-                sched_yield();
-            } else {
-                sched_sleep_until(NULL, get_ticks() + 1);
-            }
+            ide_wait_backoff(&yield_count);
         } else {
             __asm__ volatile("pause");
         }
@@ -160,11 +189,7 @@ static int ide_wait_drq(uint8_t channel) {
         }
 
         if (spins++ > 1000) {
-            if (yield_count++ < 100) {
-                sched_yield();
-            } else {
-                sched_sleep_until(NULL, get_ticks() + 1);
-            }
+            ide_wait_backoff(&yield_count);
         } else {
             __asm__ volatile("pause");
         }
@@ -192,11 +217,7 @@ static int ide_wait_ready(uint8_t channel, int timeout_ms) {
         }
 
         if (spins++ > 1000) {
-            if (yield_count++ < 100) {
-                sched_yield();
-            } else {
-                sched_sleep_until(NULL, get_ticks() + 1);
-            }
+            ide_wait_backoff(&yield_count);
         } else {
             __asm__ volatile("pause");
         }

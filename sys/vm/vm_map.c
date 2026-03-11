@@ -905,7 +905,19 @@ static void free_holes_tree(vm_map_hole_t *node) {
 // Destroy a vm_map and free all its entries
 void vm_map_destroy(vm_map_t *map) {
     if (!map) return;
-    
+
+    /*
+     * Tear down hardware mappings before releasing backing objects.
+     * Otherwise VM object deallocation can free and recycle physical pages
+     * while the old pmap still contains PTEs pointing at them, and the later
+     * pmap_destroy() walk will chase stale PV metadata.
+     */
+    if (map->pmap) {
+        pmap_t pmap = map->pmap;
+        map->pmap = NULL;
+        pmap_destroy(pmap);
+    }
+
     free_holes_tree(map->holes_root);
 
     vm_map_entry_t *header = map->header;
@@ -922,12 +934,7 @@ void vm_map_destroy(vm_map_t *map) {
         }
         free_entry(header);
     }
-    
-    // Destroy the associated pmap
-    if (map->pmap) {
-        pmap_destroy(map->pmap);
-    }
-    
+
     kfree(map, sizeof(vm_map_t));
 }
 

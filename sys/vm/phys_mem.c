@@ -21,6 +21,42 @@ static size_t vm_phys_low_watermark = 128; // 512 KB target
 
 vm_page_t *vm_phys_paddr_to_page(uintptr_t pa);
 
+static void vm_phys_reset_page_metadata(vm_page_t *page) {
+    if (!page) {
+        return;
+    }
+
+    page->next = NULL;
+    page->prev = NULL;
+    page->object = NULL;
+    page->pindex = 0;
+    page->flags = 0;
+    page->wire_count = 0;
+    page->ref_count = 0;
+    page->access_count = 0;
+    page->age = 0;
+    page->last_modified = 0;
+    page->order = 0;
+    page->pv_list = NULL;
+    page->magic_head = VM_PAGE_MAGIC;
+    page->magic_tail = VM_PAGE_MAGIC;
+}
+
+static void vm_phys_prepare_allocated_block(vm_page_t *page, int order) {
+    if (!page || order < 0) {
+        return;
+    }
+
+    size_t count = (size_t)1U << order;
+    for (size_t i = 0; i < count; i++) {
+        vm_page_t *p = &page[i];
+        uintptr_t pa = p->phys_addr;
+        vm_phys_reset_page_metadata(p);
+        p->phys_addr = pa;
+        p->ref_count = 1;
+    }
+}
+
 // Internal Helpers
 static void vm_phys_buddy_enqueue(int order, vm_page_t *page) {
     page->next = vm_phys_free_lists[order];
@@ -90,7 +126,7 @@ static vm_page_t* vm_phys_alloc_locked(int order) {
             }
             
             vm_phys_free_count -= (1 << order);
-            page->ref_count = 1; // Default for new allocation
+            vm_phys_prepare_allocated_block(page, order);
             return page;
         }
     }
@@ -228,13 +264,6 @@ vm_page_t *vm_phys_alloc_contiguous(size_t count) {
     spinlock_acquire(&vm_phys_lock);
     
     vm_page_t *page = vm_phys_alloc_locked(order);
-    if (page) {
-        // All pages in the contiguous block get ref_count 1
-        for (size_t i = 0; i < (1UL << order); i++) {
-            vm_page_t *p = &page[i];
-            p->ref_count = 1;
-        }
-    }
     size_t free_left = vm_phys_free_count;
     
     spinlock_release(&vm_phys_lock);
