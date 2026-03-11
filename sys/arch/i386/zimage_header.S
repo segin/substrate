@@ -15,6 +15,12 @@
 zimage_start:
     jmp setup_start
 
+.set ZIMG_SCRATCH_SEG,      0x0000
+.set ZIMG_SCRATCH_CMDLINE,  0x0500
+.set ZIMG_SCRATCH_RAMDISK,  0x0504
+.set ZIMG_SCRATCH_RDSIZE,   0x0508
+.set ZIMG_SCRATCH_CODE32,   0x050C
+
 .org 0x1F1
 setup_sects: .byte 0
 root_flags:  .word 0
@@ -47,6 +53,45 @@ setup_start:
     cli
     cld
 
+    /*
+     * Linux boot protocol does not promise DS/ES already point at the setup
+     * segment. Normalize them before touching local header/GDT symbols.
+     */
+    movw %cs, %ax
+    subw $0x20, %ax                # setup enters at image_base + 0x200
+    movw %ax, %ds
+    xorw %ax, %ax
+    movw %ax, %es
+
+    /*
+     * After switching to protected mode we run with flat base-0 segments, so
+     * setup-image local symbols are no longer directly addressable. Snapshot
+     * the Linux boot header values we need into fixed low-memory scratch.
+     */
+    movl cmd_line_ptr, %eax
+    movl %eax, %es:ZIMG_SCRATCH_CMDLINE
+    movl ramdisk_image, %eax
+    movl %eax, %es:ZIMG_SCRATCH_RAMDISK
+    movl ramdisk_size, %eax
+    movl %eax, %es:ZIMG_SCRATCH_RDSIZE
+    movl code32_start, %eax
+    movl %eax, %es:ZIMG_SCRATCH_CODE32
+
+    /*
+     * Build an absolute far pointer to pm_entry. Once CR0.PE is set, a jump to
+     * the raw symbol offset would land near address 0 instead of the actual
+     * loaded setup image.
+     */
+    movw %ds, %ax
+    movzwl %ax, %eax
+    shll $4, %eax
+    movl %eax, %edx
+    addl $gdt, %edx
+    movl %edx, gdt_desc + 2
+    addl $pm_entry, %eax
+    movl %eax, pm_jump_ptr
+    movw $0x0008, pm_jump_ptr + 4
+
     # Enable A20 via fast A20 gate (port 0x92)
     inb $0x92, %al
     orb $0x02, %al
@@ -58,7 +103,7 @@ setup_start:
     orl $0x1, %eax
     movl %eax, %cr0
 
-    ljmp $0x08, $pm_entry
+    ljmpl *pm_jump_ptr
 
 .code32
 pm_entry:
@@ -80,14 +125,14 @@ pm_entry:
     movl $MBI_ADDR, %edi
     movl %eax, 0(%edi)
 
-    movl cmd_line_ptr, %eax        # Filled by loader using Linux boot ABI
+    movl ZIMG_SCRATCH_CMDLINE, %eax
     movl %eax, 16(%edi)            # multiboot_info_t.cmdline
 
     # If Linux loader provided initrd, expose it as one Multiboot module.
-    movl ramdisk_size, %ecx
+    movl ZIMG_SCRATCH_RDSIZE, %ecx
     testl %ecx, %ecx
     jz 1f
-    movl ramdisk_image, %edx
+    movl ZIMG_SCRATCH_RAMDISK, %edx
     testl %edx, %edx
     jz 1f
 
@@ -104,7 +149,7 @@ pm_entry:
     movl $0x2BADB002, %eax         # MULTIBOOT_BOOTLOADER_MAGIC
     movl $MBI_ADDR, %ebx
 
-    movl code32_start, %edx
+    movl $0x00100000, %edx
     jmp *%edx
 
 .align 8
@@ -117,6 +162,10 @@ gdt_end:
 gdt_desc:
     .word gdt_end - gdt - 1
     .long gdt
+
+pm_jump_ptr:
+    .long 0
+    .word 0
 
 .set MBI_ADDR, 0x00080000
 .set MBI_MOD_ADDR, 0x00080100
