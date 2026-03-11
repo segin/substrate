@@ -17,7 +17,7 @@ TIMEOUT_BIN=${TIMEOUT_BIN:-timeout}
 QEMU_TIMEOUT=${QEMU_TIMEOUT:-35}
 LOG_DIR=${LOG_DIR:-"$SCRIPT_DIR/logs"}
 WORK_ROOTFS_IMG=${WORK_ROOTFS_IMG:-"$LOG_DIR/rootfs.img"}
-DEFAULT_CASES="hello_elks sleep_elks fileio_elks fork_elks bounds_test_elks cat_elks fuzz_syscalls_elks upstream_ls_elks upstream_uname_elks upstream_df_elks upstream_ps_elks upstream_meminfo_elks upstream_sh_prompt_elks upstream_sh_ls_elks native_sh_elks_sh"
+DEFAULT_CASES="hello_elks sleep_elks fileio_elks fork_elks bounds_test_elks cat_elks fuzz_syscalls_elks upstream_ls_elks upstream_pwd_elks upstream_date_elks upstream_tty_elks upstream_stty_elks upstream_uname_elks upstream_df_elks upstream_ps_elks upstream_meminfo_elks upstream_sh_prompt_elks upstream_sh_ls_elks upstream_sh_cd_pwd_elks native_sh_elks_sh"
 
 if [ "$#" -gt 0 ]; then
     CASES="$*"
@@ -207,6 +207,18 @@ fi
 if want_case upstream_ls_elks; then
     run_init_case upstream_ls_elks /perso/elks/bin/ls "bin         dev         lost+found  perso       proc        sys"
 fi
+if want_case upstream_pwd_elks; then
+    run_init_case upstream_pwd_elks /perso/elks/bin/pwd "/"
+fi
+if want_case upstream_date_elks; then
+    run_init_case upstream_date_elks /perso/elks/bin/date "202"
+fi
+if want_case upstream_tty_elks; then
+    run_init_case upstream_tty_elks /perso/elks/bin/tty "/dev/console"
+fi
+if want_case upstream_stty_elks; then
+    run_init_case upstream_stty_elks /perso/elks/bin/stty "speed 0 baud;" "erase = ^?"
+fi
 if want_case upstream_uname_elks; then
     run_init_case upstream_uname_elks /perso/elks/bin/uname "Substra"
 fi
@@ -226,6 +238,11 @@ if want_case upstream_sh_ls_elks; then
     run_monitor_case upstream_sh_ls_elks /perso/elks/bin/sh \
         "sendkey l\nsendkey s\nsendkey ret" \
         "# " "bin" "dev" "perso"
+fi
+if want_case upstream_sh_cd_pwd_elks; then
+    run_monitor_case upstream_sh_cd_pwd_elks /perso/elks/bin/sh \
+        "sendkey c\nsendkey d\nsendkey spc\nsendkey slash\nsendkey p\nsendkey e\nsendkey r\nsendkey s\nsendkey o\nsendkey ret\nsendkey p\nsendkey w\nsendkey d\nsendkey ret" \
+        "# " "/perso"
 fi
 if want_case native_sh_elks_sh; then
     case_name=native_sh_elks_sh

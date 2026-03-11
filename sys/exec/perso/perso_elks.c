@@ -20,12 +20,14 @@
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
+#include <sys/poll.h>
 #include <pm/pm.h>
 #include <kern/time.h>
 #include <kern/cmdline.h>
 #include <vm/vm_kmem.h>
 #include <vm/phys_mem.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -46,6 +48,19 @@ static int elks_debug_enabled(const char *channel) {
         return 1;
     }
     return channel && cmdline_debug_enabled(channel);
+}
+
+static int elks_first_set_bit(uint32_t mask) {
+    int bit = 0;
+
+    while (mask != 0U) {
+        if ((mask & 1U) != 0U) {
+            return bit;
+        }
+        mask >>= 1;
+        bit++;
+    }
+    return -1;
 }
 
 static void elks_copy_cstr(char *dst, size_t dst_size, const char *src) {
@@ -159,6 +174,8 @@ struct elks_timeval {
     int32_t tv_sec;
     int32_t tv_usec;
 } __attribute__((packed, aligned(2)));
+
+typedef int32_t elks_time_t;
 
 struct elks_timezone {
     int16_t tz_minuteswest;
@@ -1284,19 +1301,26 @@ static int elks_sys_chdir(uint32_t path_off, uint32_t unused1, uint32_t unused2,
 static int elks_sys_time(uint32_t tloc_off, uint32_t unused1, uint32_t unused2,
                          uint32_t unused3, uint32_t unused4, uint32_t unused5,
                          uint32_t unused6, uint32_t unused7) {
+    elks_time_t elks_time;
     uintptr_t linear = 0;
-    time_t *tloc = NULL;
+    time_t native_time;
 
     (void)unused1; (void)unused2; (void)unused3; (void)unused4;
     (void)unused5; (void)unused6; (void)unused7;
 
+    native_time = sys_time(NULL);
+    if (native_time < (time_t)INT32_MIN || native_time > (time_t)INT32_MAX) {
+        return -EOVERFLOW;
+    }
+    elks_time = (elks_time_t)native_time;
+
     if (tloc_off != 0U) {
-        if (elks_ds_span(tloc_off, sizeof(time_t), &linear) != 0) {
+        if (elks_ds_span(tloc_off, sizeof(elks_time), &linear) != 0) {
             return -EFAULT;
         }
-        tloc = (time_t *)(uintptr_t)linear;
+        memcpy((void *)(uintptr_t)linear, &elks_time, sizeof(elks_time));
     }
-    return (int)sys_time(tloc);
+    return (int)elks_time;
 }
 
 static int elks_sys_mknod(uint32_t path_off, uint32_t mode, uint32_t dev,
@@ -1386,15 +1410,19 @@ static int elks_sys_umount(uint32_t target_off, uint32_t unused1, uint32_t unuse
 static int elks_sys_stime(uint32_t time_off, uint32_t unused1, uint32_t unused2,
                           uint32_t unused3, uint32_t unused4, uint32_t unused5,
                           uint32_t unused6, uint32_t unused7) {
+    elks_time_t elks_time;
+    time_t native_time;
     uintptr_t linear = 0;
 
     (void)unused1; (void)unused2; (void)unused3; (void)unused4;
     (void)unused5; (void)unused6; (void)unused7;
 
-    if (elks_ds_span(time_off, sizeof(time_t), &linear) != 0) {
+    if (elks_ds_span(time_off, sizeof(elks_time), &linear) != 0) {
         return -EFAULT;
     }
-    return sys_stime((time_t *)(uintptr_t)linear);
+    memcpy(&elks_time, (const void *)(uintptr_t)linear, sizeof(elks_time));
+    native_time = (time_t)elks_time;
+    return sys_stime(&native_time);
 }
 
 static int elks_sys_unlink(uint32_t path_off, uint32_t unused1, uint32_t unused2,
@@ -1948,6 +1976,127 @@ static int elks_sys_ustatfs(uint32_t dev, uint32_t statfs_off, uint32_t flags,
     return 0;
 }
 
+static int elks_sys_select(uint32_t nfds, uint32_t readfds_off, uint32_t writefds_off,
+                           uint32_t exceptfds_off, uint32_t timeout_off, uint32_t unused5,
+                           uint32_t unused6, uint32_t unused7) {
+    uint32_t read_mask = 0;
+    uint32_t write_mask = 0;
+    uint32_t except_mask = 0;
+    uint32_t combined;
+    struct pollfd pfds[32];
+    struct elks_timeval timeout_copy;
+    uintptr_t linear = 0;
+    size_t poll_count = 0;
+    int timeout_ms = -1;
+    int ready;
+
+    (void)unused5; (void)unused6; (void)unused7;
+
+    if (nfds > 32U) {
+        return -EINVAL;
+    }
+    if (readfds_off != 0U) {
+        if (elks_ds_span(readfds_off, sizeof(read_mask), &linear) != 0) {
+            return -EFAULT;
+        }
+        memcpy(&read_mask, (const void *)(uintptr_t)linear, sizeof(read_mask));
+    }
+    if (writefds_off != 0U) {
+        if (elks_ds_span(writefds_off, sizeof(write_mask), &linear) != 0) {
+            return -EFAULT;
+        }
+        memcpy(&write_mask, (const void *)(uintptr_t)linear, sizeof(write_mask));
+    }
+    if (exceptfds_off != 0U) {
+        if (elks_ds_span(exceptfds_off, sizeof(except_mask), &linear) != 0) {
+            return -EFAULT;
+        }
+        memcpy(&except_mask, (const void *)(uintptr_t)linear, sizeof(except_mask));
+    }
+    if (timeout_off != 0U) {
+        if (elks_ds_span(timeout_off, sizeof(timeout_copy), &linear) != 0) {
+            return -EFAULT;
+        }
+        memcpy(&timeout_copy, (const void *)(uintptr_t)linear, sizeof(timeout_copy));
+        if (timeout_copy.tv_sec < 0 || timeout_copy.tv_usec < 0 || timeout_copy.tv_usec >= 1000000) {
+            return -EINVAL;
+        }
+        if (timeout_copy.tv_sec > (INT32_MAX / 1000)) {
+            timeout_ms = INT32_MAX;
+        } else {
+            timeout_ms = (int)(timeout_copy.tv_sec * 1000);
+            timeout_ms += (int)(timeout_copy.tv_usec / 1000);
+        }
+    }
+
+    combined = read_mask | write_mask | except_mask;
+    while (combined != 0U) {
+        int bit = elks_first_set_bit(combined);
+        short events = 0;
+
+        if (bit < 0 || (uint32_t)bit >= nfds) {
+            break;
+        }
+        if ((read_mask & (1U << bit)) != 0U) {
+            events |= POLLIN;
+        }
+        if ((write_mask & (1U << bit)) != 0U) {
+            events |= POLLOUT;
+        }
+        if ((except_mask & (1U << bit)) != 0U) {
+            events |= POLLPRI;
+        }
+        pfds[poll_count].fd = bit;
+        pfds[poll_count].events = events;
+        pfds[poll_count].revents = 0;
+        poll_count++;
+        combined &= ~(1U << bit);
+    }
+
+    ready = kern_poll(pfds, (unsigned int)poll_count, timeout_ms);
+    if (ready < 0) {
+        return ready;
+    }
+
+    read_mask = 0U;
+    write_mask = 0U;
+    except_mask = 0U;
+    for (size_t i = 0; i < poll_count; i++) {
+        uint32_t bit = 1U << (uint32_t)pfds[i].fd;
+        short revents = pfds[i].revents;
+
+        if ((revents & (POLLIN | POLLRDNORM | POLLERR | POLLHUP)) != 0) {
+            read_mask |= bit;
+        }
+        if ((revents & (POLLOUT | POLLWRNORM | POLLERR)) != 0) {
+            write_mask |= bit;
+        }
+        if ((revents & (POLLPRI | POLLERR | POLLHUP)) != 0) {
+            except_mask |= bit;
+        }
+    }
+
+    if (readfds_off != 0U) {
+        if (elks_ds_span(readfds_off, sizeof(read_mask), &linear) != 0) {
+            return -EFAULT;
+        }
+        memcpy((void *)(uintptr_t)linear, &read_mask, sizeof(read_mask));
+    }
+    if (writefds_off != 0U) {
+        if (elks_ds_span(writefds_off, sizeof(write_mask), &linear) != 0) {
+            return -EFAULT;
+        }
+        memcpy((void *)(uintptr_t)linear, &write_mask, sizeof(write_mask));
+    }
+    if (exceptfds_off != 0U) {
+        if (elks_ds_span(exceptfds_off, sizeof(except_mask), &linear) != 0) {
+            return -EFAULT;
+        }
+        memcpy((void *)(uintptr_t)linear, &except_mask, sizeof(except_mask));
+    }
+    return ready;
+}
+
 static int elks_sys_uname(uint32_t uts_off, uint32_t unused1, uint32_t unused2,
                           uint32_t unused3, uint32_t unused4, uint32_t unused5,
                           uint32_t unused6, uint32_t unused7) {
@@ -2265,6 +2414,7 @@ static void *elks_syscall_table[ELKS_SYS_MAX] = {
     [ELKS_SYS_lstat]   = (void *)&elks_sys_lstat,
     [ELKS_SYS_readlink] = (void *)&elks_sys_readlink,
     [ELKS_SYS_gettimeofday] = (void *)&elks_sys_gettimeofday,
+    [ELKS_SYS_select]  = (void *)&elks_sys_select,
     [ELKS_SYS_ustatfs] = (void *)&elks_sys_ustatfs,
     [ELKS_SYS_uname]   = (void *)&elks_sys_uname,
     [ELKS_SYS_umask]   = (void *)&sys_umask,
@@ -2301,6 +2451,7 @@ static const char *elks_syscall_names[ELKS_SYS_MAX] = {
     [ELKS_SYS_execve]  = "execve",
     [ELKS_SYS_alarm]   = "alarm",
     [ELKS_SYS_kill]    = "kill",
+    [ELKS_SYS_select]  = "select",
     [ELKS_SYS_ustatfs] = "ustatfs",
     [ELKS_SYS_uname]   = "uname",
 };

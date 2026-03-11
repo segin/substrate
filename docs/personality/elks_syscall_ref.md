@@ -28,11 +28,12 @@ Status meanings:
 | 9 | `link` | Partial | Two-path ELKS pointer translation is implemented and host-validated; no dedicated upstream smoke yet. |
 | 10 | `unlink` | Working | 16-bit pathname translation is implemented and smoke-tested. |
 | 11 | `execve` | Working | ELKS packed startup stack decoding and LDT replacement are implemented. |
-| 12 | `chdir` | Partial | ELKS pathname translation is implemented and host-validated; no dedicated ELKS smoke yet. |
-| 13 | `time` | Partial | Numbering is reserved in the design, but no ELKS runtime validation yet. |
+| 12 | `chdir` | Working | ELKS pathname translation is implemented and smoke-tested through upstream ELKS shell `cd /perso && pwd`. |
+| 13 | `time` | Working | ELKS uses a 32-bit `time_t` at the personality boundary; the wrapper translates native time safely and is smoke-tested with upstream `date`. |
 | 14 | `mknod` | Partial | ELKS pathname/device marshaling is implemented and host-validated; no upstream smoke yet. |
 | 15 | `chmod` | Partial | ELKS pathname/mode marshaling is implemented and host-validated; no upstream smoke yet. |
 | 16 | `chown` | Partial | ELKS pathname/credential marshaling is implemented and host-validated; no upstream smoke yet. |
+| 17 | `brk` | Working | 16-bit bounded `brk` translation is implemented. |
 | 18 | `stat` | Partial | Requires ELKS/Minix-shaped `stat` structure translation. |
 | 19 | `lseek` | Partial | Native syscall exists; ELKS width semantics are not fully validated. |
 | 20 | `getpid` | Partial | Expected to work through native return path; not smoke-tested yet. |
@@ -40,7 +41,7 @@ Status meanings:
 | 22 | `umount` | Partial | ELKS target-path translation is implemented and host-validated; no upstream smoke yet. |
 | 23 | `setuid` | Partial | Native syscall exists; ELKS credential-width validation not complete. |
 | 24 | `getuid` | Partial | Native syscall exists; ELKS credential-width validation not complete. |
-| 25 | `stime` | Unsupported | No completed ELKS ABI contract yet. |
+| 25 | `stime` | Working | The wrapper translates a 32-bit ELKS `time_t` into native kernel time and is host-validated. |
 | 27 | `alarm` | Working | Smoke-tested with ELKS signal delivery. |
 | 28 | `fstat` | Partial | Requires ELKS/Minix-shaped `stat` structure translation. |
 | 29 | `pause` | Working | Smoke-tested with `alarm` and signal delivery. |
@@ -52,14 +53,14 @@ Status meanings:
 | 41 | `dup` | Partial | Direct mapping exists; no ELKS smoke coverage yet. |
 | 42 | `pipe` | Partial | ELKS 16-bit pipe-fd array marshaling is implemented and host-validated; no upstream pipeline smoke yet. |
 | 43 | `times` | Partial | ELKS `struct tms` translation is implemented and host-validated; no upstream `times` smoke yet. |
-| 45 | `brk` | Working | 16-bit bounded `brk` translation is implemented. |
+| 45 | `dup2` | Partial | Direct mapping exists; no ELKS smoke coverage yet. |
 | 46 | `setgid` | Partial | Native syscall exists; ELKS width validation not complete. |
 | 47 | `getgid` | Partial | Native syscall exists; ELKS width validation not complete. |
 | 48 | `signal` | Working | ELKS handler translation and callback-frame delivery are implemented. |
-| 54 | `ioctl` | Unsupported | ELKS ioctl numbering and structure translation are not finished. |
+| 54 | `ioctl` | Partial | ELKS `/dev/kmem` compatibility and tty `termios`/`winsize` translation are implemented; upstream `tty` and `stty` run successfully, but broader device-specific ioctl namespaces are not finished. |
 | 55 | `fcntl` | Unsupported | ELKS command/flag translation is not finished. |
 | 60 | `umask` | Partial | Direct/native path exists; ELKS validation not complete. |
-| 63 | `dup2` | Partial | Direct mapping exists; no ELKS smoke coverage yet. |
+| 63 | `select` | Working | The ELKS `fd_set` and timeout are translated through `kern_poll()`; host coverage validates mask and timeout marshaling. |
 | 64 | `getppid` | Partial | Direct mapping exists; no ELKS smoke coverage yet. |
 | 65 | `getpgrp` | Partial | Direct mapping exists; no ELKS smoke coverage yet. |
 | 69 | `sbrk` | Working | 16-bit heap growth with old-break copyout is implemented and unit-tested. |
@@ -74,13 +75,25 @@ The current ELKS QEMU smoke suite validates:
 - `sleep_elks`
 - `fileio_elks`
 - `fork_elks`
+- upstream `ls`
+- upstream `pwd`
+- upstream `date`
+- upstream `tty`
+- upstream `stty`
+- upstream `uname`
+- upstream `df`
+- upstream `ps`
+- upstream `meminfo`
+- upstream `sh` prompt
+- upstream `sh` executing `ls`
+- upstream `sh` executing `cd /perso; pwd`
+- native `/bin/sh` handing off to upstream ELKS `sh`
 
 These are driven by `tests/elks/run_tests.sh`.
 
 ## 4. Known open runtime issues
 
-- LDT bounds-violation validation is not complete; current fault testing still
-  exposes an unresolved fault-handling bug.
-- Core dump support for ELKS processes is not implemented.
+- Persistent core-file emission is not implemented; the kernel only captures
+  in-memory crash state for ELKS faults today.
 - Many structure-bearing syscalls still need ELKS-specific layout translation.
 - `ustatfs(70)` now works for mount enumeration, but `df` still lacks ELKS-style block-device names because Substrate does not currently expose flat `/dev/hd*` aliases.

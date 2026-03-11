@@ -6,6 +6,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include <sys/errno.h>
 #include <sys/proc.h>
 #include <pm/pm.h>
 #include <sys/ldt.h>
@@ -13,6 +14,7 @@
 #include <sys/stat.h>
 #include <sys/utsname.h>
 #include <sys/file.h>
+#include <sys/poll.h>
 #include <sys/termios.h>
 #include <sys/time.h>
 #include <sys/times.h>
@@ -52,6 +54,10 @@ static uint8_t *ds_mem;
 static size_t ds_mem_size;
 static size_t stub_vm_phys_free_pages = 512;
 static size_t stub_vm_phys_used_pages = 256;
+static struct pollfd last_poll_fds[32];
+static unsigned int last_poll_nfds;
+static int last_poll_timeout;
+typedef int32_t elks_time_t;
 
 #define ELKS_TEST_NCCS 17
 #define ELKS_TEST_TERMIOS_BYTES offsetof(struct termios, c_cc[ELKS_TEST_NCCS])
@@ -112,6 +118,7 @@ static size_t stub_vm_phys_used_pages = 256;
 #define kern_fstat stub_kern_fstat
 #define kern_readlink stub_kern_readlink
 #define kern_sigaction stub_kern_sigaction
+#define kern_poll stub_kern_poll
 #define kern_gettimeofday stub_kern_gettimeofday
 #define kern_stime stub_kern_stime
 #define kern_uname stub_kern_uname
@@ -299,6 +306,18 @@ int stub_kern_sigaction(int sig, const struct sigaction *act, struct sigaction *
         *oact = stub_oldact;
     }
     return 0;
+}
+int stub_kern_poll(struct pollfd *fds, unsigned int nfds, int timeout) {
+    unsigned int i;
+
+    last_poll_nfds = nfds;
+    last_poll_timeout = timeout;
+    memset(last_poll_fds, 0, sizeof(last_poll_fds));
+    for (i = 0; i < nfds && i < 32U; i++) {
+        last_poll_fds[i] = fds[i];
+        fds[i].revents = fds[i].events;
+    }
+    return (int)nfds;
 }
 int stub_kern_gettimeofday(struct timeval *tv, struct timezone *tz) {
     if (tv) {
@@ -689,6 +708,37 @@ int main(void) {
         }
     }
 
+    *(uint32_t *)(void *)(ds_mem + 0x168) = (1U << 0) | (1U << 2);
+    *(uint32_t *)(void *)(ds_mem + 0x16C) = (1U << 1);
+    *(uint32_t *)(void *)(ds_mem + 0x170) = (1U << 2);
+    *(int32_t *)(void *)(ds_mem + 0x174) = 1;
+    *(int32_t *)(void *)(ds_mem + 0x178) = 500000;
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_select];
+    if (fn(3, 0x168, 0x16C, 0x170, 0x174, 0, 0, 0) != 3 ||
+        last_poll_nfds != 3U || last_poll_timeout != 1500) {
+        fprintf(stderr, "FAIL: ELKS select wrapper count/timeout wrong\n");
+        return 1;
+    }
+    if (last_poll_fds[0].fd != 0 || last_poll_fds[0].events != POLLIN ||
+        last_poll_fds[1].fd != 1 || last_poll_fds[1].events != POLLOUT ||
+        last_poll_fds[2].fd != 2 || last_poll_fds[2].events != (POLLIN | POLLPRI)) {
+        fprintf(stderr, "FAIL: ELKS select wrapper poll translation wrong\n");
+        return 1;
+    }
+    if (*(uint32_t *)(void *)(ds_mem + 0x168) != ((1U << 0) | (1U << 2)) ||
+        *(uint32_t *)(void *)(ds_mem + 0x16C) != (1U << 1) ||
+        *(uint32_t *)(void *)(ds_mem + 0x170) != (1U << 2)) {
+        fprintf(stderr, "FAIL: ELKS select wrapper fdset copyout wrong\n");
+        return 1;
+    }
+    *(int32_t *)(void *)(ds_mem + 0x174) = 0;
+    *(int32_t *)(void *)(ds_mem + 0x178) = 1000000;
+    if (fn(3, 0x168, 0x16C, 0x170, 0x174, 0, 0, 0) != -EINVAL) {
+        fprintf(stderr, "FAIL: ELKS select invalid timeout not rejected\n");
+        return 1;
+    }
+
+    fn = (void *)personality_elks.syscall_table[ELKS_SYS_ioctl];
     memset(ds_mem + 0x150, 0, 16);
     if (fn(4, ELKS_MEM_GETDS, 0x150, 0, 0, 0, 0, 0) != 0 ||
         *(uint16_t *)(void *)(ds_mem + 0x150) != 0) {
@@ -904,14 +954,20 @@ int main(void) {
         return 1;
     }
 
-    *(time_t *)(void *)(ds_mem + 0x1d0) = 0;
+    *(elks_time_t *)(void *)(ds_mem + 0x1d0) = 0;
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_time];
     if (fn(0x1d0, 0, 0, 0, 0, 0, 0, 0) != (int)stub_clock_sec ||
-        strcmp(last_name, "time") != 0 || last_ptr != ds_base + 0x1d0U ||
-        *(time_t *)(void *)(ds_mem + 0x1d0) != stub_clock_sec) {
+        strcmp(last_name, "time") != 0 || last_ptr != 0U ||
+        *(elks_time_t *)(void *)(ds_mem + 0x1d0) != (elks_time_t)stub_clock_sec) {
         fprintf(stderr, "FAIL: ELKS time wrapper wrong\n");
         return 1;
     }
+    stub_clock_sec = (time_t)INT32_MAX + 1;
+    if (fn(0x1d0, 0, 0, 0, 0, 0, 0, 0) != -EOVERFLOW) {
+        fprintf(stderr, "FAIL: ELKS time overflow not rejected\n");
+        return 1;
+    }
+    stub_clock_sec = 123456789;
 
     strcpy((char *)(ds_mem + 0x1e0), "/dev/test");
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_mknod];
@@ -957,10 +1013,10 @@ int main(void) {
         return 1;
     }
 
-    *(time_t *)(void *)(ds_mem + 0x2c0) = 777;
+    *(elks_time_t *)(void *)(ds_mem + 0x2c0) = 777;
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_stime];
     if (fn(0x2c0, 0, 0, 0, 0, 0, 0, 0) != 53 || strcmp(last_name, "stime") != 0 ||
-        last_ptr != ds_base + 0x2c0U || stub_clock_sec != 777) {
+        stub_clock_sec != 777) {
         fprintf(stderr, "FAIL: ELKS stime wrapper wrong\n");
         return 1;
     }
