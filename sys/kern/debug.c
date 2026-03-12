@@ -12,6 +12,19 @@ static const char *state_names[] = {
     "READY", "RUNNING", "BLOCKED", "ZOMBIE"
 };
 
+static const char *bitness_name(uint8_t bitness) {
+    switch (bitness) {
+        case 16:
+            return "16";
+        case 32:
+            return "32";
+        case 64:
+            return "64";
+        default:
+            return "-";
+    }
+}
+
 static void dump_thread_callback(thread_t *t, void *arg) {
     (void)arg;
     char buf[128];
@@ -20,6 +33,7 @@ static void dump_thread_callback(thread_t *t, void *arg) {
     static char name_buf[24];
     const char *name = "(kernel)";
     const char *pers = "(kernel)";
+    const char *bits = "-";
     
     if (t->proc) {
         pid = t->proc->pid;
@@ -41,12 +55,13 @@ static void dump_thread_callback(thread_t *t, void *arg) {
             const char *pname = perso_name(t->proc->perso_id);
             if (pname) pers = pname;
         }
+        bits = bitness_name(t->proc->bitness);
     }
     
     const char *reason = t->wait_reason ? t->wait_reason : "";
 
-    sprintf(buf, " %5d | %5d | %-8.8s | %-16.16s | %-9.9s | %s\n",
-            t->tid, pid, state, name, pers, reason);
+    sprintf(buf, " %5d | %5d | %-8.8s | %-16.16s | %-9.9s | %-4.4s | %s\n",
+            t->tid, pid, state, name, pers, bits, reason);
     kprint(buf);
 }
 
@@ -66,8 +81,8 @@ void debug_dump_processes(void) {
         kprint(buf);
     }
     
-    kprint("\n   TID |   PID | STATE    | NAME             | PERSO     | WAIT REASON\n");
-    kprint("-------|-------|----------|------------------|-----------|------------\n");
+    kprint("\n   TID |   PID | STATE    | NAME             | PERSO     | BITS | WAIT REASON\n");
+    kprint("-------|-------|----------|------------------|-----------|------|------------\n");
     
     sched_iterate_threads(dump_thread_callback, NULL);
     
