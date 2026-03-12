@@ -42,32 +42,32 @@ Reference: User Request (Step 31552)
         - Tests: integration (exec ELKS binary triggers loader)
         - Acceptance: ELKS binaries dispatched to elks_load() function.
 
-- [ ] **ELKS Exec Loader:** (REQ: REQ-20-0009)
-    - [ ] Implement `elks_load()` function for ELKS binary loading. (REQ: REQ-20-0010)
+- [x] **ELKS Exec Loader:** (REQ: REQ-20-0009)
+    - [x] Implement `elks_load()` function for ELKS binary loading. (REQ: REQ-20-0010)
         - Files: `sys/exec/formats/elks_aout.c`
         - Tests: unit (load sample ELKS binary into memory)
         - Acceptance: Binary text/data/bss segments loaded correctly.
-    - [ ] Allocate 16-bit LDT segments via LDT API for code/data/stack. (REQ: REQ-20-0011)
+    - [x] Allocate 16-bit LDT segments via LDT API for code/data/stack. (REQ: REQ-20-0011)
         - Files: `sys/exec/formats/elks_aout.c`, `sys/arch/i386/ldt.c`
         - Tests: unit (verify LDT entries created)
         - Acceptance: Separate LDT entries for CS (code), DS (data), SS (stack), ES (extra).
-    - [ ] Set up ELKS stack segment with correct base and limit. (REQ: REQ-20-0012)
+    - [x] Set up ELKS stack segment with correct base and limit. (REQ: REQ-20-0012)
         - Files: `sys/exec/formats/elks_aout.c`, `sys/exec/formats/elks_aout.h`
         - Tests: unit (stack segment bounds)
         - Acceptance: Stack limit enforced by hardware; overflow triggers #SS exception.
-    - [ ] Set up ELKS data segment with correct base and limit. (REQ: REQ-20-0013)
+    - [x] Set up ELKS data segment with correct base and limit. (REQ: REQ-20-0013)
         - Files: `sys/exec/formats/elks_aout.c`, `sys/exec/formats/elks_aout.h`
         - Tests: unit (data segment bounds)
         - Acceptance: Data accesses beyond limit trigger #GP exception.
-    - [ ] Route ELKS `INT 0x80` through the standard user-callable i386 syscall gate. (REQ: REQ-20-0014)
+    - [x] Route ELKS `INT 0x80` through the standard user-callable i386 syscall gate. (REQ: REQ-20-0014)
         - Files: `sys/arch/i386/idt.c`, `sys/arch/i386/syscall.c`, `sys/arch/i386/syscall_abi.h`
         - Tests: unit (ELKS register ABI extraction)
         - Acceptance: `INT 0x80` from an LDT-backed 16-bit ELKS context reaches the kernel syscall handler using ELKS argument order `BX, CX, DX, DI, SI`.
-    - [ ] Handle ELKS environment variables and argv setup. (REQ: REQ-20-0015)
+    - [x] Handle ELKS environment variables and argv setup. (REQ: REQ-20-0015)
         - Files: `sys/exec/formats/elks_aout.c`, `sys/exec/formats/elks_aout.h`
         - Tests: unit (ELKS startup stack image)
         - Acceptance: ELKS startup stack contains correct `argc`, `argv`, and `envp` arrays as 16-bit offsets relative to `DS`.
-    - [ ] Set process bitness to BITNESS_16 on ELKS exec. (REQ: REQ-20-0016)
+    - [x] Set process bitness to BITNESS_16 on ELKS exec. (REQ: REQ-20-0016)
         - Files: `sys/exec/formats/elks_aout.c`, `sys/exec/formats/elks_aout.h`
         - Tests: unit (verify ELKS exec state helper)
         - Acceptance: ELKS exec applies `PERS_ELKS`, `BITNESS_16`, the initial `brk`, and the basename-derived process name before userspace handoff.

@@ -8,6 +8,7 @@
 #include <sys/proc.h>
 #include <sys/ldt.h>
 #include <vm/vm_map.h>
+#include <vm/vm_object.h>
 #include <vm/vm_kmem.h>
 #include <arch/i386/pmm.h>
 #include <arch/i386/pmap.h>
@@ -23,7 +24,6 @@
 #include <kern/panic.h>
 #include <kern/arch.h>
 #include <kern/cmdline.h>
-#include <vm/vm_map.h>
 
 #define ELKS_ARG_MAX_BYTES (32 * 1024)
 #define ELKS_ARG_MAX_COUNT 4096
@@ -52,6 +52,55 @@ static int SUB_NODISCARD elks_fail(int fd, int err, const char *msg) {
 
 void elks_init_handler(void) {
     exec_register_handler(&elks_handler);
+}
+
+static int elks_map_object_pages(vm_map_t *map, pmap_t pmap, uint32_t start,
+                                 uint32_t length, uint8_t prot,
+                                 vm_object_t **obj_out) {
+    uint32_t aligned_length;
+    uint32_t va;
+    vm_object_t *obj;
+
+    if (obj_out) {
+        *obj_out = NULL;
+    }
+    if (!map || !pmap || length == 0) {
+        return 0;
+    }
+
+    aligned_length = (length + 0x0FFFU) & ~0x0FFFU;
+    obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, aligned_length);
+    if (!obj) {
+        return -ENOMEM;
+    }
+
+    if (vm_map_insert(map, obj, 0, start, start + aligned_length,
+                      prot, prot, VM_INHERIT_COPY) != 0) {
+        vm_object_deallocate(obj);
+        return -ENOMEM;
+    }
+
+    for (va = start; va < start + aligned_length; va += 0x1000U) {
+        vm_page_t *page = vm_page_alloc(obj, (uint64_t)((va - start) >> 12), 0);
+        void *page_kva;
+
+        if (!page) {
+            return -ENOMEM;
+        }
+
+        vm_object_add_page(obj, page);
+        page_kva = (void *)(uintptr_t)(page->phys_addr + 0xC0000000U);
+        memset(page_kva, 0, 0x1000U);
+
+        if (pmap_enter(pmap, va, page->phys_addr, prot, 0) < 0) {
+            return -ENOMEM;
+        }
+    }
+
+    if (obj_out) {
+        *obj_out = obj;
+    }
+    return 0;
 }
 
 static int elks_is_user_ptr(const void *ptr) {
@@ -220,6 +269,7 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     struct elks_exec hdr;
     struct elks_supl_hdr suph;
     struct elks_load_plan plan;
+    vm_map_t *map = NULL;
     char **kargv = NULL;
     char **kenvp = NULL;
     size_t argv_envp_bytes;
@@ -300,51 +350,49 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     current_process->pmap = (struct pmap*)pmap;
     extern void pmap_activate(pmap_t pmap);
     pmap_activate(pmap);
-    
-    // Allocate and map memory for Text
-    for (uint32_t va = plan.text_base;
-         va < plan.text_base + ((plan.text_limit + 0x0FFFU) & ~0x0FFFU);
-         va += 0x1000) {
-        void *pa = pmm_alloc_block();
-        if (!pa) {
+    map = vm_map_create(pmap, 0, 0xC0000000U);
+    if (!map) {
+        elks_free_kernel_vector(kargv);
+        elks_free_kernel_vector(kenvp);
+        return elks_fail(fd, -ENOMEM, "ELKS: failed to create vm_map");
+    }
+
+    if (plan.combined) {
+        ret = elks_map_object_pages(map, pmap, plan.text_base, plan.text_limit,
+                                    VM_PROT_READ | VM_PROT_EXEC | VM_PROT_WRITE,
+                                    NULL);
+        if (ret != 0) {
             elks_free_kernel_vector(kargv);
             elks_free_kernel_vector(kenvp);
-            return elks_fail(fd, -ENOMEM, "ELKS: failed to allocate text page");
+            return elks_fail(fd, ret, "ELKS: failed to map combined text/data");
         }
-        uint32_t pa_phys = (uint32_t)pa - 0xC0000000;
-        pmap_enter(pmap, va, pa_phys, VM_PROT_READ | VM_PROT_EXEC | VM_PROT_WRITE, 0);
-        memset(pa, 0, 0x1000);
-    }
-    
-    if (!plan.combined) {
-        for (uint32_t va = plan.data_base;
-             va < plan.data_base + ((plan.data_limit + 0x0FFFU) & ~0x0FFFU);
-             va += 0x1000) {
-            void *pa = pmm_alloc_block();
-            if (!pa) {
-                elks_free_kernel_vector(kargv);
-                elks_free_kernel_vector(kenvp);
-                return elks_fail(fd, -ENOMEM, "ELKS: failed to allocate data page");
-            }
-            uint32_t pa_phys = (uint32_t)pa - 0xC0000000;
-            pmap_enter(pmap, va, pa_phys, VM_PROT_READ | VM_PROT_WRITE, 0);
-            memset(pa, 0, 0x1000);
+    } else {
+        ret = elks_map_object_pages(map, pmap, plan.text_base, plan.text_limit,
+                                    VM_PROT_READ | VM_PROT_EXEC | VM_PROT_WRITE,
+                                    NULL);
+        if (ret != 0) {
+            elks_free_kernel_vector(kargv);
+            elks_free_kernel_vector(kenvp);
+            return elks_fail(fd, ret, "ELKS: failed to map text");
+        }
+
+        ret = elks_map_object_pages(map, pmap, plan.data_base, plan.data_limit,
+                                    VM_PROT_READ | VM_PROT_WRITE, NULL);
+        if (ret != 0) {
+            elks_free_kernel_vector(kargv);
+            elks_free_kernel_vector(kenvp);
+            return elks_fail(fd, ret, "ELKS: failed to map data/stack");
         }
     }
 
     if (plan.fartext_size > 0) {
-        for (uint32_t va = plan.fartext_base;
-             va < plan.fartext_base + ((plan.fartext_size + 0x0FFFU) & ~0x0FFFU);
-             va += 0x1000) {
-            void *pa = pmm_alloc_block();
-            if (!pa) {
-                elks_free_kernel_vector(kargv);
-                elks_free_kernel_vector(kenvp);
-                return elks_fail(fd, -ENOMEM, "ELKS: failed to allocate far text page");
-            }
-            uint32_t pa_phys = (uint32_t)pa - 0xC0000000;
-            pmap_enter(pmap, va, pa_phys, VM_PROT_READ | VM_PROT_EXEC | VM_PROT_WRITE, 0);
-            memset(pa, 0, 0x1000);
+        ret = elks_map_object_pages(map, pmap, plan.fartext_base, plan.fartext_size,
+                                    VM_PROT_READ | VM_PROT_EXEC | VM_PROT_WRITE,
+                                    NULL);
+        if (ret != 0) {
+            elks_free_kernel_vector(kargv);
+            elks_free_kernel_vector(kenvp);
+            return elks_fail(fd, ret, "ELKS: failed to map far text");
         }
     }
     
@@ -410,7 +458,7 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     if (current_process->vm_map) {
         vm_map_destroy(current_process->vm_map);
     }
-    current_process->vm_map = vm_map_create(pmap, 0, 0xC0000000U);
+    current_process->vm_map = map;
     arch_set_kernel_stack((uintptr_t)current_thread->kstack_top);
     
     // Stack setup (simplified for now)
