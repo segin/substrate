@@ -1065,6 +1065,30 @@ static int emit_i386_prefixed_xmm_srcdst_rm(unsigned char prefix, unsigned char 
     return emit_i386_prefixed_0f_rm(prefix, opcode2, xr, src, out, out_cap, out_len);
 }
 
+static int emit_i386_xmm_move_rm(unsigned char prefix, unsigned char load_opcode2,
+                                 unsigned char store_opcode2, const as_operand_t *src,
+                                 const as_operand_t *dst, unsigned char *out,
+                                 size_t out_cap, size_t *out_len) {
+    unsigned xr;
+    unsigned xm;
+
+    if (src == NULL || dst == NULL) {
+        return -1;
+    }
+    if (dst->kind == AS_OPERAND_REGISTER && parse_xmm_reg(dst->u.reg, &xr) == 0) {
+        if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
+            return -1;
+        }
+        return emit_i386_prefixed_0f_rm(prefix, load_opcode2, xr, src, out, out_cap, out_len);
+    }
+    if (src->kind == AS_OPERAND_REGISTER &&
+        (dst->kind == AS_OPERAND_MEMORY || dst->kind == AS_OPERAND_IMMEDIATE || dst->kind == AS_OPERAND_LABEL_REF) &&
+        parse_xmm_reg(src->u.reg, &xr) == 0) {
+        return emit_i386_prefixed_0f_rm(prefix, store_opcode2, xr, dst, out, out_cap, out_len);
+    }
+    return -1;
+}
+
 static int lookup_i386_packed_rm_opcode(const char *mnemonic, unsigned char *opcode2) {
     static const struct {
         const char *mnemonic;
@@ -3389,19 +3413,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return emit_i386_prefixed_0f_rm(0xf2, 0x2a, xr, src, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movss") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        if (dst->kind == AS_OPERAND_REGISTER && parse_xmm_reg(dst->u.reg, &xr) == 0) {
-            if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
-                return -1;
-            }
-            return emit_i386_prefixed_0f_rm(0xf3, 0x10, xr, src, out, out_cap, out_len);
-        }
-        if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xr) == 0) {
-            return emit_i386_prefixed_0f_rm(0xf3, 0x11, xr, dst, out, out_cap, out_len);
-        }
-        return -1;
+        return emit_i386_xmm_move_rm(0xf3, 0x10, 0x11, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "cvtsi2ss") == 0) {
         as_x86_reg_t gr;
@@ -4535,34 +4547,10 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return emit_i386_prefixed_0f_map_rm(0xf3, 0x38, opcode3, (unsigned)gr & 7u, src_op, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movups") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        if (dst->kind == AS_OPERAND_REGISTER && parse_xmm_reg(dst->u.reg, &xr) == 0) {
-            if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
-                return -1;
-            }
-            return emit_i386_legacy_simd_rm(0x00, 0x10, xr, src, out, out_cap, out_len);
-        }
-        if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xr) == 0) {
-            return emit_i386_prefixed_0f_rm(0x00, 0x11, xr, dst, out, out_cap, out_len);
-        }
-        return -1;
+        return emit_i386_xmm_move_rm(0x00, 0x10, 0x11, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movupd") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        if (dst->kind == AS_OPERAND_REGISTER && parse_xmm_reg(dst->u.reg, &xr) == 0) {
-            if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
-                return -1;
-            }
-            return emit_i386_prefixed_0f_rm(0x66, 0x10, xr, src, out, out_cap, out_len);
-        }
-        if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xr) == 0) {
-            return emit_i386_prefixed_0f_rm(0x66, 0x11, xr, dst, out, out_cap, out_len);
-        }
-        return -1;
+        return emit_i386_xmm_move_rm(0x66, 0x10, 0x11, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movlpd") == 0) {
         if (insn->operand_count != 2 || src == NULL || dst == NULL) {
@@ -4851,34 +4839,10 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return emit_i386_prefixed_0f_rm(0x00, 0x1c, 0u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movaps") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        if (dst->kind == AS_OPERAND_REGISTER && parse_xmm_reg(dst->u.reg, &xr) == 0) {
-            if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
-                return -1;
-            }
-            return emit_i386_legacy_simd_rm(0x00, 0x28, xr, src, out, out_cap, out_len);
-        }
-        if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xr) == 0) {
-            return emit_i386_prefixed_0f_rm(0x00, 0x29, xr, dst, out, out_cap, out_len);
-        }
-        return -1;
+        return emit_i386_xmm_move_rm(0x00, 0x28, 0x29, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movapd") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        if (dst->kind == AS_OPERAND_REGISTER && parse_xmm_reg(dst->u.reg, &xr) == 0) {
-            if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
-                return -1;
-            }
-            return emit_i386_prefixed_0f_rm(0x66, 0x28, xr, src, out, out_cap, out_len);
-        }
-        if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xr) == 0) {
-            return emit_i386_prefixed_0f_rm(0x66, 0x29, xr, dst, out, out_cap, out_len);
-        }
-        return -1;
+        return emit_i386_xmm_move_rm(0x66, 0x28, 0x29, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "cvtpi2ps") == 0) {
         if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
