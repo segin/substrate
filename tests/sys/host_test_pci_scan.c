@@ -6,7 +6,7 @@
 
 #include <kern/pci.h>
 
-static uint8_t mock_config[32][8][256];
+static uint8_t mock_config[256][32][8][256];
 static int mock_pci_available = 1;
 
 void kprint(const char *str) {
@@ -27,10 +27,10 @@ int pci_present(void) {
 }
 
 uint8_t pci_read_config8(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
-    if (!mock_pci_available || bus != 0 || slot >= 32 || func >= 8) {
+    if (!mock_pci_available || slot >= 32 || func >= 8) {
         return 0xFFU;
     }
-    return mock_config[slot][func][offset];
+    return mock_config[bus][slot][func][offset];
 }
 
 uint16_t pci_read_config16(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
@@ -44,10 +44,10 @@ uint32_t pci_read_config32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offs
 }
 
 void pci_write_config8(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint8_t value) {
-    if (!mock_pci_available || bus != 0 || slot >= 32 || func >= 8) {
+    if (!mock_pci_available || slot >= 32 || func >= 8) {
         return;
     }
-    mock_config[slot][func][offset] = value;
+    mock_config[bus][slot][func][offset] = value;
 }
 
 void pci_write_config16(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint16_t value) {
@@ -84,12 +84,12 @@ static void reset_bus(void) {
     pci_devices_clear();
 }
 
-static void mock_set_device(uint8_t slot, uint8_t func, uint16_t vendor, uint16_t device,
-                            uint16_t class_code, uint8_t header_type) {
-    memcpy(&mock_config[slot][func][0x00], &vendor, sizeof(vendor));
-    memcpy(&mock_config[slot][func][0x02], &device, sizeof(device));
-    memcpy(&mock_config[slot][func][0x0A], &class_code, sizeof(class_code));
-    mock_config[slot][func][0x0E] = header_type;
+static void mock_set_device(uint8_t bus, uint8_t slot, uint8_t func, uint16_t vendor,
+                            uint16_t device, uint16_t class_code, uint8_t header_type) {
+    memcpy(&mock_config[bus][slot][func][0x00], &vendor, sizeof(vendor));
+    memcpy(&mock_config[bus][slot][func][0x02], &device, sizeof(device));
+    memcpy(&mock_config[bus][slot][func][0x0A], &class_code, sizeof(class_code));
+    mock_config[bus][slot][func][0x0E] = header_type;
 }
 
 static void test_scan_empty_bus_returns_zero(void) {
@@ -102,7 +102,7 @@ static void test_scan_records_single_function_device(void) {
     pci_device_t *dev;
 
     reset_bus();
-    mock_set_device(5, 0, 0x1234, 0x5678, 0x0101, 0x00);
+    mock_set_device(0, 5, 0, 0x1234, 0x5678, 0x0101, 0x00);
 
     assert(pci_scan_bus(0) == 1);
     dev = pci_find_device(0x1234, 0x5678, NULL);
@@ -118,8 +118,8 @@ static void test_scan_detects_multifunction_slot(void) {
     pci_device_t *second;
 
     reset_bus();
-    mock_set_device(2, 0, 0x1111, 0xAAAA, 0x0106, 0x80);
-    mock_set_device(2, 3, 0x1111, 0xBBBB, 0x0200, 0x00);
+    mock_set_device(0, 2, 0, 0x1111, 0xAAAA, 0x0106, 0x80);
+    mock_set_device(0, 2, 3, 0x1111, 0xBBBB, 0x0200, 0x00);
 
     assert(pci_scan_bus(0) == 2);
     first = pci_find_device(0x1111, 0xAAAA, NULL);
@@ -136,11 +136,30 @@ static void test_scan_skips_non_pci_systems(void) {
     assert(pci_find_device(0x1234, 0x5678, NULL) == NULL);
 }
 
+static void test_scan_recurses_across_bridge_bus_range(void) {
+    pci_device_t *bridge;
+    pci_device_t *downstream;
+
+    reset_bus();
+    mock_set_device(0, 1, 0, 0x8086, 0x244E, 0x0604, 0x01);
+    mock_config[0][1][0][0x19] = 2;
+    mock_config[0][1][0][0x1A] = 2;
+    mock_set_device(2, 4, 0, 0x1AF4, 0x1001, 0x0100, 0x00);
+
+    assert(pci_scan_bus(0) == 2);
+    bridge = pci_find_device(0x8086, 0x244E, NULL);
+    downstream = pci_find_device(0x1AF4, 0x1001, NULL);
+    assert(bridge != NULL);
+    assert(downstream != NULL);
+    assert(downstream->bus == 2);
+}
+
 int main(void) {
     test_scan_empty_bus_returns_zero();
     test_scan_records_single_function_device();
     test_scan_detects_multifunction_slot();
     test_scan_skips_non_pci_systems();
+    test_scan_recurses_across_bridge_bus_range();
     puts("host_test_pci_scan: PASS");
     return 0;
 }

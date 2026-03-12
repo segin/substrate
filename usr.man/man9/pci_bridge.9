@@ -1,0 +1,35 @@
+.Dd March 12, 2026
+.Dt PCI_BRIDGE 9
+.Os
+.Sh NAME
+.Nm pci_scan_bridge
+.Nd scan buses behind a PCI-to-PCI bridge
+.Sh SYNOPSIS
+.In kern/pci.h
+.Ft int
+.Fn pci_scan_bridge "pci_device_t *bridge"
+.Sh DESCRIPTION
+The
+.Fn pci_scan_bridge
+function inspects a previously discovered PCI bridge device and scans the bus
+range described by its secondary and subordinate bus-number registers.
+.Pp
+Only devices with class code
+.Dv 0x0604
+are treated as PCI-to-PCI bridges.
+Non-bridge devices, disabled bridges, and bridges with invalid secondary or
+subordinate bus ranges are ignored.
+.Pp
+The bridge scan shares the same device-recording logic as
+.Fn pci_scan_bus ,
+so newly discovered downstream functions become visible through
+.Fn pci_find_device .
+.Sh RETURN VALUES
+The
+.Fn pci_scan_bridge
+function returns the number of downstream functions discovered behind the
+bridge.
+.Sh SEE ALSO
+.Xr pci_config 9 ,
+.Xr pci_scan 9 ,
+.Xr bus 9

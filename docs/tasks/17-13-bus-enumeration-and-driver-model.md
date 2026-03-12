@@ -218,7 +218,7 @@
         - Tests: unit (empty bus, populated bus, multifunction device)
         - Docs: `pci_scan.9`
         - Acceptance: All QEMU PCI devices discovered
-    - [ ] Implement bridge detection and subordinate bus scan. (REQ: REQ-17-0037)
+    - [x] Implement bridge detection and subordinate bus scan. (REQ: REQ-17-0037)
         - Files: `sys/kern/pci.c`
         - API: `int pci_scan_bridge(pci_device_t *bridge)`
         - Tests: integration (PCI-to-PCI bridge hierarchy)
