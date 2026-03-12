@@ -304,6 +304,8 @@ typedef struct scsi_device {
 
 /* Initialization */
 void scsi_init(void);
+void scsi_dev_init(void);
+void scsi_ctl_init(void);
 
 /* Transport Registration */
 int scsi_register_link(scsi_link_t *link);

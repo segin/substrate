@@ -62,11 +62,11 @@
                 - [ ] Vendor/Product/Revision strings (space-padded). (REQ: REQ-03-0045)
             - [ ] `scsi_report_luns_data`: REPORT LUNS response (up to 64 LUNs). (REQ: REQ-03-0046)
 
-        - [ ] **Initialization (`scsi_init`):** (REQ: REQ-03-0047)
-            - [ ] Initialize device registry (pre-allocate pool of `scsi_device_t`, 64 max). (REQ: REQ-03-0048)
-            - [ ] Initialize request pool (pre-allocate `scsi_request_t`, 128 max). (REQ: REQ-03-0049)
-            - [ ] Initialize free lists for both pools. (REQ: REQ-03-0050)
-            - [ ] Call `scsi_dev_init()` and `scsi_ctl_init()`. (REQ: REQ-03-0051)
+        - [x] **Initialization (`scsi_init`):** (REQ: REQ-03-0047)
+            - [x] Initialize device registry (pre-allocate pool of `scsi_device_t`, fixed-size static pool). (REQ: REQ-03-0048)
+            - [x] Initialize request pool (pre-allocate `scsi_request_t`, fixed-size static pool). (REQ: REQ-03-0049)
+            - [x] Initialize free lists for both pools. (REQ: REQ-03-0050)
+            - [x] Call `scsi_dev_init()` and `scsi_ctl_init()`. (REQ: REQ-03-0051)
 
         - [ ] **Transport Registration:** (REQ: REQ-03-0052)
             - [ ] `scsi_register_link(link)`: register HBA/transport adapter. (REQ: REQ-03-0053)
@@ -1277,8 +1277,8 @@
 - **US-03-0045**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to vendor/Product/Revision strings (space-padded) so that this capability is implemented with clear verification evidence.
 - **US-03-0046**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_report_luns_data: REPORT LUNS response (up to 64 LUNs) so that this capability is implemented with clear verification evidence.
 - **US-03-0047**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to initialization (scsi_init): so that this capability is implemented with clear verification evidence.
-- **US-03-0048**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to initialize device registry (pre-allocate pool of scsi_device_t, 64 max) so that this capability is implemented with clear verification evidence.
-- **US-03-0049**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to initialize request pool (pre-allocate scsi_request_t, 128 max) so that this capability is implemented with clear verification evidence.
+- **US-03-0048**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to initialize device registry with a fixed-size static `scsi_device_t` pool so that this capability is implemented with clear verification evidence.
+- **US-03-0049**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to initialize request pool with a fixed-size static `scsi_request_t` pool so that this capability is implemented with clear verification evidence.
 - **US-03-0050**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to initialize free lists for both pools so that this capability is implemented with clear verification evidence.
 - **US-03-0051**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to call scsi_dev_init() and scsi_ctl_init() so that this capability is implemented with clear verification evidence.
 - **US-03-0052**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to transport Registration: so that this capability is implemented with clear verification evidence.
@@ -2523,10 +2523,10 @@
 - **REQ-03-0047** (EARS/Ubiquitous): The Substrate system shall initialization (scsi_init):.
   - Context: 3. Drivers (`sys/drivers`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-03-0048** (EARS/Ubiquitous): The Substrate system shall initialize device registry (pre-allocate pool of scsi_device_t, 64 max).
+- **REQ-03-0048** (EARS/Ubiquitous): The Substrate system shall initialize the SCSI device registry from a fixed-size static `scsi_device_t` pool.
   - Context: 3. Drivers (`sys/drivers`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-03-0049** (EARS/Ubiquitous): The Substrate system shall initialize request pool (pre-allocate scsi_request_t, 128 max).
+- **REQ-03-0049** (EARS/Ubiquitous): The Substrate system shall initialize the SCSI request pool from a fixed-size static `scsi_request_t` pool.
   - Context: 3. Drivers (`sys/drivers`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-03-0050** (EARS/Ubiquitous): The Substrate system shall initialize free lists for both pools.

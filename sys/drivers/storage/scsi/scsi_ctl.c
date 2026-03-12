@@ -274,7 +274,6 @@ int scsi_create_bus_node(scsi_link_t *link, uint8_t bus_id) {
  */
 
 void scsi_ctl_init(void) {
-    scsi_dev_init();
     kprint("scsi: SCSI control interface initialized\n");
 }
 

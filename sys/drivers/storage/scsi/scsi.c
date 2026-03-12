@@ -76,6 +76,9 @@ void scsi_init(void) {
         scsi_links[i] = NULL;
     }
     scsi_link_count = 0;
+
+    scsi_dev_init();
+    scsi_ctl_init();
     
     kprint("SCSI: Mid-layer initialized (");
     char buf[32];
@@ -953,4 +956,3 @@ int scsi_scan_bus(scsi_link_t *link, uint8_t bus) {
     
     return devices_found;
 }
-
