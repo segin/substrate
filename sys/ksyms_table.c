@@ -679,6 +679,7 @@ extern void pci_enable_msix(void);
 extern void pci_find_bdf(void);
 extern void pci_find_capability(void);
 extern void pci_find_device(void);
+extern void pci_find_device_by_kdev(void);
 extern void pci_find_ext_capability(void);
 extern void pci_first_device(void);
 extern void pci_get_irq(void);
@@ -2361,6 +2362,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&pci_scan_bridge, "pci_scan_bridge" },
     { (uint32_t)(uintptr_t)&pci_scan, "pci_scan" },
     { (uint32_t)(uintptr_t)&pci_find_device, "pci_find_device" },
+    { (uint32_t)(uintptr_t)&pci_find_device_by_kdev, "pci_find_device_by_kdev" },
     { (uint32_t)(uintptr_t)&pci_first_device, "pci_first_device" },
     { (uint32_t)(uintptr_t)&pci_next_device, "pci_next_device" },
     { (uint32_t)(uintptr_t)&pci_dump_devices, "pci_dump_devices" },
@@ -3353,4 +3355,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1671;
+int ksym_count = 1672;

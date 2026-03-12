@@ -658,6 +658,19 @@ pci_device_t *pci_find_device(uint16_t vendor_id, uint16_t device_id, pci_device
     return NULL;
 }
 
+pci_device_t *pci_find_device_by_kdev(struct device *kdev) {
+    pci_device_t *curr = pci_devices_head;
+
+    while (curr != NULL) {
+        if (curr->kdev == kdev) {
+            return curr;
+        }
+        curr = curr->next;
+    }
+
+    return NULL;
+}
+
 pci_device_t *pci_first_device(void) {
     return pci_devices_head;
 }
