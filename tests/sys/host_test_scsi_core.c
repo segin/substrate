@@ -22,6 +22,14 @@ static uint8_t mock_sense_ascq;
 static int callback_calls;
 static int callback_last_error;
 static int callback_last_state;
+static int auto_attach_calls;
+static int discovery_report_luns_fail;
+static uint32_t discovery_present_luns_mask;
+static uint8_t discovery_device_type;
+static uint8_t discovery_version;
+static char discovery_vendor[9];
+static char discovery_product[17];
+static char discovery_revision[5];
 
 void kprint(const char *str) {
     (void)str;
@@ -39,7 +47,10 @@ int64_t get_uptime_ms(void) {
 
 void scsi_dev_init(void) {}
 void scsi_ctl_init(void) {}
-void scsi_auto_attach(scsi_device_t *dev) { (void)dev; }
+void scsi_auto_attach(scsi_device_t *dev) {
+    (void)dev;
+    auto_attach_calls++;
+}
 int scsi_create_bus_node(scsi_link_t *link, uint8_t bus_id) {
     (void)link;
     create_bus_node_calls++;
@@ -127,6 +138,83 @@ static int mock_execute(scsi_link_t *link, scsi_request_t *req) {
     return -1;
 }
 
+static int discovery_execute(scsi_link_t *link, scsi_request_t *req) {
+    (void)link;
+
+    if (req == NULL || req->device == NULL) {
+        return -1;
+    }
+
+    if ((discovery_present_luns_mask & (1U << req->device->lun)) == 0) {
+        return -1;
+    }
+
+    req->status = SCSI_STATUS_GOOD;
+
+    switch (req->cdb[0]) {
+    case SCSI_CMD_TEST_UNIT_READY:
+        return 0;
+    case SCSI_CMD_INQUIRY:
+        if (req->data == NULL || req->data_len < sizeof(struct scsi_inquiry_data)) {
+            return -1;
+        }
+        {
+            struct scsi_inquiry_data *inq = req->data;
+
+            memset(inq, 0, sizeof(*inq));
+            inq->device_type = discovery_device_type & 0x1F;
+            inq->version = discovery_version;
+            inq->response_format = 2;
+            inq->additional_len = 31;
+            memcpy(inq->vendor, discovery_vendor, 8);
+            memcpy(inq->product, discovery_product, 16);
+            memcpy(inq->revision, discovery_revision, 4);
+            req->data_xfer = sizeof(*inq);
+        }
+        return 0;
+    case SCSI_CMD_READ_CAPACITY_10:
+        if (req->data == NULL || req->data_len < 8) {
+            return -1;
+        }
+        memset(req->data, 0, req->data_len);
+        ((uint8_t *)req->data)[3] = 0xFF;
+        ((uint8_t *)req->data)[6] = 0x02;
+        req->data_xfer = 8;
+        return 0;
+    case SCSI_CMD_READ_CAPACITY_16:
+        if (req->data == NULL || req->data_len < 12) {
+            return -1;
+        }
+        memset(req->data, 0, req->data_len);
+        ((uint8_t *)req->data)[7] = 0xFF;
+        ((uint8_t *)req->data)[10] = 0x02;
+        req->data_xfer = 12;
+        return 0;
+    case SCSI_CMD_REPORT_LUNS:
+        if (discovery_report_luns_fail || req->data == NULL ||
+            req->data_len < sizeof(struct scsi_report_luns_data)) {
+            return -1;
+        }
+        {
+            struct scsi_report_luns_data *luns = req->data;
+            uint32_t count = 0;
+
+            memset(luns, 0, sizeof(*luns));
+            for (uint16_t lun = 0; lun < 32; lun++) {
+                if ((discovery_present_luns_mask & (1U << lun)) == 0) {
+                    continue;
+                }
+                luns->luns[count++] = (uint64_t)lun;
+            }
+            scsi_put_be32((uint8_t *)&luns->length, count * 8U);
+            req->data_xfer = sizeof(*luns);
+        }
+        return 0;
+    default:
+        return 0;
+    }
+}
+
 #include "../../sys/drivers/storage/scsi/scsi.c"
 
 static void reset_state(void) {
@@ -147,6 +235,20 @@ static void reset_state(void) {
     callback_calls = 0;
     callback_last_error = 0;
     callback_last_state = 0;
+    auto_attach_calls = 0;
+    discovery_report_luns_fail = 0;
+    discovery_present_luns_mask = 1U;
+    discovery_device_type = SCSI_TYPE_DISK;
+    discovery_version = 5;
+    memset(discovery_vendor, ' ', 8);
+    memset(discovery_product, ' ', 16);
+    memset(discovery_revision, ' ', 4);
+    memcpy(discovery_vendor, "DISCOVR", 7);
+    memcpy(discovery_product, "MOCK DISK", 9);
+    memcpy(discovery_revision, "1.0", 3);
+    discovery_vendor[8] = '\0';
+    discovery_product[16] = '\0';
+    discovery_revision[4] = '\0';
     scsi_init();
 }
 
@@ -492,6 +594,38 @@ static void test_queue_request_respects_max_queue_depth(void) {
     scsi_request_free(rejected_req);
 }
 
+static void test_scan_bus_falls_back_to_sequential_luns(void) {
+    scsi_link_t link;
+    scsi_device_t *lun0;
+    scsi_device_t *lun2;
+
+    reset_state();
+    memset(&link, 0, sizeof(link));
+    strcpy(link.name, "disc0");
+    link.execute = discovery_execute;
+    link.bus_id = 1;
+    link.max_targets = 1;
+    link.max_luns = 4;
+
+    discovery_report_luns_fail = 1;
+    discovery_present_luns_mask = (1U << 0) | (1U << 2);
+
+    assert(scsi_scan_bus(&link, 1) == 2);
+
+    lun0 = scsi_device_lookup(1, 0, 0);
+    lun2 = scsi_device_lookup(1, 0, 2);
+    assert(lun0 != NULL);
+    assert(lun2 != NULL);
+    assert(strcmp(lun0->vendor, "DISCOVR") == 0);
+    assert(strcmp(lun0->product, "MOCK DISK") == 0);
+    assert(strcmp(lun0->revision, "1.0") == 0);
+    assert(lun0->capacity == 256ULL);
+    assert(lun0->sector_size == 512);
+    assert(lun0->device_num == 0);
+    assert(lun2->device_num == 1);
+    assert(auto_attach_calls == 2);
+}
+
 int main(void) {
     test_register_link_sets_defaults_and_scans();
     test_unregister_link_detaches_registered_devices();
@@ -503,6 +637,7 @@ int main(void) {
     test_abort_request_preserves_tail();
     test_complete_request_runs_next_queued_request();
     test_queue_request_respects_max_queue_depth();
+    test_scan_bus_falls_back_to_sequential_luns();
     puts("host_test_scsi_core: PASS");
     return 0;
 }

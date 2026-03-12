@@ -1109,10 +1109,12 @@ int scsi_scan_bus(scsi_link_t *link, uint8_t bus) {
              */
             scsi_device_t *lun0_dev = scsi_device_lookup(bus, target, 0);
             if (lun0_dev) {
+                int have_report_luns = 0;
                 struct scsi_report_luns_data luns_data;
                 if (scsi_report_luns(lun0_dev, &luns_data) == 0) {
                     uint32_t list_len = scsi_be32((uint8_t*)&luns_data.length);
                     uint32_t num_luns = list_len / 8;  /* Each LUN is 8 bytes */
+                    have_report_luns = 1;
                     
                     /* Cap at reasonable limit */
                     if (num_luns > SCSI_MAX_LUNS_RESPONSE) {
@@ -1143,7 +1145,13 @@ int scsi_scan_bus(scsi_link_t *link, uint8_t bus) {
                         }
                     }
                 }
-                /* REPORT LUNS failure is OK - device just doesn't support it */
+                if (!have_report_luns) {
+                    for (uint16_t lun = 1; lun < link->max_luns; lun++) {
+                        if (scsi_probe_lun(link, bus, target, lun) == 0) {
+                            devices_found++;
+                        }
+                    }
+                }
             }
         }
     }
