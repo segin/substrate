@@ -1269,6 +1269,33 @@ static int lookup_i386_f3_0fae_group(const char *mnemonic, unsigned *reg_field) 
     return -1;
 }
 
+static int lookup_i386_scanbit_group(const char *mnemonic, unsigned char *prefix, unsigned char *opcode2) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char prefix;
+        unsigned char opcode2;
+    } map[] = {
+        {"bsf", 0x00, 0xbc},
+        {"bsr", 0x00, 0xbd},
+        {"popcnt", 0xf3, 0xb8},
+        {"tzcnt", 0xf3, 0xbc},
+        {"lzcnt", 0xf3, 0xbd},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || prefix == NULL || opcode2 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *prefix = map[i].prefix;
+            *opcode2 = map[i].opcode2;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static int lookup_i386_xmm_imm8_family(const char *mnemonic, unsigned char *prefix, unsigned char *opcode2) {
     static const struct {
         const char *mnemonic;
@@ -4408,9 +4435,9 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (reg_op->kind != AS_OPERAND_REGISTER || parse_x86_reg(reg_op->u.reg, &gr) != 0 || (gr & 8u) != 0u) {
             return -1;
         }
-        prefix = (strcmp(mnbuf, "popcnt") == 0 || strcmp(mnbuf, "tzcnt") == 0 || strcmp(mnbuf, "lzcnt") == 0) ? 0xf3 : 0x00;
-        if (strcmp(mnbuf, "popcnt") == 0) opcode2 = 0xb8;
-        else opcode2 = (strcmp(mnbuf, "bsf") == 0 || strcmp(mnbuf, "tzcnt") == 0) ? 0xbc : 0xbd;
+        if (lookup_i386_scanbit_group(mnbuf, &prefix, &opcode2) != 0) {
+            return -1;
+        }
         return emit_i386_prefixed_0f_rm(prefix, opcode2, (unsigned)gr & 7u, rm_op, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "cmpps") == 0 || strcmp(mnbuf, "cmppd") == 0 || strcmp(mnbuf, "cmpss") == 0 ||
