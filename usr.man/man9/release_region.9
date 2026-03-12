@@ -1,0 +1,18 @@
+.Dd March 12, 2026
+.Dt RELEASE_REGION 9
+.Os
+.Sh NAME
+.Nm release_region
+.Nd release a previously reserved I/O port range
+.Sh SYNOPSIS
+.In kern/resource.h
+.Ft void
+.Fn release_region "resource_size_t start" "resource_size_t n"
+.Sh DESCRIPTION
+The
+.Fn release_region
+function removes the exact matching I/O port reservation from the global
+resource tree.
+.Sh SEE ALSO
+.Xr request_region 9 ,
+.Xr resource 9

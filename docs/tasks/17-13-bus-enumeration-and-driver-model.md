@@ -509,27 +509,27 @@
 #### 13.5. Resource Conflict Resolution & Arbitration
 
 - [ ] **Resource Manager Core:** (REQ: REQ-17-0097)
-    - [ ] Implement global resource tree. (REQ: REQ-17-0098)
+    - [x] Implement global resource tree. (REQ: REQ-17-0098)
         - Files: `sys/kern/resource.c` (new)
         - Tests: unit (root initialization)
         - Docs: `resource.9`
         - Acceptance: Root resources created
-    - [ ] Implement `request_region()` for I/O ports. (REQ: REQ-17-0099)
+    - [x] Implement `request_region()` for I/O ports. (REQ: REQ-17-0099)
         - Files: `sys/kern/resource.c`
         - Tests: unit (allocation, conflict detection)
         - Docs: `request_region.9`
         - Acceptance: Region reserved or conflict reported
-    - [ ] Implement `release_region()`. (REQ: REQ-17-0100)
+    - [x] Implement `release_region()`. (REQ: REQ-17-0100)
         - Files: `sys/kern/resource.c`
         - Tests: unit (release, reallocation)
         - Docs: `release_region.9`
         - Acceptance: Region freed
-    - [ ] Implement `request_mem_region()` for MMIO. (REQ: REQ-17-0101)
+    - [x] Implement `request_mem_region()` for MMIO. (REQ: REQ-17-0101)
         - Files: `sys/kern/resource.c`
         - Tests: unit (MMIO allocation)
         - Docs: `request_mem_region.9`
         - Acceptance: MMIO regions tracked
-    - [ ] Implement `ioremap()` / `iounmap()`. (REQ: REQ-17-0102)
+    - [x] Implement `ioremap()` / `iounmap()`. (REQ: REQ-17-0102)
         - Files: `sys/kern/ioremap.c` (new)
         - Tests: unit (map/unmap, cached flags)
         - Docs: `ioremap.9`

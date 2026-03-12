@@ -1,0 +1,31 @@
+.Dd March 12, 2026
+.Dt IOREMAP 9
+.Os
+.Sh NAME
+.Nm ioremap ,
+.Nm iounmap
+.Nd create and destroy uncached kernel MMIO mappings
+.Sh SYNOPSIS
+.In kern/resource.h
+.Ft void *
+.Fn ioremap "resource_size_t phys_addr" "size_t size"
+.Ft void
+.Fn iounmap "void *addr"
+.Sh DESCRIPTION
+The
+.Fn ioremap
+function reserves the requested physical MMIO range, maps it into a dedicated
+kernel VA arena, and returns an uncached kernel pointer.
+The
+.Fn iounmap
+function tears down a mapping created by
+.Fn ioremap .
+.Sh RETURN VALUES
+The
+.Fn ioremap
+function returns the mapped kernel pointer on success or
+.Dv NULL
+on failure.
+.Sh SEE ALSO
+.Xr request_mem_region 9 ,
+.Xr resource 9

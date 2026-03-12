@@ -1,0 +1,135 @@
+#include <kern/resource.h>
+#include <string.h>
+#include <vm/vm_kmem.h>
+
+static struct resource ioport_root = {
+    .type = RES_IO,
+    .start = 0,
+    .end = 0xFFFF,
+    .name = "ioport",
+};
+
+static struct resource iomem_root = {
+    .type = RES_MEM,
+    .start = 0,
+    .end = ~((resource_size_t)0),
+    .name = "iomem",
+};
+
+static int resource_initialized = 0;
+
+static struct resource *resource_request(struct resource *root, resource_size_t start,
+                                         resource_size_t n, const char *name) {
+    struct resource *curr;
+    struct resource *prev = NULL;
+    struct resource *res;
+    resource_size_t end;
+
+    if (root == NULL || n == 0) {
+        return NULL;
+    }
+
+    end = start + n - 1;
+    if (end < start || start < root->start || end > root->end) {
+        return NULL;
+    }
+
+    curr = root->child;
+    while (curr != NULL) {
+        if (!(end < curr->start || start > curr->end)) {
+            return NULL;
+        }
+        if (curr->start > end) {
+            break;
+        }
+        prev = curr;
+        curr = curr->sibling;
+    }
+
+    res = kmalloc(sizeof(*res));
+    if (res == NULL) {
+        return NULL;
+    }
+    memset(res, 0, sizeof(*res));
+    res->type = root->type;
+    res->start = start;
+    res->end = end;
+    res->name = name;
+    res->parent = root;
+    res->sibling = curr;
+
+    if (prev != NULL) {
+        prev->sibling = res;
+    } else {
+        root->child = res;
+    }
+
+    return res;
+}
+
+static void resource_release(struct resource *root, resource_size_t start, resource_size_t n) {
+    struct resource *curr;
+    struct resource *prev = NULL;
+    resource_size_t end;
+
+    if (root == NULL || n == 0) {
+        return;
+    }
+
+    end = start + n - 1;
+    if (end < start) {
+        return;
+    }
+
+    curr = root->child;
+    while (curr != NULL) {
+        if (curr->start == start && curr->end == end) {
+            if (prev != NULL) {
+                prev->sibling = curr->sibling;
+            } else {
+                root->child = curr->sibling;
+            }
+            kfree(curr, sizeof(*curr));
+            return;
+        }
+        prev = curr;
+        curr = curr->sibling;
+    }
+}
+
+void resource_init(void) {
+    ioport_root.child = NULL;
+    iomem_root.child = NULL;
+    resource_initialized = 1;
+}
+
+struct resource *resource_root(uint32_t type) {
+    if (!resource_initialized) {
+        resource_init();
+    }
+
+    switch (type) {
+    case RES_IO:
+        return &ioport_root;
+    case RES_MEM:
+        return &iomem_root;
+    default:
+        return NULL;
+    }
+}
+
+struct resource *request_region(resource_size_t start, resource_size_t n, const char *name) {
+    return resource_request(resource_root(RES_IO), start, n, name);
+}
+
+void release_region(resource_size_t start, resource_size_t n) {
+    resource_release(resource_root(RES_IO), start, n);
+}
+
+struct resource *request_mem_region(resource_size_t start, resource_size_t n, const char *name) {
+    return resource_request(resource_root(RES_MEM), start, n, name);
+}
+
+void release_mem_region(resource_size_t start, resource_size_t n) {
+    resource_release(resource_root(RES_MEM), start, n);
+}
