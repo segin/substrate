@@ -191,7 +191,7 @@
 #### 13.2. PCI / PCIe Enumerator
 
 - [ ] **PCI Config Space Access:** (REQ: REQ-17-0031)
-    - [ ] Implement `pci_read_config8/16/32()` primitives. (REQ: REQ-17-0032)
+    - [x] Implement `pci_read_config8/16/32()` primitives. (REQ: REQ-17-0032)
         - Files: `sys/arch/i386/pci.c`, `sys/kern/pci.h`
         - API: `uint32_t pci_read_config32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset)`
         - Tests: unit (known device read, boundary checks)
