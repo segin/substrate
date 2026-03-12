@@ -225,3 +225,4 @@ sbin/*/*
 /y.tab.c
 /y.tab.h
 /test_output.txt
+/tests/test_getpagesize
