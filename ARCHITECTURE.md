@@ -211,6 +211,8 @@ ELKS personality contract:
   far-return frame for `_signal_cbhandler(sig)` on the ELKS user stack and
   resumes the interrupted `CS:IP` via `lret $2`.
 - i386 also exposes a native per-process `modify_ldt(2)` contract through `<sys/ldt.h>` and `libsys`. The ABI is single-sourced by the public `struct user_desc`; `LDT_READ` copies the current process LDT image, `LDT_WRITE` accepts exactly one validated user descriptor per call, and `LDT_READ_DEFAULT` currently returns 0. Invalid descriptors or sizes fail with `EINVAL`, inaccessible buffers fail with `EFAULT`, and LDT-growth failure returns `ENOMEM`. The Linux i386 personality also wires syscall `123` (`modify_ldt`) to this same hardened path and exposes matching syscall-trace metadata (`int`, `pointer`, `long`) for compatibility tracing.
+- The detailed i386 LDT ownership, locking, permission model, rejection rules,
+  and verification matrix are defined in `docs/specs/arch_i386_ldt.md`.
 - ELKS `/dev/kmem` compatibility is personality-scoped rather than native:
   ELKS processes opening native `/dev/kmem` are given an ELKS-shaped synthetic
   task snapshot through intercepted `ioctl`, `lseek`, and `read` operations so

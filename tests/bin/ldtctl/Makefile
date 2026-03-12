@@ -1,6 +1,6 @@
 CC ?= gcc
 CFLAGS ?= -O2 -g -Wall -Wextra -DHOST_TEST
-INCLUDES = -I../../../sys -I../../../sys/include
+INCLUDES = -I../../../include -I../../../sys -I../../../sys/include
 
 .PHONY: all clean test
 
