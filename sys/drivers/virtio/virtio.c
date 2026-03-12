@@ -17,6 +17,11 @@ static const device_id_t virtio_9p_pci_ids[] = {
     { 0, 0, 0, 0, 0 },
 };
 
+static const device_id_t virtio_scsi_pci_ids[] = {
+    { VIRTIO_VENDOR_ID, VIRTIO_PCI_DEVICE_ID_SCSI, 0, 0, 0 },
+    { 0, 0, 0, 0, 0 },
+};
+
 static int virtio_blk_pci_attach(struct device *dev) {
     pci_device_t *pdev = pci_find_device_by_kdev(dev);
 
@@ -39,6 +44,17 @@ static int virtio_9p_pci_attach(struct device *dev) {
     return 0;
 }
 
+static int virtio_scsi_pci_attach(struct device *dev) {
+    pci_device_t *pdev = pci_find_device_by_kdev(dev);
+
+    if (pdev == NULL) {
+        return -1;
+    }
+
+    virtio_scsi_setup(pdev->bus, pdev->slot, pdev->func);
+    return 0;
+}
+
 static int virtio_pci_detach(struct device *dev) {
     (void)dev;
     return 0;
@@ -55,6 +71,13 @@ static struct driver virtio_9p_pci_driver = {
     .name = "virtio-9p-pci",
     .id_table = virtio_9p_pci_ids,
     .attach = virtio_9p_pci_attach,
+    .detach = virtio_pci_detach,
+};
+
+static struct driver virtio_scsi_pci_driver = {
+    .name = "virtio-scsi-pci",
+    .id_table = virtio_scsi_pci_ids,
+    .attach = virtio_scsi_pci_attach,
     .detach = virtio_pci_detach,
 };
 
@@ -76,6 +99,7 @@ void virtio_init(void) {
     if (!virtio_drivers_registered) {
         (void)driver_register(&virtio_blk_pci_driver, &pci_bus_type);
         (void)driver_register(&virtio_9p_pci_driver, &pci_bus_type);
+        (void)driver_register(&virtio_scsi_pci_driver, &pci_bus_type);
         virtio_drivers_registered = 1;
     }
 

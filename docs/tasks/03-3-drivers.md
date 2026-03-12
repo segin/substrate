@@ -16,7 +16,7 @@
     - [ ] Migrate legacy IDE attachment onto the driver model while preserving both fixed-resource ISA attachment and PCI IDE attachment.
         - Files: `sys/drivers/storage/ide/ide.c`, `sys/kern/isa.c`, `sys/kern/pci.c`
         - Acceptance: Old non-PCI 486 systems and PCI IDE systems both attach through the framework-owned discovery path
-    - [ ] Migrate VirtIO storage/controller attachment onto the driver model rather than relying on ad hoc discovery.
+    - [x] Migrate VirtIO storage/controller attachment onto the driver model rather than relying on ad hoc discovery.
         - Files: `sys/drivers/virtio/*.c`
         - Acceptance: VirtIO controller-family drivers bind through bus/device registration instead of bespoke attach paths
     - [ ] Implement ISA Plug-and-Play protocol support on top of the legacy ISA bus framework.
