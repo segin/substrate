@@ -1658,6 +1658,136 @@ static int lookup_i386_memorder_opcode(const char *mnemonic, unsigned char *pref
     return -1;
 }
 
+static int lookup_i386_x87_nooperand_opcode(const char *mnemonic, unsigned char *op1, unsigned char *op2) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char op1;
+        unsigned char op2;
+    } map[] = {
+        {"fnop", 0xd9, 0xd0},
+        {"fchs", 0xd9, 0xe0},
+        {"f2xm1", 0xd9, 0xf0},
+        {"fprem", 0xd9, 0xf8},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || op1 == NULL || op2 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *op1 = map[i].op1;
+            *op2 = map[i].op2;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_x87_fcmov_opcode(const char *mnemonic, unsigned char *op1, unsigned char *base) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char op1;
+        unsigned char base;
+    } map[] = {
+        {"fcmovb", 0xda, 0xc0},
+        {"fcmove", 0xda, 0xc8},
+        {"fcmovbe", 0xda, 0xd0},
+        {"fcmovu", 0xda, 0xd8},
+        {"fcmovnb", 0xdb, 0xc0},
+        {"fcmovne", 0xdb, 0xc8},
+        {"fcmovnbe", 0xdb, 0xd0},
+        {"fcmovnu", 0xdb, 0xd8},
+        {"fucomi", 0xdb, 0xe8},
+        {"fcomi", 0xdb, 0xf0},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || op1 == NULL || base == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *op1 = map[i].op1;
+            *base = map[i].base;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_x87_stack_unary_opcode(const char *mnemonic, unsigned char *base) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char base;
+    } map[] = {
+        {"ffree", 0xc0},
+        {"fst", 0xd0},
+        {"fucom", 0xe0},
+        {"fucomp", 0xe8},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || base == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *base = map[i].base;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_x87_pop2_opcode(const char *mnemonic, unsigned char *base) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char base;
+    } map[] = {
+        {"faddp", 0xc0},
+        {"fmulp", 0xc8},
+        {"fsubp", 0xe0},
+        {"fsubrp", 0xe8},
+        {"fdivp", 0xf0},
+        {"fdivrp", 0xf8},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || base == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *base = map[i].base;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_x87_ipcompare_opcode(const char *mnemonic, unsigned char *base) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char base;
+    } map[] = {
+        {"fucomip", 0xe8},
+        {"fcomip", 0xf0},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || base == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *base = map[i].base;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static int lookup_i386_xmm_imm8_family(const char *mnemonic, unsigned char *prefix, unsigned char *opcode2) {
     static const struct {
         const char *mnemonic;
@@ -3664,15 +3794,16 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return 0;
     }
     if (strcmp(mnbuf, "fnop") == 0 || strcmp(mnbuf, "fchs") == 0 || strcmp(mnbuf, "f2xm1") == 0 || strcmp(mnbuf, "fprem") == 0) {
+        unsigned char op1;
         unsigned char op2;
+
         if (insn->operand_count != 0) {
             return -1;
         }
-        if (strcmp(mnbuf, "fnop") == 0) op2 = 0xd0;
-        else if (strcmp(mnbuf, "fchs") == 0) op2 = 0xe0;
-        else if (strcmp(mnbuf, "f2xm1") == 0) op2 = 0xf0;
-        else op2 = 0xf8;
-        out[0] = 0xd9;
+        if (lookup_i386_x87_nooperand_opcode(mnbuf, &op1, &op2) != 0) {
+            return -1;
+        }
+        out[0] = op1;
         out[1] = op2;
         if (out_len != NULL) *out_len = 2;
         return 0;
@@ -3687,16 +3818,9 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             stdst != 0) {
             return -1;
         }
-        if (strcmp(mnbuf, "fcmovb") == 0) { op1 = 0xda; base = 0xc0; }
-        else if (strcmp(mnbuf, "fcmove") == 0) { op1 = 0xda; base = 0xc8; }
-        else if (strcmp(mnbuf, "fcmovbe") == 0) { op1 = 0xda; base = 0xd0; }
-        else if (strcmp(mnbuf, "fcmovu") == 0) { op1 = 0xda; base = 0xd8; }
-        else if (strcmp(mnbuf, "fcmovnb") == 0) { op1 = 0xdb; base = 0xc0; }
-        else if (strcmp(mnbuf, "fcmovne") == 0) { op1 = 0xdb; base = 0xc8; }
-        else if (strcmp(mnbuf, "fcmovnbe") == 0) { op1 = 0xdb; base = 0xd0; }
-        else if (strcmp(mnbuf, "fcmovnu") == 0) { op1 = 0xdb; base = 0xd8; }
-        else if (strcmp(mnbuf, "fucomi") == 0) { op1 = 0xdb; base = 0xe8; }
-        else { op1 = 0xdb; base = 0xf0; }
+        if (lookup_i386_x87_fcmov_opcode(mnbuf, &op1, &base) != 0) {
+            return -1;
+        }
         out[0] = op1;
         out[1] = (unsigned char)(base + (stsrc & 7u));
         if (out_len != NULL) *out_len = 2;
@@ -3797,10 +3921,9 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (operand_st_index(a, &stidx) != 0) {
             return -1;
         }
-        if (strcmp(mnbuf, "ffree") == 0) base = 0xc0;
-        else if (strcmp(mnbuf, "fst") == 0) base = 0xd0;
-        else if (strcmp(mnbuf, "fucom") == 0) base = 0xe0;
-        else base = 0xe8;
+        if (lookup_i386_x87_stack_unary_opcode(mnbuf, &base) != 0) {
+            return -1;
+        }
         out[0] = 0xdd;
         out[1] = (unsigned char)(base + (stidx & 7u));
         if (out_len != NULL) *out_len = 2;
@@ -4223,12 +4346,9 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             stdst != 0) {
             return -1;
         }
-        if (strcmp(mnbuf, "faddp") == 0) base = 0xc0;
-        else if (strcmp(mnbuf, "fmulp") == 0) base = 0xc8;
-        else if (strcmp(mnbuf, "fsubp") == 0) base = 0xe0;
-        else if (strcmp(mnbuf, "fsubrp") == 0) base = 0xe8;
-        else if (strcmp(mnbuf, "fdivp") == 0) base = 0xf0;
-        else base = 0xf8;
+        if (lookup_i386_x87_pop2_opcode(mnbuf, &base) != 0) {
+            return -1;
+        }
         out[0] = 0xde;
         out[1] = (unsigned char)(base + (stsrc & 7u));
         if (out_len != NULL) *out_len = 2;
@@ -4250,7 +4370,9 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             stdst != 0) {
             return -1;
         }
-        base = strcmp(mnbuf, "fucomip") == 0 ? 0xe8u : 0xf0u;
+        if (lookup_i386_x87_ipcompare_opcode(mnbuf, &base) != 0) {
+            return -1;
+        }
         out[0] = 0xdf;
         out[1] = (unsigned char)(base + (stsrc & 7u));
         if (out_len != NULL) *out_len = 2;
