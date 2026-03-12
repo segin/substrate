@@ -2736,6 +2736,27 @@ static int emit_i386_movnt_store(unsigned char prefix, int use_xmm, int intel_sy
     return emit_i386_prefixed_0f_rm(prefix, 0xe7, xr, dst_op, out, out_cap, out_len);
 }
 
+static int emit_i386_prefetch_hint(unsigned char opcode2, unsigned char regf,
+                                   const as_operand_t *op, unsigned char *out,
+                                   size_t out_cap, size_t *out_len) {
+    if (op == NULL || op->kind == AS_OPERAND_REGISTER || op->kind == AS_OPERAND_COPROCESSOR) {
+        return -1;
+    }
+    return emit_i386_prefixed_0f_rm(0x00, opcode2, regf, op, out, out_cap, out_len);
+}
+
+static int emit_i386_bnd_binary(unsigned char prefix, unsigned char opcode2,
+                                const as_operand_t *src, const as_operand_t *dst,
+                                unsigned char *out, size_t out_cap, size_t *out_len) {
+    unsigned xr;
+
+    if (src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
+        parse_bnd_reg(dst->u.reg, &xr) != 0) {
+        return -1;
+    }
+    return emit_i386_prefixed_0f_rm(prefix, opcode2, xr, src, out, out_cap, out_len);
+}
+
 static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
                              unsigned char *out, size_t out_cap, size_t *out_len) {
     const as_operand_t *a;
@@ -5093,19 +5114,19 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
-        return emit_i386_prefixed_0f_rm(0x00, 0x0d, 0u, a, out, out_cap, out_len);
+        return emit_i386_prefetch_hint(0x0d, 0u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "prefetchnta") == 0 || strcmp(mnbuf, "prefetcht0") == 0 ||
         strcmp(mnbuf, "prefetcht1") == 0 || strcmp(mnbuf, "prefetcht2") == 0) {
         unsigned char regf;
-        if (insn->operand_count != 1 || a == NULL || a->kind == AS_OPERAND_REGISTER || a->kind == AS_OPERAND_COPROCESSOR) {
+        if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
         if (strcmp(mnbuf, "prefetchnta") == 0) regf = 0u;
         else if (strcmp(mnbuf, "prefetcht0") == 0) regf = 1u;
         else if (strcmp(mnbuf, "prefetcht1") == 0) regf = 2u;
         else regf = 3u;
-        return emit_i386_prefixed_0f_rm(0x00, 0x18, regf, a, out, out_cap, out_len);
+        return emit_i386_prefetch_hint(0x18, regf, a, out, out_cap, out_len);
     }
     {
         static const struct {
@@ -5154,10 +5175,10 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
     }
     if (strcmp(mnbuf, "prefetchwt1") == 0) {
-        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
+        if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
-        return emit_i386_prefixed_0f_rm(0x00, 0x0d, 2u, a, out, out_cap, out_len);
+        return emit_i386_prefetch_hint(0x0d, 2u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "nopl") == 0) {
         if (insn->operand_count != 1 || a == NULL || a->kind == AS_OPERAND_REGISTER || a->kind == AS_OPERAND_COPROCESSOR) {
@@ -5166,11 +5187,10 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return emit_i386_prefixed_0f_rm(0x00, 0x1d, 0u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "bndldx") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
-            parse_bnd_reg(dst->u.reg, &xr) != 0) {
+        if (insn->operand_count != 2) {
             return -1;
         }
-        return emit_i386_prefixed_0f_rm(0x00, 0x1a, xr, src, out, out_cap, out_len);
+        return emit_i386_bnd_binary(0x00, 0x1a, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "bndstx") == 0) {
         if (insn->operand_count != 2 || src == NULL || dst == NULL || src->kind != AS_OPERAND_REGISTER ||
@@ -5195,11 +5215,10 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         strcmp(mnbuf, "bndmk") == 0) {
         unsigned char prefix = (strcmp(mnbuf, "bndcl") == 0 || strcmp(mnbuf, "bndmk") == 0) ? 0xf3 : 0xf2;
         unsigned char opcode2 = (strcmp(mnbuf, "bndcn") == 0 || strcmp(mnbuf, "bndmk") == 0) ? 0x1b : 0x1a;
-        if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
-            parse_bnd_reg(dst->u.reg, &xr) != 0) {
+        if (insn->operand_count != 2) {
             return -1;
         }
-        return emit_i386_prefixed_0f_rm(prefix, opcode2, xr, src, out, out_cap, out_len);
+        return emit_i386_bnd_binary(prefix, opcode2, src, dst, out, out_cap, out_len);
     }
 
     return -1;
