@@ -24,6 +24,7 @@
 #include <kern/panic.h>
 #include <kern/arch.h>
 #include <kern/cmdline.h>
+#include <stdio.h>
 
 #define ELKS_ARG_MAX_BYTES (32 * 1024)
 #define ELKS_ARG_MAX_COUNT 4096
@@ -37,6 +38,31 @@ static struct exec_binary_handler elks_handler = {
 
 static int elks_aout_debug_enabled(void) {
     return cmdline_debug_enabled("perso:elks:aout");
+}
+
+static void elks_debug_dump_vector(const char *label, char *const vec[]) {
+    int i;
+
+    if (!elks_aout_debug_enabled()) {
+        return;
+    }
+
+    kprint("ELKS: ");
+    kprint(label ? label : "vec");
+    kprint(" =");
+    if (!vec) {
+        kprint(" (null)\n");
+        return;
+    }
+    kprint("\n");
+    for (i = 0; vec[i] != NULL; i++) {
+        char msg[32];
+
+        snprintf(msg, sizeof(msg), "  [%d] ", i);
+        kprint(msg);
+        kprint(vec[i]);
+        kprint("\n");
+    }
 }
 
 static int SUB_NODISCARD elks_fail(int fd, int err, const char *msg) {
@@ -301,6 +327,8 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     if (ret != 0) {
         return elks_fail(fd, ret, "ELKS: failed to copy exec argument vectors");
     }
+    elks_debug_dump_vector("argv", kargv);
+    elks_debug_dump_vector("envp", kenvp);
     argv_envp_bytes = elks_stack_image_bytes(kargv, kenvp);
     if (argv_envp_bytes > 0xFFFFU) {
         elks_free_kernel_vector(kargv);

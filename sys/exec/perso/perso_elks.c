@@ -1447,6 +1447,7 @@ static int elks_sys_waitpid(uint32_t pid, uint32_t status_off, uint32_t options,
                             uint32_t unused3, uint32_t unused4, uint32_t unused5,
                             uint32_t unused6, uint32_t unused7) {
     uintptr_t linear = 0;
+    int native_pid = (int)(int16_t)pid;
     int status = 0;
     int ret;
 
@@ -1458,7 +1459,7 @@ static int elks_sys_waitpid(uint32_t pid, uint32_t status_off, uint32_t options,
         }
     }
 
-    ret = kern_waitpid((int)pid, status_off ? &status : NULL, (int)options);
+    ret = kern_waitpid(native_pid, status_off ? &status : NULL, (int)options);
     if (ret < 0) {
         return ret;
     }

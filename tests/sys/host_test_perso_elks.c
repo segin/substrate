@@ -1086,6 +1086,11 @@ int main(void) {
         fprintf(stderr, "FAIL: ELKS waitpid wrapper wrong\n");
         return 1;
     }
+    if (fn(0xFFFFU, 0x30, 0, 0, 0, 0, 0, 0) != 66 || strcmp(last_name, "waitpid") != 0 ||
+        last_i0 != -1 || last_i1 != 0 || *(uint16_t *)(void *)(ds_mem + 0x30) != 0x1234) {
+        fprintf(stderr, "FAIL: ELKS waitpid signed pid translation wrong\n");
+        return 1;
+    }
 
     *(uint16_t *)(void *)(ds_mem + 0x10) = 0;
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_getpid];

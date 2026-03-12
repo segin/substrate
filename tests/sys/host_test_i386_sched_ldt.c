@@ -23,6 +23,14 @@ struct percpu_data *percpu_get_cpu(int cpu_id) { (void)cpu_id; return &cpu0; }
 int percpu_get_cpu_id(void) { return 0; }
 int smp_get_cpu_count(void) { return 1; }
 
+void ldt_init_process(process_t *proc) {
+    if (!proc) {
+        return;
+    }
+    proc->ldt = NULL;
+    proc->ldt_entry_count = 0;
+}
+
 void ldt_activate(process_t *proc) { last_ldt_proc = proc; }
 void pmap_activate(pmap_t pmap) { last_pmap = pmap; }
 void switch_to(thread_t *prev, thread_t *next) { switched_prev = prev; switched_next = next; }
