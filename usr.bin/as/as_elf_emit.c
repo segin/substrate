@@ -2757,6 +2757,38 @@ static int emit_i386_bnd_binary(unsigned char prefix, unsigned char opcode2,
     return emit_i386_prefixed_0f_rm(prefix, opcode2, xr, src, out, out_cap, out_len);
 }
 
+static int emit_i386_xmm_from_mmx_or_mem(unsigned char prefix, unsigned char opcode2,
+                                         const as_operand_t *src, const as_operand_t *dst,
+                                         unsigned char *out, size_t out_cap, size_t *out_len) {
+    unsigned xr;
+    unsigned xm;
+
+    if (src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
+        parse_xmm_reg(dst->u.reg, &xr) != 0) {
+        return -1;
+    }
+    if (src->kind == AS_OPERAND_REGISTER && parse_mmx_reg(src->u.reg, &xm) != 0) {
+        return -1;
+    }
+    return emit_i386_prefixed_0f_rm(prefix, opcode2, xr, src, out, out_cap, out_len);
+}
+
+static int emit_i386_mmx_from_xmm_or_mem(unsigned char prefix, unsigned char opcode2,
+                                         const as_operand_t *src, const as_operand_t *dst,
+                                         unsigned char *out, size_t out_cap, size_t *out_len) {
+    unsigned xr;
+    unsigned xm;
+
+    if (src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
+        parse_mmx_reg(dst->u.reg, &xr) != 0) {
+        return -1;
+    }
+    if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
+        return -1;
+    }
+    return emit_i386_prefixed_0f_rm(prefix, opcode2, xr, src, out, out_cap, out_len);
+}
+
 static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
                              unsigned char *out, size_t out_cap, size_t *out_len) {
     const as_operand_t *a;
@@ -4759,25 +4791,17 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return emit_i386_xmm_partial_move_rm(0x66, 0x16, 0x17, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "cvtpi2pd") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
-            parse_xmm_reg(dst->u.reg, &xr) != 0) {
+        if (insn->operand_count != 2) {
             return -1;
         }
-        if (src->kind == AS_OPERAND_REGISTER && parse_mmx_reg(src->u.reg, &xm) != 0) {
-            return -1;
-        }
-        return emit_i386_prefixed_0f_rm(0x66, 0x2a, xr, src, out, out_cap, out_len);
+        return emit_i386_xmm_from_mmx_or_mem(0x66, 0x2a, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "cvttpd2pi") == 0 || strcmp(mnbuf, "cvtpd2pi") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
-            parse_mmx_reg(dst->u.reg, &xr) != 0) {
+        if (insn->operand_count != 2) {
             return -1;
         }
-        if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
-            return -1;
-        }
-        return emit_i386_prefixed_0f_rm(0x66, strcmp(mnbuf, "cvttpd2pi") == 0 ? 0x2c : 0x2d,
-                                        xr, src, out, out_cap, out_len);
+        return emit_i386_mmx_from_xmm_or_mem(0x66, strcmp(mnbuf, "cvttpd2pi") == 0 ? 0x2c : 0x2d,
+                                             src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "ucomisd") == 0 || strcmp(mnbuf, "comisd") == 0) {
         if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
@@ -4985,14 +5009,10 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return emit_i386_xmm_move_rm(0x66, 0x28, 0x29, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "cvtpi2ps") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
-            parse_xmm_reg(dst->u.reg, &xr) != 0) {
+        if (insn->operand_count != 2) {
             return -1;
         }
-        if (src->kind == AS_OPERAND_REGISTER && parse_mmx_reg(src->u.reg, &xm) != 0) {
-            return -1;
-        }
-        return emit_i386_legacy_simd_rm(0x00, 0x2a, xr, src, out, out_cap, out_len);
+        return emit_i386_xmm_from_mmx_or_mem(0x00, 0x2a, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movntps") == 0) {
         if (insn->operand_count != 2) {
@@ -5007,24 +5027,16 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return emit_i386_movnt_store(0x66, 1, intel_syntax, insn, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "cvttps2pi") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
-            parse_mmx_reg(dst->u.reg, &xr) != 0) {
+        if (insn->operand_count != 2) {
             return -1;
         }
-        if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
-            return -1;
-        }
-        return emit_i386_legacy_simd_rm(0x00, 0x2c, xr, src, out, out_cap, out_len);
+        return emit_i386_mmx_from_xmm_or_mem(0x00, 0x2c, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "cvtps2pi") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
-            parse_mmx_reg(dst->u.reg, &xr) != 0) {
+        if (insn->operand_count != 2) {
             return -1;
         }
-        if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
-            return -1;
-        }
-        return emit_i386_legacy_simd_rm(0x00, 0x2d, xr, src, out, out_cap, out_len);
+        return emit_i386_mmx_from_xmm_or_mem(0x00, 0x2d, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "ucomiss") == 0 || strcmp(mnbuf, "comiss") == 0) {
         unsigned char opcode2 = strcmp(mnbuf, "ucomiss") == 0 ? 0x2e : 0x2f;
