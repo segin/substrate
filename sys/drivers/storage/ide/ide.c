@@ -1016,13 +1016,9 @@ int ide_dma_write(uint8_t channel, uint8_t drive, uint64_t lba,
  */
 int ide_dma_setup(uint16_t bus, uint8_t drive, uint64_t lba, 
                   uint16_t count, void *phys_addr, int write) {
-    /* Determine channel from bus address */
     uint8_t channel;
-    if (bus == ATA_PRIMARY_IO) {
-        channel = 0;
-    } else if (bus == ATA_SECONDARY_IO) {
-        channel = 1;
-    } else {
+
+    if (ide_channel_index_from_io(bus, &channel) < 0) {
         return -1;
     }
     
@@ -1041,7 +1037,11 @@ int ide_dma_setup(uint16_t bus, uint8_t drive, uint64_t lba,
 
 int ide_read_sectors(uint16_t bus, uint8_t drive, uint32_t lba, 
                      uint8_t count, void *buffer) {
-    uint8_t channel = (bus == ATA_SECONDARY_IO) ? 1 : 0;
+    uint8_t channel;
+
+    if (ide_channel_index_from_io(bus, &channel) < 0) {
+        return -1;
+    }
     
     ide_write_reg(channel, ATA_REG_DEVICE, 
                   0xE0 | (drive << 4) | ((lba >> 24) & 0x0F));
@@ -1067,7 +1067,11 @@ int ide_read_sectors(uint16_t bus, uint8_t drive, uint32_t lba,
 
 int ide_read_sectors_ext(uint16_t bus, uint8_t drive, uint64_t lba, 
                          uint16_t count, void *buffer) {
-    uint8_t channel = (bus == ATA_SECONDARY_IO) ? 1 : 0;
+    uint8_t channel;
+
+    if (ide_channel_index_from_io(bus, &channel) < 0) {
+        return -1;
+    }
     
     ide_write_reg(channel, ATA_REG_DEVICE, 0x40 | (drive << 4));
     ide_write_reg(channel, ATA_REG_SEC_COUNT, (uint8_t)(count >> 8));
@@ -1096,7 +1100,11 @@ int ide_read_sectors_ext(uint16_t bus, uint8_t drive, uint64_t lba,
 
 int ide_write_sectors(uint16_t bus, uint8_t drive, uint32_t lba, 
                       uint8_t count, const void *buffer) {
-    uint8_t channel = (bus == ATA_SECONDARY_IO) ? 1 : 0;
+    uint8_t channel;
+
+    if (ide_channel_index_from_io(bus, &channel) < 0) {
+        return -1;
+    }
     
     ide_write_reg(channel, ATA_REG_DEVICE, 
                   0xE0 | (drive << 4) | ((lba >> 24) & 0x0F));
@@ -1122,7 +1130,11 @@ int ide_write_sectors(uint16_t bus, uint8_t drive, uint32_t lba,
 
 int ide_write_sectors_ext(uint16_t bus, uint8_t drive, uint64_t lba, 
                           uint16_t count, const void *buffer) {
-    uint8_t channel = (bus == ATA_SECONDARY_IO) ? 1 : 0;
+    uint8_t channel;
+
+    if (ide_channel_index_from_io(bus, &channel) < 0) {
+        return -1;
+    }
     
     ide_write_reg(channel, ATA_REG_DEVICE, 0x40 | (drive << 4));
     ide_write_reg(channel, ATA_REG_SEC_COUNT, (uint8_t)(count >> 8));
@@ -1156,7 +1168,11 @@ int ide_write_sectors_ext(uint16_t bus, uint8_t drive, uint64_t lba,
  */
 
 int ide_identify(uint16_t bus, uint8_t drive, void *buffer) {
-    uint8_t channel = (bus == ATA_SECONDARY_IO) ? 1 : 0;
+    uint8_t channel;
+
+    if (ide_channel_index_from_io(bus, &channel) < 0) {
+        return -1;
+    }
     
     ide_write_reg(channel, ATA_REG_DEVICE, 0xA0 | (drive << 4));
     ide_write_reg(channel, ATA_REG_SEC_COUNT, 0);
@@ -1187,7 +1203,11 @@ int ide_identify(uint16_t bus, uint8_t drive, void *buffer) {
 }
 
 int ide_identify_atapi(uint16_t bus, uint8_t drive, void *buffer) {
-    uint8_t channel = (bus == ATA_SECONDARY_IO) ? 1 : 0;
+    uint8_t channel;
+
+    if (ide_channel_index_from_io(bus, &channel) < 0) {
+        return -1;
+    }
     
     ide_write_reg(channel, ATA_REG_DEVICE, 0xA0 | (drive << 4));
     ide_write_reg(channel, ATA_REG_SEC_COUNT, 0);

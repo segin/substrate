@@ -73,6 +73,7 @@ Strings are byte-swapped from ATA word order and right-trimmed.
 PIO transfers support:
 - LBA28 read/write
 - LBA48 read/write
+- fixed bus-to-channel mapping for all four legacy ISA-era channel bases
 - bounded BSY/DRQ waits
 - timeout classes tuned for real spinning media:
   - generic ready waits: 5s

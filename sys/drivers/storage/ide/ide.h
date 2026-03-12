@@ -231,6 +231,29 @@ typedef struct {
 void ide_init(void);
 void ide_dma_init(uint16_t bm_base_primary, uint16_t bm_base_secondary);
 
+static inline int ide_channel_index_from_io(uint16_t bus, uint8_t *channel) {
+    if (channel == NULL) {
+        return -1;
+    }
+
+    switch (bus) {
+    case ATA_PRIMARY_IO:
+        *channel = 0;
+        return 0;
+    case ATA_SECONDARY_IO:
+        *channel = 1;
+        return 0;
+    case ATA_TERTIARY_IO:
+        *channel = 2;
+        return 0;
+    case ATA_QUATERNARY_IO:
+        *channel = 3;
+        return 0;
+    default:
+        return -1;
+    }
+}
+
 /* PIO Transfers */
 int ide_read_sectors(uint16_t bus, uint8_t drive, uint32_t lba, 
                      uint8_t count, void *buffer);

@@ -6,14 +6,36 @@ ide \- ATA/ATAPI IDE device driver
 .SH DESCRIPTION
 The
 .B ide
-driver provides access to ATA (Parallel ATA) and ATAPI (CD-ROM/DVD) devices attached to standard IDE controllers. It supports both legacy PIO (Programmed I/O) and Bus Master DMA transfer modes.
+driver provides access to ATA (Parallel ATA) and ATAPI (CD-ROM/DVD)
+devices attached to standard IDE controllers.
+It supports both legacy PIO (Programmed I/O) and Bus Master DMA transfer
+modes on ISA compatibility-mode controllers and PCI IDE controllers.
 
 .SS Device Nodes
 IDE devices are typically accessed via the block device interface under
 .BR /dev/storage/ :
 .TP
 .B /dev/storage/ideN
-The block device node for the \fIN\fP-th detected IDE drive. The driver scans the Primary and Secondary channels for Master and Slave drives.
+The block device node for the \fIN\fP-th IDE drive.
+Slot numbering is fixed by channel and drive:
+.RS
+.IP \(bu 4
+\fBide0\fP primary master
+.IP \(bu 4
+\fBide1\fP primary slave
+.IP \(bu 4
+\fBide2\fP secondary master
+.IP \(bu 4
+\fBide3\fP secondary slave
+.IP \(bu 4
+\fBide4\fP tertiary master
+.IP \(bu 4
+\fBide5\fP tertiary slave
+.IP \(bu 4
+\fBide6\fP quaternary master
+.IP \(bu 4
+\fBide7\fP quaternary slave
+.RE
 
 .SS Features
 .TP
@@ -29,7 +51,10 @@ instructions (see
 ) to transfer data in 256-word (512-byte) chunks. This reduces CPU overhead compared to byte-by-byte or word-by-word loops, particularly in virtualized environments where instruction emulation is costly.
 .TP
 .B DMA Support
-Bus Master DMA is supported on compatible controllers (e.g., Intel PIIX4) for high-performance, low-CPU-usage transfers.
+Bus Master DMA is supported on compatible controllers (for example Intel
+PIIX4-class IDE) for high-performance, low-CPU-usage transfers.
+PIO paths remain polling-based, so classic non-PCI systems do not depend on
+DMA or shared-IRQ support.
 .TP
 .B ATAPI
 Packet commands (ATAPI) are supported for CD-ROM and DVD drives, allowing SCSI-like command execution over the IDE interface.
@@ -40,6 +65,15 @@ The driver automatically probes for devices on the standard legacy I/O ports:
 Primary: 0x1F0 (Control 0x3F6), IRQ 14
 .IP \(bu 4
 Secondary: 0x170 (Control 0x376), IRQ 15
+.IP \(bu 4
+Tertiary: 0x1E8 (Control 0x3EE), IRQ 11
+.IP \(bu 4
+Quaternary: 0x168 (Control 0x36E), IRQ 10
+
+If PCI IDE native mode is present, primary and secondary channel I/O bases and
+IRQs may be overridden from PCI BAR and interrupt-line configuration.
+If PCI is absent, or if additional IDE channels are not exposed through PCI,
+the driver falls back to the legacy fixed I/O model above.
 
 .SH SEE ALSO
 .BR scsi (4),

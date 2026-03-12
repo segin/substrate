@@ -120,6 +120,21 @@ static void test_decode_error_bits(void) {
     assert(strcmp(buf, "none") == 0);
 }
 
+static void test_channel_index_from_io(void) {
+    uint8_t channel = 0xFF;
+
+    assert(ide_channel_index_from_io(ATA_PRIMARY_IO, &channel) == 0);
+    assert(channel == 0);
+    assert(ide_channel_index_from_io(ATA_SECONDARY_IO, &channel) == 0);
+    assert(channel == 1);
+    assert(ide_channel_index_from_io(ATA_TERTIARY_IO, &channel) == 0);
+    assert(channel == 2);
+    assert(ide_channel_index_from_io(ATA_QUATERNARY_IO, &channel) == 0);
+    assert(channel == 3);
+    assert(ide_channel_index_from_io(0x1234, &channel) < 0);
+    assert(ide_channel_index_from_io(ATA_PRIMARY_IO, NULL) < 0);
+}
+
 int main(void) {
     assert(ATA_TERTIARY_IO == 0x1E8);
     assert(ATA_TERTIARY_CTRL == 0x3EE);
@@ -140,6 +155,7 @@ int main(void) {
     test_parse_identify_ata_lba28_only();
     test_parse_identify_atapi();
     test_decode_error_bits();
+    test_channel_index_from_io();
 
     puts("host_test_ide_identify: PASS");
     return 0;
