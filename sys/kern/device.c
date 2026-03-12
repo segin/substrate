@@ -350,3 +350,60 @@ void device_retry_deferred(void) {
         device_put(dev);
     }
 }
+
+int device_suspend(struct device *dev, pm_state_t state) {
+    struct device *child;
+    int ret;
+
+    if (!dev) {
+        return -EINVAL;
+    }
+
+    child = dev->children;
+    while (child) {
+        ret = device_suspend(child, state);
+        if (ret != 0) {
+            return ret;
+        }
+        child = child->sibling;
+    }
+
+    if (dev->driver && dev->driver->suspend) {
+        ret = dev->driver->suspend(dev, state);
+        if (ret != 0) {
+            return ret;
+        }
+    }
+
+    dev->power_state = state;
+    return 0;
+}
+
+int device_resume(struct device *dev) {
+    struct device *child;
+    int ret;
+
+    if (!dev) {
+        return -EINVAL;
+    }
+
+    if (dev->driver && dev->driver->resume) {
+        ret = dev->driver->resume(dev);
+        if (ret != 0) {
+            return ret;
+        }
+    }
+
+    dev->power_state = PM_STATE_D0;
+
+    child = dev->children;
+    while (child) {
+        ret = device_resume(child);
+        if (ret != 0) {
+            return ret;
+        }
+        child = child->sibling;
+    }
+
+    return 0;
+}

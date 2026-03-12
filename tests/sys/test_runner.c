@@ -338,6 +338,9 @@ void run_kernel_tests(void) {
 
         extern int test_deferred_probe_logic(void);
         if (test_deferred_probe_logic() == 0) kprint("deferred_probe: PASS\n"); else kprint("deferred_probe: FAIL\n");
+
+        extern int test_device_pm_logic(void);
+        if (test_device_pm_logic() == 0) kprint("device_pm: PASS\n"); else kprint("device_pm: FAIL\n");
     }
 
     if (all || strcmp(test_arg, "vfs_error") == 0) {

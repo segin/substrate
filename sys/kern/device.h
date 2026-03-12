@@ -13,6 +13,13 @@
 
 #define DEVICE_FLAG_DEFERRED_PROBE 0x00000001U
 
+typedef enum {
+    PM_STATE_D0 = 0,
+    PM_STATE_D1 = 1,
+    PM_STATE_D2 = 2,
+    PM_STATE_D3 = 3,
+} pm_state_t;
+
 /* Forward declarations */
 struct driver;
 struct bus_type;
@@ -87,5 +94,7 @@ struct device *device_find_child(struct device *parent, const char *name);
 int device_probe(struct device *dev);
 void device_defer_probe(struct device *dev);
 void device_retry_deferred(void);
+int device_suspend(struct device *dev, pm_state_t state);
+int device_resume(struct device *dev);
 
 #endif /* _KERN_DEVICE_H */

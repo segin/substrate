@@ -151,7 +151,7 @@
         - Tests: unit (defer adds to queue, retry re-probes)
         - Docs: `deferred_probe.9`
         - Acceptance: Deferred devices re-probed after dependencies ready
-    - [ ] Implement `device_suspend()` / `device_resume()`. (REQ: REQ-17-0025)
+    - [x] Implement `device_suspend()` / `device_resume()`. (REQ: REQ-17-0025)
         - Files: `sys/kern/device.c`
         - API: `int device_suspend(device_t *dev, pm_state_t state)`, `int device_resume(device_t *dev)`
         - Logic: Call driver callbacks, handle parent-child ordering
