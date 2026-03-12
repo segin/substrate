@@ -792,7 +792,7 @@ const char *scsi_sense_string(uint8_t key, uint8_t asc, uint8_t ascq) {
         "Reserved",
         "Volume Overflow",
         "Miscompare",
-        "Reserved"
+        "Completed"
     };
     
     if (key < 16) {

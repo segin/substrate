@@ -145,13 +145,13 @@
                 - [ ] `scsi_abort_request(req)`: cancel pending request (remove from queue, invoke callback with error). (REQ: REQ-03-0101)
                 - [ ] `scsi_complete_request(req, status)`: mark done, invoke callback, trigger queue processing. (REQ: REQ-03-0102)
 
-        - [ ] **Sense Data Parsing:** (REQ: REQ-03-0103)
-            - [ ] `scsi_sense_key(sense, len)`: extract sense key from fixed or descriptor format. (REQ: REQ-03-0104)
-            - [ ] `scsi_sense_asc(sense, len)`: extract ASC (Additional Sense Code). (REQ: REQ-03-0105)
-            - [ ] `scsi_sense_ascq(sense, len)`: extract ASCQ (Additional Sense Code Qualifier). (REQ: REQ-03-0106)
-            - [ ] `scsi_sense_string(sense, len, buf, buflen)`: human-readable sense string. (REQ: REQ-03-0107)
-            - [ ] Sense key names: NO SENSE, RECOVERED, NOT READY, MEDIUM ERROR, HARDWARE ERROR, ILLEGAL REQUEST, UNIT ATTENTION, DATA PROTECT, BLANK CHECK, VENDOR, COPY ABORTED, ABORTED COMMAND, VOLUME OVERFLOW, MISCOMPARE, COMPLETED. (REQ: REQ-03-0108)
-            - [ ] Common ASC/ASCQ: 0x04/01 (becoming ready), 0x28/00 (medium changed), 0x29/00 (power on reset), 0x3A/00 (medium not present). (REQ: REQ-03-0109)
+        - [x] **Sense Data Parsing:** (REQ: REQ-03-0103)
+            - [x] `scsi_sense_key(sense, len)`: extract sense key from fixed or descriptor format. (REQ: REQ-03-0104)
+            - [x] `scsi_sense_asc(sense, len)`: extract ASC (Additional Sense Code). (REQ: REQ-03-0105)
+            - [x] `scsi_sense_ascq(sense, len)`: extract ASCQ (Additional Sense Code Qualifier). (REQ: REQ-03-0106)
+            - [x] `scsi_sense_string(key, asc, ascq)`: human-readable sense string lookup from parsed sense data. (REQ: REQ-03-0107)
+            - [x] Sense key names: NO SENSE, RECOVERED, NOT READY, MEDIUM ERROR, HARDWARE ERROR, ILLEGAL REQUEST, UNIT ATTENTION, DATA PROTECT, BLANK CHECK, VENDOR, COPY ABORTED, ABORTED COMMAND, VOLUME OVERFLOW, MISCOMPARE, COMPLETED. (REQ: REQ-03-0108)
+            - [x] Common ASC/ASCQ: 0x04/01 (becoming ready), 0x28/00 (medium changed), 0x29/00 (power on reset), 0x3A/00 (medium not present). (REQ: REQ-03-0109)
 
         - [x] **CDB Builders:** (REQ: REQ-03-0110)
             - [x] `scsi_cdb_test_unit_ready(cdb)`: 6-byte TUR. (REQ: REQ-03-0111)
@@ -1359,7 +1359,7 @@
 - **US-03-0104**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_sense_key(sense, len): extract sense key from fixed or descriptor format so that this capability is implemented with clear verification evidence.
 - **US-03-0105**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_sense_asc(sense, len): extract ASC (Additional Sense Code) so that this capability is implemented with clear verification evidence.
 - **US-03-0106**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_sense_ascq(sense, len): extract ASCQ (Additional Sense Code Qualifier) so that this capability is implemented with clear verification evidence.
-- **US-03-0107**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_sense_string(sense, len, buf, buflen): human-readable sense string so that this capability is implemented with clear verification evidence.
+- **US-03-0107**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to `scsi_sense_string(key, asc, ascq)` lookup a human-readable sense string from parsed sense data so that this capability is implemented with clear verification evidence.
 - **US-03-0108**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sense key names: NO SENSE, RECOVERED, NOT READY, MEDIUM ERROR, HARDWARE ERROR, ILLEGAL REQUEST, UNIT ATTENTION, DATA PROTECT, BLANK CHECK, VENDOR, COPY ABORTED, ABORTED COMMAND, VOLUME OVERFLOW, MISCOMPARE, COMPLETED so that this capability is implemented with clear verification evidence.
 - **US-03-0109**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to common ASC/ASCQ: 0x04/01 (becoming ready), 0x28/00 (medium changed), 0x29/00 (power on reset), 0x3A/00 (medium not present) so that this capability is implemented with clear verification evidence.
 - **US-03-0110**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cDB Builders: so that this capability is implemented with clear verification evidence.
@@ -2723,7 +2723,7 @@
 - **REQ-03-0106** (EARS/Ubiquitous): The Substrate system shall scsi_sense_ascq(sense, len): extract ASCQ (Additional Sense Code Qualifier).
   - Context: 3. Drivers (`sys/drivers`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-03-0107** (EARS/Ubiquitous): The Substrate system shall scsi_sense_string(sense, len, buf, buflen): human-readable sense string.
+- **REQ-03-0107** (EARS/Ubiquitous): The Substrate system shall provide `scsi_sense_string(key, asc, ascq)` as a human-readable sense-string lookup over parsed sense key/ASC/ASCQ values.
   - Context: 3. Drivers (`sys/drivers`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-03-0108** (EARS/Ubiquitous): The Substrate system shall sense key names: NO SENSE, RECOVERED, NOT READY, MEDIUM ERROR, HARDWARE ERROR, ILLEGAL REQUEST, UNIT ATTENTION, DATA PROTECT, BLANK CHECK, VENDOR, COPY ABORTED, ABORTED COMMAND, VOLUME OVERFLOW, MISCOMPARE, COMPLETED.

@@ -214,6 +214,8 @@ static void test_standard_wrappers_and_16byte_helpers(void) {
         assert(cdb[2] == 0x88 && cdb[9] == 0x11);
         assert(cdb[10] == 0x05 && cdb[13] == 0x08);
     }
+
+    assert(strcmp(scsi_sense_string(SCSI_SENSE_COMPLETED, 0, 0), "Completed") == 0);
 }
 
 int main(void) {

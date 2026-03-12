@@ -71,6 +71,7 @@
 #define SCSI_SENSE_ABORTED_COMMAND  0xB
 #define SCSI_SENSE_VOLUME_OVERFLOW  0xD
 #define SCSI_SENSE_MISCOMPARE       0xE
+#define SCSI_SENSE_COMPLETED        0xF
 
 /* Device Type Codes (SPC-3 Table 82) */
 #define SCSI_TYPE_DISK              0x00  /* Direct Access (SBC) */
