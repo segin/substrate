@@ -37,7 +37,7 @@
             - [ ] Freeze ownership model (per-process LDT attached to `process_t`) and locking policy. (REQ: REQ-02-0029)
             - [ ] **Acceptance:** Gap report merged and this checklist updated with resolved scope. (REQ: REQ-02-0030)
         - [ ] **API, ABI, and Privilege Model:** (REQ: REQ-02-0031)
-            - [ ] Unify `struct user_desc` definitions (`sys/include/sys/ldt.h` vs `sys/arch/i386/syscall.h`) into one authoritative ABI header. (REQ: REQ-02-0032)
+            - [x] Unify `struct user_desc` definitions (`sys/include/sys/ldt.h` vs `sys/arch/i386/syscall.h`) into one authoritative ABI header. (REQ: REQ-02-0032)
             - [ ] Define supported `modify_ldt` operations and exact return semantics (`LDT_READ`, `LDT_WRITE`, `LDT_READ_DEFAULT`). (REQ: REQ-02-0033)
             - [ ] Define permission model: (REQ: REQ-02-0034)
                 - [ ] Current kernel policy (root/euid checks) for privileged operations. (REQ: REQ-02-0035)
