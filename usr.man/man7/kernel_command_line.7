@@ -145,12 +145,19 @@ The current selector offers
 .BR 80x25 ,
 .BR 80x43 ,
 and
-.BR 80x50 ,
-then appends the matching
+.BR 80x50 .
+When the BIOS advertises VBE text modes, the selector also adds any detected
+.BR 132x25 ,
+.BR 132x43 ,
+.BR 132x50 ,
+and
+.BR 132x60
+entries.
+It then appends the matching
 .B textmode=
 token so the higher-half kernel uses the same geometry.
 .PP
-Currently supported in-kernel text modes are:
+Currently supported kernel text-console geometries are:
 .IP \(bu 2
 .B 80x25
 (visible tty area:
@@ -164,9 +171,15 @@ Currently supported in-kernel text modes are:
 (visible tty area:
 .BR 80x49 )
 .PP
-Wider and super-VGA text modes such as
+BIOS-selected text modes such as
+.BR 80x43 ,
+.BR 132x25 ,
+.BR 132x43 ,
+.BR 132x50 ,
+and
 .B 132x60
-require a real-mode or VESA setup path and currently fall back to the default text mode rather than being faked in-kernel.
+are honored after the real-mode setup path has programmed them.
+The higher-half kernel does not fake those modes on its own.
 .TP
 .BI root= device
 Select the root block device.

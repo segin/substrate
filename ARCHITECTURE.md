@@ -99,7 +99,7 @@ Boot/init sequencing highlights:
 - init is spawned before VM background workers so `PID 1` remains the first userspace process.
 - i386 also provides a BIOS floppy boot artifact `sys/kernel.flp`: a fixed-layout 1.44MB image with a two-stage real-mode loader that prompts for a hand-typed kernel command line, falls back to a built-in default boot line when Enter is pressed on an empty prompt, refuses to boot on pre-386 CPUs, loads `kernel.zimage` from the floppy payload, patches the Linux boot header `cmd_line_ptr`, and then transfers control to the normal `zImage` setup entry.
 - the i386 `zImage` setup path fabricates Multiboot memory information from BIOS services in descending fidelity order: `E820`, then legacy aggregate sizing via `E801`, then `INT 15h AH=88h`; if only aggregate sizing is available, the kernel reserves the first 1MB conservatively and seeds PMM from one extended-memory run above 1MB.
-- the i386 `zImage` real-mode setup path now also handles `vga=ask` before protected-mode handoff: it prompts on the BIOS text console, applies the selected BIOS text mode (`80x25`, `80x43`, or `80x50`), and appends the matching `textmode=` token so the higher-half VT geometry stays aligned with the chosen mode after boot.
+- the i386 `zImage` real-mode setup path now also handles `vga=ask` before protected-mode handoff: it prompts on the BIOS text console, applies the selected BIOS text mode, and appends a `textmode=` handoff token so the higher-half VT geometry stays aligned with the chosen mode after boot. The fixed menu always includes `80x25`, `80x43`, and `80x50`; when VBE text modes are advertised by the firmware, the selector also offers detected `132x25`, `132x43`, `132x50`, and `132x60` variants.
 
 ### 5.1 i386 PMAP Model
 
@@ -194,7 +194,7 @@ Console policy:
 - the hardware text console now treats the last physical text row as a kernel-owned status line rendered black-on-white; the usable tty geometry reported to userland excludes that row (for example `80x24` on an `80x25` mode, `80x49` on an `80x50` mode)
 - the status line is refreshed from the timer tick on CPU 0 once per second and currently shows the active VT number plus wall-clock time in ISO 8601 UTC form
 - `video=text` keeps the system on the hardware text console even when framebuffer drivers are available
-- `textmode=` and `video=text:COLSxROWS` select hardware text geometry for the kernel text console; the current implementation supports `80x25`, `80x43`, and `80x50`, with `80x43` intended to be selected through the BIOS `vga=ask` setup path and `80x25`/`80x50` also available directly from the higher-half text driver
+- `textmode=` and `video=text:COLSxROWS` select hardware text geometry for the kernel text console; the higher-half driver can directly program `80x25` and `80x50`, while BIOS-selected modes such as `80x43` and VBE text modes like `132x60` are honored when the real-mode setup path marks them as already programmed
 
 Execution personalities support native behavior plus Linux/FreeBSD compatibility paths where implemented.
 - Linux signal compatibility is explicit at the ABI edge: Linux signal numbers,

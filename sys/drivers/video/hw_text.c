@@ -193,27 +193,35 @@ static int hw_text_get_requested_geometry(int *cols, int *rows) {
     return -1;
 }
 
+static int hw_text_requested_geometry_from_bios(void) {
+    char flag[8];
+
+    return cmdline_get("textmode_bios", flag, sizeof(flag)) == 0 &&
+           strcmp(flag, "1") == 0;
+}
+
 static void hw_text_apply_geometry_or_default(int *cols_out, int *rows_out) {
     int requested_cols = VT_DEFAULT_WIDTH;
     int requested_rows = VT_DEFAULT_HEIGHT;
     int actual_cols = VT_DEFAULT_WIDTH;
     int actual_rows = VT_DEFAULT_HEIGHT;
     int have_request = (hw_text_get_requested_geometry(&requested_cols, &requested_rows) == 0);
+    int bios_selected = hw_text_requested_geometry_from_bios();
 
     if (have_request) {
         if (requested_cols == 80 && requested_rows == 25) {
             hw_text_program_80x25();
             actual_cols = 80;
             actual_rows = 25;
-        } else if (requested_cols == 80 && requested_rows == 43) {
-            actual_cols = 80;
-            actual_rows = 43;
+        } else if (bios_selected) {
+            actual_cols = requested_cols;
+            actual_rows = requested_rows;
         } else if (requested_cols == 80 && requested_rows == 50) {
             hw_text_program_80x50();
             actual_cols = 80;
             actual_rows = 50;
         } else {
-            kprintf("hw_text: text mode %dx%d requires a real-mode/VESA setup path; using 80x25\n",
+            kprintf("hw_text: text mode %dx%d requires a BIOS real-mode setup path; using 80x25\n",
                     requested_cols, requested_rows);
         }
     }
