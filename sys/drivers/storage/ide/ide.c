@@ -254,76 +254,19 @@ static int ide_legacy_channel_present(const char *name) {
     return 0;
 }
 
-static uintptr_t ide_pci_bar_base(pci_device_t *pdev, int bar) {
-    uint32_t value;
-
-    if (pdev == NULL || bar < 0 || bar >= PCI_BAR_COUNT) {
-        return 0;
-    }
-
-    value = pci_read_config32(pdev->bus, pdev->slot, pdev->func,
-                              (uint16_t)(0x10 + bar * 4));
-    if (value == 0 || value == 0xFFFFFFFFU) {
-        return 0;
-    }
-
-    if (value & 1U) {
-        return (uintptr_t)(value & ~0x3U);
-    }
-
-    return (uintptr_t)(value & ~0xFU);
-}
-
 static void ide_configure_from_pci(void) {
-    pci_device_t *pdev;
+    (void)ide_pci_configure_channels(ide_channels, ide_channel_irq_shared);
 
-    for (pdev = pci_first_device(); pdev != NULL; pdev = pci_next_device(pdev)) {
-        uintptr_t bm_base;
-        int pci_irq = pci_get_irq(pdev);
-
-        if (pdev->kdev == NULL) {
-            continue;
-        }
-        if (pdev->kdev->class != 0x01 || pdev->kdev->subclass != 0x01) {
+    for (uint8_t ch = 0; ch < MAX_IDE_CHANNELS; ch += 2) {
+        if (ide_channels[ch].bm_base == 0 &&
+            (ch + 1 >= MAX_IDE_CHANNELS || ide_channels[ch + 1].bm_base == 0)) {
             continue;
         }
 
-        if (pdev->kdev->progif & 0x01) {
-            uintptr_t io = ide_pci_bar_base(pdev, 0);
-            uintptr_t ctrl = ide_pci_bar_base(pdev, 1);
-            if (io != 0) {
-                ide_channels[0].io_base = (uint16_t)io;
-            }
-            if (ctrl != 0) {
-                ide_channels[0].ctrl_base = (uint16_t)(ctrl + 2);
-            }
-            if (pci_irq != PCI_IRQ_NONE) {
-                ide_channels[0].irq = (uint8_t)pci_irq;
-                ide_channel_irq_shared[0] = 1;
-            }
-        }
-
-        if (pdev->kdev->progif & 0x04) {
-            uintptr_t io = ide_pci_bar_base(pdev, 2);
-            uintptr_t ctrl = ide_pci_bar_base(pdev, 3);
-            if (io != 0) {
-                ide_channels[1].io_base = (uint16_t)io;
-            }
-            if (ctrl != 0) {
-                ide_channels[1].ctrl_base = (uint16_t)(ctrl + 2);
-            }
-            if (pci_irq != PCI_IRQ_NONE) {
-                ide_channels[1].irq = (uint8_t)pci_irq;
-                ide_channel_irq_shared[1] = 1;
-            }
-        }
-
-        bm_base = ide_pci_bar_base(pdev, 4);
-        if ((pdev->kdev->progif & 0x80) && bm_base != 0) {
-            ide_dma_init((uint16_t)bm_base, (uint16_t)(bm_base + 8));
-        }
-
-        return;
+        ide_dma_init_pair(ch, ide_channels[ch].bm_base,
+                          (uint16_t)((ch + 1 < MAX_IDE_CHANNELS)
+                                         ? ide_channels[ch + 1].bm_base
+                                         : 0));
     }
 }
 
@@ -833,20 +776,34 @@ void ide_bm_clear_interrupt(uint8_t channel) {
  */
 
 void ide_dma_init(uint16_t bm_base_primary, uint16_t bm_base_secondary) {
-    ide_channels[0].bm_base = bm_base_primary;
-    ide_channels[1].bm_base = bm_base_secondary;
-    
-    if (bm_base_primary) {
-        ide_channels[0].dma_capable = 1;
-        /* Clear status bits */
-        ide_bm_clear_interrupt(0);
-        kprintf("  IDE Primary: DMA enabled (BM base 0x%x)\n", (unsigned int)bm_base_primary);
+    ide_dma_init_pair(0, bm_base_primary, bm_base_secondary);
+}
+
+void ide_dma_init_pair(uint8_t base_channel, uint16_t bm_base_primary,
+                       uint16_t bm_base_secondary) {
+    if (base_channel >= MAX_IDE_CHANNELS) {
+        return;
     }
-    
-    if (bm_base_secondary) {
-        ide_channels[1].dma_capable = 1;
-        ide_bm_clear_interrupt(1);
-        kprint("  IDE Secondary: DMA enabled\n");
+
+    ide_channels[base_channel].bm_base = bm_base_primary;
+    if (base_channel + 1 < MAX_IDE_CHANNELS) {
+        ide_channels[base_channel + 1].bm_base = bm_base_secondary;
+    }
+
+    if (bm_base_primary) {
+        ide_channels[base_channel].dma_capable = 1;
+        ide_bm_clear_interrupt(base_channel);
+        kprintf("  IDE %s: DMA enabled (BM base 0x%x)\n",
+                ide_channel_labels[base_channel],
+                (unsigned int)bm_base_primary);
+    }
+
+    if (base_channel + 1 < MAX_IDE_CHANNELS && bm_base_secondary) {
+        ide_channels[base_channel + 1].dma_capable = 1;
+        ide_bm_clear_interrupt((uint8_t)(base_channel + 1));
+        kprintf("  IDE %s: DMA enabled (BM base 0x%x)\n",
+                ide_channel_labels[base_channel + 1],
+                (unsigned int)bm_base_secondary);
     }
 }
 

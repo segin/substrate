@@ -230,6 +230,10 @@ typedef struct {
 /* Initialization */
 void ide_init(void);
 void ide_dma_init(uint16_t bm_base_primary, uint16_t bm_base_secondary);
+void ide_dma_init_pair(uint8_t base_channel, uint16_t bm_base_primary,
+                       uint16_t bm_base_secondary);
+size_t ide_pci_configure_channels(ide_channel_t channels[MAX_IDE_CHANNELS],
+                                  uint8_t irq_shared[MAX_IDE_CHANNELS]);
 
 static inline int ide_channel_index_from_io(uint16_t bus, uint8_t *channel) {
     if (channel == NULL) {

@@ -24,6 +24,7 @@ extern char fs_root[];
 extern char hw_text_active[];
 extern char idt_entries[];
 extern char idt_ptr[];
+extern char isa_bus_type[];
 extern char kbd_alt[];
 extern char kbd_ctrl[];
 extern char kbd_extended[];
@@ -40,6 +41,7 @@ extern char kernel_hostname[];
 extern char kernel_process[];
 extern char mountlist[];
 extern char num_cpus[];
+extern char pci_bus_type[];
 extern char personality_elks[];
 extern char personality_freebsd[];
 extern char personality_linux[];
@@ -126,10 +128,15 @@ extern void blkdev_read_bytes(void);
 extern void blkdev_register(void);
 extern void blkdev_register_disk(void);
 extern void blkdev_scan_partitions(void);
+extern void blkdev_unregister(void);
 extern void blkdev_write_bytes(void);
 extern void bus_compatible_match(void);
+extern void bus_dump_tree(void);
+extern void bus_first(void);
 extern void bus_id_match(void);
 extern void bus_match_device(void);
+extern void bus_next(void);
+extern void bus_register_type(void);
 extern void cache_enter(void);
 extern void cache_lookup(void);
 extern void cache_purge(void);
@@ -170,13 +177,35 @@ extern void crc32(void);
 extern void crc32_init(void);
 extern void debug_dump_processes(void);
 extern void devfs_init(void);
+extern void devfs_register_alias(void);
 extern void devfs_register_device(void);
+extern void devfs_unregister_alias(void);
+extern void devfs_unregister_device(void);
 extern void device_create(void);
+extern void device_defer_probe(void);
 extern void device_find_child(void);
 extern void device_get(void);
+extern void device_probe(void);
+extern void device_publish(void);
 extern void device_put(void);
 extern void device_register(void);
+extern void device_reset(void);
+extern void device_resume(void);
+extern void device_resume_all(void);
+extern void device_retry_deferred(void);
+extern void device_runtime_enable(void);
+extern void device_runtime_get(void);
+extern void device_runtime_poll(void);
+extern void device_runtime_put(void);
+extern void device_shutdown(void);
+extern void device_suspend(void);
+extern void device_suspend_all(void);
+extern void device_unpublish(void);
 extern void device_unregister(void);
+extern void dma_alloc_coherent(void);
+extern void dma_free_coherent(void);
+extern void dma_map_single(void);
+extern void dma_unmap_single(void);
 extern void do_sysinfo(void);
 extern void driver_attach(void);
 extern void driver_blacklist_add(void);
@@ -288,6 +317,7 @@ extern void fpu_handler(void);
 extern void fpu_init(void);
 extern void fpu_restore_context(void);
 extern void fpu_save_context(void);
+extern void free_irq(void);
 extern void freebsd_sendsig(void);
 extern void freebsd_sys_sigreturn(void);
 extern void full_init(void);
@@ -354,7 +384,9 @@ extern void ide_bm_clear_interrupt(void);
 extern void ide_bm_start(void);
 extern void ide_bm_status(void);
 extern void ide_bm_stop(void);
+extern void ide_decode_error(void);
 extern void ide_dma_init(void);
+extern void ide_dma_init_pair(void);
 extern void ide_dma_read(void);
 extern void ide_dma_setup(void);
 extern void ide_dma_write(void);
@@ -362,11 +394,15 @@ extern void ide_identify(void);
 extern void ide_identify_atapi(void);
 extern void ide_init(void);
 extern void ide_irq_handler(void);
+extern void ide_parse_identify_data(void);
+extern void ide_pci_configure_channels(void);
+extern void ide_prdt_build_entries(void);
 extern void ide_prdt_setup(void);
 extern void ide_read_ctrl(void);
 extern void ide_read_reg(void);
 extern void ide_read_sectors(void);
 extern void ide_read_sectors_ext(void);
+extern void ide_select_dma_transfer_mode(void);
 extern void ide_write_ctrl(void);
 extern void ide_write_reg(void);
 extern void ide_write_sectors(void);
@@ -392,6 +428,18 @@ extern void ioapic_register_isa_override(void);
 extern void ioapic_set_mask(void);
 extern void ioapic_set_routing(void);
 extern void ioapic_set_routing_ex(void);
+extern void ioremap(void);
+extern void ioremap_resource(void);
+extern void iounmap(void);
+extern void irq_alloc_vector(void);
+extern void irq_dispatch(void);
+extern void irq_free_vector(void);
+extern void isa_dump_devices(void);
+extern void isa_first_device(void);
+extern void isa_init(void);
+extern void isa_next_device(void);
+extern void isa_port_alive(void);
+extern void isa_probe_legacy(void);
 extern void isr0(void);
 extern void isr1(void);
 extern void isr10(void);
@@ -509,6 +557,8 @@ extern void kmem_test_init(void);
 extern void kobject_get(void);
 extern void kobject_init(void);
 extern void kobject_put(void);
+extern void kobject_uevent(void);
+extern void kobject_uevent_dump(void);
 extern void kprint(void);
 extern void kprintf(void);
 extern void krealloc(void);
@@ -551,6 +601,7 @@ extern void ldt_activate(void);
 extern void ldt_alloc_process(void);
 extern void ldt_clone_process(void);
 extern void ldt_free_process(void);
+extern void ldt_get_diag_snapshot(void);
 extern void ldt_init_process(void);
 extern void ldt_replace_process(void);
 extern void linear_fb_putpixel(void);
@@ -620,12 +671,43 @@ extern void openbsd_sys_getrusage(void);
 extern void openbsd_sys_sigreturn(void);
 extern void p9_init(void);
 extern void panic(void);
-extern void pci_check_device(void);
+extern void pci_bar_size(void);
+extern void pci_bar_type(void);
+extern void pci_config_address(void);
+extern void pci_device_create(void);
+extern void pci_disable_msi(void);
+extern void pci_dump_devices(void);
+extern void pci_ecam_configure(void);
+extern void pci_ecam_map(void);
+extern void pci_enable_msi(void);
+extern void pci_enable_msix(void);
+extern void pci_find_bdf(void);
+extern void pci_find_capability(void);
 extern void pci_find_device(void);
+extern void pci_find_device_by_kdev(void);
+extern void pci_find_ext_capability(void);
+extern void pci_first_device(void);
+extern void pci_get_irq(void);
+extern void pci_hotplug_add(void);
+extern void pci_hotplug_poll(void);
+extern void pci_hotplug_remove(void);
 extern void pci_init(void);
+extern void pci_iomap(void);
+extern void pci_next_device(void);
+extern void pci_present(void);
 extern void pci_read(void);
+extern void pci_read_config16(void);
+extern void pci_read_config32(void);
+extern void pci_read_config8(void);
+extern void pci_remove_device(void);
+extern void pci_request_region(void);
 extern void pci_scan(void);
+extern void pci_scan_bridge(void);
+extern void pci_scan_bus(void);
 extern void pci_write(void);
+extern void pci_write_config16(void);
+extern void pci_write_config32(void);
+extern void pci_write_config8(void);
 extern void pe_load_file(void);
 extern void percpu_get(void);
 extern void percpu_get_cpu(void);
@@ -721,12 +803,15 @@ extern void pool_init(void);
 extern void pool_mix_bytes(void);
 extern void proc_add_child(void);
 extern void proc_alloc_fd(void);
+extern void proc_alloc_fd_from(void);
 extern void proc_begin_vfork(void);
 extern void proc_capture_cmdline(void);
 extern void proc_clear_fd(void);
+extern void proc_close_cloexec(void);
 extern void proc_create(void);
 extern void proc_emit_cmdline(void);
 extern void proc_exit(void);
+extern void proc_fcntl(void);
 extern void proc_find(void);
 extern void proc_fork(void);
 extern void proc_get_bitness(void);
@@ -778,6 +863,15 @@ extern void rdseed64(void);
 extern void read_fs(void);
 extern void readdir_fs(void);
 extern void readlink_fs(void);
+extern void release_mem_region(void);
+extern void release_region(void);
+extern void request_irq(void);
+extern void request_mem_region(void);
+extern void request_region(void);
+extern void resource_dump(void);
+extern void resource_find(void);
+extern void resource_init(void);
+extern void resource_root(void);
 extern void rtc_init(void);
 extern void rtc_read_time(void);
 extern void run_chacha20_tests(void);
@@ -913,10 +1007,17 @@ extern void sched_yield(void);
 extern void scsi_abort_request(void);
 extern void scsi_auto_attach(void);
 extern void scsi_cdb_inquiry(void);
+extern void scsi_cdb_mode_sense_10(void);
+extern void scsi_cdb_mode_sense_6(void);
 extern void scsi_cdb_read_10(void);
+extern void scsi_cdb_read_16(void);
 extern void scsi_cdb_read_capacity_10(void);
+extern void scsi_cdb_request_sense(void);
+extern void scsi_cdb_start_stop(void);
+extern void scsi_cdb_sync_cache(void);
 extern void scsi_cdb_test_unit_ready(void);
 extern void scsi_cdb_write_10(void);
+extern void scsi_cdb_write_16(void);
 extern void scsi_complete_request(void);
 extern void scsi_create_bus_node(void);
 extern void scsi_ctl_init(void);
@@ -934,6 +1035,7 @@ extern void scsi_execute_sync(void);
 extern void scsi_init(void);
 extern void scsi_inquiry(void);
 extern void scsi_lock_door(void);
+extern void scsi_mode_sense(void);
 extern void scsi_probe_lun(void);
 extern void scsi_process_queue(void);
 extern void scsi_queue_request(void);
@@ -951,6 +1053,7 @@ extern void scsi_sense_ascq(void);
 extern void scsi_sense_key(void);
 extern void scsi_sense_string(void);
 extern void scsi_start_stop(void);
+extern void scsi_synchronize_cache(void);
 extern void scsi_test_unit_ready(void);
 extern void scsi_unregister_link(void);
 extern void sema_getvalue(void);
@@ -1182,9 +1285,14 @@ extern void test_bus_struct_layout(void);
 extern void test_console_perf(void);
 extern void test_cow_perf(void);
 extern void test_cow_stats_read(void);
+extern void test_deferred_probe_logic(void);
 extern void test_device_allocation(void);
+extern void test_device_pm_logic(void);
+extern void test_device_probe_logic(void);
 extern void test_device_refcounting(void);
 extern void test_device_registration_logic(void);
+extern void test_device_reset_logic(void);
+extern void test_device_shutdown_logic(void);
 extern void test_device_struct_layout(void);
 extern void test_device_unregister_logic(void);
 extern void test_driver_attach_logic(void);
@@ -1208,6 +1316,7 @@ extern void test_kernel_bootstrap_large_page(void);
 extern void test_kernel_pmap_protection(void);
 extern void test_ksyms(void);
 extern void test_large_mapping(void);
+extern void test_linux_personality(void);
 extern void test_mem(void);
 extern void test_mmap_anonymous(void);
 extern void test_mmap_fixed(void);
@@ -1405,6 +1514,7 @@ extern void vfs_get_filesystems(void);
 extern void vfs_init(void);
 extern void vfs_lookup(void);
 extern void vfs_lookup_lstat(void);
+extern void vfs_may_open(void);
 extern void vfs_mkdir(void);
 extern void vfs_mknod(void);
 extern void vfs_mount(void);
@@ -1513,7 +1623,9 @@ extern void vm_pager_has_page(void);
 extern void vm_pager_put_pages(void);
 extern void vm_phys_add_range(void);
 extern void vm_phys_alloc_contiguous(void);
+extern void vm_phys_alloc_contiguous_below(void);
 extern void vm_phys_alloc_page(void);
+extern void vm_phys_alloc_page_below(void);
 extern void vm_phys_check_integrity(void);
 extern void vm_phys_early_init(void);
 extern void vm_phys_free_contiguous(void);
@@ -1594,6 +1706,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&tss_iomap_init, "tss_iomap_init" },
     { (uint32_t)(uintptr_t)&tss_set_iomap, "tss_set_iomap" },
     { (uint32_t)(uintptr_t)&tss_set_iomap_range, "tss_set_iomap_range" },
+    { (uint32_t)(uintptr_t)&ldt_get_diag_snapshot, "ldt_get_diag_snapshot" },
     { (uint32_t)(uintptr_t)&ldt_activate, "ldt_activate" },
     { (uint32_t)(uintptr_t)&ldt_init_process, "ldt_init_process" },
     { (uint32_t)(uintptr_t)&ldt_alloc_process, "ldt_alloc_process" },
@@ -1687,12 +1800,18 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&pmm_walk_e820, "pmm_walk_e820" },
     { (uint32_t)(uintptr_t)&pmm_dump_e820, "pmm_dump_e820" },
     { (uint32_t)(uintptr_t)&pmm_init_e820, "pmm_init_e820" },
+    { (uint32_t)(uintptr_t)&pci_present, "pci_present" },
+    { (uint32_t)(uintptr_t)&pci_ecam_configure, "pci_ecam_configure" },
+    { (uint32_t)(uintptr_t)&pci_ecam_map, "pci_ecam_map" },
+    { (uint32_t)(uintptr_t)&pci_config_address, "pci_config_address" },
+    { (uint32_t)(uintptr_t)&pci_read_config8, "pci_read_config8" },
+    { (uint32_t)(uintptr_t)&pci_read_config16, "pci_read_config16" },
+    { (uint32_t)(uintptr_t)&pci_read_config32, "pci_read_config32" },
+    { (uint32_t)(uintptr_t)&pci_write_config8, "pci_write_config8" },
+    { (uint32_t)(uintptr_t)&pci_write_config16, "pci_write_config16" },
+    { (uint32_t)(uintptr_t)&pci_write_config32, "pci_write_config32" },
     { (uint32_t)(uintptr_t)&pci_read, "pci_read" },
     { (uint32_t)(uintptr_t)&pci_write, "pci_write" },
-    { (uint32_t)(uintptr_t)&pci_check_device, "pci_check_device" },
-    { (uint32_t)(uintptr_t)&pci_scan, "pci_scan" },
-    { (uint32_t)(uintptr_t)&pci_find_device, "pci_find_device" },
-    { (uint32_t)(uintptr_t)&pci_init, "pci_init" },
     { (uint32_t)(uintptr_t)&sys_set_thread_area, "sys_set_thread_area" },
     { (uint32_t)(uintptr_t)&syscall_handler, "syscall_handler" },
     { (uint32_t)(uintptr_t)&arch_fork_with_stack, "arch_fork_with_stack" },
@@ -2027,6 +2146,8 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&kset_init, "kset_init" },
     { (uint32_t)(uintptr_t)&kobject_get, "kobject_get" },
     { (uint32_t)(uintptr_t)&kobject_put, "kobject_put" },
+    { (uint32_t)(uintptr_t)&kobject_uevent, "kobject_uevent" },
+    { (uint32_t)(uintptr_t)&kobject_uevent_dump, "kobject_uevent_dump" },
     { (uint32_t)(uintptr_t)&cmdline_init, "cmdline_init" },
     { (uint32_t)(uintptr_t)&cmdline_has, "cmdline_has" },
     { (uint32_t)(uintptr_t)&cmdline_get, "cmdline_get" },
@@ -2183,7 +2304,22 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&device_unregister, "device_unregister" },
     { (uint32_t)(uintptr_t)&device_get, "device_get" },
     { (uint32_t)(uintptr_t)&device_put, "device_put" },
+    { (uint32_t)(uintptr_t)&device_publish, "device_publish" },
+    { (uint32_t)(uintptr_t)&device_unpublish, "device_unpublish" },
     { (uint32_t)(uintptr_t)&device_find_child, "device_find_child" },
+    { (uint32_t)(uintptr_t)&device_probe, "device_probe" },
+    { (uint32_t)(uintptr_t)&device_defer_probe, "device_defer_probe" },
+    { (uint32_t)(uintptr_t)&device_retry_deferred, "device_retry_deferred" },
+    { (uint32_t)(uintptr_t)&device_suspend, "device_suspend" },
+    { (uint32_t)(uintptr_t)&device_resume, "device_resume" },
+    { (uint32_t)(uintptr_t)&device_shutdown, "device_shutdown" },
+    { (uint32_t)(uintptr_t)&device_reset, "device_reset" },
+    { (uint32_t)(uintptr_t)&device_suspend_all, "device_suspend_all" },
+    { (uint32_t)(uintptr_t)&device_resume_all, "device_resume_all" },
+    { (uint32_t)(uintptr_t)&device_runtime_enable, "device_runtime_enable" },
+    { (uint32_t)(uintptr_t)&device_runtime_get, "device_runtime_get" },
+    { (uint32_t)(uintptr_t)&device_runtime_put, "device_runtime_put" },
+    { (uint32_t)(uintptr_t)&device_runtime_poll, "device_runtime_poll" },
     { (uint32_t)(uintptr_t)&driver_blacklist_add, "driver_blacklist_add" },
     { (uint32_t)(uintptr_t)&driver_is_blacklisted, "driver_is_blacklisted" },
     { (uint32_t)(uintptr_t)&driver_override, "driver_override" },
@@ -2191,6 +2327,10 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&driver_attach, "driver_attach" },
     { (uint32_t)(uintptr_t)&driver_detach, "driver_detach" },
     { (uint32_t)(uintptr_t)&driver_unregister, "driver_unregister" },
+    { (uint32_t)(uintptr_t)&bus_register_type, "bus_register_type" },
+    { (uint32_t)(uintptr_t)&bus_first, "bus_first" },
+    { (uint32_t)(uintptr_t)&bus_next, "bus_next" },
+    { (uint32_t)(uintptr_t)&bus_dump_tree, "bus_dump_tree" },
     { (uint32_t)(uintptr_t)&bus_match_device, "bus_match_device" },
     { (uint32_t)(uintptr_t)&bus_id_match, "bus_id_match" },
     { (uint32_t)(uintptr_t)&bus_compatible_match, "bus_compatible_match" },
@@ -2205,6 +2345,57 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&do_sysinfo, "do_sysinfo" },
     { (uint32_t)(uintptr_t)&sys_sysinfo, "sys_sysinfo" },
     { (uint32_t)(uintptr_t)&sys_vm_stats, "sys_vm_stats" },
+    { (uint32_t)(uintptr_t)&request_irq, "request_irq" },
+    { (uint32_t)(uintptr_t)&free_irq, "free_irq" },
+    { (uint32_t)(uintptr_t)&irq_dispatch, "irq_dispatch" },
+    { (uint32_t)(uintptr_t)&irq_alloc_vector, "irq_alloc_vector" },
+    { (uint32_t)(uintptr_t)&irq_free_vector, "irq_free_vector" },
+    { (uint32_t)(uintptr_t)&dma_map_single, "dma_map_single" },
+    { (uint32_t)(uintptr_t)&dma_unmap_single, "dma_unmap_single" },
+    { (uint32_t)(uintptr_t)&dma_alloc_coherent, "dma_alloc_coherent" },
+    { (uint32_t)(uintptr_t)&dma_free_coherent, "dma_free_coherent" },
+    { (uint32_t)(uintptr_t)&pci_device_create, "pci_device_create" },
+    { (uint32_t)(uintptr_t)&pci_find_bdf, "pci_find_bdf" },
+    { (uint32_t)(uintptr_t)&pci_remove_device, "pci_remove_device" },
+    { (uint32_t)(uintptr_t)&pci_find_capability, "pci_find_capability" },
+    { (uint32_t)(uintptr_t)&pci_find_ext_capability, "pci_find_ext_capability" },
+    { (uint32_t)(uintptr_t)&pci_bar_type, "pci_bar_type" },
+    { (uint32_t)(uintptr_t)&pci_bar_size, "pci_bar_size" },
+    { (uint32_t)(uintptr_t)&pci_request_region, "pci_request_region" },
+    { (uint32_t)(uintptr_t)&pci_iomap, "pci_iomap" },
+    { (uint32_t)(uintptr_t)&pci_get_irq, "pci_get_irq" },
+    { (uint32_t)(uintptr_t)&pci_enable_msi, "pci_enable_msi" },
+    { (uint32_t)(uintptr_t)&pci_disable_msi, "pci_disable_msi" },
+    { (uint32_t)(uintptr_t)&pci_enable_msix, "pci_enable_msix" },
+    { (uint32_t)(uintptr_t)&pci_hotplug_add, "pci_hotplug_add" },
+    { (uint32_t)(uintptr_t)&pci_hotplug_remove, "pci_hotplug_remove" },
+    { (uint32_t)(uintptr_t)&pci_hotplug_poll, "pci_hotplug_poll" },
+    { (uint32_t)(uintptr_t)&pci_scan_bus, "pci_scan_bus" },
+    { (uint32_t)(uintptr_t)&pci_scan_bridge, "pci_scan_bridge" },
+    { (uint32_t)(uintptr_t)&pci_scan, "pci_scan" },
+    { (uint32_t)(uintptr_t)&pci_find_device, "pci_find_device" },
+    { (uint32_t)(uintptr_t)&pci_find_device_by_kdev, "pci_find_device_by_kdev" },
+    { (uint32_t)(uintptr_t)&pci_first_device, "pci_first_device" },
+    { (uint32_t)(uintptr_t)&pci_next_device, "pci_next_device" },
+    { (uint32_t)(uintptr_t)&pci_dump_devices, "pci_dump_devices" },
+    { (uint32_t)(uintptr_t)&pci_init, "pci_init" },
+    { (uint32_t)(uintptr_t)&isa_init, "isa_init" },
+    { (uint32_t)(uintptr_t)&isa_port_alive, "isa_port_alive" },
+    { (uint32_t)(uintptr_t)&isa_probe_legacy, "isa_probe_legacy" },
+    { (uint32_t)(uintptr_t)&isa_first_device, "isa_first_device" },
+    { (uint32_t)(uintptr_t)&isa_next_device, "isa_next_device" },
+    { (uint32_t)(uintptr_t)&isa_dump_devices, "isa_dump_devices" },
+    { (uint32_t)(uintptr_t)&resource_init, "resource_init" },
+    { (uint32_t)(uintptr_t)&resource_root, "resource_root" },
+    { (uint32_t)(uintptr_t)&resource_find, "resource_find" },
+    { (uint32_t)(uintptr_t)&resource_dump, "resource_dump" },
+    { (uint32_t)(uintptr_t)&request_region, "request_region" },
+    { (uint32_t)(uintptr_t)&release_region, "release_region" },
+    { (uint32_t)(uintptr_t)&request_mem_region, "request_mem_region" },
+    { (uint32_t)(uintptr_t)&release_mem_region, "release_mem_region" },
+    { (uint32_t)(uintptr_t)&ioremap, "ioremap" },
+    { (uint32_t)(uintptr_t)&ioremap_resource, "ioremap_resource" },
+    { (uint32_t)(uintptr_t)&iounmap, "iounmap" },
     { (uint32_t)(uintptr_t)&sched_set_affinity, "sched_set_affinity" },
     { (uint32_t)(uintptr_t)&sched_get_affinity, "sched_get_affinity" },
     { (uint32_t)(uintptr_t)&sched_set_affinity_self, "sched_set_affinity_self" },
@@ -2274,9 +2465,12 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&proc_vfork_done, "proc_vfork_done" },
     { (uint32_t)(uintptr_t)&sched_spawn_kernel_process, "sched_spawn_kernel_process" },
     { (uint32_t)(uintptr_t)&fd_close_all, "fd_close_all" },
+    { (uint32_t)(uintptr_t)&proc_alloc_fd_from, "proc_alloc_fd_from" },
     { (uint32_t)(uintptr_t)&proc_alloc_fd, "proc_alloc_fd" },
     { (uint32_t)(uintptr_t)&proc_set_fd, "proc_set_fd" },
     { (uint32_t)(uintptr_t)&proc_clear_fd, "proc_clear_fd" },
+    { (uint32_t)(uintptr_t)&proc_fcntl, "proc_fcntl" },
+    { (uint32_t)(uintptr_t)&proc_close_cloexec, "proc_close_cloexec" },
     { (uint32_t)(uintptr_t)&proc_reparent_children, "proc_reparent_children" },
     { (uint32_t)(uintptr_t)&proc_reap_autoreap_zombies, "proc_reap_autoreap_zombies" },
     { (uint32_t)(uintptr_t)&proc_exit, "proc_exit" },
@@ -2411,6 +2605,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&uart_putc, "uart_putc" },
     { (uint32_t)(uintptr_t)&uart_write, "uart_write" },
     { (uint32_t)(uintptr_t)&blkdev_register, "blkdev_register" },
+    { (uint32_t)(uintptr_t)&blkdev_unregister, "blkdev_unregister" },
     { (uint32_t)(uintptr_t)&blkdev_scan_partitions, "blkdev_scan_partitions" },
     { (uint32_t)(uintptr_t)&blkdev_register_disk, "blkdev_register_disk" },
     { (uint32_t)(uintptr_t)&blkdev_get, "blkdev_get" },
@@ -2439,6 +2634,8 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&scsi_request_sense, "scsi_request_sense" },
     { (uint32_t)(uintptr_t)&scsi_start_stop, "scsi_start_stop" },
     { (uint32_t)(uintptr_t)&scsi_report_luns, "scsi_report_luns" },
+    { (uint32_t)(uintptr_t)&scsi_synchronize_cache, "scsi_synchronize_cache" },
+    { (uint32_t)(uintptr_t)&scsi_mode_sense, "scsi_mode_sense" },
     { (uint32_t)(uintptr_t)&scsi_sense_key, "scsi_sense_key" },
     { (uint32_t)(uintptr_t)&scsi_sense_asc, "scsi_sense_asc" },
     { (uint32_t)(uintptr_t)&scsi_sense_ascq, "scsi_sense_ascq" },
@@ -2448,6 +2645,13 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&scsi_cdb_read_capacity_10, "scsi_cdb_read_capacity_10" },
     { (uint32_t)(uintptr_t)&scsi_cdb_read_10, "scsi_cdb_read_10" },
     { (uint32_t)(uintptr_t)&scsi_cdb_write_10, "scsi_cdb_write_10" },
+    { (uint32_t)(uintptr_t)&scsi_cdb_read_16, "scsi_cdb_read_16" },
+    { (uint32_t)(uintptr_t)&scsi_cdb_write_16, "scsi_cdb_write_16" },
+    { (uint32_t)(uintptr_t)&scsi_cdb_request_sense, "scsi_cdb_request_sense" },
+    { (uint32_t)(uintptr_t)&scsi_cdb_mode_sense_6, "scsi_cdb_mode_sense_6" },
+    { (uint32_t)(uintptr_t)&scsi_cdb_mode_sense_10, "scsi_cdb_mode_sense_10" },
+    { (uint32_t)(uintptr_t)&scsi_cdb_start_stop, "scsi_cdb_start_stop" },
+    { (uint32_t)(uintptr_t)&scsi_cdb_sync_cache, "scsi_cdb_sync_cache" },
     { (uint32_t)(uintptr_t)&scsi_probe_lun, "scsi_probe_lun" },
     { (uint32_t)(uintptr_t)&scsi_scan_bus, "scsi_scan_bus" },
     { (uint32_t)(uintptr_t)&scsi_read_toc, "scsi_read_toc" },
@@ -2471,6 +2675,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&ide_bm_status, "ide_bm_status" },
     { (uint32_t)(uintptr_t)&ide_bm_clear_interrupt, "ide_bm_clear_interrupt" },
     { (uint32_t)(uintptr_t)&ide_dma_init, "ide_dma_init" },
+    { (uint32_t)(uintptr_t)&ide_dma_init_pair, "ide_dma_init_pair" },
     { (uint32_t)(uintptr_t)&ide_dma_read, "ide_dma_read" },
     { (uint32_t)(uintptr_t)&ide_dma_write, "ide_dma_write" },
     { (uint32_t)(uintptr_t)&ide_dma_setup, "ide_dma_setup" },
@@ -2486,6 +2691,11 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&ide_atapi_read_toc, "ide_atapi_read_toc" },
     { (uint32_t)(uintptr_t)&ide_irq_handler, "ide_irq_handler" },
     { (uint32_t)(uintptr_t)&ide_init, "ide_init" },
+    { (uint32_t)(uintptr_t)&ide_prdt_build_entries, "ide_prdt_build_entries" },
+    { (uint32_t)(uintptr_t)&ide_parse_identify_data, "ide_parse_identify_data" },
+    { (uint32_t)(uintptr_t)&ide_decode_error, "ide_decode_error" },
+    { (uint32_t)(uintptr_t)&ide_select_dma_transfer_mode, "ide_select_dma_transfer_mode" },
+    { (uint32_t)(uintptr_t)&ide_pci_configure_channels, "ide_pci_configure_channels" },
     { (uint32_t)(uintptr_t)&ahci_init, "ahci_init" },
     { (uint32_t)(uintptr_t)&nvme_init, "nvme_init" },
     { (uint32_t)(uintptr_t)&ramdisk_create, "ramdisk_create" },
@@ -2522,6 +2732,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&vfs_lookup, "vfs_lookup" },
     { (uint32_t)(uintptr_t)&vfs_lookup_lstat, "vfs_lookup_lstat" },
     { (uint32_t)(uintptr_t)&vfs_check_permissions, "vfs_check_permissions" },
+    { (uint32_t)(uintptr_t)&vfs_may_open, "vfs_may_open" },
     { (uint32_t)(uintptr_t)&readlink_fs, "readlink_fs" },
     { (uint32_t)(uintptr_t)&symlink_fs, "symlink_fs" },
     { (uint32_t)(uintptr_t)&link_fs, "link_fs" },
@@ -2644,6 +2855,9 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&udf_remove_fid, "udf_remove_fid" },
     { (uint32_t)(uintptr_t)&udf_truncate, "udf_truncate" },
     { (uint32_t)(uintptr_t)&devfs_register_device, "devfs_register_device" },
+    { (uint32_t)(uintptr_t)&devfs_unregister_device, "devfs_unregister_device" },
+    { (uint32_t)(uintptr_t)&devfs_register_alias, "devfs_register_alias" },
+    { (uint32_t)(uintptr_t)&devfs_unregister_alias, "devfs_unregister_alias" },
     { (uint32_t)(uintptr_t)&devfs_init, "devfs_init" },
     { (uint32_t)(uintptr_t)&procfs_register_entry, "procfs_register_entry" },
     { (uint32_t)(uintptr_t)&procfs_init, "procfs_init" },
@@ -2849,8 +3063,10 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&vm_phys_early_init, "vm_phys_early_init" },
     { (uint32_t)(uintptr_t)&vm_phys_add_range, "vm_phys_add_range" },
     { (uint32_t)(uintptr_t)&vm_phys_alloc_page, "vm_phys_alloc_page" },
+    { (uint32_t)(uintptr_t)&vm_phys_alloc_page_below, "vm_phys_alloc_page_below" },
     { (uint32_t)(uintptr_t)&vm_phys_free_page, "vm_phys_free_page" },
     { (uint32_t)(uintptr_t)&vm_phys_alloc_contiguous, "vm_phys_alloc_contiguous" },
+    { (uint32_t)(uintptr_t)&vm_phys_alloc_contiguous_below, "vm_phys_alloc_contiguous_below" },
     { (uint32_t)(uintptr_t)&vm_phys_free_contiguous, "vm_phys_free_contiguous" },
     { (uint32_t)(uintptr_t)&vm_phys_get_free, "vm_phys_get_free" },
     { (uint32_t)(uintptr_t)&vm_phys_get_used, "vm_phys_get_used" },
@@ -3004,6 +3220,11 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&test_device_unregister_logic, "test_device_unregister_logic" },
     { (uint32_t)(uintptr_t)&test_device_refcounting, "test_device_refcounting" },
     { (uint32_t)(uintptr_t)&test_find_child_logic, "test_find_child_logic" },
+    { (uint32_t)(uintptr_t)&test_device_probe_logic, "test_device_probe_logic" },
+    { (uint32_t)(uintptr_t)&test_deferred_probe_logic, "test_deferred_probe_logic" },
+    { (uint32_t)(uintptr_t)&test_device_pm_logic, "test_device_pm_logic" },
+    { (uint32_t)(uintptr_t)&test_device_shutdown_logic, "test_device_shutdown_logic" },
+    { (uint32_t)(uintptr_t)&test_device_reset_logic, "test_device_reset_logic" },
     { (uint32_t)(uintptr_t)&test_driver_registration_logic, "test_driver_registration_logic" },
     { (uint32_t)(uintptr_t)&test_driver_unregister_logic, "test_driver_unregister_logic" },
     { (uint32_t)(uintptr_t)&test_driver_attach_logic, "test_driver_attach_logic" },
@@ -3051,6 +3272,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&run_crc32_tests, "run_crc32_tests" },
     { (uint32_t)(uintptr_t)&run_devfs_special_device_tests, "run_devfs_special_device_tests" },
     { (uint32_t)(uintptr_t)&run_ldt_tests, "run_ldt_tests" },
+    { (uint32_t)(uintptr_t)&test_linux_personality, "test_linux_personality" },
     { (uint32_t)(uintptr_t)&test_tty_alloc, "test_tty_alloc" },
     { (uint32_t)(uintptr_t)&test_tty_canonical, "test_tty_canonical" },
     { (uint32_t)(uintptr_t)&test_tty_ixoff, "test_tty_ixoff" },
@@ -3089,6 +3311,8 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&sysctl_hw_model, "sysctl_hw_model" },
     { (uint32_t)(uintptr_t)&sysctl_hw_ncpu, "sysctl_hw_ncpu" },
     { (uint32_t)(uintptr_t)&sysctl_hw_pagesize, "sysctl_hw_pagesize" },
+    { (uint32_t)(uintptr_t)&pci_bus_type, "pci_bus_type" },
+    { (uint32_t)(uintptr_t)&isa_bus_type, "isa_bus_type" },
     { (uint32_t)(uintptr_t)&num_cpus, "num_cpus" },
     { (uint32_t)(uintptr_t)&kbd_us, "kbd_us" },
     { (uint32_t)(uintptr_t)&kbd_us_shifted, "kbd_us_shifted" },
@@ -3159,4 +3383,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1574;
+int ksym_count = 1686;

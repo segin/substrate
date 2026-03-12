@@ -70,8 +70,10 @@ Tertiary: 0x1E8 (Control 0x3EE), IRQ 11
 .IP \(bu 4
 Quaternary: 0x168 (Control 0x36E), IRQ 10
 
-If PCI IDE native mode is present, primary and secondary channel I/O bases and
-IRQs may be overridden from PCI BAR and interrupt-line configuration.
+If PCI IDE native mode is present, channel I/O bases and IRQs may be
+overridden from PCI BAR and interrupt-line configuration.
+Controllers exposing additional channel pairs through separate PCI functions
+are mapped onto the tertiary and quaternary channel slots.
 If PCI is absent, or if additional IDE channels are not exposed through PCI,
 the driver falls back to the legacy fixed I/O model above.
 

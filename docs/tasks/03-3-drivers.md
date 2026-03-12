@@ -323,7 +323,7 @@
             - Bit 2: Secondary channel in native mode (use BAR2/BAR3) vs compatibility mode (0x170/0x376).
             - Bit 7: Bus Master capable (use BAR4 for DMA registers).
         - [x] For native‑mode channels: read I/O base from PCI BARs, allocate IRQ from PCI interrupt line. (REQ: REQ-03-0255)
-        - [ ] Detect PCI IDE controllers with additional channels (e.g., CMD640, Promise, HighPoint, SiI680 — typically expose as separate PCI functions). (REQ: REQ-03-0256)
+        - [x] Detect PCI IDE controllers with additional channels (e.g., CMD640, Promise, HighPoint, SiI680 — typically expose as separate PCI functions). (REQ: REQ-03-0256)
         - [x] ISA tertiary/quaternary probing: if PCI does not enumerate additional channels, probe legacy I/O ports at 0x1E8 and 0x168 for device presence. (REQ: REQ-03-0257)
     - [x] **Device Identification (`ide_identify` / `ide_identify_atapi`):** (REQ: REQ-03-0258)
         - [x] Issue IDENTIFY DEVICE (0xEC) or IDENTIFY PACKET DEVICE (0xA1). (REQ: REQ-03-0259)

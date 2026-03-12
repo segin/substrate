@@ -388,6 +388,7 @@ extern void ide_bm_status(void);
 extern void ide_bm_stop(void);
 extern void ide_decode_error(void);
 extern void ide_dma_init(void);
+extern void ide_dma_init_pair(void);
 extern void ide_dma_read(void);
 extern void ide_dma_setup(void);
 extern void ide_dma_write(void);
@@ -396,6 +397,7 @@ extern void ide_identify_atapi(void);
 extern void ide_init(void);
 extern void ide_irq_handler(void);
 extern void ide_parse_identify_data(void);
+extern void ide_pci_configure_channels(void);
 extern void ide_prdt_build_entries(void);
 extern void ide_prdt_setup(void);
 extern void ide_read_ctrl(void);
@@ -2677,6 +2679,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&ide_bm_status, "ide_bm_status" },
     { (uint32_t)(uintptr_t)&ide_bm_clear_interrupt, "ide_bm_clear_interrupt" },
     { (uint32_t)(uintptr_t)&ide_dma_init, "ide_dma_init" },
+    { (uint32_t)(uintptr_t)&ide_dma_init_pair, "ide_dma_init_pair" },
     { (uint32_t)(uintptr_t)&ide_dma_read, "ide_dma_read" },
     { (uint32_t)(uintptr_t)&ide_dma_write, "ide_dma_write" },
     { (uint32_t)(uintptr_t)&ide_dma_setup, "ide_dma_setup" },
@@ -2696,6 +2699,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&ide_parse_identify_data, "ide_parse_identify_data" },
     { (uint32_t)(uintptr_t)&ide_decode_error, "ide_decode_error" },
     { (uint32_t)(uintptr_t)&ide_select_dma_transfer_mode, "ide_select_dma_transfer_mode" },
+    { (uint32_t)(uintptr_t)&ide_pci_configure_channels, "ide_pci_configure_channels" },
     { (uint32_t)(uintptr_t)&ahci_init, "ahci_init" },
     { (uint32_t)(uintptr_t)&nvme_init, "nvme_init" },
     { (uint32_t)(uintptr_t)&ramdisk_create, "ramdisk_create" },
@@ -3383,4 +3387,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1686;
+int ksym_count = 1688;

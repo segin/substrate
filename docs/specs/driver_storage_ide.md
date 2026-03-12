@@ -28,18 +28,20 @@ The driver tracks up to four channels:
 - tertiary: I/O `0x1E8`, control `0x3EE`, IRQ `11`
 - quaternary: I/O `0x168`, control `0x36E`, IRQ `10`
 
-Primary and secondary may be overridden by PCI native-mode BARs. Tertiary and
-quaternary remain legacy fixed-base channels.
-When a PCI IDE controller advertises native mode and exposes a valid interrupt
-line, the corresponding channel IRQ is taken from PCI configuration space and
-registered through the generic IRQ layer. Native-mode PCI channels request
-their IRQs as shared lines.
+Primary and secondary may be overridden by PCI native-mode BARs on the first
+PCI IDE controller function. Additional PCI IDE functions are consumed as
+additional channel pairs and populate the tertiary/quaternary slots from their
+BAR layout when present.
+When a PCI IDE controller exposes a valid interrupt line, the corresponding
+channel IRQ is taken from PCI configuration space and registered through the
+generic IRQ layer. Native-mode PCI channels request their IRQs as shared lines.
 
 ## Discovery
 
-Discovery starts from default channel definitions, then applies PCI IDE native
-mode overrides for primary and secondary channels when a class `01:01`
-controller is present.
+Discovery starts from default channel definitions, then walks every PCI class
+`01:01` IDE controller function in enumeration order. The first function owns
+the primary/secondary pair, and later functions claim the tertiary/quaternary
+pair when capacity remains.
 
 On ISA-only systems the driver consumes ISA legacy-bus hints for:
 - `ide-primary`
