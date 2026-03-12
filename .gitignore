@@ -206,6 +206,7 @@ sbin/*/*
 /usr.man/mandoc.db
 
 # Generated tests and harness artifacts
+/tests/host_test_*
 /tests/bench_vm_map
 /tests/bin/ldtctl/test_ldtctl
 /tests/bin/ps/test_ps_state
@@ -214,6 +215,7 @@ sbin/*/*
 /tests/test_ext2_find_next_zero_bit
 /tests/test_ext2_inode_write
 /tests/test_ext2_read_blocks
+/tests/test_libc_sysctl
 /tests/test_libpthread_mutex
 /tests/test_readline
 /tests/usr.bin/cc/test_ast2ir_bin
