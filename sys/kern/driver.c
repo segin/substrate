@@ -162,7 +162,9 @@ int driver_register(struct driver *drv, struct bus_type *bus) {
     while (curr_dev) {
         /* Probe this device against our new driver */
         /* Note: probe_device is internal helper */
-        probe_device(drv, curr_dev);
+        if (probe_device(drv, curr_dev)) {
+            (void)driver_attach(drv, curr_dev);
+        }
         
         /* Move to next */
         spinlock_acquire(&bus->lock);

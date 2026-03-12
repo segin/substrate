@@ -19,6 +19,7 @@
 #include <sys/random.h>
 #include <kern/console.h>
 #include <kern/device.h>
+#include <kern/driver.h>
 #include <kern/isa.h>
 #include <kern/pci.h>
 #include <drivers/storage/blkdev.h>
@@ -62,12 +63,16 @@ typedef struct {
 
 static ide_drive_ctx_t ide_contexts[MAX_IDE_DEVICES];
 static blkdev_t ide_blkdevs[MAX_IDE_DEVICES];
+static int ide_attached;
+static int ide_drivers_registered;
 
 /* IRQ completion flag */
 static volatile int ide_irq_complete[MAX_IDE_CHANNELS];
 
 static void ide_wait_bsy(uint8_t channel);
 static int ide_wait_drq(uint8_t channel);
+
+static int ide_scan_controller(void);
 
 static int ide_legacy_channel_present(const char *name) {
     struct device *dev;
@@ -192,6 +197,44 @@ static int ide_identify_atapi_channel(uint8_t channel, uint8_t drive, void *buff
     insw(ide_channels[channel].io_base + ATA_REG_DATA, buffer, 256);
     return 0;
 }
+
+static int ide_isa_match(struct device *dev, struct driver *drv) {
+    (void)drv;
+
+    if (dev == NULL) {
+        return 0;
+    }
+
+    return strcmp(dev->name, "ide-primary") == 0 ||
+           strcmp(dev->name, "ide-secondary") == 0;
+}
+
+static int ide_attach_via_framework(struct device *dev) {
+    (void)dev;
+
+    if (ide_attached) {
+        return -1;
+    }
+
+    return ide_scan_controller();
+}
+
+static const device_id_t ide_pci_ids[] = {
+    { DEVICE_ID_ANY, DEVICE_ID_ANY, 0x00010100U, 0x00FFFF00U, 0 },
+    { 0, 0, 0, 0, 0 },
+};
+
+static struct driver ide_isa_driver = {
+    .name = "ide-isa",
+    .match_func = ide_isa_match,
+    .attach = ide_attach_via_framework,
+};
+
+static struct driver ide_pci_driver = {
+    .name = "ide-pci",
+    .id_table = ide_pci_ids,
+    .attach = ide_attach_via_framework,
+};
 
 /*
  * ============================================================
@@ -1151,7 +1194,7 @@ void ide_irq_handler(int irq) {
  * ============================================================
  */
 
-void ide_init(void) {
+static int ide_scan_controller(void) {
     kprint("IDE Driver Initialized.\n");
     int legacy_hint_primary;
     int legacy_hint_secondary;
@@ -1306,4 +1349,19 @@ void ide_init(void) {
     /* Re-enable interrupts */
     ide_write_ctrl(0, 0);
     ide_write_ctrl(1, 0);
+
+    ide_attached = 1;
+    return 0;
+}
+
+void ide_init(void) {
+    if (ide_drivers_registered) {
+        return;
+    }
+
+    (void)driver_register(&ide_isa_driver, &isa_bus_type);
+    if (pci_present()) {
+        (void)driver_register(&ide_pci_driver, &pci_bus_type);
+    }
+    ide_drivers_registered = 1;
 }

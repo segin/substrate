@@ -13,7 +13,7 @@
     > This file owns the controller-family and transport refactors that must move
     > onto that framework.
 
-    - [ ] Migrate legacy IDE attachment onto the driver model while preserving both fixed-resource ISA attachment and PCI IDE attachment.
+    - [x] Migrate legacy IDE attachment onto the driver model while preserving both fixed-resource ISA attachment and PCI IDE attachment.
         - Files: `sys/drivers/storage/ide/ide.c`, `sys/kern/isa.c`, `sys/kern/pci.c`
         - Acceptance: Old non-PCI 486 systems and PCI IDE systems both attach through the framework-owned discovery path
     - [x] Migrate VirtIO storage/controller attachment onto the driver model rather than relying on ad hoc discovery.
