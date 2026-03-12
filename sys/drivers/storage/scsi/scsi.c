@@ -455,6 +455,17 @@ int scsi_queue_request(scsi_request_t *req) {
     }
     
     scsi_device_t *dev = req->device;
+
+    if (dev->max_queue_depth != 0 &&
+        dev->queue_depth >= dev->max_queue_depth) {
+        req->state = SCSI_REQ_STATE_ERROR;
+        req->error = -1;
+        req->next = NULL;
+        if (req->callback) {
+            req->callback(req);
+        }
+        return -1;
+    }
     
     req->state = SCSI_REQ_STATE_PENDING;
     req->next = NULL;

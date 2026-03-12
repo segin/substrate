@@ -455,6 +455,43 @@ static void test_complete_request_runs_next_queued_request(void) {
     scsi_request_free(queued_req);
 }
 
+static void test_queue_request_respects_max_queue_depth(void) {
+    scsi_device_t dev;
+    scsi_request_t *queued_req;
+    scsi_request_t *rejected_req;
+
+    reset_state();
+    memset(&dev, 0, sizeof(dev));
+    dev.link = &(scsi_link_t){
+        .execute = mock_execute,
+    };
+    dev.max_queue_depth = 1;
+
+    queued_req = scsi_request_alloc();
+    rejected_req = scsi_request_alloc();
+    assert(queued_req != NULL && rejected_req != NULL);
+    scsi_request_init(queued_req, &dev);
+    scsi_request_init(rejected_req, &dev);
+    queued_req->state = SCSI_REQ_STATE_PENDING;
+    rejected_req->callback = record_callback;
+    dev.queue_head = queued_req;
+    dev.queue_tail = queued_req;
+    dev.queue_depth = 1;
+
+    assert(scsi_queue_request(rejected_req) < 0);
+    assert(dev.queue_head == queued_req);
+    assert(dev.queue_tail == queued_req);
+    assert(dev.queue_depth == 1);
+    assert(callback_calls == 1);
+    assert(callback_last_error == -1);
+    assert(callback_last_state == SCSI_REQ_STATE_ERROR);
+    assert(rejected_req->state == SCSI_REQ_STATE_ERROR);
+    assert(rejected_req->next == NULL);
+
+    scsi_request_free(queued_req);
+    scsi_request_free(rejected_req);
+}
+
 int main(void) {
     test_register_link_sets_defaults_and_scans();
     test_unregister_link_detaches_registered_devices();
@@ -465,6 +502,7 @@ int main(void) {
     test_execute_retries_not_ready();
     test_abort_request_preserves_tail();
     test_complete_request_runs_next_queued_request();
+    test_queue_request_respects_max_queue_depth();
     puts("host_test_scsi_core: PASS");
     return 0;
 }
