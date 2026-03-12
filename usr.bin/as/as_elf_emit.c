@@ -1269,6 +1269,87 @@ static int lookup_i386_f3_0fae_group(const char *mnemonic, unsigned *reg_field) 
     return -1;
 }
 
+static int lookup_i386_0fae_rm_group(const char *mnemonic, unsigned char *prefix, unsigned *reg_field) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char prefix;
+        unsigned reg_field;
+    } map[] = {
+        {"fxsave", 0x00, 0u},
+        {"fxrstor", 0x00, 1u},
+        {"ldmxcsr", 0x00, 2u},
+        {"stmxcsr", 0x00, 3u},
+        {"xsave", 0x00, 4u},
+        {"xrstor", 0x00, 5u},
+        {"xsaveopt", 0x00, 6u},
+        {"clflush", 0x00, 7u},
+        {"clwb", 0x66, 6u},
+        {"clflushopt", 0x66, 7u},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || prefix == NULL || reg_field == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *prefix = map[i].prefix;
+            *reg_field = map[i].reg_field;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_fence_tail(const char *mnemonic, unsigned char *tail) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char tail;
+    } map[] = {
+        {"lfence", 0xe8},
+        {"mfence", 0xf0},
+        {"sfence", 0xf8},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || tail == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *tail = map[i].tail;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_bt_group(const char *mnemonic, unsigned *reg_field, unsigned char *opcode2) {
+    static const struct {
+        const char *mnemonic;
+        unsigned reg_field;
+        unsigned char opcode2;
+    } map[] = {
+        {"bt", 4u, 0xa3},
+        {"bts", 5u, 0xab},
+        {"btr", 6u, 0xb3},
+        {"btc", 7u, 0xbb},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || reg_field == NULL || opcode2 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *reg_field = map[i].reg_field;
+            *opcode2 = map[i].opcode2;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static int lookup_i386_scanbit_group(const char *mnemonic, unsigned char *prefix, unsigned char *opcode2) {
     static const struct {
         const char *mnemonic;
@@ -4261,28 +4342,22 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (insn->operand_count != 1 || a == NULL || a->kind == AS_OPERAND_REGISTER) {
             return -1;
         }
-        prefix = (insn->prefixes & AS_PREFIX_DATA16) != 0 ? 0x66 : 0x00;
-        if (strcmp(mnbuf, "fxsave") == 0) reg_field = 0;
-        else if (strcmp(mnbuf, "fxrstor") == 0) reg_field = 1;
-        else if (strcmp(mnbuf, "ldmxcsr") == 0) reg_field = 2;
-        else if (strcmp(mnbuf, "stmxcsr") == 0) reg_field = 3;
-        else if (strcmp(mnbuf, "xsave") == 0) reg_field = 4;
-        else if (strcmp(mnbuf, "xrstor") == 0) reg_field = 5;
-        else if (strcmp(mnbuf, "xsaveopt") == 0) reg_field = 6;
-        else if (strcmp(mnbuf, "clwb") == 0) {
-            reg_field = 6;
-            prefix = 0x66;
-        } else if (strcmp(mnbuf, "clflushopt") == 0) {
-            reg_field = 7;
+        if (lookup_i386_0fae_rm_group(mnbuf, &prefix, &reg_field) != 0) {
+            return -1;
+        }
+        if ((insn->prefixes & AS_PREFIX_DATA16) != 0 && prefix == 0x00) {
             prefix = 0x66;
         }
-        else reg_field = 7;
         return emit_i386_prefixed_0f_rm(prefix, 0xae, reg_field, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "lfence") == 0 || strcmp(mnbuf, "mfence") == 0 || strcmp(mnbuf, "sfence") == 0) {
+        unsigned char tail;
         size_t pos = 0;
 
         if (insn->operand_count != 0) {
+            return -1;
+        }
+        if (lookup_i386_fence_tail(mnbuf, &tail) != 0) {
             return -1;
         }
         if ((insn->prefixes & AS_PREFIX_DATA16) != 0) {
@@ -4290,7 +4365,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         out[pos++] = 0x0f;
         out[pos++] = 0xae;
-        out[pos++] = strcmp(mnbuf, "lfence") == 0 ? 0xe8 : (strcmp(mnbuf, "mfence") == 0 ? 0xf0 : 0xf8);
+        out[pos++] = tail;
         if (out_len != NULL) *out_len = pos;
         return 0;
     }
@@ -4372,18 +4447,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             src_op = &insn->operands[0];
             rm_op = &insn->operands[1];
         }
-        if (strcmp(mnbuf, "bt") == 0) {
-            reg_field = 4;
-            opcode2 = 0xa3;
-        } else if (strcmp(mnbuf, "bts") == 0) {
-            reg_field = 5;
-            opcode2 = 0xab;
-        } else if (strcmp(mnbuf, "btr") == 0) {
-            reg_field = 6;
-            opcode2 = 0xb3;
-        } else {
-            reg_field = 7;
-            opcode2 = 0xbb;
+        if (lookup_i386_bt_group(mnbuf, &reg_field, &opcode2) != 0) {
+            return -1;
         }
         if (src_op->kind == AS_OPERAND_REGISTER) {
             as_x86_reg_t gr;
