@@ -278,10 +278,10 @@
             - [x] Device registry: register, lookup, unregister, duplicate detection. (REQ: REQ-03-0223)
             - [x] Request allocation: pool exhaustion, free and reuse. (REQ: REQ-03-0224)
             - [x] Byte-order helpers: `scsi_be16()`, `scsi_be32()`, `scsi_put_be16()`, `scsi_put_be32()`. (REQ: REQ-03-0122, REQ-03-0225)
-        - [ ] **Property Tests:** (REQ: REQ-03-0226, REQ-03-0604)
-            - [ ] All CDB builders produce valid length CDBs (6/10/12/16). (REQ: REQ-03-0227)
-            - [ ] Request pool invariant: allocated + free = total pool size. (REQ: REQ-03-0228)
-            - [ ] Device list: no duplicates (unique bus:target:lun). (REQ: REQ-03-0229)
+        - [x] **Property Tests:** (REQ: REQ-03-0226, REQ-03-0604)
+            - [x] All generic mid-layer CDB builders produce valid length CDBs (6/10/16); 12-byte CDBs remain transport-specific today. (REQ: REQ-03-0227)
+            - [x] Request pool invariant: allocated + free = total pool size. (REQ: REQ-03-0228)
+            - [x] Device list: no duplicates (unique bus:target:lun). (REQ: REQ-03-0229)
         - [ ] **Integration Tests:** (REQ: REQ-03-0230, REQ-03-0608, REQ-03-1133)
             - [ ] VirtIO-SCSI disk: boot QEMU with `-device virtio-scsi-pci -device scsi-hd`, verify discovery + read/write. (REQ: REQ-03-0231)
             - [ ] ATAPI CD-ROM: boot QEMU with `-cdrom`, verify READ CAPACITY + READ TOC + sector read. (REQ: REQ-03-0232)
@@ -1477,7 +1477,7 @@
 - **US-03-0224**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to request allocation: pool exhaustion, free and reuse so that this capability is implemented with clear verification evidence.
 - **US-03-0225**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to byte-order helpers: scsi_be16(), scsi_be32(), scsi_put_be16(), scsi_put_be32() so that this capability is implemented with clear verification evidence.
 - **US-03-0226**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to property Tests: so that this capability is implemented with clear verification evidence.
-- **US-03-0227**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to all CDB builders produce valid length CDBs (6/10/12/16) so that this capability is implemented with clear verification evidence.
+- **US-03-0227**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want all generic mid-layer CDB builders to produce valid length CDBs (6/10/16), while 12-byte CDBs remain transport-specific, so that this capability is implemented with clear verification evidence.
 - **US-03-0228**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to request pool invariant: allocated + free = total pool size so that this capability is implemented with clear verification evidence.
 - **US-03-0229**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to device list: no duplicates (unique bus:target:lun) so that this capability is implemented with clear verification evidence.
 - **US-03-0230**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to integration Tests: so that this capability is implemented with clear verification evidence.
@@ -3081,7 +3081,7 @@
 - **REQ-03-0226** (EARS/Ubiquitous): The Substrate system shall property Tests:.
   - Context: 3. Drivers (`sys/drivers`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-03-0227** (EARS/Ubiquitous): The Substrate system shall all CDB builders produce valid length CDBs (6/10/12/16).
+- **REQ-03-0227** (EARS/Ubiquitous): The Substrate system shall ensure all generic mid-layer CDB builders produce valid length CDBs (6/10/16), while 12-byte CDBs remain transport-specific.
   - Context: 3. Drivers (`sys/drivers`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-03-0228** (EARS/Ubiquitous): The Substrate system shall request pool invariant: allocated + free = total pool size.

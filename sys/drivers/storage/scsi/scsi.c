@@ -76,6 +76,9 @@ static scsi_device_t *scsi_free_devices = NULL;
 
 void scsi_init(void) {
     kprint("SCSI: Initializing mid-layer...\n");
+
+    scsi_device_list = NULL;
+    scsi_device_count = 0;
     
     /* Initialize request pool */
     scsi_free_requests = NULL;

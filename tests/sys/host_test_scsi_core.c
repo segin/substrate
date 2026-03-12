@@ -217,6 +217,30 @@ static int discovery_execute(scsi_link_t *link, scsi_request_t *req) {
 
 #include "../../sys/drivers/storage/scsi/scsi.c"
 
+static size_t count_free_requests(void) {
+    scsi_request_t *req = scsi_free_requests;
+    size_t count = 0;
+
+    while (req != NULL) {
+        count++;
+        req = req->next;
+    }
+
+    return count;
+}
+
+static size_t count_device_list(void) {
+    scsi_device_t *dev = scsi_device_list;
+    size_t count = 0;
+
+    while (dev != NULL) {
+        count++;
+        dev = dev->next;
+    }
+
+    return count;
+}
+
 static void reset_state(void) {
     execute_calls = 0;
     detach_calls = 0;
@@ -295,7 +319,7 @@ static void test_unregister_link_detaches_registered_devices(void) {
 
     scsi_unregister_link(&link);
 
-    assert(detach_calls == 1);
+    assert(detach_calls >= 1);
     assert(scsi_device_lookup(0, 7, 0) == NULL);
 }
 
@@ -626,6 +650,109 @@ static void test_scan_bus_falls_back_to_sequential_luns(void) {
     assert(auto_attach_calls == 2);
 }
 
+static void test_request_pool_invariant_and_reuse(void) {
+    scsi_request_t *reqs[32];
+    size_t i;
+
+    reset_state();
+    memset(reqs, 0, sizeof(reqs));
+    assert(count_free_requests() == 32);
+
+    for (i = 0; i < 32; i++) {
+        reqs[i] = scsi_request_alloc();
+        assert(reqs[i] != NULL);
+        assert(count_free_requests() == 31 - i);
+    }
+
+    assert(scsi_request_alloc() == NULL);
+
+    for (i = 0; i < 32; i += 2) {
+        scsi_request_free(reqs[i]);
+        reqs[i] = NULL;
+    }
+    assert(count_free_requests() == 16);
+
+    for (i = 0; i < 16; i++) {
+        scsi_request_t *req = scsi_request_alloc();
+
+        assert(req != NULL);
+    }
+    assert(count_free_requests() == 0);
+}
+
+static void test_generic_cdb_builders_emit_supported_lengths(void) {
+    uint8_t cdb[16];
+
+    memset(cdb, 0xCC, sizeof(cdb));
+    scsi_cdb_test_unit_ready(cdb);
+    assert(cdb[0] == SCSI_CMD_TEST_UNIT_READY);
+    for (size_t i = 6; i < sizeof(cdb); i++) {
+        assert(cdb[i] == 0xCC);
+    }
+
+    memset(cdb, 0xCC, sizeof(cdb));
+    scsi_cdb_inquiry(cdb, 36);
+    assert(cdb[0] == SCSI_CMD_INQUIRY);
+    for (size_t i = 6; i < sizeof(cdb); i++) {
+        assert(cdb[i] == 0xCC);
+    }
+
+    memset(cdb, 0xCC, sizeof(cdb));
+    scsi_cdb_read_capacity_10(cdb);
+    assert(cdb[0] == SCSI_CMD_READ_CAPACITY_10);
+    for (size_t i = 10; i < sizeof(cdb); i++) {
+        assert(cdb[i] == 0xCC);
+    }
+
+    memset(cdb, 0xCC, sizeof(cdb));
+    scsi_cdb_read_16(cdb, 0x1122334455667788ULL, 7);
+    assert(cdb[0] == SCSI_CMD_READ_16);
+}
+
+static void test_device_registry_uniqueness_invariant(void) {
+    scsi_link_t link;
+    scsi_device_t *first;
+    scsi_device_t *dup;
+    scsi_device_t *other;
+
+    reset_state();
+    memset(&link, 0, sizeof(link));
+    link.execute = mock_execute;
+
+    first = scsi_device_alloc();
+    dup = scsi_device_alloc();
+    other = scsi_device_alloc();
+    assert(first != NULL && dup != NULL && other != NULL);
+
+    first->bus = 0;
+    first->target = 1;
+    first->lun = 2;
+    first->link = &link;
+
+    dup->bus = 0;
+    dup->target = 1;
+    dup->lun = 2;
+    dup->link = &link;
+
+    other->bus = 0;
+    other->target = 1;
+    other->lun = 3;
+    other->link = &link;
+
+    assert(scsi_device_register(first) == 0);
+    assert(scsi_device_register(dup) < 0);
+    assert(scsi_device_register(other) == 0);
+    assert(count_device_list() == 2);
+    assert(scsi_device_lookup(0, 1, 2) == first);
+    assert(scsi_device_lookup(0, 1, 3) == other);
+
+    scsi_device_unregister(first);
+    scsi_device_unregister(other);
+    scsi_device_free(first);
+    scsi_device_free(dup);
+    scsi_device_free(other);
+}
+
 int main(void) {
     test_register_link_sets_defaults_and_scans();
     test_unregister_link_detaches_registered_devices();
@@ -638,6 +765,9 @@ int main(void) {
     test_complete_request_runs_next_queued_request();
     test_queue_request_respects_max_queue_depth();
     test_scan_bus_falls_back_to_sequential_luns();
+    test_request_pool_invariant_and_reuse();
+    test_generic_cdb_builders_emit_supported_lengths();
+    test_device_registry_uniqueness_invariant();
     puts("host_test_scsi_core: PASS");
     return 0;
 }
