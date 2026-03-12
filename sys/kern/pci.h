@@ -3,10 +3,14 @@
 
 #include <stdint.h>
 
+#include <kern/bus.h>
+
 #define PCI_CONFIG_ADDRESS_PORT 0xCF8
 #define PCI_CONFIG_DATA_PORT    0xCFC
 #define PCI_CONFIG_ENABLE_BIT   0x80000000U
 #define PCI_CONFIG_SPACE_SIZE   256U
+
+struct device;
 
 typedef struct pci_device {
     uint8_t bus;
@@ -15,8 +19,11 @@ typedef struct pci_device {
     uint16_t vendor_id;
     uint16_t device_id;
     uint32_t class_code;
+    struct device *kdev;
     struct pci_device *next;
 } pci_device_t;
+
+extern struct bus_type pci_bus_type;
 
 uint32_t pci_config_address(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset);
 int pci_present(void);
@@ -34,6 +41,7 @@ uint32_t pci_read(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset);
 void pci_write(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint32_t val);
 int pci_scan_bus(uint8_t bus);
 int pci_scan_bridge(pci_device_t *bridge);
+pci_device_t *pci_device_create(uint8_t bus, uint8_t slot, uint8_t func);
 void pci_scan(void);
 pci_device_t *pci_find_device(uint16_t vendor_id, uint16_t device_id, pci_device_t *from);
 

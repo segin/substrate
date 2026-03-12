@@ -224,7 +224,7 @@
         - Tests: integration (PCI-to-PCI bridge hierarchy)
         - Docs: `pci_bridge.9`
         - Acceptance: Devices behind bridges discovered
-    - [ ] Implement `pci_device_t` creation and registration. (REQ: REQ-17-0038)
+    - [x] Implement `pci_device_t` creation and registration. (REQ: REQ-17-0038)
         - Files: `sys/kern/pci.c`
         - API: `pci_device_t *pci_device_create(uint8_t bus, uint8_t slot, uint8_t func)`
         - Tests: unit (device struct populated correctly)

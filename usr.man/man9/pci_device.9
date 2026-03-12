@@ -1,0 +1,43 @@
+.Dd March 12, 2026
+.Dt PCI_DEVICE 9
+.Os
+.Sh NAME
+.Nm pci_device_create
+.Nd create and register a PCI function with the kernel driver model
+.Sh SYNOPSIS
+.In kern/pci.h
+.Ft pci_device_t *
+.Fn pci_device_create "uint8_t bus" "uint8_t slot" "uint8_t func"
+.Sh DESCRIPTION
+The
+.Fn pci_device_create
+function reads identification fields for the specified PCI function, allocates
+a
+.Vt pci_device_t ,
+creates a corresponding
+.Vt struct device ,
+and registers that kernel device on the global
+.Dq pci
+bus type.
+.Pp
+The created
+.Vt struct device
+is populated with PCI vendor, device, class, subclass, and programming
+interface identifiers so the generic driver model can match it against PCI
+driver ID tables.
+.Pp
+If a matching driver is already registered on the PCI bus,
+.Fn pci_device_create
+also invokes the normal device probe path.
+.Sh RETURN VALUES
+The
+.Fn pci_device_create
+function returns the created
+.Vt pci_device_t
+on success or
+.Dv NULL
+if the function is absent or allocation/registration fails.
+.Sh SEE ALSO
+.Xr device_register 9 ,
+.Xr device_probe 9 ,
+.Xr pci_scan 9
