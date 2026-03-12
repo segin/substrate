@@ -111,6 +111,40 @@ static void run_ext2_find_next_zero_bit_test(void) {
     memset(bitmap, 0xFF, sizeof(bitmap));
     bitmap[10] = 0;
     if (ext2_find_next_zero_bit(bitmap, 64, 0, 128, &found_idx)) exit(1);
+
+    // Test end > total_bits
+    memset(bitmap, 0xFF, sizeof(bitmap));
+    bitmap[15] &= (uint8_t)~0x80; // Zero at bit 127
+    if (!ext2_find_next_zero_bit(bitmap, 128, 0, 256, &found_idx) || found_idx != 127) exit(1);
+
+    // Test start >= end
+    memset(bitmap, 0, sizeof(bitmap));
+    if (ext2_find_next_zero_bit(bitmap, 256, 10, 10, &found_idx)) exit(1);
+
+    // Test start >= total_bits
+    if (ext2_find_next_zero_bit(bitmap, 256, 256, 256, &found_idx)) exit(1);
+
+    // Test total_bits = 0
+    if (ext2_find_next_zero_bit(bitmap, 0, 0, 256, &found_idx)) exit(1);
+
+    // Test unaligned start with zero in unaligned range
+    memset(bitmap, 0xFF, sizeof(bitmap));
+    bitmap[0] &= (uint8_t)~0x08; // Zero at bit 3
+    if (!ext2_find_next_zero_bit(bitmap, 256, 1, 256, &found_idx) || found_idx != 3) exit(1);
+
+    // Test unaligned start, all ones in unaligned range, zeros in fast path
+    memset(bitmap, 0xFF, sizeof(bitmap));
+    bitmap[4] = 0; // Zeros starting at bit 32 (aligned fast path)
+    if (!ext2_find_next_zero_bit(bitmap, 256, 1, 256, &found_idx) || found_idx != 32) exit(1);
+
+    // Test unaligned start, all ones in unaligned and fast path, zeros in remaining slow path
+    memset(bitmap, 0xFF, sizeof(bitmap));
+    bitmap[31] &= (uint8_t)~0x80; // Zero at bit 255 (slow path at end)
+    if (!ext2_find_next_zero_bit(bitmap, 256, 1, 256, &found_idx) || found_idx != 255) exit(1);
+
+    // Test fast path with no zeros
+    memset(bitmap, 0xFF, sizeof(bitmap));
+    if (ext2_find_next_zero_bit(bitmap, 256, 0, 256, &found_idx)) exit(1);
 }
 
 int main(void) {
