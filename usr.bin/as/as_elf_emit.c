@@ -2630,6 +2630,27 @@ static int emit_i386_xmm_reg_srcdst_rm(unsigned char prefix, unsigned char opcod
     return emit_i386_legacy_simd_rm(prefix, opcode2, xr, src, out, out_cap, out_len);
 }
 
+static int emit_i386_movmsk(unsigned char prefix, const as_operand_t *src, const as_operand_t *dst,
+                            unsigned char *out, size_t out_cap, size_t *out_len) {
+    as_x86_reg_t gr;
+    unsigned xr;
+    size_t pos = 0;
+
+    if (src == NULL || dst == NULL || out == NULL || out_len == NULL || out_cap < 4 ||
+        dst->kind != AS_OPERAND_REGISTER || src->kind != AS_OPERAND_REGISTER ||
+        parse_x86_reg(dst->u.reg, &gr) != 0 || parse_xmm_reg(src->u.reg, &xr) != 0) {
+        return -1;
+    }
+    if (prefix != 0) {
+        out[pos++] = prefix;
+    }
+    out[pos++] = 0x0f;
+    out[pos++] = 0x50;
+    out[pos++] = (unsigned char)(0xc0u | (((unsigned)gr & 7u) << 3) | (xr & 7u));
+    *out_len = pos;
+    return 0;
+}
+
 static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
                              unsigned char *out, size_t out_cap, size_t *out_len) {
     const as_operand_t *a;
@@ -4992,29 +5013,16 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return emit_i386_legacy_simd_rm(0x00, opcode2, xr, src, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movmskps") == 0) {
-        as_x86_reg_t gr;
-        if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
-            src->kind != AS_OPERAND_REGISTER || parse_x86_reg(dst->u.reg, &gr) != 0 || parse_xmm_reg(src->u.reg, &xr) != 0) {
+        if (insn->operand_count != 2) {
             return -1;
         }
-        out[0] = 0x0f;
-        out[1] = 0x50;
-        out[2] = (unsigned char)(0xc0u | (((unsigned)gr & 7u) << 3) | (xr & 7u));
-        if (out_len != NULL) *out_len = 3;
-        return 0;
+        return emit_i386_movmsk(0x00, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movmskpd") == 0) {
-        as_x86_reg_t gr;
-        if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
-            src->kind != AS_OPERAND_REGISTER || parse_x86_reg(dst->u.reg, &gr) != 0 || parse_xmm_reg(src->u.reg, &xr) != 0) {
+        if (insn->operand_count != 2) {
             return -1;
         }
-        out[0] = 0x66;
-        out[1] = 0x0f;
-        out[2] = 0x50;
-        out[3] = (unsigned char)(0xc0u | (((unsigned)gr & 7u) << 3) | (xr & 7u));
-        if (out_len != NULL) *out_len = 4;
-        return 0;
+        return emit_i386_movmsk(0x66, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "sqrtps") == 0) return emit_i386_xmm_srcdst_rm(0x51, src, dst, out, out_cap, out_len);
     if (strcmp(mnbuf, "rsqrtps") == 0) return emit_i386_xmm_srcdst_rm(0x52, src, dst, out, out_cap, out_len);
