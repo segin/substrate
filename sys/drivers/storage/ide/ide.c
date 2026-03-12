@@ -22,6 +22,7 @@
 #include <kern/driver.h>
 #include <kern/isa.h>
 #include <kern/pci.h>
+#include <sys/irq.h>
 #include <drivers/storage/blkdev.h>
 #include <drivers/storage/ide/ide.h>
 #include <arch/x86-common/io.h>
@@ -55,6 +56,8 @@ static ide_drive_ctx_t ide_contexts[MAX_IDE_DEVICES];
 static blkdev_t ide_blkdevs[MAX_IDE_DEVICES];
 static int ide_attached;
 static int ide_drivers_registered;
+static uint8_t ide_channel_irq_registered[MAX_IDE_CHANNELS];
+static uint8_t ide_channel_irq_shared[MAX_IDE_CHANNELS];
 
 /* IRQ completion flag */
 static volatile int ide_irq_complete[MAX_IDE_CHANNELS];
@@ -69,6 +72,8 @@ static int ide_identify_channel(uint8_t channel, uint8_t drive, void *buffer);
 static int ide_identify_atapi_channel(uint8_t channel, uint8_t drive, void *buffer);
 static void ide_select_drive(uint8_t channel, uint8_t drive);
 static int ide_program_dma_mode(ide_device_t *dev);
+static int ide_irq_dispatch(unsigned int irq, void *dev_id, void *frame);
+static void ide_register_irqs(void);
 
 static int ide_scan_controller(void);
 static int ide_software_reset_channel(uint8_t channel);
@@ -274,6 +279,7 @@ static void ide_configure_from_pci(void) {
 
     for (pdev = pci_first_device(); pdev != NULL; pdev = pci_next_device(pdev)) {
         uintptr_t bm_base;
+        int pci_irq = pci_get_irq(pdev);
 
         if (pdev->kdev == NULL) {
             continue;
@@ -291,6 +297,10 @@ static void ide_configure_from_pci(void) {
             if (ctrl != 0) {
                 ide_channels[0].ctrl_base = (uint16_t)(ctrl + 2);
             }
+            if (pci_irq != PCI_IRQ_NONE) {
+                ide_channels[0].irq = (uint8_t)pci_irq;
+                ide_channel_irq_shared[0] = 1;
+            }
         }
 
         if (pdev->kdev->progif & 0x04) {
@@ -301,6 +311,10 @@ static void ide_configure_from_pci(void) {
             }
             if (ctrl != 0) {
                 ide_channels[1].ctrl_base = (uint16_t)(ctrl + 2);
+            }
+            if (pci_irq != PCI_IRQ_NONE) {
+                ide_channels[1].irq = (uint8_t)pci_irq;
+                ide_channel_irq_shared[1] = 1;
             }
         }
 
@@ -474,6 +488,60 @@ static int ide_can_block_wait(void) {
     }
 
     return 1;
+}
+
+static int ide_irq_dispatch(unsigned int irq, void *dev_id, void *frame) {
+    ide_channel_t *chan = (ide_channel_t *)dev_id;
+    uint8_t channel;
+    uint8_t status;
+    uint8_t bm_status;
+
+    (void)frame;
+
+    if (chan == NULL || irq >= 256U) {
+        return 0;
+    }
+
+    channel = (uint8_t)(chan - ide_channels);
+    if (channel >= MAX_IDE_CHANNELS || ide_channels[channel].irq != (uint8_t)irq) {
+        return 0;
+    }
+
+    if (ide_channels[channel].dma_capable) {
+        bm_status = ide_bm_status(channel);
+        if ((bm_status & BM_STAT_INTERRUPT) == 0) {
+            return 0;
+        }
+    }
+
+    status = ide_read_reg(channel, ATA_REG_STATUS);
+    (void)status;
+    ide_bm_clear_interrupt(channel);
+    ide_irq_complete[channel] = 1;
+    sched_wakeup((void *)&ide_irq_complete[channel]);
+    return 1;
+}
+
+static void ide_register_irqs(void) {
+    char name[16];
+
+    for (uint8_t channel = 0; channel < MAX_IDE_CHANNELS; channel++) {
+        unsigned long flags = 0;
+
+        if (!ide_channels[channel].dma_capable || ide_channel_irq_registered[channel]) {
+            continue;
+        }
+
+        if (ide_channel_irq_shared[channel]) {
+            flags |= IRQF_SHARED;
+        }
+
+        snprintf(name, sizeof(name), "ide%u", (unsigned int)channel);
+        if (request_irq(ide_channels[channel].irq, ide_irq_dispatch, flags,
+                        name, &ide_channels[channel]) == 0) {
+            ide_channel_irq_registered[channel] = 1;
+        }
+    }
 }
 
 static inline void ide_wait_backoff(int *yield_count) {
@@ -1483,6 +1551,8 @@ static int ide_scan_controller(void) {
     memset(ide_devices, 0, sizeof(ide_devices));
     memset(ide_contexts, 0, sizeof(ide_contexts));
     memset(ide_blkdevs, 0, sizeof(ide_blkdevs));
+    memset(ide_channel_irq_registered, 0, sizeof(ide_channel_irq_registered));
+    memset(ide_channel_irq_shared, 0, sizeof(ide_channel_irq_shared));
     for (int ch = 0; ch < MAX_IDE_CHANNELS; ch++) {
         ide_irq_complete[ch] = 0;
     }
@@ -1498,6 +1568,7 @@ static int ide_scan_controller(void) {
     }
 
     ide_configure_from_pci();
+    ide_register_irqs();
     
     /* Disable interrupts during probe */
     for (int ch = 0; ch < MAX_IDE_CHANNELS; ch++) {

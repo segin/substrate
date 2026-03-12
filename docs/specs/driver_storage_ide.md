@@ -30,6 +30,10 @@ The driver tracks up to four channels:
 
 Primary and secondary may be overridden by PCI native-mode BARs. Tertiary and
 quaternary remain legacy fixed-base channels.
+When a PCI IDE controller advertises native mode and exposes a valid interrupt
+line, the corresponding channel IRQ is taken from PCI configuration space and
+registered through the generic IRQ layer. Native-mode PCI channels request
+their IRQs as shared lines.
 
 ## Discovery
 

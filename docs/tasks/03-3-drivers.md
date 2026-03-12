@@ -322,7 +322,7 @@
             - Bit 0: Primary channel in native mode (use BAR0/BAR1) vs compatibility mode (0x1F0/0x3F6).
             - Bit 2: Secondary channel in native mode (use BAR2/BAR3) vs compatibility mode (0x170/0x376).
             - Bit 7: Bus Master capable (use BAR4 for DMA registers).
-        - [ ] For native‑mode channels: read I/O base from PCI BARs, allocate IRQ from PCI interrupt line. (REQ: REQ-03-0255)
+        - [x] For native‑mode channels: read I/O base from PCI BARs, allocate IRQ from PCI interrupt line. (REQ: REQ-03-0255)
         - [ ] Detect PCI IDE controllers with additional channels (e.g., CMD640, Promise, HighPoint, SiI680 — typically expose as separate PCI functions). (REQ: REQ-03-0256)
         - [x] ISA tertiary/quaternary probing: if PCI does not enumerate additional channels, probe legacy I/O ports at 0x1E8 and 0x168 for device presence. (REQ: REQ-03-0257)
     - [ ] **Device Identification (`ide_identify` / `ide_identify_atapi`):** (REQ: REQ-03-0258)
@@ -364,7 +364,7 @@
     - [ ] **IRQ Handling:** (REQ: REQ-03-0294, REQ-03-0382)
         - [x] `ide_irq_handler(irq)`: acknowledge interrupt, signal DMA completion. (REQ: REQ-03-0295)
         - [x] IRQ 14 (primary), IRQ 15 (secondary), IRQ 11 (tertiary), IRQ 10 (quaternary). (REQ: REQ-03-0296)
-        - [ ] Support shared IRQs for PCI native‑mode controllers. (REQ: REQ-03-0297)
+        - [x] Support shared IRQs for PCI native‑mode controllers. (REQ: REQ-03-0297)
     - [x] **Software Reset:** (REQ: REQ-03-0298)
         - [x] Issue SRST via device control register (bit 2). (REQ: REQ-03-0299)
         - [x] Wait for BSY clear on both master and slave. (REQ: REQ-03-0300)
