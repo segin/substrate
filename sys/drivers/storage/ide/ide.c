@@ -47,6 +47,7 @@ static int ide_device_count = 0;
 typedef struct {
     uint8_t channel;
     uint8_t drive;
+    uint8_t index;
     uint8_t type;  /* 0=ATA, 1=ATAPI */
 } ide_drive_ctx_t;
 
@@ -62,6 +63,66 @@ static void ide_wait_bsy(uint8_t channel);
 static int ide_wait_drq(uint8_t channel);
 
 static int ide_scan_controller(void);
+
+static int ide_transfer_read_once(ide_drive_ctx_t *ctx, uint64_t sector,
+                                  uint32_t count, void *buffer) {
+    uint8_t channel = ctx->channel;
+    uint8_t drive = ctx->drive;
+    uint16_t bus = ide_channels[channel].io_base;
+
+    if (ctx->type == 1) {
+        return ide_atapi_read_sectors(channel, drive, (uint32_t)sector,
+                                      (uint16_t)count, buffer);
+    }
+
+    if (ide_channels[channel].dma_capable && count <= 256) {
+        return ide_dma_read(channel, drive, sector, (uint16_t)count, buffer);
+    }
+
+    if (sector < 0x10000000ULL && count <= 256) {
+        return ide_read_sectors(bus, drive, (uint32_t)sector, (uint8_t)count, buffer);
+    }
+
+    return ide_read_sectors_ext(bus, drive, sector, (uint16_t)count, buffer);
+}
+
+static int ide_transfer_write_once(ide_drive_ctx_t *ctx, uint64_t sector,
+                                   uint32_t count, const void *buffer) {
+    uint8_t channel = ctx->channel;
+    uint8_t drive = ctx->drive;
+    uint16_t bus = ide_channels[channel].io_base;
+
+    if (ctx->type == 1) {
+        return -1;
+    }
+
+    if (ide_channels[channel].dma_capable && count <= 256) {
+        return ide_dma_write(channel, drive, sector, (uint16_t)count, buffer);
+    }
+
+    if (sector < 0x10000000ULL && count <= 256) {
+        return ide_write_sectors(bus, drive, (uint32_t)sector, (uint8_t)count, buffer);
+    }
+
+    return ide_write_sectors_ext(bus, drive, sector, (uint16_t)count, buffer);
+}
+
+static void ide_mark_offline(ide_drive_ctx_t *ctx, const char *op) {
+    ide_device_t *dev = &ide_devices[ctx->index];
+    char msg[128];
+
+    if (dev->offline) {
+        return;
+    }
+
+    dev->offline = 1;
+    snprintf(msg, sizeof(msg),
+             "ide: %s marking ide%u offline after repeated %s failures\n",
+             dev->model[0] ? dev->model : "(unknown)",
+             ctx->index,
+             op);
+    kprint(msg);
+}
 
 static const char *const ide_isa_channel_names[MAX_IDE_CHANNELS] = {
     "ide-primary",
@@ -1119,47 +1180,57 @@ int ide_atapi_read_toc(uint8_t channel, uint8_t drive,
 static int ide_blkdev_read(blkdev_t *dev, uint64_t sector, uint32_t count, 
                            void *buffer) {
     ide_drive_ctx_t *ctx = (ide_drive_ctx_t *)dev->priv;
-    uint8_t channel = ctx->channel;
-    uint8_t drive = ctx->drive;
-    
-    if (ctx->type == 1) { /* ATAPI */
-        return ide_atapi_read_sectors(channel, drive, (uint32_t)sector, (uint16_t)count, buffer);
+    ide_device_t *ide_dev;
+    int ret;
+
+    if (ctx == NULL) {
+        return -1;
+    }
+    ide_dev = &ide_devices[ctx->index];
+    if (ide_dev->offline) {
+        return -1;
     }
 
-    /* Use DMA if available, otherwise PIO */
-    if (ide_channels[channel].dma_capable && count <= 256) {
-        return ide_dma_read(channel, drive, sector, (uint16_t)count, buffer);
+    for (int attempt = 0; attempt < 3; attempt++) {
+        ret = ide_transfer_read_once(ctx, sector, count, buffer);
+        if (ret >= 0) {
+            ide_dev->offline = 0;
+            return ret;
+        }
+        if (attempt < 2) {
+            char msg[96];
+
+            snprintf(msg, sizeof(msg),
+                     "ide: ide%u read retry %d for LBA %llu count %u\n",
+                     ctx->index, attempt + 1,
+                     (unsigned long long)sector, (unsigned int)count);
+            kprint(msg);
+        }
     }
-    
-    /* Fallback to PIO */
-    uint16_t bus = ide_channels[channel].io_base;
-    if (sector < 0x10000000ULL && count <= 256) {
-        return ide_read_sectors(bus, drive, (uint32_t)sector, (uint8_t)count, buffer);
-    } else {
-        return ide_read_sectors_ext(bus, drive, sector, (uint16_t)count, buffer);
-    }
+
+    ide_mark_offline(ctx, "read");
+    return -1;
 }
 
 static int ide_blkdev_write(blkdev_t *dev, uint64_t sector, uint32_t count, 
                             const void *buffer) {
     ide_drive_ctx_t *ctx = (ide_drive_ctx_t *)dev->priv;
-    uint8_t channel = ctx->channel;
-    uint8_t drive = ctx->drive;
-    
-    if (ctx->type == 1) { /* ATAPI */
-        return -1; /* Write not supported yet */
+    ide_device_t *ide_dev;
+    int ret;
+
+    if (ctx == NULL) {
+        return -1;
+    }
+    ide_dev = &ide_devices[ctx->index];
+    if (ide_dev->offline) {
+        return -1;
     }
 
-    if (ide_channels[channel].dma_capable && count <= 256) {
-        return ide_dma_write(channel, drive, sector, (uint16_t)count, buffer);
+    ret = ide_transfer_write_once(ctx, sector, count, buffer);
+    if (ret < 0) {
+        ide_mark_offline(ctx, "write");
     }
-    
-    uint16_t bus = ide_channels[channel].io_base;
-    if (sector < 0x10000000ULL && count <= 256) {
-        return ide_write_sectors(bus, drive, (uint32_t)sector, (uint8_t)count, buffer);
-    } else {
-        return ide_write_sectors_ext(bus, drive, sector, (uint16_t)count, buffer);
-    }
+    return ret;
 }
 
 /*
@@ -1307,6 +1378,7 @@ static int ide_scan_controller(void) {
                 /* Setup context */
                 ide_contexts[slot].channel = ch;
                 ide_contexts[slot].drive = d;
+                ide_contexts[slot].index = (uint8_t)slot;
                 ide_contexts[slot].type = type;
                 
                 /* Setup blkdev */

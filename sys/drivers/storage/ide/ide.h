@@ -200,6 +200,7 @@ typedef struct {
     uint8_t  mwdma_modes;  /* Supported multiword DMA modes */
     uint8_t  udma_modes;   /* Supported ultra DMA modes */
     uint8_t  dma_mode;     /* DMA mode (0=none, 1=UDMA, 2=MWDMA) */
+    uint8_t  offline;      /* Driver marked device offline after repeated errors */
 } ide_device_t;
 
 #define IDE_FEATURE_DMA    0x00000001U

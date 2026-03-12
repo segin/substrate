@@ -71,6 +71,9 @@ PIO transfers support:
 - LBA48 read/write
 - bounded BSY/DRQ waits
 - 400ns command delays through alternate-status reads
+- ATA error-bit decoding in diagnostic paths
+- block-read retries before surfacing failure
+- offline marking after repeated transfer failure
 
 Bus-master DMA support provides:
 - PRDT setup with up to 32 entries
