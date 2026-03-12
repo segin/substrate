@@ -5223,6 +5223,43 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
             }
         }
     }
+    if (strcmp(mnbuf, "kmovw") == 0) {
+        unsigned kd;
+
+        if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
+            parse_k_reg(dst->u.reg, &kd) != 0) {
+            return -1;
+        }
+        return emit_i386_vex2_kmovw(src, kd, out, out_cap, out_len);
+    }
+    if (strncmp(mnbuf, "kand", 4) == 0 || strncmp(mnbuf, "kor", 3) == 0 || strncmp(mnbuf, "kxor", 4) == 0 ||
+        strncmp(mnbuf, "kxnor", 5) == 0 || strncmp(mnbuf, "kadd", 4) == 0 || strncmp(mnbuf, "kunpck", 6) == 0) {
+        const as_operand_t *op_rm;
+        const as_operand_t *op_vvvv;
+        const as_operand_t *op_dst;
+        unsigned krm;
+        unsigned kvvvv;
+        unsigned kdst;
+
+        if (insn->operand_count != 3) {
+            return -1;
+        }
+        if (intel_syntax) {
+            op_dst = &insn->operands[0];
+            op_vvvv = &insn->operands[1];
+            op_rm = &insn->operands[2];
+        } else {
+            op_rm = &insn->operands[0];
+            op_vvvv = &insn->operands[1];
+            op_dst = &insn->operands[2];
+        }
+        if (op_rm->kind != AS_OPERAND_REGISTER || op_vvvv->kind != AS_OPERAND_REGISTER || op_dst->kind != AS_OPERAND_REGISTER ||
+            parse_k_reg(op_rm->u.reg, &krm) != 0 || parse_k_reg(op_vvvv->u.reg, &kvvvv) != 0 ||
+            parse_k_reg(op_dst->u.reg, &kdst) != 0) {
+            return -1;
+        }
+        return emit_i386_vex_klogic(mnbuf, krm, kvvvv, kdst, out, out_cap, out_len);
+    }
     if ((strcmp(mnbuf, "push") == 0 || strcmp(mnbuf, "pop") == 0) && insn->operand_count == 1 && a != NULL &&
         a->kind == AS_OPERAND_REGISTER) {
         as_x86_seg_t seg;
@@ -7238,24 +7275,19 @@ static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigne
     if (!cfg->is_64 && emit_i386_special(&st->u.instr, intel_syntax, code, code_cap, code_len) == 0) {
         return 0;
     }
-    if (!cfg->is_64 &&
-        try_encode_x86_avx512f_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0) {
+    if (try_encode_x86_avx512f_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0) {
         return 0;
     }
-    if (!cfg->is_64 &&
-        try_encode_x86_avx512bw_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0) {
+    if (try_encode_x86_avx512bw_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0) {
         return 0;
     }
-    if (!cfg->is_64 &&
-        try_encode_x86_avx512bw_generic_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0) {
+    if (try_encode_x86_avx512bw_generic_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0) {
         return 0;
     }
-    if (!cfg->is_64 &&
-        try_encode_x86_avx512dq_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0) {
+    if (try_encode_x86_avx512dq_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0) {
         return 0;
     }
-    if (!cfg->is_64 &&
-        try_encode_x86_avx512f_generic_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0) {
+    if (try_encode_x86_avx512f_generic_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0) {
         return 0;
     }
     if (try_encode_x86_avx_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0) {
@@ -7273,8 +7305,7 @@ static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigne
     if (try_encode_x86_bmi2_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0) {
         return 0;
     }
-    if (!cfg->is_64 &&
-        try_encode_x86_avx512dq_generic_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0) {
+    if (try_encode_x86_avx512dq_generic_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0) {
         return 0;
     }
     if (cfg->is_64) {
