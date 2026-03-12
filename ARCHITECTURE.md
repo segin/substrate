@@ -62,6 +62,7 @@ docs/specs/  detailed subsystem specs
 docs/tasks/  refactored task planning sections and requirement/story tracking
 dist/        target root filesystem staging
 host_dist/   host install staging for native validation tools
+usr.man/     manual page source tree
 ```
 
 `dist/` is reserved for the contents of a real Substrate target root filesystem.

@@ -216,9 +216,9 @@ Reference: User Request (Step 31552)
         - Tests: emulation (`tests/elks/run_tests.sh upstream_sh_ls_elks`)
         - Acceptance: QEMU booting `init=/perso/elks/bin/sh`, then typing `ls`, prints the root listing and returns to a live shell without a kernel panic during `execve()` teardown.
     - [x] Add native-shell to ELKS-shell handoff smoke. (REQ: REQ-20-0069)
-        - Files: `tests/elks/run_tests.sh`
+        - Files: `tests/elks/run_tests.sh`, `tests/elks/native_linux_sh_elks_sh.c`
         - Tests: emulation (`tests/elks/run_tests.sh native_sh_elks_sh`)
-        - Acceptance: QEMU booting `init=/bin/sh`, then executing `/perso/elks/bin/sh` and `ls`, reaches the ELKS prompt and prints the root listing without a kernel panic across the native-to-ELKS personality handoff.
+        - Acceptance: A native helper `execve()`s BusyBox `sh`, which in turn executes `/perso/elks/bin/sh /elks_inner.sh`; the scripted ELKS shell runs `ls`, prints the root listing, and exits without a kernel panic across the native-to-ELKS personality handoff.
     - [x] Add sample ELKS cat utility. (REQ: REQ-20-0052)
         - Files: `tests/elks/cat.c`, `tests/elks/Makefile`, `tests/elks/run_tests.sh`
         - Tests: emulation (`tests/elks/run_tests.sh cat_elks`)
@@ -249,15 +249,15 @@ Reference: User Request (Step 31552)
         - Acceptance: `make -C tests/elks` builds all current in-tree ELKS test binaries and the Makefile supports both assembly and C ELKS test sources.
 
 - [x] **Documentation:** (REQ: REQ-20-0055)
-    - [x] Create personality-elks(7) developer guide. (REQ: REQ-20-0056)
-        - Files: `docs/man/man7/personality-elks.7`
+    - [x] Create personality_elks(7) developer guide. (REQ: REQ-20-0056)
+        - Files: `usr.man/man7/personality_elks.7`
         - Tests: N/A (documentation)
-        - Docs: `personality-elks.7`
+        - Docs: `personality_elks.7`
         - Acceptance: Covers architecture, limitations, and usage.
-    - [x] Create ELKS-compat(4) compatibility notes. (REQ: REQ-20-0057)
-        - Files: `docs/man/man4/ELKS-compat.4`
+    - [x] Create elks_compat(4) compatibility notes. (REQ: REQ-20-0057)
+        - Files: `usr.man/man4/elks_compat.4`
         - Tests: N/A (documentation)
-        - Docs: `ELKS-compat.4`
+        - Docs: `elks_compat.4`
         - Acceptance: Documents known limitations and unsupported features.
     - [x] Add ELKS personality to ARCHITECTURE.md. (REQ: REQ-20-0058)
         - Files: `ARCHITECTURE.md`
@@ -364,8 +364,8 @@ Reference: User Request (Step 31552)
 - **US-20-0074**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add upstream ELKS meminfo smoke so that this capability is implemented with clear verification evidence.
 - **US-20-0054**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want a single ELKS test-binary Makefile that builds both assembly and C test programs so that future ELKS validation artifacts share one reproducible build path.
 - **US-20-0055**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to documentation: so that this capability is implemented with clear verification evidence.
-- **US-20-0056**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to create personality-elks(7) developer guide so that this capability is implemented with clear verification evidence.
-- **US-20-0057**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to create ELKS-compat(4) compatibility notes so that this capability is implemented with clear verification evidence.
+- **US-20-0056**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to create personality_elks(7) developer guide so that this capability is implemented with clear verification evidence.
+- **US-20-0057**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to create elks_compat(4) compatibility notes so that this capability is implemented with clear verification evidence.
 - **US-20-0058**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add ELKS personality to ARCHITECTURE.md so that this capability is implemented with clear verification evidence.
 - **US-20-0059**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add ELKS syscall reference table so that this capability is implemented with clear verification evidence.
 - **US-20-0060**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to document LDT API usage for personality developers so that this capability is implemented with clear verification evidence.
@@ -567,10 +567,10 @@ Reference: User Request (Step 31552)
 - **REQ-20-0055** (EARS/Ubiquitous): The Substrate system shall documentation:.
   - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-20-0056** (EARS/Ubiquitous): The Substrate system shall create personality-elks(7) developer guide.
+- **REQ-20-0056** (EARS/Ubiquitous): The Substrate system shall create personality_elks(7) developer guide.
   - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-20-0057** (EARS/Ubiquitous): The Substrate system shall create ELKS-compat(4) compatibility notes.
+- **REQ-20-0057** (EARS/Ubiquitous): The Substrate system shall create elks_compat(4) compatibility notes.
   - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-20-0058** (EARS/Ubiquitous): The Substrate system shall add ELKS personality to ARCHITECTURE.md.
