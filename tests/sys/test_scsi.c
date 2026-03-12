@@ -69,6 +69,24 @@ void test_scsi(void) {
             fail++;
         }
     }
+
+    /*
+     * Test 2b: CDB construction - READ CAPACITY (10)
+     */
+    {
+        uint8_t cdb[10];
+        scsi_cdb_read_capacity_10(cdb);
+        if (cdb[0] == SCSI_CMD_READ_CAPACITY_10 &&
+            cdb[1] == 0 && cdb[2] == 0 && cdb[3] == 0 &&
+            cdb[4] == 0 && cdb[5] == 0 && cdb[6] == 0 &&
+            cdb[7] == 0 && cdb[8] == 0 && cdb[9] == 0) {
+            kprint("PASS: CDB READ CAPACITY(10)\n");
+            pass++;
+        } else {
+            kprint("FAIL: CDB READ CAPACITY(10)\n");
+            fail++;
+        }
+    }
     
     /*
      * Test 3: CDB construction - READ(10)
@@ -212,6 +230,44 @@ void test_scsi(void) {
         scsi_device_unregister(dev);
         scsi_device_free(dev);
     }
+
+    /*
+     * Test 10b: Duplicate device registration is rejected
+     */
+    {
+        scsi_device_t *dev1 = scsi_device_alloc();
+        scsi_device_t *dev2 = scsi_device_alloc();
+        int ret1;
+        int ret2;
+
+        dev1->bus = 0;
+        dev1->target = 3;
+        dev1->lun = 0;
+        dev1->type = SCSI_TYPE_DISK;
+        dev1->link = &mock_link;
+
+        dev2->bus = 0;
+        dev2->target = 3;
+        dev2->lun = 0;
+        dev2->type = SCSI_TYPE_DISK;
+        dev2->link = &mock_link;
+
+        ret1 = scsi_device_register(dev1);
+        ret2 = scsi_device_register(dev2);
+
+        if (ret1 == 0 && ret2 < 0) {
+            kprint("PASS: scsi_device_register duplicate detection\n");
+            pass++;
+        } else {
+            sprintf(buf, "FAIL: duplicate register ret1=%d ret2=%d\n", ret1, ret2);
+            kprint(buf);
+            fail++;
+        }
+
+        scsi_device_unregister(dev1);
+        scsi_device_free(dev1);
+        scsi_device_free(dev2);
+    }
     
     /*
      * Test 11: Sense key parsing (fixed format)
@@ -221,13 +277,29 @@ void test_scsi(void) {
         int key = scsi_sense_key(sense, 18);
         int asc = scsi_sense_asc(sense, 18);
         int ascq = scsi_sense_ascq(sense, 18);
-        
-        if (key == SCSI_SENSE_ILLEGAL_REQUEST && asc == 0x24 && ascq == 0x00) {
+        int keys_ok = 1;
+
+        for (int expected = 0; expected <= 0x0F; expected++) {
+            sense[2] = (uint8_t)expected;
+            if (scsi_sense_key(sense, sizeof(sense)) != expected) {
+                keys_ok = 0;
+                sprintf(buf, "FAIL: sense key decode expected=%d got=%d\n",
+                        expected, scsi_sense_key(sense, sizeof(sense)));
+                kprint(buf);
+                break;
+            }
+        }
+
+        sense[2] = 0x05;
+        if (keys_ok && key == SCSI_SENSE_ILLEGAL_REQUEST &&
+            asc == 0x24 && ascq == 0x00) {
             kprint("PASS: Sense parsing (fixed format)\n");
             pass++;
-        } else {
+        } else if (keys_ok) {
             sprintf(buf, "FAIL: Sense parsing key=%d asc=%02x ascq=%02x\n", key, asc, ascq);
             kprint(buf);
+            fail++;
+        } else {
             fail++;
         }
     }
@@ -264,6 +336,52 @@ void test_scsi(void) {
 
         if (ok) {
             kprint("PASS: scsi_sense_string (including ASC/ASCQ)\n");
+            pass++;
+        } else {
+            fail++;
+        }
+    }
+
+    /*
+     * Test 12b: Request pool exhaustion and reuse
+     */
+    {
+        scsi_request_t *reqs[32];
+        int ok = 1;
+
+        memset(reqs, 0, sizeof(reqs));
+        for (int i = 0; i < 32; i++) {
+            reqs[i] = scsi_request_alloc();
+            if (reqs[i] == NULL) {
+                ok = 0;
+                sprintf(buf, "FAIL: request alloc returned NULL at slot %d\n", i);
+                kprint(buf);
+                break;
+            }
+        }
+
+        if (ok && scsi_request_alloc() != NULL) {
+            ok = 0;
+            kprint("FAIL: request pool exhaustion did not return NULL\n");
+        }
+
+        if (reqs[0] != NULL) {
+            scsi_request_free(reqs[0]);
+            reqs[0] = scsi_request_alloc();
+            if (reqs[0] == NULL) {
+                ok = 0;
+                kprint("FAIL: request pool reuse failed\n");
+            }
+        }
+
+        for (int i = 0; i < 32; i++) {
+            if (reqs[i] != NULL) {
+                scsi_request_free(reqs[i]);
+            }
+        }
+
+        if (ok) {
+            kprint("PASS: scsi_request pool exhaustion/reuse\n");
             pass++;
         } else {
             fail++;
