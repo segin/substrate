@@ -51,6 +51,24 @@ void blkdev_register(blkdev_t *dev) {
     kprint(" registered\n");
 }
 
+void blkdev_unregister(blkdev_t *dev) {
+    blkdev_t **pp;
+
+    if (!dev) return;
+
+    pp = &blkdev_list;
+    while (*pp) {
+        if (*pp == dev) {
+            *pp = dev->next;
+            break;
+        }
+        pp = &(*pp)->next;
+    }
+
+    devfs_unregister_device(&dev->node);
+    dev->next = NULL;
+}
+
 static int blkdev_geom_read(struct geom_disk *disk, uint64_t sector, size_t count, void *buf) {
     blkdev_geom_provider_t *provider = (blkdev_geom_provider_t *)disk->priv;
     if (!provider || !provider->blkdev || !provider->blkdev->read) return -1;

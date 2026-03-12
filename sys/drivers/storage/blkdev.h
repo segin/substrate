@@ -23,6 +23,7 @@ typedef struct blkdev {
 
 // Register a block device (creates DevFS entry)
 void blkdev_register(blkdev_t *dev);
+void blkdev_unregister(blkdev_t *dev);
 void blkdev_scan_partitions(blkdev_t *dev);
 void blkdev_register_disk(blkdev_t *dev);
 

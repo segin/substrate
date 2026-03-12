@@ -130,6 +130,7 @@ extern void blkdev_read_bytes(void);
 extern void blkdev_register(void);
 extern void blkdev_register_disk(void);
 extern void blkdev_scan_partitions(void);
+extern void blkdev_unregister(void);
 extern void blkdev_write_bytes(void);
 extern void bus_compatible_match(void);
 extern void bus_dump_tree(void);
@@ -2602,6 +2603,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&uart_putc, "uart_putc" },
     { (uint32_t)(uintptr_t)&uart_write, "uart_write" },
     { (uint32_t)(uintptr_t)&blkdev_register, "blkdev_register" },
+    { (uint32_t)(uintptr_t)&blkdev_unregister, "blkdev_unregister" },
     { (uint32_t)(uintptr_t)&blkdev_scan_partitions, "blkdev_scan_partitions" },
     { (uint32_t)(uintptr_t)&blkdev_register_disk, "blkdev_register_disk" },
     { (uint32_t)(uintptr_t)&blkdev_get, "blkdev_get" },
@@ -3373,4 +3375,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1681;
+int ksym_count = 1682;

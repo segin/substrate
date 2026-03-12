@@ -27,7 +27,17 @@ typedef struct scsi_blk_dev {
 /* Global state */
 static scsi_blk_dev_t *scsi_dev_list = NULL;
 static uint32_t scsi_dev_count = 0;
+static uint32_t scsi_dev_next_num = 0;
 static scsi_blk_dev_t scsi_dev_pool[32];
+
+static scsi_blk_dev_t *scsi_dev_alloc_slot(void) {
+    for (size_t i = 0; i < (sizeof(scsi_dev_pool) / sizeof(scsi_dev_pool[0])); i++) {
+        if (scsi_dev_pool[i].scsi_dev == NULL) {
+            return &scsi_dev_pool[i];
+        }
+    }
+    return NULL;
+}
 
 /*
  * ============================================================
@@ -157,14 +167,18 @@ int scsi_dev_attach(scsi_device_t *scsi_dev) {
         return -1;
     }
     
-    scsi_blk_dev_t *sbd = &scsi_dev_pool[scsi_dev_count];
+    scsi_blk_dev_t *sbd = scsi_dev_alloc_slot();
+    if (!sbd) {
+        kprint("scsi: no free block-device slots\n");
+        return -1;
+    }
     memset(sbd, 0, sizeof(*sbd));
     
     sbd->scsi_dev = scsi_dev;
-    sbd->dev_num = scsi_dev_count;
+    sbd->dev_num = scsi_dev_next_num++;
     
     /* Create device name: scsi0, scsi1, etc. */
-    snprintf(sbd->blkdev.name, sizeof(sbd->blkdev.name), "scsi%u", scsi_dev_count);
+    snprintf(sbd->blkdev.name, sizeof(sbd->blkdev.name), "scsi%u", sbd->dev_num);
     
     /* Set sector size based on device type */
     if (scsi_dev->type == SCSI_TYPE_ROM || scsi_dev->type == SCSI_TYPE_OPTICAL) {
@@ -215,10 +229,14 @@ int scsi_dev_detach(scsi_device_t *scsi_dev) {
         if ((*pp)->scsi_dev == scsi_dev) {
             scsi_blk_dev_t *sbd = *pp;
             *pp = sbd->next;
+
+            blkdev_unregister(&sbd->blkdev);
+            if (scsi_dev_count > 0) scsi_dev_count--;
             
             char log_buf[64];
             snprintf(log_buf, sizeof(log_buf), "scsi: detached %s\n", sbd->blkdev.name);
             kprint(log_buf);
+            memset(sbd, 0, sizeof(*sbd));
             return 0;
         }
         pp = &(*pp)->next;
@@ -243,5 +261,9 @@ scsi_blk_dev_t *scsi_dev_lookup(const char *name) {
  * Initialize SCSI device subsystem
  */
 void scsi_dev_init(void) {
+    scsi_dev_list = NULL;
+    scsi_dev_count = 0;
+    scsi_dev_next_num = 0;
+    memset(scsi_dev_pool, 0, sizeof(scsi_dev_pool));
     kprint("scsi: unified SCSI device driver initialized\n");
 }
