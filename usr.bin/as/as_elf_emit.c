@@ -1788,6 +1788,50 @@ static int lookup_i386_x87_ipcompare_opcode(const char *mnemonic, unsigned char 
     return -1;
 }
 
+static int lookup_i386_adcxo_prefix(const char *mnemonic, unsigned char *prefix) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char prefix;
+    } map[] = {
+        {"adcx", 0x66},
+        {"adox", 0xf3},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || prefix == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *prefix = map[i].prefix;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_encodekey_opcode(const char *mnemonic, unsigned char *opcode3) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char opcode3;
+    } map[] = {
+        {"encodekey128", 0xfa},
+        {"encodekey256", 0xfb},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || opcode3 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *opcode3 = map[i].opcode3;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static int lookup_i386_xmm_imm8_family(const char *mnemonic, unsigned char *prefix, unsigned char *opcode2) {
     static const struct {
         const char *mnemonic;
@@ -5427,7 +5471,9 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (dst_op->kind != AS_OPERAND_REGISTER || parse_x86_reg(dst_op->u.reg, &gr) != 0 || (gr & 8u) != 0u) {
             return -1;
         }
-        prefix = strcmp(mnbuf, "adcx") == 0 ? 0x66 : 0xf3;
+        if (lookup_i386_adcxo_prefix(mnbuf, &prefix) != 0) {
+            return -1;
+        }
         return emit_i386_prefixed_0f_map_rm(prefix, 0x38, 0xf6, (unsigned)gr & 7u, src_op, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "encodekey128") == 0 || strcmp(mnbuf, "encodekey256") == 0) {
@@ -5449,7 +5495,9 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (dst_op->kind != AS_OPERAND_REGISTER || parse_x86_reg(dst_op->u.reg, &gr) != 0 || (gr & 8u) != 0u) {
             return -1;
         }
-        opcode3 = strcmp(mnbuf, "encodekey128") == 0 ? 0xfau : 0xfbu;
+        if (lookup_i386_encodekey_opcode(mnbuf, &opcode3) != 0) {
+            return -1;
+        }
         return emit_i386_prefixed_0f_map_rm(0xf3, 0x38, opcode3, (unsigned)gr & 7u, src_op, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movups") == 0) {
