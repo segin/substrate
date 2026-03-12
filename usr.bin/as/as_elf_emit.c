@@ -1537,6 +1537,127 @@ static int lookup_i386_crypto_0f3a_imm8_opcode(const char *mnemonic, unsigned ch
     return -1;
 }
 
+static int lookup_i386_movbe_opcode(int intel_syntax, int first_is_reg, unsigned char *opcode3) {
+    if (opcode3 == NULL) {
+        return -1;
+    }
+    if (intel_syntax) {
+        *opcode3 = first_is_reg ? 0xf0 : 0xf1;
+    } else {
+        *opcode3 = first_is_reg ? 0xf1 : 0xf0;
+    }
+    return 0;
+}
+
+static int lookup_i386_vm_invalidate_opcode(const char *mnemonic, unsigned char *opcode3) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char opcode3;
+    } map[] = {
+        {"invept", 0x80},
+        {"invvpid", 0x81},
+        {"invpcid", 0x82},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || opcode3 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *opcode3 = map[i].opcode3;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_aes_0f38_opcode(const char *mnemonic, unsigned char *opcode3) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char opcode3;
+    } map[] = {
+        {"gf2p8mulb", 0xcf},
+        {"aesimc", 0xdb},
+        {"aesenc", 0xdc},
+        {"aesenclast", 0xdd},
+        {"aesdec", 0xde},
+        {"aesdeclast", 0xdf},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || opcode3 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *opcode3 = map[i].opcode3;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_keylocker_opcode(const char *mnemonic, unsigned char *opcode3) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char opcode3;
+    } map[] = {
+        {"loadiwkey", 0xdc},
+        {"aesenc128kl", 0xdc},
+        {"aesdec128kl", 0xdd},
+        {"aesenc256kl", 0xde},
+        {"aesdec256kl", 0xdf},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || opcode3 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *opcode3 = map[i].opcode3;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_memorder_opcode(const char *mnemonic, unsigned char *prefix, unsigned char *opcode3,
+                                       int *reg_first) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char prefix;
+        unsigned char opcode3;
+        int reg_first;
+    } map[] = {
+        {"wrssd", 0x00, 0xf6, 0},
+        {"wrussd", 0x66, 0xf5, 0},
+        {"movdir64b", 0x66, 0xf8, 1},
+        {"enqcmd", 0xf2, 0xf8, 1},
+        {"enqcmds", 0xf3, 0xf8, 1},
+        {"movdiri", 0x00, 0xf9, 0},
+        {"aadd", 0x00, 0xfc, 0},
+        {"aand", 0x66, 0xfc, 0},
+        {"aor", 0xf2, 0xfc, 0},
+        {"axor", 0xf3, 0xfc, 0},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || prefix == NULL || opcode3 == NULL || reg_first == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *prefix = map[i].prefix;
+            *opcode3 = map[i].opcode3;
+            *reg_first = map[i].reg_first;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static int lookup_i386_xmm_imm8_family(const char *mnemonic, unsigned char *prefix, unsigned char *opcode2) {
     static const struct {
         const char *mnemonic;
@@ -5032,32 +5153,33 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         const as_operand_t *reg_op;
         as_x86_reg_t gr;
         unsigned char opcode3;
+        int first_is_reg;
 
         if (insn->operand_count != 2) {
             return -1;
         }
+        first_is_reg = insn->operands[0].kind == AS_OPERAND_REGISTER ? 1 : 0;
         if (intel_syntax) {
-            if (insn->operands[0].kind == AS_OPERAND_REGISTER) {
+            if (first_is_reg) {
                 reg_op = &insn->operands[0];
                 rm_op = &insn->operands[1];
-                opcode3 = 0xf0;
             } else {
                 rm_op = &insn->operands[0];
                 reg_op = &insn->operands[1];
-                opcode3 = 0xf1;
             }
         } else {
-            if (insn->operands[0].kind == AS_OPERAND_REGISTER) {
+            if (first_is_reg) {
                 reg_op = &insn->operands[0];
                 rm_op = &insn->operands[1];
-                opcode3 = 0xf1;
             } else {
                 rm_op = &insn->operands[0];
                 reg_op = &insn->operands[1];
-                opcode3 = 0xf0;
             }
         }
         if (reg_op->kind != AS_OPERAND_REGISTER || parse_x86_reg(reg_op->u.reg, &gr) != 0 || (gr & 8u) != 0u) {
+            return -1;
+        }
+        if (lookup_i386_movbe_opcode(intel_syntax, first_is_reg, &opcode3) != 0) {
             return -1;
         }
         return emit_i386_prefixed_0f_map_rm(0x00, 0x38, opcode3, (unsigned)gr & 7u, rm_op, out, out_cap, out_len);
@@ -5081,9 +5203,9 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (reg_op->kind != AS_OPERAND_REGISTER || parse_x86_reg(reg_op->u.reg, &gr) != 0 || (gr & 8u) != 0u) {
             return -1;
         }
-        if (strcmp(mnbuf, "invept") == 0) opcode3 = 0x80;
-        else if (strcmp(mnbuf, "invvpid") == 0) opcode3 = 0x81;
-        else opcode3 = 0x82;
+        if (lookup_i386_vm_invalidate_opcode(mnbuf, &opcode3) != 0) {
+            return -1;
+        }
         return emit_i386_prefixed_0f_map_rm(0x66, 0x38, opcode3, (unsigned)gr & 7u, rm_op, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "gf2p8mulb") == 0 || strcmp(mnbuf, "aesimc") == 0 || strcmp(mnbuf, "aesenc") == 0 ||
@@ -5097,12 +5219,9 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
             return -1;
         }
-        if (strcmp(mnbuf, "gf2p8mulb") == 0) opcode3 = 0xcf;
-        else if (strcmp(mnbuf, "aesimc") == 0) opcode3 = 0xdb;
-        else if (strcmp(mnbuf, "aesenc") == 0) opcode3 = 0xdc;
-        else if (strcmp(mnbuf, "aesenclast") == 0) opcode3 = 0xdd;
-        else if (strcmp(mnbuf, "aesdec") == 0) opcode3 = 0xde;
-        else opcode3 = 0xdf;
+        if (lookup_i386_aes_0f38_opcode(mnbuf, &opcode3) != 0) {
+            return -1;
+        }
         return emit_i386_prefixed_0f_map_rm(0x66, 0x38, opcode3, xr, src, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "aesencwide256kl") == 0 || strcmp(mnbuf, "aesencwide128kl") == 0) {
@@ -5125,10 +5244,9 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
             return -1;
         }
-        if (strcmp(mnbuf, "loadiwkey") == 0 || strcmp(mnbuf, "aesenc128kl") == 0) opcode3 = 0xdc;
-        else if (strcmp(mnbuf, "aesdec128kl") == 0) opcode3 = 0xdd;
-        else if (strcmp(mnbuf, "aesenc256kl") == 0) opcode3 = 0xde;
-        else opcode3 = 0xdf;
+        if (lookup_i386_keylocker_opcode(mnbuf, &opcode3) != 0) {
+            return -1;
+        }
         return emit_i386_prefixed_0f_map_rm(0xf3, 0x38, opcode3, xr, src, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "wrssd") == 0 || strcmp(mnbuf, "wrussd") == 0 || strcmp(mnbuf, "movdir64b") == 0 ||
@@ -5140,11 +5258,15 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         as_x86_reg_t gr;
         unsigned char opcode3;
         unsigned char prefix;
+        int reg_first;
 
         if (insn->operand_count != 2) {
             return -1;
         }
-        if (strcmp(mnbuf, "movdir64b") == 0 || strcmp(mnbuf, "enqcmd") == 0 || strcmp(mnbuf, "enqcmds") == 0) {
+        if (lookup_i386_memorder_opcode(mnbuf, &prefix, &opcode3, &reg_first) != 0) {
+            return -1;
+        }
+        if (reg_first) {
             if (intel_syntax) {
                 reg_op = &insn->operands[0];
                 mem_op = &insn->operands[1];
@@ -5161,32 +5283,6 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         if (reg_op->kind != AS_OPERAND_REGISTER || parse_x86_reg(reg_op->u.reg, &gr) != 0 || (gr & 8u) != 0u) {
             return -1;
-        }
-        prefix = 0x00;
-        if (strcmp(mnbuf, "wrssd") == 0) opcode3 = 0xf6;
-        else if (strcmp(mnbuf, "wrussd") == 0) {
-            opcode3 = 0xf5;
-            prefix = 0x66;
-        }
-        else if (strcmp(mnbuf, "movdir64b") == 0) {
-            opcode3 = 0xf8;
-            prefix = 0x66;
-        } else if (strcmp(mnbuf, "enqcmd") == 0) {
-            opcode3 = 0xf8;
-            prefix = 0xf2;
-        } else if (strcmp(mnbuf, "enqcmds") == 0) {
-            opcode3 = 0xf8;
-            prefix = 0xf3;
-        } else if (strcmp(mnbuf, "movdiri") == 0) opcode3 = 0xf9;
-        else {
-            opcode3 = 0xfc;
-            if (strcmp(mnbuf, "aand") == 0) {
-                prefix = 0x66;
-            } else if (strcmp(mnbuf, "aor") == 0) {
-                prefix = 0xf2;
-            } else if (strcmp(mnbuf, "axor") == 0) {
-                prefix = 0xf3;
-            }
         }
         return emit_i386_prefixed_0f_map_rm(prefix, 0x38, opcode3, (unsigned)gr & 7u, mem_op, out, out_cap, out_len);
     }
