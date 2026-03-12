@@ -3,7 +3,7 @@
 > This file was seeded from `TASKS.md` using a fork-copy (rename+restore) workflow to preserve lineage.
 > Source span in original monolith: lines 9665-10344.
 
-## Reimplemented Checklist (All Open)
+## Reimplemented Checklist
 
 ### 13. Bus Enumeration & Driver Model
 
@@ -13,29 +13,29 @@
 
 #### 13.1. Kernel Driver Model & Device Lifecycle
 
-- [ ] **Core Data Structures (Headers):** (REQ: REQ-17-0001)
-    - [ ] Define `struct device` in `sys/kern/device.h`. (REQ: REQ-17-0002)
+- [x] **Core Data Structures (Headers):** (REQ: REQ-17-0001)
+    - [x] Define `struct device` in `sys/kern/device.h`. (REQ: REQ-17-0002)
         - Note: Implemented struct device with hierarchical and resource fields.
         - Files: `sys/kern/device.h` (new)
         - Fields: `vendor_id`, `device_id`, `class`, `subclass`, `progif`, `serial[32]`, `guid[16]`, `parent`, `children`, `resources`, `power_state`, `ref_count`, `driver`, `bus`, `flags`
         - Tests: unit (struct layout, alignment)
         - Docs: `device.9` manpage
         - Acceptance: Header compiles, struct size verified
-    - [ ] Define `struct driver` in `sys/kern/driver.h`. (REQ: REQ-17-0003)
+    - [x] Define `struct driver` in `sys/kern/driver.h`. (REQ: REQ-17-0003)
         - Note: Implemented struct driver with full lifecycle callbacks and bus binding.
         - Files: `sys/kern/driver.h` (new)
         - Fields: `name`, `bus_type`, `id_table`, `probe`, `attach`, `detach`, `suspend`, `resume`, `shutdown`, `reset`, `match_func`, `priority`, `flags`
         - Tests: unit (callback signature validation)
         - Docs: `driver.9` manpage
         - Acceptance: Header compiles, all callbacks defined
-    - [ ] Define `struct bus_type` in `sys/kern/bus.h`. (REQ: REQ-17-0004)
+    - [x] Define `struct bus_type` in `sys/kern/bus.h`. (REQ: REQ-17-0004)
         - Note: Implemented struct bus_type with device/driver lists and spinlock protection.
         - Files: `sys/kern/bus.h` (new)
         - Fields: `name`, `match`, `probe`, `remove`, `devices_list`, `drivers_list`, `lock`
         - Tests: unit (struct layout)
         - Docs: `bus.9` manpage
         - Acceptance: Header compiles with list/lock fields
-    - [ ] Define `struct resource` in `sys/kern/resource.h`. (REQ: REQ-17-0005)
+    - [x] Define `struct resource` in `sys/kern/resource.h`. (REQ: REQ-17-0005)
         - Note: Implemented struct resource with types, hierarchy, and static inline overlap helpers.
         - Files: `sys/kern/resource.h` (new)
         - Types: `RES_IO`, `RES_MEM`, `RES_IRQ`, `RES_DMA`
@@ -44,36 +44,36 @@
         - Docs: `resource.9` manpage
         - Acceptance: Resource types enumerated, range helpers compile
 
-- [ ] **Device Registration API:** (REQ: REQ-17-0006)
-    - [ ] Implement `device_create()` allocator. (REQ: REQ-17-0007)
+- [x] **Device Registration API:** (REQ: REQ-17-0006)
+    - [x] Implement `device_create()` allocator. (REQ: REQ-17-0007)
         - Note: Implemented device_create with name storage, parent linking, and refcount initialization.
         - Files: `sys/kern/device.c` (new)
         - API: `device_t *device_create(const char *name, device_t *parent)`
         - Tests: unit (allocation, parent linking, refcount init)
         - Docs: `device_create.9`
         - Acceptance: Returns valid device, parent->children updated
-    - [ ] Implement `device_register()` into bus. (REQ: REQ-17-0008)
+    - [x] Implement `device_register()` into bus. (REQ: REQ-17-0008)
         - Note: Implemented device_register with duplicate pointer/name detection and spinlock protection.
         - Files: `sys/kern/device.c`
         - API: `int device_register(device_t *dev, bus_type_t *bus)`
         - Tests: unit (bus list insertion, duplicate detection)
         - Docs: `device_register.9`
         - Acceptance: Device appears in bus->devices_list
-    - [ ] Implement `device_unregister()` removal. (REQ: REQ-17-0009)
+    - [x] Implement `device_unregister()` removal. (REQ: REQ-17-0009)
         - Note: Implemented device_unregister with safe bus detachment, parent list removal, and child orphaning.
         - Files: `sys/kern/device.c`
         - API: `int device_unregister(device_t *dev)`
         - Tests: unit (list removal, children orphaning check)
         - Docs: `device_unregister.9`
         - Acceptance: Device removed, children handled
-    - [ ] Implement `device_get()` / `device_put()` refcounting. (REQ: REQ-17-0010)
+    - [x] Implement `device_get()` / `device_put()` refcounting. (REQ: REQ-17-0010)
         - Note: Implemented device_get/device_put with kfree on zero refcount.
         - Files: `sys/kern/device.c`
         - API: `void device_get(device_t *dev)`, `void device_put(device_t *dev)`
         - Tests: unit (refcount increment/decrement, free on zero)
         - Docs: `device_refcount.9`
         - Acceptance: Refcount properly tracks, frees at zero
-    - [ ] Implement `device_find_child()` lookup. (REQ: REQ-17-0011)
+    - [x] Implement `device_find_child()` lookup. (REQ: REQ-17-0011)
         - Note: Implemented device_find_child by iterating parent's sibling list.
         - Files: `sys/kern/device.c`
         - API: `device_t *device_find_child(device_t *parent, const char *name)`
@@ -81,56 +81,56 @@
         - Docs: `device_find_child.9`
         - Acceptance: Returns correct child or NULL
 
-- [ ] **Driver Registration API:** (REQ: REQ-17-0012)
-    - [ ] Implement `driver_register()`. (REQ: REQ-17-0013)
+- [x] **Driver Registration API:** (REQ: REQ-17-0012)
+    - [x] Implement `driver_register()`. (REQ: REQ-17-0013)
         - Note: Implemented driver_register with duplicate detection and probe auto-trigger.
         - Files: `sys/kern/driver.c` (new)
         - API: `int driver_register(driver_t *drv, bus_type_t *bus)`
         - Tests: unit (registration, probe auto-trigger on existing devices)
         - Docs: `driver_register.9`
         - Acceptance: Driver in bus->drivers_list, probes called
-    - [ ] Implement `driver_unregister()`. (REQ: REQ-17-0014)
+    - [x] Implement `driver_unregister()`. (REQ: REQ-17-0014)
         - Note: Implemented driver_unregister which detaches devices and removes driver from bus.
         - Files: `sys/kern/driver.c`
         - API: `int driver_unregister(driver_t *drv)`
         - Tests: unit (detach all bound devices, list removal)
         - Docs: `driver_unregister.9`
         - Acceptance: All devices detached, driver removed
-    - [ ] Implement `driver_attach()` binding. (REQ: REQ-17-0015)
+    - [x] Implement `driver_attach()` binding. (REQ: REQ-17-0015)
         - Files: `sys/kern/driver.c`
         - API: `int driver_attach(driver_t *drv, device_t *dev)`
         - Tests: unit (successful attach, already-bound rejection)
         - Docs: `driver_attach.9`
         - Acceptance: dev->driver set, attach() callback invoked
-    - [ ] Implement `driver_detach()` unbinding. (REQ: REQ-17-0016)
+    - [x] Implement `driver_detach()` unbinding. (REQ: REQ-17-0016)
         - Files: `sys/kern/driver.c`
         - API: `int driver_detach(device_t *dev)`
         - Tests: unit (detach callback, driver pointer cleared)
         - Docs: `driver_detach.9`
         - Acceptance: detach() called, dev->driver = NULL
 
-- [ ] **Matching and Binding Logic:** (REQ: REQ-17-0017)
-    - [ ] Implement `bus_match_device()` generic matcher. (REQ: REQ-17-0018)
+- [x] **Matching and Binding Logic:** (REQ: REQ-17-0017)
+    - [x] Implement `bus_match_device()` generic matcher. (REQ: REQ-17-0018)
         - Files: `sys/kern/bus.c` (new)
         - API: `driver_t *bus_match_device(bus_type_t *bus, device_t *dev)`
         - Logic: Iterate drivers, call match() or compare id_table, return highest priority match
         - Tests: unit (exact match, class match, priority ordering)
-        - Docs: `bus_match.9`
+        - Docs: `bus_match_device.9`
         - Acceptance: Correct driver selected by priority
-    - [ ] Implement ID table matching for vendor/device/class. (REQ: REQ-17-0019)
+    - [x] Implement ID table matching for vendor/device/class. (REQ: REQ-17-0019)
         - Files: `sys/kern/bus.c`
         - API: `int bus_id_match(const device_id_t *id, device_t *dev)`
         - Wildcards: 0xFFFF for any vendor/device, class mask support
         - Tests: unit (wildcard match, specific match, no match)
         - Docs: `bus_id_match.9`
         - Acceptance: Wildcard and specific IDs match correctly
-    - [ ] Implement `compatible` string matching (DT/ACPI style). (REQ: REQ-17-0020)
+    - [x] Implement `compatible` string matching (DT/ACPI style). (REQ: REQ-17-0020)
         - Files: `sys/kern/bus.c`
         - API: `int bus_compatible_match(const char *compat, device_t *dev)`
         - Tests: unit (exact string, multi-value compat)
         - Docs: `bus_compatible_match.9`
         - Acceptance: String list matching works
-    - [ ] Implement driver blacklist/override mechanism. (REQ: REQ-17-0021)
+    - [x] Implement driver blacklist/override mechanism. (REQ: REQ-17-0021)
         - Files: `sys/kern/driver.c`
         - API: `void driver_blacklist_add(const char *name)`, `void driver_override(device_t *dev, const char *name)`
         - Tests: unit (blacklisted driver skipped, override forces binding)
