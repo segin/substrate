@@ -1377,6 +1377,69 @@ static int lookup_i386_scanbit_group(const char *mnemonic, unsigned char *prefix
     return -1;
 }
 
+static int lookup_i386_f2_scalar_xmm_opcode(const char *mnemonic, unsigned char *opcode2) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char opcode2;
+    } map[] = {
+        {"cvttsd2si", 0x2c},
+        {"cvtsd2si", 0x2d},
+        {"sqrtsd", 0x51},
+        {"addsd", 0x58},
+        {"mulsd", 0x59},
+        {"cvtsd2ss", 0x5a},
+        {"subsd", 0x5c},
+        {"minsd", 0x5d},
+        {"divsd", 0x5e},
+        {"maxsd", 0x5f},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || opcode2 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *opcode2 = map[i].opcode2;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_f3_scalar_xmm_opcode(const char *mnemonic, unsigned char *opcode2) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char opcode2;
+    } map[] = {
+        {"cvttss2si", 0x2c},
+        {"cvtss2si", 0x2d},
+        {"sqrtss", 0x51},
+        {"rsqrtss", 0x52},
+        {"rcpss", 0x53},
+        {"addss", 0x58},
+        {"mulss", 0x59},
+        {"cvtss2sd", 0x5a},
+        {"cvttps2dq", 0x5b},
+        {"subss", 0x5c},
+        {"minss", 0x5d},
+        {"divss", 0x5e},
+        {"maxss", 0x5f},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || opcode2 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *opcode2 = map[i].opcode2;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static int lookup_i386_xmm_imm8_family(const char *mnemonic, unsigned char *prefix, unsigned char *opcode2) {
     static const struct {
         const char *mnemonic;
@@ -4087,6 +4150,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return emit_i386_prefixed_0f_rm(0xf3, 0x2b, xr, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "cvttsd2si") == 0 || strcmp(mnbuf, "cvtsd2si") == 0) {
+        unsigned char opcode2;
+
         if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
             parse_x86_reg(dst->u.reg, &gr) != 0 || (gr & 8u) != 0u) {
             return -1;
@@ -4094,10 +4159,14 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
             return -1;
         }
-        return emit_i386_prefixed_0f_rm(0xf2, strcmp(mnbuf, "cvttsd2si") == 0 ? 0x2c : 0x2d,
-                                        (unsigned)gr & 7u, src, out, out_cap, out_len);
+        if (lookup_i386_f2_scalar_xmm_opcode(mnbuf, &opcode2) != 0) {
+            return -1;
+        }
+        return emit_i386_prefixed_0f_rm(0xf2, opcode2, (unsigned)gr & 7u, src, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "cvttss2si") == 0 || strcmp(mnbuf, "cvtss2si") == 0) {
+        unsigned char opcode2;
+
         if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
             parse_x86_reg(dst->u.reg, &gr) != 0 || (gr & 8u) != 0u) {
             return -1;
@@ -4105,22 +4174,19 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
             return -1;
         }
-        return emit_i386_prefixed_0f_rm(0xf3, strcmp(mnbuf, "cvttss2si") == 0 ? 0x2c : 0x2d,
-                                        (unsigned)gr & 7u, src, out, out_cap, out_len);
+        if (lookup_i386_f3_scalar_xmm_opcode(mnbuf, &opcode2) != 0) {
+            return -1;
+        }
+        return emit_i386_prefixed_0f_rm(0xf3, opcode2, (unsigned)gr & 7u, src, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "sqrtsd") == 0 || strcmp(mnbuf, "addsd") == 0 || strcmp(mnbuf, "mulsd") == 0 ||
         strcmp(mnbuf, "cvtsd2ss") == 0 || strcmp(mnbuf, "subsd") == 0 || strcmp(mnbuf, "minsd") == 0 ||
         strcmp(mnbuf, "divsd") == 0 || strcmp(mnbuf, "maxsd") == 0) {
         unsigned char opcode2;
 
-        if (strcmp(mnbuf, "sqrtsd") == 0) opcode2 = 0x51;
-        else if (strcmp(mnbuf, "addsd") == 0) opcode2 = 0x58;
-        else if (strcmp(mnbuf, "mulsd") == 0) opcode2 = 0x59;
-        else if (strcmp(mnbuf, "cvtsd2ss") == 0) opcode2 = 0x5a;
-        else if (strcmp(mnbuf, "subsd") == 0) opcode2 = 0x5c;
-        else if (strcmp(mnbuf, "minsd") == 0) opcode2 = 0x5d;
-        else if (strcmp(mnbuf, "divsd") == 0) opcode2 = 0x5e;
-        else opcode2 = 0x5f;
+        if (lookup_i386_f2_scalar_xmm_opcode(mnbuf, &opcode2) != 0) {
+            return -1;
+        }
         return emit_i386_prefixed_xmm_srcdst_rm(0xf2, opcode2, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "sqrtss") == 0 || strcmp(mnbuf, "rsqrtss") == 0 || strcmp(mnbuf, "rcpss") == 0 ||
@@ -4129,17 +4195,9 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         strcmp(mnbuf, "divss") == 0 || strcmp(mnbuf, "maxss") == 0) {
         unsigned char opcode2;
 
-        if (strcmp(mnbuf, "sqrtss") == 0) opcode2 = 0x51;
-        else if (strcmp(mnbuf, "rsqrtss") == 0) opcode2 = 0x52;
-        else if (strcmp(mnbuf, "rcpss") == 0) opcode2 = 0x53;
-        else if (strcmp(mnbuf, "addss") == 0) opcode2 = 0x58;
-        else if (strcmp(mnbuf, "mulss") == 0) opcode2 = 0x59;
-        else if (strcmp(mnbuf, "cvtss2sd") == 0) opcode2 = 0x5a;
-        else if (strcmp(mnbuf, "cvttps2dq") == 0) opcode2 = 0x5b;
-        else if (strcmp(mnbuf, "subss") == 0) opcode2 = 0x5c;
-        else if (strcmp(mnbuf, "minss") == 0) opcode2 = 0x5d;
-        else if (strcmp(mnbuf, "divss") == 0) opcode2 = 0x5e;
-        else opcode2 = 0x5f;
+        if (lookup_i386_f3_scalar_xmm_opcode(mnbuf, &opcode2) != 0) {
+            return -1;
+        }
         return emit_i386_prefixed_xmm_srcdst_rm(0xf3, opcode2, src, dst, out, out_cap, out_len);
     }
     {
