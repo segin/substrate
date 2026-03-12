@@ -6,6 +6,29 @@
 ## Reimplemented Checklist (All Open)
 
 ### 3. Drivers (`sys/drivers`)
+- [ ] **Driver-Model Migration & Bus-Owned Handoff:** (Imported from `17-13`)
+
+    > **Scope:** `17` now owns the shared bus/resource/device framework, PCI/ISA
+    > discovery cores, devfs publication hooks, and runtime PM scaffolding.
+    > This file owns the controller-family and transport refactors that must move
+    > onto that framework.
+
+    - [ ] Migrate legacy IDE attachment onto the driver model while preserving both fixed-resource ISA attachment and PCI IDE attachment.
+        - Files: `sys/drivers/storage/ide/ide.c`, `sys/kern/isa.c`, `sys/kern/pci.c`
+        - Acceptance: Old non-PCI 486 systems and PCI IDE systems both attach through the framework-owned discovery path
+    - [ ] Migrate VirtIO storage/controller attachment onto the driver model rather than relying on ad hoc discovery.
+        - Files: `sys/drivers/virtio/*.c`
+        - Acceptance: VirtIO controller-family drivers bind through bus/device registration instead of bespoke attach paths
+    - [ ] Implement ISA Plug-and-Play protocol support on top of the legacy ISA bus framework.
+        - Files: `sys/kern/isapnp.c`, `sys/kern/isapnp.h`, relevant ISA drivers
+        - Acceptance: ISA-PnP cards can be isolated, assigned resources, and activated without bypassing the driver model
+    - [ ] Implement the USB host stack on top of the shared bus/resource/device framework.
+        - Files: `sys/kern/usb/*`, `sys/drivers/usb/*`
+        - Acceptance: Host controllers, USB core, hubs, and storage transport bind through the shared framework instead of inventing parallel infrastructure
+    - [ ] Add `lsusb` as the USB-side inspection companion to `lspci` and `devtree`.
+        - Files: `bin/lsusb/`, `usr.man/man1/lsusb.1`
+        - Acceptance: Userspace can inspect the USB topology once the USB host stack is present
+
 - [ ] **Storage Subsystem (Unified SCSI Stack):** (REQ: REQ-03-0001)
 
     > **Files:** `sys/drivers/storage/scsi/scsi.h`, `scsi.c`, `scsi_dev.c`,
