@@ -1215,6 +1215,60 @@ static int lookup_i386_0fc7_group(const char *mnemonic, unsigned char *prefix, u
     return -1;
 }
 
+static int lookup_i386_0f00_group(const char *mnemonic, unsigned *reg_field) {
+    static const struct {
+        const char *mnemonic;
+        unsigned reg_field;
+    } map[] = {
+        {"sldt", 0u},
+        {"str", 1u},
+        {"lldt", 2u},
+        {"ltr", 3u},
+        {"verr", 4u},
+        {"verw", 5u},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || reg_field == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *reg_field = map[i].reg_field;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_f3_0fae_group(const char *mnemonic, unsigned *reg_field) {
+    static const struct {
+        const char *mnemonic;
+        unsigned reg_field;
+    } map[] = {
+        {"rdfsbase", 0u},
+        {"rdgsbase", 1u},
+        {"wrfsbase", 2u},
+        {"wrgsbase", 3u},
+        {"ptwrite", 4u},
+        {"incsspd", 5u},
+        {"umonitor", 6u},
+        {"clrssbsy", 6u},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || reg_field == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *reg_field = map[i].reg_field;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static int emit_i386_3dnow_rm(unsigned char reg_field, const as_operand_t *src, unsigned char imm8,
                               unsigned char *out, size_t out_cap, size_t *out_len) {
     size_t pos = 0;
@@ -4193,13 +4247,9 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
-        if (strcmp(mnbuf, "rdfsbase") == 0) reg_field = 0;
-        else if (strcmp(mnbuf, "rdgsbase") == 0) reg_field = 1;
-        else if (strcmp(mnbuf, "wrfsbase") == 0) reg_field = 2;
-        else if (strcmp(mnbuf, "wrgsbase") == 0) reg_field = 3;
-        else if (strcmp(mnbuf, "ptwrite") == 0) reg_field = 4;
-        else reg_field = 6;
-        if (strcmp(mnbuf, "incsspd") == 0) reg_field = 5;
+        if (lookup_i386_f3_0fae_group(mnbuf, &reg_field) != 0) {
+            return -1;
+        }
         return emit_i386_prefixed_0f_rm(0xf3, 0xae, reg_field, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "tpause") == 0) {
@@ -4245,12 +4295,9 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (insn->operand_count != 1 || a == NULL || a->kind == AS_OPERAND_COPROCESSOR) {
             return -1;
         }
-        if (strcmp(mnbuf, "sldt") == 0) reg_field = 0u;
-        else if (strcmp(mnbuf, "str") == 0) reg_field = 1u;
-        else if (strcmp(mnbuf, "lldt") == 0) reg_field = 2u;
-        else if (strcmp(mnbuf, "ltr") == 0) reg_field = 3u;
-        else if (strcmp(mnbuf, "verr") == 0) reg_field = 4u;
-        else reg_field = 5u;
+        if (lookup_i386_0f00_group(mnbuf, &reg_field) != 0) {
+            return -1;
+        }
         return emit_i386_prefixed_0f_rm(0x00, 0x00, reg_field, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "bt") == 0 || strcmp(mnbuf, "bts") == 0 || strcmp(mnbuf, "btr") == 0 || strcmp(mnbuf, "btc") == 0) {
