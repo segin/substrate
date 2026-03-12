@@ -425,3 +425,31 @@ void device_shutdown(struct device *dev) {
         dev->driver->shutdown(dev);
     }
 }
+
+int device_reset(struct device *dev) {
+    struct device *child;
+    int ret;
+
+    if (!dev) {
+        return -EINVAL;
+    }
+
+    child = dev->children;
+    while (child) {
+        ret = device_reset(child);
+        if (ret != 0) {
+            return ret;
+        }
+        child = child->sibling;
+    }
+
+    if (dev->driver && dev->driver->reset) {
+        ret = dev->driver->reset(dev);
+        if (ret != 0) {
+            return ret;
+        }
+    }
+
+    dev->power_state = PM_STATE_D0;
+    return 0;
+}

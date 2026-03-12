@@ -164,7 +164,7 @@
         - Tests: unit (shutdown callback invoked)
         - Docs: `device_shutdown.9`
         - Acceptance: All devices shutdown on system halt
-    - [ ] Implement `device_reset()` callback. (REQ: REQ-17-0027)
+    - [x] Implement `device_reset()` callback. (REQ: REQ-17-0027)
         - Files: `sys/kern/device.c`
         - API: `int device_reset(device_t *dev)`
         - Tests: unit (reset callback, device state cleared)

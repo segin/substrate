@@ -344,6 +344,9 @@ void run_kernel_tests(void) {
 
         extern int test_device_shutdown_logic(void);
         if (test_device_shutdown_logic() == 0) kprint("device_shutdown: PASS\n"); else kprint("device_shutdown: FAIL\n");
+
+        extern int test_device_reset_logic(void);
+        if (test_device_reset_logic() == 0) kprint("device_reset: PASS\n"); else kprint("device_reset: FAIL\n");
     }
 
     if (all || strcmp(test_arg, "vfs_error") == 0) {
