@@ -61,6 +61,12 @@ static void test_parse_identify_ata(void) {
     assert(dev.mwdma_modes == 0x07);
     assert(dev.udma_modes == 0x3F);
     assert(dev.dma_mode == 1);
+    {
+        uint8_t mode;
+
+        assert(ide_select_dma_transfer_mode(&dev, &mode) == 0);
+        assert(mode == (uint8_t)(ATA_XFER_MODE_UDMA_BASE + 5));
+    }
 }
 
 static void test_parse_identify_ata_lba28_only(void) {
@@ -80,6 +86,12 @@ static void test_parse_identify_ata_lba28_only(void) {
     assert(dev.udma_modes == 0);
     assert(dev.mwdma_modes == 0);
     assert((dev.feature_flags & IDE_FEATURE_LBA48) == 0);
+    {
+        uint8_t mode = 0xFF;
+
+        assert(ide_select_dma_transfer_mode(&dev, &mode) < 0);
+        assert(mode == 0xFF);
+    }
 }
 
 static void test_parse_identify_atapi(void) {

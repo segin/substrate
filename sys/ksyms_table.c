@@ -402,6 +402,7 @@ extern void ide_read_ctrl(void);
 extern void ide_read_reg(void);
 extern void ide_read_sectors(void);
 extern void ide_read_sectors_ext(void);
+extern void ide_select_dma_transfer_mode(void);
 extern void ide_write_ctrl(void);
 extern void ide_write_reg(void);
 extern void ide_write_sectors(void);
@@ -2694,6 +2695,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&ide_prdt_build_entries, "ide_prdt_build_entries" },
     { (uint32_t)(uintptr_t)&ide_parse_identify_data, "ide_parse_identify_data" },
     { (uint32_t)(uintptr_t)&ide_decode_error, "ide_decode_error" },
+    { (uint32_t)(uintptr_t)&ide_select_dma_transfer_mode, "ide_select_dma_transfer_mode" },
     { (uint32_t)(uintptr_t)&ahci_init, "ahci_init" },
     { (uint32_t)(uintptr_t)&nvme_init, "nvme_init" },
     { (uint32_t)(uintptr_t)&ramdisk_create, "ramdisk_create" },
@@ -3381,4 +3383,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1685;
+int ksym_count = 1686;

@@ -30,6 +30,16 @@ static void ide_copy_identify_string(char *dst, size_t dst_size,
     }
 }
 
+static int ide_highest_mode_bit(uint8_t modes) {
+    for (int bit = 7; bit >= 0; bit--) {
+        if ((modes & (1U << bit)) != 0) {
+            return bit;
+        }
+    }
+
+    return -1;
+}
+
 void ide_parse_identify_data(ide_device_t *dev, const uint16_t *buffer,
                              uint8_t type, uint8_t channel, uint8_t drive) {
     uint64_t total_sectors = 0;
@@ -146,4 +156,26 @@ size_t ide_decode_error(uint8_t error, char *buf, size_t size) {
     }
 
     return off;
+}
+
+int ide_select_dma_transfer_mode(const ide_device_t *dev, uint8_t *mode) {
+    int bit;
+
+    if (dev == NULL || mode == NULL) {
+        return -1;
+    }
+
+    bit = ide_highest_mode_bit(dev->udma_modes);
+    if (bit >= 0) {
+        *mode = (uint8_t)(ATA_XFER_MODE_UDMA_BASE + bit);
+        return 0;
+    }
+
+    bit = ide_highest_mode_bit(dev->mwdma_modes);
+    if (bit >= 0) {
+        *mode = (uint8_t)(ATA_XFER_MODE_MWDMA_BASE + bit);
+        return 0;
+    }
+
+    return -1;
 }

@@ -84,6 +84,8 @@ Bus-master DMA support provides:
 - PRDT setup with up to 32 entries
 - 64KB boundary splitting
 - IRQ-driven completion with a bounded 30s timeout
+- DMA transfer-mode programming via `SET FEATURES` subcommand `0x03`
+  using the highest supported UDMA mode, or MWDMA as fallback
 
 ATAPI transport supports PACKET commands over the same channel model and backs
 the SCSI mid-layer helper path.

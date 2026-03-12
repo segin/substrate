@@ -64,9 +64,11 @@ static int ide_wait_bsy(uint8_t channel, uint32_t timeout_ms, const char *op);
 static int ide_wait_drq(uint8_t channel, uint32_t timeout_ms, const char *op);
 static int ide_wait_irq_completion(uint8_t channel, uint32_t timeout_ms,
                                    const char *op);
+static int ide_wait_ready(uint8_t channel, int timeout_ms);
 static int ide_identify_channel(uint8_t channel, uint8_t drive, void *buffer);
 static int ide_identify_atapi_channel(uint8_t channel, uint8_t drive, void *buffer);
 static void ide_select_drive(uint8_t channel, uint8_t drive);
+static int ide_program_dma_mode(ide_device_t *dev);
 
 static int ide_scan_controller(void);
 static int ide_software_reset_channel(uint8_t channel);
@@ -122,6 +124,9 @@ static void ide_refresh_device_slot(uint8_t channel, uint8_t drive) {
     ide_contexts[slot].type = (uint8_t)type;
     ide_blkdevs[slot].sector_size = sector_size;
     ide_blkdevs[slot].total_sectors = total_sectors;
+    if (type == 0) {
+        (void)ide_program_dma_mode(&ide_devices[slot]);
+    }
 }
 
 static int ide_transfer_read_once(ide_drive_ctx_t *ctx, uint64_t sector,
@@ -599,6 +604,43 @@ static int ide_software_reset_channel(uint8_t channel) {
         ide_refresh_device_slot(channel, drive);
     }
 
+    return 0;
+}
+
+static int ide_program_dma_mode(ide_device_t *dev) {
+    uint8_t mode;
+    uint8_t status;
+
+    if (dev == NULL || !dev->present || dev->type != 0) {
+        return -1;
+    }
+
+    if (!ide_channels[dev->channel].dma_capable ||
+        (dev->feature_flags & IDE_FEATURE_DMA) == 0 ||
+        ide_select_dma_transfer_mode(dev, &mode) < 0) {
+        dev->dma_mode = 0;
+        return -1;
+    }
+
+    ide_select_drive(dev->channel, dev->drive);
+    if (ide_wait_ready(dev->channel, IDE_TIMEOUT_READY_MS) < 0) {
+        return -1;
+    }
+
+    ide_write_reg(dev->channel, ATA_REG_FEATURES, ATA_FEAT_SET_TRANSFER_MODE);
+    ide_write_reg(dev->channel, ATA_REG_SEC_COUNT, mode);
+    ide_write_reg(dev->channel, ATA_REG_COMMAND, ATA_CMD_SET_FEATURES);
+
+    if (ide_wait_bsy(dev->channel, IDE_TIMEOUT_READY_MS, "set-features") < 0) {
+        return -1;
+    }
+
+    status = ide_read_reg(dev->channel, ATA_REG_STATUS);
+    if ((status & (ATA_SR_ERR | ATA_SR_DF)) != 0) {
+        return -1;
+    }
+
+    dev->dma_mode = (mode >= ATA_XFER_MODE_UDMA_BASE) ? 1 : 2;
     return 0;
 }
 
@@ -1506,6 +1548,9 @@ static int ide_scan_controller(void) {
                 ide_parse_identify_data(&ide_devices[slot], buf,
                                         (uint8_t)type, (uint8_t)ch,
                                         (uint8_t)d);
+                if (type == 0) {
+                    (void)ide_program_dma_mode(&ide_devices[slot]);
+                }
                 total_sectors = ide_devices[slot].size;
 
                 if (type == 1) {

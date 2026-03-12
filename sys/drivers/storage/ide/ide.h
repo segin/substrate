@@ -80,6 +80,7 @@
 
 /* ATAPI */
 #define ATA_CMD_PACKET         0xA0  /* ATAPI Packet Command */
+#define ATA_CMD_SET_FEATURES   0xEF  /* Set Features */
 
 /* Cache/Flush */
 #define ATA_CMD_CACHE_FLUSH    0xE7  /* Flush Cache */
@@ -121,6 +122,11 @@
 #define ATA_CTRL_SRST      0x04  /* Software Reset */
 #define ATA_CTRL_NIEN      0x02  /* Interrupt Enable (inverted) */
 #define ATA_CTRL_HOB       0x80  /* High Order Byte (LBA48) */
+
+/* SET FEATURES subcommands / transfer mode encodings */
+#define ATA_FEAT_SET_TRANSFER_MODE 0x03
+#define ATA_XFER_MODE_MWDMA_BASE   0x20
+#define ATA_XFER_MODE_UDMA_BASE    0x40
 
 /*
  * ============================================================
@@ -250,6 +256,7 @@ int ide_identify(uint16_t bus, uint8_t drive, void *buffer);
 int ide_identify_atapi(uint16_t bus, uint8_t drive, void *buffer);
 void ide_parse_identify_data(ide_device_t *dev, const uint16_t *buffer,
                              uint8_t type, uint8_t channel, uint8_t drive);
+int ide_select_dma_transfer_mode(const ide_device_t *dev, uint8_t *mode);
 size_t ide_decode_error(uint8_t error, char *buf, size_t size);
 
 /* ATAPI Packet Commands */
