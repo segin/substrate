@@ -475,52 +475,23 @@ static void ide_select_drive(uint8_t channel, uint8_t drive) {
  * - Buffer must be physically contiguous (or we split it)
  */
 int ide_prdt_setup(uint8_t channel, void *buffer, uint32_t byte_count) {
+    int entry;
+    uint32_t prdt_phys;
+
     if (channel >= MAX_IDE_CHANNELS) return -1;
-    if (byte_count == 0 || byte_count > 256 * 512) return -1;
-    
-    prdt_entry_t *prdt = ide_channels[channel].prdt;
-    uint32_t phys_addr = (uint32_t)(uintptr_t)buffer;  /* Assuming identity-mapped or known physical */
-    uint32_t remaining = byte_count;
-    int entry = 0;
-    
-    while (remaining > 0 && entry < MAX_PRD_ENTRIES - 1) {
-        uint32_t region_size = remaining;
-        
-        /* Limit to 64KB per entry (0 means 64KB) */
-        if (region_size > 65536) {
-            region_size = 65536;
-        }
-        
-        /* Don't cross 64KB boundary */
-        uint32_t boundary = (phys_addr & ~0xFFFFUL) + 0x10000;
-        if (phys_addr + region_size > boundary) {
-            region_size = boundary - phys_addr;
-        }
-        
-        /* Fill entry */
-        prdt[entry].phys_addr = phys_addr;
-        prdt[entry].byte_count = (region_size == 65536) ? 0 : (uint16_t)region_size;
-        prdt[entry].reserved = 0;
-        prdt[entry].eot = 0;
-        
-        phys_addr += region_size;
-        remaining -= region_size;
-        entry++;
+
+    entry = ide_prdt_build_entries(ide_channels[channel].prdt,
+                                   MAX_PRD_ENTRIES,
+                                   (uint32_t)(uintptr_t)buffer,
+                                   byte_count);
+    if (entry < 0) {
+        return -1;
     }
-    
-    if (remaining > 0) {
-        return -1;  /* Too many entries needed */
-    }
-    
-    /* Mark last entry */
-    if (entry > 0) {
-        prdt[entry - 1].eot = 1;
-    }
-    
+
     /* Program PRDT base address into Bus Master */
-    uint32_t prdt_phys = (uint32_t)(uintptr_t)prdt;
+    prdt_phys = (uint32_t)(uintptr_t)ide_channels[channel].prdt;
     ide_bm_write32(channel, BM_REG_PRDT, prdt_phys);
-    
+
     return entry;
 }
 

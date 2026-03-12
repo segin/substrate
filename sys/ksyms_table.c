@@ -396,6 +396,7 @@ extern void ide_identify_atapi(void);
 extern void ide_init(void);
 extern void ide_irq_handler(void);
 extern void ide_parse_identify_data(void);
+extern void ide_prdt_build_entries(void);
 extern void ide_prdt_setup(void);
 extern void ide_read_ctrl(void);
 extern void ide_read_reg(void);
@@ -2690,6 +2691,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&ide_atapi_read_toc, "ide_atapi_read_toc" },
     { (uint32_t)(uintptr_t)&ide_irq_handler, "ide_irq_handler" },
     { (uint32_t)(uintptr_t)&ide_init, "ide_init" },
+    { (uint32_t)(uintptr_t)&ide_prdt_build_entries, "ide_prdt_build_entries" },
     { (uint32_t)(uintptr_t)&ide_parse_identify_data, "ide_parse_identify_data" },
     { (uint32_t)(uintptr_t)&ide_decode_error, "ide_decode_error" },
     { (uint32_t)(uintptr_t)&ahci_init, "ahci_init" },
@@ -3379,4 +3381,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1684;
+int ksym_count = 1685;

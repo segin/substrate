@@ -386,7 +386,7 @@
         - [ ] Handle timeout (device not responding) gracefully — mark device offline. (REQ: REQ-03-0316)
     - [ ] **Testing:** (REQ: REQ-03-0218, REQ-03-0317, REQ-03-0396, REQ-03-0594, REQ-03-0926, REQ-03-1120)
         - [x] Unit: IDENTIFY parsing (model string byte‑swap, LBA48 detection, DMA mode extraction). (REQ: REQ-03-0318)
-        - [ ] Unit: PRDT construction (alignment, boundary, EOT flag). (REQ: REQ-03-0319)
+        - [x] Unit: PRDT construction (alignment, boundary, EOT flag). (REQ: REQ-03-0319)
         - [ ] Integration: PIO read/write round‑trip on QEMU `-hda` disk. (REQ: REQ-03-0320)
         - [ ] Integration: DMA read/write round‑trip on QEMU with bus master. (REQ: REQ-03-0321)
         - [ ] Integration: ATAPI CD‑ROM read capacity + read sectors on QEMU `-cdrom`. (REQ: REQ-03-0322)

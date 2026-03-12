@@ -234,6 +234,8 @@ int ide_dma_write(uint8_t channel, uint8_t drive, uint64_t lba,
                   uint16_t count, const void *buffer);
 int ide_dma_setup(uint16_t bus, uint8_t drive, uint64_t lba, 
                   uint16_t count, void *phys_addr, int write);
+int ide_prdt_build_entries(prdt_entry_t *prdt, size_t max_entries,
+                           uint32_t phys_addr, uint32_t byte_count);
 
 /* Identification */
 int ide_identify(uint16_t bus, uint8_t drive, void *buffer);
