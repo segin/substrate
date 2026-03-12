@@ -11,6 +11,10 @@ static int unregister_calls;
 static blkdev_t *last_registered;
 static blkdev_t *last_unregistered;
 static char last_unregistered_name[32];
+static uint8_t last_cdb[16];
+static uint8_t last_cdb_len;
+static uint32_t last_data_len;
+static uint16_t last_flags;
 
 void kprint(const char *str) { (void)str; }
 
@@ -30,12 +34,13 @@ int scsi_execute_sync(scsi_device_t *dev, uint8_t *cdb, uint8_t cdb_len,
                       void *data, uint32_t data_len, uint16_t flags,
                       uint32_t timeout_ms) {
     (void)dev;
-    (void)cdb;
-    (void)cdb_len;
     (void)data;
-    (void)data_len;
-    (void)flags;
     (void)timeout_ms;
+    memset(last_cdb, 0, sizeof(last_cdb));
+    memcpy(last_cdb, cdb, cdb_len > sizeof(last_cdb) ? sizeof(last_cdb) : cdb_len);
+    last_cdb_len = cdb_len;
+    last_data_len = data_len;
+    last_flags = flags;
     return 0;
 }
 
@@ -63,6 +68,10 @@ static void reset_state(void) {
     last_registered = NULL;
     last_unregistered = NULL;
     last_unregistered_name[0] = '\0';
+    memset(last_cdb, 0, sizeof(last_cdb));
+    last_cdb_len = 0;
+    last_data_len = 0;
+    last_flags = 0;
     scsi_dev_init();
 }
 
@@ -145,12 +154,37 @@ static void test_detach_unknown_device_fails(void) {
     assert(unregister_calls == 0);
 }
 
+static void test_cdrom_helpers_emit_expected_cdbs(void) {
+    scsi_device_t dev;
+    uint8_t toc[32];
+
+    reset_state();
+    memset(&dev, 0, sizeof(dev));
+    dev.type = SCSI_TYPE_ROM;
+
+    assert(scsi_read_toc(&dev, toc, sizeof(toc)) == 0);
+    assert(last_cdb_len == 10);
+    assert(last_cdb[0] == SCSI_CMD_READ_TOC);
+    assert(last_cdb[1] == 0x02);
+    assert(last_cdb[7] == 0x00);
+    assert(last_cdb[8] == sizeof(toc));
+    assert(last_data_len == sizeof(toc));
+    assert((last_flags & SCSI_REQ_READ) != 0);
+
+    assert(scsi_lock_door(&dev, 1) == 0);
+    assert(last_cdb_len == 6);
+    assert(last_cdb[0] == SCSI_CMD_PREVENT_ALLOW);
+    assert(last_cdb[4] == 0x01);
+    assert(last_data_len == 0);
+}
+
 int main(void) {
     test_attach_disk_and_lookup();
     test_attach_cdrom_uses_2048_sector_size();
     test_attach_rejects_non_block_types();
     test_detach_unregisters_and_removes_lookup();
     test_detach_unknown_device_fails();
+    test_cdrom_helpers_emit_expected_cdbs();
     puts("host_test_scsi_dev: PASS");
     return 0;
 }
