@@ -79,5 +79,8 @@ int pci_hotplug_add(uint8_t bus, uint8_t slot);
 int pci_hotplug_remove(pci_device_t *dev);
 void pci_scan(void);
 pci_device_t *pci_find_device(uint16_t vendor_id, uint16_t device_id, pci_device_t *from);
+pci_device_t *pci_first_device(void);
+pci_device_t *pci_next_device(pci_device_t *dev);
+size_t pci_dump_devices(char *buf, size_t size);
 
 #endif

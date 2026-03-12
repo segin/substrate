@@ -46,10 +46,27 @@ static void test_request_mem_region_tracks_mmio_ranges(void) {
     assert(request_mem_region(0xFEC00800ULL, 0x100, "conflict") == NULL);
 }
 
+static void test_resource_dump_reports_allocated_ranges(void) {
+    char buf[256];
+
+    resource_init();
+    assert(request_region(0x3F8, 8, "com1") != NULL);
+    assert(request_mem_region(0xFEC00000ULL, 0x1000, "ioapic") != NULL);
+
+    memset(buf, 0, sizeof(buf));
+    assert(resource_dump(RES_IO, buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "3f8-3ff : com1") != NULL);
+
+    memset(buf, 0, sizeof(buf));
+    assert(resource_dump(RES_MEM, buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "fec00000-fec00fff : ioapic") != NULL);
+}
+
 int main(void) {
     test_resource_roots_initialize();
     test_request_region_detects_conflicts_and_release_reclaims();
     test_request_mem_region_tracks_mmio_ranges();
+    test_resource_dump_reports_allocated_ranges();
     puts("host_test_resource: PASS");
     return 0;
 }

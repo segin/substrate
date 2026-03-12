@@ -14,6 +14,12 @@ void kprint(const char *str) {
     (void)str;
 }
 
+void kobject_uevent(const char *action, const char *subsystem, const char *name) {
+    (void)action;
+    (void)subsystem;
+    (void)name;
+}
+
 void *kmalloc(size_t size) {
     return malloc(size);
 }
@@ -115,6 +121,7 @@ void pmap_kremove(uintptr_t va) { (void)va; }
 static void reset_state(void) {
     memset(mock_config, 0xFF, sizeof(mock_config));
     mock_pci_available = 1;
+    bus_registry_head = NULL;
     pci_devices_clear();
     memset(&pci_bus_type, 0, sizeof(pci_bus_type));
     pci_bus_initialized = 0;
@@ -158,9 +165,28 @@ static void test_pci_device_create_rejects_absent_function(void) {
     assert(pci_device_create(0, 0, 0) == NULL);
 }
 
+static void test_pci_and_bus_dump_report_registered_devices(void) {
+    char pci_buf[256];
+    char tree_buf[256];
+
+    reset_state();
+    mock_set_device(0, 7, 0, 0x1AF4, 0x1001, 0x01, 0x00, 0x00, 0x00);
+    assert(pci_device_create(0, 7, 0) != NULL);
+
+    memset(pci_buf, 0, sizeof(pci_buf));
+    assert(pci_dump_devices(pci_buf, sizeof(pci_buf)) > 0);
+    assert(strstr(pci_buf, "00:07.0 1af4:1001") != NULL);
+
+    memset(tree_buf, 0, sizeof(tree_buf));
+    assert(bus_dump_tree(tree_buf, sizeof(tree_buf)) > 0);
+    assert(strstr(tree_buf, "pci\n") != NULL);
+    assert(strstr(tree_buf, "pci00:07.0 1af4:1001") != NULL);
+}
+
 int main(void) {
     test_pci_device_create_populates_pci_and_device_state();
     test_pci_device_create_rejects_absent_function();
+    test_pci_and_bus_dump_report_registered_devices();
     puts("host_test_pci_device: PASS");
     return 0;
 }

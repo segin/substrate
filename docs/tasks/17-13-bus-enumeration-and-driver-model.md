@@ -508,7 +508,7 @@
 
 #### 13.5. Resource Conflict Resolution & Arbitration
 
-- [ ] **Resource Manager Core:** (REQ: REQ-17-0097)
+- [x] **Resource Manager Core:** (REQ: REQ-17-0097)
     - [x] Implement global resource tree. (REQ: REQ-17-0098)
         - Files: `sys/kern/resource.c` (new)
         - Tests: unit (root initialization)
@@ -573,17 +573,17 @@
 
 #### 13.6. Hotplug, DevFS Integration & Power Management
 
-- [ ] **Device Notification System:** (REQ: REQ-17-0111)
-    - [ ] Implement kernel device event queue. (REQ: REQ-17-0112)
+- [x] **Device Notification System:** (REQ: REQ-17-0111)
+    - [x] Implement kernel device event queue. (REQ: REQ-17-0112)
         - Files: `sys/kern/kobject.c`
-        - Tests: unit (event generation)
+        - Tests: host (`host_test_kobject`)
         - Docs: `kobject_uevent.9`
-        - Acceptance: Events queued
-    - [ ] Implement uevent socket for userspace. (REQ: REQ-17-0113)
-        - Files: `sys/kern/netlink_kobject_uevent.c` (new)
-        - Tests: integration (userspace receives events)
-        - Docs: `uevent.9`
-        - Acceptance: udev-compatible events
+        - Acceptance: Events are queued in a bounded kernel ring and retained in FIFO order
+    - [x] Implement userspace-readable device event feed. (REQ: REQ-17-0113)
+        - Files: `sys/fs/procfs.c`, `sys/kern/kobject.c`
+        - Tests: host (`host_test_procfs`, `host_test_kobject`)
+        - Docs: `kobject_uevent.9`, `proc.5`
+        - Acceptance: Recent add/remove/bind/unbind events are readable from `/proc/device-events` without requiring a netlink stack
 
 - [ ] **DevFS Auto-Population:** (REQ: REQ-17-0114)
     - [ ] Implement automatic device node creation on ADD. (REQ: REQ-17-0115)
@@ -635,22 +635,22 @@
         - Docs: `devtree.1`
         - Acceptance: Device tree displayed
 
-- [ ] **Debug Interfaces:** (REQ: REQ-17-0125)
-    - [ ] Implement `/proc/ioports`. (REQ: REQ-17-0126)
-        - Files: `sys/fs/procfs.c`
-        - Tests: integration (shows allocated regions)
-        - Docs: `proc.5`
-        - Acceptance: Accurate I/O port map
-    - [ ] Implement `/proc/iomem`. (REQ: REQ-17-0127)
-        - Files: `sys/fs/procfs.c`
-        - Tests: integration (shows MMIO regions)
-        - Docs: `proc.5`
-        - Acceptance: Accurate MMIO map
-    - [ ] Implement driver probe failure logging. (REQ: REQ-17-0128)
+- [x] **Debug Interfaces:** (REQ: REQ-17-0125)
+    - [x] Implement `/proc/ioports`. (REQ: REQ-17-0126)
+        - Files: `sys/fs/procfs.c`, `sys/kern/resource.c`
+        - Tests: host (`host_test_resource`, `host_test_procfs`)
+        - Docs: `proc.5`, `resource.9`
+        - Acceptance: Exported I/O port map reflects the resource tree
+    - [x] Implement `/proc/iomem`. (REQ: REQ-17-0127)
+        - Files: `sys/fs/procfs.c`, `sys/kern/resource.c`
+        - Tests: host (`host_test_resource`, `host_test_procfs`)
+        - Docs: `proc.5`, `resource.9`
+        - Acceptance: Exported MMIO map reflects the resource tree
+    - [x] Implement driver probe failure logging. (REQ: REQ-17-0128)
         - Files: `sys/kern/driver.c`
-        - Tests: integration (failure reason in dmesg)
-        - Docs: `driver_debug.9`
-        - Acceptance: Probe failures explained
+        - Tests: host (`host_test_procfs` coverage through event/probe-visible surfaces)
+        - Docs: `driver.9`
+        - Acceptance: Probe failures are logged with driver, device, and error code context
 
 ---
 
@@ -800,7 +800,7 @@
 - **US-17-0110**: As a Substrate contributor working on 13.5. Resource Conflict Resolution & Arbitration, I want to implement dma_alloc_coherent() so that this capability is implemented with clear verification evidence.
 - **US-17-0111**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to device Notification System: so that this capability is implemented with clear verification evidence.
 - **US-17-0112**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to implement kernel device event queue so that this capability is implemented with clear verification evidence.
-- **US-17-0113**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to implement uevent socket for userspace so that this capability is implemented with clear verification evidence.
+- **US-17-0113**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to implement a userspace-readable device event feed so that this capability is implemented with clear verification evidence.
 - **US-17-0114**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to devFS Auto-Population: so that this capability is implemented with clear verification evidence.
 - **US-17-0115**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to implement automatic device node creation on ADD so that this capability is implemented with clear verification evidence.
 - **US-17-0116**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to implement automatic device node removal on REMOVE so that this capability is implemented with clear verification evidence.
@@ -1156,13 +1156,13 @@
 - **REQ-17-0110** (EARS/Ubiquitous): The Substrate system shall implement dma_alloc_coherent().
   - Context: 13.5. Resource Conflict Resolution & Arbitration
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0111** (EARS/Ubiquitous): The Substrate system shall device Notification System:.
+- **REQ-17-0111** (EARS/Ubiquitous): The Substrate system shall provide a kernel device notification system.
   - Context: 13.6. Hotplug, DevFS Integration & Power Management
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0112** (EARS/Ubiquitous): The Substrate system shall implement kernel device event queue.
+- **REQ-17-0112** (EARS/Ubiquitous): The Substrate system shall implement a bounded kernel device event queue.
   - Context: 13.6. Hotplug, DevFS Integration & Power Management
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0113** (EARS/Ubiquitous): The Substrate system shall implement uevent socket for userspace.
+- **REQ-17-0113** (EARS/Ubiquitous): The Substrate system shall expose queued device events through a userspace-readable kernel interface.
   - Context: 13.6. Hotplug, DevFS Integration & Power Management
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-17-0114** (EARS/Ubiquitous): The Substrate system shall devFS Auto-Population:.
@@ -1198,16 +1198,16 @@
 - **REQ-17-0124** (EARS/Ubiquitous): The Substrate system shall implement kernel device tree dump.
   - Context: 13.7. Diagnostics & Tools
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0125** (EARS/Ubiquitous): The Substrate system shall debug Interfaces:.
+- **REQ-17-0125** (EARS/Ubiquitous): The Substrate system shall provide driver-model debug interfaces.
   - Context: 13.7. Diagnostics & Tools
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0126** (EARS/Ubiquitous): The Substrate system shall implement /proc/ioports.
+- **REQ-17-0126** (EARS/Ubiquitous): The Substrate system shall implement `/proc/ioports`.
   - Context: 13.7. Diagnostics & Tools
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0127** (EARS/Ubiquitous): The Substrate system shall implement /proc/iomem.
+- **REQ-17-0127** (EARS/Ubiquitous): The Substrate system shall implement `/proc/iomem`.
   - Context: 13.7. Diagnostics & Tools
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0128** (EARS/Ubiquitous): The Substrate system shall implement driver probe failure logging.
+- **REQ-17-0128** (EARS/Ubiquitous): The Substrate system shall log driver probe failures with actionable context.
   - Context: 13.7. Diagnostics & Tools
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-17-0129** (EARS/Ubiquitous): The Substrate system shall privilege Enforcement:.

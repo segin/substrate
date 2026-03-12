@@ -19,6 +19,7 @@
 #include <vm/vm_page.h>
 #include <sys/lock.h>
 #include <sys/mount.h>
+#include <kern/resource.h>
 
 /* Mocks for externals used in procfs.c */
 
@@ -71,6 +72,40 @@ void vm_page_get_vmstat(vm_vmstat_t *stats) {
 int sys_pmap_stats(struct pmap_stats *stats) {
     memset(stats, 0, sizeof(*stats));
     return 0;
+}
+
+size_t resource_dump(uint32_t type, char *buf, size_t size) {
+    const char *text = (type == RES_IO) ? "3f8-3ff : com1\n" : "fec00000-fec00fff : ioapic\n";
+    return (size_t)snprintf(buf, size, "%s", text);
+}
+
+size_t bus_dump_tree(char *buf, size_t size) {
+    return (size_t)snprintf(buf, size, "pci\n  pci00:07.0 1af4:1001 class=01 subclass=00 progif=00\n");
+}
+
+size_t pci_dump_devices(char *buf, size_t size) {
+    return (size_t)snprintf(buf, size, "00:07.0 1af4:1001 class=0100 irq=11\n");
+}
+
+size_t kobject_uevent_dump(char *buf, size_t size) {
+    return (size_t)snprintf(buf, size, "add pci pci00:07.0\nbind pci virtio-blk0\n");
+}
+
+size_t proc_emit_cmdline(const process_t *proc, char *buf, size_t buf_len, size_t *argc_out) {
+    size_t len = 0;
+
+    if (argc_out) {
+        *argc_out = 1;
+    }
+    if (!proc || !buf || buf_len == 0) {
+        return 0;
+    }
+
+    len = (size_t)snprintf(buf, buf_len, "%s", proc->comm);
+    if (len + 1 < buf_len) {
+        buf[len++] = '\0';
+    }
+    return len;
 }
 
 process_t *proc_find(int pid) {
@@ -160,6 +195,26 @@ void test_procfs_finddir_static(void) {
     assert(node != NULL);
     assert(strcmp(node->name, "cow_stats") == 0);
 
+    node = procfs_finddir(NULL, "ioports");
+    assert(node != NULL);
+    assert(strcmp(node->name, "ioports") == 0);
+
+    node = procfs_finddir(NULL, "iomem");
+    assert(node != NULL);
+    assert(strcmp(node->name, "iomem") == 0);
+
+    node = procfs_finddir(NULL, "pci");
+    assert(node != NULL);
+    assert(strcmp(node->name, "pci") == 0);
+
+    node = procfs_finddir(NULL, "devtree");
+    assert(node != NULL);
+    assert(strcmp(node->name, "devtree") == 0);
+
+    node = procfs_finddir(NULL, "device-events");
+    assert(node != NULL);
+    assert(strcmp(node->name, "device-events") == 0);
+
     node = procfs_finddir(NULL, "self");
     assert(node != NULL);
     assert(strcmp(node->name, "self") == 0);
@@ -168,6 +223,52 @@ void test_procfs_finddir_static(void) {
 
     node = procfs_finddir(NULL, "nonexistent");
     assert(node == NULL);
+    printf("PASS\n");
+}
+
+void test_procfs_driver_model_entries(void) {
+    char buffer[256];
+    fs_node_t *node;
+    uint32_t len;
+
+    printf("Test: procfs driver-model entries...\n");
+
+    node = procfs_finddir(NULL, "ioports");
+    assert(node != NULL);
+    memset(buffer, 0, sizeof(buffer));
+    len = node->read(node, 0, sizeof(buffer) - 1, (uint8_t *)buffer);
+    buffer[len] = '\0';
+    assert(strstr(buffer, "3f8-3ff : com1") != NULL);
+
+    node = procfs_finddir(NULL, "iomem");
+    assert(node != NULL);
+    memset(buffer, 0, sizeof(buffer));
+    len = node->read(node, 0, sizeof(buffer) - 1, (uint8_t *)buffer);
+    buffer[len] = '\0';
+    assert(strstr(buffer, "fec00000-fec00fff : ioapic") != NULL);
+
+    node = procfs_finddir(NULL, "pci");
+    assert(node != NULL);
+    memset(buffer, 0, sizeof(buffer));
+    len = node->read(node, 0, sizeof(buffer) - 1, (uint8_t *)buffer);
+    buffer[len] = '\0';
+    assert(strstr(buffer, "00:07.0 1af4:1001") != NULL);
+
+    node = procfs_finddir(NULL, "devtree");
+    assert(node != NULL);
+    memset(buffer, 0, sizeof(buffer));
+    len = node->read(node, 0, sizeof(buffer) - 1, (uint8_t *)buffer);
+    buffer[len] = '\0';
+    assert(strstr(buffer, "pci00:07.0 1af4:1001") != NULL);
+
+    node = procfs_finddir(NULL, "device-events");
+    assert(node != NULL);
+    memset(buffer, 0, sizeof(buffer));
+    len = node->read(node, 0, sizeof(buffer) - 1, (uint8_t *)buffer);
+    buffer[len] = '\0';
+    assert(strstr(buffer, "add pci pci00:07.0") != NULL);
+    assert(strstr(buffer, "bind pci virtio-blk0") != NULL);
+
     printf("PASS\n");
 }
 
@@ -397,6 +498,7 @@ int main() {
     test_procfs_cow_stats_read();
     test_procfs_cmdline_read();
     test_procfs_mounts_read();
+    test_procfs_driver_model_entries();
     test_procfs_kmalloc_fail();
 
     printf("All tests passed!\n");

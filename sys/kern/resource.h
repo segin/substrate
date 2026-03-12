@@ -77,6 +77,7 @@ static inline resource_size_t resource_size(struct resource *r) {
 void resource_init(void);
 struct resource *resource_root(uint32_t type);
 struct resource *resource_find(uint32_t type, resource_size_t start, resource_size_t n);
+size_t resource_dump(uint32_t type, char *buf, size_t size);
 struct resource *request_region(resource_size_t start, resource_size_t n, const char *name);
 void release_region(resource_size_t start, resource_size_t n);
 struct resource *request_mem_region(resource_size_t start, resource_size_t n, const char *name);

@@ -1,5 +1,6 @@
 #include <kern/resource.h>
 #include <string.h>
+#include <stdio.h>
 #include <vm/vm_kmem.h>
 
 static struct resource ioport_root = {
@@ -97,6 +98,27 @@ static void resource_release(struct resource *root, resource_size_t start, resou
     }
 }
 
+static size_t resource_dump_node(struct resource *res, int depth, char *buf, size_t size, size_t off) {
+    while (res != NULL) {
+        int ret;
+        ret = snprintf(off < size ? buf + off : NULL,
+                       off < size ? size - off : 0,
+                       "%*s%llx-%llx : %s\n",
+                       depth * 2, "",
+                       (unsigned long long)res->start,
+                       (unsigned long long)res->end,
+                       res->name ? res->name : "(unnamed)");
+        if (ret > 0) {
+            off += (size_t)ret;
+        }
+        if (res->child != NULL) {
+            off = resource_dump_node(res->child, depth + 1, buf, size, off);
+        }
+        res = res->sibling;
+    }
+    return off;
+}
+
 static struct resource *resource_find_in_tree(struct resource *root, resource_size_t start,
                                               resource_size_t n) {
     struct resource *curr;
@@ -145,6 +167,17 @@ struct resource *resource_root(uint32_t type) {
 
 struct resource *resource_find(uint32_t type, resource_size_t start, resource_size_t n) {
     return resource_find_in_tree(resource_root(type), start, n);
+}
+
+size_t resource_dump(uint32_t type, char *buf, size_t size) {
+    struct resource *root = resource_root(type);
+
+    if (buf == NULL || size == 0 || root == NULL) {
+        return 0;
+    }
+
+    buf[0] = '\0';
+    return resource_dump_node(root->child, 0, buf, size, 0);
 }
 
 struct resource *request_region(resource_size_t start, resource_size_t n, const char *name) {

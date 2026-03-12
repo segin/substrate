@@ -3,6 +3,32 @@
 #include <string.h>
 #include <assert.h>
 #include <stddef.h>
+#include <stdbool.h>
+#include <sys/lock.h>
+
+void spinlock_init(spinlock_t *lock, const char *name) {
+    lock->locked = 0;
+    lock->cpu_id = 0;
+    lock->name = name;
+}
+
+void spinlock_acquire(spinlock_t *lock) {
+    (void)lock;
+}
+
+bool spinlock_try_acquire(spinlock_t *lock) {
+    (void)lock;
+    return true;
+}
+
+void spinlock_release(spinlock_t *lock) {
+    (void)lock;
+}
+
+bool spinlock_is_held(spinlock_t *lock) {
+    (void)lock;
+    return false;
+}
 
 // Include the source under test directly
 // This avoids needing a symlink or complex build script
@@ -142,6 +168,39 @@ void test_kset_init_name_truncation(void) {
     if (kset.kobj.name[31] != '\0') fail("kset_init: name not null terminated");
 }
 
+void test_kobject_uevent_queue(void) {
+    char buf[512];
+
+    printf("Running test_kobject_uevent_queue...\n");
+    memset(buf, 0, sizeof(buf));
+
+    kobject_uevent("add", "pci", "pci00:01.0");
+    kobject_uevent("bind", "pci", "virtio-blk0");
+
+    kobject_uevent_dump(buf, sizeof(buf));
+    if (strstr(buf, "add pci pci00:01.0\n") == NULL) fail("kobject_uevent: missing add event");
+    if (strstr(buf, "bind pci virtio-blk0\n") == NULL) fail("kobject_uevent: missing bind event");
+}
+
+void test_kobject_uevent_ring_overflow(void) {
+    char buf[4096];
+    char expect[64];
+
+    printf("Running test_kobject_uevent_ring_overflow...\n");
+    memset(buf, 0, sizeof(buf));
+
+    for (int i = 0; i < 80; ++i) {
+        char name[32];
+        snprintf(name, sizeof(name), "dev%d", i);
+        kobject_uevent("change", "test", name);
+    }
+
+    kobject_uevent_dump(buf, sizeof(buf));
+    snprintf(expect, sizeof(expect), "change test dev16\n");
+    if (strstr(buf, expect) == NULL) fail("kobject_uevent: oldest retained event incorrect");
+    if (strstr(buf, "change test dev0\n") != NULL) fail("kobject_uevent: ring failed to discard old events");
+}
+
 int main(void) {
     printf("Running kobject tests...\n");
 
@@ -152,6 +211,8 @@ int main(void) {
     test_kobject_put_no_release();
     test_kset_init();
     test_kset_init_name_truncation();
+    test_kobject_uevent_queue();
+    test_kobject_uevent_ring_overflow();
 
     if (failed_tests == 0) {
         printf("All kobject tests passed!\n");

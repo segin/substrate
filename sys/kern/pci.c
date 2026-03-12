@@ -91,6 +91,8 @@ static void pci_bus_ensure_init(void) {
     pci_bus_type.remove = NULL;
     pci_bus_type.devices_list = NULL;
     pci_bus_type.drivers_list = NULL;
+    pci_bus_type.next_registered = NULL;
+    (void)bus_register_type(&pci_bus_type);
     pci_bus_initialized = 1;
 }
 
@@ -654,6 +656,41 @@ pci_device_t *pci_find_device(uint16_t vendor_id, uint16_t device_id, pci_device
     }
 
     return NULL;
+}
+
+pci_device_t *pci_first_device(void) {
+    return pci_devices_head;
+}
+
+pci_device_t *pci_next_device(pci_device_t *dev) {
+    return dev ? dev->next : NULL;
+}
+
+size_t pci_dump_devices(char *buf, size_t size) {
+    pci_device_t *dev;
+    size_t off = 0;
+
+    if (buf == NULL || size == 0) {
+        return 0;
+    }
+
+    for (dev = pci_first_device(); dev != NULL; dev = pci_next_device(dev)) {
+        int ret = snprintf(off < size ? buf + off : NULL,
+                           off < size ? size - off : 0,
+                           "%02x:%02x.%u %04x:%04x class=%04x irq=%d\n",
+                           (unsigned int)dev->bus,
+                           (unsigned int)dev->slot,
+                           (unsigned int)dev->func,
+                           (unsigned int)dev->vendor_id,
+                           (unsigned int)dev->device_id,
+                           (unsigned int)dev->class_code,
+                           pci_get_irq(dev));
+        if (ret > 0) {
+            off += (size_t)ret;
+        }
+    }
+
+    return off;
 }
 
 void pci_init(void) {

@@ -8,6 +8,7 @@
 #include <kern/bus.h>
 #include <kern/driver.h>
 #include <sys/errno.h>
+#include <sys/kobject.h>
 #include <sys/lock.h>
 #include <string.h>
 #include <vm/vm_kmem.h> 
@@ -119,6 +120,7 @@ int device_register(struct device *dev, struct bus_type *bus) {
     dev->bus = bus;
     
     spinlock_release(&bus->lock);
+    kobject_uevent("add", bus->name, dev->name);
     
     return 0;
 }
@@ -162,6 +164,7 @@ int device_unregister(struct device *dev) {
         dev->bus_next = NULL;
         
         spinlock_release(&bus->lock);
+        kobject_uevent("remove", bus->name, dev->name);
     }
     
     /* 2. Remove from Parent */

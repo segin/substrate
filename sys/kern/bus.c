@@ -9,10 +9,92 @@
 #include <sys/lock.h>
 #include <stddef.h>
 #include <string.h>
+#include <stdio.h>
 
 #include <kern/bus.h>
 #include <kern/driver.h>
 #include <kern/device.h>
+
+static struct bus_type *bus_registry_head;
+static spinlock_t bus_registry_lock = SPINLOCK_INIT("bus_registry");
+
+int bus_register_type(struct bus_type *bus)
+{
+    struct bus_type *curr;
+
+    if (bus == NULL || bus->name == NULL) {
+        return -EINVAL;
+    }
+
+    spinlock_acquire(&bus_registry_lock);
+    curr = bus_registry_head;
+    while (curr != NULL) {
+        if (curr == bus || strcmp(curr->name, bus->name) == 0) {
+            spinlock_release(&bus_registry_lock);
+            return 0;
+        }
+        curr = curr->next_registered;
+    }
+
+    bus->next_registered = bus_registry_head;
+    bus_registry_head = bus;
+    spinlock_release(&bus_registry_lock);
+    return 0;
+}
+
+struct bus_type *bus_first(void)
+{
+    return bus_registry_head;
+}
+
+struct bus_type *bus_next(struct bus_type *bus)
+{
+    return bus ? bus->next_registered : NULL;
+}
+
+size_t bus_dump_tree(char *buf, size_t size)
+{
+    struct bus_type *bus;
+    size_t off = 0;
+
+    if (buf == NULL || size == 0) {
+        return 0;
+    }
+
+    for (bus = bus_first(); bus != NULL; bus = bus_next(bus)) {
+        struct device *dev;
+        int ret;
+
+        ret = snprintf(off < size ? buf + off : NULL,
+                       off < size ? size - off : 0,
+                       "%s\n",
+                       bus->name ? bus->name : "(unnamed-bus)");
+        if (ret > 0) {
+            off += (size_t)ret;
+        }
+
+        spinlock_acquire(&bus->lock);
+        dev = bus->devices_list;
+        while (dev != NULL) {
+            ret = snprintf(off < size ? buf + off : NULL,
+                           off < size ? size - off : 0,
+                           "  %s %04x:%04x class=%02x subclass=%02x progif=%02x\n",
+                           dev->name,
+                           (unsigned int)dev->vendor_id,
+                           (unsigned int)dev->device_id,
+                           (unsigned int)dev->class,
+                           (unsigned int)dev->subclass,
+                           (unsigned int)dev->progif);
+            if (ret > 0) {
+                off += (size_t)ret;
+            }
+            dev = dev->bus_next;
+        }
+        spinlock_release(&bus->lock);
+    }
+
+    return off;
+}
 
 /*
  * bus_match_device - Find the best driver for a device
