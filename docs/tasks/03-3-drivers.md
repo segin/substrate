@@ -193,7 +193,7 @@
                 - [x] `scsi_read_toc(dev, buffer, buflen)`: READ TOC/PMA/ATIP (CDB 0x43). (REQ: REQ-03-0144)
                 - [x] `scsi_lock_door(dev, lock)`: PREVENT/ALLOW MEDIUM REMOVAL (CDB 0x1E). (REQ: REQ-03-0145)
                 - [x] Sector size: 2048 bytes (data CD standard). (REQ: REQ-03-0146)
-                - [ ] Handle UNIT ATTENTION on media change: re-read capacity. (REQ: REQ-03-0147)
+                - [x] Handle UNIT ATTENTION on media change: re-read capacity. (REQ: REQ-03-0147)
             - [ ] **WORM / Optical (Types 0x04, 0x07):** (REQ: REQ-03-0148)
                 - [ ] Same as disk but write-once semantics; reject overwrites. (REQ: REQ-03-0149)
             - [ ] **Sequential Access (Type 0x01 — Tape) — deferred.** (REQ: REQ-03-0150)

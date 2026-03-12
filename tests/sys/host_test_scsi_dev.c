@@ -16,6 +16,8 @@ static uint8_t last_cdb_len;
 static uint32_t last_data_len;
 static uint16_t last_flags;
 static int read_capacity_calls;
+static int execute_failures_before_success;
+static int sync_cache_calls;
 
 void kprint(const char *str) { (void)str; }
 
@@ -41,6 +43,11 @@ int scsi_execute_sync(scsi_device_t *dev, uint8_t *cdb, uint8_t cdb_len,
     last_cdb_len = cdb_len;
     last_data_len = data_len;
     last_flags = flags;
+    if (cdb[0] != SCSI_CMD_READ_CAPACITY_10 &&
+        cdb[0] != SCSI_CMD_READ_CAPACITY_16 &&
+        execute_failures_before_success-- > 0) {
+        return -1;
+    }
     if (cdb[0] == SCSI_CMD_READ_CAPACITY_10 && data != NULL && data_len >= 8) {
         uint8_t *buf = data;
 
@@ -106,6 +113,14 @@ int scsi_read_capacity(scsi_device_t *dev, uint64_t *sectors, uint32_t *sector_s
     return 0;
 }
 
+int scsi_synchronize_cache(scsi_device_t *dev) {
+    uint8_t cdb[10] = {0};
+
+    cdb[0] = SCSI_CMD_SYNCHRONIZE_CACHE;
+    sync_cache_calls++;
+    return scsi_execute_sync(dev, cdb, 10, NULL, 0, 0, 30000);
+}
+
 #include "../../sys/drivers/storage/scsi/scsi_dev.c"
 
 static void reset_state(void) {
@@ -119,6 +134,8 @@ static void reset_state(void) {
     last_data_len = 0;
     last_flags = 0;
     read_capacity_calls = 0;
+    execute_failures_before_success = 0;
+    sync_cache_calls = 0;
     scsi_dev_init();
 }
 
@@ -220,6 +237,8 @@ static void test_detach_unregisters_and_removes_lookup(void) {
     assert(scsi_dev_lookup("scsi0") != NULL);
 
     assert(scsi_dev_detach(&dev) == 0);
+    assert(sync_cache_calls == 1);
+    assert(last_cdb[0] == SCSI_CMD_SYNCHRONIZE_CACHE);
     assert(unregister_calls == 1);
     assert(last_unregistered != NULL);
     assert(strcmp(last_unregistered_name, "scsi0") == 0);
@@ -261,6 +280,21 @@ static void test_cdrom_helpers_emit_expected_cdbs(void) {
     assert(last_data_len == 0);
 }
 
+static void test_cdrom_media_change_refreshes_capacity_and_retries(void) {
+    scsi_device_t dev;
+    uint8_t toc[32];
+
+    reset_state();
+    memset(&dev, 0, sizeof(dev));
+    dev.type = SCSI_TYPE_ROM;
+    dev.removable = 1;
+
+    execute_failures_before_success = 1;
+    assert(scsi_read_toc(&dev, toc, sizeof(toc)) == 0);
+    assert(read_capacity_calls == 1);
+    assert(last_cdb[0] == SCSI_CMD_READ_TOC);
+}
+
 static void test_worm_write_is_rejected(void) {
     scsi_device_t dev;
     scsi_blk_dev_t *sbd;
@@ -287,6 +321,7 @@ int main(void) {
     test_detach_unregisters_and_removes_lookup();
     test_detach_unknown_device_fails();
     test_cdrom_helpers_emit_expected_cdbs();
+    test_cdrom_media_change_refreshes_capacity_and_retries();
     test_worm_write_is_rejected();
     puts("host_test_scsi_dev: PASS");
     return 0;

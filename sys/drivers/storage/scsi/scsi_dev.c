@@ -75,7 +75,9 @@ static int scsi_blk_read(blkdev_t *dev, uint64_t sector, uint32_t count, void *b
     
     scsi_device_t *scsi = sbd->scsi_dev;
     int ret;
+    int refreshed = 0;
 
+retry:
     if (sector > 0xFFFFFFFFULL || count > 0xFFFFU || scsi->capacity > 0x100000000ULL) {
         uint8_t cdb[16];
 
@@ -90,6 +92,19 @@ static int scsi_blk_read(blkdev_t *dev, uint64_t sector, uint32_t count, void *b
         ret = scsi_execute_sync(scsi, cdb, 10, buffer,
                                 count * dev->sector_size,
                                 SCSI_REQ_READ, 60000);
+    }
+    
+    if (ret < 0 && !refreshed &&
+        scsi->type == SCSI_TYPE_ROM && scsi->removable) {
+        scsi->flags &= ~SCSI_DEV_ONLINE;
+        if (scsi_dev_refresh_capacity(scsi) == 0) {
+            refreshed = 1;
+            scsi->flags |= SCSI_DEV_ONLINE;
+            scsi->online = 1;
+            scsi->media_present = 1;
+            scsi->removable = 1;
+            goto retry;
+        }
     }
     
     return (ret >= 0) ? (int)count : -1;
@@ -146,8 +161,22 @@ int scsi_read_toc(scsi_device_t *dev, void *buffer, uint16_t buflen) {
     cdb[7] = (buflen >> 8) & 0xFF;
     cdb[8] = buflen & 0xFF;
     
-    return scsi_execute_sync(dev, cdb, 10, buffer, buflen,
-                              SCSI_REQ_READ, 30000);
+    int ret = scsi_execute_sync(dev, cdb, 10, buffer, buflen,
+                                SCSI_REQ_READ, 30000);
+
+    if (ret < 0 && dev->type == SCSI_TYPE_ROM && dev->removable) {
+        dev->flags &= ~SCSI_DEV_ONLINE;
+        if (scsi_dev_refresh_capacity(dev) == 0) {
+            dev->flags |= SCSI_DEV_ONLINE;
+            dev->online = 1;
+            dev->media_present = 1;
+            dev->removable = 1;
+            ret = scsi_execute_sync(dev, cdb, 10, buffer, buflen,
+                                    SCSI_REQ_READ, 30000);
+        }
+    }
+
+    return ret;
 }
 
 /* Lock/unlock door */
@@ -256,6 +285,12 @@ int scsi_dev_detach(scsi_device_t *scsi_dev) {
         if ((*pp)->scsi_dev == scsi_dev) {
             scsi_blk_dev_t *sbd = *pp;
             *pp = sbd->next;
+
+            if (scsi_dev->type == SCSI_TYPE_DISK ||
+                scsi_dev->type == SCSI_TYPE_OPTICAL ||
+                scsi_dev->type == SCSI_TYPE_WORM) {
+                (void)scsi_synchronize_cache(scsi_dev);
+            }
 
             blkdev_unregister(&sbd->blkdev);
             if (scsi_dev_count > 0) scsi_dev_count--;
