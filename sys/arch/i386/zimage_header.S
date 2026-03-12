@@ -122,6 +122,10 @@ setup_start:
     movw %ax, %es:ZIMG_SCRATCH_VBE_132X60
 
     call maybe_vga_ask
+    testw %ax, %ax
+    jnz 1f
+    call maybe_apply_requested_textmode
+1:
 
     /*
      * Build a Multiboot-format mmap by querying BIOS E820 while we are still
@@ -259,7 +263,6 @@ maybe_vga_ask:
     pushw %ds
     pushw %es
     pushw %si
-    pushw %ax
 
     xorw %ax, %ax
     movw %ax, %ds
@@ -295,9 +298,193 @@ maybe_vga_ask:
 3:
     call query_vbe_text_modes
     call vga_ask_menu
+    movw $1, %ax
     jmp 5f
 5:
-    popw %ax
+    testw %ax, %ax
+    jnz 6f
+    xorw %ax, %ax
+6:
+    popw %si
+    popw %es
+    popw %ds
+    ret
+
+cmdline_match_token:
+    pushw %si
+    pushw %di
+    pushw %bx
+1:
+    movb %es:(%di), %bl
+    testb %bl, %bl
+    jz 2f
+    cmpb %bl, (%si)
+    jne 3f
+    incw %si
+    incw %di
+    jmp 1b
+2:
+    movb (%si), %bl
+    testb %bl, %bl
+    jz 4f
+    cmpb $' ', %bl
+    jne 3f
+4:
+    movw $1, %ax
+    jmp 5f
+3:
+    xorw %ax, %ax
+5:
+    popw %bx
+    popw %di
+    popw %si
+    ret
+
+maybe_apply_requested_textmode:
+    pushw %ds
+    pushw %es
+    pushw %si
+    pushw %di
+
+    movw %ds, %ax
+    movw %ax, %es
+    xorw %ax, %ax
+    movw %ax, %ds
+    movw $ZIMG_SCRATCH_CMDLINE_BUF, %si
+1:
+    movb (%si), %al
+    testb %al, %al
+    jz 9f
+    cmpw $ZIMG_SCRATCH_CMDLINE_BUF, %si
+    je 2f
+    cmpb $' ', -1(%si)
+    jne 8f
+2:
+    movw $cmdline_textmode_80x25, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 10f
+    movw $cmdline_video_text_80x25, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 10f
+    movw $cmdline_textmode_80x43, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 11f
+    movw $cmdline_video_text_80x43, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 11f
+    movw $cmdline_textmode_80x50, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 12f
+    movw $cmdline_video_text_80x50, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 12f
+    movw $cmdline_textmode_132x25, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 13f
+    movw $cmdline_video_text_132x25, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 13f
+    movw $cmdline_textmode_132x43, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 14f
+    movw $cmdline_video_text_132x43, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 14f
+    movw $cmdline_textmode_132x50, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 15f
+    movw $cmdline_video_text_132x50, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 15f
+    movw $cmdline_textmode_132x60, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 16f
+    movw $cmdline_video_text_132x60, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 16f
+8:
+    incw %si
+    jmp 1b
+9:
+    jmp 17f
+10:
+    movw %es, %ax
+    movw %ax, %ds
+    call vga_select_80x25
+    jmp 17f
+11:
+    movw %es, %ax
+    movw %ax, %ds
+    call vga_select_80x43
+    jmp 17f
+12:
+    movw %es, %ax
+    movw %ax, %ds
+    call vga_select_80x50
+    jmp 17f
+13:
+    call query_vbe_text_modes
+    xorw %ax, %ax
+    movw %ax, %es
+    movw %es:ZIMG_SCRATCH_VBE_132X25, %bx
+    testw %bx, %bx
+    jz 17f
+    movw $textmode_132x25, %dx
+    movw %es, %ax
+    movw %ax, %ds
+    call vga_select_vbe_textmode
+    jmp 17f
+14:
+    call query_vbe_text_modes
+    xorw %ax, %ax
+    movw %ax, %es
+    movw %es:ZIMG_SCRATCH_VBE_132X43, %bx
+    testw %bx, %bx
+    jz 17f
+    movw $textmode_132x43, %dx
+    movw %es, %ax
+    movw %ax, %ds
+    call vga_select_vbe_textmode
+    jmp 17f
+15:
+    call query_vbe_text_modes
+    xorw %ax, %ax
+    movw %ax, %es
+    movw %es:ZIMG_SCRATCH_VBE_132X50, %bx
+    testw %bx, %bx
+    jz 17f
+    movw $textmode_132x50, %dx
+    movw %es, %ax
+    movw %ax, %ds
+    call vga_select_vbe_textmode
+    jmp 17f
+16:
+    call query_vbe_text_modes
+    xorw %ax, %ax
+    movw %ax, %es
+    movw %es:ZIMG_SCRATCH_VBE_132X60, %bx
+    testw %bx, %bx
+    jz 17f
+    movw $textmode_132x60, %dx
+    movw %es, %ax
+    movw %ax, %ds
+    call vga_select_vbe_textmode
+17:
+    popw %di
     popw %si
     popw %es
     popw %ds
@@ -653,6 +840,34 @@ textmode_132x60:
     .asciz "textmode=132x60"
 textmode_bios_flag:
     .asciz "textmode_bios=1"
+cmdline_textmode_80x25:
+    .asciz "textmode=80x25"
+cmdline_textmode_80x43:
+    .asciz "textmode=80x43"
+cmdline_textmode_80x50:
+    .asciz "textmode=80x50"
+cmdline_textmode_132x25:
+    .asciz "textmode=132x25"
+cmdline_textmode_132x43:
+    .asciz "textmode=132x43"
+cmdline_textmode_132x50:
+    .asciz "textmode=132x50"
+cmdline_textmode_132x60:
+    .asciz "textmode=132x60"
+cmdline_video_text_80x25:
+    .asciz "video=text:80x25"
+cmdline_video_text_80x43:
+    .asciz "video=text:80x43"
+cmdline_video_text_80x50:
+    .asciz "video=text:80x50"
+cmdline_video_text_132x25:
+    .asciz "video=text:132x25"
+cmdline_video_text_132x43:
+    .asciz "video=text:132x43"
+cmdline_video_text_132x50:
+    .asciz "video=text:132x50"
+cmdline_video_text_132x60:
+    .asciz "video=text:132x60"
 
 .code32
 pm_entry:

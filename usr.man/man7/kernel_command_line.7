@@ -136,6 +136,9 @@ This is equivalent to
 .BI textmode= COLS x ROWS
 Select the hardware text-console geometry used by the kernel VT driver.
 The bottom physical row is reserved for the kernel status line, so the visible tty geometry reported to userland is one row smaller than the selected physical mode.
+On BIOS
+.B zImage
+and floppy boots, the setup stub applies supported text modes in real mode before entering the kernel proper.
 .TP
 .B vga=ask
 On BIOS
@@ -179,7 +182,11 @@ BIOS-selected text modes such as
 and
 .B 132x60
 are honored after the real-mode setup path has programmed them.
-The higher-half kernel does not fake those modes on its own.
+The higher-half kernel does not fake those modes on its own; it only reprograms the stable built-in
+.BR 80x25
+and
+.B 80x50
+cases directly.
 .TP
 .BI root= device
 Select the root block device.
