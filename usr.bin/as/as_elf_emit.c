@@ -2513,6 +2513,31 @@ static int emit_x86_64_xmm_srcdst(unsigned char prefix, unsigned char opcode, co
     return -1;
 }
 
+static int emit_x86_64_xmm_move_rm(unsigned char prefix, unsigned char reg_opcode,
+                                   unsigned char load_opcode, unsigned char store_opcode,
+                                   const as_operand_t *src, const as_operand_t *dst,
+                                   unsigned char *out, size_t out_cap, size_t *out_len) {
+    unsigned xs;
+    unsigned xd;
+
+    if (src == NULL || dst == NULL) {
+        return -1;
+    }
+    if (src->kind == AS_OPERAND_REGISTER && dst->kind == AS_OPERAND_REGISTER &&
+        parse_xmm_reg(src->u.reg, &xs) == 0 && parse_xmm_reg(dst->u.reg, &xd) == 0) {
+        return emit_x86_64_xmm_regop(prefix, reg_opcode, xd, xs, out, out_cap, out_len);
+    }
+    if (src->kind == AS_OPERAND_MEMORY && dst->kind == AS_OPERAND_REGISTER &&
+        parse_xmm_reg(dst->u.reg, &xd) == 0) {
+        return emit_x86_64_xmm_memop(prefix, load_opcode, xd, &src->u.mem, out, out_cap, out_len);
+    }
+    if (src->kind == AS_OPERAND_REGISTER && dst->kind == AS_OPERAND_MEMORY &&
+        parse_xmm_reg(src->u.reg, &xd) == 0) {
+        return emit_x86_64_xmm_memop(prefix, store_opcode, xd, &dst->u.mem, out, out_cap, out_len);
+    }
+    return -1;
+}
+
 static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
                              unsigned char *out, size_t out_cap, size_t *out_len) {
     const as_operand_t *a;
@@ -5579,76 +5604,13 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
         return emit_x86_64_xmm_regop(0x66, 0x6f, xr, xm, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movdqu") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        if (src->kind == AS_OPERAND_REGISTER && dst->kind == AS_OPERAND_REGISTER &&
-            parse_xmm_reg(src->u.reg, &xm) == 0 && parse_xmm_reg(dst->u.reg, &xr) == 0) {
-            rex = (unsigned char)(0x40u | ((xr & 8u) ? 0x04u : 0u) | ((xm & 8u) ? 0x01u : 0u));
-            out[0] = 0xf3;
-            if (rex != 0x40u) {
-                out[1] = rex;
-                out[2] = 0x0f;
-                out[3] = 0x6f;
-                out[4] = (unsigned char)(0xc0u | ((xr & 7u) << 3) | (xm & 7u));
-                if (out_len != NULL) {
-                    *out_len = 5;
-                }
-            } else {
-                out[1] = 0x0f;
-                out[2] = 0x6f;
-                out[3] = (unsigned char)(0xc0u | ((xr & 7u) << 3) | (xm & 7u));
-                if (out_len != NULL) {
-                    *out_len = 4;
-                }
-            }
-            return 0;
-        }
-        if (src->kind == AS_OPERAND_MEMORY && dst->kind == AS_OPERAND_REGISTER &&
-            parse_xmm_reg(dst->u.reg, &xr) == 0) {
-            return emit_x86_64_xmm_memop(0xf3, 0x6f, xr, &src->u.mem, out, out_cap, out_len);
-        }
-        if (src->kind == AS_OPERAND_REGISTER && dst->kind == AS_OPERAND_MEMORY &&
-            parse_xmm_reg(src->u.reg, &xr) == 0) {
-            return emit_x86_64_xmm_memop(0xf3, 0x7f, xr, &dst->u.mem, out, out_cap, out_len);
-        }
-        return -1;
+        return emit_x86_64_xmm_move_rm(0xf3, 0x6f, 0x6f, 0x7f, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movups") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        if (src->kind == AS_OPERAND_REGISTER && dst->kind == AS_OPERAND_REGISTER &&
-            parse_xmm_reg(src->u.reg, &xm) == 0 && parse_xmm_reg(dst->u.reg, &xr) == 0) {
-            return emit_x86_64_xmm_regop(0x00, 0x10, xr, xm, out, out_cap, out_len);
-        }
-        if (src->kind == AS_OPERAND_MEMORY && dst->kind == AS_OPERAND_REGISTER &&
-            parse_xmm_reg(dst->u.reg, &xr) == 0) {
-            return emit_x86_64_xmm_memop(0x00, 0x10, xr, &src->u.mem, out, out_cap, out_len);
-        }
-        if (src->kind == AS_OPERAND_REGISTER && dst->kind == AS_OPERAND_MEMORY &&
-            parse_xmm_reg(src->u.reg, &xr) == 0) {
-            return emit_x86_64_xmm_memop(0x00, 0x11, xr, &dst->u.mem, out, out_cap, out_len);
-        }
-        return -1;
+        return emit_x86_64_xmm_move_rm(0x00, 0x10, 0x10, 0x11, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movaps") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        if (src->kind == AS_OPERAND_REGISTER && dst->kind == AS_OPERAND_REGISTER &&
-            parse_xmm_reg(src->u.reg, &xm) == 0 && parse_xmm_reg(dst->u.reg, &xr) == 0) {
-            return emit_x86_64_xmm_regop(0x00, 0x28, xr, xm, out, out_cap, out_len);
-        }
-        if (src->kind == AS_OPERAND_MEMORY && dst->kind == AS_OPERAND_REGISTER &&
-            parse_xmm_reg(dst->u.reg, &xr) == 0) {
-            return emit_x86_64_xmm_memop(0x00, 0x28, xr, &src->u.mem, out, out_cap, out_len);
-        }
-        if (src->kind == AS_OPERAND_REGISTER && dst->kind == AS_OPERAND_MEMORY &&
-            parse_xmm_reg(src->u.reg, &xr) == 0) {
-            return emit_x86_64_xmm_memop(0x00, 0x29, xr, &dst->u.mem, out, out_cap, out_len);
-        }
-        return -1;
+        return emit_x86_64_xmm_move_rm(0x00, 0x28, 0x28, 0x29, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "prefetcht1") == 0) {
         if (insn->operand_count != 1 || src == NULL || src->kind != AS_OPERAND_MEMORY) {
@@ -5657,40 +5619,10 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
         return emit_x86_64_regfield_memop(0x00, 0x18, 2u, 0, &src->u.mem, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movsd") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        if (src->kind == AS_OPERAND_REGISTER && dst->kind == AS_OPERAND_REGISTER &&
-            parse_xmm_reg(src->u.reg, &xm) == 0 && parse_xmm_reg(dst->u.reg, &xr) == 0) {
-            return emit_x86_64_xmm_regop(0xf2, 0x10, xr, xm, out, out_cap, out_len);
-        }
-        if (src->kind == AS_OPERAND_MEMORY && dst->kind == AS_OPERAND_REGISTER &&
-            parse_xmm_reg(dst->u.reg, &xr) == 0) {
-            return emit_x86_64_xmm_memop(0xf2, 0x10, xr, &src->u.mem, out, out_cap, out_len);
-        }
-        if (src->kind == AS_OPERAND_REGISTER && dst->kind == AS_OPERAND_MEMORY &&
-            parse_xmm_reg(src->u.reg, &xr) == 0) {
-            return emit_x86_64_xmm_memop(0xf2, 0x11, xr, &dst->u.mem, out, out_cap, out_len);
-        }
-        return -1;
+        return emit_x86_64_xmm_move_rm(0xf2, 0x10, 0x10, 0x11, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movss") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        if (src->kind == AS_OPERAND_REGISTER && dst->kind == AS_OPERAND_REGISTER &&
-            parse_xmm_reg(src->u.reg, &xm) == 0 && parse_xmm_reg(dst->u.reg, &xr) == 0) {
-            return emit_x86_64_xmm_regop(0xf3, 0x10, xr, xm, out, out_cap, out_len);
-        }
-        if (src->kind == AS_OPERAND_MEMORY && dst->kind == AS_OPERAND_REGISTER &&
-            parse_xmm_reg(dst->u.reg, &xr) == 0) {
-            return emit_x86_64_xmm_memop(0xf3, 0x10, xr, &src->u.mem, out, out_cap, out_len);
-        }
-        if (src->kind == AS_OPERAND_REGISTER && dst->kind == AS_OPERAND_MEMORY &&
-            parse_xmm_reg(src->u.reg, &xr) == 0) {
-            return emit_x86_64_xmm_memop(0xf3, 0x11, xr, &dst->u.mem, out, out_cap, out_len);
-        }
-        return -1;
+        return emit_x86_64_xmm_move_rm(0xf3, 0x10, 0x10, 0x11, src, dst, out, out_cap, out_len);
     }
     {
         unsigned char packed_opcode2;
