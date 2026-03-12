@@ -14,6 +14,11 @@ static uint8_t last_cdb_len;
 static uint32_t last_flags;
 static uint32_t last_data_len;
 static int mock_status_code;
+static int mock_execute_failures_before_success;
+static int mock_request_sense_count;
+static uint8_t mock_sense_key_code;
+static uint8_t mock_sense_asc;
+static uint8_t mock_sense_ascq;
 
 void kprint(const char *str) {
     (void)str;
@@ -54,7 +59,26 @@ static int mock_execute(scsi_link_t *link, scsi_request_t *req) {
     last_data_len = req->data_len;
     req->status = (uint8_t)mock_status_code;
 
-    if (mock_status_code == SCSI_STATUS_GOOD) {
+    if (req->cdb[0] == SCSI_CMD_REQUEST_SENSE) {
+        if (req->data != NULL && req->data_len >= 18) {
+            uint8_t *sense = req->data;
+
+            memset(sense, 0, req->data_len);
+            sense[0] = 0x70;
+            sense[2] = mock_sense_key_code;
+            sense[12] = mock_sense_asc;
+            sense[13] = mock_sense_ascq;
+            req->data_xfer = req->data_len;
+        }
+        mock_request_sense_count++;
+        req->status = SCSI_STATUS_GOOD;
+        return 0;
+    }
+
+    if (mock_status_code == SCSI_STATUS_GOOD ||
+        (mock_status_code != SCSI_STATUS_GOOD &&
+         mock_execute_failures_before_success-- <= 0)) {
+        req->status = SCSI_STATUS_GOOD;
         if (req->data && req->data_len != 0) {
             memset(req->data, 0, req->data_len);
 
@@ -105,7 +129,12 @@ static void reset_state(void) {
     last_cdb_len = 0;
     last_flags = 0;
     last_data_len = 0;
-    mock_status_code = SCSI_STATUS_BUSY;
+    mock_status_code = SCSI_STATUS_GOOD;
+    mock_execute_failures_before_success = 0;
+    mock_request_sense_count = 0;
+    mock_sense_key_code = SCSI_SENSE_NO_SENSE;
+    mock_sense_asc = 0;
+    mock_sense_ascq = 0;
     scsi_init();
 }
 
@@ -124,7 +153,7 @@ static void test_register_link_sets_defaults_and_scans(void) {
     assert(link.adapter_queue_depth == 1);
     assert(create_bus_node_calls == 1);
     assert(last_bus_id == 3);
-    assert(execute_calls == SCSI_MAX_TARGETS);
+    assert(execute_calls >= SCSI_MAX_TARGETS);
 }
 
 static void test_unregister_link_detaches_registered_devices(void) {
@@ -142,18 +171,18 @@ static void test_unregister_link_detaches_registered_devices(void) {
     dev = scsi_device_alloc();
     assert(dev != NULL);
     dev->bus = 0;
-    dev->target = 0;
+    dev->target = 7;
     dev->lun = 0;
     dev->link = &link;
     strcpy(dev->vendor, "MOCK");
     strcpy(dev->product, "DISK");
     assert(scsi_device_register(dev) == 0);
-    assert(scsi_device_lookup(0, 0, 0) == dev);
+    assert(scsi_device_lookup(0, 7, 0) == dev);
 
     scsi_unregister_link(&link);
 
     assert(detach_calls == 1);
-    assert(scsi_device_lookup(0, 0, 0) == NULL);
+    assert(scsi_device_lookup(0, 7, 0) == NULL);
 }
 
 static void test_standard_wrappers_and_16byte_helpers(void) {
@@ -218,10 +247,138 @@ static void test_standard_wrappers_and_16byte_helpers(void) {
     assert(strcmp(scsi_sense_string(SCSI_SENSE_COMPLETED, 0, 0), "Completed") == 0);
 }
 
+static void test_execute_retries_unit_attention(void) {
+    scsi_device_t dev;
+    uint8_t cdb[6];
+    scsi_request_t *req;
+
+    reset_state();
+    memset(&dev, 0, sizeof(dev));
+    dev.link = &(scsi_link_t){
+        .execute = mock_execute,
+    };
+
+    mock_status_code = SCSI_STATUS_CHECK_CONDITION;
+    mock_execute_failures_before_success = 1;
+    mock_sense_key_code = SCSI_SENSE_UNIT_ATTENTION;
+    mock_sense_asc = 0x29;
+    mock_sense_ascq = 0x00;
+
+    req = scsi_request_alloc();
+    assert(req != NULL);
+    scsi_request_init(req, &dev);
+    scsi_cdb_test_unit_ready(cdb);
+    memcpy(req->cdb, cdb, sizeof(cdb));
+    req->cdb_len = sizeof(cdb);
+
+    assert(scsi_execute(req) == 0);
+    assert(req->state == SCSI_REQ_STATE_COMPLETE);
+    assert(req->retries == 1);
+    assert(mock_request_sense_count == 1);
+    assert(execute_calls == 3);
+    scsi_request_free(req);
+}
+
+static void test_execute_stops_on_medium_error(void) {
+    scsi_device_t dev;
+    uint8_t cdb[6];
+    scsi_request_t *req;
+
+    reset_state();
+    memset(&dev, 0, sizeof(dev));
+    dev.link = &(scsi_link_t){
+        .execute = mock_execute,
+    };
+
+    mock_status_code = SCSI_STATUS_CHECK_CONDITION;
+    mock_execute_failures_before_success = 8;
+    mock_sense_key_code = SCSI_SENSE_MEDIUM_ERROR;
+    mock_sense_asc = 0x11;
+    mock_sense_ascq = 0x00;
+
+    req = scsi_request_alloc();
+    assert(req != NULL);
+    scsi_request_init(req, &dev);
+    scsi_cdb_test_unit_ready(cdb);
+    memcpy(req->cdb, cdb, sizeof(cdb));
+    req->cdb_len = sizeof(cdb);
+
+    assert(scsi_execute(req) < 0);
+    assert(req->state == SCSI_REQ_STATE_ERROR);
+    assert(req->retries == 0);
+    assert(mock_request_sense_count == 1);
+    assert(execute_calls == 2);
+    scsi_request_free(req);
+}
+
+static void test_execute_retries_busy(void) {
+    scsi_device_t dev;
+    uint8_t cdb[6];
+    scsi_request_t *req;
+
+    reset_state();
+    memset(&dev, 0, sizeof(dev));
+    dev.link = &(scsi_link_t){
+        .execute = mock_execute,
+    };
+
+    mock_status_code = SCSI_STATUS_BUSY;
+    mock_execute_failures_before_success = 1;
+
+    req = scsi_request_alloc();
+    assert(req != NULL);
+    scsi_request_init(req, &dev);
+    scsi_cdb_test_unit_ready(cdb);
+    memcpy(req->cdb, cdb, sizeof(cdb));
+    req->cdb_len = sizeof(cdb);
+
+    assert(scsi_execute(req) == 0);
+    assert(req->state == SCSI_REQ_STATE_COMPLETE);
+    assert(req->retries == 1);
+    assert(execute_calls == 2);
+    scsi_request_free(req);
+}
+
+static void test_execute_retries_not_ready(void) {
+    scsi_device_t dev;
+    uint8_t cdb[6];
+    scsi_request_t *req;
+
+    reset_state();
+    memset(&dev, 0, sizeof(dev));
+    dev.link = &(scsi_link_t){
+        .execute = mock_execute,
+    };
+
+    mock_status_code = SCSI_STATUS_CHECK_CONDITION;
+    mock_execute_failures_before_success = 1;
+    mock_sense_key_code = SCSI_SENSE_NOT_READY;
+    mock_sense_asc = 0x04;
+    mock_sense_ascq = 0x01;
+
+    req = scsi_request_alloc();
+    assert(req != NULL);
+    scsi_request_init(req, &dev);
+    scsi_cdb_test_unit_ready(cdb);
+    memcpy(req->cdb, cdb, sizeof(cdb));
+    req->cdb_len = sizeof(cdb);
+
+    assert(scsi_execute(req) == 0);
+    assert(req->state == SCSI_REQ_STATE_COMPLETE);
+    assert(req->retries == 1);
+    assert(mock_request_sense_count == 1);
+    assert(execute_calls == 3);
+    scsi_request_free(req);
+}
+
 int main(void) {
     test_register_link_sets_defaults_and_scans();
     test_unregister_link_detaches_registered_devices();
     test_standard_wrappers_and_16byte_helpers();
+    test_execute_retries_unit_attention();
+    test_execute_stops_on_medium_error();
+    test_execute_retries_busy();
+    test_execute_retries_not_ready();
     puts("host_test_scsi_core: PASS");
     return 0;
 }

@@ -20,6 +20,14 @@ static inline uint64_t kernel_time_ms(void) {
     return (uint64_t)get_uptime_ms();
 }
 
+static void scsi_delay_ms(uint32_t delay_ms) {
+    uint64_t start = kernel_time_ms();
+
+    while ((kernel_time_ms() - start) < delay_ms) {
+        __asm__ volatile("pause");
+    }
+}
+
 struct scsi_read_capacity_16 {
     uint8_t last_lba[8];
     uint8_t block_size[4];
@@ -270,7 +278,7 @@ scsi_request_t *scsi_request_alloc(void) {
     memset(req, 0, sizeof(scsi_request_t));
     req->state = SCSI_REQ_STATE_PENDING;
     req->timeout_ms = 30000;  /* 30 second default */
-    req->retries = 3;
+    req->retries = 0;
     req->max_retries = 3;
     req->submit_time = kernel_time_ms();
     
@@ -300,7 +308,7 @@ void scsi_request_init(scsi_request_t *req, scsi_device_t *dev) {
     req->state = SCSI_REQ_STATE_PENDING;
     req->error = 0;
     req->timeout_ms = 30000;
-    req->retries = 3;
+    req->retries = 0;
     req->max_retries = 3;
     req->callback = NULL;
     req->callback_arg = NULL;
@@ -314,16 +322,22 @@ void scsi_request_init(scsi_request_t *req, scsi_device_t *dev) {
  */
 
 int scsi_execute(scsi_request_t *req) {
+    int sense_key;
+    int ret = -1;
+    int should_retry = 0;
+    uint32_t retry_delay_ms = 0;
+    uint32_t attempts;
     if (!req || !req->device || !req->device->link) {
         return -1;
     }
     
     scsi_link_t *link = req->device->link;
-    int ret = -1;
-    uint32_t attempts = req->retries + 1;  /* At least 1 attempt */
+    attempts = req->max_retries + 1;
     
     while (attempts > 0) {
         req->state = SCSI_REQ_STATE_ACTIVE;
+        req->sense_len = 0;
+        req->error = 0;
         link->commands_issued++;
         
         /* Record start time for timeout tracking */
@@ -335,7 +349,9 @@ int scsi_execute(scsi_request_t *req) {
         /* Calculate elapsed time */
         req->elapsed_ms = kernel_time_ms() - req->start_time;
         
-        if (ret >= 0) {
+        if (ret >= 0 && req->status != SCSI_STATUS_CHECK_CONDITION &&
+            req->status != SCSI_STATUS_BUSY &&
+            req->status != SCSI_STATUS_TASK_SET_FULL) {
             req->state = SCSI_REQ_STATE_COMPLETE;
             
             /* Update statistics */
@@ -346,33 +362,53 @@ int scsi_execute(scsi_request_t *req) {
             }
             break;  /* Success */
         }
-        
-        /* Check if retryable error */
-        if (req->status == SCSI_STATUS_BUSY ||
-            req->status == SCSI_STATUS_TASK_SET_FULL) {
-            /* Wait a bit and retry */
-            attempts--;
-            if (attempts > 0) {
-                /* Simple delay - could use scheduler sleep later */
-                for (volatile int i = 0; i < 10000; i++);
+
+        should_retry = 0;
+        retry_delay_ms = 0;
+
+        if (req->status == SCSI_STATUS_CHECK_CONDITION &&
+            !(req->flags & SCSI_REQ_NO_SENSE) &&
+            req->sense_len == 0 &&
+            scsi_request_sense(req->device, req->sense, SCSI_MAX_SENSE_LEN) == 0) {
+            req->sense_len = SCSI_MAX_SENSE_LEN;
+        }
+
+        if (req->status == SCSI_STATUS_CHECK_CONDITION && req->sense_len != 0) {
+            sense_key = scsi_sense_key(req->sense, req->sense_len);
+            switch (sense_key) {
+            case SCSI_SENSE_UNIT_ATTENTION:
+                should_retry = 1;
+                break;
+            case SCSI_SENSE_NOT_READY:
+                should_retry = 1;
+                retry_delay_ms = 250;
+                break;
+            case SCSI_SENSE_ABORTED_COMMAND:
+                should_retry = 1;
+                break;
+            case SCSI_SENSE_MEDIUM_ERROR:
+            default:
+                break;
+            }
+        } else if (req->status == SCSI_STATUS_BUSY ||
+                   req->status == SCSI_STATUS_TASK_SET_FULL) {
+            should_retry = 1;
+            retry_delay_ms = 100;
+        }
+
+        attempts--;
+        if (should_retry && attempts > 0) {
+            req->retries++;
+            if (retry_delay_ms != 0) {
+                scsi_delay_ms(retry_delay_ms);
             }
             continue;
         }
-        
-        /* Non-retryable error */
+
         req->state = SCSI_REQ_STATE_ERROR;
-        req->error = ret;
+        req->error = (ret < 0) ? ret : -1;
         link->commands_failed++;
         break;
-    }
-    
-    /* Handle CHECK CONDITION */
-    if (req->status == SCSI_STATUS_CHECK_CONDITION && 
-        !(req->flags & SCSI_REQ_NO_SENSE) &&
-        req->sense_len == 0) {
-        /* Auto-request sense */
-        scsi_request_sense(req->device, req->sense, SCSI_MAX_SENSE_LEN);
-        req->sense_len = 18;  /* Fixed sense minimum */
     }
     
     /* Invoke callback if present */
