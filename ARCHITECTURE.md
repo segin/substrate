@@ -210,6 +210,7 @@ ELKS personality contract:
   signal delivery uses the ELKS libc callback convention: the kernel pushes a
   far-return frame for `_signal_cbhandler(sig)` on the ELKS user stack and
   resumes the interrupted `CS:IP` via `lret $2`.
+- i386 also exposes a native per-process `modify_ldt(2)` contract through `<sys/ldt.h>` and `libsys`. The ABI is single-sourced by the public `struct user_desc`; `LDT_READ` copies the current process LDT image, `LDT_WRITE` accepts exactly one validated user descriptor per call, and `LDT_READ_DEFAULT` currently returns 0. Invalid descriptors or sizes fail with `EINVAL`, inaccessible buffers fail with `EFAULT`, and LDT-growth failure returns `ENOMEM`.
 - ELKS `/dev/kmem` compatibility is personality-scoped rather than native:
   ELKS processes opening native `/dev/kmem` are given an ELKS-shaped synthetic
   task snapshot through intercepted `ioctl`, `lseek`, and `read` operations so

@@ -1,0 +1,89 @@
+.TH MODIFY_LDT 2 "March 2026" "Substrate" "System Calls Manual"
+.SH NAME
+modify_ldt \- read or update the current process local descriptor table
+.SH SYNOPSIS
+.B #include <sys/ldt.h>
+.PP
+.BI "int modify_ldt(int " func ", void *" ptr ", unsigned long " bytecount ");"
+.SH DESCRIPTION
+The
+.BR modify_ldt ()
+system call reads or updates the Local Descriptor Table (LDT) associated
+with the calling process.
+.PP
+The
+.I func
+argument selects the operation:
+.TP
+.B LDT_READ
+Copy the current process LDT image to the buffer referenced by
+.IR ptr .
+At most
+.I bytecount
+bytes are copied, rounded only by the current LDT size.
+The return value is the number of bytes copied.
+.TP
+.B LDT_WRITE
+Interpret
+.I ptr
+as a pointer to a
+.I struct user_desc
+and write or clear one LDT entry.
+The kernel currently accepts only one descriptor per call, so
+.I bytecount
+must equal
+.BR sizeof(struct user_desc) .
+Entries are validated as user descriptors and are installed with DPL 3.
+.TP
+.B LDT_READ_DEFAULT
+Return the default-LDT image size for compatibility.
+Substrate currently returns 0 and does not expose a separate default LDT
+payload.
+.PP
+A descriptor with zero base, zero limit, and
+.B seg_not_present
+set clears the target entry.
+.PP
+The exported
+.I struct user_desc
+fields follow the Linux-compatible layout used by both
+.BR modify_ldt (2)
+and
+.BR set_thread_area (2)
+on i386.
+.SH RETURN VALUE
+On success,
+.BR modify_ldt ()
+returns the number of bytes copied for
+.BR LDT_READ ,
+0 for successful
+.BR LDT_WRITE
+and
+.BR LDT_READ_DEFAULT ,
+or \-1 on error with
+.I errno
+set.
+.SH ERRORS
+.TP
+.B EFAULT
+.I ptr
+is not accessible for the requested copyin or copyout operation.
+.TP
+.B EINVAL
+.I func
+is unsupported, the descriptor payload is malformed, the entry number is out
+of bounds, or
+.I bytecount
+does not match the required size for the requested operation.
+.TP
+.B ENOMEM
+The kernel could not allocate or grow per-process LDT storage.
+.SH NOTES
+The native Substrate path currently exposes only per-process user LDT entries.
+It does not permit installing kernel descriptors, call gates, or other system
+segment forms through this interface.
+.SH SEE ALSO
+.BR ldtctl (1),
+.BR set_thread_area (2)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.
