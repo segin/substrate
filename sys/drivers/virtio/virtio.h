@@ -71,6 +71,7 @@ uint16_t virtio_get_io_base(uint8_t bus, uint8_t slot, uint8_t func);
 
 // VirtIO Block
 void virtio_blk_init(void);
+void virtio_blk_setup(uint8_t bus, uint8_t slot, uint8_t func);
 
 // VirtIO 9P
 void virtio_9p_setup(uint8_t bus, uint8_t slot, uint8_t func);
