@@ -15,6 +15,7 @@ struct bus_type pci_bus_type = {
 static int pci_bus_initialized = 0;
 
 static int pci_scan_bus_internal(uint8_t bus, uint8_t visited[256]);
+static uintptr_t pci_bar_base(pci_device_t *dev, int bar);
 
 static int pci_id_table_is_end(const device_id_t *id) {
     return id->vendor_id == 0 &&
@@ -142,6 +143,136 @@ pci_device_t *pci_device_create(uint8_t bus, uint8_t slot, uint8_t func) {
     }
 
     return dev;
+}
+
+int pci_bar_type(pci_device_t *dev, int bar) {
+    uint32_t value;
+
+    if (dev == NULL || bar < 0 || bar >= PCI_BAR_COUNT) {
+        return PCI_BAR_NONE;
+    }
+
+    value = pci_read_config32(dev->bus, dev->slot, dev->func, (uint8_t)(0x10 + bar * 4));
+    if (value == 0 || value == 0xFFFFFFFFU) {
+        return PCI_BAR_NONE;
+    }
+    if (value & 0x1U) {
+        return PCI_BAR_IO;
+    }
+    if ((value & 0x6U) == 0x4U) {
+        return PCI_BAR_MEM64;
+    }
+    return PCI_BAR_MEM32;
+}
+
+static uintptr_t pci_bar_base(pci_device_t *dev, int bar) {
+    uint32_t low;
+    uint64_t base;
+    int type = pci_bar_type(dev, bar);
+
+    if (type == PCI_BAR_NONE) {
+        return 0;
+    }
+
+    low = pci_read_config32(dev->bus, dev->slot, dev->func, (uint8_t)(0x10 + bar * 4));
+    if (type == PCI_BAR_IO) {
+        return (uintptr_t)(low & ~0x3U);
+    }
+
+    base = (uint64_t)(low & ~0xFU);
+    if (type == PCI_BAR_MEM64 && bar + 1 < PCI_BAR_COUNT) {
+        base |= (uint64_t)pci_read_config32(dev->bus, dev->slot, dev->func,
+                                            (uint8_t)(0x10 + (bar + 1) * 4)) << 32;
+    }
+    return (uintptr_t)base;
+}
+
+size_t pci_bar_size(pci_device_t *dev, int bar) {
+    uint8_t offset;
+    uint32_t orig_low;
+    uint32_t mask_low;
+    int type = pci_bar_type(dev, bar);
+
+    if (dev == NULL || bar < 0 || bar >= PCI_BAR_COUNT || type == PCI_BAR_NONE) {
+        return 0;
+    }
+
+    offset = (uint8_t)(0x10 + bar * 4);
+    orig_low = pci_read_config32(dev->bus, dev->slot, dev->func, offset);
+    pci_write_config32(dev->bus, dev->slot, dev->func, offset, 0xFFFFFFFFU);
+    mask_low = pci_read_config32(dev->bus, dev->slot, dev->func, offset);
+    pci_write_config32(dev->bus, dev->slot, dev->func, offset, orig_low);
+
+    if (type == PCI_BAR_IO) {
+        return (size_t)(~(mask_low & ~0x3U) + 1U);
+    }
+
+    if (type == PCI_BAR_MEM64 && bar + 1 < PCI_BAR_COUNT) {
+        uint32_t orig_high = pci_read_config32(dev->bus, dev->slot, dev->func, (uint8_t)(offset + 4));
+        uint32_t mask_high;
+        uint64_t mask;
+
+        pci_write_config32(dev->bus, dev->slot, dev->func, (uint8_t)(offset + 4), 0xFFFFFFFFU);
+        mask_high = pci_read_config32(dev->bus, dev->slot, dev->func, (uint8_t)(offset + 4));
+        pci_write_config32(dev->bus, dev->slot, dev->func, (uint8_t)(offset + 4), orig_high);
+
+        mask = ((uint64_t)mask_high << 32) | (uint64_t)(mask_low & ~0xFU);
+        return (size_t)(~mask + 1U);
+    }
+
+    return (size_t)(~(mask_low & ~0xFU) + 1U);
+}
+
+int pci_request_region(pci_device_t *dev, int bar, const char *name) {
+    uintptr_t base;
+    size_t size;
+    int type;
+
+    if (dev == NULL || bar < 0 || bar >= PCI_BAR_COUNT) {
+        return -1;
+    }
+    if (dev->bar_resource[bar] != NULL) {
+        return 0;
+    }
+
+    type = pci_bar_type(dev, bar);
+    base = pci_bar_base(dev, bar);
+    size = pci_bar_size(dev, bar);
+    if (type == PCI_BAR_NONE || base == 0 || size == 0) {
+        return -1;
+    }
+
+    if (type == PCI_BAR_IO) {
+        dev->bar_resource[bar] = request_region(base, size, name);
+    } else {
+        dev->bar_resource[bar] = request_mem_region(base, size, name);
+    }
+
+    return dev->bar_resource[bar] != NULL ? 0 : -1;
+}
+
+void *pci_iomap(pci_device_t *dev, int bar, size_t max_len) {
+    uintptr_t base;
+    size_t size;
+
+    if (dev == NULL || pci_bar_type(dev, bar) == PCI_BAR_IO) {
+        return NULL;
+    }
+
+    base = pci_bar_base(dev, bar);
+    size = pci_bar_size(dev, bar);
+    if (base == 0 || size == 0) {
+        return NULL;
+    }
+    if (max_len != 0 && size > max_len) {
+        size = max_len;
+    }
+    if (dev->bar_resource[bar] == NULL &&
+        pci_request_region(dev, bar, dev->kdev ? dev->kdev->name : "pci") != 0) {
+        return NULL;
+    }
+
+    return ioremap_resource(dev->bar_resource[bar], size);
 }
 
 static int pci_scan_bridge_internal(pci_device_t *bridge, uint8_t visited[256]) {

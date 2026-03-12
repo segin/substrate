@@ -232,25 +232,25 @@
         - Acceptance: Device registered with driver model
 
 - [ ] **BAR Parsing and Resource Allocation:** (REQ: REQ-17-0039)
-    - [ ] Implement BAR type detection (I/O vs MMIO, 32/64-bit). (REQ: REQ-17-0040)
+    - [x] Implement BAR type detection (I/O vs MMIO, 32/64-bit). (REQ: REQ-17-0040)
         - Files: `sys/kern/pci.c`
         - API: `int pci_bar_type(pci_device_t *dev, int bar)`
         - Tests: unit (I/O BAR, 32-bit MMIO, 64-bit MMIO)
         - Docs: `pci_bar.9`
         - Acceptance: Correctly identifies BAR types
-    - [ ] Implement BAR size probing. (REQ: REQ-17-0041)
+    - [x] Implement BAR size probing. (REQ: REQ-17-0041)
         - Files: `sys/kern/pci.c`
         - API: `size_t pci_bar_size(pci_device_t *dev, int bar)`
         - Tests: unit (known device BAR sizes)
         - Docs: `pci_bar.9`
         - Acceptance: Correct sizes reported
-    - [ ] Implement `pci_request_region()` resource reservation. (REQ: REQ-17-0042)
+    - [x] Implement `pci_request_region()` resource reservation. (REQ: REQ-17-0042)
         - Files: `sys/kern/pci.c`
         - API: `int pci_request_region(pci_device_t *dev, int bar, const char *name)`
         - Tests: unit (reservation, conflict detection)
         - Docs: `pci_request_region.9`
         - Acceptance: Region reserved, conflict returns error
-    - [ ] Implement `pci_iomap()` MMIO mapping. (REQ: REQ-17-0043)
+    - [x] Implement `pci_iomap()` MMIO mapping. (REQ: REQ-17-0043)
         - Files: `sys/kern/pci.c`
         - API: `void *pci_iomap(pci_device_t *dev, int bar, size_t max_len)`
         - Tests: unit (map and read test pattern)

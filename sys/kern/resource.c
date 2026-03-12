@@ -97,6 +97,31 @@ static void resource_release(struct resource *root, resource_size_t start, resou
     }
 }
 
+static struct resource *resource_find_in_tree(struct resource *root, resource_size_t start,
+                                              resource_size_t n) {
+    struct resource *curr;
+    resource_size_t end;
+
+    if (root == NULL || n == 0) {
+        return NULL;
+    }
+
+    end = start + n - 1;
+    if (end < start) {
+        return NULL;
+    }
+
+    curr = root->child;
+    while (curr != NULL) {
+        if (curr->start == start && curr->end == end) {
+            return curr;
+        }
+        curr = curr->sibling;
+    }
+
+    return NULL;
+}
+
 void resource_init(void) {
     ioport_root.child = NULL;
     iomem_root.child = NULL;
@@ -116,6 +141,10 @@ struct resource *resource_root(uint32_t type) {
     default:
         return NULL;
     }
+}
+
+struct resource *resource_find(uint32_t type, resource_size_t start, resource_size_t n) {
+    return resource_find_in_tree(resource_root(type), start, n);
 }
 
 struct resource *request_region(resource_size_t start, resource_size_t n, const char *name) {
