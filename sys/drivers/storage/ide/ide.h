@@ -180,9 +180,6 @@ typedef struct {
     uint8_t  irq;          /* IRQ number (14 or 15) */
     uint8_t  no_intr;      /* Interrupt disable flag */
     uint8_t  dma_capable;  /* Bus Master DMA detected */
-    
-    /* PRDT for this channel (aligned to 4 bytes, 64KB boundary safe) */
-    prdt_entry_t prdt[MAX_PRD_ENTRIES] __attribute__((aligned(4)));
 } ide_channel_t;
 
 /*

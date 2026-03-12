@@ -1314,6 +1314,10 @@ extern void test_futex_run_all(void);
 extern void test_geom(void);
 extern void test_ide_dma(void);
 extern void test_ide_perf(void);
+extern void test_ide_qemu_atapi(void);
+extern void test_ide_qemu_dma(void);
+extern void test_ide_qemu_extra_channels(void);
+extern void test_ide_qemu_pio(void);
 extern void test_kernel_bootstrap_large_page(void);
 extern void test_kernel_pmap_protection(void);
 extern void test_ksyms(void);
@@ -3284,6 +3288,10 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&run_tty_tests, "run_tty_tests" },
     { (uint32_t)(uintptr_t)&run_minix_readdir_tests, "run_minix_readdir_tests" },
     { (uint32_t)(uintptr_t)&test_ide_dma, "test_ide_dma" },
+    { (uint32_t)(uintptr_t)&test_ide_qemu_pio, "test_ide_qemu_pio" },
+    { (uint32_t)(uintptr_t)&test_ide_qemu_dma, "test_ide_qemu_dma" },
+    { (uint32_t)(uintptr_t)&test_ide_qemu_atapi, "test_ide_qemu_atapi" },
+    { (uint32_t)(uintptr_t)&test_ide_qemu_extra_channels, "test_ide_qemu_extra_channels" },
     { (uint32_t)(uintptr_t)&run_sched_bench, "run_sched_bench" },
     { (uint32_t)(uintptr_t)&run_sched_dequeue_bench, "run_sched_dequeue_bench" },
     { (uint32_t)(uintptr_t)&run_kobject_tests, "run_kobject_tests" },
@@ -3387,4 +3395,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1688;
+int ksym_count = 1692;

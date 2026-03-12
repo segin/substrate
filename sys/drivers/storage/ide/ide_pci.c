@@ -49,6 +49,15 @@ static void ide_pci_apply_channel(ide_channel_t *channel, uint8_t *irq_shared,
     }
 }
 
+static void ide_pci_apply_dma_only(ide_channel_t *channel, uintptr_t bm) {
+    if (channel == NULL || bm == 0) {
+        return;
+    }
+
+    channel->bm_base = (uint16_t)bm;
+    channel->dma_capable = 1;
+}
+
 size_t ide_pci_configure_channels(ide_channel_t channels[MAX_IDE_CHANNELS],
                                   uint8_t irq_shared[MAX_IDE_CHANNELS]) {
     pci_device_t *pdev;
@@ -77,6 +86,16 @@ size_t ide_pci_configure_channels(ide_channel_t channels[MAX_IDE_CHANNELS],
             continue;
         }
 
+        {
+            uint16_t command = pci_read_config16(pdev->bus, pdev->slot, pdev->func,
+                                                 PCI_CONFIG_COMMAND);
+            uint16_t want = (uint16_t)(command | PCI_COMMAND_IO | PCI_COMMAND_MASTER);
+            if (want != command) {
+                pci_write_config16(pdev->bus, pdev->slot, pdev->func,
+                                   PCI_CONFIG_COMMAND, want);
+            }
+        }
+
         pair_base = configured_pairs * 2;
         if (pair_base >= MAX_IDE_CHANNELS) {
             break;
@@ -97,6 +116,8 @@ size_t ide_pci_configure_channels(ide_channel_t channels[MAX_IDE_CHANNELS],
             ide_pci_apply_channel(&channels[pair_base], &irq_shared[pair_base],
                                   pdev, pci_irq, primary_io, primary_ctrl,
                                   bm_base);
+        } else if (bm_base != 0) {
+            ide_pci_apply_dma_only(&channels[pair_base], bm_base);
         }
 
         if (pair_base + 1 < MAX_IDE_CHANNELS &&
@@ -105,6 +126,8 @@ size_t ide_pci_configure_channels(ide_channel_t channels[MAX_IDE_CHANNELS],
                                   &irq_shared[pair_base + 1], pdev, pci_irq,
                                   secondary_io, secondary_ctrl,
                                   bm_base == 0 ? 0 : (bm_base + 8));
+        } else if (pair_base + 1 < MAX_IDE_CHANNELS && bm_base != 0) {
+            ide_pci_apply_dma_only(&channels[pair_base + 1], bm_base + 8);
         }
 
         configured_pairs++;

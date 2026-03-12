@@ -59,6 +59,12 @@ test=all test_halt=1
     -   Basic mmap/munmap functionality (WIP).
 -   **IDE (`test=ide`):**
     -   `test_ide_perf.c`: Benchmarks IDE PIO data transfer performance (`inw` loop vs `rep insw`).
+-   **IDE QEMU Integration:**
+    -   `test=ide_qemu_pio`: PIO read/write round-trip against a scratch IDE disk.
+    -   `test=ide_qemu_dma`: DMA read/write round-trip against a scratch IDE disk.
+    -   `test=ide_qemu_atapi`: ATAPI READ CAPACITY / READ TOC / sector read against a scratch ISO.
+    -   `test=ide_qemu_extra`: tertiary/quaternary PCI IDE channel detection.
+    -   `run_ide_qemu.sh`: disposable QEMU harness for the four IDE integration cases using `kernel.zimage` plus `root=/dev/storage/ram0`.
 
 ## Build System Integration
 

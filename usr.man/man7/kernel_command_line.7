@@ -22,6 +22,8 @@ Examples:
 .B debug=elf,perso:linux
 .IP \(bu
 .B debug=trap,perso:elks:aout
+.IP \(bu
+.B debug=storage:ide
 .SH CHANNEL MATCHING
 Channel names are colon-delimited.
 An exact match enables that channel.
@@ -65,6 +67,9 @@ Log user trap-to-signal translations before normal signal delivery.
 Log process-tree transitions and
 .BR waitpid (2)
 search decisions, including child-linking, exit, and reap flow.
+.TP
+.B storage:ide
+Enable IDE transport diagnostics, including DMA setup and completion tracing.
 .TP
 .B vm:brk
 Enable verbose

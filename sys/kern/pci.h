@@ -11,12 +11,17 @@
 #define PCI_CONFIG_ENABLE_BIT   0x80000000U
 #define PCI_CONFIG_SPACE_SIZE   256U
 #define PCI_EXT_CONFIG_SPACE_SIZE 4096U
+#define PCI_CONFIG_COMMAND      0x04U
 #define PCI_BAR_COUNT           6
 
 #define PCI_BAR_NONE    0
 #define PCI_BAR_IO      1
 #define PCI_BAR_MEM32   2
 #define PCI_BAR_MEM64   3
+
+#define PCI_COMMAND_IO      0x0001U
+#define PCI_COMMAND_MEMORY  0x0002U
+#define PCI_COMMAND_MASTER  0x0004U
 
 #define PCI_STATUS_CAP_LIST      0x0010U
 #define PCI_CAP_ID_PM            0x01U

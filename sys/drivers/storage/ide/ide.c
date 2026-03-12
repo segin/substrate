@@ -16,12 +16,14 @@
 #include <stdio.h>
 #include <string.h>
 #include <arch/i386/cpu.h>
+#include <arch/i386/pmap.h>
 #include <sys/random.h>
 #include <kern/console.h>
 #include <kern/device.h>
 #include <kern/driver.h>
 #include <kern/isa.h>
 #include <kern/pci.h>
+#include <kern/cmdline.h>
 #include <sys/irq.h>
 #include <drivers/storage/blkdev.h>
 #include <drivers/storage/ide/ide.h>
@@ -39,6 +41,12 @@
 
 /* Channel state */
 static ide_channel_t ide_channels[MAX_IDE_CHANNELS];
+/*
+ * Keep each channel's PRDT in a dedicated page-aligned slot so the table
+ * cannot straddle a 64KB boundary.
+ */
+static prdt_entry_t ide_prdts[MAX_IDE_CHANNELS][MAX_PRD_ENTRIES]
+    __attribute__((aligned(4096)));
 
 /* Device state */
 static ide_device_t ide_devices[MAX_IDE_DEVICES];
@@ -62,6 +70,10 @@ static uint8_t ide_channel_irq_shared[MAX_IDE_CHANNELS];
 /* IRQ completion flag */
 static volatile int ide_irq_complete[MAX_IDE_CHANNELS];
 
+static int ide_debug_enabled(void) {
+    return cmdline_debug_enabled("storage:ide");
+}
+
 static inline void ide_wait_backoff(int *yield_count);
 static int ide_wait_bsy(uint8_t channel, uint32_t timeout_ms, const char *op);
 static int ide_wait_drq(uint8_t channel, uint32_t timeout_ms, const char *op);
@@ -74,6 +86,7 @@ static void ide_select_drive(uint8_t channel, uint8_t drive);
 static int ide_program_dma_mode(ide_device_t *dev);
 static int ide_irq_dispatch(unsigned int irq, void *dev_id, void *frame);
 static void ide_register_irqs(void);
+static void ide_bm_set_drive_dma_capable(uint8_t channel, uint8_t drive, int enabled);
 
 static int ide_scan_controller(void);
 static int ide_software_reset_channel(uint8_t channel);
@@ -145,7 +158,7 @@ static int ide_transfer_read_once(ide_drive_ctx_t *ctx, uint64_t sector,
                                       (uint16_t)count, buffer);
     }
 
-    if (ide_channels[channel].dma_capable && count <= 256) {
+    if (ide_attached && ide_channels[channel].dma_capable && count <= 256) {
         return ide_dma_read(channel, drive, sector, (uint16_t)count, buffer);
     }
 
@@ -166,7 +179,7 @@ static int ide_transfer_write_once(ide_drive_ctx_t *ctx, uint64_t sector,
         return -1;
     }
 
-    if (ide_channels[channel].dma_capable && count <= 256) {
+    if (ide_attached && ide_channels[channel].dma_capable && count <= 256) {
         return ide_dma_write(channel, drive, sector, (uint16_t)count, buffer);
     }
 
@@ -241,6 +254,17 @@ static const uint8_t ide_default_irqs[MAX_IDE_CHANNELS] = {
     ATA_TERTIARY_IRQ,
     ATA_QUATERNARY_IRQ,
 };
+
+static int ide_channel_uses_default_legacy(uint8_t channel) {
+    if (channel >= MAX_IDE_CHANNELS) {
+        return 0;
+    }
+
+    return ide_channels[channel].io_base == ide_default_io_bases[channel] &&
+           ide_channels[channel].ctrl_base == ide_default_ctrl_bases[channel] &&
+           ide_channels[channel].irq == ide_default_irqs[channel] &&
+           ide_channels[channel].bm_base == 0;
+}
 
 static int ide_legacy_channel_present(const char *name) {
     struct device *dev;
@@ -570,22 +594,58 @@ static int ide_wait_irq_completion(uint8_t channel, uint32_t timeout_ms,
                                    const char *op) {
     uint64_t ticks = ((uint64_t)timeout_ms * get_hz() + 999ULL) / 1000ULL;
     uint64_t deadline = get_ticks() + (ticks ? ticks : 1);
+    uint64_t last_ticks = get_ticks();
+    uint32_t stalled_polls = 0;
+    int yield_count = 0;
 
     while (!ide_irq_complete[channel]) {
-        uint32_t flags = intr_disable();
-        if (!ide_irq_complete[channel]) {
-            int ret = sched_sleep_until((void *)&ide_irq_complete[channel], deadline);
-            intr_restore(flags);
-            if (ret < 0 && !ide_irq_complete[channel]) {
-                kprintf("ide: %s timeout waiting for DMA completion on channel %u\n",
-                        op ? op : "dma", channel);
+        if (ide_channels[channel].dma_capable) {
+            uint8_t bm_status = ide_bm_status(channel);
+            uint8_t ata_status = ide_read_reg(channel, ATA_REG_STATUS);
+            if (bm_status & (BM_STAT_INTERRUPT | BM_STAT_ERROR)) {
+                ide_irq_complete[channel] = 1;
+                break;
+            }
+            if (ata_status & (ATA_SR_ERR | ATA_SR_DF)) {
+                char decoded[64];
+                uint8_t error = ide_read_reg(channel, ATA_REG_ERROR);
+
+                ide_decode_error(error, decoded, sizeof(decoded));
+                kprintf("ide: %s aborted status=%02x bm=%02x error=%02x (%s) on channel %u\n",
+                        op ? op : "dma", ata_status, bm_status, error, decoded,
+                        channel);
                 ide_bm_stop(channel);
                 ide_bm_clear_interrupt(channel);
                 return -1;
             }
-            continue;
         }
-        intr_restore(flags);
+
+        if ((int64_t)(get_ticks() - deadline) >= 0) {
+            kprintf("ide: %s timeout waiting for DMA completion on channel %u (status=%02x bm=%02x)\n",
+                    op ? op : "dma", channel,
+                    ide_read_reg(channel, ATA_REG_STATUS),
+                    ide_bm_status(channel));
+            ide_bm_stop(channel);
+            ide_bm_clear_interrupt(channel);
+            return -1;
+        }
+
+        if (get_ticks() == last_ticks) {
+            if (++stalled_polls >= 500000U) {
+                kprintf("ide: %s timeout waiting for DMA completion on channel %u (timer stalled status=%02x bm=%02x)\n",
+                        op ? op : "dma", channel,
+                        ide_read_reg(channel, ATA_REG_STATUS),
+                        ide_bm_status(channel));
+                ide_bm_stop(channel);
+                ide_bm_clear_interrupt(channel);
+                return -1;
+            }
+        } else {
+            last_ticks = get_ticks();
+            stalled_polls = 0;
+        }
+
+        ide_wait_backoff(&yield_count);
     }
 
     return 0;
@@ -618,6 +678,24 @@ static int ide_software_reset_channel(uint8_t channel) {
     return 0;
 }
 
+static void ide_bm_set_drive_dma_capable(uint8_t channel, uint8_t drive, int enabled) {
+    uint8_t status;
+    uint8_t bit;
+
+    if (channel >= MAX_IDE_CHANNELS || drive > 1 || !ide_channels[channel].dma_capable) {
+        return;
+    }
+
+    bit = (drive == 0) ? BM_STAT_DRIVE0_DMA : BM_STAT_DRIVE1_DMA;
+    status = ide_bm_status(channel);
+    if (enabled) {
+        status |= bit;
+    } else {
+        status &= (uint8_t)~bit;
+    }
+    ide_bm_write8(channel, BM_REG_STATUS, status);
+}
+
 static int ide_program_dma_mode(ide_device_t *dev) {
     uint8_t mode;
     uint8_t status;
@@ -629,6 +707,7 @@ static int ide_program_dma_mode(ide_device_t *dev) {
     if (!ide_channels[dev->channel].dma_capable ||
         (dev->feature_flags & IDE_FEATURE_DMA) == 0 ||
         ide_select_dma_transfer_mode(dev, &mode) < 0) {
+        ide_bm_set_drive_dma_capable(dev->channel, dev->drive, 0);
         dev->dma_mode = 0;
         return -1;
     }
@@ -643,14 +722,17 @@ static int ide_program_dma_mode(ide_device_t *dev) {
     ide_write_reg(dev->channel, ATA_REG_COMMAND, ATA_CMD_SET_FEATURES);
 
     if (ide_wait_bsy(dev->channel, IDE_TIMEOUT_READY_MS, "set-features") < 0) {
+        ide_bm_set_drive_dma_capable(dev->channel, dev->drive, 0);
         return -1;
     }
 
     status = ide_read_reg(dev->channel, ATA_REG_STATUS);
     if ((status & (ATA_SR_ERR | ATA_SR_DF)) != 0) {
+        ide_bm_set_drive_dma_capable(dev->channel, dev->drive, 0);
         return -1;
     }
 
+    ide_bm_set_drive_dma_capable(dev->channel, dev->drive, 1);
     dev->dma_mode = (mode >= ATA_XFER_MODE_UDMA_BASE) ? 1 : 2;
     return 0;
 }
@@ -721,21 +803,59 @@ static void ide_select_drive(uint8_t channel, uint8_t drive) {
  * - Buffer must be physically contiguous (or we split it)
  */
 int ide_prdt_setup(uint8_t channel, void *buffer, uint32_t byte_count) {
+    uintptr_t va;
+    uintptr_t phys;
+    uint32_t remaining;
     int entry;
     uint32_t prdt_phys;
 
     if (channel >= MAX_IDE_CHANNELS) return -1;
+    if (buffer == NULL || byte_count == 0 || byte_count > 256U * 512U) return -1;
 
-    entry = ide_prdt_build_entries(ide_channels[channel].prdt,
-                                   MAX_PRD_ENTRIES,
-                                   (uint32_t)(uintptr_t)buffer,
-                                   byte_count);
-    if (entry < 0) {
-        return -1;
+    memset(ide_prdts[channel], 0, sizeof(ide_prdts[channel]));
+
+    va = (uintptr_t)buffer;
+    remaining = byte_count;
+    entry = 0;
+
+    while (remaining > 0) {
+        uint32_t page_off;
+        uint32_t chunk;
+
+        if (entry >= MAX_PRD_ENTRIES) {
+            return -1;
+        }
+
+        phys = pmap_extract(pmap_kernel(), va);
+        if (phys == 0) {
+            return -1;
+        }
+
+        page_off = (uint32_t)(va & 0xFFFU);
+        chunk = 4096U - page_off;
+        if (chunk > remaining) {
+            chunk = remaining;
+        }
+
+        ide_prdts[channel][entry].phys_addr = (uint32_t)phys;
+        ide_prdts[channel][entry].byte_count =
+            (chunk == 65536U) ? 0 : (uint16_t)chunk;
+        ide_prdts[channel][entry].reserved = 0;
+        ide_prdts[channel][entry].eot = 0;
+
+        va += chunk;
+        remaining -= chunk;
+        entry++;
     }
 
+    ide_prdts[channel][entry - 1].eot = 1;
+
     /* Program PRDT base address into Bus Master */
-    prdt_phys = (uint32_t)(uintptr_t)ide_channels[channel].prdt;
+    prdt_phys = (uint32_t)pmap_extract(pmap_kernel(),
+                                       (uintptr_t)ide_prdts[channel]);
+    if (prdt_phys == 0) {
+        return -1;
+    }
     ide_bm_write32(channel, BM_REG_PRDT, prdt_phys);
 
     return entry;
@@ -749,8 +869,8 @@ int ide_prdt_setup(uint8_t channel, void *buffer, uint32_t byte_count) {
 
 void ide_bm_start(uint8_t channel, int write) {
     uint8_t cmd = BM_CMD_START;
-    if (!write) {
-        cmd |= BM_CMD_WRITE;  /* Confusing: WRITE bit means "write to memory" = read from disk */
+    if (write) {
+        cmd |= BM_CMD_WRITE;
     }
     ide_bm_write8(channel, BM_REG_COMMAND, cmd);
 }
@@ -821,27 +941,39 @@ int ide_dma_read(uint8_t channel, uint8_t drive, uint64_t lba,
     if (channel >= MAX_IDE_CHANNELS) return -1;
     if (!ide_channels[channel].dma_capable) return -1;
     if (count == 0 || count > 256) return -1;
+    if (ide_debug_enabled()) {
+        kprintf("ide: dma-read ch=%u drive=%u lba=%llu count=%u\n",
+                channel, drive, (unsigned long long)lba, count);
+    }
     
     uint32_t byte_count = (uint32_t)count * 512;
     
     /* Setup PRDT */
     if (ide_prdt_setup(channel, buffer, byte_count) < 0) {
+        if (ide_debug_enabled()) {
+            kprintf("ide: dma-read prdt setup failed ch=%u\n", channel);
+        }
         return -1;
     }
     
     /* Clear status and set direction */
     ide_bm_clear_interrupt(channel);
-    ide_bm_write8(channel, BM_REG_COMMAND, BM_CMD_WRITE);  /* Read from disk = write to memory */
+    ide_bm_write8(channel, BM_REG_COMMAND, 0);
     
     /* Select drive and setup registers */
     ide_select_drive(channel, drive);
     if (ide_wait_bsy(channel, IDE_TIMEOUT_READY_MS, "dma-read") < 0) {
+        if (ide_debug_enabled()) {
+            kprintf("ide: dma-read wait ready failed ch=%u\n", channel);
+        }
         return -1;
     }
     
     /* Use LBA48 for large addresses or counts */
     int use_lba48 = (lba >= 0x10000000ULL) || (count > 256);
     
+    ide_irq_complete[channel] = 0;
+
     if (use_lba48) {
         /* LBA48 mode */
         ide_write_reg(channel, ATA_REG_DEVICE, 0x40 | (drive << 4));
@@ -870,13 +1002,19 @@ int ide_dma_read(uint8_t channel, uint8_t drive, uint64_t lba,
         
         ide_write_reg(channel, ATA_REG_COMMAND, ATA_CMD_READ_DMA);
     }
-    
-    /* Start DMA */
-    ide_irq_complete[channel] = 0;
+
     ide_bm_start(channel, 0);  /* 0 = read from disk */
+    
+    if (ide_debug_enabled()) {
+        kprintf("ide: dma-read started ch=%u bm=%#x\n",
+                channel, ide_bm_status(channel));
+    }
     
     /* Wait for completion (interrupt-driven) */
     if (ide_wait_irq_completion(channel, IDE_TIMEOUT_DMA_MS, "dma-read") < 0) {
+        if (ide_debug_enabled()) {
+            kprintf("ide: dma-read wait completion failed ch=%u\n", channel);
+        }
         return -1;
     }
     
@@ -901,26 +1039,38 @@ int ide_dma_write(uint8_t channel, uint8_t drive, uint64_t lba,
     if (channel >= MAX_IDE_CHANNELS) return -1;
     if (!ide_channels[channel].dma_capable) return -1;
     if (count == 0 || count > 256) return -1;
+    if (ide_debug_enabled()) {
+        kprintf("ide: dma-write ch=%u drive=%u lba=%llu count=%u\n",
+                channel, drive, (unsigned long long)lba, count);
+    }
     
     uint32_t byte_count = (uint32_t)count * 512;
     
     /* Setup PRDT (cast away const - buffer won't be modified for write) */
     if (ide_prdt_setup(channel, (void *)buffer, byte_count) < 0) {
+        if (ide_debug_enabled()) {
+            kprintf("ide: dma-write prdt setup failed ch=%u\n", channel);
+        }
         return -1;
     }
     
     /* Clear status and set direction */
     ide_bm_clear_interrupt(channel);
-    ide_bm_write8(channel, BM_REG_COMMAND, 0);  /* Write to disk = read from memory */
+    ide_bm_write8(channel, BM_REG_COMMAND, BM_CMD_WRITE);
     
     /* Select drive */
     ide_select_drive(channel, drive);
     if (ide_wait_bsy(channel, IDE_TIMEOUT_READY_MS, "dma-write") < 0) {
+        if (ide_debug_enabled()) {
+            kprintf("ide: dma-write wait ready failed ch=%u\n", channel);
+        }
         return -1;
     }
     
     int use_lba48 = (lba >= 0x10000000ULL) || (count > 256);
     
+    ide_irq_complete[channel] = 0;
+
     if (use_lba48) {
         ide_write_reg(channel, ATA_REG_DEVICE, 0x40 | (drive << 4));
         
@@ -945,13 +1095,19 @@ int ide_dma_write(uint8_t channel, uint8_t drive, uint64_t lba,
         
         ide_write_reg(channel, ATA_REG_COMMAND, ATA_CMD_WRITE_DMA);
     }
-    
-    /* Start DMA */
-    ide_irq_complete[channel] = 0;
+
     ide_bm_start(channel, 1);  /* 1 = write to disk */
+    
+    if (ide_debug_enabled()) {
+        kprintf("ide: dma-write started ch=%u bm=%#x\n",
+                channel, ide_bm_status(channel));
+    }
     
     /* Wait for completion */
     if (ide_wait_irq_completion(channel, IDE_TIMEOUT_DMA_MS, "dma-write") < 0) {
+        if (ide_debug_enabled()) {
+            kprintf("ide: dma-write wait completion failed ch=%u\n", channel);
+        }
         return -1;
     }
     
@@ -1523,6 +1679,8 @@ static int ide_scan_controller(void) {
     kprint("IDE Driver Initialized.\n");
     int legacy_hints[MAX_IDE_CHANNELS];
     int use_legacy_hints = 0;
+    blkdev_t *partition_scan[MAX_IDE_DEVICES];
+    size_t partition_scan_count = 0;
     
     /* Setup channel structures */
     memset(ide_devices, 0, sizeof(ide_devices));
@@ -1555,7 +1713,8 @@ static int ide_scan_controller(void) {
     /* Probe all channels and drives */
     for (int ch = 0; ch < MAX_IDE_CHANNELS; ch++) {
         if (use_legacy_hints) {
-            if (!legacy_hints[ch]) {
+            if (ch < 2 && !legacy_hints[ch] &&
+                ide_channel_uses_default_legacy((uint8_t)ch)) {
                 continue;
             }
         }
@@ -1650,7 +1809,9 @@ static int ide_scan_controller(void) {
                 if (type == 1) kprint(", ATAPI");
                 kprint(")\n");
 
-                blkdev_scan_partitions(bdev);
+                if (type == 0 && partition_scan_count < MAX_IDE_DEVICES) {
+                    partition_scan[partition_scan_count++] = bdev;
+                }
             }
         }
     }
@@ -1658,6 +1819,10 @@ static int ide_scan_controller(void) {
     /* Re-enable interrupts */
     for (int ch = 0; ch < MAX_IDE_CHANNELS; ch++) {
         ide_write_ctrl((uint8_t)ch, 0);
+    }
+
+    for (size_t i = 0; i < partition_scan_count; i++) {
+        blkdev_scan_partitions(partition_scan[i]);
     }
 
     ide_attached = 1;

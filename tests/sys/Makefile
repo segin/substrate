@@ -9,7 +9,7 @@ SRCS = test_runner.c test_mmap.c test_pmap.c property_pmap_protect.c test_vm_exp
 # property_pmap.c needs fixing (missing headers) maybe? Excluding for now to ensure build.
 
 SRCS += test_minix_readdir.c
-SRCS += test_ide_dma.c
+SRCS += test_ide_dma.c test_ide_qemu.c
 SRCS += bench_sched.c bench_sched_dequeue.c test_kobject.c test_vfs_cache.c test_vfs_busy.c
 SRCS += test_nanosleep.c test_reboot.c test_pipe_race.c test_chacha20.c
 
@@ -160,9 +160,6 @@ host_test_x86_64_asm:
 
 all: tests.o $(HOST_TESTS)
 
-host_test_ext2_get_blocks_extent: host_test_ext2_get_blocks_extent.c
-	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_ext2_get_blocks_extent.c ../../sys/fs/ext2/ext2.c -o $@
-
 host_test_kmem_test: host_test_kmem_test.c
 	$(CC) -g -Wall -DHOST_TEST -Wno-pointer-to-int-cast -Ikmem_test_mocks host_test_kmem_test.c -o $@
 
@@ -209,17 +206,8 @@ host_test_ext2_read_block: host_test_ext2_read_block.c
 host_test_ext2_free_block: test_ext2_free_block.c
 	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. test_ext2_free_block.c -o $@
 
-host_test_ext2_alloc_inode_block: host_test_ext2_alloc_inode_block.c
-	$(CC) -g -Wall -DHOST_TEST -I../../sys -I. -idirafter ../../sys/include -idirafter ../../include host_test_ext2_alloc_inode_block.c -o $@
-
 host_test_ext2_readlink: host_test_ext2_readlink.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys -I. -idirafter ../../sys/include -idirafter ../../include host_test_ext2_readlink.c -o $@
-
-host_test_ext2_get_block_num: host_test_ext2_get_block_num.c
-	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_ext2_get_block_num.c -o $@
-
-host_test_ext2_get_blocks_extent: host_test_ext2_get_blocks_extent.c
-	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_ext2_get_blocks_extent.c ../../sys/fs/ext2/ext2.c -o $@
 
 host_test_fat_get_next_cluster: host_test_fat_get_next_cluster.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_fat_get_next_cluster.c -o $@
@@ -316,9 +304,6 @@ host_test_pmap_shootdown: host_test_pmap_shootdown.c
 host_test_futex: host_test_futex.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -Imocks -I../../sys -I. -idirafter ../../sys/include -idirafter ../../include host_test_futex.c -o $@
 
-host_test_ext2_get_block_num: host_test_ext2_get_block_num.c
-	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_ext2_get_block_num.c -o $@
-
 property_cmdline: property_cmdline.c
 	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../sys -I. property_cmdline.c ../../sys/kern/cmdline.c -o $@
 
@@ -327,9 +312,6 @@ tests.o: $(OBJS)
 
 clean:
 	rm -f *.o $(HOST_TESTS)
-
-host_test_ext2_alloc_inode_block: host_test_ext2_alloc_inode_block.c
-	$(CC) -g -Wall -DHOST_TEST -I../../sys -I. -idirafter ../../sys/include -idirafter ../../include host_test_ext2_alloc_inode_block.c -o $@
 
 host_test_udf_read_file: host_test_udf_read_file.c
 	$(CC) -g -Wall -I../../sys -I. -Ivuln_mocks -idirafter ../../sys/include -idirafter ../../include host_test_udf_read_file.c -o $@

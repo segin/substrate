@@ -12,6 +12,7 @@ static pci_device_t mock_devices[4];
 static struct device mock_kdevs[4];
 static uintptr_t mock_bars[4][PCI_BAR_COUNT];
 static int mock_irqs[4];
+static uint16_t mock_command[4];
 static size_t mock_device_count;
 
 static void reset_state(void) {
@@ -19,6 +20,7 @@ static void reset_state(void) {
     memset(mock_kdevs, 0, sizeof(mock_kdevs));
     memset(mock_bars, 0, sizeof(mock_bars));
     memset(mock_irqs, 0, sizeof(mock_irqs));
+    memset(mock_command, 0, sizeof(mock_command));
     mock_device_count = 0;
 }
 
@@ -101,6 +103,43 @@ uint32_t pci_read_config32(uint8_t bus, uint8_t slot, uint8_t func, uint16_t off
     return 0xFFFFFFFFU;
 }
 
+uint16_t pci_read_config16(uint8_t bus, uint8_t slot, uint8_t func, uint16_t offset) {
+    size_t i;
+
+    (void)bus;
+    (void)slot;
+
+    if (offset != PCI_CONFIG_COMMAND) {
+        return 0;
+    }
+
+    for (i = 0; i < mock_device_count; i++) {
+        if (mock_devices[i].func == func) {
+            return mock_command[i];
+        }
+    }
+
+    return 0;
+}
+
+void pci_write_config16(uint8_t bus, uint8_t slot, uint8_t func, uint16_t offset, uint16_t val) {
+    size_t i;
+
+    (void)bus;
+    (void)slot;
+
+    assert(offset == PCI_CONFIG_COMMAND);
+
+    for (i = 0; i < mock_device_count; i++) {
+        if (mock_devices[i].func == func) {
+            mock_command[i] = val;
+            return;
+        }
+    }
+
+    assert(0 && "unknown pci device for write_config16");
+}
+
 #include "../../sys/drivers/storage/ide/ide_pci.c"
 
 static void test_first_controller_uses_primary_secondary_pair(void) {
@@ -127,6 +166,8 @@ static void test_first_controller_uses_primary_secondary_pair(void) {
     assert(channels[1].bm_base == 0xF008);
     assert(channels[0].dma_capable == 1);
     assert(channels[1].dma_capable == 1);
+    assert((mock_command[0] & (PCI_COMMAND_IO | PCI_COMMAND_MASTER)) ==
+           (PCI_COMMAND_IO | PCI_COMMAND_MASTER));
     assert(channels[0].irq == 14);
     assert(channels[1].irq == 14);
     assert(irq_shared[0] == 1);
@@ -165,6 +206,43 @@ static void test_second_controller_claims_tertiary_quaternary_pair(void) {
     assert(channels[3].irq == 11);
     assert(irq_shared[2] == 1);
     assert(irq_shared[3] == 1);
+    assert((mock_command[1] & (PCI_COMMAND_IO | PCI_COMMAND_MASTER)) ==
+           (PCI_COMMAND_IO | PCI_COMMAND_MASTER));
+}
+
+static void test_compatibility_mode_still_imports_bus_master_bars(void) {
+    ide_channel_t channels[MAX_IDE_CHANNELS];
+    uint8_t irq_shared[MAX_IDE_CHANNELS];
+
+    reset_state();
+    memset(channels, 0, sizeof(channels));
+    memset(irq_shared, 0, sizeof(irq_shared));
+
+    channels[0].io_base = ATA_PRIMARY_IO;
+    channels[0].ctrl_base = ATA_PRIMARY_CTRL;
+    channels[0].irq = ATA_PRIMARY_IRQ;
+    channels[1].io_base = ATA_SECONDARY_IO;
+    channels[1].ctrl_base = ATA_SECONDARY_CTRL;
+    channels[1].irq = ATA_SECONDARY_IRQ;
+
+    add_ide_controller(0x80U, 14);
+    mock_bars[0][4] = 0xF001U;
+
+    assert(ide_pci_configure_channels(channels, irq_shared) == 1);
+    assert(channels[0].io_base == ATA_PRIMARY_IO);
+    assert(channels[0].ctrl_base == ATA_PRIMARY_CTRL);
+    assert(channels[0].irq == ATA_PRIMARY_IRQ);
+    assert(channels[1].io_base == ATA_SECONDARY_IO);
+    assert(channels[1].ctrl_base == ATA_SECONDARY_CTRL);
+    assert(channels[1].irq == ATA_SECONDARY_IRQ);
+    assert(channels[0].bm_base == 0xF000);
+    assert(channels[1].bm_base == 0xF008);
+    assert(channels[0].dma_capable == 1);
+    assert(channels[1].dma_capable == 1);
+    assert((mock_command[0] & (PCI_COMMAND_IO | PCI_COMMAND_MASTER)) ==
+           (PCI_COMMAND_IO | PCI_COMMAND_MASTER));
+    assert(irq_shared[0] == 0);
+    assert(irq_shared[1] == 0);
 }
 
 static void test_ignores_non_ide_devices_and_channel_overflow(void) {
@@ -205,6 +283,7 @@ static void test_ignores_non_ide_devices_and_channel_overflow(void) {
 int main(void) {
     test_first_controller_uses_primary_secondary_pair();
     test_second_controller_claims_tertiary_quaternary_pair();
+    test_compatibility_mode_still_imports_bus_master_bars();
     test_ignores_non_ide_devices_and_channel_overflow();
     puts("host_test_ide_pci: PASS");
     return 0;
