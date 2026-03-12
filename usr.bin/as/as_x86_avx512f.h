@@ -23,6 +23,7 @@ typedef struct {
     int broadcast;
     int sae;
     int rounding_mode; /* -1 or 0..3 */
+    int evex_w_override; /* -1 to use descriptor default, otherwise 0 or 1 */
     size_t op_count;
 } as_x86_avx512f_insn_t;
 

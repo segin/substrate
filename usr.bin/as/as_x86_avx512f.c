@@ -160,7 +160,7 @@ static int encode_evex_desc(const avx512f_desc_t *desc, const as_x86_avx512f_ins
     ev.opcode = desc->opcode;
     ev.map = desc->map;
     ev.pp = desc->pp;
-    ev.evex_w = desc->evex_w;
+    ev.evex_w = (insn->evex_w_override >= 0) ? (uint8_t)insn->evex_w_override : (uint8_t)desc->evex_w;
     ev.opmask = insn->opmask;
     ev.zeroing = insn->zeroing;
     ev.broadcast = insn->broadcast;
@@ -199,8 +199,12 @@ static int encode_evex_desc(const avx512f_desc_t *desc, const as_x86_avx512f_ins
             return -1;
         }
         dst = insn->op1.u.reg;
-        if (streq_ci(desc->mnemonic, "vpsrldq")) {
+        if (streq_ci(desc->mnemonic, "vpsrlq")) {
+            src1 = AS_X86_REG_RDX;
+        } else if (streq_ci(desc->mnemonic, "vpsrldq")) {
             src1 = AS_X86_REG_RBX;
+        } else if (streq_ci(desc->mnemonic, "vpsllq")) {
+            src1 = AS_X86_REG_RSI;
         } else if (streq_ci(desc->mnemonic, "vpslldq")) {
             src1 = AS_X86_REG_RDI;
         } else {
@@ -668,7 +672,9 @@ int as_x86_encode_avx512f(const as_x86_avx512f_insn_t *insn, uint8_t *out, size_
         {"vpcmpq", AVX512F_FORM_KCMP, 0x1f, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 1, -1, 1, 0, 0, 0},
         {"vpcmpud", AVX512F_FORM_KCMP, 0x1e, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 0, -1, 1, 0, 0, 0},
         {"vpcmpuq", AVX512F_FORM_KCMP, 0x1e, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 1, -1, 1, 0, 0, 0},
+        {"vpsrlq", AVX512F_FORM_RRI, 0x73, AS_EVEX_MAP_0F, AS_EVEX_PP_66, 0, -1, 1, 0, 0, 0},
         {"vpsrldq", AVX512F_FORM_RRI, 0x73, AS_EVEX_MAP_0F, AS_EVEX_PP_66, 0, -1, 1, 0, 0, 0},
+        {"vpsllq", AVX512F_FORM_RRI, 0x73, AS_EVEX_MAP_0F, AS_EVEX_PP_66, 0, -1, 1, 0, 0, 0},
         {"vpslldq", AVX512F_FORM_RRI, 0x73, AS_EVEX_MAP_0F, AS_EVEX_PP_66, 0, -1, 1, 0, 0, 0},
         {"vpshldd", AVX512F_FORM_RRRI, 0x71, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 0, -1, 1, 0, 0, 0},
         {"vpshrdd", AVX512F_FORM_RRRI, 0x73, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 0, -1, 1, 0, 0, 0},
