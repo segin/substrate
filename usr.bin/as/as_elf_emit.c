@@ -1440,6 +1440,54 @@ static int lookup_i386_f3_scalar_xmm_opcode(const char *mnemonic, unsigned char 
     return -1;
 }
 
+static int lookup_i386_fixed_0f_opcode(const char *mnemonic, unsigned char *opcode2) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char opcode2;
+    } map[] = {
+        {"cpuid", 0xa2},
+        {"montmul", 0xa6},
+        {"xstore-rng", 0xa7},
+        {"rsm", 0xaa},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || opcode2 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *opcode2 = map[i].opcode2;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_shiftd_opcode(const char *mnemonic, unsigned char *reg_opcode, unsigned char *imm_opcode) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char reg_opcode;
+        unsigned char imm_opcode;
+    } map[] = {
+        {"shld", 0xa5, 0xa4},
+        {"shrd", 0xad, 0xac},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || reg_opcode == NULL || imm_opcode == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *reg_opcode = map[i].reg_opcode;
+            *imm_opcode = map[i].imm_opcode;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static int lookup_i386_xmm_imm8_family(const char *mnemonic, unsigned char *prefix, unsigned char *opcode2) {
     static const struct {
         const char *mnemonic;
@@ -4333,10 +4381,9 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (insn->operand_count != 0 || out == NULL || out_len == NULL || out_cap < 2) {
             return -1;
         }
-        if (strcmp(mnbuf, "cpuid") == 0) opcode2 = 0xa2;
-        else if (strcmp(mnbuf, "montmul") == 0) opcode2 = 0xa6;
-        else if (strcmp(mnbuf, "xstore-rng") == 0) opcode2 = 0xa7;
-        else opcode2 = 0xaa;
+        if (lookup_i386_fixed_0f_opcode(mnbuf, &opcode2) != 0) {
+            return -1;
+        }
         out[0] = 0x0f;
         out[1] = opcode2;
         *out_len = 2;
@@ -4358,6 +4405,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         const as_operand_t *dst_op;
         as_x86_reg_t gr;
         long long immv;
+        unsigned char reg_opcode;
+        unsigned char imm_opcode;
 
         if (insn->operand_count != 3) {
             return -1;
@@ -4374,21 +4423,23 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (src_op->kind != AS_OPERAND_REGISTER || parse_x86_reg(src_op->u.reg, &gr) != 0 || (gr & 8u) != 0u) {
             return -1;
         }
+        if (lookup_i386_shiftd_opcode(mnbuf, &reg_opcode, &imm_opcode) != 0) {
+            return -1;
+        }
         if (count_op->kind == AS_OPERAND_REGISTER) {
             as_x86_reg_t cr;
 
             if (parse_x86_reg(count_op->u.reg, &cr) != 0 || cr != AS_X86_REG_ECX) {
                 return -1;
             }
-            return emit_i386_prefixed_0f_rm(0x00, strcmp(mnbuf, "shld") == 0 ? 0xa5 : 0xad,
-                                            (unsigned)gr & 7u, dst_op, out, out_cap, out_len);
+            return emit_i386_prefixed_0f_rm(0x00, reg_opcode, (unsigned)gr & 7u, dst_op, out, out_cap, out_len);
         }
         if ((count_op->kind != AS_OPERAND_IMMEDIATE && count_op->kind != AS_OPERAND_LABEL_REF) ||
             eval_expr_const(count_op->u.expr, &immv) != 0 || immv < 0 || immv > 255) {
             return -1;
         }
-        return emit_i386_legacy_simd_rm_imm8(0x00, strcmp(mnbuf, "shld") == 0 ? 0xa4 : 0xac,
-                                             (unsigned)gr & 7u, dst_op, (unsigned char)immv, out, out_cap, out_len);
+        return emit_i386_legacy_simd_rm_imm8(0x00, imm_opcode, (unsigned)gr & 7u, dst_op,
+                                             (unsigned char)immv, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "fxsave") == 0 || strcmp(mnbuf, "fxrstor") == 0 || strcmp(mnbuf, "ldmxcsr") == 0 ||
         strcmp(mnbuf, "stmxcsr") == 0 || strcmp(mnbuf, "xsave") == 0 || strcmp(mnbuf, "xrstor") == 0 ||
