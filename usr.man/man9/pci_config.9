@@ -57,6 +57,9 @@ configuration words.
 .Pp
 Offsets beyond the first 256 bytes of conventional PCI configuration space are
 not accessible through these functions and read as all-ones.
+.Pp
+On systems that do not implement PCI configuration mechanism #1, the read
+functions also return all-ones and the write functions are ignored.
 .Sh RETURN VALUES
 The typed read functions return the requested value.
 Out-of-range bytes read as

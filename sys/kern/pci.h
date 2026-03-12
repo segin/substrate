@@ -19,6 +19,7 @@ typedef struct pci_device {
 } pci_device_t;
 
 uint32_t pci_config_address(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset);
+int pci_present(void);
 
 uint8_t pci_read_config8(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset);
 uint16_t pci_read_config16(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset);

@@ -6,6 +6,7 @@
 
 static uint8_t mock_config[256];
 static uint32_t selected_address;
+static int mock_pci_present = 1;
 
 void kprint(const char *str) {
     (void)str;
@@ -21,6 +22,10 @@ void kfree(void *ptr) {
 
 void pci_test_config_select(uint32_t address) {
     selected_address = address;
+}
+
+uint32_t pci_test_config_readback(void) {
+    return mock_pci_present ? selected_address : 0U;
 }
 
 static int selected_matches_device(void) {
@@ -59,6 +64,7 @@ void pci_test_data_write32(uint32_t value) {
 static void reset_config(void) {
     memset(mock_config, 0xFF, sizeof(mock_config));
     selected_address = 0;
+    mock_pci_present = 1;
 }
 
 static void test_pci_config_address_aligns_offset(void) {
@@ -93,6 +99,22 @@ static void test_missing_device_reads_as_all_ones(void) {
     assert(pci_read_config8(0, 0, 0, 0) == 0xFFU);
     assert(pci_read_config16(0, 0, 0, 0) == 0xFFFFU);
     assert(pci_read_config32(0, 0, 0, 0) == 0xFFFFFFFFU);
+}
+
+static void test_absent_pci_bus_reads_as_all_ones_and_ignores_writes(void) {
+    uint32_t before = 0x11223344U;
+
+    reset_config();
+    memcpy(&mock_config[0x20], &before, sizeof(before));
+    mock_pci_present = 0;
+
+    assert(!pci_present());
+    assert(pci_read_config8(2, 3, 1, 0x20) == 0xFFU);
+    assert(pci_read_config16(2, 3, 1, 0x20) == 0xFFFFU);
+    assert(pci_read_config32(2, 3, 1, 0x20) == 0xFFFFFFFFU);
+
+    pci_write_config32(2, 3, 1, 0x20, 0xAABBCCDDU);
+    assert(memcmp(&mock_config[0x20], &before, sizeof(before)) == 0);
 }
 
 static void test_typed_writes_round_trip_and_preserve_neighbors(void) {
@@ -132,6 +154,7 @@ int main(void) {
     test_typed_reads_extract_expected_values();
     test_word_reads_cross_dword_boundary();
     test_missing_device_reads_as_all_ones();
+    test_absent_pci_bus_reads_as_all_ones_and_ignores_writes();
     test_typed_writes_round_trip_and_preserve_neighbors();
     test_word_writes_cross_dword_boundary();
     puts("host_test_pci_config: PASS");

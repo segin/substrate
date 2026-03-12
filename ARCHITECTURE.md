@@ -106,6 +106,7 @@ The i386 kernel is compiled to an explicit i486 baseline:
 - kernel C objects use `-march=i486 -mtune=i486`
 - compiler-generated Pentium+ instructions such as `cmov` are not permitted in the core kernel image
 - newer CPU instructions remain isolated to explicit runtime-gated code paths (for example `cpuid`, `rdtsc`, `fxsave`, `rdrand`) and must not execute unless the early CPU feature probe has marked them present
+- PCI support is optional at runtime; the PCI layer first verifies configuration mechanism #1 is present and degrades to a no-op/all-ones config space view on non-PCI machines such as older 486-class systems
 
 The i386 PMAP implementation is a two-level paging design:
 - page directory + page tables
