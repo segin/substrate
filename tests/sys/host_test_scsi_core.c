@@ -19,6 +19,9 @@ static int mock_request_sense_count;
 static uint8_t mock_sense_key_code;
 static uint8_t mock_sense_asc;
 static uint8_t mock_sense_ascq;
+static int callback_calls;
+static int callback_last_error;
+static int callback_last_state;
 
 void kprint(const char *str) {
     (void)str;
@@ -48,6 +51,12 @@ int scsi_dev_detach(scsi_device_t *scsi_dev) {
     (void)scsi_dev;
     detach_calls++;
     return 0;
+}
+
+static void record_callback(scsi_request_t *req) {
+    callback_calls++;
+    callback_last_error = req->error;
+    callback_last_state = req->state;
 }
 
 static int mock_execute(scsi_link_t *link, scsi_request_t *req) {
@@ -135,6 +144,9 @@ static void reset_state(void) {
     mock_sense_key_code = SCSI_SENSE_NO_SENSE;
     mock_sense_asc = 0;
     mock_sense_ascq = 0;
+    callback_calls = 0;
+    callback_last_error = 0;
+    callback_last_state = 0;
     scsi_init();
 }
 
@@ -371,6 +383,78 @@ static void test_execute_retries_not_ready(void) {
     scsi_request_free(req);
 }
 
+static void test_abort_request_preserves_tail(void) {
+    scsi_device_t dev;
+    scsi_request_t *req1;
+    scsi_request_t *req2;
+
+    reset_state();
+    memset(&dev, 0, sizeof(dev));
+    dev.max_queue_depth = 2;
+
+    req1 = scsi_request_alloc();
+    req2 = scsi_request_alloc();
+    assert(req1 != NULL && req2 != NULL);
+    scsi_request_init(req1, &dev);
+    scsi_request_init(req2, &dev);
+    req1->state = SCSI_REQ_STATE_PENDING;
+    req2->state = SCSI_REQ_STATE_PENDING;
+    req2->callback = record_callback;
+    req1->next = req2;
+    req2->next = NULL;
+    dev.queue_head = req1;
+    dev.queue_tail = req2;
+    dev.queue_depth = 2;
+
+    assert(scsi_abort_request(req2) == 0);
+    assert(dev.queue_head == req1);
+    assert(dev.queue_tail == req1);
+    assert(dev.queue_depth == 1);
+    assert(callback_calls == 1);
+    assert(callback_last_state == SCSI_REQ_STATE_ERROR);
+
+    scsi_request_free(req1);
+    scsi_request_free(req2);
+}
+
+static void test_complete_request_runs_next_queued_request(void) {
+    scsi_device_t dev;
+    scsi_request_t *done_req;
+    scsi_request_t *queued_req;
+
+    reset_state();
+    memset(&dev, 0, sizeof(dev));
+    dev.link = &(scsi_link_t){
+        .execute = mock_execute,
+    };
+    dev.max_queue_depth = 1;
+
+    done_req = scsi_request_alloc();
+    queued_req = scsi_request_alloc();
+    assert(done_req != NULL && queued_req != NULL);
+    scsi_request_init(done_req, &dev);
+    scsi_request_init(queued_req, &dev);
+    done_req->callback = record_callback;
+    queued_req->state = SCSI_REQ_STATE_PENDING;
+    queued_req->cdb[0] = SCSI_CMD_TEST_UNIT_READY;
+    queued_req->cdb_len = 6;
+    dev.queue_head = queued_req;
+    dev.queue_tail = queued_req;
+    dev.queue_depth = 1;
+
+    scsi_complete_request(done_req, 0);
+    assert(callback_calls == 1);
+    assert(callback_last_error == 0);
+    assert(dev.queue_depth == 0);
+    assert(dev.queue_head == NULL);
+    assert(dev.queue_tail == NULL);
+    assert(execute_calls == 1);
+    assert(queued_req->state == SCSI_REQ_STATE_COMPLETE);
+
+    scsi_request_free(done_req);
+    scsi_request_free(queued_req);
+}
+
 int main(void) {
     test_register_link_sets_defaults_and_scans();
     test_unregister_link_detaches_registered_devices();
@@ -379,6 +463,8 @@ int main(void) {
     test_execute_stops_on_medium_error();
     test_execute_retries_busy();
     test_execute_retries_not_ready();
+    test_abort_request_preserves_tail();
+    test_complete_request_runs_next_queued_request();
     puts("host_test_scsi_core: PASS");
     return 0;
 }

@@ -141,9 +141,9 @@
             - [ ] **Async Queue Management:** (REQ: REQ-03-0097)
                 - [ ] `scsi_queue_request(req)`: enqueue to device's command queue. (REQ: REQ-03-0098)
                     - [ ] Respect `max_queue_depth` (drop or backpressure). (REQ: REQ-03-0099)
-                - [ ] `scsi_process_queue(dev)`: dequeue and execute pending requests. (REQ: REQ-03-0100)
-                - [ ] `scsi_abort_request(req)`: cancel pending request (remove from queue, invoke callback with error). (REQ: REQ-03-0101)
-                - [ ] `scsi_complete_request(req, status)`: mark done, invoke callback, trigger queue processing. (REQ: REQ-03-0102)
+                - [x] `scsi_process_queue(dev)`: dequeue and execute pending requests. (REQ: REQ-03-0100)
+                - [x] `scsi_abort_request(req)`: cancel pending request (remove from queue, invoke callback with error). (REQ: REQ-03-0101)
+                - [x] `scsi_complete_request(req, status)`: mark done, invoke callback, trigger queue processing. (REQ: REQ-03-0102)
 
         - [x] **Sense Data Parsing:** (REQ: REQ-03-0103)
             - [x] `scsi_sense_key(sense, len)`: extract sense key from fixed or descriptor format. (REQ: REQ-03-0104)

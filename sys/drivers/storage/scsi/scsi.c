@@ -486,13 +486,17 @@ int scsi_process_queue(scsi_device_t *dev) {
     
     int started = 0;
     
-    while (dev->queue_head && dev->queue_depth <= dev->max_queue_depth) {
+    while (dev->queue_head &&
+           (dev->max_queue_depth == 0 || started < (int)dev->max_queue_depth)) {
         scsi_request_t *req = dev->queue_head;
         
         /* Remove from queue head */
         dev->queue_head = req->next;
         if (!dev->queue_head) {
             dev->queue_tail = NULL;
+        }
+        if (dev->queue_depth > 0) {
+            dev->queue_depth--;
         }
         req->next = NULL;
         
@@ -513,6 +517,7 @@ int scsi_abort_request(scsi_request_t *req) {
     }
     
     scsi_device_t *dev = req->device;
+    scsi_request_t *prev = NULL;
     
     /* Only abort if pending (not yet started) */
     if (req->state != SCSI_REQ_STATE_PENDING) {
@@ -525,9 +530,11 @@ int scsi_abort_request(scsi_request_t *req) {
         if (*pp == req) {
             *pp = req->next;
             if (dev->queue_tail == req) {
-                dev->queue_tail = NULL;
+                dev->queue_tail = prev;
             }
-            dev->queue_depth--;
+            if (dev->queue_depth > 0) {
+                dev->queue_depth--;
+            }
             
             req->state = SCSI_REQ_STATE_ERROR;
             req->error = -1;  /* Aborted */
@@ -539,6 +546,7 @@ int scsi_abort_request(scsi_request_t *req) {
             
             return 0;
         }
+        prev = *pp;
         pp = &(*pp)->next;
     }
     
@@ -561,7 +569,6 @@ void scsi_complete_request(scsi_request_t *req, int status) {
     
     /* Process next queued request */
     if (req->device) {
-        req->device->queue_depth--;
         scsi_process_queue(req->device);
     }
 }
