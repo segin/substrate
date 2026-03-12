@@ -1213,6 +1213,7 @@ extern void test_kernel_bootstrap_large_page(void);
 extern void test_kernel_pmap_protection(void);
 extern void test_ksyms(void);
 extern void test_large_mapping(void);
+extern void test_linux_personality(void);
 extern void test_mem(void);
 extern void test_mmap_anonymous(void);
 extern void test_mmap_fixed(void);
@@ -3065,6 +3066,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&run_crc32_tests, "run_crc32_tests" },
     { (uint32_t)(uintptr_t)&run_devfs_special_device_tests, "run_devfs_special_device_tests" },
     { (uint32_t)(uintptr_t)&run_ldt_tests, "run_ldt_tests" },
+    { (uint32_t)(uintptr_t)&test_linux_personality, "test_linux_personality" },
     { (uint32_t)(uintptr_t)&test_tty_alloc, "test_tty_alloc" },
     { (uint32_t)(uintptr_t)&test_tty_canonical, "test_tty_canonical" },
     { (uint32_t)(uintptr_t)&test_tty_ixoff, "test_tty_ixoff" },
@@ -3173,4 +3175,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1581;
+int ksym_count = 1582;

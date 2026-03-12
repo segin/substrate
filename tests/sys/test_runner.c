@@ -23,6 +23,7 @@ void run_cow_stats_tests(void);
 extern void test_pte_user(void);
 extern void test_stacktrace(void);
 extern void test_ksyms(void);
+extern void test_linux_personality(void);
 extern void test_mmap_parsing(void);
 extern void test_e820_parsing(void);
 extern void test_vm_phys(void);
@@ -116,6 +117,10 @@ void run_kernel_tests(void) {
 
     if (all || strcmp(test_arg, "ksyms") == 0) {
         test_ksyms();
+    }
+
+    if (all || strcmp(test_arg, "linux_perso") == 0) {
+        test_linux_personality();
     }
 
     if (all || strcmp(test_arg, "mmap_parsing") == 0) {

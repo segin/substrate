@@ -58,6 +58,7 @@
 #define LINUX_SYS_fstat_new      108
 #define LINUX_SYS_clone          120
 #define LINUX_SYS_uname          122
+#define LINUX_SYS_modify_ldt     123
 #define LINUX_SYS_getpgid        132
 #define LINUX_SYS_fchdir         133
 #define LINUX_SYS__llseek        140
