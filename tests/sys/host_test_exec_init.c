@@ -89,6 +89,10 @@ int smp_get_cpu_id(void) {
     return 0;
 }
 
+void kprint(const char *msg) {
+    (void)msg;
+}
+
 int main(void) {
     exec_init();
 

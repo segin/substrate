@@ -37,24 +37,30 @@ ELKS and `elksemu`.
 
 ### 2.1 Recognized primary header contract
 
-Upstream ELKS defines the executable header in
-`elks/arch/i86/tools/a.out.h` as:
+The executable header contract Substrate targets is the packed
+`minix_exec_hdr` / `elksemu` shape documented in:
 
-- `a_magic[0] == 0x01`
-- `a_magic[1] == 0x03`
-- `a_cpu == A_I8086 (0x04)`
-- `a_hdrlen >= A_MINHDR (32)`
+- `/home/segin/elks/Documentation/text/binformat.txt`
+- `/home/segin/elks/elksemu/elks.h`
 
-The byte at offset `2` is a flag byte, not a standalone image-class number.
-For compatibility with the ELKS tree, `elksemu`, and historical converted
-images, Substrate shall admit:
+The first 32 bits of the executable header are interpreted as a little-endian
+`type` field encoding magic, flags, and CPU type. The currently supported ELKS
+image identifiers are:
 
-- `0x10` (`A_EXEC`)
-- `0x20` (`A_SEP`)
-- `0x30` (`A_EXEC | A_SEP`)
+- `0x04100301` (`ELKS_COMBID`)
+- `0x04200301` (`ELKS_SPLITID`)
+- `0x04300301` (`ELKS_SPLITID_AHISTORICAL`)
+
+Operationally, this means the first four bytes are:
+
+- byte 0: `0x01`
+- byte 1: `0x03`
+- byte 2: `0x10`, `0x20`, or `0x30`
+- byte 3: `0x04`
 
 Substrate shall not identify ELKS binaries by a standalone `0x0301` halfword
-test. The discriminator is the full Minix-style header shape above.
+test. The discriminator is the full Minix-style 32-bit `type` field together
+with the rest of the packed ELKS executable header.
 
 ### 2.2 Header layout
 

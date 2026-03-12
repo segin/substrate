@@ -31,13 +31,13 @@ Reference: User Request (Step 31552)
         - Tests: N/A (design doc)
         - Acceptance: Each 16-bit memory model's segment layout, pointer-width expectations, and the current Substrate support target are documented.
 
-- [ ] **Binary Format Recognition:** (REQ: REQ-20-0006)
-    - [ ] Implement ELKS a.out binary format detection. (REQ: REQ-20-0007)
+- [x] **Binary Format Recognition:** (REQ: REQ-20-0006)
+    - [x] Implement ELKS a.out binary format detection. (REQ: REQ-20-0007)
         - Files: `sys/exec/formats/elks_aout.c`, `sys/exec/formats/elks_aout.h`
         - Tests: unit (magic number detection)
         - Docs: `elks_aout.4` manpage
         - Acceptance: Correctly identify ELKS Minix-style `a.out` headers with magic bytes `0x01 0x03`, CPU `A_I8086`, and compatible flag values (`0x10`, `0x20`, `0x30`), including supplemental-header variants.
-    - [ ] Register ELKS loader with exec subsystem. (REQ: REQ-20-0008)
+    - [x] Register ELKS loader with exec subsystem. (REQ: REQ-20-0008)
         - Files: `sys/exec/exec.c`, `sys/exec/formats/elks_aout.c`
         - Tests: integration (exec ELKS binary triggers loader)
         - Acceptance: ELKS binaries dispatched to elks_load() function.
