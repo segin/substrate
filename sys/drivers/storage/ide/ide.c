@@ -1270,14 +1270,24 @@ static int ide_scan_controller(void) {
                 }
             }
 
-            if (type != -1 && ide_device_count < MAX_IDE_DEVICES) {
+            if (type != -1) {
+                int slot = IDE_DEVICE_INDEX(ch, d);
                 uint64_t total_sectors;
                 uint32_t sector_size = 512;
+                blkdev_t *bdev;
 
-                ide_parse_identify_data(&ide_devices[ide_device_count], buf,
+                if (slot < 0 || slot >= MAX_IDE_DEVICES) {
+                    continue;
+                }
+
+                if (!ide_devices[slot].present) {
+                    ide_device_count++;
+                }
+
+                ide_parse_identify_data(&ide_devices[slot], buf,
                                         (uint8_t)type, (uint8_t)ch,
                                         (uint8_t)d);
-                total_sectors = ide_devices[ide_device_count].size;
+                total_sectors = ide_devices[slot].size;
 
                 if (type == 1) {
                     /* ATAPI size calculation */
@@ -1292,26 +1302,26 @@ static int ide_scan_controller(void) {
                     }
                 }
                 
-                ide_devices[ide_device_count].size = total_sectors;
+                ide_devices[slot].size = total_sectors;
                 
                 /* Setup context */
-                ide_contexts[ide_device_count].channel = ch;
-                ide_contexts[ide_device_count].drive = d;
-                ide_contexts[ide_device_count].type = type;
+                ide_contexts[slot].channel = ch;
+                ide_contexts[slot].drive = d;
+                ide_contexts[slot].type = type;
                 
                 /* Setup blkdev */
-                blkdev_t *bdev = &ide_blkdevs[ide_device_count];
+                bdev = &ide_blkdevs[slot];
                 memset(bdev, 0, sizeof(blkdev_t));
                 
                 bdev->name[0] = 'i';
                 bdev->name[1] = 'd';
                 bdev->name[2] = 'e';
-                bdev->name[3] = '0' + ide_device_count;
+                bdev->name[3] = '0' + slot;
                 bdev->name[4] = '\0';
                 
                 bdev->sector_size = sector_size;
                 bdev->total_sectors = total_sectors;
-                bdev->priv = &ide_contexts[ide_device_count];
+                bdev->priv = &ide_contexts[slot];
                 bdev->read = ide_blkdev_read;
                 bdev->write = ide_blkdev_write;
                 
@@ -1319,7 +1329,7 @@ static int ide_scan_controller(void) {
                 kprint("  ");
                 kprint(bdev->name);
                 kprint(": ");
-                kprint(ide_devices[ide_device_count].model);
+                kprint(ide_devices[slot].model);
                 kprint(" (");
                 kprint(ide_channel_labels[ch]);
                 kprint(" ");
@@ -1328,8 +1338,6 @@ static int ide_scan_controller(void) {
                 kprint(")\n");
 
                 blkdev_scan_partitions(bdev);
-                
-                ide_device_count++;
             }
         }
     }

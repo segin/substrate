@@ -8,6 +8,16 @@ The ATA/IDE driver provides legacy PATA transport for:
 - ATA disks and ATAPI packet devices
 
 Device nodes are published under `/dev/storage/ideN`.
+The slot mapping is fixed by channel and drive:
+
+- `ide0` primary master
+- `ide1` primary slave
+- `ide2` secondary master
+- `ide3` secondary slave
+- `ide4` tertiary master
+- `ide5` tertiary slave
+- `ide6` quaternary master
+- `ide7` quaternary slave
 
 ## Channel Model
 

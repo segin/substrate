@@ -35,6 +35,7 @@
 
 #define MAX_IDE_CHANNELS 4
 #define MAX_IDE_DEVICES  (MAX_IDE_CHANNELS * 2)
+#define IDE_DEVICE_INDEX(channel, drive) (((channel) * 2) + ((drive) & 1))
 
 /*
  * ============================================================

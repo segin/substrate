@@ -115,6 +115,14 @@ int main(void) {
     assert(ATA_QUATERNARY_CTRL == 0x36E);
     assert(MAX_IDE_CHANNELS == 4);
     assert(MAX_IDE_DEVICES == 8);
+    assert(IDE_DEVICE_INDEX(0, 0) == 0);
+    assert(IDE_DEVICE_INDEX(0, 1) == 1);
+    assert(IDE_DEVICE_INDEX(1, 0) == 2);
+    assert(IDE_DEVICE_INDEX(1, 1) == 3);
+    assert(IDE_DEVICE_INDEX(2, 0) == 4);
+    assert(IDE_DEVICE_INDEX(2, 1) == 5);
+    assert(IDE_DEVICE_INDEX(3, 0) == 6);
+    assert(IDE_DEVICE_INDEX(3, 1) == 7);
 
     test_parse_identify_ata();
     test_parse_identify_ata_lba28_only();
