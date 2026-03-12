@@ -240,6 +240,25 @@ int main(void) {
             return 1;
         }
 
+        bad = suspicious;
+        memset(&bad, 0, sizeof(bad));
+        bad.entry_number = LDT_ENTRIES;
+        ldt_get_diag_snapshot(&before_diag);
+        if (sys_modify_ldt(LDT_WRITE, &bad, sizeof(bad)) != -EINVAL) {
+            fprintf(stderr, "FAIL: out-of-range LDT entry accepted\n");
+            return 1;
+        }
+        ldt_get_diag_snapshot(&after_diag);
+        if (after_diag.validation_failures != before_diag.validation_failures + 1U) {
+            fprintf(stderr, "FAIL: out-of-range descriptor did not increment validation counter\n");
+            return 1;
+        }
+
+        if (sys_modify_ldt(LDT_WRITE, &bad, sizeof(bad) - 1U) != -EINVAL) {
+            fprintf(stderr, "FAIL: partial user_desc payload accepted\n");
+            return 1;
+        }
+
         memset(&suspicious, 0, sizeof(suspicious));
         suspicious.entry_number = 512;
         suspicious.base_addr = 0x56780000U;

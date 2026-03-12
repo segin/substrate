@@ -66,6 +66,31 @@ Still missing or intentionally deferred:
 - Remote CPUs never mutate another process LDT directly; activation happens
   when the target process is scheduled on a CPU.
 
+## Lifecycle Rules
+
+- Context switch:
+  - `arch_switch_to()` activates the next process pmap first and then calls
+    `ldt_activate(next->proc)`.
+  - Processes with no LDT clear `LDTR` instead of inheriting stale state.
+- Fork:
+  - `proc_fork_common()` clones LDT state by value through
+    `ldt_clone_process()`.
+  - Parent and child never share the same mutable LDT allocation.
+- Exec:
+  - Flat native/Linux/FreeBSD ELF exec clears any inherited private LDT state
+    before creating the new `vm_map`.
+  - ELKS exec replaces the process LDT with a freshly built descriptor set for
+    the new 16-bit image.
+- Exit/reap:
+  - `proc_release_zombie_resources()` frees the process LDT before the process
+    slot is recycled.
+- SMP update rule:
+  - LDT mutation changes the owning process state under `ldt_lock`.
+  - The current CPU reloads `LDTR` immediately when mutating the current
+    process.
+  - Remote CPUs see the new `LDTR` state on the next context switch into that
+    process; there is no remote in-place descriptor rewrite path.
+
 ## Permission Model
 
 Current kernel policy:
@@ -112,7 +137,14 @@ Design note:
     logging
 - `tests/sys/host_test_ldt_race.c`
   - concurrent read/write/alloc/clone races
+- `tests/sys/host_test_ldt_codec.c`
+  - descriptor encode/decode round-trip for base/limit semantics
+- `tests/sys/host_test_ldt_fuzz.c`
+  - randomized `sys_modify_ldt()` function/size/descriptor stress
 - `tests/sys/host_test_i386_sched_ldt.c`
   - switch-time activation and no-reload fast path
 - `tests/sys/test_linux_personality.c`
   - Linux syscall `123` wiring, name, and trace metadata
+- ELKS host/runtime integration
+  - the ELKS loader and signal/core tests exercise private per-process LDT
+    selectors and 16-bit `CS/DS/SS` behavior through the ELKS personality path
