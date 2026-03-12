@@ -1269,6 +1269,34 @@ static int lookup_i386_f3_0fae_group(const char *mnemonic, unsigned *reg_field) 
     return -1;
 }
 
+static int lookup_i386_xmm_imm8_family(const char *mnemonic, unsigned char *prefix, unsigned char *opcode2) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char prefix;
+        unsigned char opcode2;
+    } map[] = {
+        {"cmpps", 0x00, 0xc2},
+        {"cmppd", 0x66, 0xc2},
+        {"cmpss", 0xf3, 0xc2},
+        {"shufps", 0x00, 0xc6},
+        {"shufpd", 0x66, 0xc6},
+        {"pshufd", 0x66, 0x70},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || prefix == NULL || opcode2 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *prefix = map[i].prefix;
+            *opcode2 = map[i].opcode2;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static int emit_i386_3dnow_rm(unsigned char reg_field, const as_operand_t *src, unsigned char imm8,
                               unsigned char *out, size_t out_cap, size_t *out_len) {
     size_t pos = 0;
@@ -4414,28 +4442,20 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (strcmp(mnbuf, "cmpps") == 0 || strcmp(mnbuf, "cmppd") == 0 || strcmp(mnbuf, "cmpss") == 0 ||
             strcmp(mnbuf, "shufps") == 0 || strcmp(mnbuf, "shufpd") == 0 ||
             strcmp(mnbuf, "pshufd") == 0) {
+            unsigned char prefix;
+            unsigned char opcode2;
+
             if (dst_op->kind != AS_OPERAND_REGISTER || parse_xmm_reg(dst_op->u.reg, &xr) != 0) {
                 return -1;
             }
             if (src_op->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src_op->u.reg, &xm) != 0) {
                 return -1;
             }
-            if (strcmp(mnbuf, "cmpps") == 0) {
-                return emit_i386_legacy_simd_rm_imm8(0x00, 0xc2, xr, src_op, (unsigned char)immv, out, out_cap, out_len);
+            if (lookup_i386_xmm_imm8_family(mnbuf, &prefix, &opcode2) != 0) {
+                return -1;
             }
-            if (strcmp(mnbuf, "cmppd") == 0) {
-                return emit_i386_legacy_simd_rm_imm8(0x66, 0xc2, xr, src_op, (unsigned char)immv, out, out_cap, out_len);
-            }
-            if (strcmp(mnbuf, "cmpss") == 0) {
-                return emit_i386_legacy_simd_rm_imm8(0xf3, 0xc2, xr, src_op, (unsigned char)immv, out, out_cap, out_len);
-            }
-            if (strcmp(mnbuf, "shufps") == 0) {
-                return emit_i386_legacy_simd_rm_imm8(0x00, 0xc6, xr, src_op, (unsigned char)immv, out, out_cap, out_len);
-            }
-            if (strcmp(mnbuf, "shufpd") == 0) {
-                return emit_i386_legacy_simd_rm_imm8(0x66, 0xc6, xr, src_op, (unsigned char)immv, out, out_cap, out_len);
-            }
-            return emit_i386_legacy_simd_rm_imm8(0x66, 0x70, xr, src_op, (unsigned char)immv, out, out_cap, out_len);
+            return emit_i386_legacy_simd_rm_imm8(prefix, opcode2, xr, src_op, (unsigned char)immv,
+                                                 out, out_cap, out_len);
         }
         if (strcmp(mnbuf, "pinsrw") == 0) {
             if (dst_op->kind != AS_OPERAND_REGISTER) {
