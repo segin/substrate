@@ -36,6 +36,11 @@
     - [ ] Implement x86_64 TLS control surface (`FSBASE`/`GSBASE`, `arch_prctl` or native equivalent). (REQ: REQ-05-0678)
     - [ ] Add `libsys`, `crt0`, and libc wrapper support for native x86_64 user binaries. (REQ: REQ-05-0679)
     - [ ] Integration: a native x86_64 user binary can `execve`, syscall, fault, receive signals, and exit cleanly. (REQ: REQ-05-0680)
+- [ ] **Cross-Architecture Personality Preservation:** (REQ: REQ-05-0681)
+    - [ ] Preserve native i386 syscall ABI support under an x86_64 kernel compat path, including 32-bit pointer marshalling, structure layouts, and restart semantics. (REQ: REQ-05-0682)
+    - [ ] Preserve Linux personality support across both 32-bit and 64-bit ABIs, with width-specific dispatch and structure translation audited explicitly. (REQ: REQ-05-0683)
+    - [ ] Preserve FreeBSD and other existing compatibility personalities across the width transition, or document exact unsupported scope per personality/ABI pair. (REQ: REQ-05-0684)
+    - [ ] Add cross-bitness exec/syscall/signal/wait regression coverage proving personalities do not regress when the x86_64 kernel path is enabled. (REQ: REQ-05-0685)
 - [ ] **Mechanisms:** (REQ: REQ-05-0023)
         - [ ] **PTY Subsystem (Unix98/System V) - Massive Expansion:** (REQ: REQ-05-0024)
             - [ ] **Core PTY Driver (`/dev/pts/` + `/dev/ptmx`):** (REQ: REQ-05-0025)
@@ -1685,6 +1690,11 @@
 - **US-05-0678**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement x86_64 TLS control surface (`FSBASE`/`GSBASE`, `arch_prctl` or native equivalent) so that this capability is implemented with clear verification evidence.
 - **US-05-0679**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add `libsys`, `crt0`, and libc wrapper support for native x86_64 user binaries so that this capability is implemented with clear verification evidence.
 - **US-05-0680**: As a Substrate contributor working on 5. System Calls & Personalities, I want to prove that a native x86_64 user binary can `execve`, syscall, fault, receive signals, and exit cleanly so that this capability is implemented with clear verification evidence.
+- **US-05-0681**: As a Substrate contributor working on 5. System Calls & Personalities, I want to cross-Architecture Personality Preservation so that this capability is implemented with clear verification evidence.
+- **US-05-0682**: As a Substrate contributor working on 5. System Calls & Personalities, I want to preserve native i386 syscall ABI support under an x86_64 kernel compat path, including 32-bit pointer marshalling, structure layouts, and restart semantics so that this capability is implemented with clear verification evidence.
+- **US-05-0683**: As a Substrate contributor working on 5. System Calls & Personalities, I want to preserve Linux personality support across both 32-bit and 64-bit ABIs, with width-specific dispatch and structure translation audited explicitly so that this capability is implemented with clear verification evidence.
+- **US-05-0684**: As a Substrate contributor working on 5. System Calls & Personalities, I want to preserve FreeBSD and other existing compatibility personalities across the width transition, or document exact unsupported scope per personality/ABI pair so that this capability is implemented with clear verification evidence.
+- **US-05-0685**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add cross-bitness exec/syscall/signal/wait regression coverage proving personalities do not regress when the x86_64 kernel path is enabled so that this capability is implemented with clear verification evidence.
 
 ## INCOSE/EARS Requirements
 
@@ -3727,5 +3737,21 @@
   - Context: 5. System Calls & Personalities
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-05-0680** (EARS/Ubiquitous): The Substrate system shall prove that a native x86_64 user binary can `execve`, syscall, fault, receive signals, and exit cleanly.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+
+- **REQ-05-0681** (EARS/Ubiquitous): The Substrate system shall preserve existing personalities across the x86_64 width transition.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0682** (EARS/Ubiquitous): The Substrate system shall preserve native i386 syscall ABI support under an x86_64 kernel compat path, including 32-bit pointer marshalling, structure layouts, and restart semantics.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0683** (EARS/Ubiquitous): The Substrate system shall preserve Linux personality support across both 32-bit and 64-bit ABIs, with width-specific dispatch and structure translation audited explicitly.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0684** (EARS/Ubiquitous): The Substrate system shall preserve FreeBSD and other existing compatibility personalities across the width transition, or shall document exact unsupported scope per personality/ABI pair.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0685** (EARS/Ubiquitous): The Substrate system shall provide cross-bitness exec/syscall/signal/wait regression coverage proving personalities do not regress when the x86_64 kernel path is enabled.
   - Context: 5. System Calls & Personalities
   - Verification: design review + implementation evidence + test/doc update.

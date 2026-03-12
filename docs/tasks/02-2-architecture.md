@@ -89,6 +89,10 @@
         - [ ] Integrate x86_64 ELF userspace handoff (`argc`/`argv`/`envp`/`auxv`) with the native AMD64 ABI contract. (REQ: REQ-02-0081)
         - [ ] Integration: boot x86_64 kernel and run `/sbin/init` as a native 64-bit userspace process. (REQ: REQ-02-0082)
         - [ ] Document the hybrid long-mode/compatibility-mode kernel approach as historical background only, not the primary Substrate bring-up path. (REQ: REQ-02-0083)
+    - [ ] **Cross-Bitness Compatibility Preservation:** (REQ: REQ-02-0084)
+        - [ ] Preserve i386 kernel/userspace execution support when the x86_64 kernel is enabled, including 32-bit native binaries and existing i386 scheduler, trap, and VFS contracts. (REQ: REQ-02-0085)
+        - [ ] Preserve segmentation/LDT-based execution paths required by VM86 and ELKS compatibility when running under the x86_64 kernel compat architecture. (REQ: REQ-02-0086)
+        - [ ] Add an x86_64-kernel compatibility validation matrix proving existing 16-bit and 32-bit execution modes still work, or document any explicitly unsupported hardware/CPU-mode boundary with precise scope. (REQ: REQ-02-0087)
 
 
 ## User Stories
@@ -177,6 +181,10 @@
 - **US-02-0081**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to integrate x86_64 ELF userspace handoff (`argc`/`argv`/`envp`/`auxv`) with the native AMD64 ABI contract so that this capability is implemented with clear verification evidence.
 - **US-02-0082**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to boot x86_64 kernel and run `/sbin/init` as a native 64-bit userspace process so that this capability is implemented with clear verification evidence.
 - **US-02-0083**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to document the hybrid long-mode/compatibility-mode kernel approach as historical background only, not the primary Substrate bring-up path so that this capability is implemented with clear verification evidence.
+- **US-02-0084**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to cross-Bitness Compatibility Preservation so that this capability is implemented with clear verification evidence.
+- **US-02-0085**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to preserve i386 kernel/userspace execution support when the x86_64 kernel is enabled, including 32-bit native binaries and existing i386 scheduler, trap, and VFS contracts so that this capability is implemented with clear verification evidence.
+- **US-02-0086**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to preserve segmentation/LDT-based execution paths required by VM86 and ELKS compatibility when running under the x86_64 kernel compat architecture so that this capability is implemented with clear verification evidence.
+- **US-02-0087**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to add an x86_64-kernel compatibility validation matrix proving existing 16-bit and 32-bit execution modes still work, or document any explicitly unsupported hardware/CPU-mode boundary with precise scope so that this capability is implemented with clear verification evidence.
 
 ## INCOSE/EARS Requirements
 
@@ -428,5 +436,18 @@
   - Context: 2. Architecture (`sys/arch`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-02-0083** (EARS/Ubiquitous): The Substrate system shall document the hybrid long-mode/compatibility-mode kernel approach as historical background only, not the primary Substrate bring-up path.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+
+- **REQ-02-0084** (EARS/Ubiquitous): The Substrate system shall preserve cross-bitness compatibility as x86_64 support is introduced.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0085** (EARS/Ubiquitous): The Substrate system shall preserve i386 kernel/userspace execution support when the x86_64 kernel is enabled, including 32-bit native binaries and existing i386 scheduler, trap, and VFS contracts.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0086** (EARS/Ubiquitous): The Substrate system shall preserve segmentation/LDT-based execution paths required by VM86 and ELKS compatibility when running under the x86_64 kernel compat architecture.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0087** (EARS/Ubiquitous): The Substrate system shall provide an x86_64-kernel compatibility validation matrix proving existing 16-bit and 32-bit execution modes still work, or shall document any explicitly unsupported hardware/CPU-mode boundary with precise scope.
   - Context: 2. Architecture (`sys/arch`)
   - Verification: design review + implementation evidence + test/doc update.

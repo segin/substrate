@@ -296,6 +296,19 @@ Reference: User Request (Step 31552)
         - Goal: Keep console/tty code under `sys/drivers/console/` and UART under `sys/drivers/console/uart/`, with compatibility shims only where callers still include the old path.
         - Tests: build (`make -C sys/drivers/console`, `make -C sys/drivers/console/uart`)
         - Acceptance: Console, TTY, and UART sources build from their driver subtrees and the legacy `sys/kern/console.h` include remains a compatibility shim rather than the implementation home.
+- [ ] **x86_64 Kernel Compatibility Preservation:** (REQ: REQ-20-0075)
+    - [ ] Define the supported ELKS execution contract under an x86_64 kernel, including whether LDT-backed 16-bit compat tasks remain first-class or are bounded by explicit CPU/ABI limits. (REQ: REQ-20-0076)
+        - Files: `docs/personality/elks_spec.md`, `ARCHITECTURE.md`
+        - Tests: N/A (design + contract)
+        - Acceptance: The contract states whether ELKS remains supported under the x86_64 kernel compat path, what architectural mechanisms are required, and what scope is explicitly unsupported.
+    - [ ] Preserve the LDT, selector, syscall-gate, and signal-delivery machinery required for ELKS when the x86_64 kernel path is enabled. (REQ: REQ-20-0077)
+        - Files: `sys/arch/x86_64/`, `sys/exec/perso/`, `sys/exec/formats/`
+        - Tests: host + emulation (`tests/sys/host_test_perso_elks`, `tests/elks/run_tests.sh`)
+        - Acceptance: Enabling the x86_64 kernel path does not silently remove ELKS exec, syscall, signal, or process-lifecycle support without an explicit documented boundary.
+    - [ ] Add an ELKS-on-x86_64 compat regression matrix covering exec, fork/vfork, wait, signals, `/dev/kmem` compatibility, and upstream shell/utilities smoke. (REQ: REQ-20-0078)
+        - Files: `tests/elks/`, `tests/sys/`
+        - Tests: host + emulation (`tests/elks/run_tests.sh`, `tests/sys/host_test_perso_elks`)
+        - Acceptance: The matrix proves ELKS behavior remains intact on the x86_64 kernel compat path, or documents exact failing areas with requirement-level scope.
 
 
 
@@ -362,6 +375,10 @@ Reference: User Request (Step 31552)
 - **US-20-0072**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement ELKS sys_ustatfs translation so that this capability is implemented with clear verification evidence.
 - **US-20-0073**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add upstream ELKS df smoke so that this capability is implemented with clear verification evidence.
 - **US-20-0074**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add upstream ELKS meminfo smoke so that this capability is implemented with clear verification evidence.
+- **US-20-0075**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to x86_64 Kernel Compatibility Preservation so that this capability is implemented with clear verification evidence.
+- **US-20-0076**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to define the supported ELKS execution contract under an x86_64 kernel, including whether LDT-backed 16-bit compat tasks remain first-class or are bounded by explicit CPU/ABI limits so that this capability is implemented with clear verification evidence.
+- **US-20-0077**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to preserve the LDT, selector, syscall-gate, and signal-delivery machinery required for ELKS when the x86_64 kernel path is enabled so that this capability is implemented with clear verification evidence.
+- **US-20-0078**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add an ELKS-on-x86_64 compat regression matrix covering exec, fork/vfork, wait, signals, /dev/kmem compatibility, and upstream shell/utilities smoke so that this capability is implemented with clear verification evidence.
 - **US-20-0054**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want a single ELKS test-binary Makefile that builds both assembly and C test programs so that future ELKS validation artifacts share one reproducible build path.
 - **US-20-0055**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to documentation: so that this capability is implemented with clear verification evidence.
 - **US-20-0056**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to create personality_elks(7) developer guide so that this capability is implemented with clear verification evidence.
@@ -559,6 +576,18 @@ Reference: User Request (Step 31552)
   - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-20-0074** (EARS/Ubiquitous): The Substrate system shall provide an upstream ELKS `meminfo` smoke test over the synthetic `/dev/kmem` compatibility surface.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0075** (EARS/Ubiquitous): The Substrate system shall preserve ELKS compatibility as the x86_64 kernel path is introduced.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0076** (EARS/Ubiquitous): The Substrate system shall define the supported ELKS execution contract under an x86_64 kernel, including whether LDT-backed 16-bit compat tasks remain first-class or are bounded by explicit CPU/ABI limits.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0077** (EARS/Ubiquitous): The Substrate system shall preserve the LDT, selector, syscall-gate, and signal-delivery machinery required for ELKS when the x86_64 kernel path is enabled.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0078** (EARS/Ubiquitous): The Substrate system shall provide an ELKS-on-x86_64 compat regression matrix covering exec, fork/vfork, wait, signals, `/dev/kmem` compatibility, and upstream shell/utilities smoke.
   - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-20-0054** (EARS/Ubiquitous): The Substrate system shall provide an ELKS test-binary Makefile that builds all current in-tree ELKS test binaries and supports both assembly and C ELKS test sources.
