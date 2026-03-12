@@ -6,6 +6,7 @@
 
 #include <kern/device.h>
 #include <kern/driver.h>
+#include <kern/bus.h>
 #include <sys/errno.h>
 #include <string.h>
 
@@ -78,6 +79,37 @@ int test_device_pm_logic(void) {
 
     if (device_suspend(NULL, PM_STATE_D3) != -EINVAL) return -22;
     if (device_resume(NULL) != -EINVAL) return -23;
+
+    {
+        static struct bus_type pm_bus = { .name = "pm-test-bus" };
+        struct device *root2 = device_create("pmroot", NULL);
+        if (!root2) return -24;
+        if (bus_register_type(&pm_bus) != 0) return -25;
+        root2->driver = &drv;
+        if (device_register(root2, &pm_bus) != 0) return -26;
+        reset_calls();
+        if (device_suspend_all(PM_STATE_D3) != 0) return -27;
+        if (root2->power_state != PM_STATE_D3) return -28;
+        if (device_resume_all() != 0) return -29;
+        if (root2->power_state != PM_STATE_D0) return -30;
+    }
+
+    {
+        struct device *rpm = device_create("runtime", NULL);
+        if (!rpm) return -31;
+        rpm->driver = &drv;
+        device_runtime_enable(rpm, 10);
+        if (device_runtime_get(rpm) != 0) return -32;
+        if (rpm->runtime_usage_count != 1) return -33;
+        if (device_runtime_put(rpm, 100) != 0) return -34;
+        if (rpm->runtime_usage_count != 0) return -35;
+        if (device_runtime_poll(109) != 0) return -36;
+        if (rpm->runtime_suspended) return -37;
+        if (device_runtime_poll(110) != 0) return -38;
+        if (!rpm->runtime_suspended) return -39;
+        if (device_runtime_get(rpm) != 0) return -40;
+        if (rpm->runtime_suspended) return -41;
+    }
 
     return 0;
 }

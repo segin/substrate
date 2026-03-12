@@ -1,0 +1,19 @@
+.Dd March 12, 2026
+.Dt CAPABILITIES 7
+.Os Substrate
+.Sh NAME
+.Nm capabilities
+.Nd privilege model notes for raw hardware access
+.Sh DESCRIPTION
+Substrate currently enforces raw hardware access primarily through effective
+user identity checks rather than a full capability bitmap.
+.Pp
+Operations such as opening or using
+.Pa /dev/port
+are reserved to effective UID 0.
+The manual page name is retained because the privilege boundary is part of the
+kernel driver model contract and may evolve into finer-grained capabilities
+later.
+.Sh SEE ALSO
+.Xr port 4 ,
+.Xr devfs_permissions 9

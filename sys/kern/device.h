@@ -24,6 +24,7 @@ typedef enum {
 struct driver;
 struct bus_type;
 struct resource;
+struct fs_node;
 
 /*
  * struct device
@@ -80,6 +81,18 @@ struct device {
     /* Status */
     uint32_t flags;
 
+    /* Optional devfs publication owned by the device model. */
+    struct fs_node *devnode;
+    char devfs_path[128];
+    char devfs_alias[128];
+
+    /* Minimal runtime PM state. */
+    uint32_t runtime_idle_timeout;
+    uint32_t runtime_last_busy;
+    uint32_t runtime_usage_count;
+    uint8_t runtime_pm_enabled;
+    uint8_t runtime_suspended;
+
     /* Locking */
     spinlock_t lock;
 };
@@ -98,5 +111,13 @@ int device_suspend(struct device *dev, pm_state_t state);
 int device_resume(struct device *dev);
 void device_shutdown(struct device *dev);
 int device_reset(struct device *dev);
+int device_publish(struct device *dev, struct fs_node *node, const char *path);
+void device_unpublish(struct device *dev);
+int device_suspend_all(pm_state_t state);
+int device_resume_all(void);
+void device_runtime_enable(struct device *dev, uint32_t idle_timeout);
+int device_runtime_get(struct device *dev);
+int device_runtime_put(struct device *dev, uint32_t now_ticks);
+int device_runtime_poll(uint32_t now_ticks);
 
 #endif /* _KERN_DEVICE_H */

@@ -33,6 +33,7 @@
 #include <arch/x86-common/rtc.h>
 #include <arch/x86-common/multiboot.h>
 #include <sys/freebsd_boot.h>
+#include <kern/isa.h>
 
 #include <sys/param.h>
 #include <pm/pm.h>
@@ -419,6 +420,8 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
 
 static void init_storage_and_vfs(multiboot_info_t *mboot_info) {
     pci_init();
+    isa_init();
+    isa_probe_legacy();
     ide_init();
     virtio_init();
     register_boot_ramdisks(mboot_info);

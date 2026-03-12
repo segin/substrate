@@ -24,6 +24,7 @@ extern char fs_root[];
 extern char hw_text_active[];
 extern char idt_entries[];
 extern char idt_ptr[];
+extern char isa_bus_type[];
 extern char kbd_alt[];
 extern char kbd_ctrl[];
 extern char kbd_extended[];
@@ -177,19 +178,30 @@ extern void crc32(void);
 extern void crc32_init(void);
 extern void debug_dump_processes(void);
 extern void devfs_init(void);
+extern void devfs_register_alias(void);
 extern void devfs_register_device(void);
+extern void devfs_unregister_alias(void);
+extern void devfs_unregister_device(void);
 extern void device_create(void);
 extern void device_defer_probe(void);
 extern void device_find_child(void);
 extern void device_get(void);
 extern void device_probe(void);
+extern void device_publish(void);
 extern void device_put(void);
 extern void device_register(void);
 extern void device_reset(void);
 extern void device_resume(void);
+extern void device_resume_all(void);
 extern void device_retry_deferred(void);
+extern void device_runtime_enable(void);
+extern void device_runtime_get(void);
+extern void device_runtime_poll(void);
+extern void device_runtime_put(void);
 extern void device_shutdown(void);
 extern void device_suspend(void);
+extern void device_suspend_all(void);
+extern void device_unpublish(void);
 extern void device_unregister(void);
 extern void dma_alloc_coherent(void);
 extern void dma_free_coherent(void);
@@ -417,6 +429,12 @@ extern void iounmap(void);
 extern void irq_alloc_vector(void);
 extern void irq_dispatch(void);
 extern void irq_free_vector(void);
+extern void isa_dump_devices(void);
+extern void isa_first_device(void);
+extern void isa_init(void);
+extern void isa_next_device(void);
+extern void isa_port_alive(void);
+extern void isa_probe_legacy(void);
 extern void isr0(void);
 extern void isr1(void);
 extern void isr10(void);
@@ -1481,6 +1499,7 @@ extern void vfs_get_filesystems(void);
 extern void vfs_init(void);
 extern void vfs_lookup(void);
 extern void vfs_lookup_lstat(void);
+extern void vfs_may_open(void);
 extern void vfs_mkdir(void);
 extern void vfs_mknod(void);
 extern void vfs_mount(void);
@@ -2272,6 +2291,8 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&device_unregister, "device_unregister" },
     { (uint32_t)(uintptr_t)&device_get, "device_get" },
     { (uint32_t)(uintptr_t)&device_put, "device_put" },
+    { (uint32_t)(uintptr_t)&device_publish, "device_publish" },
+    { (uint32_t)(uintptr_t)&device_unpublish, "device_unpublish" },
     { (uint32_t)(uintptr_t)&device_find_child, "device_find_child" },
     { (uint32_t)(uintptr_t)&device_probe, "device_probe" },
     { (uint32_t)(uintptr_t)&device_defer_probe, "device_defer_probe" },
@@ -2280,6 +2301,12 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&device_resume, "device_resume" },
     { (uint32_t)(uintptr_t)&device_shutdown, "device_shutdown" },
     { (uint32_t)(uintptr_t)&device_reset, "device_reset" },
+    { (uint32_t)(uintptr_t)&device_suspend_all, "device_suspend_all" },
+    { (uint32_t)(uintptr_t)&device_resume_all, "device_resume_all" },
+    { (uint32_t)(uintptr_t)&device_runtime_enable, "device_runtime_enable" },
+    { (uint32_t)(uintptr_t)&device_runtime_get, "device_runtime_get" },
+    { (uint32_t)(uintptr_t)&device_runtime_put, "device_runtime_put" },
+    { (uint32_t)(uintptr_t)&device_runtime_poll, "device_runtime_poll" },
     { (uint32_t)(uintptr_t)&driver_blacklist_add, "driver_blacklist_add" },
     { (uint32_t)(uintptr_t)&driver_is_blacklisted, "driver_is_blacklisted" },
     { (uint32_t)(uintptr_t)&driver_override, "driver_override" },
@@ -2338,6 +2365,12 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&pci_next_device, "pci_next_device" },
     { (uint32_t)(uintptr_t)&pci_dump_devices, "pci_dump_devices" },
     { (uint32_t)(uintptr_t)&pci_init, "pci_init" },
+    { (uint32_t)(uintptr_t)&isa_init, "isa_init" },
+    { (uint32_t)(uintptr_t)&isa_port_alive, "isa_port_alive" },
+    { (uint32_t)(uintptr_t)&isa_probe_legacy, "isa_probe_legacy" },
+    { (uint32_t)(uintptr_t)&isa_first_device, "isa_first_device" },
+    { (uint32_t)(uintptr_t)&isa_next_device, "isa_next_device" },
+    { (uint32_t)(uintptr_t)&isa_dump_devices, "isa_dump_devices" },
     { (uint32_t)(uintptr_t)&resource_init, "resource_init" },
     { (uint32_t)(uintptr_t)&resource_root, "resource_root" },
     { (uint32_t)(uintptr_t)&resource_find, "resource_find" },
@@ -2669,6 +2702,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&vfs_lookup, "vfs_lookup" },
     { (uint32_t)(uintptr_t)&vfs_lookup_lstat, "vfs_lookup_lstat" },
     { (uint32_t)(uintptr_t)&vfs_check_permissions, "vfs_check_permissions" },
+    { (uint32_t)(uintptr_t)&vfs_may_open, "vfs_may_open" },
     { (uint32_t)(uintptr_t)&readlink_fs, "readlink_fs" },
     { (uint32_t)(uintptr_t)&symlink_fs, "symlink_fs" },
     { (uint32_t)(uintptr_t)&link_fs, "link_fs" },
@@ -2791,6 +2825,9 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&udf_remove_fid, "udf_remove_fid" },
     { (uint32_t)(uintptr_t)&udf_truncate, "udf_truncate" },
     { (uint32_t)(uintptr_t)&devfs_register_device, "devfs_register_device" },
+    { (uint32_t)(uintptr_t)&devfs_unregister_device, "devfs_unregister_device" },
+    { (uint32_t)(uintptr_t)&devfs_register_alias, "devfs_register_alias" },
+    { (uint32_t)(uintptr_t)&devfs_unregister_alias, "devfs_unregister_alias" },
     { (uint32_t)(uintptr_t)&devfs_init, "devfs_init" },
     { (uint32_t)(uintptr_t)&procfs_register_entry, "procfs_register_entry" },
     { (uint32_t)(uintptr_t)&procfs_init, "procfs_init" },
@@ -3245,6 +3282,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&sysctl_hw_ncpu, "sysctl_hw_ncpu" },
     { (uint32_t)(uintptr_t)&sysctl_hw_pagesize, "sysctl_hw_pagesize" },
     { (uint32_t)(uintptr_t)&pci_bus_type, "pci_bus_type" },
+    { (uint32_t)(uintptr_t)&isa_bus_type, "isa_bus_type" },
     { (uint32_t)(uintptr_t)&num_cpus, "num_cpus" },
     { (uint32_t)(uintptr_t)&kbd_us, "kbd_us" },
     { (uint32_t)(uintptr_t)&kbd_us_shifted, "kbd_us_shifted" },
@@ -3315,4 +3353,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1652;
+int ksym_count = 1671;

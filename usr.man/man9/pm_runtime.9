@@ -1,0 +1,24 @@
+.Dd March 12, 2026
+.Dt PM_RUNTIME 9
+.Os Substrate
+.Sh NAME
+.Nm pm_runtime
+.Nd minimal runtime power-management hooks for devices
+.Sh SYNOPSIS
+.In kern/device.h
+.Ft void
+.Fn device_runtime_enable "struct device *dev" "uint32_t idle_timeout"
+.Ft int
+.Fn device_runtime_get "struct device *dev"
+.Ft int
+.Fn device_runtime_put "struct device *dev" "uint32_t now_ticks"
+.Ft int
+.Fn device_runtime_poll "uint32_t now_ticks"
+.Sh DESCRIPTION
+These helpers provide a small runtime power-management core for the Substrate
+bus model. Drivers may opt a device into runtime PM, take and drop active-use
+references, and periodically poll for autosuspend when the device has remained
+idle past its timeout.
+.Sh SEE ALSO
+.Xr pm_suspend 9 ,
+.Xr device_pm 9

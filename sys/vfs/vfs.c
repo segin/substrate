@@ -10,6 +10,7 @@
 #include <sys/poll.h>
 #include <sys/proc.h>
 #include <sys/file.h>
+#include <sys/fcntl.h>
 #include <drivers/storage/blkdev.h>
 #include <vm/vm_kmem.h>
 
@@ -532,6 +533,34 @@ int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode)
     }
 
     return (node->mask & mask) == mask ? 0 : -1;
+}
+
+int vfs_may_open(fs_node_t *node, uint32_t uid, uint32_t gid, int flags) {
+    int mode = 0;
+    int accmode;
+
+    if (node == NULL) {
+        return -1;
+    }
+
+    accmode = flags & O_ACCMODE;
+    if (accmode == O_RDONLY) {
+        mode |= 4;
+    } else if (accmode == O_WRONLY) {
+        mode |= 2;
+    } else if (accmode == O_RDWR) {
+        mode |= 4 | 2;
+    }
+
+    if (flags & O_TRUNC) {
+        mode |= 2;
+    }
+
+    if (mode == 0) {
+        return 0;
+    }
+
+    return vfs_check_permissions(node, uid, gid, mode);
 }
 
 

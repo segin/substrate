@@ -380,6 +380,14 @@ int kern_open(const char *path, int flags, int mode) {
         return -EEXIST;
     }
 
+    if (vfs_may_open(node,
+                     current_process ? current_process->euid : 0,
+                     current_process ? current_process->egid : 0,
+                     flags) != 0) {
+        proc_clear_fd(current_process, fd);
+        return -EACCES;
+    }
+
     file_t *f = file_alloc();
     if (!f) {
         proc_clear_fd(current_process, fd);

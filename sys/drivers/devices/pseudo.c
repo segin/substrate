@@ -22,6 +22,7 @@ extern void lpt_init(void);
 // /dev/port
 static size_t port_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node;
+    if (!current_process || current_process->euid != 0) return 0;
     if (offset >= 65536) return 0;
     
     size_t count = 0;
@@ -35,7 +36,8 @@ static size_t port_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buf
 
 static size_t port_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node;
-     if (offset >= 65536) return 0;
+    if (!current_process || current_process->euid != 0) return 0;
+    if (offset >= 65536) return 0;
     
     size_t count = 0;
     for (size_t i = 0; i < size; i++) {
@@ -165,6 +167,9 @@ void pseudo_init(void) {
     memset(&port_node, 0, sizeof(fs_node_t));
     strcpy(port_node.name, "port");
     port_node.flags = FS_CHARDEVICE;
+    port_node.mask = 0600;
+    port_node.uid = 0;
+    port_node.gid = 0;
     port_node.read = &port_read;
     port_node.write = &port_write;
     port_node.rdev = (1 << 8) | 4;

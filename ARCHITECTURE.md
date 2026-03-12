@@ -169,7 +169,18 @@ Device namespace policy in `devfs`:
 - Raw disk providers remain visible as `/dev/storage/<disk>` (for example `/dev/storage/ide0`), with GEOM-derived partition nodes exposed alongside them (for example `/dev/storage/ide0p1`).
 - BSD disklabels additionally expose lettered slice nodes, with `c` reserved as the whole-container alias only when a BSD disklabel is present.
 - Communication character devices self-register under `/dev/comm/*` (for example `/dev/comm/serial0`, `/dev/comm/parallel0`).
+- Device-model managed nodes may be published through `device_publish()` and withdrawn through `device_unpublish()`, allowing add/remove lifecycle to drive devfs automatically for drivers that opt into the framework path.
+- Stable device aliases are exposed under `/dev/by-id/*` when a device model entry carries a serial string or GUID.
 - Nested device paths are accepted only under predeclared subsystem directories (namespace hardening against arbitrary roots like `/dev/notreal/*`).
+
+Driver-model and legacy bus notes:
+- The core bus model now includes PCI and legacy ISA buses. PCI remains optional at runtime and old non-PCI 486-class systems are handled by a fixed-resource ISA probe pass instead of assuming PCI presence.
+- `isa_probe_legacy()` registers standard ISA-era devices (UART, LPT, IDE, PS/2) on the ISA bus when their fixed ports respond, so the kernel device tree remains meaningful on pre-PCI hardware.
+- Controller-family implementation work such as IDE transport internals, VirtIO transport refactors, USB host controllers, and ISA-PnP protocol support is tracked under the driver tasklists rather than the bus-core tasklist.
+
+Power-management model:
+- The device model owns tree-wide suspend/resume traversal (`device_suspend_all()` / `device_resume_all()`).
+- A minimal runtime PM core exists in the device layer with opt-in autosuspend (`device_runtime_enable/get/put/poll()`); it provides framework policy but not a separate userspace-facing power daemon or ACPI policy engine.
 
 Console policy:
 - the default screen console remains `console0`
