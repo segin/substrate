@@ -190,6 +190,10 @@ Console policy:
 - the default screen console remains `console0`
 - `console=serial0..serial3` selects COM1..COM4 respectively for runtime console routing
 - `serial_debug` or `console=serialN` registers the UART backend with the kernel console framework for mirrored output
+- the hardware text console now treats the last physical text row as a kernel-owned status line rendered black-on-white; the usable tty geometry reported to userland excludes that row (for example `80x24` on an `80x25` mode, `80x49` on an `80x50` mode)
+- the status line is refreshed from the timer tick on CPU 0 once per second and currently shows the active VT number plus wall-clock time in ISO 8601 UTC form
+- `video=text` keeps the system on the hardware text console even when framebuffer drivers are available
+- `textmode=` and `video=text:COLSxROWS` select hardware text geometry for the kernel text console; the current in-kernel implementation stably supports `80x25` and `80x50`, while wider/super-VGA text modes still require a real-mode/VESA setup path rather than a protected-mode kernel switch
 
 Execution personalities support native behavior plus Linux/FreeBSD compatibility paths where implemented.
 - Linux signal compatibility is explicit at the ABI edge: Linux signal numbers,

@@ -13,6 +13,7 @@
 #include <kern/sched.h>
 #include <pm/pm.h>
 #include <arch/i386/percpu.h>
+#include <drivers/video/hw_text.h>
 #include <sys/kern_syscalls.h>
 
 time_t boot_time = 0;
@@ -354,6 +355,9 @@ void timer_tick_context(int is_usermode) {
     }
 
     if (percpu_get_cpu_id() == 0) {
+        if ((ticks % HZ) == 0) {
+            hw_text_tick_1hz();
+        }
         for (int i = 0; i < MAX_PROCS; i++) {
             process_t *p = &processes[i];
             if (p->pid == -1 || p->is_kernel_task) {

@@ -10,9 +10,11 @@
 #include <sys/tty.h>
 
 #define VT_MAX 12
-#define VT_WIDTH 80
-#define VT_HEIGHT 25
-#define VT_BUF_SIZE (VT_WIDTH * VT_HEIGHT)
+#define VT_DEFAULT_WIDTH 80
+#define VT_DEFAULT_HEIGHT 25
+#define VT_MAX_WIDTH 132
+#define VT_MAX_HEIGHT 60
+#define VT_MAX_BUF_SIZE (VT_MAX_WIDTH * VT_MAX_HEIGHT)
 
 /*
  * VT State
@@ -22,7 +24,7 @@ typedef struct vt_state {
     int id; // 0..VT_MAX-1
     
     // Video Memory Buffer (Char + Attribute)
-    uint16_t buffer[VT_BUF_SIZE];
+    uint16_t buffer[VT_MAX_BUF_SIZE];
     
     // Cursor State
     int row;
@@ -41,6 +43,12 @@ void vt_init(void);
 void vt_activate(int n);
 int vt_get_active(void);
 vt_state_t *vt_get_state(int n);
+int vt_set_geometry(int cols, int rows);
+int vt_get_width(void);
+int vt_get_height(void);
+int vt_get_visible_height(void);
+int vt_get_status_row(void);
+size_t vt_get_cell_count(void);
 
 // To be called by the video driver when it updates the screen,
 // so the VT layer can keep the backing buffer in sync if it's active?

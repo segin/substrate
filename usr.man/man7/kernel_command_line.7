@@ -125,6 +125,32 @@ Use the default screen console.
 Route the console through COM\c
 .IR N+1 .
 .TP
+.B video=text
+Keep the system on the hardware text console and suppress framebuffer-console takeover.
+.TP
+.BI video=text: COLS x ROWS
+Request a specific hardware text-console geometry.
+This is equivalent to
+.BR textmode= COLS x ROWS .
+.TP
+.BI textmode= COLS x ROWS
+Select the hardware text-console geometry used by the kernel VT driver.
+The bottom physical row is reserved for the kernel status line, so the visible tty geometry reported to userland is one row smaller than the selected physical mode.
+.PP
+Currently supported in-kernel text modes are:
+.IP \(bu 2
+.B 80x25
+(visible tty area:
+.BR 80x24 )
+.IP \(bu
+.B 80x50
+(visible tty area:
+.BR 80x49 )
+.PP
+Wider and super-VGA text modes such as
+.B 132x60
+require a real-mode or VESA setup path and currently fall back to the default text mode rather than being faked in-kernel.
+.TP
 .BI root= device
 Select the root block device.
 .TP

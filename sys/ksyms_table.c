@@ -360,7 +360,9 @@ extern void get_uptime_ms(void);
 extern void getnewvnode(void);
 extern void hw_text_console_write_shim(void);
 extern void hw_text_init(void);
+extern void hw_text_refresh_statusline(void);
 extern void hw_text_set_color(void);
+extern void hw_text_tick_1hz(void);
 extern void i386_cpu_cycle_counter(void);
 extern void i386_cpu_cycle_counter_split(void);
 extern void i386_cpu_get_features(void);
@@ -1694,8 +1696,14 @@ extern void vsnprintf(void);
 extern void vsprintf(void);
 extern void vt_activate(void);
 extern void vt_get_active(void);
+extern void vt_get_cell_count(void);
+extern void vt_get_height(void);
 extern void vt_get_state(void);
+extern void vt_get_status_row(void);
+extern void vt_get_visible_height(void);
+extern void vt_get_width(void);
 extern void vt_init(void);
+extern void vt_set_geometry(void);
 extern void write_fs(void);
 extern void zero_init(void);
 
@@ -2543,6 +2551,8 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&bga_scroll, "bga_scroll" },
     { (uint32_t)(uintptr_t)&bga_install, "bga_install" },
     { (uint32_t)(uintptr_t)&hw_text_console_write_shim, "hw_text_console_write_shim" },
+    { (uint32_t)(uintptr_t)&hw_text_refresh_statusline, "hw_text_refresh_statusline" },
+    { (uint32_t)(uintptr_t)&hw_text_tick_1hz, "hw_text_tick_1hz" },
     { (uint32_t)(uintptr_t)&hw_text_set_color, "hw_text_set_color" },
     { (uint32_t)(uintptr_t)&hw_text_init, "hw_text_init" },
     { (uint32_t)(uintptr_t)&video_ask_mode, "video_ask_mode" },
@@ -2598,6 +2608,12 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&tty_close, "tty_close" },
     { (uint32_t)(uintptr_t)&tty_hangup, "tty_hangup" },
     { (uint32_t)(uintptr_t)&tty_poll, "tty_poll" },
+    { (uint32_t)(uintptr_t)&vt_set_geometry, "vt_set_geometry" },
+    { (uint32_t)(uintptr_t)&vt_get_width, "vt_get_width" },
+    { (uint32_t)(uintptr_t)&vt_get_height, "vt_get_height" },
+    { (uint32_t)(uintptr_t)&vt_get_visible_height, "vt_get_visible_height" },
+    { (uint32_t)(uintptr_t)&vt_get_status_row, "vt_get_status_row" },
+    { (uint32_t)(uintptr_t)&vt_get_cell_count, "vt_get_cell_count" },
     { (uint32_t)(uintptr_t)&vt_init, "vt_init" },
     { (uint32_t)(uintptr_t)&vt_get_active, "vt_get_active" },
     { (uint32_t)(uintptr_t)&vt_get_state, "vt_get_state" },
@@ -3395,4 +3411,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1692;
+int ksym_count = 1700;
