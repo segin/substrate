@@ -1,6 +1,7 @@
 #include <sys/types.h>
 #include <sys/vm86.h>
 #include <sys/sysarch.h>
+#include <sys/copy.h>
 #include <string.h>
 #include <errno.h>
 #include <kern/console.h>
@@ -41,6 +42,30 @@ struct vm86_monitor {
 
 /* Per-process VM86 monitor (NULL if not using VM86) */
 static struct vm86_monitor *current_vm86_monitor;
+static uint8_t vm86_port_space[65536];
+
+#ifdef HOST_TEST
+static uint8_t *vm86_test_memory;
+static size_t vm86_test_memory_size;
+
+void vm86_host_set_memory(void *base, size_t size) {
+    vm86_test_memory = (uint8_t *)base;
+    vm86_test_memory_size = size;
+}
+#endif
+
+static uint8_t *vm86_linear_ptr(uint32_t linear, size_t size) {
+#ifdef HOST_TEST
+    if (!vm86_test_memory || linear > vm86_test_memory_size ||
+        size > vm86_test_memory_size - linear) {
+        return NULL;
+    }
+    return vm86_test_memory + linear;
+#else
+    (void)size;
+    return (uint8_t *)(uintptr_t)linear;
+#endif
+}
 
 /*
  * vm86_monitor_init - Initialize VM86 monitor for current process
@@ -92,7 +117,9 @@ int sys_vm86(struct vm86_struct *info) {
     if (!info) return -EFAULT;
     
     struct vm86_struct k_info;
-    memcpy(&k_info, info, sizeof(struct vm86_struct));
+    if (copyin(info, &k_info, sizeof(k_info)) != 0) {
+        return -EFAULT;
+    }
     
     /* Call assembly helper to build stack frame and execute IRET */
     vm86_enter(&k_info);
@@ -105,15 +132,17 @@ int sys_vm86(struct vm86_struct *info) {
 }
 
 int vm86_init_bsd(void *args) {
-    struct i386_vm86_args *ua = (struct i386_vm86_args *)args;
-    if (!ua) return -EFAULT;
+    struct i386_vm86_args k_args;
+
+    if (!args) return -EFAULT;
+    if (copyin(args, &k_args, sizeof(k_args)) != 0) return -EFAULT;
     
-    if (ua->sub_op == VM86_INIT) {
+    if (k_args.sub_op == VM86_INIT) {
         // BSD `init` usually enters the mode or prepares it.
         // If it implies entering, we need the struct.
         // Assuming sub_args points to `struct vm86_struct`.
-        if (!ua->sub_args) return -EINVAL;
-        return sys_vm86((struct vm86_struct*)ua->sub_args);
+        if (!k_args.sub_args) return -EINVAL;
+        return sys_vm86((struct vm86_struct*)k_args.sub_args);
     }
     return -EINVAL;
 }
@@ -128,7 +157,11 @@ void vm86_gpf_handler(registers_t *regs) {
     uint32_t ip = regs->eip & 0xFFFF;
     uint32_t linear = (cs << 4) + ip;
     
-    uint8_t *code = (uint8_t*)linear;
+    uint8_t *code = vm86_linear_ptr(linear, 2);
+    if (!code) {
+        vm86_monitor_signal_fault(regs->eip, 0xFFFFFFFFU);
+        return;
+    }
     uint8_t opcode = code[0];
     
     // Valid IO/mem access check needed (skip for now, assuming permissive)
@@ -142,16 +175,26 @@ void vm86_gpf_handler(registers_t *regs) {
         uint16_t ss = regs->ss;
         uint16_t sp = regs->useresp;
         uint32_t stack_linear = (ss << 4) + sp;
-        uint16_t *stack = (uint16_t*)stack_linear;
-        
-        stack--; *stack = (uint16_t)regs->eflags;
-        stack--; *stack = (uint16_t)regs->cs;
-        stack--; *stack = (uint16_t)(regs->eip + 2); // Return after INT n
+        uint16_t *stack = (uint16_t *)vm86_linear_ptr(stack_linear - 6U, 6);
+        uint16_t *ivt;
+
+        if (!stack) {
+            vm86_monitor_signal_fault(regs->eip, opcode);
+            return;
+        }
+
+        stack[0] = (uint16_t)(regs->eip + 2); /* Return after INT n */
+        stack[1] = (uint16_t)regs->cs;
+        stack[2] = (uint16_t)regs->eflags;
         
         regs->useresp = (uint32_t)(sp - 6);
         
         // Load new CS:IP from IVT (at 0x0000)
-        uint16_t *ivt = (uint16_t*)0x0;
+        ivt = (uint16_t *)vm86_linear_ptr(0, 4U * 256U);
+        if (!ivt) {
+            vm86_monitor_signal_fault(regs->eip, opcode);
+            return;
+        }
         regs->eip = ivt[int_no * 2];
         regs->cs  = ivt[int_no * 2 + 1];
         
@@ -181,10 +224,13 @@ void vm86_gpf_handler(registers_t *regs) {
         uint16_t ss = regs->ss;
         uint16_t sp = regs->useresp;
         uint32_t stack_linear = (ss << 4) + sp;
-        uint16_t *stack = (uint16_t*)stack_linear;
-        
-        stack--;
-        *stack = (uint16_t)regs->eflags;
+        uint16_t *stack = (uint16_t *)vm86_linear_ptr(stack_linear - 2U, 2);
+        if (!stack) {
+            vm86_monitor_signal_fault(regs->eip, opcode);
+            return;
+        }
+
+        stack[0] = (uint16_t)regs->eflags;
         
         regs->useresp = sp - 2;
         regs->eip += 1;
@@ -195,13 +241,61 @@ void vm86_gpf_handler(registers_t *regs) {
         uint16_t ss = regs->ss;
         uint16_t sp = regs->useresp;
         uint32_t stack_linear = (ss << 4) + sp;
-        uint16_t *stack = (uint16_t*)stack_linear;
+        uint16_t *stack = (uint16_t *)vm86_linear_ptr(stack_linear, 2);
+        if (!stack) {
+            vm86_monitor_signal_fault(regs->eip, opcode);
+            return;
+        }
         
         /* Preserve VM, IOPL, and other privileged bits */
         uint32_t flags = *stack;
         regs->eflags = (regs->eflags & 0xFFFE3000) | (flags & ~0xFFFE3000);
         
         regs->useresp = sp + 2;
+        regs->eip += 1;
+        return;
+    }
+
+    if (opcode == 0xCF) { // IRET
+        uint16_t ss = regs->ss;
+        uint16_t sp = regs->useresp;
+        uint16_t *stack = (uint16_t *)vm86_linear_ptr((ss << 4) + sp, 6);
+        if (!stack) {
+            vm86_monitor_signal_fault(regs->eip, opcode);
+            return;
+        }
+
+        regs->eip = stack[0];
+        regs->cs = stack[1];
+        regs->eflags = (regs->eflags & 0xFFFF0000U) | stack[2];
+        regs->useresp = sp + 6;
+        return;
+    }
+
+    if (opcode == 0xE4) { // IN AL, imm8
+        uint8_t port = code[1];
+        regs->eax = (regs->eax & 0xFFFFFF00U) | vm86_port_space[port];
+        regs->eip += 2;
+        return;
+    }
+
+    if (opcode == 0xE6) { // OUT imm8, AL
+        uint8_t port = code[1];
+        vm86_port_space[port] = (uint8_t)(regs->eax & 0xFFU);
+        regs->eip += 2;
+        return;
+    }
+
+    if (opcode == 0xEC) { // IN AL, DX
+        uint16_t port = (uint16_t)(regs->edx & 0xFFFFU);
+        regs->eax = (regs->eax & 0xFFFFFF00U) | vm86_port_space[port];
+        regs->eip += 1;
+        return;
+    }
+
+    if (opcode == 0xEE) { // OUT DX, AL
+        uint16_t port = (uint16_t)(regs->edx & 0xFFFFU);
+        vm86_port_space[port] = (uint8_t)(regs->eax & 0xFFU);
         regs->eip += 1;
         return;
     }
@@ -340,7 +434,10 @@ int vm86_bios_call(int int_no, struct vm86_regs *regs) {
     info.regs.eip = code_base;
     
     /* 4. Write Stub Code: INT n; HLT */
-    uint8_t *stub = (uint8_t*)code_base; // Identity mapped
+    uint8_t *stub = vm86_linear_ptr(code_base, 3); // Identity mapped
+    if (!stub) {
+        return -EFAULT;
+    }
     stub[0] = 0xCD;       // INT
     stub[1] = int_no;     // imm8
     stub[2] = 0xF4;       // HLT

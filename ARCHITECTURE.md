@@ -131,6 +131,13 @@ Physical-memory bootstrap is two-stage:
 
 Fork and copy paths use copy-on-write with per-page reverse mappings (`pv_entry`) so the VM layer can inspect hardware accessed/dirty state and resolve COW faults without synthetic software shadow bits.
 
+i386 legacy-execution support includes a bounded VM86 path:
+- `sys_vm86()` and BSD `sysarch(I386_VM86, ...)` copy user VM86 state into kernel-owned structures before entry
+- `vm86_enter()` asserts `EFLAGS.VM|IF` and enters VM86 through an `iret` frame
+- GPFs taken with `EFLAGS.VM` set are redirected to `vm86_gpf_handler()` for opcode emulation (`CLI`, `STI`, `PUSHF`, `POPF`, `INT`, `IRET`, basic `IN`/`OUT`) or monitor fault reporting
+- the per-CPU TSS I/O bitmap is initialized deny-all and can be opened per-port or per-range through the exported TSS bitmap helpers
+- the detailed contract is defined in `docs/specs/arch_i386_vm86.md`
+
 ### 5.2 i386 TLB Strategy
 
 TLB management on i386 follows a tiered strategy:
