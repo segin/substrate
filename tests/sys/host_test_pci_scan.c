@@ -1,0 +1,146 @@
+#include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <kern/pci.h>
+
+static uint8_t mock_config[32][8][256];
+static int mock_pci_available = 1;
+
+void kprint(const char *str) {
+    (void)str;
+}
+
+void *kmalloc(size_t size) {
+    return malloc(size);
+}
+
+void kfree(void *ptr, size_t size) {
+    (void)size;
+    free(ptr);
+}
+
+int pci_present(void) {
+    return mock_pci_available;
+}
+
+uint8_t pci_read_config8(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
+    if (!mock_pci_available || bus != 0 || slot >= 32 || func >= 8) {
+        return 0xFFU;
+    }
+    return mock_config[slot][func][offset];
+}
+
+uint16_t pci_read_config16(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
+    return (uint16_t)pci_read_config8(bus, slot, func, offset) |
+        ((uint16_t)pci_read_config8(bus, slot, func, (uint8_t)(offset + 1U)) << 8);
+}
+
+uint32_t pci_read_config32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
+    return (uint32_t)pci_read_config16(bus, slot, func, offset) |
+        ((uint32_t)pci_read_config16(bus, slot, func, (uint8_t)(offset + 2U)) << 16);
+}
+
+void pci_write_config8(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint8_t value) {
+    if (!mock_pci_available || bus != 0 || slot >= 32 || func >= 8) {
+        return;
+    }
+    mock_config[slot][func][offset] = value;
+}
+
+void pci_write_config16(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint16_t value) {
+    pci_write_config8(bus, slot, func, offset, (uint8_t)(value & 0xFFU));
+    pci_write_config8(bus, slot, func, (uint8_t)(offset + 1U), (uint8_t)(value >> 8));
+}
+
+void pci_write_config32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint32_t value) {
+    pci_write_config16(bus, slot, func, offset, (uint16_t)(value & 0xFFFFU));
+    pci_write_config16(bus, slot, func, (uint8_t)(offset + 2U), (uint16_t)(value >> 16));
+}
+
+uint32_t pci_config_address(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
+    return PCI_CONFIG_ENABLE_BIT |
+        ((uint32_t)bus << 16) |
+        ((uint32_t)slot << 11) |
+        ((uint32_t)func << 8) |
+        (offset & 0xFCU);
+}
+
+uint32_t pci_read(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
+    return pci_read_config16(bus, slot, func, offset);
+}
+
+void pci_write(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint32_t val) {
+    pci_write_config32(bus, slot, func, offset, val);
+}
+
+#include "../../sys/kern/pci.c"
+
+static void reset_bus(void) {
+    memset(mock_config, 0xFF, sizeof(mock_config));
+    mock_pci_available = 1;
+    pci_devices_clear();
+}
+
+static void mock_set_device(uint8_t slot, uint8_t func, uint16_t vendor, uint16_t device,
+                            uint16_t class_code, uint8_t header_type) {
+    memcpy(&mock_config[slot][func][0x00], &vendor, sizeof(vendor));
+    memcpy(&mock_config[slot][func][0x02], &device, sizeof(device));
+    memcpy(&mock_config[slot][func][0x0A], &class_code, sizeof(class_code));
+    mock_config[slot][func][0x0E] = header_type;
+}
+
+static void test_scan_empty_bus_returns_zero(void) {
+    reset_bus();
+    assert(pci_scan_bus(0) == 0);
+    assert(pci_find_device(0x1234, 0x5678, NULL) == NULL);
+}
+
+static void test_scan_records_single_function_device(void) {
+    pci_device_t *dev;
+
+    reset_bus();
+    mock_set_device(5, 0, 0x1234, 0x5678, 0x0101, 0x00);
+
+    assert(pci_scan_bus(0) == 1);
+    dev = pci_find_device(0x1234, 0x5678, NULL);
+    assert(dev != NULL);
+    assert(dev->bus == 0);
+    assert(dev->slot == 5);
+    assert(dev->func == 0);
+    assert(dev->class_code == 0x0101);
+}
+
+static void test_scan_detects_multifunction_slot(void) {
+    pci_device_t *first;
+    pci_device_t *second;
+
+    reset_bus();
+    mock_set_device(2, 0, 0x1111, 0xAAAA, 0x0106, 0x80);
+    mock_set_device(2, 3, 0x1111, 0xBBBB, 0x0200, 0x00);
+
+    assert(pci_scan_bus(0) == 2);
+    first = pci_find_device(0x1111, 0xAAAA, NULL);
+    second = pci_find_device(0x1111, 0xBBBB, NULL);
+    assert(first != NULL);
+    assert(second != NULL);
+    assert(second->func == 3);
+}
+
+static void test_scan_skips_non_pci_systems(void) {
+    reset_bus();
+    mock_pci_available = 0;
+    assert(pci_scan_bus(0) == 0);
+    assert(pci_find_device(0x1234, 0x5678, NULL) == NULL);
+}
+
+int main(void) {
+    test_scan_empty_bus_returns_zero();
+    test_scan_records_single_function_device();
+    test_scan_detects_multifunction_slot();
+    test_scan_skips_non_pci_systems();
+    puts("host_test_pci_scan: PASS");
+    return 0;
+}

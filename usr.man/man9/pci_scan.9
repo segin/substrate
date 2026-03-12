@@ -1,0 +1,33 @@
+.Dd March 12, 2026
+.Dt PCI_SCAN 9
+.Os
+.Sh NAME
+.Nm pci_scan_bus
+.Nd scan one PCI bus for functions
+.Sh SYNOPSIS
+.In kern/pci.h
+.Ft int
+.Fn pci_scan_bus "uint8_t bus"
+.Sh DESCRIPTION
+The
+.Fn pci_scan_bus
+function iterates over slots 0 through 31 on the specified PCI bus.
+For each populated slot, it probes function 0 and inspects the header-type
+multifunction bit.
+Single-function devices are scanned only at function 0.
+Multifunction devices are scanned across functions 0 through 7.
+.Pp
+Each discovered function is recorded in the kernel PCI device list and is made
+available through
+.Fn pci_find_device .
+.Pp
+On systems without PCI configuration mechanism #1, the scan is skipped and no
+devices are recorded.
+.Sh RETURN VALUES
+The
+.Fn pci_scan_bus
+function returns the number of functions discovered on the requested bus.
+.Sh SEE ALSO
+.Xr pci_config 9 ,
+.Xr bus 9 ,
+.Xr driver 9

@@ -32,6 +32,7 @@ void pci_write_config32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset,
 void pci_init(void);
 uint32_t pci_read(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset);
 void pci_write(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint32_t val);
+int pci_scan_bus(uint8_t bus);
 void pci_scan(void);
 pci_device_t *pci_find_device(uint16_t vendor_id, uint16_t device_id, pci_device_t *from);
 

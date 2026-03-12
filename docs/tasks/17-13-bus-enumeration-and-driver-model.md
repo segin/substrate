@@ -211,7 +211,7 @@
         - Acceptance: Extended config space accessible
 
 - [ ] **Bus Enumeration:** (REQ: REQ-17-0035)
-    - [ ] Implement `pci_scan_bus()` recursive scanner. (REQ: REQ-17-0036)
+    - [x] Implement `pci_scan_bus()` recursive scanner. (REQ: REQ-17-0036)
         - Files: `sys/kern/pci.c`
         - API: `int pci_scan_bus(uint8_t bus)`
         - Logic: Iterate slots 0-31, functions 0-7, detect multifunction
