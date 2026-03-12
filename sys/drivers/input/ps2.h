@@ -61,13 +61,16 @@
 #define PS2_MOUSE_SET_DEFAULTS        0xF6
 #define PS2_MOUSE_ENABLE_DATA         0xF4
 
+#define PS2_TIMEOUT_LOOPS             100000U
+#define PS2_MOUSE_TIMEOUT_LOOPS       500000U
+
 /* Public API */
 int ps2_init(void);
 int ps2_write_command(uint8_t cmd);
 int ps2_write_data(uint8_t data);
 int ps2_write_aux(uint8_t data);
 uint8_t ps2_read_data(void);
-int ps2_read_data_timeout(uint8_t *data, uint32_t timeout_ms); /* Returns 0 on success, -1 on timeout */
+int ps2_read_data_timeout(uint8_t *data, uint32_t loop_count); /* Returns 0 on success, -1 on timeout */
 int ps2_wait_write(void);
 int ps2_wait_read(void);
 
