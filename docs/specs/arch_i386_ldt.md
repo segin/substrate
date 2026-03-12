@@ -26,16 +26,17 @@ Implemented today:
 - private `ldt_lock` protecting pointer/count replacement
 - lazy growth for native `modify_ldt(2)`
 - explicit allocate/replace/clone/free helpers
+- explicit set/clear/read helper paths inside `sys_modify_ldt()`
 - context-switch `LDTR` activation and clear-on-no-LDT behavior
 - fork inheritance through `ldt_clone_process()`
 - flat ELF exec cleanup through `ldt_free_process()`
 - process teardown cleanup through `ldt_free_process()`
 - full-size LDT UMA backing for the canonical 8192-entry case
 - Linux personality compatibility path for syscall `123` (`modify_ldt`)
+- internal validation/allocation failure counters via `ldt_get_diag_snapshot()`
 
 Still missing or intentionally deferred:
 
-- exported diagnostics interface for validation/allocation counters
 - fuzz coverage for malformed `modify_ldt` argument space
 - broader integration coverage beyond native and Linux caller surfaces
 - x86_64 LDT contract work

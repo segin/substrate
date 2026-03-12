@@ -553,6 +553,7 @@ extern void ldt_activate(void);
 extern void ldt_alloc_process(void);
 extern void ldt_clone_process(void);
 extern void ldt_free_process(void);
+extern void ldt_get_diag_snapshot(void);
 extern void ldt_init_process(void);
 extern void ldt_replace_process(void);
 extern void linear_fb_putpixel(void);
@@ -1604,6 +1605,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&tss_iomap_init, "tss_iomap_init" },
     { (uint32_t)(uintptr_t)&tss_set_iomap, "tss_set_iomap" },
     { (uint32_t)(uintptr_t)&tss_set_iomap_range, "tss_set_iomap_range" },
+    { (uint32_t)(uintptr_t)&ldt_get_diag_snapshot, "ldt_get_diag_snapshot" },
     { (uint32_t)(uintptr_t)&ldt_activate, "ldt_activate" },
     { (uint32_t)(uintptr_t)&ldt_init_process, "ldt_init_process" },
     { (uint32_t)(uintptr_t)&ldt_alloc_process, "ldt_alloc_process" },
@@ -3175,4 +3177,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1582;
+int ksym_count = 1583;
