@@ -12,6 +12,8 @@ Substrate is a complete Unix OS project with four first-class pillars:
 - Native toolchain (`usr.bin/cc`, `usr.bin/as`, `usr.bin/ld`, `usr.lib/elfobj`)
 
 Primary target architecture is i386. x86_64 support is active and expanding.
+x86_64 core tables and syscall-entry wiring are now host-validated even though
+full x86_64 runtime bring-up remains incomplete.
 
 ## 2. Original Design (Foundational Intent)
 
