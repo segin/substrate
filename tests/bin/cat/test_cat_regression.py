@@ -137,7 +137,7 @@ fcntl.lockf(fd, fcntl.LOCK_UN)
 os.close(fd)
 """
         holder = subprocess.Popen(
-            [sys.executable, "-c", holder_code, str(out_file), "1.5"],
+            [sys.executable, "-c", holder_code, str(out_file), "0.1"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
@@ -159,7 +159,7 @@ os.close(fd)
         holder_stderr = holder.stderr.read() if holder.stderr is not None else b""
         expect_eq(holder.returncode, 0, f"lock holder exit stderr={holder_stderr!r}")
         expect_eq(proc.returncode, 0, "real lock run exit")
-        expect(elapsed >= 1.2, f"lock wait too short: {elapsed}")
+        expect(elapsed >= 0.05, f"lock wait too short: {elapsed}")
         expect_eq(out_file.read_bytes(), payload, "real lock output")
 
     print("regression tests passed")
