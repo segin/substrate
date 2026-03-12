@@ -15,6 +15,7 @@
 #include <drivers/storage/blkdev.h>
 #include <sys/kern_syscalls.h>
 #include <sys/errno.h>
+#include <sys/proc.h>
 #include <vm/vm_kmem.h>
 #include "scsi.h"
 
@@ -31,9 +32,10 @@ extern void scsi_dev_init(void);
 /* IOCTL commands */
 #define SCSI_IOCTL_SCAN_BUS     0x5301  /* Rescan SCSI bus */
 #define SCSI_IOCTL_GET_INFO     0x5302  /* Get device info */
-#define SCSI_IOCTL_RESET_BUS    0x5303  /* Reset SCSI bus */
+#define SCSI_IOCTL_GET_IDLUN    0x5303  /* Packed bus:target:lun */
 #define SCSI_IOCTL_GET_COUNT    0x5304  /* Get device count */
 #define SCSI_IOCTL_SEND_CMD     0x5305  /* Send raw SCSI command */
+#define SCSI_IOCTL_RESET_BUS    0x5306  /* Reset SCSI bus */
 
 /*
  * Device info structure returned by SCSI_IOCTL_GET_INFO
@@ -107,9 +109,22 @@ static int sg_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         if (copyout(&kinfo, arg, sizeof(kinfo)) != 0) return -EFAULT;
         return 0;
     }
+
+    case SCSI_IOCTL_GET_IDLUN: {
+        uint32_t packed;
+        scsi_device_t *dev = sg->dev;
+
+        if (!arg) return -EINVAL;
+        packed = ((uint32_t)dev->bus << 24) |
+                 ((uint32_t)dev->target << 16) |
+                 (uint32_t)dev->lun;
+        if (copyout(&packed, arg, sizeof(packed)) != 0) return -EFAULT;
+        return 0;
+    }
     
     case SCSI_IOCTL_SEND_CMD: {
         if (!arg) return -EINVAL;
+        if (!current_process || current_process->euid != 0) return -EPERM;
         scsi_ioctl_cmd_t kcmd;
         if (copyin(arg, &kcmd, sizeof(kcmd)) != 0) return -EFAULT;
 
@@ -228,8 +243,8 @@ static int bus_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         if (!arg) return -EINVAL;
         /* Count devices on this bus */
         int count = 0;
-        for (uint8_t t = 0; t < 16; t++) {
-            for (uint8_t l = 0; l < 8; l++) {
+        for (uint16_t t = 0; t < bn->link->max_targets; t++) {
+            for (uint16_t l = 0; l < bn->link->max_luns; l++) {
                 if (scsi_device_lookup(bn->bus_id, t, l)) count++;
             }
         }
