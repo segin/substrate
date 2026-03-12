@@ -38,6 +38,24 @@ typedef struct atapi_link {
 static atapi_link_t atapi_link;
 static int atapi_initialized = 0;
 
+static atapi_link_t *atapi_link_from_scsi_link(scsi_link_t *link) {
+    if (!link) return NULL;
+    return (atapi_link_t *)link;
+}
+
+static atapi_target_t *atapi_target_for_device(atapi_link_t *alink, scsi_device_t *dev) {
+    uint8_t target_index;
+
+    if (!alink || !dev) return NULL;
+    if (dev->lun != 0) return NULL;
+
+    target_index = dev->target;
+    if (target_index >= 4) return NULL;
+    if (!alink->targets[target_index].present) return NULL;
+
+    return &alink->targets[target_index];
+}
+
 /*
  * ============================================================
  * ATAPI Transport Callbacks
@@ -51,22 +69,16 @@ static int atapi_initialized = 0;
  * Handles CDB padding (ATAPI requires 12-byte CDBs).
  */
 static int atapi_execute(scsi_link_t *link, scsi_request_t *req) {
-    (void)link;  /* Unused - we use req->device to find target */
-    
+    atapi_link_t *alink = atapi_link_from_scsi_link(link);
+    atapi_target_t *target;
+
     if (!req || !req->device) return -1;
-    
-    scsi_device_t *dev = req->device;
-    
-    /* Map target ID to channel/drive */
-    uint8_t channel = dev->target / 2;
-    uint8_t drive = dev->target % 2;
-    
-    /* Check if target is valid */
-    if (channel >= 2) {
+    target = atapi_target_for_device(alink, req->device);
+    if (!target) {
         req->status = SCSI_STATUS_CHECK_CONDITION;
         return -1;
     }
-    
+
     /* Prepare 12-byte CDB (ATAPI standard) */
     uint8_t atapi_cdb[12];
     memset(atapi_cdb, 0, 12);
@@ -80,7 +92,7 @@ static int atapi_execute(scsi_link_t *link, scsi_request_t *req) {
     int write = (req->flags & SCSI_REQ_WRITE) ? 1 : 0;
     
     /* Execute via IDE ATAPI interface */
-    int ret = ide_atapi_packet(channel, drive,
+    int ret = ide_atapi_packet(target->channel, target->drive,
                                 atapi_cdb, 12,
                                 req->data, req->data_len, write);
     
@@ -99,15 +111,15 @@ static int atapi_execute(scsi_link_t *link, scsi_request_t *req) {
  * Reset ATAPI target device
  */
 static int atapi_reset_device(scsi_link_t *link, scsi_device_t *dev) {
-    (void)link;
-    if (!dev) return -1;
-    
-    uint8_t channel = dev->target / 2;
+    atapi_link_t *alink = atapi_link_from_scsi_link(link);
+    atapi_target_t *target = atapi_target_for_device(alink, dev);
+
+    if (!target) return -1;
     
     /* Software reset via Device Control Register */
-    ide_write_ctrl(channel, 0x04);  /* Set SRST */
+    ide_write_ctrl(target->channel, 0x04);  /* Set SRST */
     for (volatile int i = 0; i < 10000; i++);
-    ide_write_ctrl(channel, 0x00);  /* Clear SRST */
+    ide_write_ctrl(target->channel, 0x00);  /* Clear SRST */
     for (volatile int i = 0; i < 100000; i++);
     
     char log_buf[64];
@@ -155,6 +167,7 @@ static int atapi_probe_devices(atapi_link_t *alink) {
         if (inb(buses[ch] + ATA_REG_STATUS) == 0xFF) continue;
         
         for (int d = 0; d < 2; d++) {
+            uint8_t target_id = (uint8_t)(ch * 2 + d);
             uint16_t buf[256];
             memset(buf, 0, 512);
             
@@ -163,7 +176,7 @@ static int atapi_probe_devices(atapi_link_t *alink) {
             if (ret != 0) continue;
             
             /* Found an ATAPI device */
-            atapi_target_t *target = &alink->targets[alink->target_count];
+            atapi_target_t *target = &alink->targets[target_id];
             target->channel = ch;
             target->drive = d;
             target->present = 1;
@@ -193,10 +206,7 @@ static int atapi_probe_devices(atapi_link_t *alink) {
             kprint(log_buf);
             
             alink->target_count++;
-            
-            if (alink->target_count >= 4) break;
         }
-        if (alink->target_count >= 4) break;
     }
     
     return alink->target_count;
@@ -215,6 +225,7 @@ void atapi_scsi_init(void) {
     if (atapi_initialized) return;
     
     memset(&atapi_link, 0, sizeof(atapi_link));
+    atapi_link.bus_id = 0;  /* First SCSI bus */
     
     /* Setup transport operations */
     snprintf(atapi_link.link.name, sizeof(atapi_link.link.name), "atapi0");
@@ -225,7 +236,6 @@ void atapi_scsi_init(void) {
     atapi_link.link.execute = atapi_execute;
     atapi_link.link.reset_device = atapi_reset_device;
     atapi_link.link.reset_bus = atapi_reset_bus;
-    atapi_link.bus_id = 0;  /* First SCSI bus */
     
     /* Probe for devices */
     int count = atapi_probe_devices(&atapi_link);
