@@ -5,7 +5,10 @@
 .Nm pci_config_address ,
 .Nm pci_read_config8 ,
 .Nm pci_read_config16 ,
-.Nm pci_read_config32
+.Nm pci_read_config32 ,
+.Nm pci_write_config8 ,
+.Nm pci_write_config16 ,
+.Nm pci_write_config32
 .Nd access PCI configuration space
 .Sh SYNOPSIS
 .In kern/pci.h
@@ -17,6 +20,12 @@
 .Fn pci_read_config16 "uint8_t bus" "uint8_t slot" "uint8_t func" "uint8_t offset"
 .Ft uint32_t
 .Fn pci_read_config32 "uint8_t bus" "uint8_t slot" "uint8_t func" "uint8_t offset"
+.Ft void
+.Fn pci_write_config8 "uint8_t bus" "uint8_t slot" "uint8_t func" "uint8_t offset" "uint8_t value"
+.Ft void
+.Fn pci_write_config16 "uint8_t bus" "uint8_t slot" "uint8_t func" "uint8_t offset" "uint16_t value"
+.Ft void
+.Fn pci_write_config32 "uint8_t bus" "uint8_t slot" "uint8_t func" "uint8_t offset" "uint32_t value"
 .Sh DESCRIPTION
 The
 .Fn pci_config_address
@@ -35,6 +44,17 @@ Byte and word reads are reconstructed from the containing 32-bit port access,
 and word reads that straddle a dword boundary are read from both adjacent
 configuration words.
 .Pp
+The
+.Fn pci_write_config8 ,
+.Fn pci_write_config16 ,
+and
+.Fn pci_write_config32
+functions update PCI configuration space.
+Byte and word writes preserve neighboring bytes within the containing 32-bit
+configuration word by performing read-modify-write cycles.
+Word writes that begin at the final byte of a dword are split across adjacent
+configuration words.
+.Pp
 Offsets beyond the first 256 bytes of conventional PCI configuration space are
 not accessible through these functions and read as all-ones.
 .Sh RETURN VALUES
@@ -45,6 +65,8 @@ out-of-range words as
 .Dv 0xffff ,
 and out-of-range dwords as
 .Dv 0xffffffff .
+.Pp
+The write functions return no value.
 .Sh SEE ALSO
 .Xr bus 9 ,
 .Xr device 9 ,

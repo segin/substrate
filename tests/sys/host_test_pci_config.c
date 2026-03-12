@@ -95,11 +95,45 @@ static void test_missing_device_reads_as_all_ones(void) {
     assert(pci_read_config32(0, 0, 0, 0) == 0xFFFFFFFFU);
 }
 
+static void test_typed_writes_round_trip_and_preserve_neighbors(void) {
+    uint32_t dword = 0x11223344U;
+
+    reset_config();
+    memcpy(&mock_config[0x20], &dword, sizeof(dword));
+
+    pci_write_config8(2, 3, 1, 0x21, 0xAAU);
+    assert(pci_read_config32(2, 3, 1, 0x20) == 0x1122AA44U);
+
+    pci_write_config16(2, 3, 1, 0x22, 0xBCDEU);
+    assert(pci_read_config32(2, 3, 1, 0x20) == 0xBCDEAA44U);
+
+    pci_write_config32(2, 3, 1, 0x20, 0xCAFEBABEU);
+    assert(pci_read_config32(2, 3, 1, 0x20) == 0xCAFEBABEU);
+}
+
+static void test_word_writes_cross_dword_boundary(void) {
+    uint32_t low = 0x11223344U;
+    uint32_t high = 0x55667788U;
+
+    reset_config();
+    memcpy(&mock_config[0x20], &low, sizeof(low));
+    memcpy(&mock_config[0x24], &high, sizeof(high));
+
+    pci_write_config16(2, 3, 1, 0x23, 0xA1B2U);
+
+    assert(pci_read_config8(2, 3, 1, 0x23) == 0xB2U);
+    assert(pci_read_config8(2, 3, 1, 0x24) == 0xA1U);
+    assert(pci_read_config32(2, 3, 1, 0x20) == 0xB2223344U);
+    assert(pci_read_config32(2, 3, 1, 0x24) == 0x556677A1U);
+}
+
 int main(void) {
     test_pci_config_address_aligns_offset();
     test_typed_reads_extract_expected_values();
     test_word_reads_cross_dword_boundary();
     test_missing_device_reads_as_all_ones();
+    test_typed_writes_round_trip_and_preserve_neighbors();
+    test_word_writes_cross_dword_boundary();
     puts("host_test_pci_config: PASS");
     return 0;
 }

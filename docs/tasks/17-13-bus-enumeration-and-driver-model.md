@@ -197,7 +197,7 @@
         - Tests: unit (known device read, boundary checks)
         - Docs: `pci_config.9`
         - Acceptance: Reads correct values from QEMU PCI devices
-    - [ ] Implement `pci_write_config8/16/32()` primitives. (REQ: REQ-17-0033)
+    - [x] Implement `pci_write_config8/16/32()` primitives. (REQ: REQ-17-0033)
         - Files: `sys/arch/i386/pci.c`
         - API: `void pci_write_config32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint32_t val)`
         - Tests: unit (write and readback verification)
