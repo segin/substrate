@@ -18,6 +18,8 @@
 #include <arch/i386/cpu.h>
 #include <sys/random.h>
 #include <kern/console.h>
+#include <kern/device.h>
+#include <kern/isa.h>
 #include <drivers/storage/blkdev.h>
 #include <drivers/storage/ide/ide.h>
 #include <arch/x86-common/io.h>
@@ -62,6 +64,18 @@ static blkdev_t ide_blkdevs[MAX_IDE_DEVICES];
 
 /* IRQ completion flag */
 static volatile int ide_irq_complete[MAX_IDE_CHANNELS];
+
+static int ide_legacy_channel_present(const char *name) {
+    struct device *dev;
+
+    for (dev = isa_first_device(); dev != NULL; dev = isa_next_device(dev)) {
+        if (strcmp(dev->name, name) == 0) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
 
 /*
  * ============================================================
@@ -1023,6 +1037,9 @@ void ide_irq_handler(int irq) {
 
 void ide_init(void) {
     kprint("IDE Driver Initialized.\n");
+    int legacy_hint_primary;
+    int legacy_hint_secondary;
+    int use_legacy_hints;
     
     /* Setup channel structures */
     ide_channels[0].io_base = ATA_PRIMARY_IO;
@@ -1036,6 +1053,10 @@ void ide_init(void) {
     ide_channels[1].irq = 15;
     ide_channels[1].bm_base = 0;
     ide_channels[1].dma_capable = 0;
+
+    legacy_hint_primary = ide_legacy_channel_present("ide-primary");
+    legacy_hint_secondary = ide_legacy_channel_present("ide-secondary");
+    use_legacy_hints = legacy_hint_primary || legacy_hint_secondary;
     
     /* Disable interrupts during probe */
     ide_write_ctrl(0, ATA_CTRL_NIEN);
@@ -1047,6 +1068,13 @@ void ide_init(void) {
     const char *drive_names[2] = { "Master", "Slave" };
     
     for (int ch = 0; ch < 2; ch++) {
+        if (use_legacy_hints) {
+            if ((ch == 0 && !legacy_hint_primary) ||
+                (ch == 1 && !legacy_hint_secondary)) {
+                continue;
+            }
+        }
+
         /* Check for floating bus */
         if (inb(buses[ch] + ATA_REG_STATUS) == 0xFF) continue;
         
