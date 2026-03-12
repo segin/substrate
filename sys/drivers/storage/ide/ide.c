@@ -59,8 +59,10 @@ static int ide_drivers_registered;
 /* IRQ completion flag */
 static volatile int ide_irq_complete[MAX_IDE_CHANNELS];
 
-static void ide_wait_bsy(uint8_t channel);
-static int ide_wait_drq(uint8_t channel);
+static int ide_wait_bsy(uint8_t channel, uint32_t timeout_ms, const char *op);
+static int ide_wait_drq(uint8_t channel, uint32_t timeout_ms, const char *op);
+static int ide_wait_irq_completion(uint8_t channel, uint32_t timeout_ms,
+                                   const char *op);
 
 static int ide_scan_controller(void);
 
@@ -252,14 +254,16 @@ static int ide_identify_channel(uint8_t channel, uint8_t drive, void *buffer) {
         return -1;
     }
 
-    ide_wait_bsy(channel);
+    if (ide_wait_bsy(channel, IDE_TIMEOUT_IDENTIFY_MS, "scan-identify") < 0) {
+        return -1;
+    }
 
     if (ide_read_reg(channel, ATA_REG_LBA_MID) != 0 ||
         ide_read_reg(channel, ATA_REG_LBA_HIGH) != 0) {
         return -2;
     }
 
-    if (ide_wait_drq(channel) < 0) {
+    if (ide_wait_drq(channel, IDE_TIMEOUT_IDENTIFY_MS, "scan-identify") < 0) {
         return -1;
     }
 
@@ -279,8 +283,10 @@ static int ide_identify_atapi_channel(uint8_t channel, uint8_t drive, void *buff
         return -1;
     }
 
-    ide_wait_bsy(channel);
-    if (ide_wait_drq(channel) < 0) {
+    if (ide_wait_bsy(channel, IDE_TIMEOUT_IDENTIFY_MS, "scan-identify-atapi") < 0) {
+        return -1;
+    }
+    if (ide_wait_drq(channel, IDE_TIMEOUT_IDENTIFY_MS, "scan-identify-atapi") < 0) {
         return -1;
     }
 
@@ -414,24 +420,32 @@ static inline void ide_wait_backoff(int *yield_count) {
     }
 }
 
-static void ide_wait_bsy(uint8_t channel) {
+static int ide_wait_bsy(uint8_t channel, uint32_t timeout_ms, const char *op) {
     uint64_t start = get_uptime_ms();
     int spins = 0;
     int yield_count = 0;
     while (ide_read_reg(channel, ATA_REG_STATUS) & ATA_SR_BSY) {
         if (spins++ > 1000) {
-            if (get_uptime_ms() - start > 1000) {
-                kprint("ide: timeout waiting for BSY\n");
-                break;
+            if (get_uptime_ms() - start > timeout_ms) {
+                uint8_t status = ide_read_reg(channel, ATA_REG_STATUS);
+                uint8_t error = ide_read_reg(channel, ATA_REG_ERROR);
+                char decoded[64];
+
+                ide_decode_error(error, decoded, sizeof(decoded));
+                kprintf("ide: %s timeout waiting for BSY status=%02x error=%02x (%s)\n",
+                        op ? op : "command", status, error, decoded);
+                return -1;
             }
             ide_wait_backoff(&yield_count);
         } else {
             __asm__ volatile("pause");
         }
     }
+
+    return 0;
 }
 
-static int ide_wait_drq(uint8_t channel) {
+static int ide_wait_drq(uint8_t channel, uint32_t timeout_ms, const char *op) {
     uint64_t start = get_uptime_ms();
     int spins = 0;
     int yield_count = 0;
@@ -447,18 +461,18 @@ static int ide_wait_drq(uint8_t channel) {
             char decoded[64];
 
             ide_decode_error(error, decoded, sizeof(decoded));
-            kprintf("ide: DRQ failed status=%02x error=%02x (%s)\n",
-                    status, error, decoded);
+            kprintf("ide: %s DRQ failed status=%02x error=%02x (%s)\n",
+                    op ? op : "command", status, error, decoded);
             return -1;
         }
 
-        if (get_uptime_ms() - start > 1000) {
+        if (get_uptime_ms() - start > timeout_ms) {
             uint8_t error = ide_read_reg(channel, ATA_REG_ERROR);
             char decoded[64];
 
             ide_decode_error(error, decoded, sizeof(decoded));
-            kprintf("ide: timeout waiting for DRQ status=%02x error=%02x (%s)\n",
-                    status, error, decoded);
+            kprintf("ide: %s timeout waiting for DRQ status=%02x error=%02x (%s)\n",
+                    op ? op : "command", status, error, decoded);
             return -1;
         }
 
@@ -468,6 +482,31 @@ static int ide_wait_drq(uint8_t channel) {
             __asm__ volatile("pause");
         }
     }
+}
+
+static int ide_wait_irq_completion(uint8_t channel, uint32_t timeout_ms,
+                                   const char *op) {
+    uint64_t ticks = ((uint64_t)timeout_ms * get_hz() + 999ULL) / 1000ULL;
+    uint64_t deadline = get_ticks() + (ticks ? ticks : 1);
+
+    while (!ide_irq_complete[channel]) {
+        uint32_t flags = intr_disable();
+        if (!ide_irq_complete[channel]) {
+            int ret = sched_sleep_until((void *)&ide_irq_complete[channel], deadline);
+            intr_restore(flags);
+            if (ret < 0 && !ide_irq_complete[channel]) {
+                kprintf("ide: %s timeout waiting for DMA completion on channel %u\n",
+                        op ? op : "dma", channel);
+                ide_bm_stop(channel);
+                ide_bm_clear_interrupt(channel);
+                return -1;
+            }
+            continue;
+        }
+        intr_restore(flags);
+    }
+
+    return 0;
 }
 
 /* Wait with timeout (returns 0 on success, -1 on timeout/error) */
@@ -636,7 +675,9 @@ int ide_dma_read(uint8_t channel, uint8_t drive, uint64_t lba,
     
     /* Select drive and setup registers */
     ide_select_drive(channel, drive);
-    ide_wait_bsy(channel);
+    if (ide_wait_bsy(channel, IDE_TIMEOUT_READY_MS, "dma-read") < 0) {
+        return -1;
+    }
     
     /* Use LBA48 for large addresses or counts */
     int use_lba48 = (lba >= 0x10000000ULL) || (count > 256);
@@ -675,12 +716,8 @@ int ide_dma_read(uint8_t channel, uint8_t drive, uint64_t lba,
     ide_bm_start(channel, 0);  /* 0 = read from disk */
     
     /* Wait for completion (interrupt-driven) */
-    while (!ide_irq_complete[channel]) {
-        uint32_t flags = intr_disable();
-        if (!ide_irq_complete[channel]) {
-            sched_sleep((void *)&ide_irq_complete[channel]);
-        }
-        intr_restore(flags);
+    if (ide_wait_irq_completion(channel, IDE_TIMEOUT_DMA_MS, "dma-read") < 0) {
+        return -1;
     }
     
     uint8_t bm_status = ide_bm_status(channel);
@@ -718,7 +755,9 @@ int ide_dma_write(uint8_t channel, uint8_t drive, uint64_t lba,
     
     /* Select drive */
     ide_select_drive(channel, drive);
-    ide_wait_bsy(channel);
+    if (ide_wait_bsy(channel, IDE_TIMEOUT_READY_MS, "dma-write") < 0) {
+        return -1;
+    }
     
     int use_lba48 = (lba >= 0x10000000ULL) || (count > 256);
     
@@ -752,12 +791,8 @@ int ide_dma_write(uint8_t channel, uint8_t drive, uint64_t lba,
     ide_bm_start(channel, 1);  /* 1 = write to disk */
     
     /* Wait for completion */
-    while (!ide_irq_complete[channel]) {
-        uint32_t flags = intr_disable();
-        if (!ide_irq_complete[channel]) {
-            sched_sleep((void *)&ide_irq_complete[channel]);
-        }
-        intr_restore(flags);
+    if (ide_wait_irq_completion(channel, IDE_TIMEOUT_DMA_MS, "dma-write") < 0) {
+        return -1;
     }
     
     uint8_t bm_status = ide_bm_status(channel);
@@ -815,8 +850,10 @@ int ide_read_sectors(uint16_t bus, uint8_t drive, uint32_t lba,
 
     uint16_t *buf = (uint16_t *)buffer;
     for (int i = 0; i < count; i++) {
-        ide_wait_bsy(channel);
-        if (ide_wait_drq(channel) < 0) {
+        if (ide_wait_bsy(channel, IDE_TIMEOUT_DATA_MS, "pio-read-ext") < 0) {
+            return -1;
+        }
+        if (ide_wait_drq(channel, IDE_TIMEOUT_DATA_MS, "pio-read-ext") < 0) {
             return -1;
         }
         insw(bus + ATA_REG_DATA, buf, 256);
@@ -842,8 +879,10 @@ int ide_read_sectors_ext(uint16_t bus, uint8_t drive, uint64_t lba,
 
     uint16_t *buf = (uint16_t *)buffer;
     for (int i = 0; i < count; i++) {
-        ide_wait_bsy(channel);
-        if (ide_wait_drq(channel) < 0) {
+        if (ide_wait_bsy(channel, IDE_TIMEOUT_DATA_MS, "pio-read") < 0) {
+            return -1;
+        }
+        if (ide_wait_drq(channel, IDE_TIMEOUT_DATA_MS, "pio-read") < 0) {
             return -1;
         }
         insw(bus + ATA_REG_DATA, buf, 256);
@@ -866,8 +905,10 @@ int ide_write_sectors(uint16_t bus, uint8_t drive, uint32_t lba,
 
     const uint16_t *buf = (const uint16_t *)buffer;
     for (int i = 0; i < count; i++) {
-        ide_wait_bsy(channel);
-        if (ide_wait_drq(channel) < 0) {
+        if (ide_wait_bsy(channel, IDE_TIMEOUT_DATA_MS, "pio-write-ext") < 0) {
+            return -1;
+        }
+        if (ide_wait_drq(channel, IDE_TIMEOUT_DATA_MS, "pio-write-ext") < 0) {
             return -1;
         }
         outsw(bus + ATA_REG_DATA, buf, 256);
@@ -893,8 +934,10 @@ int ide_write_sectors_ext(uint16_t bus, uint8_t drive, uint64_t lba,
 
     const uint16_t *buf = (const uint16_t *)buffer;
     for (int i = 0; i < count; i++) {
-        ide_wait_bsy(channel);
-        if (ide_wait_drq(channel) < 0) {
+        if (ide_wait_bsy(channel, IDE_TIMEOUT_DATA_MS, "pio-write") < 0) {
+            return -1;
+        }
+        if (ide_wait_drq(channel, IDE_TIMEOUT_DATA_MS, "pio-write") < 0) {
             return -1;
         }
         outsw(bus + ATA_REG_DATA, buf, 256);
@@ -922,7 +965,9 @@ int ide_identify(uint16_t bus, uint8_t drive, void *buffer) {
     uint8_t status = ide_read_reg(channel, ATA_REG_STATUS);
     if (status == 0) return -1;
 
-    ide_wait_bsy(channel);
+    if (ide_wait_bsy(channel, IDE_TIMEOUT_IDENTIFY_MS, "identify") < 0) {
+        return -1;
+    }
     
     /* Check for ATAPI signature */
     if (ide_read_reg(channel, ATA_REG_LBA_MID) != 0 || 
@@ -930,7 +975,7 @@ int ide_identify(uint16_t bus, uint8_t drive, void *buffer) {
         return -2;  /* Not ATA (might be ATAPI) */
     }
 
-    if (ide_wait_drq(channel) < 0) {
+    if (ide_wait_drq(channel, IDE_TIMEOUT_IDENTIFY_MS, "identify") < 0) {
         return -1;
     }
 
@@ -951,8 +996,10 @@ int ide_identify_atapi(uint16_t bus, uint8_t drive, void *buffer) {
     uint8_t status = ide_read_reg(channel, ATA_REG_STATUS);
     if (status == 0) return -1;
 
-    ide_wait_bsy(channel);
-    if (ide_wait_drq(channel) < 0) {
+    if (ide_wait_bsy(channel, IDE_TIMEOUT_IDENTIFY_MS, "identify-atapi") < 0) {
+        return -1;
+    }
+    if (ide_wait_drq(channel, IDE_TIMEOUT_IDENTIFY_MS, "identify-atapi") < 0) {
         return -1;
     }
 
@@ -1001,7 +1048,7 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
     
     /* Select drive */
     ide_select_drive(channel, drive);
-    if (ide_wait_ready(channel, 500) < 0) return -1;
+    if (ide_wait_ready(channel, IDE_TIMEOUT_PACKET_MS) < 0) return -1;
     
     /* Set byte count limit (in LBA_MID and LBA_HIGH) */
     /* This tells the device the maximum transfer size */
@@ -1012,7 +1059,9 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
     ide_write_reg(channel, ATA_REG_COMMAND, ATA_CMD_PACKET);
     
     /* Wait for DRQ to send the command packet */
-    ide_wait_bsy(channel);
+    if (ide_wait_bsy(channel, IDE_TIMEOUT_PACKET_MS, "packet-command") < 0) {
+        return -1;
+    }
     
     uint8_t status = ide_read_reg(channel, ATA_REG_STATUS);
     if (status & ATA_SR_ERR) {
@@ -1030,7 +1079,9 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
     
     /* For non-data commands, we're done */
     if (buffer_len == 0 || buffer == NULL) {
-        ide_wait_bsy(channel);
+        if (ide_wait_bsy(channel, IDE_TIMEOUT_PACKET_MS, "packet-nodata") < 0) {
+            return -1;
+        }
         status = ide_read_reg(channel, ATA_REG_STATUS);
         return (status & ATA_SR_ERR) ? -1 : 0;
     }
@@ -1041,7 +1092,9 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
     
     while (transferred < buffer_len) {
         /* Wait for DRQ or completion */
-        ide_wait_bsy(channel);
+        if (ide_wait_bsy(channel, IDE_TIMEOUT_PACKET_MS, "packet-data") < 0) {
+            return -1;
+        }
         status = ide_read_reg(channel, ATA_REG_STATUS);
         
         if (status & ATA_SR_ERR) {
@@ -1080,7 +1133,9 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
     }
     
     /* Wait for completion */
-    ide_wait_bsy(channel);
+    if (ide_wait_bsy(channel, IDE_TIMEOUT_PACKET_MS, "packet-complete") < 0) {
+        return -1;
+    }
     status = ide_read_reg(channel, ATA_REG_STATUS);
     
     return (status & ATA_SR_ERR) ? -1 : 0;

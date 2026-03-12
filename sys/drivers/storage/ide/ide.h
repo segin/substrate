@@ -209,6 +209,12 @@ typedef struct {
 #define IDE_FEATURE_NCQ    0x00000008U
 #define IDE_FEATURE_TRIM   0x00000010U
 
+#define IDE_TIMEOUT_READY_MS     5000
+#define IDE_TIMEOUT_DATA_MS      10000
+#define IDE_TIMEOUT_IDENTIFY_MS  30000
+#define IDE_TIMEOUT_PACKET_MS    30000
+#define IDE_TIMEOUT_DMA_MS       30000
+
 /*
  * ============================================================
  * Public API

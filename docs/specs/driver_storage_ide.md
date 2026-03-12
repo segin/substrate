@@ -70,6 +70,11 @@ PIO transfers support:
 - LBA28 read/write
 - LBA48 read/write
 - bounded BSY/DRQ waits
+- timeout classes tuned for real spinning media:
+  - generic ready waits: 5s
+  - PIO data phase waits: 10s
+  - IDENTIFY / IDENTIFY PACKET: 30s
+  - ATAPI PACKET command/data phases: 30s
 - 400ns command delays through alternate-status reads
 - ATA error-bit decoding in diagnostic paths
 - block-read retries before surfacing failure
@@ -78,7 +83,7 @@ PIO transfers support:
 Bus-master DMA support provides:
 - PRDT setup with up to 32 entries
 - 64KB boundary splitting
-- IRQ-driven completion
+- IRQ-driven completion with a bounded 30s timeout
 
 ATAPI transport supports PACKET commands over the same channel model and backs
 the SCSI mid-layer helper path.
