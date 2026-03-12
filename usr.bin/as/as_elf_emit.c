@@ -1488,6 +1488,55 @@ static int lookup_i386_shiftd_opcode(const char *mnemonic, unsigned char *reg_op
     return -1;
 }
 
+static int lookup_i386_sha_0f38_opcode(const char *mnemonic, unsigned char *opcode3) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char opcode3;
+    } map[] = {
+        {"sha1nexte", 0xc8},
+        {"sha1msg1", 0xc9},
+        {"sha1msg2", 0xca},
+        {"sha256msg1", 0xcc},
+        {"sha256msg2", 0xcd},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || opcode3 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *opcode3 = map[i].opcode3;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_crypto_0f3a_imm8_opcode(const char *mnemonic, unsigned char *opcode3) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char opcode3;
+    } map[] = {
+        {"pclmulqdq", 0x44},
+        {"gf2p8affineqb", 0xce},
+        {"gf2p8affineinvqb", 0xcf},
+        {"aeskeygenassist", 0xdf},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || opcode3 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *opcode3 = map[i].opcode3;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static int lookup_i386_xmm_imm8_family(const char *mnemonic, unsigned char *prefix, unsigned char *opcode2) {
     static const struct {
         const char *mnemonic;
@@ -4822,11 +4871,9 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
             return -1;
         }
-        if (strcmp(mnbuf, "sha1nexte") == 0) opcode3 = 0xc8;
-        else if (strcmp(mnbuf, "sha1msg1") == 0) opcode3 = 0xc9;
-        else if (strcmp(mnbuf, "sha1msg2") == 0) opcode3 = 0xca;
-        else if (strcmp(mnbuf, "sha256msg1") == 0) opcode3 = 0xcc;
-        else opcode3 = 0xcd;
+        if (lookup_i386_sha_0f38_opcode(mnbuf, &opcode3) != 0) {
+            return -1;
+        }
         return emit_i386_prefixed_0f_map_rm(0x00, 0x38, opcode3, xr, src, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "sha256rnds2") == 0) {
@@ -4914,10 +4961,9 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (src_op->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src_op->u.reg, &xm) != 0) {
             return -1;
         }
-        if (strcmp(mnbuf, "pclmulqdq") == 0) opcode3 = 0x44;
-        else if (strcmp(mnbuf, "gf2p8affineqb") == 0) opcode3 = 0xce;
-        else if (strcmp(mnbuf, "gf2p8affineinvqb") == 0) opcode3 = 0xcf;
-        else opcode3 = 0xdf;
+        if (lookup_i386_crypto_0f3a_imm8_opcode(mnbuf, &opcode3) != 0) {
+            return -1;
+        }
         return emit_i386_prefixed_0f_map_rm_imm8(0x66, 0x3a, opcode3, xr, src_op, (unsigned char)immv,
                                                  out, out_cap, out_len);
     }
