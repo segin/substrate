@@ -145,7 +145,7 @@
         - Tests: unit (success, failure, -EDEFER handling)
         - Docs: `device_probe.9`
         - Acceptance: Probe succeeds or defers correctly
-    - [ ] Implement deferred probe queue. (REQ: REQ-17-0024)
+    - [x] Implement deferred probe queue. (REQ: REQ-17-0024)
         - Files: `sys/kern/device.c`
         - API: `void device_defer_probe(device_t *dev)`, `void device_retry_deferred(void)`
         - Tests: unit (defer adds to queue, retry re-probes)

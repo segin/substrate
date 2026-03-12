@@ -11,6 +11,8 @@
 #include <stdint.h>
 #include <sys/lock.h>
 
+#define DEVICE_FLAG_DEFERRED_PROBE 0x00000001U
+
 /* Forward declarations */
 struct driver;
 struct bus_type;
@@ -55,6 +57,7 @@ struct device {
     struct device *children; /* Head of child list */
     struct device *sibling;  /* Next sibling */
     struct device *bus_next; /* Next device on the same bus */
+    struct device *deferred_next; /* Next device on deferred probe queue */
 
     /* Resources */
     struct resource *resources;
@@ -82,5 +85,7 @@ void device_get(struct device *dev);
 void device_put(struct device *dev);
 struct device *device_find_child(struct device *parent, const char *name);
 int device_probe(struct device *dev);
+void device_defer_probe(struct device *dev);
+void device_retry_deferred(void);
 
 #endif /* _KERN_DEVICE_H */

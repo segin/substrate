@@ -13,6 +13,34 @@
 #include <vm/vm_kmem.h> 
 #include <sys/types.h>
 
+static spinlock_t deferred_probe_lock = SPINLOCK_INIT("deferred_probe");
+static struct device *deferred_probe_head;
+
+static void device_remove_from_deferred_queue(struct device *dev) {
+    struct device *curr;
+    struct device *prev = NULL;
+
+    spinlock_acquire(&deferred_probe_lock);
+    curr = deferred_probe_head;
+    while (curr) {
+        if (curr == dev) {
+            if (prev) {
+                prev->deferred_next = curr->deferred_next;
+            } else {
+                deferred_probe_head = curr->deferred_next;
+            }
+            dev->deferred_next = NULL;
+            dev->flags &= ~DEVICE_FLAG_DEFERRED_PROBE;
+            spinlock_release(&deferred_probe_lock);
+            device_put(dev);
+            return;
+        }
+        prev = curr;
+        curr = curr->deferred_next;
+    }
+    spinlock_release(&deferred_probe_lock);
+}
+
 
 /*
  * device_create
@@ -107,6 +135,8 @@ int device_unregister(struct device *dev) {
     struct device *curr, *prev;
     
     if (!dev) return -1;
+
+    device_remove_from_deferred_queue(dev);
     
     /* 1. Remove from Bus */
     bus = dev->bus;
@@ -266,4 +296,57 @@ int device_probe(struct device *dev) {
     }
 
     return driver_attach(drv, dev);
+}
+
+void device_defer_probe(struct device *dev) {
+    struct device *curr;
+
+    if (!dev) {
+        return;
+    }
+
+    spinlock_acquire(&deferred_probe_lock);
+    if (dev->flags & DEVICE_FLAG_DEFERRED_PROBE) {
+        spinlock_release(&deferred_probe_lock);
+        return;
+    }
+
+    device_get(dev);
+    dev->flags |= DEVICE_FLAG_DEFERRED_PROBE;
+    dev->deferred_next = NULL;
+
+    if (!deferred_probe_head) {
+        deferred_probe_head = dev;
+    } else {
+        curr = deferred_probe_head;
+        while (curr->deferred_next) {
+            curr = curr->deferred_next;
+        }
+        curr->deferred_next = dev;
+    }
+    spinlock_release(&deferred_probe_lock);
+}
+
+void device_retry_deferred(void) {
+    struct device *dev;
+
+    for (;;) {
+        spinlock_acquire(&deferred_probe_lock);
+        dev = deferred_probe_head;
+        if (!dev) {
+            spinlock_release(&deferred_probe_lock);
+            return;
+        }
+
+        deferred_probe_head = dev->deferred_next;
+        dev->deferred_next = NULL;
+        dev->flags &= ~DEVICE_FLAG_DEFERRED_PROBE;
+        spinlock_release(&deferred_probe_lock);
+
+        if (device_probe(dev) == -EDEFER) {
+            device_defer_probe(dev);
+        }
+
+        device_put(dev);
+    }
 }

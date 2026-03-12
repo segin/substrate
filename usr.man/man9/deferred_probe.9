@@ -1,0 +1,40 @@
+.\" Copyright (c) 2026 Kirn Gill II <segin2005@gmail.com>
+.\" All rights reserved.
+.\"
+.Dd March 12, 2026
+.Dt DEFERRED_PROBE 9
+.Os Substrate
+.Sh NAME
+.Nm device_defer_probe ,
+.Nm device_retry_deferred
+.Nd queue and retry deferred device probes
+.Sh SYNOPSIS
+.In kern/device.h
+.Ft void
+.Fn device_defer_probe "struct device *dev"
+.Ft void
+.Fn device_retry_deferred void
+.Sh DESCRIPTION
+The
+.Fn device_defer_probe
+function adds a device to the global deferred-probe queue if it is not already
+queued.
+.Pp
+The queue holds a reference on each deferred device so that retry processing
+can safely run after the original probe site has returned.
+.Pp
+The
+.Fn device_retry_deferred
+function drains the deferred-probe queue and calls
+.Xr device_probe 9
+for each queued device.
+If a retry again returns
+.Dv -EDEFER ,
+the device is requeued.
+.Sh SEE ALSO
+.Xr device_probe 9 ,
+.Xr driver_register 9
+.Sh HISTORY
+The
+.Nm
+interfaces first appeared in Substrate.
