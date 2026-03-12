@@ -6,6 +6,8 @@
 
 #include <kern/device.h>
 #include <kern/bus.h>
+#include <kern/driver.h>
+#include <sys/errno.h>
 #include <sys/lock.h>
 #include <string.h>
 #include <vm/vm_kmem.h> 
@@ -230,3 +232,38 @@ struct device *device_find_child(struct device *parent, const char *name) {
     return found;
 }
 
+/*
+ * device_probe
+ *
+ * Matches a device against registered drivers on its bus, runs the selected
+ * driver's probe callback, and binds the device on success.
+ */
+int device_probe(struct device *dev) {
+    struct driver *drv;
+    int ret;
+
+    if (!dev || !dev->bus) {
+        return -ENODEV;
+    }
+
+    if (dev->driver) {
+        return -EBUSY;
+    }
+
+    drv = bus_match_device(dev->bus, dev);
+    if (!drv) {
+        return -ENODEV;
+    }
+
+    if (drv->probe) {
+        ret = drv->probe(dev);
+        if (ret == -EDEFER || ret == EDEFER) {
+            return -EDEFER;
+        }
+        if (ret != 0) {
+            return ret;
+        }
+    }
+
+    return driver_attach(drv, dev);
+}

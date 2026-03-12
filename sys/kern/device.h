@@ -81,5 +81,6 @@ int device_unregister(struct device *dev);
 void device_get(struct device *dev);
 void device_put(struct device *dev);
 struct device *device_find_child(struct device *parent, const char *name);
+int device_probe(struct device *dev);
 
 #endif /* _KERN_DEVICE_H */

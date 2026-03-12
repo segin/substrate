@@ -138,7 +138,7 @@
         - Acceptance: Blacklist prevents probe, override forces it
 
 - [ ] **Device Lifecycle Callbacks:** (REQ: REQ-17-0022)
-    - [ ] Implement `device_probe()` wrapper with error handling. (REQ: REQ-17-0023)
+    - [x] Implement `device_probe()` wrapper with error handling. (REQ: REQ-17-0023)
         - Files: `sys/kern/device.c`
         - API: `int device_probe(device_t *dev)`
         - Logic: Find matching driver, call probe(), handle deferred probe

@@ -1,0 +1,60 @@
+.\" Copyright (c) 2026 Kirn Gill II <segin2005@gmail.com>
+.\" All rights reserved.
+.\"
+.Dd March 12, 2026
+.Dt DEVICE_PROBE 9
+.Os Substrate
+.Sh NAME
+.Nm device_probe
+.Nd match, probe, and attach a device to a registered driver
+.Sh SYNOPSIS
+.In kern/device.h
+.Ft int
+.Fn device_probe "struct device *dev"
+.Sh DESCRIPTION
+The
+.Fn device_probe
+function matches a device against the drivers registered on its bus, runs the
+selected driver's
+.Va probe
+callback, and binds the device through
+.Xr driver_attach 9
+if probing succeeds.
+.Pp
+The function returns
+.Dv -EDEFER
+when the selected driver indicates that probing must be retried later.
+This is a driver-model internal deferral signal and is distinct from ordinary
+userspace
+.Dv errno
+reporting.
+.Sh RETURN VALUES
+The
+.Fn device_probe
+function returns 0 on success.
+.Pp
+It returns:
+.Bl -tag -width "-EDEFER"
+.It Bq Er ENODEV
+The device is
+.Dv NULL ,
+has no bus, or no registered driver matches it.
+.It Bq Er EBUSY
+The device is already bound to a driver.
+.It Bq Er EDEFER
+The selected driver requested deferred probing.
+.It Other non-zero values
+The selected driver's
+.Va probe
+or
+.Va attach
+callback failed and returned an error.
+.El
+.Sh SEE ALSO
+.Xr bus_match_device 9 ,
+.Xr driver_attach 9 ,
+.Xr driver_register 9
+.Sh HISTORY
+The
+.Fn device_probe
+kernel interface first appeared in Substrate.
