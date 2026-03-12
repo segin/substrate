@@ -20,6 +20,7 @@
 #include <kern/console.h>
 #include <kern/device.h>
 #include <kern/isa.h>
+#include <kern/pci.h>
 #include <drivers/storage/blkdev.h>
 #include <drivers/storage/ide/ide.h>
 #include <arch/x86-common/io.h>
@@ -65,6 +66,9 @@ static blkdev_t ide_blkdevs[MAX_IDE_DEVICES];
 /* IRQ completion flag */
 static volatile int ide_irq_complete[MAX_IDE_CHANNELS];
 
+static void ide_wait_bsy(uint8_t channel);
+static int ide_wait_drq(uint8_t channel);
+
 static int ide_legacy_channel_present(const char *name) {
     struct device *dev;
 
@@ -74,6 +78,118 @@ static int ide_legacy_channel_present(const char *name) {
         }
     }
 
+    return 0;
+}
+
+static uintptr_t ide_pci_bar_base(pci_device_t *pdev, int bar) {
+    uint32_t value;
+
+    if (pdev == NULL || bar < 0 || bar >= PCI_BAR_COUNT) {
+        return 0;
+    }
+
+    value = pci_read_config32(pdev->bus, pdev->slot, pdev->func,
+                              (uint16_t)(0x10 + bar * 4));
+    if (value == 0 || value == 0xFFFFFFFFU) {
+        return 0;
+    }
+
+    if (value & 1U) {
+        return (uintptr_t)(value & ~0x3U);
+    }
+
+    return (uintptr_t)(value & ~0xFU);
+}
+
+static void ide_configure_from_pci(void) {
+    pci_device_t *pdev;
+
+    for (pdev = pci_first_device(); pdev != NULL; pdev = pci_next_device(pdev)) {
+        uintptr_t bm_base;
+
+        if (pdev->kdev == NULL) {
+            continue;
+        }
+        if (pdev->kdev->class != 0x01 || pdev->kdev->subclass != 0x01) {
+            continue;
+        }
+
+        if (pdev->kdev->progif & 0x01) {
+            uintptr_t io = ide_pci_bar_base(pdev, 0);
+            uintptr_t ctrl = ide_pci_bar_base(pdev, 1);
+            if (io != 0) {
+                ide_channels[0].io_base = (uint16_t)io;
+            }
+            if (ctrl != 0) {
+                ide_channels[0].ctrl_base = (uint16_t)(ctrl + 2);
+            }
+        }
+
+        if (pdev->kdev->progif & 0x04) {
+            uintptr_t io = ide_pci_bar_base(pdev, 2);
+            uintptr_t ctrl = ide_pci_bar_base(pdev, 3);
+            if (io != 0) {
+                ide_channels[1].io_base = (uint16_t)io;
+            }
+            if (ctrl != 0) {
+                ide_channels[1].ctrl_base = (uint16_t)(ctrl + 2);
+            }
+        }
+
+        bm_base = ide_pci_bar_base(pdev, 4);
+        if ((pdev->kdev->progif & 0x80) && bm_base != 0) {
+            ide_dma_init((uint16_t)bm_base, (uint16_t)(bm_base + 8));
+        }
+
+        return;
+    }
+}
+
+static int ide_identify_channel(uint8_t channel, uint8_t drive, void *buffer) {
+    ide_write_reg(channel, ATA_REG_DEVICE, 0xA0 | (drive << 4));
+    ide_write_reg(channel, ATA_REG_SEC_COUNT, 0);
+    ide_write_reg(channel, ATA_REG_LBA_LOW, 0);
+    ide_write_reg(channel, ATA_REG_LBA_MID, 0);
+    ide_write_reg(channel, ATA_REG_LBA_HIGH, 0);
+    ide_write_reg(channel, ATA_REG_COMMAND, ATA_CMD_IDENTIFY);
+
+    if (ide_read_reg(channel, ATA_REG_STATUS) == 0) {
+        return -1;
+    }
+
+    ide_wait_bsy(channel);
+
+    if (ide_read_reg(channel, ATA_REG_LBA_MID) != 0 ||
+        ide_read_reg(channel, ATA_REG_LBA_HIGH) != 0) {
+        return -2;
+    }
+
+    if (ide_wait_drq(channel) < 0) {
+        return -1;
+    }
+
+    insw(ide_channels[channel].io_base + ATA_REG_DATA, buffer, 256);
+    return 0;
+}
+
+static int ide_identify_atapi_channel(uint8_t channel, uint8_t drive, void *buffer) {
+    ide_write_reg(channel, ATA_REG_DEVICE, 0xA0 | (drive << 4));
+    ide_write_reg(channel, ATA_REG_SEC_COUNT, 0);
+    ide_write_reg(channel, ATA_REG_LBA_LOW, 0);
+    ide_write_reg(channel, ATA_REG_LBA_MID, 0);
+    ide_write_reg(channel, ATA_REG_LBA_HIGH, 0);
+    ide_write_reg(channel, ATA_REG_COMMAND, ATA_CMD_IDENTIFY_ATAPI);
+
+    if (ide_read_reg(channel, ATA_REG_STATUS) == 0) {
+        return -1;
+    }
+
+    ide_wait_bsy(channel);
+    if (ide_wait_drq(channel) < 0) {
+        return -1;
+    }
+
+    insw(ide_channels[channel].io_base + ATA_REG_DATA, buffer, 256);
     return 0;
 }
 
@@ -1054,6 +1170,8 @@ void ide_init(void) {
     ide_channels[1].bm_base = 0;
     ide_channels[1].dma_capable = 0;
 
+    ide_configure_from_pci();
+
     legacy_hint_primary = ide_legacy_channel_present("ide-primary");
     legacy_hint_secondary = ide_legacy_channel_present("ide-secondary");
     use_legacy_hints = legacy_hint_primary || legacy_hint_secondary;
@@ -1063,7 +1181,6 @@ void ide_init(void) {
     ide_write_ctrl(1, ATA_CTRL_NIEN);
     
     /* Probe all channels and drives */
-    uint16_t buses[2] = { ATA_PRIMARY_IO, ATA_SECONDARY_IO };
     const char *bus_names[2] = { "Primary", "Secondary" };
     const char *drive_names[2] = { "Master", "Slave" };
     
@@ -1076,20 +1193,20 @@ void ide_init(void) {
         }
 
         /* Check for floating bus */
-        if (inb(buses[ch] + ATA_REG_STATUS) == 0xFF) continue;
+        if (inb(ide_channels[ch].io_base + ATA_REG_STATUS) == 0xFF) continue;
         
         for (int d = 0; d < 2; d++) {
             uint16_t buf[256];
             memset(buf, 0, 512);
             
             int type = -1;
-            int ret = ide_identify(buses[ch], d, buf);
+            int ret = ide_identify_channel((uint8_t)ch, (uint8_t)d, buf);
 
             if (ret == 0) {
                 type = 0; /* ATA */
             } else if (ret == -2) {
                 /* ATAPI signature detected, try ATAPI command */
-                if (ide_identify_atapi(buses[ch], d, buf) == 0) {
+                if (ide_identify_atapi_channel((uint8_t)ch, (uint8_t)d, buf) == 0) {
                     type = 1; /* ATAPI */
                 }
             }

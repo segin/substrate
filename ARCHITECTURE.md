@@ -177,6 +177,7 @@ Driver-model and legacy bus notes:
 - The core bus model now includes PCI and legacy ISA buses. PCI remains optional at runtime and old non-PCI 486-class systems are handled by a fixed-resource ISA probe pass instead of assuming PCI presence.
 - `isa_probe_legacy()` registers standard ISA-era devices (UART, LPT, IDE, PS/2) on the ISA bus when their fixed ports respond, so the kernel device tree remains meaningful on pre-PCI hardware.
 - the legacy IDE probe path now consumes ISA bus hints when they are available, so non-PCI systems prefer the framework-owned ISA discovery view before falling back to blind floating-bus probing.
+- when a PCI IDE controller is present, the IDE core now consumes the controller's programming-interface bits and BAR layout for native-mode channel bases and bus-master DMA windows before probing drives, while still retaining legacy fixed-base support for ISA/compatibility-mode systems.
 - the VirtIO family no longer performs its own private PCI rescan during init; it registers per-device PCI drivers against the framework-owned PCI device list and binds existing devices through the generic probe/attach path.
 - Controller-family implementation work such as IDE transport internals, VirtIO transport refactors, USB host controllers, and ISA-PnP protocol support is tracked under the driver tasklists rather than the bus-core tasklist.
 
