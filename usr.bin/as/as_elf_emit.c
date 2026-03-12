@@ -2538,6 +2538,72 @@ static int emit_x86_64_xmm_move_rm(unsigned char prefix, unsigned char reg_opcod
     return -1;
 }
 
+static int emit_x86_64_gp_to_xmm_cvtsi(unsigned char prefix, const as_operand_t *src,
+                                       const as_operand_t *dst, unsigned char *out,
+                                       size_t out_cap, size_t *out_len) {
+    as_x86_reg_t gr;
+    unsigned xr;
+    unsigned char rex;
+
+    if (src == NULL || dst == NULL || out == NULL || out_len == NULL || out_cap < 5 ||
+        src->kind != AS_OPERAND_REGISTER || dst->kind != AS_OPERAND_REGISTER ||
+        parse_x86_reg(src->u.reg, &gr) != 0 || parse_xmm_reg(dst->u.reg, &xr) != 0) {
+        return -1;
+    }
+    rex = (unsigned char)(0x48u | ((xr & 8u) ? 0x04u : 0u) | ((((unsigned)gr) & 8u) ? 0x01u : 0u));
+    out[0] = prefix;
+    out[1] = rex;
+    out[2] = 0x0f;
+    out[3] = 0x2a;
+    out[4] = (unsigned char)(0xc0u | ((xr & 7u) << 3) | (((unsigned)gr) & 7u));
+    *out_len = 5;
+    return 0;
+}
+
+static int emit_x86_64_xmm_to_gp_cvtt(unsigned char prefix, const as_operand_t *src,
+                                      const as_operand_t *dst, unsigned char *out,
+                                      size_t out_cap, size_t *out_len) {
+    as_x86_reg_t gr;
+    unsigned src_xmm;
+    int dst_bits;
+    unsigned char rex;
+
+    if (src == NULL || dst == NULL ||
+        dst->kind != AS_OPERAND_REGISTER || parse_x86_reg(dst->u.reg, &gr) != 0) {
+        return -1;
+    }
+    dst_bits = x86_reg_width_bits(dst->u.reg);
+    if (dst_bits != 32 && dst_bits != 64) {
+        return -1;
+    }
+    if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &src_xmm) == 0) {
+        if (out == NULL || out_len == NULL || out_cap < 5) {
+            return -1;
+        }
+        rex = (unsigned char)(0x40u | (dst_bits == 64 ? 0x08u : 0u) | ((((unsigned)gr) & 8u) ? 0x04u : 0u) |
+                              ((src_xmm & 8u) ? 0x01u : 0u));
+        out[0] = prefix;
+        if (rex != 0x40u) {
+            out[1] = rex;
+            out[2] = 0x0f;
+            out[3] = 0x2c;
+            out[4] = (unsigned char)(0xc0u | ((((unsigned)gr) & 7u) << 3) | (src_xmm & 7u));
+            *out_len = 5;
+        } else {
+            out[1] = 0x0f;
+            out[2] = 0x2c;
+            out[3] = (unsigned char)(0xc0u | ((((unsigned)gr) & 7u) << 3) | (src_xmm & 7u));
+            *out_len = 4;
+        }
+        return 0;
+    }
+    if (src->kind == AS_OPERAND_MEMORY) {
+        return emit_x86_64_regfield_memop(prefix, 0x2c, (unsigned)gr, dst_bits == 64, &src->u.mem, out, out_cap,
+                                          out_len);
+    }
+    return -1;
+}
+
 static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
                              unsigned char *out, size_t out_cap, size_t *out_len) {
     const as_operand_t *a;
@@ -5719,118 +5785,28 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
         return emit_x86_64_xmm_srcdst(0x00, 0x2f, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "cvtsi2sd") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL ||
-            src->kind != AS_OPERAND_REGISTER || dst->kind != AS_OPERAND_REGISTER ||
-            parse_x86_reg(src->u.reg, &gr) != 0 || parse_xmm_reg(dst->u.reg, &xr) != 0) {
+        if (insn->operand_count != 2) {
             return -1;
         }
-        rex = (unsigned char)(0x48u | ((xr & 8u) ? 0x04u : 0u) | ((((unsigned)gr) & 8u) ? 0x01u : 0u));
-        out[0] = 0xf2;
-        out[1] = rex;
-        out[2] = 0x0f;
-        out[3] = 0x2a;
-        out[4] = (unsigned char)(0xc0u | ((xr & 7u) << 3) | (((unsigned)gr) & 7u));
-        if (out_len != NULL) {
-            *out_len = 5;
-        }
-        return 0;
+        return emit_x86_64_gp_to_xmm_cvtsi(0xf2, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "cvtsi2ss") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL ||
-            src->kind != AS_OPERAND_REGISTER || dst->kind != AS_OPERAND_REGISTER ||
-            parse_x86_reg(src->u.reg, &gr) != 0 || parse_xmm_reg(dst->u.reg, &xr) != 0) {
+        if (insn->operand_count != 2) {
             return -1;
         }
-        rex = (unsigned char)(0x48u | ((xr & 8u) ? 0x04u : 0u) | ((((unsigned)gr) & 8u) ? 0x01u : 0u));
-        out[0] = 0xf3;
-        out[1] = rex;
-        out[2] = 0x0f;
-        out[3] = 0x2a;
-        out[4] = (unsigned char)(0xc0u | ((xr & 7u) << 3) | (((unsigned)gr) & 7u));
-        if (out_len != NULL) {
-            *out_len = 5;
-        }
-        return 0;
+        return emit_x86_64_gp_to_xmm_cvtsi(0xf3, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "cvttsd2si") == 0) {
-        int dst_bits;
-        unsigned src_xmm;
-
-        if (insn->operand_count != 2 || src == NULL || dst == NULL ||
-            dst->kind != AS_OPERAND_REGISTER || parse_x86_reg(dst->u.reg, &gr) != 0) {
+        if (insn->operand_count != 2) {
             return -1;
         }
-        dst_bits = x86_reg_width_bits(dst->u.reg);
-        if (dst_bits != 32 && dst_bits != 64) {
-            return -1;
-        }
-        if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &src_xmm) == 0) {
-            rex = (unsigned char)(0x40u | (dst_bits == 64 ? 0x08u : 0u) | ((((unsigned)gr) & 8u) ? 0x04u : 0u) |
-                                  ((src_xmm & 8u) ? 0x01u : 0u));
-            out[0] = 0xf2;
-            if (rex != 0x40u) {
-                out[1] = rex;
-                out[2] = 0x0f;
-                out[3] = 0x2c;
-                out[4] = (unsigned char)(0xc0u | ((((unsigned)gr) & 7u) << 3) | (src_xmm & 7u));
-                if (out_len != NULL) {
-                    *out_len = 5;
-                }
-            } else {
-                out[1] = 0x0f;
-                out[2] = 0x2c;
-                out[3] = (unsigned char)(0xc0u | ((((unsigned)gr) & 7u) << 3) | (src_xmm & 7u));
-                if (out_len != NULL) {
-                    *out_len = 4;
-                }
-            }
-            return 0;
-        }
-        if (src->kind == AS_OPERAND_MEMORY) {
-            return emit_x86_64_regfield_memop(0xf2, 0x2c, (unsigned)gr, dst_bits == 64, &src->u.mem, out, out_cap,
-                                              out_len);
-        }
-        return -1;
+        return emit_x86_64_xmm_to_gp_cvtt(0xf2, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "cvttss2si") == 0) {
-        int dst_bits;
-        unsigned src_xmm;
-
-        if (insn->operand_count != 2 || src == NULL || dst == NULL ||
-            dst->kind != AS_OPERAND_REGISTER || parse_x86_reg(dst->u.reg, &gr) != 0) {
+        if (insn->operand_count != 2) {
             return -1;
         }
-        dst_bits = x86_reg_width_bits(dst->u.reg);
-        if (dst_bits != 32 && dst_bits != 64) {
-            return -1;
-        }
-        if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &src_xmm) == 0) {
-            rex = (unsigned char)(0x40u | (dst_bits == 64 ? 0x08u : 0u) | ((((unsigned)gr) & 8u) ? 0x04u : 0u) |
-                                  ((src_xmm & 8u) ? 0x01u : 0u));
-            out[0] = 0xf3;
-            if (rex != 0x40u) {
-                out[1] = rex;
-                out[2] = 0x0f;
-                out[3] = 0x2c;
-                out[4] = (unsigned char)(0xc0u | ((((unsigned)gr) & 7u) << 3) | (src_xmm & 7u));
-                if (out_len != NULL) {
-                    *out_len = 5;
-                }
-            } else {
-                out[1] = 0x0f;
-                out[2] = 0x2c;
-                out[3] = (unsigned char)(0xc0u | ((((unsigned)gr) & 7u) << 3) | (src_xmm & 7u));
-                if (out_len != NULL) {
-                    *out_len = 4;
-                }
-            }
-            return 0;
-        }
-        if (src->kind == AS_OPERAND_MEMORY) {
-            return emit_x86_64_regfield_memop(0xf3, 0x2c, (unsigned)gr, dst_bits == 64, &src->u.mem, out, out_cap,
-                                              out_len);
-        }
-        return -1;
+        return emit_x86_64_xmm_to_gp_cvtt(0xf3, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "vpbroadcastd") == 0 || strcmp(mnbuf, "vpbroadcastq") == 0) {
         as_x86_avx2_insn_t avx2;
