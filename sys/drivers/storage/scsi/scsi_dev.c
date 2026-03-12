@@ -46,6 +46,23 @@ static scsi_blk_dev_t *scsi_dev_alloc_slot(void) {
  */
 #define CD_SECTOR_SIZE      2048    /* Standard data CD */
 
+static int scsi_dev_refresh_capacity(scsi_device_t *scsi_dev) {
+    uint64_t sectors = 0;
+    uint32_t sector_size = 0;
+
+    if (scsi_dev == NULL) {
+        return -1;
+    }
+
+    if (scsi_read_capacity(scsi_dev, &sectors, &sector_size) < 0) {
+        return -1;
+    }
+
+    scsi_dev->capacity = sectors;
+    scsi_dev->sector_size = sector_size;
+    return 0;
+}
+
 /*
  * ============================================================
  * Block Device Callbacks
@@ -84,8 +101,10 @@ static int scsi_blk_write(blkdev_t *dev, uint64_t sector, uint32_t count, const 
     
     scsi_device_t *scsi = sbd->scsi_dev;
     
-    /* CD-ROMs are typically read-only */
-    if (scsi->type == SCSI_TYPE_ROM) {
+    /* CD-ROMs and WORM media are not writable through the generic block path. */
+    if (scsi->type == SCSI_TYPE_ROM ||
+        scsi->type == SCSI_TYPE_WORM ||
+        scsi->write_protected) {
         return -1;
     }
     
@@ -176,6 +195,14 @@ int scsi_dev_attach(scsi_device_t *scsi_dev) {
     
     sbd->scsi_dev = scsi_dev;
     sbd->dev_num = scsi_dev_next_num++;
+
+    if ((scsi_dev->type == SCSI_TYPE_DISK ||
+         scsi_dev->type == SCSI_TYPE_ROM ||
+         scsi_dev->type == SCSI_TYPE_OPTICAL ||
+         scsi_dev->type == SCSI_TYPE_WORM) &&
+        (scsi_dev->capacity == 0 || scsi_dev->sector_size == 0)) {
+        (void)scsi_dev_refresh_capacity(scsi_dev);
+    }
     
     /* Create device name: scsi0, scsi1, etc. */
     snprintf(sbd->blkdev.name, sizeof(sbd->blkdev.name), "scsi%u", sbd->dev_num);
