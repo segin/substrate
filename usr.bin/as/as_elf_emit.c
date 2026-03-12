@@ -1182,6 +1182,39 @@ static int lookup_i386_xmm_66_opcode(const char *mnemonic, unsigned char *opcode
     return -1;
 }
 
+static int lookup_i386_0fc7_group(const char *mnemonic, unsigned char *prefix, unsigned *reg_field) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char prefix;
+        unsigned reg_field;
+    } map[] = {
+        {"cmpxchg8b", 0x00, 1u},
+        {"xrstors", 0x00, 3u},
+        {"xsavec", 0x00, 4u},
+        {"xsaves", 0x00, 5u},
+        {"rdrand", 0x00, 6u},
+        {"vmclear", 0x66, 6u},
+        {"vmptrld", 0x00, 6u},
+        {"vmxon", 0xf3, 6u},
+        {"rdseed", 0x00, 7u},
+        {"vmptrst", 0x00, 7u},
+        {"rdpid", 0xf3, 7u},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || prefix == NULL || reg_field == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *prefix = map[i].prefix;
+            *reg_field = map[i].reg_field;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static int emit_i386_3dnow_rm(unsigned char reg_field, const as_operand_t *src, unsigned char imm8,
                               unsigned char *out, size_t out_cap, size_t *out_len) {
     size_t pos = 0;
@@ -4505,24 +4538,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             return -1;
         }
         op = &insn->operands[0];
-        prefix = (insn->prefixes & AS_PREFIX_DATA16) != 0 ? 0x66 : 0x00;
-        if (strcmp(mnbuf, "cmpxchg8b") == 0) reg_field = 1;
-        else if (strcmp(mnbuf, "xrstors") == 0) reg_field = 3;
-        else if (strcmp(mnbuf, "xsavec") == 0) reg_field = 4;
-        else if (strcmp(mnbuf, "xsaves") == 0) reg_field = 5;
-        else if (strcmp(mnbuf, "rdrand") == 0 || strcmp(mnbuf, "vmclear") == 0 ||
-                 strcmp(mnbuf, "vmptrld") == 0 || strcmp(mnbuf, "vmxon") == 0) {
-            reg_field = 6;
-            if (strcmp(mnbuf, "vmclear") == 0) {
-                prefix = 0x66;
-            } else if (strcmp(mnbuf, "vmxon") == 0) {
-                prefix = 0xf3;
-            }
-        } else {
-            reg_field = 7;
-            if (strcmp(mnbuf, "rdpid") == 0) {
-                prefix = 0xf3;
-            }
+        if (lookup_i386_0fc7_group(mnbuf, &prefix, &reg_field) != 0) {
+            return -1;
         }
         return emit_i386_prefixed_0f_rm(prefix, 0xc7, reg_field, op, out, out_cap, out_len);
     }
