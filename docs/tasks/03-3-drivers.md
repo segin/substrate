@@ -517,8 +517,8 @@
         - [ ] PRP (Physical Region Page) List construction for data buffers. (REQ: REQ-03-0437)
         - [ ] Issue Read/Write NVM commands. (REQ: REQ-03-0438)
 - [ ] **Partitioning & DevFS:** (REQ: REQ-03-0439)
-    - [ ] **Scanner:** Detect MBR, GPT, and BSD Disklabel partition tables. <!-- geom.h, geom_subr.c, geom_mbr.c, geom_gpt.c, geom_bsd.c, test_geom.c --> (REQ: REQ-03-0440)
-    - [ ] **Registration:** Register device nodes (`/dev/storage/sata0`, `/dev/storage/sata0s1`) with DevFS. <!-- geom_subr.c --> (REQ: REQ-03-0441)
+    - [x] **Scanner:** Detect MBR, GPT, and BSD Disklabel partition tables. <!-- geom.h, geom_subr.c, geom_mbr.c, geom_gpt.c, geom_bsd.c, test_geom.c --> (REQ: REQ-03-0440)
+    - [x] **Registration:** Register device nodes (`/dev/storage/sata0`, `/dev/storage/sata0s1`) with DevFS. <!-- geom_subr.c --> (REQ: REQ-03-0441)
 - [ ] **Input:** <!-- ps2.c, keyboard.c, mouse.c, input.h --> (REQ: REQ-03-0442)
 
     - [ ] **PS/2 Controller (`sys/drivers/input/ps2.c`, `ps2.h`):** (REQ: REQ-03-0443)
