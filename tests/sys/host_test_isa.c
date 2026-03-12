@@ -108,6 +108,10 @@ int main(void) {
     io_space[0x378 + 1] = 0x80;
     io_space[0x1F0] = 0x00;
     io_space[0x1F0 + 7] = 0x50;
+    io_space[0x1E8] = 0x00;
+    io_space[0x1E8 + 7] = 0x50;
+    io_space[0x168] = 0x00;
+    io_space[0x168 + 7] = 0x50;
     io_space[0x60] = 0x00;
     io_space[0x60 + 4] = 0x14;
     isa_init();
@@ -121,6 +125,8 @@ int main(void) {
     assert(isa_find_device_by_name("serial0") != NULL);
     assert(isa_find_device_by_name("parallel0") != NULL);
     assert(isa_find_device_by_name("ide-primary") != NULL);
+    assert(isa_find_device_by_name("ide-tertiary") != NULL);
+    assert(isa_find_device_by_name("ide-quaternary") != NULL);
     assert(isa_find_device_by_name("ps2") != NULL);
 
     memset(buf, 0, sizeof(buf));

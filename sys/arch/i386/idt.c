@@ -199,8 +199,9 @@ void isr_handler(registers_t *regs) {
         fpu_handler(regs);
     } else if (regs->int_no == 36) {
         uart_handler(regs);
-    } else if (regs->int_no == 46 || regs->int_no == 47) {
-        ide_irq_handler(regs->int_no == 47 ? 15 : 14);
+    } else if (regs->int_no == 42 || regs->int_no == 43 ||
+               regs->int_no == 46 || regs->int_no == 47) {
+        ide_irq_handler((int)(regs->int_no - IDT_IRQ_BASE));
     } else if (regs->int_no < 32) {
         // Exception - check if from user mode or kernel mode
         // Fault Recovery (copyin/copyout safe handlers)

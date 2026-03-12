@@ -175,7 +175,7 @@ Device namespace policy in `devfs`:
 
 Driver-model and legacy bus notes:
 - The core bus model now includes PCI and legacy ISA buses. PCI remains optional at runtime and old non-PCI 486-class systems are handled by a fixed-resource ISA probe pass instead of assuming PCI presence.
-- `isa_probe_legacy()` registers standard ISA-era devices (UART, LPT, IDE, PS/2) on the ISA bus when their fixed ports respond, so the kernel device tree remains meaningful on pre-PCI hardware.
+- `isa_probe_legacy()` registers standard ISA-era devices (UART, LPT, IDE, PS/2) on the ISA bus when their fixed ports respond, including tertiary/quaternary IDE legacy ports, so the kernel device tree remains meaningful on pre-PCI hardware and ISA add-in storage controllers.
 - the IDE core now registers ISA and PCI drivers with the framework instead of being attached directly from `main`; on old non-PCI systems it consumes ISA bus hints before probing, and on PCI systems it binds against IDE-class PCI devices.
 - when a PCI IDE controller is present, the IDE core consumes the controller's programming-interface bits and BAR layout for native-mode channel bases and bus-master DMA windows before probing drives, while still retaining legacy fixed-base support for ISA/compatibility-mode systems.
 - the VirtIO family no longer performs its own private PCI rescan during init; block, 9P, and SCSI transports now register per-device PCI drivers against the framework-owned PCI device list and bind existing devices through the generic probe/attach path.

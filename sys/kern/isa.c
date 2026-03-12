@@ -68,6 +68,8 @@ static isa_legacy_entry_t isa_legacy_table[] = {
     { "parallel2", 0x3BC, 8, isa_probe_lpt },
     { "ide-primary", 0x1F0, 8, isa_probe_ide },
     { "ide-secondary", 0x170, 8, isa_probe_ide },
+    { "ide-tertiary", 0x1E8, 8, isa_probe_ide },
+    { "ide-quaternary", 0x168, 8, isa_probe_ide },
     { "ps2", 0x60, 8, isa_probe_ps2 },
     { NULL, 0, 0, NULL },
 };

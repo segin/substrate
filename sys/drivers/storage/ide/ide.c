@@ -36,17 +36,6 @@
  * ============================================================
  */
 
-/* Standard I/O bases */
-#define ATA_PRIMARY_IO      0x1F0
-#define ATA_PRIMARY_CTRL    0x3F6
-#define ATA_SECONDARY_IO    0x170
-#define ATA_SECONDARY_CTRL  0x376
-#define ATA_TERTIARY_IO     0x1E8
-#define ATA_QUATERNARY_IO   0x168
-
-#define MAX_IDE_CHANNELS 2
-#define MAX_IDE_DEVICES  4
-
 /* Channel state */
 static ide_channel_t ide_channels[MAX_IDE_CHANNELS];
 
@@ -73,6 +62,46 @@ static void ide_wait_bsy(uint8_t channel);
 static int ide_wait_drq(uint8_t channel);
 
 static int ide_scan_controller(void);
+
+static const char *const ide_isa_channel_names[MAX_IDE_CHANNELS] = {
+    "ide-primary",
+    "ide-secondary",
+    "ide-tertiary",
+    "ide-quaternary",
+};
+
+static const char *const ide_channel_labels[MAX_IDE_CHANNELS] = {
+    "Primary",
+    "Secondary",
+    "Tertiary",
+    "Quaternary",
+};
+
+static const char *const ide_drive_labels[2] = {
+    "Master",
+    "Slave",
+};
+
+static const uint16_t ide_default_io_bases[MAX_IDE_CHANNELS] = {
+    ATA_PRIMARY_IO,
+    ATA_SECONDARY_IO,
+    ATA_TERTIARY_IO,
+    ATA_QUATERNARY_IO,
+};
+
+static const uint16_t ide_default_ctrl_bases[MAX_IDE_CHANNELS] = {
+    ATA_PRIMARY_CTRL,
+    ATA_SECONDARY_CTRL,
+    ATA_TERTIARY_CTRL,
+    ATA_QUATERNARY_CTRL,
+};
+
+static const uint8_t ide_default_irqs[MAX_IDE_CHANNELS] = {
+    ATA_PRIMARY_IRQ,
+    ATA_SECONDARY_IRQ,
+    ATA_TERTIARY_IRQ,
+    ATA_QUATERNARY_IRQ,
+};
 
 static int ide_legacy_channel_present(const char *name) {
     struct device *dev;
@@ -206,7 +235,9 @@ static int ide_isa_match(struct device *dev, struct driver *drv) {
     }
 
     return strcmp(dev->name, "ide-primary") == 0 ||
-           strcmp(dev->name, "ide-secondary") == 0;
+           strcmp(dev->name, "ide-secondary") == 0 ||
+           strcmp(dev->name, "ide-tertiary") == 0 ||
+           strcmp(dev->name, "ide-quaternary") == 0;
 }
 
 static int ide_attach_via_framework(struct device *dev) {
@@ -352,13 +383,21 @@ static int ide_wait_drq(uint8_t channel) {
 
         if (status & (ATA_SR_ERR | ATA_SR_DF)) {
             uint8_t error = ide_read_reg(channel, ATA_REG_ERROR);
-            kprintf("ide: DRQ failed status=%02x error=%02x\n", status, error);
+            char decoded[64];
+
+            ide_decode_error(error, decoded, sizeof(decoded));
+            kprintf("ide: DRQ failed status=%02x error=%02x (%s)\n",
+                    status, error, decoded);
             return -1;
         }
 
         if (get_uptime_ms() - start > 1000) {
             uint8_t error = ide_read_reg(channel, ATA_REG_ERROR);
-            kprintf("ide: timeout waiting for DRQ status=%02x error=%02x\n", status, error);
+            char decoded[64];
+
+            ide_decode_error(error, decoded, sizeof(decoded));
+            kprintf("ide: timeout waiting for DRQ status=%02x error=%02x (%s)\n",
+                    status, error, decoded);
             return -1;
         }
 
@@ -1159,7 +1198,7 @@ static int ide_blkdev_write(blkdev_t *dev, uint64_t sector, uint32_t count,
  */
 
 void ide_irq_handler(int irq) {
-    uint8_t channel = (irq == 15) ? 1 : 0;
+    uint8_t channel = 0xFF;
     
     /* Harvest entropy from interrupt */
     struct {
@@ -1170,6 +1209,15 @@ void ide_irq_handler(int irq) {
     
     entropy.tsc = i386_cpu_cycle_counter();
     entropy.irq = irq;
+    for (uint8_t i = 0; i < MAX_IDE_CHANNELS; i++) {
+        if (ide_channels[i].irq == (uint8_t)irq) {
+            channel = i;
+            break;
+        }
+    }
+    if (channel == 0xFF) {
+        return;
+    }
     entropy.channel = channel;
     
     random_harvest_fast(&entropy, sizeof(entropy));
@@ -1196,41 +1244,38 @@ void ide_irq_handler(int irq) {
 
 static int ide_scan_controller(void) {
     kprint("IDE Driver Initialized.\n");
-    int legacy_hint_primary;
-    int legacy_hint_secondary;
-    int use_legacy_hints;
+    int legacy_hints[MAX_IDE_CHANNELS];
+    int use_legacy_hints = 0;
     
     /* Setup channel structures */
-    ide_channels[0].io_base = ATA_PRIMARY_IO;
-    ide_channels[0].ctrl_base = ATA_PRIMARY_CTRL;
-    ide_channels[0].irq = 14;
-    ide_channels[0].bm_base = 0;
-    ide_channels[0].dma_capable = 0;
-    
-    ide_channels[1].io_base = ATA_SECONDARY_IO;
-    ide_channels[1].ctrl_base = ATA_SECONDARY_CTRL;
-    ide_channels[1].irq = 15;
-    ide_channels[1].bm_base = 0;
-    ide_channels[1].dma_capable = 0;
+    memset(ide_devices, 0, sizeof(ide_devices));
+    memset(ide_contexts, 0, sizeof(ide_contexts));
+    memset(ide_blkdevs, 0, sizeof(ide_blkdevs));
+    for (int ch = 0; ch < MAX_IDE_CHANNELS; ch++) {
+        ide_irq_complete[ch] = 0;
+    }
+    ide_device_count = 0;
+    for (int ch = 0; ch < MAX_IDE_CHANNELS; ch++) {
+        ide_channels[ch].io_base = ide_default_io_bases[ch];
+        ide_channels[ch].ctrl_base = ide_default_ctrl_bases[ch];
+        ide_channels[ch].irq = ide_default_irqs[ch];
+        ide_channels[ch].bm_base = 0;
+        ide_channels[ch].dma_capable = 0;
+        legacy_hints[ch] = ide_legacy_channel_present(ide_isa_channel_names[ch]);
+        use_legacy_hints |= legacy_hints[ch];
+    }
 
     ide_configure_from_pci();
-
-    legacy_hint_primary = ide_legacy_channel_present("ide-primary");
-    legacy_hint_secondary = ide_legacy_channel_present("ide-secondary");
-    use_legacy_hints = legacy_hint_primary || legacy_hint_secondary;
     
     /* Disable interrupts during probe */
-    ide_write_ctrl(0, ATA_CTRL_NIEN);
-    ide_write_ctrl(1, ATA_CTRL_NIEN);
-    
+    for (int ch = 0; ch < MAX_IDE_CHANNELS; ch++) {
+        ide_write_ctrl((uint8_t)ch, ATA_CTRL_NIEN);
+    }
+
     /* Probe all channels and drives */
-    const char *bus_names[2] = { "Primary", "Secondary" };
-    const char *drive_names[2] = { "Master", "Slave" };
-    
-    for (int ch = 0; ch < 2; ch++) {
+    for (int ch = 0; ch < MAX_IDE_CHANNELS; ch++) {
         if (use_legacy_hints) {
-            if ((ch == 0 && !legacy_hint_primary) ||
-                (ch == 1 && !legacy_hint_secondary)) {
+            if (!legacy_hints[ch]) {
                 continue;
             }
         }
@@ -1255,37 +1300,15 @@ static int ide_scan_controller(void) {
             }
 
             if (type != -1 && ide_device_count < MAX_IDE_DEVICES) {
-                /* Found a drive */
-                char model[41];
-                for (int i = 0; i < 20; i++) {
-                    uint16_t w = buf[27 + i];
-                    model[i * 2] = (w >> 8) & 0xFF;
-                    model[i * 2 + 1] = w & 0xFF;
-                }
-                model[40] = 0;
-                
-                /* Trim trailing spaces */
-                for (int i = 39; i >= 0; i--) {
-                    if (model[i] == ' ') model[i] = 0;
-                    else break;
-                }
-                
-                uint64_t total_sectors = 0;
+                uint64_t total_sectors;
                 uint32_t sector_size = 512;
 
-                if (type == 0) {
-                    /* ATA size calculation */
-                    if (buf[83] & (1 << 10)) {
-                        /* LBA48 supported */
-                        total_sectors = (uint64_t)buf[100] |
-                                       ((uint64_t)buf[101] << 16) |
-                                       ((uint64_t)buf[102] << 32) |
-                                       ((uint64_t)buf[103] << 48);
-                    } else {
-                        /* LBA28 only */
-                        total_sectors = buf[60] | ((uint32_t)buf[61] << 16);
-                    }
-                } else {
+                ide_parse_identify_data(&ide_devices[ide_device_count], buf,
+                                        (uint8_t)type, (uint8_t)ch,
+                                        (uint8_t)d);
+                total_sectors = ide_devices[ide_device_count].size;
+
+                if (type == 1) {
                     /* ATAPI size calculation */
                     uint32_t lba, blk_size;
                     /* Try to read capacity. If fails (no media), size=0 */
@@ -1298,13 +1321,7 @@ static int ide_scan_controller(void) {
                     }
                 }
                 
-                /* Store device info */
-                ide_devices[ide_device_count].present = 1;
-                ide_devices[ide_device_count].type = type;
-                ide_devices[ide_device_count].channel = ch;
-                ide_devices[ide_device_count].drive = d;
                 ide_devices[ide_device_count].size = total_sectors;
-                memcpy(ide_devices[ide_device_count].model, model, 41);
                 
                 /* Setup context */
                 ide_contexts[ide_device_count].channel = ch;
@@ -1331,11 +1348,11 @@ static int ide_scan_controller(void) {
                 kprint("  ");
                 kprint(bdev->name);
                 kprint(": ");
-                kprint(model);
+                kprint(ide_devices[ide_device_count].model);
                 kprint(" (");
-                kprint(bus_names[ch]);
+                kprint(ide_channel_labels[ch]);
                 kprint(" ");
-                kprint(drive_names[d]);
+                kprint(ide_drive_labels[d]);
                 if (type == 1) kprint(", ATAPI");
                 kprint(")\n");
 
@@ -1347,8 +1364,9 @@ static int ide_scan_controller(void) {
     }
     
     /* Re-enable interrupts */
-    ide_write_ctrl(0, 0);
-    ide_write_ctrl(1, 0);
+    for (int ch = 0; ch < MAX_IDE_CHANNELS; ch++) {
+        ide_write_ctrl((uint8_t)ch, 0);
+    }
 
     ide_attached = 1;
     return 0;
