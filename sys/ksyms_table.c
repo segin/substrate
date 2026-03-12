@@ -1002,10 +1002,17 @@ extern void sched_yield(void);
 extern void scsi_abort_request(void);
 extern void scsi_auto_attach(void);
 extern void scsi_cdb_inquiry(void);
+extern void scsi_cdb_mode_sense_10(void);
+extern void scsi_cdb_mode_sense_6(void);
 extern void scsi_cdb_read_10(void);
+extern void scsi_cdb_read_16(void);
 extern void scsi_cdb_read_capacity_10(void);
+extern void scsi_cdb_request_sense(void);
+extern void scsi_cdb_start_stop(void);
+extern void scsi_cdb_sync_cache(void);
 extern void scsi_cdb_test_unit_ready(void);
 extern void scsi_cdb_write_10(void);
+extern void scsi_cdb_write_16(void);
 extern void scsi_complete_request(void);
 extern void scsi_create_bus_node(void);
 extern void scsi_ctl_init(void);
@@ -1023,6 +1030,7 @@ extern void scsi_execute_sync(void);
 extern void scsi_init(void);
 extern void scsi_inquiry(void);
 extern void scsi_lock_door(void);
+extern void scsi_mode_sense(void);
 extern void scsi_probe_lun(void);
 extern void scsi_process_queue(void);
 extern void scsi_queue_request(void);
@@ -1040,6 +1048,7 @@ extern void scsi_sense_ascq(void);
 extern void scsi_sense_key(void);
 extern void scsi_sense_string(void);
 extern void scsi_start_stop(void);
+extern void scsi_synchronize_cache(void);
 extern void scsi_test_unit_ready(void);
 extern void scsi_unregister_link(void);
 extern void sema_getvalue(void);
@@ -2621,6 +2630,8 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&scsi_request_sense, "scsi_request_sense" },
     { (uint32_t)(uintptr_t)&scsi_start_stop, "scsi_start_stop" },
     { (uint32_t)(uintptr_t)&scsi_report_luns, "scsi_report_luns" },
+    { (uint32_t)(uintptr_t)&scsi_synchronize_cache, "scsi_synchronize_cache" },
+    { (uint32_t)(uintptr_t)&scsi_mode_sense, "scsi_mode_sense" },
     { (uint32_t)(uintptr_t)&scsi_sense_key, "scsi_sense_key" },
     { (uint32_t)(uintptr_t)&scsi_sense_asc, "scsi_sense_asc" },
     { (uint32_t)(uintptr_t)&scsi_sense_ascq, "scsi_sense_ascq" },
@@ -2630,6 +2641,13 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&scsi_cdb_read_capacity_10, "scsi_cdb_read_capacity_10" },
     { (uint32_t)(uintptr_t)&scsi_cdb_read_10, "scsi_cdb_read_10" },
     { (uint32_t)(uintptr_t)&scsi_cdb_write_10, "scsi_cdb_write_10" },
+    { (uint32_t)(uintptr_t)&scsi_cdb_read_16, "scsi_cdb_read_16" },
+    { (uint32_t)(uintptr_t)&scsi_cdb_write_16, "scsi_cdb_write_16" },
+    { (uint32_t)(uintptr_t)&scsi_cdb_request_sense, "scsi_cdb_request_sense" },
+    { (uint32_t)(uintptr_t)&scsi_cdb_mode_sense_6, "scsi_cdb_mode_sense_6" },
+    { (uint32_t)(uintptr_t)&scsi_cdb_mode_sense_10, "scsi_cdb_mode_sense_10" },
+    { (uint32_t)(uintptr_t)&scsi_cdb_start_stop, "scsi_cdb_start_stop" },
+    { (uint32_t)(uintptr_t)&scsi_cdb_sync_cache, "scsi_cdb_sync_cache" },
     { (uint32_t)(uintptr_t)&scsi_probe_lun, "scsi_probe_lun" },
     { (uint32_t)(uintptr_t)&scsi_scan_bus, "scsi_scan_bus" },
     { (uint32_t)(uintptr_t)&scsi_read_toc, "scsi_read_toc" },
@@ -3355,4 +3373,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1672;
+int ksym_count = 1681;

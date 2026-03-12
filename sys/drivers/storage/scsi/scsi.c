@@ -20,6 +20,20 @@ static inline uint64_t kernel_time_ms(void) {
     return (uint64_t)get_uptime_ms();
 }
 
+struct scsi_read_capacity_16 {
+    uint8_t last_lba[8];
+    uint8_t block_size[4];
+    uint8_t prot_p_type;
+    uint8_t reserved[19];
+} __attribute__((packed));
+
+static void scsi_cdb_read_capacity_16(uint8_t *cdb, uint32_t alloc_len) {
+    memset(cdb, 0, 16);
+    cdb[0] = SCSI_CMD_READ_CAPACITY_16;
+    cdb[1] = 0x10; /* service action */
+    scsi_put_be32(&cdb[10], alloc_len);
+}
+
 /*
  * ============================================================
  * Static Storage
@@ -543,22 +557,40 @@ int scsi_read_capacity(scsi_device_t *dev, uint64_t *sectors, uint32_t *sector_s
     int ret = scsi_execute_sync(dev, cdb, 10, &cap, sizeof(cap), SCSI_REQ_READ, 5000);
     
     if (ret == 0) {
-        *sectors = scsi_be32((uint8_t*)&cap.lba) + 1;
-        *sector_size = scsi_be32((uint8_t*)&cap.block_size);
+        uint32_t last_lba = scsi_be32((uint8_t *)&cap.lba);
+
+        *sectors = (uint64_t)last_lba + 1U;
+        *sector_size = scsi_be32((uint8_t *)&cap.block_size);
+
+        if (last_lba == 0xFFFFFFFFU) {
+            uint8_t cdb16[16];
+            struct scsi_read_capacity_16 cap16;
+
+            scsi_cdb_read_capacity_16(cdb16, sizeof(cap16));
+            ret = scsi_execute_sync(dev, cdb16, 16, &cap16, sizeof(cap16),
+                                    SCSI_REQ_READ, 5000);
+            if (ret == 0) {
+                *sectors = scsi_be64(cap16.last_lba) + 1U;
+                *sector_size = scsi_be32(cap16.block_size);
+            }
+        }
     }
     
     return ret;
 }
 
 int scsi_request_sense(scsi_device_t *dev, uint8_t *sense, uint8_t len) {
-    uint8_t cdb[6] = {SCSI_CMD_REQUEST_SENSE, 0, 0, 0, len, 0};
+    uint8_t cdb[6];
+
+    scsi_cdb_request_sense(cdb, len);
     return scsi_execute_sync(dev, cdb, 6, sense, len, 
                             SCSI_REQ_READ | SCSI_REQ_NO_SENSE, 5000);
 }
 
 int scsi_start_stop(scsi_device_t *dev, int start, int load_eject) {
-    uint8_t cdb[6] = {SCSI_CMD_START_STOP_UNIT, 0, 0, 0, 0, 0};
-    cdb[4] = (load_eject ? 0x02 : 0) | (start ? 0x01 : 0);
+    uint8_t cdb[6];
+
+    scsi_cdb_start_stop(cdb, start, load_eject);
     return scsi_execute_sync(dev, cdb, 6, NULL, 0, 0, 30000);
 }
 
@@ -581,6 +613,33 @@ int scsi_report_luns(scsi_device_t *dev, struct scsi_report_luns_data *luns) {
     memset(luns, 0, sizeof(struct scsi_report_luns_data));
     
     return scsi_execute_sync(dev, cdb, 12, luns, alloc_len, SCSI_REQ_READ, 10000);
+}
+
+int scsi_synchronize_cache(scsi_device_t *dev) {
+    uint8_t cdb[10];
+
+    scsi_cdb_sync_cache(cdb, 0, 0);
+    return scsi_execute_sync(dev, cdb, 10, NULL, 0, 0, 30000);
+}
+
+int scsi_mode_sense(scsi_device_t *dev, uint8_t page, void *buffer, uint16_t len) {
+    if (!dev || !buffer || len == 0) {
+        return -1;
+    }
+
+    if (len <= 0xFFU) {
+        uint8_t cdb[6];
+
+        scsi_cdb_mode_sense_6(cdb, page, (uint8_t)len);
+        return scsi_execute_sync(dev, cdb, 6, buffer, len, SCSI_REQ_READ, 5000);
+    }
+
+    {
+        uint8_t cdb[10];
+
+        scsi_cdb_mode_sense_10(cdb, page, len);
+        return scsi_execute_sync(dev, cdb, 10, buffer, len, SCSI_REQ_READ, 5000);
+    }
 }
 
 /*
@@ -774,6 +833,53 @@ void scsi_cdb_read_10(uint8_t *cdb, uint32_t lba, uint16_t count) {
 void scsi_cdb_write_10(uint8_t *cdb, uint32_t lba, uint16_t count) {
     memset(cdb, 0, 10);
     cdb[0] = SCSI_CMD_WRITE_10;
+    scsi_put_be32(&cdb[2], lba);
+    scsi_put_be16(&cdb[7], count);
+}
+
+void scsi_cdb_read_16(uint8_t *cdb, uint64_t lba, uint32_t count) {
+    memset(cdb, 0, 16);
+    cdb[0] = SCSI_CMD_READ_16;
+    scsi_put_be64(&cdb[2], lba);
+    scsi_put_be32(&cdb[10], count);
+}
+
+void scsi_cdb_write_16(uint8_t *cdb, uint64_t lba, uint32_t count) {
+    memset(cdb, 0, 16);
+    cdb[0] = SCSI_CMD_WRITE_16;
+    scsi_put_be64(&cdb[2], lba);
+    scsi_put_be32(&cdb[10], count);
+}
+
+void scsi_cdb_request_sense(uint8_t *cdb, uint8_t len) {
+    memset(cdb, 0, 6);
+    cdb[0] = SCSI_CMD_REQUEST_SENSE;
+    cdb[4] = len;
+}
+
+void scsi_cdb_mode_sense_6(uint8_t *cdb, uint8_t page, uint8_t len) {
+    memset(cdb, 0, 6);
+    cdb[0] = SCSI_CMD_MODE_SENSE_6;
+    cdb[2] = (uint8_t)(page & 0x3FU);
+    cdb[4] = len;
+}
+
+void scsi_cdb_mode_sense_10(uint8_t *cdb, uint8_t page, uint16_t len) {
+    memset(cdb, 0, 10);
+    cdb[0] = SCSI_CMD_MODE_SENSE_10;
+    cdb[2] = (uint8_t)(page & 0x3FU);
+    scsi_put_be16(&cdb[7], len);
+}
+
+void scsi_cdb_start_stop(uint8_t *cdb, int start, int load_eject) {
+    memset(cdb, 0, 6);
+    cdb[0] = SCSI_CMD_START_STOP_UNIT;
+    cdb[4] = (uint8_t)((load_eject ? 0x02 : 0) | (start ? 0x01 : 0));
+}
+
+void scsi_cdb_sync_cache(uint8_t *cdb, uint32_t lba, uint16_t count) {
+    memset(cdb, 0, 10);
+    cdb[0] = SCSI_CMD_SYNCHRONIZE_CACHE;
     scsi_put_be32(&cdb[2], lba);
     scsi_put_be16(&cdb[7], count);
 }

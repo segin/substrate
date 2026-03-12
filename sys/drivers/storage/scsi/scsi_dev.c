@@ -47,14 +47,23 @@ static int scsi_blk_read(blkdev_t *dev, uint64_t sector, uint32_t count, void *b
     if (!sbd || !sbd->scsi_dev) return -1;
     
     scsi_device_t *scsi = sbd->scsi_dev;
-    uint8_t cdb[10];
-    
-    /* Build READ(10) CDB */
-    scsi_cdb_read_10(cdb, (uint32_t)sector, (uint16_t)count);
-    
-    int ret = scsi_execute_sync(scsi, cdb, 10, buffer,
-                                 count * dev->sector_size,
-                                 SCSI_REQ_READ, 60000);
+    int ret;
+
+    if (sector > 0xFFFFFFFFULL || count > 0xFFFFU || scsi->capacity > 0x100000000ULL) {
+        uint8_t cdb[16];
+
+        scsi_cdb_read_16(cdb, sector, count);
+        ret = scsi_execute_sync(scsi, cdb, 16, buffer,
+                                count * dev->sector_size,
+                                SCSI_REQ_READ, 60000);
+    } else {
+        uint8_t cdb[10];
+
+        scsi_cdb_read_10(cdb, (uint32_t)sector, (uint16_t)count);
+        ret = scsi_execute_sync(scsi, cdb, 10, buffer,
+                                count * dev->sector_size,
+                                SCSI_REQ_READ, 60000);
+    }
     
     return (ret >= 0) ? (int)count : -1;
 }
@@ -70,14 +79,23 @@ static int scsi_blk_write(blkdev_t *dev, uint64_t sector, uint32_t count, const 
         return -1;
     }
     
-    uint8_t cdb[10];
-    
-    /* Build WRITE(10) CDB */
-    scsi_cdb_write_10(cdb, (uint32_t)sector, (uint16_t)count);
-    
-    int ret = scsi_execute_sync(scsi, cdb, 10, (void *)buffer,
-                                 count * dev->sector_size,
-                                 SCSI_REQ_WRITE, 30000);
+    int ret;
+
+    if (sector > 0xFFFFFFFFULL || count > 0xFFFFU || scsi->capacity > 0x100000000ULL) {
+        uint8_t cdb[16];
+
+        scsi_cdb_write_16(cdb, sector, count);
+        ret = scsi_execute_sync(scsi, cdb, 16, (void *)buffer,
+                                count * dev->sector_size,
+                                SCSI_REQ_WRITE, 30000);
+    } else {
+        uint8_t cdb[10];
+
+        scsi_cdb_write_10(cdb, (uint32_t)sector, (uint16_t)count);
+        ret = scsi_execute_sync(scsi, cdb, 10, (void *)buffer,
+                                count * dev->sector_size,
+                                SCSI_REQ_WRITE, 30000);
+    }
     
     return (ret >= 0) ? (int)count : -1;
 }

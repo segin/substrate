@@ -373,6 +373,8 @@ int scsi_read_capacity(scsi_device_t *dev, uint64_t *sectors, uint32_t *sector_s
 int scsi_request_sense(scsi_device_t *dev, uint8_t *sense, uint8_t len);
 int scsi_start_stop(scsi_device_t *dev, int start, int load_eject);
 int scsi_report_luns(scsi_device_t *dev, struct scsi_report_luns_data *luns);
+int scsi_synchronize_cache(scsi_device_t *dev);
+int scsi_mode_sense(scsi_device_t *dev, uint8_t page, void *buffer, uint16_t len);
 
 /* Sense Data Parsing */
 int scsi_sense_key(const uint8_t *sense, uint8_t len);
@@ -383,7 +385,14 @@ const char *scsi_sense_string(uint8_t key, uint8_t asc, uint8_t ascq);
 /* CDB Helpers */
 void scsi_cdb_read_10(uint8_t *cdb, uint32_t lba, uint16_t count);
 void scsi_cdb_write_10(uint8_t *cdb, uint32_t lba, uint16_t count);
+void scsi_cdb_read_16(uint8_t *cdb, uint64_t lba, uint32_t count);
+void scsi_cdb_write_16(uint8_t *cdb, uint64_t lba, uint32_t count);
 void scsi_cdb_read_capacity_10(uint8_t *cdb);
+void scsi_cdb_request_sense(uint8_t *cdb, uint8_t len);
+void scsi_cdb_mode_sense_6(uint8_t *cdb, uint8_t page, uint8_t len);
+void scsi_cdb_mode_sense_10(uint8_t *cdb, uint8_t page, uint16_t len);
+void scsi_cdb_start_stop(uint8_t *cdb, int start, int load_eject);
+void scsi_cdb_sync_cache(uint8_t *cdb, uint32_t lba, uint16_t count);
 void scsi_cdb_inquiry(uint8_t *cdb, uint8_t len);
 void scsi_cdb_test_unit_ready(uint8_t *cdb);
 
@@ -397,6 +406,13 @@ static inline uint32_t scsi_be32(const uint8_t *p) {
            ((uint32_t)p[2] << 8) | p[3];
 }
 
+static inline uint64_t scsi_be64(const uint8_t *p) {
+    return ((uint64_t)p[0] << 56) | ((uint64_t)p[1] << 48) |
+           ((uint64_t)p[2] << 40) | ((uint64_t)p[3] << 32) |
+           ((uint64_t)p[4] << 24) | ((uint64_t)p[5] << 16) |
+           ((uint64_t)p[6] << 8) | p[7];
+}
+
 static inline void scsi_put_be16(uint8_t *p, uint16_t val) {
     p[0] = (val >> 8) & 0xFF;
     p[1] = val & 0xFF;
@@ -407,6 +423,17 @@ static inline void scsi_put_be32(uint8_t *p, uint32_t val) {
     p[1] = (val >> 16) & 0xFF;
     p[2] = (val >> 8) & 0xFF;
     p[3] = val & 0xFF;
+}
+
+static inline void scsi_put_be64(uint8_t *p, uint64_t val) {
+    p[0] = (uint8_t)(val >> 56);
+    p[1] = (uint8_t)(val >> 48);
+    p[2] = (uint8_t)(val >> 40);
+    p[3] = (uint8_t)(val >> 32);
+    p[4] = (uint8_t)(val >> 24);
+    p[5] = (uint8_t)(val >> 16);
+    p[6] = (uint8_t)(val >> 8);
+    p[7] = (uint8_t)val;
 }
 
 #endif /* _SCSI_H */
