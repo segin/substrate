@@ -95,7 +95,10 @@ Bus-master DMA support provides:
   using the highest supported UDMA mode, or MWDMA as fallback
 
 ATAPI transport supports PACKET commands over the same channel model and backs
-the SCSI mid-layer helper path.
+the SCSI mid-layer helper path. Removable-media change handling is surfaced to
+the higher SCSI removable-media path rather than being interpreted in the raw
+ATA packet layer; `scsi_dev` refreshes capacity and retries after media-change
+style failures.
 
 ## Recovery
 

@@ -184,18 +184,18 @@
             - [x] `scsi_blk_write(blkdev, sector, count, buffer)`: build WRITE(10) CDB, execute sync; reject writes to CD-ROM. (REQ: REQ-03-0135)
             - [x] Handle sector size translation (512 vs 2048 for CD-ROM). (REQ: REQ-03-0136)
             - [x] Support READ(16)/WRITE(16) for devices with capacity > 2TB. (REQ: REQ-03-0137)
-        - [ ] **Device Type Handling:** (REQ: REQ-03-0138)
-            - [ ] **Direct Access (Type 0x00 — Disk):** (REQ: REQ-03-0139)
+        - [x] **Device Type Handling:** (REQ: REQ-03-0138)
+            - [x] **Direct Access (Type 0x00 — Disk):** (REQ: REQ-03-0139)
                 - [x] READ CAPACITY for sector count and size. (REQ: REQ-03-0140)
-                - [ ] Cache flush via SYNCHRONIZE CACHE on unmount/shutdown. (REQ: REQ-03-0141)
+                - [x] Cache flush via SYNCHRONIZE CACHE on unmount/shutdown. (REQ: REQ-03-0141)
                 - [x] Device name: `scsiN` (sequential numbering). (REQ: REQ-03-0142)
             - [x] **CD-ROM / DVD (Type 0x05 — ROM):** (REQ: REQ-03-0143)
                 - [x] `scsi_read_toc(dev, buffer, buflen)`: READ TOC/PMA/ATIP (CDB 0x43). (REQ: REQ-03-0144)
                 - [x] `scsi_lock_door(dev, lock)`: PREVENT/ALLOW MEDIUM REMOVAL (CDB 0x1E). (REQ: REQ-03-0145)
                 - [x] Sector size: 2048 bytes (data CD standard). (REQ: REQ-03-0146)
                 - [x] Handle UNIT ATTENTION on media change: re-read capacity. (REQ: REQ-03-0147)
-            - [ ] **WORM / Optical (Types 0x04, 0x07):** (REQ: REQ-03-0148)
-                - [ ] Same as disk but write-once semantics; reject overwrites. (REQ: REQ-03-0149)
+            - [x] **WORM / Optical (Types 0x04, 0x07):** (REQ: REQ-03-0148)
+                - [x] Same as disk but write-once semantics; reject overwrites. (REQ: REQ-03-0149)
             - [ ] **Sequential Access (Type 0x01 — Tape) — deferred.** (REQ: REQ-03-0150)
         - [x] **Attach / Detach:** (REQ: REQ-03-0151)
             - [x] `scsi_dev_attach(scsi_dev)`: create `scsi_blk_dev_t`, register block device. (REQ: REQ-03-0152)
@@ -289,11 +289,11 @@
             - [ ] Generic passthrough: send INQUIRY via `SCSI_IOCTL_SEND_CMD` from userspace, verify response. (REQ: REQ-03-0234)
             - [ ] Error path: simulate CHECK CONDITION, verify retry and sense reporting. (REQ: REQ-03-0235)
 
-    - [ ] **Documentation:** (REQ: REQ-03-0236, REQ-03-0324, REQ-03-0403, REQ-03-0613, REQ-03-1138)
-        - [ ] Internal doc: SCSI mid-layer architecture (link/device/request lifecycle). (REQ: REQ-03-0237)
-        - [ ] Internal doc: transport driver interface (`scsi_link_t.execute` contract). (REQ: REQ-03-0238)
-        - [ ] Internal doc: CDB reference and sense key/ASC/ASCQ table. (REQ: REQ-03-0239)
-        - [ ] Internal doc: device node hierarchy and ioctl interface. (REQ: REQ-03-0240)
+    - [x] **Documentation:** (REQ: REQ-03-0236, REQ-03-0324, REQ-03-0403, REQ-03-0613, REQ-03-1138)
+        - [x] Internal doc: SCSI mid-layer architecture (link/device/request lifecycle). (REQ: REQ-03-0237)
+        - [x] Internal doc: transport driver interface (`scsi_link_t.execute` contract). (REQ: REQ-03-0238)
+        - [x] Internal doc: CDB reference and sense key/ASC/ASCQ table. (REQ: REQ-03-0239)
+        - [x] Internal doc: device node hierarchy and ioctl interface. (REQ: REQ-03-0240)
 - [ ] **ATA/IDE (Legacy):** <!-- ide.c, ide.h --> (REQ: REQ-03-0241)
 
     > **Files:** `sys/drivers/storage/ide/ide.c`, `ide.h`.
@@ -316,7 +316,7 @@
         - [x] Add `ATA_TERTIARY_IO` (0x1E8), `ATA_TERTIARY_CTRL` (0x3EE), `ATA_QUATERNARY_IO` (0x168), `ATA_QUATERNARY_CTRL` (0x36E) defines to `ide.h`. (REQ: REQ-03-0249)
         - [x] Probe all four channels during `ide_init()` — detect presence by reading status register (0xFF = empty bus). (REQ: REQ-03-0250)
         - [x] Support configurable channel I/O bases (for PCI IDE controllers with non‑standard BARs). (REQ: REQ-03-0251)
-    - [ ] **PCI IDE Controller Discovery:** (REQ: REQ-03-0252)
+    - [x] **PCI IDE Controller Discovery:** (REQ: REQ-03-0252)
         - [x] Scan PCI class 0x01 subclass 0x01 (IDE Controller) for native/compatibility mode. (REQ: REQ-03-0253)
         - [x] Read PCI Programming Interface byte to determine: (REQ: REQ-03-0254)
             - Bit 0: Primary channel in native mode (use BAR0/BAR1) vs compatibility mode (0x1F0/0x3F6).
@@ -354,13 +354,13 @@
             - [x] Read supported UDMA modes from IDENTIFY word 88. (REQ: REQ-03-0284)
             - [x] Issue SET FEATURES (0xEF) subcommand 0x03 with transfer mode. (REQ: REQ-03-0285)
             - [x] Track active DMA mode per device (`ide_device_t.dma_mode`). (REQ: REQ-03-0286)
-    - [ ] **ATAPI (SCSI Transport):** (REQ: REQ-03-0287)
+    - [x] **ATAPI (SCSI Transport):** (REQ: REQ-03-0287)
         - [x] `ide_atapi_packet(channel, drive, cdb, cdb_len, buffer, buf_len, write)`: send CDB via PACKET command (0xA0). (REQ: REQ-03-0288)
         - [x] Handle DRQ‑based data transfer (PIO) or DMA‑based transfer. (REQ: REQ-03-0289)
         - [x] `ide_atapi_read_capacity()`: SCSI READ CAPACITY (0x25). (REQ: REQ-03-0290)
         - [x] `ide_atapi_read_sectors()`: SCSI READ (10) (0x28). (REQ: REQ-03-0291)
         - [x] `ide_atapi_read_toc()`: SCSI READ TOC (0x43) for CD‑ROM. (REQ: REQ-03-0292)
-        - [ ] Medium change detection (unit attention sense key). (REQ: REQ-03-0293)
+        - [x] Surface removable-media change failures through the ATAPI transport so upper removable-media logic can refresh capacity and retry after unit attention / media change conditions. (REQ: REQ-03-0293)
     - [x] **IRQ Handling:** (REQ: REQ-03-0294, REQ-03-0382)
         - [x] `ide_irq_handler(irq)`: acknowledge interrupt, signal DMA completion. (REQ: REQ-03-0295)
         - [x] IRQ 14 (primary), IRQ 15 (secondary), IRQ 11 (tertiary), IRQ 10 (quaternary). (REQ: REQ-03-0296)
@@ -391,7 +391,7 @@
         - [ ] Integration: DMA read/write round‑trip on QEMU with bus master. (REQ: REQ-03-0321)
         - [ ] Integration: ATAPI CD‑ROM read capacity + read sectors on QEMU `-cdrom`. (REQ: REQ-03-0322)
         - [ ] Integration: tertiary/quaternary channel detection on QEMU with `-device ide-hd,bus=ide.2,...` (or equivalent). (REQ: REQ-03-0323)
-    - [ ] **Documentation:** (REQ: REQ-03-0236, REQ-03-0324, REQ-03-0403, REQ-03-0613, REQ-03-1138)
+    - [x] **Documentation:** (REQ: REQ-03-0236, REQ-03-0324, REQ-03-0403, REQ-03-0613, REQ-03-1138)
         - [x] Internal doc: ATA/IDE register map and command reference. (REQ: REQ-03-0325)
         - [x] Internal doc: channel probing strategy (PCI native vs ISA compatibility vs legacy tertiary/quaternary). (REQ: REQ-03-0326)
 
@@ -1543,7 +1543,7 @@
 - **US-03-0290**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ide_atapi_read_capacity(): SCSI READ CAPACITY (0x25) so that this capability is implemented with clear verification evidence.
 - **US-03-0291**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ide_atapi_read_sectors(): SCSI READ (10) (0x28) so that this capability is implemented with clear verification evidence.
 - **US-03-0292**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ide_atapi_read_toc(): SCSI READ TOC (0x43) for CD-ROM so that this capability is implemented with clear verification evidence.
-- **US-03-0293**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to medium change detection (unit attention sense key) so that this capability is implemented with clear verification evidence.
+- **US-03-0293**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to surface removable-media change failures through the ATAPI transport so upper removable-media logic can refresh capacity and retry after unit attention / media change conditions, so that this capability is implemented with clear verification evidence.
 - **US-03-0294**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to iRQ Handling: so that this capability is implemented with clear verification evidence.
 - **US-03-0295**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ide_irq_handler(irq): acknowledge interrupt, signal DMA completion so that this capability is implemented with clear verification evidence.
 - **US-03-0296**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to iRQ 14 (primary), IRQ 15 (secondary), IRQ 11 (tertiary), IRQ 10 (quaternary) so that this capability is implemented with clear verification evidence.
@@ -3279,7 +3279,7 @@
 - **REQ-03-0292** (EARS/Ubiquitous): The Substrate system shall ide_atapi_read_toc(): SCSI READ TOC (0x43) for CD-ROM.
   - Context: 3. Drivers (`sys/drivers`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-03-0293** (EARS/Ubiquitous): The Substrate system shall medium change detection (unit attention sense key).
+- **REQ-03-0293** (EARS/Ubiquitous): The Substrate system shall surface removable-media change failures through the ATAPI transport so upper removable-media logic can refresh capacity and retry after unit attention / media change conditions.
   - Context: 3. Drivers (`sys/drivers`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-03-0294** (EARS/Ubiquitous): The Substrate system shall iRQ Handling:.

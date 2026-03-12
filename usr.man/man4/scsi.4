@@ -21,6 +21,15 @@ The bus controller node for bus \fIB\fP. This node accepts ioctls for bus manage
 .B /dev/storage/scsiN
 Legacy-style or high-level block device alias (e.g., \fIscsi0\fP) mapping to the \fIN\fP-th detected block device (disk or CD-ROM). This serves as the primary interface for filesystems.
 
+.SS Device-Type Policy
+Direct-access disks refresh capacity before publication and issue
+.B SYNCHRONIZE CACHE
+when detached from the high-level block layer.
+CD-ROM devices use 2048-byte sectors and expose TOC-oriented helpers through
+the SCSI mid-layer.
+WORM and optical write-once media are published through the same high-level
+path but reject generic overwrite attempts.
+
 .SH IOCTLS
 .TP
 .B SCSI_IOCTL_SEND_COMMAND
