@@ -136,12 +136,29 @@ This is equivalent to
 .BI textmode= COLS x ROWS
 Select the hardware text-console geometry used by the kernel VT driver.
 The bottom physical row is reserved for the kernel status line, so the visible tty geometry reported to userland is one row smaller than the selected physical mode.
+.TP
+.B vga=ask
+On BIOS
+.B zImage
+and floppy boots, invoke the real-mode VGA text-mode selector before protected-mode handoff.
+The current selector offers
+.BR 80x25 ,
+.BR 80x43 ,
+and
+.BR 80x50 ,
+then appends the matching
+.B textmode=
+token so the higher-half kernel uses the same geometry.
 .PP
 Currently supported in-kernel text modes are:
 .IP \(bu 2
 .B 80x25
 (visible tty area:
 .BR 80x24 )
+.IP \(bu
+.B 80x43
+(visible tty area:
+.BR 80x42 )
 .IP \(bu
 .B 80x50
 (visible tty area:

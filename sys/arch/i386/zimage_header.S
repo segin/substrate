@@ -23,6 +23,8 @@ zimage_start:
 .set ZIMG_SCRATCH_MMAPLEN,  0x0510
 .set ZIMG_SCRATCH_MEMLOW,   0x0514
 .set ZIMG_SCRATCH_MEMUPPER, 0x0518
+.set ZIMG_SCRATCH_CMDLINE_BUF, 0x0600
+.set ZIMG_SCRATCH_CMDLINE_MAX, 256
 
 .set MBI_FLAG_MEMORY,  0x00000001
 .set MBI_FLAG_CMDLINE, 0x00000004
@@ -80,6 +82,8 @@ setup_start:
      * the Linux boot header values we need into fixed low-memory scratch.
      */
     movl cmd_line_ptr, %eax
+    call copy_cmdline_to_scratch
+    movl $ZIMG_SCRATCH_CMDLINE_BUF, %eax
     movl %eax, %es:ZIMG_SCRATCH_CMDLINE
     movl ramdisk_image, %eax
     movl %eax, %es:ZIMG_SCRATCH_RAMDISK
@@ -98,6 +102,8 @@ setup_start:
     movl %eax, %es:ZIMG_SCRATCH_MEMLOW
     xorl %eax, %eax
     movl %eax, %es:ZIMG_SCRATCH_MEMUPPER
+
+    call maybe_vga_ask
 
     /*
      * Build a Multiboot-format mmap by querying BIOS E820 while we are still
@@ -192,6 +198,237 @@ memory_probe_done:
     movl %eax, %cr0
 
     ljmpl *pm_jump_ptr
+
+copy_cmdline_to_scratch:
+    pushw %ds
+    pushw %es
+    pushw %si
+    pushw %di
+    pushw %cx
+    pushw %dx
+
+    xorw %dx, %dx
+    movw %dx, %es
+    movw $ZIMG_SCRATCH_CMDLINE_BUF, %di
+    movw $ZIMG_SCRATCH_CMDLINE_MAX - 1, %cx
+    testl %eax, %eax
+    jnz 1f
+    movb $0, %es:(%di)
+    jmp 3f
+1:
+    movl %eax, %edx
+    andw $0x000F, %dx
+    shrl $4, %eax
+    movw %ax, %ds
+    movw %dx, %si
+2:
+    lodsb
+    stosb
+    testb %al, %al
+    jz 3f
+    loop 2b
+    movb $0, %es:(%di)
+3:
+    popw %dx
+    popw %cx
+    popw %di
+    popw %si
+    popw %es
+    popw %ds
+    ret
+
+maybe_vga_ask:
+    pushw %ds
+    pushw %es
+    pushw %si
+    pushw %ax
+
+    xorw %ax, %ax
+    movw %ax, %ds
+    movw $ZIMG_SCRATCH_CMDLINE_BUF, %si
+1:
+    lodsb
+    testb %al, %al
+    jz 5f
+    cmpb $'v', %al
+    jne 1b
+    cmpw $ZIMG_SCRATCH_CMDLINE_BUF + 1, %si
+    je 2f
+    cmpb $' ', -2(%si)
+    jne 1b
+2:
+    cmpb $'g', (%si)
+    jne 1b
+    cmpb $'a', 1(%si)
+    jne 1b
+    cmpb $'=', 2(%si)
+    jne 1b
+    cmpb $'a', 3(%si)
+    jne 1b
+    cmpb $'s', 4(%si)
+    jne 1b
+    cmpb $'k', 5(%si)
+    jne 1b
+    movb 6(%si), %al
+    testb %al, %al
+    jz 3f
+    cmpb $' ', %al
+    jne 1b
+3:
+    call vga_ask_menu
+    jmp 5f
+5:
+    popw %ax
+    popw %si
+    popw %es
+    popw %ds
+    ret
+
+putc_bios:
+    pushw %ax
+    pushw %bx
+    cmpb $10, %al
+    jne 1f
+    movb $13, %al
+    call putc_bios
+    movb $10, %al
+1:
+    movb $0x0E, %ah
+    movw $0x0007, %bx
+    int $0x10
+    popw %bx
+    popw %ax
+    ret
+
+puts_bios:
+    pushw %ax
+1:
+    lodsb
+    testb %al, %al
+    jz 2f
+    call putc_bios
+    jmp 1b
+2:
+    popw %ax
+    ret
+
+getc_bios:
+    xorw %ax, %ax
+    int $0x16
+    ret
+
+append_textmode_token:
+    pushw %es
+    pushw %di
+    pushw %cx
+    pushw %ax
+
+    xorw %ax, %ax
+    movw %ax, %es
+    movw $ZIMG_SCRATCH_CMDLINE_BUF, %di
+    movw $ZIMG_SCRATCH_CMDLINE_MAX - 1, %cx
+1:
+    movb %es:(%di), %al
+    testb %al, %al
+    jz 2f
+    incw %di
+    loop 1b
+    jmp 4f
+2:
+    cmpw $ZIMG_SCRATCH_CMDLINE_BUF, %di
+    je 3f
+    movb $' ', %es:(%di)
+    incw %di
+3:
+    lodsb
+    testb %al, %al
+    jz 4f
+    movb %al, %es:(%di)
+    incw %di
+    jmp 3b
+4:
+    movb $0, %es:(%di)
+    popw %ax
+    popw %cx
+    popw %di
+    popw %es
+    ret
+
+vga_select_80x25:
+    movw $0x0003, %ax
+    int $0x10
+    movw $textmode_80x25, %si
+    call append_textmode_token
+    ret
+
+vga_select_80x43:
+    movw $0x0003, %ax
+    int $0x10
+    movw $0x1111, %ax
+    xorw %bx, %bx
+    int $0x10
+    movw $textmode_80x43, %si
+    call append_textmode_token
+    ret
+
+vga_select_80x50:
+    movw $0x0003, %ax
+    int $0x10
+    movw $0x1112, %ax
+    xorw %bx, %bx
+    int $0x10
+    movw $textmode_80x50, %si
+    call append_textmode_token
+    ret
+
+vga_ask_menu:
+    pushw %ds
+    pushw %si
+    movw %cs, %ax
+    subw $0x20, %ax
+    movw %ax, %ds
+    movw $vga_menu, %si
+    call puts_bios
+1:
+    call getc_bios
+    cmpb $'1', %al
+    je 2f
+    cmpb $'2', %al
+    je 3f
+    cmpb $'3', %al
+    je 4f
+    jmp 1b
+2:
+    call putc_bios
+    movb $10, %al
+    call putc_bios
+    call vga_select_80x25
+    jmp 5f
+3:
+    call putc_bios
+    movb $10, %al
+    call putc_bios
+    call vga_select_80x43
+    jmp 5f
+4:
+    call putc_bios
+    movb $10, %al
+    call putc_bios
+    call vga_select_80x50
+5:
+    popw %si
+    popw %ds
+    ret
+
+vga_menu:
+    .asciz "\r\nSubstrate VGA text mode selector\r\n1. 80x25\r\n2. 80x43\r\n3. 80x50\r\nSelect mode [1-3]: "
+
+textmode_80x25:
+    .asciz "textmode=80x25"
+textmode_80x43:
+    .asciz "textmode=80x43"
+textmode_80x50:
+    .asciz "textmode=80x50"
 
 .code32
 pm_entry:

@@ -205,6 +205,9 @@ static void hw_text_apply_geometry_or_default(int *cols_out, int *rows_out) {
             hw_text_program_80x25();
             actual_cols = 80;
             actual_rows = 25;
+        } else if (requested_cols == 80 && requested_rows == 43) {
+            actual_cols = 80;
+            actual_rows = 43;
         } else if (requested_cols == 80 && requested_rows == 50) {
             hw_text_program_80x50();
             actual_cols = 80;
