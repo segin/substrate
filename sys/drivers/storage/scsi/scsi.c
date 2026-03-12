@@ -206,9 +206,9 @@ int scsi_device_register(scsi_device_t *dev) {
     
     /* Log registration */
     char buf[128];
-    snprintf(buf, sizeof(buf), "SCSI: Registered device %d:%d:%d type=0x%02x '%s %s'\n",
-            dev->bus, dev->target, dev->lun, dev->type,
-            dev->vendor, dev->product);
+    snprintf(buf, sizeof(buf), "scsi: %d:%d:%d %s %s [0x%02x]\n",
+             dev->bus, dev->target, dev->lun,
+             dev->vendor, dev->product, dev->type);
     kprint(buf);
     
     return 0;
