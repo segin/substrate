@@ -1,0 +1,21 @@
+.Dd March 12, 2026
+.Dt PCI_FIND_CAPABILITY 9
+.Os
+.Sh NAME
+.Nm pci_find_capability ,
+.Nm pci_find_ext_capability
+.Nd locate PCI and PCIe capability records
+.Sh SYNOPSIS
+.In kern/pci.h
+.Ft int
+.Fn pci_find_capability "pci_device_t *dev" "uint8_t cap_id"
+.Ft int
+.Fn pci_find_ext_capability "pci_device_t *dev" "uint16_t cap_id"
+.Sh DESCRIPTION
+These functions walk the standard PCI capability list and the PCIe
+extended capability chain for the supplied device.
+.Sh RETURN VALUES
+The offset of the matching capability is returned on success.
+If no matching capability is present, 0 is returned.
+.Sh SEE ALSO
+.Xr pci_config 9

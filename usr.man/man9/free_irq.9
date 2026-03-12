@@ -1,0 +1,17 @@
+.Dd March 12, 2026
+.Dt FREE_IRQ 9
+.Os
+.Sh NAME
+.Nm free_irq
+.Nd unregister an interrupt handler
+.Sh SYNOPSIS
+.In sys/irq.h
+.Ft void
+.Fn free_irq "unsigned int irq" "void *dev_id"
+.Sh DESCRIPTION
+The
+.Fn free_irq
+function removes the handler registered for the supplied IRQ and
+client identifier.
+.Sh SEE ALSO
+.Xr request_irq 9

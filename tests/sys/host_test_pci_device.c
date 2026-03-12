@@ -51,38 +51,38 @@ int pci_present(void) {
     return mock_pci_available;
 }
 
-uint8_t pci_read_config8(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
+uint8_t pci_read_config8(uint8_t bus, uint8_t slot, uint8_t func, uint16_t offset) {
     if (!mock_pci_available || slot >= 32 || func >= 8) {
         return 0xFFU;
     }
     return mock_config[bus][slot][func][offset];
 }
 
-uint16_t pci_read_config16(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
+uint16_t pci_read_config16(uint8_t bus, uint8_t slot, uint8_t func, uint16_t offset) {
     return (uint16_t)pci_read_config8(bus, slot, func, offset) |
         ((uint16_t)pci_read_config8(bus, slot, func, (uint8_t)(offset + 1U)) << 8);
 }
 
-uint32_t pci_read_config32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
+uint32_t pci_read_config32(uint8_t bus, uint8_t slot, uint8_t func, uint16_t offset) {
     return (uint32_t)pci_read_config16(bus, slot, func, offset) |
         ((uint32_t)pci_read_config16(bus, slot, func, (uint8_t)(offset + 2U)) << 16);
 }
 
-void pci_write_config8(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint8_t value) {
+void pci_write_config8(uint8_t bus, uint8_t slot, uint8_t func, uint16_t offset, uint8_t value) {
     mock_config[bus][slot][func][offset] = value;
 }
 
-void pci_write_config16(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint16_t value) {
+void pci_write_config16(uint8_t bus, uint8_t slot, uint8_t func, uint16_t offset, uint16_t value) {
     pci_write_config8(bus, slot, func, offset, (uint8_t)(value & 0xFFU));
     pci_write_config8(bus, slot, func, (uint8_t)(offset + 1U), (uint8_t)(value >> 8));
 }
 
-void pci_write_config32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint32_t value) {
+void pci_write_config32(uint8_t bus, uint8_t slot, uint8_t func, uint16_t offset, uint32_t value) {
     pci_write_config16(bus, slot, func, offset, (uint16_t)(value & 0xFFFFU));
     pci_write_config16(bus, slot, func, (uint8_t)(offset + 2U), (uint16_t)(value >> 16));
 }
 
-uint32_t pci_config_address(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
+uint32_t pci_config_address(uint8_t bus, uint8_t slot, uint8_t func, uint16_t offset) {
     return PCI_CONFIG_ENABLE_BIT |
         ((uint32_t)bus << 16) |
         ((uint32_t)slot << 11) |
@@ -90,17 +90,26 @@ uint32_t pci_config_address(uint8_t bus, uint8_t slot, uint8_t func, uint8_t off
         (offset & 0xFCU);
 }
 
-uint32_t pci_read(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
+uint32_t pci_read(uint8_t bus, uint8_t slot, uint8_t func, uint16_t offset) {
     return pci_read_config16(bus, slot, func, offset);
 }
 
-void pci_write(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint32_t val) {
+void pci_write(uint8_t bus, uint8_t slot, uint8_t func, uint16_t offset, uint32_t val) {
     pci_write_config32(bus, slot, func, offset, val);
 }
+
+typedef void *pmap_t;
+pmap_t pmap_kernel(void) { return (pmap_t)0x1; }
+int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t flags) {
+    (void)pmap; (void)va; (void)pa; (void)prot; (void)flags; return 0;
+}
+void pmap_kremove(uintptr_t va) { (void)va; }
 
 #include "../../sys/kern/bus.c"
 #include "../../sys/kern/driver.c"
 #include "../../sys/kern/device.c"
+#include "../../sys/kern/resource.c"
+#include "../../sys/kern/ioremap.c"
 #include "../../sys/kern/pci.c"
 
 static void reset_state(void) {

@@ -3,8 +3,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <kern/pci.h>
 
-static uint8_t mock_config[256];
+static uint8_t mock_config[PCI_CONFIG_SPACE_SIZE];
+static uint8_t mock_ecam[1U << 20];
 static uint32_t selected_address;
 static int mock_pci_present = 1;
 
@@ -63,8 +65,10 @@ void pci_test_data_write32(uint32_t value) {
 
 static void reset_config(void) {
     memset(mock_config, 0xFF, sizeof(mock_config));
+    memset(mock_ecam, 0xFF, sizeof(mock_ecam));
     selected_address = 0;
     mock_pci_present = 1;
+    pci_ecam_configure(NULL, 0, 0, 0);
 }
 
 static void test_pci_config_address_aligns_offset(void) {
@@ -149,6 +153,20 @@ static void test_word_writes_cross_dword_boundary(void) {
     assert(pci_read_config32(2, 3, 1, 0x24) == 0x556677A1U);
 }
 
+static void test_ecam_allows_extended_config_space_access(void) {
+    uint32_t ext = 0xAABBCCDDU;
+
+    reset_config();
+    pci_ecam_configure(mock_ecam, 0, 2, 2);
+    memcpy(&mock_ecam[(3U << 15) | (1U << 12) | 0x100U], &ext, sizeof(ext));
+
+    assert(pci_ecam_map(0, 2, 3, 1) == &mock_ecam[(3U << 15) | (1U << 12)]);
+    assert(pci_read_config32(2, 3, 1, 0x100) == 0xAABBCCDDU);
+
+    pci_write_config16(2, 3, 1, 0x102, 0x1122U);
+    assert(pci_read_config32(2, 3, 1, 0x100) == 0x1122CCDDU);
+}
+
 int main(void) {
     test_pci_config_address_aligns_offset();
     test_typed_reads_extract_expected_values();
@@ -157,6 +175,7 @@ int main(void) {
     test_absent_pci_bus_reads_as_all_ones_and_ignores_writes();
     test_typed_writes_round_trip_and_preserve_neighbors();
     test_word_writes_cross_dword_boundary();
+    test_ecam_allows_extended_config_space_access();
     puts("host_test_pci_config: PASS");
     return 0;
 }

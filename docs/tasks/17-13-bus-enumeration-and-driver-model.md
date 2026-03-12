@@ -137,7 +137,7 @@
         - Docs: `driver_override.9`
         - Acceptance: Blacklist prevents probe, override forces it
 
-- [ ] **Device Lifecycle Callbacks:** (REQ: REQ-17-0022)
+- [x] **Device Lifecycle Callbacks:** (REQ: REQ-17-0022)
     - [x] Implement `device_probe()` wrapper with error handling. (REQ: REQ-17-0023)
         - Files: `sys/kern/device.c`
         - API: `int device_probe(device_t *dev)`
@@ -190,7 +190,7 @@
 
 #### 13.2. PCI / PCIe Enumerator
 
-- [ ] **PCI Config Space Access:** (REQ: REQ-17-0031)
+- [x] **PCI Config Space Access:** (REQ: REQ-17-0031)
     - [x] Implement `pci_read_config8/16/32()` primitives. (REQ: REQ-17-0032)
         - Files: `sys/arch/i386/pci.c`, `sys/kern/pci.h`
         - API: `uint32_t pci_read_config32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset)`
@@ -203,14 +203,14 @@
         - Tests: unit (write and readback verification)
         - Docs: `pci_config.9`
         - Acceptance: Written values persist
-    - [ ] Implement MMIO config access for PCIe (ECAM). (REQ: REQ-17-0034)
+    - [x] Implement MMIO config access for PCIe (ECAM). (REQ: REQ-17-0034)
         - Files: `sys/arch/i386/pci.c`
         - API: `void *pci_ecam_map(uint16_t segment, uint8_t bus, uint8_t slot, uint8_t func)`
         - Tests: integration (PCIe extended config access)
         - Docs: `pci_ecam.9`
         - Acceptance: Extended config space accessible
 
-- [ ] **Bus Enumeration:** (REQ: REQ-17-0035)
+- [x] **Bus Enumeration:** (REQ: REQ-17-0035)
     - [x] Implement `pci_scan_bus()` recursive scanner. (REQ: REQ-17-0036)
         - Files: `sys/kern/pci.c`
         - API: `int pci_scan_bus(uint8_t bus)`
@@ -231,7 +231,7 @@
         - Docs: `pci_device.9`
         - Acceptance: Device registered with driver model
 
-- [ ] **BAR Parsing and Resource Allocation:** (REQ: REQ-17-0039)
+- [x] **BAR Parsing and Resource Allocation:** (REQ: REQ-17-0039)
     - [x] Implement BAR type detection (I/O vs MMIO, 32/64-bit). (REQ: REQ-17-0040)
         - Files: `sys/kern/pci.c`
         - API: `int pci_bar_type(pci_device_t *dev, int bar)`
@@ -257,54 +257,54 @@
         - Docs: `pci_iomap.9`
         - Acceptance: Returns valid mapped pointer
 
-- [ ] **Capability List Parsing:** (REQ: REQ-17-0044)
-    - [ ] Implement capability list walker. (REQ: REQ-17-0045)
+- [x] **Capability List Parsing:** (REQ: REQ-17-0044)
+    - [x] Implement capability list walker. (REQ: REQ-17-0045)
         - Files: `sys/kern/pci.c`
         - API: `int pci_find_capability(pci_device_t *dev, uint8_t cap_id)`
         - Tests: unit (find MSI, find PM, not found)
         - Docs: `pci_find_capability.9`
         - Acceptance: Returns offset of capability
-    - [ ] Implement extended capability walker (PCIe). (REQ: REQ-17-0046)
+    - [x] Implement extended capability walker (PCIe). (REQ: REQ-17-0046)
         - Files: `sys/kern/pci.c`
         - API: `int pci_find_ext_capability(pci_device_t *dev, uint16_t cap_id)`
         - Tests: unit (find AER, find SR-IOV)
         - Docs: `pci_find_ext_capability.9`
         - Acceptance: Extended capabilities found
 
-- [ ] **Interrupt Support:** (REQ: REQ-17-0047)
-    - [ ] Implement legacy PCI interrupt routing. (REQ: REQ-17-0048)
+- [x] **Interrupt Support:** (REQ: REQ-17-0047)
+    - [x] Implement legacy PCI interrupt routing. (REQ: REQ-17-0048)
         - Files: `sys/kern/pci.c`
         - API: `int pci_get_irq(pci_device_t *dev)`
         - Tests: integration (IRQ matches expected)
         - Docs: `pci_irq.9`
         - Acceptance: Correct IRQ returned
-    - [ ] Implement MSI capability setup. (REQ: REQ-17-0049)
+    - [x] Implement MSI capability setup. (REQ: REQ-17-0049)
         - Files: `sys/kern/pci_msi.c` (new)
         - API: `int pci_enable_msi(pci_device_t *dev)`, `int pci_disable_msi(pci_device_t *dev)`
         - Tests: integration (MSI interrupt fires)
         - Docs: `pci_msi.9`
         - Acceptance: MSI interrupts work
-    - [ ] Implement MSI-X capability setup. (REQ: REQ-17-0050)
+    - [x] Implement MSI-X capability setup. (REQ: REQ-17-0050)
         - Files: `sys/kern/pci_msi.c`
         - API: `int pci_enable_msix(pci_device_t *dev, int nvec)`
         - Tests: integration (MSI-X with multiple vectors)
         - Docs: `pci_msix.9`
         - Acceptance: Multiple MSI-X vectors work
 
-- [ ] **Hotplug Support:** (REQ: REQ-17-0051)
-    - [ ] Implement PCI hotplug event detection. (REQ: REQ-17-0052)
+- [x] **Hotplug Support:** (REQ: REQ-17-0051)
+    - [x] Implement PCI hotplug event detection. (REQ: REQ-17-0052)
         - Files: `sys/kern/pci_hotplug.c` (new)
         - API: `void pci_hotplug_poll(void)`
         - Tests: integration (QEMU hotplug simulation)
         - Docs: `pci_hotplug.9`
         - Acceptance: Hotplug events detected
-    - [ ] Implement device add on hotplug. (REQ: REQ-17-0053)
+    - [x] Implement device add on hotplug. (REQ: REQ-17-0053)
         - Files: `sys/kern/pci_hotplug.c`
         - API: `int pci_hotplug_add(uint8_t bus, uint8_t slot)`
         - Tests: integration (device added, driver bound)
         - Docs: `pci_hotplug.9`
         - Acceptance: Device usable after hotplug
-    - [ ] Implement device remove on hotplug. (REQ: REQ-17-0054)
+    - [x] Implement device remove on hotplug. (REQ: REQ-17-0054)
         - Files: `sys/kern/pci_hotplug.c`
         - API: `int pci_hotplug_remove(pci_device_t *dev)`
         - Tests: integration (device removed cleanly)
@@ -535,35 +535,35 @@
         - Docs: `ioremap.9`
         - Acceptance: MMIO accessible
 
-- [ ] **IRQ Allocation:** (REQ: REQ-17-0103)
-    - [ ] Implement `request_irq()`. (REQ: REQ-17-0104)
+- [x] **IRQ Allocation:** (REQ: REQ-17-0103)
+    - [x] Implement `request_irq()`. (REQ: REQ-17-0104)
         - Files: `sys/kern/irq.c` (new)
         - Tests: unit (register, shared IRQ)
         - Docs: `request_irq.9`
         - Acceptance: Handler invoked on interrupt
-    - [ ] Implement `free_irq()`. (REQ: REQ-17-0105)
+    - [x] Implement `free_irq()`. (REQ: REQ-17-0105)
         - Files: `sys/kern/irq.c`
         - Tests: unit (free, shared unregister)
         - Docs: `free_irq.9`
         - Acceptance: Handler removed
-    - [ ] Implement shared interrupt handling. (REQ: REQ-17-0106)
+    - [x] Implement shared interrupt handling. (REQ: REQ-17-0106)
         - Files: `sys/kern/irq.c`
         - Tests: integration (two drivers share IRQ)
         - Docs: `irq_shared.9`
         - Acceptance: Both handlers called
 
-- [ ] **DMA Mapping:** (REQ: REQ-17-0107)
-    - [ ] Implement `dma_map_single()`. (REQ: REQ-17-0108)
+- [x] **DMA Mapping:** (REQ: REQ-17-0107)
+    - [x] Implement `dma_map_single()`. (REQ: REQ-17-0108)
         - Files: `sys/kern/dma.c` (new)
         - Tests: unit (map returns valid address)
         - Docs: `dma_map.9`
         - Acceptance: DMA address returned
-    - [ ] Implement `dma_unmap_single()`. (REQ: REQ-17-0109)
+    - [x] Implement `dma_unmap_single()`. (REQ: REQ-17-0109)
         - Files: `sys/kern/dma.c`
         - Tests: unit (unmap)
         - Docs: `dma_map.9`
         - Acceptance: No leaks
-    - [ ] Implement `dma_alloc_coherent()`. (REQ: REQ-17-0110)
+    - [x] Implement `dma_alloc_coherent()`. (REQ: REQ-17-0110)
         - Files: `sys/kern/dma.c`
         - Tests: unit (allocation, alignment)
         - Docs: `dma_alloc_coherent.9`

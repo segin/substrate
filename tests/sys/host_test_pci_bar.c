@@ -29,16 +29,16 @@ bool spinlock_is_held(spinlock_t *lock) { (void)lock; return false; }
 
 int pci_present(void) { return 1; }
 
-uint8_t pci_read_config8(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
+uint8_t pci_read_config8(uint8_t bus, uint8_t slot, uint8_t func, uint16_t offset) {
     return mock_config[bus][slot][func][offset];
 }
 
-uint16_t pci_read_config16(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
+uint16_t pci_read_config16(uint8_t bus, uint8_t slot, uint8_t func, uint16_t offset) {
     return (uint16_t)pci_read_config8(bus, slot, func, offset) |
-        ((uint16_t)pci_read_config8(bus, slot, func, (uint8_t)(offset + 1)) << 8);
+        ((uint16_t)pci_read_config8(bus, slot, func, (uint16_t)(offset + 1)) << 8);
 }
 
-uint32_t pci_read_config32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
+uint32_t pci_read_config32(uint8_t bus, uint8_t slot, uint8_t func, uint16_t offset) {
     if (offset == 0x10 && probe_low_active) {
         return probe_low_mask;
     }
@@ -46,19 +46,19 @@ uint32_t pci_read_config32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offs
         return probe_high_mask;
     }
     return (uint32_t)pci_read_config16(bus, slot, func, offset) |
-        ((uint32_t)pci_read_config16(bus, slot, func, (uint8_t)(offset + 2)) << 16);
+        ((uint32_t)pci_read_config16(bus, slot, func, (uint16_t)(offset + 2)) << 16);
 }
 
-void pci_write_config8(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint8_t value) {
+void pci_write_config8(uint8_t bus, uint8_t slot, uint8_t func, uint16_t offset, uint8_t value) {
     mock_config[bus][slot][func][offset] = value;
 }
 
-void pci_write_config16(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint16_t value) {
+void pci_write_config16(uint8_t bus, uint8_t slot, uint8_t func, uint16_t offset, uint16_t value) {
     pci_write_config8(bus, slot, func, offset, (uint8_t)(value & 0xFF));
-    pci_write_config8(bus, slot, func, (uint8_t)(offset + 1), (uint8_t)(value >> 8));
+    pci_write_config8(bus, slot, func, (uint16_t)(offset + 1), (uint8_t)(value >> 8));
 }
 
-void pci_write_config32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint32_t value) {
+void pci_write_config32(uint8_t bus, uint8_t slot, uint8_t func, uint16_t offset, uint32_t value) {
     if (offset == 0x10 && value == 0xFFFFFFFFU) {
         probe_low_active = 1;
         return;
@@ -74,18 +74,18 @@ void pci_write_config32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset,
         probe_high_active = 0;
     }
     pci_write_config16(bus, slot, func, offset, (uint16_t)(value & 0xFFFF));
-    pci_write_config16(bus, slot, func, (uint8_t)(offset + 2), (uint16_t)(value >> 16));
+    pci_write_config16(bus, slot, func, (uint16_t)(offset + 2), (uint16_t)(value >> 16));
 }
 
-uint32_t pci_config_address(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
+uint32_t pci_config_address(uint8_t bus, uint8_t slot, uint8_t func, uint16_t offset) {
     return PCI_CONFIG_ENABLE_BIT | ((uint32_t)bus << 16) | ((uint32_t)slot << 11) |
            ((uint32_t)func << 8) | (offset & 0xFCU);
 }
 
-uint32_t pci_read(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
+uint32_t pci_read(uint8_t bus, uint8_t slot, uint8_t func, uint16_t offset) {
     return pci_read_config16(bus, slot, func, offset);
 }
-void pci_write(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint32_t val) {
+void pci_write(uint8_t bus, uint8_t slot, uint8_t func, uint16_t offset, uint32_t val) {
     pci_write_config32(bus, slot, func, offset, val);
 }
 

@@ -20,6 +20,7 @@ idt_ptr_t   idt_ptr;
 #include <kern/sched.h>
 #include <kern/cmdline.h>
 #include <kern/debug.h>
+#include <sys/irq.h>
 #include <drivers/console/uart/uart.h>
 #include <drivers/storage/ide/ide.h>
 #include <arch/i386/vm86.h>
@@ -180,6 +181,7 @@ void isr_handler(registers_t *regs) {
             rusage_add_tick(current_process, is_usermode);
         }
         
+        (void)irq_dispatch(0, regs);
         if (regs->int_no >= PIC_SLAVE_REMAP_BASE) outb(PIC_SLAVE_CMD, PIC_EOI);
         outb(PIC_MASTER_CMD, PIC_EOI);
         if (!current_thread || !(current_thread->flags & THREAD_F_NO_PREEMPT)) {
@@ -329,6 +331,7 @@ void isr_handler(registers_t *regs) {
     }
 
     if (regs->int_no >= 32 && regs->int_no <= 47) {
+        (void)irq_dispatch((unsigned int)(regs->int_no - IDT_IRQ_BASE), regs);
         if (regs->int_no >= 40) outb(0xA0, 0x20);
         outb(0x20, 0x20);
     }

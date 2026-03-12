@@ -1,0 +1,23 @@
+.Dd March 12, 2026
+.Dt REQUEST_IRQ 9
+.Os
+.Sh NAME
+.Nm request_irq
+.Nd register an interrupt handler
+.Sh SYNOPSIS
+.In sys/irq.h
+.Ft int
+.Fn request_irq "unsigned int irq" "irq_handler_t handler" "unsigned long flags" "const char *name" "void *dev_id"
+.Sh DESCRIPTION
+The
+.Fn request_irq
+function registers an interrupt handler for the specified IRQ line.
+Shared lines require
+.Dv IRQF_SHARED
+for all participating handlers.
+.Sh RETURN VALUES
+0 is returned on success.
+Otherwise a negative error code is returned.
+.Sh SEE ALSO
+.Xr free_irq 9 ,
+.Xr irq_shared 9
