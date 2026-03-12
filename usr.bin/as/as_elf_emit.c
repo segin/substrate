@@ -2538,6 +2538,16 @@ static int emit_x86_64_xmm_move_rm(unsigned char prefix, unsigned char reg_opcod
     return -1;
 }
 
+static int emit_x86_64_xmm_binary_op(const as_instruction_t *insn, unsigned char prefix,
+                                     unsigned char opcode, const as_operand_t *src,
+                                     const as_operand_t *dst, unsigned char *out,
+                                     size_t out_cap, size_t *out_len) {
+    if (insn == NULL || insn->operand_count != 2) {
+        return -1;
+    }
+    return emit_x86_64_xmm_srcdst(prefix, opcode, src, dst, out, out_cap, out_len);
+}
+
 static int emit_x86_64_gp_to_xmm_cvtsi(unsigned char prefix, const as_operand_t *src,
                                        const as_operand_t *dst, unsigned char *out,
                                        size_t out_cap, size_t *out_len) {
@@ -2602,6 +2612,22 @@ static int emit_x86_64_xmm_to_gp_cvtt(unsigned char prefix, const as_operand_t *
                                           out_len);
     }
     return -1;
+}
+
+static int emit_i386_xmm_reg_srcdst_rm(unsigned char prefix, unsigned char opcode2,
+                                       const as_operand_t *src, const as_operand_t *dst,
+                                       unsigned char *out, size_t out_cap, size_t *out_len) {
+    unsigned xr;
+    unsigned xm;
+
+    if (src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
+        parse_xmm_reg(dst->u.reg, &xr) != 0) {
+        return -1;
+    }
+    if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
+        return -1;
+    }
+    return emit_i386_legacy_simd_rm(prefix, opcode2, xr, src, out, out_cap, out_len);
 }
 
 static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
@@ -4861,14 +4887,10 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
                                              src_op, (unsigned char)immv, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movhlps") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
-            parse_xmm_reg(dst->u.reg, &xr) != 0) {
+        if (insn->operand_count != 2) {
             return -1;
         }
-        if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
-            return -1;
-        }
-        return emit_i386_legacy_simd_rm(0x00, 0x12, xr, src, out, out_cap, out_len);
+        return emit_i386_xmm_reg_srcdst_rm(0x00, 0x12, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movlps") == 0) {
         return emit_i386_xmm_partial_move_rm(0x00, 0x12, 0x13, src, dst, out, out_cap, out_len);
@@ -4894,14 +4916,10 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return emit_i386_legacy_simd_rm(0x00, 0x15, xr, src, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movlhps") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
-            parse_xmm_reg(dst->u.reg, &xr) != 0) {
+        if (insn->operand_count != 2) {
             return -1;
         }
-        if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
-            return -1;
-        }
-        return emit_i386_legacy_simd_rm(0x00, 0x16, xr, src, out, out_cap, out_len);
+        return emit_i386_xmm_reg_srcdst_rm(0x00, 0x16, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movhps") == 0) {
         return emit_i386_xmm_partial_move_rm(0x00, 0x16, 0x17, src, dst, out, out_cap, out_len);
@@ -5701,88 +5719,46 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
         }
     }
     if (strcmp(mnbuf, "cvtsd2ss") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        return emit_x86_64_xmm_srcdst(0xf2, 0x5a, src, dst, out, out_cap, out_len);
+        return emit_x86_64_xmm_binary_op(insn, 0xf2, 0x5a, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "cvtss2sd") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        return emit_x86_64_xmm_srcdst(0xf3, 0x5a, src, dst, out, out_cap, out_len);
+        return emit_x86_64_xmm_binary_op(insn, 0xf3, 0x5a, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "addsd") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        return emit_x86_64_xmm_srcdst(0xf2, 0x58, src, dst, out, out_cap, out_len);
+        return emit_x86_64_xmm_binary_op(insn, 0xf2, 0x58, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "addss") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        return emit_x86_64_xmm_srcdst(0xf3, 0x58, src, dst, out, out_cap, out_len);
+        return emit_x86_64_xmm_binary_op(insn, 0xf3, 0x58, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "subsd") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        return emit_x86_64_xmm_srcdst(0xf2, 0x5c, src, dst, out, out_cap, out_len);
+        return emit_x86_64_xmm_binary_op(insn, 0xf2, 0x5c, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "subss") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        return emit_x86_64_xmm_srcdst(0xf3, 0x5c, src, dst, out, out_cap, out_len);
+        return emit_x86_64_xmm_binary_op(insn, 0xf3, 0x5c, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "mulsd") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        return emit_x86_64_xmm_srcdst(0xf2, 0x59, src, dst, out, out_cap, out_len);
+        return emit_x86_64_xmm_binary_op(insn, 0xf2, 0x59, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "mulss") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        return emit_x86_64_xmm_srcdst(0xf3, 0x59, src, dst, out, out_cap, out_len);
+        return emit_x86_64_xmm_binary_op(insn, 0xf3, 0x59, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "divsd") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        return emit_x86_64_xmm_srcdst(0xf2, 0x5e, src, dst, out, out_cap, out_len);
+        return emit_x86_64_xmm_binary_op(insn, 0xf2, 0x5e, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "divss") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        return emit_x86_64_xmm_srcdst(0xf3, 0x5e, src, dst, out, out_cap, out_len);
+        return emit_x86_64_xmm_binary_op(insn, 0xf3, 0x5e, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "ucomisd") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        return emit_x86_64_xmm_srcdst(0x66, 0x2e, src, dst, out, out_cap, out_len);
+        return emit_x86_64_xmm_binary_op(insn, 0x66, 0x2e, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "ucomiss") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        return emit_x86_64_xmm_srcdst(0x00, 0x2e, src, dst, out, out_cap, out_len);
+        return emit_x86_64_xmm_binary_op(insn, 0x00, 0x2e, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "comisd") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        return emit_x86_64_xmm_srcdst(0x66, 0x2f, src, dst, out, out_cap, out_len);
+        return emit_x86_64_xmm_binary_op(insn, 0x66, 0x2f, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "comiss") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        return emit_x86_64_xmm_srcdst(0x00, 0x2f, src, dst, out, out_cap, out_len);
+        return emit_x86_64_xmm_binary_op(insn, 0x00, 0x2f, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "cvtsi2sd") == 0) {
         if (insn->operand_count != 2) {
