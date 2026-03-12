@@ -1,137 +1,249 @@
-#include <stdio.h>
-#include <string.h>
 #include <assert.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 
-// Include mocks to get types
+#include <drivers/input/ps2.h>
 #include <sys/input.h>
 #include <sys/vt.h>
-#include <sys/random.h>
-#include <kern/console.h>
-#include <drivers/input/ps2.h>
 
-// Implement Mocks
-int ps2_init(void) { return 0; }
-void kprint(const char *fmt, ...) { (void)fmt; }
-int input_register_device(input_dev_t *dev) { (void)dev; return 0; }
-void random_harvest_fast(const void *data, size_t len) { (void)data; (void)len; }
-void debug_dump_processes(void) {}
-void vt_activate(int n) { (void)n; }
+static uint8_t mock_scancode;
+static int mock_ps2_init_rc;
+static int mock_inb_reads;
+static int mock_entropy_calls;
+static int mock_debug_dump_calls;
+static int mock_vt_activate_arg;
+static int mock_vt_activate_calls;
+static int mock_console_chars_len;
+static char mock_console_chars[64];
+static int mock_tty_chars_len;
+static char mock_tty_chars[64];
+static int mock_input_event_count;
+static int mock_input_register_calls;
+static input_dev_t *mock_registered_dev;
+static struct {
+    uint16_t type;
+    uint16_t code;
+    int32_t value;
+} mock_input_events[16];
+
+static struct tty mock_tty;
+static vt_state_t mock_vt;
+
+int ps2_init(void) { return mock_ps2_init_rc; }
+void kprint(const char *str) { (void)str; }
+int input_register_device(input_dev_t *dev) {
+    mock_input_register_calls++;
+    mock_registered_dev = dev;
+    return 0;
+}
+void random_harvest_fast(const void *data, size_t len) { (void)data; (void)len; mock_entropy_calls++; }
+void debug_dump_processes(void) { mock_debug_dump_calls++; }
+void vt_activate(int n) { mock_vt_activate_arg = n; mock_vt_activate_calls++; }
 int vt_get_active(void) { return 0; }
-vt_state_t *vt_get_state(int n) { (void)n; return NULL; }
-void tty_flip_buffer_push(struct tty *tty, char c) { (void)tty; (void)c; }
-void console_push_char(char c) { (void)c; }
-void input_report_key(input_dev_t *dev, uint16_t code, int32_t value) { (void)dev; (void)code; (void)value; }
-void input_sync(input_dev_t *dev) { (void)dev; }
+vt_state_t *vt_get_state(int n) { return n == 0 ? &mock_vt : NULL; }
+void tty_flip_buffer_push(struct tty *tty, char c) {
+    (void)tty;
+    assert(mock_tty_chars_len < (int)sizeof(mock_tty_chars));
+    mock_tty_chars[mock_tty_chars_len++] = c;
+}
+void console_push_char(char c) {
+    assert(mock_console_chars_len < (int)sizeof(mock_console_chars));
+    mock_console_chars[mock_console_chars_len++] = c;
+}
+void input_report_event(input_dev_t *dev, uint16_t type, uint16_t code, int32_t value) {
+    (void)dev;
+    assert(mock_input_event_count < (int)(sizeof(mock_input_events) / sizeof(mock_input_events[0])));
+    mock_input_events[mock_input_event_count].type = type;
+    mock_input_events[mock_input_event_count].code = code;
+    mock_input_events[mock_input_event_count].value = value;
+    mock_input_event_count++;
+}
+void input_sync(input_dev_t *dev) {
+    input_report_event(dev, EV_SYN, 0, 0);
+}
+void i386_cpu_cycle_counter_split(uint32_t *lo, uint32_t *hi) {
+    *lo = 0x12345678U;
+    *hi = 0x9ABCDEF0U;
+}
 
-int syscall_trace_enabled = 0;
+#define _IO_H
+#define _KERN_CONSOLE_STUB_H
+static inline uint8_t inb(uint16_t port) {
+    assert(port == 0x60);
+    mock_inb_reads++;
+    return mock_scancode;
+}
 
-// Include the source file under test
 #include "../../sys/drivers/input/keyboard.c"
 
-// Helper to reset buffer state
-void reset_buffer(void) {
+static void reset_state(void) {
+    memset(kbd_buffer, 0, sizeof(kbd_buffer));
+    memset(mock_console_chars, 0, sizeof(mock_console_chars));
+    memset(mock_tty_chars, 0, sizeof(mock_tty_chars));
+    memset(mock_input_events, 0, sizeof(mock_input_events));
+    memset(&mock_tty, 0, sizeof(mock_tty));
+    memset(&mock_vt, 0, sizeof(mock_vt));
+
     kbd_head = 0;
     kbd_tail = 0;
-    memset(kbd_buffer, 0, KBD_BUFFER_SIZE);
+    kbd_shift = 0;
+    kbd_ctrl = 0;
+    kbd_alt = 0;
+    kbd_lshift = 0;
+    kbd_rshift = 0;
+    kbd_lctrl = 0;
+    kbd_rctrl = 0;
+    kbd_lalt = 0;
+    kbd_ralt = 0;
+    kbd_extended = 0;
+
+    mock_inb_reads = 0;
+    mock_ps2_init_rc = 0;
+    mock_entropy_calls = 0;
+    mock_debug_dump_calls = 0;
+    mock_vt_activate_arg = -1;
+    mock_vt_activate_calls = 0;
+    mock_console_chars_len = 0;
+    mock_tty_chars_len = 0;
+    mock_input_event_count = 0;
+    mock_input_register_calls = 0;
+    mock_registered_dev = NULL;
 }
 
-void test_buffer_basic(void) {
-    printf("test_buffer_basic...\n");
-    reset_buffer();
+static void send_scancode(uint8_t scancode) {
+    registers_t regs;
 
-    assert(kbd_head == 0);
-    assert(kbd_tail == 0);
-    assert(keyboard_getc() == 0);
-
-    kbd_push('A');
-    assert(kbd_head == 1);
-    assert(kbd_tail == 0);
-    assert(kbd_buffer[0] == 'A');
-
-    kbd_push('B');
-    assert(kbd_head == 2);
-    assert(kbd_tail == 0);
-    assert(kbd_buffer[1] == 'B');
-
-    char c = keyboard_getc();
-    assert(c == 'A');
-    assert(kbd_head == 2);
-    assert(kbd_tail == 1);
-
-    c = keyboard_getc();
-    assert(c == 'B');
-    assert(kbd_head == 2);
-    assert(kbd_tail == 2);
-
-    assert(keyboard_getc() == 0);
-    printf("PASS\n");
+    memset(&regs, 0, sizeof(regs));
+    mock_scancode = scancode;
+    keyboard_handler(&regs);
 }
 
-void test_buffer_full(void) {
-    printf("test_buffer_full...\n");
-    reset_buffer();
+static void test_buffer_fifo_and_drop_newest(void) {
+    reset_state();
 
-    // Fill buffer (capacity is KBD_BUFFER_SIZE - 1 because head=tail means empty)
-    // KBD_BUFFER_SIZE is 256. Capacity is 255.
     for (int i = 0; i < KBD_BUFFER_SIZE - 1; i++) {
-        kbd_push((char)(i % 256));
+        kbd_push((char)(i & 0x7f));
     }
-
     assert(kbd_head == KBD_BUFFER_SIZE - 1);
     assert(kbd_tail == 0);
 
-    // Try to push one more (should be dropped)
     kbd_push('X');
-    assert(kbd_head == KBD_BUFFER_SIZE - 1); // Head should not move
+    assert(kbd_head == KBD_BUFFER_SIZE - 1);
     assert(kbd_tail == 0);
 
-    // Verify contents
     for (int i = 0; i < KBD_BUFFER_SIZE - 1; i++) {
-        char c = keyboard_getc();
-        assert(c == (char)(i % 256));
+        assert(keyboard_getc() == (char)(i & 0x7f));
     }
-
     assert(keyboard_getc() == 0);
-    printf("PASS\n");
 }
 
-void test_buffer_wrap(void) {
-    printf("test_buffer_wrap...\n");
-    reset_buffer();
+static void test_handler_reads_scancode_and_harvests_entropy(void) {
+    reset_state();
 
-    // Move head and tail near the end
-    kbd_head = KBD_BUFFER_SIZE - 2;
-    kbd_tail = KBD_BUFFER_SIZE - 2;
+    send_scancode(0x1E); /* a */
 
-    kbd_push('1'); // at index 254
-    assert(kbd_head == KBD_BUFFER_SIZE - 1);
+    assert(mock_inb_reads == 1);
+    assert(mock_entropy_calls == 1);
+    assert(keyboard_getc() == 'a');
+    assert(mock_input_event_count == 2);
+    assert(mock_input_events[0].type == EV_KEY);
+    assert(mock_input_events[0].code == 0x1E);
+    assert(mock_input_events[0].value == 1);
+    assert(mock_input_events[1].type == EV_SYN);
+}
 
-    kbd_push('2'); // at index 255
-    assert(kbd_head == 0); // Wrapped
+static void test_keyboard_init_registers_input_device(void) {
+    reset_state();
 
-    kbd_push('3'); // at index 0
-    assert(kbd_head == 1);
+    keyboard_init();
 
-    char c = keyboard_getc();
-    assert(c == '1');
-    assert(kbd_tail == KBD_BUFFER_SIZE - 1);
+    assert(mock_input_register_calls == 1);
+    assert(mock_registered_dev == &kbd_dev);
+    assert(strcmp(mock_registered_dev->name, "PS/2 Keyboard") == 0);
+    assert(mock_registered_dev->caps == (1U << EV_KEY));
+}
 
-    c = keyboard_getc();
-    assert(c == '2');
-    assert(kbd_tail == 0); // Wrapped
+static void test_modifier_tracking_and_shift_translation(void) {
+    reset_state();
+    mock_vt.tty = &mock_tty;
 
-    c = keyboard_getc();
-    assert(c == '3');
-    assert(kbd_tail == 1);
+    send_scancode(0x2A); /* LShift down */
+    assert(kbd_lshift == 1);
+    assert(kbd_shift == 1);
 
-    assert(keyboard_getc() == 0);
-    printf("PASS\n");
+    send_scancode(0x1E); /* a */
+    assert(keyboard_getc() == 'A');
+    assert(mock_tty_chars_len == 1);
+    assert(mock_tty_chars[0] == 'A');
+
+    send_scancode(0xAA); /* LShift up */
+    assert(kbd_lshift == 0);
+    assert(kbd_shift == 0);
+}
+
+static void test_extended_modifier_tracking(void) {
+    reset_state();
+
+    send_scancode(0xE0);
+    assert(kbd_extended == 1);
+
+    send_scancode(0x1D); /* Right Ctrl down */
+    assert(kbd_rctrl == 1);
+    assert(kbd_ctrl == 1);
+    assert(kbd_extended == 0);
+
+    send_scancode(0xE0);
+    send_scancode(0x9D); /* Right Ctrl up */
+    assert(kbd_rctrl == 0);
+    assert(kbd_ctrl == 0);
+}
+
+static void test_ctrl_f9_triggers_debug_dump(void) {
+    reset_state();
+
+    send_scancode(0x1D); /* Ctrl down */
+    send_scancode(0x43); /* F9 */
+
+    assert(mock_debug_dump_calls == 1);
+}
+
+static void test_alt_function_switches_vt(void) {
+    reset_state();
+
+    send_scancode(0x38); /* Alt down */
+    send_scancode(0x3B); /* F1 */
+    assert(mock_vt_activate_calls == 1);
+    assert(mock_vt_activate_arg == 0);
+
+    send_scancode(0x57); /* F11 */
+    assert(mock_vt_activate_calls == 2);
+    assert(mock_vt_activate_arg == 10);
+
+    send_scancode(0x58); /* F12 */
+    assert(mock_vt_activate_calls == 3);
+    assert(mock_vt_activate_arg == 11);
+}
+
+static void test_console_fallback_without_tty(void) {
+    reset_state();
+
+    send_scancode(0x30); /* b */
+
+    assert(mock_console_chars_len == 1);
+    assert(mock_console_chars[0] == 'b');
+    assert(mock_tty_chars_len == 0);
 }
 
 int main(void) {
-    test_buffer_basic();
-    test_buffer_full();
-    test_buffer_wrap();
+    test_buffer_fifo_and_drop_newest();
+    test_keyboard_init_registers_input_device();
+    test_handler_reads_scancode_and_harvests_entropy();
+    test_modifier_tracking_and_shift_translation();
+    test_extended_modifier_tracking();
+    test_ctrl_f9_triggers_debug_dump();
+    test_alt_function_switches_vt();
+    test_console_fallback_without_tty();
+    puts("host_test_keyboard: PASS");
     return 0;
 }

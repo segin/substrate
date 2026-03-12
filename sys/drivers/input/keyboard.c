@@ -4,6 +4,7 @@
 #include <sys/input.h>
 #include <sys/random.h>
 #include <kern/console.h>
+#include <kern/debug.h>
 #include <arch/i386/idt.h>
 #include <stdint.h>
 #include <sys/vt.h>
@@ -134,7 +135,6 @@ process_key:
     } else {
         // Ctrl+F9 - Dump process table
         if (kbd_ctrl && scancode == 0x43) { // F9 = 0x43
-            extern void debug_dump_processes(void);
             debug_dump_processes();
             goto out;
         }
@@ -144,17 +144,14 @@ process_key:
             // Handle Alt+F1..F12 for VT switching
             if (kbd_alt && scancode >= 0x3B && scancode <= 0x44) { // F1..F10
                 int vt_idx = scancode - 0x3B;
-                extern void vt_activate(int n);
                 vt_activate(vt_idx);
                 goto out;
             }
             if (kbd_alt && scancode == 0x57) { // F11
-                extern void vt_activate(int n);
                 vt_activate(10);
                 goto out;
             }
             if (kbd_alt && scancode == 0x58) { // F12
-                extern void vt_activate(int n);
                 vt_activate(11);
                 goto out;
             }
@@ -177,7 +174,6 @@ process_key:
                     tty_flip_buffer_push(vt->tty, c);
                 } else {
                     // Fallback if no TTY associated yet
-                    extern void console_push_char(char c);
                     console_push_char(c);
                 }
                 

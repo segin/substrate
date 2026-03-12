@@ -1,30 +1,47 @@
-# Keyboard (PS/2) Driver Specification
+# Keyboard Driver Specification
 
-## Overview
-The keyboard driver handles input from standard PS/2 keyboard devices. It decodes scancodes from Set 1 and provides an ASCII interface via a circular buffer.
+## Scope
+`sys/drivers/input/keyboard.c` implements the IRQ1 handler, Set 1 scancode
+decoding, modifier tracking, ASCII translation, and handoff into the VT/TTY and
+input-event paths.
 
-## Scancode Decoding
-- **State Machine:** Tracks extended scancodes (prefixed with `0xE0`).
-- **Set 1:** Maps scancodes directly to characters or actions.
-- **Modifiers:** Tracks the state of Shift, Ctrl, and Alt keys. Uses a shifted keymap when Shift is active.
-- **Keyups:** Handled for modifier keys; ignored for others.
+## IRQ Handling
+- `keyboard_handler()` reads the raw scancode from port `0x60`.
+- It harvests entropy from the cycle counter plus the scancode value.
+- It treats `0xE0` as an extended-prefix latch for the next scancode.
+- PIC EOI is handled by the common IRQ dispatcher, not by the driver.
 
-## Input Buffer
-- **Type:** Circular buffer.
-- **Size:** 256 characters.
-- **Interrupt Safety:** The handler pushes characters while the consumer pops them.
+## Modifier State
+- Left/right modifiers are tracked independently:
+  - Shift: `kbd_lshift`, `kbd_rshift`
+  - Ctrl: `kbd_lctrl`, `kbd_rctrl`
+  - Alt: `kbd_lalt`, `kbd_ralt`
+- Aggregate flags are derived after each modifier transition:
+  - `kbd_shift`
+  - `kbd_ctrl`
+  - `kbd_alt`
 
-## API
-### `void keyboard_init(void)`
-Initializes the PS/2 controller and the keyboard driver state.
+## Translation
+- Unshifted ASCII comes from `kbd_us[128]`.
+- Shifted ASCII comes from `kbd_us_shifted[128]`.
+- `Ctrl+A..Z` is translated to `0x01..0x1A`.
+- The current implementation handles:
+  - printable single-byte Set 1 make codes
+  - single-byte modifier break codes
+  - extended right Ctrl / right Alt
+  - `Alt+F1..F12` VT switching
+  - `Ctrl+F9` kernel process dump hook
 
-### `void keyboard_handler(registers_t *regs)`
-ISR for IRQ1. Reads from port 0x60 and pushes decoded characters to the buffer.
+## Output Paths
+- Translated characters are buffered in the 256-byte `kbd_buffer` ring.
+- Characters are pushed to the active VT's TTY with `tty_flip_buffer_push()`.
+- If the active VT has no attached TTY, the driver falls back to
+  `console_push_char()`.
+- Input-event notifications are emitted with `input_report_key(..., 1)` and
+  `input_sync()`.
 
-### `char keyboard_getc(void)`
-Pops and returns the next character from the input buffer. Returns 0 if empty.
-
-## Constraints
-- Only supports US QWERTY layout.
-- No support for Shift, Ctrl, Alt modifiers yet.
-- Polling `keyboard_getc` is non-blocking.
+## Current Limits
+- No lock-key state or LED programming yet.
+- No full E0 navigation-key escape-sequence generation yet.
+- No Set 2 decoding yet.
+- Key release events are not yet reported for general keys.
