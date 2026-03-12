@@ -1,7 +1,15 @@
 #include "as_x86_encode.h"
 #include "as_x86_sse3.h"
 #include "as_x86_sse41.h"
+#include "as_x86_sse42.h"
 #include "as_x86_ssse3.h"
+#include "as_x86_avx.h"
+#include "as_x86_avx2.h"
+#include "as_x86_bmi1.h"
+#include "as_x86_bmi2.h"
+#include "as_x86_fma.h"
+#include "as_x86_v2.h"
+#include "as_x86_v3_misc.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -89,9 +97,45 @@ static int is_x86_sse41_mnemonic(const char *mnemonic) {
            streq_ci(mnemonic, "pmovzxbd") || streq_ci(mnemonic, "pmovzxbq") ||
            streq_ci(mnemonic, "pmovzxwd") || streq_ci(mnemonic, "pmovzxwq") ||
            streq_ci(mnemonic, "pmovzxdq") || streq_ci(mnemonic, "pmuldq") ||
-           streq_ci(mnemonic, "pmulld") || streq_ci(mnemonic, "ptest") ||
+           streq_ci(mnemonic, "pmulld") || streq_ci(mnemonic, "phminposuw") ||
+           streq_ci(mnemonic, "ptest") ||
            streq_ci(mnemonic, "roundpd") || streq_ci(mnemonic, "roundps") ||
            streq_ci(mnemonic, "roundsd") || streq_ci(mnemonic, "roundss");
+}
+
+static int is_x86_sse42_mnemonic(const char *mnemonic) {
+    return streq_ci(mnemonic, "crc32") || streq_ci(mnemonic, "pcmpgtq") ||
+           streq_ci(mnemonic, "pcmpestrm") || streq_ci(mnemonic, "pcmpestrmq") ||
+           streq_ci(mnemonic, "pcmpestri") || streq_ci(mnemonic, "pcmpestriq") ||
+           streq_ci(mnemonic, "pcmpistrm") || streq_ci(mnemonic, "pcmpistri");
+}
+
+static int is_x86_v2_mnemonic(const char *mnemonic) {
+    return streq_ci(mnemonic, "lahf") || streq_ci(mnemonic, "sahf") ||
+           streq_ci(mnemonic, "cmpxchg16b") || streq_ci(mnemonic, "popcnt");
+}
+
+static int is_x86_v3_misc_mnemonic(const char *mnemonic) {
+    return streq_ci(mnemonic, "lzcnt") || streq_ci(mnemonic, "movbe") ||
+           streq_ci(mnemonic, "xsave") || streq_ci(mnemonic, "xrstor") ||
+           streq_ci(mnemonic, "xsaveopt") || streq_ci(mnemonic, "xsavec") ||
+           streq_ci(mnemonic, "xsaves") || streq_ci(mnemonic, "xsave64") ||
+           streq_ci(mnemonic, "xrstor64") || streq_ci(mnemonic, "xsaveopt64") ||
+           streq_ci(mnemonic, "xsavec64") || streq_ci(mnemonic, "xsaves64") ||
+           streq_ci(mnemonic, "xgetbv") || streq_ci(mnemonic, "xsetbv");
+}
+
+static int is_x86_bmi1_mnemonic(const char *mnemonic) {
+    return streq_ci(mnemonic, "andn") || streq_ci(mnemonic, "bextr") ||
+           streq_ci(mnemonic, "blsi") || streq_ci(mnemonic, "blsmsk") ||
+           streq_ci(mnemonic, "blsr") || streq_ci(mnemonic, "tzcnt");
+}
+
+static int is_x86_bmi2_mnemonic(const char *mnemonic) {
+    return streq_ci(mnemonic, "bzhi") || streq_ci(mnemonic, "mulx") ||
+           streq_ci(mnemonic, "pdep") || streq_ci(mnemonic, "pext") ||
+           streq_ci(mnemonic, "sarx") || streq_ci(mnemonic, "shlx") ||
+           streq_ci(mnemonic, "shrx") || streq_ci(mnemonic, "rorx");
 }
 
 static int try_encode_x86_ssse3_insn(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap, size_t *out_len,
@@ -163,6 +207,269 @@ static int try_encode_x86_sse41_insn(const as_x86_insn_t *insn, uint8_t *out, si
         s41.imm8 = (uint8_t)insn->ops[2].u.imm;
     }
     return as_x86_encode_sse41(&s41, out, out_cap, out_len, errbuf, errbuf_sz);
+}
+
+static int try_encode_x86_sse42_insn(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap, size_t *out_len,
+                                     char *errbuf, size_t errbuf_sz) {
+    as_x86_sse42_insn_t s42;
+
+    if (insn == NULL || out == NULL) {
+        return -1;
+    }
+    memset(&s42, 0, sizeof(s42));
+    s42.mnemonic = insn->mnemonic;
+    s42.op_count = insn->op_count >= 2 ? 2 : insn->op_count;
+    s42.rex_w = insn->rex_w;
+    if (insn->op_count >= 1) {
+        s42.dst = insn->ops[0];
+    }
+    if (insn->op_count >= 2) {
+        s42.src = insn->ops[1];
+    }
+    if (insn->op_count >= 3 && insn->ops[2].kind == AS_X86_OP_IMM) {
+        s42.has_imm8 = 1;
+        s42.imm8 = (uint8_t)insn->ops[2].u.imm;
+    }
+    if (streq_ci(insn->mnemonic, "crc32")) {
+        if (insn->op_count >= 2) {
+            if (insn->ops[1].kind == AS_X86_OP_REG) {
+                s42.width_bits = insn->ops[1].size_bits;
+            } else if (insn->ops[1].kind == AS_X86_OP_MEM) {
+                s42.width_bits = insn->ops[1].u.mem.size_bits;
+            }
+        }
+        if (s42.width_bits == 0 && insn->op_count >= 1) {
+            s42.width_bits = insn->ops[0].size_bits;
+        }
+    } else if (streq_ci(insn->mnemonic, "pcmpestrmq")) {
+        s42.mnemonic = "pcmpestrm";
+        s42.rex_w = 1;
+    } else if (streq_ci(insn->mnemonic, "pcmpestriq")) {
+        s42.mnemonic = "pcmpestri";
+        s42.rex_w = 1;
+    }
+    return as_x86_encode_sse42(&s42, out, out_cap, out_len, errbuf, errbuf_sz);
+}
+
+static int try_encode_x86_v2_insn(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap, size_t *out_len,
+                                  char *errbuf, size_t errbuf_sz) {
+    if (insn == NULL || out == NULL) {
+        return -1;
+    }
+    if (streq_ci(insn->mnemonic, "lahf")) {
+        return as_x86_encode_lahf(out, out_cap, out_len);
+    }
+    if (streq_ci(insn->mnemonic, "sahf")) {
+        return as_x86_encode_sahf(out, out_cap, out_len);
+    }
+    if (streq_ci(insn->mnemonic, "cmpxchg16b")) {
+        if (insn->op_count != 1 || insn->ops[0].kind != AS_X86_OP_MEM) {
+            return -1;
+        }
+        return as_x86_encode_cmpxchg16b(&insn->ops[0], out, out_cap, out_len, errbuf, errbuf_sz);
+    }
+    if (streq_ci(insn->mnemonic, "popcnt")) {
+        as_x86_popcnt_insn_t v2;
+
+        if (insn->op_count != 2 || insn->ops[0].kind != AS_X86_OP_REG ||
+            (insn->ops[1].kind != AS_X86_OP_REG && insn->ops[1].kind != AS_X86_OP_MEM)) {
+            return -1;
+        }
+        memset(&v2, 0, sizeof(v2));
+        v2.dst = insn->ops[0];
+        v2.src = insn->ops[1];
+        if (insn->ops[1].kind == AS_X86_OP_REG) {
+            v2.width_bits = (int)insn->ops[1].size_bits;
+        } else {
+            v2.width_bits = (int)insn->ops[1].u.mem.size_bits;
+        }
+        if (v2.width_bits == 0) {
+            v2.width_bits = (int)insn->ops[0].size_bits;
+        }
+        return as_x86_encode_popcnt(&v2, out, out_cap, out_len, errbuf, errbuf_sz);
+    }
+    return -1;
+}
+
+static int try_encode_x86_v3_misc_insn(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap, size_t *out_len,
+                                       char *errbuf, size_t errbuf_sz) {
+    as_x86_v3_misc_insn_t v3;
+
+    if (insn == NULL || out == NULL) {
+        return -1;
+    }
+    memset(&v3, 0, sizeof(v3));
+    v3.mnemonic = insn->mnemonic;
+    v3.op_count = insn->op_count;
+    if (insn->op_count >= 1) {
+        v3.op1 = insn->ops[0];
+        if (insn->ops[0].kind == AS_X86_OP_REG) {
+            v3.width_bits = insn->ops[0].size_bits;
+        } else if (insn->ops[0].kind == AS_X86_OP_MEM) {
+            v3.width_bits = insn->ops[0].u.mem.size_bits;
+        }
+    }
+    if (insn->op_count >= 2) {
+        v3.op2 = insn->ops[1];
+        if (v3.width_bits == 0) {
+            if (insn->ops[1].kind == AS_X86_OP_REG) {
+                v3.width_bits = insn->ops[1].size_bits;
+            } else if (insn->ops[1].kind == AS_X86_OP_MEM) {
+                v3.width_bits = insn->ops[1].u.mem.size_bits;
+            }
+        }
+    }
+    return as_x86_encode_v3_misc(&v3, out, out_cap, out_len, errbuf, errbuf_sz);
+}
+
+static int try_encode_x86_bmi1_insn(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap, size_t *out_len,
+                                    char *errbuf, size_t errbuf_sz) {
+    as_x86_bmi1_insn_t bmi1;
+
+    if (insn == NULL || out == NULL) {
+        return -1;
+    }
+    memset(&bmi1, 0, sizeof(bmi1));
+    bmi1.mnemonic = insn->mnemonic;
+    bmi1.op_count = insn->op_count;
+    if (insn->op_count >= 1) {
+        bmi1.op1 = insn->ops[0];
+        if (insn->ops[0].kind == AS_X86_OP_REG) {
+            bmi1.width_bits = insn->ops[0].size_bits;
+        } else if (insn->ops[0].kind == AS_X86_OP_MEM) {
+            bmi1.width_bits = insn->ops[0].u.mem.size_bits;
+        }
+    }
+    if (insn->op_count >= 2) {
+        bmi1.op2 = insn->ops[1];
+        if (bmi1.width_bits == 0) {
+            if (insn->ops[1].kind == AS_X86_OP_REG) {
+                bmi1.width_bits = insn->ops[1].size_bits;
+            } else if (insn->ops[1].kind == AS_X86_OP_MEM) {
+                bmi1.width_bits = insn->ops[1].u.mem.size_bits;
+            }
+        }
+    }
+    if (insn->op_count >= 3) {
+        bmi1.op3 = insn->ops[2];
+    }
+    return as_x86_encode_bmi1(&bmi1, out, out_cap, out_len, errbuf, errbuf_sz);
+}
+
+static int try_encode_x86_bmi2_insn(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap, size_t *out_len,
+                                    char *errbuf, size_t errbuf_sz) {
+    as_x86_bmi2_insn_t bmi2;
+
+    if (insn == NULL || out == NULL) {
+        return -1;
+    }
+    memset(&bmi2, 0, sizeof(bmi2));
+    bmi2.mnemonic = insn->mnemonic;
+    bmi2.op_count = insn->op_count;
+    if (insn->op_count >= 1) {
+        bmi2.op1 = insn->ops[0];
+        if (insn->ops[0].kind == AS_X86_OP_REG) {
+            bmi2.width_bits = insn->ops[0].size_bits;
+        } else if (insn->ops[0].kind == AS_X86_OP_MEM) {
+            bmi2.width_bits = insn->ops[0].u.mem.size_bits;
+        }
+    }
+    if (insn->op_count >= 2) {
+        bmi2.op2 = insn->ops[1];
+        if (bmi2.width_bits == 0) {
+            if (insn->ops[1].kind == AS_X86_OP_REG) {
+                bmi2.width_bits = insn->ops[1].size_bits;
+            } else if (insn->ops[1].kind == AS_X86_OP_MEM) {
+                bmi2.width_bits = insn->ops[1].u.mem.size_bits;
+            }
+        }
+    }
+    if (insn->op_count >= 3) {
+        bmi2.op3 = insn->ops[2];
+    }
+    if (insn->op_count >= 3 && insn->ops[2].kind == AS_X86_OP_IMM) {
+        bmi2.has_imm8 = 1;
+        bmi2.imm8 = (uint8_t)insn->ops[2].u.imm;
+    }
+    return as_x86_encode_bmi2(&bmi2, out, out_cap, out_len, errbuf, errbuf_sz);
+}
+
+static unsigned infer_vector_bits(const as_x86_insn_t *insn) {
+    size_t i;
+
+    if (insn == NULL) {
+        return 0;
+    }
+    for (i = 0; i < insn->op_count; ++i) {
+        if (insn->ops[i].kind == AS_X86_OP_REG && insn->ops[i].size_bits >= 128) {
+            return insn->ops[i].size_bits;
+        }
+        if (insn->ops[i].kind == AS_X86_OP_MEM && insn->ops[i].u.mem.size_bits >= 128) {
+            return insn->ops[i].u.mem.size_bits;
+        }
+    }
+    return 128;
+}
+
+static int try_encode_x86_avx_insn(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap, size_t *out_len,
+                                   char *errbuf, size_t errbuf_sz) {
+    as_x86_avx_insn_t avx;
+
+    if (insn == NULL || out == NULL) {
+        return -1;
+    }
+    memset(&avx, 0, sizeof(avx));
+    avx.mnemonic = insn->mnemonic;
+    avx.op_count = insn->op_count;
+    avx.vex_w = insn->rex_w ? 1 : 0;
+    avx.vector_bits = infer_vector_bits(insn);
+    if (insn->op_count >= 1) avx.op1 = insn->ops[0];
+    if (insn->op_count >= 2) avx.op2 = insn->ops[1];
+    if (insn->op_count >= 3) avx.op3 = insn->ops[2];
+    if (insn->op_count >= 3 && insn->ops[2].kind == AS_X86_OP_IMM) {
+        avx.has_imm8 = 1;
+        avx.imm8 = (uint8_t)insn->ops[2].u.imm;
+    }
+    return as_x86_encode_avx(&avx, out, out_cap, out_len, errbuf, errbuf_sz);
+}
+
+static int try_encode_x86_avx2_insn(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap, size_t *out_len,
+                                    char *errbuf, size_t errbuf_sz) {
+    as_x86_avx2_insn_t avx2;
+
+    if (insn == NULL || out == NULL) {
+        return -1;
+    }
+    memset(&avx2, 0, sizeof(avx2));
+    avx2.mnemonic = insn->mnemonic;
+    avx2.op_count = insn->op_count;
+    avx2.vector_bits = infer_vector_bits(insn);
+    if (insn->op_count >= 1) avx2.op1 = insn->ops[0];
+    if (insn->op_count >= 2) avx2.op2 = insn->ops[1];
+    if (insn->op_count >= 3) avx2.op3 = insn->ops[2];
+    if (insn->op_count >= 3 && insn->ops[2].kind == AS_X86_OP_IMM) {
+        avx2.has_imm8 = 1;
+        avx2.imm8 = (uint8_t)insn->ops[2].u.imm;
+    }
+    return as_x86_encode_avx2(&avx2, out, out_cap, out_len, errbuf, errbuf_sz);
+}
+
+static int try_encode_x86_fma_insn(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap, size_t *out_len,
+                                   char *errbuf, size_t errbuf_sz) {
+    as_x86_fma_insn_t fma;
+
+    if (insn == NULL || out == NULL) {
+        return -1;
+    }
+    memset(&fma, 0, sizeof(fma));
+    fma.mnemonic = insn->mnemonic;
+    fma.op_count = insn->op_count;
+    fma.vex_w = insn->rex_w ? 1 : 0;
+    fma.vector_bits = infer_vector_bits(insn);
+    if (insn->op_count >= 1) fma.op1 = insn->ops[0];
+    if (insn->op_count >= 2) fma.op2 = insn->ops[1];
+    if (insn->op_count >= 3) fma.op3 = insn->ops[2];
+    return as_x86_encode_fma(&fma, out, out_cap, out_len, errbuf, errbuf_sz);
 }
 
 static int emit8(enc_ctx_t *ctx, uint8_t v) {
@@ -2004,6 +2311,32 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
     }
     if (is_x86_sse41_mnemonic(insn->mnemonic)) {
         return try_encode_x86_sse41_insn(insn, out, out_cap, out_len, errbuf, errbuf_sz);
+    }
+    if (is_x86_sse42_mnemonic(insn->mnemonic)) {
+        return try_encode_x86_sse42_insn(insn, out, out_cap, out_len, errbuf, errbuf_sz);
+    }
+    if (is_x86_v2_mnemonic(insn->mnemonic)) {
+        return try_encode_x86_v2_insn(insn, out, out_cap, out_len, errbuf, errbuf_sz);
+    }
+    if (is_x86_v3_misc_mnemonic(insn->mnemonic)) {
+        return try_encode_x86_v3_misc_insn(insn, out, out_cap, out_len, errbuf, errbuf_sz);
+    }
+    if (is_x86_bmi1_mnemonic(insn->mnemonic)) {
+        return try_encode_x86_bmi1_insn(insn, out, out_cap, out_len, errbuf, errbuf_sz);
+    }
+    if (is_x86_bmi2_mnemonic(insn->mnemonic)) {
+        return try_encode_x86_bmi2_insn(insn, out, out_cap, out_len, errbuf, errbuf_sz);
+    }
+    if (insn->mnemonic != NULL && insn->mnemonic[0] == 'v') {
+        if (try_encode_x86_avx2_insn(insn, out, out_cap, out_len, errbuf, errbuf_sz) == 0) {
+            return 0;
+        }
+        if (try_encode_x86_fma_insn(insn, out, out_cap, out_len, errbuf, errbuf_sz) == 0) {
+            return 0;
+        }
+        if (try_encode_x86_avx_insn(insn, out, out_cap, out_len, errbuf, errbuf_sz) == 0) {
+            return 0;
+        }
     }
     if (is_x86_ssse3_mnemonic(insn->mnemonic)) {
         return try_encode_x86_ssse3_insn(insn, out, out_cap, out_len, errbuf, errbuf_sz);

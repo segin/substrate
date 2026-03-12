@@ -228,7 +228,8 @@ static int encode_prefixed_map(s42_ctx_t *ctx, const as_x86_sse42_insn_t *insn, 
         return -1;
     }
 
-    rex |= (uint8_t)((force_rex_w ? 0x08 : 0) | (rex_r ? 0x04 : 0) | (rex_x ? 0x02 : 0) | (rex_b ? 0x01 : 0));
+    rex |= (uint8_t)(((force_rex_w || insn->rex_w) ? 0x08 : 0) | (rex_r ? 0x04 : 0) | (rex_x ? 0x02 : 0) |
+                     (rex_b ? 0x01 : 0));
     if (rex == 0x40) {
         size_t i;
         for (i = rex_pos + 1; i < ctx->at; ++i) {

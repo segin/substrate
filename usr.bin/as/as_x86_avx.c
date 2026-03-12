@@ -289,6 +289,7 @@ static const avx_promoted_desc_t *lookup_promoted_imm(const char *mnemonic) {
         {"vpinsrb", 0x20, AS_VEX_MAP_0F3A, AS_VEX_PP_66},
         {"vinsertps", 0x21, AS_VEX_MAP_0F3A, AS_VEX_PP_66},
         {"vpinsrd", 0x22, AS_VEX_MAP_0F3A, AS_VEX_PP_66},
+        {"vpinsrq", 0x22, AS_VEX_MAP_0F3A, AS_VEX_PP_66},
         {"vpinsrw", 0xc4, AS_VEX_MAP_0F, AS_VEX_PP_66},
         {"vdpps", 0x40, AS_VEX_MAP_0F3A, AS_VEX_PP_66},
         {"vdppd", 0x41, AS_VEX_MAP_0F3A, AS_VEX_PP_66},

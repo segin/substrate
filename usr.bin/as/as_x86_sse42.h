@@ -17,6 +17,7 @@ typedef struct {
     int has_imm8;
     uint8_t imm8;
     unsigned width_bits;
+    int rex_w;
     size_t op_count;
 } as_x86_sse42_insn_t;
 
