@@ -180,11 +180,11 @@ void console_attach_std_fds(struct process *proc) {
     if (!proc) return;
 
     /*
-     * This helper is called explicitly from kinit_task() for the init
-     * process. Do not hard-code a numeric PID here; background kernel
-     * workers may be spawned before init during bring-up.
+     * This helper is called explicitly from kinit_task() before init has
+     * exec'd out of its kernel-task wrapper. Do not reject kernel tasks here:
+     * the call site, not this helper, decides which process should inherit the
+     * console stdio set.
      */
-    if (proc->is_kernel_task) return;
 
     fs_node_t *node = console_get_node();
     if (!node) {
