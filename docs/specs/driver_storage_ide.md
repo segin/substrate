@@ -87,3 +87,16 @@ Bus-master DMA support provides:
 
 ATAPI transport supports PACKET commands over the same channel model and backs
 the SCSI mid-layer helper path.
+
+## Recovery
+
+The driver supports ATA software reset on a per-channel basis:
+
+- assert `SRST` in the device-control register
+- deassert `SRST` after the reset pulse
+- wait for BSY to clear on both master and slave positions
+- reissue IDENTIFY / IDENTIFY PACKET on the channel to refresh in-memory
+  device metadata
+
+Repeated transfer failures attempt a channel reset once before the driver marks
+the failing device offline.

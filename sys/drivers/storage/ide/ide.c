@@ -59,12 +59,70 @@ static int ide_drivers_registered;
 /* IRQ completion flag */
 static volatile int ide_irq_complete[MAX_IDE_CHANNELS];
 
+static inline void ide_wait_backoff(int *yield_count);
 static int ide_wait_bsy(uint8_t channel, uint32_t timeout_ms, const char *op);
 static int ide_wait_drq(uint8_t channel, uint32_t timeout_ms, const char *op);
 static int ide_wait_irq_completion(uint8_t channel, uint32_t timeout_ms,
                                    const char *op);
+static int ide_identify_channel(uint8_t channel, uint8_t drive, void *buffer);
+static int ide_identify_atapi_channel(uint8_t channel, uint8_t drive, void *buffer);
+static void ide_select_drive(uint8_t channel, uint8_t drive);
 
 static int ide_scan_controller(void);
+static int ide_software_reset_channel(uint8_t channel);
+
+static void ide_delay_ms(uint32_t delay_ms) {
+    uint64_t start = get_uptime_ms();
+    int yield_count = 0;
+
+    while ((uint64_t)(get_uptime_ms() - start) < delay_ms) {
+        ide_wait_backoff(&yield_count);
+    }
+}
+
+static void ide_refresh_device_slot(uint8_t channel, uint8_t drive) {
+    int slot = IDE_DEVICE_INDEX(channel, drive);
+    uint16_t buf[256];
+    int type = -1;
+    uint64_t total_sectors;
+    uint32_t sector_size = 512;
+
+    if (slot < 0 || slot >= MAX_IDE_DEVICES) {
+        return;
+    }
+
+    memset(buf, 0, sizeof(buf));
+
+    if (ide_identify_channel(channel, drive, buf) == 0) {
+        type = 0;
+    } else if (ide_identify_atapi_channel(channel, drive, buf) == 0) {
+        type = 1;
+    }
+
+    if (type == -1) {
+        return;
+    }
+
+    ide_parse_identify_data(&ide_devices[slot], buf, (uint8_t)type, channel, drive);
+    total_sectors = ide_devices[slot].size;
+    if (type == 1) {
+        uint32_t lba;
+        uint32_t blk_size;
+
+        if (ide_atapi_read_capacity(channel, drive, &lba, &blk_size) == 0) {
+            total_sectors = (uint64_t)lba + 1;
+            sector_size = blk_size;
+        } else {
+            sector_size = 2048;
+        }
+    }
+
+    ide_devices[slot].size = total_sectors;
+    ide_devices[slot].offline = 0;
+    ide_contexts[slot].type = (uint8_t)type;
+    ide_blkdevs[slot].sector_size = sector_size;
+    ide_blkdevs[slot].total_sectors = total_sectors;
+}
 
 static int ide_transfer_read_once(ide_drive_ctx_t *ctx, uint64_t sector,
                                   uint32_t count, void *buffer) {
@@ -114,6 +172,14 @@ static void ide_mark_offline(ide_drive_ctx_t *ctx, const char *op) {
     char msg[128];
 
     if (dev->offline) {
+        return;
+    }
+
+    if (ide_software_reset_channel(ctx->channel) == 0 && !dev->offline) {
+        snprintf(msg, sizeof(msg),
+                 "ide: ide%u recovered after channel reset during %s\n",
+                 (unsigned int)ctx->index, op);
+        kprint(msg);
         return;
     }
 
@@ -504,6 +570,33 @@ static int ide_wait_irq_completion(uint8_t channel, uint32_t timeout_ms,
             continue;
         }
         intr_restore(flags);
+    }
+
+    return 0;
+}
+
+static int ide_software_reset_channel(uint8_t channel) {
+    uint8_t ctrl;
+
+    if (channel >= MAX_IDE_CHANNELS) {
+        return -1;
+    }
+
+    ctrl = ide_channels[channel].no_intr ? ATA_CTRL_NIEN : 0;
+    ide_write_ctrl(channel, ctrl | ATA_CTRL_SRST);
+    ide_delay_ms(5);
+    ide_write_ctrl(channel, ctrl);
+    ide_delay_ms(2);
+
+    for (uint8_t drive = 0; drive < 2; drive++) {
+        ide_select_drive(channel, drive);
+        if (ide_wait_bsy(channel, IDE_TIMEOUT_IDENTIFY_MS, "soft-reset") < 0) {
+            return -1;
+        }
+    }
+
+    for (uint8_t drive = 0; drive < 2; drive++) {
+        ide_refresh_device_slot(channel, drive);
     }
 
     return 0;
