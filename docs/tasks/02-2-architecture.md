@@ -80,6 +80,15 @@
     - [x] **IDT/Exceptions:** Implement IDT and ISR stubs for 64-bit mode. <!-- idt.c + isr.S define the 256-entry IDT, IST assignment, and vector stubs; host_test_x86_64_idt validates gate programming and exception names --> (REQ: REQ-02-0072)
     - [x] **Syscall Entry:** Implement `syscall`/`sysret` (MSR LSTAR). <!-- syscall.c programs LSTAR/FMASK/STAR and dispatches through the active personality; host_test_x86_64_syscall validates the MSR contract and ENOSYS fallback --> (REQ: REQ-02-0073)
     - [x] **Context Switching:** Implement `switch_to` for 64-bit registers (r12-r15, rbx, rbp). <!-- switch.S exports switch_to/switch_to_first/context_init/fork_return and preserves the AMD64 callee-saved set plus control state; host_test_x86_64_asm validates the assembled artifact --> (REQ: REQ-02-0074)
+    - [ ] **Runtime Userspace Bring-Up:** (REQ: REQ-02-0075)
+        - [ ] Enter first 64-bit userspace task with canonical user stack, selectors, and return path from kernel mode. (REQ: REQ-02-0076)
+        - [ ] Implement x86_64 fault/syscall return-to-user frame handling for synchronous traps, interrupts, and preemption. (REQ: REQ-02-0077)
+        - [ ] Integrate per-thread kernel stacks, TSS/IST state, and scheduler handoff for long-mode user threads. (REQ: REQ-02-0078)
+        - [ ] Implement x86_64 user-memory access validation (`copyin`/`copyout`, canonical address checks, SMAP-ready boundaries). (REQ: REQ-02-0079)
+        - [ ] Implement x86_64 TLS base management (`FSBASE`/`GSBASE`, `arch_prctl` or native equivalent) for user threads. (REQ: REQ-02-0080)
+        - [ ] Integrate x86_64 ELF userspace handoff (`argc`/`argv`/`envp`/`auxv`) with the native AMD64 ABI contract. (REQ: REQ-02-0081)
+        - [ ] Integration: boot x86_64 kernel and run `/sbin/init` as a native 64-bit userspace process. (REQ: REQ-02-0082)
+        - [ ] Document the hybrid long-mode/compatibility-mode kernel approach as historical background only, not the primary Substrate bring-up path. (REQ: REQ-02-0083)
 
 
 ## User Stories
@@ -158,6 +167,16 @@
 - **US-02-0072**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to iDT/Exceptions: Implement IDT and ISR stubs for 64-bit mode. <!-- idt.c, isr.S: 256 vectors, IST for NMI/DF/MC --> so that this capability is implemented with clear verification evidence.
 - **US-02-0073**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to syscall Entry: Implement syscall/sysret (MSR LSTAR). <!-- syscall.c exists, enhanced with isr128 stub --> so that this capability is implemented with clear verification evidence.
 - **US-02-0074**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to context Switching: Implement switch_to for 64-bit registers (r12-r15, rbx, rbp). <!-- switch.S: callee-saved + SSE/x87 --> so that this capability is implemented with clear verification evidence.
+
+- **US-02-0075**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to runtime Userspace Bring-Up so that this capability is implemented with clear verification evidence.
+- **US-02-0076**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to enter first 64-bit userspace task with canonical user stack, selectors, and return path from kernel mode so that this capability is implemented with clear verification evidence.
+- **US-02-0077**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to implement x86_64 fault/syscall return-to-user frame handling for synchronous traps, interrupts, and preemption so that this capability is implemented with clear verification evidence.
+- **US-02-0078**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to integrate per-thread kernel stacks, TSS/IST state, and scheduler handoff for long-mode user threads so that this capability is implemented with clear verification evidence.
+- **US-02-0079**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to implement x86_64 user-memory access validation (`copyin`/`copyout`, canonical address checks, SMAP-ready boundaries) so that this capability is implemented with clear verification evidence.
+- **US-02-0080**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to implement x86_64 TLS base management (`FSBASE`/`GSBASE`, `arch_prctl` or native equivalent) for user threads so that this capability is implemented with clear verification evidence.
+- **US-02-0081**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to integrate x86_64 ELF userspace handoff (`argc`/`argv`/`envp`/`auxv`) with the native AMD64 ABI contract so that this capability is implemented with clear verification evidence.
+- **US-02-0082**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to boot x86_64 kernel and run `/sbin/init` as a native 64-bit userspace process so that this capability is implemented with clear verification evidence.
+- **US-02-0083**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to document the hybrid long-mode/compatibility-mode kernel approach as historical background only, not the primary Substrate bring-up path so that this capability is implemented with clear verification evidence.
 
 ## INCOSE/EARS Requirements
 
@@ -381,5 +400,33 @@
   - Context: 2. Architecture (`sys/arch`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-02-0074** (EARS/Ubiquitous): The Substrate system shall context Switching: Implement switch_to for 64-bit registers (r12-r15, rbx, rbp). <!-- switch.S: callee-saved + SSE/x87 -->.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+
+- **REQ-02-0075** (EARS/Ubiquitous): The Substrate system shall provide an x86_64 runtime userspace bring-up path.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0076** (EARS/Ubiquitous): The Substrate system shall enter the first 64-bit userspace task with a canonical user stack, selectors, and return path from kernel mode.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0077** (EARS/Ubiquitous): The Substrate system shall implement x86_64 fault/syscall return-to-user frame handling for synchronous traps, interrupts, and preemption.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0078** (EARS/Ubiquitous): The Substrate system shall integrate per-thread kernel stacks, TSS/IST state, and scheduler handoff for long-mode user threads.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0079** (EARS/Ubiquitous): The Substrate system shall implement x86_64 user-memory access validation (`copyin`/`copyout`, canonical address checks, SMAP-ready boundaries).
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0080** (EARS/Ubiquitous): The Substrate system shall implement x86_64 TLS base management (`FSBASE`/`GSBASE`, `arch_prctl` or native equivalent) for user threads.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0081** (EARS/Ubiquitous): The Substrate system shall integrate x86_64 ELF userspace handoff (`argc`/`argv`/`envp`/`auxv`) with the native AMD64 ABI contract.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0082** (EARS/Ubiquitous): The Substrate system shall boot the x86_64 kernel and run `/sbin/init` as a native 64-bit userspace process.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0083** (EARS/Ubiquitous): The Substrate system shall document the hybrid long-mode/compatibility-mode kernel approach as historical background only, not the primary Substrate bring-up path.
   - Context: 2. Architecture (`sys/arch`)
   - Verification: design review + implementation evidence + test/doc update.

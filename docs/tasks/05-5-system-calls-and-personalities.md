@@ -28,6 +28,14 @@
     - [ ] **Testing:** (REQ: REQ-05-0020)
         - [ ] **Large File Support (LFS):** Test creating/seeking > 2GB files. (REQ: REQ-05-0021)
         - [ ] **Y2038:** Test time_t overflow handling. (REQ: REQ-05-0022)
+- [ ] **Native x86_64 Userspace ABI:** (REQ: REQ-05-0673)
+    - [ ] Define the native AMD64 syscall register ABI and syscall-number table contract. (REQ: REQ-05-0674)
+    - [ ] Audit native syscalls for x86_64 pointer width, structure layout, and sign-extension rules. (REQ: REQ-05-0675)
+    - [ ] Implement x86_64 signal frame, `sigreturn`, `rt_sigreturn`, altstack, and interrupted-syscall restart semantics. (REQ: REQ-05-0676)
+    - [ ] Implement x86_64 `fork`/`vfork`/`clone`/`execve` register-save and userspace-stack contracts. (REQ: REQ-05-0677)
+    - [ ] Implement x86_64 TLS control surface (`FSBASE`/`GSBASE`, `arch_prctl` or native equivalent). (REQ: REQ-05-0678)
+    - [ ] Add `libsys`, `crt0`, and libc wrapper support for native x86_64 user binaries. (REQ: REQ-05-0679)
+    - [ ] Integration: a native x86_64 user binary can `execve`, syscall, fault, receive signals, and exit cleanly. (REQ: REQ-05-0680)
 - [ ] **Mechanisms:** (REQ: REQ-05-0023)
         - [ ] **PTY Subsystem (Unix98/System V) - Massive Expansion:** (REQ: REQ-05-0024)
             - [ ] **Core PTY Driver (`/dev/pts/` + `/dev/ptmx`):** (REQ: REQ-05-0025)
@@ -1668,6 +1676,15 @@
 - **US-05-0670**: As a Substrate contributor working on 5. System Calls & Personalities, I want to copy-on-Write: Duplication of VM space (refcounts) so that this capability is implemented with clear verification evidence.
 - **US-05-0671**: As a Substrate contributor working on 5. System Calls & Personalities, I want to file Descriptors: Increment refcounts on all FDs so that this capability is implemented with clear verification evidence.
 - **US-05-0672**: As a Substrate contributor working on 5. System Calls & Personalities, I want to vfork: Shared VM space, parent blocked until child exec/exit so that this capability is implemented with clear verification evidence.
+
+- **US-05-0673**: As a Substrate contributor working on 5. System Calls & Personalities, I want to native x86_64 Userspace ABI so that this capability is implemented with clear verification evidence.
+- **US-05-0674**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define the native AMD64 syscall register ABI and syscall-number table contract so that this capability is implemented with clear verification evidence.
+- **US-05-0675**: As a Substrate contributor working on 5. System Calls & Personalities, I want to audit native syscalls for x86_64 pointer width, structure layout, and sign-extension rules so that this capability is implemented with clear verification evidence.
+- **US-05-0676**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement x86_64 signal frame, `sigreturn`, `rt_sigreturn`, altstack, and interrupted-syscall restart semantics so that this capability is implemented with clear verification evidence.
+- **US-05-0677**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement x86_64 `fork`/`vfork`/`clone`/`execve` register-save and userspace-stack contracts so that this capability is implemented with clear verification evidence.
+- **US-05-0678**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement x86_64 TLS control surface (`FSBASE`/`GSBASE`, `arch_prctl` or native equivalent) so that this capability is implemented with clear verification evidence.
+- **US-05-0679**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add `libsys`, `crt0`, and libc wrapper support for native x86_64 user binaries so that this capability is implemented with clear verification evidence.
+- **US-05-0680**: As a Substrate contributor working on 5. System Calls & Personalities, I want to prove that a native x86_64 user binary can `execve`, syscall, fault, receive signals, and exit cleanly so that this capability is implemented with clear verification evidence.
 
 ## INCOSE/EARS Requirements
 
@@ -3685,5 +3702,30 @@
   - Context: 5. System Calls & Personalities
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-05-0672** (EARS/Ubiquitous): The Substrate system shall vfork: Shared VM space, parent blocked until child exec/exit.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+
+- **REQ-05-0673** (EARS/Ubiquitous): The Substrate system shall provide a native x86_64 userspace ABI.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0674** (EARS/Ubiquitous): The Substrate system shall define the native AMD64 syscall register ABI and syscall-number table contract.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0675** (EARS/Ubiquitous): The Substrate system shall audit native syscalls for x86_64 pointer width, structure layout, and sign-extension rules.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0676** (EARS/Ubiquitous): The Substrate system shall implement x86_64 signal frame, `sigreturn`, `rt_sigreturn`, altstack, and interrupted-syscall restart semantics.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0677** (EARS/Ubiquitous): The Substrate system shall implement x86_64 `fork`/`vfork`/`clone`/`execve` register-save and userspace-stack contracts.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0678** (EARS/Ubiquitous): The Substrate system shall implement x86_64 TLS control surface (`FSBASE`/`GSBASE`, `arch_prctl` or native equivalent).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0679** (EARS/Ubiquitous): The Substrate system shall add `libsys`, `crt0`, and libc wrapper support for native x86_64 user binaries.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0680** (EARS/Ubiquitous): The Substrate system shall prove that a native x86_64 user binary can `execve`, syscall, fault, receive signals, and exit cleanly.
   - Context: 5. System Calls & Personalities
   - Verification: design review + implementation evidence + test/doc update.
