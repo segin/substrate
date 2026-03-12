@@ -73,8 +73,8 @@
                 - [x] Validate `execute` callback is non-NULL. (REQ: REQ-03-0054)
                 - [x] Add to global link list (max 8 links). (REQ: REQ-03-0055)
                 - [x] Trigger bus scan on the new link. (REQ: REQ-03-0056)
-            - [ ] `scsi_unregister_link(link)`: unregister adapter. (REQ: REQ-03-0057)
-                - [ ] Detach all devices on this link. (REQ: REQ-03-0058)
+            - [x] `scsi_unregister_link(link)`: unregister adapter. (REQ: REQ-03-0057)
+                - [x] Detach all devices on this link. (REQ: REQ-03-0058)
                 - [ ] Free associated resources. (REQ: REQ-03-0059)
 
         - [ ] **Device Discovery:** (REQ: REQ-03-0060)

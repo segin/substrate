@@ -130,6 +130,16 @@ int scsi_register_link(scsi_link_t *link) {
 }
 
 void scsi_unregister_link(scsi_link_t *link) {
+    scsi_device_t *dev = scsi_device_list;
+    while (dev) {
+        scsi_device_t *next = dev->next;
+        if (dev->link == link) {
+            scsi_dev_detach(dev);
+            scsi_device_free(dev);
+        }
+        dev = next;
+    }
+
     for (int i = 0; i < scsi_link_count; i++) {
         if (scsi_links[i] == link) {
             /* Shift remaining entries */
