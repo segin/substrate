@@ -407,3 +407,21 @@ int device_resume(struct device *dev) {
 
     return 0;
 }
+
+void device_shutdown(struct device *dev) {
+    struct device *child;
+
+    if (!dev) {
+        return;
+    }
+
+    child = dev->children;
+    while (child) {
+        device_shutdown(child);
+        child = child->sibling;
+    }
+
+    if (dev->driver && dev->driver->shutdown) {
+        dev->driver->shutdown(dev);
+    }
+}

@@ -158,7 +158,7 @@
         - Tests: unit (suspend children first, resume parents first)
         - Docs: `device_pm.9`
         - Acceptance: PM ordering correct, callbacks invoked
-    - [ ] Implement `device_shutdown()` callback. (REQ: REQ-17-0026)
+    - [x] Implement `device_shutdown()` callback. (REQ: REQ-17-0026)
         - Files: `sys/kern/device.c`
         - API: `void device_shutdown(device_t *dev)`
         - Tests: unit (shutdown callback invoked)

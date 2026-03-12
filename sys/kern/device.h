@@ -96,5 +96,6 @@ void device_defer_probe(struct device *dev);
 void device_retry_deferred(void);
 int device_suspend(struct device *dev, pm_state_t state);
 int device_resume(struct device *dev);
+void device_shutdown(struct device *dev);
 
 #endif /* _KERN_DEVICE_H */
