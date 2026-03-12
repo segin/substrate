@@ -15,6 +15,7 @@
 #include <sys/file.h>
 #include <sys/errno.h>
 #include <arch/i386/pmm.h>
+#include <sys/ldt.h>
 #include <pm/pm.h>
 #include <kern/cmdline.h>
 #include <stdio.h>
@@ -939,6 +940,11 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
         strncpy(current_process->exec_path, path, sizeof(current_process->exec_path) - 1);
         current_process->exec_path[sizeof(current_process->exec_path) - 1] = '\0';
         proc_capture_cmdline(current_process, k_argv);
+        /*
+         * Flat native/Linux/FreeBSD ELF images must not retain a prior
+         * ELKS/private-LDT execution context across exec.
+         */
+        ldt_free_process(current_process);
         // Initialize VM map
         extern vm_map_t *vm_map_create(pmap_t pmap, uintptr_t min, uintptr_t max);
         if (current_process->vm_map) {

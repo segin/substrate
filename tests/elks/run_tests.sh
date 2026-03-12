@@ -176,12 +176,20 @@ stage_binary "$SCRIPT_DIR/bounds_test_elks" /bin/bounds_test_elks
 stage_binary "$SCRIPT_DIR/cat_elks" /bin/cat_elks
 stage_binary "$SCRIPT_DIR/fuzz_syscalls_elks" /bin/fuzz_syscalls_elks
 stage_binary "$SCRIPT_DIR/native_spawn_elks" /bin/native_spawn_elks
+stage_binary "$SCRIPT_DIR/native_linux_sh_elks_sh" /bin/native_linux_sh_elks_sh
 
 if want_case cat_elks; then
     cat_input=$LOG_DIR/cat_input.txt
     printf 'ELKS cat sample\n' > "$cat_input"
     debugfs -w -R "rm /elks-cat.txt" "$WORK_ROOTFS_IMG" >/dev/null 2>&1 || true
     debugfs -w -R "write $cat_input /elks-cat.txt" "$WORK_ROOTFS_IMG" >/dev/null
+fi
+
+if want_case native_sh_elks_sh; then
+    linux_sh_script=$LOG_DIR/native_sh_elks_sh.sh
+    printf 'echo ls | /perso/elks/bin/sh\n' > "$linux_sh_script"
+    debugfs -w -R "rm /native_sh_elks_sh.sh" "$WORK_ROOTFS_IMG" >/dev/null 2>&1 || true
+    debugfs -w -R "write $linux_sh_script /native_sh_elks_sh.sh" "$WORK_ROOTFS_IMG" >/dev/null
 fi
 
 if want_case hello_elks; then
@@ -251,80 +259,7 @@ if want_case native_spawn_elks_ls; then
         "bin         dev         lost+found  perso       proc        sys"
 fi
 if want_case native_sh_elks_sh; then
-    case_name=native_sh_elks_sh
-    log_path=$LOG_DIR/$case_name.log
-    mon_path=$LOG_DIR/$case_name.mon
-    rm -f "$mon_path"
-    "$QEMU" \
-        -kernel "$KERNEL" \
-        -accel tcg \
-        -icount shift=9 \
-        -smp 1 \
-        -append "serial_debug console=serial0 debug=trap,perso:elks,perso:elks:aout root=/dev/storage/ide0 init=/bin/sh" \
-        -serial "file:$log_path" \
-        -monitor "unix:$mon_path,server,nowait" \
-        -drive "file=$WORK_ROOTFS_IMG,format=raw,if=ide" \
-        -display none \
-        -no-reboot >/dev/null 2>&1 &
-    qemu_pid=$!
-
-    trap 'kill $qemu_pid >/dev/null 2>&1 || true; wait $qemu_pid >/dev/null 2>&1 || true' EXIT INT TERM
-
-    i=0
-    while [ ! -S "$mon_path" ] && [ $i -lt 50 ]; do
-        sleep 0.1
-        i=$((i + 1))
-    done
-
-    if [ ! -S "$mon_path" ]; then
-        printf 'FAIL %s: monitor socket not ready\n' "$case_name" >&2
-        exit 1
-    fi
-
-    sleep 2
-    {
-        printf 'sendkey slash\n'
-        printf 'sendkey p\n'
-        printf 'sendkey e\n'
-        printf 'sendkey r\n'
-        printf 'sendkey s\n'
-        printf 'sendkey o\n'
-        printf 'sendkey slash\n'
-        printf 'sendkey e\n'
-        printf 'sendkey l\n'
-        printf 'sendkey k\n'
-        printf 'sendkey s\n'
-        printf 'sendkey slash\n'
-        printf 'sendkey b\n'
-        printf 'sendkey i\n'
-        printf 'sendkey n\n'
-        printf 'sendkey slash\n'
-        printf 'sendkey s\n'
-        printf 'sendkey h\n'
-        printf 'sendkey ret\n'
-    } | socat - UNIX-CONNECT:"$mon_path" >/dev/null 2>&1 || true
-
-    sleep 2
-
-    {
-        printf 'sendkey l\n'
-        printf 'sendkey s\n'
-        printf 'sendkey ret\n'
-    } | socat - UNIX-CONNECT:"$mon_path" >/dev/null 2>&1 || true
-
-    sleep 2
-    printf 'quit\n' | socat - UNIX-CONNECT:"$mon_path" >/dev/null 2>&1 || true
-
-    wait $qemu_pid >/dev/null 2>&1 || true
-    trap - EXIT INT TERM
-
-    for pattern in "# " "/perso/elks/bin/sh" "ELKS: loading /perso/elks/bin/sh" "bin" "dev" "perso"; do
-        if ! rg -q --fixed-strings "$pattern" "$log_path"; then
-            printf 'FAIL %s: missing "%s"\n' "$case_name" "$pattern" >&2
-            tail -n 160 "$log_path" >&2 || true
-            exit 1
-        fi
-    done
-
-    printf 'PASS %s\n' "$case_name"
+    run_init_case native_sh_elks_sh /bin/native_linux_sh_elks_sh \
+        "ELKS: loading /perso/elks/bin/sh" \
+        "bin         dev         lost+found  perso       proc        sys"
 fi

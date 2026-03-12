@@ -70,7 +70,7 @@ typedef int32_t elks_time_t;
 #define sys_open   stub_sys_open
 #define sys_close  stub_sys_close
 #define kern_open  stub_kern_open
-#define sys_waitpid stub_sys_waitpid
+#define kern_waitpid stub_kern_waitpid
 #define sys_creat  stub_sys_creat
 #define sys_link   stub_sys_link
 #define sys_unlink stub_sys_unlink
@@ -140,7 +140,16 @@ int stub_kern_open(const char *a, int b, int c) {
     last_path_arg[sizeof(last_path_arg) - 1] = '\0';
     return stub_sys_open(a, b, c);
 }
-int stub_sys_waitpid(int a, int *b, int c) { last_name = "waitpid"; last_i0 = a; last_ptr = (uintptr_t)b; last_i1 = c; return 66; }
+int stub_kern_waitpid(int a, int *b, int c) {
+    last_name = "waitpid";
+    last_i0 = a;
+    last_ptr = (uintptr_t)b;
+    last_i1 = c;
+    if (b) {
+        *b = 0x1234;
+    }
+    return 66;
+}
 int stub_sys_creat(const char *a, int b) { (void)a; (void)b; return -1; }
 int stub_sys_link(const char *a, const char *b) {
     last_name = "link";
@@ -1073,7 +1082,7 @@ int main(void) {
 
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_waitpid];
     if (fn(12, 0x30, 7, 0, 0, 0, 0, 0) != 66 || strcmp(last_name, "waitpid") != 0 ||
-        last_i0 != 12 || last_ptr != ds_base + 0x30U || last_i1 != 7) {
+        last_i0 != 12 || last_i1 != 7 || *(uint16_t *)(void *)(ds_mem + 0x30) != 0x1234) {
         fprintf(stderr, "FAIL: ELKS waitpid wrapper wrong\n");
         return 1;
     }

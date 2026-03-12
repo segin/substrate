@@ -233,13 +233,18 @@ void isr_handler(registers_t *regs) {
                     current_thread->trap_addr = addr;
                 }
                 if (cmdline_debug_enabled("trap")) {
-                    char trapbuf[128];
+                    char trapbuf[256];
                     sprintf(trapbuf,
-                            "TRAP: user exception %u -> signal %d code %d addr 0x%08X\n",
+                            "TRAP: user exception %u -> signal %d code %d addr 0x%08X eip=0x%08X cs=0x%04X ss=0x%04X esp=0x%08X ds=0x%04X\n",
                             (unsigned int)regs->int_no,
                             sig,
                             code,
-                            (unsigned int)addr);
+                            (unsigned int)addr,
+                            (unsigned int)regs->eip,
+                            (unsigned int)regs->cs,
+                            (unsigned int)regs->ss,
+                            (unsigned int)regs->useresp,
+                            (unsigned int)regs->ds);
                     kprint(trapbuf);
                 }
                 trapsignal(current_process, sig, code);

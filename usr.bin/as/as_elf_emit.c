@@ -1434,6 +1434,13 @@ static int normalize_x86_mnemonic(const char *src, char *dst, size_t dst_sz, cha
         memcpy(dst, "lret", sizeof("lret"));
         return 0;
     }
+    if (strcmp(dst, "jcxz") == 0) {
+        if (dst_sz < sizeof("jecxz")) {
+            return -1;
+        }
+        memcpy(dst, "jecxz", sizeof("jecxz"));
+        return 0;
+    }
     if (strncmp(dst, "cvtsi2sd", 8) == 0 && n == 9 &&
         (dst[8] == 'q' || dst[8] == 'l' || dst[8] == 'w')) {
         dst[8] = '\0';

@@ -67,6 +67,7 @@ cmp "$TMP/roundtrip_a.text" "$TMP/roundtrip_b.text"
 # 8b.5: GNU ld <-> Substrate as compatibility in both directions.
 "$ROOT/tests/usr.bin/as/test_gnu_compat_surface.sh"
 "$ROOT/tests/usr.bin/as/test_intel_dual_syntax.sh"
+"$ROOT/tests/usr.bin/as/test_i8086_corpus.sh"
 "$ROOT/tests/usr.bin/as/test_x86_32_corpus_intel_roundtrip.sh"
 "$ROOT/tests/usr.bin/as/test_x86_64_corpus_intel_roundtrip.sh"
 "$ROOT/tests/usr.bin/as/test_output_binary.sh"

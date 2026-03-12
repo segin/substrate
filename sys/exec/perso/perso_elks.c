@@ -1447,7 +1447,8 @@ static int elks_sys_waitpid(uint32_t pid, uint32_t status_off, uint32_t options,
                             uint32_t unused3, uint32_t unused4, uint32_t unused5,
                             uint32_t unused6, uint32_t unused7) {
     uintptr_t linear = 0;
-    int *status_ptr = NULL;
+    int status = 0;
+    int ret;
 
     (void)unused3; (void)unused4; (void)unused5; (void)unused6; (void)unused7;
 
@@ -1455,9 +1456,16 @@ static int elks_sys_waitpid(uint32_t pid, uint32_t status_off, uint32_t options,
         if (elks_ds_pointer(status_off, &linear) != 0) {
             return -EFAULT;
         }
-        status_ptr = (int *)(uintptr_t)linear;
     }
-    return sys_waitpid((int)pid, status_ptr, (int)options);
+
+    ret = kern_waitpid((int)pid, status_off ? &status : NULL, (int)options);
+    if (ret < 0) {
+        return ret;
+    }
+    if (status_off != 0) {
+        *(uint16_t *)(uintptr_t)linear = (uint16_t)status;
+    }
+    return ret;
 }
 
 static int elks_sys_getpid(uint32_t ppid_off, uint32_t unused1, uint32_t unused2,
