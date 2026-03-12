@@ -67,6 +67,7 @@ typedef struct {
     unsigned scale;
     unsigned size_bits;
     int has_disp;
+    int force_disp32;
     int32_t disp;
     int disp_only;
 } as_x86_mem_t;

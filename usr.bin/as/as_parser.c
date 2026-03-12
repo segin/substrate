@@ -1740,8 +1740,13 @@ static int parse_operand_slice(parse_ctx_t *ctx, const as_token_t *tokv, size_t 
     if (has_lparen && parse_att_memory(ctx, tokv, n, op) == 0) {
         return 0;
     }
-    if (has_lbr && parse_intel_memory(ctx, tokv, n, op) == 0) {
-        return 0;
+    if (has_lbr) {
+        if (parse_intel_memory(ctx, tokv, n, op) == 0) {
+            return 0;
+        }
+        if (ctx != NULL && ctx->errbuf != NULL && ctx->errbuf[0] != '\0') {
+            return -1;
+        }
     }
     if (parse_intel_absolute_memory(ctx, tokv, n, op) == 0) {
         return 0;
@@ -2253,12 +2258,14 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                         }
                     } else {
                         if (parse_operand_slice(ctx, tokv + start, i - start, &op) != 0) {
-                            char *bad = join_tokens(tokv + start, i - start, 0);
-                            set_err(ctx, "%s:%u: invalid operand '%s'",
-                                    tokv[start].file != NULL ? tokv[start].file : "<input>",
-                                    tokv[start].line,
-                                    bad != NULL ? bad : "<unknown>");
-                            free(bad);
+                            if (ctx->errbuf == NULL || ctx->errbuf[0] == '\0') {
+                                char *bad = join_tokens(tokv + start, i - start, 0);
+                                set_err(ctx, "%s:%u: invalid operand '%s'",
+                                        tokv[start].file != NULL ? tokv[start].file : "<input>",
+                                        tokv[start].line,
+                                        bad != NULL ? bad : "<unknown>");
+                                free(bad);
+                            }
                             free(in.mnemonic);
                             free(in.arm_condition);
                             free(in.segment_override);
@@ -2274,12 +2281,14 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                     }
                 } else {
                     if (parse_operand_slice(ctx, tokv + start, i - start, &op) != 0) {
-                        char *bad = join_tokens(tokv + start, i - start, 0);
-                        set_err(ctx, "%s:%u: invalid operand '%s'",
-                                tokv[start].file != NULL ? tokv[start].file : "<input>",
-                                tokv[start].line,
-                                bad != NULL ? bad : "<unknown>");
-                        free(bad);
+                        if (ctx->errbuf == NULL || ctx->errbuf[0] == '\0') {
+                            char *bad = join_tokens(tokv + start, i - start, 0);
+                            set_err(ctx, "%s:%u: invalid operand '%s'",
+                                    tokv[start].file != NULL ? tokv[start].file : "<input>",
+                                    tokv[start].line,
+                                    bad != NULL ? bad : "<unknown>");
+                            free(bad);
+                        }
                         free(in.mnemonic);
                         free(in.arm_condition);
                         free(in.segment_override);
