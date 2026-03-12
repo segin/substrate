@@ -21,7 +21,7 @@ Reference: User Request (Step 31552)
         - Files: `docs/personality/elks_syscalls.md`, `sys/exec/perso/elks_syscall_table.h`
         - Tests: N/A (design doc)
         - Docs: `elks_syscalls.md`
-        - Acceptance: Complete mapping table documents direct, translated, partial, and unsupported ELKS syscall slots against Substrate kernel entry points.
+        - Acceptance: Complete mapping table documents the active upstream ELKS syscall slots, including direct, translated, partial, and unsupported mappings against Substrate kernel entry points.
     - [x] Define ELKS signal model and mapping to POSIX signals. (REQ: REQ-20-0004)
         - Files: `docs/personality/elks_spec.md`
         - Tests: N/A (design doc)
@@ -29,268 +29,268 @@ Reference: User Request (Step 31552)
     - [x] Define ELKS memory model (tiny/small/medium/compact/large). (REQ: REQ-20-0005)
         - Files: `docs/personality/elks_spec.md`
         - Tests: N/A (design doc)
-        - Acceptance: Each 16-bit memory model's segment layout, pointer-width expectations, and Substrate support target are documented.
+        - Acceptance: Each 16-bit memory model's segment layout, pointer-width expectations, and the current Substrate support target are documented.
 
-- [x] **Binary Format Recognition:** (REQ: REQ-20-0006)
-    - [x] Implement ELKS a.out binary format detection. (REQ: REQ-20-0007)
+- [ ] **Binary Format Recognition:** (REQ: REQ-20-0006)
+    - [ ] Implement ELKS a.out binary format detection. (REQ: REQ-20-0007)
         - Files: `sys/exec/formats/elks_aout.c`, `sys/exec/formats/elks_aout.h`
         - Tests: unit (magic number detection)
         - Docs: `elks_aout.4` manpage
-        - Acceptance: Correctly identify ELKS Minix-style type values `0x04100301`, `0x04200301`, and `0x04300301`, including supplemental-header variants.
-    - [x] Register ELKS loader with exec subsystem. (REQ: REQ-20-0008)
+        - Acceptance: Correctly identify ELKS Minix-style `a.out` headers with magic bytes `0x01 0x03`, CPU `A_I8086`, and compatible flag values (`0x10`, `0x20`, `0x30`), including supplemental-header variants.
+    - [ ] Register ELKS loader with exec subsystem. (REQ: REQ-20-0008)
         - Files: `sys/exec/exec.c`, `sys/exec/formats/elks_aout.c`
         - Tests: integration (exec ELKS binary triggers loader)
         - Acceptance: ELKS binaries dispatched to elks_load() function.
 
-- [x] **ELKS Exec Loader:** (REQ: REQ-20-0009)
-    - [x] Implement `elks_load()` function for ELKS binary loading. (REQ: REQ-20-0010)
+- [ ] **ELKS Exec Loader:** (REQ: REQ-20-0009)
+    - [ ] Implement `elks_load()` function for ELKS binary loading. (REQ: REQ-20-0010)
         - Files: `sys/exec/formats/elks_aout.c`
         - Tests: unit (load sample ELKS binary into memory)
         - Acceptance: Binary text/data/bss segments loaded correctly.
-    - [x] Allocate 16-bit LDT segments via LDT API for code/data/stack. (REQ: REQ-20-0011)
+    - [ ] Allocate 16-bit LDT segments via LDT API for code/data/stack. (REQ: REQ-20-0011)
         - Files: `sys/exec/formats/elks_aout.c`, `sys/arch/i386/ldt.c`
         - Tests: unit (verify LDT entries created)
         - Acceptance: Separate LDT entries for CS (code), DS (data), SS (stack), ES (extra).
-    - [x] Set up ELKS stack segment with correct base and limit. (REQ: REQ-20-0012)
+    - [ ] Set up ELKS stack segment with correct base and limit. (REQ: REQ-20-0012)
         - Files: `sys/exec/formats/elks_aout.c`, `sys/exec/formats/elks_aout.h`
         - Tests: unit (stack segment bounds)
         - Acceptance: Stack limit enforced by hardware; overflow triggers #SS exception.
-    - [x] Set up ELKS data segment with correct base and limit. (REQ: REQ-20-0013)
+    - [ ] Set up ELKS data segment with correct base and limit. (REQ: REQ-20-0013)
         - Files: `sys/exec/formats/elks_aout.c`, `sys/exec/formats/elks_aout.h`
         - Tests: unit (data segment bounds)
         - Acceptance: Data accesses beyond limit trigger #GP exception.
-    - [x] Route ELKS `INT 0x80` through the standard user-callable i386 syscall gate. (REQ: REQ-20-0014)
+    - [ ] Route ELKS `INT 0x80` through the standard user-callable i386 syscall gate. (REQ: REQ-20-0014)
         - Files: `sys/arch/i386/idt.c`, `sys/arch/i386/syscall.c`, `sys/arch/i386/syscall_abi.h`
         - Tests: unit (ELKS register ABI extraction)
         - Acceptance: `INT 0x80` from an LDT-backed 16-bit ELKS context reaches the kernel syscall handler using ELKS argument order `BX, CX, DX, DI, SI`.
-    - [x] Handle ELKS environment variables and argv setup. (REQ: REQ-20-0015)
+    - [ ] Handle ELKS environment variables and argv setup. (REQ: REQ-20-0015)
         - Files: `sys/exec/formats/elks_aout.c`, `sys/exec/formats/elks_aout.h`
         - Tests: unit (ELKS startup stack image)
         - Acceptance: ELKS startup stack contains correct `argc`, `argv`, and `envp` arrays as 16-bit offsets relative to `DS`.
-    - [x] Set process bitness to BITNESS_16 on ELKS exec. (REQ: REQ-20-0016)
+    - [ ] Set process bitness to BITNESS_16 on ELKS exec. (REQ: REQ-20-0016)
         - Files: `sys/exec/formats/elks_aout.c`, `sys/exec/formats/elks_aout.h`
         - Tests: unit (verify ELKS exec state helper)
         - Acceptance: ELKS exec applies `PERS_ELKS`, `BITNESS_16`, the initial `brk`, and the basename-derived process name before userspace handoff.
 
-- [x] **Runtime Support & Syscall Translation:** (REQ: REQ-20-0017)
-    - [x] Implement ELKS syscall dispatcher. (REQ: REQ-20-0018)
+- [ ] **Runtime Support & Syscall Translation:** (REQ: REQ-20-0017)
+    - [ ] Implement ELKS syscall dispatcher. (REQ: REQ-20-0018)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: unit (dispatch to correct handler)
         - Acceptance: ELKS syscall numbers map to ELKS wrapper handlers instead of raw native syscall entry points.
-    - [x] Implement ELKS sys_exit translation. (REQ: REQ-20-0019)
+    - [ ] Implement ELKS sys_exit translation. (REQ: REQ-20-0019)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: unit (ELKS wrapper dispatch)
         - Acceptance: Process exits cleanly with correct exit code.
-    - [x] Implement ELKS sys_read/sys_write translation. (REQ: REQ-20-0020)
+    - [ ] Implement ELKS sys_read/sys_write translation. (REQ: REQ-20-0020)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: unit (near-pointer translation into native read/write)
         - Acceptance: Console I/O works correctly.
-    - [x] Implement ELKS sys_open/sys_close translation. (REQ: REQ-20-0021)
+    - [ ] Implement ELKS sys_open/sys_close translation. (REQ: REQ-20-0021)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: unit (near-pointer translation into native open/close)
         - Acceptance: File operations work with VFS.
-    - [x] Implement ELKS sys_brk translation (16-bit heap). (REQ: REQ-20-0022)
+    - [ ] Implement ELKS sys_brk translation (16-bit heap). (REQ: REQ-20-0022)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: unit (heap expansion within segment)
         - Acceptance: `brk` accepts and returns a 16-bit data-segment offset and rejects requests beyond the ELKS data-segment limit.
-    - [x] Implement ELKS sys_fork translation. (REQ: REQ-20-0023)
+    - [ ] Implement ELKS sys_fork translation. (REQ: REQ-20-0023)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: integration (fork returns in both parent and child)
         - Acceptance: Child inherits LDT segments correctly.
-    - [x] Implement ELKS sys_execve translation. (REQ: REQ-20-0024)
+    - [ ] Implement ELKS sys_execve translation. (REQ: REQ-20-0024)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: integration (exec another ELKS binary)
         - Acceptance: LDT segments properly replaced on exec.
-    - [x] Implement ELKS sys_waitpid translation. (REQ: REQ-20-0025)
+    - [ ] Implement ELKS sys_waitpid translation. (REQ: REQ-20-0025)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: unit (ELKS status-pointer translation)
         - Acceptance: ELKS `waitpid` translates the optional status pointer from the data segment and passes the native wait options unchanged.
-    - [x] Implement ELKS signal syscalls (sys_signal, sys_kill). (REQ: REQ-20-0026)
+    - [ ] Implement ELKS signal syscalls (sys_signal, sys_kill). (REQ: REQ-20-0026)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: unit (signal-number and handler translation)
         - Acceptance: `kill` translates ELKS smallsig numbers into native kernel signals, and `signal` installs ELKS default/ignore/custom dispositions without exposing native pointer conventions.
-    - [x] Implement ELKS sys_uname translation. (REQ: REQ-20-0070)
+    - [ ] Implement ELKS sys_uname translation. (REQ: REQ-20-0070)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: unit (ELKS utsname structure translation)
         - Acceptance: `uname` populates the ELKS five-field `struct utsname` in the data segment, truncating native Substrate identity strings to ELKS field widths without overrunning the 16-bit caller buffer.
-    - [x] Implement ELKS sys_ustatfs translation. (REQ: REQ-20-0072)
+    - [ ] Implement ELKS sys_ustatfs translation. (REQ: REQ-20-0072)
         - Files: `sys/exec/perso/perso_elks.c`, `sys/sys/mount.h`
         - Tests: unit (mount-list to ELKS statfs translation)
         - Acceptance: `ustatfs` accepts mounted-filesystem indices, returns ELKS filesystem-type numbers, and copies an ELKS-width `struct statfs` containing mount-point metadata without exposing native kernel structure layouts.
-    - [x] Return ENOSYS for unsupported ELKS syscalls with kernel log. (REQ: REQ-20-0027)
+    - [ ] Return ENOSYS for unsupported ELKS syscalls with kernel log. (REQ: REQ-20-0027)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: unit (verify ENOSYS return)
         - Acceptance: Unsupported syscalls return -ENOSYS without crashing.
-    - [x] Implement 16:16 far pointer to linear address conversion. (REQ: REQ-20-0028)
+    - [ ] Implement 16:16 far pointer to linear address conversion. (REQ: REQ-20-0028)
         - Files: `sys/include/sys/ldt.h`, `sys/arch/i386/idt.c`
         - Tests: unit (segment:offset to linear)
         - Acceptance: `LDT[seg].base + offset` is validated and computed correctly, with out-of-bounds offsets rejected.
 
-- [x] **Resource Isolation & Signal Handling:** (REQ: REQ-20-0029)
-    - [x] Ensure ELKS processes have isolated LDT (not shared with other processes). (REQ: REQ-20-0030)
+- [ ] **Resource Isolation & Signal Handling:** (REQ: REQ-20-0029)
+    - [ ] Ensure ELKS processes have isolated LDT (not shared with other processes). (REQ: REQ-20-0030)
         - Files: `sys/arch/i386/ldt.c`, `sys/pm/process.c`
         - Tests: unit (verify LDT per-process)
         - Acceptance: Each ELKS process gets private LDT.
-    - [x] Implement signal delivery for 16-bit context. (REQ: REQ-20-0031)
+    - [ ] Implement signal delivery for 16-bit context. (REQ: REQ-20-0031)
         - Files: `sys/exec/perso/perso_elks.c`
         - Tests: unit (ELKS far-call signal frame)
         - Acceptance: Signal delivery rewrites the saved 16-bit `CS:IP`, pushes an ELKS-compatible far-return frame on the ELKS stack, and enters the installed callback handler in ring-3 16-bit context.
-    - [x] Implement ELKS signal return semantics without a dedicated sigreturn syscall. (REQ: REQ-20-0032)
+    - [ ] Implement ELKS signal return semantics without a dedicated sigreturn syscall. (REQ: REQ-20-0032)
         - Files: `sys/exec/perso/perso_elks.c`, `docs/personality/elks_spec.md`
         - Tests: unit (ELKS far-call signal frame)
         - Acceptance: The kernel-built ELKS signal frame lets `_signal_cbhandler` return with `lret $2` to the interrupted `CS:IP`; no separate ELKS-visible `sigreturn` syscall is required.
-    - [x] Implement ELKS core-dump policy capture. (REQ: REQ-20-0033)
+    - [ ] Implement ELKS core-dump policy capture. (REQ: REQ-20-0033)
         - Files: `sys/kern/core.c`, `sys/exec/perso/perso_elks.c`
         - Tests: integration (SIGSEGV generates core)
         - Docs: `core.5` manpage update
         - Acceptance: `sigexit()` invokes the kernel core-dump hook for ELKS processes, and the captured crash record preserves 16-bit register state plus ELKS LDT segment descriptors; persistent core-file emission remains future writer work.
 
-- [x] **Safety & Cleanup (LDT Lifecycle):** (REQ: REQ-20-0034)
-    - [x] Implement LDT cleanup on the process exit-to-reap path. (REQ: REQ-20-0035)
+- [ ] **Safety & Cleanup (LDT Lifecycle):** (REQ: REQ-20-0034)
+    - [ ] Implement LDT cleanup on the process exit-to-reap path. (REQ: REQ-20-0035)
         - Files: `sys/arch/i386/ldt.c`, `sys/pm/process.c`
         - Tests: unit (no leaked LDT entries after exit/reap)
         - Acceptance: All LDT entries freed when an ELKS process completes the exit/reap lifecycle.
-    - [x] Implement LDT duplication on fork. (REQ: REQ-20-0036)
+    - [ ] Implement LDT duplication on fork. (REQ: REQ-20-0036)
         - Files: `sys/arch/i386/ldt.c`, `sys/pm/fork.c`
         - Tests: unit (child gets copy of LDT)
         - Acceptance: Child LDT is independent copy of parent LDT.
-    - [x] Implement LDT replacement on exec. (REQ: REQ-20-0037)
+    - [ ] Implement LDT replacement on exec. (REQ: REQ-20-0037)
         - Files: `sys/arch/i386/ldt.c`, `sys/fs/exec/exec.c`
         - Tests: unit (old LDT freed, new LDT installed)
         - Acceptance: exec clears old LDT and installs new one.
-    - [x] Add LDT entry validation to prevent privilege escalation. (REQ: REQ-20-0038)
+    - [ ] Add LDT entry validation to prevent privilege escalation. (REQ: REQ-20-0038)
         - Files: `sys/arch/i386/ldt.c`
         - Tests: fuzz (malformed LDT entries)
         - Acceptance: DPL must be 3; conforming code segments rejected; call gates rejected.
-    - [x] Implement LDT activation during ELKS-related process context switch. (REQ: REQ-20-0039)
+    - [ ] Implement LDT activation during ELKS-related process context switch. (REQ: REQ-20-0039)
         - Files: `sys/arch/i386/switch.S`, `sys/arch/i386/sched.c`
         - Tests: unit (LLDT loaded correctly)
         - Acceptance: LDTR loaded with correct selector on context switch.
-    - [x] Add kernel log warnings for suspicious LDT usage patterns. (REQ: REQ-20-0040)
+    - [ ] Add kernel log warnings for suspicious LDT usage patterns. (REQ: REQ-20-0040)
         - Files: `sys/arch/i386/ldt.c`
         - Tests: unit (warning logged)
         - Acceptance: Unusual patterns (many allocations, odd limits) logged.
 
-- [x] **Testing & Validation:** (REQ: REQ-20-0041)
-    - [x] Create ELKS hello world test binary. (REQ: REQ-20-0042)
+- [ ] **Testing & Validation:** (REQ: REQ-20-0041)
+    - [ ] Create ELKS hello world test binary. (REQ: REQ-20-0042)
         - Files: `tests/elks/hello.S`, `tests/elks/Makefile`, `tests/elks/mkelks.py`
         - Tests: emulation (run in QEMU, verify output)
         - Acceptance: "Hello, ELKS!" printed to console.
-    - [x] Create ELKS sleep test binary. (REQ: REQ-20-0043)
+    - [ ] Create ELKS sleep test binary. (REQ: REQ-20-0043)
         - Files: `tests/elks/sleep.S`, `tests/elks/Makefile`
         - Tests: emulation (run in QEMU, verify delay)
         - Acceptance: Process sleeps for specified duration.
-    - [x] Create ELKS file I/O test binary. (REQ: REQ-20-0044)
+    - [ ] Create ELKS file I/O test binary. (REQ: REQ-20-0044)
         - Files: `tests/elks/fileio.S`, `tests/elks/Makefile`
         - Tests: emulation (run in QEMU, verify file created)
         - Acceptance: File created, written, read, and deleted correctly.
-    - [x] Create ELKS fork test binary. (REQ: REQ-20-0045)
+    - [ ] Create ELKS fork test binary. (REQ: REQ-20-0045)
         - Files: `tests/elks/fork.S`, `tests/elks/Makefile`
         - Tests: emulation (run in QEMU)
         - Acceptance: Parent and child both print distinct messages.
-    - [x] Create automated test harness for ELKS binaries. (REQ: REQ-20-0046)
+    - [ ] Create automated test harness for ELKS binaries. (REQ: REQ-20-0046)
         - Files: `tests/elks/run_tests.sh`
         - Tests: CI integration
         - Acceptance: All ELKS tests pass in automated pipeline.
-    - [x] Add ELKS syscall fuzzing tests. (REQ: REQ-20-0047)
+    - [ ] Add ELKS syscall fuzzing tests. (REQ: REQ-20-0047)
         - Files: `tests/elks/fuzz_syscalls.S`
         - Tests: fuzz/emulation (`tests/elks/run_tests.sh fuzz_syscalls_elks`)
         - Acceptance: No kernel panics; unsupported syscall numbers and invalid syscall arguments return errors while the ELKS process reaches the `ELKS fuzz done` completion marker.
-    - [x] Add ELKS user-memory bounds fault tests. (REQ: REQ-20-0048)
+    - [ ] Add ELKS user-memory bounds fault tests. (REQ: REQ-20-0048)
         - Files: `tests/elks/bounds_test.S`
         - Tests: unit (access beyond segment limit)
         - Acceptance: Out-of-range ELKS user-memory access traps and tears the process down cleanly without a kernel panic; the current i386 path manifests as a user fault reported by the kernel trap path.
 
-- [x] **Upstream ELKS Userland & Build Scripts:** (REQ: REQ-20-0049)
-    - [x] Add ELKS cross-compiler toolchain setup script. (REQ: REQ-20-0050)
+- [ ] **Upstream ELKS Userland & Build Scripts:** (REQ: REQ-20-0049)
+    - [ ] Add ELKS cross-compiler toolchain setup script. (REQ: REQ-20-0050)
         - Files: `tools/elks/setup_toolchain.sh`
         - Tests: shell syntax (`sh -n tools/elks/setup_toolchain.sh`)
         - Docs: `tools/elks/README.md`
         - Acceptance: Script bootstraps the pinned `ia16-elf` binutils/GCC toolchain used by the ELKS smoke binaries and documents the install prefix plus host prerequisites.
-    - [x] Add upstream ELKS shell prompt smoke. (REQ: REQ-20-0051)
+    - [ ] Add upstream ELKS shell prompt smoke. (REQ: REQ-20-0051)
         - Files: `tests/elks/run_tests.sh`
         - Tests: emulation (`tests/elks/run_tests.sh upstream_sh_prompt_elks`)
         - Acceptance: QEMU booting `init=/perso/elks/bin/sh` reaches the upstream ELKS `# ` prompt on the staged root image without a kernel fault.
-    - [x] Add upstream ELKS shell command-exec smoke. (REQ: REQ-20-0068)
+    - [ ] Add upstream ELKS shell command-exec smoke. (REQ: REQ-20-0068)
         - Files: `tests/elks/run_tests.sh`, `sys/arch/i386/pmm.c`, `sys/vm/phys_mem.c`
         - Tests: emulation (`tests/elks/run_tests.sh upstream_sh_ls_elks`)
         - Acceptance: QEMU booting `init=/perso/elks/bin/sh`, then typing `ls`, prints the root listing and returns to a live shell without a kernel panic during `execve()` teardown.
-    - [x] Add native-shell to ELKS-shell handoff smoke. (REQ: REQ-20-0069)
+    - [ ] Add native-shell to ELKS-shell handoff smoke. (REQ: REQ-20-0069)
         - Files: `tests/elks/run_tests.sh`, `tests/elks/native_linux_sh_elks_sh.c`
         - Tests: emulation (`tests/elks/run_tests.sh native_sh_elks_sh`)
         - Acceptance: A native helper `execve()`s BusyBox `sh`, which in turn executes `/perso/elks/bin/sh /elks_inner.sh`; the scripted ELKS shell runs `ls`, prints the root listing, and exits without a kernel panic across the native-to-ELKS personality handoff.
-    - [x] Add sample ELKS cat utility. (REQ: REQ-20-0052)
+    - [ ] Add sample ELKS cat utility. (REQ: REQ-20-0052)
         - Files: `tests/elks/cat.c`, `tests/elks/Makefile`, `tests/elks/run_tests.sh`
         - Tests: emulation (`tests/elks/run_tests.sh cat_elks`)
         - Acceptance: File contents displayed correctly from a staged file on a disposable ELKS smoke image.
-    - [x] Add upstream ELKS ls smoke. (REQ: REQ-20-0053)
+    - [ ] Add upstream ELKS ls smoke. (REQ: REQ-20-0053)
         - Files: `tests/elks/run_tests.sh`
         - Tests: emulation (`tests/elks/run_tests.sh upstream_ls_elks`)
         - Acceptance: QEMU booting `init=/perso/elks/bin/ls` prints the root directory listing from `/perso/elks` system image content on the staged root image.
-    - [x] Add upstream ELKS uname smoke. (REQ: REQ-20-0071)
+    - [ ] Add upstream ELKS uname smoke. (REQ: REQ-20-0071)
         - Files: `tests/elks/run_tests.sh`, `sys/exec/perso/perso_elks.c`
         - Tests: emulation (`tests/elks/run_tests.sh upstream_uname_elks`)
         - Acceptance: QEMU booting `init=/perso/elks/bin/uname` prints the ELKS-width `uname` system name derived from the native Substrate identity without a kernel fault.
-    - [x] Add upstream ELKS df smoke. (REQ: REQ-20-0073)
+    - [ ] Add upstream ELKS df smoke. (REQ: REQ-20-0073)
         - Files: `tests/elks/run_tests.sh`, `sys/exec/perso/perso_elks.c`
         - Tests: emulation (`tests/elks/run_tests.sh upstream_df_elks`)
         - Acceptance: QEMU booting `init=/perso/elks/bin/df` enumerates mounted filesystems through `ustatfs`, prints the mount table, and exits without `ENOSYS` or a kernel fault; block-device names may remain blank until ELKS-specific `/dev` aliases are provided.
-    - [x] Add upstream ELKS ps smoke. (REQ: REQ-20-0067)
+    - [ ] Add upstream ELKS ps smoke. (REQ: REQ-20-0067)
         - Files: `tests/elks/run_tests.sh`, `sys/exec/perso/perso_elks.c`
         - Tests: emulation (`tests/elks/run_tests.sh upstream_ps_elks`)
         - Acceptance: QEMU booting `init=/perso/elks/bin/ps` prints a coherent process table including the ELKS `ps` process and `kinit`, using the synthetic `/dev/kmem` compatibility surface without a kernel fault.
-    - [x] Add upstream ELKS meminfo smoke. (REQ: REQ-20-0074)
+    - [ ] Add upstream ELKS meminfo smoke. (REQ: REQ-20-0074)
         - Files: `tests/elks/run_tests.sh`, `sys/exec/perso/perso_elks.c`
         - Tests: emulation (`tests/elks/run_tests.sh upstream_meminfo_elks`)
         - Acceptance: QEMU booting `init=/perso/elks/bin/meminfo` traverses the synthetic ELKS `/dev/kmem` task, heap, and segment views, prints heap plus memory-usage summaries, and exits without `EINVAL` or a kernel fault.
-    - [x] Add ELKS binary build Makefile. (REQ: REQ-20-0054)
+    - [ ] Add ELKS binary build Makefile. (REQ: REQ-20-0054)
         - Files: `tests/elks/Makefile`
         - Tests: N/A (build script)
         - Acceptance: `make -C tests/elks` builds all current in-tree ELKS test binaries and the Makefile supports both assembly and C ELKS test sources.
 
-- [x] **Documentation:** (REQ: REQ-20-0055)
-    - [x] Create personality_elks(7) developer guide. (REQ: REQ-20-0056)
+- [ ] **Documentation:** (REQ: REQ-20-0055)
+    - [ ] Create personality_elks(7) developer guide. (REQ: REQ-20-0056)
         - Files: `usr.man/man7/personality_elks.7`
         - Tests: N/A (documentation)
         - Docs: `personality_elks.7`
         - Acceptance: Covers architecture, limitations, and usage.
-    - [x] Create elks_compat(4) compatibility notes. (REQ: REQ-20-0057)
+    - [ ] Create elks_compat(4) compatibility notes. (REQ: REQ-20-0057)
         - Files: `usr.man/man4/elks_compat.4`
         - Tests: N/A (documentation)
         - Docs: `elks_compat.4`
         - Acceptance: Documents known limitations and unsupported features.
-    - [x] Add ELKS personality to ARCHITECTURE.md. (REQ: REQ-20-0058)
+    - [ ] Add ELKS personality to ARCHITECTURE.md. (REQ: REQ-20-0058)
         - Files: `ARCHITECTURE.md`
         - Tests: N/A (documentation)
         - Acceptance: ELKS personality architecture documented.
-    - [x] Add ELKS syscall reference table. (REQ: REQ-20-0059)
+    - [ ] Add ELKS syscall reference table. (REQ: REQ-20-0059)
         - Files: `docs/personality/elks_syscall_ref.md`
         - Tests: N/A (documentation)
         - Acceptance: All syscalls listed with support status.
-    - [x] Document LDT API usage for personality developers. (REQ: REQ-20-0060)
+    - [ ] Document LDT API usage for personality developers. (REQ: REQ-20-0060)
         - Files: `docs/kernel/ldt_api.md`
         - Tests: N/A (documentation)
         - Acceptance: API documented with examples.
 
-- [x] **Quality Audit & Refactoring:** (REQ: REQ-20-0061)
+- [ ] **Quality Audit & Refactoring:** (REQ: REQ-20-0061)
         - Acceptance: All allocated resources freed on error.
-    - [x] Audit elks_aout.c for unchecked file read errors. (REQ: REQ-20-0062)
+    - [ ] Audit elks_aout.c for unchecked file read errors. (REQ: REQ-20-0062)
         - Files: `sys/exec/formats/elks_aout.c`
         - Tests: fuzz (truncated binary files)
         - Acceptance: Truncated ELKS headers and segment reads are rejected with `ENOEXEC`, while hard read failures continue to surface as I/O errors.
-    - [x] Audit ldt.c for race conditions in multi-threaded allocation. (REQ: REQ-20-0063)
+    - [ ] Audit ldt.c for race conditions in multi-threaded allocation. (REQ: REQ-20-0063)
         - Files: `sys/arch/i386/ldt.c`
         - Tests: host stress (`tests/sys/host_test_ldt_race.c`)
         - Acceptance: Concurrent LDT allocation, clone, readback, activation, and free/replace paths preserve coherent pointer/count state without descriptor overruns or allocator corruption.
-    - [x] Refactor LDT allocation to use UMA zone for efficiency. (REQ: REQ-20-0064)
+    - [ ] Refactor LDT allocation to use UMA zone for efficiency. (REQ: REQ-20-0064)
         - Files: `sys/arch/i386/ldt.c`
         - Tests: unit/regression (`tests/sys/host_test_ldt_lifecycle.c`, `tests/sys/host_test_ldt_race.c`)
         - Acceptance: Canonical full-size LDT tables allocate from a dedicated UMA zone, while noncanonical short-lived sizes retain a safe fallback path without changing the external LDT API.
-    - [x] Add static analysis annotations to ELKS personality code. (REQ: REQ-20-0065)
+    - [ ] Add static analysis annotations to ELKS personality code. (REQ: REQ-20-0065)
         - Files: `sys/include/sys/compiler.h`, `sys/exec/perso/perso_elks.c`, `sys/exec/formats/elks_aout.c`
         - Tests: build/host regression (`make -C sys/exec/perso perso_elks.o`, `make -C sys/exec/formats elks_aout.o`, `tests/sys/host_test_perso_elks`, `tests/sys/host_test_elks_aout`)
         - Acceptance: ELKS pointer and must-check helper contracts are expressed through shared compiler annotations that compile cleanly and remain covered by existing ELKS host regression tests.
-    - [x] **Refactor Console and UART Subsystems** (REQ: REQ-20-0066)
+    - [ ] **Refactor Console and UART Subsystems** (REQ: REQ-20-0066)
         - Note: The refactor is already present in-tree; this checklist entry was stale.
         - Files: `sys/drivers/console/ansi_handler.c`, `sys/drivers/console/console.c`, `sys/drivers/console/tty.c`, `sys/drivers/console/uart/*`, `sys/kern/console.h`, `sys/include/kern/ansi_handler.h`
         - Goal: Keep console/tty code under `sys/drivers/console/` and UART under `sys/drivers/console/uart/`, with compatibility shims only where callers still include the old path.
