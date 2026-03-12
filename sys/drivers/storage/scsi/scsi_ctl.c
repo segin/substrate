@@ -189,15 +189,14 @@ static int scsi_create_generic_node(scsi_device_t *dev) {
     
     sg->dev = dev;
     
-    /* Name format: B:T:L */
-    snprintf(sg->node.name, sizeof(sg->node.name), "%d:%d:%d",
+    /* Name format: storage/scsi/B:T:L */
+    snprintf(sg->node.name, sizeof(sg->node.name), "storage/scsi/%d:%d:%d",
              dev->bus, dev->target, dev->lun);
     
     sg->node.flags = FS_CHARDEVICE;
     sg->node.impl = (uint32_t)(uintptr_t)sg;
     sg->node.ioctl = sg_ioctl;
     
-    /* Register - path would be /dev/storage/scsi/B:T:L */
     devfs_register_device(&sg->node);
     
     sg->next = sg_list;
@@ -268,7 +267,7 @@ int scsi_create_bus_node(scsi_link_t *link, uint8_t bus_id) {
     
     bn->link = link;
     bn->bus_id = bus_id;
-    snprintf(bn->node.name, sizeof(bn->node.name), "%d", bus_id);
+    snprintf(bn->node.name, sizeof(bn->node.name), "storage/scsi/%d", bus_id);
     bn->node.flags = FS_CHARDEVICE;
     bn->node.impl = (uint32_t)(uintptr_t)bn;
     bn->node.ioctl = bus_ioctl;
