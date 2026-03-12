@@ -44,6 +44,10 @@ struct vm86_monitor {
 static struct vm86_monitor *current_vm86_monitor;
 static uint8_t vm86_port_space[65536];
 
+enum {
+    VM86_ENTRY_EFLAGS = 0x20200U
+};
+
 #ifdef HOST_TEST
 static uint8_t *vm86_test_memory;
 static size_t vm86_test_memory_size;
@@ -65,6 +69,10 @@ static uint8_t *vm86_linear_ptr(uint32_t linear, size_t size) {
     (void)size;
     return (uint8_t *)(uintptr_t)linear;
 #endif
+}
+
+static void vm86_prepare_entry(struct vm86_struct *info) {
+    info->regs.eflags |= VM86_ENTRY_EFLAGS;
 }
 
 /*
@@ -120,6 +128,8 @@ int sys_vm86(struct vm86_struct *info) {
     if (copyin(info, &k_info, sizeof(k_info)) != 0) {
         return -EFAULT;
     }
+
+    vm86_prepare_entry(&k_info);
     
     /* Call assembly helper to build stack frame and execute IRET */
     vm86_enter(&k_info);
@@ -422,6 +432,7 @@ int vm86_bios_call(int int_no, struct vm86_regs *regs) {
     struct vm86_struct info;
     memset(&info, 0, sizeof(info));
     if (regs) info.regs = *regs;
+    vm86_prepare_entry(&info);
     
     /* Setup Stack at 0x7C00 (safest area usually) or 0x1000 */
     /* We need to put our stub code somewhere too. 0x8000? */

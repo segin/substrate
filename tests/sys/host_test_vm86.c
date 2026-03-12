@@ -92,7 +92,7 @@ static void test_sys_vm86_copies_input(void) {
     assert(vm86_enter_called == 1);
     assert(entered_vm86.regs.eip == info.regs.eip);
     assert(entered_vm86.regs.cs == info.regs.cs);
-    assert(entered_vm86.regs.eflags == info.regs.eflags);
+    assert(entered_vm86.regs.eflags == (info.regs.eflags | 0x20200U));
 }
 
 static void test_vm86_init_bsd_copies_args(void) {
@@ -111,6 +111,7 @@ static void test_vm86_init_bsd_copies_args(void) {
     assert(vm86_enter_called == 1);
     assert(entered_vm86.regs.eip == 0x7788);
     assert(entered_vm86.regs.cs == 0x1234);
+    assert((entered_vm86.regs.eflags & 0x20200U) == 0x20200U);
 }
 
 static void test_int_emulation(void) {

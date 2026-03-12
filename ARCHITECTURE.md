@@ -138,6 +138,11 @@ i386 legacy-execution support includes a bounded VM86 path:
 - the per-CPU TSS I/O bitmap is initialized deny-all and can be opened per-port or per-range through the exported TSS bitmap helpers
 - the detailed contract is defined in `docs/specs/arch_i386_vm86.md`
 
+i386 exception diagnostics are explicit and stable:
+- exception reporting emits the exception name plus saved general-register state before escalation
+- invalid-opcode faults dump up to 16 instruction bytes at `EIP` when the address is safe to read
+- the panic path emits a fixed high-visibility `*** KERNEL PANIC ***` banner, the fatal message, a stack trace, and a halt footer
+
 ### 5.2 i386 TLB Strategy
 
 TLB management on i386 follows a tiered strategy:

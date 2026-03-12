@@ -67,6 +67,17 @@ static const char *exception_messages[] = {
     "Reserved", "Reserved", "Security Exception", "Reserved"
 };
 
+static uint32_t idt_read_cr2(void) {
+#ifdef HOST_TEST
+    extern uint32_t idt_host_cr2;
+    return idt_host_cr2;
+#else
+    uint32_t cr2;
+    __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
+    return cr2;
+#endif
+}
+
 static void pic_remap(void) {
     /*
      * Reprogram the legacy 8259 PIC so hardware IRQs land at 32..47 instead
@@ -215,7 +226,7 @@ void isr_handler(registers_t *regs) {
 
         uint32_t cr2 = 0;
         if (regs->int_no == 14) {
-            __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
+            cr2 = idt_read_cr2();
             // COW and lazy fault handling are expected for normal process execution.
             if (pmap_fault(regs->err_code, cr2)) {
                 return;
