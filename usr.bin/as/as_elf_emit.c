@@ -2704,6 +2704,38 @@ static int emit_i386_maskmov(unsigned char prefix, int use_xmm, const as_operand
     return emit_i386_prefixed_0f_rm(prefix, 0xf7, xr, mask, out, out_cap, out_len);
 }
 
+static int emit_i386_movnt_store(unsigned char prefix, int use_xmm, int intel_syntax,
+                                 const as_instruction_t *insn, unsigned char *out,
+                                 size_t out_cap, size_t *out_len) {
+    const as_operand_t *src_op;
+    const as_operand_t *dst_op;
+    unsigned xr;
+
+    if (insn == NULL || out == NULL || out_len == NULL || insn->operand_count != 2) {
+        return -1;
+    }
+    if (intel_syntax) {
+        dst_op = &insn->operands[0];
+        src_op = &insn->operands[1];
+    } else {
+        src_op = &insn->operands[0];
+        dst_op = &insn->operands[1];
+    }
+    if (dst_op->kind == AS_OPERAND_REGISTER || src_op->kind != AS_OPERAND_REGISTER) {
+        return -1;
+    }
+    if (use_xmm) {
+        if (parse_xmm_reg(src_op->u.reg, &xr) != 0) {
+            return -1;
+        }
+    } else {
+        if (parse_mmx_reg(src_op->u.reg, &xr) != 0) {
+            return -1;
+        }
+    }
+    return emit_i386_prefixed_0f_rm(prefix, 0xe7, xr, dst_op, out, out_cap, out_len);
+}
+
 static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
                              unsigned char *out, size_t out_cap, size_t *out_len) {
     const as_operand_t *a;
@@ -4251,23 +4283,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return emit_i386_prefixed_0f_rm(prefix, 0xd7, (unsigned)gr & 7u, src_op, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movntq") == 0) {
-        const as_operand_t *src_op;
-        const as_operand_t *dst_op;
-
-        if (insn->operand_count != 2) {
-            return -1;
-        }
-        if (intel_syntax) {
-            dst_op = &insn->operands[0];
-            src_op = &insn->operands[1];
-        } else {
-            src_op = &insn->operands[0];
-            dst_op = &insn->operands[1];
-        }
-        if (src_op->kind != AS_OPERAND_REGISTER || parse_mmx_reg(src_op->u.reg, &xr) != 0) {
-            return -1;
-        }
-        return emit_i386_prefixed_0f_rm(0x00, 0xe7, xr, dst_op, out, out_cap, out_len);
+        return emit_i386_movnt_store(0x00, 0, intel_syntax, insn, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movdq2q") == 0) {
         if (insn->operand_count != 2) {
@@ -4282,24 +4298,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return emit_i386_prefixed_xmm_srcdst_rm(0xf2, 0xe6, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movntdq") == 0) {
-        const as_operand_t *src_op;
-        const as_operand_t *dst_op;
-
-        if (insn->operand_count != 2) {
-            return -1;
-        }
-        if (intel_syntax) {
-            dst_op = &insn->operands[0];
-            src_op = &insn->operands[1];
-        } else {
-            src_op = &insn->operands[0];
-            dst_op = &insn->operands[1];
-        }
-        if (dst_op->kind == AS_OPERAND_REGISTER || src_op->kind != AS_OPERAND_REGISTER ||
-            parse_xmm_reg(src_op->u.reg, &xr) != 0) {
-            return -1;
-        }
-        return emit_i386_prefixed_0f_rm(0x66, 0xe7, xr, dst_op, out, out_cap, out_len);
+        return emit_i386_movnt_store(0x66, 1, intel_syntax, insn, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "maskmovq") == 0) {
         if (insn->operand_count != 2) {
