@@ -3367,40 +3367,6 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return -1;
     }
-    if (strcmp(mnbuf, "movups") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        if (dst->kind == AS_OPERAND_REGISTER && parse_xmm_reg(dst->u.reg, &xr) == 0) {
-            if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
-                return -1;
-            }
-            return emit_i386_legacy_simd_rm(0x00, 0x10, xr, src, out, out_cap, out_len);
-        }
-        if (src->kind == AS_OPERAND_REGISTER &&
-            (dst->kind == AS_OPERAND_MEMORY || dst->kind == AS_OPERAND_IMMEDIATE || dst->kind == AS_OPERAND_LABEL_REF) &&
-            parse_xmm_reg(src->u.reg, &xr) == 0) {
-            return emit_i386_prefixed_0f_rm(0x00, 0x11, xr, dst, out, out_cap, out_len);
-        }
-        return -1;
-    }
-    if (strcmp(mnbuf, "movaps") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
-            return -1;
-        }
-        if (dst->kind == AS_OPERAND_REGISTER && parse_xmm_reg(dst->u.reg, &xr) == 0) {
-            if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
-                return -1;
-            }
-            return emit_i386_legacy_simd_rm(0x00, 0x28, xr, src, out, out_cap, out_len);
-        }
-        if (src->kind == AS_OPERAND_REGISTER &&
-            (dst->kind == AS_OPERAND_MEMORY || dst->kind == AS_OPERAND_IMMEDIATE || dst->kind == AS_OPERAND_LABEL_REF) &&
-            parse_xmm_reg(src->u.reg, &xr) == 0) {
-            return emit_i386_prefixed_0f_rm(0x00, 0x29, xr, dst, out, out_cap, out_len);
-        }
-        return -1;
-    }
     if (strcmp(mnbuf, "cvtsi2sd") == 0) {
         as_x86_reg_t gr;
         if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
