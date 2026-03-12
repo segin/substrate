@@ -205,7 +205,7 @@
             - [x] `scsi_dev_detach(scsi_dev)`: unregister block device, remove from list. (REQ: REQ-03-0156)
             - [x] `scsi_dev_lookup(name)`: find block device by name (e.g., `"scsi0"`). (REQ: REQ-03-0157)
             - [x] `scsi_dev_init()`: initialize unified device subsystem. (REQ: REQ-03-0158)
-            - [ ] `scsi_auto_attach(dev)`: called on discovery — create generic node + block device. (REQ: REQ-03-0159)
+            - [x] `scsi_auto_attach(dev)`: called on discovery — create generic node + block device. (REQ: REQ-03-0159)
 
     - [ ] **Controller Interface (`scsi_ctl.c`):** (REQ: REQ-03-0160)
 

@@ -45,8 +45,12 @@ int scsi_execute_sync(scsi_device_t *dev, uint8_t *cdb, uint8_t cdb_len,
     return 0;
 }
 
+static int scsi_dev_attach_calls;
+static scsi_device_t *last_attached_dev;
+
 int scsi_dev_attach(scsi_device_t *dev) {
-    (void)dev;
+    scsi_dev_attach_calls++;
+    last_attached_dev = dev;
     return 0;
 }
 
@@ -120,9 +124,39 @@ static void test_bus_node_goes_under_storage_scsi(void) {
     assert((node->node->flags & 0x7) == FS_CHARDEVICE);
 }
 
+static void test_auto_attach_creates_generic_node_and_calls_block_attach(void) {
+    scsi_device_t dev;
+    devfs_entry_t *storage;
+    devfs_entry_t *scsi;
+    devfs_entry_t *node;
+
+    memset(&dev, 0, sizeof(dev));
+    dev.bus = 1;
+    dev.target = 0;
+    dev.lun = 0;
+
+    devfs_init();
+    sg_list = NULL;
+    sg_count = 0;
+    scsi_dev_attach_calls = 0;
+    last_attached_dev = NULL;
+
+    scsi_auto_attach(&dev);
+
+    storage = devfs_find_child(root_entry, "storage");
+    assert(storage != NULL);
+    scsi = devfs_find_child(storage, "scsi");
+    assert(scsi != NULL);
+    node = devfs_find_child(scsi, "1:0:0");
+    assert(node != NULL);
+    assert(scsi_dev_attach_calls == 1);
+    assert(last_attached_dev == &dev);
+}
+
 int main(void) {
     test_generic_node_goes_under_storage_scsi();
     test_bus_node_goes_under_storage_scsi();
+    test_auto_attach_creates_generic_node_and_calls_block_attach();
     puts("host_test_scsi_nodes: PASS");
     return 0;
 }
