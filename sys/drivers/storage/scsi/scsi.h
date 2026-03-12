@@ -113,6 +113,17 @@
 #define SCSI_MAX_TARGETS            16
 #define SCSI_MAX_LUNS               256
 
+/* Device flags */
+#define SCSI_DEV_ONLINE             0x0001
+#define SCSI_DEV_WRITE_PROTECTED    0x0002
+#define SCSI_DEV_REMOVABLE          0x0004
+#define SCSI_DEV_TCQ                0x0008
+
+/* Transport flags */
+#define SCSI_LINK_DMA               0x0001
+#define SCSI_LINK_TAGGED_QUEUEING   0x0002
+#define SCSI_LINK_ORDERED_TAGS      0x0004
+
 /*
  * ============================================================
  * Fixed Sense Data (SPC-3 7.3.3)
@@ -206,7 +217,10 @@ typedef struct scsi_request {
     uint16_t flags;                 /* SCSI_REQ_* flags */
     
     /* Sense Data */
-    uint8_t  sense[SCSI_MAX_SENSE_LEN]; /* Sense buffer */
+    union {
+        uint8_t  sense[SCSI_MAX_SENSE_LEN];
+        uint8_t  sense_data[SCSI_MAX_SENSE_LEN];
+    };
     uint8_t  sense_len;             /* Sense data length */
     
     /* Status */
@@ -217,6 +231,7 @@ typedef struct scsi_request {
     /* Timeout */
     uint32_t timeout_ms;            /* Timeout in milliseconds */
     uint32_t retries;               /* Retry count remaining */
+    uint32_t max_retries;           /* Initial retry budget */
     
     /* Completion */
     scsi_callback_t callback;       /* Async completion callback */
@@ -234,7 +249,12 @@ typedef struct scsi_request {
  * ============================================================
  */
 typedef struct scsi_link {
-    const char *name;               /* Transport name (e.g., "atapi", "usb") */
+    char     name[32];              /* Transport name (e.g., "atapi0", "usb0") */
+    uint8_t  bus_id;                /* Controller-local bus identifier */
+    uint8_t  max_targets;           /* Maximum target IDs on this bus */
+    uint16_t max_luns;              /* Maximum LUNs per target */
+    uint16_t adapter_queue_depth;   /* Adapter-level concurrency */
+    uint32_t flags;                 /* SCSI_LINK_* capabilities */
     
     /* Execute SCSI command via this transport */
     int (*execute)(struct scsi_link *link, scsi_request_t *req);
@@ -269,9 +289,11 @@ typedef struct scsi_device {
     /* Device Identity (from INQUIRY) */
     uint8_t  type;                  /* Device type (SCSI_TYPE_*) */
     uint8_t  removable;             /* Removable media flag */
+    uint8_t  scsi_version;          /* SPC/SBC version from INQUIRY */
     char     vendor[9];             /* Vendor string (null-terminated) */
     char     product[17];           /* Product string (null-terminated) */
     char     revision[5];           /* Revision string (null-terminated) */
+    char     serial[21];            /* Optional serial string */
     
     /* Geometry (for block devices) */
     uint64_t capacity;              /* Total sectors */
@@ -281,6 +303,8 @@ typedef struct scsi_device {
     uint8_t  online;                /* Device is online/ready */
     uint8_t  media_present;         /* Media is present (for removable) */
     uint8_t  write_protected;       /* Media is write-protected */
+    uint32_t flags;                 /* SCSI_DEV_* flags */
+    uint32_t device_num;            /* Monotonic registry identifier */
     
     /* Transport */
     scsi_link_t *link;              /* Transport adapter */
@@ -338,6 +362,8 @@ void scsi_complete_request(scsi_request_t *req, int status);  /* Mark complete *
 /* Discovery */
 int scsi_scan_bus(scsi_link_t *link, uint8_t bus);
 int scsi_probe_lun(scsi_link_t *link, uint8_t bus, uint8_t target, uint16_t lun);
+int scsi_create_bus_node(scsi_link_t *link, uint8_t bus_id);
+void scsi_auto_attach(scsi_device_t *dev);
 
 /* Standard Commands */
 int scsi_test_unit_ready(scsi_device_t *dev);

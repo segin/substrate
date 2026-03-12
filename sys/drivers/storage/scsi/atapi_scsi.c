@@ -217,7 +217,11 @@ void atapi_scsi_init(void) {
     memset(&atapi_link, 0, sizeof(atapi_link));
     
     /* Setup transport operations */
-    atapi_link.link.name = "atapi";
+    snprintf(atapi_link.link.name, sizeof(atapi_link.link.name), "atapi0");
+    atapi_link.link.bus_id = atapi_link.bus_id;
+    atapi_link.link.max_targets = 4;
+    atapi_link.link.max_luns = 1;
+    atapi_link.link.adapter_queue_depth = 1;
     atapi_link.link.execute = atapi_execute;
     atapi_link.link.reset_device = atapi_reset_device;
     atapi_link.link.reset_bus = atapi_reset_bus;
@@ -230,11 +234,10 @@ void atapi_scsi_init(void) {
         /* Register with SCSI mid-layer */
         if (scsi_register_link(&atapi_link.link) == 0) {
             char log_buf[64];
-            sprintf(log_buf, "atapi_scsi: registered with SCSI mid-layer (%d devices)\n", count);
+            snprintf(log_buf, sizeof(log_buf),
+                     "atapi_scsi: registered (%d devices)\n",
+                     count);
             kprint(log_buf);
-            
-            /* Scan the bus to discover devices */
-            scsi_scan_bus(&atapi_link.link, atapi_link.bus_id);
         }
     } else {
         kprint("atapi_scsi: no ATAPI devices found\n");

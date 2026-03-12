@@ -29,6 +29,7 @@ static inline uint64_t kernel_time_ms(void) {
 /* Device Registry */
 static scsi_device_t *scsi_device_list = NULL;
 static int scsi_device_count = 0;
+static uint32_t scsi_next_device_num = 0;
 
 /* Transport Registry */
 #define SCSI_MAX_LINKS 8
@@ -76,6 +77,7 @@ void scsi_init(void) {
         scsi_links[i] = NULL;
     }
     scsi_link_count = 0;
+    scsi_next_device_num = 0;
 
     scsi_dev_init();
     scsi_ctl_init();
@@ -105,11 +107,23 @@ int scsi_register_link(scsi_link_t *link) {
         kprint("SCSI: Too many transport links\n");
         return -1;
     }
+
+    if (link->max_targets == 0) {
+        link->max_targets = SCSI_MAX_TARGETS;
+    }
+    if (link->max_luns == 0) {
+        link->max_luns = 8;
+    }
+    if (link->adapter_queue_depth == 0) {
+        link->adapter_queue_depth = 1;
+    }
     
     scsi_links[scsi_link_count++] = link;
+    scsi_create_bus_node(link, link->bus_id);
+    scsi_scan_bus(link, link->bus_id);
     
     kprint("SCSI: Registered transport '");
-    kprint(link->name ? link->name : "unknown");
+    kprint(link->name[0] ? link->name : "unknown");
     kprint("'\n");
     
     return 0;
@@ -178,6 +192,7 @@ int scsi_device_register(scsi_device_t *dev) {
     dev->next = scsi_device_list;
     scsi_device_list = dev;
     scsi_device_count++;
+    dev->device_num = scsi_next_device_num++;
     
     /* Log registration */
     char buf[128];
@@ -232,6 +247,8 @@ scsi_request_t *scsi_request_alloc(void) {
     req->state = SCSI_REQ_STATE_PENDING;
     req->timeout_ms = 30000;  /* 30 second default */
     req->retries = 3;
+    req->max_retries = 3;
+    req->submit_time = kernel_time_ms();
     
     return req;
 }
@@ -260,8 +277,10 @@ void scsi_request_init(scsi_request_t *req, scsi_device_t *dev) {
     req->error = 0;
     req->timeout_ms = 30000;
     req->retries = 3;
+    req->max_retries = 3;
     req->callback = NULL;
     req->callback_arg = NULL;
+    req->submit_time = kernel_time_ms();
 }
 
 /*
@@ -836,6 +855,10 @@ int scsi_probe_lun(scsi_link_t *link, uint8_t bus, uint8_t target, uint16_t lun)
     /* Populate device info from INQUIRY */
     dev->type = dtype;
     dev->removable = (inq.rmb & 0x80) ? 1 : 0;
+    dev->scsi_version = inq.version;
+    if (dev->removable) {
+        dev->flags |= SCSI_DEV_REMOVABLE;
+    }
     
     /* Copy vendor/product/revision (space-padded in INQUIRY, need null-term) */
     memcpy(dev->vendor, inq.vendor, 8);
@@ -873,13 +896,16 @@ int scsi_probe_lun(scsi_link_t *link, uint8_t bus, uint8_t target, uint16_t lun)
     
     dev->online = 1;
     dev->media_present = 1;  /* Assume present, will be updated by TUR later */
+    dev->flags |= SCSI_DEV_ONLINE;
     
     /* Register device */
     if (scsi_device_register(dev) < 0) {
         scsi_device_free(dev);
         return -1;
     }
-    
+
+    scsi_auto_attach(dev);
+
     return 0;
 }
 
@@ -892,7 +918,7 @@ int scsi_scan_bus(scsi_link_t *link, uint8_t bus) {
         return -1;
     }
     
-    kprintf("SCSI: Scanning bus %d via '%s'\n", bus, link->name ? link->name : "unknown");
+    kprintf("SCSI: Scanning bus %d via '%s'\n", bus, link->name[0] ? link->name : "unknown");
     
     int devices_found = 0;
     
@@ -902,7 +928,7 @@ int scsi_scan_bus(scsi_link_t *link, uint8_t bus) {
      * - For each target, probe LUN 0 first
      * - If LUN 0 responds, optionally probe more LUNs (REPORT LUNS in L621)
      */
-    for (uint8_t target = 0; target < SCSI_MAX_TARGETS; target++) {
+    for (uint8_t target = 0; target < link->max_targets; target++) {
         /* Probe LUN 0 first */
         if (scsi_probe_lun(link, bus, target, 0) == 0) {
             devices_found++;
