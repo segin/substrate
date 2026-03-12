@@ -1,0 +1,101 @@
+.TH FCNTL 2 "March 2026" "Substrate" "System Calls"
+.SH NAME
+fcntl \- manipulate file descriptor flags and status flags
+.SH LIBRARY
+Substrate libc
+.SH SYNOPSIS
+.nf
+#include <fcntl.h>
+
+int fcntl(int fd, int cmd, ...);
+.fi
+.SH DESCRIPTION
+.BR fcntl ()
+operates on an existing file descriptor.
+Substrate currently implements the basic descriptor and status-flag commands:
+.TP
+.B F_DUPFD
+Duplicate
+.I fd
+to the lowest-numbered free descriptor greater than or equal to the supplied third argument.
+The duplicate shares the same underlying file object and file offset, but its descriptor flags start clear.
+.TP
+.B F_GETFD
+Return the descriptor flags for
+.IR fd .
+Only
+.B FD_CLOEXEC
+is currently defined.
+.TP
+.B F_SETFD
+Set the descriptor flags for
+.IR fd .
+Only
+.B FD_CLOEXEC
+is honored.
+.TP
+.B F_GETFL
+Return the file status flags and access mode for
+.IR fd .
+Substrate reports
+.BR O_RDONLY ,
+.BR O_WRONLY ,
+or
+.BR O_RDWR ,
+plus
+.BR O_APPEND
+and
+.BR O_NONBLOCK
+when set.
+.TP
+.B F_SETFL
+Update the mutable file status flags for
+.IR fd .
+Only
+.B O_APPEND
+and
+.B O_NONBLOCK
+are changed; access-mode bits are ignored.
+.P
+Descriptors marked with
+.B FD_CLOEXEC
+are closed on successful
+.BR execve (2)
+for native, Linux, and ELKS execution paths.
+.SH RETURN VALUE
+On success,
+.BR fcntl ()
+returns a value specific to
+.IR cmd .
+For
+.BR F_DUPFD ,
+the new descriptor number is returned.
+For the other currently implemented commands, 0 or the requested flag word is returned.
+On error, \-1 is returned and
+.I errno
+is set.
+.SH ERRORS
+.TP
+.B EBADF
+.I fd
+does not name an open file descriptor.
+.TP
+.B EINVAL
+.I cmd
+is unsupported, or the argument is invalid for that command.
+.TP
+.B EMFILE
+No free descriptor was available for
+.BR F_DUPFD .
+.SH NOTES
+Record locking commands such as
+.BR F_GETLK ,
+.BR F_SETLK ,
+and
+.BR F_SETLKW
+are not implemented yet.
+.SH SEE ALSO
+.BR dup (2),
+.BR dup2 (2),
+.BR execve (2),
+.BR open (2)

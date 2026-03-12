@@ -155,6 +155,15 @@ extern pmap_t pmap_kernel(void);
 
 void *sys_brk(void *addr) {
     if (!current_process) return NULL;
+
+    /*
+     * Exec paths establish brk_start as the canonical heap floor. If brk has
+     * not been materialized yet, recover it lazily from brk_start so the first
+     * userspace brk/sbrk query does not observe a transient zero heap pointer.
+     */
+    if (current_process->brk == 0 && current_process->brk_start != 0) {
+        current_process->brk = current_process->brk_start;
+    }
     
     // If querying (addr == 0) or uninitialized
     if (!addr || !current_process->brk_start) {

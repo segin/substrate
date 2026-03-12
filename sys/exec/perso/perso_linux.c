@@ -514,9 +514,12 @@ static int linux_sys_clone(uint32_t flags, void *child_stack, int *parent_tidptr
         return -22; /* EINVAL */
     }
 
-    if (flags & CLONE_VFORK) {
-        return sys_vfork();
-    }
+    /*
+     * Substrate does not yet provide Linux-grade shared-address-space vfork
+     * semantics. Shells such as BusyBox ash use clone(CLONE_VM|CLONE_VFORK)
+     * as a process-spawn fast path; emulating that as a plain fork keeps the
+     * user-visible ABI working until the stricter contract is implemented.
+     */
     return arch_fork_with_stack(child_stack);
 }
 

@@ -12,10 +12,17 @@ MKELKS = $(CURDIR)/mkelks.py
 
 ASM_SOURCES = hello.S sleep.S fileio.S fork.S bounds_test.S fuzz_syscalls.S
 C_SOURCES = cat.c
+NATIVE_SOURCES = native_spawn_elks.c
 
 ASM_PROGRAMS = $(ASM_SOURCES:.S=_elks)
 C_PROGRAMS = $(C_SOURCES:.c=_elks)
-PROGRAMS = $(ASM_PROGRAMS) $(C_PROGRAMS)
+NATIVE_PROGRAMS = $(NATIVE_SOURCES:.c=)
+PROGRAMS = $(ASM_PROGRAMS) $(C_PROGRAMS) $(NATIVE_PROGRAMS)
+
+NATIVE_CC = gcc
+NATIVE_CFLAGS = -m32 -nostdlib -fno-pie -no-pie -fno-stack-protector -ffreestanding
+NATIVE_LDFLAGS = -m32 -nostdlib -fno-pie -no-pie -static
+ELFEDIT ?= elfedit
 
 .PHONY: all clean
 
@@ -38,6 +45,10 @@ $(ELKS_BUILD)/%.bin: $(ELKS_BUILD)/%.elf | $(ELKS_BUILD)
 
 %_elks: $(ELKS_BUILD)/%.bin $(MKELKS)
 	$(PYTHON) $(MKELKS) --text $< --output $@ --stack 4096
+
+native_spawn_elks: native_spawn_elks.c
+	$(NATIVE_CC) $(NATIVE_CFLAGS) $(NATIVE_LDFLAGS) -o $@ $<
+	$(ELFEDIT) --output-osabi Linux $@ >/dev/null 2>&1 || true
 
 clean:
 	rm -rf $(ELKS_BUILD) $(PROGRAMS)

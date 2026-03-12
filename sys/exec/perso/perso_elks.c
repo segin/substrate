@@ -1626,6 +1626,9 @@ static int elks_sys_brk(uint32_t brk_off, uint32_t unused1, uint32_t unused2,
     if (ret != 0) {
         return ret;
     }
+    if (current_process->brk == 0 && current_process->brk_start != 0) {
+        current_process->brk = current_process->brk_start;
+    }
     if (brk_off > (limit + 1U)) {
         return -ENOMEM;
     }
@@ -1848,6 +1851,9 @@ static int elks_sys_sbrk(uint32_t increment, uint32_t oldbrk_off, uint32_t unuse
     ret = elks_ds_base_limit(&base, &limit);
     if (ret != 0) {
         return ret;
+    }
+    if (current_process->brk == 0 && current_process->brk_start != 0) {
+        current_process->brk = current_process->brk_start;
     }
     if (oldbrk_off == 0 || elks_ds_span(oldbrk_off, sizeof(uint16_t), &linear) != 0) {
         return -EFAULT;

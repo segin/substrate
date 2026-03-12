@@ -16,6 +16,7 @@
 #define O_APPEND    0x0400
 #define O_NONBLOCK  0x0800
 #define O_DIRECTORY 0x10000
+#define O_CLOEXEC   0x80000
 
 /* fcntl() commands */
 #define F_DUPFD     0
@@ -26,6 +27,9 @@
 #define F_GETLK     5
 #define F_SETLK     6
 #define F_SETLKW    7
+
+/* file descriptor flags */
+#define FD_CLOEXEC  1
 
 /* record-lock types */
 #define F_RDLCK     0

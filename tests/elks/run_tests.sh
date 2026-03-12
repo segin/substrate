@@ -17,7 +17,7 @@ TIMEOUT_BIN=${TIMEOUT_BIN:-timeout}
 QEMU_TIMEOUT=${QEMU_TIMEOUT:-35}
 LOG_DIR=${LOG_DIR:-"$SCRIPT_DIR/logs"}
 WORK_ROOTFS_IMG=${WORK_ROOTFS_IMG:-"$LOG_DIR/rootfs.img"}
-DEFAULT_CASES="hello_elks sleep_elks fileio_elks fork_elks bounds_test_elks cat_elks fuzz_syscalls_elks upstream_ls_elks upstream_pwd_elks upstream_date_elks upstream_tty_elks upstream_stty_elks upstream_uname_elks upstream_df_elks upstream_ps_elks upstream_meminfo_elks upstream_sh_prompt_elks upstream_sh_ls_elks upstream_sh_cd_pwd_elks native_sh_elks_sh"
+DEFAULT_CASES="hello_elks sleep_elks fileio_elks fork_elks bounds_test_elks cat_elks fuzz_syscalls_elks upstream_ls_elks upstream_pwd_elks upstream_date_elks upstream_tty_elks upstream_stty_elks upstream_uname_elks upstream_df_elks upstream_ps_elks upstream_meminfo_elks upstream_sh_prompt_elks upstream_sh_ls_elks upstream_sh_cd_pwd_elks native_spawn_elks_ls native_sh_elks_sh"
 
 if [ "$#" -gt 0 ]; then
     CASES="$*"
@@ -175,6 +175,7 @@ stage_binary "$SCRIPT_DIR/fork_elks" /bin/fork_elks
 stage_binary "$SCRIPT_DIR/bounds_test_elks" /bin/bounds_test_elks
 stage_binary "$SCRIPT_DIR/cat_elks" /bin/cat_elks
 stage_binary "$SCRIPT_DIR/fuzz_syscalls_elks" /bin/fuzz_syscalls_elks
+stage_binary "$SCRIPT_DIR/native_spawn_elks" /bin/native_spawn_elks
 
 if want_case cat_elks; then
     cat_input=$LOG_DIR/cat_input.txt
@@ -243,6 +244,11 @@ if want_case upstream_sh_cd_pwd_elks; then
     run_monitor_case upstream_sh_cd_pwd_elks /perso/elks/bin/sh \
         "sendkey c\nsendkey d\nsendkey spc\nsendkey slash\nsendkey p\nsendkey e\nsendkey r\nsendkey s\nsendkey o\nsendkey ret\nsendkey p\nsendkey w\nsendkey d\nsendkey ret" \
         "# " "/perso"
+fi
+if want_case native_spawn_elks_ls; then
+    run_init_case native_spawn_elks_ls /bin/native_spawn_elks \
+        "native spawn: /perso/elks/bin/ls exit 0" \
+        "bin         dev         lost+found  perso       proc        sys"
 fi
 if want_case native_sh_elks_sh; then
     case_name=native_sh_elks_sh

@@ -23,6 +23,9 @@ void proc_set_bitness(process_t *p, uint8_t bitness);
 uint8_t proc_get_bitness(process_t *p);
 void proc_capture_cmdline(process_t *p, char *const argv[]);
 size_t proc_emit_cmdline(const process_t *p, char *buf, size_t buf_len, size_t *argc_out);
+int proc_alloc_fd_from(process_t *p, int start);
+int proc_fcntl(process_t *p, int fd, int cmd, int arg);
+void proc_close_cloexec(process_t *p);
 
 /*
  * proc_find - Find a process by PID

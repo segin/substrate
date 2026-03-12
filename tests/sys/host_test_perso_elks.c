@@ -1235,6 +1235,19 @@ int main(void) {
             return 1;
         }
     }
+    current_process->brk = 0;
+    *(uint16_t *)(void *)(ds_mem + 0x302) = 0;
+    {
+        int rc = fn(0x10, 0x302, 0, 0, 0, 0, 0, 0);
+        uint16_t oldbrk = *(uint16_t *)(void *)(ds_mem + 0x302);
+
+        if (rc != 0 || oldbrk != 0x200 ||
+            current_process->brk != current_process->brk_start + 0x10U) {
+            fprintf(stderr, "FAIL: ELKS sbrk bootstrap wrong rc=%d old=0x%x brk=0x%x start=0x%x\n",
+                    rc, oldbrk, current_process->brk, current_process->brk_start);
+            return 1;
+        }
+    }
 
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_gettimeofday];
     memset(ds_mem + 0x320, 0, 12);

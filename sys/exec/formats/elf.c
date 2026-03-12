@@ -998,6 +998,8 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     kprint(hexbuf);
     kprint("\n");
     
+    proc_close_cloexec(current_process);
+
     // Cleanup kernel arguments
     if (k_argv) kfree(k_argv, (argc + 1) * sizeof(char*));
     if (k_envp) kfree(k_envp, (envc + 1) * sizeof(char*));

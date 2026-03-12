@@ -436,6 +436,7 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     extern void jump_to_elks(uint32_t entry, uint32_t stack, uint32_t cs,
                              uint32_t ds, uint32_t ss, uint32_t es);
     
+    proc_close_cloexec(current_process);
     elks_free_kernel_vector(kargv);
     elks_free_kernel_vector(kenvp);
     kern_close(fd);

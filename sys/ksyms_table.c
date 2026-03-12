@@ -723,12 +723,15 @@ extern void pool_init(void);
 extern void pool_mix_bytes(void);
 extern void proc_add_child(void);
 extern void proc_alloc_fd(void);
+extern void proc_alloc_fd_from(void);
 extern void proc_begin_vfork(void);
 extern void proc_capture_cmdline(void);
 extern void proc_clear_fd(void);
+extern void proc_close_cloexec(void);
 extern void proc_create(void);
 extern void proc_emit_cmdline(void);
 extern void proc_exit(void);
+extern void proc_fcntl(void);
 extern void proc_find(void);
 extern void proc_fork(void);
 extern void proc_get_bitness(void);
@@ -2280,9 +2283,12 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&proc_vfork_done, "proc_vfork_done" },
     { (uint32_t)(uintptr_t)&sched_spawn_kernel_process, "sched_spawn_kernel_process" },
     { (uint32_t)(uintptr_t)&fd_close_all, "fd_close_all" },
+    { (uint32_t)(uintptr_t)&proc_alloc_fd_from, "proc_alloc_fd_from" },
     { (uint32_t)(uintptr_t)&proc_alloc_fd, "proc_alloc_fd" },
     { (uint32_t)(uintptr_t)&proc_set_fd, "proc_set_fd" },
     { (uint32_t)(uintptr_t)&proc_clear_fd, "proc_clear_fd" },
+    { (uint32_t)(uintptr_t)&proc_fcntl, "proc_fcntl" },
+    { (uint32_t)(uintptr_t)&proc_close_cloexec, "proc_close_cloexec" },
     { (uint32_t)(uintptr_t)&proc_reparent_children, "proc_reparent_children" },
     { (uint32_t)(uintptr_t)&proc_reap_autoreap_zombies, "proc_reap_autoreap_zombies" },
     { (uint32_t)(uintptr_t)&proc_exit, "proc_exit" },
@@ -3167,4 +3173,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1578;
+int ksym_count = 1581;

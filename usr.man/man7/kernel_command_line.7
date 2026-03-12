@@ -61,6 +61,11 @@ Enable verbose ELF loader and exec handoff tracing.
 .B trap
 Log user trap-to-signal translations before normal signal delivery.
 .TP
+.B proc
+Log process-tree transitions and
+.BR waitpid (2)
+search decisions, including child-linking, exit, and reap flow.
+.TP
 .B vm:brk
 Enable verbose
 .BR brk (2)
