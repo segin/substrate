@@ -291,7 +291,7 @@ static void test_read_long_ad_file() {
 
     ads[0].length = (0 << 30) | 1024;
     ads[0].block = 1;
-    ads[0].partition = 0; // The logic ignores partition
+    ads[0].partition = 0;
 
     ads[1].length = (1 << 30) | 512;
     ads[1].block = 2;
@@ -381,9 +381,9 @@ static void test_read_long_ad_file_ext_read_limits() {
 
     // Write some data to the mock disk
     uint8_t data1[2048];
-    memset(data1, 'E', sizeof(data1));
+    memset(data1, 'C', sizeof(data1));
     write_sector(1, data1, sizeof(data1));
-    memset(data1, 'F', sizeof(data1));
+    memset(data1, 'D', sizeof(data1));
     write_sector(2, data1, sizeof(data1));
 
     uint8_t buffer[4096];
@@ -392,11 +392,32 @@ static void test_read_long_ad_file_ext_read_limits() {
     memset(buffer, 0, sizeof(buffer));
     uint32_t read_bytes = udf_read_file(&fs, fe, 2040, 16, buffer);
     assert(read_bytes == 16);
-    for (int i = 0; i < 8; i++) assert(buffer[i] == 'E');
-    for (int i = 8; i < 16; i++) assert(buffer[i] == 'F');
+    for (int i = 0; i < 8; i++) assert(buffer[i] == 'C');
+    for (int i = 8; i < 16; i++) assert(buffer[i] == 'D');
 
     teardown_mock_disk();
     printf("test_read_long_ad_file_ext_read_limits PASSED\n");
+}
+
+static void test_read_invalid_ad_file() {
+    printf("Running test_read_invalid_ad_file...\n");
+
+    struct udf_fs fs;
+    struct udf_fe fe;
+    uint8_t buffer[1024];
+
+    memset(&fs, 0, sizeof(fs));
+    memset(&fe, 0, sizeof(fe));
+
+    // Setup an invalid AD type
+    fe.icb_tag.flags = 7; // invalid
+    fe.info_length = 100;
+
+    memset(buffer, 0, sizeof(buffer));
+    uint32_t read_bytes = udf_read_file(&fs, &fe, 0, 10, buffer);
+    assert(read_bytes == 0);
+
+    printf("test_read_invalid_ad_file PASSED\n");
 }
 
 int main() {
@@ -405,6 +426,7 @@ int main() {
     test_read_short_ad_file_ext_read_limits();
     test_read_long_ad_file();
     test_read_long_ad_file_ext_read_limits();
+    test_read_invalid_ad_file();
     printf("\nAll udf_read_file tests PASSED!\n");
     return 0;
 }
