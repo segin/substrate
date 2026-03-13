@@ -979,9 +979,19 @@ int sys_poll(struct pollfd *fds, unsigned int nfds, int timeout) {
 
 int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
     int ready = 0;
-    void *waiter = NULL; 
-    
+    uint64_t deadline = 0;
+
+    if (timeout > 0) {
+        uint64_t timeout_ticks = ((uint64_t)timeout * (uint64_t)HZ + 999ULL) / 1000ULL;
+        if (timeout_ticks == 0) {
+            timeout_ticks = 1;
+        }
+        deadline = get_ticks() + timeout_ticks;
+    }
+
     while (1) {
+        void *wait_chan = NULL;
+
         ready = 0;
         for (unsigned int i = 0; i < nfds; i++) {
             if (kfds[i].fd < 0) {
@@ -993,7 +1003,7 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
             short mask = 0;
             
             if (f && f->f_data) {
-                mask = poll_fs((fs_node_t*)f->f_data, waiter);
+                mask = poll_fs((fs_node_t*)f->f_data, &wait_chan);
                 short ret_mask = mask & (kfds[i].events | POLLERR | POLLHUP | POLLNVAL);
                 kfds[i].revents = ret_mask;
             } else {
@@ -1005,14 +1015,25 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
         
         if (ready > 0) break;
         if (timeout == 0) break;
-        
-        // Timeout handling (simplified)
-        if (timeout > 0 && timeout != -1) {
-             timeout -= 10; 
-             if (timeout <= 0) return 0;
+
+        if (timeout > 0) {
+            int sleep_ret = sched_sleep_until(wait_chan ? wait_chan : (void *)current_thread, deadline);
+            if (sleep_ret == -ETIMEDOUT) {
+                return 0;
+            }
+        } else {
+            if (wait_chan) {
+                sched_sleep(wait_chan);
+            } else {
+                sched_yield();
+            }
         }
-        
-        sched_yield();
+
+        if (current_thread &&
+            (current_thread->flags & THREAD_F_INTERRUPTIBLE) &&
+            (current_thread->sig_pending & ~current_thread->sig_mask)) {
+            return -EINTR;
+        }
     }
  
     return ready;

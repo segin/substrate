@@ -115,6 +115,7 @@ void vt_activate(int n) {
         console_set_tty(vt->tty);
     }
     hw_text_redraw_active();
+    hw_text_refresh_statusline();
 }
 
 int vt_get_scrollback_view(const vt_state_t *vt) {

@@ -8,6 +8,7 @@
 #include <sys/vt.h>
 
 static int mock_redraw_calls;
+static int mock_status_refresh_calls;
 static struct tty *mock_console_tty;
 
 void hw_text_redraw_active(void) {
@@ -16,6 +17,10 @@ void hw_text_redraw_active(void) {
 
 void console_set_tty(struct tty *tty) {
     mock_console_tty = tty;
+}
+
+void hw_text_refresh_statusline(void) {
+    mock_status_refresh_calls++;
 }
 
 int kprintf(const char *fmt, ...) {
@@ -39,6 +44,7 @@ static void fill_row(vt_state_t *vt, int row, uint16_t base) {
 
 static void reset_state(void) {
     mock_redraw_calls = 0;
+    mock_status_refresh_calls = 0;
     mock_console_tty = NULL;
     vt_set_geometry(80, 25);
     vt_init();
@@ -57,7 +63,14 @@ static void test_activate_redraws_and_switches_console_tty(void) {
     assert(vt_get_active() == 1);
     assert(mock_redraw_calls == 1);
     assert(mock_console_tty == &tty2);
+    assert(mock_status_refresh_calls == 1);
+
+    vt_activate(0);
+    assert(vt_get_active() == 0);
+    assert(mock_redraw_calls == 2);
+    assert(mock_status_refresh_calls == 2);
 }
+
 
 static void test_scrollback_capture_and_view(void) {
     vt_state_t *vt;

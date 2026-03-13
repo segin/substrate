@@ -72,6 +72,8 @@ thread_t *sched_alloc_thread(process_t *proc) {
     }
     if (i == MAX_THREADS) return NULL;
 
+    memset(&threads[i], 0, sizeof(threads[i]));
+
     // Allocate TID using generation index for O(1) lookup
     // TID = (generation << 6) | index
     // MAX_THREADS is 64, so 6 bits for index.

@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include <arch/x86-common/io.h>
+#include <arch/x86-common/rtc.h>
 #include <drivers/console/console.h>
 #include <drivers/video/font.h>
 #include <drivers/video/hw_text.h>
@@ -404,6 +405,15 @@ static void hw_text_format_iso8601(char *buf, size_t buf_len, time_t when) {
              year, month, day, hour, minute, second);
 }
 
+static time_t hw_text_status_time(void) {
+    int64_t now = rtc_read_time();
+
+    if (now > 0) {
+        return (time_t)now;
+    }
+    return get_time();
+}
+
 static void hw_text_render_statusline_locked(vt_state_t *vt) {
     char left[32];
     char right[32];
@@ -425,7 +435,7 @@ static void hw_text_render_statusline_locked(vt_state_t *vt) {
     } else {
         snprintf(left, sizeof(left), " VT%d ", vt->id + 1);
     }
-    hw_text_format_iso8601(right, sizeof(right), get_time());
+    hw_text_format_iso8601(right, sizeof(right), hw_text_status_time());
     left_len = strlen(left);
     right_len = strlen(right);
 

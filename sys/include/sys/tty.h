@@ -72,6 +72,7 @@ struct tty {
     // Wait queues
     void *read_wait;
     void *write_wait;
+    void *poll_wait;
     
     // State flags
     int stopped; // Output stopped (IXON)

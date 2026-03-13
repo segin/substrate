@@ -468,6 +468,8 @@ static void tty_echo(struct tty *tp, unsigned char c) {
 // Input processing (ISR context usually)
 // Implements 'ttyinput'
 void tty_flip_buffer_push(struct tty *tty, char c) {
+    int wake_readers = 0;
+
     if (!tty) return;
     
     TTY_LOCK(tty);
@@ -539,7 +541,7 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
         // Add delimiter
         tty_buf_put(&tty->raw_buf, (char)0xFF);
         tty->delct++;
-        sched_wakeup(&tty->read_wait);
+        wake_readers = 1;
     }
     
     // Echo and canonical line tracking
@@ -560,6 +562,11 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
         }
     }
     tty_start_locked(tty);
+
+    if (wake_readers) {
+        sched_wakeup(&tty->read_wait);
+        sched_wakeup(&tty->poll_wait);
+    }
 
     TTY_UNLOCK(tty);
 }
@@ -1001,7 +1008,6 @@ void tty_hangup(struct tty *tty) {
 
 int tty_poll(struct tty *tty, void *waiter) {
     if (!tty) return POLLNVAL;
-    (void)waiter; // No wait queue support yet
     
     int events = 0;
     
@@ -1026,6 +1032,9 @@ int tty_poll(struct tty *tty, void *waiter) {
     }
     if (write_room > 0 && pending < TTY_BUF_SIZE) {
         events |= POLLOUT | POLLWRNORM;
+    }
+    if ((events & (POLLIN | POLLRDNORM)) == 0 && waiter) {
+        *(void **)waiter = &tty->poll_wait;
     }
     TTY_UNLOCK(tty);
     return events;
