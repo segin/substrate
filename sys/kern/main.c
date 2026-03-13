@@ -10,6 +10,8 @@
 #include <drivers/video/fb.h>
 #include <drivers/video/hw_text.h>
 #include <drivers/console/uart/uart.h>
+#include <sys/tty.h>
+#include <sys/vt.h>
 #include <drivers/input/keyboard.h>
 #include <drivers/input/mouse.h>
 #include <drivers/storage/scsi/scsi.h>
@@ -362,6 +364,7 @@ static void init_runtime_console(int serial_console) {
         syscall_trace_enabled = 1;
         kprint("Syscall Tracing Enabled.\n");
     }
+
 }
 
 static void init_core_subsystems(multiboot_info_t *mboot_info) {
@@ -420,6 +423,7 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
     if (mboot_info) {
         fb_init(mboot_info);
     }
+
 }
 
 static void init_storage_and_vfs(multiboot_info_t *mboot_info) {
@@ -436,6 +440,7 @@ static void init_storage_and_vfs(multiboot_info_t *mboot_info) {
     vfs_init();
     console_register_devfs();
     init_root_fs();
+
 }
 
 static void reclaim_bootloader_state(void) {

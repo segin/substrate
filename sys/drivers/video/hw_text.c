@@ -27,6 +27,7 @@ static spinlock_t hw_text_lock = SPINLOCK_INIT("hw_text");
 static vt_state_t *current_vt_ctx = NULL;
 static volatile uint32_t hw_text_status_epoch = 0;
 static int hw_text_status_thread_started = 0;
+static int hw_text_tty_count = 0;
 
 #define HW_TEXT_STATUS_COLOR 0x70
 #define VGA_FONT_MEM_BASE ((volatile uint8_t *)(uintptr_t)0xC00A0000)
@@ -715,6 +716,29 @@ static struct tty_driver vt_driver = {
     .ioctl = vt_tty_ioctl,
 };
 
+static void hw_text_init_ttys_once(void) {
+    struct tty *tty;
+    char name[16];
+    int i;
+
+    if (hw_text_tty_count > 0) {
+        return;
+    }
+
+    for (i = 0; i < VT_MAX; i++) {
+        tty = tty_alloc(&vt_driver, i);
+        if (!tty) {
+            continue;
+        }
+        snprintf(name, sizeof(name), "tty%d", i + 1);
+        tty_register_device(tty, name);
+        hw_text_tty_count++;
+        if (i == 0) {
+            console_set_tty(tty);
+        }
+    }
+}
+
 void hw_text_console_write_shim(const char *data, size_t len) {
     vt_state_t *vt = vt_get_state(vt_get_active());
     size_t i;
@@ -771,6 +795,8 @@ void hw_text_late_init(void) {
         return;
     }
 
+    hw_text_init_ttys_once();
+
     if (kthread_create(hw_text_statusline_task, NULL, &td, "vtstatus") == 0) {
         hw_text_status_thread_started = 1;
     }
@@ -819,24 +845,10 @@ void hw_text_clear_screen(void) {
 void hw_text_init(void) {
     int cols;
     int rows;
-    struct tty *tty;
-    char name[16];
-    int i;
 
     hw_text_apply_geometry_or_default(&cols, &rows);
     vt_init();
-
-    for (i = 0; i < VT_MAX; i++) {
-        tty = tty_alloc(&vt_driver, i);
-        if (!tty) {
-            continue;
-        }
-        snprintf(name, sizeof(name), "tty%d", i + 1);
-        tty_register_device(tty, name);
-        if (i == 0) {
-            console_set_tty(tty);
-        }
-    }
+    hw_text_tty_count = 0;
 
     hw_text_active = 1;
     console_register(&vt_kprint_backend);

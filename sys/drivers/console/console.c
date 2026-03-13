@@ -31,6 +31,10 @@ static struct tty *console_resolve_tty(void) {
     if (tty) {
         return tty;
     }
+    tty = tty_get(vt_get_active());
+    if (tty) {
+        return tty;
+    }
     return console_tty;
 }
 
@@ -252,6 +256,9 @@ int console_read(char *data, size_t len) {
 }
 
 void console_attach_std_fds(struct process *proc) {
+    struct tty *tty;
+    fs_node_t *node;
+
     if (!proc) return;
 
     /*
@@ -261,15 +268,16 @@ void console_attach_std_fds(struct process *proc) {
      * console stdio set.
      */
 
-    fs_node_t *node = console_get_node();
+    tty = console_resolve_tty();
+    node = (tty && tty->devnode) ? tty->devnode : console_get_node();
     if (!node) {
         kprint("console: Cannot attach std fds - node not found!\n");
         return;
     }
 
     // Associate process with console TTY
-    if (console_resolve_tty()) {
-        proc->tty = console_resolve_tty();
+    if (tty) {
+        proc->tty = tty;
         /*
          * Init becomes session leader before this call.
          * Make that session/pgrp foreground on the console so

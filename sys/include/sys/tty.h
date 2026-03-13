@@ -78,6 +78,7 @@ struct tty {
     int input_stopped; // Input stopped (IXOFF)
     
     void *driver_data; // Private driver data
+    struct fs_node *devnode; // Published device node (for direct stdio attachment)
 };
 
 // API
@@ -85,6 +86,7 @@ void tty_init(void);
 struct tty *tty_alloc(struct tty_driver *driver, int idx);
 void tty_free(struct tty *tty);
 void tty_register_device(struct tty *tty, char *name);
+struct tty *tty_get(int idx);
 
 // File Operations (to be called by VFS wrapper)
 int tty_open(struct tty *tty);

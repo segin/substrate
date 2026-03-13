@@ -1461,6 +1461,7 @@ extern void tty_close(void);
 extern void tty_default_termios(void);
 extern void tty_flip_buffer_push(void);
 extern void tty_free(void);
+extern void tty_get(void);
 extern void tty_hangup(void);
 extern void tty_init(void);
 extern void tty_ioctl(void);
@@ -2617,6 +2618,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&tty_default_termios, "tty_default_termios" },
     { (uint32_t)(uintptr_t)&tty_register_device, "tty_register_device" },
     { (uint32_t)(uintptr_t)&tty_init, "tty_init" },
+    { (uint32_t)(uintptr_t)&tty_get, "tty_get" },
     { (uint32_t)(uintptr_t)&tty_alloc, "tty_alloc" },
     { (uint32_t)(uintptr_t)&tty_free, "tty_free" },
     { (uint32_t)(uintptr_t)&tty_flip_buffer_push, "tty_flip_buffer_push" },
@@ -3439,4 +3441,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1714;
+int ksym_count = 1715;

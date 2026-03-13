@@ -10,7 +10,11 @@
 #include <sys/poll.h>
 #include <sys/errno.h>
 #include <sys/param.h>
+#include <kern/console.h>
 #include <intr.h>
+#ifndef HOST_TEST
+#include <arch/i386/pmm.h>
+#endif
 
 #define TTY_MAGIC 0x5401
 
@@ -44,28 +48,28 @@ void tty_default_termios(struct termios *t) {
 // VFS Proxy functions for specific TTY devices
 static size_t tty_fs_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)offset;
-    struct tty *tty = (struct tty *)node->impl;
+    struct tty *tty = (struct tty *)node->ptr;
     return tty_read(tty, (char *)buffer, size);
 }
 
 static size_t tty_fs_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)offset;
-    struct tty *tty = (struct tty *)node->impl;
+    struct tty *tty = (struct tty *)node->ptr;
     return tty_write(tty, (const char *)buffer, size);
 }
 
 static int tty_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
-    struct tty *tty = (struct tty *)node->impl;
+    struct tty *tty = (struct tty *)node->ptr;
     return tty_ioctl(tty, request, (unsigned long)arg);
 }
 
 static void tty_fs_open(fs_node_t *node) {
-    struct tty *tty = (struct tty *)node->impl;
+    struct tty *tty = (struct tty *)node->ptr;
     tty_open(tty);
 }
 
 static void tty_fs_close(fs_node_t *node) {
-    struct tty *tty = (struct tty *)node->impl;
+    struct tty *tty = (struct tty *)node->ptr;
     tty_close(tty);
 }
 
@@ -80,7 +84,7 @@ void tty_register_device(struct tty *tty, char *name) {
     memset(node, 0, sizeof(fs_node_t));
     strncpy(node->name, name, sizeof(node->name) - 1);
     node->flags = FS_CHARDEVICE;
-    node->impl = (uintptr_t)tty;
+    node->ptr = (fs_node_t *)tty;
     node->read = tty_fs_read;
     node->write = tty_fs_write;
     node->ioctl = tty_fs_ioctl;
@@ -88,20 +92,37 @@ void tty_register_device(struct tty *tty, char *name) {
     node->close = tty_fs_close;
     
     devfs_register_device(node);
+    tty->devnode = node;
 }
 
 void tty_init(void) {
     memset(ttys, 0, sizeof(ttys));
 }
 
+struct tty *tty_get(int idx) {
+    if (idx < 0 || idx >= (int)(sizeof(ttys) / sizeof(ttys[0]))) {
+        return NULL;
+    }
+    return ttys[idx];
+}
+
 struct tty *tty_alloc(struct tty_driver *driver, int idx) {
-    struct tty *tty = kmalloc(sizeof(struct tty));
-    if (!tty) return NULL;
+    struct tty *tty;
+#ifndef HOST_TEST
+    size_t pages = (sizeof(struct tty) + 4095U) / 4096U;
+    tty = pmm_alloc_contiguous(pages);
+#else
+    tty = kmalloc(sizeof(struct tty));
+#endif
+    if (!tty) {
+        return NULL;
+    }
     memset(tty, 0, sizeof(struct tty));
     
     tty->magic = TTY_MAGIC;
     tty->driver = driver;
     tty->index = idx;
+    tty->devnode = NULL;
     
     spinlock_init(&tty->lock, "tty_lock");
 
@@ -115,9 +136,16 @@ struct tty *tty_alloc(struct tty_driver *driver, int idx) {
         int ret = driver->install(driver, tty); // Use the signature from main
         if (ret != 0) {
             if (idx >= 0 && idx < 64) ttys[idx] = NULL;
+#ifndef HOST_TEST
+            pmm_free_contiguous(tty, pages);
+#else
             kfree(tty, sizeof(struct tty));
+#endif
             return NULL;
         }
+    }
+    if (idx >= 0 && idx < 64) {
+        ttys[idx] = tty;
     }
     return tty;
 }
@@ -130,7 +158,11 @@ void tty_free(struct tty *tty) {
     if (tty->index >= 0 && tty->index < 64) {
         ttys[tty->index] = NULL;
     }
+#ifndef HOST_TEST
+    pmm_free_contiguous(tty, (sizeof(struct tty) + 4095U) / 4096U);
+#else
     kfree(tty, sizeof(struct tty));
+#endif
 }
 
 // Minimal ring buffer ops
@@ -762,6 +794,9 @@ int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
      * We assume tty pointer remains valid (held by open file reference).
      */
     if (ret == -1 && tty->driver && tty->driver->ioctl) {
+        if ((uintptr_t)tty->driver->ioctl < KERN_BASE) {
+            return -EIO;
+        }
         ret = tty->driver->ioctl(tty, cmd, (unsigned long)arg);
     }
 
