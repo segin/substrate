@@ -147,23 +147,20 @@ int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, voi
         return ENOENT;
     }
 
-    int locked = 1;
-    if (oid->oid_kind & CTLFLAG_NOLOCK) {
-        mutex_unlock(&sysctl_mutex);
-        locked = 0;
-    }
-
     /* 5. Permission checks (Basic) */
     if ((oid->oid_kind & CTLFLAG_WR) == 0 && newp != NULL) {
-        if (locked) {
-            mutex_unlock(&sysctl_mutex);
-        }
+        mutex_unlock(&sysctl_mutex);
         return EPERM;
     }
 
-    /* 6. Call parameters setup */
-    // For standard handlers, we might need to handle buffer copyout results
-    // The handler does the work.
+    /* 6. Lock dropping and Call parameters setup */
+    int nolock = (oid->oid_kind & CTLFLAG_NOLOCK);
+    req.lock = !nolock;
+
+    if (nolock) {
+        oid->oid_refcnt++;
+        mutex_unlock(&sysctl_mutex);
+    }
 
     /* 7. Invoke Handler */
     if (oid->oid_handler) {
@@ -172,9 +169,12 @@ int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, voi
         error = EINVAL;
     }
 
-    if (locked) {
-        mutex_unlock(&sysctl_mutex);
+    if (nolock) {
+        mutex_lock(&sysctl_mutex);
+        oid->oid_refcnt--;
     }
+
+    mutex_unlock(&sysctl_mutex);
 
     /* 8. Copy out new length if requested and no error */
     if (error == 0 && oldlenp) {
@@ -220,6 +220,15 @@ void sysctl_unregister_oid(struct sysctl_oid *oidp) {
     struct sysctl_oid *p, *prev = NULL;
 
     mutex_lock(&sysctl_mutex);
+
+    // Wait for any active lock-dropped handlers to finish
+    while (oidp->oid_refcnt > 0) {
+        mutex_unlock(&sysctl_mutex);
+        /* In a real kernel, use a sleep queue or condvar. Here we yield. */
+        __asm__ volatile ("pause" ::: "memory"); // Simple backoff/yield equivalent
+        mutex_lock(&sysctl_mutex);
+    }
+
     for (p = parent->slh_first; p; p = p->oid_link) {
         if (p == oidp) {
             if (prev) prev->oid_link = p->oid_link;

@@ -85,7 +85,7 @@ int sysctlnametomib(const char *name, int *mibp, size_t *sizep);
 #define CTLFLAG_RD      0x80000000  /* Allow reads of variable */
 #define CTLFLAG_WR      0x40000000  /* Allow writes to the variable */
 #define CTLFLAG_RW      (CTLFLAG_RD|CTLFLAG_WR)
-#define CTLFLAG_NOLOCK  0x20000000  /* Don't hold sysctl lock while calling handler */
+#define CTLFLAG_NOLOCK  0x20000000  /* Execute handler without holding sysctl lock */
 #define CTLFLAG_ANYBODY 0x10000000  /* All users can set this */
 #define CTLFLAG_SECURE  0x08000000  /* Permit set only if securelevel<=0 */
 #define CTLFLAG_PRISON  0x04000000  /* Prisoned roots can fiddle */
