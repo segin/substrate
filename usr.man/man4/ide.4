@@ -51,13 +51,18 @@ instructions (see
 ) to transfer data in 256-word (512-byte) chunks. This reduces CPU overhead compared to byte-by-byte or word-by-word loops, particularly in virtualized environments where instruction emulation is costly.
 .TP
 .B DMA Support
-Bus Master DMA is supported on compatible controllers (for example Intel
-PIIX4-class IDE) for high-performance, low-CPU-usage transfers.
+Bus Master DMA support exists in the driver for compatible controllers (for
+example Intel PIIX4-class IDE), but PCI probe does not enable it
+automatically.  The default attach path stays PIO-first so that PCI/native
+channel discovery does not silently change the transfer engine used for root
+filesystem I/O.
 PIO paths remain polling-based, so classic non-PCI systems do not depend on
 DMA or shared-IRQ support.
-If a device repeatedly fails DMA reads or writes at runtime, the driver
-demotes that device to PIO and keeps the controller online instead of
-re-entering the same failing DMA path indefinitely.
+If a device repeatedly fails DMA reads or writes at runtime after DMA has been
+enabled, the driver demotes that device to PIO and keeps the controller online
+instead of re-entering the same failing DMA path indefinitely.
+After repeated transfer failures, the driver grants at most one successful
+channel-reset recovery window before it marks the device offline.
 .TP
 .B ATAPI
 Packet commands (ATAPI) are supported for CD-ROM and DVD drives, allowing SCSI-like command execution over the IDE interface.
@@ -77,6 +82,8 @@ If PCI IDE native mode is present, channel I/O bases and IRQs may be
 overridden from PCI BAR and interrupt-line configuration.
 Controllers exposing additional channel pairs through separate PCI functions
 are mapped onto the tertiary and quaternary channel slots.
+Bus-master DMA BARs may be discovered from PCI configuration space without
+being enabled for normal transfers.
 If PCI is absent, or if additional IDE channels are not exposed through PCI,
 the driver falls back to the legacy fixed I/O model above.
 

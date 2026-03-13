@@ -108,12 +108,14 @@ static void ide_refresh_device_slot(uint8_t channel, uint8_t drive) {
     uint64_t total_sectors;
     uint32_t sector_size = 512;
     uint8_t dma_forced_pio = 0;
+    uint8_t reset_recovery_seen = 0;
 
     if (slot < 0 || slot >= MAX_IDE_DEVICES) {
         return;
     }
 
     dma_forced_pio = ide_devices[slot].dma_forced_pio;
+    reset_recovery_seen = ide_devices[slot].reset_recovery_seen;
 
     memset(buf, 0, sizeof(buf));
 
@@ -129,6 +131,7 @@ static void ide_refresh_device_slot(uint8_t channel, uint8_t drive) {
 
     ide_parse_identify_data(&ide_devices[slot], buf, (uint8_t)type, channel, drive);
     ide_devices[slot].dma_forced_pio = dma_forced_pio;
+    ide_devices[slot].reset_recovery_seen = reset_recovery_seen;
     total_sectors = ide_devices[slot].size;
     if (type == 1) {
         uint32_t lba;
@@ -214,7 +217,19 @@ static void ide_mark_offline(ide_drive_ctx_t *ctx, const char *op) {
         return;
     }
 
+    if (dev->reset_recovery_seen) {
+        dev->offline = 1;
+        snprintf(msg, sizeof(msg),
+                 "ide: %s marking ide%u offline after repeated %s failures post-reset\n",
+                 dev->model[0] ? dev->model : "(unknown)",
+                 ctx->index,
+                 op);
+        kprint(msg);
+        return;
+    }
+
     if (ide_software_reset_channel(ctx->channel) == 0 && !dev->offline) {
+        dev->reset_recovery_seen = 1;
         snprintf(msg, sizeof(msg),
                  "ide: ide%u recovered after channel reset during %s\n",
                  (unsigned int)ctx->index, op);
@@ -317,18 +332,6 @@ static int ide_legacy_channel_present(const char *name) {
 
 static void ide_configure_from_pci(void) {
     (void)ide_pci_configure_channels(ide_channels, ide_channel_irq_shared);
-
-    for (uint8_t ch = 0; ch < MAX_IDE_CHANNELS; ch += 2) {
-        if (ide_channels[ch].bm_base == 0 &&
-            (ch + 1 >= MAX_IDE_CHANNELS || ide_channels[ch + 1].bm_base == 0)) {
-            continue;
-        }
-
-        ide_dma_init_pair(ch, ide_channels[ch].bm_base,
-                          (uint16_t)((ch + 1 < MAX_IDE_CHANNELS)
-                                         ? ide_channels[ch + 1].bm_base
-                                         : 0));
-    }
 }
 
 static int ide_identify_channel(uint8_t channel, uint8_t drive, void *buffer) {
@@ -1629,6 +1632,7 @@ static int ide_blkdev_read(blkdev_t *dev, uint64_t sector, uint32_t count,
         ret = ide_transfer_read_once(ctx, sector, count, buffer);
         if (ret >= 0) {
             ide_dev->offline = 0;
+            ide_dev->reset_recovery_seen = 0;
             return ret;
         }
         if (attempt < 2) {
@@ -1661,9 +1665,11 @@ static int ide_blkdev_write(blkdev_t *dev, uint64_t sector, uint32_t count,
     }
 
     ret = ide_transfer_write_once(ctx, sector, count, buffer);
-    if (ret < 0) {
-        ide_mark_offline(ctx, "write");
+    if (ret >= 0) {
+        ide_dev->reset_recovery_seen = 0;
+        return ret;
     }
+    ide_mark_offline(ctx, "write");
     return ret;
 }
 

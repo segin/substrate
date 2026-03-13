@@ -204,6 +204,7 @@ typedef struct {
     uint8_t  udma_modes;   /* Supported ultra DMA modes */
     uint8_t  dma_mode;     /* DMA mode (0=none, 1=UDMA, 2=MWDMA) */
     uint8_t  dma_forced_pio; /* Runtime DMA demotion after controller faults */
+    uint8_t  reset_recovery_seen; /* A prior channel reset recovered this device once */
     uint8_t  offline;      /* Driver marked device offline after repeated errors */
 } ide_device_t;
 
