@@ -214,7 +214,6 @@ bc_num *bc_from_string(const char *s, int ibase) {
     return bc_from_string_base(s, ibase);
 }
 
-// Print base 10 (optimised)
 void bc_print(bc_num *n) {
     if (!n) {
         printf("(null)");

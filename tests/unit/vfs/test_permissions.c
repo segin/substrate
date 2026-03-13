@@ -3,6 +3,7 @@
 #include <sys/file.h>
 #include <sys/fcntl.h>
 #include <vfs/vfs.h>
+#include <fcntl.h>
 #include <kern/sched.h>
 #include <string.h>
 
