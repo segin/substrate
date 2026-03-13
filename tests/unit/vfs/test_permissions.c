@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <sys/file.h>
 #include <vfs/vfs.h>
+#include <sys/fcntl.h>
 #include <kern/sched.h>
 #include <string.h>
 
