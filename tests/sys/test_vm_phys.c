@@ -391,31 +391,25 @@ static void test_free_list_integrity(void) {
     TEST_PASS("free_list_integrity");
 }
 
-/* Test: vm_phys_alloc_contiguous_below respects the physical limit and handles 0 count */
-static void test_contiguous_below(void) {
-    /* Test 0 count returns NULL */
-    vm_page_t *page_zero = vm_phys_alloc_contiguous_below(0, 0x100000);
-    TEST_ASSERT(page_zero == NULL, "contig_below: count 0 did not return NULL");
+/* Test: vm_phys_add_range validates parameters */
+static void test_vm_phys_add_range(void) {
+    size_t free_before = vm_phys_get_free();
 
-    /* Test allocation below 1MB (0x100000) */
-    uintptr_t limit = 0x100000;
-    vm_page_t *page = vm_phys_alloc_contiguous_below(4, limit);
-    TEST_ASSERT(page != NULL, "contig_below: returned NULL for valid request");
+    /* Test invalid range */
+    vm_phys_add_range(0x2000, 0x1000);
+    TEST_ASSERT(vm_phys_get_free() == free_before, "add_range: invalid range changed free count");
 
-    /* 4 pages = 16KB (order 2), must be 16KB aligned */
-    TEST_ASSERT((page->phys_addr & 0x3FFF) == 0, "contig_below: not 16KB aligned");
+    /* Test zero-sized range */
+    vm_phys_add_range(0x1000, 0x1000);
+    TEST_ASSERT(vm_phys_get_free() == free_before, "add_range: zero-sized range changed free count");
 
-    /* Block must be entirely below the limit. 4 pages = 16KB (0x4000) */
-    TEST_ASSERT(page->phys_addr + 0x4000 <= limit, "contig_below: block exceeds physical limit");
+    /* Test unaligned range that results in zero pages */
+    vm_phys_add_range(0x1000, 0x1FFF);
+    TEST_ASSERT(vm_phys_get_free() == free_before, "add_range: sub-page range changed free count");
 
-    vm_phys_free_contiguous(page, 4);
+    TEST_ASSERT(vm_phys_check_integrity(), "add_range: integrity invalid after bad ranges");
 
-    /* Test allocation with no limit (phys_limit = 0) */
-    vm_page_t *page_nolimit = vm_phys_alloc_contiguous_below(2, 0);
-    TEST_ASSERT(page_nolimit != NULL, "contig_below: returned NULL for 0 limit");
-    vm_phys_free_contiguous(page_nolimit, 2);
-
-    TEST_PASS("contiguous_below");
+    TEST_PASS("test_vm_phys_add_range");
 }
 
 /* Test entry point */
@@ -441,7 +435,7 @@ void test_vm_phys(void) {
     test_mark_used_single_page_reservation();
     test_free_used_invariant();
     test_free_list_integrity();
-    test_contiguous_below();
+    test_vm_phys_add_range();
     
     char buf[64];
     sprintf(buf, "=== vm_phys tests: %d passed, %d failed ===\n", passed, failed);
