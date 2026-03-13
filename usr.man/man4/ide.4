@@ -55,6 +55,9 @@ Bus Master DMA is supported on compatible controllers (for example Intel
 PIIX4-class IDE) for high-performance, low-CPU-usage transfers.
 PIO paths remain polling-based, so classic non-PCI systems do not depend on
 DMA or shared-IRQ support.
+If a device repeatedly fails DMA reads or writes at runtime, the driver
+demotes that device to PIO and keeps the controller online instead of
+re-entering the same failing DMA path indefinitely.
 .TP
 .B ATAPI
 Packet commands (ATAPI) are supported for CD-ROM and DVD drives, allowing SCSI-like command execution over the IDE interface.

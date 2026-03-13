@@ -112,3 +112,8 @@ The driver supports ATA software reset on a per-channel basis:
 
 Repeated transfer failures attempt a channel reset once before the driver marks
 the failing device offline.
+DMA failures are treated separately from generic media/offline failure: the
+driver blacklists DMA on the affected ATA device, clears its bus-master DMA
+enable bit, and falls back to PIO for future reads. Writes are demoted in the
+same way but are not transparently retried in the same call because a timed-out
+DMA write may already have reached the medium.
