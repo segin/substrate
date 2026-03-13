@@ -207,13 +207,6 @@ static void parse_definitions(void) {
         if (c == '%') {
             int c2 = next_char();
             if (c2 == '%') {
-                // Determine if this is truly the section delimiter
-                // POSIX: "The first %% marks the beginning of the Rules section"
-                // It must be at the beginning of a line.
-                // We are at beginning of logic (looping char by char, but logic needs to be valid)
-                // Wait, this loop is char-by-char. We need to handle line context.
-                // Let's assume we are at start of line for now or track column.
-                
                 // Unput to let caller handle section switch or just return?
                 // parse_input expects to handle the switch.
                 unput_char(c2);

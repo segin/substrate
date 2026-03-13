@@ -420,6 +420,37 @@ static void test_vm_page_object_linkage(void) {
 }
 
 /* Test: pv_entry insert/remove/remove_all maintains backlink list */
+static void test_vm_page_try_to_free(void) {
+    vm_page_t *page = vm_page_alloc(NULL, 0, 0);
+    TEST_ASSERT(page != NULL, "try_to_free: initial alloc failed");
+
+    // NULL check
+    TEST_ASSERT(vm_page_try_to_free(NULL) == 0, "try_to_free: handled NULL incorrectly");
+
+    // Clear busy flag so we can test other conditions
+    page->flags &= ~PG_BUSY;
+
+    // Test dirty page
+    page->flags |= PG_DIRTY;
+    TEST_ASSERT(vm_page_try_to_free(page) == 0, "try_to_free: freed a dirty page");
+    page->flags &= ~PG_DIRTY;
+
+    // Test busy page
+    page->flags |= PG_BUSY;
+    TEST_ASSERT(vm_page_try_to_free(page) == 0, "try_to_free: freed a busy page");
+    page->flags &= ~PG_BUSY;
+
+    // Test wired page
+    page->wire_count = 1;
+    TEST_ASSERT(vm_page_try_to_free(page) == 0, "try_to_free: freed a wired page");
+    page->wire_count = 0;
+
+    // Test clean, inactive page (should succeed and free it)
+    TEST_ASSERT(vm_page_try_to_free(page) == 1, "try_to_free: failed to free a clean inactive page");
+
+    TEST_PASS("vm_page_try_to_free");
+}
+
 static void test_pv_entry_list_manipulation(void) {
     vm_page_t page;
     struct pmap *pmap1 = (struct pmap *)(uintptr_t)0x1000;
@@ -472,6 +503,7 @@ void test_vm_page_queue(void) {
     test_queue_accounting_invariant();
     test_vm_page_object_linkage();
     test_pv_entry_list_manipulation();
+    test_vm_page_try_to_free();
     
     char buf[64];
     sprintf(buf, "=== vm_page tests: %d passed, %d failed ===\n", passed, failed);
