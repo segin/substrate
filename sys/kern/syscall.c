@@ -1071,18 +1071,45 @@ int sys_unlink(const char *path) {
 }
 
 int kern_unlink(const char *path) {
+    if (!path) return -EINVAL;
+    
+    char dir[256];
+    char file[128];
+    
+    // Find the last slash to separate directory and filename
+    const char *last_slash = NULL;
+    for (const char *p = path; *p; p++) {
+        if (*p == '/') last_slash = p;
+    }
+    
     fs_node_t *parent = NULL;
-    const char *name = NULL;
-    int err;
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
 
-    if (!path) return -1;
-
-    err = kern_resolve_parent(path, &parent, &name);
-    if (err != 0) return err;
-
-    if (!parent || !name || !name[0]) return -1;
-
-    return unlink_fs(parent, name);
+    if (!last_slash) {
+        // No slash - parent is CWD
+        parent = cwd;
+        if (strlcpy(file, path, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
+    } else if (last_slash == path) {
+        // Only one slash at the beginning - parent is root
+        parent = root;
+        if (strlcpy(file, path + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
+    } else {
+        // Split into dir and file
+        size_t dirlen = (size_t)(last_slash - path);
+        if (dirlen >= sizeof(dir)) return -ENAMETOOLONG;
+        memcpy(dir, path, dirlen);
+        dir[dirlen] = '\0';
+        
+        if (strlcpy(file, last_slash + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
+        
+        parent = vfs_lookup((path[0] == '/') ? root : cwd, dir);
+    }
+    
+    if (!parent) return -ENOENT;
+    if (!file[0]) return -EINVAL;
+    
+    return unlink_fs(parent, file);
 }
 
 int sys_link(const char *oldpath, const char *newpath) {
@@ -1093,28 +1120,44 @@ int sys_link(const char *oldpath, const char *newpath) {
 }
 
 int kern_link(const char *oldpath, const char *newpath) {
-    fs_node_t *root;
-    fs_node_t *cwd;
-    fs_node_t *source;
-    fs_node_t *parent = NULL;
-    const char *name = NULL;
-    int err;
+    if (!oldpath || !newpath) return -EINVAL;
 
-    if (!oldpath || !newpath) return -1;
-
-    root = current_process->root_node ? current_process->root_node : fs_root;
-    cwd = current_process->cwd_node ? current_process->cwd_node : root;
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
 
     // Resolve oldpath to source node
-    source = vfs_lookup(cwd, oldpath);
-    if (!source) return -1;
+    fs_node_t *source = vfs_lookup(cwd, oldpath);
+    if (!source) return -ENOENT;
 
-    err = kern_resolve_parent(newpath, &parent, &name);
-    if (err != 0) return err;
+    // Resolve newpath to parent directory and name
+    char dir[256];
+    char file[128];
+    const char *last_slash = NULL;
+    for (const char *p = newpath; *p; p++) {
+        if (*p == '/') last_slash = p;
+    }
 
-    if (!parent || !name || !name[0]) return -1;
+    fs_node_t *parent = NULL;
+    if (!last_slash) {
+        parent = cwd;
+        if (strlcpy(file, newpath, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
+    } else if (last_slash == newpath) {
+        parent = root;
+        if (strlcpy(file, newpath + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
+    } else {
+        size_t dirlen = (size_t)(last_slash - newpath);
+        if (dirlen >= sizeof(dir)) return -ENAMETOOLONG;
+        memcpy(dir, newpath, dirlen);
+        dir[dirlen] = '\0';
+        
+        if (strlcpy(file, last_slash + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
+        parent = vfs_lookup((newpath[0] == '/') ? root : cwd, dir);
+    }
 
-    return link_fs(parent, source, name);
+    if (!parent) return -ENOENT;
+    if (!file[0]) return -EINVAL;
+
+    return link_fs(parent, source, file);
 }
 
 int sys_readlink(const char *pathname, char *buf, size_t bufsiz) {

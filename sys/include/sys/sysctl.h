@@ -132,9 +132,12 @@ struct sysctl_oid {
 #define CTLFLAG_RD      0x80000000
 #define CTLFLAG_WR      0x40000000
 #define CTLFLAG_RW      (CTLFLAG_RD|CTLFLAG_WR)
-#define CTLFLAG_DYN     0x20000000  /* Dynamically allocated */
+#define CTLFLAG_NOLOCK  0x20000000  /* Execute handler without holding sysctl lock */
 #define CTLFLAG_ANYBODY 0x10000000  /* Accessible by any user */
 #define CTLFLAG_SECURE  0x08000000  /* Require securelevel check */
+#define CTLFLAG_PRISON  0x04000000  /* Prisoned roots can fiddle */
+#define CTLFLAG_DYN     0x02000000  /* Dynamically allocated */
+#define CTLFLAG_SKIP    0x01000000  /* System tunable, but not a sysctl */
 #define CTLFLAG_MASK    0xf8000000
 #define CTLTYPE_MASK    0x0000000f
 

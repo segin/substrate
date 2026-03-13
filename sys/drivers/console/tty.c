@@ -692,7 +692,6 @@ int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
             }
             if (!is_session_leader) {
                 // Must be session leader
-                // return EPERM;
                 ret = -1;
                 break;
             }
