@@ -1,8 +1,8 @@
-#include <fcntl.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <sys/file.h>
 #include <vfs/vfs.h>
+#include <fcntl.h>
 #include <kern/sched.h>
 #include <string.h>
 
