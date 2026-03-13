@@ -11,6 +11,7 @@
 void run_pmap_tests(void);
 void run_pmap_protect_property_tests(void);
 void run_mmap_tests(void);
+void run_brk_tests(void);
 void run_pid_tests(void);
 void run_unlink_tests(void);
 void run_unlink_property_tests(void);
@@ -39,7 +40,6 @@ extern void run_string_tests(void);
 extern void run_sched_bench(void);
 extern void run_sched_dequeue_bench(void);
 extern void run_vnode_lock_tests(void);
-extern void run_vnode_ref_tests(void);
 extern void run_kobject_tests(void);
 void run_reboot_tests(void);
 extern void test_pipe_race(void);
@@ -169,6 +169,10 @@ void run_kernel_tests(void) {
     
     if (all || strcmp(test_arg, "mmap") == 0) {
         run_mmap_tests();
+    }
+
+    if (all || strcmp(test_arg, "brk") == 0) {
+        run_brk_tests();
     }
 
     if (all || strcmp(test_arg, "futex") == 0) {
@@ -310,10 +314,6 @@ void run_kernel_tests(void) {
 
     if (all || strcmp(test_arg, "vnode_lock") == 0) {
         run_vnode_lock_tests();
-    }
-
-    if (all || strcmp(test_arg, "vnode_ref") == 0) {
-        run_vnode_ref_tests();
     }
 
     if (all || strcmp(test_arg, "driver") == 0) {
