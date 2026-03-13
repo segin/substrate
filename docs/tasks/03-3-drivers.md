@@ -698,7 +698,7 @@
             - [x] Mouse packet decoding: standard 3‑byte packets with known dx/dy/buttons. (REQ: REQ-03-0600)
             - [x] Mouse packet realignment: inject byte with bit 3 clear, verify resync. (REQ: REQ-03-0601)
             - [x] Mouse overflow: inject overflow bits, verify clamping. (REQ: REQ-03-0602)
-            - [ ] Mouse event queue: fill, overflow, drain. (REQ: REQ-03-0603)
+            - [x] Mouse event queue: fill, overflow, drain. (REQ: REQ-03-0603)
         - [ ] **Property Tests:** (REQ: REQ-03-0226, REQ-03-0604)
             - [x] Key buffer invariant: `0 <= head, tail < KBD_BUFFER_SIZE`, head == tail ↔ empty. (REQ: REQ-03-0605)
             - [x] Mouse queue invariant: `0 <= head, tail < MOUSE_QUEUE_SIZE`. (REQ: REQ-03-0606)

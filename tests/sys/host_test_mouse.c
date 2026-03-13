@@ -186,11 +186,37 @@ static void test_mouse_overflow_clamps(void) {
     assert(mouse_y == -255);
 }
 
+static void test_mouse_event_queue_fill_overflow_and_drain(void) {
+    mouse_event_t ev;
+    int i;
+
+    reset_state();
+
+    for (i = 0; i < MOUSE_QUEUE_SIZE + 4; i++) {
+        mouse_q_push(i, -i, (uint8_t)(i & 0x07));
+        assert(mouse_q_head >= 0 && mouse_q_head < MOUSE_QUEUE_SIZE);
+        assert(mouse_q_tail >= 0 && mouse_q_tail < MOUSE_QUEUE_SIZE);
+    }
+
+    for (i = 0; i < MOUSE_QUEUE_SIZE - 1; i++) {
+        assert(mouse_get_event(&ev) == 1);
+        assert(ev.dx == i);
+        assert(ev.dy == -i);
+        assert(ev.buttons == (uint8_t)(i & 0x07));
+        assert(mouse_q_head >= 0 && mouse_q_head < MOUSE_QUEUE_SIZE);
+        assert(mouse_q_tail >= 0 && mouse_q_tail < MOUSE_QUEUE_SIZE);
+    }
+
+    assert(mouse_get_event(&ev) == 0);
+    assert(mouse_q_head == mouse_q_tail);
+}
+
 int main(void) {
     test_mouse_init_registers_device();
     test_mouse_packet_decode_and_queue();
     test_mouse_realigns_on_bad_first_byte();
     test_mouse_overflow_clamps();
+    test_mouse_event_queue_fill_overflow_and_drain();
     puts("host_test_mouse: PASS");
     return 0;
 }
