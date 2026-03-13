@@ -403,7 +403,7 @@ static void test_vm_phys_early_init(void) {
     for (size_t i = 0; i < 4; i++) {
         TEST_ASSERT(test_pages[i].magic_head == VM_PAGE_MAGIC, "early_init: magic_head invalid");
         TEST_ASSERT(test_pages[i].magic_tail == VM_PAGE_MAGIC, "early_init: magic_tail invalid");
-        TEST_ASSERT(test_pages[i].phys_addr == i * 4096, "early_init: phys_addr invalid");
+        TEST_ASSERT(test_pages[i].phys_addr == i * PMM_BLOCK_SIZE, "early_init: phys_addr invalid");
         TEST_ASSERT(test_pages[i].flags == 0, "early_init: flags not zero");
     }
 
