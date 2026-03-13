@@ -563,12 +563,7 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
     ctx->dcache_idx = 0;
     memset(ctx->dcache, 0, sizeof(ctx->dcache));
 
-    // If this cache slot was previously used, it might have allocated buffers.
-    // We should free them to avoid leaks when reusing the slot for a new inode.
-    // In a more sophisticated cache, we might reuse them, but here we prioritize correctness.
-    uint32_t block_size = fs->block_size; // Assumption: block_size matches what was allocated
-    // Note: If block_size changed (unlikely for same FS mount), we definitely need to free.
-    // Since we only support one mount (ext2_fs) globally right now, block_size is constant.
+    uint32_t block_size = fs->block_size;
 
     if (ctx->block_buf) { kfree(ctx->block_buf, block_size); ctx->block_buf = NULL; }
     if (ctx->indirect_buf) { kfree(ctx->indirect_buf, block_size); ctx->indirect_buf = NULL; }
