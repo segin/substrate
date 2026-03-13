@@ -6,6 +6,7 @@
 #include <kern/version.h>
 #include <sys/session.h>
 #include <drivers/console/uart/uart.h>
+#include <sys/vt.h>
 #include <string.h>
 #include <vm/vm_kmem.h>
 #include <stdio.h>
@@ -14,6 +15,14 @@
 // Globals
 static console_backend_t *backends = NULL;
 static struct tty *console_tty = NULL;
+
+static struct tty *console_resolve_tty(void) {
+    struct tty *tty = vt_get_active_tty();
+    if (tty) {
+        return tty;
+    }
+    return console_tty;
+}
 
 void console_init(void) {
     backends = NULL;
@@ -72,26 +81,29 @@ void console_clear(void) {
 
 // Push input to TTY layer (called by keyboard handler etc.)
 void console_push_char(char c) {
-    if (console_tty) {
-        tty_flip_buffer_push(console_tty, c);
+    struct tty *tty = console_resolve_tty();
+    if (tty) {
+        tty_flip_buffer_push(tty, c);
     }
 }
 
 // DevFS Hooks using TTY Layer
 static size_t console_node_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node; (void)offset;
-    if (!console_tty) return 0;
-    return tty_read(console_tty, (char*)buffer, size);
+    struct tty *tty = console_resolve_tty();
+    if (!tty) return 0;
+    return tty_read(tty, (char*)buffer, size);
 }
 
 static size_t console_node_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node; (void)offset;
-    if (!console_tty) {
+    struct tty *tty = console_resolve_tty();
+    if (!tty) {
         backend_write((const char *)buffer, size);
         return size;
     }
 
-    int written = tty_write(console_tty, (const char*)buffer, size);
+    int written = tty_write(tty, (const char*)buffer, size);
     if (serial_debug_enabled && size > 0) {
         uart_write((const char *)buffer, size);
     }
@@ -104,14 +116,16 @@ static size_t console_node_write(fs_node_t *node, off_t offset, size_t size, con
 
 static int console_node_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     (void)node;
-    if (!console_tty) return -1;
-    return tty_ioctl(console_tty, request, (unsigned long)arg);
+    struct tty *tty = console_resolve_tty();
+    if (!tty) return -1;
+    return tty_ioctl(tty, request, (unsigned long)arg);
 }
 
 static int console_node_poll(fs_node_t *node, void *waiter) {
     (void)node;
-    if (!console_tty) return 0; // POLLNVAL?
-    return tty_poll(console_tty, waiter);
+    struct tty *tty = console_resolve_tty();
+    if (!tty) return 0; // POLLNVAL?
+    return tty_poll(tty, waiter);
 }
 
 static void console_node_open(fs_node_t *node) {
@@ -193,16 +207,16 @@ void console_attach_std_fds(struct process *proc) {
     }
 
     // Associate process with console TTY
-    if (console_tty) {
-        proc->tty = console_tty;
+    if (console_resolve_tty()) {
+        proc->tty = console_resolve_tty();
         /*
          * Init becomes session leader before this call.
          * Make that session/pgrp foreground on the console so
          * job-control shells don't spin on tcgetpgrp/getpgrp mismatch.
          */
         if (proc->p_pgrp && proc->p_pgrp->pg_session) {
-            console_tty->session = proc->p_pgrp->pg_session->s_sid;
-            console_tty->pgrp = proc->p_pgrp->pg_id;
+            proc->tty->session = proc->p_pgrp->pg_session->s_sid;
+            proc->tty->pgrp = proc->p_pgrp->pg_id;
         }
     }
 

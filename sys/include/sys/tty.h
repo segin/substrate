@@ -67,6 +67,7 @@ struct tty {
     spinlock_t lock;
     int delct; // Delimiter count in raw_buf
     int canon_len; // Current canonical line length for echo/editing
+    int output_col; // Current output column for tab/newline expansion
     
     // Wait queues
     void *read_wait;

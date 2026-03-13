@@ -109,6 +109,7 @@ struct tty *tty_alloc(struct tty_driver *driver, int idx) {
     
     tty->winsize.ws_row = 25;
     tty->winsize.ws_col = 80;
+    tty->output_col = 0;
 
     if (driver && driver->install) {
         int ret = driver->install(driver, tty); // Use the signature from main
@@ -222,9 +223,13 @@ static void tty_output_locked(char c, struct tty *tp) {
     
     // Turn tabs to spaces
     if (c == '\t' && (tp->termios.c_oflag & OXTABS)) { // using OXTABS instead of XTABS
+        int spaces = 8 - (tp->output_col & 7);
+        if (spaces <= 0) {
+            spaces = 8;
+        }
         do {
             tty_output_locked(' ', tp);
-        } while (tp->winsize.ws_col && (tp->winsize.ws_col % 8));
+        } while (--spaces > 0);
         return;
     }
     
@@ -234,7 +239,20 @@ static void tty_output_locked(char c, struct tty *tp) {
     
     // Put to write buffer
     if (tty_buf_put(&tp->write_buf, c) == 0) {
-        // v6 delays... we omit delays for modern HW
+        if (c == '\r') {
+            tp->output_col = 0;
+        } else if (c == '\n') {
+            tp->output_col = 0;
+        } else if (c == '\b') {
+            if (tp->output_col > 0) {
+                tp->output_col--;
+            }
+        } else {
+            tp->output_col++;
+            if (tp->winsize.ws_col > 0 && tp->output_col >= tp->winsize.ws_col) {
+                tp->output_col = 0;
+            }
+        }
     } else {
         // Buffer full
         // sleep(&tp->write_buf, ...);
@@ -248,6 +266,8 @@ static void tty_start_locked(struct tty *tp) {
         unsigned char buf[128];
         int n;
         while ((n = tp->write_buf.count) > 0) {
+            int i;
+            int written;
             if (n > (int)sizeof(buf)) n = sizeof(buf);
             
             // Check driver write room
@@ -258,18 +278,24 @@ static void tty_start_locked(struct tty *tp) {
             }
             
             // Peek and pull chars
-            for (int i = 0; i < n; i++) {
+            for (i = 0; i < n; i++) {
                 char c;
                 tty_buf_get(&tp->write_buf, &c);
                 buf[i] = (unsigned char)c;
             }
             
-            int written = tp->driver->write(tp, buf, n);
+            written = tp->driver->write(tp, buf, n);
             if (written <= 0) break; // Driver can't accept more
             
-            // If driver wrote less than requested, we'd need to put back chars...
-            // but our tty_buf_get already removed them.
-            // Simplified: assume driver writes what it can or we pause.
+            if (written < n) {
+                while (i > written) {
+                    i--;
+                    tp->write_buf.tail = (tp->write_buf.tail - 1 + TTY_BUF_SIZE) % TTY_BUF_SIZE;
+                    tp->write_buf.data[tp->write_buf.tail] = (char)buf[i];
+                    tp->write_buf.count++;
+                }
+                break;
+            }
         }
     } else {
         char c;
@@ -280,9 +306,6 @@ static void tty_start_locked(struct tty *tp) {
         }
     }
     
-    if (tp->driver->flush_chars) {
-        tp->driver->flush_chars(tp);
-    }
     if (tp->driver->flush_chars) {
         tp->driver->flush_chars(tp);
     }
@@ -557,7 +580,7 @@ int tty_read(struct tty *tty, char *buf, int len) {
         // But we don't have errno access here easily.
         // Assume syscall wrapper handles signal interruption.
         TTY_UNLOCK(tty);
-        return -4; // EINTR 
+        return -EINTR;
     }
     
     // If read_buf is empty, canonicalize a line
@@ -607,7 +630,7 @@ int tty_write(struct tty *tty, const char *buf, int len) {
 
     if (tty_check_write(tty)) {
         TTY_UNLOCK(tty);
-        return -4; // EINTR
+        return -EINTR;
     }
     
     for (int i = 0; i < len; i++) {

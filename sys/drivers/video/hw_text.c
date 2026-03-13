@@ -600,25 +600,50 @@ static const struct ansi_callbacks ansi_cb = {
 };
 
 static int vt_tty_open(struct tty *tty) {
-    int idx = tty->index;
+    (void)tty;
+    return 0;
+}
+
+static void vt_tty_close(struct tty *tty) {
+    (void)tty;
+}
+
+static int vt_tty_install(struct tty_driver *driver, struct tty *tty) {
+    int idx;
     vt_state_t *vt;
 
+    (void)driver;
+    if (!tty) {
+        return -1;
+    }
+
+    idx = tty->index;
     if (idx < 0 || idx >= VT_MAX) {
         return -1;
     }
 
     vt = vt_get_state(idx);
+    if (!vt) {
+        return -1;
+    }
     vt->tty = tty;
     tty->driver_data = vt;
     hw_text_apply_tty_winsize(tty);
     return 0;
 }
 
-static void vt_tty_close(struct tty *tty) {
-    vt_state_t *vt = (vt_state_t *)tty->driver_data;
-    if (vt) {
+static void vt_tty_remove(struct tty_driver *driver, struct tty *tty) {
+    vt_state_t *vt;
+
+    (void)driver;
+    if (!tty) {
+        return;
+    }
+    vt = (vt_state_t *)tty->driver_data;
+    if (vt && vt->tty == tty) {
         vt->tty = NULL;
     }
+    tty->driver_data = NULL;
 }
 
 static int vt_tty_write(struct tty *tty, const unsigned char *buf, int count) {
@@ -662,6 +687,8 @@ static struct tty_driver vt_driver = {
     .name = "tty",
     .major = 4,
     .minor_start = 1,
+    .install = vt_tty_install,
+    .remove = vt_tty_remove,
     .open = vt_tty_open,
     .close = vt_tty_close,
     .write = vt_tty_write,

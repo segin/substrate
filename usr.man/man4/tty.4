@@ -13,6 +13,11 @@ is a synonym for the controlling terminal of the current process.
 It can be used by programs that need to access the terminal explicitly,
 regardless of standard input/output redirection.
 .PP
+On the kernel text console, keyboard input and
+.B /dev/console
+I/O resolve against the active virtual terminal first so the visible VT and
+its line discipline stay aligned.
+.PP
 Opening
 .B /dev/tty
 will fail with

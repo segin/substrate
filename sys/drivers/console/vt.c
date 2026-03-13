@@ -95,6 +95,14 @@ vt_state_t *vt_get_state(int n) {
     return &vt_states[n];
 }
 
+struct tty *vt_get_active_tty(void) {
+    vt_state_t *vt = vt_get_state(active_vt);
+    if (!vt) {
+        return NULL;
+    }
+    return vt->tty;
+}
+
 void vt_activate(int n) {
     vt_state_t *vt;
 

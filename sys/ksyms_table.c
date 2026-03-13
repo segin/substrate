@@ -1703,6 +1703,7 @@ extern void vsprintf(void);
 extern void vt_activate(void);
 extern void vt_capture_scrollback_top(void);
 extern void vt_get_active(void);
+extern void vt_get_active_tty(void);
 extern void vt_get_cell_count(void);
 extern void vt_get_display_cell(void);
 extern void vt_get_height(void);
@@ -2632,6 +2633,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&vt_init, "vt_init" },
     { (uint32_t)(uintptr_t)&vt_get_active, "vt_get_active" },
     { (uint32_t)(uintptr_t)&vt_get_state, "vt_get_state" },
+    { (uint32_t)(uintptr_t)&vt_get_active_tty, "vt_get_active_tty" },
     { (uint32_t)(uintptr_t)&vt_activate, "vt_activate" },
     { (uint32_t)(uintptr_t)&vt_get_scrollback_view, "vt_get_scrollback_view" },
     { (uint32_t)(uintptr_t)&vt_get_display_cell, "vt_get_display_cell" },
@@ -3433,4 +3435,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1711;
+int ksym_count = 1712;

@@ -7,6 +7,8 @@
 - **Read:** Uses the kernel TTY core to provide canonical and raw input processing with blocking reads.
 - **Write:** Routes output through the TTY line discipline and then into the console backend stack.
 - **Line Discipline:** Supports `termios` input/output flags (canonical mode, echo, signal generation, and flow control).
+- **Output State:** Tracks the current output column so tab expansion and CR/LF post-processing derive from stream state, not `winsize`.
+- **Signal Semantics:** Interrupted foreground/background TTY operations surface `-EINTR` to callers instead of leaking internal sentinel values.
 
 ## TTY Driver Interface
 Console and future TTY devices are implemented via the `tty_driver` callbacks:
@@ -23,3 +25,4 @@ Console and future TTY devices are implemented via the `tty_driver` callbacks:
 
 ## Constraints
 - Input is currently shared across all processes (no per-session TTYs).
+- The active hardware text VT permanently owns its TTY object. `/dev/console` and keyboard delivery resolve through the active VT first and fall back to the legacy console pointer only when no VT-backed console exists.

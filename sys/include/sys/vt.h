@@ -48,6 +48,7 @@ void vt_init(void);
 void vt_activate(int n);
 int vt_get_active(void);
 vt_state_t *vt_get_state(int n);
+struct tty *vt_get_active_tty(void);
 int vt_set_geometry(int cols, int rows);
 int vt_get_width(void);
 int vt_get_height(void);
