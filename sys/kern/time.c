@@ -370,13 +370,19 @@ int sys_setitimer(int which, const struct itimerval *new_value, struct itimerval
 }
 
 void timer_tick_context(int is_usermode) {
-    ticks++;
-    sched_tick();
-    if ((ticks % (5 * HZ)) == 0) {
-        sched_update_loadavg();
-    }
+    int cpu_id = percpu_get_cpu_id();
 
-    if (percpu_get_cpu_id() == 0) {
+    /*
+     * Global wall-clock and timeout accounting must advance exactly once per
+     * system tick. On SMP, other CPUs may have local timer sources for
+     * preemption, but they must not multiply global timekeeping.
+     */
+    if (cpu_id == 0) {
+        ticks++;
+        sched_tick();
+        if ((ticks % (5 * HZ)) == 0) {
+            sched_update_loadavg();
+        }
         if ((ticks % HZ) == 0) {
             hw_text_tick_1hz();
         }

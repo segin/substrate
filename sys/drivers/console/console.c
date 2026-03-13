@@ -269,7 +269,7 @@ void console_attach_std_fds(struct process *proc) {
      */
 
     tty = console_resolve_tty();
-    node = (tty && tty->devnode) ? tty->devnode : console_get_node();
+    node = console_get_node();
     if (!node) {
         kprint("console: Cannot attach std fds - node not found!\n");
         return;
