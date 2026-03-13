@@ -267,6 +267,7 @@ void sched_wakeup(void *chan) {
 
 void sched_wakeup_n(void *chan, int n) {
     int woken = 0;
+
     for (int i = 0; i < MAX_THREADS; i++) {
         if (threads[i].tid != -1 && threads[i].state == THREAD_BLOCKED && threads[i].wait_chan == chan) {
             threads[i].state = THREAD_READY;
@@ -274,6 +275,10 @@ void sched_wakeup_n(void *chan, int n) {
             woken++;
             if (n > 0 && woken >= n) break;
         }
+    }
+
+    if (woken > 0 && current_thread) {
+        current_thread->needs_resched = 1;
     }
 }
 
