@@ -125,7 +125,6 @@ static void ftoa(char *buf, size_t size, double val, int precision, int uppercas
     int64_t integral = (int64_t)val;
     double fractional = val - (double)integral;
     
-    // Print integral part
     char tmp[64];
     itoa(tmp, sizeof(tmp), integral, 0, 0);
     size_t len = strlcpy(buf, tmp, size);

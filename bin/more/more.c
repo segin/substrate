@@ -15,7 +15,6 @@ int main(int argc, char *argv[]) {
     char buf[1];
     int lines = 0;
     
-    // Unbuffered read char by char for simplicity in prototype
     while (read(fd, buf, 1) > 0) {
         putchar(buf[0]);
         if (buf[0] == '\n') {

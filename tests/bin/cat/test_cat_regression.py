@@ -124,20 +124,19 @@ def main():
 import fcntl
 import os
 import sys
-import time
 
 path = sys.argv[1]
-hold = float(sys.argv[2])
 fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
 fcntl.lockf(fd, fcntl.LOCK_EX)
 sys.stdout.buffer.write(b"1")
 sys.stdout.flush()
-time.sleep(hold)
+sys.stdin.buffer.read(1)
 fcntl.lockf(fd, fcntl.LOCK_UN)
 os.close(fd)
 """
         holder = subprocess.Popen(
-            [sys.executable, "-c", holder_code, str(out_file), "0.1"],
+            [sys.executable, "-c", holder_code, str(out_file)],
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
@@ -146,19 +145,24 @@ os.close(fd)
 
         start = time.monotonic()
         with out_file.open("wb") as fp:
-            proc = subprocess.run(
+            proc = subprocess.Popen(
                 [cat_bin, "-l", str(src)],
                 stdout=fp,
                 stderr=subprocess.PIPE,
-                check=False,
-                timeout=10,
             )
+            time.sleep(0.055)
+            if holder.stdin is not None:
+                holder.stdin.close()
+            _, proc_stderr = proc.communicate(timeout=10)
         elapsed = time.monotonic() - start
+
+        # Update proc.returncode so it has the returncode similar to subprocess.run
+        proc_returncode = proc.returncode
 
         holder.wait(timeout=5)
         holder_stderr = holder.stderr.read() if holder.stderr is not None else b""
         expect_eq(holder.returncode, 0, f"lock holder exit stderr={holder_stderr!r}")
-        expect_eq(proc.returncode, 0, "real lock run exit")
+        expect_eq(proc_returncode, 0, "real lock run exit")
         expect(elapsed >= 0.05, f"lock wait too short: {elapsed}")
         expect_eq(out_file.read_bytes(), payload, "real lock output")
 
