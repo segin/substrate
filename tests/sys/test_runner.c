@@ -449,6 +449,11 @@ void run_kernel_tests(void) {
         if (test_mem() == 0) kprint("mem: PASS\n"); else kprint("mem: FAIL\n");
     }
 
+    if (all || strcmp(test_arg, "vnode_cache") == 0) {
+        extern void run_vnode_cache_tests(void);
+        run_vnode_cache_tests();
+    }
+
     if (all || strcmp(test_arg, "vfs_cache") == 0) {
         extern void run_vfs_cache_tests(void);
         run_vfs_cache_tests();
