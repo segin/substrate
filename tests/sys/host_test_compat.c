@@ -168,6 +168,38 @@ int main() {
     ret = compat_time32(NULL);
     assert(ret == (int32_t)0x87654321);
 
+    // Test Case 5: Exact Y2038 boundary (0x80000000)
+    g_mock_sys_time_result = 0;
+    g_mock_sys_time_out_val = 0x0000000080000000LL;
+    tloc_val = 0;
+    ret = compat_time32(&tloc_val);
+    assert(ret == (int32_t)0x80000000);
+    assert(tloc_val == (int32_t)0x80000000);
+
+    // Test Case 6: Exact 32-bit boundary overflow (0x100000000LL)
+    g_mock_sys_time_result = 0;
+    g_mock_sys_time_out_val = 0x0000000100000000LL;
+    tloc_val = -1;
+    ret = compat_time32(&tloc_val);
+    assert(ret == 0);
+    assert(tloc_val == 0);
+
+    // Test Case 7: High bits set, low bits zero (0xFFFFFFFF00000000LL)
+    g_mock_sys_time_result = 0;
+    g_mock_sys_time_out_val = 0xFFFFFFFF00000000LL;
+    tloc_val = -1;
+    ret = compat_time32(&tloc_val);
+    assert(ret == 0);
+    assert(tloc_val == 0);
+
+    // Test Case 8: All bits set (0xFFFFFFFFFFFFFFFFLL)
+    g_mock_sys_time_result = 0;
+    g_mock_sys_time_out_val = 0xFFFFFFFFFFFFFFFFLL;
+    tloc_val = 0;
+    ret = compat_time32(&tloc_val);
+    assert(ret == -1);
+    assert(tloc_val == -1);
+
     printf("All compat_time32 tests passed!\n");
     test_compat_lseek32();
 
