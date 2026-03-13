@@ -75,8 +75,6 @@ all: test_runner test_getuid test_minix test_ext2_perf test_ext2_read_blocks tes
 	./host_test_fork_exec_wait
 	./test_getpagesize
 	./test_getuid
-test_getuid: lib/sys/test_getuid.c
-	$(CC) $(CFLAGS_COMMON) -I../sys -I../include -I../sys/include $< -o $@
 
 test_getpagesize: lib/sys/test_getpagesize.c ../lib/sys/getpagesize.c
 	$(CC) $(CFLAGS_COMMON) $^ -o $@
