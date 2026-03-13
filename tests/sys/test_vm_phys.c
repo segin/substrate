@@ -391,6 +391,48 @@ static void test_free_list_integrity(void) {
     TEST_PASS("free_list_integrity");
 }
 
+/* Test: vm_phys_add_range validates parameters */
+static void test_vm_phys_add_range(void) {
+    size_t free_before = vm_phys_get_free();
+
+    /* Test invalid range */
+    vm_phys_add_range(0x2000, 0x1000);
+    TEST_ASSERT(vm_phys_get_free() == free_before, "add_range: invalid range changed free count");
+
+    /* Test zero-sized range */
+    vm_phys_add_range(0x1000, 0x1000);
+    TEST_ASSERT(vm_phys_get_free() == free_before, "add_range: zero-sized range changed free count");
+
+    /* Test unaligned range that results in zero pages */
+    vm_phys_add_range(0x1000, 0x1FFF);
+    TEST_ASSERT(vm_phys_get_free() == free_before, "add_range: sub-page range changed free count");
+
+    TEST_ASSERT(vm_phys_check_integrity(), "add_range: integrity invalid after bad ranges");
+
+    TEST_PASS("test_vm_phys_add_range");
+}
+
+/* Test: alloc page below a specific limit */
+static void test_alloc_page_below(void) {
+    vm_page_t *page = vm_phys_alloc_page_below(0x2000);
+    TEST_ASSERT(page != NULL, "alloc_below: returned NULL for valid limit");
+    TEST_ASSERT(page->phys_addr < 0x2000, "alloc_below: address >= limit");
+
+    vm_phys_free_page(page);
+
+    /* Allocate with limit 0 (no limit) */
+    vm_page_t *page2 = vm_phys_alloc_page_below(0);
+    TEST_ASSERT(page2 != NULL, "alloc_below: returned NULL for limit 0");
+
+    vm_phys_free_page(page2);
+
+    /* Allocate with an impossible limit (e.g. 1) */
+    vm_page_t *page3 = vm_phys_alloc_page_below(1);
+    TEST_ASSERT(page3 == NULL, "alloc_below: returned non-NULL for impossible limit");
+
+    TEST_PASS("alloc_page_below");
+}
+
 /* Test entry point */
 void test_vm_phys(void) {
     kprint("=== Physical Memory Manager Integration Tests ===\n");
@@ -414,6 +456,8 @@ void test_vm_phys(void) {
     test_mark_used_single_page_reservation();
     test_free_used_invariant();
     test_free_list_integrity();
+    test_alloc_page_below();
+    test_vm_phys_add_range();
     
     char buf[64];
     sprintf(buf, "=== vm_phys tests: %d passed, %d failed ===\n", passed, failed);
