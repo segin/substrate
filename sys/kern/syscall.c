@@ -1052,9 +1052,18 @@ int kern_ioctl(int fd, uint32_t request, void *arg) {
     if (fd < 0 || fd >= MAX_FD) return -1;
     file_t *f = current_process->fds[fd];
     if (!f || !f->f_data) return -1;
-    
-    if (((fs_node_t*)f->f_data)->ioctl) {
-        return ((fs_node_t*)f->f_data)->ioctl((fs_node_t*)f->f_data, request, arg);
+
+    if ((uintptr_t)f->f_data < KERN_BASE) {
+        return -EIO;
+    }
+
+    fs_node_t *node = (fs_node_t *)f->f_data;
+
+    if (node->ioctl) {
+        if ((uintptr_t)node->ioctl < KERN_BASE) {
+            return -EIO;
+        }
+        return node->ioctl(node, request, arg);
     }
     
     return -1;
