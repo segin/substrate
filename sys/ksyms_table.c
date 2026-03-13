@@ -358,8 +358,11 @@ extern void get_time(void);
 extern void get_uptime(void);
 extern void get_uptime_ms(void);
 extern void getnewvnode(void);
+extern void hw_text_clear_screen(void);
 extern void hw_text_console_write_shim(void);
 extern void hw_text_init(void);
+extern void hw_text_putc(void);
+extern void hw_text_redraw_active(void);
 extern void hw_text_refresh_statusline(void);
 extern void hw_text_set_color(void);
 extern void hw_text_tick_1hz(void);
@@ -1698,14 +1701,19 @@ extern void vrele(void);
 extern void vsnprintf(void);
 extern void vsprintf(void);
 extern void vt_activate(void);
+extern void vt_capture_scrollback_top(void);
 extern void vt_get_active(void);
 extern void vt_get_cell_count(void);
+extern void vt_get_display_cell(void);
 extern void vt_get_height(void);
+extern void vt_get_scrollback_view(void);
 extern void vt_get_state(void);
 extern void vt_get_status_row(void);
 extern void vt_get_visible_height(void);
 extern void vt_get_width(void);
 extern void vt_init(void);
+extern void vt_scrollback_page_down(void);
+extern void vt_scrollback_page_up(void);
 extern void vt_set_geometry(void);
 extern void write_fs(void);
 extern void zero_init(void);
@@ -2555,9 +2563,12 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&bga_scroll, "bga_scroll" },
     { (uint32_t)(uintptr_t)&bga_install, "bga_install" },
     { (uint32_t)(uintptr_t)&hw_text_console_write_shim, "hw_text_console_write_shim" },
+    { (uint32_t)(uintptr_t)&hw_text_redraw_active, "hw_text_redraw_active" },
     { (uint32_t)(uintptr_t)&hw_text_refresh_statusline, "hw_text_refresh_statusline" },
     { (uint32_t)(uintptr_t)&hw_text_tick_1hz, "hw_text_tick_1hz" },
     { (uint32_t)(uintptr_t)&hw_text_set_color, "hw_text_set_color" },
+    { (uint32_t)(uintptr_t)&hw_text_putc, "hw_text_putc" },
+    { (uint32_t)(uintptr_t)&hw_text_clear_screen, "hw_text_clear_screen" },
     { (uint32_t)(uintptr_t)&hw_text_init, "hw_text_init" },
     { (uint32_t)(uintptr_t)&video_ask_mode, "video_ask_mode" },
     { (uint32_t)(uintptr_t)&input_init, "input_init" },
@@ -2622,6 +2633,11 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&vt_get_active, "vt_get_active" },
     { (uint32_t)(uintptr_t)&vt_get_state, "vt_get_state" },
     { (uint32_t)(uintptr_t)&vt_activate, "vt_activate" },
+    { (uint32_t)(uintptr_t)&vt_get_scrollback_view, "vt_get_scrollback_view" },
+    { (uint32_t)(uintptr_t)&vt_get_display_cell, "vt_get_display_cell" },
+    { (uint32_t)(uintptr_t)&vt_capture_scrollback_top, "vt_capture_scrollback_top" },
+    { (uint32_t)(uintptr_t)&vt_scrollback_page_up, "vt_scrollback_page_up" },
+    { (uint32_t)(uintptr_t)&vt_scrollback_page_down, "vt_scrollback_page_down" },
     { (uint32_t)(uintptr_t)&uart_select_port, "uart_select_port" },
     { (uint32_t)(uintptr_t)&uart_get_console, "uart_get_console" },
     { (uint32_t)(uintptr_t)&uart_devfs_init, "uart_devfs_init" },
@@ -3417,4 +3433,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1703;
+int ksym_count = 1711;

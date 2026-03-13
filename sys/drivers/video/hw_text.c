@@ -75,6 +75,18 @@ static void hw_text_write_crtc(uint8_t index, uint8_t value) {
     outb(VGA_CRTC_DATA_COLOR, value);
 }
 
+static void hw_text_cursor_visible_locked(int visible) {
+    uint8_t start;
+
+    start = hw_text_read_crtc(VGA_CRTC_CURSOR_START);
+    if (visible) {
+        start &= (uint8_t)~0x20U;
+    } else {
+        start |= 0x20U;
+    }
+    hw_text_write_crtc(VGA_CRTC_CURSOR_START, start);
+}
+
 static void hw_text_load_font_plane(const uint8_t *font, size_t glyph_height) {
     uint8_t old_seq_map_mask;
     uint8_t old_seq_mem_mode;
@@ -250,7 +262,7 @@ static void hw_text_write_cell_locked(vt_state_t *vt, size_t x, size_t y,
 
     index = hw_text_index(x, y);
     vt->buffer[index] = hw_text_entry((unsigned char)c, color);
-    if (vt->id == vt_get_active()) {
+    if (vt->id == vt_get_active() && vt_get_scrollback_view(vt) == 0) {
         vga_buffer[index] = vt->buffer[index];
     }
 }
@@ -271,6 +283,12 @@ static void hw_text_update_cursor_locked(vt_state_t *vt) {
     if (!vt || vt->id != vt_get_active()) {
         return;
     }
+
+    if (vt_get_scrollback_view(vt) != 0) {
+        hw_text_cursor_visible_locked(0);
+        return;
+    }
+    hw_text_cursor_visible_locked(1);
 
     row = vt->row;
     col = vt->col;
@@ -312,6 +330,7 @@ static void hw_text_scroll_locked(vt_state_t *vt) {
         return;
     }
 
+    vt_capture_scrollback_top(vt);
     line_size = (size_t)vt_get_width() * sizeof(uint16_t);
     scroll_size = (size_t)(visible_rows - 1) * line_size;
     memcpy(vt->buffer, (void *)((uintptr_t)vt->buffer + line_size), scroll_size);
@@ -322,8 +341,8 @@ static void hw_text_scroll_locked(vt_state_t *vt) {
         last_line[x] = empty;
     }
 
-    if (vt->id == vt_get_active()) {
-        memcpy(vga_buffer, vt->buffer, vt_get_cell_count() * sizeof(uint16_t));
+    if (vt->id == vt_get_active() && vt_get_scrollback_view(vt) == 0) {
+        memcpy(vga_buffer, vt->buffer, (size_t)visible_rows * line_size);
     }
 }
 
@@ -381,7 +400,7 @@ static void hw_text_format_iso8601(char *buf, size_t buf_len, time_t when) {
 }
 
 static void hw_text_render_statusline_locked(vt_state_t *vt) {
-    char left[16];
+    char left[32];
     char right[32];
     char line[VT_MAX_WIDTH];
     size_t left_len;
@@ -396,7 +415,11 @@ static void hw_text_render_statusline_locked(vt_state_t *vt) {
 
     cols = vt_get_width();
     row = vt_get_status_row();
-    snprintf(left, sizeof(left), " VT%d ", vt->id + 1);
+    if (vt_get_scrollback_view(vt) != 0) {
+        snprintf(left, sizeof(left), " VT%d +%u ", vt->id + 1, vt->scrollback_view);
+    } else {
+        snprintf(left, sizeof(left), " VT%d ", vt->id + 1);
+    }
     hw_text_format_iso8601(right, sizeof(right), get_time());
     left_len = strlen(left);
     right_len = strlen(right);
@@ -425,6 +448,27 @@ static void hw_text_render_statusline_locked(vt_state_t *vt) {
             }
         }
     }
+}
+
+static void hw_text_redraw_vt_locked(vt_state_t *vt) {
+    int row;
+    int col;
+    int visible_rows;
+    size_t index;
+
+    if (!vt) {
+        return;
+    }
+
+    visible_rows = vt_get_visible_height();
+    for (row = 0; row < visible_rows; row++) {
+        for (col = 0; col < vt_get_width(); col++) {
+            index = hw_text_index((size_t)col, (size_t)row);
+            vga_buffer[index] = vt_get_display_cell(vt, row, col);
+        }
+    }
+    hw_text_render_statusline_locked(vt);
+    hw_text_update_cursor_locked(vt);
 }
 
 static void cb_putc(char c) {
@@ -645,6 +689,18 @@ void hw_text_console_write_shim(const char *data, size_t len) {
     spinlock_release(&hw_text_lock);
 }
 
+void hw_text_redraw_active(void) {
+    vt_state_t *vt = vt_get_state(vt_get_active());
+
+    if (!hw_text_active || !vt) {
+        return;
+    }
+
+    spinlock_acquire(&hw_text_lock);
+    hw_text_redraw_vt_locked(vt);
+    spinlock_release(&hw_text_lock);
+}
+
 static console_backend_t vt_kprint_backend = {
     .name = "vga_vt",
     .write = hw_text_console_write_shim,
@@ -674,28 +730,51 @@ void hw_text_set_color(uint8_t fg, uint8_t bg) {
     }
 }
 
+void hw_text_putc(char c) {
+    hw_text_console_write_shim(&c, 1);
+}
+
+void hw_text_clear_screen(void) {
+    vt_state_t *vt = vt_get_state(vt_get_active());
+
+    if (!vt) {
+        return;
+    }
+
+    spinlock_acquire(&hw_text_lock);
+    current_vt_ctx = vt;
+    cb_clear_screen();
+    hw_text_update_cursor_locked(vt);
+    current_vt_ctx = NULL;
+    spinlock_release(&hw_text_lock);
+}
+
 void hw_text_init(void) {
     int cols;
     int rows;
     struct tty *tty;
+    char name[16];
+    int i;
 
     hw_text_apply_geometry_or_default(&cols, &rows);
     vt_init();
 
-    tty = tty_alloc(&vt_driver, 0);
-    if (tty) {
-        char name[16];
-
-        snprintf(name, sizeof(name), "tty1");
-        (void)name;
-        hw_text_apply_tty_winsize(tty);
-        console_set_tty(tty);
+    for (i = 0; i < VT_MAX; i++) {
+        tty = tty_alloc(&vt_driver, i);
+        if (!tty) {
+            continue;
+        }
+        snprintf(name, sizeof(name), "tty%d", i + 1);
+        tty_register_device(tty, name);
+        if (i == 0) {
+            console_set_tty(tty);
+        }
     }
 
     hw_text_active = 1;
     console_register(&vt_kprint_backend);
 
-    hw_text_refresh_statusline();
+    hw_text_redraw_active();
     kprintf("VGA VT Driver Initialized (%dx%d physical, %d usable rows).\n",
             cols, rows, vt_get_visible_height());
 }

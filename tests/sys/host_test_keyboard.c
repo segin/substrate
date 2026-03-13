@@ -14,6 +14,8 @@ static int mock_entropy_calls;
 static int mock_debug_dump_calls;
 static int mock_vt_activate_arg;
 static int mock_vt_activate_calls;
+static int mock_scrollback_up_calls;
+static int mock_scrollback_down_calls;
 static int mock_console_chars_len;
 static char mock_console_chars[64];
 static int mock_tty_chars_len;
@@ -42,6 +44,8 @@ void debug_dump_processes(void) { mock_debug_dump_calls++; }
 void vt_activate(int n) { mock_vt_activate_arg = n; mock_vt_activate_calls++; }
 int vt_get_active(void) { return 0; }
 vt_state_t *vt_get_state(int n) { return n == 0 ? &mock_vt : NULL; }
+void vt_scrollback_page_up(void) { mock_scrollback_up_calls++; }
+void vt_scrollback_page_down(void) { mock_scrollback_down_calls++; }
 void tty_flip_buffer_push(struct tty *tty, char c) {
     (void)tty;
     assert(mock_tty_chars_len < (int)sizeof(mock_tty_chars));
@@ -104,6 +108,8 @@ static void reset_state(void) {
     mock_debug_dump_calls = 0;
     mock_vt_activate_arg = -1;
     mock_vt_activate_calls = 0;
+    mock_scrollback_up_calls = 0;
+    mock_scrollback_down_calls = 0;
     mock_console_chars_len = 0;
     mock_tty_chars_len = 0;
     mock_input_event_count = 0;
@@ -235,6 +241,38 @@ static void test_console_fallback_without_tty(void) {
     assert(mock_tty_chars_len == 0);
 }
 
+static void test_extended_navigation_sequences(void) {
+    reset_state();
+    mock_vt.tty = &mock_tty;
+
+    send_scancode(0xE0);
+    send_scancode(0x48); /* Up */
+    assert(mock_tty_chars_len == 3);
+    assert(memcmp(mock_tty_chars, "\x1b[A", 3) == 0);
+
+    reset_state();
+    mock_vt.tty = &mock_tty;
+    send_scancode(0xE0);
+    send_scancode(0x53); /* Delete */
+    assert(mock_tty_chars_len == 4);
+    assert(memcmp(mock_tty_chars, "\x1b[3~", 4) == 0);
+}
+
+static void test_shift_page_keys_drive_scrollback(void) {
+    reset_state();
+
+    send_scancode(0x2A); /* Shift down */
+    send_scancode(0xE0);
+    send_scancode(0x49); /* PgUp */
+    send_scancode(0xE0);
+    send_scancode(0x51); /* PgDn */
+
+    assert(mock_scrollback_up_calls == 1);
+    assert(mock_scrollback_down_calls == 1);
+    assert(mock_tty_chars_len == 0);
+    assert(mock_console_chars_len == 0);
+}
+
 int main(void) {
     test_buffer_fifo_and_drop_newest();
     test_keyboard_init_registers_input_device();
@@ -244,6 +282,8 @@ int main(void) {
     test_ctrl_f9_triggers_debug_dump();
     test_alt_function_switches_vt();
     test_console_fallback_without_tty();
+    test_extended_navigation_sequences();
+    test_shift_page_keys_drive_scrollback();
     puts("host_test_keyboard: PASS");
     return 0;
 }

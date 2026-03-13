@@ -9,5 +9,6 @@ void hw_text_clear_screen(void);
 void hw_text_set_color(uint8_t fg, uint8_t bg);
 void hw_text_refresh_statusline(void);
 void hw_text_tick_1hz(void);
+void hw_text_redraw_active(void);
 
 #endif

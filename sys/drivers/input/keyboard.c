@@ -62,6 +62,27 @@ static input_dev_t kbd_dev = {
     .caps = (1 << EV_KEY),
 };
 
+static void keyboard_emit_char(char c) {
+    int active;
+    vt_state_t *vt;
+
+    kbd_push(c);
+
+    active = vt_get_active();
+    vt = vt_get_state(active);
+    if (vt && vt->tty) {
+        tty_flip_buffer_push(vt->tty, c);
+    } else {
+        console_push_char(c);
+    }
+}
+
+static void keyboard_emit_seq(const char *seq) {
+    while (*seq) {
+        keyboard_emit_char(*seq++);
+    }
+}
+
 void keyboard_init(void) {
     if (ps2_init() != 0) {
         kprint("Keyboard: PS/2 Controller init failed.\n");
@@ -114,7 +135,33 @@ void keyboard_handler(registers_t *regs) {
     }
 
     if (kbd_extended) {
-        // Handle other extended scancodes
+        if (!(scancode & 0x80)) {
+            if (kbd_shift && scancode == 0x49) {
+                vt_scrollback_page_up();
+                kbd_extended = 0;
+                goto out;
+            }
+            if (kbd_shift && scancode == 0x51) {
+                vt_scrollback_page_down();
+                kbd_extended = 0;
+                goto out;
+            }
+
+            switch (scancode) {
+                case 0x48: keyboard_emit_seq("\x1b[A"); break;
+                case 0x50: keyboard_emit_seq("\x1b[B"); break;
+                case 0x4D: keyboard_emit_seq("\x1b[C"); break;
+                case 0x4B: keyboard_emit_seq("\x1b[D"); break;
+                case 0x47: keyboard_emit_seq("\x1b[H"); break;
+                case 0x4F: keyboard_emit_seq("\x1b[F"); break;
+                case 0x49: keyboard_emit_seq("\x1b[5~"); break;
+                case 0x51: keyboard_emit_seq("\x1b[6~"); break;
+                case 0x52: keyboard_emit_seq("\x1b[2~"); break;
+                case 0x53: keyboard_emit_seq("\x1b[3~"); break;
+                default:
+                    break;
+            }
+        }
         kbd_extended = 0;
         goto out;
     }
@@ -165,18 +212,7 @@ process_key:
             }
 
             if (c) {
-                kbd_push(c);
-                
-                // Push to Active VT's TTY
-                int active = vt_get_active();
-                vt_state_t *vt = vt_get_state(active);
-                if (vt && vt->tty) {
-                    tty_flip_buffer_push(vt->tty, c);
-                } else {
-                    // Fallback if no TTY associated yet
-                    console_push_char(c);
-                }
-                
+                keyboard_emit_char(c);
                 input_report_key(&kbd_dev, scancode, 1);
                 // input_report_key(&kbd_dev, scancode, 0); // Release immediately for now since we ignore break codes
                 input_sync(&kbd_dev);

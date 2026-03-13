@@ -15,6 +15,7 @@
 #define VT_MAX_WIDTH 132
 #define VT_MAX_HEIGHT 60
 #define VT_MAX_BUF_SIZE (VT_MAX_WIDTH * VT_MAX_HEIGHT)
+#define VT_SCROLLBACK_LINES 256
 
 /*
  * VT State
@@ -25,6 +26,10 @@ typedef struct vt_state {
     
     // Video Memory Buffer (Char + Attribute)
     uint16_t buffer[VT_MAX_BUF_SIZE];
+    uint16_t scrollback[VT_SCROLLBACK_LINES][VT_MAX_WIDTH];
+    uint16_t scrollback_head;
+    uint16_t scrollback_count;
+    uint16_t scrollback_view;
     
     // Cursor State
     int row;
@@ -49,6 +54,11 @@ int vt_get_height(void);
 int vt_get_visible_height(void);
 int vt_get_status_row(void);
 size_t vt_get_cell_count(void);
+int vt_get_scrollback_view(const vt_state_t *vt);
+uint16_t vt_get_display_cell(const vt_state_t *vt, int row, int col);
+void vt_capture_scrollback_top(vt_state_t *vt);
+void vt_scrollback_page_up(void);
+void vt_scrollback_page_down(void);
 
 // To be called by the video driver when it updates the screen,
 // so the VT layer can keep the backing buffer in sync if it's active?

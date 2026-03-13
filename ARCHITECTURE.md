@@ -195,6 +195,8 @@ Console policy:
 - the status line is refreshed from the timer tick on CPU 0 once per second and currently shows the active VT number plus wall-clock time in ISO 8601 UTC form
 - `video=text` keeps the system on the hardware text console even when framebuffer drivers are available
 - `textmode=` and `video=text:COLSxROWS` select hardware text geometry for the kernel text console; the BIOS setup path on `zImage` and floppy boots can program `80x25`, `80x43`, `80x50`, and any detected VBE text modes such as `132x60`, while the higher-half driver directly reprograms only the stable in-kernel `80x25` and `80x50` cases and otherwise trusts the BIOS-programmed geometry handoff
+- the VT layer owns per-console backing buffers, per-VT `tty` bindings, and per-VT scrollback history; the VGA text backend owns all active-screen redraw and cursor updates so VT switching does not memcpy live VGA memory directly
+- the active text console exports `/dev/tty1` through `/dev/tty12`; `Alt+F1..F12` switches VTs and `Shift+PageUp/PageDown` enters and exits scrollback on the active VT
 
 Execution personalities support native behavior plus Linux/FreeBSD compatibility paths where implemented.
 - Linux signal compatibility is explicit at the ABI edge: Linux signal numbers,
