@@ -253,10 +253,158 @@ static void test_read_short_ad_file_ext_read_limits() {
     printf("test_read_short_ad_file_ext_read_limits PASSED\n");
 }
 
+static void test_read_long_ad_file() {
+    printf("Running test_read_long_ad_file...\n");
+    setup_mock_disk(10);
+
+    fs_node_t dev;
+    dev.read = mock_read;
+
+    struct udf_fs fs;
+    memset(&fs, 0, sizeof(fs));
+    fs.device = &dev;
+    fs.partition_start = 0; // Absolute block
+
+    // Define a struct large enough to hold the FE + alloc_area
+    struct {
+        struct udf_fe fe;
+        struct udf_long_ad ads[4];
+    } mock_fe_data;
+
+    struct udf_fe *fe = &mock_fe_data.fe;
+
+    memset(&mock_fe_data, 0, sizeof(mock_fe_data));
+    fe->icb_tag.flags = UDF_ICB_FLAG_AD_LONG;
+
+    // We will have 4 extents:
+    // 1. Extent 1: type 0 (recorded), length 1024, block 1, partition 0
+    // 2. Extent 2: type 1 (unallocated but recorded), length 512, block 2, partition 0
+    // 3. Extent 3: type 0 (recorded), length 2048, block 3, partition 0
+    // 4. Extent 4: type 3 (continuation), length 1024, block 4, partition 0
+
+    fe->info_length = 1024 + 512 + 2048 + 1024;
+    fe->ext_attr_length = 0;
+    fe->alloc_desc_length = 4 * sizeof(struct udf_long_ad);
+
+    uint8_t *alloc_area = ((uint8_t *)fe) + sizeof(struct udf_fe) + fe->ext_attr_length;
+    struct udf_long_ad *ads = (struct udf_long_ad *)alloc_area;
+
+    ads[0].length = (0 << 30) | 1024;
+    ads[0].block = 1;
+    ads[0].partition = 0; // The logic ignores partition
+
+    ads[1].length = (1 << 30) | 512;
+    ads[1].block = 2;
+    ads[1].partition = 0;
+
+    ads[2].length = (0 << 30) | 2048;
+    ads[2].block = 3;
+    ads[2].partition = 0;
+
+    ads[3].length = (3U << 30) | 1024;
+    ads[3].block = 4;
+    ads[3].partition = 0;
+
+    // Write some data to the mock disk
+    uint8_t data1[1024];
+    memset(data1, 'C', sizeof(data1));
+    write_sector(1, data1, sizeof(data1));
+
+    uint8_t data3[2048];
+    memset(data3, 'D', sizeof(data3));
+    write_sector(3, data3, sizeof(data3));
+
+    uint8_t buffer[4096];
+
+    // Read first extent partially
+    memset(buffer, 0, sizeof(buffer));
+    uint32_t read_bytes = udf_read_file(&fs, fe, 0, 500, buffer);
+    assert(read_bytes == 500);
+    for (int i = 0; i < 500; i++) assert(buffer[i] == 'C');
+
+    // Read across extents (part of extent 1, all of extent 2, part of extent 3)
+    memset(buffer, 0, sizeof(buffer));
+    read_bytes = udf_read_file(&fs, fe, 1000, 24 + 512 + 10, buffer);
+    assert(read_bytes == 24 + 512 + 10);
+    for (int i = 0; i < 24; i++) assert(buffer[i] == 'C');
+    for (int i = 24; i < 24 + 512; i++) assert(buffer[i] == 0); // Unrecorded extent reads as 0
+    for (int i = 24 + 512; i < 24 + 512 + 10; i++) assert(buffer[i] == 'D');
+
+    // Read full file
+    memset(buffer, 0, sizeof(buffer));
+    // It should stop at continuation!
+    read_bytes = udf_read_file(&fs, fe, 0, 1024 + 512 + 2048 + 1024, buffer);
+    assert(read_bytes == 1024 + 512 + 2048);
+    for (int i = 0; i < 1024; i++) assert(buffer[i] == 'C');
+    for (int i = 1024; i < 1024 + 512; i++) assert(buffer[i] == 0);
+    for (int i = 1024 + 512; i < 1024 + 512 + 2048; i++) assert(buffer[i] == 'D');
+
+    teardown_mock_disk();
+    printf("test_read_long_ad_file PASSED\n");
+}
+
+static void test_read_long_ad_file_ext_read_limits() {
+    printf("Running test_read_long_ad_file_ext_read_limits...\n");
+    setup_mock_disk(10);
+
+    fs_node_t dev;
+    dev.read = mock_read;
+
+    struct udf_fs fs;
+    memset(&fs, 0, sizeof(fs));
+    fs.device = &dev;
+    fs.partition_start = 0; // Absolute block
+
+    // Define a struct large enough to hold the FE + alloc_area
+    struct {
+        struct udf_fe fe;
+        struct udf_long_ad ads[3];
+    } mock_fe_data;
+
+    struct udf_fe *fe = &mock_fe_data.fe;
+
+    memset(&mock_fe_data, 0, sizeof(mock_fe_data));
+    fe->icb_tag.flags = UDF_ICB_FLAG_AD_LONG;
+
+    // We will have 1 extent: type 0 (recorded), length 4096, block 1, partition 0
+
+    fe->info_length = 4096;
+    fe->ext_attr_length = 0;
+    fe->alloc_desc_length = 1 * sizeof(struct udf_long_ad);
+
+    uint8_t *alloc_area = ((uint8_t *)fe) + sizeof(struct udf_fe) + fe->ext_attr_length;
+    struct udf_long_ad *ads = (struct udf_long_ad *)alloc_area;
+
+    ads[0].length = (0 << 30) | 4096;
+    ads[0].block = 1;
+    ads[0].partition = 0;
+
+    // Write some data to the mock disk
+    uint8_t data1[2048];
+    memset(data1, 'E', sizeof(data1));
+    write_sector(1, data1, sizeof(data1));
+    memset(data1, 'F', sizeof(data1));
+    write_sector(2, data1, sizeof(data1));
+
+    uint8_t buffer[4096];
+
+    // Read spanning sector boundary inside one extent
+    memset(buffer, 0, sizeof(buffer));
+    uint32_t read_bytes = udf_read_file(&fs, fe, 2040, 16, buffer);
+    assert(read_bytes == 16);
+    for (int i = 0; i < 8; i++) assert(buffer[i] == 'E');
+    for (int i = 8; i < 16; i++) assert(buffer[i] == 'F');
+
+    teardown_mock_disk();
+    printf("test_read_long_ad_file_ext_read_limits PASSED\n");
+}
+
 int main() {
     test_read_inline_file();
     test_read_short_ad_file();
     test_read_short_ad_file_ext_read_limits();
+    test_read_long_ad_file();
+    test_read_long_ad_file_ext_read_limits();
     printf("\nAll udf_read_file tests PASSED!\n");
     return 0;
 }

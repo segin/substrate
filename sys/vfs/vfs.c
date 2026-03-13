@@ -736,7 +736,7 @@ int vfs_unmount_legacy(const char *path) {
     // When we lookup "/mnt", check if traversal logic handles it.
     
     // In finddir_fs_internal:
-    // if ((node->flags & FS_MOUNTPOINT) && node->ptr) node = node->ptr;
+    // the node pointer is replaced by node->ptr if FS_MOUNTPOINT is set.
     
     // So if we lookup "/mnt", we get the ROOT of the new fs.
     // We need the node BEFORE the jump.

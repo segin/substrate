@@ -449,6 +449,30 @@ static void test_pv_entry_list_manipulation(void) {
     TEST_PASS("pv_entry_list_manipulation");
 }
 
+/* Mock for sched_spawn_kernel_process used by vm_page_late_init */
+static int mock_spawn_calls = 0;
+int sched_spawn_kernel_process(void (*entry)(void*), void *arg) {
+    (void)entry;
+    (void)arg;
+    mock_spawn_calls++;
+    return 0;
+}
+
+/* Test: vm_page_late_init initializes pagedaemon and prevents double init */
+static void test_vm_page_late_init(void) {
+    mock_spawn_calls = 0;
+
+    /* First call should spawn the daemon process */
+    vm_page_late_init();
+    TEST_ASSERT(mock_spawn_calls == 1, "late_init: should spawn process once");
+
+    /* Second call should return early, not spawning again */
+    vm_page_late_init();
+    TEST_ASSERT(mock_spawn_calls == 1, "late_init: should not spawn process again");
+
+    TEST_PASS("vm_page_late_init");
+}
+
 /* Test entry point */
 void test_vm_page_queue(void) {
     kprint("=== VM Page Queue Unit Tests ===\n");
@@ -472,6 +496,7 @@ void test_vm_page_queue(void) {
     test_queue_accounting_invariant();
     test_vm_page_object_linkage();
     test_pv_entry_list_manipulation();
+    test_vm_page_late_init();
     
     char buf[64];
     sprintf(buf, "=== vm_page tests: %d passed, %d failed ===\n", passed, failed);
