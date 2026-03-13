@@ -202,8 +202,17 @@ static void test_shared_blocks_exclusive(void) {
 }
 
 
+static void test_vnode_init(void) {
+    kprint("\n--- Test: vnode_init ---\n");
+    /* We expect vnode_init to complete and not panic. */
+    vnode_init();
+    kprint("PASS: vnode_init completed without crashing.\n");
+}
+
 void run_vnode_lock_tests(void) {
     kprint("\n=== TEST: VNode Locking Semantics ===\n");
+
+    test_vnode_init();
 
     /* Create a dummy vnode */
     int error = getnewvnode("test_lock", NULL, NULL, &test_vp);
