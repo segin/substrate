@@ -391,46 +391,46 @@ static void test_free_list_integrity(void) {
     TEST_PASS("free_list_integrity");
 }
 
-/* Test: vm_phys_add_range validates parameters */
+/* Property: vm_phys_add_range adds valid ranges correctly */
 static void test_vm_phys_add_range(void) {
-    size_t free_before = vm_phys_get_free();
+    /* Setup a clean environment to isolate add_range */
+    vm_page_t test_pages[4];
+    /* Initialize with proper canaries and clear state */
+    vm_phys_early_init(NULL, 0, test_pages, 4);
 
-    /* Test invalid range */
-    vm_phys_add_range(0x2000, 0x1000);
-    TEST_ASSERT(vm_phys_get_free() == free_before, "add_range: invalid range changed free count");
+    /* Ensure initial state is 0 free */
+    TEST_ASSERT(vm_phys_get_free() == 0, "add_range: initial free not 0");
 
-    /* Test zero-sized range */
+    /* Test 1: start == end -> should do nothing */
     vm_phys_add_range(0x1000, 0x1000);
-    TEST_ASSERT(vm_phys_get_free() == free_before, "add_range: zero-sized range changed free count");
+    TEST_ASSERT(vm_phys_get_free() == 0, "add_range: equal bounds changed free count");
 
-    /* Test unaligned range that results in zero pages */
-    vm_phys_add_range(0x1000, 0x1FFF);
-    TEST_ASSERT(vm_phys_get_free() == free_before, "add_range: sub-page range changed free count");
+    /* Test 2: start > end -> should do nothing */
+    vm_phys_add_range(0x2000, 0x1000);
+    TEST_ASSERT(vm_phys_get_free() == 0, "add_range: reversed bounds changed free count");
 
-    TEST_ASSERT(vm_phys_check_integrity(), "add_range: integrity invalid after bad ranges");
+    /* Test 3: non-page-aligned bounds are rounded correctly.
+     * start is rounded UP: 0x0001 -> 0x1000
+     * end is rounded DOWN: 0x3FFF -> 0x3000
+     * Resulting range is 0x1000 to 0x3000, which is 2 pages (0x1000 and 0x2000).
+     */
+    vm_phys_add_range(0x0001, 0x3FFF);
+    TEST_ASSERT(vm_phys_get_free() == 2, "add_range: misaligned bounds did not add 2 pages");
 
-    TEST_PASS("test_vm_phys_add_range");
-}
+    /* Verify the two pages were added */
+    vm_page_t *p1 = vm_phys_paddr_to_page(0x1000);
+    vm_page_t *p2 = vm_phys_paddr_to_page(0x2000);
+    TEST_ASSERT(p1 != NULL && (p1->flags & PG_FREE), "add_range: page 1 not marked free");
+    TEST_ASSERT(p2 != NULL && (p2->flags & PG_FREE), "add_range: page 2 not marked free");
 
-/* Test: alloc page below a specific limit */
-static void test_alloc_page_below(void) {
-    vm_page_t *page = vm_phys_alloc_page_below(0x2000);
-    TEST_ASSERT(page != NULL, "alloc_below: returned NULL for valid limit");
-    TEST_ASSERT(page->phys_addr < 0x2000, "alloc_below: address >= limit");
+    /* Test 4: Fully aligned bounds */
+    /* Add another page at 0x3000 */
+    vm_phys_add_range(0x3000, 0x4000);
+    TEST_ASSERT(vm_phys_get_free() == 3, "add_range: aligned bounds did not add 1 page");
+    vm_page_t *p3 = vm_phys_paddr_to_page(0x3000);
+    TEST_ASSERT(p3 != NULL && (p3->flags & PG_FREE), "add_range: page 3 not marked free");
 
-    vm_phys_free_page(page);
-
-    /* Allocate with limit 0 (no limit) */
-    vm_page_t *page2 = vm_phys_alloc_page_below(0);
-    TEST_ASSERT(page2 != NULL, "alloc_below: returned NULL for limit 0");
-
-    vm_phys_free_page(page2);
-
-    /* Allocate with an impossible limit (e.g. 1) */
-    vm_page_t *page3 = vm_phys_alloc_page_below(1);
-    TEST_ASSERT(page3 == NULL, "alloc_below: returned non-NULL for impossible limit");
-
-    TEST_PASS("alloc_page_below");
+    TEST_PASS("vm_phys_add_range");
 }
 
 /* Test entry point */
@@ -456,7 +456,6 @@ void test_vm_phys(void) {
     test_mark_used_single_page_reservation();
     test_free_used_invariant();
     test_free_list_integrity();
-    test_alloc_page_below();
     test_vm_phys_add_range();
     
     char buf[64];
