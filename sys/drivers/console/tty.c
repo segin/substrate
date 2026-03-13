@@ -12,9 +12,6 @@
 #include <sys/param.h>
 #include <kern/console.h>
 #include <intr.h>
-#ifndef HOST_TEST
-#include <arch/i386/pmm.h>
-#endif
 
 #define TTY_MAGIC 0x5401
 
@@ -25,6 +22,21 @@
 
 static struct tty *ttys[64]; // Simple array for now
 void tty_hangup(struct tty *tty);
+
+static int tty_valid(const struct tty *tty) {
+    return tty && tty->magic == TTY_MAGIC;
+}
+
+static int tty_driver_cb_valid(const void *fn) {
+    if (!fn) {
+        return 0;
+    }
+#ifdef HOST_TEST
+    return 1;
+#else
+    return (uintptr_t)fn >= KERN_BASE;
+#endif
+}
 
 void tty_default_termios(struct termios *t) {
     if (!t) return;
@@ -108,12 +120,8 @@ struct tty *tty_get(int idx) {
 
 struct tty *tty_alloc(struct tty_driver *driver, int idx) {
     struct tty *tty;
-#ifndef HOST_TEST
-    size_t pages = (sizeof(struct tty) + 4095U) / 4096U;
-    tty = pmm_alloc_contiguous(pages);
-#else
+
     tty = kmalloc(sizeof(struct tty));
-#endif
     if (!tty) {
         return NULL;
     }
@@ -133,14 +141,15 @@ struct tty *tty_alloc(struct tty_driver *driver, int idx) {
     tty->output_col = 0;
 
     if (driver && driver->install) {
+        if (!tty_driver_cb_valid((const void *)driver->install)) {
+            if (idx >= 0 && idx < 64) ttys[idx] = NULL;
+            kfree(tty, sizeof(struct tty));
+            return NULL;
+        }
         int ret = driver->install(driver, tty); // Use the signature from main
         if (ret != 0) {
             if (idx >= 0 && idx < 64) ttys[idx] = NULL;
-#ifndef HOST_TEST
-            pmm_free_contiguous(tty, pages);
-#else
             kfree(tty, sizeof(struct tty));
-#endif
             return NULL;
         }
     }
@@ -151,18 +160,15 @@ struct tty *tty_alloc(struct tty_driver *driver, int idx) {
 }
 
 void tty_free(struct tty *tty) {
-    if (!tty) return;
-    if (tty->driver && tty->driver->remove) {
+    if (!tty_valid(tty)) return;
+    if (tty->driver && tty->driver->remove &&
+        tty_driver_cb_valid((const void *)tty->driver->remove)) {
         tty->driver->remove(tty->driver, tty); // Use signature from main
     }
     if (tty->index >= 0 && tty->index < 64) {
         ttys[tty->index] = NULL;
     }
-#ifndef HOST_TEST
-    pmm_free_contiguous(tty, (sizeof(struct tty) + 4095U) / 4096U);
-#else
     kfree(tty, sizeof(struct tty));
-#endif
 }
 
 // Minimal ring buffer ops
@@ -241,9 +247,12 @@ static void tty_output_locked(char c, struct tty *tp);
 static void tty_start_locked(struct tty *tp);
 
 static void tty_send_xchar(struct tty *tp, char c) {
-    if (tp->driver->put_char) {
+    if (!tty_valid(tp) || !tp->driver) {
+        return;
+    }
+    if (tty_driver_cb_valid((const void *)tp->driver->put_char)) {
         tp->driver->put_char(tp, c);
-    } else if (tp->driver->write) {
+    } else if (tty_driver_cb_valid((const void *)tp->driver->write)) {
         tp->driver->write(tp, (const unsigned char*)&c, 1);
     }
 }
@@ -294,7 +303,11 @@ static void tty_output_locked(char c, struct tty *tp) {
 static void tty_start_locked(struct tty *tp) {
     if (tp->stopped) return;
     
-    if (tp->driver->write) {
+    if (!tp->driver) {
+        return;
+    }
+
+    if (tty_driver_cb_valid((const void *)tp->driver->write)) {
         unsigned char buf[128];
         int n;
         while ((n = tp->write_buf.count) > 0) {
@@ -303,7 +316,7 @@ static void tty_start_locked(struct tty *tp) {
             if (n > (int)sizeof(buf)) n = sizeof(buf);
             
             // Check driver write room
-            if (tp->driver->write_room) {
+            if (tty_driver_cb_valid((const void *)tp->driver->write_room)) {
                 int room = tp->driver->write_room(tp);
                 if (room <= 0) break;
                 if (n > room) n = room;
@@ -332,13 +345,15 @@ static void tty_start_locked(struct tty *tp) {
     } else {
         char c;
         while (tty_buf_get(&tp->write_buf, &c)) {
-            if (tp->driver->put_char) {
+            if (tty_driver_cb_valid((const void *)tp->driver->put_char)) {
                 tp->driver->put_char(tp, c);
+            } else {
+                break;
             }
         }
     }
     
-    if (tp->driver->flush_chars) {
+    if (tty_driver_cb_valid((const void *)tp->driver->flush_chars)) {
         tp->driver->flush_chars(tp);
     }
 }
@@ -417,7 +432,7 @@ static void canon(struct tty *tp, uint32_t *flags_ptr) {
         if (tp->raw_buf.count <= (TTY_BUF_SIZE / 4)) {
             tp->input_stopped = 0;
             tty_send_xchar(tp, tp->termios.c_cc[VSTART]);
-            if (tp->driver->unthrottle) {
+            if (tty_driver_cb_valid((const void *)tp->driver->unthrottle)) {
                 tp->driver->unthrottle(tp);
             }
         }
@@ -531,7 +546,7 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
         if (tty->raw_buf.count >= (TTY_BUF_SIZE * 3 / 4)) {
             tty->input_stopped = 1;
             tty_send_xchar(tty, tty->termios.c_cc[VSTOP]);
-            if (tty->driver->throttle) {
+            if (tty_driver_cb_valid((const void *)tty->driver->throttle)) {
                 tty->driver->throttle(tty);
             }
         }
@@ -607,7 +622,7 @@ static int tty_check_write(struct tty *tty) {
 }
 
 int tty_read(struct tty *tty, char *buf, int len) {
-    if (!tty || len <= 0) return 0;
+    if (!tty_valid(tty) || len <= 0) return 0;
     
     TTY_LOCK(tty);
 
@@ -663,9 +678,16 @@ int tty_read(struct tty *tty, char *buf, int len) {
 }
 
 int tty_write(struct tty *tty, const char *buf, int len) {
-    if (!tty) return 0;
+    if (!tty_valid(tty)) return -EIO;
     
     TTY_LOCK(tty);
+
+    if (!tty->driver ||
+        (!tty_driver_cb_valid((const void *)tty->driver->write) &&
+         !tty_driver_cb_valid((const void *)tty->driver->put_char))) {
+        TTY_UNLOCK(tty);
+        return -EIO;
+    }
 
     if (tty_check_write(tty)) {
         TTY_UNLOCK(tty);
@@ -681,7 +703,7 @@ int tty_write(struct tty *tty, const char *buf, int len) {
 }
 
 int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
-    if (!tty) return -1;
+    if (!tty_valid(tty)) return -EIO;
     int ret = -1;
     int do_hangup = 0;
 
@@ -696,7 +718,10 @@ int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
         case TCSETSW:
         case TCSETSF:
             if (arg) tty->termios = *(struct termios*)arg;
-            if (tty->driver->set_termios) tty->driver->set_termios(tty);
+            if (tty->driver &&
+                tty_driver_cb_valid((const void *)tty->driver->set_termios)) {
+                tty->driver->set_termios(tty);
+            }
             ret = 0;
             break;
         case TIOCGWINSZ:
@@ -801,7 +826,7 @@ int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
      * We assume tty pointer remains valid (held by open file reference).
      */
     if (ret == -1 && tty->driver && tty->driver->ioctl) {
-        if ((uintptr_t)tty->driver->ioctl < KERN_BASE) {
+        if (!tty_driver_cb_valid((const void *)tty->driver->ioctl)) {
             return -EIO;
         }
         ret = tty->driver->ioctl(tty, cmd, (unsigned long)arg);
@@ -815,7 +840,7 @@ int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
 }
 
 int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
-    if (!tty) return -1;
+    if (!tty_valid(tty)) return -EIO;
 
     struct termios k_termios;
     struct winsize k_winsize;
@@ -895,7 +920,7 @@ int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
 }
 
 int tty_open(struct tty *tty) {
-    if (!tty) return -1;
+    if (!tty_valid(tty)) return -EIO;
     for (;;) {
         TTY_LOCK(tty);
         if (tty->lifecycle_busy) {
@@ -904,7 +929,8 @@ int tty_open(struct tty *tty) {
             continue;
         }
 
-        if (tty->driver_active || !tty->driver || !tty->driver->open) {
+        if (tty->driver_active || !tty->driver ||
+            !tty_driver_cb_valid((const void *)tty->driver->open)) {
             tty->count++;
             tty->driver_active = 1;
             TTY_UNLOCK(tty);
@@ -935,7 +961,7 @@ int tty_open(struct tty *tty) {
 }
 
 void tty_close(struct tty *tty) {
-    if (!tty) return;
+    if (!tty_valid(tty)) return;
     for (;;) {
         int call_driver_close = 0;
 
@@ -958,7 +984,8 @@ void tty_close(struct tty *tty) {
         }
 
         tty->lifecycle_busy = 1;
-        call_driver_close = tty->driver_active && tty->driver && tty->driver->close;
+        call_driver_close = tty->driver_active && tty->driver &&
+                            tty_driver_cb_valid((const void *)tty->driver->close);
         tty->driver_active = 0;
         TTY_UNLOCK(tty);
 
@@ -987,7 +1014,7 @@ void tty_close(struct tty *tty) {
  * 2. The terminal is disassociated from the session
  */
 void tty_hangup(struct tty *tty) {
-    if (!tty) return;
+    if (!tty_valid(tty)) return;
     
     TTY_LOCK(tty);
 
@@ -1007,7 +1034,7 @@ void tty_hangup(struct tty *tty) {
 }
 
 int tty_poll(struct tty *tty, void *waiter) {
-    if (!tty) return POLLNVAL;
+    if (!tty_valid(tty)) return POLLNVAL;
     
     int events = 0;
     
@@ -1024,10 +1051,12 @@ int tty_poll(struct tty *tty, void *waiter) {
     // Check for writability
     int write_room = TTY_BUF_SIZE - tty->write_buf.count;
     int pending = tty->write_buf.count;
-    if (tty->driver->write_room) {
+    if (tty->driver &&
+        tty_driver_cb_valid((const void *)tty->driver->write_room)) {
         write_room = tty->driver->write_room(tty);
     }
-    if (tty->driver->chars_in_buffer) {
+    if (tty->driver &&
+        tty_driver_cb_valid((const void *)tty->driver->chars_in_buffer)) {
         pending += tty->driver->chars_in_buffer(tty);
     }
     if (write_room > 0 && pending < TTY_BUF_SIZE) {

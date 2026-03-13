@@ -443,6 +443,7 @@ extern void iounmap(void);
 extern void irq_alloc_vector(void);
 extern void irq_dispatch(void);
 extern void irq_free_vector(void);
+extern void isa_device_present(void);
 extern void isa_dump_devices(void);
 extern void isa_first_device(void);
 extern void isa_init(void);
@@ -1403,6 +1404,7 @@ extern void test_uma_percpu_cache_paths(void);
 extern void test_uma_redzone(void);
 extern void test_uma_slab_freelist_integrity(void);
 extern void test_uma_zero_fill(void);
+extern void test_vhold_vdrop(void);
 extern void test_vm_device_fault_mapping(void);
 extern void test_vm_fault_cow(void);
 extern void test_vm_fault_file_backed(void);
@@ -2411,6 +2413,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&pci_next_device, "pci_next_device" },
     { (uint32_t)(uintptr_t)&pci_dump_devices, "pci_dump_devices" },
     { (uint32_t)(uintptr_t)&pci_init, "pci_init" },
+    { (uint32_t)(uintptr_t)&isa_device_present, "isa_device_present" },
     { (uint32_t)(uintptr_t)&isa_init, "isa_init" },
     { (uint32_t)(uintptr_t)&isa_port_alive, "isa_port_alive" },
     { (uint32_t)(uintptr_t)&isa_probe_legacy, "isa_probe_legacy" },
@@ -3321,6 +3324,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&run_getcwd_tests, "run_getcwd_tests" },
     { (uint32_t)(uintptr_t)&run_vnode_lock_tests, "run_vnode_lock_tests" },
     { (uint32_t)(uintptr_t)&run_vnode_hold_tests, "run_vnode_hold_tests" },
+    { (uint32_t)(uintptr_t)&test_vhold_vdrop, "test_vhold_vdrop" },
     { (uint32_t)(uintptr_t)&test_mem, "test_mem" },
     { (uint32_t)(uintptr_t)&run_div64_tests, "run_div64_tests" },
     { (uint32_t)(uintptr_t)&run_crc32_tests, "run_crc32_tests" },
@@ -3441,4 +3445,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1715;
+int ksym_count = 1717;

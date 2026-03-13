@@ -11,6 +11,7 @@ static struct tty *mock_console_tty;
 static int redraw_calls;
 
 void hw_text_redraw_active(void) { redraw_calls++; }
+void hw_text_refresh_statusline(void) { }
 int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
 void ansi_init(struct ansi_ctx *ctx) { memset(ctx, 0, sizeof(*ctx)); }
 void console_set_tty(struct tty *tty) { mock_console_tty = tty; }

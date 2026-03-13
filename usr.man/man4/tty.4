@@ -18,6 +18,15 @@ On the kernel text console, keyboard input and
 I/O resolve against the active virtual terminal first so the visible VT and
 its line discipline stay aligned.
 .PP
+TTY state lives in ordinary kernel memory allocated via
+.BR kmalloc (9) ,
+not raw page-frame allocations.
+.PP
+The TTY core validates its live control object and driver callback table before
+issuing indirect driver operations; corrupted or invalid callbacks fail with
+.B EIO
+instead of being executed.
+.PP
 Opening
 .B /dev/tty
 will fail with
@@ -38,6 +47,9 @@ Prompt user even when stdin is redirected:
 .TP
 .B ENXIO
 The process has no controlling terminal.
+.TP
+.B EIO
+The active TTY or its backing driver callbacks were invalid.
 .SH FILES
 .TP
 .B /dev/tty

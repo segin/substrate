@@ -332,12 +332,6 @@ void isr_handler(registers_t *regs) {
         (void)irq_dispatch((unsigned int)(regs->int_no - IDT_IRQ_BASE), regs);
         if (regs->int_no >= 40) outb(0xA0, 0x20);
         outb(0x20, 0x20);
-
-        if (current_thread && current_thread->needs_resched &&
-            !(current_thread->flags & THREAD_F_NO_PREEMPT)) {
-            current_thread->needs_resched = 0;
-            sched_yield();
-        }
     }
 
     signal_handle_pending(regs);
