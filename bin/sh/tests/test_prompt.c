@@ -191,8 +191,6 @@ void test_conditional_tokens() {
     ASSERT_STR_EQ(res, "NONZERO");
     free(res);
     
-    // Nested colors in conditional
-    // If ? is 1 (nonzero), print Red ERROR
     shell_var_set("?", "1");
     res = expand_prompt_escapes("%(?.%F{red}ERROR%f.OK)", 1, 1, 0);
     ASSERT_STR_EQ(res, "\001\033[31m\002ERROR\001\033[39m\002");
