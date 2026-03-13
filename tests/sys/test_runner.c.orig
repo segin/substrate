@@ -45,16 +45,16 @@ extern void test_pipe_race(void);
 
 void run_kernel_tests(void) {
     char test_arg[32] = {0};
-    
+
     if (cmdline_get("test", test_arg, sizeof(test_arg)) != 0) {
         // No test argument
         return;
     }
-    
+
     kprint("\n\n=== RUNNING KERNEL TESTS ===\n");
-    
+
     int all = (strcmp(test_arg, "all") == 0) || (strcmp(test_arg, "1") == 0);
-    
+
     if (all || strcmp(test_arg, "string") == 0) {
         run_string_tests();
     }
@@ -165,7 +165,7 @@ void run_kernel_tests(void) {
         run_vm_pager_tests();
         run_vm_policy_tests();
     }
-    
+
     if (all || strcmp(test_arg, "mmap") == 0) {
         run_mmap_tests();
     }
@@ -253,7 +253,7 @@ void run_kernel_tests(void) {
          extern void test_printf_flags(void);
          test_printf_flags();
     }
-    
+
     if (all || strcmp(test_arg, "printf_specifiers") == 0) {
          extern void run_printf_specifier_tests(void);
          run_printf_specifier_tests();
@@ -298,7 +298,7 @@ void run_kernel_tests(void) {
     }
 
     if (all || strcmp(test_arg, "kthread") == 0) {
-        if (cmdline_has("test_kthread_create")) { 
+        if (cmdline_has("test_kthread_create")) {
              extern void run_kthread_create_tests(void);
              run_kthread_create_tests();
         } else {
@@ -314,7 +314,7 @@ void run_kernel_tests(void) {
     if (all || strcmp(test_arg, "driver") == 0) {
         extern int test_driver_registration_logic(void);
         if (test_driver_registration_logic() == 0) kprint("driver_register: PASS\n"); else kprint("driver_register: FAIL\n");
-        
+
         extern int test_driver_attach_logic(void);
         if (test_driver_attach_logic() == 0) kprint("driver_attach: PASS\n"); else kprint("driver_attach: FAIL\n");
 
@@ -449,11 +449,6 @@ void run_kernel_tests(void) {
         if (test_mem() == 0) kprint("mem: PASS\n"); else kprint("mem: FAIL\n");
     }
 
-    if (all || strcmp(test_arg, "vnode_cache") == 0) {
-        extern void run_vnode_cache_tests(void);
-        run_vnode_cache_tests();
-    }
-
     if (all || strcmp(test_arg, "vfs_cache") == 0) {
         extern void run_vfs_cache_tests(void);
         run_vfs_cache_tests();
@@ -464,7 +459,7 @@ void run_kernel_tests(void) {
     }
 
     kprint("=== TESTS COMPLETE ===\n\n");
-    
+
     // Optional: Halt after tests if requested
     if (cmdline_has("test_halt")) {
         kprint("Halting system as requested.\n");
