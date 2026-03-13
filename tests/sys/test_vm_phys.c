@@ -391,6 +391,27 @@ static void test_free_list_integrity(void) {
     TEST_PASS("free_list_integrity");
 }
 
+/* Test: alloc page below a specific limit */
+static void test_alloc_page_below(void) {
+    vm_page_t *page = vm_phys_alloc_page_below(0x2000);
+    TEST_ASSERT(page != NULL, "alloc_below: returned NULL for valid limit");
+    TEST_ASSERT(page->phys_addr < 0x2000, "alloc_below: address >= limit");
+
+    vm_phys_free_page(page);
+
+    /* Allocate with limit 0 (no limit) */
+    vm_page_t *page2 = vm_phys_alloc_page_below(0);
+    TEST_ASSERT(page2 != NULL, "alloc_below: returned NULL for limit 0");
+
+    vm_phys_free_page(page2);
+
+    /* Allocate with an impossible limit (e.g. 1) */
+    vm_page_t *page3 = vm_phys_alloc_page_below(1);
+    TEST_ASSERT(page3 == NULL, "alloc_below: returned non-NULL for impossible limit");
+
+    TEST_PASS("alloc_page_below");
+}
+
 /* Test entry point */
 void test_vm_phys(void) {
     kprint("=== Physical Memory Manager Integration Tests ===\n");
@@ -414,6 +435,7 @@ void test_vm_phys(void) {
     test_mark_used_single_page_reservation();
     test_free_used_invariant();
     test_free_list_integrity();
+    test_alloc_page_below();
     
     char buf[64];
     sprintf(buf, "=== vm_phys tests: %d passed, %d failed ===\n", passed, failed);
