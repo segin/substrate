@@ -675,31 +675,32 @@ void do_command(buffer_t *b, char *cmd) {
             if (!first) return;
             // join lines addr1 through addr2
             size_t total_len = first->len;
-            for (int i = 1; i <= (addr2 - addr1); i++) {
-                line_t *nxt = buf_get_line(b, addr1 + i);
-                if (nxt) total_len += nxt->len;
+            line_t *nxt_len = first->next;
+            for (int i = 1; i <= (addr2 - addr1) && nxt_len; i++) {
+                total_len += nxt_len->len;
+                nxt_len = nxt_len->next;
             }
             char *joined = malloc(total_len + (addr2 - addr1 + 1));
             size_t cur_len = first->len;
             memcpy(joined, first->text, cur_len);
             joined[cur_len] = '\0';
-            for (int i = 1; i <= (addr2 - addr1); i++) {
-                line_t *nxt = buf_get_line(b, addr1 + 1);
-                if (nxt) {
-                    // Add a space if the previous string doesn't end with a space and the next doesn't start with one
-                    if (cur_len > 0 && joined[cur_len-1] != ' ' && joined[cur_len-1] != '\t' && nxt->text[0] != ' ' && nxt->text[0] != '\t' && nxt->text[0] != ')') {
-                        joined[cur_len] = ' ';
-                        cur_len++;
-                        total_len++;
-                    }
-                    memcpy(joined + cur_len, nxt->text, nxt->len);
-                    cur_len += nxt->len;
-                    joined[cur_len] = '\0';
-                    buf_delete(b, nxt);
+            line_t *nxt = first->next;
+            for (int i = 1; i <= (addr2 - addr1) && nxt; i++) {
+                line_t *to_delete = nxt;
+                nxt = nxt->next;
+                // Add a space if the previous string doesn't end with a space and the next doesn't start with one
+                if (cur_len > 0 && joined[cur_len-1] != ' ' && joined[cur_len-1] != '\t' && to_delete->text[0] != ' ' && to_delete->text[0] != '\t' && to_delete->text[0] != ')') {
+                    joined[cur_len] = ' ';
+                    cur_len++;
                 }
+                memcpy(joined + cur_len, to_delete->text, to_delete->len);
+                cur_len += to_delete->len;
+                joined[cur_len] = '\0';
+                buf_delete(b, to_delete);
             }
             free(first->text);
             first->text = joined;
+            first->len = cur_len;
             first->len = total_len;
         }
     } else if (cmd[0] == 'y') {
