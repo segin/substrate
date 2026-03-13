@@ -1,7 +1,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <sys/file.h>
+#include <sys/fcntl.h>
 #include <vfs/vfs.h>
+#include <fcntl.h>
 #include <kern/sched.h>
 #include <string.h>
 
@@ -52,12 +54,12 @@ bool test_vfs_open_permissions(void) {
     node.gid = 1000;
     node.mask = 0640;
 
-    if (vfs_may_open(&node, 1000, 1000, O_RDONLY) != 0) return false;
-    if (vfs_may_open(&node, 1000, 1000, O_WRONLY) != 0) return false;
-    if (vfs_may_open(&node, 1001, 1001, O_RDONLY) == 0) return false;
-    if (vfs_may_open(&node, 1001, 1000, O_RDONLY) != 0) return false;
-    if (vfs_may_open(&node, 1001, 1000, O_WRONLY) == 0) return false;
-    if (vfs_may_open(&node, 1001, 1001, O_TRUNC | O_WRONLY) == 0) return false;
+    if (vfs_may_open(&node, 1000, 1000, 0) != 0) return false;
+    if (vfs_may_open(&node, 1000, 1000, 1) != 0) return false;
+    if (vfs_may_open(&node, 1001, 1001, 0) == 0) return false;
+    if (vfs_may_open(&node, 1001, 1000, 0) != 0) return false;
+    if (vfs_may_open(&node, 1001, 1000, 1) == 0) return false;
+    if (vfs_may_open(&node, 1001, 1001, 0x0200 | 1) == 0) return false;
 
     return true;
 }
