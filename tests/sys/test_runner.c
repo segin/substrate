@@ -311,6 +311,11 @@ void run_kernel_tests(void) {
         run_vnode_lock_tests();
     }
 
+    if (all || strcmp(test_arg, "vgone") == 0) {
+        extern void run_vgone_tests(void);
+        run_vgone_tests();
+    }
+
     if (all || strcmp(test_arg, "driver") == 0) {
         extern int test_driver_registration_logic(void);
         if (test_driver_registration_logic() == 0) kprint("driver_register: PASS\n"); else kprint("driver_register: FAIL\n");

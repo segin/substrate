@@ -1,9 +1,12 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <sys/file.h>
+#include <sys/fcntl.h>
 #include <vfs/vfs.h>
+#include <fcntl.h>
 #include <kern/sched.h>
 #include <string.h>
+#include <sys/fcntl.h>
 
 extern int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode);
 extern int vfs_may_open(fs_node_t *node, uint32_t uid, uint32_t gid, int flags);
@@ -52,12 +55,12 @@ bool test_vfs_open_permissions(void) {
     node.gid = 1000;
     node.mask = 0640;
 
-    if (vfs_may_open(&node, 1000, 1000, O_RDONLY) != 0) return false;
-    if (vfs_may_open(&node, 1000, 1000, O_WRONLY) != 0) return false;
-    if (vfs_may_open(&node, 1001, 1001, O_RDONLY) == 0) return false;
-    if (vfs_may_open(&node, 1001, 1000, O_RDONLY) != 0) return false;
-    if (vfs_may_open(&node, 1001, 1000, O_WRONLY) == 0) return false;
-    if (vfs_may_open(&node, 1001, 1001, O_TRUNC | O_WRONLY) == 0) return false;
+    if (vfs_may_open(&node, 1000, 1000, 0) != 0) return false;
+    if (vfs_may_open(&node, 1000, 1000, 1) != 0) return false;
+    if (vfs_may_open(&node, 1001, 1001, 0) == 0) return false;
+    if (vfs_may_open(&node, 1001, 1000, 0) != 0) return false;
+    if (vfs_may_open(&node, 1001, 1000, 1) == 0) return false;
+    if (vfs_may_open(&node, 1001, 1001, 0x0200 | 1) == 0) return false;
 
     return true;
 }
