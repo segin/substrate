@@ -23,7 +23,6 @@ void run_cow_stats_tests(void);
 extern void test_pte_user(void);
 extern void test_stacktrace(void);
 extern void test_ksyms(void);
-extern void test_linux_personality(void);
 extern void test_mmap_parsing(void);
 extern void test_e820_parsing(void);
 extern void test_vm_phys(void);
@@ -39,6 +38,7 @@ extern void run_string_tests(void);
 extern void run_sched_bench(void);
 extern void run_sched_dequeue_bench(void);
 extern void run_vnode_lock_tests(void);
+extern void test_vhold_vdrop(void);
 extern void run_kobject_tests(void);
 void run_reboot_tests(void);
 extern void test_pipe_race(void);
@@ -117,10 +117,6 @@ void run_kernel_tests(void) {
 
     if (all || strcmp(test_arg, "ksyms") == 0) {
         test_ksyms();
-    }
-
-    if (all || strcmp(test_arg, "linux_perso") == 0) {
-        test_linux_personality();
     }
 
     if (all || strcmp(test_arg, "mmap_parsing") == 0) {
@@ -311,6 +307,10 @@ void run_kernel_tests(void) {
         run_vnode_lock_tests();
     }
 
+    if (all || strcmp(test_arg, "vhold_vdrop") == 0) {
+        test_vhold_vdrop();
+    }
+
     if (all || strcmp(test_arg, "driver") == 0) {
         extern int test_driver_registration_logic(void);
         if (test_driver_registration_logic() == 0) kprint("driver_register: PASS\n"); else kprint("driver_register: FAIL\n");
@@ -332,21 +332,6 @@ void run_kernel_tests(void) {
 
         extern int test_driver_override_logic(void);
         if (test_driver_override_logic() == 0) kprint("driver_override: PASS\n"); else kprint("driver_override: FAIL\n");
-
-        extern int test_device_probe_logic(void);
-        if (test_device_probe_logic() == 0) kprint("device_probe: PASS\n"); else kprint("device_probe: FAIL\n");
-
-        extern int test_deferred_probe_logic(void);
-        if (test_deferred_probe_logic() == 0) kprint("deferred_probe: PASS\n"); else kprint("deferred_probe: FAIL\n");
-
-        extern int test_device_pm_logic(void);
-        if (test_device_pm_logic() == 0) kprint("device_pm: PASS\n"); else kprint("device_pm: FAIL\n");
-
-        extern int test_device_shutdown_logic(void);
-        if (test_device_shutdown_logic() == 0) kprint("device_shutdown: PASS\n"); else kprint("device_shutdown: FAIL\n");
-
-        extern int test_device_reset_logic(void);
-        if (test_device_reset_logic() == 0) kprint("device_reset: PASS\n"); else kprint("device_reset: FAIL\n");
     }
 
     if (all || strcmp(test_arg, "vfs_error") == 0) {
@@ -377,22 +362,6 @@ void run_kernel_tests(void) {
     if (all || strcmp(test_arg, "ide_dma") == 0) {
         extern void test_ide_dma(void);
         test_ide_dma();
-    }
-    if (all || strcmp(test_arg, "ide_qemu_pio") == 0) {
-        extern void test_ide_qemu_pio(void);
-        test_ide_qemu_pio();
-    }
-    if (all || strcmp(test_arg, "ide_qemu_dma") == 0) {
-        extern void test_ide_qemu_dma(void);
-        test_ide_qemu_dma();
-    }
-    if (all || strcmp(test_arg, "ide_qemu_atapi") == 0) {
-        extern void test_ide_qemu_atapi(void);
-        test_ide_qemu_atapi();
-    }
-    if (all || strcmp(test_arg, "ide_qemu_extra") == 0) {
-        extern void test_ide_qemu_extra_channels(void);
-        test_ide_qemu_extra_channels();
     }
     if (all || strcmp(test_arg, "sysinfo") == 0) {
         extern int test_sysinfo(void);
