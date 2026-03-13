@@ -192,7 +192,7 @@ Console policy:
 - `console=serial0..serial3` selects COM1..COM4 respectively for runtime console routing
 - `serial_debug` or `console=serialN` registers the UART backend with the kernel console framework for mirrored output
 - the hardware text console now treats the last physical text row as a kernel-owned status line rendered black-on-white; the usable tty geometry reported to userland excludes that row (for example `80x24` on an `80x25` mode, `80x49` on an `80x50` mode)
-- the status line is refreshed from the timer tick on CPU 0 once per second and currently shows the active VT number plus wall-clock time in ISO 8601 UTC form
+- the timer tick raises a once-per-second wakeup for a dedicated kernel `vtstatus` thread, which refreshes the status line without doing the redraw work directly in interrupt context; the line currently shows the active VT number plus wall-clock time in ISO 8601 UTC form
 - `video=text` keeps the system on the hardware text console even when framebuffer drivers are available
 - `textmode=` and `video=text:COLSxROWS` select hardware text geometry for the kernel text console; the BIOS setup path on `zImage` and floppy boots can program `80x25`, `80x43`, `80x50`, and any detected VBE text modes such as `132x60`, while the higher-half driver directly reprograms only the stable in-kernel `80x25` and `80x50` cases and otherwise trusts the BIOS-programmed geometry handoff
 - the VT layer owns per-console backing buffers, per-VT `tty` bindings, and per-VT scrollback history; the VGA text backend owns all active-screen redraw and cursor updates so VT switching does not memcpy live VGA memory directly

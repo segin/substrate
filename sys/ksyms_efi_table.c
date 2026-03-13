@@ -356,9 +356,14 @@ extern void get_time(void);
 extern void get_uptime(void);
 extern void get_uptime_ms(void);
 extern void getnewvnode(void);
+extern void hw_text_clear_screen(void);
 extern void hw_text_console_write_shim(void);
 extern void hw_text_init(void);
+extern void hw_text_putc(void);
+extern void hw_text_redraw_active(void);
+extern void hw_text_refresh_statusline(void);
 extern void hw_text_set_color(void);
+extern void hw_text_tick_1hz(void);
 extern void i386_cpu_cycle_counter(void);
 extern void i386_cpu_cycle_counter_split(void);
 extern void i386_cpu_get_features(void);
@@ -928,6 +933,7 @@ extern void run_vm_map_tests(void);
 extern void run_vm_object_tests(void);
 extern void run_vm_pager_tests(void);
 extern void run_vm_policy_tests(void);
+extern void run_vnode_hold_tests(void);
 extern void run_vnode_lock_tests(void);
 extern void run_vnode_ops_tests(void);
 extern void runqueue_add(void);
@@ -1312,6 +1318,10 @@ extern void test_futex_run_all(void);
 extern void test_geom(void);
 extern void test_ide_dma(void);
 extern void test_ide_perf(void);
+extern void test_ide_qemu_atapi(void);
+extern void test_ide_qemu_dma(void);
+extern void test_ide_qemu_extra_channels(void);
+extern void test_ide_qemu_pio(void);
 extern void test_kernel_bootstrap_large_page(void);
 extern void test_kernel_pmap_protection(void);
 extern void test_ksyms(void);
@@ -1364,6 +1374,7 @@ extern void test_pte_user(void);
 extern void test_resource_helpers(void);
 extern void test_scsi(void);
 extern void test_stacktrace(void);
+extern void test_sys_brk(void);
 extern void test_sys_mmap(void);
 extern void test_sys_mprotect(void);
 extern void test_sys_munmap(void);
@@ -1424,6 +1435,7 @@ extern void test_vm_policy_lru(void);
 extern void test_vm_policy_writeback(void);
 extern void test_vm_swap_pager_full(void);
 extern void test_vm_swap_pager_roundtrip(void);
+extern void timer_init(void);
 extern void timer_tick(void);
 extern void timer_tick_context(void);
 extern void timeval_add(void);
@@ -1687,9 +1699,21 @@ extern void vrele(void);
 extern void vsnprintf(void);
 extern void vsprintf(void);
 extern void vt_activate(void);
+extern void vt_capture_scrollback_top(void);
 extern void vt_get_active(void);
+extern void vt_get_active_tty(void);
+extern void vt_get_cell_count(void);
+extern void vt_get_display_cell(void);
+extern void vt_get_height(void);
+extern void vt_get_scrollback_view(void);
 extern void vt_get_state(void);
+extern void vt_get_status_row(void);
+extern void vt_get_visible_height(void);
+extern void vt_get_width(void);
 extern void vt_init(void);
+extern void vt_scrollback_page_down(void);
+extern void vt_scrollback_page_up(void);
+extern void vt_set_geometry(void);
 extern void write_fs(void);
 extern void zero_init(void);
 
@@ -2036,6 +2060,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&sys_getpgrp, "sys_getpgrp" },
     { (uint32_t)(uintptr_t)&proc_timers_init, "proc_timers_init" },
     { (uint32_t)(uintptr_t)&proc_timers_cancel, "proc_timers_cancel" },
+    { (uint32_t)(uintptr_t)&timer_init, "timer_init" },
     { (uint32_t)(uintptr_t)&get_ticks, "get_ticks" },
     { (uint32_t)(uintptr_t)&get_time, "get_time" },
     { (uint32_t)(uintptr_t)&get_uptime, "get_uptime" },
@@ -2535,7 +2560,12 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&bga_scroll, "bga_scroll" },
     { (uint32_t)(uintptr_t)&bga_install, "bga_install" },
     { (uint32_t)(uintptr_t)&hw_text_console_write_shim, "hw_text_console_write_shim" },
+    { (uint32_t)(uintptr_t)&hw_text_redraw_active, "hw_text_redraw_active" },
+    { (uint32_t)(uintptr_t)&hw_text_refresh_statusline, "hw_text_refresh_statusline" },
+    { (uint32_t)(uintptr_t)&hw_text_tick_1hz, "hw_text_tick_1hz" },
     { (uint32_t)(uintptr_t)&hw_text_set_color, "hw_text_set_color" },
+    { (uint32_t)(uintptr_t)&hw_text_putc, "hw_text_putc" },
+    { (uint32_t)(uintptr_t)&hw_text_clear_screen, "hw_text_clear_screen" },
     { (uint32_t)(uintptr_t)&hw_text_init, "hw_text_init" },
     { (uint32_t)(uintptr_t)&video_ask_mode, "video_ask_mode" },
     { (uint32_t)(uintptr_t)&input_init, "input_init" },
@@ -2590,10 +2620,22 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&tty_close, "tty_close" },
     { (uint32_t)(uintptr_t)&tty_hangup, "tty_hangup" },
     { (uint32_t)(uintptr_t)&tty_poll, "tty_poll" },
+    { (uint32_t)(uintptr_t)&vt_set_geometry, "vt_set_geometry" },
+    { (uint32_t)(uintptr_t)&vt_get_width, "vt_get_width" },
+    { (uint32_t)(uintptr_t)&vt_get_height, "vt_get_height" },
+    { (uint32_t)(uintptr_t)&vt_get_visible_height, "vt_get_visible_height" },
+    { (uint32_t)(uintptr_t)&vt_get_status_row, "vt_get_status_row" },
+    { (uint32_t)(uintptr_t)&vt_get_cell_count, "vt_get_cell_count" },
     { (uint32_t)(uintptr_t)&vt_init, "vt_init" },
     { (uint32_t)(uintptr_t)&vt_get_active, "vt_get_active" },
     { (uint32_t)(uintptr_t)&vt_get_state, "vt_get_state" },
+    { (uint32_t)(uintptr_t)&vt_get_active_tty, "vt_get_active_tty" },
     { (uint32_t)(uintptr_t)&vt_activate, "vt_activate" },
+    { (uint32_t)(uintptr_t)&vt_get_scrollback_view, "vt_get_scrollback_view" },
+    { (uint32_t)(uintptr_t)&vt_get_display_cell, "vt_get_display_cell" },
+    { (uint32_t)(uintptr_t)&vt_capture_scrollback_top, "vt_capture_scrollback_top" },
+    { (uint32_t)(uintptr_t)&vt_scrollback_page_up, "vt_scrollback_page_up" },
+    { (uint32_t)(uintptr_t)&vt_scrollback_page_down, "vt_scrollback_page_down" },
     { (uint32_t)(uintptr_t)&uart_select_port, "uart_select_port" },
     { (uint32_t)(uintptr_t)&uart_get_console, "uart_get_console" },
     { (uint32_t)(uintptr_t)&uart_devfs_init, "uart_devfs_init" },
@@ -3136,6 +3178,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&test_vm_map_benchmark, "test_vm_map_benchmark" },
     { (uint32_t)(uintptr_t)&test_vm_map_property_sorted_non_overlapping, "test_vm_map_property_sorted_non_overlapping" },
     { (uint32_t)(uintptr_t)&test_vm_map_merge_adjacent, "test_vm_map_merge_adjacent" },
+    { (uint32_t)(uintptr_t)&test_sys_brk, "test_sys_brk" },
     { (uint32_t)(uintptr_t)&run_vm_map_tests, "run_vm_map_tests" },
     { (uint32_t)(uintptr_t)&run_vm_map_benchmark, "run_vm_map_benchmark" },
     { (uint32_t)(uintptr_t)&test_vm_object_lifecycle, "test_vm_object_lifecycle" },
@@ -3267,6 +3310,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&run_printf_vsnprintf_tests, "run_printf_vsnprintf_tests" },
     { (uint32_t)(uintptr_t)&run_getcwd_tests, "run_getcwd_tests" },
     { (uint32_t)(uintptr_t)&run_vnode_lock_tests, "run_vnode_lock_tests" },
+    { (uint32_t)(uintptr_t)&run_vnode_hold_tests, "run_vnode_hold_tests" },
     { (uint32_t)(uintptr_t)&test_mem, "test_mem" },
     { (uint32_t)(uintptr_t)&run_div64_tests, "run_div64_tests" },
     { (uint32_t)(uintptr_t)&run_crc32_tests, "run_crc32_tests" },
@@ -3280,6 +3324,10 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&run_tty_tests, "run_tty_tests" },
     { (uint32_t)(uintptr_t)&run_minix_readdir_tests, "run_minix_readdir_tests" },
     { (uint32_t)(uintptr_t)&test_ide_dma, "test_ide_dma" },
+    { (uint32_t)(uintptr_t)&test_ide_qemu_pio, "test_ide_qemu_pio" },
+    { (uint32_t)(uintptr_t)&test_ide_qemu_dma, "test_ide_qemu_dma" },
+    { (uint32_t)(uintptr_t)&test_ide_qemu_atapi, "test_ide_qemu_atapi" },
+    { (uint32_t)(uintptr_t)&test_ide_qemu_extra_channels, "test_ide_qemu_extra_channels" },
     { (uint32_t)(uintptr_t)&run_sched_bench, "run_sched_bench" },
     { (uint32_t)(uintptr_t)&run_sched_dequeue_bench, "run_sched_dequeue_bench" },
     { (uint32_t)(uintptr_t)&run_kobject_tests, "run_kobject_tests" },
@@ -3383,4 +3431,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1686;
+int ksym_count = 1710;

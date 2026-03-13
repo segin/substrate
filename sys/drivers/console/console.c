@@ -11,10 +11,20 @@
 #include <vm/vm_kmem.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <sys/lock.h>
+#include <kern/sched.h>
+#include <intr.h>
 
 // Globals
 static console_backend_t *backends = NULL;
 static struct tty *console_tty = NULL;
+static spinlock_t console_input_lock = SPINLOCK_INIT("console_input");
+
+#define CONSOLE_INPUT_BUF_SIZE 256
+static char console_input_buf[CONSOLE_INPUT_BUF_SIZE];
+static unsigned int console_input_head;
+static unsigned int console_input_tail;
+static unsigned int console_input_count;
 
 static struct tty *console_resolve_tty(void) {
     struct tty *tty = vt_get_active_tty();
@@ -26,6 +36,9 @@ static struct tty *console_resolve_tty(void) {
 
 void console_init(void) {
     backends = NULL;
+    console_input_head = 0;
+    console_input_tail = 0;
+    console_input_count = 0;
     tty_init();
 }
 
@@ -84,15 +97,59 @@ void console_push_char(char c) {
     struct tty *tty = console_resolve_tty();
     if (tty) {
         tty_flip_buffer_push(tty, c);
+        return;
     }
+
+    {
+        uint32_t flags = intr_disable();
+        spinlock_acquire(&console_input_lock);
+        if (console_input_count < CONSOLE_INPUT_BUF_SIZE) {
+            console_input_buf[console_input_head] = c;
+            console_input_head = (console_input_head + 1U) % CONSOLE_INPUT_BUF_SIZE;
+            console_input_count++;
+        }
+        spinlock_release(&console_input_lock);
+        intr_restore(flags);
+    }
+
+    sched_wakeup((void *)&console_input_count);
 }
 
 // DevFS Hooks using TTY Layer
 static size_t console_node_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node; (void)offset;
     struct tty *tty = console_resolve_tty();
-    if (!tty) return 0;
-    return tty_read(tty, (char*)buffer, size);
+    if (tty) {
+        return tty_read(tty, (char*)buffer, size);
+    }
+
+    if (!buffer || size == 0) {
+        return 0;
+    }
+
+    for (;;) {
+        size_t count = 0;
+        uint32_t flags = intr_disable();
+        spinlock_acquire(&console_input_lock);
+
+        while (count < size && console_input_count > 0) {
+            buffer[count++] = (uint8_t)console_input_buf[console_input_tail];
+            console_input_tail = (console_input_tail + 1U) % CONSOLE_INPUT_BUF_SIZE;
+            console_input_count--;
+        }
+
+        if (count > 0) {
+            spinlock_release(&console_input_lock);
+            intr_restore(flags);
+            return count;
+        }
+
+        current_thread->wait_chan = (void *)&console_input_count;
+        current_thread->state = THREAD_BLOCKED;
+        spinlock_release(&console_input_lock);
+        intr_restore(flags);
+        sched_yield();
+    }
 }
 
 static size_t console_node_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
@@ -189,6 +246,10 @@ int kprintf(const char *fmt, ...) {
 #include <sys/proc.h>
 #include <sys/tty.h>
 #include <string.h>
+
+int console_read(char *data, size_t len) {
+    return (int)console_node_read(&console_node, 0, len, (uint8_t *)data);
+}
 
 void console_attach_std_fds(struct process *proc) {
     if (!proc) return;

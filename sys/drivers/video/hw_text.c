@@ -13,9 +13,11 @@
 #include <drivers/video/vga.h>
 #include <kern/ansi_handler.h>
 #include <kern/cmdline.h>
+#include <kern/sched.h>
 #include <kern/time.h>
 #include <stdio.h>
 #include <sys/lock.h>
+#include <sys/kthread.h>
 #include <sys/tty.h>
 #include <sys/vt.h>
 
@@ -23,6 +25,8 @@ int hw_text_active = 0;
 static uint16_t *vga_buffer = (uint16_t *)0xC00B8000;
 static spinlock_t hw_text_lock = SPINLOCK_INIT("hw_text");
 static vt_state_t *current_vt_ctx = NULL;
+static volatile uint32_t hw_text_status_epoch = 0;
+static int hw_text_status_thread_started = 0;
 
 #define HW_TEXT_STATUS_COLOR 0x70
 #define VGA_FONT_MEM_BASE ((volatile uint8_t *)(uintptr_t)0xC00A0000)
@@ -450,6 +454,20 @@ static void hw_text_render_statusline_locked(vt_state_t *vt) {
     }
 }
 
+static void hw_text_statusline_task(void *arg) {
+    uint32_t seen = 0;
+
+    (void)arg;
+
+    for (;;) {
+        while (seen == hw_text_status_epoch) {
+            sched_sleep((void *)&hw_text_status_epoch);
+        }
+        seen = hw_text_status_epoch;
+        hw_text_refresh_statusline();
+    }
+}
+
 static void hw_text_redraw_vt_locked(vt_state_t *vt) {
     int row;
     int col;
@@ -746,8 +764,30 @@ void hw_text_refresh_statusline(void) {
     spinlock_release(&hw_text_lock);
 }
 
+void hw_text_late_init(void) {
+    thread_t *td;
+
+    if (!hw_text_active || hw_text_status_thread_started) {
+        return;
+    }
+
+    if (kthread_create(hw_text_statusline_task, NULL, &td, "vtstatus") == 0) {
+        hw_text_status_thread_started = 1;
+    }
+}
+
 void hw_text_tick_1hz(void) {
-    hw_text_refresh_statusline();
+    if (!hw_text_active) {
+        return;
+    }
+
+    if (!hw_text_status_thread_started) {
+        hw_text_refresh_statusline();
+        return;
+    }
+
+    hw_text_status_epoch++;
+    sched_wakeup((void *)&hw_text_status_epoch);
 }
 
 void hw_text_set_color(uint8_t fg, uint8_t bg) {

@@ -406,6 +406,8 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
     sched_init();
     kprint("Scheduler Initialized.\n");
 
+    hw_text_late_init();
+
     if (i386_cpu_has_apic() && smp_get_cpu_count() > 1) {
         smp_boot_all_aps();
         sched_smp_init(smp_get_cpu_count());

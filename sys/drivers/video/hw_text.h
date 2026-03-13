@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 void hw_text_init(void);
+void hw_text_late_init(void);
 void hw_text_putc(char c);
 void hw_text_clear_screen(void);
 void hw_text_set_color(uint8_t fg, uint8_t bg);
