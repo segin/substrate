@@ -1,0 +1,13 @@
+CC = gcc
+CFLAGS = -Wall -Wextra -g -I../sys -I../sys/arch/i386 -I../sys/kern -I../sys/drivers/video -I../sys/exec/perso -I../sys/include -DHOST_TEST
+
+SRCS = ../sys/kern/mutex.c ../sys/kern/spinlock.c ../sys/kern/sleepq.c ../sys/kern/turnstile.c \
+       ../sys/pm/sched.c ../sys/arch/i386/sched.c \
+       ../sys/kern/semaphore.c ../sys/kern/futex.c \
+       unit/kern/test_sync.c mocks.c test_mutex_runner.c
+
+test_mutex: $(SRCS)
+	$(CC) $(CFLAGS) $^ -o $@
+
+clean:
+	rm -f test_mutex
