@@ -11,7 +11,6 @@
 void run_pmap_tests(void);
 void run_pmap_protect_property_tests(void);
 void run_mmap_tests(void);
-void run_brk_tests(void);
 void run_pid_tests(void);
 void run_unlink_tests(void);
 void run_unlink_property_tests(void);
@@ -171,10 +170,6 @@ void run_kernel_tests(void) {
         run_mmap_tests();
     }
 
-    if (all || strcmp(test_arg, "brk") == 0) {
-        run_brk_tests();
-    }
-
     if (all || strcmp(test_arg, "futex") == 0) {
          extern void test_futex(void);
          test_futex();
@@ -314,6 +309,11 @@ void run_kernel_tests(void) {
 
     if (all || strcmp(test_arg, "vnode_lock") == 0) {
         run_vnode_lock_tests();
+    }
+
+    if (all || strcmp(test_arg, "vgone") == 0) {
+        extern void run_vgone_tests(void);
+        run_vgone_tests();
     }
 
     if (all || strcmp(test_arg, "driver") == 0) {
