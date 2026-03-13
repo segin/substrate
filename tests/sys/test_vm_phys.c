@@ -391,6 +391,25 @@ static void test_free_list_integrity(void) {
     TEST_PASS("free_list_integrity");
 }
 
+
+/* Test: vm_phys_early_init correctly initializes page array and states */
+static void test_vm_phys_early_init(void) {
+    static vm_page_t test_pages[4];
+
+    vm_phys_early_init(NULL, 0, test_pages, 4);
+
+    TEST_ASSERT(vm_phys_get_free() == 0, "early_init: free count not zero");
+
+    for (size_t i = 0; i < 4; i++) {
+        TEST_ASSERT(test_pages[i].magic_head == VM_PAGE_MAGIC, "early_init: magic_head invalid");
+        TEST_ASSERT(test_pages[i].magic_tail == VM_PAGE_MAGIC, "early_init: magic_tail invalid");
+        TEST_ASSERT(test_pages[i].phys_addr == i * 4096, "early_init: phys_addr invalid");
+        TEST_ASSERT(test_pages[i].flags == 0, "early_init: flags not zero");
+    }
+
+    TEST_PASS("vm_phys_early_init");
+}
+
 /* Test entry point */
 void test_vm_phys(void) {
     kprint("=== Physical Memory Manager Integration Tests ===\n");
@@ -414,6 +433,7 @@ void test_vm_phys(void) {
     test_mark_used_single_page_reservation();
     test_free_used_invariant();
     test_free_list_integrity();
+    test_vm_phys_early_init();
     
     char buf[64];
     sprintf(buf, "=== vm_phys tests: %d passed, %d failed ===\n", passed, failed);
