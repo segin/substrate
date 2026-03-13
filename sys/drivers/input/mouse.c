@@ -93,10 +93,6 @@ void mouse_handler(registers_t *regs) {
                 input_report_key(&mouse_dev, 0x112, mouse_buttons & 4); // BTN_MIDDLE
                 input_sync(&mouse_dev);
 
-                // Log movement (optional)
-                // char buf[64];
-                // snprintf(buf, 64, "Mouse: %d, %d buttons=%x\n", mouse_x, mouse_y, mouse_buttons);
-                // vga_write(buf, strlen(buf));
                 break;
         }
     }
