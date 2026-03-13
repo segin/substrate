@@ -694,7 +694,6 @@ void do_command(buffer_t *b, char *cmd) {
                 if (cur_len > 0 && joined[cur_len-1] != ' ' && joined[cur_len-1] != '\t' && to_delete->text[0] != ' ' && to_delete->text[0] != '\t' && to_delete->text[0] != ')') {
                     joined[cur_len] = ' ';
                     cur_len++;
-                    total_len++;
                 }
                 memcpy(joined + cur_len, to_delete->text, to_delete->len);
                 cur_len += to_delete->len;
@@ -703,6 +702,7 @@ void do_command(buffer_t *b, char *cmd) {
             }
             free(first->text);
             first->text = joined;
+            first->len = cur_len;
             first->len = total_len;
         }
     } else if (cmd[0] == 'y') {
