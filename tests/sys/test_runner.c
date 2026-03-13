@@ -39,7 +39,6 @@ extern void run_string_tests(void);
 extern void run_sched_bench(void);
 extern void run_sched_dequeue_bench(void);
 extern void run_vnode_lock_tests(void);
-extern void test_vnode_create(void);
 extern void run_kobject_tests(void);
 void run_reboot_tests(void);
 extern void test_pipe_race(void);
@@ -312,10 +311,6 @@ void run_kernel_tests(void) {
         run_vnode_lock_tests();
     }
 
-    if (all || strcmp(test_arg, "vnode_create") == 0) {
-        test_vnode_create();
-    }
-
     if (all || strcmp(test_arg, "driver") == 0) {
         extern int test_driver_registration_logic(void);
         if (test_driver_registration_logic() == 0) kprint("driver_register: PASS\n"); else kprint("driver_register: FAIL\n");
@@ -362,6 +357,11 @@ void run_kernel_tests(void) {
     if (all || strcmp(test_arg, "vfs_busy") == 0) {
         extern void run_vfs_busy_tests(void);
         run_vfs_busy_tests();
+    }
+
+    if (all || strcmp(test_arg, "mknod_fs") == 0) {
+        extern void run_mknod_fs_tests(void);
+        run_mknod_fs_tests();
     }
 
     if (all || strcmp(test_arg, "ext2") == 0) {
