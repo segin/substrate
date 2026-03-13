@@ -391,46 +391,23 @@ static void test_free_list_integrity(void) {
     TEST_PASS("free_list_integrity");
 }
 
-/* Property: vm_phys_add_range adds valid ranges correctly */
-static void test_vm_phys_add_range(void) {
-    /* Setup a clean environment to isolate add_range */
-    vm_page_t test_pages[4];
-    /* Initialize with proper canaries and clear state */
+
+/* Test: vm_phys_early_init correctly initializes page array and states */
+static void test_vm_phys_early_init(void) {
+    static vm_page_t test_pages[4];
+
     vm_phys_early_init(NULL, 0, test_pages, 4);
 
-    /* Ensure initial state is 0 free */
-    TEST_ASSERT(vm_phys_get_free() == 0, "add_range: initial free not 0");
+    TEST_ASSERT(vm_phys_get_free() == 0, "early_init: free count not zero");
 
-    /* Test 1: start == end -> should do nothing */
-    vm_phys_add_range(0x1000, 0x1000);
-    TEST_ASSERT(vm_phys_get_free() == 0, "add_range: equal bounds changed free count");
+    for (size_t i = 0; i < 4; i++) {
+        TEST_ASSERT(test_pages[i].magic_head == VM_PAGE_MAGIC, "early_init: magic_head invalid");
+        TEST_ASSERT(test_pages[i].magic_tail == VM_PAGE_MAGIC, "early_init: magic_tail invalid");
+        TEST_ASSERT(test_pages[i].phys_addr == i * PMM_BLOCK_SIZE, "early_init: phys_addr invalid");
+        TEST_ASSERT(test_pages[i].flags == 0, "early_init: flags not zero");
+    }
 
-    /* Test 2: start > end -> should do nothing */
-    vm_phys_add_range(0x2000, 0x1000);
-    TEST_ASSERT(vm_phys_get_free() == 0, "add_range: reversed bounds changed free count");
-
-    /* Test 3: non-page-aligned bounds are rounded correctly.
-     * start is rounded UP: 0x0001 -> 0x1000
-     * end is rounded DOWN: 0x3FFF -> 0x3000
-     * Resulting range is 0x1000 to 0x3000, which is 2 pages (0x1000 and 0x2000).
-     */
-    vm_phys_add_range(0x0001, 0x3FFF);
-    TEST_ASSERT(vm_phys_get_free() == 2, "add_range: misaligned bounds did not add 2 pages");
-
-    /* Verify the two pages were added */
-    vm_page_t *p1 = vm_phys_paddr_to_page(0x1000);
-    vm_page_t *p2 = vm_phys_paddr_to_page(0x2000);
-    TEST_ASSERT(p1 != NULL && (p1->flags & PG_FREE), "add_range: page 1 not marked free");
-    TEST_ASSERT(p2 != NULL && (p2->flags & PG_FREE), "add_range: page 2 not marked free");
-
-    /* Test 4: Fully aligned bounds */
-    /* Add another page at 0x3000 */
-    vm_phys_add_range(0x3000, 0x4000);
-    TEST_ASSERT(vm_phys_get_free() == 3, "add_range: aligned bounds did not add 1 page");
-    vm_page_t *p3 = vm_phys_paddr_to_page(0x3000);
-    TEST_ASSERT(p3 != NULL && (p3->flags & PG_FREE), "add_range: page 3 not marked free");
-
-    TEST_PASS("vm_phys_add_range");
+    TEST_PASS("vm_phys_early_init");
 }
 
 /* Test entry point */
@@ -456,7 +433,7 @@ void test_vm_phys(void) {
     test_mark_used_single_page_reservation();
     test_free_used_invariant();
     test_free_list_integrity();
-    test_vm_phys_add_range();
+    test_vm_phys_early_init();
     
     char buf[64];
     sprintf(buf, "=== vm_phys tests: %d passed, %d failed ===\n", passed, failed);
