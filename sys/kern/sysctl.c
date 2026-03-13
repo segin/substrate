@@ -147,9 +147,17 @@ int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, voi
         return ENOENT;
     }
 
+    int locked = 1;
+    if (oid->oid_kind & CTLFLAG_NOLOCK) {
+        mutex_unlock(&sysctl_mutex);
+        locked = 0;
+    }
+
     /* 5. Permission checks (Basic) */
     if ((oid->oid_kind & CTLFLAG_WR) == 0 && newp != NULL) {
-        mutex_unlock(&sysctl_mutex);
+        if (locked) {
+            mutex_unlock(&sysctl_mutex);
+        }
         return EPERM;
     }
 
@@ -164,7 +172,9 @@ int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, voi
         error = EINVAL;
     }
 
-    mutex_unlock(&sysctl_mutex);
+    if (locked) {
+        mutex_unlock(&sysctl_mutex);
+    }
 
     /* 8. Copy out new length if requested and no error */
     if (error == 0 && oldlenp) {
