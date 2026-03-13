@@ -359,6 +359,11 @@ void run_kernel_tests(void) {
         run_vfs_busy_tests();
     }
 
+    if (all || strcmp(test_arg, "mknod_fs") == 0) {
+        extern void run_mknod_fs_tests(void);
+        run_mknod_fs_tests();
+    }
+
     if (all || strcmp(test_arg, "ext2") == 0) {
         extern void run_ext2_perf_test(void);
         run_ext2_perf_test();
