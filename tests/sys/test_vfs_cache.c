@@ -6,6 +6,7 @@
 #include <kern/panic.h>
 #include <vm/vm_kmem.h>
 #include <string.h>
+#include <sys/mount.h>
 
 /* Externs from vfs_cache.c */
 extern int vfs_cache_limit;
@@ -180,6 +181,75 @@ test_vfs_cache_lru(void)
     return failures;
 }
 
+static int
+test_vnode_cache_insert_lookup(void)
+{
+    int failures = 0;
+    struct vnode *vp;
+    struct mount mock_mount;
+    struct vnode *lookup_vp;
+
+    kprint("  Testing vnode_cache_insert and vnode_lookup_cache...\n");
+
+    /* Initialize a vnode */
+    vp = create_mock_vnode();
+    memset(&mock_mount, 0, sizeof(mock_mount));
+    vp->v_mount = &mock_mount;
+    vp->v_ino = 12345;
+
+    /* Should not be found initially */
+    lookup_vp = vnode_lookup_cache(&mock_mount, 12345);
+    if (lookup_vp != NULL) {
+        kprint("FAILURE: vnode_lookup_cache found non-existent vnode\n");
+        vrele(lookup_vp);
+        failures++;
+    }
+
+    /* Insert into cache */
+    vnode_cache_insert(vp);
+
+    /* Look it up */
+    lookup_vp = vnode_lookup_cache(&mock_mount, 12345);
+
+    if (lookup_vp != vp) {
+        kprint("FAILURE: vnode_lookup_cache failed to find inserted vnode\n");
+        if (lookup_vp) vrele(lookup_vp);
+        failures++;
+    } else {
+        kprint("PASS: vnode_lookup_cache found inserted vnode\n");
+        vrele(lookup_vp); /* vnode_lookup_cache vref()s, vrele will drop our extra ref */
+    }
+
+    /* Remove from cache */
+    vnode_cache_remove(vp);
+
+    /* Ensure it's removed */
+    lookup_vp = vnode_lookup_cache(&mock_mount, 12345);
+    if (lookup_vp != NULL) {
+        kprint("FAILURE: vnode_lookup_cache found vnode after removal\n");
+        failures++;
+        vrele(lookup_vp);
+    } else {
+        kprint("PASS: vnode_lookup_cache correctly returned NULL after removal\n");
+    }
+
+    /* Test invalid vnode (no mount) */
+    vp->v_mount = NULL;
+    vnode_cache_insert(vp); /* Should be a no-op */
+
+    /* Look up with original mount, shouldn't find anything */
+    lookup_vp = vnode_lookup_cache(&mock_mount, 12345);
+    if (lookup_vp != NULL) {
+        kprint("FAILURE: vnode_cache_insert inserted vnode without mount\n");
+        failures++;
+        vrele(lookup_vp);
+    }
+
+    free_mock_vnode(vp);
+
+    return failures;
+}
+
 void
 run_vfs_cache_tests(void)
 {
@@ -187,6 +257,7 @@ run_vfs_cache_tests(void)
 
     kprint("=== Running VFS Cache Tests ===\n");
 
+    failures += test_vnode_cache_insert_lookup();
     failures += test_vfs_cache_limit();
     failures += test_vfs_cache_lru();
 
