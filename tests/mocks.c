@@ -381,6 +381,19 @@ void cmdline_get_full(char *buf, size_t buf_len) { if(buf && buf_len > 0) buf[0]
 
 void wait_for_interrupt() {}
 
+int cmdline_debug_enabled(const char *subsystem) { (void)subsystem; return 0; }
+
+void vm_map_lock_read(vm_map_t *map) { (void)map; }
+void vm_map_unlock_read(vm_map_t *map) { (void)map; }
+int hw_text_tick_1hz(void) { return 0; }
+void core_prepare_dump(struct process *p, int sig) { (void)p; (void)sig; }
+int coredump(struct process *p) { (void)p; return -1; }
+vm_map_t *vm_map_fork(vm_map_t *src_map, pmap_t dst_pmap) { (void)src_map; (void)dst_pmap; return NULL; }
+void resource_dump(void *ctx) { (void)ctx; }
+void pci_dump_devices(void *ctx) { (void)ctx; }
+void bus_dump_tree(void *ctx) { (void)ctx; }
+void kobject_uevent_dump(void *ctx) { (void)ctx; }
+
 // Missing mocks restored
 void sched_get_loadavg(unsigned long loads[3]) { loads[0] = loads[1] = loads[2] = 0; }
 uint32_t sched_count_runnable(void) { return 0; }
