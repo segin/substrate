@@ -202,8 +202,34 @@ static void test_shared_blocks_exclusive(void) {
 }
 
 
+static void test_vnode_initial_state(void) {
+    struct vnode *vp = NULL;
+    int error;
+
+    kprint("\n--- Test: vnode initial state ---\n");
+
+    error = getnewvnode("test_init_state", NULL, NULL, &vp);
+    if (error || !vp) {
+        kprintf("FAIL: getnewvnode failed: %d\n", error);
+        return;
+    }
+
+    if (vp->v_usecount != 1 || vp->v_holdcount != 0 ||
+        vp->v_writecount != 0 || vp->v_flag != 0 ||
+        vp->v_mount != NULL || vp->v_op != NULL ||
+        vp->v_lockstate != 0 || vp->v_lockowner != NULL) {
+        kprint("FAIL: vnode initial state is incorrect\n");
+    } else {
+        kprint("PASS: getnewvnode returned a clean vnode\n");
+    }
+
+    vrele(vp);
+}
+
 void run_vnode_lock_tests(void) {
     kprint("\n=== TEST: VNode Locking Semantics ===\n");
+
+    test_vnode_initial_state();
 
     /* Create a dummy vnode */
     int error = getnewvnode("test_lock", NULL, NULL, &test_vp);
