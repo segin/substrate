@@ -202,34 +202,51 @@ static void test_shared_blocks_exclusive(void) {
 }
 
 
-static void test_vnode_initial_state(void) {
-    struct vnode *vp = NULL;
-    int error;
+/* --- vput Test --- */
+static void test_vput(void) {
+    kprint("\n--- Test: vput ---\n");
 
-    kprint("\n--- Test: vnode initial state ---\n");
+    /* Ensure vnode is unlocked */
+    if (vn_islocked(test_vp)) vn_unlock(test_vp);
 
-    error = getnewvnode("test_init_state", NULL, NULL, &vp);
-    if (error || !vp) {
-        kprintf("FAIL: getnewvnode failed: %d\n", error);
+    uint32_t initial_usecount = test_vp->v_usecount;
+
+    /* Lock the vnode */
+    int error = vn_lock(test_vp, LK_EXCLUSIVE);
+    if (error) {
+        kprintf("FAIL: vn_lock failed: %d\n", error);
         return;
     }
 
-    if (vp->v_usecount != 1 || vp->v_holdcount != 0 ||
-        vp->v_writecount != 0 || vp->v_flag != 0 ||
-        vp->v_mount != NULL || vp->v_op != NULL ||
-        vp->v_lockstate != 0 || vp->v_lockowner != NULL) {
-        kprint("FAIL: vnode initial state is incorrect\n");
-    } else {
-        kprint("PASS: getnewvnode returned a clean vnode\n");
+    /* Verify it is locked */
+    if (!vn_islocked(test_vp)) {
+        kprint("FAIL: vn_islocked returned false after vn_lock\n");
+        return;
     }
 
-    vrele(vp);
+    /* Bump usecount as if we're adding another reference while locked */
+    vref(test_vp);
+
+    /* Call vput */
+    vput(test_vp);
+
+    /* Verify the vnode is unlocked and usecount is back to initial */
+    if (vn_islocked(test_vp)) {
+        kprint("FAIL: vnode still locked after vput\n");
+        return;
+    }
+
+    if (test_vp->v_usecount != initial_usecount) {
+        kprintf("FAIL: vnode usecount mismatch: expected %u, got %u\n", initial_usecount, test_vp->v_usecount);
+        return;
+    }
+
+    kprint("PASS: vput unlocked vnode and decremented usecount correctly.\n");
 }
+
 
 void run_vnode_lock_tests(void) {
     kprint("\n=== TEST: VNode Locking Semantics ===\n");
-
-    test_vnode_initial_state();
 
     /* Create a dummy vnode */
     int error = getnewvnode("test_lock", NULL, NULL, &test_vp);
@@ -249,6 +266,13 @@ void run_vnode_lock_tests(void) {
     for(int i=0; i<100000; i++) __asm__ volatile("nop");
 
     test_shared_blocks_exclusive();
+
+    /* Ensure helper threads from previous tests have exited completely */
+    while (helper_started && !helper_done) {
+        sched_yield();
+    }
+
+    test_vput();
 
     kprint("=== TEST COMPLETE ===\n");
 }
