@@ -530,7 +530,8 @@ void proc_vfork_done(process_t *child) {
 }
 
 int sched_spawn_kernel_process(void (*entry)(void*), void *arg) {
-    extern void *pmm_alloc_block(void);
+    extern void *pmm_alloc_contiguous(size_t count);
+    extern void pmm_free_contiguous(void *p, size_t count);
     extern thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack, void *arg);
 
     // 1. Create Process
@@ -541,24 +542,23 @@ int sched_spawn_kernel_process(void (*entry)(void*), void *arg) {
     strncpy(child->comm, "(kinit)", AC_COMM_LEN);
     child->comm[AC_COMM_LEN - 1] = '\0';
 
-    // 3. Allocate Stack (4KB) - pmm_alloc_block returns virtual address
-    void *stack = pmm_alloc_block();
+    // 3. Allocate Stack (8KB) - contiguous direct-mapped RAM
+    void *stack = pmm_alloc_contiguous(2);
     if (!stack) {
         return -1;
     }
-    void *stack_top = (uint8_t*)stack + 4096;
+    void *stack_top = (uint8_t*)stack + 8192;
     
     // 4. Create Thread
     thread_t *t = sched_create_thread(child, entry, stack_top, arg);
     if (!t) {
-        extern void pmm_free_block(void *p);
-        pmm_free_block(stack);
+        pmm_free_contiguous(stack, 2);
         return -1;
     }
 
     t->kstack_base = (uintptr_t)stack;
-    t->kstack_units = 1;
-    t->kstack_type = THREAD_KSTACK_PMM_BLOCK;
+    t->kstack_units = 2;
+    t->kstack_type = THREAD_KSTACK_PMM_CONTIG;
     t->kstack_owned = 1;
 
     return t->tid;

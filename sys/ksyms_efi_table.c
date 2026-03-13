@@ -161,6 +161,7 @@ extern void console_get_node(void);
 extern void console_init(void);
 extern void console_push_char(void);
 extern void console_putchar(void);
+extern void console_read(void);
 extern void console_register(void);
 extern void console_register_devfs(void);
 extern void console_set_tty(void);
@@ -359,6 +360,7 @@ extern void getnewvnode(void);
 extern void hw_text_clear_screen(void);
 extern void hw_text_console_write_shim(void);
 extern void hw_text_init(void);
+extern void hw_text_late_init(void);
 extern void hw_text_putc(void);
 extern void hw_text_redraw_active(void);
 extern void hw_text_refresh_statusline(void);
@@ -2562,6 +2564,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&hw_text_console_write_shim, "hw_text_console_write_shim" },
     { (uint32_t)(uintptr_t)&hw_text_redraw_active, "hw_text_redraw_active" },
     { (uint32_t)(uintptr_t)&hw_text_refresh_statusline, "hw_text_refresh_statusline" },
+    { (uint32_t)(uintptr_t)&hw_text_late_init, "hw_text_late_init" },
     { (uint32_t)(uintptr_t)&hw_text_tick_1hz, "hw_text_tick_1hz" },
     { (uint32_t)(uintptr_t)&hw_text_set_color, "hw_text_set_color" },
     { (uint32_t)(uintptr_t)&hw_text_putc, "hw_text_putc" },
@@ -2605,6 +2608,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&console_register_devfs, "console_register_devfs" },
     { (uint32_t)(uintptr_t)&kprint, "kprint" },
     { (uint32_t)(uintptr_t)&kprintf, "kprintf" },
+    { (uint32_t)(uintptr_t)&console_read, "console_read" },
     { (uint32_t)(uintptr_t)&console_attach_std_fds, "console_attach_std_fds" },
     { (uint32_t)(uintptr_t)&tty_default_termios, "tty_default_termios" },
     { (uint32_t)(uintptr_t)&tty_register_device, "tty_register_device" },
@@ -3431,4 +3435,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1710;
+int ksym_count = 1712;
