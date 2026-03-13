@@ -578,11 +578,9 @@ void do_command(buffer_t *b, char *cmd) {
             line_t *l = buf_get_line(b, addr1);
             for (int i = 0; i < (addr2 - addr1 + 1) && l; i++) {
                 if (cmd[0] == '#') {
-                    // print line number
                     printf("%6d  ", addr1 + i);
                 }
                 if (cmd[0] == 'l') {
-                    // list format
                     for (size_t j = 0; j < l->len; j++) {
                         unsigned char c = l->text[j];
                         if (c == '\t') printf("^I");
