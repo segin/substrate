@@ -313,6 +313,11 @@ void syscall_handler(registers_t *regs) {
     // Clear syscall tracking after signals have been handled
     if (current_thread) {
         current_thread->in_syscall = 0;
+        if (current_thread->needs_resched &&
+            !(current_thread->flags & THREAD_F_NO_PREEMPT)) {
+            current_thread->needs_resched = 0;
+            sched_yield();
+        }
     }
     
     if (regs->cs == 0x1B && regs->useresp >= 0xC0000000) {
