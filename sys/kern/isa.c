@@ -30,6 +30,7 @@ struct bus_type isa_bus_type = {
 };
 
 static int isa_bus_initialized;
+static void isa_ensure_init(void);
 
 static int isa_probe_default(uint16_t base) {
     return isa_port_alive(base);
@@ -102,6 +103,15 @@ static void isa_ensure_init(void) {
     isa_bus_type.next_registered = NULL;
     (void)bus_register_type(&isa_bus_type);
     isa_bus_initialized = 1;
+}
+
+int isa_device_present(const char *name) {
+    if (name == NULL || *name == '\0') {
+        return 0;
+    }
+
+    isa_ensure_init();
+    return isa_find_device_by_name(name) != NULL;
 }
 
 void isa_init(void) {

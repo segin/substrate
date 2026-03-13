@@ -13,7 +13,7 @@
 void vga_write(const char *s, size_t n) { (void)s; (void)n; }
 void uart_write(const char *s, size_t n) { (void)s; (void)n; }
 void vga_init() {}
-void uart_init() {}
+int uart_init(void) { return 0; }
 void keyboard_handler(void *regs) { (void)regs; }
 void mouse_handler(void *regs) { (void)regs; }
 

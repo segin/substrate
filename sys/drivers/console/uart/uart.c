@@ -2,6 +2,7 @@
 #include <drivers/console/uart/uart.h>
 #include <arch/x86-common/io.h>
 #include <arch/i386/idt.h>
+#include <kern/isa.h>
 #include <sys/termios.h>
 #include <sys/errno.h>
 #include <sys/poll.h>
@@ -18,8 +19,35 @@ static const uint16_t uart_ports[UART_PORT_COUNT] = {
 };
 
 static uint16_t uart_base_port = UART_COM1;
+static uint32_t uart_base_index;
 static fs_node_t uart_nodes[UART_PORT_COUNT];
 static int uart_nodes_registered = 0;
+
+static int uart_probe_port(uint16_t port) {
+    uint8_t old;
+    uint8_t probe;
+
+    old = inb(port + 7);
+    outb(port + 7, 0x5A);
+    probe = inb(port + 7);
+    outb(port + 7, old);
+    return probe == 0x5A;
+}
+
+static int uart_port_present(uint32_t serial_index) {
+    char name[16];
+
+    if (serial_index >= UART_PORT_COUNT) {
+        return 0;
+    }
+
+    snprintf(name, sizeof(name), "serial%u", serial_index);
+    if (isa_device_present(name)) {
+        return 1;
+    }
+
+    return uart_probe_port(uart_ports[serial_index]);
+}
 
 static void uart_program_port(uint16_t port, int enable_rx_irq) {
     outb(port + 1, 0x00);    // Disable all interrupts
@@ -109,6 +137,7 @@ int uart_select_port(uint32_t serial_index) {
         return -1;
     }
     uart_base_port = uart_ports[serial_index];
+    uart_base_index = serial_index;
     return 0;
 }
 
@@ -199,6 +228,10 @@ void uart_devfs_init(void) {
         fs_node_t *node = &uart_nodes[i];
         uint16_t port = uart_ports[i];
 
+        if (!uart_port_present(i)) {
+            continue;
+        }
+
         uart_program_port(port, 0);
 
         memset(node, 0, sizeof(*node));
@@ -224,8 +257,12 @@ void uart_devfs_init(void) {
     uart_nodes_registered = 1;
 }
 
-void uart_init(void) {
+int uart_init(void) {
+    if (!uart_port_present(uart_base_index)) {
+        return -1;
+    }
     uart_program_port(uart_base_port, 1);
+    return 0;
 }
 
 void uart_handler(registers_t *regs) {

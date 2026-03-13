@@ -344,16 +344,24 @@ static int init_cmdline_policy(const char *cmdline) {
 }
 
 static void init_runtime_console(int serial_console) {
+    int uart_ready = 0;
+
     console_init();
     hw_text_init();
 
-    if (serial_console >= 0 && uart_select_port((uint32_t)serial_console) == 0) {
+    if (serial_console >= 0) {
+        (void)uart_select_port((uint32_t)serial_console);
+    }
+    uart_ready = (uart_init() == 0);
+    if (uart_ready && serial_console >= 0) {
         kprintf("console=serial%d selected (COM%d).\n",
                 serial_console, serial_console + 1);
     }
-    uart_init();
+    if (!uart_ready && (cmdline_has("serial_debug") || serial_console >= 0)) {
+        kprint("Serial console requested but selected UART is not present.\n");
+    }
 
-    if (cmdline_has("serial_debug") || serial_console >= 0) {
+    if (uart_ready && (cmdline_has("serial_debug") || serial_console >= 0)) {
         serial_debug_enabled = 1;
         console_register(uart_get_console());
         kprint("Serial Debug Enabled.\n");
