@@ -30,11 +30,7 @@ UNIT_OBJS = $(notdir $(UNIT_SRCS:.c=.o))
 
 MOCKS_OBJ = mocks.o
 
-<<<<<<< HEAD
 all: test_runner test_getuid test_minix test_ext2_perf test_ext2_read_blocks test_ext2_find_next_zero_bit test_ext2_inode_write test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_libc_sysctl test_ext2_remove_perf bench_ext2_readdir test_ext2_write_block test_libpthread_mutex test_pthread_join test_readline test_history test_bc test_libedit host_test_wait_logic host_test_pgrp host_test_proc_tree host_test_proc_exit host_test_tty_jobctl host_test_sync_guards host_test_sleepq_private host_test_swapper host_test_rusage host_test_proc_lifecycle host_test_i386_signal host_test_linux_signal host_test_signal_restart host_test_signal_integration host_test_proc_signal_state host_test_rwlock host_test_fork_exec_wait test_getpagesize test_getuid test_libc_stdio test_libc_printf test_libc_scanf
-=======
-all: test_runner test_getuid test_minix test_ext2_perf test_ext2_read_blocks test_ext2_find_next_zero_bit test_ext2_inode_write test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_libc_sysctl test_ext2_remove_perf bench_ext2_readdir test_ext2_write_block test_libpthread_mutex test_pthread_join test_readline test_history test_bc test_libedit host_test_wait_logic host_test_pgrp host_test_proc_tree host_test_proc_exit host_test_tty_jobctl host_test_sync_guards host_test_sleepq_private host_test_swapper host_test_rusage host_test_proc_lifecycle host_test_i386_signal host_test_linux_signal host_test_signal_restart host_test_signal_integration host_test_proc_signal_state host_test_rwlock host_test_fork_exec_wait test_getpagesize test_libc_stdio test_libc_printf test_libc_scanf
->>>>>>> pr909
 	./test_runner
 	./test_minix
 	./test_ext2_find_next_zero_bit
@@ -79,13 +75,6 @@ all: test_runner test_getuid test_minix test_ext2_perf test_ext2_read_blocks tes
 	./host_test_fork_exec_wait
 	./test_getpagesize
 	./test_getuid
-<<<<<<< HEAD
-=======
-
-
-test_getuid: lib/sys/test_getuid.c
-	$(CC) $(CFLAGS_COMMON) -I../sys -I../include -I../sys/include $< -o $@
->>>>>>> pr909
 
 test_getpagesize: lib/sys/test_getpagesize.c ../lib/sys/getpagesize.c
 	$(CC) $(CFLAGS_COMMON) $^ -o $@
