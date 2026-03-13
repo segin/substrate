@@ -932,6 +932,7 @@ extern void run_vm_map_tests(void);
 extern void run_vm_object_tests(void);
 extern void run_vm_pager_tests(void);
 extern void run_vm_policy_tests(void);
+extern void run_vnode_hold_tests(void);
 extern void run_vnode_lock_tests(void);
 extern void run_vnode_ops_tests(void);
 extern void runqueue_add(void);
@@ -1372,6 +1373,7 @@ extern void test_pte_user(void);
 extern void test_resource_helpers(void);
 extern void test_scsi(void);
 extern void test_stacktrace(void);
+extern void test_sys_brk(void);
 extern void test_sys_mmap(void);
 extern void test_sys_mprotect(void);
 extern void test_sys_munmap(void);
@@ -1432,6 +1434,7 @@ extern void test_vm_policy_lru(void);
 extern void test_vm_policy_writeback(void);
 extern void test_vm_swap_pager_full(void);
 extern void test_vm_swap_pager_roundtrip(void);
+extern void timer_init(void);
 extern void timer_tick(void);
 extern void timer_tick_context(void);
 extern void timeval_add(void);
@@ -2052,6 +2055,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&sys_getpgrp, "sys_getpgrp" },
     { (uint32_t)(uintptr_t)&proc_timers_init, "proc_timers_init" },
     { (uint32_t)(uintptr_t)&proc_timers_cancel, "proc_timers_cancel" },
+    { (uint32_t)(uintptr_t)&timer_init, "timer_init" },
     { (uint32_t)(uintptr_t)&get_ticks, "get_ticks" },
     { (uint32_t)(uintptr_t)&get_time, "get_time" },
     { (uint32_t)(uintptr_t)&get_uptime, "get_uptime" },
@@ -3160,6 +3164,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&test_vm_map_benchmark, "test_vm_map_benchmark" },
     { (uint32_t)(uintptr_t)&test_vm_map_property_sorted_non_overlapping, "test_vm_map_property_sorted_non_overlapping" },
     { (uint32_t)(uintptr_t)&test_vm_map_merge_adjacent, "test_vm_map_merge_adjacent" },
+    { (uint32_t)(uintptr_t)&test_sys_brk, "test_sys_brk" },
     { (uint32_t)(uintptr_t)&run_vm_map_tests, "run_vm_map_tests" },
     { (uint32_t)(uintptr_t)&run_vm_map_benchmark, "run_vm_map_benchmark" },
     { (uint32_t)(uintptr_t)&test_vm_object_lifecycle, "test_vm_object_lifecycle" },
@@ -3291,6 +3296,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&run_printf_vsnprintf_tests, "run_printf_vsnprintf_tests" },
     { (uint32_t)(uintptr_t)&run_getcwd_tests, "run_getcwd_tests" },
     { (uint32_t)(uintptr_t)&run_vnode_lock_tests, "run_vnode_lock_tests" },
+    { (uint32_t)(uintptr_t)&run_vnode_hold_tests, "run_vnode_hold_tests" },
     { (uint32_t)(uintptr_t)&test_mem, "test_mem" },
     { (uint32_t)(uintptr_t)&run_div64_tests, "run_div64_tests" },
     { (uint32_t)(uintptr_t)&run_crc32_tests, "run_crc32_tests" },
@@ -3411,4 +3417,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1700;
+int ksym_count = 1703;

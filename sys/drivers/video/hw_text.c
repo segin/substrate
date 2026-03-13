@@ -24,7 +24,7 @@ static uint16_t *vga_buffer = (uint16_t *)0xC00B8000;
 static spinlock_t hw_text_lock = SPINLOCK_INIT("hw_text");
 static vt_state_t *current_vt_ctx = NULL;
 
-#define HW_TEXT_STATUS_COLOR 0xF0
+#define HW_TEXT_STATUS_COLOR 0x70
 #define VGA_FONT_MEM_BASE ((volatile uint8_t *)(uintptr_t)0xC00A0000)
 
 static inline uint16_t hw_text_entry(unsigned char uc, uint8_t color) {
@@ -383,6 +383,7 @@ static void hw_text_format_iso8601(char *buf, size_t buf_len, time_t when) {
 static void hw_text_render_statusline_locked(vt_state_t *vt) {
     char left[16];
     char right[32];
+    char line[VT_MAX_WIDTH];
     size_t left_len;
     size_t right_len;
     int cols;
@@ -400,17 +401,28 @@ static void hw_text_render_statusline_locked(vt_state_t *vt) {
     left_len = strlen(left);
     right_len = strlen(right);
 
-    hw_text_fill_row_locked(vt, (size_t)row, ' ', HW_TEXT_STATUS_COLOR);
+    memset(line, ' ', sizeof(line));
 
     for (x = 0; x < cols && (size_t)x < left_len; x++) {
-        hw_text_write_cell_locked(vt, (size_t)x, (size_t)row, left[x], HW_TEXT_STATUS_COLOR);
+        line[x] = left[x];
     }
 
     if ((int)right_len < cols) {
         size_t start = (size_t)(cols - (int)right_len);
         for (x = 0; x < (int)right_len; x++) {
-            hw_text_write_cell_locked(vt, start + (size_t)x, (size_t)row,
-                                      right[x], HW_TEXT_STATUS_COLOR);
+            line[start + (size_t)x] = right[x];
+        }
+    }
+
+    for (x = 0; x < cols; x++) {
+        size_t index = hw_text_index((size_t)x, (size_t)row);
+        uint16_t entry = hw_text_entry((unsigned char)line[x], HW_TEXT_STATUS_COLOR);
+
+        if (vt->buffer[index] != entry) {
+            vt->buffer[index] = entry;
+            if (vt->id == vt_get_active()) {
+                vga_buffer[index] = entry;
+            }
         }
     }
 }

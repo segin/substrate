@@ -57,6 +57,7 @@ extern void ntsync_init(void);
 #include <kern/console.h>
 #include <kern/cmdline.h>
 #include <kern/sched.h>
+#include <kern/time.h>
 #include <kern/version.h>
 #include <kern/panic.h>
 #include <kern/geom/geom.h>
@@ -371,6 +372,7 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
     kprint("GDT Initialized.\n");
 
     idt_init();
+    timer_init();
 
     extern void fpu_init(void);
     fpu_init();
