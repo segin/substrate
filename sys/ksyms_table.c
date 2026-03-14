@@ -270,7 +270,6 @@ extern void exec_pin_current_thread(void);
 extern void exec_register_handler(void);
 extern void exec_unpin_current_thread(void);
 extern void exfat_init(void);
-extern void ext2_add_entry(void);
 extern void ext2_alloc_block(void);
 extern void ext2_alloc_inode(void);
 extern void ext2_alloc_inode_block(void);
@@ -292,7 +291,6 @@ extern void ext2_read_blocks(void);
 extern void ext2_read_inode(void);
 extern void ext2_readdir(void);
 extern void ext2_readlink(void);
-extern void ext2_remove_entry(void);
 extern void ext2_truncate(void);
 extern void ext2_write_block(void);
 extern void ext2_write_inode(void);
@@ -2894,8 +2892,6 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&ext2_alloc_inode, "ext2_alloc_inode" },
     { (uint32_t)(uintptr_t)&ext2_free_inode, "ext2_free_inode" },
     { (uint32_t)(uintptr_t)&ext2_truncate, "ext2_truncate" },
-    { (uint32_t)(uintptr_t)&ext2_add_entry, "ext2_add_entry" },
-    { (uint32_t)(uintptr_t)&ext2_remove_entry, "ext2_remove_entry" },
     { (uint32_t)(uintptr_t)&fat_get_next_cluster, "fat_get_next_cluster" },
     { (uint32_t)(uintptr_t)&fat_parse_lfn, "fat_parse_lfn" },
     { (uint32_t)(uintptr_t)&fat_file_read, "fat_file_read" },
@@ -3459,4 +3455,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1724;
+int ksym_count = 1722;

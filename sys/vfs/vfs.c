@@ -10,6 +10,7 @@
 #include <sys/poll.h>
 #include <sys/proc.h>
 #include <sys/file.h>
+#include <sys/errno.h>
 #include <sys/fcntl.h>
 #include <drivers/storage/blkdev.h>
 #include <vm/vm_kmem.h>
@@ -19,6 +20,8 @@ fs_node_t *fs_root = 0;
 struct vnode *rootvnode = NULL;
 
 static filesystem_t *filesystems = NULL;
+
+static char *vfs_strrchr(const char *s, int c);
 
 static fs_node_t *vfs_cross_mountpoint(fs_node_t *node) {
     if (!node) return NULL;
@@ -592,6 +595,64 @@ int unlink_fs(fs_node_t *node, const char *name) {
     return -1;
 }
 
+static int vfs_resolve_parent_path(const char *path, fs_node_t **parent_out,
+                                   char *name_out, size_t name_out_size) {
+    fs_node_t *root;
+    fs_node_t *cwd;
+    fs_node_t *parent = NULL;
+    const char *last_slash;
+    char dir[256];
+
+    if (!path || !parent_out || !name_out || name_out_size == 0) {
+        return -EINVAL;
+    }
+    if (path[0] == '\0') {
+        return -EINVAL;
+    }
+
+    root = (current_process && current_process->root_node) ? current_process->root_node : fs_root;
+    cwd = (current_process && current_process->cwd_node) ? current_process->cwd_node : root;
+    if (!root || !cwd) {
+        return -ENOENT;
+    }
+
+    last_slash = vfs_strrchr(path, '/');
+    if (!last_slash) {
+        parent = cwd;
+        if (strlcpy(name_out, path, name_out_size) >= name_out_size) {
+            return -ENAMETOOLONG;
+        }
+    } else if (last_slash == path) {
+        parent = root;
+        if (strlcpy(name_out, path + 1, name_out_size) >= name_out_size) {
+            return -ENAMETOOLONG;
+        }
+    } else {
+        size_t dirlen = (size_t)(last_slash - path);
+        fs_node_t *lookup_root = (path[0] == '/') ? root : cwd;
+
+        if (dirlen >= sizeof(dir)) {
+            return -ENAMETOOLONG;
+        }
+        memcpy(dir, path, dirlen);
+        dir[dirlen] = '\0';
+        if (strlcpy(name_out, last_slash + 1, name_out_size) >= name_out_size) {
+            return -ENAMETOOLONG;
+        }
+        parent = vfs_lookup(lookup_root, dir);
+    }
+
+    if (!parent) {
+        return -ENOENT;
+    }
+    if (name_out[0] == '\0') {
+        return -EINVAL;
+    }
+
+    *parent_out = parent;
+    return 0;
+}
+
 int mknod_fs(fs_node_t *node, const char *name, uint16_t mode, uint32_t dev) {
     if (node && node->mknod) {
         return node->mknod(node, name, mode, dev);
@@ -634,83 +695,46 @@ static char *vfs_strrchr(const char *s, int c) {
 }
 
 int vfs_mkdir(const char *path, uint16_t permission) {
-    struct nameidata nd;
-    struct vattr va;
-    struct vnode *vp;
-    int error;
+    fs_node_t *parent_node = NULL;
+    char name[128];
+    int ret;
 
-    if (!path) return -1;
-
-    /* Initialize attributes for the new directory */
-    VATTR_NULL(&va);
-    va.va_type = VDIR;
-    va.va_mode = permission & 0777;
-
-    /* 
-     * Lookup for creation.
-     * We need the parent directory (nd.ni_dvp) and information about the 
-     * component to be created (nd.ni_cnd).
-     */
-    NDINIT(&nd, CREATE, LOCKPARENT, UIO_SYSSPACE, path);
-    error = namei(&nd);
-    if (error)
-        return error;
-
-    /* Check if the entry already exists */
-    if (nd.ni_vp != NULL) {
-        vput(nd.ni_dvp);
-        vrele(nd.ni_vp);
-        return -17; /* EEXIST */
+    ret = vfs_resolve_parent_path(path, &parent_node, name, sizeof(name));
+    if (ret != 0) {
+        return ret;
+    }
+    if ((parent_node->flags & 0x7) != FS_DIRECTORY) {
+        return -ENOTDIR;
+    }
+    if (parent_node->finddir && parent_node->finddir(parent_node, name) != NULL) {
+        return -EEXIST;
+    }
+    if (!parent_node->mkdir) {
+        return -EOPNOTSUPP;
     }
 
-    /* Perform the directory creation */
-    error = VOP_MKDIR(nd.ni_dvp, &vp, &nd.ni_cnd, &va);
-    
-    /* VOP_MKDIR is expected to release the lock on parent if needed, 
-     * but following BSD pattern, we usually vput the parent.
-     */
-    vput(nd.ni_dvp);
-    
-    if (error == 0) {
-        /* Successfully created, we can release the new vnode */
-        vput(vp);
-    }
-
-    return error;
+    return parent_node->mkdir(parent_node, name, permission);
 }
 
 int vfs_mknod(const char *path, uint16_t mode, uint32_t dev) {
-    if (!path) return -1;
-    
-    char path_buf[256];
-    strncpy(path_buf, path, sizeof(path_buf));
-    path_buf[255] = '\0';
-    
-    // Split path
-    char *last_slash = vfs_strrchr(path_buf, '/');
-    char *name = NULL;
     fs_node_t *parent_node = NULL;
-    
-    if (last_slash) {
-        *last_slash = '\0';
-        name = last_slash + 1;
-        if (*name == '\0') return -1; // Trailing slash invalid for node creation
-        
-        if (path_buf[0] == '\0') {
-            parent_node = fs_root;
-        } else {
-            parent_node = vfs_lookup(fs_root, path_buf);
-        }
-    } else {
-        parent_node = fs_root;
-        name = path_buf;
+    char name[128];
+    int ret;
+
+    ret = vfs_resolve_parent_path(path, &parent_node, name, sizeof(name));
+    if (ret != 0) {
+        return ret;
     }
-    
-    if (!parent_node) return -1;
-    if ((parent_node->flags & 0x7) != FS_DIRECTORY) return -1;
-    
-    if (!parent_node->mknod) return -1;
-    
+    if ((parent_node->flags & 0x7) != FS_DIRECTORY) {
+        return -ENOTDIR;
+    }
+    if (parent_node->finddir && parent_node->finddir(parent_node, name) != NULL) {
+        return -EEXIST;
+    }
+    if (!parent_node->mknod) {
+        return -EOPNOTSUPP;
+    }
+
     return parent_node->mknod(parent_node, name, mode, dev);
 }
 

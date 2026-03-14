@@ -1186,6 +1186,8 @@ int kern_link(const char *oldpath, const char *newpath) {
 
     if (!parent) return -ENOENT;
     if (!file[0]) return -EINVAL;
+    if ((parent->flags & 0x07) != FS_DIRECTORY) return -ENOTDIR;
+    if (parent->finddir && parent->finddir(parent, file) != NULL) return -EEXIST;
 
     return link_fs(parent, source, file);
 }
