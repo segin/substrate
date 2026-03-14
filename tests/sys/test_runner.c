@@ -39,6 +39,7 @@ extern void run_string_tests(void);
 extern void run_sched_bench(void);
 extern void run_sched_dequeue_bench(void);
 extern void run_vnode_lock_tests(void);
+extern void test_vnode_reclaim(void);
 extern void run_vnode_hold_tests(void);
 extern void test_vhold_vdrop(void);
 extern void run_kobject_tests(void);
@@ -316,6 +317,10 @@ void run_kernel_tests(void) {
 
     if (all || strcmp(test_arg, "vnode_lock") == 0) {
         run_vnode_lock_tests();
+    }
+
+    if (all || strcmp(test_arg, "vnode_reclaim") == 0) {
+        test_vnode_reclaim();
     }
 
     if (all || strcmp(test_arg, "vnode_hold") == 0) {
