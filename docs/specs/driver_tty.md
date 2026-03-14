@@ -10,6 +10,7 @@
 - **Canonical Erase Echo:** `VERASE` in canonical mode emits the standard visual erase sequence `\b`, space, `\b` when `ECHOE` is active, so shells and full-screen programs clear deleted characters instead of leaving stale glyphs on screen.
 - **Raw Echo:** In non-canonical mode with `ECHO` enabled, incoming bytes are echoed unchanged rather than being line-edited first.
 - **Control-Character Echo:** With `ECHOCTL` enabled, signal-generating control bytes are echoed in caret form such as `^C` before the corresponding foreground-group signal is raised.
+- **Canonical Erase Semantics:** In canonical mode, `VERASE` removes the most recent character from the pending cooked line before that line is copied into the read buffer.
 - **Output State:** Tracks the current output column so tab expansion and CR/LF post-processing derive from stream state, not `winsize`.
 - **Signal Semantics:** Interrupted foreground/background TTY operations surface `-EINTR` to callers instead of leaking internal sentinel values.
 
