@@ -531,6 +531,30 @@ static void test_tty_output_tab_expands_to_spaces(void) {
     tty_free(tty);
 }
 
+static void test_tty_input_icrnl_translates_cr_to_nl(void) {
+    struct tty_driver driver = {
+        .write = mock_tty_write,
+        .write_room = mock_tty_write_room,
+    };
+    struct tty *tty;
+    char buf[8];
+    int n;
+
+    reset_env();
+
+    tty = tty_alloc(&driver, 12);
+    assert(tty != NULL);
+
+    tty_flip_buffer_push(tty, '\r');
+
+    memset(buf, 0, sizeof(buf));
+    n = tty_read(tty, buf, sizeof(buf));
+    assert(n == 1);
+    assert(buf[0] == '\n');
+
+    tty_free(tty);
+}
+
 static void test_tiocspgrp_checks_sigttou_for_background_group(void) {
     reset_env();
 
@@ -578,6 +602,7 @@ int main(void) {
     test_tty_canonical_empty_eof_returns_zero();
     test_tty_output_newline_expands_to_crlf();
     test_tty_output_tab_expands_to_spaces();
+    test_tty_input_icrnl_translates_cr_to_nl();
     puts("host_test_tty_jobctl: PASS");
     return 0;
 }

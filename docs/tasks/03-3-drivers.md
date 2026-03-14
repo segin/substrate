@@ -732,7 +732,7 @@
             - [ ] **Line Discipline (`N_TTY`):** (REQ: REQ-03-0632)
                 - [ ] **Input Processing (`n_tty_receive_buf`):** (REQ: REQ-03-0633)
                     - [ ] Parity checks and stripping. (REQ: REQ-03-0634)
-                    - [ ] Newline translation (CR->NL). (REQ: REQ-03-0635)
+                    - [x] Newline translation (CR->NL). (REQ: REQ-03-0635)
                     - [ ] Software flow control (XON/XOFF detection). (REQ: REQ-03-0636)
                     - [ ] Signal generation check (`ISIG`). (REQ: REQ-03-0637)
                 - [x] **Canonical Editing (`n_tty_read`):** (REQ: REQ-03-0638)
