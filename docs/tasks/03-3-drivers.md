@@ -763,7 +763,7 @@
                 - [ ] `tty_check_change()`: Verify background writes (`SIGTTOU`). (REQ: REQ-03-0663)
         - [ ] **API:** (REQ: REQ-03-0664)
             - [ ] `tty_init()`: Initialize subsystem. (REQ: REQ-03-0665)
-            - [ ] `tty_alloc()`: Create a new TTY device. (REQ: REQ-03-0666)
+            - [x] `tty_alloc()`: Create a new TTY device. (REQ: REQ-03-0666)
             - [ ] `tty_register_device()`: Register with DevFS `/dev/ttyX`. (REQ: REQ-03-0667)
             - [ ] `tty_open`, `tty_close`: Refcounting and session logic. (REQ: REQ-03-0668)
             - [ ] `tty_read`, `tty_write`: Dispatch to ldisc. (REQ: REQ-03-0669)
