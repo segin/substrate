@@ -747,7 +747,7 @@
                     - [x] Raw echo (input char -> output). (REQ: REQ-03-0647)
                     - [x] Control char echo (`^C`). (REQ: REQ-03-0648)
                     - [x] Erase echo (backspace-space-backspace sequence). (REQ: REQ-03-0649)
-            - [ ] **Driver Interface (`tty_driver`):** (REQ: REQ-03-0650)
+            - [x] **Driver Interface (`tty_driver`):** (REQ: REQ-03-0650)
                 - [x] `install` / `remove`: setup private data. (REQ: REQ-03-0651)
                 - [x] `open` / `close`: hardware init/shutdown. (REQ: REQ-03-0652)
                 - [x] `write`: device output path. (REQ: REQ-03-0653)
