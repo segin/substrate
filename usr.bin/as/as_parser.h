@@ -131,6 +131,7 @@ typedef struct {
     char *segment_override;
     as_operand_t *operands;
     size_t operand_count;
+    size_t operand_cap;
 } as_instruction_t;
 
 typedef enum {
@@ -150,6 +151,7 @@ typedef struct {
     char *name;
     char **args;
     size_t arg_count;
+    size_t arg_cap;
 } as_directive_t;
 
 typedef struct {
@@ -158,6 +160,7 @@ typedef struct {
     unsigned line;
     as_label_def_t *labels;
     size_t label_count;
+    size_t label_cap;
     union {
         as_directive_t directive;
         as_instruction_t instr;

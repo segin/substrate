@@ -40,6 +40,7 @@ typedef struct {
 typedef struct {
     as_relax_branch_t *branches;
     size_t branch_count;
+    size_t branch_cap;
     unsigned passes;
     int stabilized;
 } as_relax_result_t;

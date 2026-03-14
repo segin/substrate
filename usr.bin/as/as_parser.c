@@ -255,14 +255,15 @@ static int push_stmt(as_parse_result_t *r, const as_stmt_t *st) {
 static int push_label(as_stmt_t *st, const char *name, const char *file, unsigned line) {
     as_label_def_t *next;
 
-    if (st->label_count == 0) {
-        st->labels = NULL;
+    if (st->label_count == st->label_cap) {
+        size_t ncap = st->label_cap == 0 ? 4 : st->label_cap * 2;
+        next = (as_label_def_t *)realloc(st->labels, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        st->labels = next;
+        st->label_cap = ncap;
     }
-    next = (as_label_def_t *)realloc(st->labels, (st->label_count + 1) * sizeof(*next));
-    if (next == NULL) {
-        return -1;
-    }
-    st->labels = next;
     st->labels[st->label_count].name = xstrdup(name);
     st->labels[st->label_count].file = xstrdup(file);
     st->labels[st->label_count].line = line;
@@ -915,11 +916,15 @@ static int expr_is_symbolic_leaf(const as_expr_t *e) {
 static int add_operand(as_instruction_t *in, const as_operand_t *op) {
     as_operand_t *next;
 
-    next = (as_operand_t *)realloc(in->operands, (in->operand_count + 1) * sizeof(*next));
-    if (next == NULL) {
-        return -1;
+    if (in->operand_count == in->operand_cap) {
+        size_t ncap = in->operand_cap == 0 ? 4 : in->operand_cap * 2;
+        next = (as_operand_t *)realloc(in->operands, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        in->operands = next;
+        in->operand_cap = ncap;
     }
-    in->operands = next;
     in->operands[in->operand_count] = *op;
     in->operand_count++;
     return 0;
@@ -1132,6 +1137,7 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
     as_mem_operand_t mem;
     as_token_t *disp_toks = NULL;
     size_t disp_count = 0;
+    size_t disp_cap = 0;
     size_t i;
 
     memset(&mem, 0, sizeof(mem));
@@ -1262,7 +1268,19 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
             continue;
         }
 
-        disp_toks = (as_token_t *)realloc(disp_toks, (disp_count + 1) * sizeof(*disp_toks));
+        if (disp_count == disp_cap) {
+            size_t ncap = disp_cap == 0 ? 8 : disp_cap * 2;
+            disp_toks = (as_token_t *)realloc(disp_toks, ncap * sizeof(*disp_toks));
+            if (disp_toks == NULL) {
+                free(mem.base_reg);
+                free(mem.index_reg);
+                free(mem.segment_reg);
+                set_err(ctx, "%s:%u: out of memory", tokv[0].file, tokv[0].line);
+                return -1;
+            }
+            disp_cap = ncap;
+        }
+
         if (disp_toks == NULL) {
             free(mem.base_reg);
             free(mem.index_reg);
@@ -1858,11 +1876,15 @@ static int parse_operand_slice(parse_ctx_t *ctx, const as_token_t *tokv, size_t 
 static int add_directive_arg(as_directive_t *d, const char *arg) {
     char **next;
 
-    next = (char **)realloc(d->args, (d->arg_count + 1) * sizeof(*next));
-    if (next == NULL) {
-        return -1;
+    if (d->arg_count == d->arg_cap) {
+        size_t ncap = d->arg_cap == 0 ? 4 : d->arg_cap * 2;
+        next = (char **)realloc(d->args, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        d->args = next;
+        d->arg_cap = ncap;
     }
-    d->args = next;
     d->args[d->arg_count] = xstrdup(arg);
     if (d->args[d->arg_count] == NULL) {
         return -1;
