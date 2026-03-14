@@ -757,7 +757,7 @@
                 - [x] `chars_in_buffer`: check pending bytes. (REQ: REQ-03-0657)
                 - [x] `ioctl`: hardware-specific controls. (REQ: REQ-03-0658)
                 - [x] `throttle` / `unthrottle`: hardware flow control hooks. (REQ: REQ-03-0659)
-            - [ ] **Session/Job Control:** (REQ: REQ-03-0660)
+            - [x] **Session/Job Control:** (REQ: REQ-03-0660)
                 - [x] `tty_struct.session`: Pointer to current session. (REQ: REQ-03-0661)
                 - [x] `tty_struct.pgrp`: Pointer to foreground process group. (REQ: REQ-03-0662)
                 - [x] `tty_check_change()`: Verify background writes (`SIGTTOU`). (REQ: REQ-03-0663)
