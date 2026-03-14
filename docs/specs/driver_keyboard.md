@@ -25,6 +25,7 @@ input-event paths.
 - Unshifted ASCII comes from `kbd_us[128]`.
 - Shifted ASCII comes from `kbd_us_shifted[128]`.
 - `Ctrl+A..Z` is translated to `0x01..0x1A`.
+- The same path produces the shell-relevant bytes for `Ctrl+C`, `Ctrl+D`, and `Ctrl+Z`.
 - The current implementation handles:
   - printable single-byte Set 1 make codes
   - single-byte modifier break codes

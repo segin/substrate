@@ -271,6 +271,21 @@ static void test_extended_navigation_sequences(void) {
     assert(memcmp(mock_tty_chars, "\x1b[3~", 4) == 0);
 }
 
+static void test_ctrl_c_d_z_generate_control_bytes(void) {
+    reset_state();
+    mock_vt.tty = &mock_tty;
+
+    send_scancode(0x1D); /* Ctrl down */
+    send_scancode(0x2E); /* c */
+    send_scancode(0x20); /* d */
+    send_scancode(0x2C); /* z */
+
+    assert(mock_tty_chars_len == 3);
+    assert((unsigned char)mock_tty_chars[0] == 0x03);
+    assert((unsigned char)mock_tty_chars[1] == 0x04);
+    assert((unsigned char)mock_tty_chars[2] == 0x1A);
+}
+
 static void test_backspace_maps_to_del(void) {
     reset_state();
     mock_vt.tty = &mock_tty;
@@ -307,6 +322,7 @@ int main(void) {
     test_alt_function_switches_vt();
     test_console_fallback_without_tty();
     test_extended_navigation_sequences();
+    test_ctrl_c_d_z_generate_control_bytes();
     test_backspace_maps_to_del();
     test_shift_page_keys_drive_scrollback();
     puts("host_test_keyboard: PASS");
