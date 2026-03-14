@@ -608,21 +608,22 @@ static int eval_node(node_t *n, entry_t *e) {
 	case NODE_EXEC:
 	case NODE_EXECDIR:
 		if(n->exec_dir && n->exec_argc > 0) {
-			/* GNU -execdir PATH safety: reject if PATH contains '.' */
+			/* GNU -execdir PATH safety: reject if PATH contains relative paths (including '.' and '') */
 			char *path_env = getenv("PATH");
 			if(path_env) {
 				char *dup = strdup(path_env);
-				char *tok = strtok(dup, ":");
-				while(tok) {
-					if(strcmp(tok, ".") == 0 || strcmp(tok, "") == 0) {
-						fprintf(stderr, "find: The current directory is included "
+				char *p = dup;
+				char *tok;
+				while((tok = strsep(&p, ":")) != NULL) {
+					if(tok[0] != '/') {
+						fprintf(stderr, "find: The relative path '%s' is included "
 						        "in the PATH environment variable, which is "
-						        "insecure in combination with the -execdir action.\n");
+						        "insecure in combination with the -execdir action.\n",
+						        tok[0] == '\0' ? "." : tok);
 						free(dup);
 						g_exit_status = 1;
 						return(0);
 					}
-					tok = strtok(NULL, ":");
 				}
 				free(dup);
 			}
