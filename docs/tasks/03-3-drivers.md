@@ -760,7 +760,7 @@
             - [ ] **Session/Job Control:** (REQ: REQ-03-0660)
                 - [x] `tty_struct.session`: Pointer to current session. (REQ: REQ-03-0661)
                 - [x] `tty_struct.pgrp`: Pointer to foreground process group. (REQ: REQ-03-0662)
-                - [ ] `tty_check_change()`: Verify background writes (`SIGTTOU`). (REQ: REQ-03-0663)
+                - [x] `tty_check_change()`: Verify background writes (`SIGTTOU`). (REQ: REQ-03-0663)
         - [x] **API:** (REQ: REQ-03-0664)
             - [x] `tty_init()`: Initialize subsystem. (REQ: REQ-03-0665)
             - [x] `tty_alloc()`: Create a new TTY device. (REQ: REQ-03-0666)

@@ -100,6 +100,7 @@ int tty_write(struct tty *tty, const char *buf, int len);
 int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg);
 int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg);
 int tty_poll(struct tty *tty, void *waiter);
+int tty_check_change(struct tty *tty);
 
 // Input processing (called by driver interrupt/worker)
 void tty_flip_buffer_push(struct tty *tty, char c);

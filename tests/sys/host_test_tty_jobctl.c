@@ -735,6 +735,39 @@ static void test_tty_driver_ioctl_fallback_path(void) {
     assert(tty_driver_ioctl_count == 1);
 }
 
+static void test_tty_check_change_signals_background_writes(void) {
+    process_t *proc;
+    struct pgrp fg_pgrp;
+    struct pgrp bg_pgrp;
+    struct session sess;
+    struct tty tty;
+
+    reset_env();
+
+    proc = init_proc(0, 90);
+    memset(&fg_pgrp, 0, sizeof(fg_pgrp));
+    memset(&bg_pgrp, 0, sizeof(bg_pgrp));
+    memset(&sess, 0, sizeof(sess));
+    memset(&tty, 0, sizeof(tty));
+
+    sess.s_sid = proc->pid;
+    fg_pgrp.pg_id = 500;
+    fg_pgrp.pg_session = &sess;
+    bg_pgrp.pg_id = 600;
+    bg_pgrp.pg_session = &sess;
+    proc->p_pgrp = &bg_pgrp;
+    current_process = proc;
+
+    tty.magic = TTY_MAGIC;
+    tty.termios.c_lflag = TOSTOP;
+    tty.pgrp = fg_pgrp.pg_id;
+
+    assert(tty_check_change(&tty) == 1);
+    assert(signal_count == 1);
+    assert(signal_pgrp[0] == bg_pgrp.pg_id);
+    assert(signal_sig[0] == SIGTTOU);
+}
+
 static void test_tty_open_failure_restores_state(void) {
     struct tty_driver driver = {
         .open = mock_tty_open,
@@ -1301,6 +1334,7 @@ int main(void) {
     test_tty_driver_write_room_limits_drain();
     test_tty_driver_chars_in_buffer_blocks_writable_poll();
     test_tty_driver_ioctl_fallback_path();
+    test_tty_check_change_signals_background_writes();
     test_tty_open_close_refcounts_driver_transitions();
     test_tty_open_failure_restores_state();
     test_tiocsctty_assigns_owner();

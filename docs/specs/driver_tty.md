@@ -56,5 +56,6 @@ Console and future TTY devices are implemented via the `tty_driver` callbacks:
 - The core validates `struct tty` magic and driver callback targets before indirect calls, so corruption degrades to `-EIO` instead of executing low or invalid addresses.
 - Each TTY tracks controlling-session ownership in `tty.session`, and `TIOCSCTTY` updates that ownership when a session leader acquires the terminal.
 - Each TTY also tracks its foreground process group in `tty.pgrp`, and job-control ioctls update that foreground ownership for signal delivery and write checks.
+- `tty_check_change()` enforces background-write `TOSTOP` semantics by delivering `SIGTTOU` to the caller’s process group before the write path proceeds.
 - Input is currently shared across all processes (no per-session TTYs).
 - The active hardware text VT permanently owns its TTY object. `/dev/console` and keyboard delivery resolve through the active VT first and fall back to the legacy console pointer only when no VT-backed console exists.

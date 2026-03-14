@@ -657,7 +657,7 @@ static int tty_check_read(struct tty *tty) {
     return 0; 
 }
 
-static int tty_check_write(struct tty *tty) {
+int tty_check_change(struct tty *tty) {
     if (!tty) return -1;
     if (tty->pgrp <= 0) return 0;
     
@@ -745,7 +745,7 @@ int tty_write(struct tty *tty, const char *buf, int len) {
         return -EIO;
     }
 
-    if (tty_check_write(tty)) {
+    if (tty_check_change(tty)) {
         TTY_UNLOCK(tty);
         return -EINTR;
     }
