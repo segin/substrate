@@ -1513,7 +1513,9 @@ extern void vm_pager_has_page(void);
 extern void vm_pager_put_pages(void);
 extern void vm_phys_add_range(void);
 extern void vm_phys_alloc_contiguous(void);
+extern void vm_phys_alloc_contiguous_below(void);
 extern void vm_phys_alloc_page(void);
+extern void vm_phys_alloc_page_below(void);
 extern void vm_phys_check_integrity(void);
 extern void vm_phys_early_init(void);
 extern void vm_phys_free_contiguous(void);
@@ -2687,12 +2689,6 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&elks_personality_init, "elks_personality_init" },
     { (uint32_t)(uintptr_t)&compat_lseek32, "compat_lseek32" },
     { (uint32_t)(uintptr_t)&compat_time32, "compat_time32" },
-    { (uint32_t)(uintptr_t)&sys_freebsd_stat, "sys_freebsd_stat" },
-    { (uint32_t)(uintptr_t)&sys_freebsd_lstat, "sys_freebsd_lstat" },
-    { (uint32_t)(uintptr_t)&sys_freebsd_fstat, "sys_freebsd_fstat" },
-    { (uint32_t)(uintptr_t)&sys_freebsd11_stat, "sys_freebsd11_stat" },
-    { (uint32_t)(uintptr_t)&sys_freebsd11_lstat, "sys_freebsd11_lstat" },
-    { (uint32_t)(uintptr_t)&sys_freebsd11_fstat, "sys_freebsd11_fstat" },
     { (uint32_t)(uintptr_t)&sys_freebsd_lseek, "sys_freebsd_lseek" },
     { (uint32_t)(uintptr_t)&sys_freebsd_mmap, "sys_freebsd_mmap" },
     { (uint32_t)(uintptr_t)&sys_nice, "sys_nice" },
@@ -2726,6 +2722,12 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&linux_sys_rt_sigreturn, "linux_sys_rt_sigreturn" },
     { (uint32_t)(uintptr_t)&freebsd_sendsig, "freebsd_sendsig" },
     { (uint32_t)(uintptr_t)&freebsd_sys_sigreturn, "freebsd_sys_sigreturn" },
+    { (uint32_t)(uintptr_t)&sys_freebsd_stat, "sys_freebsd_stat" },
+    { (uint32_t)(uintptr_t)&sys_freebsd_lstat, "sys_freebsd_lstat" },
+    { (uint32_t)(uintptr_t)&sys_freebsd_fstat, "sys_freebsd_fstat" },
+    { (uint32_t)(uintptr_t)&sys_freebsd11_stat, "sys_freebsd11_stat" },
+    { (uint32_t)(uintptr_t)&sys_freebsd11_lstat, "sys_freebsd11_lstat" },
+    { (uint32_t)(uintptr_t)&sys_freebsd11_fstat, "sys_freebsd11_fstat" },
     { (uint32_t)(uintptr_t)&netbsd_sendsig, "netbsd_sendsig" },
     { (uint32_t)(uintptr_t)&netbsd_sys_sigreturn, "netbsd_sys_sigreturn" },
     { (uint32_t)(uintptr_t)&netbsd_sys_stat, "netbsd_sys_stat" },
@@ -2849,8 +2851,10 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&vm_phys_early_init, "vm_phys_early_init" },
     { (uint32_t)(uintptr_t)&vm_phys_add_range, "vm_phys_add_range" },
     { (uint32_t)(uintptr_t)&vm_phys_alloc_page, "vm_phys_alloc_page" },
+    { (uint32_t)(uintptr_t)&vm_phys_alloc_page_below, "vm_phys_alloc_page_below" },
     { (uint32_t)(uintptr_t)&vm_phys_free_page, "vm_phys_free_page" },
     { (uint32_t)(uintptr_t)&vm_phys_alloc_contiguous, "vm_phys_alloc_contiguous" },
+    { (uint32_t)(uintptr_t)&vm_phys_alloc_contiguous_below, "vm_phys_alloc_contiguous_below" },
     { (uint32_t)(uintptr_t)&vm_phys_free_contiguous, "vm_phys_free_contiguous" },
     { (uint32_t)(uintptr_t)&vm_phys_get_free, "vm_phys_get_free" },
     { (uint32_t)(uintptr_t)&vm_phys_get_used, "vm_phys_get_used" },
@@ -3159,4 +3163,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1574;
+int ksym_count = 1576;

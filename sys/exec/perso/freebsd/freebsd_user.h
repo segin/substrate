@@ -279,4 +279,12 @@ struct freebsd_sigframe {
 void freebsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
 int  freebsd_sys_sigreturn(void *regs);
 
-#endif
+
+int sys_freebsd_stat(const char *path, struct freebsd_stat *buf);
+int sys_freebsd_lstat(const char *path, struct freebsd_stat *buf);
+int sys_freebsd_fstat(int fd, struct freebsd_stat *buf);
+int sys_freebsd11_stat(const char *path, struct freebsd11_stat *buf);
+int sys_freebsd11_lstat(const char *path, struct freebsd11_stat *buf);
+int sys_freebsd11_fstat(int fd, struct freebsd11_stat *buf);
+
+#endif /* _FREEBSD_USER_H */
