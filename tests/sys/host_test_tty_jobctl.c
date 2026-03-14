@@ -284,6 +284,31 @@ static void test_tty_ixoff_high_and_low_water_marks(void) {
     assert(tty_driver_out[0] == 17);
 }
 
+static void test_tty_c_iflag_defaults_and_roundtrip(void) {
+    struct tty *tty;
+    struct tty_driver driver = {0};
+    struct termios termios;
+    struct termios out;
+
+    reset_env();
+
+    tty = tty_alloc(&driver, 18);
+    assert(tty != NULL);
+    assert((tty->termios.c_iflag & (ICRNL | IXON)) == (ICRNL | IXON));
+
+    memset(&termios, 0, sizeof(termios));
+    termios.c_iflag = IGNBRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON;
+
+    assert(tty_ioctl_kern(tty, TCSETS, (uintptr_t)&termios) == 0);
+
+    memset(&out, 0, sizeof(out));
+    assert(tty_ioctl_kern(tty, TCGETS, (uintptr_t)&out) == 0);
+    assert((out.c_iflag & (IGNBRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON)) ==
+           (IGNBRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON));
+
+    tty_free(tty);
+}
+
 static process_t *init_proc(int slot, int pid) {
     process_t *p = &processes[slot];
     memset(p, 0, sizeof(*p));
@@ -928,6 +953,7 @@ int main(void) {
     test_tty_write_buffer_queues_and_drains_in_order();
     test_tty_canon_buffer_receives_cooked_line();
     test_tty_ixoff_high_and_low_water_marks();
+    test_tty_c_iflag_defaults_and_roundtrip();
     test_tty_open_close_refcounts_driver_transitions();
     test_tty_open_failure_restores_state();
     test_tiocsctty_assigns_owner();
