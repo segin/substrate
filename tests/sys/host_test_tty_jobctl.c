@@ -378,6 +378,35 @@ static void test_tty_canonical_erase_removes_previous_char(void) {
     tty_free(tty);
 }
 
+static void test_tty_canonical_kill_discards_pending_line(void) {
+    struct tty_driver driver = {
+        .write = mock_tty_write,
+        .write_room = mock_tty_write_room,
+    };
+    struct tty *tty;
+    char buf[8];
+    int n;
+
+    reset_env();
+
+    tty = tty_alloc(&driver, 6);
+    assert(tty != NULL);
+
+    tty_flip_buffer_push(tty, 'a');
+    tty_flip_buffer_push(tty, 'b');
+    tty_flip_buffer_push(tty, tty->termios.c_cc[VKILL]);
+    tty_flip_buffer_push(tty, 'c');
+    tty_flip_buffer_push(tty, '\n');
+
+    memset(buf, 0, sizeof(buf));
+    n = tty_read(tty, buf, sizeof(buf));
+    assert(n == 2);
+    assert(buf[0] == 'c');
+    assert(buf[1] == '\n');
+
+    tty_free(tty);
+}
+
 static void test_tiocspgrp_checks_sigttou_for_background_group(void) {
     reset_env();
 
@@ -419,6 +448,7 @@ int main(void) {
     test_tty_raw_echo_sequence();
     test_tty_signal_char_echo_sequence();
     test_tty_canonical_erase_removes_previous_char();
+    test_tty_canonical_kill_discards_pending_line();
     puts("host_test_tty_jobctl: PASS");
     return 0;
 }
