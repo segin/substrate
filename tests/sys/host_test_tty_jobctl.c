@@ -26,6 +26,7 @@ static int tty_driver_close_count;
 static int tty_driver_open_errno;
 static unsigned char tty_driver_out[256];
 static int tty_driver_out_len;
+static fs_node_t *last_devfs_node;
 
 uint32_t intr_disable(void) { return 0; }
 void intr_restore(uint32_t flags) { (void)flags; }
@@ -43,7 +44,7 @@ int copyinstr(const void *src, void *dst, size_t maxlen, size_t *len) {
     if (len) *len = n + 1;
     return 0;
 }
-void devfs_register_device(fs_node_t *node) { (void)node; }
+void devfs_register_device(fs_node_t *node) { last_devfs_node = node; }
 void kprint(const char *str) { (void)str; }
 void sched_wakeup(void *chan) { (void)chan; }
 void sched_yield(void) {}
@@ -79,6 +80,7 @@ static void reset_env(void) {
     tty_driver_open_errno = 0;
     tty_driver_out_len = 0;
     memset(tty_driver_out, 0, sizeof(tty_driver_out));
+    last_devfs_node = NULL;
 }
 
 static void test_tty_init_clears_global_slots(void) {
@@ -91,6 +93,32 @@ static void test_tty_init_clears_global_slots(void) {
 
     assert(ttys[0] == NULL);
     assert(ttys[1] == NULL);
+}
+
+static void test_tty_register_device_publishes_devfs_node(void) {
+    struct tty_driver driver = {0};
+    struct tty *tty;
+
+    reset_env();
+
+    tty = tty_alloc(&driver, 0);
+    assert(tty != NULL);
+
+    tty_register_device(tty, "tty42");
+
+    assert(last_devfs_node != NULL);
+    assert(tty->devnode == last_devfs_node);
+    assert(strcmp(last_devfs_node->name, "tty42") == 0);
+    assert(last_devfs_node->flags == FS_CHARDEVICE);
+    assert(last_devfs_node->mask == 0666);
+    assert(last_devfs_node->uid == 0);
+    assert(last_devfs_node->gid == 0);
+    assert(last_devfs_node->ptr == (fs_node_t *)tty);
+    assert(last_devfs_node->read == tty_fs_read);
+    assert(last_devfs_node->write == tty_fs_write);
+    assert(last_devfs_node->ioctl == tty_fs_ioctl);
+    assert(last_devfs_node->open == tty_fs_open);
+    assert(last_devfs_node->close == tty_fs_close);
 }
 
 static process_t *init_proc(int slot, int pid) {
@@ -722,6 +750,7 @@ static void test_tiocspgrp_checks_sigttou_for_background_group(void) {
 
 int main(void) {
     test_tty_init_clears_global_slots();
+    test_tty_register_device_publishes_devfs_node();
     test_tty_open_close_refcounts_driver_transitions();
     test_tty_open_failure_restores_state();
     test_tiocsctty_assigns_owner();

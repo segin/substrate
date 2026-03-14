@@ -96,6 +96,9 @@ void tty_register_device(struct tty *tty, char *name) {
     memset(node, 0, sizeof(fs_node_t));
     strncpy(node->name, name, sizeof(node->name) - 1);
     node->flags = FS_CHARDEVICE;
+    node->mask = 0666;
+    node->uid = 0;
+    node->gid = 0;
     node->ptr = (fs_node_t *)tty;
     node->read = tty_fs_read;
     node->write = tty_fs_write;
