@@ -651,6 +651,34 @@ static void test_tty_termios_get_set_roundtrip(void) {
     tty_free(tty);
 }
 
+static void test_tty_winsize_get_set_roundtrip(void) {
+    struct tty_driver driver = {
+        .write = mock_tty_write,
+        .write_room = mock_tty_write_room,
+    };
+    struct tty *tty;
+    struct winsize winsize;
+    struct winsize out;
+
+    reset_env();
+
+    tty = tty_alloc(&driver, 17);
+    assert(tty != NULL);
+
+    memset(&winsize, 0, sizeof(winsize));
+    winsize.ws_row = 42;
+    winsize.ws_col = 132;
+
+    assert(tty_ioctl_kern(tty, TIOCSWINSZ, (uintptr_t)&winsize) == 0);
+
+    memset(&out, 0, sizeof(out));
+    assert(tty_ioctl_kern(tty, TIOCGWINSZ, (uintptr_t)&out) == 0);
+    assert(out.ws_row == 42);
+    assert(out.ws_col == 132);
+
+    tty_free(tty);
+}
+
 static void test_tiocspgrp_checks_sigttou_for_background_group(void) {
     reset_env();
 
@@ -702,6 +730,7 @@ int main(void) {
     test_tty_input_xon_xoff_controls_output_flow();
     test_tty_isig_controls_signal_generation();
     test_tty_termios_get_set_roundtrip();
+    test_tty_winsize_get_set_roundtrip();
     puts("host_test_tty_jobctl: PASS");
     return 0;
 }

@@ -20,6 +20,7 @@
 - **Software Flow Control:** With `IXON` enabled, received `VSTOP` pauses output emission and received `VSTART` resumes it.
 - **Signal Generation Gate:** With `ISIG` enabled, `VINTR`, `VQUIT`, and `VSUSP` generate foreground-group signals; when `ISIG` is cleared, those bytes are delivered as ordinary input instead.
 - **Termios Round-Trip:** `TCSETS*` updates the live line-discipline state and `TCGETS` returns the current `termios` image back unchanged.
+- **Window Size Round-Trip:** `TIOCSWINSZ` updates the stored terminal geometry and `TIOCGWINSZ` returns the same `winsize` structure back to callers.
 - **Output State:** Tracks the current output column so tab expansion and CR/LF post-processing derive from stream state, not `winsize`.
 - **Signal Semantics:** Interrupted foreground/background TTY operations surface `-EINTR` to callers instead of leaking internal sentinel values.
 

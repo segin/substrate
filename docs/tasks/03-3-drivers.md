@@ -771,7 +771,7 @@
                 - [x] `TIOCSCTTY`: Become controlling TTY. (REQ: REQ-03-0671)
                 - [x] `TIOCSPGRP` / `TIOCGPGRP`: Manage foreground group. (REQ: REQ-03-0672)
                 - [x] `TCGETS` / `TCSETS`: Termios get/set. (REQ: REQ-03-0673)
-                - [ ] `TIOCGWINSZ`: Window size. (REQ: REQ-03-0674)
+                - [x] `TIOCGWINSZ`: Window size. (REQ: REQ-03-0674)
     - [ ] **Virtual Terminal (VT) Layer:** (REQ: REQ-03-0675)
         - [x] **VT Management:** Array of `vt_state_t` structures (vt0..vtN). (REQ: REQ-03-0676)
         - [x] **Switching:** `vt_activate(n)`, keyboard shortcuts (`Alt+Fn`). (REQ: REQ-03-0677)
