@@ -27,9 +27,13 @@ static int tty_driver_open_errno;
 static unsigned char tty_driver_out[256];
 static int tty_driver_out_len;
 static fs_node_t *last_devfs_node;
+static int tty_driver_throttle_count;
+static int tty_driver_unthrottle_count;
 
 static int mock_tty_write(struct tty *tty, const unsigned char *buf, int count);
 static int mock_tty_write_room(struct tty *tty);
+static void mock_tty_throttle(struct tty *tty);
+static void mock_tty_unthrottle(struct tty *tty);
 
 uint32_t intr_disable(void) { return 0; }
 void intr_restore(uint32_t flags) { (void)flags; }
@@ -84,6 +88,8 @@ static void reset_env(void) {
     tty_driver_out_len = 0;
     memset(tty_driver_out, 0, sizeof(tty_driver_out));
     last_devfs_node = NULL;
+    tty_driver_throttle_count = 0;
+    tty_driver_unthrottle_count = 0;
 }
 
 static void test_tty_init_clears_global_slots(void) {
@@ -217,6 +223,67 @@ static void test_tty_canon_buffer_receives_cooked_line(void) {
     assert(c == '\n');
 }
 
+static void test_tty_ixoff_high_and_low_water_marks(void) {
+    struct tty_driver driver = {
+        .write = mock_tty_write,
+        .write_room = mock_tty_write_room,
+        .throttle = mock_tty_throttle,
+        .unthrottle = mock_tty_unthrottle,
+    };
+    struct tty tty;
+    uint32_t flags = 0;
+
+    reset_env();
+    memset(&tty, 0, sizeof(tty));
+    tty.magic = TTY_MAGIC;
+    tty.driver = &driver;
+    tty.termios.c_iflag = IXOFF;
+    tty.termios.c_lflag = ICANON;
+    tty.termios.c_cc[VSTOP] = 19;
+    tty.termios.c_cc[VSTART] = 17;
+    tty.termios.c_cc[VERASE] = 127;
+    tty.termios.c_cc[VKILL] = 21;
+    tty.termios.c_cc[VWERASE] = 23;
+    tty.termios.c_cc[VEOF] = 4;
+
+    while (tty.raw_buf.count < (TTY_BUF_SIZE * 3 / 4) - 1) {
+        assert(tty_buf_put(&tty.raw_buf, 'x') == 0);
+    }
+
+    tty_flip_buffer_push(&tty, 'y');
+
+    assert(tty.input_stopped == 1);
+    assert(tty_driver_throttle_count == 1);
+    assert(tty_driver_out_len == 1);
+    assert(tty_driver_out[0] == 19);
+
+    reset_env();
+    memset(&tty, 0, sizeof(tty));
+    tty.magic = TTY_MAGIC;
+    tty.driver = &driver;
+    tty.termios.c_iflag = IXOFF;
+    tty.termios.c_lflag = ICANON;
+    tty.termios.c_cc[VSTOP] = 19;
+    tty.termios.c_cc[VSTART] = 17;
+    tty.termios.c_cc[VERASE] = 127;
+    tty.termios.c_cc[VKILL] = 21;
+    tty.termios.c_cc[VWERASE] = 23;
+    tty.termios.c_cc[VEOF] = 4;
+    tty.input_stopped = 1;
+
+    assert(tty_buf_put(&tty.raw_buf, 'o') == 0);
+    assert(tty_buf_put(&tty.raw_buf, 'k') == 0);
+    assert(tty_buf_put(&tty.raw_buf, '\n') == 0);
+    assert(tty_buf_put(&tty.raw_buf, (char)0xFF) == 0);
+    tty.delct = 1;
+
+    assert(canon(&tty, &flags) == 0);
+    assert(tty.input_stopped == 0);
+    assert(tty_driver_unthrottle_count == 1);
+    assert(tty_driver_out_len == 1);
+    assert(tty_driver_out[0] == 17);
+}
+
 static process_t *init_proc(int slot, int pid) {
     process_t *p = &processes[slot];
     memset(p, 0, sizeof(*p));
@@ -263,6 +330,16 @@ static int mock_tty_write(struct tty *tty, const unsigned char *buf, int count) 
 static int mock_tty_write_room(struct tty *tty) {
     (void)tty;
     return (int)sizeof(tty_driver_out) - tty_driver_out_len;
+}
+
+static void mock_tty_throttle(struct tty *tty) {
+    (void)tty;
+    tty_driver_throttle_count++;
+}
+
+static void mock_tty_unthrottle(struct tty *tty) {
+    (void)tty;
+    tty_driver_unthrottle_count++;
 }
 
 
@@ -850,6 +927,7 @@ int main(void) {
     test_tty_raw_buffer_wraps_as_circular_queue();
     test_tty_write_buffer_queues_and_drains_in_order();
     test_tty_canon_buffer_receives_cooked_line();
+    test_tty_ixoff_high_and_low_water_marks();
     test_tty_open_close_refcounts_driver_transitions();
     test_tty_open_failure_restores_state();
     test_tiocsctty_assigns_owner();

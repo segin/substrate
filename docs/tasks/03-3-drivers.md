@@ -721,7 +721,7 @@
                 - [x] **Read Buffer (Raw Input):** Circular buffer for incoming IRQ data. (REQ: REQ-03-0621)
                 - [x] **Write Buffer (Output):** Queue for driver consumption. (REQ: REQ-03-0622)
                 - [x] **Canon Buffer (Cooked):** Line-editing buffer for `ICANON` mode. (REQ: REQ-03-0623)
-                - [ ] **Flow Control:** Low-water/High-water marks for `IXON`/`IXOFF`. (REQ: REQ-03-0624)
+                - [x] **Flow Control:** Low-water/High-water marks for `IXON`/`IXOFF`. (REQ: REQ-03-0624)
             - [ ] **State Control (`termios`):** (REQ: REQ-03-0625)
                 - [ ] `c_iflag`: Input modes (IGNBRK, ISTRIP, INLCR, IGNCR, ICRNL, IXON). (REQ: REQ-03-0626)
                 - [ ] `c_oflag`: Output modes (OPOST, ONLCR, OXTABS). (REQ: REQ-03-0627)
