@@ -54,5 +54,6 @@ Console and future TTY devices are implemented via the `tty_driver` callbacks:
 ## Constraints
 - TTY control structures are allocated from `kmalloc`, not raw PMM pages, so they follow normal kernel object lifetime and never depend on low physical memory reuse.
 - The core validates `struct tty` magic and driver callback targets before indirect calls, so corruption degrades to `-EIO` instead of executing low or invalid addresses.
+- Each TTY tracks controlling-session ownership in `tty.session`, and `TIOCSCTTY` updates that ownership when a session leader acquires the terminal.
 - Input is currently shared across all processes (no per-session TTYs).
 - The active hardware text VT permanently owns its TTY object. `/dev/console` and keyboard delivery resolve through the active VT first and fall back to the legacy console pointer only when no VT-backed console exists.
