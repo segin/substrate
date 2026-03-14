@@ -488,6 +488,26 @@ static void test_tty_canonical_empty_eof_returns_zero(void) {
     tty_free(tty);
 }
 
+static void test_tty_output_newline_expands_to_crlf(void) {
+    struct tty_driver driver = {
+        .write = mock_tty_write,
+        .write_room = mock_tty_write_room,
+    };
+    struct tty *tty;
+
+    reset_env();
+
+    tty = tty_alloc(&driver, 10);
+    assert(tty != NULL);
+
+    assert(tty_write(tty, "\n", 1) == 1);
+    assert(tty_driver_out_len == 2);
+    assert(tty_driver_out[0] == '\r');
+    assert(tty_driver_out[1] == '\n');
+
+    tty_free(tty);
+}
+
 static void test_tiocspgrp_checks_sigttou_for_background_group(void) {
     reset_env();
 
@@ -533,6 +553,7 @@ int main(void) {
     test_tty_canonical_word_erase_discards_last_word();
     test_tty_canonical_eof_returns_pending_data_without_marker();
     test_tty_canonical_empty_eof_returns_zero();
+    test_tty_output_newline_expands_to_crlf();
     puts("host_test_tty_jobctl: PASS");
     return 0;
 }

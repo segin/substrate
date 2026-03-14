@@ -741,7 +741,7 @@
                     - [x] Word erase (`VWERASE`). (REQ: REQ-03-0641)
                     - [x] EOF handling (`VEOF` / Ctrl+D). (REQ: REQ-03-0642)
                 - [ ] **Output Post-processing (`n_tty_write`):** (REQ: REQ-03-0643)
-                    - [ ] Newline expansion (NL -> CR/NL). (REQ: REQ-03-0644)
+                    - [x] Newline expansion (NL -> CR/NL). (REQ: REQ-03-0644)
                     - [ ] Tab expansion (optional). (REQ: REQ-03-0645)
                 - [ ] **Echoing Logic:** (REQ: REQ-03-0646)
                     - [x] Raw echo (input char -> output). (REQ: REQ-03-0647)
