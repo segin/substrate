@@ -120,6 +120,9 @@ host_test_driver_register_attach: host_test_driver_register_attach.c
 host_test_isa: host_test_isa.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_isa.c -o $@
 
+host_test_tty_jobctl: host_test_tty_jobctl.c
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I../../sys/arch/i386 -I. host_test_tty_jobctl.c -o $@
+
 host_test_kobject: host_test_kobject.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_kobject.c -o $@
 

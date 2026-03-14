@@ -24,6 +24,8 @@ static int last_psignal_sig;
 static int tty_driver_open_count;
 static int tty_driver_close_count;
 static int tty_driver_open_errno;
+static unsigned char tty_driver_out[256];
+static int tty_driver_out_len;
 
 uint32_t intr_disable(void) { return 0; }
 void intr_restore(uint32_t flags) { (void)flags; }
@@ -42,7 +44,7 @@ int copyinstr(const void *src, void *dst, size_t maxlen, size_t *len) {
     return 0;
 }
 void devfs_register_device(fs_node_t *node) { (void)node; }
-void kprint(const char *fmt, ...) { (void)fmt; }
+void kprint(const char *str) { (void)str; }
 void sched_wakeup(void *chan) { (void)chan; }
 void sched_yield(void) {}
 int signal_send_group(int pgrp, int sig) {
@@ -75,6 +77,8 @@ static void reset_env(void) {
     tty_driver_open_count = 0;
     tty_driver_close_count = 0;
     tty_driver_open_errno = 0;
+    tty_driver_out_len = 0;
+    memset(tty_driver_out, 0, sizeof(tty_driver_out));
 }
 
 static process_t *init_proc(int slot, int pid) {
@@ -105,6 +109,26 @@ static void mock_tty_close(struct tty *tty) {
     (void)tty;
     tty_driver_close_count++;
 }
+
+static int mock_tty_write(struct tty *tty, const unsigned char *buf, int count) {
+    (void)tty;
+    int room = (int)sizeof(tty_driver_out) - tty_driver_out_len;
+    if (room <= 0) {
+        return 0;
+    }
+    if (count > room) {
+        count = room;
+    }
+    memcpy(tty_driver_out + tty_driver_out_len, buf, (size_t)count);
+    tty_driver_out_len += count;
+    return count;
+}
+
+static int mock_tty_write_room(struct tty *tty) {
+    (void)tty;
+    return (int)sizeof(tty_driver_out) - tty_driver_out_len;
+}
+
 
 static void test_tty_open_close_refcounts_driver_transitions(void) {
     struct tty_driver driver = {
@@ -173,6 +197,7 @@ static void test_tiocsctty_assigns_owner(void) {
     struct tty tty;
 
     memset(&tty, 0, sizeof(tty));
+    tty.magic = TTY_MAGIC;
     init_session_leader(proc, &pgrp, &sess, 42);
     current_process = proc;
 
@@ -191,6 +216,7 @@ static void test_tiocsctty_rejects_foreign_owner_without_steal(void) {
     struct tty tty;
 
     memset(&tty, 0, sizeof(tty));
+    tty.magic = TTY_MAGIC;
     tty.session = 77;
     tty.pgrp = 77;
     init_session_leader(proc, &pgrp, &sess, 50);
@@ -215,6 +241,7 @@ static void test_tiocnotty_hangsup_foreground_group(void) {
     struct tty tty;
 
     memset(&tty, 0, sizeof(tty));
+    tty.magic = TTY_MAGIC;
     init_session_leader(proc, &pgrp, &sess, 61);
     current_process = proc;
     proc->tty = &tty;
@@ -243,6 +270,7 @@ static void test_tiocpgrp_roundtrip(void) {
     int out = 0;
 
     memset(&tty, 0, sizeof(tty));
+    tty.magic = TTY_MAGIC;
     init_session_leader(proc, &pgrp, &sess, 70);
     current_process = proc;
 
@@ -250,6 +278,30 @@ static void test_tiocpgrp_roundtrip(void) {
     assert(tty.pgrp == 99);
     assert(tty_ioctl_kern(&tty, TIOCGPGRP, (uintptr_t)&out) == 0);
     assert(out == 99);
+}
+
+static void test_tty_erase_echo_sequence(void) {
+    struct tty_driver driver = {
+        .write = mock_tty_write,
+        .write_room = mock_tty_write_room,
+    };
+    struct tty *tty;
+
+    reset_env();
+
+    tty = tty_alloc(&driver, 2);
+    assert(tty != NULL);
+
+    tty_flip_buffer_push(tty, 'a');
+    tty_flip_buffer_push(tty, tty->termios.c_cc[VERASE]);
+
+    assert(tty_driver_out_len == 4);
+    assert(tty_driver_out[0] == 'a');
+    assert(tty_driver_out[1] == '');
+    assert(tty_driver_out[2] == ' ');
+    assert(tty_driver_out[3] == '');
+
+    tty_free(tty);
 }
 
 static void test_tiocspgrp_checks_sigttou_for_background_group(void) {
@@ -263,6 +315,7 @@ static void test_tiocspgrp_checks_sigttou_for_background_group(void) {
     int value = 81;
 
     memset(&tty, 0, sizeof(tty));
+    tty.magic = TTY_MAGIC;
     memset(&thread, 0, sizeof(thread));
     init_session_leader(proc, &pgrp, &sess, 80);
     current_process = proc;
@@ -288,6 +341,7 @@ int main(void) {
     test_tiocnotty_hangsup_foreground_group();
     test_tiocpgrp_roundtrip();
     test_tiocspgrp_checks_sigttou_for_background_group();
+    test_tty_erase_echo_sequence();
     puts("host_test_tty_jobctl: PASS");
     return 0;
 }

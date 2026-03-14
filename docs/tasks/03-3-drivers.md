@@ -746,7 +746,7 @@
                 - [ ] **Echoing Logic:** (REQ: REQ-03-0646)
                     - [ ] Raw echo (input char -> output). (REQ: REQ-03-0647)
                     - [ ] Control char echo (`^C`). (REQ: REQ-03-0648)
-                    - [ ] Erase echo (backspace-space-backspace sequence). (REQ: REQ-03-0649)
+                    - [x] Erase echo (backspace-space-backspace sequence). (REQ: REQ-03-0649)
             - [ ] **Driver Interface (`tty_driver`):** (REQ: REQ-03-0650)
                 - [ ] `install` / `remove`: setup private data. (REQ: REQ-03-0651)
                 - [ ] `open` / `close`: hardware init/shutdown. (REQ: REQ-03-0652)
