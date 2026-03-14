@@ -29,6 +29,207 @@
         - Files: `bin/lsusb/`, `usr.man/man1/lsusb.1`
         - Acceptance: Userspace can inspect the USB topology once the USB host stack is present
 
+- [ ] **Userspace USB Library (`lib/usb` — libusb 1.0 Compatible):** (REQ: REQ-03-1150)
+
+    > **Architecture:** Userspace C library (`libusb.a`) providing direct USB
+    > device access without kernel driver involvement. Fully API-compatible with
+    > libusb 1.0.27+ so existing Linux/FreeBSD applications compile unmodified.
+    > Talks to kernel via `/dev/usb/busN/devM` character device nodes and
+    > usbdevfs ioctls. Depends on the USB host stack (above) and the driver
+    > model (§13).
+    >
+    > **Files:** `lib/usb/`, `lib/usb/include/libusb.h`, `lib/usb/src/`,
+    > `lib/usb/tests/`, `bin/lsusb/`, `usr.man/man3/libusb_*.3`,
+    > `usr.man/man1/lsusb.1`
+
+    - [ ] **Kernel Interface Contract (usbdevfs):** (REQ: REQ-03-1151)
+        - [ ] Define `/dev/usb/busN/devM` character device node layout. (REQ: REQ-03-1152)
+        - [ ] Define ioctl commands: `USBDEVFS_CLAIMINTERFACE`, `USBDEVFS_RELEASEINTERFACE`. (REQ: REQ-03-1153)
+        - [ ] Define ioctl commands: `USBDEVFS_CONTROL`, `USBDEVFS_BULK` for sync transfers. (REQ: REQ-03-1154)
+        - [ ] Define ioctl commands: `USBDEVFS_SUBMITURB`, `USBDEVFS_REAPURB`, `USBDEVFS_REAPURBNDELAY`, `USBDEVFS_DISCARDURB` for async I/O. (REQ: REQ-03-1155)
+        - [ ] Define ioctl commands: `USBDEVFS_SETCONFIGURATION`, `USBDEVFS_SETINTERFACE`, `USBDEVFS_CLEAR_HALT`, `USBDEVFS_RESET`. (REQ: REQ-03-1156)
+        - [ ] Define ioctl commands: `USBDEVFS_DISCONNECT`, `USBDEVFS_CONNECT`, `USBDEVFS_GET_DRIVER` for kernel driver management. (REQ: REQ-03-1157)
+        - [ ] Define `struct usbdevfs_urb` kernel URB structure (type, endpoint, status, buffer, actual_length, iso packet descriptors). (REQ: REQ-03-1158)
+        - [ ] Define device node permissions: `root:usb`, mode `0664`. (REQ: REQ-03-1159)
+
+    - [ ] **Headers & Build System:** (REQ: REQ-03-1160)
+        - [ ] Create `lib/usb/Makefile` with target build rules (`-m32 -nostdlib`). (REQ: REQ-03-1161)
+            - Files: `lib/usb/Makefile` (new)
+            - Acceptance: `make -C lib/usb` produces `libusb.a`
+        - [ ] Create `lib/usb/include/libusb.h` with full libusb 1.0.27+ API declarations. (REQ: REQ-03-1162)
+            - Files: `lib/usb/include/libusb.h` (new)
+            - Acceptance: Header is drop-in compatible with upstream `libusb.h`
+        - [ ] Add `usb` to `SUBDIRS` in `lib/Makefile`. (REQ: REQ-03-1163)
+            - Files: `lib/Makefile`
+            - Acceptance: `make -C lib` builds libusb alongside other libraries
+        - [ ] Create `NATIVE_BUILD=1` path for host-side testing against host libc. (REQ: REQ-03-1164)
+            - Files: `lib/usb/Makefile`
+            - Acceptance: Host build compiles and links against glibc for unit testing
+
+    - [ ] **Opaque Types & Data Structures (`libusb.h`):** (REQ: REQ-03-1165)
+        - [ ] Define `libusb_context`, `libusb_device`, `libusb_device_handle`, `libusb_transfer` opaque types. (REQ: REQ-03-1166)
+        - [ ] Define `struct libusb_device_descriptor` (18 bytes, packed). (REQ: REQ-03-1167)
+        - [ ] Define `struct libusb_config_descriptor` with nested interface/endpoint arrays. (REQ: REQ-03-1168)
+        - [ ] Define `struct libusb_interface_descriptor`, `struct libusb_interface`. (REQ: REQ-03-1169)
+        - [ ] Define `struct libusb_endpoint_descriptor` with `extra`/`extra_length` for class-specific data. (REQ: REQ-03-1170)
+        - [ ] Define `struct libusb_ss_endpoint_companion_descriptor`. (REQ: REQ-03-1171)
+        - [ ] Define `struct libusb_bos_descriptor`, `struct libusb_bos_dev_capability_descriptor`. (REQ: REQ-03-1172)
+        - [ ] Define `struct libusb_usb_2_0_extension_descriptor`, `struct libusb_ss_usb_device_capability_descriptor`, `struct libusb_container_id_descriptor`. (REQ: REQ-03-1173)
+        - [ ] Define `struct libusb_transfer` with callback, iso packet descriptors, flags. (REQ: REQ-03-1174)
+        - [ ] Define `struct libusb_iso_packet_descriptor`. (REQ: REQ-03-1175)
+        - [ ] Define `struct libusb_control_setup` (8-byte setup packet). (REQ: REQ-03-1176)
+        - [ ] Define `struct libusb_pollfd` (fd + events). (REQ: REQ-03-1177)
+        - [ ] Define `struct libusb_version` (major/minor/micro/nano/rc/describe). (REQ: REQ-03-1178)
+
+    - [ ] **Enumerations & Constants (`libusb.h`):** (REQ: REQ-03-1179)
+        - [ ] Define `enum libusb_class_code` (USB class codes 0x00–0xFF). (REQ: REQ-03-1180)
+        - [ ] Define `enum libusb_descriptor_type` (DEVICE, CONFIG, STRING, INTERFACE, ENDPOINT, BOS, etc.). (REQ: REQ-03-1181)
+        - [ ] Define `enum libusb_endpoint_direction` (IN=0x80, OUT=0x00), `enum libusb_endpoint_transfer_type` (CONTROL, ISO, BULK, INTERRUPT). (REQ: REQ-03-1182)
+        - [ ] Define `enum libusb_standard_request` (GET_STATUS through SYNCH_FRAME). (REQ: REQ-03-1183)
+        - [ ] Define `enum libusb_request_type` (STANDARD, CLASS, VENDOR, RESERVED), `enum libusb_request_recipient` (DEVICE, INTERFACE, ENDPOINT, OTHER). (REQ: REQ-03-1184)
+        - [ ] Define `enum libusb_iso_sync_type`, `enum libusb_iso_usage_type`. (REQ: REQ-03-1185)
+        - [ ] Define `enum libusb_speed` (UNKNOWN, LOW, FULL, HIGH, SUPER, SUPER_PLUS). (REQ: REQ-03-1186)
+        - [ ] Define `enum libusb_error` (SUCCESS, ERROR_IO, ERROR_INVALID_PARAM, ERROR_ACCESS, ERROR_NO_DEVICE, ERROR_NOT_FOUND, ERROR_BUSY, ERROR_TIMEOUT, ERROR_OVERFLOW, ERROR_PIPE, ERROR_INTERRUPTED, ERROR_NO_MEM, ERROR_NOT_SUPPORTED, ERROR_OTHER). (REQ: REQ-03-1187)
+        - [ ] Define `enum libusb_transfer_status`, `enum libusb_transfer_type`, `enum libusb_transfer_flags`. (REQ: REQ-03-1188)
+        - [ ] Define `enum libusb_capability` (HAS_CAPABILITY, HAS_HOTPLUG, HAS_HID_ACCESS, SUPPORTS_DETACH_KERNEL_DRIVER). (REQ: REQ-03-1189)
+        - [ ] Define `enum libusb_hotplug_event` (DEVICE_ARRIVED, DEVICE_LEFT), `enum libusb_hotplug_flag` (ENUMERATE). (REQ: REQ-03-1190)
+        - [ ] Define `enum libusb_log_level`, `enum libusb_option`. (REQ: REQ-03-1191)
+        - [ ] Define `LIBUSB_HOTPLUG_MATCH_ANY` = -1. (REQ: REQ-03-1192)
+
+    - [ ] **Library Initialization & Exit (`core.c`):** (REQ: REQ-03-1193)
+        - [ ] Implement `libusb_init(ctx)` — allocate context, open event pipe, scan devices. (REQ: REQ-03-1194)
+        - [ ] Implement `libusb_init_context(ctx, options, num_options)` — init with options. (REQ: REQ-03-1195)
+        - [ ] Implement `libusb_exit(ctx)` — close all handles, free context. (REQ: REQ-03-1196)
+        - [ ] Implement `libusb_set_debug()` / `libusb_set_option()`. (REQ: REQ-03-1197)
+        - [ ] Implement `libusb_has_capability(capability)`. (REQ: REQ-03-1198)
+        - [ ] Implement `libusb_error_name()` / `libusb_strerror()` / `libusb_setlocale()`. (REQ: REQ-03-1199)
+        - [ ] Implement `libusb_get_version()`. (REQ: REQ-03-1200)
+        - [ ] Implement default context (NULL ctx) support. (REQ: REQ-03-1201)
+
+    - [ ] **Device Enumeration (`device.c`):** (REQ: REQ-03-1202)
+        - [ ] Implement `libusb_get_device_list(ctx, list)` — scan `/dev/usb/`, read descriptors. (REQ: REQ-03-1203)
+        - [ ] Implement `libusb_free_device_list(list, unref_devices)`. (REQ: REQ-03-1204)
+        - [ ] Implement `libusb_ref_device()` / `libusb_unref_device()` refcounting. (REQ: REQ-03-1205)
+        - [ ] Implement `libusb_get_bus_number()`, `libusb_get_device_address()`. (REQ: REQ-03-1206)
+        - [ ] Implement `libusb_get_port_number()`, `libusb_get_port_numbers()`, `libusb_get_port_path()`. (REQ: REQ-03-1207)
+        - [ ] Implement `libusb_get_parent()`. (REQ: REQ-03-1208)
+        - [ ] Implement `libusb_get_device_speed()`. (REQ: REQ-03-1209)
+        - [ ] Implement `libusb_get_max_packet_size()` / `libusb_get_max_iso_packet_size()`. (REQ: REQ-03-1210)
+
+    - [ ] **Device Open/Close & Configuration (`device.c`):** (REQ: REQ-03-1211)
+        - [ ] Implement `libusb_open(dev, hdl)` — open `/dev/usb/busN/devM` fd. (REQ: REQ-03-1212)
+        - [ ] Implement `libusb_open_device_with_vid_pid(ctx, vid, pid)` — convenience wrapper. (REQ: REQ-03-1213)
+        - [ ] Implement `libusb_close(hdl)` — release interfaces, close fd. (REQ: REQ-03-1214)
+        - [ ] Implement `libusb_get_device(hdl)`. (REQ: REQ-03-1215)
+        - [ ] Implement `libusb_wrap_sys_device(ctx, sys_dev, hdl)`. (REQ: REQ-03-1216)
+        - [ ] Implement `libusb_get_configuration()` / `libusb_set_configuration()` via `USBDEVFS_SETCONFIGURATION`. (REQ: REQ-03-1217)
+        - [ ] Implement `libusb_claim_interface()` / `libusb_release_interface()` via `USBDEVFS_CLAIMINTERFACE` / `USBDEVFS_RELEASEINTERFACE`. (REQ: REQ-03-1218)
+        - [ ] Implement `libusb_set_interface_alt_setting()` via `USBDEVFS_SETINTERFACE`. (REQ: REQ-03-1219)
+        - [ ] Implement `libusb_clear_halt()` via `USBDEVFS_CLEAR_HALT`. (REQ: REQ-03-1220)
+        - [ ] Implement `libusb_reset_device()` via `USBDEVFS_RESET`. (REQ: REQ-03-1221)
+        - [ ] Implement `libusb_kernel_driver_active()` via `USBDEVFS_GET_DRIVER`. (REQ: REQ-03-1222)
+        - [ ] Implement `libusb_detach_kernel_driver()` / `libusb_attach_kernel_driver()` via `USBDEVFS_DISCONNECT` / `USBDEVFS_CONNECT`. (REQ: REQ-03-1223)
+        - [ ] Implement `libusb_set_auto_detach_kernel_driver()`. (REQ: REQ-03-1224)
+
+    - [ ] **Descriptor Parsing (`descriptor.c`):** (REQ: REQ-03-1225)
+        - [ ] Implement `libusb_get_device_descriptor(dev, desc)`. (REQ: REQ-03-1226)
+        - [ ] Implement `libusb_get_config_descriptor()` / `libusb_get_active_config_descriptor()`. (REQ: REQ-03-1227)
+        - [ ] Implement `libusb_get_config_descriptor_by_value()`. (REQ: REQ-03-1228)
+        - [ ] Implement `libusb_free_config_descriptor()` — recursive free of interface/endpoint trees. (REQ: REQ-03-1229)
+        - [ ] Implement `libusb_get_ss_endpoint_companion_descriptor()` / free. (REQ: REQ-03-1230)
+        - [ ] Implement `libusb_get_bos_descriptor()` / `libusb_free_bos_descriptor()`. (REQ: REQ-03-1231)
+        - [ ] Implement `libusb_get_string_descriptor_ascii()` — GET_DESCRIPTOR control transfer + UTF-16→ASCII. (REQ: REQ-03-1232)
+        - [ ] Parse nested descriptors: config → interface → endpoint → extra class-specific data. (REQ: REQ-03-1233)
+
+    - [ ] **Synchronous I/O (`sync.c`):** (REQ: REQ-03-1234)
+        - [ ] Implement `libusb_control_transfer()` via `USBDEVFS_CONTROL` ioctl. (REQ: REQ-03-1235)
+        - [ ] Implement `libusb_bulk_transfer()` via `USBDEVFS_BULK` ioctl with timeout. (REQ: REQ-03-1236)
+        - [ ] Implement `libusb_interrupt_transfer()` via `USBDEVFS_BULK` ioctl (same kernel path). (REQ: REQ-03-1237)
+        - [ ] Implement timeout handling via `poll()` on device fd before ioctl. (REQ: REQ-03-1238)
+        - [ ] Implement error mapping: kernel errno → `LIBUSB_ERROR_*`. (REQ: REQ-03-1239)
+
+    - [ ] **Asynchronous I/O (`async.c`):** (REQ: REQ-03-1240)
+        - [ ] Implement `libusb_alloc_transfer(iso_packets)` / `libusb_free_transfer()`. (REQ: REQ-03-1241)
+        - [ ] Implement `libusb_submit_transfer()` — build `usbdevfs_urb`, submit via `USBDEVFS_SUBMITURB`. (REQ: REQ-03-1242)
+        - [ ] Implement `libusb_cancel_transfer()` — `USBDEVFS_DISCARDURB`. (REQ: REQ-03-1243)
+        - [ ] Implement flying transfer tracking (in-flight URB list per context). (REQ: REQ-03-1244)
+        - [ ] Implement transfer completion reaping in event loop. (REQ: REQ-03-1245)
+        - [ ] Implement ISO transfer support with per-packet status tracking. (REQ: REQ-03-1246)
+        - [ ] Implement bulk stream ID support (`libusb_transfer_set_stream_id` / `libusb_transfer_get_stream_id`). (REQ: REQ-03-1247)
+        - [ ] Implement transfer timeout via timer tracking. (REQ: REQ-03-1248)
+        - [ ] Implement `LIBUSB_TRANSFER_FREE_BUFFER`, `LIBUSB_TRANSFER_FREE_TRANSFER`, `LIBUSB_TRANSFER_ADD_ZERO_PACKET` flags. (REQ: REQ-03-1249)
+        - [ ] Implement fill helper macros: `libusb_fill_control_transfer`, `libusb_fill_bulk_transfer`, `libusb_fill_bulk_stream_transfer`, `libusb_fill_interrupt_transfer`, `libusb_fill_iso_transfer`. (REQ: REQ-03-1250)
+
+    - [ ] **Event Handling / Poll Integration (`poll.c`):** (REQ: REQ-03-1251)
+        - [ ] Implement `libusb_handle_events(ctx)` — poll device fds, reap completed URBs, invoke callbacks. (REQ: REQ-03-1252)
+        - [ ] Implement `libusb_handle_events_timeout()` / `_timeout_completed()` / `_completed()` variants. (REQ: REQ-03-1253)
+        - [ ] Implement `libusb_handle_events_locked()`. (REQ: REQ-03-1254)
+        - [ ] Implement `libusb_get_next_timeout()`. (REQ: REQ-03-1255)
+        - [ ] Implement `libusb_get_pollfds()` / `libusb_free_pollfds()`. (REQ: REQ-03-1256)
+        - [ ] Implement `libusb_set_pollfd_notifiers()` — callback on fd add/remove. (REQ: REQ-03-1257)
+        - [ ] Implement event lock/unlock API: `libusb_try_lock_events`, `libusb_lock_events`, `libusb_unlock_events`, `libusb_event_handling_ok`, `libusb_event_handler_active`. (REQ: REQ-03-1258)
+        - [ ] Implement `libusb_interrupt_event_handler(ctx)` via event pipe write. (REQ: REQ-03-1259)
+        - [ ] Implement `libusb_lock_event_waiters` / `libusb_unlock_event_waiters` / `libusb_wait_for_event()`. (REQ: REQ-03-1260)
+
+    - [ ] **Hotplug (`hotplug.c`):** (REQ: REQ-03-1261)
+        - [ ] Implement `libusb_hotplug_register_callback()` — store callback with VID/PID/class filter. (REQ: REQ-03-1262)
+        - [ ] Implement `libusb_hotplug_deregister_callback()`. (REQ: REQ-03-1263)
+        - [ ] Implement `libusb_hotplug_get_user_data()`. (REQ: REQ-03-1264)
+        - [ ] Implement hotplug monitoring via `/proc/device-events` USB add/remove notifications. (REQ: REQ-03-1265)
+        - [ ] Implement `LIBUSB_HOTPLUG_ENUMERATE` flag — fire callbacks for already-connected devices. (REQ: REQ-03-1266)
+
+    - [ ] **Substrate Backend (`os/substrate.c`):** (REQ: REQ-03-1267)
+        - [ ] Implement `substrate_get_device_list()` — enumerate `/dev/usb/` tree. (REQ: REQ-03-1268)
+        - [ ] Implement `substrate_open()` / `substrate_close()` — open/close device node fd. (REQ: REQ-03-1269)
+        - [ ] Implement `substrate_submit_transfer()` — build and submit `usbdevfs_urb`. (REQ: REQ-03-1270)
+        - [ ] Implement `substrate_cancel_transfer()` — `USBDEVFS_DISCARDURB`. (REQ: REQ-03-1271)
+        - [ ] Implement `substrate_handle_transfer_completion()` — reap URBs via `USBDEVFS_REAPURBNDELAY`. (REQ: REQ-03-1272)
+        - [ ] Implement `substrate_claim_interface()` / `substrate_release_interface()`. (REQ: REQ-03-1273)
+        - [ ] Implement `substrate_set_configuration()` / `substrate_set_interface_alt_setting()`. (REQ: REQ-03-1274)
+        - [ ] Implement `substrate_clear_halt()` / `substrate_reset_device()`. (REQ: REQ-03-1275)
+        - [ ] Implement `substrate_kernel_driver_active()` / `substrate_detach_kernel_driver()` / `substrate_attach_kernel_driver()`. (REQ: REQ-03-1276)
+        - [ ] Implement `substrate_get_device_descriptor()` / `substrate_get_config_descriptor()` via ioctl. (REQ: REQ-03-1277)
+
+    - [ ] **`lsusb` Utility (`bin/lsusb/`):** (REQ: REQ-03-1278)
+        - [ ] Create `bin/lsusb/lsusb.c` — enumerate and display USB devices using libusb. (REQ: REQ-03-1279)
+        - [ ] Implement `-v` verbose mode (full descriptor dump). (REQ: REQ-03-1280)
+        - [ ] Implement `-t` tree mode (topology display). (REQ: REQ-03-1281)
+        - [ ] Implement `-s bus:dev` device filter. (REQ: REQ-03-1282)
+        - [ ] Implement `-d vendor:product` filter. (REQ: REQ-03-1283)
+        - [ ] Create `usr.man/man1/lsusb.1` man page. (REQ: REQ-03-1284)
+        - [ ] Add to `bin/Makefile`. (REQ: REQ-03-1285)
+
+    - [ ] **Testing:** (REQ: REQ-03-1286)
+        - [ ] **Unit Tests (Host Build):** (REQ: REQ-03-1287)
+            - [ ] `test_core.c`: init/exit, default context, capability query, error strings. (REQ: REQ-03-1288)
+            - [ ] `test_descriptor.c`: descriptor parsing from raw byte buffers, nested config/interface/endpoint, BOS. (REQ: REQ-03-1289)
+            - [ ] `test_device.c`: refcounting (ref/unref), device list management, bus/address/speed queries. (REQ: REQ-03-1290)
+            - [ ] `test_io.c`: control setup packet construction, fill macros, error code mapping. (REQ: REQ-03-1291)
+            - [ ] `test_async.c`: transfer alloc/free, flag handling, ISO packet descriptor layout. (REQ: REQ-03-1292)
+            - [ ] `test_hotplug.c`: callback registration/deregistration, filter matching, enumerate flag. (REQ: REQ-03-1293)
+        - [ ] **Integration Tests (QEMU):** (REQ: REQ-03-1294)
+            - [ ] Boot with `-device qemu-xhci -device usb-storage`, run `lsusb`, verify device appears. (REQ: REQ-03-1295)
+            - [ ] `lsusb -v`: verify full descriptor dump. (REQ: REQ-03-1296)
+            - [ ] `lsusb -t`: verify topology tree output. (REQ: REQ-03-1297)
+            - [ ] `libusb_open()` + `libusb_control_transfer()` GET_DESCRIPTOR on virtual device. (REQ: REQ-03-1298)
+            - [ ] `libusb_bulk_transfer()` read/write with USB mass storage. (REQ: REQ-03-1299)
+            - [ ] Hotplug: hot-add device via QEMU monitor, verify callback fires. (REQ: REQ-03-1300)
+            - [ ] Hotplug: hot-remove device, verify callback fires and handle invalidated. (REQ: REQ-03-1301)
+        - [ ] **Compatibility Tests:** (REQ: REQ-03-1302)
+            - [ ] Compile existing open-source libusb applications against Substrate `libusb.h` — verify no modifications needed. (REQ: REQ-03-1303)
+            - [ ] Verify `sizeof(struct libusb_device_descriptor)` == 18, other struct sizes match upstream. (REQ: REQ-03-1304)
+
+    - [ ] **Documentation:** (REQ: REQ-03-1305)
+        - [ ] Create `usr.man/man3/libusb_init.3` (and init family). (REQ: REQ-03-1306)
+        - [ ] Create `usr.man/man3/libusb_open.3`. (REQ: REQ-03-1307)
+        - [ ] Create `usr.man/man3/libusb_control_transfer.3`. (REQ: REQ-03-1308)
+        - [ ] Create `usr.man/man3/libusb_bulk_transfer.3`. (REQ: REQ-03-1309)
+        - [ ] Create `usr.man/man3/libusb_submit_transfer.3`. (REQ: REQ-03-1310)
+        - [ ] Create `usr.man/man3/libusb_handle_events.3`. (REQ: REQ-03-1311)
+        - [ ] Create `usr.man/man3/libusb_hotplug_register_callback.3`. (REQ: REQ-03-1312)
+        - [ ] Update `ARCHITECTURE.md` with `lib/usb` entry. (REQ: REQ-03-1313)
+
+
 - [ ] **Storage Subsystem (Unified SCSI Stack):** (REQ: REQ-03-0001)
 
     > **Files:** `sys/drivers/storage/scsi/scsi.h`, `scsi.c`, `scsi_dev.c`,
@@ -715,7 +916,7 @@
         - [x] Internal doc: input subsystem event model and device registration. (REQ: REQ-03-0616)
 
 - [ ] **Console Subsystem (`sys/console`):** (REQ: REQ-03-0617)
-    - [ ] **TTY Subsystem (Core):** (REQ: REQ-03-0618)
+    - [x] **TTY Subsystem (Core):** (REQ: REQ-03-0618)
         - [x] **Structures (`tty_t`):** (REQ: REQ-03-0619)
             - [x] **Buffers & Queues:** (REQ: REQ-03-0620)
                 - [x] **Read Buffer (Raw Input):** Circular buffer for incoming IRQ data. (REQ: REQ-03-0621)
@@ -2400,6 +2601,18 @@
 - **US-03-1147**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to entropy source hookup guide so that this capability is implemented with clear verification evidence.
 - **US-03-1148**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to security model documentation so that this capability is implemented with clear verification evidence.
 - **US-03-1149**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to performance tuning guide so that this capability is implemented with clear verification evidence.
+- **US-03-1150**: As a developer porting a Linux USB application to Substrate, I want `#include <libusb.h>` to work without changes so that my application compiles natively.
+- **US-03-1151**: As a developer, I want `libusb_get_device_list()` to return all connected USB devices so that I can enumerate the bus.
+- **US-03-1152**: As a developer, I want `libusb_open()` and `libusb_claim_interface()` to grant exclusive access to a USB interface so that I can communicate with my device.
+- **US-03-1153**: As a developer, I want `libusb_control_transfer()` to send standard and vendor-specific control requests so that I can configure USB devices.
+- **US-03-1154**: As a developer, I want `libusb_bulk_transfer()` and `libusb_interrupt_transfer()` to work with timeouts so that I can exchange data reliably.
+- **US-03-1155**: As a developer, I want `libusb_submit_transfer()` and `libusb_handle_events()` for async I/O so that my application can handle multiple USB devices concurrently.
+- **US-03-1156**: As a developer, I want `libusb_hotplug_register_callback()` to notify me of device arrivals and departures so that my application handles plug/unplug gracefully.
+- **US-03-1157**: As a developer, I want `libusb_get_pollfds()` to integrate with my event loop (poll/select) so that I don't need dedicated USB threads.
+- **US-03-1158**: As a sysadmin, I want `lsusb` to show all USB devices, their topology, and descriptors so that I can diagnose USB issues.
+- **US-03-1159**: As a developer, I want `libusb_get_device_descriptor()` and `libusb_get_config_descriptor()` to parse USB descriptors so that I can inspect device capabilities.
+- **US-03-1160**: As a developer, I want `libusb_detach_kernel_driver()` to unbind a kernel driver so that I can take over a device from userspace.
+- **US-03-1161**: As a developer, I want isochronous transfer support so that I can work with USB audio and video devices.
 
 ## INCOSE/EARS Requirements
 
@@ -5849,4 +6062,52 @@
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-03-1149** (EARS/Ubiquitous): The Substrate system shall performance tuning guide.
   - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1150** (EARS/Ubiquitous): The Substrate system shall provide a userspace USB library (`lib/usb`) fully API-compatible with libusb 1.0.27+.
+  - Context: 3. Drivers — Userspace USB Library
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1151** (EARS/Ubiquitous): The Substrate system shall define a usbdevfs kernel interface contract for userspace USB device access.
+  - Context: 3. Drivers — Kernel Interface Contract
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1152** (EARS/Ubiquitous): The Substrate system shall expose USB device nodes at `/dev/usb/busN/devM`.
+  - Context: 3. Drivers — Kernel Interface Contract
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1153** (EARS/Ubiquitous): The Substrate system shall implement `USBDEVFS_CLAIMINTERFACE` / `USBDEVFS_RELEASEINTERFACE` ioctls.
+  - Context: 3. Drivers — Kernel Interface Contract
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1154** (EARS/Ubiquitous): The Substrate system shall implement `USBDEVFS_CONTROL` / `USBDEVFS_BULK` ioctls for synchronous transfers.
+  - Context: 3. Drivers — Kernel Interface Contract
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1155** (EARS/Ubiquitous): The Substrate system shall implement `USBDEVFS_SUBMITURB` / `USBDEVFS_REAPURB` / `USBDEVFS_DISCARDURB` ioctls for async I/O.
+  - Context: 3. Drivers — Kernel Interface Contract
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1156** (EARS/Ubiquitous): The Substrate system shall implement `USBDEVFS_SETCONFIGURATION` / `USBDEVFS_SETINTERFACE` / `USBDEVFS_CLEAR_HALT` / `USBDEVFS_RESET` ioctls.
+  - Context: 3. Drivers — Kernel Interface Contract
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1157** (EARS/Ubiquitous): The Substrate system shall implement `USBDEVFS_DISCONNECT` / `USBDEVFS_CONNECT` / `USBDEVFS_GET_DRIVER` ioctls for kernel driver management.
+  - Context: 3. Drivers — Kernel Interface Contract
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1158** (EARS/Ubiquitous): The Substrate system shall define `struct usbdevfs_urb` for kernel-userspace URB submission.
+  - Context: 3. Drivers — Kernel Interface Contract
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1159** (EARS/Ubiquitous): The Substrate system shall set USB device node permissions to `root:usb`, mode `0664`.
+  - Context: 3. Drivers — Kernel Interface Contract
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1160** (EARS/Ubiquitous): The Substrate system shall provide build system support for `lib/usb`.
+  - Context: 3. Drivers — libusb Headers & Build
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1161** (EARS/Ubiquitous): The Substrate system shall create `lib/usb/Makefile` producing `libusb.a`.
+  - Context: 3. Drivers — libusb Headers & Build
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1162** (EARS/Ubiquitous): The Substrate system shall provide `lib/usb/include/libusb.h` compatible with upstream libusb 1.0.27+ headers.
+  - Context: 3. Drivers — libusb Headers & Build
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1163** (EARS/Ubiquitous): The Substrate system shall add `usb` to `lib/Makefile` SUBDIRS.
+  - Context: 3. Drivers — libusb Headers & Build
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1164** (EARS/Ubiquitous): The Substrate system shall support `NATIVE_BUILD=1` for host-side libusb testing.
+  - Context: 3. Drivers — libusb Headers & Build
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1165** through **REQ-03-1313**: See checklist items above for complete per-function requirements covering opaque types, data structures, enumerations, library init/exit, device enumeration, open/close/configuration, descriptor parsing, synchronous I/O, asynchronous I/O, event handling, hotplug, Substrate backend, lsusb utility, testing, and documentation.
+  - Context: 3. Drivers — Userspace USB Library
   - Verification: design review + implementation evidence + test/doc update.
