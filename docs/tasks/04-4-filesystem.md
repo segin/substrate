@@ -16,7 +16,7 @@
 
     - [ ] **Core Structures & Life Cycle:** (REQ: REQ-04-0002)
         - [ ] **`struct vnode`:** (REQ: REQ-04-0003)
-            - [ ] `v_type`: VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD. (REQ: REQ-04-0004)
+            - [x] `v_type`: VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD. (REQ: REQ-04-0004)
             - [ ] `v_tag`: VT_UFS, VT_NFS, VT_EXT2, VT_PROCFS, etc. (REQ: REQ-04-0005)
             - [ ] `v_op` (operations vector), `v_data` (private fs data). (REQ: REQ-04-0006)
             - [ ] `v_mount` (pointer to mount point). (REQ: REQ-04-0007)
