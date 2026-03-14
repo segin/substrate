@@ -24,6 +24,8 @@ struct ansi_callbacks {
     void (*putc)(char c);
     void (*set_color)(uint8_t fg, uint8_t bg);
     void (*clear_screen)(void);
+    void (*erase_display)(int mode);
+    void (*erase_line)(int mode);
     void (*move_cursor)(int row, int col);
     void (*scroll)(void);
     

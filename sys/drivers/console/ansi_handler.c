@@ -42,9 +42,14 @@ static void handle_csi(struct ansi_ctx *ctx, char c, const struct ansi_callbacks
             break;
             
         case 'J': // Erase Display
-            if (ctx->param_count > 0 && ctx->params[0] == 2 && cb->clear_screen) {
-                cb->clear_screen();
-                if (cb->move_cursor) cb->move_cursor(0, 0);
+            {
+                int mode = (ctx->param_count > 0) ? ctx->params[0] : 0;
+
+                if (mode == 2 && cb->clear_screen) {
+                    cb->clear_screen();
+                } else if (cb->erase_display) {
+                    cb->erase_display(mode);
+                }
             }
             break;
             
@@ -88,11 +93,12 @@ static void handle_csi(struct ansi_ctx *ctx, char c, const struct ansi_callbacks
             }
             break;
             
-        case 'K': // Erase Line (Partial support in simple driver, usually ignorable or implementable)
-             // Not implemented in original hw_text.c fully correctly for all modes (implemented partially)
-             // If we want to support it, we need a callback.
-             // For now, ignore or implement in callbacks later.
-             break;
+        case 'K': // Erase Line
+            if (cb->erase_line) {
+                int mode = (ctx->param_count > 0) ? ctx->params[0] : 0;
+                cb->erase_line(mode);
+            }
+            break;
     }
 }
 

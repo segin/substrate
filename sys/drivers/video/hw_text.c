@@ -281,6 +281,120 @@ static void hw_text_fill_row_locked(vt_state_t *vt, size_t row, char c, uint8_t 
     }
 }
 
+static void hw_text_erase_line_segment_locked(vt_state_t *vt, int row, int start_col, int end_col) {
+    int col;
+
+    if (!vt) {
+        return;
+    }
+    if (row < 0 || row >= vt_get_visible_height()) {
+        return;
+    }
+    if (start_col < 0) {
+        start_col = 0;
+    }
+    if (end_col > vt_get_width()) {
+        end_col = vt_get_width();
+    }
+    if (start_col >= end_col) {
+        return;
+    }
+
+    for (col = start_col; col < end_col; col++) {
+        hw_text_write_cell_locked(vt, (size_t)col, (size_t)row, ' ', vt->color);
+    }
+}
+
+static void hw_text_erase_display_locked(vt_state_t *vt, int mode) {
+    int row;
+    int col;
+    int width;
+    int height;
+
+    if (!vt) {
+        return;
+    }
+
+    width = vt_get_width();
+    height = vt_get_visible_height();
+    row = vt->row;
+    col = vt->col;
+
+    if (row < 0) {
+        row = 0;
+    }
+    if (row >= height) {
+        row = height - 1;
+    }
+    if (col < 0) {
+        col = 0;
+    }
+    if (col >= width) {
+        col = width - 1;
+    }
+
+    switch (mode) {
+        case 1:
+            for (int y = 0; y < row; y++) {
+                hw_text_fill_row_locked(vt, (size_t)y, ' ', vt->color);
+            }
+            hw_text_erase_line_segment_locked(vt, row, 0, col + 1);
+            break;
+        case 2:
+            for (int y = 0; y < height; y++) {
+                hw_text_fill_row_locked(vt, (size_t)y, ' ', vt->color);
+            }
+            break;
+        case 0:
+        default:
+            hw_text_erase_line_segment_locked(vt, row, col, width);
+            for (int y = row + 1; y < height; y++) {
+                hw_text_fill_row_locked(vt, (size_t)y, ' ', vt->color);
+            }
+            break;
+    }
+}
+
+static void hw_text_erase_line_locked(vt_state_t *vt, int mode) {
+    int row;
+    int col;
+    int width;
+
+    if (!vt) {
+        return;
+    }
+
+    width = vt_get_width();
+    row = vt->row;
+    col = vt->col;
+
+    if (row < 0) {
+        row = 0;
+    }
+    if (row >= vt_get_visible_height()) {
+        row = vt_get_visible_height() - 1;
+    }
+    if (col < 0) {
+        col = 0;
+    }
+    if (col >= width) {
+        col = width - 1;
+    }
+
+    switch (mode) {
+        case 1:
+            hw_text_erase_line_segment_locked(vt, row, 0, col + 1);
+            break;
+        case 2:
+            hw_text_fill_row_locked(vt, (size_t)row, ' ', vt->color);
+            break;
+        case 0:
+        default:
+            hw_text_erase_line_segment_locked(vt, row, col, width);
+            break;
+    }
+}
+
 static void hw_text_update_cursor_locked(vt_state_t *vt) {
     uint16_t pos;
     int row;
@@ -557,21 +671,35 @@ static void cb_set_color(uint8_t fg, uint8_t bg) {
 
 static void cb_clear_screen(void) {
     vt_state_t *vt = current_vt_ctx;
-    size_t y;
-    size_t x;
 
     if (!vt) {
         return;
     }
 
-    for (y = 0; y < (size_t)vt_get_visible_height(); y++) {
-        for (x = 0; x < (size_t)vt_get_width(); x++) {
-            hw_text_putentryat_locked(vt, ' ', vt->color, x, y);
-        }
-    }
+    hw_text_erase_display_locked(vt, 2);
     vt->row = 0;
     vt->col = 0;
     hw_text_render_statusline_locked(vt);
+}
+
+static void cb_erase_display(int mode) {
+    vt_state_t *vt = current_vt_ctx;
+
+    if (!vt) {
+        return;
+    }
+
+    hw_text_erase_display_locked(vt, mode);
+}
+
+static void cb_erase_line(int mode) {
+    vt_state_t *vt = current_vt_ctx;
+
+    if (!vt) {
+        return;
+    }
+
+    hw_text_erase_line_locked(vt, mode);
 }
 
 static void cb_move_cursor(int row, int col) {
@@ -622,6 +750,8 @@ static const struct ansi_callbacks ansi_cb = {
     .putc = cb_putc,
     .set_color = cb_set_color,
     .clear_screen = cb_clear_screen,
+    .erase_display = cb_erase_display,
+    .erase_line = cb_erase_line,
     .move_cursor = cb_move_cursor,
     .get_cursor = cb_get_cursor,
     .get_dimensions = cb_get_dimensions,

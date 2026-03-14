@@ -310,11 +310,17 @@ extern void fb_putc(void);
 extern void fb_putpixel(void);
 extern void fb_write(void);
 extern void fd_close_all(void);
+extern void fdc_chs_to_lba(void);
+extern void fdc_dma_window_valid(void);
+extern void fdc_geometry_from_cmos(void);
+extern void fdc_lba_to_chs(void);
+extern void fdc_parse_cmos_drive_types(void);
 extern void file_alloc(void);
 extern void file_close_ptr(void);
 extern void file_free(void);
 extern void fill_ldt_entry(void);
 extern void finddir_fs(void);
+extern void floppy_init(void);
 extern void fork_child_return(void);
 extern void fpu_handler(void);
 extern void fpu_init(void);
@@ -1316,6 +1322,7 @@ extern void test_e820_parsing(void);
 extern void test_fb_modes(void);
 extern void test_fb_perf(void);
 extern void test_find_child_logic(void);
+extern void test_floppy_qemu(void);
 extern void test_futex(void);
 extern void test_futex_private(void);
 extern void test_futex_private_run_all(void);
@@ -2751,6 +2758,12 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&ide_decode_error, "ide_decode_error" },
     { (uint32_t)(uintptr_t)&ide_select_dma_transfer_mode, "ide_select_dma_transfer_mode" },
     { (uint32_t)(uintptr_t)&ide_pci_configure_channels, "ide_pci_configure_channels" },
+    { (uint32_t)(uintptr_t)&floppy_init, "floppy_init" },
+    { (uint32_t)(uintptr_t)&fdc_geometry_from_cmos, "fdc_geometry_from_cmos" },
+    { (uint32_t)(uintptr_t)&fdc_parse_cmos_drive_types, "fdc_parse_cmos_drive_types" },
+    { (uint32_t)(uintptr_t)&fdc_lba_to_chs, "fdc_lba_to_chs" },
+    { (uint32_t)(uintptr_t)&fdc_chs_to_lba, "fdc_chs_to_lba" },
+    { (uint32_t)(uintptr_t)&fdc_dma_window_valid, "fdc_dma_window_valid" },
     { (uint32_t)(uintptr_t)&ahci_init, "ahci_init" },
     { (uint32_t)(uintptr_t)&nvme_init, "nvme_init" },
     { (uint32_t)(uintptr_t)&ramdisk_create, "ramdisk_create" },
@@ -3351,6 +3364,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&run_reboot_tests, "run_reboot_tests" },
     { (uint32_t)(uintptr_t)&test_pipe_race, "test_pipe_race" },
     { (uint32_t)(uintptr_t)&run_chacha20_tests, "run_chacha20_tests" },
+    { (uint32_t)(uintptr_t)&test_floppy_qemu, "test_floppy_qemu" },
     { (uint32_t)(uintptr_t)&sigprop, "sigprop" },
     { (uint32_t)(uintptr_t)&font_8x16, "font_8x16" },
     { (uint32_t)(uintptr_t)&font_8x8, "font_8x8" },
@@ -3445,4 +3459,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1717;
+int ksym_count = 1724;
