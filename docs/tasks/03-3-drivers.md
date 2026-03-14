@@ -769,7 +769,7 @@
                 - [ ] Single‑byte make codes (0x01–0x58). (REQ: REQ-03-0478)
                 - [ ] Single‑byte break codes (make | 0x80). (REQ: REQ-03-0479)
                 - [ ] Extended prefix `0xE0` → two‑byte sequences: (REQ: REQ-03-0480)
-                    - [ ] Right Ctrl (E0 1D / E0 9D), Right Alt (E0 38 / E0 B8). (REQ: REQ-03-0481)
+                    - [x] Right Ctrl (E0 1D / E0 9D), Right Alt (E0 38 / E0 B8). (REQ: REQ-03-0481)
                     - [ ] Arrow keys (E0 48/50/4B/4D). (REQ: REQ-03-0482)
                     - [ ] Insert (E0 52), Delete (E0 53), Home (E0 47), End (E0 4F). (REQ: REQ-03-0483)
                     - [ ] Page Up (E0 49), Page Down (E0 51). (REQ: REQ-03-0484)

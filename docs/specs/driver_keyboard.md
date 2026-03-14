@@ -28,7 +28,7 @@ input-event paths.
 - The current implementation handles:
   - printable single-byte Set 1 make codes
   - single-byte modifier break codes
-  - extended right Ctrl / right Alt
+  - extended right Ctrl / right Alt make and break sequences
   - `Alt+F1..F12` VT switching
   - `Ctrl+F9` kernel process dump hook
 

@@ -203,6 +203,17 @@ static void test_extended_modifier_tracking(void) {
     send_scancode(0x9D); /* Right Ctrl up */
     assert(kbd_rctrl == 0);
     assert(kbd_ctrl == 0);
+
+    send_scancode(0xE0);
+    send_scancode(0x38); /* Right Alt down */
+    assert(kbd_ralt == 1);
+    assert(kbd_alt == 1);
+    assert(kbd_extended == 0);
+
+    send_scancode(0xE0);
+    send_scancode(0xB8); /* Right Alt up */
+    assert(kbd_ralt == 0);
+    assert(kbd_alt == 0);
 }
 
 static void test_ctrl_f9_triggers_debug_dump(void) {
