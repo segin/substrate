@@ -353,3 +353,6 @@ host_test_pci_ecam: host_test_pci_ecam.c
 
 host_test_tty_console: host_test_tty_console.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_tty_console.c -o $@
+HOST_TESTS += host_test_vdrop_panic
+host_test_vdrop_panic: host_test_vdrop_panic.c
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_vdrop_panic.c -o $@
