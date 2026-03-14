@@ -620,6 +620,37 @@ static void test_tty_isig_controls_signal_generation(void) {
     tty_free(tty);
 }
 
+static void test_tty_termios_get_set_roundtrip(void) {
+    struct tty_driver driver = {
+        .write = mock_tty_write,
+        .write_room = mock_tty_write_room,
+    };
+    struct tty *tty;
+    struct termios termios;
+    struct termios out;
+
+    reset_env();
+
+    tty = tty_alloc(&driver, 16);
+    assert(tty != NULL);
+
+    memset(&termios, 0, sizeof(termios));
+    termios.c_iflag = IGNCR | IXON;
+    termios.c_oflag = OPOST | ONLCR;
+    termios.c_cflag = CREAD | CS8 | HUPCL;
+    termios.c_lflag = ISIG | ECHO;
+    termios.c_cc[VINTR] = 7;
+    termios.c_cc[VEOF] = 5;
+
+    assert(tty_ioctl_kern(tty, TCSETS, (uintptr_t)&termios) == 0);
+
+    memset(&out, 0, sizeof(out));
+    assert(tty_ioctl_kern(tty, TCGETS, (uintptr_t)&out) == 0);
+    assert(memcmp(&out, &termios, sizeof(termios)) == 0);
+
+    tty_free(tty);
+}
+
 static void test_tiocspgrp_checks_sigttou_for_background_group(void) {
     reset_env();
 
@@ -670,6 +701,7 @@ int main(void) {
     test_tty_input_icrnl_translates_cr_to_nl();
     test_tty_input_xon_xoff_controls_output_flow();
     test_tty_isig_controls_signal_generation();
+    test_tty_termios_get_set_roundtrip();
     puts("host_test_tty_jobctl: PASS");
     return 0;
 }
