@@ -39,7 +39,7 @@
 ## TTY Driver Interface
 Console and future TTY devices are implemented via the `tty_driver` callbacks:
 - `install` / `remove`: Allocate or release per-TTY private data. `tty_alloc()` invokes `install` before publishing the slot, and `tty_free()` invokes `remove` during teardown.
-- `open` / `close`: Hardware initialization and shutdown.
+- `open` / `close`: Hardware initialization and shutdown. The core calls `open` exactly once on the first active reference and `close` exactly once on the final release.
 - `write` / `put_char`: Output paths (bulk vs single character).
 - `flush_chars`: Trigger hardware transmission.
 - `write_room` / `chars_in_buffer`: Report output buffer availability and pending bytes.
