@@ -28,6 +28,9 @@ static unsigned char tty_driver_out[256];
 static int tty_driver_out_len;
 static fs_node_t *last_devfs_node;
 
+static int mock_tty_write(struct tty *tty, const unsigned char *buf, int count);
+static int mock_tty_write_room(struct tty *tty);
+
 uint32_t intr_disable(void) { return 0; }
 void intr_restore(uint32_t flags) { (void)flags; }
 void spinlock_init(spinlock_t *lock, const char *name) { (void)lock; (void)name; }
@@ -149,6 +152,33 @@ static void test_tty_raw_buffer_wraps_as_circular_queue(void) {
     assert(c == 'B');
     assert(tty.raw_buf.tail == 1);
     assert(tty.raw_buf.count == 0);
+}
+
+static void test_tty_write_buffer_queues_and_drains_in_order(void) {
+    struct tty_driver driver = {
+        .write = mock_tty_write,
+        .write_room = mock_tty_write_room,
+    };
+    struct tty tty;
+
+    reset_env();
+    memset(&tty, 0, sizeof(tty));
+    tty.magic = TTY_MAGIC;
+    tty.driver = &driver;
+    tty.winsize.ws_col = 80;
+
+    tty_output_locked('A', &tty);
+    tty_output_locked('B', &tty);
+    tty_output_locked('C', &tty);
+
+    assert(tty.write_buf.count == 3);
+    assert(tty_driver_out_len == 0);
+
+    tty_start_locked(&tty);
+
+    assert(tty.write_buf.count == 0);
+    assert(tty_driver_out_len == 3);
+    assert(memcmp(tty_driver_out, "ABC", 3) == 0);
 }
 
 static process_t *init_proc(int slot, int pid) {
@@ -782,6 +812,7 @@ int main(void) {
     test_tty_init_clears_global_slots();
     test_tty_register_device_publishes_devfs_node();
     test_tty_raw_buffer_wraps_as_circular_queue();
+    test_tty_write_buffer_queues_and_drains_in_order();
     test_tty_open_close_refcounts_driver_transitions();
     test_tty_open_failure_restores_state();
     test_tiocsctty_assigns_owner();

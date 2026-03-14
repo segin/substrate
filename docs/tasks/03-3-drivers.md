@@ -719,7 +719,7 @@
         - [ ] **Structures (`tty_t`):** (REQ: REQ-03-0619)
             - [ ] **Buffers & Queues:** (REQ: REQ-03-0620)
                 - [x] **Read Buffer (Raw Input):** Circular buffer for incoming IRQ data. (REQ: REQ-03-0621)
-                - [ ] **Write Buffer (Output):** Queue for driver consumption. (REQ: REQ-03-0622)
+                - [x] **Write Buffer (Output):** Queue for driver consumption. (REQ: REQ-03-0622)
                 - [ ] **Canon Buffer (Cooked):** Line-editing buffer for `ICANON` mode. (REQ: REQ-03-0623)
                 - [ ] **Flow Control:** Low-water/High-water marks for `IXON`/`IXOFF`. (REQ: REQ-03-0624)
             - [ ] **State Control (`termios`):** (REQ: REQ-03-0625)
