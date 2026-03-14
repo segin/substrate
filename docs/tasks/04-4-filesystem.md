@@ -28,7 +28,7 @@
             - [x] `v_hash` (hash chain for vnode cache lookup). (REQ: REQ-04-0013)
             - [ ] **Life Cycle:** (REQ: REQ-04-0014)
                 - [x] `getnewvnode(tag, mp, ops, vpp)`: allocate from zone, recycle LRU if pool full. (REQ: REQ-04-0015)
-                - [ ] `vref(vp)`: increment use count. (REQ: REQ-04-0016)
+                - [x] `vref(vp)`: increment use count. (REQ: REQ-04-0016)
                 - [ ] `vrele(vp)`: decrement use count, trigger inactive/reclaim if zero. (REQ: REQ-04-0017)
                 - [ ] `vput(vp)`: unlock and vrele. (REQ: REQ-04-0018)
                 - [ ] `vget(vp, flags)`: lock and vref (with LK_NOWAIT support). (REQ: REQ-04-0019)
