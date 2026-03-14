@@ -4,6 +4,7 @@
 `/dev/tty` is a pseudo-device that represents the controlling terminal of the current process. In Substrate, it currently maps to the combined input of the PS/2 keyboard and the output of the VGA/Framebuffer console.
 
 ## Implementation
+- **Initialization:** `tty_init()` clears the global TTY slot table before device allocation begins.
 - **Read:** Uses the kernel TTY core to provide canonical and raw input processing with blocking reads.
 - **Write:** Routes output through the TTY line discipline and then into the console backend stack.
 - **Line Discipline:** Supports `termios` input/output flags (canonical mode, echo, signal generation, and flow control).

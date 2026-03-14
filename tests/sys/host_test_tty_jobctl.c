@@ -81,6 +81,18 @@ static void reset_env(void) {
     memset(tty_driver_out, 0, sizeof(tty_driver_out));
 }
 
+static void test_tty_init_clears_global_slots(void) {
+    reset_env();
+
+    ttys[0] = (struct tty *)0x1;
+    ttys[1] = (struct tty *)0x2;
+
+    tty_init();
+
+    assert(ttys[0] == NULL);
+    assert(ttys[1] == NULL);
+}
+
 static process_t *init_proc(int slot, int pid) {
     process_t *p = &processes[slot];
     memset(p, 0, sizeof(*p));
@@ -709,6 +721,7 @@ static void test_tiocspgrp_checks_sigttou_for_background_group(void) {
 }
 
 int main(void) {
+    test_tty_init_clears_global_slots();
     test_tty_open_close_refcounts_driver_transitions();
     test_tty_open_failure_restores_state();
     test_tiocsctty_assigns_owner();
