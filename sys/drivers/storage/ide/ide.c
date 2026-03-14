@@ -1664,13 +1664,25 @@ static int ide_blkdev_write(blkdev_t *dev, uint64_t sector, uint32_t count,
         return -1;
     }
 
-    ret = ide_transfer_write_once(ctx, sector, count, buffer);
-    if (ret >= 0) {
-        ide_dev->reset_recovery_seen = 0;
-        return ret;
+    for (int attempt = 0; attempt < 3; attempt++) {
+        ret = ide_transfer_write_once(ctx, sector, count, buffer);
+        if (ret >= 0) {
+            ide_dev->offline = 0;
+            ide_dev->reset_recovery_seen = 0;
+            return ret;
+        }
+        if (attempt < 2) {
+            char msg[96];
+
+            snprintf(msg, sizeof(msg),
+                     "ide: ide%u write retry %d for LBA %llu count %u\n",
+                     ctx->index, attempt + 1,
+                     (unsigned long long)sector, (unsigned int)count);
+            kprint(msg);
+        }
     }
     ide_mark_offline(ctx, "write");
-    return ret;
+    return -1;
 }
 
 /*
