@@ -78,6 +78,7 @@ enum vtagtype {
 #define VXWANT      0x0800  /* Want exclusive lock */
 #define VMODIFIED   0x1000  /* Vnode has been modified */
 #define VACCESSTIME 0x2000  /* Access time needs update */
+#define VEXECMAP    0x4000  /* Vnode mapped for exec */
 
 /*
  * Lock operations for vn_lock
