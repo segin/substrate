@@ -729,7 +729,7 @@
                 - [x] `c_lflag`: Local modes (ICANON, ECHO, ECHOE, ECHOK, ISIG, TOSTOP). (REQ: REQ-03-0629)
                 - [x] `c_cc`: Control characters (VINTR, VQUIT, VERASE, VKILL, VEOF, VMIN, VTIME, VSTART, VSTOP, VWERASE). (REQ: REQ-03-0630)
                 - [x] `winsize`: Window size tracking (rows/cols) + `SIGWINCH`. (REQ: REQ-03-0631)
-            - [ ] **Line Discipline (`N_TTY`):** (REQ: REQ-03-0632)
+            - [x] **Line Discipline (`N_TTY`):** (REQ: REQ-03-0632)
                 - [x] **Input Processing (`n_tty_receive_buf`):** (REQ: REQ-03-0633)
                     - [x] Parity checks and stripping. (REQ: REQ-03-0634)
                     - [x] Newline translation (CR->NL). (REQ: REQ-03-0635)
