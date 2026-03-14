@@ -56,7 +56,7 @@ sys/         kernel
 bin/         base Unix userland
 sbin/        system utilities
 usr.bin/     compiler/toolchain and extended user tools
-lib/         target runtime libraries (libc/libsys/libm/libpthread...)
+lib/         target runtime libraries (libc/libsys/libm/libpthread/libusb...)
 usr.lib/     shared libraries for tooling/runtime support (elfobj, demangle, ...)
 include/     userspace public headers
 tests/       unit/integration/regression/property/fuzz harnesses
@@ -170,6 +170,7 @@ Device namespace policy in `devfs`:
 - Raw disk providers remain visible as `/dev/storage/<disk>` (for example `/dev/storage/ide0`), with GEOM-derived partition nodes exposed alongside them (for example `/dev/storage/ide0p1`).
 - BSD disklabels additionally expose lettered slice nodes, with `c` reserved as the whole-container alias only when a BSD disklabel is present.
 - Communication character devices self-register under `/dev/comm/*` (for example `/dev/comm/serial0`, `/dev/comm/parallel0`).
+- USB character devices are reserved under `/dev/usb/busN/devM`, with the usbdevfs ioctl ABI carried by `<sys/usbdevfs.h>` and the published permission contract `root:usb` mode `0664`.
 - Device-model managed nodes may be published through `device_publish()` and withdrawn through `device_unpublish()`, allowing add/remove lifecycle to drive devfs automatically for drivers that opt into the framework path.
 - Stable device aliases are exposed under `/dev/by-id/*` when a device model entry carries a serial string or GUID.
 - Nested device paths are accepted only under predeclared subsystem directories (namespace hardening against arbitrary roots like `/dev/notreal/*`).
