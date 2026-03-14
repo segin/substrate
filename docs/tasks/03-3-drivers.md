@@ -734,7 +734,7 @@
                     - [ ] Parity checks and stripping. (REQ: REQ-03-0634)
                     - [x] Newline translation (CR->NL). (REQ: REQ-03-0635)
                     - [x] Software flow control (XON/XOFF detection). (REQ: REQ-03-0636)
-                    - [ ] Signal generation check (`ISIG`). (REQ: REQ-03-0637)
+                    - [x] Signal generation check (`ISIG`). (REQ: REQ-03-0637)
                 - [x] **Canonical Editing (`n_tty_read`):** (REQ: REQ-03-0638)
                     - [x] Backspace/Delete handling (`VERASE`). (REQ: REQ-03-0639)
                     - [x] Line kill (`VKILL`). (REQ: REQ-03-0640)

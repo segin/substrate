@@ -18,6 +18,7 @@
 - **Output Tab Expansion:** With `OXTABS` enabled, tabs are expanded into spaces based on the current output column rather than being passed through as raw tab bytes.
 - **Input Newline Translation:** With `ICRNL` enabled, carriage return received from the hardware path is converted to newline before canonical processing.
 - **Software Flow Control:** With `IXON` enabled, received `VSTOP` pauses output emission and received `VSTART` resumes it.
+- **Signal Generation Gate:** With `ISIG` enabled, `VINTR`, `VQUIT`, and `VSUSP` generate foreground-group signals; when `ISIG` is cleared, those bytes are delivered as ordinary input instead.
 - **Output State:** Tracks the current output column so tab expansion and CR/LF post-processing derive from stream state, not `winsize`.
 - **Signal Semantics:** Interrupted foreground/background TTY operations surface `-EINTR` to callers instead of leaking internal sentinel values.
 

@@ -581,6 +581,45 @@ static void test_tty_input_xon_xoff_controls_output_flow(void) {
     tty_free(tty);
 }
 
+static void test_tty_isig_controls_signal_generation(void) {
+    struct tty_driver driver = {
+        .write = mock_tty_write,
+        .write_room = mock_tty_write_room,
+    };
+    struct tty *tty;
+    char buf[8];
+    int n;
+
+    reset_env();
+
+    tty = tty_alloc(&driver, 14);
+    assert(tty != NULL);
+    tty->pgrp = 321;
+
+    tty_flip_buffer_push(tty, tty->termios.c_cc[VINTR]);
+    assert(signal_count == 1);
+    assert(signal_pgrp[0] == 321);
+    assert(signal_sig[0] == SIGINT);
+
+    reset_env();
+
+    tty = tty_alloc(&driver, 15);
+    assert(tty != NULL);
+    tty->termios.c_lflag &= ~ISIG;
+
+    tty_flip_buffer_push(tty, tty->termios.c_cc[VINTR]);
+    tty_flip_buffer_push(tty, '\n');
+
+    assert(signal_count == 0);
+    memset(buf, 0, sizeof(buf));
+    n = tty_read(tty, buf, sizeof(buf));
+    assert(n == 2);
+    assert((unsigned char)buf[0] == tty->termios.c_cc[VINTR]);
+    assert(buf[1] == '\n');
+
+    tty_free(tty);
+}
+
 static void test_tiocspgrp_checks_sigttou_for_background_group(void) {
     reset_env();
 
@@ -630,6 +669,7 @@ int main(void) {
     test_tty_output_tab_expands_to_spaces();
     test_tty_input_icrnl_translates_cr_to_nl();
     test_tty_input_xon_xoff_controls_output_flow();
+    test_tty_isig_controls_signal_generation();
     puts("host_test_tty_jobctl: PASS");
     return 0;
 }
