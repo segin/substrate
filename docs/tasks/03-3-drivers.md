@@ -766,7 +766,7 @@
             - [x] `tty_alloc()`: Create a new TTY device. (REQ: REQ-03-0666)
             - [ ] `tty_register_device()`: Register with DevFS `/dev/ttyX`. (REQ: REQ-03-0667)
             - [x] `tty_open`, `tty_close`: Refcounting and session logic. (REQ: REQ-03-0668)
-            - [ ] `tty_read`, `tty_write`: Dispatch to ldisc. (REQ: REQ-03-0669)
+            - [x] `tty_read`, `tty_write`: Dispatch to ldisc. (REQ: REQ-03-0669)
             - [x] `tty_ioctl`: (REQ: REQ-03-0670)
                 - [x] `TIOCSCTTY`: Become controlling TTY. (REQ: REQ-03-0671)
                 - [x] `TIOCSPGRP` / `TIOCGPGRP`: Manage foreground group. (REQ: REQ-03-0672)
