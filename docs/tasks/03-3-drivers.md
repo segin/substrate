@@ -725,7 +725,7 @@
             - [ ] **State Control (`termios`):** (REQ: REQ-03-0625)
                 - [x] `c_iflag`: Input modes (IGNBRK, ISTRIP, INLCR, IGNCR, ICRNL, IXON). (REQ: REQ-03-0626)
                 - [x] `c_oflag`: Output modes (OPOST, ONLCR, OXTABS). (REQ: REQ-03-0627)
-                - [ ] `c_cflag`: Control modes (CSIZE, PARENB, CSTOPB, CRTSCTS). (REQ: REQ-03-0628)
+                - [x] `c_cflag`: Control modes (CSIZE, PARENB, CSTOPB, CRTSCTS). (REQ: REQ-03-0628)
                 - [ ] `c_lflag`: Local modes (ICANON, ECHO, ECHOE, ECHOK, ISIG, TOSTOP). (REQ: REQ-03-0629)
                 - [ ] `c_cc`: Control characters (VINTR, VQUIT, VERASE, VKILL, VEOF, VMIN, VTIME, VSTART, VSTOP, VWERASE). (REQ: REQ-03-0630)
                 - [ ] `winsize`: Window size tracking (rows/cols) + `SIGWINCH`. (REQ: REQ-03-0631)
