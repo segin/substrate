@@ -229,16 +229,18 @@ static void test_alt_function_switches_vt(void) {
     reset_state();
 
     send_scancode(0x38); /* Alt down */
-    send_scancode(0x3B); /* F1 */
-    assert(mock_vt_activate_calls == 1);
-    assert(mock_vt_activate_arg == 0);
+    for (int scancode = 0x3B; scancode <= 0x44; scancode++) {
+        send_scancode((uint8_t)scancode); /* F1..F10 */
+        assert(mock_vt_activate_calls == (scancode - 0x3B) + 1);
+        assert(mock_vt_activate_arg == scancode - 0x3B);
+    }
 
     send_scancode(0x57); /* F11 */
-    assert(mock_vt_activate_calls == 2);
+    assert(mock_vt_activate_calls == 11);
     assert(mock_vt_activate_arg == 10);
 
     send_scancode(0x58); /* F12 */
-    assert(mock_vt_activate_calls == 3);
+    assert(mock_vt_activate_calls == 12);
     assert(mock_vt_activate_arg == 11);
 }
 

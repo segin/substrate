@@ -907,7 +907,7 @@
         - [ ] **Integration Tests:** (REQ: REQ-03-0230, REQ-03-0608, REQ-03-1133)
             - [ ] Boot kernel in QEMU, inject keyboard scancodes via monitor (`sendkey`), verify TTY output. (REQ: REQ-03-0609)
             - [ ] Boot kernel, inject mouse events, verify `mouse_get_state()` returns expected position. (REQ: REQ-03-0610)
-            - [ ] Alt+F1..F12 switches VT correctly. (REQ: REQ-03-0611)
+            - [x] Alt+F1..F12 switches VT correctly. (REQ: REQ-03-0611)
             - [ ] Ctrl+C / Ctrl+D / Ctrl+Z generate correct control characters. (REQ: REQ-03-0612)
 
     - [ ] **Documentation:** (REQ: REQ-03-0236, REQ-03-0324, REQ-03-0403, REQ-03-0613, REQ-03-1138)

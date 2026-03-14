@@ -29,7 +29,7 @@ input-event paths.
   - printable single-byte Set 1 make codes
   - single-byte modifier break codes
   - extended right Ctrl / right Alt make and break sequences
-  - `Alt+F1..F12` VT switching
+  - `Alt+F1..F12` VT switching across the full 12-console range
   - `Ctrl+F9` kernel process dump hook
 
 ## Output Paths
