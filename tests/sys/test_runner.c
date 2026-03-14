@@ -260,6 +260,10 @@ void run_kernel_tests(void) {
          extern void test_printf_flags(void);
          test_printf_flags();
     }
+    if (all || strcmp(test_arg, "kvasprintf") == 0) {
+         extern void test_kvasprintf(void);
+         test_kvasprintf();
+    }
     
     if (all || strcmp(test_arg, "printf_specifiers") == 0) {
          extern void run_printf_specifier_tests(void);
