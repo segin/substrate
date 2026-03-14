@@ -358,6 +358,32 @@ static void test_tty_c_cflag_defaults_and_roundtrip(void) {
     tty_free(tty);
 }
 
+static void test_tty_c_lflag_defaults_and_roundtrip(void) {
+    struct tty *tty;
+    struct tty_driver driver = {0};
+    struct termios termios;
+    struct termios out;
+
+    reset_env();
+
+    tty = tty_alloc(&driver, 21);
+    assert(tty != NULL);
+    assert((tty->termios.c_lflag & (ISIG | ICANON | ECHO | ECHOE | ECHOK)) ==
+           (ISIG | ICANON | ECHO | ECHOE | ECHOK));
+
+    memset(&termios, 0, sizeof(termios));
+    termios.c_lflag = ICANON | ECHO | ECHOE | ECHOK | ISIG | TOSTOP;
+
+    assert(tty_ioctl_kern(tty, TCSETS, (uintptr_t)&termios) == 0);
+
+    memset(&out, 0, sizeof(out));
+    assert(tty_ioctl_kern(tty, TCGETS, (uintptr_t)&out) == 0);
+    assert((out.c_lflag & (ICANON | ECHO | ECHOE | ECHOK | ISIG | TOSTOP)) ==
+           (ICANON | ECHO | ECHOE | ECHOK | ISIG | TOSTOP));
+
+    tty_free(tty);
+}
+
 static process_t *init_proc(int slot, int pid) {
     process_t *p = &processes[slot];
     memset(p, 0, sizeof(*p));
@@ -1005,6 +1031,7 @@ int main(void) {
     test_tty_c_iflag_defaults_and_roundtrip();
     test_tty_c_oflag_defaults_and_roundtrip();
     test_tty_c_cflag_defaults_and_roundtrip();
+    test_tty_c_lflag_defaults_and_roundtrip();
     test_tty_open_close_refcounts_driver_transitions();
     test_tty_open_failure_restores_state();
     test_tiocsctty_assigns_owner();

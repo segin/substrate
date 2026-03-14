@@ -12,6 +12,7 @@
 - **Input Mode State:** `c_iflag` defaults to `ICRNL|IXON`, and `TCSETS`/`TCGETS` preserve the configured input-mode bitmask, including `IGNBRK`, `ISTRIP`, `INLCR`, `IGNCR`, `ICRNL`, and `IXON`.
 - **Output Mode State:** `c_oflag` defaults to `OPOST|ONLCR`, and callers can round-trip `OPOST`, `ONLCR`, and `OXTABS` through the ioctl surface without losing flag state.
 - **Control Mode State:** `c_cflag` defaults to `CREAD|CS8|HUPCL`, and the TTY core preserves configured `CSIZE`, `PARENB`, `CSTOPB`, and `CRTSCTS` bits across `TCSETS`/`TCGETS`.
+- **Local Mode State:** `c_lflag` defaults to canonical signal-generating echo mode, and callers can round-trip `ICANON`, `ECHO`, `ECHOE`, `ECHOK`, `ISIG`, and `TOSTOP` through the ioctl surface.
 - **Read:** Uses the kernel TTY core to provide canonical and raw input processing with blocking reads.
 - **Write:** Routes output through the TTY line discipline and then into the console backend stack.
 - **Line Discipline:** Supports `termios` input/output flags (canonical mode, echo, signal generation, and flow control).
