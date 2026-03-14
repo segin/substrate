@@ -440,6 +440,54 @@ static void test_tty_canonical_word_erase_discards_last_word(void) {
     tty_free(tty);
 }
 
+static void test_tty_canonical_eof_returns_pending_data_without_marker(void) {
+    struct tty_driver driver = {
+        .write = mock_tty_write,
+        .write_room = mock_tty_write_room,
+    };
+    struct tty *tty;
+    char buf[8];
+    int n;
+
+    reset_env();
+
+    tty = tty_alloc(&driver, 8);
+    assert(tty != NULL);
+
+    tty_flip_buffer_push(tty, 'a');
+    tty_flip_buffer_push(tty, tty->termios.c_cc[VEOF]);
+
+    memset(buf, 0, sizeof(buf));
+    n = tty_read(tty, buf, sizeof(buf));
+    assert(n == 1);
+    assert(buf[0] == 'a');
+
+    tty_free(tty);
+}
+
+static void test_tty_canonical_empty_eof_returns_zero(void) {
+    struct tty_driver driver = {
+        .write = mock_tty_write,
+        .write_room = mock_tty_write_room,
+    };
+    struct tty *tty;
+    char buf[8];
+    int n;
+
+    reset_env();
+
+    tty = tty_alloc(&driver, 9);
+    assert(tty != NULL);
+
+    tty_flip_buffer_push(tty, tty->termios.c_cc[VEOF]);
+
+    memset(buf, 0, sizeof(buf));
+    n = tty_read(tty, buf, sizeof(buf));
+    assert(n == 0);
+
+    tty_free(tty);
+}
+
 static void test_tiocspgrp_checks_sigttou_for_background_group(void) {
     reset_env();
 
@@ -483,6 +531,8 @@ int main(void) {
     test_tty_canonical_erase_removes_previous_char();
     test_tty_canonical_kill_discards_pending_line();
     test_tty_canonical_word_erase_discards_last_word();
+    test_tty_canonical_eof_returns_pending_data_without_marker();
+    test_tty_canonical_empty_eof_returns_zero();
     puts("host_test_tty_jobctl: PASS");
     return 0;
 }

@@ -376,10 +376,11 @@ static void tty_start_locked(struct tty *tp) {
 }
 
 // Unix v6-style canonical processing
-static void canon(struct tty *tp, uint32_t *flags_ptr) {
+static int canon(struct tty *tp, uint32_t *flags_ptr) {
     char buf[TTY_BUF_SIZE];
     char *bp = buf;
     char c;
+    int eof_seen = 0;
     
     // Wait for delimiter
     while (tp->delct == 0) {
@@ -409,6 +410,10 @@ static void canon(struct tty *tp, uint32_t *flags_ptr) {
             *bp++ = c;
         } else {
             // Cooked mode
+            if (c == tp->termios.c_cc[VEOF]) {
+                eof_seen = 1;
+                continue; // EOF doesn't go into line, just terminates it
+            }
             if (bp > buf && *(bp-1) != '\\') {
                 if (c == tp->termios.c_cc[VERASE]) {
                     if (bp > buf) bp--;
@@ -422,9 +427,6 @@ static void canon(struct tty *tp, uint32_t *flags_ptr) {
                 if (c == tp->termios.c_cc[VKILL]) {
                     bp = buf;
                     continue;
-                }
-                if (c == tp->termios.c_cc[VEOF]) {
-                    continue; // EOF doesn't go into line, just terminates it
                 }
             } else {
                  if (c == '\\' && bp > buf && *(bp-1) == '\\') {
@@ -456,6 +458,8 @@ static void canon(struct tty *tp, uint32_t *flags_ptr) {
             }
         }
     }
+
+    return eof_seen && bp == buf;
 }
 
 static void tty_echo(struct tty *tp, unsigned char c) {
@@ -672,7 +676,11 @@ int tty_read(struct tty *tty, char *buf, int len) {
     
     while (count < len) {
         if (tty->read_buf.head == tty->read_buf.tail) {
-            canon(tty, &_flags); // Blocks until line available. Releases/reacquires lock.
+            int eof = canon(tty, &_flags); // Blocks until line available. Releases/reacquires lock.
+            if (eof && tty->read_buf.head == tty->read_buf.tail) {
+                TTY_UNLOCK(tty);
+                return count;
+            }
         }
         
         while (count < len) {

@@ -739,7 +739,7 @@
                     - [x] Backspace/Delete handling (`VERASE`). (REQ: REQ-03-0639)
                     - [x] Line kill (`VKILL`). (REQ: REQ-03-0640)
                     - [x] Word erase (`VWERASE`). (REQ: REQ-03-0641)
-                    - [ ] EOF handling (`VEOF` / Ctrl+D). (REQ: REQ-03-0642)
+                    - [x] EOF handling (`VEOF` / Ctrl+D). (REQ: REQ-03-0642)
                 - [ ] **Output Post-processing (`n_tty_write`):** (REQ: REQ-03-0643)
                     - [ ] Newline expansion (NL -> CR/NL). (REQ: REQ-03-0644)
                     - [ ] Tab expansion (optional). (REQ: REQ-03-0645)

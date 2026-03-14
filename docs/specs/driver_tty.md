@@ -13,6 +13,7 @@
 - **Canonical Erase Semantics:** In canonical mode, `VERASE` removes the most recent character from the pending cooked line before that line is copied into the read buffer.
 - **Canonical Kill Semantics:** In canonical mode, `VKILL` clears the pending cooked line, so subsequent reads see only input typed after the kill operation.
 - **Canonical Word Erase:** In canonical mode, `VWERASE` trims trailing spaces at the cursor and then deletes the preceding non-space run, leaving any earlier word separator intact.
+- **Canonical EOF Semantics:** In canonical mode, `VEOF` terminates the current cooked line without inserting a byte into the stream. If data is pending, a read returns that data immediately; if the line is empty, the read returns `0`.
 - **Output State:** Tracks the current output column so tab expansion and CR/LF post-processing derive from stream state, not `winsize`.
 - **Signal Semantics:** Interrupted foreground/background TTY operations surface `-EINTR` to callers instead of leaking internal sentinel values.
 
