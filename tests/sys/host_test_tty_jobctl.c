@@ -508,6 +508,29 @@ static void test_tty_output_newline_expands_to_crlf(void) {
     tty_free(tty);
 }
 
+static void test_tty_output_tab_expands_to_spaces(void) {
+    struct tty_driver driver = {
+        .write = mock_tty_write,
+        .write_room = mock_tty_write_room,
+    };
+    struct tty *tty;
+
+    reset_env();
+
+    tty = tty_alloc(&driver, 11);
+    assert(tty != NULL);
+    tty->termios.c_oflag |= OXTABS;
+
+    assert(tty_write(tty, "a\t", 2) == 2);
+    assert(tty_driver_out_len == 8);
+    assert(tty_driver_out[0] == 'a');
+    for (int i = 1; i < 8; i++) {
+        assert(tty_driver_out[i] == ' ');
+    }
+
+    tty_free(tty);
+}
+
 static void test_tiocspgrp_checks_sigttou_for_background_group(void) {
     reset_env();
 
@@ -554,6 +577,7 @@ int main(void) {
     test_tty_canonical_eof_returns_pending_data_without_marker();
     test_tty_canonical_empty_eof_returns_zero();
     test_tty_output_newline_expands_to_crlf();
+    test_tty_output_tab_expands_to_spaces();
     puts("host_test_tty_jobctl: PASS");
     return 0;
 }

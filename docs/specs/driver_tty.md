@@ -15,6 +15,7 @@
 - **Canonical Word Erase:** In canonical mode, `VWERASE` trims trailing spaces at the cursor and then deletes the preceding non-space run, leaving any earlier word separator intact.
 - **Canonical EOF Semantics:** In canonical mode, `VEOF` terminates the current cooked line without inserting a byte into the stream. If data is pending, a read returns that data immediately; if the line is empty, the read returns `0`.
 - **Output Newline Expansion:** With `OPOST|ONLCR` enabled, output newlines are expanded to carriage-return/newline on the driver side.
+- **Output Tab Expansion:** With `OXTABS` enabled, tabs are expanded into spaces based on the current output column rather than being passed through as raw tab bytes.
 - **Output State:** Tracks the current output column so tab expansion and CR/LF post-processing derive from stream state, not `winsize`.
 - **Signal Semantics:** Interrupted foreground/background TTY operations surface `-EINTR` to callers instead of leaking internal sentinel values.
 
