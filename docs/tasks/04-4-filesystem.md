@@ -15,7 +15,7 @@
     > lookup, buffer cache, and per-filesystem operations vectors.
 
     - [ ] **Core Structures & Life Cycle:** (REQ: REQ-04-0002)
-        - [ ] **`struct vnode`:** (REQ: REQ-04-0003)
+        - [x] **`struct vnode`:** (REQ: REQ-04-0003)
             - [x] `v_type`: VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD. (REQ: REQ-04-0004)
             - [x] `v_tag`: VT_UFS, VT_NFS, VT_EXT2, VT_PROCFS, etc. (REQ: REQ-04-0005)
             - [x] `v_op` (operations vector), `v_data` (private fs data). (REQ: REQ-04-0006)
