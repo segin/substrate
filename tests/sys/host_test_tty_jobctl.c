@@ -384,6 +384,55 @@ static void test_tty_c_lflag_defaults_and_roundtrip(void) {
     tty_free(tty);
 }
 
+static void test_tty_c_cc_defaults_and_roundtrip(void) {
+    struct tty *tty;
+    struct tty_driver driver = {0};
+    struct termios termios;
+    struct termios out;
+
+    reset_env();
+
+    tty = tty_alloc(&driver, 22);
+    assert(tty != NULL);
+    assert(tty->termios.c_cc[VINTR] == 3);
+    assert(tty->termios.c_cc[VQUIT] == 28);
+    assert(tty->termios.c_cc[VERASE] == 127);
+    assert(tty->termios.c_cc[VKILL] == 21);
+    assert(tty->termios.c_cc[VEOF] == 4);
+    assert(tty->termios.c_cc[VSTART] == 17);
+    assert(tty->termios.c_cc[VSTOP] == 19);
+    assert(tty->termios.c_cc[VWERASE] == 23);
+
+    memset(&termios, 0, sizeof(termios));
+    termios.c_cc[VINTR] = 1;
+    termios.c_cc[VQUIT] = 2;
+    termios.c_cc[VERASE] = 3;
+    termios.c_cc[VKILL] = 4;
+    termios.c_cc[VEOF] = 5;
+    termios.c_cc[VMIN] = 6;
+    termios.c_cc[VTIME] = 7;
+    termios.c_cc[VSTART] = 8;
+    termios.c_cc[VSTOP] = 9;
+    termios.c_cc[VWERASE] = 10;
+
+    assert(tty_ioctl_kern(tty, TCSETS, (uintptr_t)&termios) == 0);
+
+    memset(&out, 0, sizeof(out));
+    assert(tty_ioctl_kern(tty, TCGETS, (uintptr_t)&out) == 0);
+    assert(out.c_cc[VINTR] == 1);
+    assert(out.c_cc[VQUIT] == 2);
+    assert(out.c_cc[VERASE] == 3);
+    assert(out.c_cc[VKILL] == 4);
+    assert(out.c_cc[VEOF] == 5);
+    assert(out.c_cc[VMIN] == 6);
+    assert(out.c_cc[VTIME] == 7);
+    assert(out.c_cc[VSTART] == 8);
+    assert(out.c_cc[VSTOP] == 9);
+    assert(out.c_cc[VWERASE] == 10);
+
+    tty_free(tty);
+}
+
 static process_t *init_proc(int slot, int pid) {
     process_t *p = &processes[slot];
     memset(p, 0, sizeof(*p));
@@ -1032,6 +1081,7 @@ int main(void) {
     test_tty_c_oflag_defaults_and_roundtrip();
     test_tty_c_cflag_defaults_and_roundtrip();
     test_tty_c_lflag_defaults_and_roundtrip();
+    test_tty_c_cc_defaults_and_roundtrip();
     test_tty_open_close_refcounts_driver_transitions();
     test_tty_open_failure_restores_state();
     test_tiocsctty_assigns_owner();
