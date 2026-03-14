@@ -751,7 +751,7 @@
                 - [x] `install` / `remove`: setup private data. (REQ: REQ-03-0651)
                 - [x] `open` / `close`: hardware init/shutdown. (REQ: REQ-03-0652)
                 - [x] `write`: device output path. (REQ: REQ-03-0653)
-                - [ ] `put_char`: optimized single-char write. (REQ: REQ-03-0654)
+                - [x] `put_char`: optimized single-char write. (REQ: REQ-03-0654)
                 - [ ] `flush_chars`: kick hardware transmission. (REQ: REQ-03-0655)
                 - [ ] `write_room`: check available hardware buffer space. (REQ: REQ-03-0656)
                 - [ ] `chars_in_buffer`: check pending bytes. (REQ: REQ-03-0657)

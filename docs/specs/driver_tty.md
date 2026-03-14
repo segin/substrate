@@ -41,7 +41,7 @@ Console and future TTY devices are implemented via the `tty_driver` callbacks:
 - `install` / `remove`: Allocate or release per-TTY private data. `tty_alloc()` invokes `install` before publishing the slot, and `tty_free()` invokes `remove` during teardown.
 - `open` / `close`: Hardware initialization and shutdown. The core calls `open` exactly once on the first active reference and `close` exactly once on the final release.
 - `write`: Bulk output path. `tty_start_locked()` drains queued bytes through `write()` in-order when the driver exposes a buffered transmit path.
-- `put_char`: Optimized single-character output path.
+- `put_char`: Optimized single-character output path. When no bulk `write()` callback exists, `tty_start_locked()` drains queued bytes one character at a time through `put_char()`.
 - `flush_chars`: Trigger hardware transmission.
 - `write_room` / `chars_in_buffer`: Report output buffer availability and pending bytes.
 - `ioctl`: Driver-specific controls.

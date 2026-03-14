@@ -34,6 +34,7 @@ static int tty_driver_unthrottle_count;
 
 static int mock_tty_write(struct tty *tty, const unsigned char *buf, int count);
 static int mock_tty_write_room(struct tty *tty);
+static int mock_tty_put_char(struct tty *tty, unsigned char c);
 static void mock_tty_throttle(struct tty *tty);
 static void mock_tty_unthrottle(struct tty *tty);
 
@@ -535,6 +536,10 @@ static int mock_tty_write_room(struct tty *tty) {
     return (int)sizeof(tty_driver_out) - tty_driver_out_len;
 }
 
+static int mock_tty_put_char(struct tty *tty, unsigned char c) {
+    return mock_tty_write(tty, &c, 1);
+}
+
 static void mock_tty_throttle(struct tty *tty) {
     (void)tty;
     tty_driver_throttle_count++;
@@ -597,6 +602,25 @@ static void test_tty_driver_install_and_remove_callbacks(void) {
 
     tty_free(tty);
     assert(tty_driver_remove_count == 1);
+}
+
+static void test_tty_driver_put_char_fallback_path(void) {
+    struct tty_driver driver = {
+        .put_char = mock_tty_put_char,
+    };
+    struct tty tty;
+
+    reset_env();
+    memset(&tty, 0, sizeof(tty));
+    tty.magic = TTY_MAGIC;
+    tty.driver = &driver;
+
+    tty_output_locked('Z', &tty);
+    tty_start_locked(&tty);
+
+    assert(tty.write_buf.count == 0);
+    assert(tty_driver_out_len == 1);
+    assert(tty_driver_out[0] == 'Z');
 }
 
 static void test_tty_open_failure_restores_state(void) {
@@ -1160,6 +1184,7 @@ int main(void) {
     test_tty_c_cc_defaults_and_roundtrip();
     test_tty_input_parity_checks_and_stripping();
     test_tty_driver_install_and_remove_callbacks();
+    test_tty_driver_put_char_fallback_path();
     test_tty_open_close_refcounts_driver_transitions();
     test_tty_open_failure_restores_state();
     test_tiocsctty_assigns_owner();
