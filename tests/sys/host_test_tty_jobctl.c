@@ -121,6 +121,36 @@ static void test_tty_register_device_publishes_devfs_node(void) {
     assert(last_devfs_node->close == tty_fs_close);
 }
 
+static void test_tty_raw_buffer_wraps_as_circular_queue(void) {
+    struct tty tty;
+    char c;
+
+    reset_env();
+    memset(&tty, 0, sizeof(tty));
+
+    tty.raw_buf.head = TTY_BUF_SIZE - 1;
+    tty.raw_buf.tail = TTY_BUF_SIZE - 1;
+
+    assert(tty_buf_put(&tty.raw_buf, 'A') == 0);
+    assert(tty.raw_buf.head == 0);
+    assert(tty.raw_buf.tail == TTY_BUF_SIZE - 1);
+    assert(tty.raw_buf.count == 1);
+
+    assert(tty_buf_put(&tty.raw_buf, 'B') == 0);
+    assert(tty.raw_buf.head == 1);
+    assert(tty.raw_buf.count == 2);
+
+    assert(tty_buf_get(&tty.raw_buf, &c) == 1);
+    assert(c == 'A');
+    assert(tty.raw_buf.tail == 0);
+    assert(tty.raw_buf.count == 1);
+
+    assert(tty_buf_get(&tty.raw_buf, &c) == 1);
+    assert(c == 'B');
+    assert(tty.raw_buf.tail == 1);
+    assert(tty.raw_buf.count == 0);
+}
+
 static process_t *init_proc(int slot, int pid) {
     process_t *p = &processes[slot];
     memset(p, 0, sizeof(*p));
@@ -751,6 +781,7 @@ static void test_tiocspgrp_checks_sigttou_for_background_group(void) {
 int main(void) {
     test_tty_init_clears_global_slots();
     test_tty_register_device_publishes_devfs_node();
+    test_tty_raw_buffer_wraps_as_circular_queue();
     test_tty_open_close_refcounts_driver_transitions();
     test_tty_open_failure_restores_state();
     test_tiocsctty_assigns_owner();

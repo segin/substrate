@@ -5,6 +5,7 @@
 
 ## Implementation
 - **Initialization:** `tty_init()` clears the global TTY slot table before device allocation begins.
+- **Raw Input Queue:** Incoming hardware bytes land in a circular `raw_buf`, so IRQ-side producers can wrap and continue feeding the line discipline without shifting storage.
 - **Read:** Uses the kernel TTY core to provide canonical and raw input processing with blocking reads.
 - **Write:** Routes output through the TTY line discipline and then into the console backend stack.
 - **Line Discipline:** Supports `termios` input/output flags (canonical mode, echo, signal generation, and flow control).
