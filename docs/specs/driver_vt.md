@@ -8,6 +8,7 @@
 ## Current Contract
 - each VT owns a full text buffer sized to the current physical geometry
 - each VT owns a fixed scrollback ring of `256` lines at the maximum supported width
+- each VT owns an ANSI/VT102 parser state machine for printable characters, cursor movement, erase sequences, and basic SGR color changes
 - `vt_activate(n)` switches the active VT, repoints `/dev/console` input to that VT's `tty`, and requests a backend redraw
 - `Shift+PageUp` and `Shift+PageDown` adjust the active VT scrollback view by one visible page
 - when scrollback is active, the VGA backend redraws historical lines and hides the hardware cursor
