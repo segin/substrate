@@ -23,7 +23,7 @@
             - [x] `v_usecount` (active references), `v_holdcount` (weak refs for cache). (REQ: REQ-04-0008)
             - [x] `v_writecount` (writers count). (REQ: REQ-04-0009)
             - [x] `v_flag`: VROOT, VTEXT, VSYSTEM, VISTTY, VEXECMAP, etc. (REQ: REQ-04-0010)
-            - [ ] `v_lock` (exclusive/shared lockmgr lock). (REQ: REQ-04-0011)
+            - [x] `v_lock` (exclusive/shared lockmgr lock). (REQ: REQ-04-0011)
             - [ ] `v_numoutput` (pending async writes for fsync). (REQ: REQ-04-0012)
             - [ ] `v_hash` (hash chain for vnode cache lookup). (REQ: REQ-04-0013)
             - [ ] **Life Cycle:** (REQ: REQ-04-0014)
