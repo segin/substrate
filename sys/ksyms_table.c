@@ -142,6 +142,7 @@ extern void bus_register_type(void);
 extern void cache_enter(void);
 extern void cache_lookup(void);
 extern void cache_purge(void);
+extern void cache_purgevfs(void);
 extern void chacha20_block(void);
 extern void chacha20_extract(void);
 extern void chacha20_init(void);
@@ -1464,9 +1465,11 @@ extern void tss_iomap_init(void);
 extern void tss_set_iomap(void);
 extern void tss_set_iomap_range(void);
 extern void tty_alloc(void);
+extern void tty_check_change(void);
 extern void tty_close(void);
 extern void tty_default_termios(void);
 extern void tty_flip_buffer_push(void);
+extern void tty_flip_buffer_push_status(void);
 extern void tty_free(void);
 extern void tty_get(void);
 extern void tty_hangup(void);
@@ -1533,6 +1536,7 @@ extern void unlink_fs(void);
 extern void validate_user_addr(void);
 extern void vclean(void);
 extern void vdrop(void);
+extern void vflush(void);
 extern void vfs_check_permissions(void);
 extern void vfs_get_filesystems(void);
 extern void vfs_init(void);
@@ -1557,6 +1561,7 @@ extern void vhold(void);
 extern void video_ask_mode(void);
 extern void video_register_driver(void);
 extern void video_set_viewport(void);
+extern void vinvalbuf(void);
 extern void virtio_9p_send(void);
 extern void virtio_9p_setup(void);
 extern void virtio_blk_setup(void);
@@ -1677,6 +1682,7 @@ extern void vnode_init(void);
 extern void vnode_lookup_cache(void);
 extern void vnode_reclaim(void);
 extern void vop_access(void);
+extern void vop_advlock(void);
 extern void vop_bmap(void);
 extern void vop_cachedlookup(void);
 extern void vop_close(void);
@@ -1685,7 +1691,9 @@ extern void vop_fsync(void);
 extern void vop_getattr(void);
 extern void vop_inactive(void);
 extern void vop_ioctl(void);
+extern void vop_islocked(void);
 extern void vop_link(void);
+extern void vop_lock(void);
 extern void vop_lookup(void);
 extern void vop_mkdir(void);
 extern void vop_mknod(void);
@@ -1703,6 +1711,7 @@ extern void vop_rmdir(void);
 extern void vop_setattr(void);
 extern void vop_strategy(void);
 extern void vop_symlink(void);
+extern void vop_unlock(void);
 extern void vop_whiteout(void);
 extern void vop_write(void);
 extern void vput(void);
@@ -2629,7 +2638,9 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&tty_get, "tty_get" },
     { (uint32_t)(uintptr_t)&tty_alloc, "tty_alloc" },
     { (uint32_t)(uintptr_t)&tty_free, "tty_free" },
+    { (uint32_t)(uintptr_t)&tty_flip_buffer_push_status, "tty_flip_buffer_push_status" },
     { (uint32_t)(uintptr_t)&tty_flip_buffer_push, "tty_flip_buffer_push" },
+    { (uint32_t)(uintptr_t)&tty_check_change, "tty_check_change" },
     { (uint32_t)(uintptr_t)&tty_read, "tty_read" },
     { (uint32_t)(uintptr_t)&tty_write, "tty_write" },
     { (uint32_t)(uintptr_t)&tty_ioctl_kern, "tty_ioctl_kern" },
@@ -2822,6 +2833,8 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&vput, "vput" },
     { (uint32_t)(uintptr_t)&vgone, "vgone" },
     { (uint32_t)(uintptr_t)&vclean, "vclean" },
+    { (uint32_t)(uintptr_t)&vinvalbuf, "vinvalbuf" },
+    { (uint32_t)(uintptr_t)&vflush, "vflush" },
     { (uint32_t)(uintptr_t)&vnode_reclaim, "vnode_reclaim" },
     { (uint32_t)(uintptr_t)&vnode_cache_insert, "vnode_cache_insert" },
     { (uint32_t)(uintptr_t)&vnode_cache_remove, "vnode_cache_remove" },
@@ -2833,6 +2846,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&cache_enter, "cache_enter" },
     { (uint32_t)(uintptr_t)&cache_purge, "cache_purge" },
     { (uint32_t)(uintptr_t)&nchinit, "nchinit" },
+    { (uint32_t)(uintptr_t)&cache_purgevfs, "cache_purgevfs" },
     { (uint32_t)(uintptr_t)&vfs_mount, "vfs_mount" },
     { (uint32_t)(uintptr_t)&vfs_unmount, "vfs_unmount" },
     { (uint32_t)(uintptr_t)&vfs_start, "vfs_start" },
@@ -2868,6 +2882,10 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&vop_inactive, "vop_inactive" },
     { (uint32_t)(uintptr_t)&vop_reclaim, "vop_reclaim" },
     { (uint32_t)(uintptr_t)&vop_print, "vop_print" },
+    { (uint32_t)(uintptr_t)&vop_lock, "vop_lock" },
+    { (uint32_t)(uintptr_t)&vop_unlock, "vop_unlock" },
+    { (uint32_t)(uintptr_t)&vop_islocked, "vop_islocked" },
+    { (uint32_t)(uintptr_t)&vop_advlock, "vop_advlock" },
     { (uint32_t)(uintptr_t)&ext2_find_next_zero_bit, "ext2_find_next_zero_bit" },
     { (uint32_t)(uintptr_t)&ext2_read_block, "ext2_read_block" },
     { (uint32_t)(uintptr_t)&ext2_read_blocks, "ext2_read_blocks" },
@@ -3455,4 +3473,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1722;
+int ksym_count = 1731;

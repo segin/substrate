@@ -480,6 +480,23 @@ static void test_pv_entry_list_manipulation(void) {
     TEST_PASS("pv_entry_list_manipulation");
 }
 
+/* Test: vm_page_late_init sets up thresholds and spawns daemon */
+static void test_vm_page_late_init(void) {
+    vm_page_thresholds_t thresholds_before;
+    vm_page_thresholds_t thresholds_after;
+
+    vm_page_get_thresholds(&thresholds_before);
+    vm_page_late_init();
+    vm_page_get_thresholds(&thresholds_after);
+
+    TEST_ASSERT(thresholds_after.free_target > 0, "late_init: free_target not tuned");
+    TEST_ASSERT(thresholds_after.free_min > 0, "late_init: free_min not tuned");
+
+    vm_page_late_init(); // test idempotency
+
+    TEST_PASS("test_vm_page_late_init");
+}
+
 /* Test entry point */
 void test_vm_page_queue(void) {
     kprint("=== VM Page Queue Unit Tests ===\n");
@@ -504,6 +521,7 @@ void test_vm_page_queue(void) {
     test_vm_page_object_linkage();
     test_pv_entry_list_manipulation();
     test_vm_page_try_to_free();
+    test_vm_page_late_init();
     
     char buf[64];
     sprintf(buf, "=== vm_page tests: %d passed, %d failed ===\n", passed, failed);
