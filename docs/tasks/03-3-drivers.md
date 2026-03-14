@@ -743,7 +743,7 @@
                 - [x] **Output Post-processing (`n_tty_write`):** (REQ: REQ-03-0643)
                     - [x] Newline expansion (NL -> CR/NL). (REQ: REQ-03-0644)
                     - [x] Tab expansion (optional). (REQ: REQ-03-0645)
-                - [ ] **Echoing Logic:** (REQ: REQ-03-0646)
+                - [x] **Echoing Logic:** (REQ: REQ-03-0646)
                     - [x] Raw echo (input char -> output). (REQ: REQ-03-0647)
                     - [x] Control char echo (`^C`). (REQ: REQ-03-0648)
                     - [x] Erase echo (backspace-space-backspace sequence). (REQ: REQ-03-0649)
