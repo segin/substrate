@@ -67,6 +67,12 @@ TAILQ_HEAD(vnode_list, vnode);
 #define	MNT_FORCE	0x00080000	/* force unmount or downgrade */
 
 /*
+ * Flags for vfs_sync waitfor.
+ */
+#define MNT_WAIT	1		/* synchronous wait */
+#define MNT_NOWAIT	2		/* asynchronous, start write */
+
+/*
  * Structure per mounted file system. Each mounted file system has an
  * array of operations and an instance record. The file systems are
  * maintained on a doubly linked list.
@@ -122,6 +128,7 @@ struct vfsops {
 				struct vnode **vpp);
 	int	(*vfs_vptofh)(struct vnode *vp, struct fid *fhp);
 	int	(*vfs_init)(struct vfsconf *);
+	int	(*vfs_uninit)(struct vfsconf *);
 };
 
 #ifndef _KERNEL

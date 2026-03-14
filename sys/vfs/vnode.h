@@ -183,6 +183,11 @@ struct vnodeops {
                     int *runp, int *runb);
     int (*vop_pathconf)(struct vnode *vp, int name, register_t *retval);
     int (*vop_print)(struct vnode *vp);
+    int (*vop_lock)(struct vnode *vp, int flags);
+    int (*vop_unlock)(struct vnode *vp, int flags);
+    int (*vop_islocked)(struct vnode *vp);
+    int (*vop_advlock)(struct vnode *vp, void *id, int op,
+                       void *fl, int flags);
 };
 
 /*
@@ -240,6 +245,14 @@ struct vnodeops {
     ((vp)->v_op->vop_pathconf(vp, name, retval))
 #define VOP_PRINT(vp) \
     ((vp)->v_op->vop_print(vp))
+#define VOP_LOCK(vp, flags) \
+    ((vp)->v_op->vop_lock(vp, flags))
+#define VOP_UNLOCK(vp, flags) \
+    ((vp)->v_op->vop_unlock(vp, flags))
+#define VOP_ISLOCKED(vp) \
+    ((vp)->v_op->vop_islocked(vp))
+#define VOP_ADVLOCK(vp, id, op, fl, flags) \
+    ((vp)->v_op->vop_advlock(vp, id, op, fl, flags))
 
 /*
  * VFS macros for calling filesystem operations
@@ -266,6 +279,8 @@ struct vnodeops {
     ((mp)->mnt_op->vfs_vptofh(vp, fhp))
 #define VFS_INIT(vfsconf) \
     ((vfsconf)->vfc_vfsops->vfs_init(vfsconf))
+#define VFS_UNINIT(vfsconf) \
+    ((vfsconf)->vfc_vfsops->vfs_uninit(vfsconf))
 
 /*
  * Vnode attributes (for getattr/setattr)
