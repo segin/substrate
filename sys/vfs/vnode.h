@@ -113,6 +113,7 @@ struct vnode {
     uint32_t        v_usecount;     /* Active references (holds vnode in use) */
     uint32_t        v_holdcount;    /* Weak references (for caching) */
     uint32_t        v_writecount;   /* Number of write opens */
+    int32_t         v_numoutput;    /* Pending async writes (for fsync) */
     
     /* Flags and state */
     uint32_t        v_flag;         /* Vnode flags */

@@ -24,7 +24,7 @@
             - [x] `v_writecount` (writers count). (REQ: REQ-04-0009)
             - [x] `v_flag`: VROOT, VTEXT, VSYSTEM, VISTTY, VEXECMAP, etc. (REQ: REQ-04-0010)
             - [x] `v_lock` (exclusive/shared lockmgr lock). (REQ: REQ-04-0011)
-            - [ ] `v_numoutput` (pending async writes for fsync). (REQ: REQ-04-0012)
+            - [x] `v_numoutput` (pending async writes for fsync). (REQ: REQ-04-0012)
             - [ ] `v_hash` (hash chain for vnode cache lookup). (REQ: REQ-04-0013)
             - [ ] **Life Cycle:** (REQ: REQ-04-0014)
                 - [ ] `getnewvnode(tag, mp, ops, vpp)`: allocate from zone, recycle LRU if pool full. (REQ: REQ-04-0015)
