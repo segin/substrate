@@ -42,7 +42,6 @@ vgcore.*
 /pr_list_latest.txt
 /qemu.out
 /qemu.pid
-/root.img
 /stat_verify
 /substrate.iso
 /test.bc
