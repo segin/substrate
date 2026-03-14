@@ -744,7 +744,7 @@
                     - [ ] Newline expansion (NL -> CR/NL). (REQ: REQ-03-0644)
                     - [ ] Tab expansion (optional). (REQ: REQ-03-0645)
                 - [ ] **Echoing Logic:** (REQ: REQ-03-0646)
-                    - [ ] Raw echo (input char -> output). (REQ: REQ-03-0647)
+                    - [x] Raw echo (input char -> output). (REQ: REQ-03-0647)
                     - [ ] Control char echo (`^C`). (REQ: REQ-03-0648)
                     - [x] Erase echo (backspace-space-backspace sequence). (REQ: REQ-03-0649)
             - [ ] **Driver Interface (`tty_driver`):** (REQ: REQ-03-0650)

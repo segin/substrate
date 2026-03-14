@@ -304,6 +304,27 @@ static void test_tty_erase_echo_sequence(void) {
     tty_free(tty);
 }
 
+static void test_tty_raw_echo_sequence(void) {
+    struct tty_driver driver = {
+        .write = mock_tty_write,
+        .write_room = mock_tty_write_room,
+    };
+    struct tty *tty;
+
+    reset_env();
+
+    tty = tty_alloc(&driver, 3);
+    assert(tty != NULL);
+    tty->termios.c_lflag &= ~ICANON;
+
+    tty_flip_buffer_push(tty, 'x');
+
+    assert(tty_driver_out_len == 1);
+    assert(tty_driver_out[0] == 'x');
+
+    tty_free(tty);
+}
+
 static void test_tiocspgrp_checks_sigttou_for_background_group(void) {
     reset_env();
 
@@ -342,6 +363,7 @@ int main(void) {
     test_tiocpgrp_roundtrip();
     test_tiocspgrp_checks_sigttou_for_background_group();
     test_tty_erase_echo_sequence();
+    test_tty_raw_echo_sequence();
     puts("host_test_tty_jobctl: PASS");
     return 0;
 }
