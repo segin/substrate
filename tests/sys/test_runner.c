@@ -44,6 +44,7 @@ extern void test_vhold_vdrop(void);
 extern void run_kobject_tests(void);
 void run_reboot_tests(void);
 extern void test_pipe_race(void);
+extern void test_floppy_qemu(void);
 
 void run_kernel_tests(void) {
     char test_arg[32] = {0};
@@ -227,6 +228,10 @@ void run_kernel_tests(void) {
          extern void run_ps2_tests(void);
          run_ps2_tests();
      }
+
+    if (all || strcmp(test_arg, "floppy_qemu") == 0 || strcmp(test_arg, "floppy") == 0) {
+         test_floppy_qemu();
+    }
 
     if (all || strcmp(test_arg, "minix") == 0) {
          run_minix_mount_tests();

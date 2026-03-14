@@ -20,6 +20,7 @@
 #include <drivers/storage/nvme/nvme.h>
 #include <drivers/virtio/virtio.h>
 #include <drivers/storage/ramdisk.h>
+#include <drivers/storage/floppy/floppy.h>
 
 #include <arch/i386/idt.h>
 #include <arch/i386/cpu.h>
@@ -438,6 +439,7 @@ static void init_storage_and_vfs(multiboot_info_t *mboot_info) {
     pci_init();
     isa_init();
     isa_probe_legacy();
+    floppy_init();
     ide_init();
     virtio_init();
     register_boot_ramdisks(mboot_info);

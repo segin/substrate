@@ -59,6 +59,10 @@ static int isa_probe_ps2(uint16_t base) {
     return isa_inb((uint16_t)(base + 4)) != 0xFF;
 }
 
+static int isa_probe_floppy(uint16_t base) {
+    return isa_inb((uint16_t)(base + 4)) != 0xFF;
+}
+
 static isa_legacy_entry_t isa_legacy_table[] = {
     { "serial0", 0x3F8, 8, isa_probe_uart },
     { "serial1", 0x2F8, 8, isa_probe_uart },
@@ -71,6 +75,8 @@ static isa_legacy_entry_t isa_legacy_table[] = {
     { "ide-secondary", 0x170, 8, isa_probe_ide },
     { "ide-tertiary", 0x1E8, 8, isa_probe_ide },
     { "ide-quaternary", 0x168, 8, isa_probe_ide },
+    { "floppy-primary", 0x3F0, 8, isa_probe_floppy },
+    { "floppy-secondary", 0x370, 8, isa_probe_floppy },
     { "ps2", 0x60, 8, isa_probe_ps2 },
     { NULL, 0, 0, NULL },
 };
