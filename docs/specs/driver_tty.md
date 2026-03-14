@@ -46,7 +46,7 @@ Console and future TTY devices are implemented via the `tty_driver` callbacks:
 - `write_room`: Report output buffer availability. The core consults `write_room()` before each bulk drain and leaves excess bytes queued if the backend cannot currently accept them.
 - `chars_in_buffer`: Report driver-side pending bytes. `tty_poll()` folds that hardware backlog into its writability decision so userspace does not see `POLLOUT` while the backend transmit queue is still full.
 - `ioctl`: Driver-specific controls. Unhandled TTY-core ioctls fall through to the driver callback after the core drops its lock.
-- `throttle` / `unthrottle`: Hardware flow-control hooks.
+- `throttle` / `unthrottle`: Hardware flow-control hooks. The IXOFF high-water and low-water paths invoke these callbacks alongside the transmitted `VSTOP`/`VSTART` characters.
 
 ## VFS Integration
 - Registered as a character device (`FS_CHARDEVICE`) in DevFS.
