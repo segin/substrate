@@ -29,6 +29,7 @@ static int tty_driver_remove_count;
 static int tty_driver_flush_count;
 static int tty_driver_write_room_override;
 static int tty_driver_chars_in_buffer_override;
+static int tty_driver_ioctl_count;
 static unsigned char tty_driver_out[256];
 static int tty_driver_out_len;
 static fs_node_t *last_devfs_node;
@@ -96,6 +97,7 @@ static void reset_env(void) {
     tty_driver_flush_count = 0;
     tty_driver_write_room_override = -1;
     tty_driver_chars_in_buffer_override = 0;
+    tty_driver_ioctl_count = 0;
     tty_driver_out_len = 0;
     memset(tty_driver_out, 0, sizeof(tty_driver_out));
     last_devfs_node = NULL;
@@ -560,6 +562,12 @@ static int mock_tty_chars_in_buffer(struct tty *tty) {
     return tty_driver_chars_in_buffer_override;
 }
 
+static int mock_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
+    (void)tty;
+    tty_driver_ioctl_count++;
+    return (cmd == 0xDEADBEEF && arg == 0x1234UL) ? 37 : -1;
+}
+
 static void mock_tty_flush_chars(struct tty *tty) {
     (void)tty;
     tty_driver_flush_count++;
@@ -710,6 +718,21 @@ static void test_tty_driver_chars_in_buffer_blocks_writable_poll(void) {
     tty_driver_chars_in_buffer_override = 0;
     assert((tty_poll(&tty, NULL) & (POLLOUT | POLLWRNORM)) ==
            (POLLOUT | POLLWRNORM));
+}
+
+static void test_tty_driver_ioctl_fallback_path(void) {
+    struct tty_driver driver = {
+        .ioctl = mock_tty_ioctl,
+    };
+    struct tty tty;
+
+    reset_env();
+    memset(&tty, 0, sizeof(tty));
+    tty.magic = TTY_MAGIC;
+    tty.driver = &driver;
+
+    assert(tty_ioctl_kern(&tty, 0xDEADBEEF, 0x1234UL) == 37);
+    assert(tty_driver_ioctl_count == 1);
 }
 
 static void test_tty_open_failure_restores_state(void) {
@@ -1277,6 +1300,7 @@ int main(void) {
     test_tty_driver_flush_chars_kicks_transmission();
     test_tty_driver_write_room_limits_drain();
     test_tty_driver_chars_in_buffer_blocks_writable_poll();
+    test_tty_driver_ioctl_fallback_path();
     test_tty_open_close_refcounts_driver_transitions();
     test_tty_open_failure_restores_state();
     test_tiocsctty_assigns_owner();

@@ -45,7 +45,7 @@ Console and future TTY devices are implemented via the `tty_driver` callbacks:
 - `flush_chars`: Trigger hardware transmission. The core calls `flush_chars()` after a drain pass so UART- or VT-style backends can kick deferred transmission.
 - `write_room`: Report output buffer availability. The core consults `write_room()` before each bulk drain and leaves excess bytes queued if the backend cannot currently accept them.
 - `chars_in_buffer`: Report driver-side pending bytes. `tty_poll()` folds that hardware backlog into its writability decision so userspace does not see `POLLOUT` while the backend transmit queue is still full.
-- `ioctl`: Driver-specific controls.
+- `ioctl`: Driver-specific controls. Unhandled TTY-core ioctls fall through to the driver callback after the core drops its lock.
 - `throttle` / `unthrottle`: Hardware flow-control hooks.
 
 ## VFS Integration

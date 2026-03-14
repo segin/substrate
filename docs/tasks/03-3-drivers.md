@@ -755,7 +755,7 @@
                 - [x] `flush_chars`: kick hardware transmission. (REQ: REQ-03-0655)
                 - [x] `write_room`: check available hardware buffer space. (REQ: REQ-03-0656)
                 - [x] `chars_in_buffer`: check pending bytes. (REQ: REQ-03-0657)
-                - [ ] `ioctl`: hardware-specific controls. (REQ: REQ-03-0658)
+                - [x] `ioctl`: hardware-specific controls. (REQ: REQ-03-0658)
                 - [ ] `throttle` / `unthrottle`: hardware flow control hooks. (REQ: REQ-03-0659)
             - [ ] **Session/Job Control:** (REQ: REQ-03-0660)
                 - [ ] `tty_struct.session`: Pointer to current session. (REQ: REQ-03-0661)
