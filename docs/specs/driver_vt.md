@@ -11,6 +11,7 @@
 - `vt_activate(n)` switches the active VT, repoints `/dev/console` input to that VT's `tty`, and requests a backend redraw
 - `Shift+PageUp` and `Shift+PageDown` adjust the active VT scrollback view by one visible page
 - when scrollback is active, the VGA backend redraws historical lines and hides the hardware cursor
+- each VT owns an ANSI/VT102 parser state machine that handles cursor movement, erase-in-line/display, and SGR color changes through the shared `ansi_handler` callbacks
 
 ## Non-Goals
 - framebuffer console composition
