@@ -27,6 +27,7 @@ static int tty_driver_open_errno;
 static int tty_driver_install_count;
 static int tty_driver_remove_count;
 static int tty_driver_flush_count;
+static int tty_driver_write_room_override;
 static unsigned char tty_driver_out[256];
 static int tty_driver_out_len;
 static fs_node_t *last_devfs_node;
@@ -92,6 +93,7 @@ static void reset_env(void) {
     tty_driver_install_count = 0;
     tty_driver_remove_count = 0;
     tty_driver_flush_count = 0;
+    tty_driver_write_room_override = -1;
     tty_driver_out_len = 0;
     memset(tty_driver_out, 0, sizeof(tty_driver_out));
     last_devfs_node = NULL;
@@ -530,11 +532,20 @@ static int mock_tty_write(struct tty *tty, const unsigned char *buf, int count) 
     }
     memcpy(tty_driver_out + tty_driver_out_len, buf, (size_t)count);
     tty_driver_out_len += count;
+    if (tty_driver_write_room_override >= 0) {
+        tty_driver_write_room_override -= count;
+        if (tty_driver_write_room_override < 0) {
+            tty_driver_write_room_override = 0;
+        }
+    }
     return count;
 }
 
 static int mock_tty_write_room(struct tty *tty) {
     (void)tty;
+    if (tty_driver_write_room_override >= 0) {
+        return tty_driver_write_room_override;
+    }
     return (int)sizeof(tty_driver_out) - tty_driver_out_len;
 }
 
@@ -649,6 +660,28 @@ static void test_tty_driver_flush_chars_kicks_transmission(void) {
     assert(tty_driver_flush_count == 1);
     assert(tty_driver_out_len == 1);
     assert(tty_driver_out[0] == 'Q');
+}
+
+static void test_tty_driver_write_room_limits_drain(void) {
+    struct tty_driver driver = {
+        .write = mock_tty_write,
+        .write_room = mock_tty_write_room,
+    };
+    struct tty tty;
+
+    reset_env();
+    memset(&tty, 0, sizeof(tty));
+    tty.magic = TTY_MAGIC;
+    tty.driver = &driver;
+    tty_driver_write_room_override = 1;
+
+    tty_output_locked('A', &tty);
+    tty_output_locked('B', &tty);
+    tty_start_locked(&tty);
+
+    assert(tty_driver_out_len == 1);
+    assert(tty_driver_out[0] == 'A');
+    assert(tty.write_buf.count == 1);
 }
 
 static void test_tty_open_failure_restores_state(void) {
@@ -1214,6 +1247,7 @@ int main(void) {
     test_tty_driver_install_and_remove_callbacks();
     test_tty_driver_put_char_fallback_path();
     test_tty_driver_flush_chars_kicks_transmission();
+    test_tty_driver_write_room_limits_drain();
     test_tty_open_close_refcounts_driver_transitions();
     test_tty_open_failure_restores_state();
     test_tiocsctty_assigns_owner();

@@ -753,7 +753,7 @@
                 - [x] `write`: device output path. (REQ: REQ-03-0653)
                 - [x] `put_char`: optimized single-char write. (REQ: REQ-03-0654)
                 - [x] `flush_chars`: kick hardware transmission. (REQ: REQ-03-0655)
-                - [ ] `write_room`: check available hardware buffer space. (REQ: REQ-03-0656)
+                - [x] `write_room`: check available hardware buffer space. (REQ: REQ-03-0656)
                 - [ ] `chars_in_buffer`: check pending bytes. (REQ: REQ-03-0657)
                 - [ ] `ioctl`: hardware-specific controls. (REQ: REQ-03-0658)
                 - [ ] `throttle` / `unthrottle`: hardware flow control hooks. (REQ: REQ-03-0659)
