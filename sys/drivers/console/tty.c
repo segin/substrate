@@ -278,7 +278,6 @@ static void tty_output_locked(char c, struct tty *tp) {
         tty_output_locked('\r', tp);
     }
     
-    // Put to write buffer
     if (tty_buf_put(&tp->write_buf, c) == 0) {
         if (c == '\r') {
             tp->output_col = 0;
@@ -295,8 +294,26 @@ static void tty_output_locked(char c, struct tty *tp) {
             }
         }
     } else {
-        // Buffer full
-        // sleep(&tp->write_buf, ...);
+        /*
+         * Try to drain once before dropping output. This keeps the line
+         * discipline from silently losing prompt/echo bytes under bursty
+         * console writes.
+         */
+        tty_start_locked(tp);
+        if (tty_buf_put(&tp->write_buf, c) == 0) {
+            if (c == '\r' || c == '\n') {
+                tp->output_col = 0;
+            } else if (c == '\b') {
+                if (tp->output_col > 0) {
+                    tp->output_col--;
+                }
+            } else {
+                tp->output_col++;
+                if (tp->winsize.ws_col > 0 && tp->output_col >= tp->winsize.ws_col) {
+                    tp->output_col = 0;
+                }
+            }
+        }
     }
 }
 
@@ -360,7 +377,7 @@ static void tty_start_locked(struct tty *tp) {
 
 // Unix v6-style canonical processing
 static void canon(struct tty *tp, uint32_t *flags_ptr) {
-    char buf[256]; // Line buffer
+    char buf[TTY_BUF_SIZE];
     char *bp = buf;
     char c;
     
@@ -415,16 +432,18 @@ static void canon(struct tty *tp, uint32_t *flags_ptr) {
                      // maptab checks...
                  }
             }
-            *bp++ = c;
+            if (bp < buf + sizeof(buf) - 1) {
+                *bp++ = c;
+            }
         }
-        
-        if (bp >= buf + sizeof(buf) - 1) break; 
     }
     
     // Copy canonical line to read_buf
     char *p = buf;
     while (p < bp) {
-        tty_buf_put(&tp->read_buf, *p++);
+        if (tty_buf_put(&tp->read_buf, *p++) != 0) {
+            break;
+        }
     }
     
     // Input Flow Control: resume if LWM reached
@@ -538,8 +557,15 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
     
     int old_canon_len = tty->canon_len;
 
-    // Put char to raw buffer
-    tty_buf_put(&tty->raw_buf, c);
+    if (tty_buf_put(&tty->raw_buf, c) != 0) {
+        if (tty->termios.c_lflag & ECHO) {
+            tty_output_locked('\a', tty);
+            tty_start_locked(tty);
+        }
+        sched_wakeup(&tty->poll_wait);
+        TTY_UNLOCK(tty);
+        return;
+    }
     
     // Input Flow Control: stopped if HWM reached
     if ((tty->termios.c_iflag & IXOFF) && !tty->input_stopped) {
@@ -554,9 +580,10 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
     
     if (raw || c == '\n' || c == tty->termios.c_cc[VEOF]) {
         // Add delimiter
-        tty_buf_put(&tty->raw_buf, (char)0xFF);
-        tty->delct++;
-        wake_readers = 1;
+        if (tty_buf_put(&tty->raw_buf, (char)0xFF) == 0) {
+            tty->delct++;
+            wake_readers = 1;
+        }
     }
     
     // Echo and canonical line tracking
@@ -580,8 +607,8 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
 
     if (wake_readers) {
         sched_wakeup(&tty->read_wait);
-        sched_wakeup(&tty->poll_wait);
     }
+    sched_wakeup(&tty->poll_wait);
 
     TTY_UNLOCK(tty);
 }
