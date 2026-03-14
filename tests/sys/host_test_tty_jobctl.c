@@ -433,6 +433,43 @@ static void test_tty_c_cc_defaults_and_roundtrip(void) {
     tty_free(tty);
 }
 
+static void test_tty_input_parity_checks_and_stripping(void) {
+    struct tty tty;
+
+    reset_env();
+    memset(&tty, 0, sizeof(tty));
+    tty.magic = TTY_MAGIC;
+    tty.termios.c_iflag = ISTRIP;
+    tty.termios.c_cc[VEOF] = 4;
+
+    tty_flip_buffer_push_status(&tty, (char)0xE1, 0);
+    assert(tty.raw_buf.count == 2);
+    assert((unsigned char)tty.raw_buf.data[0] == 0x61);
+    assert((unsigned char)tty.raw_buf.data[1] == 0xFF);
+    assert(tty.delct == 1);
+
+    reset_env();
+    memset(&tty, 0, sizeof(tty));
+    tty.magic = TTY_MAGIC;
+    tty.termios.c_iflag = INPCK | IGNPAR;
+    tty.termios.c_cc[VEOF] = 4;
+
+    tty_flip_buffer_push_status(&tty, 'x', TTY_INPUT_PARITY_ERROR);
+    assert(tty.raw_buf.count == 0);
+    assert(tty.delct == 0);
+
+    reset_env();
+    memset(&tty, 0, sizeof(tty));
+    tty.magic = TTY_MAGIC;
+    tty.termios.c_iflag = INPCK | ISTRIP;
+    tty.termios.c_cc[VEOF] = 4;
+
+    tty_flip_buffer_push_status(&tty, (char)0xE2, TTY_INPUT_PARITY_ERROR);
+    assert(tty.raw_buf.count == 2);
+    assert((unsigned char)tty.raw_buf.data[0] == 0x62);
+    assert(tty.delct == 1);
+}
+
 static process_t *init_proc(int slot, int pid) {
     process_t *p = &processes[slot];
     memset(p, 0, sizeof(*p));
@@ -1086,6 +1123,7 @@ int main(void) {
     test_tty_c_cflag_defaults_and_roundtrip();
     test_tty_c_lflag_defaults_and_roundtrip();
     test_tty_c_cc_defaults_and_roundtrip();
+    test_tty_input_parity_checks_and_stripping();
     test_tty_open_close_refcounts_driver_transitions();
     test_tty_open_failure_restores_state();
     test_tiocsctty_assigns_owner();

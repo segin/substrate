@@ -731,7 +731,7 @@
                 - [x] `winsize`: Window size tracking (rows/cols) + `SIGWINCH`. (REQ: REQ-03-0631)
             - [ ] **Line Discipline (`N_TTY`):** (REQ: REQ-03-0632)
                 - [ ] **Input Processing (`n_tty_receive_buf`):** (REQ: REQ-03-0633)
-                    - [ ] Parity checks and stripping. (REQ: REQ-03-0634)
+                    - [x] Parity checks and stripping. (REQ: REQ-03-0634)
                     - [x] Newline translation (CR->NL). (REQ: REQ-03-0635)
                     - [x] Software flow control (XON/XOFF detection). (REQ: REQ-03-0636)
                     - [x] Signal generation check (`ISIG`). (REQ: REQ-03-0637)

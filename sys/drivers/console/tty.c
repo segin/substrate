@@ -508,12 +508,24 @@ static void tty_echo(struct tty *tp, unsigned char c) {
 
 // Input processing (ISR context usually)
 // Implements 'ttyinput'
-void tty_flip_buffer_push(struct tty *tty, char c) {
+void tty_flip_buffer_push_status(struct tty *tty, char c, uint32_t status) {
     int wake_readers = 0;
 
     if (!tty) return;
     
     TTY_LOCK(tty);
+
+    if ((status & TTY_INPUT_BREAK) && (tty->termios.c_iflag & IGNBRK)) {
+        TTY_UNLOCK(tty);
+        return;
+    }
+
+    if ((status & TTY_INPUT_PARITY_ERROR) &&
+        (tty->termios.c_iflag & INPCK) &&
+        (tty->termios.c_iflag & IGNPAR)) {
+        TTY_UNLOCK(tty);
+        return;
+    }
 
     /* Input Processing */
     if (tty->termios.c_iflag & ISTRIP)
@@ -620,6 +632,10 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
     sched_wakeup(&tty->poll_wait);
 
     TTY_UNLOCK(tty);
+}
+
+void tty_flip_buffer_push(struct tty *tty, char c) {
+    tty_flip_buffer_push_status(tty, c, 0);
 }
 
 // Job Control Checks

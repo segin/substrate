@@ -14,6 +14,7 @@
 - **Control Mode State:** `c_cflag` defaults to `CREAD|CS8|HUPCL`, and the TTY core preserves configured `CSIZE`, `PARENB`, `CSTOPB`, and `CRTSCTS` bits across `TCSETS`/`TCGETS`.
 - **Local Mode State:** `c_lflag` defaults to canonical signal-generating echo mode, and callers can round-trip `ICANON`, `ECHO`, `ECHOE`, `ECHOK`, `ISIG`, and `TOSTOP` through the ioctl surface.
 - **Control Character Table:** `c_cc` ships with standard default bindings for interrupt, quit, erase, kill, EOF, start, stop, and word erase, and the full control-character table round-trips through `TCSETS`/`TCGETS`, including `VMIN` and `VTIME`.
+- **Parity Status Handling:** The receive path accepts out-of-band input status, strips high bits under `ISTRIP`, and drops parity-failed bytes when `INPCK|IGNPAR` is active instead of queueing bad input into the line discipline.
 - **Read:** Uses the kernel TTY core to provide canonical and raw input processing with blocking reads.
 - **Write:** Routes output through the TTY line discipline and then into the console backend stack.
 - **Line Discipline:** Supports `termios` input/output flags (canonical mode, echo, signal generation, and flow control).

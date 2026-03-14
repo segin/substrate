@@ -9,6 +9,9 @@
 
 #define TTY_BUF_SIZE 2048
 
+#define TTY_INPUT_BREAK        0x01U
+#define TTY_INPUT_PARITY_ERROR 0x02U
+
 struct tty;
 
 typedef struct tty_buffer {
@@ -100,6 +103,7 @@ int tty_poll(struct tty *tty, void *waiter);
 
 // Input processing (called by driver interrupt/worker)
 void tty_flip_buffer_push(struct tty *tty, char c);
+void tty_flip_buffer_push_status(struct tty *tty, char c, uint32_t status);
 
 // Helper
 void tty_default_termios(struct termios *t);
