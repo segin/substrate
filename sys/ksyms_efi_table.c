@@ -268,7 +268,6 @@ extern void exec_pin_current_thread(void);
 extern void exec_register_handler(void);
 extern void exec_unpin_current_thread(void);
 extern void exfat_init(void);
-extern void ext2_add_entry(void);
 extern void ext2_alloc_block(void);
 extern void ext2_alloc_inode(void);
 extern void ext2_alloc_inode_block(void);
@@ -290,7 +289,6 @@ extern void ext2_read_blocks(void);
 extern void ext2_read_inode(void);
 extern void ext2_readdir(void);
 extern void ext2_readlink(void);
-extern void ext2_remove_entry(void);
 extern void ext2_truncate(void);
 extern void ext2_write_block(void);
 extern void ext2_write_inode(void);
@@ -308,11 +306,17 @@ extern void fb_putc(void);
 extern void fb_putpixel(void);
 extern void fb_write(void);
 extern void fd_close_all(void);
+extern void fdc_chs_to_lba(void);
+extern void fdc_dma_window_valid(void);
+extern void fdc_geometry_from_cmos(void);
+extern void fdc_lba_to_chs(void);
+extern void fdc_parse_cmos_drive_types(void);
 extern void file_alloc(void);
 extern void file_close_ptr(void);
 extern void file_free(void);
 extern void fill_ldt_entry(void);
 extern void finddir_fs(void);
+extern void floppy_init(void);
 extern void fork_child_return(void);
 extern void fpu_handler(void);
 extern void fpu_init(void);
@@ -441,6 +445,7 @@ extern void iounmap(void);
 extern void irq_alloc_vector(void);
 extern void irq_dispatch(void);
 extern void irq_free_vector(void);
+extern void isa_device_present(void);
 extern void isa_dump_devices(void);
 extern void isa_first_device(void);
 extern void isa_init(void);
@@ -1313,6 +1318,7 @@ extern void test_e820_parsing(void);
 extern void test_fb_modes(void);
 extern void test_fb_perf(void);
 extern void test_find_child_logic(void);
+extern void test_floppy_qemu(void);
 extern void test_futex(void);
 extern void test_futex_private(void);
 extern void test_futex_private_run_all(void);
@@ -1401,6 +1407,7 @@ extern void test_uma_percpu_cache_paths(void);
 extern void test_uma_redzone(void);
 extern void test_uma_slab_freelist_integrity(void);
 extern void test_uma_zero_fill(void);
+extern void test_vhold_vdrop(void);
 extern void test_vm_device_fault_mapping(void);
 extern void test_vm_fault_cow(void);
 extern void test_vm_fault_file_backed(void);
@@ -1455,9 +1462,11 @@ extern void tss_iomap_init(void);
 extern void tss_set_iomap(void);
 extern void tss_set_iomap_range(void);
 extern void tty_alloc(void);
+extern void tty_check_change(void);
 extern void tty_close(void);
 extern void tty_default_termios(void);
 extern void tty_flip_buffer_push(void);
+extern void tty_flip_buffer_push_status(void);
 extern void tty_free(void);
 extern void tty_get(void);
 extern void tty_hangup(void);
@@ -2407,6 +2416,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&pci_next_device, "pci_next_device" },
     { (uint32_t)(uintptr_t)&pci_dump_devices, "pci_dump_devices" },
     { (uint32_t)(uintptr_t)&pci_init, "pci_init" },
+    { (uint32_t)(uintptr_t)&isa_device_present, "isa_device_present" },
     { (uint32_t)(uintptr_t)&isa_init, "isa_init" },
     { (uint32_t)(uintptr_t)&isa_port_alive, "isa_port_alive" },
     { (uint32_t)(uintptr_t)&isa_probe_legacy, "isa_probe_legacy" },
@@ -2617,7 +2627,9 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&tty_get, "tty_get" },
     { (uint32_t)(uintptr_t)&tty_alloc, "tty_alloc" },
     { (uint32_t)(uintptr_t)&tty_free, "tty_free" },
+    { (uint32_t)(uintptr_t)&tty_flip_buffer_push_status, "tty_flip_buffer_push_status" },
     { (uint32_t)(uintptr_t)&tty_flip_buffer_push, "tty_flip_buffer_push" },
+    { (uint32_t)(uintptr_t)&tty_check_change, "tty_check_change" },
     { (uint32_t)(uintptr_t)&tty_read, "tty_read" },
     { (uint32_t)(uintptr_t)&tty_write, "tty_write" },
     { (uint32_t)(uintptr_t)&tty_ioctl_kern, "tty_ioctl_kern" },
@@ -2744,6 +2756,12 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&ide_decode_error, "ide_decode_error" },
     { (uint32_t)(uintptr_t)&ide_select_dma_transfer_mode, "ide_select_dma_transfer_mode" },
     { (uint32_t)(uintptr_t)&ide_pci_configure_channels, "ide_pci_configure_channels" },
+    { (uint32_t)(uintptr_t)&floppy_init, "floppy_init" },
+    { (uint32_t)(uintptr_t)&fdc_geometry_from_cmos, "fdc_geometry_from_cmos" },
+    { (uint32_t)(uintptr_t)&fdc_parse_cmos_drive_types, "fdc_parse_cmos_drive_types" },
+    { (uint32_t)(uintptr_t)&fdc_lba_to_chs, "fdc_lba_to_chs" },
+    { (uint32_t)(uintptr_t)&fdc_chs_to_lba, "fdc_chs_to_lba" },
+    { (uint32_t)(uintptr_t)&fdc_dma_window_valid, "fdc_dma_window_valid" },
     { (uint32_t)(uintptr_t)&ahci_init, "ahci_init" },
     { (uint32_t)(uintptr_t)&nvme_init, "nvme_init" },
     { (uint32_t)(uintptr_t)&ramdisk_create, "ramdisk_create" },
@@ -2874,8 +2892,6 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&ext2_alloc_inode, "ext2_alloc_inode" },
     { (uint32_t)(uintptr_t)&ext2_free_inode, "ext2_free_inode" },
     { (uint32_t)(uintptr_t)&ext2_truncate, "ext2_truncate" },
-    { (uint32_t)(uintptr_t)&ext2_add_entry, "ext2_add_entry" },
-    { (uint32_t)(uintptr_t)&ext2_remove_entry, "ext2_remove_entry" },
     { (uint32_t)(uintptr_t)&fat_get_next_cluster, "fat_get_next_cluster" },
     { (uint32_t)(uintptr_t)&fat_parse_lfn, "fat_parse_lfn" },
     { (uint32_t)(uintptr_t)&fat_file_read, "fat_file_read" },
@@ -3317,6 +3333,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&run_getcwd_tests, "run_getcwd_tests" },
     { (uint32_t)(uintptr_t)&run_vnode_lock_tests, "run_vnode_lock_tests" },
     { (uint32_t)(uintptr_t)&run_vnode_hold_tests, "run_vnode_hold_tests" },
+    { (uint32_t)(uintptr_t)&test_vhold_vdrop, "test_vhold_vdrop" },
     { (uint32_t)(uintptr_t)&test_mem, "test_mem" },
     { (uint32_t)(uintptr_t)&run_div64_tests, "run_div64_tests" },
     { (uint32_t)(uintptr_t)&run_crc32_tests, "run_crc32_tests" },
@@ -3343,6 +3360,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&run_reboot_tests, "run_reboot_tests" },
     { (uint32_t)(uintptr_t)&test_pipe_race, "test_pipe_race" },
     { (uint32_t)(uintptr_t)&run_chacha20_tests, "run_chacha20_tests" },
+    { (uint32_t)(uintptr_t)&test_floppy_qemu, "test_floppy_qemu" },
     { (uint32_t)(uintptr_t)&sigprop, "sigprop" },
     { (uint32_t)(uintptr_t)&font_8x16, "font_8x16" },
     { (uint32_t)(uintptr_t)&font_8x8, "font_8x8" },
@@ -3437,4 +3455,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1713;
+int ksym_count = 1722;

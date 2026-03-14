@@ -1464,9 +1464,11 @@ extern void tss_iomap_init(void);
 extern void tss_set_iomap(void);
 extern void tss_set_iomap_range(void);
 extern void tty_alloc(void);
+extern void tty_check_change(void);
 extern void tty_close(void);
 extern void tty_default_termios(void);
 extern void tty_flip_buffer_push(void);
+extern void tty_flip_buffer_push_status(void);
 extern void tty_free(void);
 extern void tty_get(void);
 extern void tty_hangup(void);
@@ -2629,7 +2631,9 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&tty_get, "tty_get" },
     { (uint32_t)(uintptr_t)&tty_alloc, "tty_alloc" },
     { (uint32_t)(uintptr_t)&tty_free, "tty_free" },
+    { (uint32_t)(uintptr_t)&tty_flip_buffer_push_status, "tty_flip_buffer_push_status" },
     { (uint32_t)(uintptr_t)&tty_flip_buffer_push, "tty_flip_buffer_push" },
+    { (uint32_t)(uintptr_t)&tty_check_change, "tty_check_change" },
     { (uint32_t)(uintptr_t)&tty_read, "tty_read" },
     { (uint32_t)(uintptr_t)&tty_write, "tty_write" },
     { (uint32_t)(uintptr_t)&tty_ioctl_kern, "tty_ioctl_kern" },
@@ -3455,4 +3459,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1722;
+int ksym_count = 1724;
