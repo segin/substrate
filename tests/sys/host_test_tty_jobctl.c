@@ -26,6 +26,7 @@ static int tty_driver_close_count;
 static int tty_driver_open_errno;
 static int tty_driver_install_count;
 static int tty_driver_remove_count;
+static int tty_driver_flush_count;
 static unsigned char tty_driver_out[256];
 static int tty_driver_out_len;
 static fs_node_t *last_devfs_node;
@@ -90,6 +91,7 @@ static void reset_env(void) {
     tty_driver_open_errno = 0;
     tty_driver_install_count = 0;
     tty_driver_remove_count = 0;
+    tty_driver_flush_count = 0;
     tty_driver_out_len = 0;
     memset(tty_driver_out, 0, sizeof(tty_driver_out));
     last_devfs_node = NULL;
@@ -540,6 +542,11 @@ static int mock_tty_put_char(struct tty *tty, unsigned char c) {
     return mock_tty_write(tty, &c, 1);
 }
 
+static void mock_tty_flush_chars(struct tty *tty) {
+    (void)tty;
+    tty_driver_flush_count++;
+}
+
 static void mock_tty_throttle(struct tty *tty) {
     (void)tty;
     tty_driver_throttle_count++;
@@ -621,6 +628,27 @@ static void test_tty_driver_put_char_fallback_path(void) {
     assert(tty.write_buf.count == 0);
     assert(tty_driver_out_len == 1);
     assert(tty_driver_out[0] == 'Z');
+}
+
+static void test_tty_driver_flush_chars_kicks_transmission(void) {
+    struct tty_driver driver = {
+        .write = mock_tty_write,
+        .write_room = mock_tty_write_room,
+        .flush_chars = mock_tty_flush_chars,
+    };
+    struct tty tty;
+
+    reset_env();
+    memset(&tty, 0, sizeof(tty));
+    tty.magic = TTY_MAGIC;
+    tty.driver = &driver;
+
+    tty_output_locked('Q', &tty);
+    tty_start_locked(&tty);
+
+    assert(tty_driver_flush_count == 1);
+    assert(tty_driver_out_len == 1);
+    assert(tty_driver_out[0] == 'Q');
 }
 
 static void test_tty_open_failure_restores_state(void) {
@@ -1185,6 +1213,7 @@ int main(void) {
     test_tty_input_parity_checks_and_stripping();
     test_tty_driver_install_and_remove_callbacks();
     test_tty_driver_put_char_fallback_path();
+    test_tty_driver_flush_chars_kicks_transmission();
     test_tty_open_close_refcounts_driver_transitions();
     test_tty_open_failure_restores_state();
     test_tiocsctty_assigns_owner();
