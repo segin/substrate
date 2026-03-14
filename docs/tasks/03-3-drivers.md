@@ -717,7 +717,7 @@
 - [ ] **Console Subsystem (`sys/console`):** (REQ: REQ-03-0617)
     - [ ] **TTY Subsystem (Core):** (REQ: REQ-03-0618)
         - [ ] **Structures (`tty_t`):** (REQ: REQ-03-0619)
-            - [ ] **Buffers & Queues:** (REQ: REQ-03-0620)
+            - [x] **Buffers & Queues:** (REQ: REQ-03-0620)
                 - [x] **Read Buffer (Raw Input):** Circular buffer for incoming IRQ data. (REQ: REQ-03-0621)
                 - [x] **Write Buffer (Output):** Queue for driver consumption. (REQ: REQ-03-0622)
                 - [x] **Canon Buffer (Cooked):** Line-editing buffer for `ICANON` mode. (REQ: REQ-03-0623)
