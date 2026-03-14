@@ -19,7 +19,7 @@
             - [x] `v_type`: VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD. (REQ: REQ-04-0004)
             - [x] `v_tag`: VT_UFS, VT_NFS, VT_EXT2, VT_PROCFS, etc. (REQ: REQ-04-0005)
             - [x] `v_op` (operations vector), `v_data` (private fs data). (REQ: REQ-04-0006)
-            - [ ] `v_mount` (pointer to mount point). (REQ: REQ-04-0007)
+            - [x] `v_mount` (pointer to mount point). (REQ: REQ-04-0007)
             - [ ] `v_usecount` (active references), `v_holdcount` (weak refs for cache). (REQ: REQ-04-0008)
             - [ ] `v_writecount` (writers count). (REQ: REQ-04-0009)
             - [ ] `v_flag`: VROOT, VTEXT, VSYSTEM, VISTTY, VEXECMAP, etc. (REQ: REQ-04-0010)
