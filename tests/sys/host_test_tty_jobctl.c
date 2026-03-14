@@ -1030,8 +1030,12 @@ static void test_tty_winsize_get_set_roundtrip(void) {
     memset(&winsize, 0, sizeof(winsize));
     winsize.ws_row = 42;
     winsize.ws_col = 132;
+    tty->pgrp = 77;
 
     assert(tty_ioctl_kern(tty, TIOCSWINSZ, (uintptr_t)&winsize) == 0);
+    assert(signal_count == 1);
+    assert(signal_pgrp[0] == 77);
+    assert(signal_sig[0] == SIGWINCH);
 
     memset(&out, 0, sizeof(out));
     assert(tty_ioctl_kern(tty, TIOCGWINSZ, (uintptr_t)&out) == 0);
