@@ -765,7 +765,7 @@
             - [ ] `tty_init()`: Initialize subsystem. (REQ: REQ-03-0665)
             - [x] `tty_alloc()`: Create a new TTY device. (REQ: REQ-03-0666)
             - [ ] `tty_register_device()`: Register with DevFS `/dev/ttyX`. (REQ: REQ-03-0667)
-            - [ ] `tty_open`, `tty_close`: Refcounting and session logic. (REQ: REQ-03-0668)
+            - [x] `tty_open`, `tty_close`: Refcounting and session logic. (REQ: REQ-03-0668)
             - [ ] `tty_read`, `tty_write`: Dispatch to ldisc. (REQ: REQ-03-0669)
             - [ ] `tty_ioctl`: (REQ: REQ-03-0670)
                 - [ ] `TIOCSCTTY`: Become controlling TTY. (REQ: REQ-03-0671)
