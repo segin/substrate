@@ -549,6 +549,8 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
         else if (c == tty->termios.c_cc[VSUSP]) sig = SIGTSTP;
         
         if (sig) {
+            tty_echo(tty, (unsigned char)c);
+            tty_start_locked(tty);
             if (tty->pgrp > 0) signal_send_group(tty->pgrp, sig);
             TTY_UNLOCK(tty);
             return;

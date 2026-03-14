@@ -325,6 +325,31 @@ static void test_tty_raw_echo_sequence(void) {
     tty_free(tty);
 }
 
+static void test_tty_signal_char_echo_sequence(void) {
+    struct tty_driver driver = {
+        .write = mock_tty_write,
+        .write_room = mock_tty_write_room,
+    };
+    struct tty *tty;
+
+    reset_env();
+
+    tty = tty_alloc(&driver, 4);
+    assert(tty != NULL);
+    tty->pgrp = 123;
+
+    tty_flip_buffer_push(tty, tty->termios.c_cc[VINTR]);
+
+    assert(signal_count == 1);
+    assert(signal_pgrp[0] == 123);
+    assert(signal_sig[0] == SIGINT);
+    assert(tty_driver_out_len == 2);
+    assert(tty_driver_out[0] == '^');
+    assert(tty_driver_out[1] == 'C');
+
+    tty_free(tty);
+}
+
 static void test_tiocspgrp_checks_sigttou_for_background_group(void) {
     reset_env();
 
@@ -364,6 +389,7 @@ int main(void) {
     test_tiocspgrp_checks_sigttou_for_background_group();
     test_tty_erase_echo_sequence();
     test_tty_raw_echo_sequence();
+    test_tty_signal_char_echo_sequence();
     puts("host_test_tty_jobctl: PASS");
     return 0;
 }
