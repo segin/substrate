@@ -328,6 +328,12 @@ void vgone(struct vnode *vp);
 /* Disassociate vnode from filesystem data */
 void vclean(struct vnode *vp, int flags);
 
+/* Invalidate all buffers for a vnode */
+int vinvalbuf(struct vnode *vp, int flags);
+
+/* Flush all vnodes for a mount point */
+int vflush(struct mount *mp, struct vnode *skipvp, int flags);
+
 /* Increment hold count (weak reference for caching) */
 void vhold(struct vnode *vp);
 

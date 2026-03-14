@@ -14,7 +14,7 @@
     > **Architecture:** BSD-style VFS with vnodes, mount points, namei
     > lookup, buffer cache, and per-filesystem operations vectors.
 
-    - [ ] **Core Structures & Life Cycle:** (REQ: REQ-04-0002)
+    - [x] **Core Structures & Life Cycle:** (REQ: REQ-04-0002)
         - [x] **`struct vnode`:** (REQ: REQ-04-0003)
             - [x] `v_type`: VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD. (REQ: REQ-04-0004)
             - [x] `v_tag`: VT_UFS, VT_NFS, VT_EXT2, VT_PROCFS, etc. (REQ: REQ-04-0005)
@@ -26,7 +26,7 @@
             - [x] `v_lock` (exclusive/shared lockmgr lock). (REQ: REQ-04-0011)
             - [x] `v_numoutput` (pending async writes for fsync). (REQ: REQ-04-0012)
             - [x] `v_hash` (hash chain for vnode cache lookup). (REQ: REQ-04-0013)
-            - [ ] **Life Cycle:** (REQ: REQ-04-0014)
+            - [x] **Life Cycle:** (REQ: REQ-04-0014)
                 - [x] `getnewvnode(tag, mp, ops, vpp)`: allocate from zone, recycle LRU if pool full. (REQ: REQ-04-0015)
                 - [x] `vref(vp)`: increment use count. (REQ: REQ-04-0016)
                 - [x] `vrele(vp)`: decrement use count, trigger inactive/reclaim if zero. (REQ: REQ-04-0017)
@@ -34,8 +34,8 @@
                 - [x] `vget(vp, flags)`: lock and vref (with LK_NOWAIT support). (REQ: REQ-04-0019)
                 - [x] `vgone(vp)`: mark for doom/destruction. (REQ: REQ-04-0020)
                 - [x] `vclean(vp, flags)`: disassociate from filesystem data. (REQ: REQ-04-0021)
-                - [ ] `vinvalbuf(vp, flags)`: invalidate all buffers for vnode. (REQ: REQ-04-0022)
-                - [ ] `vflush(mp, skipvp, flags)`: flush all vnodes for mount point. (REQ: REQ-04-0023)
+                - [x] `vinvalbuf(vp, flags)`: invalidate all buffers for vnode. (REQ: REQ-04-0022)
+                - [x] `vflush(mp, skipvp, flags)`: flush all vnodes for mount point. (REQ: REQ-04-0023)
         - [ ] **`struct mount`:** (REQ: REQ-04-0024)
             - [ ] `mnt_vnodecovered` (vnode mounted on). (REQ: REQ-04-0025)
             - [ ] `mnt_op` (VFS ops vector). (REQ: REQ-04-0026)
