@@ -768,7 +768,7 @@
             - [x] `tty_open`, `tty_close`: Refcounting and session logic. (REQ: REQ-03-0668)
             - [ ] `tty_read`, `tty_write`: Dispatch to ldisc. (REQ: REQ-03-0669)
             - [ ] `tty_ioctl`: (REQ: REQ-03-0670)
-                - [ ] `TIOCSCTTY`: Become controlling TTY. (REQ: REQ-03-0671)
+                - [x] `TIOCSCTTY`: Become controlling TTY. (REQ: REQ-03-0671)
                 - [ ] `TIOCSPGRP` / `TIOCGPGRP`: Manage foreground group. (REQ: REQ-03-0672)
                 - [ ] `TCGETS` / `TCSETS`: Termios get/set. (REQ: REQ-03-0673)
                 - [ ] `TIOCGWINSZ`: Window size. (REQ: REQ-03-0674)
