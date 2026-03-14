@@ -11,7 +11,7 @@
 #include <kern/panic.h>
 #include <vm/uma.h>
 
-#define MAXSYMLINKS 8
+/* MAXSYMLINKS defined in <sys/namei.h> */
 
 static uma_zone_t *namei_zone;
 

@@ -47,6 +47,7 @@ TAILQ_HEAD(vnode_list, vnode);
 #define	MNT_NODEV	0x00000010	/* don't interpret special files */
 #define	MNT_UNION	0x00000020	/* union with underlying filesystem */
 #define	MNT_ASYNC	0x00000040	/* file system written asynchronously */
+#define	MNT_LOCAL	0x00001000	/* filesystem is stored locally */
 
 /*
  * Exported mount flags.
@@ -84,6 +85,8 @@ struct mount {
     uint32_t            mnt_flag;           /* flags */
     struct vnode_list   mnt_vnodelist;      /* list of active vnodes */
     struct statfs       mnt_stat;           /* cached filesystem statistics */
+    int                 mnt_maxsymlinklen;  /* max symlink target inline */
+    uint32_t            mnt_lock;           /* mount-level rw lock state */
     struct fs_node      *mnt_node_covered;  /* Legacy: Node we mounted on */
     struct fs_node      *mnt_node_root;     /* Legacy: root node of this fs */
 };
