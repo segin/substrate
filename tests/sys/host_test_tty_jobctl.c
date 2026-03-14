@@ -181,6 +181,42 @@ static void test_tty_write_buffer_queues_and_drains_in_order(void) {
     assert(memcmp(tty_driver_out, "ABC", 3) == 0);
 }
 
+static void test_tty_canon_buffer_receives_cooked_line(void) {
+    struct tty tty;
+    uint32_t flags = 0;
+    char c;
+
+    reset_env();
+    memset(&tty, 0, sizeof(tty));
+    tty.magic = TTY_MAGIC;
+    tty.termios.c_lflag = ICANON;
+    tty.termios.c_cc[VERASE] = 127;
+    tty.termios.c_cc[VKILL] = 21;
+    tty.termios.c_cc[VWERASE] = 23;
+    tty.termios.c_cc[VEOF] = 4;
+
+    assert(tty_buf_put(&tty.raw_buf, 'c') == 0);
+    assert(tty_buf_put(&tty.raw_buf, 'a') == 0);
+    assert(tty_buf_put(&tty.raw_buf, 't') == 0);
+    assert(tty_buf_put(&tty.raw_buf, '\n') == 0);
+    assert(tty_buf_put(&tty.raw_buf, (char)0xFF) == 0);
+    tty.delct = 1;
+
+    assert(canon(&tty, &flags) == 0);
+    assert(tty.read_buf.count == 4);
+    assert(tty.raw_buf.count == 0);
+    assert(tty.delct == 0);
+
+    assert(tty_buf_get(&tty.read_buf, &c) == 1);
+    assert(c == 'c');
+    assert(tty_buf_get(&tty.read_buf, &c) == 1);
+    assert(c == 'a');
+    assert(tty_buf_get(&tty.read_buf, &c) == 1);
+    assert(c == 't');
+    assert(tty_buf_get(&tty.read_buf, &c) == 1);
+    assert(c == '\n');
+}
+
 static process_t *init_proc(int slot, int pid) {
     process_t *p = &processes[slot];
     memset(p, 0, sizeof(*p));
@@ -813,6 +849,7 @@ int main(void) {
     test_tty_register_device_publishes_devfs_node();
     test_tty_raw_buffer_wraps_as_circular_queue();
     test_tty_write_buffer_queues_and_drains_in_order();
+    test_tty_canon_buffer_receives_cooked_line();
     test_tty_open_close_refcounts_driver_transitions();
     test_tty_open_failure_restores_state();
     test_tiocsctty_assigns_owner();
