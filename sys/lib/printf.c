@@ -95,7 +95,7 @@ static void utoa_oct(char *buf, uint64_t val) {
     buf[i] = '\0';
 }
 
-// Floating point to ASCII (simplistic)
+// Floating point to ASCII
 static void ftoa(char *buf, size_t size, double val, int precision, int uppercase) {
     if (precision < 0) precision = 6;
     
@@ -118,9 +118,12 @@ static void ftoa(char *buf, size_t size, double val, int precision, int uppercas
     }
     
     // Rounding
-    double rounding = 0.5;
-    for (int i = 0; i < precision; i++) rounding /= 10.0;
-    val += rounding;
+    double multiplier = 1.0;
+    for (int i = 0; i < precision; i++) {
+        multiplier *= 10.0;
+    }
+
+    val += 0.5 / multiplier;
 
     int64_t integral = (int64_t)val;
     double fractional = val - (double)integral;
@@ -138,6 +141,11 @@ static void ftoa(char *buf, size_t size, double val, int precision, int uppercas
         for (int i = 0; i < precision && size > 1; i++) {
             fractional *= 10.0;
             int digit = (int)fractional;
+
+            // Handle edge cases from floating point precision issues
+            if (digit > 9) digit = 9;
+            if (digit < 0) digit = 0;
+
             *buf++ = digit + '0';
             size--;
             fractional -= digit;
