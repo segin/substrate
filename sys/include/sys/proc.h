@@ -61,6 +61,7 @@ typedef struct process {
     file_t *fds[MAX_FD]; // File Descriptor Table
     int next_fd;         // Hint for next free FD
     uint32_t fd_bitmap;  // Bitmap of allocated FDs
+    uint32_t fd_cloexec; // Bitmap of descriptors closed on successful exec
     fs_node_t *root_node; // Per-process root (for chroot)
     
     // Signals

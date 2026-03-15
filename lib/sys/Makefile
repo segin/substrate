@@ -5,7 +5,7 @@ AR = ar
 CFLAGS := -m32 -Wall -fno-builtin -nostdinc -I../../include -I../../sys/include -I../../sys
 ASFLAGS := -m32
 
-OBJS = syscall.o vm86.o proc.o sysctl.o sysinfo.o getpagesize.o mlock.o getpid.o getuid.o pgrp.o getrusage.o times.o ioctl.o stime.o ptrace.o reboot.o
+OBJS = syscall.o vm86.o proc.o sysctl.o sysinfo.o getpagesize.o mlock.o getpid.o getuid.o pgrp.o getrusage.o times.o ioctl.o stime.o ptrace.o reboot.o modify_ldt.o
 
 all: libsys.a
 
@@ -20,3 +20,6 @@ vm86.o: vm86.c
 
 clean:
 	rm -f *.o libsys.a
+
+modify_ldt.o: modify_ldt.c
+	$(CC) $(CFLAGS) -c -o $@ $<

@@ -130,10 +130,36 @@ static void test_orphaned_group_signals(void) {
     assert(stopped->sig_catch & sigmask(SIGCONT));
 }
 
+static void test_remove_member_checks_orphan_before_unlock(void) {
+    reset_env();
+
+    process_t *session_leader = alloc_proc(0, 40, 0);
+    current_process = session_leader;
+    assert(sys_setsid() == 40);
+
+    process_t *shell = alloc_proc(1, 41, 40);
+    proc_join_pgrp(shell, session_leader->p_pgrp);
+    assert(sys_setpgid(41, 0) == 0);
+
+    process_t *stopped = alloc_proc(2, 42, 41);
+    stopped->state = SSTOP;
+    stopped->p_parent = shell;
+    proc_join_pgrp(stopped, shell->p_pgrp);
+
+    last_signal_mask = 0;
+    pgrp_remove_proc(shell);
+
+    assert(shell->p_pgrp == NULL);
+    assert(stopped->p_pgrp != NULL);
+    assert(last_signal_mask & sigmask(SIGHUP));
+    assert(last_signal_mask & sigmask(SIGCONT));
+}
+
 int main(void) {
     test_setsid_and_ids();
     test_setpgid_paths();
     test_orphaned_group_signals();
+    test_remove_member_checks_orphan_before_unlock();
     puts("host_test_pgrp: PASS");
     return 0;
 }

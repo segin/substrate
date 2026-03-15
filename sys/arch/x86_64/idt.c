@@ -146,7 +146,9 @@ void idt_init(void) {
     idt_pointer.limit = sizeof(idt) - 1;
     idt_pointer.base = (uint64_t)&idt;
     
+#ifndef HOST_TEST
     __asm__ volatile("lidt %0" :: "m"(idt_pointer));
+#endif
 }
 
 /*
@@ -161,14 +163,18 @@ void idt_set_handler(int vector, uint64_t handler, uint8_t type) {
  * Enable interrupts
  */
 void idt_enable(void) {
+#ifndef HOST_TEST
     __asm__ volatile("sti");
+#endif
 }
 
 /*
  * Disable interrupts
  */
 void idt_disable(void) {
+#ifndef HOST_TEST
     __asm__ volatile("cli");
+#endif
 }
 
 /* Exception names for debugging */

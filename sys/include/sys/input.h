@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <sys/file.h> // for fs_node_t, off_t
+#include <sys/keycodes.h>
 
 // Event Types
 #define EV_SYN 0x00
@@ -11,17 +12,15 @@
 #define EV_ABS 0x03
 #define EV_MSC 0x04
 
-// Key Codes (Subset of Linux input.h)
-#define KEY_RESERVED 0
-#define KEY_ESC      1
-#define KEY_1        2
-#define KEY_2        3
-// ... extensive list omitted for now, drivers use raw scancodes or defined mappings
-
 // Relative Axes
 #define REL_X      0x00
 #define REL_Y      0x01
 #define REL_WHEEL  0x08
+
+// Mouse Buttons
+#define BTN_LEFT   0x110
+#define BTN_RIGHT  0x111
+#define BTN_MIDDLE 0x112
 
 // Input Event Structure (Linux compatible)
 typedef struct input_event {
@@ -62,6 +61,9 @@ static inline void input_report_key(input_dev_t *dev, uint16_t code, int32_t val
 }
 static inline void input_report_rel(input_dev_t *dev, uint16_t code, int32_t value) {
     input_report_event(dev, EV_REL, code, value);
+}
+static inline void input_report_abs(input_dev_t *dev, uint16_t code, int32_t value) {
+    input_report_event(dev, EV_ABS, code, value);
 }
 void input_sync(input_dev_t *dev); // Send EV_SYN
 

@@ -1,0 +1,18 @@
+.Dd March 12, 2026
+.Dt DMA_MAP 9
+.Os
+.Sh NAME
+.Nm dma_map_single ,
+.Nm dma_unmap_single
+.Nd map and unmap a single DMA buffer
+.Sh SYNOPSIS
+.In sys/dma.h
+.Ft dma_addr_t
+.Fn dma_map_single "void *cpu_addr" "size_t size" "enum dma_data_direction dir"
+.Ft void
+.Fn dma_unmap_single "dma_addr_t dma_addr" "size_t size" "enum dma_data_direction dir"
+.Sh DESCRIPTION
+These functions translate a kernel buffer into a device-visible DMA
+address and retire that mapping when the transfer is complete.
+.Sh SEE ALSO
+.Xr dma_alloc_coherent 9

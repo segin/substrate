@@ -744,7 +744,9 @@ static int modrm_sib_disp(enc_ctx_t *ctx, uint8_t reg_field, const as_x86_operan
             return 0;
         }
 
-        if (!m->has_disp && m->base != AS_X86_REG_EBP) {
+        if (m->force_disp32) {
+            mod = 2;
+        } else if (!m->has_disp && m->base != AS_X86_REG_EBP) {
             mod = 0;
         } else if (m->has_disp && is_disp8(m->disp)) {
             mod = 1;
@@ -905,7 +907,9 @@ static int modrm_sib_disp64(enc_ctx_t *ctx, as_x86_reg_t reg_field, const as_x86
             return 0;
         }
 
-        if (!m->has_disp && (m->base & 7) != AS_X86_REG_RBP) {
+        if (m->force_disp32) {
+            mod = 2;
+        } else if (!m->has_disp && (m->base & 7) != AS_X86_REG_RBP) {
             mod = 0;
         } else if (m->has_disp && is_disp8(m->disp)) {
             mod = 1;
@@ -1906,7 +1910,8 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         }
     } else if (streq_ci(insn->mnemonic, "loop") || streq_ci(insn->mnemonic, "loope") ||
                streq_ci(insn->mnemonic, "loopz") || streq_ci(insn->mnemonic, "loopne") ||
-               streq_ci(insn->mnemonic, "loopnz") || streq_ci(insn->mnemonic, "jecxz")) {
+               streq_ci(insn->mnemonic, "loopnz") || streq_ci(insn->mnemonic, "jecxz") ||
+               streq_ci(insn->mnemonic, "jrcxz")) {
         uint8_t opcode;
         int32_t rel;
 
@@ -5007,6 +5012,29 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             }
         } else {
             set_err(&ctx, "unsupported x86_64 ret form");
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "loop") || streq_ci(insn->mnemonic, "loope") ||
+               streq_ci(insn->mnemonic, "loopz") || streq_ci(insn->mnemonic, "loopne") ||
+               streq_ci(insn->mnemonic, "loopnz") || streq_ci(insn->mnemonic, "jecxz") ||
+               streq_ci(insn->mnemonic, "jrcxz")) {
+        uint8_t opcode;
+        int32_t rel;
+
+        if (!(insn->op_count == 1 && a->kind == AS_X86_OP_REL)) {
+            set_err(&ctx, "unsupported x86_64 loop form");
+            return -1;
+        }
+        rel = a->u.rel;
+        if (rel < -128 || rel > 127) {
+            set_err(&ctx, "x86_64 loop target out of range");
+            return -1;
+        }
+        if (streq_ci(insn->mnemonic, "loop")) opcode = 0xe2;
+        else if (streq_ci(insn->mnemonic, "loope") || streq_ci(insn->mnemonic, "loopz")) opcode = 0xe1;
+        else if (streq_ci(insn->mnemonic, "loopne") || streq_ci(insn->mnemonic, "loopnz")) opcode = 0xe0;
+        else opcode = 0xe3;
+        if (emit8(&ctx, opcode) != 0 || emit8(&ctx, (uint8_t)rel) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "lret") || streq_ci(insn->mnemonic, "retf") || streq_ci(insn->mnemonic, "lretw")) {

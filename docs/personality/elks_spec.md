@@ -17,15 +17,35 @@ The contract is intentionally split into:
 This is a personality contract. It does not redefine the native Substrate
 signal or process ABI. Translation happens at the ELKS personality boundary.
 
+## 1.1 Current implementation note
+
+This document is the target contract grounded in the upstream ELKS source tree
+under `/home/segin/elks`.
+
+Current Substrate runtime coverage is narrower than the full target:
+
+- direct upstream ELKS programs such as `ls`, `pwd`, `date`, `tty`, `stty`,
+  `uname`, `df`, `ps`, and `meminfo` are the current compatibility baseline
+- reaching the upstream ELKS shell prompt is part of that baseline
+- shell-mediated child process execution remains unstable and is not claimed as
+  complete by this document
+
 ## 2. Binary Format Contract
 
 Substrate ELKS execution targets the Minix-style 16-bit `a.out` format used by
 ELKS and `elksemu`.
 
-### 2.1 Recognized primary image types
+### 2.1 Recognized primary header contract
+
+The executable header contract Substrate targets is the packed
+`minix_exec_hdr` / `elksemu` shape documented in:
+
+- `/home/segin/elks/Documentation/text/binformat.txt`
+- `/home/segin/elks/elksemu/elks.h`
 
 The first 32 bits of the executable header are interpreted as a little-endian
-`type` field. The supported ELKS image identifiers are:
+`type` field encoding magic, flags, and CPU type. The currently supported ELKS
+image identifiers are:
 
 - `0x04100301` (`ELKS_COMBID`)
 - `0x04200301` (`ELKS_SPLITID`)
@@ -38,9 +58,9 @@ Operationally, this means the first four bytes are:
 - byte 2: `0x10`, `0x20`, or `0x30`
 - byte 3: `0x04`
 
-Substrate shall treat these values as the canonical ELKS `a.out` magic. It
-shall not treat a standalone `0x0301` or `0x0302` halfword as a sufficient
-ELKS executable discriminator.
+Substrate shall not identify ELKS binaries by a standalone `0x0301` halfword
+test. The discriminator is the full Minix-style 32-bit `type` field together
+with the rest of the packed ELKS executable header.
 
 ### 2.2 Header layout
 
@@ -124,6 +144,34 @@ resolution is:
 Substrate shall preserve 16-bit wrap semantics on the offset portion of ELKS
 user pointers.
 
+### 4.3 Memory-model scope
+
+Upstream ELKS toolchain and libc support multiple 16-bit models:
+
+- tiny
+- small
+- medium
+- compact
+- large
+
+However, upstream ELKS user documentation currently describes the practical
+load baseline as `-mcmodel=small`: up to `64KB` of code plus up to `64KB` of
+data+stack in separate segments.
+
+Substrate's first-class execution target shall therefore be:
+
+- small-model ELKS binaries
+
+The compatibility plan for broader models is:
+
+- tiny: compatible subset of small-model execution
+- medium: requires far-text entry and callback correctness
+- compact: requires far-data correctness across syscall pointer marshaling
+- large: requires both far-text and far-data correctness
+
+Substrate shall not claim medium/compact/large runtime compatibility merely
+because the loader recognizes their header variants.
+
 ## 5. Syscall ABI Contract
 
 ### 5.1 Supported syscall vector
@@ -146,6 +194,12 @@ Negative return values in `AX` represent `-errno` in ELKS-visible form.
 Arguments that represent user pointers are 16-bit ELKS addresses and must be
 translated through the ELKS process address model before being passed to native
 kernel services.
+
+For compact and large ELKS programs, upstream libc explicitly treats some user
+arguments as far pointers and uses `sys_setseg()` before issuing `INT 0x80`.
+Substrate shall treat the ELKS syscall ABI as a 16-bit ABI whose pointer
+interpretation depends on the ELKS program's memory model and wrapper
+convention, not as a flat near-pointer-only ABI.
 
 ### 5.3 `argv` / `envp` process-entry contract
 
@@ -247,8 +301,10 @@ shall contain, in order:
 - return CS
 - 16-bit signal number
 
-This matches `_signal_cbhandler(sig)` in ELKS libc, which completes delivery
-with `lret $2`.
+This matches the upstream ELKS libc `_signal_cbhandler(sig)` callback stubs and
+the ELKS kernel-side `arch_setup_sighandler_stack()` contract. For the current
+ELKS libc trees in `/home/segin/elks`, the callback completes delivery with a
+far return that discards the 16-bit signal number (`lret $2` / `retf 2`).
 
 Substrate shall not expose a separate ELKS-visible `sigreturn` syscall for this
 path. Return from the signal callback is part of the ELKS far-return frame

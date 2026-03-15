@@ -9,6 +9,18 @@
 #include <arch/i386/pmap.h>
 #include <sys/ldt.h>
 #include <vm/vm_map.h>
+#ifndef HOST_TEST
+#include <kern/cmdline.h>
+#include <kern/console.h>
+#endif
+
+#ifdef HOST_TEST
+#define PROC_WAIT_DEBUG_ENABLED() 0
+#define PROC_WAIT_DEBUG(...) ((void)0)
+#else
+#define PROC_WAIT_DEBUG_ENABLED() cmdline_debug_enabled("proc")
+#define PROC_WAIT_DEBUG(...) kprintf(__VA_ARGS__)
+#endif
 
 /*
  * find_waitable_child: Search for a child matching the wait criteria.
@@ -34,8 +46,20 @@ static process_t *find_waitable_child(pid_t pid, process_t *parent, int options,
     int exists = 0;
     int reason = 0;
 
+    if (PROC_WAIT_DEBUG_ENABLED()) {
+        PROC_WAIT_DEBUG("wait: parent=%d pid=%d children=%p options=%#x\n",
+                        parent->pid, pid, parent->p_children, options);
+    }
+
     while (child) {
         int match = 0;
+
+        if (PROC_WAIT_DEBUG_ENABLED()) {
+            PROC_WAIT_DEBUG("wait: scan child=%d state=%u flags=%#x sibling=%p parent=%d\n",
+                            child->pid, child->state, child->p_flag,
+                            child->p_sibling,
+                            child->p_parent ? child->p_parent->pid : -1);
+        }
 
         // PID matching logic
         if (pid > 0) {
@@ -85,6 +109,9 @@ static process_t *find_waitable_child(pid_t pid, process_t *parent, int options,
 
     if (out_any_exists) *out_any_exists = exists;
     if (out_reason) *out_reason = reason;
+    if (PROC_WAIT_DEBUG_ENABLED() && !found) {
+        PROC_WAIT_DEBUG("wait: no waitable child exists=%d\n", exists);
+    }
     return found;
 }
 

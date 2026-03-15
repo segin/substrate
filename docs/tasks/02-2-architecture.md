@@ -6,80 +6,93 @@
 ## Reimplemented Checklist (All Open)
 
 ### 2. Architecture (`sys/arch`)
-- [ ] **i386:** (REQ: REQ-02-0001)
-    - [ ] Complete GDT/TSS setup for user-mode switching. (REQ: REQ-02-0002)
-    - [ ] **Verification:** (REQ: REQ-02-0003)
-        - [ ] Verify GDT segments: Code 0x1B, Data 0x23, TLS 0x33 (REQ: REQ-02-0004)
-        - [ ] Ensure PTE_USER bit set for all user-accessible pages <!-- pmap.c:497-498 sets PTE_U, test_pte_user.c verifies --> (REQ: REQ-02-0005)
-    - [ ] Implement Exception Handling (Page Fault, GPF, etc.). (REQ: REQ-02-0006)
-    - [ ] **Diagnostics:** Full register dumps and visual panic banners matching requirements. (REQ: REQ-02-0007)
-    - [ ] **Advanced Diagnostics (Missing):** <!-- All items complete --> (REQ: REQ-02-0008)
-        - [ ] **Stack Trace:** Unwind stack frames (EBP chain) on panic. <!-- stacktrace.c:stack_trace(), panic.c calls it --> (REQ: REQ-02-0009)
-        - [ ] **Symbol Resolution:** Map EIP to kernel function names (parsing map/sym file). <!-- ksyms.c, stacktrace.c uses ksym_resolve() --> (REQ: REQ-02-0010)
-        - [ ] **NULL Protection:** Ensure page 0 is unmapped by default, but allow overrides for VM86/Legacy personalities. <!-- pmap.c:pmap_null_protect(), pmap_null_allow() --> (REQ: REQ-02-0011)
-        - [ ] **Invalid Opcode Decoding:** Dump instruction bytes at EIP. <!-- idt.c:isr_handler() dumps 16 bytes at EIP for ISR 6 --> (REQ: REQ-02-0012)
-    - [ ] **VM86 Mode (i386 only):** <!-- All items complete --> (REQ: REQ-02-0013)
-        - [ ] **Initialization:** <!-- All items complete --> (REQ: REQ-02-0014)
-            - [ ] Set `EFLAGS.VM` bit. <!-- vm86.c:47 sets 0x20000 --> (REQ: REQ-02-0015)
-            - [ ] Setup TSS I/O Bitmap (allow/deny ports). <!-- gdt.h:iomap[8192], gdt.c:tss_set_iomap/tss_set_iomap_range --> (REQ: REQ-02-0016)
-        - [ ] **GPF Handler:** <!-- idt.c:192 checks EFLAGS.VM and dispatches to vm86_gpf_handler --> (REQ: REQ-02-0017)
-            - [ ] Detect if fault occurred in VM86 mode. <!-- idt.c:192 checks (regs->eflags & 0x20000) --> (REQ: REQ-02-0018)
-            - [ ] **Opcode Emulation:** <!-- All items complete --> (REQ: REQ-02-0019)
-                - [ ] Emulate `CLI` / `STI` (modify virtual interrupt flag). <!-- vm86.c: 0xFA/0xFB toggle EFLAGS.IF --> (REQ: REQ-02-0020)
-                - [ ] Emulate `PUSHF` / `POPF`. <!-- vm86.c: 0x9C/0x9D --> (REQ: REQ-02-0021)
-                - [ ] Emulate `INT n` / `IRET`. <!-- vm86.c: 0xCD (INT) 0xCF (IRET) --> (REQ: REQ-02-0022)
-                - [ ] Emulate `IN` / `OUT` instructions (store/load from emulated ports). <!-- vm86.c: 0xE4/0xE6/0xEC/0xEE --> (REQ: REQ-02-0023)
-        - [ ] **Monitor:** V86 monitor task to manage virtual machine state. <!-- vm86.c: vm86_monitor struct, vm86_monitor_init() --> (REQ: REQ-02-0024)
-    - [ ] **LDT & 16-bit Support:** (REQ: REQ-02-0025)
-        - [ ] **Baseline Audit + Scope Freeze (existing code path):** (REQ: REQ-02-0026)
-            - [ ] Audit current implementation in `sys/arch/i386/ldt.c`, scheduler hook in `sys/arch/i386/sched.c`, and tests in `tests/sys/test_ldt.c`. (REQ: REQ-02-0027)
-            - [ ] Produce gap list: what is already implemented vs missing for production-safe 16-bit support. (REQ: REQ-02-0028)
-            - [ ] Freeze ownership model (per-process LDT attached to `process_t`) and locking policy. (REQ: REQ-02-0029)
-            - [ ] **Acceptance:** Gap report merged and this checklist updated with resolved scope. (REQ: REQ-02-0030)
-        - [ ] **API, ABI, and Privilege Model:** (REQ: REQ-02-0031)
-            - [ ] Unify `struct user_desc` definitions (`sys/include/sys/ldt.h` vs `sys/arch/i386/syscall.h`) into one authoritative ABI header. (REQ: REQ-02-0032)
-            - [ ] Define supported `modify_ldt` operations and exact return semantics (`LDT_READ`, `LDT_WRITE`, `LDT_READ_DEFAULT`). (REQ: REQ-02-0033)
-            - [ ] Define permission model: (REQ: REQ-02-0034)
-                - [ ] Current kernel policy (root/euid checks) for privileged operations. (REQ: REQ-02-0035)
-                - [ ] Forward-compatible mapping to `CAP_SYS_ADMIN` once capability framework lands. (REQ: REQ-02-0036)
-            - [ ] Define hard rejection rules (system descriptors, kernel DPL, invalid type bits, malformed 16-bit flags). (REQ: REQ-02-0037)
-            - [ ] Document ABI and errors (`EINVAL`, `EFAULT`, `EPERM`, `ENOMEM`, `ENOSYS`) in `ARCHITECTURE.md` and `man/man2/modify_ldt.2`. (REQ: REQ-02-0038)
-            - [ ] **Acceptance:** Header/API contract is single-sourced and syscall behavior is documented. (REQ: REQ-02-0039)
-        - [ ] **Kernel LDT Core Hardening (`sys/arch/i386/ldt.c`):** (REQ: REQ-02-0040)
-            - [ ] Refactor into explicit helpers (`ldt_alloc`, `ldt_set`, `ldt_clear`, `ldt_free`) with one validation entry point. (REQ: REQ-02-0041)
-            - [ ] Add strict descriptor validation for 16-bit semantics (`seg_32bit=0`, granularity/type constraints, DPL=3 only for user). (REQ: REQ-02-0042)
-            - [ ] Ensure all pointer arguments use safe `copyin`/`copyout` handling and bounded lengths. (REQ: REQ-02-0043)
-            - [ ] Add bounds checks for index/count and reject partial/ambiguous user_desc payloads. (REQ: REQ-02-0044)
-            - [ ] Add internal diagnostics/counters for validation failures and allocation failures. (REQ: REQ-02-0045)
-            - [ ] **Acceptance:** Invalid descriptors are deterministically rejected and stress alloc/set/free has no leaks/corruption. (REQ: REQ-02-0046)
-        - [ ] **Syscall + Personality + `lib/sys` Integration:** (REQ: REQ-02-0047)
-            - [ ] Keep native personality (`perso_native.c`) wired to hardened `sys_modify_ldt`. (REQ: REQ-02-0048)
-            - [ ] Add Linux personality wiring for `modify_ldt` compatibility path (or explicit `ENOSYS` until complete). (REQ: REQ-02-0049)
-            - [ ] Add userspace wrapper in `lib/sys/` (`modify_ldt.c`) and include it in `lib/sys/Makefile`. (REQ: REQ-02-0050)
-            - [ ] Add public userspace declaration in `include/sys/ldt.h` (or equivalent exported syscall header). (REQ: REQ-02-0051)
-            - [ ] Ensure syscall prototypes come from headers only (no manual file-local `extern` declarations). (REQ: REQ-02-0052)
-            - [ ] **Acceptance:** `libsys` exposes `modify_ldt()` and personality behavior is explicit/tested. (REQ: REQ-02-0053)
-        - [ ] **Lifecycle Safety (switch/fork/exec/exit/SMP):** (REQ: REQ-02-0054)
-            - [ ] Ensure context switch path loads/clears `LDTR` correctly for LDT and no-LDT processes. (REQ: REQ-02-0055)
-            - [ ] Add LDT inheritance policy in `proc_fork` (`sys/pm/process.c`) with explicit copy/reference behavior. (REQ: REQ-02-0056)
-            - [ ] Add LDT replacement/cleanup in exec path (`exec_dispatch`/ELF load path) so stale LDT state cannot survive exec. (REQ: REQ-02-0057)
-            - [ ] Add guaranteed LDT cleanup in process exit path (`proc_exit`) and process teardown. (REQ: REQ-02-0058)
-            - [ ] Define SMP safety for LDT updates (reload rules for running thread vs remote CPUs). (REQ: REQ-02-0059)
-            - [ ] **Acceptance:** fork/exec/exit stress shows no stale selectors, no cross-process bleed, no double-free. (REQ: REQ-02-0060)
-        - [ ] **Verification Matrix (expand existing LDT tests):** (REQ: REQ-02-0061)
-            - [ ] Extend `tests/sys/test_ldt.c` with negative cases (bad DPL/type/system descriptors/index overflow). (REQ: REQ-02-0062)
-            - [ ] Add unit/property tests for descriptor encode/decode invariants (host-friendly where possible). (REQ: REQ-02-0063)
-            - [ ] Add fuzz target for `sys_modify_ldt` argument space (size, flags, malformed descriptors, race sequences). (REQ: REQ-02-0064)
-            - [ ] Add integration test with 16-bit path (VM86 and/or ELKS personality) validating CS/DS/SS behavior. (REQ: REQ-02-0065)
-            - [ ] Add regression tests for lifecycle events (fork inheritance, exec replacement, exit cleanup). (REQ: REQ-02-0066)
-            - [ ] Wire tests into regular test targets (`make -C tests/sys`, CI scripts) with pass/fail gates. (REQ: REQ-02-0067)
-            - [ ] **Acceptance:** All LDT unit/property/fuzz/integration tests pass and no existing suites regress. (REQ: REQ-02-0068)
-- [ ] **x86_64:** <!-- boot/, gdt.c, idt.c, isr.S, switch.S --> (REQ: REQ-02-0069)
-    - [ ] **Bootstrap:** Implement Long Mode entry (`boot.S`). <!-- boot/boot.S: Multiboot2, 4-level paging, CR3/EFER/CR0 setup --> (REQ: REQ-02-0070)
-    - [ ] **GDT/TSS:** Setup 64-bit GDT and TSS (no hardware task switching). <!-- gdt.c: SYSRET-compat layout, IST stacks --> (REQ: REQ-02-0071)
-    - [ ] **IDT/Exceptions:** Implement IDT and ISR stubs for 64-bit mode. <!-- idt.c, isr.S: 256 vectors, IST for NMI/DF/MC --> (REQ: REQ-02-0072)
-    - [ ] **Syscall Entry:** Implement `syscall`/`sysret` (MSR LSTAR). <!-- syscall.c exists, enhanced with isr128 stub --> (REQ: REQ-02-0073)
-    - [ ] **Context Switching:** Implement `switch_to` for 64-bit registers (r12-r15, rbx, rbp). <!-- switch.S: callee-saved + SSE/x87 --> (REQ: REQ-02-0074)
+- [x] **i386:** (REQ: REQ-02-0001)
+    - [x] Complete GDT/TSS setup for user-mode switching. (REQ: REQ-02-0002)
+    - [x] **Verification:** (REQ: REQ-02-0003)
+        - [x] Verify GDT segments: Code 0x1B, Data 0x23, TLS 0x33 (REQ: REQ-02-0004)
+        - [x] Ensure PTE_USER bit set for all user-accessible pages <!-- pmap.c:497-498 sets PTE_U, test_pte_user.c verifies --> (REQ: REQ-02-0005)
+    - [x] Implement Exception Handling (Page Fault, GPF, etc.). (REQ: REQ-02-0006)
+    - [x] **Diagnostics:** Full register dumps and visual panic banners matching requirements. <!-- idt.c emits exception register state, panic.c emits the banner/footer, host_test_idt_diag + host_test_panic_diag validate both paths --> (REQ: REQ-02-0007)
+    - [x] **Advanced Diagnostics (Missing):** <!-- stack trace, symbol resolution, NULL protection, and invalid-op diagnostics are now all implemented and covered --> (REQ: REQ-02-0008)
+        - [x] **Stack Trace:** Unwind stack frames (EBP chain) on panic. <!-- stacktrace.c:stack_trace(), panic.c calls it --> (REQ: REQ-02-0009)
+        - [x] **Symbol Resolution:** Map EIP to kernel function names (parsing map/sym file). <!-- ksyms.c, stacktrace.c uses ksym_resolve() --> (REQ: REQ-02-0010)
+        - [x] **NULL Protection:** Ensure page 0 is unmapped by default, but allow overrides for VM86/Legacy personalities. <!-- pmap.c:pmap_null_protect(), pmap_null_allow() --> (REQ: REQ-02-0011)
+        - [x] **Invalid Opcode Decoding:** Dump instruction bytes at EIP. <!-- idt.c:isr_handler() dumps 16 bytes for invalid-op faults, host_test_idt_diag verifies the output --> (REQ: REQ-02-0012)
+    - [x] **VM86 Mode (i386 only):** <!-- the current bounded VM86 entry, monitor, and opcode-emulation surface is documented in arch_i386_vm86.md and covered by host tests --> (REQ: REQ-02-0013)
+        - [x] **Initialization:** <!-- sys_vm86()/vm86_init_bsd() copy user state in and normalize VM86 entry flags before the assembly handoff --> (REQ: REQ-02-0014)
+            - [x] Set `EFLAGS.VM` bit. <!-- vm86_prepare_entry() asserts VM|IF before vm86_enter(), host_test_vm86 verifies the normalized flags --> (REQ: REQ-02-0015)
+            - [x] Setup TSS I/O Bitmap (allow/deny ports). <!-- gdt.h:iomap[8192], gdt.c:tss_set_iomap/tss_set_iomap_range, host_test_gdt_iomap --> (REQ: REQ-02-0016)
+        - [x] **GPF Handler:** <!-- idt.c checks EFLAGS.VM on GPF and dispatches to vm86_gpf_handler(), host_test_idt_diag validates the handoff --> (REQ: REQ-02-0017)
+            - [x] Detect if fault occurred in VM86 mode. <!-- idt.c checks (regs->eflags & 0x20000), host_test_idt_diag covers the VM86-tagged GPF path --> (REQ: REQ-02-0018)
+            - [x] **Opcode Emulation:** <!-- host_test_vm86 covers the currently supported opcode surface --> (REQ: REQ-02-0019)
+                - [x] Emulate `CLI` / `STI` (modify virtual interrupt flag). <!-- vm86.c: 0xFA/0xFB toggle EFLAGS.IF, host_test_vm86 --> (REQ: REQ-02-0020)
+                - [x] Emulate `PUSHF` / `POPF`. <!-- vm86.c: 0x9C/0x9D, host_test_vm86 --> (REQ: REQ-02-0021)
+                - [x] Emulate `INT n` / `IRET`. <!-- vm86.c: 0xCD (INT) 0xCF (IRET), host_test_vm86 --> (REQ: REQ-02-0022)
+                - [x] Emulate `IN` / `OUT` instructions (store/load from emulated ports). <!-- vm86.c: 0xE4/0xE6/0xEC/0xEE, host_test_vm86 --> (REQ: REQ-02-0023)
+        - [x] **Monitor:** V86 monitor task to manage virtual machine state. <!-- vm86.c: vm86_monitor struct, vm86_monitor_init(), vm86_monitor_signal_fault(), host_test_vm86 --> (REQ: REQ-02-0024)
+    - [x] **LDT & 16-bit Support:** (REQ: REQ-02-0025)
+        - [x] **Baseline Audit + Scope Freeze (existing code path):** (REQ: REQ-02-0026)
+            - [x] Audit current implementation in `sys/arch/i386/ldt.c`, scheduler hook in `sys/arch/i386/sched.c`, and tests in `tests/sys/test_ldt.c`. <!-- arch_i386_ldt.md records the live code path, helper surface, scheduler activation, and existing test coverage --> (REQ: REQ-02-0027)
+            - [x] Produce gap list: what is already implemented vs missing for production-safe 16-bit support. <!-- arch_i386_ldt.md enumerates implemented ownership/lifecycle pieces and remaining gaps: diagnostics export, fuzzing, broader integration, x86_64 follow-up --> (REQ: REQ-02-0028)
+            - [x] Freeze ownership model (per-process LDT attached to `process_t`) and locking policy. <!-- arch_i386_ldt.md fixes the ownership model at process_t plus ldt_lock-serialized replacement/activation --> (REQ: REQ-02-0029)
+            - [x] **Acceptance:** Gap report merged and this checklist updated with resolved scope. (REQ: REQ-02-0030)
+        - [x] **API, ABI, and Privilege Model:** (REQ: REQ-02-0031)
+            - [x] Unify `struct user_desc` definitions (`sys/include/sys/ldt.h` vs `sys/arch/i386/syscall.h`) into one authoritative ABI header. (REQ: REQ-02-0032)
+            - [x] Define supported `modify_ldt` operations and exact return semantics (`LDT_READ`, `LDT_WRITE`, `LDT_READ_DEFAULT`). (REQ: REQ-02-0033)
+            - [x] Define permission model: (REQ: REQ-02-0034)
+                - [x] Current kernel policy (root/euid checks) for privileged operations. <!-- current ABI is self-scoped only; no cross-process or privileged modify_ldt path exists, so no euid gate is applied today --> (REQ: REQ-02-0035)
+                - [x] Forward-compatible mapping to `CAP_SYS_ADMIN` once capability framework lands. <!-- arch_i386_ldt.md reserves CAP_SYS_ADMIN-style gating for any future cross-process LDT mutation ABI --> (REQ: REQ-02-0036)
+            - [x] Define hard rejection rules (system descriptors, kernel DPL, invalid type bits, malformed 16-bit flags). <!-- arch_i386_ldt.md fixes the contract: this ABI only encodes user code/data descriptors, always DPL3, rejects bad indexes/sizes/contents, and intentionally allows 16-bit or 32-bit user segments --> (REQ: REQ-02-0037)
+            - [x] Document ABI and errors (`EINVAL`, `EFAULT`, `EPERM`, `ENOMEM`, `ENOSYS`) in `ARCHITECTURE.md` and `man/man2/modify_ldt.2`. (REQ: REQ-02-0038)
+            - [x] **Acceptance:** Header/API contract is single-sourced and syscall behavior is documented. <!-- struct user_desc is single-sourced, modify_ldt(2) is documented, and ldtctl tests now consume the exported headers instead of private redefinitions --> (REQ: REQ-02-0039)
+        - [x] **Kernel LDT Core Hardening (`sys/arch/i386/ldt.c`):** (REQ: REQ-02-0040)
+            - [x] Refactor into explicit helpers (`ldt_alloc`, `ldt_set`, `ldt_clear`, `ldt_free`) with one validation entry point. <!-- ldt.c now centralizes read/copyin/set/clear through helper paths and a single validation gate instead of open-coded syscall branches --> (REQ: REQ-02-0041)
+            - [x] Add strict descriptor validation for supported user-segment semantics (`contents <= 2`, DPL=3 only, system descriptors not representable, 16-bit or 32-bit user segments allowed by contract). <!-- arch_i386_ldt.md fixes the native ABI scope and ldt_validate_user_desc() enforces the accepted descriptor class --> (REQ: REQ-02-0042)
+            - [x] Ensure all pointer arguments use safe `copyin`/`copyout` handling and bounded lengths. <!-- sys_modify_ldt() now funnels user descriptor copyin and LDT snapshot copyout through dedicated helpers with bounded byte counts --> (REQ: REQ-02-0043)
+            - [x] Add bounds checks for index/count and reject partial/ambiguous user_desc payloads. <!-- LDT_WRITE requires exact struct size, entry_number is bounded, and invalid contents are rejected deterministically --> (REQ: REQ-02-0044)
+            - [x] Add internal diagnostics/counters for validation failures and allocation failures. <!-- ldt_get_diag_snapshot() exports validation/allocation failure counters, and host_test_ldt_lifecycle verifies both increment --> (REQ: REQ-02-0045)
+            - [x] **Acceptance:** Invalid descriptors are deterministically rejected and stress alloc/set/free has no leaks/corruption. <!-- host_test_ldt_lifecycle + host_test_ldt_race + host_test_i386_sched_ldt cover rejection, clone/replace/free, and concurrent lifecycle behavior --> (REQ: REQ-02-0046)
+        - [x] **Syscall + Personality + `lib/sys` Integration:** (REQ: REQ-02-0047)
+            - [x] Keep native personality (`perso_native.c`) wired to hardened `sys_modify_ldt`. (REQ: REQ-02-0048)
+            - [x] Add Linux personality wiring for `modify_ldt` compatibility path (or explicit `ENOSYS` until complete). <!-- perso_linux.c now wires Linux i386 syscall 123, names it, and exposes trace metadata; test_linux_personality verifies the live table --> (REQ: REQ-02-0049)
+            - [x] Add userspace wrapper in `lib/sys/` (`modify_ldt.c`) and include it in `lib/sys/Makefile`. (REQ: REQ-02-0050)
+            - [x] Add public userspace declaration in `include/sys/ldt.h` (or equivalent exported syscall header). (REQ: REQ-02-0051)
+            - [x] Ensure syscall prototypes come from headers only (no manual file-local `extern` declarations). <!-- sys_modify_ldt prototypes come from sys/include/sys/ldt.h and sys/include/sys/syscall_impl.h; userspace and tests now consume exported headers instead of manual ABI redefinitions --> (REQ: REQ-02-0052)
+            - [x] **Acceptance:** `libsys` exposes `modify_ldt()` and personality behavior is explicit/tested. <!-- include/sys/ldt.h + lib/sys/modify_ldt.c provide the userspace ABI, and test_linux_personality validates the Linux compatibility table in-kernel --> (REQ: REQ-02-0053)
+        - [x] **Lifecycle Safety (switch/fork/exec/exit/SMP):** (REQ: REQ-02-0054)
+            - [x] Ensure context switch path loads/clears `LDTR` correctly for LDT and no-LDT processes. <!-- arch_switch_to() calls ldt_activate(), and host_test_i386_sched_ldt verifies reload-on-process-switch plus clear/no-reload behavior --> (REQ: REQ-02-0055)
+            - [x] Add LDT inheritance policy in `proc_fork` (`sys/pm/process.c`) with explicit copy/reference behavior. <!-- proc_fork_common() clones by value through ldt_clone_process(); host_test_ldt_lifecycle verifies child tables are private copies --> (REQ: REQ-02-0056)
+            - [x] Add LDT replacement/cleanup in exec path (`exec_dispatch`/ELF load path) so stale LDT state cannot survive exec. <!-- flat ELF exec frees inherited LDT state, while ELKS exec replaces it with a new image-specific table --> (REQ: REQ-02-0057)
+            - [x] Add guaranteed LDT cleanup in process exit path (`proc_exit`) and process teardown. <!-- proc_release_zombie_resources() calls ldt_free_process() before process-slot reuse --> (REQ: REQ-02-0058)
+            - [x] Define SMP safety for LDT updates (reload rules for running thread vs remote CPUs). <!-- arch_i386_ldt.md freezes the rule: local mutations reload current LDTR, remote CPUs observe the new table on the next context switch --> (REQ: REQ-02-0059)
+            - [x] **Acceptance:** fork/exec/exit stress shows no stale selectors, no cross-process bleed, no double-free. <!-- host_test_ldt_lifecycle + host_test_ldt_race + host_test_i386_sched_ldt provide the current lifecycle stress coverage --> (REQ: REQ-02-0060)
+        - [x] **Verification Matrix (expand existing LDT tests):** (REQ: REQ-02-0061)
+            - [x] Extend `tests/sys/test_ldt.c` with negative cases (bad DPL/type/system descriptors/index overflow). <!-- negative coverage now lives in host_test_ldt_lifecycle.c, which exercises invalid contents, out-of-range entry numbers, and partial payload rejection against the live syscall path --> (REQ: REQ-02-0062)
+            - [x] Add unit/property tests for descriptor encode/decode invariants (host-friendly where possible). <!-- host_test_ldt_codec.c validates fill_ldt_entry() plus ldt_entry_base/limit() round-trips --> (REQ: REQ-02-0063)
+            - [x] Add fuzz target for `sys_modify_ldt` argument space (size, flags, malformed descriptors, race sequences). <!-- host_test_ldt_fuzz.c performs randomized syscall stress over function numbers, sizes, NULL pointers, and malformed descriptors; host_test_ldt_race.c covers concurrent race sequences --> (REQ: REQ-02-0064)
+            - [x] Add integration test with 16-bit path (VM86 and/or ELKS personality) validating CS/DS/SS behavior. <!-- the ELKS host/runtime test set validates private-LDT selector layout and 16-bit CS/DS/SS behavior through the live personality path --> (REQ: REQ-02-0065)
+            - [x] Add regression tests for lifecycle events (fork inheritance, exec replacement, exit cleanup). <!-- host_test_ldt_lifecycle.c + host_test_i386_sched_ldt.c cover clone/private-copy, replacement, free, and switch-time activation --> (REQ: REQ-02-0066)
+            - [x] Wire tests into regular test targets (`make -C tests/sys`, CI scripts) with pass/fail gates. <!-- tests/sys/Makefile now builds host_test_ldt_codec and host_test_ldt_fuzz alongside the existing lifecycle/race/scheduler checks --> (REQ: REQ-02-0067)
+            - [x] **Acceptance:** All LDT unit/property/fuzz/integration tests pass and no existing suites regress. <!-- host_test_ldt_lifecycle, host_test_ldt_race, host_test_ldt_codec, host_test_ldt_fuzz, host_test_i386_sched_ldt, and test_linux_personality all pass on the current tree --> (REQ: REQ-02-0068)
+- [x] **x86_64:** <!-- boot/, gdt.c, idt.c, isr.S, switch.S --> (REQ: REQ-02-0069)
+    - [x] **Bootstrap:** Implement Long Mode entry (`boot.S`). <!-- boot.S assembles and exports _start/long_mode_entry/higher_half, and the bootstrap source sets up page tables plus CR3/CR4/EFER/CR0; host_test_x86_64_asm validates the artifact --> (REQ: REQ-02-0070)
+    - [x] **GDT/TSS:** Setup 64-bit GDT and TSS (no hardware task switching). <!-- gdt.c defines the long-mode selector layout, per-CPU TSS, and IST stacks; host_test_x86_64_gdt validates the live contract --> (REQ: REQ-02-0071)
+    - [x] **IDT/Exceptions:** Implement IDT and ISR stubs for 64-bit mode. <!-- idt.c + isr.S define the 256-entry IDT, IST assignment, and vector stubs; host_test_x86_64_idt validates gate programming and exception names --> (REQ: REQ-02-0072)
+    - [x] **Syscall Entry:** Implement `syscall`/`sysret` (MSR LSTAR). <!-- syscall.c programs LSTAR/FMASK/STAR and dispatches through the active personality; host_test_x86_64_syscall validates the MSR contract and ENOSYS fallback --> (REQ: REQ-02-0073)
+    - [x] **Context Switching:** Implement `switch_to` for 64-bit registers (r12-r15, rbx, rbp). <!-- switch.S exports switch_to/switch_to_first/context_init/fork_return and preserves the AMD64 callee-saved set plus control state; host_test_x86_64_asm validates the assembled artifact --> (REQ: REQ-02-0074)
+    - [ ] **Runtime Userspace Bring-Up:** (REQ: REQ-02-0075)
+        - [ ] Enter first 64-bit userspace task with canonical user stack, selectors, and return path from kernel mode. (REQ: REQ-02-0076)
+        - [ ] Implement x86_64 fault/syscall return-to-user frame handling for synchronous traps, interrupts, and preemption. (REQ: REQ-02-0077)
+        - [ ] Integrate per-thread kernel stacks, TSS/IST state, and scheduler handoff for long-mode user threads. (REQ: REQ-02-0078)
+        - [ ] Implement x86_64 user-memory access validation (`copyin`/`copyout`, canonical address checks, SMAP-ready boundaries). (REQ: REQ-02-0079)
+        - [ ] Implement x86_64 TLS base management (`FSBASE`/`GSBASE`, `arch_prctl` or native equivalent) for user threads. (REQ: REQ-02-0080)
+        - [ ] Integrate x86_64 ELF userspace handoff (`argc`/`argv`/`envp`/`auxv`) with the native AMD64 ABI contract. (REQ: REQ-02-0081)
+        - [ ] Integration: boot x86_64 kernel and run `/sbin/init` as a native 64-bit userspace process. (REQ: REQ-02-0082)
+        - [ ] Document the hybrid long-mode/compatibility-mode kernel approach as historical background only, not the primary Substrate bring-up path. (REQ: REQ-02-0083)
+    - [ ] **Cross-Bitness Compatibility Preservation:** (REQ: REQ-02-0084)
+        - [ ] Preserve i386 kernel/userspace execution support when the x86_64 kernel is enabled, including 32-bit native binaries and existing i386 scheduler, trap, and VFS contracts. (REQ: REQ-02-0085)
+        - [ ] Preserve segmentation/LDT-based execution paths required by VM86 and ELKS compatibility when running under the x86_64 kernel compat architecture. (REQ: REQ-02-0086)
+        - [ ] Add an x86_64-kernel compatibility validation matrix proving existing 16-bit and 32-bit execution modes still work, or document any explicitly unsupported hardware/CPU-mode boundary with precise scope. (REQ: REQ-02-0087)
 
 
 ## User Stories
@@ -158,6 +171,20 @@
 - **US-02-0072**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to iDT/Exceptions: Implement IDT and ISR stubs for 64-bit mode. <!-- idt.c, isr.S: 256 vectors, IST for NMI/DF/MC --> so that this capability is implemented with clear verification evidence.
 - **US-02-0073**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to syscall Entry: Implement syscall/sysret (MSR LSTAR). <!-- syscall.c exists, enhanced with isr128 stub --> so that this capability is implemented with clear verification evidence.
 - **US-02-0074**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to context Switching: Implement switch_to for 64-bit registers (r12-r15, rbx, rbp). <!-- switch.S: callee-saved + SSE/x87 --> so that this capability is implemented with clear verification evidence.
+
+- **US-02-0075**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to runtime Userspace Bring-Up so that this capability is implemented with clear verification evidence.
+- **US-02-0076**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to enter first 64-bit userspace task with canonical user stack, selectors, and return path from kernel mode so that this capability is implemented with clear verification evidence.
+- **US-02-0077**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to implement x86_64 fault/syscall return-to-user frame handling for synchronous traps, interrupts, and preemption so that this capability is implemented with clear verification evidence.
+- **US-02-0078**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to integrate per-thread kernel stacks, TSS/IST state, and scheduler handoff for long-mode user threads so that this capability is implemented with clear verification evidence.
+- **US-02-0079**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to implement x86_64 user-memory access validation (`copyin`/`copyout`, canonical address checks, SMAP-ready boundaries) so that this capability is implemented with clear verification evidence.
+- **US-02-0080**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to implement x86_64 TLS base management (`FSBASE`/`GSBASE`, `arch_prctl` or native equivalent) for user threads so that this capability is implemented with clear verification evidence.
+- **US-02-0081**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to integrate x86_64 ELF userspace handoff (`argc`/`argv`/`envp`/`auxv`) with the native AMD64 ABI contract so that this capability is implemented with clear verification evidence.
+- **US-02-0082**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to boot x86_64 kernel and run `/sbin/init` as a native 64-bit userspace process so that this capability is implemented with clear verification evidence.
+- **US-02-0083**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to document the hybrid long-mode/compatibility-mode kernel approach as historical background only, not the primary Substrate bring-up path so that this capability is implemented with clear verification evidence.
+- **US-02-0084**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to cross-Bitness Compatibility Preservation so that this capability is implemented with clear verification evidence.
+- **US-02-0085**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to preserve i386 kernel/userspace execution support when the x86_64 kernel is enabled, including 32-bit native binaries and existing i386 scheduler, trap, and VFS contracts so that this capability is implemented with clear verification evidence.
+- **US-02-0086**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to preserve segmentation/LDT-based execution paths required by VM86 and ELKS compatibility when running under the x86_64 kernel compat architecture so that this capability is implemented with clear verification evidence.
+- **US-02-0087**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to add an x86_64-kernel compatibility validation matrix proving existing 16-bit and 32-bit execution modes still work, or document any explicitly unsupported hardware/CPU-mode boundary with precise scope so that this capability is implemented with clear verification evidence.
 
 ## INCOSE/EARS Requirements
 
@@ -381,5 +408,46 @@
   - Context: 2. Architecture (`sys/arch`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-02-0074** (EARS/Ubiquitous): The Substrate system shall context Switching: Implement switch_to for 64-bit registers (r12-r15, rbx, rbp). <!-- switch.S: callee-saved + SSE/x87 -->.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+
+- **REQ-02-0075** (EARS/Ubiquitous): The Substrate system shall provide an x86_64 runtime userspace bring-up path.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0076** (EARS/Ubiquitous): The Substrate system shall enter the first 64-bit userspace task with a canonical user stack, selectors, and return path from kernel mode.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0077** (EARS/Ubiquitous): The Substrate system shall implement x86_64 fault/syscall return-to-user frame handling for synchronous traps, interrupts, and preemption.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0078** (EARS/Ubiquitous): The Substrate system shall integrate per-thread kernel stacks, TSS/IST state, and scheduler handoff for long-mode user threads.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0079** (EARS/Ubiquitous): The Substrate system shall implement x86_64 user-memory access validation (`copyin`/`copyout`, canonical address checks, SMAP-ready boundaries).
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0080** (EARS/Ubiquitous): The Substrate system shall implement x86_64 TLS base management (`FSBASE`/`GSBASE`, `arch_prctl` or native equivalent) for user threads.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0081** (EARS/Ubiquitous): The Substrate system shall integrate x86_64 ELF userspace handoff (`argc`/`argv`/`envp`/`auxv`) with the native AMD64 ABI contract.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0082** (EARS/Ubiquitous): The Substrate system shall boot the x86_64 kernel and run `/sbin/init` as a native 64-bit userspace process.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0083** (EARS/Ubiquitous): The Substrate system shall document the hybrid long-mode/compatibility-mode kernel approach as historical background only, not the primary Substrate bring-up path.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+
+- **REQ-02-0084** (EARS/Ubiquitous): The Substrate system shall preserve cross-bitness compatibility as x86_64 support is introduced.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0085** (EARS/Ubiquitous): The Substrate system shall preserve i386 kernel/userspace execution support when the x86_64 kernel is enabled, including 32-bit native binaries and existing i386 scheduler, trap, and VFS contracts.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0086** (EARS/Ubiquitous): The Substrate system shall preserve segmentation/LDT-based execution paths required by VM86 and ELKS compatibility when running under the x86_64 kernel compat architecture.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0087** (EARS/Ubiquitous): The Substrate system shall provide an x86_64-kernel compatibility validation matrix proving existing 16-bit and 32-bit execution modes still work, or shall document any explicitly unsupported hardware/CPU-mode boundary with precise scope.
   - Context: 2. Architecture (`sys/arch`)
   - Verification: design review + implementation evidence + test/doc update.

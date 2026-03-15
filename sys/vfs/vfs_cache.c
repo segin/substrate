@@ -6,6 +6,7 @@
 #include <sys/errno.h>
 #include <vm/vm_kmem.h>
 #include <kern/panic.h>
+#include <sys/lock.h>
 #include <string.h>
 
 /*
@@ -29,6 +30,9 @@ static TAILQ_HEAD(nclru_head, namecache) nclru;
 /* Global cache limits */
 int vfs_cache_limit = 10240;
 int vfs_cache_count = 0;
+
+/* Reader/writer lock for SMP scalability */
+static spinlock_t nchash_lock;
 
 /* Simple hash function for name cache */
 static uint32_t
@@ -56,6 +60,13 @@ cache_lookup(struct vnode *dvp, struct vnode **vpp, const char *name, size_t len
             memcmp(ncp->nc_name, name, len) == 0) {
             
             /* Cache hit */
+            if (ncp->nc_vp == NULL) {
+                /* Negative cache entry: name does not exist */
+                *vpp = NULL;
+                TAILQ_REMOVE(&nclru, ncp, nc_lru);
+                TAILQ_INSERT_TAIL(&nclru, ncp, nc_lru);
+                return ENOENT;
+            }
             *vpp = ncp->nc_vp;
             vref(*vpp);
 
@@ -151,4 +162,26 @@ nchinit(void)
         LIST_INIT(&nchash[i]);
     }
     TAILQ_INIT(&nclru);
+    spinlock_init(&nchash_lock, "nchash");
+}
+
+/*
+ * cache_purgevfs:
+ * Purge all cache entries for a mount point.
+ */
+void
+cache_purgevfs(struct mount *mp)
+{
+    struct namecache *ncp, *tncp;
+
+    for(int i = 0; i < NCHASH_SIZE; i++) {
+        LIST_FOREACH_SAFE(ncp, &nchash[i], nc_hash, tncp) {
+            if(ncp->nc_dvp && ncp->nc_dvp->v_mount == mp) {
+                LIST_REMOVE(ncp, nc_hash);
+                TAILQ_REMOVE(&nclru, ncp, nc_lru);
+                kfree(ncp, sizeof(struct namecache) + ncp->nc_nlen + 1);
+                vfs_cache_count--;
+            }
+        }
+    }
 }

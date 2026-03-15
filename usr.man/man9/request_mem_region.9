@@ -1,0 +1,24 @@
+.Dd March 12, 2026
+.Dt REQUEST_MEM_REGION 9
+.Os
+.Sh NAME
+.Nm request_mem_region
+.Nd reserve an MMIO range in the global resource tree
+.Sh SYNOPSIS
+.In kern/resource.h
+.Ft "struct resource *"
+.Fn request_mem_region "resource_size_t start" "resource_size_t n" "const char *name"
+.Sh DESCRIPTION
+The
+.Fn request_mem_region
+function reserves a memory-mapped I/O range in the global resource tree.
+Conflicting reservations fail.
+.Sh RETURN VALUES
+The
+.Fn request_mem_region
+function returns the reserved resource on success or
+.Dv NULL
+on conflict or allocation failure.
+.Sh SEE ALSO
+.Xr resource 9 ,
+.Xr ioremap 9

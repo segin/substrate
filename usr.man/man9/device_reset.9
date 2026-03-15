@@ -1,0 +1,41 @@
+.\" Copyright (c) 2026 Kirn Gill II <segin2005@gmail.com>
+.\" All rights reserved.
+.\"
+.Dd March 12, 2026
+.Dt DEVICE_RESET 9
+.Os Substrate
+.Sh NAME
+.Nm device_reset
+.Nd reset a device subtree through driver callbacks
+.Sh SYNOPSIS
+.In kern/device.h
+.Ft int
+.Fn device_reset "struct device *dev"
+.Sh DESCRIPTION
+The
+.Fn device_reset
+function walks a device subtree, invokes each bound driver's
+.Va reset
+callback, and restores the recorded device power state to
+.Dv PM_STATE_D0
+on success.
+.Pp
+Children are reset before their parent so subordinate state is quiesced before
+the parent transport or bridge is reinitialized.
+.Sh RETURN VALUES
+The
+.Fn device_reset
+function returns 0 on success, the first non-zero error returned by a driver
+callback, or
+.Dv -EINVAL
+if
+.Fa dev
+is
+.Dv NULL .
+.Sh SEE ALSO
+.Xr device 9 ,
+.Xr driver 9
+.Sh HISTORY
+The
+.Fn device_reset
+interface first appeared in Substrate.

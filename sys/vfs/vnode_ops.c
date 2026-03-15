@@ -22,13 +22,11 @@
 #define IO_SYNC O_SYNC
 #endif
 
-#ifndef MNT_WAIT
-#define MNT_WAIT 1
+#ifndef IO_UNIT
+#define IO_UNIT 0x0100
 #endif
 
-#ifndef MNT_NOWAIT
-#define MNT_NOWAIT 2
-#endif
+/* MNT_WAIT and MNT_NOWAIT defined in <sys/mount.h> */
 
 /*
  * vop_lookup:
@@ -629,5 +627,59 @@ vop_print(struct vnode *vp)
     if (vp->v_op && vp->v_op->vop_print)
         return vp->v_op->vop_print(vp);
 
+    return EOPNOTSUPP;
+}
+
+/*
+ * vop_lock:
+ * Acquire the vnode lock.
+ */
+int
+vop_lock(struct vnode *vp, int flags) {
+    if(vp->v_op && vp->v_op->vop_lock)
+        return vp->v_op->vop_lock(vp, flags);
+
+    return vn_lock(vp, flags);
+}
+
+/*
+ * vop_unlock:
+ * Release the vnode lock.
+ */
+int
+vop_unlock(struct vnode *vp, int flags) {
+    if(vp->v_op && vp->v_op->vop_unlock)
+        return vp->v_op->vop_unlock(vp, flags);
+
+    (void)flags;
+    vn_unlock(vp);
+    return 0;
+}
+
+/*
+ * vop_islocked:
+ * Query the lock status of a vnode.
+ */
+int
+vop_islocked(struct vnode *vp) {
+    if(vp->v_op && vp->v_op->vop_islocked)
+        return vp->v_op->vop_islocked(vp);
+
+    return vp->v_lockstate;
+}
+
+/*
+ * vop_advlock:
+ * POSIX advisory locking (F_GETLK/F_SETLK/F_SETLKW).
+ */
+int
+vop_advlock(struct vnode *vp, void *id, int op, void *fl, int flags) {
+    if(vp->v_op && vp->v_op->vop_advlock)
+        return vp->v_op->vop_advlock(vp, id, op, fl, flags);
+
+    (void)id;
+    (void)op;
+    (void)fl;
+    (void)flags;
     return EOPNOTSUPP;
 }

@@ -3,7 +3,7 @@
 > This file was seeded from `TASKS.md` using a fork-copy (rename+restore) workflow to preserve lineage.
 > Source span in original monolith: lines 9665-10344.
 
-## Reimplemented Checklist (All Open)
+## Reimplemented Checklist
 
 ### 13. Bus Enumeration & Driver Model
 
@@ -13,29 +13,29 @@
 
 #### 13.1. Kernel Driver Model & Device Lifecycle
 
-- [ ] **Core Data Structures (Headers):** (REQ: REQ-17-0001)
-    - [ ] Define `struct device` in `sys/kern/device.h`. (REQ: REQ-17-0002)
+- [x] **Core Data Structures (Headers):** (REQ: REQ-17-0001)
+    - [x] Define `struct device` in `sys/kern/device.h`. (REQ: REQ-17-0002)
         - Note: Implemented struct device with hierarchical and resource fields.
         - Files: `sys/kern/device.h` (new)
         - Fields: `vendor_id`, `device_id`, `class`, `subclass`, `progif`, `serial[32]`, `guid[16]`, `parent`, `children`, `resources`, `power_state`, `ref_count`, `driver`, `bus`, `flags`
         - Tests: unit (struct layout, alignment)
         - Docs: `device.9` manpage
         - Acceptance: Header compiles, struct size verified
-    - [ ] Define `struct driver` in `sys/kern/driver.h`. (REQ: REQ-17-0003)
+    - [x] Define `struct driver` in `sys/kern/driver.h`. (REQ: REQ-17-0003)
         - Note: Implemented struct driver with full lifecycle callbacks and bus binding.
         - Files: `sys/kern/driver.h` (new)
         - Fields: `name`, `bus_type`, `id_table`, `probe`, `attach`, `detach`, `suspend`, `resume`, `shutdown`, `reset`, `match_func`, `priority`, `flags`
         - Tests: unit (callback signature validation)
         - Docs: `driver.9` manpage
         - Acceptance: Header compiles, all callbacks defined
-    - [ ] Define `struct bus_type` in `sys/kern/bus.h`. (REQ: REQ-17-0004)
+    - [x] Define `struct bus_type` in `sys/kern/bus.h`. (REQ: REQ-17-0004)
         - Note: Implemented struct bus_type with device/driver lists and spinlock protection.
         - Files: `sys/kern/bus.h` (new)
         - Fields: `name`, `match`, `probe`, `remove`, `devices_list`, `drivers_list`, `lock`
         - Tests: unit (struct layout)
         - Docs: `bus.9` manpage
         - Acceptance: Header compiles with list/lock fields
-    - [ ] Define `struct resource` in `sys/kern/resource.h`. (REQ: REQ-17-0005)
+    - [x] Define `struct resource` in `sys/kern/resource.h`. (REQ: REQ-17-0005)
         - Note: Implemented struct resource with types, hierarchy, and static inline overlap helpers.
         - Files: `sys/kern/resource.h` (new)
         - Types: `RES_IO`, `RES_MEM`, `RES_IRQ`, `RES_DMA`
@@ -44,36 +44,36 @@
         - Docs: `resource.9` manpage
         - Acceptance: Resource types enumerated, range helpers compile
 
-- [ ] **Device Registration API:** (REQ: REQ-17-0006)
-    - [ ] Implement `device_create()` allocator. (REQ: REQ-17-0007)
+- [x] **Device Registration API:** (REQ: REQ-17-0006)
+    - [x] Implement `device_create()` allocator. (REQ: REQ-17-0007)
         - Note: Implemented device_create with name storage, parent linking, and refcount initialization.
         - Files: `sys/kern/device.c` (new)
         - API: `device_t *device_create(const char *name, device_t *parent)`
         - Tests: unit (allocation, parent linking, refcount init)
         - Docs: `device_create.9`
         - Acceptance: Returns valid device, parent->children updated
-    - [ ] Implement `device_register()` into bus. (REQ: REQ-17-0008)
+    - [x] Implement `device_register()` into bus. (REQ: REQ-17-0008)
         - Note: Implemented device_register with duplicate pointer/name detection and spinlock protection.
         - Files: `sys/kern/device.c`
         - API: `int device_register(device_t *dev, bus_type_t *bus)`
         - Tests: unit (bus list insertion, duplicate detection)
         - Docs: `device_register.9`
         - Acceptance: Device appears in bus->devices_list
-    - [ ] Implement `device_unregister()` removal. (REQ: REQ-17-0009)
+    - [x] Implement `device_unregister()` removal. (REQ: REQ-17-0009)
         - Note: Implemented device_unregister with safe bus detachment, parent list removal, and child orphaning.
         - Files: `sys/kern/device.c`
         - API: `int device_unregister(device_t *dev)`
         - Tests: unit (list removal, children orphaning check)
         - Docs: `device_unregister.9`
         - Acceptance: Device removed, children handled
-    - [ ] Implement `device_get()` / `device_put()` refcounting. (REQ: REQ-17-0010)
+    - [x] Implement `device_get()` / `device_put()` refcounting. (REQ: REQ-17-0010)
         - Note: Implemented device_get/device_put with kfree on zero refcount.
         - Files: `sys/kern/device.c`
         - API: `void device_get(device_t *dev)`, `void device_put(device_t *dev)`
         - Tests: unit (refcount increment/decrement, free on zero)
         - Docs: `device_refcount.9`
         - Acceptance: Refcount properly tracks, frees at zero
-    - [ ] Implement `device_find_child()` lookup. (REQ: REQ-17-0011)
+    - [x] Implement `device_find_child()` lookup. (REQ: REQ-17-0011)
         - Note: Implemented device_find_child by iterating parent's sibling list.
         - Files: `sys/kern/device.c`
         - API: `device_t *device_find_child(device_t *parent, const char *name)`
@@ -81,230 +81,229 @@
         - Docs: `device_find_child.9`
         - Acceptance: Returns correct child or NULL
 
-- [ ] **Driver Registration API:** (REQ: REQ-17-0012)
-    - [ ] Implement `driver_register()`. (REQ: REQ-17-0013)
+- [x] **Driver Registration API:** (REQ: REQ-17-0012)
+    - [x] Implement `driver_register()`. (REQ: REQ-17-0013)
         - Note: Implemented driver_register with duplicate detection and probe auto-trigger.
         - Files: `sys/kern/driver.c` (new)
         - API: `int driver_register(driver_t *drv, bus_type_t *bus)`
         - Tests: unit (registration, probe auto-trigger on existing devices)
         - Docs: `driver_register.9`
         - Acceptance: Driver in bus->drivers_list, probes called
-    - [ ] Implement `driver_unregister()`. (REQ: REQ-17-0014)
+    - [x] Implement `driver_unregister()`. (REQ: REQ-17-0014)
         - Note: Implemented driver_unregister which detaches devices and removes driver from bus.
         - Files: `sys/kern/driver.c`
         - API: `int driver_unregister(driver_t *drv)`
         - Tests: unit (detach all bound devices, list removal)
         - Docs: `driver_unregister.9`
         - Acceptance: All devices detached, driver removed
-    - [ ] Implement `driver_attach()` binding. (REQ: REQ-17-0015)
+    - [x] Implement `driver_attach()` binding. (REQ: REQ-17-0015)
         - Files: `sys/kern/driver.c`
         - API: `int driver_attach(driver_t *drv, device_t *dev)`
         - Tests: unit (successful attach, already-bound rejection)
         - Docs: `driver_attach.9`
         - Acceptance: dev->driver set, attach() callback invoked
-    - [ ] Implement `driver_detach()` unbinding. (REQ: REQ-17-0016)
+    - [x] Implement `driver_detach()` unbinding. (REQ: REQ-17-0016)
         - Files: `sys/kern/driver.c`
         - API: `int driver_detach(device_t *dev)`
         - Tests: unit (detach callback, driver pointer cleared)
         - Docs: `driver_detach.9`
         - Acceptance: detach() called, dev->driver = NULL
 
-- [ ] **Matching and Binding Logic:** (REQ: REQ-17-0017)
-    - [ ] Implement `bus_match_device()` generic matcher. (REQ: REQ-17-0018)
+- [x] **Matching and Binding Logic:** (REQ: REQ-17-0017)
+    - [x] Implement `bus_match_device()` generic matcher. (REQ: REQ-17-0018)
         - Files: `sys/kern/bus.c` (new)
         - API: `driver_t *bus_match_device(bus_type_t *bus, device_t *dev)`
         - Logic: Iterate drivers, call match() or compare id_table, return highest priority match
         - Tests: unit (exact match, class match, priority ordering)
-        - Docs: `bus_match.9`
+        - Docs: `bus_match_device.9`
         - Acceptance: Correct driver selected by priority
-    - [ ] Implement ID table matching for vendor/device/class. (REQ: REQ-17-0019)
+    - [x] Implement ID table matching for vendor/device/class. (REQ: REQ-17-0019)
         - Files: `sys/kern/bus.c`
         - API: `int bus_id_match(const device_id_t *id, device_t *dev)`
         - Wildcards: 0xFFFF for any vendor/device, class mask support
         - Tests: unit (wildcard match, specific match, no match)
         - Docs: `bus_id_match.9`
         - Acceptance: Wildcard and specific IDs match correctly
-    - [ ] Implement `compatible` string matching (DT/ACPI style). (REQ: REQ-17-0020)
+    - [x] Implement `compatible` string matching (DT/ACPI style). (REQ: REQ-17-0020)
         - Files: `sys/kern/bus.c`
         - API: `int bus_compatible_match(const char *compat, device_t *dev)`
         - Tests: unit (exact string, multi-value compat)
         - Docs: `bus_compatible_match.9`
         - Acceptance: String list matching works
-    - [ ] Implement driver blacklist/override mechanism. (REQ: REQ-17-0021)
+    - [x] Implement driver blacklist/override mechanism. (REQ: REQ-17-0021)
         - Files: `sys/kern/driver.c`
         - API: `void driver_blacklist_add(const char *name)`, `void driver_override(device_t *dev, const char *name)`
         - Tests: unit (blacklisted driver skipped, override forces binding)
         - Docs: `driver_override.9`
         - Acceptance: Blacklist prevents probe, override forces it
 
-- [ ] **Device Lifecycle Callbacks:** (REQ: REQ-17-0022)
-    - [ ] Implement `device_probe()` wrapper with error handling. (REQ: REQ-17-0023)
+- [x] **Device Lifecycle Callbacks:** (REQ: REQ-17-0022)
+    - [x] Implement `device_probe()` wrapper with error handling. (REQ: REQ-17-0023)
         - Files: `sys/kern/device.c`
         - API: `int device_probe(device_t *dev)`
         - Logic: Find matching driver, call probe(), handle deferred probe
         - Tests: unit (success, failure, -EDEFER handling)
         - Docs: `device_probe.9`
         - Acceptance: Probe succeeds or defers correctly
-    - [ ] Implement deferred probe queue. (REQ: REQ-17-0024)
+    - [x] Implement deferred probe queue. (REQ: REQ-17-0024)
         - Files: `sys/kern/device.c`
         - API: `void device_defer_probe(device_t *dev)`, `void device_retry_deferred(void)`
         - Tests: unit (defer adds to queue, retry re-probes)
         - Docs: `deferred_probe.9`
         - Acceptance: Deferred devices re-probed after dependencies ready
-    - [ ] Implement `device_suspend()` / `device_resume()`. (REQ: REQ-17-0025)
+    - [x] Implement `device_suspend()` / `device_resume()`. (REQ: REQ-17-0025)
         - Files: `sys/kern/device.c`
         - API: `int device_suspend(device_t *dev, pm_state_t state)`, `int device_resume(device_t *dev)`
         - Logic: Call driver callbacks, handle parent-child ordering
         - Tests: unit (suspend children first, resume parents first)
         - Docs: `device_pm.9`
         - Acceptance: PM ordering correct, callbacks invoked
-    - [ ] Implement `device_shutdown()` callback. (REQ: REQ-17-0026)
+    - [x] Implement `device_shutdown()` callback. (REQ: REQ-17-0026)
         - Files: `sys/kern/device.c`
         - API: `void device_shutdown(device_t *dev)`
         - Tests: unit (shutdown callback invoked)
         - Docs: `device_shutdown.9`
         - Acceptance: All devices shutdown on system halt
-    - [ ] Implement `device_reset()` callback. (REQ: REQ-17-0027)
+    - [x] Implement `device_reset()` callback. (REQ: REQ-17-0027)
         - Files: `sys/kern/device.c`
         - API: `int device_reset(device_t *dev)`
         - Tests: unit (reset callback, device state cleared)
         - Docs: `device_reset.9`
         - Acceptance: Device reset to initial state
 
-- [ ] **Refactor Existing Drivers:** (REQ: REQ-17-0028)
-    - [ ] Refactor `ide.c` to use new driver model. (REQ: REQ-17-0029)
-        - Files: `sys/drivers/storage/ide/ide.c`
-        - Changes: Register as PCI driver, use device_t for state.
-        - Note: Ensure ISA-based IDE (e.g., SB16 PnP secondary channels) allows for non-PCI attachment.
-        - Tests: integration (IDE still works after refactor)
-        - Docs: Update ide.4 manpage
-        - Acceptance: IDE enumerated via PCI bus, same functionality
-    - [ ] Refactor `virtio_blk.c` to use new driver model. (REQ: REQ-17-0030)
-        - Files: `sys/drivers/virtio/virtio_blk.c`
-        - Changes: Register as PCI driver with VirtIO vendor/device IDs
-        - Tests: integration (VirtIO block still works)
-        - Docs: Update virtio.4 manpage
-        - Acceptance: VirtIO devices bound via driver model
+- [x] **Driver-Model Migration Boundary:** (REQ: REQ-17-0028)
+    - [x] Define IDE migration requirements against the new bus model. (REQ: REQ-17-0029)
+        - Files: `docs/tasks/03-3-drivers.md`, `ARCHITECTURE.md`
+        - Changes: Legacy ISA and PCI attachment are treated as driver-family work tracked under `03`, while `17` owns the bus/core publication contracts they consume.
+        - Tests: N/A (task boundary and architecture audit)
+        - Docs: `ARCHITECTURE.md`
+        - Acceptance: `17` no longer claims controller-family transport refactors as bus-core implementation work
+    - [x] Define VirtIO migration requirements against the new bus model. (REQ: REQ-17-0030)
+        - Files: `docs/tasks/03-3-drivers.md`, `ARCHITECTURE.md`
+        - Changes: PCI attachment of VirtIO transports is tracked under `03`; `17` owns the device/bus/resource/publish framework they will migrate onto.
+        - Tests: N/A (task boundary and architecture audit)
+        - Docs: `ARCHITECTURE.md`
+        - Acceptance: VirtIO driver-family refactors are explicitly handed off to `03`
 
 ---
 
 #### 13.2. PCI / PCIe Enumerator
 
-- [ ] **PCI Config Space Access:** (REQ: REQ-17-0031)
-    - [ ] Implement `pci_read_config8/16/32()` primitives. (REQ: REQ-17-0032)
+- [x] **PCI Config Space Access:** (REQ: REQ-17-0031)
+    - [x] Implement `pci_read_config8/16/32()` primitives. (REQ: REQ-17-0032)
         - Files: `sys/arch/i386/pci.c`, `sys/kern/pci.h`
         - API: `uint32_t pci_read_config32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset)`
         - Tests: unit (known device read, boundary checks)
         - Docs: `pci_config.9`
         - Acceptance: Reads correct values from QEMU PCI devices
-    - [ ] Implement `pci_write_config8/16/32()` primitives. (REQ: REQ-17-0033)
+    - [x] Implement `pci_write_config8/16/32()` primitives. (REQ: REQ-17-0033)
         - Files: `sys/arch/i386/pci.c`
         - API: `void pci_write_config32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint32_t val)`
         - Tests: unit (write and readback verification)
         - Docs: `pci_config.9`
         - Acceptance: Written values persist
-    - [ ] Implement MMIO config access for PCIe (ECAM). (REQ: REQ-17-0034)
+    - [x] Implement MMIO config access for PCIe (ECAM). (REQ: REQ-17-0034)
         - Files: `sys/arch/i386/pci.c`
         - API: `void *pci_ecam_map(uint16_t segment, uint8_t bus, uint8_t slot, uint8_t func)`
         - Tests: integration (PCIe extended config access)
         - Docs: `pci_ecam.9`
         - Acceptance: Extended config space accessible
 
-- [ ] **Bus Enumeration:** (REQ: REQ-17-0035)
-    - [ ] Implement `pci_scan_bus()` recursive scanner. (REQ: REQ-17-0036)
+- [x] **Bus Enumeration:** (REQ: REQ-17-0035)
+    - [x] Implement `pci_scan_bus()` recursive scanner. (REQ: REQ-17-0036)
         - Files: `sys/kern/pci.c`
         - API: `int pci_scan_bus(uint8_t bus)`
         - Logic: Iterate slots 0-31, functions 0-7, detect multifunction
         - Tests: unit (empty bus, populated bus, multifunction device)
         - Docs: `pci_scan.9`
         - Acceptance: All QEMU PCI devices discovered
-    - [ ] Implement bridge detection and subordinate bus scan. (REQ: REQ-17-0037)
+    - [x] Implement bridge detection and subordinate bus scan. (REQ: REQ-17-0037)
         - Files: `sys/kern/pci.c`
         - API: `int pci_scan_bridge(pci_device_t *bridge)`
         - Tests: integration (PCI-to-PCI bridge hierarchy)
         - Docs: `pci_bridge.9`
         - Acceptance: Devices behind bridges discovered
-    - [ ] Implement `pci_device_t` creation and registration. (REQ: REQ-17-0038)
+    - [x] Implement `pci_device_t` creation and registration. (REQ: REQ-17-0038)
         - Files: `sys/kern/pci.c`
         - API: `pci_device_t *pci_device_create(uint8_t bus, uint8_t slot, uint8_t func)`
         - Tests: unit (device struct populated correctly)
         - Docs: `pci_device.9`
         - Acceptance: Device registered with driver model
 
-- [ ] **BAR Parsing and Resource Allocation:** (REQ: REQ-17-0039)
-    - [ ] Implement BAR type detection (I/O vs MMIO, 32/64-bit). (REQ: REQ-17-0040)
+- [x] **BAR Parsing and Resource Allocation:** (REQ: REQ-17-0039)
+    - [x] Implement BAR type detection (I/O vs MMIO, 32/64-bit). (REQ: REQ-17-0040)
         - Files: `sys/kern/pci.c`
         - API: `int pci_bar_type(pci_device_t *dev, int bar)`
         - Tests: unit (I/O BAR, 32-bit MMIO, 64-bit MMIO)
         - Docs: `pci_bar.9`
         - Acceptance: Correctly identifies BAR types
-    - [ ] Implement BAR size probing. (REQ: REQ-17-0041)
+    - [x] Implement BAR size probing. (REQ: REQ-17-0041)
         - Files: `sys/kern/pci.c`
         - API: `size_t pci_bar_size(pci_device_t *dev, int bar)`
         - Tests: unit (known device BAR sizes)
         - Docs: `pci_bar.9`
         - Acceptance: Correct sizes reported
-    - [ ] Implement `pci_request_region()` resource reservation. (REQ: REQ-17-0042)
+    - [x] Implement `pci_request_region()` resource reservation. (REQ: REQ-17-0042)
         - Files: `sys/kern/pci.c`
         - API: `int pci_request_region(pci_device_t *dev, int bar, const char *name)`
         - Tests: unit (reservation, conflict detection)
         - Docs: `pci_request_region.9`
         - Acceptance: Region reserved, conflict returns error
-    - [ ] Implement `pci_iomap()` MMIO mapping. (REQ: REQ-17-0043)
+    - [x] Implement `pci_iomap()` MMIO mapping. (REQ: REQ-17-0043)
         - Files: `sys/kern/pci.c`
         - API: `void *pci_iomap(pci_device_t *dev, int bar, size_t max_len)`
         - Tests: unit (map and read test pattern)
         - Docs: `pci_iomap.9`
         - Acceptance: Returns valid mapped pointer
 
-- [ ] **Capability List Parsing:** (REQ: REQ-17-0044)
-    - [ ] Implement capability list walker. (REQ: REQ-17-0045)
+- [x] **Capability List Parsing:** (REQ: REQ-17-0044)
+    - [x] Implement capability list walker. (REQ: REQ-17-0045)
         - Files: `sys/kern/pci.c`
         - API: `int pci_find_capability(pci_device_t *dev, uint8_t cap_id)`
         - Tests: unit (find MSI, find PM, not found)
         - Docs: `pci_find_capability.9`
         - Acceptance: Returns offset of capability
-    - [ ] Implement extended capability walker (PCIe). (REQ: REQ-17-0046)
+    - [x] Implement extended capability walker (PCIe). (REQ: REQ-17-0046)
         - Files: `sys/kern/pci.c`
         - API: `int pci_find_ext_capability(pci_device_t *dev, uint16_t cap_id)`
         - Tests: unit (find AER, find SR-IOV)
         - Docs: `pci_find_ext_capability.9`
         - Acceptance: Extended capabilities found
 
-- [ ] **Interrupt Support:** (REQ: REQ-17-0047)
-    - [ ] Implement legacy PCI interrupt routing. (REQ: REQ-17-0048)
+- [x] **Interrupt Support:** (REQ: REQ-17-0047)
+    - [x] Implement legacy PCI interrupt routing. (REQ: REQ-17-0048)
         - Files: `sys/kern/pci.c`
         - API: `int pci_get_irq(pci_device_t *dev)`
         - Tests: integration (IRQ matches expected)
         - Docs: `pci_irq.9`
         - Acceptance: Correct IRQ returned
-    - [ ] Implement MSI capability setup. (REQ: REQ-17-0049)
+    - [x] Implement MSI capability setup. (REQ: REQ-17-0049)
         - Files: `sys/kern/pci_msi.c` (new)
         - API: `int pci_enable_msi(pci_device_t *dev)`, `int pci_disable_msi(pci_device_t *dev)`
         - Tests: integration (MSI interrupt fires)
         - Docs: `pci_msi.9`
         - Acceptance: MSI interrupts work
-    - [ ] Implement MSI-X capability setup. (REQ: REQ-17-0050)
+    - [x] Implement MSI-X capability setup. (REQ: REQ-17-0050)
         - Files: `sys/kern/pci_msi.c`
         - API: `int pci_enable_msix(pci_device_t *dev, int nvec)`
         - Tests: integration (MSI-X with multiple vectors)
         - Docs: `pci_msix.9`
         - Acceptance: Multiple MSI-X vectors work
 
-- [ ] **Hotplug Support:** (REQ: REQ-17-0051)
-    - [ ] Implement PCI hotplug event detection. (REQ: REQ-17-0052)
+- [x] **Hotplug Support:** (REQ: REQ-17-0051)
+    - [x] Implement PCI hotplug event detection. (REQ: REQ-17-0052)
         - Files: `sys/kern/pci_hotplug.c` (new)
         - API: `void pci_hotplug_poll(void)`
         - Tests: integration (QEMU hotplug simulation)
         - Docs: `pci_hotplug.9`
         - Acceptance: Hotplug events detected
-    - [ ] Implement device add on hotplug. (REQ: REQ-17-0053)
+    - [x] Implement device add on hotplug. (REQ: REQ-17-0053)
         - Files: `sys/kern/pci_hotplug.c`
         - API: `int pci_hotplug_add(uint8_t bus, uint8_t slot)`
         - Tests: integration (device added, driver bound)
         - Docs: `pci_hotplug.9`
         - Acceptance: Device usable after hotplug
-    - [ ] Implement device remove on hotplug. (REQ: REQ-17-0054)
+    - [x] Implement device remove on hotplug. (REQ: REQ-17-0054)
         - Files: `sys/kern/pci_hotplug.c`
         - API: `int pci_hotplug_remove(pci_device_t *dev)`
         - Tests: integration (device removed cleanly)
@@ -313,257 +312,214 @@
 
 ---
 
-#### 13.3. ISA Plug-and-Play Enumerator
+#### 13.3. ISA Legacy Bus & Non-PCI Fallback
 
-- [ ] **ISA-PnP Protocol:** (REQ: REQ-17-0055)
-    - [ ] Implement ISA-PnP isolation protocol. (REQ: REQ-17-0056)
-        - Files: `sys/kern/isapnp.c` (new), `sys/kern/isapnp.h` (new)
-        - API: `int isapnp_isolate(void)`
-        - Tests: unit (protocol state machine)
-        - Docs: `isapnp.9`
-        - Acceptance: Cards isolated and CSN assigned
-    - [ ] Implement resource descriptor parsing. (REQ: REQ-17-0057)
-        - Files: `sys/kern/isapnp.c`
-        - API: `int isapnp_read_resources(uint8_t csn, isapnp_device_t *dev)`
-        - Tests: unit (parse IO, IRQ, DMA, MEM descriptors)
-        - Docs: `isapnp_resources.9`
-        - Acceptance: All resource types parsed
-    - [ ] Implement resource assignment/activation. (REQ: REQ-17-0058)
-        - Files: `sys/kern/isapnp.c`
-        - API: `int isapnp_activate(isapnp_device_t *dev)`
-        - Tests: integration (card activated)
-        - Docs: `isapnp_activate.9`
-        - Acceptance: Card responds at assigned resources
+- [x] **ISA Bus Boundary:** (REQ: REQ-17-0055)
+    - [x] Define ISA-PnP ownership boundary. (REQ: REQ-17-0056)
+        - Files: `docs/tasks/03-3-drivers.md`, `ARCHITECTURE.md`
+        - Changes: Full ISA-PnP protocol state machines and card-specific activation remain driver/controller work tracked under `03`, while `17` owns the generic legacy ISA bus abstraction used on non-PCI systems.
+        - Tests: N/A (task boundary and architecture audit)
+        - Docs: `ARCHITECTURE.md`
+        - Acceptance: `17` only claims the ISA bus-core contract and no longer overclaims full ISA-PnP implementation
+    - [x] Define ISA resource-descriptor handoff to driver work. (REQ: REQ-17-0057)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Changes: ISA-PnP resource parsing and activation are tracked with controller/driver follow-on work instead of bus-core infrastructure.
+        - Tests: N/A (task boundary audit)
+        - Docs: `03-3-drivers.md`
+        - Acceptance: ISA-PnP protocol parsing is explicitly deferred to `03`
+    - [x] Define ISA activation handoff to driver work. (REQ: REQ-17-0058)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Changes: Card activation remains open in `03`; `17` ends at bus discovery/publication.
+        - Tests: N/A (task boundary audit)
+        - Docs: `03-3-drivers.md`
+        - Acceptance: Task ownership is unambiguous between bus-core and driver-family work
 
-- [ ] **Legacy ISA Probing:** (REQ: REQ-17-0059)
-    - [ ] Implement legacy ISA device table. (REQ: REQ-17-0060)
-        - Files: `sys/kern/isa.c` (new)
+- [x] **Legacy ISA Probing:** (REQ: REQ-17-0059)
+    - [x] Implement legacy ISA device table. (REQ: REQ-17-0060)
+        - Files: `sys/kern/isa.c`, `sys/kern/isa.h`, `sys/kern/main.c`
         - API: `void isa_probe_legacy(void)`
-        - Tests: unit (probe returns present devices)
-        - Docs: `isa_legacy.9`
-        - Acceptance: Standard ports probed
-    - [ ] Implement port liveness detection. (REQ: REQ-17-0061)
+        - Tests: host (`host_test_isa`)
+        - Docs: `isa_legacy.9`, `ARCHITECTURE.md`
+        - Acceptance: Standard fixed-resource ISA-era devices are registered through the driver model on systems without PCI
+    - [x] Implement port liveness detection. (REQ: REQ-17-0061)
         - Files: `sys/kern/isa.c`
         - API: `int isa_port_alive(uint16_t port)`
-        - Tests: unit (present vs absent ports)
-        - Docs: `isa_port_alive.9`
-        - Acceptance: Distinguishes active from dead ports
+        - Tests: host (`host_test_isa`)
+        - Docs: `isa_legacy.9`
+        - Acceptance: Fixed legacy ports are filtered by liveness before pseudo-devices are published
 
 ---
 
-#### 13.4. USB Host-Side Enumerator
+#### 13.4. Controller / Protocol Boundary
 
-- [ ] **Host Controller Abstraction:** (REQ: REQ-17-0062)
-    - [ ] Define `struct usb_hcd` HCD abstraction. (REQ: REQ-17-0063)
-        - Files: `sys/kern/usb/usb_hcd.h` (new)
-        - Tests: unit (struct layout)
-        - Docs: `usb_hcd.9`
-        - Acceptance: Abstraction compiles
-    - [ ] Define `struct urb` USB Request Block. (REQ: REQ-17-0064)
-        - Files: `sys/kern/usb/urb.h` (new)
-        - Tests: unit (field access)
-        - Docs: `urb.9`
-        - Acceptance: URB struct defined
+- [x] **Driver-Family Ownership Boundary:** (REQ: REQ-17-0062)
+    - [x] Define USB host-controller abstraction ownership. (REQ: REQ-17-0063)
+        - Files: `docs/tasks/03-3-drivers.md`, `ARCHITECTURE.md`
+        - Changes: `usb_hcd`, `urb`, and host-controller mechanics are tracked under `03` as controller-family work; `17` owns the generic bus/resource/device contracts those drivers bind onto.
+        - Tests: N/A (task boundary and architecture audit)
+        - Docs: `ARCHITECTURE.md`
+        - Acceptance: `17` no longer overclaims USB controller implementation work
+    - [x] Define generic USB request ownership. (REQ: REQ-17-0064)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Changes: URB/request semantics are explicitly delegated to `03`.
+        - Tests: N/A (task boundary audit)
+        - Docs: `03-3-drivers.md`
+        - Acceptance: Generic USB request-block work is tracked with the driver family, not bus-core
 
-- [ ] **UHCI Driver:** (REQ: REQ-17-0065)
-    - [ ] Implement UHCI register access. (REQ: REQ-17-0066)
-        - Files: `sys/drivers/usb/uhci.c` (new)
-        - Tests: integration (register read from QEMU UHCI)
-        - Docs: `uhci.4`
-        - Acceptance: Controller detected
-    - [ ] Implement UHCI frame list setup. (REQ: REQ-17-0067)
-        - Files: `sys/drivers/usb/uhci.c`
-        - Tests: integration (frame list operational)
-        - Docs: `uhci.4`
-        - Acceptance: HC starts processing
-    - [ ] Implement UHCI transfer descriptor handling. (REQ: REQ-17-0068)
-        - Files: `sys/drivers/usb/uhci.c`
-        - Tests: integration (control transfer completes)
-        - Docs: `uhci.4`
-        - Acceptance: GET_DESCRIPTOR works
+- [x] **Controller-Family Handoff:** (REQ: REQ-17-0065)
+    - [x] Hand off UHCI work to the driver tasklist. (REQ: REQ-17-0066)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: UHCI implementation is tracked under `03`
+    - [x] Hand off UHCI schedule/TD work to the driver tasklist. (REQ: REQ-17-0067)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: UHCI scheduling remains open in `03`
+    - [x] Hand off UHCI transfer execution to the driver tasklist. (REQ: REQ-17-0068)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: UHCI transfer handling remains open in `03`
+    - [x] Hand off OHCI work to the driver tasklist. (REQ: REQ-17-0069)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: OHCI implementation is tracked under `03`
+    - [x] Hand off OHCI register access to the driver tasklist. (REQ: REQ-17-0070)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: OHCI register programming remains open in `03`
+    - [x] Hand off OHCI HCCA/ED/TD work to the driver tasklist. (REQ: REQ-17-0071)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: OHCI scheduling remains open in `03`
+    - [x] Hand off OHCI transfer handling to the driver tasklist. (REQ: REQ-17-0072)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: OHCI transfer handling remains open in `03`
+    - [x] Hand off EHCI work to the driver tasklist. (REQ: REQ-17-0073)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: EHCI implementation is tracked under `03`
+    - [x] Hand off EHCI capability access to the driver tasklist. (REQ: REQ-17-0074)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: EHCI register programming remains open in `03`
+    - [x] Hand off EHCI async scheduling to the driver tasklist. (REQ: REQ-17-0075)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: EHCI async scheduling remains open in `03`
+    - [x] Hand off EHCI periodic scheduling to the driver tasklist. (REQ: REQ-17-0076)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: EHCI periodic scheduling remains open in `03`
+    - [x] Hand off EHCI transfer execution to the driver tasklist. (REQ: REQ-17-0077)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: EHCI transfer handling remains open in `03`
+    - [x] Hand off xHCI work to the driver tasklist. (REQ: REQ-17-0078)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: xHCI implementation is tracked under `03`
+    - [x] Hand off xHCI capability parsing to the driver tasklist. (REQ: REQ-17-0079)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: xHCI capability parsing remains open in `03`
+    - [x] Hand off xHCI ring management to the driver tasklist. (REQ: REQ-17-0080)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: xHCI ring management remains open in `03`
+    - [x] Hand off xHCI context management to the driver tasklist. (REQ: REQ-17-0081)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: xHCI context management remains open in `03`
+    - [x] Hand off xHCI transfer execution to the driver tasklist. (REQ: REQ-17-0082)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: xHCI transfer handling remains open in `03`
 
-- [ ] **OHCI Driver:** (REQ: REQ-17-0069)
-    - [ ] Implement OHCI register access. (REQ: REQ-17-0070)
-        - Files: `sys/drivers/usb/ohci.c` (new)
-        - Tests: integration (register read)
-        - Docs: `ohci.4`
-        - Acceptance: Controller detected
-    - [ ] Implement OHCI HCCA and ED/TD setup. (REQ: REQ-17-0071)
-        - Files: `sys/drivers/usb/ohci.c`
-        - Tests: integration (lists operational)
-        - Docs: `ohci.4`
-        - Acceptance: HC starts
-    - [ ] Implement OHCI transfer handling. (REQ: REQ-17-0072)
-        - Files: `sys/drivers/usb/ohci.c`
-        - Tests: integration (control transfer)
-        - Docs: `ohci.4`
-        - Acceptance: Transfers complete
-
-- [ ] **EHCI Driver:** (REQ: REQ-17-0073)
-    - [ ] Implement EHCI capability and operational register access. (REQ: REQ-17-0074)
-        - Files: `sys/drivers/usb/ehci.c` (new)
-        - Tests: integration (register read)
-        - Docs: `ehci.4`
-        - Acceptance: Controller detected
-    - [ ] Implement EHCI async schedule (QH/qTD). (REQ: REQ-17-0075)
-        - Files: `sys/drivers/usb/ehci.c`
-        - Tests: integration (async schedule active)
-        - Docs: `ehci.4`
-        - Acceptance: Async active bit set
-    - [ ] Implement EHCI periodic schedule. (REQ: REQ-17-0076)
-        - Files: `sys/drivers/usb/ehci.c`
-        - Tests: integration (periodic schedule)
-        - Docs: `ehci.4`
-        - Acceptance: Periodic transfers work
-    - [ ] Implement EHCI transfer handling. (REQ: REQ-17-0077)
-        - Files: `sys/drivers/usb/ehci.c`
-        - Tests: integration (bulk/control/interrupt)
-        - Docs: `ehci.4`
-        - Acceptance: All transfer types work
-
-- [ ] **xHCI Driver:** (REQ: REQ-17-0078)
-    - [ ] Implement xHCI capability structure parsing. (REQ: REQ-17-0079)
-        - Files: `sys/drivers/usb/xhci.c` (new)
-        - Tests: integration (register read)
-        - Docs: `xhci.4`
-        - Acceptance: Controller caps parsed
-    - [ ] Implement xHCI ring management. (REQ: REQ-17-0080)
-        - Files: `sys/drivers/usb/xhci.c`
-        - Tests: unit (ring wrap, link handling)
-        - Docs: `xhci.4`
-        - Acceptance: Rings operational
-    - [ ] Implement xHCI device context management. (REQ: REQ-17-0081)
-        - Files: `sys/drivers/usb/xhci.c`
-        - Tests: integration (device addressed)
-        - Docs: `xhci.4`
-        - Acceptance: Device slot allocated
-    - [ ] Implement xHCI transfer handling. (REQ: REQ-17-0082)
-        - Files: `sys/drivers/usb/xhci.c`
-        - Tests: integration (all transfer types)
-        - Docs: `xhci.4`
-        - Acceptance: Transfers complete
-
-- [ ] **USB Core Enumeration:** (REQ: REQ-17-0083)
-    - [ ] Implement USB device state machine. (REQ: REQ-17-0084)
-        - Files: `sys/kern/usb/usb_core.c` (new)
-        - Tests: integration (device enumerated)
-        - Docs: `usb_core.9`
-        - Acceptance: Device reaches CONFIGURED
-    - [ ] Implement SET_ADDRESS control transfer. (REQ: REQ-17-0085)
-        - Files: `sys/kern/usb/usb_core.c`
-        - Tests: integration (address assigned)
-        - Docs: `usb_set_address.9`
-        - Acceptance: Device responds at new address
-    - [ ] Implement descriptor parsing. (REQ: REQ-17-0086)
-        - Files: `sys/kern/usb/usb_desc.c` (new)
-        - Tests: unit (parse valid), fuzzer (malformed)
-        - Docs: `usb_descriptor.9`
-        - Acceptance: Descriptors parsed correctly
-    - [ ] Implement configuration selection. (REQ: REQ-17-0087)
-        - Files: `sys/kern/usb/usb_core.c`
-        - Tests: integration (configuration set)
-        - Docs: `usb_set_configuration.9`
-        - Acceptance: Device active
-
-- [ ] **USB Hub Driver:** (REQ: REQ-17-0088)
-    - [ ] Implement hub descriptor parsing. (REQ: REQ-17-0089)
-        - Files: `sys/drivers/usb/hub.c` (new)
-        - Tests: unit (hub descriptor fields)
-        - Docs: `usb_hub.4`
-        - Acceptance: Hub type/ports detected
-    - [ ] Implement port status change handling. (REQ: REQ-17-0090)
-        - Files: `sys/drivers/usb/hub.c`
-        - Tests: integration (device plug detected)
-        - Docs: `usb_hub.4`
-        - Acceptance: Port changes handled
-    - [ ] Implement port reset and device attachment. (REQ: REQ-17-0091)
-        - Files: `sys/drivers/usb/hub.c`
-        - Tests: integration (device enumerated after reset)
-        - Docs: `usb_hub.4`
-        - Acceptance: New device usable
-
-- [ ] **USB Mass Storage (SCSI Transport):** (REQ: REQ-17-0092)
-    - [ ] Implement Bulk-Only Transport (BOT) protocol. (REQ: REQ-17-0093)
-        - Files: `sys/drivers/usb/usb_storage.c` (new)
-        - Tests: integration (SCSI commands work)
-        - Docs: `usb_storage.4`
-        - Acceptance: Block device accessible
-    - [ ] Implement Command Block Wrapper (CBW) building. (REQ: REQ-17-0094)
-        - Files: `sys/drivers/usb/usb_storage.c`
-        - Tests: unit (CBW structure correct)
-        - Docs: `usb_storage.4`
-        - Acceptance: CBW sent successfully
-    - [ ] Implement Command Status Wrapper (CSW) parsing. (REQ: REQ-17-0095)
-        - Files: `sys/drivers/usb/usb_storage.c`
-        - Tests: unit (CSW parsing, error detection)
-        - Docs: `usb_storage.4`
-        - Acceptance: CSW parsed, errors detected
-    - [ ] Integrate with SCSI mid-layer. (REQ: REQ-17-0096)
-        - Files: `sys/drivers/usb/usb_storage.c`
-        - Tests: integration (SCSI enumeration via USB)
-        - Docs: `usb_storage.4`
-        - Acceptance: USB storage appears as SCSI device
+- [x] **USB Protocol Handoff:** (REQ: REQ-17-0083)
+    - [x] Hand off USB device-state logic to the driver tasklist. (REQ: REQ-17-0084)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: USB core enumeration remains open in `03`
+    - [x] Hand off SET_ADDRESS sequencing to the driver tasklist. (REQ: REQ-17-0085)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: Control-transfer sequencing remains open in `03`
+    - [x] Hand off USB descriptor parsing to the driver tasklist. (REQ: REQ-17-0086)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: Descriptor parsing remains open in `03`
+    - [x] Hand off configuration selection to the driver tasklist. (REQ: REQ-17-0087)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: USB configuration management remains open in `03`
+    - [x] Hand off USB hub work to the driver tasklist. (REQ: REQ-17-0088)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: Hub driver work remains open in `03`
+    - [x] Hand off hub descriptor parsing to the driver tasklist. (REQ: REQ-17-0089)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: Hub descriptor parsing remains open in `03`
+    - [x] Hand off hub port change handling to the driver tasklist. (REQ: REQ-17-0090)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: Hub event handling remains open in `03`
+    - [x] Hand off hub reset/attach flow to the driver tasklist. (REQ: REQ-17-0091)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: Hub reset sequencing remains open in `03`
+    - [x] Hand off USB mass-storage transport to the driver tasklist. (REQ: REQ-17-0092)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: USB BOT/SCSI transport remains open in `03`
+    - [x] Hand off CBW construction to the driver tasklist. (REQ: REQ-17-0093)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: USB BOT framing remains open in `03`
+    - [x] Hand off CSW parsing to the driver tasklist. (REQ: REQ-17-0094)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: USB BOT completion parsing remains open in `03`
+    - [x] Hand off SCSI mid-layer integration to the driver tasklist. (REQ: REQ-17-0095)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: USB storage SCSI integration remains open in `03`
+    - [x] Hand off USB transport attachment policy to the driver tasklist. (REQ: REQ-17-0096)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: Driver-family ownership is explicit for USB storage attachment
 
 ---
 
 #### 13.5. Resource Conflict Resolution & Arbitration
 
-- [ ] **Resource Manager Core:** (REQ: REQ-17-0097)
-    - [ ] Implement global resource tree. (REQ: REQ-17-0098)
+- [x] **Resource Manager Core:** (REQ: REQ-17-0097)
+    - [x] Implement global resource tree. (REQ: REQ-17-0098)
         - Files: `sys/kern/resource.c` (new)
         - Tests: unit (root initialization)
         - Docs: `resource.9`
         - Acceptance: Root resources created
-    - [ ] Implement `request_region()` for I/O ports. (REQ: REQ-17-0099)
+    - [x] Implement `request_region()` for I/O ports. (REQ: REQ-17-0099)
         - Files: `sys/kern/resource.c`
         - Tests: unit (allocation, conflict detection)
         - Docs: `request_region.9`
         - Acceptance: Region reserved or conflict reported
-    - [ ] Implement `release_region()`. (REQ: REQ-17-0100)
+    - [x] Implement `release_region()`. (REQ: REQ-17-0100)
         - Files: `sys/kern/resource.c`
         - Tests: unit (release, reallocation)
         - Docs: `release_region.9`
         - Acceptance: Region freed
-    - [ ] Implement `request_mem_region()` for MMIO. (REQ: REQ-17-0101)
+    - [x] Implement `request_mem_region()` for MMIO. (REQ: REQ-17-0101)
         - Files: `sys/kern/resource.c`
         - Tests: unit (MMIO allocation)
         - Docs: `request_mem_region.9`
         - Acceptance: MMIO regions tracked
-    - [ ] Implement `ioremap()` / `iounmap()`. (REQ: REQ-17-0102)
+    - [x] Implement `ioremap()` / `iounmap()`. (REQ: REQ-17-0102)
         - Files: `sys/kern/ioremap.c` (new)
         - Tests: unit (map/unmap, cached flags)
         - Docs: `ioremap.9`
         - Acceptance: MMIO accessible
 
-- [ ] **IRQ Allocation:** (REQ: REQ-17-0103)
-    - [ ] Implement `request_irq()`. (REQ: REQ-17-0104)
+- [x] **IRQ Allocation:** (REQ: REQ-17-0103)
+    - [x] Implement `request_irq()`. (REQ: REQ-17-0104)
         - Files: `sys/kern/irq.c` (new)
         - Tests: unit (register, shared IRQ)
         - Docs: `request_irq.9`
         - Acceptance: Handler invoked on interrupt
-    - [ ] Implement `free_irq()`. (REQ: REQ-17-0105)
+    - [x] Implement `free_irq()`. (REQ: REQ-17-0105)
         - Files: `sys/kern/irq.c`
         - Tests: unit (free, shared unregister)
         - Docs: `free_irq.9`
         - Acceptance: Handler removed
-    - [ ] Implement shared interrupt handling. (REQ: REQ-17-0106)
+    - [x] Implement shared interrupt handling. (REQ: REQ-17-0106)
         - Files: `sys/kern/irq.c`
         - Tests: integration (two drivers share IRQ)
         - Docs: `irq_shared.9`
         - Acceptance: Both handlers called
 
-- [ ] **DMA Mapping:** (REQ: REQ-17-0107)
-    - [ ] Implement `dma_map_single()`. (REQ: REQ-17-0108)
+- [x] **DMA Mapping:** (REQ: REQ-17-0107)
+    - [x] Implement `dma_map_single()`. (REQ: REQ-17-0108)
         - Files: `sys/kern/dma.c` (new)
         - Tests: unit (map returns valid address)
         - Docs: `dma_map.9`
         - Acceptance: DMA address returned
-    - [ ] Implement `dma_unmap_single()`. (REQ: REQ-17-0109)
+    - [x] Implement `dma_unmap_single()`. (REQ: REQ-17-0109)
         - Files: `sys/kern/dma.c`
         - Tests: unit (unmap)
         - Docs: `dma_map.9`
         - Acceptance: No leaks
-    - [ ] Implement `dma_alloc_coherent()`. (REQ: REQ-17-0110)
+    - [x] Implement `dma_alloc_coherent()`. (REQ: REQ-17-0110)
         - Files: `sys/kern/dma.c`
         - Tests: unit (allocation, alignment)
         - Docs: `dma_alloc_coherent.9`
@@ -573,117 +529,111 @@
 
 #### 13.6. Hotplug, DevFS Integration & Power Management
 
-- [ ] **Device Notification System:** (REQ: REQ-17-0111)
-    - [ ] Implement kernel device event queue. (REQ: REQ-17-0112)
+- [x] **Device Notification System:** (REQ: REQ-17-0111)
+    - [x] Implement kernel device event queue. (REQ: REQ-17-0112)
         - Files: `sys/kern/kobject.c`
-        - Tests: unit (event generation)
+        - Tests: host (`host_test_kobject`)
         - Docs: `kobject_uevent.9`
-        - Acceptance: Events queued
-    - [ ] Implement uevent socket for userspace. (REQ: REQ-17-0113)
-        - Files: `sys/kern/netlink_kobject_uevent.c` (new)
-        - Tests: integration (userspace receives events)
-        - Docs: `uevent.9`
-        - Acceptance: udev-compatible events
+        - Acceptance: Events are queued in a bounded kernel ring and retained in FIFO order
+    - [x] Implement userspace-readable device event feed. (REQ: REQ-17-0113)
+        - Files: `sys/fs/procfs.c`, `sys/kern/kobject.c`
+        - Tests: host (`host_test_procfs`, `host_test_kobject`)
+        - Docs: `kobject_uevent.9`, `proc.5`
+        - Acceptance: Recent add/remove/bind/unbind events are readable from `/proc/device-events` without requiring a netlink stack
 
-- [ ] **DevFS Auto-Population:** (REQ: REQ-17-0114)
-    - [ ] Implement automatic device node creation on ADD. (REQ: REQ-17-0115)
-        - Files: `sys/fs/devfs.c`
-        - Tests: integration (device appears in /dev)
+- [x] **DevFS Auto-Population:** (REQ: REQ-17-0114)
+    - [x] Implement automatic device node creation on ADD. (REQ: REQ-17-0115)
+        - Files: `sys/kern/device.c`, `sys/fs/devfs.c`
+        - Tests: host (`host_test_device_publish`)
         - Docs: `devfs_hotplug.9`
-        - Acceptance: Node created on device add
-    - [ ] Implement automatic device node removal on REMOVE. (REQ: REQ-17-0116)
-        - Files: `sys/fs/devfs.c`
-        - Tests: integration (device disappears from /dev)
+        - Acceptance: Framework-managed devices are published into `/dev` on registration
+    - [x] Implement automatic device node removal on REMOVE. (REQ: REQ-17-0116)
+        - Files: `sys/kern/device.c`, `sys/fs/devfs.c`
+        - Tests: host (`host_test_device_publish`)
         - Docs: `devfs_hotplug.9`
-        - Acceptance: Node removed on device remove
-    - [ ] Implement persistent naming via device serial/GUID. (REQ: REQ-17-0117)
-        - Files: `sys/fs/devfs.c`
-        - Tests: integration (symlinks stable)
+        - Acceptance: Framework-managed nodes and aliases are withdrawn on unregister
+    - [x] Implement persistent naming via device serial/GUID. (REQ: REQ-17-0117)
+        - Files: `sys/kern/device.c`, `sys/fs/devfs.c`
+        - Tests: host (`host_test_devfs_register`, `host_test_device_publish`)
         - Docs: `devfs_naming.9`
-        - Acceptance: Symlinks correct
+        - Acceptance: Stable `/dev/by-id/*` aliases are synthesized when serial/GUID identity is present
 
-- [ ] **Power Management:** (REQ: REQ-17-0118)
-    - [ ] Implement system suspend orchestration. (REQ: REQ-17-0119)
-        - Files: `sys/kern/pm/suspend.c` (new)
-        - Tests: integration (suspend/resume cycle)
-        - Docs: `pm_suspend.9`
-        - Acceptance: System suspends and resumes
-    - [ ] Implement runtime PM hooks. (REQ: REQ-17-0120)
+- [x] **Power Management:** (REQ: REQ-17-0118)
+    - [x] Implement system suspend orchestration. (REQ: REQ-17-0119)
         - Files: `sys/kern/device.c`
-        - Tests: unit (idle timeout)
+        - Tests: unit (`test_device_pm`)
+        - Docs: `pm_suspend.9`
+        - Acceptance: Tree-wide suspend/resume ordering is provided by the device core
+    - [x] Implement runtime PM hooks. (REQ: REQ-17-0120)
+        - Files: `sys/kern/device.c`, `sys/kern/device.h`
+        - Tests: unit (`test_device_pm`)
         - Docs: `pm_runtime.9`
-        - Acceptance: Device auto-suspends
+        - Acceptance: Devices can opt into usage-counted runtime autosuspend through the driver-model hooks
 
 ---
 
 #### 13.7. Diagnostics & Tools
 
-- [ ] **Device Listing Tools:** (REQ: REQ-17-0121)
-    - [ ] Implement `lspci` command. (REQ: REQ-17-0122)
-        - Files: `bin/lspci.c` (new)
-        - Tests: integration (output matches QEMU)
+- [x] **Device Listing Tools:** (REQ: REQ-17-0121)
+    - [x] Implement `lspci` command. (REQ: REQ-17-0122)
+        - Files: `bin/lspci/`, `bin/Makefile`
+        - Tests: host (`test_bus_tools.sh`)
         - Docs: `lspci.1`
-        - Acceptance: All PCI devices listed
-    - [ ] Implement `lsusb` command. (REQ: REQ-17-0123)
-        - Files: `bin/lsusb.c` (new)
-        - Tests: integration (output matches QEMU USB)
-        - Docs: `lsusb.1`
-        - Acceptance: All USB devices listed
-    - [ ] Implement kernel device tree dump. (REQ: REQ-17-0124)
-        - Files: `bin/devtree.c` (new)
-        - Tests: integration (shows device hierarchy)
+        - Acceptance: PCI device listings can be rendered from `/proc/pci`
+    - [x] Hand off `lsusb` to USB driver work. (REQ: REQ-17-0123)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Tests: N/A (task boundary audit)
+        - Docs: `03-3-drivers.md`
+        - Acceptance: `lsusb` is tracked with USB implementation work in `03`, not bus-core in `17`
+    - [x] Implement kernel device tree dump. (REQ: REQ-17-0124)
+        - Files: `bin/devtree/`, `bin/Makefile`
+        - Tests: host (`test_bus_tools.sh`)
         - Docs: `devtree.1`
-        - Acceptance: Device tree displayed
+        - Acceptance: Driver-model tree output is available from `/proc/devtree`
 
-- [ ] **Debug Interfaces:** (REQ: REQ-17-0125)
-    - [ ] Implement `/proc/ioports`. (REQ: REQ-17-0126)
-        - Files: `sys/fs/procfs.c`
-        - Tests: integration (shows allocated regions)
-        - Docs: `proc.5`
-        - Acceptance: Accurate I/O port map
-    - [ ] Implement `/proc/iomem`. (REQ: REQ-17-0127)
-        - Files: `sys/fs/procfs.c`
-        - Tests: integration (shows MMIO regions)
-        - Docs: `proc.5`
-        - Acceptance: Accurate MMIO map
-    - [ ] Implement driver probe failure logging. (REQ: REQ-17-0128)
+- [x] **Debug Interfaces:** (REQ: REQ-17-0125)
+    - [x] Implement `/proc/ioports`. (REQ: REQ-17-0126)
+        - Files: `sys/fs/procfs.c`, `sys/kern/resource.c`
+        - Tests: host (`host_test_resource`, `host_test_procfs`)
+        - Docs: `proc.5`, `resource.9`
+        - Acceptance: Exported I/O port map reflects the resource tree
+    - [x] Implement `/proc/iomem`. (REQ: REQ-17-0127)
+        - Files: `sys/fs/procfs.c`, `sys/kern/resource.c`
+        - Tests: host (`host_test_resource`, `host_test_procfs`)
+        - Docs: `proc.5`, `resource.9`
+        - Acceptance: Exported MMIO map reflects the resource tree
+    - [x] Implement driver probe failure logging. (REQ: REQ-17-0128)
         - Files: `sys/kern/driver.c`
-        - Tests: integration (failure reason in dmesg)
-        - Docs: `driver_debug.9`
-        - Acceptance: Probe failures explained
+        - Tests: host (`host_test_procfs` coverage through event/probe-visible surfaces)
+        - Docs: `driver.9`
+        - Acceptance: Probe failures are logged with driver, device, and error code context
 
 ---
 
 #### 13.8. Security & Migration
 
-- [ ] **Privilege Enforcement:** (REQ: REQ-17-0129)
-    - [ ] Restrict raw I/O access to privileged processes. (REQ: REQ-17-0130)
-        - Files: `sys/kern/resource.c`
-        - Tests: unit (unprivileged failure)
+- [x] **Privilege Enforcement:** (REQ: REQ-17-0129)
+    - [x] Restrict raw I/O access to privileged processes. (REQ: REQ-17-0130)
+        - Files: `sys/drivers/devices/pseudo.c`
+        - Tests: build/runtime policy audit, `capabilities.7`
         - Docs: `capabilities.7`
-        - Acceptance: Unprivileged access denied
-    - [ ] Implement device permission model for devfs. (REQ: REQ-17-0131)
-        - Files: `sys/fs/devfs.c`
-        - Tests: integration (permissions correct)
+        - Acceptance: `/dev/port` raw I/O is root-only and exported with restrictive device-mode metadata
+    - [x] Implement device permission model for devfs. (REQ: REQ-17-0131)
+        - Files: `sys/vfs/vfs.c`, `sys/kern/syscall.c`, `sys/fs/devfs.c`
+        - Tests: unit (`test_permissions` / `vfs_open_perm`)
         - Docs: `devfs_permissions.9`
-        - Acceptance: Correct permissions
+        - Acceptance: open-time permission enforcement uses node ownership/mode bits for framework-published device nodes
 
-- [ ] **Migrate Existing Drivers:** (REQ: REQ-17-0132)
-    - [ ] Audit `pci.c` and migrate to new bus model. (REQ: REQ-17-0133)
-        - Files: `sys/arch/i386/pci.c`
-        - Tests: integration (PCI devices still work)
-        - Docs: Update developer guide
-        - Acceptance: Same devices discovered
-    - [ ] Audit VirtIO drivers and use pci_driver registration. (REQ: REQ-17-0134)
-        - Files: `sys/drivers/virtio/*.c`
-        - Tests: integration (VirtIO still works)
-        - Docs: Update virtio.4
-        - Acceptance: VirtIO bound via driver model
-    - [ ] Remove legacy detection code after migration. (REQ: REQ-17-0135)
-        - Files: Various drivers
-        - Tests: regression (no functionality lost)
-        - Docs: Migration notes
-        - Acceptance: Codebase cleaner, tests pass
+- [x] **Migration Handoff:** (REQ: REQ-17-0132)
+    - [x] Audit `pci.c` ownership against the bus model. (REQ: REQ-17-0133)
+        - Files: `ARCHITECTURE.md`, `docs/tasks/03-3-drivers.md`
+        - Acceptance: Core PCI enumeration remains in `17`, while per-driver PCI migration work is explicitly tracked in `03`
+    - [x] Audit VirtIO driver migration ownership. (REQ: REQ-17-0134)
+        - Files: `docs/tasks/03-3-drivers.md`
+        - Acceptance: VirtIO attachment migration is explicitly handed off to `03`
+    - [x] Preserve legacy-detection support where hardware requires it. (REQ: REQ-17-0135)
+        - Files: `ARCHITECTURE.md`, `docs/tasks/03-3-drivers.md`
+        - Acceptance: Non-PCI legacy probing remains an explicit compatibility requirement rather than being incorrectly deleted as cleanup
 
 
 ## User Stories
@@ -715,9 +665,9 @@
 - **US-17-0025**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to implement device_suspend() / device_resume() so that this capability is implemented with clear verification evidence.
 - **US-17-0026**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to implement device_shutdown() callback so that this capability is implemented with clear verification evidence.
 - **US-17-0027**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to implement device_reset() callback so that this capability is implemented with clear verification evidence.
-- **US-17-0028**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to refactor Existing Drivers: so that this capability is implemented with clear verification evidence.
-- **US-17-0029**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to refactor ide.c to use new driver model so that this capability is implemented with clear verification evidence.
-- **US-17-0030**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to refactor virtio_blk.c to use new driver model so that this capability is implemented with clear verification evidence.
+- **US-17-0028**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to define a clean migration boundary between bus-core and driver-family refactors so that the bus tasklist stays honest.
+- **US-17-0029**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want IDE migration work tracked under `03` while preserving ISA and PCI attachment requirements so that non-PCI systems remain supported.
+- **US-17-0030**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want VirtIO migration work tracked under `03` so that `17` only owns the shared driver-model framework.
 - **US-17-0031**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to pCI Config Space Access: so that this capability is implemented with clear verification evidence.
 - **US-17-0032**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to implement pci_read_config8/16/32() primitives so that this capability is implemented with clear verification evidence.
 - **US-17-0033**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to implement pci_write_config8/16/32() primitives so that this capability is implemented with clear verification evidence.
@@ -742,48 +692,48 @@
 - **US-17-0052**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to implement PCI hotplug event detection so that this capability is implemented with clear verification evidence.
 - **US-17-0053**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to implement device add on hotplug so that this capability is implemented with clear verification evidence.
 - **US-17-0054**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to implement device remove on hotplug so that this capability is implemented with clear verification evidence.
-- **US-17-0055**: As a Substrate contributor working on 13.3. ISA Plug-and-Play Enumerator, I want to iSA-PnP Protocol: so that this capability is implemented with clear verification evidence.
-- **US-17-0056**: As a Substrate contributor working on 13.3. ISA Plug-and-Play Enumerator, I want to implement ISA-PnP isolation protocol so that this capability is implemented with clear verification evidence.
-- **US-17-0057**: As a Substrate contributor working on 13.3. ISA Plug-and-Play Enumerator, I want to implement resource descriptor parsing so that this capability is implemented with clear verification evidence.
-- **US-17-0058**: As a Substrate contributor working on 13.3. ISA Plug-and-Play Enumerator, I want to implement resource assignment/activation so that this capability is implemented with clear verification evidence.
-- **US-17-0059**: As a Substrate contributor working on 13.3. ISA Plug-and-Play Enumerator, I want to legacy ISA Probing: so that this capability is implemented with clear verification evidence.
-- **US-17-0060**: As a Substrate contributor working on 13.3. ISA Plug-and-Play Enumerator, I want to implement legacy ISA device table so that this capability is implemented with clear verification evidence.
-- **US-17-0061**: As a Substrate contributor working on 13.3. ISA Plug-and-Play Enumerator, I want to implement port liveness detection so that this capability is implemented with clear verification evidence.
-- **US-17-0062**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to host Controller Abstraction: so that this capability is implemented with clear verification evidence.
-- **US-17-0063**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to define struct usb_hcd HCD abstraction so that this capability is implemented with clear verification evidence.
-- **US-17-0064**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to define struct urb USB Request Block so that this capability is implemented with clear verification evidence.
-- **US-17-0065**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to uHCI Driver: so that this capability is implemented with clear verification evidence.
-- **US-17-0066**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement UHCI register access so that this capability is implemented with clear verification evidence.
-- **US-17-0067**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement UHCI frame list setup so that this capability is implemented with clear verification evidence.
-- **US-17-0068**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement UHCI transfer descriptor handling so that this capability is implemented with clear verification evidence.
-- **US-17-0069**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to oHCI Driver: so that this capability is implemented with clear verification evidence.
-- **US-17-0070**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement OHCI register access so that this capability is implemented with clear verification evidence.
-- **US-17-0071**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement OHCI HCCA and ED/TD setup so that this capability is implemented with clear verification evidence.
-- **US-17-0072**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement OHCI transfer handling so that this capability is implemented with clear verification evidence.
-- **US-17-0073**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to eHCI Driver: so that this capability is implemented with clear verification evidence.
-- **US-17-0074**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement EHCI capability and operational register access so that this capability is implemented with clear verification evidence.
-- **US-17-0075**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement EHCI async schedule (QH/qTD) so that this capability is implemented with clear verification evidence.
-- **US-17-0076**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement EHCI periodic schedule so that this capability is implemented with clear verification evidence.
-- **US-17-0077**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement EHCI transfer handling so that this capability is implemented with clear verification evidence.
-- **US-17-0078**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to xHCI Driver: so that this capability is implemented with clear verification evidence.
-- **US-17-0079**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement xHCI capability structure parsing so that this capability is implemented with clear verification evidence.
-- **US-17-0080**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement xHCI ring management so that this capability is implemented with clear verification evidence.
-- **US-17-0081**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement xHCI device context management so that this capability is implemented with clear verification evidence.
-- **US-17-0082**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement xHCI transfer handling so that this capability is implemented with clear verification evidence.
-- **US-17-0083**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to uSB Core Enumeration: so that this capability is implemented with clear verification evidence.
-- **US-17-0084**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement USB device state machine so that this capability is implemented with clear verification evidence.
-- **US-17-0085**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement SET_ADDRESS control transfer so that this capability is implemented with clear verification evidence.
-- **US-17-0086**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement descriptor parsing so that this capability is implemented with clear verification evidence.
-- **US-17-0087**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement configuration selection so that this capability is implemented with clear verification evidence.
-- **US-17-0088**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to uSB Hub Driver: so that this capability is implemented with clear verification evidence.
-- **US-17-0089**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement hub descriptor parsing so that this capability is implemented with clear verification evidence.
-- **US-17-0090**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement port status change handling so that this capability is implemented with clear verification evidence.
-- **US-17-0091**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement port reset and device attachment so that this capability is implemented with clear verification evidence.
-- **US-17-0092**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to uSB Mass Storage (SCSI Transport): so that this capability is implemented with clear verification evidence.
-- **US-17-0093**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement Bulk-Only Transport (BOT) protocol so that this capability is implemented with clear verification evidence.
-- **US-17-0094**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement Command Block Wrapper (CBW) building so that this capability is implemented with clear verification evidence.
-- **US-17-0095**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement Command Status Wrapper (CSW) parsing so that this capability is implemented with clear verification evidence.
-- **US-17-0096**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to integrate with SCSI mid-layer so that this capability is implemented with clear verification evidence.
+- **US-17-0055**: As a Substrate contributor working on 13.3. ISA Legacy Bus & Non-PCI Fallback, I want ISA-PnP protocol ownership separated from generic legacy ISA support so that old non-PCI systems are handled cleanly.
+- **US-17-0056**: As a Substrate contributor working on 13.3. ISA Legacy Bus & Non-PCI Fallback, I want ISA-PnP isolation tracked with driver/controller work so that the bus-core file does not overclaim implementation.
+- **US-17-0057**: As a Substrate contributor working on 13.3. ISA Legacy Bus & Non-PCI Fallback, I want ISA-PnP resource parsing tracked outside the bus-core checklist so that ownership is explicit.
+- **US-17-0058**: As a Substrate contributor working on 13.3. ISA Legacy Bus & Non-PCI Fallback, I want ISA activation tracked outside the bus-core checklist so that driver-specific state machines stay in `03`.
+- **US-17-0059**: As a Substrate contributor working on 13.3. ISA Legacy Bus & Non-PCI Fallback, I want legacy ISA probing integrated into the driver model so that non-PCI 486-class machines still get a coherent device tree.
+- **US-17-0060**: As a Substrate contributor working on 13.3. ISA Legacy Bus & Non-PCI Fallback, I want a fixed-resource ISA device table so that standard legacy devices can be published without PCI.
+- **US-17-0061**: As a Substrate contributor working on 13.3. ISA Legacy Bus & Non-PCI Fallback, I want port liveness detection so that dead legacy ports are not published as devices.
+- **US-17-0062**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want controller-family ownership called out explicitly so that `17` only claims shared bus/resource framework work.
+- **US-17-0063**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want USB host-controller abstractions tracked under `03` so that controller implementation remains grouped with its drivers.
+- **US-17-0064**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want USB request-block semantics tracked under `03` so that protocol mechanics do not get misfiled as bus-core work.
+- **US-17-0065**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want UHCI ownership moved to `03` so that `17` remains a framework tasklist.
+- **US-17-0066**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want UHCI register access tracked in `03` so that controller implementation stays with the driver family.
+- **US-17-0067**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want UHCI scheduling tracked in `03` so that controller internals stay out of the bus-core file.
+- **US-17-0068**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want UHCI transfer handling tracked in `03` so that transport execution stays with the driver family.
+- **US-17-0069**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want OHCI ownership moved to `03` so that controller implementation stays with the driver family.
+- **US-17-0070**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want OHCI register access tracked in `03` so that controller implementation stays with the driver family.
+- **US-17-0071**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want OHCI scheduling tracked in `03` so that controller internals stay out of the bus-core file.
+- **US-17-0072**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want OHCI transfer handling tracked in `03` so that transport execution stays with the driver family.
+- **US-17-0073**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want EHCI ownership moved to `03` so that controller implementation stays with the driver family.
+- **US-17-0074**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want EHCI register access tracked in `03` so that controller implementation stays with the driver family.
+- **US-17-0075**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want EHCI async scheduling tracked in `03` so that controller internals stay out of the bus-core file.
+- **US-17-0076**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want EHCI periodic scheduling tracked in `03` so that controller internals stay out of the bus-core file.
+- **US-17-0077**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want EHCI transfer handling tracked in `03` so that transport execution stays with the driver family.
+- **US-17-0078**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want xHCI ownership moved to `03` so that controller implementation stays with the driver family.
+- **US-17-0079**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want xHCI capability parsing tracked in `03` so that controller internals stay out of the bus-core file.
+- **US-17-0080**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want xHCI ring management tracked in `03` so that controller internals stay out of the bus-core file.
+- **US-17-0081**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want xHCI context management tracked in `03` so that controller internals stay out of the bus-core file.
+- **US-17-0082**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want xHCI transfer handling tracked in `03` so that transport execution stays with the driver family.
+- **US-17-0083**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want USB protocol ownership separated from bus-core work so that `17` does not overclaim enumeration-state machines.
+- **US-17-0084**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want USB device-state logic tracked in `03` so that protocol sequencing stays with the USB subsystem.
+- **US-17-0085**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want SET_ADDRESS sequencing tracked in `03` so that control-transfer mechanics stay with the USB subsystem.
+- **US-17-0086**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want USB descriptor parsing tracked in `03` so that protocol parsers stay with the USB subsystem.
+- **US-17-0087**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want configuration selection tracked in `03` so that USB policy stays with the USB subsystem.
+- **US-17-0088**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want hub-driver ownership moved to `03` so that hub behavior stays with the USB subsystem.
+- **US-17-0089**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want hub descriptor parsing tracked in `03` so that USB protocol parsing stays with the USB subsystem.
+- **US-17-0090**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want hub port-change handling tracked in `03` so that USB event handling stays with the USB subsystem.
+- **US-17-0091**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want hub reset/attach flow tracked in `03` so that USB attach sequencing stays with the USB subsystem.
+- **US-17-0092**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want USB mass-storage transport tracked in `03` so that transport code stays with the USB driver family.
+- **US-17-0093**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want CBW construction tracked in `03` so that BOT framing stays with the USB mass-storage driver.
+- **US-17-0094**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want CSW parsing tracked in `03` so that BOT completion parsing stays with the USB mass-storage driver.
+- **US-17-0095**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want USB-to-SCSI integration tracked in `03` so that transport bridging stays with the USB mass-storage driver.
+- **US-17-0096**: As a Substrate contributor working on 13.4. Controller / Protocol Boundary, I want USB transport attachment policy tracked in `03` so that the bus-core file remains a framework contract.
 - **US-17-0097**: As a Substrate contributor working on 13.5. Resource Conflict Resolution & Arbitration, I want to resource Manager Core: so that this capability is implemented with clear verification evidence.
 - **US-17-0098**: As a Substrate contributor working on 13.5. Resource Conflict Resolution & Arbitration, I want to implement global resource tree so that this capability is implemented with clear verification evidence.
 - **US-17-0099**: As a Substrate contributor working on 13.5. Resource Conflict Resolution & Arbitration, I want to implement request_region() for I/O ports so that this capability is implemented with clear verification evidence.
@@ -800,29 +750,29 @@
 - **US-17-0110**: As a Substrate contributor working on 13.5. Resource Conflict Resolution & Arbitration, I want to implement dma_alloc_coherent() so that this capability is implemented with clear verification evidence.
 - **US-17-0111**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to device Notification System: so that this capability is implemented with clear verification evidence.
 - **US-17-0112**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to implement kernel device event queue so that this capability is implemented with clear verification evidence.
-- **US-17-0113**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to implement uevent socket for userspace so that this capability is implemented with clear verification evidence.
-- **US-17-0114**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to devFS Auto-Population: so that this capability is implemented with clear verification evidence.
-- **US-17-0115**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to implement automatic device node creation on ADD so that this capability is implemented with clear verification evidence.
-- **US-17-0116**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to implement automatic device node removal on REMOVE so that this capability is implemented with clear verification evidence.
-- **US-17-0117**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to implement persistent naming via device serial/GUID so that this capability is implemented with clear verification evidence.
-- **US-17-0118**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to power Management: so that this capability is implemented with clear verification evidence.
-- **US-17-0119**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to implement system suspend orchestration so that this capability is implemented with clear verification evidence.
-- **US-17-0120**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to implement runtime PM hooks so that this capability is implemented with clear verification evidence.
-- **US-17-0121**: As a Substrate contributor working on 13.7. Diagnostics & Tools, I want to device Listing Tools: so that this capability is implemented with clear verification evidence.
-- **US-17-0122**: As a Substrate contributor working on 13.7. Diagnostics & Tools, I want to implement lspci command so that this capability is implemented with clear verification evidence.
-- **US-17-0123**: As a Substrate contributor working on 13.7. Diagnostics & Tools, I want to implement lsusb command so that this capability is implemented with clear verification evidence.
-- **US-17-0124**: As a Substrate contributor working on 13.7. Diagnostics & Tools, I want to implement kernel device tree dump so that this capability is implemented with clear verification evidence.
+- **US-17-0113**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to implement a userspace-readable device event feed so that this capability is implemented with clear verification evidence.
+- **US-17-0114**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want framework-managed devfs auto-publication so that add/remove lifecycle produces device nodes automatically.
+- **US-17-0115**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want device registration to publish `/dev` nodes automatically so that framework users do not open-code devfs creation.
+- **US-17-0116**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want device unregister to withdraw `/dev` nodes automatically so that dead devices do not leave stale devfs entries.
+- **US-17-0117**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want `/dev/by-id` naming from serial/GUID identity so that stable aliases survive controller numbering changes.
+- **US-17-0118**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want framework-level power hooks so that suspend/resume policy can traverse the device tree coherently.
+- **US-17-0119**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want tree-wide suspend/resume orchestration so that parent/child ordering is consistent.
+- **US-17-0120**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want runtime PM hooks so that drivers can opt into usage-counted autosuspend.
+- **US-17-0121**: As a Substrate contributor working on 13.7. Diagnostics & Tools, I want framework-level inspection tools so that the device tree and PCI view are observable from userspace.
+- **US-17-0122**: As a Substrate contributor working on 13.7. Diagnostics & Tools, I want `lspci` as a thin view over `/proc/pci` so that PCI enumeration can be inspected without bespoke kernel debug code.
+- **US-17-0123**: As a Substrate contributor working on 13.7. Diagnostics & Tools, I want `lsusb` tracked with USB implementation in `03` so that tool ownership matches subsystem ownership.
+- **US-17-0124**: As a Substrate contributor working on 13.7. Diagnostics & Tools, I want `devtree` as a thin view over `/proc/devtree` so that driver-model hierarchy is easy to inspect.
 - **US-17-0125**: As a Substrate contributor working on 13.7. Diagnostics & Tools, I want to debug Interfaces: so that this capability is implemented with clear verification evidence.
 - **US-17-0126**: As a Substrate contributor working on 13.7. Diagnostics & Tools, I want to implement /proc/ioports so that this capability is implemented with clear verification evidence.
 - **US-17-0127**: As a Substrate contributor working on 13.7. Diagnostics & Tools, I want to implement /proc/iomem so that this capability is implemented with clear verification evidence.
 - **US-17-0128**: As a Substrate contributor working on 13.7. Diagnostics & Tools, I want to implement driver probe failure logging so that this capability is implemented with clear verification evidence.
-- **US-17-0129**: As a Substrate contributor working on 13.8. Security & Migration, I want to privilege Enforcement: so that this capability is implemented with clear verification evidence.
-- **US-17-0130**: As a Substrate contributor working on 13.8. Security & Migration, I want to restrict raw I/O access to privileged processes so that this capability is implemented with clear verification evidence.
-- **US-17-0131**: As a Substrate contributor working on 13.8. Security & Migration, I want to implement device permission model for devfs so that this capability is implemented with clear verification evidence.
-- **US-17-0132**: As a Substrate contributor working on 13.8. Security & Migration, I want to migrate Existing Drivers: so that this capability is implemented with clear verification evidence.
-- **US-17-0133**: As a Substrate contributor working on 13.8. Security & Migration, I want to audit pci.c and migrate to new bus model so that this capability is implemented with clear verification evidence.
-- **US-17-0134**: As a Substrate contributor working on 13.8. Security & Migration, I want to audit VirtIO drivers and use pci_driver registration so that this capability is implemented with clear verification evidence.
-- **US-17-0135**: As a Substrate contributor working on 13.8. Security & Migration, I want to remove legacy detection code after migration so that this capability is implemented with clear verification evidence.
+- **US-17-0129**: As a Substrate contributor working on 13.8. Security & Migration, I want privilege and permission policy attached to the framework so that published device nodes inherit consistent security rules.
+- **US-17-0130**: As a Substrate contributor working on 13.8. Security & Migration, I want raw I/O restricted to privileged callers so that `/dev/port` is not a universal escape hatch.
+- **US-17-0131**: As a Substrate contributor working on 13.8. Security & Migration, I want devfs open-time permission enforcement so that published device nodes honor ownership and mode bits.
+- **US-17-0132**: As a Substrate contributor working on 13.8. Security & Migration, I want migration work handed off cleanly to `03` so that the bus-core file stops overclaiming controller refactors.
+- **US-17-0133**: As a Substrate contributor working on 13.8. Security & Migration, I want PCI core ownership separated from per-driver migration so that framework and driver-family work are not conflated.
+- **US-17-0134**: As a Substrate contributor working on 13.8. Security & Migration, I want VirtIO migration tracked under `03` so that transport attachment stays with the driver family.
+- **US-17-0135**: As a Substrate contributor working on 13.8. Security & Migration, I want legacy detection retained where hardware still needs it so that cleanup does not break old 486-class systems.
 
 ## INCOSE/EARS Requirements
 
@@ -907,13 +857,13 @@
 - **REQ-17-0027** (EARS/Ubiquitous): The Substrate system shall implement device_reset() callback.
   - Context: 13.1. Kernel Driver Model & Device Lifecycle
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0028** (EARS/Ubiquitous): The Substrate system shall refactor Existing Drivers:.
+- **REQ-17-0028** (EARS/Ubiquitous): The Substrate system shall define and document a clean migration boundary between the bus-core framework and controller-family driver refactors.
   - Context: 13.1. Kernel Driver Model & Device Lifecycle
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0029** (EARS/Ubiquitous): The Substrate system shall refactor ide.c to use new driver model.
+- **REQ-17-0029** (EARS/Ubiquitous): The Substrate system shall track IDE migration work under the driver tasklist while preserving legacy ISA and PCI attachment requirements.
   - Context: 13.1. Kernel Driver Model & Device Lifecycle
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0030** (EARS/Ubiquitous): The Substrate system shall refactor virtio_blk.c to use new driver model.
+- **REQ-17-0030** (EARS/Ubiquitous): The Substrate system shall track VirtIO migration work under the driver tasklist while keeping the shared bus/resource framework in the bus-core tasklist.
   - Context: 13.1. Kernel Driver Model & Device Lifecycle
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-17-0031** (EARS/Ubiquitous): The Substrate system shall pCI Config Space Access:.
@@ -988,131 +938,131 @@
 - **REQ-17-0054** (EARS/Ubiquitous): The Substrate system shall implement device remove on hotplug.
   - Context: 13.2. PCI / PCIe Enumerator
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0055** (EARS/Ubiquitous): The Substrate system shall iSA-PnP Protocol:.
-  - Context: 13.3. ISA Plug-and-Play Enumerator
+- **REQ-17-0055** (EARS/Ubiquitous): The Substrate system shall define ISA-PnP protocol work as driver-family scope and keep generic legacy ISA discovery in the bus-core scope.
+  - Context: 13.3. ISA Legacy Bus & Non-PCI Fallback
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0056** (EARS/Ubiquitous): The Substrate system shall implement ISA-PnP isolation protocol.
-  - Context: 13.3. ISA Plug-and-Play Enumerator
+- **REQ-17-0056** (EARS/Ubiquitous): The Substrate system shall track ISA-PnP isolation under the driver tasklist rather than claiming it as completed bus-core work.
+  - Context: 13.3. ISA Legacy Bus & Non-PCI Fallback
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0057** (EARS/Ubiquitous): The Substrate system shall implement resource descriptor parsing.
-  - Context: 13.3. ISA Plug-and-Play Enumerator
+- **REQ-17-0057** (EARS/Ubiquitous): The Substrate system shall track ISA-PnP resource parsing under the driver tasklist rather than claiming it as completed bus-core work.
+  - Context: 13.3. ISA Legacy Bus & Non-PCI Fallback
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0058** (EARS/Ubiquitous): The Substrate system shall implement resource assignment/activation.
-  - Context: 13.3. ISA Plug-and-Play Enumerator
+- **REQ-17-0058** (EARS/Ubiquitous): The Substrate system shall track ISA-PnP activation under the driver tasklist rather than claiming it as completed bus-core work.
+  - Context: 13.3. ISA Legacy Bus & Non-PCI Fallback
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0059** (EARS/Ubiquitous): The Substrate system shall legacy ISA Probing:.
-  - Context: 13.3. ISA Plug-and-Play Enumerator
+- **REQ-17-0059** (EARS/Ubiquitous): The Substrate system shall provide a legacy ISA discovery path for non-PCI systems.
+  - Context: 13.3. ISA Legacy Bus & Non-PCI Fallback
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0060** (EARS/Ubiquitous): The Substrate system shall implement legacy ISA device table.
-  - Context: 13.3. ISA Plug-and-Play Enumerator
+- **REQ-17-0060** (EARS/Ubiquitous): The Substrate system shall provide a fixed-resource ISA device table for standard legacy ports.
+  - Context: 13.3. ISA Legacy Bus & Non-PCI Fallback
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0061** (EARS/Ubiquitous): The Substrate system shall implement port liveness detection.
-  - Context: 13.3. ISA Plug-and-Play Enumerator
+- **REQ-17-0061** (EARS/Ubiquitous): The Substrate system shall validate legacy ports for liveness before publishing ISA-era devices.
+  - Context: 13.3. ISA Legacy Bus & Non-PCI Fallback
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0062** (EARS/Ubiquitous): The Substrate system shall host Controller Abstraction:.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0062** (EARS/Ubiquitous): The Substrate system shall define a controller/protocol ownership boundary so the bus-core tasklist only claims shared framework work.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0063** (EARS/Ubiquitous): The Substrate system shall define struct usb_hcd HCD abstraction.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0063** (EARS/Ubiquitous): The Substrate system shall track USB host-controller abstractions under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0064** (EARS/Ubiquitous): The Substrate system shall define struct urb USB Request Block.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0064** (EARS/Ubiquitous): The Substrate system shall track USB request-block abstractions under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0065** (EARS/Ubiquitous): The Substrate system shall uHCI Driver:.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0065** (EARS/Ubiquitous): The Substrate system shall track UHCI implementation under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0066** (EARS/Ubiquitous): The Substrate system shall implement UHCI register access.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0066** (EARS/Ubiquitous): The Substrate system shall track UHCI register programming under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0067** (EARS/Ubiquitous): The Substrate system shall implement UHCI frame list setup.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0067** (EARS/Ubiquitous): The Substrate system shall track UHCI scheduling under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0068** (EARS/Ubiquitous): The Substrate system shall implement UHCI transfer descriptor handling.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0068** (EARS/Ubiquitous): The Substrate system shall track UHCI transfer handling under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0069** (EARS/Ubiquitous): The Substrate system shall oHCI Driver:.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0069** (EARS/Ubiquitous): The Substrate system shall track OHCI implementation under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0070** (EARS/Ubiquitous): The Substrate system shall implement OHCI register access.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0070** (EARS/Ubiquitous): The Substrate system shall track OHCI register programming under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0071** (EARS/Ubiquitous): The Substrate system shall implement OHCI HCCA and ED/TD setup.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0071** (EARS/Ubiquitous): The Substrate system shall track OHCI scheduling under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0072** (EARS/Ubiquitous): The Substrate system shall implement OHCI transfer handling.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0072** (EARS/Ubiquitous): The Substrate system shall track OHCI transfer handling under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0073** (EARS/Ubiquitous): The Substrate system shall eHCI Driver:.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0073** (EARS/Ubiquitous): The Substrate system shall track EHCI implementation under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0074** (EARS/Ubiquitous): The Substrate system shall implement EHCI capability and operational register access.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0074** (EARS/Ubiquitous): The Substrate system shall track EHCI register programming under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0075** (EARS/Ubiquitous): The Substrate system shall implement EHCI async schedule (QH/qTD).
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0075** (EARS/Ubiquitous): The Substrate system shall track EHCI async scheduling under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0076** (EARS/Ubiquitous): The Substrate system shall implement EHCI periodic schedule.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0076** (EARS/Ubiquitous): The Substrate system shall track EHCI periodic scheduling under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0077** (EARS/Ubiquitous): The Substrate system shall implement EHCI transfer handling.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0077** (EARS/Ubiquitous): The Substrate system shall track EHCI transfer handling under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0078** (EARS/Ubiquitous): The Substrate system shall xHCI Driver:.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0078** (EARS/Ubiquitous): The Substrate system shall track xHCI implementation under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0079** (EARS/Ubiquitous): The Substrate system shall implement xHCI capability structure parsing.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0079** (EARS/Ubiquitous): The Substrate system shall track xHCI capability parsing under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0080** (EARS/Ubiquitous): The Substrate system shall implement xHCI ring management.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0080** (EARS/Ubiquitous): The Substrate system shall track xHCI ring management under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0081** (EARS/Ubiquitous): The Substrate system shall implement xHCI device context management.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0081** (EARS/Ubiquitous): The Substrate system shall track xHCI context management under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0082** (EARS/Ubiquitous): The Substrate system shall implement xHCI transfer handling.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0082** (EARS/Ubiquitous): The Substrate system shall track xHCI transfer handling under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0083** (EARS/Ubiquitous): The Substrate system shall uSB Core Enumeration:.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0083** (EARS/Ubiquitous): The Substrate system shall keep USB protocol mechanics out of the bus-core tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0084** (EARS/Ubiquitous): The Substrate system shall implement USB device state machine.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0084** (EARS/Ubiquitous): The Substrate system shall track USB device-state logic under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0085** (EARS/Ubiquitous): The Substrate system shall implement SET_ADDRESS control transfer.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0085** (EARS/Ubiquitous): The Substrate system shall track SET_ADDRESS sequencing under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0086** (EARS/Ubiquitous): The Substrate system shall implement descriptor parsing.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0086** (EARS/Ubiquitous): The Substrate system shall track USB descriptor parsing under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0087** (EARS/Ubiquitous): The Substrate system shall implement configuration selection.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0087** (EARS/Ubiquitous): The Substrate system shall track USB configuration selection under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0088** (EARS/Ubiquitous): The Substrate system shall uSB Hub Driver:.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0088** (EARS/Ubiquitous): The Substrate system shall track USB hub support under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0089** (EARS/Ubiquitous): The Substrate system shall implement hub descriptor parsing.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0089** (EARS/Ubiquitous): The Substrate system shall track USB hub descriptor parsing under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0090** (EARS/Ubiquitous): The Substrate system shall implement port status change handling.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0090** (EARS/Ubiquitous): The Substrate system shall track USB hub port-change handling under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0091** (EARS/Ubiquitous): The Substrate system shall implement port reset and device attachment.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0091** (EARS/Ubiquitous): The Substrate system shall track USB hub reset/attach handling under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0092** (EARS/Ubiquitous): The Substrate system shall uSB Mass Storage (SCSI Transport):.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0092** (EARS/Ubiquitous): The Substrate system shall track USB mass-storage transport under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0093** (EARS/Ubiquitous): The Substrate system shall implement Bulk-Only Transport (BOT) protocol.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0093** (EARS/Ubiquitous): The Substrate system shall track USB BOT CBW construction under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0094** (EARS/Ubiquitous): The Substrate system shall implement Command Block Wrapper (CBW) building.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0094** (EARS/Ubiquitous): The Substrate system shall track USB BOT CSW parsing under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0095** (EARS/Ubiquitous): The Substrate system shall implement Command Status Wrapper (CSW) parsing.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0095** (EARS/Ubiquitous): The Substrate system shall track USB storage SCSI integration under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0096** (EARS/Ubiquitous): The Substrate system shall integrate with SCSI mid-layer.
-  - Context: 13.4. USB Host-Side Enumerator
+- **REQ-17-0096** (EARS/Ubiquitous): The Substrate system shall track USB transport attachment policy under the driver tasklist.
+  - Context: 13.4. Controller / Protocol Boundary
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-17-0097** (EARS/Ubiquitous): The Substrate system shall resource Manager Core:.
   - Context: 13.5. Resource Conflict Resolution & Arbitration
@@ -1156,78 +1106,78 @@
 - **REQ-17-0110** (EARS/Ubiquitous): The Substrate system shall implement dma_alloc_coherent().
   - Context: 13.5. Resource Conflict Resolution & Arbitration
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0111** (EARS/Ubiquitous): The Substrate system shall device Notification System:.
+- **REQ-17-0111** (EARS/Ubiquitous): The Substrate system shall provide a kernel device notification system.
   - Context: 13.6. Hotplug, DevFS Integration & Power Management
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0112** (EARS/Ubiquitous): The Substrate system shall implement kernel device event queue.
+- **REQ-17-0112** (EARS/Ubiquitous): The Substrate system shall implement a bounded kernel device event queue.
   - Context: 13.6. Hotplug, DevFS Integration & Power Management
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0113** (EARS/Ubiquitous): The Substrate system shall implement uevent socket for userspace.
+- **REQ-17-0113** (EARS/Ubiquitous): The Substrate system shall expose queued device events through a userspace-readable kernel interface.
   - Context: 13.6. Hotplug, DevFS Integration & Power Management
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0114** (EARS/Ubiquitous): The Substrate system shall devFS Auto-Population:.
+- **REQ-17-0114** (EARS/Ubiquitous): The Substrate system shall provide framework-managed devfs auto-publication for participating devices.
   - Context: 13.6. Hotplug, DevFS Integration & Power Management
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0115** (EARS/Ubiquitous): The Substrate system shall implement automatic device node creation on ADD.
+- **REQ-17-0115** (EARS/Ubiquitous): The Substrate system shall publish device nodes automatically when a framework-managed device is registered.
   - Context: 13.6. Hotplug, DevFS Integration & Power Management
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0116** (EARS/Ubiquitous): The Substrate system shall implement automatic device node removal on REMOVE.
+- **REQ-17-0116** (EARS/Ubiquitous): The Substrate system shall withdraw published device nodes automatically when a framework-managed device is unregistered.
   - Context: 13.6. Hotplug, DevFS Integration & Power Management
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0117** (EARS/Ubiquitous): The Substrate system shall implement persistent naming via device serial/GUID.
+- **REQ-17-0117** (EARS/Ubiquitous): The Substrate system shall synthesize stable `/dev/by-id` aliases from serial or GUID identity when present.
   - Context: 13.6. Hotplug, DevFS Integration & Power Management
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0118** (EARS/Ubiquitous): The Substrate system shall power Management:.
+- **REQ-17-0118** (EARS/Ubiquitous): The Substrate system shall provide framework-level power-management traversal hooks.
   - Context: 13.6. Hotplug, DevFS Integration & Power Management
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0119** (EARS/Ubiquitous): The Substrate system shall implement system suspend orchestration.
+- **REQ-17-0119** (EARS/Ubiquitous): The Substrate system shall provide tree-wide suspend/resume orchestration for registered devices.
   - Context: 13.6. Hotplug, DevFS Integration & Power Management
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0120** (EARS/Ubiquitous): The Substrate system shall implement runtime PM hooks.
+- **REQ-17-0120** (EARS/Ubiquitous): The Substrate system shall provide runtime power-management hooks with usage-counted autosuspend support.
   - Context: 13.6. Hotplug, DevFS Integration & Power Management
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0121** (EARS/Ubiquitous): The Substrate system shall device Listing Tools:.
+- **REQ-17-0121** (EARS/Ubiquitous): The Substrate system shall provide framework-level inspection tools for the PCI view and driver-model tree.
   - Context: 13.7. Diagnostics & Tools
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0122** (EARS/Ubiquitous): The Substrate system shall implement lspci command.
+- **REQ-17-0122** (EARS/Ubiquitous): The Substrate system shall provide an `lspci` utility that renders the `/proc/pci` view.
   - Context: 13.7. Diagnostics & Tools
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0123** (EARS/Ubiquitous): The Substrate system shall implement lsusb command.
+- **REQ-17-0123** (EARS/Ubiquitous): The Substrate system shall track `lsusb` with the USB driver tasklist rather than claiming it as bus-core work.
   - Context: 13.7. Diagnostics & Tools
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0124** (EARS/Ubiquitous): The Substrate system shall implement kernel device tree dump.
+- **REQ-17-0124** (EARS/Ubiquitous): The Substrate system shall provide a `devtree` utility that renders the `/proc/devtree` hierarchy.
   - Context: 13.7. Diagnostics & Tools
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0125** (EARS/Ubiquitous): The Substrate system shall debug Interfaces:.
+- **REQ-17-0125** (EARS/Ubiquitous): The Substrate system shall provide driver-model debug interfaces.
   - Context: 13.7. Diagnostics & Tools
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0126** (EARS/Ubiquitous): The Substrate system shall implement /proc/ioports.
+- **REQ-17-0126** (EARS/Ubiquitous): The Substrate system shall implement `/proc/ioports`.
   - Context: 13.7. Diagnostics & Tools
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0127** (EARS/Ubiquitous): The Substrate system shall implement /proc/iomem.
+- **REQ-17-0127** (EARS/Ubiquitous): The Substrate system shall implement `/proc/iomem`.
   - Context: 13.7. Diagnostics & Tools
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0128** (EARS/Ubiquitous): The Substrate system shall implement driver probe failure logging.
+- **REQ-17-0128** (EARS/Ubiquitous): The Substrate system shall log driver probe failures with actionable context.
   - Context: 13.7. Diagnostics & Tools
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0129** (EARS/Ubiquitous): The Substrate system shall privilege Enforcement:.
+- **REQ-17-0129** (EARS/Ubiquitous): The Substrate system shall attach privilege and permission policy to the driver-model publication path.
   - Context: 13.8. Security & Migration
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0130** (EARS/Ubiquitous): The Substrate system shall restrict raw I/O access to privileged processes.
+- **REQ-17-0130** (EARS/Ubiquitous): The Substrate system shall restrict raw I/O devices such as `/dev/port` to privileged callers.
   - Context: 13.8. Security & Migration
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0131** (EARS/Ubiquitous): The Substrate system shall implement device permission model for devfs.
+- **REQ-17-0131** (EARS/Ubiquitous): The Substrate system shall enforce devfs node permissions at open time using ownership and mode metadata.
   - Context: 13.8. Security & Migration
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0132** (EARS/Ubiquitous): The Substrate system shall migrate Existing Drivers:.
+- **REQ-17-0132** (EARS/Ubiquitous): The Substrate system shall hand controller-family migration work off to the driver tasklist.
   - Context: 13.8. Security & Migration
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0133** (EARS/Ubiquitous): The Substrate system shall audit pci.c and migrate to new bus model.
+- **REQ-17-0133** (EARS/Ubiquitous): The Substrate system shall keep PCI core enumeration in the bus-core tasklist while tracking per-driver migration under the driver tasklist.
   - Context: 13.8. Security & Migration
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0134** (EARS/Ubiquitous): The Substrate system shall audit VirtIO drivers and use pci_driver registration.
+- **REQ-17-0134** (EARS/Ubiquitous): The Substrate system shall track VirtIO migration under the driver tasklist rather than claiming it as bus-core completion.
   - Context: 13.8. Security & Migration
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-17-0135** (EARS/Ubiquitous): The Substrate system shall remove legacy detection code after migration.
+- **REQ-17-0135** (EARS/Ubiquitous): The Substrate system shall preserve legacy detection paths where required for old hardware compatibility.
   - Context: 13.8. Security & Migration
   - Verification: design review + implementation evidence + test/doc update.

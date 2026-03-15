@@ -589,9 +589,7 @@ static int builtin_eval(int argc, char **argv) {
         if (line) {
             char *ptr = line;
             for (int i = 1; i < argc; i++) {
-                size_t len = strlen(argv[i]);
-                memcpy(ptr, argv[i], len);
-                ptr += len;
+                ptr = stpcpy(ptr, argv[i]);
                 if (i < argc - 1) *ptr++ = ' ';
             }
             *ptr = '\0';

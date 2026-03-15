@@ -22,6 +22,7 @@ int tty_ioctl(tty_t *tty, uint32_t cmd, unsigned long arg) { return 0; }
 
 struct fs_node;
 struct fs_node *console_get_node(void) { return NULL; }
+int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
 
 typedef struct filesystem filesystem_t;
 void vfs_register_filesystem(filesystem_t *fs) { (void)fs; }

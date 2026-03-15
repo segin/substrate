@@ -12,7 +12,7 @@ extern fs_node_t *console_get_node(void);
 static size_t tty_read_proxy(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node;
     if (current_process && current_process->tty) {
-        return tty_read(current_process->tty, (char*)buffer, size);
+        return tty_read(current_process->tty, (char *)buffer, size);
     }
     fs_node_t *cons = console_get_node();
     if (cons && cons->read) return cons->read(cons, offset, size, buffer);
@@ -22,7 +22,7 @@ static size_t tty_read_proxy(fs_node_t *node, off_t offset, size_t size, uint8_t
 static size_t tty_write_proxy(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node;
     if (current_process && current_process->tty) {
-        return tty_write(current_process->tty, (const char*)buffer, size);
+        return tty_write(current_process->tty, (const char *)buffer, size);
     }
     fs_node_t *cons = console_get_node();
     if (cons && cons->write) return cons->write(cons, offset, size, buffer);
@@ -56,16 +56,26 @@ typedef struct devfs_entry {
     struct devfs_entry *parent;
     struct devfs_entry *child;
     struct devfs_entry *next;
+    uint8_t owns_node;
+    char link_target[128];
 } devfs_entry_t;
 
 static devfs_entry_t *root_entry = NULL;
 static struct dirent dev_dirent;
+static fs_node_t devfs_root_node;
+fs_node_t *devfs_root_node_ptr = NULL;
 
 static struct dirent *devfs_dir_readdir(fs_node_t *node, uint64_t index);
 static fs_node_t *devfs_dir_finddir(fs_node_t *node, char *name);
 
 static devfs_entry_t *devfs_find_child(devfs_entry_t *parent, const char *name) {
-    devfs_entry_t *curr = parent->child;
+    devfs_entry_t *curr;
+
+    if (parent == NULL || name == NULL) {
+        return NULL;
+    }
+
+    curr = parent->child;
     while (curr) {
         if (strcmp(curr->name, name) == 0) return curr;
         curr = curr->next;
@@ -74,23 +84,23 @@ static devfs_entry_t *devfs_find_child(devfs_entry_t *parent, const char *name) 
 }
 
 static devfs_entry_t *devfs_create_entry(const char *name, fs_node_t *node, devfs_entry_t *parent) {
-    devfs_entry_t *entry = kmalloc(sizeof(devfs_entry_t));
+    devfs_entry_t *entry;
+
+    if (name == NULL || node == NULL || parent == NULL) {
+        return NULL;
+    }
+
+    entry = kmalloc(sizeof(devfs_entry_t));
     if (!entry) return NULL;
     memset(entry, 0, sizeof(devfs_entry_t));
-    strncpy(entry->name, name, 127);
+    strncpy(entry->name, name, sizeof(entry->name) - 1);
     entry->node = node;
     entry->parent = parent;
 
-    // Link to parent
     entry->next = parent->child;
     parent->child = entry;
 
-    // If it's a directory node we created, set impl to point to entry
-    // so we can find children later.
-    if (node->flags == FS_DIRECTORY) {
-        node->impl = (uintptr_t)entry;
-    }
-
+    node->impl = (uintptr_t)entry;
     return entry;
 }
 
@@ -98,7 +108,7 @@ static fs_node_t *devfs_create_dir_node(const char *name) {
     fs_node_t *node = kmalloc(sizeof(fs_node_t));
     if (!node) return NULL;
     memset(node, 0, sizeof(fs_node_t));
-    strncpy(node->name, name, 127);
+    strncpy(node->name, name, sizeof(node->name) - 1);
     node->flags = FS_DIRECTORY;
     node->mask = 0755;
     node->uid = 0;
@@ -108,12 +118,35 @@ static fs_node_t *devfs_create_dir_node(const char *name) {
     return node;
 }
 
+static int devfs_symlink_readlink(fs_node_t *node, char *buf, size_t size) {
+    devfs_entry_t *entry;
+    size_t len;
+
+    if (node == NULL || buf == NULL || size == 0) {
+        return -1;
+    }
+
+    entry = (devfs_entry_t *)node->impl;
+    if (entry == NULL) {
+        return -1;
+    }
+
+    len = strlen(entry->link_target);
+    if (len > size) {
+        len = size;
+    }
+    memcpy(buf, entry->link_target, len);
+    return (int)len;
+}
+
 static struct dirent *devfs_dir_readdir(fs_node_t *node, uint64_t index) {
     devfs_entry_t *entry = (devfs_entry_t *)node->impl;
+    devfs_entry_t *child;
+    uint64_t i = 0;
+
     if (!entry) return NULL;
 
-    devfs_entry_t *child = entry->child;
-    uint64_t i = 0;
+    child = entry->child;
     while (child && i < index) {
         child = child->next;
         i++;
@@ -122,7 +155,7 @@ static struct dirent *devfs_dir_readdir(fs_node_t *node, uint64_t index) {
     if (child) {
         strncpy(dev_dirent.d_name, child->name, sizeof(dev_dirent.d_name) - 1);
         dev_dirent.d_name[sizeof(dev_dirent.d_name) - 1] = '\0';
-        dev_dirent.d_ino = (uintptr_t)child; // Use pointer as inode
+        dev_dirent.d_ino = (uintptr_t)child;
         return &dev_dirent;
     }
     return NULL;
@@ -130,9 +163,11 @@ static struct dirent *devfs_dir_readdir(fs_node_t *node, uint64_t index) {
 
 static fs_node_t *devfs_dir_finddir(fs_node_t *node, char *name) {
     devfs_entry_t *entry = (devfs_entry_t *)node->impl;
+    devfs_entry_t *child;
+
     if (!entry) return NULL;
 
-    devfs_entry_t *child = devfs_find_child(entry, name);
+    child = devfs_find_child(entry, name);
     if (child) return child->node;
 
     return NULL;
@@ -171,7 +206,6 @@ static int devfs_path_allowed(const char *path) {
     if (!top_entry || !top_entry->node) return 0;
     if ((top_entry->node->flags & 0x7) != FS_DIRECTORY) return 0;
 
-    /* Validate all remaining path components. */
     while (*sep == '/') {
         const char *comp = sep + 1;
         const char *next = strchr(comp, '/');
@@ -184,39 +218,151 @@ static int devfs_path_allowed(const char *path) {
     return 1;
 }
 
-static void devfs_add_entry(const char *path, fs_node_t *node) {
+static devfs_entry_t *devfs_lookup_path(const char *path) {
     devfs_entry_t *current = root_entry;
-    if (!current) return; // Should not happen if initialized
-
-    char name_buf[128];
     const char *p = path;
+    char name_buf[128];
+
+    if (current == NULL || path == NULL || path[0] == '\0') {
+        return NULL;
+    }
 
     while (1) {
         const char *sep = strchr(p, '/');
-        if (sep) {
-            size_t len = sep - p;
-            if (len >= sizeof(name_buf)) len = sizeof(name_buf) - 1;
-            strncpy(name_buf, p, len);
-            name_buf[len] = '\0';
+        size_t len = sep ? (size_t)(sep - p) : strlen(p);
 
-            // Find or create directory
-            devfs_entry_t *next = devfs_find_child(current, name_buf);
-            if (!next) {
-                // Create directory node
-                fs_node_t *dir_node = devfs_create_dir_node(name_buf);
-                if (dir_node) {
-                    next = devfs_create_entry(name_buf, dir_node, current);
-                }
+        if (len >= sizeof(name_buf)) {
+            return NULL;
+        }
+        strncpy(name_buf, p, len);
+        name_buf[len] = '\0';
+
+        current = devfs_find_child(current, name_buf);
+        if (current == NULL) {
+            return NULL;
+        }
+        if (!sep) {
+            return current;
+        }
+        p = sep + 1;
+    }
+}
+
+static devfs_entry_t *devfs_find_entry_by_node(devfs_entry_t *entry, fs_node_t *node) {
+    devfs_entry_t *found;
+
+    while (entry != NULL) {
+        if (entry->node == node) {
+            return entry;
+        }
+        found = devfs_find_entry_by_node(entry->child, node);
+        if (found != NULL) {
+            return found;
+        }
+        entry = entry->next;
+    }
+
+    return NULL;
+}
+
+static void devfs_destroy_entry(devfs_entry_t *entry) {
+    devfs_entry_t *child;
+    devfs_entry_t *next;
+
+    if (entry == NULL) {
+        return;
+    }
+
+    child = entry->child;
+    while (child != NULL) {
+        next = child->next;
+        devfs_destroy_entry(child);
+        child = next;
+    }
+
+    if (entry->owns_node && entry->node != NULL) {
+        kfree(entry->node, sizeof(fs_node_t));
+    }
+    kfree(entry, sizeof(*entry));
+}
+
+static void devfs_remove_entry(devfs_entry_t *entry) {
+    devfs_entry_t *curr;
+    devfs_entry_t *prev = NULL;
+
+    if (entry == NULL || entry->parent == NULL) {
+        return;
+    }
+
+    curr = entry->parent->child;
+    while (curr != NULL) {
+        if (curr == entry) {
+            if (prev != NULL) {
+                prev->next = curr->next;
+            } else {
+                entry->parent->child = curr->next;
             }
-            if (!next) return; // Failed to create directory
+            entry->next = NULL;
+            devfs_destroy_entry(entry);
+            return;
+        }
+        prev = curr;
+        curr = curr->next;
+    }
+}
+
+static int devfs_add_entry(const char *path, fs_node_t *node) {
+    devfs_entry_t *current = root_entry;
+    char name_buf[128];
+    const char *p = path;
+
+    if (current == NULL || path == NULL || node == NULL) {
+        return -1;
+    }
+
+    while (1) {
+        const char *sep = strchr(p, '/');
+        size_t len = sep ? (size_t)(sep - p) : strlen(p);
+        devfs_entry_t *next;
+
+        if (len >= sizeof(name_buf)) {
+            return -1;
+        }
+        strncpy(name_buf, p, len);
+        name_buf[len] = '\0';
+
+        next = devfs_find_child(current, name_buf);
+        if (sep) {
+            if (!next) {
+                fs_node_t *dir_node = devfs_create_dir_node(name_buf);
+                if (dir_node == NULL) {
+                    return -1;
+                }
+                next = devfs_create_entry(name_buf, dir_node, current);
+            }
+            if (next == NULL || (next->node->flags & 0x7) != FS_DIRECTORY) {
+                return -1;
+            }
             current = next;
             p = sep + 1;
-        } else {
-            // Last component
-            strncpy(name_buf, p, sizeof(name_buf) - 1);
-            name_buf[sizeof(name_buf) - 1] = '\0';
-            devfs_create_entry(name_buf, node, current);
-            break;
+            continue;
+        }
+
+        if (next != NULL) {
+            next->node = node;
+            node->impl = (uintptr_t)next;
+            return 0;
+        }
+
+        return devfs_create_entry(name_buf, node, current) != NULL ? 0 : -1;
+    }
+}
+
+static void devfs_create_common_dir(const char *name) {
+    if (!devfs_find_child(root_entry, name)) {
+        fs_node_t *dir_node = devfs_create_dir_node(name);
+        if (dir_node) {
+            (void)devfs_create_entry(name, dir_node, root_entry);
         }
     }
 }
@@ -234,7 +380,7 @@ void devfs_register_device(fs_node_t *node) {
     }
 
     if (strchr(node->name, '/')) {
-        devfs_add_entry(node->name, node);
+        (void)devfs_add_entry(node->name, node);
         return;
     }
 
@@ -242,18 +388,87 @@ void devfs_register_device(fs_node_t *node) {
         strncpy(path, "storage/", sizeof(path) - 1);
         path[sizeof(path) - 1] = '\0';
         strncat(path, node->name, sizeof(path) - strlen(path) - 1);
-        devfs_add_entry(path, node);
+        (void)devfs_add_entry(path, node);
         return;
     }
 
-    devfs_add_entry(node->name, node);
+    (void)devfs_add_entry(node->name, node);
 }
 
-static fs_node_t devfs_root_node;
-fs_node_t *devfs_root_node_ptr = NULL; // For VFS device lookup
+void devfs_unregister_device(fs_node_t *node) {
+    devfs_entry_t *entry;
+
+    if (node == NULL || root_entry == NULL) {
+        return;
+    }
+
+    entry = devfs_find_entry_by_node(root_entry->child, node);
+    if (entry != NULL) {
+        devfs_remove_entry(entry);
+    }
+}
+
+int devfs_register_alias(const char *path, const char *target) {
+    fs_node_t *node;
+    devfs_entry_t *entry;
+
+    if (!devfs_path_allowed(path) || target == NULL || target[0] == '\0') {
+        return -1;
+    }
+
+    entry = devfs_lookup_path(path);
+    if (entry != NULL) {
+        if (entry->node == NULL || (entry->node->flags & 0x7) != FS_SYMLINK) {
+            return -1;
+        }
+        strncpy(entry->link_target, target, sizeof(entry->link_target) - 1);
+        entry->link_target[sizeof(entry->link_target) - 1] = '\0';
+        return 0;
+    }
+
+    node = kmalloc(sizeof(fs_node_t));
+    if (node == NULL) {
+        return -1;
+    }
+    memset(node, 0, sizeof(*node));
+    strncpy(node->name, path, sizeof(node->name) - 1);
+    node->flags = FS_SYMLINK;
+    node->mask = 0777;
+    node->uid = 0;
+    node->gid = 0;
+    node->readlink = devfs_symlink_readlink;
+
+    if (devfs_add_entry(path, node) != 0) {
+        kfree(node, sizeof(*node));
+        return -1;
+    }
+
+    entry = (devfs_entry_t *)node->impl;
+    if (entry == NULL) {
+        kfree(node, sizeof(*node));
+        return -1;
+    }
+    entry->owns_node = 1;
+    strncpy(entry->link_target, target, sizeof(entry->link_target) - 1);
+    entry->link_target[sizeof(entry->link_target) - 1] = '\0';
+    return 0;
+}
+
+void devfs_unregister_alias(const char *path) {
+    devfs_entry_t *entry;
+
+    entry = devfs_lookup_path(path);
+    if (entry == NULL || entry->node == NULL || (entry->node->flags & 0x7) != FS_SYMLINK) {
+        return;
+    }
+
+    devfs_remove_entry(entry);
+}
 
 static fs_node_t *devfs_mount(const char *device, uint32_t flags, void *data) {
-    (void)device; (void)flags; (void)data;
+    (void)device;
+    (void)flags;
+    (void)data;
     return &devfs_root_node;
 }
 
@@ -263,7 +478,6 @@ static filesystem_t devfs_fs = {
 };
 
 void devfs_init(void) {
-    // Initialize root node
     memset(&devfs_root_node, 0, sizeof(fs_node_t));
     strncpy(devfs_root_node.name, "dev", sizeof(devfs_root_node.name) - 1);
     devfs_root_node.name[sizeof(devfs_root_node.name) - 1] = '\0';
@@ -274,41 +488,21 @@ void devfs_init(void) {
     devfs_root_node.readdir = &devfs_dir_readdir;
     devfs_root_node.finddir = &devfs_dir_finddir;
 
-    // Create root entry
     root_entry = kmalloc(sizeof(devfs_entry_t));
     if (root_entry) {
         memset(root_entry, 0, sizeof(devfs_entry_t));
         strncpy(root_entry->name, "dev", sizeof(root_entry->name) - 1);
         root_entry->name[sizeof(root_entry->name) - 1] = '\0';
         root_entry->node = &devfs_root_node;
-
         devfs_root_node.impl = (uintptr_t)root_entry;
 
-        /* Create common subsystem directories eagerly. */
-        if (!devfs_find_child(root_entry, "comm")) {
-            fs_node_t *comm_dir = devfs_create_dir_node("comm");
-            if (comm_dir) {
-                devfs_create_entry("comm", comm_dir, root_entry);
-            }
-        }
-        if (!devfs_find_child(root_entry, "storage")) {
-            fs_node_t *storage_dir = devfs_create_dir_node("storage");
-            if (storage_dir) {
-                devfs_create_entry("storage", storage_dir, root_entry);
-            }
-        }
-        if (!devfs_find_child(root_entry, "input")) {
-            fs_node_t *input_dir = devfs_create_dir_node("input");
-            if (input_dir) {
-                devfs_create_entry("input", input_dir, root_entry);
-            }
-        }
+        devfs_create_common_dir("comm");
+        devfs_create_common_dir("storage");
+        devfs_create_common_dir("input");
+        devfs_create_common_dir("by-id");
     }
-    
-    devfs_root_node_ptr = &devfs_root_node; // Export for VFS device lookup
 
+    devfs_root_node_ptr = &devfs_root_node;
     vfs_register_filesystem(&devfs_fs);
-
-    // Register TTY
     devfs_register_device(&tty_node);
 }

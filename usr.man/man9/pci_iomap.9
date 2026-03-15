@@ -1,0 +1,24 @@
+.Dd March 12, 2026
+.Dt PCI_IOMAP 9
+.Os
+.Sh NAME
+.Nm pci_iomap
+.Nd map the MMIO range described by a PCI BAR
+.Sh SYNOPSIS
+.In kern/pci.h
+.Ft void *
+.Fn pci_iomap "pci_device_t *dev" "int bar" "size_t max_len"
+.Sh DESCRIPTION
+The
+.Fn pci_iomap
+function reserves the selected MMIO BAR if necessary and maps it through the
+kernel
+.Fn ioremap
+API.
+.Sh RETURN VALUES
+Returns the mapped kernel pointer on success or
+.Dv NULL
+on failure.
+.Sh SEE ALSO
+.Xr ioremap 9 ,
+.Xr pci_request_region 9

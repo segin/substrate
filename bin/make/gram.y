@@ -291,7 +291,7 @@ lastchp = t;
 lastch = *t;
 *t = '\0';
 
-subst(yytext, templin); 	/* Substitute for macros on dependency lines */
+subst(yytext, templin, INMAX); 	/* Substitute for macros on dependency lines */
 
 if(lastch)
 	{

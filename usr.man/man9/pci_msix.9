@@ -1,0 +1,20 @@
+.Dd March 12, 2026
+.Dt PCI_MSIX 9
+.Os
+.Sh NAME
+.Nm pci_enable_msix
+.Nd enable MSI-X for a PCI function
+.Sh SYNOPSIS
+.In kern/pci.h
+.Ft int
+.Fn pci_enable_msix "pci_device_t *dev" "int nvec"
+.Sh DESCRIPTION
+The
+.Fn pci_enable_msix
+function validates the requested vector count against the MSI-X table
+size and enables MSI-X in the device control register.
+.Sh RETURN VALUES
+0 is returned on success.
+Otherwise a negative error code is returned.
+.Sh SEE ALSO
+.Xr pci_find_capability 9

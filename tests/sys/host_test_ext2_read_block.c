@@ -48,6 +48,25 @@ size_t mock_device_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buf
     return 0;
 }
 
+
+static size_t mock_device_read_partial(fs_node_t *node, off_t offset, size_t size, uint8_t *buf) {
+    (void)node;
+    mock_device_read_calls++;
+    last_mock_device_read_offset = offset;
+    last_mock_device_read_size = size;
+    if (size >= 512) {
+        memcpy(buf, mock_read_data, 512);
+        return 512;
+    }
+    return size;
+}
+
+static size_t mock_device_read_error(fs_node_t *node, off_t offset, size_t size, uint8_t *buf) {
+    (void)node; (void)offset; (void)size; (void)buf;
+    mock_device_read_calls++;
+    return 0;
+}
+
 size_t mock_device_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node; (void)offset; (void)size; (void)buffer;
     return size;
@@ -75,7 +94,7 @@ int main() {
     fs.device = &device_node;
     fs.block_size = 1024;
 
-    uint8_t buffer[1024];
+    uint8_t buffer[4096];
     memset(buffer, 0, sizeof(buffer));
     memset(mock_read_data, 0xAA, sizeof(mock_read_data));
 
@@ -140,6 +159,103 @@ int main() {
     }
     if (mock_device_read_calls != 0) {
         printf("FAILED Test 4: Expected 0 device read calls, got %zu\n", mock_device_read_calls);
+        return 1;
+    }
+
+    // Test 5: Large block number (requires 64-bit off_t casting)
+    device_node.read = mock_device_read;
+    mock_device_read_calls = 0;
+    uint32_t large_block = 0x80000000;
+    result = ext2_read_block(&fs, large_block, buffer);
+    if (result != 1024) {
+        printf("FAILED Test 5: Expected return 1024, got %u\n", result);
+        return 1;
+    }
+    if (mock_device_read_calls != 1) {
+        printf("FAILED Test 5: Expected 1 device read call, got %zu\n", mock_device_read_calls);
+        return 1;
+    }
+    if (last_mock_device_read_offset != ((off_t)large_block * 1024)) {
+        printf("FAILED Test 5: Expected offset %ld, got %ld\n", ((off_t)large_block * 1024), last_mock_device_read_offset);
+        return 1;
+    }
+
+    // Test 6: Mock device returns partial read
+    fs.device = &device_node;
+    device_node.read = mock_device_read_partial;
+
+    mock_device_read_calls = 0;
+    result = ext2_read_block(&fs, 5, buffer);
+    if (result != 512) {
+        printf("FAILED Test 6: Expected return 512, got %u\n", result);
+        return 1;
+    }
+
+    // Test 7: Mock device returns 0 (error)
+    device_node.read = mock_device_read_error;
+
+    mock_device_read_calls = 0;
+    result = ext2_read_block(&fs, 5, buffer);
+    if (result != 0) {
+        printf("FAILED Test 7: Expected return 0, got %u\n", result);
+        return 1;
+    }
+
+    device_node.read = mock_device_read; // Restore original mock
+
+    printf("Running ext2_read_blocks tests...\n");
+
+    // Test 8: ext2_read_blocks Successful multiple blocks read
+    mock_device_read_calls = 0;
+    result = ext2_read_blocks(&fs, 10, 3, buffer);
+
+    if (result != 3072) {
+        printf("FAILED Test 8: Expected return 3072, got %u\n", result);
+        return 1;
+    }
+    if (mock_device_read_calls != 1) {
+        printf("FAILED Test 8: Expected 1 device read call, got %zu\n", mock_device_read_calls);
+        return 1;
+    }
+    if (last_mock_device_read_offset != 10 * 1024) {
+        printf("FAILED Test 8: Expected offset %u, got %ld\n", 10 * 1024, last_mock_device_read_offset);
+        return 1;
+    }
+    if (last_mock_device_read_size != 3072) {
+        printf("FAILED Test 8: Expected size 3072, got %zu\n", last_mock_device_read_size);
+        return 1;
+    }
+
+    // Test 9: ext2_read_blocks Large block number
+    mock_device_read_calls = 0;
+    large_block = 0x80000000;
+    result = ext2_read_blocks(&fs, large_block, 2, buffer);
+
+    if (result != 2048) {
+        printf("FAILED Test 9: Expected return 2048, got %u\n", result);
+        return 1;
+    }
+    if (last_mock_device_read_offset != ((off_t)large_block * 1024)) {
+        printf("FAILED Test 9: Expected offset %ld, got %ld\n", ((off_t)large_block * 1024), last_mock_device_read_offset);
+        return 1;
+    }
+    if (last_mock_device_read_size != 2048) {
+        printf("FAILED Test 9: Expected size 2048, got %zu\n", last_mock_device_read_size);
+        return 1;
+    }
+
+    // Test 10: ext2_read_blocks Error handling (null fs)
+    result = ext2_read_blocks(NULL, 10, 3, buffer);
+    if (result != 0) {
+        printf("FAILED Test 10: Expected return 0 for NULL fs, got %u\n", result);
+        return 1;
+    }
+
+    // Test 11: ext2_read_blocks Mock device returns error (0)
+    device_node.read = mock_device_read_error;
+    result = ext2_read_blocks(&fs, 5, 2, buffer);
+    if (result != 0) {
+        printf("FAILED Test 11: Expected return 0, got %u\n", result);
         return 1;
     }
 

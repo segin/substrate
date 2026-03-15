@@ -1,0 +1,24 @@
+.Dd March 12, 2026
+.Dt REQUEST_REGION 9
+.Os
+.Sh NAME
+.Nm request_region
+.Nd reserve an I/O port range in the global resource tree
+.Sh SYNOPSIS
+.In kern/resource.h
+.Ft "struct resource *"
+.Fn request_region "resource_size_t start" "resource_size_t n" "const char *name"
+.Sh DESCRIPTION
+The
+.Fn request_region
+function reserves an I/O port range in the global resource tree.
+If the requested range overlaps an existing reservation, the request fails.
+.Sh RETURN VALUES
+The
+.Fn request_region
+function returns a pointer to the reserved resource on success or
+.Dv NULL
+on conflict or allocation failure.
+.Sh SEE ALSO
+.Xr release_region 9 ,
+.Xr resource 9

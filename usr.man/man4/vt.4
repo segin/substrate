@@ -1,0 +1,59 @@
+.Dd March 12, 2026
+.Dt VT 4
+.Os
+.Sh NAME
+.Nm vt
+.Nd virtual terminal layer for the kernel text console
+.Sh SYNOPSIS
+.Cd "device vt"
+.Sh DESCRIPTION
+The
+.Nm
+layer provides the kernel text console's virtual terminals.
+Each VT maintains its own screen buffer, cursor state, ANSI parser state,
+scrollback history, and attached
+.Xr tty 4
+instance.
+.Pp
+The active VT is displayed through the VGA hardware text backend.
+Inactive VTs retain their state in memory and are redrawn when activated.
+.Pp
+Substrate currently provides:
+.Bl -bullet
+.It
+12 virtual terminals
+.It
+dedicated
+.Pa /dev/tty1
+through
+.Pa /dev/tty12
+devices
+.It
+.Li Alt+F1
+through
+.Li Alt+F12
+for console switching
+.It
+per-VT scrollback, entered with
+.Li Shift+PageUp
+and left with
+.Li Shift+PageDown
+.It
+a kernel-owned status line on the last physical text row
+.El
+.Pp
+Scrollback freezes the visible console view while live output continues to
+append to the active VT buffer. The status line shows the current VT number and
+the number of lines by which the view is scrolled back.
+.Sh FILES
+.Bl -tag -width "/sys/drivers/console/vt.c"
+.It Pa /sys/drivers/console/vt.c
+VT state management and scrollback logic.
+.It Pa /sys/include/sys/vt.h
+VT data structures and interface.
+.It Pa /sys/drivers/video/hw_text.c
+VGA hardware text backend.
+.El
+.Sh SEE ALSO
+.Xr keyboard 4 ,
+.Xr tty 4

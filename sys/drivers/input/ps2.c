@@ -10,8 +10,6 @@
 #include <kern/console.h>
 #include <stdio.h>
 
-#define PS2_TIMEOUT 100000
-
 /* Global state */
 static int ps2_dual_channel = 0;
 
@@ -20,7 +18,7 @@ static int ps2_dual_channel = 0;
  * Returns 0 on success, -1 on timeout.
  */
 int ps2_wait_write(void) {
-    uint32_t timeout = PS2_TIMEOUT;
+    uint32_t timeout = PS2_TIMEOUT_LOOPS;
     while (timeout--) {
         if (!(inb(PS2_STATUS_PORT) & PS2_STATUS_INPUT_BUFFER_FULL)) {
             return 0;
@@ -35,7 +33,7 @@ int ps2_wait_write(void) {
  * Returns 0 on success, -1 on timeout.
  */
 int ps2_wait_read(void) {
-    uint32_t timeout = PS2_TIMEOUT;
+    uint32_t timeout = PS2_TIMEOUT_LOOPS;
     while (timeout--) {
         if (inb(PS2_STATUS_PORT) & PS2_STATUS_OUTPUT_BUFFER_FULL) {
             return 0;
@@ -106,7 +104,14 @@ static void ps2_flush(void) {
  */
 static int ps2_send_command_with_response(uint8_t cmd, uint8_t *response) {
     if (ps2_write_command(cmd)) return -1;
-    return ps2_read_data_timeout(response, PS2_TIMEOUT);
+    return ps2_read_data_timeout(response, PS2_TIMEOUT_LOOPS);
+}
+
+static void ps2_log_port_test_failure(const char *port, uint8_t response) {
+    char buf[48];
+
+    snprintf(buf, sizeof(buf), "PS/2: %s test failed (0x%02x)\n", port, response);
+    kprint(buf);
 }
 
 int ps2_init(void) {
@@ -141,16 +146,27 @@ int ps2_init(void) {
     }
 
     /* Step 4: Controller self-test */
-    if (ps2_send_command_with_response(PS2_CMD_SELF_TEST, &response)) {
-        kprint("PS/2: Self-test timeout\n");
-        return -1;
-    }
-    
-    if (response != PS2_TEST_PASSED) {
-        char buf[32];
-        sprintf(buf, "PS/2: Self-test failed (0x%02x)\n", response);
-        kprint(buf);
-        return -1;
+    if (ps2_send_command_with_response(PS2_CMD_SELF_TEST, &response) != 0 ||
+        response != PS2_TEST_PASSED) {
+        if (response != PS2_TEST_PASSED) {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "PS/2: Self-test retry (0x%02x)\n", response);
+            kprint(buf);
+        } else {
+            kprint("PS/2: Self-test retry after timeout\n");
+        }
+
+        if (ps2_send_command_with_response(PS2_CMD_SELF_TEST, &response) != 0) {
+            kprint("PS/2: Self-test timeout\n");
+            return -1;
+        }
+
+        if (response != PS2_TEST_PASSED) {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "PS/2: Self-test failed (0x%02x)\n", response);
+            kprint(buf);
+            return -1;
+        }
     }
     
     /* 
@@ -185,18 +201,18 @@ int ps2_init(void) {
     }
     
     if (response != PS2_PORT_TEST_PASSED) {
-        char buf[32];
-        sprintf(buf, "PS/2: Port 1 test failed (0x%02x)\n", response);
-        kprint(buf);
+        ps2_log_port_test_failure("Port 1", response);
         return -1;
     }
     
     if (ps2_dual_channel) {
         if (ps2_send_command_with_response(PS2_CMD_TEST_P2, &response) == 0) {
             if (response != PS2_PORT_TEST_PASSED) {
+                ps2_log_port_test_failure("Port 2", response);
                 ps2_dual_channel = 0;
             }
         } else {
+            kprint("PS/2: Port 2 test timeout\n");
             ps2_dual_channel = 0;
         }
     }
@@ -235,15 +251,17 @@ int ps2_init(void) {
         /* Send reset command to mouse */
         if (ps2_write_aux(PS2_DEV_RESET) == 0) {
             /* Wait for ACK (0xFA) */
-            if (ps2_read_data_timeout(&byte, 500000) == 0 && byte == PS2_DEV_ACK) {
+            if (ps2_read_data_timeout(&byte, PS2_MOUSE_TIMEOUT_LOOPS) == 0 &&
+                byte == PS2_DEV_ACK) {
                 /* Wait for self-test passed (0xAA) */
-                if (ps2_read_data_timeout(&byte, 500000) == 0 && byte == 0xAA) {
+                if (ps2_read_data_timeout(&byte, PS2_MOUSE_TIMEOUT_LOOPS) == 0 &&
+                    byte == 0xAA) {
                     /* Consume device ID (0x00 for standard mouse) */
-                    ps2_read_data_timeout(&byte, 100000);
+                    ps2_read_data_timeout(&byte, PS2_TIMEOUT_LOOPS);
                     
                     /* Enable data reporting */
                     if (ps2_write_aux(PS2_DEV_SCAN_ON) == 0) {
-                        ps2_read_data_timeout(&byte, 100000); /* ACK */
+                        ps2_read_data_timeout(&byte, PS2_TIMEOUT_LOOPS); /* ACK */
                         kprint("PS/2: Mouse enabled\n");
                     }
                 }

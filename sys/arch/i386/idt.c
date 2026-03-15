@@ -20,6 +20,7 @@ idt_ptr_t   idt_ptr;
 #include <kern/sched.h>
 #include <kern/cmdline.h>
 #include <kern/debug.h>
+#include <sys/irq.h>
 #include <drivers/console/uart/uart.h>
 #include <drivers/storage/ide/ide.h>
 #include <arch/i386/vm86.h>
@@ -66,6 +67,17 @@ static const char *exception_messages[] = {
     "Reserved", "Reserved", "Reserved", "Reserved", "Reserved",
     "Reserved", "Reserved", "Security Exception", "Reserved"
 };
+
+static uint32_t idt_read_cr2(void) {
+#ifdef HOST_TEST
+    extern uint32_t idt_host_cr2;
+    return idt_host_cr2;
+#else
+    uint32_t cr2;
+    __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
+    return cr2;
+#endif
+}
 
 static void pic_remap(void) {
     /*
@@ -169,9 +181,17 @@ void isr_handler(registers_t *regs) {
             rusage_add_tick(current_process, is_usermode);
         }
         
+        (void)irq_dispatch(0, regs);
         if (regs->int_no >= PIC_SLAVE_REMAP_BASE) outb(PIC_SLAVE_CMD, PIC_EOI);
         outb(PIC_MASTER_CMD, PIC_EOI);
-        if (!current_thread || !(current_thread->flags & THREAD_F_NO_PREEMPT)) {
+        if (current_thread && !(current_thread->flags & THREAD_F_NO_PREEMPT)) {
+            if (is_usermode) {
+                current_thread->needs_resched = 0;
+                sched_yield();
+            } else {
+                current_thread->needs_resched = 1;
+            }
+        } else if (!current_thread && is_usermode) {
             sched_yield();
         }
         signal_handle_pending(regs);
@@ -186,8 +206,6 @@ void isr_handler(registers_t *regs) {
         fpu_handler(regs);
     } else if (regs->int_no == 36) {
         uart_handler(regs);
-    } else if (regs->int_no == 46 || regs->int_no == 47) {
-        ide_irq_handler(regs->int_no == 47 ? 15 : 14);
     } else if (regs->int_no < 32) {
         // Exception - check if from user mode or kernel mode
         // Fault Recovery (copyin/copyout safe handlers)
@@ -215,7 +233,7 @@ void isr_handler(registers_t *regs) {
 
         uint32_t cr2 = 0;
         if (regs->int_no == 14) {
-            __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
+            cr2 = idt_read_cr2();
             // COW and lazy fault handling are expected for normal process execution.
             if (pmap_fault(regs->err_code, cr2)) {
                 return;
@@ -233,13 +251,18 @@ void isr_handler(registers_t *regs) {
                     current_thread->trap_addr = addr;
                 }
                 if (cmdline_debug_enabled("trap")) {
-                    char trapbuf[128];
+                    char trapbuf[256];
                     sprintf(trapbuf,
-                            "TRAP: user exception %u -> signal %d code %d addr 0x%08X\n",
+                            "TRAP: user exception %u -> signal %d code %d addr 0x%08X eip=0x%08X cs=0x%04X ss=0x%04X esp=0x%08X ds=0x%04X\n",
                             (unsigned int)regs->int_no,
                             sig,
                             code,
-                            (unsigned int)addr);
+                            (unsigned int)addr,
+                            (unsigned int)regs->eip,
+                            (unsigned int)regs->cs,
+                            (unsigned int)regs->ss,
+                            (unsigned int)regs->useresp,
+                            (unsigned int)regs->ds);
                     kprint(trapbuf);
                 }
                 trapsignal(current_process, sig, code);
@@ -313,9 +336,10 @@ void isr_handler(registers_t *regs) {
     }
 
     if (regs->int_no >= 32 && regs->int_no <= 47) {
+        (void)irq_dispatch((unsigned int)(regs->int_no - IDT_IRQ_BASE), regs);
         if (regs->int_no >= 40) outb(0xA0, 0x20);
         outb(0x20, 0x20);
     }
-    
+
     signal_handle_pending(regs);
 }

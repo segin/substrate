@@ -27,7 +27,17 @@ typedef struct scsi_blk_dev {
 /* Global state */
 static scsi_blk_dev_t *scsi_dev_list = NULL;
 static uint32_t scsi_dev_count = 0;
+static uint32_t scsi_dev_next_num = 0;
 static scsi_blk_dev_t scsi_dev_pool[32];
+
+static scsi_blk_dev_t *scsi_dev_alloc_slot(void) {
+    for (size_t i = 0; i < (sizeof(scsi_dev_pool) / sizeof(scsi_dev_pool[0])); i++) {
+        if (scsi_dev_pool[i].scsi_dev == NULL) {
+            return &scsi_dev_pool[i];
+        }
+    }
+    return NULL;
+}
 
 /*
  * ============================================================
@@ -35,6 +45,23 @@ static scsi_blk_dev_t scsi_dev_pool[32];
  * ============================================================
  */
 #define CD_SECTOR_SIZE      2048    /* Standard data CD */
+
+static int scsi_dev_refresh_capacity(scsi_device_t *scsi_dev) {
+    uint64_t sectors = 0;
+    uint32_t sector_size = 0;
+
+    if (scsi_dev == NULL) {
+        return -1;
+    }
+
+    if (scsi_read_capacity(scsi_dev, &sectors, &sector_size) < 0) {
+        return -1;
+    }
+
+    scsi_dev->capacity = sectors;
+    scsi_dev->sector_size = sector_size;
+    return 0;
+}
 
 /*
  * ============================================================
@@ -47,14 +74,38 @@ static int scsi_blk_read(blkdev_t *dev, uint64_t sector, uint32_t count, void *b
     if (!sbd || !sbd->scsi_dev) return -1;
     
     scsi_device_t *scsi = sbd->scsi_dev;
-    uint8_t cdb[10];
+    int ret;
+    int refreshed = 0;
+
+retry:
+    if (sector > 0xFFFFFFFFULL || count > 0xFFFFU || scsi->capacity > 0x100000000ULL) {
+        uint8_t cdb[16];
+
+        scsi_cdb_read_16(cdb, sector, count);
+        ret = scsi_execute_sync(scsi, cdb, 16, buffer,
+                                count * dev->sector_size,
+                                SCSI_REQ_READ, 60000);
+    } else {
+        uint8_t cdb[10];
+
+        scsi_cdb_read_10(cdb, (uint32_t)sector, (uint16_t)count);
+        ret = scsi_execute_sync(scsi, cdb, 10, buffer,
+                                count * dev->sector_size,
+                                SCSI_REQ_READ, 60000);
+    }
     
-    /* Build READ(10) CDB */
-    scsi_cdb_read_10(cdb, (uint32_t)sector, (uint16_t)count);
-    
-    int ret = scsi_execute_sync(scsi, cdb, 10, buffer,
-                                 count * dev->sector_size,
-                                 SCSI_REQ_READ, 60000);
+    if (ret < 0 && !refreshed &&
+        scsi->type == SCSI_TYPE_ROM && scsi->removable) {
+        scsi->flags &= ~SCSI_DEV_ONLINE;
+        if (scsi_dev_refresh_capacity(scsi) == 0) {
+            refreshed = 1;
+            scsi->flags |= SCSI_DEV_ONLINE;
+            scsi->online = 1;
+            scsi->media_present = 1;
+            scsi->removable = 1;
+            goto retry;
+        }
+    }
     
     return (ret >= 0) ? (int)count : -1;
 }
@@ -65,19 +116,30 @@ static int scsi_blk_write(blkdev_t *dev, uint64_t sector, uint32_t count, const 
     
     scsi_device_t *scsi = sbd->scsi_dev;
     
-    /* CD-ROMs are typically read-only */
-    if (scsi->type == SCSI_TYPE_ROM) {
+    /* CD-ROMs and WORM media are not writable through the generic block path. */
+    if (scsi->type == SCSI_TYPE_ROM ||
+        scsi->type == SCSI_TYPE_WORM ||
+        scsi->write_protected) {
         return -1;
     }
     
-    uint8_t cdb[10];
-    
-    /* Build WRITE(10) CDB */
-    scsi_cdb_write_10(cdb, (uint32_t)sector, (uint16_t)count);
-    
-    int ret = scsi_execute_sync(scsi, cdb, 10, (void *)buffer,
-                                 count * dev->sector_size,
-                                 SCSI_REQ_WRITE, 30000);
+    int ret;
+
+    if (sector > 0xFFFFFFFFULL || count > 0xFFFFU || scsi->capacity > 0x100000000ULL) {
+        uint8_t cdb[16];
+
+        scsi_cdb_write_16(cdb, sector, count);
+        ret = scsi_execute_sync(scsi, cdb, 16, (void *)buffer,
+                                count * dev->sector_size,
+                                SCSI_REQ_WRITE, 30000);
+    } else {
+        uint8_t cdb[10];
+
+        scsi_cdb_write_10(cdb, (uint32_t)sector, (uint16_t)count);
+        ret = scsi_execute_sync(scsi, cdb, 10, (void *)buffer,
+                                count * dev->sector_size,
+                                SCSI_REQ_WRITE, 30000);
+    }
     
     return (ret >= 0) ? (int)count : -1;
 }
@@ -99,8 +161,22 @@ int scsi_read_toc(scsi_device_t *dev, void *buffer, uint16_t buflen) {
     cdb[7] = (buflen >> 8) & 0xFF;
     cdb[8] = buflen & 0xFF;
     
-    return scsi_execute_sync(dev, cdb, 10, buffer, buflen,
-                              SCSI_REQ_READ, 30000);
+    int ret = scsi_execute_sync(dev, cdb, 10, buffer, buflen,
+                                SCSI_REQ_READ, 30000);
+
+    if (ret < 0 && dev->type == SCSI_TYPE_ROM && dev->removable) {
+        dev->flags &= ~SCSI_DEV_ONLINE;
+        if (scsi_dev_refresh_capacity(dev) == 0) {
+            dev->flags |= SCSI_DEV_ONLINE;
+            dev->online = 1;
+            dev->media_present = 1;
+            dev->removable = 1;
+            ret = scsi_execute_sync(dev, cdb, 10, buffer, buflen,
+                                    SCSI_REQ_READ, 30000);
+        }
+    }
+
+    return ret;
 }
 
 /* Lock/unlock door */
@@ -139,14 +215,26 @@ int scsi_dev_attach(scsi_device_t *scsi_dev) {
         return -1;
     }
     
-    scsi_blk_dev_t *sbd = &scsi_dev_pool[scsi_dev_count];
+    scsi_blk_dev_t *sbd = scsi_dev_alloc_slot();
+    if (!sbd) {
+        kprint("scsi: no free block-device slots\n");
+        return -1;
+    }
     memset(sbd, 0, sizeof(*sbd));
     
     sbd->scsi_dev = scsi_dev;
-    sbd->dev_num = scsi_dev_count;
+    sbd->dev_num = scsi_dev_next_num++;
+
+    if ((scsi_dev->type == SCSI_TYPE_DISK ||
+         scsi_dev->type == SCSI_TYPE_ROM ||
+         scsi_dev->type == SCSI_TYPE_OPTICAL ||
+         scsi_dev->type == SCSI_TYPE_WORM) &&
+        (scsi_dev->capacity == 0 || scsi_dev->sector_size == 0)) {
+        (void)scsi_dev_refresh_capacity(scsi_dev);
+    }
     
     /* Create device name: scsi0, scsi1, etc. */
-    snprintf(sbd->blkdev.name, sizeof(sbd->blkdev.name), "scsi%u", scsi_dev_count);
+    snprintf(sbd->blkdev.name, sizeof(sbd->blkdev.name), "scsi%u", sbd->dev_num);
     
     /* Set sector size based on device type */
     if (scsi_dev->type == SCSI_TYPE_ROM || scsi_dev->type == SCSI_TYPE_OPTICAL) {
@@ -197,10 +285,20 @@ int scsi_dev_detach(scsi_device_t *scsi_dev) {
         if ((*pp)->scsi_dev == scsi_dev) {
             scsi_blk_dev_t *sbd = *pp;
             *pp = sbd->next;
+
+            if (scsi_dev->type == SCSI_TYPE_DISK ||
+                scsi_dev->type == SCSI_TYPE_OPTICAL ||
+                scsi_dev->type == SCSI_TYPE_WORM) {
+                (void)scsi_synchronize_cache(scsi_dev);
+            }
+
+            blkdev_unregister(&sbd->blkdev);
+            if (scsi_dev_count > 0) scsi_dev_count--;
             
             char log_buf[64];
             snprintf(log_buf, sizeof(log_buf), "scsi: detached %s\n", sbd->blkdev.name);
             kprint(log_buf);
+            memset(sbd, 0, sizeof(*sbd));
             return 0;
         }
         pp = &(*pp)->next;
@@ -225,5 +323,9 @@ scsi_blk_dev_t *scsi_dev_lookup(const char *name) {
  * Initialize SCSI device subsystem
  */
 void scsi_dev_init(void) {
+    scsi_dev_list = NULL;
+    scsi_dev_count = 0;
+    scsi_dev_next_num = 0;
+    memset(scsi_dev_pool, 0, sizeof(scsi_dev_pool));
     kprint("scsi: unified SCSI device driver initialized\n");
 }

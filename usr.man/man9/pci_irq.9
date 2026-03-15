@@ -1,0 +1,22 @@
+.Dd March 12, 2026
+.Dt PCI_IRQ 9
+.Os
+.Sh NAME
+.Nm pci_get_irq
+.Nd return the legacy interrupt line for a PCI function
+.Sh SYNOPSIS
+.In kern/pci.h
+.Ft int
+.Fn pci_get_irq "pci_device_t *dev"
+.Sh DESCRIPTION
+The
+.Fn pci_get_irq
+function reads the PCI interrupt pin and interrupt line registers and
+returns the routable legacy IRQ when present.
+.Sh RETURN VALUES
+A non-negative IRQ number is returned on success.
+The value
+.Dv PCI_IRQ_NONE
+is returned if the device has no usable legacy interrupt assignment.
+.Sh SEE ALSO
+.Xr pci_config 9

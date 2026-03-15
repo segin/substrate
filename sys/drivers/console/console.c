@@ -6,17 +6,43 @@
 #include <kern/version.h>
 #include <sys/session.h>
 #include <drivers/console/uart/uart.h>
+#include <sys/vt.h>
 #include <string.h>
 #include <vm/vm_kmem.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <sys/lock.h>
+#include <kern/sched.h>
+#include <intr.h>
 
 // Globals
 static console_backend_t *backends = NULL;
 static struct tty *console_tty = NULL;
+static spinlock_t console_input_lock = SPINLOCK_INIT("console_input");
+
+#define CONSOLE_INPUT_BUF_SIZE 256
+static char console_input_buf[CONSOLE_INPUT_BUF_SIZE];
+static unsigned int console_input_head;
+static unsigned int console_input_tail;
+static unsigned int console_input_count;
+
+static struct tty *console_resolve_tty(void) {
+    struct tty *tty = vt_get_active_tty();
+    if (tty) {
+        return tty;
+    }
+    tty = tty_get(vt_get_active());
+    if (tty) {
+        return tty;
+    }
+    return console_tty;
+}
 
 void console_init(void) {
     backends = NULL;
+    console_input_head = 0;
+    console_input_tail = 0;
+    console_input_count = 0;
     tty_init();
 }
 
@@ -72,26 +98,73 @@ void console_clear(void) {
 
 // Push input to TTY layer (called by keyboard handler etc.)
 void console_push_char(char c) {
-    if (console_tty) {
-        tty_flip_buffer_push(console_tty, c);
+    struct tty *tty = console_resolve_tty();
+    if (tty) {
+        tty_flip_buffer_push(tty, c);
+        return;
     }
+
+    {
+        uint32_t flags = intr_disable();
+        spinlock_acquire(&console_input_lock);
+        if (console_input_count < CONSOLE_INPUT_BUF_SIZE) {
+            console_input_buf[console_input_head] = c;
+            console_input_head = (console_input_head + 1U) % CONSOLE_INPUT_BUF_SIZE;
+            console_input_count++;
+        }
+        spinlock_release(&console_input_lock);
+        intr_restore(flags);
+    }
+
+    sched_wakeup((void *)&console_input_count);
 }
 
 // DevFS Hooks using TTY Layer
 static size_t console_node_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node; (void)offset;
-    if (!console_tty) return 0;
-    return tty_read(console_tty, (char*)buffer, size);
+    struct tty *tty = console_resolve_tty();
+    if (tty) {
+        return tty_read(tty, (char*)buffer, size);
+    }
+
+    if (!buffer || size == 0) {
+        return 0;
+    }
+
+    for (;;) {
+        size_t count = 0;
+        uint32_t flags = intr_disable();
+        spinlock_acquire(&console_input_lock);
+
+        while (count < size && console_input_count > 0) {
+            buffer[count++] = (uint8_t)console_input_buf[console_input_tail];
+            console_input_tail = (console_input_tail + 1U) % CONSOLE_INPUT_BUF_SIZE;
+            console_input_count--;
+        }
+
+        if (count > 0) {
+            spinlock_release(&console_input_lock);
+            intr_restore(flags);
+            return count;
+        }
+
+        current_thread->wait_chan = (void *)&console_input_count;
+        current_thread->state = THREAD_BLOCKED;
+        spinlock_release(&console_input_lock);
+        intr_restore(flags);
+        sched_yield();
+    }
 }
 
 static size_t console_node_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node; (void)offset;
-    if (!console_tty) {
+    struct tty *tty = console_resolve_tty();
+    if (!tty) {
         backend_write((const char *)buffer, size);
         return size;
     }
 
-    int written = tty_write(console_tty, (const char*)buffer, size);
+    int written = tty_write(tty, (const char*)buffer, size);
     if (serial_debug_enabled && size > 0) {
         uart_write((const char *)buffer, size);
     }
@@ -104,14 +177,16 @@ static size_t console_node_write(fs_node_t *node, off_t offset, size_t size, con
 
 static int console_node_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     (void)node;
-    if (!console_tty) return -1;
-    return tty_ioctl(console_tty, request, (unsigned long)arg);
+    struct tty *tty = console_resolve_tty();
+    if (!tty) return -1;
+    return tty_ioctl(tty, request, (unsigned long)arg);
 }
 
 static int console_node_poll(fs_node_t *node, void *waiter) {
     (void)node;
-    if (!console_tty) return 0; // POLLNVAL?
-    return tty_poll(console_tty, waiter);
+    struct tty *tty = console_resolve_tty();
+    if (!tty) return 0; // POLLNVAL?
+    return tty_poll(tty, waiter);
 }
 
 static void console_node_open(fs_node_t *node) {
@@ -176,33 +251,41 @@ int kprintf(const char *fmt, ...) {
 #include <sys/tty.h>
 #include <string.h>
 
+int console_read(char *data, size_t len) {
+    return (int)console_node_read(&console_node, 0, len, (uint8_t *)data);
+}
+
 void console_attach_std_fds(struct process *proc) {
+    struct tty *tty;
+    fs_node_t *node;
+
     if (!proc) return;
 
     /*
-     * This helper is called explicitly from kinit_task() for the init
-     * process. Do not hard-code a numeric PID here; background kernel
-     * workers may be spawned before init during bring-up.
+     * This helper is called explicitly from kinit_task() before init has
+     * exec'd out of its kernel-task wrapper. Do not reject kernel tasks here:
+     * the call site, not this helper, decides which process should inherit the
+     * console stdio set.
      */
-    if (proc->is_kernel_task) return;
 
-    fs_node_t *node = console_get_node();
+    tty = console_resolve_tty();
+    node = console_get_node();
     if (!node) {
         kprint("console: Cannot attach std fds - node not found!\n");
         return;
     }
 
     // Associate process with console TTY
-    if (console_tty) {
-        proc->tty = console_tty;
+    if (tty) {
+        proc->tty = tty;
         /*
          * Init becomes session leader before this call.
          * Make that session/pgrp foreground on the console so
          * job-control shells don't spin on tcgetpgrp/getpgrp mismatch.
          */
         if (proc->p_pgrp && proc->p_pgrp->pg_session) {
-            console_tty->session = proc->p_pgrp->pg_session->s_sid;
-            console_tty->pgrp = proc->p_pgrp->pg_id;
+            proc->tty->session = proc->p_pgrp->pg_session->s_sid;
+            proc->tty->pgrp = proc->p_pgrp->pg_id;
         }
     }
 

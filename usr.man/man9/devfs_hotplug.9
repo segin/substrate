@@ -1,0 +1,35 @@
+.Dd March 12, 2026
+.Dt DEVFS_HOTPLUG 9
+.Os Substrate
+.Sh NAME
+.Nm devfs_hotplug
+.Nd publish and withdraw device-model nodes in devfs
+.Sh SYNOPSIS
+.In kern/device.h
+.In vfs/vfs.h
+.Ft int
+.Fn device_publish "struct device *dev" "struct fs_node *node" "const char *path"
+.Ft void
+.Fn device_unpublish "struct device *dev"
+.Ft void
+.Fn devfs_register_device "struct fs_node *node"
+.Ft void
+.Fn devfs_unregister_device "struct fs_node *node"
+.Sh DESCRIPTION
+The device model may associate a backing devfs node with a
+.Vt struct device
+by calling
+.Fn device_publish .
+Once the device is registered with a bus, the framework publishes the node into
+.Xr devfs 5
+at the supplied relative path.
+.Pp
+When the device is unregistered,
+.Fn device_unpublish
+and
+.Fn devfs_unregister_device
+remove the exported node and any framework-managed aliases.
+.Sh SEE ALSO
+.Xr devfs_naming 9 ,
+.Xr devfs_permissions 9 ,
+.Xr device_register 9

@@ -32,6 +32,11 @@ struct user_desc {
 #define LDT_ENTRIES     8192
 #define LDT_ENTRY_SIZE  8
 
+struct ldt_diag_snapshot {
+    uint32_t validation_failures;
+    uint32_t allocation_failures;
+};
+
 /* Function declarations */
 struct process;
 void ldt_init_process(struct process *proc);
@@ -42,6 +47,7 @@ int ldt_clone_process(struct process *dst, const struct process *src);
 void ldt_activate(struct process *proc);
 int sys_modify_ldt(int func, void *ptr, unsigned long bytecount);
 void fill_ldt_entry(void *entry, struct user_desc *info);
+void ldt_get_diag_snapshot(struct ldt_diag_snapshot *out);
 
 static inline uint32_t ldt_entry_base(const void *entry_ptr) {
     const gdt_entry_t *entry = (const gdt_entry_t *)entry_ptr;

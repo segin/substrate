@@ -11,6 +11,7 @@ thread_t *current_thread;
 
 static size_t last_kfree_size;
 static char last_log[128];
+static int fail_next_kmalloc;
 
 uint32_t lapic_get_id(void) {
     return 0;
@@ -46,6 +47,10 @@ bool spinlock_is_held(spinlock_t *lock) {
 }
 
 void *kmalloc(size_t size) {
+    if (fail_next_kmalloc) {
+        fail_next_kmalloc = 0;
+        return NULL;
+    }
     return calloc(1, size);
 }
 
@@ -102,6 +107,7 @@ int main(void) {
     memset(&child, 0, sizeof(child));
     memset(&replaced, 0, sizeof(replaced));
     memset(last_log, 0, sizeof(last_log));
+    fail_next_kmalloc = 0;
     ldt_init_process(&parent);
     ldt_init_process(&child);
     ldt_init_process(&replaced);
@@ -214,6 +220,8 @@ int main(void) {
     {
         struct user_desc bad;
         struct user_desc suspicious;
+        struct ldt_diag_snapshot before_diag;
+        struct ldt_diag_snapshot after_diag;
 
         memset(&bad, 0, sizeof(bad));
         bad.entry_number = 1;
@@ -221,8 +229,33 @@ int main(void) {
         bad.limit = 0x123U;
         bad.seg_32bit = 1;
         bad.contents = 3;
+        ldt_get_diag_snapshot(&before_diag);
         if (sys_modify_ldt(LDT_WRITE, &bad, sizeof(bad)) != -EINVAL) {
             fprintf(stderr, "FAIL: invalid LDT descriptor contents accepted\n");
+            return 1;
+        }
+        ldt_get_diag_snapshot(&after_diag);
+        if (after_diag.validation_failures != before_diag.validation_failures + 1U) {
+            fprintf(stderr, "FAIL: validation failure counter did not increment\n");
+            return 1;
+        }
+
+        bad = suspicious;
+        memset(&bad, 0, sizeof(bad));
+        bad.entry_number = LDT_ENTRIES;
+        ldt_get_diag_snapshot(&before_diag);
+        if (sys_modify_ldt(LDT_WRITE, &bad, sizeof(bad)) != -EINVAL) {
+            fprintf(stderr, "FAIL: out-of-range LDT entry accepted\n");
+            return 1;
+        }
+        ldt_get_diag_snapshot(&after_diag);
+        if (after_diag.validation_failures != before_diag.validation_failures + 1U) {
+            fprintf(stderr, "FAIL: out-of-range descriptor did not increment validation counter\n");
+            return 1;
+        }
+
+        if (sys_modify_ldt(LDT_WRITE, &bad, sizeof(bad) - 1U) != -EINVAL) {
+            fprintf(stderr, "FAIL: partial user_desc payload accepted\n");
             return 1;
         }
 
@@ -240,6 +273,23 @@ int main(void) {
         }
         if (strstr(last_log, "suspicious") == NULL) {
             fprintf(stderr, "FAIL: suspicious LDT descriptor did not log warning\n");
+            return 1;
+        }
+
+        ldt_get_diag_snapshot(&before_diag);
+        ldt_free_process(&replaced);
+        fail_next_kmalloc = 1;
+        if (ldt_alloc_process(&replaced, 4) != -ENOMEM) {
+            fprintf(stderr, "FAIL: ldt_alloc_process did not surface ENOMEM\n");
+            return 1;
+        }
+        ldt_get_diag_snapshot(&after_diag);
+        if (after_diag.allocation_failures != before_diag.allocation_failures + 1U) {
+            fprintf(stderr, "FAIL: allocation failure counter did not increment\n");
+            return 1;
+        }
+        if (ldt_alloc_process(&replaced, 4) != 0) {
+            fprintf(stderr, "FAIL: ldt_alloc_process did not recover after ENOMEM\n");
             return 1;
         }
     }

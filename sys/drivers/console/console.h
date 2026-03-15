@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 struct fs_node;
+struct tty;
 typedef struct fs_node fs_node_t;
 
 // Console Backend Interface
@@ -28,10 +29,12 @@ void geom_bsd_init(void);
 void geom_gpt_init(void);
 
 void console_register(console_backend_t *backend);
+void console_set_tty(struct tty *tty);
 void console_write(const char *data, size_t len);
 int console_read(char *data, size_t len);
 void console_putchar(char c);
 void console_clear(void);
+void console_push_char(char c);
 
 // For /dev/tty proxy
 fs_node_t *console_get_node(void);

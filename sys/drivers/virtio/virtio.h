@@ -17,6 +17,7 @@
 // Let's check Device ID. QEMU uses 0x1000 + ID for DeviceID.
 #define VIRTIO_PCI_DEVICE_ID_NET  0x1000
 #define VIRTIO_PCI_DEVICE_ID_BLK  0x1001
+#define VIRTIO_PCI_DEVICE_ID_SCSI 0x1008
 #define VIRTIO_PCI_DEVICE_ID_9P   0x1009
 
 // I/O Register Offsets (Legacy)
@@ -71,6 +72,7 @@ uint16_t virtio_get_io_base(uint8_t bus, uint8_t slot, uint8_t func);
 
 // VirtIO Block
 void virtio_blk_init(void);
+void virtio_blk_setup(uint8_t bus, uint8_t slot, uint8_t func);
 
 // VirtIO 9P
 void virtio_9p_setup(uint8_t bus, uint8_t slot, uint8_t func);

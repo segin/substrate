@@ -20,6 +20,28 @@ static inline uint64_t kernel_time_ms(void) {
     return (uint64_t)get_uptime_ms();
 }
 
+static void scsi_delay_ms(uint32_t delay_ms) {
+    uint64_t start = kernel_time_ms();
+
+    while ((kernel_time_ms() - start) < delay_ms) {
+        __asm__ volatile("pause");
+    }
+}
+
+struct scsi_read_capacity_16 {
+    uint8_t last_lba[8];
+    uint8_t block_size[4];
+    uint8_t prot_p_type;
+    uint8_t reserved[19];
+} __attribute__((packed));
+
+static void scsi_cdb_read_capacity_16(uint8_t *cdb, uint32_t alloc_len) {
+    memset(cdb, 0, 16);
+    cdb[0] = SCSI_CMD_READ_CAPACITY_16;
+    cdb[1] = 0x10; /* service action */
+    scsi_put_be32(&cdb[10], alloc_len);
+}
+
 /*
  * ============================================================
  * Static Storage
@@ -29,6 +51,7 @@ static inline uint64_t kernel_time_ms(void) {
 /* Device Registry */
 static scsi_device_t *scsi_device_list = NULL;
 static int scsi_device_count = 0;
+static uint32_t scsi_next_device_num = 0;
 
 /* Transport Registry */
 #define SCSI_MAX_LINKS 8
@@ -53,6 +76,9 @@ static scsi_device_t *scsi_free_devices = NULL;
 
 void scsi_init(void) {
     kprint("SCSI: Initializing mid-layer...\n");
+
+    scsi_device_list = NULL;
+    scsi_device_count = 0;
     
     /* Initialize request pool */
     scsi_free_requests = NULL;
@@ -76,6 +102,10 @@ void scsi_init(void) {
         scsi_links[i] = NULL;
     }
     scsi_link_count = 0;
+    scsi_next_device_num = 0;
+
+    scsi_dev_init();
+    scsi_ctl_init();
     
     kprint("SCSI: Mid-layer initialized (");
     char buf[32];
@@ -102,17 +132,39 @@ int scsi_register_link(scsi_link_t *link) {
         kprint("SCSI: Too many transport links\n");
         return -1;
     }
+
+    if (link->max_targets == 0) {
+        link->max_targets = SCSI_MAX_TARGETS;
+    }
+    if (link->max_luns == 0) {
+        link->max_luns = 8;
+    }
+    if (link->adapter_queue_depth == 0) {
+        link->adapter_queue_depth = 1;
+    }
     
     scsi_links[scsi_link_count++] = link;
+    scsi_create_bus_node(link, link->bus_id);
+    scsi_scan_bus(link, link->bus_id);
     
     kprint("SCSI: Registered transport '");
-    kprint(link->name ? link->name : "unknown");
+    kprint(link->name[0] ? link->name : "unknown");
     kprint("'\n");
     
     return 0;
 }
 
 void scsi_unregister_link(scsi_link_t *link) {
+    scsi_device_t *dev = scsi_device_list;
+    while (dev) {
+        scsi_device_t *next = dev->next;
+        if (dev->link == link) {
+            scsi_dev_detach(dev);
+            scsi_device_free(dev);
+        }
+        dev = next;
+    }
+
     for (int i = 0; i < scsi_link_count; i++) {
         if (scsi_links[i] == link) {
             /* Shift remaining entries */
@@ -175,12 +227,13 @@ int scsi_device_register(scsi_device_t *dev) {
     dev->next = scsi_device_list;
     scsi_device_list = dev;
     scsi_device_count++;
+    dev->device_num = scsi_next_device_num++;
     
     /* Log registration */
     char buf[128];
-    snprintf(buf, sizeof(buf), "SCSI: Registered device %d:%d:%d type=0x%02x '%s %s'\n",
-            dev->bus, dev->target, dev->lun, dev->type,
-            dev->vendor, dev->product);
+    snprintf(buf, sizeof(buf), "scsi: %d:%d:%d %s %s [0x%02x]\n",
+             dev->bus, dev->target, dev->lun,
+             dev->vendor, dev->product, dev->type);
     kprint(buf);
     
     return 0;
@@ -228,7 +281,9 @@ scsi_request_t *scsi_request_alloc(void) {
     memset(req, 0, sizeof(scsi_request_t));
     req->state = SCSI_REQ_STATE_PENDING;
     req->timeout_ms = 30000;  /* 30 second default */
-    req->retries = 3;
+    req->retries = 0;
+    req->max_retries = 3;
+    req->submit_time = kernel_time_ms();
     
     return req;
 }
@@ -256,9 +311,11 @@ void scsi_request_init(scsi_request_t *req, scsi_device_t *dev) {
     req->state = SCSI_REQ_STATE_PENDING;
     req->error = 0;
     req->timeout_ms = 30000;
-    req->retries = 3;
+    req->retries = 0;
+    req->max_retries = 3;
     req->callback = NULL;
     req->callback_arg = NULL;
+    req->submit_time = kernel_time_ms();
 }
 
 /*
@@ -268,16 +325,22 @@ void scsi_request_init(scsi_request_t *req, scsi_device_t *dev) {
  */
 
 int scsi_execute(scsi_request_t *req) {
+    int sense_key;
+    int ret = -1;
+    int should_retry = 0;
+    uint32_t retry_delay_ms = 0;
+    uint32_t attempts;
     if (!req || !req->device || !req->device->link) {
         return -1;
     }
     
     scsi_link_t *link = req->device->link;
-    int ret = -1;
-    uint32_t attempts = req->retries + 1;  /* At least 1 attempt */
+    attempts = req->max_retries + 1;
     
     while (attempts > 0) {
         req->state = SCSI_REQ_STATE_ACTIVE;
+        req->sense_len = 0;
+        req->error = 0;
         link->commands_issued++;
         
         /* Record start time for timeout tracking */
@@ -289,7 +352,9 @@ int scsi_execute(scsi_request_t *req) {
         /* Calculate elapsed time */
         req->elapsed_ms = kernel_time_ms() - req->start_time;
         
-        if (ret >= 0) {
+        if (ret >= 0 && req->status != SCSI_STATUS_CHECK_CONDITION &&
+            req->status != SCSI_STATUS_BUSY &&
+            req->status != SCSI_STATUS_TASK_SET_FULL) {
             req->state = SCSI_REQ_STATE_COMPLETE;
             
             /* Update statistics */
@@ -300,33 +365,53 @@ int scsi_execute(scsi_request_t *req) {
             }
             break;  /* Success */
         }
-        
-        /* Check if retryable error */
-        if (req->status == SCSI_STATUS_BUSY ||
-            req->status == SCSI_STATUS_TASK_SET_FULL) {
-            /* Wait a bit and retry */
-            attempts--;
-            if (attempts > 0) {
-                /* Simple delay - could use scheduler sleep later */
-                for (volatile int i = 0; i < 10000; i++);
+
+        should_retry = 0;
+        retry_delay_ms = 0;
+
+        if (req->status == SCSI_STATUS_CHECK_CONDITION &&
+            !(req->flags & SCSI_REQ_NO_SENSE) &&
+            req->sense_len == 0 &&
+            scsi_request_sense(req->device, req->sense, SCSI_MAX_SENSE_LEN) == 0) {
+            req->sense_len = SCSI_MAX_SENSE_LEN;
+        }
+
+        if (req->status == SCSI_STATUS_CHECK_CONDITION && req->sense_len != 0) {
+            sense_key = scsi_sense_key(req->sense, req->sense_len);
+            switch (sense_key) {
+            case SCSI_SENSE_UNIT_ATTENTION:
+                should_retry = 1;
+                break;
+            case SCSI_SENSE_NOT_READY:
+                should_retry = 1;
+                retry_delay_ms = 250;
+                break;
+            case SCSI_SENSE_ABORTED_COMMAND:
+                should_retry = 1;
+                break;
+            case SCSI_SENSE_MEDIUM_ERROR:
+            default:
+                break;
+            }
+        } else if (req->status == SCSI_STATUS_BUSY ||
+                   req->status == SCSI_STATUS_TASK_SET_FULL) {
+            should_retry = 1;
+            retry_delay_ms = 100;
+        }
+
+        attempts--;
+        if (should_retry && attempts > 0) {
+            req->retries++;
+            if (retry_delay_ms != 0) {
+                scsi_delay_ms(retry_delay_ms);
             }
             continue;
         }
-        
-        /* Non-retryable error */
+
         req->state = SCSI_REQ_STATE_ERROR;
-        req->error = ret;
+        req->error = (ret < 0) ? ret : -1;
         link->commands_failed++;
         break;
-    }
-    
-    /* Handle CHECK CONDITION */
-    if (req->status == SCSI_STATUS_CHECK_CONDITION && 
-        !(req->flags & SCSI_REQ_NO_SENSE) &&
-        req->sense_len == 0) {
-        /* Auto-request sense */
-        scsi_request_sense(req->device, req->sense, SCSI_MAX_SENSE_LEN);
-        req->sense_len = 18;  /* Fixed sense minimum */
     }
     
     /* Invoke callback if present */
@@ -373,6 +458,17 @@ int scsi_queue_request(scsi_request_t *req) {
     }
     
     scsi_device_t *dev = req->device;
+
+    if (dev->max_queue_depth != 0 &&
+        dev->queue_depth >= dev->max_queue_depth) {
+        req->state = SCSI_REQ_STATE_ERROR;
+        req->error = -1;
+        req->next = NULL;
+        if (req->callback) {
+            req->callback(req);
+        }
+        return -1;
+    }
     
     req->state = SCSI_REQ_STATE_PENDING;
     req->next = NULL;
@@ -404,13 +500,17 @@ int scsi_process_queue(scsi_device_t *dev) {
     
     int started = 0;
     
-    while (dev->queue_head && dev->queue_depth <= dev->max_queue_depth) {
+    while (dev->queue_head &&
+           (dev->max_queue_depth == 0 || started < (int)dev->max_queue_depth)) {
         scsi_request_t *req = dev->queue_head;
         
         /* Remove from queue head */
         dev->queue_head = req->next;
         if (!dev->queue_head) {
             dev->queue_tail = NULL;
+        }
+        if (dev->queue_depth > 0) {
+            dev->queue_depth--;
         }
         req->next = NULL;
         
@@ -431,6 +531,7 @@ int scsi_abort_request(scsi_request_t *req) {
     }
     
     scsi_device_t *dev = req->device;
+    scsi_request_t *prev = NULL;
     
     /* Only abort if pending (not yet started) */
     if (req->state != SCSI_REQ_STATE_PENDING) {
@@ -443,9 +544,11 @@ int scsi_abort_request(scsi_request_t *req) {
         if (*pp == req) {
             *pp = req->next;
             if (dev->queue_tail == req) {
-                dev->queue_tail = NULL;
+                dev->queue_tail = prev;
             }
-            dev->queue_depth--;
+            if (dev->queue_depth > 0) {
+                dev->queue_depth--;
+            }
             
             req->state = SCSI_REQ_STATE_ERROR;
             req->error = -1;  /* Aborted */
@@ -457,6 +560,7 @@ int scsi_abort_request(scsi_request_t *req) {
             
             return 0;
         }
+        prev = *pp;
         pp = &(*pp)->next;
     }
     
@@ -479,7 +583,6 @@ void scsi_complete_request(scsi_request_t *req, int status) {
     
     /* Process next queued request */
     if (req->device) {
-        req->device->queue_depth--;
         scsi_process_queue(req->device);
     }
 }
@@ -511,22 +614,40 @@ int scsi_read_capacity(scsi_device_t *dev, uint64_t *sectors, uint32_t *sector_s
     int ret = scsi_execute_sync(dev, cdb, 10, &cap, sizeof(cap), SCSI_REQ_READ, 5000);
     
     if (ret == 0) {
-        *sectors = scsi_be32((uint8_t*)&cap.lba) + 1;
-        *sector_size = scsi_be32((uint8_t*)&cap.block_size);
+        uint32_t last_lba = scsi_be32((uint8_t *)&cap.lba);
+
+        *sectors = (uint64_t)last_lba + 1U;
+        *sector_size = scsi_be32((uint8_t *)&cap.block_size);
+
+        if (last_lba == 0xFFFFFFFFU) {
+            uint8_t cdb16[16];
+            struct scsi_read_capacity_16 cap16;
+
+            scsi_cdb_read_capacity_16(cdb16, sizeof(cap16));
+            ret = scsi_execute_sync(dev, cdb16, 16, &cap16, sizeof(cap16),
+                                    SCSI_REQ_READ, 5000);
+            if (ret == 0) {
+                *sectors = scsi_be64(cap16.last_lba) + 1U;
+                *sector_size = scsi_be32(cap16.block_size);
+            }
+        }
     }
     
     return ret;
 }
 
 int scsi_request_sense(scsi_device_t *dev, uint8_t *sense, uint8_t len) {
-    uint8_t cdb[6] = {SCSI_CMD_REQUEST_SENSE, 0, 0, 0, len, 0};
+    uint8_t cdb[6];
+
+    scsi_cdb_request_sense(cdb, len);
     return scsi_execute_sync(dev, cdb, 6, sense, len, 
                             SCSI_REQ_READ | SCSI_REQ_NO_SENSE, 5000);
 }
 
 int scsi_start_stop(scsi_device_t *dev, int start, int load_eject) {
-    uint8_t cdb[6] = {SCSI_CMD_START_STOP_UNIT, 0, 0, 0, 0, 0};
-    cdb[4] = (load_eject ? 0x02 : 0) | (start ? 0x01 : 0);
+    uint8_t cdb[6];
+
+    scsi_cdb_start_stop(cdb, start, load_eject);
     return scsi_execute_sync(dev, cdb, 6, NULL, 0, 0, 30000);
 }
 
@@ -549,6 +670,33 @@ int scsi_report_luns(scsi_device_t *dev, struct scsi_report_luns_data *luns) {
     memset(luns, 0, sizeof(struct scsi_report_luns_data));
     
     return scsi_execute_sync(dev, cdb, 12, luns, alloc_len, SCSI_REQ_READ, 10000);
+}
+
+int scsi_synchronize_cache(scsi_device_t *dev) {
+    uint8_t cdb[10];
+
+    scsi_cdb_sync_cache(cdb, 0, 0);
+    return scsi_execute_sync(dev, cdb, 10, NULL, 0, 0, 30000);
+}
+
+int scsi_mode_sense(scsi_device_t *dev, uint8_t page, void *buffer, uint16_t len) {
+    if (!dev || !buffer || len == 0) {
+        return -1;
+    }
+
+    if (len <= 0xFFU) {
+        uint8_t cdb[6];
+
+        scsi_cdb_mode_sense_6(cdb, page, (uint8_t)len);
+        return scsi_execute_sync(dev, cdb, 6, buffer, len, SCSI_REQ_READ, 5000);
+    }
+
+    {
+        uint8_t cdb[10];
+
+        scsi_cdb_mode_sense_10(cdb, page, len);
+        return scsi_execute_sync(dev, cdb, 10, buffer, len, SCSI_REQ_READ, 5000);
+    }
 }
 
 /*
@@ -701,7 +849,7 @@ const char *scsi_sense_string(uint8_t key, uint8_t asc, uint8_t ascq) {
         "Reserved",
         "Volume Overflow",
         "Miscompare",
-        "Reserved"
+        "Completed"
     };
     
     if (key < 16) {
@@ -742,6 +890,53 @@ void scsi_cdb_read_10(uint8_t *cdb, uint32_t lba, uint16_t count) {
 void scsi_cdb_write_10(uint8_t *cdb, uint32_t lba, uint16_t count) {
     memset(cdb, 0, 10);
     cdb[0] = SCSI_CMD_WRITE_10;
+    scsi_put_be32(&cdb[2], lba);
+    scsi_put_be16(&cdb[7], count);
+}
+
+void scsi_cdb_read_16(uint8_t *cdb, uint64_t lba, uint32_t count) {
+    memset(cdb, 0, 16);
+    cdb[0] = SCSI_CMD_READ_16;
+    scsi_put_be64(&cdb[2], lba);
+    scsi_put_be32(&cdb[10], count);
+}
+
+void scsi_cdb_write_16(uint8_t *cdb, uint64_t lba, uint32_t count) {
+    memset(cdb, 0, 16);
+    cdb[0] = SCSI_CMD_WRITE_16;
+    scsi_put_be64(&cdb[2], lba);
+    scsi_put_be32(&cdb[10], count);
+}
+
+void scsi_cdb_request_sense(uint8_t *cdb, uint8_t len) {
+    memset(cdb, 0, 6);
+    cdb[0] = SCSI_CMD_REQUEST_SENSE;
+    cdb[4] = len;
+}
+
+void scsi_cdb_mode_sense_6(uint8_t *cdb, uint8_t page, uint8_t len) {
+    memset(cdb, 0, 6);
+    cdb[0] = SCSI_CMD_MODE_SENSE_6;
+    cdb[2] = (uint8_t)(page & 0x3FU);
+    cdb[4] = len;
+}
+
+void scsi_cdb_mode_sense_10(uint8_t *cdb, uint8_t page, uint16_t len) {
+    memset(cdb, 0, 10);
+    cdb[0] = SCSI_CMD_MODE_SENSE_10;
+    cdb[2] = (uint8_t)(page & 0x3FU);
+    scsi_put_be16(&cdb[7], len);
+}
+
+void scsi_cdb_start_stop(uint8_t *cdb, int start, int load_eject) {
+    memset(cdb, 0, 6);
+    cdb[0] = SCSI_CMD_START_STOP_UNIT;
+    cdb[4] = (uint8_t)((load_eject ? 0x02 : 0) | (start ? 0x01 : 0));
+}
+
+void scsi_cdb_sync_cache(uint8_t *cdb, uint32_t lba, uint16_t count) {
+    memset(cdb, 0, 10);
+    cdb[0] = SCSI_CMD_SYNCHRONIZE_CACHE;
     scsi_put_be32(&cdb[2], lba);
     scsi_put_be16(&cdb[7], count);
 }
@@ -833,6 +1028,10 @@ int scsi_probe_lun(scsi_link_t *link, uint8_t bus, uint8_t target, uint16_t lun)
     /* Populate device info from INQUIRY */
     dev->type = dtype;
     dev->removable = (inq.rmb & 0x80) ? 1 : 0;
+    dev->scsi_version = inq.version;
+    if (dev->removable) {
+        dev->flags |= SCSI_DEV_REMOVABLE;
+    }
     
     /* Copy vendor/product/revision (space-padded in INQUIRY, need null-term) */
     memcpy(dev->vendor, inq.vendor, 8);
@@ -870,13 +1069,16 @@ int scsi_probe_lun(scsi_link_t *link, uint8_t bus, uint8_t target, uint16_t lun)
     
     dev->online = 1;
     dev->media_present = 1;  /* Assume present, will be updated by TUR later */
+    dev->flags |= SCSI_DEV_ONLINE;
     
     /* Register device */
     if (scsi_device_register(dev) < 0) {
         scsi_device_free(dev);
         return -1;
     }
-    
+
+    scsi_auto_attach(dev);
+
     return 0;
 }
 
@@ -889,7 +1091,7 @@ int scsi_scan_bus(scsi_link_t *link, uint8_t bus) {
         return -1;
     }
     
-    kprintf("SCSI: Scanning bus %d via '%s'\n", bus, link->name ? link->name : "unknown");
+    kprintf("SCSI: Scanning bus %d via '%s'\n", bus, link->name[0] ? link->name : "unknown");
     
     int devices_found = 0;
     
@@ -899,7 +1101,7 @@ int scsi_scan_bus(scsi_link_t *link, uint8_t bus) {
      * - For each target, probe LUN 0 first
      * - If LUN 0 responds, optionally probe more LUNs (REPORT LUNS in L621)
      */
-    for (uint8_t target = 0; target < SCSI_MAX_TARGETS; target++) {
+    for (uint8_t target = 0; target < link->max_targets; target++) {
         /* Probe LUN 0 first */
         if (scsi_probe_lun(link, bus, target, 0) == 0) {
             devices_found++;
@@ -910,10 +1112,12 @@ int scsi_scan_bus(scsi_link_t *link, uint8_t bus) {
              */
             scsi_device_t *lun0_dev = scsi_device_lookup(bus, target, 0);
             if (lun0_dev) {
+                int have_report_luns = 0;
                 struct scsi_report_luns_data luns_data;
                 if (scsi_report_luns(lun0_dev, &luns_data) == 0) {
                     uint32_t list_len = scsi_be32((uint8_t*)&luns_data.length);
                     uint32_t num_luns = list_len / 8;  /* Each LUN is 8 bytes */
+                    have_report_luns = 1;
                     
                     /* Cap at reasonable limit */
                     if (num_luns > SCSI_MAX_LUNS_RESPONSE) {
@@ -944,7 +1148,13 @@ int scsi_scan_bus(scsi_link_t *link, uint8_t bus) {
                         }
                     }
                 }
-                /* REPORT LUNS failure is OK - device just doesn't support it */
+                if (!have_report_luns) {
+                    for (uint16_t lun = 1; lun < link->max_luns; lun++) {
+                        if (scsi_probe_lun(link, bus, target, lun) == 0) {
+                            devices_found++;
+                        }
+                    }
+                }
             }
         }
     }
@@ -953,4 +1163,3 @@ int scsi_scan_bus(scsi_link_t *link, uint8_t bus) {
     
     return devices_found;
 }
-

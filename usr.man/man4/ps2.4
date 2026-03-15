@@ -1,0 +1,46 @@
+.Dd March 12, 2026
+.Dt PS2 4
+.Os
+.Sh NAME
+.Nm ps2
+.Nd i8042-compatible PS/2 controller driver
+.Sh SYNOPSIS
+.Cd "device ps2"
+.Sh DESCRIPTION
+The
+.Nm
+driver initializes and manages an i8042-compatible PS/2 controller.
+It provides the controller-side bring-up for the keyboard on port 1 and,
+when present, the auxiliary device on port 2.
+.Pp
+The controller initialization sequence:
+.Bl -enum
+.It
+Disables both ports.
+.It
+Flushes stale output-buffer bytes.
+.It
+Reads and rewrites the controller configuration byte with interrupts masked
+and translation enabled.
+.It
+Runs the controller self-test and retries it once before failing.
+.It
+Detects dual-channel capability and tests each interface.
+.It
+Re-enables working ports and restores IRQ delivery.
+.It
+If port 2 is present, resets the auxiliary device and enables data reporting.
+.El
+.Pp
+If the second port test fails, the driver falls back to single-channel mode
+and continues with keyboard-only operation.
+.Sh FILES
+.Bl -tag -width "/sys/drivers/input/ps2.c"
+.It Pa /sys/drivers/input/ps2.c
+Controller implementation.
+.It Pa /sys/drivers/input/ps2.h
+Register definitions and controller constants.
+.El
+.Sh SEE ALSO
+.Xr keyboard 4 ,
+.Xr mouse 4

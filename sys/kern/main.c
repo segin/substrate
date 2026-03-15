@@ -5,19 +5,25 @@
 #include <sys/proc.h>
 #include <sys/input.h>
 #include <arch/i386/early_boot.h>
+#include <arch/i386/intr.h>
 
 #include <drivers/video/vga.h>
 #include <drivers/video/fb.h>
 #include <drivers/video/hw_text.h>
 #include <drivers/console/uart/uart.h>
+#include <sys/tty.h>
+#include <sys/vt.h>
 #include <drivers/input/keyboard.h>
 #include <drivers/input/mouse.h>
 #include <drivers/storage/scsi/scsi.h>
 #include <drivers/storage/ide/ide.h>
 #include <drivers/storage/ahci/ahci.h>
 #include <drivers/storage/nvme/nvme.h>
+#include <drivers/usb/usb.h>
+#include <drivers/usb/uhci.h>
 #include <drivers/virtio/virtio.h>
 #include <drivers/storage/ramdisk.h>
+#include <drivers/storage/floppy/floppy.h>
 
 #include <arch/i386/idt.h>
 #include <arch/i386/cpu.h>
@@ -33,6 +39,7 @@
 #include <arch/x86-common/rtc.h>
 #include <arch/x86-common/multiboot.h>
 #include <sys/freebsd_boot.h>
+#include <kern/isa.h>
 
 #include <sys/param.h>
 #include <pm/pm.h>
@@ -56,6 +63,7 @@ extern void ntsync_init(void);
 #include <kern/console.h>
 #include <kern/cmdline.h>
 #include <kern/sched.h>
+#include <kern/time.h>
 #include <kern/version.h>
 #include <kern/panic.h>
 #include <kern/geom/geom.h>
@@ -340,16 +348,24 @@ static int init_cmdline_policy(const char *cmdline) {
 }
 
 static void init_runtime_console(int serial_console) {
+    int uart_ready = 0;
+
     console_init();
     hw_text_init();
 
-    if (serial_console >= 0 && uart_select_port((uint32_t)serial_console) == 0) {
+    if (serial_console >= 0) {
+        (void)uart_select_port((uint32_t)serial_console);
+    }
+    uart_ready = (uart_init() == 0);
+    if (uart_ready && serial_console >= 0) {
         kprintf("console=serial%d selected (COM%d).\n",
                 serial_console, serial_console + 1);
     }
-    uart_init();
+    if (!uart_ready && (cmdline_has("serial_debug") || serial_console >= 0)) {
+        kprint("Serial console requested but selected UART is not present.\n");
+    }
 
-    if (cmdline_has("serial_debug") || serial_console >= 0) {
+    if (uart_ready && (cmdline_has("serial_debug") || serial_console >= 0)) {
         serial_debug_enabled = 1;
         console_register(uart_get_console());
         kprint("Serial Debug Enabled.\n");
@@ -360,6 +376,7 @@ static void init_runtime_console(int serial_console) {
         syscall_trace_enabled = 1;
         kprint("Syscall Tracing Enabled.\n");
     }
+
 }
 
 static void init_core_subsystems(multiboot_info_t *mboot_info) {
@@ -370,6 +387,7 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
     kprint("GDT Initialized.\n");
 
     idt_init();
+    timer_init();
 
     extern void fpu_init(void);
     fpu_init();
@@ -403,6 +421,8 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
     sched_init();
     kprint("Scheduler Initialized.\n");
 
+    hw_text_late_init();
+
     if (i386_cpu_has_apic() && smp_get_cpu_count() > 1) {
         smp_boot_all_aps();
         sched_smp_init(smp_get_cpu_count());
@@ -415,11 +435,29 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
     if (mboot_info) {
         fb_init(mboot_info);
     }
+
 }
 
 static void init_storage_and_vfs(multiboot_info_t *mboot_info) {
+    /*
+     * Enable interrupts before driver init — timer IRQs must be
+     * running so get_uptime_ms() advances for driver timeout loops
+     * (UHCI reset, AHCI port stop, etc.).  IDT, PIT, and PIC/APIC
+     * are all configured by init_core_subsystems() above.
+     */
+    intr_enable();
+
     pci_init();
+    isa_init();
+    isa_probe_legacy();
+    scsi_init();
+    floppy_init();
     ide_init();
+    ahci_init();
+    uhci_init();
+    usb_msc_init();
+    usb_hid_init();
+    usb_init();
     virtio_init();
     register_boot_ramdisks(mboot_info);
     ntsync_init();
@@ -429,6 +467,7 @@ static void init_storage_and_vfs(multiboot_info_t *mboot_info) {
     vfs_init();
     console_register_devfs();
     init_root_fs();
+
 }
 
 static void reclaim_bootloader_state(void) {

@@ -1,0 +1,52 @@
+.Dd March 12, 2026
+.Dt KEYBOARD 4
+.Os
+.Sh NAME
+.Nm keyboard
+.Nd PS/2 keyboard input driver
+.Sh SYNOPSIS
+.Cd "device keyboard"
+.Sh DESCRIPTION
+The
+.Nm
+driver handles IRQ1 input from the PS/2 keyboard path.
+It reads translated Set 1 scancodes from port
+.Li 0x60 ,
+tracks modifier state, translates supported key presses into ASCII, and forwards
+the resulting input to the active virtual terminal and the kernel input-event
+stream.
+.Pp
+The current implementation supports:
+.Bl -bullet
+.It
+single-byte Set 1 printable keys
+.It
+left and right Shift/Ctrl/Alt state tracking
+.It
+.Li Alt+Fn
+virtual-terminal switching
+.It
+ANSI escape emission for extended cursor and navigation keys
+.It
+.Li Shift+PageUp
+and
+.Li Shift+PageDown
+for VT scrollback navigation
+.It
+.Li Ctrl+F9
+kernel process-table dump
+.El
+.Pp
+Translated characters are queued in an internal ring buffer and forwarded to the
+active VT's TTY. If no TTY is attached, input falls back to the console input
+path.
+.Sh FILES
+.Bl -tag -width "/sys/drivers/input/keyboard.c"
+.It Pa /sys/drivers/input/keyboard.c
+Driver implementation.
+.It Pa /sys/drivers/input/keyboard.h
+Driver interface.
+.El
+.Sh SEE ALSO
+.Xr ps2 4 ,
+.Xr tty 4

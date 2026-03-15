@@ -51,8 +51,6 @@ FILE *fdopen(int fd, const char *mode) {
     
     f->flags = flags; // Simplified
     
-    // Check if isatty
-    // if (isatty(fd)) f->mode = _IOLBF; else f->mode = _IOFBF;
     f->mode = _IOFBF; 
     
     // Add to global list

@@ -1,0 +1,22 @@
+.Dd March 12, 2026
+.Dt ISA_LEGACY 9
+.Os Substrate
+.Sh NAME
+.Nm isa_legacy
+.Nd legacy ISA enumeration for fixed-resource systems
+.Sh SYNOPSIS
+.In kern/isa.h
+.Ft void
+.Fn isa_init void
+.Ft void
+.Fn isa_probe_legacy void
+.Ft int
+.Fn isa_port_alive "uint16_t port"
+.Sh DESCRIPTION
+The ISA legacy framework provides fixed-resource discovery for machines without
+PCI enumeration, including older 486-class systems. It probes standard ISA-era
+port ranges such as UART, LPT, IDE, and PS/2 controller locations and registers
+present devices on the ISA bus.
+.Sh SEE ALSO
+.Xr bus 9 ,
+.Xr request_region 9

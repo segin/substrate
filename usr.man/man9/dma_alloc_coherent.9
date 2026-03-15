@@ -1,0 +1,20 @@
+.Dd March 12, 2026
+.Dt DMA_ALLOC_COHERENT 9
+.Os
+.Sh NAME
+.Nm dma_alloc_coherent ,
+.Nm dma_free_coherent
+.Nd allocate and free coherent DMA buffers
+.Sh SYNOPSIS
+.In sys/dma.h
+.Ft void *
+.Fn dma_alloc_coherent "size_t size" "dma_addr_t *dma_handle"
+.Ft void
+.Fn dma_free_coherent "void *cpu_addr" "size_t size"
+.Sh DESCRIPTION
+The
+.Fn dma_alloc_coherent
+function allocates page-aligned, zeroed memory suitable for coherent DMA
+and returns both the CPU mapping and the device-visible DMA address.
+.Sh SEE ALSO
+.Xr dma_map 9

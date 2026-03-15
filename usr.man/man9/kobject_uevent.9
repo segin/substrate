@@ -1,0 +1,38 @@
+.\" Process this file with
+.\" groff -man -Tascii kobject_uevent.9
+.TH KOBJECT_UEVENT 9 "March 2026" "Substrate Kernel" "Kernel Developer's Manual"
+.SH NAME
+kobject_uevent, kobject_uevent_dump \- queue and inspect kernel device-model events
+.SH SYNOPSIS
+.nf
+.B #include <sys/kobject.h>
+.PP
+.BI "void kobject_uevent(const char *" action ", const char *" subsystem ", const char *" name ");"
+.BI "size_t kobject_uevent_dump(char *" buf ", size_t " size ");"
+.fi
+.SH DESCRIPTION
+The
+.B kobject_uevent
+interface records lightweight device-model lifecycle events inside a bounded
+kernel ring buffer.
+Each event is recorded as a single textual line containing the action,
+subsystem, and device name.
+.PP
+The current implementation is intended for low-cost kernel diagnostics and for
+export through
+.BR /proc/device-events .
+It is not a netlink-compatible transport.
+.PP
+.B kobject_uevent_dump
+serializes the retained event ring into the caller-supplied buffer in FIFO
+order.
+When the ring is full, the oldest events are discarded.
+.SH RETURN VALUE
+.B kobject_uevent
+returns no value.
+.B kobject_uevent_dump
+returns the number of bytes that would be written.
+.SH SEE ALSO
+.BR proc (5),
+.BR device_register (9),
+.BR driver_attach (9)

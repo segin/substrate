@@ -1,9 +1,11 @@
 #include <pm/pm.h>
 #include <sys/acct.h>
+#include <sys/fcntl.h>
 #include <sys/file.h>
 #include <sys/lock.h>
 #include <sys/session.h>
 #include <kern/console.h>
+#include <kern/file.h>
 #include <kern/sched.h> // For MAX_THREADS, thread creation
 #include <kern/sleepq.h>
 #include <stddef.h>
@@ -14,6 +16,9 @@
 #include <vm/vm_map.h>
 #include <exec/perso/personality.h>
 #include <kern/time.h>
+#ifndef HOST_TEST
+#include <kern/cmdline.h>
+#endif
 #include <vfs/vfs.h>
 
 process_t processes[MAX_PROCS];
@@ -38,6 +43,15 @@ mutex_t proctree_lock;
 extern fs_node_t *fs_root;
 extern struct personality personality_native;
 
+#ifdef HOST_TEST
+#define PROC_DEBUG_ENABLED() 0
+#define PROC_DEBUG(...) ((void)0)
+#else
+#define PROC_DEBUG_ENABLED() \
+    (cmdline_debug_enabled("proc") || cmdline_debug_enabled("perso:linux"))
+#define PROC_DEBUG(...) kprintf(__VA_ARGS__)
+#endif
+
 static void proc_idle_wait(void) {
 #ifdef HOST_TEST
     extern void host_wait_for_interrupt(void);
@@ -55,6 +69,8 @@ static void proc_release_zombie_resources(process_t *proc);
 static int proc_fork_common(process_t *parent, void *stack, int is_vfork);
 static void proc_sysvipc_exit(process_t *proc);
 static void proc_posixipc_exit(process_t *proc);
+static int proc_status_flags_from_file(const file_t *f);
+static void proc_apply_status_flags(file_t *f, int flags);
 
 static const char *proc_cmdline_name(const process_t *proc) {
     const char *name;
@@ -260,6 +276,7 @@ process_t *proc_create(int perso_id) {
     }
     processes[i].next_fd = 0; // Reset FD hint
     processes[i].fd_bitmap = 0;
+    processes[i].fd_cloexec = 0;
     for(int j=0; j<MAX_FD; j++) processes[i].fds[j] = 0;
     
     // Acct init
@@ -347,6 +364,7 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     child_proc->vfork_waiter = is_vfork ? current_thread : NULL;
 
     child_proc->fd_bitmap = parent->fd_bitmap;
+    child_proc->fd_cloexec = parent->fd_cloexec;
     for(int j=0; j<MAX_FD; j++) {
         if (parent->fds[j]) {
             child_proc->fds[j] = parent->fds[j];
@@ -437,15 +455,32 @@ int proc_vfork(process_t *parent, void *stack) {
 }
 
 void proc_add_child(process_t *parent, process_t *child) {
+    if (parent && PROC_DEBUG_ENABLED()) {
+        PROC_DEBUG("proc: add_child parent=%d child=%d before=%p\n",
+                   parent->pid, child ? child->pid : -1,
+                   parent->p_children);
+    }
     mutex_lock(&proctree_lock);
     child->p_parent = parent;
     child->p_sibling = parent->p_children;
     parent->p_children = child;
+    if (PROC_DEBUG_ENABLED()) {
+        PROC_DEBUG("proc: add_child parent=%d child=%d after=%p sibling=%p\n",
+                   parent ? parent->pid : -1,
+                   child ? child->pid : -1,
+                   parent ? parent->p_children : NULL,
+                   child ? child->p_sibling : NULL);
+    }
     mutex_unlock(&proctree_lock);
 }
 
 void proc_remove_child(process_t *parent, process_t *child) {
     if (!parent || !child) return;
+    if (PROC_DEBUG_ENABLED()) {
+        PROC_DEBUG("proc: remove_child parent=%d child=%d state=%u flags=%#x\n",
+                   parent->pid, child->pid, child->state,
+                   child->p_flag);
+    }
     mutex_lock(&proctree_lock);
     if (parent->p_children == child) {
         parent->p_children = child->p_sibling;
@@ -465,6 +500,14 @@ int sched_fork_process(process_t *parent, void *stack) {
 }
 
 int proc_begin_vfork(process_t *child) {
+    if (current_process && PROC_DEBUG_ENABLED()) {
+        PROC_DEBUG("proc: begin_vfork parent=%d child=%p childpid=%d waiter=%p current=%p\n",
+                   current_process->pid,
+                   child,
+                   child ? child->pid : -1,
+                   child ? child->vfork_waiter : NULL,
+                   current_thread);
+    }
     if (!child || child->vfork_waiter != current_thread) {
         return 0;
     }
@@ -474,6 +517,10 @@ int proc_begin_vfork(process_t *child) {
 }
 
 void proc_vfork_done(process_t *child) {
+    if (child && PROC_DEBUG_ENABLED()) {
+        PROC_DEBUG("proc: vfork_done child=%d waiter=%p\n",
+                   child->pid, child->vfork_waiter);
+    }
     if (!child || !child->vfork_waiter) {
         return;
     }
@@ -483,7 +530,8 @@ void proc_vfork_done(process_t *child) {
 }
 
 int sched_spawn_kernel_process(void (*entry)(void*), void *arg) {
-    extern void *pmm_alloc_block(void);
+    extern void *pmm_alloc_contiguous(size_t count);
+    extern void pmm_free_contiguous(void *p, size_t count);
     extern thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack, void *arg);
 
     // 1. Create Process
@@ -494,24 +542,23 @@ int sched_spawn_kernel_process(void (*entry)(void*), void *arg) {
     strncpy(child->comm, "(kinit)", AC_COMM_LEN);
     child->comm[AC_COMM_LEN - 1] = '\0';
 
-    // 3. Allocate Stack (4KB) - pmm_alloc_block returns virtual address
-    void *stack = pmm_alloc_block();
+    // 3. Allocate Stack (8KB) - contiguous direct-mapped RAM
+    void *stack = pmm_alloc_contiguous(2);
     if (!stack) {
         return -1;
     }
-    void *stack_top = (uint8_t*)stack + 4096;
+    void *stack_top = (uint8_t*)stack + 8192;
     
     // 4. Create Thread
     thread_t *t = sched_create_thread(child, entry, stack_top, arg);
     if (!t) {
-        extern void pmm_free_block(void *p);
-        pmm_free_block(stack);
+        pmm_free_contiguous(stack, 2);
         return -1;
     }
 
     t->kstack_base = (uintptr_t)stack;
-    t->kstack_units = 1;
-    t->kstack_type = THREAD_KSTACK_PMM_BLOCK;
+    t->kstack_units = 2;
+    t->kstack_type = THREAD_KSTACK_PMM_CONTIG;
     t->kstack_owned = 1;
 
     return t->tid;
@@ -534,6 +581,70 @@ void fd_close_all(process_t *p) {
             proc_clear_fd(p, i);
         }
     }
+}
+
+static int proc_status_flags_from_file(const file_t *f) {
+    int flags;
+
+    if (!f) {
+        return 0;
+    }
+
+    if ((f->f_flag & FREAD) && (f->f_flag & FWRITE)) {
+        flags = O_RDWR;
+    } else if (f->f_flag & FWRITE) {
+        flags = O_WRONLY;
+    } else {
+        flags = O_RDONLY;
+    }
+
+    if (f->f_flag & FAPPEND) {
+        flags |= O_APPEND;
+    }
+    if (f->f_flag & FNONBLOCK) {
+        flags |= O_NONBLOCK;
+    }
+
+    return flags;
+}
+
+static void proc_apply_status_flags(file_t *f, int flags) {
+    if (!f) {
+        return;
+    }
+
+    f->f_flag &= ~(FAPPEND | FNONBLOCK);
+    if (flags & O_APPEND) {
+        f->f_flag |= FAPPEND;
+    }
+    if (flags & O_NONBLOCK) {
+        f->f_flag |= FNONBLOCK;
+    }
+}
+
+int proc_alloc_fd_from(process_t *p, int start) {
+    int fd;
+
+    if (!p) {
+        return -1;
+    }
+    if (start < 0) {
+        return -EINVAL;
+    }
+    if (start >= MAX_FD) {
+        return -1;
+    }
+
+    for (fd = start; fd < MAX_FD; fd++) {
+        if (!(p->fd_bitmap & (1U << fd))) {
+            p->fd_bitmap |= (1U << fd);
+            p->fd_cloexec &= ~(1U << fd);
+            p->next_fd = (fd + 1) % MAX_FD;
+            return fd;
+        }
+    }
+
+    return -1;
 }
 
 int proc_alloc_fd(process_t *p) {
@@ -559,6 +670,7 @@ int proc_alloc_fd(process_t *p) {
     if (fd != -1) {
         p->next_fd = (fd + 1) % MAX_FD;
         p->fd_bitmap |= (1U << fd); // Mark as reserved
+        p->fd_cloexec &= ~(1U << fd);
     }
 
     return fd;
@@ -575,7 +687,78 @@ void proc_set_fd(process_t *p, int fd, file_t *f) {
 }
 
 void proc_clear_fd(process_t *p, int fd) {
+    if (!p || fd < 0 || fd >= MAX_FD) return;
+    p->fd_cloexec &= ~(1U << fd);
     proc_set_fd(p, fd, NULL);
+}
+
+int proc_fcntl(process_t *p, int fd, int cmd, int arg) {
+    file_t *f;
+    int newfd;
+
+    if (!p || fd < 0 || fd >= MAX_FD) {
+        return -EBADF;
+    }
+
+    f = p->fds[fd];
+    if (!f) {
+        return -EBADF;
+    }
+
+    switch (cmd) {
+    case F_DUPFD:
+        if (arg < 0) {
+            return -EINVAL;
+        }
+        if (arg >= MAX_FD) {
+            return -EINVAL;
+        }
+        newfd = proc_alloc_fd_from(p, arg);
+        if (newfd < 0) {
+            return -EMFILE;
+        }
+        proc_set_fd(p, newfd, f);
+        p->fd_cloexec &= ~(1U << newfd);
+        f->f_count++;
+        return newfd;
+    case F_GETFD:
+        return (p->fd_cloexec & (1U << fd)) ? FD_CLOEXEC : 0;
+    case F_SETFD:
+        if (arg & FD_CLOEXEC) {
+            p->fd_cloexec |= (1U << fd);
+        } else {
+            p->fd_cloexec &= ~(1U << fd);
+        }
+        return 0;
+    case F_GETFL:
+        return proc_status_flags_from_file(f);
+    case F_SETFL:
+        proc_apply_status_flags(f, arg);
+        return 0;
+    default:
+        return -EINVAL;
+    }
+}
+
+void proc_close_cloexec(process_t *p) {
+    int fd;
+
+    if (!p) {
+        return;
+    }
+
+    for (fd = 0; fd < MAX_FD; fd++) {
+        if (!(p->fd_cloexec & (1U << fd))) {
+            continue;
+        }
+        if (p->fds[fd]) {
+            file_close_ptr(p->fds[fd]);
+        }
+        proc_clear_fd(p, fd);
+        if (fd < p->next_fd) {
+            p->next_fd = fd;
+        }
+    }
 }
 
 // Reparent children to init
@@ -815,6 +998,15 @@ void proc_exit(int code) {
         int nocldwait = 0;
         if (current_process->p_parent->sig_actions[SIGCHLD-1].sa_flags & SA_NOCLDWAIT) {
              nocldwait = 1;
+        }
+
+        if (PROC_DEBUG_ENABLED()) {
+            PROC_DEBUG("proc: exit pid=%d parent=%d nocldwait=%d flags=%#x code=%d\n",
+                       current_process->pid,
+                       current_process->p_parent->pid,
+                       nocldwait,
+                       current_process->p_parent->sig_actions[SIGCHLD-1].sa_flags,
+                       code);
         }
 
         if (nocldwait) {

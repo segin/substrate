@@ -12,6 +12,8 @@ Substrate is a complete Unix OS project with four first-class pillars:
 - Native toolchain (`usr.bin/cc`, `usr.bin/as`, `usr.bin/ld`, `usr.lib/elfobj`)
 
 Primary target architecture is i386. x86_64 support is active and expanding.
+x86_64 core tables and syscall-entry wiring are now host-validated even though
+full x86_64 runtime bring-up remains incomplete.
 
 ## 2. Original Design (Foundational Intent)
 
@@ -54,7 +56,7 @@ sys/         kernel
 bin/         base Unix userland
 sbin/        system utilities
 usr.bin/     compiler/toolchain and extended user tools
-lib/         target runtime libraries (libc/libsys/libm/libpthread...)
+lib/         target runtime libraries (libc/libsys/libm/libpthread/libusb...)
 usr.lib/     shared libraries for tooling/runtime support (elfobj, demangle, ...)
 include/     userspace public headers
 tests/       unit/integration/regression/property/fuzz harnesses
@@ -62,6 +64,7 @@ docs/specs/  detailed subsystem specs
 docs/tasks/  refactored task planning sections and requirement/story tracking
 dist/        target root filesystem staging
 host_dist/   host install staging for native validation tools
+usr.man/     manual page source tree
 ```
 
 `dist/` is reserved for the contents of a real Substrate target root filesystem.
@@ -96,6 +99,7 @@ Boot/init sequencing highlights:
 - init is spawned before VM background workers so `PID 1` remains the first userspace process.
 - i386 also provides a BIOS floppy boot artifact `sys/kernel.flp`: a fixed-layout 1.44MB image with a two-stage real-mode loader that prompts for a hand-typed kernel command line, falls back to a built-in default boot line when Enter is pressed on an empty prompt, refuses to boot on pre-386 CPUs, loads `kernel.zimage` from the floppy payload, patches the Linux boot header `cmd_line_ptr`, and then transfers control to the normal `zImage` setup entry.
 - the i386 `zImage` setup path fabricates Multiboot memory information from BIOS services in descending fidelity order: `E820`, then legacy aggregate sizing via `E801`, then `INT 15h AH=88h`; if only aggregate sizing is available, the kernel reserves the first 1MB conservatively and seeds PMM from one extended-memory run above 1MB.
+- the i386 `zImage` real-mode setup path now owns BIOS text-mode programming before protected-mode handoff: `vga=ask` prompts on the BIOS text console and applies the selected BIOS text mode, while explicit `textmode=` or `video=text:COLSxROWS` requests are applied directly without the menu. The setup stub appends canonical handoff tokens so the higher-half VT geometry stays aligned with the programmed mode after boot. The fixed menu always includes `80x25`, `80x43`, and `80x50`; when VBE text modes are advertised by the firmware, the selector also offers detected `132x25`, `132x43`, `132x50`, and `132x60` variants.
 
 ### 5.1 i386 PMAP Model
 
@@ -103,6 +107,7 @@ The i386 kernel is compiled to an explicit i486 baseline:
 - kernel C objects use `-march=i486 -mtune=i486`
 - compiler-generated Pentium+ instructions such as `cmov` are not permitted in the core kernel image
 - newer CPU instructions remain isolated to explicit runtime-gated code paths (for example `cpuid`, `rdtsc`, `fxsave`, `rdrand`) and must not execute unless the early CPU feature probe has marked them present
+- PCI support is optional at runtime; the PCI layer first verifies configuration mechanism #1 is present and degrades to a no-op/all-ones config space view on non-PCI machines such as older 486-class systems
 
 The i386 PMAP implementation is a two-level paging design:
 - page directory + page tables
@@ -130,6 +135,18 @@ Physical-memory bootstrap is two-stage:
 
 Fork and copy paths use copy-on-write with per-page reverse mappings (`pv_entry`) so the VM layer can inspect hardware accessed/dirty state and resolve COW faults without synthetic software shadow bits.
 
+i386 legacy-execution support includes a bounded VM86 path:
+- `sys_vm86()` and BSD `sysarch(I386_VM86, ...)` copy user VM86 state into kernel-owned structures before entry
+- `vm86_enter()` asserts `EFLAGS.VM|IF` and enters VM86 through an `iret` frame
+- GPFs taken with `EFLAGS.VM` set are redirected to `vm86_gpf_handler()` for opcode emulation (`CLI`, `STI`, `PUSHF`, `POPF`, `INT`, `IRET`, basic `IN`/`OUT`) or monitor fault reporting
+- the per-CPU TSS I/O bitmap is initialized deny-all and can be opened per-port or per-range through the exported TSS bitmap helpers
+- the detailed contract is defined in `docs/specs/arch_i386_vm86.md`
+
+i386 exception diagnostics are explicit and stable:
+- exception reporting emits the exception name plus saved general-register state before escalation
+- invalid-opcode faults dump up to 16 instruction bytes at `EIP` when the address is safe to read
+- the panic path emits a fixed high-visibility `*** KERNEL PANIC ***` banner, the fatal message, a stack trace, and a halt footer
+
 ### 5.2 i386 TLB Strategy
 
 TLB management on i386 follows a tiered strategy:
@@ -153,12 +170,38 @@ Device namespace policy in `devfs`:
 - Raw disk providers remain visible as `/dev/storage/<disk>` (for example `/dev/storage/ide0`), with GEOM-derived partition nodes exposed alongside them (for example `/dev/storage/ide0p1`).
 - BSD disklabels additionally expose lettered slice nodes, with `c` reserved as the whole-container alias only when a BSD disklabel is present.
 - Communication character devices self-register under `/dev/comm/*` (for example `/dev/comm/serial0`, `/dev/comm/parallel0`).
+- USB character devices are reserved under `/dev/usb/busN/devM`, with the usbdevfs ioctl ABI carried by `<sys/usbdevfs.h>` and the published permission contract `root:usb` mode `0664`.
+- Device-model managed nodes may be published through `device_publish()` and withdrawn through `device_unpublish()`, allowing add/remove lifecycle to drive devfs automatically for drivers that opt into the framework path.
+- Stable device aliases are exposed under `/dev/by-id/*` when a device model entry carries a serial string or GUID.
 - Nested device paths are accepted only under predeclared subsystem directories (namespace hardening against arbitrary roots like `/dev/notreal/*`).
+
+Driver-model and legacy bus notes:
+- The core bus model now includes PCI and legacy ISA buses. PCI remains optional at runtime and old non-PCI 486-class systems are handled by a fixed-resource ISA probe pass instead of assuming PCI presence.
+- `isa_probe_legacy()` registers standard ISA-era devices (UART, LPT, IDE, PS/2) on the ISA bus when their fixed ports respond, including tertiary/quaternary IDE legacy ports, so the kernel device tree remains meaningful on pre-PCI hardware and ISA add-in storage controllers.
+- the IDE core now registers ISA and PCI drivers with the framework instead of being attached directly from `main`; on old non-PCI systems it consumes ISA bus hints before probing, and on PCI systems it binds against IDE-class PCI devices.
+- the floppy controller now also binds through legacy ISA presence hints, using the classic `0x3F0`/`0x370` controller bases and publishing detected drives as `/dev/storage/fd*` block devices through the storage layer.
+- when a PCI IDE controller is present, the IDE core consumes the controller's programming-interface bits and BAR layout for native-mode channel bases and bus-master DMA windows before probing drives, while still retaining legacy fixed-base support for ISA/compatibility-mode systems.
+- the AHCI driver registers a PCI driver against class 0x01/0x06/0x01 (Mass Storage / SATA / AHCI 1.0) through the device-model framework. It maps BAR5 via `pci_iomap()`, enables bus mastering, takes AHCI ownership from BIOS, allocates DMA-coherent command lists, FIS receive areas, and command tables per port, probes each implemented port for device signatures, issues IDENTIFY DEVICE for SATA disks and publishes them as `/dev/storage/sataN` block devices, and wraps SATAPI (ATAPI-over-SATA) optical drives behind the SCSI mid-layer via `scsi_link_t`. The driver operates in polling mode with a single command slot per port.
+- the VirtIO family no longer performs its own private PCI rescan during init; block, 9P, and SCSI transports now register per-device PCI drivers against the framework-owned PCI device list and bind existing devices through the generic probe/attach path.
+- late driver registration now binds already-enumerated devices immediately instead of only probing them, so controller families migrated onto the device model work regardless of whether the bus enumerator or the driver registers first.
+- Controller-family implementation work such as IDE transport internals, VirtIO transport refactors, USB host controllers, and ISA-PnP protocol support is tracked under the driver tasklists rather than the bus-core tasklist.
+
+Power-management model:
+- The device model owns tree-wide suspend/resume traversal (`device_suspend_all()` / `device_resume_all()`).
+- A minimal runtime PM core exists in the device layer with opt-in autosuspend (`device_runtime_enable/get/put/poll()`); it provides framework policy but not a separate userspace-facing power daemon or ACPI policy engine.
 
 Console policy:
 - the default screen console remains `console0`
 - `console=serial0..serial3` selects COM1..COM4 respectively for runtime console routing
 - `serial_debug` or `console=serialN` registers the UART backend with the kernel console framework for mirrored output
+- the hardware text console now treats the last physical text row as a kernel-owned status line rendered black-on-white; the usable tty geometry reported to userland excludes that row (for example `80x24` on an `80x25` mode, `80x49` on an `80x50` mode)
+- the timer tick raises a once-per-second wakeup for a dedicated kernel `vtstatus` thread, which refreshes the status line without doing the redraw work directly in interrupt context; the line currently shows the active VT number plus wall-clock time in ISO 8601 UTC form
+- init/stdout/stderr attachment is done through the `/dev/console` facade while the process controlling-tty pointer is set to the active VT tty, so console file descriptors continue to follow the active kernel text console without losing tty ioctl/job-control semantics
+- global wall-clock and scheduler timeout accounting advance only from CPU 0; secondary CPUs may take local preemption ticks, but they must not multiply system time
+- `video=text` keeps the system on the hardware text console even when framebuffer drivers are available
+- `textmode=` and `video=text:COLSxROWS` select hardware text geometry for the kernel text console; the BIOS setup path on `zImage` and floppy boots can program `80x25`, `80x43`, `80x50`, and any detected VBE text modes such as `132x60`, while the higher-half driver directly reprograms only the stable in-kernel `80x25` and `80x50` cases and otherwise trusts the BIOS-programmed geometry handoff
+- the VT layer owns per-console backing buffers, per-VT `tty` bindings, and per-VT scrollback history; the VGA text backend owns all active-screen redraw and cursor updates so VT switching does not memcpy live VGA memory directly
+- the active text console exports `/dev/tty1` through `/dev/tty12`; `Alt+F1..F12` switches VTs and `Shift+PageUp/PageDown` enters and exits scrollback on the active VT
 
 Execution personalities support native behavior plus Linux/FreeBSD compatibility paths where implemented.
 - Linux signal compatibility is explicit at the ABI edge: Linux signal numbers,
@@ -209,6 +252,9 @@ ELKS personality contract:
   signal delivery uses the ELKS libc callback convention: the kernel pushes a
   far-return frame for `_signal_cbhandler(sig)` on the ELKS user stack and
   resumes the interrupted `CS:IP` via `lret $2`.
+- i386 also exposes a native per-process `modify_ldt(2)` contract through `<sys/ldt.h>` and `libsys`. The ABI is single-sourced by the public `struct user_desc`; `LDT_READ` copies the current process LDT image, `LDT_WRITE` accepts exactly one validated user descriptor per call, and `LDT_READ_DEFAULT` currently returns 0. Invalid descriptors or sizes fail with `EINVAL`, inaccessible buffers fail with `EFAULT`, and LDT-growth failure returns `ENOMEM`. The Linux i386 personality also wires syscall `123` (`modify_ldt`) to this same hardened path and exposes matching syscall-trace metadata (`int`, `pointer`, `long`) for compatibility tracing.
+- The detailed i386 LDT ownership, locking, permission model, rejection rules,
+  and verification matrix are defined in `docs/specs/arch_i386_ldt.md`.
 - ELKS `/dev/kmem` compatibility is personality-scoped rather than native:
   ELKS processes opening native `/dev/kmem` are given an ELKS-shaped synthetic
   task snapshot through intercepted `ioctl`, `lseek`, and `read` operations so
