@@ -39,12 +39,16 @@ extern void run_string_tests(void);
 extern void run_sched_bench(void);
 extern void run_sched_dequeue_bench(void);
 extern void run_vnode_lock_tests(void);
+extern void test_vnode_reclaim(void);
+extern void run_vclean_tests(void);
 extern void run_vnode_hold_tests(void);
 extern void test_vhold_vdrop(void);
+extern void test_vnode_init(void);
 extern void run_kobject_tests(void);
 void run_reboot_tests(void);
 extern void test_pipe_race(void);
 extern void test_floppy_qemu(void);
+extern void run_brk_tests(void);
 
 void run_kernel_tests(void) {
     char test_arg[32] = {0};
@@ -173,6 +177,10 @@ void run_kernel_tests(void) {
         run_mmap_tests();
     }
 
+    if (all || strcmp(test_arg, "brk") == 0) {
+        run_brk_tests();
+    }
+
     if (all || strcmp(test_arg, "futex") == 0) {
          extern void test_futex(void);
          test_futex();
@@ -266,17 +274,17 @@ void run_kernel_tests(void) {
          run_printf_specifier_tests();
     }
 
+    if (all || strcmp(test_arg, "kvasprintf") == 0) {
+         extern void test_kvasprintf(void);
+         test_kvasprintf();
+    }
+
     if (all || strcmp(test_arg, "nanosleep") == 0) {
         run_nanosleep_tests();
     }
 
     if (all || strcmp(test_arg, "ldt") == 0) {
         run_ldt_tests();
-    }
-
-    if (all || strcmp(test_arg, "printf_specifiers") == 0) {
-         extern void run_printf_specifier_tests(void);
-         run_printf_specifier_tests();
     }
 
     if (strcmp(test_arg, "benchmark") == 0) {
@@ -318,12 +326,24 @@ void run_kernel_tests(void) {
         run_vnode_lock_tests();
     }
 
+    if (all || strcmp(test_arg, "vnode_reclaim") == 0) {
+        test_vnode_reclaim();
+    }
+
+    if (all || strcmp(test_arg, "vclean") == 0) {
+        run_vclean_tests();
+    }
+
     if (all || strcmp(test_arg, "vnode_hold") == 0) {
         run_vnode_hold_tests();
     }
 
     if (all || strcmp(test_arg, "vhold_vdrop") == 0) {
         test_vhold_vdrop();
+    }
+
+    if (all || strcmp(test_arg, "vnode_init") == 0) {
+        test_vnode_init();
     }
 
     if (all || strcmp(test_arg, "driver") == 0) {
@@ -413,10 +433,6 @@ void run_kernel_tests(void) {
         extern int test_sysinfo(void);
         if (test_sysinfo() == 0) kprint("sysinfo: PASS\n"); else kprint("sysinfo: FAIL\n");
 
-    }
-
-    if (all || strcmp(test_arg, "string") == 0) {
-        run_string_tests();
     }
 
     if (all || strcmp(test_arg, "sysctl") == 0) {

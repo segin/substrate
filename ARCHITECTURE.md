@@ -56,7 +56,7 @@ sys/         kernel
 bin/         base Unix userland
 sbin/        system utilities
 usr.bin/     compiler/toolchain and extended user tools
-lib/         target runtime libraries (libc/libsys/libm/libpthread...)
+lib/         target runtime libraries (libc/libsys/libm/libpthread/libusb...)
 usr.lib/     shared libraries for tooling/runtime support (elfobj, demangle, ...)
 include/     userspace public headers
 tests/       unit/integration/regression/property/fuzz harnesses
@@ -170,6 +170,7 @@ Device namespace policy in `devfs`:
 - Raw disk providers remain visible as `/dev/storage/<disk>` (for example `/dev/storage/ide0`), with GEOM-derived partition nodes exposed alongside them (for example `/dev/storage/ide0p1`).
 - BSD disklabels additionally expose lettered slice nodes, with `c` reserved as the whole-container alias only when a BSD disklabel is present.
 - Communication character devices self-register under `/dev/comm/*` (for example `/dev/comm/serial0`, `/dev/comm/parallel0`).
+- USB character devices are reserved under `/dev/usb/busN/devM`, with the usbdevfs ioctl ABI carried by `<sys/usbdevfs.h>` and the published permission contract `root:usb` mode `0664`.
 - Device-model managed nodes may be published through `device_publish()` and withdrawn through `device_unpublish()`, allowing add/remove lifecycle to drive devfs automatically for drivers that opt into the framework path.
 - Stable device aliases are exposed under `/dev/by-id/*` when a device model entry carries a serial string or GUID.
 - Nested device paths are accepted only under predeclared subsystem directories (namespace hardening against arbitrary roots like `/dev/notreal/*`).
@@ -180,6 +181,7 @@ Driver-model and legacy bus notes:
 - the IDE core now registers ISA and PCI drivers with the framework instead of being attached directly from `main`; on old non-PCI systems it consumes ISA bus hints before probing, and on PCI systems it binds against IDE-class PCI devices.
 - the floppy controller now also binds through legacy ISA presence hints, using the classic `0x3F0`/`0x370` controller bases and publishing detected drives as `/dev/storage/fd*` block devices through the storage layer.
 - when a PCI IDE controller is present, the IDE core consumes the controller's programming-interface bits and BAR layout for native-mode channel bases and bus-master DMA windows before probing drives, while still retaining legacy fixed-base support for ISA/compatibility-mode systems.
+- the AHCI driver registers a PCI driver against class 0x01/0x06/0x01 (Mass Storage / SATA / AHCI 1.0) through the device-model framework. It maps BAR5 via `pci_iomap()`, enables bus mastering, takes AHCI ownership from BIOS, allocates DMA-coherent command lists, FIS receive areas, and command tables per port, probes each implemented port for device signatures, issues IDENTIFY DEVICE for SATA disks and publishes them as `/dev/storage/sataN` block devices, and wraps SATAPI (ATAPI-over-SATA) optical drives behind the SCSI mid-layer via `scsi_link_t`. The driver operates in polling mode with a single command slot per port.
 - the VirtIO family no longer performs its own private PCI rescan during init; block, 9P, and SCSI transports now register per-device PCI drivers against the framework-owned PCI device list and bind existing devices through the generic probe/attach path.
 - late driver registration now binds already-enumerated devices immediately instead of only probing them, so controller families migrated onto the device model work regardless of whether the bus enumerator or the driver registers first.
 - Controller-family implementation work such as IDE transport internals, VirtIO transport refactors, USB host controllers, and ISA-PnP protocol support is tracked under the driver tasklists rather than the bus-core tasklist.
