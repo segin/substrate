@@ -300,6 +300,42 @@ Follow symbolic links (equivalent to
 .TP
 .B \-daystart
 Measure times from the beginning of today (GNU).
+.TP
+.BI \-fstype " type"
+True if the file is on a filesystem of the given type (e.g.,
+.BR ext2 ", " tmpfs ", " nfs ).
+.TP
+.B \-ignore_readdir_race
+Suppress errors from files that disappear between readdir and stat (GNU).
+.TP
+.B \-noignore_readdir_race
+Undo a previous
+.B \-ignore_readdir_race
+(GNU).
+.TP
+.B \-noleaf
+Silently accepted for compatibility (GNU).
+.TP
+.BR \-warn " / " \-nowarn
+Silently accepted for compatibility (GNU).
+.TP
+.B \-printx
+Print pathnames with special characters backslash-escaped (NetBSD).
+.TP
+.BI \-ok " command" " {} ;"
+Like
+.B \-exec
+but prompts the user before each execution.
+.TP
+.BI \-okdir " command" " {} ;"
+Like
+.B \-ok
+but runs from the file's directory.
+.TP
+.B \-rm
+Alias for
+.B \-delete
+(NetBSD).
 .SH DIALECT PRECEDENCE
 When BSD and GNU semantics conflict, FreeBSD behavior is the default.
 GNU extensions are accepted but do not override BSD semantics.
@@ -307,6 +343,95 @@ GNU extensions are accepted but do not override BSD semantics.
 Regex defaults to BRE; use
 .B \-E
 for ERE.
+.SH COMPATIBILITY
+.SS Regex
+The default regex flavor is POSIX BRE (FreeBSD default).
+Use
+.B \-E
+to switch to ERE, or
+.B \-regextype
+to select a specific flavor.
+GNU Emacs regex is not supported.
+.SS Permission Matching
+.B \-perm /mode
+(any\-bit match) and
+.B \-perm +mode
+(legacy GNU alias) are both accepted.
+.SS Timestamps
+.BI \-newerXY " ref"
+uses the GNU two\-token form.
+The FreeBSD three\-token form
+.Pq Fl newer Ar XY Ar file
+is not supported.
+.SS Destructive Actions
+.B \-delete
+combined with
+.B \-L
+(follow mode) is rejected at startup.
+Silently deleting symlink referents is a safety hazard.
+.PP
+.B \-delete
+implies
+.B \-depth
+(post\-order traversal); placement in the expression matters.
+.SS Batching
+.BI \-exec " command" " {} +"
+batches pathnames using both an ARG_MAX/2 byte\-size threshold
+and a 5000\-pathname cap (FreeBSD limit).
+.SS Feature Matrix
+.TS
+l l l.
+Feature	Origin	Status
+_
+\-name, \-type, \-perm	POSIX	Supported
+\-exec {} +, \-ok	POSIX	Supported
+\-iname	POSIX Issue 8	Supported
+\-H, \-L, \-P	POSIX	Supported
+\-E, \-s, \-f, \-d	FreeBSD	Supported
+\-empty, \-delete, \-execdir	BSD	Supported
+\-ls, \-print0, \-regex	BSD	Supported
+\-samefile, \-fstype	BSD	Supported
+\-X, \-h	OpenBSD	Supported
+\-printx, \-quit, \-rm	NetBSD	Supported
+\-D, \-O, \-regextype	GNU	Supported
+\-files0\-from, \-daystart	GNU	Supported
+\-readable, \-writable	GNU	Supported
+\-printf, \-fprintf, \-fls	GNU	Supported
+\-newerXY, \-xtype, \-ilname	GNU	Supported
+\-B* birthtime	FreeBSD	Unsupported
+\-acl, \-flags, \-sparse	FreeBSD	Unsupported
+\-exit, \-since	NetBSD	Unsupported
+\-context	GNU/SELinux	Unsupported
+.TE
+.SH EXAMPLES
+Search for C source files:
+.RS
+.nf
+find . \-name "*.c" \-type f
+.fi
+.RE
+.PP
+Delete empty files safely:
+.RS
+.nf
+find . \-empty \-type f \-delete
+.fi
+.RE
+.PP
+Safe filename handling with
+.BR xargs (1):
+.RS
+.nf
+find . \-type f \-print0 | xargs \-0 ls \-l
+.fi
+.RE
+.PP
+Find files modified in the last 24 hours:
+.RS
+.nf
+find . \-mtime \-1
+.fi
+.RE
 .SH SECURITY
 .B \-execdir
 rejects execution when the PATH environment variable contains

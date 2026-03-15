@@ -34,6 +34,11 @@
 #include <errno.h>
 #include <limits.h>
 #include <fcntl.h>
+#include <sys/statvfs.h>
+#ifdef __linux__
+#include <sys/statfs.h>
+#include <strings.h>
+#endif
 
 #ifndef FNM_CASEFOLD
 #define FNM_CASEFOLD 0x10

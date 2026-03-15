@@ -43,6 +43,7 @@ available as overlays.
 | `-samefile` | ✅ | dev+ino match |
 | `-not`, `-and`, `-or` | ✅ | Operator aliases |
 | `-maxdepth`/`-mindepth` | ✅ | |
+| `-fstype` | ✅ | statfs(2) on Linux, statvfs on BSD |
 | `-B*` birthtime | ❌ | Platform-dependent |
 | `-acl`, `-flags` | ❌ | Platform-dependent |
 | `-sparse` | ❌ | Platform-dependent |

@@ -316,6 +316,9 @@ OpenBSD/NetBSD deltas, and GNU findutils extensions.
 3. **Pure tests** — `-name`, `-type`, `-perm`, `-newer`, `-regex`, etc. (no side effects)
 4. **Actions** — `-print`, `-exec`, `-delete`, `-quit`, etc. (side-effecting; inhibit implicit `-print`)
 
+**Dialect conflict policy** documented in `docs/find/conflicts.md`.
+Feature matrix and implementation status in `docs/find/spec-baseline.md`.
+
 ## 7. Toolchain Architecture
 
 ### 7.1 Compiler

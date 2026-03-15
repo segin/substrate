@@ -123,7 +123,9 @@ static node_t *parse_primary(char **argv, int *idx, int argc)
 		NEED_ARG(); (*idx)++;
 		node_t *n = new_node(NODE_NEWER);
 		struct stat rs;
-		if (stat(argv[*idx], &rs) < 0) {
+		int r = (g_deref == DEREF_ALWAYS) ? stat(argv[*idx], &rs)
+		                                   : lstat(argv[*idx], &rs);
+		if (r < 0) {
 			fprintf(stderr, "find: '%s': %s\n", argv[*idx], strerror(errno));
 			exit(1);
 		}
@@ -154,6 +156,12 @@ static node_t *parse_primary(char **argv, int *idx, int argc)
 	if (strcmp(tok, "-empty") == 0) { (*idx)++; return new_node(NODE_EMPTY); }
 	if (strcmp(tok, "-true") == 0)  { (*idx)++; return new_node(NODE_TRUE); }
 	if (strcmp(tok, "-false") == 0) { (*idx)++; return new_node(NODE_FALSE); }
+	if (strcmp(tok, "-fstype") == 0) {
+		NEED_ARG(); (*idx)++;
+		node_t *n = new_node(NODE_FSTYPE);
+		n->sval = strdup(argv[(*idx)++]);
+		return n;
+	}
 
 	/* GNU access tests */
 	if (strcmp(tok, "-readable") == 0)   { (*idx)++; return new_node(NODE_READABLE); }
@@ -276,7 +284,9 @@ static node_t *parse_primary(char **argv, int *idx, int argc)
 			}
 		} else {
 			struct stat rs;
-			if (stat(argv[*idx], &rs) < 0) {
+			int r = (g_deref == DEREF_ALWAYS) ? stat(argv[*idx], &rs)
+			                                   : lstat(argv[*idx], &rs);
+			if (r < 0) {
 				fprintf(stderr, "find: '%s': %s\n", argv[*idx], strerror(errno));
 				exit(1);
 			}
@@ -445,6 +455,12 @@ node_t *parse_expr(char **argv, int *idx, int argc)
 
 /* ── Optimizer: reorder pure predicates in AND chains ── */
 
+/*
+ * is_pure_test: returns true for predicates that are safe to reorder.
+ * Excludes access-based tests (-readable, -writable, -executable)
+ * which have ordering-sensitive behavior across permission boundaries.
+ * Also excludes -empty since it opens directories (observable side effect).
+ */
 static int is_pure_test(node_t *n)
 {
 	if (!n) return 0;
@@ -455,12 +471,17 @@ static int is_pure_test(node_t *n)
 	case NODE_SIZE: case NODE_NEWER: case NODE_NEWXY:
 	case NODE_ATIME: case NODE_MTIME: case NODE_CTIME:
 	case NODE_AMIN: case NODE_MMIN: case NODE_CMIN:
-	case NODE_INUM: case NODE_EMPTY: case NODE_FSTYPE:
+	case NODE_INUM: case NODE_FSTYPE:
 	case NODE_REGEX: case NODE_IREGEX:
-	case NODE_READABLE: case NODE_WRITABLE: case NODE_EXECUTABLE:
 	case NODE_SAMEFILE: case NODE_ILNAME:
 	case NODE_TRUE: case NODE_FALSE:
 		return 1;
+	/* Ordering-sensitive: -readable/-writable/-executable use access(2)
+	 * which can fail differently based on process state. -empty opens
+	 * directories. Only safe to reorder at -O3. */
+	case NODE_READABLE: case NODE_WRITABLE: case NODE_EXECUTABLE:
+	case NODE_EMPTY:
+		return g_opt_level >= 3;
 	default:
 		return 0;
 	}

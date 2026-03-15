@@ -112,6 +112,14 @@ static void print_tree(node_t *n, int indent)
 	print_tree(n->right, indent + 1);
 }
 
+/* Check if AST contains a given node type */
+static int has_node_type(node_t *n, enum node_type type)
+{
+	if (!n) return 0;
+	if (n->type == type) return 1;
+	return has_node_type(n->left, type) || has_node_type(n->right, type);
+}
+
 int main(int argc, char **argv)
 {
 	g_now = time(NULL);
@@ -276,6 +284,13 @@ int main(int argc, char **argv)
 	}
 
 	/* Implicit -print if no action in expression */
+	/* REQ-FIND-101: reject -delete combined with -L (follow mode) */
+	if (g_deref == DEREF_ALWAYS && has_node_type(expr, NODE_DELETE)) {
+		fprintf(stderr, "find: the -delete action is not compatible "
+		        "with -L (follow symlinks); use -P instead\n");
+		exit(1);
+	}
+
 	if (!has_action(expr)) {
 		node_t *print_node = new_node(NODE_PRINT);
 		if (expr) {

@@ -193,8 +193,28 @@ static void do_printf(FILE *fp, const char *fmt, entry_t *e)
 			case 'd': fprintf(fp, "%d", e->depth); break;
 			case 'm': fprintf(fp, "%03o", (unsigned)(e->st.st_mode & 07777)); break;
 			case 'M': {
-				char c = file_type_char(e->st.st_mode);
-				fputc(c, fp);
+				/* Full strmode-style permission string */
+				char perm[11] = "----------";
+				mode_t m = e->st.st_mode;
+				if (S_ISDIR(m))  perm[0] = 'd';
+				else if (S_ISLNK(m))  perm[0] = 'l';
+				else if (S_ISCHR(m))  perm[0] = 'c';
+				else if (S_ISBLK(m))  perm[0] = 'b';
+				else if (S_ISFIFO(m)) perm[0] = 'p';
+				else if (S_ISSOCK(m)) perm[0] = 's';
+				if (m & S_IRUSR) perm[1] = 'r';
+				if (m & S_IWUSR) perm[2] = 'w';
+				if (m & S_IXUSR) perm[3] = 'x';
+				if (m & S_IRGRP) perm[4] = 'r';
+				if (m & S_IWGRP) perm[5] = 'w';
+				if (m & S_IXGRP) perm[6] = 'x';
+				if (m & S_IROTH) perm[7] = 'r';
+				if (m & S_IWOTH) perm[8] = 'w';
+				if (m & S_IXOTH) perm[9] = 'x';
+				if (m & S_ISUID) perm[3] = (perm[3] == 'x') ? 's' : 'S';
+				if (m & S_ISGID) perm[6] = (perm[6] == 'x') ? 's' : 'S';
+				if (m & S_ISVTX) perm[9] = (perm[9] == 'x') ? 't' : 'T';
+				fputs(perm, fp);
 				break;
 			}
 			case 'u': {
@@ -547,8 +567,43 @@ int eval_node(node_t *n, entry_t *e)
 		return 0;
 
 	case NODE_FSTYPE: {
-		/* -fstype: currently unsupported, always false */
-		return 0;
+		if (do_stat(e) < 0) return 0;
+		struct statvfs vfs;
+		if (statvfs(e->path, &vfs) < 0) return 0;
+		/* Compare filesystem type name from f_basetype/f_fstypename */
+#if defined(__linux__)
+		/* Linux statvfs doesn't have f_basetype; use /proc/mounts or
+		 * statfs(2) f_type. For now, use a basic heuristic. */
+		(void)vfs;
+		struct statfs sfs;
+		if (statfs(e->path, &sfs) < 0) return 0;
+		/* Map common f_type values to names */
+		const char *fsname = "unknown";
+		switch (sfs.f_type) {
+		case 0xEF53:     fsname = "ext2"; break;   /* ext2/3/4 */
+		case 0x9123683E: fsname = "btrfs"; break;
+		case 0x58465342: fsname = "xfs"; break;
+		case 0x01021994: fsname = "tmpfs"; break;
+		case 0x9FA0:     fsname = "proc"; break;
+		case 0x62656572: fsname = "sysfs"; break;
+		case 0x64626720: fsname = "debugfs"; break;
+		case 0x4D44:     fsname = "msdos"; break;   /* FAT/VFAT */
+		case 0x4006:     fsname = "fat"; break;
+		case 0x5346544E: fsname = "ntfs"; break;
+		case 0x6969:     fsname = "nfs"; break;
+		case 0xFF534D42: fsname = "cifs"; break;
+		case 0x52654973: fsname = "reiserfs"; break;
+		case 0x3153464A: fsname = "jfs"; break;
+		case 0xF15F:     fsname = "ecryptfs"; break;
+		case 0x794C7630: fsname = "overlayfs"; break;
+		case 0x2FC12FC1: fsname = "zfs"; break;
+		case 0x0BD00BD0: fsname = "lustre"; break;
+		}
+		return strcasecmp(n->sval, fsname) == 0;
+#else
+		/* BSD: statvfs has f_fstypename */
+		return strcasecmp(n->sval, vfs.f_fstypename) == 0;
+#endif
 	}
 
 	case NODE_REGEX:
@@ -565,7 +620,9 @@ int eval_node(node_t *n, entry_t *e)
 	case NODE_SAMEFILE: {
 		if (do_stat(e) < 0) return 0;
 		struct stat rs;
-		if (stat(n->sval, &rs) < 0) return 0;
+		int r = (g_deref == DEREF_ALWAYS) ? stat(n->sval, &rs)
+		                                   : lstat(n->sval, &rs);
+		if (r < 0) return 0;
 		return e->st.st_dev == rs.st_dev && e->st.st_ino == rs.st_ino;
 	}
 

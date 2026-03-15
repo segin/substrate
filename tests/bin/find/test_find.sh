@@ -263,6 +263,124 @@ else
     TEST_FAIL=$((TEST_FAIL+1))
 fi
 
+# ── T13.7: Conflict resolution tests (C01–C12) ──
+
+# C01: regex default is BRE
+run_test_no_oracle "C01: BRE regex default" tree -regex '.*file[0-9]*\.txt'
+
+# C02: -perm /mode (any-bit)
+run_test "-perm /111" tree -perm /111
+# C02: -perm +mode legacy alias
+run_test_no_oracle "C02: -perm +111 legacy" tree -perm +111 -type f
+
+# C06: -delete + -L rejected
+DELETE_L_ERR=$(cd "$TMPDIR" && "$OLDPWD/$FIND_BIN" -L tree -delete 2>&1 || true)
+if echo "$DELETE_L_ERR" | grep -q "not compatible"; then
+    echo "PASS: C06: -delete + -L rejected"
+    TEST_PASS=$((TEST_PASS+1))
+else
+    echo "FAIL: C06: -delete + -L rejected"
+    echo "  GOT: $DELETE_L_ERR"
+    TEST_FAIL=$((TEST_FAIL+1))
+fi
+
+# C07: -follow sets global deref mode (may exit non-zero due to broken symlinks)
+FOLLOW_OUT=$(cd "$TMPDIR" && "$OLDPWD/$FIND_BIN" tree -follow -type f 2>/dev/null || true)
+if [ -n "$FOLLOW_OUT" ]; then
+    echo "PASS: C07: -follow as global modifier"
+    TEST_PASS=$((TEST_PASS+1))
+else
+    echo "FAIL: C07: -follow as global modifier"
+    TEST_FAIL=$((TEST_FAIL+1))
+fi
+
+# C08: -d alias for -depth
+run_test "-d alias" tree -d -type f
+
+# C10: -exec {} + batch mode with many files
+for i in $(seq 1 20); do touch "$TMPDIR/tree/batch_${i}.tmp"; done
+run_test "-exec + with 20 files" tree -name "batch_*.tmp" -exec echo {} +
+
+# C12: -O0 disables reordering
+run_test_no_oracle "C12: -O0" -O0 tree -type f -name "*.c"
+
+# ── T13.8: -fstype test ──
+# Get the filesystem type of tmpdir
+FSTYPE=$(stat -f -c %T "$TMPDIR" 2>/dev/null || echo "")
+if [ -n "$FSTYPE" ]; then
+    FOUND=$(cd "$TMPDIR" && "$OLDPWD/$FIND_BIN" tree -maxdepth 0 -fstype "$FSTYPE" 2>/dev/null)
+    if [ -n "$FOUND" ]; then
+        echo "PASS: -fstype matches"
+        TEST_PASS=$((TEST_PASS+1))
+    else
+        echo "FAIL: -fstype matches"
+        TEST_FAIL=$((TEST_FAIL+1))
+    fi
+else
+    echo "PASS: -fstype (skipped - no stat -f)" ; TEST_PASS=$((TEST_PASS+1))
+fi
+
+# ── T13.9: -printf %M full strmode ──
+MOUT=$(cd "$TMPDIR" && "$OLDPWD/$FIND_BIN" tree -maxdepth 0 -printf "%M\n" 2>/dev/null)
+if echo "$MOUT" | grep -qE '^d[r-][w-][xsS-][r-][w-][xsS-][r-][w-][xtT-]$'; then
+    echo "PASS: -printf %M produces strmode"
+    TEST_PASS=$((TEST_PASS+1))
+else
+    echo "FAIL: -printf %M produces strmode"
+    echo "  GOT: '$MOUT'"
+    TEST_FAIL=$((TEST_FAIL+1))
+fi
+
+# ── T13.10: -printx escaped output ──
+# Create file with space in name
+touch "$TMPDIR/tree/has space.txt" 2>/dev/null || true
+PXOUT=$(cd "$TMPDIR" && "$OLDPWD/$FIND_BIN" tree -name "has space.txt" -printx 2>/dev/null)
+if echo "$PXOUT" | grep -q '\\'; then
+    echo "PASS: -printx escapes spaces"
+    TEST_PASS=$((TEST_PASS+1))
+else
+    echo "FAIL: -printx escapes spaces"
+    echo "  GOT: '$PXOUT'"
+    TEST_FAIL=$((TEST_FAIL+1))
+fi
+
+# ── T13.11: -H only dereferences command-line symlinks ──
+run_test "-H mode" -H tree -type f
+
+# ── T13.12: -daystart modifier ──
+run_test_no_oracle "-daystart -mtime 0" tree -daystart -mtime 0
+
+# ── T13.13: no starting point defaults to . ──
+DEFAULT_OUT=$(cd "$TMPDIR/tree" && "$OLDPWD/$FIND_BIN" -maxdepth 0 2>/dev/null)
+SYS_DEFAULT_OUT=$(cd "$TMPDIR/tree" && "$SYS_FIND" -maxdepth 0 2>/dev/null)
+if [ "$DEFAULT_OUT" = "$SYS_DEFAULT_OUT" ]; then
+    echo "PASS: default starting point = ."
+    TEST_PASS=$((TEST_PASS+1))
+else
+    echo "FAIL: default starting point = ."
+    echo "  EXPECTED: '$SYS_DEFAULT_OUT'  GOT: '$DEFAULT_OUT'"
+    TEST_FAIL=$((TEST_FAIL+1))
+fi
+
+# ── T13.14: comma operator ──
+run_test_no_oracle "comma operator" tree -name "*.txt" , -name "*.c"
+
+# ── T13.15: -ignore_readdir_race ──
+run_test_no_oracle "-ignore_readdir_race" tree -ignore_readdir_race -type f
+
+# ── T13.16: -noignore_readdir_race ──
+run_test_no_oracle "-noignore_readdir_race" tree -noignore_readdir_race -type f
+
+# ── T13.17: -noleaf (silently accepted) ──
+run_test_no_oracle "-noleaf" tree -noleaf -type f
+
+# ── T13.18: -warn/-nowarn (silently accepted) ──
+run_test_no_oracle "-nowarn" tree -nowarn -name "*.txt"
+
+# Cleanup batch files
+rm -f "$TMPDIR/tree"/batch_*.tmp
+rm -f "$TMPDIR/tree/has space.txt"
+
 echo ""
 echo "$TEST_PASS passed, $TEST_FAIL failed out of $((TEST_PASS+TEST_FAIL)) tests."
 exit $((TEST_FAIL > 0 ? 1 : 0))
