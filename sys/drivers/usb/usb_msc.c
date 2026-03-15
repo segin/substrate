@@ -18,6 +18,7 @@
 #include "usb.h"
 #include <drivers/storage/scsi/scsi.h>
 #include <kern/console.h>
+#include <sys/dma.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -80,6 +81,12 @@ typedef struct usb_msc_dev {
     uint32_t         tag;           /* Incrementing CBW tag */
     uint8_t          max_lun;
     uint8_t          active;
+
+    /* DMA-safe buffers for BOT protocol (avoid stack DMA) */
+    struct usb_msc_cbw *cbw;        /* DMA-coherent CBW buffer */
+    struct usb_msc_csw *csw;        /* DMA-coherent CSW buffer */
+    dma_addr_t          cbw_dma;
+    dma_addr_t          csw_dma;
 } usb_msc_dev_t;
 
 static usb_msc_dev_t msc_devices[USB_MSC_MAX_DEVICES];
@@ -120,26 +127,26 @@ static int usb_msc_bot_transfer(usb_msc_dev_t *msc,
                                 void *data, uint32_t data_len,
                                 int is_read, uint32_t *residue)
 {
-    struct usb_msc_cbw cbw;
-    struct usb_msc_csw csw;
+    struct usb_msc_cbw *cbw = msc->cbw;
+    struct usb_msc_csw *csw = msc->csw;
     uint32_t actual;
     int ret;
 
-    /* Build CBW */
-    memset(&cbw, 0, sizeof(cbw));
-    cbw.dCBWSignature = CBW_SIGNATURE;
-    cbw.dCBWTag = ++msc->tag;
-    cbw.dCBWDataTransferLength = data_len;
-    cbw.bmCBWFlags = is_read ? 0x80 : 0x00;
-    cbw.bCBWLUN = 0;
-    cbw.bCBWCBLength = cdb_len;
+    /* Build CBW in DMA-coherent buffer */
+    memset(cbw, 0, sizeof(*cbw));
+    cbw->dCBWSignature = CBW_SIGNATURE;
+    cbw->dCBWTag = ++msc->tag;
+    cbw->dCBWDataTransferLength = data_len;
+    cbw->bmCBWFlags = is_read ? 0x80 : 0x00;
+    cbw->bCBWLUN = 0;
+    cbw->bCBWCBLength = cdb_len;
     if (cdb_len > 16)
         cdb_len = 16;
-    memcpy(cbw.CBWCB, cdb, cdb_len);
+    memcpy(cbw->CBWCB, cdb, cdb_len);
 
     /* Send CBW via Bulk-OUT */
     ret = usb_bulk_transfer(msc->udev, msc->ep_out,
-                            &cbw, CBW_SIZE, &actual);
+                            cbw, CBW_SIZE, &actual);
     if (ret != USB_XFER_OK) {
         kprintf("usb_msc: CBW send failed (%d)\n", ret);
         usb_msc_reset_recovery(msc);
@@ -162,14 +169,14 @@ static int usb_msc_bot_transfer(usb_msc_dev_t *msc,
         }
     }
 
-    /* Receive CSW via Bulk-IN */
+    /* Receive CSW via Bulk-IN (into DMA-coherent buffer) */
     ret = usb_bulk_transfer(msc->udev, msc->ep_in,
-                            &csw, CSW_SIZE, &actual);
+                            csw, CSW_SIZE, &actual);
     if (ret == USB_XFER_STALL) {
         /* Stall on CSW — clear halt and retry once */
         usb_clear_halt(msc->udev, msc->ep_in);
         ret = usb_bulk_transfer(msc->udev, msc->ep_in,
-                                &csw, CSW_SIZE, &actual);
+                                csw, CSW_SIZE, &actual);
     }
 
     if (ret != USB_XFER_OK || actual < CSW_SIZE) {
@@ -179,23 +186,23 @@ static int usb_msc_bot_transfer(usb_msc_dev_t *msc,
     }
 
     /* Validate CSW */
-    if (csw.dCSWSignature != CSW_SIGNATURE) {
-        kprintf("usb_msc: invalid CSW signature 0x%08x\n", csw.dCSWSignature);
+    if (csw->dCSWSignature != CSW_SIGNATURE) {
+        kprintf("usb_msc: invalid CSW signature 0x%08x\n", csw->dCSWSignature);
         usb_msc_reset_recovery(msc);
         return -1;
     }
 
-    if (csw.dCSWTag != cbw.dCBWTag) {
+    if (csw->dCSWTag != cbw->dCBWTag) {
         kprintf("usb_msc: CSW tag mismatch (expected %u, got %u)\n",
-                cbw.dCBWTag, csw.dCSWTag);
+                cbw->dCBWTag, csw->dCSWTag);
         usb_msc_reset_recovery(msc);
         return -1;
     }
 
     if (residue)
-        *residue = csw.dCSWDataResidue;
+        *residue = csw->dCSWDataResidue;
 
-    switch (csw.bCSWStatus) {
+    switch (csw->bCSWStatus) {
     case CSW_STATUS_PASSED:
         return 0;
 
@@ -209,7 +216,7 @@ static int usb_msc_bot_transfer(usb_msc_dev_t *msc,
         return -1;
 
     default:
-        kprintf("usb_msc: unknown CSW status %u\n", csw.bCSWStatus);
+        kprintf("usb_msc: unknown CSW status %u\n", csw->bCSWStatus);
         usb_msc_reset_recovery(msc);
         return -1;
     }
@@ -362,6 +369,19 @@ static int usb_msc_attach(usb_device_t *dev)
     msc->ep_in = ep_in;
     msc->ep_out = ep_out;
     msc->tag = 0;
+
+    /* Allocate DMA-coherent buffers for CBW/CSW (avoid stack DMA) */
+    msc->cbw = dma_alloc_coherent(sizeof(struct usb_msc_cbw), &msc->cbw_dma);
+    msc->csw = dma_alloc_coherent(sizeof(struct usb_msc_csw), &msc->csw_dma);
+    if (!msc->cbw || !msc->csw) {
+        kprintf("usb_msc: failed to allocate DMA buffers\n");
+        if (msc->cbw)
+            dma_free_coherent(msc->cbw, sizeof(struct usb_msc_cbw));
+        if (msc->csw)
+            dma_free_coherent(msc->csw, sizeof(struct usb_msc_csw));
+        return -1;
+    }
+
     msc->active = 1;
 
     /* Query max LUN */
@@ -405,6 +425,15 @@ static void usb_msc_detach(usb_device_t *dev)
         return;
 
     scsi_unregister_link(&msc->scsi_link);
+
+    /* Free DMA-coherent BOT buffers */
+    if (msc->cbw)
+        dma_free_coherent(msc->cbw, sizeof(struct usb_msc_cbw));
+    if (msc->csw)
+        dma_free_coherent(msc->csw, sizeof(struct usb_msc_csw));
+    msc->cbw = NULL;
+    msc->csw = NULL;
+
     msc->active = 0;
     msc->udev = NULL;
     dev->driver_data = NULL;
