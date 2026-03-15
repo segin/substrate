@@ -14,7 +14,7 @@ static int test_oom(void) {
 
     // Simulate OOM on realloc by setting capacity to an intentionally large value
     // that will cause reallocarray to fail due to overflow/OOM.
-    // The if condition in elf__push_section is `if (obj->section_count == obj->section_cap)`
+    // The equality check on section count and capacity in elf__push_section must be met to trigger reallocation.
     obj->section_count = 1;
     obj->section_cap = (size_t)-1 / 2;
     obj->sections = NULL;
