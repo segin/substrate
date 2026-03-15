@@ -328,12 +328,12 @@ void run_kernel_tests(void) {
         run_vnode_hold_tests();
     }
 
-    if (all || strcmp(test_arg, "vnode_init") == 0) {
-        test_vnode_init();
-    }
-
     if (all || strcmp(test_arg, "vhold_vdrop") == 0) {
         test_vhold_vdrop();
+    }
+
+    if (all || strcmp(test_arg, "vnode_init") == 0) {
+        test_vnode_init();
     }
 
     if (all || strcmp(test_arg, "driver") == 0) {
