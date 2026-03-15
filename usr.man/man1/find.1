@@ -8,8 +8,17 @@ find \- walk a file hierarchy evaluating a Boolean expression
 .RB [ \-E ]
 .RB [ \-s ]
 .RB [ \-x ]
+.RB [ \-X ]
+.RB [ \-D
+.IR debugopts ]
+.RB [ \-O\c
+.IR level ]
+.RB [ \-regextype
+.IR type ]
 .RB [ \-f
 .IR path ]
+.RB [ \-files0\-from
+.IR file ]
 .RI [ path... ]
 .RI [ expression ]
 .SH DESCRIPTION
@@ -50,6 +59,53 @@ Do not descend into directories on other filesystems.
 .TP
 .BI \-f " path"
 Explicitly specify a starting-point path (FreeBSD).
+.TP
+.B \-X
+Modify output to be safe for use with
+.BR xargs (1)
+(OpenBSD).
+.TP
+.BI \-D " debugopts"
+Print diagnostic information.
+.I debugopts
+is a comma-separated list of:
+.BR tree " (expression tree),"
+.BR stat " (trace stat calls),"
+.BR opt " (optimizer actions),"
+.BR rates " (predicate success rates),"
+.BR exec " (trace exec calls),"
+.BR all " (all of the above),"
+.BR help " (list available flags)."
+(GNU).
+.TP
+.BI \-O level
+Set the optimization level (0\(en3).
+Level 1 reorders filename tests before stat-requiring tests.
+Level 2 reorders all pure tests before actions.
+(GNU).
+.TP
+.BI \-regextype " type"
+Set the regex flavor for
+.B \-regex
+and
+.BR \-iregex .
+Valid types:
+.BR posix-basic ,
+.BR posix-extended ,
+.BR sed ,
+.BR egrep ,
+.BR posix-egrep .
+(GNU).
+.TP
+.BI \-files0\-from " file"
+Read starting-point paths from
+.IR file ,
+separated by NUL characters.
+Use
+.Sq \-
+for standard input.
+Cannot be combined with path arguments on the command line.
+(GNU).
 .SH PRIMARIES
 .SS Tests
 .TP

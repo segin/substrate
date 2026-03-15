@@ -60,7 +60,7 @@ available as overlays.
 |---------|--------|-------|
 | `-printx` | ✅ | Backslash-escaped output |
 | `-quit` | ✅ | Immediate exit |
-| `-rm` | ❌ | Alias for `-delete` |
+| `-rm` | ✅ | Alias for `-delete` |
 | `-exit [status]` | ❌ | |
 | `-since`/`-asince`/`-csince` | ❌ | |
 | Whiteout type | ❌ | Platform-dependent |
@@ -79,13 +79,13 @@ available as overlays.
 | `-ipath` | ✅ | |
 | `-printf` | ✅ | Subset: %p %f %h %s %i %n %d %m %M %u %g %T |
 | `-true`/`-false` | ✅ | |
-| `-D` (debug) | ❌ | |
-| `-O` (optimizer) | ❌ | |
-| `-files0-from` | ❌ | |
-| `-regextype` | ❌ | |
-| `-newerXY` | ❌ | |
-| `-ilname` | ❌ | |
-| `-fls`/`-fprint`/`-fprint0`/`-fprintf` | ❌ | |
+| `-D` (debug) | ✅ | tree,stat,opt,rates,exec,all,help |
+| `-O` (optimizer) | ✅ | Levels 0–3 |
+| `-files0-from` | ✅ | NUL-separated path list |
+| `-regextype` | ✅ | posix-basic, posix-extended, sed, egrep |
+| `-newerXY` | ✅ | All XY combos incl. -newerXt |
+| `-ilname` | ✅ | Case-insensitive link target match |
+| `-fls`/`-fprint`/`-fprint0`/`-fprintf` | ✅ | File-directed output |
 
 ## Conflict resolution policy
 

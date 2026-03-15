@@ -298,6 +298,24 @@ Command integration contract:
 - `bin/free`: implement memory reporting via `sys_vm_stats`/`sysinfo`.
 - `bin/mount` and `bin/umount`: implement control path via `mount(2)`/`umount(2)` and mount-list reporting via typed APIs when available.
 
+### 6.2 find(1) — Multi-Dialect File Hierarchy Walker
+
+`bin/find/` implements a POSIX.1-2024 `find` with FreeBSD-default semantics,
+OpenBSD/NetBSD deltas, and GNU findutils extensions.
+
+**Architecture** (4 source files + shared header):
+- `find.h` — shared types: `node_t` AST nodes, `entry_t` per-file state, global traversal variables, debug flags
+- `find_main.c` — main entry, Phase 1–4 orchestration (startup options → paths → expression → traversal)
+- `find_parse.c` — recursive descent parser (precedence: `()` > `!` > AND > OR), optimizer (cost-based AND reordering)
+- `find_eval.c` — expression evaluator, output (print/ls/printf/file-directed), exec helpers (batch + execdir PATH safety)
+- `find_traverse.c` — directory traversal engine with loop detection, xdev, sorted readdir, depth-first support
+
+**Semantic token classes** (per the 4-class model):
+1. **Startup options** — `-H`, `-L`, `-P`, `-E`, `-s`, `-x`, `-X`, `-D`, `-O`, `-regextype`, `-f`, `-files0-from`
+2. **Global modifiers** — `-depth`, `-xdev`, `-maxdepth`, `-mindepth`, `-follow`, `-daystart`, etc. (return NODE_TRUE in AST)
+3. **Pure tests** — `-name`, `-type`, `-perm`, `-newer`, `-regex`, etc. (no side effects)
+4. **Actions** — `-print`, `-exec`, `-delete`, `-quit`, etc. (side-effecting; inhibit implicit `-print`)
+
 ## 7. Toolchain Architecture
 
 ### 7.1 Compiler
