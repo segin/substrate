@@ -48,6 +48,7 @@ extern void run_kobject_tests(void);
 void run_reboot_tests(void);
 extern void test_pipe_race(void);
 extern void test_floppy_qemu(void);
+extern void run_brk_tests(void);
 
 void run_kernel_tests(void) {
     char test_arg[32] = {0};
@@ -174,6 +175,10 @@ void run_kernel_tests(void) {
     
     if (all || strcmp(test_arg, "mmap") == 0) {
         run_mmap_tests();
+    }
+
+    if (all || strcmp(test_arg, "brk") == 0) {
+        run_brk_tests();
     }
 
     if (all || strcmp(test_arg, "futex") == 0) {

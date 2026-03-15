@@ -8,7 +8,7 @@ SRCS = test_runner.c test_mmap.c test_pmap.c property_pmap_protect.c test_vm_exp
 # Add more tests here: test_mmap.c test_gdt.c etc.
 # property_pmap.c needs fixing (missing headers) maybe? Excluding for now to ensure build.
 
-SRCS += test_minix_readdir.c
+SRCS += test_minix_readdir.c test_brk.c
 SRCS += test_ide_dma.c test_ide_qemu.c
 SRCS += bench_sched.c bench_sched_dequeue.c test_kobject.c test_vfs_cache.c test_vfs_busy.c
 SRCS += test_nanosleep.c test_reboot.c test_pipe_race.c test_chacha20.c
