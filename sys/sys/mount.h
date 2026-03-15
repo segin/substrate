@@ -95,6 +95,8 @@ struct mount {
     uint32_t            mnt_lock;           /* mount-level rw lock state */
     struct fs_node      *mnt_node_covered;  /* Legacy: Node we mounted on */
     struct fs_node      *mnt_node_root;     /* Legacy: root node of this fs */
+    uint64_t            mnt_covered_ino;    /* inode of covered directory (snapshot) */
+    struct mount        *mnt_covered_mp;    /* mount of covered directory (snapshot) */
 };
 
 /*

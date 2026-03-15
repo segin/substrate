@@ -204,6 +204,15 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
         mp->mnt_node_root = root;
         mp->mnt_node_covered = mountpoint;
 
+        /* Snapshot the covered node's identity for mount crossing.
+         * We cannot dereference mnt_node_covered later because
+         * filesystems like ext2 reuse a fixed-size node cache;
+         * the slot may be recycled and overwritten. */
+        if (mountpoint) {
+            mp->mnt_covered_ino = mountpoint->inode;
+            mp->mnt_covered_mp  = mountpoint->mp;
+        }
+
         // Set mount reference on root node
         root->mp = mp;
 
@@ -407,16 +416,16 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
          * instances on each finddir, so pointer comparison and the
          * FS_MOUNTPOINT flag alone are unreliable.  Compare the
          * (mp, inode) tuple — which uniquely identifies a directory
-         * across the entire VFS — against each mount's covered node.
+         * across the entire VFS — against each mount's snapshot of
+         * the covered directory's identity taken at mount time.
          * This works for both absolute and relative path lookups.
          */
         {
             struct mount *mnt;
             TAILQ_FOREACH(mnt, &mountlist, mnt_list) {
-                if (mnt->mnt_node_covered &&
-                    current->inode != 0 &&
-                    current->inode == mnt->mnt_node_covered->inode &&
-                    current->mp == mnt->mnt_node_covered->mp) {
+                if (mnt->mnt_covered_ino != 0 &&
+                    current->inode == mnt->mnt_covered_ino &&
+                    current->mp == mnt->mnt_covered_mp) {
                     current = mnt->mnt_node_root;
                     break;
                 }
@@ -479,10 +488,9 @@ fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path) {
         {
             struct mount *mnt;
             TAILQ_FOREACH(mnt, &mountlist, mnt_list) {
-                if (mnt->mnt_node_covered &&
-                    current->inode != 0 &&
-                    current->inode == mnt->mnt_node_covered->inode &&
-                    current->mp == mnt->mnt_node_covered->mp) {
+                if (mnt->mnt_covered_ino != 0 &&
+                    current->inode == mnt->mnt_covered_ino &&
+                    current->mp == mnt->mnt_covered_mp) {
                     current = mnt->mnt_node_root;
                     break;
                 }
