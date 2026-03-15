@@ -65,6 +65,20 @@ static struct dirent dev_dirent;
 static fs_node_t devfs_root_node;
 fs_node_t *devfs_root_node_ptr = NULL;
 
+/*
+ * Deferred registration queue.
+ *
+ * Block device drivers (IDE, floppy, etc.) call devfs_register_device()
+ * during driver init, which runs before vfs_init() → devfs_init().
+ * At that point root_entry is still NULL so registrations silently fail.
+ * Queue them here and replay after devfs_init() creates the tree.
+ */
+#define DEVFS_DEFERRED_MAX 32
+static struct {
+    fs_node_t *nodes[DEVFS_DEFERRED_MAX];
+    int count;
+} devfs_deferred = { .count = 0 };
+
 static struct dirent *devfs_dir_readdir(fs_node_t *node, uint64_t index);
 static fs_node_t *devfs_dir_finddir(fs_node_t *node, char *name);
 
@@ -100,7 +114,14 @@ static devfs_entry_t *devfs_create_entry(const char *name, fs_node_t *node, devf
     entry->next = parent->child;
     parent->child = entry;
 
-    node->impl = (uintptr_t)entry;
+    /*
+     * Only set the back-reference on devfs-owned nodes (dirs, symlinks).
+     * Device nodes use impl for driver state (e.g. blkdev_t pointer)
+     * which must not be clobbered.
+     */
+    if (!node->impl) {
+        node->impl = (uintptr_t)entry;
+    }
     return entry;
 }
 
@@ -350,7 +371,9 @@ static int devfs_add_entry(const char *path, fs_node_t *node) {
 
         if (next != NULL) {
             next->node = node;
-            node->impl = (uintptr_t)next;
+            if (!node->impl) {
+                node->impl = (uintptr_t)next;
+            }
             return 0;
         }
 
@@ -371,6 +394,14 @@ void devfs_register_device(fs_node_t *node) {
     char path[128];
 
     if (!node || !node->name[0]) {
+        return;
+    }
+
+    /* Queue for replay if devfs tree is not yet initialized */
+    if (!root_entry) {
+        if (devfs_deferred.count < DEVFS_DEFERRED_MAX) {
+            devfs_deferred.nodes[devfs_deferred.count++] = node;
+        }
         return;
     }
 
@@ -505,4 +536,10 @@ void devfs_init(void) {
     devfs_root_node_ptr = &devfs_root_node;
     vfs_register_filesystem(&devfs_fs);
     devfs_register_device(&tty_node);
+
+    /* Replay any devices that registered before devfs_init() */
+    for (int i = 0; i < devfs_deferred.count; i++) {
+        devfs_register_device(devfs_deferred.nodes[i]);
+    }
+    devfs_deferred.count = 0;
 }

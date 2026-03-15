@@ -364,14 +364,11 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
 // Lookup a path from a root node
 fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
     if (!path || !root) return NULL;
-    int absolute = (path[0] == '/');
     if (path[0] == '/') path++; // Skip leading /
     if (path[0] == '\0') return root; // Root itself
     
     fs_node_t *current = root;
     static char component[256];
-    char resolved[512];
-    size_t resolved_len = 0;
     const char *p = path;
     
     while (*p) {
@@ -404,32 +401,29 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
         if (!current) return NULL;
 
         /*
-         * Mount crossing by pathname for covered nodes that are recreated
-         * per-lookup (e.g. ext2 dynamic fs_node instances).
+         * Mount crossing by node identity.
+         *
+         * Filesystems like ext2 return freshly-allocated fs_node_t
+         * instances on each finddir, so pointer comparison and the
+         * FS_MOUNTPOINT flag alone are unreliable.  Compare the
+         * (mp, inode) tuple — which uniquely identifies a directory
+         * across the entire VFS — against each mount's covered node.
+         * This works for both absolute and relative path lookups.
          */
-        if (absolute) {
-            size_t comp_len = strlen(component);
-            if (resolved_len == 0) {
-                if (comp_len + 1 < sizeof(resolved)) {
-                    resolved[0] = '/';
-                    memcpy(resolved + 1, component, comp_len + 1);
-                    resolved_len = comp_len + 1;
-                }
-            } else if (resolved_len + 1 + comp_len < sizeof(resolved)) {
-                resolved[resolved_len++] = '/';
-                memcpy(resolved + resolved_len, component, comp_len + 1);
-                resolved_len += comp_len;
-            }
-
-            struct mount *mp;
-            TAILQ_FOREACH(mp, &mountlist, mnt_list) {
-                if (mp->mnt_node_root && strcmp(mp->mnt_stat_path, resolved) == 0) {
-                    current = mp->mnt_node_root;
+        {
+            struct mount *mnt;
+            TAILQ_FOREACH(mnt, &mountlist, mnt_list) {
+                if (mnt->mnt_node_covered &&
+                    current->inode != 0 &&
+                    current->inode == mnt->mnt_node_covered->inode &&
+                    current->mp == mnt->mnt_node_covered->mp) {
+                    current = mnt->mnt_node_root;
                     break;
                 }
             }
         }
-        
+
+        /* Flag-based fast path for nodes with FS_MOUNTPOINT set */
         current = vfs_cross_mountpoint(current);
 
         // Skip trailing slash
@@ -441,14 +435,11 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
 
 fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path) {
     if (!path || !root) return NULL;
-    int absolute = (path[0] == '/');
     if (path[0] == '/') path++; // Skip leading /
     if (path[0] == '\0') return root; // Root itself
     
     fs_node_t *current = root;
     static char component[256];
-    char resolved[512];
-    size_t resolved_len = 0;
     const char *p = path;
     
     while (*p) {
@@ -484,29 +475,21 @@ fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path) {
         current = finddir_fs_internal(current, component, 0, !is_last);
         if (!current) return NULL;
 
-        if (absolute) {
-            size_t comp_len = strlen(component);
-            if (resolved_len == 0) {
-                if (comp_len + 1 < sizeof(resolved)) {
-                    resolved[0] = '/';
-                    memcpy(resolved + 1, component, comp_len + 1);
-                    resolved_len = comp_len + 1;
-                }
-            } else if (resolved_len + 1 + comp_len < sizeof(resolved)) {
-                resolved[resolved_len++] = '/';
-                memcpy(resolved + resolved_len, component, comp_len + 1);
-                resolved_len += comp_len;
-            }
-
-            struct mount *mp;
-            TAILQ_FOREACH(mp, &mountlist, mnt_list) {
-                if (mp->mnt_node_root && strcmp(mp->mnt_stat_path, resolved) == 0) {
-                    current = mp->mnt_node_root;
+        /* Mount crossing by node identity (see vfs_lookup comment) */
+        {
+            struct mount *mnt;
+            TAILQ_FOREACH(mnt, &mountlist, mnt_list) {
+                if (mnt->mnt_node_covered &&
+                    current->inode != 0 &&
+                    current->inode == mnt->mnt_node_covered->inode &&
+                    current->mp == mnt->mnt_node_covered->mp) {
+                    current = mnt->mnt_node_root;
                     break;
                 }
             }
         }
-        
+
+        /* Flag-based fast path for nodes with FS_MOUNTPOINT set */
         current = vfs_cross_mountpoint(current);
 
         // Skip trailing slash

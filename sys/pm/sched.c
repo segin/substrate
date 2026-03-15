@@ -149,8 +149,16 @@ void sched_yield(void) {
     int highest_prio = -1;
     sched_class_t best_class = SCHED_IDLE;
 
+    /*
+     * Round-robin index: start scanning from the thread AFTER the last
+     * one we scheduled, so that equal-priority threads get fair turns.
+     */
+    static int rr_start = 0;
+    int start = rr_start;
+
     // Scan for best thread to run (Generic Policy)
-    for (int i = 0; i < MAX_THREADS; i++) {
+    for (int n = 0; n < MAX_THREADS; n++) {
+        int i = (start + n) % MAX_THREADS;
         if (threads[i].tid == -1 || threads[i].state != THREAD_READY) continue;
         if (!sched_can_run_on_cpu(&threads[i], cpu_id)) continue;
 
@@ -175,6 +183,8 @@ void sched_yield(void) {
     if (best_thread == current_thread && current_thread && current_thread->state == THREAD_RUNNING) return;
 
     if (best_thread) {
+        /* Advance round-robin start for next call */
+        rr_start = (int)((best_thread - threads) + 1) % MAX_THREADS;
         sched_context_switch(current_thread, best_thread);
     }
 }
