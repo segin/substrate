@@ -1368,17 +1368,17 @@ static int elks_sys_mount(uint32_t source_off, uint32_t target_off, uint32_t fst
                           uint32_t unused6, uint32_t unused7) {
     uintptr_t source_linear = 0;
     uintptr_t target_linear = 0;
-    uintptr_t fstype_linear = 0;
     uintptr_t data_linear = 0;
+    const char *fstype = NULL;
     void *data = NULL;
+    unsigned long native_flags = 0;
 
     (void)unused5; (void)unused6; (void)unused7;
 
     if (source_off != 0U && elks_ds_pointer(source_off, &source_linear) != 0) {
         return -EFAULT;
     }
-    if (elks_ds_pointer(target_off, &target_linear) != 0 ||
-        elks_ds_pointer(fstype_off, &fstype_linear) != 0) {
+    if (elks_ds_pointer(target_off, &target_linear) != 0) {
         return -EFAULT;
     }
     if (data_off != 0U) {
@@ -1387,10 +1387,43 @@ static int elks_sys_mount(uint32_t source_off, uint32_t target_off, uint32_t fst
         }
         data = (void *)(uintptr_t)data_linear;
     }
+    if (flags & 0x0001U) native_flags |= MNT_RDONLY;
+    if (flags & 0x0002U) native_flags |= MNT_NOSUID;
+    if (flags & 0x0004U) native_flags |= MNT_NODEV;
+    if (flags & 0x0008U) native_flags |= MNT_NOEXEC;
+    if (flags & 0x0010U) native_flags |= MNT_SYNCHRONOUS;
+    if (flags & 0x0020U) native_flags |= MNT_UPDATE;
+
+    switch (fstype_off) {
+    case 0:
+        fstype = "minix";
+        break;
+    case 1:
+        fstype = "minix";
+        break;
+    case 2:
+        fstype = "fat";
+        break;
+    case 3:
+        fstype = "romfs";
+        break;
+    default:
+        if (fstype_off != 0U) {
+            uintptr_t fstype_linear = 0;
+
+            if (elks_ds_pointer(fstype_off, &fstype_linear) != 0) {
+                return -EFAULT;
+            }
+            fstype = (const char *)(uintptr_t)fstype_linear;
+        }
+        break;
+    }
+    if (!fstype) {
+        return -ENODEV;
+    }
     return sys_mount(source_off ? (const char *)(uintptr_t)source_linear : NULL,
                      (const char *)(uintptr_t)target_linear,
-                     (const char *)(uintptr_t)fstype_linear,
-                     (unsigned long)flags, data);
+                     fstype, native_flags, data);
 }
 
 static int elks_sys_umount(uint32_t target_off, uint32_t unused1, uint32_t unused2,

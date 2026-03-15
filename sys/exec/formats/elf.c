@@ -30,6 +30,11 @@ typedef struct elf_image_info {
     uint32_t interp_len;
 } elf_image_info_t;
 
+typedef struct {
+    uint32_t va;
+    void *pa;
+} elf_page_map_t;
+
 typedef struct elf_image_cache_entry {
     uint8_t valid;
     uintptr_t fsid;
@@ -180,6 +185,14 @@ static int elf_get_image_info(fs_node_t *file, elf_image_info_t *image) {
     return 0;
 }
 
+static elf_image_info_t *elf_image_alloc(void) {
+    elf_image_info_t *image = kmalloc(sizeof(elf_image_info_t));
+    if (image) {
+        memset(image, 0, sizeof(*image));
+    }
+    return image;
+}
+
 /*
  * exec_reset_signals - Reset signal handlers on exec
  *
@@ -255,8 +268,20 @@ int elf_check_file(Elf32_Ehdr *hdr) {
 // Load ELF from file node and prepare for execution
 // Returns entry point address on success, 0 on failure
 uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32_t *interp_len) {
-    elf_image_info_t image;
+    elf_image_info_t *image;
     const Elf32_Ehdr *ehdr;
+    uint32_t entry;
+    uint32_t max_vaddr = 0;
+    int trace_elf;
+    int trace_personality;
+    uint32_t val;
+    char hexbuf[16];
+    void *pmap;
+    uint32_t tls_vaddr = 0;
+    uint32_t tls_filesz = 0;
+    uint32_t tls_memsz = 0;
+    uint32_t tls_align = 1;
+    int has_tls = 0;
 
     if (interp_len) *interp_len = 0;
 
@@ -265,27 +290,35 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
         return 0;
     }
 
-    if (elf_get_image_info(file, &image) != 0) {
-        kprint("ELF: Failed to read image metadata\n");
+    image = elf_image_alloc();
+    if (!image) {
+        kprint("ELF: Failed to allocate image metadata\n");
         return 0;
     }
 
-    ehdr = &image.ehdr;
+    if (elf_get_image_info(file, image) != 0) {
+        kprint("ELF: Failed to read image metadata\n");
+        kfree(image, sizeof(*image));
+        return 0;
+    }
+
+    ehdr = &image->ehdr;
 
     if (ehdr->e_type != 2 && ehdr->e_type != 3) { // ET_EXEC or ET_DYN
         kprint("ELF: Not an executable or shared object\n");
+        kfree(image, sizeof(*image));
         return 0;
     }
     
     if (!elf_machine_matches_kernel(ehdr)) {
+        kfree(image, sizeof(*image));
         return 0;
     }
-    
-    char hexbuf[16];
-    uint32_t entry = ehdr->e_entry + load_base;
-    uint32_t val = entry;
-    int trace_elf = elf_debug_enabled();
-    int trace_personality = elf_personality_debug_enabled(image.detected_os);
+
+    entry = ehdr->e_entry + load_base;
+    val = entry;
+    trace_elf = elf_debug_enabled();
+    trace_personality = elf_personality_debug_enabled(image->detected_os);
 
     if (trace_elf) {
         kprint("ELF: Loading executable, entry=0x");
@@ -299,28 +332,21 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
     }
     
     // Use pmap_t from vm_map.h/pmap.h
-    void *pmap = pmap_kernel();
+    pmap = pmap_kernel();
     if (current_process && current_process->pmap) {
         pmap = (void*)((uintptr_t)current_process->pmap);
     }
-    uint32_t max_vaddr = 0;
-    
-    // TLS segment tracking
-    uint32_t tls_vaddr = 0;
-    uint32_t tls_filesz = 0;
-    uint32_t tls_memsz = 0;
-    uint32_t tls_align = 1;
-    int has_tls = 0;
+
     (void)tls_vaddr;  // Will be used for debug output
     (void)tls_align;  // Will be used for proper alignment
     
-    for (int i = 0; i < image.phnum; i++) {
-        Elf32_Phdr phdr = image.phdrs[i];
+    for (int i = 0; i < image->phnum; i++) {
+        Elf32_Phdr phdr = image->phdrs[i];
 
         if (phdr.p_type == PT_INTERP) {
-            if (interp_path && interp_len && image.interp_len > 0) {
-                uint32_t to_copy = (image.interp_len < (*interp_len - 1)) ? image.interp_len : (*interp_len - 1);
-                memcpy(interp_path, image.interp_path, to_copy);
+            if (interp_path && interp_len && image->interp_len > 0) {
+                uint32_t to_copy = (image->interp_len < (*interp_len - 1)) ? image->interp_len : (*interp_len - 1);
+                memcpy(interp_path, image->interp_path, to_copy);
                 interp_path[to_copy] = '\0';
                 *interp_len = to_copy;
             }
@@ -375,9 +401,16 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
             
             // Allocate and map pages for this segment
             // Track PA for each VA so we can write to it via kernel mapping
-            typedef struct { uint32_t va; void *pa; } page_map_t;
-            page_map_t page_maps[256]; // Max 256 pages per segment (1MB)
+            uint32_t segment_pages = (va_end - va_start) / 0x1000;
+            elf_page_map_t *page_maps;
             int num_pages = 0;
+
+            page_maps = kmalloc(segment_pages * sizeof(*page_maps));
+            if (!page_maps) {
+                kprint("ELF: Failed to allocate page map array\n");
+                kfree(image, sizeof(*image));
+                return 0;
+            }
             
             // Determine permissions from ELF segment flags
             int prot = 0;
@@ -398,15 +431,15 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
                 uint32_t pa_phys = (uint32_t)(uintptr_t)pa - 0xC0000000;
                 if (pmap_enter(pmap, va, pa_phys, prot, 0) < 0) {
                     kprint("ELF: Failed to map page\n");
+                    kfree(page_maps, segment_pages * sizeof(*page_maps));
+                    kfree(image, sizeof(*image));
                     return 0;
                 }
                 
                 // Save mapping for later access via kernel space
-                if (num_pages < 256) {
-                    page_maps[num_pages].va = va;
-                    page_maps[num_pages].pa = pa;
-                    num_pages++;
-                }
+                page_maps[num_pages].va = va;
+                page_maps[num_pages].pa = pa;
+                num_pages++;
                 
                 // Zero the page - pa is already virtual from pmm_alloc_block
                 memset(pa, 0, 0x1000);
@@ -442,12 +475,16 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
                         uint8_t *dest = (uint8_t *)page_maps[pi].pa + offset_in_page;
                         if (file->read(file, phdr.p_offset + offset_in_segment, copy_size, dest) != copy_size) {
                             kprint("ELF: Failed to read segment data directly\n");
+                            kfree(page_maps, segment_pages * sizeof(*page_maps));
+                            kfree(image, sizeof(*image));
                             return 0;
                         }
                         bytes_copied += copy_size;
                     }
                 }
             }
+
+            kfree(page_maps, segment_pages * sizeof(*page_maps));
             
             // BSS is already zeroed since we memset each page
             
@@ -469,7 +506,7 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
     (void)tls_filesz;
     
     // Detect personality based on OSABI
-    int detected_os = image.detected_os;
+    int detected_os = image->detected_os;
     
     if (trace_elf || trace_personality) {
         kprint("ELF: Personality: ");
@@ -504,7 +541,8 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
             current_process->brk = max_vaddr;
         }
     }
-    
+
+    kfree(image, sizeof(*image));
     return entry;
 }
 
@@ -765,7 +803,7 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
 // Execute a binary - loads ELF and prepares for userspace transition
 // Returns 0 on success, negative error code on failure
 int elf_execve(int fd, const char *path, char *const argv[], char *const envp[]) {
-    elf_image_info_t image;
+    elf_image_info_t *image = NULL;
     fs_node_t *root = (current_process && current_process->root_node) ? current_process->root_node : fs_root;
     if (!root) {
         if (fd >= 0) kern_close(fd);
@@ -804,8 +842,15 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
         return -1;
     }
 
-    if (elf_get_image_info(file, &image) != 0) {
+    image = elf_image_alloc();
+    if (!image) {
+        if (fd >= 0) kern_close(fd);
+        return -12;
+    }
+
+    if (elf_get_image_info(file, image) != 0) {
         kprint("execve: Failed to load executable metadata\n");
+        kfree(image, sizeof(*image));
         if (fd >= 0) kern_close(fd);
         return -ENOEXEC;
     }
@@ -959,7 +1004,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     set_kernel_stack((uint32_t)current_thread->kstack_top);
 
     uint32_t sp;
-    if (exec_setup_stack(new_pmap, &sp, k_argv, argc, k_envp, envc, main_entry, at_base, &image) < 0) {
+    if (exec_setup_stack(new_pmap, &sp, k_argv, argc, k_envp, envc, main_entry, at_base, image) < 0) {
         goto cleanup;
     }
 
@@ -1010,6 +1055,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     if (k_argv) kfree(k_argv, (argc + 1) * sizeof(char*));
     if (k_envp) kfree(k_envp, (envc + 1) * sizeof(char*));
     if (arg_buffer) kfree(arg_buffer, ARG_MAX_BYTES);
+    if (image) kfree(image, sizeof(*image));
     if (fd >= 0) kern_close(fd);
 
     // Jump to userspace - does not return
@@ -1024,6 +1070,7 @@ cleanup:
     if (k_argv) kfree(k_argv, (argc + 1) * sizeof(char*));
     if (k_envp) kfree(k_envp, (envc + 1) * sizeof(char*));
     if (arg_buffer) kfree(arg_buffer, ARG_MAX_BYTES);
+    if (image) kfree(image, sizeof(*image));
     if (fd >= 0) kern_close(fd);
     exec_unpin_current_thread();
     return error_code;

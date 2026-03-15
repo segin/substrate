@@ -40,9 +40,12 @@ extern void run_sched_bench(void);
 extern void run_sched_dequeue_bench(void);
 extern void run_vnode_lock_tests(void);
 extern void run_vclean_tests(void);
+extern void run_vnode_hold_tests(void);
+extern void test_vhold_vdrop(void);
 extern void run_kobject_tests(void);
 void run_reboot_tests(void);
 extern void test_pipe_race(void);
+extern void test_floppy_qemu(void);
 
 void run_kernel_tests(void) {
     char test_arg[32] = {0};
@@ -227,6 +230,10 @@ void run_kernel_tests(void) {
          run_ps2_tests();
      }
 
+    if (all || strcmp(test_arg, "floppy_qemu") == 0 || strcmp(test_arg, "floppy") == 0) {
+         test_floppy_qemu();
+    }
+
     if (all || strcmp(test_arg, "minix") == 0) {
          run_minix_mount_tests();
          run_minix_write_tests();
@@ -314,6 +321,14 @@ void run_kernel_tests(void) {
 
     if (all || strcmp(test_arg, "vclean") == 0) {
         run_vclean_tests();
+    }
+
+    if (all || strcmp(test_arg, "vnode_hold") == 0) {
+        run_vnode_hold_tests();
+    }
+
+    if (all || strcmp(test_arg, "vhold_vdrop") == 0) {
+        test_vhold_vdrop();
     }
 
     if (all || strcmp(test_arg, "driver") == 0) {

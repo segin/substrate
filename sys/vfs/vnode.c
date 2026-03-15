@@ -17,6 +17,7 @@
 #include <kern/sched.h>
 #include <kern/sleepq.h>
 #include <sys/lock.h>
+#include <sys/mount.h>
 #include <sys/errno.h>
 #include <vm/uma.h>
 #include <string.h>
@@ -557,6 +558,85 @@ void vclean(struct vnode *vp, int flags)
     vp->v_flag &= ~(VFREEING | VDOOMED);
     
     spinlock_release(&vp->v_interlock);
+}
+
+/*
+ * vinvalbuf - Invalidate all buffers for a vnode
+ *
+ * flags: V_SAVE - sync dirty data before invalidating
+ *
+ * Once the buffer cache (bio.c) is implemented, this will walk
+ * the vnode's buffer list and invalidate each buffer. For now,
+ * we handle the vnode-side bookkeeping (v_numoutput).
+ */
+#define V_SAVE 0x01
+int vinvalbuf(struct vnode *vp, int flags)
+{
+    (void)flags;
+
+    spinlock_acquire(&vp->v_interlock);
+
+    /*
+     * TODO: When buffer cache is implemented, iterate vp's
+     * buffer list and invalidate (or sync if V_SAVE) each buf.
+     * For now, just reset the pending output counter.
+     */
+    vp->v_numoutput = 0;
+
+    spinlock_release(&vp->v_interlock);
+
+    return(0);
+}
+
+/*
+ * vflush - Flush all vnodes for a mount point
+ *
+ * mp: mount point to flush
+ * skipvp: vnode to skip (usually root vnode during unmount)
+ * flags: FORCECLOSE - force close even if busy
+ *
+ * Returns 0 on success, EBUSY if active vnodes remain.
+ */
+#define FORCECLOSE 0x01
+int vflush(struct mount *mp, struct vnode *skipvp, int flags)
+{
+    struct vnode *vp, *nvp;
+    int busy = 0;
+
+    /*
+     * Walk the mount's vnode list. We use the safe variant since
+     * vrele/vgone may remove vnodes from the list.
+     */
+    TAILQ_FOREACH_SAFE(vp, &mp->mnt_vnodelist, v_mntlist, nvp) {
+        /* Skip the designated vnode (usually root) */
+        if(vp == skipvp)
+            continue;
+
+        spinlock_acquire(&vp->v_interlock);
+
+        /*
+         * If vnode has active references and we're not forcing,
+         * mark as busy and skip.
+         */
+        if(vp->v_usecount > 0 && !(flags & FORCECLOSE)) {
+            busy++;
+            spinlock_release(&vp->v_interlock);
+            continue;
+        }
+
+        spinlock_release(&vp->v_interlock);
+
+        /* Invalidate buffers for this vnode */
+        vinvalbuf(vp, 0);
+
+        /* Mark for doom and clean */
+        vgone(vp);
+    }
+
+    if(busy)
+        return(-EBUSY);
+
+    return(0);
 }
 
 /*

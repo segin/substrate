@@ -87,6 +87,7 @@ static int ide_program_dma_mode(ide_device_t *dev);
 static int ide_irq_dispatch(unsigned int irq, void *dev_id, void *frame);
 static void ide_register_irqs(void);
 static void ide_bm_set_drive_dma_capable(uint8_t channel, uint8_t drive, int enabled);
+static void ide_disable_device_dma(ide_device_t *dev, const char *op);
 
 static int ide_scan_controller(void);
 static int ide_software_reset_channel(uint8_t channel);
@@ -106,10 +107,15 @@ static void ide_refresh_device_slot(uint8_t channel, uint8_t drive) {
     int type = -1;
     uint64_t total_sectors;
     uint32_t sector_size = 512;
+    uint8_t dma_forced_pio = 0;
+    uint8_t reset_recovery_seen = 0;
 
     if (slot < 0 || slot >= MAX_IDE_DEVICES) {
         return;
     }
+
+    dma_forced_pio = ide_devices[slot].dma_forced_pio;
+    reset_recovery_seen = ide_devices[slot].reset_recovery_seen;
 
     memset(buf, 0, sizeof(buf));
 
@@ -124,6 +130,8 @@ static void ide_refresh_device_slot(uint8_t channel, uint8_t drive) {
     }
 
     ide_parse_identify_data(&ide_devices[slot], buf, (uint8_t)type, channel, drive);
+    ide_devices[slot].dma_forced_pio = dma_forced_pio;
+    ide_devices[slot].reset_recovery_seen = reset_recovery_seen;
     total_sectors = ide_devices[slot].size;
     if (type == 1) {
         uint32_t lba;
@@ -152,14 +160,19 @@ static int ide_transfer_read_once(ide_drive_ctx_t *ctx, uint64_t sector,
     uint8_t channel = ctx->channel;
     uint8_t drive = ctx->drive;
     uint16_t bus = ide_channels[channel].io_base;
+    ide_device_t *dev = &ide_devices[ctx->index];
 
     if (ctx->type == 1) {
         return ide_atapi_read_sectors(channel, drive, (uint32_t)sector,
                                       (uint16_t)count, buffer);
     }
 
-    if (ide_attached && ide_channels[channel].dma_capable && count <= 256) {
-        return ide_dma_read(channel, drive, sector, (uint16_t)count, buffer);
+    if (ide_attached && ide_channels[channel].dma_capable &&
+        !dev->dma_forced_pio && dev->dma_mode != 0 && count <= 256) {
+        if (ide_dma_read(channel, drive, sector, (uint16_t)count, buffer) == 0) {
+            return 0;
+        }
+        ide_disable_device_dma(dev, "read");
     }
 
     if (sector < 0x10000000ULL && count <= 256) {
@@ -174,13 +187,19 @@ static int ide_transfer_write_once(ide_drive_ctx_t *ctx, uint64_t sector,
     uint8_t channel = ctx->channel;
     uint8_t drive = ctx->drive;
     uint16_t bus = ide_channels[channel].io_base;
+    ide_device_t *dev = &ide_devices[ctx->index];
 
     if (ctx->type == 1) {
         return -1;
     }
 
-    if (ide_attached && ide_channels[channel].dma_capable && count <= 256) {
-        return ide_dma_write(channel, drive, sector, (uint16_t)count, buffer);
+    if (ide_attached && ide_channels[channel].dma_capable &&
+        !dev->dma_forced_pio && dev->dma_mode != 0 && count <= 256) {
+        if (ide_dma_write(channel, drive, sector, (uint16_t)count, buffer) == 0) {
+            return 0;
+        }
+        ide_disable_device_dma(dev, "write");
+        return -1;
     }
 
     if (sector < 0x10000000ULL && count <= 256) {
@@ -198,7 +217,19 @@ static void ide_mark_offline(ide_drive_ctx_t *ctx, const char *op) {
         return;
     }
 
+    if (dev->reset_recovery_seen) {
+        dev->offline = 1;
+        snprintf(msg, sizeof(msg),
+                 "ide: %s marking ide%u offline after repeated %s failures post-reset\n",
+                 dev->model[0] ? dev->model : "(unknown)",
+                 ctx->index,
+                 op);
+        kprint(msg);
+        return;
+    }
+
     if (ide_software_reset_channel(ctx->channel) == 0 && !dev->offline) {
+        dev->reset_recovery_seen = 1;
         snprintf(msg, sizeof(msg),
                  "ide: ide%u recovered after channel reset during %s\n",
                  (unsigned int)ctx->index, op);
@@ -212,6 +243,27 @@ static void ide_mark_offline(ide_drive_ctx_t *ctx, const char *op) {
              dev->model[0] ? dev->model : "(unknown)",
              ctx->index,
              op);
+    kprint(msg);
+}
+
+static void ide_disable_device_dma(ide_device_t *dev, const char *op) {
+    char msg[128];
+
+    if (dev == NULL || dev->type != 0) {
+        return;
+    }
+
+    if (dev->dma_forced_pio) {
+        return;
+    }
+
+    dev->dma_forced_pio = 1;
+    dev->dma_mode = 0;
+    ide_bm_set_drive_dma_capable(dev->channel, dev->drive, 0);
+    snprintf(msg, sizeof(msg),
+             "ide: ide%u disabling DMA after %s failure; falling back to PIO\n",
+             IDE_DEVICE_INDEX(dev->channel, dev->drive),
+             op ? op : "transfer");
     kprint(msg);
 }
 
@@ -280,18 +332,6 @@ static int ide_legacy_channel_present(const char *name) {
 
 static void ide_configure_from_pci(void) {
     (void)ide_pci_configure_channels(ide_channels, ide_channel_irq_shared);
-
-    for (uint8_t ch = 0; ch < MAX_IDE_CHANNELS; ch += 2) {
-        if (ide_channels[ch].bm_base == 0 &&
-            (ch + 1 >= MAX_IDE_CHANNELS || ide_channels[ch + 1].bm_base == 0)) {
-            continue;
-        }
-
-        ide_dma_init_pair(ch, ide_channels[ch].bm_base,
-                          (uint16_t)((ch + 1 < MAX_IDE_CHANNELS)
-                                         ? ide_channels[ch + 1].bm_base
-                                         : 0));
-    }
 }
 
 static int ide_identify_channel(uint8_t channel, uint8_t drive, void *buffer) {
@@ -701,6 +741,12 @@ static int ide_program_dma_mode(ide_device_t *dev) {
     uint8_t status;
 
     if (dev == NULL || !dev->present || dev->type != 0) {
+        return -1;
+    }
+
+    if (dev->dma_forced_pio) {
+        ide_bm_set_drive_dma_capable(dev->channel, dev->drive, 0);
+        dev->dma_mode = 0;
         return -1;
     }
 
@@ -1586,6 +1632,7 @@ static int ide_blkdev_read(blkdev_t *dev, uint64_t sector, uint32_t count,
         ret = ide_transfer_read_once(ctx, sector, count, buffer);
         if (ret >= 0) {
             ide_dev->offline = 0;
+            ide_dev->reset_recovery_seen = 0;
             return ret;
         }
         if (attempt < 2) {
@@ -1617,11 +1664,25 @@ static int ide_blkdev_write(blkdev_t *dev, uint64_t sector, uint32_t count,
         return -1;
     }
 
-    ret = ide_transfer_write_once(ctx, sector, count, buffer);
-    if (ret < 0) {
-        ide_mark_offline(ctx, "write");
+    for (int attempt = 0; attempt < 3; attempt++) {
+        ret = ide_transfer_write_once(ctx, sector, count, buffer);
+        if (ret >= 0) {
+            ide_dev->offline = 0;
+            ide_dev->reset_recovery_seen = 0;
+            return ret;
+        }
+        if (attempt < 2) {
+            char msg[96];
+
+            snprintf(msg, sizeof(msg),
+                     "ide: ide%u write retry %d for LBA %llu count %u\n",
+                     ctx->index, attempt + 1,
+                     (unsigned long long)sector, (unsigned int)count);
+            kprint(msg);
+        }
     }
-    return ret;
+    ide_mark_offline(ctx, "write");
+    return -1;
 }
 
 /*
