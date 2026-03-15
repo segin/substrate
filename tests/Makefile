@@ -80,7 +80,7 @@ test_getpagesize: lib/sys/test_getpagesize.c ../lib/sys/getpagesize.c
 	$(CC) $(CFLAGS_COMMON) $^ -o $@
 
 test_getuid: lib/sys/test_getuid.c
-	$(CC) $(CFLAGS_COMMON) -D__i386__ $^ -o $@
+	$(CC) $(CFLAGS_COMMON) -D__i386__ -I../sys -I../include -I../sys/include $^ -o $@
 
 test_readline: lib/edit/test_readline.c ../lib/edit/readline.c
 	$(CC) $(CFLAGS_COMMON) -I../lib/edit $< -o $@
@@ -144,7 +144,7 @@ host_test_fork_exec_wait: sys/host_test_fork_exec_wait.c
 test_pthread_join: lib/test_pthread_join.c ../lib/pthreads/pthread.c
 	$(CC) $(CFLAGS_COMMON) -Wno-int-conversion -Wno-pointer-to-int-cast -I../include -I../sys/include -I../sys $< -o $@
 
-test_libpthread_mutex: lib/test_pthread_mutex.c ../lib/pthreads/pthread.c
+test_libpthread_mutex: lib/test_libpthread_mutex.c ../lib/pthreads/pthread.c
 	$(CC) $(CFLAGS_COMMON) -I../include -I../sys/include -I../sys $< -o $@
 
 test_history:
@@ -294,7 +294,7 @@ string_prefixed.o: ../lib/c/src/string.c
 	objcopy --prefix-symbols=libc_ string_raw.o string_prefixed.o
 
 clean:
-	rm -f *.o test_runner test_minix test_ext2_perf test_ext2_read_blocks test_ext2_find_next_zero_bit test_ext2_inode_write test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir test_ext2_write_block test_libpthread_mutex test_pthread_join test_readline test_libedit test_bc host_test_wait_logic host_test_pgrp host_test_proc_tree host_test_proc_exit host_test_tty_jobctl host_test_sync_guards host_test_sleepq_private host_test_swapper host_test_rusage host_test_proc_lifecycle host_test_i386_signal host_test_signal_restart host_test_signal_integration host_test_rwlock host_test_fork_exec_wait test_getpagesize test_getuid
+	rm -f *.o test_runner test_minix test_ext2_perf test_ext2_read_blocks test_ext2_find_next_zero_bit test_ext2_inode_write test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir test_ext2_write_block test_libpthread_mutex test_pthread_join test_readline test_libedit test_bc host_test_wait_logic host_test_pgrp host_test_proc_tree host_test_proc_exit host_test_tty_jobctl host_test_sync_guards host_test_sleepq_private host_test_swapper host_test_rusage host_test_proc_lifecycle host_test_i386_signal host_test_linux_signal host_test_signal_restart host_test_signal_integration host_test_proc_signal_state host_test_rwlock host_test_fork_exec_wait test_getpagesize test_getuid
 	$(MAKE) -C sys clean
 	$(MAKE) -C lib/edit clean
 
@@ -311,7 +311,7 @@ bench_vm_map_alloc.o: bench_vm_map_alloc.c
 	$(CC) $(CFLAGS_KERN) -c $< -o $@
 
 mocks_vm.o: mocks_vm.c
-	$(CC) $(CFLAGS_KERN) -c $< -o $@
+	$(CC) $(CFLAGS_KERN) $c -o $@
 
 test_bc: bin/bc/host_test_bc.c ../bin/bc/bc.c ../usr.lib/bc/num.c ../usr.lib/bc/arith.c
 	$(CC) $(CFLAGS_COMMON) $< ../usr.lib/bc/num.c ../usr.lib/bc/arith.c -o $@
