@@ -305,6 +305,34 @@ static const char *fkey_seq[12] = {
     "\x1b[24~", /* F12 */
 };
 
+/* ---- Typematic Rate/Delay ---- */
+
+/*
+ * Encode delay and rate into the 0xF3 parameter byte.
+ * delay: 0=250ms, 1=500ms, 2=750ms, 3=1000ms
+ * rate:  0=30.0Hz, 1=26.7Hz, 2=24.0Hz, ... 0x1F=2.0Hz
+ */
+static uint8_t typematic_encode(uint8_t delay, uint8_t rate)
+{
+    return ((delay & 0x03) << 5) | (rate & 0x1F);
+}
+
+/*
+ * Send the Set Typematic Rate/Delay command (0xF3) to the keyboard.
+ */
+void keyboard_set_typematic(uint8_t delay, uint8_t rate)
+{
+    uint8_t response;
+    uint8_t param = typematic_encode(delay, rate);
+
+    ps2_write_data(0xF3);
+    if (ps2_read_data_timeout(&response, PS2_TIMEOUT_LOOPS) == 0 &&
+        response == PS2_DEV_ACK) {
+        ps2_write_data(param);
+        ps2_read_data_timeout(&response, PS2_TIMEOUT_LOOPS);
+    }
+}
+
 /* ---- Initialization ---- */
 
 void keyboard_init(void) {
@@ -313,6 +341,10 @@ void keyboard_init(void) {
         return;
     }
     init_numpad_nav();
+
+    /* Set typematic: 250ms delay, 30Hz repeat */
+    keyboard_set_typematic(0, 0);
+
     input_register_device(&kbd_dev);
 }
 

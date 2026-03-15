@@ -408,7 +408,7 @@ static void hw_text_update_cursor_locked(vt_state_t *vt) {
         hw_text_cursor_visible_locked(0);
         return;
     }
-    hw_text_cursor_visible_locked(1);
+    hw_text_cursor_visible_locked(vt->cursor_visible);
 
     row = vt->row;
     col = vt->col;
@@ -432,42 +432,86 @@ static void hw_text_update_cursor_locked(vt_state_t *vt) {
     outb(0x3D5, pos & 0xFF);
 }
 
-static void hw_text_scroll_locked(vt_state_t *vt) {
-    size_t line_size;
-    size_t scroll_size;
+static void hw_text_putentryat_locked(vt_state_t *vt, char c, uint8_t color, size_t x, size_t y) {
+    hw_text_write_cell_locked(vt, x, y, c, color);
+}
+
+/* ---- Region-Aware Scroll Helpers ---- */
+
+/*
+ * Scroll rows [top..bottom] up by n lines.
+ * Rows at top get captured to scrollback (if scrolling full screen top).
+ * New blank lines appear at the bottom of the region.
+ */
+static void hw_text_scroll_region_up_locked(vt_state_t *vt, int top, int bottom, int n) {
+    int width = vt_get_width();
+    int lines;
+    int y, x;
     uint16_t empty;
-    uint16_t *last_line;
-    int visible_rows;
-    size_t x;
 
-    if (!vt) {
-        return;
+    if (!vt || top > bottom || n <= 0) return;
+    lines = bottom - top + 1;
+    if (n > lines) n = lines;
+
+    /* Capture scrollback only when scrolling from the very top */
+    if (top == 0)
+        vt_capture_scrollback_top(vt);
+
+    /* Move rows up by n within the region */
+    for (y = top; y <= bottom - n; y++) {
+        memcpy(&vt->buffer[y * width],
+               &vt->buffer[(y + n) * width],
+               (size_t)width * sizeof(uint16_t));
     }
 
-    visible_rows = vt_get_visible_height();
-    if (visible_rows <= 1) {
-        hw_text_fill_row_locked(vt, 0, ' ', vt->color);
-        return;
-    }
-
-    vt_capture_scrollback_top(vt);
-    line_size = (size_t)vt_get_width() * sizeof(uint16_t);
-    scroll_size = (size_t)(visible_rows - 1) * line_size;
-    memcpy(vt->buffer, (void *)((uintptr_t)vt->buffer + line_size), scroll_size);
-
+    /* Clear the bottom n rows */
     empty = hw_text_entry(' ', vt->color);
-    last_line = vt->buffer + ((size_t)(visible_rows - 1) * (size_t)vt_get_width());
-    for (x = 0; x < (size_t)vt_get_width(); x++) {
-        last_line[x] = empty;
+    for (y = bottom - n + 1; y <= bottom; y++) {
+        for (x = 0; x < width; x++)
+            vt->buffer[y * width + x] = empty;
     }
 
+    /* Sync to VGA if active */
     if (vt->id == vt_get_active() && vt_get_scrollback_view(vt) == 0) {
-        memcpy(vga_buffer, vt->buffer, (size_t)visible_rows * line_size);
+        size_t start = (size_t)(top * width);
+        size_t count = (size_t)((bottom - top + 1) * width);
+        memcpy(&vga_buffer[start], &vt->buffer[start], count * sizeof(uint16_t));
     }
 }
 
-static void hw_text_putentryat_locked(vt_state_t *vt, char c, uint8_t color, size_t x, size_t y) {
-    hw_text_write_cell_locked(vt, x, y, c, color);
+/*
+ * Scroll rows [top..bottom] down by n lines.
+ * New blank lines appear at the top of the region.
+ */
+static void hw_text_scroll_region_down_locked(vt_state_t *vt, int top, int bottom, int n) {
+    int width = vt_get_width();
+    int lines;
+    int y, x;
+    uint16_t empty;
+
+    if (!vt || top > bottom || n <= 0) return;
+    lines = bottom - top + 1;
+    if (n > lines) n = lines;
+
+    /* Move rows down by n within the region */
+    for (y = bottom; y >= top + n; y--) {
+        memcpy(&vt->buffer[y * width],
+               &vt->buffer[(y - n) * width],
+               (size_t)width * sizeof(uint16_t));
+    }
+
+    /* Clear the top n rows */
+    empty = hw_text_entry(' ', vt->color);
+    for (y = top; y < top + n; y++) {
+        for (x = 0; x < width; x++)
+            vt->buffer[y * width + x] = empty;
+    }
+
+    if (vt->id == vt_get_active() && vt_get_scrollback_view(vt) == 0) {
+        size_t start = (size_t)(top * width);
+        size_t count = (size_t)((bottom - top + 1) * width);
+        memcpy(&vga_buffer[start], &vt->buffer[start], count * sizeof(uint16_t));
+    }
 }
 
 static void hw_text_civil_from_days(int64_t z, int *year, unsigned *month, unsigned *day) {
@@ -616,18 +660,20 @@ static void hw_text_redraw_vt_locked(vt_state_t *vt) {
 
 static void cb_putc(char c) {
     vt_state_t *vt = current_vt_ctx;
-    int visible_rows;
+    int bottom;
 
     if (!vt) {
         return;
     }
 
-    visible_rows = vt_get_visible_height();
+    bottom = vt->scroll_bottom;
+
     if (c == '\n') {
         vt->col = 0;
-        if (++vt->row == visible_rows) {
-            vt->row--;
-            hw_text_scroll_locked(vt);
+        if (vt->row >= bottom) {
+            hw_text_scroll_region_up_locked(vt, vt->scroll_top, bottom, 1);
+        } else {
+            vt->row++;
         }
         return;
     }
@@ -645,9 +691,10 @@ static void cb_putc(char c) {
         vt->col = (vt->col + 8) & ~7;
         if (vt->col >= vt_get_width()) {
             vt->col = 0;
-            if (++vt->row == visible_rows) {
-                vt->row--;
-                hw_text_scroll_locked(vt);
+            if (vt->row >= bottom) {
+                hw_text_scroll_region_up_locked(vt, vt->scroll_top, bottom, 1);
+            } else {
+                vt->row++;
             }
         }
         return;
@@ -656,9 +703,10 @@ static void cb_putc(char c) {
     hw_text_putentryat_locked(vt, c, vt->color, (size_t)vt->col, (size_t)vt->row);
     if (++vt->col == vt_get_width()) {
         vt->col = 0;
-        if (++vt->row == visible_rows) {
-            vt->row--;
-            hw_text_scroll_locked(vt);
+        if (vt->row >= bottom) {
+            hw_text_scroll_region_up_locked(vt, vt->scroll_top, bottom, 1);
+        } else {
+            vt->row++;
         }
     }
 }
@@ -746,6 +794,177 @@ static void cb_get_color(uint8_t *fg, uint8_t *bg) {
     }
 }
 
+/* ---- Extended Callbacks ---- */
+
+static void cb_save_cursor(void) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    vt->saved_row = vt->row;
+    vt->saved_col = vt->col;
+    vt->saved_color = vt->color;
+}
+
+static void cb_restore_cursor(void) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    vt->row = vt->saved_row;
+    vt->col = vt->saved_col;
+    vt->color = vt->saved_color;
+    hw_text_update_cursor_locked(vt);
+}
+
+static void cb_set_cursor_visible(int visible) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    vt->cursor_visible = visible;
+    if (vt->id == vt_get_active())
+        hw_text_cursor_visible_locked(visible);
+}
+
+static void cb_insert_lines(int n) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    if (vt->row >= vt->scroll_top && vt->row <= vt->scroll_bottom)
+        hw_text_scroll_region_down_locked(vt, vt->row, vt->scroll_bottom, n);
+}
+
+static void cb_delete_lines(int n) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    if (vt->row >= vt->scroll_top && vt->row <= vt->scroll_bottom)
+        hw_text_scroll_region_up_locked(vt, vt->row, vt->scroll_bottom, n);
+}
+
+static void cb_insert_chars(int n) {
+    vt_state_t *vt = current_vt_ctx;
+    int width, col, row;
+    uint16_t empty;
+
+    if (!vt) return;
+    width = vt_get_width();
+    row = vt->row;
+    col = vt->col;
+
+    if (n > width - col) n = width - col;
+
+    /* Shift cells right */
+    for (int x = width - 1; x >= col + n; x--) {
+        vt->buffer[row * width + x] = vt->buffer[row * width + x - n];
+    }
+    /* Clear inserted cells */
+    empty = hw_text_entry(' ', vt->color);
+    for (int x = col; x < col + n && x < width; x++) {
+        vt->buffer[row * width + x] = empty;
+    }
+    /* Sync to VGA */
+    if (vt->id == vt_get_active() && vt_get_scrollback_view(vt) == 0) {
+        size_t start = (size_t)(row * width + col);
+        size_t count = (size_t)(width - col);
+        memcpy(&vga_buffer[start], &vt->buffer[start], count * sizeof(uint16_t));
+    }
+}
+
+static void cb_delete_chars(int n) {
+    vt_state_t *vt = current_vt_ctx;
+    int width, col, row;
+    uint16_t empty;
+
+    if (!vt) return;
+    width = vt_get_width();
+    row = vt->row;
+    col = vt->col;
+
+    if (n > width - col) n = width - col;
+
+    /* Shift cells left */
+    for (int x = col; x < width - n; x++) {
+        vt->buffer[row * width + x] = vt->buffer[row * width + x + n];
+    }
+    /* Clear vacated cells at end */
+    empty = hw_text_entry(' ', vt->color);
+    for (int x = width - n; x < width; x++) {
+        vt->buffer[row * width + x] = empty;
+    }
+    if (vt->id == vt_get_active() && vt_get_scrollback_view(vt) == 0) {
+        size_t start = (size_t)(row * width + col);
+        size_t count = (size_t)(width - col);
+        memcpy(&vga_buffer[start], &vt->buffer[start], count * sizeof(uint16_t));
+    }
+}
+
+static void cb_erase_chars(int n) {
+    vt_state_t *vt = current_vt_ctx;
+    int width, col, row;
+
+    if (!vt) return;
+    width = vt_get_width();
+    row = vt->row;
+    col = vt->col;
+
+    if (n > width - col) n = width - col;
+
+    for (int x = col; x < col + n; x++) {
+        hw_text_write_cell_locked(vt, (size_t)x, (size_t)row, ' ', vt->color);
+    }
+}
+
+static void cb_scroll_up(int n) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    hw_text_scroll_region_up_locked(vt, vt->scroll_top, vt->scroll_bottom, n);
+}
+
+static void cb_scroll_down(int n) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    hw_text_scroll_region_down_locked(vt, vt->scroll_top, vt->scroll_bottom, n);
+}
+
+static void cb_set_scroll_region(int top, int bottom) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    vt->scroll_top = top;
+    vt->scroll_bottom = bottom;
+}
+
+static void cb_index_down(void) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    if (vt->row >= vt->scroll_bottom) {
+        hw_text_scroll_region_up_locked(vt, vt->scroll_top, vt->scroll_bottom, 1);
+    } else {
+        vt->row++;
+    }
+    hw_text_update_cursor_locked(vt);
+}
+
+static void cb_reverse_index(void) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    if (vt->row <= vt->scroll_top) {
+        hw_text_scroll_region_down_locked(vt, vt->scroll_top, vt->scroll_bottom, 1);
+    } else {
+        vt->row--;
+    }
+    hw_text_update_cursor_locked(vt);
+}
+
+static void cb_reset(void) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    vt->row = 0;
+    vt->col = 0;
+    vt->color = 0x07;
+    vt->scroll_top = 0;
+    vt->scroll_bottom = vt_get_visible_height() - 1;
+    vt->cursor_visible = 1;
+    ansi_init(&vt->ansi);
+    hw_text_erase_display_locked(vt, 2);
+    if (vt->id == vt_get_active())
+        hw_text_cursor_visible_locked(1);
+    hw_text_update_cursor_locked(vt);
+}
+
 static const struct ansi_callbacks ansi_cb = {
     .putc = cb_putc,
     .set_color = cb_set_color,
@@ -756,6 +975,20 @@ static const struct ansi_callbacks ansi_cb = {
     .get_cursor = cb_get_cursor,
     .get_dimensions = cb_get_dimensions,
     .get_color = cb_get_color,
+    .save_cursor = cb_save_cursor,
+    .restore_cursor = cb_restore_cursor,
+    .set_cursor_visible = cb_set_cursor_visible,
+    .insert_lines = cb_insert_lines,
+    .delete_lines = cb_delete_lines,
+    .insert_chars = cb_insert_chars,
+    .delete_chars = cb_delete_chars,
+    .erase_chars = cb_erase_chars,
+    .scroll_up = cb_scroll_up,
+    .scroll_down = cb_scroll_down,
+    .set_scroll_region = cb_set_scroll_region,
+    .index_down = cb_index_down,
+    .reverse_index = cb_reverse_index,
+    .reset = cb_reset,
 };
 
 static int vt_tty_open(struct tty *tty) {

@@ -69,6 +69,12 @@ void vt_init(void) {
         vt_states[i].scrollback_head = 0;
         vt_states[i].scrollback_count = 0;
         vt_states[i].scrollback_view = 0;
+        vt_states[i].saved_row = 0;
+        vt_states[i].saved_col = 0;
+        vt_states[i].saved_color = 0x07;
+        vt_states[i].scroll_top = 0;
+        vt_states[i].scroll_bottom = VT_DEFAULT_HEIGHT - 2; /* visible rows - 1 */
+        vt_states[i].cursor_visible = 1;
         
         // Initialize ansi state
         ansi_init(&vt_states[i].ansi);

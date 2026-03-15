@@ -36,6 +36,18 @@ typedef struct vt_state {
     int col;
     uint8_t color; // Current attribute
     
+    // Saved Cursor (DECSC/DECRC / CSI s/u)
+    int saved_row;
+    int saved_col;
+    uint8_t saved_color;
+    
+    // Scroll Region (DECSTBM)
+    int scroll_top;    // 0-based inclusive
+    int scroll_bottom; // 0-based inclusive (default: height-1)
+    
+    // Cursor visibility
+    int cursor_visible; // 1=visible (default), 0=hidden
+    
     // ANSI Parser State
     struct ansi_ctx ansi;
     

@@ -11,6 +11,7 @@ void keyboard_handler(registers_t *regs);
 char keyboard_getc(void);
 void kbd_push(char c);
 void keyboard_set_keymap(const struct keymap *km);
+void keyboard_set_typematic(uint8_t delay, uint8_t rate);
 
 /* Modifier state (read-only for external consumers) */
 extern int kbd_shift;
