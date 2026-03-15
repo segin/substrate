@@ -439,8 +439,10 @@ static void init_storage_and_vfs(multiboot_info_t *mboot_info) {
     pci_init();
     isa_init();
     isa_probe_legacy();
+    scsi_init();
     floppy_init();
     ide_init();
+    ahci_init();
     virtio_init();
     register_boot_ramdisks(mboot_info);
     ntsync_init();
