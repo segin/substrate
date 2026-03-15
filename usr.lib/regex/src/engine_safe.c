@@ -354,6 +354,18 @@ static int charclass_match(const regex_charclass *cc, uint32_t cp, int icase, in
 
 static regex_node *parse_regex(parser *p);
 
+static regex_node *create_group_node(parser *p, regex_node *n) {
+    regex_node *g = node_new(NODE_GROUP);
+    if (!g) {
+        node_free(n);
+        p->err = REGEX_ERR_NOMEM;
+        return NULL;
+    }
+    g->left = n;
+    g->group_id = ++p->capture_count;
+    return g;
+}
+
 static regex_node *parse_group_extended(parser *p) {
     regex_node *n;
     parser_get(p);
@@ -366,17 +378,7 @@ static regex_node *parse_group_extended(parser *p) {
         p->err = REGEX_ERR_SYNTAX;
         return NULL;
     }
-    {
-        regex_node *g = node_new(NODE_GROUP);
-        if (!g) {
-            node_free(n);
-            p->err = REGEX_ERR_NOMEM;
-            return NULL;
-        }
-        g->left = n;
-        g->group_id = ++p->capture_count;
-        return g;
-    }
+    return create_group_node(p, n);
 }
 
 static regex_node *parse_group_basic(parser *p) {
@@ -392,17 +394,7 @@ static regex_node *parse_group_basic(parser *p) {
         p->err = REGEX_ERR_SYNTAX;
         return NULL;
     }
-    {
-        regex_node *g = node_new(NODE_GROUP);
-        if (!g) {
-            node_free(n);
-            p->err = REGEX_ERR_NOMEM;
-            return NULL;
-        }
-        g->left = n;
-        g->group_id = ++p->capture_count;
-        return g;
-    }
+    return create_group_node(p, n);
 }
 
 static regex_node *parse_charclass(parser *p) {
@@ -717,6 +709,16 @@ static regex_node *parse_escape(parser *p) {
     }
 }
 
+static regex_node *parse_simple_node(parser *p, node_type_t type) {
+    regex_node *n;
+    parser_get(p);
+    n = node_new(type);
+    if (!n) {
+        p->err = REGEX_ERR_NOMEM;
+    }
+    return n;
+}
+
 static regex_node *parse_atom(parser *p) {
     regex_node *n = NULL;
     uint8_t c;
@@ -751,30 +753,15 @@ static regex_node *parse_atom(parser *p) {
     }
 
     if (c == '.') {
-        parser_get(p);
-        n = node_new(NODE_DOT);
-        if (!n) {
-            p->err = REGEX_ERR_NOMEM;
-        }
-        return n;
+        return parse_simple_node(p, NODE_DOT);
     }
 
     if (c == '^') {
-        parser_get(p);
-        n = node_new(NODE_BOL);
-        if (!n) {
-            p->err = REGEX_ERR_NOMEM;
-        }
-        return n;
+        return parse_simple_node(p, NODE_BOL);
     }
 
     if (c == '$') {
-        parser_get(p);
-        n = node_new(NODE_EOL);
-        if (!n) {
-            p->err = REGEX_ERR_NOMEM;
-        }
-        return n;
+        return parse_simple_node(p, NODE_EOL);
     }
 
     if (c == '\\') {

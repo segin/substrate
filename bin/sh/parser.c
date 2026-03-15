@@ -126,18 +126,30 @@ char *ast_to_string(ast_node_t *node) {
         ast_simple_command_t *cmd = (ast_simple_command_t *)node;
         if (cmd->arg_count == 0) return strdup("(assignment)");
         size_t len = 0;
-        for (int i = 0; i < cmd->arg_count; i++) len += strlen(cmd->args[i]) + 1;
+
+        size_t static_lens[128];
+        size_t *arg_lens = static_lens;
+        if (cmd->arg_count > 128) {
+            arg_lens = malloc(cmd->arg_count * sizeof(size_t));
+            if (!arg_lens) return strdup("");
+        }
+
+        for (int i = 0; i < cmd->arg_count; i++) {
+            arg_lens[i] = strlen(cmd->args[i]);
+            len += arg_lens[i] + 1;
+        }
+
         char *res = malloc(len + 1);
         char *ptr = res;
         for (int i = 0; i < cmd->arg_count; i++) {
-            size_t arg_len = strlen(cmd->args[i]);
-            memcpy(ptr, cmd->args[i], arg_len);
-            ptr += arg_len;
+            memcpy(ptr, cmd->args[i], arg_lens[i]);
+            ptr += arg_lens[i];
             if (i < cmd->arg_count - 1) {
                 *ptr++ = ' ';
             }
         }
         *ptr = '\0';
+        if (arg_lens != static_lens) free(arg_lens);
         return res;
     }
     if (node->type == NODE_PIPELINE) {

@@ -2,6 +2,8 @@
 #include <kern/console.h>
 #include <string.h>
 
+void vnode_reclaim(struct vnode *vp);
+
 static int mock_vop_reclaim_called = 0;
 
 static int mock_vop_reclaim(struct vnode *vp, struct ucred *cred) {
@@ -11,64 +13,72 @@ static int mock_vop_reclaim(struct vnode *vp, struct ucred *cred) {
     return 0;
 }
 
-void test_vclean(void) {
+void run_vclean_tests(void) {
     kprint("\n=== TEST: vclean ===\n");
+    struct vnode *test_vp;
+    int error = getnewvnode("test_vclean", NULL, NULL, &test_vp);
+    if (error) {
+        kprintf("FAIL: getnewvnode failed: %d\n", error);
+        return;
+    }
 
-    struct vnode vp;
-    struct vnodeops vops;
-
-    /* Zero out structures */
-    memset(&vp, 0, sizeof(vp));
-    memset(&vops, 0, sizeof(vops));
-
-    /* Initialize interlock */
-    spinlock_init(&vp.v_interlock, "vnode_interlock");
-
-    /* Setup mock vnodeops */
-    vops.vop_reclaim = mock_vop_reclaim;
-
-    /* Initialize test values */
-    vp.v_data = (void *)0xdeadbeef;
-    vp.v_op = &vops;
-    vp.v_mount = (struct mount *)0x12345678;
-    vp.v_type = VREG;
-    vp.v_flag = VDOOMED | VROOT; /* VROOT should be preserved, VDOOMED cleared */
-
-    /* Reset mock state */
+    /* Setup mock state */
+    struct vnodeops mock_vops = {0};
+    mock_vops.vop_reclaim = mock_vop_reclaim;
+    test_vp->v_op = &mock_vops;
+    test_vp->v_data = (void *)0xdeadbeef;
+    test_vp->v_mount = (struct mount *)0xcafebabe;
+    test_vp->v_type = VREG;
+    test_vp->v_flag |= VDOOMED | VROOT; /* VROOT should be preserved, VDOOMED cleared */
     mock_vop_reclaim_called = 0;
 
-    /* Call function under test */
-    vclean(&vp, 0);
+    /* Call vclean */
+    vclean(test_vp, 0);
 
-    /* Verify VOP_RECLAIM was called */
-    if (mock_vop_reclaim_called) {
-        kprint("PASS: vop_reclaim was called\n");
-    } else {
+    /* Verify results */
+    if (mock_vop_reclaim_called != 1) {
         kprint("FAIL: vop_reclaim was not called\n");
-    }
-
-    /* Verify fs-specific state was cleared */
-    if (vp.v_data == NULL && vp.v_op == NULL && vp.v_mount == NULL) {
-        kprint("PASS: v_data, v_op, v_mount cleared\n");
     } else {
-        kprint("FAIL: fs-specific state not fully cleared\n");
+        kprint("PASS: vop_reclaim called\n");
     }
 
-    /* Verify type changed to VBAD */
-    if (vp.v_type == VBAD) {
-        kprint("PASS: v_type changed to VBAD\n");
+    if (test_vp->v_data != NULL) {
+        kprint("FAIL: v_data not cleared\n");
     } else {
-        kprintf("FAIL: v_type is %d instead of VBAD (%d)\n", vp.v_type, VBAD);
+        kprint("PASS: v_data cleared\n");
     }
 
-    /* Verify VFREEING and VDOOMED are cleared, VROOT preserved */
-    if ((vp.v_flag & VFREEING) == 0 && (vp.v_flag & VDOOMED) == 0) {
-        kprint("PASS: VFREEING and VDOOMED flags cleared\n");
+    if (test_vp->v_op != NULL) {
+        kprint("FAIL: v_op not cleared\n");
     } else {
-        kprintf("FAIL: VFREEING or VDOOMED not cleared. v_flag = 0x%x\n", vp.v_flag);
+        kprint("PASS: v_op cleared\n");
     }
 
-    if ((vp.v_flag & VROOT) != 0) {
+    if (test_vp->v_mount != NULL) {
+        kprint("FAIL: v_mount not cleared\n");
+    } else {
+        kprint("PASS: v_mount cleared\n");
+    }
+
+    if (test_vp->v_type != VBAD) {
+        kprint("FAIL: v_type not VBAD\n");
+    } else {
+        kprint("PASS: v_type set to VBAD\n");
+    }
+
+    if (test_vp->v_flag & VFREEING) {
+        kprint("FAIL: VFREEING flag still set\n");
+    } else {
+        kprint("PASS: VFREEING flag cleared\n");
+    }
+
+    if (test_vp->v_flag & VDOOMED) {
+        kprint("FAIL: VDOOMED flag still set\n");
+    } else {
+        kprint("PASS: VDOOMED flag cleared\n");
+    }
+
+    if ((test_vp->v_flag & VROOT) != 0) {
         kprint("PASS: VROOT flag preserved\n");
     } else {
         kprint("FAIL: VROOT flag not preserved\n");
@@ -76,18 +86,27 @@ void test_vclean(void) {
 
     /* Test path where vop_reclaim is NULL */
     kprint("--- Testing without vop_reclaim ---\n");
+    
+    /* Get another vnode for second test */
+    struct vnode *test_vp2;
+    error = getnewvnode("test_vclean2", NULL, NULL, &test_vp2);
+    if (error) {
+        kprintf("FAIL: getnewvnode 2 failed: %d\n", error);
+        vnode_reclaim(test_vp);
+        return;
+    }
 
-    /* Re-initialize for second test */
-    memset(&vops, 0, sizeof(vops));
-    vp.v_data = (void *)0xbeefdead;
-    vp.v_op = &vops; /* vop_reclaim is now NULL */
-    vp.v_mount = (struct mount *)0x87654321;
-    vp.v_type = VDIR;
-    vp.v_flag = VDOOMED;
+    test_vp2->v_op = &mock_vops; /* vop_reclaim is NOT NULL yet */
+    struct vnodeops empty_vops = {0};
+    test_vp2->v_op = &empty_vops; /* Now vop_reclaim IS NULL */
+    test_vp2->v_data = (void *)0xbeefdead;
+    test_vp2->v_mount = (struct mount *)0x87654321;
+    test_vp2->v_type = VDIR;
+    test_vp2->v_flag |= VDOOMED;
     mock_vop_reclaim_called = 0;
 
     /* Call function under test */
-    vclean(&vp, 0);
+    vclean(test_vp2, 0);
 
     /* Verify VOP_RECLAIM was NOT called */
     if (!mock_vop_reclaim_called) {
@@ -97,11 +116,14 @@ void test_vclean(void) {
     }
 
     /* Verify fs-specific state was cleared */
-    if (vp.v_data == NULL && vp.v_op == NULL && vp.v_mount == NULL && vp.v_type == VBAD) {
+    if (test_vp2->v_data == NULL && test_vp2->v_op == NULL && test_vp2->v_mount == NULL && test_vp2->v_type == VBAD) {
         kprint("PASS: fs-specific state cleared (NULL vop_reclaim case)\n");
     } else {
         kprint("FAIL: fs-specific state not cleared (NULL vop_reclaim case)\n");
     }
+
+    vnode_reclaim(test_vp);
+    vnode_reclaim(test_vp2);
 
     kprint("=== TEST COMPLETE ===\n");
 }
