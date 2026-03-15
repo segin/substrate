@@ -45,5 +45,6 @@
 #define ELOOP        62 /* Too many symbolic links encountered */
 #define EOPNOTSUPP   95 /* Operation not supported on transport endpoint */
 #define ENOTSUP      EOPNOTSUPP
+#define EDEFER      517 /* Driver probe should be retried later */
 
 #endif

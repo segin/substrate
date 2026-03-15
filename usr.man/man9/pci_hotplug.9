@@ -1,0 +1,24 @@
+.Dd March 12, 2026
+.Dt PCI_HOTPLUG 9
+.Os
+.Sh NAME
+.Nm pci_hotplug_poll ,
+.Nm pci_hotplug_add ,
+.Nm pci_hotplug_remove
+.Nd poll and reconcile PCI device hotplug state
+.Sh SYNOPSIS
+.In kern/pci.h
+.Ft void
+.Fn pci_hotplug_poll void
+.Ft int
+.Fn pci_hotplug_add "uint8_t bus" "uint8_t slot"
+.Ft int
+.Fn pci_hotplug_remove "pci_device_t *dev"
+.Sh DESCRIPTION
+These functions reconcile the PCI device list with current configuration
+space visibility and create or remove driver-model devices accordingly.
+.Sh RETURN VALUES
+The add and remove functions return 0 or a positive device count on
+success, and a negative error code on failure.
+.Sh SEE ALSO
+.Xr pci_scan 9

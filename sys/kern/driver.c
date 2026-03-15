@@ -6,9 +6,12 @@
 
 #include <sys/types.h>
 #include <sys/errno.h>
+#include <sys/kobject.h>
 #include <sys/lock.h>
 #include <string.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <kern/console.h>
 
 #include "driver.h"
 #include "bus.h"
@@ -72,8 +75,16 @@ static int probe_device(struct driver *drv, struct device *dev) {
     /* 3. Probe */
     if (drv->probe) {
         ret = drv->probe(dev);
-        if (ret != 0)
+        if (ret != 0) {
+            char buf[160];
+            snprintf(buf, sizeof(buf),
+                     "driver: probe %s for %s failed: %d\n",
+                     drv->name ? drv->name : "(unnamed)",
+                     dev->name[0] ? dev->name : "(unnamed)",
+                     ret);
+            kprint(buf);
             return 0;
+        }
     }
 
     return 1;
@@ -151,7 +162,9 @@ int driver_register(struct driver *drv, struct bus_type *bus) {
     while (curr_dev) {
         /* Probe this device against our new driver */
         /* Note: probe_device is internal helper */
-        probe_device(drv, curr_dev);
+        if (probe_device(drv, curr_dev)) {
+            (void)driver_attach(drv, curr_dev);
+        }
         
         /* Move to next */
         spinlock_acquire(&bus->lock);
@@ -218,6 +231,9 @@ int driver_attach(struct driver *drv, struct device *dev) {
     if (dev->bus) {
         spinlock_release(&dev->bus->lock);
     }
+    if (dev->bus) {
+        kobject_uevent("bind", dev->bus->name, dev->name);
+    }
     
     return 0;
 }
@@ -264,7 +280,10 @@ int driver_detach(struct device *dev) {
     if (dev->bus) {
         spinlock_release(&dev->bus->lock);
     }
-
+    if (dev->bus) {
+        kobject_uevent("unbind", dev->bus->name, dev->name);
+    }
+    
     return 0;
 }
 

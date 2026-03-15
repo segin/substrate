@@ -39,6 +39,21 @@ Copy-on-Write memory statistics: page faults, COW duplications, TLB flushes.
 .TP
 .B /proc/filesystems
 List of supported filesystems.
+.TP
+.B /proc/ioports
+Allocated I/O port resource tree exported by the kernel resource manager.
+.TP
+.B /proc/iomem
+Allocated MMIO resource tree exported by the kernel resource manager.
+.TP
+.B /proc/pci
+Enumerated PCI devices as seen by the kernel bus layer.
+.TP
+.B /proc/devtree
+Registered kernel bus/device hierarchy dump.
+.TP
+.B /proc/device-events
+Recent kernel device-model add, remove, bind, and unbind events.
 .SS Per-Process Directories
 For each running process with PID
 .IR n ,

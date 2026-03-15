@@ -10,6 +10,10 @@ static int mock_set_color_calls = 0;
 static uint8_t mock_fg = 0;
 static uint8_t mock_bg = 0;
 static int mock_clear_screen_calls = 0;
+static int mock_erase_display_calls = 0;
+static int mock_last_erase_display_mode = -1;
+static int mock_erase_line_calls = 0;
+static int mock_last_erase_line_mode = -1;
 static int mock_move_cursor_calls = 0;
 static int mock_row = 0;
 static int mock_col = 0;
@@ -30,6 +34,16 @@ static void mock_set_color(uint8_t fg, uint8_t bg) {
 
 static void mock_clear_screen(void) {
     mock_clear_screen_calls++;
+}
+
+static void mock_erase_display(int mode) {
+    mock_erase_display_calls++;
+    mock_last_erase_display_mode = mode;
+}
+
+static void mock_erase_line(int mode) {
+    mock_erase_line_calls++;
+    mock_last_erase_line_mode = mode;
 }
 
 static void mock_move_cursor(int row, int col) {
@@ -57,6 +71,8 @@ static struct ansi_callbacks callbacks = {
     .putc = mock_putc,
     .set_color = mock_set_color,
     .clear_screen = mock_clear_screen,
+    .erase_display = mock_erase_display,
+    .erase_line = mock_erase_line,
     .move_cursor = mock_move_cursor,
     .get_cursor = mock_get_cursor,
     .get_dimensions = mock_get_dimensions,
@@ -71,6 +87,10 @@ static void reset_mocks(void) {
     mock_fg = 7;
     mock_bg = 0;
     mock_clear_screen_calls = 0;
+    mock_erase_display_calls = 0;
+    mock_last_erase_display_mode = -1;
+    mock_erase_line_calls = 0;
+    mock_last_erase_line_mode = -1;
     mock_move_cursor_calls = 0;
     mock_row = 0;
     mock_col = 0;
@@ -135,12 +155,8 @@ bool test_ansi_parsing(void) {
         printf("FAIL: Clear screen calls expected 1, got %d\n", mock_clear_screen_calls);
         return false;
     }
-    if (mock_move_cursor_calls != 1) {
-        printf("FAIL: Move cursor calls expected 1 (after clear), got %d\n", mock_move_cursor_calls);
-        return false;
-    }
-    if (mock_row != 0 || mock_col != 0) {
-        printf("FAIL: Cursor pos expected 0,0, got %d,%d\n", mock_row, mock_col);
+    if (mock_move_cursor_calls != 0) {
+        printf("FAIL: Move cursor calls expected 0 after clear, got %d\n", mock_move_cursor_calls);
         return false;
     }
 
@@ -154,6 +170,32 @@ bool test_ansi_parsing(void) {
     }
     if (mock_row != 11 || mock_col != 33) { // 0-based index
         printf("FAIL: Row/Col expected 11,33, got %d,%d\n", mock_row, mock_col);
+        return false;
+    }
+
+    // Test 6: Default erase display should not be treated as full clear
+    reset_mocks();
+    mock_row = 7;
+    mock_col = 9;
+    ansi_init(&ctx);
+    feed_string(&ctx, "\x1b[J");
+    if (mock_clear_screen_calls != 0) {
+        printf("FAIL: Clear screen calls expected 0 for ESC[J, got %d\n", mock_clear_screen_calls);
+        return false;
+    }
+    if (mock_erase_display_calls != 1 || mock_last_erase_display_mode != 0) {
+        printf("FAIL: Erase display expected one mode-0 call, got %d mode %d\n",
+               mock_erase_display_calls, mock_last_erase_display_mode);
+        return false;
+    }
+
+    // Test 7: Erase line should route to erase_line callback
+    reset_mocks();
+    ansi_init(&ctx);
+    feed_string(&ctx, "\x1b[2K");
+    if (mock_erase_line_calls != 1 || mock_last_erase_line_mode != 2) {
+        printf("FAIL: Erase line expected one mode-2 call, got %d mode %d\n",
+               mock_erase_line_calls, mock_last_erase_line_mode);
         return false;
     }
 

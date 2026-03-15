@@ -1,0 +1,19 @@
+.Dd March 12, 2026
+.Dt PM_SUSPEND 9
+.Os Substrate
+.Sh NAME
+.Nm pm_suspend
+.Nd suspend and resume device-model trees
+.Sh SYNOPSIS
+.In kern/device.h
+.Ft int
+.Fn device_suspend_all "pm_state_t state"
+.Ft int
+.Fn device_resume_all void
+.Sh DESCRIPTION
+.Fn device_suspend_all
+walks the registered bus trees and suspends root devices recursively.
+.Fn device_resume_all
+performs the inverse traversal and resumes suspended devices.
+.Sh SEE ALSO
+.Xr device_pm 9

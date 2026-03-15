@@ -22,6 +22,7 @@ int64_t get_uptime_ms(void);
 uint32_t get_hz(void);
 
 // Timer tick handlers (called from PIT/APIC interrupt)
+void timer_init(void);
 void timer_tick(void);
 void timer_tick_context(int is_usermode);
 

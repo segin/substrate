@@ -1,0 +1,24 @@
+.Dd March 12, 2026
+.Dt PCI_BAR 9
+.Os
+.Sh NAME
+.Nm pci_bar_type ,
+.Nm pci_bar_size
+.Nd inspect PCI base address registers
+.Sh SYNOPSIS
+.In kern/pci.h
+.Ft int
+.Fn pci_bar_type "pci_device_t *dev" "int bar"
+.Ft size_t
+.Fn pci_bar_size "pci_device_t *dev" "int bar"
+.Sh DESCRIPTION
+The
+.Fn pci_bar_type
+function classifies a PCI BAR as I/O, 32-bit MMIO, or 64-bit MMIO.
+The
+.Fn pci_bar_size
+function probes the BAR size by temporarily writing all-ones and restoring the
+original register value.
+.Sh SEE ALSO
+.Xr pci_device 9 ,
+.Xr pci_iomap 9

@@ -1,0 +1,48 @@
+.\" Copyright (c) 2026 Kirn Gill II <segin2005@gmail.com>
+.\" All rights reserved.
+.\"
+.Dd March 12, 2026
+.Dt DEVICE_PM 9
+.Os Substrate
+.Sh NAME
+.Nm device_suspend ,
+.Nm device_resume
+.Nd suspend and resume a device tree
+.Sh SYNOPSIS
+.In kern/device.h
+.Ft int
+.Fn device_suspend "struct device *dev" "pm_state_t state"
+.Ft int
+.Fn device_resume "struct device *dev"
+.Sh DESCRIPTION
+The
+.Fn device_suspend
+function recursively suspends a device subtree.
+Child devices are suspended before their parent so downstream devices quiesce
+before shared upstream transport state is powered down.
+.Pp
+The
+.Fn device_resume
+function recursively resumes a device subtree.
+The parent device is resumed before its children so downstream devices see an
+already-restored upstream path.
+.Pp
+If present, the bound driver's
+.Va suspend
+and
+.Va resume
+callbacks are invoked for each device in the required order.
+.Sh RETURN VALUES
+These functions return 0 on success or a non-zero error from the first failing
+driver callback.
+Passing a
+.Dv NULL
+device returns
+.Dv -EINVAL .
+.Sh SEE ALSO
+.Xr device 9 ,
+.Xr driver 9
+.Sh HISTORY
+The
+.Nm
+interfaces first appeared in Substrate.

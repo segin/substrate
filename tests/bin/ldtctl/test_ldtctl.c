@@ -5,32 +5,8 @@
 #include <assert.h>
 #include <unistd.h>
 #include <stdarg.h>
-
-#define _SYS_SYSCALL_H
-#define SYS_MODIFY_LDT 123
-
-// LDT defines from Substrate
-#define LDT_ENTRIES 8192
-#define LDT_ENTRY_SIZE 8
-#define LDT_READ 0
-#define LDT_WRITE 1
-
-// We need the fallback definition of user_desc without sys/ldt.h
-#define _SYS_LDT_H
-struct user_desc {
-    unsigned int  entry_number;
-    unsigned int  base_addr;
-    unsigned int  limit;
-    unsigned int  seg_32bit:1;
-    unsigned int  contents:2;
-    unsigned int  read_exec_only:1;
-    unsigned int  limit_in_pages:1;
-    unsigned int  seg_not_present:1;
-    unsigned int  useable:1;
-#ifdef __x86_64__
-    unsigned int  lm:1;
-#endif
-};
+#include <sys/ldt.h>
+#include <sys/syscall.h>
 
 // Mock LDT table
 static uint8_t mock_ldt[LDT_ENTRIES * LDT_ENTRY_SIZE];
@@ -114,21 +90,20 @@ void test_write_and_read(void) {
     int fd = mkstemp(temp_file);
     assert(fd != -1);
     
-    int old_stdout = dup(1);
     dup2(fd, 1);
     
     char *argv_read[] = {"ldtctl", "read", "1"};
     ldtctl_main(3, argv_read);
     
     fflush(stdout);
-    dup2(old_stdout, 1);
-    close(old_stdout);
-    
-    lseek(fd, 0, SEEK_SET);
+    close(fd);
+
+    FILE *fp = fopen(temp_file, "r");
+    assert(fp != NULL);
     char buf[1024];
     memset(buf, 0, sizeof(buf));
-    read(fd, buf, sizeof(buf)-1);
-    close(fd);
+    fread(buf, 1, sizeof(buf) - 1, fp);
+    fclose(fp);
     unlink(temp_file);
     
     assert(strstr(buf, "Base=0x12345678") != NULL);
@@ -142,7 +117,7 @@ void test_write_and_read(void) {
     
     assert(entry[0] == 0 && entry[1] == 0);
     
-    printf("ldtctl integration tests passed.\n");
+    fprintf(stderr, "ldtctl integration tests passed.\n");
 }
 
 int main(void) {

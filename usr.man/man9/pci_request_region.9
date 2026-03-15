@@ -1,0 +1,21 @@
+.Dd March 12, 2026
+.Dt PCI_REQUEST_REGION 9
+.Os
+.Sh NAME
+.Nm pci_request_region
+.Nd reserve the address range described by a PCI BAR
+.Sh SYNOPSIS
+.In kern/pci.h
+.Ft int
+.Fn pci_request_region "pci_device_t *dev" "int bar" "const char *name"
+.Sh DESCRIPTION
+The
+.Fn pci_request_region
+function reserves the I/O or MMIO range described by the selected PCI BAR
+using the generic resource manager.
+.Sh RETURN VALUES
+Returns 0 on success and -1 on failure.
+.Sh SEE ALSO
+.Xr pci_bar 9 ,
+.Xr request_region 9 ,
+.Xr request_mem_region 9

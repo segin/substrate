@@ -33,4 +33,7 @@
 #define F_GETFL     3
 #define F_SETFL     4
 
+/* File descriptor flags */
+#define FD_CLOEXEC  1
+
 #endif /* _SYS_FCNTL_H */

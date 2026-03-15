@@ -34,6 +34,7 @@ process_t *current_process = NULL;
 // Mock console_get_node
 struct fs_node;
 struct fs_node *console_get_node(void) { return NULL; }
+int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
 
 // Mock vfs_register_filesystem
 struct filesystem;
@@ -142,6 +143,38 @@ int main() {
         return 1;
     }
     printf("PASS: Character device 'input/mouse0' found\n");
+
+    if (devfs_register_alias("by-id/test-mouse", "/dev/input/mouse0") != 0) {
+        printf("FAIL: alias registration failed\n");
+        return 1;
+    }
+    devfs_entry_t *by_id = devfs_find_child(root_entry, "by-id");
+    devfs_entry_t *alias = by_id ? devfs_find_child(by_id, "test-mouse") : NULL;
+    if (!alias || !alias->node || alias->node->readlink == NULL) {
+        printf("FAIL: alias node missing or invalid\n");
+        return 1;
+    }
+    char linkbuf[128];
+    int linklen = alias->node->readlink(alias->node, linkbuf, sizeof(linkbuf));
+    if (linklen <= 0 || strncmp(linkbuf, "/dev/input/mouse0", (size_t)linklen) != 0) {
+        printf("FAIL: alias target incorrect\n");
+        return 1;
+    }
+    printf("PASS: Alias /dev/by-id/test-mouse points to /dev/input/mouse0\n");
+
+    devfs_unregister_alias("by-id/test-mouse");
+    if (devfs_find_child(by_id, "test-mouse") != NULL) {
+        printf("FAIL: alias removal failed\n");
+        return 1;
+    }
+    printf("PASS: Alias removal works\n");
+
+    devfs_unregister_device(mouse_node);
+    if (devfs_find_child(input, "mouse0") != NULL) {
+        printf("FAIL: device removal failed\n");
+        return 1;
+    }
+    printf("PASS: Device removal works\n");
 
     printf("All tests passed!\n");
     return 0;

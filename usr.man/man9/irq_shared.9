@@ -1,0 +1,17 @@
+.Dd March 12, 2026
+.Dt IRQ_SHARED 9
+.Os
+.Sh NAME
+.Nm irq_dispatch
+.Nd dispatch shared IRQ handlers
+.Sh SYNOPSIS
+.In sys/irq.h
+.Ft int
+.Fn irq_dispatch "unsigned int irq" "void *frame"
+.Sh DESCRIPTION
+The
+.Fn irq_dispatch
+function invokes all handlers currently registered on an IRQ line and
+returns a non-zero value if any handler reports the interrupt as handled.
+.Sh SEE ALSO
+.Xr request_irq 9

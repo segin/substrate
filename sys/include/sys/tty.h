@@ -9,6 +9,9 @@
 
 #define TTY_BUF_SIZE 2048
 
+#define TTY_INPUT_BREAK        0x01U
+#define TTY_INPUT_PARITY_ERROR 0x02U
+
 struct tty;
 
 typedef struct tty_buffer {
@@ -67,16 +70,19 @@ struct tty {
     spinlock_t lock;
     int delct; // Delimiter count in raw_buf
     int canon_len; // Current canonical line length for echo/editing
+    int output_col; // Current output column for tab/newline expansion
     
     // Wait queues
     void *read_wait;
     void *write_wait;
+    void *poll_wait;
     
     // State flags
     int stopped; // Output stopped (IXON)
     int input_stopped; // Input stopped (IXOFF)
     
     void *driver_data; // Private driver data
+    struct fs_node *devnode; // Published device node (for direct stdio attachment)
 };
 
 // API
@@ -84,6 +90,7 @@ void tty_init(void);
 struct tty *tty_alloc(struct tty_driver *driver, int idx);
 void tty_free(struct tty *tty);
 void tty_register_device(struct tty *tty, char *name);
+struct tty *tty_get(int idx);
 
 // File Operations (to be called by VFS wrapper)
 int tty_open(struct tty *tty);
@@ -93,9 +100,11 @@ int tty_write(struct tty *tty, const char *buf, int len);
 int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg);
 int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg);
 int tty_poll(struct tty *tty, void *waiter);
+int tty_check_change(struct tty *tty);
 
 // Input processing (called by driver interrupt/worker)
 void tty_flip_buffer_push(struct tty *tty, char c);
+void tty_flip_buffer_push_status(struct tty *tty, char c, uint32_t status);
 
 // Helper
 void tty_default_termios(struct termios *t);

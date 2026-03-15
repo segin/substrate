@@ -34,6 +34,8 @@ Start address or index of the resource range (inclusive).
 End address or index of the resource range (inclusive).
 .It Vt uint32_t flags
 Resource attribute flags (e.g., shared, reserved).
+.It Vt const char *name
+Human-readable reservation label.
 .It Vt struct resource *parent
 Pointer to the parent resource container.
 .It Vt struct resource *sibling
@@ -51,6 +53,18 @@ Returns true if range r1 fully contains range r2.
 Returns true if range r1 overlaps with range r2.
 .It Fn resource_size_t resource_size "struct resource *r"
 Returns the size of the resource range.
+.It Fn void resource_init void
+Initializes the root I/O and MMIO resource trees.
+.It Fn "struct resource *" resource_root "uint32_t type"
+Returns the root resource node for the requested type.
+.It Fn "struct resource *" request_region "resource_size_t start" "resource_size_t n" "const char *name"
+Reserves an I/O port range.
+.It Fn void release_region "resource_size_t start" "resource_size_t n"
+Releases an I/O port range.
+.It Fn "struct resource *" request_mem_region "resource_size_t start" "resource_size_t n" "const char *name"
+Reserves an MMIO range.
+.It Fn void release_mem_region "resource_size_t start" "resource_size_t n"
+Releases an MMIO range.
 .El
 .Sh SEE ALSO
 .Xr device 9

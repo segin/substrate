@@ -1,0 +1,48 @@
+.\" Process this file with
+.\" groff -man -Tascii uart.4
+.\"
+.TH UART 4 "March 2026" "Substrate Kernel" "Device Drivers Manual"
+.SH NAME
+uart \- ISA serial ports
+.SH SYNOPSIS
+.B /dev/comm/serial0
+.br
+.B /dev/comm/serial1
+.br
+.B /dev/comm/serial2
+.br
+.B /dev/comm/serial3
+.SH DESCRIPTION
+The
+.B uart
+driver exposes detected ISA-compatible serial ports under
+.BR /dev/comm/serial0
+through
+.BR /dev/comm/serial3 .
+These map to COM1 through COM4 respectively.
+.PP
+Substrate does not publish serial device nodes for ports that do not appear to
+exist. Once ISA legacy discovery has run, the UART driver uses the ISA bus
+model to decide which serial ports to register. During early boot console
+selection, the kernel falls back to a direct UART scratch-register probe so
+.B console=serialN
+and
+.B serial_debug
+can fail cleanly when the selected port is absent.
+.SH FILES
+.TP
+.B /dev/comm/serial0
+COM1, if present.
+.TP
+.B /dev/comm/serial1
+COM2, if present.
+.TP
+.B /dev/comm/serial2
+COM3, if present.
+.TP
+.B /dev/comm/serial3
+COM4, if present.
+.SH SEE ALSO
+.BR console (4),
+.BR tty (4),
+.BR isa (9)

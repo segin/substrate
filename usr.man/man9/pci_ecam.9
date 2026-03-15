@@ -1,0 +1,22 @@
+.Dd March 12, 2026
+.Dt PCI_ECAM 9
+.Os
+.Sh NAME
+.Nm pci_ecam_map
+.Nd map PCIe ECAM configuration space for a device function
+.Sh SYNOPSIS
+.In kern/pci.h
+.Ft void *
+.Fn pci_ecam_map "uint16_t segment" "uint8_t bus" "uint8_t slot" "uint8_t func"
+.Sh DESCRIPTION
+The
+.Fn pci_ecam_map
+function returns a pointer to the base of the extended configuration
+space window for the selected PCIe function when an ECAM aperture has
+been configured.
+.Sh RETURN VALUES
+The function returns a configuration-space pointer on success and
+.Dv NULL
+if no matching ECAM window exists.
+.Sh SEE ALSO
+.Xr pci_config 9

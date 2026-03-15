@@ -2,6 +2,7 @@
 #define _IDE_H
 
 #include <stdint.h>
+#include <stddef.h>
 
 /*
  * ATA/IDE Driver Header
@@ -10,7 +11,7 @@
  * - PIO Mode transfers (LBA28 and LBA48)
  * - DMA transfers (Bus Master IDE)
  * - ATAPI packet commands
- * - Primary/Secondary channels with Master/Slave drives
+ * - Up to four channels with Master/Slave drives
  */
 
 /*
@@ -20,8 +21,21 @@
  */
 #define ATA_PRIMARY_IO      0x1F0   /* Primary channel I/O base */
 #define ATA_SECONDARY_IO    0x170   /* Secondary channel I/O base */
+#define ATA_TERTIARY_IO     0x1E8   /* Tertiary channel I/O base */
+#define ATA_QUATERNARY_IO   0x168   /* Quaternary channel I/O base */
 #define ATA_PRIMARY_CTRL    0x3F6   /* Primary channel control base */
 #define ATA_SECONDARY_CTRL  0x376   /* Secondary channel control base */
+#define ATA_TERTIARY_CTRL   0x3EE   /* Tertiary channel control base */
+#define ATA_QUATERNARY_CTRL 0x36E   /* Quaternary channel control base */
+
+#define ATA_PRIMARY_IRQ      14
+#define ATA_SECONDARY_IRQ    15
+#define ATA_TERTIARY_IRQ     11
+#define ATA_QUATERNARY_IRQ   10
+
+#define MAX_IDE_CHANNELS 4
+#define MAX_IDE_DEVICES  (MAX_IDE_CHANNELS * 2)
+#define IDE_DEVICE_INDEX(channel, drive) (((channel) * 2) + ((drive) & 1))
 
 /*
  * ============================================================
@@ -66,6 +80,7 @@
 
 /* ATAPI */
 #define ATA_CMD_PACKET         0xA0  /* ATAPI Packet Command */
+#define ATA_CMD_SET_FEATURES   0xEF  /* Set Features */
 
 /* Cache/Flush */
 #define ATA_CMD_CACHE_FLUSH    0xE7  /* Flush Cache */
@@ -107,6 +122,11 @@
 #define ATA_CTRL_SRST      0x04  /* Software Reset */
 #define ATA_CTRL_NIEN      0x02  /* Interrupt Enable (inverted) */
 #define ATA_CTRL_HOB       0x80  /* High Order Byte (LBA48) */
+
+/* SET FEATURES subcommands / transfer mode encodings */
+#define ATA_FEAT_SET_TRANSFER_MODE 0x03
+#define ATA_XFER_MODE_MWDMA_BASE   0x20
+#define ATA_XFER_MODE_UDMA_BASE    0x40
 
 /*
  * ============================================================
@@ -160,9 +180,6 @@ typedef struct {
     uint8_t  irq;          /* IRQ number (14 or 15) */
     uint8_t  no_intr;      /* Interrupt disable flag */
     uint8_t  dma_capable;  /* Bus Master DMA detected */
-    
-    /* PRDT for this channel (aligned to 4 bytes, 64KB boundary safe) */
-    prdt_entry_t prdt[MAX_PRD_ENTRIES] __attribute__((aligned(4)));
 } ide_channel_t;
 
 /*
@@ -173,15 +190,35 @@ typedef struct {
 typedef struct {
     uint8_t  present;      /* Device present */
     uint8_t  type;         /* 0=ATA, 1=ATAPI */
-    uint8_t  channel;      /* 0=Primary, 1=Secondary */
+    uint8_t  channel;      /* 0=Primary, 1=Secondary, 2=Tertiary, 3=Quaternary */
     uint8_t  drive;        /* 0=Master, 1=Slave */
     uint16_t signature;    /* Drive signature */
     uint16_t capabilities; /* Capabilities from IDENTIFY */
     uint32_t command_sets; /* Supported command sets */
     uint64_t size;         /* Size in sectors */
+    char     serial[21];   /* Serial string */
+    char     firmware[9];  /* Firmware revision string */
     char     model[41];    /* Model string */
+    uint32_t feature_flags;/* Parsed feature bits */
+    uint8_t  mwdma_modes;  /* Supported multiword DMA modes */
+    uint8_t  udma_modes;   /* Supported ultra DMA modes */
     uint8_t  dma_mode;     /* DMA mode (0=none, 1=UDMA, 2=MWDMA) */
+    uint8_t  dma_forced_pio; /* Runtime DMA demotion after controller faults */
+    uint8_t  reset_recovery_seen; /* A prior channel reset recovered this device once */
+    uint8_t  offline;      /* Driver marked device offline after repeated errors */
 } ide_device_t;
+
+#define IDE_FEATURE_DMA    0x00000001U
+#define IDE_FEATURE_LBA48  0x00000002U
+#define IDE_FEATURE_SMART  0x00000004U
+#define IDE_FEATURE_NCQ    0x00000008U
+#define IDE_FEATURE_TRIM   0x00000010U
+
+#define IDE_TIMEOUT_READY_MS     5000
+#define IDE_TIMEOUT_DATA_MS      10000
+#define IDE_TIMEOUT_IDENTIFY_MS  30000
+#define IDE_TIMEOUT_PACKET_MS    30000
+#define IDE_TIMEOUT_DMA_MS       30000
 
 /*
  * ============================================================
@@ -192,6 +229,33 @@ typedef struct {
 /* Initialization */
 void ide_init(void);
 void ide_dma_init(uint16_t bm_base_primary, uint16_t bm_base_secondary);
+void ide_dma_init_pair(uint8_t base_channel, uint16_t bm_base_primary,
+                       uint16_t bm_base_secondary);
+size_t ide_pci_configure_channels(ide_channel_t channels[MAX_IDE_CHANNELS],
+                                  uint8_t irq_shared[MAX_IDE_CHANNELS]);
+
+static inline int ide_channel_index_from_io(uint16_t bus, uint8_t *channel) {
+    if (channel == NULL) {
+        return -1;
+    }
+
+    switch (bus) {
+    case ATA_PRIMARY_IO:
+        *channel = 0;
+        return 0;
+    case ATA_SECONDARY_IO:
+        *channel = 1;
+        return 0;
+    case ATA_TERTIARY_IO:
+        *channel = 2;
+        return 0;
+    case ATA_QUATERNARY_IO:
+        *channel = 3;
+        return 0;
+    default:
+        return -1;
+    }
+}
 
 /* PIO Transfers */
 int ide_read_sectors(uint16_t bus, uint8_t drive, uint32_t lba, 
@@ -210,10 +274,16 @@ int ide_dma_write(uint8_t channel, uint8_t drive, uint64_t lba,
                   uint16_t count, const void *buffer);
 int ide_dma_setup(uint16_t bus, uint8_t drive, uint64_t lba, 
                   uint16_t count, void *phys_addr, int write);
+int ide_prdt_build_entries(prdt_entry_t *prdt, size_t max_entries,
+                           uint32_t phys_addr, uint32_t byte_count);
 
 /* Identification */
 int ide_identify(uint16_t bus, uint8_t drive, void *buffer);
 int ide_identify_atapi(uint16_t bus, uint8_t drive, void *buffer);
+void ide_parse_identify_data(ide_device_t *dev, const uint16_t *buffer,
+                             uint8_t type, uint8_t channel, uint8_t drive);
+int ide_select_dma_transfer_mode(const ide_device_t *dev, uint8_t *mode);
+size_t ide_decode_error(uint8_t error, char *buf, size_t size);
 
 /* ATAPI Packet Commands */
 int ide_atapi_packet(uint8_t channel, uint8_t drive, 
@@ -223,6 +293,8 @@ int ide_atapi_read_capacity(uint8_t channel, uint8_t drive,
                             uint32_t *lba, uint32_t *block_size);
 int ide_atapi_read_sectors(uint8_t channel, uint8_t drive, 
                            uint32_t lba, uint16_t count, void *buffer);
+int ide_atapi_read_toc(uint8_t channel, uint8_t drive,
+                       uint8_t start_track, void *buffer, uint16_t buffer_len);
 
 /* Bus Master Control */
 void ide_bm_start(uint8_t channel, int write);

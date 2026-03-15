@@ -13,11 +13,18 @@
 #include <kern/sched.h>
 #include <pm/pm.h>
 #include <arch/i386/percpu.h>
+#include <arch/x86-common/io.h>
+#include <drivers/video/hw_text.h>
 #include <sys/kern_syscalls.h>
 
 time_t boot_time = 0;
 
 static uint64_t ticks = 0;
+
+#define PIT_FREQUENCY 1193182U
+#define PIT_CHANNEL0  0x40U
+#define PIT_COMMAND   0x43U
+#define PIT_MODE_RATE_GENERATOR 0x34U
 
 static int proc_itimer_index(int which) {
     switch (which) {
@@ -128,6 +135,22 @@ void proc_timers_cancel(process_t *p) {
     memset(p->itimer_value_ticks, 0, sizeof(p->itimer_value_ticks));
     memset(p->itimer_interval_ticks, 0, sizeof(p->itimer_interval_ticks));
     spinlock_release(&p->itimer_lock);
+}
+
+void timer_init(void) {
+    uint32_t divisor;
+
+    divisor = (PIT_FREQUENCY + (HZ / 2U)) / HZ;
+    if (divisor == 0) {
+        divisor = 1;
+    }
+    if (divisor > 0xFFFFU) {
+        divisor = 0xFFFFU;
+    }
+
+    outb(PIT_COMMAND, PIT_MODE_RATE_GENERATOR);
+    outb(PIT_CHANNEL0, (uint8_t)(divisor & 0xFFU));
+    outb(PIT_CHANNEL0, (uint8_t)((divisor >> 8) & 0xFFU));
 }
 
 uint64_t get_ticks(void) {
@@ -347,13 +370,22 @@ int sys_setitimer(int which, const struct itimerval *new_value, struct itimerval
 }
 
 void timer_tick_context(int is_usermode) {
-    ticks++;
-    sched_tick();
-    if ((ticks % (5 * HZ)) == 0) {
-        sched_update_loadavg();
-    }
+    int cpu_id = percpu_get_cpu_id();
 
-    if (percpu_get_cpu_id() == 0) {
+    /*
+     * Global wall-clock and timeout accounting must advance exactly once per
+     * system tick. On SMP, other CPUs may have local timer sources for
+     * preemption, but they must not multiply global timekeeping.
+     */
+    if (cpu_id == 0) {
+        ticks++;
+        sched_tick();
+        if ((ticks % (5 * HZ)) == 0) {
+            sched_update_loadavg();
+        }
+        if ((ticks % HZ) == 0) {
+            hw_text_tick_1hz();
+        }
         for (int i = 0; i < MAX_PROCS; i++) {
             process_t *p = &processes[i];
             if (p->pid == -1 || p->is_kernel_task) {

@@ -23,6 +23,22 @@ zimage_start:
 .set ZIMG_SCRATCH_MMAPLEN,  0x0510
 .set ZIMG_SCRATCH_MEMLOW,   0x0514
 .set ZIMG_SCRATCH_MEMUPPER, 0x0518
+.set ZIMG_SCRATCH_VBE_132X25, 0x051C
+.set ZIMG_SCRATCH_VBE_132X43, 0x051E
+.set ZIMG_SCRATCH_VBE_132X50, 0x0520
+.set ZIMG_SCRATCH_VBE_132X60, 0x0522
+.set ZIMG_SCRATCH_CMDLINE_BUF, 0x0600
+.set ZIMG_SCRATCH_CMDLINE_MAX, 256
+.set ZIMG_SCRATCH_VBE_INFO, 0x0800
+.set ZIMG_SCRATCH_VBE_MODE, 0x0A00
+
+.set VBE_INFO_MODEPTR_OFF, 0x0E
+.set VBE_INFO_MODEPTR_SEG, 0x10
+.set VBE_MODE_ATTR, 0x00
+.set VBE_MODE_XRES, 0x12
+.set VBE_MODE_YRES, 0x14
+.set VBE_MODE_XCHAR, 0x16
+.set VBE_MODE_YCHAR, 0x17
 
 .set MBI_FLAG_MEMORY,  0x00000001
 .set MBI_FLAG_CMDLINE, 0x00000004
@@ -80,6 +96,8 @@ setup_start:
      * the Linux boot header values we need into fixed low-memory scratch.
      */
     movl cmd_line_ptr, %eax
+    call copy_cmdline_to_scratch
+    movl $ZIMG_SCRATCH_CMDLINE_BUF, %eax
     movl %eax, %es:ZIMG_SCRATCH_CMDLINE
     movl ramdisk_image, %eax
     movl %eax, %es:ZIMG_SCRATCH_RAMDISK
@@ -98,6 +116,16 @@ setup_start:
     movl %eax, %es:ZIMG_SCRATCH_MEMLOW
     xorl %eax, %eax
     movl %eax, %es:ZIMG_SCRATCH_MEMUPPER
+    movw %ax, %es:ZIMG_SCRATCH_VBE_132X25
+    movw %ax, %es:ZIMG_SCRATCH_VBE_132X43
+    movw %ax, %es:ZIMG_SCRATCH_VBE_132X50
+    movw %ax, %es:ZIMG_SCRATCH_VBE_132X60
+
+    call maybe_vga_ask
+    testw %ax, %ax
+    jnz 1f
+    call maybe_apply_requested_textmode
+1:
 
     /*
      * Build a Multiboot-format mmap by querying BIOS E820 while we are still
@@ -192,6 +220,654 @@ memory_probe_done:
     movl %eax, %cr0
 
     ljmpl *pm_jump_ptr
+
+copy_cmdline_to_scratch:
+    pushw %ds
+    pushw %es
+    pushw %si
+    pushw %di
+    pushw %cx
+    pushw %dx
+
+    xorw %dx, %dx
+    movw %dx, %es
+    movw $ZIMG_SCRATCH_CMDLINE_BUF, %di
+    movw $ZIMG_SCRATCH_CMDLINE_MAX - 1, %cx
+    testl %eax, %eax
+    jnz 1f
+    movb $0, %es:(%di)
+    jmp 3f
+1:
+    movl %eax, %edx
+    andw $0x000F, %dx
+    shrl $4, %eax
+    movw %ax, %ds
+    movw %dx, %si
+2:
+    lodsb
+    stosb
+    testb %al, %al
+    jz 3f
+    loop 2b
+    movb $0, %es:(%di)
+3:
+    popw %dx
+    popw %cx
+    popw %di
+    popw %si
+    popw %es
+    popw %ds
+    ret
+
+maybe_vga_ask:
+    pushw %ds
+    pushw %es
+    pushw %si
+
+    xorw %ax, %ax
+    movw %ax, %ds
+    movw $ZIMG_SCRATCH_CMDLINE_BUF, %si
+1:
+    lodsb
+    testb %al, %al
+    jz 5f
+    cmpb $'v', %al
+    jne 1b
+    cmpw $ZIMG_SCRATCH_CMDLINE_BUF + 1, %si
+    je 2f
+    cmpb $' ', -2(%si)
+    jne 1b
+2:
+    cmpb $'g', (%si)
+    jne 1b
+    cmpb $'a', 1(%si)
+    jne 1b
+    cmpb $'=', 2(%si)
+    jne 1b
+    cmpb $'a', 3(%si)
+    jne 1b
+    cmpb $'s', 4(%si)
+    jne 1b
+    cmpb $'k', 5(%si)
+    jne 1b
+    movb 6(%si), %al
+    testb %al, %al
+    jz 3f
+    cmpb $' ', %al
+    jne 1b
+3:
+    call query_vbe_text_modes
+    call vga_ask_menu
+    movw $1, %ax
+    jmp 5f
+5:
+    testw %ax, %ax
+    jnz 6f
+    xorw %ax, %ax
+6:
+    popw %si
+    popw %es
+    popw %ds
+    ret
+
+cmdline_match_token:
+    pushw %si
+    pushw %di
+    pushw %bx
+1:
+    movb %es:(%di), %bl
+    testb %bl, %bl
+    jz 2f
+    cmpb %bl, (%si)
+    jne 3f
+    incw %si
+    incw %di
+    jmp 1b
+2:
+    movb (%si), %bl
+    testb %bl, %bl
+    jz 4f
+    cmpb $' ', %bl
+    jne 3f
+4:
+    movw $1, %ax
+    jmp 5f
+3:
+    xorw %ax, %ax
+5:
+    popw %bx
+    popw %di
+    popw %si
+    ret
+
+maybe_apply_requested_textmode:
+    pushw %ds
+    pushw %es
+    pushw %si
+    pushw %di
+
+    movw %ds, %ax
+    movw %ax, %es
+    xorw %ax, %ax
+    movw %ax, %ds
+    movw $ZIMG_SCRATCH_CMDLINE_BUF, %si
+1:
+    movb (%si), %al
+    testb %al, %al
+    jz 9f
+    cmpw $ZIMG_SCRATCH_CMDLINE_BUF, %si
+    je 2f
+    cmpb $' ', -1(%si)
+    jne 8f
+2:
+    movw $cmdline_textmode_80x25, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 10f
+    movw $cmdline_video_text_80x25, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 10f
+    movw $cmdline_textmode_80x43, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 11f
+    movw $cmdline_video_text_80x43, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 11f
+    movw $cmdline_textmode_80x50, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 12f
+    movw $cmdline_video_text_80x50, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 12f
+    movw $cmdline_textmode_132x25, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 13f
+    movw $cmdline_video_text_132x25, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 13f
+    movw $cmdline_textmode_132x43, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 14f
+    movw $cmdline_video_text_132x43, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 14f
+    movw $cmdline_textmode_132x50, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 15f
+    movw $cmdline_video_text_132x50, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 15f
+    movw $cmdline_textmode_132x60, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 16f
+    movw $cmdline_video_text_132x60, %di
+    call cmdline_match_token
+    testw %ax, %ax
+    jnz 16f
+8:
+    incw %si
+    jmp 1b
+9:
+    jmp 17f
+10:
+    movw %es, %ax
+    movw %ax, %ds
+    call vga_select_80x25
+    jmp 17f
+11:
+    movw %es, %ax
+    movw %ax, %ds
+    call vga_select_80x43
+    jmp 17f
+12:
+    movw %es, %ax
+    movw %ax, %ds
+    call vga_select_80x50
+    jmp 17f
+13:
+    call query_vbe_text_modes
+    xorw %ax, %ax
+    movw %ax, %es
+    movw %es:ZIMG_SCRATCH_VBE_132X25, %bx
+    testw %bx, %bx
+    jz 17f
+    movw $textmode_132x25, %dx
+    movw %es, %ax
+    movw %ax, %ds
+    call vga_select_vbe_textmode
+    jmp 17f
+14:
+    call query_vbe_text_modes
+    xorw %ax, %ax
+    movw %ax, %es
+    movw %es:ZIMG_SCRATCH_VBE_132X43, %bx
+    testw %bx, %bx
+    jz 17f
+    movw $textmode_132x43, %dx
+    movw %es, %ax
+    movw %ax, %ds
+    call vga_select_vbe_textmode
+    jmp 17f
+15:
+    call query_vbe_text_modes
+    xorw %ax, %ax
+    movw %ax, %es
+    movw %es:ZIMG_SCRATCH_VBE_132X50, %bx
+    testw %bx, %bx
+    jz 17f
+    movw $textmode_132x50, %dx
+    movw %es, %ax
+    movw %ax, %ds
+    call vga_select_vbe_textmode
+    jmp 17f
+16:
+    call query_vbe_text_modes
+    xorw %ax, %ax
+    movw %ax, %es
+    movw %es:ZIMG_SCRATCH_VBE_132X60, %bx
+    testw %bx, %bx
+    jz 17f
+    movw $textmode_132x60, %dx
+    movw %es, %ax
+    movw %ax, %ds
+    call vga_select_vbe_textmode
+17:
+    popw %di
+    popw %si
+    popw %es
+    popw %ds
+    ret
+
+putc_bios:
+    pushw %ax
+    pushw %bx
+    cmpb $10, %al
+    jne 1f
+    movb $13, %al
+    call putc_bios
+    movb $10, %al
+1:
+    movb $0x0E, %ah
+    movw $0x0007, %bx
+    int $0x10
+    popw %bx
+    popw %ax
+    ret
+
+puts_bios:
+    pushw %ax
+1:
+    lodsb
+    testb %al, %al
+    jz 2f
+    call putc_bios
+    jmp 1b
+2:
+    popw %ax
+    ret
+
+getc_bios:
+    xorw %ax, %ax
+    int $0x16
+    ret
+
+append_textmode_token:
+    pushw %es
+    pushw %di
+    pushw %cx
+    pushw %ax
+
+    xorw %ax, %ax
+    movw %ax, %es
+    movw $ZIMG_SCRATCH_CMDLINE_BUF, %di
+    movw $ZIMG_SCRATCH_CMDLINE_MAX - 1, %cx
+1:
+    movb %es:(%di), %al
+    testb %al, %al
+    jz 2f
+    incw %di
+    loop 1b
+    jmp 4f
+2:
+    cmpw $ZIMG_SCRATCH_CMDLINE_BUF, %di
+    je 3f
+    movb $' ', %es:(%di)
+    incw %di
+3:
+    lodsb
+    testb %al, %al
+    jz 4f
+    movb %al, %es:(%di)
+    incw %di
+    jmp 3b
+4:
+    movb $0, %es:(%di)
+    popw %ax
+    popw %cx
+    popw %di
+    popw %es
+    ret
+
+append_bios_textmode_flag:
+    movw $textmode_bios_flag, %si
+    call append_textmode_token
+    ret
+
+query_vbe_text_modes:
+    pushw %ds
+    pushw %es
+    pushw %si
+    pushw %di
+    pushw %bx
+    pushw %cx
+    pushw %dx
+    pushw %ax
+
+    xorw %ax, %ax
+    movw %ax, %es
+    movw $ZIMG_SCRATCH_VBE_INFO, %di
+    movl $0x32454256, %es:(%di)
+    movw $0x4F00, %ax
+    int $0x10
+    cmpw $0x004F, %ax
+    jne 9f
+
+    movw %es:ZIMG_SCRATCH_VBE_INFO + VBE_INFO_MODEPTR_SEG, %dx
+    movw %es:ZIMG_SCRATCH_VBE_INFO + VBE_INFO_MODEPTR_OFF, %bx
+    testw %dx, %dx
+    jz 9f
+
+    movw %ds, %ax
+    pushw %ax
+    movw %dx, %ds
+    movw %bx, %si
+1:
+    lodsw
+    cmpw $0xFFFF, %ax
+    je 8f
+    pushw %si
+    movw %ax, %cx
+    xorw %ax, %ax
+    movw %ax, %es
+    movw $ZIMG_SCRATCH_VBE_MODE, %di
+    movw $0x4F01, %ax
+    int $0x10
+    cmpw $0x004F, %ax
+    jne 7f
+
+    movw %es:ZIMG_SCRATCH_VBE_MODE + VBE_MODE_ATTR, %ax
+    testw $0x0001, %ax
+    jz 7f
+    testw $0x0010, %ax
+    jnz 7f
+    movb %es:ZIMG_SCRATCH_VBE_MODE + VBE_MODE_XCHAR, %al
+    testb %al, %al
+    jz 7f
+    movb %es:ZIMG_SCRATCH_VBE_MODE + VBE_MODE_YCHAR, %al
+    testb %al, %al
+    jz 7f
+    movw %es:ZIMG_SCRATCH_VBE_MODE + VBE_MODE_XRES, %ax
+    cmpw $132, %ax
+    jne 7f
+    movw %es:ZIMG_SCRATCH_VBE_MODE + VBE_MODE_YRES, %ax
+    cmpw $25, %ax
+    je 2f
+    cmpw $43, %ax
+    je 3f
+    cmpw $50, %ax
+    je 4f
+    cmpw $60, %ax
+    je 5f
+    jmp 7f
+2:
+    movw %cx, %es:ZIMG_SCRATCH_VBE_132X25
+    jmp 7f
+3:
+    movw %cx, %es:ZIMG_SCRATCH_VBE_132X43
+    jmp 7f
+4:
+    movw %cx, %es:ZIMG_SCRATCH_VBE_132X50
+    jmp 7f
+5:
+    movw %cx, %es:ZIMG_SCRATCH_VBE_132X60
+7:
+    popw %si
+    jmp 1b
+8:
+    popw %ds
+9:
+    popw %ax
+    popw %dx
+    popw %cx
+    popw %bx
+    popw %di
+    popw %si
+    popw %es
+    popw %ds
+    ret
+
+vga_select_vbe_textmode:
+    pushw %si
+    movw $0x4F02, %ax
+    int $0x10
+    movw %dx, %si
+    call append_textmode_token
+    call append_bios_textmode_flag
+    popw %si
+    ret
+
+vga_select_80x25:
+    movw $0x0003, %ax
+    int $0x10
+    movw $textmode_80x25, %si
+    call append_textmode_token
+    call append_bios_textmode_flag
+    ret
+
+vga_select_80x43:
+    movw $0x0003, %ax
+    int $0x10
+    movw $0x1111, %ax
+    xorw %bx, %bx
+    int $0x10
+    movw $textmode_80x43, %si
+    call append_textmode_token
+    call append_bios_textmode_flag
+    ret
+
+vga_select_80x50:
+    movw $0x0003, %ax
+    int $0x10
+    movw $0x1112, %ax
+    xorw %bx, %bx
+    int $0x10
+    movw $textmode_80x50, %si
+    call append_textmode_token
+    call append_bios_textmode_flag
+    ret
+
+vga_ask_menu:
+    pushw %ds
+    pushw %es
+    pushw %si
+    movw %cs, %ax
+    subw $0x20, %ax
+    movw %ax, %ds
+    movw $vga_menu, %si
+    call puts_bios
+    xorw %ax, %ax
+    movw %ax, %es
+    cmpw $0, %es:ZIMG_SCRATCH_VBE_132X25
+    je 1f
+    movw $vga_menu_132x25, %si
+    call puts_bios
+1:
+    cmpw $0, %es:ZIMG_SCRATCH_VBE_132X43
+    je 2f
+    movw $vga_menu_132x43, %si
+    call puts_bios
+2:
+    cmpw $0, %es:ZIMG_SCRATCH_VBE_132X50
+    je 3f
+    movw $vga_menu_132x50, %si
+    call puts_bios
+3:
+    cmpw $0, %es:ZIMG_SCRATCH_VBE_132X60
+    je 4f
+    movw $vga_menu_132x60, %si
+    call puts_bios
+4:
+    movw $vga_menu_prompt, %si
+    call puts_bios
+5:
+    call getc_bios
+    cmpb $'1', %al
+    je 6f
+    cmpb $'2', %al
+    je 7f
+    cmpb $'3', %al
+    je 8f
+    cmpb $'4', %al
+    je 9f
+    cmpb $'5', %al
+    je 10f
+    cmpb $'6', %al
+    je 11f
+    cmpb $'7', %al
+    je 12f
+    jmp 5b
+6:
+    call putc_bios
+    movb $10, %al
+    call putc_bios
+    call vga_select_80x25
+    jmp 13f
+7:
+    call putc_bios
+    movb $10, %al
+    call putc_bios
+    call vga_select_80x43
+    jmp 13f
+8:
+    call putc_bios
+    movb $10, %al
+    call putc_bios
+    call vga_select_80x50
+    jmp 13f
+9:
+    movw %es:ZIMG_SCRATCH_VBE_132X25, %bx
+    testw %bx, %bx
+    jz 5b
+    call putc_bios
+    movb $10, %al
+    call putc_bios
+    movw $textmode_132x25, %dx
+    call vga_select_vbe_textmode
+    jmp 13f
+10:
+    movw %es:ZIMG_SCRATCH_VBE_132X43, %bx
+    testw %bx, %bx
+    jz 5b
+    call putc_bios
+    movb $10, %al
+    call putc_bios
+    movw $textmode_132x43, %dx
+    call vga_select_vbe_textmode
+    jmp 13f
+11:
+    movw %es:ZIMG_SCRATCH_VBE_132X50, %bx
+    testw %bx, %bx
+    jz 5b
+    call putc_bios
+    movb $10, %al
+    call putc_bios
+    movw $textmode_132x50, %dx
+    call vga_select_vbe_textmode
+    jmp 13f
+12:
+    movw %es:ZIMG_SCRATCH_VBE_132X60, %bx
+    testw %bx, %bx
+    jz 5b
+    call putc_bios
+    movb $10, %al
+    call putc_bios
+    movw $textmode_132x60, %dx
+    call vga_select_vbe_textmode
+13:
+    popw %si
+    popw %es
+    popw %ds
+    ret
+
+vga_menu:
+    .asciz "\r\nSubstrate VGA text mode selector\r\n1. 80x25\r\n2. 80x43\r\n3. 80x50\r\n"
+vga_menu_132x25:
+    .asciz "4. 132x25 (VBE)\r\n"
+vga_menu_132x43:
+    .asciz "5. 132x43 (VBE)\r\n"
+vga_menu_132x50:
+    .asciz "6. 132x50 (VBE)\r\n"
+vga_menu_132x60:
+    .asciz "7. 132x60 (VBE)\r\n"
+vga_menu_prompt:
+    .asciz "Select mode [1-7]: "
+
+textmode_80x25:
+    .asciz "textmode=80x25"
+textmode_80x43:
+    .asciz "textmode=80x43"
+textmode_80x50:
+    .asciz "textmode=80x50"
+textmode_132x25:
+    .asciz "textmode=132x25"
+textmode_132x43:
+    .asciz "textmode=132x43"
+textmode_132x50:
+    .asciz "textmode=132x50"
+textmode_132x60:
+    .asciz "textmode=132x60"
+textmode_bios_flag:
+    .asciz "textmode_bios=1"
+cmdline_textmode_80x25:
+    .asciz "textmode=80x25"
+cmdline_textmode_80x43:
+    .asciz "textmode=80x43"
+cmdline_textmode_80x50:
+    .asciz "textmode=80x50"
+cmdline_textmode_132x25:
+    .asciz "textmode=132x25"
+cmdline_textmode_132x43:
+    .asciz "textmode=132x43"
+cmdline_textmode_132x50:
+    .asciz "textmode=132x50"
+cmdline_textmode_132x60:
+    .asciz "textmode=132x60"
+cmdline_video_text_80x25:
+    .asciz "video=text:80x25"
+cmdline_video_text_80x43:
+    .asciz "video=text:80x43"
+cmdline_video_text_80x50:
+    .asciz "video=text:80x50"
+cmdline_video_text_132x25:
+    .asciz "video=text:132x25"
+cmdline_video_text_132x43:
+    .asciz "video=text:132x43"
+cmdline_video_text_132x50:
+    .asciz "video=text:132x50"
+cmdline_video_text_132x60:
+    .asciz "video=text:132x60"
 
 .code32
 pm_entry:

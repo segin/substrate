@@ -70,7 +70,7 @@ typedef int32_t elks_time_t;
 #define sys_open   stub_sys_open
 #define sys_close  stub_sys_close
 #define kern_open  stub_kern_open
-#define sys_waitpid stub_sys_waitpid
+#define kern_waitpid stub_kern_waitpid
 #define sys_creat  stub_sys_creat
 #define sys_link   stub_sys_link
 #define sys_unlink stub_sys_unlink
@@ -140,7 +140,16 @@ int stub_kern_open(const char *a, int b, int c) {
     last_path_arg[sizeof(last_path_arg) - 1] = '\0';
     return stub_sys_open(a, b, c);
 }
-int stub_sys_waitpid(int a, int *b, int c) { last_name = "waitpid"; last_i0 = a; last_ptr = (uintptr_t)b; last_i1 = c; return 66; }
+int stub_kern_waitpid(int a, int *b, int c) {
+    last_name = "waitpid";
+    last_i0 = a;
+    last_ptr = (uintptr_t)b;
+    last_i1 = c;
+    if (b) {
+        *b = 0x1234;
+    }
+    return 66;
+}
 int stub_sys_creat(const char *a, int b) { (void)a; (void)b; return -1; }
 int stub_sys_link(const char *a, const char *b) {
     last_name = "link";
@@ -995,14 +1004,21 @@ int main(void) {
 
     strcpy((char *)(ds_mem + 0x240), "/dev/storage/ide0");
     strcpy((char *)(ds_mem + 0x260), "/mnt");
-    strcpy((char *)(ds_mem + 0x280), "ext2");
+    strcpy((char *)(ds_mem + 0x280), "minix");
     memset(ds_mem + 0x2a0, 0x5A, 8);
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_mount];
-    if (fn(0x240, 0x260, 0x280, 3, 0x2a0, 0, 0, 0) != 51 || strcmp(last_name, "mount") != 0 ||
+    if (fn(0x240, 0x260, 2, 3, 0x2a0, 0, 0, 0) != 51 || strcmp(last_name, "mount") != 0 ||
         last_ptr != ds_base + 0x240U || last_ptr2 != ds_base + 0x260U ||
-        last_ptr3 != ds_base + 0x280U || last_i0 != 3 ||
+        strcmp((const char *)(uintptr_t)last_ptr3, "fat") != 0 ||
+        last_i0 != (MNT_RDONLY | MNT_NOSUID) ||
         last_i1 != (int)(ds_base + 0x2a0U)) {
         fprintf(stderr, "FAIL: ELKS mount wrapper wrong\n");
+        return 1;
+    }
+
+    if (fn(0x240, 0x260, 0x280, 0, 0, 0, 0, 0) != 51 || strcmp(last_name, "mount") != 0 ||
+        strcmp((const char *)(uintptr_t)last_ptr3, "minix") != 0) {
+        fprintf(stderr, "FAIL: ELKS mount string fallback wrong\n");
         return 1;
     }
 
@@ -1073,8 +1089,13 @@ int main(void) {
 
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_waitpid];
     if (fn(12, 0x30, 7, 0, 0, 0, 0, 0) != 66 || strcmp(last_name, "waitpid") != 0 ||
-        last_i0 != 12 || last_ptr != ds_base + 0x30U || last_i1 != 7) {
+        last_i0 != 12 || last_i1 != 7 || *(uint16_t *)(void *)(ds_mem + 0x30) != 0x1234) {
         fprintf(stderr, "FAIL: ELKS waitpid wrapper wrong\n");
+        return 1;
+    }
+    if (fn(0xFFFFU, 0x30, 0, 0, 0, 0, 0, 0) != 66 || strcmp(last_name, "waitpid") != 0 ||
+        last_i0 != -1 || last_i1 != 0 || *(uint16_t *)(void *)(ds_mem + 0x30) != 0x1234) {
+        fprintf(stderr, "FAIL: ELKS waitpid signed pid translation wrong\n");
         return 1;
     }
 
@@ -1231,6 +1252,19 @@ int main(void) {
         if (rc != 0 || oldbrk != 0x200 ||
             current_process->brk != current_process->brk_start + 0x20U) {
             fprintf(stderr, "FAIL: ELKS sbrk translation wrong rc=%d old=0x%x brk=0x%x start=0x%x\n",
+                    rc, oldbrk, current_process->brk, current_process->brk_start);
+            return 1;
+        }
+    }
+    current_process->brk = 0;
+    *(uint16_t *)(void *)(ds_mem + 0x302) = 0;
+    {
+        int rc = fn(0x10, 0x302, 0, 0, 0, 0, 0, 0);
+        uint16_t oldbrk = *(uint16_t *)(void *)(ds_mem + 0x302);
+
+        if (rc != 0 || oldbrk != 0x200 ||
+            current_process->brk != current_process->brk_start + 0x10U) {
+            fprintf(stderr, "FAIL: ELKS sbrk bootstrap wrong rc=%d old=0x%x brk=0x%x start=0x%x\n",
                     rc, oldbrk, current_process->brk, current_process->brk_start);
             return 1;
         }

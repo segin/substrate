@@ -1,0 +1,20 @@
+.Dd March 12, 2026
+.Dt DEVFS_NAMING 9
+.Os Substrate
+.Sh NAME
+.Nm devfs_naming
+.Nd persistent devfs aliases for device-model nodes
+.Sh SYNOPSIS
+.In vfs/vfs.h
+.Ft int
+.Fn devfs_register_alias "const char *path" "const char *target"
+.Ft void
+.Fn devfs_unregister_alias "const char *path"
+.Sh DESCRIPTION
+Substrate devfs supports framework-managed symlink aliases under
+.Pa /dev/by-id
+for devices that expose stable identity through a serial string or GUID.
+These aliases point at the published primary device node path.
+.Sh SEE ALSO
+.Xr devfs_hotplug 9 ,
+.Xr device 9

@@ -41,6 +41,9 @@ __attribute__((weak)) int ksym_count = 0;
  */
 const struct ksym *ksym_lookup(uint32_t addr) {
     if (ksym_count == 0) return NULL;
+    if (addr < ksym_table[0].addr || addr > ksym_table[ksym_count - 1].addr) {
+        return NULL;
+    }
     
     /* Binary search for largest address <= addr */
     int low = 0;
@@ -68,18 +71,20 @@ const struct ksym *ksym_lookup(uint32_t addr) {
  * Returns length written.
  */
 int ksym_resolve(uint32_t addr, char *buf, int buflen) {
-    (void)buflen;  /* Currently unused - for future bounds checking */
     const struct ksym *sym = ksym_lookup(addr);
+    if (!buf || buflen <= 0) {
+        return 0;
+    }
     
     if (sym && sym->name[0]) {
         uint32_t offset = addr - sym->addr;
         if (offset == 0) {
-            return sprintf(buf, "%s", sym->name);
+            return snprintf(buf, (size_t)buflen, "%s", sym->name);
         } else {
-            return sprintf(buf, "%s+0x%x", sym->name, offset);
+            return snprintf(buf, (size_t)buflen, "%s+0x%x", sym->name, offset);
         }
     } else {
-        return sprintf(buf, "0x%08x", addr);
+        return snprintf(buf, (size_t)buflen, "0x%08x", addr);
     }
 }
 

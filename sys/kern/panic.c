@@ -9,10 +9,16 @@
 // Forward decl
 void vga_text_set_color(uint8_t fg, uint8_t bg);
 
+#ifdef HOST_TEST
+void panic_test_halt(void);
+#endif
+
 void panic(const char *msg) {
+#ifndef HOST_TEST
     /* Disable interrupts immediately */
     __asm__ volatile("cli");
-    
+#endif
+
     /* Set high-visibility color but DON'T clear screen */
 
     if (!fb_active) {
@@ -33,7 +39,12 @@ void panic(const char *msg) {
     stack_trace();
 
     console_write("\nSystem Halted.", 15);
-    
+
+#ifdef HOST_TEST
+    panic_test_halt();
+    return;
+#endif
+
     /* Halt */
     while(1) {
         __asm__ volatile("hlt");

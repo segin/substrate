@@ -22,6 +22,7 @@
 
 #include "../../sys/vfs/vfs.h"
 #include "../../sys/drivers/storage/scsi/scsi.h"
+#include <sys/proc.h>
 
 /* Forward declarations for scsi_ctl.c mocks */
 void kprint(const char *str) { printf("[K] %s", str); }
@@ -57,6 +58,8 @@ int copyout(const void *src, void *dst, size_t size) {
 static int last_execute_flags = 0;
 static uint32_t last_execute_data_len = 0;
 static void *last_execute_data = NULL;
+static process_t mock_process;
+process_t *current_process = &mock_process;
 
 int scsi_execute_sync(scsi_device_t *dev, uint8_t *cdb, uint8_t cdb_len,
                       void *data, uint32_t data_len, uint16_t flags,
@@ -137,6 +140,7 @@ void test_send_cmd() {
     cmd.data_len = 100;
     char data_buf[100];
     cmd.data = data_buf;
+    current_process->euid = 0;
 
     int ret = sg_ioctl(&node, SCSI_IOCTL_SEND_CMD, &cmd);
     assert(ret == 0);
@@ -163,6 +167,68 @@ void test_send_cmd() {
     copy_fail = 0;
 
     printf("SCSI_IOCTL_SEND_CMD pass\n");
+}
+
+void test_get_idlun() {
+    printf("Testing SCSI_IOCTL_GET_IDLUN...\n");
+    scsi_device_t dev;
+    scsi_generic_node_t sg;
+    fs_node_t node;
+    uint32_t packed = 0;
+    int ret;
+
+    memset(&dev, 0, sizeof(dev));
+    dev.bus = 1;
+    dev.target = 2;
+    dev.lun = 0x3456;
+
+    memset(&sg, 0, sizeof(sg));
+    sg.dev = &dev;
+
+    memset(&node, 0, sizeof(node));
+    node.impl = (uintptr_t)&sg;
+
+    ret = sg_ioctl(&node, SCSI_IOCTL_GET_IDLUN, &packed);
+    assert(ret == 0);
+    assert(packed == 0x01023456U);
+
+    copy_fail = 1;
+    ret = sg_ioctl(&node, SCSI_IOCTL_GET_IDLUN, &packed);
+    assert(ret == -EFAULT);
+    copy_fail = 0;
+
+    printf("SCSI_IOCTL_GET_IDLUN pass\n");
+}
+
+void test_send_cmd_permissions() {
+    printf("Testing SCSI_IOCTL_SEND_CMD permissions...\n");
+    scsi_device_t dev;
+    scsi_generic_node_t sg;
+    fs_node_t node;
+    scsi_ioctl_cmd_t cmd;
+    char data_buf[16];
+    int ret;
+
+    memset(&dev, 0, sizeof(dev));
+    memset(&sg, 0, sizeof(sg));
+    memset(&node, 0, sizeof(node));
+    memset(&cmd, 0, sizeof(cmd));
+
+    sg.dev = &dev;
+    node.impl = (uintptr_t)&sg;
+    cmd.direction = 1;
+    cmd.data_len = sizeof(data_buf);
+    cmd.data = data_buf;
+
+    current_process->euid = 1000;
+    ret = sg_ioctl(&node, SCSI_IOCTL_SEND_CMD, &cmd);
+    assert(ret == -EPERM);
+
+    current_process->euid = 0;
+    ret = sg_ioctl(&node, SCSI_IOCTL_SEND_CMD, &cmd);
+    assert(ret == 0);
+
+    printf("SCSI_IOCTL_SEND_CMD permissions pass\n");
 }
 
 void test_send_cmd_cdb_overflow() {
@@ -204,6 +270,9 @@ void test_get_count() {
     scsi_bus_node_t bn;
     memset(&bn, 0, sizeof(bn));
     scsi_link_t link;
+    memset(&link, 0, sizeof(link));
+    link.max_targets = 16;
+    link.max_luns = 8;
     bn.link = &link;
     bn.bus_id = 0;
 
@@ -229,7 +298,9 @@ void test_get_count() {
 int main() {
     printf("Running host-side scsi_ctl tests...\n");
     test_get_info();
+    test_get_idlun();
     test_send_cmd();
+    test_send_cmd_permissions();
     test_get_count();
     test_send_cmd_cdb_overflow();
     printf("All scsi_ctl tests passed!\n");

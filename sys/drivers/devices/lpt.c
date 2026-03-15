@@ -1,5 +1,6 @@
 #include <arch/x86-common/io.h>
 #include <kern/console.h>
+#include <kern/isa.h>
 #include <sys/errno.h>
 #include <sys/poll.h>
 #include <vfs/vfs.h>
@@ -94,6 +95,12 @@ void lpt_init(void) {
     for (uint32_t i = 0; i < LPT_PORT_COUNT; i++) {
         fs_node_t *node = &lpt_nodes[i];
         uint16_t port = lpt_ports[i];
+        char isa_name[16];
+
+        snprintf(isa_name, sizeof(isa_name), "parallel%u", i);
+        if (!isa_device_present(isa_name)) {
+            continue;
+        }
 
         /* Control: IRQ disabled, selected, init high. */
         outb(port + 2, 0x0C);

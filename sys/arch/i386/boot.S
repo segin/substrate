@@ -154,6 +154,9 @@ higher_half:
 	
 	# Unmap identity mapping
 	movl $0, (boot_page_directory)
+	movl $0, (boot_page_directory + 4)
+	movl $0, (boot_page_directory + 8)
+	movl $0, (boot_page_directory + 12)
 	
 	# Flush TLB
 	mov %cr3, %edx

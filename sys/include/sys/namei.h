@@ -16,6 +16,7 @@
 
 /* Forward declarations */
 struct vnode;
+struct mount;
 
 /*
  * Component name structure.
@@ -82,6 +83,16 @@ struct nameidata {
 #define WILLLOOKUP  0x00002000  /* VFS_VGET will be followed by VOP_LOOKUP */
 
 /*
+ * Symlink recursion limit
+ */
+#define MAXSYMLINKS 32
+
+/*
+ * AT_FDCWD: use current working directory for *at() syscalls
+ */
+#define AT_FDCWD    (-100)
+
+/*
  * Initialization macros
  */
 #define NDINIT(ndp, op, flags, segflg, namep) do { \
@@ -98,6 +109,7 @@ void namei_init(void);
 void cache_enter(struct vnode *dvp, struct vnode *vp, const char *name, size_t len);
 int  cache_lookup(struct vnode *dvp, struct vnode **vpp, const char *name, size_t len);
 void cache_purge(struct vnode *vp);
+void cache_purgevfs(struct mount *mp);
 
 /* namei entry point */
 int namei(struct nameidata *ndp);

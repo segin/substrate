@@ -39,10 +39,12 @@ typedef struct {
 typedef struct {
     label_entry_t *labels;
     size_t label_count;
+    size_t label_cap;
     const cc_function_t *fn;
     cc_ssa_module_t *mod;
     hoisted_alloc_entry_t *hoisted_allocs;
     size_t hoisted_alloc_count;
+    size_t hoisted_alloc_cap;
 } lower_ctx_t;
 
 enum {
@@ -893,12 +895,16 @@ static int append_hoisted_alloc(lower_ctx_t *ctx, const cc_stmt_t *decl, int val
     if (ctx == NULL || decl == NULL || value < 0) {
         return -1;
     }
-    next = (hoisted_alloc_entry_t *)realloc(ctx->hoisted_allocs, (ctx->hoisted_alloc_count + 1) * sizeof(*next));
-    if (next == NULL) {
-        set_diag(diag, "out of memory recording hoisted local storage");
-        return -1;
+    if (ctx->hoisted_alloc_count >= ctx->hoisted_alloc_cap) {
+        size_t ncap = ctx->hoisted_alloc_cap == 0 ? 16 : ctx->hoisted_alloc_cap * 2;
+        next = (hoisted_alloc_entry_t *)realloc(ctx->hoisted_allocs, ncap * sizeof(*next));
+        if (next == NULL) {
+            set_diag(diag, "out of memory recording hoisted local storage");
+            return -1;
+        }
+        ctx->hoisted_allocs = next;
+        ctx->hoisted_alloc_cap = ncap;
     }
-    ctx->hoisted_allocs = next;
     ctx->hoisted_allocs[ctx->hoisted_alloc_count].decl = decl;
     ctx->hoisted_allocs[ctx->hoisted_alloc_count].value = value;
     ctx->hoisted_alloc_count++;
@@ -940,12 +946,16 @@ static int lower_collect_labels(cc_ssa_function_t *sf, const cc_stmt_t *s, lower
             }
             return -1;
         }
-        next = (label_entry_t *)realloc(ctx->labels, (ctx->label_count + 1) * sizeof(*next));
-        if (next == NULL) {
-            set_diag(diag, "out of memory collecting labels");
-            return -1;
+        if (ctx->label_count >= ctx->label_cap) {
+            size_t ncap = ctx->label_cap == 0 ? 16 : ctx->label_cap * 2;
+            next = (label_entry_t *)realloc(ctx->labels, ncap * sizeof(*next));
+            if (next == NULL) {
+                set_diag(diag, "out of memory collecting labels");
+                return -1;
+            }
+            ctx->labels = next;
+            ctx->label_cap = ncap;
         }
-        ctx->labels = next;
         ctx->labels[ctx->label_count].name = xstrdup(s->label_name);
         if (ctx->labels[ctx->label_count].name == NULL) {
             set_diag(diag, "out of memory duplicating label name");

@@ -22,6 +22,10 @@
 #include <vm/vm_kmem.h>
 #include <vm/vm_page.h>
 #include <sys/lock.h>
+#include <kern/bus.h>
+#include <kern/pci.h>
+#include <kern/resource.h>
+#include <sys/kobject.h>
 
 /* External declarations */
 extern uint32_t get_time(void);
@@ -296,6 +300,31 @@ static uint32_t gen_mounts(char *buf, size_t size, void *opaque) {
     return (uint32_t)off;
 }
 
+static uint32_t gen_ioports(char *buf, size_t size, void *opaque) {
+    (void)opaque;
+    return (uint32_t)resource_dump(RES_IO, buf, size);
+}
+
+static uint32_t gen_iomem(char *buf, size_t size, void *opaque) {
+    (void)opaque;
+    return (uint32_t)resource_dump(RES_MEM, buf, size);
+}
+
+static uint32_t gen_pci(char *buf, size_t size, void *opaque) {
+    (void)opaque;
+    return (uint32_t)pci_dump_devices(buf, size);
+}
+
+static uint32_t gen_devtree(char *buf, size_t size, void *opaque) {
+    (void)opaque;
+    return (uint32_t)bus_dump_tree(buf, size);
+}
+
+static uint32_t gen_device_events(char *buf, size_t size, void *opaque) {
+    (void)opaque;
+    return (uint32_t)kobject_uevent_dump(buf, size);
+}
+
 /*
  * Entry table - Static /proc entries
  * Add new entries here for automatic registration.
@@ -311,6 +340,11 @@ static struct procfs_runtime_entry procfs_entries[] = {
     { "pmap_stats",  proc_pmap_stats_read, NULL },
     { "filesystems", gen_filesystems,   NULL },
     { "mounts",      gen_mounts,        NULL },
+    { "ioports",     gen_ioports,       NULL },
+    { "iomem",       gen_iomem,         NULL },
+    { "pci",         gen_pci,           NULL },
+    { "devtree",     gen_devtree,       NULL },
+    { "device-events", gen_device_events, NULL },
     { NULL, NULL, NULL }  /* Sentinel */
 };
 

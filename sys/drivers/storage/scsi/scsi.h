@@ -71,6 +71,7 @@
 #define SCSI_SENSE_ABORTED_COMMAND  0xB
 #define SCSI_SENSE_VOLUME_OVERFLOW  0xD
 #define SCSI_SENSE_MISCOMPARE       0xE
+#define SCSI_SENSE_COMPLETED        0xF
 
 /* Device Type Codes (SPC-3 Table 82) */
 #define SCSI_TYPE_DISK              0x00  /* Direct Access (SBC) */
@@ -112,6 +113,17 @@
 #define SCSI_MAX_BUSES              8
 #define SCSI_MAX_TARGETS            16
 #define SCSI_MAX_LUNS               256
+
+/* Device flags */
+#define SCSI_DEV_ONLINE             0x0001
+#define SCSI_DEV_WRITE_PROTECTED    0x0002
+#define SCSI_DEV_REMOVABLE          0x0004
+#define SCSI_DEV_TCQ                0x0008
+
+/* Transport flags */
+#define SCSI_LINK_DMA               0x0001
+#define SCSI_LINK_TAGGED_QUEUEING   0x0002
+#define SCSI_LINK_ORDERED_TAGS      0x0004
 
 /*
  * ============================================================
@@ -206,7 +218,10 @@ typedef struct scsi_request {
     uint16_t flags;                 /* SCSI_REQ_* flags */
     
     /* Sense Data */
-    uint8_t  sense[SCSI_MAX_SENSE_LEN]; /* Sense buffer */
+    union {
+        uint8_t  sense[SCSI_MAX_SENSE_LEN];
+        uint8_t  sense_data[SCSI_MAX_SENSE_LEN];
+    };
     uint8_t  sense_len;             /* Sense data length */
     
     /* Status */
@@ -217,6 +232,7 @@ typedef struct scsi_request {
     /* Timeout */
     uint32_t timeout_ms;            /* Timeout in milliseconds */
     uint32_t retries;               /* Retry count remaining */
+    uint32_t max_retries;           /* Initial retry budget */
     
     /* Completion */
     scsi_callback_t callback;       /* Async completion callback */
@@ -234,7 +250,12 @@ typedef struct scsi_request {
  * ============================================================
  */
 typedef struct scsi_link {
-    const char *name;               /* Transport name (e.g., "atapi", "usb") */
+    char     name[32];              /* Transport name (e.g., "atapi0", "usb0") */
+    uint8_t  bus_id;                /* Controller-local bus identifier */
+    uint8_t  max_targets;           /* Maximum target IDs on this bus */
+    uint16_t max_luns;              /* Maximum LUNs per target */
+    uint16_t adapter_queue_depth;   /* Adapter-level concurrency */
+    uint32_t flags;                 /* SCSI_LINK_* capabilities */
     
     /* Execute SCSI command via this transport */
     int (*execute)(struct scsi_link *link, scsi_request_t *req);
@@ -269,9 +290,11 @@ typedef struct scsi_device {
     /* Device Identity (from INQUIRY) */
     uint8_t  type;                  /* Device type (SCSI_TYPE_*) */
     uint8_t  removable;             /* Removable media flag */
+    uint8_t  scsi_version;          /* SPC/SBC version from INQUIRY */
     char     vendor[9];             /* Vendor string (null-terminated) */
     char     product[17];           /* Product string (null-terminated) */
     char     revision[5];           /* Revision string (null-terminated) */
+    char     serial[21];            /* Optional serial string */
     
     /* Geometry (for block devices) */
     uint64_t capacity;              /* Total sectors */
@@ -281,6 +304,8 @@ typedef struct scsi_device {
     uint8_t  online;                /* Device is online/ready */
     uint8_t  media_present;         /* Media is present (for removable) */
     uint8_t  write_protected;       /* Media is write-protected */
+    uint32_t flags;                 /* SCSI_DEV_* flags */
+    uint32_t device_num;            /* Monotonic registry identifier */
     
     /* Transport */
     scsi_link_t *link;              /* Transport adapter */
@@ -304,6 +329,9 @@ typedef struct scsi_device {
 
 /* Initialization */
 void scsi_init(void);
+void scsi_dev_init(void);
+void scsi_ctl_init(void);
+int scsi_dev_detach(scsi_device_t *scsi_dev);
 
 /* Transport Registration */
 int scsi_register_link(scsi_link_t *link);
@@ -336,6 +364,8 @@ void scsi_complete_request(scsi_request_t *req, int status);  /* Mark complete *
 /* Discovery */
 int scsi_scan_bus(scsi_link_t *link, uint8_t bus);
 int scsi_probe_lun(scsi_link_t *link, uint8_t bus, uint8_t target, uint16_t lun);
+int scsi_create_bus_node(scsi_link_t *link, uint8_t bus_id);
+void scsi_auto_attach(scsi_device_t *dev);
 
 /* Standard Commands */
 int scsi_test_unit_ready(scsi_device_t *dev);
@@ -344,6 +374,8 @@ int scsi_read_capacity(scsi_device_t *dev, uint64_t *sectors, uint32_t *sector_s
 int scsi_request_sense(scsi_device_t *dev, uint8_t *sense, uint8_t len);
 int scsi_start_stop(scsi_device_t *dev, int start, int load_eject);
 int scsi_report_luns(scsi_device_t *dev, struct scsi_report_luns_data *luns);
+int scsi_synchronize_cache(scsi_device_t *dev);
+int scsi_mode_sense(scsi_device_t *dev, uint8_t page, void *buffer, uint16_t len);
 
 /* Sense Data Parsing */
 int scsi_sense_key(const uint8_t *sense, uint8_t len);
@@ -354,7 +386,14 @@ const char *scsi_sense_string(uint8_t key, uint8_t asc, uint8_t ascq);
 /* CDB Helpers */
 void scsi_cdb_read_10(uint8_t *cdb, uint32_t lba, uint16_t count);
 void scsi_cdb_write_10(uint8_t *cdb, uint32_t lba, uint16_t count);
+void scsi_cdb_read_16(uint8_t *cdb, uint64_t lba, uint32_t count);
+void scsi_cdb_write_16(uint8_t *cdb, uint64_t lba, uint32_t count);
 void scsi_cdb_read_capacity_10(uint8_t *cdb);
+void scsi_cdb_request_sense(uint8_t *cdb, uint8_t len);
+void scsi_cdb_mode_sense_6(uint8_t *cdb, uint8_t page, uint8_t len);
+void scsi_cdb_mode_sense_10(uint8_t *cdb, uint8_t page, uint16_t len);
+void scsi_cdb_start_stop(uint8_t *cdb, int start, int load_eject);
+void scsi_cdb_sync_cache(uint8_t *cdb, uint32_t lba, uint16_t count);
 void scsi_cdb_inquiry(uint8_t *cdb, uint8_t len);
 void scsi_cdb_test_unit_ready(uint8_t *cdb);
 
@@ -368,6 +407,13 @@ static inline uint32_t scsi_be32(const uint8_t *p) {
            ((uint32_t)p[2] << 8) | p[3];
 }
 
+static inline uint64_t scsi_be64(const uint8_t *p) {
+    return ((uint64_t)p[0] << 56) | ((uint64_t)p[1] << 48) |
+           ((uint64_t)p[2] << 40) | ((uint64_t)p[3] << 32) |
+           ((uint64_t)p[4] << 24) | ((uint64_t)p[5] << 16) |
+           ((uint64_t)p[6] << 8) | p[7];
+}
+
 static inline void scsi_put_be16(uint8_t *p, uint16_t val) {
     p[0] = (val >> 8) & 0xFF;
     p[1] = val & 0xFF;
@@ -378,6 +424,17 @@ static inline void scsi_put_be32(uint8_t *p, uint32_t val) {
     p[1] = (val >> 16) & 0xFF;
     p[2] = (val >> 8) & 0xFF;
     p[3] = val & 0xFF;
+}
+
+static inline void scsi_put_be64(uint8_t *p, uint64_t val) {
+    p[0] = (uint8_t)(val >> 56);
+    p[1] = (uint8_t)(val >> 48);
+    p[2] = (uint8_t)(val >> 40);
+    p[3] = (uint8_t)(val >> 32);
+    p[4] = (uint8_t)(val >> 24);
+    p[5] = (uint8_t)(val >> 16);
+    p[6] = (uint8_t)(val >> 8);
+    p[7] = (uint8_t)val;
 }
 
 #endif /* _SCSI_H */

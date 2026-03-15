@@ -514,9 +514,12 @@ static int linux_sys_clone(uint32_t flags, void *child_stack, int *parent_tidptr
         return -22; /* EINVAL */
     }
 
-    if (flags & CLONE_VFORK) {
-        return sys_vfork();
-    }
+    /*
+     * Substrate does not yet provide Linux-grade shared-address-space vfork
+     * semantics. Shells such as BusyBox ash use clone(CLONE_VM|CLONE_VFORK)
+     * as a process-spawn fast path; emulating that as a plain fork keeps the
+     * user-visible ABI working until the stricter contract is implemented.
+     */
     return arch_fork_with_stack(child_stack);
 }
 
@@ -600,6 +603,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_fstat_new]      = (void*)linux_sys_fstat,
     [LINUX_SYS_clone]          = (void*)linux_sys_clone,
     [LINUX_SYS_uname]          = &sys_uname,
+    [LINUX_SYS_modify_ldt]     = &sys_modify_ldt,
     [LINUX_SYS_getpgid]        = &sys_getpgid,
     [LINUX_SYS_fchdir]         = &sys_fchdir,
     [LINUX_SYS__llseek]        = &linux_sys__llseek,
@@ -681,6 +685,7 @@ static const char *linux_names[MAX_SYSCALLS] = {
     [LINUX_SYS_fstat_new]      = "fstat",
     [LINUX_SYS_clone]          = "clone",
     [LINUX_SYS_uname]          = "uname",
+    [LINUX_SYS_modify_ldt]     = "modify_ldt",
     [LINUX_SYS_getpgid]        = "getpgid",
     [LINUX_SYS_fchdir]         = "fchdir",
     [LINUX_SYS__llseek]        = "_llseek",
@@ -765,6 +770,7 @@ static struct syscall_fmt linux_fmts[MAX_SYSCALLS] = {
     [LINUX_SYS_fstat_new]      = { 2, { ARG_INT, ARG_PTR } }, // fstat
     [LINUX_SYS_clone]          = { 5, { ARG_HEX, ARG_PTR, ARG_PTR, ARG_PTR, ARG_PTR } }, // clone
     [LINUX_SYS_uname]          = { 1, { ARG_PTR } }, // uname
+    [LINUX_SYS_modify_ldt]     = { 3, { ARG_INT, ARG_PTR, ARG_LONG } }, // modify_ldt
     [LINUX_SYS_getpgid]        = { 1, { ARG_INT } }, // getpgid
     [LINUX_SYS_fchdir]         = { 1, { ARG_INT } }, // fchdir
     [LINUX_SYS__llseek]        = { 5, { ARG_INT, ARG_HEX, ARG_HEX, ARG_PTR, ARG_INT } }, // _llseek

@@ -25,5 +25,7 @@ void kset_init(struct kset *kset, const char *name);
 
 struct kobject *kobject_get(struct kobject *kobj);
 void kobject_put(struct kobject *kobj);
+void kobject_uevent(const char *action, const char *subsystem, const char *name);
+size_t kobject_uevent_dump(char *buf, size_t size);
 
 #endif

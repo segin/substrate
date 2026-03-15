@@ -83,6 +83,7 @@ extern bool test_fd_dup2(void);
 extern bool test_vfs_permissions_root(void);
 extern bool test_vfs_permissions_user(void);
 extern bool test_vfs_permissions_group(void);
+extern bool test_vfs_open_permissions(void);
 extern bool test_vfs_chroot_basic(void);
 extern bool test_vfs_chroot_effect(void);
 extern bool test_vop_readdir_basic(void);
@@ -100,6 +101,7 @@ extern bool test_vop_symlink_notsupp(void);
 extern bool test_vop_readlink_basic(void);
 extern bool test_vop_readlink_notlink(void);
 extern bool test_vop_readlink_notsupp(void);
+extern bool test_vnode_reclaim_basic(void);
 
 // FUSE Tests
 extern bool test_fuse_read(void);
@@ -233,6 +235,7 @@ test_case_t tests[] = {
     {"vfs_perm_root", test_vfs_permissions_root},
     {"vfs_perm_user", test_vfs_permissions_user},
     {"vfs_perm_group", test_vfs_permissions_group},
+    {"vfs_open_perm", test_vfs_open_permissions},
     {"vfs_chroot_basic", test_vfs_chroot_basic},
     {"vfs_chroot_effect", test_vfs_chroot_effect},
     {"vfs_readdir_basic", test_vop_readdir_basic},
@@ -250,6 +253,7 @@ test_case_t tests[] = {
     { "vfs_readlink_basic", test_vop_readlink_basic },
     { "vfs_readlink_notlink", test_vop_readlink_notlink },
     { "vfs_readlink_notsupp", test_vop_readlink_notsupp },
+    { "vnode_reclaim_basic", test_vnode_reclaim_basic },
     {"fuse_read", test_fuse_read},
     {"ansi_parsing", test_ansi_parsing},
     {"sched_prop", test_sched_properties},

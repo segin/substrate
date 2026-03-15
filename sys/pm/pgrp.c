@@ -28,6 +28,9 @@ static inline int pgrp_hashval(int pgid) {
 
 static void __pgrp_add_proc(struct pgrp *pgrp, struct process *proc);
 static void __pgrp_remove_proc(struct process *proc);
+static int __pgrp_is_orphaned(struct pgrp *pgrp);
+static int __pgrp_has_stopped(struct pgrp *pgrp);
+static struct session *__pgrp_unlink_locked(struct pgrp *pgrp);
 
 /*
  * session_alloc - Allocate and initialize a new session
@@ -98,30 +101,17 @@ struct pgrp *pgrp_alloc(struct process *leader, struct session *sess) {
  * pgrp_free - Free a process group when it becomes empty
  */
 void pgrp_free(struct pgrp *pgrp) {
+    struct session *sess;
+
     if (!pgrp) return;
     if (pgrp->pg_members != NULL) return; /* Still has members */
-    
-    int free_sess = 0;
-    struct session *sess = pgrp->pg_session;
 
     mutex_lock(&proctree_lock);
-    /* Remove from hash table */
-    int hash = pgrp_hashval(pgrp->pg_id);
-    struct pgrp **pp = &pgrp_hash[hash];
-    while (*pp && *pp != pgrp) pp = &(*pp)->pg_hash_next;
-    if (*pp) *pp = pgrp->pg_hash_next;
-    
-    /* Remove from session's pgrp list */
-    if (sess) {
-        struct pgrp **sp = &sess->s_pgrps;
-        while (*sp && *sp != pgrp) sp = &(*sp)->pg_sess_next;
-        if (*sp) *sp = pgrp->pg_sess_next;
-        free_sess = (sess->s_pgrps == NULL);
-    }
+    sess = __pgrp_unlink_locked(pgrp);
     mutex_unlock(&proctree_lock);
-    
+
     kfree(pgrp, sizeof(struct pgrp));
-    if (free_sess) {
+    if (sess) {
         session_free(sess);
     }
 }
@@ -196,21 +186,36 @@ static void __pgrp_remove_proc(struct process *proc) {
 
 void pgrp_remove_proc(struct process *proc) {
     struct pgrp *old_pgrp;
+    struct session *free_sess = NULL;
+    int orphaned = 0;
+    int has_stopped = 0;
 
     if (!proc) return;
 
     old_pgrp = proc->p_pgrp;
     mutex_lock(&proctree_lock);
     __pgrp_remove_proc(proc);
+    if (old_pgrp && old_pgrp->pg_members) {
+        orphaned = __pgrp_is_orphaned(old_pgrp);
+        has_stopped = __pgrp_has_stopped(old_pgrp);
+    } else if (old_pgrp) {
+        free_sess = __pgrp_unlink_locked(old_pgrp);
+    }
     mutex_unlock(&proctree_lock);
 
     if (!old_pgrp) {
         return;
     }
-    if (old_pgrp->pg_members) {
-        pgrp_check_orphan(old_pgrp);
+    if (free_sess || old_pgrp->pg_members == NULL) {
+        kfree(old_pgrp, sizeof(struct pgrp));
+        if (free_sess) {
+            session_free(free_sess);
+        }
     } else {
-        pgrp_free(old_pgrp);
+        if (orphaned && has_stopped) {
+            pgrp_signal(old_pgrp, 1);  /* SIGHUP */
+            pgrp_signal(old_pgrp, 18); /* SIGCONT */
+        }
     }
 }
 
@@ -430,6 +435,15 @@ struct session *session_find(int sid) {
  * process group within the same session.
  */
 int pgrp_is_orphaned(struct pgrp *pgrp) {
+    int orphaned;
+
+    mutex_lock(&proctree_lock);
+    orphaned = __pgrp_is_orphaned(pgrp);
+    mutex_unlock(&proctree_lock);
+    return orphaned;
+}
+
+static int __pgrp_is_orphaned(struct pgrp *pgrp) {
     if (!pgrp || !pgrp->pg_session) return 1;
     
     struct process *p = pgrp->pg_members;
@@ -448,6 +462,61 @@ int pgrp_is_orphaned(struct pgrp *pgrp) {
     return 1; /* Orphaned */
 }
 
+static int __pgrp_has_stopped(struct pgrp *pgrp) {
+    struct process *p;
+
+    if (!pgrp) {
+        return 0;
+    }
+
+    p = pgrp->pg_members;
+    while (p) {
+        if (p->state == SSTOP) {
+            return 1;
+        }
+        p = p->p_pgrp_link;
+    }
+
+    return 0;
+}
+
+static struct session *__pgrp_unlink_locked(struct pgrp *pgrp) {
+    struct session *sess;
+    int hash;
+    struct pgrp **pp;
+
+    if (!pgrp) {
+        return NULL;
+    }
+
+    hash = pgrp_hashval(pgrp->pg_id);
+    pp = &pgrp_hash[hash];
+    while (*pp && *pp != pgrp) {
+        pp = &(*pp)->pg_hash_next;
+    }
+    if (*pp) {
+        *pp = pgrp->pg_hash_next;
+    }
+
+    sess = pgrp->pg_session;
+    if (!sess) {
+        return NULL;
+    }
+
+    pp = &sess->s_pgrps;
+    while (*pp && *pp != pgrp) {
+        pp = &(*pp)->pg_sess_next;
+    }
+    if (*pp) {
+        *pp = pgrp->pg_sess_next;
+    }
+    if (sess->s_pgrps == NULL) {
+        return sess;
+    }
+
+    return NULL;
+}
+
 /*
  * pgrp_check_orphan - Handle orphaned process group
  *
@@ -455,21 +524,17 @@ int pgrp_is_orphaned(struct pgrp *pgrp) {
  * send SIGHUP followed by SIGCONT to all members.
  */
 void pgrp_check_orphan(struct pgrp *pgrp) {
+    int orphaned;
+    int has_stopped;
+
     if (!pgrp) return;
-    if (!pgrp_is_orphaned(pgrp)) return;
-    
-    /* Check if any member is stopped */
-    int has_stopped = 0;
-    struct process *p = pgrp->pg_members;
-    while (p) {
-        if (p->state == SSTOP) {
-            has_stopped = 1;
-            break;
-        }
-        p = p->p_pgrp_link;
-    }
-    
-    if (has_stopped) {
+
+    mutex_lock(&proctree_lock);
+    orphaned = __pgrp_is_orphaned(pgrp);
+    has_stopped = __pgrp_has_stopped(pgrp);
+    mutex_unlock(&proctree_lock);
+
+    if (orphaned && has_stopped) {
         /* Send SIGHUP + SIGCONT to all members */
         pgrp_signal(pgrp, 1);  /* SIGHUP */
         pgrp_signal(pgrp, 18); /* SIGCONT */

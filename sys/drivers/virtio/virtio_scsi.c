@@ -24,8 +24,6 @@
  * ============================================================
  */
 
-#define VIRTIO_SCSI_DEVICE_ID     0x1008
-
 /* Feature bits */
 #define VIRTIO_SCSI_F_INOUT       (1 << 0)   /* Single request for IN/OUT */
 #define VIRTIO_SCSI_F_HOTPLUG     (1 << 1)   /* Hot-plug support */
@@ -561,7 +559,8 @@ void virtio_scsi_setup(uint8_t bus, uint8_t slot, uint8_t func) {
     }
     
     /* Setup SCSI transport link */
-    dev->link.name = "virtio-scsi";
+    strncpy(dev->link.name, "virtio-scsi", sizeof(dev->link.name) - 1);
+    dev->link.name[sizeof(dev->link.name) - 1] = '\0';
     dev->link.execute = vscsi_execute;
     dev->link.reset_device = vscsi_reset_device;
     dev->link.reset_bus = vscsi_reset_bus;

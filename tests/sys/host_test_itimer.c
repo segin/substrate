@@ -41,6 +41,7 @@ void spinlock_acquire(spinlock_t *lock) { (void)lock; }
 void spinlock_release(spinlock_t *lock) { (void)lock; }
 
 int percpu_get_cpu_id(void) { return current_cpu; }
+void hw_text_tick_1hz(void) {}
 
 #include "../../sys/kern/time.c"
 

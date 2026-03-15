@@ -1,0 +1,21 @@
+.Dd March 12, 2026
+.Dt PCI_MSI 9
+.Os
+.Sh NAME
+.Nm pci_enable_msi ,
+.Nm pci_disable_msi
+.Nd program MSI delivery for a PCI function
+.Sh SYNOPSIS
+.In kern/pci.h
+.Ft int
+.Fn pci_enable_msi "pci_device_t *dev"
+.Ft int
+.Fn pci_disable_msi "pci_device_t *dev"
+.Sh DESCRIPTION
+These functions locate the MSI capability and program the device-side MSI
+control fields.
+.Sh RETURN VALUES
+0 is returned on success.
+Otherwise a negative error code is returned.
+.Sh SEE ALSO
+.Xr pci_find_capability 9

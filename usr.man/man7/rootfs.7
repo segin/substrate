@@ -1,0 +1,141 @@
+.TH ROOTFS 7 "March 2026" "Substrate" "Miscellaneous Information Manual"
+.SH NAME
+rootfs \- constructing and booting a Substrate root filesystem image
+.SH DESCRIPTION
+Substrate expects a conventional Unix root filesystem image containing at least
+an init program, a shell, device directories, and the normal top-level
+hierarchy.
+.PP
+The repository already carries a reference ext2 image at
+.IR root.img .
+That image can be used directly for QEMU bring-up or copied and modified for
+experiments.
+.SH STAGING A ROOT TREE
+The top-level build installs a complete staged target tree into
+.B dist/
+by default.
+Build and stage it with:
+.PP
+.nf
+make
+make install DESTDIR=$PWD/dist
+.fi
+.PP
+The install step creates the standard root hierarchy, including
+.BR /bin ,
+.BR /sbin ,
+.BR /lib ,
+.BR /usr ,
+.BR /tmp ,
+.BR /dev ,
+.BR /proc ,
+and
+.BR /sys .
+.PP
+The kernel mounts
+.BR devfs ,
+.BR procfs ,
+and
+.BR sysfs
+itself after the root filesystem is established, but the mount points should
+still exist in the image.
+.SH BUILDING AN EXT2 ROOT IMAGE
+Create a fresh image from the staged tree with normal host ext2 tools:
+.PP
+.nf
+truncate -s 256M myroot.img
+mkfs.ext2 -F myroot.img
+
+tmpdir=$(mktemp -d)
+sudo mount -o loop myroot.img "$tmpdir"
+sudo cp -a dist/. "$tmpdir"/
+sudo mkdir -p "$tmpdir"/dev "$tmpdir"/proc "$tmpdir"/sys "$tmpdir"/tmp
+sudo chmod 1777 "$tmpdir"/tmp
+sync
+sudo umount "$tmpdir"
+rmdir "$tmpdir"
+.fi
+.PP
+The resulting image is suitable for use as a plain block-device root
+filesystem.
+.SH MODIFYING THE REFERENCE IMAGE
+To use the in-repo reference image as a starting point:
+.PP
+.nf
+cp root.img myroot.img
+tmpdir=$(mktemp -d)
+sudo mount -o loop myroot.img "$tmpdir"
+\&...modify files...
+sync
+sudo umount "$tmpdir"
+rmdir "$tmpdir"
+.fi
+.SH REQUIRED CONTENTS
+At minimum, a bootable root image should provide:
+.IP \(bu 2
+an init program at
+.BR /sbin/init ,
+or an explicit
+.B init=
+override at boot
+.IP \(bu
+a working shell such as
+.BR /bin/sh
+.IP \(bu
+directories
+.BR /dev ,
+.BR /proc ,
+.BR /sys ,
+and
+.BR /tmp
+.IP \(bu
+the userland and libraries required by the selected init program
+.SH QEMU BOOT EXAMPLES
+Boot the reference ext2 image as the primary IDE disk:
+.PP
+.nf
+qemu-system-i386 \\
+    -kernel sys/kernel.bin \\
+    -append "serial_debug root=/dev/storage/ide0 init=/bin/sh" \\
+    -serial stdio \\
+    -hda root.img \\
+    -m 2048
+.fi
+.PP
+Boot the BIOS
+.B zImage
+artifact directly:
+.PP
+.nf
+qemu-system-i386 \\
+    -kernel sys/kernel.zimage \\
+    -append "serial_debug root=/dev/storage/ide0 init=/bin/sh" \\
+    -serial stdio \\
+    -hda root.img \\
+    -m 2048
+.fi
+.PP
+Boot the BIOS floppy image and use the default command line by pressing
+.B Enter
+at the loader prompt:
+.PP
+.nf
+qemu-system-i386 \\
+    -fda sys/kernel.flp \\
+    -hda root.img \\
+    -serial stdio \\
+    -m 2048
+.fi
+.SH NOTES
+The tracked
+.I root.img
+is a reference root filesystem, not a generated artifact.
+It is intentionally kept at the repository root rather than under
+.B dist/
+because
+.B dist/
+is only the staged contents of a target filesystem tree.
+.SH SEE ALSO
+.BR kernel_command_line (7),
+.BR execve (2),
+.BR mount (2)

@@ -1,0 +1,19 @@
+.Dd March 12, 2026
+.Dt DEVFS_PERMISSIONS 9
+.Os Substrate
+.Sh NAME
+.Nm devfs_permissions
+.Nd open-time permission enforcement for devfs nodes
+.Sh SYNOPSIS
+.In vfs/vfs.h
+.Ft int
+.Fn vfs_may_open "fs_node_t *node" "uint32_t uid" "uint32_t gid" "int flags"
+.Sh DESCRIPTION
+.Fn vfs_may_open
+translates open flags into read/write permission requirements and evaluates them
+against the node's mode, owner, and group using
+.Fn vfs_check_permissions .
+Kernel open paths call this helper before allocating an active file object.
+.Sh SEE ALSO
+.Xr capabilities 7 ,
+.Xr request_region 9

@@ -1,0 +1,19 @@
+.Dd March 12, 2026
+.Dt LSPCI 1
+.Os Substrate
+.Sh NAME
+.Nm lspci
+.Nd print the kernel's enumerated PCI device list
+.Sh SYNOPSIS
+.Nm
+.Op Ar path
+.Sh DESCRIPTION
+.Nm
+prints the contents of
+.Pa /proc/pci
+or an alternate proc-style path supplied on the command line.
+It is a thin inspection tool over the kernel PCI bus layer.
+.Sh EXIT STATUS
+.Ex -std
+.Sh SEE ALSO
+.Xr proc 5

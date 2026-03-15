@@ -71,5 +71,9 @@ struct driver {
 void driver_blacklist_add(const char *name);
 void driver_override(struct device *dev, const char *name);
 int driver_is_blacklisted(const char *name);
+int driver_register(struct driver *drv, struct bus_type *bus);
+int driver_unregister(struct driver *drv);
+int driver_attach(struct driver *drv, struct device *dev);
+int driver_detach(struct device *dev);
 
 #endif /* _KERN_DRIVER_H */

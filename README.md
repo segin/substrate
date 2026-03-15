@@ -92,6 +92,79 @@ Substrate uses two build modes:
 
 Key rule: host mode is for validation/bootstrap only; target libraries and ABI behavior must remain Substrate-correct.
 
+## Using The System
+
+Build the tree:
+
+```sh
+make
+```
+
+Build the common kernel boot artifacts explicitly:
+
+```sh
+make -C sys kernel.bin kernel.zimage kernel.flp
+```
+
+Boot the tracked reference root filesystem image under QEMU:
+
+```sh
+qemu-system-i386 \
+  -kernel sys/kernel.bin \
+  -append "serial_debug root=/dev/storage/ide0 init=/bin/sh" \
+  -serial stdio \
+  -hda root.img \
+  -m 2048
+```
+
+The same root image can also be used with:
+
+- `sys/kernel.zimage` for direct BIOS-style boot
+- `sys/kernel.flp` as a floppy bootloader artifact, with `root.img` attached as the primary IDE disk
+
+Useful boot parameters are documented in [`kernel_command_line.7`](usr.man/man7/kernel_command_line.7).
+
+## Constructing A Root Filesystem
+
+Stage a complete target root tree into `dist/`:
+
+```sh
+make install DESTDIR=$PWD/dist
+```
+
+That staging tree is the source for a real bootable root image. Create a fresh ext2 image from it with host tools:
+
+```sh
+truncate -s 256M myroot.img
+mkfs.ext2 -F myroot.img
+
+tmpdir=$(mktemp -d)
+sudo mount -o loop myroot.img "$tmpdir"
+sudo cp -a dist/. "$tmpdir"/
+sudo mkdir -p "$tmpdir"/dev "$tmpdir"/proc "$tmpdir"/sys "$tmpdir"/tmp
+sudo chmod 1777 "$tmpdir"/tmp
+sync
+sudo umount "$tmpdir"
+rmdir "$tmpdir"
+```
+
+Minimum practical contents:
+
+- `/sbin/init`, or an alternate program supplied with `init=`
+- `/bin/sh`
+- `/dev`, `/proc`, `/sys`, `/tmp`
+- the libraries and userland required by your chosen init path
+
+If you want to start from the tracked reference image instead of building from `dist/`:
+
+```sh
+cp root.img myroot.img
+```
+
+then mount and modify `myroot.img` as needed.
+
+`dist/` remains only the staged contents of a target filesystem tree. Disk images such as `root.img` are separate artifacts.
+
 ## Host Toolchain Install (`host_dist` / `host_install`)
 
 Build host-runnable Substrate tools into `host_dist/`:
@@ -141,6 +214,7 @@ Notes:
 - `AGENTS.md`: project constraints and engineering directives.
 - `TASKS.md`: active execution plan/checklist.
 - `docs/specs/`: detailed subsystem specifications.
+- `usr.man/man7/rootfs.7`: root filesystem construction and boot examples.
 
 ## Contributing
 

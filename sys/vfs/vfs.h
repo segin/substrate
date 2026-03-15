@@ -107,6 +107,7 @@ int vfs_mkdir(const char *path, uint16_t permission);
 int vfs_mknod(const char *path, uint16_t mode, uint32_t dev);
 
 int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode);
+int vfs_may_open(fs_node_t *node, uint32_t uid, uint32_t gid, int flags);
 
 void vfs_register_filesystem(filesystem_t *fs);
 filesystem_t *vfs_get_filesystems(void);
@@ -118,6 +119,9 @@ void vfs_init(void);
 
 void devfs_init(void);
 void devfs_register_device(fs_node_t *node);
+void devfs_unregister_device(fs_node_t *node);
+int devfs_register_alias(const char *path, const char *target);
+void devfs_unregister_alias(const char *path);
 
 extern fs_node_t *fs_root; // Global root node
 
