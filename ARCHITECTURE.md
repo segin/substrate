@@ -383,6 +383,27 @@ Testing is multi-layer:
 - regression tests for previously fixed bugs
 - property/fuzz tests for parser/ELF robustness
 
+### Kernel Test Suite
+
+The kernel test suite (`tests/sys/`) is **not** compiled into the kernel by default.
+To build a kernel with the test suite linked in, pass `KERNEL_TESTS=1`:
+
+```
+make -C sys KERNEL_TESTS=1
+```
+
+At boot, pass `test=<name>` or `test=all` on the kernel command line to run tests.
+Without `KERNEL_TESTS=1`, the tests target compiles a no-op stub (`kern/tests_stub.c`).
+
+### Host Tests
+
+Host-runnable tests (`host_test_*` in `tests/sys/`) are built separately and run on the
+host OS for quick validation without booting the kernel. Build them with:
+
+```
+make -C tests/sys
+```
+
 Architecture policy:
 - toolchain behavior changes must include assembly/link/runtime validation
 - kernel changes must not silently invalidate userspace/toolchain assumptions

@@ -23,7 +23,7 @@ This is the Substrate operating system project targeting x86 32-bit architecture
 - **Framebuffer:** Implemented native linear framebuffer driver (`fb.c`) with Multiboot support and bitmap font console. Added Bochs Graphics Adapter (BGA) native driver support via `video=bga`.
 - **Build System:** Root filesystem generation in `dist/`
 - **Root Staging Rule:** `dist/` is only the staged contents of a real Substrate root filesystem. Do not place generic boot media, floppy images, scratch boot artifacts, or unrelated test payloads there; keep those beside the subsystem that builds them unless a different explicit staging path exists.
-- **Test Framework:** Implemented comprehensive kernel test runner (`sys/tests`), integrated into build system, with initial PMAP property tests.
+- **Test Framework:** Comprehensive kernel test runner (`tests/sys/`). Tests are **not** compiled into the kernel by default; use `make -C sys KERNEL_TESTS=1` for test builds. Host-runnable tests (`host_test_*`) are built separately with `make -C tests/sys`.
 - **Kernel sprintf Enhancements:** Added printf flags: `-`, `+`, ` `, `#`, `0`, numeric width, and conversions: d/i/u/o/x/X/p/s/c for improved debug output
 - **Process Model Refactor:** Separated Swapper (PID 0) and Init (PID 1). Enforced `PID == Main_TID` invariant. Added Process Group (`pgrp`) and Session support.
 - **TTY Signals:** Implemented signal generation from TTY (`SIGINT`, `SIGQUIT`, `SIGTSTP`) and group signal delivery (`signal_send_group`).

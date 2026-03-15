@@ -13,6 +13,8 @@ SRCS += test_ide_dma.c test_ide_qemu.c
 SRCS += bench_sched.c bench_sched_dequeue.c test_kobject.c test_vfs_cache.c test_vnode_cache.c test_vfs_busy.c
 SRCS += test_nanosleep.c test_reboot.c test_pipe_race.c test_chacha20.c
 SRCS += test_floppy_qemu.c
+SRCS += test_vnode_create.c test_vgone.c test_vnode_ref.c test_rusage.c test_mknod_fs.c
+SRCS += test_brk.c
 
 OBJS = $(SRCS:.c=.o)
 

@@ -66,7 +66,6 @@ extern char sysctl_debug[];
 extern char sysctl_debug_children[];
 extern char sysctl_debug_kmem_test_addr[];
 extern char sysctl_debug_kmem_test_size[];
-extern char sysctl_debug_test_uid[];
 extern char sysctl_hw[];
 extern char sysctl_hw_children[];
 extern char sysctl_hw_machine[];
@@ -334,7 +333,6 @@ extern void futex_lock_pi(void);
 extern void futex_thread_exit(void);
 extern void futex_unlock_pi(void);
 extern void futex_wake_exited_thread(void);
-extern void fuzz_pmap_enter(void);
 extern void gdt_flush(void);
 extern void gdt_init(void);
 extern void gdt_init_cpu(void);
@@ -651,8 +649,6 @@ extern void memset(void);
 extern void minix_init(void);
 extern void mknod_fs(void);
 extern void mmap_fs(void);
-extern void mock_kfree(void);
-extern void mock_kmalloc(void);
 extern void mouse_get_event(void);
 extern void mouse_get_state(void);
 extern void mouse_handler(void);
@@ -844,7 +840,6 @@ extern void proc_vfork_done(void);
 extern void process_keycode(void);
 extern void procfs_init(void);
 extern void procfs_register_entry(void);
-extern void property_pmap_kernel_consistency(void);
 extern void ps2_init(void);
 extern void ps2_read_data(void);
 extern void ps2_read_data_timeout(void);
@@ -889,63 +884,7 @@ extern void resource_init(void);
 extern void resource_root(void);
 extern void rtc_init(void);
 extern void rtc_read_time(void);
-extern void run_chacha20_tests(void);
-extern void run_cow_stats_tests(void);
-extern void run_crc32_tests(void);
-extern void run_devfs_special_device_tests(void);
-extern void run_div64_tests(void);
-extern void run_ext2_perf_test(void);
-extern void run_ext2_read_perf_test(void);
-extern void run_getcwd_tests(void);
 extern void run_kernel_tests(void);
-extern void run_kobject_tests(void);
-extern void run_kthread_create_tests(void);
-extern void run_ldt_tests(void);
-extern void run_link_property_tests(void);
-extern void run_link_tests(void);
-extern void run_minix_inode_tests(void);
-extern void run_minix_mount_tests(void);
-extern void run_minix_readdir_tests(void);
-extern void run_minix_write_tests(void);
-extern void run_mkdir_tests(void);
-extern void run_mmap_tests(void);
-extern void run_mount_tests(void);
-extern void run_nanosleep_tests(void);
-extern void run_pid_tests(void);
-extern void run_pmap_protect_property_tests(void);
-extern void run_pmap_tests(void);
-extern void run_printf_specifier_tests(void);
-extern void run_printf_vsnprintf_tests(void);
-extern void run_ps2_tests(void);
-extern void run_reboot_tests(void);
-extern void run_rng_tests(void);
-extern void run_sched_bench(void);
-extern void run_sched_dequeue_bench(void);
-extern void run_sched_perf_tests(void);
-extern void run_scsi_tests(void);
-extern void run_signal_tests(void);
-extern void run_sigstop_tests(void);
-extern void run_string_tests(void);
-extern void run_tty_tests(void);
-extern void run_udf_tests(void);
-extern void run_udf_write_tests(void);
-extern void run_uma_tests(void);
-extern void run_unlink_property_tests(void);
-extern void run_unlink_tests(void);
-extern void run_vfs_busy_tests(void);
-extern void run_vfs_cache_tests(void);
-extern void run_vfs_error_tests(void);
-extern void run_vm_cow_tests(void);
-extern void run_vm_expanded_tests(void);
-extern void run_vm_fault_tests(void);
-extern void run_vm_map_benchmark(void);
-extern void run_vm_map_tests(void);
-extern void run_vm_object_tests(void);
-extern void run_vm_pager_tests(void);
-extern void run_vm_policy_tests(void);
-extern void run_vnode_hold_tests(void);
-extern void run_vnode_lock_tests(void);
-extern void run_vnode_ops_tests(void);
 extern void runqueue_add(void);
 extern void runqueue_count(void);
 extern void runqueue_init(void);
@@ -984,9 +923,7 @@ extern void sched_enter_critical(void);
 extern void sched_fork_process(void);
 extern void sched_fork_thread(void);
 extern void sched_get_affinity(void);
-extern void sched_get_affinity_linear(void);
 extern void sched_get_affinity_self(void);
-extern void sched_get_affinity_via_func(void);
 extern void sched_get_cpu_load(void);
 extern void sched_get_current_runqueue(void);
 extern void sched_get_current_tid(void);
@@ -1293,160 +1230,6 @@ extern void sysctl_init(void);
 extern void sysctl_register_oid(void);
 extern void sysctl_unregister_oid(void);
 extern void sysfs_init(void);
-extern void test_bitness(void);
-extern void test_bus_compatible_match_logic(void);
-extern void test_bus_id_match_logic(void);
-extern void test_bus_match_logic(void);
-extern void test_bus_struct_layout(void);
-extern void test_console_perf(void);
-extern void test_cow_perf(void);
-extern void test_cow_stats_read(void);
-extern void test_deferred_probe_logic(void);
-extern void test_device_allocation(void);
-extern void test_device_pm_logic(void);
-extern void test_device_probe_logic(void);
-extern void test_device_refcounting(void);
-extern void test_device_registration_logic(void);
-extern void test_device_reset_logic(void);
-extern void test_device_shutdown_logic(void);
-extern void test_device_struct_layout(void);
-extern void test_device_unregister_logic(void);
-extern void test_driver_attach_logic(void);
-extern void test_driver_detach_logic(void);
-extern void test_driver_override_logic(void);
-extern void test_driver_registration_logic(void);
-extern void test_driver_struct_signatures(void);
-extern void test_driver_unregister_logic(void);
-extern void test_e820_parsing(void);
-extern void test_fb_modes(void);
-extern void test_fb_perf(void);
-extern void test_find_child_logic(void);
-extern void test_floppy_qemu(void);
-extern void test_futex(void);
-extern void test_futex_private(void);
-extern void test_futex_private_run_all(void);
-extern void test_futex_run_all(void);
-extern void test_geom(void);
-extern void test_ide_dma(void);
-extern void test_ide_perf(void);
-extern void test_ide_qemu_atapi(void);
-extern void test_ide_qemu_dma(void);
-extern void test_ide_qemu_extra_channels(void);
-extern void test_ide_qemu_pio(void);
-extern void test_kernel_bootstrap_large_page(void);
-extern void test_kernel_pmap_protection(void);
-extern void test_ksyms(void);
-extern void test_large_mapping(void);
-extern void test_linux_personality(void);
-extern void test_mem(void);
-extern void test_mmap_anonymous(void);
-extern void test_mmap_fixed(void);
-extern void test_mmap_fixed_overlap(void);
-extern void test_mmap_fixed_unaligned(void);
-extern void test_mmap_parsing(void);
-extern void test_mount_permissions(void);
-extern void test_mprotect(void);
-extern void test_multiple_mappings(void);
-extern void test_multiple_pmaps(void);
-extern void test_ntsync(void);
-extern void test_null_pmap(void);
-extern void test_pge_detection(void);
-extern void test_pge_global_flush(void);
-extern void test_pipe_race(void);
-extern void test_pmap_check(void);
-extern void test_pmap_copy_mixed(void);
-extern void test_pmap_dump(void);
-extern void test_pmap_enter_extract(void);
-extern void test_pmap_fork_cow_fault(void);
-extern void test_pmap_growkernel_sync(void);
-extern void test_pmap_hw_mappings(void);
-extern void test_pmap_large_protect_demote(void);
-extern void test_pmap_large_remove(void);
-extern void test_pmap_large_replace(void);
-extern void test_pmap_lifecycle(void);
-extern void test_pmap_mapping_counters(void);
-extern void test_pmap_page_refcounts_follow_mappings(void);
-extern void test_pmap_protect_rw(void);
-extern void test_pmap_pse(void);
-extern void test_pmap_refmod_tracking(void);
-extern void test_pmm_buddy(void);
-extern void test_pmm_watermark(void);
-extern void test_printf_flags(void);
-extern void test_printf_hash_flag(void);
-extern void test_printf_new(void);
-extern void test_printf_octal(void);
-extern void test_printf_plus_flag(void);
-extern void test_printf_space_flag(void);
-extern void test_printf_star(void);
-extern void test_printf_vsnprintf(void);
-extern void test_printf_width(void);
-extern void test_printf_zero_flag(void);
-extern void test_pte_user(void);
-extern void test_resource_helpers(void);
-extern void test_scsi(void);
-extern void test_stacktrace(void);
-extern void test_sys_brk(void);
-extern void test_sys_mmap(void);
-extern void test_sys_mprotect(void);
-extern void test_sys_munmap(void);
-extern void test_sysctl(void);
-extern void test_sysctl_handlers(void);
-extern void test_sysinfo(void);
-extern void test_tty_alloc(void);
-extern void test_tty_canonical(void);
-extern void test_tty_ixoff(void);
-extern void test_tty_termios(void);
-extern void test_uma_alloc_free(void);
-extern void test_uma_callback_ordering(void);
-extern void test_uma_capacity_accounting(void);
-extern void test_uma_ctor_dtor(void);
-extern void test_uma_dynamic_stress(void);
-extern void test_uma_large_objects(void);
-extern void test_uma_leak_tracking(void);
-extern void test_uma_limits(void);
-extern void test_uma_many_allocs(void);
-extern void test_uma_multi_zone_stress(void);
-extern void test_uma_percpu_cache_paths(void);
-extern void test_uma_redzone(void);
-extern void test_uma_slab_freelist_integrity(void);
-extern void test_uma_zero_fill(void);
-extern void test_vhold_vdrop(void);
-extern void test_vm_device_fault_mapping(void);
-extern void test_vm_fault_cow(void);
-extern void test_vm_fault_file_backed(void);
-extern void test_vm_fault_simple(void);
-extern void test_vm_map_benchmark(void);
-extern void test_vm_map_entry_flags(void);
-extern void test_vm_map_find_space(void);
-extern void test_vm_map_fork_cow(void);
-extern void test_vm_map_fork_mmap_isolation(void);
-extern void test_vm_map_insert_lookup(void);
-extern void test_vm_map_lifecycle(void);
-extern void test_vm_map_merge_adjacent(void);
-extern void test_vm_map_property_sorted_non_overlapping(void);
-extern void test_vm_map_protect_inherit(void);
-extern void test_vm_map_remove(void);
-extern void test_vm_map_wire(void);
-extern void test_vm_mmap_file_private_cow(void);
-extern void test_vm_mmap_file_shared_fork_visibility(void);
-extern void test_vm_msync_dirty_writeback(void);
-extern void test_vm_object_collapse(void);
-extern void test_vm_object_dynamic_free(void);
-extern void test_vm_object_lifecycle(void);
-extern void test_vm_object_map_reference_contract(void);
-extern void test_vm_object_pages(void);
-extern void test_vm_object_shadow(void);
-extern void test_vm_page_queue(void);
-extern void test_vm_pageout_launders_before_scanning_active(void);
-extern void test_vm_pageout_oom_kills_largest_user_process(void);
-extern void test_vm_pageout_prefers_inactive_then_active(void);
-extern void test_vm_pager_io(void);
-extern void test_vm_pager_lifecycle(void);
-extern void test_vm_phys(void);
-extern void test_vm_policy_lru(void);
-extern void test_vm_policy_writeback(void);
-extern void test_vm_swap_pager_full(void);
-extern void test_vm_swap_pager_roundtrip(void);
 extern void timer_init(void);
 extern void timer_tick(void);
 extern void timer_tick_context(void);
@@ -1597,12 +1380,6 @@ extern void vm86_init_bsd(void);
 extern void vm86_monitor_get(void);
 extern void vm86_monitor_init(void);
 extern void vm86_monitor_signal_fault(void);
-extern void vm_area_create(void);
-extern void vm_area_destroy(void);
-extern void vm_area_find(void);
-extern void vm_area_free_all(void);
-extern void vm_area_insert(void);
-extern void vm_area_remove(void);
 extern void vm_fault(void);
 extern void vm_map_create(void);
 extern void vm_map_destroy(void);
@@ -3198,228 +2975,6 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&vm_phys_mark_used, "vm_phys_mark_used" },
     { (uint32_t)(uintptr_t)&vm_phys_check_integrity, "vm_phys_check_integrity" },
     { (uint32_t)(uintptr_t)&run_kernel_tests, "run_kernel_tests" },
-    { (uint32_t)(uintptr_t)&vm_area_create, "vm_area_create" },
-    { (uint32_t)(uintptr_t)&vm_area_destroy, "vm_area_destroy" },
-    { (uint32_t)(uintptr_t)&vm_area_find, "vm_area_find" },
-    { (uint32_t)(uintptr_t)&vm_area_insert, "vm_area_insert" },
-    { (uint32_t)(uintptr_t)&vm_area_remove, "vm_area_remove" },
-    { (uint32_t)(uintptr_t)&vm_area_free_all, "vm_area_free_all" },
-    { (uint32_t)(uintptr_t)&test_sys_mmap, "test_sys_mmap" },
-    { (uint32_t)(uintptr_t)&test_sys_munmap, "test_sys_munmap" },
-    { (uint32_t)(uintptr_t)&test_sys_mprotect, "test_sys_mprotect" },
-    { (uint32_t)(uintptr_t)&test_mmap_anonymous, "test_mmap_anonymous" },
-    { (uint32_t)(uintptr_t)&test_multiple_mappings, "test_multiple_mappings" },
-    { (uint32_t)(uintptr_t)&test_mmap_fixed, "test_mmap_fixed" },
-    { (uint32_t)(uintptr_t)&test_mprotect, "test_mprotect" },
-    { (uint32_t)(uintptr_t)&test_large_mapping, "test_large_mapping" },
-    { (uint32_t)(uintptr_t)&test_mmap_fixed_unaligned, "test_mmap_fixed_unaligned" },
-    { (uint32_t)(uintptr_t)&test_mmap_fixed_overlap, "test_mmap_fixed_overlap" },
-    { (uint32_t)(uintptr_t)&run_mmap_tests, "run_mmap_tests" },
-    { (uint32_t)(uintptr_t)&test_pmap_lifecycle, "test_pmap_lifecycle" },
-    { (uint32_t)(uintptr_t)&test_pmap_large_replace, "test_pmap_large_replace" },
-    { (uint32_t)(uintptr_t)&test_multiple_pmaps, "test_multiple_pmaps" },
-    { (uint32_t)(uintptr_t)&test_pmap_enter_extract, "test_pmap_enter_extract" },
-    { (uint32_t)(uintptr_t)&test_kernel_pmap_protection, "test_kernel_pmap_protection" },
-    { (uint32_t)(uintptr_t)&test_null_pmap, "test_null_pmap" },
-    { (uint32_t)(uintptr_t)&test_pmap_pse, "test_pmap_pse" },
-    { (uint32_t)(uintptr_t)&test_pmap_check, "test_pmap_check" },
-    { (uint32_t)(uintptr_t)&test_pmap_dump, "test_pmap_dump" },
-    { (uint32_t)(uintptr_t)&test_pmap_mapping_counters, "test_pmap_mapping_counters" },
-    { (uint32_t)(uintptr_t)&test_pmap_page_refcounts_follow_mappings, "test_pmap_page_refcounts_follow_mappings" },
-    { (uint32_t)(uintptr_t)&test_pmap_growkernel_sync, "test_pmap_growkernel_sync" },
-    { (uint32_t)(uintptr_t)&test_pge_detection, "test_pge_detection" },
-    { (uint32_t)(uintptr_t)&test_pge_global_flush, "test_pge_global_flush" },
-    { (uint32_t)(uintptr_t)&test_kernel_bootstrap_large_page, "test_kernel_bootstrap_large_page" },
-    { (uint32_t)(uintptr_t)&test_pmap_refmod_tracking, "test_pmap_refmod_tracking" },
-    { (uint32_t)(uintptr_t)&test_pmap_protect_rw, "test_pmap_protect_rw" },
-    { (uint32_t)(uintptr_t)&test_pmap_fork_cow_fault, "test_pmap_fork_cow_fault" },
-    { (uint32_t)(uintptr_t)&test_pmap_copy_mixed, "test_pmap_copy_mixed" },
-    { (uint32_t)(uintptr_t)&test_pmap_large_remove, "test_pmap_large_remove" },
-    { (uint32_t)(uintptr_t)&test_pmap_large_protect_demote, "test_pmap_large_protect_demote" },
-    { (uint32_t)(uintptr_t)&run_pmap_tests, "run_pmap_tests" },
-    { (uint32_t)(uintptr_t)&run_pmap_protect_property_tests, "run_pmap_protect_property_tests" },
-    { (uint32_t)(uintptr_t)&test_pmap_hw_mappings, "test_pmap_hw_mappings" },
-    { (uint32_t)(uintptr_t)&property_pmap_kernel_consistency, "property_pmap_kernel_consistency" },
-    { (uint32_t)(uintptr_t)&fuzz_pmap_enter, "fuzz_pmap_enter" },
-    { (uint32_t)(uintptr_t)&run_vm_expanded_tests, "run_vm_expanded_tests" },
-    { (uint32_t)(uintptr_t)&run_pid_tests, "run_pid_tests" },
-    { (uint32_t)(uintptr_t)&run_unlink_tests, "run_unlink_tests" },
-    { (uint32_t)(uintptr_t)&run_unlink_property_tests, "run_unlink_property_tests" },
-    { (uint32_t)(uintptr_t)&run_link_tests, "run_link_tests" },
-    { (uint32_t)(uintptr_t)&run_link_property_tests, "run_link_property_tests" },
-    { (uint32_t)(uintptr_t)&test_cow_stats_read, "test_cow_stats_read" },
-    { (uint32_t)(uintptr_t)&run_cow_stats_tests, "run_cow_stats_tests" },
-    { (uint32_t)(uintptr_t)&test_vm_map_lifecycle, "test_vm_map_lifecycle" },
-    { (uint32_t)(uintptr_t)&test_vm_map_insert_lookup, "test_vm_map_insert_lookup" },
-    { (uint32_t)(uintptr_t)&test_vm_map_find_space, "test_vm_map_find_space" },
-    { (uint32_t)(uintptr_t)&test_vm_map_remove, "test_vm_map_remove" },
-    { (uint32_t)(uintptr_t)&test_vm_map_entry_flags, "test_vm_map_entry_flags" },
-    { (uint32_t)(uintptr_t)&test_vm_map_wire, "test_vm_map_wire" },
-    { (uint32_t)(uintptr_t)&test_vm_map_protect_inherit, "test_vm_map_protect_inherit" },
-    { (uint32_t)(uintptr_t)&test_vm_map_benchmark, "test_vm_map_benchmark" },
-    { (uint32_t)(uintptr_t)&test_vm_map_property_sorted_non_overlapping, "test_vm_map_property_sorted_non_overlapping" },
-    { (uint32_t)(uintptr_t)&test_vm_map_merge_adjacent, "test_vm_map_merge_adjacent" },
-    { (uint32_t)(uintptr_t)&test_sys_brk, "test_sys_brk" },
-    { (uint32_t)(uintptr_t)&run_vm_map_tests, "run_vm_map_tests" },
-    { (uint32_t)(uintptr_t)&run_vm_map_benchmark, "run_vm_map_benchmark" },
-    { (uint32_t)(uintptr_t)&test_vm_object_lifecycle, "test_vm_object_lifecycle" },
-    { (uint32_t)(uintptr_t)&test_vm_object_shadow, "test_vm_object_shadow" },
-    { (uint32_t)(uintptr_t)&test_vm_object_pages, "test_vm_object_pages" },
-    { (uint32_t)(uintptr_t)&test_vm_object_dynamic_free, "test_vm_object_dynamic_free" },
-    { (uint32_t)(uintptr_t)&test_vm_object_collapse, "test_vm_object_collapse" },
-    { (uint32_t)(uintptr_t)&test_vm_object_map_reference_contract, "test_vm_object_map_reference_contract" },
-    { (uint32_t)(uintptr_t)&run_vm_object_tests, "run_vm_object_tests" },
-    { (uint32_t)(uintptr_t)&test_vm_fault_simple, "test_vm_fault_simple" },
-    { (uint32_t)(uintptr_t)&test_vm_fault_cow, "test_vm_fault_cow" },
-    { (uint32_t)(uintptr_t)&test_vm_fault_file_backed, "test_vm_fault_file_backed" },
-    { (uint32_t)(uintptr_t)&run_vm_fault_tests, "run_vm_fault_tests" },
-    { (uint32_t)(uintptr_t)&test_vm_map_fork_cow, "test_vm_map_fork_cow" },
-    { (uint32_t)(uintptr_t)&test_vm_map_fork_mmap_isolation, "test_vm_map_fork_mmap_isolation" },
-    { (uint32_t)(uintptr_t)&run_vm_cow_tests, "run_vm_cow_tests" },
-    { (uint32_t)(uintptr_t)&test_vm_pager_lifecycle, "test_vm_pager_lifecycle" },
-    { (uint32_t)(uintptr_t)&test_vm_pager_io, "test_vm_pager_io" },
-    { (uint32_t)(uintptr_t)&test_vm_swap_pager_roundtrip, "test_vm_swap_pager_roundtrip" },
-    { (uint32_t)(uintptr_t)&test_vm_swap_pager_full, "test_vm_swap_pager_full" },
-    { (uint32_t)(uintptr_t)&test_vm_device_fault_mapping, "test_vm_device_fault_mapping" },
-    { (uint32_t)(uintptr_t)&test_vm_msync_dirty_writeback, "test_vm_msync_dirty_writeback" },
-    { (uint32_t)(uintptr_t)&test_vm_mmap_file_private_cow, "test_vm_mmap_file_private_cow" },
-    { (uint32_t)(uintptr_t)&test_vm_mmap_file_shared_fork_visibility, "test_vm_mmap_file_shared_fork_visibility" },
-    { (uint32_t)(uintptr_t)&run_vm_pager_tests, "run_vm_pager_tests" },
-    { (uint32_t)(uintptr_t)&test_vm_policy_lru, "test_vm_policy_lru" },
-    { (uint32_t)(uintptr_t)&test_vm_policy_writeback, "test_vm_policy_writeback" },
-    { (uint32_t)(uintptr_t)&test_vm_pageout_prefers_inactive_then_active, "test_vm_pageout_prefers_inactive_then_active" },
-    { (uint32_t)(uintptr_t)&test_vm_pageout_launders_before_scanning_active, "test_vm_pageout_launders_before_scanning_active" },
-    { (uint32_t)(uintptr_t)&test_vm_pageout_oom_kills_largest_user_process, "test_vm_pageout_oom_kills_largest_user_process" },
-    { (uint32_t)(uintptr_t)&run_vm_policy_tests, "run_vm_policy_tests" },
-    { (uint32_t)(uintptr_t)&test_uma_large_objects, "test_uma_large_objects" },
-    { (uint32_t)(uintptr_t)&test_uma_alloc_free, "test_uma_alloc_free" },
-    { (uint32_t)(uintptr_t)&test_uma_zero_fill, "test_uma_zero_fill" },
-    { (uint32_t)(uintptr_t)&test_uma_ctor_dtor, "test_uma_ctor_dtor" },
-    { (uint32_t)(uintptr_t)&test_uma_callback_ordering, "test_uma_callback_ordering" },
-    { (uint32_t)(uintptr_t)&test_uma_leak_tracking, "test_uma_leak_tracking" },
-    { (uint32_t)(uintptr_t)&test_uma_percpu_cache_paths, "test_uma_percpu_cache_paths" },
-    { (uint32_t)(uintptr_t)&test_uma_slab_freelist_integrity, "test_uma_slab_freelist_integrity" },
-    { (uint32_t)(uintptr_t)&test_uma_capacity_accounting, "test_uma_capacity_accounting" },
-    { (uint32_t)(uintptr_t)&test_uma_many_allocs, "test_uma_many_allocs" },
-    { (uint32_t)(uintptr_t)&test_uma_redzone, "test_uma_redzone" },
-    { (uint32_t)(uintptr_t)&test_uma_dynamic_stress, "test_uma_dynamic_stress" },
-    { (uint32_t)(uintptr_t)&test_uma_multi_zone_stress, "test_uma_multi_zone_stress" },
-    { (uint32_t)(uintptr_t)&test_uma_limits, "test_uma_limits" },
-    { (uint32_t)(uintptr_t)&run_uma_tests, "run_uma_tests" },
-    { (uint32_t)(uintptr_t)&test_futex_run_all, "test_futex_run_all" },
-    { (uint32_t)(uintptr_t)&test_futex, "test_futex" },
-    { (uint32_t)(uintptr_t)&test_futex_private_run_all, "test_futex_private_run_all" },
-    { (uint32_t)(uintptr_t)&test_futex_private, "test_futex_private" },
-    { (uint32_t)(uintptr_t)&test_ntsync, "test_ntsync" },
-    { (uint32_t)(uintptr_t)&test_geom, "test_geom" },
-    { (uint32_t)(uintptr_t)&test_pte_user, "test_pte_user" },
-    { (uint32_t)(uintptr_t)&test_stacktrace, "test_stacktrace" },
-    { (uint32_t)(uintptr_t)&test_ksyms, "test_ksyms" },
-    { (uint32_t)(uintptr_t)&test_mmap_parsing, "test_mmap_parsing" },
-    { (uint32_t)(uintptr_t)&test_e820_parsing, "test_e820_parsing" },
-    { (uint32_t)(uintptr_t)&test_vm_phys, "test_vm_phys" },
-    { (uint32_t)(uintptr_t)&test_vm_page_queue, "test_vm_page_queue" },
-    { (uint32_t)(uintptr_t)&test_pmm_watermark, "test_pmm_watermark" },
-    { (uint32_t)(uintptr_t)&test_pmm_buddy, "test_pmm_buddy" },
-    { (uint32_t)(uintptr_t)&run_mkdir_tests, "run_mkdir_tests" },
-    { (uint32_t)(uintptr_t)&test_scsi, "test_scsi" },
-    { (uint32_t)(uintptr_t)&run_scsi_tests, "run_scsi_tests" },
-    { (uint32_t)(uintptr_t)&run_signal_tests, "run_signal_tests" },
-    { (uint32_t)(uintptr_t)&test_bitness, "test_bitness" },
-    { (uint32_t)(uintptr_t)&run_rng_tests, "run_rng_tests" },
-    { (uint32_t)(uintptr_t)&run_ps2_tests, "run_ps2_tests" },
-    { (uint32_t)(uintptr_t)&run_minix_mount_tests, "run_minix_mount_tests" },
-    { (uint32_t)(uintptr_t)&run_minix_write_tests, "run_minix_write_tests" },
-    { (uint32_t)(uintptr_t)&run_minix_inode_tests, "run_minix_inode_tests" },
-    { (uint32_t)(uintptr_t)&test_mount_permissions, "test_mount_permissions" },
-    { (uint32_t)(uintptr_t)&run_mount_tests, "run_mount_tests" },
-    { (uint32_t)(uintptr_t)&test_device_struct_layout, "test_device_struct_layout" },
-    { (uint32_t)(uintptr_t)&test_driver_struct_signatures, "test_driver_struct_signatures" },
-    { (uint32_t)(uintptr_t)&test_bus_struct_layout, "test_bus_struct_layout" },
-    { (uint32_t)(uintptr_t)&test_resource_helpers, "test_resource_helpers" },
-    { (uint32_t)(uintptr_t)&mock_kmalloc, "mock_kmalloc" },
-    { (uint32_t)(uintptr_t)&mock_kfree, "mock_kfree" },
-    { (uint32_t)(uintptr_t)&test_device_allocation, "test_device_allocation" },
-    { (uint32_t)(uintptr_t)&test_device_registration_logic, "test_device_registration_logic" },
-    { (uint32_t)(uintptr_t)&test_device_unregister_logic, "test_device_unregister_logic" },
-    { (uint32_t)(uintptr_t)&test_device_refcounting, "test_device_refcounting" },
-    { (uint32_t)(uintptr_t)&test_find_child_logic, "test_find_child_logic" },
-    { (uint32_t)(uintptr_t)&test_device_probe_logic, "test_device_probe_logic" },
-    { (uint32_t)(uintptr_t)&test_deferred_probe_logic, "test_deferred_probe_logic" },
-    { (uint32_t)(uintptr_t)&test_device_pm_logic, "test_device_pm_logic" },
-    { (uint32_t)(uintptr_t)&test_device_shutdown_logic, "test_device_shutdown_logic" },
-    { (uint32_t)(uintptr_t)&test_device_reset_logic, "test_device_reset_logic" },
-    { (uint32_t)(uintptr_t)&test_driver_registration_logic, "test_driver_registration_logic" },
-    { (uint32_t)(uintptr_t)&test_driver_unregister_logic, "test_driver_unregister_logic" },
-    { (uint32_t)(uintptr_t)&test_driver_attach_logic, "test_driver_attach_logic" },
-    { (uint32_t)(uintptr_t)&test_driver_detach_logic, "test_driver_detach_logic" },
-    { (uint32_t)(uintptr_t)&test_printf_new, "test_printf_new" },
-    { (uint32_t)(uintptr_t)&test_printf_flags, "test_printf_flags" },
-    { (uint32_t)(uintptr_t)&test_printf_plus_flag, "test_printf_plus_flag" },
-    { (uint32_t)(uintptr_t)&test_printf_space_flag, "test_printf_space_flag" },
-    { (uint32_t)(uintptr_t)&test_printf_hash_flag, "test_printf_hash_flag" },
-    { (uint32_t)(uintptr_t)&test_printf_zero_flag, "test_printf_zero_flag" },
-    { (uint32_t)(uintptr_t)&test_printf_width, "test_printf_width" },
-    { (uint32_t)(uintptr_t)&test_printf_octal, "test_printf_octal" },
-    { (uint32_t)(uintptr_t)&run_udf_write_tests, "run_udf_write_tests" },
-    { (uint32_t)(uintptr_t)&run_udf_tests, "run_udf_tests" },
-    { (uint32_t)(uintptr_t)&run_sigstop_tests, "run_sigstop_tests" },
-    { (uint32_t)(uintptr_t)&test_bus_match_logic, "test_bus_match_logic" },
-    { (uint32_t)(uintptr_t)&test_bus_id_match_logic, "test_bus_id_match_logic" },
-    { (uint32_t)(uintptr_t)&test_bus_compatible_match_logic, "test_bus_compatible_match_logic" },
-    { (uint32_t)(uintptr_t)&test_driver_override_logic, "test_driver_override_logic" },
-    { (uint32_t)(uintptr_t)&run_vfs_error_tests, "run_vfs_error_tests" },
-    { (uint32_t)(uintptr_t)&test_console_perf, "test_console_perf" },
-    { (uint32_t)(uintptr_t)&test_sysinfo, "test_sysinfo" },
-    { (uint32_t)(uintptr_t)&run_kthread_create_tests, "run_kthread_create_tests" },
-    { (uint32_t)(uintptr_t)&test_fb_perf, "test_fb_perf" },
-    { (uint32_t)(uintptr_t)&test_fb_modes, "test_fb_modes" },
-    { (uint32_t)(uintptr_t)&run_string_tests, "run_string_tests" },
-    { (uint32_t)(uintptr_t)&test_sysctl, "test_sysctl" },
-    { (uint32_t)(uintptr_t)&test_sysctl_handlers, "test_sysctl_handlers" },
-    { (uint32_t)(uintptr_t)&test_cow_perf, "test_cow_perf" },
-    { (uint32_t)(uintptr_t)&test_ide_perf, "test_ide_perf" },
-    { (uint32_t)(uintptr_t)&run_ext2_perf_test, "run_ext2_perf_test" },
-    { (uint32_t)(uintptr_t)&run_ext2_read_perf_test, "run_ext2_read_perf_test" },
-    { (uint32_t)(uintptr_t)&sched_get_affinity_linear, "sched_get_affinity_linear" },
-    { (uint32_t)(uintptr_t)&sched_get_affinity_via_func, "sched_get_affinity_via_func" },
-    { (uint32_t)(uintptr_t)&run_sched_perf_tests, "run_sched_perf_tests" },
-    { (uint32_t)(uintptr_t)&run_vnode_ops_tests, "run_vnode_ops_tests" },
-    { (uint32_t)(uintptr_t)&test_printf_star, "test_printf_star" },
-    { (uint32_t)(uintptr_t)&run_printf_specifier_tests, "run_printf_specifier_tests" },
-    { (uint32_t)(uintptr_t)&test_printf_vsnprintf, "test_printf_vsnprintf" },
-    { (uint32_t)(uintptr_t)&run_printf_vsnprintf_tests, "run_printf_vsnprintf_tests" },
-    { (uint32_t)(uintptr_t)&run_getcwd_tests, "run_getcwd_tests" },
-    { (uint32_t)(uintptr_t)&run_vnode_lock_tests, "run_vnode_lock_tests" },
-    { (uint32_t)(uintptr_t)&run_vnode_hold_tests, "run_vnode_hold_tests" },
-    { (uint32_t)(uintptr_t)&test_vhold_vdrop, "test_vhold_vdrop" },
-    { (uint32_t)(uintptr_t)&test_mem, "test_mem" },
-    { (uint32_t)(uintptr_t)&run_div64_tests, "run_div64_tests" },
-    { (uint32_t)(uintptr_t)&run_crc32_tests, "run_crc32_tests" },
-    { (uint32_t)(uintptr_t)&run_devfs_special_device_tests, "run_devfs_special_device_tests" },
-    { (uint32_t)(uintptr_t)&run_ldt_tests, "run_ldt_tests" },
-    { (uint32_t)(uintptr_t)&test_linux_personality, "test_linux_personality" },
-    { (uint32_t)(uintptr_t)&test_tty_alloc, "test_tty_alloc" },
-    { (uint32_t)(uintptr_t)&test_tty_canonical, "test_tty_canonical" },
-    { (uint32_t)(uintptr_t)&test_tty_ixoff, "test_tty_ixoff" },
-    { (uint32_t)(uintptr_t)&test_tty_termios, "test_tty_termios" },
-    { (uint32_t)(uintptr_t)&run_tty_tests, "run_tty_tests" },
-    { (uint32_t)(uintptr_t)&run_minix_readdir_tests, "run_minix_readdir_tests" },
-    { (uint32_t)(uintptr_t)&test_ide_dma, "test_ide_dma" },
-    { (uint32_t)(uintptr_t)&test_ide_qemu_pio, "test_ide_qemu_pio" },
-    { (uint32_t)(uintptr_t)&test_ide_qemu_dma, "test_ide_qemu_dma" },
-    { (uint32_t)(uintptr_t)&test_ide_qemu_atapi, "test_ide_qemu_atapi" },
-    { (uint32_t)(uintptr_t)&test_ide_qemu_extra_channels, "test_ide_qemu_extra_channels" },
-    { (uint32_t)(uintptr_t)&run_sched_bench, "run_sched_bench" },
-    { (uint32_t)(uintptr_t)&run_sched_dequeue_bench, "run_sched_dequeue_bench" },
-    { (uint32_t)(uintptr_t)&run_kobject_tests, "run_kobject_tests" },
-    { (uint32_t)(uintptr_t)&run_vfs_cache_tests, "run_vfs_cache_tests" },
-    { (uint32_t)(uintptr_t)&run_vfs_busy_tests, "run_vfs_busy_tests" },
-    { (uint32_t)(uintptr_t)&run_nanosleep_tests, "run_nanosleep_tests" },
-    { (uint32_t)(uintptr_t)&run_reboot_tests, "run_reboot_tests" },
-    { (uint32_t)(uintptr_t)&test_pipe_race, "test_pipe_race" },
-    { (uint32_t)(uintptr_t)&run_chacha20_tests, "run_chacha20_tests" },
-    { (uint32_t)(uintptr_t)&test_floppy_qemu, "test_floppy_qemu" },
     { (uint32_t)(uintptr_t)&sigprop, "sigprop" },
     { (uint32_t)(uintptr_t)&font_8x16, "font_8x16" },
     { (uint32_t)(uintptr_t)&font_8x8, "font_8x8" },
@@ -3463,7 +3018,6 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&swap_pager_ops, "swap_pager_ops" },
     { (uint32_t)(uintptr_t)&vnode_pager_ops, "vnode_pager_ops" },
     { (uint32_t)(uintptr_t)&device_pager_ops, "device_pager_ops" },
-    { (uint32_t)(uintptr_t)&sysctl_debug_test_uid, "sysctl_debug_test_uid" },
     { (uint32_t)(uintptr_t)&stack_top, "stack_top" },
     { (uint32_t)(uintptr_t)&idt_entries, "idt_entries" },
     { (uint32_t)(uintptr_t)&idt_ptr, "idt_ptr" },
@@ -3511,4 +3065,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1750;
+int ksym_count = 1527;

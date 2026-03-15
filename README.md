@@ -92,6 +92,22 @@ Substrate uses two build modes:
 
 Key rule: host mode is for validation/bootstrap only; target libraries and ABI behavior must remain Substrate-correct.
 
+## Testing
+
+The kernel test suite is **not** compiled into the kernel by default. To build a test kernel:
+
+```sh
+make -C sys KERNEL_TESTS=1
+```
+
+Boot with `test=all` (or `test=<name>`) on the command line to run tests.
+
+Host-runnable tests (`host_test_*`) can be built and run on the development machine without booting the kernel:
+
+```sh
+make -C tests/sys
+```
+
 ## Using The System
 
 Build the tree:

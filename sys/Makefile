@@ -4,6 +4,16 @@ include ../Makefile.inc
 ARCH ?= i386
 # Note: No libgcc needed - we implement our own 64-bit helpers in kern/lib.c
 
+# Set KERNEL_TESTS=1 to compile the kernel test suite into the kernel.
+# By default, tests are NOT included - use a dedicated test build for that.
+KERNEL_TESTS ?= 0
+
+ifeq ($(KERNEL_TESTS),1)
+TESTS_OBJ = ../tests/sys/tests.o
+else
+TESTS_OBJ = kern/tests_stub.o
+endif
+
 EFI_OBJCOPY_FLAGS =
 ifeq ($(ARCH),i386)
 	EFI_OBJCOPY_FLAGS := --change-section-vma .text-0xBFC00000 \
@@ -37,7 +47,7 @@ kernel.bin: arch_kernel klib kern pm drivers fs exec vfs exec_perso vm tests
 		exec/formats/exec.o \
 		exec/perso/perso.o \
 		vm/vm.o \
-	../tests/sys/tests.o
+	$(TESTS_OBJ)
 	# Generate ksyms table
 	nm kernel.tmp | python3 mkksyms.py > ksyms_table.c
 	$(CC) $(KERNEL_CFLAGS) -c ksyms_table.c -o ksyms_table.o
@@ -60,7 +70,7 @@ kernel.bin: arch_kernel klib kern pm drivers fs exec vfs exec_perso vm tests
 		exec/formats/exec.o \
 		exec/perso/perso.o \
 		vm/vm.o \
-	../tests/sys/tests.o \
+	$(TESTS_OBJ) \
 	ksyms_table.o
 	@echo "Linked kernel.bin"
 
@@ -101,7 +111,7 @@ kernel.efi: arch_kernel klib kern pm drivers fs exec vfs exec_perso vm tests
 		exec/formats/exec.o \
 		exec/perso/perso.o \
 		vm/vm.o \
-	../tests/sys/tests.o \
+	$(TESTS_OBJ) \
 		$(LIBGCC)
 	# Generate ksyms table
 	nm kernel_efi.tmp | python3 mkksyms.py > ksyms_efi_table.c
@@ -125,7 +135,7 @@ kernel.efi: arch_kernel klib kern pm drivers fs exec vfs exec_perso vm tests
 		exec/formats/exec.o \
 		exec/perso/perso.o \
 		vm/vm.o \
-	../tests/sys/tests.o \
+	$(TESTS_OBJ) \
 	ksyms_efi_table.o \
 		$(LIBGCC)
 	objcopy -O pe-i386 $(EFI_OBJCOPY_FLAGS) kernel_efi.elf kernel.efi
@@ -202,11 +212,18 @@ clean:
 	$(MAKE) -C exec/perso clean
 	$(MAKE) -C vm clean
 	$(MAKE) -C lib clean
-	rm -f kernel.bin kernel.zimage kernel.flp kernel.tmp kernel_efi.tmp ksyms_table.c ksyms_table.o ksyms_efi_table.c ksyms_efi_table.o kernel_efi.elf kernel.efi kernel.multiboot kernel.freebsd
+	rm -f kernel.bin kernel.zimage kernel.flp kernel.tmp kernel_efi.tmp ksyms_table.c ksyms_table.o ksyms_efi_table.c ksyms_efi_table.o kernel_efi.elf kernel.efi kernel.multiboot kernel.freebsd kern/tests_stub.o
 	rm -f arch/$(ARCH)/floppy/stage1.bin arch/$(ARCH)/floppy/stage2.bin
 
+ifeq ($(KERNEL_TESTS),1)
 tests:
 	$(MAKE) -C ../tests/sys tests.o
+else
+tests: kern/tests_stub.o
+endif
+
+kern/tests_stub.o: kern/tests_stub.c
+	$(CC) $(KERNEL_CFLAGS) -c kern/tests_stub.c -o kern/tests_stub.o
 
 install: kernel.bin
 	@echo "Installing Kernel to $(DESTDIR)/vmunix..."
