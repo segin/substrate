@@ -5,6 +5,7 @@
 #include <sys/proc.h>
 #include <sys/input.h>
 #include <arch/i386/early_boot.h>
+#include <arch/i386/intr.h>
 
 #include <drivers/video/vga.h>
 #include <drivers/video/fb.h>
@@ -18,6 +19,8 @@
 #include <drivers/storage/ide/ide.h>
 #include <drivers/storage/ahci/ahci.h>
 #include <drivers/storage/nvme/nvme.h>
+#include <drivers/usb/usb.h>
+#include <drivers/usb/uhci.h>
 #include <drivers/virtio/virtio.h>
 #include <drivers/storage/ramdisk.h>
 #include <drivers/storage/floppy/floppy.h>
@@ -436,11 +439,25 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
 }
 
 static void init_storage_and_vfs(multiboot_info_t *mboot_info) {
+    /*
+     * Enable interrupts before driver init — timer IRQs must be
+     * running so get_uptime_ms() advances for driver timeout loops
+     * (UHCI reset, AHCI port stop, etc.).  IDT, PIT, and PIC/APIC
+     * are all configured by init_core_subsystems() above.
+     */
+    intr_enable();
+
     pci_init();
     isa_init();
     isa_probe_legacy();
+    scsi_init();
     floppy_init();
     ide_init();
+    ahci_init();
+    uhci_init();
+    usb_msc_init();
+    usb_hid_init();
+    usb_init();
     virtio_init();
     register_boot_ramdisks(mboot_info);
     ntsync_init();

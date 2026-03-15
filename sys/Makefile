@@ -29,6 +29,7 @@ kernel.bin: arch_kernel klib kern pm drivers fs exec vfs exec_perso vm tests
 		drivers/console/console_subsys.o \
 		drivers/console/uart/uart_drv.o \
 		drivers/storage/storage.o \
+		drivers/usb/usb_drv.o \
 		drivers/devices/devices.o \
 		drivers/virtio/virtio_drv.o \
 		vfs/vfs_subsys.o \
@@ -51,6 +52,7 @@ kernel.bin: arch_kernel klib kern pm drivers fs exec vfs exec_perso vm tests
 		drivers/console/console_subsys.o \
 		drivers/console/uart/uart_drv.o \
 		drivers/storage/storage.o \
+		drivers/usb/usb_drv.o \
 		drivers/devices/devices.o \
 		drivers/virtio/virtio_drv.o \
 		vfs/vfs_subsys.o \
@@ -91,6 +93,7 @@ kernel.efi: arch_kernel klib kern pm drivers fs exec vfs exec_perso vm tests
 		drivers/console/console_subsys.o \
 		drivers/console/uart/uart_drv.o \
 		drivers/storage/storage.o \
+		drivers/usb/usb_drv.o \
 		drivers/devices/devices.o \
 		drivers/virtio/virtio_drv.o \
 		vfs/vfs_subsys.o \
@@ -114,6 +117,7 @@ kernel.efi: arch_kernel klib kern pm drivers fs exec vfs exec_perso vm tests
 		drivers/console/console_subsys.o \
 		drivers/console/uart/uart_drv.o \
 		drivers/storage/storage.o \
+		drivers/usb/usb_drv.o \
 		drivers/devices/devices.o \
 		drivers/virtio/virtio_drv.o \
 		vfs/vfs_subsys.o \
@@ -157,6 +161,7 @@ klib:
 	$(MAKE) -C drivers/storage
 	$(MAKE) -C drivers/devices
 	$(MAKE) -C drivers/virtio
+	$(MAKE) -C drivers/usb
 	$(MAKE) -C drivers/console
 	$(MAKE) -C drivers/console/uart
 
@@ -188,6 +193,7 @@ clean:
 	$(MAKE) -C drivers/storage clean
 	$(MAKE) -C drivers/devices clean
 	$(MAKE) -C drivers/virtio clean
+	$(MAKE) -C drivers/usb clean
 	$(MAKE) -C drivers/console clean
 	$(MAKE) -C drivers/console/uart clean
 	$(MAKE) -C vfs clean

@@ -131,6 +131,7 @@ pmm_free_block(virt);  // CORRECT - convert first
 10. **Host Builds vs Target Builds (CRITICAL):**
 11. **Header & Macro Standards (CRITICAL):**
 12. **Autonomous Execution (CRITICAL):**
+    - **Use `#askuser`:** When communicating with the user for clarification, confirmation, or feedback, always use `#askuser` rather than plain freeform prompting.
     - Default to autonomous mode: do not stop for routine confirmations.
     - Make best-effort decisions and continue immediately unless an operation is destructive (`reset`, `checkout --`, force-push) or truly blocked.
     - In dirty worktrees, commit only files related to the active task and ignore unrelated modifications.

@@ -741,25 +741,27 @@ int vfs_mknod(const char *path, uint16_t mode, uint32_t dev) {
 int vfs_unmount_legacy(const char *path) {
     if (!path) return -1;
     
-    // Lookup mount point (directory that was mounted ON)
-    // We need to find the node that has FS_MOUNTPOINT flag.
-    // If we use regular lookup, we might traverse into the mounted filesystem.
-    // But we want the COVERED node.
-    
-    // NOTE: vfs_lookup usually traverses mountpoints.
-    // We need a way to lookup without traversing the LAST mountpoint.
-    
-    // For now, let's assume we can match by path string if we had a mount list?
-    // But we didn't implement a global mount list with paths yet (except implicit tree).
-    
-    // Workaround: Use vfs_lookup_lstat? No, that stops at symlinks.
-    // We need to implement a lookup that returns the MOUNTPOINT node, not the root of the fs.
-    
-    // Actually, if we mount on /mnt, the node at /mnt (in root fs) has FS_MOUNTPOINT.
-    // Its 'ptr' points to the new root.
-    
-    // Strategy: Lookup parent directory, then find entry, but manually check flags
-    // without invoking the automatic traversal (or utilize a specialized finding function).
+    /*
+     * Lookup mount point (the directory that was mounted ON).
+     * We need to find the node that has the mount point flag.
+     * If we use standard lookup, we might traverse into the mounted filesystem.
+     * But we want the COVERED node.
+     *
+     * NOTE: Standard lookup usually traverses mount points.
+     * We need a way to lookup without traversing the LAST mount point.
+     *
+     * For now, let's assume we can match by path string if we had a mount list.
+     * But we didn't implement a global mount list with paths yet (except implicit tree).
+     *
+     * Workaround: Use standard lookup lstat. No, that stops at symlinks.
+     * We need to implement a lookup that returns the mount point node, not the root of the filesystem.
+     *
+     * Actually, if we mount on /mnt, the node at /mnt (in root filesystem) has the mount point flag.
+     * Its internal pointer points to the new root.
+     *
+     * Strategy: Lookup parent directory, then find entry, but manually check flags
+     * without invoking the automatic traversal (or utilize a specialized finding function).
+     */
     
     char path_buf[256];
     strncpy(path_buf, path, sizeof(path_buf));
