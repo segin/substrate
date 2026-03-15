@@ -1092,6 +1092,17 @@ size_t pmm_get_used_blocks(void) {
 void pmm_reclaim_range(uint32_t start, uint32_t end) {
     start = pmm_virt_to_phys(start);
     end = pmm_virt_to_phys(end);
+
+    if (end <= 0x100000U) {
+        return;
+    }
+    if (start < 0x100000U) {
+        start = 0x100000U;
+    }
+    if (end <= start) {
+        return;
+    }
+
     vm_phys_add_range(start, end);
 }
 

@@ -561,21 +561,10 @@ void fb_init(multiboot_info_t *mbi) {
     /* Register Console (unless hw_text active and not overridden) */
     /* Logic: If user specifically asked for video=xxx, we assume they want FB console
        even if hw_text was active. If we just fell back to multiboot/default, and hw_text
-       is active, maybe keep text?
-       Current logic: If hw_text_active, don't clobber unless cmdline requested video.
+       is active, keep text.
+       Register console if hw_text is not active OR video override present.
     */
-    int register_console = 1;
-    if (hw_text_active && !use_cmdline) {
-        // If we are just using default (e.g. multiboot) but we have text mode working,
-        // we might prefer text mode for speed/stability unless explicit override?
-        // Actually, if we have FB, we probably want FB console?
-        // Previous logic: if (hw_text_active && cmdline != 0) -> skip.
-        // Wait, previous logic was: "Register console if hw_text is not active OR video override present"
-        // So:
-        register_console = (!hw_text_active) || use_cmdline;
-    }
-
-    if (register_console) {
+    if (!hw_text_active || use_cmdline) {
         fb_console_init();
     }
     

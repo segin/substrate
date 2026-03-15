@@ -979,9 +979,19 @@ int sys_poll(struct pollfd *fds, unsigned int nfds, int timeout) {
 
 int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
     int ready = 0;
-    void *waiter = NULL; 
-    
+    uint64_t deadline = 0;
+
+    if (timeout > 0) {
+        uint64_t timeout_ticks = ((uint64_t)timeout * (uint64_t)HZ + 999ULL) / 1000ULL;
+        if (timeout_ticks == 0) {
+            timeout_ticks = 1;
+        }
+        deadline = get_ticks() + timeout_ticks;
+    }
+
     while (1) {
+        void *wait_chan = NULL;
+
         ready = 0;
         for (unsigned int i = 0; i < nfds; i++) {
             if (kfds[i].fd < 0) {
@@ -993,7 +1003,7 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
             short mask = 0;
             
             if (f && f->f_data) {
-                mask = poll_fs((fs_node_t*)f->f_data, waiter);
+                mask = poll_fs((fs_node_t*)f->f_data, &wait_chan);
                 short ret_mask = mask & (kfds[i].events | POLLERR | POLLHUP | POLLNVAL);
                 kfds[i].revents = ret_mask;
             } else {
@@ -1005,14 +1015,25 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
         
         if (ready > 0) break;
         if (timeout == 0) break;
-        
-        // Timeout handling (simplified)
-        if (timeout > 0 && timeout != -1) {
-             timeout -= 10; 
-             if (timeout <= 0) return 0;
+
+        if (timeout > 0) {
+            int sleep_ret = sched_sleep_until(wait_chan ? wait_chan : (void *)current_thread, deadline);
+            if (sleep_ret == -ETIMEDOUT) {
+                return 0;
+            }
+        } else {
+            if (wait_chan) {
+                sched_sleep(wait_chan);
+            } else {
+                sched_yield();
+            }
         }
-        
-        sched_yield();
+
+        if (current_thread &&
+            (current_thread->flags & THREAD_F_INTERRUPTIBLE) &&
+            (current_thread->sig_pending & ~current_thread->sig_mask)) {
+            return -EINTR;
+        }
     }
  
     return ready;
@@ -1052,9 +1073,18 @@ int kern_ioctl(int fd, uint32_t request, void *arg) {
     if (fd < 0 || fd >= MAX_FD) return -1;
     file_t *f = current_process->fds[fd];
     if (!f || !f->f_data) return -1;
-    
-    if (((fs_node_t*)f->f_data)->ioctl) {
-        return ((fs_node_t*)f->f_data)->ioctl((fs_node_t*)f->f_data, request, arg);
+
+    if ((uintptr_t)f->f_data < KERN_BASE) {
+        return -EIO;
+    }
+
+    fs_node_t *node = (fs_node_t *)f->f_data;
+
+    if (node->ioctl) {
+        if ((uintptr_t)node->ioctl < KERN_BASE) {
+            return -EIO;
+        }
+        return node->ioctl(node, request, arg);
     }
     
     return -1;
@@ -1071,7 +1101,7 @@ int sys_unlink(const char *path) {
 }
 
 int kern_unlink(const char *path) {
-    if (!path) return -1;
+    if (!path) return -EINVAL;
     
     char dir[256];
     char file[128];
@@ -1084,31 +1114,30 @@ int kern_unlink(const char *path) {
     
     fs_node_t *parent = NULL;
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
-    
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
+
     if (!last_slash) {
         // No slash - parent is CWD
-        parent = current_process->cwd_node ? current_process->cwd_node : root;
-        if (strlen(path) >= sizeof(file)) return -36; // ENAMETOOLONG
-        strcpy(file, path);
+        parent = cwd;
+        if (strlcpy(file, path, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
     } else if (last_slash == path) {
         // Only one slash at the beginning - parent is root
         parent = root;
-        if (strlen(path + 1) >= sizeof(file)) return -36; // ENAMETOOLONG
-        strcpy(file, path + 1);
+        if (strlcpy(file, path + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
     } else {
         // Split into dir and file
-        size_t dirlen = last_slash - path;
-        if (dirlen >= sizeof(dir)) return -36; // ENAMETOOLONG
+        size_t dirlen = (size_t)(last_slash - path);
+        if (dirlen >= sizeof(dir)) return -ENAMETOOLONG;
         memcpy(dir, path, dirlen);
         dir[dirlen] = '\0';
         
-        if (strlen(last_slash + 1) >= sizeof(file)) return -36; // ENAMETOOLONG
-        strcpy(file, last_slash + 1);
+        if (strlcpy(file, last_slash + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
         
-        parent = vfs_lookup(root, dir);
+        parent = vfs_lookup((path[0] == '/') ? root : cwd, dir);
     }
     
-    if (!parent || !file[0]) return -1;
+    if (!parent) return -ENOENT;
+    if (!file[0]) return -EINVAL;
     
     return unlink_fs(parent, file);
 }
@@ -1121,14 +1150,14 @@ int sys_link(const char *oldpath, const char *newpath) {
 }
 
 int kern_link(const char *oldpath, const char *newpath) {
-    if (!oldpath || !newpath) return -1;
+    if (!oldpath || !newpath) return -EINVAL;
 
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
     fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
 
     // Resolve oldpath to source node
     fs_node_t *source = vfs_lookup(cwd, oldpath);
-    if (!source) return -1;
+    if (!source) return -ENOENT;
 
     // Resolve newpath to parent directory and name
     char dir[256];
@@ -1141,24 +1170,24 @@ int kern_link(const char *oldpath, const char *newpath) {
     fs_node_t *parent = NULL;
     if (!last_slash) {
         parent = cwd;
-        if (strlen(newpath) >= sizeof(file)) return -36; // ENAMETOOLONG
-        strcpy(file, newpath);
+        if (strlcpy(file, newpath, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
     } else if (last_slash == newpath) {
         parent = root;
-        if (strlen(newpath + 1) >= sizeof(file)) return -36; // ENAMETOOLONG
-        strcpy(file, newpath + 1);
+        if (strlcpy(file, newpath + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
     } else {
-        size_t dirlen = last_slash - newpath;
-        if (dirlen >= sizeof(dir)) return -36; // ENAMETOOLONG
+        size_t dirlen = (size_t)(last_slash - newpath);
+        if (dirlen >= sizeof(dir)) return -ENAMETOOLONG;
         memcpy(dir, newpath, dirlen);
         dir[dirlen] = '\0';
         
-        if (strlen(last_slash + 1) >= sizeof(file)) return -36; // ENAMETOOLONG
-        strcpy(file, last_slash + 1);
-        parent = vfs_lookup(root, dir);
+        if (strlcpy(file, last_slash + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
+        parent = vfs_lookup((newpath[0] == '/') ? root : cwd, dir);
     }
 
-    if (!parent || !file[0]) return -1;
+    if (!parent) return -ENOENT;
+    if (!file[0]) return -EINVAL;
+    if ((parent->flags & 0x07) != FS_DIRECTORY) return -ENOTDIR;
+    if (parent->finddir && parent->finddir(parent, file) != NULL) return -EEXIST;
 
     return link_fs(parent, source, file);
 }

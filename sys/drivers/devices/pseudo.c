@@ -81,49 +81,12 @@ static int stderr_readlink(fs_node_t *node, char *buf, size_t size) {
 /*
  * Note: /dev/random and /dev/urandom are now registered in sys/kern/random.c
  * with a proper ChaCha20-based CSPRNG implementation.
+ *
+ * /dev/tty is registered by devfs_init() so the proxy keeps tty ioctl support.
  */
-
-// /dev/tty - proxy to current process's controlling terminal
-static size_t dev_tty_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
-    (void)node; (void)offset;
-    
-    // Get current process's TTY
-    if (current_process && current_process->tty) {
-        return tty_read(current_process->tty, (char*)buffer, size);
-    }
-    
-    // Fallback to keyboard if no TTY assigned
-    size_t count = 0;
-    while (count < size) {
-        char c = keyboard_getc();
-        if (c == 0) break;
-        buffer[count++] = (uint8_t)c;
-    }
-    return count;
-}
-
-static size_t dev_tty_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
-    (void)node; (void)offset;
-    
-    // Get current process's TTY
-    if (current_process && current_process->tty) {
-        return tty_write(current_process->tty, (const char*)buffer, size);
-    }
-    
-    // Fallback to console
-    console_write((const char *)buffer, size);
-    return size;
-}
 
 // /dev/mem - Now implemented in mem.c
 // /dev/kmem - Implemented in kmem.c
-
-
-
-
-
-
-static fs_node_t tty_node;
 
 
 
@@ -143,14 +106,6 @@ void pseudo_init(void) {
     /* Register communication character devices under /dev/comm/. */
     uart_devfs_init();
     lpt_init();
-
-    memset(&tty_node, 0, sizeof(fs_node_t));
-    strcpy(tty_node.name, "tty");
-    tty_node.flags = FS_CHARDEVICE;
-    tty_node.read = &dev_tty_read;
-    tty_node.write = &dev_tty_write;
-    tty_node.rdev = (5 << 8) | 0;
-    devfs_register_device(&tty_node);
 
     /* Initialize /dev/mem (handled by mem.c) */
     mem_init();

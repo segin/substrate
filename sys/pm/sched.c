@@ -72,6 +72,8 @@ thread_t *sched_alloc_thread(process_t *proc) {
     }
     if (i == MAX_THREADS) return NULL;
 
+    memset(&threads[i], 0, sizeof(threads[i]));
+
     // Allocate TID using generation index for O(1) lookup
     // TID = (generation << 6) | index
     // MAX_THREADS is 64, so 6 bits for index.
@@ -265,6 +267,7 @@ void sched_wakeup(void *chan) {
 
 void sched_wakeup_n(void *chan, int n) {
     int woken = 0;
+
     for (int i = 0; i < MAX_THREADS; i++) {
         if (threads[i].tid != -1 && threads[i].state == THREAD_BLOCKED && threads[i].wait_chan == chan) {
             threads[i].state = THREAD_READY;
@@ -272,6 +275,10 @@ void sched_wakeup_n(void *chan, int n) {
             woken++;
             if (n > 0 && woken >= n) break;
         }
+    }
+
+    if (woken > 0 && current_thread) {
+        current_thread->needs_resched = 1;
     }
 }
 

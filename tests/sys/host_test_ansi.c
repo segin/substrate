@@ -16,6 +16,8 @@ static uint8_t mock_bg = 0;
 static char output_buffer[1024];
 static int output_pos = 0;
 static int screen_cleared = 0;
+static int erase_display_mode = -1;
+static int erase_line_mode = -1;
 
 /* Callback implementations */
 static void mock_putc(char c) {
@@ -32,6 +34,14 @@ static void mock_set_color(uint8_t fg, uint8_t bg) {
 
 static void mock_clear_screen(void) {
     screen_cleared = 1;
+}
+
+static void mock_erase_display(int mode) {
+    erase_display_mode = mode;
+}
+
+static void mock_erase_line(int mode) {
+    erase_line_mode = mode;
 }
 
 static void mock_move_cursor(int row, int col) {
@@ -62,6 +72,8 @@ static struct ansi_callbacks callbacks = {
     .putc = mock_putc,
     .set_color = mock_set_color,
     .clear_screen = mock_clear_screen,
+    .erase_display = mock_erase_display,
+    .erase_line = mock_erase_line,
     .move_cursor = mock_move_cursor,
     .get_cursor = mock_get_cursor,
     .get_dimensions = mock_get_dimensions,
@@ -78,6 +90,8 @@ static void reset_mocks() {
     output_pos = 0;
     output_buffer[0] = '\0';
     screen_cleared = 0;
+    erase_display_mode = -1;
+    erase_line_mode = -1;
 }
 
 static void run_test(const char *name, void (*test_func)(void)) {
@@ -148,9 +162,47 @@ static void test_clear_screen(void) {
     while (*seq) ansi_process(&ctx, *seq++, &callbacks);
 
     assert(screen_cleared == 1);
-    /* Also verify cursor moves to (0,0) as per handler logic */
-    assert(mock_cursor_row == 0);
-    assert(mock_cursor_col == 0);
+    assert(erase_display_mode == -1);
+}
+
+static void test_erase_display_default_mode(void) {
+    struct ansi_ctx ctx;
+    ansi_init(&ctx);
+    reset_mocks();
+
+    mock_cursor_row = 4;
+    mock_cursor_col = 9;
+
+    const char *seq = "\x1b[J";
+    while (*seq) ansi_process(&ctx, *seq++, &callbacks);
+
+    assert(screen_cleared == 0);
+    assert(erase_display_mode == 0);
+    assert(mock_cursor_row == 4);
+    assert(mock_cursor_col == 9);
+}
+
+static void test_erase_line_modes(void) {
+    struct ansi_ctx ctx;
+    const char *seq;
+
+    ansi_init(&ctx);
+    reset_mocks();
+    seq = "\x1b[K";
+    while (*seq) ansi_process(&ctx, *seq++, &callbacks);
+    assert(erase_line_mode == 0);
+
+    ansi_init(&ctx);
+    reset_mocks();
+    seq = "\x1b[1K";
+    while (*seq) ansi_process(&ctx, *seq++, &callbacks);
+    assert(erase_line_mode == 1);
+
+    ansi_init(&ctx);
+    reset_mocks();
+    seq = "\x1b[2K";
+    while (*seq) ansi_process(&ctx, *seq++, &callbacks);
+    assert(erase_line_mode == 2);
 }
 
 static void test_relative_moves(void) {
@@ -209,6 +261,8 @@ int main(void) {
     run_test("Cursor Movement", test_cursor_movement);
     run_test("Color Change", test_color_change);
     run_test("Clear Screen", test_clear_screen);
+    run_test("Erase Display Default", test_erase_display_default_mode);
+    run_test("Erase Line Modes", test_erase_line_modes);
     run_test("Relative Moves", test_relative_moves);
     run_test("Partial Sequence", test_partial_sequence);
 

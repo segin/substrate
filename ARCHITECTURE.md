@@ -56,7 +56,7 @@ sys/         kernel
 bin/         base Unix userland
 sbin/        system utilities
 usr.bin/     compiler/toolchain and extended user tools
-lib/         target runtime libraries (libc/libsys/libm/libpthread...)
+lib/         target runtime libraries (libc/libsys/libm/libpthread/libusb...)
 usr.lib/     shared libraries for tooling/runtime support (elfobj, demangle, ...)
 include/     userspace public headers
 tests/       unit/integration/regression/property/fuzz harnesses
@@ -170,6 +170,7 @@ Device namespace policy in `devfs`:
 - Raw disk providers remain visible as `/dev/storage/<disk>` (for example `/dev/storage/ide0`), with GEOM-derived partition nodes exposed alongside them (for example `/dev/storage/ide0p1`).
 - BSD disklabels additionally expose lettered slice nodes, with `c` reserved as the whole-container alias only when a BSD disklabel is present.
 - Communication character devices self-register under `/dev/comm/*` (for example `/dev/comm/serial0`, `/dev/comm/parallel0`).
+- USB character devices are reserved under `/dev/usb/busN/devM`, with the usbdevfs ioctl ABI carried by `<sys/usbdevfs.h>` and the published permission contract `root:usb` mode `0664`.
 - Device-model managed nodes may be published through `device_publish()` and withdrawn through `device_unpublish()`, allowing add/remove lifecycle to drive devfs automatically for drivers that opt into the framework path.
 - Stable device aliases are exposed under `/dev/by-id/*` when a device model entry carries a serial string or GUID.
 - Nested device paths are accepted only under predeclared subsystem directories (namespace hardening against arbitrary roots like `/dev/notreal/*`).
@@ -178,7 +179,9 @@ Driver-model and legacy bus notes:
 - The core bus model now includes PCI and legacy ISA buses. PCI remains optional at runtime and old non-PCI 486-class systems are handled by a fixed-resource ISA probe pass instead of assuming PCI presence.
 - `isa_probe_legacy()` registers standard ISA-era devices (UART, LPT, IDE, PS/2) on the ISA bus when their fixed ports respond, including tertiary/quaternary IDE legacy ports, so the kernel device tree remains meaningful on pre-PCI hardware and ISA add-in storage controllers.
 - the IDE core now registers ISA and PCI drivers with the framework instead of being attached directly from `main`; on old non-PCI systems it consumes ISA bus hints before probing, and on PCI systems it binds against IDE-class PCI devices.
+- the floppy controller now also binds through legacy ISA presence hints, using the classic `0x3F0`/`0x370` controller bases and publishing detected drives as `/dev/storage/fd*` block devices through the storage layer.
 - when a PCI IDE controller is present, the IDE core consumes the controller's programming-interface bits and BAR layout for native-mode channel bases and bus-master DMA windows before probing drives, while still retaining legacy fixed-base support for ISA/compatibility-mode systems.
+- the AHCI driver registers a PCI driver against class 0x01/0x06/0x01 (Mass Storage / SATA / AHCI 1.0) through the device-model framework. It maps BAR5 via `pci_iomap()`, enables bus mastering, takes AHCI ownership from BIOS, allocates DMA-coherent command lists, FIS receive areas, and command tables per port, probes each implemented port for device signatures, issues IDENTIFY DEVICE for SATA disks and publishes them as `/dev/storage/sataN` block devices, and wraps SATAPI (ATAPI-over-SATA) optical drives behind the SCSI mid-layer via `scsi_link_t`. The driver operates in polling mode with a single command slot per port.
 - the VirtIO family no longer performs its own private PCI rescan during init; block, 9P, and SCSI transports now register per-device PCI drivers against the framework-owned PCI device list and bind existing devices through the generic probe/attach path.
 - late driver registration now binds already-enumerated devices immediately instead of only probing them, so controller families migrated onto the device model work regardless of whether the bus enumerator or the driver registers first.
 - Controller-family implementation work such as IDE transport internals, VirtIO transport refactors, USB host controllers, and ISA-PnP protocol support is tracked under the driver tasklists rather than the bus-core tasklist.
@@ -192,9 +195,13 @@ Console policy:
 - `console=serial0..serial3` selects COM1..COM4 respectively for runtime console routing
 - `serial_debug` or `console=serialN` registers the UART backend with the kernel console framework for mirrored output
 - the hardware text console now treats the last physical text row as a kernel-owned status line rendered black-on-white; the usable tty geometry reported to userland excludes that row (for example `80x24` on an `80x25` mode, `80x49` on an `80x50` mode)
-- the status line is refreshed from the timer tick on CPU 0 once per second and currently shows the active VT number plus wall-clock time in ISO 8601 UTC form
+- the timer tick raises a once-per-second wakeup for a dedicated kernel `vtstatus` thread, which refreshes the status line without doing the redraw work directly in interrupt context; the line currently shows the active VT number plus wall-clock time in ISO 8601 UTC form
+- init/stdout/stderr attachment is done through the `/dev/console` facade while the process controlling-tty pointer is set to the active VT tty, so console file descriptors continue to follow the active kernel text console without losing tty ioctl/job-control semantics
+- global wall-clock and scheduler timeout accounting advance only from CPU 0; secondary CPUs may take local preemption ticks, but they must not multiply system time
 - `video=text` keeps the system on the hardware text console even when framebuffer drivers are available
 - `textmode=` and `video=text:COLSxROWS` select hardware text geometry for the kernel text console; the BIOS setup path on `zImage` and floppy boots can program `80x25`, `80x43`, `80x50`, and any detected VBE text modes such as `132x60`, while the higher-half driver directly reprograms only the stable in-kernel `80x25` and `80x50` cases and otherwise trusts the BIOS-programmed geometry handoff
+- the VT layer owns per-console backing buffers, per-VT `tty` bindings, and per-VT scrollback history; the VGA text backend owns all active-screen redraw and cursor updates so VT switching does not memcpy live VGA memory directly
+- the active text console exports `/dev/tty1` through `/dev/tty12`; `Alt+F1..F12` switches VTs and `Shift+PageUp/PageDown` enters and exits scrollback on the active VT
 
 Execution personalities support native behavior plus Linux/FreeBSD compatibility paths where implemented.
 - Linux signal compatibility is explicit at the ABI edge: Linux signal numbers,

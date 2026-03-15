@@ -1,0 +1,20 @@
+# Virtual Terminal Driver
+
+## Scope
+- manages `vt0..vt11`
+- stores per-VT text buffer, cursor state, ANSI parser state, and scrollback
+- coordinates active-VT redraw through the VGA text backend
+
+## Current Contract
+- each VT owns a full text buffer sized to the current physical geometry
+- each VT owns a fixed scrollback ring of `256` lines at the maximum supported width
+- each VT owns an ANSI/VT102 parser state machine for printable characters, cursor movement, erase sequences, and basic SGR color changes
+- `vt_activate(n)` switches the active VT, repoints `/dev/console` input to that VT's `tty`, and requests a backend redraw
+- `Shift+PageUp` and `Shift+PageDown` adjust the active VT scrollback view by one visible page
+- when scrollback is active, the VGA backend redraws historical lines and hides the hardware cursor
+- each VT owns an ANSI/VT102 parser state machine that handles cursor movement, erase-in-line/display, and SGR color changes through the shared `ansi_handler` callbacks
+
+## Non-Goals
+- framebuffer console composition
+- full VT102 feature parity
+- hardware smooth-scroll via CRTC start-address programming

@@ -14,6 +14,8 @@ static int mock_entropy_calls;
 static int mock_debug_dump_calls;
 static int mock_vt_activate_arg;
 static int mock_vt_activate_calls;
+static int mock_scrollback_up_calls;
+static int mock_scrollback_down_calls;
 static int mock_console_chars_len;
 static char mock_console_chars[64];
 static int mock_tty_chars_len;
@@ -42,6 +44,8 @@ void debug_dump_processes(void) { mock_debug_dump_calls++; }
 void vt_activate(int n) { mock_vt_activate_arg = n; mock_vt_activate_calls++; }
 int vt_get_active(void) { return 0; }
 vt_state_t *vt_get_state(int n) { return n == 0 ? &mock_vt : NULL; }
+void vt_scrollback_page_up(void) { mock_scrollback_up_calls++; }
+void vt_scrollback_page_down(void) { mock_scrollback_down_calls++; }
 void tty_flip_buffer_push(struct tty *tty, char c) {
     (void)tty;
     assert(mock_tty_chars_len < (int)sizeof(mock_tty_chars));
@@ -104,6 +108,8 @@ static void reset_state(void) {
     mock_debug_dump_calls = 0;
     mock_vt_activate_arg = -1;
     mock_vt_activate_calls = 0;
+    mock_scrollback_up_calls = 0;
+    mock_scrollback_down_calls = 0;
     mock_console_chars_len = 0;
     mock_tty_chars_len = 0;
     mock_input_event_count = 0;
@@ -197,6 +203,17 @@ static void test_extended_modifier_tracking(void) {
     send_scancode(0x9D); /* Right Ctrl up */
     assert(kbd_rctrl == 0);
     assert(kbd_ctrl == 0);
+
+    send_scancode(0xE0);
+    send_scancode(0x38); /* Right Alt down */
+    assert(kbd_ralt == 1);
+    assert(kbd_alt == 1);
+    assert(kbd_extended == 0);
+
+    send_scancode(0xE0);
+    send_scancode(0xB8); /* Right Alt up */
+    assert(kbd_ralt == 0);
+    assert(kbd_alt == 0);
 }
 
 static void test_ctrl_f9_triggers_debug_dump(void) {
@@ -212,16 +229,18 @@ static void test_alt_function_switches_vt(void) {
     reset_state();
 
     send_scancode(0x38); /* Alt down */
-    send_scancode(0x3B); /* F1 */
-    assert(mock_vt_activate_calls == 1);
-    assert(mock_vt_activate_arg == 0);
+    for (int scancode = 0x3B; scancode <= 0x44; scancode++) {
+        send_scancode((uint8_t)scancode); /* F1..F10 */
+        assert(mock_vt_activate_calls == (scancode - 0x3B) + 1);
+        assert(mock_vt_activate_arg == scancode - 0x3B);
+    }
 
     send_scancode(0x57); /* F11 */
-    assert(mock_vt_activate_calls == 2);
+    assert(mock_vt_activate_calls == 11);
     assert(mock_vt_activate_arg == 10);
 
     send_scancode(0x58); /* F12 */
-    assert(mock_vt_activate_calls == 3);
+    assert(mock_vt_activate_calls == 12);
     assert(mock_vt_activate_arg == 11);
 }
 
@@ -235,6 +254,64 @@ static void test_console_fallback_without_tty(void) {
     assert(mock_tty_chars_len == 0);
 }
 
+static void test_extended_navigation_sequences(void) {
+    reset_state();
+    mock_vt.tty = &mock_tty;
+
+    send_scancode(0xE0);
+    send_scancode(0x48); /* Up */
+    assert(mock_tty_chars_len == 3);
+    assert(memcmp(mock_tty_chars, "\x1b[A", 3) == 0);
+
+    reset_state();
+    mock_vt.tty = &mock_tty;
+    send_scancode(0xE0);
+    send_scancode(0x53); /* Delete */
+    assert(mock_tty_chars_len == 4);
+    assert(memcmp(mock_tty_chars, "\x1b[3~", 4) == 0);
+}
+
+static void test_ctrl_c_d_z_generate_control_bytes(void) {
+    reset_state();
+    mock_vt.tty = &mock_tty;
+
+    send_scancode(0x1D); /* Ctrl down */
+    send_scancode(0x2E); /* c */
+    send_scancode(0x20); /* d */
+    send_scancode(0x2C); /* z */
+
+    assert(mock_tty_chars_len == 3);
+    assert((unsigned char)mock_tty_chars[0] == 0x03);
+    assert((unsigned char)mock_tty_chars[1] == 0x04);
+    assert((unsigned char)mock_tty_chars[2] == 0x1A);
+}
+
+static void test_backspace_maps_to_del(void) {
+    reset_state();
+    mock_vt.tty = &mock_tty;
+
+    send_scancode(0x0E); /* Backspace */
+
+    assert(mock_tty_chars_len == 1);
+    assert((unsigned char)mock_tty_chars[0] == 127U);
+    assert((unsigned char)keyboard_getc() == 127U);
+}
+
+static void test_shift_page_keys_drive_scrollback(void) {
+    reset_state();
+
+    send_scancode(0x2A); /* Shift down */
+    send_scancode(0xE0);
+    send_scancode(0x49); /* PgUp */
+    send_scancode(0xE0);
+    send_scancode(0x51); /* PgDn */
+
+    assert(mock_scrollback_up_calls == 1);
+    assert(mock_scrollback_down_calls == 1);
+    assert(mock_tty_chars_len == 0);
+    assert(mock_console_chars_len == 0);
+}
+
 int main(void) {
     test_buffer_fifo_and_drop_newest();
     test_keyboard_init_registers_input_device();
@@ -244,6 +321,10 @@ int main(void) {
     test_ctrl_f9_triggers_debug_dump();
     test_alt_function_switches_vt();
     test_console_fallback_without_tty();
+    test_extended_navigation_sequences();
+    test_ctrl_c_d_z_generate_control_bytes();
+    test_backspace_maps_to_del();
+    test_shift_page_keys_drive_scrollback();
     puts("host_test_keyboard: PASS");
     return 0;
 }

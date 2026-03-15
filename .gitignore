@@ -42,7 +42,6 @@ vgcore.*
 /pr_list_latest.txt
 /qemu.out
 /qemu.pid
-/root.img
 /stat_verify
 /substrate.iso
 /test.bc
@@ -228,3 +227,13 @@ sbin/*/*
 /y.tab.h
 /test_output.txt
 /tests/test_getpagesize
+tests/lib/usb/host_test_libusb
+usr.bin/lsusb/lsusb
+
+# USB test binaries
+tests/lib/usb/test_core
+tests/lib/usb/test_descriptor
+tests/lib/usb/test_device
+tests/lib/usb/test_io
+tests/lib/usb/test_async
+tests/lib/usb/test_hotplug

@@ -7,15 +7,18 @@
 #include <string.h>
 
 #include <arch/x86-common/io.h>
+#include <arch/x86-common/rtc.h>
 #include <drivers/console/console.h>
 #include <drivers/video/font.h>
 #include <drivers/video/hw_text.h>
 #include <drivers/video/vga.h>
 #include <kern/ansi_handler.h>
 #include <kern/cmdline.h>
+#include <kern/sched.h>
 #include <kern/time.h>
 #include <stdio.h>
 #include <sys/lock.h>
+#include <sys/kthread.h>
 #include <sys/tty.h>
 #include <sys/vt.h>
 
@@ -23,8 +26,11 @@ int hw_text_active = 0;
 static uint16_t *vga_buffer = (uint16_t *)0xC00B8000;
 static spinlock_t hw_text_lock = SPINLOCK_INIT("hw_text");
 static vt_state_t *current_vt_ctx = NULL;
+static volatile uint32_t hw_text_status_epoch = 0;
+static int hw_text_status_thread_started = 0;
+static int hw_text_tty_count = 0;
 
-#define HW_TEXT_STATUS_COLOR 0xF0
+#define HW_TEXT_STATUS_COLOR 0x70
 #define VGA_FONT_MEM_BASE ((volatile uint8_t *)(uintptr_t)0xC00A0000)
 
 static inline uint16_t hw_text_entry(unsigned char uc, uint8_t color) {
@@ -73,6 +79,18 @@ static uint8_t hw_text_read_crtc(uint8_t index) {
 static void hw_text_write_crtc(uint8_t index, uint8_t value) {
     outb(VGA_CRTC_INDEX_COLOR, index);
     outb(VGA_CRTC_DATA_COLOR, value);
+}
+
+static void hw_text_cursor_visible_locked(int visible) {
+    uint8_t start;
+
+    start = hw_text_read_crtc(VGA_CRTC_CURSOR_START);
+    if (visible) {
+        start &= (uint8_t)~0x20U;
+    } else {
+        start |= 0x20U;
+    }
+    hw_text_write_crtc(VGA_CRTC_CURSOR_START, start);
 }
 
 static void hw_text_load_font_plane(const uint8_t *font, size_t glyph_height) {
@@ -250,7 +268,7 @@ static void hw_text_write_cell_locked(vt_state_t *vt, size_t x, size_t y,
 
     index = hw_text_index(x, y);
     vt->buffer[index] = hw_text_entry((unsigned char)c, color);
-    if (vt->id == vt_get_active()) {
+    if (vt->id == vt_get_active() && vt_get_scrollback_view(vt) == 0) {
         vga_buffer[index] = vt->buffer[index];
     }
 }
@@ -263,6 +281,120 @@ static void hw_text_fill_row_locked(vt_state_t *vt, size_t row, char c, uint8_t 
     }
 }
 
+static void hw_text_erase_line_segment_locked(vt_state_t *vt, int row, int start_col, int end_col) {
+    int col;
+
+    if (!vt) {
+        return;
+    }
+    if (row < 0 || row >= vt_get_visible_height()) {
+        return;
+    }
+    if (start_col < 0) {
+        start_col = 0;
+    }
+    if (end_col > vt_get_width()) {
+        end_col = vt_get_width();
+    }
+    if (start_col >= end_col) {
+        return;
+    }
+
+    for (col = start_col; col < end_col; col++) {
+        hw_text_write_cell_locked(vt, (size_t)col, (size_t)row, ' ', vt->color);
+    }
+}
+
+static void hw_text_erase_display_locked(vt_state_t *vt, int mode) {
+    int row;
+    int col;
+    int width;
+    int height;
+
+    if (!vt) {
+        return;
+    }
+
+    width = vt_get_width();
+    height = vt_get_visible_height();
+    row = vt->row;
+    col = vt->col;
+
+    if (row < 0) {
+        row = 0;
+    }
+    if (row >= height) {
+        row = height - 1;
+    }
+    if (col < 0) {
+        col = 0;
+    }
+    if (col >= width) {
+        col = width - 1;
+    }
+
+    switch (mode) {
+        case 1:
+            for (int y = 0; y < row; y++) {
+                hw_text_fill_row_locked(vt, (size_t)y, ' ', vt->color);
+            }
+            hw_text_erase_line_segment_locked(vt, row, 0, col + 1);
+            break;
+        case 2:
+            for (int y = 0; y < height; y++) {
+                hw_text_fill_row_locked(vt, (size_t)y, ' ', vt->color);
+            }
+            break;
+        case 0:
+        default:
+            hw_text_erase_line_segment_locked(vt, row, col, width);
+            for (int y = row + 1; y < height; y++) {
+                hw_text_fill_row_locked(vt, (size_t)y, ' ', vt->color);
+            }
+            break;
+    }
+}
+
+static void hw_text_erase_line_locked(vt_state_t *vt, int mode) {
+    int row;
+    int col;
+    int width;
+
+    if (!vt) {
+        return;
+    }
+
+    width = vt_get_width();
+    row = vt->row;
+    col = vt->col;
+
+    if (row < 0) {
+        row = 0;
+    }
+    if (row >= vt_get_visible_height()) {
+        row = vt_get_visible_height() - 1;
+    }
+    if (col < 0) {
+        col = 0;
+    }
+    if (col >= width) {
+        col = width - 1;
+    }
+
+    switch (mode) {
+        case 1:
+            hw_text_erase_line_segment_locked(vt, row, 0, col + 1);
+            break;
+        case 2:
+            hw_text_fill_row_locked(vt, (size_t)row, ' ', vt->color);
+            break;
+        case 0:
+        default:
+            hw_text_erase_line_segment_locked(vt, row, col, width);
+            break;
+    }
+}
+
 static void hw_text_update_cursor_locked(vt_state_t *vt) {
     uint16_t pos;
     int row;
@@ -271,6 +403,12 @@ static void hw_text_update_cursor_locked(vt_state_t *vt) {
     if (!vt || vt->id != vt_get_active()) {
         return;
     }
+
+    if (vt_get_scrollback_view(vt) != 0) {
+        hw_text_cursor_visible_locked(0);
+        return;
+    }
+    hw_text_cursor_visible_locked(vt->cursor_visible);
 
     row = vt->row;
     col = vt->col;
@@ -294,41 +432,86 @@ static void hw_text_update_cursor_locked(vt_state_t *vt) {
     outb(0x3D5, pos & 0xFF);
 }
 
-static void hw_text_scroll_locked(vt_state_t *vt) {
-    size_t line_size;
-    size_t scroll_size;
+static void hw_text_putentryat_locked(vt_state_t *vt, char c, uint8_t color, size_t x, size_t y) {
+    hw_text_write_cell_locked(vt, x, y, c, color);
+}
+
+/* ---- Region-Aware Scroll Helpers ---- */
+
+/*
+ * Scroll rows [top..bottom] up by n lines.
+ * Rows at top get captured to scrollback (if scrolling full screen top).
+ * New blank lines appear at the bottom of the region.
+ */
+static void hw_text_scroll_region_up_locked(vt_state_t *vt, int top, int bottom, int n) {
+    int width = vt_get_width();
+    int lines;
+    int y, x;
     uint16_t empty;
-    uint16_t *last_line;
-    int visible_rows;
-    size_t x;
 
-    if (!vt) {
-        return;
+    if (!vt || top > bottom || n <= 0) return;
+    lines = bottom - top + 1;
+    if (n > lines) n = lines;
+
+    /* Capture scrollback only when scrolling from the very top */
+    if (top == 0)
+        vt_capture_scrollback_top(vt);
+
+    /* Move rows up by n within the region */
+    for (y = top; y <= bottom - n; y++) {
+        memcpy(&vt->buffer[y * width],
+               &vt->buffer[(y + n) * width],
+               (size_t)width * sizeof(uint16_t));
     }
 
-    visible_rows = vt_get_visible_height();
-    if (visible_rows <= 1) {
-        hw_text_fill_row_locked(vt, 0, ' ', vt->color);
-        return;
-    }
-
-    line_size = (size_t)vt_get_width() * sizeof(uint16_t);
-    scroll_size = (size_t)(visible_rows - 1) * line_size;
-    memcpy(vt->buffer, (void *)((uintptr_t)vt->buffer + line_size), scroll_size);
-
+    /* Clear the bottom n rows */
     empty = hw_text_entry(' ', vt->color);
-    last_line = vt->buffer + ((size_t)(visible_rows - 1) * (size_t)vt_get_width());
-    for (x = 0; x < (size_t)vt_get_width(); x++) {
-        last_line[x] = empty;
+    for (y = bottom - n + 1; y <= bottom; y++) {
+        for (x = 0; x < width; x++)
+            vt->buffer[y * width + x] = empty;
     }
 
-    if (vt->id == vt_get_active()) {
-        memcpy(vga_buffer, vt->buffer, vt_get_cell_count() * sizeof(uint16_t));
+    /* Sync to VGA if active */
+    if (vt->id == vt_get_active() && vt_get_scrollback_view(vt) == 0) {
+        size_t start = (size_t)(top * width);
+        size_t count = (size_t)((bottom - top + 1) * width);
+        memcpy(&vga_buffer[start], &vt->buffer[start], count * sizeof(uint16_t));
     }
 }
 
-static void hw_text_putentryat_locked(vt_state_t *vt, char c, uint8_t color, size_t x, size_t y) {
-    hw_text_write_cell_locked(vt, x, y, c, color);
+/*
+ * Scroll rows [top..bottom] down by n lines.
+ * New blank lines appear at the top of the region.
+ */
+static void hw_text_scroll_region_down_locked(vt_state_t *vt, int top, int bottom, int n) {
+    int width = vt_get_width();
+    int lines;
+    int y, x;
+    uint16_t empty;
+
+    if (!vt || top > bottom || n <= 0) return;
+    lines = bottom - top + 1;
+    if (n > lines) n = lines;
+
+    /* Move rows down by n within the region */
+    for (y = bottom; y >= top + n; y--) {
+        memcpy(&vt->buffer[y * width],
+               &vt->buffer[(y - n) * width],
+               (size_t)width * sizeof(uint16_t));
+    }
+
+    /* Clear the top n rows */
+    empty = hw_text_entry(' ', vt->color);
+    for (y = top; y < top + n; y++) {
+        for (x = 0; x < width; x++)
+            vt->buffer[y * width + x] = empty;
+    }
+
+    if (vt->id == vt_get_active() && vt_get_scrollback_view(vt) == 0) {
+        size_t start = (size_t)(top * width);
+        size_t count = (size_t)((bottom - top + 1) * width);
+        memcpy(&vga_buffer[start], &vt->buffer[start], count * sizeof(uint16_t));
+    }
 }
 
 static void hw_text_civil_from_days(int64_t z, int *year, unsigned *month, unsigned *day) {
@@ -380,9 +563,19 @@ static void hw_text_format_iso8601(char *buf, size_t buf_len, time_t when) {
              year, month, day, hour, minute, second);
 }
 
+static time_t hw_text_status_time(void) {
+    int64_t now = rtc_read_time();
+
+    if (now > 0) {
+        return (time_t)now;
+    }
+    return get_time();
+}
+
 static void hw_text_render_statusline_locked(vt_state_t *vt) {
-    char left[16];
+    char left[32];
     char right[32];
+    char line[VT_MAX_WIDTH];
     size_t left_len;
     size_t right_len;
     int cols;
@@ -395,40 +588,92 @@ static void hw_text_render_statusline_locked(vt_state_t *vt) {
 
     cols = vt_get_width();
     row = vt_get_status_row();
-    snprintf(left, sizeof(left), " VT%d ", vt->id + 1);
-    hw_text_format_iso8601(right, sizeof(right), get_time());
+    if (vt_get_scrollback_view(vt) != 0) {
+        snprintf(left, sizeof(left), " VT%d +%u ", vt->id + 1, vt->scrollback_view);
+    } else {
+        snprintf(left, sizeof(left), " VT%d ", vt->id + 1);
+    }
+    hw_text_format_iso8601(right, sizeof(right), hw_text_status_time());
     left_len = strlen(left);
     right_len = strlen(right);
 
-    hw_text_fill_row_locked(vt, (size_t)row, ' ', HW_TEXT_STATUS_COLOR);
+    memset(line, ' ', sizeof(line));
 
     for (x = 0; x < cols && (size_t)x < left_len; x++) {
-        hw_text_write_cell_locked(vt, (size_t)x, (size_t)row, left[x], HW_TEXT_STATUS_COLOR);
+        line[x] = left[x];
     }
 
     if ((int)right_len < cols) {
         size_t start = (size_t)(cols - (int)right_len);
         for (x = 0; x < (int)right_len; x++) {
-            hw_text_write_cell_locked(vt, start + (size_t)x, (size_t)row,
-                                      right[x], HW_TEXT_STATUS_COLOR);
+            line[start + (size_t)x] = right[x];
+        }
+    }
+
+    for (x = 0; x < cols; x++) {
+        size_t index = hw_text_index((size_t)x, (size_t)row);
+        uint16_t entry = hw_text_entry((unsigned char)line[x], HW_TEXT_STATUS_COLOR);
+
+        if (vt->buffer[index] != entry) {
+            vt->buffer[index] = entry;
+            if (vt->id == vt_get_active()) {
+                vga_buffer[index] = entry;
+            }
         }
     }
 }
 
-static void cb_putc(char c) {
-    vt_state_t *vt = current_vt_ctx;
+static void hw_text_statusline_task(void *arg) {
+    uint32_t seen = 0;
+
+    (void)arg;
+
+    for (;;) {
+        while (seen == hw_text_status_epoch) {
+            sched_sleep((void *)&hw_text_status_epoch);
+        }
+        seen = hw_text_status_epoch;
+        hw_text_refresh_statusline();
+    }
+}
+
+static void hw_text_redraw_vt_locked(vt_state_t *vt) {
+    int row;
+    int col;
     int visible_rows;
+    size_t index;
 
     if (!vt) {
         return;
     }
 
     visible_rows = vt_get_visible_height();
+    for (row = 0; row < visible_rows; row++) {
+        for (col = 0; col < vt_get_width(); col++) {
+            index = hw_text_index((size_t)col, (size_t)row);
+            vga_buffer[index] = vt_get_display_cell(vt, row, col);
+        }
+    }
+    hw_text_render_statusline_locked(vt);
+    hw_text_update_cursor_locked(vt);
+}
+
+static void cb_putc(char c) {
+    vt_state_t *vt = current_vt_ctx;
+    int bottom;
+
+    if (!vt) {
+        return;
+    }
+
+    bottom = vt->scroll_bottom;
+
     if (c == '\n') {
         vt->col = 0;
-        if (++vt->row == visible_rows) {
-            vt->row--;
-            hw_text_scroll_locked(vt);
+        if (vt->row >= bottom) {
+            hw_text_scroll_region_up_locked(vt, vt->scroll_top, bottom, 1);
+        } else {
+            vt->row++;
         }
         return;
     }
@@ -446,20 +691,26 @@ static void cb_putc(char c) {
         vt->col = (vt->col + 8) & ~7;
         if (vt->col >= vt_get_width()) {
             vt->col = 0;
-            if (++vt->row == visible_rows) {
-                vt->row--;
-                hw_text_scroll_locked(vt);
+            if (vt->row >= bottom) {
+                hw_text_scroll_region_up_locked(vt, vt->scroll_top, bottom, 1);
+            } else {
+                vt->row++;
             }
         }
         return;
     }
 
     hw_text_putentryat_locked(vt, c, vt->color, (size_t)vt->col, (size_t)vt->row);
-    if (++vt->col == vt_get_width()) {
-        vt->col = 0;
-        if (++vt->row == visible_rows) {
-            vt->row--;
-            hw_text_scroll_locked(vt);
+    if (++vt->col >= vt_get_width()) {
+        if (vt->autowrap) {
+            vt->col = 0;
+            if (vt->row >= bottom) {
+                hw_text_scroll_region_up_locked(vt, vt->scroll_top, bottom, 1);
+            } else {
+                vt->row++;
+            }
+        } else {
+            vt->col = vt_get_width() - 1; /* Clamp at right margin */
         }
     }
 }
@@ -472,21 +723,35 @@ static void cb_set_color(uint8_t fg, uint8_t bg) {
 
 static void cb_clear_screen(void) {
     vt_state_t *vt = current_vt_ctx;
-    size_t y;
-    size_t x;
 
     if (!vt) {
         return;
     }
 
-    for (y = 0; y < (size_t)vt_get_visible_height(); y++) {
-        for (x = 0; x < (size_t)vt_get_width(); x++) {
-            hw_text_putentryat_locked(vt, ' ', vt->color, x, y);
-        }
-    }
+    hw_text_erase_display_locked(vt, 2);
     vt->row = 0;
     vt->col = 0;
     hw_text_render_statusline_locked(vt);
+}
+
+static void cb_erase_display(int mode) {
+    vt_state_t *vt = current_vt_ctx;
+
+    if (!vt) {
+        return;
+    }
+
+    hw_text_erase_display_locked(vt, mode);
+}
+
+static void cb_erase_line(int mode) {
+    vt_state_t *vt = current_vt_ctx;
+
+    if (!vt) {
+        return;
+    }
+
+    hw_text_erase_line_locked(vt, mode);
 }
 
 static void cb_move_cursor(int row, int col) {
@@ -496,18 +761,17 @@ static void cb_move_cursor(int row, int col) {
         return;
     }
 
-    if (row < 0) {
-        row = 0;
+    /* In origin mode, row is relative to scroll region */
+    if (vt->origin_mode) {
+        row += vt->scroll_top;
+        if (row < vt->scroll_top) row = vt->scroll_top;
+        if (row > vt->scroll_bottom) row = vt->scroll_bottom;
+    } else {
+        if (row < 0) row = 0;
+        if (row >= vt_get_visible_height()) row = vt_get_visible_height() - 1;
     }
-    if (row >= vt_get_visible_height()) {
-        row = vt_get_visible_height() - 1;
-    }
-    if (col < 0) {
-        col = 0;
-    }
-    if (col >= vt_get_width()) {
-        col = vt_get_width() - 1;
-    }
+    if (col < 0) col = 0;
+    if (col >= vt_get_width()) col = vt_get_width() - 1;
 
     vt->row = row;
     vt->col = col;
@@ -533,36 +797,316 @@ static void cb_get_color(uint8_t *fg, uint8_t *bg) {
     }
 }
 
+/* ---- Extended Callbacks ---- */
+
+static void cb_save_cursor(void) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    vt->saved_row = vt->row;
+    vt->saved_col = vt->col;
+    vt->saved_color = vt->color;
+}
+
+static void cb_restore_cursor(void) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    vt->row = vt->saved_row;
+    vt->col = vt->saved_col;
+    vt->color = vt->saved_color;
+    hw_text_update_cursor_locked(vt);
+}
+
+static void cb_set_cursor_visible(int visible) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    vt->cursor_visible = visible;
+    if (vt->id == vt_get_active())
+        hw_text_cursor_visible_locked(visible);
+}
+
+static void cb_insert_lines(int n) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    if (vt->row >= vt->scroll_top && vt->row <= vt->scroll_bottom)
+        hw_text_scroll_region_down_locked(vt, vt->row, vt->scroll_bottom, n);
+}
+
+static void cb_delete_lines(int n) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    if (vt->row >= vt->scroll_top && vt->row <= vt->scroll_bottom)
+        hw_text_scroll_region_up_locked(vt, vt->row, vt->scroll_bottom, n);
+}
+
+static void cb_insert_chars(int n) {
+    vt_state_t *vt = current_vt_ctx;
+    int width, col, row;
+    uint16_t empty;
+
+    if (!vt) return;
+    width = vt_get_width();
+    row = vt->row;
+    col = vt->col;
+
+    if (n > width - col) n = width - col;
+
+    /* Shift cells right */
+    for (int x = width - 1; x >= col + n; x--) {
+        vt->buffer[row * width + x] = vt->buffer[row * width + x - n];
+    }
+    /* Clear inserted cells */
+    empty = hw_text_entry(' ', vt->color);
+    for (int x = col; x < col + n && x < width; x++) {
+        vt->buffer[row * width + x] = empty;
+    }
+    /* Sync to VGA */
+    if (vt->id == vt_get_active() && vt_get_scrollback_view(vt) == 0) {
+        size_t start = (size_t)(row * width + col);
+        size_t count = (size_t)(width - col);
+        memcpy(&vga_buffer[start], &vt->buffer[start], count * sizeof(uint16_t));
+    }
+}
+
+static void cb_delete_chars(int n) {
+    vt_state_t *vt = current_vt_ctx;
+    int width, col, row;
+    uint16_t empty;
+
+    if (!vt) return;
+    width = vt_get_width();
+    row = vt->row;
+    col = vt->col;
+
+    if (n > width - col) n = width - col;
+
+    /* Shift cells left */
+    for (int x = col; x < width - n; x++) {
+        vt->buffer[row * width + x] = vt->buffer[row * width + x + n];
+    }
+    /* Clear vacated cells at end */
+    empty = hw_text_entry(' ', vt->color);
+    for (int x = width - n; x < width; x++) {
+        vt->buffer[row * width + x] = empty;
+    }
+    if (vt->id == vt_get_active() && vt_get_scrollback_view(vt) == 0) {
+        size_t start = (size_t)(row * width + col);
+        size_t count = (size_t)(width - col);
+        memcpy(&vga_buffer[start], &vt->buffer[start], count * sizeof(uint16_t));
+    }
+}
+
+static void cb_erase_chars(int n) {
+    vt_state_t *vt = current_vt_ctx;
+    int width, col, row;
+
+    if (!vt) return;
+    width = vt_get_width();
+    row = vt->row;
+    col = vt->col;
+
+    if (n > width - col) n = width - col;
+
+    for (int x = col; x < col + n; x++) {
+        hw_text_write_cell_locked(vt, (size_t)x, (size_t)row, ' ', vt->color);
+    }
+}
+
+static void cb_scroll_up(int n) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    hw_text_scroll_region_up_locked(vt, vt->scroll_top, vt->scroll_bottom, n);
+}
+
+static void cb_scroll_down(int n) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    hw_text_scroll_region_down_locked(vt, vt->scroll_top, vt->scroll_bottom, n);
+}
+
+static void cb_set_scroll_region(int top, int bottom) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    vt->scroll_top = top;
+    vt->scroll_bottom = bottom;
+}
+
+static void cb_index_down(void) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    if (vt->row >= vt->scroll_bottom) {
+        hw_text_scroll_region_up_locked(vt, vt->scroll_top, vt->scroll_bottom, 1);
+    } else {
+        vt->row++;
+    }
+    hw_text_update_cursor_locked(vt);
+}
+
+static void cb_reverse_index(void) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    if (vt->row <= vt->scroll_top) {
+        hw_text_scroll_region_down_locked(vt, vt->scroll_top, vt->scroll_bottom, 1);
+    } else {
+        vt->row--;
+    }
+    hw_text_update_cursor_locked(vt);
+}
+
+static void cb_reset(void) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    vt->row = 0;
+    vt->col = 0;
+    vt->color = 0x07;
+    vt->scroll_top = 0;
+    vt->scroll_bottom = vt_get_visible_height() - 1;
+    vt->cursor_visible = 1;
+    vt->autowrap = 1;
+    vt->cursor_key_app = 0;
+    vt->origin_mode = 0;
+    vt->bracketed_paste = 0;
+    if (vt->alt_screen_active) {
+        vt->alt_screen_active = 0;
+    }
+    ansi_init(&vt->ansi);
+    hw_text_erase_display_locked(vt, 2);
+    if (vt->id == vt_get_active())
+        hw_text_cursor_visible_locked(1);
+    hw_text_update_cursor_locked(vt);
+}
+
+static void cb_set_autowrap(int on) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    vt->autowrap = on ? 1 : 0;
+}
+
+static void cb_set_cursor_key_app(int on) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    vt->cursor_key_app = on ? 1 : 0;
+}
+
+static void cb_set_origin_mode(int on) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    vt->origin_mode = on ? 1 : 0;
+}
+
+static void cb_set_alt_screen(int on) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+
+    int visible_rows = vt_get_visible_height();
+    int width = vt_get_width();
+    size_t cells = (size_t)visible_rows * (size_t)width;
+
+    if (on && !vt->alt_screen_active) {
+        /* Save main screen, switch to alt */
+        vt->alt_row = vt->row;
+        vt->alt_col = vt->col;
+        vt->alt_color = vt->color;
+        memcpy(vt->alt_buffer, vt->buffer, cells * sizeof(uint16_t));
+        vt->alt_screen_active = 1;
+        /* Clear the alt screen */
+        hw_text_erase_display_locked(vt, 2);
+    } else if (!on && vt->alt_screen_active) {
+        /* Restore main screen from saved */
+        memcpy(vt->buffer, vt->alt_buffer, cells * sizeof(uint16_t));
+        vt->row = vt->alt_row;
+        vt->col = vt->alt_col;
+        vt->color = vt->alt_color;
+        vt->alt_screen_active = 0;
+        /* Repaint from buffer */
+        if (vt->id == vt_get_active()) {
+            hw_text_redraw_vt_locked(vt);
+        }
+        hw_text_update_cursor_locked(vt);
+    }
+}
+
+static void cb_set_bracketed_paste(int on) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    vt->bracketed_paste = on ? 1 : 0;
+}
+
 static const struct ansi_callbacks ansi_cb = {
     .putc = cb_putc,
     .set_color = cb_set_color,
     .clear_screen = cb_clear_screen,
+    .erase_display = cb_erase_display,
+    .erase_line = cb_erase_line,
     .move_cursor = cb_move_cursor,
     .get_cursor = cb_get_cursor,
     .get_dimensions = cb_get_dimensions,
     .get_color = cb_get_color,
+    .save_cursor = cb_save_cursor,
+    .restore_cursor = cb_restore_cursor,
+    .set_cursor_visible = cb_set_cursor_visible,
+    .insert_lines = cb_insert_lines,
+    .delete_lines = cb_delete_lines,
+    .insert_chars = cb_insert_chars,
+    .delete_chars = cb_delete_chars,
+    .erase_chars = cb_erase_chars,
+    .scroll_up = cb_scroll_up,
+    .scroll_down = cb_scroll_down,
+    .set_scroll_region = cb_set_scroll_region,
+    .index_down = cb_index_down,
+    .reverse_index = cb_reverse_index,
+    .reset = cb_reset,
+    .set_autowrap = cb_set_autowrap,
+    .set_cursor_key_app = cb_set_cursor_key_app,
+    .set_origin_mode = cb_set_origin_mode,
+    .set_alt_screen = cb_set_alt_screen,
+    .set_bracketed_paste = cb_set_bracketed_paste,
 };
 
 static int vt_tty_open(struct tty *tty) {
-    int idx = tty->index;
+    (void)tty;
+    return 0;
+}
+
+static void vt_tty_close(struct tty *tty) {
+    (void)tty;
+}
+
+static int vt_tty_install(struct tty_driver *driver, struct tty *tty) {
+    int idx;
     vt_state_t *vt;
 
+    (void)driver;
+    if (!tty) {
+        return -1;
+    }
+
+    idx = tty->index;
     if (idx < 0 || idx >= VT_MAX) {
         return -1;
     }
 
     vt = vt_get_state(idx);
+    if (!vt) {
+        return -1;
+    }
     vt->tty = tty;
     tty->driver_data = vt;
     hw_text_apply_tty_winsize(tty);
     return 0;
 }
 
-static void vt_tty_close(struct tty *tty) {
-    vt_state_t *vt = (vt_state_t *)tty->driver_data;
-    if (vt) {
+static void vt_tty_remove(struct tty_driver *driver, struct tty *tty) {
+    vt_state_t *vt;
+
+    (void)driver;
+    if (!tty) {
+        return;
+    }
+    vt = (vt_state_t *)tty->driver_data;
+    if (vt && vt->tty == tty) {
         vt->tty = NULL;
     }
+    tty->driver_data = NULL;
 }
 
 static int vt_tty_write(struct tty *tty, const unsigned char *buf, int count) {
@@ -606,6 +1150,8 @@ static struct tty_driver vt_driver = {
     .name = "tty",
     .major = 4,
     .minor_start = 1,
+    .install = vt_tty_install,
+    .remove = vt_tty_remove,
     .open = vt_tty_open,
     .close = vt_tty_close,
     .write = vt_tty_write,
@@ -613,6 +1159,29 @@ static struct tty_driver vt_driver = {
     .write_room = vt_tty_write_room,
     .ioctl = vt_tty_ioctl,
 };
+
+static void hw_text_init_ttys_once(void) {
+    struct tty *tty;
+    char name[16];
+    int i;
+
+    if (hw_text_tty_count > 0) {
+        return;
+    }
+
+    for (i = 0; i < VT_MAX; i++) {
+        tty = tty_alloc(&vt_driver, i);
+        if (!tty) {
+            continue;
+        }
+        snprintf(name, sizeof(name), "tty%d", i + 1);
+        tty_register_device(tty, name);
+        hw_text_tty_count++;
+        if (i == 0) {
+            console_set_tty(tty);
+        }
+    }
+}
 
 void hw_text_console_write_shim(const char *data, size_t len) {
     vt_state_t *vt = vt_get_state(vt_get_active());
@@ -630,6 +1199,18 @@ void hw_text_console_write_shim(const char *data, size_t len) {
     hw_text_render_statusline_locked(vt);
     hw_text_update_cursor_locked(vt);
     current_vt_ctx = NULL;
+    spinlock_release(&hw_text_lock);
+}
+
+void hw_text_redraw_active(void) {
+    vt_state_t *vt = vt_get_state(vt_get_active());
+
+    if (!hw_text_active || !vt) {
+        return;
+    }
+
+    spinlock_acquire(&hw_text_lock);
+    hw_text_redraw_vt_locked(vt);
     spinlock_release(&hw_text_lock);
 }
 
@@ -651,8 +1232,32 @@ void hw_text_refresh_statusline(void) {
     spinlock_release(&hw_text_lock);
 }
 
+void hw_text_late_init(void) {
+    thread_t *td;
+
+    if (!hw_text_active || hw_text_status_thread_started) {
+        return;
+    }
+
+    hw_text_init_ttys_once();
+
+    if (kthread_create(hw_text_statusline_task, NULL, &td, "vtstatus") == 0) {
+        hw_text_status_thread_started = 1;
+    }
+}
+
 void hw_text_tick_1hz(void) {
-    hw_text_refresh_statusline();
+    if (!hw_text_active) {
+        return;
+    }
+
+    if (!hw_text_status_thread_started) {
+        hw_text_refresh_statusline();
+        return;
+    }
+
+    hw_text_status_epoch++;
+    sched_wakeup((void *)&hw_text_status_epoch);
 }
 
 void hw_text_set_color(uint8_t fg, uint8_t bg) {
@@ -662,28 +1267,37 @@ void hw_text_set_color(uint8_t fg, uint8_t bg) {
     }
 }
 
+void hw_text_putc(char c) {
+    hw_text_console_write_shim(&c, 1);
+}
+
+void hw_text_clear_screen(void) {
+    vt_state_t *vt = vt_get_state(vt_get_active());
+
+    if (!vt) {
+        return;
+    }
+
+    spinlock_acquire(&hw_text_lock);
+    current_vt_ctx = vt;
+    cb_clear_screen();
+    hw_text_update_cursor_locked(vt);
+    current_vt_ctx = NULL;
+    spinlock_release(&hw_text_lock);
+}
+
 void hw_text_init(void) {
     int cols;
     int rows;
-    struct tty *tty;
 
     hw_text_apply_geometry_or_default(&cols, &rows);
     vt_init();
-
-    tty = tty_alloc(&vt_driver, 0);
-    if (tty) {
-        char name[16];
-
-        snprintf(name, sizeof(name), "tty1");
-        (void)name;
-        hw_text_apply_tty_winsize(tty);
-        console_set_tty(tty);
-    }
+    hw_text_tty_count = 0;
 
     hw_text_active = 1;
     console_register(&vt_kprint_backend);
 
-    hw_text_refresh_statusline();
+    hw_text_redraw_active();
     kprintf("VGA VT Driver Initialized (%dx%d physical, %d usable rows).\n",
             cols, rows, vt_get_visible_height());
 }

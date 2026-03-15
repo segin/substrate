@@ -3,33 +3,30 @@
  */
 
 #include <sys/vt.h>
-#include <drivers/video/vga.h>
 #include <drivers/video/hw_text.h>
 #include <kern/console.h>
 #include <string.h>
 #include <sys/tty.h>
-#include <arch/x86-common/io.h>
 
 static vt_state_t vt_states[VT_MAX];
 static int active_vt = 0;
 static int vt_width = VT_DEFAULT_WIDTH;
 static int vt_height = VT_DEFAULT_HEIGHT;
 
-// VGA Hardware Constants (should match hw_text.c/vga.h)
-#define VGA_MEM_BASE 0xC00B8000
-
-// We need access to hardware cursor update from here, or we duplicate it.
-// Ideally hw_text exposes a helper. For now, we duplicate standard VGA ports.
-static void update_hw_cursor(int row, int col) {
-    uint16_t pos = (uint16_t)(row * vt_width + col);
-    outb(0x3D4, 0x0E);
-    outb(0x3D5, (pos >> 8) & 0xFF);
-    outb(0x3D4, 0x0F);
-    outb(0x3D5, pos & 0xFF);
-}
-
 static size_t vt_cell_count_internal(void) {
     return (size_t)vt_width * (size_t)vt_height;
+}
+
+static size_t vt_row_offset(size_t row) {
+    return row * (size_t)vt_width;
+}
+
+static size_t vt_scrollback_slot(const vt_state_t *vt, size_t logical_index) {
+    size_t oldest;
+
+    oldest = (size_t)((vt->scrollback_head + VT_SCROLLBACK_LINES - vt->scrollback_count) %
+                      VT_SCROLLBACK_LINES);
+    return (oldest + logical_index) % VT_SCROLLBACK_LINES;
 }
 
 int vt_set_geometry(int cols, int rows) {
@@ -69,6 +66,24 @@ void vt_init(void) {
         vt_states[i].col = 0;
         vt_states[i].color = 0x07; // Light Grey on Black
         vt_states[i].tty = NULL;
+        vt_states[i].scrollback_head = 0;
+        vt_states[i].scrollback_count = 0;
+        vt_states[i].scrollback_view = 0;
+        vt_states[i].saved_row = 0;
+        vt_states[i].saved_col = 0;
+        vt_states[i].saved_color = 0x07;
+        vt_states[i].scroll_top = 0;
+        vt_states[i].scroll_bottom = VT_DEFAULT_HEIGHT - 2; /* visible rows - 1 */
+        vt_states[i].cursor_visible = 1;
+        vt_states[i].autowrap = 1;         /* DECAWM on by default */
+        vt_states[i].cursor_key_app = 0;   /* Normal cursor keys */
+        vt_states[i].origin_mode = 0;      /* Absolute origin */
+        vt_states[i].bracketed_paste = 0;
+        vt_states[i].alt_screen_active = 0;
+        vt_states[i].alt_row = 0;
+        vt_states[i].alt_col = 0;
+        vt_states[i].alt_color = 0x07;
+        memset(vt_states[i].alt_buffer, 0, sizeof(vt_states[i].alt_buffer));
         
         // Initialize ansi state
         ansi_init(&vt_states[i].ansi);
@@ -95,31 +110,134 @@ vt_state_t *vt_get_state(int n) {
     return &vt_states[n];
 }
 
+struct tty *vt_get_active_tty(void) {
+    vt_state_t *vt = vt_get_state(active_vt);
+    if (!vt) {
+        return NULL;
+    }
+    return vt->tty;
+}
+
 void vt_activate(int n) {
+    vt_state_t *vt;
+
     if (n < 0 || n >= VT_MAX) return;
     if (n == active_vt) return;
-    
-    uint16_t *vga_mem = (uint16_t*)VGA_MEM_BASE;
-    size_t cell_count = vt_cell_count_internal();
-    
-    // 1. Save current active VT state
-    // We assume the proper driver has been updating vt_states[active_vt].row/col/color
-    // BUT if the driver only updates its internal state, we need to sync.
-    // Since we are refactoring hw_text to use vt_state, it should be in sync.
-    // The only thing not in sync is the VIDEO RAM content.
-    
-    memcpy(vt_states[active_vt].buffer, vga_mem, cell_count * sizeof(uint16_t));
-    
-    // 2. Load new VT state
-    memcpy(vga_mem, vt_states[n].buffer, cell_count * sizeof(uint16_t));
-    
-    // 3. Update Active Index
+
     active_vt = n;
-    
-    // 4. Restore HW Cursor
-    update_hw_cursor(vt_states[n].row, vt_states[n].col);
+    vt = &vt_states[n];
+    if (vt->tty) {
+        console_set_tty(vt->tty);
+    }
+    hw_text_redraw_active();
     hw_text_refresh_statusline();
-    
-    // 5. Signal TTY switch? (Not standard, but maybe helpful)
-    kprintf("Switched to VT %d\n", n + 1);
+}
+
+int vt_get_scrollback_view(const vt_state_t *vt) {
+    if (!vt) {
+        return 0;
+    }
+    return vt->scrollback_view;
+}
+
+uint16_t vt_get_display_cell(const vt_state_t *vt, int row, int col) {
+    int visible_rows;
+    int history_count;
+    int view;
+    int display_start;
+    int seq_index;
+    size_t slot;
+
+    if (!vt || row < 0 || col < 0 || row >= vt_get_visible_height() || col >= vt_get_width()) {
+        return 0x0720;
+    }
+
+    visible_rows = vt_get_visible_height();
+    history_count = vt->scrollback_count;
+    view = vt->scrollback_view;
+    if (view > history_count) {
+        view = history_count;
+    }
+
+    display_start = history_count - view;
+    seq_index = display_start + row;
+    if (seq_index < history_count) {
+        slot = vt_scrollback_slot(vt, (size_t)seq_index);
+        return vt->scrollback[slot][col];
+    }
+
+    seq_index -= history_count;
+    if (seq_index >= visible_rows) {
+        return 0x0720;
+    }
+
+    return vt->buffer[vt_row_offset((size_t)seq_index) + (size_t)col];
+}
+
+void vt_capture_scrollback_top(vt_state_t *vt) {
+    size_t row_offset;
+    size_t width;
+
+    if (!vt) {
+        return;
+    }
+
+    width = (size_t)vt_get_width();
+    row_offset = vt_row_offset(0);
+    memcpy(vt->scrollback[vt->scrollback_head], &vt->buffer[row_offset],
+           width * sizeof(uint16_t));
+    vt->scrollback_head = (uint16_t)((vt->scrollback_head + 1) % VT_SCROLLBACK_LINES);
+    if (vt->scrollback_count < VT_SCROLLBACK_LINES) {
+        vt->scrollback_count++;
+    }
+}
+
+void vt_scrollback_page_up(void) {
+    vt_state_t *vt;
+    int step;
+    int new_view;
+
+    vt = vt_get_state(vt_get_active());
+    if (!vt || vt->scrollback_count == 0) {
+        return;
+    }
+
+    step = vt_get_visible_height() - 1;
+    if (step < 1) {
+        step = 1;
+    }
+    new_view = vt->scrollback_view + step;
+    if (new_view > vt->scrollback_count) {
+        new_view = vt->scrollback_count;
+    }
+    if (new_view == vt->scrollback_view) {
+        return;
+    }
+    vt->scrollback_view = (uint16_t)new_view;
+    hw_text_redraw_active();
+}
+
+void vt_scrollback_page_down(void) {
+    vt_state_t *vt;
+    int step;
+    int new_view;
+
+    vt = vt_get_state(vt_get_active());
+    if (!vt || vt->scrollback_view == 0) {
+        return;
+    }
+
+    step = vt_get_visible_height() - 1;
+    if (step < 1) {
+        step = 1;
+    }
+    new_view = vt->scrollback_view - step;
+    if (new_view < 0) {
+        new_view = 0;
+    }
+    if (new_view == vt->scrollback_view) {
+        return;
+    }
+    vt->scrollback_view = (uint16_t)new_view;
+    hw_text_redraw_active();
 }

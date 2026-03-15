@@ -184,7 +184,14 @@ void isr_handler(registers_t *regs) {
         (void)irq_dispatch(0, regs);
         if (regs->int_no >= PIC_SLAVE_REMAP_BASE) outb(PIC_SLAVE_CMD, PIC_EOI);
         outb(PIC_MASTER_CMD, PIC_EOI);
-        if (!current_thread || !(current_thread->flags & THREAD_F_NO_PREEMPT)) {
+        if (current_thread && !(current_thread->flags & THREAD_F_NO_PREEMPT)) {
+            if (is_usermode) {
+                current_thread->needs_resched = 0;
+                sched_yield();
+            } else {
+                current_thread->needs_resched = 1;
+            }
+        } else if (!current_thread && is_usermode) {
             sched_yield();
         }
         signal_handle_pending(regs);
@@ -333,6 +340,6 @@ void isr_handler(registers_t *regs) {
         if (regs->int_no >= 40) outb(0xA0, 0x20);
         outb(0x20, 0x20);
     }
-    
+
     signal_handle_pending(regs);
 }

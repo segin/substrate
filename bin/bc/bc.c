@@ -224,6 +224,7 @@ typedef struct var_entry {
     bc_num *val;
     bc_num **array;
     int array_len;
+    int array_cap;
     struct var_entry *next;
 } var_entry_t;
 
@@ -1003,6 +1004,7 @@ typedef struct local_var {
     bc_num *val;
     bc_num **array;
     int array_len;
+    int array_cap;
     struct local_var *next;
 } local_var_t;
 
@@ -1040,28 +1042,38 @@ bc_num *get_arr_val(const char *name, int idx) {
     local_var_t *l = get_local(name);
     if (l) {
         if (!l->array) {
+            l->array_cap = (idx + 1) < 16 ? 16 : (idx + 1) * 2;
             l->array_len = idx + 1;
-            l->array = calloc(l->array_len, sizeof(bc_num*));
+            l->array = calloc(l->array_cap, sizeof(bc_num*));
         }
         if (idx >= l->array_len) {
-            int old_len = l->array_len;
+            if (idx >= l->array_cap) {
+                int new_cap = l->array_cap == 0 ? 16 : l->array_cap * 2;
+                while (idx >= new_cap) new_cap *= 2;
+                l->array = realloc(l->array, new_cap * sizeof(bc_num*));
+                memset(l->array + l->array_cap, 0, (new_cap - l->array_cap) * sizeof(bc_num*));
+                l->array_cap = new_cap;
+            }
             l->array_len = idx + 1;
-            l->array = realloc(l->array, l->array_len * sizeof(bc_num*));
-            memset(l->array + old_len, 0, (l->array_len - old_len) * sizeof(bc_num*));
         }
         if (!l->array[idx]) l->array[idx] = bc_from_long(0);
         return bc_dup(l->array[idx]);
     }
     var_entry_t *g = get_global(name);
     if (!g->array) {
+        g->array_cap = (idx + 1) < 16 ? 16 : (idx + 1) * 2;
         g->array_len = idx + 1;
-        g->array = calloc(g->array_len, sizeof(bc_num*));
+        g->array = calloc(g->array_cap, sizeof(bc_num*));
     }
     if (idx >= g->array_len) {
-        int old_len = g->array_len;
+        if (idx >= g->array_cap) {
+            int new_cap = g->array_cap == 0 ? 16 : g->array_cap * 2;
+            while (idx >= new_cap) new_cap *= 2;
+            g->array = realloc(g->array, new_cap * sizeof(bc_num*));
+            memset(g->array + g->array_cap, 0, (new_cap - g->array_cap) * sizeof(bc_num*));
+            g->array_cap = new_cap;
+        }
         g->array_len = idx + 1;
-        g->array = realloc(g->array, g->array_len * sizeof(bc_num*));
-        memset(g->array + old_len, 0, (g->array_len - old_len) * sizeof(bc_num*));
     }
     if (!g->array[idx]) g->array[idx] = bc_from_long(0);
     return bc_dup(g->array[idx]);
@@ -1102,14 +1114,19 @@ void set_arr_val(const char *name, int idx, bc_num *val) {
     local_var_t *l = get_local(name);
     if (l) {
         if (!l->array) {
+            l->array_cap = (idx + 1) < 16 ? 16 : (idx + 1) * 2;
             l->array_len = idx + 1;
-            l->array = calloc(l->array_len, sizeof(bc_num*));
+            l->array = calloc(l->array_cap, sizeof(bc_num*));
         }
         if (idx >= l->array_len) {
-            int old_len = l->array_len;
+            if (idx >= l->array_cap) {
+                int new_cap = l->array_cap == 0 ? 16 : l->array_cap * 2;
+                while (idx >= new_cap) new_cap *= 2;
+                l->array = realloc(l->array, new_cap * sizeof(bc_num*));
+                memset(l->array + l->array_cap, 0, (new_cap - l->array_cap) * sizeof(bc_num*));
+                l->array_cap = new_cap;
+            }
             l->array_len = idx + 1;
-            l->array = realloc(l->array, l->array_len * sizeof(bc_num*));
-            memset(l->array + old_len, 0, (l->array_len - old_len) * sizeof(bc_num*));
         }
         if (l->array[idx]) bc_free(l->array[idx]);
         l->array[idx] = bc_dup(val);
@@ -1117,14 +1134,19 @@ void set_arr_val(const char *name, int idx, bc_num *val) {
     }
     var_entry_t *g = get_global(name);
     if (!g->array) {
+        g->array_cap = (idx + 1) < 16 ? 16 : (idx + 1) * 2;
         g->array_len = idx + 1;
-        g->array = calloc(g->array_len, sizeof(bc_num*));
+        g->array = calloc(g->array_cap, sizeof(bc_num*));
     }
     if (idx >= g->array_len) {
-        int old_len = g->array_len;
+        if (idx >= g->array_cap) {
+            int new_cap = g->array_cap == 0 ? 16 : g->array_cap * 2;
+            while (idx >= new_cap) new_cap *= 2;
+            g->array = realloc(g->array, new_cap * sizeof(bc_num*));
+            memset(g->array + g->array_cap, 0, (new_cap - g->array_cap) * sizeof(bc_num*));
+            g->array_cap = new_cap;
+        }
         g->array_len = idx + 1;
-        g->array = realloc(g->array, g->array_len * sizeof(bc_num*));
-        memset(g->array + old_len, 0, (g->array_len - old_len) * sizeof(bc_num*));
     }
     if (g->array[idx]) bc_free(g->array[idx]);
     g->array[idx] = bc_dup(val);
@@ -1281,13 +1303,13 @@ bc_num *eval_expr(ast_node_t *n) {
             
             // Evaluates arguments before pushing frame
             int argc = 0;
-            int args_cap = 0;
+            int args_capacity = 0;
             bc_num **args = NULL;
             expr_list_t *p = n->call.args;
             while (p) {
-                if (argc >= args_cap) {
-                    args_cap = args_cap == 0 ? 4 : args_cap * 2;
-                    args = realloc(args, args_cap * sizeof(bc_num*));
+                if (argc >= args_capacity) {
+                    args_capacity = args_capacity == 0 ? 16 : args_capacity * 2;
+                    args = realloc(args, args_capacity * sizeof(bc_num*));
                 }
                 args[argc++] = eval_expr(p->expr);
                 p = p->next;
