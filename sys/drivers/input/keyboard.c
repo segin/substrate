@@ -441,8 +441,9 @@ static char keycode_to_char(uint16_t keycode)
 
 /*
  * Process a fully-decoded keycode (after scancode->keycode translation).
+ * Exported for use by USB HID keyboard driver.
  */
-static void process_keycode(uint16_t keycode, int pressed)
+void process_keycode(uint16_t keycode, int pressed)
 {
     /* Report to input subsystem for both press and release */
     input_report_key(&kbd_dev, keycode, pressed);

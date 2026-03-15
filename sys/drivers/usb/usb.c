@@ -7,6 +7,7 @@
 
 #include "usb.h"
 #include <kern/console.h>
+#include <kern/time.h>
 #include <vm/vm_kmem.h>
 #include <string.h>
 
@@ -393,12 +394,15 @@ int usb_enumerate_device(usb_hcd_t *hcd, uint8_t port, uint8_t speed)
     /* Get first 8 bytes of device descriptor to learn max packet size */
     ret = usb_get_descriptor(dev, USB_DT_DEVICE, 0, &dd, 8);
     if (ret != USB_XFER_OK) {
-        kprintf("usb: port %u: failed to get device descriptor (initial)\n", port);
+        kprintf("usb: port %u: failed to get device descriptor (initial, err=%d)\n",
+                port, ret);
         usb_free_device(dev);
         return -1;
     }
 
     dev->ep0.max_packet = dd.bMaxPacketSize0;
+    if (dev->ep0.max_packet == 0)
+        dev->ep0.max_packet = 8;
 
     /* Assign unique address */
     addr = usb_next_address;
@@ -411,20 +415,27 @@ int usb_enumerate_device(usb_hcd_t *hcd, uint8_t port, uint8_t speed)
 
     ret = usb_set_address(dev, addr);
     if (ret != USB_XFER_OK) {
-        kprintf("usb: port %u: SET_ADDRESS failed\n", port);
+        kprintf("usb: port %u: SET_ADDRESS failed (err=%d)\n", port, ret);
         usb_free_device(dev);
         return -1;
     }
 
-    /* Small delay for address to take effect (USB spec: 2ms) */
-    for (volatile int i = 0; i < 100000; i++)
-        ;
+    /* Wait for address to take effect (USB spec requires >= 2ms / one SOF) */
+    {
+        uint64_t addr_deadline = (uint64_t)get_uptime_ms() + 10;
+        while ((uint64_t)get_uptime_ms() < addr_deadline)
+            __asm__ volatile("pause");
+    }
+
+    /* Reset EP0 toggle after SET_ADDRESS (USB spec: device resets toggles) */
+    dev->ep0.toggle = 0;
 
     /* Read full device descriptor */
     ret = usb_get_descriptor(dev, USB_DT_DEVICE, 0,
                              &dev->dev_desc, sizeof(dev->dev_desc));
     if (ret != USB_XFER_OK) {
-        kprintf("usb: addr %u: failed to get full device descriptor\n", addr);
+        kprintf("usb: addr %u: failed to get full device descriptor (err=%d)\n",
+                addr, ret);
         usb_free_device(dev);
         return -1;
     }
@@ -435,7 +446,8 @@ int usb_enumerate_device(usb_hcd_t *hcd, uint8_t port, uint8_t speed)
     /* Read config descriptor header to get total length */
     ret = usb_get_descriptor(dev, USB_DT_CONFIG, 0, &cd, sizeof(cd));
     if (ret != USB_XFER_OK) {
-        kprintf("usb: addr %u: failed to get config descriptor\n", addr);
+        kprintf("usb: addr %u: failed to get config descriptor (err=%d)\n",
+                addr, ret);
         usb_free_device(dev);
         return -1;
     }
@@ -448,7 +460,8 @@ int usb_enumerate_device(usb_hcd_t *hcd, uint8_t port, uint8_t speed)
     ret = usb_get_descriptor(dev, USB_DT_CONFIG, 0,
                              dev->config_data, dev->config_len);
     if (ret != USB_XFER_OK) {
-        kprintf("usb: addr %u: failed to get full config descriptor\n", addr);
+        kprintf("usb: addr %u: failed to get full config descriptor (err=%d)\n",
+                addr, ret);
         usb_free_device(dev);
         return -1;
     }
@@ -459,7 +472,7 @@ int usb_enumerate_device(usb_hcd_t *hcd, uint8_t port, uint8_t speed)
     /* Set configuration */
     ret = usb_set_configuration(dev, cd.bConfigurationValue);
     if (ret != USB_XFER_OK) {
-        kprintf("usb: addr %u: SET_CONFIGURATION failed\n", addr);
+        kprintf("usb: addr %u: SET_CONFIGURATION failed (err=%d)\n", addr, ret);
         usb_free_device(dev);
         return -1;
     }

@@ -514,8 +514,12 @@ static int uhci_control_transfer(uhci_hc_t *hc, usb_transfer_t *xfer)
     status_td->ctrl_status = UHCI_TD_CTRL_ACTIVE | UHCI_TD_CTRL_IOC |
                              (3U << UHCI_TD_CTRL_CERR_SHIFT) |
                              ((xfer->dev->speed == USB_SPEED_LOW) ? UHCI_TD_CTRL_LS : 0);
-    /* Status uses opposite direction, always DATA1 */
-    if (is_in || (xfer->length == 0)) {
+    /*
+     * Status phase uses opposite direction of data/setup, always DATA1.
+     * IN transfer (device→host data): status = OUT (host→device ack)
+     * OUT or no-data transfer:        status = IN  (device→host ack)
+     */
+    if (is_in) {
         status_td->token = UHCI_TD_TOKEN_ZERO(UHCI_TD_PID_OUT, addr, ep_num, 1);
     } else {
         status_td->token = UHCI_TD_TOKEN_ZERO(UHCI_TD_PID_IN, addr, ep_num, 1);

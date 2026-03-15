@@ -78,6 +78,7 @@
 
 /* Device Classes */
 #define USB_CLASS_PER_INTERFACE 0x00
+#define USB_CLASS_HID           0x03
 #define USB_CLASS_HUB           0x09
 #define USB_CLASS_MASS_STORAGE  0x08
 
@@ -342,6 +343,7 @@ typedef struct usb_class_driver {
 /* Initialization */
 void usb_init(void);
 void usb_msc_init(void);
+void usb_hid_init(void);
 
 /* HCD Registration */
 int  usb_register_hcd(usb_hcd_t *hcd);
