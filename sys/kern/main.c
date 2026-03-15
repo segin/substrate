@@ -18,6 +18,8 @@
 #include <drivers/storage/ide/ide.h>
 #include <drivers/storage/ahci/ahci.h>
 #include <drivers/storage/nvme/nvme.h>
+#include <drivers/usb/usb.h>
+#include <drivers/usb/uhci.h>
 #include <drivers/virtio/virtio.h>
 #include <drivers/storage/ramdisk.h>
 #include <drivers/storage/floppy/floppy.h>
@@ -443,6 +445,9 @@ static void init_storage_and_vfs(multiboot_info_t *mboot_info) {
     floppy_init();
     ide_init();
     ahci_init();
+    uhci_init();
+    usb_msc_init();
+    usb_init();
     virtio_init();
     register_boot_ramdisks(mboot_info);
     ntsync_init();

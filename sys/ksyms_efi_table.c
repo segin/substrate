@@ -27,7 +27,6 @@ extern char idt_ptr[];
 extern char isa_bus_type[];
 extern char kbd_alt[];
 extern char kbd_ctrl[];
-extern char kbd_extended[];
 extern char kbd_lalt[];
 extern char kbd_lctrl[];
 extern char kbd_lshift[];
@@ -35,8 +34,6 @@ extern char kbd_ralt[];
 extern char kbd_rctrl[];
 extern char kbd_rshift[];
 extern char kbd_shift[];
-extern char kbd_us[];
-extern char kbd_us_shifted[];
 extern char kernel_hostname[];
 extern char kernel_process[];
 extern char mountlist[];
@@ -140,6 +137,7 @@ extern void bus_register_type(void);
 extern void cache_enter(void);
 extern void cache_lookup(void);
 extern void cache_purge(void);
+extern void cache_purgevfs(void);
 extern void chacha20_block(void);
 extern void chacha20_extract(void);
 extern void chacha20_init(void);
@@ -557,6 +555,8 @@ extern void kern_write(void);
 extern void keyboard_getc(void);
 extern void keyboard_handler(void);
 extern void keyboard_init(void);
+extern void keyboard_set_keymap(void);
+extern void keyboard_set_typematic(void);
 extern void kfree(void);
 extern void kinit_task(void);
 extern void kmain(void);
@@ -1509,6 +1509,7 @@ extern void udf_remove_fid(void);
 extern void udf_tag_checksum(void);
 extern void udf_truncate(void);
 extern void udf_write_file(void);
+extern void uhci_init(void);
 extern void uiomove(void);
 extern void uma_debug_check_redzone_impl(void);
 extern void uma_debug_fill_redzone(void);
@@ -1530,9 +1531,27 @@ extern void uma_zone_set_max(void);
 extern void uma_zone_set_reclaim(void);
 extern void uma_zone_stat(void);
 extern void unlink_fs(void);
+extern void usb_alloc_device(void);
+extern void usb_bulk_transfer(void);
+extern void usb_clear_halt(void);
+extern void usb_control_transfer(void);
+extern void usb_enumerate_bus(void);
+extern void usb_enumerate_device(void);
+extern void usb_find_endpoint(void);
+extern void usb_free_device(void);
+extern void usb_get_descriptor(void);
+extern void usb_init(void);
+extern void usb_msc_init(void);
+extern void usb_register_class_driver(void);
+extern void usb_register_hcd(void);
+extern void usb_set_address(void);
+extern void usb_set_configuration(void);
+extern void usb_unregister_class_driver(void);
+extern void usb_unregister_hcd(void);
 extern void validate_user_addr(void);
 extern void vclean(void);
 extern void vdrop(void);
+extern void vflush(void);
 extern void vfs_check_permissions(void);
 extern void vfs_get_filesystems(void);
 extern void vfs_init(void);
@@ -1557,6 +1576,7 @@ extern void vhold(void);
 extern void video_ask_mode(void);
 extern void video_register_driver(void);
 extern void video_set_viewport(void);
+extern void vinvalbuf(void);
 extern void virtio_9p_send(void);
 extern void virtio_9p_setup(void);
 extern void virtio_blk_setup(void);
@@ -1677,6 +1697,7 @@ extern void vnode_init(void);
 extern void vnode_lookup_cache(void);
 extern void vnode_reclaim(void);
 extern void vop_access(void);
+extern void vop_advlock(void);
 extern void vop_bmap(void);
 extern void vop_cachedlookup(void);
 extern void vop_close(void);
@@ -1685,7 +1706,9 @@ extern void vop_fsync(void);
 extern void vop_getattr(void);
 extern void vop_inactive(void);
 extern void vop_ioctl(void);
+extern void vop_islocked(void);
 extern void vop_link(void);
+extern void vop_lock(void);
 extern void vop_lookup(void);
 extern void vop_mkdir(void);
 extern void vop_mknod(void);
@@ -1703,6 +1726,7 @@ extern void vop_rmdir(void);
 extern void vop_setattr(void);
 extern void vop_strategy(void);
 extern void vop_symlink(void);
+extern void vop_unlock(void);
 extern void vop_whiteout(void);
 extern void vop_write(void);
 extern void vput(void);
@@ -2592,6 +2616,8 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&input_register_devfs, "input_register_devfs" },
     { (uint32_t)(uintptr_t)&kbd_push, "kbd_push" },
     { (uint32_t)(uintptr_t)&keyboard_getc, "keyboard_getc" },
+    { (uint32_t)(uintptr_t)&keyboard_set_keymap, "keyboard_set_keymap" },
+    { (uint32_t)(uintptr_t)&keyboard_set_typematic, "keyboard_set_typematic" },
     { (uint32_t)(uintptr_t)&keyboard_init, "keyboard_init" },
     { (uint32_t)(uintptr_t)&keyboard_handler, "keyboard_handler" },
     { (uint32_t)(uintptr_t)&ps2_wait_write, "ps2_wait_write" },
@@ -2766,6 +2792,24 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&nvme_init, "nvme_init" },
     { (uint32_t)(uintptr_t)&ramdisk_create, "ramdisk_create" },
     { (uint32_t)(uintptr_t)&ramdisk_init, "ramdisk_init" },
+    { (uint32_t)(uintptr_t)&usb_register_hcd, "usb_register_hcd" },
+    { (uint32_t)(uintptr_t)&usb_unregister_hcd, "usb_unregister_hcd" },
+    { (uint32_t)(uintptr_t)&usb_register_class_driver, "usb_register_class_driver" },
+    { (uint32_t)(uintptr_t)&usb_unregister_class_driver, "usb_unregister_class_driver" },
+    { (uint32_t)(uintptr_t)&usb_alloc_device, "usb_alloc_device" },
+    { (uint32_t)(uintptr_t)&usb_free_device, "usb_free_device" },
+    { (uint32_t)(uintptr_t)&usb_control_transfer, "usb_control_transfer" },
+    { (uint32_t)(uintptr_t)&usb_bulk_transfer, "usb_bulk_transfer" },
+    { (uint32_t)(uintptr_t)&usb_get_descriptor, "usb_get_descriptor" },
+    { (uint32_t)(uintptr_t)&usb_set_address, "usb_set_address" },
+    { (uint32_t)(uintptr_t)&usb_set_configuration, "usb_set_configuration" },
+    { (uint32_t)(uintptr_t)&usb_clear_halt, "usb_clear_halt" },
+    { (uint32_t)(uintptr_t)&usb_find_endpoint, "usb_find_endpoint" },
+    { (uint32_t)(uintptr_t)&usb_enumerate_device, "usb_enumerate_device" },
+    { (uint32_t)(uintptr_t)&usb_enumerate_bus, "usb_enumerate_bus" },
+    { (uint32_t)(uintptr_t)&usb_init, "usb_init" },
+    { (uint32_t)(uintptr_t)&uhci_init, "uhci_init" },
+    { (uint32_t)(uintptr_t)&usb_msc_init, "usb_msc_init" },
     { (uint32_t)(uintptr_t)&pseudo_init, "pseudo_init" },
     { (uint32_t)(uintptr_t)&full_init, "full_init" },
     { (uint32_t)(uintptr_t)&null_init, "null_init" },
@@ -2822,6 +2866,8 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&vput, "vput" },
     { (uint32_t)(uintptr_t)&vgone, "vgone" },
     { (uint32_t)(uintptr_t)&vclean, "vclean" },
+    { (uint32_t)(uintptr_t)&vinvalbuf, "vinvalbuf" },
+    { (uint32_t)(uintptr_t)&vflush, "vflush" },
     { (uint32_t)(uintptr_t)&vnode_reclaim, "vnode_reclaim" },
     { (uint32_t)(uintptr_t)&vnode_cache_insert, "vnode_cache_insert" },
     { (uint32_t)(uintptr_t)&vnode_cache_remove, "vnode_cache_remove" },
@@ -2833,6 +2879,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&cache_enter, "cache_enter" },
     { (uint32_t)(uintptr_t)&cache_purge, "cache_purge" },
     { (uint32_t)(uintptr_t)&nchinit, "nchinit" },
+    { (uint32_t)(uintptr_t)&cache_purgevfs, "cache_purgevfs" },
     { (uint32_t)(uintptr_t)&vfs_mount, "vfs_mount" },
     { (uint32_t)(uintptr_t)&vfs_unmount, "vfs_unmount" },
     { (uint32_t)(uintptr_t)&vfs_start, "vfs_start" },
@@ -2868,6 +2915,10 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&vop_inactive, "vop_inactive" },
     { (uint32_t)(uintptr_t)&vop_reclaim, "vop_reclaim" },
     { (uint32_t)(uintptr_t)&vop_print, "vop_print" },
+    { (uint32_t)(uintptr_t)&vop_lock, "vop_lock" },
+    { (uint32_t)(uintptr_t)&vop_unlock, "vop_unlock" },
+    { (uint32_t)(uintptr_t)&vop_islocked, "vop_islocked" },
+    { (uint32_t)(uintptr_t)&vop_advlock, "vop_advlock" },
     { (uint32_t)(uintptr_t)&ext2_find_next_zero_bit, "ext2_find_next_zero_bit" },
     { (uint32_t)(uintptr_t)&ext2_read_block, "ext2_read_block" },
     { (uint32_t)(uintptr_t)&ext2_read_blocks, "ext2_read_blocks" },
@@ -3386,8 +3437,6 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&pci_bus_type, "pci_bus_type" },
     { (uint32_t)(uintptr_t)&isa_bus_type, "isa_bus_type" },
     { (uint32_t)(uintptr_t)&num_cpus, "num_cpus" },
-    { (uint32_t)(uintptr_t)&kbd_us, "kbd_us" },
-    { (uint32_t)(uintptr_t)&kbd_us_shifted, "kbd_us_shifted" },
     { (uint32_t)(uintptr_t)&sysctl_kern_kmem_allow_read, "sysctl_kern_kmem_allow_read" },
     { (uint32_t)(uintptr_t)&sysctl_kern_kmem_allow_write, "sysctl_kern_kmem_allow_write" },
     { (uint32_t)(uintptr_t)&sysctl_debug_kmem_test_addr, "sysctl_debug_kmem_test_addr" },
@@ -3442,7 +3491,6 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&kbd_rctrl, "kbd_rctrl" },
     { (uint32_t)(uintptr_t)&kbd_lalt, "kbd_lalt" },
     { (uint32_t)(uintptr_t)&kbd_ralt, "kbd_ralt" },
-    { (uint32_t)(uintptr_t)&kbd_extended, "kbd_extended" },
     { (uint32_t)(uintptr_t)&mountlist, "mountlist" },
     { (uint32_t)(uintptr_t)&fs_root, "fs_root" },
     { (uint32_t)(uintptr_t)&rootvnode, "rootvnode" },
@@ -3455,4 +3503,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1722;
+int ksym_count = 1746;
