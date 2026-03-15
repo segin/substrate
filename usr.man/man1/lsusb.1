@@ -1,0 +1,69 @@
+.\" lsusb.1 - list USB devices
+.Dd March 14, 2026
+.Dt LSUSB 1
+.Os Substrate
+.Sh NAME
+.Nm lsusb
+.Nd list USB devices
+.Sh SYNOPSIS
+.Nm
+.Op Fl v
+.Op Fl t
+.Op Fl s Ar bus Ns : Ns Ar devnum
+.Op Fl d Ar vendor Ns : Ns Ar product
+.Op Fl V
+.Op Fl h
+.Sh DESCRIPTION
+The
+.Nm
+utility enumerates USB devices attached to the system and displays
+summary information for each device.
+By default, a one-line summary is printed for every device showing the
+bus number, device address, vendor ID, and product ID.
+.Sh OPTIONS
+.Bl -tag -width Ds
+.It Fl v
+Verbose mode.
+Display detailed USB descriptor information for each device, including
+device, configuration, interface, and endpoint descriptors.
+String descriptors are retrieved where available.
+.It Fl t
+Tree mode.
+Display USB devices in a tree topology showing bus and port hierarchy.
+.It Fl s Ar bus Ns : Ns Ar devnum
+Show only the device with the specified bus number and/or device
+number.
+Either field may be omitted to match all values for that field.
+Values are in decimal.
+.It Fl d Ar vendor Ns : Ns Ar product
+Show only devices with the specified vendor and/or product ID.
+Either field may be omitted to match all values for that field.
+Values are in hexadecimal.
+.It Fl V
+Print version information and exit.
+.It Fl h
+Print usage information and exit.
+.El
+.Sh EXIT STATUS
+.Ex -std
+.Sh EXAMPLES
+List all USB devices:
+.Pp
+.Dl $ lsusb
+.Pp
+List all devices on bus 1:
+.Pp
+.Dl $ lsusb -s 1:
+.Pp
+Show verbose information for a specific vendor:product:
+.Pp
+.Dl $ lsusb -v -d 1d6b:0002
+.Pp
+Show device tree:
+.Pp
+.Dl $ lsusb -t
+.Sh SEE ALSO
+.Xr libusb 3 ,
+.Xr usb 4
+.Sh AUTHORS
+Substrate contributors.
