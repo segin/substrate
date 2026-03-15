@@ -36,6 +36,31 @@ typedef struct vt_state {
     int col;
     uint8_t color; // Current attribute
     
+    // Saved Cursor (DECSC/DECRC / CSI s/u)
+    int saved_row;
+    int saved_col;
+    uint8_t saved_color;
+    
+    // Scroll Region (DECSTBM)
+    int scroll_top;    // 0-based inclusive
+    int scroll_bottom; // 0-based inclusive (default: height-1)
+    
+    // Cursor visibility
+    int cursor_visible; // 1=visible (default), 0=hidden
+    
+    // DEC modes
+    int autowrap;       // DECAWM: 1=wrap at right margin (default), 0=clamp
+    int cursor_key_app; // DECCKM: 0=normal (default), 1=application mode
+    int origin_mode;    // DECOM: 0=absolute (default), 1=relative to scroll region
+    int bracketed_paste;// DECSET 2004: 0=off (default), 1=on
+    
+    // Alternate screen buffer (DECSET 47/1047/1049)
+    int alt_screen_active;
+    uint16_t alt_buffer[VT_MAX_BUF_SIZE];
+    int alt_row;
+    int alt_col;
+    uint8_t alt_color;
+    
     // ANSI Parser State
     struct ansi_ctx ansi;
     
