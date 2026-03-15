@@ -165,6 +165,9 @@ libusb__parse_config_blob(const unsigned char *raw, int raw_len,
 			altsettings[current_altsetting].bInterfaceSubClass = raw[offset + 6];
 			altsettings[current_altsetting].bInterfaceProtocol = raw[offset + 7];
 			altsettings[current_altsetting].iInterface = raw[offset + 8];
+			/* Reset bNumEndpoints; it will be recomputed as
+			   endpoint descriptors are parsed below. */
+			altsettings[current_altsetting].bNumEndpoints = 0;
 			current_endpoint = NULL;
 		} else if (type == LIBUSB_DT_ENDPOINT && current_interface >= 0 &&
 		    current_altsetting >= 0) {
