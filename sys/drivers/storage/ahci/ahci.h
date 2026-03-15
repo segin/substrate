@@ -407,6 +407,8 @@ typedef struct hba_fis {
     uint8_t  rsv[0x100 - 0xA0];   /* 0xA0: Reserved */
 } __attribute__((packed)) hba_fis_t;
 
+_Static_assert(sizeof(hba_fis_t) == 256, "hba_fis_t must be exactly 256 bytes");
+
 /*
  * ============================================================
  * Driver Limits

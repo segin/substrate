@@ -144,8 +144,15 @@ static int ahci_port_stop(hba_port_t *port) {
 
 /* Start command engine on a port */
 static void ahci_port_start(hba_port_t *port) {
+    uint64_t deadline;
+
     /* Wait until CR clears before setting ST */
+    deadline = ahci_time_ms() + 500;
     while (port->cmd & HBA_PXCMD_CR) {
+        if (ahci_time_ms() > deadline) {
+            kprint("ahci: port start timeout (CR stuck)\n");
+            return;
+        }
         __asm__ volatile("pause");
     }
 
@@ -207,6 +214,30 @@ static int ahci_port_init(ahci_port_t *ap, hba_port_t *port_regs, int port_num) 
     if (ahci_port_stop(port_regs) < 0) {
         return -1;
     }
+
+    /* Perform COMRESET to ensure clean port state */
+    port_regs->sctl = (port_regs->sctl & ~HBA_PXSCTL_DET_MASK) | HBA_PXSCTL_DET_INIT;
+    /* COMRESET must be asserted for at least 1ms (SATA spec) */
+    {
+        uint64_t comreset_end = ahci_time_ms() + 2;
+        while (ahci_time_ms() < comreset_end)
+            __asm__ volatile("pause");
+    }
+    port_regs->sctl &= ~HBA_PXSCTL_DET_MASK;  /* Clear DET to re-establish */
+
+    /* Wait for device detection (DET=3 means phy communication established) */
+    {
+        uint64_t detect_deadline = ahci_time_ms() + AHCI_TIMEOUT_SPINUP;
+        while ((port_regs->ssts & HBA_PXSSTS_DET_MASK) != HBA_PXSSTS_DET_ACTIVE) {
+            if (ahci_time_ms() > detect_deadline) {
+                break;  /* No device or slow device — will be caught by detect */
+            }
+            __asm__ volatile("pause");
+        }
+    }
+
+    /* Clear errors accumulated during COMRESET */
+    port_regs->serr = 0xFFFFFFFF;
 
     /* Allocate DMA memory */
     if (ahci_port_alloc(ap) < 0) {
@@ -301,9 +332,11 @@ static int ahci_port_issue_cmd(ahci_port_t *ap, uint32_t timeout_ms) {
                      "ahci: port %d fatal error IS=0x%08x SERR=0x%08x TFD=0x%08x\n",
                      ap->port_num, port->is, port->serr, port->tfd);
             kprint(buf);
-            /* Clear errors */
+            /* Clear errors and restart command engine */
             port->serr = port->serr;
             port->is = port->is;
+            ahci_port_stop(port);
+            ahci_port_start(port);
             return -1;
         }
 
@@ -672,7 +705,8 @@ static int ahci_scsi_execute(scsi_link_t *link, scsi_request_t *req) {
     fis->fis_type = FIS_TYPE_REG_H2D;
     fis->pmport_c = 0x80;
     fis->command  = AHCI_ATA_CMD_PACKET;
-    fis->featurel = (req->flags & SCSI_REQ_WRITE) ? 0x00 : 0x04; /* DMA bit */
+    /* Feature bit 0 = DMA mode, bit 2 = DMADIR (1=D2H read, 0=H2D write) */
+    fis->featurel = (req->flags & SCSI_REQ_WRITE) ? 0x01 : 0x05;
     fis->lba1     = (uint8_t)(req->data_len);         /* Byte count low */
     fis->lba2     = (uint8_t)(req->data_len >> 8);    /* Byte count high */
 
@@ -683,6 +717,7 @@ static int ahci_scsi_execute(scsi_link_t *link, scsi_request_t *req) {
     /* Setup PRDT if there's data */
     hdr = &ap->cmd_list[AHCI_CMD_SLOT];
     hdr->prdtl = 0;
+    data_dma = 0;
 
     if (req->data && req->data_len > 0) {
         data_dma = dma_map_single(req->data, req->data_len,
@@ -709,8 +744,7 @@ static int ahci_scsi_execute(scsi_link_t *link, scsi_request_t *req) {
     ret = ahci_port_issue_cmd(ap, req->timeout_ms ? req->timeout_ms : AHCI_TIMEOUT_CMD);
 
     if (req->data && req->data_len > 0) {
-        dma_unmap_single(dma_map_single(req->data, req->data_len, DMA_BIDIRECTIONAL),
-                          req->data_len,
+        dma_unmap_single(data_dma, req->data_len,
                           (req->flags & SCSI_REQ_WRITE)
                               ? DMA_TO_DEVICE : DMA_FROM_DEVICE);
     }
@@ -780,6 +814,23 @@ static int ahci_hba_init(ahci_controller_t *ctrl) {
     hba_mem_t *abar = ctrl->abar;
     uint32_t version;
     char buf[128];
+
+    /* BIOS/OS Handoff (BOHC): take ownership from BIOS if needed */
+    if (abar->cap2 & (1U << 0)) {  /* CAP2.BOH - BIOS/OS Handoff supported */
+        if (abar->bohc & (1U << 0)) {  /* BOS - BIOS owns semaphore */
+            uint64_t bohc_deadline;
+            abar->bohc |= (1U << 1);   /* Set OOS - OS requests ownership */
+            /* Wait for BIOS to release (BOS clears) */
+            bohc_deadline = ahci_time_ms() + 2000;
+            while (abar->bohc & (1U << 0)) {
+                if (ahci_time_ms() > bohc_deadline) {
+                    kprint("ahci: BIOS handoff timeout, forcing ownership\n");
+                    break;
+                }
+                __asm__ volatile("pause");
+            }
+        }
+    }
 
     /* Enable AHCI mode (GHC.AE) */
     abar->ghc |= HBA_GHC_AE;
