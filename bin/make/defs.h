@@ -52,7 +52,7 @@ void fatal1(char *s, char *a);
 struct nameblock *srchname(char *name);
 struct nameblock *makename(char *name);
 void eqsign(char *s);
-void subst(char *a, char *b);
+void subst(char *a, char *b, size_t max_len);
 int unequal(char *a, char *b);
 char *copys(char *s);
 
