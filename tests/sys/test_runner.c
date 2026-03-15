@@ -268,17 +268,17 @@ void run_kernel_tests(void) {
          run_printf_specifier_tests();
     }
 
+    if (all || strcmp(test_arg, "kvasprintf") == 0) {
+         extern void test_kvasprintf(void);
+         test_kvasprintf();
+    }
+
     if (all || strcmp(test_arg, "nanosleep") == 0) {
         run_nanosleep_tests();
     }
 
     if (all || strcmp(test_arg, "ldt") == 0) {
         run_ldt_tests();
-    }
-
-    if (all || strcmp(test_arg, "printf_specifiers") == 0) {
-         extern void run_printf_specifier_tests(void);
-         run_printf_specifier_tests();
     }
 
     if (strcmp(test_arg, "benchmark") == 0) {
@@ -423,10 +423,6 @@ void run_kernel_tests(void) {
         extern int test_sysinfo(void);
         if (test_sysinfo() == 0) kprint("sysinfo: PASS\n"); else kprint("sysinfo: FAIL\n");
 
-    }
-
-    if (all || strcmp(test_arg, "string") == 0) {
-        run_string_tests();
     }
 
     if (all || strcmp(test_arg, "sysctl") == 0) {
