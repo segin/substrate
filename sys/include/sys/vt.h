@@ -64,6 +64,9 @@ typedef struct vt_state {
     // ANSI Parser State
     struct ansi_ctx ansi;
     
+    // Keyboard LED state for this VT (Scroll Lock, Num Lock, Caps Lock)
+    uint8_t led_state;
+    
     // Associated TTY (if any)
     struct tty *tty;
 } vt_state_t;

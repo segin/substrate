@@ -12,6 +12,7 @@
 #include <sys/keycodes.h>
 #include <sys/random.h>
 #include <kern/console.h>
+#include <kern/sysrq.h>
 #include <kern/debug.h>
 #include <arch/i386/idt.h>
 #include <stdint.h>
@@ -222,6 +223,7 @@ int kbd_ralt   = 0;
 static int kbd_capslock  = 0;
 static int kbd_numlock   = 0;
 static int kbd_scrolllock = 0;
+static int kbd_sysrq     = 0; /* 1 when Alt+SysRq is held */
 
 /* ---- LED Control ---- */
 
@@ -256,6 +258,31 @@ static void kbd_update_leds(void)
             }
         }
     }
+}
+
+/*
+ * keyboard_get_led_state - Return current LED state byte.
+ * Bit 0 = Scroll Lock, Bit 1 = Num Lock, Bit 2 = Caps Lock.
+ */
+uint8_t keyboard_get_led_state(void)
+{
+    uint8_t state = 0;
+    if (kbd_scrolllock) state |= LED_SCROLLL;
+    if (kbd_numlock)    state |= LED_NUML;
+    if (kbd_capslock)   state |= LED_CAPSL;
+    return state;
+}
+
+/*
+ * keyboard_set_led_state - Restore LED state (e.g., on VT switch).
+ * Sets the internal lock key flags and updates hardware LEDs.
+ */
+void keyboard_set_led_state(uint8_t state)
+{
+    kbd_scrolllock = !!(state & LED_SCROLLL);
+    kbd_numlock    = !!(state & LED_NUML);
+    kbd_capslock   = !!(state & LED_CAPSL);
+    kbd_update_leds();
 }
 
 /* ---- Input Device Registration ---- */
@@ -455,9 +482,36 @@ void process_keycode(uint16_t keycode, int pressed)
     if (handle_lock_key(keycode, pressed))
         return;
 
+    /*
+     * SysRq key tracking: Alt+SysRq sets sysrq mode.
+     * Releasing SysRq (or Alt) clears it.
+     */
+    if (keycode == KEY_SYSRQ) {
+        kbd_sysrq = pressed && kbd_alt;
+        return;
+    }
+    if (!kbd_alt)
+        kbd_sysrq = 0;
+
     /* Only generate output on key press */
     if (!pressed)
         return;
+
+    /* Ctrl+Alt+Delete -> reboot */
+    if (kbd_ctrl && kbd_alt && keycode == KEY_DELETE) {
+        kprint("keyboard: Ctrl+Alt+Del pressed — rebooting\n");
+        sysrq_handle('b');
+        return;
+    }
+
+    /* Alt+SysRq+key -> magic SysRq command */
+    if (kbd_sysrq && kbd_alt) {
+        char c = keycode_to_char(keycode);
+        if (c) {
+            sysrq_handle(c);
+            return;
+        }
+    }
 
     /* Alt+F1..F12 -> VT switching */
     if (kbd_alt) {

@@ -550,10 +550,12 @@ extern void kern_unlink(void);
 extern void kern_wait4(void);
 extern void kern_waitpid(void);
 extern void kern_write(void);
+extern void keyboard_get_led_state(void);
 extern void keyboard_getc(void);
 extern void keyboard_handler(void);
 extern void keyboard_init(void);
 extern void keyboard_set_keymap(void);
+extern void keyboard_set_led_state(void);
 extern void keyboard_set_typematic(void);
 extern void kfree(void);
 extern void kinit_task(void);
@@ -1228,6 +1230,8 @@ extern void sysctl_init(void);
 extern void sysctl_register_oid(void);
 extern void sysctl_unregister_oid(void);
 extern void sysfs_init(void);
+extern void sysrq_handle(void);
+extern void sysrq_init(void);
 extern void timer_init(void);
 extern void timer_tick(void);
 extern void timer_tick_context(void);
@@ -1275,6 +1279,7 @@ extern void uart_is_transmit_empty(void);
 extern void uart_putc(void);
 extern void uart_received(void);
 extern void uart_select_port(void);
+extern void uart_send_break(void);
 extern void uart_write(void);
 extern void udf_add_fid(void);
 extern void udf_alloc_block(void);
@@ -2237,6 +2242,8 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&ioremap, "ioremap" },
     { (uint32_t)(uintptr_t)&ioremap_resource, "ioremap_resource" },
     { (uint32_t)(uintptr_t)&iounmap, "iounmap" },
+    { (uint32_t)(uintptr_t)&sysrq_init, "sysrq_init" },
+    { (uint32_t)(uintptr_t)&sysrq_handle, "sysrq_handle" },
     { (uint32_t)(uintptr_t)&sched_set_affinity, "sched_set_affinity" },
     { (uint32_t)(uintptr_t)&sched_get_affinity, "sched_get_affinity" },
     { (uint32_t)(uintptr_t)&sched_set_affinity_self, "sched_set_affinity_self" },
@@ -2396,6 +2403,8 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&kbd_push, "kbd_push" },
     { (uint32_t)(uintptr_t)&keyboard_getc, "keyboard_getc" },
     { (uint32_t)(uintptr_t)&keyboard_set_keymap, "keyboard_set_keymap" },
+    { (uint32_t)(uintptr_t)&keyboard_get_led_state, "keyboard_get_led_state" },
+    { (uint32_t)(uintptr_t)&keyboard_set_led_state, "keyboard_set_led_state" },
     { (uint32_t)(uintptr_t)&keyboard_set_typematic, "keyboard_set_typematic" },
     { (uint32_t)(uintptr_t)&keyboard_init, "keyboard_init" },
     { (uint32_t)(uintptr_t)&process_keycode, "process_keycode" },
@@ -2464,6 +2473,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&uart_get_console, "uart_get_console" },
     { (uint32_t)(uintptr_t)&uart_devfs_init, "uart_devfs_init" },
     { (uint32_t)(uintptr_t)&uart_init, "uart_init" },
+    { (uint32_t)(uintptr_t)&uart_send_break, "uart_send_break" },
     { (uint32_t)(uintptr_t)&uart_handler, "uart_handler" },
     { (uint32_t)(uintptr_t)&uart_received, "uart_received" },
     { (uint32_t)(uintptr_t)&uart_getc, "uart_getc" },
@@ -3061,4 +3071,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1525;
+int ksym_count = 1530;

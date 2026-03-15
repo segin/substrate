@@ -24,4 +24,8 @@ extern int kbd_lshift, kbd_rshift;
 extern int kbd_lctrl, kbd_rctrl;
 extern int kbd_lalt, kbd_ralt;
 
+/* LED state management for VT switch persistence */
+uint8_t keyboard_get_led_state(void);
+void keyboard_set_led_state(uint8_t state);
+
 #endif

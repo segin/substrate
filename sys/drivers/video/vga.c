@@ -383,7 +383,70 @@ static int vga_set_mode_internal(int mode_id) {
     return 0;
 }
 
-static int vga_probe(void) { return 0; }
+/*
+ * vga_probe - Detect VGA hardware presence.
+ *
+ * Strategy:
+ *   1. Check the BIOS Data Area at 0x449 (current video mode) and 0x463
+ *      (CRTC base port) for plausible values.
+ *   2. Probe the VGA Input Status 1 register (0x3DA for color, 0x3BA for
+ *      mono). Bits 0 and 3 toggle with retrace; reading should not return
+ *      0xFF (floating bus).
+ *   3. Probe the VGA Sequencer — write a test value to the Map Mask register
+ *      and verify it reads back.
+ *
+ * Returns 0 if VGA is present, -1 otherwise.
+ */
+static int vga_probe(void) {
+    volatile uint8_t *bda = (volatile uint8_t *)0xC0000400; /* BDA at phys 0x400, mapped via direct map */
+    uint8_t bda_mode;
+    uint16_t bda_crtc;
+    uint8_t stat1, saved_seq, readback;
+
+    /* 1. BIOS Data Area sanity check */
+    bda_mode = bda[0x49];  /* Current video mode */
+    bda_crtc = (uint16_t)bda[0x63] | ((uint16_t)bda[0x64] << 8); /* CRTC base port */
+
+    /* A valid BDA should have CRTC port 0x3B4 (mono) or 0x3D4 (color) */
+    if (bda_crtc != 0x3B4 && bda_crtc != 0x3D4 && bda_crtc != 0) {
+        kprint("VGA: probe: unexpected BDA CRTC port\n");
+        return -1;
+    }
+
+    /* 2. Probe Input Status 1 register — should not read 0xFF (floating bus) */
+    stat1 = inb(VGA_INPUT_STAT1_COLOR);
+    if (stat1 == 0xFF) {
+        /* Try monochrome port */
+        stat1 = inb(VGA_INPUT_STAT1_MONO);
+        if (stat1 == 0xFF) {
+            kprint("VGA: probe: no response on Input Status 1\n");
+            return -1;
+        }
+    }
+
+    /* 3. Sequencer register roundtrip test */
+    outb(VGA_SEQ_INDEX, VGA_SEQ_MAP_MASK);
+    saved_seq = inb(VGA_SEQ_DATA);
+
+    outb(VGA_SEQ_INDEX, VGA_SEQ_MAP_MASK);
+    outb(VGA_SEQ_DATA, 0x05);
+    outb(VGA_SEQ_INDEX, VGA_SEQ_MAP_MASK);
+    readback = inb(VGA_SEQ_DATA);
+
+    /* Restore original value */
+    outb(VGA_SEQ_INDEX, VGA_SEQ_MAP_MASK);
+    outb(VGA_SEQ_DATA, saved_seq);
+
+    if (readback != 0x05) {
+        kprint("VGA: probe: sequencer register test failed\n");
+        return -1;
+    }
+
+    kprintf("VGA: probe: detected (BDA mode=0x%02x, CRTC=0x%03x)\n",
+            bda_mode, bda_crtc);
+
+    return 0;
+}
 
 static int vga_init_driver(fb_info_t *info) {
     kprint("VGA: Initializing Unified Driver [VGA/EGA/CGA/Hercules]\n");

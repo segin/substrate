@@ -4,6 +4,7 @@
 
 #include <sys/vt.h>
 #include <drivers/video/hw_text.h>
+#include <drivers/input/keyboard.h>
 #include <kern/console.h>
 #include <string.h>
 #include <sys/tty.h>
@@ -119,13 +120,18 @@ struct tty *vt_get_active_tty(void) {
 }
 
 void vt_activate(int n) {
+    vt_state_t *old_vt;
     vt_state_t *vt;
 
     if (n < 0 || n >= VT_MAX) return;
     if (n == active_vt) return;
 
+    old_vt = &vt_states[active_vt];
+    old_vt->led_state = keyboard_get_led_state();
+
     active_vt = n;
     vt = &vt_states[n];
+    keyboard_set_led_state(vt->led_state);
     if (vt->tty) {
         console_set_tty(vt->tty);
     }
