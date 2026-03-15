@@ -137,15 +137,38 @@ static void handle_dec_mode(struct ansi_ctx *ctx, int set,
                             const struct ansi_callbacks *cb) {
     for (int i = 0; i < ctx->param_count; i++) {
         switch (ctx->params[i]) {
+        case 1: /* DECCKM - cursor key mode */
+            if (cb->set_cursor_key_app)
+                cb->set_cursor_key_app(set);
+            break;
+        case 7: /* DECAWM - auto-wrap mode */
+            if (cb->set_autowrap)
+                cb->set_autowrap(set);
+            break;
+        case 6: /* DECOM - origin mode */
+            if (cb->set_origin_mode)
+                cb->set_origin_mode(set);
+            /* DECOM also homes cursor */
+            if (cb->move_cursor) cb->move_cursor(0, 0);
+            break;
         case 25: /* DECTCEM - cursor visibility */
             if (cb->set_cursor_visible)
                 cb->set_cursor_visible(set);
             break;
-        /* Other DEC private modes can be added here:
-         * case 1: DECCKM (cursor key mode)
-         * case 7: DECAWM (auto-wrap mode)
-         * case 1049: alternate screen buffer
-         */
+        case 47:   /* alternate screen buffer (basic) */
+        case 1047: /* alternate screen buffer */
+        case 1049: /* alternate screen + save/restore cursor */
+            if (ctx->params[i] == 1049 && set && cb->save_cursor)
+                cb->save_cursor();
+            if (cb->set_alt_screen)
+                cb->set_alt_screen(set);
+            if (ctx->params[i] == 1049 && !set && cb->restore_cursor)
+                cb->restore_cursor();
+            break;
+        case 2004: /* Bracketed paste mode */
+            if (cb->set_bracketed_paste)
+                cb->set_bracketed_paste(set);
+            break;
         }
     }
 }

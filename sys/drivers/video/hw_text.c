@@ -701,12 +701,16 @@ static void cb_putc(char c) {
     }
 
     hw_text_putentryat_locked(vt, c, vt->color, (size_t)vt->col, (size_t)vt->row);
-    if (++vt->col == vt_get_width()) {
-        vt->col = 0;
-        if (vt->row >= bottom) {
-            hw_text_scroll_region_up_locked(vt, vt->scroll_top, bottom, 1);
+    if (++vt->col >= vt_get_width()) {
+        if (vt->autowrap) {
+            vt->col = 0;
+            if (vt->row >= bottom) {
+                hw_text_scroll_region_up_locked(vt, vt->scroll_top, bottom, 1);
+            } else {
+                vt->row++;
+            }
         } else {
-            vt->row++;
+            vt->col = vt_get_width() - 1; /* Clamp at right margin */
         }
     }
 }
@@ -757,18 +761,17 @@ static void cb_move_cursor(int row, int col) {
         return;
     }
 
-    if (row < 0) {
-        row = 0;
+    /* In origin mode, row is relative to scroll region */
+    if (vt->origin_mode) {
+        row += vt->scroll_top;
+        if (row < vt->scroll_top) row = vt->scroll_top;
+        if (row > vt->scroll_bottom) row = vt->scroll_bottom;
+    } else {
+        if (row < 0) row = 0;
+        if (row >= vt_get_visible_height()) row = vt_get_visible_height() - 1;
     }
-    if (row >= vt_get_visible_height()) {
-        row = vt_get_visible_height() - 1;
-    }
-    if (col < 0) {
-        col = 0;
-    }
-    if (col >= vt_get_width()) {
-        col = vt_get_width() - 1;
-    }
+    if (col < 0) col = 0;
+    if (col >= vt_get_width()) col = vt_get_width() - 1;
 
     vt->row = row;
     vt->col = col;
@@ -958,11 +961,74 @@ static void cb_reset(void) {
     vt->scroll_top = 0;
     vt->scroll_bottom = vt_get_visible_height() - 1;
     vt->cursor_visible = 1;
+    vt->autowrap = 1;
+    vt->cursor_key_app = 0;
+    vt->origin_mode = 0;
+    vt->bracketed_paste = 0;
+    if (vt->alt_screen_active) {
+        vt->alt_screen_active = 0;
+    }
     ansi_init(&vt->ansi);
     hw_text_erase_display_locked(vt, 2);
     if (vt->id == vt_get_active())
         hw_text_cursor_visible_locked(1);
     hw_text_update_cursor_locked(vt);
+}
+
+static void cb_set_autowrap(int on) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    vt->autowrap = on ? 1 : 0;
+}
+
+static void cb_set_cursor_key_app(int on) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    vt->cursor_key_app = on ? 1 : 0;
+}
+
+static void cb_set_origin_mode(int on) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    vt->origin_mode = on ? 1 : 0;
+}
+
+static void cb_set_alt_screen(int on) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+
+    int visible_rows = vt_get_visible_height();
+    int width = vt_get_width();
+    size_t cells = (size_t)visible_rows * (size_t)width;
+
+    if (on && !vt->alt_screen_active) {
+        /* Save main screen, switch to alt */
+        vt->alt_row = vt->row;
+        vt->alt_col = vt->col;
+        vt->alt_color = vt->color;
+        memcpy(vt->alt_buffer, vt->buffer, cells * sizeof(uint16_t));
+        vt->alt_screen_active = 1;
+        /* Clear the alt screen */
+        hw_text_erase_display_locked(vt, 2);
+    } else if (!on && vt->alt_screen_active) {
+        /* Restore main screen from saved */
+        memcpy(vt->buffer, vt->alt_buffer, cells * sizeof(uint16_t));
+        vt->row = vt->alt_row;
+        vt->col = vt->alt_col;
+        vt->color = vt->alt_color;
+        vt->alt_screen_active = 0;
+        /* Repaint from buffer */
+        if (vt->id == vt_get_active()) {
+            hw_text_redraw_vt_locked(vt);
+        }
+        hw_text_update_cursor_locked(vt);
+    }
+}
+
+static void cb_set_bracketed_paste(int on) {
+    vt_state_t *vt = current_vt_ctx;
+    if (!vt) return;
+    vt->bracketed_paste = on ? 1 : 0;
 }
 
 static const struct ansi_callbacks ansi_cb = {
@@ -989,6 +1055,11 @@ static const struct ansi_callbacks ansi_cb = {
     .index_down = cb_index_down,
     .reverse_index = cb_reverse_index,
     .reset = cb_reset,
+    .set_autowrap = cb_set_autowrap,
+    .set_cursor_key_app = cb_set_cursor_key_app,
+    .set_origin_mode = cb_set_origin_mode,
+    .set_alt_screen = cb_set_alt_screen,
+    .set_bracketed_paste = cb_set_bracketed_paste,
 };
 
 static int vt_tty_open(struct tty *tty) {

@@ -53,6 +53,11 @@ struct ansi_callbacks {
     void (*reverse_index)(void); /* ESC M - scroll down at top margin */
     void (*reset)(void);         /* ESC c - full reset */
     void (*set_attrs)(uint16_t flags); /* attribute flags (bold, underline, etc.) */
+    void (*set_autowrap)(int on);      /* DECAWM */
+    void (*set_cursor_key_app)(int on);/* DECCKM */
+    void (*set_origin_mode)(int on);   /* DECOM */
+    void (*set_alt_screen)(int on);    /* alt screen buffer (47/1047/1049) */
+    void (*set_bracketed_paste)(int on); /* DECSET 2004 */
 };
 
 /* Attribute flags for set_attrs callback */
