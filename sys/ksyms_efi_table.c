@@ -839,6 +839,7 @@ extern void proc_timers_cancel(void);
 extern void proc_timers_init(void);
 extern void proc_vfork(void);
 extern void proc_vfork_done(void);
+extern void process_keycode(void);
 extern void procfs_init(void);
 extern void procfs_register_entry(void);
 extern void property_pmap_kernel_consistency(void);
@@ -1540,6 +1541,7 @@ extern void usb_enumerate_device(void);
 extern void usb_find_endpoint(void);
 extern void usb_free_device(void);
 extern void usb_get_descriptor(void);
+extern void usb_hid_init(void);
 extern void usb_init(void);
 extern void usb_msc_init(void);
 extern void usb_register_class_driver(void);
@@ -2619,6 +2621,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&keyboard_set_keymap, "keyboard_set_keymap" },
     { (uint32_t)(uintptr_t)&keyboard_set_typematic, "keyboard_set_typematic" },
     { (uint32_t)(uintptr_t)&keyboard_init, "keyboard_init" },
+    { (uint32_t)(uintptr_t)&process_keycode, "process_keycode" },
     { (uint32_t)(uintptr_t)&keyboard_handler, "keyboard_handler" },
     { (uint32_t)(uintptr_t)&ps2_wait_write, "ps2_wait_write" },
     { (uint32_t)(uintptr_t)&ps2_wait_read, "ps2_wait_read" },
@@ -2810,6 +2813,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&usb_init, "usb_init" },
     { (uint32_t)(uintptr_t)&uhci_init, "uhci_init" },
     { (uint32_t)(uintptr_t)&usb_msc_init, "usb_msc_init" },
+    { (uint32_t)(uintptr_t)&usb_hid_init, "usb_hid_init" },
     { (uint32_t)(uintptr_t)&pseudo_init, "pseudo_init" },
     { (uint32_t)(uintptr_t)&full_init, "full_init" },
     { (uint32_t)(uintptr_t)&null_init, "null_init" },
@@ -3503,4 +3507,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1746;
+int ksym_count = 1748;
