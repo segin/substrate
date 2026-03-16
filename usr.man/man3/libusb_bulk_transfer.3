@@ -1,0 +1,53 @@
+.TH LIBUSB_BULK_TRANSFER 3 "March 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+libusb_bulk_transfer, libusb_interrupt_transfer \- perform synchronous USB data transfers
+.SH LIBRARY
+.B libusb
+.SH SYNOPSIS
+.B #include <libusb.h>
+.PP
+.BI "int libusb_bulk_transfer(libusb_device_handle *" handle ", unsigned char " endpoint ", unsigned char *" data ", int " length ", int *" transferred ", unsigned int " timeout ");"
+.PP
+.BI "int libusb_interrupt_transfer(libusb_device_handle *" handle ", unsigned char " endpoint ", unsigned char *" data ", int " length ", int *" transferred ", unsigned int " timeout ");"
+.SH DESCRIPTION
+.BR libusb_bulk_transfer ()
+and
+.BR libusb_interrupt_transfer ()
+submit a synchronous read or write request on a non-control endpoint.
+The library polls the device handle before issuing the backend bulk-transfer
+ioctl so timeouts map cleanly onto the libusb error model.
+.PP
+For interrupt endpoints, the current backend uses the same synchronous bulk
+ioctl path while preserving libusb's public API contract.
+.SH RETURN VALUE
+Both functions return 0 on success and store the number of bytes transferred in
+.I transferred
+when the pointer is non-NULL.
+On failure, a negative
+.B LIBUSB_ERROR_*
+code is returned.
+.SH ERRORS
+.TP
+.B LIBUSB_ERROR_INVALID_PARAM
+The handle was NULL or the transfer length was negative.
+.TP
+.B LIBUSB_ERROR_TIMEOUT
+The transfer did not complete before the requested timeout.
+.TP
+.B LIBUSB_ERROR_PIPE
+The endpoint stalled.
+.TP
+.B LIBUSB_ERROR_IO
+The backend transfer ioctl failed.
+.SH EXAMPLE
+.nf
+int transferred;
+int rc;
+unsigned char buf[512];
+
+rc = libusb_bulk_transfer(handle, 0x81, buf, sizeof(buf), &transferred, 1000);
+.fi
+.SH SEE ALSO
+.BR libusb_open (3),
+.BR libusb_control_transfer (3),
+.BR libusb_handle_events (3)

@@ -13,6 +13,7 @@
 #include <drivers/virtio/virtio.h>
 #include <drivers/storage/scsi/scsi.h>
 #include <arch/x86-common/io.h>
+#include <arch/i386/percpu.h>
 #include <arch/i386/pmm.h>
 #include <kern/console.h>
 #include <string.h>
@@ -126,6 +127,9 @@ struct virtio_scsi_event {
     uint32_t reason;
 } __attribute__((packed));
 
+#define VIRTIO_SCSI_KERNEL_BASE 0xC0000000u
+#define VIRTIO_SCSI_EVENT_SLOTS 4
+
 /*
  * ============================================================
  * Driver State
@@ -137,6 +141,7 @@ struct virtio_scsi_event {
 
 typedef struct virtio_scsi_queue {
     uint16_t size;
+    uint16_t pages;
     struct vring_desc *desc;
     struct vring_avail *avail;
     struct vring_used *used;
@@ -166,6 +171,14 @@ typedef struct virtio_scsi_dev {
     virtio_scsi_queue_t ctrl_queue;   /* Queue 0 */
     virtio_scsi_queue_t event_queue;  /* Queue 1 */
     virtio_scsi_queue_t req_queue;    /* Queue 2 (use first of N) */
+    virtio_scsi_queue_t extra_req_queues[VIRTIO_SCSI_MAX_QUEUES - 1];
+    uint16_t req_queue_count;
+
+    /* DMA staging buffers */
+    void *ctrl_buf;
+    void *req_buf;
+    void *extra_req_bufs[VIRTIO_SCSI_MAX_QUEUES - 1];
+    struct virtio_scsi_event *event_bufs;
     
     /* SCSI link */
     scsi_link_t link;
@@ -173,6 +186,54 @@ typedef struct virtio_scsi_dev {
 
 static virtio_scsi_dev_t vscsi_dev;
 static int vscsi_initialized = 0;
+
+static uint32_t vscsi_phys_addr(const void *ptr) {
+    uintptr_t addr = (uintptr_t)ptr;
+
+#ifdef HOST_TEST
+    return (uint32_t)addr;
+#else
+    if (addr >= VIRTIO_SCSI_KERNEL_BASE) {
+        addr -= VIRTIO_SCSI_KERNEL_BASE;
+    }
+    return (uint32_t)addr;
+#endif
+}
+
+static virtio_scsi_queue_t *vscsi_get_req_queue(virtio_scsi_dev_t *dev, uint16_t index) {
+    if (index == 0) {
+        return &dev->req_queue;
+    }
+    if (index >= dev->req_queue_count) {
+        return NULL;
+    }
+    return &dev->extra_req_queues[index - 1];
+}
+
+static void *vscsi_get_req_buf(virtio_scsi_dev_t *dev, uint16_t index) {
+    if (index == 0) {
+        return dev->req_buf;
+    }
+    if (index >= dev->req_queue_count) {
+        return NULL;
+    }
+    return dev->extra_req_bufs[index - 1];
+}
+
+static uint16_t vscsi_select_req_queue(virtio_scsi_dev_t *dev) {
+    int cpu_id;
+
+    if (dev->req_queue_count <= 1) {
+        return 0;
+    }
+
+    cpu_id = percpu_get_cpu_id();
+    if (cpu_id < 0) {
+        cpu_id = 0;
+    }
+
+    return (uint16_t)(cpu_id % dev->req_queue_count);
+}
 
 /*
  * ============================================================
@@ -182,6 +243,10 @@ static int vscsi_initialized = 0;
 
 static int vscsi_setup_queue(virtio_scsi_dev_t *dev, int queue_idx, 
                               virtio_scsi_queue_t *q) {
+    uint32_t avail_end;
+    uint32_t used_offset;
+    uint32_t total_size;
+
     /* Select queue */
     outw(dev->io_base + VIRTIO_REG_QUEUE_SELECT, queue_idx);
     
@@ -191,31 +256,27 @@ static int vscsi_setup_queue(virtio_scsi_dev_t *dev, int queue_idx,
         return -1;  /* Queue not available */
     }
     
-    /* Allocate queue memory (page aligned) */
-    q->mem = pmm_alloc_block();
+    avail_end = 16 * q->size + 6 + 2 * q->size;
+    used_offset = (avail_end + 4095) & ~4095;
+    total_size = used_offset + 6 + 8 * q->size;
+    q->pages = (uint16_t)((total_size + 4095) / 4096);
+
+    /* Allocate queue memory (page aligned, physically contiguous) */
+    q->mem = pmm_alloc_contiguous(q->pages);
     if (!q->mem) {
         return -1;
     }
-    memset(q->mem, 0, 4096);
+    memset(q->mem, 0, q->pages * 4096U);
     
     /* Setup ring pointers */
     q->desc = (struct vring_desc *)q->mem;
     q->avail = (struct vring_avail *)((char*)q->mem + 16 * q->size);
     
-    uint32_t avail_end = 16 * q->size + 6 + 2 * q->size;
-    uint32_t used_offset = (avail_end + 4095) & ~4095;
-    
-    if (used_offset + 6 + 8 * q->size > 4096) {
-        /* Queue too large for single page */
-        pmm_free_block(q->mem);
-        return -1;
-    }
-    
     q->used = (struct vring_used *)((char*)q->mem + used_offset);
     q->last_used_idx = 0;
     
     /* Write physical address */
-    uint32_t phys = (uint32_t)(uintptr_t)q->mem - 0xC0000000;
+    uint32_t phys = vscsi_phys_addr(q->mem);
     outl(dev->io_base + VIRTIO_REG_QUEUE_ADDR, phys / 4096);
     
     return 0;
@@ -229,48 +290,57 @@ static int vscsi_setup_queue(virtio_scsi_dev_t *dev, int queue_idx,
 
 static int vscsi_execute(scsi_link_t *link, scsi_request_t *req) {
     virtio_scsi_dev_t *dev = (virtio_scsi_dev_t *)link->priv;
+    uint16_t queue_index;
+    uint16_t notify_queue;
+    void *req_buf;
+
     if (!dev || !req || !req->device) return -1;
+
+    queue_index = vscsi_select_req_queue(dev);
+    notify_queue = (uint16_t)(2 + queue_index);
     
-    virtio_scsi_queue_t *q = &dev->req_queue;
+    virtio_scsi_queue_t *q = vscsi_get_req_queue(dev, queue_index);
     scsi_device_t *sdev = req->device;
+    req_buf = vscsi_get_req_buf(dev, queue_index);
+    if (!q || !req_buf) return -1;
+
+    struct virtio_scsi_req_hdr *hdr = (struct virtio_scsi_req_hdr *)req_buf;
+    struct virtio_scsi_resp_hdr *resp =
+        (struct virtio_scsi_resp_hdr *)((uint8_t *)req_buf + sizeof(*hdr));
     
     /* Build request header */
-    struct virtio_scsi_req_hdr hdr;
-    memset(&hdr, 0, sizeof(hdr));
+    memset(hdr, 0, sizeof(*hdr));
+    memset(resp, 0, sizeof(*resp));
     
     /* LUN format: first byte is 1, second is target, bytes 2-3 are LUN */
-    hdr.lun[0] = 1;
-    hdr.lun[1] = sdev->target;
-    hdr.lun[2] = (sdev->lun >> 8) & 0xFF;
-    hdr.lun[3] = sdev->lun & 0xFF;
-    hdr.tag = (uint64_t)(uintptr_t)req;
-    hdr.task_attr = 0;  /* Simple queue */
-    hdr.prio = 0;
-    hdr.crn = 0;
+    hdr->lun[0] = 1;
+    hdr->lun[1] = sdev->target;
+    hdr->lun[2] = (sdev->lun >> 8) & 0xFF;
+    hdr->lun[3] = sdev->lun & 0xFF;
+    hdr->tag = (uint64_t)(uintptr_t)req;
+    hdr->task_attr = 0;  /* Simple queue */
+    hdr->prio = 0;
+    hdr->crn = 0;
     
     /* Copy CDB */
     uint8_t cdb_len = req->cdb_len;
     if (cdb_len > 32) cdb_len = 32;
-    memcpy(hdr.cdb, req->cdb, cdb_len);
-    
-    /* Response buffer */
-    struct virtio_scsi_resp_hdr resp;
-    memset(&resp, 0, sizeof(resp));
+    memcpy(hdr->cdb, req->cdb, cdb_len);
     
     /* Build descriptor chain */
     int write_to_device = (req->flags & SCSI_REQ_WRITE) ? 1 : 0;
     int desc_idx = 0;
     
     /* Descriptor 0: Request header (device-readable) */
-    q->desc[0].addr = (uint64_t)(uint32_t)&hdr;
-    q->desc[0].len = sizeof(hdr);
+    q->desc[0].addr = (uint64_t)vscsi_phys_addr(hdr);
+    q->desc[0].len = sizeof(*hdr);
     q->desc[0].flags = VRING_DESC_F_NEXT;
     q->desc[0].next = 1;
     desc_idx = 1;
     
     /* Descriptor 1: Data buffer (optional) */
     if (req->data && req->data_len > 0) {
-        q->desc[desc_idx].addr = (uint64_t)(uint32_t)req->data;
+        q->desc[desc_idx].addr = (uint64_t)vscsi_phys_addr(req->data);
         q->desc[desc_idx].len = req->data_len;
         q->desc[desc_idx].flags = VRING_DESC_F_NEXT;
         if (!write_to_device) {
@@ -281,8 +351,8 @@ static int vscsi_execute(scsi_link_t *link, scsi_request_t *req) {
     }
     
     /* Final descriptor: Response header (device-writable) */
-    q->desc[desc_idx].addr = (uint64_t)(uint32_t)&resp;
-    q->desc[desc_idx].len = sizeof(resp);
+    q->desc[desc_idx].addr = (uint64_t)vscsi_phys_addr(resp);
+    q->desc[desc_idx].len = sizeof(*resp);
     q->desc[desc_idx].flags = VRING_DESC_F_WRITE;
     q->desc[desc_idx].next = 0;
     
@@ -292,7 +362,7 @@ static int vscsi_execute(scsi_link_t *link, scsi_request_t *req) {
     q->avail->idx++;
     
     /* Notify device */
-    outw(dev->io_base + VIRTIO_REG_QUEUE_NOTIFY, 2);  /* Request queue */
+    outw(dev->io_base + VIRTIO_REG_QUEUE_NOTIFY, notify_queue);
     
     /* Poll for completion */
     while (q->last_used_idx == q->used->idx) {
@@ -301,20 +371,21 @@ static int vscsi_execute(scsi_link_t *link, scsi_request_t *req) {
     q->last_used_idx++;
     
     /* Parse response */
-    if (resp.response != VIRTIO_SCSI_S_OK) {
+    if (resp->response != VIRTIO_SCSI_S_OK) {
         req->status = SCSI_STATUS_CHECK_CONDITION;
-        req->error = resp.response;
+        req->error = resp->response;
         return -1;
     }
     
-    req->status = resp.status;
-    req->data_xfer = req->data_len - resp.residual;
+    req->status = resp->status;
+    req->error = 0;
+    req->data_xfer = (resp->residual > req->data_len) ? 0 : (req->data_len - resp->residual);
     
     /* Copy sense data if present */
-    if (resp.sense_len > 0) {
-        uint32_t copy_len = resp.sense_len;
+    if (resp->sense_len > 0) {
+        uint32_t copy_len = resp->sense_len;
         if (copy_len > SCSI_MAX_SENSE_LEN) copy_len = SCSI_MAX_SENSE_LEN;
-        memcpy(req->sense, resp.sense, copy_len);
+        memcpy(req->sense, resp->sense, copy_len);
         req->sense_len = (uint8_t)copy_len;
     }
     
@@ -324,37 +395,38 @@ static int vscsi_execute(scsi_link_t *link, scsi_request_t *req) {
 static int vscsi_send_tmf(virtio_scsi_dev_t *dev, uint32_t subtype,
                           uint8_t target, uint16_t lun) {
     if (!dev) return -1;
+    if (!dev->ctrl_buf) return -1;
     virtio_scsi_queue_t *q = &dev->ctrl_queue;
+    struct virtio_scsi_ctrl_tmf_req *req =
+        (struct virtio_scsi_ctrl_tmf_req *)dev->ctrl_buf;
+    struct virtio_scsi_ctrl_tmf_resp *resp =
+        (struct virtio_scsi_ctrl_tmf_resp *)((uint8_t *)dev->ctrl_buf + sizeof(*req));
 
     /* Build TMF request */
-    struct virtio_scsi_ctrl_tmf_req req;
-    memset(&req, 0, sizeof(req));
+    memset(req, 0, sizeof(*req));
+    memset(resp, 0, sizeof(*resp));
 
-    req.type = VIRTIO_SCSI_T_TMF;
-    req.subtype = subtype;
-    req.lun[0] = 1;
-    req.lun[1] = target;
-    req.lun[2] = (lun >> 8) & 0xFF;
-    req.lun[3] = lun & 0xFF;
-    req.id = 0;
-
-    /* Build TMF response */
-    struct virtio_scsi_ctrl_tmf_resp resp;
-    memset(&resp, 0, sizeof(resp));
+    req->type = VIRTIO_SCSI_T_TMF;
+    req->subtype = subtype;
+    req->lun[0] = 1;
+    req->lun[1] = target;
+    req->lun[2] = (lun >> 8) & 0xFF;
+    req->lun[3] = lun & 0xFF;
+    req->id = 0;
 
     /* Build descriptor chain */
     int desc_idx = 0;
 
     /* Descriptor 0: Request (device-readable) */
-    q->desc[0].addr = (uint64_t)(uint32_t)&req;
-    q->desc[0].len = sizeof(req);
+    q->desc[0].addr = (uint64_t)vscsi_phys_addr(req);
+    q->desc[0].len = sizeof(*req);
     q->desc[0].flags = VRING_DESC_F_NEXT;
     q->desc[0].next = 1;
     desc_idx = 1;
 
     /* Descriptor 1: Response (device-writable) */
-    q->desc[desc_idx].addr = (uint64_t)(uint32_t)&resp;
-    q->desc[desc_idx].len = sizeof(resp);
+    q->desc[desc_idx].addr = (uint64_t)vscsi_phys_addr(resp);
+    q->desc[desc_idx].len = sizeof(*resp);
     q->desc[desc_idx].flags = VRING_DESC_F_WRITE;
     q->desc[desc_idx].next = 0;
 
@@ -373,12 +445,12 @@ static int vscsi_send_tmf(virtio_scsi_dev_t *dev, uint32_t subtype,
     q->last_used_idx++;
 
     /* Check response */
-    if (resp.response == VIRTIO_SCSI_S_FUNCTION_COMPLETE ||
-        resp.response == VIRTIO_SCSI_S_FUNCTION_SUCCEEDED) {
+    if (resp->response == VIRTIO_SCSI_S_FUNCTION_COMPLETE ||
+        resp->response == VIRTIO_SCSI_S_FUNCTION_SUCCEEDED) {
         return 0;
     }
 
-    return resp.response;
+    return resp->response;
 }
 
 static int vscsi_reset_device(scsi_link_t *link, scsi_device_t *sdev) {
@@ -437,22 +509,26 @@ static void vscsi_process_events(virtio_scsi_dev_t *dev) {
     
     while (eq->last_used_idx != eq->used->idx) {
         uint32_t idx = eq->used->ring[eq->last_used_idx % eq->size].id;
-        struct virtio_scsi_event *event = (struct virtio_scsi_event *)
-            (uintptr_t)eq->desc[idx].addr;
+        if (dev->event_bufs == NULL || idx >= VIRTIO_SCSI_EVENT_SLOTS) {
+            eq->last_used_idx++;
+            continue;
+        }
+        struct virtio_scsi_event *event = &dev->event_bufs[idx];
         
         switch (event->event) {
         case VIRTIO_SCSI_T_TRANSPORT_RESET:
             kprint("virtio_scsi: transport reset event\n");
-            /* Rescan for device changes */
-            scsi_scan_bus(&dev->link, 0);
+            scsi_scan_bus(&dev->link, dev->link.bus_id);
             break;
             
         case VIRTIO_SCSI_T_ASYNC_NOTIFY:
             kprint("virtio_scsi: async notify event\n");
+            scsi_scan_bus(&dev->link, dev->link.bus_id);
             break;
             
         case VIRTIO_SCSI_T_PARAM_CHANGE:
             kprint("virtio_scsi: param change event\n");
+            scsi_scan_bus(&dev->link, dev->link.bus_id);
             break;
             
         default:
@@ -468,19 +544,27 @@ static void vscsi_process_events(virtio_scsi_dev_t *dev) {
 
 static void vscsi_setup_event_buffers(virtio_scsi_dev_t *dev) {
     virtio_scsi_queue_t *eq = &dev->event_queue;
-    
-    /* Allocate event structures and queue them */
-    static struct virtio_scsi_event events[4];
-    
-    for (int i = 0; i < 4 && (uint16_t)i < eq->size; i++) {
-        eq->desc[i].addr = (uint64_t)(uint32_t)&events[i];
+
+    if (dev->event_bufs == NULL) {
+        return;
+    }
+
+    uint16_t slots = eq->size;
+    if (slots > VIRTIO_SCSI_EVENT_SLOTS) {
+        slots = VIRTIO_SCSI_EVENT_SLOTS;
+    }
+
+    memset(dev->event_bufs, 0, sizeof(*dev->event_bufs) * slots);
+
+    for (uint16_t i = 0; i < slots; i++) {
+        eq->desc[i].addr = (uint64_t)vscsi_phys_addr(&dev->event_bufs[i]);
         eq->desc[i].len = sizeof(struct virtio_scsi_event);
         eq->desc[i].flags = VRING_DESC_F_WRITE;
         eq->desc[i].next = 0;
         
         eq->avail->ring[i] = i;
     }
-    eq->avail->idx = 4;
+    eq->avail->idx = slots;
     
     /* Notify device */
     outw(dev->io_base + VIRTIO_REG_QUEUE_NOTIFY, 1);  /* Event queue */
@@ -548,6 +632,48 @@ void virtio_scsi_setup(uint8_t bus, uint8_t slot, uint8_t func) {
         kprint("virtio_scsi: failed to setup request queue\n");
         return;
     }
+
+    dev->req_queue_count = dev->num_queues;
+    if (dev->req_queue_count == 0) {
+        dev->req_queue_count = 1;
+    }
+    if (dev->req_queue_count > VIRTIO_SCSI_MAX_QUEUES) {
+        dev->req_queue_count = VIRTIO_SCSI_MAX_QUEUES;
+    }
+
+    for (uint16_t i = 1; i < dev->req_queue_count; i++) {
+        if (vscsi_setup_queue(dev, (int)(2 + i), &dev->extra_req_queues[i - 1]) < 0) {
+            kprint("virtio_scsi: failed to setup additional request queue\n");
+            return;
+        }
+    }
+
+    dev->ctrl_buf = pmm_alloc_block();
+    dev->req_buf = pmm_alloc_block();
+    if (!dev->ctrl_buf || !dev->req_buf) {
+        kprint("virtio_scsi: failed to allocate DMA staging buffers\n");
+        return;
+    }
+    memset(dev->ctrl_buf, 0, 4096);
+    memset(dev->req_buf, 0, 4096);
+
+    for (uint16_t i = 1; i < dev->req_queue_count; i++) {
+        dev->extra_req_bufs[i - 1] = pmm_alloc_block();
+        if (!dev->extra_req_bufs[i - 1]) {
+            kprint("virtio_scsi: failed to allocate per-queue DMA staging buffer\n");
+            return;
+        }
+        memset(dev->extra_req_bufs[i - 1], 0, 4096);
+    }
+
+    if (dev->features & VIRTIO_SCSI_F_HOTPLUG) {
+        dev->event_bufs = (struct virtio_scsi_event *)pmm_alloc_block();
+        if (!dev->event_bufs) {
+            kprint("virtio_scsi: failed to allocate event buffers\n");
+            return;
+        }
+        memset(dev->event_bufs, 0, 4096);
+    }
     
     /* 3. Driver OK */
     outb(dev->io_base + VIRTIO_REG_DEVICE_STATUS,
@@ -559,8 +685,12 @@ void virtio_scsi_setup(uint8_t bus, uint8_t slot, uint8_t func) {
     }
     
     /* Setup SCSI transport link */
-    strncpy(dev->link.name, "virtio-scsi", sizeof(dev->link.name) - 1);
-    dev->link.name[sizeof(dev->link.name) - 1] = '\0';
+    snprintf(dev->link.name, sizeof(dev->link.name), "virtio-scsi0");
+    dev->link.bus_id = 0;
+    dev->link.max_targets = (dev->max_target + 1 > SCSI_MAX_TARGETS) ? SCSI_MAX_TARGETS : (uint8_t)(dev->max_target + 1);
+    dev->link.max_luns = (dev->max_lun + 1 > SCSI_MAX_LUNS) ? SCSI_MAX_LUNS : (uint16_t)(dev->max_lun + 1);
+    dev->link.adapter_queue_depth = dev->cmd_per_lun ? (uint16_t)dev->cmd_per_lun : 1;
+    dev->link.flags = SCSI_LINK_DMA;
     dev->link.execute = vscsi_execute;
     dev->link.reset_device = vscsi_reset_device;
     dev->link.reset_bus = vscsi_reset_bus;

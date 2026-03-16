@@ -57,6 +57,7 @@ bin/         base Unix userland
 sbin/        system utilities
 usr.bin/     compiler/toolchain and extended user tools
 lib/         target runtime libraries (libc/libsys/libm/libpthread/libusb...)
+lib/usb/     libusb 1.0-compatible userspace USB access library over usbdevfs
 usr.lib/     shared libraries for tooling/runtime support (elfobj, demangle, ...)
 include/     userspace public headers
 tests/       unit/integration/regression/property/fuzz harnesses

@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -28,6 +29,236 @@ static const struct libusb_version g_libusb_version = {
 	.rc = "",
 	.describe = "Substrate libusb compatibility layer",
 };
+
+static const char *
+libusb__device_events_path(void)
+{
+	const char *override = getenv("LIBUSB_DEVICE_EVENTS_PATH");
+
+	if (override != NULL && override[0] != '\0') {
+		return override;
+	}
+	return "/proc/device-events";
+}
+
+static void
+libusb__free_hotplug_snapshot(libusb_context *ctx)
+{
+	size_t index;
+
+	for (index = 0; index < ctx->hotplug_device_count; index++) {
+		libusb_unref_device(ctx->hotplug_devices[index]);
+	}
+	free(ctx->hotplug_devices);
+	ctx->hotplug_devices = NULL;
+	ctx->hotplug_device_count = 0;
+}
+
+static int
+libusb__same_device(const libusb_device *left, const libusb_device *right)
+{
+	return left->bus_number == right->bus_number &&
+	    left->device_address == right->device_address;
+}
+
+static int
+libusb__match_hotplug_filter(struct libusb__hotplug_callback *callback,
+	libusb_device *device)
+{
+	struct libusb_device_descriptor desc;
+	int ret;
+
+	if (callback->vendor_id == LIBUSB_HOTPLUG_MATCH_ANY &&
+	    callback->product_id == LIBUSB_HOTPLUG_MATCH_ANY &&
+	    callback->dev_class == LIBUSB_HOTPLUG_MATCH_ANY) {
+		return 1;
+	}
+	ret = libusb_get_device_descriptor(device, &desc);
+	if (ret != LIBUSB_SUCCESS) {
+		return 0;
+	}
+	if (callback->vendor_id != LIBUSB_HOTPLUG_MATCH_ANY &&
+	    desc.idVendor != (uint16_t)callback->vendor_id) {
+		return 0;
+	}
+	if (callback->product_id != LIBUSB_HOTPLUG_MATCH_ANY &&
+	    desc.idProduct != (uint16_t)callback->product_id) {
+		return 0;
+	}
+	if (callback->dev_class != LIBUSB_HOTPLUG_MATCH_ANY &&
+	    desc.bDeviceClass != (uint8_t)callback->dev_class) {
+		return 0;
+	}
+	return 1;
+}
+
+static void
+libusb__deregister_hotplug_handle(libusb_context *ctx,
+	libusb_hotplug_callback_handle handle)
+{
+	int index;
+
+	for (index = 0; index < LIBUSB__MAX_HOTPLUG_CALLBACKS; index++) {
+		if (ctx->hotplug_callbacks[index].in_use &&
+		    ctx->hotplug_callbacks[index].handle == handle) {
+			memset(&ctx->hotplug_callbacks[index], 0,
+			    sizeof(ctx->hotplug_callbacks[index]));
+			return;
+		}
+	}
+}
+
+static void
+libusb__notify_hotplug(libusb_context *ctx, libusb_device *device,
+	libusb_hotplug_event event)
+{
+	int index;
+
+	for (index = 0; index < LIBUSB__MAX_HOTPLUG_CALLBACKS; index++) {
+		struct libusb__hotplug_callback *callback = &ctx->hotplug_callbacks[index];
+
+		if (!callback->in_use || (callback->events & event) == 0) {
+			continue;
+		}
+		if (!libusb__match_hotplug_filter(callback, device)) {
+			continue;
+		}
+		if (callback->cb_fn(ctx, device, event, callback->user_data)) {
+			libusb__deregister_hotplug_handle(ctx, callback->handle);
+		}
+	}
+}
+
+static int
+libusb__seed_hotplug_snapshot(libusb_context *ctx)
+{
+	size_t index;
+
+	if (ctx->hotplug_devices != NULL || ctx->cached_device_count == 0) {
+		return LIBUSB_SUCCESS;
+	}
+	ctx->hotplug_devices = calloc(ctx->cached_device_count,
+	    sizeof(*ctx->hotplug_devices));
+	if (ctx->hotplug_devices == NULL) {
+		return LIBUSB_ERROR_NO_MEM;
+	}
+	for (index = 0; index < ctx->cached_device_count; index++) {
+		ctx->hotplug_devices[index] = libusb_ref_device(ctx->cached_devices[index]);
+	}
+	ctx->hotplug_device_count = ctx->cached_device_count;
+	return LIBUSB_SUCCESS;
+}
+
+static int
+libusb__sync_hotplug_devices(libusb_context *ctx)
+{
+	libusb_device **current = NULL;
+	ssize_t count;
+	size_t old_index;
+	size_t new_index;
+	libusb_device **snapshot = NULL;
+
+	count = libusb_get_device_list(ctx, &current);
+	if (count < 0) {
+		return (int)count;
+	}
+	for (old_index = 0; old_index < ctx->hotplug_device_count; old_index++) {
+		int still_present = 0;
+
+		for (new_index = 0; new_index < (size_t)count; new_index++) {
+			if (libusb__same_device(ctx->hotplug_devices[old_index], current[new_index])) {
+				still_present = 1;
+				break;
+			}
+		}
+		if (!still_present) {
+			libusb__notify_hotplug(ctx, ctx->hotplug_devices[old_index],
+			    LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT);
+		}
+	}
+	for (new_index = 0; new_index < (size_t)count; new_index++) {
+		int already_known = 0;
+
+		for (old_index = 0; old_index < ctx->hotplug_device_count; old_index++) {
+			if (libusb__same_device(current[new_index], ctx->hotplug_devices[old_index])) {
+				already_known = 1;
+				break;
+			}
+		}
+		if (!already_known) {
+			libusb__notify_hotplug(ctx, current[new_index],
+			    LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED);
+		}
+	}
+	if (count > 0) {
+		snapshot = calloc((size_t)count, sizeof(*snapshot));
+		if (snapshot == NULL) {
+			libusb_free_device_list(current, 1);
+			return LIBUSB_ERROR_NO_MEM;
+		}
+		for (new_index = 0; new_index < (size_t)count; new_index++) {
+			snapshot[new_index] = libusb_ref_device(current[new_index]);
+		}
+	}
+	libusb__free_hotplug_snapshot(ctx);
+	ctx->hotplug_devices = snapshot;
+	ctx->hotplug_device_count = (size_t)count;
+	libusb_free_device_list(current, 1);
+	return LIBUSB_SUCCESS;
+}
+
+static int
+libusb__read_device_events(libusb_context *ctx, int *changed)
+{
+	const char *path = libusb__device_events_path();
+	FILE *stream;
+	char *buffer;
+	long size;
+
+	*changed = 0;
+	stream = fopen(path, "r");
+	if (stream == NULL) {
+		return LIBUSB_SUCCESS;
+	}
+	if (fseek(stream, 0, SEEK_END) != 0) {
+		fclose(stream);
+		return LIBUSB_SUCCESS;
+	}
+	size = ftell(stream);
+	if (size < 0 || fseek(stream, 0, SEEK_SET) != 0) {
+		fclose(stream);
+		return LIBUSB_SUCCESS;
+	}
+	buffer = calloc((size_t)size + 1, 1);
+	if (buffer == NULL) {
+		fclose(stream);
+		return LIBUSB_ERROR_NO_MEM;
+	}
+	if (size > 0 && fread(buffer, 1, (size_t)size, stream) != (size_t)size) {
+		free(buffer);
+		fclose(stream);
+		return LIBUSB_SUCCESS;
+	}
+	fclose(stream);
+	if (ctx->hotplug_event_snapshot_len == 0) {
+		*changed = strstr(buffer, "add usb ") != NULL ||
+		    strstr(buffer, "remove usb ") != NULL;
+	} else if ((size_t)size >= ctx->hotplug_event_snapshot_len &&
+	    memcmp(buffer, ctx->hotplug_event_snapshot,
+	    ctx->hotplug_event_snapshot_len) == 0) {
+		*changed = strstr(buffer + ctx->hotplug_event_snapshot_len,
+		    "add usb ") != NULL ||
+		    strstr(buffer + ctx->hotplug_event_snapshot_len,
+		    "remove usb ") != NULL;
+	} else {
+		*changed = strstr(buffer, "add usb ") != NULL ||
+		    strstr(buffer, "remove usb ") != NULL;
+	}
+	free(ctx->hotplug_event_snapshot);
+	ctx->hotplug_event_snapshot = buffer;
+	ctx->hotplug_event_snapshot_len = (size_t)size;
+	return LIBUSB_SUCCESS;
+}
 
 static void
 libusb__apply_option_values(libusb_context *ctx, enum libusb_option option,
@@ -226,6 +457,8 @@ libusb_exit(libusb_context *ctx)
 		g_default_context = NULL;
 	}
 	libusb__free_cached_devices(resolved);
+	libusb__free_hotplug_snapshot(resolved);
+	free(resolved->hotplug_event_snapshot);
 	if (resolved->event_pipe[0] >= 0) {
 		close(resolved->event_pipe[0]);
 	}
@@ -269,9 +502,9 @@ libusb_has_capability(uint32_t capability)
 {
 	switch (capability) {
 	case LIBUSB_CAP_HAS_CAPABILITY:
+	case LIBUSB_CAP_HAS_HOTPLUG:
 	case LIBUSB_CAP_SUPPORTS_DETACH_KERNEL_DRIVER:
 		return 1;
-	case LIBUSB_CAP_HAS_HOTPLUG:
 	case LIBUSB_CAP_HAS_HID_ACCESS:
 	default:
 		return 0;
@@ -366,4 +599,124 @@ libusb_set_option(libusb_context *ctx, enum libusb_option option, ...)
 
 	libusb__apply_option_values(resolved, option, int_value, cb_value);
 	return LIBUSB_SUCCESS;
+}
+
+int
+libusb__poll_hotplug(libusb_context *ctx)
+{
+	int changed;
+	int ret;
+	int index;
+
+	for (index = 0; index < LIBUSB__MAX_HOTPLUG_CALLBACKS; index++) {
+		if (ctx->hotplug_callbacks[index].in_use) {
+			break;
+		}
+	}
+	if (index == LIBUSB__MAX_HOTPLUG_CALLBACKS) {
+		return LIBUSB_SUCCESS;
+	}
+	ret = libusb__seed_hotplug_snapshot(ctx);
+	if (ret != LIBUSB_SUCCESS) {
+		return ret;
+	}
+	ret = libusb__read_device_events(ctx, &changed);
+	if (ret != LIBUSB_SUCCESS) {
+		return ret;
+	}
+	if (changed || ctx->hotplug_event_snapshot == NULL) {
+		return libusb__sync_hotplug_devices(ctx);
+	}
+	return LIBUSB_SUCCESS;
+}
+
+int LIBUSB_CALL
+libusb_hotplug_register_callback(libusb_context *ctx, int events, int flags,
+	int vendor_id, int product_id, int dev_class,
+	libusb_hotplug_callback_fn cb_fn, void *user_data,
+	libusb_hotplug_callback_handle *callback_handle)
+{
+	libusb_context *resolved;
+	int index;
+
+	if (cb_fn == NULL || callback_handle == NULL ||
+	    (events & (LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED |
+	    LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT)) == 0) {
+		return LIBUSB_ERROR_INVALID_PARAM;
+	}
+	resolved = libusb__resolve_context(ctx);
+	if (resolved == NULL) {
+		return LIBUSB_ERROR_OTHER;
+	}
+	for (index = 0; index < LIBUSB__MAX_HOTPLUG_CALLBACKS; index++) {
+		if (!resolved->hotplug_callbacks[index].in_use) {
+			struct libusb__hotplug_callback *callback =
+			    &resolved->hotplug_callbacks[index];
+			callback->in_use = 1;
+			callback->handle = ++resolved->next_hotplug_handle;
+			callback->events = events;
+			callback->flags = flags;
+			callback->vendor_id = vendor_id;
+			callback->product_id = product_id;
+			callback->dev_class = dev_class;
+			callback->cb_fn = cb_fn;
+			callback->user_data = user_data;
+			*callback_handle = callback->handle;
+			if (libusb__seed_hotplug_snapshot(resolved) != LIBUSB_SUCCESS) {
+				memset(callback, 0, sizeof(*callback));
+				return LIBUSB_ERROR_NO_MEM;
+			}
+			if ((flags & LIBUSB_HOTPLUG_ENUMERATE) != 0 &&
+			    (events & LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED) != 0) {
+				size_t device_index;
+				for (device_index = 0;
+				    device_index < resolved->hotplug_device_count;
+				    device_index++) {
+					if (libusb__match_hotplug_filter(callback,
+					    resolved->hotplug_devices[device_index]) &&
+					    callback->cb_fn(resolved,
+					    resolved->hotplug_devices[device_index],
+					    LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED,
+					    callback->user_data)) {
+						libusb__deregister_hotplug_handle(resolved,
+						    callback->handle);
+						break;
+					}
+				}
+			}
+			return LIBUSB_SUCCESS;
+		}
+	}
+	return LIBUSB_ERROR_NO_MEM;
+}
+
+void LIBUSB_CALL
+libusb_hotplug_deregister_callback(libusb_context *ctx,
+	libusb_hotplug_callback_handle callback_handle)
+{
+	libusb_context *resolved = libusb__resolve_context(ctx);
+
+	if (resolved == NULL) {
+		return;
+	}
+	libusb__deregister_hotplug_handle(resolved, callback_handle);
+}
+
+void *LIBUSB_CALL
+libusb_hotplug_get_user_data(libusb_context *ctx,
+	libusb_hotplug_callback_handle callback_handle)
+{
+	libusb_context *resolved = libusb__resolve_context(ctx);
+	int index;
+
+	if (resolved == NULL) {
+		return NULL;
+	}
+	for (index = 0; index < LIBUSB__MAX_HOTPLUG_CALLBACKS; index++) {
+		if (resolved->hotplug_callbacks[index].in_use &&
+		    resolved->hotplug_callbacks[index].handle == callback_handle) {
+			return resolved->hotplug_callbacks[index].user_data;
+		}
+	}
+	return NULL;
 }

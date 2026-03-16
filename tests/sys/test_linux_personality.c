@@ -39,11 +39,32 @@ void test_linux_personality(void) {
 
     test_assert(linux->syscall_table[LINUX_SYS_modify_ldt] == (void *)&sys_modify_ldt,
                 "Linux syscall table wires modify_ldt to sys_modify_ldt");
+    test_assert(linux->syscall_table[LINUX_SYS_mount] == (void *)&sys_mount,
+                "Linux syscall table wires mount to sys_mount");
+    test_assert(linux->syscall_table[LINUX_SYS_umount] == (void *)&sys_umount,
+                "Linux syscall table wires umount to sys_umount");
     test_assert(linux->syscall_names[LINUX_SYS_modify_ldt] != NULL &&
                     strcmp(linux->syscall_names[LINUX_SYS_modify_ldt], "modify_ldt") == 0,
                 "Linux syscall name table exposes modify_ldt");
+    test_assert(linux->syscall_names[LINUX_SYS_mount] != NULL &&
+                    strcmp(linux->syscall_names[LINUX_SYS_mount], "mount") == 0,
+                "Linux syscall name table exposes mount");
+    test_assert(linux->syscall_names[LINUX_SYS_umount] != NULL &&
+                    strcmp(linux->syscall_names[LINUX_SYS_umount], "umount") == 0,
+                "Linux syscall name table exposes umount");
     test_assert(linux->syscall_fmts[LINUX_SYS_modify_ldt].nargs == 3,
                 "Linux modify_ldt trace format has three arguments");
+    test_assert(linux->syscall_fmts[LINUX_SYS_mount].nargs == 5,
+                "Linux mount trace format has five arguments");
+    test_assert(linux->syscall_fmts[LINUX_SYS_mount].arg_types[0] == ARG_STR &&
+                    linux->syscall_fmts[LINUX_SYS_mount].arg_types[1] == ARG_STR &&
+                    linux->syscall_fmts[LINUX_SYS_mount].arg_types[2] == ARG_STR &&
+                    linux->syscall_fmts[LINUX_SYS_mount].arg_types[3] == ARG_HEX &&
+                    linux->syscall_fmts[LINUX_SYS_mount].arg_types[4] == ARG_PTR,
+                "Linux mount trace format matches ABI");
+    test_assert(linux->syscall_fmts[LINUX_SYS_umount].nargs == 1 &&
+                    linux->syscall_fmts[LINUX_SYS_umount].arg_types[0] == ARG_STR,
+                "Linux umount trace format matches ABI");
     test_assert(linux->syscall_fmts[LINUX_SYS_modify_ldt].arg_types[0] == ARG_INT &&
                     linux->syscall_fmts[LINUX_SYS_modify_ldt].arg_types[1] == ARG_PTR &&
                     linux->syscall_fmts[LINUX_SYS_modify_ldt].arg_types[2] == ARG_LONG,

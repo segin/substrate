@@ -3,6 +3,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -53,6 +54,183 @@ libusb__append_device(libusb_device ***devices, size_t *count, libusb_device *de
 	*devices = grown;
 	(*count)++;
 	return LIBUSB_SUCCESS;
+}
+
+static int
+libusb__parse_bus_address(const char *value, uint8_t *bus_number,
+	uint8_t *device_address)
+{
+	char *end;
+	unsigned long parsed;
+
+	parsed = strtoul(value, &end, 10);
+	if (end == value || end == NULL || *end != ':' || parsed > 255UL) {
+		return 0;
+	}
+	*bus_number = (uint8_t)parsed;
+	parsed = strtoul(end + 1, &end, 10);
+	if (end == NULL || *end != '\0' || parsed > 255UL) {
+		return 0;
+	}
+	*device_address = (uint8_t)parsed;
+	return 1;
+}
+
+static void
+libusb__trim_ascii(char *text)
+{
+	size_t len;
+
+	len = strlen(text);
+	while (len > 0 && (text[len - 1] == '\n' || text[len - 1] == '\r' ||
+	    text[len - 1] == ' ' || text[len - 1] == '\t')) {
+		text[--len] = '\0';
+	}
+}
+
+static void
+libusb__load_metadata(libusb_device *device)
+{
+	char meta_path[PATH_MAX];
+	FILE *stream;
+	char line[256];
+
+	snprintf(meta_path, sizeof(meta_path), "%s.meta", device->path);
+	stream = fopen(meta_path, "r");
+	if (stream == NULL) {
+		return;
+	}
+
+	while (fgets(line, sizeof(line), stream) != NULL) {
+		char *equals;
+		char *key;
+		char *value;
+		char *end;
+		unsigned long parsed;
+		unsigned int endpoint_number;
+
+		libusb__trim_ascii(line);
+		if (line[0] == '\0' || line[0] == '#') {
+			continue;
+		}
+		equals = strchr(line, '=');
+		if (equals == NULL) {
+			continue;
+		}
+		*equals = '\0';
+		key = line;
+		value = equals + 1;
+		if (strcmp(key, "port") == 0) {
+			parsed = strtoul(value, &end, 10);
+			if (end != NULL && *end == '\0' && parsed <= 255UL) {
+				device->port_number = (uint8_t)parsed;
+			}
+		} else if (strcmp(key, "speed") == 0) {
+			parsed = strtoul(value, &end, 10);
+			if (end != NULL && *end == '\0' && parsed <= INT_MAX) {
+				device->speed = (int)parsed;
+			}
+		} else if (strcmp(key, "parent") == 0) {
+			device->parent_valid = libusb__parse_bus_address(value,
+				&device->parent_bus_number, &device->parent_device_address);
+		} else if (strcmp(key, "active_configuration") == 0) {
+			parsed = strtoul(value, &end, 10);
+			if (end != NULL && *end == '\0' && parsed <= INT_MAX) {
+				device->active_configuration = (int)parsed;
+			}
+		} else if (sscanf(key, "ep%x_iso_max_packet_size", &endpoint_number) == 1 &&
+		    endpoint_number <= 255U) {
+			parsed = strtoul(value, &end, 0);
+			if (end != NULL && *end == '\0' && parsed <= 0xffffUL) {
+				device->endpoint_iso_max_packet[endpoint_number] = (uint16_t)parsed;
+			}
+		} else if (sscanf(key, "ep%x_max_packet_size", &endpoint_number) == 1 &&
+		    endpoint_number <= 255U) {
+			parsed = strtoul(value, &end, 0);
+			if (end != NULL && *end == '\0' && parsed <= 0xffffUL) {
+				device->endpoint_max_packet[endpoint_number] = (uint16_t)parsed;
+			}
+		}
+	}
+
+	fclose(stream);
+}
+
+static void
+libusb__resolve_topology(libusb_device **devices, size_t count)
+{
+	size_t child_index;
+
+	for (child_index = 0; child_index < count; child_index++) {
+		libusb_device *child = devices[child_index];
+		size_t parent_index;
+
+		if (!child->parent_valid || child->parent != NULL) {
+			continue;
+		}
+		for (parent_index = 0; parent_index < count; parent_index++) {
+			libusb_device *candidate = devices[parent_index];
+
+			if (candidate->bus_number == child->parent_bus_number &&
+			    candidate->device_address == child->parent_device_address) {
+				child->parent = libusb_ref_device(candidate);
+				break;
+			}
+		}
+	}
+}
+
+static int
+libusb__find_endpoint_packet_size(libusb_device *dev, unsigned char endpoint,
+	int is_isochronous)
+{
+	struct libusb_config_descriptor *config = NULL;
+	int ret;
+	uint8_t iface_index;
+	uint16_t cached_size;
+
+	cached_size = is_isochronous ? dev->endpoint_iso_max_packet[endpoint] :
+	    dev->endpoint_max_packet[endpoint];
+	if (cached_size != 0) {
+		return (int)cached_size;
+	}
+
+	ret = libusb_get_active_config_descriptor(dev, &config);
+	if (ret != LIBUSB_SUCCESS) {
+		return ret;
+	}
+
+	for (iface_index = 0; iface_index < config->bNumInterfaces; iface_index++) {
+		const struct libusb_interface *iface = &config->interface[iface_index];
+		int alt_index;
+
+		for (alt_index = 0; alt_index < iface->num_altsetting; alt_index++) {
+			const struct libusb_interface_descriptor *alt =
+				&iface->altsetting[alt_index];
+			int ep_index;
+
+			for (ep_index = 0; ep_index < alt->bNumEndpoints; ep_index++) {
+				const struct libusb_endpoint_descriptor *ep =
+					&alt->endpoint[ep_index];
+				uint16_t raw_size;
+				int packet_size;
+
+				if (ep->bEndpointAddress != endpoint) {
+					continue;
+				}
+				raw_size = ep->wMaxPacketSize;
+				packet_size = (int)(raw_size & 0x07ffU);
+				if (is_isochronous) {
+					packet_size *= (int)(((raw_size >> 11) & 0x3U) + 1U);
+				}
+				libusb_free_config_descriptor(config);
+				return packet_size;
+			}
+		}
+	}
+
+	libusb_free_config_descriptor(config);
+	return LIBUSB_ERROR_NOT_FOUND;
 }
 
 static void
@@ -108,6 +286,7 @@ libusb__scan_bus_dir(libusb_context *ctx, const char *root, const char *bus_name
 		libusb__strlcpy(device->path, root, sizeof(device->path));
 		libusb__append_path_component(device->path, sizeof(device->path), bus_name);
 		libusb__append_path_component(device->path, sizeof(device->path), entry->d_name);
+		libusb__load_metadata(device);
 
 		if (libusb__append_device(devices, count, device) != LIBUSB_SUCCESS) {
 			free(device);
@@ -193,6 +372,7 @@ libusb__context_rescan(libusb_context *ctx)
 	if (count > 1) {
 		qsort(devices, count, sizeof(*devices), libusb__device_compare);
 	}
+	libusb__resolve_topology(devices, count);
 	ctx->cached_devices = devices;
 	ctx->cached_device_count = count;
 	return LIBUSB_SUCCESS;
@@ -264,6 +444,9 @@ libusb_unref_device(libusb_device *dev)
 	if (--dev->refcount > 0) {
 		return;
 	}
+	if (dev->parent != NULL) {
+		libusb_unref_device(dev->parent);
+	}
 	free(dev);
 }
 
@@ -295,8 +478,25 @@ libusb_get_port_numbers(libusb_device *dev, uint8_t *port_numbers,
 	if (dev->port_number == 0) {
 		return 0;
 	}
-	port_numbers[0] = dev->port_number;
-	return 1;
+	{
+		uint8_t reversed[8];
+		int depth = 0;
+		libusb_device *cursor = dev;
+		int index;
+
+		while (cursor != NULL && cursor->port_number != 0 &&
+		    depth < (int)(sizeof(reversed) / sizeof(reversed[0]))) {
+			reversed[depth++] = cursor->port_number;
+			cursor = cursor->parent;
+		}
+		if (depth > port_numbers_len) {
+			return LIBUSB_ERROR_OVERFLOW;
+		}
+		for (index = 0; index < depth; index++) {
+			port_numbers[index] = reversed[depth - index - 1];
+		}
+		return depth;
+	}
 }
 
 int LIBUSB_CALL
@@ -322,17 +522,19 @@ libusb_get_device_speed(libusb_device *dev)
 int LIBUSB_CALL
 libusb_get_max_packet_size(libusb_device *dev, unsigned char endpoint)
 {
-	(void)dev;
-	(void)endpoint;
-	return LIBUSB_ERROR_NOT_SUPPORTED;
+	if (dev == NULL) {
+		return LIBUSB_ERROR_INVALID_PARAM;
+	}
+	return libusb__find_endpoint_packet_size(dev, endpoint, 0);
 }
 
 int LIBUSB_CALL
 libusb_get_max_iso_packet_size(libusb_device *dev, unsigned char endpoint)
 {
-	(void)dev;
-	(void)endpoint;
-	return LIBUSB_ERROR_NOT_SUPPORTED;
+	if (dev == NULL) {
+		return LIBUSB_ERROR_INVALID_PARAM;
+	}
+	return libusb__find_endpoint_packet_size(dev, endpoint, 1);
 }
 
 int LIBUSB_CALL
@@ -374,7 +576,7 @@ libusb_wrap_sys_device(libusb_context *ctx, intptr_t sys_dev, libusb_device_hand
 	handle->device = device;
 	handle->fd = (int)sys_dev;
 	handle->owns_fd = 0;
-	handle->active_configuration = 0;
+	handle->active_configuration = device->active_configuration;
 	libusb__register_handle(resolved, handle);
 	*dev_handle = handle;
 	return LIBUSB_SUCCESS;
@@ -401,7 +603,7 @@ libusb_open(libusb_device *dev, libusb_device_handle **dev_handle)
 	handle->device = libusb_ref_device(dev);
 	handle->fd = fd;
 	handle->owns_fd = 1;
-	handle->active_configuration = 0;
+	handle->active_configuration = dev->active_configuration;
 	libusb__register_handle(dev->ctx, handle);
 	*dev_handle = handle;
 	return LIBUSB_SUCCESS;
@@ -536,7 +738,9 @@ libusb_open_device_with_vid_pid(libusb_context *ctx, uint16_t vendor_id, uint16_
 		return NULL;
 	}
 	for (index = 0; index < count; index++) {
-		if (list[index]->descriptor.idVendor == vendor_id &&
+		if (libusb_get_device_descriptor(list[index], &list[index]->descriptor) ==
+		    LIBUSB_SUCCESS &&
+		    list[index]->descriptor.idVendor == vendor_id &&
 		    list[index]->descriptor.idProduct == product_id &&
 		    libusb_open(list[index], &handle) == LIBUSB_SUCCESS) {
 			break;
@@ -587,6 +791,8 @@ libusb_reset_device(libusb_device_handle *dev_handle)
 	if (ioctl(dev_handle->fd, USBDEVFS_RESET, NULL) != 0) {
 		return libusb__map_errno(errno);
 	}
+	dev_handle->active_configuration = dev_handle->device != NULL ?
+		dev_handle->device->active_configuration : dev_handle->active_configuration;
 	return LIBUSB_SUCCESS;
 }
 

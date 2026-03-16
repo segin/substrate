@@ -1,0 +1,82 @@
+.TH LIBUSB_OPEN 3 "March 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+libusb_open, libusb_close, libusb_get_device, libusb_open_device_with_vid_pid, libusb_get_configuration, libusb_set_configuration \- open and configure USB devices
+.SH LIBRARY
+.B libusb
+.SH SYNOPSIS
+.B #include <libusb.h>
+.PP
+.BI "int libusb_open(libusb_device *" dev ", libusb_device_handle **" handle ");"
+.PP
+.BI "void libusb_close(libusb_device_handle *" handle ");"
+.PP
+.BI "libusb_device *libusb_get_device(libusb_device_handle *" handle ");"
+.PP
+.BI "libusb_device_handle *libusb_open_device_with_vid_pid(libusb_context *" ctx ", uint16_t " vendor_id ", uint16_t " product_id ");"
+.PP
+.BI "int libusb_get_configuration(libusb_device_handle *" handle ", int *" config ");"
+.PP
+.BI "int libusb_set_configuration(libusb_device_handle *" handle ", int " configuration ");"
+.SH DESCRIPTION
+.BR libusb_open ()
+opens the device node backing
+.I dev
+and returns a device handle suitable for control, bulk, interrupt, or
+asynchronous transfers.
+.PP
+.BR libusb_open_device_with_vid_pid ()
+scans the current device list, loads each device descriptor, and opens the
+first device whose vendor and product identifiers match the supplied values.
+.PP
+.BR libusb_get_configuration ()
+returns the handle's currently tracked active configuration.
+.BR libusb_set_configuration ()
+requests a new active configuration through the usbdevfs backend and updates
+the cached handle state on success.
+.PP
+.BR libusb_close ()
+releases any claimed interfaces and closes the underlying device descriptor.
+.SH RETURN VALUE
+.BR libusb_open (),
+.BR libusb_get_configuration (),
+and
+.BR libusb_set_configuration ()
+return 0 on success or a negative
+.B LIBUSB_ERROR_*
+code on failure.
+.PP
+.BR libusb_open_device_with_vid_pid ()
+returns a valid handle on success or NULL when no matching device could be
+opened.
+.SH ERRORS
+.TP
+.B LIBUSB_ERROR_INVALID_PARAM
+A required device, handle, or output pointer was NULL, or the configuration
+value was invalid.
+.TP
+.B LIBUSB_ERROR_ACCESS
+The caller lacks permission to open or reconfigure the USB device node.
+.TP
+.B LIBUSB_ERROR_NO_DEVICE
+The target device no longer exists.
+.TP
+.B LIBUSB_ERROR_BUSY
+Too many interfaces are already claimed on the handle.
+.TP
+.B LIBUSB_ERROR_NO_MEM
+Memory allocation for the handle failed.
+.SH EXAMPLE
+.nf
+libusb_device_handle *handle;
+
+handle = libusb_open_device_with_vid_pid(NULL, 0x1234, 0x5678);
+if (handle == NULL)
+    return 1;
+
+libusb_set_configuration(handle, 1);
+libusb_close(handle);
+.fi
+.SH SEE ALSO
+.BR libusb_init (3),
+.BR libusb_control_transfer (3),
+.BR libusb_bulk_transfer (3)

@@ -548,8 +548,18 @@ void process_keycode(uint16_t keycode, int pressed)
     }
 
     /* F1-F12 -> escape sequences */
-    if (keycode >= KEY_F1 && keycode <= KEY_F12) {
-        keyboard_emit_seq(fkey_seq[keycode - KEY_F1]);
+    if ((keycode >= KEY_F1 && keycode <= KEY_F10) ||
+        keycode == KEY_F11 || keycode == KEY_F12) {
+        int fkey_index;
+
+        if (keycode <= KEY_F10) {
+            fkey_index = keycode - KEY_F1;
+        } else if (keycode == KEY_F11) {
+            fkey_index = 10;
+        } else {
+            fkey_index = 11;
+        }
+        keyboard_emit_seq(fkey_seq[fkey_index]);
         return;
     }
 

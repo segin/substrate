@@ -1,0 +1,59 @@
+.TH LIBUSB_HANDLE_EVENTS 3 "March 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+libusb_handle_events, libusb_handle_events_timeout, libusb_handle_events_completed, libusb_get_pollfds \- drive libusb event processing
+.SH LIBRARY
+.B libusb
+.SH SYNOPSIS
+.B #include <libusb.h>
+.PP
+.BI "int libusb_handle_events(libusb_context *" ctx ");"
+.PP
+.BI "int libusb_handle_events_timeout(libusb_context *" ctx ", struct timeval *" tv ");"
+.PP
+.BI "int libusb_handle_events_completed(libusb_context *" ctx ", int *" completed ");"
+.PP
+.BI "const struct libusb_pollfd **libusb_get_pollfds(libusb_context *" ctx ");"
+.SH DESCRIPTION
+These functions run the libusb event loop.
+The loop reaps completed asynchronous URBs, services the event-interrupt pipe,
+and processes USB hotplug changes detected through the backend event source.
+.PP
+.BR libusb_handle_events ()
+waits using the library default timeout.
+.BR libusb_handle_events_timeout ()
+uses the caller-provided timeout.
+.BR libusb_handle_events_completed ()
+returns immediately if
+.I *completed
+is already non-zero.
+.PP
+.BR libusb_get_pollfds ()
+returns a NULL-terminated array of poll descriptors that can be integrated into
+an external event loop.
+.SH RETURN VALUE
+The event-handling functions return 0 on success or a negative
+.B LIBUSB_ERROR_*
+code on failure.
+.BR libusb_get_pollfds ()
+returns a dynamically allocated pollfd list or NULL on allocation failure.
+.SH ERRORS
+.TP
+.B LIBUSB_ERROR_OTHER
+No usable libusb context could be resolved.
+.TP
+.B LIBUSB_ERROR_NO_MEM
+Internal hotplug or pollfd bookkeeping allocation failed.
+.TP
+.B LIBUSB_ERROR_IO
+A backend event or URB reap operation failed.
+.SH EXAMPLE
+.nf
+while (!done) {
+    if (libusb_handle_events_timeout(ctx, &(struct timeval){1, 0}) != 0)
+        break;
+}
+.fi
+.SH SEE ALSO
+.BR libusb_init (3),
+.BR libusb_submit_transfer (3),
+.BR libusb_hotplug_register_callback (3)
