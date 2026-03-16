@@ -11,6 +11,14 @@
 .long MULTIBOOT_HEADER_MAGIC
 .long MULTIBOOT_HEADER_FLAGS
 .long -(MULTIBOOT_HEADER_MAGIC + MULTIBOOT_HEADER_FLAGS)
+# Address fields (offsets 12-28): unused since bit 16 is not set, but must
+# be present so that the video mode fields land at the correct offsets 32-44.
+.long 0         # header_addr  (ignored)
+.long 0         # load_addr    (ignored)
+.long 0         # load_end_addr(ignored)
+.long 0         # bss_end_addr (ignored)
+.long 0         # entry_addr   (ignored)
+# Video mode fields (offsets 32-44): used since bit 2 (VIDEO) is set.
 .long 0         # mode_type: 0 = linear graphics
 .long 1024      # width
 .long 768       # height
