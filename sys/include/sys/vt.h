@@ -88,6 +88,8 @@ uint16_t vt_get_display_cell(const vt_state_t *vt, int row, int col);
 void vt_capture_scrollback_top(vt_state_t *vt);
 void vt_scrollback_page_up(void);
 void vt_scrollback_page_down(void);
+void vt_scrollback_line_up(void);
+void vt_scrollback_line_down(void);
 
 // To be called by the video driver when it updates the screen,
 // so the VT layer can keep the backing buffer in sync if it's active?

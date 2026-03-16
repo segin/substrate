@@ -529,13 +529,21 @@ void process_keycode(uint16_t keycode, int pressed)
         return;
     }
 
-    /* Shift+PgUp/PgDn -> scrollback */
+    /* Shift+PgUp/PgDn -> scrollback (page), Shift+Up/Down -> scrollback (line) */
     if (kbd_shift && keycode == KEY_PAGEUP) {
         vt_scrollback_page_up();
         return;
     }
     if (kbd_shift && keycode == KEY_PAGEDOWN) {
         vt_scrollback_page_down();
+        return;
+    }
+    if (kbd_shift && keycode == KEY_UP) {
+        vt_scrollback_line_up();
+        return;
+    }
+    if (kbd_shift && keycode == KEY_DOWN) {
+        vt_scrollback_line_down();
         return;
     }
 
