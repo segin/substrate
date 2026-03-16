@@ -239,7 +239,7 @@ static void hw_text_apply_geometry_or_default(int *cols_out, int *rows_out) {
             actual_cols = 80;
             actual_rows = 50;
         } else {
-            kprintf("hw_text: text mode %dx%d requires a BIOS real-mode setup path; using 80x25\n",
+            kprintf("hw_text: text mode %dx%d not available in protected mode; using 80x25\n",
                     requested_cols, requested_rows);
         }
     }

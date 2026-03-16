@@ -74,7 +74,7 @@ void vt_init(void) {
         vt_states[i].saved_col = 0;
         vt_states[i].saved_color = 0x07;
         vt_states[i].scroll_top = 0;
-        vt_states[i].scroll_bottom = VT_DEFAULT_HEIGHT - 2; /* visible rows - 1 */
+        vt_states[i].scroll_bottom = vt_get_visible_height() - 1;
         vt_states[i].cursor_visible = 1;
         vt_states[i].autowrap = 1;         /* DECAWM on by default */
         vt_states[i].cursor_key_app = 0;   /* Normal cursor keys */
@@ -245,5 +245,37 @@ void vt_scrollback_page_down(void) {
         return;
     }
     vt->scrollback_view = (uint16_t)new_view;
+    hw_text_redraw_active();
+}
+
+void vt_scrollback_line_up(void) {
+    vt_state_t *vt;
+    int new_view;
+
+    vt = vt_get_state(vt_get_active());
+    if (!vt || vt->scrollback_count == 0) {
+        return;
+    }
+
+    new_view = vt->scrollback_view + 1;
+    if (new_view > vt->scrollback_count) {
+        new_view = vt->scrollback_count;
+    }
+    if (new_view == vt->scrollback_view) {
+        return;
+    }
+    vt->scrollback_view = (uint16_t)new_view;
+    hw_text_redraw_active();
+}
+
+void vt_scrollback_line_down(void) {
+    vt_state_t *vt;
+
+    vt = vt_get_state(vt_get_active());
+    if (!vt || vt->scrollback_view == 0) {
+        return;
+    }
+
+    vt->scrollback_view--;
     hw_text_redraw_active();
 }

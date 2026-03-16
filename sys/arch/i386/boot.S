@@ -19,10 +19,10 @@
 .long 0         # bss_end_addr (ignored)
 .long 0         # entry_addr   (ignored)
 # Video mode fields (offsets 32-44): used since bit 2 (VIDEO) is set.
-.long 0         # mode_type: 0 = linear graphics
-.long 1024      # width
-.long 768       # height
-.long 32        # depth
+.long 1         # mode_type: 1 = EGA text mode
+.long 80        # width  (columns)
+.long 25        # height (rows)
+.long 0         # depth  (unused for text)
 
 .section .setup, "ax"
 .global _start
