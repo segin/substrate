@@ -158,13 +158,54 @@ static int bga_list_modes(struct video_mode_info *modes, int max_count) {
     return count;
 }
 
+static int bga_set_mode(int mode_id) {
+    /* Find the mode by ID */
+    const struct video_mode_info *mode = NULL;
+    for (int i = 0; i < BGA_MODE_COUNT; i++) {
+        if ((int)bga_modes[i].mode_id == mode_id) {
+            mode = &bga_modes[i];
+            break;
+        }
+    }
+    if (!mode) return -1;
+
+    uint16_t width = (uint16_t)mode->width;
+    uint16_t height = (uint16_t)mode->height;
+    uint16_t bpp = (uint16_t)mode->bpp;
+    uint16_t virt_height = height * 2;
+
+    bga_write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_DISABLED);
+    bga_write(VBE_DISPI_INDEX_XRES, width);
+    bga_write(VBE_DISPI_INDEX_YRES, height);
+    bga_write(VBE_DISPI_INDEX_BPP, bpp);
+    bga_write(VBE_DISPI_INDEX_VIRT_WIDTH, width);
+    bga_write(VBE_DISPI_INDEX_VIRT_HEIGHT, virt_height);
+    bga_write(VBE_DISPI_INDEX_X_OFFSET, 0);
+    bga_write(VBE_DISPI_INDEX_Y_OFFSET, 0);
+    bga_write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_ENABLED | VBE_DISPI_LFB_ENABLED);
+
+    /* Update global fb */
+    fb.addr = (uint32_t *)bga_lfb_addr;
+    fb.width = width;
+    fb.height = height;
+    fb.bpp = bpp;
+    fb.pitch = (width * bpp) / 8;
+    fb.virt_width = width;
+    fb.virt_height = virt_height;
+    fb.set_viewport = bga_set_viewport;
+    fb.scroll = bga_scroll;
+
+    return 0;
+}
+
 static video_driver_t bga_driver = {
     .name = "bga",
     .priority = 50,
     .probe = bga_is_available,
     .init = bga_init,
     .set_viewport = bga_set_viewport,
-    .list_modes = bga_list_modes
+    .list_modes = bga_list_modes,
+    .set_mode = bga_set_mode
 };
 
 void bga_install(void) {

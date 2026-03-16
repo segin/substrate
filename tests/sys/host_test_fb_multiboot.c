@@ -66,6 +66,11 @@ void kprint(const char *str) {
     (void)str;
 }
 
+int kprintf(const char *fmt, ...) {
+    (void)fmt;
+    return 0;
+}
+
 size_t strlcpy(char *dst, const char *src, size_t size) {
     size_t len = strlen(src);
     if (size != 0) {

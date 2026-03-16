@@ -1189,7 +1189,7 @@
                 - [x] SysRq over serial (break + key). (REQ: REQ-03-0888)
     - [ ] **Features:** (REQ: REQ-03-0889)
         - [ ] **Multi-Terminal:** Support switching (`Alt+F1`, etc.) between virtual consoles. (REQ: REQ-03-0890)
-        - [ ] **Legacy Support:** CGA/Hercules/EGA fallback modes.?? (REQ: REQ-03-0891)
+        - [x] **Legacy Support:** CGA/Hercules/EGA fallback modes.?? (REQ: REQ-03-0891)
 - [x] **RNG Subsystem (`/dev/random`, `/dev/urandom`):** <!-- random.c, random_internal.h, sys/random.h --> (REQ: REQ-03-0892)Infrastructure:** (REQ: REQ-03-0727, REQ-03-0893)
         - [x] **Data Structures:** (REQ: REQ-03-0894)
             - [x] Define `struct entropy_pool` (input pool, output pool, counters). <!-- 
