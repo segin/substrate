@@ -46,6 +46,7 @@ This is the Substrate operating system project targeting x86 32-bit architecture
 - **Synchronization Improvements:** Updated `mutex` and `semaphore` to use `sleepq` for robust thread sleeping (removed ad-hoc `sched_sleep`).
 - **SMP Scheduler Fixes:** Updated `sched_smp.c` to use `percpu_get_cpu_id()` instead of assumption.
 - **Code Quality:** Defined `kernel_process` explicitly for kthreads (fixing PID assumption), improved `panic()` messaging, and cleaned up `random.c` duplicates.
+- **GRUB Boot Fix:** Fixed multiboot header video mode field offsets (were at 12-24, spec requires 32-44). Kernel now boots through GRUB for the first time.
 
 
 ## Current Status
@@ -201,7 +202,6 @@ If the kernel hangs in `hlt`, check `eflags` bit 9. If `IF=1`, the IRQ may be ma
 - **PMAP Memory Overhead:** 32 identity-mapped kernel PDEs (0-31) in userspace consume 128KB+ per process.
 
 ## Next Steps
-- Debug remaining console OOM issue (kmalloc returning NULL during std fd init)
 - Refactor PMAP to dynamically allocate page tables (reduce 128KB overhead)
 - Implement mmap() syscall with personality driver integration
 - Flesh out 9P filesystem logic implementation

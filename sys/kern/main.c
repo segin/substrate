@@ -698,10 +698,10 @@ void kinit_task(void *arg) {
     panic("kinit: No init found. Try passing init= option to kernel.");
 
 exec_success:
-    // exec succeeded (or will when usermode is implemented)
-    // In a real kernel, we wouldn't reach here - we'd jump to userspace
-    kprint("kinit: exec returned (usermode not implemented)\n");
-    kprint("System idle - init loaded but cannot run.\n");
+    // kern_execve() should not return on success — the thread transitions
+    // to usermode with the new binary's address space. If we reach here,
+    // something unexpected happened.
+    kprint("kinit: BUG: kern_execve returned after successful exec\n");
     for (;;) { __asm__ volatile("hlt"); }
 }
 
