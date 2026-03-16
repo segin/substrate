@@ -549,6 +549,7 @@ extern void kern_proc_info(void);
 extern void kern_proc_list(void);
 extern void kern_read(void);
 extern void kern_readlink(void);
+extern void kern_rmdir(void);
 extern void kern_setitimer(void);
 extern void kern_sigaction(void);
 extern void kern_sigaltstack(void);
@@ -559,6 +560,7 @@ extern void kern_sigtimedwait(void);
 extern void kern_sigwait(void);
 extern void kern_stat(void);
 extern void kern_stime(void);
+extern void kern_symlink(void);
 extern void kern_thr_new(void);
 extern void kern_time(void);
 extern void kern_times(void);
@@ -1213,6 +1215,7 @@ extern void sys_sigwait(void);
 extern void sys_stat(void);
 extern void sys_statfs(void);
 extern void sys_stime(void);
+extern void sys_symlink(void);
 extern void sys_sync(void);
 extern void sys_sysarch(void);
 extern void sys_sysctl(void);
@@ -2094,6 +2097,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&sys_mkdir, "sys_mkdir" },
     { (uint32_t)(uintptr_t)&kern_mkdir, "kern_mkdir" },
     { (uint32_t)(uintptr_t)&sys_rmdir, "sys_rmdir" },
+    { (uint32_t)(uintptr_t)&kern_rmdir, "kern_rmdir" },
     { (uint32_t)(uintptr_t)&sys_getuid, "sys_getuid" },
     { (uint32_t)(uintptr_t)&sys_getgid, "sys_getgid" },
     { (uint32_t)(uintptr_t)&sys_getppid, "sys_getppid" },
@@ -2116,6 +2120,8 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&kern_unlink, "kern_unlink" },
     { (uint32_t)(uintptr_t)&sys_link, "sys_link" },
     { (uint32_t)(uintptr_t)&kern_link, "kern_link" },
+    { (uint32_t)(uintptr_t)&sys_symlink, "sys_symlink" },
+    { (uint32_t)(uintptr_t)&kern_symlink, "kern_symlink" },
     { (uint32_t)(uintptr_t)&sys_readlink, "sys_readlink" },
     { (uint32_t)(uintptr_t)&kern_readlink, "kern_readlink" },
     { (uint32_t)(uintptr_t)&sys_access, "sys_access" },
@@ -3113,4 +3119,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1551;
+int ksym_count = 1554;

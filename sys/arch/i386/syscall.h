@@ -54,6 +54,7 @@
 #define SYS_CHROOT  61
 #define SYS_DUP2    63
 #define SYS_READLINK 85
+#define SYS_SYMLINK  83
 #define SYS_REBOOT   88
 #define SYS_MMAP    90
 #define SYS_MUNMAP  91

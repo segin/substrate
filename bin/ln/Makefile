@@ -16,6 +16,10 @@ LDADD += -L../../usr.lib/link -llink
 linklib:
 	$(MAKE) -C ../../usr.lib/link clean all NATIVE_BUILD=$(NATIVE_BUILD)
 
+# Must come after PROG/SRCS but include before linklib definition won't work,
+# so declare explicit default goal
+.DEFAULT_GOAL := all
+
 $(PROG): linklib
 
 include ../../Makefile.bin.inc

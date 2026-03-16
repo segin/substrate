@@ -47,6 +47,7 @@
 #define LINUX_SYS_setsid         66
 #define LINUX_SYS_lstat          84
 #define LINUX_SYS_readlink       85
+#define LINUX_SYS_symlink        83
 #define LINUX_SYS_mmap           90
 #define LINUX_SYS_munmap         91
 #define LINUX_SYS_truncate       92

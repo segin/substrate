@@ -31,25 +31,45 @@ extern int64_t _syscall6(int, int, int, int, int, int, int);
 int errno = 0;
 char **environ = NULL;
 
+/* Provide __errno_location for code compiled with __linux__ defined */
+int *__errno_location(void) { return &errno; }
+/* FreeBSD/DragonFly compat */
+int *__error(void) { return &errno; }
+/* NetBSD/OpenBSD compat */
+int *__errno(void) { return &errno; }
+
+/* Convert kernel-style negative error returns to errno convention */
+static inline int __set_errno(int r) {
+    if (r < 0) {
+        errno = -r;
+        return -1;
+    }
+    return r;
+}
+
 void _exit(int status) {
     _syscall1(SYS_EXIT, status);
     while(1);
 }
 
 int fork(void) {
-    return (int)_syscall0(SYS_FORK);
+    return __set_errno((int)_syscall0(SYS_FORK));
 }
 
 ssize_t read(int fd, void *buf, size_t count) {
-    return (ssize_t)_syscall3(SYS_READ, fd, (int)buf, (int)count);
+    int64_t r = _syscall3(SYS_READ, fd, (int)buf, (int)count);
+    if (r < 0) { errno = (int)(-r); return -1; }
+    return (ssize_t)r;
 }
 
 ssize_t write(int fd, const void *buf, size_t count) {
-    return (ssize_t)_syscall3(SYS_WRITE, fd, (int)buf, (int)count);
+    int64_t r = _syscall3(SYS_WRITE, fd, (int)buf, (int)count);
+    if (r < 0) { errno = (int)(-r); return -1; }
+    return (ssize_t)r;
 }
 
 int close(int fd) {
-    return (int)_syscall1(SYS_CLOSE, fd);
+    return __set_errno((int)_syscall1(SYS_CLOSE, fd));
 }
 
 int open(const char *pathname, int flags, ...) {
@@ -60,19 +80,23 @@ int open(const char *pathname, int flags, ...) {
         mode = va_arg(ap, int);
         va_end(ap);
     }
-    return (int)_syscall3(SYS_OPEN, (int)pathname, flags, mode);
+    return __set_errno((int)_syscall3(SYS_OPEN, (int)pathname, flags, mode));
 }
 
 int unlink(const char *pathname) {
-    return (int)_syscall1(SYS_UNLINK, (int)pathname);
+    return __set_errno((int)_syscall1(SYS_UNLINK, (int)pathname));
 }
 
 int link(const char *oldpath, const char *newpath) {
-    return (int)_syscall2(SYS_LINK, (int)oldpath, (int)newpath);
+    return __set_errno((int)_syscall2(SYS_LINK, (int)oldpath, (int)newpath));
+}
+
+int symlink(const char *target, const char *linkpath) {
+    return __set_errno((int)_syscall2(SYS_SYMLINK, (int)target, (int)linkpath));
 }
 
 int execve(const char *filename, char *const argv[], char *const envp[]) {
-    return (int)_syscall3(SYS_EXECVE, (int)filename, (int)argv, (int)envp);
+    return __set_errno((int)_syscall3(SYS_EXECVE, (int)filename, (int)argv, (int)envp));
 }
 
 int execv(const char *filename, char *const argv[]) {
@@ -104,12 +128,12 @@ int execl(const char *path, const char *arg, ...) {
 }
 
 int chdir(const char *path) {
-    return (int)_syscall1(SYS_CHDIR, (int)path);
+    return __set_errno((int)_syscall1(SYS_CHDIR, (int)path));
 }
 
 char *getcwd(char *buf, size_t size) {
     int ret = (int)_syscall2(SYS_GETCWD, (int)buf, size);
-    if (ret < 0) return NULL;
+    if (ret < 0) { errno = -ret; return NULL; }
     return buf;
 }
 
@@ -125,22 +149,22 @@ uid_t getuid(void) { return (uid_t)_syscall0(SYS_GETUID); }
 gid_t getgid(void) { return (gid_t)_syscall0(SYS_GETGID); }
 uid_t geteuid(void) { return (uid_t)_syscall0(SYS_GETEUID); }
 gid_t getegid(void) { return (gid_t)_syscall0(SYS_GETEGID); }
-int setuid(uid_t uid) { return (int)_syscall1(SYS_SETUID, uid); }
-int setgid(gid_t gid) { return (int)_syscall1(SYS_SETGID, gid); }
+int setuid(uid_t uid) { return __set_errno((int)_syscall1(SYS_SETUID, uid)); }
+int setgid(gid_t gid) { return __set_errno((int)_syscall1(SYS_SETGID, gid)); }
 
 int pipe(int pipefd[2]) {
-    return (int)_syscall1(SYS_PIPE, (int)pipefd);
+    return __set_errno((int)_syscall1(SYS_PIPE, (int)pipefd));
 }
 
 // Forward declaration
 int ioctl(int fd, unsigned long request, ...);
 
 int dup2(int oldfd, int newfd) {
-    return (int)_syscall2(SYS_DUP2, oldfd, newfd);
+    return __set_errno((int)_syscall2(SYS_DUP2, oldfd, newfd));
 }
 
 int dup(int oldfd) {
-    return (int)_syscall1(SYS_DUP, oldfd);
+    return __set_errno((int)_syscall1(SYS_DUP, oldfd));
 }
 
 int tcsetpgrp(int fd, pid_t pgrp) {
@@ -167,11 +191,11 @@ extern mode_t umask(mode_t mask);
 typedef void (*sig_t)(int);
 
 int setpgid(pid_t pid, pid_t pgid) {
-    return (int)_syscall2(SYS_SETPGID, (int)pid, (int)pgid);
+    return __set_errno((int)_syscall2(SYS_SETPGID, (int)pid, (int)pgid));
 }
 
 pid_t getpgid(pid_t pid) {
-    return (pid_t)_syscall1(SYS_GETPGID, (int)pid);
+    return (pid_t)__set_errno((int)_syscall1(SYS_GETPGID, (int)pid));
 }
 
 pid_t getpgrp(void) {
@@ -196,19 +220,19 @@ sighandler_t signal(int signum, sighandler_t handler) {
 }
 
 int sigaction(int sig, const struct sigaction *act, struct sigaction *oact) {
-    return (int)_syscall3(SYS_SIGACTION, sig, (int)act, (int)oact);
+    return __set_errno((int)_syscall3(SYS_SIGACTION, sig, (int)act, (int)oact));
 }
 
 int sigprocmask(int how, const sigset_t *set, sigset_t *oset) {
-    return (int)_syscall3(SYS_SIGPROCMASK, how, (int)set, (int)oset);
+    return __set_errno((int)_syscall3(SYS_SIGPROCMASK, how, (int)set, (int)oset));
 }
 
 int sigpending(sigset_t *set) {
-    return (int)_syscall1(SYS_SIGPENDING, (int)set);
+    return __set_errno((int)_syscall1(SYS_SIGPENDING, (int)set));
 }
 
 int sigsuspend(const sigset_t *mask) {
-    return (int)_syscall1(SYS_SIGSUSPEND, (int)mask);
+    return __set_errno((int)_syscall1(SYS_SIGSUSPEND, (int)mask));
 }
 
 mode_t umask(mode_t mask) {
@@ -249,7 +273,9 @@ int sigismember(const sigset_t *set, int signo) {
 off_t lseek(int fd, off_t offset, int whence) {
     uint32_t off_lo = (uint32_t)(offset & 0xFFFFFFFF);
     uint32_t off_hi = (uint32_t)((offset >> 32) & 0xFFFFFFFF);
-    return (off_t)_syscall4(SYS_LSEEK, fd, off_lo, off_hi, whence);
+    int64_t r = _syscall4(SYS_LSEEK, fd, off_lo, off_hi, whence);
+    if (r < 0) { errno = (int)(-r); return (off_t)-1; }
+    return (off_t)r;
 }
 
 void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
@@ -266,11 +292,13 @@ void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
 }
 
 int munmap(void *addr, size_t length) {
-    return (int)_syscall2(SYS_MUNMAP, (int)addr, (int)length);
+    return __set_errno((int)_syscall2(SYS_MUNMAP, (int)addr, (int)length));
 }
 
 pid_t waitpid(pid_t pid, int *status, int options) {
-    return (pid_t)_syscall3(SYS_WAITPID, pid, (int)status, options);
+    int64_t r = _syscall3(SYS_WAITPID, pid, (int)status, options);
+    if (r < 0) { errno = (int)(-r); return -1; }
+    return (pid_t)r;
 }
 
 pid_t wait(int *status) {
@@ -278,27 +306,29 @@ pid_t wait(int *status) {
 }
 
 int access(const char *pathname, int mode) {
-    return (int)_syscall2(SYS_ACCESS, (int)pathname, mode);
+    return __set_errno((int)_syscall2(SYS_ACCESS, (int)pathname, mode));
 }
 
 int stat(const char *pathname, struct stat *buf) {
-    return (int)_syscall2(SYS_STAT, (int)pathname, (int)buf);
+    return __set_errno((int)_syscall2(SYS_STAT, (int)pathname, (int)buf));
 }
 
 int lstat(const char *pathname, struct stat *buf) {
-    return (int)_syscall2(SYS_LSTAT, (int)pathname, (int)buf);
+    return __set_errno((int)_syscall2(SYS_LSTAT, (int)pathname, (int)buf));
 }
 
 int fstat(int fd, struct stat *buf) {
-    return (int)_syscall2(SYS_FSTAT, fd, (int)buf);
+    return __set_errno((int)_syscall2(SYS_FSTAT, fd, (int)buf));
 }
 
 int chown(const char *pathname, uid_t owner, gid_t group) {
-    return (int)_syscall3(SYS_LCHOWN, (int)pathname, owner, group);
+    return __set_errno((int)_syscall3(SYS_LCHOWN, (int)pathname, owner, group));
 }
 
 ssize_t readlink(const char *pathname, char *buf, size_t bufsiz) {
-    return (ssize_t)_syscall3(SYS_READLINK, (int)pathname, (int)buf, bufsiz);
+    int64_t r = _syscall3(SYS_READLINK, (int)pathname, (int)buf, bufsiz);
+    if (r < 0) { errno = (int)(-r); return -1; }
+    return (ssize_t)r;
 }
 
 time_t time(time_t *tloc) {
@@ -310,11 +340,11 @@ unsigned int alarm(unsigned int seconds) {
 }
 
 int getitimer(int which, struct itimerval *curr_value) {
-    return (int)_syscall2(SYS_GETITIMER, which, (int)curr_value);
+    return __set_errno((int)_syscall2(SYS_GETITIMER, which, (int)curr_value));
 }
 
 int setitimer(int which, const struct itimerval *new_value, struct itimerval *old_value) {
-    return (int)_syscall3(SYS_SETITIMER, which, (int)new_value, (int)old_value);
+    return __set_errno((int)_syscall3(SYS_SETITIMER, which, (int)new_value, (int)old_value));
 }
 
 clock_t times(struct tms *buf) {
@@ -322,19 +352,19 @@ clock_t times(struct tms *buf) {
 }
 
 int mkdir(const char *pathname, mode_t mode) {
-    return (int)_syscall2(SYS_MKDIR, (int)pathname, mode);
+    return __set_errno((int)_syscall2(SYS_MKDIR, (int)pathname, mode));
 }
 
 int rmdir(const char *pathname) {
-    return (int)_syscall1(SYS_RMDIR, (int)pathname);
+    return __set_errno((int)_syscall1(SYS_RMDIR, (int)pathname));
 }
 
 int mknod(const char *pathname, mode_t mode, dev_t dev) {
-    return (int)_syscall3(SYS_MKNOD, (int)pathname, mode, dev);
+    return __set_errno((int)_syscall3(SYS_MKNOD, (int)pathname, mode, dev));
 }
 
 int chmod(const char *pathname, mode_t mode) {
-    return (int)_syscall2(SYS_CHMOD, (int)pathname, mode);
+    return __set_errno((int)_syscall2(SYS_CHMOD, (int)pathname, mode));
 }
 
 int utimes(const char *filename, const struct timeval times[2]) {
@@ -343,35 +373,35 @@ int utimes(const char *filename, const struct timeval times[2]) {
     return -1;
 }
 int mount(const char *source, const char *target, const char *filesystemtype, unsigned long mountflags, const void *data) {
-    return (int)_syscall5(SYS_MOUNT, (int)source, (int)target, (int)filesystemtype, (int)mountflags, (int)data);
+    return __set_errno((int)_syscall5(SYS_MOUNT, (int)source, (int)target, (int)filesystemtype, (int)mountflags, (int)data));
 }
 
 int umount(const char *target) {
-    return (int)_syscall1(SYS_UMOUNT, (int)target);
+    return __set_errno((int)_syscall1(SYS_UMOUNT, (int)target));
 }
 
 int rename(const char *oldpath, const char *newpath) {
-    return (int)_syscall2(SYS_RENAME, (int)oldpath, (int)newpath);
+    return __set_errno((int)_syscall2(SYS_RENAME, (int)oldpath, (int)newpath));
 }
 
 int ftruncate(int fd, off_t length) {
     uint32_t len_lo = (uint32_t)(length & 0xFFFFFFFF);
     uint32_t len_hi = (uint32_t)((length >> 32) & 0xFFFFFFFF);
-    return (int)_syscall4(SYS_FTRUNCATE, fd, len_lo, len_hi, 0);
+    return __set_errno((int)_syscall4(SYS_FTRUNCATE, fd, len_lo, len_hi, 0));
 }
 
 int truncate(const char *path, off_t length) {
     uint32_t len_lo = (uint32_t)(length & 0xFFFFFFFF);
     uint32_t len_hi = (uint32_t)((length >> 32) & 0xFFFFFFFF);
-    return (int)_syscall5(SYS_TRUNCATE, (int)path, len_lo, len_hi, 0, 0);
+    return __set_errno((int)_syscall5(SYS_TRUNCATE, (int)path, len_lo, len_hi, 0, 0));
 }
 
 int uname(struct utsname *buf) {
-    return (int)_syscall1(SYS_UNAME, (int)buf);
+    return __set_errno((int)_syscall1(SYS_UNAME, (int)buf));
 }
 
 int nanosleep(const struct timespec *req, struct timespec *rem) {
-    return (int)_syscall2(SYS_NANOSLEEP, (int)req, (int)rem);
+    return __set_errno((int)_syscall2(SYS_NANOSLEEP, (int)req, (int)rem));
 }
 
 unsigned int sleep(unsigned int seconds) {
@@ -387,7 +417,7 @@ int usleep(useconds_t usec) {
 }
 
 int clock_gettime(clockid_t clk_id, struct timespec *tp) {
-    return (int)_syscall2(SYS_CLOCK_GETTIME, clk_id, (int)tp);
+    return __set_errno((int)_syscall2(SYS_CLOCK_GETTIME, clk_id, (int)tp));
 }
 
 int ioctl(int fd, unsigned long request, ...) {
@@ -395,7 +425,7 @@ int ioctl(int fd, unsigned long request, ...) {
     va_start(ap, request);
     void *arg = va_arg(ap, void *);
     va_end(ap);
-    return (int)_syscall3(SYS_IOCTL, fd, request, (int)arg);
+    return __set_errno((int)_syscall3(SYS_IOCTL, fd, request, (int)arg));
 }
 
 int isatty(int fd) {
@@ -425,7 +455,7 @@ int sethostname(const char *name, size_t len) {
 }
 
 int futex(int *uaddr, int op, int val, const struct timespec *timeout, int *uaddr2, int val3) {
-    return _syscall6(240, (int)uaddr, op, val, (int)timeout, (int)uaddr2, val3);
+    return __set_errno((int)_syscall6(240, (int)uaddr, op, val, (int)timeout, (int)uaddr2, val3));
 }
 
 int getpriority(int which, id_t who) {
@@ -438,6 +468,6 @@ int getpriority(int which, id_t who) {
 }
 
 int setpriority(int which, id_t who, int prio) {
-    return (int)_syscall3(SYS_SETPRIORITY, which, who, prio);
+    return __set_errno((int)_syscall3(SYS_SETPRIORITY, which, who, prio));
 }
 

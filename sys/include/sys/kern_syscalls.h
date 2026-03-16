@@ -46,6 +46,8 @@ int kern_fstat(int fd, struct stat *buf);
 int kern_ioctl(int fd, uint32_t request, void *arg);
 int kern_unlink(const char *path);
 int kern_link(const char *oldpath, const char *newpath);
+int kern_rmdir(const char *path);
+int kern_symlink(const char *target, const char *linkpath);
 int kern_readlink(const char *pathname, char *buf, size_t bufsiz);
 int kern_access(const char *path, int mode);
 int kern_pipe(int *fds);

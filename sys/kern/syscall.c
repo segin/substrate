@@ -854,8 +854,49 @@ int kern_mkdir(const char *p, int m) {
 int sys_rmdir(const char *p) { 
     char kpath[256];
     if (copyinstr(p, kpath, sizeof(kpath), NULL) != 0) return -14;
-    // kern_rmdir not in header yet, but following pattern
-    return 0; 
+    return kern_rmdir(kpath);
+}
+
+int kern_rmdir(const char *path) {
+    if (!path) return -EINVAL;
+
+    char dir[256];
+    char file[128];
+
+    const char *last_slash = NULL;
+    for (const char *p = path; *p; p++) {
+        if (*p == '/') last_slash = p;
+    }
+
+    fs_node_t *parent = NULL;
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
+
+    if (!last_slash) {
+        parent = cwd;
+        if (strlcpy(file, path, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
+    } else if (last_slash == path) {
+        parent = root;
+        if (strlcpy(file, path + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
+    } else {
+        size_t dirlen = (size_t)(last_slash - path);
+        if (dirlen >= sizeof(dir)) return -ENAMETOOLONG;
+        memcpy(dir, path, dirlen);
+        dir[dirlen] = '\0';
+
+        if (strlcpy(file, last_slash + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
+        parent = vfs_lookup((path[0] == '/') ? root : cwd, dir);
+    }
+
+    if (!parent) return -ENOENT;
+    if (!file[0]) return -EINVAL;
+
+    /* Verify target is a directory */
+    fs_node_t *target = parent->finddir ? parent->finddir(parent, file) : NULL;
+    if (!target) return -ENOENT;
+    if ((target->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
+
+    return unlink_fs(parent, file);
 }
 int sys_getuid(void) { return current_process->uid; }
 int sys_getgid(void) { return current_process->gid; }
@@ -1190,6 +1231,52 @@ int kern_link(const char *oldpath, const char *newpath) {
     if (parent->finddir && parent->finddir(parent, file) != NULL) return -EEXIST;
 
     return link_fs(parent, source, file);
+}
+
+int sys_symlink(const char *target, const char *linkpath) {
+    char ktarget[256], klinkpath[256];
+    if (copyinstr(target, ktarget, sizeof(ktarget), NULL) != 0) return -EFAULT;
+    if (copyinstr(linkpath, klinkpath, sizeof(klinkpath), NULL) != 0) return -EFAULT;
+    return kern_symlink(ktarget, klinkpath);
+}
+
+int kern_symlink(const char *target, const char *linkpath) {
+    if (!target || !linkpath) return -EINVAL;
+    if (target[0] == '\0') return -ENOENT;
+
+    char dir[256];
+    char file[128];
+    const char *last_slash = NULL;
+    for (const char *p = linkpath; *p; p++) {
+        if (*p == '/') last_slash = p;
+    }
+
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
+    fs_node_t *parent = NULL;
+
+    if (!last_slash) {
+        parent = cwd;
+        if (strlcpy(file, linkpath, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
+    } else if (last_slash == linkpath) {
+        parent = root;
+        if (strlcpy(file, linkpath + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
+    } else {
+        size_t dirlen = (size_t)(last_slash - linkpath);
+        if (dirlen >= sizeof(dir)) return -ENAMETOOLONG;
+        memcpy(dir, linkpath, dirlen);
+        dir[dirlen] = '\0';
+
+        if (strlcpy(file, last_slash + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
+        parent = vfs_lookup((linkpath[0] == '/') ? root : cwd, dir);
+    }
+
+    if (!parent) return -ENOENT;
+    if (!file[0]) return -EINVAL;
+    if ((parent->flags & 0x07) != FS_DIRECTORY) return -ENOTDIR;
+    if (parent->finddir && parent->finddir(parent, file) != NULL) return -EEXIST;
+
+    return symlink_fs(parent, target, file);
 }
 
 int sys_readlink(const char *pathname, char *buf, size_t bufsiz) {
