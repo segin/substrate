@@ -31,6 +31,12 @@ static uint8_t mock_req_status;
 static uint32_t mock_req_residual;
 static uint32_t mock_req_sense_len;
 static uint8_t mock_req_sense[8];
+static uint8_t mock_ctrl_response;
+static uint32_t mock_ctrl_event_actual;
+static int ctrl_notify_count;
+static uint32_t last_ctrl_type;
+static uint32_t last_ctrl_subtype;
+static uint32_t last_ctrl_event_requested;
 
 static void outb(uint16_t port, uint8_t val) {
     (void)port;
@@ -118,6 +124,35 @@ static void outw(uint16_t port, uint16_t val) {
 
     if (offset == VIRTIO_REG_QUEUE_NOTIFY) {
         last_notified_queue = val;
+
+        if (val == 0) {
+            virtio_scsi_queue_t *queue = &vscsi_dev.ctrl_queue;
+            uint16_t head = queue->avail->ring[(uint16_t)(queue->avail->idx - 1) % queue->size];
+            void *ctrl_req = (void *)(uintptr_t)queue->desc[head].addr;
+
+            ctrl_notify_count++;
+            last_ctrl_type = *(uint32_t *)ctrl_req;
+            if (last_ctrl_type == VIRTIO_SCSI_T_TMF) {
+                struct virtio_scsi_ctrl_tmf_req *tmf_req = ctrl_req;
+                struct virtio_scsi_ctrl_tmf_resp *tmf_resp =
+                    (struct virtio_scsi_ctrl_tmf_resp *)(uintptr_t)queue->desc[queue->desc[head].next].addr;
+
+                last_ctrl_subtype = tmf_req->subtype;
+                tmf_resp->response = mock_ctrl_response;
+            } else {
+                struct virtio_scsi_ctrl_an_req *an_req = ctrl_req;
+                struct virtio_scsi_ctrl_an_resp *an_resp =
+                    (struct virtio_scsi_ctrl_an_resp *)(uintptr_t)queue->desc[queue->desc[head].next].addr;
+
+                last_ctrl_event_requested = an_req->event_requested;
+                an_resp->event_actual = mock_ctrl_event_actual;
+                an_resp->response = mock_ctrl_response;
+            }
+
+            queue->used->ring[queue->used->idx % queue->size].id = head;
+            queue->used->idx++;
+            return;
+        }
 
         if (val >= 2 && auto_complete_req) {
             uint16_t queue_index = (uint16_t)(val - 2);
@@ -208,6 +243,14 @@ static void reset_state(void) {
     mock_req_residual = 0;
     mock_req_sense_len = 0;
     memset(mock_req_sense, 0, sizeof(mock_req_sense));
+    mock_ctrl_response = VIRTIO_SCSI_S_FUNCTION_COMPLETE;
+    mock_ctrl_event_actual = VIRTIO_SCSI_EVT_TRANSPORT_RESET |
+        VIRTIO_SCSI_EVT_ASYNC_NOTIFY |
+        VIRTIO_SCSI_EVT_PARAM_CHANGE;
+    ctrl_notify_count = 0;
+    last_ctrl_type = 0;
+    last_ctrl_subtype = 0;
+    last_ctrl_event_requested = 0;
 
     queue_sizes[0] = 8;
     queue_sizes[1] = 8;
@@ -382,12 +425,36 @@ static void test_multi_queue_uses_cpu_selected_request_queue(void) {
     assert(last_notified_queue == 3);
 }
 
+static void test_control_queue_handles_tmf_and_subscriptions(void) {
+    scsi_device_t sdev;
+
+    reset_state();
+    virtio_scsi_setup(0, 1, 0);
+
+    assert(ctrl_notify_count == 2);
+    assert(last_ctrl_type == VIRTIO_SCSI_T_AN_SUBSCRIBE);
+    assert((last_ctrl_event_requested & VIRTIO_SCSI_EVT_TRANSPORT_RESET) != 0);
+    assert((last_ctrl_event_requested & VIRTIO_SCSI_EVT_ASYNC_NOTIFY) != 0);
+    assert(vscsi_dev.supported_events == mock_ctrl_event_actual);
+    assert(vscsi_dev.subscribed_events == mock_ctrl_event_actual);
+
+    memset(&sdev, 0, sizeof(sdev));
+    sdev.target = 4;
+    sdev.lun = 3;
+
+    assert(vscsi_reset_device(&vscsi_dev.link, &sdev) == 0);
+    assert(last_notified_queue == 0);
+    assert(last_ctrl_type == VIRTIO_SCSI_T_TMF);
+    assert(last_ctrl_subtype == VIRTIO_SCSI_T_TMF_LOGICAL_UNIT_RESET);
+}
+
 int main(void) {
     test_execute_builds_dma_descriptor_chain();
     test_execute_marks_write_payload_read_only_to_device();
     test_event_buffers_rescan_and_requeue();
     test_setup_initializes_scsi_link_and_queues();
     test_multi_queue_uses_cpu_selected_request_queue();
+    test_control_queue_handles_tmf_and_subscriptions();
     puts("host_test_virtio_scsi: PASS");
     return 0;
 }

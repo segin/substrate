@@ -12,6 +12,12 @@ typedef struct {
     uint32_t virt_height; /* Virtual height for hardware scrolling */
     uint32_t pitch;
     uint8_t  bpp;
+    uint8_t  red_offset;
+    uint8_t  red_length;
+    uint8_t  green_offset;
+    uint8_t  green_length;
+    uint8_t  blue_offset;
+    uint8_t  blue_length;
     void (*putpixel)(int x, int y, uint32_t color);
     uint32_t virt_width;
     int (*set_viewport)(int x, int y);

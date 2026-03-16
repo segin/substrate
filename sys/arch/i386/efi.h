@@ -197,4 +197,44 @@ typedef struct {
     unsigned long (*Unload)(EFI_HANDLE ImageHandle);
 } EFI_LOADED_IMAGE_PROTOCOL;
 
+typedef enum {
+    PixelRedGreenBlueReserved8BitPerColor,
+    PixelBlueGreenRedReserved8BitPerColor,
+    PixelBitMask,
+    PixelBltOnly,
+    PixelFormatMax
+} EFI_GRAPHICS_PIXEL_FORMAT;
+
+typedef struct {
+    uint32_t RedMask;
+    uint32_t GreenMask;
+    uint32_t BlueMask;
+    uint32_t ReservedMask;
+} EFI_PIXEL_BITMASK;
+
+typedef struct {
+    uint32_t Version;
+    uint32_t HorizontalResolution;
+    uint32_t VerticalResolution;
+    EFI_GRAPHICS_PIXEL_FORMAT PixelFormat;
+    EFI_PIXEL_BITMASK PixelInformation;
+    uint32_t PixelsPerScanLine;
+} EFI_GRAPHICS_OUTPUT_MODE_INFORMATION;
+
+typedef struct {
+    uint32_t MaxMode;
+    uint32_t Mode;
+    EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *Info;
+    unsigned long SizeOfInfo;
+    uint64_t FrameBufferBase;
+    unsigned long FrameBufferSize;
+} EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE;
+
+typedef struct _EFI_GRAPHICS_OUTPUT_PROTOCOL {
+    void *QueryMode;
+    void *SetMode;
+    void *Blt;
+    EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE *Mode;
+} EFI_GRAPHICS_OUTPUT_PROTOCOL;
+
 #endif

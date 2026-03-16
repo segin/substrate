@@ -55,6 +55,83 @@ static void efi_print_hex(EFI_SYSTEM_TABLE *st, uint32_t val) {
     efi_print(st, buf);
 }
 
+static uint8_t efi_mask_shift(uint32_t mask) {
+    uint8_t shift = 0;
+
+    if (mask == 0) {
+        return 0;
+    }
+    while ((mask & 1U) == 0) {
+        shift++;
+        mask >>= 1;
+    }
+    return shift;
+}
+
+static uint8_t efi_mask_width(uint32_t mask) {
+    uint8_t width = 0;
+
+    while ((mask & 1U) != 0) {
+        width++;
+        mask >>= 1;
+    }
+    return width;
+}
+
+static void efi_populate_gop_framebuffer(multiboot_info_t *mbi,
+    EFI_GRAPHICS_OUTPUT_PROTOCOL *gop) {
+    EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE *mode;
+    EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *info;
+
+    if (mbi == NULL || gop == NULL || gop->Mode == NULL || gop->Mode->Info == NULL) {
+        return;
+    }
+
+    mode = gop->Mode;
+    info = mode->Info;
+    if (info->PixelFormat == PixelBltOnly) {
+        return;
+    }
+
+    mbi->flags |= MULTIBOOT_INFO_FRAMEBUFFER_INFO;
+    mbi->framebuffer_addr = mode->FrameBufferBase;
+    mbi->framebuffer_width = info->HorizontalResolution;
+    mbi->framebuffer_height = info->VerticalResolution;
+    mbi->framebuffer_pitch = info->PixelsPerScanLine * 4;
+    mbi->framebuffer_bpp = 32;
+    mbi->framebuffer_type = MULTIBOOT_FRAMEBUFFER_TYPE_RGB;
+
+    switch (info->PixelFormat) {
+    case PixelRedGreenBlueReserved8BitPerColor:
+        mbi->framebuffer_red_field_position = 0;
+        mbi->framebuffer_red_mask_size = 8;
+        mbi->framebuffer_green_field_position = 8;
+        mbi->framebuffer_green_mask_size = 8;
+        mbi->framebuffer_blue_field_position = 16;
+        mbi->framebuffer_blue_mask_size = 8;
+        break;
+    case PixelBlueGreenRedReserved8BitPerColor:
+        mbi->framebuffer_red_field_position = 16;
+        mbi->framebuffer_red_mask_size = 8;
+        mbi->framebuffer_green_field_position = 8;
+        mbi->framebuffer_green_mask_size = 8;
+        mbi->framebuffer_blue_field_position = 0;
+        mbi->framebuffer_blue_mask_size = 8;
+        break;
+    case PixelBitMask:
+        mbi->framebuffer_red_field_position = efi_mask_shift(info->PixelInformation.RedMask);
+        mbi->framebuffer_red_mask_size = efi_mask_width(info->PixelInformation.RedMask >> mbi->framebuffer_red_field_position);
+        mbi->framebuffer_green_field_position = efi_mask_shift(info->PixelInformation.GreenMask);
+        mbi->framebuffer_green_mask_size = efi_mask_width(info->PixelInformation.GreenMask >> mbi->framebuffer_green_field_position);
+        mbi->framebuffer_blue_field_position = efi_mask_shift(info->PixelInformation.BlueMask);
+        mbi->framebuffer_blue_mask_size = efi_mask_width(info->PixelInformation.BlueMask >> mbi->framebuffer_blue_field_position);
+        break;
+    default:
+        mbi->flags &= ~MULTIBOOT_INFO_FRAMEBUFFER_INFO;
+        break;
+    }
+}
+
 // --------------------------------------------------------------------------------
 // Entry Point
 // --------------------------------------------------------------------------------
@@ -68,6 +145,8 @@ uint32_t efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     // Define GUID on stack to avoid high-memory global access
     EFI_GUID LoadedImageProtocolGUID =
         { 0x5B1B31A1, 0x9562, 0x11D2, { 0x8E, 0x3F, 0x00, 0xA0, 0xC9, 0x69, 0x72, 0x3B } };
+    EFI_GUID GraphicsOutputProtocolGUID =
+        { 0x9042A9DE, 0x23DC, 0x4A38, { 0x96, 0xFB, 0x7A, 0xDE, 0xD0, 0x80, 0x51, 0x6A } };
 
     SystemTable->ConOut->ClearScreen(SystemTable->ConOut);
     efi_print(SystemTable, RELOC("Starting Kernel (EFI IA32)...\r\n"));
@@ -102,6 +181,11 @@ uint32_t efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
 
     // Set MBI fields
     mbi->flags = (1<<6); // MMAP valid
+
+    EFI_GRAPHICS_OUTPUT_PROTOCOL *gop = NULL;
+    if (bs->LocateProtocol(&GraphicsOutputProtocolGUID, NULL, (void **)&gop) == EFI_SUCCESS) {
+        efi_populate_gop_framebuffer(mbi, gop);
+    }
 
     // Allocate buffer for EFI Memory Map (to convert later)
     uint64_t mmap_phys = 0;

@@ -19,6 +19,7 @@
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
 #include <vm/vm_pager.h>
+#include <kern/resource.h>
 
 #include <arch/i386/pmap.h>
 
@@ -51,14 +52,65 @@ static uint8_t rgb_to_index(uint32_t color) {
     return i;
 }
 
+static uint32_t fb_scale_component(uint8_t component, uint8_t bits) {
+    uint64_t max_value;
+
+    if (bits == 0) {
+        return 0;
+    }
+    if (bits >= 31) {
+        return (uint32_t)component;
+    }
+    max_value = ((uint64_t)1 << bits) - 1;
+    return (uint32_t)(((uint64_t)component * max_value + 127) / 255);
+}
+
+static void fb_set_default_color_layout(fb_info_t *info) {
+    if (info->red_length != 0 || info->green_length != 0 || info->blue_length != 0) {
+        return;
+    }
+
+    switch (info->bpp) {
+    case 32:
+    case 24:
+        info->red_offset = 16;
+        info->red_length = 8;
+        info->green_offset = 8;
+        info->green_length = 8;
+        info->blue_offset = 0;
+        info->blue_length = 8;
+        break;
+    case 16:
+        info->red_offset = 11;
+        info->red_length = 5;
+        info->green_offset = 5;
+        info->green_length = 6;
+        info->blue_offset = 0;
+        info->blue_length = 5;
+        break;
+    case 15:
+        info->red_offset = 10;
+        info->red_length = 5;
+        info->green_offset = 5;
+        info->green_length = 5;
+        info->blue_offset = 0;
+        info->blue_length = 5;
+        break;
+    default:
+        break;
+    }
+}
+
 static uint32_t fb_get_raw_pixel(uint32_t color, uint8_t bpp) {
     if (bpp >= 15) {
-        switch (bpp) {
-            case 32: return color;
-            case 24: return color & 0xFFFFFF;
-            case 16: return ((color >> 8) & 0xF800) | ((color >> 5) & 0x07E0) | ((color >> 3) & 0x001F);
-            case 15: return ((color >> 9) & 0x7C00) | ((color >> 6) & 0x03E0) | ((color >> 3) & 0x001F);
-        }
+        uint8_t red = (color >> 16) & 0xFF;
+        uint8_t green = (color >> 8) & 0xFF;
+        uint8_t blue = color & 0xFF;
+
+        fb_set_default_color_layout(&fb);
+        return (fb_scale_component(red, fb.red_length) << fb.red_offset) |
+            (fb_scale_component(green, fb.green_length) << fb.green_offset) |
+            (fb_scale_component(blue, fb.blue_length) << fb.blue_offset);
     } else if (bpp == 8) {
         return rgb_to_index(color);
     }
@@ -289,14 +341,14 @@ static int fb_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         vi->yres_virtual = fb.virt_height ? fb.virt_height : fb.height;
         vi->bits_per_pixel = fb.bpp;
 
-        if (fb.bpp == 32 || fb.bpp == 24) {
-            vi->red.offset = 16; vi->red.length = 8;
-            vi->green.offset = 8; vi->green.length = 8;
-            vi->blue.offset = 0; vi->blue.length = 8;
-        } else if (fb.bpp == 16) {
-            vi->red.offset = 11; vi->red.length = 5;
-            vi->green.offset = 5; vi->green.length = 6;
-            vi->blue.offset = 0; vi->blue.length = 5;
+        fb_set_default_color_layout(&fb);
+        if (fb.red_length || fb.green_length || fb.blue_length) {
+            vi->red.offset = fb.red_offset;
+            vi->red.length = fb.red_length;
+            vi->green.offset = fb.green_offset;
+            vi->green.length = fb.green_length;
+            vi->blue.offset = fb.blue_offset;
+            vi->blue.length = fb.blue_length;
         }
 
         return 0;
@@ -397,16 +449,59 @@ extern void vga_install(void);
 
 /* Default Multiboot Driver Wrapper */
 static multiboot_info_t *saved_mbi = NULL;
+static void *saved_mbi_fb_addr = NULL;
+static size_t saved_mbi_fb_len = 0;
 static int mb_probe(void) {
-    if (saved_mbi && (saved_mbi->flags & (1 << 12))) return 0;
+    if (saved_mbi && (saved_mbi->flags & MULTIBOOT_INFO_FRAMEBUFFER_INFO) &&
+        saved_mbi->framebuffer_type != MULTIBOOT_FRAMEBUFFER_TYPE_EGA_TEXT) return 0;
     return -1;
 }
 static int mb_init(fb_info_t *info) {
+    uint64_t fb_phys;
+
     if (!saved_mbi) return -1;
-    info->addr = (uint32_t *)(uintptr_t)saved_mbi->framebuffer_addr;
+    if ((saved_mbi->flags & MULTIBOOT_INFO_FRAMEBUFFER_INFO) == 0 ||
+        saved_mbi->framebuffer_type == MULTIBOOT_FRAMEBUFFER_TYPE_EGA_TEXT) {
+        return -1;
+    }
+
+    fb_phys = saved_mbi->framebuffer_addr;
+    if (fb_phys > UINT32_MAX) {
+        return -1;
+    }
+    if (saved_mbi_fb_addr == NULL) {
+        saved_mbi_fb_len = (size_t)saved_mbi->framebuffer_pitch * saved_mbi->framebuffer_height;
+        if (saved_mbi_fb_len == 0) {
+            return -1;
+        }
+        saved_mbi_fb_addr = ioremap((resource_size_t)fb_phys, saved_mbi_fb_len);
+        if (saved_mbi_fb_addr == NULL) {
+            return -1;
+        }
+    }
+
+    info->addr = (uint32_t *)saved_mbi_fb_addr;
     info->width = saved_mbi->framebuffer_width;
+    info->height = saved_mbi->framebuffer_height;
+    info->pitch = saved_mbi->framebuffer_pitch;
+    info->bpp = saved_mbi->framebuffer_bpp;
     info->virt_width = info->width;
     info->virt_height = info->height;
+    info->red_offset = 0;
+    info->red_length = 0;
+    info->green_offset = 0;
+    info->green_length = 0;
+    info->blue_offset = 0;
+    info->blue_length = 0;
+    if (saved_mbi->framebuffer_type == MULTIBOOT_FRAMEBUFFER_TYPE_RGB) {
+        info->red_offset = saved_mbi->framebuffer_red_field_position;
+        info->red_length = saved_mbi->framebuffer_red_mask_size;
+        info->green_offset = saved_mbi->framebuffer_green_field_position;
+        info->green_length = saved_mbi->framebuffer_green_mask_size;
+        info->blue_offset = saved_mbi->framebuffer_blue_field_position;
+        info->blue_length = saved_mbi->framebuffer_blue_mask_size;
+    }
+    fb_set_default_color_layout(info);
     info->set_viewport = NULL;
     info->putpixel = linear_fb_putpixel;
     info->scroll = NULL;
@@ -549,6 +644,7 @@ void fb_init(multiboot_info_t *mbi) {
     if (selected_drv->init(&fb) == 0) {
         fb_active = 1;
         current_driver = selected_drv;
+        fb_set_default_color_layout(&fb);
         fb.putpixel = fb.putpixel ? fb.putpixel : linear_fb_putpixel; // Ensure fallback
         if (fb.virt_height == 0) fb.virt_height = fb.height; // Fallback
         kprint("Video: Initialization success.\n");

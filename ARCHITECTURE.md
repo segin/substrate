@@ -201,6 +201,7 @@ Console policy:
 - global wall-clock and scheduler timeout accounting advance only from CPU 0; secondary CPUs may take local preemption ticks, but they must not multiply system time
 - `video=text` keeps the system on the hardware text console even when framebuffer drivers are available
 - `textmode=` and `video=text:COLSxROWS` select hardware text geometry for the kernel text console; the BIOS setup path on `zImage` and floppy boots can program `80x25`, `80x43`, `80x50`, and any detected VBE text modes such as `132x60`, while the higher-half driver directly reprograms only the stable in-kernel `80x25` and `80x50` cases and otherwise trusts the BIOS-programmed geometry handoff
+- EFI boots now translate GOP framebuffer state into the Multiboot framebuffer fields consumed by the higher-half video stack, and the generic framebuffer core preserves firmware-provided channel layouts so GRUB or EFI framebuffers with RGBX or BGRX packing render correctly without a dedicated mode set
 - the VT layer owns per-console backing buffers, per-VT `tty` bindings, and per-VT scrollback history; the VGA text backend owns all active-screen redraw and cursor updates so VT switching does not memcpy live VGA memory directly
 - the active text console exports `/dev/tty1` through `/dev/tty12`; `Alt+F1..F12` switches VTs and `Shift+PageUp/PageDown` enters and exits scrollback on the active VT
 

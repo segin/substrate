@@ -75,6 +75,10 @@
 #define VIRTIO_SCSI_S_FUNCTION_SUCCEEDED  10
 #define VIRTIO_SCSI_S_FUNCTION_REJECTED   11
 
+#define VIRTIO_SCSI_EVT_TRANSPORT_RESET   (1u << VIRTIO_SCSI_T_TRANSPORT_RESET)
+#define VIRTIO_SCSI_EVT_ASYNC_NOTIFY      (1u << VIRTIO_SCSI_T_ASYNC_NOTIFY)
+#define VIRTIO_SCSI_EVT_PARAM_CHANGE      (1u << VIRTIO_SCSI_T_PARAM_CHANGE)
+
 /* Event types */
 #define VIRTIO_SCSI_T_NO_EVENT         0
 #define VIRTIO_SCSI_T_TRANSPORT_RESET  1
@@ -98,6 +102,17 @@ struct virtio_scsi_ctrl_tmf_req {
 /* Task Management Function (TMF) Response */
 struct virtio_scsi_ctrl_tmf_resp {
     uint8_t response;
+} __attribute__((packed));
+
+struct virtio_scsi_ctrl_an_req {
+    uint32_t type;
+    uint8_t  lun[8];
+    uint32_t event_requested;
+} __attribute__((packed));
+
+struct virtio_scsi_ctrl_an_resp {
+    uint32_t event_actual;
+    uint8_t  response;
 } __attribute__((packed));
 
 /* SCSI request header (device-readable) */
@@ -179,6 +194,8 @@ typedef struct virtio_scsi_dev {
     void *req_buf;
     void *extra_req_bufs[VIRTIO_SCSI_MAX_QUEUES - 1];
     struct virtio_scsi_event *event_bufs;
+    uint32_t supported_events;
+    uint32_t subscribed_events;
     
     /* SCSI link */
     scsi_link_t link;
@@ -453,6 +470,86 @@ static int vscsi_send_tmf(virtio_scsi_dev_t *dev, uint32_t subtype,
     return resp->response;
 }
 
+static int vscsi_send_an(virtio_scsi_dev_t *dev, uint32_t subtype,
+                         uint8_t target, uint16_t lun, uint32_t requested,
+                         uint32_t *actual) {
+    virtio_scsi_queue_t *q;
+    struct virtio_scsi_ctrl_an_req *req;
+    struct virtio_scsi_ctrl_an_resp *resp;
+
+    if (!dev || !dev->ctrl_buf) return -1;
+    q = &dev->ctrl_queue;
+    req = (struct virtio_scsi_ctrl_an_req *)dev->ctrl_buf;
+    resp = (struct virtio_scsi_ctrl_an_resp *)((uint8_t *)dev->ctrl_buf + sizeof(*req));
+
+    memset(req, 0, sizeof(*req));
+    memset(resp, 0, sizeof(*resp));
+
+    req->type = subtype;
+    req->lun[0] = 1;
+    req->lun[1] = target;
+    req->lun[2] = (lun >> 8) & 0xFF;
+    req->lun[3] = lun & 0xFF;
+    req->event_requested = requested;
+
+    q->desc[0].addr = (uint64_t)vscsi_phys_addr(req);
+    q->desc[0].len = sizeof(*req);
+    q->desc[0].flags = VRING_DESC_F_NEXT;
+    q->desc[0].next = 1;
+    q->desc[1].addr = (uint64_t)vscsi_phys_addr(resp);
+    q->desc[1].len = sizeof(*resp);
+    q->desc[1].flags = VRING_DESC_F_WRITE;
+    q->desc[1].next = 0;
+
+    q->avail->ring[q->avail->idx % q->size] = 0;
+    __asm__ volatile("mfence" ::: "memory");
+    q->avail->idx++;
+    outw(dev->io_base + VIRTIO_REG_QUEUE_NOTIFY, 0);
+
+    while (q->last_used_idx == q->used->idx) {
+        __asm__ volatile("pause");
+    }
+    q->last_used_idx++;
+
+    if (actual) {
+        *actual = resp->event_actual;
+    }
+    if (resp->response == VIRTIO_SCSI_S_FUNCTION_COMPLETE ||
+        resp->response == VIRTIO_SCSI_S_FUNCTION_SUCCEEDED) {
+        return 0;
+    }
+    return resp->response;
+}
+
+static void vscsi_setup_control_events(virtio_scsi_dev_t *dev) {
+    uint32_t requested;
+    uint32_t supported = 0;
+
+    if (!dev) return;
+
+    requested = VIRTIO_SCSI_EVT_TRANSPORT_RESET;
+    if (dev->features & VIRTIO_SCSI_F_HOTPLUG) {
+        requested |= VIRTIO_SCSI_EVT_ASYNC_NOTIFY;
+    }
+    if (dev->features & VIRTIO_SCSI_F_CHANGE) {
+        requested |= VIRTIO_SCSI_EVT_PARAM_CHANGE;
+    }
+
+    if (vscsi_send_an(dev, VIRTIO_SCSI_T_AN_QUERY, 0, 0, requested, &supported) == 0 &&
+        supported != 0) {
+        dev->supported_events = supported;
+    } else {
+        dev->supported_events = requested;
+    }
+
+    if (vscsi_send_an(dev, VIRTIO_SCSI_T_AN_SUBSCRIBE, 0, 0,
+        dev->supported_events, &dev->subscribed_events) != 0) {
+        dev->subscribed_events = 0;
+    } else if (dev->subscribed_events == 0) {
+        dev->subscribed_events = dev->supported_events;
+    }
+}
+
 static int vscsi_reset_device(scsi_link_t *link, scsi_device_t *sdev) {
     virtio_scsi_dev_t *dev = (virtio_scsi_dev_t *)link->priv;
     if (!dev || !sdev) return -1;
@@ -683,6 +780,7 @@ void virtio_scsi_setup(uint8_t bus, uint8_t slot, uint8_t func) {
     if (dev->features & VIRTIO_SCSI_F_HOTPLUG) {
         vscsi_setup_event_buffers(dev);
     }
+    vscsi_setup_control_events(dev);
     
     /* Setup SCSI transport link */
     snprintf(dev->link.name, sizeof(dev->link.name), "virtio-scsi0");
