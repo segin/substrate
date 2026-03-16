@@ -40,6 +40,7 @@
 #include <arch/x86-common/multiboot.h>
 #include <sys/freebsd_boot.h>
 #include <kern/isa.h>
+#include <kern/efi_runtime.h>
 
 #include <sys/param.h>
 #include <pm/pm.h>
@@ -435,6 +436,8 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
     if (mboot_info) {
         fb_init(mboot_info);
     }
+
+    efi_runtime_init();
 
 }
 

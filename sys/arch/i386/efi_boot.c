@@ -23,6 +23,22 @@
 
 // kmain is the kernel entry point (defined in kern/main.c)
 
+/*
+ * Saved EFI Runtime Services pointer.
+ * Set during efi_main() before ExitBootServices.  The kernel's
+ * efi_runtime.c reads this once paging is up to wire the RT calls.
+ * Physical address — must be mapped before dereferencing.
+ */
+EFI_RUNTIME_SERVICES *efi_saved_runtime_services __attribute__((section(".data"))) = NULL;
+
+/*
+ * EFI memory map snapshot, kept for SetVirtualAddressMap.
+ * Stored as physical address + metadata.
+ */
+uint8_t *efi_saved_mmap __attribute__((section(".data"))) = NULL;
+unsigned long efi_saved_mmap_size __attribute__((section(".data"))) = 0;
+unsigned long efi_saved_desc_size __attribute__((section(".data"))) = 0;
+uint32_t efi_saved_desc_version __attribute__((section(".data"))) = 0;
 
 // Address Translation Macros
 // We link strings/globals at 0xC0... but we run at 0x40...
@@ -132,6 +148,75 @@ static void efi_populate_gop_framebuffer(multiboot_info_t *mbi,
     }
 }
 
+/*
+ * efi_select_best_gop_mode - Enumerate GOP modes and select the best one.
+ *
+ * Prefers 32-bit modes. Among 32-bit modes, selects the highest resolution
+ * (by pixel count) that doesn't exceed 1920x1200. Falls back to the
+ * firmware's current mode if no suitable mode is found.
+ *
+ * Must be called before ExitBootServices since QueryMode uses boot services.
+ */
+static void efi_select_best_gop_mode(EFI_SYSTEM_TABLE *st,
+    EFI_GRAPHICS_OUTPUT_PROTOCOL *gop) {
+    EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE *mode;
+    uint32_t best_mode;
+    uint64_t best_pixels;
+    uint32_t i;
+
+    if (gop == NULL || gop->Mode == NULL || gop->QueryMode == NULL ||
+        gop->SetMode == NULL) {
+        return;
+    }
+
+    mode = gop->Mode;
+    best_mode = mode->Mode;  /* Default: keep current mode */
+    best_pixels = 0;
+
+    for (i = 0; i < mode->MaxMode; i++) {
+        EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *info = NULL;
+        unsigned long info_size = 0;
+        EFI_STATUS qs;
+
+        qs = gop->QueryMode(gop, i, &info_size, &info);
+        if (qs != EFI_SUCCESS || info == NULL) {
+            continue;
+        }
+
+        /* Skip non-linear formats */
+        if (info->PixelFormat == PixelBltOnly) {
+            continue;
+        }
+
+        /* Skip modes wider/taller than 1920x1200 to avoid oversized FB */
+        if (info->HorizontalResolution > 1920 ||
+            info->VerticalResolution > 1200) {
+            continue;
+        }
+
+        /* Prefer 32-bit capable formats */
+        if (info->PixelFormat == PixelRedGreenBlueReserved8BitPerColor ||
+            info->PixelFormat == PixelBlueGreenRedReserved8BitPerColor ||
+            info->PixelFormat == PixelBitMask) {
+            uint64_t pixels = (uint64_t)info->HorizontalResolution *
+                              info->VerticalResolution;
+            if (pixels > best_pixels) {
+                best_pixels = pixels;
+                best_mode = i;
+            }
+        }
+    }
+
+    if (best_mode != mode->Mode) {
+        EFI_STATUS ss = gop->SetMode(gop, best_mode);
+        if (ss == EFI_SUCCESS) {
+            efi_print(st, RELOC("GOP: Switched to mode "));
+            efi_print_hex(st, best_mode);
+            efi_print(st, RELOC("\r\n"));
+        }
+    }
+}
+
 // --------------------------------------------------------------------------------
 // Entry Point
 // --------------------------------------------------------------------------------
@@ -184,6 +269,7 @@ uint32_t efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
 
     EFI_GRAPHICS_OUTPUT_PROTOCOL *gop = NULL;
     if (bs->LocateProtocol(&GraphicsOutputProtocolGUID, NULL, (void **)&gop) == EFI_SUCCESS) {
+        efi_select_best_gop_mode(SystemTable, gop);
         efi_populate_gop_framebuffer(mbi, gop);
     }
 
@@ -280,7 +366,21 @@ uint32_t efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
         return status;
     }
 
-    // 5. Exit Boot Services
+    // 5. Save Runtime Services and memory map metadata for kernel use.
+    // These globals are linked at high addresses; write through physical
+    // addresses since paging is not yet enabled.
+    *(EFI_RUNTIME_SERVICES **)((uint32_t)&efi_saved_runtime_services - LINK_BASE + image_base) =
+        SystemTable->RuntimeServices;
+    *(uint8_t **)((uint32_t)&efi_saved_mmap - LINK_BASE + image_base) =
+        (uint8_t *)(uintptr_t)mmap_phys;
+    *(unsigned long *)((uint32_t)&efi_saved_mmap_size - LINK_BASE + image_base) =
+        mmap_size;
+    *(unsigned long *)((uint32_t)&efi_saved_desc_size - LINK_BASE + image_base) =
+        desc_size;
+    *(uint32_t *)((uint32_t)&efi_saved_desc_version - LINK_BASE + image_base) =
+        desc_ver;
+
+    // 6. Exit Boot Services
     status = bs->ExitBootServices(ImageHandle, map_key);
     if (status != EFI_SUCCESS) {
         status = bs->GetMemoryMap(&mmap_size, (EFI_MEMORY_DESCRIPTOR*)(uintptr_t)mmap_phys, &map_key, &desc_size, &desc_ver);
@@ -293,7 +393,7 @@ uint32_t efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
         return status;
     }
 
-    // 6. Convert Memory Map to Multiboot
+    // 7. Convert Memory Map to Multiboot
     struct multiboot_mmap_entry {
         uint32_t size;
         uint64_t addr;
@@ -330,7 +430,7 @@ uint32_t efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     mbi->mmap_addr = (uint32_t)(uintptr_t)mb_mmap;
     mbi->mmap_length = mb_mmap_count * sizeof(struct multiboot_mmap_entry);
 
-    // 7. Enable Paging
+    // 8. Enable Paging
     __asm__ volatile("mov %0, %%cr3" :: "r"((uint32_t)pd_phys));
 
     uint32_t cr0;
@@ -338,7 +438,7 @@ uint32_t efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     cr0 |= 0x80000000;
     __asm__ volatile("mov %0, %%cr0" :: "r"(cr0));
 
-    // 8. Jump to Kernel
+    // 9. Jump to Kernel
     extern char stack_top[];
 
     __asm__ volatile (

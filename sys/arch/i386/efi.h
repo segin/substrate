@@ -165,6 +165,8 @@ typedef struct {
     EFI_STATUS (*LocateProtocol)(EFI_GUID *Protocol, void *Registration, void **Interface);
 } EFI_BOOT_SERVICES;
 
+typedef struct EFI_RUNTIME_SERVICES EFI_RUNTIME_SERVICES;
+
 struct _EFI_SYSTEM_TABLE {
     EFI_TABLE_HEADER Hdr;
     int16_t *FirmwareVendor;
@@ -175,7 +177,7 @@ struct _EFI_SYSTEM_TABLE {
     EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *ConOut;
     EFI_HANDLE StandardErrorHandle;
     EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *StdErr;
-    void *RuntimeServices;
+    EFI_RUNTIME_SERVICES *RuntimeServices;
     EFI_BOOT_SERVICES *BootServices;
     unsigned long NumberOfTableEntries;
     void *ConfigurationTable;
@@ -230,11 +232,92 @@ typedef struct {
     unsigned long FrameBufferSize;
 } EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE;
 
-typedef struct _EFI_GRAPHICS_OUTPUT_PROTOCOL {
-    void *QueryMode;
-    void *SetMode;
+typedef struct _EFI_GRAPHICS_OUTPUT_PROTOCOL EFI_GRAPHICS_OUTPUT_PROTOCOL;
+
+typedef EFI_STATUS (*EFI_GRAPHICS_OUTPUT_PROTOCOL_QUERY_MODE)(
+    EFI_GRAPHICS_OUTPUT_PROTOCOL *This,
+    uint32_t ModeNumber,
+    unsigned long *SizeOfInfo,
+    EFI_GRAPHICS_OUTPUT_MODE_INFORMATION **Info);
+
+typedef EFI_STATUS (*EFI_GRAPHICS_OUTPUT_PROTOCOL_SET_MODE)(
+    EFI_GRAPHICS_OUTPUT_PROTOCOL *This,
+    uint32_t ModeNumber);
+
+struct _EFI_GRAPHICS_OUTPUT_PROTOCOL {
+    EFI_GRAPHICS_OUTPUT_PROTOCOL_QUERY_MODE QueryMode;
+    EFI_GRAPHICS_OUTPUT_PROTOCOL_SET_MODE SetMode;
     void *Blt;
     EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE *Mode;
-} EFI_GRAPHICS_OUTPUT_PROTOCOL;
+};
+
+/* ==================== EFI Time ==================== */
+
+typedef struct {
+    uint16_t Year;
+    uint8_t  Month;
+    uint8_t  Day;
+    uint8_t  Hour;
+    uint8_t  Minute;
+    uint8_t  Second;
+    uint8_t  Pad1;
+    uint32_t Nanosecond;
+    int16_t  TimeZone;
+    uint8_t  Daylight;
+    uint8_t  Pad2;
+} EFI_TIME;
+
+typedef struct {
+    uint32_t Resolution;
+    uint32_t Accuracy;
+    uint8_t  SetsToZero;
+} EFI_TIME_CAPABILITIES;
+
+/* ==================== EFI Reset ==================== */
+
+typedef enum {
+    EfiResetCold,
+    EfiResetWarm,
+    EfiResetShutdown,
+    EfiResetPlatformSpecific
+} EFI_RESET_TYPE;
+
+/* ==================== EFI Runtime Services ==================== */
+
+#define EFI_RUNTIME_SERVICES_SIGNATURE 0x56524553544E5245ULL  /* "RUNTSERV" */
+
+struct EFI_RUNTIME_SERVICES {
+    EFI_TABLE_HEADER Hdr;
+    EFI_STATUS (*GetTime)(EFI_TIME *Time, EFI_TIME_CAPABILITIES *Capabilities);
+    EFI_STATUS (*SetTime)(EFI_TIME *Time);
+    void *GetWakeupTime;
+    void *SetWakeupTime;
+
+    /* Virtual Memory Services */
+    EFI_STATUS (*SetVirtualAddressMap)(unsigned long MemoryMapSize,
+        unsigned long DescriptorSize, uint32_t DescriptorVersion,
+        EFI_MEMORY_DESCRIPTOR *VirtualMap);
+    void *ConvertPointer;
+
+    /* Variable Services */
+    EFI_STATUS (*GetVariable)(int16_t *VariableName, EFI_GUID *VendorGuid,
+        uint32_t *Attributes, unsigned long *DataSize, void *Data);
+    EFI_STATUS (*GetNextVariableName)(unsigned long *VariableNameSize,
+        int16_t *VariableName, EFI_GUID *VendorGuid);
+    EFI_STATUS (*SetVariable)(int16_t *VariableName, EFI_GUID *VendorGuid,
+        uint32_t Attributes, unsigned long DataSize, void *Data);
+
+    /* Miscellaneous Services */
+    void *GetNextHighMonotonicCount;
+    void (*ResetSystem)(EFI_RESET_TYPE ResetType, EFI_STATUS ResetStatus,
+        unsigned long DataSize, void *ResetData);
+
+    /* UEFI 2.0 Capsule Services */
+    void *UpdateCapsule;
+    void *QueryCapsuleCapabilities;
+
+    /* Miscellaneous UEFI 2.0 Service */
+    void *QueryVariableInfo;
+};
 
 #endif
