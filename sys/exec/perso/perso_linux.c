@@ -575,6 +575,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_kill]           = &linux_sys_kill,
     [LINUX_SYS_mkdir]          = &sys_mkdir,
     [LINUX_SYS_rmdir]          = &sys_rmdir,
+    [LINUX_SYS_dup]            = &sys_dup,
     [LINUX_SYS_pipe]           = &sys_pipe,
     [LINUX_SYS_times]          = &sys_times,
     [LINUX_SYS_brk]            = &sys_brk,

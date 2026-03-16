@@ -43,6 +43,8 @@ void test_linux_personality(void) {
                 "Linux syscall table wires mount to sys_mount");
     test_assert(linux->syscall_table[LINUX_SYS_umount] == (void *)&sys_umount,
                 "Linux syscall table wires umount to sys_umount");
+    test_assert(linux->syscall_table[LINUX_SYS_dup] == (void *)&sys_dup,
+                "Linux syscall table wires dup to sys_dup");
     test_assert(linux->syscall_names[LINUX_SYS_modify_ldt] != NULL &&
                     strcmp(linux->syscall_names[LINUX_SYS_modify_ldt], "modify_ldt") == 0,
                 "Linux syscall name table exposes modify_ldt");
