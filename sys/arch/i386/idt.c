@@ -28,6 +28,7 @@ idt_ptr_t   idt_ptr;
 #include <arch/i386/gdt.h>
 #include <sys/exec.h>
 #include <arch/i386/percpu.h>
+#include <vm/vm_fault.h>
 #include <exec/perso/personality.h>
 // isr externs are in idt.h now
 
@@ -237,6 +238,15 @@ void isr_handler(registers_t *regs) {
             // COW and lazy fault handling are expected for normal process execution.
             if (pmap_fault(regs->err_code, cr2)) {
                 return;
+            }
+            // Demand paging: try vm_fault for vm_map-backed regions
+            if (is_usermode && current_process && current_process->vm_map) {
+                uint8_t fault_prot = VM_PROT_READ;
+                if (regs->err_code & 0x02) fault_prot |= VM_PROT_WRITE;
+                if (regs->err_code & 0x10) fault_prot |= VM_PROT_EXEC;
+                if (vm_fault(current_process->vm_map, cr2, fault_prot) == VM_FAULT_SUCCESS) {
+                    return;
+                }
             }
         }
 

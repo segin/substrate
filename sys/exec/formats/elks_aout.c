@@ -378,7 +378,7 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     current_process->pmap = (struct pmap*)pmap;
     extern void pmap_activate(pmap_t pmap);
     pmap_activate(pmap);
-    map = vm_map_create(pmap, 0, 0xC0000000U);
+    map = vm_map_create(pmap, 0x10000, 0xC0000000U);
     if (!map) {
         elks_free_kernel_vector(kargv);
         elks_free_kernel_vector(kenvp);

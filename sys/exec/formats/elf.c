@@ -996,7 +996,9 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
              vm_map_destroy(current_process->vm_map);
         }
         // Use the proper pmap pointer (already active)
-        current_process->vm_map = vm_map_create((pmap_t)(uintptr_t)current_process->pmap, 0, 0xC0000000);
+        // min=0x10000: reserve low 64KB to catch NULL dereferences and
+        // match typical Linux mmap_min_addr default.
+        current_process->vm_map = vm_map_create((pmap_t)(uintptr_t)current_process->pmap, 0x10000, 0xC0000000);
     }
 
     // Set up kernel stack for this process in TSS
@@ -1031,23 +1033,25 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
         kprint("\n");
     }
     
-    kprint("execve: Final check - entry=0x");
-    val = entry;
-    for (int i = 7; i >= 0; i--) {
-        int nib = (val >> (i * 4)) & 0xF;
-        hexbuf[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
+    if (elf_debug_enabled()) {
+        kprint("execve: Final check - entry=0x");
+        val = entry;
+        for (int i = 7; i >= 0; i--) {
+            int nib = (val >> (i * 4)) & 0xF;
+            hexbuf[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
+        }
+        hexbuf[8] = '\0';
+        kprint(hexbuf);
+        kprint(", stack=0x");
+        val = sp;
+        for (int i = 7; i >= 0; i--) {
+            int nib = (val >> (i * 4)) & 0xF;
+            hexbuf[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
+        }
+        hexbuf[8] = '\0';
+        kprint(hexbuf);
+        kprint("\n");
     }
-    hexbuf[8] = '\0';
-    kprint(hexbuf);
-    kprint(", stack=0x");
-    val = sp;
-    for (int i = 7; i >= 0; i--) {
-        int nib = (val >> (i * 4)) & 0xF;
-        hexbuf[7 - i] = nib < 10 ? '0' + nib : 'A' + nib - 10;
-    }
-    hexbuf[8] = '\0';
-    kprint(hexbuf);
-    kprint("\n");
     
     proc_close_cloexec(current_process);
 
