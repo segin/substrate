@@ -260,6 +260,21 @@ void isr_handler(registers_t *regs) {
                 if (current_thread && current_thread->proc == current_process) {
                     current_thread->trap_addr = addr;
                 }
+                if (current_process->perso_id == PERS_ELKS) {
+                    char elks_trapbuf[256];
+                    sprintf(elks_trapbuf,
+                            "TRAP[ELKS]: int=%u sig=%d code=%d addr=0x%08X eip=0x%08X cs=0x%04X ss=0x%04X esp=0x%08X ds=0x%04X\n",
+                            (unsigned int)regs->int_no,
+                            sig,
+                            code,
+                            (unsigned int)addr,
+                            (unsigned int)regs->eip,
+                            (unsigned int)regs->cs,
+                            (unsigned int)regs->ss,
+                            (unsigned int)regs->useresp,
+                            (unsigned int)regs->ds);
+                    kprint(elks_trapbuf);
+                }
                 if (cmdline_debug_enabled("trap")) {
                     char trapbuf[256];
                     sprintf(trapbuf,
