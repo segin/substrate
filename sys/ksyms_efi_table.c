@@ -957,6 +957,7 @@ extern void sched_update_loadavg(void);
 extern void sched_wakeup(void);
 extern void sched_wakeup_n(void);
 extern void sched_yield(void);
+extern void script_init_handler(void);
 extern void scsi_abort_request(void);
 extern void scsi_auto_attach(void);
 extern void scsi_cdb_inquiry(void);
@@ -1531,6 +1532,8 @@ extern void vt_get_status_row(void);
 extern void vt_get_visible_height(void);
 extern void vt_get_width(void);
 extern void vt_init(void);
+extern void vt_scrollback_line_down(void);
+extern void vt_scrollback_line_up(void);
 extern void vt_scrollback_page_down(void);
 extern void vt_scrollback_page_up(void);
 extern void vt_set_geometry(void);
@@ -2469,6 +2472,8 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&vt_capture_scrollback_top, "vt_capture_scrollback_top" },
     { (uint32_t)(uintptr_t)&vt_scrollback_page_up, "vt_scrollback_page_up" },
     { (uint32_t)(uintptr_t)&vt_scrollback_page_down, "vt_scrollback_page_down" },
+    { (uint32_t)(uintptr_t)&vt_scrollback_line_up, "vt_scrollback_line_up" },
+    { (uint32_t)(uintptr_t)&vt_scrollback_line_down, "vt_scrollback_line_down" },
     { (uint32_t)(uintptr_t)&uart_select_port, "uart_select_port" },
     { (uint32_t)(uintptr_t)&uart_get_console, "uart_get_console" },
     { (uint32_t)(uintptr_t)&uart_devfs_init, "uart_devfs_init" },
@@ -2781,6 +2786,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&elks_init_handler, "elks_init_handler" },
     { (uint32_t)(uintptr_t)&elks_check_file, "elks_check_file" },
     { (uint32_t)(uintptr_t)&elks_load, "elks_load" },
+    { (uint32_t)(uintptr_t)&script_init_handler, "script_init_handler" },
     { (uint32_t)(uintptr_t)&exec_init, "exec_init" },
     { (uint32_t)(uintptr_t)&exec_register_handler, "exec_register_handler" },
     { (uint32_t)(uintptr_t)&exec_pin_current_thread, "exec_pin_current_thread" },
@@ -3071,4 +3077,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1530;
+int ksym_count = 1533;
