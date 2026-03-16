@@ -15,6 +15,17 @@
 #include <sys/proc.h>
 #include <string.h>
 
+#define LINUX_UTS_FIELD_LEN 65
+
+struct linux_utsname {
+    char sysname[LINUX_UTS_FIELD_LEN];
+    char nodename[LINUX_UTS_FIELD_LEN];
+    char release[LINUX_UTS_FIELD_LEN];
+    char version[LINUX_UTS_FIELD_LEN];
+    char machine[LINUX_UTS_FIELD_LEN];
+    char domainname[LINUX_UTS_FIELD_LEN];
+};
+
 /* Signal Translation Tables */
 #define LINUX_SIGHUP        1
 #define LINUX_SIGINT        2
@@ -475,6 +486,31 @@ int linux_sys_ftruncate(int fd, int32_t length) {
     return sys_ftruncate(fd, (uint32_t)length, 0);
 }
 
+static int linux_sys_uname(void *ubuf) {
+    struct utsname native;
+    struct linux_utsname compat;
+    int ret;
+
+    if (!ubuf) return -EFAULT;
+
+    ret = kern_uname(&native);
+    if (ret != 0) return ret;
+
+    memset(&compat, 0, sizeof(compat));
+    strlcpy(compat.sysname, native.sysname, sizeof(compat.sysname));
+    strlcpy(compat.nodename, native.nodename, sizeof(compat.nodename));
+    strlcpy(compat.release, native.release, sizeof(compat.release));
+    strlcpy(compat.version, native.version, sizeof(compat.version));
+    strlcpy(compat.machine, native.machine, sizeof(compat.machine));
+    strlcpy(compat.domainname, native.domainname, sizeof(compat.domainname));
+
+    if (copyout(&compat, ubuf, sizeof(compat)) != 0) {
+        return -EFAULT;
+    }
+
+    return 0;
+}
+
 static int linux_sys_clone(uint32_t flags, void *child_stack, int *parent_tidptr, void *tls, int *child_tidptr) {
     (void)parent_tidptr;
     (void)tls;
@@ -604,7 +640,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_lstat_new]      = (void*)linux_sys_lstat,
     [LINUX_SYS_fstat_new]      = (void*)linux_sys_fstat,
     [LINUX_SYS_clone]          = (void*)linux_sys_clone,
-    [LINUX_SYS_uname]          = &sys_uname,
+    [LINUX_SYS_uname]          = &linux_sys_uname,
     [LINUX_SYS_modify_ldt]     = &sys_modify_ldt,
     [LINUX_SYS_getpgid]        = &sys_getpgid,
     [LINUX_SYS_fchdir]         = &sys_fchdir,
