@@ -1115,6 +1115,8 @@ extern void sys_dup2(void);
 extern void sys_execve(void);
 extern void sys_exit(void);
 extern void sys_fchdir(void);
+extern void sys_fchmod(void);
+extern void sys_fchown(void);
 extern void sys_fcntl(void);
 extern void sys_fork(void);
 extern void sys_freebsd11_fstat(void);
@@ -2132,6 +2134,8 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&sys_dup2, "sys_dup2" },
     { (uint32_t)(uintptr_t)&sys_chmod, "sys_chmod" },
     { (uint32_t)(uintptr_t)&sys_lchown, "sys_lchown" },
+    { (uint32_t)(uintptr_t)&sys_fchmod, "sys_fchmod" },
+    { (uint32_t)(uintptr_t)&sys_fchown, "sys_fchown" },
     { (uint32_t)(uintptr_t)&sys_fcntl, "sys_fcntl" },
     { (uint32_t)(uintptr_t)&sys_creat, "sys_creat" },
     { (uint32_t)(uintptr_t)&sys_signal, "sys_signal" },
@@ -3117,4 +3121,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1553;
+int ksym_count = 1555;

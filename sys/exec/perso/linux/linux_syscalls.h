@@ -52,6 +52,7 @@
 #define LINUX_SYS_munmap         91
 #define LINUX_SYS_truncate       92
 #define LINUX_SYS_ftruncate      93
+#define LINUX_SYS_fchmod         94
 #define LINUX_SYS_setitimer      104
 #define LINUX_SYS_getitimer      105
 #define LINUX_SYS_stat_new       106
@@ -78,6 +79,7 @@
 #define LINUX_SYS_getgid32       200
 #define LINUX_SYS_geteuid32      201
 #define LINUX_SYS_getegid32      202
+#define LINUX_SYS_fchown32       207
 #define LINUX_SYS_setgid32       214
 #define LINUX_SYS_getdents64     220
 #define LINUX_SYS_fcntl64        221

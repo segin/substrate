@@ -1475,6 +1475,30 @@ int sys_lchown(const char *path, int uid, int gid) {
     return 0;
 }
 
+int sys_fchmod(int fd, int mode) {
+    if (fd < 0 || fd >= MAX_FD) return -EBADF;
+
+    file_t *f = current_process->fds[fd];
+    if (!f || !f->f_data) return -EBADF;
+
+    fs_node_t *node = (fs_node_t *)f->f_data;
+    node->mask = (uint32_t)(mode & 07777);
+    return 0;
+}
+
+int sys_fchown(int fd, int uid, int gid) {
+    if (fd < 0 || fd >= MAX_FD) return -EBADF;
+
+    file_t *f = current_process->fds[fd];
+    if (!f || !f->f_data) return -EBADF;
+
+    fs_node_t *node = (fs_node_t *)f->f_data;
+
+    if (uid != -1) node->uid = (uint32_t)uid;
+    if (gid != -1) node->gid = (uint32_t)gid;
+    return 0;
+}
+
 int sys_fcntl(int fd, int cmd, int arg) {
     return proc_fcntl(current_process, fd, cmd, arg);
 }
