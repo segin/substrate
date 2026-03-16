@@ -420,7 +420,7 @@ _Static_assert(sizeof(hba_fis_t) == 256, "hba_fis_t must be exactly 256 bytes");
 #define AHCI_SECTOR_SIZE    512
 
 /* Timeout values (milliseconds) */
-#define AHCI_TIMEOUT_SPINUP     5000
+#define AHCI_TIMEOUT_SPINUP     2000
 #define AHCI_TIMEOUT_RESET      1000
 #define AHCI_TIMEOUT_CMD        30000
 #define AHCI_TIMEOUT_IDENTIFY   5000

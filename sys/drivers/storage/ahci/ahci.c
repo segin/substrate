@@ -228,9 +228,18 @@ static int ahci_port_init(ahci_port_t *ap, hba_port_t *port_regs, int port_num) 
     /* Wait for device detection (DET=3 means phy communication established) */
     {
         uint64_t detect_deadline = ahci_time_ms() + AHCI_TIMEOUT_SPINUP;
+        uint64_t empty_deadline = ahci_time_ms() + 200; /* 200ms fast-fail for empty ports */
+        int empty_checked = 0;
         while ((port_regs->ssts & HBA_PXSSTS_DET_MASK) != HBA_PXSSTS_DET_ACTIVE) {
             if (ahci_time_ms() > detect_deadline) {
                 break;  /* No device or slow device — will be caught by detect */
+            }
+            /* Fast-fail: if DET is still 0 after 200ms, no device attached */
+            if (!empty_checked && ahci_time_ms() > empty_deadline) {
+                empty_checked = 1;
+                if ((port_regs->ssts & HBA_PXSSTS_DET_MASK) == 0) {
+                    break;  /* No device responding at all */
+                }
             }
             __asm__ volatile("pause");
         }
@@ -879,9 +888,16 @@ static void ahci_probe_ports(ahci_controller_t *ctrl) {
     for (port = 0; port < AHCI_MAX_PORTS; port++) {
         ahci_port_t *ap;
         const char *type_str;
+        uint32_t ssts;
 
         if (!(pi & (1U << port))) {
             continue;
+        }
+
+        /* Quick pre-check: if port shows no device at all, skip init */
+        ssts = ctrl->abar->ports[port].ssts & HBA_PXSSTS_DET_MASK;
+        if (ssts == 0x00) {
+            continue;  /* No device, no phy — skip expensive COMRESET */
         }
 
         ap = &ctrl->ports[port];
