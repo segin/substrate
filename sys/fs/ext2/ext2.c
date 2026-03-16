@@ -47,6 +47,7 @@ int ext2_readlink(fs_node_t *node, char *buf, size_t size);
 uint32_t ext2_alloc_block(ext2_fs_t *fs);
 static int ext2_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t dev);
 static int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission);
+static int ext2_symlink(fs_node_t *dir, const char *target, const char *name);
 static int ext2_unlink(fs_node_t *dir, const char *name);
 static int ext2_rmdir(fs_node_t *dir, const char *name);
 static int ext2_dir_is_empty(fs_node_t *node);
@@ -597,6 +598,7 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
         node->mknod = ext2_mknod;
         node->unlink = ext2_unlink;
         node->rmdir = ext2_rmdir;
+        node->symlink = ext2_symlink;
     } else if (type == EXT2_S_IFREG) {
         node->flags = FS_FILE;
         node->read = ext2_file_read;
@@ -936,6 +938,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     ext2_root.mknod = ext2_mknod;
     ext2_root.unlink = ext2_unlink;
     ext2_root.rmdir = ext2_rmdir;
+    ext2_root.symlink = ext2_symlink;
     ext2_root.open = ext2_node_open;
     ext2_root.close = ext2_node_close;
     
@@ -1588,6 +1591,69 @@ static int ext2_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t 
 
     if (ext2_add_entry(dir, name, inode_num, ext2_dirent_type_from_mode(mode)) != 0) {
         ext2_free_inode(fs, inode_num, is_dir);
+        return -EIO;
+    }
+
+    return 0;
+}
+
+static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
+    if (!dir || !target || !name || !name[0]) return -EINVAL;
+    if ((dir->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
+    if (!strcmp(name, ".") || !strcmp(name, "..")) return -EINVAL;
+    if (ext2_finddir(dir, (char *)name) != NULL) return -EEXIST;
+
+    ext2_node_t *dir_ctx = (ext2_node_t *)(uintptr_t)dir->impl;
+    ext2_fs_t *fs = dir_ctx->fs;
+    uint32_t target_len = strlen(target);
+
+    uint32_t inode_num = ext2_alloc_inode(fs, 0);
+    if (inode_num == 0) return -ENOSPC;
+
+    ext2_inode_t inode;
+    memset(&inode, 0, sizeof(inode));
+    inode.i_mode = EXT2_S_IFLNK | 0777;
+    inode.i_uid = 0;
+    inode.i_gid = 0;
+    inode.i_links_count = 1;
+    inode.i_size = target_len;
+    extern int64_t get_time(void);
+    uint32_t now = (uint32_t)get_time();
+    inode.i_atime = now;
+    inode.i_mtime = now;
+    inode.i_ctime = now;
+
+    if (target_len <= 60) {
+        /* Fast symlink: target stored inline in i_block[] */
+        memcpy(inode.i_block, target, target_len);
+        inode.i_blocks = 0;
+    }
+
+    if (ext2_write_inode(fs, inode_num, &inode) != 0) {
+        ext2_free_inode(fs, inode_num, 0);
+        return -EIO;
+    }
+
+    if (target_len > 60) {
+        /* Slow symlink: allocate a data block and write target */
+        fs_node_t *lnode = ext2_alloc_node(fs, inode_num, &inode);
+        if (!lnode) {
+            ext2_free_inode(fs, inode_num, 0);
+            return -EIO;
+        }
+        ext2_node_t *lctx = (ext2_node_t *)(uintptr_t)lnode->impl;
+        uint32_t written = ext2_inode_write(lctx, 0, target_len, target);
+        lctx->inode.i_size = target_len;
+        ext2_write_inode(fs, inode_num, &lctx->inode);
+        if (written < target_len) {
+            ext2_free_inode(fs, inode_num, 0);
+            return -EIO;
+        }
+        close_fs(lnode);
+    }
+
+    if (ext2_add_entry(dir, name, inode_num, EXT2_FT_SYMLINK) != 0) {
+        ext2_free_inode(fs, inode_num, 0);
         return -EIO;
     }
 
