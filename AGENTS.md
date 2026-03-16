@@ -47,6 +47,7 @@ This is the Substrate operating system project targeting x86 32-bit architecture
 - **SMP Scheduler Fixes:** Updated `sched_smp.c` to use `percpu_get_cpu_id()` instead of assumption.
 - **Code Quality:** Defined `kernel_process` explicitly for kthreads (fixing PID assumption), improved `panic()` messaging, and cleaned up `random.c` duplicates.
 - **GRUB Boot Fix:** Fixed multiboot header video mode field offsets (were at 12-24, spec requires 32-44). Kernel now boots through GRUB for the first time.
+- **Shebang Script Execution:** Implemented `#!` (shebang) handler in exec subsystem (`sys/exec/formats/script.c`). Scripts with `#!/path/to/interpreter` are now properly executed by extracting the interpreter and re-dispatching. Supports optional interpreter argument, recursion depth limit (4), and DOS line endings. `/sbin/init` shell scripts now execute correctly.
 
 
 ## Current Status

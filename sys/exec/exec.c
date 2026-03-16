@@ -16,6 +16,7 @@
 #include <kern/console.h>
 #include <exec/formats/elf.h>
 #include <exec/formats/elks_aout.h>
+#include <exec/formats/script.h>
 struct thr_param;
 #include <sys/syscall_impl.h>
 #include <sys/kern_syscalls.h>
@@ -27,6 +28,7 @@ static struct exec_binary_handler *exec_handlers = NULL;
 
 void exec_init(void) {
     elks_init_handler();
+    script_init_handler();
 }
 
 void exec_register_handler(struct exec_binary_handler *handler) {
