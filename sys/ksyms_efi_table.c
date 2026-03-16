@@ -900,6 +900,7 @@ extern void resource_dump(void);
 extern void resource_find(void);
 extern void resource_init(void);
 extern void resource_root(void);
+extern void rmdir_fs(void);
 extern void rtc_init(void);
 extern void rtc_read_time(void);
 extern void run_kernel_tests(void);
@@ -2674,6 +2675,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&symlink_fs, "symlink_fs" },
     { (uint32_t)(uintptr_t)&link_fs, "link_fs" },
     { (uint32_t)(uintptr_t)&unlink_fs, "unlink_fs" },
+    { (uint32_t)(uintptr_t)&rmdir_fs, "rmdir_fs" },
     { (uint32_t)(uintptr_t)&mknod_fs, "mknod_fs" },
     { (uint32_t)(uintptr_t)&mmap_fs, "mmap_fs" },
     { (uint32_t)(uintptr_t)&poll_fs, "poll_fs" },
@@ -3115,4 +3117,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1552;
+int ksym_count = 1553;

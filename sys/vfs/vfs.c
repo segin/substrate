@@ -586,6 +586,13 @@ int unlink_fs(fs_node_t *node, const char *name) {
     return -1;
 }
 
+int rmdir_fs(fs_node_t *node, const char *name) {
+    if (node && node->rmdir) {
+        return node->rmdir(node, name);
+    }
+    return -1;
+}
+
 static int vfs_resolve_parent_path(const char *path, fs_node_t **parent_out,
                                    char *name_out, size_t name_out_size) {
     fs_node_t *root;

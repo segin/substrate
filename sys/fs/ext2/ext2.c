@@ -48,6 +48,8 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs);
 static int ext2_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t dev);
 static int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission);
 static int ext2_unlink(fs_node_t *dir, const char *name);
+static int ext2_rmdir(fs_node_t *dir, const char *name);
+static int ext2_dir_is_empty(fs_node_t *node);
 static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint8_t file_type);
 static int ext2_remove_entry(fs_node_t *dir, const char *name);
 static int ext2_flush_super(ext2_fs_t *fs);
@@ -594,6 +596,7 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
         node->mkdir = ext2_mkdir;
         node->mknod = ext2_mknod;
         node->unlink = ext2_unlink;
+        node->rmdir = ext2_rmdir;
     } else if (type == EXT2_S_IFREG) {
         node->flags = FS_FILE;
         node->read = ext2_file_read;
@@ -932,6 +935,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     ext2_root.mkdir = ext2_mkdir;
     ext2_root.mknod = ext2_mknod;
     ext2_root.unlink = ext2_unlink;
+    ext2_root.rmdir = ext2_rmdir;
     ext2_root.open = ext2_node_open;
     ext2_root.close = ext2_node_close;
     
@@ -1732,6 +1736,69 @@ static int ext2_unlink(fs_node_t *dir, const char *name) {
             return -EIO;
         }
     }
+
+    return 0;
+}
+
+static int ext2_dir_is_empty(fs_node_t *node) {
+    uint64_t idx = 0;
+    struct dirent *de;
+
+    if (!node || (node->flags & 0x7) != FS_DIRECTORY) return 0;
+
+    while ((de = ext2_readdir(node, idx++)) != NULL) {
+        if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) {
+            continue;
+        }
+        return 0;
+    }
+    return 1;
+}
+
+static int ext2_rmdir(fs_node_t *dir, const char *name) {
+    fs_node_t *victim;
+    ext2_node_t *dir_ctx;
+    ext2_node_t *victim_ctx;
+    ext2_fs_t *fs;
+    int ret;
+
+    if (!dir || !name || !name[0]) return -EINVAL;
+    if ((dir->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
+    if (!strcmp(name, ".") || !strcmp(name, "..")) return -EINVAL;
+
+    victim = ext2_finddir(dir, (char *)name);
+    if (!victim) return -ENOENT;
+    if ((victim->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
+    if (!ext2_dir_is_empty(victim)) return -ENOTEMPTY;
+
+    dir_ctx = (ext2_node_t *)(uintptr_t)dir->impl;
+    victim_ctx = (ext2_node_t *)(uintptr_t)victim->impl;
+    fs = victim_ctx->fs;
+
+    ret = ext2_remove_entry(dir, name);
+    if (ret != 0) return -EIO;
+
+    if (dir_ctx->inode.i_links_count > 0) {
+        dir_ctx->inode.i_links_count--;
+    }
+
+    extern int64_t get_time(void);
+    dir_ctx->inode.i_mtime = (uint32_t)get_time();
+    dir_ctx->inode.i_ctime = dir_ctx->inode.i_mtime;
+    if (ext2_write_inode(fs, dir_ctx->inode_num, &dir_ctx->inode) != 0) {
+        return -EIO;
+    }
+
+    victim_ctx->inode.i_links_count = 0;
+    victim_ctx->inode.i_dtime = (uint32_t)get_time();
+    ret = ext2_free_inode_blocks(fs, &victim_ctx->inode);
+    if (ret != 0) return ret;
+    if (ext2_write_inode(fs, victim_ctx->inode_num, &victim_ctx->inode) != 0) {
+        return -EIO;
+    }
+    ext2_free_inode(fs, victim_ctx->inode_num, 1);
+    memset(&victim_ctx->inode, 0, sizeof(victim_ctx->inode));
+    victim->length = 0;
 
     return 0;
 }

@@ -29,8 +29,10 @@ static int minix_readlink(fs_node_t *node, char *buf, size_t size);
 static int minix_symlink(fs_node_t *node, const char *name, const char *target);
 static int minix_link(fs_node_t *dir, fs_node_t *node, const char *name);
 static int minix_unlink(fs_node_t *dir, const char *name);
+static int minix_rmdir(fs_node_t *dir, const char *name);
 static int minix_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t dev);
 static int minix_unmount(fs_node_t *root);
+static int minix_dir_is_empty(fs_node_t *node);
 
 /* Inode reading helper */
 static int minix_read_inode(minix_fs_t *fs, uint32_t inode_num, fs_node_t *node);
@@ -246,6 +248,7 @@ static int minix_read_inode(minix_fs_t *fs, uint32_t inode_num, fs_node_t *node)
          node->symlink = minix_symlink;
          node->link = minix_link;
          node->unlink = minix_unlink;
+            node->rmdir = minix_rmdir;
          node->mknod = minix_mknod;
     }
 
@@ -938,12 +941,6 @@ static int minix_unlink(fs_node_t *dir, const char *name) {
                 return -1;
             }
 
-            // Check if directory
-            if (target.flags & FS_DIRECTORY) {
-                 kfree(target.ptr, sizeof(struct minix_inode_wrapper));
-                 return -1;
-            }
-
             // Remove directory entry
             entry.inode = 0;
             memset(entry.name, 0, 30);
@@ -992,6 +989,60 @@ static int minix_unlink(fs_node_t *dir, const char *name) {
     }
 
     return -1;
+}
+
+static int minix_dir_is_empty(fs_node_t *node) {
+    uint64_t idx = 0;
+    struct dirent *de;
+
+    if (!node || !(node->flags & FS_DIRECTORY)) return 0;
+
+    while ((de = minix_readdir(node, idx++)) != NULL) {
+        if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) {
+            continue;
+        }
+        return 0;
+    }
+
+    return 1;
+}
+
+static int minix_rmdir(fs_node_t *dir, const char *name) {
+    minix_fs_t *fs;
+    fs_node_t *target;
+    struct minix_inode_v1 *dir_inode;
+    int ret;
+
+    if (!dir || !name || !name[0]) return -1;
+    if (!(dir->flags & FS_DIRECTORY)) return -1;
+    if (!strcmp(name, ".") || !strcmp(name, "..")) return -1;
+
+    target = minix_finddir(dir, (char *)name);
+    if (!target) return -1;
+    if (!(target->flags & FS_DIRECTORY)) {
+        if (target->ptr) kfree(target->ptr, sizeof(struct minix_inode_wrapper));
+        return -1;
+    }
+    if (!minix_dir_is_empty(target)) {
+        if (target->ptr) kfree(target->ptr, sizeof(struct minix_inode_wrapper));
+        return -1;
+    }
+
+    fs = (minix_fs_t *)(uintptr_t)dir->impl;
+    ret = minix_unlink(dir, name);
+    if (ret != 0) {
+        if (target->ptr) kfree(target->ptr, sizeof(struct minix_inode_wrapper));
+        return ret;
+    }
+
+    dir_inode = (struct minix_inode_v1 *)dir->ptr;
+    if (dir_inode && dir_inode->i_nlinks > 0) {
+        dir_inode->i_nlinks--;
+        minix_write_inode(fs, dir);
+    }
+
+    if (target->ptr) kfree(target->ptr, sizeof(struct minix_inode_wrapper));
+    return 0;
 }
 
 static int minix_write_inode(minix_fs_t *fs, fs_node_t *node) {

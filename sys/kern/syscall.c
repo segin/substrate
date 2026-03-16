@@ -896,7 +896,7 @@ int kern_rmdir(const char *path) {
     if (!target) return -ENOENT;
     if ((target->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
 
-    return unlink_fs(parent, file);
+    return rmdir_fs(parent, file);
 }
 int sys_getuid(void) { return current_process->uid; }
 int sys_getgid(void) { return current_process->gid; }
@@ -1179,6 +1179,10 @@ int kern_unlink(const char *path) {
     
     if (!parent) return -ENOENT;
     if (!file[0]) return -EINVAL;
+
+    fs_node_t *target = parent->finddir ? parent->finddir(parent, file) : NULL;
+    if (!target) return -ENOENT;
+    if ((target->flags & 0x7) == FS_DIRECTORY) return -EISDIR;
     
     return unlink_fs(parent, file);
 }
