@@ -16,8 +16,15 @@ extern char current_thread[];
 extern char devfs_root_node_ptr[];
 extern char device_pager_ops[];
 extern char early_exception_num[];
+extern char efi_saved_desc_size[];
+extern char efi_saved_desc_version[];
+extern char efi_saved_mmap[];
+extern char efi_saved_mmap_size[];
+extern char efi_saved_runtime_services[];
 extern char fb[];
 extern char fb_active[];
+extern char fb_device_count[];
+extern char fb_devices[];
 extern char font_8x16[];
 extern char font_8x8[];
 extern char fs_root[];
@@ -251,7 +258,14 @@ extern void early_isr8(void);
 extern void early_isr9(void);
 extern void early_isr_common(void);
 extern void early_uart_print(void);
+extern void efi_get_time(void);
+extern void efi_get_variable(void);
 extern void efi_main(void);
+extern void efi_reset_system(void);
+extern void efi_runtime_available(void);
+extern void efi_runtime_init(void);
+extern void efi_set_time(void);
+extern void efi_set_variable(void);
 extern void elf_check_file(void);
 extern void elf_execve(void);
 extern void elf_load(void);
@@ -301,8 +315,10 @@ extern void fat_readdir(void);
 extern void fb_clear(void);
 extern void fb_console_init(void);
 extern void fb_init(void);
+extern void fb_parse_vga_mode(void);
 extern void fb_putc(void);
 extern void fb_putpixel(void);
+extern void fb_register_device(void);
 extern void fb_write(void);
 extern void fd_close_all(void);
 extern void fdc_chs_to_lba(void);
@@ -2289,6 +2305,13 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&copyout, "copyout" },
     { (uint32_t)(uintptr_t)&copyin, "copyin" },
     { (uint32_t)(uintptr_t)&copyinstr, "copyinstr" },
+    { (uint32_t)(uintptr_t)&efi_runtime_init, "efi_runtime_init" },
+    { (uint32_t)(uintptr_t)&efi_runtime_available, "efi_runtime_available" },
+    { (uint32_t)(uintptr_t)&efi_get_time, "efi_get_time" },
+    { (uint32_t)(uintptr_t)&efi_set_time, "efi_set_time" },
+    { (uint32_t)(uintptr_t)&efi_reset_system, "efi_reset_system" },
+    { (uint32_t)(uintptr_t)&efi_get_variable, "efi_get_variable" },
+    { (uint32_t)(uintptr_t)&efi_set_variable, "efi_set_variable" },
     { (uint32_t)(uintptr_t)&geom_init, "geom_init" },
     { (uint32_t)(uintptr_t)&geom_register_class, "geom_register_class" },
     { (uint32_t)(uintptr_t)&geom_read_sector, "geom_read_sector" },
@@ -2379,6 +2402,8 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&linear_fb_putpixel, "linear_fb_putpixel" },
     { (uint32_t)(uintptr_t)&fb_putpixel, "fb_putpixel" },
     { (uint32_t)(uintptr_t)&fb_clear, "fb_clear" },
+    { (uint32_t)(uintptr_t)&fb_parse_vga_mode, "fb_parse_vga_mode" },
+    { (uint32_t)(uintptr_t)&fb_register_device, "fb_register_device" },
     { (uint32_t)(uintptr_t)&video_set_viewport, "video_set_viewport" },
     { (uint32_t)(uintptr_t)&video_register_driver, "video_register_driver" },
     { (uint32_t)(uintptr_t)&fb_init, "fb_init" },
@@ -2994,6 +3019,11 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&sigprop, "sigprop" },
     { (uint32_t)(uintptr_t)&font_8x16, "font_8x16" },
     { (uint32_t)(uintptr_t)&font_8x8, "font_8x8" },
+    { (uint32_t)(uintptr_t)&efi_saved_runtime_services, "efi_saved_runtime_services" },
+    { (uint32_t)(uintptr_t)&efi_saved_mmap, "efi_saved_mmap" },
+    { (uint32_t)(uintptr_t)&efi_saved_mmap_size, "efi_saved_mmap_size" },
+    { (uint32_t)(uintptr_t)&efi_saved_desc_size, "efi_saved_desc_size" },
+    { (uint32_t)(uintptr_t)&efi_saved_desc_version, "efi_saved_desc_version" },
     { (uint32_t)(uintptr_t)&sig_trampoline_code, "sig_trampoline_code" },
     { (uint32_t)(uintptr_t)&sig_trampoline_size, "sig_trampoline_size" },
     { (uint32_t)(uintptr_t)&kernel_hostname, "kernel_hostname" },
@@ -3059,6 +3089,8 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&current_thread, "current_thread" },
     { (uint32_t)(uintptr_t)&fb, "fb" },
     { (uint32_t)(uintptr_t)&fb_active, "fb_active" },
+    { (uint32_t)(uintptr_t)&fb_devices, "fb_devices" },
+    { (uint32_t)(uintptr_t)&fb_device_count, "fb_device_count" },
     { (uint32_t)(uintptr_t)&hw_text_active, "hw_text_active" },
     { (uint32_t)(uintptr_t)&kbd_shift, "kbd_shift" },
     { (uint32_t)(uintptr_t)&kbd_ctrl, "kbd_ctrl" },
@@ -3081,4 +3113,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1535;
+int ksym_count = 1551;

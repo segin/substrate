@@ -323,12 +323,12 @@ static void cga_putpixel(int x, int y, uint32_t color) {
     if (x < 0 || x >= (int)fb.width || y < 0 || y >= (int)fb.height) return;
     
     /* 2-way Interleave */
-    /* Even Lines: Base */
-    /* Odd Lines: Base + 0x2000 */
-    int bank_shift = (y & 1) ? 13 : 0; /* 0x2000 = 1<<13 */
+    /* Even Lines: Base + 0x0000 */
+    /* Odd Lines:  Base + 0x2000 */
+    uintptr_t bank_offset = (y & 1) ? 0x2000 : 0;
     uintptr_t offset = (y >> 1) * fb.pitch + (x / 4);
     
-    volatile uint8_t *mem = (volatile uint8_t *)((uintptr_t)fb.addr + (1 << bank_shift) + offset);
+    volatile uint8_t *mem = (volatile uint8_t *)((uintptr_t)fb.addr + bank_offset + offset);
     
     /* 2 bits per pixel */
     int shift = 6 - ((x % 4) * 2);

@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <kern/console.h>
+#include <sys/vt.h>
 #include "fb.h"
 #include "fb_console.h"
 #include "font.h"
@@ -77,6 +78,15 @@ static console_backend_t fb_console_backend = {
 void fb_console_init(void) {
     fb_console_backend.clear = fb_console_clear;
     console_register(&fb_console_backend);
+
+    /* Adjust VT geometry to match framebuffer character dimensions */
+    if (fb_active && fb.width > 0 && fb.height > 0) {
+        int cols = (int)(fb.width / FB_FONT_WIDTH);
+        int rows = (int)(fb.height / FB_FONT_HEIGHT);
+        if (cols < 1) cols = 1;
+        if (rows < 2) rows = 2;  /* VT requires at least 2 rows */
+        vt_set_geometry(cols, rows);
+    }
 }
 
 /* ==================== Character Rendering ==================== */
