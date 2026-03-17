@@ -475,6 +475,7 @@ void test_vm_phys(void) {
     test_mark_used_single_page_reservation();
     test_free_used_invariant();
     test_free_list_integrity();
+    test_contiguous_below_basic();
     test_contiguous_below_success();
     test_contiguous_below_limit();
     test_contiguous_below_zero();
@@ -483,4 +484,16 @@ void test_vm_phys(void) {
     char buf[64];
     sprintf(buf, "=== vm_phys tests: %d passed, %d failed ===\n", passed, failed);
     kprint(buf);
+}
+
+/* Test: Basic contiguous below allocation logic */
+static void test_contiguous_below_basic(void) {
+    uintptr_t limit = 0x80000;
+    vm_page_t *page = vm_phys_alloc_contiguous_below(4, limit);
+    TEST_ASSERT(page != NULL, "contig_below_basic: returned NULL");
+    TEST_ASSERT(page->phys_addr < limit, "contig_below_basic: above limit");
+    TEST_ASSERT((page->phys_addr & 0x3FFF) == 0, "contig_below_basic: not 16KB aligned");
+
+    vm_phys_free_contiguous(page, 4);
+    TEST_PASS("contiguous_below_basic");
 }
