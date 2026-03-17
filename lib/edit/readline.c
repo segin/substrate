@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <sys/ioctl.h>
+#include <sys/time.h>
 #include <sys/select.h>
 #include <dirent.h>
 #include <sys/stat.h>
