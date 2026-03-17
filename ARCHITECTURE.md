@@ -87,6 +87,11 @@ Major kernel layers:
 - `sys/drivers/`: device drivers
 - `sys/exec/`: executable loading and personality execution paths
 
+VM-backed file cache integration:
+- vnode-backed paging is implemented through `sys/vm/vm_pager.c` with explicit batch interfaces (`vnode_pager_getpages()` / `vnode_pager_putpages()`).
+- file-cache backing uses `vm_page_t` pages keyed by `(fs_node, file_page_index)` rather than `kmalloc` byte buffers.
+- `MAP_SHARED` mappings reuse cached file-backed VM objects for the same `(fs_node, page offset)` key so mmap-visible pages and pager-managed file cache share backing state.
+
 Kernel worker model:
 - `swapper` (PID 0) remains the idle/root kernel context.
 - `swapper` owns one CPU-bound idle thread per online CPU.
