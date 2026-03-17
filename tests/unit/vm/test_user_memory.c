@@ -41,3 +41,39 @@ bool test_munmap_logic(void) {
     
     return true;
 }
+
+#include <sys/proc.h>
+extern void *sys_brk(void *addr);
+
+bool test_sys_brk_logic(void) {
+    process_t dummy_proc = {0};
+    dummy_proc.brk_start = 0x10000;
+    dummy_proc.brk = 0; // will be initialized to brk_start by sys_brk lazily
+    vm_map_t dummy_map;
+    vm_map_init(&dummy_map, NULL, 0x1000, 0x10000000);
+    dummy_proc.vm_map = &dummy_map;
+
+    current_process = &dummy_proc;
+
+    bool passed = true;
+
+    // Test 1: Query uninitialized brk
+    void *res1 = sys_brk(NULL);
+    if (res1 != (void*)0x10000 || dummy_proc.brk != 0x10000) passed = false;
+
+    // Test 2: Expand brk
+    void *res2 = sys_brk((void*)0x12000);
+    if (res2 != (void*)0x12000 || dummy_proc.brk != 0x12000) passed = false;
+
+    // Test 3: Shrink brk
+    void *res3 = sys_brk((void*)0x11000);
+    if (res3 != (void*)0x11000 || dummy_proc.brk != 0x11000) passed = false;
+
+    // Test 4: Below start
+    void *res4 = sys_brk((void*)0x0F000);
+    if (res4 != (void*)0x11000 || dummy_proc.brk != 0x11000) passed = false;
+
+    current_process = NULL;
+
+    return passed;
+}
