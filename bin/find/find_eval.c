@@ -398,19 +398,27 @@ static int check_execdir_path_safety(void)
 {
 	char *path_env = getenv("PATH");
 	if (!path_env) return 1;
-	char *dup = strdup(path_env);
-	char *tok = strtok(dup, ":");
-	while (tok) {
-		if (strcmp(tok, ".") == 0 || strcmp(tok, "") == 0) {
+
+	const char *p = path_env;
+	while (1) {
+		const char *end = strchr(p, ':');
+		size_t len = end ? (size_t)(end - p) : strlen(p);
+
+		if (len == 0 || (len == 1 && p[0] == '.') || (len >= 2 && p[0] == '.' && p[1] == '/')) {
 			fprintf(stderr, "find: The current directory is included "
 			        "in the PATH environment variable, which is "
 			        "insecure in combination with the -execdir action.\n");
-			free(dup);
+			return 0;
+		} else if (len > 0 && p[0] != '/') {
+			fprintf(stderr, "find: A relative path is included "
+			        "in the PATH environment variable, which is "
+			        "insecure in combination with the -execdir action.\n");
 			return 0;
 		}
-		tok = strtok(NULL, ":");
+
+		if (!end) break;
+		p = end + 1;
 	}
-	free(dup);
 	return 1;
 }
 
