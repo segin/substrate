@@ -147,7 +147,7 @@ char *ast_to_string(ast_node_t *node) {
             char *s = ast_to_string(pipe->commands[i]);
             size_t new_len = strlen(res) + strlen(s) + 4;
             char *next = malloc(new_len);
-            sprintf(next, "%s%s%s", res, (i == 0 ? "" : " | "), s);
+            snprintf(next, new_len, "%s%s%s", res, (i == 0 ? "" : " | "), s);
             free(res);
             free(s);
             res = next;
@@ -163,8 +163,9 @@ char *ast_to_string(ast_node_t *node) {
         else if (bin->op == OP_OR) op = " || ";
         else if (bin->op == OP_BACKGROUND) op = " & ";
         
-        char *res = malloc(strlen(s1) + strlen(s2) + strlen(op) + 1);
-        sprintf(res, "%s%s%s", s1, op, s2);
+        size_t len = strlen(s1) + strlen(s2) + strlen(op) + 1;
+        char *res = malloc(len);
+        snprintf(res, len, "%s%s%s", s1, op, s2);
         free(s1);
         free(s2);
         return res;

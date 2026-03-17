@@ -426,11 +426,13 @@ static void expand_glob_recursive(char ***list, size_t *cap, size_t *len, const 
         if (!prefix || !*prefix) {
             new_prefix = strdup(unquoted_comp);
         } else if (strcmp(prefix, "/") == 0) {
-            new_prefix = malloc(strlen(unquoted_comp) + 2);
-            sprintf(new_prefix, "/%s", unquoted_comp);
+            size_t len = strlen(unquoted_comp) + 2;
+            new_prefix = malloc(len);
+            snprintf(new_prefix, len, "/%s", unquoted_comp);
         } else {
-            new_prefix = malloc(strlen(prefix) + strlen(unquoted_comp) + 2);
-            sprintf(new_prefix, "%s/%s", prefix, unquoted_comp);
+            size_t len = strlen(prefix) + strlen(unquoted_comp) + 2;
+            new_prefix = malloc(len);
+            snprintf(new_prefix, len, "%s/%s", prefix, unquoted_comp);
         }
         expand_glob_recursive(list, cap, len, new_prefix, remainder);
         free(new_prefix);
@@ -454,11 +456,13 @@ static void expand_glob_recursive(char ***list, size_t *cap, size_t *len, const 
             if (!prefix || !*prefix) {
                 new_prefix = strdup(ent->d_name);
             } else if (strcmp(prefix, "/") == 0) {
-                new_prefix = malloc(strlen(ent->d_name) + 2);
-                sprintf(new_prefix, "/%s", ent->d_name);
+                size_t len = strlen(ent->d_name) + 2;
+                new_prefix = malloc(len);
+                snprintf(new_prefix, len, "/%s", ent->d_name);
             } else {
-                new_prefix = malloc(strlen(prefix) + strlen(ent->d_name) + 2);
-                sprintf(new_prefix, "%s/%s", prefix, ent->d_name);
+                size_t len = strlen(prefix) + strlen(ent->d_name) + 2;
+                new_prefix = malloc(len);
+                snprintf(new_prefix, len, "%s/%s", prefix, ent->d_name);
             }
             expand_glob_recursive(list, cap, len, new_prefix, remainder);
             free(new_prefix);
