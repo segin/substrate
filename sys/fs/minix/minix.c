@@ -38,6 +38,7 @@ static int minix_dir_is_empty(fs_node_t *node);
 static int minix_read_inode(minix_fs_t *fs, uint32_t inode_num, fs_node_t *node);
 static int minix_write_inode(minix_fs_t *fs, fs_node_t *node);
 static int minix_write_inode_raw(minix_fs_t *fs, uint32_t inode_num, struct minix_inode_v1 *inode);
+static void minix_free_block(minix_fs_t *fs, uint32_t zone);
 
 /* Filesystem definition */
 static filesystem_t minix_fs = {
@@ -154,13 +155,241 @@ static uint32_t minix_get_zone(minix_fs_t *fs, fs_node_t *node, uint32_t zone_in
     }
 }
 
+static uint32_t minix_total_zones(minix_fs_t *fs) {
+    if (fs->sb.s_magic == MINIX_V1_Magic || fs->sb.s_magic == MINIX_V1_Magic_14) {
+        return fs->sb.s_nzones;
+    }
+    return fs->sb.s_zones;
+}
+
+static int minix_zero_zone(minix_fs_t *fs, uint32_t zone) {
+    uint8_t zero_buf[MINIX_BLOCK_SIZE];
+    memset(zero_buf, 0, sizeof(zero_buf));
+
+    if (write_fs(fs->block_device, zone * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, zero_buf) != MINIX_BLOCK_SIZE) {
+        return -1;
+    }
+    return 0;
+}
+
 static uint32_t minix_alloc_zone(minix_fs_t *fs) {
-    // Mock: simple counter allocator
-    if (fs->last_zone_alloc == 0) fs->last_zone_alloc = fs->sb.s_firstdatazone;
-    fs->last_zone_alloc++;
-    uint32_t max_zones = (fs->sb.s_magic == MINIX_V1_Magic || fs->sb.s_magic == MINIX_V1_Magic_14) ? fs->sb.s_nzones : fs->sb.s_zones;
-    if (fs->last_zone_alloc >= max_zones) return 0;
-    return fs->last_zone_alloc;
+    uint32_t first_data_zone = fs->sb.s_firstdatazone;
+    uint32_t max_zones = minix_total_zones(fs);
+    uint32_t zmap_start_block = 2 + fs->sb.s_imap_blocks;
+
+    if (max_zones <= first_data_zone) return 0;
+
+    uint32_t range = max_zones - first_data_zone;
+    uint32_t start_zone = fs->last_zone_alloc;
+    if (start_zone < first_data_zone || start_zone >= max_zones) {
+        start_zone = first_data_zone;
+    }
+
+    for (uint32_t attempt = 0; attempt < range; attempt++) {
+        uint32_t zone = first_data_zone + ((start_zone - first_data_zone + attempt) % range);
+        uint32_t block_index = zone / (MINIX_BLOCK_SIZE * 8);
+        uint32_t bit_offset = zone % (MINIX_BLOCK_SIZE * 8);
+
+        if (block_index >= fs->sb.s_zmap_blocks) continue;
+
+        uint8_t buf[MINIX_BLOCK_SIZE];
+        uint32_t zmap_block = zmap_start_block + block_index;
+
+        if (read_fs(fs->block_device, zmap_block * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, buf) != MINIX_BLOCK_SIZE) {
+            continue;
+        }
+
+        uint8_t mask = (uint8_t)(1u << (bit_offset % 8));
+        uint32_t byte_index = bit_offset / 8;
+
+        if (buf[byte_index] & mask) {
+            continue;
+        }
+
+        buf[byte_index] |= mask;
+        if (write_fs(fs->block_device, zmap_block * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, buf) != MINIX_BLOCK_SIZE) {
+            continue;
+        }
+
+        if (minix_zero_zone(fs, zone) != 0) {
+            buf[byte_index] &= (uint8_t)~mask;
+            write_fs(fs->block_device, zmap_block * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, buf);
+            continue;
+        }
+
+        fs->last_zone_alloc = zone + 1;
+        if (fs->last_zone_alloc >= max_zones) {
+            fs->last_zone_alloc = first_data_zone;
+        }
+        return zone;
+    }
+
+    return 0;
+}
+
+static int minix_set_zone_v1(minix_fs_t *fs, struct minix_inode_v1 *inode, uint32_t zone_index, uint32_t zone) {
+    uint32_t entries_per_block = MINIX_BLOCK_SIZE / sizeof(uint16_t);
+
+    if (zone > 0xFFFFU) return -1;
+
+    if (zone_index < 7) {
+        inode->i_zone[zone_index] = (uint16_t)zone;
+        return 0;
+    }
+
+    uint32_t indirect_index = zone_index - 7;
+    if (indirect_index < entries_per_block) {
+        if (inode->i_zone[7] == 0) {
+            uint32_t ind_zone = minix_alloc_zone(fs);
+            if (ind_zone == 0 || ind_zone > 0xFFFFU) return -1;
+            inode->i_zone[7] = (uint16_t)ind_zone;
+        }
+
+        uint16_t buf[MINIX_BLOCK_SIZE / 2];
+        if (read_fs(fs->block_device, inode->i_zone[7] * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
+            return -1;
+        }
+
+        buf[indirect_index] = (uint16_t)zone;
+        if (write_fs(fs->block_device, inode->i_zone[7] * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
+            return -1;
+        }
+        return 0;
+    }
+
+    uint32_t double_indirect_index = indirect_index - entries_per_block;
+    if (double_indirect_index < entries_per_block * entries_per_block) {
+        if (inode->i_zone[8] == 0) {
+            uint32_t dbl_zone = minix_alloc_zone(fs);
+            if (dbl_zone == 0 || dbl_zone > 0xFFFFU) return -1;
+            inode->i_zone[8] = (uint16_t)dbl_zone;
+        }
+
+        uint16_t l1[MINIX_BLOCK_SIZE / 2];
+        if (read_fs(fs->block_device, inode->i_zone[8] * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)l1) != MINIX_BLOCK_SIZE) {
+            return -1;
+        }
+
+        uint32_t l1_index = double_indirect_index / entries_per_block;
+        uint32_t l2_index = double_indirect_index % entries_per_block;
+
+        if (l1[l1_index] == 0) {
+            uint32_t l2_zone = minix_alloc_zone(fs);
+            if (l2_zone == 0 || l2_zone > 0xFFFFU) return -1;
+            l1[l1_index] = (uint16_t)l2_zone;
+            if (write_fs(fs->block_device, inode->i_zone[8] * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)l1) != MINIX_BLOCK_SIZE) {
+                minix_free_block(fs, l2_zone);
+                return -1;
+            }
+        }
+
+        uint16_t l2[MINIX_BLOCK_SIZE / 2];
+        if (read_fs(fs->block_device, l1[l1_index] * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)l2) != MINIX_BLOCK_SIZE) {
+            return -1;
+        }
+        l2[l2_index] = (uint16_t)zone;
+        if (write_fs(fs->block_device, l1[l1_index] * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)l2) != MINIX_BLOCK_SIZE) {
+            return -1;
+        }
+        return 0;
+    }
+
+    return -1;
+}
+
+static int minix_set_zone_v2(minix_fs_t *fs, struct minix_inode_v2 *inode, uint32_t zone_index, uint32_t zone) {
+    uint32_t entries_per_block = MINIX_BLOCK_SIZE / sizeof(uint32_t);
+
+    if (zone_index < 7) {
+        inode->i_zone[zone_index] = zone;
+        return 0;
+    }
+
+    uint32_t indirect_index = zone_index - 7;
+    if (indirect_index < entries_per_block) {
+        if (inode->i_zone[7] == 0) {
+            uint32_t ind_zone = minix_alloc_zone(fs);
+            if (ind_zone == 0) return -1;
+            inode->i_zone[7] = ind_zone;
+        }
+
+        uint32_t buf[MINIX_BLOCK_SIZE / 4];
+        if (read_fs(fs->block_device, inode->i_zone[7] * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
+            return -1;
+        }
+
+        buf[indirect_index] = zone;
+        if (write_fs(fs->block_device, inode->i_zone[7] * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
+            return -1;
+        }
+        return 0;
+    }
+
+    uint32_t double_indirect_index = indirect_index - entries_per_block;
+    if (double_indirect_index < entries_per_block * entries_per_block) {
+        if (inode->i_zone[8] == 0) {
+            uint32_t dbl_zone = minix_alloc_zone(fs);
+            if (dbl_zone == 0) return -1;
+            inode->i_zone[8] = dbl_zone;
+        }
+
+        uint32_t l1[MINIX_BLOCK_SIZE / 4];
+        if (read_fs(fs->block_device, inode->i_zone[8] * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)l1) != MINIX_BLOCK_SIZE) {
+            return -1;
+        }
+
+        uint32_t l1_index = double_indirect_index / entries_per_block;
+        uint32_t l2_index = double_indirect_index % entries_per_block;
+
+        if (l1[l1_index] == 0) {
+            uint32_t l2_zone = minix_alloc_zone(fs);
+            if (l2_zone == 0) return -1;
+            l1[l1_index] = l2_zone;
+            if (write_fs(fs->block_device, inode->i_zone[8] * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)l1) != MINIX_BLOCK_SIZE) {
+                minix_free_block(fs, l2_zone);
+                return -1;
+            }
+        }
+
+        uint32_t l2[MINIX_BLOCK_SIZE / 4];
+        if (read_fs(fs->block_device, l1[l1_index] * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)l2) != MINIX_BLOCK_SIZE) {
+            return -1;
+        }
+        l2[l2_index] = zone;
+        if (write_fs(fs->block_device, l1[l1_index] * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)l2) != MINIX_BLOCK_SIZE) {
+            return -1;
+        }
+        return 0;
+    }
+
+    return -1;
+}
+
+static int minix_set_zone(minix_fs_t *fs, fs_node_t *node, uint32_t zone_index, uint32_t zone) {
+    if (!node || !node->ptr) return -1;
+    if (fs->sb.s_magic == MINIX_V2_Magic || fs->sb.s_magic == MINIX_V2_Magic_14) {
+        return minix_set_zone_v2(fs, (struct minix_inode_v2 *)node->ptr, zone_index, zone);
+    }
+    return minix_set_zone_v1(fs, (struct minix_inode_v1 *)node->ptr, zone_index, zone);
+}
+
+static int minix_ensure_zone(minix_fs_t *fs, fs_node_t *node, uint32_t zone_index, uint32_t *zone_out) {
+    uint32_t zone = minix_get_zone(fs, node, zone_index);
+    if (zone != 0) {
+        if (zone_out) *zone_out = zone;
+        return 0;
+    }
+
+    uint32_t new_zone = minix_alloc_zone(fs);
+    if (new_zone == 0) return -1;
+
+    if (minix_set_zone(fs, node, zone_index, new_zone) != 0) {
+        minix_free_block(fs, new_zone);
+        return -1;
+    }
+
+    if (zone_out) *zone_out = new_zone;
+    return 1;
 }
 
 
@@ -470,35 +699,36 @@ static size_t minix_read(fs_node_t *node, off_t offset, size_t size, uint8_t *bu
 
 static size_t minix_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     minix_fs_t *fs = (minix_fs_t *)(uintptr_t)node->impl;
-    
-    // Simple overwrite support (no allocation)
+
     size_t written = 0;
     uint32_t current_offset = (uint32_t)offset;
-    
+
     while (written < size) {
         uint32_t block_index = current_offset / MINIX_BLOCK_SIZE;
         uint32_t block_offset = current_offset % MINIX_BLOCK_SIZE;
-        uint32_t zone = minix_get_zone(fs, node, block_index);
-        
-        if (zone == 0) {
-            // Hole - Allocation not supported yet
-            break; 
+        uint32_t zone = 0;
+
+        int ensure_rc = minix_ensure_zone(fs, node, block_index, &zone);
+        if (ensure_rc < 0 || zone == 0) {
+            break;
         }
 
         uint32_t chunk = MINIX_BLOCK_SIZE - block_offset;
         if (chunk > size - written) chunk = size - written;
 
         uint8_t block_buf[MINIX_BLOCK_SIZE];
-        bool need_read = (block_offset != 0) || (chunk != MINIX_BLOCK_SIZE);
-        
+        bool need_read = ((block_offset != 0) || (chunk != MINIX_BLOCK_SIZE)) && (ensure_rc == 0);
+
         if (need_read) {
              if (read_fs(fs->block_device, zone * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, block_buf) != MINIX_BLOCK_SIZE) {
                  break;
              }
+        } else {
+            memset(block_buf, 0, sizeof(block_buf));
         }
-        
+
         memcpy(block_buf + block_offset, buffer + written, chunk);
-        
+
         if (write_fs(fs->block_device, zone * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, block_buf) != MINIX_BLOCK_SIZE) {
             break;
         }
@@ -510,6 +740,11 @@ static size_t minix_write(fs_node_t *node, off_t offset, size_t size, const uint
     // Update size if extended
     if (offset + (off_t)written > node->length) {
         node->length = offset + written;
+        if (fs->sb.s_magic == MINIX_V2_Magic || fs->sb.s_magic == MINIX_V2_Magic_14) {
+            ((struct minix_inode_v2 *)node->ptr)->i_size = (uint32_t)node->length;
+        } else {
+            ((struct minix_inode_v1 *)node->ptr)->i_size = (uint32_t)node->length;
+        }
         minix_write_inode(fs, node);
     }
     return written;
