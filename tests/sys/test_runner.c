@@ -40,6 +40,7 @@ extern void test_vnode_reclaim(void);
 extern void run_vclean_tests(void);
 extern void run_vnode_hold_tests(void);
 extern void test_vhold_vdrop(void);
+extern void test_vdrop(void);
 extern void test_vnode_init(void);
 extern void run_kobject_tests(void);
 void run_reboot_tests(void);
@@ -361,6 +362,10 @@ void run_kernel_tests(void) {
 
     if (all || strcmp(test_arg, "vhold_vdrop") == 0) {
         test_vhold_vdrop();
+    }
+
+    if (all || strcmp(test_arg, "vdrop") == 0) {
+        test_vdrop();
     }
 
     if (all || strcmp(test_arg, "vnode_init") == 0) {
