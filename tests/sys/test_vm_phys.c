@@ -452,6 +452,34 @@ static void test_vm_phys_early_init(void) {
     TEST_PASS("vm_phys_early_init");
 }
 
+/* Test: vm_phys_add_range correctly adds memory ranges to buddy system */
+static void test_vm_phys_add_range(void) {
+    static vm_page_t test_pages[16];
+
+    /* Setup a fresh environment for testing */
+    vm_phys_early_init(NULL, 0, test_pages, 16);
+    TEST_ASSERT(vm_phys_get_free() == 0, "add_range: initial free count not zero");
+
+    /* Test empty range (start >= end) */
+    vm_phys_add_range(PMM_BLOCK_SIZE * 4, PMM_BLOCK_SIZE * 4);
+    TEST_ASSERT(vm_phys_get_free() == 0, "add_range: empty range modified free count");
+
+    /* Test inverted range */
+    vm_phys_add_range(PMM_BLOCK_SIZE * 8, PMM_BLOCK_SIZE * 4);
+    TEST_ASSERT(vm_phys_get_free() == 0, "add_range: inverted range modified free count");
+
+    /* Test adding a valid range (4 pages, order 2) */
+    vm_phys_add_range(0, PMM_BLOCK_SIZE * 4);
+    TEST_ASSERT(vm_phys_get_free() == 4, "add_range: 4 pages free count incorrect");
+    TEST_ASSERT(vm_phys_get_order_free_count(2) == 1, "add_range: 4 pages order 2 count incorrect");
+
+    /* Test adding remaining range (12 pages) */
+    vm_phys_add_range(PMM_BLOCK_SIZE * 4, PMM_BLOCK_SIZE * 16);
+    TEST_ASSERT(vm_phys_get_free() == 16, "add_range: 16 total pages free count incorrect");
+
+    TEST_PASS("vm_phys_add_range");
+}
+
 /* Test entry point */
 void test_vm_phys(void) {
     kprint("=== Physical Memory Manager Integration Tests ===\n");
@@ -479,6 +507,7 @@ void test_vm_phys(void) {
     test_contiguous_below_limit();
     test_contiguous_below_zero();
     test_vm_phys_early_init();
+    test_vm_phys_add_range();
     
     char buf[64];
     sprintf(buf, "=== vm_phys tests: %d passed, %d failed ===\n", passed, failed);
