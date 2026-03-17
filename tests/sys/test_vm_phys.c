@@ -392,6 +392,40 @@ static void test_free_list_integrity(void) {
 }
 
 
+/* Test: Alloc page below success */
+static void test_alloc_page_below_success(void) {
+    uintptr_t limit = 0x20000; /* 128KB limit */
+    vm_page_t *page = vm_phys_alloc_page_below(limit);
+    TEST_ASSERT(page != NULL, "alloc_page_below_success: returned NULL");
+    TEST_ASSERT(page->phys_addr < limit, "alloc_page_below_success: above limit");
+
+    vm_phys_free_page(page);
+    TEST_PASS("alloc_page_below_success");
+}
+
+/* Test: Alloc page below limit */
+static void test_alloc_page_below_limit(void) {
+    uintptr_t limit = 0x1000; /* Extremely low limit */
+    /* drain order 0 temporarily */
+    vm_page_t *drained = NULL;
+    while (vm_phys_get_order_free_count(0) > 0) {
+        vm_page_t *page = vm_phys_alloc_page_below(limit);
+        if (!page) break;
+        page->next = drained;
+        drained = page;
+    }
+
+    vm_page_t *page = vm_phys_alloc_page_below(limit);
+    TEST_ASSERT(page == NULL, "alloc_page_below_limit: should return NULL");
+
+    while (drained) {
+        vm_page_t *next = drained->next;
+        vm_phys_free_page(drained);
+        drained = next;
+    }
+    TEST_PASS("alloc_page_below_limit");
+}
+
 /* Test: Contiguous below success */
 static void test_contiguous_below_success(void) {
     uintptr_t limit = 0x20000; /* 128KB limit */
@@ -475,6 +509,8 @@ void test_vm_phys(void) {
     test_mark_used_single_page_reservation();
     test_free_used_invariant();
     test_free_list_integrity();
+    test_alloc_page_below_success();
+    test_alloc_page_below_limit();
     test_contiguous_below_success();
     test_contiguous_below_limit();
     test_contiguous_below_zero();
