@@ -469,6 +469,11 @@ void run_kernel_tests(void) {
         run_vfs_cache_tests();
     }
 
+    if (all || strcmp(test_arg, "vnode_cache") == 0) {
+        extern void run_vnode_cache_tests(void);
+        run_vnode_cache_tests();
+    }
+
     if (all || strcmp(test_arg, "pipe_race") == 0) {
         test_pipe_race();
     }
