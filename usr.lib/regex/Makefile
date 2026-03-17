@@ -5,7 +5,7 @@ CXXFLAGS := $(CXXFLAGS) -I../../include -I../../sys/include
 LDFLAGS := $(USER_LDFLAGS)
 
 SRCS = src/compile.c src/exec.c src/util.c src/engine_posix.c src/engine_safe.c \
-       src/engine_pcre2_adapter.c
+       src/engine_pcre2_adapter.c src/posix_compat.c
 CPPSRCS = src/engine_re2_adapter.cpp
 
 OBJS = $(SRCS:.c=.o) $(CPPSRCS:.cpp=.o)
