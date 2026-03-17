@@ -101,6 +101,9 @@ extern bool test_vop_symlink_notsupp(void);
 extern bool test_vop_readlink_basic(void);
 extern bool test_vop_readlink_notlink(void);
 extern bool test_vop_readlink_notsupp(void);
+extern bool test_vnode_cache_insert_basic(void);
+extern bool test_vnode_cache_insert_no_mount(void);
+extern bool test_vnode_cache_insert_zero_ino(void);
 extern bool test_vnode_reclaim_basic(void);
 
 // FUSE Tests
@@ -253,6 +256,9 @@ test_case_t tests[] = {
     { "vfs_readlink_basic", test_vop_readlink_basic },
     { "vfs_readlink_notlink", test_vop_readlink_notlink },
     { "vfs_readlink_notsupp", test_vop_readlink_notsupp },
+    { "vnode_cache_insert_basic", test_vnode_cache_insert_basic },
+    { "vnode_cache_insert_no_mount", test_vnode_cache_insert_no_mount },
+    { "vnode_cache_insert_zero_ino", test_vnode_cache_insert_zero_ino },
     { "vnode_reclaim_basic", test_vnode_reclaim_basic },
     {"fuse_read", test_fuse_read},
     {"ansi_parsing", test_ansi_parsing},
