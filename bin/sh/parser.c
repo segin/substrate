@@ -142,15 +142,31 @@ char *ast_to_string(ast_node_t *node) {
     }
     if (node->type == NODE_PIPELINE) {
         ast_pipeline_t *pipe = (ast_pipeline_t *)node;
-        char *res = strdup("");
+        size_t cap = 128;
+        size_t len = 0;
+        char *res = malloc(cap);
+        res[0] = '\0';
+
         for (int i = 0; i < pipe->command_count; i++) {
             char *s = ast_to_string(pipe->commands[i]);
-            size_t new_len = strlen(res) + strlen(s) + 4;
-            char *next = malloc(new_len);
-            sprintf(next, "%s%s%s", res, (i == 0 ? "" : " | "), s);
-            free(res);
+            size_t s_len = strlen(s);
+            const char *sep = (i == 0 ? "" : " | ");
+            size_t sep_len = strlen(sep);
+
+            if (len + sep_len + s_len + 1 > cap) {
+                while (len + sep_len + s_len + 1 > cap) cap *= 2;
+                res = realloc(res, cap);
+            }
+
+            if (sep_len > 0) {
+                memcpy(res + len, sep, sep_len);
+                len += sep_len;
+            }
+            memcpy(res + len, s, s_len);
+            len += s_len;
+            res[len] = '\0';
+
             free(s);
-            res = next;
         }
         return res;
     }
