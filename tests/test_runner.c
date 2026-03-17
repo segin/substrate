@@ -19,6 +19,7 @@ extern bool test_vm_object_lifecycle(void);
 extern bool test_vm_object_page_mgmt(void);
 extern bool test_vm_page_queue_ops(void);
 extern bool test_vm_page_flags(void);
+extern bool test_vm_page_try_to_free(void);
 extern bool test_vm_fault_anonymous(void);
 extern bool test_vm_fault_protection_violation(void);
 extern bool test_mmap_logic(void);
@@ -185,6 +186,7 @@ test_case_t tests[] = {
     {"object_page", test_vm_object_page_mgmt},
     {"page_queues", test_vm_page_queue_ops},
     {"page_flags", test_vm_page_flags},
+    {"page_try_to_free", test_vm_page_try_to_free},
     {"fault_anon", test_vm_fault_anonymous},
     {"fault_prot", test_vm_fault_protection_violation},
     {"mmap_logic", test_mmap_logic},
