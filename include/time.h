@@ -38,6 +38,7 @@ time_t time(time_t *tloc);
 double difftime(time_t time1, time_t time0);
 time_t mktime(struct tm *timeptr);
 size_t strftime(char *__restrict s, size_t maxsize, const char *__restrict format, const struct tm *__restrict timeptr);
+char *strptime(const char *__restrict s, const char *__restrict format, struct tm *__restrict tm);
 int timespec_get(struct timespec *ts, int base);
 
 char *asctime(const struct tm *timeptr);

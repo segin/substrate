@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #define RAND_MAX 2147483647
+#define MB_CUR_MAX 4
 
 [[noreturn]] void exit(int status);
 [[noreturn]] void abort(void);
@@ -49,5 +50,8 @@ void srand(unsigned int seed);
 uint32_t arc4random(void);
 void arc4random_buf(void *buf, size_t n);
 uint32_t arc4random_uniform(uint32_t upper_bound);
+int mkstemp(char *tmpl);
+char *mkdtemp(char *tmpl);
+
 
 #endif

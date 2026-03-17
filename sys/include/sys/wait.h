@@ -45,6 +45,7 @@ typedef enum {
 
 pid_t wait(int *status);
 pid_t waitpid(pid_t pid, int *status, int options);
-// pid_t wait4(pid_t pid, int *status, int options, struct rusage *rusage); // Usually in sys/resource.h or explicit
+struct rusage;
+pid_t wait4(pid_t pid, int *status, int options, struct rusage *rusage);
 
 #endif

@@ -107,6 +107,8 @@ int rename(const char *oldpath, const char *newpath);
 FILE *tmpfile(void);
 char *tmpnam(char *s);
 int fcloseall(void);
+FILE *popen(const char *command, const char *type);
+int pclose(FILE *stream);
 
 void __stdio_init(void);
 

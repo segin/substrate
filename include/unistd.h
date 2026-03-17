@@ -65,6 +65,11 @@ int gethostname(char *name, size_t len);
 int sethostname(const char *name, size_t len);
 
 int chown(const char *pathname, uid_t owner, gid_t group);
+int fchmod(int fd, mode_t mode);
+int fchown(int fd, uid_t owner, gid_t group);
+char *getlogin(void);
+int getgroups(int size, gid_t list[]);
+int setgroups(int size, const gid_t *list);
 
 extern char *optarg;
 extern int optind, opterr, optopt;
@@ -73,3 +78,20 @@ int getopt(int argc, char * const argv[], const char *optstring);
 long syscall(long number, ...);
 
 #endif
+/* sysconf() constants */
+#define _SC_ARG_MAX      0
+#define _SC_CHILD_MAX    1
+#define _SC_CLK_TCK      2
+#define _SC_NGROUPS_MAX  3
+#define _SC_OPEN_MAX     4
+#define _SC_JOB_CONTROL  5
+#define _SC_SAVED_IDS    6
+#define _SC_VERSION      7
+#define _SC_PAGESIZE     8
+#define _SC_PAGE_SIZE    _SC_PAGESIZE
+#define _SC_NPROCESSORS_CONF 9
+#define _SC_NPROCESSORS_ONLN 10
+#define _SC_PHYS_PAGES   11
+
+long sysconf(int name);
+

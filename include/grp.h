@@ -12,5 +12,6 @@ struct group {
 
 struct group *getgrgid(gid_t gid);
 struct group *getgrnam(const char *name);
+int getgrouplist(const char *user, gid_t group, gid_t *groups, int *ngroups);
 
 #endif

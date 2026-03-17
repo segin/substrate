@@ -2,7 +2,7 @@ include Makefile.inc
 
 # Subdirectories to build
 # Order matters: lib is usually a dependency for bin/usr.bin
-SUBDIRS = lib sbin sys bin usr.lib usr.bin usr.man
+SUBDIRS = lib usr.lib sys sbin bin usr.bin usr.man
 
 .PHONY: all clean install efi multiboot freebsd zimage debug host_dist host_dist_install host_install $(SUBDIRS)
 
@@ -91,6 +91,8 @@ install:
 		echo ">>> Installing $$dir"; \
 		if [ -f "$$dir/Makefile" ]; then $(MAKE) -C $$dir install; fi; \
 	done
+
+dist: install
 
 debug: all
 	qemu-system-i386 -kernel sys/kernel.bin -nographic -serial file:serial.log

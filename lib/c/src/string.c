@@ -369,3 +369,29 @@ char *strerror(int errnum) {
     (void)errnum;
     return "Error";
 }
+int ffs(int i) {
+    if (i == 0) return 0;
+    int bit = 1;
+    while (!(i & 1)) { i >>= 1; bit++; }
+    return bit;
+}
+
+int ffsl(long i) {
+    if (i == 0) return 0;
+    int bit = 1;
+    while (!(i & 1)) { i >>= 1; bit++; }
+    return bit;
+}
+
+int ffsll(long long i) {
+    if (i == 0) return 0;
+    int bit = 1;
+    while (!(i & 1)) { i >>= 1; bit++; }
+    return bit;
+}
+
+void bzero(void *s, size_t n) { memset(s, 0, n); }
+void bcopy(const void *src, void *dst, size_t n) { memmove(dst, src, n); }
+int  bcmp(const void *s1, const void *s2, size_t n) { return memcmp(s1, s2, n); }
+char *index(const char *s, int c)  { return strchr(s, c); }
+char *rindex(const char *s, int c) { return strrchr(s, c); }
