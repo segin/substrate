@@ -534,6 +534,78 @@ char *getenv(const char *name) {
     return NULL;
 }
 
+int setenv(const char *name, const char *value, int overwrite) {
+    if (!name || !*name || strchr(name, '=')) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (!value) value = "";
+
+    size_t name_len = strlen(name);
+    size_t value_len = strlen(value);
+
+    size_t count = 0;
+    if (environ) {
+        while (environ[count]) count++;
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        if (strncmp(environ[i], name, name_len) == 0 && environ[i][name_len] == '=') {
+            if (!overwrite) return 0;
+
+            char *entry = malloc(name_len + 1 + value_len + 1);
+            if (!entry) {
+                errno = ENOMEM;
+                return -1;
+            }
+            memcpy(entry, name, name_len);
+            entry[name_len] = '=';
+            memcpy(entry + name_len + 1, value, value_len + 1);
+            environ[i] = entry;
+            return 0;
+        }
+    }
+
+    char **new_env = realloc(environ, (count + 2) * sizeof(char *));
+    if (!new_env) {
+        errno = ENOMEM;
+        return -1;
+    }
+    environ = new_env;
+
+    char *entry = malloc(name_len + 1 + value_len + 1);
+    if (!entry) {
+        errno = ENOMEM;
+        return -1;
+    }
+    memcpy(entry, name, name_len);
+    entry[name_len] = '=';
+    memcpy(entry + name_len + 1, value, value_len + 1);
+
+    environ[count] = entry;
+    environ[count + 1] = NULL;
+    return 0;
+}
+
+int unsetenv(const char *name) {
+    if (!name || !*name || strchr(name, '=')) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (!environ) return 0;
+
+    size_t name_len = strlen(name);
+    size_t dst = 0;
+    for (size_t src = 0; environ[src]; src++) {
+        if (strncmp(environ[src], name, name_len) == 0 && environ[src][name_len] == '=') {
+            continue;
+        }
+        environ[dst++] = environ[src];
+    }
+    environ[dst] = NULL;
+    return 0;
+}
+
 int system(const char *command) {
     if (!command) return 1;
 
@@ -684,4 +756,102 @@ uint32_t arc4random_uniform(uint32_t upper_bound) {
     }
 
     return r % upper_bound;
+}
+
+static void fill_temp_suffix(char *suffix) {
+    static const char alphabet[] =
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    for (int i = 0; i < 6; i++) {
+        suffix[i] = alphabet[arc4random_uniform((uint32_t)(sizeof(alphabet) - 1))];
+    }
+}
+
+int mkstemp(char *tmpl) {
+    if (!tmpl) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    size_t len = strlen(tmpl);
+    if (len < 6 || strcmp(tmpl + len - 6, "XXXXXX") != 0) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    char *suffix = tmpl + len - 6;
+    for (int attempt = 0; attempt < 256; attempt++) {
+        fill_temp_suffix(suffix);
+        int fd = open(tmpl, O_CREAT | O_EXCL | O_RDWR, 0600);
+        if (fd >= 0) return fd;
+        if (errno != EEXIST) return -1;
+    }
+
+    errno = EEXIST;
+    return -1;
+}
+
+char *mkdtemp(char *tmpl) {
+    if (!tmpl) {
+        errno = EINVAL;
+        return NULL;
+    }
+
+    size_t len = strlen(tmpl);
+    if (len < 6 || strcmp(tmpl + len - 6, "XXXXXX") != 0) {
+        errno = EINVAL;
+        return NULL;
+    }
+
+    char *suffix = tmpl + len - 6;
+    for (int attempt = 0; attempt < 256; attempt++) {
+        fill_temp_suffix(suffix);
+        if (mkdir(tmpl, 0700) == 0) return tmpl;
+        if (errno != EEXIST) return NULL;
+    }
+
+    errno = EEXIST;
+    return NULL;
+}
+
+char *realpath(const char *restrict path, char *restrict resolved_path) {
+    if (!path || *path == '\0') {
+        errno = EINVAL;
+        return NULL;
+    }
+
+    char tmp[PATH_MAX];
+    if (path[0] == '/') {
+        if (strlcpy(tmp, path, sizeof(tmp)) >= sizeof(tmp)) {
+            errno = ENAMETOOLONG;
+            return NULL;
+        }
+    } else {
+        char cwd[PATH_MAX];
+        if (!getcwd(cwd, sizeof(cwd))) return NULL;
+        size_t cwd_len = strlen(cwd);
+        size_t path_len = strlen(path);
+        if (cwd_len + 1 + path_len + 1 > sizeof(tmp)) {
+            errno = ENAMETOOLONG;
+            return NULL;
+        }
+        memcpy(tmp, cwd, cwd_len);
+        tmp[cwd_len] = '/';
+        memcpy(tmp + cwd_len + 1, path, path_len + 1);
+    }
+
+    char *out = resolved_path;
+    if (!out) {
+        out = malloc(PATH_MAX);
+        if (!out) {
+            errno = ENOMEM;
+            return NULL;
+        }
+    }
+
+    if (strlcpy(out, tmp, PATH_MAX) >= PATH_MAX) {
+        if (!resolved_path) free(out);
+        errno = ENAMETOOLONG;
+        return NULL;
+    }
+    return out;
 }

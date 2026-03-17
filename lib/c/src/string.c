@@ -281,12 +281,27 @@ size_t strlen(const char *s) {
     return len;
 }
 
+size_t strnlen(const char *s, size_t maxlen) {
+    size_t len = 0;
+    while (len < maxlen && s[len]) len++;
+    return len;
+}
+
 char *strdup(const char *s) {
     size_t len = strlen(s) + 1;
     char *new_s = malloc(len);
     if (new_s) {
         memcpy(new_s, s, len);
     }
+    return new_s;
+}
+
+char *strndup(const char *s, size_t n) {
+    size_t len = strnlen(s, n);
+    char *new_s = malloc(len + 1);
+    if (!new_s) return NULL;
+    memcpy(new_s, s, len);
+    new_s[len] = '\0';
     return new_s;
 }
 

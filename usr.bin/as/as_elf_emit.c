@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #ifndef STV_DEFAULT
 #define STV_DEFAULT 0
@@ -100,11 +101,20 @@ static char *xstrdup(const char *s) {
 }
 
 static size_t hash_name(const char *name) {
-    size_t h = 1469598103934665603ull;
+    size_t h;
+    size_t prime;
+
+#if UINTPTR_MAX > 0xFFFFFFFFu
+    h = 1469598103934665603ull;
+    prime = 1099511628211ull;
+#else
+    h = 2166136261u;
+    prime = 16777619u;
+#endif
 
     while (name != NULL && *name != '\0') {
         h ^= (unsigned char)*name++;
-        h *= 1099511628211ull;
+        h *= prime;
     }
     return h;
 }

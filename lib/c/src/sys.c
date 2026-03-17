@@ -433,6 +433,27 @@ int clock_gettime(clockid_t clk_id, struct timespec *tp) {
     return __set_errno((int)_syscall2(SYS_CLOCK_GETTIME, clk_id, (int)tp));
 }
 
+int gettimeofday(struct timeval *restrict tp, void *restrict tzp) {
+    (void)tzp;
+    if (!tp) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    struct timespec ts;
+    if (clock_gettime(CLOCK_REALTIME, &ts) < 0) {
+        return -1;
+    }
+
+    tp->tv_sec = ts.tv_sec;
+    tp->tv_usec = (suseconds_t)(ts.tv_nsec / 1000);
+    return 0;
+}
+
+int poll(struct pollfd *fds, nfds_t nfds, int timeout) {
+    return __set_errno((int)_syscall3(SYS_POLL, (int)fds, (int)nfds, timeout));
+}
+
 int ioctl(int fd, unsigned long request, ...) {
     va_list ap;
     va_start(ap, request);
