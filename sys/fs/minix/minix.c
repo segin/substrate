@@ -40,6 +40,16 @@ static int minix_write_inode(minix_fs_t *fs, fs_node_t *node);
 static int minix_write_inode_raw(minix_fs_t *fs, uint32_t inode_num, struct minix_inode_v1 *inode);
 static void minix_free_block(minix_fs_t *fs, uint32_t zone);
 
+static uint16_t minix_type_bits_from_flags(uint32_t flags) {
+    if (flags & FS_DIRECTORY) return 0x4000;
+    if (flags & FS_SYMLINK) return 0xA000;
+    if (flags & FS_CHARDEVICE) return 0x2000;
+    if (flags & FS_BLOCKDEVICE) return 0x6000;
+    if (flags & FS_PIPE) return 0x1000;
+    if (flags & FS_FILE) return 0x8000;
+    return 0;
+}
+
 /* Filesystem definition */
 static filesystem_t minix_fs = {
     .name = "minix",
@@ -1305,7 +1315,22 @@ static int minix_rmdir(fs_node_t *dir, const char *name) {
 static int minix_write_inode(minix_fs_t *fs, fs_node_t *node) {
     if (!fs || !node || !node->ptr) return -1;
 
+    uint16_t type_bits = minix_type_bits_from_flags(node->flags);
+
     if (fs->sb.s_magic == MINIX_V2_Magic || fs->sb.s_magic == MINIX_V2_Magic_14) {
+        struct minix_inode_v2 *inode = (struct minix_inode_v2 *)node->ptr;
+        if (type_bits) {
+            inode->i_mode = (uint16_t)(type_bits | (node->mask & 0x0FFF));
+        } else {
+            inode->i_mode = (uint16_t)((inode->i_mode & 0xF000) | (node->mask & 0x0FFF));
+        }
+        inode->i_uid = (uint16_t)node->uid;
+        inode->i_gid = (uint16_t)node->gid;
+        inode->i_size = (uint32_t)node->length;
+        inode->i_atime = (uint32_t)node->atime;
+        inode->i_mtime = (uint32_t)node->mtime;
+        inode->i_ctime = (uint32_t)node->ctime;
+
         // V2
         uint32_t inode_start = 2 + fs->sb.s_imap_blocks + fs->sb.s_zmap_blocks;
         uint32_t inodes_per_block = MINIX_BLOCK_SIZE / sizeof(struct minix_inode_v2);
@@ -1320,6 +1345,17 @@ static int minix_write_inode(minix_fs_t *fs, fs_node_t *node) {
         if (write_fs(fs->block_device, block * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, buf) != MINIX_BLOCK_SIZE) return -1;
         return 0;
     } else {
+        struct minix_inode_v1 *inode = (struct minix_inode_v1 *)node->ptr;
+        if (type_bits) {
+            inode->i_mode = (uint16_t)(type_bits | (node->mask & 0x0FFF));
+        } else {
+            inode->i_mode = (uint16_t)((inode->i_mode & 0xF000) | (node->mask & 0x0FFF));
+        }
+        inode->i_uid = (uint16_t)node->uid;
+        inode->i_gid = (uint8_t)node->gid;
+        inode->i_size = (uint32_t)node->length;
+        inode->i_time = (uint32_t)node->mtime;
+
         // V1
         return minix_write_inode_raw(fs, node->inode, (struct minix_inode_v1 *)node->ptr);
     }
