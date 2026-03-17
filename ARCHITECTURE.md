@@ -209,6 +209,7 @@ Console policy:
 - the BGA driver now supports per-mode selection via `set_mode`, allowing `vga=640x480@32` or `vga=1280x1024@32` alongside its default 1024x768
 - the framebuffer subsystem supports up to 8 simultaneous devices (`/dev/fb0` through `/dev/fb7`) via a multi-framebuffer registry; the primary framebuffer is always fb0; additional monitors register as fb1, fb2, etc. via `fb_register_device()`
 - GRUB framebuffer inheritance works seamlessly: if GRUB boots in a graphical mode, the multiboot driver inherits the framebuffer and the console runs over it; `vga=` can override the inherited mode if a higher-priority driver (BGA, VGA) supports the requested resolution
+- BIOS interactive video selection now performs VBE controller detection/capability query, gates menu entries by enumerated mode support, attempts VBE protected-mode interface discovery, and attempts EDID retrieval through VBE/DDC before selecting an LFB graphics mode
 - the VT layer owns per-console backing buffers, per-VT `tty` bindings, and per-VT scrollback history; the VGA text backend owns all active-screen redraw and cursor updates so VT switching does not memcpy live VGA memory directly
 - the active text console exports `/dev/tty1` through `/dev/tty12`; `Alt+F1..F12` switches VTs and `Shift+PageUp/PageDown` enters and exits scrollback on the active VT
 

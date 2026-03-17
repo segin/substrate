@@ -365,7 +365,20 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
         elks_free_kernel_vector(kenvp);
         return elks_fail(fd, -ENOEXEC, "ELKS: invalid load plan");
     }
-    
+
+    /*
+     * ELKS userspace expects a near-64K DS/SS window even for small a.out
+     * images. Clamp the effective segment size here in the loader so kernel
+     * rebuilds cannot miss the compatibility adjustment via a stale header-
+     * only object.
+     */
+    if (plan.data_limit < 0xFFF0U) {
+        plan.data_limit = 0xFFF0U;
+    }
+    if (plan.combined && plan.text_limit < plan.data_limit) {
+        plan.text_limit = plan.data_limit;
+    }
+
     // Create new address space
     extern pmap_t pmap_create(void);
     pmap_t pmap = pmap_create();
@@ -495,10 +508,6 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     uint32_t user_sp;
     struct elks_segment_layout layout;
     
-    if (elks_aout_debug_enabled()) {
-        kprint("ELKS: Loaded binary, jumping to 16-bit mode\n");
-    }
-    
     memset(&layout, 0, sizeof(layout));
     elks_build_segment_layout(&plan, &layout);
     if (!elks_build_stack_image((uint8_t *)(uintptr_t)plan.data_base, &plan,
@@ -510,7 +519,9 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     user_sp = initial_sp;
 
     extern void jump_to_elks(uint32_t entry, uint32_t stack, uint32_t cs,
-                             uint32_t ds, uint32_t ss, uint32_t es);
+                             uint32_t ds, uint32_t ss, uint32_t es,
+                             uint32_t stack_size);
+    uint16_t elks_stack_size = 0;
     
     proc_close_cloexec(current_process);
     elks_free_kernel_vector(kargv);
@@ -525,9 +536,15 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
      */
     pmap_activate((pmap_t)(uintptr_t)current_process->pmap);
     ldt_activate(current_process);
+
+    if (plan.data_limit > plan.brk_offset) {
+        elks_stack_size = (uint16_t)(plan.data_limit - plan.brk_offset);
+    } else {
+        elks_stack_size = plan.data_limit;
+    }
     
     jump_to_elks(hdr.entry, user_sp ? user_sp : 0xFFFE, layout.cs_sel, layout.ds_sel,
-                 layout.ss_sel, layout.es_sel);
+                 layout.ss_sel, layout.es_sel, elks_stack_size);
     
     panic("jump_to_elks returned!");
     return 0;

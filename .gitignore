@@ -81,6 +81,7 @@ vgcore.*
 /sys/kernel.freebsd
 /sys/kernel.multiboot
 /sys/kernel.zimage
+/sys/ksyms*.c
 /sys/ksyms_efi_table.c
 /sys/ksyms_table.c
 /sys/screen.png

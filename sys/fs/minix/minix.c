@@ -520,28 +520,32 @@ static int minix_readlink(fs_node_t *node, char *buf, size_t size) {
 }
 
 static struct dirent *minix_readdir(fs_node_t *node, uint64_t index) {
-    
-    // Minix V1 directory entries are 32 bytes (2 byte inode, 30 chars name)
-    // 1024 bytes per block / 32 = 32 entries per block
-    
     uint32_t entry_size = sizeof(struct minix_dirent_v1);
-    uint32_t offset = index * entry_size;
-    
-    // Read directly from file logic (reuse minix_read if possible, but we need temporary buffer)
-    // Or just implement simplified read here
-    
+    uint32_t offset = 0;
+    uint64_t seen = 0;
     struct minix_dirent_v1 entry;
-    if (minix_read(node, offset, entry_size, (uint8_t *)&entry) != entry_size) {
-        return NULL;
+
+    while (offset < node->length) {
+        if (minix_read(node, offset, entry_size, (uint8_t *)&entry) != entry_size) {
+            return NULL;
+        }
+        offset += entry_size;
+
+        if (entry.inode == 0) {
+            continue;
+        }
+        if (seen++ != index) {
+            continue;
+        }
+
+        struct minix_inode_wrapper *wrapper = (struct minix_inode_wrapper *)node->ptr;
+        strncpy(wrapper->dirent.d_name, entry.name, 30);
+        wrapper->dirent.d_name[30] = '\0';
+        wrapper->dirent.d_ino = entry.inode;
+        return &wrapper->dirent;
     }
 
-    if (entry.inode == 0) return NULL; // Deleted/Empty
-
-    struct minix_inode_wrapper *wrapper = (struct minix_inode_wrapper *)node->ptr;
-    strncpy(wrapper->dirent.d_name, entry.name, 30);
-    wrapper->dirent.d_name[30] = '\0';
-    wrapper->dirent.d_ino = entry.inode;
-    return &wrapper->dirent;
+    return NULL;
 }
 
 static fs_node_t *minix_finddir(fs_node_t *node, char *name) {
@@ -585,7 +589,8 @@ static fs_node_t *minix_mount(const char *device, uint32_t flags, void *data) {
     /* Check Magic - Supports V1 (0x137F) mainly for now */
     if (fs->sb.s_magic != MINIX_V1_Magic && 
         fs->sb.s_magic != MINIX_V1_Magic_14 && 
-        fs->sb.s_magic != MINIX_V2_Magic) {
+        fs->sb.s_magic != MINIX_V2_Magic &&
+        fs->sb.s_magic != MINIX_V2_Magic_14) {
         kprint("Minix: Invalid magic\n");
         kfree(fs, sizeof(minix_fs_t));
         return NULL;
@@ -787,7 +792,10 @@ static int minix_symlink(fs_node_t *dir, const char *name, const char *target) {
     bool v2 = (fs->sb.s_magic == MINIX_V2_Magic || fs->sb.s_magic == MINIX_V2_Magic_14);
 
     new_node.ptr = kmalloc(sizeof(struct minix_inode_wrapper));
-    if (!new_node.ptr) return -1;
+    if (!new_node.ptr) {
+        minix_free_inode(fs, inode_num);
+        return -1;
+    }
     memset(new_node.ptr, 0, sizeof(struct minix_inode_wrapper));
     if (v2) ((struct minix_inode_v2 *)new_node.ptr)->i_nlinks = 1;
     else ((struct minix_inode_v1 *)new_node.ptr)->i_nlinks = 1;
@@ -871,15 +879,25 @@ static int minix_link(fs_node_t *dir, fs_node_t *node, const char *name) {
     }
 
     // 2. Increment link count
-    struct minix_inode_v1 *inode = (struct minix_inode_v1 *)node->ptr;
-    if (!inode) return -1;
+    bool v2 = (fs->sb.s_magic == MINIX_V2_Magic || fs->sb.s_magic == MINIX_V2_Magic_14);
+    if (!node->ptr) return -1;
 
-    if (inode->i_nlinks == 255) return -1;
-
-    inode->i_nlinks++;
-    if (minix_write_inode(fs, node) != 0) {
-        inode->i_nlinks--;
-        return -1;
+    if (v2) {
+        struct minix_inode_v2 *inode = (struct minix_inode_v2 *)node->ptr;
+        if (inode->i_nlinks == 0xFFFFU) return -1;
+        inode->i_nlinks++;
+        if (minix_write_inode(fs, node) != 0) {
+            inode->i_nlinks--;
+            return -1;
+        }
+    } else {
+        struct minix_inode_v1 *inode = (struct minix_inode_v1 *)node->ptr;
+        if (inode->i_nlinks == 255U) return -1;
+        inode->i_nlinks++;
+        if (minix_write_inode(fs, node) != 0) {
+            inode->i_nlinks--;
+            return -1;
+        }
     }
 
     // 3. Write directory entry
@@ -889,7 +907,11 @@ static int minix_link(fs_node_t *dir, fs_node_t *node, const char *name) {
 
     if (minix_write(dir, free_offset, sizeof(struct minix_dirent_v1), (uint8_t *)&entry) != sizeof(struct minix_dirent_v1)) {
         // Rollback
-        inode->i_nlinks--;
+        if (v2) {
+            ((struct minix_inode_v2 *)node->ptr)->i_nlinks--;
+        } else {
+            ((struct minix_inode_v1 *)node->ptr)->i_nlinks--;
+        }
         minix_write_inode(fs, node);
         return -1;
     }

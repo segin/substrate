@@ -168,6 +168,10 @@ void syscall_handler(registers_t *regs) {
                          * For write(fd, buf, len), print up to write length bytes.
                          * For generic strings, use bounded copyinstr.
                          */
+                        if (p->id == PERS_ELKS) {
+                            len += sprintf(buf + len, "off:0x%x", (unsigned int)args[i]);
+                            break;
+                        }
                         if (args[i] && args[i] > 0x1000) {
                             char quote[64];
                             size_t copied = 0, show = 0;

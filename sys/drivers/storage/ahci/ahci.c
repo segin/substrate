@@ -89,6 +89,14 @@ typedef struct ahci_controller {
 static ahci_controller_t ahci_ctrl;
 static int ahci_initialized;
 
+static void *ahci_dma_bounce_alloc(size_t size, dma_addr_t *dma_handle) {
+    return dma_alloc_coherent(size, dma_handle);
+}
+
+static void ahci_dma_bounce_free(void *buf, size_t size) {
+    dma_free_coherent(buf, size);
+}
+
 /* SCSI link for SATAPI devices */
 static scsi_link_t ahci_scsi_link;
 static int ahci_scsi_registered;
@@ -401,6 +409,7 @@ static int ahci_ata_dma_cmd(ahci_port_t *ap, uint8_t command,
     hba_cmd_header_t *hdr = &ap->cmd_list[AHCI_CMD_SLOT];
     hba_cmd_table_t *tbl  = ap->cmd_table;
     struct fis_reg_h2d *fis;
+    void *dma_buf;
     dma_addr_t data_dma;
     uint32_t byte_count;
 
@@ -413,13 +422,26 @@ static int ahci_ata_dma_cmd(ahci_port_t *ap, uint8_t command,
     fis = (struct fis_reg_h2d *)tbl->cfis;
     ahci_build_h2d_fis(fis, command, lba, sector_count, 0x40); /* LBA mode */
 
-    /* Setup PRDT - single entry for the entire transfer */
-    data_dma = dma_map_single(data_virt, byte_count,
-                               is_write ? DMA_TO_DEVICE : DMA_FROM_DEVICE);
-    tbl->prdt[0].dba  = (uint32_t)data_dma;
-    tbl->prdt[0].dbau = 0;
-    tbl->prdt[0].dbc  = byte_count - 1;  /* 0-based */
-    tbl->prdt[0].i    = 0;
+    dma_buf = NULL;
+    data_dma = 0;
+    if (byte_count > 0) {
+        /*
+         * DMA into a coherent bounce buffer instead of arbitrary kernel/user
+         * virtual memory. The generic dma_map_single() path is currently a
+         * direct phys translation and does not provide scatter-gather.
+         */
+        dma_buf = ahci_dma_bounce_alloc(byte_count, &data_dma);
+        if (!dma_buf) {
+            return -1;
+        }
+        if (is_write) {
+            memcpy(dma_buf, data_virt, byte_count);
+        }
+        tbl->prdt[0].dba  = (uint32_t)data_dma;
+        tbl->prdt[0].dbau = 0;
+        tbl->prdt[0].dbc  = byte_count - 1;  /* 0-based */
+        tbl->prdt[0].i    = 0;
+    }
 
     /* Setup command header */
     hdr->cfl   = sizeof(struct fis_reg_h2d) / 4;  /* 5 DWORDs */
@@ -436,8 +458,12 @@ static int ahci_ata_dma_cmd(ahci_port_t *ap, uint8_t command,
     /* Issue and wait */
     int ret = ahci_port_issue_cmd(ap, AHCI_TIMEOUT_CMD);
 
-    dma_unmap_single(data_dma, byte_count,
-                      is_write ? DMA_TO_DEVICE : DMA_FROM_DEVICE);
+    if (dma_buf) {
+        if (!is_write && ret == 0) {
+            memcpy(data_virt, dma_buf, byte_count);
+        }
+        ahci_dma_bounce_free(dma_buf, byte_count);
+    }
 
     return ret;
 }
@@ -675,6 +701,7 @@ static int ahci_scsi_execute(scsi_link_t *link, scsi_request_t *req) {
     hba_cmd_header_t *hdr;
     hba_cmd_table_t *tbl;
     struct fis_reg_h2d *fis;
+    void *dma_buf;
     dma_addr_t data_dma;
     int port_idx;
     int ret;
@@ -726,12 +753,18 @@ static int ahci_scsi_execute(scsi_link_t *link, scsi_request_t *req) {
     /* Setup PRDT if there's data */
     hdr = &ap->cmd_list[AHCI_CMD_SLOT];
     hdr->prdtl = 0;
+    dma_buf = NULL;
     data_dma = 0;
 
     if (req->data && req->data_len > 0) {
-        data_dma = dma_map_single(req->data, req->data_len,
-                                   (req->flags & SCSI_REQ_WRITE)
-                                       ? DMA_TO_DEVICE : DMA_FROM_DEVICE);
+        dma_buf = ahci_dma_bounce_alloc(req->data_len, &data_dma);
+        if (!dma_buf) {
+            req->status = SCSI_STATUS_CHECK_CONDITION;
+            return -1;
+        }
+        if (req->flags & SCSI_REQ_WRITE) {
+            memcpy(dma_buf, req->data, req->data_len);
+        }
         tbl->prdt[0].dba  = (uint32_t)data_dma;
         tbl->prdt[0].dbau = 0;
         tbl->prdt[0].dbc  = req->data_len - 1;
@@ -752,10 +785,11 @@ static int ahci_scsi_execute(scsi_link_t *link, scsi_request_t *req) {
 
     ret = ahci_port_issue_cmd(ap, req->timeout_ms ? req->timeout_ms : AHCI_TIMEOUT_CMD);
 
-    if (req->data && req->data_len > 0) {
-        dma_unmap_single(data_dma, req->data_len,
-                          (req->flags & SCSI_REQ_WRITE)
-                              ? DMA_TO_DEVICE : DMA_FROM_DEVICE);
+    if (dma_buf) {
+        if (!(req->flags & SCSI_REQ_WRITE) && ret == 0) {
+            memcpy(req->data, dma_buf, req->data_len);
+        }
+        ahci_dma_bounce_free(dma_buf, req->data_len);
     }
 
     if (ret < 0) {

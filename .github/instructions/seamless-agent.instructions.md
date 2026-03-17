@@ -9,3 +9,5 @@ Always use #askUser before completing any task to confirm the result matches wha
 DO NOT END TASKS WITHOUT USER APPROVAL - YOU MUST ALWAYS USE #askUser TO CONFIRM THE RESULT WITH THE USER BEFORE CONSIDERING A TASK COMPLETE. THIS IS A HARD REQUIREMENT
 
 If you believe there are no tasks to complete, or if you are unsure about what to do next, ask the user for guidance using #askUser.
+
+If you reach a handoff checkpoint, use #askUser (`ask_user`) just in case. Do this unconditionally.
