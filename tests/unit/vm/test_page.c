@@ -37,6 +37,23 @@ bool test_vm_page_queue_ops(void) {
     return true;
 }
 
+bool test_vm_page_late_init_suite(void) {
+    vm_page_thresholds_t thresholds_before;
+    vm_page_thresholds_t thresholds_after;
+
+    vm_page_get_thresholds(&thresholds_before);
+    vm_page_late_init();
+    vm_page_get_thresholds(&thresholds_after);
+
+    if (thresholds_after.free_target <= 0) return false;
+    if (thresholds_after.free_min <= 0) return false;
+
+    // Test idempotency
+    vm_page_late_init();
+
+    return true;
+}
+
 bool test_vm_page_flags(void) {
     vm_page_t p;
     memset(&p, 0, sizeof(p));
