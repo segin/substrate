@@ -410,6 +410,27 @@ static void test_vm_phys_early_init(void) {
     TEST_PASS("vm_phys_early_init");
 }
 
+/* Test: vm_phys_alloc_page_below honors physical address limits */
+static void test_vm_phys_alloc_page_below(void) {
+    uintptr_t limit = 16 * 1024 * 1024; /* 16MB limit */
+    vm_page_t *page = vm_phys_alloc_page_below(limit);
+
+    TEST_ASSERT(page != NULL, "alloc_below: initial allocation failed");
+    if (page != NULL) {
+        TEST_ASSERT(page->phys_addr < limit, "alloc_below: returned page above limit");
+        vm_phys_free_page(page);
+    }
+
+    /* Edge case: very low limit where no pages exist or all are used */
+    vm_page_t *page_fail = vm_phys_alloc_page_below(0x1000); /* Only 4KB limit */
+    if (page_fail != NULL) {
+        TEST_ASSERT(page_fail->phys_addr < 0x1000, "alloc_below: returned page above tight limit");
+        vm_phys_free_page(page_fail);
+    }
+
+    TEST_PASS("vm_phys_alloc_page_below");
+}
+
 /* Test entry point */
 void test_vm_phys(void) {
     kprint("=== Physical Memory Manager Integration Tests ===\n");
@@ -434,6 +455,7 @@ void test_vm_phys(void) {
     test_free_used_invariant();
     test_free_list_integrity();
     test_vm_phys_early_init();
+    test_vm_phys_alloc_page_below();
     
     char buf[64];
     sprintf(buf, "=== vm_phys tests: %d passed, %d failed ===\n", passed, failed);
