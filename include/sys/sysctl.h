@@ -9,6 +9,7 @@
 #define _SYS_SYSCTL_H_
 
 #include <sys/types.h>
+#include <sys/cdefs.h>
 #include <stddef.h>
 #include <stdint.h>
 

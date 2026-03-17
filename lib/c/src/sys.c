@@ -18,6 +18,8 @@
 #include <sys/resource.h>
 #include <termios.h>
 #include <sys/sysctl.h>
+#include <sys/select.h>
+#include <sys/poll.h>
 
 extern int64_t _syscall0(int);
 extern int64_t _syscall1(int, int);
@@ -469,5 +471,76 @@ int getpriority(int which, id_t who) {
 
 int setpriority(int which, id_t who, int prio) {
     return __set_errno((int)_syscall3(SYS_SETPRIORITY, which, who, prio));
+}
+
+int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
+           struct timeval *timeout) {
+    /* Implement select using poll syscall */
+    if (nfds < 0 || nfds > FD_SETSIZE) {
+        errno = EINVAL;
+        return -1;
+    }
+    
+    /* Count fds and build poll array */
+    struct pollfd fds[256];  /* Stack limit */
+    int poll_count = 0;
+    
+    if (nfds > 256) {
+        errno = EINVAL;
+        return -1;
+    }
+    
+    for (int i = 0; i < nfds; i++) {
+        short events = 0;
+        if (readfds && FD_ISSET(i, readfds)) events |= POLLIN;
+        if (writefds && FD_ISSET(i, writefds)) events |= POLLOUT;
+        if (exceptfds && FD_ISSET(i, exceptfds)) events |= POLLERR;
+        
+        if (events) {
+            fds[poll_count].fd = i;
+            fds[poll_count].events = events;
+            fds[poll_count].revents = 0;
+            poll_count++;
+        }
+    }
+    
+    /* Convert timeout */
+    int poll_timeout = -1;
+    if (timeout) {
+        poll_timeout = timeout->tv_sec * 1000 + timeout->tv_usec / 1000;
+    }
+    
+    /* Call poll */
+    int ret = (int)_syscall3(SYS_POLL, (int)fds, poll_count, poll_timeout);
+    
+    if (ret > 0) {
+        /* Convert poll results back to select format */
+        fd_set result_read, result_write, result_except;
+        if (readfds) FD_ZERO(&result_read);
+        if (writefds) FD_ZERO(&result_write);
+        if (exceptfds) FD_ZERO(&result_except);
+        
+        for (int i = 0; i < poll_count; i++) {
+            int fd = fds[i].fd;
+            short revents = fds[i].revents;
+            
+            if (revents & POLLIN && readfds) FD_SET(fd, &result_read);
+            if (revents & POLLOUT && writefds) FD_SET(fd, &result_write);
+            if (revents & POLLERR && exceptfds) FD_SET(fd, &result_except);
+        }
+        
+        if (readfds) *readfds = result_read;
+        if (writefds) *writefds = result_write;
+        if (exceptfds) *exceptfds = result_except;
+    } else if (ret == 0) {
+        /* Timeout */
+        if (readfds) FD_ZERO(readfds);
+        if (writefds) FD_ZERO(writefds);
+        if (exceptfds) FD_ZERO(exceptfds);
+    } else {
+        return __set_errno(ret);
+    }
+    
+    return ret;
 }
 

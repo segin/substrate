@@ -35,6 +35,7 @@
 #define SYS_PTRACE  26
 #define SYS_ALARM   27
 #define SYS_ACCESS  33
+#define SYS_SELECT  85
 #define SYS_SYNC    36
 #define SYS_KILL    37
 #define SYS_RENAME  38
