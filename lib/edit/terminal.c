@@ -1,6 +1,8 @@
 #include <termios.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <sys/ioctl.h>
 #include "el.h"
 
 int terminal_set_raw(EditLine *el) {
@@ -33,4 +35,36 @@ int terminal_set_orig(EditLine *el) {
 
     el->term.is_raw = 0;
     return 0;
+}
+
+void terminal_get_size(EditLine *el) {
+    struct winsize ws;
+    const char *env;
+
+    if (!el) return;
+
+    /* Try ioctl first */
+    if (el->fout &&
+        ioctl(fileno(el->fout), TIOCGWINSZ, &ws) == 0 &&
+        ws.ws_col > 0 && ws.ws_row > 0) {
+        el->term.cols = ws.ws_col;
+        el->term.rows = ws.ws_row;
+        return;
+    }
+
+    /* Fall back to environment variables */
+    env = getenv("COLUMNS");
+    if (env) {
+        int v = atoi(env);
+        if (v > 0) el->term.cols = v;
+    }
+    env = getenv("LINES");
+    if (env) {
+        int v = atoi(env);
+        if (v > 0) el->term.rows = v;
+    }
+
+    /* Default 80x24 if nothing else worked */
+    if (el->term.cols <= 0) el->term.cols = 80;
+    if (el->term.rows <= 0) el->term.rows = 24;
 }

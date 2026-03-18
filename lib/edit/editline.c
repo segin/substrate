@@ -1,7 +1,6 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
-#include <sys/ioctl.h>
 #include "el.h"
 
 #define EL_LINE_DEFAULT_CAP 1024U
@@ -58,6 +57,9 @@ EditLine *el_init(const char *prog, FILE *fin, FILE *fout, FILE *ferr) {
     el->line.len = 0;
     el->line.cursor = 0;
     el->editor_mode = ED_EMACS;
+
+    /* Query initial terminal dimensions */
+    terminal_get_size(el);
 
     return el;
 }
@@ -163,12 +165,12 @@ const LineInfo *el_line(EditLine *el) {
 }
 
 int el_resize(EditLine *el) {
-    struct winsize ws;
-
     if (!el || !el->fout) return -1;
 
-    (void)ioctl(fileno(el->fout), TIOCGWINSZ, &ws);
+    /* Re-query terminal dimensions */
+    terminal_get_size(el);
 
+    /* Force full redraw */
     fprintf(el->fout, "\r\033[K%s%s", el->prompt ? el->prompt : "", el->line.buffer);
     if (el->line.cursor < el->line.len) {
         int back = (int)(el->line.len - el->line.cursor);

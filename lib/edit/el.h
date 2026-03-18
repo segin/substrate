@@ -18,6 +18,8 @@ struct terminal {
     struct termios orig;
     struct termios raw;
     int is_raw;
+    int cols;
+    int rows;
 };
 
 struct signal_state {
@@ -82,9 +84,15 @@ struct editline {
     int history_browsing;
 };
 
-/* Internal functions */
+/*
+ * Internal functions.
+ *
+ * NOTE: EditLine is NOT thread-safe.  A single EditLine handle must only
+ * be accessed from one thread at a time (single-thread contract).
+ */
 int terminal_set_raw(EditLine *el);
 int terminal_set_orig(EditLine *el);
+void terminal_get_size(EditLine *el);
 int line_ensure_capacity(EditLine *el, size_t needed);
 
 #endif /* _EL_H_ */

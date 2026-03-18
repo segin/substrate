@@ -3,7 +3,6 @@
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
-#include <sys/ioctl.h>
 #include <sys/select.h>
 #include <dirent.h>
 #include <sys/stat.h>
@@ -463,13 +462,8 @@ static int default_filename_complete(EditLine *el) {
 }
 
 static size_t get_terminal_columns(EditLine *el) {
-    struct winsize ws;
-
-    if (el && el->fout &&
-        ioctl(fileno(el->fout), TIOCGWINSZ, &ws) == 0 &&
-        ws.ws_col > 0) {
-        return (size_t)ws.ws_col;
-    }
+    if (el && el->term.cols > 0)
+        return (size_t)el->term.cols;
     return 80;
 }
 
@@ -702,6 +696,9 @@ const char *el_gets(EditLine *el, int *count) {
 
     if (count) *count = 0;
     if (terminal_set_raw(el) == -1) return NULL;
+
+    /* Refresh terminal dimensions on each gets entry */
+    terminal_get_size(el);
 
     el->line.len = 0;
     el->line.cursor = 0;

@@ -19,6 +19,12 @@ int terminal_set_orig(EditLine *el) {
     return 0;
 }
 
+void terminal_get_size(EditLine *el) {
+    if (!el) return;
+    el->term.cols = 80;
+    el->term.rows = 24;
+}
+
 // Tests for el_init
 void test_el_init_valid_args() {
     EditLine *el = el_init("myprog", stdin, stdout, stderr);
@@ -35,6 +41,10 @@ void test_el_init_valid_args() {
     assert(el->line.len == 0);
     assert(el->line.cursor == 0);
     assert(el->editor_mode == ED_EMACS); // Default mode
+
+    // Terminal dimensions should be initialized (via mock: 80x24)
+    assert(el->term.cols == 80);
+    assert(el->term.rows == 24);
 
     el_end(el);
 }
@@ -206,6 +216,25 @@ void test_el_line_info() {
     el_end(el);
 }
 
+// Test el_resize
+void test_el_resize_updates_dims() {
+    EditLine *el = el_init("test", stdin, stdout, stderr);
+    assert(el != NULL);
+
+    // Mock sets 80x24; verify el_resize refreshes them
+    el->term.cols = 0;
+    el->term.rows = 0;
+    assert(el_resize(el) == 0);
+    assert(el->term.cols == 80);
+    assert(el->term.rows == 24);
+
+    el_end(el);
+}
+
+void test_el_resize_null() {
+    assert(el_resize(NULL) == -1);
+}
+
 int main() {
     printf("Running editline tests...\n");
     run_test(test_el_init_valid_args, "test_el_init_valid_args");
@@ -222,6 +251,8 @@ int main() {
     run_test(test_line_ensure_capacity_max, "test_line_ensure_capacity_max");
     run_test(test_line_ensure_capacity_null, "test_line_ensure_capacity_null");
     run_test(test_el_line_info, "test_el_line_info");
+    run_test(test_el_resize_updates_dims, "test_el_resize_updates_dims");
+    run_test(test_el_resize_null, "test_el_resize_null");
     printf("All editline tests passed!\n");
     return 0;
 }

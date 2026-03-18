@@ -18,7 +18,12 @@ typedef struct {
 } LineInfo;
 
 /*
- * EditLine functions
+ * EditLine functions.
+ *
+ * Thread-safety: EditLine is NOT thread-safe.  Each EditLine handle must
+ * only be used from a single thread at a time.  No internal locking is
+ * performed; the caller is responsible for serialisation if an EditLine
+ * handle is shared across threads.
  */
 EditLine *el_init(const char *prog, FILE *fin, FILE *fout, FILE *ferr);
 void      el_end(EditLine *el);
