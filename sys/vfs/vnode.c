@@ -12,6 +12,7 @@
  */
 
 #include <vfs/vnode.h>
+#include <vfs/buf.h>
 #include <kern/console.h>
 #include <kern/panic.h>
 #include <kern/sched.h>
@@ -572,20 +573,15 @@ void vclean(struct vnode *vp, int flags)
 #define V_SAVE 0x01
 int vinvalbuf(struct vnode *vp, int flags)
 {
-    (void)flags;
+    int error;
+
+    error = binval_vnode(vp, (flags & V_SAVE) ? 1 : 0);
 
     spinlock_acquire(&vp->v_interlock);
-
-    /*
-     * TODO: When buffer cache is implemented, iterate vp's
-     * buffer list and invalidate (or sync if V_SAVE) each buf.
-     * For now, just reset the pending output counter.
-     */
     vp->v_numoutput = 0;
-
     spinlock_release(&vp->v_interlock);
 
-    return(0);
+    return error;
 }
 
 /*

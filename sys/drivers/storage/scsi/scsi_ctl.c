@@ -19,10 +19,6 @@
 #include <vm/vm_kmem.h>
 #include "scsi.h"
 
-/* Forward declarations from scsi_dev.c */
-extern int scsi_dev_attach(scsi_device_t *scsi_dev);
-extern void scsi_dev_init(void);
-
 /*
  * ============================================================
  * SCSI Control IOCTLs

@@ -5,6 +5,7 @@
 #include "../sys/vm/vm_object.h"
 #include "../sys/vm/vm_page.h"
 #include "../sys/kern/sched.h"
+#include "../sys/kern/sleepq.h"
 
 // VM Tests
 extern bool test_kmem_basic_alloc(void);
@@ -286,7 +287,6 @@ test_case_t tests[] = {
 };
 
 #include <string.h>
-extern void sleepq_init(void);
 
 int main(int argc, char **argv) {
     const char *target_test = NULL;

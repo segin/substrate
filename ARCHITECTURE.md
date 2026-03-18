@@ -74,6 +74,7 @@ The kernel remains monolithic and is organized into logical layers:
 - **Memory Management:** See `docs/specs/pmm.md` (Physical) and `docs/specs/pmap.md` (Virtual).
 - **Process Model:** See `docs/specs/kern_process_exit.md` and `docs/specs/kern_pid1.md`.
 - **VFS and Filesystems:** See `docs/specs/vm_subsystem.md` (File cache) and `docs/specs/fs_devfs.md`.
+- **Buffer Cache (`bio`):** BSD-style cache in `sys/vfs/buf.h` + `sys/vfs/bio.c` with hash lookup by `(vnode, blkno)`, queueing (`BQ_LOCKED`, `BQ_CLEAN`, `BQ_DIRTY`, `BQ_EMPTY`), delayed write, `sync()` integration, and 30s syncer kthread.
 - **Device Model:** See `docs/specs/driver_model.md`.
 - **Console and VT:** See `docs/specs/driver_tty.md` and `docs/specs/driver_vt.md`.
 - **Personalities:** See `docs/specs/personality_targets.md` and `docs/specs/personality_elks.md`.

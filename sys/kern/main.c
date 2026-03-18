@@ -49,6 +49,7 @@
 #include <vfs/vfs.h>
 #include <sys/exec.h>
 #include <sys/kern_syscalls.h>
+#include <sys/ntsync.h>
 #include <exec/formats/elf.h>
 #include <fs/procfs.h>
 #include <fs/sysfs.h>
@@ -57,9 +58,6 @@
 #include <fs/9p.h>
 
 #include <sys/tests.h>
-
-extern void ntsync_init(void);
-
 
 #include <kern/console.h>
 #include <kern/cmdline.h>

@@ -61,6 +61,8 @@ extern struct personality personality_openbsd;
 extern struct personality personality_solaris;
 extern struct personality personality_elks;
 
+void elks_personality_init(void);
+
 struct personality *perso_lookup(int id);
 const char *perso_name(int id);
 

@@ -51,6 +51,9 @@ struct udf_tag {
     uint32_t tag_location;      /* Sector number of this descriptor */
 } __attribute__((packed));
 
+/* Driver initialization */
+void udf_init(void);
+
 /*
  * Extent Descriptor (ECMA-167 3/7.1)
  * Describes location and length of an extent.

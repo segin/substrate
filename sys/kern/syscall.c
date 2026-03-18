@@ -24,6 +24,7 @@
 #include <include/sys/session.h>
 #include <kern/file.h>
 #include <vfs/vfs.h>
+#include <vfs/buf.h>
 #include <drivers/console/uart/uart.h>
 #include <include/sys/sysinfo.h>
 #include <sys/kern_syscalls.h>
@@ -1364,9 +1365,7 @@ int sys_munlock(const void *addr, size_t len) {
 }
 
 int sys_sync(void) {
-    // In a real system, we'd iterate over all mounted filesystems
-    // and call their sync methods.
-    return 0;
+    return bufsync(0);
 }
 
 extern int sys_stat(const char *p, struct stat *buf);

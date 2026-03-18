@@ -1,5 +1,6 @@
 #include <vfs/vfs.h>
 #include <vfs/vnode.h>
+#include <vfs/buf.h>
 #include <sys/mount.h>
 #include <sys/namei.h>
 #include <sys/proc.h>
@@ -12,6 +13,18 @@
 #include <sys/file.h>
 #include <sys/errno.h>
 #include <sys/fcntl.h>
+#include <fs/ext2/ext2.h>
+#include <fs/fat/fat.h>
+#include <fs/exfat/exfat.h>
+#include <fs/minix/minix.h>
+#include <fs/udf/udf.h>
+#include <fs/procfs.h>
+#include <fs/sysfs.h>
+#include <fs/pseudofs.h>
+#include <fs/fuse.h>
+#include <fs/9p.h>
+#include <drivers/devices/full.h>
+#include <drivers/devices/cpuid.h>
 #include <drivers/storage/blkdev.h>
 #include <vm/vm_kmem.h>
 
@@ -32,24 +45,10 @@ static fs_node_t *vfs_cross_mountpoint(fs_node_t *node) {
     return node;
 }
 
-// External filesystem init functions
-extern void ext2_init(void);
-extern void fat_init(void);
-extern void exfat_init(void);
-extern void minix_init(void);
-extern void udf_init(void);
-extern void devfs_init(void);
-extern void procfs_init(void);
-extern void sysfs_init(void);
-extern void fuse_init(void);
-extern void fuse_fs_init(void);
-extern void p9_init(void);
-extern void pseudo_init(void);
-extern void full_init(void);
-extern void cpuid_init(void);
-
 void vfs_init(void) {
     kprint("VFS: Initializing...\n");
+
+    bio_init();
     
     // Register real filesystem drivers
     ext2_init();
