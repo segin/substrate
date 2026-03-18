@@ -10,58 +10,42 @@ This is the Substrate operating system project targeting x86 32-bit architecture
 - **Userland Linker Flags:** `-m32 -nostdlib -fno-pie`.
 
 ## Recent Accomplishments
-- **VFS Hard Link Support:** Implemented `link` in VFS and hooked up `sys_link` across native, Linux, and FreeBSD personalities. Improved ABI detection for stack-based syscalls.
-- **VFS Unlink Support:** Implemented `unlink` in VFS and hooked up `sys_unlink` across native, Linux, and FreeBSD personalities.
-- **Per-Process Address Spaces:** Implemented `pmap_create()`, `pmap_destroy()`, `pmap_reference()`, `pmap_release()`, `pmap_fork()` with COW support. Global pmap list for TLB management. Full 3GB/1GB user/kernel split.
-- **PMM Hardening:** Phase 1 boot memory detection with sanitization, total RAM reporting, and proper kernel bounds.
-- **FPU State Tracking:** Lazy FPU context switching with FXSAVE/FXRSTOR
-- **Filesystem Timestamps:** Added atime/mtime/ctime tracking with atomic updates
-- **TTY Integration:** Per-process controlling terminal support
-- **Time System:** 64-bit time_t, RTC driver, gettimeofday/clock_gettime syscalls
-- **VirtIO Drivers:** Implemented Core VirtIO, Block Device (virtio-blk), and 9P Transport (virtio-9p) drivers.
-- **PS/2 Subsystem:** Expanded PS/2 controller driver to support dual-channel (Mouse/Aux) operation.
-- **Framebuffer:** Implemented native linear framebuffer driver (`fb.c`) with Multiboot support and bitmap font console. Added Bochs Graphics Adapter (BGA) native driver support via `video=bga`.
-- **Build System:** Root filesystem generation in `dist/`
-- **Root Staging Rule:** `dist/` is only the staged contents of a real Substrate root filesystem. Do not place generic boot media, floppy images, scratch boot artifacts, or unrelated test payloads there; keep those beside the subsystem that builds them unless a different explicit staging path exists.
-- **Test Framework:** Comprehensive kernel test runner (`tests/sys/`). Tests are **not** compiled into the kernel by default; use `make -C sys KERNEL_TESTS=1` for test builds. Host-runnable tests (`host_test_*`) are built separately with `make -C tests/sys`.
-- **Kernel sprintf Enhancements:** Added printf flags: `-`, `+`, ` `, `#`, `0`, numeric width, and conversions: d/i/u/o/x/X/p/s/c for improved debug output
-- **Process Model Refactor:** Separated Swapper (PID 0) and Init (PID 1). Enforced `PID == Main_TID` invariant. Added Process Group (`pgrp`) and Session support.
-- **TTY Signals:** Implemented signal generation from TTY (`SIGINT`, `SIGQUIT`, `SIGTSTP`) and group signal delivery (`signal_send_group`).
-- **Syscall Tracing:** Enhanced `syscall_trace` with names, typed arguments (int/hex/ptr/str), return values, and Personality details.
-- **Init Safety:** Kernel now catches `init` process exit (e.g., from detached stdin) and enters an idle loop instead of panicking.
-- **Build System:** Fixed `dist` directory generation to include standard Unix hierarchy (`usr/include`, `usr/local`, etc.) and ensured `vmunix` installation.
-- **Boot/Init:** Cleaned up `sbin` build process; kernel now boots correctly with `root=/dev/hda` for external root filesystems, attempting fallback to `init` search path.
-- **UDF Filesystem Driver:** Complete read-write UDF (Universal Disk Format) driver per ECMA-167/OSTA spec. On-disk structures in `udf.h`, read-only support in `udf.c`, write support in `udf_write.c`, with unit tests and man pages (`udf.4`, `udf.5`).
-- **UMA Integration:** Integrated FreeBSD-style Universal Memory Allocator (UMA) for kernel memory allocation. `kmalloc`/`kfree` now backed by UMA zones via `vm_kmem.c`. Added `uma_startup()` before `kmem_init()`.
-- **Early Boot Debugging:** Added early GDT+IDT handler in `main.c` using `early_uart_print()` for exception debugging before full console is available. Prints exception number and halts on any early fault.
-- **LAPIC Early Mapping:** Added LAPIC identity-mapping (0xFEC00000-0xFFFFFFFF) in `boot.S` page tables with PCD flag for MMIO. Entry 1019 (offset 4076) covers LAPIC at 0xFEE00000.
-- **PMM Virtual Address API:** `pmm_alloc_block()` and `pmm_alloc_contiguous()` now return kernel virtual addresses (phys + 0xC0000000) instead of physical addresses. `pmm_free_block()` and `pmm_free_contiguous()` expect virtual addresses. Updated all callers in: `pmap.c`, `elf.c`, `sched.c`, `process.c`.
-- **Scheduler Refactor (MLFQ):** Implemented Multilevel Feedback Queue with Realtime, Timeshare, and Idle classes.
-- **SMP Scheduler:** Per-CPU runqueues, Work Stealing load balancing, CPU Affinity support, and IPI-based preemption.
-- **Synchronization Primitives:** Implemented Turnstiles (Priority Inheritance) and Hashed Sleep Queues (O(1) lookup).
-- **Context Switching:** Validated FPU Lazy Save and refined PCB for thread/process separation.
-- **Kernel Process:** Implemented Swapper/Idle (PID 0) with pageout daemon and idle loop responsibilities.
-- **libsys Library:** Created `lib/sys/` syscall wrapper library with `syscall.S` (raw i386 int 0x80), `syscall.h` (SYS_* constants), and typed wrappers (`vm86()`). Supports mmap, munmap, mprotect, brk syscalls.
-- **Kernel Library Refactor:** Modularized `sys/kern/lib.c` into `sys/lib/string.c`, `printf.c`, and `div64.c`.
-- **Synchronization Improvements:** Updated `mutex` and `semaphore` to use `sleepq` for robust thread sleeping (removed ad-hoc `sched_sleep`).
-- **SMP Scheduler Fixes:** Updated `sched_smp.c` to use `percpu_get_cpu_id()` instead of assumption.
-- **Code Quality:** Defined `kernel_process` explicitly for kthreads (fixing PID assumption), improved `panic()` messaging, and cleaned up `random.c` duplicates.
-- **GRUB Boot Fix:** Fixed multiboot header video mode field offsets (were at 12-24, spec requires 32-44). Kernel now boots through GRUB for the first time.
-- **Shebang Script Execution:** Implemented `#!` (shebang) handler in exec subsystem (`sys/exec/formats/script.c`). Scripts with `#!/path/to/interpreter` are now properly executed by extracting the interpreter and re-dispatching. Supports optional interpreter argument, recursion depth limit (4), and DOS line endings. `/sbin/init` shell scripts now execute correctly.
-- **Framebuffer Mode Selection (`vga=`):** Added `vga=WxH@BPP` kernel command line parameter for framebuffer mode selection across all video drivers. Supports legacy CGA/EGA/Hercules/VGA modes, BGA set_mode, multi-framebuffer device registry (`/dev/fb0`..`/dev/fb7`), and GRUB framebuffer inheritance.
-- **VFS Concurrency & Locking:** Implemented BSD-style `lockmgr()` lock manager (`sys/kern/lockmgr.c`) with `struct lock` supporting LK_SHARED, LK_EXCLUSIVE, LK_UPGRADE, LK_DOWNGRADE, LK_DRAIN, LK_NOWAIT, and priority inheritance via turnstiles. Refactored vnode locking (`vn_lock`/`vn_unlock`) to delegate to `lockmgr()`. Wired name cache rwlock (`rwlock_t nchash_lock`) around all cache operations. Wired mount point rwlock (`rwlock_t mnt_lock`) for mount/unmount protection. Validated buffer cache B_BUSY semantics.
-- **Framebuffer Rendering Subsystem:** Full rendering pipeline in `sys/drivers/video/`. PSF1/PSF2 font parsers (`psf.c`) with auto-detection and Unicode table extraction. BDF/PCF bitmap font parsers (`bdf_pcf.c`) with hex-to-binary glyph conversion and PCF TOC navigation. Font glyph cache (`font_cache.c`) with FNV-1a hash table (256 buckets) and UTF-8 Unicode mapping from PSF1/PSF2 tables. Blitting operations (`fb_ops.c`): `fb_fillrect()` with ROP_COPY/ROP_XOR, `fb_copyarea()` with overlap-safe memmove, `fb_imageblit()` for mono/color images — all with 32bpp fast paths and generic putpixel fallback, plus viewport clipping. Character rendering attributes (`fb_console.c`): `fb_putc_attr()` supports bold (shift-and-OR double-strike), italic (quarter-height shear transform), underline, strikethrough, and reverse video.
+
+For the full detailed changelog, see `docs/CHANGELOG.md`.
+
+### Kernel Core
+- PMM Buddy Allocator (Phase 2), UMA-backed kmalloc, per-process pmap with COW
+- MLFQ + SMP scheduler with per-CPU runqueues, work stealing, and CPU affinity
+- Turnstiles (priority inheritance), hashed sleep queues, sleepq-backed mutex/semaphore
+- BSD-style `lockmgr()` with shared/exclusive/upgrade/drain modes; vnode, namecache, and mount locking
+- Process model: Swapper (PID 0) / Init (PID 1), process groups, sessions
+- TTY signals (SIGINT/SIGQUIT/SIGTSTP), VMIN/VTIME support, per-process ctty
+- 64-bit time_t, POSIX timestamp compliance (atime/mtime/ctime across VFS and ext2)
+- Syscall tracing with typed arguments and personality detail
+
+### Filesystems
+- VFS: link/unlink, readdir atime, chmod/chown ctime
+- ext2: timestamp fixes (write ctime, add_entry/remove_entry parent timestamps)
+- UDF: Complete read-write driver with unit tests and man pages
+- Buffer cache (bio): hash lookup, queueing, delayed write, syncer kthread
+
+### Drivers
+- Framebuffer: linear FB, BGA, `vga=WxH@BPP` mode selection, multi-device registry
+- Rendering: PSF1/PSF2/BDF/PCF font parsers, glyph cache, fb_fillrect/fb_copyarea/fb_imageblit, bold/italic/underline/strikethrough/reverse attributes
+- VirtIO (block + 9P), PS/2 dual-channel, FPU lazy save
+
+### Boot & Architecture
+- GRUB boot fix, early boot debugging, LAPIC identity mapping
+- Shebang `#!` script execution, PT_TLS support
+- EFI boot stub with GOP framebuffer
+
+### Libraries & Build
+- libsys syscall wrapper library, kernel library modularization
+- Root filesystem staging (`dist/`), test framework (`tests/sys/`)
 
 
 ## Current Status
-- **PMM Refactor:** Phase 2 complete.
-    - O(log N) Buddy Allocator with proper page coalescing (Orders 0-10).
-    - Contiguous allocation optimized via Buddy system.
-    - Bootstrap Watermark Allocator for early boot.
-    - Dynamic Metadata sizing (no static limit).
-    - Low Memory safeguards active.
-    - **API:** `pmm_alloc_block()` returns kernel virtual address (0xC0000000+), NOT physical.
-    
+
 ### PMM API Usage (CRITICAL)
 **`pmm_alloc_block()` returns VIRTUAL address (kernel direct-mapped):**
 ```c
@@ -89,20 +73,6 @@ uint32_t phys = pmap_extract(pmap, va);
 void *virt = (void*)(phys + 0xC0000000);
 pmm_free_block(virt);  // CORRECT - convert first
 ```
-- **User process foundation complete (pmap layer):**
-    - Recursive paging and global page support.
-    - `pmap_protect` and `pmap_copy` with Copy-on-Write (COW).
-    - `pmap_kenter`/`pmap_kremove` kernel fast paths.
-    - Page reference/modification tracking (`pmap_is_referenced`, `pmap_is_modified_range`).
-    - Identity-mapping for Local APIC (0xFEE00000) during bootstrap.
-- **Process Model Refactored:**
-    - Swapper: PID 0 (TID 0).
-    - Init: PID 1 (TID 1).
-    - Init spawned via `sched_spawn_kernel_process` and transitions via `execve`.
-- VirtIO drivers (Block, 9P) linked and initialized
-- **PT_TLS Support:** ELF loader now handles PT_TLS segment, allocates TLS block, sets GDT entry 6 for GS-based TLS access
-- **VGA Hardware Cursor:** Fixed to sync with software cursor position
-- Debugging remaining TLS access issue (ESI pointing to PT_TLS template instead of allocated block)
 
 ## Substrate System Patterns (CRITICAL)
 - **Device Naming:** Storage devices reside in `/dev/storage/` and use a `type`+`instance` pattern:

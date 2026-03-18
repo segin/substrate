@@ -74,11 +74,11 @@ The kernel remains monolithic and is organized into logical layers:
 - **Memory Management:** See `docs/specs/pmm.md` (Physical) and `docs/specs/pmap.md` (Virtual).
 - **Process Model:** See `docs/specs/kern_process_exit.md` and `docs/specs/kern_pid1.md`.
 - **VFS and Filesystems:** See `docs/specs/vm_subsystem.md` (File cache) and `docs/specs/fs_devfs.md`.
-- **Buffer Cache (`bio`):** BSD-style cache in `sys/vfs/buf.h` + `sys/vfs/bio.c` with hash lookup by `(vnode, blkno)`, queueing (`BQ_LOCKED`, `BQ_CLEAN`, `BQ_DIRTY`, `BQ_EMPTY`), delayed write, `sync()` integration, and 30s syncer kthread.
-- **VFS Locking (`lockmgr`):** BSD-style lock manager in `sys/kern/lockmgr.c` providing `struct lock` with shared/exclusive/upgrade/downgrade/drain modes and priority inheritance via turnstiles. Vnode locking (`vn_lock`/`vn_unlock`) delegates to `lockmgr()`. Name cache protected by `rwlock_t`. Mount points protected by `rwlock_t mnt_lock`. Buffer cache uses per-buffer `B_BUSY` flag with `spinlock_t` + `sleepq`.
+- **Buffer Cache (`bio`):** BSD-style block I/O cache with hash lookup, four-queue lifecycle, delayed write, and 30s syncer kthread. See `docs/specs/vfs_bio.md`.
+- **VFS Locking (`lockmgr`):** BSD-style lock manager with shared/exclusive/upgrade/drain modes and turnstile PI. See `docs/specs/kern_locking.md`.
 - **Device Model:** See `docs/specs/driver_model.md`.
 - **Console and VT:** See `docs/specs/driver_tty.md` and `docs/specs/driver_vt.md`.
-- **Framebuffer Rendering:** PSF1/PSF2/BDF/PCF font parsers (`psf.c`, `bdf_pcf.c`), glyph cache with Unicode mapping (`font_cache.c`), blitting operations with 32bpp fast paths (`fb_ops.c`), and attributed character rendering with bold/italic/underline/strikethrough/reverse (`fb_console.c`). All in `sys/drivers/video/`.
+- **Framebuffer Rendering:** Font parsers, glyph cache, blitting operations, and attributed character rendering. See `docs/specs/driver_fb_console.md`.
 - **Personalities:** See `docs/specs/personality_targets.md` and `docs/specs/personality_elks.md`.
 
 ## 6. Userland and Libraries

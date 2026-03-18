@@ -121,7 +121,68 @@ Attempts a non-blocking exclusive acquisition.
 ### `bool rw_wowned(rwlock_t *rw)`
 Returns true if the current thread owns the lock in exclusive mode.
 
+## Lock Manager (`lockmgr`)
+
+The BSD-style lock manager (`sys/kern/lockmgr.c`) provides `struct lock` — a heavyweight shared/exclusive lock used primarily for vnode locking. It supports recursive exclusive acquisition, atomic upgrade/downgrade, drain semantics for reclamation, and priority inheritance via turnstiles.
+
+### `struct lock`
+| Field | Type | Purpose |
+|-------|------|---------|
+| `lk_interlock` | `spinlock_t` | Protects all lock state |
+| `lk_flags` | `uint32_t` | Status flags (`LK_HAVE_EXCL`, `LK_WANT_EXCL`, etc.) |
+| `lk_sharecount` | `uint32_t` | Current shared holder count |
+| `lk_waitcount` | `uint32_t` | Threads waiting on this lock |
+| `lk_exclusivecount` | `uint32_t` | Recursive exclusive lock depth |
+| `lk_lockholder` | `struct thread *` | Exclusive lock owner (for turnstile PI) |
+| `lk_prio` | `int` | Sleep priority for blocked threads |
+| `lk_name` | `const char *` | Debug identifier |
+
+### Operations
+
+#### `int lockmgr(struct lock *lkp, uint32_t flags, spinlock_t *interlock)`
+Central dispatch function. The `flags` parameter selects the operation:
+
+| Flag | Behavior |
+|------|----------|
+| `LK_SHARED` | Acquire shared (reader) lock. Blocks if exclusive or drain is active (writer preference). Uses `turnstile_block()` for PI. |
+| `LK_EXCLUSIVE` | Acquire exclusive (writer) lock. Recursive if same thread already holds it (increments `lk_exclusivecount`). Sets `LK_WANT_EXCL` to signal waiters. |
+| `LK_UPGRADE` | Atomically upgrade shared → exclusive. Only one upgrader allowed at a time; returns `EBUSY` if `LK_WANT_UPGRADE` already set (fairness). |
+| `LK_DOWNGRADE` | Downgrade exclusive → shared. Clears `LK_HAVE_EXCL`, sets `lk_sharecount = 1`, calls `turnstile_release()`, wakes waiters. |
+| `LK_RELEASE` | Release held lock. Handles both shared (decrement `lk_sharecount`) and exclusive (decrement `lk_exclusivecount`; on zero, clear `LK_HAVE_EXCL`). |
+| `LK_DRAIN` | Wait for full quiescence (all readers and writers release). Sets `LK_DRAINED` on completion. Used during vnode reclamation. |
+
+Modifiers: `LK_NOWAIT` (return `EBUSY` instead of blocking), `LK_RETRY` (auto-retry on failure).
+
+If `interlock` is non-NULL, it is released before sleeping and reacquired after waking.
+
+#### `int lockstatus(struct lock *lkp)`
+Returns `LK_EXCLUSIVE`, `LK_SHARED`, or `0` (unlocked).
+
+#### `int lockcount(struct lock *lkp)`
+Returns `lk_sharecount + lk_exclusivecount`.
+
+### Priority Inheritance
+
+When a thread blocks on an exclusively-held lock, `turnstile_block(lkp, lk_lockholder)` links the waiter to the holder's priority chain. On `LK_RELEASE` (exclusive) and `LK_DOWNGRADE`, `turnstile_release()` propagates priority back. Shared holders do not participate in PI.
+
+### Vnode Integration
+
+Vnodes use `lockmgr` as their primary lock:
+- `vn_lock(vp, flags)` → `lockmgr(&vp->v_lock, flags, &vp->v_interlock)`
+- `vn_unlock(vp)` → `lockmgr(&vp->v_lock, LK_RELEASE, &vp->v_interlock)`
+- `vn_islocked(vp)` → returns 2 (exclusive), 1 (shared), 0 (unlocked)
+
+### VFS Locking Summary
+
+| Resource | Lock Type | Notes |
+|----------|-----------|-------|
+| Vnodes | `lockmgr` (`struct lock`) | Shared/exclusive via `vn_lock`/`vn_unlock` |
+| Name cache | `rwlock_t` | Protects cached path lookups |
+| Mount points | `rwlock_t mnt_lock` | Protects mount state |
+| Buffer cache | Per-buffer `B_BUSY` flag | With `spinlock_t` + `sleepq`; see `docs/specs/vfs_bio.md` |
+
 ## Constraints
 - Safe for use in kernel mode.
 - Not safe for interrupt context if it leads to blocking.
-- Reader/writer locks currently provide writer preference and exclusive-owner checks, but do not yet include upgrade/downgrade operations.
+- Reader/writer locks provide writer preference and exclusive-owner checks.
+- `lockmgr` provides full upgrade/downgrade/drain operations for vnode locking.
