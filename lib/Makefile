@@ -12,6 +12,9 @@ $(SUBDIRS):
 	$(MAKE) -C $@
 	@echo "<<< Leaving lib/$@"
 
+# Dependency ordering: libc must be built before other libraries.
+m pthreads dl sys edit usb: | c
+
 clean:
 	@for dir in $(SUBDIRS); do \
 		echo ">>> Cleaning lib/$$dir"; \

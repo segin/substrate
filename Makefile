@@ -63,6 +63,10 @@ $(SUBDIRS):
 	$(MAKE) -C $@
 	@echo "<<< Leaving $@"
 
+# Dependency ordering for parallel builds: lib must finish before
+# anything that links against it.
+sys sbin bin usr.bin usr.lib usr.man: | lib
+
 
 clean:
 	@for dir in $(SUBDIRS); do \
