@@ -10,6 +10,7 @@
 #include <include/sys/proc.h>
 #include <pm/pm.h>
 #include <kern/sched.h>
+#include <kern/time.h>
 #include <kern/cmdline.h>
 #include <exec/perso/personality.h>
 #include <arch/i386/pmap.h>
@@ -28,7 +29,6 @@
 #include <sys/kobject.h>
 
 /* External declarations */
-extern uint32_t get_time(void);
 extern uint32_t pmm_get_total_memory(void);    /* from PMM */
 extern uint32_t pmm_get_free_memory(void);     /* from PMM */
 extern filesystem_t *vfs_get_filesystems(void); /* from VFS */

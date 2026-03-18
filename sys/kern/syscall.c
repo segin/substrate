@@ -12,6 +12,7 @@
 #include <kern/version.h>
 #include <kern/panic.h>
 #include <kern/console.h>
+#include <kern/time.h>
 #include <exec/perso/personality.h>
 #include <pm/pm.h>
 #include <vm/vm_kmem.h>
@@ -220,12 +221,21 @@ int kern_write(int fd, const char *buf, int len) {
 
 int truncate_fs(fs_node_t *node, off_t length) {
     if (node->truncate != 0) {
-        return node->truncate(node, length);
+        int ret = node->truncate(node, length);
+        if (ret == 0) {
+            time_t now = get_time();
+            node->mtime = now;
+            node->ctime = now;
+        }
+        return ret;
     }
     
-    // Default: just update length if file is regular
+    /* Default: just update length if file is regular */
     if ((node->flags & 0x7) == FS_FILE) {
         node->length = length;
+        time_t now = get_time();
+        node->mtime = now;
+        node->ctime = now;
         return 0;
     }
     
@@ -1239,7 +1249,12 @@ int kern_link(const char *oldpath, const char *newpath) {
     if ((parent->flags & 0x07) != FS_DIRECTORY) return -ENOTDIR;
     if (parent->finddir && parent->finddir(parent, file) != NULL) return -EEXIST;
 
-    return link_fs(parent, source, file);
+    int ret = link_fs(parent, source, file);
+    if (ret == 0) {
+        /* POSIX: ctime of source must be updated on link */
+        source->ctime = get_time();
+    }
+    return ret;
 }
 
 int sys_symlink(const char *target, const char *linkpath) {
@@ -1484,6 +1499,7 @@ int sys_chmod(const char *path, int mode) {
     }
 
     node->mask = (uint32_t)(mode & 07777);
+    node->ctime = get_time();
     close_fs(node);
     return 0;
 }
@@ -1505,6 +1521,7 @@ int sys_lchown(const char *path, int uid, int gid) {
 
     if (uid != (int)-1) node->uid = (uint32_t)uid;
     if (gid != (int)-1) node->gid = (uint32_t)gid;
+    node->ctime = get_time();
     close_fs(node);
     return 0;
 }
@@ -1522,6 +1539,7 @@ int sys_fchmod(int fd, int mode) {
         return -EPERM;
 
     node->mask = (uint32_t)(mode & 07777);
+    node->ctime = get_time();
     return 0;
 }
 
@@ -1538,6 +1556,7 @@ int sys_fchown(int fd, int uid, int gid) {
 
     if (uid != -1) node->uid = (uint32_t)uid;
     if (gid != -1) node->gid = (uint32_t)gid;
+    node->ctime = get_time();
     return 0;
 }
 

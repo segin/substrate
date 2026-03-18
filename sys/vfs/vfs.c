@@ -7,6 +7,7 @@
 
 #include <string.h>
 #include <kern/console.h>
+#include <kern/time.h>
 #include <stdio.h>
 #include <sys/poll.h>
 #include <sys/proc.h>
@@ -230,11 +231,7 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
 size_t read_fs(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     if (node->read != 0) {
         size_t result = node->read(node, offset, size, buffer);
-        
-        // Update access time
-        extern int64_t get_time(void);
         node->atime = get_time();
-        
         return result;
     } else
         return 0;
@@ -243,13 +240,9 @@ size_t read_fs(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
 size_t write_fs(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     if (node->write != 0) {
         size_t result = node->write(node, offset, size, buffer);
-        
-        // Update modification and change times
-        extern int64_t get_time(void);
         int64_t now = get_time();
         node->mtime = now;
         node->ctime = now;
-        
         return result;
     } else
         return 0;
@@ -267,9 +260,12 @@ void close_fs(fs_node_t *node) {
 }
 
 struct dirent *readdir_fs(fs_node_t *node, uint64_t index) {
-    if ((node->flags & 0x7) == FS_DIRECTORY && node->readdir != 0)
-        return node->readdir(node, index);
-    else
+    if ((node->flags & 0x7) == FS_DIRECTORY && node->readdir != 0) {
+        struct dirent *de = node->readdir(node, index);
+        if (de)
+            node->atime = get_time();
+        return de;
+    } else
         return 0;
 }
 

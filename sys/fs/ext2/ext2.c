@@ -1,6 +1,7 @@
 #include <fs/ext2/ext2.h>
 #include <vfs/vfs.h>
 #include <kern/console.h>
+#include <kern/time.h>
 #include <string.h>
 #include <vm/vm_kmem.h>
 #include <vm/uma.h>
@@ -527,9 +528,10 @@ uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size, const 
         inode->i_size = offset;
     }
 
-    // Update modification time
-    extern int64_t get_time(void);
-    inode->i_mtime = (uint32_t)get_time();
+    /* Update modification and change times */
+    time_t now = get_time();
+    inode->i_mtime = (uint32_t)now;
+    inode->i_ctime = (uint32_t)now;
     
     mutex_unlock(&node->lock);
     return total_written;
@@ -1135,7 +1137,6 @@ uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
                 // Initialize the inode
                 ext2_inode_t inode;
                 memset(&inode, 0, sizeof(ext2_inode_t));
-                extern int64_t get_time(void);
                 uint32_t now = (uint32_t)get_time();
                 inode.i_ctime = now;
                 inode.i_mtime = now;
@@ -1289,7 +1290,6 @@ int ext2_truncate(fs_node_t *node, off_t length) {
     mutex_lock(&ctx->lock);
     int ret = ext2_free_inode_blocks(fs, &ctx->inode);
     if (ret == 0) {
-        extern int64_t get_time(void);
         uint32_t now = (uint32_t)get_time();
         ctx->inode.i_mtime = now;
         ctx->inode.i_ctime = now;
@@ -1381,7 +1381,7 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
                 
                 ext2_write_block(fs, block_num, block_buf);
                 result = 0;
-                goto cleanup;
+                goto done;
             }
             
             // Can we reuse a deleted entry?
@@ -1393,7 +1393,7 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
                 
                 ext2_write_block(fs, block_num, block_buf);
                 result = 0;
-                goto cleanup;
+                goto done;
             }
             
             block_off += de->rec_len;
@@ -1430,12 +1430,13 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
     
     ext2_write_block(fs, new_block, block_buf);
     
-    // Update directory size
+    // Update directory size and timestamps
     ctx->inode.i_size += fs->block_size;
     ctx->inode.i_blocks += (fs->block_size / 512);
     
-    extern int64_t get_time(void);
-    ctx->inode.i_mtime = (uint32_t)get_time();
+    uint32_t now = (uint32_t)get_time();
+    ctx->inode.i_mtime = now;
+    ctx->inode.i_ctime = now;
     
     ext2_write_inode(fs, ctx->inode_num, &ctx->inode);
     result = 0;
@@ -1443,6 +1444,16 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
     // Invalidate readdir cache
     ctx->last_readdir_idx = (uint64_t)-1;
     ctx->last_readdir_pos = 0;
+    goto cleanup;
+
+done:
+    /* Update parent dir timestamps for slot reuse/split paths */
+    {
+        uint32_t now = (uint32_t)get_time();
+        ctx->inode.i_mtime = now;
+        ctx->inode.i_ctime = now;
+        ext2_write_inode(fs, ctx->inode_num, &ctx->inode);
+    }
 
 cleanup:
     mutex_unlock(&ctx->lock);
@@ -1520,9 +1531,10 @@ static int ext2_remove_entry(fs_node_t *dir, const char *name) {
                 
                 ext2_write_block(fs, block_num, block_buf);
                 
-                // Update directory mtime
-                extern int64_t get_time(void);
-                ctx->inode.i_mtime = (uint32_t)get_time();
+                // Update directory mtime and ctime
+                uint32_t now = (uint32_t)get_time();
+                ctx->inode.i_mtime = now;
+                ctx->inode.i_ctime = now;
                 ext2_write_inode(fs, ctx->inode_num, &ctx->inode);
                 
                 result = 0;
@@ -1578,7 +1590,6 @@ static int ext2_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t 
     if (type == S_IFCHR || type == S_IFBLK) {
         inode.i_block[0] = dev;
     }
-    extern int64_t get_time(void);
     uint32_t now = (uint32_t)get_time();
     inode.i_atime = now;
     inode.i_mtime = now;
@@ -1617,7 +1628,6 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
     inode.i_gid = 0;
     inode.i_links_count = 1;
     inode.i_size = target_len;
-    extern int64_t get_time(void);
     uint32_t now = (uint32_t)get_time();
     inode.i_atime = now;
     inode.i_mtime = now;
@@ -1696,7 +1706,6 @@ static int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
     memset(&inode, 0, sizeof(inode));
     memset(block_buf, 0, fs->block_size);
 
-    extern int64_t get_time(void);
     now = (uint32_t)get_time();
 
     inode.i_mode = (uint16_t)(S_IFDIR | (permission & 0777));
@@ -1787,7 +1796,6 @@ static int ext2_unlink(fs_node_t *dir, const char *name) {
     }
 
     if (victim_ctx->inode.i_links_count == 0) {
-        extern int64_t get_time(void);
         victim_ctx->inode.i_dtime = (uint32_t)get_time();
         ret = ext2_free_inode_blocks(fs, &victim_ctx->inode);
         if (ret != 0) return ret;
@@ -1798,6 +1806,8 @@ static int ext2_unlink(fs_node_t *dir, const char *name) {
         memset(&victim_ctx->inode, 0, sizeof(victim_ctx->inode));
         victim->length = 0;
     } else {
+        /* Update ctime: link count changed */
+        victim_ctx->inode.i_ctime = (uint32_t)get_time();
         if (ext2_write_inode(fs, victim_ctx->inode_num, &victim_ctx->inode) != 0) {
             return -EIO;
         }
@@ -1848,7 +1858,6 @@ static int ext2_rmdir(fs_node_t *dir, const char *name) {
         dir_ctx->inode.i_links_count--;
     }
 
-    extern int64_t get_time(void);
     dir_ctx->inode.i_mtime = (uint32_t)get_time();
     dir_ctx->inode.i_ctime = dir_ctx->inode.i_mtime;
     if (ext2_write_inode(fs, dir_ctx->inode_num, &dir_ctx->inode) != 0) {
