@@ -89,6 +89,7 @@ bool rw_wowned(rwlock_t *rw);
 #define LK_WANT_EXCL    0x0200  /* Exclusive lock wanted */
 #define LK_WANT_DRAIN   0x0400  /* Drain requested */
 #define LK_DRAINED      0x0800  /* Lock has been drained */
+#define LK_WANT_UPGRADE 0x1000  /* Upgrade in progress */
 
 struct lock {
     spinlock_t      lk_interlock;       /* Protects lock fields */

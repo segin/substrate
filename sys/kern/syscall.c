@@ -1469,12 +1469,43 @@ int sys_dup2(int oldfd, int newfd) {
 }
 
 int sys_chmod(const char *path, int mode) {
-    (void)path; (void)mode;
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
+    fs_node_t *start = (kpath[0] == '/') ? root : cwd;
+    fs_node_t *node = vfs_lookup(start, kpath);
+    if (!node) return -ENOENT;
+
+    /* Only root or owner may chmod */
+    if (current_process->euid != 0 && current_process->euid != node->uid) {
+        close_fs(node);
+        return -EPERM;
+    }
+
+    node->mask = (uint32_t)(mode & 07777);
+    close_fs(node);
     return 0;
 }
 
 int sys_lchown(const char *path, int uid, int gid) {
-    (void)path; (void)uid; (void)gid;
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
+    fs_node_t *start = (kpath[0] == '/') ? root : cwd;
+    fs_node_t *node = vfs_lookup_lstat(start, kpath);
+    if (!node) return -ENOENT;
+
+    /* Only root may chown */
+    if (current_process->euid != 0) {
+        close_fs(node);
+        return -EPERM;
+    }
+
+    if (uid != (int)-1) node->uid = (uint32_t)uid;
+    if (gid != (int)-1) node->gid = (uint32_t)gid;
+    close_fs(node);
     return 0;
 }
 
@@ -1485,6 +1516,11 @@ int sys_fchmod(int fd, int mode) {
     if (!f || !f->f_data) return -EBADF;
 
     fs_node_t *node = (fs_node_t *)f->f_data;
+
+    /* Only root or owner may chmod */
+    if (current_process->euid != 0 && current_process->euid != node->uid)
+        return -EPERM;
+
     node->mask = (uint32_t)(mode & 07777);
     return 0;
 }
@@ -1496,6 +1532,9 @@ int sys_fchown(int fd, int uid, int gid) {
     if (!f || !f->f_data) return -EBADF;
 
     fs_node_t *node = (fs_node_t *)f->f_data;
+
+    /* Only root may chown */
+    if (current_process->euid != 0) return -EPERM;
 
     if (uid != -1) node->uid = (uint32_t)uid;
     if (gid != -1) node->gid = (uint32_t)gid;

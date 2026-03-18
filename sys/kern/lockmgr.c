@@ -147,19 +147,26 @@ lockmgr(struct lock *lkp, uint32_t flags, spinlock_t *interlock)
     case LK_UPGRADE:
         /*
          * Upgrade from shared to exclusive.
-         * Release our shared hold, then acquire exclusive.
+         * Only one upgrader is permitted at a time; if another thread
+         * is already upgrading, fail with EBUSY (caller must release
+         * the shared lock and re-acquire exclusive).
          */
         if (lkp->lk_sharecount == 0) {
             panic("lockmgr: upgrade without shared lock");
         }
+        if (lkp->lk_flags & LK_WANT_UPGRADE) {
+            /* Another upgrader is already waiting - cannot proceed */
+            error = EBUSY;
+            break;
+        }
         lkp->lk_sharecount--;
-        lkp->lk_flags |= LK_WANT_EXCL;
+        lkp->lk_flags |= LK_WANT_EXCL | LK_WANT_UPGRADE;
         while (lkp->lk_sharecount > 0 ||
                (lkp->lk_flags & LK_HAVE_EXCL)) {
             if (flags & LK_NOWAIT) {
                 /* Restore shared hold on failure */
                 lkp->lk_sharecount++;
-                lkp->lk_flags &= ~LK_WANT_EXCL;
+                lkp->lk_flags &= ~(LK_WANT_EXCL | LK_WANT_UPGRADE);
                 error = EBUSY;
                 break;
             }
@@ -175,7 +182,7 @@ lockmgr(struct lock *lkp, uint32_t flags, spinlock_t *interlock)
             lkp->lk_waitcount--;
         }
         if (error == 0) {
-            lkp->lk_flags &= ~LK_WANT_EXCL;
+            lkp->lk_flags &= ~(LK_WANT_EXCL | LK_WANT_UPGRADE);
             lkp->lk_flags |= LK_HAVE_EXCL;
             lkp->lk_lockholder = td;
             lkp->lk_exclusivecount = 1;

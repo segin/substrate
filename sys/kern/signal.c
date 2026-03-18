@@ -169,13 +169,17 @@ int kern_sigsuspend(const uint32_t *mask) {
         current_thread->sig_mask = *mask;
     }
     
-    // Sleep until a signal arrives
+    /* Mark interruptible so psignal() can wake us */
+    current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+    
+    /* Sleep until a signal arrives that is not masked */
     while (!(current_thread->sig_pending & ~current_thread->sig_mask)) {
         sched_sleep(&current_thread->sig_pending);
     }
     
+    current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
     current_thread->sig_mask = old_mask;
-    return -1; // Always returns -1 (EINTR orphan) but personalidad might translate
+    return -1; /* Always returns -1 (EINTR) per POSIX */
 }
 
 int kern_sigaltstack(const stack_t *ss, stack_t *oss) {
@@ -250,43 +254,40 @@ int sys_sigwait(const uint32_t *set, int *sig) {
 }
 
 int kern_sigwait(const uint32_t *set, int *sig) {
-    if (!set || !sig) return 22; // EINVAL
+    if (!set || !sig) return 22; /* EINVAL */
     
     uint32_t wait_mask = *set;
     
-    // Cannot wait for SIGKILL or SIGSTOP
+    /* Cannot wait for SIGKILL or SIGSTOP */
     wait_mask &= ~(sigmask(SIGKILL) | sigmask(SIGSTOP));
     
-    if (wait_mask == 0) return 22; // EINVAL - no valid signals
+    if (wait_mask == 0) return 22; /* EINVAL - no valid signals */
     
-    // Block until a signal in wait_mask becomes pending
+    current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+    
+    /* Block until a signal in wait_mask becomes pending */
     while (1) {
         uint32_t deliverable = current_thread->sig_pending & wait_mask;
         
         if (deliverable) {
-            // Find the first matching signal
+            /* Find the first matching signal */
             for (int i = 0; i < NSIG; i++) {
                 if (deliverable & (1 << i)) {
                     int signal = i + 1;
-                    // Remove from pending (consume it)
                     current_thread->sig_pending &= ~sigmask(signal);
-                    // Return signal number
                     *sig = signal;
-                    return 0; // Success
+                    current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+                    return 0;
                 }
             }
         }
         
-        // No matching signal pending, sleep and retry
         sched_sleep(&current_thread->sig_pending);
         
-        // Check if we were woken by a non-matching signal that's unmasked
-        // (which would normally trigger handler delivery)
         uint32_t other_pending = current_thread->sig_pending & ~current_thread->sig_mask & ~wait_mask;
         if (other_pending) {
-            // Let the normal signal delivery mechanism handle it
-            // We return EINTR so the syscall can be restarted
-            return 4; // EINTR
+            current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+            return 4; /* EINTR */
         }
     }
 }
@@ -338,22 +339,25 @@ int kern_sigtimedwait(const uint32_t *set, siginfo_t *info,
         use_timeout = 1;
     }
     
-    // Check for immediately available signal
+    /* Check for immediately available signal */
     uint32_t deliverable = current_thread->sig_pending & wait_mask;
     
     if (!deliverable && use_timeout) {
         uint64_t now = get_ticks();
         if (now >= deadline) {
-             return -11; // EAGAIN
+             return -11; /* EAGAIN */
         }
     }
     
-    // Block until signal available (if no timeout)
+    current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+    
+    /* Block until signal available (if no timeout) */
     while (!deliverable) {
         if (use_timeout) {
             uint64_t now = get_ticks();
             if (now >= deadline) {
-                 return -11; // EAGAIN
+                 current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+                 return -11; /* EAGAIN */
             }
             current_thread->sleep_expiry = deadline;
         }
@@ -366,12 +370,14 @@ int kern_sigtimedwait(const uint32_t *set, siginfo_t *info,
 
         deliverable = current_thread->sig_pending & wait_mask;
         
-        // Check for interruption by other signals
         uint32_t other_pending = current_thread->sig_pending & ~current_thread->sig_mask & ~wait_mask;
         if (other_pending) {
-            return -4; // EINTR
+            current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+            return -4; /* EINTR */
         }
     }
+    
+    current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
     
     // Find the first matching signal
     int signal = 0;

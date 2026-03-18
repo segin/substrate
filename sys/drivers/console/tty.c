@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <vm/vm_kmem.h>
 #include <kern/sched.h>
+#include <kern/time.h>
 #include <sys/poll.h>
 #include <sys/errno.h>
 #include <sys/param.h>
@@ -55,6 +56,8 @@ void tty_default_termios(struct termios *t) {
     t->c_cc[VSTART] = 17; // ^Q
     t->c_cc[VSTOP] = 19;  // ^S
     t->c_cc[VWERASE] = 23; // ^W
+    t->c_cc[VMIN] = 1;    // Default: block until 1 char
+    t->c_cc[VTIME] = 0;   // Default: no timeout
 }
 // ...
 // VFS Proxy functions for specific TTY devices
@@ -679,23 +682,103 @@ int tty_read(struct tty *tty, char *buf, int len) {
     TTY_LOCK(tty);
 
     if (tty_check_read(tty)) {
-        // Should restart syscall or return EINTR
-        // For now return 0 or -1?
-        // Returning 0 might be interpreted as EOF.
-        // Returning -1 and setting errno = EINTR is correct.
-        // But we don't have errno access here easily.
-        // Assume syscall wrapper handles signal interruption.
         TTY_UNLOCK(tty);
         return -EINTR;
     }
     
-    // If read_buf is empty, canonicalize a line
-    // Loop helps handle partial reads or retries
     int count = 0;
     
+    if (!(tty->termios.c_lflag & ICANON)) {
+        /*
+         * Non-canonical mode: implement POSIX VMIN/VTIME semantics.
+         *   MIN>0, TIME=0: Block until MIN chars
+         *   MIN=0, TIME>0: Timer from start, return what we got
+         *   MIN>0, TIME>0: Timer starts after first char, wait for MIN
+         *   MIN=0, TIME=0: Return immediately with available data
+         */
+        cc_t vmin = tty->termios.c_cc[VMIN];
+        cc_t vtime = tty->termios.c_cc[VTIME];
+        int minchars = (vmin < (cc_t)len) ? vmin : (cc_t)len;
+        uint64_t deadline = 0;
+        int timer_started = 0;
+
+        if (vmin == 0 && vtime == 0) {
+            /* Polling: return whatever is in raw_buf now */
+            while (count < len && tty->raw_buf.head != tty->raw_buf.tail) {
+                char c;
+                if (tty_buf_get(&tty->raw_buf, &c)) {
+                    if (c == (char)0xFF) {
+                        tty->delct--;
+                        continue;
+                    }
+                    buf[count++] = c;
+                }
+            }
+            TTY_UNLOCK(tty);
+            return count;
+        }
+
+        if (vmin == 0 && vtime > 0) {
+            /* Start timer immediately */
+            deadline = get_ticks() + ((uint64_t)vtime * HZ + 9) / 10;
+            timer_started = 1;
+        }
+
+        while (count < len) {
+            /* Try to read from raw_buf */
+            while (count < len && tty->raw_buf.head != tty->raw_buf.tail) {
+                char c;
+                if (tty_buf_get(&tty->raw_buf, &c)) {
+                    if (c == (char)0xFF) {
+                        tty->delct--;
+                        continue;
+                    }
+                    buf[count++] = c;
+                    /* MIN>0, TIME>0: start timer after first char */
+                    if (vmin > 0 && vtime > 0 && !timer_started) {
+                        deadline = get_ticks() + ((uint64_t)vtime * HZ + 9) / 10;
+                        timer_started = 1;
+                    }
+                }
+            }
+
+            /* Check completion conditions */
+            if (vmin == 0) {
+                /* MIN=0: return whatever we have (timer may still be active) */
+                if (count > 0)
+                    break;
+                /* Check timeout */
+                if (timer_started && get_ticks() >= deadline)
+                    break;
+            } else {
+                /* MIN>0: need at least minchars */
+                if (count >= minchars)
+                    break;
+                /* If timer active and expired, return what we have */
+                if (timer_started && get_ticks() >= deadline)
+                    break;
+            }
+
+            /* Sleep waiting for input */
+            current_thread->wait_chan = &tty->read_wait;
+            current_thread->state = THREAD_BLOCKED;
+            spinlock_release(&tty->lock);
+            intr_restore(_flags);
+
+            sched_yield();
+
+            _flags = intr_disable();
+            spinlock_acquire(&tty->lock);
+        }
+
+        TTY_UNLOCK(tty);
+        return count;
+    }
+
+    /* Canonical mode: use canon() for line-buffered reads */
     while (count < len) {
         if (tty->read_buf.head == tty->read_buf.tail) {
-            int eof = canon(tty, &_flags); // Blocks until line available. Releases/reacquires lock.
+            int eof = canon(tty, &_flags);
             if (eof && tty->read_buf.head == tty->read_buf.tail) {
                 TTY_UNLOCK(tty);
                 return count;
@@ -706,27 +789,18 @@ int tty_read(struct tty *tty, char *buf, int len) {
             char c;
             if (tty_buf_get(&tty->read_buf, &c)) {
                 buf[count++] = c;
-                // In canonical mode, return on newline
-                if ((tty->termios.c_lflag & ICANON) && c == '\n') {
+                if (c == '\n') {
                     TTY_UNLOCK(tty);
                     return count;
                 }
             } else {
-                break; // read_buf empty, need more canon
+                break;
             }
         }
         
-        if (tty->termios.c_lflag & ICANON) {
-             if (count > 0) {
-                 TTY_UNLOCK(tty);
-                 return count; // Return processed line
-             }
-        } else {
-             // Raw mode: return whatever we got
-             if (count > 0) {
-                 TTY_UNLOCK(tty);
-                 return count;
-             }
+        if (count > 0) {
+            TTY_UNLOCK(tty);
+            return count;
         }
     }
     TTY_UNLOCK(tty);
