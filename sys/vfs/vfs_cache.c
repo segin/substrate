@@ -32,7 +32,7 @@ int vfs_cache_limit = 10240;
 int vfs_cache_count = 0;
 
 /* Reader/writer lock for SMP scalability */
-static spinlock_t nchash_lock;
+static rwlock_t nchash_lock;
 
 /* Simple hash function for name cache */
 static uint32_t
@@ -55,6 +55,8 @@ cache_lookup(struct vnode *dvp, struct vnode **vpp, const char *name, size_t len
     uint32_t hash = cache_hash(dvp, name, len);
     struct namecache *ncp;
 
+    rw_wlock(&nchash_lock);
+
     LIST_FOREACH(ncp, &nchash[hash], nc_hash) {
         if (ncp->nc_dvp == dvp && ncp->nc_nlen == len &&
             memcmp(ncp->nc_name, name, len) == 0) {
@@ -65,6 +67,7 @@ cache_lookup(struct vnode *dvp, struct vnode **vpp, const char *name, size_t len
                 *vpp = NULL;
                 TAILQ_REMOVE(&nclru, ncp, nc_lru);
                 TAILQ_INSERT_TAIL(&nclru, ncp, nc_lru);
+                rw_wunlock(&nchash_lock);
                 return ENOENT;
             }
             *vpp = ncp->nc_vp;
@@ -73,10 +76,12 @@ cache_lookup(struct vnode *dvp, struct vnode **vpp, const char *name, size_t len
             /* Move to tail of LRU (most recently used) */
             TAILQ_REMOVE(&nclru, ncp, nc_lru);
             TAILQ_INSERT_TAIL(&nclru, ncp, nc_lru);
+            rw_wunlock(&nchash_lock);
             return 0;
         }
     }
 
+    rw_wunlock(&nchash_lock);
     return ENOENT;
 }
 
@@ -92,6 +97,8 @@ cache_enter(struct vnode *dvp, struct vnode *vp, const char *name, size_t len)
     uint32_t hash = cache_hash(dvp, name, len);
     struct namecache *ncp;
 
+    rw_wlock(&nchash_lock);
+
     /* Check if already in cache */
     LIST_FOREACH(ncp, &nchash[hash], nc_hash) {
         if (ncp->nc_dvp == dvp && ncp->nc_nlen == len &&
@@ -101,13 +108,17 @@ cache_enter(struct vnode *dvp, struct vnode *vp, const char *name, size_t len)
             if (ncp->nc_vp != vp) {
                 ncp->nc_vp = vp;
             }
+            rw_wunlock(&nchash_lock);
             return;
         }
     }
 
     /* Allocate new cache entry */
     ncp = kmalloc(sizeof(struct namecache) + len + 1);
-    if (ncp == NULL) return;
+    if (ncp == NULL) {
+        rw_wunlock(&nchash_lock);
+        return;
+    }
 
     /* Enforce cache limit */
     if (vfs_cache_count >= vfs_cache_limit) {
@@ -129,6 +140,8 @@ cache_enter(struct vnode *dvp, struct vnode *vp, const char *name, size_t len)
     LIST_INSERT_HEAD(&nchash[hash], ncp, nc_hash);
     TAILQ_INSERT_TAIL(&nclru, ncp, nc_lru);
     vfs_cache_count++;
+
+    rw_wunlock(&nchash_lock);
 }
 
 /*
@@ -140,6 +153,8 @@ cache_purge(struct vnode *vp)
 {
     struct namecache *ncp, *tncp;
 
+    rw_wlock(&nchash_lock);
+
     for (int i = 0; i < NCHASH_SIZE; i++) {
         LIST_FOREACH_SAFE(ncp, &nchash[i], nc_hash, tncp) {
             if (ncp->nc_dvp == vp || ncp->nc_vp == vp) {
@@ -150,6 +165,8 @@ cache_purge(struct vnode *vp)
             }
         }
     }
+
+    rw_wunlock(&nchash_lock);
 }
 
 /*
@@ -162,7 +179,7 @@ nchinit(void)
         LIST_INIT(&nchash[i]);
     }
     TAILQ_INIT(&nclru);
-    spinlock_init(&nchash_lock, "nchash");
+    rwlock_init(&nchash_lock, "nchash");
 }
 
 /*
@@ -174,6 +191,8 @@ cache_purgevfs(struct mount *mp)
 {
     struct namecache *ncp, *tncp;
 
+    rw_wlock(&nchash_lock);
+
     for(int i = 0; i < NCHASH_SIZE; i++) {
         LIST_FOREACH_SAFE(ncp, &nchash[i], nc_hash, tncp) {
             if(ncp->nc_dvp && ncp->nc_dvp->v_mount == mp) {
@@ -184,4 +203,6 @@ cache_purgevfs(struct mount *mp)
             }
         }
     }
+
+    rw_wunlock(&nchash_lock);
 }

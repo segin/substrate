@@ -80,13 +80,7 @@ enum vtagtype {
 #define VACCESSTIME 0x2000  /* Access time needs update */
 #define VEXECMAP    0x4000  /* Vnode mapped for exec */
 
-/*
- * Lock operations for vn_lock
- */
-#define LK_SHARED       0x01    /* Shared lock */
-#define LK_EXCLUSIVE    0x02    /* Exclusive lock */
-#define LK_NOWAIT       0x10    /* Don't wait for lock */
-#define LK_RETRY        0x20    /* Retry on failure */
+/* Lock operations for vn_lock are defined in <sys/lock.h> */
 
 /*
  * vop_open:
@@ -120,8 +114,7 @@ struct vnode {
     
     /* Locking */
     spinlock_t      v_interlock;    /* Protects vnode fields */
-    uint32_t        v_lockstate;    /* Current lock state */
-    struct thread   *v_lockowner;   /* Current exclusive lock owner */
+    struct lock     v_lock;         /* Lockmgr shared/exclusive lock */
     
     /* LRU list linkage (for vnode cache) */
     struct vnode    *v_freelist_next;

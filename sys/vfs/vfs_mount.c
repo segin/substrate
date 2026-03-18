@@ -60,6 +60,7 @@ vfs_mount(struct mount *mp, const char *path, void *data, struct nameidata *ndp,
      * Initialize mount structure 
      */
     TAILQ_INIT(&mp->mnt_vnodelist);
+    rwlock_init(&mp->mnt_lock, "mnt_lock");
     mp->mnt_vnodecovered = vp;
     
     /*
@@ -101,15 +102,20 @@ int
 vfs_unmount(struct mount *mp, int mntflags, struct thread *td)
 {
     int error;
-    
+
+    /* Acquire mount write lock to prevent concurrent operations */
+    rw_wlock(&mp->mnt_lock);
+
     /*
      * Check if filesystem is busy (open files, etc.)
      */
     if ((mntflags & MNT_FORCE) == 0) {
         struct vnode *vp;
         TAILQ_FOREACH(vp, &mp->mnt_vnodelist, v_mntlist) {
-            if (vp->v_usecount > 0)
+            if (vp->v_usecount > 0) {
+                rw_wunlock(&mp->mnt_lock);
                 return EBUSY;
+            }
         }
     }
 
@@ -118,8 +124,10 @@ vfs_unmount(struct mount *mp, int mntflags, struct thread *td)
      */
     if (mp->mnt_op && mp->mnt_op->vfs_unmount) {
         error = mp->mnt_op->vfs_unmount(mp, mntflags, td);
-        if (error)
+        if (error) {
+            rw_wunlock(&mp->mnt_lock);
             return error;
+        }
     }
 
     /*
@@ -132,6 +140,7 @@ vfs_unmount(struct mount *mp, int mntflags, struct thread *td)
 
     /* Remove from global list and free */
     TAILQ_REMOVE(&mountlist, mp, mnt_list);
+    rw_wunlock(&mp->mnt_lock);
     kfree(mp, sizeof(struct mount));
 
     return 0;
@@ -159,15 +168,21 @@ vfs_root(struct mount *mp, struct vnode **vpp)
     struct vnode *vp;
     int error;
 
+    rw_rlock(&mp->mnt_lock);
+
     if (mp->mnt_op && mp->mnt_op->vfs_root) {
         error = mp->mnt_op->vfs_root(mp, &vp);
-        if (error)
+        if (error) {
+            rw_runlock(&mp->mnt_lock);
             return error;
+        }
         
         *vpp = vp;
+        rw_runlock(&mp->mnt_lock);
         return 0;
     }
     
+    rw_runlock(&mp->mnt_lock);
     return EOPNOTSUPP;
 }
 
