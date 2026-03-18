@@ -78,6 +78,7 @@ The kernel remains monolithic and is organized into logical layers:
 - **VFS Locking (`lockmgr`):** BSD-style lock manager in `sys/kern/lockmgr.c` providing `struct lock` with shared/exclusive/upgrade/downgrade/drain modes and priority inheritance via turnstiles. Vnode locking (`vn_lock`/`vn_unlock`) delegates to `lockmgr()`. Name cache protected by `rwlock_t`. Mount points protected by `rwlock_t mnt_lock`. Buffer cache uses per-buffer `B_BUSY` flag with `spinlock_t` + `sleepq`.
 - **Device Model:** See `docs/specs/driver_model.md`.
 - **Console and VT:** See `docs/specs/driver_tty.md` and `docs/specs/driver_vt.md`.
+- **Framebuffer Rendering:** PSF1/PSF2/BDF/PCF font parsers (`psf.c`, `bdf_pcf.c`), glyph cache with Unicode mapping (`font_cache.c`), blitting operations with 32bpp fast paths (`fb_ops.c`), and attributed character rendering with bold/italic/underline/strikethrough/reverse (`fb_console.c`). All in `sys/drivers/video/`.
 - **Personalities:** See `docs/specs/personality_targets.md` and `docs/specs/personality_elks.md`.
 
 ## 6. Userland and Libraries

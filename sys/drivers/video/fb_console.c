@@ -11,6 +11,7 @@
 #include <sys/vt.h>
 #include "fb.h"
 #include "fb_console.h"
+#include "fb_ops.h"
 #include "font.h"
 
 /* ==================== Constants ==================== */
@@ -20,7 +21,6 @@
 
 #define FB_COLOR_WHITE       0x00FFFFFF
 #define FB_COLOR_BLACK       0x00000000
-#define FB_COLOR_TRANSPARENT 0xFFFFFFFF
 
 /* ==================== State ==================== */
 
@@ -194,5 +194,124 @@ void fb_write(const char *s, size_t n) {
     if (!fb_active) return;
     for (size_t i = 0; i < n; i++) {
         fb_putc(s[i], FB_COLOR_WHITE, FB_COLOR_BLACK);
+    }
+}
+
+/* ==================== Attributed Character Rendering ==================== */
+
+void fb_putc_attr(char c, uint32_t fg, uint32_t bg, uint8_t attr) {
+    if (!fb_active) return;
+
+    /* Handle reverse video: swap fg and bg */
+    if (attr & FB_ATTR_REVERSE) {
+        uint32_t tmp = fg;
+        fg = bg;
+        bg = tmp;
+    }
+
+    if (c == '\n' || c == '\r') {
+        /* Control characters delegate to normal fb_putc (no glyph) */
+        fb_putc(c, fg, bg);
+        return;
+    }
+
+    /* Get base glyph */
+    const uint8_t *glyph = &font_8x16[(unsigned char)c * 16];
+    int draw_y = cursor_y + view_y_offset;
+
+    /* Build a modified glyph with attributes applied */
+    uint8_t modified[FB_FONT_HEIGHT];
+    for (int y = 0; y < FB_FONT_HEIGHT; y++)
+        modified[y] = glyph[y];
+
+    /* Bold: shift glyph right by 1 and OR with original (double-strike) */
+    if (attr & FB_ATTR_BOLD) {
+        for (int y = 0; y < FB_FONT_HEIGHT; y++)
+            modified[y] |= (modified[y] >> 1);
+    }
+
+    /* Italic: shear transform — shift upper rows right, lower rows left.
+     * The shear is 2 pixels over the full glyph height:
+     *   top quarter: shift right 2
+     *   second quarter: shift right 1
+     *   third quarter: no shift
+     *   bottom quarter: shift left 1 (but clamp to avoid losing bits)
+     */
+    if (attr & FB_ATTR_ITALIC) {
+        for (int y = 0; y < FB_FONT_HEIGHT; y++) {
+            int quarter = y * 4 / FB_FONT_HEIGHT;
+            switch (quarter) {
+            case 0: modified[y] >>= 2; break;
+            case 1: modified[y] >>= 1; break;
+            case 2: break;  /* no shift */
+            case 3: modified[y] <<= 1; break;
+            }
+        }
+    }
+
+    /* Underline: set bottom two rows to solid */
+    if (attr & FB_ATTR_UNDERLINE) {
+        modified[FB_FONT_HEIGHT - 2] = 0xFF;
+        modified[FB_FONT_HEIGHT - 1] = 0xFF;
+    }
+
+    /* Strikethrough: set middle row to solid */
+    if (attr & FB_ATTR_STRIKETHROUGH) {
+        modified[FB_FONT_HEIGHT / 2] = 0xFF;
+        modified[FB_FONT_HEIGHT / 2 + 1] = 0xFF;
+    }
+
+    /* Render the modified glyph */
+    for (int y = 0; y < FB_FONT_HEIGHT; y++) {
+        for (int x = 0; x < FB_FONT_WIDTH; x++) {
+            if (modified[y] & (0x80 >> x)) {
+                fb_putpixel(cursor_x + x, draw_y + y, fg);
+            } else if (bg != FB_COLOR_TRANSPARENT) {
+                fb_putpixel(cursor_x + x, draw_y + y, bg);
+            }
+        }
+    }
+    cursor_x += FB_FONT_WIDTH;
+
+    /* Handle line wrap */
+    if (cursor_x >= (int)fb.width) {
+        cursor_x = 0;
+        cursor_y += FB_FONT_HEIGHT;
+    }
+
+    /* Handle scroll — reuse the same logic from fb_putc */
+    if (cursor_y + FB_FONT_HEIGHT > (int)fb.height) {
+        if (fb.scroll && fb.virt_height >= fb.height * 2) {
+            view_y_offset += FB_FONT_HEIGHT;
+            if (view_y_offset + (int)fb.height > (int)fb.virt_height) {
+                void *dst = fb.addr;
+                int previous_offset = view_y_offset - FB_FONT_HEIGHT;
+                void *src = (void *)((uintptr_t)fb.addr + (previous_offset + FB_FONT_HEIGHT) * fb.pitch);
+                size_t size = (fb.height - FB_FONT_HEIGHT) * fb.pitch;
+                optimized_memcpy(dst, src, size);
+                view_y_offset = 0;
+            }
+            uint32_t clear_color = (bg != FB_COLOR_TRANSPARENT) ? bg : FB_COLOR_BLACK;
+            int clear_y = view_y_offset + (fb.height - FB_FONT_HEIGHT);
+            for (uint32_t fy = 0; fy < FB_FONT_HEIGHT; fy++) {
+                for (uint32_t fx = 0; fx < fb.width; fx++) {
+                    fb_putpixel(fx, clear_y + fy, clear_color);
+                }
+            }
+            fb.scroll(view_y_offset);
+            cursor_y -= FB_FONT_HEIGHT;
+        } else {
+            void *dst = fb.addr;
+            void *src = (void *)((uintptr_t)fb.addr + FB_FONT_HEIGHT * fb.pitch);
+            size_t size = (fb.height - FB_FONT_HEIGHT) * fb.pitch;
+            optimized_memcpy(dst, src, size);
+            uint32_t clear_color = (bg != FB_COLOR_TRANSPARENT) ? bg : FB_COLOR_BLACK;
+            for (uint32_t fy = fb.height - FB_FONT_HEIGHT; fy < fb.height; fy++) {
+                for (uint32_t fx = 0; fx < fb.width; fx++) {
+                    fb_putpixel(fx, fy, clear_color);
+                }
+            }
+            cursor_y -= FB_FONT_HEIGHT;
+        }
     }
 }
