@@ -2041,25 +2041,28 @@ static int lookup_i386_mmx_xmm_convert_from_xmm(const char *mnemonic, unsigned c
     return -1;
 }
 
-static int lookup_i386_movnt_store_family(const char *mnemonic, unsigned char *prefix, int *use_xmm) {
+static int lookup_i386_movnt_store_family(const char *mnemonic, unsigned char *prefix, unsigned char *opcode2,
+                                          int *use_xmm) {
     static const struct {
         const char *mnemonic;
         unsigned char prefix;
+        unsigned char opcode2;
         int use_xmm;
     } map[] = {
-        {"movntq", 0x00, 0},
-        {"movntdq", 0x66, 1},
-        {"movntps", 0x00, 1},
-        {"movntpd", 0x66, 1},
+        {"movntq", 0x00, 0xe7, 0},
+        {"movntdq", 0x66, 0xe7, 1},
+        {"movntps", 0x00, 0x2b, 1},
+        {"movntpd", 0x66, 0x2b, 1},
     };
     size_t i;
 
-    if (mnemonic == NULL || prefix == NULL || use_xmm == NULL) {
+    if (mnemonic == NULL || prefix == NULL || opcode2 == NULL || use_xmm == NULL) {
         return -1;
     }
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
         if (strcmp(mnemonic, map[i].mnemonic) == 0) {
             *prefix = map[i].prefix;
+            *opcode2 = map[i].opcode2;
             *use_xmm = map[i].use_xmm;
             return 0;
         }
@@ -4281,7 +4284,7 @@ static int emit_i386_maskmov(unsigned char prefix, int use_xmm, const as_operand
     return emit_i386_prefixed_0f_rm(prefix, 0xf7, xr, mask, out, out_cap, out_len);
 }
 
-static int emit_i386_movnt_store(unsigned char prefix, int use_xmm, int intel_syntax,
+static int emit_i386_movnt_store(unsigned char prefix, unsigned char opcode2, int use_xmm, int intel_syntax,
                                  const as_instruction_t *insn, unsigned char *out,
                                  size_t out_cap, size_t *out_len) {
     const as_operand_t *src_op;
@@ -4310,7 +4313,7 @@ static int emit_i386_movnt_store(unsigned char prefix, int use_xmm, int intel_sy
             return -1;
         }
     }
-    return emit_i386_prefixed_0f_rm(prefix, 0xe7, xr, dst_op, out, out_cap, out_len);
+    return emit_i386_prefixed_0f_rm(prefix, opcode2, xr, dst_op, out, out_cap, out_len);
 }
 
 static int emit_i386_extrq_insertq_family(const char *mnemonic, const as_instruction_t *insn, int intel_syntax,
@@ -5648,7 +5651,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return emit_i386_movmask_family(mnbuf, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movntq") == 0) {
-        return emit_i386_movnt_store(0x00, 0, intel_syntax, insn, out, out_cap, out_len);
+        return emit_i386_movnt_store(0x00, 0xe7, 0, intel_syntax, insn, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "cvttpd2dq") == 0) {
         return emit_i386_prefixed_xmm_srcdst_rm(0x66, 0xe6, src, dst, out, out_cap, out_len);
@@ -5657,7 +5660,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return emit_i386_prefixed_xmm_srcdst_rm(0xf2, 0xe6, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movntdq") == 0) {
-        return emit_i386_movnt_store(0x66, 1, intel_syntax, insn, out, out_cap, out_len);
+        return emit_i386_movnt_store(0x66, 0xe7, 1, intel_syntax, insn, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "maskmovq") == 0) {
         if (insn->operand_count != 2) {
@@ -6087,13 +6090,14 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
     }
     {
         unsigned char prefix;
+        unsigned char opcode2;
         int use_xmm;
 
-        if (lookup_i386_movnt_store_family(mnbuf, &prefix, &use_xmm) == 0) {
+        if (lookup_i386_movnt_store_family(mnbuf, &prefix, &opcode2, &use_xmm) == 0) {
             if (insn->operand_count != 2) {
                 return -1;
             }
-            return emit_i386_movnt_store(prefix, use_xmm, intel_syntax, insn, out, out_cap, out_len);
+            return emit_i386_movnt_store(prefix, opcode2, use_xmm, intel_syntax, insn, out, out_cap, out_len);
         }
     }
     {

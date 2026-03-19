@@ -5,6 +5,7 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 
 # 8a.1 Encode each instruction, verify bytes vs reference.
 "$ROOT/tests/usr.bin/as/test_x86_legacy_encode.sh"
+"$ROOT/tests/usr.bin/as/test_i386_refactor_tail.sh"
 "$ROOT/tests/usr.bin/as/test_x86_64_encode_ext.sh"
 "$ROOT/tests/usr.bin/as/test_arm_encode_core.sh"
 "$ROOT/tests/usr.bin/as/test_a64_encode_core.sh"
