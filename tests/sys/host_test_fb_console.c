@@ -262,6 +262,21 @@ static void test_tty_ioctl_exposes_framebuffer_controls(void) {
     assert(tty->driver->ioctl(tty, VTIOCGBLINK, (unsigned long)&value) == -1);
 }
 
+static void test_tty_winsize_tracks_framebuffer_geometry(void) {
+    reset_state();
+    fb_console_init();
+
+    assert(test_vts[0].tty != NULL);
+    assert(test_vts[0].tty->winsize.ws_col == 80);
+    assert(test_vts[0].tty->winsize.ws_row == 24);
+
+    memset(&test_ttys[0], 0, sizeof(test_ttys[0]));
+    test_vts[0].tty = &test_ttys[0];
+    fb_console_init();
+    assert(test_vts[0].tty->winsize.ws_col == 80);
+    assert(test_vts[0].tty->winsize.ws_row == 24);
+}
+
 static void test_clear_marks_full_screen_dirty(void) {
     int x;
     int y;
@@ -363,6 +378,7 @@ int main(void) {
     test_init_preserves_existing_vt_ttys();
     test_tty_write_processes_ansi_sequences();
     test_tty_ioctl_exposes_framebuffer_controls();
+    test_tty_winsize_tracks_framebuffer_geometry();
     test_clear_marks_full_screen_dirty();
     test_writes_expand_dirty_rectangle();
     test_tick_batches_and_flushes_dirty_rectangle();

@@ -128,6 +128,11 @@ actually implemented by the graphical console:
 VGA text-blink mode ioctls remain specific to the hardware text backend and are
 rejected by the framebuffer tty path.
 
+Framebuffer VT tty registration also refreshes `winsize` from the active text
+geometry (`ws_col = cols`, `ws_row = visible_rows`) for both newly created tty
+instances and preexisting VT tty ownership. That keeps generic
+`TIOCGWINSZ`/`TIOCSWINSZ` behavior aligned with the framebuffer console layout.
+
 ## Constraints
 - Built-in font is limited to the PSF glyph set (typically 256 or 512 glyphs).
 - BDF/PCF parsers require the full font data to be memory-resident at parse time.

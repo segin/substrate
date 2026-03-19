@@ -73,6 +73,18 @@ static void fb_console_apply_tty_winsize(struct tty *tty) {
     tty->winsize.ws_ypixel = 0;
 }
 
+static void fb_console_refresh_tty_winsizes(void) {
+    int i;
+
+    for (i = 0; i < VT_MAX; i++) {
+        vt_state_t *vt = vt_get_state(i);
+        if (!vt || !vt->tty) {
+            continue;
+        }
+        fb_console_apply_tty_winsize(vt->tty);
+    }
+}
+
 static uint8_t fb_console_effective_color(vt_state_t *vt, uint8_t color) {
     uint8_t fg;
     uint8_t bg;
@@ -1409,6 +1421,7 @@ void fb_console_init(void) {
     }
 
     fb_console_init_ttys_once();
+    fb_console_refresh_tty_winsizes();
 }
 
 /* ==================== Character Rendering ==================== */
