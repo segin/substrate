@@ -1136,7 +1136,7 @@
                     - [x] DECTCEM (cursor visibility). (REQ: REQ-03-0835)
                     - [x] Alternate screen buffer (DECSET 1049). (REQ: REQ-03-0836)
                     - [x] Bracketed paste mode (DECSET 2004). (REQ: REQ-03-0837)
-                - [ ] **Character Sets:** (REQ: REQ-03-0838)
+                - [x] **Character Sets:** <!-- sys/include/kern/ansi_handler.h, sys/drivers/console/ansi_handler.c, tests/sys/host_test_ansi.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0838)
                     - [x] G0/G1/G2/G3 character set designation. <!-- sys/include/kern/ansi_handler.h, sys/drivers/console/ansi_handler.c, tests/sys/host_test_ansi.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0839)
                     - [x] SI/SO (shift in/out for G0/G1). <!-- sys/drivers/console/ansi_handler.c, tests/sys/host_test_ansi.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0840)
                     - [x] DEC Special Graphics (line drawing). <!-- sys/drivers/console/ansi_handler.c, tests/sys/host_test_ansi.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0841)
