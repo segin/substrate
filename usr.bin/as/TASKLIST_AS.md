@@ -67,9 +67,9 @@ Primary rule: prefer shrinking duplicated logic into shared helpers and lookup t
 
 ### 1.4 SSE/MMX Tail Cleanup
 - [ ] Remove remaining one-off selector branches that are now expressible via existing lookup helpers.
-- [ ] Consolidate `movups`/`movupd`/`movaps`/`movapd`/`movlps`/`movhps`/`movlpd`/`movhpd` handling where prefix/opcode patterns match helper form.
+- [x] Consolidate `movups`/`movupd`/`movaps`/`movapd`/`movlps`/`movhps`/`movlpd`/`movhpd` handling where prefix/opcode patterns match helper form.
 - [ ] Consolidate `movmskps` / `movmskpd` / `pmovmskb` paths where operand validation is equivalent.
-- [ ] Consolidate remaining MMX<->XMM bridge instructions into shared helpers.
+- [x] Consolidate remaining MMX<->XMM bridge instructions into shared helpers.
 
 ### 1.5 Control/Cache/Prefetch Tail Cleanup
 - [ ] Consolidate prefetch-family reg-field selection into a single lookup path.
