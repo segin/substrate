@@ -45,6 +45,9 @@ input-event paths.
   `console_push_char()`.
 - Input-event notifications are emitted for both key press and key release via
   `input_report_key(..., value)` followed by `input_sync()`.
+- The keyboard driver does not inspect or branch on raw-vs-canonical tty mode;
+  it only forwards translated bytes into the active TTY input path and leaves
+  discipline-specific processing to `tty.c`.
 
 ## Current Limits
 - No Set 2 decoding yet.

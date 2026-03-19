@@ -836,7 +836,7 @@
         - [ ] **VT/TTY Integration:** (REQ: REQ-03-0545)
             - [x] Push translated character to active VT's TTY via `tty_flip_buffer_push()`. (REQ: REQ-03-0546)
             - [x] Fallback to `console_push_char()` if no TTY attached. (REQ: REQ-03-0547)
-            - [ ] Respect TTY discipline: raw vs cooked mode affects nothing at driver level (TTY handles it). (REQ: REQ-03-0548)
+            - [x] Respect TTY discipline: raw vs cooked mode affects nothing at driver level (TTY handles it). <!-- sys/drivers/input/keyboard.c, sys/drivers/console/tty.c, tests/sys/host_test_keyboard.c, docs/specs/driver_keyboard.md --> (REQ: REQ-03-0548)
 
     - [ ] **Mouse Driver (`sys/drivers/input/mouse.c`, `mouse.h`):** (REQ: REQ-03-0549)
 
