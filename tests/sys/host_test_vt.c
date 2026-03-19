@@ -10,6 +10,7 @@
 static int mock_redraw_calls;
 static int mock_status_refresh_calls;
 static struct tty *mock_console_tty;
+static uint8_t mock_led_state;
 
 void hw_text_redraw_active(void) {
     mock_redraw_calls++;
@@ -21,6 +22,14 @@ void console_set_tty(struct tty *tty) {
 
 void hw_text_refresh_statusline(void) {
     mock_status_refresh_calls++;
+}
+
+uint8_t keyboard_get_led_state(void) {
+    return mock_led_state;
+}
+
+void keyboard_set_led_state(uint8_t state) {
+    mock_led_state = state;
 }
 
 int kprintf(const char *fmt, ...) {
@@ -46,6 +55,7 @@ static void reset_state(void) {
     mock_redraw_calls = 0;
     mock_status_refresh_calls = 0;
     mock_console_tty = NULL;
+    mock_led_state = 0;
     vt_set_geometry(80, 25);
     vt_init();
 }
@@ -58,17 +68,20 @@ static void test_activate_redraws_and_switches_console_tty(void) {
     memset(&tty2, 0, sizeof(tty2));
     vt2 = vt_get_state(1);
     vt2->tty = &tty2;
+    vt2->led_state = 0x03;
 
     vt_activate(1);
     assert(vt_get_active() == 1);
     assert(mock_redraw_calls == 1);
     assert(mock_console_tty == &tty2);
     assert(mock_status_refresh_calls == 1);
+    assert(mock_led_state == 0x03);
 
     vt_activate(0);
     assert(vt_get_active() == 0);
     assert(mock_redraw_calls == 2);
     assert(mock_status_refresh_calls == 2);
+    assert(mock_led_state == 0x00);
 }
 
 

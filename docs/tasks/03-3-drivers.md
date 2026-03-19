@@ -976,7 +976,7 @@
     - [x] **Virtual Terminal (VT) Layer:** (REQ: REQ-03-0675)
         - [x] **VT Management:** Array of `vt_state_t` structures (vt0..vtN). (REQ: REQ-03-0676)
         - [x] **Switching:** `vt_activate(n)`, keyboard shortcuts (`Alt+Fn`). (REQ: REQ-03-0677)
-        - [ ] **Emulation:** VT102 state machine (escape codes). (REQ: REQ-03-0678)
+        - [x] **Emulation:** VT102 state machine (escape codes). <!-- sys/drivers/console/vt.c, sys/drivers/console/ansi_handler.c, sys/drivers/video/hw_text.c, tests/sys/host_test_vt.c --> (REQ: REQ-03-0678)
     - [ ] **Backend Drivers:** (REQ: REQ-03-0679)
         - [ ] **VGA Text Mode Console:** (REQ: REQ-03-0680)
             - [ ] **Initialization:** (REQ: REQ-03-0681, REQ-03-0905)

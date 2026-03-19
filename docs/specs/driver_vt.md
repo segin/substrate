@@ -7,6 +7,7 @@
 
 ## Current Contract
 - each VT owns a full text buffer sized to the current physical geometry.
+- each VT owns an ANSI/VT102 parser state machine, and the active hardware-text backend feeds printable characters and escape sequences through the shared `ansi_handler` callbacks.
 - the hardware text console treats the last physical text row as a kernel-owned status line rendered black-on-white; the usable tty geometry reported to userland excludes that row (e.g., `80x24` on an `80x25` mode).
 - a dedicated kernel `vtstatus` thread refreshes the status line once per second, showing the active VT number and wall-clock time in ISO 8601 UTC form.
 - each VT owns a fixed scrollback ring of `256` lines at the maximum supported width.

@@ -18,6 +18,11 @@ instance.
 The active VT is displayed through the VGA hardware text backend.
 Inactive VTs retain their state in memory and are redrawn when activated.
 .Pp
+Printable characters and escape sequences are interpreted through a shared
+VT102/ANSI parser, but the parser state itself is maintained per VT so that
+cursor position, saved state, and pending sequence parameters survive console
+switches.
+.Pp
 Substrate currently provides:
 .Bl -bullet
 .It
