@@ -268,6 +268,265 @@ static int parse_int64(const char *s, long long *out) {
     return 0;
 }
 
+typedef struct {
+    const char *s;
+    size_t i;
+} const_expr_parser_t;
+
+static void const_expr_skip_ws(const_expr_parser_t *p) {
+    while (p != NULL && p->s[p->i] != '\0' && isspace((unsigned char)p->s[p->i])) {
+        ++p->i;
+    }
+}
+
+static int const_expr_parse_or(const_expr_parser_t *p, long long *out);
+
+static int const_expr_parse_number(const_expr_parser_t *p, long long *out) {
+    const char *start;
+    char *end;
+    long long v;
+
+    if (p == NULL || out == NULL) {
+        return -1;
+    }
+    const_expr_skip_ws(p);
+    start = p->s + p->i;
+    if (*start == '\0') {
+        return -1;
+    }
+    v = strtoll(start, &end, 0);
+    if (end == start) {
+        return -1;
+    }
+    p->i += (size_t)(end - start);
+    *out = v;
+    return 0;
+}
+
+static int const_expr_parse_primary(const_expr_parser_t *p, long long *out) {
+    long long v;
+
+    if (p == NULL || out == NULL) {
+        return -1;
+    }
+    const_expr_skip_ws(p);
+    if (p->s[p->i] == '(') {
+        ++p->i;
+        if (const_expr_parse_or(p, &v) != 0) {
+            return -1;
+        }
+        const_expr_skip_ws(p);
+        if (p->s[p->i] != ')') {
+            return -1;
+        }
+        ++p->i;
+        *out = v;
+        return 0;
+    }
+    return const_expr_parse_number(p, out);
+}
+
+static int const_expr_parse_unary(const_expr_parser_t *p, long long *out) {
+    if (p == NULL || out == NULL) {
+        return -1;
+    }
+    const_expr_skip_ws(p);
+    if (p->s[p->i] == '+') {
+        ++p->i;
+        return const_expr_parse_unary(p, out);
+    }
+    if (p->s[p->i] == '-') {
+        ++p->i;
+        if (const_expr_parse_unary(p, out) != 0) {
+            return -1;
+        }
+        *out = -*out;
+        return 0;
+    }
+    if (p->s[p->i] == '~') {
+        ++p->i;
+        if (const_expr_parse_unary(p, out) != 0) {
+            return -1;
+        }
+        *out = ~*out;
+        return 0;
+    }
+    return const_expr_parse_primary(p, out);
+}
+
+static int const_expr_parse_mul(const_expr_parser_t *p, long long *out) {
+    long long lhs;
+
+    if (const_expr_parse_unary(p, &lhs) != 0) {
+        return -1;
+    }
+    for (;;) {
+        long long rhs;
+        const_expr_skip_ws(p);
+        if (p->s[p->i] == '*') {
+            ++p->i;
+            if (const_expr_parse_unary(p, &rhs) != 0) {
+                return -1;
+            }
+            lhs *= rhs;
+            continue;
+        }
+        if (p->s[p->i] == '/') {
+            ++p->i;
+            if (const_expr_parse_unary(p, &rhs) != 0 || rhs == 0) {
+                return -1;
+            }
+            lhs /= rhs;
+            continue;
+        }
+        if (p->s[p->i] == '%') {
+            ++p->i;
+            if (const_expr_parse_unary(p, &rhs) != 0 || rhs == 0) {
+                return -1;
+            }
+            lhs %= rhs;
+            continue;
+        }
+        break;
+    }
+    *out = lhs;
+    return 0;
+}
+
+static int const_expr_parse_add(const_expr_parser_t *p, long long *out) {
+    long long lhs;
+
+    if (const_expr_parse_mul(p, &lhs) != 0) {
+        return -1;
+    }
+    for (;;) {
+        long long rhs;
+        const_expr_skip_ws(p);
+        if (p->s[p->i] == '+') {
+            ++p->i;
+            if (const_expr_parse_mul(p, &rhs) != 0) {
+                return -1;
+            }
+            lhs += rhs;
+            continue;
+        }
+        if (p->s[p->i] == '-') {
+            ++p->i;
+            if (const_expr_parse_mul(p, &rhs) != 0) {
+                return -1;
+            }
+            lhs -= rhs;
+            continue;
+        }
+        break;
+    }
+    *out = lhs;
+    return 0;
+}
+
+static int const_expr_parse_shift(const_expr_parser_t *p, long long *out) {
+    long long lhs;
+
+    if (const_expr_parse_add(p, &lhs) != 0) {
+        return -1;
+    }
+    for (;;) {
+        long long rhs;
+        const_expr_skip_ws(p);
+        if (p->s[p->i] == '<' && p->s[p->i + 1] == '<') {
+            p->i += 2;
+            if (const_expr_parse_add(p, &rhs) != 0) {
+                return -1;
+            }
+            lhs <<= (rhs & 63);
+            continue;
+        }
+        if (p->s[p->i] == '>' && p->s[p->i + 1] == '>') {
+            p->i += 2;
+            if (const_expr_parse_add(p, &rhs) != 0) {
+                return -1;
+            }
+            lhs >>= (rhs & 63);
+            continue;
+        }
+        break;
+    }
+    *out = lhs;
+    return 0;
+}
+
+static int const_expr_parse_and(const_expr_parser_t *p, long long *out) {
+    long long lhs;
+
+    if (const_expr_parse_shift(p, &lhs) != 0) {
+        return -1;
+    }
+    while (p->s[p->i] == '&' && p->s[p->i + 1] != '&') {
+        long long rhs;
+        ++p->i;
+        if (const_expr_parse_shift(p, &rhs) != 0) {
+            return -1;
+        }
+        lhs &= rhs;
+        const_expr_skip_ws(p);
+    }
+    *out = lhs;
+    return 0;
+}
+
+static int const_expr_parse_xor(const_expr_parser_t *p, long long *out) {
+    long long lhs;
+
+    if (const_expr_parse_and(p, &lhs) != 0) {
+        return -1;
+    }
+    while (p->s[p->i] == '^') {
+        long long rhs;
+        ++p->i;
+        if (const_expr_parse_and(p, &rhs) != 0) {
+            return -1;
+        }
+        lhs ^= rhs;
+        const_expr_skip_ws(p);
+    }
+    *out = lhs;
+    return 0;
+}
+
+static int const_expr_parse_or(const_expr_parser_t *p, long long *out) {
+    long long lhs;
+
+    if (const_expr_parse_xor(p, &lhs) != 0) {
+        return -1;
+    }
+    while (p->s[p->i] == '|' && p->s[p->i + 1] != '|') {
+        long long rhs;
+        ++p->i;
+        if (const_expr_parse_xor(p, &rhs) != 0) {
+            return -1;
+        }
+        lhs |= rhs;
+        const_expr_skip_ws(p);
+    }
+    *out = lhs;
+    return 0;
+}
+
+static int parse_const_expr_string(const char *s, long long *out) {
+    const_expr_parser_t p;
+
+    if (s == NULL || out == NULL) {
+        return -1;
+    }
+    p.s = s;
+    p.i = 0;
+    if (const_expr_parse_or(&p, out) != 0) {
+        return -1;
+    }
+    const_expr_skip_ws(&p);
+    return p.s[p.i] == '\0' ? 0 : -1;
+}
+
 static int eval_expr_const(const as_expr_t *e, long long *out) {
     long long l;
     long long r;
@@ -6900,7 +7159,7 @@ static int append_directive_data(bytebuf_t *buf, const as_directive_t *d) {
 
     if (width != 0) {
         for (i = 0; i < d->arg_count; ++i) {
-            if (parse_int64(d->args[i], &v) == 0) {
+            if (parse_int64(d->args[i], &v) == 0 || parse_const_expr_string(d->args[i], &v) == 0) {
                 if (bytebuf_append_u64_le(buf, (uint64_t)v, width) != 0) {
                     return -1;
                 }
@@ -10453,7 +10712,7 @@ static int append_data_directive_binary(emit_ctx_t *ctx, const as_stmt_t *st, bi
         }
         for (i = 0; i < d->arg_count; ++i) {
             long long v;
-            if (parse_int64(d->args[i], &v) != 0) {
+            if (parse_int64(d->args[i], &v) != 0 && parse_const_expr_string(d->args[i], &v) != 0) {
                 char *sym = NULL;
                 int64_t add = 0;
                 if (parse_symbol_addend_arg(d->args[i], &sym, &add) == 0 && sym != NULL) {
