@@ -1084,7 +1084,7 @@
                 - [ ] **Performance:** (REQ: REQ-03-0783)
                     - [x] Double buffering (offscreen back buffer). (REQ: REQ-03-0784)
                     - [x] Dirty rectangle tracking. <!-- sys/drivers/video/fb_console.c, sys/drivers/video/fb_console.h, tests/sys/host_test_fb_console.c, tests/sys/Makefile, docs/specs/driver_fb_console.md --> (REQ: REQ-03-0785)
-                    - [ ] Deferred updates (batch flush on vsync). (REQ: REQ-03-0786)
+                    - [x] Deferred updates (batch flush on vsync). <!-- sys/drivers/video/fb.h, sys/drivers/video/fb_console.c, sys/drivers/video/fb_console.h, sys/drivers/video/fb.c, sys/kern/time.c, tests/sys/host_test_fb_console.c, docs/specs/driver_fb_console.md --> (REQ: REQ-03-0786)
                     - [ ] Write-combining memory type (PAT/MTRR). (REQ: REQ-03-0787)
             - [ ] **Cursor:** (REQ: REQ-03-0788)
                 - [ ] **Software Cursor:** (REQ: REQ-03-0789)

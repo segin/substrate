@@ -16,6 +16,11 @@ int fb_active = 1;
 static console_backend_t *registered_backend;
 static int viewport_x;
 static int viewport_y;
+static int flush_calls;
+static int flush_x;
+static int flush_y;
+static int flush_w;
+static int flush_h;
 
 void fb_putpixel(int x, int y, uint32_t color) {
     (void)x;
@@ -27,10 +32,22 @@ void fb_clear(uint32_t color) {
     (void)color;
 }
 
+static void mock_flush(int x, int y, int w, int h) {
+    flush_calls++;
+    flush_x = x;
+    flush_y = y;
+    flush_w = w;
+    flush_h = h;
+}
+
 int video_set_viewport(int x, int y) {
     viewport_x = x;
     viewport_y = y;
     return 0;
+}
+
+uint32_t get_hz(void) {
+    return 100;
 }
 
 void console_register(console_backend_t *backend) {
@@ -57,6 +74,11 @@ static void reset_state(void) {
     registered_backend = NULL;
     viewport_x = -1;
     viewport_y = -1;
+    flush_calls = 0;
+    flush_x = 0;
+    flush_y = 0;
+    flush_w = 0;
+    flush_h = 0;
     cursor_x = 0;
     cursor_y = 0;
     view_y_offset = 0;
@@ -106,9 +128,29 @@ static void test_writes_expand_dirty_rectangle(void) {
     assert(h == 16);
 }
 
+static void test_tick_batches_and_flushes_dirty_rectangle(void) {
+    reset_state();
+    fb.flush = mock_flush;
+
+    fb_putc('A', FB_COLOR_WHITE, FB_COLOR_BLACK);
+    fb_putc('B', FB_COLOR_WHITE, FB_COLOR_BLACK);
+
+    assert(flush_calls == 0);
+    fb_console_tick();
+    assert(flush_calls == 0);
+    fb_console_tick();
+    assert(flush_calls == 1);
+    assert(flush_x == 0);
+    assert(flush_y == 0);
+    assert(flush_w == 16);
+    assert(flush_h == 16);
+    assert(fb_console_dirty_pending() == 0);
+}
+
 int main(void) {
     test_clear_marks_full_screen_dirty();
     test_writes_expand_dirty_rectangle();
+    test_tick_batches_and_flushes_dirty_rectangle();
     puts("host_test_fb_console: PASS");
     return 0;
 }

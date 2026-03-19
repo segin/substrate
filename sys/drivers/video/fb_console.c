@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <kern/console.h>
+#include <kern/time.h>
 #include <sys/vt.h>
 #include "fb.h"
 #include "fb_console.h"
@@ -32,6 +33,9 @@ static int dirty_x1 = 0;
 static int dirty_y1 = 0;
 static int dirty_x2 = 0;
 static int dirty_y2 = 0;
+static unsigned int dirty_ticks = 0;
+
+#define FB_CONSOLE_FLUSH_HZ 60U
 
 /* Helper for faster framebuffer copies */
 static void optimized_memcpy(void *dst, const void *src, size_t n) {
@@ -67,6 +71,7 @@ static void fb_console_mark_dirty(int x, int y, int w, int h) {
         dirty_x2 = x2;
         dirty_y2 = y2;
         dirty_valid = 1;
+        dirty_ticks = 0;
         return;
     }
 
@@ -74,6 +79,30 @@ static void fb_console_mark_dirty(int x, int y, int w, int h) {
     if (y < dirty_y1) dirty_y1 = y;
     if (x2 > dirty_x2) dirty_x2 = x2;
     if (y2 > dirty_y2) dirty_y2 = y2;
+}
+
+static unsigned int fb_console_flush_period_ticks(void) {
+    unsigned int hz = get_hz();
+    unsigned int period = (hz + FB_CONSOLE_FLUSH_HZ - 1U) / FB_CONSOLE_FLUSH_HZ;
+
+    return period > 0 ? period : 1;
+}
+
+static void fb_console_flush_dirty_internal(void) {
+    int x;
+    int y;
+    int w;
+    int h;
+
+    if (!dirty_valid) {
+        return;
+    }
+
+    fb_console_get_dirty_rect(&x, &y, &w, &h);
+    if (fb.flush) {
+        fb.flush(x, y, w, h);
+    }
+    fb_console_reset_dirty();
 }
 
 /* External framebuffer info (from fb.c) */
@@ -94,6 +123,7 @@ static void fb_console_clear(void) {
     cursor_y = 0;
     view_y_offset = 0;
     dirty_valid = 0;
+    dirty_ticks = 0;
     if (video_set_viewport(0, 0) != 0) {
         // failed or not supported
     }
@@ -379,4 +409,16 @@ void fb_console_reset_dirty(void) {
     dirty_y1 = 0;
     dirty_x2 = 0;
     dirty_y2 = 0;
+    dirty_ticks = 0;
+}
+
+void fb_console_tick(void) {
+    if (!dirty_valid) {
+        return;
+    }
+
+    dirty_ticks++;
+    if (dirty_ticks >= fb_console_flush_period_ticks()) {
+        fb_console_flush_dirty_internal();
+    }
 }

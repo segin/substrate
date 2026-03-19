@@ -629,6 +629,7 @@ static int mb_init(fb_info_t *info) {
     info->set_viewport = NULL;
     info->putpixel = linear_fb_putpixel;
     info->scroll = NULL;
+    info->flush = NULL;
     return 0;
 }
 

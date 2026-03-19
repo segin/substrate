@@ -78,6 +78,13 @@ current frame. Character draws, clears, and scroll operations expand that
 rectangle so later deferred-flush logic can submit one bounded update instead of
 rewriting the whole visible surface on every write.
 
+## Deferred Presentation
+Dirty framebuffer-console output is presented on a timer-driven cadence rather
+than forcing an immediate per-character flush. Drivers that need an explicit
+present step may provide an `fb.flush(x, y, w, h)` callback; the console batches
+all writes observed during the interval into one rectangle and submits that
+region on the next flush tick.
+
 ## Integration
 The `vga_write` function is hooked to automatically use the framebuffer console if initialized and active. This allows seamless kernel logging through the standard console path.
 

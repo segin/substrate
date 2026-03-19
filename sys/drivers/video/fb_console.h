@@ -33,5 +33,6 @@ void fb_putc_attr(char c, uint32_t fg, uint32_t bg, uint8_t attr);
 int fb_console_dirty_pending(void);
 void fb_console_get_dirty_rect(int *x, int *y, int *w, int *h);
 void fb_console_reset_dirty(void);
+void fb_console_tick(void);
 
 #endif /* _FB_CONSOLE_H */
