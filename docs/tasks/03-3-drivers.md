@@ -1093,7 +1093,7 @@
                     - [x] Cursor blink timer integration. <!-- sys/drivers/video/fb_console.c, tests/sys/host_test_fb_console.c, docs/specs/driver_fb_console.md --> (REQ: REQ-03-0792)
                 - [ ] **Hardware Cursor:** (REQ: REQ-03-0793)
                     - [x] Cursor image upload (ARGB format). <!-- sys/drivers/virtio/virtio_gpu.c, tests/sys/host_test_virtio_gpu.c, usr.man/man4/virtio_gpu.4, docs/specs/driver_virtio_gpu.md --> (REQ: REQ-03-0794)
-                    - [ ] Cursor position registers. (REQ: REQ-03-0795)
+                    - [x] Cursor position registers. <!-- sys/drivers/virtio/virtio_gpu.c, tests/sys/host_test_virtio_gpu.c, usr.man/man4/virtio_gpu.4, docs/specs/driver_virtio_gpu.md --> (REQ: REQ-03-0795)
                     - [ ] Hot spot offset configuration. (REQ: REQ-03-0796)
                     - [ ] Cursor enable/disable. (REQ: REQ-03-0797)
             - [ ] **Emulation (VT102/ANSI):** (REQ: REQ-03-0798)
