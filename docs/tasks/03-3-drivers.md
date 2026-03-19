@@ -1030,7 +1030,7 @@
                 - [x] Framebuffer registration/deregistration API. (REQ: REQ-03-0729)
                 - [x] Memory mapping (physical to kernel virtual). (REQ: REQ-03-0730)
                 - [x] `/dev/fb/[0-N]` device node creation. (REQ: REQ-03-0731)
-            - [ ] **Drivers:** (REQ: REQ-03-0732)
+            - [x] **Drivers:** (REQ: REQ-03-0732)
               - [x] **VESA VBE (Linear Framebuffer):** (REQ: REQ-03-0733)
                 - [x] VBE 2.0+ detection and capability query. (REQ: REQ-03-0734)
                 - [x] Mode enumeration and selection. (REQ: REQ-03-0735)
