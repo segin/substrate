@@ -167,6 +167,47 @@ static void serial_puts(const char *s)
 	}
 }
 
+static void serial_puthex(uint32_t val)
+{
+	static const char hex[] = "0123456789abcdef";
+	char buf[11];
+	buf[0] = '0';
+	buf[1] = 'x';
+	int i;
+	for (i = 0; i < 8; i++)
+		buf[2 + i] = hex[(val >> (28 - i * 4)) & 0xF];
+	buf[10] = 0;
+	serial_puts(buf);
+}
+
+static void serial_putdec(uint32_t val)
+{
+	char buf[12];
+	int i = 0;
+	if (val == 0) {
+		serial_putc('0');
+		return;
+	}
+	while (val) {
+		buf[i++] = '0' + (val % 10);
+		val /= 10;
+	}
+	while (i > 0)
+		serial_putc(buf[--i]);
+}
+
+static void puthex(uint32_t val)
+{
+	vga_puthex(val);
+	serial_puthex(val);
+}
+
+static void putdec(uint32_t val)
+{
+	vga_putdec(val);
+	serial_putdec(val);
+}
+
 static void puts(const char *s)
 {
 	vga_puts(s);
@@ -372,9 +413,14 @@ static void ext2_read_file(struct ext2_inode *inode, void *dest)
 			    idx / (BLOCK_SIZE / 4));
 			blk = ext2_read_indirect(ind, idx % (BLOCK_SIZE / 4));
 		}
-		if (blk == 0)
-			break;
-		read_block(p, blk);
+		if (blk == 0) {
+			/* Sparse block (hole) – zero-fill */
+			uint32_t j;
+			for (j = 0; j < BLOCK_SIZE; j++)
+				p[j] = 0;
+		} else {
+			read_block(p, blk);
+		}
 		p += BLOCK_SIZE;
 	}
 }
@@ -439,6 +485,7 @@ static uint32_t load_elf(void *data)
 	}
 
 	struct elf32_phdr *phdr = (void *)((uint32_t)data + ehdr->e_phoff);
+	uint32_t entry_vaddr = ehdr->e_entry;
 	uint32_t virt_to_phys = 0;
 	int found_load = 0;
 	int i;
@@ -466,7 +513,7 @@ static uint32_t load_elf(void *data)
 	}
 
 	/* Convert virtual entry to physical */
-	return ehdr->e_entry - virt_to_phys;
+	return entry_vaddr - virt_to_phys;
 }
 
 /* ==== Multiboot info construction ==== */
@@ -600,6 +647,7 @@ jump_to_kernel(uint32_t entry)
 #define DEFAULT_KERNEL "vmunix"
 #define BOOT_TIMEOUT   5            /* seconds to wait for input */
 
+__attribute__((section(".text.entry")))
 void stage2_main(uint32_t e820_count, struct e820_entry *e820_map,
                  uint32_t drive_num)
 {
@@ -728,8 +776,7 @@ do_boot:
 	uint32_t ksize = kernel_inode->i_size;
 
 	puts("  size: ");
-	vga_putdec(ksize);
-	serial_puts("  size: ");
+	putdec(ksize);
 	putc_both('\n');
 
 	/* Read entire kernel into a temp buffer above 0x200000 (2MB) */
@@ -744,7 +791,7 @@ do_boot:
 	}
 
 	puts("  entry: ");
-	vga_puthex(entry);
+	puthex(entry);
 	putc_both('\n');
 
 	/* Build multiboot info */

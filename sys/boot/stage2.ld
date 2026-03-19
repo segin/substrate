@@ -14,6 +14,7 @@ SECTIONS
     . = 0x5000;
 
     .text : {
+        *(.text.entry)
         *(.text .text.*)
     }
 

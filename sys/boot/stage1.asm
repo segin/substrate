@@ -82,10 +82,12 @@ entry:
 ; read_disk - INT 13h extended read using DAP
 ;-----------------------------------------------------------------------------
 read_disk:
+    push si                         ; preserve caller's SI
     mov si, dap
     mov ah, 0x42
     mov dl, [drive]
     int 0x13
+    pop si                          ; restore SI (does not affect CF)
     jc .disk_err
     ret
 .disk_err:

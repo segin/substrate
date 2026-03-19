@@ -13,7 +13,8 @@ OBJCOPY ?= objcopy
 
 CFLAGS  = -m32 -ffreestanding -fno-pic -fno-pie -fno-builtin \
           -nostdlib -nostdinc -fno-stack-protector -Os -Wall -Wextra -Werror \
-          -Wno-unused-parameter -std=gnu99
+          -Wno-unused-parameter -std=gnu99 -mno-sse -mno-sse2 -mno-mmx \
+          -mno-80387 -mno-fp-ret-in-387
 
 LDFLAGS = -m elf_i386 -T stage2.ld --oformat elf32-i386
 
