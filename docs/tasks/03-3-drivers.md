@@ -1151,7 +1151,7 @@
                     - [x] CPR (cursor position report). <!-- sys/drivers/console/ansi_handler.c, tests/sys/host_test_ansi.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0850)
                     - [x] DA (device attributes). <!-- sys/drivers/console/ansi_handler.c, tests/sys/host_test_ansi.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0851)
                     - [x] DECID (terminal ID). <!-- sys/drivers/console/ansi_handler.c, tests/sys/host_test_ansi.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0852)
-            - [ ] **TTY Binding:** (REQ: REQ-03-0703, REQ-03-0853, REQ-03-0879)
+            - [x] **TTY Binding:** <!-- sys/drivers/video/fb_console.c, tests/sys/host_test_fb_console.c, docs/specs/driver_fb_console.md --> (REQ: REQ-03-0703, REQ-03-0853, REQ-03-0879)
                 - [x] Register as `tty_driver` for `/dev/tty[1-N]`. <!-- sys/drivers/video/fb_console.c, tests/sys/host_test_fb_console.c, docs/specs/driver_fb_console.md --> (REQ: REQ-03-0704, REQ-03-0854)
                 - [x] `tty_driver->write()` with escape sequence processing. <!-- sys/drivers/video/fb_console.c, tests/sys/host_test_fb_console.c, docs/specs/driver_fb_console.md --> (REQ: REQ-03-0855)
                 - [x] `tty_driver->ioctl()` for FB-specific controls. <!-- sys/drivers/video/fb_console.c, tests/sys/host_test_fb_console.c, docs/specs/driver_fb_console.md --> (REQ: REQ-03-0856)
