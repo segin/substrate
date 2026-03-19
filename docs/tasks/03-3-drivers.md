@@ -1138,7 +1138,7 @@
                     - [x] Bracketed paste mode (DECSET 2004). (REQ: REQ-03-0837)
                 - [ ] **Character Sets:** (REQ: REQ-03-0838)
                     - [x] G0/G1/G2/G3 character set designation. <!-- sys/include/kern/ansi_handler.h, sys/drivers/console/ansi_handler.c, tests/sys/host_test_ansi.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0839)
-                    - [ ] SI/SO (shift in/out for G0/G1). (REQ: REQ-03-0840)
+                    - [x] SI/SO (shift in/out for G0/G1). <!-- sys/drivers/console/ansi_handler.c, tests/sys/host_test_ansi.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0840)
                     - [ ] DEC Special Graphics (line drawing). (REQ: REQ-03-0841)
                     - [ ] UTF-8 decoding and Unicode support. (REQ: REQ-03-0842)
                 - [x] **Tabs:** <!-- sys/include/sys/vt.h, sys/include/kern/ansi_handler.h, sys/drivers/console/vt.c, sys/drivers/console/ansi_handler.c, sys/drivers/video/hw_text.c, tests/sys/host_test_ansi.c, tests/sys/host_test_hw_text.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0843)

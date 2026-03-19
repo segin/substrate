@@ -406,6 +406,10 @@ void ansi_process(struct ansi_ctx *ctx, char c, const struct ansi_callbacks *cb)
     case ANSI_NORMAL:
         if (c == '\x1b') {
             ctx->state = ANSI_ESC;
+        } else if (c == '\x0e') {
+            ctx->active_gl = 1;
+        } else if (c == '\x0f') {
+            ctx->active_gl = 0;
         } else {
             if (cb->putc) cb->putc(c);
         }
