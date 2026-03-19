@@ -179,7 +179,11 @@ Validation gate for Section 1:
 ## 6. Directives and Object Semantics
 
 ### 6.1 Directive Coverage
-- [ ] Audit implemented directives against `docs/specs/as_spec.md`.
+- [x] Audit implemented directives against `docs/specs/as_spec.md`.
+- Audit result:
+  - Implemented and exercised in full-as tests: `.section`, `.pushsection`, `.popsection`, `.previous`, `.org`, `.align`, `.balign`, `.p2align`, `.type`.
+  - Tightened unsupported-directive diagnostics: `.if`, `.ifdef`, `.ifndef`, `.else`, `.elseif`, `.endif`, `.macro`, `.endm`, `.rept`, `.endr`, `.irp`, `.irpc`.
+  - Remaining semantic gaps: symbolic `.size` still emits size `0`; `.group` marks `SHF_GROUP` but does not yet produce `SHT_GROUP`; `.symver` metadata is recorded but GNU version alias emission is incomplete.
 - [ ] Add missing directives or tighten diagnostics for unsupported ones.
 - [ ] Add tests for:
   - `.section`
