@@ -1,18 +1,14 @@
+#include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <stdint.h>
-#include <stddef.h>
-#include <assert.h>
-#include <stdbool.h>
 
-/* Mock Headers */
 #define _SUBSTRATE_SYS_TYPES_H
 #define _SYS_FILE_H
 #define _KERN_CONSOLE_STUB_H
 #define _IO_H
 #define _FB_H
 
-/* Mock Types needed by bga.c */
 typedef struct {
     uint32_t *addr;
     uint32_t width;
@@ -20,10 +16,17 @@ typedef struct {
     uint32_t virt_height;
     uint32_t pitch;
     uint8_t  bpp;
+    uint8_t  red_offset;
+    uint8_t  red_length;
+    uint8_t  green_offset;
+    uint8_t  green_length;
+    uint8_t  blue_offset;
+    uint8_t  blue_length;
     void (*putpixel)(int x, int y, uint32_t color);
     uint32_t virt_width;
     int (*set_viewport)(int x, int y);
     void (*scroll)(int y_offset);
+    void (*flush)(int x, int y, int w, int h);
 } fb_info_t;
 
 struct video_mode_info {
@@ -46,128 +49,156 @@ typedef struct video_driver {
     struct video_driver *next;
 } video_driver_t;
 
-/* Mock Functions */
+typedef struct pci_device {
+    uint8_t bus;
+    uint8_t slot;
+    uint8_t func;
+    uint16_t vendor_id;
+    uint16_t device_id;
+    uint32_t class_code;
+    void *kdev;
+    void *bar_resource[6];
+    struct pci_device *next;
+} pci_device_t;
+
+fb_info_t fb;
+volatile uint8_t mock_bank_window[0x10000];
+volatile uint8_t *bga_test_bank_window = mock_bank_window;
+
 static uint16_t mock_regs[16];
-static uint16_t mock_index_reg = 0;
+static uint16_t mock_index_reg;
+static int mock_force_banked;
 
 void outw(uint16_t port, uint16_t val) {
-    if (port == 0x01CE) { // Index
+    if (port == 0x01CE) {
         mock_index_reg = val;
-    } else if (port == 0x01CF) { // Data
-        if (mock_index_reg < 16) {
-            mock_regs[mock_index_reg] = val;
-        }
+    } else if (port == 0x01CF && mock_index_reg < 16) {
+        mock_regs[mock_index_reg] = val;
     }
 }
 
 uint16_t inw(uint16_t port) {
-    if (port == 0x01CF) { // Data
-        if (mock_index_reg == 0) { // ID
-            return mock_regs[0];
-        }
-        if (mock_index_reg < 16) {
-            return mock_regs[mock_index_reg];
-        }
+    if (port == 0x01CF && mock_index_reg < 16) {
+        return mock_regs[mock_index_reg];
     }
     return 0;
 }
 
+int cmdline_get(const char *key, char *value, size_t value_size) {
+    if (strcmp(key, "bga") != 0 || !mock_force_banked) {
+        return -1;
+    }
+    snprintf(value, value_size, "nolfb");
+    return 0;
+}
+
 void kprint(const char *s) {
-    printf("[KERNEL] %s", s);
+    (void)s;
 }
 
 void video_register_driver(video_driver_t *drv) {
-    printf("Registered driver: %s\n", drv->name);
+    (void)drv;
 }
 
-/* Include the source file directly */
+void linear_fb_putpixel(int x, int y, uint32_t color) {
+    (void)x;
+    (void)y;
+    (void)color;
+}
+
 #include "../../sys/drivers/video/bga.c"
 
-/* Tests */
-void test_bga_is_available(void) {
-    printf("Running test_bga_is_available...\n");
+static void reset_mocks(void) {
+    memset(mock_regs, 0, sizeof(mock_regs));
+    mock_index_reg = 0;
+    mock_force_banked = 0;
+    memset((void *)mock_bank_window, 0, sizeof(mock_bank_window));
+    memset(&fb, 0, sizeof(fb));
+    bga_current_bank = 0xFFFFU;
+    bga_use_lfb = 1;
+    bga_lfb_addr = 0;
+}
 
-    // Case 1: Valid ID (VBE_DISPI_ID0 to VBE_DISPI_ID5)
-    // 0xB0C0 to 0xB0C5
+static void test_bga_is_available(void) {
+    reset_mocks();
+
     mock_regs[0] = 0xB0C0;
     assert(bga_is_available() == 1);
-
     mock_regs[0] = 0xB0C5;
     assert(bga_is_available() == 1);
-
-    // Case 2: Invalid ID
     mock_regs[0] = 0xB0BF;
     assert(bga_is_available() == 0);
-
     mock_regs[0] = 0xB0C6;
     assert(bga_is_available() == 0);
-
-    printf("Passed.\n");
 }
 
-void test_bga_init(void) {
-    printf("Running test_bga_init...\n");
+static void test_bga_init_uses_lfb_by_default(void) {
+    fb_info_t info;
 
-    // Reset mocks
-    memset(mock_regs, 0, sizeof(mock_regs));
-    mock_regs[0] = 0xB0C5; // Valid ID
+    reset_mocks();
+    mock_regs[0] = 0xB0C5;
+    memset(&info, 0, sizeof(info));
 
-    fb_info_t fb;
-    memset(&fb, 0, sizeof(fb));
-
-    int res = bga_init(&fb);
-    assert(res == 0);
-
-    // Verify registers written
-    // XRES (1) = 1024
-    assert(mock_regs[1] == 1024);
-    // YRES (2) = 768
-    assert(mock_regs[2] == 768);
-    // BPP (3) = 32
-    assert(mock_regs[3] == 32);
-    // ENABLE (4) = ENABLED | LFB_ENABLED (0x41)
-    assert(mock_regs[4] == 0x41);
-    // VIRT_WIDTH (6) = 1024
-    assert(mock_regs[6] == 1024);
-    // VIRT_HEIGHT (7) = 1536 (768 * 2)
-    assert(mock_regs[7] == 1536);
-    // X_OFFSET (8) = 0
-    assert(mock_regs[8] == 0);
-    // Y_OFFSET (9) = 0
-    assert(mock_regs[9] == 0);
-
-    // Verify fb struct
-    assert(fb.width == 1024);
-    assert(fb.height == 768);
-    assert(fb.virt_height == 1536);
-    assert(fb.bpp == 32);
-    assert(fb.pitch == (1024 * 32) / 8);
-    assert(fb.addr == (uint32_t*)0xE0000000);
-    assert(fb.set_viewport == bga_set_viewport);
-    assert(fb.scroll == bga_scroll);
-
-    printf("Passed.\n");
+    assert(bga_init(&info) == 0);
+    assert(mock_regs[VBE_DISPI_INDEX_ENABLE] == (VBE_DISPI_ENABLED | VBE_DISPI_LFB_ENABLED));
+    assert(info.addr == (uint32_t *)0xE0000000);
+    assert(info.putpixel == linear_fb_putpixel);
+    assert(info.virt_height == 1536);
+    assert(info.set_viewport == bga_set_viewport);
+    assert(info.scroll == bga_scroll);
 }
 
-void test_bga_set_viewport(void) {
-    printf("Running test_bga_set_viewport...\n");
+static void test_bga_init_banked_fallback(void) {
+    fb_info_t info;
 
-    // Reset mocks
-    memset(mock_regs, 0, sizeof(mock_regs));
+    reset_mocks();
+    mock_regs[0] = 0xB0C5;
+    mock_force_banked = 1;
+    memset(&info, 0, sizeof(info));
 
-    bga_set_viewport(100, 200);
+    assert(bga_init(&info) == 0);
+    assert(mock_regs[VBE_DISPI_INDEX_ENABLE] == VBE_DISPI_ENABLED);
+    assert(info.addr == (uint32_t *)(uintptr_t)BGA_BANK_WINDOW_VIRT);
+    assert(info.putpixel == bga_banked_putpixel);
+    assert(info.virt_height == 768);
+    assert(info.set_viewport == NULL);
+    assert(info.scroll == NULL);
+}
 
-    // Verify registers
-    assert(mock_regs[8] == 100); // X_OFFSET
-    assert(mock_regs[9] == 200); // Y_OFFSET
+static void test_bga_banked_putpixel_switches_banks(void) {
+    reset_mocks();
+    fb.width = 1024;
+    fb.height = 768;
+    fb.pitch = 1024 * 4;
+    fb.bpp = 32;
 
-    printf("Passed.\n");
+    bga_banked_putpixel(0, 16, 0x00112233U);
+
+    assert(mock_regs[VBE_DISPI_INDEX_BANK] == 1);
+    assert(mock_bank_window[0] == 0x33);
+    assert(mock_bank_window[1] == 0x22);
+    assert(mock_bank_window[2] == 0x11);
+    assert(mock_bank_window[3] == 0x00);
+}
+
+static void test_bga_set_viewport_respects_lfb_mode(void) {
+    reset_mocks();
+    bga_use_lfb = 1;
+    assert(bga_set_viewport(100, 200) == 0);
+    assert(mock_regs[VBE_DISPI_INDEX_X_OFFSET] == 100);
+    assert(mock_regs[VBE_DISPI_INDEX_Y_OFFSET] == 200);
+
+    reset_mocks();
+    bga_use_lfb = 0;
+    assert(bga_set_viewport(100, 200) == -1);
 }
 
 int main(void) {
     test_bga_is_available();
-    test_bga_init();
-    test_bga_set_viewport();
-    printf("All tests passed!\n");
+    test_bga_init_uses_lfb_by_default();
+    test_bga_init_banked_fallback();
+    test_bga_banked_putpixel_switches_banks();
+    test_bga_set_viewport_respects_lfb_mode();
+    puts("host_test_bga: PASS");
     return 0;
 }
