@@ -74,7 +74,7 @@ Primary rule: prefer shrinking duplicated logic into shared helpers and lookup t
 ### 1.5 Control/Cache/Prefetch Tail Cleanup
 - [x] Consolidate prefetch-family reg-field selection into a single lookup path.
 - [x] Consolidate `clflush` / `clwb` / `clflushopt` / `cldemote` related selector handling where possible.
-- [ ] Consolidate `movbe`, `movdiri`, `movdir64b`, `enqcmd`, `enqcmds`, `wrssd`, `wrussd`, `aadd`, `aand`, `aor`, `axor` into shared operand-order helpers.
+- [x] Consolidate `movbe`, `movdiri`, `movdir64b`, `enqcmd`, `enqcmds`, `wrssd`, `wrussd`, `aadd`, `aand`, `aor`, `axor` into shared operand-order helpers.
 
 ### 1.6 Dead-Path Elimination
 - [ ] Remove branches that are now subsumed by lookup helpers.

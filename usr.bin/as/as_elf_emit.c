@@ -2203,6 +2203,49 @@ static int select_x86_vmread_vmwrite_operands(const as_instruction_t *insn, int 
     return 0;
 }
 
+static int select_i386_actual_reg_rm_operands(const as_instruction_t *insn,
+                                              const as_operand_t **reg_op,
+                                              const as_operand_t **rm_op) {
+    if (insn == NULL || reg_op == NULL || rm_op == NULL || insn->operand_count != 2) {
+        return -1;
+    }
+    if (insn->operands[0].kind == AS_OPERAND_REGISTER) {
+        *reg_op = &insn->operands[0];
+        *rm_op = &insn->operands[1];
+        return 0;
+    }
+    if (insn->operands[1].kind == AS_OPERAND_REGISTER) {
+        *rm_op = &insn->operands[0];
+        *reg_op = &insn->operands[1];
+        return 0;
+    }
+    return -1;
+}
+
+static int select_i386_syntax_reg_rm_operands(const as_instruction_t *insn, int intel_syntax, int intel_reg_first,
+                                              const as_operand_t **reg_op,
+                                              const as_operand_t **rm_op) {
+    if (insn == NULL || reg_op == NULL || rm_op == NULL || insn->operand_count != 2) {
+        return -1;
+    }
+    if (intel_reg_first) {
+        if (intel_syntax) {
+            *reg_op = &insn->operands[0];
+            *rm_op = &insn->operands[1];
+        } else {
+            *rm_op = &insn->operands[0];
+            *reg_op = &insn->operands[1];
+        }
+    } else if (intel_syntax) {
+        *rm_op = &insn->operands[0];
+        *reg_op = &insn->operands[1];
+    } else {
+        *reg_op = &insn->operands[0];
+        *rm_op = &insn->operands[1];
+    }
+    return 0;
+}
+
 static int lookup_i386_xmm_imm8_family(const char *mnemonic, unsigned char *prefix, unsigned char *opcode2) {
     static const struct {
         const char *mnemonic;
@@ -5576,22 +5619,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             return -1;
         }
         first_is_reg = insn->operands[0].kind == AS_OPERAND_REGISTER ? 1 : 0;
-        if (intel_syntax) {
-            if (first_is_reg) {
-                reg_op = &insn->operands[0];
-                rm_op = &insn->operands[1];
-            } else {
-                rm_op = &insn->operands[0];
-                reg_op = &insn->operands[1];
-            }
-        } else {
-            if (first_is_reg) {
-                reg_op = &insn->operands[0];
-                rm_op = &insn->operands[1];
-            } else {
-                rm_op = &insn->operands[0];
-                reg_op = &insn->operands[1];
-            }
+        if (select_i386_actual_reg_rm_operands(insn, &reg_op, &rm_op) != 0) {
+            return -1;
         }
         if (reg_op->kind != AS_OPERAND_REGISTER || parse_x86_reg(reg_op->u.reg, &gr) != 0 || (gr & 8u) != 0u) {
             return -1;
@@ -5610,12 +5639,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (insn->operand_count != 2) {
             return -1;
         }
-        if (intel_syntax) {
-            reg_op = &insn->operands[0];
-            rm_op = &insn->operands[1];
-        } else {
-            rm_op = &insn->operands[0];
-            reg_op = &insn->operands[1];
+        if (select_i386_syntax_reg_rm_operands(insn, intel_syntax, 1, &reg_op, &rm_op) != 0) {
+            return -1;
         }
         if (reg_op->kind != AS_OPERAND_REGISTER || parse_x86_reg(reg_op->u.reg, &gr) != 0 || (gr & 8u) != 0u) {
             return -1;
@@ -5683,20 +5708,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (lookup_i386_memorder_opcode(mnbuf, &prefix, &opcode3, &reg_first) != 0) {
             return -1;
         }
-        if (reg_first) {
-            if (intel_syntax) {
-                reg_op = &insn->operands[0];
-                mem_op = &insn->operands[1];
-            } else {
-                mem_op = &insn->operands[0];
-                reg_op = &insn->operands[1];
-            }
-        } else if (intel_syntax) {
-            mem_op = &insn->operands[0];
-            reg_op = &insn->operands[1];
-        } else {
-            reg_op = &insn->operands[0];
-            mem_op = &insn->operands[1];
+        if (select_i386_syntax_reg_rm_operands(insn, intel_syntax, reg_first, &reg_op, &mem_op) != 0) {
+            return -1;
         }
         if (reg_op->kind != AS_OPERAND_REGISTER || parse_x86_reg(reg_op->u.reg, &gr) != 0 || (gr & 8u) != 0u) {
             return -1;
