@@ -833,7 +833,7 @@
             - [x] Call `input_report_key(dev, keycode, 1)` on key press. (REQ: REQ-03-0542)
             - [x] Call `input_report_key(dev, keycode, 0)` on key release (currently missing). (REQ: REQ-03-0543)
             - [x] Call `input_sync(dev)` after each event. (REQ: REQ-03-0544)
-        - [ ] **VT/TTY Integration:** (REQ: REQ-03-0545)
+        - [x] **VT/TTY Integration:** <!-- sys/drivers/input/keyboard.c, sys/drivers/console/tty.c, tests/sys/host_test_keyboard.c, docs/specs/driver_keyboard.md --> (REQ: REQ-03-0545)
             - [x] Push translated character to active VT's TTY via `tty_flip_buffer_push()`. (REQ: REQ-03-0546)
             - [x] Fallback to `console_push_char()` if no TTY attached. (REQ: REQ-03-0547)
             - [x] Respect TTY discipline: raw vs cooked mode affects nothing at driver level (TTY handles it). <!-- sys/drivers/input/keyboard.c, sys/drivers/console/tty.c, tests/sys/host_test_keyboard.c, docs/specs/driver_keyboard.md --> (REQ: REQ-03-0548)
