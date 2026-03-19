@@ -2057,12 +2057,13 @@ static int lookup_i386_comisd_opcode(const char *mnemonic, unsigned char *opcode
     return -1;
 }
 
-static int lookup_i386_prefetch_regf(const char *mnemonic, unsigned char *opcode2, unsigned char *regf) {
+static int lookup_i386_cachehint_regf(const char *mnemonic, unsigned char *opcode2, unsigned char *regf) {
     static const struct {
         const char *mnemonic;
         unsigned char opcode2;
         unsigned char regf;
     } map[] = {
+        {"cldemote", 0x1c, 0u},
         {"prefetch", 0x0d, 0u},
         {"prefetchwt1", 0x0d, 2u},
         {"prefetchnta", 0x18, 0u},
@@ -4150,9 +4151,9 @@ static int emit_i386_movnt_store(unsigned char prefix, int use_xmm, int intel_sy
     return emit_i386_prefixed_0f_rm(prefix, 0xe7, xr, dst_op, out, out_cap, out_len);
 }
 
-static int emit_i386_prefetch_hint(unsigned char opcode2, unsigned char regf,
-                                   const as_operand_t *op, unsigned char *out,
-                                   size_t out_cap, size_t *out_len) {
+static int emit_i386_cachehint(unsigned char opcode2, unsigned char regf,
+                               const as_operand_t *op, unsigned char *out,
+                               size_t out_cap, size_t *out_len) {
     if (op == NULL || op->kind == AS_OPERAND_REGISTER || op->kind == AS_OPERAND_COPROCESSOR) {
         return -1;
     }
@@ -5935,12 +5936,6 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_xmm_reg_srcdst_rm(0x00, 0x16, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "cldemote") == 0) {
-        if (insn->operand_count != 1 || a == NULL || a->kind == AS_OPERAND_REGISTER || a->kind == AS_OPERAND_COPROCESSOR) {
-            return -1;
-        }
-        return emit_i386_prefixed_0f_rm(0x00, 0x1c, 0u, a, out, out_cap, out_len);
-    }
     if (strcmp(mnbuf, "cvtpi2ps") == 0) {
         if (insn->operand_count != 2) {
             return -1;
@@ -6002,7 +5997,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
     }
     if (strcmp(mnbuf, "cvtdq2pd") == 0) return emit_i386_prefixed_xmm_srcdst_rm(0xf3, 0xe6, src, dst, out, out_cap, out_len);
-    if (strcmp(mnbuf, "prefetch") == 0 || strcmp(mnbuf, "prefetchwt1") == 0 ||
+    if (strcmp(mnbuf, "cldemote") == 0 || strcmp(mnbuf, "prefetch") == 0 || strcmp(mnbuf, "prefetchwt1") == 0 ||
         strcmp(mnbuf, "prefetchnta") == 0 || strcmp(mnbuf, "prefetcht0") == 0 ||
         strcmp(mnbuf, "prefetcht1") == 0 || strcmp(mnbuf, "prefetcht2") == 0) {
         unsigned char opcode2;
@@ -6011,10 +6006,10 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
-        if (lookup_i386_prefetch_regf(mnbuf, &opcode2, &regf) != 0) {
+        if (lookup_i386_cachehint_regf(mnbuf, &opcode2, &regf) != 0) {
             return -1;
         }
-        return emit_i386_prefetch_hint(opcode2, regf, a, out, out_cap, out_len);
+        return emit_i386_cachehint(opcode2, regf, a, out, out_cap, out_len);
     }
     {
         static const struct {
@@ -6061,12 +6056,6 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             }
             return emit_i386_3dnow_rm(xr, src, ops[i].imm8, out, out_cap, out_len);
         }
-    }
-    if (strcmp(mnbuf, "prefetchwt1") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefetch_hint(0x0d, 2u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "nopl") == 0) {
         if (insn->operand_count != 1 || a == NULL || a->kind == AS_OPERAND_REGISTER || a->kind == AS_OPERAND_COPROCESSOR) {

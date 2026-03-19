@@ -72,8 +72,8 @@ Primary rule: prefer shrinking duplicated logic into shared helpers and lookup t
 - [x] Consolidate remaining MMX<->XMM bridge instructions into shared helpers.
 
 ### 1.5 Control/Cache/Prefetch Tail Cleanup
-- [ ] Consolidate prefetch-family reg-field selection into a single lookup path.
-- [ ] Consolidate `clflush` / `clwb` / `clflushopt` / `cldemote` related selector handling where possible.
+- [x] Consolidate prefetch-family reg-field selection into a single lookup path.
+- [x] Consolidate `clflush` / `clwb` / `clflushopt` / `cldemote` related selector handling where possible.
 - [ ] Consolidate `movbe`, `movdiri`, `movdir64b`, `enqcmd`, `enqcmds`, `wrssd`, `wrussd`, `aadd`, `aand`, `aor`, `axor` into shared operand-order helpers.
 
 ### 1.6 Dead-Path Elimination
