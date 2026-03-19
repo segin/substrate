@@ -113,6 +113,7 @@ typedef enum {
 #define VGA_AC_OVERSCAN         0x11
 #define VGA_AC_PLANE_ENABLE     0x12
 #define VGA_AC_PANNING          0x13
+#define VGA_AC_MODE_CTRL_BLINK  0x08
 
 /* Counts */
 #define VGA_NUM_SEQ_REGS    5

@@ -23,14 +23,47 @@ static int mock_active_vt;
 static int mock_vt_width;
 static int mock_vt_height;
 static console_backend_t *registered_backend;
+static uint8_t mock_crtc_regs[256];
+static uint8_t mock_ac_regs[256];
+static uint8_t mock_last_crtc_index;
+static uint8_t mock_last_ac_index;
+static int mock_ac_expect_data;
 
 #define _IO_H
 static inline uint8_t inb(uint16_t port) {
+    if (port == VGA_CRTC_DATA_COLOR) {
+        return mock_crtc_regs[mock_last_crtc_index];
+    }
+    if (port == VGA_AC_READ) {
+        return mock_ac_regs[mock_last_ac_index];
+    }
+    if (port == VGA_INPUT_STAT1_COLOR) {
+        mock_ac_expect_data = 0;
+        return 0;
+    }
     (void)port;
     return 0;
 }
 
 static inline void outb(uint16_t port, uint8_t value) {
+    if (port == VGA_CRTC_INDEX_COLOR) {
+        mock_last_crtc_index = value;
+        return;
+    }
+    if (port == VGA_CRTC_DATA_COLOR) {
+        mock_crtc_regs[mock_last_crtc_index] = value;
+        return;
+    }
+    if (port == VGA_AC_INDEX || port == VGA_AC_WRITE) {
+        if (!mock_ac_expect_data || value == 0x20) {
+            mock_last_ac_index = value & 0x1fU;
+            mock_ac_expect_data = (value == 0x20) ? 0 : 1;
+        } else {
+            mock_ac_regs[mock_last_ac_index] = value;
+            mock_ac_expect_data = 0;
+        }
+        return;
+    }
     (void)port;
     (void)value;
 }
@@ -179,6 +212,8 @@ void vt_scrollback_line_down(void) {}
 
 static void reset_state(void) {
     memset(mock_vga_cells, 0, sizeof(mock_vga_cells));
+    memset(mock_crtc_regs, 0, sizeof(mock_crtc_regs));
+    memset(mock_ac_regs, 0, sizeof(mock_ac_regs));
     memset(&mock_vt, 0, sizeof(mock_vt));
     registered_backend = NULL;
     mock_active_vt = 0;
@@ -190,6 +225,10 @@ static void reset_state(void) {
     hw_text_status_epoch = 0;
     hw_text_status_thread_started = 0;
     hw_text_tty_count = 0;
+    hw_text_blink_enabled = 0;
+    mock_last_crtc_index = 0;
+    mock_last_ac_index = 0;
+    mock_ac_expect_data = 0;
     vt_init();
 }
 
@@ -260,11 +299,37 @@ static void test_vt_tty_ioctl_exposes_vga_controls(void) {
     assert(value == 0);
 }
 
+static void test_vt_tty_ioctl_toggles_blink_mode(void) {
+    struct tty tty;
+    int value;
+
+    reset_state();
+    memset(&tty, 0, sizeof(tty));
+    tty.driver_data = &mock_vt;
+
+    value = 0;
+    assert(vt_tty_ioctl(&tty, VTIOCGBLINK, (unsigned long)&value) == 0);
+    assert(value == 0);
+    assert((mock_ac_regs[VGA_AC_MODE_CONTROL] & VGA_AC_MODE_CTRL_BLINK) == 0);
+
+    value = 1;
+    assert(vt_tty_ioctl(&tty, VTIOCSBLINK, (unsigned long)&value) == 0);
+    value = 0;
+    assert(vt_tty_ioctl(&tty, VTIOCGBLINK, (unsigned long)&value) == 0);
+    assert(value == 1);
+    assert((mock_ac_regs[VGA_AC_MODE_CONTROL] & VGA_AC_MODE_CTRL_BLINK) != 0);
+
+    value = 0;
+    assert(vt_tty_ioctl(&tty, VTIOCSBLINK, (unsigned long)&value) == 0);
+    assert((mock_ac_regs[VGA_AC_MODE_CONTROL] & VGA_AC_MODE_CTRL_BLINK) == 0);
+}
+
 int main(void) {
     test_hw_text_bulk_write_updates_buffer_and_cursor();
     test_console_backend_shim_uses_bulk_write_path();
     test_tab_width_is_configurable_per_vt();
     test_vt_tty_ioctl_exposes_vga_controls();
+    test_vt_tty_ioctl_toggles_blink_mode();
     puts("host_test_hw_text: PASS");
     return 0;
 }

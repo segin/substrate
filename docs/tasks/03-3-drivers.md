@@ -999,7 +999,7 @@
                 - [x] Scroll region support (VT102 DECSTBM). <!-- sys/drivers/console/ansi_handler.c, sys/drivers/video/hw_text.c, tests/sys/host_test_ansi.c --> (REQ: REQ-03-0698)
             - [ ] **Attributes:** (REQ: REQ-03-0699)
                 - [x] 16-color foreground/background palette. <!-- sys/drivers/console/ansi_handler.c, sys/drivers/video/hw_text.c, tests/sys/host_test_ansi.c --> (REQ: REQ-03-0700)
-                - [ ] Blink/bright background toggle (attribute controller). (REQ: REQ-03-0701)
+                - [x] Blink/bright background toggle (attribute controller). <!-- sys/include/sys/vtio.h, sys/drivers/video/hw_text.c, sys/drivers/video/vga.h, tests/sys/host_test_hw_text.c --> (REQ: REQ-03-0701)
                 - [ ] Reverse video, bold, underline emulation. (REQ: REQ-03-0702)
             - [x] **TTY Binding:** (REQ: REQ-03-0703, REQ-03-0853, REQ-03-0879)
                 - [x] Register as `tty_driver` for `/dev/tty[1-N]`. (REQ: REQ-03-0704, REQ-03-0854)

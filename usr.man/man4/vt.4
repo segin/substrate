@@ -71,6 +71,9 @@ The VGA text backend also accepts backend-specific
 requests for per-console tab width and cursor visibility through the
 .Xr tty 4
 device.
+.Pp
+The same backend can toggle the VGA attribute-controller blink mode, trading
+text blink for bright background colors when blink is disabled.
 .Sh FILES
 .Bl -tag -width "/sys/drivers/console/vt.c"
 .It Pa /sys/drivers/console/vt.c

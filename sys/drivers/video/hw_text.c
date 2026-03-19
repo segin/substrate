@@ -30,6 +30,7 @@ static vt_state_t *current_vt_ctx = NULL;
 static volatile uint32_t hw_text_status_epoch = 0;
 static int hw_text_status_thread_started = 0;
 static int hw_text_tty_count = 0;
+static int hw_text_blink_enabled = 0;
 
 #define HW_TEXT_STATUS_COLOR 0x70
 #define VGA_FONT_MEM_BASE ((volatile uint8_t *)(uintptr_t)0xC00A0000)
@@ -82,6 +83,20 @@ static void hw_text_write_crtc(uint8_t index, uint8_t value) {
     outb(VGA_CRTC_DATA_COLOR, value);
 }
 
+static uint8_t hw_text_read_ac(uint8_t index) {
+    (void)inb(VGA_INPUT_STAT1_COLOR);
+    outb(VGA_AC_INDEX, index);
+    return inb(VGA_AC_READ);
+}
+
+static void hw_text_write_ac(uint8_t index, uint8_t value) {
+    (void)inb(VGA_INPUT_STAT1_COLOR);
+    outb(VGA_AC_INDEX, index);
+    outb(VGA_AC_WRITE, value);
+    (void)inb(VGA_INPUT_STAT1_COLOR);
+    outb(VGA_AC_INDEX, 0x20);
+}
+
 static void hw_text_cursor_visible_locked(int visible) {
     uint8_t start;
 
@@ -92,6 +107,19 @@ static void hw_text_cursor_visible_locked(int visible) {
         start |= 0x20U;
     }
     hw_text_write_crtc(VGA_CRTC_CURSOR_START, start);
+}
+
+static void hw_text_set_blink_mode_locked(int enabled) {
+    uint8_t mode_ctrl;
+
+    mode_ctrl = hw_text_read_ac(VGA_AC_MODE_CONTROL);
+    if (enabled) {
+        mode_ctrl |= VGA_AC_MODE_CTRL_BLINK;
+    } else {
+        mode_ctrl &= (uint8_t)~VGA_AC_MODE_CTRL_BLINK;
+    }
+    hw_text_write_ac(VGA_AC_MODE_CONTROL, mode_ctrl);
+    hw_text_blink_enabled = enabled ? 1 : 0;
 }
 
 static void hw_text_load_font_plane(const uint8_t *font, size_t glyph_height) {
@@ -1184,6 +1212,12 @@ static int vt_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
             hw_text_update_cursor_locked(vt);
         }
         return 0;
+    case VTIOCGBLINK:
+        *value = hw_text_blink_enabled ? 1 : 0;
+        return 0;
+    case VTIOCSBLINK:
+        hw_text_set_blink_mode_locked(*value ? 1 : 0);
+        return 0;
     default:
         return -1;
     }
@@ -1356,6 +1390,7 @@ void hw_text_init(void) {
     hw_text_tty_count = 0;
 
     hw_text_active = 1;
+    hw_text_set_blink_mode_locked(0);
     console_register(&vt_kprint_backend);
 
     hw_text_redraw_active();
