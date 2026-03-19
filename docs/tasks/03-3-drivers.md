@@ -1123,7 +1123,7 @@
                     - [x] 8-color foreground/background (30-37, 40-47). (REQ: REQ-03-0822)
                     - [x] Bright colors (90-97, 100-107). (REQ: REQ-03-0823)
                     - [x] 256-color mode (38;5;N, 48;5;N). (REQ: REQ-03-0824)
-                    - [ ] 24-bit true color (38;2;R;G;B, 48;2;R;G;B). (REQ: REQ-03-0825)
+                    - [x] 24-bit true color (38;2;R;G;B, 48;2;R;G;B). <!-- sys/drivers/console/ansi_handler.c, tests/sys/host_test_ansi.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0825)
                 - [x] **Scrolling:** (REQ: REQ-03-0695, REQ-03-0826)
                     - [x] DECSTBM (set top/bottom margins). (REQ: REQ-03-0827)
                     - [x] SU/SD (scroll up/down). (REQ: REQ-03-0828)

@@ -231,6 +231,20 @@ static void test_bright_color_change(void) {
     assert(mock_bg == 12);
 }
 
+static void test_truecolor_sequences_are_accepted(void) {
+    struct ansi_ctx ctx;
+    ansi_init(&ctx);
+    reset_mocks();
+
+    const char *seq = "\x1b[38;2;250;250;250;48;2;1;2;3m";
+    while (*seq) {
+        ansi_process(&ctx, *seq++, &callbacks);
+    }
+
+    assert(mock_fg == 15);
+    assert(mock_bg == 0);
+}
+
 static void test_sgr_attrs_persist_across_sequences(void) {
     struct ansi_ctx ctx;
     ansi_init(&ctx);
@@ -464,6 +478,7 @@ int main(void) {
     run_test("Cursor Movement", test_cursor_movement);
     run_test("Color Change", test_color_change);
     run_test("Bright Color Change", test_bright_color_change);
+    run_test("Truecolor SGR", test_truecolor_sequences_are_accepted);
     run_test("SGR Attr Persistence", test_sgr_attrs_persist_across_sequences);
     run_test("Clear Screen", test_clear_screen);
     run_test("Device Status Report", test_device_status_report_ok);

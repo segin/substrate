@@ -13,6 +13,7 @@
 - each VT owns a fixed scrollback ring of `256` lines at the maximum supported width.
 - the hardware-text VT backend honors DECSTBM scroll regions through the shared ANSI callback table, so line insert/delete, index, reverse-index, and bulk scroll operations stay clipped to the configured top/bottom margins.
 - the hardware-text attribute byte is treated as a 4-bit foreground plus 4-bit background palette, so ANSI SGR color changes can address the full 16 VGA text colors for both foreground and background.
+- extended SGR true-color forms (`38;2;R;G;B` and `48;2;R;G;B`) are accepted by the parser and approximated onto the text palette rather than rejected.
 - the VGA text backend preserves SGR attribute state per VT and approximates bold, reverse video, and underline using palette/intensity transforms when a true text-mode rendering primitive is unavailable.
 - the hardware-text backend exposes a bulk write path for both console logging and `/dev/ttyN` output, so multi-byte writes traverse the same ANSI parser and cursor-update logic as single-character output.
 - ANSI status replies that are terminal input rather than display output, such as `CSI 5 n`, `CSI 6 n`, `CSI c`, and `ESC Z`, are reinjected into the active VT tty input queue instead of being rendered on screen.
