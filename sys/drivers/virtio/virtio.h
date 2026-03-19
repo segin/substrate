@@ -90,5 +90,6 @@ int virtio_gpu_create_scanout_resource(uint32_t resource_id,
                                        uint32_t height,
                                        void *backing,
                                        size_t backing_len);
+int virtio_gpu_flush_scanout(uint32_t x, uint32_t y, uint32_t width, uint32_t height);
 
 #endif

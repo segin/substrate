@@ -28,6 +28,17 @@ The driver can now construct a minimal 2D scanout resource on control queue
 This stage binds resource ID `N` to scanout `0` using a single backing entry
 supplied by the caller. It does not transfer pixels to the host.
 
+## Dirty-Region Transfer
+
+The driver can flush a dirty rectangle for the active scanout resource by
+issuing, in order:
+
+- `TRANSFER_TO_HOST_2D`
+- `RESOURCE_FLUSH`
+
+The current implementation assumes a tightly packed `B8G8R8X8` backing store
+and computes the transfer offset from the tracked scanout width.
+
 ## Transport Contract
 
 - PCI vendor ID: `0x1af4`
@@ -52,3 +63,4 @@ If either required queue is unavailable or cannot be allocated, the driver sets
 - missing I/O BAR is rejected
 - missing cursor queue is rejected and sets failed status
 - 2D scanout creation emits the expected control-queue command sequence
+- dirty-region flush emits `TRANSFER_TO_HOST_2D` followed by `RESOURCE_FLUSH`

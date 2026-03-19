@@ -12,6 +12,7 @@
 #define VIRTIO_GPU_CMD_GET_DISPLAY_INFO       0x0100U
 #define VIRTIO_GPU_CMD_RESOURCE_CREATE_2D     0x0101U
 #define VIRTIO_GPU_CMD_SET_SCANOUT            0x0103U
+#define VIRTIO_GPU_CMD_RESOURCE_FLUSH         0x0104U
 #define VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D    0x0105U
 #define VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING 0x0106U
 #define VIRTIO_GPU_RESP_OK_NODATA             0x1100U
@@ -59,6 +60,21 @@ struct virtio_gpu_set_scanout {
     uint32_t resource_id;
 } __attribute__((packed));
 
+struct virtio_gpu_transfer_to_host_2d {
+    struct virtio_gpu_ctrl_hdr hdr;
+    struct virtio_gpu_rect rect;
+    uint64_t offset;
+    uint32_t resource_id;
+    uint32_t padding;
+} __attribute__((packed));
+
+struct virtio_gpu_resource_flush {
+    struct virtio_gpu_ctrl_hdr hdr;
+    struct virtio_gpu_rect rect;
+    uint32_t resource_id;
+    uint32_t padding;
+} __attribute__((packed));
+
 typedef struct virtio_gpu_queue {
     uint16_t size;
     uint16_t pages;
@@ -78,6 +94,8 @@ typedef struct virtio_gpu_dev {
     virtio_gpu_queue_t cursorq;
     uint8_t initialized;
     uint32_t scanout_resource_id;
+    uint32_t scanout_width;
+    uint32_t scanout_height;
 } virtio_gpu_dev_t;
 
 static virtio_gpu_dev_t vgpu_dev;
@@ -289,5 +307,57 @@ int virtio_gpu_create_scanout_resource(uint32_t resource_id,
     }
 
     vgpu_dev.scanout_resource_id = resource_id;
+    vgpu_dev.scanout_width = width;
+    vgpu_dev.scanout_height = height;
+    return 0;
+}
+
+int virtio_gpu_flush_scanout(uint32_t x, uint32_t y, uint32_t width, uint32_t height) {
+    struct virtio_gpu_transfer_to_host_2d transfer_req;
+    struct virtio_gpu_resource_flush flush_req;
+    struct virtio_gpu_ctrl_hdr resp;
+    uint64_t offset;
+
+    if (!vgpu_dev.initialized || vgpu_dev.scanout_resource_id == 0 || width == 0 || height == 0) {
+        return -1;
+    }
+
+    if (x >= vgpu_dev.scanout_width || y >= vgpu_dev.scanout_height) {
+        return -1;
+    }
+
+    if (width > vgpu_dev.scanout_width - x || height > vgpu_dev.scanout_height - y) {
+        return -1;
+    }
+
+    offset = ((uint64_t)y * vgpu_dev.scanout_width + x) * 4U;
+
+    memset(&transfer_req, 0, sizeof(transfer_req));
+    transfer_req.hdr.type = VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D;
+    transfer_req.rect.x = x;
+    transfer_req.rect.y = y;
+    transfer_req.rect.width = width;
+    transfer_req.rect.height = height;
+    transfer_req.offset = offset;
+    transfer_req.resource_id = vgpu_dev.scanout_resource_id;
+    memset(&resp, 0, sizeof(resp));
+    if (virtio_gpu_submit_ctrl(&vgpu_dev, &transfer_req, sizeof(transfer_req), NULL, 0, 0,
+                               &resp, sizeof(resp)) < 0) {
+        return -1;
+    }
+
+    memset(&flush_req, 0, sizeof(flush_req));
+    flush_req.hdr.type = VIRTIO_GPU_CMD_RESOURCE_FLUSH;
+    flush_req.rect.x = x;
+    flush_req.rect.y = y;
+    flush_req.rect.width = width;
+    flush_req.rect.height = height;
+    flush_req.resource_id = vgpu_dev.scanout_resource_id;
+    memset(&resp, 0, sizeof(resp));
+    if (virtio_gpu_submit_ctrl(&vgpu_dev, &flush_req, sizeof(flush_req), NULL, 0, 0,
+                               &resp, sizeof(resp)) < 0) {
+        return -1;
+    }
+
     return 0;
 }

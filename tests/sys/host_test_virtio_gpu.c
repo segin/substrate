@@ -19,6 +19,8 @@ static uint16_t notified_queues[8];
 static uint32_t notified_types[8];
 static uint32_t attach_entry_length;
 static uint32_t set_scanout_resource_id;
+static uint64_t transfer_offset;
+static uint32_t flush_resource_id;
 static int notify_count;
 
 static void outb(uint16_t port, uint8_t val);
@@ -115,6 +117,14 @@ static void outw(uint16_t port, uint16_t val) {
             struct virtio_gpu_set_scanout *scanout =
                 (struct virtio_gpu_set_scanout *)(uintptr_t)queue->desc[head].addr;
             set_scanout_resource_id = scanout->resource_id;
+        } else if (req->type == VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D) {
+            struct virtio_gpu_transfer_to_host_2d *transfer =
+                (struct virtio_gpu_transfer_to_host_2d *)(uintptr_t)queue->desc[head].addr;
+            transfer_offset = transfer->offset;
+        } else if (req->type == VIRTIO_GPU_CMD_RESOURCE_FLUSH) {
+            struct virtio_gpu_resource_flush *flush =
+                (struct virtio_gpu_resource_flush *)(uintptr_t)queue->desc[head].addr;
+            flush_resource_id = flush->resource_id;
         }
 
         queue->used->ring[queue->used->idx % queue->size].id = head;
@@ -158,6 +168,8 @@ static void reset_state(void) {
     next_page_idx = 0;
     attach_entry_length = 0;
     set_scanout_resource_id = 0;
+    transfer_offset = 0;
+    flush_resource_id = 0;
     notify_count = 0;
     queue_sizes[0] = 8;
     queue_sizes[1] = 8;
@@ -215,11 +227,33 @@ static void test_create_scanout_resource_emits_expected_ctrl_sequence(void) {
     assert(set_scanout_resource_id == 7);
 }
 
+static void test_flush_scanout_emits_transfer_and_flush(void) {
+    static uint8_t backing[640 * 480 * 4];
+
+    reset_state();
+    assert(virtio_gpu_setup(0, 5, 0) == 0);
+    assert(virtio_gpu_create_scanout_resource(9, 640, 480, backing, sizeof(backing)) == 0);
+
+    notify_count = 0;
+    memset(notified_queues, 0, sizeof(notified_queues));
+    memset(notified_types, 0, sizeof(notified_types));
+    transfer_offset = 0;
+    flush_resource_id = 0;
+
+    assert(virtio_gpu_flush_scanout(3, 4, 20, 10) == 0);
+    assert(notify_count == 2);
+    assert(notified_types[0] == VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D);
+    assert(notified_types[1] == VIRTIO_GPU_CMD_RESOURCE_FLUSH);
+    assert(transfer_offset == (((uint64_t)4 * 640U) + 3U) * 4U);
+    assert(flush_resource_id == 9);
+}
+
 int main(void) {
     test_setup_initializes_control_and_cursor_queues();
     test_setup_rejects_missing_cursor_queue();
     test_setup_rejects_missing_io_base();
     test_create_scanout_resource_emits_expected_ctrl_sequence();
+    test_flush_scanout_emits_transfer_and_flush();
     puts("host_test_virtio_gpu: PASS");
     return 0;
 }
