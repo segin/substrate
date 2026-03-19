@@ -28,8 +28,8 @@ Primary rule: prefer shrinking duplicated logic into shared helpers and lookup t
 ### 1.1 Shared x86 Special-Case Emitters
 - [x] Factor duplicated `push`/`pop` segment-register handling shared by i386 and x86_64 emitters.
 - [x] Factor duplicated `kand`/`kor`/`kxor`/`kxnor`/`kadd`/`kunpck` operand-selection logic shared by i386 and x86_64 emitters.
-- [ ] Factor shared `vmread`/`vmwrite` operand-order handling.
-- [ ] Factor shared immediate-vs-register selector helpers for `shld`/`shrd`, `extrq`/`insertq`, and similar multi-form instructions.
+- [x] Factor shared `vmread`/`vmwrite` operand-order handling.
+- [x] Factor shared immediate-vs-register selector helpers for `shld`/`shrd`, `extrq`/`insertq`, and similar multi-form instructions.
 
 ### 1.2 Remaining i386 x87 Cleanup
 - [ ] Factor `fld` / `fxch` / `fld1` / related x87 single-purpose stack instructions into shared x87 helpers.
