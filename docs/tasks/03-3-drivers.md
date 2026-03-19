@@ -1156,7 +1156,7 @@
                 - [ ] `tty_driver->write()` with escape sequence processing. (REQ: REQ-03-0855)
                 - [ ] `tty_driver->ioctl()` for FB-specific controls. (REQ: REQ-03-0856)
                 - [ ] Window size tracking (TIOCGWINSZ/TIOCSWINSZ). (REQ: REQ-03-0857)
-        - [x] **Serial Console (Headless):** (REQ: REQ-03-0858)
+        - [x] **Serial Console (Headless):** <!-- sys/drivers/console/uart/uart.c, sys/include/sys/termios.h, tests/sys/host_test_uart.c, docs/specs/driver_console_uart.md, usr.man/man4/uart.4 --> (REQ: REQ-03-0858)
             - [x] **UART Drivers:** <!-- sys/drivers/console/uart/uart.c, sys/include/sys/termios.h, tests/sys/host_test_uart.c, docs/specs/driver_console_uart.md, usr.man/man4/uart.4 --> (REQ: REQ-03-0859)
                 - [x] 8250/16550 UART driver (I/O port and MMIO). (REQ: REQ-03-0860)
                 - [x] Baud rate configuration (divisor latch). (REQ: REQ-03-0861)
