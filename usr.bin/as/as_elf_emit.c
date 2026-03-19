@@ -1842,6 +1842,32 @@ static int lookup_i386_encodekey_opcode(const char *mnemonic, unsigned char *opc
     return -1;
 }
 
+static int lookup_i386_bndcmp_opcode(const char *mnemonic, unsigned char *prefix, unsigned char *opcode2) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char prefix;
+        unsigned char opcode2;
+    } map[] = {
+        {"bndcl", 0xf3, 0x1a},
+        {"bndcu", 0xf2, 0x1a},
+        {"bndcn", 0xf2, 0x1b},
+        {"bndmk", 0xf3, 0x1b},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || prefix == NULL || opcode2 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *prefix = map[i].prefix;
+            *opcode2 = map[i].opcode2;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static int lookup_i386_xmm_imm8_family(const char *mnemonic, unsigned char *prefix, unsigned char *opcode2) {
     static const struct {
         const char *mnemonic;
@@ -5918,9 +5944,12 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
     }
     if (strcmp(mnbuf, "bndcl") == 0 || strcmp(mnbuf, "bndcu") == 0 || strcmp(mnbuf, "bndcn") == 0 ||
         strcmp(mnbuf, "bndmk") == 0) {
-        unsigned char prefix = (strcmp(mnbuf, "bndcl") == 0 || strcmp(mnbuf, "bndmk") == 0) ? 0xf3 : 0xf2;
-        unsigned char opcode2 = (strcmp(mnbuf, "bndcn") == 0 || strcmp(mnbuf, "bndmk") == 0) ? 0x1b : 0x1a;
+        unsigned char prefix;
+        unsigned char opcode2;
         if (insn->operand_count != 2) {
+            return -1;
+        }
+        if (lookup_i386_bndcmp_opcode(mnbuf, &prefix, &opcode2) != 0) {
             return -1;
         }
         return emit_i386_bnd_binary(prefix, opcode2, src, dst, out, out_cap, out_len);
