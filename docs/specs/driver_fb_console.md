@@ -105,6 +105,14 @@ presentation path as ordinary text output.
 ## Integration
 The `vga_write` function is hooked to automatically use the framebuffer console if initialized and active. This allows seamless kernel logging through the standard console path.
 
+## VT / TTY Registration
+On framebuffer-only boots, the framebuffer console now allocates the standard
+VT tty set (`/dev/tty1` through `/dev/tty12`) if no earlier backend has already
+claimed those VTs. This keeps the visible graphical console on the normal tty
+namespace instead of requiring a framebuffer-specific userspace path. When VGA
+text mode has already installed those tty bindings, the framebuffer console
+detects the existing ownership and leaves it intact.
+
 ## Constraints
 - Built-in font is limited to the PSF glyph set (typically 256 or 512 glyphs).
 - BDF/PCF parsers require the full font data to be memory-resident at parse time.

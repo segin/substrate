@@ -9,6 +9,8 @@
 #include <stdint.h>
 #include <kern/console.h>
 #include <kern/time.h>
+#include <stdio.h>
+#include <sys/tty.h>
 #include <sys/vt.h>
 #include "fb.h"
 #include "fb_console.h"
@@ -41,10 +43,120 @@ static int dirty_y1 = 0;
 static int dirty_x2 = 0;
 static int dirty_y2 = 0;
 static unsigned int dirty_ticks = 0;
+static int fb_console_tty_count = 0;
 
 #define FB_CONSOLE_FLUSH_HZ 60U
 
 static int fb_console_cursor_should_be_visible(void);
+
+static void fb_console_apply_tty_winsize(struct tty *tty) {
+    if (!tty) {
+        return;
+    }
+
+    tty->winsize.ws_col = (unsigned short)vt_get_width();
+    tty->winsize.ws_row = (unsigned short)vt_get_visible_height();
+    tty->winsize.ws_xpixel = 0;
+    tty->winsize.ws_ypixel = 0;
+}
+
+static int fb_vt_tty_open(struct tty *tty) {
+    (void)tty;
+    return 0;
+}
+
+static void fb_vt_tty_close(struct tty *tty) {
+    (void)tty;
+}
+
+static int fb_vt_tty_install(struct tty_driver *driver, struct tty *tty) {
+    int idx;
+    vt_state_t *vt;
+
+    (void)driver;
+    if (!tty) {
+        return -1;
+    }
+
+    idx = tty->index;
+    if (idx < 0 || idx >= VT_MAX) {
+        return -1;
+    }
+
+    vt = vt_get_state(idx);
+    if (!vt) {
+        return -1;
+    }
+    if (vt->tty && vt->tty != tty) {
+        return -1;
+    }
+
+    vt->tty = tty;
+    tty->driver_data = vt;
+    fb_console_apply_tty_winsize(tty);
+    return 0;
+}
+
+static void fb_vt_tty_remove(struct tty_driver *driver, struct tty *tty) {
+    vt_state_t *vt;
+
+    (void)driver;
+    if (!tty) {
+        return;
+    }
+
+    vt = (vt_state_t *)tty->driver_data;
+    if (vt && vt->tty == tty) {
+        vt->tty = NULL;
+    }
+    tty->driver_data = NULL;
+}
+
+static struct tty_driver fb_vt_driver = {
+    .driver_name = "fb_vt",
+    .name = "tty",
+    .major = 4,
+    .minor_start = 1,
+    .install = fb_vt_tty_install,
+    .remove = fb_vt_tty_remove,
+    .open = fb_vt_tty_open,
+    .close = fb_vt_tty_close,
+};
+
+static void fb_console_init_ttys_once(void) {
+    struct tty *tty;
+    vt_state_t *vt;
+    char name[16];
+    int i;
+
+    if (fb_console_tty_count >= VT_MAX) {
+        return;
+    }
+
+    for (i = 0; i < VT_MAX; i++) {
+        vt = vt_get_state(i);
+        if (!vt) {
+            continue;
+        }
+        if (vt->tty) {
+            if (fb_console_tty_count < i + 1) {
+                fb_console_tty_count = i + 1;
+            }
+            continue;
+        }
+
+        tty = tty_alloc(&fb_vt_driver, i);
+        if (!tty) {
+            continue;
+        }
+        snprintf(name, sizeof(name), "tty%d", i + 1);
+        tty_register_device(tty, name);
+        fb_console_tty_count++;
+        if (i == vt_get_active()) {
+            console_set_tty(tty);
+        }
+    }
+}
 
 /* Helper for faster framebuffer copies */
 static void optimized_memcpy(void *dst, const void *src, size_t n) {
@@ -369,6 +481,8 @@ void fb_console_init(void) {
         if (rows < 2) rows = 2;  /* VT requires at least 2 rows */
         vt_set_geometry(cols, rows);
     }
+
+    fb_console_init_ttys_once();
 }
 
 /* ==================== Character Rendering ==================== */

@@ -6,6 +6,7 @@
 #include <drivers/video/font.h>
 #include <drivers/video/fb.h>
 #include <kern/console.h>
+#include <sys/tty.h>
 #include <sys/vt.h>
 
 const uint8_t font_8x16[256 * 16] = {0};
@@ -23,7 +24,12 @@ static int flush_x;
 static int flush_y;
 static int flush_w;
 static int flush_h;
-static vt_state_t test_vt;
+static vt_state_t test_vts[VT_MAX];
+static struct tty test_ttys[VT_MAX];
+static int tty_alloc_count;
+static int tty_register_count;
+static char tty_registered_names[VT_MAX][16];
+static struct tty *console_tty;
 
 void fb_putpixel(int x, int y, uint32_t color) {
     fb_mem[(size_t)y * 640U + (size_t)x] = color;
@@ -63,13 +69,53 @@ int vt_set_geometry(int cols, int rows) {
     return 0;
 }
 
+int vt_get_width(void) {
+    return 80;
+}
+
+int vt_get_visible_height(void) {
+    return 24;
+}
+
 int vt_get_active(void) {
     return 0;
 }
 
 vt_state_t *vt_get_state(int n) {
-    (void)n;
-    return &test_vt;
+    if (n < 0 || n >= VT_MAX) {
+        return NULL;
+    }
+    return &test_vts[n];
+}
+
+struct tty *tty_alloc(struct tty_driver *driver, int idx) {
+    struct tty *tty;
+
+    if (idx < 0 || idx >= VT_MAX) {
+        return NULL;
+    }
+    tty = &test_ttys[idx];
+    memset(tty, 0, sizeof(*tty));
+    tty->driver = driver;
+    tty->index = idx;
+    tty_alloc_count++;
+    if (driver && driver->install && driver->install(driver, tty) != 0) {
+        return NULL;
+    }
+    return tty;
+}
+
+void tty_register_device(struct tty *tty, char *name) {
+    (void)tty;
+    if (tty_register_count < VT_MAX) {
+        snprintf(tty_registered_names[tty_register_count],
+                 sizeof(tty_registered_names[tty_register_count]), "%s", name);
+    }
+    tty_register_count++;
+}
+
+void console_set_tty(struct tty *tty) {
+    console_tty = tty;
 }
 
 #include "../../sys/drivers/video/fb_console.c"
@@ -92,16 +138,51 @@ static void reset_state(void) {
     flush_y = 0;
     flush_w = 0;
     flush_h = 0;
-    memset(&test_vt, 0, sizeof(test_vt));
-    test_vt.cursor_visible = 1;
-    test_vt.cursor_blink = 1;
+    memset(test_vts, 0, sizeof(test_vts));
+    memset(test_ttys, 0, sizeof(test_ttys));
+    tty_alloc_count = 0;
+    tty_register_count = 0;
+    memset(tty_registered_names, 0, sizeof(tty_registered_names));
+    console_tty = NULL;
+    for (int i = 0; i < VT_MAX; i++) {
+        test_vts[i].id = i;
+        test_vts[i].cursor_visible = 1;
+        test_vts[i].cursor_blink = 1;
+    }
     cursor_x = 0;
     cursor_y = 0;
     view_y_offset = 0;
     cursor_blink_phase = 1;
     cursor_blink_ticks = 0;
+    fb_console_tty_count = 0;
     fb_console_reset_dirty();
     memset(fb_mem, 0, sizeof(fb_mem));
+}
+
+static void test_init_registers_framebuffer_vt_ttys(void) {
+    reset_state();
+
+    fb_console_init();
+
+    assert(tty_alloc_count == VT_MAX);
+    assert(tty_register_count == VT_MAX);
+    assert(strcmp(tty_registered_names[0], "tty1") == 0);
+    assert(strcmp(tty_registered_names[VT_MAX - 1], "tty12") == 0);
+    assert(test_vts[0].tty == &test_ttys[0]);
+    assert(test_vts[VT_MAX - 1].tty == &test_ttys[VT_MAX - 1]);
+    assert(console_tty == &test_ttys[0]);
+}
+
+static void test_init_preserves_existing_vt_ttys(void) {
+    reset_state();
+
+    test_vts[0].tty = &test_ttys[0];
+    fb_console_init();
+
+    assert(tty_alloc_count == VT_MAX - 1);
+    assert(tty_register_count == VT_MAX - 1);
+    assert(test_vts[0].tty == &test_ttys[0]);
+    assert(console_tty == NULL);
 }
 
 static void test_clear_marks_full_screen_dirty(void) {
@@ -201,6 +282,8 @@ static void test_software_cursor_blinks_on_tick(void) {
 }
 
 int main(void) {
+    test_init_registers_framebuffer_vt_ttys();
+    test_init_preserves_existing_vt_ttys();
     test_clear_marks_full_screen_dirty();
     test_writes_expand_dirty_rectangle();
     test_tick_batches_and_flushes_dirty_rectangle();

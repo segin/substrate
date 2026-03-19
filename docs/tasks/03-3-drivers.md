@@ -1152,7 +1152,7 @@
                     - [x] DA (device attributes). <!-- sys/drivers/console/ansi_handler.c, tests/sys/host_test_ansi.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0851)
                     - [x] DECID (terminal ID). <!-- sys/drivers/console/ansi_handler.c, tests/sys/host_test_ansi.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0852)
             - [ ] **TTY Binding:** (REQ: REQ-03-0703, REQ-03-0853, REQ-03-0879)
-                - [ ] Register as `tty_driver` for `/dev/tty[1-N]`. (REQ: REQ-03-0704, REQ-03-0854)
+                - [x] Register as `tty_driver` for `/dev/tty[1-N]`. <!-- sys/drivers/video/fb_console.c, tests/sys/host_test_fb_console.c, docs/specs/driver_fb_console.md --> (REQ: REQ-03-0704, REQ-03-0854)
                 - [ ] `tty_driver->write()` with escape sequence processing. (REQ: REQ-03-0855)
                 - [ ] `tty_driver->ioctl()` for FB-specific controls. (REQ: REQ-03-0856)
                 - [ ] Window size tracking (TIOCGWINSZ/TIOCSWINSZ). (REQ: REQ-03-0857)
