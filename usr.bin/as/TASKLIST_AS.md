@@ -120,7 +120,7 @@ Validation gate for Section 1:
 
 ### 3.2 Real-Mode Instruction Coverage
 - [x] Implement remaining i8086-specific syntax/encoding gaps discovered by the corpus.
-- [ ] Add explicit tests for:
+- [x] Add explicit tests for:
   - far jumps/calls
   - segment overrides
   - 16-bit addressing modes
@@ -128,7 +128,7 @@ Validation gate for Section 1:
   - `.org` and fixed-address code16 layout
 
 ### 3.3 Real-Mode Output Validation
-- [ ] Verify emitted relocatable objects preserve 16-bit intent.
+- [x] Verify emitted relocatable objects preserve 16-bit intent.
 - [ ] Add flat-binary smoke tests once `-O binary` is live.
 
 ---
@@ -161,9 +161,9 @@ Validation gate for Section 1:
 - [ ] Add regression tests to prevent `as -> cc -> as` recursion.
 
 ### 5.2 Output Modes
-- [ ] Implement and validate `-O binary`.
-- [ ] Add tests for flat-binary output layout and section placement.
-- [ ] Ensure ELF object emission remains the default and is unaffected by binary mode.
+- [x] Implement and validate `-O binary`.
+- [x] Add tests for flat-binary output layout and section placement.
+- [x] Ensure ELF object emission remains the default and is unaffected by binary mode.
 
 ### 5.3 Diagnostics
 - [ ] Normalize diagnostics for unsupported mnemonics, operands, and ISA-level failures.
@@ -230,13 +230,13 @@ Validation gate for Section 1:
 ## 9. Test Matrix Completion
 
 ### 9.1 Required Green Set Before Moving On
-- [ ] `tests/usr.bin/as/test_parser_core.sh`
-- [ ] `tests/usr.bin/as/test_x86_64_encoding.sh`
-- [ ] `tests/usr.bin/as/test_intel_dual_syntax.sh`
-- [ ] `tests/usr.bin/as/test_x86_32_corpus_intel_roundtrip.sh`
-- [ ] `tests/usr.bin/as/test_x86_64_corpus_intel_roundtrip.sh`
-- [ ] `tests/usr.bin/as/test_integration_matrix.sh`
-- [ ] i8086 corpus test once added
+- [x] `tests/usr.bin/as/test_parser_core.sh`
+- [x] `tests/usr.bin/as/test_x86_64_encoding.sh`
+- [x] `tests/usr.bin/as/test_intel_dual_syntax.sh`
+- [x] `tests/usr.bin/as/test_x86_32_corpus_intel_roundtrip.sh`
+- [x] `tests/usr.bin/as/test_x86_64_corpus_intel_roundtrip.sh`
+- [x] `tests/usr.bin/as/test_integration_matrix.sh`
+- [x] i8086 corpus test once added
 
 ### 9.2 Regression Additions
 - [ ] For every emitter cleanup commit, add or update at least one regression test when the change affects nontrivial dispatch.

@@ -8,6 +8,8 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 "$ROOT/tests/usr.bin/as/test_i386_refactor_tail.sh"
 "$ROOT/tests/usr.bin/as/test_x86_64_encode_ext.sh"
 "$ROOT/tests/usr.bin/as/test_i8086_corpus.sh"
+"$ROOT/tests/usr.bin/as/test_i8086_realmode_core.sh"
+"$ROOT/tests/usr.bin/as/test_i8086_elf_object.sh"
 "$ROOT/tests/usr.bin/as/test_arm_encode_core.sh"
 "$ROOT/tests/usr.bin/as/test_a64_encode_core.sh"
 "$ROOT/tests/usr.bin/as/test_a64_simd_core.sh"
