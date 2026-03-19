@@ -29,4 +29,9 @@ void fb_putc(char c, uint32_t fg, uint32_t bg);
 /* Put single character with colors and rendering attributes */
 void fb_putc_attr(char c, uint32_t fg, uint32_t bg, uint8_t attr);
 
+/* Dirty-rectangle tracking for deferred console updates */
+int fb_console_dirty_pending(void);
+void fb_console_get_dirty_rect(int *x, int *y, int *w, int *h);
+void fb_console_reset_dirty(void);
+
 #endif /* _FB_CONSOLE_H */

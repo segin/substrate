@@ -72,6 +72,12 @@ native storage format. The current implementation covers:
 ## Scrolling
 Performed via `fb_copyarea` (overlap-safe blit) when the cursor reaches the bottom of the screen. The bottom line is cleared with `fb_fillrect`.
 
+## Dirty Tracking
+The framebuffer console maintains a single accumulated dirty rectangle over the
+current frame. Character draws, clears, and scroll operations expand that
+rectangle so later deferred-flush logic can submit one bounded update instead of
+rewriting the whole visible surface on every write.
+
 ## Integration
 The `vga_write` function is hooked to automatically use the framebuffer console if initialized and active. This allows seamless kernel logging through the standard console path.
 

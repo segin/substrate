@@ -27,6 +27,11 @@
 static int cursor_x = 0;
 static int cursor_y = 0;
 static int view_y_offset = 0; /* Viewport Y offset for hardware scrolling */
+static int dirty_valid = 0;
+static int dirty_x1 = 0;
+static int dirty_y1 = 0;
+static int dirty_x2 = 0;
+static int dirty_y2 = 0;
 
 /* Helper for faster framebuffer copies */
 static void optimized_memcpy(void *dst, const void *src, size_t n) {
@@ -46,6 +51,31 @@ static void optimized_memcpy(void *dst, const void *src, size_t n) {
     }
 }
 
+static void fb_console_mark_dirty(int x, int y, int w, int h) {
+    int x2;
+    int y2;
+
+    if (w <= 0 || h <= 0) {
+        return;
+    }
+
+    x2 = x + w;
+    y2 = y + h;
+    if (!dirty_valid) {
+        dirty_x1 = x;
+        dirty_y1 = y;
+        dirty_x2 = x2;
+        dirty_y2 = y2;
+        dirty_valid = 1;
+        return;
+    }
+
+    if (x < dirty_x1) dirty_x1 = x;
+    if (y < dirty_y1) dirty_y1 = y;
+    if (x2 > dirty_x2) dirty_x2 = x2;
+    if (y2 > dirty_y2) dirty_y2 = y2;
+}
+
 /* External framebuffer info (from fb.c) */
 
 /* Access to current driver for set_viewport via video_set_viewport() in fb.c */
@@ -63,9 +93,11 @@ static void fb_console_clear(void) {
     cursor_x = 0;
     cursor_y = 0;
     view_y_offset = 0;
+    dirty_valid = 0;
     if (video_set_viewport(0, 0) != 0) {
         // failed or not supported
     }
+    fb_console_mark_dirty(0, 0, (int)fb.width, (int)fb.height);
 }
 
 static console_backend_t fb_console_backend = {
@@ -118,6 +150,7 @@ void fb_putc(char c, uint32_t fg, uint32_t bg) {
                 }
             }
         }
+        fb_console_mark_dirty(cursor_x, draw_y, FB_FONT_WIDTH, FB_FONT_HEIGHT);
         cursor_x += FB_FONT_WIDTH;
     }
 
@@ -168,6 +201,7 @@ void fb_putc(char c, uint32_t fg, uint32_t bg) {
 
             /* Commit Scroll */
             fb.scroll(view_y_offset);
+            fb_console_mark_dirty(0, view_y_offset, (int)fb.width, (int)fb.height);
 
             cursor_y -= FB_FONT_HEIGHT;
 
@@ -185,6 +219,7 @@ void fb_putc(char c, uint32_t fg, uint32_t bg) {
                     fb_putpixel(x, y, clear_color);
                 }
             }
+            fb_console_mark_dirty(0, 0, (int)fb.width, (int)fb.height);
             cursor_y -= FB_FONT_HEIGHT;
         }
     }
@@ -271,6 +306,7 @@ void fb_putc_attr(char c, uint32_t fg, uint32_t bg, uint8_t attr) {
             }
         }
     }
+    fb_console_mark_dirty(cursor_x, draw_y, FB_FONT_WIDTH, FB_FONT_HEIGHT);
     cursor_x += FB_FONT_WIDTH;
 
     /* Handle line wrap */
@@ -299,6 +335,7 @@ void fb_putc_attr(char c, uint32_t fg, uint32_t bg, uint8_t attr) {
                 }
             }
             fb.scroll(view_y_offset);
+            fb_console_mark_dirty(0, view_y_offset, (int)fb.width, (int)fb.height);
             cursor_y -= FB_FONT_HEIGHT;
         } else {
             void *dst = fb.addr;
@@ -311,7 +348,35 @@ void fb_putc_attr(char c, uint32_t fg, uint32_t bg, uint8_t attr) {
                     fb_putpixel(fx, fy, clear_color);
                 }
             }
+            fb_console_mark_dirty(0, 0, (int)fb.width, (int)fb.height);
             cursor_y -= FB_FONT_HEIGHT;
         }
     }
+}
+
+int fb_console_dirty_pending(void) {
+    return dirty_valid;
+}
+
+void fb_console_get_dirty_rect(int *x, int *y, int *w, int *h) {
+    if (!dirty_valid) {
+        if (x) *x = 0;
+        if (y) *y = 0;
+        if (w) *w = 0;
+        if (h) *h = 0;
+        return;
+    }
+
+    if (x) *x = dirty_x1;
+    if (y) *y = dirty_y1;
+    if (w) *w = dirty_x2 - dirty_x1;
+    if (h) *h = dirty_y2 - dirty_y1;
+}
+
+void fb_console_reset_dirty(void) {
+    dirty_valid = 0;
+    dirty_x1 = 0;
+    dirty_y1 = 0;
+    dirty_x2 = 0;
+    dirty_y2 = 0;
 }
