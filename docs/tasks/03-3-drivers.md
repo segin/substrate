@@ -1007,7 +1007,7 @@
                 - [ ] Implement `tty_driver->ioctl()` for VGA-specific controls. (REQ: REQ-03-0706)
         - [ ] **Keyboard Input (PS/2 to TTY):** (REQ: REQ-03-0707)
             - [x] Fix PS/2 driver build errors (constant mismatches in `test_ps2.c`). (REQ: REQ-03-0708)
-            - [ ] **Input Path:** (REQ: REQ-03-0709)
+            - [x] **Input Path:** <!-- sys/drivers/input/keyboard.c, tests/sys/host_test_keyboard.c, docs/specs/driver_keyboard.md, usr.man/man4/keyboard.4 --> (REQ: REQ-03-0709)
                 - [x] Hook keyboard driver to TTY input queue. (REQ: REQ-03-0710)
                 - [x] Convert scancodes to ASCII via keymap. (REQ: REQ-03-0711)
                 - [x] Handle modifier keys (Shift, Ctrl, Alt, AltGr). (REQ: REQ-03-0712)

@@ -23,6 +23,8 @@ single-byte Set 1 printable keys
 .It
 left and right Shift/Ctrl/Alt state tracking
 .It
+translation through the active keymap, including Ctrl-generated control bytes
+.It
 .Li Alt+Fn
 virtual-terminal switching
 .It
@@ -39,7 +41,8 @@ kernel process-table dump
 .Pp
 Translated characters are queued in an internal ring buffer and forwarded to the
 active VT's TTY. If no TTY is attached, input falls back to the console input
-path.
+path. The driver also emits key press and key release notifications through the
+generic input-event interface.
 .Sh FILES
 .Bl -tag -width "/sys/drivers/input/keyboard.c"
 .It Pa /sys/drivers/input/keyboard.c
