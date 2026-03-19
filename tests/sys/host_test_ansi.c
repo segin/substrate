@@ -360,6 +360,22 @@ static void test_dec_special_graphics_maps_line_drawing(void) {
     assert((unsigned char)output_buffer[1] == 0xB3U);
 }
 
+static void test_utf8_box_drawing_maps_to_text_glyphs(void) {
+    struct ansi_ctx ctx;
+    ansi_init(&ctx);
+    reset_mocks();
+
+    const unsigned char seq[] = { 0xE2, 0x94, 0x80, 0xE2, 0x94, 0x82, 0 };
+    const unsigned char *p = seq;
+
+    while (*p) {
+        ansi_process(&ctx, (char)*p++, &callbacks);
+    }
+
+    assert((unsigned char)output_buffer[0] == 0xC4U);
+    assert((unsigned char)output_buffer[1] == 0xB3U);
+}
+
 static void test_tab_clear_modes(void) {
     struct ansi_ctx ctx;
     ansi_init(&ctx);
@@ -527,6 +543,7 @@ int main(void) {
     run_test("Charset Designation", test_charset_designation_targets_g_sets);
     run_test("Shift In/Out", test_shift_in_out_selects_g0_or_g1);
     run_test("DEC Special Graphics", test_dec_special_graphics_maps_line_drawing);
+    run_test("UTF-8 Box Drawing", test_utf8_box_drawing_maps_to_text_glyphs);
     run_test("Tab Clear", test_tab_clear_modes);
     run_test("Cursor Tab Forward/Backward", test_cursor_tab_forward_and_backward);
     run_test("DECID", test_decid_report);

@@ -40,6 +40,45 @@ static unsigned char ansi_translate_dec_special(unsigned char c) {
     }
 }
 
+static unsigned char ansi_translate_unicode(uint32_t cp) {
+    switch (cp) {
+    case 0x2500: return 0xC4; /* box drawings light horizontal */
+    case 0x2502: return 0xB3; /* box drawings light vertical */
+    case 0x250C: return 0xDA; /* box drawings light down and right */
+    case 0x2510: return 0xBF; /* box drawings light down and left */
+    case 0x2514: return 0xC0; /* box drawings light up and right */
+    case 0x2518: return 0xD9; /* box drawings light up and left */
+    case 0x251C: return 0xC3; /* box drawings light vertical and right */
+    case 0x2524: return 0xB4; /* box drawings light vertical and left */
+    case 0x252C: return 0xC2; /* box drawings light down and horizontal */
+    case 0x2534: return 0xC1; /* box drawings light up and horizontal */
+    case 0x253C: return 0xC5; /* box drawings light vertical and horizontal */
+    case 0x00A0: return ' ';
+    default:
+        if (cp < 0x80U) {
+            return (unsigned char)cp;
+        }
+        return '?';
+    }
+}
+
+static void ansi_emit_codepoint(struct ansi_ctx *ctx,
+                                uint32_t cp,
+                                const struct ansi_callbacks *cb) {
+    unsigned char out;
+
+    if (!cb || !cb->putc) {
+        return;
+    }
+
+    if (cp < 0x80U && ctx->charsets[ctx->active_gl] == ANSI_CHARSET_DEC_SPECIAL) {
+        out = ansi_translate_dec_special((unsigned char)cp);
+    } else {
+        out = ansi_translate_unicode(cp);
+    }
+    cb->putc((char)out);
+}
+
 void ansi_init(struct ansi_ctx *ctx) {
     if (!ctx) return;
     ctx->state = ANSI_NORMAL;
@@ -51,6 +90,8 @@ void ansi_init(struct ansi_ctx *ctx) {
     ctx->charsets[3] = ANSI_CHARSET_ASCII;
     ctx->active_gl = 0;
     ctx->charset_target = 0;
+    ctx->utf8_codepoint = 0;
+    ctx->utf8_remaining = 0;
 }
 
 /* ---- SGR (Select Graphic Rendition) ---- */
@@ -429,13 +470,37 @@ void ansi_process(struct ansi_ctx *ctx, char c, const struct ansi_callbacks *cb)
         } else if (c == '\x0f') {
             ctx->active_gl = 0;
         } else {
-            if (cb->putc) {
-                unsigned char out = (unsigned char)c;
+            unsigned char uc = (unsigned char)c;
 
-                if (ctx->charsets[ctx->active_gl] == ANSI_CHARSET_DEC_SPECIAL) {
-                    out = ansi_translate_dec_special(out);
+            if (ctx->utf8_remaining != 0) {
+                if ((uc & 0xC0U) == 0x80U) {
+                    ctx->utf8_codepoint = (ctx->utf8_codepoint << 6) | (uc & 0x3FU);
+                    ctx->utf8_remaining--;
+                    if (ctx->utf8_remaining == 0) {
+                        ansi_emit_codepoint(ctx, ctx->utf8_codepoint, cb);
+                        ctx->utf8_codepoint = 0;
+                    }
+                } else {
+                    ansi_emit_codepoint(ctx, '?', cb);
+                    ctx->utf8_codepoint = 0;
+                    ctx->utf8_remaining = 0;
+                    if (uc < 0x80U) {
+                        ansi_emit_codepoint(ctx, uc, cb);
+                    }
                 }
-                cb->putc((char)out);
+            } else if (uc < 0x80U) {
+                ansi_emit_codepoint(ctx, uc, cb);
+            } else if ((uc & 0xE0U) == 0xC0U) {
+                ctx->utf8_codepoint = uc & 0x1FU;
+                ctx->utf8_remaining = 1;
+            } else if ((uc & 0xF0U) == 0xE0U) {
+                ctx->utf8_codepoint = uc & 0x0FU;
+                ctx->utf8_remaining = 2;
+            } else if ((uc & 0xF8U) == 0xF0U) {
+                ctx->utf8_codepoint = uc & 0x07U;
+                ctx->utf8_remaining = 3;
+            } else {
+                ansi_emit_codepoint(ctx, '?', cb);
             }
         }
         break;

@@ -29,6 +29,8 @@ struct ansi_ctx {
     uint8_t charsets[4];
     uint8_t active_gl;
     uint8_t charset_target;
+    uint32_t utf8_codepoint;
+    uint8_t utf8_remaining;
 };
 
 /* Callbacks for the driver */
