@@ -691,13 +691,1636 @@ static void history_incremental_search(EditLine *el, int reverse) {
     refresh_line(el);
 }
 
+/*
+ * Return codes from per-mode dispatch functions.
+ */
+#define DISP_CONTINUE  0   /* keep reading */
+#define DISP_ACCEPT    1   /* line accepted (Enter) */
+#define DISP_EOF       2   /* EOF (^D on empty) */
+
+/* Forward declarations for dispatch functions */
+static int emacs_handle_escape(EditLine *el);
+static int emacs_handle_char(EditLine *el, int c);
+static int vi_insert_handle_char(EditLine *el, int c);
+static int vi_command_handle_char(EditLine *el, int c);
+static int vi_replace_handle_char(EditLine *el, int c);
+
+/* ------------------------------------------------------------------ */
+/* Vi-specific word motion helpers.                                    */
+/* Vi "word" = alnum/_ chars; "WORD" = non-blank chars.               */
+/* ------------------------------------------------------------------ */
+
+static int is_vi_word(unsigned char ch) {
+    return isalnum(ch) || ch == '_';
+}
+
+static size_t vi_forward_word(EditLine *el, size_t pos) {
+    size_t i = pos;
+    if (i >= el->line.len) return i;
+    if (is_vi_word((unsigned char)el->line.buffer[i])) {
+        while (i < el->line.len && is_vi_word((unsigned char)el->line.buffer[i])) i++;
+    } else if (!isspace((unsigned char)el->line.buffer[i])) {
+        while (i < el->line.len && !is_vi_word((unsigned char)el->line.buffer[i])
+               && !isspace((unsigned char)el->line.buffer[i])) i++;
+    }
+    while (i < el->line.len && isspace((unsigned char)el->line.buffer[i])) i++;
+    return i;
+}
+
+static size_t vi_forward_WORD(EditLine *el, size_t pos) {
+    size_t i = pos;
+    while (i < el->line.len && !isspace((unsigned char)el->line.buffer[i])) i++;
+    while (i < el->line.len && isspace((unsigned char)el->line.buffer[i])) i++;
+    return i;
+}
+
+static size_t vi_backward_word(EditLine *el, size_t pos) {
+    size_t i = pos;
+    if (i == 0) return 0;
+    i--;
+    while (i > 0 && isspace((unsigned char)el->line.buffer[i])) i--;
+    if (is_vi_word((unsigned char)el->line.buffer[i])) {
+        while (i > 0 && is_vi_word((unsigned char)el->line.buffer[i - 1])) i--;
+    } else {
+        while (i > 0 && !is_vi_word((unsigned char)el->line.buffer[i - 1])
+               && !isspace((unsigned char)el->line.buffer[i - 1])) i--;
+    }
+    return i;
+}
+
+static size_t vi_backward_WORD(EditLine *el, size_t pos) {
+    size_t i = pos;
+    if (i == 0) return 0;
+    i--;
+    while (i > 0 && isspace((unsigned char)el->line.buffer[i])) i--;
+    while (i > 0 && !isspace((unsigned char)el->line.buffer[i - 1])) i--;
+    return i;
+}
+
+static size_t vi_end_word(EditLine *el, size_t pos) {
+    size_t i = pos;
+    if (i + 1 >= el->line.len) return el->line.len > 0 ? el->line.len - 1 : 0;
+    i++;
+    while (i < el->line.len && isspace((unsigned char)el->line.buffer[i])) i++;
+    if (i < el->line.len && is_vi_word((unsigned char)el->line.buffer[i])) {
+        while (i + 1 < el->line.len && is_vi_word((unsigned char)el->line.buffer[i + 1])) i++;
+    } else {
+        while (i + 1 < el->line.len && !is_vi_word((unsigned char)el->line.buffer[i + 1])
+               && !isspace((unsigned char)el->line.buffer[i + 1])) i++;
+    }
+    return i;
+}
+
+static size_t vi_end_WORD(EditLine *el, size_t pos) {
+    size_t i = pos;
+    if (i + 1 >= el->line.len) return el->line.len > 0 ? el->line.len - 1 : 0;
+    i++;
+    while (i < el->line.len && isspace((unsigned char)el->line.buffer[i])) i++;
+    while (i + 1 < el->line.len && !isspace((unsigned char)el->line.buffer[i + 1])) i++;
+    return i;
+}
+
+static size_t vi_find_char_fwd(EditLine *el, char ch, size_t pos) {
+    size_t i;
+    for (i = pos + 1; i < el->line.len; i++) {
+        if (el->line.buffer[i] == ch) return i;
+    }
+    return pos; /* not found */
+}
+
+static size_t vi_find_char_bwd(EditLine *el, char ch, size_t pos) {
+    size_t i;
+    if (pos == 0) return 0;
+    for (i = pos - 1; ; i--) {
+        if (el->line.buffer[i] == ch) return i;
+        if (i == 0) break;
+    }
+    return pos; /* not found */
+}
+
+static size_t vi_first_nonblank(EditLine *el) {
+    size_t i;
+    for (i = 0; i < el->line.len; i++) {
+        if (!isspace((unsigned char)el->line.buffer[i])) return i;
+    }
+    return el->line.len;
+}
+
+/*
+ * Compute the target position for a vi motion character.
+ * Returns the resulting cursor position, or (size_t)-1 if invalid.
+ * For delete/change/yank, the range is [min(cursor, target), max(cursor, target)).
+ */
+static size_t vi_motion_target(EditLine *el, int motion, int count) {
+    size_t pos = el->line.cursor;
+    int i;
+
+    switch (motion) {
+    case 'h':
+        return pos > (size_t)count ? pos - count : 0;
+    case 'l':
+        return (pos + count < el->line.len) ? pos + count : el->line.len;
+    case 'w':
+        for (i = 0; i < count; i++) pos = vi_forward_word(el, pos);
+        return pos;
+    case 'W':
+        for (i = 0; i < count; i++) pos = vi_forward_WORD(el, pos);
+        return pos;
+    case 'b':
+        for (i = 0; i < count; i++) pos = vi_backward_word(el, pos);
+        return pos;
+    case 'B':
+        for (i = 0; i < count; i++) pos = vi_backward_WORD(el, pos);
+        return pos;
+    case 'e':
+        for (i = 0; i < count; i++) pos = vi_end_word(el, pos);
+        return pos < el->line.len ? pos + 1 : el->line.len;
+    case 'E':
+        for (i = 0; i < count; i++) pos = vi_end_WORD(el, pos);
+        return pos < el->line.len ? pos + 1 : el->line.len;
+    case '0':
+        return 0;
+    case '$':
+        return el->line.len;
+    case '^':
+        return vi_first_nonblank(el);
+    case 'f': case 'F': case 't': case 'T': {
+        char fc;
+        if (!read_esc_byte(el, &fc, 80)) return (size_t)-1;
+        el->vi_find.ch = fc;
+        el->vi_find.forward = (motion == 'f' || motion == 't');
+        el->vi_find.till = (motion == 't' || motion == 'T');
+        size_t target;
+        for (i = 0; i < count; i++) {
+            if (el->vi_find.forward)
+                target = vi_find_char_fwd(el, fc, i == 0 ? pos : target);
+            else
+                target = vi_find_char_bwd(el, fc, i == 0 ? pos : target);
+        }
+        if (target == pos) return (size_t)-1;
+        if (el->vi_find.till) {
+            if (el->vi_find.forward && target > 0) target--;
+            else if (!el->vi_find.forward) target++;
+        }
+        /* For forward motions used with d/c/y, include the target char */
+        if (el->vi_find.forward) target++;
+        return target;
+    }
+    default:
+        return (size_t)-1;
+    }
+}
+
+/*
+ * Record the last edit command for Vi dot-repeat.
+ */
+static void vi_record_repeat(EditLine *el, char cmd, char arg, int count) {
+    el->vi_repeat.cmd = cmd;
+    el->vi_repeat.arg = arg;
+    el->vi_repeat.count = count;
+    free(el->vi_repeat.insert_text);
+    el->vi_repeat.insert_text = NULL;
+    el->vi_repeat.insert_len = 0;
+}
+
+/*
+ * Capture inserted text for dot-repeat (from vi_insert_start to cursor).
+ */
+static void vi_capture_insert(EditLine *el) {
+    size_t start = el->vi_insert_start;
+    size_t end = el->line.cursor;
+    size_t len;
+
+    free(el->vi_repeat.insert_text);
+    el->vi_repeat.insert_text = NULL;
+    el->vi_repeat.insert_len = 0;
+
+    if (end <= start) return;
+    len = end - start;
+    el->vi_repeat.insert_text = malloc(len + 1);
+    if (!el->vi_repeat.insert_text) return;
+    memcpy(el->vi_repeat.insert_text, el->line.buffer + start, len);
+    el->vi_repeat.insert_text[len] = '\0';
+    el->vi_repeat.insert_len = len;
+}
+
+static void vi_enter_insert(EditLine *el) {
+    el->vi_mode = VI_INSERT;
+    el->vi_insert_start = el->line.cursor;
+}
+
+/* ------------------------------------------------------------------ */
+/* Vi history search: reads /pattern or ?pattern from user.           */
+/* ------------------------------------------------------------------ */
+static void vi_history_search(EditLine *el, int reverse) {
+    char query[256];
+    size_t qlen = 0;
+    const char *match;
+    int ch;
+
+    query[0] = '\0';
+
+    for (;;) {
+        fprintf(el->fout, "\r\033[K%c%s",
+                reverse ? '/' : '?', query);
+        fflush(el->fout);
+
+        if (read(fileno(el->fin), &ch, 1) != 1) break;
+        ch &= 0xFF;
+
+        if (ch == '\n' || ch == '\r') {
+            if (qlen > 0) {
+                memcpy(el->vi_search.pattern, query, qlen + 1);
+                el->vi_search.reverse = reverse;
+            }
+            match = history_find_match(el, el->vi_search.pattern, el->vi_search.reverse);
+            if (match) {
+                line_load_history(el, match);
+                el->history_browsing = 1;
+            }
+            break;
+        }
+        if (ch == 0x1B || ch == 0x03) break; /* ESC or ^C cancels */
+        if (ch == 0x08 || ch == 0x7F) {
+            if (qlen > 0) query[--qlen] = '\0';
+        } else if (ch >= 32 && ch < 127 && qlen + 1 < sizeof(query)) {
+            query[qlen++] = (char)ch;
+            query[qlen] = '\0';
+        }
+    }
+    refresh_line(el);
+}
+
+/* ------------------------------------------------------------------ */
+/* Emacs mode character dispatch.                                     */
+/* ------------------------------------------------------------------ */
+static int emacs_handle_char(EditLine *el, int c) {
+    if (c == '\n' || c == '\r') {
+        el->last_cmd_was_kill = 0;
+        el->yank_active = 0;
+        return DISP_ACCEPT;
+    }
+
+    if (c == 0x7F || c == 0x08) { /* Backspace */
+        if (el->line.cursor > 0) {
+            el->last_cmd_was_kill = 0;
+            el->yank_active = 0;
+            undo_push(el);
+            memmove(el->line.buffer + el->line.cursor - 1,
+                    el->line.buffer + el->line.cursor,
+                    el->line.len - el->line.cursor + 1);
+            el->line.len--;
+            el->line.cursor--;
+            refresh_line(el);
+        }
+        return DISP_CONTINUE;
+    }
+
+    if (c == 0x04) { /* ^D - EOF or delete */
+        if (el->line.len == 0) {
+            el->last_cmd_was_kill = 0;
+            el->yank_active = 0;
+            return DISP_EOF;
+        }
+        if (el->line.cursor < el->line.len) {
+            el->last_cmd_was_kill = 0;
+            el->yank_active = 0;
+            undo_push(el);
+            memmove(el->line.buffer + el->line.cursor,
+                    el->line.buffer + el->line.cursor + 1,
+                    el->line.len - el->line.cursor);
+            el->line.len--;
+            refresh_line(el);
+        } else if (el->completion) {
+            el->yank_active = 0;
+            el->completion(el, c);
+            refresh_line(el);
+        }
+        return DISP_CONTINUE;
+    }
+
+    if (c == 0x03) { /* ^C */
+        el->last_cmd_was_kill = 0;
+        el->yank_active = 0;
+        fprintf(el->fout, "^C\r\n");
+        el_reset(el);
+        if (el->prompt) {
+            fprintf(el->fout, "%s", el->prompt);
+            fflush(el->fout);
+        }
+        return DISP_CONTINUE;
+    }
+
+    if (c == 0x0C) { /* ^L - Clear screen */
+        el->last_cmd_was_kill = 0;
+        el->yank_active = 0;
+        fprintf(el->fout, "\033[H\033[2J");
+        refresh_line(el);
+        return DISP_CONTINUE;
+    }
+
+    if (c == 0x01) { /* ^A */
+        el->last_cmd_was_kill = 0;
+        el->yank_active = 0;
+        if (el->line.cursor != 0) {
+            undo_push(el);
+            el->line.cursor = 0;
+            refresh_line(el);
+        }
+        return DISP_CONTINUE;
+    }
+
+    if (c == 0x02) { /* ^B */
+        el->last_cmd_was_kill = 0;
+        el->yank_active = 0;
+        if (el->line.cursor > 0) {
+            undo_push(el);
+            el->line.cursor--;
+            refresh_line(el);
+        }
+        return DISP_CONTINUE;
+    }
+
+    if (c == 0x05) { /* ^E */
+        el->last_cmd_was_kill = 0;
+        el->yank_active = 0;
+        if (el->line.cursor != el->line.len) {
+            undo_push(el);
+            el->line.cursor = el->line.len;
+            refresh_line(el);
+        }
+        return DISP_CONTINUE;
+    }
+
+    if (c == 0x06) { /* ^F */
+        el->last_cmd_was_kill = 0;
+        el->yank_active = 0;
+        if (el->line.cursor < el->line.len) {
+            undo_push(el);
+            el->line.cursor++;
+            refresh_line(el);
+        }
+        return DISP_CONTINUE;
+    }
+
+    if (c == 0x09) { /* Tab complete */
+        el->last_cmd_was_kill = 0;
+        el->yank_active = 0;
+        if (el->completion) {
+            undo_push(el);
+            el->completion(el, c);
+            refresh_line(el);
+        } else {
+            undo_push(el);
+            if (default_filename_complete(el)) {
+                refresh_line(el);
+            } else {
+                undo_discard_last(el);
+                fputc('\a', el->fout);
+                fflush(el->fout);
+            }
+        }
+        return DISP_CONTINUE;
+    }
+
+    if (c == 0x0E) { /* ^N next-history */
+        el->last_cmd_was_kill = 0;
+        el->yank_active = 0;
+        if (el->history) {
+            HistEvent ev;
+            if (history(el->history, &ev, H_NEXT) == 0 && ev.str) {
+                undo_push(el);
+                line_load_history(el, ev.str);
+                refresh_line(el);
+            } else {
+                undo_push(el);
+                history_restore_current_input(el);
+                el->history_browsing = 0;
+                refresh_line(el);
+            }
+        }
+        return DISP_CONTINUE;
+    }
+
+    if (c == 0x10) { /* ^P previous-history */
+        el->last_cmd_was_kill = 0;
+        el->yank_active = 0;
+        if (el->history) {
+            HistEvent ev;
+            if (!el->history_browsing) {
+                (void)history_save_current_input(el);
+                el->history_browsing = 1;
+            }
+            if (history(el->history, &ev, H_PREV) == 0 && ev.str) {
+                undo_push(el);
+                line_load_history(el, ev.str);
+                refresh_line(el);
+            }
+        }
+        return DISP_CONTINUE;
+    }
+
+    if (c == 0x12) { /* ^R */
+        el->last_cmd_was_kill = 0;
+        el->yank_active = 0;
+        history_incremental_search(el, 1);
+        return DISP_CONTINUE;
+    }
+
+    if (c == 0x13) { /* ^S */
+        el->last_cmd_was_kill = 0;
+        el->yank_active = 0;
+        history_incremental_search(el, 0);
+        return DISP_CONTINUE;
+    }
+
+    if (c == 0x0B) { /* ^K kill-line */
+        el->yank_active = 0;
+        undo_push(el);
+        if (kill_line(el)) refresh_line(el);
+        return DISP_CONTINUE;
+    }
+
+    if (c == 0x15) { /* ^U backward-kill-line */
+        el->yank_active = 0;
+        undo_push(el);
+        if (backward_kill_line(el)) refresh_line(el);
+        return DISP_CONTINUE;
+    }
+
+    if (c == 0x17) { /* ^W unix-word-rubout */
+        el->yank_active = 0;
+        undo_push(el);
+        if (backward_kill_word(el)) refresh_line(el);
+        return DISP_CONTINUE;
+    }
+
+    if (c == 0x14) { /* ^T transpose-chars */
+        el->last_cmd_was_kill = 0;
+        el->yank_active = 0;
+        undo_push(el);
+        if (transpose_chars(el)) refresh_line(el);
+        return DISP_CONTINUE;
+    }
+
+    if (c == 0x19) { /* ^Y yank */
+        el->last_cmd_was_kill = 0;
+        undo_push(el);
+        if (yank_from_kill_ring(el)) refresh_line(el);
+        return DISP_CONTINUE;
+    }
+
+    if (c == 0x1F) { /* ^_ undo */
+        el->last_cmd_was_kill = 0;
+        el->yank_active = 0;
+        if (undo_pop(el)) refresh_line(el);
+        return DISP_CONTINUE;
+    }
+
+    if (c == 0x1B) { /* ESC */
+        return emacs_handle_escape(el);
+    }
+
+    /* Printable self-insert */
+    if (c >= 32 && c < 127) {
+        if (line_ensure_capacity(el, el->line.len + 2) == 0) {
+            el->last_cmd_was_kill = 0;
+            el->yank_active = 0;
+            undo_push(el);
+            if (el->overwrite_mode && el->line.cursor < el->line.len) {
+                el->line.buffer[el->line.cursor] = (char)c;
+                el->line.cursor++;
+            } else {
+                memmove(el->line.buffer + el->line.cursor + 1,
+                        el->line.buffer + el->line.cursor,
+                        el->line.len - el->line.cursor + 1);
+                el->line.buffer[el->line.cursor] = (char)c;
+                el->line.len++;
+                el->line.cursor++;
+            }
+            refresh_line(el);
+        } else {
+            fputc('\a', el->fout);
+            fflush(el->fout);
+        }
+    }
+    return DISP_CONTINUE;
+}
+
+/* ------------------------------------------------------------------ */
+/* Emacs escape sequence handler (extracted from old el_gets).        */
+/* ------------------------------------------------------------------ */
+static int emacs_handle_escape(EditLine *el) {
+    char seq0;
+    if (!read_esc_byte(el, &seq0, 80)) {
+        el->last_cmd_was_kill = 0;
+        el->yank_active = 0;
+        return DISP_CONTINUE;
+    }
+
+    if (seq0 == '[') {
+        char seq1;
+        if (!read_esc_byte(el, &seq1, 80)) return DISP_CONTINUE;
+
+        if (seq1 == 'C') { /* Right */
+            el->last_cmd_was_kill = 0;
+            el->yank_active = 0;
+            if (el->line.cursor < el->line.len) {
+                undo_push(el);
+                el->line.cursor++;
+                refresh_line(el);
+            }
+        } else if (seq1 == 'D') { /* Left */
+            el->last_cmd_was_kill = 0;
+            el->yank_active = 0;
+            if (el->line.cursor > 0) {
+                undo_push(el);
+                el->line.cursor--;
+                refresh_line(el);
+            }
+        } else if (seq1 == 'H') { /* Home */
+            el->last_cmd_was_kill = 0;
+            el->yank_active = 0;
+            if (el->line.cursor != 0) {
+                undo_push(el);
+                el->line.cursor = 0;
+                refresh_line(el);
+            }
+        } else if (seq1 == 'F') { /* End */
+            el->last_cmd_was_kill = 0;
+            el->yank_active = 0;
+            if (el->line.cursor != el->line.len) {
+                undo_push(el);
+                el->line.cursor = el->line.len;
+                refresh_line(el);
+            }
+        } else if (seq1 == 'A') { /* Up */
+            el->last_cmd_was_kill = 0;
+            el->yank_active = 0;
+            if (el->history) {
+                HistEvent ev;
+                if (!el->history_browsing) {
+                    (void)history_save_current_input(el);
+                    el->history_browsing = 1;
+                }
+                if (history(el->history, &ev, H_PREV) == 0 && ev.str) {
+                    line_load_history(el, ev.str);
+                    refresh_line(el);
+                }
+            }
+        } else if (seq1 == 'B') { /* Down */
+            el->last_cmd_was_kill = 0;
+            el->yank_active = 0;
+            if (el->history) {
+                HistEvent ev;
+                if (history(el->history, &ev, H_NEXT) == 0 && ev.str) {
+                    line_load_history(el, ev.str);
+                    refresh_line(el);
+                } else {
+                    history_restore_current_input(el);
+                    el->history_browsing = 0;
+                    refresh_line(el);
+                }
+            }
+        } else if (seq1 >= '0' && seq1 <= '9') {
+            char seq2;
+            if (!read_esc_byte(el, &seq2, 80)) return DISP_CONTINUE;
+
+            if (seq2 == '~') {
+                el->last_cmd_was_kill = 0;
+                el->yank_active = 0;
+                if (seq1 == '1') { /* Home alt */
+                    if (el->line.cursor != 0) {
+                        undo_push(el);
+                        el->line.cursor = 0;
+                        refresh_line(el);
+                    }
+                } else if (seq1 == '2') { /* Insert */
+                    el->overwrite_mode = !el->overwrite_mode;
+                } else if (seq1 == '3') { /* Delete */
+                    if (el->line.cursor < el->line.len) {
+                        undo_push(el);
+                        memmove(el->line.buffer + el->line.cursor,
+                                el->line.buffer + el->line.cursor + 1,
+                                el->line.len - el->line.cursor);
+                        el->line.len--;
+                        refresh_line(el);
+                    }
+                } else if (seq1 == '4') { /* End alt */
+                    if (el->line.cursor != el->line.len) {
+                        undo_push(el);
+                        el->line.cursor = el->line.len;
+                        refresh_line(el);
+                    }
+                } else if (seq1 == '5') { /* PgUp */
+                    if (el->history) {
+                        HistEvent ev;
+                        if (!el->history_browsing) {
+                            (void)history_save_current_input(el);
+                            el->history_browsing = 1;
+                        }
+                        if (history(el->history, &ev, H_FIRST) == 0 && ev.str) {
+                            line_load_history(el, ev.str);
+                            refresh_line(el);
+                        }
+                    }
+                } else if (seq1 == '6') { /* PgDn */
+                    if (el->history) {
+                        HistEvent ev;
+                        if (!el->history_browsing) {
+                            (void)history_save_current_input(el);
+                            el->history_browsing = 1;
+                        }
+                        if (history(el->history, &ev, H_LAST) == 0 && ev.str) {
+                            line_load_history(el, ev.str);
+                            refresh_line(el);
+                        }
+                    }
+                }
+            } else if (seq1 == '1' && seq2 == ';') {
+                char mod, final;
+                if (!read_esc_byte(el, &mod, 80)) return DISP_CONTINUE;
+                if (!read_esc_byte(el, &final, 80)) return DISP_CONTINUE;
+                (void)mod;
+                el->last_cmd_was_kill = 0;
+                el->yank_active = 0;
+                if (final == 'A') {
+                    if (el->history) {
+                        HistEvent ev;
+                        if (!el->history_browsing) {
+                            (void)history_save_current_input(el);
+                            el->history_browsing = 1;
+                        }
+                        if (history(el->history, &ev, H_PREV) == 0 && ev.str) {
+                            line_load_history(el, ev.str);
+                            refresh_line(el);
+                        }
+                    }
+                } else if (final == 'B') {
+                    if (el->history) {
+                        HistEvent ev;
+                        if (history(el->history, &ev, H_NEXT) == 0 && ev.str) {
+                            line_load_history(el, ev.str);
+                            refresh_line(el);
+                        } else {
+                            history_restore_current_input(el);
+                            el->history_browsing = 0;
+                            refresh_line(el);
+                        }
+                    }
+                } else if (final == 'C') {
+                    if (el->line.cursor < el->line.len) {
+                        undo_push(el);
+                        el->line.cursor++;
+                        refresh_line(el);
+                    }
+                } else if (final == 'D') {
+                    if (el->line.cursor > 0) {
+                        undo_push(el);
+                        el->line.cursor--;
+                        refresh_line(el);
+                    }
+                } else if (final == 'H') {
+                    if (el->line.cursor != 0) {
+                        undo_push(el);
+                        el->line.cursor = 0;
+                        refresh_line(el);
+                    }
+                } else if (final == 'F') {
+                    if (el->line.cursor != el->line.len) {
+                        undo_push(el);
+                        el->line.cursor = el->line.len;
+                        refresh_line(el);
+                    }
+                }
+            }
+        }
+    } else if (seq0 == 'O') { /* SS3 alternate arrows */
+        char seq1;
+        if (!read_esc_byte(el, &seq1, 80)) return DISP_CONTINUE;
+        el->last_cmd_was_kill = 0;
+        el->yank_active = 0;
+        if (seq1 == 'C') {
+            if (el->line.cursor < el->line.len) {
+                undo_push(el);
+                el->line.cursor++;
+                refresh_line(el);
+            }
+        } else if (seq1 == 'D') {
+            if (el->line.cursor > 0) {
+                undo_push(el);
+                el->line.cursor--;
+                refresh_line(el);
+            }
+        } else if (seq1 == 'A') {
+            if (el->history) {
+                HistEvent ev;
+                if (!el->history_browsing) {
+                    (void)history_save_current_input(el);
+                    el->history_browsing = 1;
+                }
+                if (history(el->history, &ev, H_PREV) == 0 && ev.str) {
+                    line_load_history(el, ev.str);
+                    refresh_line(el);
+                }
+            }
+        } else if (seq1 == 'B') {
+            if (el->history) {
+                HistEvent ev;
+                if (history(el->history, &ev, H_NEXT) == 0 && ev.str) {
+                    line_load_history(el, ev.str);
+                    refresh_line(el);
+                } else {
+                    history_restore_current_input(el);
+                    el->history_browsing = 0;
+                    refresh_line(el);
+                }
+            }
+        }
+    } else if (seq0 == 'c' || seq0 == 'C') { /* M-c capitalize-word */
+        el->last_cmd_was_kill = 0;
+        el->yank_active = 0;
+        undo_push(el);
+        if (apply_word_case(el, 0)) refresh_line(el);
+        else undo_discard_last(el);
+    } else if (seq0 == 'l' || seq0 == 'L') { /* M-l downcase-word */
+        el->last_cmd_was_kill = 0;
+        el->yank_active = 0;
+        undo_push(el);
+        if (apply_word_case(el, -1)) refresh_line(el);
+        else undo_discard_last(el);
+    } else if (seq0 == 'u' || seq0 == 'U') { /* M-u upcase-word */
+        el->last_cmd_was_kill = 0;
+        el->yank_active = 0;
+        undo_push(el);
+        if (apply_word_case(el, 1)) refresh_line(el);
+        else undo_discard_last(el);
+    } else if (seq0 == '.') { /* M-. yank-last-arg */
+        el->last_cmd_was_kill = 0;
+        el->yank_active = 0;
+        undo_push(el);
+        if (yank_last_arg(el)) refresh_line(el);
+        else undo_discard_last(el);
+    } else if (seq0 == 'd' || seq0 == 'D') { /* M-d kill-word */
+        el->yank_active = 0;
+        undo_push(el);
+        if (kill_word(el)) refresh_line(el);
+    } else if (seq0 == 'f' || seq0 == 'F') { /* M-f forward-word */
+        size_t old_cursor;
+        el->last_cmd_was_kill = 0;
+        el->yank_active = 0;
+        undo_push(el);
+        old_cursor = el->line.cursor;
+        move_forward_word(el);
+        if (el->line.cursor != old_cursor) refresh_line(el);
+        else undo_discard_last(el);
+    } else if (seq0 == 'b' || seq0 == 'B') { /* M-b backward-word */
+        size_t old_cursor;
+        el->last_cmd_was_kill = 0;
+        el->yank_active = 0;
+        undo_push(el);
+        old_cursor = el->line.cursor;
+        move_backward_word(el);
+        if (el->line.cursor != old_cursor) refresh_line(el);
+        else undo_discard_last(el);
+    } else if (seq0 == '<') { /* M-< beginning-of-history */
+        el->last_cmd_was_kill = 0;
+        el->yank_active = 0;
+        if (el->history) {
+            HistEvent ev;
+            if (!el->history_browsing) {
+                (void)history_save_current_input(el);
+                el->history_browsing = 1;
+            }
+            if (history(el->history, &ev, H_FIRST) == 0 && ev.str) {
+                line_load_history(el, ev.str);
+                refresh_line(el);
+            }
+        }
+    } else if (seq0 == '>') { /* M-> end-of-history */
+        el->last_cmd_was_kill = 0;
+        el->yank_active = 0;
+        if (el->history) {
+            HistEvent ev;
+            if (history(el->history, &ev, H_LAST) == 0 && ev.str) {
+                if (!el->history_browsing) {
+                    (void)history_save_current_input(el);
+                    el->history_browsing = 1;
+                }
+                line_load_history(el, ev.str);
+            } else {
+                history_restore_current_input(el);
+                el->history_browsing = 0;
+            }
+            refresh_line(el);
+        }
+    } else if (seq0 == 'y' || seq0 == 'Y') { /* M-y yank-pop */
+        el->last_cmd_was_kill = 0;
+        undo_push(el);
+        if (yank_pop(el)) refresh_line(el);
+    } else if (seq0 == 0x08 || seq0 == 0x7F) { /* M-BS or M-DEL */
+        el->yank_active = 0;
+        undo_push(el);
+        if (backward_kill_word(el)) refresh_line(el);
+    } else {
+        el->last_cmd_was_kill = 0;
+        el->yank_active = 0;
+    }
+    return DISP_CONTINUE;
+}
+
+/* ------------------------------------------------------------------ */
+/* Vi insert mode character dispatch.                                 */
+/* ------------------------------------------------------------------ */
+static int vi_insert_handle_char(EditLine *el, int c) {
+    if (c == '\n' || c == '\r') {
+        vi_capture_insert(el);
+        el->vi_mode = VI_INSERT; /* reset for next line */
+        return DISP_ACCEPT;
+    }
+
+    if (c == 0x1B) { /* ESC → command mode */
+        vi_capture_insert(el);
+        el->vi_mode = VI_COMMAND;
+        if (el->line.cursor > 0) el->line.cursor--;
+        refresh_line(el);
+        return DISP_CONTINUE;
+    }
+
+    if (c == 0x7F || c == 0x08) { /* Backspace */
+        if (el->line.cursor > 0) {
+            undo_push(el);
+            memmove(el->line.buffer + el->line.cursor - 1,
+                    el->line.buffer + el->line.cursor,
+                    el->line.len - el->line.cursor + 1);
+            el->line.len--;
+            el->line.cursor--;
+            refresh_line(el);
+        }
+        return DISP_CONTINUE;
+    }
+
+    if (c == 0x17) { /* ^W delete word backward */
+        undo_push(el);
+        if (backward_kill_word(el)) refresh_line(el);
+        return DISP_CONTINUE;
+    }
+
+    if (c == 0x15) { /* ^U delete to start of line */
+        undo_push(el);
+        if (backward_kill_line(el)) refresh_line(el);
+        return DISP_CONTINUE;
+    }
+
+    if (c == 0x04) { /* ^D - EOF or delete */
+        if (el->line.len == 0) return DISP_EOF;
+        if (el->line.cursor < el->line.len) {
+            undo_push(el);
+            memmove(el->line.buffer + el->line.cursor,
+                    el->line.buffer + el->line.cursor + 1,
+                    el->line.len - el->line.cursor);
+            el->line.len--;
+            refresh_line(el);
+        }
+        return DISP_CONTINUE;
+    }
+
+    if (c == 0x09) { /* Tab complete */
+        if (el->completion) {
+            undo_push(el);
+            el->completion(el, c);
+            refresh_line(el);
+        } else {
+            undo_push(el);
+            if (default_filename_complete(el))
+                refresh_line(el);
+            else
+                undo_discard_last(el);
+        }
+        return DISP_CONTINUE;
+    }
+
+    /* Printable self-insert */
+    if (c >= 32 && c < 127) {
+        if (line_ensure_capacity(el, el->line.len + 2) == 0) {
+            undo_push(el);
+            memmove(el->line.buffer + el->line.cursor + 1,
+                    el->line.buffer + el->line.cursor,
+                    el->line.len - el->line.cursor + 1);
+            el->line.buffer[el->line.cursor] = (char)c;
+            el->line.len++;
+            el->line.cursor++;
+            refresh_line(el);
+        }
+    }
+    return DISP_CONTINUE;
+}
+
+/* ------------------------------------------------------------------ */
+/* Vi replace mode character dispatch.                                */
+/* ------------------------------------------------------------------ */
+static int vi_replace_handle_char(EditLine *el, int c) {
+    if (c == '\n' || c == '\r') {
+        el->vi_mode = VI_INSERT;
+        return DISP_ACCEPT;
+    }
+
+    if (c == 0x1B) { /* ESC → command mode */
+        el->vi_mode = VI_COMMAND;
+        if (el->line.cursor > 0) el->line.cursor--;
+        refresh_line(el);
+        return DISP_CONTINUE;
+    }
+
+    if (c == 0x7F || c == 0x08) { /* Backspace */
+        if (el->line.cursor > 0) {
+            undo_push(el);
+            el->line.cursor--;
+            refresh_line(el);
+        }
+        return DISP_CONTINUE;
+    }
+
+    /* Overwrite char at cursor */
+    if (c >= 32 && c < 127) {
+        undo_push(el);
+        if (el->line.cursor < el->line.len) {
+            el->line.buffer[el->line.cursor] = (char)c;
+            el->line.cursor++;
+        } else {
+            /* At end: extend like insert */
+            if (line_ensure_capacity(el, el->line.len + 2) == 0) {
+                el->line.buffer[el->line.cursor] = (char)c;
+                el->line.len++;
+                el->line.cursor++;
+                el->line.buffer[el->line.len] = '\0';
+            }
+        }
+        refresh_line(el);
+    }
+    return DISP_CONTINUE;
+}
+
+/* ------------------------------------------------------------------ */
+/* Vi command mode character dispatch.                                */
+/* ------------------------------------------------------------------ */
+static int vi_command_handle_char(EditLine *el, int c) {
+    static int count_accum = 0;
+    static int in_count = 0;
+
+    /* Handle count prefix digits (but '0' is beginning-of-line if not in count) */
+    if (c >= '1' && c <= '9') {
+        count_accum = count_accum * 10 + (c - '0');
+        in_count = 1;
+        return DISP_CONTINUE;
+    }
+    if (c == '0' && in_count) {
+        count_accum = count_accum * 10;
+        return DISP_CONTINUE;
+    }
+
+    int count = in_count ? count_accum : 1;
+    count_accum = 0;
+    in_count = 0;
+
+    if (c == '\n' || c == '\r') {
+        el->vi_mode = VI_INSERT;
+        return DISP_ACCEPT;
+    }
+
+    /* --- Motion commands --- */
+    if (c == 'h') {
+        if (el->line.cursor > 0) {
+            el->line.cursor -= ((size_t)count <= el->line.cursor) ? (size_t)count : el->line.cursor;
+            refresh_line(el);
+        }
+        return DISP_CONTINUE;
+    }
+    if (c == 'l') {
+        if (el->line.cursor < el->line.len) {
+            size_t max_move = el->line.len - el->line.cursor;
+            el->line.cursor += ((size_t)count <= max_move) ? (size_t)count : max_move;
+            /* In command mode, cursor shouldn't go past last char */
+            if (el->line.cursor >= el->line.len && el->line.len > 0)
+                el->line.cursor = el->line.len - 1;
+            refresh_line(el);
+        }
+        return DISP_CONTINUE;
+    }
+    if (c == 'w') {
+        int i;
+        for (i = 0; i < count; i++) el->line.cursor = vi_forward_word(el, el->line.cursor);
+        if (el->line.cursor >= el->line.len && el->line.len > 0)
+            el->line.cursor = el->line.len - 1;
+        refresh_line(el);
+        return DISP_CONTINUE;
+    }
+    if (c == 'W') {
+        int i;
+        for (i = 0; i < count; i++) el->line.cursor = vi_forward_WORD(el, el->line.cursor);
+        if (el->line.cursor >= el->line.len && el->line.len > 0)
+            el->line.cursor = el->line.len - 1;
+        refresh_line(el);
+        return DISP_CONTINUE;
+    }
+    if (c == 'b') {
+        int i;
+        for (i = 0; i < count; i++) el->line.cursor = vi_backward_word(el, el->line.cursor);
+        refresh_line(el);
+        return DISP_CONTINUE;
+    }
+    if (c == 'B') {
+        int i;
+        for (i = 0; i < count; i++) el->line.cursor = vi_backward_WORD(el, el->line.cursor);
+        refresh_line(el);
+        return DISP_CONTINUE;
+    }
+    if (c == 'e') {
+        int i;
+        for (i = 0; i < count; i++) el->line.cursor = vi_end_word(el, el->line.cursor);
+        refresh_line(el);
+        return DISP_CONTINUE;
+    }
+    if (c == 'E') {
+        int i;
+        for (i = 0; i < count; i++) el->line.cursor = vi_end_WORD(el, el->line.cursor);
+        refresh_line(el);
+        return DISP_CONTINUE;
+    }
+    if (c == '0') { /* beginning of line (only reached when not in count) */
+        el->line.cursor = 0;
+        refresh_line(el);
+        return DISP_CONTINUE;
+    }
+    if (c == '$') {
+        el->line.cursor = el->line.len > 0 ? el->line.len - 1 : 0;
+        refresh_line(el);
+        return DISP_CONTINUE;
+    }
+    if (c == '^') {
+        el->line.cursor = vi_first_nonblank(el);
+        refresh_line(el);
+        return DISP_CONTINUE;
+    }
+
+    /* --- Find char motions --- */
+    if (c == 'f' || c == 'F' || c == 't' || c == 'T') {
+        char fc;
+        int i;
+        size_t target;
+        if (!read_esc_byte(el, &fc, 80)) return DISP_CONTINUE;
+        el->vi_find.ch = fc;
+        el->vi_find.forward = (c == 'f' || c == 't');
+        el->vi_find.till = (c == 't' || c == 'T');
+        target = el->line.cursor;
+        for (i = 0; i < count; i++) {
+            if (el->vi_find.forward)
+                target = vi_find_char_fwd(el, fc, target);
+            else
+                target = vi_find_char_bwd(el, fc, target);
+        }
+        if (target != el->line.cursor) {
+            if (el->vi_find.till) {
+                if (el->vi_find.forward && target > 0) target--;
+                else if (!el->vi_find.forward && target < el->line.len) target++;
+            }
+            el->line.cursor = target;
+            refresh_line(el);
+        }
+        return DISP_CONTINUE;
+    }
+    if (c == ';') { /* repeat last find */
+        if (el->vi_find.ch) {
+            int i;
+            size_t target = el->line.cursor;
+            for (i = 0; i < count; i++) {
+                if (el->vi_find.forward)
+                    target = vi_find_char_fwd(el, el->vi_find.ch, target);
+                else
+                    target = vi_find_char_bwd(el, el->vi_find.ch, target);
+            }
+            if (target != el->line.cursor) {
+                if (el->vi_find.till) {
+                    if (el->vi_find.forward && target > 0) target--;
+                    else if (!el->vi_find.forward && target < el->line.len) target++;
+                }
+                el->line.cursor = target;
+                refresh_line(el);
+            }
+        }
+        return DISP_CONTINUE;
+    }
+    if (c == ',') { /* reverse last find */
+        if (el->vi_find.ch) {
+            int i;
+            size_t target = el->line.cursor;
+            for (i = 0; i < count; i++) {
+                if (!el->vi_find.forward)
+                    target = vi_find_char_fwd(el, el->vi_find.ch, target);
+                else
+                    target = vi_find_char_bwd(el, el->vi_find.ch, target);
+            }
+            if (target != el->line.cursor) {
+                if (el->vi_find.till) {
+                    if (!el->vi_find.forward && target > 0) target--;
+                    else if (el->vi_find.forward && target < el->line.len) target++;
+                }
+                el->line.cursor = target;
+                refresh_line(el);
+            }
+        }
+        return DISP_CONTINUE;
+    }
+
+    /* --- Entering insert/append modes --- */
+    if (c == 'i') {
+        vi_record_repeat(el, 'i', 0, count);
+        vi_enter_insert(el);
+        return DISP_CONTINUE;
+    }
+    if (c == 'a') {
+        vi_record_repeat(el, 'a', 0, count);
+        if (el->line.cursor < el->line.len) el->line.cursor++;
+        vi_enter_insert(el);
+        return DISP_CONTINUE;
+    }
+    if (c == 'I') {
+        vi_record_repeat(el, 'I', 0, count);
+        el->line.cursor = 0;
+        vi_enter_insert(el);
+        refresh_line(el);
+        return DISP_CONTINUE;
+    }
+    if (c == 'A') {
+        vi_record_repeat(el, 'A', 0, count);
+        el->line.cursor = el->line.len;
+        vi_enter_insert(el);
+        refresh_line(el);
+        return DISP_CONTINUE;
+    }
+
+    /* --- Delete/change char --- */
+    if (c == 'x') { /* delete char at cursor */
+        int i;
+        undo_push(el);
+        vi_record_repeat(el, 'x', 0, count);
+        for (i = 0; i < count && el->line.cursor < el->line.len; i++) {
+            kill_ring_push(el, el->line.buffer + el->line.cursor, 1, i > 0);
+            memmove(el->line.buffer + el->line.cursor,
+                    el->line.buffer + el->line.cursor + 1,
+                    el->line.len - el->line.cursor);
+            el->line.len--;
+        }
+        if (el->line.cursor >= el->line.len && el->line.len > 0)
+            el->line.cursor = el->line.len - 1;
+        refresh_line(el);
+        return DISP_CONTINUE;
+    }
+    if (c == 'X') { /* delete char before cursor */
+        int i;
+        undo_push(el);
+        vi_record_repeat(el, 'X', 0, count);
+        for (i = 0; i < count && el->line.cursor > 0; i++) {
+            el->line.cursor--;
+            kill_ring_push(el, el->line.buffer + el->line.cursor, 1, i > 0);
+            memmove(el->line.buffer + el->line.cursor,
+                    el->line.buffer + el->line.cursor + 1,
+                    el->line.len - el->line.cursor);
+            el->line.len--;
+        }
+        refresh_line(el);
+        return DISP_CONTINUE;
+    }
+    if (c == 'r') { /* replace char at cursor */
+        char rc;
+        if (!read_esc_byte(el, &rc, 80)) return DISP_CONTINUE;
+        if (el->line.cursor < el->line.len && rc >= 32 && rc < 127) {
+            undo_push(el);
+            vi_record_repeat(el, 'r', rc, count);
+            el->line.buffer[el->line.cursor] = rc;
+            refresh_line(el);
+        }
+        return DISP_CONTINUE;
+    }
+    if (c == 'R') { /* enter replace mode */
+        vi_record_repeat(el, 'R', 0, count);
+        el->vi_mode = VI_REPLACE;
+        return DISP_CONTINUE;
+    }
+    if (c == 's') { /* substitute char */
+        int i;
+        undo_push(el);
+        vi_record_repeat(el, 's', 0, count);
+        for (i = 0; i < count && el->line.cursor < el->line.len; i++) {
+            memmove(el->line.buffer + el->line.cursor,
+                    el->line.buffer + el->line.cursor + 1,
+                    el->line.len - el->line.cursor);
+            el->line.len--;
+        }
+        vi_enter_insert(el);
+        refresh_line(el);
+        return DISP_CONTINUE;
+    }
+    if (c == 'S') { /* substitute entire line */
+        undo_push(el);
+        vi_record_repeat(el, 'S', 0, count);
+        kill_ring_push(el, el->line.buffer, el->line.len, 0);
+        el->line.len = 0;
+        el->line.cursor = 0;
+        el->line.buffer[0] = '\0';
+        vi_enter_insert(el);
+        refresh_line(el);
+        return DISP_CONTINUE;
+    }
+
+    /* --- d<motion>: delete over motion --- */
+    if (c == 'd') {
+        int motion;
+        size_t target, start, end;
+        if (read(fileno(el->fin), &motion, 1) != 1) return DISP_CONTINUE;
+        motion &= 0xFF;
+        if (motion == 'd') { /* dd = delete entire line */
+            undo_push(el);
+            vi_record_repeat(el, 'd', 'd', count);
+            kill_ring_push(el, el->line.buffer, el->line.len, 0);
+            el->line.len = 0;
+            el->line.cursor = 0;
+            el->line.buffer[0] = '\0';
+            refresh_line(el);
+            return DISP_CONTINUE;
+        }
+        target = vi_motion_target(el, motion, count);
+        if (target == (size_t)-1) return DISP_CONTINUE;
+        start = (el->line.cursor < target) ? el->line.cursor : target;
+        end = (el->line.cursor < target) ? target : el->line.cursor;
+        if (end > el->line.len) end = el->line.len;
+        if (start < end) {
+            undo_push(el);
+            vi_record_repeat(el, 'd', (char)motion, count);
+            kill_ring_push(el, el->line.buffer + start, end - start, 0);
+            delete_range(el, start, end);
+            el->line.cursor = start;
+            if (el->line.cursor >= el->line.len && el->line.len > 0)
+                el->line.cursor = el->line.len - 1;
+            refresh_line(el);
+        }
+        return DISP_CONTINUE;
+    }
+    if (c == 'D') { /* delete to end of line */
+        if (el->line.cursor < el->line.len) {
+            undo_push(el);
+            vi_record_repeat(el, 'D', 0, count);
+            kill_ring_push(el, el->line.buffer + el->line.cursor,
+                           el->line.len - el->line.cursor, 0);
+            el->line.len = el->line.cursor;
+            el->line.buffer[el->line.len] = '\0';
+            if (el->line.cursor > 0) el->line.cursor--;
+            refresh_line(el);
+        }
+        return DISP_CONTINUE;
+    }
+
+    /* --- c<motion>: change over motion --- */
+    if (c == 'c') {
+        int motion;
+        size_t target, start, end;
+        if (read(fileno(el->fin), &motion, 1) != 1) return DISP_CONTINUE;
+        motion &= 0xFF;
+        if (motion == 'c') { /* cc = change entire line */
+            undo_push(el);
+            vi_record_repeat(el, 'c', 'c', count);
+            kill_ring_push(el, el->line.buffer, el->line.len, 0);
+            el->line.len = 0;
+            el->line.cursor = 0;
+            el->line.buffer[0] = '\0';
+            vi_enter_insert(el);
+            refresh_line(el);
+            return DISP_CONTINUE;
+        }
+        target = vi_motion_target(el, motion, count);
+        if (target == (size_t)-1) return DISP_CONTINUE;
+        start = (el->line.cursor < target) ? el->line.cursor : target;
+        end = (el->line.cursor < target) ? target : el->line.cursor;
+        if (end > el->line.len) end = el->line.len;
+        if (start < end) {
+            undo_push(el);
+            vi_record_repeat(el, 'c', (char)motion, count);
+            kill_ring_push(el, el->line.buffer + start, end - start, 0);
+            delete_range(el, start, end);
+            el->line.cursor = start;
+            vi_enter_insert(el);
+            refresh_line(el);
+        }
+        return DISP_CONTINUE;
+    }
+    if (c == 'C') { /* change to end of line */
+        undo_push(el);
+        vi_record_repeat(el, 'C', 0, count);
+        if (el->line.cursor < el->line.len) {
+            kill_ring_push(el, el->line.buffer + el->line.cursor,
+                           el->line.len - el->line.cursor, 0);
+            el->line.len = el->line.cursor;
+            el->line.buffer[el->line.len] = '\0';
+        }
+        vi_enter_insert(el);
+        refresh_line(el);
+        return DISP_CONTINUE;
+    }
+
+    /* --- y<motion>: yank over motion --- */
+    if (c == 'y') {
+        int motion;
+        size_t target, start, end;
+        if (read(fileno(el->fin), &motion, 1) != 1) return DISP_CONTINUE;
+        motion &= 0xFF;
+        if (motion == 'y') { /* yy = yank entire line */
+            kill_ring_push(el, el->line.buffer, el->line.len, 0);
+            return DISP_CONTINUE;
+        }
+        target = vi_motion_target(el, motion, count);
+        if (target == (size_t)-1) return DISP_CONTINUE;
+        start = (el->line.cursor < target) ? el->line.cursor : target;
+        end = (el->line.cursor < target) ? target : el->line.cursor;
+        if (end > el->line.len) end = el->line.len;
+        if (start < end) {
+            kill_ring_push(el, el->line.buffer + start, end - start, 0);
+        }
+        return DISP_CONTINUE;
+    }
+
+    /* --- Paste --- */
+    if (c == 'p') { /* paste after cursor */
+        if (el->kill_ring_count > 0 && el->kill_ring[el->kill_ring_head]) {
+            undo_push(el);
+            vi_record_repeat(el, 'p', 0, count);
+            if (el->line.cursor < el->line.len) el->line.cursor++;
+            (void)insert_span(el, el->kill_ring[el->kill_ring_head],
+                              strlen(el->kill_ring[el->kill_ring_head]));
+            if (el->line.cursor > 0) el->line.cursor--;
+            refresh_line(el);
+        }
+        return DISP_CONTINUE;
+    }
+    if (c == 'P') { /* paste before cursor */
+        if (el->kill_ring_count > 0 && el->kill_ring[el->kill_ring_head]) {
+            undo_push(el);
+            vi_record_repeat(el, 'P', 0, count);
+            (void)insert_span(el, el->kill_ring[el->kill_ring_head],
+                              strlen(el->kill_ring[el->kill_ring_head]));
+            if (el->line.cursor > 0) el->line.cursor--;
+            refresh_line(el);
+        }
+        return DISP_CONTINUE;
+    }
+
+    /* --- Undo --- */
+    if (c == 'u') {
+        if (undo_pop(el)) refresh_line(el);
+        return DISP_CONTINUE;
+    }
+
+    /* --- Dot repeat --- */
+    if (c == '.') {
+        char rcmd = el->vi_repeat.cmd;
+        char rarg = el->vi_repeat.arg;
+        int rcount = el->vi_repeat.count > 0 ? el->vi_repeat.count : 1;
+        if (!rcmd) return DISP_CONTINUE;
+
+        undo_push(el);
+
+        /* Re-execute the recorded command */
+        switch (rcmd) {
+        case 'x': {
+            int i;
+            for (i = 0; i < rcount && el->line.cursor < el->line.len; i++) {
+                memmove(el->line.buffer + el->line.cursor,
+                        el->line.buffer + el->line.cursor + 1,
+                        el->line.len - el->line.cursor);
+                el->line.len--;
+            }
+            if (el->line.cursor >= el->line.len && el->line.len > 0)
+                el->line.cursor = el->line.len - 1;
+            break;
+        }
+        case 'X': {
+            int i;
+            for (i = 0; i < rcount && el->line.cursor > 0; i++) {
+                el->line.cursor--;
+                memmove(el->line.buffer + el->line.cursor,
+                        el->line.buffer + el->line.cursor + 1,
+                        el->line.len - el->line.cursor);
+                el->line.len--;
+            }
+            break;
+        }
+        case 'r':
+            if (el->line.cursor < el->line.len && rarg >= 32 && rarg < 127)
+                el->line.buffer[el->line.cursor] = rarg;
+            break;
+        case 'D':
+            if (el->line.cursor < el->line.len) {
+                el->line.len = el->line.cursor;
+                el->line.buffer[el->line.len] = '\0';
+                if (el->line.cursor > 0) el->line.cursor--;
+            }
+            break;
+        case 'S':
+            el->line.len = 0;
+            el->line.cursor = 0;
+            el->line.buffer[0] = '\0';
+            vi_enter_insert(el);
+            break;
+        case 's': {
+            int i;
+            for (i = 0; i < rcount && el->line.cursor < el->line.len; i++) {
+                memmove(el->line.buffer + el->line.cursor,
+                        el->line.buffer + el->line.cursor + 1,
+                        el->line.len - el->line.cursor);
+                el->line.len--;
+            }
+            vi_enter_insert(el);
+            break;
+        }
+        case '~':
+            if (el->line.cursor < el->line.len) {
+                unsigned char ch = (unsigned char)el->line.buffer[el->line.cursor];
+                if (isupper(ch)) el->line.buffer[el->line.cursor] = (char)tolower(ch);
+                else if (islower(ch)) el->line.buffer[el->line.cursor] = (char)toupper(ch);
+                if (el->line.cursor + 1 < el->line.len) el->line.cursor++;
+            }
+            break;
+        default:
+            break;
+        }
+
+        /* If the repeated command entered insert mode and we have saved text, replay it */
+        if (el->vi_repeat.insert_text && el->vi_repeat.insert_len > 0 &&
+            (rcmd == 'i' || rcmd == 'a' || rcmd == 'I' || rcmd == 'A' ||
+             rcmd == 'c' || rcmd == 'C' || rcmd == 's' || rcmd == 'S')) {
+            /* For 'a' commands, advance cursor first */
+            if (rcmd == 'a' && el->line.cursor < el->line.len) el->line.cursor++;
+            if (rcmd == 'I') el->line.cursor = 0;
+            if (rcmd == 'A') el->line.cursor = el->line.len;
+            (void)insert_span(el, el->vi_repeat.insert_text, el->vi_repeat.insert_len);
+            el->vi_mode = VI_COMMAND;
+            if (el->line.cursor > 0) el->line.cursor--;
+        }
+
+        refresh_line(el);
+        return DISP_CONTINUE;
+    }
+
+    /* --- Toggle case --- */
+    if (c == '~') {
+        if (el->line.cursor < el->line.len) {
+            undo_push(el);
+            vi_record_repeat(el, '~', 0, count);
+            unsigned char ch = (unsigned char)el->line.buffer[el->line.cursor];
+            if (isupper(ch)) el->line.buffer[el->line.cursor] = (char)tolower(ch);
+            else if (islower(ch)) el->line.buffer[el->line.cursor] = (char)toupper(ch);
+            if (el->line.cursor + 1 < el->line.len) el->line.cursor++;
+            refresh_line(el);
+        }
+        return DISP_CONTINUE;
+    }
+
+    /* --- History navigation --- */
+    if (c == 'j') { /* next history */
+        if (el->history) {
+            HistEvent ev;
+            if (history(el->history, &ev, H_NEXT) == 0 && ev.str) {
+                line_load_history(el, ev.str);
+                refresh_line(el);
+            } else {
+                history_restore_current_input(el);
+                el->history_browsing = 0;
+                refresh_line(el);
+            }
+        }
+        return DISP_CONTINUE;
+    }
+    if (c == 'k') { /* previous history */
+        if (el->history) {
+            HistEvent ev;
+            if (!el->history_browsing) {
+                (void)history_save_current_input(el);
+                el->history_browsing = 1;
+            }
+            if (history(el->history, &ev, H_PREV) == 0 && ev.str) {
+                line_load_history(el, ev.str);
+                refresh_line(el);
+            }
+        }
+        return DISP_CONTINUE;
+    }
+
+    /* --- History search --- */
+    if (c == '/') {
+        vi_history_search(el, 1);
+        return DISP_CONTINUE;
+    }
+    if (c == '?') {
+        vi_history_search(el, 0);
+        return DISP_CONTINUE;
+    }
+    if (c == 'n') { /* repeat search */
+        if (el->vi_search.pattern[0]) {
+            const char *match = history_find_match(el, el->vi_search.pattern,
+                                                   el->vi_search.reverse);
+            if (match) {
+                line_load_history(el, match);
+                el->history_browsing = 1;
+                refresh_line(el);
+            }
+        }
+        return DISP_CONTINUE;
+    }
+    if (c == 'N') { /* reverse search */
+        if (el->vi_search.pattern[0]) {
+            const char *match = history_find_match(el, el->vi_search.pattern,
+                                                   !el->vi_search.reverse);
+            if (match) {
+                line_load_history(el, match);
+                el->history_browsing = 1;
+                refresh_line(el);
+            }
+        }
+        return DISP_CONTINUE;
+    }
+
+    /* --- Misc commands --- */
+    if (c == 'v') { /* invoke $VISUAL or $EDITOR */
+        const char *editor = getenv("VISUAL");
+        char tmpfile[64];
+        char cmd[512];
+        FILE *fp;
+        char buf[4096];
+        size_t nread;
+        int fd;
+
+        if (!editor) editor = getenv("EDITOR");
+        if (!editor) editor = "vi";
+
+        terminal_set_orig(el);
+
+        snprintf(tmpfile, sizeof(tmpfile), "/tmp/el_edit.XXXXXX");
+        fd = mkstemp(tmpfile);
+        if (fd < 0) {
+            terminal_set_raw(el);
+            return DISP_CONTINUE;
+        }
+        (void)write(fd, el->line.buffer, el->line.len);
+        close(fd);
+
+        snprintf(cmd, sizeof(cmd), "%s %s", editor, tmpfile);
+        (void)system(cmd);
+
+        fp = fopen(tmpfile, "r");
+        if (fp) {
+            nread = fread(buf, 1, sizeof(buf) - 1, fp);
+            fclose(fp);
+            buf[nread] = '\0';
+            /* Strip trailing newline */
+            while (nread > 0 && (buf[nread - 1] == '\n' || buf[nread - 1] == '\r'))
+                buf[--nread] = '\0';
+            undo_push(el);
+            (void)line_set_text(el, buf);
+        }
+        unlink(tmpfile);
+
+        terminal_set_raw(el);
+        refresh_line(el);
+
+        /* Accept the edited line */
+        return DISP_ACCEPT;
+    }
+
+    if (c == '#') { /* comment out line */
+        undo_push(el);
+        el->line.cursor = 0;
+        if (line_ensure_capacity(el, el->line.len + 2) == 0) {
+            memmove(el->line.buffer + 1, el->line.buffer, el->line.len + 1);
+            el->line.buffer[0] = '#';
+            el->line.len++;
+        }
+        el->vi_mode = VI_INSERT;
+        return DISP_ACCEPT;
+    }
+
+    return DISP_CONTINUE;
+}
+
+/* ------------------------------------------------------------------ */
+/* el_gets: main entry point — dispatches to per-mode handlers.       */
+/* ------------------------------------------------------------------ */
 const char *el_gets(EditLine *el, int *count) {
     size_t i;
+    int c;
+    int result;
 
     if (count) *count = 0;
     if (terminal_set_raw(el) == -1) return NULL;
 
-    /* Refresh terminal dimensions on each gets entry */
     terminal_get_size(el);
 
     el->line.len = 0;
@@ -717,538 +2340,43 @@ const char *el_gets(EditLine *el, int *count) {
     el->undo_depth = 0;
     if (el->render_cache) el->render_cache[0] = '\0';
 
+    /* Vi mode starts in insert mode */
+    if (el->editor_mode == ED_VI)
+        el->vi_mode = VI_INSERT;
+
     if (el->prompt) {
         fprintf(el->fout, "%s", el->prompt);
         fflush(el->fout);
     }
 
-    int c;
     while (read(fileno(el->fin), &c, 1) == 1) {
         c &= 0xFF;
 
-        if (c == '\n' || c == '\r') {
-            el->last_cmd_was_kill = 0;
-            el->yank_active = 0;
+        if (el->editor_mode == ED_EMACS) {
+            result = emacs_handle_char(el, c);
+        } else {
+            switch (el->vi_mode) {
+            case VI_COMMAND:
+                result = vi_command_handle_char(el, c);
+                break;
+            case VI_REPLACE:
+                result = vi_replace_handle_char(el, c);
+                break;
+            default: /* VI_INSERT */
+                result = vi_insert_handle_char(el, c);
+                break;
+            }
+        }
+
+        if (result == DISP_ACCEPT) {
             fprintf(el->fout, "\r\n");
             terminal_set_orig(el);
-            if (count) *count = el->line.len;
+            if (count) *count = (int)el->line.len;
             return el->line.buffer;
-        } else if (c == 0x7F || c == 0x08) { /* Backspace */
-            if (el->line.cursor > 0) {
-                el->last_cmd_was_kill = 0;
-                el->yank_active = 0;
-                undo_push(el);
-                memmove(el->line.buffer + el->line.cursor - 1,
-                        el->line.buffer + el->line.cursor,
-                        el->line.len - el->line.cursor + 1);
-                el->line.len--;
-                el->line.cursor--;
-                refresh_line(el);
-            }
-        } else if (c == 0x04) { /* ^D - EOF */
-            if (el->line.len == 0) {
-                el->last_cmd_was_kill = 0;
-                el->yank_active = 0;
-                terminal_set_orig(el);
-                return NULL;
-            }
-            if (el->line.cursor < el->line.len) {
-                el->last_cmd_was_kill = 0;
-                el->yank_active = 0;
-                undo_push(el);
-                memmove(el->line.buffer + el->line.cursor,
-                        el->line.buffer + el->line.cursor + 1,
-                        el->line.len - el->line.cursor);
-                el->line.len--;
-                refresh_line(el);
-            } else if (el->completion) {
-                el->yank_active = 0;
-                el->completion(el, c);
-                refresh_line(el);
-            }
-        } else if (c == 0x03) { /* ^C - Clear line */
-            el->last_cmd_was_kill = 0;
-            el->yank_active = 0;
-            fprintf(el->fout, "^C\r\n");
-            el_reset(el);
-            if (el->prompt) {
-                fprintf(el->fout, "%s", el->prompt);
-                fflush(el->fout);
-            }
-        } else if (c == 0x0C) { /* ^L - Clear screen */
-            el->last_cmd_was_kill = 0;
-            el->yank_active = 0;
-            fprintf(el->fout, "\033[H\033[2J");
-            refresh_line(el);
-        } else if (c == 0x01) { /* ^A */
-            el->last_cmd_was_kill = 0;
-            el->yank_active = 0;
-            if (el->line.cursor != 0) {
-                undo_push(el);
-                el->line.cursor = 0;
-                refresh_line(el);
-            }
-        } else if (c == 0x02) { /* ^B */
-            el->last_cmd_was_kill = 0;
-            el->yank_active = 0;
-            if (el->line.cursor > 0) {
-                undo_push(el);
-                el->line.cursor--;
-                refresh_line(el);
-            }
-        } else if (c == 0x05) { /* ^E */
-            el->last_cmd_was_kill = 0;
-            el->yank_active = 0;
-            if (el->line.cursor != el->line.len) {
-                undo_push(el);
-                el->line.cursor = el->line.len;
-                refresh_line(el);
-            }
-        } else if (c == 0x06) { /* ^F */
-            el->last_cmd_was_kill = 0;
-            el->yank_active = 0;
-            if (el->line.cursor < el->line.len) {
-                undo_push(el);
-                el->line.cursor++;
-                refresh_line(el);
-            }
-        } else if (c == 0x09) { /* Tab complete */
-            el->last_cmd_was_kill = 0;
-            el->yank_active = 0;
-            if (el->completion) {
-                undo_push(el);
-                el->completion(el, c);
-                refresh_line(el);
-            } else {
-                undo_push(el);
-                if (default_filename_complete(el)) {
-                    refresh_line(el);
-                } else {
-                    undo_discard_last(el);
-                    fputc('\a', el->fout);
-                    fflush(el->fout);
-                }
-            }
-        } else if (c == 0x0E) { /* ^N next-history */
-            el->last_cmd_was_kill = 0;
-            el->yank_active = 0;
-            if (el->history) {
-                HistEvent ev;
-                if (history(el->history, &ev, H_NEXT) == 0 && ev.str) {
-                    undo_push(el);
-                    line_load_history(el, ev.str);
-                    refresh_line(el);
-                } else {
-                    undo_push(el);
-                    history_restore_current_input(el);
-                    el->history_browsing = 0;
-                    refresh_line(el);
-                }
-            }
-        } else if (c == 0x10) { /* ^P previous-history */
-            el->last_cmd_was_kill = 0;
-            el->yank_active = 0;
-            if (el->history) {
-                HistEvent ev;
-                if (!el->history_browsing) {
-                    (void)history_save_current_input(el);
-                    el->history_browsing = 1;
-                }
-                if (history(el->history, &ev, H_PREV) == 0 && ev.str) {
-                    undo_push(el);
-                    line_load_history(el, ev.str);
-                    refresh_line(el);
-                }
-            }
-        } else if (c == 0x12) { /* ^R history-search-backward */
-            el->last_cmd_was_kill = 0;
-            el->yank_active = 0;
-            history_incremental_search(el, 1);
-        } else if (c == 0x13) { /* ^S history-search-forward */
-            el->last_cmd_was_kill = 0;
-            el->yank_active = 0;
-            history_incremental_search(el, 0);
-        } else if (c == 0x0B) { /* ^K kill-line */
-            el->yank_active = 0;
-            undo_push(el);
-            if (kill_line(el)) refresh_line(el);
-        } else if (c == 0x15) { /* ^U backward-kill-line */
-            el->yank_active = 0;
-            undo_push(el);
-            if (backward_kill_line(el)) refresh_line(el);
-        } else if (c == 0x17) { /* ^W unix-word-rubout */
-            el->yank_active = 0;
-            undo_push(el);
-            if (backward_kill_word(el)) refresh_line(el);
-        } else if (c == 0x14) { /* ^T transpose-chars */
-            el->last_cmd_was_kill = 0;
-            el->yank_active = 0;
-            undo_push(el);
-            if (transpose_chars(el)) refresh_line(el);
-        } else if (c == 0x19) { /* ^Y yank */
-            el->last_cmd_was_kill = 0;
-            undo_push(el);
-            if (yank_from_kill_ring(el)) refresh_line(el);
-        } else if (c == 0x1F) { /* ^_ undo */
-            el->last_cmd_was_kill = 0;
-            el->yank_active = 0;
-            if (undo_pop(el)) refresh_line(el);
-        } else if (c == 0x1B) { /* ESC */
-            char seq0;
-            if (!read_esc_byte(el, &seq0, 80)) {
-                el->last_cmd_was_kill = 0;
-                el->yank_active = 0;
-                continue;
-            }
-            if (seq0 == '[') {
-                char seq1;
-                if (!read_esc_byte(el, &seq1, 80)) continue;
-
-                if (seq1 == 'C') { /* Right */
-                    el->last_cmd_was_kill = 0;
-                    el->yank_active = 0;
-                    if (el->line.cursor < el->line.len) {
-                        undo_push(el);
-                        el->line.cursor++;
-                        refresh_line(el);
-                    }
-                } else if (seq1 == 'D') { /* Left */
-                    el->last_cmd_was_kill = 0;
-                    el->yank_active = 0;
-                    if (el->line.cursor > 0) {
-                        undo_push(el);
-                        el->line.cursor--;
-                        refresh_line(el);
-                    }
-                } else if (seq1 == 'H') { /* Home */
-                    el->last_cmd_was_kill = 0;
-                    el->yank_active = 0;
-                    if (el->line.cursor != 0) {
-                        undo_push(el);
-                        el->line.cursor = 0;
-                        refresh_line(el);
-                    }
-                } else if (seq1 == 'F') { /* End */
-                    el->last_cmd_was_kill = 0;
-                    el->yank_active = 0;
-                    if (el->line.cursor != el->line.len) {
-                        undo_push(el);
-                        el->line.cursor = el->line.len;
-                        refresh_line(el);
-                    }
-                } else if (seq1 == 'A') { /* Up (History) */
-                    el->last_cmd_was_kill = 0;
-                    el->yank_active = 0;
-                    if (el->history) {
-                        HistEvent ev;
-                        if (!el->history_browsing) {
-                            (void)history_save_current_input(el);
-                            el->history_browsing = 1;
-                        }
-                        if (history(el->history, &ev, H_PREV) == 0 && ev.str) {
-                            line_load_history(el, ev.str);
-                            refresh_line(el);
-                        }
-                    }
-                } else if (seq1 == 'B') { /* Down (History) */
-                    el->last_cmd_was_kill = 0;
-                    el->yank_active = 0;
-                    if (el->history) {
-                        HistEvent ev;
-                        if (history(el->history, &ev, H_NEXT) == 0 && ev.str) {
-                            line_load_history(el, ev.str);
-                            refresh_line(el);
-                        } else {
-                            history_restore_current_input(el);
-                            el->history_browsing = 0;
-                            refresh_line(el);
-                        }
-                    }
-                } else if (seq1 >= '0' && seq1 <= '9') {
-                    char seq2;
-                    if (!read_esc_byte(el, &seq2, 80)) continue;
-
-                        if (seq2 == '~') {
-                            el->last_cmd_was_kill = 0;
-                            el->yank_active = 0;
-                            if (seq1 == '1') {
-                                if (el->line.cursor != 0) {
-                                    undo_push(el);
-                                    el->line.cursor = 0;
-                                    refresh_line(el);
-                                }
-                            } else if (seq1 == '2') {
-                                el->overwrite_mode = !el->overwrite_mode;
-                            } else if (seq1 == '3') { /* Delete */
-                            if (el->line.cursor < el->line.len) {
-                                undo_push(el);
-                                memmove(el->line.buffer + el->line.cursor,
-                                        el->line.buffer + el->line.cursor + 1,
-                                        el->line.len - el->line.cursor);
-                                el->line.len--;
-                                refresh_line(el);
-                            }
-                            } else if (seq1 == '4') {
-                                if (el->line.cursor != el->line.len) {
-                                    undo_push(el);
-                                    el->line.cursor = el->line.len;
-                                    refresh_line(el);
-                                }
-                        } else if (seq1 == '5') { /* PgUp */
-                            if (el->history) {
-                                HistEvent ev;
-                                if (!el->history_browsing) {
-                                    (void)history_save_current_input(el);
-                                    el->history_browsing = 1;
-                                }
-                                if (history(el->history, &ev, H_FIRST) == 0 && ev.str) {
-                                    line_load_history(el, ev.str);
-                                    refresh_line(el);
-                                }
-                            }
-                        } else if (seq1 == '6') { /* PgDn */
-                            if (el->history) {
-                                HistEvent ev;
-                                if (!el->history_browsing) {
-                                    (void)history_save_current_input(el);
-                                    el->history_browsing = 1;
-                                }
-                                if (history(el->history, &ev, H_LAST) == 0 && ev.str) {
-                                    line_load_history(el, ev.str);
-                                    refresh_line(el);
-                                }
-                            }
-                        }
-                    } else if (seq1 == '1' && seq2 == ';') { /* ESC [ 1 ; <mod> <final> */
-                        char mod;
-                        char final;
-                        if (!read_esc_byte(el, &mod, 80)) continue;
-                        if (!read_esc_byte(el, &final, 80)) continue;
-                        (void)mod;
-                        el->last_cmd_was_kill = 0;
-                        el->yank_active = 0;
-                        if (final == 'A') {
-                            if (el->history) {
-                                HistEvent ev;
-                                if (!el->history_browsing) {
-                                    (void)history_save_current_input(el);
-                                    el->history_browsing = 1;
-                                }
-                                if (history(el->history, &ev, H_PREV) == 0 && ev.str) {
-                                    line_load_history(el, ev.str);
-                                    refresh_line(el);
-                                }
-                            }
-                        } else if (final == 'B') {
-                            if (el->history) {
-                                HistEvent ev;
-                                if (history(el->history, &ev, H_NEXT) == 0 && ev.str) {
-                                    line_load_history(el, ev.str);
-                                    refresh_line(el);
-                                } else {
-                                    history_restore_current_input(el);
-                                    el->history_browsing = 0;
-                                    refresh_line(el);
-                                }
-                            }
-                        } else if (final == 'C') {
-                            if (el->line.cursor < el->line.len) {
-                                undo_push(el);
-                                el->line.cursor++;
-                                refresh_line(el);
-                            }
-                        } else if (final == 'D') {
-                            if (el->line.cursor > 0) {
-                                undo_push(el);
-                                el->line.cursor--;
-                                refresh_line(el);
-                            }
-                        } else if (final == 'H') {
-                            if (el->line.cursor != 0) {
-                                undo_push(el);
-                                el->line.cursor = 0;
-                                refresh_line(el);
-                            }
-                        } else if (final == 'F') {
-                            if (el->line.cursor != el->line.len) {
-                                undo_push(el);
-                                el->line.cursor = el->line.len;
-                                refresh_line(el);
-                            }
-                        }
-                    }
-                }
-            } else if (seq0 == 'O') { /* SS3 alternate arrows */
-                char seq1;
-                if (!read_esc_byte(el, &seq1, 80)) continue;
-                el->last_cmd_was_kill = 0;
-                el->yank_active = 0;
-                if (seq1 == 'C') {
-                    if (el->line.cursor < el->line.len) {
-                        undo_push(el);
-                        el->line.cursor++;
-                        refresh_line(el);
-                    }
-                } else if (seq1 == 'D') {
-                    if (el->line.cursor > 0) {
-                        undo_push(el);
-                        el->line.cursor--;
-                        refresh_line(el);
-                    }
-                } else if (seq1 == 'A') {
-                    if (el->history) {
-                        HistEvent ev;
-                        if (!el->history_browsing) {
-                            (void)history_save_current_input(el);
-                            el->history_browsing = 1;
-                        }
-                        if (history(el->history, &ev, H_PREV) == 0 && ev.str) {
-                            line_load_history(el, ev.str);
-                            refresh_line(el);
-                        }
-                    }
-                } else if (seq1 == 'B') {
-                    if (el->history) {
-                        HistEvent ev;
-                        if (history(el->history, &ev, H_NEXT) == 0 && ev.str) {
-                            line_load_history(el, ev.str);
-                            refresh_line(el);
-                        } else {
-                            history_restore_current_input(el);
-                            el->history_browsing = 0;
-                            refresh_line(el);
-                        }
-                    }
-                }
-            } else if (seq0 == 'c' || seq0 == 'C') { /* M-c capitalize-word */
-                el->last_cmd_was_kill = 0;
-                el->yank_active = 0;
-                undo_push(el);
-                if (apply_word_case(el, 0)) {
-                    refresh_line(el);
-                } else {
-                    undo_discard_last(el);
-                }
-            } else if (seq0 == 'l' || seq0 == 'L') { /* M-l downcase-word */
-                el->last_cmd_was_kill = 0;
-                el->yank_active = 0;
-                undo_push(el);
-                if (apply_word_case(el, -1)) {
-                    refresh_line(el);
-                } else {
-                    undo_discard_last(el);
-                }
-            } else if (seq0 == 'u' || seq0 == 'U') { /* M-u upcase-word */
-                el->last_cmd_was_kill = 0;
-                el->yank_active = 0;
-                undo_push(el);
-                if (apply_word_case(el, 1)) {
-                    refresh_line(el);
-                } else {
-                    undo_discard_last(el);
-                }
-            } else if (seq0 == '.') { /* M-. yank-last-arg */
-                el->last_cmd_was_kill = 0;
-                el->yank_active = 0;
-                undo_push(el);
-                if (yank_last_arg(el)) {
-                    refresh_line(el);
-                } else {
-                    undo_discard_last(el);
-                }
-            } else if (seq0 == 'd' || seq0 == 'D') { /* M-d kill-word */
-                el->yank_active = 0;
-                undo_push(el);
-                if (kill_word(el)) refresh_line(el);
-            } else if (seq0 == 'f' || seq0 == 'F') { /* M-f */
-                size_t old_cursor;
-                el->last_cmd_was_kill = 0;
-                el->yank_active = 0;
-                undo_push(el);
-                old_cursor = el->line.cursor;
-                move_forward_word(el);
-                if (el->line.cursor != old_cursor) {
-                    refresh_line(el);
-                } else {
-                    undo_discard_last(el);
-                }
-            } else if (seq0 == 'b' || seq0 == 'B') { /* M-b */
-                size_t old_cursor;
-                el->last_cmd_was_kill = 0;
-                el->yank_active = 0;
-                undo_push(el);
-                old_cursor = el->line.cursor;
-                move_backward_word(el);
-                if (el->line.cursor != old_cursor) {
-                    refresh_line(el);
-                } else {
-                    undo_discard_last(el);
-                }
-            } else if (seq0 == '<') { /* M-< beginning-of-history */
-                el->last_cmd_was_kill = 0;
-                el->yank_active = 0;
-                if (el->history) {
-                    HistEvent ev;
-                    if (!el->history_browsing) {
-                        (void)history_save_current_input(el);
-                        el->history_browsing = 1;
-                    }
-                    if (history(el->history, &ev, H_FIRST) == 0 && ev.str) {
-                        line_load_history(el, ev.str);
-                        refresh_line(el);
-                    }
-                }
-            } else if (seq0 == '>') { /* M-> end-of-history */
-                el->last_cmd_was_kill = 0;
-                el->yank_active = 0;
-                if (el->history) {
-                    HistEvent ev;
-                    if (history(el->history, &ev, H_LAST) == 0 && ev.str) {
-                        if (!el->history_browsing) {
-                            (void)history_save_current_input(el);
-                            el->history_browsing = 1;
-                        }
-                        line_load_history(el, ev.str);
-                    } else {
-                        history_restore_current_input(el);
-                        el->history_browsing = 0;
-                    }
-                    refresh_line(el);
-                }
-            } else if (seq0 == 'y' || seq0 == 'Y') { /* M-y yank-pop */
-                el->last_cmd_was_kill = 0;
-                undo_push(el);
-                if (yank_pop(el)) refresh_line(el);
-            } else if (seq0 == 0x08 || seq0 == 0x7F) { /* M-BS or M-DEL */
-                el->yank_active = 0;
-                undo_push(el);
-                if (backward_kill_word(el)) refresh_line(el);
-            } else {
-                el->last_cmd_was_kill = 0;
-                el->yank_active = 0;
-            }
-        } else if (c >= 32 && c < 127) {
-            if (line_ensure_capacity(el, el->line.len + 2) == 0) {
-                el->last_cmd_was_kill = 0;
-                el->yank_active = 0;
-                undo_push(el);
-                if (el->overwrite_mode && el->line.cursor < el->line.len) {
-                    el->line.buffer[el->line.cursor] = (char)c;
-                    el->line.cursor++;
-                    refresh_line(el);
-                    continue;
-                }
-                memmove(el->line.buffer + el->line.cursor + 1,
-                        el->line.buffer + el->line.cursor,
-                        el->line.len - el->line.cursor + 1);
-                el->line.buffer[el->line.cursor] = c;
-                el->line.len++;
-                el->line.cursor++;
-                refresh_line(el);
-            } else {
-                fputc('\a', el->fout);
-                fflush(el->fout);
-            }
+        }
+        if (result == DISP_EOF) {
+            terminal_set_orig(el);
+            return NULL;
         }
     }
 

@@ -14,6 +14,34 @@ enum editor_mode {
     ED_VI = 1
 };
 
+enum vi_mode {
+    VI_INSERT = 0,
+    VI_COMMAND = 1,
+    VI_REPLACE = 2
+};
+
+/* Vi repeat info for dot command */
+struct vi_repeat {
+    char cmd;           /* The command character */
+    char arg;           /* Argument char (for r, f, t, etc.) */
+    int count;          /* Count prefix */
+    char *insert_text;  /* Text inserted (for i/a/c/s type cmds) */
+    size_t insert_len;
+};
+
+/* Vi find-char state for ;/, repeat */
+struct vi_find {
+    char ch;            /* Character to find */
+    int forward;        /* 1 = f/t, 0 = F/T */
+    int till;           /* 1 = t/T, 0 = f/F */
+};
+
+/* Vi history search state */
+struct vi_search {
+    char pattern[256];
+    int reverse;        /* 1 = /, 0 = ? */
+};
+
 struct terminal {
     struct termios orig;
     struct termios raw;
@@ -82,6 +110,12 @@ struct editline {
     char *saved_input;
     size_t saved_input_cap;
     int history_browsing;
+    /* Vi mode state */
+    enum vi_mode vi_mode;
+    struct vi_repeat vi_repeat;
+    struct vi_find vi_find;
+    struct vi_search vi_search;
+    size_t vi_insert_start;  /* cursor pos when entering insert mode */
 };
 
 /*
