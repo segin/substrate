@@ -207,6 +207,32 @@ static void test_mb_init_maps_framebuffer_and_layout(void) {
     assert(fb_get_raw_pixel(0x00112233, 32) == 0x00112233);
 }
 
+static void test_fb_format_conversion_routines(void) {
+    memset(&fb, 0, sizeof(fb));
+
+    fb.bpp = 32;
+    assert(fb_get_raw_pixel(0x00112233, 32) == 0x00112233);
+
+    memset(&fb, 0, sizeof(fb));
+    fb.bpp = 24;
+    assert(fb_get_raw_pixel(0x00ABCDEF, 24) == 0x00ABCDEF);
+
+    memset(&fb, 0, sizeof(fb));
+    fb.bpp = 16;
+    assert(fb_get_raw_pixel(0x00FF0000, 16) == 0xF800);
+    assert(fb_get_raw_pixel(0x0000FF00, 16) == 0x07E0);
+    assert(fb_get_raw_pixel(0x000000FF, 16) == 0x001F);
+
+    memset(&fb, 0, sizeof(fb));
+    fb.bpp = 15;
+    assert(fb_get_raw_pixel(0x00FF0000, 15) == 0x7C00);
+    assert(fb_get_raw_pixel(0x0000FF00, 15) == 0x03E0);
+    assert(fb_get_raw_pixel(0x000000FF, 15) == 0x001F);
+
+    assert(fb_get_raw_pixel(0x00FFFFFF, 8) == 0x0F);
+    assert(fb_get_raw_pixel(0x00000000, 8) == 0x00);
+}
+
 static void test_mb_init_rejects_text_mode(void) {
     multiboot_info_t mbi;
     fb_info_t info;
@@ -224,6 +250,7 @@ static void test_mb_init_rejects_text_mode(void) {
 
 int main(void) {
     test_mb_init_maps_framebuffer_and_layout();
+    test_fb_format_conversion_routines();
     test_mb_init_rejects_text_mode();
     puts("host_test_fb_multiboot: PASS");
     return 0;

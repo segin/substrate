@@ -1060,7 +1060,7 @@
                 - [x] 24-bit (RGB888, BGR888). (REQ: REQ-03-0759)
                 - [x] 32-bit (ARGB8888, XRGB8888, ABGR8888). (REQ: REQ-03-0760)
                 - [x] Endianness handling (little/big endian). (REQ: REQ-03-0761)
-                - [ ] Format conversion routines. (REQ: REQ-03-0762)
+                - [x] Format conversion routines. <!-- sys/drivers/video/fb.c, tests/sys/host_test_fb_multiboot.c --> (REQ: REQ-03-0762)
             - [x] **Rendering:** (REQ: REQ-03-0763)
                 - [x] **Font Support:** (REQ: REQ-03-0764)
                     - [x] PSF1 font parser (256/512 glyphs, fixed width). (REQ: REQ-03-0765)

@@ -62,6 +62,13 @@ Attributes can be combined via bitwise OR.
 ### `fb_write(const char *s, size_t n)`
 Writes a string of characters to the framebuffer console.
 
+## Format Conversion
+`fb_get_raw_pixel()` converts canonical RGB colors into the active framebuffer's
+native storage format. The current implementation covers:
+- direct-color 15/16/24/32bpp layouts using channel-offset/length scaling
+- 8bpp indexed output through palette adaptation
+- packed 1/2/4bpp fallback packing in `linear_fb_putpixel()`
+
 ## Scrolling
 Performed via `fb_copyarea` (overlap-safe blit) when the cursor reaches the bottom of the screen. The bottom line is cleared with `fb_fillrect`.
 
