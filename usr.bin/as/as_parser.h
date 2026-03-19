@@ -128,6 +128,11 @@ typedef struct {
     unsigned syntax_intel;
     unsigned prefixes;
     unsigned rex_bits;
+    unsigned opmask;
+    int zeroing;
+    int broadcast;
+    int sae;
+    int rounding_mode;
     char *segment_override;
     as_operand_t *operands;
     size_t operand_count;

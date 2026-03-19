@@ -74,6 +74,7 @@ static int encode_x86_stmt_for_layout(emit_ctx_t *ctx, const char *section_name,
                                       const as_stmt_t *st, unsigned char *code, size_t code_cap,
                                       size_t *code_len, char *encerr, size_t encerr_sz);
 static int parse_xmm_reg(const char *name, unsigned *out);
+static int parse_zmm_reg(const char *name, unsigned *out);
 static int parse_mmx_reg(const char *name, unsigned *out);
 static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_x86_operand_t *dst, int is64,
                                int intel_syntax, char *errbuf, size_t errbuf_sz);
@@ -3181,6 +3182,34 @@ static int parse_ymm_reg(const char *name, unsigned *out) {
         ++p;
     }
     if (*p != '\0' || v > 15u) {
+        return -1;
+    }
+    *out = v;
+    return 0;
+}
+
+static int parse_zmm_reg(const char *name, unsigned *out) {
+    const char *p = name;
+    unsigned v = 0;
+
+    if (p == NULL || out == NULL) {
+        return -1;
+    }
+    while (*p == '%' || isspace((unsigned char)*p)) {
+        ++p;
+    }
+    if (!(p[0] == 'z' || p[0] == 'Z') || !(p[1] == 'm' || p[1] == 'M') || !(p[2] == 'm' || p[2] == 'M')) {
+        return -1;
+    }
+    p += 3;
+    if (!isdigit((unsigned char)*p)) {
+        return -1;
+    }
+    while (isdigit((unsigned char)*p)) {
+        v = (v * 10u) + (unsigned)(*p - '0');
+        ++p;
+    }
+    if (*p != '\0' || v > 31u) {
         return -1;
     }
     *out = v;
@@ -7445,11 +7474,19 @@ static unsigned infer_avx_vector_bits(const as_instruction_t *in) {
         unsigned vr;
 
         if (op->kind == AS_OPERAND_REGISTER && op->u.reg != NULL) {
+            if (parse_zmm_reg(op->u.reg, &vr) == 0) {
+                return 512;
+            }
             if (parse_ymm_reg(op->u.reg, &vr) == 0) {
                 return 256;
             }
-        } else if (op->kind == AS_OPERAND_MEMORY && op->u.mem.size_bits == 256) {
-            return 256;
+        } else if (op->kind == AS_OPERAND_MEMORY) {
+            if (op->u.mem.size_bits == 512) {
+                return 512;
+            }
+            if (op->u.mem.size_bits == 256) {
+                return 256;
+            }
         }
     }
     return 128;
@@ -7897,7 +7934,11 @@ static int try_encode_x86_avx512dq_generic_stmt(const as_instruction_t *in, int 
     memset(&ev, 0, sizeof(ev));
     ev.mnemonic = in->mnemonic;
     ev.vector_bits = infer_avx_vector_bits(in);
-    ev.rounding_mode = -1;
+    ev.opmask = (uint8_t)in->opmask;
+    ev.zeroing = in->zeroing;
+    ev.broadcast = in->broadcast;
+    ev.sae = in->sae;
+    ev.rounding_mode = in->rounding_mode;
 
     if (in->operand_count == 2) {
         dst_i = intel_syntax ? 0u : 1u;
@@ -7975,7 +8016,11 @@ static int try_encode_x86_avx512bw_generic_stmt(const as_instruction_t *in, int 
     memset(&ev, 0, sizeof(ev));
     ev.mnemonic = in->mnemonic;
     ev.vector_bits = infer_avx_vector_bits(in);
-    ev.rounding_mode = -1;
+    ev.opmask = (uint8_t)in->opmask;
+    ev.zeroing = in->zeroing;
+    ev.broadcast = in->broadcast;
+    ev.sae = in->sae;
+    ev.rounding_mode = in->rounding_mode;
 
     if (in->operand_count == 2) {
         dst_i = intel_syntax ? 0u : 1u;
@@ -8059,7 +8104,11 @@ static int try_encode_x86_avx512f_generic_stmt(const as_instruction_t *in, int i
         ev.mnemonic = mnbuf;
     }
     ev.vector_bits = infer_avx_vector_bits(in);
-    ev.rounding_mode = -1;
+    ev.opmask = (uint8_t)in->opmask;
+    ev.zeroing = in->zeroing;
+    ev.broadcast = in->broadcast;
+    ev.sae = in->sae;
+    ev.rounding_mode = in->rounding_mode;
     ev.evex_w_override = -1;
     if (suffix == 'q') {
         ev.evex_w_override = 1;

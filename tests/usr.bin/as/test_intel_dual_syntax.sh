@@ -321,6 +321,38 @@ objcopy -O binary --only-section=.text "$TMP/qual64_att.o" "$TMP/qual64_att.text
 objcopy -O binary --only-section=.text "$TMP/qual64_intel.o" "$TMP/qual64_intel.text"
 cmp "$TMP/qual64_att.text" "$TMP/qual64_intel.text"
 
+cat > "$TMP/avxmask_att.s" <<'SRC'
+.text
+.globl avxmask64
+.type avxmask64,@function
+avxmask64:
+    vbroadcastss (%rax), %ymm0
+    vpbroadcastd (%rax), %ymm1
+    vaddps (%rax){1to16}, %zmm1, %zmm0{%k1}{z}
+    ret
+.size avxmask64, .-avxmask64
+SRC
+
+cat > "$TMP/avxmask_intel.s" <<'SRC'
+.intel_syntax noprefix
+.text
+.globl avxmask64
+.type avxmask64,@function
+avxmask64:
+    vbroadcastss ymm0, dword ptr [rax]
+    vpbroadcastd ymm1, dword ptr [rax]
+    vaddps zmm0{k1}{z}, zmm1, dword ptr [rax]{1to16}
+    ret
+.size avxmask64, .-avxmask64
+.att_syntax prefix
+SRC
+
+"$AS" -64 -march=x86-64-v4 -o "$TMP/avxmask_att.o" "$TMP/avxmask_att.s"
+"$AS" -64 -march=x86-64-v4 -o "$TMP/avxmask_intel.o" "$TMP/avxmask_intel.s"
+objcopy -O binary --only-section=.text "$TMP/avxmask_att.o" "$TMP/avxmask_att.text"
+objcopy -O binary --only-section=.text "$TMP/avxmask_intel.o" "$TMP/avxmask_intel.text"
+cmp "$TMP/avxmask_att.text" "$TMP/avxmask_intel.text"
+
 cat > "$TMP/forms_att.s" <<'SRC'
 .text
 .globl forms64
