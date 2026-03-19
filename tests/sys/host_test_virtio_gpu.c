@@ -21,6 +21,9 @@ static uint32_t attach_entry_length;
 static uint32_t set_scanout_resource_id;
 static uint64_t transfer_offset;
 static uint32_t flush_resource_id;
+static uint32_t queried_width;
+static uint32_t queried_height;
+static uint32_t queried_format;
 static int notify_count;
 
 static void outb(uint16_t port, uint8_t val);
@@ -107,7 +110,16 @@ static void outw(uint16_t port, uint16_t val) {
         }
 
         resp = (struct virtio_gpu_ctrl_hdr *)(uintptr_t)queue->desc[idx].addr;
-        resp->type = VIRTIO_GPU_RESP_OK_NODATA;
+        if (req->type == VIRTIO_GPU_CMD_GET_DISPLAY_INFO) {
+            struct virtio_gpu_resp_display_info *display =
+                (struct virtio_gpu_resp_display_info *)(uintptr_t)queue->desc[idx].addr;
+            display->hdr.type = VIRTIO_GPU_RESP_OK_DISPLAY_INFO;
+            display->pmodes[0].enabled = 1;
+            display->pmodes[0].rect.width = 1024;
+            display->pmodes[0].rect.height = 768;
+        } else {
+            resp->type = VIRTIO_GPU_RESP_OK_NODATA;
+        }
 
         if (req->type == VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING) {
             struct virtio_gpu_mem_entry *entry =
@@ -170,6 +182,9 @@ static void reset_state(void) {
     set_scanout_resource_id = 0;
     transfer_offset = 0;
     flush_resource_id = 0;
+    queried_width = 0;
+    queried_height = 0;
+    queried_format = 0;
     notify_count = 0;
     queue_sizes[0] = 8;
     queue_sizes[1] = 8;
@@ -248,12 +263,23 @@ static void test_flush_scanout_emits_transfer_and_flush(void) {
     assert(flush_resource_id == 9);
 }
 
+static void test_query_display_info_returns_first_enabled_mode(void) {
+    reset_state();
+    assert(virtio_gpu_setup(0, 5, 0) == 0);
+    assert(virtio_gpu_query_display_info(&queried_width, &queried_height, &queried_format) == 0);
+    assert(notified_types[0] == VIRTIO_GPU_CMD_GET_DISPLAY_INFO);
+    assert(queried_width == 1024);
+    assert(queried_height == 768);
+    assert(queried_format == VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM);
+}
+
 int main(void) {
     test_setup_initializes_control_and_cursor_queues();
     test_setup_rejects_missing_cursor_queue();
     test_setup_rejects_missing_io_base();
     test_create_scanout_resource_emits_expected_ctrl_sequence();
     test_flush_scanout_emits_transfer_and_flush();
+    test_query_display_info_returns_first_enabled_mode();
     puts("host_test_virtio_gpu: PASS");
     return 0;
 }

@@ -32,7 +32,8 @@ The driver can create a basic 2D resource, attach a single backing entry, and
 bind that resource to scanout 0.
 It can also transfer a dirty rectangle to the host and flush that rectangle to
 the visible scanout.
-It does not yet query display modes or upload cursor images.
+It can query display geometry from the first enabled scanout.
+It does not yet upload cursor images.
 .Sh HARDWARE
 The
 .Nm

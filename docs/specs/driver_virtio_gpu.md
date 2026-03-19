@@ -39,6 +39,12 @@ issuing, in order:
 The current implementation assumes a tightly packed `B8G8R8X8` backing store
 and computes the transfer offset from the tracked scanout width.
 
+## Display Information Query
+
+The driver can query scanout geometry with `GET_DISPLAY_INFO` and caches the
+first enabled mode it receives from the device. The effective pixel format is
+reported as the driver's current 2D resource format, `B8G8R8X8`.
+
 ## Transport Contract
 
 - PCI vendor ID: `0x1af4`
@@ -64,3 +70,4 @@ If either required queue is unavailable or cannot be allocated, the driver sets
 - missing cursor queue is rejected and sets failed status
 - 2D scanout creation emits the expected control-queue command sequence
 - dirty-region flush emits `TRANSFER_TO_HOST_2D` followed by `RESOURCE_FLUSH`
+- display-info query returns the first enabled scanout geometry
