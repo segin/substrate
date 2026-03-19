@@ -43,6 +43,16 @@ avx2_only:
 .size avx2_only, .-avx2_only
 SRC
 
+cat > "$TMP/avx512_only.s" <<'SRC'
+.text
+.globl avx512_only
+.type avx512_only,@function
+avx512_only:
+    vrcp14ps %xmm0, %xmm1
+    ret
+.size avx512_only, .-avx512_only
+SRC
+
 cat > "$TMP/forbidden64.s" <<'SRC'
 .text
 bad64:
@@ -71,6 +81,14 @@ fi
 grep -qi "error" "$TMP/avx_bad.err"
 
 "$AS" -64 -march=x86-64-v3 -o "$TMP/avx2_ok.o" "$TMP/avx2_only.s"
+
+if "$AS" -64 -march=x86-64-v3 -o "$TMP/avx512_bad.o" "$TMP/avx512_only.s" >"$TMP/avx512_bad.out" 2>"$TMP/avx512_bad.err"; then
+    echo "expected AVX-512 with -march=x86-64-v3 to fail"
+    exit 1
+fi
+grep -qi "error" "$TMP/avx512_bad.err"
+
+"$AS" -64 -march=x86-64-v4 -o "$TMP/avx512_ok.o" "$TMP/avx512_only.s"
 
 if "$AS" -64 -o "$TMP/forbidden64.o" "$TMP/forbidden64.s" >"$TMP/forbid.out" 2>"$TMP/forbid.err"; then
     echo "expected forbidden 64-bit instruction to fail"
