@@ -1087,7 +1087,7 @@
                     - [x] Deferred updates (batch flush on vsync). <!-- sys/drivers/video/fb.h, sys/drivers/video/fb_console.c, sys/drivers/video/fb_console.h, sys/drivers/video/fb.c, sys/kern/time.c, tests/sys/host_test_fb_console.c, docs/specs/driver_fb_console.md --> (REQ: REQ-03-0786)
                     - [ ] Write-combining memory type (PAT/MTRR). (REQ: REQ-03-0787)
             - [ ] **Cursor:** (REQ: REQ-03-0788)
-                - [ ] **Software Cursor:** (REQ: REQ-03-0789)
+                - [x] **Software Cursor:** <!-- sys/drivers/video/fb_console.c, tests/sys/host_test_fb_console.c, docs/specs/driver_fb_console.md --> (REQ: REQ-03-0789)
                     - [x] XOR cursor rendering. <!-- sys/drivers/video/fb_console.c, tests/sys/host_test_fb_console.c, docs/specs/driver_fb_console.md --> (REQ: REQ-03-0790)
                     - [x] Cursor save/restore (background preservation). <!-- sys/drivers/video/fb_console.c, tests/sys/host_test_fb_console.c, docs/specs/driver_fb_console.md --> (REQ: REQ-03-0791)
                     - [x] Cursor blink timer integration. <!-- sys/drivers/video/fb_console.c, tests/sys/host_test_fb_console.c, docs/specs/driver_fb_console.md --> (REQ: REQ-03-0792)
