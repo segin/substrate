@@ -33,6 +33,8 @@ static int cursor_draw_x = 0;
 static int cursor_draw_y = 0;
 static uint8_t cursor_saved[64];
 static int cursor_saved_valid = 0;
+static uint8_t cursor_blink_phase = 1;
+static uint32_t cursor_blink_ticks = 0;
 static int dirty_valid = 0;
 static int dirty_x1 = 0;
 static int dirty_y1 = 0;
@@ -41,6 +43,8 @@ static int dirty_y2 = 0;
 static unsigned int dirty_ticks = 0;
 
 #define FB_CONSOLE_FLUSH_HZ 60U
+
+static int fb_console_cursor_should_be_visible(void);
 
 /* Helper for faster framebuffer copies */
 static void optimized_memcpy(void *dst, const void *src, size_t n) {
@@ -257,6 +261,12 @@ static void fb_console_hide_cursor(void) {
 }
 
 static void fb_console_show_cursor(void) {
+    if (!fb_console_cursor_should_be_visible()) {
+        cursor_drawn = 0;
+        cursor_saved_valid = 0;
+        return;
+    }
+
     cursor_draw_x = cursor_x;
     cursor_draw_y = cursor_y + view_y_offset;
     fb_console_save_cursor_background(cursor_draw_x, cursor_draw_y);
@@ -269,6 +279,28 @@ static unsigned int fb_console_flush_period_ticks(void) {
     unsigned int period = (hz + FB_CONSOLE_FLUSH_HZ - 1U) / FB_CONSOLE_FLUSH_HZ;
 
     return period > 0 ? period : 1;
+}
+
+static unsigned int fb_console_blink_period_ticks(void) {
+    unsigned int hz = get_hz();
+    unsigned int period = hz / 2U;
+
+    return period > 0 ? period : 1;
+}
+
+static int fb_console_cursor_should_be_visible(void) {
+    vt_state_t *vt = vt_get_state(vt_get_active());
+
+    if (!vt) {
+        return 1;
+    }
+    if (!vt->cursor_visible) {
+        return 0;
+    }
+    if (!vt->cursor_blink) {
+        return 1;
+    }
+    return cursor_blink_phase ? 1 : 0;
 }
 
 static void fb_console_flush_dirty_internal(void) {
@@ -297,6 +329,8 @@ static void fb_console_flush_dirty_internal(void) {
 static void fb_console_clear(void) {
     cursor_drawn = 0;
     cursor_saved_valid = 0;
+    cursor_blink_phase = 1;
+    cursor_blink_ticks = 0;
     if (fb.set_viewport) {
         view_y_offset = 0;
         fb.set_viewport(0, 0);
@@ -607,6 +641,33 @@ void fb_console_reset_dirty(void) {
 }
 
 void fb_console_tick(void) {
+    vt_state_t *vt = vt_get_state(vt_get_active());
+
+    if (vt && vt->cursor_visible) {
+        if (!vt->cursor_blink) {
+            cursor_blink_ticks = 0;
+            if (!cursor_blink_phase) {
+                cursor_blink_phase = 1;
+                fb_console_show_cursor();
+            }
+        } else {
+            cursor_blink_ticks++;
+            if (cursor_blink_ticks >= fb_console_blink_period_ticks()) {
+                cursor_blink_ticks = 0;
+                cursor_blink_phase ^= 1U;
+                if (cursor_blink_phase) {
+                    fb_console_show_cursor();
+                } else {
+                    fb_console_hide_cursor();
+                }
+            }
+        }
+    } else {
+        cursor_blink_ticks = 0;
+        cursor_blink_phase = 1;
+        fb_console_hide_cursor();
+    }
+
     if (!dirty_valid) {
         return;
     }

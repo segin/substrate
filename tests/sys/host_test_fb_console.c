@@ -6,6 +6,7 @@
 #include <drivers/video/font.h>
 #include <drivers/video/fb.h>
 #include <kern/console.h>
+#include <sys/vt.h>
 
 const uint8_t font_8x16[256 * 16] = {0};
 const uint8_t font_8x8[256 * 8] = {0};
@@ -22,6 +23,7 @@ static int flush_x;
 static int flush_y;
 static int flush_w;
 static int flush_h;
+static vt_state_t test_vt;
 
 void fb_putpixel(int x, int y, uint32_t color) {
     fb_mem[(size_t)y * 640U + (size_t)x] = color;
@@ -61,6 +63,15 @@ int vt_set_geometry(int cols, int rows) {
     return 0;
 }
 
+int vt_get_active(void) {
+    return 0;
+}
+
+vt_state_t *vt_get_state(int n) {
+    (void)n;
+    return &test_vt;
+}
+
 #include "../../sys/drivers/video/fb_console.c"
 
 static void reset_state(void) {
@@ -81,9 +92,14 @@ static void reset_state(void) {
     flush_y = 0;
     flush_w = 0;
     flush_h = 0;
+    memset(&test_vt, 0, sizeof(test_vt));
+    test_vt.cursor_visible = 1;
+    test_vt.cursor_blink = 1;
     cursor_x = 0;
     cursor_y = 0;
     view_y_offset = 0;
+    cursor_blink_phase = 1;
+    cursor_blink_ticks = 0;
     fb_console_reset_dirty();
     memset(fb_mem, 0, sizeof(fb_mem));
 }
@@ -165,11 +181,31 @@ static void test_software_cursor_preserves_background(void) {
     assert(fb_mem[15U * 640U] == 0x55667788U);
 }
 
+static void test_software_cursor_blinks_on_tick(void) {
+    unsigned int i;
+
+    reset_state();
+
+    fb_console_show_cursor();
+    assert(fb_mem[14U * 640U] == 0xFFFFFFFFU);
+
+    for (i = 0; i < 50; i++) {
+        fb_console_tick();
+    }
+    assert(fb_mem[14U * 640U] == 0);
+
+    for (i = 0; i < 50; i++) {
+        fb_console_tick();
+    }
+    assert(fb_mem[14U * 640U] == 0xFFFFFFFFU);
+}
+
 int main(void) {
     test_clear_marks_full_screen_dirty();
     test_writes_expand_dirty_rectangle();
     test_tick_batches_and_flushes_dirty_rectangle();
     test_software_cursor_preserves_background();
+    test_software_cursor_blinks_on_tick();
     puts("host_test_fb_console: PASS");
     return 0;
 }

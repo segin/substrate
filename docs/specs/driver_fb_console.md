@@ -97,6 +97,11 @@ do not accumulate XOR damage. Cursor hide/show operations participate in
 dirty-rectangle tracking so deferred presentation still flushes the correct
 bounds.
 
+Cursor blink runs through `fb_console_tick()` using the kernel timer cadence.
+When the active VT requests blinking, the software cursor toggles at roughly
+2 Hz and each blink transition is dirtied and flushed through the same deferred
+presentation path as ordinary text output.
+
 ## Integration
 The `vga_write` function is hooked to automatically use the framebuffer console if initialized and active. This allows seamless kernel logging through the standard console path.
 
