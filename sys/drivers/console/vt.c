@@ -76,6 +76,7 @@ void vt_init(void) {
         vt_states[i].scroll_top = 0;
         vt_states[i].scroll_bottom = vt_get_visible_height() - 1;
         vt_states[i].cursor_visible = 1;
+        vt_states[i].tab_width = 8;
         vt_states[i].autowrap = 1;         /* DECAWM on by default */
         vt_states[i].cursor_key_app = 0;   /* Normal cursor keys */
         vt_states[i].origin_mode = 0;      /* Absolute origin */

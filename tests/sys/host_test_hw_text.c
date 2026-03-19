@@ -101,6 +101,7 @@ void vt_init(void) {
     memset(&mock_vt, 0, sizeof(mock_vt));
     mock_vt.id = 0;
     mock_vt.color = 0x07;
+    mock_vt.tab_width = 8;
     mock_vt.scroll_top = 0;
     mock_vt.scroll_bottom = mock_vt_height - 2;
     mock_vt.cursor_visible = 1;
@@ -216,9 +217,23 @@ static void test_console_backend_shim_uses_bulk_write_path(void) {
     assert(mock_vt.col == 2);
 }
 
+static void test_tab_width_is_configurable_per_vt(void) {
+    reset_state();
+
+    assert(hw_text_get_tab_width() == 8);
+    assert(hw_text_set_tab_width(4) == 0);
+    assert(hw_text_get_tab_width() == 4);
+
+    hw_text_write("\tX", 2);
+
+    assert(mock_vt.col == 5);
+    assert((mock_vt.buffer[4] & 0x00ffU) == 'X');
+}
+
 int main(void) {
     test_hw_text_bulk_write_updates_buffer_and_cursor();
     test_console_backend_shim_uses_bulk_write_path();
+    test_tab_width_is_configurable_per_vt();
     puts("host_test_hw_text: PASS");
     return 0;
 }

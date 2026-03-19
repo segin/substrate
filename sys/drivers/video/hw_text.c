@@ -688,7 +688,9 @@ static void cb_putc(char c) {
         return;
     }
     if (c == '\t') {
-        vt->col = (vt->col + 8) & ~7;
+        int tab_width = vt->tab_width ? vt->tab_width : 8;
+
+        vt->col = ((vt->col / tab_width) + 1) * tab_width;
         if (vt->col >= vt_get_width()) {
             vt->col = 0;
             if (vt->row >= bottom) {
@@ -1259,6 +1261,26 @@ void hw_text_set_color(uint8_t fg, uint8_t bg) {
     if (vt) {
         vt->color = (uint8_t)(fg | (bg << 4));
     }
+}
+
+int hw_text_set_tab_width(unsigned int width) {
+    vt_state_t *vt = vt_get_state(vt_get_active());
+
+    if (!vt || width < 1 || width > 32) {
+        return -1;
+    }
+
+    vt->tab_width = (uint8_t)width;
+    return 0;
+}
+
+unsigned int hw_text_get_tab_width(void) {
+    vt_state_t *vt = vt_get_state(vt_get_active());
+
+    if (!vt || vt->tab_width == 0) {
+        return 8;
+    }
+    return vt->tab_width;
 }
 
 void hw_text_putc(char c) {

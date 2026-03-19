@@ -62,6 +62,9 @@ Bulk writes from the kernel console path and from
 devices share the same hardware-text write path, so escape-sequence parsing,
 cursor updates, and redraw rules remain consistent regardless of whether output
 arrives one character at a time or in larger buffers.
+.Pp
+Horizontal tab stops default to 8 columns and are tracked per virtual terminal
+so that console-local formatting state is preserved across VT switches.
 .Sh FILES
 .Bl -tag -width "/sys/drivers/console/vt.c"
 .It Pa /sys/drivers/console/vt.c

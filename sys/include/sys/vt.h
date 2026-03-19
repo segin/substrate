@@ -47,6 +47,7 @@ typedef struct vt_state {
     
     // Cursor visibility
     int cursor_visible; // 1=visible (default), 0=hidden
+    uint8_t tab_width; // Horizontal tab stop width in columns
     
     // DEC modes
     int autowrap;       // DECAWM: 1=wrap at right margin (default), 0=clamp
