@@ -166,8 +166,8 @@ Validation gate for Section 1:
 - [x] Ensure ELF object emission remains the default and is unaffected by binary mode.
 
 ### 5.3 Diagnostics
-- [ ] Normalize diagnostics for unsupported mnemonics, operands, and ISA-level failures.
-- [ ] Ensure Intel and AT&T syntax errors identify the same root cause cleanly.
+- [x] Normalize diagnostics for unsupported mnemonics, operands, and ISA-level failures.
+- [x] Ensure Intel and AT&T syntax errors identify the same root cause cleanly.
 - [x] Add tests for message stability on:
   - unsupported mnemonic
   - bad register class

@@ -8557,6 +8557,56 @@ static int x86_mem_operand_is_dx_port(const as_x86_operand_t *op) {
            !op->u.mem.has_disp;
 }
 
+static void set_x86_isa_requirement(char *encerr, size_t encerr_sz, const char *mnemonic, unsigned min_level) {
+    if (encerr == NULL || encerr_sz == 0) {
+        return;
+    }
+    snprintf(encerr, encerr_sz, "instruction requires -march=x86-64-v%u or higher: %s",
+             min_level, mnemonic != NULL ? mnemonic : "<null>");
+}
+
+static int x86_stmt_requires_v3(const as_instruction_t *insn, int intel_syntax, int is_64);
+
+static int x86_stmt_requires_v4(const as_instruction_t *insn, int intel_syntax) {
+    unsigned char probe[32];
+    size_t probe_len = 0;
+    char probe_err[128];
+
+    if (insn == NULL) {
+        return 0;
+    }
+    if (x86_stmt_requires_v3(insn, intel_syntax, 1)) {
+        return 0;
+    }
+    return try_encode_x86_avx512f_stmt(insn, intel_syntax, probe, sizeof(probe), &probe_len, probe_err, sizeof(probe_err)) == 0 ||
+           try_encode_x86_avx512bw_stmt(insn, intel_syntax, probe, sizeof(probe), &probe_len, probe_err, sizeof(probe_err)) == 0 ||
+           try_encode_x86_avx512bw_generic_stmt(insn, intel_syntax, probe, sizeof(probe), &probe_len, probe_err,
+                                                sizeof(probe_err)) == 0 ||
+           try_encode_x86_avx512dq_stmt(insn, intel_syntax, probe, sizeof(probe), &probe_len, probe_err, sizeof(probe_err)) == 0 ||
+           try_encode_x86_avx512f_generic_stmt(insn, intel_syntax, probe, sizeof(probe), &probe_len, probe_err,
+                                               sizeof(probe_err)) == 0 ||
+           try_encode_x86_avx512dq_generic_stmt(insn, intel_syntax, probe, sizeof(probe), &probe_len, probe_err,
+                                                sizeof(probe_err)) == 0;
+}
+
+static int x86_stmt_requires_v3(const as_instruction_t *insn, int intel_syntax, int is_64) {
+    unsigned char probe[32];
+    size_t probe_len = 0;
+    char probe_err[128];
+
+    if (insn == NULL) {
+        return 0;
+    }
+    return try_encode_x86_avx_stmt(insn, intel_syntax, is_64, probe, sizeof(probe), &probe_len, probe_err, sizeof(probe_err)) == 0 ||
+           try_encode_x86_avx2_stmt(insn, intel_syntax, is_64, probe, sizeof(probe), &probe_len, probe_err,
+                                    sizeof(probe_err)) == 0 ||
+           try_encode_x86_fma_stmt(insn, intel_syntax, is_64, probe, sizeof(probe), &probe_len, probe_err, sizeof(probe_err)) == 0 ||
+           try_encode_x86_bmi1_stmt(insn, intel_syntax, is_64, probe, sizeof(probe), &probe_len, probe_err,
+                                     sizeof(probe_err)) == 0 ||
+           try_encode_x86_bmi2_stmt(insn, intel_syntax, is_64, probe, sizeof(probe), &probe_len, probe_err,
+                                     sizeof(probe_err)) == 0;
+}
+
 static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code, size_t code_cap,
                            size_t *code_len, char *encerr, size_t encerr_sz) {
     as_x86_insn_t in;
@@ -8729,6 +8779,9 @@ static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigne
         if (try_encode_x86_avx512dq_generic_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0) {
             return 0;
         }
+    } else if (cfg->is_64 && x86_stmt_requires_v4(&st->u.instr, intel_syntax)) {
+        set_x86_isa_requirement(encerr, encerr_sz, mnbuf, 4);
+        return -1;
     }
     if (!cfg->is_64 || cfg->x86_64_isa_level >= 3) {
         if (try_encode_x86_avx_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0) {
@@ -8746,6 +8799,9 @@ static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigne
         if (try_encode_x86_bmi2_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0) {
             return 0;
         }
+    } else if (cfg->is_64 && x86_stmt_requires_v3(&st->u.instr, intel_syntax, cfg->is_64)) {
+        set_x86_isa_requirement(encerr, encerr_sz, mnbuf, 3);
+        return -1;
     }
     if (cfg->is_64) {
         int s64 = emit_x86_64_special(&st->u.instr, intel_syntax, cfg->x86_64_isa_level, code, code_cap, code_len);
@@ -8753,7 +8809,7 @@ static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigne
             return 0;
         }
         if (s64 == -2) {
-            snprintf(encerr, encerr_sz, "AVX2 instruction requires -march=x86-64-v3 or higher");
+            set_x86_isa_requirement(encerr, encerr_sz, mnbuf, 3);
             return -1;
         }
     }

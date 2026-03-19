@@ -43,6 +43,29 @@ fi
 grep -qi "unsupported mnemonic" "$TMP/bm.err"
 grep -Eq "bad_mnemonic\.s:3|bad_mnemonic\.s" "$TMP/bm.err"
 
+# Intel and AT&T syntax should surface the same unsupported-form root cause.
+cat > "$TMP/att_bad_form.s" <<'SRC'
+.text
+att_bad_form:
+    mov %eax, (%ebx), %ecx
+SRC
+cat > "$TMP/intel_bad_form.s" <<'SRC'
+.intel_syntax noprefix
+.text
+intel_bad_form:
+    mov eax, [ebx], ecx
+SRC
+if "$AS" -32 -o "$TMP/att_bad_form.o" "$TMP/att_bad_form.s" >"$TMP/abf.out" 2>"$TMP/abf.err"; then
+    echo "expected AT&T unsupported-form failure"
+    exit 1
+fi
+if "$AS" -32 -msyntax=intel -o "$TMP/intel_bad_form.o" "$TMP/intel_bad_form.s" >"$TMP/ibf.out" 2>"$TMP/ibf.err"; then
+    echo "expected Intel unsupported-form failure"
+    exit 1
+fi
+grep -q "unsupported operand form for 'mov'" "$TMP/abf.err"
+grep -q "unsupported operand form for 'mov'" "$TMP/ibf.err"
+
 # ambiguous Intel memory-size diagnostics
 cat > "$TMP/ambiguous_intel.s" <<'SRC'
 .intel_syntax noprefix
@@ -67,6 +90,29 @@ SRC
 "$AS" -32 -o "$TMP/trunc_warn.o" "$TMP/trunc_warn.s" >"$TMP/tw.out" 2>"$TMP/tw.err"
 grep -qi "truncated to 8 bits" "$TMP/tw.err"
 grep -Eq "trunc_warn\.s:3|trunc_warn\.s" "$TMP/tw.err"
+
+# ISA-level failures should report the required -march level and mnemonic.
+cat > "$TMP/avx2_gate.s" <<'SRC'
+.text
+avx2_gate:
+    vpbroadcastd %xmm0, %ymm1
+SRC
+if "$AS" -64 -march=x86-64-v2 -o "$TMP/avx2_gate.o" "$TMP/avx2_gate.s" >"$TMP/avx2g.out" 2>"$TMP/avx2g.err"; then
+    echo "expected AVX2 ISA-gate failure"
+    exit 1
+fi
+grep -q "instruction requires -march=x86-64-v3 or higher: vpbroadcastd" "$TMP/avx2g.err"
+
+cat > "$TMP/avx512_gate.s" <<'SRC'
+.text
+avx512_gate:
+    vrcp14ps %xmm0, %xmm1
+SRC
+if "$AS" -64 -march=x86-64-v3 -o "$TMP/avx512_gate.o" "$TMP/avx512_gate.s" >"$TMP/avx512g.out" 2>"$TMP/avx512g.err"; then
+    echo "expected AVX-512 ISA-gate failure"
+    exit 1
+fi
+grep -q "instruction requires -march=x86-64-v4 or higher: vrcp14ps" "$TMP/avx512g.err"
 
 # include stack diagnostics via cpp include chain
 cat > "$TMP/inc/stack2.inc" <<'SRC'
