@@ -169,6 +169,54 @@ objcopy -O binary --only-section=.text "$TMP/qual32_att.o" "$TMP/qual32_att.text
 objcopy -O binary --only-section=.text "$TMP/qual32_intel.o" "$TMP/qual32_intel.text"
 cmp "$TMP/qual32_att.text" "$TMP/qual32_intel.text"
 
+cat > "$TMP/order32_att.s" <<'SRC'
+.text
+.globl order32
+.type order32,@function
+order32:
+    movbe (%ebx), %eax
+    movbe %eax, (%ebx)
+    in (%dx), %al
+    in (%dx), %eax
+    out %al, (%dx)
+    out %eax, (%dx)
+    vmread %ebx, %eax
+    vmwrite %ebx, %eax
+    movdir64b (%ebx), %eax
+    enqcmd (%eax), %ebx
+    enqcmds (%eax), %ebx
+    ret
+.size order32, .-order32
+SRC
+
+cat > "$TMP/order32_intel.s" <<'SRC'
+.intel_syntax noprefix
+.text
+.globl order32
+.type order32,@function
+order32:
+    movbe eax, [ebx]
+    movbe [ebx], eax
+    in al, dx
+    in eax, dx
+    out dx, al
+    out dx, eax
+    vmread eax, ebx
+    vmwrite eax, ebx
+    movdir64b eax, [ebx]
+    enqcmd ebx, [eax]
+    enqcmds ebx, [eax]
+    ret
+.size order32, .-order32
+.att_syntax prefix
+SRC
+
+"$AS" -32 -o "$TMP/order32_att.o" "$TMP/order32_att.s"
+"$AS" -32 -o "$TMP/order32_intel.o" "$TMP/order32_intel.s"
+objcopy -O binary --only-section=.text "$TMP/order32_att.o" "$TMP/order32_att.text"
+objcopy -O binary --only-section=.text "$TMP/order32_intel.o" "$TMP/order32_intel.text"
+cmp "$TMP/order32_att.text" "$TMP/order32_intel.text"
+
 cat > "$TMP/qual64_att.s" <<'SRC'
 .text
 .globl qual64

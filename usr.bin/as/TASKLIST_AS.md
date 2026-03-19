@@ -138,7 +138,7 @@ Validation gate for Section 1:
 ### 4.1 Parser Completeness
 - [x] Audit all Intel memory-size qualifiers against real accepted syntax.
 - [x] Audit ambiguous Intel `mem, imm` diagnostics for consistency.
-- [ ] Audit operand-order exceptions:
+- [x] Audit operand-order exceptions:
   - string ops
   - port I/O
   - `movbe`
