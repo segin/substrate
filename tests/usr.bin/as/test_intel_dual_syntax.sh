@@ -169,6 +169,44 @@ objcopy -O binary --only-section=.text "$TMP/qual32_att.o" "$TMP/qual32_att.text
 objcopy -O binary --only-section=.text "$TMP/qual32_intel.o" "$TMP/qual32_intel.text"
 cmp "$TMP/qual32_att.text" "$TMP/qual32_intel.text"
 
+cat > "$TMP/x87stack_att.s" <<'SRC'
+.text
+.globl x87stack32
+.type x87stack32,@function
+x87stack32:
+    fld %st(1)
+    fxch %st(2)
+    fadd %st(1), %st
+    fucomi %st(1), %st
+    fcomi %st(1), %st
+    fucomip %st(1), %st
+    ret
+.size x87stack32, .-x87stack32
+SRC
+
+cat > "$TMP/x87stack_intel.s" <<'SRC'
+.intel_syntax noprefix
+.text
+.globl x87stack32
+.type x87stack32,@function
+x87stack32:
+    fld st(1)
+    fxch st(2)
+    fadd st, st(1)
+    fucomi st, st(1)
+    fcomi st, st(1)
+    fucomip st, st(1)
+    ret
+.size x87stack32, .-x87stack32
+.att_syntax prefix
+SRC
+
+"$AS" -32 -o "$TMP/x87stack_att.o" "$TMP/x87stack_att.s"
+"$AS" -32 -o "$TMP/x87stack_intel.o" "$TMP/x87stack_intel.s"
+objcopy -O binary --only-section=.text "$TMP/x87stack_att.o" "$TMP/x87stack_att.text"
+objcopy -O binary --only-section=.text "$TMP/x87stack_intel.o" "$TMP/x87stack_intel.text"
+cmp "$TMP/x87stack_att.text" "$TMP/x87stack_intel.text"
+
 cat > "$TMP/order32_att.s" <<'SRC'
 .text
 .globl order32
