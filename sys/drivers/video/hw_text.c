@@ -8,6 +8,7 @@
 
 #include <arch/x86-common/io.h>
 #include <arch/x86-common/rtc.h>
+#include <arch/i386/intr.h>
 #include <drivers/console/console.h>
 #include <drivers/video/font.h>
 #include <drivers/video/hw_text.h>
@@ -1206,8 +1207,44 @@ static void cb_set_bracketed_paste(int on) {
     vt->bracketed_paste = on ? 1 : 0;
 }
 
+static void cb_respond(const char *buf, size_t len) {
+    vt_state_t *vt = current_vt_ctx;
+    struct tty *tty;
+    uint32_t flags;
+    size_t i;
+
+    if (!vt || !buf || len == 0) {
+        return;
+    }
+
+    tty = vt->tty;
+    if (!tty) {
+        return;
+    }
+
+    flags = intr_disable();
+    spinlock_acquire(&tty->lock);
+    for (i = 0; i < len; i++) {
+        tty_buffer_t *tb = &tty->raw_buf;
+        if (tb->count >= TTY_BUF_SIZE) {
+            break;
+        }
+        tb->data[tb->tail] = buf[i];
+        tb->tail = (tb->tail + 1) % TTY_BUF_SIZE;
+        tb->count++;
+    }
+    spinlock_release(&tty->lock);
+    intr_restore(flags);
+
+    if (i > 0) {
+        sched_wakeup(&tty->read_wait);
+        sched_wakeup(&tty->poll_wait);
+    }
+}
+
 static const struct ansi_callbacks ansi_cb = {
     .putc = cb_putc,
+    .respond = cb_respond,
     .set_color = cb_set_color,
     .clear_screen = cb_clear_screen,
     .erase_display = cb_erase_display,

@@ -25,6 +25,7 @@ struct ansi_ctx {
 /* Callbacks for the driver */
 struct ansi_callbacks {
     void (*putc)(char c);
+    void (*respond)(const char *buf, size_t len);
     void (*set_color)(uint8_t fg, uint8_t bg);
     void (*clear_screen)(void);
     void (*erase_display)(int mode);

@@ -16,6 +16,8 @@ static uint8_t mock_bg = 0;
 static uint16_t mock_attrs = 0;
 static char output_buffer[1024];
 static int output_pos = 0;
+static char response_buffer[1024];
+static int response_pos = 0;
 static int screen_cleared = 0;
 static int erase_display_mode = -1;
 static int erase_line_mode = -1;
@@ -28,6 +30,15 @@ static void mock_putc(char c) {
         output_buffer[output_pos++] = c;
         output_buffer[output_pos] = '\0';
     }
+}
+
+static void mock_respond(const char *buf, size_t len) {
+    size_t i;
+
+    for (i = 0; i < len && response_pos < 1024 - 1; i++) {
+        response_buffer[response_pos++] = buf[i];
+    }
+    response_buffer[response_pos] = '\0';
 }
 
 static void mock_set_color(uint8_t fg, uint8_t bg) {
@@ -86,6 +97,7 @@ static void mock_get_color(uint8_t *fg, uint8_t *bg) {
 /* Test helpers */
 static struct ansi_callbacks callbacks = {
     .putc = mock_putc,
+    .respond = mock_respond,
     .set_color = mock_set_color,
     .clear_screen = mock_clear_screen,
     .erase_display = mock_erase_display,
@@ -109,6 +121,8 @@ static void reset_mocks() {
     mock_attrs = 0;
     output_pos = 0;
     output_buffer[0] = '\0';
+    response_pos = 0;
+    response_buffer[0] = '\0';
     screen_cleared = 0;
     erase_display_mode = -1;
     erase_line_mode = -1;
@@ -216,6 +230,17 @@ static void test_clear_screen(void) {
 
     assert(screen_cleared == 1);
     assert(erase_display_mode == -1);
+}
+
+static void test_device_status_report_ok(void) {
+    struct ansi_ctx ctx;
+    ansi_init(&ctx);
+    reset_mocks();
+
+    const char *seq = "\x1b[5n";
+    while (*seq) ansi_process(&ctx, *seq++, &callbacks);
+
+    assert(strcmp(response_buffer, "\x1b[0n") == 0);
 }
 
 static void test_erase_display_default_mode(void) {
@@ -336,6 +361,7 @@ int main(void) {
     run_test("Bright Color Change", test_bright_color_change);
     run_test("SGR Attr Persistence", test_sgr_attrs_persist_across_sequences);
     run_test("Clear Screen", test_clear_screen);
+    run_test("Device Status Report", test_device_status_report_ok);
     run_test("Erase Display Default", test_erase_display_default_mode);
     run_test("Erase Line Modes", test_erase_line_modes);
     run_test("Set Scroll Region", test_set_scroll_region);

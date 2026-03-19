@@ -12,6 +12,15 @@
 
 #include <kern/ansi_handler.h>
 
+static void ansi_respond(const struct ansi_callbacks *cb,
+                         const char *buf,
+                         size_t len) {
+    if (!cb || !cb->respond || !buf || len == 0) {
+        return;
+    }
+    cb->respond(buf, len);
+}
+
 void ansi_init(struct ansi_ctx *ctx) {
     if (!ctx) return;
     ctx->state = ANSI_NORMAL;
@@ -333,7 +342,10 @@ static void handle_csi(struct ansi_ctx *ctx, char c,
         break;
 
     case 'n': /* DSR - Device Status Report */
-        /* TODO: Respond with cursor position report */
+        n = (ctx->param_count > 0) ? ctx->params[0] : 0;
+        if (n == 5) {
+            ansi_respond(cb, "\x1b[0n", 4);
+        }
         break;
 
     case 'c': /* DA - Device Attributes */

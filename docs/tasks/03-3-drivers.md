@@ -1147,7 +1147,7 @@
                     - [ ] CHT/CBT (cursor horizontal tab forward/back). (REQ: REQ-03-0846)
                     - [ ] Default tab stops (every 8 columns). (REQ: REQ-03-0847)
                 - [ ] **Reports:** (REQ: REQ-03-0848)
-                    - [ ] DSR (device status report). (REQ: REQ-03-0849)
+                    - [x] DSR (device status report). <!-- sys/include/kern/ansi_handler.h, sys/drivers/console/ansi_handler.c, sys/drivers/video/hw_text.c, tests/sys/host_test_ansi.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0849)
                     - [ ] CPR (cursor position report). (REQ: REQ-03-0850)
                     - [ ] DA (device attributes). (REQ: REQ-03-0851)
                     - [ ] DECID (terminal ID). (REQ: REQ-03-0852)
