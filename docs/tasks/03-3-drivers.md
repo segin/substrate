@@ -1004,7 +1004,7 @@
             - [x] **TTY Binding:** (REQ: REQ-03-0703, REQ-03-0853, REQ-03-0879)
                 - [x] Register as `tty_driver` for `/dev/tty[1-N]`. (REQ: REQ-03-0704, REQ-03-0854)
                 - [x] Implement `tty_driver->write()` callback. (REQ: REQ-03-0705)
-                - [ ] Implement `tty_driver->ioctl()` for VGA-specific controls. (REQ: REQ-03-0706)
+                - [x] Implement `tty_driver->ioctl()` for VGA-specific controls. <!-- sys/include/sys/vtio.h, sys/drivers/video/hw_text.c, tests/sys/host_test_hw_text.c --> (REQ: REQ-03-0706)
         - [x] **Keyboard Input (PS/2 to TTY):** <!-- sys/drivers/input/keyboard.c, tests/sys/host_test_keyboard.c, docs/specs/driver_keyboard.md, usr.man/man4/keyboard.4 --> (REQ: REQ-03-0707)
             - [x] Fix PS/2 driver build errors (constant mismatches in `test_ps2.c`). (REQ: REQ-03-0708)
             - [x] **Input Path:** <!-- sys/drivers/input/keyboard.c, tests/sys/host_test_keyboard.c, docs/specs/driver_keyboard.md, usr.man/man4/keyboard.4 --> (REQ: REQ-03-0709)

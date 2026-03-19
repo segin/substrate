@@ -65,6 +65,12 @@ arrives one character at a time or in larger buffers.
 .Pp
 Horizontal tab stops default to 8 columns and are tracked per virtual terminal
 so that console-local formatting state is preserved across VT switches.
+.Pp
+The VGA text backend also accepts backend-specific
+.Xr ioctl 2
+requests for per-console tab width and cursor visibility through the
+.Xr tty 4
+device.
 .Sh FILES
 .Bl -tag -width "/sys/drivers/console/vt.c"
 .It Pa /sys/drivers/console/vt.c

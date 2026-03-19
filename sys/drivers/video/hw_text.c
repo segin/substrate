@@ -21,6 +21,7 @@
 #include <sys/kthread.h>
 #include <sys/tty.h>
 #include <sys/vt.h>
+#include <sys/vtio.h>
 
 int hw_text_active = 0;
 static uint16_t *vga_buffer = (uint16_t *)0xC00B8000;
@@ -1150,10 +1151,42 @@ static int vt_tty_write_room(struct tty *tty) {
 }
 
 static int vt_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
-    (void)tty;
-    (void)cmd;
-    (void)arg;
-    return -1;
+    vt_state_t *vt;
+    int *value;
+
+    if (!tty || !arg) {
+        return -1;
+    }
+
+    vt = (vt_state_t *)tty->driver_data;
+    if (!vt) {
+        return -1;
+    }
+
+    value = (int *)(uintptr_t)arg;
+
+    switch (cmd) {
+    case VTIOCGTABW:
+        *value = (int)(vt->tab_width ? vt->tab_width : 8);
+        return 0;
+    case VTIOCSTABW:
+        if (*value < 1 || *value > 32) {
+            return -1;
+        }
+        vt->tab_width = (uint8_t)*value;
+        return 0;
+    case VTIOCGCURSOR:
+        *value = vt->cursor_visible ? 1 : 0;
+        return 0;
+    case VTIOCSCURSOR:
+        vt->cursor_visible = *value ? 1 : 0;
+        if (vt->id == vt_get_active()) {
+            hw_text_update_cursor_locked(vt);
+        }
+        return 0;
+    default:
+        return -1;
+    }
 }
 
 static struct tty_driver vt_driver = {

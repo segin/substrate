@@ -12,6 +12,7 @@
 #include <sys/kthread.h>
 #include <sys/tty.h>
 #include <sys/vt.h>
+#include <sys/vtio.h>
 
 const uint8_t font_8x16[256 * 16] = {0};
 const uint8_t font_8x8[256 * 8] = {0};
@@ -230,10 +231,40 @@ static void test_tab_width_is_configurable_per_vt(void) {
     assert((mock_vt.buffer[4] & 0x00ffU) == 'X');
 }
 
+static void test_vt_tty_ioctl_exposes_vga_controls(void) {
+    struct tty tty;
+    int value;
+
+    reset_state();
+    memset(&tty, 0, sizeof(tty));
+    tty.driver_data = &mock_vt;
+
+    value = 0;
+    assert(vt_tty_ioctl(&tty, VTIOCGTABW, (unsigned long)&value) == 0);
+    assert(value == 8);
+
+    value = 6;
+    assert(vt_tty_ioctl(&tty, VTIOCSTABW, (unsigned long)&value) == 0);
+    value = 0;
+    assert(vt_tty_ioctl(&tty, VTIOCGTABW, (unsigned long)&value) == 0);
+    assert(value == 6);
+
+    value = 0;
+    assert(vt_tty_ioctl(&tty, VTIOCGCURSOR, (unsigned long)&value) == 0);
+    assert(value == 1);
+
+    value = 0;
+    assert(vt_tty_ioctl(&tty, VTIOCSCURSOR, (unsigned long)&value) == 0);
+    value = 1;
+    assert(vt_tty_ioctl(&tty, VTIOCGCURSOR, (unsigned long)&value) == 0);
+    assert(value == 0);
+}
+
 int main(void) {
     test_hw_text_bulk_write_updates_buffer_and_cursor();
     test_console_backend_shim_uses_bulk_write_path();
     test_tab_width_is_configurable_per_vt();
+    test_vt_tty_ioctl_exposes_vga_controls();
     puts("host_test_hw_text: PASS");
     return 0;
 }
