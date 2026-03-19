@@ -1128,7 +1128,7 @@
                     - [x] DECSTBM (set top/bottom margins). (REQ: REQ-03-0827)
                     - [x] SU/SD (scroll up/down). (REQ: REQ-03-0828)
                     - [x] IND/RI (index/reverse index). (REQ: REQ-03-0829)
-                    - [ ] Smooth scroll support (optional). (REQ: REQ-03-0830)
+                    - [x] Smooth scroll support (optional). <!-- sys/drivers/video/fb_console.c, tests/sys/host_test_fb_console.c, docs/specs/driver_fb_console.md --> (REQ: REQ-03-0830)
                 - [x] **Modes:** (REQ: REQ-03-0831)
                     - [x] DECCKM (cursor key mode: application/normal). (REQ: REQ-03-0832)
                     - [x] DECAWM (auto-wrap mode). (REQ: REQ-03-0833)

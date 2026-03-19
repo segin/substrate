@@ -72,6 +72,12 @@ native storage format. The current implementation covers:
 ## Scrolling
 Performed via `fb_copyarea` (overlap-safe blit) when the cursor reaches the bottom of the screen. The bottom line is cleared with `fb_fillrect`.
 
+When the active framebuffer exposes a hardware viewport (`fb.scroll`) and a
+double-height virtual surface, full-screen upward text scrolls animate one
+scanline at a time across the next text row instead of jumping directly by a
+full cell height. Partial-region scrolls and non-viewport backends keep the
+older immediate redraw path.
+
 ## Dirty Tracking
 The framebuffer console maintains a single accumulated dirty rectangle over the
 current frame. Character draws, clears, and scroll operations expand that

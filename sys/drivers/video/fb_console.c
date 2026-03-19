@@ -251,6 +251,53 @@ static void fb_console_fill_row_locked(vt_state_t *vt, int row, char c, uint8_t 
     }
 }
 
+static void fb_console_clear_scanlines(int start_y, int line_count, uint32_t color) {
+    int y;
+    int x;
+
+    if (start_y < 0) {
+        line_count += start_y;
+        start_y = 0;
+    }
+    if (line_count <= 0 || start_y >= (int)fb.virt_height) {
+        return;
+    }
+    if (start_y + line_count > (int)fb.virt_height) {
+        line_count = (int)fb.virt_height - start_y;
+    }
+
+    for (y = start_y; y < start_y + line_count; y++) {
+        for (x = 0; x < (int)fb.width; x++) {
+            fb_putpixel(x, y, color);
+        }
+    }
+}
+
+static int fb_console_smooth_scroll_fullscreen(uint32_t clear_color) {
+    int old_offset;
+    int target_offset;
+    int step;
+
+    if (!fb.scroll || fb.virt_height < fb.height * 2U) {
+        return 0;
+    }
+
+    old_offset = view_y_offset;
+    target_offset = old_offset + FB_FONT_HEIGHT;
+    if (target_offset + (int)fb.height > (int)fb.virt_height) {
+        return 0;
+    }
+
+    fb_console_clear_scanlines(target_offset + (int)fb.height - FB_FONT_HEIGHT,
+                               FB_FONT_HEIGHT, clear_color);
+    for (step = 1; step <= FB_FONT_HEIGHT; step++) {
+        fb.scroll(old_offset + step);
+    }
+    view_y_offset = target_offset;
+    fb_console_mark_dirty(0, view_y_offset, (int)fb.width, (int)fb.height);
+    return 1;
+}
+
 static void fb_console_erase_line_segment_locked(vt_state_t *vt,
                                                  int row,
                                                  int start_col,
@@ -356,6 +403,8 @@ static void fb_console_erase_line_locked(vt_state_t *vt, int mode) {
 static void fb_console_scroll_region_up_locked(vt_state_t *vt, int top, int bottom, int n) {
     int width;
     int row;
+    uint8_t effective;
+    uint32_t clear_color;
 
     if (!vt || top < 0 || bottom >= vt_get_visible_height() || top > bottom || n <= 0) {
         return;
@@ -378,7 +427,13 @@ static void fb_console_scroll_region_up_locked(vt_state_t *vt, int top, int bott
                 (uint16_t)' ' | (uint16_t)fb_console_effective_color(vt, vt->color) << 8;
         }
     }
+    effective = fb_console_effective_color(vt, vt->color);
+    clear_color = fb_console_palette[(effective >> 4) & 0x0FU];
     if (vt->id == vt_get_active()) {
+        if (top == 0 && bottom == vt_get_visible_height() - 1 && n == 1 &&
+            fb_console_smooth_scroll_fullscreen(clear_color)) {
+            return;
+        }
         for (row = top; row <= bottom; row++) {
             fb_console_sync_buffer_row_locked(vt, row);
         }
@@ -1467,7 +1522,9 @@ void fb_putc(char c, uint32_t fg, uint32_t bg) {
 
     /* Handle scroll */
     if (cursor_y + FB_FONT_HEIGHT > (int)fb.height) {
-        if (fb.scroll && fb.virt_height >= fb.height * 2) {
+        if (fb_console_smooth_scroll_fullscreen((bg != FB_COLOR_TRANSPARENT) ? bg : FB_COLOR_BLACK)) {
+            cursor_y -= FB_FONT_HEIGHT;
+        } else if (fb.scroll && fb.virt_height >= fb.height * 2) {
             /* Hardware Scrolling Strategy */
 
             /* Advance view offset */
@@ -1626,7 +1683,9 @@ void fb_putc_attr(char c, uint32_t fg, uint32_t bg, uint8_t attr) {
 
     /* Handle scroll — reuse the same logic from fb_putc */
     if (cursor_y + FB_FONT_HEIGHT > (int)fb.height) {
-        if (fb.scroll && fb.virt_height >= fb.height * 2) {
+        if (fb_console_smooth_scroll_fullscreen((bg != FB_COLOR_TRANSPARENT) ? bg : FB_COLOR_BLACK)) {
+            cursor_y -= FB_FONT_HEIGHT;
+        } else if (fb.scroll && fb.virt_height >= fb.height * 2) {
             view_y_offset += FB_FONT_HEIGHT;
             if (view_y_offset + (int)fb.height > (int)fb.virt_height) {
                 void *dst = fb.addr;

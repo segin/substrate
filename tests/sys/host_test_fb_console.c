@@ -13,9 +13,13 @@
 const uint8_t font_8x16[256 * 16] = {0};
 const uint8_t font_8x8[256 * 8] = {0};
 
+#define TEST_FB_WIDTH 640
+#define TEST_FB_HEIGHT 480
+#define TEST_FB_VIRT_HEIGHT (TEST_FB_HEIGHT * 2)
+
 fb_info_t fb;
 int fb_active = 1;
-static uint32_t fb_mem[640 * 480];
+static uint32_t fb_mem[TEST_FB_WIDTH * TEST_FB_VIRT_HEIGHT];
 
 static console_backend_t *registered_backend;
 static int viewport_x;
@@ -25,6 +29,8 @@ static int flush_x;
 static int flush_y;
 static int flush_w;
 static int flush_h;
+static int scroll_calls;
+static int last_scroll_offset;
 static vt_state_t test_vts[VT_MAX];
 static struct tty test_ttys[VT_MAX];
 static int tty_alloc_count;
@@ -33,7 +39,7 @@ static char tty_registered_names[VT_MAX][16];
 static struct tty *console_tty;
 
 void fb_putpixel(int x, int y, uint32_t color) {
-    fb_mem[(size_t)y * 640U + (size_t)x] = color;
+    fb_mem[(size_t)y * TEST_FB_WIDTH + (size_t)x] = color;
 }
 
 void fb_clear(uint32_t color) {
@@ -48,6 +54,11 @@ static void mock_flush(int x, int y, int w, int h) {
     flush_y = y;
     flush_w = w;
     flush_h = h;
+}
+
+static void mock_scroll(int y_offset) {
+    scroll_calls++;
+    last_scroll_offset = y_offset;
 }
 
 int video_set_viewport(int x, int y) {
@@ -136,11 +147,11 @@ void sched_wakeup(void *chan) {
 
 static void reset_state(void) {
     memset(&fb, 0, sizeof(fb));
-    fb.width = 640;
-    fb.height = 480;
-    fb.virt_width = 640;
-    fb.virt_height = 480;
-    fb.pitch = 640 * 4;
+    fb.width = TEST_FB_WIDTH;
+    fb.height = TEST_FB_HEIGHT;
+    fb.virt_width = TEST_FB_WIDTH;
+    fb.virt_height = TEST_FB_HEIGHT;
+    fb.pitch = TEST_FB_WIDTH * 4;
     fb.bpp = 32;
     fb.addr = fb_mem;
     fb_active = 1;
@@ -152,6 +163,8 @@ static void reset_state(void) {
     flush_y = 0;
     flush_w = 0;
     flush_h = 0;
+    scroll_calls = 0;
+    last_scroll_offset = -1;
     memset(test_vts, 0, sizeof(test_vts));
     memset(test_ttys, 0, sizeof(test_ttys));
     tty_alloc_count = 0;
@@ -373,6 +386,20 @@ static void test_software_cursor_blinks_on_tick(void) {
     assert(fb_mem[14U * 640U] == 0xFFFFFFFFU);
 }
 
+static void test_fullscreen_scroll_uses_smooth_viewport_steps(void) {
+    reset_state();
+
+    fb.scroll = mock_scroll;
+    fb.virt_height = fb.height * 2U;
+    test_vts[0].color = 0x1F;
+
+    fb_console_scroll_region_up_locked(&test_vts[0], 0, 23, 1);
+
+    assert(scroll_calls == FB_FONT_HEIGHT);
+    assert(last_scroll_offset == FB_FONT_HEIGHT);
+    assert(view_y_offset == FB_FONT_HEIGHT);
+}
+
 int main(void) {
     test_init_registers_framebuffer_vt_ttys();
     test_init_preserves_existing_vt_ttys();
@@ -384,6 +411,7 @@ int main(void) {
     test_tick_batches_and_flushes_dirty_rectangle();
     test_software_cursor_preserves_background();
     test_software_cursor_blinks_on_tick();
+    test_fullscreen_scroll_uses_smooth_viewport_steps();
     puts("host_test_fb_console: PASS");
     return 0;
 }
