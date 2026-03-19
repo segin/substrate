@@ -207,6 +207,36 @@ objcopy -O binary --only-section=.text "$TMP/x87stack_att.o" "$TMP/x87stack_att.
 objcopy -O binary --only-section=.text "$TMP/x87stack_intel.o" "$TMP/x87stack_intel.text"
 cmp "$TMP/x87stack_att.text" "$TMP/x87stack_intel.text"
 
+cat > "$TMP/mmxbridge_att.s" <<'SRC'
+.text
+.globl mmxbridge32
+.type mmxbridge32,@function
+mmxbridge32:
+    movdq2q %xmm0, %mm1
+    movq2dq %mm0, %xmm1
+    ret
+.size mmxbridge32, .-mmxbridge32
+SRC
+
+cat > "$TMP/mmxbridge_intel.s" <<'SRC'
+.intel_syntax noprefix
+.text
+.globl mmxbridge32
+.type mmxbridge32,@function
+mmxbridge32:
+    movdq2q mm1, xmm0
+    movq2dq xmm1, mm0
+    ret
+.size mmxbridge32, .-mmxbridge32
+.att_syntax prefix
+SRC
+
+"$AS" -32 -o "$TMP/mmxbridge_att.o" "$TMP/mmxbridge_att.s"
+"$AS" -32 -o "$TMP/mmxbridge_intel.o" "$TMP/mmxbridge_intel.s"
+objcopy -O binary --only-section=.text "$TMP/mmxbridge_att.o" "$TMP/mmxbridge_att.text"
+objcopy -O binary --only-section=.text "$TMP/mmxbridge_intel.o" "$TMP/mmxbridge_intel.text"
+cmp "$TMP/mmxbridge_att.text" "$TMP/mmxbridge_intel.text"
+
 cat > "$TMP/order32_att.s" <<'SRC'
 .text
 .globl order32

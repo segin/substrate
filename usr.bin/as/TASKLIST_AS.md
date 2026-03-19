@@ -148,7 +148,7 @@ Validation gate for Section 1:
 ### 4.2 Intel Semantic Parity
 - [x] Add targeted Intel tests for x87 stack forms.
 - [ ] Add targeted Intel tests for AVX/AVX2/AVX-512 forms, including mask and broadcast syntax.
-- [ ] Add targeted Intel tests for MMX/XMM bridge instructions.
+- [x] Add targeted Intel tests for MMX/XMM bridge instructions.
 
 ---
 
