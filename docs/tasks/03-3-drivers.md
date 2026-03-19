@@ -1163,7 +1163,7 @@
                 - [x] Line control (data bits, parity, stop bits). (REQ: REQ-03-0862)
                 - [x] FIFO control (16550A FIFO enable, trigger level). (REQ: REQ-03-0863)
                 - [x] Modem control signals (DTR, RTS). (REQ: REQ-03-0864)
-                - [ ] Modem status signals (CTS, DSR, DCD, RI). (REQ: REQ-03-0865)
+                - [x] Modem status signals (CTS, DSR, DCD, RI). <!-- sys/drivers/console/uart/uart.c, sys/include/sys/termios.h, tests/sys/host_test_uart.c --> (REQ: REQ-03-0865)
                 - [x] Interrupt-driven I/O (IRQ handler). (REQ: REQ-03-0866)
                 - [x] Polling mode fallback (for early boot). (REQ: REQ-03-0867)
             - [x] **Console Output:** (REQ: REQ-03-0868)

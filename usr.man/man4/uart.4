@@ -29,6 +29,17 @@ selection, the kernel falls back to a direct UART scratch-register probe so
 and
 .B serial_debug
 can fail cleanly when the selected port is absent.
+.PP
+The driver exposes modem-control and modem-status lines through
+.BR ioctl (2)
+requests such as
+.BR TIOCMGET ,
+including
+.BR CTS ,
+.BR DSR ,
+.BR DCD ,
+and
+.BR RI .
 .SH FILES
 .TP
 .B /dev/comm/serial0
