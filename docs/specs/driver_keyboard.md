@@ -34,6 +34,8 @@ input-event paths.
   - extended right Ctrl / right Alt make and break sequences
   - ANSI escape generation for function keys and navigation keys
   - `Alt+F1..F12` VT switching across the full 12-console range
+  - `Ctrl+Alt+Del` reboot hook through the SysRq path
+  - `Alt+SysRq+<key>` magic SysRq dispatch
   - `Ctrl+F9` kernel process dump hook
 
 ## Output Paths

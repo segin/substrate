@@ -1017,7 +1017,7 @@
                 - [x] Arrow keys to ANSI escape sequences. (REQ: REQ-03-0716)
                 - [x] Insert, Delete, Home, End, PgUp, PgDn sequences. (REQ: REQ-03-0717)
                 - [x] Numeric keypad handling (NumLock state). (REQ: REQ-03-0718)
-            - [ ] **Console Switching:** (REQ: REQ-03-0719)
+            - [x] **Console Switching:** <!-- sys/drivers/input/keyboard.c, sys/kern/sysrq.c, tests/sys/host_test_keyboard.c --> (REQ: REQ-03-0719)
                 - [x] Alt+F1..F12 for virtual console switch. (REQ: REQ-03-0720)
                 - [x] Ctrl+Alt+Del for reboot/shutdown hook. (REQ: REQ-03-0721)
                 - [x] SysRq key handling (magic SysRq sequences). (REQ: REQ-03-0722)
