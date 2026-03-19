@@ -63,7 +63,7 @@ check_obj() {
     readelf -S "$obj" | grep -q "\\.orgsec"
     readelf -S "$obj" | grep -q "\\.alignsec"
 
-    readelf --wide -s "$obj" | awk '$8 == "entry" && $4 == "FUNC" { ok = 1 } END { exit ok ? 0 : 1 }'
+    readelf --wide -s "$obj" | awk '$8 == "entry" && $4 == "FUNC" && $3 != "0" && $3 != "00000000" && $3 != "0000000000000000" { ok = 1 } END { exit ok ? 0 : 1 }'
 
     objdump -s -j .alpha "$obj" | grep -Eiq "0103"
     objdump -s -j .beta "$obj" | grep -Eiq "02"

@@ -9825,7 +9825,7 @@ static int directive_assigns_symbol(const as_directive_t *d, const char *sym_nam
     if (d == NULL || sym_name == NULL || d->name == NULL || d->arg_count < 1) {
         return 0;
     }
-    if (strcmp(d->name, ".set") != 0 && strcmp(d->name, ".equ") != 0) {
+    if (strcmp(d->name, ".set") != 0 && strcmp(d->name, ".equ") != 0 && strcmp(d->name, ".size") != 0) {
         return 0;
     }
     lhs = trim_copy(d->args[0]);
@@ -10060,8 +10060,48 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
     for (i = 0; i < symtab->count; ++i) {
         const as_symbol_t *s = &symtab->items[i];
         elf_symbol_t *esym;
+        unsigned long long sym_size = s->size;
 
-        esym = elf_add_symbol(ctx->obj, s->name, 0, s->size, map_bind(s->bind), map_type(s->type));
+        if (s->size_target_symbol != NULL) {
+            const sym_loc_t *target_loc = find_sym_loc(locs, &loc_index, s->size_target_symbol);
+            elf_section_t *base_sec = NULL;
+            uint64_t base_off = 0;
+
+            if (target_loc == NULL || target_loc->sec == NULL) {
+                set_err(ctx, "cannot resolve size target for %s", s->name);
+                free_sym_locs(locs, loc_count);
+                free_name_index(&loc_index);
+                return -1;
+            }
+            if (s->size_base_from_dot) {
+                if (find_set_dot_location(ctx, s->name, s->size_anchor_file, s->size_anchor_line,
+                                          &base_sec, &base_off) != 0 || base_sec == NULL) {
+                    set_err(ctx, "cannot resolve symbolic size for %s", s->name);
+                    free_sym_locs(locs, loc_count);
+                    free_name_index(&loc_index);
+                    return -1;
+                }
+            } else {
+                const sym_loc_t *base_loc = find_sym_loc(locs, &loc_index, s->size_base_symbol);
+                if (base_loc == NULL || base_loc->sec == NULL) {
+                    set_err(ctx, "cannot resolve size base for %s", s->name);
+                    free_sym_locs(locs, loc_count);
+                    free_name_index(&loc_index);
+                    return -1;
+                }
+                base_sec = base_loc->sec;
+                base_off = base_loc->off;
+            }
+            if (base_sec != target_loc->sec || base_off < target_loc->off) {
+                set_err(ctx, "invalid symbolic size for %s", s->name);
+                free_sym_locs(locs, loc_count);
+                free_name_index(&loc_index);
+                return -1;
+            }
+            sym_size = (unsigned long long)(base_off - target_loc->off);
+        }
+
+        esym = elf_add_symbol(ctx->obj, s->name, 0, sym_size, map_bind(s->bind), map_type(s->type));
         if (esym == NULL) {
             free_sym_locs(locs, loc_count);
             free_name_index(&loc_index);
@@ -11425,12 +11465,16 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
     }
 
     if (emit_data_program(&ctx, data) != 0) {
-        set_err(&ctx, "failed to emit data program");
+        if (ctx.errbuf == NULL || ctx.errbuf[0] == '\0') {
+            set_err(&ctx, "failed to emit data program");
+        }
         goto fail;
     }
 
     if (emit_symbols(&ctx, symtab) != 0) {
-        set_err(&ctx, "failed to emit symbols");
+        if (ctx.errbuf == NULL || ctx.errbuf[0] == '\0') {
+            set_err(&ctx, "failed to emit symbols");
+        }
         goto fail;
     }
 
