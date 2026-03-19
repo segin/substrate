@@ -996,7 +996,7 @@
             - [ ] **Scrolling:** (REQ: REQ-03-0695, REQ-03-0826)
                 - [x] Software scroll (memmove video buffer). (REQ: REQ-03-0696)
                 - [ ] Hardware scroll (CRTC start address register). (REQ: REQ-03-0697)
-                - [ ] Scroll region support (VT102 DECSTBM). (REQ: REQ-03-0698)
+                - [x] Scroll region support (VT102 DECSTBM). <!-- sys/drivers/console/ansi_handler.c, sys/drivers/video/hw_text.c, tests/sys/host_test_ansi.c --> (REQ: REQ-03-0698)
             - [ ] **Attributes:** (REQ: REQ-03-0699)
                 - [ ] 16-color foreground/background palette. (REQ: REQ-03-0700)
                 - [ ] Blink/bright background toggle (attribute controller). (REQ: REQ-03-0701)

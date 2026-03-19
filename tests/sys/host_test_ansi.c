@@ -18,6 +18,8 @@ static int output_pos = 0;
 static int screen_cleared = 0;
 static int erase_display_mode = -1;
 static int erase_line_mode = -1;
+static int scroll_region_top = -1;
+static int scroll_region_bottom = -1;
 
 /* Callback implementations */
 static void mock_putc(char c) {
@@ -42,6 +44,11 @@ static void mock_erase_display(int mode) {
 
 static void mock_erase_line(int mode) {
     erase_line_mode = mode;
+}
+
+static void mock_set_scroll_region(int top, int bottom) {
+    scroll_region_top = top;
+    scroll_region_bottom = bottom;
 }
 
 static void mock_move_cursor(int row, int col) {
@@ -77,7 +84,8 @@ static struct ansi_callbacks callbacks = {
     .move_cursor = mock_move_cursor,
     .get_cursor = mock_get_cursor,
     .get_dimensions = mock_get_dimensions,
-    .get_color = mock_get_color
+    .get_color = mock_get_color,
+    .set_scroll_region = mock_set_scroll_region
 };
 
 static void reset_mocks() {
@@ -92,6 +100,8 @@ static void reset_mocks() {
     screen_cleared = 0;
     erase_display_mode = -1;
     erase_line_mode = -1;
+    scroll_region_top = -1;
+    scroll_region_bottom = -1;
 }
 
 static void run_test(const char *name, void (*test_func)(void)) {
@@ -205,6 +215,26 @@ static void test_erase_line_modes(void) {
     assert(erase_line_mode == 2);
 }
 
+static void test_set_scroll_region(void) {
+    struct ansi_ctx ctx;
+    const char *seq;
+
+    ansi_init(&ctx);
+    reset_mocks();
+    mock_cursor_row = 7;
+    mock_cursor_col = 9;
+
+    seq = "\x1b[2;20r";
+    while (*seq) {
+        ansi_process(&ctx, *seq++, &callbacks);
+    }
+
+    assert(scroll_region_top == 1);
+    assert(scroll_region_bottom == 19);
+    assert(mock_cursor_row == 0);
+    assert(mock_cursor_col == 0);
+}
+
 static void test_relative_moves(void) {
     struct ansi_ctx ctx;
     ansi_init(&ctx);
@@ -263,6 +293,7 @@ int main(void) {
     run_test("Clear Screen", test_clear_screen);
     run_test("Erase Display Default", test_erase_display_default_mode);
     run_test("Erase Line Modes", test_erase_line_modes);
+    run_test("Set Scroll Region", test_set_scroll_region);
     run_test("Relative Moves", test_relative_moves);
     run_test("Partial Sequence", test_partial_sequence);
 
