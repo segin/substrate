@@ -4,7 +4,7 @@ CC = gcc
 ifdef NATIVE_BUILD
 CFLAGS := -Wall -g -I.
 else
-CFLAGS := -m32 -Wall -fno-builtin -fno-stack-protector -nostdinc -I../../include -I../../sys/include -I../../sys
+CFLAGS += -I../../include -I../../sys/include -I../../sys
 endif
 
 all: histedit.h libedit.a
