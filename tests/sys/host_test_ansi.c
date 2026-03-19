@@ -162,6 +162,21 @@ static void test_color_change(void) {
     assert(mock_bg == 0);
 }
 
+static void test_bright_color_change(void) {
+    struct ansi_ctx ctx;
+    ansi_init(&ctx);
+    reset_mocks();
+
+    /* ESC [ 97 ; 104 m -> bright white fg, bright blue bg */
+    const char *seq = "\x1b[97;104m";
+    while (*seq) {
+        ansi_process(&ctx, *seq++, &callbacks);
+    }
+
+    assert(mock_fg == 15);
+    assert(mock_bg == 12);
+}
+
 static void test_clear_screen(void) {
     struct ansi_ctx ctx;
     ansi_init(&ctx);
@@ -290,6 +305,7 @@ int main(void) {
     run_test("Simple Char", test_simple_char);
     run_test("Cursor Movement", test_cursor_movement);
     run_test("Color Change", test_color_change);
+    run_test("Bright Color Change", test_bright_color_change);
     run_test("Clear Screen", test_clear_screen);
     run_test("Erase Display Default", test_erase_display_default_mode);
     run_test("Erase Line Modes", test_erase_line_modes);

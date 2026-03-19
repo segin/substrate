@@ -998,7 +998,7 @@
                 - [ ] Hardware scroll (CRTC start address register). (REQ: REQ-03-0697)
                 - [x] Scroll region support (VT102 DECSTBM). <!-- sys/drivers/console/ansi_handler.c, sys/drivers/video/hw_text.c, tests/sys/host_test_ansi.c --> (REQ: REQ-03-0698)
             - [ ] **Attributes:** (REQ: REQ-03-0699)
-                - [ ] 16-color foreground/background palette. (REQ: REQ-03-0700)
+                - [x] 16-color foreground/background palette. <!-- sys/drivers/console/ansi_handler.c, sys/drivers/video/hw_text.c, tests/sys/host_test_ansi.c --> (REQ: REQ-03-0700)
                 - [ ] Blink/bright background toggle (attribute controller). (REQ: REQ-03-0701)
                 - [ ] Reverse video, bold, underline emulation. (REQ: REQ-03-0702)
             - [x] **TTY Binding:** (REQ: REQ-03-0703, REQ-03-0853, REQ-03-0879)
