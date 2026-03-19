@@ -155,10 +155,10 @@ Validation gate for Section 1:
 ## 5. Standalone Assembler Behavior
 
 ### 5.1 No Backend Compiler Fallback
-- [ ] Audit `usr.bin/as` for any remaining assumptions that external compiler behavior can “fix up” malformed state.
-- [ ] Ensure `.s` is treated as preprocessed input.
-- [ ] Ensure `.S` preprocessing path goes through `cpp`, not `cc`.
-- [ ] Add regression tests to prevent `as -> cc -> as` recursion.
+- [x] Audit `usr.bin/as` for any remaining assumptions that external compiler behavior can “fix up” malformed state.
+- [x] Ensure `.s` is treated as preprocessed input.
+- [x] Ensure `.S` preprocessing path goes through `cpp`, not `cc`.
+- [x] Add regression tests to prevent `as -> cc -> as` recursion.
 
 ### 5.2 Output Modes
 - [x] Implement and validate `-O binary`.
