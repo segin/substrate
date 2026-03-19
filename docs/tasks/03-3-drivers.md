@@ -979,7 +979,7 @@
         - [x] **Emulation:** VT102 state machine (escape codes). <!-- sys/drivers/console/vt.c, sys/drivers/console/ansi_handler.c, sys/drivers/video/hw_text.c, tests/sys/host_test_vt.c --> (REQ: REQ-03-0678)
     - [ ] **Backend Drivers:** (REQ: REQ-03-0679)
         - [ ] **VGA Text Mode Console:** (REQ: REQ-03-0680)
-            - [ ] **Initialization:** (REQ: REQ-03-0681, REQ-03-0905)
+            - [x] **Initialization:** <!-- sys/drivers/video/hw_text.c, sys/drivers/video/vga.h, sys/arch/i386/zimage_header.S --> (REQ: REQ-03-0681, REQ-03-0905)
                 - [x] Detect VGA presence (BIOS/PCI enumeration). (REQ: REQ-03-0682)
                 - [x] Set 80x25 or 80x50 text mode. (REQ: REQ-03-0683)
                 - [x] Map video memory (0xB8000) into kernel address space. (REQ: REQ-03-0684)
