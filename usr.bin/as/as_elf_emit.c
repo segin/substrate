@@ -1148,6 +1148,7 @@ static int lookup_i386_xmm_unprefixed_opcode(const char *mnemonic, unsigned char
         const char *mnemonic;
         unsigned char opcode2;
     } map[] = {
+        {"unpcklps", 0x14}, {"unpckhps", 0x15},
         {"sqrtps", 0x51}, {"rsqrtps", 0x52}, {"rcpps", 0x53}, {"andps", 0x54},
         {"andnps", 0x55}, {"orps", 0x56},    {"xorps", 0x57}, {"addps", 0x58},
         {"mulps", 0x59},  {"cvtps2pd", 0x5a},{"cvtdq2ps", 0x5b},{"subps", 0x5c},
@@ -1173,6 +1174,7 @@ static int lookup_i386_xmm_66_opcode(const char *mnemonic, unsigned char *opcode
         const char *mnemonic;
         unsigned char opcode2;
     } map[] = {
+        {"unpcklpd", 0x14}, {"unpckhpd", 0x15},
         {"sqrtpd", 0x51}, {"andpd", 0x54},   {"andnpd", 0x55}, {"orpd", 0x56},
         {"xorpd", 0x57},  {"addpd", 0x58},   {"mulpd", 0x59},  {"cvtpd2ps", 0x5a},
         {"cvtps2dq", 0x5b},{"subpd", 0x5c},  {"minpd", 0x5d},  {"divpd", 0x5e},
@@ -1927,6 +1929,28 @@ static int lookup_i386_pd2pi_opcode(const char *mnemonic, unsigned char *opcode2
     return -1;
 }
 
+static int lookup_i386_ps2pi_opcode(const char *mnemonic, unsigned char *opcode2) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char opcode2;
+    } map[] = {
+        {"cvttps2pi", 0x2c},
+        {"cvtps2pi", 0x2d},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || opcode2 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *opcode2 = map[i].opcode2;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static int lookup_i386_comisd_opcode(const char *mnemonic, unsigned char *opcode2) {
     static const struct {
         const char *mnemonic;
@@ -1943,6 +1967,34 @@ static int lookup_i386_comisd_opcode(const char *mnemonic, unsigned char *opcode
     for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
         if (strcmp(mnemonic, map[i].mnemonic) == 0) {
             *opcode2 = map[i].opcode2;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_prefetch_regf(const char *mnemonic, unsigned char *opcode2, unsigned char *regf) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char opcode2;
+        unsigned char regf;
+    } map[] = {
+        {"prefetch", 0x0d, 0u},
+        {"prefetchwt1", 0x0d, 2u},
+        {"prefetchnta", 0x18, 0u},
+        {"prefetcht0", 0x18, 1u},
+        {"prefetcht1", 0x18, 2u},
+        {"prefetcht2", 0x18, 3u},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || opcode2 == NULL || regf == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *opcode2 = map[i].opcode2;
+            *regf = map[i].regf;
             return 0;
         }
     }
@@ -5627,12 +5679,6 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_0f_rm(0x66, 0x1d, 0u, a, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "unpcklpd") == 0) {
-        return emit_i386_prefixed_xmm_srcdst_rm(0x66, 0x14, src, dst, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "unpckhpd") == 0) {
-        return emit_i386_prefixed_xmm_srcdst_rm(0x66, 0x15, src, dst, out, out_cap, out_len);
-    }
     if (strcmp(mnbuf, "movhpd") == 0) {
         return emit_i386_xmm_partial_move_rm(0x66, 0x16, 0x17, src, dst, out, out_cap, out_len);
     }
@@ -5825,26 +5871,6 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
     if (strcmp(mnbuf, "movlps") == 0) {
         return emit_i386_xmm_partial_move_rm(0x00, 0x12, 0x13, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "unpcklps") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
-            parse_xmm_reg(dst->u.reg, &xr) != 0) {
-            return -1;
-        }
-        if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
-            return -1;
-        }
-        return emit_i386_legacy_simd_rm(0x00, 0x14, xr, src, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "unpckhps") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
-            parse_xmm_reg(dst->u.reg, &xr) != 0) {
-            return -1;
-        }
-        if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
-            return -1;
-        }
-        return emit_i386_legacy_simd_rm(0x00, 0x15, xr, src, out, out_cap, out_len);
-    }
     if (strcmp(mnbuf, "movlhps") == 0) {
         if (insn->operand_count != 2) {
             return -1;
@@ -5884,17 +5910,16 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_movnt_store(0x66, 1, intel_syntax, insn, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "cvttps2pi") == 0) {
+    if (strcmp(mnbuf, "cvttps2pi") == 0 || strcmp(mnbuf, "cvtps2pi") == 0) {
+        unsigned char opcode2;
+
         if (insn->operand_count != 2) {
             return -1;
         }
-        return emit_i386_mmx_from_xmm_or_mem(0x00, 0x2c, src, dst, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "cvtps2pi") == 0) {
-        if (insn->operand_count != 2) {
+        if (lookup_i386_ps2pi_opcode(mnbuf, &opcode2) != 0) {
             return -1;
         }
-        return emit_i386_mmx_from_xmm_or_mem(0x00, 0x2d, src, dst, out, out_cap, out_len);
+        return emit_i386_mmx_from_xmm_or_mem(0x00, opcode2, src, dst, out, out_cap, out_len);
     }
     {
         unsigned char opcode2;
@@ -5929,23 +5954,19 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return emit_i386_mmx_xmm_bridge(0xf3, src, dst, 1, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "cvtdq2pd") == 0) return emit_i386_prefixed_xmm_srcdst_rm(0xf3, 0xe6, src, dst, out, out_cap, out_len);
-    if (strcmp(mnbuf, "prefetch") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefetch_hint(0x0d, 0u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "prefetchnta") == 0 || strcmp(mnbuf, "prefetcht0") == 0 ||
+    if (strcmp(mnbuf, "prefetch") == 0 || strcmp(mnbuf, "prefetchwt1") == 0 ||
+        strcmp(mnbuf, "prefetchnta") == 0 || strcmp(mnbuf, "prefetcht0") == 0 ||
         strcmp(mnbuf, "prefetcht1") == 0 || strcmp(mnbuf, "prefetcht2") == 0) {
+        unsigned char opcode2;
         unsigned char regf;
+
         if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
-        if (strcmp(mnbuf, "prefetchnta") == 0) regf = 0u;
-        else if (strcmp(mnbuf, "prefetcht0") == 0) regf = 1u;
-        else if (strcmp(mnbuf, "prefetcht1") == 0) regf = 2u;
-        else regf = 3u;
-        return emit_i386_prefetch_hint(0x18, regf, a, out, out_cap, out_len);
+        if (lookup_i386_prefetch_regf(mnbuf, &opcode2, &regf) != 0) {
+            return -1;
+        }
+        return emit_i386_prefetch_hint(opcode2, regf, a, out, out_cap, out_len);
     }
     {
         static const struct {
