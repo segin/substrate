@@ -114,7 +114,7 @@ Validation gate for Section 1:
 ## 3. i8086 / Real-Mode Assembler Bring-Up
 
 ### 3.1 Corpus Integration
-- [ ] Add `tests/usr.bin/as/test_i8086_corpus.sh`.
+- [x] Add `tests/usr.bin/as/test_i8086_corpus.sh`.
 - [ ] Hook `tests/usr.bin/as/corpus/generate_i8086_gas_corpus.py` outputs into the test matrix.
 - [ ] Ensure `.code16` + `.arch i8086` corpora assemble cleanly with our assembler.
 
