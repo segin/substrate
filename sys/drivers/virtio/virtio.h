@@ -92,5 +92,15 @@ int virtio_gpu_create_scanout_resource(uint32_t resource_id,
                                        size_t backing_len);
 int virtio_gpu_flush_scanout(uint32_t x, uint32_t y, uint32_t width, uint32_t height);
 int virtio_gpu_query_display_info(uint32_t *width, uint32_t *height, uint32_t *format);
+int virtio_gpu_upload_cursor(uint32_t resource_id,
+                             uint32_t width,
+                             uint32_t height,
+                             void *backing,
+                             size_t backing_len,
+                             uint32_t hot_x,
+                             uint32_t hot_y,
+                             uint32_t x,
+                             uint32_t y);
+int virtio_gpu_move_cursor(uint32_t x, uint32_t y);
 
 #endif

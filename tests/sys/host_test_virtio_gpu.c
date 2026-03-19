@@ -24,6 +24,12 @@ static uint32_t flush_resource_id;
 static uint32_t queried_width;
 static uint32_t queried_height;
 static uint32_t queried_format;
+static uint32_t last_cursor_cmd;
+static uint32_t last_cursor_resource_id;
+static uint32_t last_cursor_x;
+static uint32_t last_cursor_y;
+static uint32_t last_cursor_hot_x;
+static uint32_t last_cursor_hot_y;
 static int notify_count;
 
 static void outb(uint16_t port, uint8_t val);
@@ -110,7 +116,18 @@ static void outw(uint16_t port, uint16_t val) {
         }
 
         resp = (struct virtio_gpu_ctrl_hdr *)(uintptr_t)queue->desc[idx].addr;
-        if (req->type == VIRTIO_GPU_CMD_GET_DISPLAY_INFO) {
+        if (val == VIRTIO_GPU_CURSORQ_INDEX) {
+            struct virtio_gpu_update_cursor *cursor =
+                (struct virtio_gpu_update_cursor *)(uintptr_t)queue->desc[head].addr;
+
+            resp->type = VIRTIO_GPU_RESP_OK_NODATA;
+            last_cursor_cmd = cursor->hdr.type;
+            last_cursor_resource_id = cursor->resource_id;
+            last_cursor_x = cursor->pos.x;
+            last_cursor_y = cursor->pos.y;
+            last_cursor_hot_x = cursor->hot_x;
+            last_cursor_hot_y = cursor->hot_y;
+        } else if (req->type == VIRTIO_GPU_CMD_GET_DISPLAY_INFO) {
             struct virtio_gpu_resp_display_info *display =
                 (struct virtio_gpu_resp_display_info *)(uintptr_t)queue->desc[idx].addr;
             display->hdr.type = VIRTIO_GPU_RESP_OK_DISPLAY_INFO;
@@ -185,6 +202,12 @@ static void reset_state(void) {
     queried_width = 0;
     queried_height = 0;
     queried_format = 0;
+    last_cursor_cmd = 0;
+    last_cursor_resource_id = 0;
+    last_cursor_x = 0;
+    last_cursor_y = 0;
+    last_cursor_hot_x = 0;
+    last_cursor_hot_y = 0;
     notify_count = 0;
     queue_sizes[0] = 8;
     queue_sizes[1] = 8;
@@ -273,6 +296,29 @@ static void test_query_display_info_returns_first_enabled_mode(void) {
     assert(queried_format == VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM);
 }
 
+static void test_cursor_upload_and_move_use_cursor_queue(void) {
+    static uint8_t cursor[64 * 64 * 4];
+
+    reset_state();
+    assert(virtio_gpu_setup(0, 5, 0) == 0);
+    assert(virtio_gpu_upload_cursor(17, 64, 64, cursor, sizeof(cursor), 4, 5, 100, 120) == 0);
+    assert(vgpu_dev.cursor_resource_id == 17);
+    assert(last_cursor_cmd == VIRTIO_GPU_CMD_UPDATE_CURSOR);
+    assert(last_cursor_resource_id == 17);
+    assert(last_cursor_x == 100);
+    assert(last_cursor_y == 120);
+    assert(last_cursor_hot_x == 4);
+    assert(last_cursor_hot_y == 5);
+
+    assert(virtio_gpu_move_cursor(130, 140) == 0);
+    assert(last_cursor_cmd == VIRTIO_GPU_CMD_MOVE_CURSOR);
+    assert(last_cursor_resource_id == 17);
+    assert(last_cursor_x == 130);
+    assert(last_cursor_y == 140);
+    assert(last_cursor_hot_x == 4);
+    assert(last_cursor_hot_y == 5);
+}
+
 int main(void) {
     test_setup_initializes_control_and_cursor_queues();
     test_setup_rejects_missing_cursor_queue();
@@ -280,6 +326,7 @@ int main(void) {
     test_create_scanout_resource_emits_expected_ctrl_sequence();
     test_flush_scanout_emits_transfer_and_flush();
     test_query_display_info_returns_first_enabled_mode();
+    test_cursor_upload_and_move_use_cursor_queue();
     puts("host_test_virtio_gpu: PASS");
     return 0;
 }

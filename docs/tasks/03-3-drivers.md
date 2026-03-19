@@ -1053,7 +1053,7 @@
                     - [x] Resource creation (2D scanout). <!-- sys/drivers/virtio/virtio.h, sys/drivers/virtio/virtio_gpu.c, tests/sys/host_test_virtio_gpu.c, docs/specs/driver_virtio_gpu.md, usr.man/man4/virtio_gpu.4 --> (REQ: REQ-03-0752)
                     - [x] Transfer to host (flush dirty regions). <!-- sys/drivers/virtio/virtio.h, sys/drivers/virtio/virtio_gpu.c, tests/sys/host_test_virtio_gpu.c, docs/specs/driver_virtio_gpu.md, usr.man/man4/virtio_gpu.4 --> (REQ: REQ-03-0753)
                     - [x] Display info query (resolution, format). <!-- sys/drivers/virtio/virtio.h, sys/drivers/virtio/virtio_gpu.c, tests/sys/host_test_virtio_gpu.c, docs/specs/driver_virtio_gpu.md, usr.man/man4/virtio_gpu.4 --> (REQ: REQ-03-0754)
-                    - [ ] Cursor image upload and positioning. (REQ: REQ-03-0755)
+                    - [x] Cursor image upload and positioning. <!-- sys/drivers/virtio/virtio.h, sys/drivers/virtio/virtio_gpu.c, tests/sys/host_test_virtio_gpu.c, docs/specs/driver_virtio_gpu.md, usr.man/man4/virtio_gpu.4 --> (REQ: REQ-03-0755)
             - [x] **Pixel Formats:** <!-- sys/drivers/video/fb.c, tests/sys/host_test_fb_multiboot.c --> (REQ: REQ-03-0756)
                 - [x] 8-bit indexed (palette-based). (REQ: REQ-03-0757)
                 - [x] 16-bit (RGB565, ARGB1555). (REQ: REQ-03-0758)

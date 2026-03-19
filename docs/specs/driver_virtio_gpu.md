@@ -45,6 +45,17 @@ The driver can query scanout geometry with `GET_DISPLAY_INFO` and caches the
 first enabled mode it receives from the device. The effective pixel format is
 reported as the driver's current 2D resource format, `B8G8R8X8`.
 
+## Cursor Upload and Positioning
+
+The driver can upload a cursor image by:
+
+- creating an alpha-capable 2D resource
+- attaching a single backing entry
+- issuing `UPDATE_CURSOR` on queue `1`
+
+Subsequent pointer motion uses `MOVE_CURSOR` on queue `1` without recreating
+the cursor resource.
+
 ## Transport Contract
 
 - PCI vendor ID: `0x1af4`
@@ -71,3 +82,4 @@ If either required queue is unavailable or cannot be allocated, the driver sets
 - 2D scanout creation emits the expected control-queue command sequence
 - dirty-region flush emits `TRANSFER_TO_HOST_2D` followed by `RESOURCE_FLUSH`
 - display-info query returns the first enabled scanout geometry
+- cursor upload uses `UPDATE_CURSOR` and later motion uses `MOVE_CURSOR`

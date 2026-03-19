@@ -33,7 +33,8 @@ bind that resource to scanout 0.
 It can also transfer a dirty rectangle to the host and flush that rectangle to
 the visible scanout.
 It can query display geometry from the first enabled scanout.
-It does not yet upload cursor images.
+It can upload an ARGB cursor image and reposition that cursor through the
+dedicated cursor queue.
 .Sh HARDWARE
 The
 .Nm

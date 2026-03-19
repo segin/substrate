@@ -15,8 +15,11 @@
 #define VIRTIO_GPU_CMD_RESOURCE_FLUSH         0x0104U
 #define VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D    0x0105U
 #define VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING 0x0106U
+#define VIRTIO_GPU_CMD_UPDATE_CURSOR          0x0300U
+#define VIRTIO_GPU_CMD_MOVE_CURSOR            0x0301U
 #define VIRTIO_GPU_RESP_OK_NODATA             0x1100U
 #define VIRTIO_GPU_RESP_OK_DISPLAY_INFO       0x1101U
+#define VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM      1U
 #define VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM      2U
 #define VIRTIO_GPU_MAX_SCANOUTS               16U
 
@@ -88,6 +91,22 @@ struct virtio_gpu_resp_display_info {
     struct virtio_gpu_display_one pmodes[VIRTIO_GPU_MAX_SCANOUTS];
 } __attribute__((packed));
 
+struct virtio_gpu_cursor_pos {
+    uint32_t scanout_id;
+    uint32_t x;
+    uint32_t y;
+    uint32_t padding;
+} __attribute__((packed));
+
+struct virtio_gpu_update_cursor {
+    struct virtio_gpu_ctrl_hdr hdr;
+    struct virtio_gpu_cursor_pos pos;
+    uint32_t resource_id;
+    uint32_t hot_x;
+    uint32_t hot_y;
+    uint32_t padding;
+} __attribute__((packed));
+
 typedef struct virtio_gpu_queue {
     uint16_t size;
     uint16_t pages;
@@ -112,6 +131,11 @@ typedef struct virtio_gpu_dev {
     uint32_t display_width;
     uint32_t display_height;
     uint32_t display_format;
+    uint32_t cursor_resource_id;
+    uint32_t cursor_hot_x;
+    uint32_t cursor_hot_y;
+    uint32_t cursor_x;
+    uint32_t cursor_y;
 } virtio_gpu_dev_t;
 
 static virtio_gpu_dev_t vgpu_dev;
@@ -231,6 +255,49 @@ static int virtio_gpu_submit_ctrl(virtio_gpu_dev_t *dev,
     queue->last_used_idx++;
 
     if (resp->type != expected_resp_type) {
+        return -1;
+    }
+
+    return 0;
+}
+
+static int virtio_gpu_submit_cursor(virtio_gpu_dev_t *dev,
+                                    struct virtio_gpu_update_cursor *req,
+                                    struct virtio_gpu_ctrl_hdr *resp) {
+    virtio_gpu_queue_t *queue;
+    uint16_t head;
+    uint16_t avail_slot;
+
+    if (!dev->initialized) {
+        return -1;
+    }
+
+    queue = &dev->cursorq;
+    head = 0;
+
+    queue->desc[head].addr = (uint64_t)virtio_gpu_phys_addr(req);
+    queue->desc[head].len = sizeof(*req);
+    queue->desc[head].flags = VRING_DESC_F_NEXT;
+    queue->desc[head].next = 1;
+
+    queue->desc[1].addr = (uint64_t)virtio_gpu_phys_addr(resp);
+    queue->desc[1].len = sizeof(*resp);
+    queue->desc[1].flags = VRING_DESC_F_WRITE;
+    queue->desc[1].next = 0;
+
+    avail_slot = (uint16_t)(queue->avail->idx % queue->size);
+    queue->avail->ring[avail_slot] = head;
+    __asm__ volatile("" ::: "memory");
+    queue->avail->idx++;
+
+    outw(dev->io_base + VIRTIO_REG_QUEUE_NOTIFY, VIRTIO_GPU_CURSORQ_INDEX);
+
+    while (queue->last_used_idx == queue->used->idx) {
+        __asm__ volatile("pause");
+    }
+    queue->last_used_idx++;
+
+    if (resp->type != VIRTIO_GPU_RESP_OK_NODATA) {
         return -1;
     }
 
@@ -409,4 +476,95 @@ int virtio_gpu_query_display_info(uint32_t *width, uint32_t *height, uint32_t *f
     }
 
     return -1;
+}
+
+int virtio_gpu_upload_cursor(uint32_t resource_id,
+                             uint32_t width,
+                             uint32_t height,
+                             void *backing,
+                             size_t backing_len,
+                             uint32_t hot_x,
+                             uint32_t hot_y,
+                             uint32_t x,
+                             uint32_t y) {
+    struct virtio_gpu_resource_create_2d create_req;
+    struct virtio_gpu_resource_attach_backing attach_req;
+    struct virtio_gpu_mem_entry entry;
+    struct virtio_gpu_update_cursor cursor_req;
+    struct virtio_gpu_ctrl_hdr resp;
+
+    if (!vgpu_dev.initialized || backing == NULL || backing_len == 0 || width == 0 || height == 0) {
+        return -1;
+    }
+
+    memset(&create_req, 0, sizeof(create_req));
+    create_req.hdr.type = VIRTIO_GPU_CMD_RESOURCE_CREATE_2D;
+    create_req.resource_id = resource_id;
+    create_req.format = VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM;
+    create_req.width = width;
+    create_req.height = height;
+    memset(&resp, 0, sizeof(resp));
+    if (virtio_gpu_submit_ctrl(&vgpu_dev, &create_req, sizeof(create_req), NULL, 0, 0,
+                               &resp, sizeof(resp), VIRTIO_GPU_RESP_OK_NODATA) < 0) {
+        return -1;
+    }
+
+    memset(&attach_req, 0, sizeof(attach_req));
+    attach_req.hdr.type = VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING;
+    attach_req.resource_id = resource_id;
+    attach_req.nr_entries = 1;
+    memset(&entry, 0, sizeof(entry));
+    entry.addr = virtio_gpu_phys_addr(backing);
+    entry.length = (uint32_t)backing_len;
+    memset(&resp, 0, sizeof(resp));
+    if (virtio_gpu_submit_ctrl(&vgpu_dev, &attach_req, sizeof(attach_req), &entry, sizeof(entry), 0,
+                               &resp, sizeof(resp), VIRTIO_GPU_RESP_OK_NODATA) < 0) {
+        return -1;
+    }
+
+    memset(&cursor_req, 0, sizeof(cursor_req));
+    cursor_req.hdr.type = VIRTIO_GPU_CMD_UPDATE_CURSOR;
+    cursor_req.pos.scanout_id = 0;
+    cursor_req.pos.x = x;
+    cursor_req.pos.y = y;
+    cursor_req.resource_id = resource_id;
+    cursor_req.hot_x = hot_x;
+    cursor_req.hot_y = hot_y;
+    memset(&resp, 0, sizeof(resp));
+    if (virtio_gpu_submit_cursor(&vgpu_dev, &cursor_req, &resp) < 0) {
+        return -1;
+    }
+
+    vgpu_dev.cursor_resource_id = resource_id;
+    vgpu_dev.cursor_hot_x = hot_x;
+    vgpu_dev.cursor_hot_y = hot_y;
+    vgpu_dev.cursor_x = x;
+    vgpu_dev.cursor_y = y;
+    return 0;
+}
+
+int virtio_gpu_move_cursor(uint32_t x, uint32_t y) {
+    struct virtio_gpu_update_cursor cursor_req;
+    struct virtio_gpu_ctrl_hdr resp;
+
+    if (!vgpu_dev.initialized || vgpu_dev.cursor_resource_id == 0) {
+        return -1;
+    }
+
+    memset(&cursor_req, 0, sizeof(cursor_req));
+    cursor_req.hdr.type = VIRTIO_GPU_CMD_MOVE_CURSOR;
+    cursor_req.pos.scanout_id = 0;
+    cursor_req.pos.x = x;
+    cursor_req.pos.y = y;
+    cursor_req.resource_id = vgpu_dev.cursor_resource_id;
+    cursor_req.hot_x = vgpu_dev.cursor_hot_x;
+    cursor_req.hot_y = vgpu_dev.cursor_hot_y;
+    memset(&resp, 0, sizeof(resp));
+    if (virtio_gpu_submit_cursor(&vgpu_dev, &cursor_req, &resp) < 0) {
+        return -1;
+    }
+
+    vgpu_dev.cursor_x = x;
+    vgpu_dev.cursor_y = y;
+    return 0;
 }
