@@ -1048,7 +1048,7 @@
                     - [x] Mode setting (resolution, bpp, enable LFB). (REQ: REQ-03-0747)
                     - [x] Virtual resolution and display offset. (REQ: REQ-03-0748)
                     - [x] Bank switching (legacy mode fallback). <!-- sys/drivers/video/bga.c, tests/sys/host_test_bga.c, tests/sys/Makefile, usr.man/man4/vga.4 --> (REQ: REQ-03-0749)
-                - [ ] **VirtIO-GPU:** (REQ: REQ-03-0750)
+                - [x] **VirtIO-GPU:** <!-- sys/drivers/virtio/virtio.c, sys/drivers/virtio/virtio.h, sys/drivers/virtio/virtio_gpu.c, tests/sys/host_test_virtio_gpu.c, tests/sys/Makefile, docs/specs/driver_virtio_gpu.md, usr.man/man4/virtio_gpu.4 --> (REQ: REQ-03-0750)
                     - [x] VirtIO device discovery and setup. <!-- sys/drivers/virtio/virtio.c, sys/drivers/virtio/virtio.h, sys/drivers/virtio/virtio_gpu.c, tests/sys/host_test_virtio_gpu.c, tests/sys/Makefile, docs/specs/driver_virtio_gpu.md, usr.man/man4/virtio_gpu.4 --> (REQ: REQ-03-0751)
                     - [x] Resource creation (2D scanout). <!-- sys/drivers/virtio/virtio.h, sys/drivers/virtio/virtio_gpu.c, tests/sys/host_test_virtio_gpu.c, docs/specs/driver_virtio_gpu.md, usr.man/man4/virtio_gpu.4 --> (REQ: REQ-03-0752)
                     - [x] Transfer to host (flush dirty regions). <!-- sys/drivers/virtio/virtio.h, sys/drivers/virtio/virtio_gpu.c, tests/sys/host_test_virtio_gpu.c, docs/specs/driver_virtio_gpu.md, usr.man/man4/virtio_gpu.4 --> (REQ: REQ-03-0753)
