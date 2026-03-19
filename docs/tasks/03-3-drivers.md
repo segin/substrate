@@ -1081,7 +1081,7 @@
                     - [x] Italic rendering (shear transform, or italic font). (REQ: REQ-03-0780)
                     - [x] Underline and strikethrough rendering. (REQ: REQ-03-0781)
                     - [x] Reverse video attribute. (REQ: REQ-03-0782)
-                - [ ] **Performance:** (REQ: REQ-03-0783)
+                - [x] **Performance:** (REQ: REQ-03-0783)
                     - [x] Double buffering (offscreen back buffer). (REQ: REQ-03-0784)
                     - [x] Dirty rectangle tracking. <!-- sys/drivers/video/fb_console.c, sys/drivers/video/fb_console.h, tests/sys/host_test_fb_console.c, tests/sys/Makefile, docs/specs/driver_fb_console.md --> (REQ: REQ-03-0785)
                     - [x] Deferred updates (batch flush on vsync). <!-- sys/drivers/video/fb.h, sys/drivers/video/fb_console.c, sys/drivers/video/fb_console.h, sys/drivers/video/fb.c, sys/kern/time.c, tests/sys/host_test_fb_console.c, docs/specs/driver_fb_console.md --> (REQ: REQ-03-0786)
