@@ -102,7 +102,7 @@ Validation gate for Section 1:
 ### 2.3 x86-64 AT&T Corpus
 - [x] Keep x86_64 v1/v2/v3/v4 corpora green.
 - [x] Preserve ISA-level rejection behavior at dispatcher level.
-- [ ] Add regression tests whenever a cleanup touches ISA gating.
+- [x] Add regression tests whenever a cleanup touches ISA gating.
 
 ### 2.4 x86-64 Intel Roundtrip
 - [ ] Keep x86_64 Intel roundtrip green for v1/v2/v3/v4.
