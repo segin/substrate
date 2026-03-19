@@ -915,7 +915,7 @@
         - [x] Internal doc: scancode set 1 table and extended key mapping. (REQ: REQ-03-0615)
         - [x] Internal doc: input subsystem event model and device registration. (REQ: REQ-03-0616)
 
-- [ ] **Console Subsystem (`sys/console`):** (REQ: REQ-03-0617)
+- [x] **Console Subsystem (`sys/console`):** (REQ: REQ-03-0617)
     - [x] **TTY Subsystem (Core):** (REQ: REQ-03-0618)
         - [x] **Structures (`tty_t`):** (REQ: REQ-03-0619)
             - [x] **Buffers & Queues:** (REQ: REQ-03-0620)
