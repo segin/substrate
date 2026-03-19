@@ -6366,29 +6366,16 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
         }
         return -1;
     }
-    if (strcmp(mnbuf, "fldt") == 0) {
+    {
         unsigned char opcode;
         unsigned reg_field;
 
-        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
-            return -1;
-        }
         if (lookup_x86_64_x87_mem_exact(mnbuf, &opcode, &reg_field) == 0) {
+            if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
+                return -1;
+            }
             return emit_x86_64_1byte_regfield_memop(opcode, reg_field, &a->u.mem, out, out_cap, out_len);
         }
-    }
-    if (strcmp(mnbuf, "fcoms") == 0 || strcmp(mnbuf, "fcomps") == 0 || strcmp(mnbuf, "fcoml") == 0 ||
-        strcmp(mnbuf, "fcompl") == 0 || strcmp(mnbuf, "fstpl") == 0) {
-        unsigned char opcode;
-        unsigned reg_field;
-
-        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
-            return -1;
-        }
-        if (lookup_x86_64_x87_mem_exact(mnbuf, &opcode, &reg_field) != 0) {
-            return -1;
-        }
-        return emit_x86_64_1byte_regfield_memop(opcode, reg_field, &a->u.mem, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "fst") == 0) {
         if (insn->operand_count != 1 || a == NULL) {
@@ -6414,21 +6401,18 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
         }
         return emit_x86_64_1byte_regfield_memop(0xdb, 7u, &a->u.mem, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "fiadd") == 0 || strcmp(mnbuf, "fimul") == 0 || strcmp(mnbuf, "ficom") == 0 ||
-        strcmp(mnbuf, "ficomp") == 0 || strcmp(mnbuf, "fisub") == 0 || strcmp(mnbuf, "fisubr") == 0 ||
-        strcmp(mnbuf, "fidiv") == 0 || strcmp(mnbuf, "fidivr") == 0 || strcmp(mnbuf, "fist") == 0) {
+    {
         unsigned char opcode16;
         unsigned reg16;
         unsigned char opcode32;
         unsigned reg32;
 
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        if (lookup_x86_64_x87_mem16_32(mnbuf, &opcode16, &reg16, &opcode32, &reg32) != 0) {
-            return -1;
+        if (lookup_x86_64_x87_mem16_32(mnbuf, &opcode16, &reg16, &opcode32, &reg32) == 0) {
+            if (insn->operand_count != 1 || a == NULL) return -1;
+            return emit_x86_64_x87_mem16_32(a, opcode16, reg16, opcode32, reg32, out, out_cap, out_len);
         }
-        return emit_x86_64_x87_mem16_32(a, opcode16, reg16, opcode32, reg32, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "fild") == 0 || strcmp(mnbuf, "fistp") == 0 || strcmp(mnbuf, "fisttp") == 0) {
+    {
         unsigned char opcode16;
         unsigned reg16;
         unsigned char opcode32;
@@ -6436,24 +6420,11 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
         unsigned char opcode64;
         unsigned reg64;
 
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        if (lookup_x86_64_x87_mem16_32_64(mnbuf, &opcode16, &reg16, &opcode32, &reg32, &opcode64, &reg64) != 0) {
-            return -1;
+        if (lookup_x86_64_x87_mem16_32_64(mnbuf, &opcode16, &reg16, &opcode32, &reg32, &opcode64, &reg64) == 0) {
+            if (insn->operand_count != 1 || a == NULL) return -1;
+            return emit_x86_64_x87_mem16_32_64(a, opcode16, reg16, opcode32, reg32, opcode64, reg64, out, out_cap,
+                                                out_len);
         }
-        return emit_x86_64_x87_mem16_32_64(a, opcode16, reg16, opcode32, reg32, opcode64, reg64, out, out_cap,
-                                            out_len);
-    }
-    if (strcmp(mnbuf, "fbld") == 0 || strcmp(mnbuf, "fbstp") == 0) {
-        unsigned char opcode;
-        unsigned reg_field;
-
-        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
-            return -1;
-        }
-        if (lookup_x86_64_x87_mem_exact(mnbuf, &opcode, &reg_field) != 0) {
-            return -1;
-        }
-        return emit_x86_64_1byte_regfield_memop(opcode, reg_field, &a->u.mem, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movdqa") == 0) {
         if (insn->operand_count != 2) {

@@ -43,13 +43,13 @@ Primary rule: prefer shrinking duplicated logic into shared helpers and lookup t
 - [x] Eliminate remaining i386 x87 mnemonic ladders where opcode selection is table-driven in practice.
 
 ### 1.3 Remaining x86_64 x87 Cleanup
-- [ ] Factor x86_64 x87 exact-memory group:
+- [x] Factor x86_64 x87 exact-memory group:
   - `fcoms`
   - `fcomps`
   - `fcoml`
   - `fcompl`
   - `fstpl`
-- [ ] Factor x86_64 x87 16/32-bit integer-memory group:
+- [x] Factor x86_64 x87 16/32-bit integer-memory group:
   - `fiadd`
   - `fimul`
   - `ficom`
@@ -59,11 +59,11 @@ Primary rule: prefer shrinking duplicated logic into shared helpers and lookup t
   - `fidiv`
   - `fidivr`
   - `fist`
-- [ ] Factor x86_64 x87 16/32/64-bit integer-memory group:
+- [x] Factor x86_64 x87 16/32/64-bit integer-memory group:
   - `fild`
   - `fistp`
   - `fisttp`
-- [ ] Factor x86_64 `fbld` / `fbstp`.
+- [x] Factor x86_64 `fbld` / `fbstp`.
 
 ### 1.4 SSE/MMX Tail Cleanup
 - [ ] Remove remaining one-off selector branches that are now expressible via existing lookup helpers.
