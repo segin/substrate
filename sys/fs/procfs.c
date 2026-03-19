@@ -6,6 +6,7 @@
  */
 
 #include <vfs/vfs.h>
+#include <arch/i386/pmm.h>
 #include <fs/procfs.h>
 #include <include/sys/proc.h>
 #include <pm/pm.h>
@@ -27,12 +28,6 @@
 #include <kern/pci.h>
 #include <kern/resource.h>
 #include <sys/kobject.h>
-
-/* External declarations */
-extern uint32_t pmm_get_total_memory(void);    /* from PMM */
-extern uint32_t pmm_get_free_memory(void);     /* from PMM */
-extern filesystem_t *vfs_get_filesystems(void); /* from VFS */
-extern struct mountlist mountlist;
 
 /* Forward declarations */
 static size_t procfs_generic_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);

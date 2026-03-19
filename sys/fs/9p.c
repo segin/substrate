@@ -3,10 +3,11 @@
 #include <string.h>
 #include <stddef.h>
 #include <vm/vm_kmem.h>
+#include <vfs/vfs.h>
+#include <drivers/virtio/virtio.h>
+#include <sys/errno.h>
 
-extern int virtio_9p_send(void *out_buf, uint32_t out_len, void *in_buf, uint32_t in_len);
-
-static uint32_t p9_next_fid = 0;
+uint32_t p9_next_fid = 0;
 
 static uint32_t p9_alloc_fid(void) {
     return p9_next_fid++;

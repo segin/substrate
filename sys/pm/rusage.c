@@ -266,10 +266,11 @@ void timeval_add(struct timeval *result, const struct timeval *a,
  *
  * Returns: 0 on success, -EINVAL on invalid who value
  */
-int sys_getrusage(int who, struct rusage *usage)
-{
-    extern process_t *current_process;
+#include <sys/proc.h>
 
+int
+sys_getrusage(int who, struct rusage *usage)
+{
     if (!usage || !current_process)
         return -22; /* EINVAL */
 
