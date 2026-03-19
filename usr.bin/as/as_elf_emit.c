@@ -1798,6 +1798,43 @@ static int lookup_i386_x87_ipcompare_opcode(const char *mnemonic, unsigned char 
     return -1;
 }
 
+static int lookup_i386_x87_arith_opcode(const char *mnemonic, unsigned char *mem_d8_regf,
+                                        unsigned char *mem_dc_regf, int *stack_single_base,
+                                        unsigned char *stack_pair_base) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char mem_d8_regf;
+        unsigned char mem_dc_regf;
+        int stack_single_base;
+        unsigned char stack_pair_base;
+    } map[] = {
+        {"fadd", 0u, 0u, -1, 0xc0},
+        {"fmul", 1u, 1u, -1, 0xc8},
+        {"fcom", 2u, 2u, 0xd0, 0xd0},
+        {"fcomp", 3u, 3u, 0xd8, 0xd8},
+        {"fsub", 4u, 4u, -1, 0xe0},
+        {"fsubr", 5u, 5u, -1, 0xe8},
+        {"fdiv", 6u, 6u, -1, 0xf0},
+        {"fdivr", 7u, 7u, -1, 0xf8},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || mem_d8_regf == NULL || mem_dc_regf == NULL ||
+        stack_single_base == NULL || stack_pair_base == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *mem_d8_regf = map[i].mem_d8_regf;
+            *mem_dc_regf = map[i].mem_dc_regf;
+            *stack_single_base = map[i].stack_single_base;
+            *stack_pair_base = map[i].stack_pair_base;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static int lookup_i386_adcxo_prefix(const char *mnemonic, unsigned char *prefix) {
     static const struct {
         const char *mnemonic;
@@ -3976,44 +4013,25 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         strcmp(mnbuf, "fsub") == 0 || strcmp(mnbuf, "fsubr") == 0 || strcmp(mnbuf, "fdiv") == 0 || strcmp(mnbuf, "fdivr") == 0) {
         unsigned stsrc;
         unsigned stdst;
+        unsigned char mem_d8_regf;
+        unsigned char mem_dc_regf;
+        int stack_single_base;
         unsigned char base;
+
+        if (lookup_i386_x87_arith_opcode(mnbuf, &mem_d8_regf, &mem_dc_regf, &stack_single_base, &base) != 0) {
+            return -1;
+        }
         if (insn->operand_count == 1 && a != NULL) {
             if (a->kind == AS_OPERAND_MEMORY) {
-                if (strcmp(mnbuf, "fadd") == 0) {
-                    return emit_i386_x87_mem_by_size(insn, a, 0xd8, 0u, 0xdc, 0u, -1, 0u, out, out_cap, out_len);
-                }
-                if (strcmp(mnbuf, "fmul") == 0) {
-                    return emit_i386_x87_mem_by_size(insn, a, 0xd8, 1u, 0xdc, 1u, -1, 0u, out, out_cap, out_len);
-                }
-                if (strcmp(mnbuf, "fcom") == 0) {
-                    return emit_i386_x87_mem_by_size(insn, a, 0xd8, 2u, 0xdc, 2u, -1, 0u, out, out_cap, out_len);
-                }
-                if (strcmp(mnbuf, "fcomp") == 0) {
-                    return emit_i386_x87_mem_by_size(insn, a, 0xd8, 3u, 0xdc, 3u, -1, 0u, out, out_cap, out_len);
-                }
-                if (strcmp(mnbuf, "fsub") == 0) {
-                    return emit_i386_x87_mem_by_size(insn, a, 0xd8, 4u, 0xdc, 4u, -1, 0u, out, out_cap, out_len);
-                }
-                if (strcmp(mnbuf, "fsubr") == 0) {
-                    return emit_i386_x87_mem_by_size(insn, a, 0xd8, 5u, 0xdc, 5u, -1, 0u, out, out_cap, out_len);
-                }
-                if (strcmp(mnbuf, "fdiv") == 0) {
-                    return emit_i386_x87_mem_by_size(insn, a, 0xd8, 6u, 0xdc, 6u, -1, 0u, out, out_cap, out_len);
-                }
-                return emit_i386_x87_mem_by_size(insn, a, 0xd8, 7u, 0xdc, 7u, -1, 0u, out, out_cap, out_len);
+                return emit_i386_x87_mem_by_size(insn, a, 0xd8, mem_d8_regf, 0xdc, mem_dc_regf, -1, 0u,
+                                                 out, out_cap, out_len);
             }
             if (operand_st_index(a, &stsrc) != 0) {
                 return -1;
             }
-            if (strcmp(mnbuf, "fcom") == 0) {
+            if (stack_single_base >= 0) {
                 out[0] = 0xd8;
-                out[1] = (unsigned char)(0xd0u + (stsrc & 7u));
-                if (out_len != NULL) *out_len = 2;
-                return 0;
-            }
-            if (strcmp(mnbuf, "fcomp") == 0) {
-                out[0] = 0xd8;
-                out[1] = (unsigned char)(0xd8u + (stsrc & 7u));
+                out[1] = (unsigned char)((unsigned char)stack_single_base + (stsrc & 7u));
                 if (out_len != NULL) *out_len = 2;
                 return 0;
             }
@@ -4024,14 +4042,6 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             stdst != 0) {
             return -1;
         }
-        if (strcmp(mnbuf, "fadd") == 0) base = 0xc0;
-        else if (strcmp(mnbuf, "fmul") == 0) base = 0xc8;
-        else if (strcmp(mnbuf, "fcom") == 0) base = 0xd0;
-        else if (strcmp(mnbuf, "fcomp") == 0) base = 0xd8;
-        else if (strcmp(mnbuf, "fsub") == 0) base = 0xe0;
-        else if (strcmp(mnbuf, "fsubr") == 0) base = 0xe8;
-        else if (strcmp(mnbuf, "fdiv") == 0) base = 0xf0;
-        else base = 0xf8;
         out[0] = 0xd8;
         out[1] = (unsigned char)(base + (stsrc & 7u));
         if (out_len != NULL) {
