@@ -3751,6 +3751,119 @@ static int emit_i386_prefetch_hint(unsigned char opcode2, unsigned char regf,
     return emit_i386_prefixed_0f_rm(0x00, opcode2, regf, op, out, out_cap, out_len);
 }
 
+static int emit_x86_klogic(const as_instruction_t *insn, int intel_syntax, const char *mnemonic,
+                           unsigned char *out, size_t out_cap, size_t *out_len) {
+    const as_operand_t *op_rm;
+    const as_operand_t *op_vvvv;
+    const as_operand_t *op_dst;
+    unsigned krm;
+    unsigned kvvvv;
+    unsigned kdst;
+
+    if (insn == NULL || mnemonic == NULL || out == NULL || insn->operand_count != 3) {
+        return -1;
+    }
+    if (intel_syntax) {
+        op_dst = &insn->operands[0];
+        op_vvvv = &insn->operands[1];
+        op_rm = &insn->operands[2];
+    } else {
+        op_rm = &insn->operands[0];
+        op_vvvv = &insn->operands[1];
+        op_dst = &insn->operands[2];
+    }
+    if (op_rm->kind != AS_OPERAND_REGISTER || op_vvvv->kind != AS_OPERAND_REGISTER ||
+        op_dst->kind != AS_OPERAND_REGISTER || parse_k_reg(op_rm->u.reg, &krm) != 0 ||
+        parse_k_reg(op_vvvv->u.reg, &kvvvv) != 0 || parse_k_reg(op_dst->u.reg, &kdst) != 0) {
+        return -1;
+    }
+    return emit_i386_vex_klogic(mnemonic, krm, kvvvv, kdst, out, out_cap, out_len);
+}
+
+static int emit_x86_seg_pushpop(const char *mnemonic, const as_operand_t *op, int allow_legacy,
+                                unsigned char *out, size_t out_cap, size_t *out_len) {
+    as_x86_seg_t seg;
+
+    if (mnemonic == NULL || op == NULL || out == NULL || op->kind != AS_OPERAND_REGISTER) {
+        return -1;
+    }
+    if (parse_seg_reg_text(op->u.reg, &seg) != 0) {
+        return -1;
+    }
+    if (strcmp(mnemonic, "push") == 0) {
+        switch (seg) {
+        case AS_X86_SEG_ES:
+            if (!allow_legacy || out_cap < 1) return -1;
+            out[0] = 0x06;
+            if (out_len != NULL) *out_len = 1;
+            return 0;
+        case AS_X86_SEG_CS:
+            if (!allow_legacy || out_cap < 1) return -1;
+            out[0] = 0x0e;
+            if (out_len != NULL) *out_len = 1;
+            return 0;
+        case AS_X86_SEG_SS:
+            if (!allow_legacy || out_cap < 1) return -1;
+            out[0] = 0x16;
+            if (out_len != NULL) *out_len = 1;
+            return 0;
+        case AS_X86_SEG_DS:
+            if (!allow_legacy || out_cap < 1) return -1;
+            out[0] = 0x1e;
+            if (out_len != NULL) *out_len = 1;
+            return 0;
+        case AS_X86_SEG_FS:
+            if (out_cap < 2) return -1;
+            out[0] = 0x0f;
+            out[1] = 0xa0;
+            if (out_len != NULL) *out_len = 2;
+            return 0;
+        case AS_X86_SEG_GS:
+            if (out_cap < 2) return -1;
+            out[0] = 0x0f;
+            out[1] = 0xa8;
+            if (out_len != NULL) *out_len = 2;
+            return 0;
+        default:
+            return -1;
+        }
+    }
+    if (strcmp(mnemonic, "pop") == 0) {
+        switch (seg) {
+        case AS_X86_SEG_ES:
+            if (!allow_legacy || out_cap < 1) return -1;
+            out[0] = 0x07;
+            if (out_len != NULL) *out_len = 1;
+            return 0;
+        case AS_X86_SEG_SS:
+            if (!allow_legacy || out_cap < 1) return -1;
+            out[0] = 0x17;
+            if (out_len != NULL) *out_len = 1;
+            return 0;
+        case AS_X86_SEG_DS:
+            if (!allow_legacy || out_cap < 1) return -1;
+            out[0] = 0x1f;
+            if (out_len != NULL) *out_len = 1;
+            return 0;
+        case AS_X86_SEG_FS:
+            if (out_cap < 2) return -1;
+            out[0] = 0x0f;
+            out[1] = 0xa1;
+            if (out_len != NULL) *out_len = 2;
+            return 0;
+        case AS_X86_SEG_GS:
+            if (out_cap < 2) return -1;
+            out[0] = 0x0f;
+            out[1] = 0xa9;
+            if (out_len != NULL) *out_len = 2;
+            return 0;
+        default:
+            return -1;
+        }
+    }
+    return -1;
+}
+
 static int emit_i386_bnd_binary(unsigned char prefix, unsigned char opcode2,
                                 const as_operand_t *src, const as_operand_t *dst,
                                 unsigned char *out, size_t out_cap, size_t *out_len) {
@@ -3889,59 +4002,11 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
     }
     if (strncmp(mnbuf, "kand", 4) == 0 || strncmp(mnbuf, "kor", 3) == 0 || strncmp(mnbuf, "kxor", 4) == 0 ||
         strncmp(mnbuf, "kxnor", 5) == 0 || strncmp(mnbuf, "kadd", 4) == 0 || strncmp(mnbuf, "kunpck", 6) == 0) {
-        const as_operand_t *op_rm;
-        const as_operand_t *op_vvvv;
-        const as_operand_t *op_dst;
-        unsigned krm;
-        unsigned kvvvv;
-        unsigned kdst;
-
-        if (insn->operand_count != 3) {
-            return -1;
-        }
-        if (intel_syntax) {
-            op_dst = &insn->operands[0];
-            op_vvvv = &insn->operands[1];
-            op_rm = &insn->operands[2];
-        } else {
-            op_rm = &insn->operands[0];
-            op_vvvv = &insn->operands[1];
-            op_dst = &insn->operands[2];
-        }
-        if (op_rm->kind != AS_OPERAND_REGISTER || op_vvvv->kind != AS_OPERAND_REGISTER || op_dst->kind != AS_OPERAND_REGISTER ||
-            parse_k_reg(op_rm->u.reg, &krm) != 0 || parse_k_reg(op_vvvv->u.reg, &kvvvv) != 0 ||
-            parse_k_reg(op_dst->u.reg, &kdst) != 0) {
-            return -1;
-        }
-        return emit_i386_vex_klogic(mnbuf, krm, kvvvv, kdst, out, out_cap, out_len);
+        return emit_x86_klogic(insn, intel_syntax, mnbuf, out, out_cap, out_len);
     }
     if ((strcmp(mnbuf, "push") == 0 || strcmp(mnbuf, "pop") == 0) && insn->operand_count == 1 && a != NULL &&
         a->kind == AS_OPERAND_REGISTER) {
-        as_x86_seg_t seg;
-
-        if (parse_seg_reg_text(a->u.reg, &seg) != 0) {
-            return -1;
-        }
-        if (strcmp(mnbuf, "push") == 0) {
-            switch (seg) {
-            case AS_X86_SEG_ES: out[0] = 0x06; *out_len = 1; return 0;
-            case AS_X86_SEG_CS: out[0] = 0x0e; *out_len = 1; return 0;
-            case AS_X86_SEG_SS: out[0] = 0x16; *out_len = 1; return 0;
-            case AS_X86_SEG_DS: out[0] = 0x1e; *out_len = 1; return 0;
-            case AS_X86_SEG_FS: out[0] = 0x0f; out[1] = 0xa0; *out_len = 2; return 0;
-            case AS_X86_SEG_GS: out[0] = 0x0f; out[1] = 0xa8; *out_len = 2; return 0;
-            default: return -1;
-            }
-        } else {
-            switch (seg) {
-            case AS_X86_SEG_ES: out[0] = 0x07; *out_len = 1; return 0;
-            case AS_X86_SEG_SS: out[0] = 0x17; *out_len = 1; return 0;
-            case AS_X86_SEG_DS: out[0] = 0x1f; *out_len = 1; return 0;
-            case AS_X86_SEG_FS: out[0] = 0x0f; out[1] = 0xa1; *out_len = 2; return 0;
-            case AS_X86_SEG_GS: out[0] = 0x0f; out[1] = 0xa9; *out_len = 2; return 0;
-            default: return -1;
-            }
-        }
+        return emit_x86_seg_pushpop(mnbuf, a, 1, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "in") == 0 && insn->operand_count == 2 && src != NULL && dst != NULL) {
         const char *dstreg = NULL;
@@ -6370,75 +6435,11 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
     }
     if (strncmp(mnbuf, "kand", 4) == 0 || strncmp(mnbuf, "kor", 3) == 0 || strncmp(mnbuf, "kxor", 4) == 0 ||
         strncmp(mnbuf, "kxnor", 5) == 0 || strncmp(mnbuf, "kadd", 4) == 0 || strncmp(mnbuf, "kunpck", 6) == 0) {
-        const as_operand_t *op_rm;
-        const as_operand_t *op_vvvv;
-        const as_operand_t *op_dst;
-        unsigned krm;
-        unsigned kvvvv;
-        unsigned kdst;
-
-        if (insn->operand_count != 3) {
-            return -1;
-        }
-        if (intel_syntax) {
-            op_dst = &insn->operands[0];
-            op_vvvv = &insn->operands[1];
-            op_rm = &insn->operands[2];
-        } else {
-            op_rm = &insn->operands[0];
-            op_vvvv = &insn->operands[1];
-            op_dst = &insn->operands[2];
-        }
-        if (op_rm->kind != AS_OPERAND_REGISTER || op_vvvv->kind != AS_OPERAND_REGISTER || op_dst->kind != AS_OPERAND_REGISTER ||
-            parse_k_reg(op_rm->u.reg, &krm) != 0 || parse_k_reg(op_vvvv->u.reg, &kvvvv) != 0 ||
-            parse_k_reg(op_dst->u.reg, &kdst) != 0) {
-            return -1;
-        }
-        return emit_i386_vex_klogic(mnbuf, krm, kvvvv, kdst, out, out_cap, out_len);
+        return emit_x86_klogic(insn, intel_syntax, mnbuf, out, out_cap, out_len);
     }
     if ((strcmp(mnbuf, "push") == 0 || strcmp(mnbuf, "pop") == 0) && insn->operand_count == 1 && a != NULL &&
         a->kind == AS_OPERAND_REGISTER) {
-        as_x86_seg_t seg;
-
-        if (parse_seg_reg_text(a->u.reg, &seg) != 0) {
-            return -1;
-        }
-        if (strcmp(mnbuf, "push") == 0) {
-            if (seg == AS_X86_SEG_FS) {
-                out[0] = 0x0f;
-                out[1] = 0xa0;
-                if (out_len != NULL) {
-                    *out_len = 2;
-                }
-                return 0;
-            }
-            if (seg == AS_X86_SEG_GS) {
-                out[0] = 0x0f;
-                out[1] = 0xa8;
-                if (out_len != NULL) {
-                    *out_len = 2;
-                }
-                return 0;
-            }
-            return -1;
-        }
-        if (seg == AS_X86_SEG_FS) {
-            out[0] = 0x0f;
-            out[1] = 0xa1;
-            if (out_len != NULL) {
-                *out_len = 2;
-            }
-            return 0;
-        }
-        if (seg == AS_X86_SEG_GS) {
-            out[0] = 0x0f;
-            out[1] = 0xa9;
-            if (out_len != NULL) {
-                *out_len = 2;
-            }
-            return 0;
-        }
-        return -1;
+        return emit_x86_seg_pushpop(mnbuf, a, 0, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "fldl") == 0) {
         if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {

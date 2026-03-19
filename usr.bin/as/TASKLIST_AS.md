@@ -26,8 +26,8 @@ Primary rule: prefer shrinking duplicated logic into shared helpers and lookup t
 ## 1. Finish `as_elf_emit.c` Structural Cleanup
 
 ### 1.1 Shared x86 Special-Case Emitters
-- [ ] Factor duplicated `push`/`pop` segment-register handling shared by i386 and x86_64 emitters.
-- [ ] Factor duplicated `kand`/`kor`/`kxor`/`kxnor`/`kadd`/`kunpck` operand-selection logic shared by i386 and x86_64 emitters.
+- [x] Factor duplicated `push`/`pop` segment-register handling shared by i386 and x86_64 emitters.
+- [x] Factor duplicated `kand`/`kor`/`kxor`/`kxnor`/`kadd`/`kunpck` operand-selection logic shared by i386 and x86_64 emitters.
 - [ ] Factor shared `vmread`/`vmwrite` operand-order handling.
 - [ ] Factor shared immediate-vs-register selector helpers for `shld`/`shrd`, `extrq`/`insertq`, and similar multi-form instructions.
 
