@@ -113,6 +113,12 @@ namespace instead of requiring a framebuffer-specific userspace path. When VGA
 text mode has already installed those tty bindings, the framebuffer console
 detects the existing ownership and leaves it intact.
 
+TTY writes no longer bypass terminal semantics. The framebuffer VT driver now
+feeds tty output through the shared ANSI parser and updates per-VT cursor,
+color, attribute, tab-stop, scroll-region, and alternate-screen state before
+redrawing the affected framebuffer cells. That makes `/dev/tty[1-N]` on a
+framebuffer-only boot behave like a terminal instead of a raw glyph sink.
+
 ## Constraints
 - Built-in font is limited to the PSF glyph set (typically 256 or 512 glyphs).
 - BDF/PCF parsers require the full font data to be memory-resident at parse time.

@@ -118,6 +118,19 @@ void console_set_tty(struct tty *tty) {
     console_tty = tty;
 }
 
+void spinlock_acquire(spinlock_t *lock) {
+    (void)lock;
+}
+
+void spinlock_release(spinlock_t *lock) {
+    (void)lock;
+}
+
+void sched_wakeup(void *chan) {
+    (void)chan;
+}
+
+#include "../../sys/drivers/console/ansi_handler.c"
 #include "../../sys/drivers/video/fb_console.c"
 
 static void reset_state(void) {
@@ -183,6 +196,25 @@ static void test_init_preserves_existing_vt_ttys(void) {
     assert(tty_register_count == VT_MAX - 1);
     assert(test_vts[0].tty == &test_ttys[0]);
     assert(console_tty == NULL);
+}
+
+static void test_tty_write_processes_ansi_sequences(void) {
+    static const unsigned char seq[] = "\x1b[2;3H\x1b[31mA";
+    struct tty *tty;
+    size_t index;
+
+    reset_state();
+    fb_console_init();
+
+    tty = test_vts[0].tty;
+    assert(tty != NULL);
+    assert(tty->driver != NULL);
+    assert(tty->driver->write != NULL);
+    assert(tty->driver->write(tty, seq, (int)(sizeof(seq) - 1)) == (int)(sizeof(seq) - 1));
+
+    index = (size_t)1 * 80U + 2U;
+    assert((unsigned char)(test_vts[0].buffer[index] & 0xFFU) == 'A');
+    assert((unsigned char)(test_vts[0].buffer[index] >> 8) == 0x01U);
 }
 
 static void test_clear_marks_full_screen_dirty(void) {
@@ -284,6 +316,7 @@ static void test_software_cursor_blinks_on_tick(void) {
 int main(void) {
     test_init_registers_framebuffer_vt_ttys();
     test_init_preserves_existing_vt_ttys();
+    test_tty_write_processes_ansi_sequences();
     test_clear_marks_full_screen_dirty();
     test_writes_expand_dirty_rectangle();
     test_tick_batches_and_flushes_dirty_rectangle();
