@@ -3418,6 +3418,204 @@ static int emit_i386_x87_mem16_32_64(const as_instruction_t *insn, const as_oper
     return -1;
 }
 
+static int operand_st_index(const as_operand_t *op, unsigned *out);
+
+static int lookup_i386_x87_mem_exact(const char *mnemonic, unsigned char *opcode, unsigned *reg_field) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char opcode;
+        unsigned char reg_field;
+    } map[] = {
+        {"fldl", 0xdd, 0u},
+        {"flds", 0xd9, 0u},
+        {"fldt", 0xdb, 5u},
+        {"fstpl", 0xdd, 3u},
+        {"fstps", 0xd9, 3u},
+        {"fstpt", 0xdb, 7u},
+        {"faddl", 0xdc, 0u},
+        {"fadds", 0xd8, 0u},
+        {"fsubl", 0xdc, 4u},
+        {"fsubs", 0xd8, 4u},
+        {"fsubrs", 0xd8, 5u},
+        {"fsubrl", 0xdc, 5u},
+        {"fmull", 0xdc, 1u},
+        {"fmuls", 0xd8, 1u},
+        {"fdivl", 0xdc, 6u},
+        {"fdivs", 0xd8, 6u},
+        {"fdivrs", 0xd8, 7u},
+        {"fdivrl", 0xdc, 7u},
+        {"fcoms", 0xd8, 2u},
+        {"fcomps", 0xd8, 3u},
+        {"fcoml", 0xdc, 2u},
+        {"fcompl", 0xdc, 3u},
+        {"fildl", 0xdb, 0u},
+        {"filds", 0xdf, 0u},
+        {"fildll", 0xdf, 5u},
+        {"fistl", 0xdb, 2u},
+        {"fistpl", 0xdb, 3u},
+        {"fists", 0xdf, 2u},
+        {"fistps", 0xdf, 3u},
+        {"fistpll", 0xdf, 7u},
+        {"fisttps", 0xdf, 1u},
+        {"fisttpl", 0xdb, 1u},
+        {"fisttpll", 0xdd, 1u},
+        {"fstl", 0xdd, 2u},
+        {"fbld", 0xdf, 4u},
+        {"fbstp", 0xdf, 6u},
+        {"fldcw", 0xd9, 5u},
+        {"fnstcw", 0xd9, 7u},
+        {"fsts", 0xd9, 2u},
+        {"fldenv", 0xd9, 4u},
+        {"fnstenv", 0xd9, 6u},
+        {"frstor", 0xdd, 4u},
+        {"fnsave", 0xdd, 6u},
+        {"fiaddl", 0xda, 0u},
+        {"fimull", 0xda, 1u},
+        {"fisubl", 0xda, 4u},
+        {"fisubrl", 0xda, 5u},
+        {"fidivl", 0xda, 6u},
+        {"fidivrl", 0xda, 7u},
+        {"fiadds", 0xde, 0u},
+        {"fimuls", 0xde, 1u},
+        {"fisubs", 0xde, 4u},
+        {"fisubrs", 0xde, 5u},
+        {"fidivs", 0xde, 6u},
+        {"fidivrs", 0xde, 7u},
+        {"ficoml", 0xda, 2u},
+        {"ficompl", 0xda, 3u},
+        {"ficoms", 0xde, 2u},
+        {"ficomps", 0xde, 3u},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || opcode == NULL || reg_field == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *opcode = map[i].opcode;
+            *reg_field = map[i].reg_field;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_x87_mem16_32_named(const char *mnemonic, unsigned char *opcode16, unsigned *reg16,
+                                          unsigned char *opcode32, unsigned *reg32) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char opcode16;
+        unsigned char reg16;
+        unsigned char opcode32;
+        unsigned char reg32;
+    } map[] = {
+        {"fiadd", 0xde, 0u, 0xda, 0u},
+        {"fimul", 0xde, 1u, 0xda, 1u},
+        {"ficom", 0xde, 2u, 0xda, 2u},
+        {"ficomp", 0xde, 3u, 0xda, 3u},
+        {"fisub", 0xde, 4u, 0xda, 4u},
+        {"fisubr", 0xde, 5u, 0xda, 5u},
+        {"fidiv", 0xde, 6u, 0xda, 6u},
+        {"fidivr", 0xde, 7u, 0xda, 7u},
+        {"fist", 0xdf, 2u, 0xdb, 2u},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || opcode16 == NULL || reg16 == NULL || opcode32 == NULL || reg32 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *opcode16 = map[i].opcode16;
+            *reg16 = map[i].reg16;
+            *opcode32 = map[i].opcode32;
+            *reg32 = map[i].reg32;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_x87_mem16_32_64_named(const char *mnemonic, unsigned char *opcode16, unsigned *reg16,
+                                             unsigned char *opcode32, unsigned *reg32,
+                                             unsigned char *opcode64, unsigned *reg64) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char opcode16;
+        unsigned char reg16;
+        unsigned char opcode32;
+        unsigned char reg32;
+        unsigned char opcode64;
+        unsigned char reg64;
+    } map[] = {
+        {"fild", 0xdf, 0u, 0xdb, 0u, 0xdf, 5u},
+        {"fistp", 0xdf, 3u, 0xdb, 3u, 0xdf, 7u},
+        {"fisttp", 0xdf, 1u, 0xdb, 1u, 0xdd, 1u},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || opcode16 == NULL || reg16 == NULL || opcode32 == NULL || reg32 == NULL ||
+        opcode64 == NULL || reg64 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *opcode16 = map[i].opcode16;
+            *reg16 = map[i].reg16;
+            *opcode32 = map[i].opcode32;
+            *reg32 = map[i].reg32;
+            *opcode64 = map[i].opcode64;
+            *reg64 = map[i].reg64;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int emit_i386_x87_stack_load_exchange(const as_instruction_t *insn, const char *mnemonic, const as_operand_t *op,
+                                             unsigned char *out, size_t out_cap, size_t *out_len) {
+    unsigned stidx;
+
+    if (mnemonic == NULL || insn == NULL || out == NULL) {
+        return -1;
+    }
+    if (strcmp(mnemonic, "fld1") == 0) {
+        if (insn->operand_count != 0 || out_cap < 2) {
+            return -1;
+        }
+        out[0] = 0xd9;
+        out[1] = 0xe8;
+        if (out_len != NULL) *out_len = 2;
+        return 0;
+    }
+    if (strcmp(mnemonic, "fld") == 0) {
+        if (insn->operand_count != 1 || op == NULL) {
+            return -1;
+        }
+        if (op->kind == AS_OPERAND_MEMORY) {
+            return emit_i386_x87_mem_by_size(insn, op, 0xd9, 0u, 0xdd, 0u, 0xdb, 5u, out, out_cap, out_len);
+        }
+        if (operand_st_index(op, &stidx) != 0 || out_cap < 2) {
+            return -1;
+        }
+        out[0] = 0xd9;
+        out[1] = (unsigned char)(0xc0u + (stidx & 7u));
+        if (out_len != NULL) *out_len = 2;
+        return 0;
+    }
+    if (strcmp(mnemonic, "fxch") == 0) {
+        if (insn->operand_count != 1 || op == NULL || operand_st_index(op, &stidx) != 0 || out_cap < 2) {
+            return -1;
+        }
+        out[0] = 0xd9;
+        out[1] = (unsigned char)(0xc8u + (stidx & 7u));
+        if (out_len != NULL) *out_len = 2;
+        return 0;
+    }
+    return -1;
+}
+
 static int emit_i386_vex2_kmovw(const as_operand_t *src, unsigned dst_k, unsigned char *out, size_t out_cap, size_t *out_len) {
     size_t pos = 0;
 
@@ -4153,40 +4351,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             }
         }
     }
-    if (strcmp(mnbuf, "fld1") == 0) {
-        if (insn->operand_count != 0) {
-            return -1;
-        }
-        out[0] = 0xd9;
-        out[1] = 0xe8;
-        if (out_len != NULL) {
-            *out_len = 2;
-        }
-        return 0;
-    }
-    if (strcmp(mnbuf, "fld") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        if (a->kind == AS_OPERAND_MEMORY) {
-            return emit_i386_x87_mem_by_size(insn, a, 0xd9, 0u, 0xdd, 0u, 0xdb, 5u, out, out_cap, out_len);
-        }
-        if (operand_st_index(a, &stidx) != 0) {
-            return -1;
-        }
-        out[0] = 0xd9;
-        out[1] = (unsigned char)(0xc0u + (stidx & 7u));
-        if (out_len != NULL) *out_len = 2;
-        return 0;
-    }
-    if (strcmp(mnbuf, "fxch") == 0) {
-        if (insn->operand_count != 1 || a == NULL || operand_st_index(a, &stidx) != 0) {
-            return -1;
-        }
-        out[0] = 0xd9;
-        out[1] = (unsigned char)(0xc8u + (stidx & 7u));
-        if (out_len != NULL) *out_len = 2;
-        return 0;
+    if (strcmp(mnbuf, "fld1") == 0 || strcmp(mnbuf, "fld") == 0 || strcmp(mnbuf, "fxch") == 0) {
+        return emit_i386_x87_stack_load_exchange(insn, mnbuf, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "fnop") == 0 || strcmp(mnbuf, "fchs") == 0 || strcmp(mnbuf, "f2xm1") == 0 || strcmp(mnbuf, "fprem") == 0) {
         unsigned char op1;
@@ -4352,299 +4518,34 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_1byte_x87_mem(insn, 0xdd, 7u, a, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "fldl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
+    {
+        unsigned char opcode;
+        unsigned reg_field;
+
+        if (lookup_i386_x87_mem_exact(mnbuf, &opcode, &reg_field) == 0) {
+            if (insn->operand_count != 1 || a == NULL) {
+                return -1;
+            }
+            return emit_i386_prefixed_1byte_x87_mem(insn, opcode, reg_field, a, out, out_cap, out_len);
         }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdd, 0u, a, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "flds") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
+    {
+        unsigned char opcode16;
+        unsigned reg16;
+        unsigned char opcode32;
+        unsigned reg32;
+        unsigned char opcode64;
+        unsigned reg64;
+
+        if (lookup_i386_x87_mem16_32_named(mnbuf, &opcode16, &reg16, &opcode32, &reg32) == 0) {
+            if (insn->operand_count != 1 || a == NULL) return -1;
+            return emit_i386_x87_mem16_32(insn, a, opcode16, reg16, opcode32, reg32, out, out_cap, out_len);
         }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd9, 0u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fldt") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
+        if (lookup_i386_x87_mem16_32_64_named(mnbuf, &opcode16, &reg16, &opcode32, &reg32, &opcode64, &reg64) == 0) {
+            if (insn->operand_count != 1 || a == NULL) return -1;
+            return emit_i386_x87_mem16_32_64(insn, a, opcode16, reg16, opcode32, reg32, opcode64, reg64,
+                                             out, out_cap, out_len);
         }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdb, 5u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fstpl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdd, 3u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fstps") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd9, 3u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fstpt") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdb, 7u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "faddl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdc, 0u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fadds") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd8, 0u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fsubl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdc, 4u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fsubs") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd8, 4u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fsubrs") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd8, 5u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fsubrl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdc, 5u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fmull") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdc, 1u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fmuls") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd8, 1u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fdivl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdc, 6u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fdivs") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd8, 6u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fdivrs") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd8, 7u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fdivrl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdc, 7u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fcoms") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd8, 2u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fcomps") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd8, 3u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fcoml") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdc, 2u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fcompl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdc, 3u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fildl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdb, 0u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "filds") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdf, 0u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fildll") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdf, 5u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fistl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdb, 2u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fistpl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdb, 3u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fists") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdf, 2u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fistps") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdf, 3u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fistpll") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdf, 7u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fisttps") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdf, 1u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fisttpl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdb, 1u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fisttpll") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdd, 1u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fstl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdd, 2u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fbld") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdf, 4u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fbstp") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdf, 6u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fldcw") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd9, 5u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fnstcw") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd9, 7u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fsts") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd9, 2u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fldenv") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd9, 4u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fnstenv") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd9, 6u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fiadd") == 0) {
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        return emit_i386_x87_mem16_32(insn, a, 0xde, 0u, 0xda, 0u, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fimul") == 0) {
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        return emit_i386_x87_mem16_32(insn, a, 0xde, 1u, 0xda, 1u, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fisub") == 0) {
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        return emit_i386_x87_mem16_32(insn, a, 0xde, 4u, 0xda, 4u, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fisubr") == 0) {
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        return emit_i386_x87_mem16_32(insn, a, 0xde, 5u, 0xda, 5u, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fidiv") == 0) {
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        return emit_i386_x87_mem16_32(insn, a, 0xde, 6u, 0xda, 6u, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fidivr") == 0) {
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        return emit_i386_x87_mem16_32(insn, a, 0xde, 7u, 0xda, 7u, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "ficom") == 0) {
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        return emit_i386_x87_mem16_32(insn, a, 0xde, 2u, 0xda, 2u, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "ficomp") == 0) {
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        return emit_i386_x87_mem16_32(insn, a, 0xde, 3u, 0xda, 3u, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fild") == 0) {
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        return emit_i386_x87_mem16_32_64(insn, a, 0xdf, 0u, 0xdb, 0u, 0xdf, 5u, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fist") == 0) {
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        return emit_i386_x87_mem16_32(insn, a, 0xdf, 2u, 0xdb, 2u, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fistp") == 0) {
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        return emit_i386_x87_mem16_32_64(insn, a, 0xdf, 3u, 0xdb, 3u, 0xdf, 7u, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fisttp") == 0) {
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        return emit_i386_x87_mem16_32_64(insn, a, 0xdf, 1u, 0xdb, 1u, 0xdd, 1u, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "fiaddl") == 0) {
         if (insn->operand_count != 1 || a == NULL) return -1;
@@ -4745,30 +4646,6 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         out[1] = (unsigned char)(base + (stsrc & 7u));
         if (out_len != NULL) *out_len = 2;
         return 0;
-    }
-    if (strcmp(mnbuf, "ficoml") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xda, 2u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "ficompl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xda, 3u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "ficoms") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xde, 2u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "ficomps") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xde, 3u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "pxor") == 0) {
         unsigned char prefix;

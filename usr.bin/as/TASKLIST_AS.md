@@ -32,15 +32,15 @@ Primary rule: prefer shrinking duplicated logic into shared helpers and lookup t
 - [x] Factor shared immediate-vs-register selector helpers for `shld`/`shrd`, `extrq`/`insertq`, and similar multi-form instructions.
 
 ### 1.2 Remaining i386 x87 Cleanup
-- [ ] Factor `fld` / `fxch` / `fld1` / related x87 single-purpose stack instructions into shared x87 helpers.
-- [ ] Factor remaining i386 x87 memory-size groups beyond the arithmetic family:
+- [x] Factor `fld` / `fxch` / `fld1` / related x87 single-purpose stack instructions into shared x87 helpers.
+- [x] Factor remaining i386 x87 memory-size groups beyond the arithmetic family:
   - `fstp`
   - `ficom*`
   - `fild*`
   - `fist*`
   - `fbld`
   - `fbstp`
-- [ ] Eliminate remaining i386 x87 mnemonic ladders where opcode selection is table-driven in practice.
+- [x] Eliminate remaining i386 x87 mnemonic ladders where opcode selection is table-driven in practice.
 
 ### 1.3 Remaining x86_64 x87 Cleanup
 - [ ] Factor x86_64 x87 exact-memory group:
