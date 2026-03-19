@@ -16,6 +16,7 @@
 #define VT_MAX_HEIGHT 60
 #define VT_MAX_BUF_SIZE (VT_MAX_WIDTH * VT_MAX_HEIGHT)
 #define VT_SCROLLBACK_LINES 256
+#define VT_TABSTOP_WORDS ((VT_MAX_WIDTH + 31) / 32)
 
 /*
  * VT State
@@ -51,6 +52,7 @@ typedef struct vt_state {
     int cursor_visible; // 1=visible (default), 0=hidden
     int cursor_blink;   // 1=blinking (default), 0=steady
     uint8_t tab_width; // Horizontal tab stop width in columns
+    uint32_t tab_stops[VT_TABSTOP_WORDS];
     
     // DEC modes
     int autowrap;       // DECAWM: 1=wrap at right margin (default), 0=clamp

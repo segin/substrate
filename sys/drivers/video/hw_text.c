@@ -6,9 +6,14 @@
 #include <stdint.h>
 #include <string.h>
 
+#ifdef HOST_TEST
+static inline uint32_t intr_disable(void) { return 0; }
+static inline void intr_restore(uint32_t flags) { (void)flags; }
+#else
+#include <arch/i386/intr.h>
+#endif
 #include <arch/x86-common/io.h>
 #include <arch/x86-common/rtc.h>
-#include <arch/i386/intr.h>
 #include <drivers/console/console.h>
 #include <drivers/video/font.h>
 #include <drivers/video/hw_text.h>
@@ -70,6 +75,41 @@ static void hw_text_sync_buffer_row_locked(vt_state_t *vt, int row) {
         hw_text_write_vga_cell_locked((size_t)x, (size_t)row,
                                       vt->buffer[hw_text_index((size_t)x, (size_t)row)]);
     }
+}
+
+static void hw_text_reset_tab_stops(vt_state_t *vt,
+                                    unsigned int limit,
+                                    unsigned int spacing) {
+    unsigned int col;
+
+    if (!vt) {
+        return;
+    }
+    if (spacing == 0) {
+        spacing = 8;
+    }
+
+    memset(vt->tab_stops, 0, sizeof(vt->tab_stops));
+    for (col = spacing; col < limit; col += spacing) {
+        vt->tab_stops[col / 32] |= (uint32_t)1U << (col % 32);
+    }
+}
+
+static int hw_text_next_tab_stop(const vt_state_t *vt, int col) {
+    int limit;
+    int next;
+
+    if (!vt) {
+        return col;
+    }
+
+    limit = vt_get_width();
+    for (next = col + 1; next < limit; next++) {
+        if (vt->tab_stops[next / 32] & ((uint32_t)1U << (next % 32))) {
+            return next;
+        }
+    }
+    return limit - 1;
 }
 
 static void hw_text_apply_tty_winsize(struct tty *tty) {
@@ -842,9 +882,7 @@ static void cb_putc(char c) {
         return;
     }
     if (c == '\t') {
-        int tab_width = vt->tab_width ? vt->tab_width : 8;
-
-        vt->col = ((vt->col / tab_width) + 1) * tab_width;
+        vt->col = hw_text_next_tab_stop(vt, vt->col);
         if (vt->col >= vt_get_width()) {
             vt->col = 0;
             if (vt->row >= bottom) {
@@ -1136,6 +1174,8 @@ static void cb_reset(void) {
     vt->cursor_visible = 1;
     vt->cursor_blink = 1;
     vt->autowrap = 1;
+    vt->tab_width = 8;
+    hw_text_reset_tab_stops(vt, (unsigned int)vt_get_width(), 8);
     vt->cursor_key_app = 0;
     vt->origin_mode = 0;
     vt->bracketed_paste = 0;
@@ -1385,6 +1425,7 @@ static int vt_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
             return -1;
         }
         vt->tab_width = (uint8_t)*value;
+        hw_text_reset_tab_stops(vt, (unsigned int)vt_get_width(), (unsigned int)*value);
         return 0;
     case VTIOCGCURSOR:
         *value = vt->cursor_visible ? 1 : 0;
@@ -1565,6 +1606,7 @@ int hw_text_set_tab_width(unsigned int width) {
     }
 
     vt->tab_width = (uint8_t)width;
+    hw_text_reset_tab_stops(vt, (unsigned int)vt_get_width(), width);
     return 0;
 }
 

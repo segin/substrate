@@ -1145,7 +1145,7 @@
                     - [ ] HTS (horizontal tab set). (REQ: REQ-03-0844)
                     - [ ] TBC (tab clear: current, all). (REQ: REQ-03-0845)
                     - [ ] CHT/CBT (cursor horizontal tab forward/back). (REQ: REQ-03-0846)
-                    - [ ] Default tab stops (every 8 columns). (REQ: REQ-03-0847)
+                    - [x] Default tab stops (every 8 columns). <!-- sys/include/sys/vt.h, sys/drivers/console/vt.c, sys/drivers/video/hw_text.c, tests/sys/host_test_hw_text.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0847)
                 - [x] **Reports:** <!-- sys/drivers/console/ansi_handler.c, sys/drivers/video/hw_text.c, tests/sys/host_test_ansi.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0848)
                     - [x] DSR (device status report). <!-- sys/include/kern/ansi_handler.h, sys/drivers/console/ansi_handler.c, sys/drivers/video/hw_text.c, tests/sys/host_test_ansi.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0849)
                     - [x] CPR (cursor position report). <!-- sys/drivers/console/ansi_handler.c, tests/sys/host_test_ansi.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0850)

@@ -136,11 +136,17 @@ int kprintf(const char *fmt, ...) {
 }
 
 void vt_init(void) {
+    int col;
+
     memset(&mock_vt, 0, sizeof(mock_vt));
     mock_vt.id = 0;
     mock_vt.color = 0x07;
     mock_vt.attrs = 0;
     mock_vt.tab_width = 8;
+    memset(mock_vt.tab_stops, 0, sizeof(mock_vt.tab_stops));
+    for (col = 8; col < mock_vt_width; col += 8) {
+        mock_vt.tab_stops[col / 32] |= (uint32_t)1U << (col % 32);
+    }
     mock_vt.scroll_top = 0;
     mock_vt.scroll_bottom = mock_vt_height - 2;
     mock_vt.cursor_visible = 1;
@@ -274,6 +280,16 @@ static void test_tab_width_is_configurable_per_vt(void) {
 
     assert(mock_vt.col == 5);
     assert((mock_vt.buffer[4] & 0x00ffU) == 'X');
+}
+
+static void test_default_tab_stops_advance_every_eight_columns(void) {
+    reset_state();
+
+    hw_text_write("a\tb", 3);
+
+    assert((mock_vt.buffer[0] & 0x00ffU) == 'a');
+    assert((mock_vt.buffer[8] & 0x00ffU) == 'b');
+    assert(mock_vt.col == 9);
 }
 
 static void test_vt_tty_ioctl_exposes_vga_controls(void) {
@@ -410,6 +426,7 @@ static void test_text_attrs_emulate_bold_reverse_and_underline(void) {
 int main(void) {
     test_hw_text_bulk_write_updates_buffer_and_cursor();
     test_console_backend_shim_uses_bulk_write_path();
+    test_default_tab_stops_advance_every_eight_columns();
     test_tab_width_is_configurable_per_vt();
     test_vt_tty_ioctl_exposes_vga_controls();
     test_vt_tty_ioctl_toggles_blink_mode();
