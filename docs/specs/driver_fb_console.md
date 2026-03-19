@@ -85,6 +85,14 @@ present step may provide an `fb.flush(x, y, w, h)` callback; the console batches
 all writes observed during the interval into one rectangle and submits that
 region on the next flush tick.
 
+## Mapping Policy
+Linear framebuffer memory is mapped through `ioremap_wc()` when the i386 PAT
+path is available. The CPU feature probe programs a dedicated PAT slot for write
+combining and the PMAP layer preserves `PTE_PWT`/`PTE_PCD`/`PTE_PAT` on page
+entries so framebuffer mappings can use WC semantics instead of the older
+always-uncached path. Machines without PAT support fall back to uncached
+`ioremap()` semantics.
+
 ## Software Cursor
 The framebuffer console uses a software cursor when no hardware cursor path is
 available. The current implementation renders an underline cursor by XORing the

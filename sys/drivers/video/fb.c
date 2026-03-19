@@ -598,7 +598,7 @@ static int mb_init(fb_info_t *info) {
         if (saved_mbi_fb_len == 0) {
             return -1;
         }
-        saved_mbi_fb_addr = ioremap((resource_size_t)fb_phys, saved_mbi_fb_len);
+        saved_mbi_fb_addr = ioremap_wc((resource_size_t)fb_phys, saved_mbi_fb_len);
         if (saved_mbi_fb_addr == NULL) {
             return -1;
         }

@@ -1085,7 +1085,7 @@
                     - [x] Double buffering (offscreen back buffer). (REQ: REQ-03-0784)
                     - [x] Dirty rectangle tracking. <!-- sys/drivers/video/fb_console.c, sys/drivers/video/fb_console.h, tests/sys/host_test_fb_console.c, tests/sys/Makefile, docs/specs/driver_fb_console.md --> (REQ: REQ-03-0785)
                     - [x] Deferred updates (batch flush on vsync). <!-- sys/drivers/video/fb.h, sys/drivers/video/fb_console.c, sys/drivers/video/fb_console.h, sys/drivers/video/fb.c, sys/kern/time.c, tests/sys/host_test_fb_console.c, docs/specs/driver_fb_console.md --> (REQ: REQ-03-0786)
-                    - [ ] Write-combining memory type (PAT/MTRR). (REQ: REQ-03-0787)
+                    - [x] Write-combining memory type (PAT/MTRR). <!-- sys/arch/i386/cpu.c, sys/arch/i386/pmap.c, sys/arch/i386/pmap.h, sys/arch/x86-common/msr.h, sys/kern/ioremap.c, sys/kern/resource.h, sys/drivers/video/fb.c, tests/sys/host_test_ioremap.c, tests/sys/host_test_fb_multiboot.c, tests/sys/host_test_fb_vga_mode.c, usr.man/man4/fb.4, docs/specs/driver_fb_console.md --> (REQ: REQ-03-0787)
             - [ ] **Cursor:** (REQ: REQ-03-0788)
                 - [x] **Software Cursor:** <!-- sys/drivers/video/fb_console.c, tests/sys/host_test_fb_console.c, docs/specs/driver_fb_console.md --> (REQ: REQ-03-0789)
                     - [x] XOR cursor rendering. <!-- sys/drivers/video/fb_console.c, tests/sys/host_test_fb_console.c, docs/specs/driver_fb_console.md --> (REQ: REQ-03-0790)
