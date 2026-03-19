@@ -90,7 +90,7 @@ Validation gate for Section 1:
 ## 2. x86 AT&T and Intel Syntax Parity
 
 ### 2.1 x86-32 AT&T Corpus
-- [ ] Keep `tests/usr.bin/as/corpus/x86_32_gas_all_valid_assembles.s` assembling with no warnings.
+- [x] Keep `tests/usr.bin/as/corpus/x86_32_gas_all_valid_assembles.s` assembling with no warnings.
 - [ ] Keep `tests/usr.bin/as/corpus/x86_32_gas_all_opcodes_assembles.s` assembling with no warnings.
 - [ ] Add regression tests for any instruction family whose support depended on emitter refactors.
 
