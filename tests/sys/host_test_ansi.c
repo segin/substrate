@@ -348,6 +348,18 @@ static void test_shift_in_out_selects_g0_or_g1(void) {
     assert(ctx.active_gl == 0);
 }
 
+static void test_dec_special_graphics_maps_line_drawing(void) {
+    struct ansi_ctx ctx;
+    ansi_init(&ctx);
+    reset_mocks();
+
+    const char *seq = "\x1b(0qx";
+    while (*seq) ansi_process(&ctx, *seq++, &callbacks);
+
+    assert((unsigned char)output_buffer[0] == 0xC4U);
+    assert((unsigned char)output_buffer[1] == 0xB3U);
+}
+
 static void test_tab_clear_modes(void) {
     struct ansi_ctx ctx;
     ansi_init(&ctx);
@@ -514,6 +526,7 @@ int main(void) {
     run_test("Horizontal Tab Set", test_horizontal_tab_set);
     run_test("Charset Designation", test_charset_designation_targets_g_sets);
     run_test("Shift In/Out", test_shift_in_out_selects_g0_or_g1);
+    run_test("DEC Special Graphics", test_dec_special_graphics_maps_line_drawing);
     run_test("Tab Clear", test_tab_clear_modes);
     run_test("Cursor Tab Forward/Backward", test_cursor_tab_forward_and_backward);
     run_test("DECID", test_decid_report);

@@ -20,6 +20,7 @@
 - each VT carries its own tab-stop bitmap, seeded with default stops every `8` columns; `ESC H` can set an additional stop at the current column, `CSI g` clears the current stop, `CSI 3 g` clears all stops, `CSI I`/`CSI Z` move forward/backward across the bitmap, and the existing tab-width control resets the bitmap to a uniform spacing when requested.
 - the ANSI parser now tracks G0..G3 charset designation state (`ESC (`, `)`, `*`, `+`) so later shift and DEC-special-graphics handling has real parser state to operate on.
 - `SI`/`SO` now switch the active GL set between G0 and G1 inside that parser state.
+- when the active GL set is designated as DEC Special Graphics, the parser maps the VT100 line-drawing subset onto CP437 box-drawing glyphs for the text backends.
 - the VGA text `tty_driver->ioctl()` path exposes backend-specific controls for per-VT tab width, cursor visibility, cursor blink, and text blink mode, separate from generic termios handling.
 - the VGA text backend advances cursor blink from the real timer tick path and keeps blink state per VT, so a steady cursor and a blinking cursor are both supported without reusing the text-attribute blink bit.
 - the VGA text backend programs the attribute-controller mode register so blink mode can be toggled on and off, allowing bright backgrounds when blink is disabled.

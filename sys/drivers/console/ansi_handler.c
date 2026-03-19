@@ -22,6 +22,24 @@ static void ansi_respond(const struct ansi_callbacks *cb,
     cb->respond(buf, len);
 }
 
+static unsigned char ansi_translate_dec_special(unsigned char c) {
+    switch (c) {
+    case 'j': return 0xD9; /* lower right corner */
+    case 'k': return 0xBF; /* upper right corner */
+    case 'l': return 0xDA; /* upper left corner */
+    case 'm': return 0xC0; /* lower left corner */
+    case 'n': return 0xC5; /* crossing lines */
+    case 'q': return 0xC4; /* horizontal line */
+    case 't': return 0xC3; /* left tee */
+    case 'u': return 0xB4; /* right tee */
+    case 'v': return 0xC1; /* bottom tee */
+    case 'w': return 0xC2; /* top tee */
+    case 'x': return 0xB3; /* vertical line */
+    default:
+        return c;
+    }
+}
+
 void ansi_init(struct ansi_ctx *ctx) {
     if (!ctx) return;
     ctx->state = ANSI_NORMAL;
@@ -411,7 +429,14 @@ void ansi_process(struct ansi_ctx *ctx, char c, const struct ansi_callbacks *cb)
         } else if (c == '\x0f') {
             ctx->active_gl = 0;
         } else {
-            if (cb->putc) cb->putc(c);
+            if (cb->putc) {
+                unsigned char out = (unsigned char)c;
+
+                if (ctx->charsets[ctx->active_gl] == ANSI_CHARSET_DEC_SPECIAL) {
+                    out = ansi_translate_dec_special(out);
+                }
+                cb->putc((char)out);
+            }
         }
         break;
 
