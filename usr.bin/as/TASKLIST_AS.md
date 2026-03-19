@@ -100,7 +100,7 @@ Validation gate for Section 1:
 - [x] Add tests for Intel memory-qualifier ambiguity diagnostics.
 
 ### 2.3 x86-64 AT&T Corpus
-- [ ] Keep x86_64 v1/v2/v3/v4 corpora green.
+- [x] Keep x86_64 v1/v2/v3/v4 corpora green.
 - [ ] Preserve ISA-level rejection behavior at dispatcher level.
 - [ ] Add regression tests whenever a cleanup touches ISA gating.
 
