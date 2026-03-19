@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <termios.h>
 #include <signal.h>
 #include <histedit.h>
@@ -209,6 +210,8 @@ struct editline {
     char rprompt_esc_char;
     /* Editing mode toggle */
     int editing_enabled;          /* 0 = passthrough, 1 = full editing */
+    /* UTF-8 state */
+    int utf8_enabled;             /* 1 if locale is UTF-8, 0 for ASCII */
 };
 
 /*
@@ -263,5 +266,16 @@ int line_ensure_capacity(EditLine *el, size_t needed);
 
 /* Byte reader for escape sequences (used by keymap dispatch) */
 int el_read_esc_byte(EditLine *el, char *out, int timeout_ms);
+
+/* UTF-8 support */
+int utf8_decode(const char *s, size_t n, uint32_t *cp);
+int utf8_encode(uint32_t cp, char *buf);
+int utf8_width(uint32_t cp);
+int utf8_char_len(const char *buf, size_t pos, size_t len);
+size_t utf8_prev(const char *buf, size_t pos);
+size_t utf8_next(const char *buf, size_t pos, size_t len);
+int utf8_is_word(uint32_t cp);
+int utf8_display_width(const char *buf, size_t len);
+int utf8_is_locale_utf8(void);
 
 #endif /* _EL_H_ */

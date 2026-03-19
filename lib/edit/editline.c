@@ -45,6 +45,7 @@ EditLine *el_init(const char *prog, FILE *fin, FILE *fout, FILE *ferr) {
     el->fout = fout;
     el->ferr = ferr;
     el->editing_enabled = 1; /* editing on by default */
+    el->utf8_enabled = utf8_is_locale_utf8();
 
     /* Initialize line buffer */
     el->line.cap = EL_LINE_DEFAULT_CAP;

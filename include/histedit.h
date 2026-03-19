@@ -33,6 +33,7 @@ const char *el_gets(EditLine *el, int *count);
 int         el_get(EditLine *el, int op, ...);
 int         el_set(EditLine *el, int op, ...);
 int         el_resize(EditLine *el);
+int         el_gets_continuation(EditLine *el);
 
 const LineInfo *el_line(EditLine *el);
 

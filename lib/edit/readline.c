@@ -17,6 +17,53 @@ static int is_word_char(unsigned char ch) {
     return isalnum(ch) || ch == '_';
 }
 
+/*
+ * UTF-8-aware word character check at buffer position.
+ * Decodes codepoint at pos and checks with utf8_is_word.
+ */
+static int is_word_at(EditLine *el, size_t pos) {
+    if (pos >= el->line.len) return 0;
+    if (el->utf8_enabled) {
+        uint32_t cp;
+        if (utf8_decode(el->line.buffer + pos, el->line.len - pos, &cp) > 0)
+            return utf8_is_word(cp);
+        return 0;
+    }
+    return is_word_char((unsigned char)el->line.buffer[pos]);
+}
+
+/*
+ * UTF-8-aware word character check before position.
+ */
+static int is_word_before(EditLine *el, size_t pos) {
+    if (pos == 0 || pos > el->line.len) return 0;
+    if (el->utf8_enabled) {
+        size_t prev = utf8_prev(el->line.buffer, pos);
+        return is_word_at(el, prev);
+    }
+    return is_word_char((unsigned char)el->line.buffer[pos - 1]);
+}
+
+/*
+ * Step forward by one character (byte or codepoint).
+ */
+static size_t step_forward(EditLine *el, size_t pos) {
+    if (pos >= el->line.len) return el->line.len;
+    if (el->utf8_enabled)
+        return utf8_next(el->line.buffer, pos, el->line.len);
+    return pos + 1;
+}
+
+/*
+ * Step backward by one character (byte or codepoint).
+ */
+static size_t step_backward(EditLine *el, size_t pos) {
+    if (pos == 0) return 0;
+    if (el->utf8_enabled)
+        return utf8_prev(el->line.buffer, pos);
+    return pos - 1;
+}
+
 static int read_esc_byte(EditLine *el, char *out, int timeout_ms) {
     fd_set rfds;
     struct timeval tv;
@@ -117,10 +164,10 @@ static int kill_word(EditLine *el) {
     if (!el || el->line.cursor >= el->line.len) return 0;
 
     i = el->line.cursor;
-    if (!is_word_char((unsigned char)el->line.buffer[i])) {
-        while (i < el->line.len && !is_word_char((unsigned char)el->line.buffer[i])) i++;
+    if (!is_word_at(el, i)) {
+        while (i < el->line.len && !is_word_at(el, i)) i = step_forward(el, i);
     }
-    while (i < el->line.len && is_word_char((unsigned char)el->line.buffer[i])) i++;
+    while (i < el->line.len && is_word_at(el, i)) i = step_forward(el, i);
 
     start = el->line.cursor;
     end = i;
@@ -140,8 +187,8 @@ static int backward_kill_word(EditLine *el) {
     if (!el || el->line.cursor == 0) return 0;
 
     i = el->line.cursor;
-    while (i > 0 && !is_word_char((unsigned char)el->line.buffer[i - 1])) i--;
-    while (i > 0 && is_word_char((unsigned char)el->line.buffer[i - 1])) i--;
+    while (i > 0 && !is_word_before(el, i)) i = step_backward(el, i);
+    while (i > 0 && is_word_before(el, i)) i = step_backward(el, i);
 
     start = i;
     end = el->line.cursor;
@@ -263,13 +310,27 @@ static int yank_pop(EditLine *el) {
 }
 
 static int transpose_chars(EditLine *el) {
-    size_t left;
-    char tmp;
-
     if (!el || el->line.len < 2 || el->line.cursor == 0) return 0;
 
-    left = (el->line.cursor == el->line.len) ? el->line.cursor - 2 : el->line.cursor - 1;
-    tmp = el->line.buffer[left];
+    if (el->utf8_enabled) {
+        /* Transpose two codepoints before cursor */
+        size_t pos = el->line.cursor;
+        if (pos == el->line.len) pos = utf8_prev(el->line.buffer, pos);
+        size_t p1 = utf8_prev(el->line.buffer, pos);
+        size_t p1_len = pos - p1;
+        size_t p2_len = utf8_next(el->line.buffer, pos, el->line.len) - pos;
+        if (p1_len == 0 || p2_len == 0) return 0;
+        char tmp[8];
+        if (p1_len + p2_len > sizeof(tmp)) return 0;
+        memcpy(tmp, el->line.buffer + pos, p2_len);
+        memcpy(tmp + p2_len, el->line.buffer + p1, p1_len);
+        memcpy(el->line.buffer + p1, tmp, p1_len + p2_len);
+        el->line.cursor = p1 + p1_len + p2_len;
+        return 1;
+    }
+
+    size_t left = (el->line.cursor == el->line.len) ? el->line.cursor - 2 : el->line.cursor - 1;
+    char tmp = el->line.buffer[left];
     el->line.buffer[left] = el->line.buffer[left + 1];
     el->line.buffer[left + 1] = tmp;
     if (el->line.cursor < el->line.len) el->line.cursor++;
@@ -281,8 +342,8 @@ static void move_forward_word(EditLine *el) {
 
     if (!el) return;
     i = el->line.cursor;
-    while (i < el->line.len && !is_word_char((unsigned char)el->line.buffer[i])) i++;
-    while (i < el->line.len && is_word_char((unsigned char)el->line.buffer[i])) i++;
+    while (i < el->line.len && !is_word_at(el, i)) i = step_forward(el, i);
+    while (i < el->line.len && is_word_at(el, i)) i = step_forward(el, i);
     el->line.cursor = i;
 }
 
@@ -291,31 +352,35 @@ static void move_backward_word(EditLine *el) {
 
     if (!el) return;
     i = el->line.cursor;
-    while (i > 0 && !is_word_char((unsigned char)el->line.buffer[i - 1])) i--;
-    while (i > 0 && is_word_char((unsigned char)el->line.buffer[i - 1])) i--;
+    while (i > 0 && !is_word_before(el, i)) i = step_backward(el, i);
+    while (i > 0 && is_word_before(el, i)) i = step_backward(el, i);
     el->line.cursor = i;
 }
 
 static int apply_word_case(EditLine *el, int mode) {
     size_t i;
-    size_t start;
+    int first;
 
     if (!el) return 0;
     i = el->line.cursor;
-    while (i < el->line.len && !is_word_char((unsigned char)el->line.buffer[i])) i++;
+    while (i < el->line.len && !is_word_at(el, i)) i = step_forward(el, i);
     if (i >= el->line.len) return 0;
-    start = i;
+    first = 1;
 
-    while (i < el->line.len && is_word_char((unsigned char)el->line.buffer[i])) {
+    while (i < el->line.len && is_word_at(el, i)) {
         unsigned char ch = (unsigned char)el->line.buffer[i];
-        if (mode == 0) {
-            el->line.buffer[i] = (char)((i == start) ? toupper(ch) : tolower(ch));
-        } else if (mode > 0) {
-            el->line.buffer[i] = (char)toupper(ch);
-        } else {
-            el->line.buffer[i] = (char)tolower(ch);
+        /* Only apply case to ASCII letters; skip multi-byte codepoints */
+        if (ch < 0x80) {
+            if (mode == 0) {
+                el->line.buffer[i] = (char)(first ? toupper(ch) : tolower(ch));
+            } else if (mode > 0) {
+                el->line.buffer[i] = (char)toupper(ch);
+            } else {
+                el->line.buffer[i] = (char)tolower(ch);
+            }
+            first = 0;
         }
-        i++;
+        i = step_forward(el, i);
     }
     el->line.cursor = i;
     return 1;
@@ -550,19 +615,6 @@ static size_t get_terminal_columns(EditLine *el) {
     return 80;
 }
 
-static size_t line_dirty_from_cache(EditLine *el) {
-    size_t i;
-    size_t limit;
-
-    if (!el || !el->render_cache) return 0;
-
-    limit = (el->render_cache_len < el->line.len) ? el->render_cache_len : el->line.len;
-    for (i = 0; i < limit; i++) {
-        if (el->render_cache[i] != el->line.buffer[i]) return i;
-    }
-    return limit;
-}
-
 static void line_update_cache(EditLine *el) {
     char *new_cache;
 
@@ -583,14 +635,13 @@ static void line_update_cache(EditLine *el) {
 
 static void refresh_line(EditLine *el) {
     size_t cols;
-    size_t prompt_len;
-    size_t total_len;
-    size_t cursor_total;
-    size_t end_row;
+    size_t prompt_bytes;
+    size_t prompt_dw;
     size_t rows;
     size_t cursor_row;
     size_t cursor_col;
-    size_t dirty_from;
+    size_t end_row;
+    size_t end_col;
     size_t i;
 
     if (!el || !el->fout) return;
@@ -598,34 +649,58 @@ static void refresh_line(EditLine *el) {
     cols = get_terminal_columns(el);
     if (cols == 0) cols = 80;
 
-    prompt_len = el->prompt ? strlen(el->prompt) : 0;
-    total_len = prompt_len + el->line.len;
-    cursor_total = prompt_len + el->line.cursor;
-    end_row = total_len / cols;
-    rows = end_row + 1;
-    cursor_row = cursor_total / cols;
-    cursor_col = cursor_total % cols;
-    dirty_from = line_dirty_from_cache(el);
+    prompt_bytes = el->prompt ? strlen(el->prompt) : 0;
+    if (el->utf8_enabled)
+        prompt_dw = (size_t)utf8_display_width(el->prompt, prompt_bytes);
+    else
+        prompt_dw = prompt_bytes;
 
     /*
-     * Dirty-region fast path for single-row refreshes.
-     * Keep full redraw logic for wrapped output.
+     * Calculate display rows/cols accounting for both \n and line wrapping.
+     * Walk through the buffer character by character.
      */
-    if (el->refresh_rows <= 1 && rows <= 1 &&
-        dirty_from < el->line.len &&
-        el->render_cache_cursor <= cols &&
-        prompt_len <= cols) {
-        size_t target_col = prompt_len + dirty_from;
-        terminal_putc(el, '\r');
-        if (target_col > 0) terminal_printf(el, "\033[%zuC", target_col);
-        terminal_write(el, el->line.buffer + dirty_from, el->line.len - dirty_from);
-        if (el->render_cache_len > el->line.len) terminal_puts(el, "\033[K");
-        terminal_putc(el, '\r');
-        if (cursor_total > 0) terminal_printf(el, "\033[%zuC", cursor_total);
-        terminal_flush(el);
-        el->refresh_rows = 1;
-        line_update_cache(el);
-        return;
+    {
+        size_t row = 0, col = prompt_dw;
+        size_t c_row = 0, c_col = prompt_dw;
+        size_t pos = 0;
+
+        while (pos < el->line.len) {
+            if (pos == el->line.cursor) {
+                c_row = row;
+                c_col = col;
+            }
+            if (el->line.buffer[pos] == '\n') {
+                row++;
+                col = 0;
+                pos++;
+                continue;
+            }
+            if (el->utf8_enabled) {
+                uint32_t cp;
+                int n = utf8_decode(el->line.buffer + pos, el->line.len - pos, &cp);
+                int w = (n > 0) ? utf8_width(cp) : 1;
+                if (w < 0) w = 2; /* ^X display */
+                col += (size_t)w;
+                pos += (n > 0) ? (size_t)n : 1;
+            } else {
+                col++;
+                pos++;
+            }
+            if (col >= cols) {
+                row++;
+                col -= cols;
+            }
+        }
+        if (el->line.cursor == el->line.len) {
+            c_row = row;
+            c_col = col;
+        }
+        end_row = row;
+        end_col = col;
+        (void)end_col; /* unused but computed for clarity */
+        rows = end_row + 1;
+        cursor_row = c_row;
+        cursor_col = c_col;
     }
 
     /* Return to first physical row of the previous render block. */
@@ -641,7 +716,7 @@ static void refresh_line(EditLine *el) {
     if (el->refresh_rows > 1) terminal_printf(el, "\033[%zuA", el->refresh_rows - 1);
     terminal_putc(el, '\r');
 
-    if (el->prompt) terminal_write(el, el->prompt, prompt_len);
+    if (el->prompt) terminal_write(el, el->prompt, prompt_bytes);
     if (el->line.len > 0) terminal_write(el, el->line.buffer, el->line.len);
 
     /* Reposition cursor from render end to logical cursor location. */
@@ -783,36 +858,73 @@ static int is_vi_word(unsigned char ch) {
     return isalnum(ch) || ch == '_';
 }
 
+/*
+ * UTF-8-aware vi word character check at buffer position.
+ */
+static int is_vi_word_at(EditLine *el, size_t pos) {
+    if (pos >= el->line.len) return 0;
+    if (el->utf8_enabled) {
+        uint32_t cp;
+        if (utf8_decode(el->line.buffer + pos, el->line.len - pos, &cp) > 0)
+            return utf8_is_word(cp);
+        return 0;
+    }
+    return is_vi_word((unsigned char)el->line.buffer[pos]);
+}
+
+static int is_vi_word_before(EditLine *el, size_t pos) {
+    if (pos == 0) return 0;
+    if (el->utf8_enabled) {
+        size_t prev = utf8_prev(el->line.buffer, pos);
+        return is_vi_word_at(el, prev);
+    }
+    return is_vi_word((unsigned char)el->line.buffer[pos - 1]);
+}
+
+static int is_space_at(EditLine *el, size_t pos) {
+    if (pos >= el->line.len) return 0;
+    return isspace((unsigned char)el->line.buffer[pos]);
+}
+
+static int is_space_before(EditLine *el, size_t pos) {
+    if (pos == 0) return 0;
+    if (el->utf8_enabled) {
+        size_t prev = utf8_prev(el->line.buffer, pos);
+        return is_space_at(el, prev);
+    }
+    return isspace((unsigned char)el->line.buffer[pos - 1]);
+}
+
 static size_t vi_forward_word(EditLine *el, size_t pos) {
     size_t i = pos;
     if (i >= el->line.len) return i;
-    if (is_vi_word((unsigned char)el->line.buffer[i])) {
-        while (i < el->line.len && is_vi_word((unsigned char)el->line.buffer[i])) i++;
-    } else if (!isspace((unsigned char)el->line.buffer[i])) {
-        while (i < el->line.len && !is_vi_word((unsigned char)el->line.buffer[i])
-               && !isspace((unsigned char)el->line.buffer[i])) i++;
+    if (is_vi_word_at(el, i)) {
+        while (i < el->line.len && is_vi_word_at(el, i)) i = step_forward(el, i);
+    } else if (!is_space_at(el, i)) {
+        while (i < el->line.len && !is_vi_word_at(el, i)
+               && !is_space_at(el, i)) i = step_forward(el, i);
     }
-    while (i < el->line.len && isspace((unsigned char)el->line.buffer[i])) i++;
+    while (i < el->line.len && is_space_at(el, i)) i = step_forward(el, i);
     return i;
 }
 
 static size_t vi_forward_WORD(EditLine *el, size_t pos) {
     size_t i = pos;
-    while (i < el->line.len && !isspace((unsigned char)el->line.buffer[i])) i++;
-    while (i < el->line.len && isspace((unsigned char)el->line.buffer[i])) i++;
+    while (i < el->line.len && !is_space_at(el, i)) i = step_forward(el, i);
+    while (i < el->line.len && is_space_at(el, i)) i = step_forward(el, i);
     return i;
 }
 
 static size_t vi_backward_word(EditLine *el, size_t pos) {
     size_t i = pos;
     if (i == 0) return 0;
-    i--;
-    while (i > 0 && isspace((unsigned char)el->line.buffer[i])) i--;
-    if (is_vi_word((unsigned char)el->line.buffer[i])) {
-        while (i > 0 && is_vi_word((unsigned char)el->line.buffer[i - 1])) i--;
+    i = step_backward(el, i);
+    while (i > 0 && is_space_at(el, i)) i = step_backward(el, i);
+    if (is_vi_word_at(el, i)) {
+        while (i > 0 && is_vi_word_before(el, i)) i = step_backward(el, i);
     } else {
-        while (i > 0 && !is_vi_word((unsigned char)el->line.buffer[i - 1])
-               && !isspace((unsigned char)el->line.buffer[i - 1])) i--;
+        while (i > 0 && !is_vi_word_before(el, i)
+               && !is_space_before(el, i)) i = step_backward(el, i);
     }
     return i;
 }
@@ -820,32 +932,42 @@ static size_t vi_backward_word(EditLine *el, size_t pos) {
 static size_t vi_backward_WORD(EditLine *el, size_t pos) {
     size_t i = pos;
     if (i == 0) return 0;
-    i--;
-    while (i > 0 && isspace((unsigned char)el->line.buffer[i])) i--;
-    while (i > 0 && !isspace((unsigned char)el->line.buffer[i - 1])) i--;
+    i = step_backward(el, i);
+    while (i > 0 && is_space_at(el, i)) i = step_backward(el, i);
+    while (i > 0 && !is_space_before(el, i)) i = step_backward(el, i);
     return i;
 }
 
 static size_t vi_end_word(EditLine *el, size_t pos) {
     size_t i = pos;
-    if (i + 1 >= el->line.len) return el->line.len > 0 ? el->line.len - 1 : 0;
-    i++;
-    while (i < el->line.len && isspace((unsigned char)el->line.buffer[i])) i++;
-    if (i < el->line.len && is_vi_word((unsigned char)el->line.buffer[i])) {
-        while (i + 1 < el->line.len && is_vi_word((unsigned char)el->line.buffer[i + 1])) i++;
+    size_t next;
+    if (step_forward(el, i) >= el->line.len)
+        return el->line.len > 0 ? el->line.len - 1 : 0;
+    i = step_forward(el, i);
+    while (i < el->line.len && is_space_at(el, i)) i = step_forward(el, i);
+    if (i < el->line.len && is_vi_word_at(el, i)) {
+        for (next = step_forward(el, i); next < el->line.len && is_vi_word_at(el, next);
+             next = step_forward(el, i))
+            i = next;
     } else {
-        while (i + 1 < el->line.len && !is_vi_word((unsigned char)el->line.buffer[i + 1])
-               && !isspace((unsigned char)el->line.buffer[i + 1])) i++;
+        for (next = step_forward(el, i); next < el->line.len &&
+             !is_vi_word_at(el, next) && !is_space_at(el, next);
+             next = step_forward(el, i))
+            i = next;
     }
     return i;
 }
 
 static size_t vi_end_WORD(EditLine *el, size_t pos) {
     size_t i = pos;
-    if (i + 1 >= el->line.len) return el->line.len > 0 ? el->line.len - 1 : 0;
-    i++;
-    while (i < el->line.len && isspace((unsigned char)el->line.buffer[i])) i++;
-    while (i + 1 < el->line.len && !isspace((unsigned char)el->line.buffer[i + 1])) i++;
+    size_t next;
+    if (step_forward(el, i) >= el->line.len)
+        return el->line.len > 0 ? el->line.len - 1 : 0;
+    i = step_forward(el, i);
+    while (i < el->line.len && is_space_at(el, i)) i = step_forward(el, i);
+    for (next = step_forward(el, i); next < el->line.len && !is_space_at(el, next);
+         next = step_forward(el, i))
+        i = next;
     return i;
 }
 
@@ -886,9 +1008,11 @@ static size_t vi_motion_target(EditLine *el, int motion, int count) {
 
     switch (motion) {
     case 'h':
-        return pos > (size_t)count ? pos - count : 0;
+        for (i = 0; i < count && pos > 0; i++) pos = step_backward(el, pos);
+        return pos;
     case 'l':
-        return (pos + count < el->line.len) ? pos + count : el->line.len;
+        for (i = 0; i < count && pos < el->line.len; i++) pos = step_forward(el, pos);
+        return pos;
     case 'w':
         for (i = 0; i < count; i++) pos = vi_forward_word(el, pos);
         return pos;
@@ -1041,6 +1165,38 @@ static unsigned char ed_newline(EditLine *el, int c) {
 }
 
 static unsigned char ed_insert(EditLine *el, int c) {
+    /* UTF-8 multi-byte input handling */
+    if (el->utf8_enabled && (c & 0x80)) {
+        char mb[4];
+        int need;
+        uint32_t cp;
+        mb[0] = (char)c;
+        if ((c & 0xE0) == 0xC0) need = 2;
+        else if ((c & 0xF0) == 0xE0) need = 3;
+        else if ((c & 0xF8) == 0xF0) need = 4;
+        else return CC_NORM; /* invalid lead byte */
+        /* Read continuation bytes */
+        for (int i = 1; i < need; i++) {
+            if (!read_esc_byte(el, &mb[i], 100)) return CC_NORM;
+            if (((unsigned char)mb[i] & 0xC0) != 0x80) return CC_NORM;
+        }
+        if (utf8_decode(mb, (size_t)need, &cp) != need) return CC_NORM;
+        if (utf8_width(cp) < 0) return CC_NORM; /* non-printable */
+        if (line_ensure_capacity(el, el->line.len + (size_t)need + 1) != 0)
+            return CC_ERROR;
+        el->last_cmd_was_kill = 0;
+        el->yank_active = 0;
+        undo_push(el);
+        memmove(el->line.buffer + el->line.cursor + need,
+                el->line.buffer + el->line.cursor,
+                el->line.len - el->line.cursor + 1);
+        memcpy(el->line.buffer + el->line.cursor, mb, (size_t)need);
+        el->line.len += (size_t)need;
+        el->line.cursor += (size_t)need;
+        refresh_line(el);
+        return CC_NORM;
+    }
+
     if (c < 32 || c >= 127) return CC_NORM;
     if (line_ensure_capacity(el, el->line.len + 2) != 0) return CC_ERROR;
     el->last_cmd_was_kill = 0;
@@ -1067,11 +1223,13 @@ static unsigned char ed_delete_next_char(EditLine *el, int c) {
     el->yank_active = 0;
     if (el->line.len == 0) return CC_EOF;
     if (el->line.cursor < el->line.len) {
+        size_t clen = (size_t)utf8_char_len(el->line.buffer, el->line.cursor, el->line.len);
+        if (clen == 0) clen = 1;
         undo_push(el);
         memmove(el->line.buffer + el->line.cursor,
-                el->line.buffer + el->line.cursor + 1,
-                el->line.len - el->line.cursor);
-        el->line.len--;
+                el->line.buffer + el->line.cursor + clen,
+                el->line.len - el->line.cursor - clen + 1);
+        el->line.len -= clen;
         refresh_line(el);
     } else if (el->completion) {
         el->completion(el, c);
@@ -1120,7 +1278,7 @@ static unsigned char ed_prev_char(EditLine *el, int c) {
     el->yank_active = 0;
     if (el->line.cursor > 0) {
         undo_push(el);
-        el->line.cursor--;
+        el->line.cursor = step_backward(el, el->line.cursor);
         refresh_line(el);
     }
     return CC_NORM;
@@ -1144,7 +1302,7 @@ static unsigned char ed_next_char(EditLine *el, int c) {
     el->yank_active = 0;
     if (el->line.cursor < el->line.len) {
         undo_push(el);
-        el->line.cursor++;
+        el->line.cursor = step_forward(el, el->line.cursor);
         refresh_line(el);
     }
     return CC_NORM;
@@ -1179,11 +1337,95 @@ static unsigned char ed_kill_line(EditLine *el, int c) {
     return CC_NORM;
 }
 
+/* ------------------------------------------------------------------ */
+/* Multi-line editing helpers                                         */
+/* ------------------------------------------------------------------ */
+
+static int buffer_has_newline(EditLine *el) {
+    size_t i;
+    for (i = 0; i < el->line.len; i++) {
+        if (el->line.buffer[i] == '\n') return 1;
+    }
+    return 0;
+}
+
+static size_t logical_line_start(EditLine *el, size_t pos) {
+    while (pos > 0 && el->line.buffer[pos - 1] != '\n') pos--;
+    return pos;
+}
+
+static size_t logical_line_end(EditLine *el, size_t pos) {
+    while (pos < el->line.len && el->line.buffer[pos] != '\n') pos++;
+    return pos;
+}
+
+static int multiline_move_up(EditLine *el) {
+    size_t cur_start = logical_line_start(el, el->line.cursor);
+    size_t col;
+    size_t prev_start;
+    size_t prev_len;
+    if (cur_start == 0) return 0; /* already on first line */
+    col = el->line.cursor - cur_start;
+    prev_start = logical_line_start(el, cur_start - 1);
+    prev_len = (cur_start - 1) - prev_start;
+    el->line.cursor = prev_start + (col < prev_len ? col : prev_len);
+    return 1;
+}
+
+static int multiline_move_down(EditLine *el) {
+    size_t cur_end = logical_line_end(el, el->line.cursor);
+    size_t cur_start;
+    size_t col;
+    size_t next_start;
+    size_t next_end;
+    size_t next_len;
+    if (cur_end >= el->line.len) return 0; /* already on last line */
+    cur_start = logical_line_start(el, el->line.cursor);
+    col = el->line.cursor - cur_start;
+    next_start = cur_end + 1;
+    next_end = logical_line_end(el, next_start);
+    next_len = next_end - next_start;
+    el->line.cursor = next_start + (col < next_len ? col : next_len);
+    return 1;
+}
+
+/*
+ * Check if input is incomplete (unmatched quotes or trailing backslash).
+ * Returns 1 if continuation is needed, 0 if input is complete.
+ */
+int el_gets_continuation(EditLine *el) {
+    size_t i;
+    int in_squote = 0;
+    int in_dquote = 0;
+
+    if (!el) return 0;
+    for (i = 0; i < el->line.len; i++) {
+        char c = el->line.buffer[i];
+        if (c == '\\' && !in_squote && i + 1 < el->line.len) {
+            i++; /* skip escaped char */
+            continue;
+        }
+        if (c == '\'' && !in_dquote) in_squote = !in_squote;
+        else if (c == '"' && !in_squote) in_dquote = !in_dquote;
+    }
+    /* Trailing backslash */
+    if (el->line.len > 0 && el->line.buffer[el->line.len - 1] == '\\')
+        return 1;
+    return in_squote || in_dquote;
+}
+
 static unsigned char ed_next_history(EditLine *el, int c) {
     HistEvent ev;
     (void)c;
     el->last_cmd_was_kill = 0;
     el->yank_active = 0;
+    /* Multi-line: down arrow moves between logical lines first */
+    if (buffer_has_newline(el)) {
+        if (multiline_move_down(el)) {
+            refresh_line(el);
+            return CC_NORM;
+        }
+    }
     if (!el->history) return CC_NORM;
     if (history(el->history, &ev, H_NEXT) == 0 && ev.str) {
         undo_push(el);
@@ -1202,6 +1444,13 @@ static unsigned char ed_prev_history(EditLine *el, int c) {
     (void)c;
     el->last_cmd_was_kill = 0;
     el->yank_active = 0;
+    /* Multi-line: up arrow moves between logical lines first */
+    if (buffer_has_newline(el)) {
+        if (multiline_move_up(el)) {
+            refresh_line(el);
+            return CC_NORM;
+        }
+    }
     if (!el->history) return CC_NORM;
     if (!el->history_browsing) {
         (void)history_save_current_input(el);
@@ -1282,12 +1531,14 @@ static unsigned char em_delete_prev_char(EditLine *el, int c) {
     el->last_cmd_was_kill = 0;
     el->yank_active = 0;
     if (el->line.cursor > 0) {
+        size_t prev = step_backward(el, el->line.cursor);
+        size_t clen = el->line.cursor - prev;
         undo_push(el);
-        memmove(el->line.buffer + el->line.cursor - 1,
+        memmove(el->line.buffer + prev,
                 el->line.buffer + el->line.cursor,
                 el->line.len - el->line.cursor + 1);
-        el->line.len--;
-        el->line.cursor--;
+        el->line.len -= clen;
+        el->line.cursor = prev;
         refresh_line(el);
     }
     return CC_NORM;
@@ -1477,7 +1728,7 @@ static unsigned char vi_to_command_mode(EditLine *el, int c) {
     if (el->vi_mode == VI_INSERT) vi_capture_insert(el);
     el->vi_mode = VI_COMMAND;
     el->vi_count = 0;
-    if (el->line.cursor > 0) el->line.cursor--;
+    if (el->line.cursor > 0) el->line.cursor = step_backward(el, el->line.cursor);
     refresh_line(el);
     return CC_NORM;
 }
@@ -1697,7 +1948,7 @@ static unsigned char vi_append_mode(EditLine *el, int c) {
     (void)c;
     el->vi_count = 0;
     vi_record_repeat(el, 'a', 0, count);
-    if (el->line.cursor < el->line.len) el->line.cursor++;
+    if (el->line.cursor < el->line.len) el->line.cursor = step_forward(el, el->line.cursor);
     vi_enter_insert(el);
     return CC_NORM;
 }
@@ -1732,14 +1983,16 @@ static unsigned char vi_delete_char_action(EditLine *el, int c) {
     undo_push(el);
     vi_record_repeat(el, 'x', 0, count);
     for (i = 0; i < count && el->line.cursor < el->line.len; i++) {
-        kill_ring_push(el, el->line.buffer + el->line.cursor, 1, i > 0);
+        size_t clen = (size_t)utf8_char_len(el->line.buffer, el->line.cursor, el->line.len);
+        if (clen == 0) clen = 1;
+        kill_ring_push(el, el->line.buffer + el->line.cursor, clen, i > 0);
         memmove(el->line.buffer + el->line.cursor,
-                el->line.buffer + el->line.cursor + 1,
-                el->line.len - el->line.cursor);
-        el->line.len--;
+                el->line.buffer + el->line.cursor + clen,
+                el->line.len - el->line.cursor - clen + 1);
+        el->line.len -= clen;
     }
     if (el->line.cursor >= el->line.len && el->line.len > 0)
-        el->line.cursor = el->line.len - 1;
+        el->line.cursor = utf8_prev(el->line.buffer, el->line.len);
     refresh_line(el);
     return CC_NORM;
 }
@@ -1752,12 +2005,14 @@ static unsigned char vi_backward_delete_char(EditLine *el, int c) {
     undo_push(el);
     vi_record_repeat(el, 'X', 0, count);
     for (i = 0; i < count && el->line.cursor > 0; i++) {
-        el->line.cursor--;
-        kill_ring_push(el, el->line.buffer + el->line.cursor, 1, i > 0);
-        memmove(el->line.buffer + el->line.cursor,
-                el->line.buffer + el->line.cursor + 1,
-                el->line.len - el->line.cursor);
-        el->line.len--;
+        size_t prev = step_backward(el, el->line.cursor);
+        size_t clen = el->line.cursor - prev;
+        kill_ring_push(el, el->line.buffer + prev, clen, i > 0);
+        memmove(el->line.buffer + prev,
+                el->line.buffer + el->line.cursor,
+                el->line.len - el->line.cursor + 1);
+        el->line.len -= clen;
+        el->line.cursor = prev;
     }
     refresh_line(el);
     return CC_NORM;
@@ -1849,7 +2104,7 @@ static unsigned char vi_delete_motion(EditLine *el, int c) {
         delete_range(el, start, end);
         el->line.cursor = start;
         if (el->line.cursor >= el->line.len && el->line.len > 0)
-            el->line.cursor = el->line.len - 1;
+            el->line.cursor = utf8_prev(el->line.buffer, el->line.len);
         refresh_line(el);
     }
     return CC_NORM;
@@ -1865,7 +2120,7 @@ static unsigned char vi_delete_to_end(EditLine *el, int c) {
                        el->line.len - el->line.cursor, 0);
         el->line.len = el->line.cursor;
         el->line.buffer[el->line.len] = '\0';
-        if (el->line.cursor > 0) el->line.cursor--;
+        if (el->line.cursor > 0) el->line.cursor = step_backward(el, el->line.cursor);
         refresh_line(el);
     }
     return CC_NORM;
@@ -1951,10 +2206,10 @@ static unsigned char vi_paste_after(EditLine *el, int c) {
     if (el->kill_ring_count > 0 && el->kill_ring[el->kill_ring_head]) {
         undo_push(el);
         vi_record_repeat(el, 'p', 0, 1);
-        if (el->line.cursor < el->line.len) el->line.cursor++;
+        if (el->line.cursor < el->line.len) el->line.cursor = step_forward(el, el->line.cursor);
         (void)insert_span(el, el->kill_ring[el->kill_ring_head],
                           strlen(el->kill_ring[el->kill_ring_head]));
-        if (el->line.cursor > 0) el->line.cursor--;
+        if (el->line.cursor > 0) el->line.cursor = step_backward(el, el->line.cursor);
         refresh_line(el);
     }
     return CC_NORM;
@@ -1968,7 +2223,7 @@ static unsigned char vi_paste_before(EditLine *el, int c) {
         vi_record_repeat(el, 'P', 0, 1);
         (void)insert_span(el, el->kill_ring[el->kill_ring_head],
                           strlen(el->kill_ring[el->kill_ring_head]));
-        if (el->line.cursor > 0) el->line.cursor--;
+        if (el->line.cursor > 0) el->line.cursor = step_backward(el, el->line.cursor);
         refresh_line(el);
     }
     return CC_NORM;
@@ -1988,23 +2243,27 @@ static unsigned char vi_dot_repeat(EditLine *el, int c) {
     case 'x': {
         int i;
         for (i = 0; i < rcount && el->line.cursor < el->line.len; i++) {
+            size_t clen = (size_t)utf8_char_len(el->line.buffer, el->line.cursor, el->line.len);
+            if (clen == 0) clen = 1;
             memmove(el->line.buffer + el->line.cursor,
-                    el->line.buffer + el->line.cursor + 1,
-                    el->line.len - el->line.cursor);
-            el->line.len--;
+                    el->line.buffer + el->line.cursor + clen,
+                    el->line.len - el->line.cursor - clen + 1);
+            el->line.len -= clen;
         }
         if (el->line.cursor >= el->line.len && el->line.len > 0)
-            el->line.cursor = el->line.len - 1;
+            el->line.cursor = utf8_prev(el->line.buffer, el->line.len);
         break;
     }
     case 'X': {
         int i;
         for (i = 0; i < rcount && el->line.cursor > 0; i++) {
-            el->line.cursor--;
-            memmove(el->line.buffer + el->line.cursor,
-                    el->line.buffer + el->line.cursor + 1,
-                    el->line.len - el->line.cursor);
-            el->line.len--;
+            size_t prev = step_backward(el, el->line.cursor);
+            size_t clen = el->line.cursor - prev;
+            memmove(el->line.buffer + prev,
+                    el->line.buffer + el->line.cursor,
+                    el->line.len - el->line.cursor + 1);
+            el->line.len -= clen;
+            el->line.cursor = prev;
         }
         break;
     }
@@ -2016,7 +2275,7 @@ static unsigned char vi_dot_repeat(EditLine *el, int c) {
         if (el->line.cursor < el->line.len) {
             el->line.len = el->line.cursor;
             el->line.buffer[el->line.len] = '\0';
-            if (el->line.cursor > 0) el->line.cursor--;
+            if (el->line.cursor > 0) el->line.cursor = step_backward(el, el->line.cursor);
         }
         break;
     case 'S':
@@ -2028,10 +2287,12 @@ static unsigned char vi_dot_repeat(EditLine *el, int c) {
     case 's': {
         int i;
         for (i = 0; i < rcount && el->line.cursor < el->line.len; i++) {
+            size_t clen = (size_t)utf8_char_len(el->line.buffer, el->line.cursor, el->line.len);
+            if (clen == 0) clen = 1;
             memmove(el->line.buffer + el->line.cursor,
-                    el->line.buffer + el->line.cursor + 1,
-                    el->line.len - el->line.cursor);
-            el->line.len--;
+                    el->line.buffer + el->line.cursor + clen,
+                    el->line.len - el->line.cursor - clen + 1);
+            el->line.len -= clen;
         }
         vi_enter_insert(el);
         break;
@@ -2041,7 +2302,8 @@ static unsigned char vi_dot_repeat(EditLine *el, int c) {
             unsigned char ch = (unsigned char)el->line.buffer[el->line.cursor];
             if (isupper(ch)) el->line.buffer[el->line.cursor] = (char)tolower(ch);
             else if (islower(ch)) el->line.buffer[el->line.cursor] = (char)toupper(ch);
-            if (el->line.cursor + 1 < el->line.len) el->line.cursor++;
+            if (step_forward(el, el->line.cursor) < el->line.len)
+                el->line.cursor = step_forward(el, el->line.cursor);
         }
         break;
     default:
@@ -2052,12 +2314,12 @@ static unsigned char vi_dot_repeat(EditLine *el, int c) {
     if (el->vi_repeat.insert_text && el->vi_repeat.insert_len > 0 &&
         (rcmd == 'i' || rcmd == 'a' || rcmd == 'I' || rcmd == 'A' ||
          rcmd == 'c' || rcmd == 'C' || rcmd == 's' || rcmd == 'S')) {
-        if (rcmd == 'a' && el->line.cursor < el->line.len) el->line.cursor++;
+        if (rcmd == 'a' && el->line.cursor < el->line.len) el->line.cursor = step_forward(el, el->line.cursor);
         if (rcmd == 'I') el->line.cursor = 0;
         if (rcmd == 'A') el->line.cursor = el->line.len;
         (void)insert_span(el, el->vi_repeat.insert_text, el->vi_repeat.insert_len);
         el->vi_mode = VI_COMMAND;
-        if (el->line.cursor > 0) el->line.cursor--;
+        if (el->line.cursor > 0) el->line.cursor = step_backward(el, el->line.cursor);
     }
 
     refresh_line(el);
@@ -2074,7 +2336,8 @@ static unsigned char vi_toggle_case(EditLine *el, int c) {
         ch = (unsigned char)el->line.buffer[el->line.cursor];
         if (isupper(ch)) el->line.buffer[el->line.cursor] = (char)tolower(ch);
         else if (islower(ch)) el->line.buffer[el->line.cursor] = (char)toupper(ch);
-        if (el->line.cursor + 1 < el->line.len) el->line.cursor++;
+        if (step_forward(el, el->line.cursor) < el->line.len)
+            el->line.cursor = step_forward(el, el->line.cursor);
         refresh_line(el);
     }
     return CC_NORM;
@@ -2188,7 +2451,7 @@ static unsigned char vi_replace_back(EditLine *el, int c) {
     (void)c;
     if (el->line.cursor > 0) {
         undo_push(el);
-        el->line.cursor--;
+        el->line.cursor = step_backward(el, el->line.cursor);
         refresh_line(el);
     }
     return CC_NORM;

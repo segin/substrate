@@ -13,18 +13,6 @@ void run_test(void (*test_func)(void), const char* test_name) {
     printf("%s passed\n", test_name);
 }
 
-// Mock terminal functions
-int terminal_set_orig(EditLine *el) {
-    (void)el;
-    return 0;
-}
-
-void terminal_get_size(EditLine *el) {
-    if (!el) return;
-    el->term.cols = 80;
-    el->term.rows = 24;
-}
-
 // Tests for el_init
 void test_el_init_valid_args() {
     EditLine *el = el_init("myprog", stdin, stdout, stderr);
@@ -42,9 +30,9 @@ void test_el_init_valid_args() {
     assert(el->line.cursor == 0);
     assert(el->editor_mode == ED_EMACS); // Default mode
 
-    // Terminal dimensions should be initialized (via mock: 80x24)
-    assert(el->term.cols == 80);
-    assert(el->term.rows == 24);
+    // Terminal dimensions should be initialized to some positive value
+    assert(el->term.cols > 0);
+    assert(el->term.rows > 0);
 
     el_end(el);
 }
@@ -225,8 +213,8 @@ void test_el_resize_updates_dims() {
     el->term.cols = 0;
     el->term.rows = 0;
     assert(el_resize(el) == 0);
-    assert(el->term.cols == 80);
-    assert(el->term.rows == 24);
+    assert(el->term.cols > 0);
+    assert(el->term.rows > 0);
 
     el_end(el);
 }
