@@ -992,7 +992,7 @@
             - [ ] **Cursor Control:** (REQ: REQ-03-0691)
                 - [x] Read/write hardware cursor position (CRTC registers 0x0E/0x0F). (REQ: REQ-03-0692)
                 - [x] Cursor shape control (underline, block, invisible). (REQ: REQ-03-0693)
-                - [ ] Cursor blink enable/disable. (REQ: REQ-03-0694)
+                - [x] Cursor blink enable/disable. <!-- sys/include/sys/vt.h, sys/include/sys/vtio.h, sys/drivers/console/vt.c, sys/drivers/video/hw_text.c, sys/kern/time.c, tests/sys/host_test_hw_text.c, tests/sys/host_test_itimer.c --> (REQ: REQ-03-0694)
             - [ ] **Scrolling:** (REQ: REQ-03-0695, REQ-03-0826)
                 - [x] Software scroll (memmove video buffer). (REQ: REQ-03-0696)
                 - [ ] Hardware scroll (CRTC start address register). (REQ: REQ-03-0697)

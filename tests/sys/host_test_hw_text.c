@@ -29,6 +29,10 @@ static uint8_t mock_last_crtc_index;
 static uint8_t mock_last_ac_index;
 static int mock_ac_expect_data;
 
+#ifndef HZ
+#define HZ 100
+#endif
+
 #define _IO_H
 static inline uint8_t inb(uint16_t port) {
     if (port == VGA_CRTC_DATA_COLOR) {
@@ -324,12 +328,49 @@ static void test_vt_tty_ioctl_toggles_blink_mode(void) {
     assert((mock_ac_regs[VGA_AC_MODE_CONTROL] & VGA_AC_MODE_CTRL_BLINK) == 0);
 }
 
+static void test_vt_tty_ioctl_toggles_cursor_blink_mode(void) {
+    struct tty tty;
+    int value;
+
+    reset_state();
+    memset(&tty, 0, sizeof(tty));
+    tty.driver_data = &mock_vt;
+
+    value = 0;
+    assert(vt_tty_ioctl(&tty, VTIOCGCURBLINK, (unsigned long)&value) == 0);
+    assert(value == 1);
+
+    value = 0;
+    assert(vt_tty_ioctl(&tty, VTIOCSCURBLINK, (unsigned long)&value) == 0);
+    value = 1;
+    assert(vt_tty_ioctl(&tty, VTIOCGCURBLINK, (unsigned long)&value) == 0);
+    assert(value == 0);
+
+    mock_crtc_regs[VGA_CRTC_CURSOR_START] = 0;
+    for (int i = 0; i < (HZ / 2); i++) {
+        hw_text_tick();
+    }
+    assert((mock_crtc_regs[VGA_CRTC_CURSOR_START] & 0x20U) == 0);
+
+    value = 1;
+    assert(vt_tty_ioctl(&tty, VTIOCSCURBLINK, (unsigned long)&value) == 0);
+    for (int i = 0; i < (HZ / 2); i++) {
+        hw_text_tick();
+    }
+    assert((mock_crtc_regs[VGA_CRTC_CURSOR_START] & 0x20U) != 0);
+    for (int i = 0; i < (HZ / 2); i++) {
+        hw_text_tick();
+    }
+    assert((mock_crtc_regs[VGA_CRTC_CURSOR_START] & 0x20U) == 0);
+}
+
 int main(void) {
     test_hw_text_bulk_write_updates_buffer_and_cursor();
     test_console_backend_shim_uses_bulk_write_path();
     test_tab_width_is_configurable_per_vt();
     test_vt_tty_ioctl_exposes_vga_controls();
     test_vt_tty_ioctl_toggles_blink_mode();
+    test_vt_tty_ioctl_toggles_cursor_blink_mode();
     puts("host_test_hw_text: PASS");
     return 0;
 }

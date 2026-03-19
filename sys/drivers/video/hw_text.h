@@ -13,6 +13,7 @@ void hw_text_set_color(uint8_t fg, uint8_t bg);
 int hw_text_set_tab_width(unsigned int width);
 unsigned int hw_text_get_tab_width(void);
 void hw_text_refresh_statusline(void);
+void hw_text_tick(void);
 void hw_text_tick_1hz(void);
 void hw_text_redraw_active(void);
 

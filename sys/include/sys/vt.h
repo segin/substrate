@@ -47,6 +47,7 @@ typedef struct vt_state {
     
     // Cursor visibility
     int cursor_visible; // 1=visible (default), 0=hidden
+    int cursor_blink;   // 1=blinking (default), 0=steady
     uint8_t tab_width; // Horizontal tab stop width in columns
     
     // DEC modes

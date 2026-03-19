@@ -15,7 +15,8 @@
 - the hardware-text attribute byte is treated as a 4-bit foreground plus 4-bit background palette, so ANSI SGR color changes can address the full 16 VGA text colors for both foreground and background.
 - the hardware-text backend exposes a bulk write path for both console logging and `/dev/ttyN` output, so multi-byte writes traverse the same ANSI parser and cursor-update logic as single-character output.
 - each VT carries its own configurable tab width, defaulting to `8` columns, and the hardware-text backend advances horizontal tab stops against that per-console setting.
-- the VGA text `tty_driver->ioctl()` path exposes backend-specific controls for per-VT tab width and cursor visibility, separate from generic termios handling.
+- the VGA text `tty_driver->ioctl()` path exposes backend-specific controls for per-VT tab width, cursor visibility, cursor blink, and text blink mode, separate from generic termios handling.
+- the VGA text backend advances cursor blink from the real timer tick path and keeps blink state per VT, so a steady cursor and a blinking cursor are both supported without reusing the text-attribute blink bit.
 - the VGA text backend programs the attribute-controller mode register so blink mode can be toggled on and off, allowing bright backgrounds when blink is disabled.
 - `Alt+F1..F12` switches the active VT.
 - `Shift+PageUp` and `Shift+PageDown` enter/exit scrollback and adjust the active VT scrollback view.

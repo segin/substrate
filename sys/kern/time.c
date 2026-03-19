@@ -380,6 +380,7 @@ void timer_tick_context(int is_usermode) {
     if (cpu_id == 0) {
         ticks++;
         sched_tick();
+        hw_text_tick();
         if ((ticks % (5 * HZ)) == 0) {
             sched_update_loadavg();
         }

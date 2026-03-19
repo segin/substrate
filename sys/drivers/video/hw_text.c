@@ -18,6 +18,7 @@
 #include <kern/time.h>
 #include <stdio.h>
 #include <sys/lock.h>
+#include <sys/param.h>
 #include <sys/kthread.h>
 #include <sys/tty.h>
 #include <sys/vt.h>
@@ -31,6 +32,8 @@ static volatile uint32_t hw_text_status_epoch = 0;
 static int hw_text_status_thread_started = 0;
 static int hw_text_tty_count = 0;
 static int hw_text_blink_enabled = 0;
+static uint8_t hw_text_cursor_blink_phase = 1;
+static uint32_t hw_text_cursor_blink_ticks = 0;
 
 #define HW_TEXT_STATUS_COLOR 0x70
 #define VGA_FONT_MEM_BASE ((volatile uint8_t *)(uintptr_t)0xC00A0000)
@@ -437,7 +440,8 @@ static void hw_text_update_cursor_locked(vt_state_t *vt) {
         hw_text_cursor_visible_locked(0);
         return;
     }
-    hw_text_cursor_visible_locked(vt->cursor_visible);
+    hw_text_cursor_visible_locked(vt->cursor_visible &&
+                                  (!vt->cursor_blink || hw_text_cursor_blink_phase));
 
     row = vt->row;
     col = vt->col;
@@ -992,6 +996,7 @@ static void cb_reset(void) {
     vt->scroll_top = 0;
     vt->scroll_bottom = vt_get_visible_height() - 1;
     vt->cursor_visible = 1;
+    vt->cursor_blink = 1;
     vt->autowrap = 1;
     vt->cursor_key_app = 0;
     vt->origin_mode = 0;
@@ -1218,6 +1223,18 @@ static int vt_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
     case VTIOCSBLINK:
         hw_text_set_blink_mode_locked(*value ? 1 : 0);
         return 0;
+    case VTIOCGCURBLINK:
+        *value = vt->cursor_blink ? 1 : 0;
+        return 0;
+    case VTIOCSCURBLINK:
+        vt->cursor_blink = *value ? 1 : 0;
+        if (!vt->cursor_blink) {
+            hw_text_cursor_blink_phase = 1;
+        }
+        if (vt->id == vt_get_active()) {
+            hw_text_update_cursor_locked(vt);
+        }
+        return 0;
     default:
         return -1;
     }
@@ -1291,6 +1308,38 @@ void hw_text_refresh_statusline(void) {
 
     spinlock_acquire(&hw_text_lock);
     hw_text_render_statusline_locked(vt);
+    hw_text_update_cursor_locked(vt);
+    spinlock_release(&hw_text_lock);
+}
+
+void hw_text_tick(void) {
+    vt_state_t *vt;
+    uint32_t blink_period = HZ / 2U;
+
+    if (!hw_text_active) {
+        return;
+    }
+
+    if (blink_period == 0) {
+        blink_period = 1;
+    }
+
+    hw_text_cursor_blink_ticks++;
+    if (hw_text_cursor_blink_ticks < blink_period) {
+        return;
+    }
+    hw_text_cursor_blink_ticks = 0;
+
+    vt = vt_get_state(vt_get_active());
+    if (!vt || !vt->cursor_blink) {
+        if (!hw_text_cursor_blink_phase) {
+            hw_text_cursor_blink_phase = 1;
+        }
+        return;
+    }
+
+    hw_text_cursor_blink_phase ^= 1U;
+    spinlock_acquire(&hw_text_lock);
     hw_text_update_cursor_locked(vt);
     spinlock_release(&hw_text_lock);
 }
@@ -1391,6 +1440,8 @@ void hw_text_init(void) {
 
     hw_text_active = 1;
     hw_text_set_blink_mode_locked(0);
+    hw_text_cursor_blink_phase = 1;
+    hw_text_cursor_blink_ticks = 0;
     console_register(&vt_kprint_backend);
 
     hw_text_redraw_active();
