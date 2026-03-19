@@ -1150,7 +1150,7 @@
                     - [x] DSR (device status report). <!-- sys/include/kern/ansi_handler.h, sys/drivers/console/ansi_handler.c, sys/drivers/video/hw_text.c, tests/sys/host_test_ansi.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0849)
                     - [x] CPR (cursor position report). <!-- sys/drivers/console/ansi_handler.c, tests/sys/host_test_ansi.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0850)
                     - [x] DA (device attributes). <!-- sys/drivers/console/ansi_handler.c, tests/sys/host_test_ansi.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0851)
-                    - [ ] DECID (terminal ID). (REQ: REQ-03-0852)
+                    - [x] DECID (terminal ID). <!-- sys/drivers/console/ansi_handler.c, tests/sys/host_test_ansi.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0852)
             - [ ] **TTY Binding:** (REQ: REQ-03-0703, REQ-03-0853, REQ-03-0879)
                 - [ ] Register as `tty_driver` for `/dev/tty[1-N]`. (REQ: REQ-03-0704, REQ-03-0854)
                 - [ ] `tty_driver->write()` with escape sequence processing. (REQ: REQ-03-0855)

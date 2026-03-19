@@ -412,6 +412,10 @@ void ansi_process(struct ansi_ctx *ctx, char c, const struct ansi_callbacks *cb)
             if (cb->reset) cb->reset();
             ctx->state = ANSI_NORMAL;
             break;
+        case 'Z': /* DECID - Identify terminal */
+            ansi_respond(cb, "\x1b[?6c", 5);
+            ctx->state = ANSI_NORMAL;
+            break;
         case ']': /* OSC - ignore until ST */
             ctx->state = ANSI_OSC;
             break;
