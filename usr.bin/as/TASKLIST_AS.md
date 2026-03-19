@@ -168,7 +168,7 @@ Validation gate for Section 1:
 ### 5.3 Diagnostics
 - [ ] Normalize diagnostics for unsupported mnemonics, operands, and ISA-level failures.
 - [ ] Ensure Intel and AT&T syntax errors identify the same root cause cleanly.
-- [ ] Add tests for message stability on:
+- [x] Add tests for message stability on:
   - unsupported mnemonic
   - bad register class
   - ambiguous memory size
