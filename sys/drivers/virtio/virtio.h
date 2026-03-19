@@ -19,6 +19,7 @@
 #define VIRTIO_PCI_DEVICE_ID_BLK  0x1001
 #define VIRTIO_PCI_DEVICE_ID_SCSI 0x1008
 #define VIRTIO_PCI_DEVICE_ID_9P   0x1009
+#define VIRTIO_PCI_DEVICE_ID_GPU  0x1010
 
 // I/O Register Offsets (Legacy)
 #define VIRTIO_REG_HOST_FEATURES  0x00
@@ -76,9 +77,13 @@ void virtio_blk_setup(uint8_t bus, uint8_t slot, uint8_t func);
 
 // VirtIO 9P
 void virtio_9p_setup(uint8_t bus, uint8_t slot, uint8_t func);
+int virtio_9p_send(void *out_buf, uint32_t out_len, void *in_buf, uint32_t in_len);
 
 // VirtIO SCSI
 void virtio_scsi_setup(uint8_t bus, uint8_t slot, uint8_t func);
 void virtio_scsi_poll(void);
+
+// VirtIO GPU
+int virtio_gpu_setup(uint8_t bus, uint8_t slot, uint8_t func);
 
 #endif

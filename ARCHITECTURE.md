@@ -79,6 +79,7 @@ The kernel remains monolithic and is organized into logical layers:
 - **Device Model:** See `docs/specs/driver_model.md`.
 - **Console and VT:** See `docs/specs/driver_tty.md` and `docs/specs/driver_vt.md`.
 - **Framebuffer Rendering:** Font parsers, glyph cache, blitting operations, and attributed character rendering. See `docs/specs/driver_fb_console.md`.
+- **VirtIO Display Transport:** Legacy PCI VirtIO-GPU discovery and queue bring-up are tracked in `docs/specs/driver_virtio_gpu.md`.
 - **Personalities:** See `docs/specs/personality_targets.md` and `docs/specs/personality_elks.md`.
 
 ## 6. Userland and Libraries
