@@ -269,6 +269,13 @@ static void handle_csi(struct ansi_ctx *ctx, char c,
             cb->move_cursor(cur_row, n - 1 < width ? n - 1 : width - 1);
         break;
 
+    case 'g': /* TBC - Tab Clear */
+        n = (ctx->param_count > 0) ? ctx->params[0] : 0;
+        if (cb->clear_tab_stops) {
+            cb->clear_tab_stops(n);
+        }
+        break;
+
     case 'd': /* VPA - Vertical Position Absolute */
         n = (ctx->param_count > 0) ? ctx->params[0] : 1;
         if (n < 1) n = 1;

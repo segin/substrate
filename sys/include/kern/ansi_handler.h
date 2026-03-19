@@ -43,6 +43,7 @@ struct ansi_callbacks {
     void (*save_cursor)(void);
     void (*restore_cursor)(void);
     void (*set_tab_stop)(void);
+    void (*clear_tab_stops)(int mode);
     void (*set_cursor_visible)(int visible);
     void (*insert_lines)(int n);
     void (*delete_lines)(int n);

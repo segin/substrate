@@ -1143,7 +1143,7 @@
                     - [ ] UTF-8 decoding and Unicode support. (REQ: REQ-03-0842)
                 - [ ] **Tabs:** (REQ: REQ-03-0843)
                     - [x] HTS (horizontal tab set). <!-- sys/include/kern/ansi_handler.h, sys/drivers/console/ansi_handler.c, sys/drivers/video/hw_text.c, tests/sys/host_test_ansi.c, tests/sys/host_test_hw_text.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0844)
-                    - [ ] TBC (tab clear: current, all). (REQ: REQ-03-0845)
+                    - [x] TBC (tab clear: current, all). <!-- sys/include/kern/ansi_handler.h, sys/drivers/console/ansi_handler.c, sys/drivers/video/hw_text.c, tests/sys/host_test_ansi.c, tests/sys/host_test_hw_text.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0845)
                     - [ ] CHT/CBT (cursor horizontal tab forward/back). (REQ: REQ-03-0846)
                     - [x] Default tab stops (every 8 columns). <!-- sys/include/sys/vt.h, sys/drivers/console/vt.c, sys/drivers/video/hw_text.c, tests/sys/host_test_hw_text.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0847)
                 - [x] **Reports:** <!-- sys/drivers/console/ansi_handler.c, sys/drivers/video/hw_text.c, tests/sys/host_test_ansi.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0848)

@@ -1033,6 +1033,23 @@ static void cb_set_tab_stop(void) {
     vt->tab_stops[vt->col / 32] |= (uint32_t)1U << (vt->col % 32);
 }
 
+static void cb_clear_tab_stops(int mode) {
+    vt_state_t *vt = current_vt_ctx;
+
+    if (!vt) {
+        return;
+    }
+
+    if (mode == 3) {
+        memset(vt->tab_stops, 0, sizeof(vt->tab_stops));
+        return;
+    }
+
+    if (mode == 0 && vt->col >= 0 && vt->col < vt_get_width()) {
+        vt->tab_stops[vt->col / 32] &= ~((uint32_t)1U << (vt->col % 32));
+    }
+}
+
 static void cb_set_attrs(uint16_t flags) {
     vt_state_t *vt = current_vt_ctx;
 
@@ -1307,6 +1324,7 @@ static const struct ansi_callbacks ansi_cb = {
     .save_cursor = cb_save_cursor,
     .restore_cursor = cb_restore_cursor,
     .set_tab_stop = cb_set_tab_stop,
+    .clear_tab_stops = cb_clear_tab_stops,
     .set_cursor_visible = cb_set_cursor_visible,
     .insert_lines = cb_insert_lines,
     .delete_lines = cb_delete_lines,
