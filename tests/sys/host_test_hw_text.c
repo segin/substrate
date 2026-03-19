@@ -316,6 +316,21 @@ static void test_tab_clear_current_and_all(void) {
     }
 }
 
+static void test_cursor_tab_forward_and_backward_use_bitmap(void) {
+    reset_state();
+
+    memset(mock_vt.tab_stops, 0, sizeof(mock_vt.tab_stops));
+    mock_vt.tab_stops[4 / 32] |= (uint32_t)1U << (4 % 32);
+    mock_vt.tab_stops[12 / 32] |= (uint32_t)1U << (12 % 32);
+    mock_vt.tab_stops[20 / 32] |= (uint32_t)1U << (20 % 32);
+
+    hw_text_write("\x1b[2I", 4);
+    assert(mock_vt.col == 12);
+
+    hw_text_write("\x1b[Z", 3);
+    assert(mock_vt.col == 4);
+}
+
 static void test_vt_tty_ioctl_exposes_vga_controls(void) {
     struct tty tty;
     int value;
@@ -453,6 +468,7 @@ int main(void) {
     test_default_tab_stops_advance_every_eight_columns();
     test_escape_h_sets_current_tab_stop();
     test_tab_clear_current_and_all();
+    test_cursor_tab_forward_and_backward_use_bitmap();
     test_tab_width_is_configurable_per_vt();
     test_vt_tty_ioctl_exposes_vga_controls();
     test_vt_tty_ioctl_toggles_blink_mode();

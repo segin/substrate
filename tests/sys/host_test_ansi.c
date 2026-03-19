@@ -25,6 +25,8 @@ static int scroll_region_top = -1;
 static int scroll_region_bottom = -1;
 static int tab_stop_set = 0;
 static int tab_stop_clear_mode = -1;
+static int tab_forward_count = 0;
+static int tab_backward_count = 0;
 
 /* Callback implementations */
 static void mock_putc(char c) {
@@ -81,6 +83,14 @@ static void mock_clear_tab_stops(int mode) {
     tab_stop_clear_mode = mode;
 }
 
+static void mock_tab_forward(int count) {
+    tab_forward_count = count;
+}
+
+static void mock_tab_backward(int count) {
+    tab_backward_count = count;
+}
+
 static void mock_move_cursor(int row, int col) {
     mock_cursor_row = row;
     mock_cursor_col = col;
@@ -120,7 +130,9 @@ static struct ansi_callbacks callbacks = {
     .set_attrs = mock_set_attrs,
     .set_scroll_region = mock_set_scroll_region,
     .set_tab_stop = mock_set_tab_stop,
-    .clear_tab_stops = mock_clear_tab_stops
+    .clear_tab_stops = mock_clear_tab_stops,
+    .tab_forward = mock_tab_forward,
+    .tab_backward = mock_tab_backward
 };
 
 static void reset_mocks() {
@@ -142,6 +154,8 @@ static void reset_mocks() {
     scroll_region_bottom = -1;
     tab_stop_set = 0;
     tab_stop_clear_mode = -1;
+    tab_forward_count = 0;
+    tab_backward_count = 0;
 }
 
 static void run_test(const char *name, void (*test_func)(void)) {
@@ -308,6 +322,21 @@ static void test_tab_clear_modes(void) {
     assert(tab_stop_clear_mode == 3);
 }
 
+static void test_cursor_tab_forward_and_backward(void) {
+    struct ansi_ctx ctx;
+    ansi_init(&ctx);
+    reset_mocks();
+
+    const char *seq = "\x1b[2I";
+    while (*seq) ansi_process(&ctx, *seq++, &callbacks);
+    assert(tab_forward_count == 2);
+
+    reset_mocks();
+    seq = "\x1b[3Z";
+    while (*seq) ansi_process(&ctx, *seq++, &callbacks);
+    assert(tab_backward_count == 3);
+}
+
 static void test_decid_report(void) {
     struct ansi_ctx ctx;
     ansi_init(&ctx);
@@ -442,6 +471,7 @@ int main(void) {
     run_test("Device Attributes", test_device_attributes_report);
     run_test("Horizontal Tab Set", test_horizontal_tab_set);
     run_test("Tab Clear", test_tab_clear_modes);
+    run_test("Cursor Tab Forward/Backward", test_cursor_tab_forward_and_backward);
     run_test("DECID", test_decid_report);
     run_test("Erase Display Default", test_erase_display_default_mode);
     run_test("Erase Line Modes", test_erase_line_modes);

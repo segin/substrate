@@ -269,6 +269,13 @@ static void handle_csi(struct ansi_ctx *ctx, char c,
             cb->move_cursor(cur_row, n - 1 < width ? n - 1 : width - 1);
         break;
 
+    case 'I': /* CHT - Cursor Horizontal Forward Tabulation */
+        n = (ctx->param_count > 0 && ctx->params[0] > 0) ? ctx->params[0] : 1;
+        if (cb->tab_forward) {
+            cb->tab_forward(n);
+        }
+        break;
+
     case 'g': /* TBC - Tab Clear */
         n = (ctx->param_count > 0) ? ctx->params[0] : 0;
         if (cb->clear_tab_stops) {
@@ -281,6 +288,13 @@ static void handle_csi(struct ansi_ctx *ctx, char c,
         if (n < 1) n = 1;
         if (cb->move_cursor)
             cb->move_cursor(n - 1 < height ? n - 1 : height - 1, cur_col);
+        break;
+
+    case 'Z': /* CBT - Cursor Backward Tabulation */
+        n = (ctx->param_count > 0 && ctx->params[0] > 0) ? ctx->params[0] : 1;
+        if (cb->tab_backward) {
+            cb->tab_backward(n);
+        }
         break;
 
     case 'L': /* IL - Insert Lines */

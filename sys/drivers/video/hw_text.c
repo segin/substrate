@@ -112,6 +112,21 @@ static int hw_text_next_tab_stop(const vt_state_t *vt, int col) {
     return limit - 1;
 }
 
+static int hw_text_prev_tab_stop(const vt_state_t *vt, int col) {
+    int prev;
+
+    if (!vt) {
+        return col;
+    }
+
+    for (prev = col - 1; prev >= 0; prev--) {
+        if (vt->tab_stops[prev / 32] & ((uint32_t)1U << (prev % 32))) {
+            return prev;
+        }
+    }
+    return 0;
+}
+
 static void hw_text_apply_tty_winsize(struct tty *tty) {
     if (!tty) {
         return;
@@ -1050,6 +1065,32 @@ static void cb_clear_tab_stops(int mode) {
     }
 }
 
+static void cb_tab_forward(int count) {
+    vt_state_t *vt = current_vt_ctx;
+
+    if (!vt) {
+        return;
+    }
+
+    while (count-- > 0) {
+        vt->col = hw_text_next_tab_stop(vt, vt->col);
+    }
+    hw_text_update_cursor_locked(vt);
+}
+
+static void cb_tab_backward(int count) {
+    vt_state_t *vt = current_vt_ctx;
+
+    if (!vt) {
+        return;
+    }
+
+    while (count-- > 0) {
+        vt->col = hw_text_prev_tab_stop(vt, vt->col);
+    }
+    hw_text_update_cursor_locked(vt);
+}
+
 static void cb_set_attrs(uint16_t flags) {
     vt_state_t *vt = current_vt_ctx;
 
@@ -1325,6 +1366,8 @@ static const struct ansi_callbacks ansi_cb = {
     .restore_cursor = cb_restore_cursor,
     .set_tab_stop = cb_set_tab_stop,
     .clear_tab_stops = cb_clear_tab_stops,
+    .tab_forward = cb_tab_forward,
+    .tab_backward = cb_tab_backward,
     .set_cursor_visible = cb_set_cursor_visible,
     .insert_lines = cb_insert_lines,
     .delete_lines = cb_delete_lines,
