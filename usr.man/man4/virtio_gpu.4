@@ -28,8 +28,10 @@ transitions the device to
 .Dv DRIVER_OK
 .El
 .Pp
-The driver does not yet create scanout resources, query display modes, flush
-dirty rectangles, or upload cursor images.
+The driver can create a basic 2D resource, attach a single backing entry, and
+bind that resource to scanout 0.
+It does not yet query display modes, transfer dirty rectangles to the host, or
+upload cursor images.
 .Sh HARDWARE
 The
 .Nm

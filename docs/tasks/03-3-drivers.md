@@ -1050,7 +1050,7 @@
                     - [x] Bank switching (legacy mode fallback). <!-- sys/drivers/video/bga.c, tests/sys/host_test_bga.c, tests/sys/Makefile, usr.man/man4/vga.4 --> (REQ: REQ-03-0749)
                 - [ ] **VirtIO-GPU:** (REQ: REQ-03-0750)
                     - [x] VirtIO device discovery and setup. <!-- sys/drivers/virtio/virtio.c, sys/drivers/virtio/virtio.h, sys/drivers/virtio/virtio_gpu.c, tests/sys/host_test_virtio_gpu.c, tests/sys/Makefile, docs/specs/driver_virtio_gpu.md, usr.man/man4/virtio_gpu.4 --> (REQ: REQ-03-0751)
-                    - [ ] Resource creation (2D scanout). (REQ: REQ-03-0752)
+                    - [x] Resource creation (2D scanout). <!-- sys/drivers/virtio/virtio.h, sys/drivers/virtio/virtio_gpu.c, tests/sys/host_test_virtio_gpu.c, docs/specs/driver_virtio_gpu.md, usr.man/man4/virtio_gpu.4 --> (REQ: REQ-03-0752)
                     - [ ] Transfer to host (flush dirty regions). (REQ: REQ-03-0753)
                     - [ ] Display info query (resolution, format). (REQ: REQ-03-0754)
                     - [ ] Cursor image upload and positioning. (REQ: REQ-03-0755)

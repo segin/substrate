@@ -13,8 +13,20 @@ transport setup:
 - allocate and register queue `1` (cursorq)
 - transition the device to `DRIVER_OK`
 
-Resource creation, scanout binding, dirty-region flush, display-info queries,
-and cursor image handling are separate follow-on steps.
+Dirty-region flush, display-info queries, and cursor image handling are
+separate follow-on steps.
+
+## 2D Scanout Resource Bring-Up
+
+The driver can now construct a minimal 2D scanout resource on control queue
+`0` by issuing, in order:
+
+- `RESOURCE_CREATE_2D`
+- `RESOURCE_ATTACH_BACKING`
+- `SET_SCANOUT`
+
+This stage binds resource ID `N` to scanout `0` using a single backing entry
+supplied by the caller. It does not transfer pixels to the host.
 
 ## Transport Contract
 
@@ -39,3 +51,4 @@ If either required queue is unavailable or cannot be allocated, the driver sets
 - both queue PFNs are written
 - missing I/O BAR is rejected
 - missing cursor queue is rejected and sets failed status
+- 2D scanout creation emits the expected control-queue command sequence

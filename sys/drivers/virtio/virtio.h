@@ -85,5 +85,10 @@ void virtio_scsi_poll(void);
 
 // VirtIO GPU
 int virtio_gpu_setup(uint8_t bus, uint8_t slot, uint8_t func);
+int virtio_gpu_create_scanout_resource(uint32_t resource_id,
+                                       uint32_t width,
+                                       uint32_t height,
+                                       void *backing,
+                                       size_t backing_len);
 
 #endif
