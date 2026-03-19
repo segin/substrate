@@ -28,6 +28,9 @@
 static int cursor_x = 0;
 static int cursor_y = 0;
 static int view_y_offset = 0; /* Viewport Y offset for hardware scrolling */
+static int cursor_drawn = 0;
+static int cursor_draw_x = 0;
+static int cursor_draw_y = 0;
 static int dirty_valid = 0;
 static int dirty_x1 = 0;
 static int dirty_y1 = 0;
@@ -81,6 +84,84 @@ static void fb_console_mark_dirty(int x, int y, int w, int h) {
     if (y2 > dirty_y2) dirty_y2 = y2;
 }
 
+static void fb_console_xor_pixel(int x, int y) {
+    uintptr_t addr;
+    uint8_t *pixel;
+    uint8_t shift;
+    uint8_t mask;
+
+    if (x < 0 || y < 0 || x >= (int)fb.width || y >= (int)fb.height) {
+        return;
+    }
+
+    addr = (uintptr_t)fb.addr + (uintptr_t)y * fb.pitch;
+    switch (fb.bpp) {
+    case 32:
+        *(uint32_t *)(addr + (uintptr_t)x * 4U) ^= 0xFFFFFFFFU;
+        break;
+    case 24:
+        pixel = (uint8_t *)(addr + (uintptr_t)x * 3U);
+        pixel[0] ^= 0xFFU;
+        pixel[1] ^= 0xFFU;
+        pixel[2] ^= 0xFFU;
+        break;
+    case 16:
+    case 15:
+        *(uint16_t *)(addr + (uintptr_t)x * 2U) ^= 0xFFFFU;
+        break;
+    case 8:
+        *(uint8_t *)(addr + (uintptr_t)x) ^= 0xFFU;
+        break;
+    case 4:
+        pixel = (uint8_t *)(addr + (uintptr_t)(x / 2));
+        shift = (uint8_t)((1 - (x % 2)) * 4);
+        mask = (uint8_t)(0x0FU << shift);
+        *pixel ^= mask;
+        break;
+    case 2:
+        pixel = (uint8_t *)(addr + (uintptr_t)(x / 4));
+        shift = (uint8_t)((3 - (x % 4)) * 2);
+        mask = (uint8_t)(0x03U << shift);
+        *pixel ^= mask;
+        break;
+    case 1:
+        pixel = (uint8_t *)(addr + (uintptr_t)(x / 8));
+        mask = (uint8_t)(1U << (7 - (x % 8)));
+        *pixel ^= mask;
+        break;
+    default:
+        break;
+    }
+}
+
+static void fb_console_toggle_cursor_at(int x, int y) {
+    int py;
+    int px;
+
+    for (py = FB_FONT_HEIGHT - 2; py < FB_FONT_HEIGHT; py++) {
+        for (px = 0; px < FB_FONT_WIDTH; px++) {
+            fb_console_xor_pixel(x + px, y + py);
+        }
+    }
+    fb_console_mark_dirty(x, y + FB_FONT_HEIGHT - 2, FB_FONT_WIDTH, 2);
+}
+
+static void fb_console_hide_cursor(void) {
+    if (!cursor_drawn) {
+        return;
+    }
+
+    fb_console_toggle_cursor_at(cursor_draw_x, cursor_draw_y);
+    cursor_drawn = 0;
+}
+
+static void fb_console_show_cursor(void) {
+    cursor_draw_x = cursor_x;
+    cursor_draw_y = cursor_y + view_y_offset;
+    fb_console_toggle_cursor_at(cursor_draw_x, cursor_draw_y);
+    cursor_drawn = 1;
+}
+
 static unsigned int fb_console_flush_period_ticks(void) {
     unsigned int hz = get_hz();
     unsigned int period = (hz + FB_CONSOLE_FLUSH_HZ - 1U) / FB_CONSOLE_FLUSH_HZ;
@@ -112,6 +193,7 @@ static void fb_console_flush_dirty_internal(void) {
 /* ==================== Console Backend ==================== */
 
 static void fb_console_clear(void) {
+    cursor_drawn = 0;
     if (fb.set_viewport) {
         view_y_offset = 0;
         fb.set_viewport(0, 0);
@@ -128,6 +210,7 @@ static void fb_console_clear(void) {
         // failed or not supported
     }
     fb_console_mark_dirty(0, 0, (int)fb.width, (int)fb.height);
+    fb_console_show_cursor();
 }
 
 static console_backend_t fb_console_backend = {
@@ -155,6 +238,8 @@ void fb_console_init(void) {
 
 void fb_putc(char c, uint32_t fg, uint32_t bg) {
     if (!fb_active) return;
+
+    fb_console_hide_cursor();
 
     if (c == '\n') {
         cursor_x = 0;
@@ -253,6 +338,8 @@ void fb_putc(char c, uint32_t fg, uint32_t bg) {
             cursor_y -= FB_FONT_HEIGHT;
         }
     }
+
+    fb_console_show_cursor();
 }
 
 void fb_write(const char *s, size_t n) {
@@ -266,6 +353,8 @@ void fb_write(const char *s, size_t n) {
 
 void fb_putc_attr(char c, uint32_t fg, uint32_t bg, uint8_t attr) {
     if (!fb_active) return;
+
+    fb_console_hide_cursor();
 
     /* Handle reverse video: swap fg and bg */
     if (attr & FB_ATTR_REVERSE) {
@@ -382,6 +471,8 @@ void fb_putc_attr(char c, uint32_t fg, uint32_t bg, uint8_t attr) {
             cursor_y -= FB_FONT_HEIGHT;
         }
     }
+
+    fb_console_show_cursor();
 }
 
 int fb_console_dirty_pending(void) {

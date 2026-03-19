@@ -12,6 +12,7 @@ const uint8_t font_8x8[256 * 8] = {0};
 
 fb_info_t fb;
 int fb_active = 1;
+static uint32_t fb_mem[640 * 480];
 
 static console_backend_t *registered_backend;
 static int viewport_x;
@@ -23,13 +24,13 @@ static int flush_w;
 static int flush_h;
 
 void fb_putpixel(int x, int y, uint32_t color) {
-    (void)x;
-    (void)y;
-    (void)color;
+    fb_mem[(size_t)y * 640U + (size_t)x] = color;
 }
 
 void fb_clear(uint32_t color) {
-    (void)color;
+    for (size_t i = 0; i < (sizeof(fb_mem) / sizeof(fb_mem[0])); i++) {
+        fb_mem[i] = color;
+    }
 }
 
 static void mock_flush(int x, int y, int w, int h) {
@@ -70,6 +71,7 @@ static void reset_state(void) {
     fb.virt_height = 480;
     fb.pitch = 640 * 4;
     fb.bpp = 32;
+    fb.addr = fb_mem;
     fb_active = 1;
     registered_backend = NULL;
     viewport_x = -1;
@@ -83,6 +85,7 @@ static void reset_state(void) {
     cursor_y = 0;
     view_y_offset = 0;
     fb_console_reset_dirty();
+    memset(fb_mem, 0, sizeof(fb_mem));
 }
 
 static void test_clear_marks_full_screen_dirty(void) {
@@ -117,14 +120,14 @@ static void test_writes_expand_dirty_rectangle(void) {
     fb_console_get_dirty_rect(&x, &y, &w, &h);
     assert(x == 0);
     assert(y == 0);
-    assert(w == 8);
+    assert(w == 16);
     assert(h == 16);
 
     fb_putc('B', FB_COLOR_WHITE, FB_COLOR_BLACK);
     fb_console_get_dirty_rect(&x, &y, &w, &h);
     assert(x == 0);
     assert(y == 0);
-    assert(w == 16);
+    assert(w == 24);
     assert(h == 16);
 }
 
@@ -142,15 +145,28 @@ static void test_tick_batches_and_flushes_dirty_rectangle(void) {
     assert(flush_calls == 1);
     assert(flush_x == 0);
     assert(flush_y == 0);
-    assert(flush_w == 16);
+    assert(flush_w == 24);
     assert(flush_h == 16);
     assert(fb_console_dirty_pending() == 0);
+}
+
+static void test_software_cursor_xor_is_reversible(void) {
+    reset_state();
+
+    fb_console_show_cursor();
+    assert(fb_mem[14U * 640U] == 0xFFFFFFFFU);
+    assert(fb_mem[15U * 640U] == 0xFFFFFFFFU);
+
+    fb_console_hide_cursor();
+    assert(fb_mem[14U * 640U] == 0);
+    assert(fb_mem[15U * 640U] == 0);
 }
 
 int main(void) {
     test_clear_marks_full_screen_dirty();
     test_writes_expand_dirty_rectangle();
     test_tick_batches_and_flushes_dirty_rectangle();
+    test_software_cursor_xor_is_reversible();
     puts("host_test_fb_console: PASS");
     return 0;
 }

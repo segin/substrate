@@ -85,6 +85,14 @@ present step may provide an `fb.flush(x, y, w, h)` callback; the console batches
 all writes observed during the interval into one rectangle and submits that
 region on the next flush tick.
 
+## Software Cursor
+The framebuffer console uses a software cursor when no hardware cursor path is
+available. The current implementation renders an underline cursor by XORing the
+bottom two pixel rows of the active text cell. This keeps the cursor visible on
+top of arbitrary foreground and background colors without requiring a separate
+backing store. Cursor hide/show operations participate in dirty-rectangle
+tracking so deferred presentation still flushes the correct bounds.
+
 ## Integration
 The `vga_write` function is hooked to automatically use the framebuffer console if initialized and active. This allows seamless kernel logging through the standard console path.
 
