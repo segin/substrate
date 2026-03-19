@@ -150,23 +150,26 @@ static void test_tick_batches_and_flushes_dirty_rectangle(void) {
     assert(fb_console_dirty_pending() == 0);
 }
 
-static void test_software_cursor_xor_is_reversible(void) {
+static void test_software_cursor_preserves_background(void) {
     reset_state();
 
+    fb_mem[14U * 640U] = 0x11223344U;
+    fb_mem[15U * 640U] = 0x55667788U;
+
     fb_console_show_cursor();
-    assert(fb_mem[14U * 640U] == 0xFFFFFFFFU);
-    assert(fb_mem[15U * 640U] == 0xFFFFFFFFU);
+    assert(fb_mem[14U * 640U] == (0x11223344U ^ 0xFFFFFFFFU));
+    assert(fb_mem[15U * 640U] == (0x55667788U ^ 0xFFFFFFFFU));
 
     fb_console_hide_cursor();
-    assert(fb_mem[14U * 640U] == 0);
-    assert(fb_mem[15U * 640U] == 0);
+    assert(fb_mem[14U * 640U] == 0x11223344U);
+    assert(fb_mem[15U * 640U] == 0x55667788U);
 }
 
 int main(void) {
     test_clear_marks_full_screen_dirty();
     test_writes_expand_dirty_rectangle();
     test_tick_batches_and_flushes_dirty_rectangle();
-    test_software_cursor_xor_is_reversible();
+    test_software_cursor_preserves_background();
     puts("host_test_fb_console: PASS");
     return 0;
 }

@@ -1089,7 +1089,7 @@
             - [ ] **Cursor:** (REQ: REQ-03-0788)
                 - [ ] **Software Cursor:** (REQ: REQ-03-0789)
                     - [x] XOR cursor rendering. <!-- sys/drivers/video/fb_console.c, tests/sys/host_test_fb_console.c, docs/specs/driver_fb_console.md --> (REQ: REQ-03-0790)
-                    - [ ] Cursor save/restore (background preservation). (REQ: REQ-03-0791)
+                    - [x] Cursor save/restore (background preservation). <!-- sys/drivers/video/fb_console.c, tests/sys/host_test_fb_console.c, docs/specs/driver_fb_console.md --> (REQ: REQ-03-0791)
                     - [ ] Cursor blink timer integration. (REQ: REQ-03-0792)
                 - [ ] **Hardware Cursor:** (REQ: REQ-03-0793)
                     - [ ] Cursor image upload (ARGB format). (REQ: REQ-03-0794)
