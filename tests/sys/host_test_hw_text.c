@@ -292,6 +292,15 @@ static void test_default_tab_stops_advance_every_eight_columns(void) {
     assert(mock_vt.col == 9);
 }
 
+static void test_escape_h_sets_current_tab_stop(void) {
+    reset_state();
+
+    mock_vt.col = 5;
+    hw_text_write("\x1bH", 2);
+
+    assert((mock_vt.tab_stops[5 / 32] & ((uint32_t)1U << (5 % 32))) != 0);
+}
+
 static void test_vt_tty_ioctl_exposes_vga_controls(void) {
     struct tty tty;
     int value;
@@ -427,6 +436,7 @@ int main(void) {
     test_hw_text_bulk_write_updates_buffer_and_cursor();
     test_console_backend_shim_uses_bulk_write_path();
     test_default_tab_stops_advance_every_eight_columns();
+    test_escape_h_sets_current_tab_stop();
     test_tab_width_is_configurable_per_vt();
     test_vt_tty_ioctl_exposes_vga_controls();
     test_vt_tty_ioctl_toggles_blink_mode();

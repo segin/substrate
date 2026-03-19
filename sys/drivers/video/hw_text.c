@@ -1023,6 +1023,16 @@ static void cb_restore_cursor(void) {
     hw_text_update_cursor_locked(vt);
 }
 
+static void cb_set_tab_stop(void) {
+    vt_state_t *vt = current_vt_ctx;
+
+    if (!vt || vt->col < 0 || vt->col >= vt_get_width()) {
+        return;
+    }
+
+    vt->tab_stops[vt->col / 32] |= (uint32_t)1U << (vt->col % 32);
+}
+
 static void cb_set_attrs(uint16_t flags) {
     vt_state_t *vt = current_vt_ctx;
 
@@ -1296,6 +1306,7 @@ static const struct ansi_callbacks ansi_cb = {
     .get_attrs = cb_get_attrs,
     .save_cursor = cb_save_cursor,
     .restore_cursor = cb_restore_cursor,
+    .set_tab_stop = cb_set_tab_stop,
     .set_cursor_visible = cb_set_cursor_visible,
     .insert_lines = cb_insert_lines,
     .delete_lines = cb_delete_lines,

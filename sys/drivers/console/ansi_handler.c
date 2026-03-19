@@ -400,6 +400,10 @@ void ansi_process(struct ansi_ctx *ctx, char c, const struct ansi_callbacks *cb)
             if (cb->restore_cursor) cb->restore_cursor();
             ctx->state = ANSI_NORMAL;
             break;
+        case 'H': /* HTS - Horizontal Tab Set */
+            if (cb->set_tab_stop) cb->set_tab_stop();
+            ctx->state = ANSI_NORMAL;
+            break;
         case 'D': /* IND - Index (scroll up at bottom) */
             if (cb->index_down) cb->index_down();
             ctx->state = ANSI_NORMAL;

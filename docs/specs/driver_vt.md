@@ -16,7 +16,7 @@
 - the VGA text backend preserves SGR attribute state per VT and approximates bold, reverse video, and underline using palette/intensity transforms when a true text-mode rendering primitive is unavailable.
 - the hardware-text backend exposes a bulk write path for both console logging and `/dev/ttyN` output, so multi-byte writes traverse the same ANSI parser and cursor-update logic as single-character output.
 - ANSI status replies that are terminal input rather than display output, such as `CSI 5 n`, `CSI 6 n`, `CSI c`, and `ESC Z`, are reinjected into the active VT tty input queue instead of being rendered on screen.
-- each VT carries its own tab-stop bitmap, seeded with default stops every `8` columns; the existing tab-width control resets that bitmap to a uniform spacing when requested.
+- each VT carries its own tab-stop bitmap, seeded with default stops every `8` columns; `ESC H` can set an additional stop at the current column, and the existing tab-width control resets the bitmap to a uniform spacing when requested.
 - the VGA text `tty_driver->ioctl()` path exposes backend-specific controls for per-VT tab width, cursor visibility, cursor blink, and text blink mode, separate from generic termios handling.
 - the VGA text backend advances cursor blink from the real timer tick path and keeps blink state per VT, so a steady cursor and a blinking cursor are both supported without reusing the text-attribute blink bit.
 - the VGA text backend programs the attribute-controller mode register so blink mode can be toggled on and off, allowing bright backgrounds when blink is disabled.

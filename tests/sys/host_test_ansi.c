@@ -23,6 +23,7 @@ static int erase_display_mode = -1;
 static int erase_line_mode = -1;
 static int scroll_region_top = -1;
 static int scroll_region_bottom = -1;
+static int tab_stop_set = 0;
 
 /* Callback implementations */
 static void mock_putc(char c) {
@@ -71,6 +72,10 @@ static void mock_set_scroll_region(int top, int bottom) {
     scroll_region_bottom = bottom;
 }
 
+static void mock_set_tab_stop(void) {
+    tab_stop_set++;
+}
+
 static void mock_move_cursor(int row, int col) {
     mock_cursor_row = row;
     mock_cursor_col = col;
@@ -108,7 +113,8 @@ static struct ansi_callbacks callbacks = {
     .get_color = mock_get_color,
     .get_attrs = mock_get_attrs,
     .set_attrs = mock_set_attrs,
-    .set_scroll_region = mock_set_scroll_region
+    .set_scroll_region = mock_set_scroll_region,
+    .set_tab_stop = mock_set_tab_stop
 };
 
 static void reset_mocks() {
@@ -128,6 +134,7 @@ static void reset_mocks() {
     erase_line_mode = -1;
     scroll_region_top = -1;
     scroll_region_bottom = -1;
+    tab_stop_set = 0;
 }
 
 static void run_test(const char *name, void (*test_func)(void)) {
@@ -268,6 +275,17 @@ static void test_device_attributes_report(void) {
     assert(strcmp(response_buffer, "\x1b[?6c") == 0);
 }
 
+static void test_horizontal_tab_set(void) {
+    struct ansi_ctx ctx;
+    ansi_init(&ctx);
+    reset_mocks();
+
+    const char *seq = "\x1bH";
+    while (*seq) ansi_process(&ctx, *seq++, &callbacks);
+
+    assert(tab_stop_set == 1);
+}
+
 static void test_decid_report(void) {
     struct ansi_ctx ctx;
     ansi_init(&ctx);
@@ -400,6 +418,7 @@ int main(void) {
     run_test("Device Status Report", test_device_status_report_ok);
     run_test("Cursor Position Report", test_cursor_position_report);
     run_test("Device Attributes", test_device_attributes_report);
+    run_test("Horizontal Tab Set", test_horizontal_tab_set);
     run_test("DECID", test_decid_report);
     run_test("Erase Display Default", test_erase_display_default_mode);
     run_test("Erase Line Modes", test_erase_line_modes);
