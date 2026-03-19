@@ -319,6 +319,31 @@ static void test_cursor_upload_and_move_use_cursor_queue(void) {
     assert(last_cursor_hot_y == 5);
 }
 
+static void test_cursor_enable_and_disable_update_resource_binding(void) {
+    static uint8_t cursor[64 * 64 * 4];
+
+    reset_state();
+    assert(virtio_gpu_setup(0, 5, 0) == 0);
+    assert(virtio_gpu_upload_cursor(21, 64, 64, cursor, sizeof(cursor), 2, 3, 40, 50) == 0);
+    assert(vgpu_dev.cursor_enabled == 1);
+
+    assert(virtio_gpu_set_cursor_enabled(0) == 0);
+    assert(last_cursor_cmd == VIRTIO_GPU_CMD_UPDATE_CURSOR);
+    assert(last_cursor_resource_id == 0);
+    assert(last_cursor_x == 40);
+    assert(last_cursor_y == 50);
+    assert(last_cursor_hot_x == 2);
+    assert(last_cursor_hot_y == 3);
+    assert(vgpu_dev.cursor_enabled == 0);
+
+    assert(virtio_gpu_set_cursor_enabled(1) == 0);
+    assert(last_cursor_cmd == VIRTIO_GPU_CMD_UPDATE_CURSOR);
+    assert(last_cursor_resource_id == 21);
+    assert(last_cursor_x == 40);
+    assert(last_cursor_y == 50);
+    assert(vgpu_dev.cursor_enabled == 1);
+}
+
 int main(void) {
     test_setup_initializes_control_and_cursor_queues();
     test_setup_rejects_missing_cursor_queue();
@@ -327,6 +352,7 @@ int main(void) {
     test_flush_scanout_emits_transfer_and_flush();
     test_query_display_info_returns_first_enabled_mode();
     test_cursor_upload_and_move_use_cursor_queue();
+    test_cursor_enable_and_disable_update_resource_binding();
     puts("host_test_virtio_gpu: PASS");
     return 0;
 }

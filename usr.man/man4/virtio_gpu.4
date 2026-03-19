@@ -35,6 +35,8 @@ the visible scanout.
 It can query display geometry from the first enabled scanout.
 It can upload an ARGB cursor image and reposition that cursor through the
 dedicated cursor queue.
+It can also disable and later re-enable the currently uploaded cursor without
+destroying the underlying cursor resource.
 .Sh HARDWARE
 The
 .Nm

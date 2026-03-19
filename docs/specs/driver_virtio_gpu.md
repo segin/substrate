@@ -56,6 +56,11 @@ The driver can upload a cursor image by:
 Subsequent pointer motion uses `MOVE_CURSOR` on queue `1` without recreating
 the cursor resource.
 
+Cursor visibility is controlled by reissuing `UPDATE_CURSOR` with either the
+tracked cursor resource ID (enabled) or resource ID `0` (disabled). The driver
+keeps the last cursor position and hot spot so re-enabling restores the prior
+state without rebuilding the image resource.
+
 ## Transport Contract
 
 - PCI vendor ID: `0x1af4`

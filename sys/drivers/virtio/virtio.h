@@ -102,5 +102,6 @@ int virtio_gpu_upload_cursor(uint32_t resource_id,
                              uint32_t x,
                              uint32_t y);
 int virtio_gpu_move_cursor(uint32_t x, uint32_t y);
+int virtio_gpu_set_cursor_enabled(int enabled);
 
 #endif

@@ -136,6 +136,7 @@ typedef struct virtio_gpu_dev {
     uint32_t cursor_hot_y;
     uint32_t cursor_x;
     uint32_t cursor_y;
+    uint8_t cursor_enabled;
 } virtio_gpu_dev_t;
 
 static virtio_gpu_dev_t vgpu_dev;
@@ -540,6 +541,7 @@ int virtio_gpu_upload_cursor(uint32_t resource_id,
     vgpu_dev.cursor_hot_y = hot_y;
     vgpu_dev.cursor_x = x;
     vgpu_dev.cursor_y = y;
+    vgpu_dev.cursor_enabled = 1;
     return 0;
 }
 
@@ -566,5 +568,30 @@ int virtio_gpu_move_cursor(uint32_t x, uint32_t y) {
 
     vgpu_dev.cursor_x = x;
     vgpu_dev.cursor_y = y;
+    return 0;
+}
+
+int virtio_gpu_set_cursor_enabled(int enabled) {
+    struct virtio_gpu_update_cursor cursor_req;
+    struct virtio_gpu_ctrl_hdr resp;
+
+    if (!vgpu_dev.initialized || vgpu_dev.cursor_resource_id == 0) {
+        return -1;
+    }
+
+    memset(&cursor_req, 0, sizeof(cursor_req));
+    cursor_req.hdr.type = VIRTIO_GPU_CMD_UPDATE_CURSOR;
+    cursor_req.pos.scanout_id = 0;
+    cursor_req.pos.x = vgpu_dev.cursor_x;
+    cursor_req.pos.y = vgpu_dev.cursor_y;
+    cursor_req.resource_id = enabled ? vgpu_dev.cursor_resource_id : 0;
+    cursor_req.hot_x = vgpu_dev.cursor_hot_x;
+    cursor_req.hot_y = vgpu_dev.cursor_hot_y;
+    memset(&resp, 0, sizeof(resp));
+    if (virtio_gpu_submit_cursor(&vgpu_dev, &cursor_req, &resp) < 0) {
+        return -1;
+    }
+
+    vgpu_dev.cursor_enabled = enabled ? 1 : 0;
     return 0;
 }
