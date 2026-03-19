@@ -119,7 +119,7 @@ Validation gate for Section 1:
 - [x] Ensure `.code16` + `.arch i8086` corpora assemble cleanly with our assembler.
 
 ### 3.2 Real-Mode Instruction Coverage
-- [ ] Implement remaining i8086-specific syntax/encoding gaps discovered by the corpus.
+- [x] Implement remaining i8086-specific syntax/encoding gaps discovered by the corpus.
 - [ ] Add explicit tests for:
   - far jumps/calls
   - segment overrides
