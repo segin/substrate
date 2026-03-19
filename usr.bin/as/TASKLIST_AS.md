@@ -136,8 +136,8 @@ Validation gate for Section 1:
 ## 4. Intel Syntax Completion
 
 ### 4.1 Parser Completeness
-- [ ] Audit all Intel memory-size qualifiers against real accepted syntax.
-- [ ] Audit ambiguous Intel `mem, imm` diagnostics for consistency.
+- [x] Audit all Intel memory-size qualifiers against real accepted syntax.
+- [x] Audit ambiguous Intel `mem, imm` diagnostics for consistency.
 - [ ] Audit operand-order exceptions:
   - string ops
   - port I/O

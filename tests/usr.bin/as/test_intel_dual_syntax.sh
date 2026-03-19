@@ -104,8 +104,10 @@ cat > "$TMP/width_att.s" <<'SRC'
 .globl width_case
 .type width_case,@function
 width_case:
+    movb (%ebx), %al
     movw (%ebx), %ax
     movl (%ebx), %eax
+    addb %al, (%ebx)
     addw %ax, (%ebx)
     addl %eax, (%ebx)
     ret
@@ -118,8 +120,10 @@ cat > "$TMP/width_intel.s" <<'SRC'
 .globl width_case
 .type width_case,@function
 width_case:
+    mov al, byte ptr [ebx]
     mov ax, word ptr [ebx]
     mov eax, dword ptr [ebx]
+    add byte ptr [ebx], al
     add word ptr [ebx], ax
     add dword ptr [ebx], eax
     ret
@@ -132,6 +136,74 @@ SRC
 objcopy -O binary --only-section=.text "$TMP/width_att.o" "$TMP/width_att.text"
 objcopy -O binary --only-section=.text "$TMP/width_intel.o" "$TMP/width_intel.text"
 cmp "$TMP/width_att.text" "$TMP/width_intel.text"
+
+cat > "$TMP/qual32_att.s" <<'SRC'
+.text
+.globl qual32
+.type qual32,@function
+qual32:
+    movq (%ebx), %mm0
+    sgdt (%eax)
+    fldt (%ebx)
+    ret
+.size qual32, .-qual32
+SRC
+
+cat > "$TMP/qual32_intel.s" <<'SRC'
+.intel_syntax noprefix
+.text
+.globl qual32
+.type qual32,@function
+qual32:
+    movq mm0, mmword ptr [ebx]
+    sgdt fword ptr [eax]
+    fld tbyte ptr [ebx]
+    ret
+.size qual32, .-qual32
+.att_syntax prefix
+SRC
+
+"$AS" -32 -o "$TMP/qual32_att.o" "$TMP/qual32_att.s"
+"$AS" -32 -o "$TMP/qual32_intel.o" "$TMP/qual32_intel.s"
+objcopy -O binary --only-section=.text "$TMP/qual32_att.o" "$TMP/qual32_att.text"
+objcopy -O binary --only-section=.text "$TMP/qual32_intel.o" "$TMP/qual32_intel.text"
+cmp "$TMP/qual32_att.text" "$TMP/qual32_intel.text"
+
+cat > "$TMP/qual64_att.s" <<'SRC'
+.text
+.globl qual64
+.type qual64,@function
+qual64:
+    movq (%rbx), %rax
+    movdqa (%rax), %xmm0
+    movdqa (%rax), %xmm1
+    vpaddd (%rax), %ymm1, %ymm0
+    vaddps (%rax), %zmm1, %zmm0
+    ret
+.size qual64, .-qual64
+SRC
+
+cat > "$TMP/qual64_intel.s" <<'SRC'
+.intel_syntax noprefix
+.text
+.globl qual64
+.type qual64,@function
+qual64:
+    mov rax, qword ptr [rbx]
+    movdqa xmm0, xmmword ptr [rax]
+    movdqa xmm1, oword ptr [rax]
+    vpaddd ymm0, ymm1, ymmword ptr [rax]
+    vaddps zmm0, zmm1, zmmword ptr [rax]
+    ret
+.size qual64, .-qual64
+.att_syntax prefix
+SRC
+
+"$AS" -64 -march=x86-64-v4 -o "$TMP/qual64_att.o" "$TMP/qual64_att.s"
+"$AS" -64 -march=x86-64-v4 -o "$TMP/qual64_intel.o" "$TMP/qual64_intel.s"
+objcopy -O binary --only-section=.text "$TMP/qual64_att.o" "$TMP/qual64_att.text"
+objcopy -O binary --only-section=.text "$TMP/qual64_intel.o" "$TMP/qual64_intel.text"
+cmp "$TMP/qual64_att.text" "$TMP/qual64_intel.text"
 
 cat > "$TMP/forms_att.s" <<'SRC'
 .text
