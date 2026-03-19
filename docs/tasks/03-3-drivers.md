@@ -1188,7 +1188,7 @@
                 - [x] Kernel panic output to serial. (REQ: REQ-03-0887)
                 - [x] SysRq over serial (break + key). (REQ: REQ-03-0888)
     - [ ] **Features:** (REQ: REQ-03-0889)
-        - [ ] **Multi-Terminal:** Support switching (`Alt+F1`, etc.) between virtual consoles. (REQ: REQ-03-0890)
+        - [x] **Multi-Terminal:** Support switching (`Alt+F1`, etc.) between virtual consoles. <!-- sys/include/sys/vt.h, sys/drivers/console/vt.c, sys/drivers/input/keyboard.c, tests/sys/host_test_vt.c, tests/sys/host_test_keyboard.c --> (REQ: REQ-03-0890)
         - [x] **Legacy Support:** CGA/Hercules/EGA fallback modes.?? (REQ: REQ-03-0891)
 - [x] **RNG Subsystem (`/dev/random`, `/dev/urandom`):** <!-- random.c, random_internal.h, sys/random.h --> (REQ: REQ-03-0892)Infrastructure:** (REQ: REQ-03-0727, REQ-03-0893)
         - [x] **Data Structures:** (REQ: REQ-03-0894)
