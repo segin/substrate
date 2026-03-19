@@ -321,6 +321,21 @@ static void test_horizontal_tab_set(void) {
     assert(tab_stop_set == 1);
 }
 
+static void test_charset_designation_targets_g_sets(void) {
+    struct ansi_ctx ctx;
+    ansi_init(&ctx);
+    reset_mocks();
+
+    const char *seq = "\x1b(0\x1b)B\x1b*0\x1b+B";
+    while (*seq) ansi_process(&ctx, *seq++, &callbacks);
+
+    assert(ctx.charsets[0] == ANSI_CHARSET_DEC_SPECIAL);
+    assert(ctx.charsets[1] == ANSI_CHARSET_ASCII);
+    assert(ctx.charsets[2] == ANSI_CHARSET_DEC_SPECIAL);
+    assert(ctx.charsets[3] == ANSI_CHARSET_ASCII);
+    assert(ctx.state == ANSI_NORMAL);
+}
+
 static void test_tab_clear_modes(void) {
     struct ansi_ctx ctx;
     ansi_init(&ctx);
@@ -485,6 +500,7 @@ int main(void) {
     run_test("Cursor Position Report", test_cursor_position_report);
     run_test("Device Attributes", test_device_attributes_report);
     run_test("Horizontal Tab Set", test_horizontal_tab_set);
+    run_test("Charset Designation", test_charset_designation_targets_g_sets);
     run_test("Tab Clear", test_tab_clear_modes);
     run_test("Cursor Tab Forward/Backward", test_cursor_tab_forward_and_backward);
     run_test("DECID", test_decid_report);

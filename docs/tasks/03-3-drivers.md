@@ -1137,7 +1137,7 @@
                     - [x] Alternate screen buffer (DECSET 1049). (REQ: REQ-03-0836)
                     - [x] Bracketed paste mode (DECSET 2004). (REQ: REQ-03-0837)
                 - [ ] **Character Sets:** (REQ: REQ-03-0838)
-                    - [ ] G0/G1/G2/G3 character set designation. (REQ: REQ-03-0839)
+                    - [x] G0/G1/G2/G3 character set designation. <!-- sys/include/kern/ansi_handler.h, sys/drivers/console/ansi_handler.c, tests/sys/host_test_ansi.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0839)
                     - [ ] SI/SO (shift in/out for G0/G1). (REQ: REQ-03-0840)
                     - [ ] DEC Special Graphics (line drawing). (REQ: REQ-03-0841)
                     - [ ] UTF-8 decoding and Unicode support. (REQ: REQ-03-0842)

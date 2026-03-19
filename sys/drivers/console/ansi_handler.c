@@ -27,6 +27,12 @@ void ansi_init(struct ansi_ctx *ctx) {
     ctx->state = ANSI_NORMAL;
     ctx->param_count = 0;
     ctx->private_mode = 0;
+    ctx->charsets[0] = ANSI_CHARSET_ASCII;
+    ctx->charsets[1] = ANSI_CHARSET_ASCII;
+    ctx->charsets[2] = ANSI_CHARSET_ASCII;
+    ctx->charsets[3] = ANSI_CHARSET_ASCII;
+    ctx->active_gl = 0;
+    ctx->charset_target = 0;
 }
 
 /* ---- SGR (Select Graphic Rendition) ---- */
@@ -413,6 +419,22 @@ void ansi_process(struct ansi_ctx *ctx, char c, const struct ansi_callbacks *cb)
             ctx->params[0] = 0;
             ctx->private_mode = 0;
             break;
+        case '(':
+            ctx->charset_target = 0;
+            ctx->state = ANSI_CHARSET;
+            break;
+        case ')':
+            ctx->charset_target = 1;
+            ctx->state = ANSI_CHARSET;
+            break;
+        case '*':
+            ctx->charset_target = 2;
+            ctx->state = ANSI_CHARSET;
+            break;
+        case '+':
+            ctx->charset_target = 3;
+            ctx->state = ANSI_CHARSET;
+            break;
         case '7': /* DECSC - Save Cursor */
             if (cb->save_cursor) cb->save_cursor();
             ctx->state = ANSI_NORMAL;
@@ -491,6 +513,15 @@ void ansi_process(struct ansi_ctx *ctx, char c, const struct ansi_callbacks *cb)
         } else {
             ctx->state = ANSI_NORMAL;
         }
+        break;
+
+    case ANSI_CHARSET:
+        if (c == '0') {
+            ctx->charsets[ctx->charset_target] = ANSI_CHARSET_DEC_SPECIAL;
+        } else {
+            ctx->charsets[ctx->charset_target] = ANSI_CHARSET_ASCII;
+        }
+        ctx->state = ANSI_NORMAL;
         break;
 
     case ANSI_OSC:
