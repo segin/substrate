@@ -1094,7 +1094,7 @@
                 - [ ] **Hardware Cursor:** (REQ: REQ-03-0793)
                     - [x] Cursor image upload (ARGB format). <!-- sys/drivers/virtio/virtio_gpu.c, tests/sys/host_test_virtio_gpu.c, usr.man/man4/virtio_gpu.4, docs/specs/driver_virtio_gpu.md --> (REQ: REQ-03-0794)
                     - [x] Cursor position registers. <!-- sys/drivers/virtio/virtio_gpu.c, tests/sys/host_test_virtio_gpu.c, usr.man/man4/virtio_gpu.4, docs/specs/driver_virtio_gpu.md --> (REQ: REQ-03-0795)
-                    - [ ] Hot spot offset configuration. (REQ: REQ-03-0796)
+                    - [x] Hot spot offset configuration. <!-- sys/drivers/virtio/virtio_gpu.c, tests/sys/host_test_virtio_gpu.c, usr.man/man4/virtio_gpu.4, docs/specs/driver_virtio_gpu.md --> (REQ: REQ-03-0796)
                     - [ ] Cursor enable/disable. (REQ: REQ-03-0797)
             - [ ] **Emulation (VT102/ANSI):** (REQ: REQ-03-0798)
                 - [x] **Parser State Machine:** <!-- sys/drivers/console/ansi_handler.c, tests/sys/host_test_ansi.c --> (REQ: REQ-03-0799)
