@@ -1868,6 +1868,72 @@ static int lookup_i386_bndcmp_opcode(const char *mnemonic, unsigned char *prefix
     return -1;
 }
 
+static int lookup_i386_pd2pi_opcode(const char *mnemonic, unsigned char *opcode2) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char opcode2;
+    } map[] = {
+        {"cvttpd2pi", 0x2c},
+        {"cvtpd2pi", 0x2d},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || opcode2 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *opcode2 = map[i].opcode2;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_comisd_opcode(const char *mnemonic, unsigned char *opcode2) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char opcode2;
+    } map[] = {
+        {"ucomisd", 0x2e},
+        {"comisd", 0x2f},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || opcode2 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *opcode2 = map[i].opcode2;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_extrq_insertq_prefix(const char *mnemonic, unsigned char *prefix) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char prefix;
+    } map[] = {
+        {"extrq", 0x66},
+        {"insertq", 0xf2},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || prefix == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *prefix = map[i].prefix;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static int lookup_i386_xmm_imm8_family(const char *mnemonic, unsigned char *prefix, unsigned char *opcode2) {
     static const struct {
         const char *mnemonic;
@@ -5567,13 +5633,19 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return emit_i386_xmm_from_mmx_or_mem(0x66, 0x2a, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "cvttpd2pi") == 0 || strcmp(mnbuf, "cvtpd2pi") == 0) {
+        unsigned char opcode2;
+
         if (insn->operand_count != 2) {
             return -1;
         }
-        return emit_i386_mmx_from_xmm_or_mem(0x66, strcmp(mnbuf, "cvttpd2pi") == 0 ? 0x2c : 0x2d,
-                                             src, dst, out, out_cap, out_len);
+        if (lookup_i386_pd2pi_opcode(mnbuf, &opcode2) != 0) {
+            return -1;
+        }
+        return emit_i386_mmx_from_xmm_or_mem(0x66, opcode2, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "ucomisd") == 0 || strcmp(mnbuf, "comisd") == 0) {
+        unsigned char opcode2;
+
         if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
             parse_xmm_reg(dst->u.reg, &xr) != 0) {
             return -1;
@@ -5581,11 +5653,17 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
             return -1;
         }
-        return emit_i386_prefixed_0f_rm(0x66, strcmp(mnbuf, "ucomisd") == 0 ? 0x2e : 0x2f,
-                                        xr, src, out, out_cap, out_len);
+        if (lookup_i386_comisd_opcode(mnbuf, &opcode2) != 0) {
+            return -1;
+        }
+        return emit_i386_prefixed_0f_rm(0x66, opcode2, xr, src, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "extrq") == 0 || strcmp(mnbuf, "insertq") == 0) {
-        unsigned char prefix = strcmp(mnbuf, "extrq") == 0 ? 0x66 : 0xf2;
+        unsigned char prefix;
+
+        if (lookup_i386_extrq_insertq_prefix(mnbuf, &prefix) != 0) {
+            return -1;
+        }
 
         if (insn->operand_count == 2) {
             const as_operand_t *src_op;
