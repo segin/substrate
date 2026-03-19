@@ -989,7 +989,7 @@
                 - [x] Handle control characters (CR, LF, BS, TAB, BEL). (REQ: REQ-03-0688)
                 - [x] Implement `vga_write(const char *buf, size_t len)`. <!-- sys/drivers/video/hw_text.c, sys/drivers/video/hw_text.h, tests/sys/host_test_hw_text.c --> (REQ: REQ-03-0689)
                 - [x] Tab stop handling (configurable tab width). <!-- sys/include/sys/vt.h, sys/drivers/console/vt.c, sys/drivers/video/hw_text.c, sys/drivers/video/hw_text.h, tests/sys/host_test_hw_text.c --> (REQ: REQ-03-0690)
-            - [ ] **Cursor Control:** (REQ: REQ-03-0691)
+            - [x] **Cursor Control:** <!-- sys/include/sys/vt.h, sys/include/sys/vtio.h, sys/drivers/console/vt.c, sys/drivers/video/hw_text.c, sys/kern/time.c, tests/sys/host_test_hw_text.c, tests/sys/host_test_itimer.c, docs/specs/driver_vt.md, usr.man/man4/vt.4 --> (REQ: REQ-03-0691)
                 - [x] Read/write hardware cursor position (CRTC registers 0x0E/0x0F). (REQ: REQ-03-0692)
                 - [x] Cursor shape control (underline, block, invisible). (REQ: REQ-03-0693)
                 - [x] Cursor blink enable/disable. <!-- sys/include/sys/vt.h, sys/include/sys/vtio.h, sys/drivers/console/vt.c, sys/drivers/video/hw_text.c, sys/kern/time.c, tests/sys/host_test_hw_text.c, tests/sys/host_test_itimer.c --> (REQ: REQ-03-0694)
