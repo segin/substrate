@@ -8,6 +8,7 @@
 #include <kern/console.h>
 #include <sys/tty.h>
 #include <sys/vt.h>
+#include <sys/vtio.h>
 
 const uint8_t font_8x16[256 * 16] = {0};
 const uint8_t font_8x8[256 * 8] = {0};
@@ -217,6 +218,50 @@ static void test_tty_write_processes_ansi_sequences(void) {
     assert((unsigned char)(test_vts[0].buffer[index] >> 8) == 0x01U);
 }
 
+static void test_tty_ioctl_exposes_framebuffer_controls(void) {
+    struct tty *tty;
+    int value;
+
+    reset_state();
+    fb_console_init();
+
+    tty = test_vts[0].tty;
+    assert(tty != NULL);
+    assert(tty->driver != NULL);
+    assert(tty->driver->ioctl != NULL);
+
+    value = 0;
+    assert(tty->driver->ioctl(tty, VTIOCGTABW, (unsigned long)&value) == 0);
+    assert(value == 8);
+
+    value = 4;
+    assert(tty->driver->ioctl(tty, VTIOCSTABW, (unsigned long)&value) == 0);
+    value = 0;
+    assert(tty->driver->ioctl(tty, VTIOCGTABW, (unsigned long)&value) == 0);
+    assert(value == 4);
+
+    value = 0;
+    assert(tty->driver->ioctl(tty, VTIOCGCURSOR, (unsigned long)&value) == 0);
+    assert(value == 1);
+    value = 0;
+    assert(tty->driver->ioctl(tty, VTIOCSCURSOR, (unsigned long)&value) == 0);
+    value = 1;
+    assert(tty->driver->ioctl(tty, VTIOCGCURSOR, (unsigned long)&value) == 0);
+    assert(value == 0);
+
+    value = 1;
+    assert(tty->driver->ioctl(tty, VTIOCGCURBLINK, (unsigned long)&value) == 0);
+    assert(value == 1);
+    value = 0;
+    assert(tty->driver->ioctl(tty, VTIOCSCURBLINK, (unsigned long)&value) == 0);
+    value = 1;
+    assert(tty->driver->ioctl(tty, VTIOCGCURBLINK, (unsigned long)&value) == 0);
+    assert(value == 0);
+
+    value = 1;
+    assert(tty->driver->ioctl(tty, VTIOCGBLINK, (unsigned long)&value) == -1);
+}
+
 static void test_clear_marks_full_screen_dirty(void) {
     int x;
     int y;
@@ -317,6 +362,7 @@ int main(void) {
     test_init_registers_framebuffer_vt_ttys();
     test_init_preserves_existing_vt_ttys();
     test_tty_write_processes_ansi_sequences();
+    test_tty_ioctl_exposes_framebuffer_controls();
     test_clear_marks_full_screen_dirty();
     test_writes_expand_dirty_rectangle();
     test_tick_batches_and_flushes_dirty_rectangle();

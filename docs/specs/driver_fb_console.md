@@ -119,6 +119,15 @@ color, attribute, tab-stop, scroll-region, and alternate-screen state before
 redrawing the affected framebuffer cells. That makes `/dev/tty[1-N]` on a
 framebuffer-only boot behave like a terminal instead of a raw glyph sink.
 
+The framebuffer VT tty backend currently exposes the per-VT controls that are
+actually implemented by the graphical console:
+- tab width get/set (`VTIOCGTABW`, `VTIOCSTABW`)
+- cursor visibility get/set (`VTIOCGCURSOR`, `VTIOCSCURSOR`)
+- cursor blink get/set (`VTIOCGCURBLINK`, `VTIOCSCURBLINK`)
+
+VGA text-blink mode ioctls remain specific to the hardware text backend and are
+rejected by the framebuffer tty path.
+
 ## Constraints
 - Built-in font is limited to the PSF glyph set (typically 256 or 512 glyphs).
 - BDF/PCF parsers require the full font data to be memory-resident at parse time.

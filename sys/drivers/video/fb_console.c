@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <sys/tty.h>
 #include <sys/vt.h>
+#include <sys/vtio.h>
 #include "fb.h"
 #include "fb_console.h"
 #include "fb_ops.h"
@@ -979,6 +980,60 @@ static int fb_vt_tty_write_room(struct tty *tty) {
     return 2048;
 }
 
+static int fb_vt_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
+    vt_state_t *vt;
+    int *value;
+
+    if (!tty || !arg) {
+        return -1;
+    }
+
+    vt = (vt_state_t *)tty->driver_data;
+    if (!vt) {
+        return -1;
+    }
+
+    value = (int *)(uintptr_t)arg;
+    switch (cmd) {
+    case VTIOCGTABW:
+        *value = (int)(vt->tab_width ? vt->tab_width : 8);
+        return 0;
+    case VTIOCSTABW:
+        if (*value < 1 || *value > 32) {
+            return -1;
+        }
+        vt->tab_width = (uint8_t)*value;
+        memset(vt->tab_stops, 0, sizeof(vt->tab_stops));
+        for (int col = *value; col < vt_get_width(); col += *value) {
+            vt->tab_stops[col / 32] |= (uint32_t)1U << (col % 32);
+        }
+        return 0;
+    case VTIOCGCURSOR:
+        *value = vt->cursor_visible ? 1 : 0;
+        return 0;
+    case VTIOCSCURSOR:
+        vt->cursor_visible = *value ? 1 : 0;
+        if (vt->id == vt_get_active()) {
+            fb_console_update_cursor_locked(vt);
+        }
+        return 0;
+    case VTIOCGCURBLINK:
+        *value = vt->cursor_blink ? 1 : 0;
+        return 0;
+    case VTIOCSCURBLINK:
+        vt->cursor_blink = *value ? 1 : 0;
+        if (!vt->cursor_blink) {
+            cursor_blink_phase = 1;
+        }
+        if (vt->id == vt_get_active()) {
+            fb_console_update_cursor_locked(vt);
+        }
+        return 0;
+    default:
+        return -1;
+    }
+}
+
 static struct tty_driver fb_vt_driver = {
     .driver_name = "fb_vt",
     .name = "tty",
@@ -991,6 +1046,7 @@ static struct tty_driver fb_vt_driver = {
     .write = fb_vt_tty_write,
     .put_char = fb_vt_tty_put_char,
     .write_room = fb_vt_tty_write_room,
+    .ioctl = fb_vt_tty_ioctl,
 };
 
 static void fb_console_init_ttys_once(void) {
