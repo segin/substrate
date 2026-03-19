@@ -9,6 +9,10 @@
 #include <sys/stat.h>
 #include "el.h"
 
+/* Forward declarations for functions used before their definitions */
+static size_t get_terminal_columns(EditLine *el);
+static void refresh_line(EditLine *el);
+
 static int is_word_char(unsigned char ch) {
     return isalnum(ch) || ch == '_';
 }
@@ -362,6 +366,7 @@ static int default_filename_complete(EditLine *el) {
     size_t word_start;
     size_t word_len;
     char *word;
+    char *expanded;
     char *slash;
     const char *dir_path;
     const char *base;
@@ -384,6 +389,24 @@ static int default_filename_complete(EditLine *el) {
     if (!word) return 0;
     memcpy(word, el->line.buffer + word_start, word_len);
     word[word_len] = '\0';
+
+    /* Tilde expansion: ~/ → $HOME/ */
+    expanded = NULL;
+    if (word[0] == '~' && (word[1] == '/' || word[1] == '\0')) {
+        const char *home = getenv("HOME");
+        if (home) {
+            size_t hlen = strlen(home);
+            size_t rest = strlen(word + 1);
+            expanded = malloc(hlen + rest + 1);
+            if (expanded) {
+                memcpy(expanded, home, hlen);
+                memcpy(expanded + hlen, word + 1, rest + 1);
+                free(word);
+                word = expanded;
+                word_len = hlen + rest;
+            }
+        }
+    }
 
     slash = strrchr(word, '/');
     if (slash) {
@@ -451,6 +474,65 @@ static int default_filename_complete(EditLine *el) {
         }
     } else if (common_len > base_len) {
         (void)insert_span(el, first_match + base_len, common_len - base_len);
+    } else if (el->last_action_was_complete) {
+        /* Second tab with no common prefix: display alternatives in columns */
+        size_t cols = get_terminal_columns(el);
+        size_t max_name = 0;
+        size_t ncols, nrows, r, cc;
+        char **names;
+        int ni;
+
+        /* Collect matching names */
+        names = malloc((size_t)match_count * sizeof(char *));
+        if (!names) { free(first_match); free(word); return 0; }
+        ni = 0;
+        dir = opendir(dir_path);
+        if (dir) {
+            while ((de = readdir(dir)) != NULL && ni < match_count) {
+                if (strncmp(de->d_name, base, base_len) != 0) continue;
+                names[ni] = strdup(de->d_name);
+                if (names[ni]) {
+                    size_t nl = strlen(names[ni]);
+                    if (nl > max_name) max_name = nl;
+                    ni++;
+                }
+            }
+            closedir(dir);
+        }
+
+        /* Display in columns */
+        if (ni > 0 && max_name > 0) {
+            max_name += 2; /* padding */
+            ncols = cols / max_name;
+            if (ncols == 0) ncols = 1;
+            nrows = ((size_t)ni + ncols - 1) / ncols;
+
+            terminal_puts(el, "\r\n");
+            for (r = 0; r < nrows; r++) {
+                for (cc = 0; cc < ncols; cc++) {
+                    size_t idx = cc * nrows + r;
+                    if (idx < (size_t)ni) {
+                        size_t nl = strlen(names[idx]);
+                        size_t pad;
+                        terminal_write(el, names[idx], nl);
+                        if (cc + 1 < ncols) {
+                            for (pad = nl; pad < max_name; pad++)
+                                terminal_putc(el, ' ');
+                        }
+                    }
+                }
+                terminal_puts(el, "\r\n");
+            }
+            terminal_flush(el);
+            el->refresh_rows = 1;
+            refresh_line(el);
+        }
+
+        {
+            int j;
+            for (j = 0; j < ni; j++) free(names[j]);
+        }
+        free(names);
     } else {
         free(first_match);
         free(word);
@@ -691,20 +773,6 @@ static void history_incremental_search(EditLine *el, int reverse) {
 
     refresh_line(el);
 }
-
-/*
- * Return codes from per-mode dispatch functions.
- */
-#define DISP_CONTINUE  0   /* keep reading */
-#define DISP_ACCEPT    1   /* line accepted (Enter) */
-#define DISP_EOF       2   /* EOF (^D on empty) */
-
-/* Forward declarations for dispatch functions */
-static int emacs_handle_escape(EditLine *el);
-static int emacs_handle_char(EditLine *el, int c);
-static int vi_insert_handle_char(EditLine *el, int c);
-static int vi_command_handle_char(EditLine *el, int c);
-static int vi_replace_handle_char(EditLine *el, int c);
 
 /* ------------------------------------------------------------------ */
 /* Vi-specific word motion helpers.                                    */
@@ -952,1373 +1020,1324 @@ static void vi_history_search(EditLine *el, int reverse) {
     refresh_line(el);
 }
 
-/* ------------------------------------------------------------------ */
-/* Emacs mode character dispatch.                                     */
-/* ------------------------------------------------------------------ */
-static int emacs_handle_char(EditLine *el, int c) {
-    if (c == '\n' || c == '\r') {
-        el->last_cmd_was_kill = 0;
-        el->yank_active = 0;
-        return DISP_ACCEPT;
-    }
+/* ================================================================== */
+/* Action functions for keymap dispatch                                */
+/*                                                                    */
+/* Each function has signature: unsigned char fn(EditLine *, int)      */
+/* Returns CC_NORM, CC_NEWLINE, CC_EOF, CC_REFRESH, or CC_ERROR       */
+/* ================================================================== */
 
-    if (c == 0x7F || c == 0x08) { /* Backspace */
-        if (el->line.cursor > 0) {
-            el->last_cmd_was_kill = 0;
-            el->yank_active = 0;
-            undo_push(el);
-            memmove(el->line.buffer + el->line.cursor - 1,
-                    el->line.buffer + el->line.cursor,
-                    el->line.len - el->line.cursor + 1);
-            el->line.len--;
-            el->line.cursor--;
-            refresh_line(el);
-        }
-        return DISP_CONTINUE;
-    }
+/* -- Editor-wide actions (ed_*) -- */
 
-    if (c == 0x04) { /* ^D - EOF or delete */
-        if (el->line.len == 0) {
-            el->last_cmd_was_kill = 0;
-            el->yank_active = 0;
-            return DISP_EOF;
-        }
-        if (el->line.cursor < el->line.len) {
-            el->last_cmd_was_kill = 0;
-            el->yank_active = 0;
-            undo_push(el);
-            memmove(el->line.buffer + el->line.cursor,
-                    el->line.buffer + el->line.cursor + 1,
-                    el->line.len - el->line.cursor);
-            el->line.len--;
-            refresh_line(el);
-        } else if (el->completion) {
-            el->yank_active = 0;
-            el->completion(el, c);
-            refresh_line(el);
-        }
-        return DISP_CONTINUE;
+static unsigned char ed_newline(EditLine *el, int c) {
+    (void)c;
+    el->last_cmd_was_kill = 0;
+    el->yank_active = 0;
+    if (el->editor_mode == ED_VI) {
+        vi_capture_insert(el);
+        el->vi_mode = VI_INSERT;
     }
+    return CC_NEWLINE;
+}
 
-    if (c == 0x03) { /* ^C */
-        el->last_cmd_was_kill = 0;
-        el->yank_active = 0;
-        terminal_puts(el, "^C\r\n");
-        el_reset(el);
-        if (el->prompt) {
-            terminal_puts(el, el->prompt);
-            terminal_flush(el);
-        }
-        return DISP_CONTINUE;
+static unsigned char ed_insert(EditLine *el, int c) {
+    if (c < 32 || c >= 127) return CC_NORM;
+    if (line_ensure_capacity(el, el->line.len + 2) != 0) return CC_ERROR;
+    el->last_cmd_was_kill = 0;
+    el->yank_active = 0;
+    undo_push(el);
+    if (el->overwrite_mode && el->line.cursor < el->line.len) {
+        el->line.buffer[el->line.cursor] = (char)c;
+        el->line.cursor++;
+    } else {
+        memmove(el->line.buffer + el->line.cursor + 1,
+                el->line.buffer + el->line.cursor,
+                el->line.len - el->line.cursor + 1);
+        el->line.buffer[el->line.cursor] = (char)c;
+        el->line.len++;
+        el->line.cursor++;
     }
+    refresh_line(el);
+    return CC_NORM;
+}
 
-    if (c == 0x0C) { /* ^L - Clear screen */
-        el->last_cmd_was_kill = 0;
-        el->yank_active = 0;
-        terminal_puts(el, "\033[H\033[2J");
+static unsigned char ed_delete_next_char(EditLine *el, int c) {
+    (void)c;
+    el->last_cmd_was_kill = 0;
+    el->yank_active = 0;
+    if (el->line.len == 0) return CC_EOF;
+    if (el->line.cursor < el->line.len) {
+        undo_push(el);
+        memmove(el->line.buffer + el->line.cursor,
+                el->line.buffer + el->line.cursor + 1,
+                el->line.len - el->line.cursor);
+        el->line.len--;
         refresh_line(el);
-        return DISP_CONTINUE;
+    } else if (el->completion) {
+        el->completion(el, c);
+        refresh_line(el);
     }
+    return CC_NORM;
+}
 
-    if (c == 0x01) { /* ^A */
-        el->last_cmd_was_kill = 0;
-        el->yank_active = 0;
-        if (el->line.cursor != 0) {
-            undo_push(el);
-            el->line.cursor = 0;
-            refresh_line(el);
-        }
-        return DISP_CONTINUE;
+static unsigned char ed_tty_sigint(EditLine *el, int c) {
+    (void)c;
+    el->last_cmd_was_kill = 0;
+    el->yank_active = 0;
+    terminal_puts(el, "^C\r\n");
+    el_reset(el);
+    if (el->prompt) {
+        terminal_puts(el, el->prompt);
+        terminal_flush(el);
     }
+    return CC_NORM;
+}
 
-    if (c == 0x02) { /* ^B */
-        el->last_cmd_was_kill = 0;
-        el->yank_active = 0;
-        if (el->line.cursor > 0) {
-            undo_push(el);
-            el->line.cursor--;
-            refresh_line(el);
-        }
-        return DISP_CONTINUE;
+static unsigned char ed_clear_screen(EditLine *el, int c) {
+    (void)c;
+    el->last_cmd_was_kill = 0;
+    el->yank_active = 0;
+    terminal_puts(el, "\033[H\033[2J");
+    refresh_line(el);
+    return CC_NORM;
+}
+
+static unsigned char ed_move_to_beg(EditLine *el, int c) {
+    (void)c;
+    el->last_cmd_was_kill = 0;
+    el->yank_active = 0;
+    if (el->line.cursor != 0) {
+        undo_push(el);
+        el->line.cursor = 0;
+        refresh_line(el);
     }
+    return CC_NORM;
+}
 
-    if (c == 0x05) { /* ^E */
-        el->last_cmd_was_kill = 0;
-        el->yank_active = 0;
-        if (el->line.cursor != el->line.len) {
-            undo_push(el);
-            el->line.cursor = el->line.len;
-            refresh_line(el);
-        }
-        return DISP_CONTINUE;
+static unsigned char ed_prev_char(EditLine *el, int c) {
+    (void)c;
+    el->last_cmd_was_kill = 0;
+    el->yank_active = 0;
+    if (el->line.cursor > 0) {
+        undo_push(el);
+        el->line.cursor--;
+        refresh_line(el);
     }
+    return CC_NORM;
+}
 
-    if (c == 0x06) { /* ^F */
-        el->last_cmd_was_kill = 0;
-        el->yank_active = 0;
-        if (el->line.cursor < el->line.len) {
-            undo_push(el);
-            el->line.cursor++;
-            refresh_line(el);
-        }
-        return DISP_CONTINUE;
+static unsigned char ed_move_to_end(EditLine *el, int c) {
+    (void)c;
+    el->last_cmd_was_kill = 0;
+    el->yank_active = 0;
+    if (el->line.cursor != el->line.len) {
+        undo_push(el);
+        el->line.cursor = el->line.len;
+        refresh_line(el);
     }
+    return CC_NORM;
+}
 
-    if (c == 0x09) { /* Tab complete */
-        el->last_cmd_was_kill = 0;
-        el->yank_active = 0;
-        if (el->completion) {
-            undo_push(el);
-            el->completion(el, c);
+static unsigned char ed_next_char(EditLine *el, int c) {
+    (void)c;
+    el->last_cmd_was_kill = 0;
+    el->yank_active = 0;
+    if (el->line.cursor < el->line.len) {
+        undo_push(el);
+        el->line.cursor++;
+        refresh_line(el);
+    }
+    return CC_NORM;
+}
+
+static unsigned char ed_complete(EditLine *el, int c) {
+    el->last_cmd_was_kill = 0;
+    el->yank_active = 0;
+    if (el->completion) {
+        undo_push(el);
+        el->completion(el, c);
+        refresh_line(el);
+    } else {
+        undo_push(el);
+        if (default_filename_complete(el)) {
             refresh_line(el);
         } else {
-            undo_push(el);
-            if (default_filename_complete(el)) {
-                refresh_line(el);
-            } else {
-                undo_discard_last(el);
-                terminal_putc(el, '\a');
-                terminal_flush(el);
-            }
-        }
-        return DISP_CONTINUE;
-    }
-
-    if (c == 0x0E) { /* ^N next-history */
-        el->last_cmd_was_kill = 0;
-        el->yank_active = 0;
-        if (el->history) {
-            HistEvent ev;
-            if (history(el->history, &ev, H_NEXT) == 0 && ev.str) {
-                undo_push(el);
-                line_load_history(el, ev.str);
-                refresh_line(el);
-            } else {
-                undo_push(el);
-                history_restore_current_input(el);
-                el->history_browsing = 0;
-                refresh_line(el);
-            }
-        }
-        return DISP_CONTINUE;
-    }
-
-    if (c == 0x10) { /* ^P previous-history */
-        el->last_cmd_was_kill = 0;
-        el->yank_active = 0;
-        if (el->history) {
-            HistEvent ev;
-            if (!el->history_browsing) {
-                (void)history_save_current_input(el);
-                el->history_browsing = 1;
-            }
-            if (history(el->history, &ev, H_PREV) == 0 && ev.str) {
-                undo_push(el);
-                line_load_history(el, ev.str);
-                refresh_line(el);
-            }
-        }
-        return DISP_CONTINUE;
-    }
-
-    if (c == 0x12) { /* ^R */
-        el->last_cmd_was_kill = 0;
-        el->yank_active = 0;
-        history_incremental_search(el, 1);
-        return DISP_CONTINUE;
-    }
-
-    if (c == 0x13) { /* ^S */
-        el->last_cmd_was_kill = 0;
-        el->yank_active = 0;
-        history_incremental_search(el, 0);
-        return DISP_CONTINUE;
-    }
-
-    if (c == 0x0B) { /* ^K kill-line */
-        el->yank_active = 0;
-        undo_push(el);
-        if (kill_line(el)) refresh_line(el);
-        return DISP_CONTINUE;
-    }
-
-    if (c == 0x15) { /* ^U backward-kill-line */
-        el->yank_active = 0;
-        undo_push(el);
-        if (backward_kill_line(el)) refresh_line(el);
-        return DISP_CONTINUE;
-    }
-
-    if (c == 0x17) { /* ^W unix-word-rubout */
-        el->yank_active = 0;
-        undo_push(el);
-        if (backward_kill_word(el)) refresh_line(el);
-        return DISP_CONTINUE;
-    }
-
-    if (c == 0x14) { /* ^T transpose-chars */
-        el->last_cmd_was_kill = 0;
-        el->yank_active = 0;
-        undo_push(el);
-        if (transpose_chars(el)) refresh_line(el);
-        return DISP_CONTINUE;
-    }
-
-    if (c == 0x19) { /* ^Y yank */
-        el->last_cmd_was_kill = 0;
-        undo_push(el);
-        if (yank_from_kill_ring(el)) refresh_line(el);
-        return DISP_CONTINUE;
-    }
-
-    if (c == 0x1F) { /* ^_ undo */
-        el->last_cmd_was_kill = 0;
-        el->yank_active = 0;
-        if (undo_pop(el)) refresh_line(el);
-        return DISP_CONTINUE;
-    }
-
-    if (c == 0x1B) { /* ESC */
-        return emacs_handle_escape(el);
-    }
-
-    /* Printable self-insert */
-    if (c >= 32 && c < 127) {
-        if (line_ensure_capacity(el, el->line.len + 2) == 0) {
-            el->last_cmd_was_kill = 0;
-            el->yank_active = 0;
-            undo_push(el);
-            if (el->overwrite_mode && el->line.cursor < el->line.len) {
-                el->line.buffer[el->line.cursor] = (char)c;
-                el->line.cursor++;
-            } else {
-                memmove(el->line.buffer + el->line.cursor + 1,
-                        el->line.buffer + el->line.cursor,
-                        el->line.len - el->line.cursor + 1);
-                el->line.buffer[el->line.cursor] = (char)c;
-                el->line.len++;
-                el->line.cursor++;
-            }
-            refresh_line(el);
-        } else {
+            undo_discard_last(el);
             terminal_putc(el, '\a');
             terminal_flush(el);
         }
     }
-    return DISP_CONTINUE;
+    el->last_action_was_complete = 1;
+    return CC_NORM;
 }
 
-/* ------------------------------------------------------------------ */
-/* Emacs escape sequence handler (extracted from old el_gets).        */
-/* ------------------------------------------------------------------ */
-static int emacs_handle_escape(EditLine *el) {
-    char seq0;
-    if (!read_esc_byte(el, &seq0, 80)) {
-        el->last_cmd_was_kill = 0;
-        el->yank_active = 0;
-        return DISP_CONTINUE;
-    }
+static unsigned char ed_kill_line(EditLine *el, int c) {
+    (void)c;
+    el->yank_active = 0;
+    undo_push(el);
+    if (kill_line(el)) refresh_line(el);
+    return CC_NORM;
+}
 
-    if (seq0 == '[') {
-        char seq1;
-        if (!read_esc_byte(el, &seq1, 80)) return DISP_CONTINUE;
-
-        if (seq1 == 'C') { /* Right */
-            el->last_cmd_was_kill = 0;
-            el->yank_active = 0;
-            if (el->line.cursor < el->line.len) {
-                undo_push(el);
-                el->line.cursor++;
-                refresh_line(el);
-            }
-        } else if (seq1 == 'D') { /* Left */
-            el->last_cmd_was_kill = 0;
-            el->yank_active = 0;
-            if (el->line.cursor > 0) {
-                undo_push(el);
-                el->line.cursor--;
-                refresh_line(el);
-            }
-        } else if (seq1 == 'H') { /* Home */
-            el->last_cmd_was_kill = 0;
-            el->yank_active = 0;
-            if (el->line.cursor != 0) {
-                undo_push(el);
-                el->line.cursor = 0;
-                refresh_line(el);
-            }
-        } else if (seq1 == 'F') { /* End */
-            el->last_cmd_was_kill = 0;
-            el->yank_active = 0;
-            if (el->line.cursor != el->line.len) {
-                undo_push(el);
-                el->line.cursor = el->line.len;
-                refresh_line(el);
-            }
-        } else if (seq1 == 'A') { /* Up */
-            el->last_cmd_was_kill = 0;
-            el->yank_active = 0;
-            if (el->history) {
-                HistEvent ev;
-                if (!el->history_browsing) {
-                    (void)history_save_current_input(el);
-                    el->history_browsing = 1;
-                }
-                if (history(el->history, &ev, H_PREV) == 0 && ev.str) {
-                    line_load_history(el, ev.str);
-                    refresh_line(el);
-                }
-            }
-        } else if (seq1 == 'B') { /* Down */
-            el->last_cmd_was_kill = 0;
-            el->yank_active = 0;
-            if (el->history) {
-                HistEvent ev;
-                if (history(el->history, &ev, H_NEXT) == 0 && ev.str) {
-                    line_load_history(el, ev.str);
-                    refresh_line(el);
-                } else {
-                    history_restore_current_input(el);
-                    el->history_browsing = 0;
-                    refresh_line(el);
-                }
-            }
-        } else if (seq1 >= '0' && seq1 <= '9') {
-            char seq2;
-            if (!read_esc_byte(el, &seq2, 80)) return DISP_CONTINUE;
-
-            if (seq2 == '~') {
-                el->last_cmd_was_kill = 0;
-                el->yank_active = 0;
-                if (seq1 == '1') { /* Home alt */
-                    if (el->line.cursor != 0) {
-                        undo_push(el);
-                        el->line.cursor = 0;
-                        refresh_line(el);
-                    }
-                } else if (seq1 == '2') { /* Insert */
-                    el->overwrite_mode = !el->overwrite_mode;
-                } else if (seq1 == '3') { /* Delete */
-                    if (el->line.cursor < el->line.len) {
-                        undo_push(el);
-                        memmove(el->line.buffer + el->line.cursor,
-                                el->line.buffer + el->line.cursor + 1,
-                                el->line.len - el->line.cursor);
-                        el->line.len--;
-                        refresh_line(el);
-                    }
-                } else if (seq1 == '4') { /* End alt */
-                    if (el->line.cursor != el->line.len) {
-                        undo_push(el);
-                        el->line.cursor = el->line.len;
-                        refresh_line(el);
-                    }
-                } else if (seq1 == '5') { /* PgUp */
-                    if (el->history) {
-                        HistEvent ev;
-                        if (!el->history_browsing) {
-                            (void)history_save_current_input(el);
-                            el->history_browsing = 1;
-                        }
-                        if (history(el->history, &ev, H_FIRST) == 0 && ev.str) {
-                            line_load_history(el, ev.str);
-                            refresh_line(el);
-                        }
-                    }
-                } else if (seq1 == '6') { /* PgDn */
-                    if (el->history) {
-                        HistEvent ev;
-                        if (!el->history_browsing) {
-                            (void)history_save_current_input(el);
-                            el->history_browsing = 1;
-                        }
-                        if (history(el->history, &ev, H_LAST) == 0 && ev.str) {
-                            line_load_history(el, ev.str);
-                            refresh_line(el);
-                        }
-                    }
-                }
-            } else if (seq1 == '1' && seq2 == ';') {
-                char mod, final;
-                if (!read_esc_byte(el, &mod, 80)) return DISP_CONTINUE;
-                if (!read_esc_byte(el, &final, 80)) return DISP_CONTINUE;
-                (void)mod;
-                el->last_cmd_was_kill = 0;
-                el->yank_active = 0;
-                if (final == 'A') {
-                    if (el->history) {
-                        HistEvent ev;
-                        if (!el->history_browsing) {
-                            (void)history_save_current_input(el);
-                            el->history_browsing = 1;
-                        }
-                        if (history(el->history, &ev, H_PREV) == 0 && ev.str) {
-                            line_load_history(el, ev.str);
-                            refresh_line(el);
-                        }
-                    }
-                } else if (final == 'B') {
-                    if (el->history) {
-                        HistEvent ev;
-                        if (history(el->history, &ev, H_NEXT) == 0 && ev.str) {
-                            line_load_history(el, ev.str);
-                            refresh_line(el);
-                        } else {
-                            history_restore_current_input(el);
-                            el->history_browsing = 0;
-                            refresh_line(el);
-                        }
-                    }
-                } else if (final == 'C') {
-                    if (el->line.cursor < el->line.len) {
-                        undo_push(el);
-                        el->line.cursor++;
-                        refresh_line(el);
-                    }
-                } else if (final == 'D') {
-                    if (el->line.cursor > 0) {
-                        undo_push(el);
-                        el->line.cursor--;
-                        refresh_line(el);
-                    }
-                } else if (final == 'H') {
-                    if (el->line.cursor != 0) {
-                        undo_push(el);
-                        el->line.cursor = 0;
-                        refresh_line(el);
-                    }
-                } else if (final == 'F') {
-                    if (el->line.cursor != el->line.len) {
-                        undo_push(el);
-                        el->line.cursor = el->line.len;
-                        refresh_line(el);
-                    }
-                }
-            }
-        }
-    } else if (seq0 == 'O') { /* SS3 alternate arrows */
-        char seq1;
-        if (!read_esc_byte(el, &seq1, 80)) return DISP_CONTINUE;
-        el->last_cmd_was_kill = 0;
-        el->yank_active = 0;
-        if (seq1 == 'C') {
-            if (el->line.cursor < el->line.len) {
-                undo_push(el);
-                el->line.cursor++;
-                refresh_line(el);
-            }
-        } else if (seq1 == 'D') {
-            if (el->line.cursor > 0) {
-                undo_push(el);
-                el->line.cursor--;
-                refresh_line(el);
-            }
-        } else if (seq1 == 'A') {
-            if (el->history) {
-                HistEvent ev;
-                if (!el->history_browsing) {
-                    (void)history_save_current_input(el);
-                    el->history_browsing = 1;
-                }
-                if (history(el->history, &ev, H_PREV) == 0 && ev.str) {
-                    line_load_history(el, ev.str);
-                    refresh_line(el);
-                }
-            }
-        } else if (seq1 == 'B') {
-            if (el->history) {
-                HistEvent ev;
-                if (history(el->history, &ev, H_NEXT) == 0 && ev.str) {
-                    line_load_history(el, ev.str);
-                    refresh_line(el);
-                } else {
-                    history_restore_current_input(el);
-                    el->history_browsing = 0;
-                    refresh_line(el);
-                }
-            }
-        }
-    } else if (seq0 == 'c' || seq0 == 'C') { /* M-c capitalize-word */
-        el->last_cmd_was_kill = 0;
-        el->yank_active = 0;
+static unsigned char ed_next_history(EditLine *el, int c) {
+    HistEvent ev;
+    (void)c;
+    el->last_cmd_was_kill = 0;
+    el->yank_active = 0;
+    if (!el->history) return CC_NORM;
+    if (history(el->history, &ev, H_NEXT) == 0 && ev.str) {
         undo_push(el);
-        if (apply_word_case(el, 0)) refresh_line(el);
-        else undo_discard_last(el);
-    } else if (seq0 == 'l' || seq0 == 'L') { /* M-l downcase-word */
-        el->last_cmd_was_kill = 0;
-        el->yank_active = 0;
-        undo_push(el);
-        if (apply_word_case(el, -1)) refresh_line(el);
-        else undo_discard_last(el);
-    } else if (seq0 == 'u' || seq0 == 'U') { /* M-u upcase-word */
-        el->last_cmd_was_kill = 0;
-        el->yank_active = 0;
-        undo_push(el);
-        if (apply_word_case(el, 1)) refresh_line(el);
-        else undo_discard_last(el);
-    } else if (seq0 == '.') { /* M-. yank-last-arg */
-        el->last_cmd_was_kill = 0;
-        el->yank_active = 0;
-        undo_push(el);
-        if (yank_last_arg(el)) refresh_line(el);
-        else undo_discard_last(el);
-    } else if (seq0 == 'd' || seq0 == 'D') { /* M-d kill-word */
-        el->yank_active = 0;
-        undo_push(el);
-        if (kill_word(el)) refresh_line(el);
-    } else if (seq0 == 'f' || seq0 == 'F') { /* M-f forward-word */
-        size_t old_cursor;
-        el->last_cmd_was_kill = 0;
-        el->yank_active = 0;
-        undo_push(el);
-        old_cursor = el->line.cursor;
-        move_forward_word(el);
-        if (el->line.cursor != old_cursor) refresh_line(el);
-        else undo_discard_last(el);
-    } else if (seq0 == 'b' || seq0 == 'B') { /* M-b backward-word */
-        size_t old_cursor;
-        el->last_cmd_was_kill = 0;
-        el->yank_active = 0;
-        undo_push(el);
-        old_cursor = el->line.cursor;
-        move_backward_word(el);
-        if (el->line.cursor != old_cursor) refresh_line(el);
-        else undo_discard_last(el);
-    } else if (seq0 == '<') { /* M-< beginning-of-history */
-        el->last_cmd_was_kill = 0;
-        el->yank_active = 0;
-        if (el->history) {
-            HistEvent ev;
-            if (!el->history_browsing) {
-                (void)history_save_current_input(el);
-                el->history_browsing = 1;
-            }
-            if (history(el->history, &ev, H_FIRST) == 0 && ev.str) {
-                line_load_history(el, ev.str);
-                refresh_line(el);
-            }
-        }
-    } else if (seq0 == '>') { /* M-> end-of-history */
-        el->last_cmd_was_kill = 0;
-        el->yank_active = 0;
-        if (el->history) {
-            HistEvent ev;
-            if (history(el->history, &ev, H_LAST) == 0 && ev.str) {
-                if (!el->history_browsing) {
-                    (void)history_save_current_input(el);
-                    el->history_browsing = 1;
-                }
-                line_load_history(el, ev.str);
-            } else {
-                history_restore_current_input(el);
-                el->history_browsing = 0;
-            }
-            refresh_line(el);
-        }
-    } else if (seq0 == 'y' || seq0 == 'Y') { /* M-y yank-pop */
-        el->last_cmd_was_kill = 0;
-        undo_push(el);
-        if (yank_pop(el)) refresh_line(el);
-    } else if (seq0 == 0x08 || seq0 == 0x7F) { /* M-BS or M-DEL */
-        el->yank_active = 0;
-        undo_push(el);
-        if (backward_kill_word(el)) refresh_line(el);
+        line_load_history(el, ev.str);
     } else {
-        el->last_cmd_was_kill = 0;
-        el->yank_active = 0;
+        undo_push(el);
+        history_restore_current_input(el);
+        el->history_browsing = 0;
     }
-    return DISP_CONTINUE;
+    refresh_line(el);
+    return CC_NORM;
 }
 
-/* ------------------------------------------------------------------ */
-/* Vi insert mode character dispatch.                                 */
-/* ------------------------------------------------------------------ */
-static int vi_insert_handle_char(EditLine *el, int c) {
-    if (c == '\n' || c == '\r') {
-        vi_capture_insert(el);
-        el->vi_mode = VI_INSERT; /* reset for next line */
-        return DISP_ACCEPT;
+static unsigned char ed_prev_history(EditLine *el, int c) {
+    HistEvent ev;
+    (void)c;
+    el->last_cmd_was_kill = 0;
+    el->yank_active = 0;
+    if (!el->history) return CC_NORM;
+    if (!el->history_browsing) {
+        (void)history_save_current_input(el);
+        el->history_browsing = 1;
     }
+    if (history(el->history, &ev, H_PREV) == 0 && ev.str) {
+        undo_push(el);
+        line_load_history(el, ev.str);
+        refresh_line(el);
+    }
+    return CC_NORM;
+}
 
-    if (c == 0x1B) { /* ESC → command mode */
-        vi_capture_insert(el);
-        el->vi_mode = VI_COMMAND;
+static unsigned char ed_transpose_chars(EditLine *el, int c) {
+    (void)c;
+    el->last_cmd_was_kill = 0;
+    el->yank_active = 0;
+    undo_push(el);
+    if (transpose_chars(el)) refresh_line(el);
+    return CC_NORM;
+}
+
+static unsigned char ed_undo(EditLine *el, int c) {
+    (void)c;
+    el->last_cmd_was_kill = 0;
+    el->yank_active = 0;
+    if (undo_pop(el)) refresh_line(el);
+    return CC_NORM;
+}
+
+static unsigned char ed_toggle_overwrite(EditLine *el, int c) {
+    (void)c;
+    el->overwrite_mode = !el->overwrite_mode;
+    return CC_NORM;
+}
+
+static unsigned char ed_beginning_of_history(EditLine *el, int c) {
+    HistEvent ev;
+    (void)c;
+    el->last_cmd_was_kill = 0;
+    el->yank_active = 0;
+    if (!el->history) return CC_NORM;
+    if (!el->history_browsing) {
+        (void)history_save_current_input(el);
+        el->history_browsing = 1;
+    }
+    if (history(el->history, &ev, H_FIRST) == 0 && ev.str) {
+        line_load_history(el, ev.str);
+        refresh_line(el);
+    }
+    return CC_NORM;
+}
+
+static unsigned char em_end_of_history(EditLine *el, int c) {
+    HistEvent ev;
+    (void)c;
+    el->last_cmd_was_kill = 0;
+    el->yank_active = 0;
+    if (!el->history) return CC_NORM;
+    if (!el->history_browsing) {
+        (void)history_save_current_input(el);
+        el->history_browsing = 1;
+    }
+    if (history(el->history, &ev, H_LAST) == 0 && ev.str) {
+        line_load_history(el, ev.str);
+    } else {
+        history_restore_current_input(el);
+        el->history_browsing = 0;
+    }
+    refresh_line(el);
+    return CC_NORM;
+}
+
+/* -- Emacs-specific actions (em_*) -- */
+
+static unsigned char em_delete_prev_char(EditLine *el, int c) {
+    (void)c;
+    el->last_cmd_was_kill = 0;
+    el->yank_active = 0;
+    if (el->line.cursor > 0) {
+        undo_push(el);
+        memmove(el->line.buffer + el->line.cursor - 1,
+                el->line.buffer + el->line.cursor,
+                el->line.len - el->line.cursor + 1);
+        el->line.len--;
+        el->line.cursor--;
+        refresh_line(el);
+    }
+    return CC_NORM;
+}
+
+static unsigned char em_kill_region(EditLine *el, int c) {
+    (void)c;
+    el->yank_active = 0;
+    undo_push(el);
+    if (backward_kill_line(el)) refresh_line(el);
+    return CC_NORM;
+}
+
+static unsigned char em_delete_prev_word(EditLine *el, int c) {
+    (void)c;
+    el->yank_active = 0;
+    undo_push(el);
+    if (backward_kill_word(el)) refresh_line(el);
+    return CC_NORM;
+}
+
+static unsigned char em_yank(EditLine *el, int c) {
+    (void)c;
+    el->last_cmd_was_kill = 0;
+    undo_push(el);
+    if (yank_from_kill_ring(el)) refresh_line(el);
+    return CC_NORM;
+}
+
+static unsigned char em_search_prev(EditLine *el, int c) {
+    (void)c;
+    el->last_cmd_was_kill = 0;
+    el->yank_active = 0;
+    history_incremental_search(el, 1);
+    return CC_NORM;
+}
+
+static unsigned char em_search_next(EditLine *el, int c) {
+    (void)c;
+    el->last_cmd_was_kill = 0;
+    el->yank_active = 0;
+    history_incremental_search(el, 0);
+    return CC_NORM;
+}
+
+static unsigned char em_capitalize_word(EditLine *el, int c) {
+    (void)c;
+    el->last_cmd_was_kill = 0;
+    el->yank_active = 0;
+    undo_push(el);
+    if (apply_word_case(el, 0)) refresh_line(el);
+    else undo_discard_last(el);
+    return CC_NORM;
+}
+
+static unsigned char em_lower_case_word(EditLine *el, int c) {
+    (void)c;
+    el->last_cmd_was_kill = 0;
+    el->yank_active = 0;
+    undo_push(el);
+    if (apply_word_case(el, -1)) refresh_line(el);
+    else undo_discard_last(el);
+    return CC_NORM;
+}
+
+static unsigned char em_upper_case_word(EditLine *el, int c) {
+    (void)c;
+    el->last_cmd_was_kill = 0;
+    el->yank_active = 0;
+    undo_push(el);
+    if (apply_word_case(el, 1)) refresh_line(el);
+    else undo_discard_last(el);
+    return CC_NORM;
+}
+
+static unsigned char em_yank_last_arg(EditLine *el, int c) {
+    (void)c;
+    el->last_cmd_was_kill = 0;
+    el->yank_active = 0;
+    undo_push(el);
+    if (yank_last_arg(el)) refresh_line(el);
+    else undo_discard_last(el);
+    return CC_NORM;
+}
+
+static unsigned char em_kill_word(EditLine *el, int c) {
+    (void)c;
+    el->yank_active = 0;
+    undo_push(el);
+    if (kill_word(el)) refresh_line(el);
+    return CC_NORM;
+}
+
+static unsigned char em_next_word(EditLine *el, int c) {
+    size_t old_cursor;
+    (void)c;
+    el->last_cmd_was_kill = 0;
+    el->yank_active = 0;
+    undo_push(el);
+    old_cursor = el->line.cursor;
+    move_forward_word(el);
+    if (el->line.cursor != old_cursor) refresh_line(el);
+    else undo_discard_last(el);
+    return CC_NORM;
+}
+
+static unsigned char em_prev_word(EditLine *el, int c) {
+    size_t old_cursor;
+    (void)c;
+    el->last_cmd_was_kill = 0;
+    el->yank_active = 0;
+    undo_push(el);
+    old_cursor = el->line.cursor;
+    move_backward_word(el);
+    if (el->line.cursor != old_cursor) refresh_line(el);
+    else undo_discard_last(el);
+    return CC_NORM;
+}
+
+static unsigned char em_yank_pop(EditLine *el, int c) {
+    (void)c;
+    el->last_cmd_was_kill = 0;
+    undo_push(el);
+    if (yank_pop(el)) refresh_line(el);
+    return CC_NORM;
+}
+
+static unsigned char em_backward_kill_word(EditLine *el, int c) {
+    (void)c;
+    el->yank_active = 0;
+    undo_push(el);
+    if (backward_kill_word(el)) refresh_line(el);
+    return CC_NORM;
+}
+
+/*
+ * CSI digit dispatch: handles ESC[<digit>~ and ESC[1;mod;final
+ * Called from the CSI sub-keymap when a digit 0-9 is received.
+ */
+static unsigned char em_csi_dispatch(EditLine *el, int c) {
+    char seq2;
+    if (!read_esc_byte(el, &seq2, 80)) return CC_NORM;
+    if (seq2 == '~') {
+        switch (c) {
+        case '1': return ed_move_to_beg(el, c);
+        case '2': return ed_toggle_overwrite(el, c);
+        case '3': /* Delete key: delete char, never EOF */
+            el->last_cmd_was_kill = 0;
+            el->yank_active = 0;
+            if (el->line.cursor < el->line.len) {
+                undo_push(el);
+                memmove(el->line.buffer + el->line.cursor,
+                        el->line.buffer + el->line.cursor + 1,
+                        el->line.len - el->line.cursor);
+                el->line.len--;
+                refresh_line(el);
+            }
+            return CC_NORM;
+        case '4': return ed_move_to_end(el, c);
+        case '5': return ed_beginning_of_history(el, c);
+        case '6': return em_end_of_history(el, c);
+        default: return CC_NORM;
+        }
+    }
+    if (c == '1' && seq2 == ';') {
+        char mod, final;
+        if (!read_esc_byte(el, &mod, 80)) return CC_NORM;
+        if (!read_esc_byte(el, &final, 80)) return CC_NORM;
+        (void)mod;
+        switch (final) {
+        case 'A': return ed_prev_history(el, final);
+        case 'B': return ed_next_history(el, final);
+        case 'C': return ed_next_char(el, final);
+        case 'D': return ed_prev_char(el, final);
+        case 'H': return ed_move_to_beg(el, final);
+        case 'F': return ed_move_to_end(el, final);
+        default: return CC_NORM;
+        }
+    }
+    return CC_NORM;
+}
+
+/* -- Vi-specific actions (vi_*) -- */
+
+static unsigned char vi_to_command_mode(EditLine *el, int c) {
+    (void)c;
+    if (el->vi_mode == VI_INSERT) vi_capture_insert(el);
+    el->vi_mode = VI_COMMAND;
+    el->vi_count = 0;
+    if (el->line.cursor > 0) el->line.cursor--;
+    refresh_line(el);
+    return CC_NORM;
+}
+
+static unsigned char vi_arg_digit(EditLine *el, int c) {
+    el->vi_count = el->vi_count * 10 + (c - '0');
+    return CC_NORM;
+}
+
+static unsigned char vi_motion_h(EditLine *el, int c) {
+    int count = el->vi_count > 0 ? el->vi_count : 1;
+    (void)c;
+    el->vi_count = 0;
+    if (el->line.cursor > 0) {
+        el->line.cursor -= ((size_t)count <= el->line.cursor) ? (size_t)count : el->line.cursor;
+        refresh_line(el);
+    }
+    return CC_NORM;
+}
+
+static unsigned char vi_motion_l(EditLine *el, int c) {
+    int count = el->vi_count > 0 ? el->vi_count : 1;
+    size_t max_move;
+    (void)c;
+    el->vi_count = 0;
+    if (el->line.cursor < el->line.len) {
+        max_move = el->line.len - el->line.cursor;
+        el->line.cursor += ((size_t)count <= max_move) ? (size_t)count : max_move;
+        if (el->line.cursor >= el->line.len && el->line.len > 0)
+            el->line.cursor = el->line.len - 1;
+        refresh_line(el);
+    }
+    return CC_NORM;
+}
+
+static unsigned char vi_motion_w(EditLine *el, int c) {
+    int count = el->vi_count > 0 ? el->vi_count : 1;
+    int i;
+    (void)c;
+    el->vi_count = 0;
+    for (i = 0; i < count; i++) el->line.cursor = vi_forward_word(el, el->line.cursor);
+    if (el->line.cursor >= el->line.len && el->line.len > 0)
+        el->line.cursor = el->line.len - 1;
+    refresh_line(el);
+    return CC_NORM;
+}
+
+static unsigned char vi_motion_W(EditLine *el, int c) {
+    int count = el->vi_count > 0 ? el->vi_count : 1;
+    int i;
+    (void)c;
+    el->vi_count = 0;
+    for (i = 0; i < count; i++) el->line.cursor = vi_forward_WORD(el, el->line.cursor);
+    if (el->line.cursor >= el->line.len && el->line.len > 0)
+        el->line.cursor = el->line.len - 1;
+    refresh_line(el);
+    return CC_NORM;
+}
+
+static unsigned char vi_motion_b(EditLine *el, int c) {
+    int count = el->vi_count > 0 ? el->vi_count : 1;
+    int i;
+    (void)c;
+    el->vi_count = 0;
+    for (i = 0; i < count; i++) el->line.cursor = vi_backward_word(el, el->line.cursor);
+    refresh_line(el);
+    return CC_NORM;
+}
+
+static unsigned char vi_motion_B(EditLine *el, int c) {
+    int count = el->vi_count > 0 ? el->vi_count : 1;
+    int i;
+    (void)c;
+    el->vi_count = 0;
+    for (i = 0; i < count; i++) el->line.cursor = vi_backward_WORD(el, el->line.cursor);
+    refresh_line(el);
+    return CC_NORM;
+}
+
+static unsigned char vi_motion_e(EditLine *el, int c) {
+    int count = el->vi_count > 0 ? el->vi_count : 1;
+    int i;
+    (void)c;
+    el->vi_count = 0;
+    for (i = 0; i < count; i++) el->line.cursor = vi_end_word(el, el->line.cursor);
+    refresh_line(el);
+    return CC_NORM;
+}
+
+static unsigned char vi_motion_E(EditLine *el, int c) {
+    int count = el->vi_count > 0 ? el->vi_count : 1;
+    int i;
+    (void)c;
+    el->vi_count = 0;
+    for (i = 0; i < count; i++) el->line.cursor = vi_end_WORD(el, el->line.cursor);
+    refresh_line(el);
+    return CC_NORM;
+}
+
+static unsigned char vi_beginning_of_line(EditLine *el, int c) {
+    (void)c;
+    if (el->vi_count > 0) {
+        /* Part of a count sequence: 10, 20, etc. */
+        el->vi_count = el->vi_count * 10;
+        return CC_NORM;
+    }
+    el->line.cursor = 0;
+    refresh_line(el);
+    return CC_NORM;
+}
+
+static unsigned char vi_end_of_line(EditLine *el, int c) {
+    (void)c;
+    el->vi_count = 0;
+    el->line.cursor = el->line.len > 0 ? el->line.len - 1 : 0;
+    refresh_line(el);
+    return CC_NORM;
+}
+
+static unsigned char vi_first_nonblank_action(EditLine *el, int c) {
+    (void)c;
+    el->vi_count = 0;
+    el->line.cursor = vi_first_nonblank(el);
+    refresh_line(el);
+    return CC_NORM;
+}
+
+static unsigned char vi_find_char_action(EditLine *el, int c) {
+    char fc;
+    int count = el->vi_count > 0 ? el->vi_count : 1;
+    int i;
+    size_t target;
+    el->vi_count = 0;
+    if (!read_esc_byte(el, &fc, 80)) return CC_NORM;
+    el->vi_find.ch = fc;
+    el->vi_find.forward = (c == 'f' || c == 't');
+    el->vi_find.till = (c == 't' || c == 'T');
+    target = el->line.cursor;
+    for (i = 0; i < count; i++) {
+        if (el->vi_find.forward)
+            target = vi_find_char_fwd(el, fc, target);
+        else
+            target = vi_find_char_bwd(el, fc, target);
+    }
+    if (target != el->line.cursor) {
+        if (el->vi_find.till) {
+            if (el->vi_find.forward && target > 0) target--;
+            else if (!el->vi_find.forward && target < el->line.len) target++;
+        }
+        el->line.cursor = target;
+        refresh_line(el);
+    }
+    return CC_NORM;
+}
+
+static unsigned char vi_repeat_find_action(EditLine *el, int c) {
+    int count = el->vi_count > 0 ? el->vi_count : 1;
+    int i;
+    size_t target;
+    (void)c;
+    el->vi_count = 0;
+    if (!el->vi_find.ch) return CC_NORM;
+    target = el->line.cursor;
+    for (i = 0; i < count; i++) {
+        if (el->vi_find.forward)
+            target = vi_find_char_fwd(el, el->vi_find.ch, target);
+        else
+            target = vi_find_char_bwd(el, el->vi_find.ch, target);
+    }
+    if (target != el->line.cursor) {
+        if (el->vi_find.till) {
+            if (el->vi_find.forward && target > 0) target--;
+            else if (!el->vi_find.forward && target < el->line.len) target++;
+        }
+        el->line.cursor = target;
+        refresh_line(el);
+    }
+    return CC_NORM;
+}
+
+static unsigned char vi_reverse_find_action(EditLine *el, int c) {
+    int count = el->vi_count > 0 ? el->vi_count : 1;
+    int i;
+    size_t target;
+    (void)c;
+    el->vi_count = 0;
+    if (!el->vi_find.ch) return CC_NORM;
+    target = el->line.cursor;
+    for (i = 0; i < count; i++) {
+        if (!el->vi_find.forward)
+            target = vi_find_char_fwd(el, el->vi_find.ch, target);
+        else
+            target = vi_find_char_bwd(el, el->vi_find.ch, target);
+    }
+    if (target != el->line.cursor) {
+        if (el->vi_find.till) {
+            if (!el->vi_find.forward && target > 0) target--;
+            else if (el->vi_find.forward && target < el->line.len) target++;
+        }
+        el->line.cursor = target;
+        refresh_line(el);
+    }
+    return CC_NORM;
+}
+
+static unsigned char vi_insert_mode(EditLine *el, int c) {
+    int count = el->vi_count > 0 ? el->vi_count : 1;
+    (void)c;
+    el->vi_count = 0;
+    vi_record_repeat(el, 'i', 0, count);
+    vi_enter_insert(el);
+    return CC_NORM;
+}
+
+static unsigned char vi_append_mode(EditLine *el, int c) {
+    int count = el->vi_count > 0 ? el->vi_count : 1;
+    (void)c;
+    el->vi_count = 0;
+    vi_record_repeat(el, 'a', 0, count);
+    if (el->line.cursor < el->line.len) el->line.cursor++;
+    vi_enter_insert(el);
+    return CC_NORM;
+}
+
+static unsigned char vi_insert_beg(EditLine *el, int c) {
+    int count = el->vi_count > 0 ? el->vi_count : 1;
+    (void)c;
+    el->vi_count = 0;
+    vi_record_repeat(el, 'I', 0, count);
+    el->line.cursor = 0;
+    vi_enter_insert(el);
+    refresh_line(el);
+    return CC_NORM;
+}
+
+static unsigned char vi_append_end(EditLine *el, int c) {
+    int count = el->vi_count > 0 ? el->vi_count : 1;
+    (void)c;
+    el->vi_count = 0;
+    vi_record_repeat(el, 'A', 0, count);
+    el->line.cursor = el->line.len;
+    vi_enter_insert(el);
+    refresh_line(el);
+    return CC_NORM;
+}
+
+static unsigned char vi_delete_char_action(EditLine *el, int c) {
+    int count = el->vi_count > 0 ? el->vi_count : 1;
+    int i;
+    (void)c;
+    el->vi_count = 0;
+    undo_push(el);
+    vi_record_repeat(el, 'x', 0, count);
+    for (i = 0; i < count && el->line.cursor < el->line.len; i++) {
+        kill_ring_push(el, el->line.buffer + el->line.cursor, 1, i > 0);
+        memmove(el->line.buffer + el->line.cursor,
+                el->line.buffer + el->line.cursor + 1,
+                el->line.len - el->line.cursor);
+        el->line.len--;
+    }
+    if (el->line.cursor >= el->line.len && el->line.len > 0)
+        el->line.cursor = el->line.len - 1;
+    refresh_line(el);
+    return CC_NORM;
+}
+
+static unsigned char vi_backward_delete_char(EditLine *el, int c) {
+    int count = el->vi_count > 0 ? el->vi_count : 1;
+    int i;
+    (void)c;
+    el->vi_count = 0;
+    undo_push(el);
+    vi_record_repeat(el, 'X', 0, count);
+    for (i = 0; i < count && el->line.cursor > 0; i++) {
+        el->line.cursor--;
+        kill_ring_push(el, el->line.buffer + el->line.cursor, 1, i > 0);
+        memmove(el->line.buffer + el->line.cursor,
+                el->line.buffer + el->line.cursor + 1,
+                el->line.len - el->line.cursor);
+        el->line.len--;
+    }
+    refresh_line(el);
+    return CC_NORM;
+}
+
+static unsigned char vi_replace_char_action(EditLine *el, int c) {
+    char rc;
+    int count = el->vi_count > 0 ? el->vi_count : 1;
+    (void)c;
+    el->vi_count = 0;
+    if (!read_esc_byte(el, &rc, 80)) return CC_NORM;
+    if (el->line.cursor < el->line.len && rc >= 32 && rc < 127) {
+        undo_push(el);
+        vi_record_repeat(el, 'r', rc, count);
+        el->line.buffer[el->line.cursor] = rc;
+        refresh_line(el);
+    }
+    return CC_NORM;
+}
+
+static unsigned char vi_replace_mode_action(EditLine *el, int c) {
+    int count = el->vi_count > 0 ? el->vi_count : 1;
+    (void)c;
+    el->vi_count = 0;
+    vi_record_repeat(el, 'R', 0, count);
+    el->vi_mode = VI_REPLACE;
+    return CC_NORM;
+}
+
+static unsigned char vi_substitute_char(EditLine *el, int c) {
+    int count = el->vi_count > 0 ? el->vi_count : 1;
+    int i;
+    (void)c;
+    el->vi_count = 0;
+    undo_push(el);
+    vi_record_repeat(el, 's', 0, count);
+    for (i = 0; i < count && el->line.cursor < el->line.len; i++) {
+        memmove(el->line.buffer + el->line.cursor,
+                el->line.buffer + el->line.cursor + 1,
+                el->line.len - el->line.cursor);
+        el->line.len--;
+    }
+    vi_enter_insert(el);
+    refresh_line(el);
+    return CC_NORM;
+}
+
+static unsigned char vi_substitute_line(EditLine *el, int c) {
+    (void)c;
+    el->vi_count = 0;
+    undo_push(el);
+    vi_record_repeat(el, 'S', 0, 1);
+    kill_ring_push(el, el->line.buffer, el->line.len, 0);
+    el->line.len = 0;
+    el->line.cursor = 0;
+    el->line.buffer[0] = '\0';
+    vi_enter_insert(el);
+    refresh_line(el);
+    return CC_NORM;
+}
+
+static unsigned char vi_delete_motion(EditLine *el, int c) {
+    int motion;
+    int count = el->vi_count > 0 ? el->vi_count : 1;
+    size_t target, start, end;
+    (void)c;
+    el->vi_count = 0;
+    if (read(fileno(el->fin), &motion, 1) != 1) return CC_NORM;
+    motion &= 0xFF;
+    if (motion == 'd') {
+        undo_push(el);
+        vi_record_repeat(el, 'd', 'd', count);
+        kill_ring_push(el, el->line.buffer, el->line.len, 0);
+        el->line.len = 0;
+        el->line.cursor = 0;
+        el->line.buffer[0] = '\0';
+        refresh_line(el);
+        return CC_NORM;
+    }
+    target = vi_motion_target(el, motion, count);
+    if (target == (size_t)-1) return CC_NORM;
+    start = (el->line.cursor < target) ? el->line.cursor : target;
+    end = (el->line.cursor < target) ? target : el->line.cursor;
+    if (end > el->line.len) end = el->line.len;
+    if (start < end) {
+        undo_push(el);
+        vi_record_repeat(el, 'd', (char)motion, count);
+        kill_ring_push(el, el->line.buffer + start, end - start, 0);
+        delete_range(el, start, end);
+        el->line.cursor = start;
+        if (el->line.cursor >= el->line.len && el->line.len > 0)
+            el->line.cursor = el->line.len - 1;
+        refresh_line(el);
+    }
+    return CC_NORM;
+}
+
+static unsigned char vi_delete_to_end(EditLine *el, int c) {
+    (void)c;
+    el->vi_count = 0;
+    if (el->line.cursor < el->line.len) {
+        undo_push(el);
+        vi_record_repeat(el, 'D', 0, 1);
+        kill_ring_push(el, el->line.buffer + el->line.cursor,
+                       el->line.len - el->line.cursor, 0);
+        el->line.len = el->line.cursor;
+        el->line.buffer[el->line.len] = '\0';
         if (el->line.cursor > 0) el->line.cursor--;
         refresh_line(el);
-        return DISP_CONTINUE;
     }
-
-    if (c == 0x7F || c == 0x08) { /* Backspace */
-        if (el->line.cursor > 0) {
-            undo_push(el);
-            memmove(el->line.buffer + el->line.cursor - 1,
-                    el->line.buffer + el->line.cursor,
-                    el->line.len - el->line.cursor + 1);
-            el->line.len--;
-            el->line.cursor--;
-            refresh_line(el);
-        }
-        return DISP_CONTINUE;
-    }
-
-    if (c == 0x17) { /* ^W delete word backward */
-        undo_push(el);
-        if (backward_kill_word(el)) refresh_line(el);
-        return DISP_CONTINUE;
-    }
-
-    if (c == 0x15) { /* ^U delete to start of line */
-        undo_push(el);
-        if (backward_kill_line(el)) refresh_line(el);
-        return DISP_CONTINUE;
-    }
-
-    if (c == 0x04) { /* ^D - EOF or delete */
-        if (el->line.len == 0) return DISP_EOF;
-        if (el->line.cursor < el->line.len) {
-            undo_push(el);
-            memmove(el->line.buffer + el->line.cursor,
-                    el->line.buffer + el->line.cursor + 1,
-                    el->line.len - el->line.cursor);
-            el->line.len--;
-            refresh_line(el);
-        }
-        return DISP_CONTINUE;
-    }
-
-    if (c == 0x09) { /* Tab complete */
-        if (el->completion) {
-            undo_push(el);
-            el->completion(el, c);
-            refresh_line(el);
-        } else {
-            undo_push(el);
-            if (default_filename_complete(el))
-                refresh_line(el);
-            else
-                undo_discard_last(el);
-        }
-        return DISP_CONTINUE;
-    }
-
-    /* Printable self-insert */
-    if (c >= 32 && c < 127) {
-        if (line_ensure_capacity(el, el->line.len + 2) == 0) {
-            undo_push(el);
-            memmove(el->line.buffer + el->line.cursor + 1,
-                    el->line.buffer + el->line.cursor,
-                    el->line.len - el->line.cursor + 1);
-            el->line.buffer[el->line.cursor] = (char)c;
-            el->line.len++;
-            el->line.cursor++;
-            refresh_line(el);
-        }
-    }
-    return DISP_CONTINUE;
+    return CC_NORM;
 }
 
-/* ------------------------------------------------------------------ */
-/* Vi replace mode character dispatch.                                */
-/* ------------------------------------------------------------------ */
-static int vi_replace_handle_char(EditLine *el, int c) {
-    if (c == '\n' || c == '\r') {
-        el->vi_mode = VI_INSERT;
-        return DISP_ACCEPT;
-    }
-
-    if (c == 0x1B) { /* ESC → command mode */
-        el->vi_mode = VI_COMMAND;
-        if (el->line.cursor > 0) el->line.cursor--;
-        refresh_line(el);
-        return DISP_CONTINUE;
-    }
-
-    if (c == 0x7F || c == 0x08) { /* Backspace */
-        if (el->line.cursor > 0) {
-            undo_push(el);
-            el->line.cursor--;
-            refresh_line(el);
-        }
-        return DISP_CONTINUE;
-    }
-
-    /* Overwrite char at cursor */
-    if (c >= 32 && c < 127) {
+static unsigned char vi_change_motion(EditLine *el, int c) {
+    int motion;
+    int count = el->vi_count > 0 ? el->vi_count : 1;
+    size_t target, start, end;
+    (void)c;
+    el->vi_count = 0;
+    if (read(fileno(el->fin), &motion, 1) != 1) return CC_NORM;
+    motion &= 0xFF;
+    if (motion == 'c') {
         undo_push(el);
-        if (el->line.cursor < el->line.len) {
-            el->line.buffer[el->line.cursor] = (char)c;
-            el->line.cursor++;
-        } else {
-            /* At end: extend like insert */
-            if (line_ensure_capacity(el, el->line.len + 2) == 0) {
-                el->line.buffer[el->line.cursor] = (char)c;
-                el->line.len++;
-                el->line.cursor++;
-                el->line.buffer[el->line.len] = '\0';
-            }
-        }
-        refresh_line(el);
-    }
-    return DISP_CONTINUE;
-}
-
-/* ------------------------------------------------------------------ */
-/* Vi command mode character dispatch.                                */
-/* ------------------------------------------------------------------ */
-static int vi_command_handle_char(EditLine *el, int c) {
-    static int count_accum = 0;
-    static int in_count = 0;
-
-    /* Handle count prefix digits (but '0' is beginning-of-line if not in count) */
-    if (c >= '1' && c <= '9') {
-        count_accum = count_accum * 10 + (c - '0');
-        in_count = 1;
-        return DISP_CONTINUE;
-    }
-    if (c == '0' && in_count) {
-        count_accum = count_accum * 10;
-        return DISP_CONTINUE;
-    }
-
-    int count = in_count ? count_accum : 1;
-    count_accum = 0;
-    in_count = 0;
-
-    if (c == '\n' || c == '\r') {
-        el->vi_mode = VI_INSERT;
-        return DISP_ACCEPT;
-    }
-
-    /* --- Motion commands --- */
-    if (c == 'h') {
-        if (el->line.cursor > 0) {
-            el->line.cursor -= ((size_t)count <= el->line.cursor) ? (size_t)count : el->line.cursor;
-            refresh_line(el);
-        }
-        return DISP_CONTINUE;
-    }
-    if (c == 'l') {
-        if (el->line.cursor < el->line.len) {
-            size_t max_move = el->line.len - el->line.cursor;
-            el->line.cursor += ((size_t)count <= max_move) ? (size_t)count : max_move;
-            /* In command mode, cursor shouldn't go past last char */
-            if (el->line.cursor >= el->line.len && el->line.len > 0)
-                el->line.cursor = el->line.len - 1;
-            refresh_line(el);
-        }
-        return DISP_CONTINUE;
-    }
-    if (c == 'w') {
-        int i;
-        for (i = 0; i < count; i++) el->line.cursor = vi_forward_word(el, el->line.cursor);
-        if (el->line.cursor >= el->line.len && el->line.len > 0)
-            el->line.cursor = el->line.len - 1;
-        refresh_line(el);
-        return DISP_CONTINUE;
-    }
-    if (c == 'W') {
-        int i;
-        for (i = 0; i < count; i++) el->line.cursor = vi_forward_WORD(el, el->line.cursor);
-        if (el->line.cursor >= el->line.len && el->line.len > 0)
-            el->line.cursor = el->line.len - 1;
-        refresh_line(el);
-        return DISP_CONTINUE;
-    }
-    if (c == 'b') {
-        int i;
-        for (i = 0; i < count; i++) el->line.cursor = vi_backward_word(el, el->line.cursor);
-        refresh_line(el);
-        return DISP_CONTINUE;
-    }
-    if (c == 'B') {
-        int i;
-        for (i = 0; i < count; i++) el->line.cursor = vi_backward_WORD(el, el->line.cursor);
-        refresh_line(el);
-        return DISP_CONTINUE;
-    }
-    if (c == 'e') {
-        int i;
-        for (i = 0; i < count; i++) el->line.cursor = vi_end_word(el, el->line.cursor);
-        refresh_line(el);
-        return DISP_CONTINUE;
-    }
-    if (c == 'E') {
-        int i;
-        for (i = 0; i < count; i++) el->line.cursor = vi_end_WORD(el, el->line.cursor);
-        refresh_line(el);
-        return DISP_CONTINUE;
-    }
-    if (c == '0') { /* beginning of line (only reached when not in count) */
-        el->line.cursor = 0;
-        refresh_line(el);
-        return DISP_CONTINUE;
-    }
-    if (c == '$') {
-        el->line.cursor = el->line.len > 0 ? el->line.len - 1 : 0;
-        refresh_line(el);
-        return DISP_CONTINUE;
-    }
-    if (c == '^') {
-        el->line.cursor = vi_first_nonblank(el);
-        refresh_line(el);
-        return DISP_CONTINUE;
-    }
-
-    /* --- Find char motions --- */
-    if (c == 'f' || c == 'F' || c == 't' || c == 'T') {
-        char fc;
-        int i;
-        size_t target;
-        if (!read_esc_byte(el, &fc, 80)) return DISP_CONTINUE;
-        el->vi_find.ch = fc;
-        el->vi_find.forward = (c == 'f' || c == 't');
-        el->vi_find.till = (c == 't' || c == 'T');
-        target = el->line.cursor;
-        for (i = 0; i < count; i++) {
-            if (el->vi_find.forward)
-                target = vi_find_char_fwd(el, fc, target);
-            else
-                target = vi_find_char_bwd(el, fc, target);
-        }
-        if (target != el->line.cursor) {
-            if (el->vi_find.till) {
-                if (el->vi_find.forward && target > 0) target--;
-                else if (!el->vi_find.forward && target < el->line.len) target++;
-            }
-            el->line.cursor = target;
-            refresh_line(el);
-        }
-        return DISP_CONTINUE;
-    }
-    if (c == ';') { /* repeat last find */
-        if (el->vi_find.ch) {
-            int i;
-            size_t target = el->line.cursor;
-            for (i = 0; i < count; i++) {
-                if (el->vi_find.forward)
-                    target = vi_find_char_fwd(el, el->vi_find.ch, target);
-                else
-                    target = vi_find_char_bwd(el, el->vi_find.ch, target);
-            }
-            if (target != el->line.cursor) {
-                if (el->vi_find.till) {
-                    if (el->vi_find.forward && target > 0) target--;
-                    else if (!el->vi_find.forward && target < el->line.len) target++;
-                }
-                el->line.cursor = target;
-                refresh_line(el);
-            }
-        }
-        return DISP_CONTINUE;
-    }
-    if (c == ',') { /* reverse last find */
-        if (el->vi_find.ch) {
-            int i;
-            size_t target = el->line.cursor;
-            for (i = 0; i < count; i++) {
-                if (!el->vi_find.forward)
-                    target = vi_find_char_fwd(el, el->vi_find.ch, target);
-                else
-                    target = vi_find_char_bwd(el, el->vi_find.ch, target);
-            }
-            if (target != el->line.cursor) {
-                if (el->vi_find.till) {
-                    if (!el->vi_find.forward && target > 0) target--;
-                    else if (el->vi_find.forward && target < el->line.len) target++;
-                }
-                el->line.cursor = target;
-                refresh_line(el);
-            }
-        }
-        return DISP_CONTINUE;
-    }
-
-    /* --- Entering insert/append modes --- */
-    if (c == 'i') {
-        vi_record_repeat(el, 'i', 0, count);
-        vi_enter_insert(el);
-        return DISP_CONTINUE;
-    }
-    if (c == 'a') {
-        vi_record_repeat(el, 'a', 0, count);
-        if (el->line.cursor < el->line.len) el->line.cursor++;
-        vi_enter_insert(el);
-        return DISP_CONTINUE;
-    }
-    if (c == 'I') {
-        vi_record_repeat(el, 'I', 0, count);
-        el->line.cursor = 0;
-        vi_enter_insert(el);
-        refresh_line(el);
-        return DISP_CONTINUE;
-    }
-    if (c == 'A') {
-        vi_record_repeat(el, 'A', 0, count);
-        el->line.cursor = el->line.len;
-        vi_enter_insert(el);
-        refresh_line(el);
-        return DISP_CONTINUE;
-    }
-
-    /* --- Delete/change char --- */
-    if (c == 'x') { /* delete char at cursor */
-        int i;
-        undo_push(el);
-        vi_record_repeat(el, 'x', 0, count);
-        for (i = 0; i < count && el->line.cursor < el->line.len; i++) {
-            kill_ring_push(el, el->line.buffer + el->line.cursor, 1, i > 0);
-            memmove(el->line.buffer + el->line.cursor,
-                    el->line.buffer + el->line.cursor + 1,
-                    el->line.len - el->line.cursor);
-            el->line.len--;
-        }
-        if (el->line.cursor >= el->line.len && el->line.len > 0)
-            el->line.cursor = el->line.len - 1;
-        refresh_line(el);
-        return DISP_CONTINUE;
-    }
-    if (c == 'X') { /* delete char before cursor */
-        int i;
-        undo_push(el);
-        vi_record_repeat(el, 'X', 0, count);
-        for (i = 0; i < count && el->line.cursor > 0; i++) {
-            el->line.cursor--;
-            kill_ring_push(el, el->line.buffer + el->line.cursor, 1, i > 0);
-            memmove(el->line.buffer + el->line.cursor,
-                    el->line.buffer + el->line.cursor + 1,
-                    el->line.len - el->line.cursor);
-            el->line.len--;
-        }
-        refresh_line(el);
-        return DISP_CONTINUE;
-    }
-    if (c == 'r') { /* replace char at cursor */
-        char rc;
-        if (!read_esc_byte(el, &rc, 80)) return DISP_CONTINUE;
-        if (el->line.cursor < el->line.len && rc >= 32 && rc < 127) {
-            undo_push(el);
-            vi_record_repeat(el, 'r', rc, count);
-            el->line.buffer[el->line.cursor] = rc;
-            refresh_line(el);
-        }
-        return DISP_CONTINUE;
-    }
-    if (c == 'R') { /* enter replace mode */
-        vi_record_repeat(el, 'R', 0, count);
-        el->vi_mode = VI_REPLACE;
-        return DISP_CONTINUE;
-    }
-    if (c == 's') { /* substitute char */
-        int i;
-        undo_push(el);
-        vi_record_repeat(el, 's', 0, count);
-        for (i = 0; i < count && el->line.cursor < el->line.len; i++) {
-            memmove(el->line.buffer + el->line.cursor,
-                    el->line.buffer + el->line.cursor + 1,
-                    el->line.len - el->line.cursor);
-            el->line.len--;
-        }
-        vi_enter_insert(el);
-        refresh_line(el);
-        return DISP_CONTINUE;
-    }
-    if (c == 'S') { /* substitute entire line */
-        undo_push(el);
-        vi_record_repeat(el, 'S', 0, count);
+        vi_record_repeat(el, 'c', 'c', count);
         kill_ring_push(el, el->line.buffer, el->line.len, 0);
         el->line.len = 0;
         el->line.cursor = 0;
         el->line.buffer[0] = '\0';
         vi_enter_insert(el);
         refresh_line(el);
-        return DISP_CONTINUE;
+        return CC_NORM;
     }
-
-    /* --- d<motion>: delete over motion --- */
-    if (c == 'd') {
-        int motion;
-        size_t target, start, end;
-        if (read(fileno(el->fin), &motion, 1) != 1) return DISP_CONTINUE;
-        motion &= 0xFF;
-        if (motion == 'd') { /* dd = delete entire line */
-            undo_push(el);
-            vi_record_repeat(el, 'd', 'd', count);
-            kill_ring_push(el, el->line.buffer, el->line.len, 0);
-            el->line.len = 0;
-            el->line.cursor = 0;
-            el->line.buffer[0] = '\0';
-            refresh_line(el);
-            return DISP_CONTINUE;
-        }
-        target = vi_motion_target(el, motion, count);
-        if (target == (size_t)-1) return DISP_CONTINUE;
-        start = (el->line.cursor < target) ? el->line.cursor : target;
-        end = (el->line.cursor < target) ? target : el->line.cursor;
-        if (end > el->line.len) end = el->line.len;
-        if (start < end) {
-            undo_push(el);
-            vi_record_repeat(el, 'd', (char)motion, count);
-            kill_ring_push(el, el->line.buffer + start, end - start, 0);
-            delete_range(el, start, end);
-            el->line.cursor = start;
-            if (el->line.cursor >= el->line.len && el->line.len > 0)
-                el->line.cursor = el->line.len - 1;
-            refresh_line(el);
-        }
-        return DISP_CONTINUE;
-    }
-    if (c == 'D') { /* delete to end of line */
-        if (el->line.cursor < el->line.len) {
-            undo_push(el);
-            vi_record_repeat(el, 'D', 0, count);
-            kill_ring_push(el, el->line.buffer + el->line.cursor,
-                           el->line.len - el->line.cursor, 0);
-            el->line.len = el->line.cursor;
-            el->line.buffer[el->line.len] = '\0';
-            if (el->line.cursor > 0) el->line.cursor--;
-            refresh_line(el);
-        }
-        return DISP_CONTINUE;
-    }
-
-    /* --- c<motion>: change over motion --- */
-    if (c == 'c') {
-        int motion;
-        size_t target, start, end;
-        if (read(fileno(el->fin), &motion, 1) != 1) return DISP_CONTINUE;
-        motion &= 0xFF;
-        if (motion == 'c') { /* cc = change entire line */
-            undo_push(el);
-            vi_record_repeat(el, 'c', 'c', count);
-            kill_ring_push(el, el->line.buffer, el->line.len, 0);
-            el->line.len = 0;
-            el->line.cursor = 0;
-            el->line.buffer[0] = '\0';
-            vi_enter_insert(el);
-            refresh_line(el);
-            return DISP_CONTINUE;
-        }
-        target = vi_motion_target(el, motion, count);
-        if (target == (size_t)-1) return DISP_CONTINUE;
-        start = (el->line.cursor < target) ? el->line.cursor : target;
-        end = (el->line.cursor < target) ? target : el->line.cursor;
-        if (end > el->line.len) end = el->line.len;
-        if (start < end) {
-            undo_push(el);
-            vi_record_repeat(el, 'c', (char)motion, count);
-            kill_ring_push(el, el->line.buffer + start, end - start, 0);
-            delete_range(el, start, end);
-            el->line.cursor = start;
-            vi_enter_insert(el);
-            refresh_line(el);
-        }
-        return DISP_CONTINUE;
-    }
-    if (c == 'C') { /* change to end of line */
+    target = vi_motion_target(el, motion, count);
+    if (target == (size_t)-1) return CC_NORM;
+    start = (el->line.cursor < target) ? el->line.cursor : target;
+    end = (el->line.cursor < target) ? target : el->line.cursor;
+    if (end > el->line.len) end = el->line.len;
+    if (start < end) {
         undo_push(el);
-        vi_record_repeat(el, 'C', 0, count);
-        if (el->line.cursor < el->line.len) {
-            kill_ring_push(el, el->line.buffer + el->line.cursor,
-                           el->line.len - el->line.cursor, 0);
-            el->line.len = el->line.cursor;
-            el->line.buffer[el->line.len] = '\0';
-        }
+        vi_record_repeat(el, 'c', (char)motion, count);
+        kill_ring_push(el, el->line.buffer + start, end - start, 0);
+        delete_range(el, start, end);
+        el->line.cursor = start;
         vi_enter_insert(el);
         refresh_line(el);
-        return DISP_CONTINUE;
     }
+    return CC_NORM;
+}
 
-    /* --- y<motion>: yank over motion --- */
-    if (c == 'y') {
-        int motion;
-        size_t target, start, end;
-        if (read(fileno(el->fin), &motion, 1) != 1) return DISP_CONTINUE;
-        motion &= 0xFF;
-        if (motion == 'y') { /* yy = yank entire line */
-            kill_ring_push(el, el->line.buffer, el->line.len, 0);
-            return DISP_CONTINUE;
-        }
-        target = vi_motion_target(el, motion, count);
-        if (target == (size_t)-1) return DISP_CONTINUE;
-        start = (el->line.cursor < target) ? el->line.cursor : target;
-        end = (el->line.cursor < target) ? target : el->line.cursor;
-        if (end > el->line.len) end = el->line.len;
-        if (start < end) {
-            kill_ring_push(el, el->line.buffer + start, end - start, 0);
-        }
-        return DISP_CONTINUE;
+static unsigned char vi_change_to_end(EditLine *el, int c) {
+    (void)c;
+    el->vi_count = 0;
+    undo_push(el);
+    vi_record_repeat(el, 'C', 0, 1);
+    if (el->line.cursor < el->line.len) {
+        kill_ring_push(el, el->line.buffer + el->line.cursor,
+                       el->line.len - el->line.cursor, 0);
+        el->line.len = el->line.cursor;
+        el->line.buffer[el->line.len] = '\0';
     }
+    vi_enter_insert(el);
+    refresh_line(el);
+    return CC_NORM;
+}
 
-    /* --- Paste --- */
-    if (c == 'p') { /* paste after cursor */
-        if (el->kill_ring_count > 0 && el->kill_ring[el->kill_ring_head]) {
-            undo_push(el);
-            vi_record_repeat(el, 'p', 0, count);
-            if (el->line.cursor < el->line.len) el->line.cursor++;
-            (void)insert_span(el, el->kill_ring[el->kill_ring_head],
-                              strlen(el->kill_ring[el->kill_ring_head]));
-            if (el->line.cursor > 0) el->line.cursor--;
-            refresh_line(el);
-        }
-        return DISP_CONTINUE;
+static unsigned char vi_yank_motion(EditLine *el, int c) {
+    int motion;
+    int count = el->vi_count > 0 ? el->vi_count : 1;
+    size_t target, start, end;
+    (void)c;
+    el->vi_count = 0;
+    if (read(fileno(el->fin), &motion, 1) != 1) return CC_NORM;
+    motion &= 0xFF;
+    if (motion == 'y') {
+        kill_ring_push(el, el->line.buffer, el->line.len, 0);
+        return CC_NORM;
     }
-    if (c == 'P') { /* paste before cursor */
-        if (el->kill_ring_count > 0 && el->kill_ring[el->kill_ring_head]) {
-            undo_push(el);
-            vi_record_repeat(el, 'P', 0, count);
-            (void)insert_span(el, el->kill_ring[el->kill_ring_head],
-                              strlen(el->kill_ring[el->kill_ring_head]));
-            if (el->line.cursor > 0) el->line.cursor--;
-            refresh_line(el);
-        }
-        return DISP_CONTINUE;
-    }
+    target = vi_motion_target(el, motion, count);
+    if (target == (size_t)-1) return CC_NORM;
+    start = (el->line.cursor < target) ? el->line.cursor : target;
+    end = (el->line.cursor < target) ? target : el->line.cursor;
+    if (end > el->line.len) end = el->line.len;
+    if (start < end)
+        kill_ring_push(el, el->line.buffer + start, end - start, 0);
+    return CC_NORM;
+}
 
-    /* --- Undo --- */
-    if (c == 'u') {
-        if (undo_pop(el)) refresh_line(el);
-        return DISP_CONTINUE;
-    }
-
-    /* --- Dot repeat --- */
-    if (c == '.') {
-        char rcmd = el->vi_repeat.cmd;
-        char rarg = el->vi_repeat.arg;
-        int rcount = el->vi_repeat.count > 0 ? el->vi_repeat.count : 1;
-        if (!rcmd) return DISP_CONTINUE;
-
+static unsigned char vi_paste_after(EditLine *el, int c) {
+    (void)c;
+    el->vi_count = 0;
+    if (el->kill_ring_count > 0 && el->kill_ring[el->kill_ring_head]) {
         undo_push(el);
+        vi_record_repeat(el, 'p', 0, 1);
+        if (el->line.cursor < el->line.len) el->line.cursor++;
+        (void)insert_span(el, el->kill_ring[el->kill_ring_head],
+                          strlen(el->kill_ring[el->kill_ring_head]));
+        if (el->line.cursor > 0) el->line.cursor--;
+        refresh_line(el);
+    }
+    return CC_NORM;
+}
 
-        /* Re-execute the recorded command */
-        switch (rcmd) {
-        case 'x': {
-            int i;
-            for (i = 0; i < rcount && el->line.cursor < el->line.len; i++) {
-                memmove(el->line.buffer + el->line.cursor,
-                        el->line.buffer + el->line.cursor + 1,
-                        el->line.len - el->line.cursor);
-                el->line.len--;
-            }
-            if (el->line.cursor >= el->line.len && el->line.len > 0)
-                el->line.cursor = el->line.len - 1;
-            break;
-        }
-        case 'X': {
-            int i;
-            for (i = 0; i < rcount && el->line.cursor > 0; i++) {
-                el->line.cursor--;
-                memmove(el->line.buffer + el->line.cursor,
-                        el->line.buffer + el->line.cursor + 1,
-                        el->line.len - el->line.cursor);
-                el->line.len--;
-            }
-            break;
-        }
-        case 'r':
-            if (el->line.cursor < el->line.len && rarg >= 32 && rarg < 127)
-                el->line.buffer[el->line.cursor] = rarg;
-            break;
-        case 'D':
-            if (el->line.cursor < el->line.len) {
-                el->line.len = el->line.cursor;
-                el->line.buffer[el->line.len] = '\0';
-                if (el->line.cursor > 0) el->line.cursor--;
-            }
-            break;
-        case 'S':
-            el->line.len = 0;
-            el->line.cursor = 0;
-            el->line.buffer[0] = '\0';
-            vi_enter_insert(el);
-            break;
-        case 's': {
-            int i;
-            for (i = 0; i < rcount && el->line.cursor < el->line.len; i++) {
-                memmove(el->line.buffer + el->line.cursor,
-                        el->line.buffer + el->line.cursor + 1,
-                        el->line.len - el->line.cursor);
-                el->line.len--;
-            }
-            vi_enter_insert(el);
-            break;
-        }
-        case '~':
-            if (el->line.cursor < el->line.len) {
-                unsigned char ch = (unsigned char)el->line.buffer[el->line.cursor];
-                if (isupper(ch)) el->line.buffer[el->line.cursor] = (char)tolower(ch);
-                else if (islower(ch)) el->line.buffer[el->line.cursor] = (char)toupper(ch);
-                if (el->line.cursor + 1 < el->line.len) el->line.cursor++;
-            }
-            break;
-        default:
-            break;
-        }
+static unsigned char vi_paste_before(EditLine *el, int c) {
+    (void)c;
+    el->vi_count = 0;
+    if (el->kill_ring_count > 0 && el->kill_ring[el->kill_ring_head]) {
+        undo_push(el);
+        vi_record_repeat(el, 'P', 0, 1);
+        (void)insert_span(el, el->kill_ring[el->kill_ring_head],
+                          strlen(el->kill_ring[el->kill_ring_head]));
+        if (el->line.cursor > 0) el->line.cursor--;
+        refresh_line(el);
+    }
+    return CC_NORM;
+}
 
-        /* If the repeated command entered insert mode and we have saved text, replay it */
-        if (el->vi_repeat.insert_text && el->vi_repeat.insert_len > 0 &&
-            (rcmd == 'i' || rcmd == 'a' || rcmd == 'I' || rcmd == 'A' ||
-             rcmd == 'c' || rcmd == 'C' || rcmd == 's' || rcmd == 'S')) {
-            /* For 'a' commands, advance cursor first */
-            if (rcmd == 'a' && el->line.cursor < el->line.len) el->line.cursor++;
-            if (rcmd == 'I') el->line.cursor = 0;
-            if (rcmd == 'A') el->line.cursor = el->line.len;
-            (void)insert_span(el, el->vi_repeat.insert_text, el->vi_repeat.insert_len);
-            el->vi_mode = VI_COMMAND;
+static unsigned char vi_dot_repeat(EditLine *el, int c) {
+    char rcmd = el->vi_repeat.cmd;
+    char rarg = el->vi_repeat.arg;
+    int rcount = el->vi_repeat.count > 0 ? el->vi_repeat.count : 1;
+    (void)c;
+    el->vi_count = 0;
+    if (!rcmd) return CC_NORM;
+
+    undo_push(el);
+
+    switch (rcmd) {
+    case 'x': {
+        int i;
+        for (i = 0; i < rcount && el->line.cursor < el->line.len; i++) {
+            memmove(el->line.buffer + el->line.cursor,
+                    el->line.buffer + el->line.cursor + 1,
+                    el->line.len - el->line.cursor);
+            el->line.len--;
+        }
+        if (el->line.cursor >= el->line.len && el->line.len > 0)
+            el->line.cursor = el->line.len - 1;
+        break;
+    }
+    case 'X': {
+        int i;
+        for (i = 0; i < rcount && el->line.cursor > 0; i++) {
+            el->line.cursor--;
+            memmove(el->line.buffer + el->line.cursor,
+                    el->line.buffer + el->line.cursor + 1,
+                    el->line.len - el->line.cursor);
+            el->line.len--;
+        }
+        break;
+    }
+    case 'r':
+        if (el->line.cursor < el->line.len && rarg >= 32 && rarg < 127)
+            el->line.buffer[el->line.cursor] = rarg;
+        break;
+    case 'D':
+        if (el->line.cursor < el->line.len) {
+            el->line.len = el->line.cursor;
+            el->line.buffer[el->line.len] = '\0';
             if (el->line.cursor > 0) el->line.cursor--;
         }
-
-        refresh_line(el);
-        return DISP_CONTINUE;
+        break;
+    case 'S':
+        el->line.len = 0;
+        el->line.cursor = 0;
+        el->line.buffer[0] = '\0';
+        vi_enter_insert(el);
+        break;
+    case 's': {
+        int i;
+        for (i = 0; i < rcount && el->line.cursor < el->line.len; i++) {
+            memmove(el->line.buffer + el->line.cursor,
+                    el->line.buffer + el->line.cursor + 1,
+                    el->line.len - el->line.cursor);
+            el->line.len--;
+        }
+        vi_enter_insert(el);
+        break;
     }
-
-    /* --- Toggle case --- */
-    if (c == '~') {
+    case '~':
         if (el->line.cursor < el->line.len) {
-            undo_push(el);
-            vi_record_repeat(el, '~', 0, count);
             unsigned char ch = (unsigned char)el->line.buffer[el->line.cursor];
             if (isupper(ch)) el->line.buffer[el->line.cursor] = (char)tolower(ch);
             else if (islower(ch)) el->line.buffer[el->line.cursor] = (char)toupper(ch);
             if (el->line.cursor + 1 < el->line.len) el->line.cursor++;
-            refresh_line(el);
         }
-        return DISP_CONTINUE;
+        break;
+    default:
+        break;
     }
 
-    /* --- History navigation --- */
-    if (c == 'j') { /* next history */
-        if (el->history) {
-            HistEvent ev;
-            if (history(el->history, &ev, H_NEXT) == 0 && ev.str) {
-                line_load_history(el, ev.str);
-                refresh_line(el);
-            } else {
-                history_restore_current_input(el);
-                el->history_browsing = 0;
-                refresh_line(el);
-            }
-        }
-        return DISP_CONTINUE;
-    }
-    if (c == 'k') { /* previous history */
-        if (el->history) {
-            HistEvent ev;
-            if (!el->history_browsing) {
-                (void)history_save_current_input(el);
-                el->history_browsing = 1;
-            }
-            if (history(el->history, &ev, H_PREV) == 0 && ev.str) {
-                line_load_history(el, ev.str);
-                refresh_line(el);
-            }
-        }
-        return DISP_CONTINUE;
+    /* Replay saved insert text for insert-mode commands */
+    if (el->vi_repeat.insert_text && el->vi_repeat.insert_len > 0 &&
+        (rcmd == 'i' || rcmd == 'a' || rcmd == 'I' || rcmd == 'A' ||
+         rcmd == 'c' || rcmd == 'C' || rcmd == 's' || rcmd == 'S')) {
+        if (rcmd == 'a' && el->line.cursor < el->line.len) el->line.cursor++;
+        if (rcmd == 'I') el->line.cursor = 0;
+        if (rcmd == 'A') el->line.cursor = el->line.len;
+        (void)insert_span(el, el->vi_repeat.insert_text, el->vi_repeat.insert_len);
+        el->vi_mode = VI_COMMAND;
+        if (el->line.cursor > 0) el->line.cursor--;
     }
 
-    /* --- History search --- */
-    if (c == '/') {
-        vi_history_search(el, 1);
-        return DISP_CONTINUE;
-    }
-    if (c == '?') {
-        vi_history_search(el, 0);
-        return DISP_CONTINUE;
-    }
-    if (c == 'n') { /* repeat search */
-        if (el->vi_search.pattern[0]) {
-            const char *match = history_find_match(el, el->vi_search.pattern,
-                                                   el->vi_search.reverse);
-            if (match) {
-                line_load_history(el, match);
-                el->history_browsing = 1;
-                refresh_line(el);
-            }
-        }
-        return DISP_CONTINUE;
-    }
-    if (c == 'N') { /* reverse search */
-        if (el->vi_search.pattern[0]) {
-            const char *match = history_find_match(el, el->vi_search.pattern,
-                                                   !el->vi_search.reverse);
-            if (match) {
-                line_load_history(el, match);
-                el->history_browsing = 1;
-                refresh_line(el);
-            }
-        }
-        return DISP_CONTINUE;
-    }
-
-    /* --- Misc commands --- */
-    if (c == 'v') { /* invoke $VISUAL or $EDITOR */
-        const char *editor = getenv("VISUAL");
-        char tmpfile[64];
-        char cmd[512];
-        FILE *fp;
-        char buf[4096];
-        size_t nread;
-        int fd;
-
-        if (!editor) editor = getenv("EDITOR");
-        if (!editor) editor = "vi";
-
-        terminal_set_orig(el);
-
-        snprintf(tmpfile, sizeof(tmpfile), "/tmp/el_edit.XXXXXX");
-        fd = mkstemp(tmpfile);
-        if (fd < 0) {
-            terminal_set_raw(el);
-            return DISP_CONTINUE;
-        }
-        (void)write(fd, el->line.buffer, el->line.len);
-        close(fd);
-
-        snprintf(cmd, sizeof(cmd), "%s %s", editor, tmpfile);
-        (void)system(cmd);
-
-        fp = fopen(tmpfile, "r");
-        if (fp) {
-            nread = fread(buf, 1, sizeof(buf) - 1, fp);
-            fclose(fp);
-            buf[nread] = '\0';
-            /* Strip trailing newline */
-            while (nread > 0 && (buf[nread - 1] == '\n' || buf[nread - 1] == '\r'))
-                buf[--nread] = '\0';
-            undo_push(el);
-            (void)line_set_text(el, buf);
-        }
-        unlink(tmpfile);
-
-        terminal_set_raw(el);
-        refresh_line(el);
-
-        /* Accept the edited line */
-        return DISP_ACCEPT;
-    }
-
-    if (c == '#') { /* comment out line */
-        undo_push(el);
-        el->line.cursor = 0;
-        if (line_ensure_capacity(el, el->line.len + 2) == 0) {
-            memmove(el->line.buffer + 1, el->line.buffer, el->line.len + 1);
-            el->line.buffer[0] = '#';
-            el->line.len++;
-        }
-        el->vi_mode = VI_INSERT;
-        return DISP_ACCEPT;
-    }
-
-    return DISP_CONTINUE;
+    refresh_line(el);
+    return CC_NORM;
 }
 
-/* ------------------------------------------------------------------ */
-/* el_gets: main entry point — dispatches to per-mode handlers.       */
-/* ------------------------------------------------------------------ */
+static unsigned char vi_toggle_case(EditLine *el, int c) {
+    unsigned char ch;
+    (void)c;
+    el->vi_count = 0;
+    if (el->line.cursor < el->line.len) {
+        undo_push(el);
+        vi_record_repeat(el, '~', 0, 1);
+        ch = (unsigned char)el->line.buffer[el->line.cursor];
+        if (isupper(ch)) el->line.buffer[el->line.cursor] = (char)tolower(ch);
+        else if (islower(ch)) el->line.buffer[el->line.cursor] = (char)toupper(ch);
+        if (el->line.cursor + 1 < el->line.len) el->line.cursor++;
+        refresh_line(el);
+    }
+    return CC_NORM;
+}
+
+static unsigned char vi_search_forward_action(EditLine *el, int c) {
+    (void)c;
+    el->vi_count = 0;
+    vi_history_search(el, 1);
+    return CC_NORM;
+}
+
+static unsigned char vi_search_backward_action(EditLine *el, int c) {
+    (void)c;
+    el->vi_count = 0;
+    vi_history_search(el, 0);
+    return CC_NORM;
+}
+
+static unsigned char vi_search_next_action(EditLine *el, int c) {
+    (void)c;
+    el->vi_count = 0;
+    if (el->vi_search.pattern[0]) {
+        const char *match = history_find_match(el, el->vi_search.pattern,
+                                               el->vi_search.reverse);
+        if (match) {
+            line_load_history(el, match);
+            el->history_browsing = 1;
+            refresh_line(el);
+        }
+    }
+    return CC_NORM;
+}
+
+static unsigned char vi_search_prev_action(EditLine *el, int c) {
+    (void)c;
+    el->vi_count = 0;
+    if (el->vi_search.pattern[0]) {
+        const char *match = history_find_match(el, el->vi_search.pattern,
+                                               !el->vi_search.reverse);
+        if (match) {
+            line_load_history(el, match);
+            el->history_browsing = 1;
+            refresh_line(el);
+        }
+    }
+    return CC_NORM;
+}
+
+static unsigned char vi_edit_external(EditLine *el, int c) {
+    const char *editor;
+    char tmpfile[64];
+    char cmd[512];
+    FILE *fp;
+    char buf[4096];
+    size_t nread;
+    int fd;
+    (void)c;
+    el->vi_count = 0;
+
+    editor = getenv("VISUAL");
+    if (!editor) editor = getenv("EDITOR");
+    if (!editor) editor = "vi";
+
+    terminal_set_orig(el);
+
+    snprintf(tmpfile, sizeof(tmpfile), "/tmp/el_edit.XXXXXX");
+    fd = mkstemp(tmpfile);
+    if (fd < 0) {
+        terminal_set_raw(el);
+        return CC_NORM;
+    }
+    (void)write(fd, el->line.buffer, el->line.len);
+    close(fd);
+
+    snprintf(cmd, sizeof(cmd), "%s %s", editor, tmpfile);
+    (void)system(cmd);
+
+    fp = fopen(tmpfile, "r");
+    if (fp) {
+        nread = fread(buf, 1, sizeof(buf) - 1, fp);
+        fclose(fp);
+        buf[nread] = '\0';
+        while (nread > 0 && (buf[nread - 1] == '\n' || buf[nread - 1] == '\r'))
+            buf[--nread] = '\0';
+        undo_push(el);
+        (void)line_set_text(el, buf);
+    }
+    unlink(tmpfile);
+
+    terminal_set_raw(el);
+    refresh_line(el);
+    return CC_NEWLINE;
+}
+
+static unsigned char vi_comment_line(EditLine *el, int c) {
+    (void)c;
+    el->vi_count = 0;
+    undo_push(el);
+    el->line.cursor = 0;
+    if (line_ensure_capacity(el, el->line.len + 2) == 0) {
+        memmove(el->line.buffer + 1, el->line.buffer, el->line.len + 1);
+        el->line.buffer[0] = '#';
+        el->line.len++;
+    }
+    el->vi_mode = VI_INSERT;
+    return CC_NEWLINE;
+}
+
+static unsigned char vi_replace_back(EditLine *el, int c) {
+    (void)c;
+    if (el->line.cursor > 0) {
+        undo_push(el);
+        el->line.cursor--;
+        refresh_line(el);
+    }
+    return CC_NORM;
+}
+
+static unsigned char vi_replace_insert(EditLine *el, int c) {
+    if (c < 32 || c >= 127) return CC_NORM;
+    undo_push(el);
+    if (el->line.cursor < el->line.len) {
+        el->line.buffer[el->line.cursor] = (char)c;
+        el->line.cursor++;
+    } else {
+        if (line_ensure_capacity(el, el->line.len + 2) == 0) {
+            el->line.buffer[el->line.cursor] = (char)c;
+            el->line.len++;
+            el->line.cursor++;
+            el->line.buffer[el->line.len] = '\0';
+        }
+    }
+    refresh_line(el);
+    return CC_NORM;
+}
+
+/* ================================================================== */
+/* Builtin action registry                                            */
+/* ================================================================== */
+
+static const struct action_entry builtin_actions[] = {
+    /* Editor-wide */
+    {"ed-newline",              "Accept line",                ed_newline},
+    {"ed-insert",               "Self-insert character",      ed_insert},
+    {"ed-delete-next-char",     "Delete or EOF",              ed_delete_next_char},
+    {"ed-tty-sigint",           "Send SIGINT (^C)",           ed_tty_sigint},
+    {"ed-clear-screen",         "Clear screen",               ed_clear_screen},
+    {"ed-move-to-beg",          "Cursor to beginning",        ed_move_to_beg},
+    {"ed-prev-char",            "Cursor left",                ed_prev_char},
+    {"ed-move-to-end",          "Cursor to end",              ed_move_to_end},
+    {"ed-next-char",            "Cursor right",               ed_next_char},
+    {"ed-complete",             "Complete filename",           ed_complete},
+    {"ed-kill-line",            "Kill to end of line",         ed_kill_line},
+    {"ed-next-history",         "Next history entry",          ed_next_history},
+    {"ed-prev-history",         "Previous history entry",      ed_prev_history},
+    {"ed-transpose-chars",      "Transpose characters",        ed_transpose_chars},
+    {"ed-undo",                 "Undo last change",            ed_undo},
+    {"ed-toggle-overwrite",     "Toggle insert/overwrite",     ed_toggle_overwrite},
+    {"ed-beginning-of-history", "First history entry",         ed_beginning_of_history},
+    {"em-end-of-history",       "Last history entry",          em_end_of_history},
+    /* Emacs-specific */
+    {"em-delete-prev-char",     "Delete backward",             em_delete_prev_char},
+    {"em-kill-region",          "Kill backward to line start", em_kill_region},
+    {"em-delete-prev-word",     "Delete word backward",        em_delete_prev_word},
+    {"em-yank",                 "Yank from kill ring",         em_yank},
+    {"em-search-prev",          "Incremental search backward", em_search_prev},
+    {"em-search-next",          "Incremental search forward",  em_search_next},
+    {"em-capitalize-word",      "Capitalize word",             em_capitalize_word},
+    {"em-lower-case-word",      "Lowercase word",              em_lower_case_word},
+    {"em-upper-case-word",      "Uppercase word",              em_upper_case_word},
+    {"em-yank-last-arg",        "Yank last argument",          em_yank_last_arg},
+    {"em-kill-word",            "Kill word forward",           em_kill_word},
+    {"em-next-word",            "Move forward word",           em_next_word},
+    {"em-prev-word",            "Move backward word",          em_prev_word},
+    {"em-yank-pop",             "Yank pop (cycle kill ring)",  em_yank_pop},
+    {"em-backward-kill-word",   "Kill word backward",          em_backward_kill_word},
+    {"em-csi-dispatch",         "CSI sequence dispatch",       em_csi_dispatch},
+    /* Vi mode */
+    {"vi-to-command-mode",      "Enter vi command mode",       vi_to_command_mode},
+    {"vi-arg-digit",            "Vi digit argument",           vi_arg_digit},
+    {"vi-motion-h",             "Vi cursor left",              vi_motion_h},
+    {"vi-motion-l",             "Vi cursor right",             vi_motion_l},
+    {"vi-motion-w",             "Vi forward word",             vi_motion_w},
+    {"vi-motion-W",             "Vi forward WORD",             vi_motion_W},
+    {"vi-motion-b",             "Vi backward word",            vi_motion_b},
+    {"vi-motion-B",             "Vi backward WORD",            vi_motion_B},
+    {"vi-motion-e",             "Vi end of word",              vi_motion_e},
+    {"vi-motion-E",             "Vi end of WORD",              vi_motion_E},
+    {"vi-beginning-of-line",    "Vi beginning of line (0)",    vi_beginning_of_line},
+    {"vi-end-of-line",          "Vi end of line ($)",          vi_end_of_line},
+    {"vi-first-nonblank",       "Vi first non-blank (^)",      vi_first_nonblank_action},
+    {"vi-find-char",            "Vi find character (f/F/t/T)", vi_find_char_action},
+    {"vi-repeat-find",          "Vi repeat find (;)",          vi_repeat_find_action},
+    {"vi-reverse-find",         "Vi reverse find (,)",         vi_reverse_find_action},
+    {"vi-insert-mode",          "Vi insert mode (i)",          vi_insert_mode},
+    {"vi-append-mode",          "Vi append mode (a)",          vi_append_mode},
+    {"vi-insert-beg",           "Vi insert at beginning (I)",  vi_insert_beg},
+    {"vi-append-end",           "Vi append at end (A)",        vi_append_end},
+    {"vi-delete-char",          "Vi delete char (x)",          vi_delete_char_action},
+    {"vi-backward-delete-char", "Vi backward delete (X)",      vi_backward_delete_char},
+    {"vi-replace-char",         "Vi replace char (r)",         vi_replace_char_action},
+    {"vi-replace-mode",         "Vi replace mode (R)",         vi_replace_mode_action},
+    {"vi-substitute-char",      "Vi substitute char (s)",      vi_substitute_char},
+    {"vi-substitute-line",      "Vi substitute line (S)",      vi_substitute_line},
+    {"vi-delete-motion",        "Vi delete over motion (d)",   vi_delete_motion},
+    {"vi-delete-to-end",        "Vi delete to end (D)",        vi_delete_to_end},
+    {"vi-change-motion",        "Vi change over motion (c)",   vi_change_motion},
+    {"vi-change-to-end",        "Vi change to end (C)",        vi_change_to_end},
+    {"vi-yank-motion",          "Vi yank over motion (y)",     vi_yank_motion},
+    {"vi-paste-after",          "Vi paste after (p)",          vi_paste_after},
+    {"vi-paste-before",         "Vi paste before (P)",         vi_paste_before},
+    {"vi-dot-repeat",           "Vi dot repeat (.)",           vi_dot_repeat},
+    {"vi-toggle-case",          "Vi toggle case (~)",          vi_toggle_case},
+    {"vi-next-history",         "Vi next history (j)",         ed_next_history},
+    {"vi-prev-history",         "Vi prev history (k)",         ed_prev_history},
+    {"vi-search-forward",       "Vi search forward (/)",       vi_search_forward_action},
+    {"vi-search-backward",      "Vi search backward (?)",      vi_search_backward_action},
+    {"vi-search-next",          "Vi search next (n)",          vi_search_next_action},
+    {"vi-search-prev",          "Vi search prev (N)",          vi_search_prev_action},
+    {"vi-edit-external",        "Vi external editor (v)",      vi_edit_external},
+    {"vi-comment-line",         "Vi comment line (#)",         vi_comment_line},
+    {"vi-replace-back",         "Vi replace backspace",        vi_replace_back},
+    {"vi-replace-insert",       "Vi replace self-insert",      vi_replace_insert},
+};
+
+static const int n_builtin_actions = (int)(sizeof(builtin_actions) / sizeof(builtin_actions[0]));
+
+const struct action_entry *el_builtin_actions(int *count) {
+    if (count) *count = n_builtin_actions;
+    return builtin_actions;
+}
+
+const struct action_entry *el_find_action(EditLine *el, const char *name) {
+    int i;
+    if (!name) return NULL;
+    for (i = 0; i < n_builtin_actions; i++) {
+        if (strcmp(builtin_actions[i].name, name) == 0)
+            return &builtin_actions[i];
+    }
+    if (el) {
+        for (i = 0; i < el->n_user_actions; i++) {
+            if (strcmp(el->user_actions[i].name, name) == 0)
+                return &el->user_actions[i];
+        }
+    }
+    return NULL;
+}
+
+/* Expose read_esc_byte for keymap dispatch (cross-module use) */
+int el_read_esc_byte(EditLine *el, char *out, int timeout_ms) {
+    return read_esc_byte(el, out, timeout_ms);
+}
+
+/* ================================================================== */
+/* el_gets: main entry point — keymap-based dispatch                  */
+/* ================================================================== */
 const char *el_gets(EditLine *el, int *count) {
     size_t i;
     int c;
-    int result;
+    unsigned char result;
     ssize_t n;
+    struct keymap_entry *current_keymap;
 
     if (count) *count = 0;
     if (terminal_set_raw(el) == -1) return NULL;
@@ -2333,6 +2352,8 @@ const char *el_gets(EditLine *el, int *count) {
     el->render_cache_cursor = 0;
     el->history_browsing = 0;
     el->yank_active = 0;
+    el->vi_count = 0;
+    el->last_action_was_complete = 0;
     for (i = 0; i < el->undo_depth; i++) {
         if (el->undo_stack[i].buffer) {
             free(el->undo_stack[i].buffer);
@@ -2359,7 +2380,6 @@ const char *el_gets(EditLine *el, int *count) {
         n = read(fileno(el->fin), &c, 1);
         if (n == -1) {
             if (errno == EINTR) {
-                /* Handle pending signals (SIGWINCH, SIGINT, etc.) */
                 el_signal_handle(el);
                 refresh_line(el);
                 continue;
@@ -2370,23 +2390,30 @@ const char *el_gets(EditLine *el, int *count) {
 
         c &= 0xFF;
 
+        /* Select keymap based on current mode */
         if (el->editor_mode == ED_EMACS) {
-            result = emacs_handle_char(el, c);
+            current_keymap = (struct keymap_entry *)el->emacs_keymap;
         } else {
             switch (el->vi_mode) {
             case VI_COMMAND:
-                result = vi_command_handle_char(el, c);
+                current_keymap = (struct keymap_entry *)el->vi_command_keymap;
                 break;
             case VI_REPLACE:
-                result = vi_replace_handle_char(el, c);
+                current_keymap = (struct keymap_entry *)el->vi_replace_keymap;
                 break;
             default: /* VI_INSERT */
-                result = vi_insert_handle_char(el, c);
+                current_keymap = (struct keymap_entry *)el->vi_insert_keymap;
                 break;
             }
         }
 
-        if (result == DISP_ACCEPT) {
+        /* Dispatch through keymap (falls back to CC_NORM for unbound keys) */
+        if (current_keymap)
+            result = keymap_dispatch(el, current_keymap, c);
+        else
+            result = CC_NORM;
+
+        if (result == CC_NEWLINE) {
             terminal_puts(el, "\r\n");
             terminal_flush(el);
             el_signals_restore(el);
@@ -2394,7 +2421,7 @@ const char *el_gets(EditLine *el, int *count) {
             if (count) *count = (int)el->line.len;
             return el->line.buffer;
         }
-        if (result == DISP_EOF) {
+        if (result == CC_EOF) {
             el_signals_restore(el);
             terminal_set_orig(el);
             return NULL;

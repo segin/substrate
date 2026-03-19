@@ -61,6 +61,7 @@ int history(History *h, HistEvent *ev, int op, ...);
 #define EL_HIST         8
 #define EL_RPROMPT      9
 #define EL_CLIENTDATA   10
+#define EL_ADDFN        11
 
 /* history operations */
 #define H_FUNC          0

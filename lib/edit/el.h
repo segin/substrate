@@ -10,6 +10,46 @@
 #define EL_KILL_RING_SIZE 8
 #define EL_UNDO_DEPTH 256
 #define EL_OUTBUF_SIZE 4096
+#define EL_MAX_USER_ACTIONS 64
+
+/* ------------------------------------------------------------------ */
+/* Action function type and return codes                              */
+/* ------------------------------------------------------------------ */
+
+typedef unsigned char (*el_action_t)(EditLine *, int);
+
+#define CC_NORM     0   /* Normal: continue editing */
+#define CC_NEWLINE  1   /* Accept line (newline entered) */
+#define CC_EOF      2   /* End-of-file (^D on empty) */
+#define CC_REFRESH  4   /* Refresh display */
+#define CC_ERROR    5   /* Error */
+
+/* ------------------------------------------------------------------ */
+/* Keymap types                                                       */
+/* ------------------------------------------------------------------ */
+
+enum keymap_type {
+    KM_UNBOUND = 0,
+    KM_FUNC,
+    KM_SUBMAP
+};
+
+struct keymap_entry {
+    enum keymap_type type;
+    union {
+        el_action_t func;
+        struct keymap_entry *submap;  /* points to [256] array */
+    } val;
+};
+
+typedef struct keymap_entry el_keymap_t[256];
+
+/* Action registry entry */
+struct action_entry {
+    const char *name;
+    const char *help;
+    el_action_t func;
+};
 
 enum editor_mode {
     ED_EMACS = 0,
@@ -153,6 +193,15 @@ struct editline {
     struct vi_find vi_find;
     struct vi_search vi_search;
     size_t vi_insert_start;  /* cursor pos when entering insert mode */
+    int vi_count;            /* accumulated count prefix for vi commands */
+    /* Key map subsystem */
+    el_keymap_t *emacs_keymap;
+    el_keymap_t *vi_insert_keymap;
+    el_keymap_t *vi_command_keymap;
+    el_keymap_t *vi_replace_keymap;
+    struct action_entry user_actions[EL_MAX_USER_ACTIONS];
+    int n_user_actions;
+    int last_action_was_complete;  /* for second-tab display */
 };
 
 /*
@@ -184,7 +233,28 @@ void el_signals_restore(EditLine *el);
 int  el_signal_pending(void);
 void el_signal_handle(EditLine *el);
 
+/* Key map subsystem */
+struct keymap_entry *keymap_alloc(void);
+void keymap_free(struct keymap_entry *km);
+void keymap_bind_func(struct keymap_entry *km, int ch, el_action_t func);
+void keymap_bind_submap(struct keymap_entry *km, int ch, struct keymap_entry *sub);
+unsigned char keymap_dispatch(EditLine *el, struct keymap_entry *km, int ch);
+int keymap_parse_sequence(const char *str, unsigned char *out, size_t outsz, size_t *outlen);
+int keymap_bind_sequence(struct keymap_entry *km, const unsigned char *seq,
+                         size_t seqlen, el_action_t func);
+void keymap_init_emacs(EditLine *el);
+void keymap_init_vi_insert(EditLine *el);
+void keymap_init_vi_command(EditLine *el);
+void keymap_init_vi_replace(EditLine *el);
+
+/* Action registry */
+const struct action_entry *el_builtin_actions(int *count);
+const struct action_entry *el_find_action(EditLine *el, const char *name);
+
 /* Line buffer */
 int line_ensure_capacity(EditLine *el, size_t needed);
+
+/* Byte reader for escape sequences (used by keymap dispatch) */
+int el_read_esc_byte(EditLine *el, char *out, int timeout_ms);
 
 #endif /* _EL_H_ */
