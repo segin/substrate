@@ -77,13 +77,13 @@ Primary rule: prefer shrinking duplicated logic into shared helpers and lookup t
 - [x] Consolidate `movbe`, `movdiri`, `movdir64b`, `enqcmd`, `enqcmds`, `wrssd`, `wrussd`, `aadd`, `aand`, `aor`, `axor` into shared operand-order helpers.
 
 ### 1.6 Dead-Path Elimination
-- [ ] Remove branches that are now subsumed by lookup helpers.
-- [ ] Remove unused local variables introduced by old ladders.
-- [ ] Remove duplicate helper code paths that differ only by small selector tables.
+- [x] Remove branches that are now subsumed by lookup helpers.
+- [x] Remove unused local variables introduced by old ladders.
+- [x] Remove duplicate helper code paths that differ only by small selector tables.
 
 Validation gate for Section 1:
-- [ ] `usr.bin/as/as_elf_emit.c` builds warning-free under `-Werror`.
-- [ ] All assembler-only validation commands in Section 0 pass.
+- [x] `usr.bin/as/as_elf_emit.c` builds warning-free under `-Werror`.
+- [x] All assembler-only validation commands in Section 0 pass.
 
 ---
 
