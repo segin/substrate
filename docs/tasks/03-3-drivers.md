@@ -1054,7 +1054,7 @@
                     - [ ] Transfer to host (flush dirty regions). (REQ: REQ-03-0753)
                     - [ ] Display info query (resolution, format). (REQ: REQ-03-0754)
                     - [ ] Cursor image upload and positioning. (REQ: REQ-03-0755)
-            - [x] **Pixel Formats:** (REQ: REQ-03-0756)
+            - [x] **Pixel Formats:** <!-- sys/drivers/video/fb.c, tests/sys/host_test_fb_multiboot.c --> (REQ: REQ-03-0756)
                 - [x] 8-bit indexed (palette-based). (REQ: REQ-03-0757)
                 - [x] 16-bit (RGB565, ARGB1555). (REQ: REQ-03-0758)
                 - [x] 24-bit (RGB888, BGR888). (REQ: REQ-03-0759)
