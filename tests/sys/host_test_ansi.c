@@ -243,6 +243,20 @@ static void test_device_status_report_ok(void) {
     assert(strcmp(response_buffer, "\x1b[0n") == 0);
 }
 
+static void test_cursor_position_report(void) {
+    struct ansi_ctx ctx;
+    ansi_init(&ctx);
+    reset_mocks();
+
+    mock_cursor_row = 4;
+    mock_cursor_col = 9;
+
+    const char *seq = "\x1b[6n";
+    while (*seq) ansi_process(&ctx, *seq++, &callbacks);
+
+    assert(strcmp(response_buffer, "\x1b[5;10R") == 0);
+}
+
 static void test_erase_display_default_mode(void) {
     struct ansi_ctx ctx;
     ansi_init(&ctx);
@@ -362,6 +376,7 @@ int main(void) {
     run_test("SGR Attr Persistence", test_sgr_attrs_persist_across_sequences);
     run_test("Clear Screen", test_clear_screen);
     run_test("Device Status Report", test_device_status_report_ok);
+    run_test("Cursor Position Report", test_cursor_position_report);
     run_test("Erase Display Default", test_erase_display_default_mode);
     run_test("Erase Line Modes", test_erase_line_modes);
     run_test("Set Scroll Region", test_set_scroll_region);

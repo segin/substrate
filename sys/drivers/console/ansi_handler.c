@@ -11,6 +11,7 @@
  */
 
 #include <kern/ansi_handler.h>
+#include <stdio.h>
 
 static void ansi_respond(const struct ansi_callbacks *cb,
                          const char *buf,
@@ -345,6 +346,19 @@ static void handle_csi(struct ansi_ctx *ctx, char c,
         n = (ctx->param_count > 0) ? ctx->params[0] : 0;
         if (n == 5) {
             ansi_respond(cb, "\x1b[0n", 4);
+        } else if (n == 6) {
+            char resp[32];
+            size_t len;
+
+            len = 0;
+            if (cb->get_cursor) {
+                cb->get_cursor(&cur_row, &cur_col);
+            }
+            len = (size_t)snprintf(resp, sizeof(resp), "\x1b[%d;%dR",
+                cur_row + 1, cur_col + 1);
+            if (len < sizeof(resp)) {
+                ansi_respond(cb, resp, len);
+            }
         }
         break;
 
