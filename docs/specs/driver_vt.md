@@ -13,6 +13,7 @@
 - each VT owns a fixed scrollback ring of `256` lines at the maximum supported width.
 - the hardware-text VT backend honors DECSTBM scroll regions through the shared ANSI callback table, so line insert/delete, index, reverse-index, and bulk scroll operations stay clipped to the configured top/bottom margins.
 - the hardware-text attribute byte is treated as a 4-bit foreground plus 4-bit background palette, so ANSI SGR color changes can address the full 16 VGA text colors for both foreground and background.
+- the hardware-text backend exposes a bulk write path for both console logging and `/dev/ttyN` output, so multi-byte writes traverse the same ANSI parser and cursor-update logic as single-character output.
 - `Alt+F1..F12` switches the active VT.
 - `Shift+PageUp` and `Shift+PageDown` enter/exit scrollback and adjust the active VT scrollback view.
 - when scrollback is active, the VGA backend redraws historical lines and hides the hardware cursor.

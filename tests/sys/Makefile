@@ -193,6 +193,9 @@ host_test_vt: host_test_vt.c
 host_test_ansi: host_test_ansi.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_ansi.c -o $@
 
+host_test_hw_text: host_test_hw_text.c
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_hw_text.c -o $@
+
 host_test_ps2: host_test_ps2.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_ps2.c -o $@
 

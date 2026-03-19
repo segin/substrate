@@ -56,6 +56,12 @@ a kernel-owned status line on the last physical text row
 Scrollback freezes the visible console view while live output continues to
 append to the active VT buffer. The status line shows the current VT number and
 the number of lines by which the view is scrolled back.
+.Pp
+Bulk writes from the kernel console path and from
+.Pa /dev/ttyN
+devices share the same hardware-text write path, so escape-sequence parsing,
+cursor updates, and redraw rules remain consistent regardless of whether output
+arrives one character at a time or in larger buffers.
 .Sh FILES
 .Bl -tag -width "/sys/drivers/console/vt.c"
 .It Pa /sys/drivers/console/vt.c

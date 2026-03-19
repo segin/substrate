@@ -987,7 +987,7 @@
             - [ ] **Text Output:** (REQ: REQ-03-0686)
                 - [x] Implement `vga_putchar(char c, uint8_t attr)`. (REQ: REQ-03-0687)
                 - [x] Handle control characters (CR, LF, BS, TAB, BEL). (REQ: REQ-03-0688)
-                - [ ] Implement `vga_write(const char *buf, size_t len)`. (REQ: REQ-03-0689)
+                - [x] Implement `vga_write(const char *buf, size_t len)`. <!-- sys/drivers/video/hw_text.c, sys/drivers/video/hw_text.h, tests/sys/host_test_hw_text.c --> (REQ: REQ-03-0689)
                 - [ ] Tab stop handling (configurable tab width). (REQ: REQ-03-0690)
             - [ ] **Cursor Control:** (REQ: REQ-03-0691)
                 - [x] Read/write hardware cursor position (CRTC registers 0x0E/0x0F). (REQ: REQ-03-0692)

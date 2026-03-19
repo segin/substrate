@@ -1109,22 +1109,31 @@ static void vt_tty_remove(struct tty_driver *driver, struct tty *tty) {
     tty->driver_data = NULL;
 }
 
+static void hw_text_write_vt_locked(vt_state_t *vt, const char *data, size_t len) {
+    size_t i;
+
+    if (!vt || !data) {
+        return;
+    }
+
+    current_vt_ctx = vt;
+    for (i = 0; i < len; i++) {
+        ansi_process(&vt->ansi, data[i], &ansi_cb);
+    }
+    hw_text_render_statusline_locked(vt);
+    hw_text_update_cursor_locked(vt);
+    current_vt_ctx = NULL;
+}
+
 static int vt_tty_write(struct tty *tty, const unsigned char *buf, int count) {
     vt_state_t *vt = (vt_state_t *)tty->driver_data;
-    int i;
 
     if (!vt) {
         return 0;
     }
 
     spinlock_acquire(&hw_text_lock);
-    current_vt_ctx = vt;
-    for (i = 0; i < count; i++) {
-        ansi_process(&vt->ansi, buf[i], &ansi_cb);
-    }
-    hw_text_render_statusline_locked(vt);
-    hw_text_update_cursor_locked(vt);
-    current_vt_ctx = NULL;
+    hw_text_write_vt_locked(vt, (const char *)buf, (size_t)count);
     spinlock_release(&hw_text_lock);
     return count;
 }
@@ -1184,22 +1193,7 @@ static void hw_text_init_ttys_once(void) {
 }
 
 void hw_text_console_write_shim(const char *data, size_t len) {
-    vt_state_t *vt = vt_get_state(vt_get_active());
-    size_t i;
-
-    if (!vt) {
-        return;
-    }
-
-    spinlock_acquire(&hw_text_lock);
-    current_vt_ctx = vt;
-    for (i = 0; i < len; i++) {
-        ansi_process(&vt->ansi, data[i], &ansi_cb);
-    }
-    hw_text_render_statusline_locked(vt);
-    hw_text_update_cursor_locked(vt);
-    current_vt_ctx = NULL;
-    spinlock_release(&hw_text_lock);
+    hw_text_write(data, len);
 }
 
 void hw_text_redraw_active(void) {
@@ -1269,6 +1263,18 @@ void hw_text_set_color(uint8_t fg, uint8_t bg) {
 
 void hw_text_putc(char c) {
     hw_text_console_write_shim(&c, 1);
+}
+
+void hw_text_write(const char *data, size_t len) {
+    vt_state_t *vt = vt_get_state(vt_get_active());
+
+    if (!vt || !data || len == 0) {
+        return;
+    }
+
+    spinlock_acquire(&hw_text_lock);
+    hw_text_write_vt_locked(vt, data, len);
+    spinlock_release(&hw_text_lock);
 }
 
 void hw_text_clear_screen(void) {
