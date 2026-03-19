@@ -12,7 +12,7 @@ all: histedit.h libedit.a
 histedit.h: ../../include/histedit.h
 	cp $< $@
 
-OBJS = editline.o readline.o terminal.o history.o signal.o keymap.o
+OBJS = editline.o readline.o terminal.o history.o signal.o keymap.o tokenizer.o rl_compat.o
 
 libedit.a: $(OBJS)
 	$(AR) rcs $@ $^

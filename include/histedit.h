@@ -49,6 +49,22 @@ typedef struct {
 
 int history(History *h, HistEvent *ev, int op, ...);
 
+/*
+ * Tokenizer
+ */
+typedef struct tokenizer Tokenizer;
+
+Tokenizer *tok_init(const char *ifs);
+void       tok_end(Tokenizer *tok);
+void       tok_reset(Tokenizer *tok);
+int        tok_str(Tokenizer *tok, const LineInfo *li, int *argc,
+		   const char ***argv);
+
+/*
+ * el_source - read and execute .editrc commands
+ */
+int el_source(EditLine *el, const char *file);
+
 /* el_set/el_get operations */
 #define EL_PROMPT       0
 #define EL_TERMINAL     1
@@ -62,6 +78,15 @@ int history(History *h, HistEvent *ev, int op, ...);
 #define EL_RPROMPT      9
 #define EL_CLIENTDATA   10
 #define EL_ADDFN        11
+#define EL_SETFN        12
+#define EL_PROMPT_ESC   13
+#define EL_SETTY        14
+#define EL_GETFP        15
+#define EL_SETFP        16
+#define EL_EDITMODE     17
+
+/* History unique/dedup flags (set via H_SETUNIQUE) */
+#define H_SETUNIQUE     20
 
 /* history operations */
 #define H_FUNC          0

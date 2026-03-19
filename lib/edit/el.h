@@ -202,6 +202,13 @@ struct editline {
     struct action_entry user_actions[EL_MAX_USER_ACTIONS];
     int n_user_actions;
     int last_action_was_complete;  /* for second-tab display */
+    /* Prompt escape support */
+    const char *(*prompt_func)(EditLine *);
+    char prompt_esc_char;         /* escape char for non-printing sequences */
+    const char *(*rprompt_func)(EditLine *);
+    char rprompt_esc_char;
+    /* Editing mode toggle */
+    int editing_enabled;          /* 0 = passthrough, 1 = full editing */
 };
 
 /*
