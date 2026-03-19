@@ -105,7 +105,7 @@ Validation gate for Section 1:
 - [x] Add regression tests whenever a cleanup touches ISA gating.
 
 ### 2.4 x86-64 Intel Roundtrip
-- [ ] Keep x86_64 Intel roundtrip green for v1/v2/v3/v4.
+- [x] Keep x86_64 Intel roundtrip green for v1/v2/v3/v4.
 - [ ] Remove remaining alias-normalization special cases that should be proper encoder behavior.
 - [ ] Add explicit tests for `movabs`, `rex.*`, segment-register transfers, and `jrcxz`.
 
