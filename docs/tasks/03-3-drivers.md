@@ -1097,7 +1097,7 @@
                     - [ ] Hot spot offset configuration. (REQ: REQ-03-0796)
                     - [ ] Cursor enable/disable. (REQ: REQ-03-0797)
             - [ ] **Emulation (VT102/ANSI):** (REQ: REQ-03-0798)
-                - [ ] **Parser State Machine:** (REQ: REQ-03-0799)
+                - [x] **Parser State Machine:** <!-- sys/drivers/console/ansi_handler.c, tests/sys/host_test_ansi.c --> (REQ: REQ-03-0799)
                     - [x] Ground state (printable characters). (REQ: REQ-03-0800)
                     - [x] Escape state (ESC received). (REQ: REQ-03-0801)
                     - [x] CSI state (ESC [ sequences). (REQ: REQ-03-0802)
