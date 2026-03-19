@@ -27,5 +27,9 @@ select.o: select.c
 clean:
 	rm -f *.o libsys.a
 
+install: libsys.a
+	@mkdir -p $(DESTDIR)/usr/lib
+	cp libsys.a $(DESTDIR)/usr/lib/
+
 modify_ldt.o: modify_ldt.c
 	$(CC) $(CFLAGS) -c -o $@ $<

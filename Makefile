@@ -69,7 +69,7 @@ sys sbin bin usr.bin usr.lib usr.man: | lib
 
 
 clean:
-	@for dir in $(SUBDIRS); do \
+	@set -e; for dir in $(SUBDIRS); do \
 		echo ">>> Cleaning $$dir"; \
 		if [ -f "$$dir/Makefile" ]; then $(MAKE) -C $$dir clean; fi; \
 	done
@@ -91,7 +91,7 @@ install:
 	@mkdir -p $(DESTDIR)/usr/local
 	@mkdir -p $(DESTDIR)/usr/man
 	@mkdir -p $(DESTDIR)/var
-	@for dir in $(SUBDIRS); do \
+	@set -e; for dir in $(SUBDIRS); do \
 		echo ">>> Installing $$dir"; \
 		if [ -f "$$dir/Makefile" ]; then $(MAKE) -C $$dir DESTDIR="$(DESTDIR)" NATIVE_BUILD="$(NATIVE_BUILD)" install; fi; \
 	done
