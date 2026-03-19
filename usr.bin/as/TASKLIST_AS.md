@@ -97,7 +97,7 @@ Validation gate for Section 1:
 ### 2.2 x86-32 Intel Roundtrip
 - [x] Keep `tests/usr.bin/as/test_x86_32_corpus_intel_roundtrip.sh` green after every emitter cleanup batch.
 - [x] Eliminate any remaining normalization hacks that can be replaced by real parser/encoder support.
-- [ ] Add tests for Intel memory-qualifier ambiguity diagnostics.
+- [x] Add tests for Intel memory-qualifier ambiguity diagnostics.
 
 ### 2.3 x86-64 AT&T Corpus
 - [ ] Keep x86_64 v1/v2/v3/v4 corpora green.

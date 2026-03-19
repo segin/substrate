@@ -217,6 +217,24 @@ if "$AS" -64 -o "$TMP/ambig_intel.o" "$TMP/ambig_intel.s" >"$TMP/ambig.out" 2>"$
 fi
 grep -Eqi "unsupported|malformed|error" "$TMP/ambig.err"
 
+cat > "$TMP/ambig_add_intel.s" <<'SRC'
+.intel_syntax noprefix
+.text
+.globl ambig_add
+.type ambig_add,@function
+ambig_add:
+    add [ebx], 1
+    ret
+.size ambig_add, .-ambig_add
+.att_syntax prefix
+SRC
+
+if "$AS" -32 -o "$TMP/ambig_add_intel.o" "$TMP/ambig_add_intel.s" >"$TMP/ambig_add.out" 2>"$TMP/ambig_add.err"; then
+    echo "expected ambiguous Intel add form to fail"
+    exit 1
+fi
+grep -Eqi "unsupported|malformed|error" "$TMP/ambig_add.err"
+
 cat > "$TMP/unsupported_qual.s" <<'SRC'
 .intel_syntax noprefix
 .text
