@@ -82,6 +82,8 @@ def first_mnemonic(inst):
     return ''
 
 def is_skip_32bit_intel_roundtrip(inst):
+    # These are objdump artifacts for encodings that are not valid 32-bit Intel
+    # source, so skipping them is a disassembler filter, not an assembler crutch.
     mnem = first_mnemonic(inst)
     if mnem in {'swapgs'}:
         return True
@@ -94,6 +96,8 @@ def is_skip_32bit_intel_roundtrip(inst):
     return False
 
 def rewrite_targets(inst):
+    # objdump prints resolved branch destinations, not source-level relative
+    # expressions. Reconstruct local labels so the round-trip stays meaningful.
     ok = True
     def repl(mm):
         nonlocal ok
