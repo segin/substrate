@@ -93,7 +93,7 @@ install:
 	@mkdir -p $(DESTDIR)/var
 	@for dir in $(SUBDIRS); do \
 		echo ">>> Installing $$dir"; \
-		if [ -f "$$dir/Makefile" ]; then $(MAKE) -C $$dir install; fi; \
+		if [ -f "$$dir/Makefile" ]; then $(MAKE) -C $$dir DESTDIR="$(DESTDIR)" NATIVE_BUILD="$(NATIVE_BUILD)" install; fi; \
 	done
 
 dist: install

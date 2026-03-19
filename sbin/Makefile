@@ -26,5 +26,5 @@ clean:
 install:
 	@for dir in $(SUBDIRS); do \
 		echo ">>> Installing sbin/$$dir"; \
-		if [ -f "$$dir/Makefile" ]; then $(MAKE) -C $$dir install; fi; \
+		if [ -f "$$dir/Makefile" ]; then $(MAKE) -C $$dir DESTDIR="$(DESTDIR)" NATIVE_BUILD="$(NATIVE_BUILD)" install; fi; \
 	done
