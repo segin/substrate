@@ -66,6 +66,7 @@ void vt_init(void) {
         vt_states[i].row = 0;
         vt_states[i].col = 0;
         vt_states[i].color = 0x07; // Light Grey on Black
+        vt_states[i].attrs = 0;
         vt_states[i].tty = NULL;
         vt_states[i].scrollback_head = 0;
         vt_states[i].scrollback_count = 0;
@@ -73,6 +74,7 @@ void vt_init(void) {
         vt_states[i].saved_row = 0;
         vt_states[i].saved_col = 0;
         vt_states[i].saved_color = 0x07;
+        vt_states[i].saved_attrs = 0;
         vt_states[i].scroll_top = 0;
         vt_states[i].scroll_bottom = vt_get_visible_height() - 1;
         vt_states[i].cursor_visible = 1;
@@ -86,6 +88,7 @@ void vt_init(void) {
         vt_states[i].alt_row = 0;
         vt_states[i].alt_col = 0;
         vt_states[i].alt_color = 0x07;
+        vt_states[i].alt_attrs = 0;
         memset(vt_states[i].alt_buffer, 0, sizeof(vt_states[i].alt_buffer));
         
         // Initialize ansi state

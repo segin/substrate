@@ -36,6 +36,7 @@ struct ansi_callbacks {
     void (*get_cursor)(int *row, int *col);
     void (*get_dimensions)(int *width, int *height);
     void (*get_color)(uint8_t *fg, uint8_t *bg);
+    void (*get_attrs)(uint16_t *flags);
 
     /* Extended operations */
     void (*save_cursor)(void);

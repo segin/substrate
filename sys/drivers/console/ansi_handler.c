@@ -26,6 +26,7 @@ static void handle_sgr(struct ansi_ctx *ctx, const struct ansi_callbacks *cb) {
     uint16_t attrs = 0;
 
     if (cb->get_color) cb->get_color(&cur_fg, &cur_bg);
+    if (cb->get_attrs) cb->get_attrs(&attrs);
 
     if (ctx->param_count == 0) {
         /* SGR with no params = reset */

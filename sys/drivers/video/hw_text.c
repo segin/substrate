@@ -322,6 +322,41 @@ static void hw_text_apply_geometry_or_default(int *cols_out, int *rows_out) {
     }
 }
 
+static uint8_t hw_text_effective_color(vt_state_t *vt, uint8_t color) {
+    uint8_t fg;
+    uint8_t bg;
+    uint16_t attrs;
+
+    if (!vt) {
+        return color;
+    }
+
+    fg = color & 0x0FU;
+    bg = (uint8_t)((color >> 4) & 0x0FU);
+    attrs = vt->attrs;
+
+    if ((attrs & ANSI_ATTR_BOLD) && fg < 8) {
+        fg = (uint8_t)(fg + 8);
+    }
+    if (attrs & ANSI_ATTR_UNDERLINE) {
+        if (fg < 8) {
+            fg = (uint8_t)(fg + 8);
+        } else if (fg == bg) {
+            fg ^= 0x01U;
+        }
+    }
+    if (attrs & ANSI_ATTR_REVERSE) {
+        uint8_t tmp = fg;
+        fg = bg;
+        bg = tmp;
+    }
+    if (attrs & ANSI_ATTR_HIDDEN) {
+        fg = bg;
+    }
+
+    return (uint8_t)(fg | (uint8_t)(bg << 4));
+}
+
 static void hw_text_write_cell_locked(vt_state_t *vt, size_t x, size_t y,
                                       char c, uint8_t color) {
     size_t index;
@@ -331,7 +366,8 @@ static void hw_text_write_cell_locked(vt_state_t *vt, size_t x, size_t y,
     }
 
     index = hw_text_index(x, y);
-    vt->buffer[index] = hw_text_entry((unsigned char)c, color);
+    vt->buffer[index] = hw_text_entry((unsigned char)c,
+                                      hw_text_effective_color(vt, color));
     if (vt->id == vt_get_active() && vt_get_scrollback_view(vt) == 0) {
         hw_text_write_vga_cell_locked(x, y, vt->buffer[index]);
     }
@@ -916,6 +952,17 @@ static void cb_get_color(uint8_t *fg, uint8_t *bg) {
     }
 }
 
+static void cb_get_attrs(uint16_t *flags) {
+    if (!flags) {
+        return;
+    }
+    if (current_vt_ctx) {
+        *flags = current_vt_ctx->attrs;
+    } else {
+        *flags = 0;
+    }
+}
+
 /* ---- Extended Callbacks ---- */
 
 static void cb_save_cursor(void) {
@@ -924,6 +971,7 @@ static void cb_save_cursor(void) {
     vt->saved_row = vt->row;
     vt->saved_col = vt->col;
     vt->saved_color = vt->color;
+    vt->saved_attrs = vt->attrs;
 }
 
 static void cb_restore_cursor(void) {
@@ -932,7 +980,15 @@ static void cb_restore_cursor(void) {
     vt->row = vt->saved_row;
     vt->col = vt->saved_col;
     vt->color = vt->saved_color;
+    vt->attrs = vt->saved_attrs;
     hw_text_update_cursor_locked(vt);
+}
+
+static void cb_set_attrs(uint16_t flags) {
+    vt_state_t *vt = current_vt_ctx;
+
+    if (!vt) return;
+    vt->attrs = flags;
 }
 
 static void cb_set_cursor_visible(int visible) {
@@ -1073,6 +1129,7 @@ static void cb_reset(void) {
     vt->row = 0;
     vt->col = 0;
     vt->color = 0x07;
+    vt->attrs = 0;
     vt->scroll_top = 0;
     vt->scroll_bottom = vt_get_visible_height() - 1;
     vt->cursor_visible = 1;
@@ -1122,6 +1179,7 @@ static void cb_set_alt_screen(int on) {
         vt->alt_row = vt->row;
         vt->alt_col = vt->col;
         vt->alt_color = vt->color;
+        vt->alt_attrs = vt->attrs;
         memcpy(vt->alt_buffer, vt->buffer, cells * sizeof(uint16_t));
         vt->alt_screen_active = 1;
         /* Clear the alt screen */
@@ -1132,6 +1190,7 @@ static void cb_set_alt_screen(int on) {
         vt->row = vt->alt_row;
         vt->col = vt->alt_col;
         vt->color = vt->alt_color;
+        vt->attrs = vt->alt_attrs;
         vt->alt_screen_active = 0;
         /* Repaint from buffer */
         if (vt->id == vt_get_active()) {
@@ -1157,6 +1216,7 @@ static const struct ansi_callbacks ansi_cb = {
     .get_cursor = cb_get_cursor,
     .get_dimensions = cb_get_dimensions,
     .get_color = cb_get_color,
+    .get_attrs = cb_get_attrs,
     .save_cursor = cb_save_cursor,
     .restore_cursor = cb_restore_cursor,
     .set_cursor_visible = cb_set_cursor_visible,
@@ -1171,6 +1231,7 @@ static const struct ansi_callbacks ansi_cb = {
     .index_down = cb_index_down,
     .reverse_index = cb_reverse_index,
     .reset = cb_reset,
+    .set_attrs = cb_set_attrs,
     .set_autowrap = cb_set_autowrap,
     .set_cursor_key_app = cb_set_cursor_key_app,
     .set_origin_mode = cb_set_origin_mode,

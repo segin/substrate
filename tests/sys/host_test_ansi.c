@@ -13,6 +13,7 @@ static int mock_cursor_row = 0;
 static int mock_cursor_col = 0;
 static uint8_t mock_fg = 7;
 static uint8_t mock_bg = 0;
+static uint16_t mock_attrs = 0;
 static char output_buffer[1024];
 static int output_pos = 0;
 static int screen_cleared = 0;
@@ -36,6 +37,14 @@ static void mock_set_color(uint8_t fg, uint8_t bg) {
 
 static void mock_clear_screen(void) {
     screen_cleared = 1;
+}
+
+static void mock_get_attrs(uint16_t *flags) {
+    *flags = mock_attrs;
+}
+
+static void mock_set_attrs(uint16_t flags) {
+    mock_attrs = flags;
 }
 
 static void mock_erase_display(int mode) {
@@ -85,6 +94,8 @@ static struct ansi_callbacks callbacks = {
     .get_cursor = mock_get_cursor,
     .get_dimensions = mock_get_dimensions,
     .get_color = mock_get_color,
+    .get_attrs = mock_get_attrs,
+    .set_attrs = mock_set_attrs,
     .set_scroll_region = mock_set_scroll_region
 };
 
@@ -95,6 +106,7 @@ static void reset_mocks() {
     mock_cursor_col = 0;
     mock_fg = 7;
     mock_bg = 0;
+    mock_attrs = 0;
     output_pos = 0;
     output_buffer[0] = '\0';
     screen_cleared = 0;
@@ -175,6 +187,22 @@ static void test_bright_color_change(void) {
 
     assert(mock_fg == 15);
     assert(mock_bg == 12);
+}
+
+static void test_sgr_attrs_persist_across_sequences(void) {
+    struct ansi_ctx ctx;
+    ansi_init(&ctx);
+    reset_mocks();
+
+    const char *seq = "\x1b[1m\x1b[31m\x1b[4m\x1b[7m";
+    while (*seq) {
+        ansi_process(&ctx, *seq++, &callbacks);
+    }
+
+    assert((mock_attrs & ANSI_ATTR_BOLD) != 0);
+    assert((mock_attrs & ANSI_ATTR_UNDERLINE) != 0);
+    assert((mock_attrs & ANSI_ATTR_REVERSE) != 0);
+    assert(mock_fg == 9);
 }
 
 static void test_clear_screen(void) {
@@ -306,6 +334,7 @@ int main(void) {
     run_test("Cursor Movement", test_cursor_movement);
     run_test("Color Change", test_color_change);
     run_test("Bright Color Change", test_bright_color_change);
+    run_test("SGR Attr Persistence", test_sgr_attrs_persist_across_sequences);
     run_test("Clear Screen", test_clear_screen);
     run_test("Erase Display Default", test_erase_display_default_mode);
     run_test("Erase Line Modes", test_erase_line_modes);

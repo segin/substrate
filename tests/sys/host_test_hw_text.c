@@ -139,6 +139,7 @@ void vt_init(void) {
     memset(&mock_vt, 0, sizeof(mock_vt));
     mock_vt.id = 0;
     mock_vt.color = 0x07;
+    mock_vt.attrs = 0;
     mock_vt.tab_width = 8;
     mock_vt.scroll_top = 0;
     mock_vt.scroll_bottom = mock_vt_height - 2;
@@ -392,6 +393,20 @@ static void test_full_screen_scroll_uses_crtc_start_address(void) {
     assert(mock_vga_cells[hw_text_vram_index(0, (size_t)(mock_vt_height - 2))] == blank);
 }
 
+static void test_text_attrs_emulate_bold_reverse_and_underline(void) {
+    reset_state();
+
+    hw_text_write("\x1b[1mA", 5);
+    assert((mock_vt.buffer[0] >> 8) == 0x0FU);
+
+    hw_text_write("\x1b[7mB", 5);
+    assert((mock_vt.buffer[1] >> 8) == 0xF0U);
+
+    hw_text_write("\x1b[0m\x1b[34;44m\x1b[4mC", 17);
+    assert((mock_vt.buffer[2] >> 8) != 0x44U);
+    assert((mock_vt.buffer[2] >> 8) == 0x4CU);
+}
+
 int main(void) {
     test_hw_text_bulk_write_updates_buffer_and_cursor();
     test_console_backend_shim_uses_bulk_write_path();
@@ -400,6 +415,7 @@ int main(void) {
     test_vt_tty_ioctl_toggles_blink_mode();
     test_vt_tty_ioctl_toggles_cursor_blink_mode();
     test_full_screen_scroll_uses_crtc_start_address();
+    test_text_attrs_emulate_bold_reverse_and_underline();
     puts("host_test_hw_text: PASS");
     return 0;
 }
