@@ -58,8 +58,9 @@ EditLine *el_init(const char *prog, FILE *fin, FILE *fout, FILE *ferr) {
     el->line.cursor = 0;
     el->editor_mode = ED_EMACS;
 
-    /* Query initial terminal dimensions */
+    /* Query initial terminal dimensions and load termcap */
     terminal_get_size(el);
+    terminal_init_caps(el);
 
     return el;
 }
@@ -69,6 +70,7 @@ void el_end(EditLine *el) {
 
     if (!el) return;
     terminal_set_orig(el);
+    terminal_free_caps(el);
     if (el->line.buffer) free(el->line.buffer);
     if (el->render_cache) free(el->render_cache);
     if (el->saved_input) free(el->saved_input);
@@ -172,12 +174,12 @@ int el_resize(EditLine *el) {
     terminal_get_size(el);
 
     /* Force full redraw */
-    fprintf(el->fout, "\r\033[K%s%s", el->prompt ? el->prompt : "", el->line.buffer);
+    terminal_printf(el, "\r\033[K%s%s", el->prompt ? el->prompt : "", el->line.buffer);
     if (el->line.cursor < el->line.len) {
         int back = (int)(el->line.len - el->line.cursor);
-        fprintf(el->fout, "\033[%dD", back);
+        terminal_printf(el, "\033[%dD", back);
     }
-    fflush(el->fout);
+    terminal_flush(el);
 
     return 0;
 }

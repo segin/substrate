@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <errno.h>
 #include <sys/select.h>
 #include <dirent.h>
 #include <sys/stat.h>
@@ -533,40 +534,40 @@ static void refresh_line(EditLine *el) {
         el->render_cache_cursor <= cols &&
         prompt_len <= cols) {
         size_t target_col = prompt_len + dirty_from;
-        fprintf(el->fout, "\r");
-        if (target_col > 0) fprintf(el->fout, "\033[%zuC", target_col);
-        fwrite(el->line.buffer + dirty_from, 1, el->line.len - dirty_from, el->fout);
-        if (el->render_cache_len > el->line.len) fprintf(el->fout, "\033[K");
-        fprintf(el->fout, "\r");
-        if (cursor_total > 0) fprintf(el->fout, "\033[%zuC", cursor_total);
-        fflush(el->fout);
+        terminal_putc(el, '\r');
+        if (target_col > 0) terminal_printf(el, "\033[%zuC", target_col);
+        terminal_write(el, el->line.buffer + dirty_from, el->line.len - dirty_from);
+        if (el->render_cache_len > el->line.len) terminal_puts(el, "\033[K");
+        terminal_putc(el, '\r');
+        if (cursor_total > 0) terminal_printf(el, "\033[%zuC", cursor_total);
+        terminal_flush(el);
         el->refresh_rows = 1;
         line_update_cache(el);
         return;
     }
 
     /* Return to first physical row of the previous render block. */
-    fprintf(el->fout, "\r");
-    if (el->refresh_rows > 1) fprintf(el->fout, "\033[%zuA", el->refresh_rows - 1);
-    fprintf(el->fout, "\r");
+    terminal_putc(el, '\r');
+    if (el->refresh_rows > 1) terminal_printf(el, "\033[%zuA", el->refresh_rows - 1);
+    terminal_putc(el, '\r');
 
     /* Clear the old wrapped rows. */
     for (i = 0; i < el->refresh_rows; i++) {
-        fprintf(el->fout, "\033[2K");
-        if (i + 1 < el->refresh_rows) fprintf(el->fout, "\n");
+        terminal_puts(el, "\033[2K");
+        if (i + 1 < el->refresh_rows) terminal_putc(el, '\n');
     }
-    if (el->refresh_rows > 1) fprintf(el->fout, "\033[%zuA", el->refresh_rows - 1);
-    fprintf(el->fout, "\r");
+    if (el->refresh_rows > 1) terminal_printf(el, "\033[%zuA", el->refresh_rows - 1);
+    terminal_putc(el, '\r');
 
-    if (el->prompt) fwrite(el->prompt, 1, prompt_len, el->fout);
-    if (el->line.len > 0) fwrite(el->line.buffer, 1, el->line.len, el->fout);
+    if (el->prompt) terminal_write(el, el->prompt, prompt_len);
+    if (el->line.len > 0) terminal_write(el, el->line.buffer, el->line.len);
 
     /* Reposition cursor from render end to logical cursor location. */
-    if (end_row > cursor_row) fprintf(el->fout, "\033[%zuA", end_row - cursor_row);
-    fprintf(el->fout, "\r");
-    if (cursor_col > 0) fprintf(el->fout, "\033[%zuC", cursor_col);
+    if (end_row > cursor_row) terminal_printf(el, "\033[%zuA", end_row - cursor_row);
+    terminal_putc(el, '\r');
+    if (cursor_col > 0) terminal_printf(el, "\033[%zuC", cursor_col);
 
-    fflush(el->fout);
+    terminal_flush(el);
     el->refresh_rows = rows;
     line_update_cache(el);
 }
@@ -659,11 +660,11 @@ static void history_incremental_search(EditLine *el, int reverse) {
     match = NULL;
 
     for (;;) {
-        fprintf(el->fout, "\r\033[K(%s-i-search)`%s': %s",
+        terminal_printf(el, "\r\033[K(%s-i-search)`%s': %s",
                 reverse ? "reverse" : "forward",
                 query,
                 match ? match : "");
-        fflush(el->fout);
+        terminal_flush(el);
 
         if (read(fileno(el->fin), &ch, 1) != 1) break;
         ch &= 0xFF;
@@ -921,9 +922,9 @@ static void vi_history_search(EditLine *el, int reverse) {
     query[0] = '\0';
 
     for (;;) {
-        fprintf(el->fout, "\r\033[K%c%s",
+        terminal_printf(el, "\r\033[K%c%s",
                 reverse ? '/' : '?', query);
-        fflush(el->fout);
+        terminal_flush(el);
 
         if (read(fileno(el->fin), &ch, 1) != 1) break;
         ch &= 0xFF;
@@ -1002,11 +1003,11 @@ static int emacs_handle_char(EditLine *el, int c) {
     if (c == 0x03) { /* ^C */
         el->last_cmd_was_kill = 0;
         el->yank_active = 0;
-        fprintf(el->fout, "^C\r\n");
+        terminal_puts(el, "^C\r\n");
         el_reset(el);
         if (el->prompt) {
-            fprintf(el->fout, "%s", el->prompt);
-            fflush(el->fout);
+            terminal_puts(el, el->prompt);
+            terminal_flush(el);
         }
         return DISP_CONTINUE;
     }
@@ -1014,7 +1015,7 @@ static int emacs_handle_char(EditLine *el, int c) {
     if (c == 0x0C) { /* ^L - Clear screen */
         el->last_cmd_was_kill = 0;
         el->yank_active = 0;
-        fprintf(el->fout, "\033[H\033[2J");
+        terminal_puts(el, "\033[H\033[2J");
         refresh_line(el);
         return DISP_CONTINUE;
     }
@@ -1076,8 +1077,8 @@ static int emacs_handle_char(EditLine *el, int c) {
                 refresh_line(el);
             } else {
                 undo_discard_last(el);
-                fputc('\a', el->fout);
-                fflush(el->fout);
+                terminal_putc(el, '\a');
+                terminal_flush(el);
             }
         }
         return DISP_CONTINUE;
@@ -1200,8 +1201,8 @@ static int emacs_handle_char(EditLine *el, int c) {
             }
             refresh_line(el);
         } else {
-            fputc('\a', el->fout);
-            fflush(el->fout);
+            terminal_putc(el, '\a');
+            terminal_flush(el);
         }
     }
     return DISP_CONTINUE;
@@ -2317,6 +2318,7 @@ const char *el_gets(EditLine *el, int *count) {
     size_t i;
     int c;
     int result;
+    ssize_t n;
 
     if (count) *count = 0;
     if (terminal_set_raw(el) == -1) return NULL;
@@ -2344,12 +2346,28 @@ const char *el_gets(EditLine *el, int *count) {
     if (el->editor_mode == ED_VI)
         el->vi_mode = VI_INSERT;
 
+    /* Install signal handlers; save old dispositions */
+    el_signals_install(el);
+
+    /* Display prompt (flushed before blocking read) */
     if (el->prompt) {
-        fprintf(el->fout, "%s", el->prompt);
-        fflush(el->fout);
+        terminal_puts(el, el->prompt);
+        terminal_flush(el);
     }
 
-    while (read(fileno(el->fin), &c, 1) == 1) {
+    for (;;) {
+        n = read(fileno(el->fin), &c, 1);
+        if (n == -1) {
+            if (errno == EINTR) {
+                /* Handle pending signals (SIGWINCH, SIGINT, etc.) */
+                el_signal_handle(el);
+                refresh_line(el);
+                continue;
+            }
+            break;  /* real error */
+        }
+        if (n == 0) break;  /* EOF */
+
         c &= 0xFF;
 
         if (el->editor_mode == ED_EMACS) {
@@ -2369,17 +2387,21 @@ const char *el_gets(EditLine *el, int *count) {
         }
 
         if (result == DISP_ACCEPT) {
-            fprintf(el->fout, "\r\n");
+            terminal_puts(el, "\r\n");
+            terminal_flush(el);
+            el_signals_restore(el);
             terminal_set_orig(el);
             if (count) *count = (int)el->line.len;
             return el->line.buffer;
         }
         if (result == DISP_EOF) {
+            el_signals_restore(el);
             terminal_set_orig(el);
             return NULL;
         }
     }
 
+    el_signals_restore(el);
     terminal_set_orig(el);
     return NULL;
 }

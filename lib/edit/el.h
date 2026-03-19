@@ -2,12 +2,14 @@
 #define _EL_H_
 
 #include <stdio.h>
+#include <stdarg.h>
 #include <termios.h>
 #include <signal.h>
 #include <histedit.h>
 
 #define EL_KILL_RING_SIZE 8
 #define EL_UNDO_DEPTH 256
+#define EL_OUTBUF_SIZE 4096
 
 enum editor_mode {
     ED_EMACS = 0,
@@ -42,12 +44,47 @@ struct vi_search {
     int reverse;        /* 1 = /, 0 = ? */
 };
 
+struct termcap_caps {
+    /* Cursor motion */
+    char *cm;       /* cursor motion (parameterized) */
+    char *le;       /* cursor left */
+    char *nd;       /* cursor right (non-destructive space) */
+    char *up;       /* cursor up */
+    char *do_cap;   /* cursor down */
+    char *ho;       /* home cursor */
+    /* Clear */
+    char *cl;       /* clear screen */
+    char *ce;       /* clear to end of line */
+    char *cd;       /* clear to end of screen */
+    /* Insert/delete */
+    char *ic;       /* insert character */
+    char *dc;       /* delete character */
+    char *al;       /* add line */
+    char *dl;       /* delete line */
+    /* Attributes */
+    char *md;       /* bold on */
+    char *me;       /* all attributes off */
+    char *so;       /* standout on */
+    char *se;       /* standout off */
+    /* Scrolling */
+    char *sr;       /* scroll reverse */
+    char *sf;       /* scroll forward */
+    /* Numeric */
+    int co;         /* columns */
+    int li;         /* lines */
+    int loaded;     /* 1 if caps were successfully loaded */
+};
+
 struct terminal {
     struct termios orig;
     struct termios raw;
     int is_raw;
     int cols;
     int rows;
+    int dims_valid;     /* 0 = need to re-query (SIGWINCH invalidation) */
+    struct termcap_caps caps;
+    char outbuf[EL_OUTBUF_SIZE];
+    size_t outbuf_len;
 };
 
 struct signal_state {
@@ -124,9 +161,30 @@ struct editline {
  * NOTE: EditLine is NOT thread-safe.  A single EditLine handle must only
  * be accessed from one thread at a time (single-thread contract).
  */
+
+/* Terminal: raw mode and dimensions */
 int terminal_set_raw(EditLine *el);
 int terminal_set_orig(EditLine *el);
 void terminal_get_size(EditLine *el);
+
+/* Terminal: termcap capabilities */
+void terminal_init_caps(EditLine *el);
+void terminal_free_caps(EditLine *el);
+
+/* Terminal: buffered output */
+void terminal_write(EditLine *el, const char *data, size_t len);
+void terminal_puts(EditLine *el, const char *s);
+void terminal_putc(EditLine *el, char c);
+void terminal_printf(EditLine *el, const char *fmt, ...);
+void terminal_flush(EditLine *el);
+
+/* Signal handling */
+void el_signals_install(EditLine *el);
+void el_signals_restore(EditLine *el);
+int  el_signal_pending(void);
+void el_signal_handle(EditLine *el);
+
+/* Line buffer */
 int line_ensure_capacity(EditLine *el, size_t needed);
 
 #endif /* _EL_H_ */
