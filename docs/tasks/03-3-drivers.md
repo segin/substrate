@@ -1117,7 +1117,7 @@
                     - [x] ECH (erase characters). (REQ: REQ-03-0816)
                     - [x] DCH/ICH (delete/insert characters). (REQ: REQ-03-0817)
                     - [x] DL/IL (delete/insert lines). (REQ: REQ-03-0818)
-                - [ ] **Attribute Sequences (SGR):** (REQ: REQ-03-0819)
+                - [x] **Attribute Sequences (SGR):** <!-- sys/drivers/console/ansi_handler.c, tests/sys/host_test_ansi.c, docs/specs/driver_vt.md --> (REQ: REQ-03-0819)
                     - [x] Reset (SGR 0). (REQ: REQ-03-0820)
                     - [x] Bold/dim/italic/underline/blink/reverse/hidden. (REQ: REQ-03-0821)
                     - [x] 8-color foreground/background (30-37, 40-47). (REQ: REQ-03-0822)
