@@ -984,7 +984,7 @@
                 - [x] Set 80x25 or 80x50 text mode. (REQ: REQ-03-0683)
                 - [x] Map video memory (0xB8000) into kernel address space. (REQ: REQ-03-0684)
                 - [x] Initialize attribute byte defaults (white on black). (REQ: REQ-03-0685)
-            - [ ] **Text Output:** (REQ: REQ-03-0686)
+            - [x] **Text Output:** <!-- sys/drivers/video/hw_text.c, sys/drivers/video/hw_text.h, tests/sys/host_test_hw_text.c, tests/sys/host_test_ansi.c --> (REQ: REQ-03-0686)
                 - [x] Implement `vga_putchar(char c, uint8_t attr)`. (REQ: REQ-03-0687)
                 - [x] Handle control characters (CR, LF, BS, TAB, BEL). (REQ: REQ-03-0688)
                 - [x] Implement `vga_write(const char *buf, size_t len)`. <!-- sys/drivers/video/hw_text.c, sys/drivers/video/hw_text.h, tests/sys/host_test_hw_text.c --> (REQ: REQ-03-0689)
