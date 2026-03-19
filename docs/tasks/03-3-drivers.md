@@ -1177,7 +1177,7 @@
                 - [x] Break signal detection. (REQ: REQ-03-0876)
                 - [x] Framing and parity error handling. (REQ: REQ-03-0877)
                 - [x] Overrun error handling. (REQ: REQ-03-0878)
-            - [ ] **TTY Binding:** (REQ: REQ-03-0703, REQ-03-0853, REQ-03-0879)
+            - [x] **TTY Binding:** <!-- sys/drivers/console/uart/uart.c, sys/include/sys/tty.h, tests/sys/host_test_tty_console.c, usr.man/man4/tty.4 --> (REQ: REQ-03-0703, REQ-03-0853, REQ-03-0879)
                 - [x] Register as `tty_driver` for `/dev/ttyS[0-N]`. (REQ: REQ-03-0880)
                 - [x] `tty_driver->write()` callback. (REQ: REQ-03-0881)
                 - [x] `tty_driver->ioctl()` for serial-specific controls. (REQ: REQ-03-0882)
