@@ -106,7 +106,7 @@ Validation gate for Section 1:
 
 ### 2.4 x86-64 Intel Roundtrip
 - [x] Keep x86_64 Intel roundtrip green for v1/v2/v3/v4.
-- [ ] Remove remaining alias-normalization special cases that should be proper encoder behavior.
+- [x] Remove remaining alias-normalization special cases that should be proper encoder behavior.
 - [ ] Add explicit tests for `movabs`, `rex.*`, segment-register transfers, and `jrcxz`.
 
 ---
