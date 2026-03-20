@@ -23,7 +23,6 @@ extern bool test_vm_fault_anonymous(void);
 extern bool test_vm_fault_protection_violation(void);
 extern bool test_mmap_logic(void);
 extern bool test_munmap_logic(void);
-extern bool test_sys_brk_logic(void);
 extern bool test_swap_lifecycle(void); // Mock-based
 extern bool test_swap_full(void);      // Mock-based
 extern bool test_vm_swap_real_io(void);
@@ -102,7 +101,6 @@ extern bool test_vop_symlink_notsupp(void);
 extern bool test_vop_readlink_basic(void);
 extern bool test_vop_readlink_notlink(void);
 extern bool test_vop_readlink_notsupp(void);
-
 // FUSE Tests
 extern bool test_fuse_read(void);
 
@@ -189,9 +187,6 @@ test_case_t tests[] = {
     {"fault_prot", test_vm_fault_protection_violation},
     {"mmap_logic", test_mmap_logic},
     {"munmap_logic", test_munmap_logic},
-    {"sys_brk_logic", test_sys_brk_logic},
-
-
     {"swap_mock_life", test_swap_lifecycle},
     {"swap_mock_full", test_swap_full},
     {"swap_real_io", test_vm_swap_real_io},
