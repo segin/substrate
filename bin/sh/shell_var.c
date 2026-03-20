@@ -418,7 +418,7 @@ char **shell_var_get_envp(void) {
         char *val = shell_var_get(curr->name);
         size_t len = strlen(curr->name) + strlen(val) + 2;
         envp[i] = malloc(len);
-        sprintf(envp[i], "%s=%s", curr->name, val);
+        snprintf(envp[i], len, "%s=%s", curr->name, val);
         free(val);
         i++;
         name_list_t *tmp = curr;

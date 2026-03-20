@@ -4,19 +4,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "../include/regex.h"
+#include <regex.h>
 
 #define REGEX_MAX_CODEPOINT 0x10FFFFu
 
+/* regex_t struct body is now defined in the public header */
+/* regex_engine_vtable is forward-declared in public header; define it here */
 typedef struct regex_engine_vtable regex_engine_vtable;
-
-typedef struct regex_t {
-    unsigned flags;
-    size_t capture_count;
-    regex_limits_t limits;
-    const regex_engine_vtable *engine;
-    void *impl;
-} regex_t;
 
 typedef struct regex_iter_t {
     const regex_engine_vtable *engine;

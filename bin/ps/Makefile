@@ -6,6 +6,7 @@ install:
 else
 PROG = ps
 SRCS = ps.c
+LDADD = -L$(TOP)/lib/sys -lsys
 
 include ../../Makefile.inc
 include ../../Makefile.bin.inc

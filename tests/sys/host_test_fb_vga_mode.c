@@ -87,6 +87,7 @@ int video_ask_mode(fb_info_t *info) { (void)info; return 0; }
 void bga_install(void) {}
 void vga_install(void) {}
 void *ioremap(uint64_t phys_addr, size_t size) { (void)phys_addr; (void)size; return fake_fb; }
+void *ioremap_wc(uint64_t phys_addr, size_t size) { (void)phys_addr; (void)size; return fake_fb; }
 void iounmap(void *addr) { (void)addr; }
 vm_object_t *vm_object_allocate(int type, size_t size) { (void)type; (void)size; return NULL; }
 void vm_object_deallocate(vm_object_t *obj) { (void)obj; }

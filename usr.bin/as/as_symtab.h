@@ -47,6 +47,11 @@ typedef struct {
     int alias_from_dot;
     long long alias_addend;
     unsigned long long size;
+    char *size_base_symbol;
+    char *size_target_symbol;
+    int size_base_from_dot;
+    char *size_anchor_file;
+    unsigned size_anchor_line;
     char *version;
     size_t reference_count;
     size_t forward_ref_count;

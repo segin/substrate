@@ -13,7 +13,7 @@
 #include <arch/x86-common/io.h>
 
 /* Forward declarations for subsystem functions we call */
-extern uint32_t pmm_get_total_memory(void);
+#include <arch/i386/pmm.h>
 extern uint32_t pmm_get_free_memory(void);
 
 void sysrq_init(void)
