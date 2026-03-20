@@ -8931,6 +8931,69 @@ static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigne
 static int eval_local_rel_expr_virtual(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *base_st, uint64_t base_off,
                                        unsigned x86_code_bits, const as_expr_t *e, long long *out);
 
+static int is_jcc_mnemonic(const char *mn) {
+    if (mn == NULL || mn[0] == '\0') {
+        return 0;
+    }
+    if (streq_ci(mn, "jmp")) {
+        return 0;
+    }
+    if (is_short_rel_mnemonic(mn)) {
+        return 0;
+    }
+    return (mn[0] == 'j' || mn[0] == 'J') && mn[1] != '\0';
+}
+
+static unsigned rel_forward_base_len(const as_instruction_t *in, unsigned x86_code_bits, long long delta) {
+    char mnbuf[32];
+    char suffix = '\0';
+
+    if (in == NULL || in->mnemonic == NULL) {
+        return 0;
+    }
+    if (normalize_x86_mnemonic(in->mnemonic, mnbuf, sizeof(mnbuf), &suffix) != 0) {
+        return 0;
+    }
+    if (!is_rel_mnemonic(mnbuf)) {
+        return 0;
+    }
+    if (suffix == 'b' || is_short_rel_mnemonic(mnbuf)) {
+        return 2u;
+    }
+    if (streq_ci(mnbuf, "call") || streq_ci(mnbuf, "jmp")) {
+        return x86_code_bits == 16u ? 3u : 5u;
+    }
+    if (streq_ci(mnbuf, "xbegin")) {
+        return 6u;
+    }
+    if (is_jcc_mnemonic(mnbuf)) {
+        if (delta >= -128 && delta <= 127) {
+            return 2u;
+        }
+        return x86_code_bits == 16u ? 4u : 6u;
+    }
+    return x86_code_bits == 16u ? 3u : 5u;
+}
+
+static uint64_t estimate_stmt_len(emit_ctx_t *ctx, unsigned x86_code_bits, const as_stmt_t *st) {
+    unsigned char code[32];
+    size_t code_len = 0;
+    char encerr[256];
+    as_elf_cfg_t stmt_cfg;
+
+    if (ctx == NULL || ctx->cfg == NULL || st == NULL || st->kind != AS_STMT_INSTRUCTION) {
+        return 0;
+    }
+    stmt_cfg = *ctx->cfg;
+    stmt_cfg.x86_code_bits = x86_code_bits;
+    stmt_cfg.have_current_text_offset = 1u;
+    stmt_cfg.current_text_offset = 0;
+    if (encode_x86_stmt(&stmt_cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
+        return 0;
+    }
+    return (uint64_t)code_len;
+}
+
 static int find_label_virtual_offset(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *base_st,
                                      const char *file, unsigned line, int digit, const char *sym_name,
                                      uint64_t *off_out) {
@@ -9113,8 +9176,31 @@ static int find_numeric_local_virtual_offset(emit_ctx_t *ctx, const char *sectio
         }
     }
     section_track_free(&track);
-    *off_out = (target_idx < base_idx) ? (base_off - delta) : (base_off + delta);
-    return 0;
+    if (target_idx < base_idx) {
+        *off_out = base_off - delta;
+        return 0;
+    }
+    {
+        uint64_t base_len = 0;
+
+        if (base_st->kind == AS_STMT_DIRECTIVE) {
+            bytebuf_t tmp;
+            memset(&tmp, 0, sizeof(tmp));
+            if (append_directive_data(&tmp, &base_st->u.directive) == 0) {
+                base_len = (uint64_t)tmp.len;
+            }
+            free(tmp.data);
+        } else if (base_st->kind == AS_STMT_INSTRUCTION && section_name_is_executable(ctx, section_name)) {
+            unsigned rel_len = rel_forward_base_len(&base_st->u.instr, x86_code_bits, (long long)delta);
+            if (rel_len != 0) {
+                base_len = rel_len;
+            } else {
+                base_len = estimate_stmt_len(ctx, x86_code_bits, base_st);
+            }
+        }
+        *off_out = base_off + base_len + delta;
+        return 0;
+    }
 }
 
 static int find_named_label_virtual_offset(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *base_st,
@@ -9202,8 +9288,31 @@ static int find_named_label_virtual_offset(emit_ctx_t *ctx, const char *section_
         }
     }
     section_track_free(&track);
-    *off_out = (target_idx < base_idx) ? (base_off - delta) : (base_off + delta);
-    return 0;
+    if (target_idx < base_idx) {
+        *off_out = base_off - delta;
+        return 0;
+    }
+    {
+        uint64_t base_len = 0;
+
+        if (base_st->kind == AS_STMT_DIRECTIVE) {
+            bytebuf_t tmp;
+            memset(&tmp, 0, sizeof(tmp));
+            if (append_directive_data(&tmp, &base_st->u.directive) == 0) {
+                base_len = (uint64_t)tmp.len;
+            }
+            free(tmp.data);
+        } else if (base_st->kind == AS_STMT_INSTRUCTION && section_name_is_executable(ctx, section_name)) {
+            unsigned rel_len = rel_forward_base_len(&base_st->u.instr, x86_code_bits, (long long)delta);
+            if (rel_len != 0) {
+                base_len = rel_len;
+            } else {
+                base_len = estimate_stmt_len(ctx, x86_code_bits, base_st);
+            }
+        }
+        *off_out = base_off + base_len + delta;
+        return 0;
+    }
 }
 
 static int eval_local_rel_expr_virtual(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *base_st, uint64_t base_off,
