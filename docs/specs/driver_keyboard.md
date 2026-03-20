@@ -22,15 +22,20 @@ input-event paths.
   - `kbd_alt`
 
 ## Translation
-- Unshifted ASCII comes from `kbd_us[128]`.
-- Shifted ASCII comes from `kbd_us_shifted[128]`.
+- Character translation comes from the active `struct keymap`.
+- The default keymap is the built-in US layout exposed through the keymap API.
 - `Ctrl+A..Z` is translated to `0x01..0x1A`.
+- `Ctrl+[` / `Ctrl+\` / `Ctrl+]` produce `ESC`, `FS`, and `GS`.
+- With Num Lock cleared, keypad navigation keys emit ANSI cursor/editing sequences.
 - The same path produces the shell-relevant bytes for `Ctrl+C`, `Ctrl+D`, and `Ctrl+Z`.
 - The current implementation handles:
   - printable single-byte Set 1 make codes
   - single-byte modifier break codes
   - extended right Ctrl / right Alt make and break sequences
+  - ANSI escape generation for function keys and navigation keys
   - `Alt+F1..F12` VT switching across the full 12-console range
+  - `Ctrl+Alt+Del` reboot hook through the SysRq path
+  - `Alt+SysRq+<key>` magic SysRq dispatch
   - `Ctrl+F9` kernel process dump hook
 
 ## Output Paths
@@ -38,11 +43,13 @@ input-event paths.
 - Characters are pushed to the active VT's TTY with `tty_flip_buffer_push()`.
 - If the active VT has no attached TTY, the driver falls back to
   `console_push_char()`.
-- Input-event notifications are emitted with `input_report_key(..., 1)` and
-  `input_sync()`.
+- Input-event notifications are emitted for both key press and key release via
+  `input_report_key(..., value)` followed by `input_sync()`.
+- The keyboard driver does not inspect or branch on raw-vs-canonical tty mode;
+  it only forwards translated bytes into the active TTY input path and leaves
+  discipline-specific processing to `tty.c`.
 
 ## Current Limits
-- No lock-key state or LED programming yet.
-- No full E0 navigation-key escape-sequence generation yet.
 - No Set 2 decoding yet.
-- Key release events are not yet reported for general keys.
+- No compose/dead-key implementation yet.
+- No alternate non-US layouts are registered yet.

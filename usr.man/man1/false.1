@@ -1,0 +1,36 @@
+.\" Copyright (c) 2026
+.\" All rights reserved.
+.\"
+.Dd March 19, 2026
+.Dt FALSE 1
+.Os
+.Sh NAME
+.Nm false
+.Nd return false value
+.Sh SYNOPSIS
+.Nm
+.Sh DESCRIPTION
+The
+.Nm
+utility always returns with a non-zero exit code.
+.Pp
+It may be shadowed by a shell built-in named
+.Nm false .
+This manual page documents the external utility.
+.Pp
+By default, this implementation adheres to BSD-priority semantics and ignores GNU long options such as
+.Fl -help
+and
+.Fl -version ,
+remaining silent and exiting unsuccessfully.
+.Sh EXIT STATUS
+The
+.Nm
+utility exits 1 unconditionally, indicating failure.
+.Sh SEE ALSO
+.Xr sh 1 ,
+.Xr true 1
+.Sh STANDARDS
+The
+.Nm
+utility is expected to be IEEE Std 1003.1-2024 ("POSIX.1") compatible.

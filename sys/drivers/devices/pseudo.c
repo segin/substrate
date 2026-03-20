@@ -8,10 +8,10 @@
 #include <vfs/vfs.h>
 #include <sys/tty.h>
 #include "null.h"
-
-extern void mem_init(void);
-extern void mem_test_init(void);
-extern void lpt_init(void);
+#include "zero.h"
+#include "lpt.h"
+#include "mem.h"
+#include "kmem.h"
 
 // /dev/null
 // Implemented in null.c
@@ -88,12 +88,6 @@ static int stderr_readlink(fs_node_t *node, char *buf, size_t size) {
 // /dev/mem - Now implemented in mem.c
 // /dev/kmem - Implemented in kmem.c
 
-
-
-
-extern void null_init(void);
-extern void zero_init(void);
-
 void pseudo_init(void) {
     // Initialize /dev/null (from null.c)
     null_init();
@@ -114,7 +108,6 @@ void pseudo_init(void) {
     mem_test_init();
 
     // /dev/kmem
-    extern void kmem_dev_init(void);
     kmem_dev_init();
 
     // /dev/port

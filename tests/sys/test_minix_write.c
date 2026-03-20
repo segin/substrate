@@ -4,8 +4,6 @@
 #include <string.h>
 #include "tests.h"
 
-extern void minix_init(void);
-
 #define MOCK_DISK_SIZE (100 * 1024)
 static uint8_t mock_disk[MOCK_DISK_SIZE];
 static bool write_inode_occurred = false;

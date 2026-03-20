@@ -84,6 +84,151 @@ Public interfaces are grouped as:
 .BR history (3),
 .BR history_init (3),
 .BR history_end (3)
+.TP
+.B Tokenizer
+.BR tok_init (3),
+.BR tok_end (3),
+.BR tok_reset (3),
+.BR tok_str (3)
+.SH EDITING MODES
+.SS Emacs Mode (default)
+Emacs-style editing is the default mode.
+Standard bindings include:
+.TP
+.B ^A / ^E
+Beginning / end of line.
+.TP
+.B ^B / ^F
+Move backward / forward one character.
+.TP
+.B M-b / M-f
+Move backward / forward one word.
+.TP
+.B ^D
+Delete character at cursor (or indicate EOF on empty line).
+.TP
+.B ^K
+Kill from cursor to end of line.
+.TP
+.B ^U
+Unix line discard (kill from beginning to cursor).
+.TP
+.B ^W
+Unix word rubout.
+.TP
+.B ^Y
+Yank (paste) killed text.
+.TP
+.B ^_
+Undo last edit.
+.TP
+.B ^T
+Transpose characters.
+.TP
+.B TAB
+Filename completion.
+.SS Vi Mode
+Vi mode is activated by calling:
+.RS
+.nf
+el_set(el, EL_EDITOR, "vi");
+.fi
+.RE
+.PP
+Vi mode provides two sub-modes:
+.TP
+.B Insert Mode
+Characters are inserted at the cursor.
+Press
+.B ESC
+to enter command mode.
+Insert mode is the default when vi mode is first selected.
+.TP
+.B Command Mode
+Single-key commands move the cursor and manipulate text.
+Press
+.B i
+to return to insert mode.
+.PP
+Command-mode key bindings include:
+.TP
+.B h / l
+Move left / right one character.
+.TP
+.B w / b / e
+Move forward / backward by word, or to end of word.
+.TP
+.B 0 / $
+Move to beginning / end of line.
+.TP
+.B x / X
+Delete character at / before cursor.
+.TP
+.B d
+Delete (followed by a motion).
+.TP
+.B c
+Change (delete then enter insert mode).
+.TP
+.B y
+Yank (copy, followed by a motion).
+.TP
+.B p / P
+Put yanked text after / before cursor.
+.TP
+.B r
+Replace one character.
+.TP
+.B .
+Repeat last change.
+.TP
+.B u
+Undo.
+.TP
+.B /\fIpattern\fR
+Search history forward for
+.IR pattern .
+.TP
+.B ?\fIpattern\fR
+Search history backward for
+.IR pattern .
+.TP
+.B n / N
+Repeat last search in same / opposite direction.
+.TP
+.B f\fIc\fR / F\fIc\fR
+Find character
+.I c
+forward / backward on current line.
+.TP
+.B ;\fR / \fB,
+Repeat / reverse last find character command.
+.SH COMPLETION
+The completion callback is registered via:
+.RS
+.nf
+el_set(el, EL_ADDFN, "complete", "Complete filename",
+       my_complete_func);
+el_set(el, EL_BIND, "^I", "complete", NULL);
+.fi
+.RE
+.PP
+A completion function has the signature:
+.RS
+.nf
+unsigned char my_complete(EditLine *el, int ch);
+.fi
+.RE
+.PP
+When invoked, the function should inspect the current line via
+.BR el_line (3),
+determine possible completions, and insert the result using
+.BR el_insertstr (3).
+Return
+.B CC_NORM
+to redraw the line, or
+.B CC_ERROR
+on failure.
 .SH PUBLIC MACROS
 Public operation macros used with
 .BR el_set ()
@@ -200,4 +345,6 @@ serialize external access.
 .BR el_set (3),
 .BR el_source (3),
 .BR history (3),
+.BR tok_init (3),
+.BR readline (3),
 .BR editrc (5)
