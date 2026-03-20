@@ -9,7 +9,7 @@ endif
 SRCS = src/core.c src/device.c src/sync.c src/descriptor.c src/async.c src/poll.c
 OBJS = $(SRCS:.c=.o)
 
-.PHONY: all clean
+.PHONY: all clean install
 
 all: libusb.a
 
@@ -21,3 +21,9 @@ libusb.a: $(OBJS)
 
 clean:
 	rm -f $(OBJS) libusb.a
+
+install: libusb.a
+	@mkdir -p $(DESTDIR)/usr/lib
+	@mkdir -p $(DESTDIR)/usr/include
+	cp libusb.a $(DESTDIR)/usr/lib/
+	cp include/libusb.h $(DESTDIR)/usr/include/

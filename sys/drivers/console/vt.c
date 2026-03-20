@@ -4,6 +4,7 @@
 
 #include <sys/vt.h>
 #include <drivers/video/hw_text.h>
+#include <drivers/input/keyboard.h>
 #include <kern/console.h>
 #include <string.h>
 #include <sys/tty.h>
@@ -27,6 +28,15 @@ static size_t vt_scrollback_slot(const vt_state_t *vt, size_t logical_index) {
     oldest = (size_t)((vt->scrollback_head + VT_SCROLLBACK_LINES - vt->scrollback_count) %
                       VT_SCROLLBACK_LINES);
     return (oldest + logical_index) % VT_SCROLLBACK_LINES;
+}
+
+static void vt_init_tab_stops(vt_state_t *vt, int width) {
+    int col;
+
+    memset(vt->tab_stops, 0, sizeof(vt->tab_stops));
+    for (col = 8; col < width; col += 8) {
+        vt->tab_stops[col / 32] |= (uint32_t)1U << (col % 32);
+    }
 }
 
 int vt_set_geometry(int cols, int rows) {
@@ -65,10 +75,31 @@ void vt_init(void) {
         vt_states[i].row = 0;
         vt_states[i].col = 0;
         vt_states[i].color = 0x07; // Light Grey on Black
+        vt_states[i].attrs = 0;
         vt_states[i].tty = NULL;
         vt_states[i].scrollback_head = 0;
         vt_states[i].scrollback_count = 0;
         vt_states[i].scrollback_view = 0;
+        vt_states[i].saved_row = 0;
+        vt_states[i].saved_col = 0;
+        vt_states[i].saved_color = 0x07;
+        vt_states[i].saved_attrs = 0;
+        vt_states[i].scroll_top = 0;
+        vt_states[i].scroll_bottom = vt_get_visible_height() - 1;
+        vt_states[i].cursor_visible = 1;
+        vt_states[i].cursor_blink = 1;
+        vt_states[i].tab_width = 8;
+        vt_init_tab_stops(&vt_states[i], vt_width);
+        vt_states[i].autowrap = 1;         /* DECAWM on by default */
+        vt_states[i].cursor_key_app = 0;   /* Normal cursor keys */
+        vt_states[i].origin_mode = 0;      /* Absolute origin */
+        vt_states[i].bracketed_paste = 0;
+        vt_states[i].alt_screen_active = 0;
+        vt_states[i].alt_row = 0;
+        vt_states[i].alt_col = 0;
+        vt_states[i].alt_color = 0x07;
+        vt_states[i].alt_attrs = 0;
+        memset(vt_states[i].alt_buffer, 0, sizeof(vt_states[i].alt_buffer));
         
         // Initialize ansi state
         ansi_init(&vt_states[i].ansi);
@@ -104,13 +135,18 @@ struct tty *vt_get_active_tty(void) {
 }
 
 void vt_activate(int n) {
+    vt_state_t *old_vt;
     vt_state_t *vt;
 
     if (n < 0 || n >= VT_MAX) return;
     if (n == active_vt) return;
 
+    old_vt = &vt_states[active_vt];
+    old_vt->led_state = keyboard_get_led_state();
+
     active_vt = n;
     vt = &vt_states[n];
+    keyboard_set_led_state(vt->led_state);
     if (vt->tty) {
         console_set_tty(vt->tty);
     }
@@ -224,5 +260,37 @@ void vt_scrollback_page_down(void) {
         return;
     }
     vt->scrollback_view = (uint16_t)new_view;
+    hw_text_redraw_active();
+}
+
+void vt_scrollback_line_up(void) {
+    vt_state_t *vt;
+    int new_view;
+
+    vt = vt_get_state(vt_get_active());
+    if (!vt || vt->scrollback_count == 0) {
+        return;
+    }
+
+    new_view = vt->scrollback_view + 1;
+    if (new_view > vt->scrollback_count) {
+        new_view = vt->scrollback_count;
+    }
+    if (new_view == vt->scrollback_view) {
+        return;
+    }
+    vt->scrollback_view = (uint16_t)new_view;
+    hw_text_redraw_active();
+}
+
+void vt_scrollback_line_down(void) {
+    vt_state_t *vt;
+
+    vt = vt_get_state(vt_get_active());
+    if (!vt || vt->scrollback_view == 0) {
+        return;
+    }
+
+    vt->scrollback_view--;
     hw_text_redraw_active();
 }

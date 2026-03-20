@@ -19,7 +19,7 @@ UNIT_SRCS = unit/drivers/console/test_ansi.c unit/vm/test_kmem.c unit/vm/test_zo
              unit/kern/test_sync.c unit/kern/test_sleepq.c unit/kern/test_signal.c unit/kern/test_pthread_exit.c \
              unit/kern/test_reboot.c \
              unit/vfs/test_fd.c unit/vfs/test_permissions.c unit/vfs/test_chroot.c unit/vfs/test_readdir.c \
-             unit/vfs/test_link.c unit/vfs/test_rename.c unit/vfs/test_symlink.c unit/vfs/test_readlink.c \
+             unit/vfs/test_link.c unit/vfs/test_rename.c unit/vfs/test_symlink.c unit/vfs/test_readlink.c unit/vfs/test_vnode_cache.c \
              unit/fs/test_fuse.c unit/fs/test_ext2_blocks_extent.c \
              unit/kern/prop_sched.c fuzz/fuzz_sched.c \
              unit/perso/test_att.c ../sys/exec/perso/perso_svr3.c ../sys/exec/perso/perso_svr4.c \
@@ -76,12 +76,16 @@ all: test_runner test_getuid test_minix test_ext2_perf test_ext2_read_blocks tes
 	./host_test_fork_exec_wait
 	./test_getpagesize
 	./test_getuid
+	./test_getrusage
 
 test_getpagesize: lib/sys/test_getpagesize.c ../lib/sys/getpagesize.c
 	$(CC) $(CFLAGS_COMMON) $^ -o $@
 
 test_getuid: lib/sys/test_getuid.c
-	$(CC) $(CFLAGS_COMMON) -D__i386__ $^ -o $@
+	$(CC) $(CFLAGS_COMMON) -D__i386__ -I../sys -I../include -I../sys/include $^ -o $@
+
+test_getrusage: lib/sys/test_getrusage.c
+	$(CC) $(CFLAGS_COMMON) -D__i386__ -I../sys -I../sys/arch/i386 -I../include $^ -o $@
 
 test_readline: lib/edit/test_readline.c ../lib/edit/readline.c
 	$(CC) $(CFLAGS_COMMON) -I../lib/edit $< -o $@
@@ -145,7 +149,7 @@ host_test_fork_exec_wait: sys/host_test_fork_exec_wait.c
 test_pthread_join: lib/test_pthread_join.c ../lib/pthreads/pthread.c
 	$(CC) $(CFLAGS_COMMON) -Wno-int-conversion -Wno-pointer-to-int-cast -I../include -I../sys/include -I../sys $< -o $@
 
-test_libpthread_mutex: lib/test_pthread_mutex.c ../lib/pthreads/pthread.c
+test_libpthread_mutex: lib/test_libpthread_mutex.c ../lib/pthreads/pthread.c
 	$(CC) $(CFLAGS_COMMON) -I../include -I../sys/include -I../sys $< -o $@
 
 test_history:

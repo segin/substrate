@@ -1,0 +1,84 @@
+.TH LIBUSB_INIT 3 "March 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+libusb_init, libusb_init_context, libusb_exit, libusb_set_option, libusb_has_capability, libusb_get_version \- initialize and configure the libusb compatibility layer
+.SH LIBRARY
+.B libusb
+.SH SYNOPSIS
+.B #include <libusb.h>
+.PP
+.BI "int libusb_init(libusb_context **" ctx ");"
+.PP
+.BI "int libusb_init_context(libusb_context **" ctx ", const struct libusb_init_option " options[] ", int " num_options ");"
+.PP
+.BI "void libusb_exit(libusb_context *" ctx ");"
+.PP
+.BI "int libusb_set_option(libusb_context *" ctx ", enum libusb_option " option ", ...);"
+.PP
+.BI "int libusb_has_capability(uint32_t " capability ");"
+.PP
+.BI "const struct libusb_version *libusb_get_version(void);"
+.SH DESCRIPTION
+.BR libusb_init ()
+creates a libusb context and initializes event handling state.
+If
+.I ctx
+is NULL, the library-wide default context is created or referenced.
+.PP
+.BR libusb_init_context ()
+behaves similarly, but applies initialization options such as log level,
+log callback registration, and disabled device discovery.
+.PP
+.BR libusb_exit ()
+releases a context and closes any library-managed state once the reference
+count reaches zero.
+.PP
+.BR libusb_set_option ()
+updates an existing context or the default option set when
+.I ctx
+is NULL.
+.PP
+.BR libusb_has_capability ()
+reports whether the active backend exposes a given optional feature.
+.BR libusb_get_version ()
+returns a pointer to the static library version descriptor.
+.SH RETURN VALUE
+.BR libusb_init (),
+.BR libusb_init_context (),
+and
+.BR libusb_set_option ()
+return 0 on success or a negative
+.B LIBUSB_ERROR_*
+code on failure.
+.PP
+.BR libusb_has_capability ()
+returns non-zero when the capability is supported and 0 otherwise.
+.BR libusb_get_version ()
+returns a non-NULL pointer.
+.SH ERRORS
+.TP
+.B LIBUSB_ERROR_INVALID_PARAM
+A required pointer or option argument was invalid.
+.TP
+.B LIBUSB_ERROR_NO_MEM
+The library could not allocate the requested context or internal state.
+.TP
+.B LIBUSB_ERROR_IO
+Backend initialization failed while creating event-handling resources.
+.TP
+.B LIBUSB_ERROR_OTHER
+The default context could not be resolved.
+.SH EXAMPLE
+.nf
+libusb_context *ctx = NULL;
+
+if (libusb_init(&ctx) != 0)
+    return 1;
+
+libusb_set_option(ctx, LIBUSB_OPTION_LOG_LEVEL, LIBUSB_LOG_LEVEL_INFO);
+/* ... use libusb ... */
+libusb_exit(ctx);
+.fi
+.SH SEE ALSO
+.BR libusb_open (3),
+.BR libusb_handle_events (3),
+.BR libusb_hotplug_register_callback (3)

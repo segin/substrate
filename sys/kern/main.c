@@ -5,6 +5,7 @@
 #include <sys/proc.h>
 #include <sys/input.h>
 #include <arch/i386/early_boot.h>
+#include <arch/i386/intr.h>
 
 #include <drivers/video/vga.h>
 #include <drivers/video/fb.h>
@@ -18,6 +19,8 @@
 #include <drivers/storage/ide/ide.h>
 #include <drivers/storage/ahci/ahci.h>
 #include <drivers/storage/nvme/nvme.h>
+#include <drivers/usb/usb.h>
+#include <drivers/usb/uhci.h>
 #include <drivers/virtio/virtio.h>
 #include <drivers/storage/ramdisk.h>
 #include <drivers/storage/floppy/floppy.h>
@@ -37,6 +40,7 @@
 #include <arch/x86-common/multiboot.h>
 #include <sys/freebsd_boot.h>
 #include <kern/isa.h>
+#include <kern/efi_runtime.h>
 
 #include <sys/param.h>
 #include <pm/pm.h>
@@ -45,6 +49,7 @@
 #include <vfs/vfs.h>
 #include <sys/exec.h>
 #include <sys/kern_syscalls.h>
+#include <sys/ntsync.h>
 #include <exec/formats/elf.h>
 #include <fs/procfs.h>
 #include <fs/sysfs.h>
@@ -53,9 +58,6 @@
 #include <fs/9p.h>
 
 #include <sys/tests.h>
-
-extern void ntsync_init(void);
-
 
 #include <kern/console.h>
 #include <kern/cmdline.h>
@@ -433,14 +435,30 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
         fb_init(mboot_info);
     }
 
+    efi_runtime_init();
+
 }
 
 static void init_storage_and_vfs(multiboot_info_t *mboot_info) {
+    /*
+     * Enable interrupts before driver init — timer IRQs must be
+     * running so get_uptime_ms() advances for driver timeout loops
+     * (UHCI reset, AHCI port stop, etc.).  IDT, PIT, and PIC/APIC
+     * are all configured by init_core_subsystems() above.
+     */
+    intr_enable();
+
     pci_init();
     isa_init();
     isa_probe_legacy();
+    scsi_init();
     floppy_init();
     ide_init();
+    ahci_init();
+    uhci_init();
+    usb_msc_init();
+    usb_hid_init();
+    usb_init();
     virtio_init();
     register_boot_ramdisks(mboot_info);
     ntsync_init();
@@ -681,10 +699,10 @@ void kinit_task(void *arg) {
     panic("kinit: No init found. Try passing init= option to kernel.");
 
 exec_success:
-    // exec succeeded (or will when usermode is implemented)
-    // In a real kernel, we wouldn't reach here - we'd jump to userspace
-    kprint("kinit: exec returned (usermode not implemented)\n");
-    kprint("System idle - init loaded but cannot run.\n");
+    // kern_execve() should not return on success — the thread transitions
+    // to usermode with the new binary's address space. If we reach here,
+    // something unexpected happened.
+    kprint("kinit: BUG: kern_execve returned after successful exec\n");
     for (;;) { __asm__ volatile("hlt"); }
 }
 

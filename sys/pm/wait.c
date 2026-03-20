@@ -189,8 +189,10 @@ int kern_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
                 
             case 1: // Stopped (WUNTRACED)
                 // Return stopped status: 0x7f in low byte, stop signal in high byte
-                // For now, use SIGSTOP (19) as the default stop signal
-                if (status) *status = 0x7f | (19 << 8); // WIFSTOPPED will be true
+                {
+                    int stopsig = target->p_xsig ? target->p_xsig : SIGSTOP;
+                    if (status) *status = 0x7f | (stopsig << 8);
+                }
                 // Mark as reported so we don't report again
                 target->p_flag |= P_WAITED;
                 return pid_val;
