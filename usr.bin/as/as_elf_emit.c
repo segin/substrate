@@ -10158,10 +10158,25 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
             free_name_index(&loc_index);
             return -1;
         }
-        if (s->version != NULL && elf_symbol_set_version(esym, 1) != ELF_OK) {
-            free_sym_locs(locs, loc_count);
-            free_name_index(&loc_index);
-            return -1;
+        if (s->version != NULL) {
+            const char *ver = s->version;
+            const char *at = strrchr(ver, '@');
+            int is_default = 0;
+            const char *ver_name = NULL;
+
+            if (at != NULL && at > ver && at[1] != '\0') {
+                if (at > ver && at[-1] == '@') {
+                    is_default = 1;
+                }
+                ver_name = at + 1;
+            }
+            if (ver_name == NULL ||
+                elf_symbol_set_version_name(esym, ver_name, is_default) != ELF_OK) {
+                set_err(ctx, "invalid .symver mapping for %s", s->name ? s->name : "<anon>");
+                free_sym_locs(locs, loc_count);
+                free_name_index(&loc_index);
+                return -1;
+            }
         }
         if (append_emit_symbol(ctx, s->name, esym) != 0) {
             free_sym_locs(locs, loc_count);

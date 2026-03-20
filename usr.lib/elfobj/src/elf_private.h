@@ -144,6 +144,8 @@ struct elf_symbol {
     uint8_t other;
     uint16_t shndx;
     uint16_t ver_index;
+    char *version_name;
+    uint8_t version_default;
     size_t index;
 };
 

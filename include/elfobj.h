@@ -1319,6 +1319,7 @@ elf_err_t elf_symbol_set_binding(elf_symbol_t *symbol, uint8_t bind);
 elf_err_t elf_symbol_set_type(elf_symbol_t *symbol, uint8_t type);
 elf_err_t elf_symbol_set_visibility(elf_symbol_t *symbol, uint8_t visibility);
 elf_err_t elf_symbol_set_version(elf_symbol_t *symbol, uint16_t version_index);
+elf_err_t elf_symbol_set_version_name(elf_symbol_t *symbol, const char *version, int is_default);
 uint16_t elf_symbol_version(const elf_symbol_t *symbol);
 elf_err_t elf_symbol_set_value(elf_symbol_t *symbol, uint64_t value);
 elf_err_t elf_symbol_set_shndx(elf_symbol_t *symbol, uint16_t shndx);

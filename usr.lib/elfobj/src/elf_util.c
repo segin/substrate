@@ -380,6 +380,7 @@ static void elf_free_symbols(elfobj_t *obj) {
             continue;
         }
         free(sym->name);
+        free(sym->version_name);
         free(sym);
     }
     free(obj->symbols);

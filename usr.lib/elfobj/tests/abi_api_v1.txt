@@ -116,6 +116,7 @@ elf_symbol_set_binding
 elf_symbol_set_shndx
 elf_symbol_set_type
 elf_symbol_set_version
+elf_symbol_set_version_name
 elf_symbol_set_visibility
 elf_symbol_size
 elf_symbol_value

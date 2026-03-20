@@ -31,6 +31,7 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 # 8a.5 Expression evaluation and symbol resolution.
 "$ROOT/tests/usr.bin/as/test_parser_core.sh"
 "$ROOT/tests/usr.bin/as/test_symtab_core.sh"
+"$ROOT/tests/usr.bin/as/test_symver_elf.sh"
 "$ROOT/tests/usr.bin/as/test_sections_symbols_expr_32_64.sh"
 "$ROOT/tests/usr.bin/as/test_directive_surface_32_64.sh"
 "$ROOT/tests/usr.bin/as/test_numeric_local_labels.sh"

@@ -31,6 +31,11 @@ typedef struct {
     size_t signature_sym_index;
 } out_group_t;
 
+typedef struct {
+    const char *name;
+    uint16_t index;
+} ver_name_t;
+
 #ifndef GRP_COMDAT
 #define GRP_COMDAT 0x1u
 #endif
@@ -322,6 +327,157 @@ static uint8_t *build_symtab(const elfobj_t *obj, elfobj_endian_t e, elfobj_clas
     return buf;
 }
 
+static uint16_t ver_name_lookup(const ver_name_t *names, size_t count, const char *name) {
+    size_t i;
+    if (name == NULL || name[0] == '\0') {
+        return 0;
+    }
+    for (i = 0; i < count; ++i) {
+        if (names[i].name != NULL && strcmp(names[i].name, name) == 0) {
+            return names[i].index;
+        }
+    }
+    return 0;
+}
+
+static elf_err_t collect_version_names(const elfobj_t *obj, ver_name_t **out_names, size_t *out_count) {
+    ver_name_t *names = NULL;
+    size_t count = 0;
+    size_t cap = 0;
+    size_t i;
+
+    if (out_names == NULL || out_count == NULL) {
+        return ELF_ERR_STATE;
+    }
+    *out_names = NULL;
+    *out_count = 0;
+
+    for (i = 0; i < obj->symbol_count; ++i) {
+        const struct elf_symbol *sym = obj->symbols[i];
+        uint16_t idx;
+        if (sym == NULL || sym->version_name == NULL || sym->version_name[0] == '\0') {
+            continue;
+        }
+        idx = ver_name_lookup(names, count, sym->version_name);
+        if (idx != 0) {
+            continue;
+        }
+        if (count == cap) {
+            size_t new_cap = cap == 0 ? 8 : cap * 2;
+            void *next = elf__reallocarray(names, new_cap, sizeof(names[0]));
+            if (next == NULL) {
+                free(names);
+                return ELF_ERR_OOM;
+            }
+            names = (ver_name_t *)next;
+            cap = new_cap;
+        }
+        names[count].name = sym->version_name;
+        names[count].index = (uint16_t)(count + 2);
+        count++;
+    }
+
+    *out_names = names;
+    *out_count = count;
+    return ELF_OK;
+}
+
+static uint8_t *build_gnu_versym(const elfobj_t *obj, elfobj_endian_t e, const ver_name_t *names,
+                                 size_t name_count, size_t extra_count, size_t *out_size) {
+    int has_null = (obj->symbol_count > 0 &&
+                    (obj->symbols[0]->name == NULL || obj->symbols[0]->name[0] == '\0') &&
+                    obj->symbols[0]->value == 0 &&
+                    obj->symbols[0]->size == 0);
+    size_t nsyms = obj->symbol_count + (has_null ? 0 : 1) + extra_count;
+    uint8_t *buf;
+    size_t i;
+
+    if (out_size == NULL) {
+        return NULL;
+    }
+    *out_size = 0;
+    if (nsyms == 0) {
+        return NULL;
+    }
+    buf = (uint8_t *)elf__calloc(nsyms, 2);
+    if (buf == NULL) {
+        return NULL;
+    }
+
+    for (i = 0; i < nsyms; ++i) {
+        elf__wr16(buf + (i * 2), e, VER_NDX_GLOBAL);
+    }
+    elf__wr16(buf + 0, e, VER_NDX_LOCAL);
+
+    for (i = 0; i < obj->symbol_count; ++i) {
+        const struct elf_symbol *sym = obj->symbols[i];
+        size_t idx = has_null ? i : (i + 1);
+        uint16_t ver = VER_NDX_GLOBAL;
+
+        if (sym == NULL) {
+            continue;
+        }
+        if (sym->bind == STB_LOCAL) {
+            ver = VER_NDX_LOCAL;
+        }
+        if (sym->version_name != NULL && sym->version_name[0] != '\0') {
+            uint16_t v = ver_name_lookup(names, name_count, sym->version_name);
+            if (v != 0) {
+                ver = v;
+                if (!sym->version_default) {
+                    ver = (uint16_t)(ver | VER_NDX_HIDDEN);
+                }
+            }
+        }
+        if (idx < nsyms) {
+            elf__wr16(buf + (idx * 2), e, ver);
+        }
+    }
+
+    *out_size = nsyms * 2;
+    return buf;
+}
+
+static uint8_t *build_gnu_verdef(elfobj_endian_t e, elf_strtab_t *strtab,
+                                 const ver_name_t *names, size_t name_count, size_t *out_size) {
+    size_t verdef_sz = 20;
+    size_t verdaux_sz = 8;
+    size_t total = name_count * (verdef_sz + verdaux_sz);
+    uint8_t *buf;
+    size_t i;
+
+    if (out_size == NULL) {
+        return NULL;
+    }
+    *out_size = 0;
+    if (name_count == 0) {
+        return NULL;
+    }
+    buf = (uint8_t *)elf__calloc(1, total);
+    if (buf == NULL) {
+        return NULL;
+    }
+    for (i = 0; i < name_count; ++i) {
+        uint8_t *p = buf + (i * (verdef_sz + verdaux_sz));
+        uint32_t name_off = elf__strtab_add(strtab, names[i].name ? names[i].name : "");
+        uint32_t hash = elf_hash_sysv(names[i].name ? names[i].name : "");
+
+        elf__wr16(p + 0, e, 1);
+        elf__wr16(p + 2, e, 0);
+        elf__wr16(p + 4, e, names[i].index);
+        elf__wr16(p + 6, e, 1);
+        elf__wr32(p + 8, e, hash);
+        elf__wr32(p + 12, e, (uint32_t)verdef_sz);
+        elf__wr32(p + 16, e, (uint32_t)((i + 1 < name_count) ? (verdef_sz + verdaux_sz) : 0));
+
+        elf__wr32(p + verdef_sz + 0, e, name_off);
+        elf__wr32(p + verdef_sz + 4, e, 0);
+    }
+
+    *out_size = total;
+    return buf;
+}
+
 static uint8_t *build_relocs_for_section(const elfobj_t *obj, const struct elf_section *target,
                                          int with_addend,
                                          size_t *out_size, size_t *out_entsize) {
@@ -473,8 +629,16 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
     size_t *group_sig_indices = NULL;
     uint8_t *symtab_data = NULL;
     uint8_t *dynstr_data = NULL;
+    ver_name_t *ver_names = NULL;
+    size_t ver_name_count = 0;
+    uint8_t *versym_data = NULL;
+    uint8_t *verdef_data = NULL;
+    size_t versym_size = 0;
+    size_t verdef_size = 0;
     size_t dynstr_size = 0;
     int has_dynstr_section = 0;
+    int has_gnu_versym = 0;
+    int has_gnu_verdef = 0;
     size_t symtab_size = 0;
     size_t symtab_entsz = 0;
     uint64_t shoff;
@@ -543,6 +707,10 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         out.group_comdat = s->comdat;
         if (strcmp(name, ".dynstr") == 0) {
             has_dynstr_section = 1;
+        } else if (strcmp(name, ".gnu.version") == 0) {
+            has_gnu_versym = 1;
+        } else if (strcmp(name, ".gnu.version_d") == 0) {
+            has_gnu_verdef = 1;
         }
         obj_sec_to_out[i] = sec_count;
         if (out_push(&secs, &sec_count, &sec_cap, &out) != ELF_OK) {
@@ -683,6 +851,25 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         }
     }
 
+    if (obj->has_versioning && !has_gnu_versym && !has_gnu_verdef) {
+        err = collect_version_names(obj, &ver_names, &ver_name_count);
+        if (err != ELF_OK) {
+            goto done;
+        }
+        if (ver_name_count != 0) {
+            verdef_data = build_gnu_verdef(obj->endian, &strtab, ver_names, ver_name_count, &verdef_size);
+            if (verdef_data == NULL || verdef_size == 0) {
+                err = ELF_ERR_OOM;
+                goto done;
+            }
+            versym_data = build_gnu_versym(obj, obj->endian, ver_names, ver_name_count, group_count, &versym_size);
+            if (versym_data == NULL || versym_size == 0) {
+                err = ELF_ERR_OOM;
+                goto done;
+            }
+        }
+    }
+
     {
         out_sec_t stsec;
         memset(&stsec, 0, sizeof(stsec));
@@ -697,6 +884,45 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
             err = ELF_ERR_OOM;
             goto done;
         }
+    }
+
+    if (verdef_data != NULL && verdef_size != 0) {
+        out_sec_t vsec;
+        memset(&vsec, 0, sizeof(vsec));
+        vsec.name = ".gnu.version_d";
+        vsec.type = SHT_GNU_verdef;
+        vsec.flags = 0;
+        vsec.addralign = 4;
+        vsec.entsize = 20;
+        vsec.data = verdef_data;
+        vsec.size = verdef_size;
+        vsec.owns_data = 1;
+        vsec.link = (uint32_t)strtab_index;
+        vsec.info = (uint32_t)ver_name_count;
+        if (out_push(&secs, &sec_count, &sec_cap, &vsec) != ELF_OK) {
+            err = ELF_ERR_OOM;
+            goto done;
+        }
+        verdef_data = NULL;
+    }
+
+    if (versym_data != NULL && versym_size != 0) {
+        out_sec_t vsec;
+        memset(&vsec, 0, sizeof(vsec));
+        vsec.name = ".gnu.version";
+        vsec.type = SHT_GNU_versym;
+        vsec.flags = 0;
+        vsec.addralign = 2;
+        vsec.entsize = 2;
+        vsec.data = versym_data;
+        vsec.size = versym_size;
+        vsec.owns_data = 1;
+        vsec.link = (uint32_t)symtab_index;
+        if (out_push(&secs, &sec_count, &sec_cap, &vsec) != ELF_OK) {
+            err = ELF_ERR_OOM;
+            goto done;
+        }
+        versym_data = NULL;
     }
 
     if ((obj->type == ET_EXEC || obj->type == ET_DYN) && !has_dynstr_section) {
@@ -1397,6 +1623,9 @@ done:
     free(group_sig_indices);
     free(group_sig_names);
     free(obj_sec_to_out);
+    free(ver_names);
+    free(versym_data);
+    free(verdef_data);
     free_out_groups(groups, group_count);
     for (i = 0; i < sec_count; ++i) {
         if (secs[i].owns_data) {

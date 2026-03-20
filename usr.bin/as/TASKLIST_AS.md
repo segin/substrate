@@ -183,16 +183,16 @@ Validation gate for Section 1:
 - Audit result:
   - Implemented and exercised in full-as tests: `.section`, `.pushsection`, `.popsection`, `.previous`, `.org`, `.align`, `.balign`, `.p2align`, `.type`, common compiler-emitted `.size` forms (`.size foo, .-foo`).
   - Tightened unsupported-directive diagnostics: `.if`, `.ifdef`, `.ifndef`, `.else`, `.elseif`, `.endif`, `.macro`, `.endm`, `.rept`, `.endr`, `.irp`, `.irpc`.
-  - Remaining semantic gaps: `.symver` metadata is recorded but GNU version alias emission is incomplete.
+  - `.symver` now emits `.gnu.version` and `.gnu.version_d` metadata for versioned symbols.
 - [x] Add missing directives or tighten diagnostics for unsupported ones.
-- [ ] Add tests for:
+- [x] Add tests for:
   - `.section` (done)
   - `.pushsection` / `.popsection` (done)
   - `.group` (done)
   - `.org` (done)
   - `.balign` / `.p2align` (done)
   - `.type` / `.size` (done)
-  - `.symver` (pending)
+  - `.symver` (done)
 
 ### 6.2 Symbol and Relocation Semantics
 - [x] Add tests for local numeric labels in complex mixed forward/backward flows.

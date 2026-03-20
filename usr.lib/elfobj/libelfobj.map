@@ -100,6 +100,7 @@ ELFOBJ_1.0 {
 		elf_symbol_set_shndx;
 		elf_symbol_set_type;
 		elf_symbol_set_version;
+		elf_symbol_set_version_name;
 		elf_symbol_set_visibility;
 		elf_symbol_size;
 		elf_symbol_value;
