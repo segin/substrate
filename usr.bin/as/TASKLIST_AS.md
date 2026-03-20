@@ -195,9 +195,9 @@ Validation gate for Section 1:
   - `.symver` (pending)
 
 ### 6.2 Symbol and Relocation Semantics
-- [ ] Add tests for local numeric labels in complex mixed forward/backward flows.
-- [ ] Add tests for relocation width mismatches and range diagnostics.
-- [ ] Add tests for symbol visibility directives and COMDAT/group behavior.
+- [x] Add tests for local numeric labels in complex mixed forward/backward flows.
+- [x] Add tests for relocation width mismatches and range diagnostics.
+- [x] Add tests for symbol visibility directives and COMDAT/group behavior.
 
 ---
 

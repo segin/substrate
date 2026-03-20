@@ -33,6 +33,7 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 "$ROOT/tests/usr.bin/as/test_symtab_core.sh"
 "$ROOT/tests/usr.bin/as/test_sections_symbols_expr_32_64.sh"
 "$ROOT/tests/usr.bin/as/test_directive_surface_32_64.sh"
+"$ROOT/tests/usr.bin/as/test_numeric_local_labels.sh"
 "$ROOT/tests/usr.bin/as/test_cpp_path.sh"
 "$ROOT/tests/usr.bin/as/test_diagnostics_determinism.sh"
 
