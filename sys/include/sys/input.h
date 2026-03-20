@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <sys/file.h> // for fs_node_t, off_t
+#include <sys/keycodes.h>
 
 // Event Types
 #define EV_SYN 0x00
@@ -10,13 +11,6 @@
 #define EV_REL 0x02
 #define EV_ABS 0x03
 #define EV_MSC 0x04
-
-// Key Codes (Subset of Linux input.h)
-#define KEY_RESERVED 0
-#define KEY_ESC      1
-#define KEY_1        2
-#define KEY_2        3
-// ... extensive list omitted for now, drivers use raw scancodes or defined mappings
 
 // Relative Axes
 #define REL_X      0x00

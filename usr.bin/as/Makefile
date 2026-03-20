@@ -9,7 +9,14 @@ include ../../Makefile.bin.inc
 
 BINDIR := $(DESTDIR)/usr/bin
 
+ifeq ($(NATIVE_BUILD),1)
+$(PROG): force_native_elfobj
+
+force_native_elfobj:
+	$(MAKE) -C ../../usr.lib/elfobj NATIVE_BUILD=1
+else
 $(PROG): ../../usr.lib/elfobj/libelfobj.a
+endif
 
 ../../usr.lib/elfobj/libelfobj.a:
 	$(MAKE) -C ../../usr.lib/elfobj $(if $(NATIVE_BUILD),NATIVE_BUILD=1)

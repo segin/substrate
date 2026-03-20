@@ -391,10 +391,8 @@ bc_num *bc_dup(bc_num *src) {
 // Returns 1 if |a| > |b|, -1 if |a| < |b|, 0 if equal
 // MUST handle scale correctly
 int bc_abs_cmp(bc_num *a, bc_num *b) {
-    // We cannot just compare length if scales differ.
-    // Align scales dynamically without allocating.
-    // Total decimal length (int + frac) ...
-    // Much easier: use align function
+    /* We cannot just compare length if scales differ.
+       Align scales dynamically using the align function. */
     bc_num *aa, *bb;
     bc_align_scale(a, b, &aa, &bb);
     

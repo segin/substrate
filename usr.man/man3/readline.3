@@ -1,0 +1,125 @@
+.\" Process this file with
+.\" groff -man -Tascii readline.3
+.\"
+.TH READLINE 3 "February 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+readline, add_history, rl_bind_key, rl_set_prompt, rl_on_new_line,
+rl_forced_update_display \- GNU readline compatibility shim
+.SH LIBRARY
+Editline library (libedit, \-ledit)
+.SH SYNOPSIS
+.B #include <histedit.h>
+.PP
+.BI "char *readline(const char *prompt);"
+.br
+.BI "void add_history(const char *line);"
+.br
+.BI "int rl_bind_key(int key, void (*func)(void));"
+.br
+.BI "void rl_set_prompt(const char *prompt);"
+.br
+.BI "void rl_on_new_line(void);"
+.br
+.BI "void rl_forced_update_display(void);"
+.PP
+.B "extern char *rl_line_buffer;"
+.br
+.B "extern int rl_point;"
+.br
+.B "extern int rl_end;"
+.br
+.B "extern const char *rl_readline_name;"
+.br
+.B "extern char **(*rl_attempted_completion_function)(const char *, int, int);"
+.SH DESCRIPTION
+The editline library provides a source-compatible shim that implements
+a subset of the GNU
+.B readline
+API.
+Programs written for readline can be recompiled against libedit without
+source modification for the functions listed here.
+.PP
+.BR readline ()
+displays
+.I prompt
+and reads a line of input with editing.
+The returned string is allocated with
+.BR malloc (3)
+and does not include the trailing newline.
+The caller must
+.BR free (3)
+the returned pointer.
+Returns NULL on end-of-file.
+.PP
+.BR add_history ()
+appends
+.I line
+to the history list.
+.PP
+.BR rl_bind_key ()
+binds the key
+.I key
+to
+.IR func .
+Returns 0 on success.
+.PP
+.BR rl_set_prompt ()
+changes the primary prompt string.
+.PP
+.BR rl_on_new_line ()
+informs the display engine that the cursor is on a new line.
+.PP
+.BR rl_forced_update_display ()
+forces an immediate redraw of the input line.
+.SS Global Variables
+.TP
+.B rl_line_buffer
+Points to the current line being edited.
+.TP
+.B rl_point
+Index of the cursor in
+.BR rl_line_buffer .
+.TP
+.B rl_end
+Index of the last character in
+.BR rl_line_buffer .
+.TP
+.B rl_readline_name
+Application name used for conditional directives in
+.BR .editrc .
+.TP
+.B rl_attempted_completion_function
+If non-NULL, called by the default completion engine to generate
+candidate completions.
+.SH RETURN VALUE
+.BR readline ()
+returns a pointer to the input line on success, or NULL on EOF or
+error.
+.PP
+.BR rl_bind_key ()
+returns 0 on success.
+.SH ERRORS
+No errno values are set by these functions.
+.SH EXAMPLES
+.nf
+#include <histedit.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    char *line;
+    while ((line = readline("$ ")) != NULL) {
+        if (*line)
+            add_history(line);
+        printf("You typed: %s\\n", line);
+        free(line);
+    }
+    return 0;
+}
+.fi
+.SH SEE ALSO
+.BR editline (3),
+.BR history (3),
+.BR tok_init (3),
+.BR editrc (5)

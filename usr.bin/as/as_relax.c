@@ -61,6 +61,7 @@ void as_relax_result_init(as_relax_result_t *r) {
     }
     r->branches = NULL;
     r->branch_count = 0;
+    r->branch_cap = 0;
     r->passes = 0;
     r->stabilized = 0;
 }
@@ -157,11 +158,15 @@ static int add_branch(relax_ctx_t *ctx, size_t stmt_index, const as_instruction_
     as_relax_branch_t *next;
     as_relax_branch_t *b;
 
-    next = (as_relax_branch_t *)realloc(ctx->out->branches, (ctx->out->branch_count + 1) * sizeof(*next));
-    if (next == NULL) {
-        return -1;
+    if (ctx->out->branch_count == ctx->out->branch_cap) {
+        size_t ncap = ctx->out->branch_cap == 0 ? 16 : ctx->out->branch_cap * 2;
+        next = (as_relax_branch_t *)realloc(ctx->out->branches, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        ctx->out->branches = next;
+        ctx->out->branch_cap = ncap;
     }
-    ctx->out->branches = next;
     b = &ctx->out->branches[ctx->out->branch_count++];
     memset(b, 0, sizeof(*b));
     b->stmt_index = stmt_index;

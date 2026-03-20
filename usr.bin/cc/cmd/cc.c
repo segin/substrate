@@ -49,6 +49,7 @@ typedef struct {
     int query_print_file_name;
     int query_print_libgcc_file_name;
     int nostdlib;
+    int nostdinc;
     int nodefaultlibs;
     int gnu89_inline_mode;
     int gnu89_inline_override;
@@ -439,6 +440,49 @@ static int strvec_has_flag(const strvec_t *v, const char *flag) {
     return 0;
 }
 
+static int strvec_contains(const strvec_t *v, const char *value) {
+    size_t i;
+    if (v == NULL || value == NULL) {
+        return 0;
+    }
+    for (i = 0; i < v->count; ++i) {
+        if (strcmp(v->items[i], value) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int add_gcc_system_include(cc_opts_t *o, const char *name) {
+    char path[PATH_MAX];
+    if (o == NULL || name == NULL) {
+        return 0;
+    }
+    if (gcc_print_file_name(name, o->target, path) != 0) {
+        return 0;
+    }
+    if (strvec_contains(&o->cpp_flags, path)) {
+        return 0;
+    }
+    if (strvec_push(&o->cpp_flags, "-isystem") != 0 || strvec_push(&o->cpp_flags, path) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+static int add_gcc_system_includes(cc_opts_t *o) {
+    if (o == NULL || o->nostdinc || strvec_has_flag(&o->cpp_flags, "-nostdinc")) {
+        return 0;
+    }
+    if (add_gcc_system_include(o, "include") != 0) {
+        return -1;
+    }
+    if (add_gcc_system_include(o, "include-fixed") != 0) {
+        return -1;
+    }
+    return 0;
+}
+
 static int make_temp_path(cc_opts_t *o, const char *prefix, const char *suffix, char out[PATH_MAX]) {
     char templ[PATH_MAX];
     int fd;
@@ -752,6 +796,7 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
             continue;
         }
         if (strcmp(a, "-nostdinc") == 0) {
+            o->nostdinc = 1;
             if (strvec_push(&o->cpp_flags, a) != 0 || strvec_push(&o->c_flags, a) != 0) {
                 return -1;
             }
@@ -1690,6 +1735,11 @@ int cc_main(int argc, char **argv) {
             printf("libgcc.a\n");
         }
         rc = 0;
+        goto out;
+    }
+
+    if (add_gcc_system_includes(&o) != 0) {
+        fprintf(stderr, "cc: failed to add gcc include paths\n");
         goto out;
     }
 
