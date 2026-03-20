@@ -5,7 +5,6 @@
 #include "../sys/vm/vm_object.h"
 #include "../sys/vm/vm_page.h"
 #include "../sys/kern/sched.h"
-#include "../sys/kern/sleepq.h"
 
 // VM Tests
 extern bool test_kmem_basic_alloc(void);
@@ -24,6 +23,7 @@ extern bool test_vm_fault_anonymous(void);
 extern bool test_vm_fault_protection_violation(void);
 extern bool test_mmap_logic(void);
 extern bool test_munmap_logic(void);
+extern bool test_sys_brk_logic(void);
 extern bool test_swap_lifecycle(void); // Mock-based
 extern bool test_swap_full(void);      // Mock-based
 extern bool test_vm_swap_real_io(void);
@@ -102,9 +102,6 @@ extern bool test_vop_symlink_notsupp(void);
 extern bool test_vop_readlink_basic(void);
 extern bool test_vop_readlink_notlink(void);
 extern bool test_vop_readlink_notsupp(void);
-extern bool test_vnode_init_basic(void);
-extern bool test_vnode_reclaim_basic(void);
-extern bool test_vnode_create_basic(void);
 
 // FUSE Tests
 extern bool test_fuse_read(void);
@@ -192,6 +189,9 @@ test_case_t tests[] = {
     {"fault_prot", test_vm_fault_protection_violation},
     {"mmap_logic", test_mmap_logic},
     {"munmap_logic", test_munmap_logic},
+    {"sys_brk_logic", test_sys_brk_logic},
+
+
     {"swap_mock_life", test_swap_lifecycle},
     {"swap_mock_full", test_swap_full},
     {"swap_real_io", test_vm_swap_real_io},
@@ -256,9 +256,6 @@ test_case_t tests[] = {
     { "vfs_readlink_basic", test_vop_readlink_basic },
     { "vfs_readlink_notlink", test_vop_readlink_notlink },
     { "vfs_readlink_notsupp", test_vop_readlink_notsupp },
-    { "vnode_init_basic", test_vnode_init_basic },
-    { "vnode_reclaim_basic", test_vnode_reclaim_basic },
-    { "vnode_create_basic", test_vnode_create_basic },
     {"fuse_read", test_fuse_read},
     {"ansi_parsing", test_ansi_parsing},
     {"sched_prop", test_sched_properties},
@@ -291,6 +288,7 @@ test_case_t tests[] = {
 };
 
 #include <string.h>
+extern void sleepq_init(void);
 
 int main(int argc, char **argv) {
     const char *target_test = NULL;
