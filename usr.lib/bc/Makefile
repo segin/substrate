@@ -13,3 +13,7 @@ libbc.a: $(OBJS)
 
 clean:
 	rm -f $(OBJS) libbc.a
+
+install: libbc.a
+	@mkdir -p $(DESTDIR)/usr/lib
+	cp libbc.a $(DESTDIR)/usr/lib/

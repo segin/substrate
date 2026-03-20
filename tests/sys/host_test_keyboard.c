@@ -16,6 +16,8 @@ static int mock_vt_activate_arg;
 static int mock_vt_activate_calls;
 static int mock_scrollback_up_calls;
 static int mock_scrollback_down_calls;
+static int mock_scrollback_line_up_calls;
+static int mock_scrollback_line_down_calls;
 static int mock_console_chars_len;
 static char mock_console_chars[64];
 static int mock_tty_chars_len;
@@ -27,12 +29,20 @@ static struct {
     uint16_t type;
     uint16_t code;
     int32_t value;
-} mock_input_events[16];
+} mock_input_events[512];
 
 static struct tty mock_tty;
 static vt_state_t mock_vt;
 
 int ps2_init(void) { return mock_ps2_init_rc; }
+int ps2_write_data(uint8_t value) { (void)value; return 0; }
+int ps2_read_data_timeout(uint8_t *value, uint32_t timeout_loops) {
+    (void)timeout_loops;
+    if (value) {
+        *value = PS2_DEV_ACK;
+    }
+    return 0;
+}
 void kprint(const char *str) { (void)str; }
 int input_register_device(input_dev_t *dev) {
     mock_input_register_calls++;
@@ -41,11 +51,14 @@ int input_register_device(input_dev_t *dev) {
 }
 void random_harvest_fast(const void *data, size_t len) { (void)data; (void)len; mock_entropy_calls++; }
 void debug_dump_processes(void) { mock_debug_dump_calls++; }
+void sysrq_handle(int cmd) { (void)cmd; }
 void vt_activate(int n) { mock_vt_activate_arg = n; mock_vt_activate_calls++; }
 int vt_get_active(void) { return 0; }
 vt_state_t *vt_get_state(int n) { return n == 0 ? &mock_vt : NULL; }
 void vt_scrollback_page_up(void) { mock_scrollback_up_calls++; }
 void vt_scrollback_page_down(void) { mock_scrollback_down_calls++; }
+void vt_scrollback_line_up(void) { mock_scrollback_line_up_calls++; }
+void vt_scrollback_line_down(void) { mock_scrollback_line_down_calls++; }
 void tty_flip_buffer_push(struct tty *tty, char c) {
     (void)tty;
     assert(mock_tty_chars_len < (int)sizeof(mock_tty_chars));
@@ -100,7 +113,12 @@ static void reset_state(void) {
     kbd_rctrl = 0;
     kbd_lalt = 0;
     kbd_ralt = 0;
+    kbd_capslock = 0;
+    kbd_numlock = 0;
+    kbd_scrolllock = 0;
+    kbd_sysrq = 0;
     kbd_extended = 0;
+    init_numpad_nav();
 
     mock_inb_reads = 0;
     mock_ps2_init_rc = 0;
@@ -110,6 +128,8 @@ static void reset_state(void) {
     mock_vt_activate_calls = 0;
     mock_scrollback_up_calls = 0;
     mock_scrollback_down_calls = 0;
+    mock_scrollback_line_up_calls = 0;
+    mock_scrollback_line_down_calls = 0;
     mock_console_chars_len = 0;
     mock_tty_chars_len = 0;
     mock_input_event_count = 0;
@@ -312,6 +332,121 @@ static void test_shift_page_keys_drive_scrollback(void) {
     assert(mock_console_chars_len == 0);
 }
 
+static void test_scancode_set1_decoding_tables(void) {
+    for (int scancode = 0; scancode < 128; scancode++) {
+        uint16_t keycode = scancode1_to_keycode[scancode];
+
+        if (keycode == 0 || keycode == KEY_RESERVED) {
+            continue;
+        }
+        reset_state();
+        kbd_numlock = 1;
+        send_scancode((uint8_t)scancode);
+        assert(mock_input_event_count == 2);
+        assert(mock_input_events[0].type == EV_KEY);
+        assert(mock_input_events[0].code == keycode);
+        assert(mock_input_events[0].value == 1);
+
+        send_scancode((uint8_t)(scancode | 0x80));
+        assert(mock_input_event_count == 4);
+        assert(mock_input_events[2].type == EV_KEY);
+        assert(mock_input_events[2].code == keycode);
+        assert(mock_input_events[2].value == 0);
+    }
+
+    for (int scancode = 0; scancode < 128; scancode++) {
+        uint16_t keycode = scancode1_e0_to_keycode[scancode];
+
+        if (keycode == 0 || keycode == KEY_RESERVED) {
+            continue;
+        }
+        reset_state();
+        kbd_numlock = 1;
+        send_scancode(0xE0);
+        send_scancode((uint8_t)scancode);
+        assert(mock_input_event_count == 2);
+        assert(mock_input_events[0].type == EV_KEY);
+        assert(mock_input_events[0].code == keycode);
+        assert(mock_input_events[0].value == 1);
+
+        send_scancode(0xE0);
+        send_scancode((uint8_t)(scancode | 0x80));
+        assert(mock_input_event_count == 4);
+        assert(mock_input_events[2].type == EV_KEY);
+        assert(mock_input_events[2].code == keycode);
+        assert(mock_input_events[2].value == 0);
+    }
+}
+
+static char expected_keycode_char(uint16_t keycode, int shift, int ctrl, int caps)
+{
+    char c;
+    int shifted = shift;
+    char base;
+
+    if (keycode >= 128) {
+        return 0;
+    }
+    if (ctrl && active_keymap->ctrl[keycode]) {
+        return active_keymap->ctrl[keycode];
+    }
+    base = active_keymap->base[keycode];
+    if (caps && base >= 'a' && base <= 'z') {
+        shifted = !shifted;
+    }
+    c = shifted ? active_keymap->shift[keycode] : active_keymap->base[keycode];
+    return c;
+}
+
+static void test_modifier_and_lock_combinations(void) {
+    for (int shift = 0; shift <= 1; shift++) {
+        for (int ctrl = 0; ctrl <= 1; ctrl++) {
+            for (int alt = 0; alt <= 1; alt++) {
+                for (int caps = 0; caps <= 1; caps++) {
+                    for (int num = 0; num <= 1; num++) {
+                        reset_state();
+                        kbd_shift = shift;
+                        kbd_ctrl = ctrl;
+                        kbd_alt = alt;
+                        kbd_capslock = caps;
+                        kbd_numlock = num;
+
+                        assert(keycode_to_char(KEY_A) ==
+                            expected_keycode_char(KEY_A, shift, ctrl, caps));
+                        assert(keycode_to_char(KEY_1) ==
+                            expected_keycode_char(KEY_1, shift, ctrl, caps));
+                    }
+                }
+            }
+        }
+    }
+
+    reset_state();
+    assert(kbd_numlock == 0);
+    assert(handle_lock_key(KEY_NUMLOCK, 1) == 1);
+    assert(kbd_numlock == 1);
+    assert((keyboard_get_led_state() & LED_NUML) != 0);
+    assert(handle_lock_key(KEY_NUMLOCK, 0) == 1);
+}
+
+static void test_full_us_qwerty_keymap(void) {
+    for (int keycode = 0; keycode < 128; keycode++) {
+        reset_state();
+        assert(keycode_to_char((uint16_t)keycode) ==
+            expected_keycode_char((uint16_t)keycode, 0, 0, 0));
+
+        reset_state();
+        kbd_shift = 1;
+        assert(keycode_to_char((uint16_t)keycode) ==
+            expected_keycode_char((uint16_t)keycode, 1, 0, 0));
+
+        reset_state();
+        kbd_ctrl = 1;
+        assert(keycode_to_char((uint16_t)keycode) ==
+            expected_keycode_char((uint16_t)keycode, 0, 1, 0));
+    }
+}
+
 int main(void) {
     test_buffer_fifo_and_drop_newest();
     test_keyboard_init_registers_input_device();
@@ -325,6 +460,9 @@ int main(void) {
     test_ctrl_c_d_z_generate_control_bytes();
     test_backspace_maps_to_del();
     test_shift_page_keys_drive_scrollback();
+    test_scancode_set1_decoding_tables();
+    test_modifier_and_lock_combinations();
+    test_full_us_qwerty_keymap();
     puts("host_test_keyboard: PASS");
     return 0;
 }

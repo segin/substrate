@@ -392,6 +392,48 @@ static void test_free_list_integrity(void) {
 }
 
 
+/* Test: Contiguous below success */
+static void test_contiguous_below_success(void) {
+    uintptr_t limit = 0x20000; /* 128KB limit */
+    vm_page_t *page = vm_phys_alloc_contiguous_below(2, limit);
+    TEST_ASSERT(page != NULL, "contig_below_success: returned NULL");
+    TEST_ASSERT(page->phys_addr < limit, "contig_below_success: above limit");
+
+    vm_phys_free_contiguous(page, 2);
+    TEST_PASS("contiguous_below_success");
+}
+
+/* Test: Contiguous below limit */
+static void test_contiguous_below_limit(void) {
+    uintptr_t limit = 0x1000; /* Extremely low limit */
+    /* drain order 0 temporarily */
+    vm_page_t *drained = NULL;
+    while (vm_phys_get_order_free_count(0) > 0) {
+        vm_page_t *page = vm_phys_alloc_page_below(limit);
+        if (!page) break;
+        page->next = drained;
+        drained = page;
+    }
+
+    vm_page_t *page = vm_phys_alloc_contiguous_below(1, limit);
+    TEST_ASSERT(page == NULL, "contig_below_limit: should return NULL");
+
+    while (drained) {
+        vm_page_t *next = drained->next;
+        vm_phys_free_page(drained);
+        drained = next;
+    }
+    TEST_PASS("contiguous_below_limit");
+}
+
+/* Test: Contiguous below zero count */
+static void test_contiguous_below_zero(void) {
+    uintptr_t limit = 0x100000;
+    vm_page_t *page = vm_phys_alloc_contiguous_below(0, limit);
+    TEST_ASSERT(page == NULL, "contig_below_zero: should return NULL");
+    TEST_PASS("contiguous_below_zero");
+}
+
 /* Test: vm_phys_early_init correctly initializes page array and states */
 static void test_vm_phys_early_init(void) {
     static vm_page_t test_pages[4];
@@ -408,6 +450,27 @@ static void test_vm_phys_early_init(void) {
     }
 
     TEST_PASS("vm_phys_early_init");
+}
+
+/* Test: vm_phys_alloc_page_below honors physical address limits */
+static void test_vm_phys_alloc_page_below(void) {
+    uintptr_t limit = 16 * 1024 * 1024; /* 16MB limit */
+    vm_page_t *page = vm_phys_alloc_page_below(limit);
+
+    TEST_ASSERT(page != NULL, "alloc_below: initial allocation failed");
+    if (page != NULL) {
+        TEST_ASSERT(page->phys_addr < limit, "alloc_below: returned page above limit");
+        vm_phys_free_page(page);
+    }
+
+    /* Edge case: very low limit where no pages exist or all are used */
+    vm_page_t *page_fail = vm_phys_alloc_page_below(0x1000); /* Only 4KB limit */
+    if (page_fail != NULL) {
+        TEST_ASSERT(page_fail->phys_addr < 0x1000, "alloc_below: returned page above tight limit");
+        vm_phys_free_page(page_fail);
+    }
+
+    TEST_PASS("vm_phys_alloc_page_below");
 }
 
 /* Test entry point */
@@ -433,7 +496,11 @@ void test_vm_phys(void) {
     test_mark_used_single_page_reservation();
     test_free_used_invariant();
     test_free_list_integrity();
+    test_contiguous_below_success();
+    test_contiguous_below_limit();
+    test_contiguous_below_zero();
     test_vm_phys_early_init();
+    test_vm_phys_alloc_page_below();
     
     char buf[64];
     sprintf(buf, "=== vm_phys tests: %d passed, %d failed ===\n", passed, failed);

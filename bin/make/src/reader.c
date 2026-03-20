@@ -138,8 +138,9 @@ void parse_line(char *line) {
         struct depblock *curr_dep = NULL;
         
         // Need to expand macros in deps?
-        char exp_deps[2048];
-        subst(deps, exp_deps);
+        char *exp_deps = malloc(OUTMAX);
+        if (!exp_deps) fatal("malloc failed in reader");
+        subst(deps, exp_deps, OUTMAX);
         
         char *d = strtok(exp_deps, " \t");
         while (d) {
@@ -156,6 +157,7 @@ void parse_line(char *line) {
             
             d = strtok(NULL, " \t");
         }
+        free(exp_deps);
         
         lb->depp = head_dep;
         

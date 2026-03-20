@@ -64,6 +64,7 @@ static int ascii_casecmp(const char *a, const char *b) {
     return (unsigned char)*a - (unsigned char)*b;
 }
 
+#ifdef NATIVE_BUILD
 static wchar_t *wide_lower_dup(const char *s) {
     size_t n;
     wchar_t *out;
@@ -90,6 +91,7 @@ static wchar_t *wide_lower_dup(const char *s) {
 
     return out;
 }
+#endif
 
 static int collate_name(const char *a, const char *b, int ignore_case) {
 #ifdef NATIVE_BUILD

@@ -153,6 +153,21 @@ struct termios {
 #define FIONREAD    0x541B
 #define TIOCINQ     FIONREAD
 #define TIOCNOTTY   0x5422
+#define TIOCSBRK    0x5427  /* Set break */
+#define TIOCCBRK    0x5428  /* Clear break */
+
+/* Modem line bits for TIOCMGET/TIOCMSET/TIOCMBIS/TIOCMBIC */
+#define TIOCM_LE    0x001   /* Line Enable (DSR) */
+#define TIOCM_DTR   0x002
+#define TIOCM_RTS   0x004
+#define TIOCM_ST    0x008   /* Secondary Transmit */
+#define TIOCM_SR    0x010   /* Secondary Receive */
+#define TIOCM_CTS   0x020
+#define TIOCM_CAR   0x040   /* DCD */
+#define TIOCM_CD    TIOCM_CAR
+#define TIOCM_RNG   0x080   /* Ring */
+#define TIOCM_RI    TIOCM_RNG
+#define TIOCM_DSR   0x100
 
 #ifndef _STRUCT_WINSIZE_DEFINED
 #define _STRUCT_WINSIZE_DEFINED
