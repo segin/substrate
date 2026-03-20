@@ -1,0 +1,53 @@
+.Dd March 12, 2026
+.Dt MOUSE 4
+.Os
+.Sh NAME
+.Nm mouse
+.Nd PS/2 mouse input driver
+.Sh SYNOPSIS
+.Cd "device mouse"
+.Sh DESCRIPTION
+The
+.Nm
+driver handles IRQ12 input from the PS/2 auxiliary device path.
+It consumes standard 3-byte PS/2 mouse packets from port
+.Li 0x60 ,
+maintains cumulative X/Y state, queues relative motion events, and forwards
+movement/button changes into the kernel input-event stream.
+.Pp
+The current implementation supports:
+.Bl -bullet
+.It
+standard 3-byte PS/2 packets
+.It
+packet realignment by discarding malformed first bytes until byte 0 bit 3 is set
+.It
+overflow clamping to
+.Li +/-255
+per axis when packet overflow bits are set
+.It
+button reporting for left, right, and middle buttons
+.El
+.Pp
+Each completed packet emits relative-axis events for
+.Dv REL_X
+and
+.Dv REL_Y ,
+button events for
+.Dv BTN_LEFT ,
+.Dv BTN_RIGHT ,
+and
+.Dv BTN_MIDDLE ,
+then an
+.Dv EV_SYN
+boundary marker.
+.Sh FILES
+.Bl -tag -width "/sys/drivers/input/mouse.c"
+.It Pa /sys/drivers/input/mouse.c
+Driver implementation.
+.It Pa /sys/drivers/input/mouse.h
+Driver interface.
+.El
+.Sh SEE ALSO
+.Xr ps2 4 ,
+.Xr keyboard 4

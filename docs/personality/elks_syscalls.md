@@ -43,7 +43,7 @@ Status values:
 | 18 | `stat` | `kern_stat` | Translate | Must emit ELKS-width `struct stat`. |
 | 19 | `lseek` | `sys_lseek` | Translate | ELKS offset/result semantics differ from native. |
 | 20 | `getpid` | personality wrapper | Translate | Upstream ELKS libc expects this slot to provide both PID and PPID information through its ABI. |
-| 21 | `mount` | `sys_mount` | Partial | ELKS mount ABI and structure conventions are not finished. |
+| 21 | `mount` | `sys_mount` | Partial | Integer ELKS filesystem types and ELKS mount flags are translated at the personality edge; native options/data semantics remain incomplete. |
 | 22 | `umount` | `sys_umount` | Partial | ELKS ABI edge not finalized. |
 | 23 | `setuid` | `sys_setuid` | Translate | ELKS credential-width translation required. |
 | 24 | `getuid` | personality wrapper | Translate | Upstream ELKS libc expects this slot to provide both UID and EUID information through its ABI. |

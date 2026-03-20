@@ -25,7 +25,8 @@
 #define PTE_PCD         0x10    // Cache-Disable
 #define PTE_A           0x20    // Accessed
 #define PTE_D           0x40    // Dirty
-#define PTE_PS          0x80    // Page Size (4MB)
+#define PTE_PAT         0x80    // PAT index bit for 4KB PTEs
+#define PTE_PS          0x80    // Page Size (4MB PDEs only)
 #define PTE_G           0x100   // Global
 
 // Abstract PMAP handle (opaque pointer to Page Directory)

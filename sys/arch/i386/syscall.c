@@ -168,6 +168,10 @@ void syscall_handler(registers_t *regs) {
                          * For write(fd, buf, len), print up to write length bytes.
                          * For generic strings, use bounded copyinstr.
                          */
+                        if (p->id == PERS_ELKS) {
+                            len += sprintf(buf + len, "off:0x%x", (unsigned int)args[i]);
+                            break;
+                        }
                         if (args[i] && args[i] > 0x1000) {
                             char quote[64];
                             size_t copied = 0, show = 0;
@@ -251,10 +255,29 @@ void syscall_handler(registers_t *regs) {
         return;
     }
     
+    if (!p->syscall_table || (uintptr_t)p->syscall_table < 0xC0000000U) {
+        if (syscall_trace_enabled) {
+            kprint("SYSCALL: Invalid syscall table\n");
+        }
+        regs->eax = -38; // ENOSYS
+        return;
+    }
+
     void *location = p->syscall_table[syscall_num];
     
     if (!location) {
         if (syscall_trace_enabled) kprint("SYSCALL: Not Implemented\n");
+        regs->eax = -38; // ENOSYS
+        return;
+    }
+
+    if ((uintptr_t)location < 0xC0000000U) {
+        if (syscall_trace_enabled) {
+            char buf[96];
+            sprintf(buf, "SYSCALL: Invalid handler %p for #%u\n",
+                    location, (unsigned int)syscall_num);
+            kprint(buf);
+        }
         regs->eax = -38; // ENOSYS
         return;
     }
@@ -294,6 +317,11 @@ void syscall_handler(registers_t *regs) {
     // Clear syscall tracking after signals have been handled
     if (current_thread) {
         current_thread->in_syscall = 0;
+        if (current_thread->needs_resched &&
+            !(current_thread->flags & THREAD_F_NO_PREEMPT)) {
+            current_thread->needs_resched = 0;
+            sched_yield();
+        }
     }
     
     if (regs->cs == 0x1B && regs->useresp >= 0xC0000000) {

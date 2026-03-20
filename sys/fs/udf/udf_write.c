@@ -11,7 +11,6 @@
 #include <vm/vm_kmem.h>
 
 /* External context from udf.c */
-extern struct udf_fs udf_ctx;
 
 static uint8_t *space_bitmap = NULL;
 static uint32_t space_bitmap_size = 0;

@@ -28,6 +28,12 @@ int mock_munmap(void *addr, size_t length) { (void)addr; (void)length; return 0;
 #include <sys/types.h>
 #include <sys/mman.h>
 
+// We want to mock __sync_lock_test_and_set to simulate contention
+int mock_sync_lock_test_and_set(int *ptr, int val);
+void mock_sync_lock_release(int *ptr);
+#define __sync_lock_test_and_set mock_sync_lock_test_and_set
+#define __sync_lock_release mock_sync_lock_release
+
 // Include the source to test
 #include "../../lib/pthreads/pthread.c"
 
@@ -51,10 +57,61 @@ bool test_pthread_mutex_init_null_attr() {
     return true;
 }
 
+// Variables to control the behavior of mock_sync_lock_test_and_set
+int spin_count = 0;
+int max_spins = 0;
+
+int mock_sync_lock_test_and_set(int *ptr, int val) {
+    if (spin_count < max_spins) {
+        spin_count++;
+        return 1; // Simulate that the lock is already held
+    }
+    // Simulate successful lock acquisition
+    int old = *ptr;
+    *ptr = val;
+    return old;
+}
+
+void mock_sync_lock_release(int *ptr) {
+    *ptr = 0;
+}
+
+/*
+ * Validates pthread_mutex_lock acquisition and contention behavior.
+ */
+bool test_pthread_mutex_lock_contention() {
+    local_pthread_mutex_t mutex;
+
+    // Initialize the mutex
+    int ret = pthread_mutex_init(&mutex, NULL);
+    assert(ret == 0);
+
+    // Test mutex lock - with contention
+    spin_count = 0;
+    max_spins = 5; // Should loop 5 times then succeed
+
+    ret = pthread_mutex_lock(&mutex);
+
+    // Assert success and correct spinning behavior
+    assert(ret == 0);
+    assert(mutex == 1);
+    assert(spin_count == 5); // Verify it spun the expected number of times
+
+    return true;
+}
+
 int main() {
     bool passed = true;
     printf("test_pthread_mutex_init_null_attr: ");
     if (test_pthread_mutex_init_null_attr()) {
+        printf("PASS\n");
+    } else {
+        printf("FAIL\n");
+        passed = false;
+    }
+
+    printf("test_pthread_mutex_lock_contention: ");
+    if (test_pthread_mutex_lock_contention()) {
         printf("PASS\n");
     } else {
         printf("FAIL\n");

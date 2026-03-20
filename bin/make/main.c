@@ -22,7 +22,12 @@ struct nameblock *makename(char *name) {
     return nb;
 }
 void eqsign(char *s) { (void)s; }
-void subst(char *a, char *b) { strcpy(b, a); }
+void subst(char *a, char *b, size_t max_len) {
+    if (max_len > 0) {
+        strncpy(b, a, max_len - 1);
+        b[max_len - 1] = '\0';
+    }
+}
 int unequal(char *a, char *b) { return strcmp(a, b); }
 char *copys(char *s) { return strdup(s); }
 

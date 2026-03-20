@@ -400,16 +400,32 @@ static int file_exists(const char *path) {
 static int parse_zero_like(data_ctx_t *ctx, const as_stmt_t *st) {
     as_data_op_t op;
     unsigned long long count;
+    unsigned long long value = 0;
+    int use_fill = 0;
 
     if (st->u.directive.arg_count < 1 || parse_u64(st->u.directive.args[0], &count) != 0) {
         return -1;
+    }
+    if ((strcmp(st->u.directive.name, ".space") == 0 || strcmp(st->u.directive.name, ".skip") == 0) &&
+        st->u.directive.arg_count >= 2) {
+        if (parse_u64(st->u.directive.args[1], &value) != 0) {
+            return -1;
+        }
+        use_fill = 1;
     }
 
     if (init_op_from_stmt(&op, st) != 0) {
         return -1;
     }
-    op.kind = AS_DATA_ZERO;
-    op.u.zero.count = count;
+    if (use_fill) {
+        op.kind = AS_DATA_FILL;
+        op.u.fill.repeat = count;
+        op.u.fill.size = 1;
+        op.u.fill.value = value;
+    } else {
+        op.kind = AS_DATA_ZERO;
+        op.u.zero.count = count;
+    }
 
     if (push_op(ctx->out, &op) != 0) {
         free_op(&op);

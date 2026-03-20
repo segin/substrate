@@ -1,0 +1,38 @@
+.\" Process this file with
+.\" groff -man -Tascii lpt.4
+.\"
+.TH LPT 4 "March 2026" "Substrate Kernel" "Device Drivers Manual"
+.SH NAME
+lpt \- ISA parallel ports
+.SH SYNOPSIS
+.B /dev/comm/parallel0
+.br
+.B /dev/comm/parallel1
+.br
+.B /dev/comm/parallel2
+.SH DESCRIPTION
+The
+.B lpt
+driver exposes detected ISA-compatible parallel ports under
+.BR /dev/comm/parallel0
+through
+.BR /dev/comm/parallel2 .
+These map to LPT1 through LPT3 respectively.
+.PP
+Substrate does not publish parallel device nodes for ports that do not appear
+to exist. The driver relies on ISA legacy discovery before registering
+.B /dev/comm/parallel*
+nodes.
+.SH FILES
+.TP
+.B /dev/comm/parallel0
+LPT1, if present.
+.TP
+.B /dev/comm/parallel1
+LPT2, if present.
+.TP
+.B /dev/comm/parallel2
+LPT3, if present.
+.SH SEE ALSO
+.BR intro (4),
+.BR isa (9)

@@ -11,7 +11,6 @@ extern struct personality personality_svr4;
 
 extern struct personality personality_sunos;
 extern struct personality personality_elks;
-extern void elks_personality_init(void);
 
 static struct personality *personalities[PERS_MAX] = {
     [PERS_NATIVE]  = &personality_native,
