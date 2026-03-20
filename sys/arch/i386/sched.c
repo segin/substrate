@@ -1,4 +1,5 @@
 #include <kern/sched.h>
+#include <kern/time.h>
 #include <sys/smp.h>
 #include <pm/pm.h>
 #include <sys/acct.h>
@@ -14,7 +15,6 @@ extern void set_kernel_stack(uint32_t stack);
 extern thread_t *current_thread; // Now defined in generic sched.c
 extern process_t processes[]; // from pm
 extern fs_node_t *fs_root;
-extern uint32_t get_time(void);
 
 // Generic Allocation Helper
 extern thread_t *sched_alloc_thread(process_t *proc);

@@ -5,8 +5,13 @@ The framebuffer driver provides a generic interface for interacting with graphic
 
 ## Implementation
 - **Data Source:** Parses the Multiboot information structure for framebuffer details (address, width, height, pitch, BPP).
+- **EFI GOP Integration:** EFI boots translate GOP framebuffer state into Multiboot framebuffer fields. The generic framebuffer core preserves firmware-provided layouts (RGBX/BGRX). The EFI boot stub enumerates modes and selects the highest 32-bit linear mode ≤ 1920x1200.
 - **Format:** Primarily supports 32-bit RGB/RGBA modes.
-- **Memory Mapping:** Uses the physical address provided by Multiboot. (Note: In a full VMM, this memory would be mapped into the kernel address space).
+- **Resolution Selection:** The `vga=WxH@BPP` command line parameter selects a resolution across registered drivers. Legacy VGA graphics modes are also supported via `vga=`.
+- **BGA Support:** The BGA driver supports per-mode selection via `vga=`.
+- **Multi-Framebuffer Registry:** Supports up to 8 simultaneous devices (`/dev/fb0` through `/dev/fb7`). Additional monitors register via `fb_register_device()`.
+- **GRUB Inheritance:** Framebuffers initialized by GRUB are inherited by the multiboot driver.
+- **Memory Mapping:** Uses the physical address provided by Multiboot.
 
 ## API
 ### `void fb_init(multiboot_info_t *mbi)`

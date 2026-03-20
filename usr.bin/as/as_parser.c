@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 typedef struct {
     int digit;
@@ -27,6 +28,15 @@ typedef struct {
     size_t errbuf_sz;
     local_label_vec_t local_defs;
 } parse_ctx_t;
+
+typedef struct {
+    int has_opmask;
+    unsigned opmask;
+    int zeroing;
+    int broadcast;
+    int sae;
+    int rounding_mode;
+} x86_operand_decorators_t;
 
 typedef enum {
     EXPR_TOK_EOF = 0,
@@ -94,6 +104,8 @@ static int streq_ci(const char *a, const char *b) {
     }
     return a[i] == '\0' && b[i] == '\0';
 }
+
+static char *join_tokens(const as_token_t *tokv, size_t n, int for_expr);
 
 static int push_local_def(local_label_vec_t *v, int digit, const char *file, unsigned line) {
     local_label_def_t *next;
@@ -255,14 +267,15 @@ static int push_stmt(as_parse_result_t *r, const as_stmt_t *st) {
 static int push_label(as_stmt_t *st, const char *name, const char *file, unsigned line) {
     as_label_def_t *next;
 
-    if (st->label_count == 0) {
-        st->labels = NULL;
+    if (st->label_count == st->label_cap) {
+        size_t ncap = st->label_cap == 0 ? 4 : st->label_cap * 2;
+        next = (as_label_def_t *)realloc(st->labels, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        st->labels = next;
+        st->label_cap = ncap;
     }
-    next = (as_label_def_t *)realloc(st->labels, (st->label_count + 1) * sizeof(*next));
-    if (next == NULL) {
-        return -1;
-    }
-    st->labels = next;
     st->labels[st->label_count].name = xstrdup(name);
     st->labels[st->label_count].file = xstrdup(file);
     st->labels[st->label_count].line = line;
@@ -361,6 +374,144 @@ static int is_x86_segment_text(const char *s) {
     }
     return streq_ci(s, "cs") || streq_ci(s, "ds") || streq_ci(s, "es") || streq_ci(s, "fs") || streq_ci(s, "gs") ||
            streq_ci(s, "ss");
+}
+
+static int parse_k_mask_text(const char *s, unsigned *out) {
+    const char *p;
+    unsigned value = 0;
+
+    if (s == NULL || out == NULL) {
+        return -1;
+    }
+    p = s;
+    if (*p == '%') {
+        p++;
+    }
+    if ((*p != 'k' && *p != 'K') || !isdigit((unsigned char)p[1])) {
+        return -1;
+    }
+    p++;
+    while (isdigit((unsigned char)*p)) {
+        value = value * 10u + (unsigned)(*p - '0');
+        p++;
+    }
+    if (*p != '\0' || value > 7u) {
+        return -1;
+    }
+    *out = value;
+    return 0;
+}
+
+static int is_broadcast_text(const char *s) {
+    const char *p;
+
+    if (s == NULL) {
+        return 0;
+    }
+    if (strncmp(s, "1to", 3) != 0 && strncmp(s, "1TO", 3) != 0) {
+        return 0;
+    }
+    p = s + 3;
+    if (!isdigit((unsigned char)*p)) {
+        return 0;
+    }
+    while (isdigit((unsigned char)*p)) {
+        p++;
+    }
+    return *p == '\0';
+}
+
+static int parse_rounding_text(const char *s, int *mode_out, int *sae_out) {
+    if (s == NULL || mode_out == NULL || sae_out == NULL) {
+        return -1;
+    }
+    if (streq_ci(s, "rn-sae")) {
+        *mode_out = 0;
+        *sae_out = 1;
+        return 0;
+    }
+    if (streq_ci(s, "rd-sae")) {
+        *mode_out = 1;
+        *sae_out = 1;
+        return 0;
+    }
+    if (streq_ci(s, "ru-sae")) {
+        *mode_out = 2;
+        *sae_out = 1;
+        return 0;
+    }
+    if (streq_ci(s, "rz-sae")) {
+        *mode_out = 3;
+        *sae_out = 1;
+        return 0;
+    }
+    return -1;
+}
+
+static int parse_x86_operand_decorators(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
+                                        x86_operand_decorators_t *decor, size_t *core_n) {
+    size_t end;
+
+    if (decor == NULL || core_n == NULL) {
+        return -1;
+    }
+    memset(decor, 0, sizeof(*decor));
+    decor->rounding_mode = -1;
+    end = n;
+    while (end >= 3 &&
+           tokv[end - 1].kind == AS_TOK_PUNCT && strcmp(tokv[end - 1].text, "}") == 0) {
+        size_t open = end - 1;
+        size_t depth = 1;
+        char *inner;
+        unsigned kop;
+        int rmode;
+        int sae;
+
+        while (open > 0) {
+            open--;
+            if (tokv[open].kind != AS_TOK_PUNCT) {
+                continue;
+            }
+            if (strcmp(tokv[open].text, "}") == 0) {
+                depth++;
+            } else if (strcmp(tokv[open].text, "{") == 0) {
+                depth--;
+                if (depth == 0) {
+                    break;
+                }
+            }
+        }
+        if (!(tokv[open].kind == AS_TOK_PUNCT && strcmp(tokv[open].text, "{") == 0)) {
+            break;
+        }
+        inner = join_tokens(tokv + open + 1, end - open - 2, 1);
+        if (inner == NULL) {
+            return -1;
+        }
+        if (parse_k_mask_text(inner, &kop) == 0) {
+            decor->has_opmask = 1;
+            decor->opmask = kop;
+        } else if (streq_ci(inner, "z")) {
+            decor->zeroing = 1;
+        } else if (is_broadcast_text(inner)) {
+            decor->broadcast = 1;
+        } else if (streq_ci(inner, "sae")) {
+            decor->sae = 1;
+        } else if (parse_rounding_text(inner, &rmode, &sae) == 0) {
+            decor->rounding_mode = rmode;
+            decor->sae = sae;
+        } else {
+            set_err(ctx, "%s:%u: unsupported x86 decorator '%s'",
+                    tokv[open].file != NULL ? tokv[open].file : "<input>",
+                    tokv[open].line, inner);
+            free(inner);
+            return -1;
+        }
+        free(inner);
+        end = open;
+    }
+    *core_n = end;
+    return 0;
 }
 
 static int intel_mem_size_bits(const char *s) {
@@ -915,11 +1066,15 @@ static int expr_is_symbolic_leaf(const as_expr_t *e) {
 static int add_operand(as_instruction_t *in, const as_operand_t *op) {
     as_operand_t *next;
 
-    next = (as_operand_t *)realloc(in->operands, (in->operand_count + 1) * sizeof(*next));
-    if (next == NULL) {
-        return -1;
+    if (in->operand_count == in->operand_cap) {
+        size_t ncap = in->operand_cap == 0 ? 4 : in->operand_cap * 2;
+        next = (as_operand_t *)realloc(in->operands, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        in->operands = next;
+        in->operand_cap = ncap;
     }
-    in->operands = next;
     in->operands[in->operand_count] = *op;
     in->operand_count++;
     return 0;
@@ -1132,6 +1287,7 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
     as_mem_operand_t mem;
     as_token_t *disp_toks = NULL;
     size_t disp_count = 0;
+    size_t disp_cap = 0;
     size_t i;
 
     memset(&mem, 0, sizeof(mem));
@@ -1262,7 +1418,19 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
             continue;
         }
 
-        disp_toks = (as_token_t *)realloc(disp_toks, (disp_count + 1) * sizeof(*disp_toks));
+        if (disp_count == disp_cap) {
+            size_t ncap = disp_cap == 0 ? 8 : disp_cap * 2;
+            disp_toks = (as_token_t *)realloc(disp_toks, ncap * sizeof(*disp_toks));
+            if (disp_toks == NULL) {
+                free(mem.base_reg);
+                free(mem.index_reg);
+                free(mem.segment_reg);
+                set_err(ctx, "%s:%u: out of memory", tokv[0].file, tokv[0].line);
+                return -1;
+            }
+            disp_cap = ncap;
+        }
+
         if (disp_toks == NULL) {
             free(mem.base_reg);
             free(mem.index_reg);
@@ -1863,11 +2031,15 @@ static int parse_operand_slice(parse_ctx_t *ctx, const as_token_t *tokv, size_t 
 static int add_directive_arg(as_directive_t *d, const char *arg) {
     char **next;
 
-    next = (char **)realloc(d->args, (d->arg_count + 1) * sizeof(*next));
-    if (next == NULL) {
-        return -1;
+    if (d->arg_count == d->arg_cap) {
+        size_t ncap = d->arg_cap == 0 ? 4 : d->arg_cap * 2;
+        next = (char **)realloc(d->args, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        d->args = next;
+        d->arg_cap = ncap;
     }
-    d->args = next;
     d->args[d->arg_count] = xstrdup(arg);
     if (d->args[d->arg_count] == NULL) {
         return -1;
@@ -2161,6 +2333,7 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
 
     memset(&in, 0, sizeof(in));
     in.syntax_intel = (unsigned)(ctx != NULL && ctx->syntax_intel ? 1 : 0);
+    in.rounding_mode = -1;
 
     i = 0;
     while (i < n) {
@@ -2233,10 +2406,22 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
         if (at_end || at_sep) {
             if (i > start) {
                 as_operand_t op;
+                x86_operand_decorators_t decor;
+                size_t operand_n = i - start;
                 memset(&op, 0, sizeof(op));
+                memset(&decor, 0, sizeof(decor));
+                decor.rounding_mode = -1;
+
+                if (ctx->cfg != NULL && ctx->cfg->arch == AS_PARSER_ARCH_X86 &&
+                    parse_x86_operand_decorators(ctx, tokv + start, operand_n, &decor, &operand_n) != 0) {
+                    free(in.mnemonic);
+                    free(in.arm_condition);
+                    free(in.segment_override);
+                    return -1;
+                }
 
                 if (ctx->cfg != NULL && ctx->cfg->arch == AS_PARSER_ARCH_ARM && in.operand_count > 0 &&
-                    is_shift_keyword(tokv[start].text) && parse_shift_suffix(ctx, &in.operands[in.operand_count - 1], tokv + start, i - start) == 0) {
+                    is_shift_keyword(tokv[start].text) && parse_shift_suffix(ctx, &in.operands[in.operand_count - 1], tokv + start, operand_n) == 0) {
                     /* Shift suffix consumed by previous operand. */
                 } else if (ctx->cfg != NULL && ctx->cfg->arch == AS_PARSER_ARCH_X86 &&
                            in.operand_count == 0 && is_x86_far_imm_mnemonic(in.mnemonic)) {
@@ -2245,7 +2430,7 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
 
                     memset(&off_op, 0, sizeof(off_op));
                     memset(&seg_op, 0, sizeof(seg_op));
-                    if (parse_x86_far_immediate_pair(ctx, tokv + start, i - start, &off_op, &seg_op) == 0) {
+                    if (parse_x86_far_immediate_pair(ctx, tokv + start, operand_n, &off_op, &seg_op) == 0) {
                         if (rewrite_x86_far_imm_mnemonic(&in.mnemonic) != 0 ||
                             add_operand(&in, &off_op) != 0 ||
                             add_operand(&in, &seg_op) != 0) {
@@ -2257,9 +2442,9 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                             return -1;
                         }
                     } else {
-                        if (parse_operand_slice(ctx, tokv + start, i - start, &op) != 0) {
+                        if (parse_operand_slice(ctx, tokv + start, operand_n, &op) != 0) {
                             if (ctx->errbuf == NULL || ctx->errbuf[0] == '\0') {
-                                char *bad = join_tokens(tokv + start, i - start, 0);
+                                char *bad = join_tokens(tokv + start, operand_n, 0);
                                 set_err(ctx, "%s:%u: invalid operand '%s'",
                                         tokv[start].file != NULL ? tokv[start].file : "<input>",
                                         tokv[start].line,
@@ -2271,6 +2456,42 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                             free(in.segment_override);
                             return -1;
                         }
+                        if ((decor.has_opmask || decor.zeroing || decor.sae || decor.rounding_mode >= 0) &&
+                            op.kind != AS_OPERAND_REGISTER) {
+                            set_err(ctx, "%s:%u: x86 mask/rounding decorators require register operand",
+                                    tokv[start].file != NULL ? tokv[start].file : "<input>",
+                                    tokv[start].line);
+                            free_operand(&op);
+                            free(in.mnemonic);
+                            free(in.arm_condition);
+                            free(in.segment_override);
+                            return -1;
+                        }
+                        if (decor.broadcast && op.kind != AS_OPERAND_MEMORY) {
+                            set_err(ctx, "%s:%u: broadcast decorator requires memory operand",
+                                    tokv[start].file != NULL ? tokv[start].file : "<input>",
+                                    tokv[start].line);
+                            free_operand(&op);
+                            free(in.mnemonic);
+                            free(in.arm_condition);
+                            free(in.segment_override);
+                            return -1;
+                        }
+                        if (decor.has_opmask) {
+                            in.opmask = decor.opmask;
+                        }
+                        if (decor.zeroing) {
+                            in.zeroing = 1;
+                        }
+                        if (decor.broadcast) {
+                            in.broadcast = 1;
+                        }
+                        if (decor.sae) {
+                            in.sae = 1;
+                        }
+                        if (decor.rounding_mode >= 0) {
+                            in.rounding_mode = decor.rounding_mode;
+                        }
                         if (add_operand(&in, &op) != 0) {
                             free_operand(&op);
                             free(in.mnemonic);
@@ -2280,9 +2501,9 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                         }
                     }
                 } else {
-                    if (parse_operand_slice(ctx, tokv + start, i - start, &op) != 0) {
+                    if (parse_operand_slice(ctx, tokv + start, operand_n, &op) != 0) {
                         if (ctx->errbuf == NULL || ctx->errbuf[0] == '\0') {
-                            char *bad = join_tokens(tokv + start, i - start, 0);
+                            char *bad = join_tokens(tokv + start, operand_n, 0);
                             set_err(ctx, "%s:%u: invalid operand '%s'",
                                     tokv[start].file != NULL ? tokv[start].file : "<input>",
                                     tokv[start].line,
@@ -2293,6 +2514,42 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                         free(in.arm_condition);
                         free(in.segment_override);
                         return -1;
+                    }
+                    if ((decor.has_opmask || decor.zeroing || decor.sae || decor.rounding_mode >= 0) &&
+                        op.kind != AS_OPERAND_REGISTER) {
+                        set_err(ctx, "%s:%u: x86 mask/rounding decorators require register operand",
+                                tokv[start].file != NULL ? tokv[start].file : "<input>",
+                                tokv[start].line);
+                        free_operand(&op);
+                        free(in.mnemonic);
+                        free(in.arm_condition);
+                        free(in.segment_override);
+                        return -1;
+                    }
+                    if (decor.broadcast && op.kind != AS_OPERAND_MEMORY) {
+                        set_err(ctx, "%s:%u: broadcast decorator requires memory operand",
+                                tokv[start].file != NULL ? tokv[start].file : "<input>",
+                                tokv[start].line);
+                        free_operand(&op);
+                        free(in.mnemonic);
+                        free(in.arm_condition);
+                        free(in.segment_override);
+                        return -1;
+                    }
+                    if (decor.has_opmask) {
+                        in.opmask = decor.opmask;
+                    }
+                    if (decor.zeroing) {
+                        in.zeroing = 1;
+                    }
+                    if (decor.broadcast) {
+                        in.broadcast = 1;
+                    }
+                    if (decor.sae) {
+                        in.sae = 1;
+                    }
+                    if (decor.rounding_mode >= 0) {
+                        in.rounding_mode = decor.rounding_mode;
                     }
                     if (add_operand(&in, &op) != 0) {
                         free_operand(&op);

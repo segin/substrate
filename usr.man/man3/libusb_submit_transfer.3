@@ -1,0 +1,67 @@
+.TH LIBUSB_SUBMIT_TRANSFER 3 "March 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+libusb_alloc_transfer, libusb_free_transfer, libusb_submit_transfer, libusb_cancel_transfer \- manage asynchronous libusb transfers
+.SH LIBRARY
+.B libusb
+.SH SYNOPSIS
+.B #include <libusb.h>
+.PP
+.BI "struct libusb_transfer *libusb_alloc_transfer(int " iso_packets ");"
+.PP
+.BI "void libusb_free_transfer(struct libusb_transfer *" transfer ");"
+.PP
+.BI "int libusb_submit_transfer(struct libusb_transfer *" transfer ");"
+.PP
+.BI "int libusb_cancel_transfer(struct libusb_transfer *" transfer ");"
+.SH DESCRIPTION
+.BR libusb_alloc_transfer ()
+allocates a transfer object with optional space for isochronous packet
+descriptors.
+.BR libusb_submit_transfer ()
+translates the public transfer description into a usbdevfs URB and places it on
+the backend queue.
+.BR libusb_cancel_transfer ()
+requests cancellation of an in-flight transfer.
+.PP
+Transfer completion is delivered when the application runs one of the libusb
+event-handling functions.
+Callbacks registered in the transfer are invoked from
+that event loop.
+.SH RETURN VALUE
+.BR libusb_alloc_transfer ()
+returns a newly allocated transfer pointer or NULL on allocation failure.
+.PP
+.BR libusb_submit_transfer ()
+and
+.BR libusb_cancel_transfer ()
+return 0 on success or a negative
+.B LIBUSB_ERROR_*
+code on failure.
+.SH ERRORS
+.TP
+.B LIBUSB_ERROR_INVALID_PARAM
+The transfer object or one of its required fields was invalid.
+.TP
+.B LIBUSB_ERROR_NO_MEM
+The backend URB or internal bookkeeping state could not be allocated.
+.TP
+.B LIBUSB_ERROR_BUSY
+The transfer was already submitted or internal tracking is saturated.
+.TP
+.B LIBUSB_ERROR_IO
+The backend URB submit or cancel operation failed.
+.SH EXAMPLE
+.nf
+struct libusb_transfer *xfer;
+
+xfer = libusb_alloc_transfer(0);
+if (xfer == NULL)
+    return 1;
+
+libusb_fill_bulk_transfer(xfer, handle, 0x81, buf, sizeof(buf), cb, NULL, 1000);
+libusb_submit_transfer(xfer);
+.fi
+.SH SEE ALSO
+.BR libusb_handle_events (3),
+.BR libusb_bulk_transfer (3),
+.BR libusb_hotplug_register_callback (3)

@@ -59,6 +59,12 @@ void *pmm_watermark_alloc(size_t bytes);  // Returns kernel virt addr
 ## Implementation Details
 - **Page Metadata:** `vm_page_t` structure tracks physical address, flags, order, and free list links.
 - **Transition:** boot starts on the watermark allocator, then `vm_phys_early_init()` and `vm_phys_add_range()` establish the machine-independent buddy allocator and page database.
+- **i386 Bootstrap:**
+  - Physical-memory bootstrap is two-stage.
+  - Early PMM metadata allocation is constrained to the first 8MB of RAM.
+  - After `pmap_bootstrap()` installs the larger kernel direct map, PMM promotes itself into a full page database sized from the detected RAM map when that metadata fits inside the direct-mapped window.
+  - Current i386 PMM accounting is capped at 3GB physical RAM.
+  - Pages above the current direct-mapped physical ceiling are detected and accounted, but are not yet exposed to generic kernel allocators that rely on `phys + 0xC0000000`.
 - **Global Lock:** Spinlock protects free lists for SMP safety.
 - **Low Memory Safeguards:** Reserves pages below 1MB for BIOS/legacy.
 - **Legacy BIOS Policy:** when only aggregate BIOS totals are available, the kernel reserves the first 1MB conservatively and treats reported extended memory as one usable run above 1MB.
