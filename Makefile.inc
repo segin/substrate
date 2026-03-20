@@ -5,10 +5,10 @@ ARCH ?= i386
 
 # Toolchain definitions
 CC ?= gcc
-CXX ?= g++
 LD ?= ld
 AR ?= ar
 AS ?= as
+HOSTCC ?= cc
 
 # Warning policy
 WARNFLAGS ?= -Wall -Wextra
@@ -31,11 +31,9 @@ USR_INCLUDE = $(TOP)/include
 SYS_INCLUDE = $(TOP)/sys/include
 GCC_INCLUDE = $(shell $(CC) -m32 -print-file-name=include 2>/dev/null)
 CFLAGS += $(COMMON_FLAGS) -std=c2x -nostdinc -I$(SYS_INCLUDE) -I$(USR_INCLUDE) -I$(TOP)/sys
-CXXFLAGS += $(COMMON_FLAGS) -std=c++2b -nostdinc -I$(SYS_INCLUDE) -I$(USR_INCLUDE) -I$(TOP)/sys
 ifneq ($(strip $(GCC_INCLUDE)),)
 ifneq ($(wildcard $(GCC_INCLUDE)),)
 CFLAGS += -I$(GCC_INCLUDE)
-CXXFLAGS += -I$(GCC_INCLUDE)
 endif
 endif
 
@@ -54,20 +52,19 @@ KERNEL_CFLAGS = $(FREESTANDING_CFLAGS) $(KERNEL_I386_BASELINE_FLAGS) -I$(KERNEL_
 # These will eventually link against our own libc
 ifdef NATIVE_BUILD
     # Host build configuration
-    HOSTCC ?= cc
     HOSTCFLAGS ?= -O2 $(WARNFLAGS)
     CC := $(HOSTCC)
     CFLAGS := $(HOSTCFLAGS)
-    # Start with empty/standard flags for host, but allow overrides
+    # Start with empty/standard flags for host, but allow overrides.
     USER_CFLAGS := $(CFLAGS) $(USER_CFLAGS)
     USER_LDFLAGS := $(USER_LDFLAGS)
+    LIBGCC :=
 else
     # Target build configuration (Substrate i386)
     USER_CFLAGS := $(CFLAGS) -I$(TOP)/sys $(USER_CFLAGS)
     USER_LDFLAGS := -m32 -nostdlib -fno-pie -no-pie $(USER_LDFLAGS)
+    LIBGCC = $(shell $(CC) -m32 -print-libgcc-file-name)
 endif
-
-LIBGCC = $(shell $(CC) -m32 -print-libgcc-file-name)
 
 # Macro to brand a binary as Substrate native (OSABI=64)
 # Usage: $(call BRAND_SUBSTRATE,binary_name)

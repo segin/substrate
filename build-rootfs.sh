@@ -98,9 +98,40 @@ create_image() {
     rm -f "$IMAGE"
     truncate -s "${IMAGE_SIZE_MIB}M" "$IMAGE"
 
-    # Create ext2 filesystem with 1024-byte blocks and 128-byte inodes
-    # (required by ext2-boot bootloader)
-    mkfs.ext2 -F -b 1024 -I 128 -O ^resize_inode -d "$DIST" "$IMAGE"
+    # 1. Create empty ext2 filesystem (no -d population yet)
+    mkfs.ext2 -F -b 1024 -I 128 -O ^resize_inode "$IMAGE"
+
+    # 2. Install bootloader into pristine filesystem (gets group 0 blocks)
+    if [ "$DO_BOOT" = true ]; then
+        install_bootloader
+    fi
+
+    # 3. Populate filesystem from dist/ via debugfs
+    echo "Populating image from $DIST..."
+    local cmdfile
+    cmdfile=$(mktemp)
+
+    # Create directories first (sorted so parents come before children)
+    (cd "$DIST" && find . -mindepth 1 -type d | sort) | while IFS= read -r d; do
+        rel="${d#./}"
+        echo "mkdir $rel"
+    done >> "$cmdfile"
+
+    # Write regular files
+    (cd "$DIST" && find . -mindepth 1 -type f) | while IFS= read -r f; do
+        rel="${f#./}"
+        echo "write $DIST/$rel $rel"
+    done >> "$cmdfile"
+
+    # Create symlinks
+    (cd "$DIST" && find . -mindepth 1 -type l) | while IFS= read -r l; do
+        rel="${l#./}"
+        target=$(readlink "$DIST/$rel")
+        echo "symlink $rel $target"
+    done >> "$cmdfile"
+
+    debugfs -w -f "$cmdfile" "$IMAGE" > /dev/null 2>&1
+    rm -f "$cmdfile"
 
     echo "Image created: $IMAGE"
 }
@@ -152,15 +183,16 @@ done
 
 if [ "$DO_DIST" = true ]; then
     clean_dist
+    # Build bootloader first so it's ready for image creation
+    if [ "$DO_BOOT" = true ]; then
+        build_bootloader
+    fi
     build_components
     install_to_dist
 fi
 
 if [ "$DO_IMAGE" = true ]; then
     create_image
-    if [ "$DO_BOOT" = true ]; then
-        install_bootloader
-    fi
 fi
 
 echo ""

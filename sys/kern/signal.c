@@ -799,6 +799,7 @@ void signal_handle_pending(registers_t *regs) {
                  return;
              }
 
+             current_process->p_xsig = (uint8_t)sig;
              signal_stop_process_threads(current_process, "Signal");
              
              // Notify parent if not SA_NOCLDSTOP

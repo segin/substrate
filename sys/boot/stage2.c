@@ -645,6 +645,7 @@ jump_to_kernel(uint32_t entry)
 /* ==== Main ==== */
 
 #define DEFAULT_KERNEL "vmunix"
+#define DEFAULT_CMDLINE "vmunix serial_debug root=/dev/storage/ide0"
 #define BOOT_TIMEOUT   5            /* seconds to wait for input */
 
 __attribute__((section(".text.entry")))
@@ -740,7 +741,7 @@ do_boot:
 		if (*p == '\0') {
 			kernel_name = DEFAULT_KERNEL;
 			/* Set default command line */
-			const char *def = DEFAULT_KERNEL;
+			const char *def = DEFAULT_CMDLINE;
 			int i = 0;
 			while (def[i]) {
 				cmdline_buf[i] = def[i];

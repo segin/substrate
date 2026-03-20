@@ -78,50 +78,69 @@ def main():
         # ---- Read block group descriptor table ----
         # For 1024-byte blocks, the BGD table is at block 2 (byte 2048)
         bgdt_offset = 2 * block_size
-        img.seek(bgdt_offset)
-        bgd_raw = bytearray(img.read(32))
+        num_groups = (s_blocks_count + s_blocks_per_group - 1) // s_blocks_per_group
 
-        bg_block_bitmap  = struct.unpack_from('<I', bgd_raw, 0)[0]
-        bg_inode_bitmap  = struct.unpack_from('<I', bgd_raw, 4)[0]
-        bg_inode_table   = struct.unpack_from('<I', bgd_raw, 8)[0]
-        bg_free_blocks   = struct.unpack_from('<H', bgd_raw, 12)[0]
-        bg_free_inodes   = struct.unpack_from('<H', bgd_raw, 14)[0]
+        # Read BGD for group 0 (inode table location)
+        img.seek(bgdt_offset)
+        bgd0_raw = bytearray(img.read(32))
+
+        bg_inode_table   = struct.unpack_from('<I', bgd0_raw, 8)[0]
 
         # ---- Allocate data blocks for stage2 ----
         blocks_needed = (len(stage2) + block_size - 1) // block_size
         if blocks_needed > 12:
             die(f"stage2 needs {blocks_needed} blocks (max 12 direct)")
 
-        # Read block bitmap
-        img.seek(bg_block_bitmap * block_size)
-        block_bitmap = bytearray(img.read(block_size))
-
-        # In ext2, block bitmap bit N maps to block (N + s_first_data_block)
-        # for block group 0.  For 1024-byte blocks, s_first_data_block = 1.
-        first = s_first_data_block
+        # Search all block groups for free blocks
         free_blocks = []
-        for bit in range(s_blocks_per_group):
-            blk = bit + first
-            if blk >= s_blocks_count:
+        alloc_map = {}  # group_idx -> list of (bit, blk) allocated in that group
+
+        for g in range(num_groups):
+            if len(free_blocks) >= blocks_needed:
                 break
-            byte_idx = bit // 8
-            bit_idx  = bit % 8
-            if not (block_bitmap[byte_idx] & (1 << bit_idx)):
-                free_blocks.append(blk)
-                if len(free_blocks) >= blocks_needed:
+
+            img.seek(bgdt_offset + g * 32)
+            bgd_raw = bytearray(img.read(32))
+            bg_block_bitmap = struct.unpack_from('<I', bgd_raw, 0)[0]
+            bg_free = struct.unpack_from('<H', bgd_raw, 12)[0]
+
+            if bg_free == 0:
+                continue
+
+            # Read this group's block bitmap
+            img.seek(bg_block_bitmap * block_size)
+            bitmap = bytearray(img.read(block_size))
+
+            group_base = g * s_blocks_per_group + s_first_data_block
+            group_allocs = []
+
+            for bit in range(s_blocks_per_group):
+                blk = group_base + bit
+                if blk >= s_blocks_count:
                     break
+                byte_idx = bit // 8
+                bit_idx  = bit % 8
+                if not (bitmap[byte_idx] & (1 << bit_idx)):
+                    free_blocks.append(blk)
+                    group_allocs.append((bit, blk))
+                    # Mark in bitmap
+                    bitmap[byte_idx] |= (1 << bit_idx)
+                    if len(free_blocks) >= blocks_needed:
+                        break
+
+            if group_allocs:
+                # Write updated bitmap
+                img.seek(bg_block_bitmap * block_size)
+                img.write(bytes(bitmap))
+
+                # Update BGD free block count
+                bg_free -= len(group_allocs)
+                struct.pack_into('<H', bgd_raw, 12, bg_free)
+                img.seek(bgdt_offset + g * 32)
+                img.write(bytes(bgd_raw))
 
         if len(free_blocks) < blocks_needed:
             die(f"need {blocks_needed} free blocks, only {len(free_blocks)} available")
-
-        # Mark allocated blocks in bitmap
-        for blk in free_blocks:
-            bit = blk - first
-            bi, bj = bit // 8, bit % 8
-            block_bitmap[bi] |= (1 << bj)
-
-        img.seek(bg_block_bitmap * block_size)
-        img.write(bytes(block_bitmap))
 
         # Write stage2 data to the allocated blocks
         for i, blk in enumerate(free_blocks):
@@ -157,12 +176,7 @@ def main():
         img.seek(inode_offset)
         img.write(bytes(inode))
 
-        # ---- Update free-block counts ----
-        bg_free_blocks -= blocks_needed
-        struct.pack_into('<H', bgd_raw, 12, bg_free_blocks)
-        img.seek(bgdt_offset)
-        img.write(bytes(bgd_raw))
-
+        # ---- Update superblock free-block count ----
         s_free_blocks_count -= blocks_needed
         struct.pack_into('<I', sb_raw, 12, s_free_blocks_count)
         img.seek(SUPERBLOCK_OFFSET)

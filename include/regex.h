@@ -5,6 +5,13 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+/* C++ does not have the restrict keyword. */
+#ifdef __cplusplus
+#ifndef restrict
+#define restrict
+#endif
+#endif
+
 #include <regex/flags.h>
 
 #ifdef __cplusplus
