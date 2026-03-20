@@ -1948,9 +1948,16 @@ int kern_proc_info(pid_t pid, sys_procinfo_t *info) {
     
     info->uid = target->uid;
     info->gid = target->gid;
+    info->euid = target->euid;
+    info->egid = target->egid;
     info->state = target->state;
     info->bitness = target->bitness;
+    info->perso_id = target->perso_id;
+    info->tty = -1;
+    info->nice = 0;
     info->start_time = target->start_time;
+    info->user_time = target->utime;
+    info->sys_time = target->stime;
     
     strncpy(info->name, target->comm, sizeof(info->name)-1);
     return 0;
@@ -1987,9 +1994,7 @@ int kern_proc_list(pid_t *pids, size_t count) {
     int copied = 0;
     for (int i = 0; i < MAX_PROCS && copied < (int)count; i++) {
         if (processes[i].pid != -1) {
-            pid_t pid = processes[i].pid;
-            if (copyout(&pid, &pids[copied], sizeof(pid_t)) != 0) return -14;
-            copied++;
+            pids[copied++] = processes[i].pid;
         }
     }
     return copied;

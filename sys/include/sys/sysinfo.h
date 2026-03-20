@@ -84,23 +84,6 @@ typedef struct sys_vmstat {
 
 #ifndef _KERNEL
 int sysinfo(struct sysinfo *info);
-
-/* Process Information API */
-int sys_proc_count(void);
-int sys_proc_list(pid_t *pids, size_t count);
-int sys_proc_info(pid_t pid, sys_procinfo_t *info);
-int sys_proc_threads(pid_t pid, tid_t *tids, size_t *count);
-int sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count);
-int sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count);
-int sys_proc_cwd(pid_t pid, char *buf, size_t len);
-int sys_proc_exe(pid_t pid, char *buf, size_t len);
-int sys_proc_cmdline(pid_t pid, char **argv, size_t *argc);
-int sys_proc_environ(pid_t pid, char **envp, size_t *envc);
-int sys_proc_pers_name(int perso_id, char *buf, size_t len);
-
-/* VM Statistics API */
-int sys_vm_stats(sys_vmstat_t *stats);
-int sys_cpu_count(void);
 #endif
 
 #endif
