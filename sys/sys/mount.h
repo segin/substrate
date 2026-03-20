@@ -3,6 +3,7 @@
 
 #include <sys/types.h>
 #include <sys/queue.h>
+#include <sys/lock.h>
 #include <stdint.h>
 
 struct vnode;
@@ -92,7 +93,7 @@ struct mount {
     struct vnode_list   mnt_vnodelist;      /* list of active vnodes */
     struct statfs       mnt_stat;           /* cached filesystem statistics */
     int                 mnt_maxsymlinklen;  /* max symlink target inline */
-    uint32_t            mnt_lock;           /* mount-level rw lock state */
+    rwlock_t            mnt_lock;           /* mount-level reader/writer lock */
     struct fs_node      *mnt_node_covered;  /* Legacy: Node we mounted on */
     struct fs_node      *mnt_node_root;     /* Legacy: root node of this fs */
     uint64_t            mnt_covered_ino;    /* inode of covered directory (snapshot) */

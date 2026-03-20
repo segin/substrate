@@ -5,6 +5,7 @@
 
 // Model Specific Registers
 #define MSR_EFER    0xC0000080
+#define MSR_IA32_PAT 0x00000277
 
 // EFER bits
 #define EFER_SCE    (1 << 0)   // Syscall Enable

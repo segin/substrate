@@ -31,8 +31,9 @@ Mode 4 (320x200, 4 colors). Uses standard BIOS-compatible palette (Cyan/Magenta/
 .It Hercules
 720x348 Monochrome graphics. Configures the 6845 CRTC for high-resolution text/graphics.
 .It Bochs BGA
-Bochs Graphics Adapter (Linear Framebuffer). Supports high resolutions (e.g., 1024x768) if enabled via
-.Cd video=bga .
+Bochs Graphics Adapter. Supports high resolutions (e.g., 1024x768) via the
+linear framebuffer path when available, and a bank-switched fallback when
+linear framebuffer access is disabled.
 .El
 .Sh CONFIGURATION
 The driver defaults to Standard VGA Mode 12h (640x480) if no boot argument is specified.
@@ -47,6 +48,9 @@ Initialize assuming CGA hardware (Mode 4).
 Initialize assuming Hercules hardware (720x348).
 .It Cd video=bga
 Attempt to use the Bochs Graphics Adapter extensions (virtualization).
+.It Cd "video=bga bga=nolfb"
+Force the Bochs Graphics Adapter bank-switched fallback instead of the linear
+framebuffer path.
 .El
 .Sh FONTS
 The driver includes compiled-in 8x16 and 8x8 fonts (CP437 character set) to ensure text is rendered correctly regardless of the video bandwidth or resolution width.

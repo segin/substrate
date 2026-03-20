@@ -3,6 +3,29 @@
 > This file was seeded from `TASKS.md` using a fork-copy (rename+restore) workflow to preserve lineage.
 > Source span in original monolith: lines 3752-5365.
 
+### Logical Library Manifest
+
+> **Key fact:** There is **no standards-defined one-to-one mapping** from
+> C23/POSIX interfaces to physical shared objects named `libc.so`, `libm.so`,
+> `libdl.so`, and `libpthread.so`; the standards define **headers and
+> interfaces**, not SONAME ownership. On real systems that mapping is
+> increasingly blurry — e.g. glibc 2.34 merged `libpthread`, `libdl`,
+> `libutil`, and `libanl` into `libc`, while preserving compatibility for the
+> old link flags.
+
+The only honest representation is as a **logical-library manifest**:
+
+| Logical lib | Link flag | Scope |
+|---|---|---|
+| **m** | `-lm` | C23 math / complex / floating-environment interfaces |
+| **dl** | `-ldl` | POSIX `<dlfcn.h>` |
+| **pthread** | `-lpthread` | POSIX `<pthread.h>` plus C `<threads.h>` |
+| **c** | (implicit) | Everything else from ISO C23, plus the POSIX system-interface surface conventionally shipped in libc |
+
+Some C23 facilities are **conditional features**, notably `<complex.h>` and
+`<threads.h>`. If the implementation does not claim those feature-test macros,
+they are not mandatory.
+
 ## Reimplemented Checklist (All Open)
 
 ### 6. C Library (`lib/c`)
@@ -1647,6 +1670,367 @@
             - [ ] Man pages: `crypt(3)`, `crypt_gensalt(3)`. (REQ: REQ-06-1236)
             - [ ] Man pages: `passwd(5)`, `group(5)`. (REQ: REQ-06-1237)
 
+- [ ] **`libdl` Logical Surface (`<dlfcn.h>`):** (REQ: REQ-06-1283)
+
+    > Consolidated list of dynamic-linking interfaces. Implementation details
+    > are in the Dynamic Linker (`/libexec/ld.so`) checklist above; this
+    > section tracks the *public API contract* only.
+
+    - [ ] `dladdr(const void *addr, Dl_info *info)`: address-to-symbol reverse lookup. (REQ: REQ-06-1284)
+    - [ ] `dlclose(void *handle)`: decrement ref-count; unload if zero. (REQ: REQ-06-1285)
+    - [ ] `dlerror(void)`: thread-local last-error string; clears after call. (REQ: REQ-06-1286)
+    - [ ] `dlopen(const char *filename, int flags)`: load DSO; flags include `RTLD_LAZY`, `RTLD_NOW`, `RTLD_LOCAL`, `RTLD_GLOBAL`, `RTLD_NODELETE`, `RTLD_NOLOAD`. (REQ: REQ-06-1287)
+    - [ ] `dlsym(void *handle, const char *symbol)`: symbol lookup with `RTLD_DEFAULT` and `RTLD_NEXT`. (REQ: REQ-06-1288)
+    - [ ] `dlinfo(void *handle, int request, void *info)`: query DSO metadata (GNU/BSD extension). (REQ: REQ-06-1289)
+    - [ ] `dl_iterate_phdr(callback, data)`: iterate all loaded program headers (GNU extension). (REQ: REQ-06-1290)
+    - [ ] **Testing:** (REQ: REQ-06-1291)
+        - [ ] Unit: `dlopen` → `dlsym` → use → `dlclose` round-trip. (REQ: REQ-06-1292)
+        - [ ] Unit: `dlerror` clears after retrieval. (REQ: REQ-06-1293)
+        - [ ] Unit: `dladdr` resolves known symbols. (REQ: REQ-06-1294)
+        - [ ] Property: `dlclose` never produces negative refcounts. (REQ: REQ-06-1295)
+        - [ ] Fuzz: random flag combos to `dlopen`. (REQ: REQ-06-1296)
+    - [ ] **Man Pages:** `dlopen(3)`, `dlsym(3)`, `dlclose(3)`, `dlerror(3)`, `dladdr(3)`, `dlinfo(3)`, `dl_iterate_phdr(3)`. (REQ: REQ-06-1297)
+
+- [ ] **`libpthread` Logical Surface (`<pthread.h>` + `<threads.h>`):** (REQ: REQ-06-1298)
+
+    > POSIX threads (IEEE 1003.1) plus C11/C23 `<threads.h>` portable thread
+    > abstraction. Substrate ships both; `<threads.h>` is implemented atop
+    > pthreads.
+
+    - [ ] **Thread Lifecycle:** (REQ: REQ-06-1299)
+        - [ ] `pthread_create(thread, attr, start_routine, arg)`: create a new thread. (REQ: REQ-06-1300)
+        - [ ] `pthread_exit(retval)`: terminate calling thread. (REQ: REQ-06-1301)
+        - [ ] `pthread_join(thread, retval)`: wait for thread termination. (REQ: REQ-06-1302)
+        - [ ] `pthread_detach(thread)`: mark thread as detached. (REQ: REQ-06-1303)
+        - [ ] `pthread_self()`: obtain calling thread's ID. (REQ: REQ-06-1304)
+        - [ ] `pthread_equal(t1, t2)`: compare thread IDs. (REQ: REQ-06-1305)
+        - [ ] `pthread_cancel(thread)`: request thread cancellation. (REQ: REQ-06-1306)
+        - [ ] `pthread_setcancelstate(state, oldstate)`: set cancellation state. (REQ: REQ-06-1307)
+        - [ ] `pthread_setcanceltype(type, oldtype)`: set cancellation type. (REQ: REQ-06-1308)
+        - [ ] `pthread_testcancel()`: create cancellation point. (REQ: REQ-06-1309)
+    - [ ] **Thread Attributes:** (REQ: REQ-06-1310)
+        - [ ] `pthread_attr_init()` / `pthread_attr_destroy()`. (REQ: REQ-06-1311)
+        - [ ] `pthread_attr_setdetachstate()` / `getdetachstate()`. (REQ: REQ-06-1312)
+        - [ ] `pthread_attr_setstacksize()` / `getstacksize()`. (REQ: REQ-06-1313)
+        - [ ] `pthread_attr_setstackaddr()` / `getstackaddr()`. (REQ: REQ-06-1314)
+        - [ ] `pthread_attr_setguardsize()` / `getguardsize()`. (REQ: REQ-06-1315)
+        - [ ] `pthread_attr_setschedparam()` / `getschedparam()`. (REQ: REQ-06-1316)
+        - [ ] `pthread_attr_setschedpolicy()` / `getschedpolicy()`. (REQ: REQ-06-1317)
+        - [ ] `pthread_attr_setinheritsched()` / `getinheritsched()`. (REQ: REQ-06-1318)
+        - [ ] `pthread_attr_setscope()` / `getscope()`. (REQ: REQ-06-1319)
+    - [ ] **Mutexes:** (REQ: REQ-06-1320)
+        - [ ] `pthread_mutex_init(mutex, attr)` / `pthread_mutex_destroy(mutex)`. (REQ: REQ-06-1321)
+        - [ ] `pthread_mutex_lock(mutex)` / `pthread_mutex_trylock(mutex)` / `pthread_mutex_unlock(mutex)`. (REQ: REQ-06-1322)
+        - [ ] `pthread_mutex_timedlock(mutex, abstime)`. (REQ: REQ-06-1323)
+        - [ ] `pthread_mutexattr_init()` / `destroy()`. (REQ: REQ-06-1324)
+        - [ ] `pthread_mutexattr_settype()` / `gettype()`: `PTHREAD_MUTEX_NORMAL`, `ERRORCHECK`, `RECURSIVE`, `DEFAULT`. (REQ: REQ-06-1325)
+        - [ ] `pthread_mutexattr_setprotocol()` / `getprotocol()`: `PTHREAD_PRIO_NONE`, `INHERIT`, `PROTECT`. (REQ: REQ-06-1326)
+        - [ ] `pthread_mutexattr_setrobust()` / `getrobust()`: `PTHREAD_MUTEX_STALLED`, `ROBUST`. (REQ: REQ-06-1327)
+        - [ ] `pthread_mutex_consistent(mutex)`: mark recovered robust mutex. (REQ: REQ-06-1328)
+    - [ ] **Condition Variables:** (REQ: REQ-06-1329)
+        - [ ] `pthread_cond_init(cond, attr)` / `pthread_cond_destroy(cond)`. (REQ: REQ-06-1330)
+        - [ ] `pthread_cond_wait(cond, mutex)` / `pthread_cond_timedwait(cond, mutex, abstime)`. (REQ: REQ-06-1331)
+        - [ ] `pthread_cond_signal(cond)` / `pthread_cond_broadcast(cond)`. (REQ: REQ-06-1332)
+        - [ ] `pthread_condattr_init()` / `destroy()`. (REQ: REQ-06-1333)
+        - [ ] `pthread_condattr_setclock()` / `getclock()`. (REQ: REQ-06-1334)
+        - [ ] `pthread_condattr_setpshared()` / `getpshared()`. (REQ: REQ-06-1335)
+    - [ ] **Read-Write Locks:** (REQ: REQ-06-1336)
+        - [ ] `pthread_rwlock_init()` / `pthread_rwlock_destroy()`. (REQ: REQ-06-1337)
+        - [ ] `pthread_rwlock_rdlock()` / `tryrdlock()` / `timedrdlock()`. (REQ: REQ-06-1338)
+        - [ ] `pthread_rwlock_wrlock()` / `trywrlock()` / `timedwrlock()`. (REQ: REQ-06-1339)
+        - [ ] `pthread_rwlock_unlock()`. (REQ: REQ-06-1340)
+        - [ ] `pthread_rwlockattr_init()` / `destroy()` / `setpshared()` / `getpshared()`. (REQ: REQ-06-1341)
+    - [ ] **Barriers:** (REQ: REQ-06-1342)
+        - [ ] `pthread_barrier_init(barrier, attr, count)` / `pthread_barrier_destroy(barrier)`. (REQ: REQ-06-1343)
+        - [ ] `pthread_barrier_wait(barrier)`: return `PTHREAD_BARRIER_SERIAL_THREAD` for one waiter. (REQ: REQ-06-1344)
+        - [ ] `pthread_barrierattr_init()` / `destroy()` / `setpshared()` / `getpshared()`. (REQ: REQ-06-1345)
+    - [ ] **Spinlocks:** (REQ: REQ-06-1346)
+        - [ ] `pthread_spin_init(lock, pshared)` / `pthread_spin_destroy(lock)`. (REQ: REQ-06-1347)
+        - [ ] `pthread_spin_lock(lock)` / `pthread_spin_trylock(lock)` / `pthread_spin_unlock(lock)`. (REQ: REQ-06-1348)
+    - [ ] **Thread-Specific Data (TSD):** (REQ: REQ-06-1349)
+        - [ ] `pthread_key_create(key, destructor)` / `pthread_key_delete(key)`. (REQ: REQ-06-1350)
+        - [ ] `pthread_setspecific(key, value)` / `pthread_getspecific(key)`. (REQ: REQ-06-1351)
+    - [ ] **Once Initialization:** (REQ: REQ-06-1352)
+        - [ ] `pthread_once(once_control, init_routine)` with `PTHREAD_ONCE_INIT`. (REQ: REQ-06-1353)
+    - [ ] **Cleanup Handlers:** (REQ: REQ-06-1354)
+        - [ ] `pthread_cleanup_push(routine, arg)` / `pthread_cleanup_pop(execute)`. (REQ: REQ-06-1355)
+    - [ ] **Scheduling:** (REQ: REQ-06-1356)
+        - [ ] `pthread_setschedparam(thread, policy, param)` / `pthread_getschedparam()`. (REQ: REQ-06-1357)
+        - [ ] `pthread_setschedprio(thread, prio)`. (REQ: REQ-06-1358)
+        - [ ] `pthread_yield()` (non-portable) / `sched_yield()`. (REQ: REQ-06-1359)
+    - [ ] **Concurrency Level:** (REQ: REQ-06-1360)
+        - [ ] `pthread_setconcurrency(new_level)` / `pthread_getconcurrency()`. (REQ: REQ-06-1361)
+    - [ ] **Fork Safety:** (REQ: REQ-06-1362)
+        - [ ] `pthread_atfork(prepare, parent, child)`. (REQ: REQ-06-1363)
+    - [ ] **Signal Masking:** (REQ: REQ-06-1364)
+        - [ ] `pthread_sigmask(how, set, oldset)`. (REQ: REQ-06-1365)
+        - [ ] `pthread_kill(thread, sig)`. (REQ: REQ-06-1366)
+        - [ ] `sigwait(set, sig)`. (REQ: REQ-06-1367)
+    - [ ] **C11/C23 `<threads.h>` Portable Abstraction:** (REQ: REQ-06-1368)
+        - [ ] `thrd_create(thr, func, arg)` / `thrd_exit(res)` / `thrd_join(thr, res)` / `thrd_detach(thr)`. (REQ: REQ-06-1369)
+        - [ ] `thrd_current()` / `thrd_equal(lhs, rhs)` / `thrd_sleep(duration, remaining)` / `thrd_yield()`. (REQ: REQ-06-1370)
+        - [ ] `mtx_init(mtx, type)` / `mtx_destroy(mtx)` / `mtx_lock(mtx)` / `mtx_trylock(mtx)` / `mtx_timedlock(mtx, ts)` / `mtx_unlock(mtx)`. (REQ: REQ-06-1371)
+        - [ ] `cnd_init(cond)` / `cnd_destroy(cond)` / `cnd_signal(cond)` / `cnd_broadcast(cond)` / `cnd_wait(cond, mtx)` / `cnd_timedwait(cond, mtx, ts)`. (REQ: REQ-06-1372)
+        - [ ] `tss_create(key, dtor)` / `tss_delete(key)` / `tss_get(key)` / `tss_set(key, val)`. (REQ: REQ-06-1373)
+        - [ ] `call_once(flag, func)` with `once_flag` / `ONCE_FLAG_INIT`. (REQ: REQ-06-1374)
+    - [ ] **Testing:** (REQ: REQ-06-1375)
+        - [ ] Unit: thread create/join round-trip with return value. (REQ: REQ-06-1376)
+        - [ ] Unit: mutex type enforcement (ERRORCHECK returns EDEADLK on double-lock). (REQ: REQ-06-1377)
+        - [ ] Unit: cond_broadcast wakes all waiters. (REQ: REQ-06-1378)
+        - [ ] Unit: rwlock allows concurrent readers, exclusive writer. (REQ: REQ-06-1379)
+        - [ ] Unit: barrier wait returns SERIAL_THREAD to exactly one waiter. (REQ: REQ-06-1380)
+        - [ ] Unit: TSD destructor invoked on thread exit. (REQ: REQ-06-1381)
+        - [ ] Unit: `pthread_once` executes init_routine exactly once across threads. (REQ: REQ-06-1382)
+        - [ ] Unit: cancellation handlers run in LIFO order. (REQ: REQ-06-1383)
+        - [ ] Unit: `pthread_atfork` handlers execute in correct order. (REQ: REQ-06-1384)
+        - [ ] Unit: C11 `<threads.h>` create/join with `thrd_success` return. (REQ: REQ-06-1385)
+        - [ ] Property: `pthread_mutex_lock` → `unlock` always succeeds for valid mutex. (REQ: REQ-06-1386)
+        - [ ] Property: `pthread_cond_signal` never loses wakeups. (REQ: REQ-06-1387)
+        - [ ] Property: robust mutex → `EOWNERDEAD` when holder exits. (REQ: REQ-06-1388)
+        - [ ] Stress: 100+ threads contending on single mutex. (REQ: REQ-06-1389)
+        - [ ] Stress: producer-consumer with condvar under high contention. (REQ: REQ-06-1390)
+        - [ ] Fuzz: random scheduling of lock/unlock/signal sequences. (REQ: REQ-06-1391)
+    - [ ] **Man Pages:** (REQ: REQ-06-1392)
+        - [ ] `pthread_create(3)`, `pthread_exit(3)`, `pthread_join(3)`, `pthread_detach(3)`. (REQ: REQ-06-1393)
+        - [ ] `pthread_mutex_init(3)`, `pthread_mutex_lock(3)`. (REQ: REQ-06-1394)
+        - [ ] `pthread_cond_init(3)`, `pthread_cond_wait(3)`, `pthread_cond_signal(3)`. (REQ: REQ-06-1395)
+        - [ ] `pthread_rwlock_init(3)`, `pthread_rwlock_rdlock(3)`, `pthread_rwlock_wrlock(3)`. (REQ: REQ-06-1396)
+        - [ ] `pthread_barrier_init(3)`, `pthread_barrier_wait(3)`. (REQ: REQ-06-1397)
+        - [ ] `pthread_key_create(3)`, `pthread_once(3)`, `pthread_atfork(3)`. (REQ: REQ-06-1398)
+        - [ ] `pthread_cancel(3)`, `pthread_cleanup_push(3)`. (REQ: REQ-06-1399)
+        - [ ] `pthread_sigmask(3)`, `pthread_kill(3)`, `sigwait(3)`. (REQ: REQ-06-1400)
+        - [ ] `threads.h(0P)` — C11/C23 threads overview. (REQ: REQ-06-1401)
+
+- [ ] **`tgmath.h` — Type-Generic Math Macros (C11/C23):** (REQ: REQ-06-1402)
+
+    > `<tgmath.h>` provides type-generic macros that dispatch to the correct
+    > `float`, `double`, or `long double` variant of `<math.h>` and
+    > `<complex.h>` functions based on argument type. C23 adds `_Decimal`
+    > dispatch (deferred).
+
+    - [ ] Define type-generic dispatching macros for all applicable `<math.h>` functions: (REQ: REQ-06-1403)
+        - [ ] Trigonometric: `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`. (REQ: REQ-06-1404)
+        - [ ] Hyperbolic: `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`. (REQ: REQ-06-1405)
+        - [ ] Exponential/log: `exp`, `exp2`, `expm1`, `log`, `log2`, `log10`, `log1p`, `logb`, `ilogb`. (REQ: REQ-06-1406)
+        - [ ] Power: `pow`, `sqrt`, `cbrt`, `hypot`. (REQ: REQ-06-1407)
+        - [ ] Rounding: `ceil`, `floor`, `trunc`, `round`, `lround`, `llround`, `nearbyint`, `rint`, `lrint`, `llrint`. (REQ: REQ-06-1408)
+        - [ ] Manipulation: `frexp`, `ldexp`, `modf`, `scalbn`, `scalbln`, `nextafter`, `nexttoward`, `copysign`. (REQ: REQ-06-1409)
+        - [ ] Error/gamma: `erf`, `erfc`, `tgamma`, `lgamma`. (REQ: REQ-06-1410)
+        - [ ] Absolute/remainder: `fabs`, `fmod`, `remainder`, `remquo`, `fma`, `fdim`, `fmax`, `fmin`. (REQ: REQ-06-1411)
+    - [ ] Define type-generic dispatching macros for `<complex.h>` functions (if `__STDC_NO_COMPLEX__` is not defined): (REQ: REQ-06-1412)
+        - [ ] `cabs`, `carg`, `cimag`, `creal`, `conj`, `cproj`. (REQ: REQ-06-1413)
+        - [ ] `cexp`, `clog`, `cpow`, `csqrt`. (REQ: REQ-06-1414)
+        - [ ] `csin`, `ccos`, `ctan`, `casin`, `cacos`, `catan`. (REQ: REQ-06-1415)
+        - [ ] `csinh`, `ccosh`, `ctanh`, `casinh`, `cacosh`, `catanh`. (REQ: REQ-06-1416)
+    - [ ] Ensure dispatch correctly handles mixed-type arguments (e.g., `pow(int, float)` dispatches to `powf`). (REQ: REQ-06-1417)
+    - [ ] **Testing (`tests/lib/m/unit/test_tgmath.c`):** (REQ: REQ-06-1418)
+        - [ ] Compile-time: verify correct variant is selected via `_Generic` or `__builtin_types_compatible_p`. (REQ: REQ-06-1419)
+        - [ ] Unit: `sin((float)x)` calls `sinf`, `sin((double)x)` calls `sin`, `sin((long double)x)` calls `sinl`. (REQ: REQ-06-1420)
+        - [ ] Unit: complex dispatch when `<complex.h>` is available. (REQ: REQ-06-1421)
+        - [ ] Property: result type matches narrowest argument type. (REQ: REQ-06-1422)
+    - [ ] **Man Pages:** `tgmath.h(0P)` — type-generic math overview, dispatch rules, examples. (REQ: REQ-06-1423)
+
+- [ ] **POSIX-2024 Callable Surface (System Interface Headers):** (REQ: REQ-06-1424)
+
+    > Core POSIX headers and their callable surface. These are conventionally
+    > shipped in `libc` and accessed without special link flags.
+
+    - [ ] **`<unistd.h>` — POSIX Operating System API:** (REQ: REQ-06-1425)
+        - [ ] Process: `fork()`, `vfork()`, `_exit()`, `execve()`, `execl()`, `execle()`, `execlp()`, `execv()`, `execvp()`, `execvpe()`, `fexecve()`. (REQ: REQ-06-1426)
+        - [ ] Process identity: `getpid()`, `getppid()`, `getpgrp()`, `setpgid()`, `setsid()`, `getsid()`, `getuid()`, `geteuid()`, `getgid()`, `getegid()`, `setuid()`, `seteuid()`, `setgid()`, `setegid()`, `setreuid()`, `setregid()`, `getgroups()`, `setgroups()`. (REQ: REQ-06-1427)
+        - [ ] File I/O: `read()`, `write()`, `lseek()`, `close()`, `dup()`, `dup2()`, `pipe()`, `pread()`, `pwrite()`, `ftruncate()`, `truncate()`, `fsync()`, `fdatasync()`. (REQ: REQ-06-1428)
+        - [ ] File operations: `link()`, `linkat()`, `unlink()`, `unlinkat()`, `symlink()`, `symlinkat()`, `readlink()`, `readlinkat()`, `rename()`, `renameat()`. (REQ: REQ-06-1429)
+        - [ ] Directory: `chdir()`, `fchdir()`, `getcwd()`, `chroot()`, `rmdir()`. (REQ: REQ-06-1430)
+        - [ ] File access: `access()`, `faccessat()`, `chown()`, `fchown()`, `fchownat()`, `lchown()`. (REQ: REQ-06-1431)
+        - [ ] Terminal: `isatty()`, `ttyname()`, `ttyname_r()`, `tcgetpgrp()`, `tcsetpgrp()`. (REQ: REQ-06-1432)
+        - [ ] Miscellaneous: `alarm()`, `pause()`, `sleep()`, `usleep()`, `sysconf()`, `pathconf()`, `fpathconf()`, `getlogin()`, `getlogin_r()`, `gethostname()`, `sethostname()`, `getopt()`, `crypt()`, `encrypt()`, `swab()`, `nice()`, `confstr()`, `getpagesize()`. (REQ: REQ-06-1433)
+    - [ ] **`<fcntl.h>` — File Control:** (REQ: REQ-06-1434)
+        - [ ] `open()`, `openat()`, `creat()`, `fcntl()` (with `F_DUPFD`, `F_GETFD`, `F_SETFD`, `F_GETFL`, `F_SETFL`, `F_GETLK`, `F_SETLK`, `F_SETLKW`, `F_GETOWN`, `F_SETOWN`). (REQ: REQ-06-1435)
+        - [ ] Open flags: `O_RDONLY`, `O_WRONLY`, `O_RDWR`, `O_APPEND`, `O_CREAT`, `O_EXCL`, `O_TRUNC`, `O_NONBLOCK`, `O_NOCTTY`, `O_CLOEXEC`, `O_DIRECTORY`, `O_NOFOLLOW`, `O_SYNC`, `O_DSYNC`. (REQ: REQ-06-1436)
+        - [ ] Advisory locking: `struct flock`, `F_RDLCK`, `F_WRLCK`, `F_UNLCK`. (REQ: REQ-06-1437)
+        - [ ] `posix_fadvise()`, `posix_fallocate()`. (REQ: REQ-06-1438)
+    - [ ] **`<dirent.h>` — Directory Entries:** (REQ: REQ-06-1439)
+        - [ ] `opendir()`, `fdopendir()`, `readdir()`, `readdir_r()`, `rewinddir()`, `seekdir()`, `telldir()`, `closedir()`, `dirfd()`, `scandir()`, `alphasort()`. (REQ: REQ-06-1440)
+    - [ ] **`<sys/stat.h>` — File Status:** (REQ: REQ-06-1441)
+        - [ ] `stat()`, `lstat()`, `fstat()`, `fstatat()`, `chmod()`, `fchmod()`, `fchmodat()`, `mkdir()`, `mkdirat()`, `mkfifo()`, `mkfifoat()`, `mknod()`, `mknodat()`, `umask()`, `futimens()`, `utimensat()`. (REQ: REQ-06-1442)
+        - [ ] `struct stat` with `st_dev`, `st_ino`, `st_mode`, `st_nlink`, `st_uid`, `st_gid`, `st_rdev`, `st_size`, `st_blksize`, `st_blocks`, `st_atim`, `st_mtim`, `st_ctim`. (REQ: REQ-06-1443)
+        - [ ] Mode macros: `S_ISREG`, `S_ISDIR`, `S_ISCHR`, `S_ISBLK`, `S_ISFIFO`, `S_ISLNK`, `S_ISSOCK`, `S_IRWXU`, etc. (REQ: REQ-06-1444)
+    - [ ] **`<sys/wait.h>` — Process Wait:** (REQ: REQ-06-1445)
+        - [ ] `wait()`, `waitpid()`, `waitid()`. (REQ: REQ-06-1446)
+        - [ ] Status macros: `WIFEXITED`, `WEXITSTATUS`, `WIFSIGNALED`, `WTERMSIG`, `WIFSTOPPED`, `WSTOPSIG`, `WIFCONTINUED`, `WCOREDUMP`. (REQ: REQ-06-1447)
+    - [ ] **`<sys/uio.h>` — Scatter/Gather I/O:** (REQ: REQ-06-1448)
+        - [ ] `readv()`, `writev()`, `preadv()`, `pwritev()`. (REQ: REQ-06-1449)
+        - [ ] `struct iovec` with `iov_base`, `iov_len`. (REQ: REQ-06-1450)
+    - [ ] **`<sys/mman.h>` — Memory Management:** (REQ: REQ-06-1451)
+        - [ ] `mmap()`, `munmap()`, `mprotect()`, `msync()`, `mlock()`, `munlock()`, `mlockall()`, `munlockall()`, `madvise()`, `mincore()`, `shm_open()`, `shm_unlink()`. (REQ: REQ-06-1452)
+        - [ ] Prot flags: `PROT_READ`, `PROT_WRITE`, `PROT_EXEC`, `PROT_NONE`. (REQ: REQ-06-1453)
+        - [ ] Map flags: `MAP_SHARED`, `MAP_PRIVATE`, `MAP_FIXED`, `MAP_ANONYMOUS`, `MAP_FAILED`. (REQ: REQ-06-1454)
+    - [ ] **`<aio.h>` — Asynchronous I/O:** (REQ: REQ-06-1455)
+        - [ ] `aio_read()`, `aio_write()`, `aio_error()`, `aio_return()`, `aio_cancel()`, `aio_suspend()`, `aio_fsync()`, `lio_listio()`. (REQ: REQ-06-1456)
+        - [ ] `struct aiocb` with `aio_fildes`, `aio_offset`, `aio_buf`, `aio_nbytes`, `aio_reqprio`, `aio_sigevent`, `aio_lio_opcode`. (REQ: REQ-06-1457)
+    - [ ] **`<semaphore.h>` — POSIX Semaphores:** (REQ: REQ-06-1458)
+        - [ ] `sem_init()`, `sem_destroy()`, `sem_open()`, `sem_close()`, `sem_unlink()`, `sem_wait()`, `sem_trywait()`, `sem_timedwait()`, `sem_post()`, `sem_getvalue()`. (REQ: REQ-06-1459)
+    - [ ] **`<mqueue.h>` — POSIX Message Queues:** (REQ: REQ-06-1460)
+        - [ ] `mq_open()`, `mq_close()`, `mq_unlink()`, `mq_send()`, `mq_receive()`, `mq_timedsend()`, `mq_timedreceive()`, `mq_notify()`, `mq_getattr()`, `mq_setattr()`. (REQ: REQ-06-1461)
+    - [ ] **`<spawn.h>` — POSIX Spawn:** (REQ: REQ-06-1462)
+        - [ ] `posix_spawn()`, `posix_spawnp()`. (REQ: REQ-06-1463)
+        - [ ] `posix_spawn_file_actions_init()` / `destroy()` / `addopen()` / `addclose()` / `adddup2()` / `addchdir_np()`. (REQ: REQ-06-1464)
+        - [ ] `posix_spawnattr_init()` / `destroy()` / `setflags()` / `getflags()` / `setsigdefault()` / `getsigdefault()` / `setsigmask()` / `getsigmask()` / `setpgroup()` / `getpgroup()` / `setschedparam()` / `getschedparam()` / `setschedpolicy()` / `getschedpolicy()`. (REQ: REQ-06-1465)
+    - [ ] **`<poll.h>` — I/O Multiplexing:** (REQ: REQ-06-1466)
+        - [ ] `poll()`, `ppoll()`. (REQ: REQ-06-1467)
+        - [ ] `struct pollfd` with `fd`, `events`, `revents`. (REQ: REQ-06-1468)
+        - [ ] Event flags: `POLLIN`, `POLLOUT`, `POLLERR`, `POLLHUP`, `POLLNVAL`, `POLLRDNORM`, `POLLRDBAND`, `POLLWRNORM`, `POLLWRBAND`. (REQ: REQ-06-1469)
+    - [ ] **`<sched.h>` — Process Scheduling:** (REQ: REQ-06-1470)
+        - [ ] `sched_setscheduler()`, `sched_getscheduler()`, `sched_setparam()`, `sched_getparam()`, `sched_yield()`, `sched_get_priority_max()`, `sched_get_priority_min()`, `sched_rr_get_interval()`. (REQ: REQ-06-1471)
+    - [ ] **`<regex.h>` — Regular Expressions:** (REQ: REQ-06-1472)
+        - [ ] `regcomp()`, `regexec()`, `regerror()`, `regfree()`. (REQ: REQ-06-1473)
+        - [ ] Flags: `REG_EXTENDED`, `REG_ICASE`, `REG_NOSUB`, `REG_NEWLINE`, `REG_NOTBOL`, `REG_NOTEOL`. (REQ: REQ-06-1474)
+    - [ ] **`<glob.h>` — Pathname Generation:** (REQ: REQ-06-1475)
+        - [ ] `glob()`, `globfree()`. (REQ: REQ-06-1476)
+        - [ ] Flags: `GLOB_ERR`, `GLOB_MARK`, `GLOB_NOSORT`, `GLOB_DOOFFS`, `GLOB_NOCHECK`, `GLOB_APPEND`, `GLOB_NOESCAPE`. (REQ: REQ-06-1477)
+    - [ ] **`<fnmatch.h>` — Filename Matching:** (REQ: REQ-06-1478)
+        - [ ] `fnmatch()` with `FNM_PATHNAME`, `FNM_PERIOD`, `FNM_NOESCAPE`. (REQ: REQ-06-1479)
+    - [ ] **`<wordexp.h>` — Word Expansion:** (REQ: REQ-06-1480)
+        - [ ] `wordexp()`, `wordfree()`. (REQ: REQ-06-1481)
+    - [ ] **`<search.h>` — Search Tables:** (REQ: REQ-06-1482)
+        - [ ] `hcreate()`, `hdestroy()`, `hsearch()`, `insque()`, `lfind()`, `lsearch()`, `remque()`, `tdelete()`, `tfind()`, `tsearch()`, `twalk()`. (REQ: REQ-06-1483)
+    - [ ] **`<ftw.h>` — File Tree Walk:** (REQ: REQ-06-1484)
+        - [ ] `ftw()`, `nftw()`. (REQ: REQ-06-1485)
+    - [ ] **`<libgen.h>` — Path Utilities:** (REQ: REQ-06-1486)
+        - [ ] `basename()`, `dirname()`. (REQ: REQ-06-1487)
+    - [ ] **`<langinfo.h>` — Language Information:** (REQ: REQ-06-1488)
+        - [ ] `nl_langinfo()`, `nl_langinfo_l()`. (REQ: REQ-06-1489)
+    - [ ] **`<monetary.h>` — Monetary Formatting:** (REQ: REQ-06-1490)
+        - [ ] `strfmon()`, `strfmon_l()`. (REQ: REQ-06-1491)
+    - [ ] **`<fmtmsg.h>` — Formatted Messages:** (REQ: REQ-06-1492)
+        - [ ] `fmtmsg()`. (REQ: REQ-06-1493)
+    - [ ] **`<iconv.h>` — Character Set Conversion:** (REQ: REQ-06-1494)
+        - [ ] `iconv_open()`, `iconv()`, `iconv_close()`. (REQ: REQ-06-1495)
+    - [ ] **`<nl_types.h>` — Message Catalogs:** (REQ: REQ-06-1496)
+        - [ ] `catopen()`, `catgets()`, `catclose()`. (REQ: REQ-06-1497)
+    - [ ] **Networking Headers:** (REQ: REQ-06-1498)
+        - [ ] **`<arpa/inet.h>`:** `inet_addr()`, `inet_ntoa()`, `inet_pton()`, `inet_ntop()`, `htonl()`, `htons()`, `ntohl()`, `ntohs()`. (REQ: REQ-06-1499)
+        - [ ] **`<netdb.h>`:** `gethostbyname()`, `gethostbyaddr()`, `getaddrinfo()`, `freeaddrinfo()`, `gai_strerror()`, `getnameinfo()`, `getservbyname()`, `getservbyport()`, `getprotobyname()`, `getprotobynumber()`, `getnetbyname()`, `getnetbyaddr()`, `sethostent()`, `endhostent()`, `setnetent()`, `endnetent()`, `setservent()`, `endservent()`, `setprotoent()`, `endprotoent()`, `herror()`, `hstrerror()`. (REQ: REQ-06-1500)
+        - [ ] **`<sys/socket.h>`:** `socket()`, `bind()`, `listen()`, `accept()`, `connect()`, `send()`, `recv()`, `sendto()`, `recvfrom()`, `sendmsg()`, `recvmsg()`, `shutdown()`, `getsockopt()`, `setsockopt()`, `getsockname()`, `getpeername()`, `socketpair()`. (REQ: REQ-06-1501)
+        - [ ] **`<net/if.h>`:** `if_nametoindex()`, `if_indextoname()`, `if_nameindex()`, `if_freenameindex()`. (REQ: REQ-06-1502)
+    - [ ] **Account / Identity Headers:** (REQ: REQ-06-1503)
+        - [ ] **`<grp.h>`:** `getgrnam()`, `getgrgid()`, `getgrent()`, `setgrent()`, `endgrent()`, `getgrnam_r()`, `getgrgid_r()`. (REQ: REQ-06-1504)
+        - [ ] **`<pwd.h>`:** `getpwnam()`, `getpwuid()`, `getpwent()`, `setpwent()`, `endpwent()`, `getpwnam_r()`, `getpwuid_r()`. (REQ: REQ-06-1505)
+    - [ ] **`<syslog.h>` — System Logging:** (REQ: REQ-06-1506)
+        - [ ] `openlog()`, `syslog()`, `closelog()`, `setlogmask()`, `vsyslog()`. (REQ: REQ-06-1507)
+        - [ ] Priority macros: `LOG_EMERG` through `LOG_DEBUG`; facility macros: `LOG_KERN`, `LOG_USER`, `LOG_DAEMON`, etc. (REQ: REQ-06-1508)
+    - [ ] **`<termios.h>` — Terminal Control:** (REQ: REQ-06-1509)
+        - [ ] `tcgetattr()`, `tcsetattr()`, `tcsendbreak()`, `tcdrain()`, `tcflush()`, `tcflow()`, `cfgetispeed()`, `cfsetispeed()`, `cfgetospeed()`, `cfsetospeed()`, `cfmakeraw()`. (REQ: REQ-06-1510)
+    - [ ] **`<sys/resource.h>` — Resource Usage:** (REQ: REQ-06-1511)
+        - [ ] `getrlimit()`, `setrlimit()`, `getrusage()`, `getpriority()`, `setpriority()`. (REQ: REQ-06-1512)
+    - [ ] **`<sys/statvfs.h>` — Filesystem Statistics:** (REQ: REQ-06-1513)
+        - [ ] `statvfs()`, `fstatvfs()`. (REQ: REQ-06-1514)
+    - [ ] **`<sys/times.h>` — Process Times:** (REQ: REQ-06-1515)
+        - [ ] `times()` with `struct tms`. (REQ: REQ-06-1516)
+    - [ ] **`<sys/utsname.h>` — System Identification:** (REQ: REQ-06-1517)
+        - [ ] `uname()` with `struct utsname`. (REQ: REQ-06-1518)
+    - [ ] **System V IPC:** (REQ: REQ-06-1519)
+        - [ ] **`<sys/ipc.h>`:** `ftok()`, IPC_CREAT, IPC_EXCL, IPC_NOWAIT, IPC_RMID, IPC_SET, IPC_STAT. (REQ: REQ-06-1520)
+        - [ ] **`<sys/msg.h>`:** `msgget()`, `msgsnd()`, `msgrcv()`, `msgctl()`. (REQ: REQ-06-1521)
+        - [ ] **`<sys/shm.h>`:** `shmget()`, `shmat()`, `shmdt()`, `shmctl()`. (REQ: REQ-06-1522)
+        - [ ] **`<sys/sem.h>`:** `semget()`, `semop()`, `semctl()`. (REQ: REQ-06-1523)
+    - [ ] **`<utime.h>` / `<sys/time.h>` — Timestamps:** (REQ: REQ-06-1524)
+        - [ ] `utime()`, `utimes()`, `lutimes()`, `futimes()`, `gettimeofday()`, `settimeofday()`, `adjtime()`. (REQ: REQ-06-1525)
+        - [ ] `select()`, `pselect()` (from `<sys/select.h>`). (REQ: REQ-06-1526)
+    - [ ] **POSIX Signal Extras (beyond `<signal.h>` base):** (REQ: REQ-06-1527)
+        - [ ] `sigaction()`, `sigprocmask()`, `sigpending()`, `sigsuspend()`, `sigwaitinfo()`, `sigtimedwait()`, `sigqueue()`. (REQ: REQ-06-1528)
+        - [ ] `sigaltstack()`, `siginterrupt()`, `sighold()`, `sigrelse()`, `sigignore()`, `sigpause()`, `sigset()`. (REQ: REQ-06-1529)
+        - [ ] `psignal()`, `psiginfo()`, `strsignal()`. (REQ: REQ-06-1530)
+    - [ ] **POSIX Time Extras (beyond `<time.h>` base):** (REQ: REQ-06-1531)
+        - [ ] `clock_gettime()`, `clock_settime()`, `clock_getres()`, `clock_nanosleep()`, `nanosleep()`. (REQ: REQ-06-1532)
+        - [ ] `timer_create()`, `timer_delete()`, `timer_settime()`, `timer_gettime()`, `timer_getoverrun()`. (REQ: REQ-06-1533)
+        - [ ] Clock IDs: `CLOCK_REALTIME`, `CLOCK_MONOTONIC`, `CLOCK_PROCESS_CPUTIME_ID`, `CLOCK_THREAD_CPUTIME_ID`. (REQ: REQ-06-1534)
+    - [ ] **Gettext Family (GNU/POSIX):** (REQ: REQ-06-1535)
+        - [ ] `gettext()`, `dgettext()`, `dcgettext()`, `ngettext()`, `dngettext()`, `dcngettext()`, `textdomain()`, `bindtextdomain()`, `bind_textdomain_codeset()`. (REQ: REQ-06-1536)
+    - [ ] **Testing (POSIX callable surface):** (REQ: REQ-06-1537)
+        - [ ] Unit: `fork()` + `wait()` + `WIFEXITED` round-trip. (REQ: REQ-06-1538)
+        - [ ] Unit: `socket()` + `bind()` + `listen()` + `accept()` + `connect()` round-trip. (REQ: REQ-06-1539)
+        - [ ] Unit: `mmap()` + `munmap()` with MAP_ANONYMOUS. (REQ: REQ-06-1540)
+        - [ ] Unit: `sigaction()` + signal delivery and handler invocation. (REQ: REQ-06-1541)
+        - [ ] Unit: `clock_gettime(CLOCK_MONOTONIC)` returns increasing values. (REQ: REQ-06-1542)
+        - [ ] Unit: `opendir()` + `readdir()` + `closedir()` round-trip. (REQ: REQ-06-1543)
+        - [ ] Unit: `stat()` returns valid `struct stat` for known file. (REQ: REQ-06-1544)
+        - [ ] Unit: `poll()` reports readability on readable fd. (REQ: REQ-06-1545)
+        - [ ] Unit: `sem_init()` + `sem_post()` + `sem_wait()` + `sem_destroy()`. (REQ: REQ-06-1546)
+        - [ ] Unit: `posix_spawn()` creates child and returns pid. (REQ: REQ-06-1547)
+        - [ ] Unit: System V IPC `shmget()` + `shmat()` + `shmdt()` + `shmctl()`. (REQ: REQ-06-1548)
+        - [ ] Property: `getpid()` == `getpid()` (stable within process). (REQ: REQ-06-1549)
+        - [ ] Property: `pipe()` fd pair: write(fd[1]) → readable on fd[0]. (REQ: REQ-06-1550)
+        - [ ] Stress: 1000 concurrent `fork()` + `_exit()`. (REQ: REQ-06-1551)
+        - [ ] Fuzz: random `fcntl()` flag combinations. (REQ: REQ-06-1552)
+    - [ ] **Man Pages (POSIX callable surface):** (REQ: REQ-06-1553)
+        - [ ] `select(2)`, `poll(2)`, `mmap(2)`, `sigaction(2)`, `clock_gettime(2)`, `socket(2)`. (REQ: REQ-06-1554)
+        - [ ] `opendir(3)`, `readdir(3)`, `scandir(3)`. (REQ: REQ-06-1555)
+        - [ ] `getaddrinfo(3)`, `getnameinfo(3)`. (REQ: REQ-06-1556)
+        - [ ] `sem_overview(7)`, `mq_overview(7)`, `shm_overview(7)`. (REQ: REQ-06-1557)
+
+- [ ] **ISO C23 `libc` Surface (Non-Math, Non-Thread Remainder):** (REQ: REQ-06-1558)
+
+    > Tracks the ISO C23 standard library components that are conventionally
+    > part of `libc` (not `libm` or `libpthread`). Some overlap with the
+    > POSIX Gap Closure Audit below; this section is the *standards-first*
+    > view, while the Gap Closure Audit tracks missing POSIX-specific
+    > interfaces.
+
+    - [ ] **Character Classification and Locale (`<ctype.h>`, `<locale.h>`, `<wctype.h>`):** (REQ: REQ-06-1559)
+        - [ ] Full `is*()` family: `isalnum`, `isalpha`, `isblank`, `iscntrl`, `isdigit`, `isgraph`, `islower`, `isprint`, `ispunct`, `isspace`, `isupper`, `isxdigit`. (REQ: REQ-06-1560)
+        - [ ] `tolower()`, `toupper()`. (REQ: REQ-06-1561)
+        - [ ] Wide variants: `iswalnum`, `iswalpha`, `iswblank`, `iswcntrl`, `iswdigit`, `iswgraph`, `iswlower`, `iswprint`, `iswpunct`, `iswspace`, `iswupper`, `iswxdigit`, `towlower`, `towupper`, `wctype`, `iswctype`, `wctrans`, `towctrans`. (REQ: REQ-06-1562)
+        - [ ] `setlocale()`, `localeconv()`, `newlocale()`, `duplocale()`, `freelocale()`, `uselocale()`. (REQ: REQ-06-1563)
+    - [ ] **Non-Local Jumps and Signal Handling (`<setjmp.h>`, `<signal.h>`):** (REQ: REQ-06-1564)
+        - [ ] `setjmp()`, `longjmp()`, `sigsetjmp()`, `siglongjmp()`. (REQ: REQ-06-1565)
+        - [ ] `signal()`, `raise()`, `sig_atomic_t`. (REQ: REQ-06-1566)
+    - [ ] **Standard I/O (`<stdio.h>`):** (REQ: REQ-06-1567)
+        - [ ] Already covered in detail above (FILE, buffer management, open/close, character/line/block I/O, positioning, printf/scanf, tmpfile/tmpnam, perror). (REQ: REQ-06-1568)
+    - [ ] **General Utilities (`<stdlib.h>`):** (REQ: REQ-06-1569)
+        - [ ] Numeric conversion: `atoi`, `atol`, `atoll`, `atof`, `strtol`, `strtoll`, `strtoul`, `strtoull`, `strtod`, `strtof`, `strtold`, `strtoimax`, `strtoumax`. (REQ: REQ-06-1570)
+        - [ ] Memory: `malloc`, `calloc`, `realloc`, `free`, `aligned_alloc`. (REQ: REQ-06-1571)
+        - [ ] Process: `exit`, `_Exit`, `atexit`, `at_quick_exit`, `quick_exit`, `abort`, `system`. (REQ: REQ-06-1572)
+        - [ ] Environment: `getenv`, `secure_getenv` (GNU). (REQ: REQ-06-1573)
+        - [ ] Search/sort: `bsearch`, `qsort`, `qsort_s` (C11 Annex K). (REQ: REQ-06-1574)
+        - [ ] Integer arithmetic: `abs`, `labs`, `llabs`, `div`, `ldiv`, `lldiv`, `imaxabs`, `imaxdiv`. (REQ: REQ-06-1575)
+        - [ ] Pseudorandom: `rand`, `srand`, `rand_r`. (REQ: REQ-06-1576)
+        - [ ] Multibyte/wide: `mblen`, `mbtowc`, `wctomb`, `mbstowcs`, `wcstombs`. (REQ: REQ-06-1577)
+    - [ ] **String Handling (`<string.h>`, `<strings.h>`):** (REQ: REQ-06-1578)
+        - [ ] Core: `memcpy`, `memmove`, `memset`, `memcmp`, `memchr`, `strlen`, `strcpy`, `strncpy`, `strcat`, `strncat`, `strcmp`, `strncmp`, `strchr`, `strrchr`, `strstr`, `strtok`, `strcspn`, `strspn`, `strpbrk`, `strerror`, `strcoll`, `strxfrm`. (REQ: REQ-06-1579)
+        - [ ] C23 additions: `memset_explicit`, `memccpy`, `strnlen`, `strdup`, `strndup`, `strlcpy`, `strlcat`. (REQ: REQ-06-1580)
+        - [ ] BSD: `bcopy`, `bzero`, `bcmp`, `index`, `rindex`, `ffs`, `strcasecmp`, `strncasecmp`. (REQ: REQ-06-1581)
+    - [ ] **Date and Time (`<time.h>`):** (REQ: REQ-06-1582)
+        - [ ] `time`, `difftime`, `mktime`, `gmtime`, `gmtime_r`, `localtime`, `localtime_r`, `asctime`, `asctime_r`, `ctime`, `ctime_r`, `strftime`, `strptime`, `timespec_get`, `timespec_getres`, `clock`. (REQ: REQ-06-1583)
+    - [ ] **Unicode / Wide Character (`<uchar.h>`, `<wchar.h>`):** (REQ: REQ-06-1584)
+        - [ ] `<uchar.h>`: `c16rtomb`, `c32rtomb`, `mbrtoc16`, `mbrtoc32`, `char8_t`, `char16_t`, `char32_t`. (REQ: REQ-06-1585)
+        - [ ] `<wchar.h>`: `wprintf`, `wscanf`, `fwprintf`, `fwscanf`, `swprintf`, `swscanf`, `vwprintf`, `vfwprintf`, `vswprintf`, `wcslen`, `wcscpy`, `wcsncpy`, `wcscat`, `wcsncat`, `wcscmp`, `wcsncmp`, `wcschr`, `wcsrchr`, `wcsstr`, `wcstok`, `wmemcpy`, `wmemmove`, `wmemcmp`, `wmemchr`, `wmemset`, `wcstol`, `wcstoll`, `wcstoul`, `wcstoull`, `wcstod`, `wcstof`, `wcstold`, `wcsftime`, `wcscoll`, `wcsxfrm`, `wcswidth`, `wcwidth`. (REQ: REQ-06-1586)
+    - [ ] **Atomics and Alignment (`<stdatomic.h>`, `<stdalign.h>`):** (REQ: REQ-06-1587)
+        - [ ] `atomic_flag`, `atomic_init`, `atomic_load`, `atomic_store`, `atomic_exchange`, `atomic_compare_exchange_strong`, `atomic_compare_exchange_weak`, `atomic_fetch_add`, `atomic_fetch_sub`, `atomic_fetch_or`, `atomic_fetch_xor`, `atomic_fetch_and`, `atomic_thread_fence`, `atomic_signal_fence`. (REQ: REQ-06-1588)
+        - [ ] Memory orders: `memory_order_relaxed`, `memory_order_consume`, `memory_order_acquire`, `memory_order_release`, `memory_order_acq_rel`, `memory_order_seq_cst`. (REQ: REQ-06-1589)
+    - [ ] **Error Handling (`<errno.h>`, `<assert.h>`):** (REQ: REQ-06-1590)
+        - [ ] `errno` as thread-local; all POSIX error constants (`EACCES`, `EAGAIN`, `EBADF`, `EBUSY`, `EEXIST`, `EINTR`, `EINVAL`, `EIO`, `EISDIR`, `EMFILE`, `ENFILE`, `ENOENT`, `ENOMEM`, `ENOSPC`, `ENOSYS`, `ENOTDIR`, `ENOTEMPTY`, `ENOTSUP`, `EPERM`, `ERANGE`, etc.). (REQ: REQ-06-1591)
+        - [ ] `assert()` with `NDEBUG` suppression. (REQ: REQ-06-1592)
+    - [ ] **Format Macros (`<inttypes.h>`):** (REQ: REQ-06-1593)
+        - [ ] `PRId8`..`PRId64`, `PRIu8`..`PRIu64`, `PRIx8`..`PRIx64`, `PRIX8`..`PRIX64`, `PRIo8`..`PRIo64`. (REQ: REQ-06-1594)
+        - [ ] `SCNd8`..`SCNd64`, `SCNu8`..`SCNu64`, `SCNx8`..`SCNx64`. (REQ: REQ-06-1595)
+        - [ ] `strtoimax()`, `strtoumax()`, `imaxabs()`, `imaxdiv()`. (REQ: REQ-06-1596)
+    - [ ] **Testing (ISO C23 libc surface):** (REQ: REQ-06-1597)
+        - [ ] Unit: all `ctype` functions classify representative characters correctly. (REQ: REQ-06-1598)
+        - [ ] Unit: `setjmp`/`longjmp` round-trip preserves value. (REQ: REQ-06-1599)
+        - [ ] Unit: `strtol` base-10 and base-16 with overflow. (REQ: REQ-06-1600)
+        - [ ] Unit: `qsort` sorts known array correctly. (REQ: REQ-06-1601)
+        - [ ] Unit: `mktime`/`gmtime_r` round-trip. (REQ: REQ-06-1602)
+        - [ ] Unit: `c32rtomb`/`mbrtoc32` round-trip for BMP and supplementary chars. (REQ: REQ-06-1603)
+        - [ ] Unit: `atomic_fetch_add` with multiple threads. (REQ: REQ-06-1604)
+        - [ ] Unit: `memset_explicit` is not optimized away (volatile-like semantics). (REQ: REQ-06-1605)
+        - [ ] Property: `strlen(s) == wcslen(wcs)` for ASCII-only strings. (REQ: REQ-06-1606)
+        - [ ] Fuzz: random inputs to `strtod`, `strtol`, `atoi`. (REQ: REQ-06-1607)
+    - [ ] **Man Pages (ISO C23 surface):** (REQ: REQ-06-1608)
+        - [ ] `ctype(3)` overview, `setjmp(3)`, `signal(3)`, `strtol(3)`, `qsort(3)`, `bsearch(3)`. (REQ: REQ-06-1609)
+        - [ ] `stdatomic.h(0P)` — C11/C23 atomics overview. (REQ: REQ-06-1610)
+        - [ ] `uchar.h(0P)` — Unicode character types and conversions. (REQ: REQ-06-1611)
+
 - [ ] **POSIX.1-2024 Gap Closure Audit:** (REQ: REQ-06-1238)
     - [ ] **Foundational Headers & ABI Macros:** (REQ: REQ-06-1239)
         - [ ] Add complete header contracts for `<assert.h>`, `<ctype.h>`, `<errno.h>`, `<inttypes.h>`, `<libgen.h>`, `<limits.h>`, `<setjmp.h>`, `<signal.h>`, `<stdint.h>`, `<stdbool.h>`, `<stddef.h>`, `<stdarg.h>`, `<wchar.h>`, and `<wctype.h>`, including required feature-test and visibility rules. (REQ: REQ-06-1240)
@@ -2978,6 +3362,335 @@
 - **US-06-1280**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add non-local jump and assertion interfaces: `setjmp()`, `longjmp()`, `sigsetjmp()`, `siglongjmp()`, `assert()` so that this capability is implemented with clear verification evidence.
 - **US-06-1281**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add terminal/path/temp helpers: `grantpt()`, `mkdtemp()`, `posix_openpt()`, `ptsname()`, `realpath()`, `ttyname()`, `ttyname_r()`, `unlockpt()` so that this capability is implemented with clear verification evidence.
 - **US-06-1282**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add tests and man pages for search, spawn, jump, assertion, and PTY/path utilities so that this capability is implemented with clear verification evidence.
+- **US-06-1283**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `libdl` Logical Surface (`<dlfcn.h>`) so that this capability is implemented with clear verification evidence.
+- **US-06-1284**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `dladdr(const void *addr, Dl_info *info)`: address-to-symbol reverse lookup. so that this capability is implemented with clear verification evidence.
+- **US-06-1285**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `dlclose(void *handle)`: decrement ref-count; unload if zero. so that this capability is implemented with clear verification evidence.
+- **US-06-1286**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `dlerror(void)`: thread-local last-error string; clears after call. so that this capability is implemented with clear verification evidence.
+- **US-06-1287**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `dlopen(const char *filename, int flags)`: load DSO; flags include `RTLD_LAZY`, `RTLD_NOW`, `RTLD_LOCAL`, `RTLD_GLOBAL`, `RTLD_NODELETE`, `RTLD_NOLOAD`. so that this capability is implemented with clear verification evidence.
+- **US-06-1288**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `dlsym(void *handle, const char *symbol)`: symbol lookup with `RTLD_DEFAULT` and `RTLD_NEXT`. so that this capability is implemented with clear verification evidence.
+- **US-06-1289**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `dlinfo(void *handle, int request, void *info)`: query DSO metadata (GNU/BSD extension). so that this capability is implemented with clear verification evidence.
+- **US-06-1290**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `dl_iterate_phdr(callback, data)`: iterate all loaded program headers (GNU extension). so that this capability is implemented with clear verification evidence.
+- **US-06-1291**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Testing so that this capability is implemented with clear verification evidence.
+- **US-06-1292**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: `dlopen` → `dlsym` → use → `dlclose` round-trip. so that this capability is implemented with clear verification evidence.
+- **US-06-1293**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: `dlerror` clears after retrieval. so that this capability is implemented with clear verification evidence.
+- **US-06-1294**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: `dladdr` resolves known symbols. so that this capability is implemented with clear verification evidence.
+- **US-06-1295**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Property: `dlclose` never produces negative refcounts. so that this capability is implemented with clear verification evidence.
+- **US-06-1296**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Fuzz: random flag combos to `dlopen`. so that this capability is implemented with clear verification evidence.
+- **US-06-1297**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Man Pages:** `dlopen(3)`, `dlsym(3)`, `dlclose(3)`, `dlerror(3)`, `dladdr(3)`, `dlinfo(3)`, `dl_iterate_phdr(3)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1298**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `libpthread` Logical Surface (`<pthread.h>` + `<threads.h>`) so that this capability is implemented with clear verification evidence.
+- **US-06-1299**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Thread Lifecycle so that this capability is implemented with clear verification evidence.
+- **US-06-1300**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_create(thread, attr, start_routine, arg)`: create a new thread. so that this capability is implemented with clear verification evidence.
+- **US-06-1301**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_exit(retval)`: terminate calling thread. so that this capability is implemented with clear verification evidence.
+- **US-06-1302**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_join(thread, retval)`: wait for thread termination. so that this capability is implemented with clear verification evidence.
+- **US-06-1303**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_detach(thread)`: mark thread as detached. so that this capability is implemented with clear verification evidence.
+- **US-06-1304**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_self()`: obtain calling thread's ID. so that this capability is implemented with clear verification evidence.
+- **US-06-1305**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_equal(t1, t2)`: compare thread IDs. so that this capability is implemented with clear verification evidence.
+- **US-06-1306**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_cancel(thread)`: request thread cancellation. so that this capability is implemented with clear verification evidence.
+- **US-06-1307**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_setcancelstate(state, oldstate)`: set cancellation state. so that this capability is implemented with clear verification evidence.
+- **US-06-1308**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_setcanceltype(type, oldtype)`: set cancellation type. so that this capability is implemented with clear verification evidence.
+- **US-06-1309**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_testcancel()`: create cancellation point. so that this capability is implemented with clear verification evidence.
+- **US-06-1310**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Thread Attributes so that this capability is implemented with clear verification evidence.
+- **US-06-1311**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_attr_init()` / `pthread_attr_destroy()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1312**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_attr_setdetachstate()` / `getdetachstate()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1313**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_attr_setstacksize()` / `getstacksize()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1314**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_attr_setstackaddr()` / `getstackaddr()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1315**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_attr_setguardsize()` / `getguardsize()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1316**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_attr_setschedparam()` / `getschedparam()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1317**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_attr_setschedpolicy()` / `getschedpolicy()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1318**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_attr_setinheritsched()` / `getinheritsched()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1319**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_attr_setscope()` / `getscope()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1320**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Mutexes so that this capability is implemented with clear verification evidence.
+- **US-06-1321**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_mutex_init(mutex, attr)` / `pthread_mutex_destroy(mutex)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1322**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_mutex_lock(mutex)` / `pthread_mutex_trylock(mutex)` / `pthread_mutex_unlock(mutex)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1323**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_mutex_timedlock(mutex, abstime)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1324**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_mutexattr_init()` / `destroy()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1325**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_mutexattr_settype()` / `gettype()`: `PTHREAD_MUTEX_NORMAL`, `ERRORCHECK`, `RECURSIVE`, `DEFAULT`. so that this capability is implemented with clear verification evidence.
+- **US-06-1326**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_mutexattr_setprotocol()` / `getprotocol()`: `PTHREAD_PRIO_NONE`, `INHERIT`, `PROTECT`. so that this capability is implemented with clear verification evidence.
+- **US-06-1327**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_mutexattr_setrobust()` / `getrobust()`: `PTHREAD_MUTEX_STALLED`, `ROBUST`. so that this capability is implemented with clear verification evidence.
+- **US-06-1328**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_mutex_consistent(mutex)`: mark recovered robust mutex. so that this capability is implemented with clear verification evidence.
+- **US-06-1329**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Condition Variables so that this capability is implemented with clear verification evidence.
+- **US-06-1330**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_cond_init(cond, attr)` / `pthread_cond_destroy(cond)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1331**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_cond_wait(cond, mutex)` / `pthread_cond_timedwait(cond, mutex, abstime)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1332**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_cond_signal(cond)` / `pthread_cond_broadcast(cond)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1333**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_condattr_init()` / `destroy()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1334**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_condattr_setclock()` / `getclock()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1335**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_condattr_setpshared()` / `getpshared()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1336**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Read-Write Locks so that this capability is implemented with clear verification evidence.
+- **US-06-1337**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_rwlock_init()` / `pthread_rwlock_destroy()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1338**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_rwlock_rdlock()` / `tryrdlock()` / `timedrdlock()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1339**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_rwlock_wrlock()` / `trywrlock()` / `timedwrlock()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1340**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_rwlock_unlock()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1341**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_rwlockattr_init()` / `destroy()` / `setpshared()` / `getpshared()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1342**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Barriers so that this capability is implemented with clear verification evidence.
+- **US-06-1343**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_barrier_init(barrier, attr, count)` / `pthread_barrier_destroy(barrier)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1344**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_barrier_wait(barrier)`: return `PTHREAD_BARRIER_SERIAL_THREAD` for one waiter. so that this capability is implemented with clear verification evidence.
+- **US-06-1345**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_barrierattr_init()` / `destroy()` / `setpshared()` / `getpshared()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1346**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Spinlocks so that this capability is implemented with clear verification evidence.
+- **US-06-1347**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_spin_init(lock, pshared)` / `pthread_spin_destroy(lock)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1348**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_spin_lock(lock)` / `pthread_spin_trylock(lock)` / `pthread_spin_unlock(lock)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1349**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Thread-Specific Data (TSD) so that this capability is implemented with clear verification evidence.
+- **US-06-1350**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_key_create(key, destructor)` / `pthread_key_delete(key)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1351**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_setspecific(key, value)` / `pthread_getspecific(key)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1352**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Once Initialization so that this capability is implemented with clear verification evidence.
+- **US-06-1353**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_once(once_control, init_routine)` with `PTHREAD_ONCE_INIT`. so that this capability is implemented with clear verification evidence.
+- **US-06-1354**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Cleanup Handlers so that this capability is implemented with clear verification evidence.
+- **US-06-1355**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_cleanup_push(routine, arg)` / `pthread_cleanup_pop(execute)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1356**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Scheduling so that this capability is implemented with clear verification evidence.
+- **US-06-1357**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_setschedparam(thread, policy, param)` / `pthread_getschedparam()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1358**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_setschedprio(thread, prio)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1359**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_yield()` (non-portable) / `sched_yield()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1360**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Concurrency Level so that this capability is implemented with clear verification evidence.
+- **US-06-1361**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_setconcurrency(new_level)` / `pthread_getconcurrency()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1362**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Fork Safety so that this capability is implemented with clear verification evidence.
+- **US-06-1363**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_atfork(prepare, parent, child)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1364**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Signal Masking so that this capability is implemented with clear verification evidence.
+- **US-06-1365**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_sigmask(how, set, oldset)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1366**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_kill(thread, sig)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1367**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `sigwait(set, sig)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1368**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to C11/C23 `<threads.h>` Portable Abstraction so that this capability is implemented with clear verification evidence.
+- **US-06-1369**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `thrd_create(thr, func, arg)` / `thrd_exit(res)` / `thrd_join(thr, res)` / `thrd_detach(thr)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1370**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `thrd_current()` / `thrd_equal(lhs, rhs)` / `thrd_sleep(duration, remaining)` / `thrd_yield()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1371**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `mtx_init(mtx, type)` / `mtx_destroy(mtx)` / `mtx_lock(mtx)` / `mtx_trylock(mtx)` / `mtx_timedlock(mtx, ts)` / `mtx_unlock(mtx)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1372**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `cnd_init(cond)` / `cnd_destroy(cond)` / `cnd_signal(cond)` / `cnd_broadcast(cond)` / `cnd_wait(cond, mtx)` / `cnd_timedwait(cond, mtx, ts)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1373**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `tss_create(key, dtor)` / `tss_delete(key)` / `tss_get(key)` / `tss_set(key, val)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1374**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `call_once(flag, func)` with `once_flag` / `ONCE_FLAG_INIT`. so that this capability is implemented with clear verification evidence.
+- **US-06-1375**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Testing so that this capability is implemented with clear verification evidence.
+- **US-06-1376**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: thread create/join round-trip with return value. so that this capability is implemented with clear verification evidence.
+- **US-06-1377**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: mutex type enforcement (ERRORCHECK returns EDEADLK on double-lock). so that this capability is implemented with clear verification evidence.
+- **US-06-1378**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: cond_broadcast wakes all waiters. so that this capability is implemented with clear verification evidence.
+- **US-06-1379**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: rwlock allows concurrent readers, exclusive writer. so that this capability is implemented with clear verification evidence.
+- **US-06-1380**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: barrier wait returns SERIAL_THREAD to exactly one waiter. so that this capability is implemented with clear verification evidence.
+- **US-06-1381**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: TSD destructor invoked on thread exit. so that this capability is implemented with clear verification evidence.
+- **US-06-1382**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: `pthread_once` executes init_routine exactly once across threads. so that this capability is implemented with clear verification evidence.
+- **US-06-1383**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: cancellation handlers run in LIFO order. so that this capability is implemented with clear verification evidence.
+- **US-06-1384**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: `pthread_atfork` handlers execute in correct order. so that this capability is implemented with clear verification evidence.
+- **US-06-1385**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: C11 `<threads.h>` create/join with `thrd_success` return. so that this capability is implemented with clear verification evidence.
+- **US-06-1386**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Property: `pthread_mutex_lock` → `unlock` always succeeds for valid mutex. so that this capability is implemented with clear verification evidence.
+- **US-06-1387**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Property: `pthread_cond_signal` never loses wakeups. so that this capability is implemented with clear verification evidence.
+- **US-06-1388**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Property: robust mutex → `EOWNERDEAD` when holder exits. so that this capability is implemented with clear verification evidence.
+- **US-06-1389**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Stress: 100+ threads contending on single mutex. so that this capability is implemented with clear verification evidence.
+- **US-06-1390**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Stress: producer-consumer with condvar under high contention. so that this capability is implemented with clear verification evidence.
+- **US-06-1391**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Fuzz: random scheduling of lock/unlock/signal sequences. so that this capability is implemented with clear verification evidence.
+- **US-06-1392**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Man Pages so that this capability is implemented with clear verification evidence.
+- **US-06-1393**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_create(3)`, `pthread_exit(3)`, `pthread_join(3)`, `pthread_detach(3)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1394**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_mutex_init(3)`, `pthread_mutex_lock(3)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1395**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_cond_init(3)`, `pthread_cond_wait(3)`, `pthread_cond_signal(3)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1396**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_rwlock_init(3)`, `pthread_rwlock_rdlock(3)`, `pthread_rwlock_wrlock(3)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1397**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_barrier_init(3)`, `pthread_barrier_wait(3)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1398**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_key_create(3)`, `pthread_once(3)`, `pthread_atfork(3)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1399**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_cancel(3)`, `pthread_cleanup_push(3)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1400**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `pthread_sigmask(3)`, `pthread_kill(3)`, `sigwait(3)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1401**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `threads.h(0P)` — C11/C23 threads overview. so that this capability is implemented with clear verification evidence.
+- **US-06-1402**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `tgmath.h` — Type-Generic Math Macros (C11/C23) so that this capability is implemented with clear verification evidence.
+- **US-06-1403**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Define type-generic dispatching macros for all applicable `<math.h>` functions so that this capability is implemented with clear verification evidence.
+- **US-06-1404**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Trigonometric: `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`. so that this capability is implemented with clear verification evidence.
+- **US-06-1405**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Hyperbolic: `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`. so that this capability is implemented with clear verification evidence.
+- **US-06-1406**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Exponential/log: `exp`, `exp2`, `expm1`, `log`, `log2`, `log10`, `log1p`, `logb`, `ilogb`. so that this capability is implemented with clear verification evidence.
+- **US-06-1407**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Power: `pow`, `sqrt`, `cbrt`, `hypot`. so that this capability is implemented with clear verification evidence.
+- **US-06-1408**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Rounding: `ceil`, `floor`, `trunc`, `round`, `lround`, `llround`, `nearbyint`, `rint`, `lrint`, `llrint`. so that this capability is implemented with clear verification evidence.
+- **US-06-1409**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Manipulation: `frexp`, `ldexp`, `modf`, `scalbn`, `scalbln`, `nextafter`, `nexttoward`, `copysign`. so that this capability is implemented with clear verification evidence.
+- **US-06-1410**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Error/gamma: `erf`, `erfc`, `tgamma`, `lgamma`. so that this capability is implemented with clear verification evidence.
+- **US-06-1411**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Absolute/remainder: `fabs`, `fmod`, `remainder`, `remquo`, `fma`, `fdim`, `fmax`, `fmin`. so that this capability is implemented with clear verification evidence.
+- **US-06-1412**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Define type-generic dispatching macros for `<complex.h>` functions (if `__STDC_NO_COMPLEX__` is not defined) so that this capability is implemented with clear verification evidence.
+- **US-06-1413**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `cabs`, `carg`, `cimag`, `creal`, `conj`, `cproj`. so that this capability is implemented with clear verification evidence.
+- **US-06-1414**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `cexp`, `clog`, `cpow`, `csqrt`. so that this capability is implemented with clear verification evidence.
+- **US-06-1415**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `csin`, `ccos`, `ctan`, `casin`, `cacos`, `catan`. so that this capability is implemented with clear verification evidence.
+- **US-06-1416**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `csinh`, `ccosh`, `ctanh`, `casinh`, `cacosh`, `catanh`. so that this capability is implemented with clear verification evidence.
+- **US-06-1417**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Ensure dispatch correctly handles mixed-type arguments (e.g., `pow(int, float)` dispatches to `powf`). so that this capability is implemented with clear verification evidence.
+- **US-06-1418**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Testing (`tests/lib/m/unit/test_tgmath.c`) so that this capability is implemented with clear verification evidence.
+- **US-06-1419**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Compile-time: verify correct variant is selected via `_Generic` or `__builtin_types_compatible_p`. so that this capability is implemented with clear verification evidence.
+- **US-06-1420**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: `sin((float)x)` calls `sinf`, `sin((double)x)` calls `sin`, `sin((long double)x)` calls `sinl`. so that this capability is implemented with clear verification evidence.
+- **US-06-1421**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: complex dispatch when `<complex.h>` is available. so that this capability is implemented with clear verification evidence.
+- **US-06-1422**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Property: result type matches narrowest argument type. so that this capability is implemented with clear verification evidence.
+- **US-06-1423**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Man Pages:** `tgmath.h(0P)` — type-generic math overview, dispatch rules, examples. so that this capability is implemented with clear verification evidence.
+- **US-06-1424**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to POSIX-2024 Callable Surface (System Interface Headers) so that this capability is implemented with clear verification evidence.
+- **US-06-1425**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<unistd.h>` — POSIX Operating System API so that this capability is implemented with clear verification evidence.
+- **US-06-1426**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Process: `fork()`, `vfork()`, `_exit()`, `execve()`, `execl()`, `execle()`, `execlp()`, `execv()`, `execvp()`, `execvpe()`, `fexecve()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1427**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Process identity: `getpid()`, `getppid()`, `getpgrp()`, `setpgid()`, `setsid()`, `getsid()`, `getuid()`, `geteuid()`, `getgid()`, `getegid()`, `setuid()`, `seteuid()`, `setgid()`, `setegid()`, `setreuid()`, `setregid()`, `getgroups()`, `setgroups()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1428**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to File I/O: `read()`, `write()`, `lseek()`, `close()`, `dup()`, `dup2()`, `pipe()`, `pread()`, `pwrite()`, `ftruncate()`, `truncate()`, `fsync()`, `fdatasync()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1429**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to File operations: `link()`, `linkat()`, `unlink()`, `unlinkat()`, `symlink()`, `symlinkat()`, `readlink()`, `readlinkat()`, `rename()`, `renameat()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1430**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Directory: `chdir()`, `fchdir()`, `getcwd()`, `chroot()`, `rmdir()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1431**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to File access: `access()`, `faccessat()`, `chown()`, `fchown()`, `fchownat()`, `lchown()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1432**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Terminal: `isatty()`, `ttyname()`, `ttyname_r()`, `tcgetpgrp()`, `tcsetpgrp()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1433**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Miscellaneous: `alarm()`, `pause()`, `sleep()`, `usleep()`, `sysconf()`, `pathconf()`, `fpathconf()`, `getlogin()`, `getlogin_r()`, `gethostname()`, `sethostname()`, `getopt()`, `crypt()`, `encrypt()`, `swab()`, `nice()`, `confstr()`, `getpagesize()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1434**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<fcntl.h>` — File Control so that this capability is implemented with clear verification evidence.
+- **US-06-1435**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `open()`, `openat()`, `creat()`, `fcntl()` (with `F_DUPFD`, `F_GETFD`, `F_SETFD`, `F_GETFL`, `F_SETFL`, `F_GETLK`, `F_SETLK`, `F_SETLKW`, `F_GETOWN`, `F_SETOWN`). so that this capability is implemented with clear verification evidence.
+- **US-06-1436**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Open flags: `O_RDONLY`, `O_WRONLY`, `O_RDWR`, `O_APPEND`, `O_CREAT`, `O_EXCL`, `O_TRUNC`, `O_NONBLOCK`, `O_NOCTTY`, `O_CLOEXEC`, `O_DIRECTORY`, `O_NOFOLLOW`, `O_SYNC`, `O_DSYNC`. so that this capability is implemented with clear verification evidence.
+- **US-06-1437**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Advisory locking: `struct flock`, `F_RDLCK`, `F_WRLCK`, `F_UNLCK`. so that this capability is implemented with clear verification evidence.
+- **US-06-1438**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `posix_fadvise()`, `posix_fallocate()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1439**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<dirent.h>` — Directory Entries so that this capability is implemented with clear verification evidence.
+- **US-06-1440**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `opendir()`, `fdopendir()`, `readdir()`, `readdir_r()`, `rewinddir()`, `seekdir()`, `telldir()`, `closedir()`, `dirfd()`, `scandir()`, `alphasort()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1441**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<sys/stat.h>` — File Status so that this capability is implemented with clear verification evidence.
+- **US-06-1442**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `stat()`, `lstat()`, `fstat()`, `fstatat()`, `chmod()`, `fchmod()`, `fchmodat()`, `mkdir()`, `mkdirat()`, `mkfifo()`, `mkfifoat()`, `mknod()`, `mknodat()`, `umask()`, `futimens()`, `utimensat()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1443**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `struct stat` with `st_dev`, `st_ino`, `st_mode`, `st_nlink`, `st_uid`, `st_gid`, `st_rdev`, `st_size`, `st_blksize`, `st_blocks`, `st_atim`, `st_mtim`, `st_ctim`. so that this capability is implemented with clear verification evidence.
+- **US-06-1444**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Mode macros: `S_ISREG`, `S_ISDIR`, `S_ISCHR`, `S_ISBLK`, `S_ISFIFO`, `S_ISLNK`, `S_ISSOCK`, `S_IRWXU`, etc. so that this capability is implemented with clear verification evidence.
+- **US-06-1445**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<sys/wait.h>` — Process Wait so that this capability is implemented with clear verification evidence.
+- **US-06-1446**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `wait()`, `waitpid()`, `waitid()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1447**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Status macros: `WIFEXITED`, `WEXITSTATUS`, `WIFSIGNALED`, `WTERMSIG`, `WIFSTOPPED`, `WSTOPSIG`, `WIFCONTINUED`, `WCOREDUMP`. so that this capability is implemented with clear verification evidence.
+- **US-06-1448**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<sys/uio.h>` — Scatter/Gather I/O so that this capability is implemented with clear verification evidence.
+- **US-06-1449**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `readv()`, `writev()`, `preadv()`, `pwritev()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1450**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `struct iovec` with `iov_base`, `iov_len`. so that this capability is implemented with clear verification evidence.
+- **US-06-1451**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<sys/mman.h>` — Memory Management so that this capability is implemented with clear verification evidence.
+- **US-06-1452**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `mmap()`, `munmap()`, `mprotect()`, `msync()`, `mlock()`, `munlock()`, `mlockall()`, `munlockall()`, `madvise()`, `mincore()`, `shm_open()`, `shm_unlink()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1453**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Prot flags: `PROT_READ`, `PROT_WRITE`, `PROT_EXEC`, `PROT_NONE`. so that this capability is implemented with clear verification evidence.
+- **US-06-1454**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Map flags: `MAP_SHARED`, `MAP_PRIVATE`, `MAP_FIXED`, `MAP_ANONYMOUS`, `MAP_FAILED`. so that this capability is implemented with clear verification evidence.
+- **US-06-1455**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<aio.h>` — Asynchronous I/O so that this capability is implemented with clear verification evidence.
+- **US-06-1456**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `aio_read()`, `aio_write()`, `aio_error()`, `aio_return()`, `aio_cancel()`, `aio_suspend()`, `aio_fsync()`, `lio_listio()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1457**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `struct aiocb` with `aio_fildes`, `aio_offset`, `aio_buf`, `aio_nbytes`, `aio_reqprio`, `aio_sigevent`, `aio_lio_opcode`. so that this capability is implemented with clear verification evidence.
+- **US-06-1458**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<semaphore.h>` — POSIX Semaphores so that this capability is implemented with clear verification evidence.
+- **US-06-1459**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `sem_init()`, `sem_destroy()`, `sem_open()`, `sem_close()`, `sem_unlink()`, `sem_wait()`, `sem_trywait()`, `sem_timedwait()`, `sem_post()`, `sem_getvalue()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1460**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<mqueue.h>` — POSIX Message Queues so that this capability is implemented with clear verification evidence.
+- **US-06-1461**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `mq_open()`, `mq_close()`, `mq_unlink()`, `mq_send()`, `mq_receive()`, `mq_timedsend()`, `mq_timedreceive()`, `mq_notify()`, `mq_getattr()`, `mq_setattr()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1462**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<spawn.h>` — POSIX Spawn so that this capability is implemented with clear verification evidence.
+- **US-06-1463**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `posix_spawn()`, `posix_spawnp()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1464**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `posix_spawn_file_actions_init()` / `destroy()` / `addopen()` / `addclose()` / `adddup2()` / `addchdir_np()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1465**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `posix_spawnattr_init()` / `destroy()` / `setflags()` / `getflags()` / `setsigdefault()` / `getsigdefault()` / `setsigmask()` / `getsigmask()` / `setpgroup()` / `getpgroup()` / `setschedparam()` / `getschedparam()` / `setschedpolicy()` / `getschedpolicy()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1466**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<poll.h>` — I/O Multiplexing so that this capability is implemented with clear verification evidence.
+- **US-06-1467**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `poll()`, `ppoll()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1468**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `struct pollfd` with `fd`, `events`, `revents`. so that this capability is implemented with clear verification evidence.
+- **US-06-1469**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Event flags: `POLLIN`, `POLLOUT`, `POLLERR`, `POLLHUP`, `POLLNVAL`, `POLLRDNORM`, `POLLRDBAND`, `POLLWRNORM`, `POLLWRBAND`. so that this capability is implemented with clear verification evidence.
+- **US-06-1470**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<sched.h>` — Process Scheduling so that this capability is implemented with clear verification evidence.
+- **US-06-1471**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `sched_setscheduler()`, `sched_getscheduler()`, `sched_setparam()`, `sched_getparam()`, `sched_yield()`, `sched_get_priority_max()`, `sched_get_priority_min()`, `sched_rr_get_interval()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1472**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<regex.h>` — Regular Expressions so that this capability is implemented with clear verification evidence.
+- **US-06-1473**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `regcomp()`, `regexec()`, `regerror()`, `regfree()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1474**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Flags: `REG_EXTENDED`, `REG_ICASE`, `REG_NOSUB`, `REG_NEWLINE`, `REG_NOTBOL`, `REG_NOTEOL`. so that this capability is implemented with clear verification evidence.
+- **US-06-1475**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<glob.h>` — Pathname Generation so that this capability is implemented with clear verification evidence.
+- **US-06-1476**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `glob()`, `globfree()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1477**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Flags: `GLOB_ERR`, `GLOB_MARK`, `GLOB_NOSORT`, `GLOB_DOOFFS`, `GLOB_NOCHECK`, `GLOB_APPEND`, `GLOB_NOESCAPE`. so that this capability is implemented with clear verification evidence.
+- **US-06-1478**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<fnmatch.h>` — Filename Matching so that this capability is implemented with clear verification evidence.
+- **US-06-1479**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `fnmatch()` with `FNM_PATHNAME`, `FNM_PERIOD`, `FNM_NOESCAPE`. so that this capability is implemented with clear verification evidence.
+- **US-06-1480**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<wordexp.h>` — Word Expansion so that this capability is implemented with clear verification evidence.
+- **US-06-1481**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `wordexp()`, `wordfree()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1482**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<search.h>` — Search Tables so that this capability is implemented with clear verification evidence.
+- **US-06-1483**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `hcreate()`, `hdestroy()`, `hsearch()`, `insque()`, `lfind()`, `lsearch()`, `remque()`, `tdelete()`, `tfind()`, `tsearch()`, `twalk()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1484**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<ftw.h>` — File Tree Walk so that this capability is implemented with clear verification evidence.
+- **US-06-1485**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `ftw()`, `nftw()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1486**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<libgen.h>` — Path Utilities so that this capability is implemented with clear verification evidence.
+- **US-06-1487**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `basename()`, `dirname()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1488**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<langinfo.h>` — Language Information so that this capability is implemented with clear verification evidence.
+- **US-06-1489**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `nl_langinfo()`, `nl_langinfo_l()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1490**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<monetary.h>` — Monetary Formatting so that this capability is implemented with clear verification evidence.
+- **US-06-1491**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `strfmon()`, `strfmon_l()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1492**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<fmtmsg.h>` — Formatted Messages so that this capability is implemented with clear verification evidence.
+- **US-06-1493**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `fmtmsg()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1494**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<iconv.h>` — Character Set Conversion so that this capability is implemented with clear verification evidence.
+- **US-06-1495**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `iconv_open()`, `iconv()`, `iconv_close()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1496**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<nl_types.h>` — Message Catalogs so that this capability is implemented with clear verification evidence.
+- **US-06-1497**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `catopen()`, `catgets()`, `catclose()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1498**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Networking Headers so that this capability is implemented with clear verification evidence.
+- **US-06-1499**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<arpa/inet.h>`:** `inet_addr()`, `inet_ntoa()`, `inet_pton()`, `inet_ntop()`, `htonl()`, `htons()`, `ntohl()`, `ntohs()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1500**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<netdb.h>`:** `gethostbyname()`, `gethostbyaddr()`, `getaddrinfo()`, `freeaddrinfo()`, `gai_strerror()`, `getnameinfo()`, `getservbyname()`, `getservbyport()`, `getprotobyname()`, `getprotobynumber()`, `getnetbyname()`, `getnetbyaddr()`, `sethostent()`, `endhostent()`, `setnetent()`, `endnetent()`, `setservent()`, `endservent()`, `setprotoent()`, `endprotoent()`, `herror()`, `hstrerror()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1501**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<sys/socket.h>`:** `socket()`, `bind()`, `listen()`, `accept()`, `connect()`, `send()`, `recv()`, `sendto()`, `recvfrom()`, `sendmsg()`, `recvmsg()`, `shutdown()`, `getsockopt()`, `setsockopt()`, `getsockname()`, `getpeername()`, `socketpair()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1502**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<net/if.h>`:** `if_nametoindex()`, `if_indextoname()`, `if_nameindex()`, `if_freenameindex()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1503**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Account / Identity Headers so that this capability is implemented with clear verification evidence.
+- **US-06-1504**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<grp.h>`:** `getgrnam()`, `getgrgid()`, `getgrent()`, `setgrent()`, `endgrent()`, `getgrnam_r()`, `getgrgid_r()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1505**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<pwd.h>`:** `getpwnam()`, `getpwuid()`, `getpwent()`, `setpwent()`, `endpwent()`, `getpwnam_r()`, `getpwuid_r()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1506**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<syslog.h>` — System Logging so that this capability is implemented with clear verification evidence.
+- **US-06-1507**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `openlog()`, `syslog()`, `closelog()`, `setlogmask()`, `vsyslog()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1508**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Priority macros: `LOG_EMERG` through `LOG_DEBUG`; facility macros: `LOG_KERN`, `LOG_USER`, `LOG_DAEMON`, etc. so that this capability is implemented with clear verification evidence.
+- **US-06-1509**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<termios.h>` — Terminal Control so that this capability is implemented with clear verification evidence.
+- **US-06-1510**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `tcgetattr()`, `tcsetattr()`, `tcsendbreak()`, `tcdrain()`, `tcflush()`, `tcflow()`, `cfgetispeed()`, `cfsetispeed()`, `cfgetospeed()`, `cfsetospeed()`, `cfmakeraw()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1511**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<sys/resource.h>` — Resource Usage so that this capability is implemented with clear verification evidence.
+- **US-06-1512**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `getrlimit()`, `setrlimit()`, `getrusage()`, `getpriority()`, `setpriority()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1513**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<sys/statvfs.h>` — Filesystem Statistics so that this capability is implemented with clear verification evidence.
+- **US-06-1514**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `statvfs()`, `fstatvfs()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1515**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<sys/times.h>` — Process Times so that this capability is implemented with clear verification evidence.
+- **US-06-1516**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `times()` with `struct tms`. so that this capability is implemented with clear verification evidence.
+- **US-06-1517**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<sys/utsname.h>` — System Identification so that this capability is implemented with clear verification evidence.
+- **US-06-1518**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `uname()` with `struct utsname`. so that this capability is implemented with clear verification evidence.
+- **US-06-1519**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to System V IPC so that this capability is implemented with clear verification evidence.
+- **US-06-1520**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<sys/ipc.h>`:** `ftok()`, IPC_CREAT, IPC_EXCL, IPC_NOWAIT, IPC_RMID, IPC_SET, IPC_STAT. so that this capability is implemented with clear verification evidence.
+- **US-06-1521**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<sys/msg.h>`:** `msgget()`, `msgsnd()`, `msgrcv()`, `msgctl()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1522**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<sys/shm.h>`:** `shmget()`, `shmat()`, `shmdt()`, `shmctl()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1523**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<sys/sem.h>`:** `semget()`, `semop()`, `semctl()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1524**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<utime.h>` / `<sys/time.h>` — Timestamps so that this capability is implemented with clear verification evidence.
+- **US-06-1525**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `utime()`, `utimes()`, `lutimes()`, `futimes()`, `gettimeofday()`, `settimeofday()`, `adjtime()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1526**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `select()`, `pselect()` (from `<sys/select.h>`). so that this capability is implemented with clear verification evidence.
+- **US-06-1527**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to POSIX Signal Extras (beyond `<signal.h>` base) so that this capability is implemented with clear verification evidence.
+- **US-06-1528**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `sigaction()`, `sigprocmask()`, `sigpending()`, `sigsuspend()`, `sigwaitinfo()`, `sigtimedwait()`, `sigqueue()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1529**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `sigaltstack()`, `siginterrupt()`, `sighold()`, `sigrelse()`, `sigignore()`, `sigpause()`, `sigset()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1530**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `psignal()`, `psiginfo()`, `strsignal()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1531**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to POSIX Time Extras (beyond `<time.h>` base) so that this capability is implemented with clear verification evidence.
+- **US-06-1532**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `clock_gettime()`, `clock_settime()`, `clock_getres()`, `clock_nanosleep()`, `nanosleep()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1533**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `timer_create()`, `timer_delete()`, `timer_settime()`, `timer_gettime()`, `timer_getoverrun()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1534**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Clock IDs: `CLOCK_REALTIME`, `CLOCK_MONOTONIC`, `CLOCK_PROCESS_CPUTIME_ID`, `CLOCK_THREAD_CPUTIME_ID`. so that this capability is implemented with clear verification evidence.
+- **US-06-1535**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Gettext Family (GNU/POSIX) so that this capability is implemented with clear verification evidence.
+- **US-06-1536**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `gettext()`, `dgettext()`, `dcgettext()`, `ngettext()`, `dngettext()`, `dcngettext()`, `textdomain()`, `bindtextdomain()`, `bind_textdomain_codeset()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1537**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Testing (POSIX callable surface) so that this capability is implemented with clear verification evidence.
+- **US-06-1538**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: `fork()` + `wait()` + `WIFEXITED` round-trip. so that this capability is implemented with clear verification evidence.
+- **US-06-1539**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: `socket()` + `bind()` + `listen()` + `accept()` + `connect()` round-trip. so that this capability is implemented with clear verification evidence.
+- **US-06-1540**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: `mmap()` + `munmap()` with MAP_ANONYMOUS. so that this capability is implemented with clear verification evidence.
+- **US-06-1541**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: `sigaction()` + signal delivery and handler invocation. so that this capability is implemented with clear verification evidence.
+- **US-06-1542**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: `clock_gettime(CLOCK_MONOTONIC)` returns increasing values. so that this capability is implemented with clear verification evidence.
+- **US-06-1543**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: `opendir()` + `readdir()` + `closedir()` round-trip. so that this capability is implemented with clear verification evidence.
+- **US-06-1544**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: `stat()` returns valid `struct stat` for known file. so that this capability is implemented with clear verification evidence.
+- **US-06-1545**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: `poll()` reports readability on readable fd. so that this capability is implemented with clear verification evidence.
+- **US-06-1546**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: `sem_init()` + `sem_post()` + `sem_wait()` + `sem_destroy()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1547**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: `posix_spawn()` creates child and returns pid. so that this capability is implemented with clear verification evidence.
+- **US-06-1548**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: System V IPC `shmget()` + `shmat()` + `shmdt()` + `shmctl()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1549**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Property: `getpid()` == `getpid()` (stable within process). so that this capability is implemented with clear verification evidence.
+- **US-06-1550**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Property: `pipe()` fd pair: write(fd[1]) → readable on fd[0]. so that this capability is implemented with clear verification evidence.
+- **US-06-1551**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Stress: 1000 concurrent `fork()` + `_exit()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1552**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Fuzz: random `fcntl()` flag combinations. so that this capability is implemented with clear verification evidence.
+- **US-06-1553**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Man Pages (POSIX callable surface) so that this capability is implemented with clear verification evidence.
+- **US-06-1554**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `select(2)`, `poll(2)`, `mmap(2)`, `sigaction(2)`, `clock_gettime(2)`, `socket(2)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1555**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `opendir(3)`, `readdir(3)`, `scandir(3)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1556**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `getaddrinfo(3)`, `getnameinfo(3)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1557**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `sem_overview(7)`, `mq_overview(7)`, `shm_overview(7)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1558**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to ISO C23 `libc` Surface (Non-Math, Non-Thread Remainder) so that this capability is implemented with clear verification evidence.
+- **US-06-1559**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Character Classification and Locale (`<ctype.h>`, `<locale.h>`, `<wctype.h>`) so that this capability is implemented with clear verification evidence.
+- **US-06-1560**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Full `is*()` family: `isalnum`, `isalpha`, `isblank`, `iscntrl`, `isdigit`, `isgraph`, `islower`, `isprint`, `ispunct`, `isspace`, `isupper`, `isxdigit`. so that this capability is implemented with clear verification evidence.
+- **US-06-1561**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `tolower()`, `toupper()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1562**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Wide variants: `iswalnum`, `iswalpha`, `iswblank`, `iswcntrl`, `iswdigit`, `iswgraph`, `iswlower`, `iswprint`, `iswpunct`, `iswspace`, `iswupper`, `iswxdigit`, `towlower`, `towupper`, `wctype`, `iswctype`, `wctrans`, `towctrans`. so that this capability is implemented with clear verification evidence.
+- **US-06-1563**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `setlocale()`, `localeconv()`, `newlocale()`, `duplocale()`, `freelocale()`, `uselocale()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1564**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Non-Local Jumps and Signal Handling (`<setjmp.h>`, `<signal.h>`) so that this capability is implemented with clear verification evidence.
+- **US-06-1565**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `setjmp()`, `longjmp()`, `sigsetjmp()`, `siglongjmp()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1566**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `signal()`, `raise()`, `sig_atomic_t`. so that this capability is implemented with clear verification evidence.
+- **US-06-1567**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Standard I/O (`<stdio.h>`) so that this capability is implemented with clear verification evidence.
+- **US-06-1568**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Already covered in detail above (FILE, buffer management, open/close, character/line/block I/O, positioning, printf/scanf, tmpfile/tmpnam, perror). so that this capability is implemented with clear verification evidence.
+- **US-06-1569**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to General Utilities (`<stdlib.h>`) so that this capability is implemented with clear verification evidence.
+- **US-06-1570**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Numeric conversion: `atoi`, `atol`, `atoll`, `atof`, `strtol`, `strtoll`, `strtoul`, `strtoull`, `strtod`, `strtof`, `strtold`, `strtoimax`, `strtoumax`. so that this capability is implemented with clear verification evidence.
+- **US-06-1571**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Memory: `malloc`, `calloc`, `realloc`, `free`, `aligned_alloc`. so that this capability is implemented with clear verification evidence.
+- **US-06-1572**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Process: `exit`, `_Exit`, `atexit`, `at_quick_exit`, `quick_exit`, `abort`, `system`. so that this capability is implemented with clear verification evidence.
+- **US-06-1573**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Environment: `getenv`, `secure_getenv` (GNU). so that this capability is implemented with clear verification evidence.
+- **US-06-1574**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Search/sort: `bsearch`, `qsort`, `qsort_s` (C11 Annex K). so that this capability is implemented with clear verification evidence.
+- **US-06-1575**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Integer arithmetic: `abs`, `labs`, `llabs`, `div`, `ldiv`, `lldiv`, `imaxabs`, `imaxdiv`. so that this capability is implemented with clear verification evidence.
+- **US-06-1576**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Pseudorandom: `rand`, `srand`, `rand_r`. so that this capability is implemented with clear verification evidence.
+- **US-06-1577**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Multibyte/wide: `mblen`, `mbtowc`, `wctomb`, `mbstowcs`, `wcstombs`. so that this capability is implemented with clear verification evidence.
+- **US-06-1578**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to String Handling (`<string.h>`, `<strings.h>`) so that this capability is implemented with clear verification evidence.
+- **US-06-1579**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Core: `memcpy`, `memmove`, `memset`, `memcmp`, `memchr`, `strlen`, `strcpy`, `strncpy`, `strcat`, `strncat`, `strcmp`, `strncmp`, `strchr`, `strrchr`, `strstr`, `strtok`, `strcspn`, `strspn`, `strpbrk`, `strerror`, `strcoll`, `strxfrm`. so that this capability is implemented with clear verification evidence.
+- **US-06-1580**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to C23 additions: `memset_explicit`, `memccpy`, `strnlen`, `strdup`, `strndup`, `strlcpy`, `strlcat`. so that this capability is implemented with clear verification evidence.
+- **US-06-1581**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to BSD: `bcopy`, `bzero`, `bcmp`, `index`, `rindex`, `ffs`, `strcasecmp`, `strncasecmp`. so that this capability is implemented with clear verification evidence.
+- **US-06-1582**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Date and Time (`<time.h>`) so that this capability is implemented with clear verification evidence.
+- **US-06-1583**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `time`, `difftime`, `mktime`, `gmtime`, `gmtime_r`, `localtime`, `localtime_r`, `asctime`, `asctime_r`, `ctime`, `ctime_r`, `strftime`, `strptime`, `timespec_get`, `timespec_getres`, `clock`. so that this capability is implemented with clear verification evidence.
+- **US-06-1584**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unicode / Wide Character (`<uchar.h>`, `<wchar.h>`) so that this capability is implemented with clear verification evidence.
+- **US-06-1585**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<uchar.h>`: `c16rtomb`, `c32rtomb`, `mbrtoc16`, `mbrtoc32`, `char8_t`, `char16_t`, `char32_t`. so that this capability is implemented with clear verification evidence.
+- **US-06-1586**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `<wchar.h>`: `wprintf`, `wscanf`, `fwprintf`, `fwscanf`, `swprintf`, `swscanf`, `vwprintf`, `vfwprintf`, `vswprintf`, `wcslen`, `wcscpy`, `wcsncpy`, `wcscat`, `wcsncat`, `wcscmp`, `wcsncmp`, `wcschr`, `wcsrchr`, `wcsstr`, `wcstok`, `wmemcpy`, `wmemmove`, `wmemcmp`, `wmemchr`, `wmemset`, `wcstol`, `wcstoll`, `wcstoul`, `wcstoull`, `wcstod`, `wcstof`, `wcstold`, `wcsftime`, `wcscoll`, `wcsxfrm`, `wcswidth`, `wcwidth`. so that this capability is implemented with clear verification evidence.
+- **US-06-1587**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Atomics and Alignment (`<stdatomic.h>`, `<stdalign.h>`) so that this capability is implemented with clear verification evidence.
+- **US-06-1588**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `atomic_flag`, `atomic_init`, `atomic_load`, `atomic_store`, `atomic_exchange`, `atomic_compare_exchange_strong`, `atomic_compare_exchange_weak`, `atomic_fetch_add`, `atomic_fetch_sub`, `atomic_fetch_or`, `atomic_fetch_xor`, `atomic_fetch_and`, `atomic_thread_fence`, `atomic_signal_fence`. so that this capability is implemented with clear verification evidence.
+- **US-06-1589**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Memory orders: `memory_order_relaxed`, `memory_order_consume`, `memory_order_acquire`, `memory_order_release`, `memory_order_acq_rel`, `memory_order_seq_cst`. so that this capability is implemented with clear verification evidence.
+- **US-06-1590**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Error Handling (`<errno.h>`, `<assert.h>`) so that this capability is implemented with clear verification evidence.
+- **US-06-1591**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `errno` as thread-local; all POSIX error constants (`EACCES`, `EAGAIN`, `EBADF`, `EBUSY`, `EEXIST`, `EINTR`, `EINVAL`, `EIO`, `EISDIR`, `EMFILE`, `ENFILE`, `ENOENT`, `ENOMEM`, `ENOSPC`, `ENOSYS`, `ENOTDIR`, `ENOTEMPTY`, `ENOTSUP`, `EPERM`, `ERANGE`, etc.). so that this capability is implemented with clear verification evidence.
+- **US-06-1592**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `assert()` with `NDEBUG` suppression. so that this capability is implemented with clear verification evidence.
+- **US-06-1593**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Format Macros (`<inttypes.h>`) so that this capability is implemented with clear verification evidence.
+- **US-06-1594**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `PRId8`..`PRId64`, `PRIu8`..`PRIu64`, `PRIx8`..`PRIx64`, `PRIX8`..`PRIX64`, `PRIo8`..`PRIo64`. so that this capability is implemented with clear verification evidence.
+- **US-06-1595**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `SCNd8`..`SCNd64`, `SCNu8`..`SCNu64`, `SCNx8`..`SCNx64`. so that this capability is implemented with clear verification evidence.
+- **US-06-1596**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `strtoimax()`, `strtoumax()`, `imaxabs()`, `imaxdiv()`. so that this capability is implemented with clear verification evidence.
+- **US-06-1597**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Testing (ISO C23 libc surface) so that this capability is implemented with clear verification evidence.
+- **US-06-1598**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: all `ctype` functions classify representative characters correctly. so that this capability is implemented with clear verification evidence.
+- **US-06-1599**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: `setjmp`/`longjmp` round-trip preserves value. so that this capability is implemented with clear verification evidence.
+- **US-06-1600**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: `strtol` base-10 and base-16 with overflow. so that this capability is implemented with clear verification evidence.
+- **US-06-1601**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: `qsort` sorts known array correctly. so that this capability is implemented with clear verification evidence.
+- **US-06-1602**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: `mktime`/`gmtime_r` round-trip. so that this capability is implemented with clear verification evidence.
+- **US-06-1603**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: `c32rtomb`/`mbrtoc32` round-trip for BMP and supplementary chars. so that this capability is implemented with clear verification evidence.
+- **US-06-1604**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: `atomic_fetch_add` with multiple threads. so that this capability is implemented with clear verification evidence.
+- **US-06-1605**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Unit: `memset_explicit` is not optimized away (volatile-like semantics). so that this capability is implemented with clear verification evidence.
+- **US-06-1606**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Property: `strlen(s) == wcslen(wcs)` for ASCII-only strings. so that this capability is implemented with clear verification evidence.
+- **US-06-1607**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Fuzz: random inputs to `strtod`, `strtol`, `atoi`. so that this capability is implemented with clear verification evidence.
+- **US-06-1608**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to Man Pages (ISO C23 surface) so that this capability is implemented with clear verification evidence.
+- **US-06-1609**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `ctype(3)` overview, `setjmp(3)`, `signal(3)`, `strtol(3)`, `qsort(3)`, `bsearch(3)`. so that this capability is implemented with clear verification evidence.
+- **US-06-1610**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `stdatomic.h(0P)` — C11/C23 atomics overview. so that this capability is implemented with clear verification evidence.
+- **US-06-1611**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to `uchar.h(0P)` — Unicode character types and conversions. so that this capability is implemented with clear verification evidence.
 
 ## INCOSE/EARS Requirements
 
@@ -6825,5 +7538,992 @@
   - Context: 6. C Library (`lib/c`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-06-1282** (EARS/Ubiquitous): The Substrate system shall add tests and man pages for search, spawn, jump, assertion, and PTY/path utilities.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1283** (EARS/Ubiquitous): The Substrate system shall `libdl` Logical Surface (`<dlfcn.h>`).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1284** (EARS/Ubiquitous): The Substrate system shall `dladdr(const void *addr, Dl_info *info)`: address-to-symbol reverse lookup..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1285** (EARS/Ubiquitous): The Substrate system shall `dlclose(void *handle)`: decrement ref-count; unload if zero..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1286** (EARS/Ubiquitous): The Substrate system shall `dlerror(void)`: thread-local last-error string; clears after call..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1287** (EARS/Ubiquitous): The Substrate system shall `dlopen(const char *filename, int flags)`: load DSO; flags include `RTLD_LAZY`, `RTLD_NOW`, `RTLD_LOCAL`, `RTLD_GLOBAL`, `RTLD_NODELETE`, `RTLD_NOLOAD`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1288** (EARS/Ubiquitous): The Substrate system shall `dlsym(void *handle, const char *symbol)`: symbol lookup with `RTLD_DEFAULT` and `RTLD_NEXT`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1289** (EARS/Ubiquitous): The Substrate system shall `dlinfo(void *handle, int request, void *info)`: query DSO metadata (GNU/BSD extension)..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1290** (EARS/Ubiquitous): The Substrate system shall `dl_iterate_phdr(callback, data)`: iterate all loaded program headers (GNU extension)..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1291** (EARS/Ubiquitous): The Substrate system shall Testing.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1292** (EARS/Ubiquitous): The Substrate system shall Unit: `dlopen` → `dlsym` → use → `dlclose` round-trip..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1293** (EARS/Ubiquitous): The Substrate system shall Unit: `dlerror` clears after retrieval..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1294** (EARS/Ubiquitous): The Substrate system shall Unit: `dladdr` resolves known symbols..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1295** (EARS/Ubiquitous): The Substrate system shall Property: `dlclose` never produces negative refcounts..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1296** (EARS/Ubiquitous): The Substrate system shall Fuzz: random flag combos to `dlopen`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1297** (EARS/Ubiquitous): The Substrate system shall Man Pages:** `dlopen(3)`, `dlsym(3)`, `dlclose(3)`, `dlerror(3)`, `dladdr(3)`, `dlinfo(3)`, `dl_iterate_phdr(3)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1298** (EARS/Ubiquitous): The Substrate system shall `libpthread` Logical Surface (`<pthread.h>` + `<threads.h>`).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1299** (EARS/Ubiquitous): The Substrate system shall Thread Lifecycle.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1300** (EARS/Ubiquitous): The Substrate system shall `pthread_create(thread, attr, start_routine, arg)`: create a new thread..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1301** (EARS/Ubiquitous): The Substrate system shall `pthread_exit(retval)`: terminate calling thread..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1302** (EARS/Ubiquitous): The Substrate system shall `pthread_join(thread, retval)`: wait for thread termination..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1303** (EARS/Ubiquitous): The Substrate system shall `pthread_detach(thread)`: mark thread as detached..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1304** (EARS/Ubiquitous): The Substrate system shall `pthread_self()`: obtain calling thread's ID..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1305** (EARS/Ubiquitous): The Substrate system shall `pthread_equal(t1, t2)`: compare thread IDs..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1306** (EARS/Ubiquitous): The Substrate system shall `pthread_cancel(thread)`: request thread cancellation..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1307** (EARS/Ubiquitous): The Substrate system shall `pthread_setcancelstate(state, oldstate)`: set cancellation state..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1308** (EARS/Ubiquitous): The Substrate system shall `pthread_setcanceltype(type, oldtype)`: set cancellation type..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1309** (EARS/Ubiquitous): The Substrate system shall `pthread_testcancel()`: create cancellation point..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1310** (EARS/Ubiquitous): The Substrate system shall Thread Attributes.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1311** (EARS/Ubiquitous): The Substrate system shall `pthread_attr_init()` / `pthread_attr_destroy()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1312** (EARS/Ubiquitous): The Substrate system shall `pthread_attr_setdetachstate()` / `getdetachstate()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1313** (EARS/Ubiquitous): The Substrate system shall `pthread_attr_setstacksize()` / `getstacksize()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1314** (EARS/Ubiquitous): The Substrate system shall `pthread_attr_setstackaddr()` / `getstackaddr()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1315** (EARS/Ubiquitous): The Substrate system shall `pthread_attr_setguardsize()` / `getguardsize()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1316** (EARS/Ubiquitous): The Substrate system shall `pthread_attr_setschedparam()` / `getschedparam()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1317** (EARS/Ubiquitous): The Substrate system shall `pthread_attr_setschedpolicy()` / `getschedpolicy()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1318** (EARS/Ubiquitous): The Substrate system shall `pthread_attr_setinheritsched()` / `getinheritsched()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1319** (EARS/Ubiquitous): The Substrate system shall `pthread_attr_setscope()` / `getscope()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1320** (EARS/Ubiquitous): The Substrate system shall Mutexes.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1321** (EARS/Ubiquitous): The Substrate system shall `pthread_mutex_init(mutex, attr)` / `pthread_mutex_destroy(mutex)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1322** (EARS/Ubiquitous): The Substrate system shall `pthread_mutex_lock(mutex)` / `pthread_mutex_trylock(mutex)` / `pthread_mutex_unlock(mutex)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1323** (EARS/Ubiquitous): The Substrate system shall `pthread_mutex_timedlock(mutex, abstime)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1324** (EARS/Ubiquitous): The Substrate system shall `pthread_mutexattr_init()` / `destroy()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1325** (EARS/Ubiquitous): The Substrate system shall `pthread_mutexattr_settype()` / `gettype()`: `PTHREAD_MUTEX_NORMAL`, `ERRORCHECK`, `RECURSIVE`, `DEFAULT`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1326** (EARS/Ubiquitous): The Substrate system shall `pthread_mutexattr_setprotocol()` / `getprotocol()`: `PTHREAD_PRIO_NONE`, `INHERIT`, `PROTECT`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1327** (EARS/Ubiquitous): The Substrate system shall `pthread_mutexattr_setrobust()` / `getrobust()`: `PTHREAD_MUTEX_STALLED`, `ROBUST`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1328** (EARS/Ubiquitous): The Substrate system shall `pthread_mutex_consistent(mutex)`: mark recovered robust mutex..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1329** (EARS/Ubiquitous): The Substrate system shall Condition Variables.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1330** (EARS/Ubiquitous): The Substrate system shall `pthread_cond_init(cond, attr)` / `pthread_cond_destroy(cond)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1331** (EARS/Ubiquitous): The Substrate system shall `pthread_cond_wait(cond, mutex)` / `pthread_cond_timedwait(cond, mutex, abstime)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1332** (EARS/Ubiquitous): The Substrate system shall `pthread_cond_signal(cond)` / `pthread_cond_broadcast(cond)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1333** (EARS/Ubiquitous): The Substrate system shall `pthread_condattr_init()` / `destroy()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1334** (EARS/Ubiquitous): The Substrate system shall `pthread_condattr_setclock()` / `getclock()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1335** (EARS/Ubiquitous): The Substrate system shall `pthread_condattr_setpshared()` / `getpshared()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1336** (EARS/Ubiquitous): The Substrate system shall Read-Write Locks.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1337** (EARS/Ubiquitous): The Substrate system shall `pthread_rwlock_init()` / `pthread_rwlock_destroy()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1338** (EARS/Ubiquitous): The Substrate system shall `pthread_rwlock_rdlock()` / `tryrdlock()` / `timedrdlock()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1339** (EARS/Ubiquitous): The Substrate system shall `pthread_rwlock_wrlock()` / `trywrlock()` / `timedwrlock()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1340** (EARS/Ubiquitous): The Substrate system shall `pthread_rwlock_unlock()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1341** (EARS/Ubiquitous): The Substrate system shall `pthread_rwlockattr_init()` / `destroy()` / `setpshared()` / `getpshared()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1342** (EARS/Ubiquitous): The Substrate system shall Barriers.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1343** (EARS/Ubiquitous): The Substrate system shall `pthread_barrier_init(barrier, attr, count)` / `pthread_barrier_destroy(barrier)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1344** (EARS/Ubiquitous): The Substrate system shall `pthread_barrier_wait(barrier)`: return `PTHREAD_BARRIER_SERIAL_THREAD` for one waiter..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1345** (EARS/Ubiquitous): The Substrate system shall `pthread_barrierattr_init()` / `destroy()` / `setpshared()` / `getpshared()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1346** (EARS/Ubiquitous): The Substrate system shall Spinlocks.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1347** (EARS/Ubiquitous): The Substrate system shall `pthread_spin_init(lock, pshared)` / `pthread_spin_destroy(lock)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1348** (EARS/Ubiquitous): The Substrate system shall `pthread_spin_lock(lock)` / `pthread_spin_trylock(lock)` / `pthread_spin_unlock(lock)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1349** (EARS/Ubiquitous): The Substrate system shall Thread-Specific Data (TSD).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1350** (EARS/Ubiquitous): The Substrate system shall `pthread_key_create(key, destructor)` / `pthread_key_delete(key)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1351** (EARS/Ubiquitous): The Substrate system shall `pthread_setspecific(key, value)` / `pthread_getspecific(key)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1352** (EARS/Ubiquitous): The Substrate system shall Once Initialization.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1353** (EARS/Ubiquitous): The Substrate system shall `pthread_once(once_control, init_routine)` with `PTHREAD_ONCE_INIT`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1354** (EARS/Ubiquitous): The Substrate system shall Cleanup Handlers.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1355** (EARS/Ubiquitous): The Substrate system shall `pthread_cleanup_push(routine, arg)` / `pthread_cleanup_pop(execute)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1356** (EARS/Ubiquitous): The Substrate system shall Scheduling.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1357** (EARS/Ubiquitous): The Substrate system shall `pthread_setschedparam(thread, policy, param)` / `pthread_getschedparam()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1358** (EARS/Ubiquitous): The Substrate system shall `pthread_setschedprio(thread, prio)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1359** (EARS/Ubiquitous): The Substrate system shall `pthread_yield()` (non-portable) / `sched_yield()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1360** (EARS/Ubiquitous): The Substrate system shall Concurrency Level.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1361** (EARS/Ubiquitous): The Substrate system shall `pthread_setconcurrency(new_level)` / `pthread_getconcurrency()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1362** (EARS/Ubiquitous): The Substrate system shall Fork Safety.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1363** (EARS/Ubiquitous): The Substrate system shall `pthread_atfork(prepare, parent, child)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1364** (EARS/Ubiquitous): The Substrate system shall Signal Masking.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1365** (EARS/Ubiquitous): The Substrate system shall `pthread_sigmask(how, set, oldset)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1366** (EARS/Ubiquitous): The Substrate system shall `pthread_kill(thread, sig)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1367** (EARS/Ubiquitous): The Substrate system shall `sigwait(set, sig)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1368** (EARS/Ubiquitous): The Substrate system shall C11/C23 `<threads.h>` Portable Abstraction.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1369** (EARS/Ubiquitous): The Substrate system shall `thrd_create(thr, func, arg)` / `thrd_exit(res)` / `thrd_join(thr, res)` / `thrd_detach(thr)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1370** (EARS/Ubiquitous): The Substrate system shall `thrd_current()` / `thrd_equal(lhs, rhs)` / `thrd_sleep(duration, remaining)` / `thrd_yield()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1371** (EARS/Ubiquitous): The Substrate system shall `mtx_init(mtx, type)` / `mtx_destroy(mtx)` / `mtx_lock(mtx)` / `mtx_trylock(mtx)` / `mtx_timedlock(mtx, ts)` / `mtx_unlock(mtx)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1372** (EARS/Ubiquitous): The Substrate system shall `cnd_init(cond)` / `cnd_destroy(cond)` / `cnd_signal(cond)` / `cnd_broadcast(cond)` / `cnd_wait(cond, mtx)` / `cnd_timedwait(cond, mtx, ts)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1373** (EARS/Ubiquitous): The Substrate system shall `tss_create(key, dtor)` / `tss_delete(key)` / `tss_get(key)` / `tss_set(key, val)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1374** (EARS/Ubiquitous): The Substrate system shall `call_once(flag, func)` with `once_flag` / `ONCE_FLAG_INIT`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1375** (EARS/Ubiquitous): The Substrate system shall Testing.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1376** (EARS/Ubiquitous): The Substrate system shall Unit: thread create/join round-trip with return value..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1377** (EARS/Ubiquitous): The Substrate system shall Unit: mutex type enforcement (ERRORCHECK returns EDEADLK on double-lock)..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1378** (EARS/Ubiquitous): The Substrate system shall Unit: cond_broadcast wakes all waiters..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1379** (EARS/Ubiquitous): The Substrate system shall Unit: rwlock allows concurrent readers, exclusive writer..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1380** (EARS/Ubiquitous): The Substrate system shall Unit: barrier wait returns SERIAL_THREAD to exactly one waiter..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1381** (EARS/Ubiquitous): The Substrate system shall Unit: TSD destructor invoked on thread exit..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1382** (EARS/Ubiquitous): The Substrate system shall Unit: `pthread_once` executes init_routine exactly once across threads..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1383** (EARS/Ubiquitous): The Substrate system shall Unit: cancellation handlers run in LIFO order..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1384** (EARS/Ubiquitous): The Substrate system shall Unit: `pthread_atfork` handlers execute in correct order..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1385** (EARS/Ubiquitous): The Substrate system shall Unit: C11 `<threads.h>` create/join with `thrd_success` return..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1386** (EARS/Ubiquitous): The Substrate system shall Property: `pthread_mutex_lock` → `unlock` always succeeds for valid mutex..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1387** (EARS/Ubiquitous): The Substrate system shall Property: `pthread_cond_signal` never loses wakeups..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1388** (EARS/Ubiquitous): The Substrate system shall Property: robust mutex → `EOWNERDEAD` when holder exits..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1389** (EARS/Ubiquitous): The Substrate system shall Stress: 100+ threads contending on single mutex..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1390** (EARS/Ubiquitous): The Substrate system shall Stress: producer-consumer with condvar under high contention..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1391** (EARS/Ubiquitous): The Substrate system shall Fuzz: random scheduling of lock/unlock/signal sequences..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1392** (EARS/Ubiquitous): The Substrate system shall Man Pages.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1393** (EARS/Ubiquitous): The Substrate system shall `pthread_create(3)`, `pthread_exit(3)`, `pthread_join(3)`, `pthread_detach(3)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1394** (EARS/Ubiquitous): The Substrate system shall `pthread_mutex_init(3)`, `pthread_mutex_lock(3)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1395** (EARS/Ubiquitous): The Substrate system shall `pthread_cond_init(3)`, `pthread_cond_wait(3)`, `pthread_cond_signal(3)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1396** (EARS/Ubiquitous): The Substrate system shall `pthread_rwlock_init(3)`, `pthread_rwlock_rdlock(3)`, `pthread_rwlock_wrlock(3)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1397** (EARS/Ubiquitous): The Substrate system shall `pthread_barrier_init(3)`, `pthread_barrier_wait(3)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1398** (EARS/Ubiquitous): The Substrate system shall `pthread_key_create(3)`, `pthread_once(3)`, `pthread_atfork(3)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1399** (EARS/Ubiquitous): The Substrate system shall `pthread_cancel(3)`, `pthread_cleanup_push(3)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1400** (EARS/Ubiquitous): The Substrate system shall `pthread_sigmask(3)`, `pthread_kill(3)`, `sigwait(3)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1401** (EARS/Ubiquitous): The Substrate system shall `threads.h(0P)` — C11/C23 threads overview..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1402** (EARS/Ubiquitous): The Substrate system shall `tgmath.h` — Type-Generic Math Macros (C11/C23).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1403** (EARS/Ubiquitous): The Substrate system shall Define type-generic dispatching macros for all applicable `<math.h>` functions.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1404** (EARS/Ubiquitous): The Substrate system shall Trigonometric: `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1405** (EARS/Ubiquitous): The Substrate system shall Hyperbolic: `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1406** (EARS/Ubiquitous): The Substrate system shall Exponential/log: `exp`, `exp2`, `expm1`, `log`, `log2`, `log10`, `log1p`, `logb`, `ilogb`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1407** (EARS/Ubiquitous): The Substrate system shall Power: `pow`, `sqrt`, `cbrt`, `hypot`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1408** (EARS/Ubiquitous): The Substrate system shall Rounding: `ceil`, `floor`, `trunc`, `round`, `lround`, `llround`, `nearbyint`, `rint`, `lrint`, `llrint`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1409** (EARS/Ubiquitous): The Substrate system shall Manipulation: `frexp`, `ldexp`, `modf`, `scalbn`, `scalbln`, `nextafter`, `nexttoward`, `copysign`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1410** (EARS/Ubiquitous): The Substrate system shall Error/gamma: `erf`, `erfc`, `tgamma`, `lgamma`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1411** (EARS/Ubiquitous): The Substrate system shall Absolute/remainder: `fabs`, `fmod`, `remainder`, `remquo`, `fma`, `fdim`, `fmax`, `fmin`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1412** (EARS/Ubiquitous): The Substrate system shall Define type-generic dispatching macros for `<complex.h>` functions (if `__STDC_NO_COMPLEX__` is not defined).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1413** (EARS/Ubiquitous): The Substrate system shall `cabs`, `carg`, `cimag`, `creal`, `conj`, `cproj`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1414** (EARS/Ubiquitous): The Substrate system shall `cexp`, `clog`, `cpow`, `csqrt`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1415** (EARS/Ubiquitous): The Substrate system shall `csin`, `ccos`, `ctan`, `casin`, `cacos`, `catan`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1416** (EARS/Ubiquitous): The Substrate system shall `csinh`, `ccosh`, `ctanh`, `casinh`, `cacosh`, `catanh`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1417** (EARS/Ubiquitous): The Substrate system shall Ensure dispatch correctly handles mixed-type arguments (e.g., `pow(int, float)` dispatches to `powf`)..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1418** (EARS/Ubiquitous): The Substrate system shall Testing (`tests/lib/m/unit/test_tgmath.c`).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1419** (EARS/Ubiquitous): The Substrate system shall Compile-time: verify correct variant is selected via `_Generic` or `__builtin_types_compatible_p`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1420** (EARS/Ubiquitous): The Substrate system shall Unit: `sin((float)x)` calls `sinf`, `sin((double)x)` calls `sin`, `sin((long double)x)` calls `sinl`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1421** (EARS/Ubiquitous): The Substrate system shall Unit: complex dispatch when `<complex.h>` is available..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1422** (EARS/Ubiquitous): The Substrate system shall Property: result type matches narrowest argument type..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1423** (EARS/Ubiquitous): The Substrate system shall Man Pages:** `tgmath.h(0P)` — type-generic math overview, dispatch rules, examples..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1424** (EARS/Ubiquitous): The Substrate system shall POSIX-2024 Callable Surface (System Interface Headers).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1425** (EARS/Ubiquitous): The Substrate system shall `<unistd.h>` — POSIX Operating System API.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1426** (EARS/Ubiquitous): The Substrate system shall Process: `fork()`, `vfork()`, `_exit()`, `execve()`, `execl()`, `execle()`, `execlp()`, `execv()`, `execvp()`, `execvpe()`, `fexecve()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1427** (EARS/Ubiquitous): The Substrate system shall Process identity: `getpid()`, `getppid()`, `getpgrp()`, `setpgid()`, `setsid()`, `getsid()`, `getuid()`, `geteuid()`, `getgid()`, `getegid()`, `setuid()`, `seteuid()`, `setgid()`, `setegid()`, `setreuid()`, `setregid()`, `getgroups()`, `setgroups()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1428** (EARS/Ubiquitous): The Substrate system shall File I/O: `read()`, `write()`, `lseek()`, `close()`, `dup()`, `dup2()`, `pipe()`, `pread()`, `pwrite()`, `ftruncate()`, `truncate()`, `fsync()`, `fdatasync()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1429** (EARS/Ubiquitous): The Substrate system shall File operations: `link()`, `linkat()`, `unlink()`, `unlinkat()`, `symlink()`, `symlinkat()`, `readlink()`, `readlinkat()`, `rename()`, `renameat()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1430** (EARS/Ubiquitous): The Substrate system shall Directory: `chdir()`, `fchdir()`, `getcwd()`, `chroot()`, `rmdir()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1431** (EARS/Ubiquitous): The Substrate system shall File access: `access()`, `faccessat()`, `chown()`, `fchown()`, `fchownat()`, `lchown()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1432** (EARS/Ubiquitous): The Substrate system shall Terminal: `isatty()`, `ttyname()`, `ttyname_r()`, `tcgetpgrp()`, `tcsetpgrp()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1433** (EARS/Ubiquitous): The Substrate system shall Miscellaneous: `alarm()`, `pause()`, `sleep()`, `usleep()`, `sysconf()`, `pathconf()`, `fpathconf()`, `getlogin()`, `getlogin_r()`, `gethostname()`, `sethostname()`, `getopt()`, `crypt()`, `encrypt()`, `swab()`, `nice()`, `confstr()`, `getpagesize()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1434** (EARS/Ubiquitous): The Substrate system shall `<fcntl.h>` — File Control.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1435** (EARS/Ubiquitous): The Substrate system shall `open()`, `openat()`, `creat()`, `fcntl()` (with `F_DUPFD`, `F_GETFD`, `F_SETFD`, `F_GETFL`, `F_SETFL`, `F_GETLK`, `F_SETLK`, `F_SETLKW`, `F_GETOWN`, `F_SETOWN`)..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1436** (EARS/Ubiquitous): The Substrate system shall Open flags: `O_RDONLY`, `O_WRONLY`, `O_RDWR`, `O_APPEND`, `O_CREAT`, `O_EXCL`, `O_TRUNC`, `O_NONBLOCK`, `O_NOCTTY`, `O_CLOEXEC`, `O_DIRECTORY`, `O_NOFOLLOW`, `O_SYNC`, `O_DSYNC`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1437** (EARS/Ubiquitous): The Substrate system shall Advisory locking: `struct flock`, `F_RDLCK`, `F_WRLCK`, `F_UNLCK`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1438** (EARS/Ubiquitous): The Substrate system shall `posix_fadvise()`, `posix_fallocate()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1439** (EARS/Ubiquitous): The Substrate system shall `<dirent.h>` — Directory Entries.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1440** (EARS/Ubiquitous): The Substrate system shall `opendir()`, `fdopendir()`, `readdir()`, `readdir_r()`, `rewinddir()`, `seekdir()`, `telldir()`, `closedir()`, `dirfd()`, `scandir()`, `alphasort()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1441** (EARS/Ubiquitous): The Substrate system shall `<sys/stat.h>` — File Status.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1442** (EARS/Ubiquitous): The Substrate system shall `stat()`, `lstat()`, `fstat()`, `fstatat()`, `chmod()`, `fchmod()`, `fchmodat()`, `mkdir()`, `mkdirat()`, `mkfifo()`, `mkfifoat()`, `mknod()`, `mknodat()`, `umask()`, `futimens()`, `utimensat()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1443** (EARS/Ubiquitous): The Substrate system shall `struct stat` with `st_dev`, `st_ino`, `st_mode`, `st_nlink`, `st_uid`, `st_gid`, `st_rdev`, `st_size`, `st_blksize`, `st_blocks`, `st_atim`, `st_mtim`, `st_ctim`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1444** (EARS/Ubiquitous): The Substrate system shall Mode macros: `S_ISREG`, `S_ISDIR`, `S_ISCHR`, `S_ISBLK`, `S_ISFIFO`, `S_ISLNK`, `S_ISSOCK`, `S_IRWXU`, etc..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1445** (EARS/Ubiquitous): The Substrate system shall `<sys/wait.h>` — Process Wait.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1446** (EARS/Ubiquitous): The Substrate system shall `wait()`, `waitpid()`, `waitid()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1447** (EARS/Ubiquitous): The Substrate system shall Status macros: `WIFEXITED`, `WEXITSTATUS`, `WIFSIGNALED`, `WTERMSIG`, `WIFSTOPPED`, `WSTOPSIG`, `WIFCONTINUED`, `WCOREDUMP`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1448** (EARS/Ubiquitous): The Substrate system shall `<sys/uio.h>` — Scatter/Gather I/O.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1449** (EARS/Ubiquitous): The Substrate system shall `readv()`, `writev()`, `preadv()`, `pwritev()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1450** (EARS/Ubiquitous): The Substrate system shall `struct iovec` with `iov_base`, `iov_len`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1451** (EARS/Ubiquitous): The Substrate system shall `<sys/mman.h>` — Memory Management.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1452** (EARS/Ubiquitous): The Substrate system shall `mmap()`, `munmap()`, `mprotect()`, `msync()`, `mlock()`, `munlock()`, `mlockall()`, `munlockall()`, `madvise()`, `mincore()`, `shm_open()`, `shm_unlink()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1453** (EARS/Ubiquitous): The Substrate system shall Prot flags: `PROT_READ`, `PROT_WRITE`, `PROT_EXEC`, `PROT_NONE`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1454** (EARS/Ubiquitous): The Substrate system shall Map flags: `MAP_SHARED`, `MAP_PRIVATE`, `MAP_FIXED`, `MAP_ANONYMOUS`, `MAP_FAILED`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1455** (EARS/Ubiquitous): The Substrate system shall `<aio.h>` — Asynchronous I/O.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1456** (EARS/Ubiquitous): The Substrate system shall `aio_read()`, `aio_write()`, `aio_error()`, `aio_return()`, `aio_cancel()`, `aio_suspend()`, `aio_fsync()`, `lio_listio()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1457** (EARS/Ubiquitous): The Substrate system shall `struct aiocb` with `aio_fildes`, `aio_offset`, `aio_buf`, `aio_nbytes`, `aio_reqprio`, `aio_sigevent`, `aio_lio_opcode`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1458** (EARS/Ubiquitous): The Substrate system shall `<semaphore.h>` — POSIX Semaphores.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1459** (EARS/Ubiquitous): The Substrate system shall `sem_init()`, `sem_destroy()`, `sem_open()`, `sem_close()`, `sem_unlink()`, `sem_wait()`, `sem_trywait()`, `sem_timedwait()`, `sem_post()`, `sem_getvalue()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1460** (EARS/Ubiquitous): The Substrate system shall `<mqueue.h>` — POSIX Message Queues.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1461** (EARS/Ubiquitous): The Substrate system shall `mq_open()`, `mq_close()`, `mq_unlink()`, `mq_send()`, `mq_receive()`, `mq_timedsend()`, `mq_timedreceive()`, `mq_notify()`, `mq_getattr()`, `mq_setattr()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1462** (EARS/Ubiquitous): The Substrate system shall `<spawn.h>` — POSIX Spawn.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1463** (EARS/Ubiquitous): The Substrate system shall `posix_spawn()`, `posix_spawnp()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1464** (EARS/Ubiquitous): The Substrate system shall `posix_spawn_file_actions_init()` / `destroy()` / `addopen()` / `addclose()` / `adddup2()` / `addchdir_np()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1465** (EARS/Ubiquitous): The Substrate system shall `posix_spawnattr_init()` / `destroy()` / `setflags()` / `getflags()` / `setsigdefault()` / `getsigdefault()` / `setsigmask()` / `getsigmask()` / `setpgroup()` / `getpgroup()` / `setschedparam()` / `getschedparam()` / `setschedpolicy()` / `getschedpolicy()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1466** (EARS/Ubiquitous): The Substrate system shall `<poll.h>` — I/O Multiplexing.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1467** (EARS/Ubiquitous): The Substrate system shall `poll()`, `ppoll()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1468** (EARS/Ubiquitous): The Substrate system shall `struct pollfd` with `fd`, `events`, `revents`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1469** (EARS/Ubiquitous): The Substrate system shall Event flags: `POLLIN`, `POLLOUT`, `POLLERR`, `POLLHUP`, `POLLNVAL`, `POLLRDNORM`, `POLLRDBAND`, `POLLWRNORM`, `POLLWRBAND`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1470** (EARS/Ubiquitous): The Substrate system shall `<sched.h>` — Process Scheduling.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1471** (EARS/Ubiquitous): The Substrate system shall `sched_setscheduler()`, `sched_getscheduler()`, `sched_setparam()`, `sched_getparam()`, `sched_yield()`, `sched_get_priority_max()`, `sched_get_priority_min()`, `sched_rr_get_interval()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1472** (EARS/Ubiquitous): The Substrate system shall `<regex.h>` — Regular Expressions.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1473** (EARS/Ubiquitous): The Substrate system shall `regcomp()`, `regexec()`, `regerror()`, `regfree()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1474** (EARS/Ubiquitous): The Substrate system shall Flags: `REG_EXTENDED`, `REG_ICASE`, `REG_NOSUB`, `REG_NEWLINE`, `REG_NOTBOL`, `REG_NOTEOL`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1475** (EARS/Ubiquitous): The Substrate system shall `<glob.h>` — Pathname Generation.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1476** (EARS/Ubiquitous): The Substrate system shall `glob()`, `globfree()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1477** (EARS/Ubiquitous): The Substrate system shall Flags: `GLOB_ERR`, `GLOB_MARK`, `GLOB_NOSORT`, `GLOB_DOOFFS`, `GLOB_NOCHECK`, `GLOB_APPEND`, `GLOB_NOESCAPE`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1478** (EARS/Ubiquitous): The Substrate system shall `<fnmatch.h>` — Filename Matching.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1479** (EARS/Ubiquitous): The Substrate system shall `fnmatch()` with `FNM_PATHNAME`, `FNM_PERIOD`, `FNM_NOESCAPE`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1480** (EARS/Ubiquitous): The Substrate system shall `<wordexp.h>` — Word Expansion.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1481** (EARS/Ubiquitous): The Substrate system shall `wordexp()`, `wordfree()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1482** (EARS/Ubiquitous): The Substrate system shall `<search.h>` — Search Tables.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1483** (EARS/Ubiquitous): The Substrate system shall `hcreate()`, `hdestroy()`, `hsearch()`, `insque()`, `lfind()`, `lsearch()`, `remque()`, `tdelete()`, `tfind()`, `tsearch()`, `twalk()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1484** (EARS/Ubiquitous): The Substrate system shall `<ftw.h>` — File Tree Walk.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1485** (EARS/Ubiquitous): The Substrate system shall `ftw()`, `nftw()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1486** (EARS/Ubiquitous): The Substrate system shall `<libgen.h>` — Path Utilities.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1487** (EARS/Ubiquitous): The Substrate system shall `basename()`, `dirname()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1488** (EARS/Ubiquitous): The Substrate system shall `<langinfo.h>` — Language Information.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1489** (EARS/Ubiquitous): The Substrate system shall `nl_langinfo()`, `nl_langinfo_l()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1490** (EARS/Ubiquitous): The Substrate system shall `<monetary.h>` — Monetary Formatting.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1491** (EARS/Ubiquitous): The Substrate system shall `strfmon()`, `strfmon_l()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1492** (EARS/Ubiquitous): The Substrate system shall `<fmtmsg.h>` — Formatted Messages.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1493** (EARS/Ubiquitous): The Substrate system shall `fmtmsg()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1494** (EARS/Ubiquitous): The Substrate system shall `<iconv.h>` — Character Set Conversion.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1495** (EARS/Ubiquitous): The Substrate system shall `iconv_open()`, `iconv()`, `iconv_close()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1496** (EARS/Ubiquitous): The Substrate system shall `<nl_types.h>` — Message Catalogs.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1497** (EARS/Ubiquitous): The Substrate system shall `catopen()`, `catgets()`, `catclose()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1498** (EARS/Ubiquitous): The Substrate system shall Networking Headers.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1499** (EARS/Ubiquitous): The Substrate system shall `<arpa/inet.h>`:** `inet_addr()`, `inet_ntoa()`, `inet_pton()`, `inet_ntop()`, `htonl()`, `htons()`, `ntohl()`, `ntohs()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1500** (EARS/Ubiquitous): The Substrate system shall `<netdb.h>`:** `gethostbyname()`, `gethostbyaddr()`, `getaddrinfo()`, `freeaddrinfo()`, `gai_strerror()`, `getnameinfo()`, `getservbyname()`, `getservbyport()`, `getprotobyname()`, `getprotobynumber()`, `getnetbyname()`, `getnetbyaddr()`, `sethostent()`, `endhostent()`, `setnetent()`, `endnetent()`, `setservent()`, `endservent()`, `setprotoent()`, `endprotoent()`, `herror()`, `hstrerror()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1501** (EARS/Ubiquitous): The Substrate system shall `<sys/socket.h>`:** `socket()`, `bind()`, `listen()`, `accept()`, `connect()`, `send()`, `recv()`, `sendto()`, `recvfrom()`, `sendmsg()`, `recvmsg()`, `shutdown()`, `getsockopt()`, `setsockopt()`, `getsockname()`, `getpeername()`, `socketpair()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1502** (EARS/Ubiquitous): The Substrate system shall `<net/if.h>`:** `if_nametoindex()`, `if_indextoname()`, `if_nameindex()`, `if_freenameindex()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1503** (EARS/Ubiquitous): The Substrate system shall Account / Identity Headers.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1504** (EARS/Ubiquitous): The Substrate system shall `<grp.h>`:** `getgrnam()`, `getgrgid()`, `getgrent()`, `setgrent()`, `endgrent()`, `getgrnam_r()`, `getgrgid_r()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1505** (EARS/Ubiquitous): The Substrate system shall `<pwd.h>`:** `getpwnam()`, `getpwuid()`, `getpwent()`, `setpwent()`, `endpwent()`, `getpwnam_r()`, `getpwuid_r()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1506** (EARS/Ubiquitous): The Substrate system shall `<syslog.h>` — System Logging.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1507** (EARS/Ubiquitous): The Substrate system shall `openlog()`, `syslog()`, `closelog()`, `setlogmask()`, `vsyslog()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1508** (EARS/Ubiquitous): The Substrate system shall Priority macros: `LOG_EMERG` through `LOG_DEBUG`; facility macros: `LOG_KERN`, `LOG_USER`, `LOG_DAEMON`, etc..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1509** (EARS/Ubiquitous): The Substrate system shall `<termios.h>` — Terminal Control.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1510** (EARS/Ubiquitous): The Substrate system shall `tcgetattr()`, `tcsetattr()`, `tcsendbreak()`, `tcdrain()`, `tcflush()`, `tcflow()`, `cfgetispeed()`, `cfsetispeed()`, `cfgetospeed()`, `cfsetospeed()`, `cfmakeraw()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1511** (EARS/Ubiquitous): The Substrate system shall `<sys/resource.h>` — Resource Usage.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1512** (EARS/Ubiquitous): The Substrate system shall `getrlimit()`, `setrlimit()`, `getrusage()`, `getpriority()`, `setpriority()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1513** (EARS/Ubiquitous): The Substrate system shall `<sys/statvfs.h>` — Filesystem Statistics.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1514** (EARS/Ubiquitous): The Substrate system shall `statvfs()`, `fstatvfs()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1515** (EARS/Ubiquitous): The Substrate system shall `<sys/times.h>` — Process Times.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1516** (EARS/Ubiquitous): The Substrate system shall `times()` with `struct tms`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1517** (EARS/Ubiquitous): The Substrate system shall `<sys/utsname.h>` — System Identification.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1518** (EARS/Ubiquitous): The Substrate system shall `uname()` with `struct utsname`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1519** (EARS/Ubiquitous): The Substrate system shall System V IPC.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1520** (EARS/Ubiquitous): The Substrate system shall `<sys/ipc.h>`:** `ftok()`, IPC_CREAT, IPC_EXCL, IPC_NOWAIT, IPC_RMID, IPC_SET, IPC_STAT..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1521** (EARS/Ubiquitous): The Substrate system shall `<sys/msg.h>`:** `msgget()`, `msgsnd()`, `msgrcv()`, `msgctl()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1522** (EARS/Ubiquitous): The Substrate system shall `<sys/shm.h>`:** `shmget()`, `shmat()`, `shmdt()`, `shmctl()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1523** (EARS/Ubiquitous): The Substrate system shall `<sys/sem.h>`:** `semget()`, `semop()`, `semctl()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1524** (EARS/Ubiquitous): The Substrate system shall `<utime.h>` / `<sys/time.h>` — Timestamps.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1525** (EARS/Ubiquitous): The Substrate system shall `utime()`, `utimes()`, `lutimes()`, `futimes()`, `gettimeofday()`, `settimeofday()`, `adjtime()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1526** (EARS/Ubiquitous): The Substrate system shall `select()`, `pselect()` (from `<sys/select.h>`)..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1527** (EARS/Ubiquitous): The Substrate system shall POSIX Signal Extras (beyond `<signal.h>` base).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1528** (EARS/Ubiquitous): The Substrate system shall `sigaction()`, `sigprocmask()`, `sigpending()`, `sigsuspend()`, `sigwaitinfo()`, `sigtimedwait()`, `sigqueue()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1529** (EARS/Ubiquitous): The Substrate system shall `sigaltstack()`, `siginterrupt()`, `sighold()`, `sigrelse()`, `sigignore()`, `sigpause()`, `sigset()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1530** (EARS/Ubiquitous): The Substrate system shall `psignal()`, `psiginfo()`, `strsignal()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1531** (EARS/Ubiquitous): The Substrate system shall POSIX Time Extras (beyond `<time.h>` base).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1532** (EARS/Ubiquitous): The Substrate system shall `clock_gettime()`, `clock_settime()`, `clock_getres()`, `clock_nanosleep()`, `nanosleep()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1533** (EARS/Ubiquitous): The Substrate system shall `timer_create()`, `timer_delete()`, `timer_settime()`, `timer_gettime()`, `timer_getoverrun()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1534** (EARS/Ubiquitous): The Substrate system shall Clock IDs: `CLOCK_REALTIME`, `CLOCK_MONOTONIC`, `CLOCK_PROCESS_CPUTIME_ID`, `CLOCK_THREAD_CPUTIME_ID`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1535** (EARS/Ubiquitous): The Substrate system shall Gettext Family (GNU/POSIX).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1536** (EARS/Ubiquitous): The Substrate system shall `gettext()`, `dgettext()`, `dcgettext()`, `ngettext()`, `dngettext()`, `dcngettext()`, `textdomain()`, `bindtextdomain()`, `bind_textdomain_codeset()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1537** (EARS/Ubiquitous): The Substrate system shall Testing (POSIX callable surface).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1538** (EARS/Ubiquitous): The Substrate system shall Unit: `fork()` + `wait()` + `WIFEXITED` round-trip..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1539** (EARS/Ubiquitous): The Substrate system shall Unit: `socket()` + `bind()` + `listen()` + `accept()` + `connect()` round-trip..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1540** (EARS/Ubiquitous): The Substrate system shall Unit: `mmap()` + `munmap()` with MAP_ANONYMOUS..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1541** (EARS/Ubiquitous): The Substrate system shall Unit: `sigaction()` + signal delivery and handler invocation..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1542** (EARS/Ubiquitous): The Substrate system shall Unit: `clock_gettime(CLOCK_MONOTONIC)` returns increasing values..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1543** (EARS/Ubiquitous): The Substrate system shall Unit: `opendir()` + `readdir()` + `closedir()` round-trip..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1544** (EARS/Ubiquitous): The Substrate system shall Unit: `stat()` returns valid `struct stat` for known file..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1545** (EARS/Ubiquitous): The Substrate system shall Unit: `poll()` reports readability on readable fd..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1546** (EARS/Ubiquitous): The Substrate system shall Unit: `sem_init()` + `sem_post()` + `sem_wait()` + `sem_destroy()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1547** (EARS/Ubiquitous): The Substrate system shall Unit: `posix_spawn()` creates child and returns pid..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1548** (EARS/Ubiquitous): The Substrate system shall Unit: System V IPC `shmget()` + `shmat()` + `shmdt()` + `shmctl()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1549** (EARS/Ubiquitous): The Substrate system shall Property: `getpid()` == `getpid()` (stable within process)..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1550** (EARS/Ubiquitous): The Substrate system shall Property: `pipe()` fd pair: write(fd[1]) → readable on fd[0]..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1551** (EARS/Ubiquitous): The Substrate system shall Stress: 1000 concurrent `fork()` + `_exit()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1552** (EARS/Ubiquitous): The Substrate system shall Fuzz: random `fcntl()` flag combinations..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1553** (EARS/Ubiquitous): The Substrate system shall Man Pages (POSIX callable surface).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1554** (EARS/Ubiquitous): The Substrate system shall `select(2)`, `poll(2)`, `mmap(2)`, `sigaction(2)`, `clock_gettime(2)`, `socket(2)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1555** (EARS/Ubiquitous): The Substrate system shall `opendir(3)`, `readdir(3)`, `scandir(3)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1556** (EARS/Ubiquitous): The Substrate system shall `getaddrinfo(3)`, `getnameinfo(3)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1557** (EARS/Ubiquitous): The Substrate system shall `sem_overview(7)`, `mq_overview(7)`, `shm_overview(7)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1558** (EARS/Ubiquitous): The Substrate system shall ISO C23 `libc` Surface (Non-Math, Non-Thread Remainder).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1559** (EARS/Ubiquitous): The Substrate system shall Character Classification and Locale (`<ctype.h>`, `<locale.h>`, `<wctype.h>`).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1560** (EARS/Ubiquitous): The Substrate system shall Full `is*()` family: `isalnum`, `isalpha`, `isblank`, `iscntrl`, `isdigit`, `isgraph`, `islower`, `isprint`, `ispunct`, `isspace`, `isupper`, `isxdigit`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1561** (EARS/Ubiquitous): The Substrate system shall `tolower()`, `toupper()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1562** (EARS/Ubiquitous): The Substrate system shall Wide variants: `iswalnum`, `iswalpha`, `iswblank`, `iswcntrl`, `iswdigit`, `iswgraph`, `iswlower`, `iswprint`, `iswpunct`, `iswspace`, `iswupper`, `iswxdigit`, `towlower`, `towupper`, `wctype`, `iswctype`, `wctrans`, `towctrans`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1563** (EARS/Ubiquitous): The Substrate system shall `setlocale()`, `localeconv()`, `newlocale()`, `duplocale()`, `freelocale()`, `uselocale()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1564** (EARS/Ubiquitous): The Substrate system shall Non-Local Jumps and Signal Handling (`<setjmp.h>`, `<signal.h>`).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1565** (EARS/Ubiquitous): The Substrate system shall `setjmp()`, `longjmp()`, `sigsetjmp()`, `siglongjmp()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1566** (EARS/Ubiquitous): The Substrate system shall `signal()`, `raise()`, `sig_atomic_t`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1567** (EARS/Ubiquitous): The Substrate system shall Standard I/O (`<stdio.h>`).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1568** (EARS/Ubiquitous): The Substrate system shall Already covered in detail above (FILE, buffer management, open/close, character/line/block I/O, positioning, printf/scanf, tmpfile/tmpnam, perror)..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1569** (EARS/Ubiquitous): The Substrate system shall General Utilities (`<stdlib.h>`).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1570** (EARS/Ubiquitous): The Substrate system shall Numeric conversion: `atoi`, `atol`, `atoll`, `atof`, `strtol`, `strtoll`, `strtoul`, `strtoull`, `strtod`, `strtof`, `strtold`, `strtoimax`, `strtoumax`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1571** (EARS/Ubiquitous): The Substrate system shall Memory: `malloc`, `calloc`, `realloc`, `free`, `aligned_alloc`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1572** (EARS/Ubiquitous): The Substrate system shall Process: `exit`, `_Exit`, `atexit`, `at_quick_exit`, `quick_exit`, `abort`, `system`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1573** (EARS/Ubiquitous): The Substrate system shall Environment: `getenv`, `secure_getenv` (GNU)..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1574** (EARS/Ubiquitous): The Substrate system shall Search/sort: `bsearch`, `qsort`, `qsort_s` (C11 Annex K)..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1575** (EARS/Ubiquitous): The Substrate system shall Integer arithmetic: `abs`, `labs`, `llabs`, `div`, `ldiv`, `lldiv`, `imaxabs`, `imaxdiv`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1576** (EARS/Ubiquitous): The Substrate system shall Pseudorandom: `rand`, `srand`, `rand_r`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1577** (EARS/Ubiquitous): The Substrate system shall Multibyte/wide: `mblen`, `mbtowc`, `wctomb`, `mbstowcs`, `wcstombs`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1578** (EARS/Ubiquitous): The Substrate system shall String Handling (`<string.h>`, `<strings.h>`).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1579** (EARS/Ubiquitous): The Substrate system shall Core: `memcpy`, `memmove`, `memset`, `memcmp`, `memchr`, `strlen`, `strcpy`, `strncpy`, `strcat`, `strncat`, `strcmp`, `strncmp`, `strchr`, `strrchr`, `strstr`, `strtok`, `strcspn`, `strspn`, `strpbrk`, `strerror`, `strcoll`, `strxfrm`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1580** (EARS/Ubiquitous): The Substrate system shall C23 additions: `memset_explicit`, `memccpy`, `strnlen`, `strdup`, `strndup`, `strlcpy`, `strlcat`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1581** (EARS/Ubiquitous): The Substrate system shall BSD: `bcopy`, `bzero`, `bcmp`, `index`, `rindex`, `ffs`, `strcasecmp`, `strncasecmp`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1582** (EARS/Ubiquitous): The Substrate system shall Date and Time (`<time.h>`).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1583** (EARS/Ubiquitous): The Substrate system shall `time`, `difftime`, `mktime`, `gmtime`, `gmtime_r`, `localtime`, `localtime_r`, `asctime`, `asctime_r`, `ctime`, `ctime_r`, `strftime`, `strptime`, `timespec_get`, `timespec_getres`, `clock`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1584** (EARS/Ubiquitous): The Substrate system shall Unicode / Wide Character (`<uchar.h>`, `<wchar.h>`).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1585** (EARS/Ubiquitous): The Substrate system shall `<uchar.h>`: `c16rtomb`, `c32rtomb`, `mbrtoc16`, `mbrtoc32`, `char8_t`, `char16_t`, `char32_t`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1586** (EARS/Ubiquitous): The Substrate system shall `<wchar.h>`: `wprintf`, `wscanf`, `fwprintf`, `fwscanf`, `swprintf`, `swscanf`, `vwprintf`, `vfwprintf`, `vswprintf`, `wcslen`, `wcscpy`, `wcsncpy`, `wcscat`, `wcsncat`, `wcscmp`, `wcsncmp`, `wcschr`, `wcsrchr`, `wcsstr`, `wcstok`, `wmemcpy`, `wmemmove`, `wmemcmp`, `wmemchr`, `wmemset`, `wcstol`, `wcstoll`, `wcstoul`, `wcstoull`, `wcstod`, `wcstof`, `wcstold`, `wcsftime`, `wcscoll`, `wcsxfrm`, `wcswidth`, `wcwidth`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1587** (EARS/Ubiquitous): The Substrate system shall Atomics and Alignment (`<stdatomic.h>`, `<stdalign.h>`).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1588** (EARS/Ubiquitous): The Substrate system shall `atomic_flag`, `atomic_init`, `atomic_load`, `atomic_store`, `atomic_exchange`, `atomic_compare_exchange_strong`, `atomic_compare_exchange_weak`, `atomic_fetch_add`, `atomic_fetch_sub`, `atomic_fetch_or`, `atomic_fetch_xor`, `atomic_fetch_and`, `atomic_thread_fence`, `atomic_signal_fence`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1589** (EARS/Ubiquitous): The Substrate system shall Memory orders: `memory_order_relaxed`, `memory_order_consume`, `memory_order_acquire`, `memory_order_release`, `memory_order_acq_rel`, `memory_order_seq_cst`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1590** (EARS/Ubiquitous): The Substrate system shall Error Handling (`<errno.h>`, `<assert.h>`).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1591** (EARS/Ubiquitous): The Substrate system shall `errno` as thread-local; all POSIX error constants (`EACCES`, `EAGAIN`, `EBADF`, `EBUSY`, `EEXIST`, `EINTR`, `EINVAL`, `EIO`, `EISDIR`, `EMFILE`, `ENFILE`, `ENOENT`, `ENOMEM`, `ENOSPC`, `ENOSYS`, `ENOTDIR`, `ENOTEMPTY`, `ENOTSUP`, `EPERM`, `ERANGE`, etc.)..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1592** (EARS/Ubiquitous): The Substrate system shall `assert()` with `NDEBUG` suppression..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1593** (EARS/Ubiquitous): The Substrate system shall Format Macros (`<inttypes.h>`).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1594** (EARS/Ubiquitous): The Substrate system shall `PRId8`..`PRId64`, `PRIu8`..`PRIu64`, `PRIx8`..`PRIx64`, `PRIX8`..`PRIX64`, `PRIo8`..`PRIo64`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1595** (EARS/Ubiquitous): The Substrate system shall `SCNd8`..`SCNd64`, `SCNu8`..`SCNu64`, `SCNx8`..`SCNx64`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1596** (EARS/Ubiquitous): The Substrate system shall `strtoimax()`, `strtoumax()`, `imaxabs()`, `imaxdiv()`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1597** (EARS/Ubiquitous): The Substrate system shall Testing (ISO C23 libc surface).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1598** (EARS/Ubiquitous): The Substrate system shall Unit: all `ctype` functions classify representative characters correctly..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1599** (EARS/Ubiquitous): The Substrate system shall Unit: `setjmp`/`longjmp` round-trip preserves value..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1600** (EARS/Ubiquitous): The Substrate system shall Unit: `strtol` base-10 and base-16 with overflow..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1601** (EARS/Ubiquitous): The Substrate system shall Unit: `qsort` sorts known array correctly..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1602** (EARS/Ubiquitous): The Substrate system shall Unit: `mktime`/`gmtime_r` round-trip..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1603** (EARS/Ubiquitous): The Substrate system shall Unit: `c32rtomb`/`mbrtoc32` round-trip for BMP and supplementary chars..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1604** (EARS/Ubiquitous): The Substrate system shall Unit: `atomic_fetch_add` with multiple threads..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1605** (EARS/Ubiquitous): The Substrate system shall Unit: `memset_explicit` is not optimized away (volatile-like semantics)..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1606** (EARS/Ubiquitous): The Substrate system shall Property: `strlen(s) == wcslen(wcs)` for ASCII-only strings..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1607** (EARS/Ubiquitous): The Substrate system shall Fuzz: random inputs to `strtod`, `strtol`, `atoi`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1608** (EARS/Ubiquitous): The Substrate system shall Man Pages (ISO C23 surface).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1609** (EARS/Ubiquitous): The Substrate system shall `ctype(3)` overview, `setjmp(3)`, `signal(3)`, `strtol(3)`, `qsort(3)`, `bsearch(3)`..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1610** (EARS/Ubiquitous): The Substrate system shall `stdatomic.h(0P)` — C11/C23 atomics overview..
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1611** (EARS/Ubiquitous): The Substrate system shall `uchar.h(0P)` — Unicode character types and conversions..
   - Context: 6. C Library (`lib/c`)
   - Verification: design review + implementation evidence + test/doc update.

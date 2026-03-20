@@ -1,0 +1,128 @@
+.\" Process this file with
+.\" groff -man -Tascii tok_init.3
+.\"
+.TH TOK_INIT 3 "February 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+tok_init, tok_end, tok_reset, tok_str \- editline tokenizer interface
+.SH LIBRARY
+Editline library (libedit, \-ledit)
+.SH SYNOPSIS
+.B #include <histedit.h>
+.PP
+.BI "Tokenizer *tok_init(const char *ifs);"
+.br
+.BI "void tok_end(Tokenizer *tok);"
+.br
+.BI "void tok_reset(Tokenizer *tok);"
+.br
+.BI "int tok_str(Tokenizer *tok, const LineInfo *li, int *argc, const char ***argv);"
+.SH DESCRIPTION
+The editline tokenizer splits an input line into words, handling quoting,
+backslash escaping, and line continuation.
+.PP
+.BR tok_init ()
+creates a new tokenizer.
+If
+.I ifs
+is non-NULL, it specifies the set of input field separator characters;
+if NULL, the default separators (space, tab, and newline) are used.
+.PP
+.BR tok_end ()
+frees all resources associated with the tokenizer.
+.PP
+.BR tok_reset ()
+resets a tokenizer to its initial state, discarding any partial parse
+state.
+This allows a single tokenizer to be reused across multiple input lines.
+.PP
+.BR tok_str ()
+tokenizes the line described by
+.IR li .
+On return,
+.I argc
+contains the number of tokens found, and
+.I argv
+points to a NULL-terminated array of token strings.
+The storage for
+.I argv
+and the token strings is owned by
+.I tok
+and remains valid until the next call to
+.BR tok_str (),
+.BR tok_reset (),
+or
+.BR tok_end ().
+.SS Quoting Rules
+.TP
+.B Single quotes
+Characters between matching single quotes are taken literally.
+A single quote cannot appear inside single-quoted text.
+An unmatched single quote causes
+.BR tok_str ()
+to return a continuation status.
+.TP
+.B Double quotes
+Characters between matching double quotes are taken literally, except
+that a backslash followed by a double quote or another backslash is
+processed as an escape.
+An unmatched double quote causes
+.BR tok_str ()
+to return a continuation status.
+.TP
+.B Backslash
+Outside of quotes, a backslash followed by any character treats the
+next character as a literal.
+A trailing backslash at the end of the input indicates a line
+continuation.
+.SH RETURN VALUE
+.BR tok_init ()
+returns a valid
+.B Tokenizer
+pointer on success, or NULL on allocation failure.
+.PP
+.BR tok_str ()
+returns 0 when the line is fully tokenized, or a non-zero value when
+the line requires continuation (unterminated quotes or trailing
+backslash).
+.PP
+.BR tok_end ()
+and
+.BR tok_reset ()
+return no value.
+.SH ERRORS
+.TP
+.B ENOMEM
+Memory allocation failed during tokenizer creation or word buffer
+expansion.
+.SH EXAMPLES
+.nf
+#include <histedit.h>
+#include <stdio.h>
+
+Tokenizer *tok = tok_init(NULL);
+EditLine *el = el_init("myapp", stdin, stdout, stderr);
+
+int count;
+const char *line = el_gets(el, &count);
+if (line) {
+    LineInfo li;
+    li.buffer = line;
+    li.cursor = line + count;
+    li.lastchar = line + count;
+
+    int argc;
+    const char **argv;
+    if (tok_str(tok, &li, &argc, &argv) == 0) {
+        for (int i = 0; i < argc; i++)
+            printf("argv[%d] = \\"%s\\"\\n", i, argv[i]);
+    }
+}
+
+tok_end(tok);
+el_end(el);
+.fi
+.SH SEE ALSO
+.BR editline (3),
+.BR el_gets (3),
+.BR history (3),
+.BR editrc (5)

@@ -1,6 +1,7 @@
 #include "as_symtab.h"
 
 #include <ctype.h>
+#include <stdint.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,11 +14,20 @@ typedef struct {
 } sym_ctx_t;
 
 static size_t hash_name(const char *name) {
-    size_t h = 1469598103934665603ull;
+    size_t h;
+    size_t prime;
+
+#if UINTPTR_MAX > 0xFFFFFFFFu
+        h = 1469598103934665603ull;
+        prime = 1099511628211ull;
+#else
+        h = 2166136261u;
+        prime = 16777619u;
+#endif
 
     while (name != NULL && *name != '\0') {
         h ^= (unsigned char)*name++;
-        h *= 1099511628211ull;
+        h *= prime;
     }
     return h;
 }
@@ -174,6 +184,9 @@ void as_symtab_free(as_symtab_t *tab) {
         free(s->name);
         free(s->def_file);
         free(s->alias_target);
+        free(s->size_base_symbol);
+        free(s->size_target_symbol);
+        free(s->size_anchor_file);
         free(s->version);
     }
     free(tab->items);
@@ -407,14 +420,27 @@ static int parse_set_rhs_dot_minus_symbol(const char *expr, char **out_name) {
     return 0;
 }
 
-static int parse_size_arg(const char *expr, const char *sym_name, unsigned long long *out) {
+static int parse_size_arg(const char *expr, const char *sym_name, as_symbol_t *sym,
+                          const char *file, unsigned line) {
     char *tmp;
     char *dash;
+    unsigned long long out = 0;
 
-    if (expr == NULL || out == NULL) {
+    if (expr == NULL || sym == NULL) {
         return -1;
     }
-    if (parse_u64_arg(expr, out) == 0) {
+
+    free(sym->size_base_symbol);
+    free(sym->size_target_symbol);
+    free(sym->size_anchor_file);
+    sym->size_base_symbol = NULL;
+    sym->size_target_symbol = NULL;
+    sym->size_base_from_dot = 0;
+    sym->size_anchor_file = NULL;
+    sym->size_anchor_line = 0;
+
+    if (parse_u64_arg(expr, &out) == 0) {
+        sym->size = out;
         return 0;
     }
 
@@ -423,31 +449,42 @@ static int parse_size_arg(const char *expr, const char *sym_name, unsigned long 
         return -1;
     }
 
-    /*
-     * Accept common symbolic forms emitted by C compilers:
-     *   .size foo, .-foo
-     *   .size foo, .Lend-foo
-     * We record size as 0 here when symbolic.
-     */
     if (sym_name != NULL) {
         if (strncmp(tmp, ".-", 2) == 0 && strcmp(tmp + 2, sym_name) == 0) {
+            sym->size = 0;
+            sym->size_target_symbol = xstrdup(sym_name);
+            sym->size_base_from_dot = 1;
+            sym->size_anchor_file = xstrdup(file);
+            sym->size_anchor_line = line;
+            if (sym->size_target_symbol == NULL || sym->size_anchor_file == NULL) {
+                free(tmp);
+                return -1;
+            }
             free(tmp);
-            *out = 0;
             return 0;
         }
         dash = strrchr(tmp, '-');
         if (dash != NULL) {
-            char *rhs = trim_copy(dash + 1);
-            if (rhs == NULL) {
+            char *lhs;
+            char *rhs;
+
+            *dash = '\0';
+            lhs = trim_copy(tmp);
+            rhs = trim_copy(dash + 1);
+            if (lhs == NULL || rhs == NULL) {
+                free(lhs);
+                free(rhs);
                 free(tmp);
                 return -1;
             }
             if (strcmp(rhs, sym_name) == 0) {
-                free(rhs);
+                sym->size = 0;
+                sym->size_base_symbol = lhs;
+                sym->size_target_symbol = rhs;
                 free(tmp);
-                *out = 0;
                 return 0;
             }
+            free(lhs);
             free(rhs);
         }
     }
@@ -636,8 +673,6 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
     if (strcmp(d->name, ".size") == 0) {
         char *name;
         as_symbol_t *sym;
-        unsigned long long nsize = 0;
-
         if (d->arg_count < 2) {
             return -1;
         }
@@ -650,12 +685,11 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
             free(name);
             return -1;
         }
-        if (parse_size_arg(d->args[1], name, &nsize) != 0) {
+        if (parse_size_arg(d->args[1], name, sym, st->file, st->line) != 0) {
             free(name);
             return -1;
         }
         free(name);
-        sym->size = nsize;
         return 0;
     }
 
