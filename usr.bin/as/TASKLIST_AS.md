@@ -183,16 +183,16 @@ Validation gate for Section 1:
 - Audit result:
   - Implemented and exercised in full-as tests: `.section`, `.pushsection`, `.popsection`, `.previous`, `.org`, `.align`, `.balign`, `.p2align`, `.type`, common compiler-emitted `.size` forms (`.size foo, .-foo`).
   - Tightened unsupported-directive diagnostics: `.if`, `.ifdef`, `.ifndef`, `.else`, `.elseif`, `.endif`, `.macro`, `.endm`, `.rept`, `.endr`, `.irp`, `.irpc`.
-  - Remaining semantic gaps: `.group` marks `SHF_GROUP` but does not yet produce `SHT_GROUP`; `.symver` metadata is recorded but GNU version alias emission is incomplete.
-- [ ] Add missing directives or tighten diagnostics for unsupported ones.
+  - Remaining semantic gaps: `.symver` metadata is recorded but GNU version alias emission is incomplete.
+- [x] Add missing directives or tighten diagnostics for unsupported ones.
 - [ ] Add tests for:
-  - `.section`
-  - `.pushsection` / `.popsection`
-  - `.group`
-  - `.org`
-  - `.balign` / `.p2align`
-  - `.type` / `.size`
-  - `.symver`
+  - `.section` (done)
+  - `.pushsection` / `.popsection` (done)
+  - `.group` (done)
+  - `.org` (done)
+  - `.balign` / `.p2align` (done)
+  - `.type` / `.size` (done)
+  - `.symver` (pending)
 
 ### 6.2 Symbol and Relocation Semantics
 - [ ] Add tests for local numeric labels in complex mixed forward/backward flows.

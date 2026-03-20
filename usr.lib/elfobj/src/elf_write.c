@@ -15,7 +15,25 @@ typedef struct {
     const uint8_t *data;
     uint8_t owns_data;
     uint8_t owns_name;
+    size_t source_index;
+    uint32_t group_index;
+    const char *group_signature;
+    uint8_t group_comdat;
 } out_sec_t;
+
+typedef struct {
+    uint32_t group_index;
+    const char *signature;
+    uint8_t comdat;
+    size_t *members;
+    size_t member_count;
+    size_t member_cap;
+    size_t signature_sym_index;
+} out_group_t;
+
+#ifndef GRP_COMDAT
+#define GRP_COMDAT 0x1u
+#endif
 
 static uint64_t align_up(uint64_t v, uint64_t a) {
     if (a <= 1) {
@@ -122,14 +140,125 @@ static elf_err_t out_push(out_sec_t **secs, size_t *count, size_t *cap, const ou
     return ELF_OK;
 }
 
+static elf_err_t group_member_push(out_group_t *group, size_t member) {
+    size_t new_cap;
+    void *next;
+
+    if (group->member_count == group->member_cap) {
+        new_cap = group->member_cap == 0 ? 8 : group->member_cap * 2;
+        next = elf__reallocarray(group->members, new_cap, sizeof(group->members[0]));
+        if (next == NULL) {
+            return ELF_ERR_OOM;
+        }
+        group->members = (size_t *)next;
+        group->member_cap = new_cap;
+    }
+    group->members[group->member_count++] = member;
+    return ELF_OK;
+}
+
+static ptrdiff_t find_group_desc(const out_group_t *groups, size_t group_count, uint32_t group_index) {
+    size_t i;
+
+    for (i = 0; i < group_count; ++i) {
+        if (groups[i].group_index == group_index) {
+            return (ssize_t)i;
+        }
+    }
+    return -1;
+}
+
+static elf_err_t collect_out_groups(const out_sec_t *secs, size_t sec_count, out_group_t **groups_out, size_t *count_out) {
+    out_group_t *groups = NULL;
+    size_t group_count = 0;
+    size_t group_cap = 0;
+    size_t i;
+
+    for (i = 1; i < sec_count; ++i) {
+        const out_sec_t *sec = &secs[i];
+        ptrdiff_t idx;
+        void *next;
+
+        if (sec->group_index == 0 || sec->group_signature == NULL || sec->group_signature[0] == '\0') {
+            continue;
+        }
+        idx = find_group_desc(groups, group_count, sec->group_index);
+        if (idx < 0) {
+            if (group_count == group_cap) {
+                group_cap = group_cap == 0 ? 8 : group_cap * 2;
+                next = elf__reallocarray(groups, group_cap, sizeof(groups[0]));
+                if (next == NULL) {
+                    goto oom;
+                }
+                groups = (out_group_t *)next;
+            }
+            idx = (ptrdiff_t)group_count++;
+            memset(&groups[idx], 0, sizeof(groups[idx]));
+            groups[idx].group_index = sec->group_index;
+            groups[idx].signature = sec->group_signature;
+            groups[idx].comdat = sec->group_comdat;
+        }
+        if (group_member_push(&groups[idx], i) != ELF_OK) {
+            goto oom;
+        }
+    }
+
+    *groups_out = groups;
+    *count_out = group_count;
+    return ELF_OK;
+
+oom:
+    if (groups != NULL) {
+        for (i = 0; i < group_count; ++i) {
+            free(groups[i].members);
+        }
+        free(groups);
+    }
+    return ELF_ERR_OOM;
+}
+
+static void free_out_groups(out_group_t *groups, size_t group_count) {
+    size_t i;
+
+    if (groups == NULL) {
+        return;
+    }
+    for (i = 0; i < group_count; ++i) {
+        free(groups[i].members);
+    }
+    free(groups);
+}
+
+static uint8_t *build_group_data(const out_group_t *group, elfobj_endian_t endian, size_t *out_size) {
+    uint8_t *data;
+    size_t i;
+    size_t words;
+
+    if (group == NULL || out_size == NULL) {
+        return NULL;
+    }
+    words = 1 + group->member_count;
+    data = (uint8_t *)elf__calloc(words, 4);
+    if (data == NULL) {
+        return NULL;
+    }
+    elf__wr32(data + 0, endian, group->comdat ? GRP_COMDAT : 0);
+    for (i = 0; i < group->member_count; ++i) {
+        elf__wr32(data + ((i + 1) * 4), endian, (uint32_t)group->members[i]);
+    }
+    *out_size = words * 4;
+    return data;
+}
+
 static uint8_t *build_symtab(const elfobj_t *obj, elfobj_endian_t e, elfobj_class_t cls,
-                             elf_strtab_t *strtab, size_t *out_size, size_t *out_entsize) {
+                             elf_strtab_t *strtab, const char **extra_names, size_t extra_count,
+                             size_t *extra_indices, size_t *out_size, size_t *out_entsize) {
     size_t entsz = (cls == ELFOBJ_CLASS_64) ? 24 : 16;
     int has_null = (obj->symbol_count > 0 &&
                     (obj->symbols[0]->name == NULL || obj->symbols[0]->name[0] == '\0') &&
                     obj->symbols[0]->value == 0 &&
                     obj->symbols[0]->size == 0);
-    size_t n = obj->symbol_count + (has_null ? 0 : 1);
+    size_t n = obj->symbol_count + (has_null ? 0 : 1) + extra_count;
     uint8_t *buf = (uint8_t *)elf__calloc(n, entsz);
     size_t i;
 
@@ -159,6 +288,32 @@ static uint8_t *build_symtab(const elfobj_t *obj, elfobj_endian_t e, elfobj_clas
             elf__wr16(p + 6, e, sym->shndx);
             elf__wr64(p + 8, e, sym->value);
             elf__wr64(p + 16, e, sym->size);
+        }
+    }
+
+    for (i = 0; i < extra_count; ++i) {
+        size_t sym_index = obj->symbol_count + (has_null ? 0 : 1) + i;
+        uint8_t *p = buf + (sym_index * entsz);
+        uint32_t st_name = elf__strtab_add(strtab, extra_names[i] ? extra_names[i] : "");
+        uint8_t st_info = ELF32_ST_INFO(STB_GLOBAL, STT_NOTYPE);
+
+        if (extra_indices != NULL) {
+            extra_indices[i] = sym_index;
+        }
+        if (cls == ELFOBJ_CLASS_32) {
+            elf__wr32(p + 0, e, st_name);
+            elf__wr32(p + 4, e, 0);
+            elf__wr32(p + 8, e, 0);
+            p[12] = st_info;
+            p[13] = 0;
+            elf__wr16(p + 14, e, SHN_UNDEF);
+        } else {
+            elf__wr32(p + 0, e, st_name);
+            p[4] = st_info;
+            p[5] = 0;
+            elf__wr16(p + 6, e, SHN_UNDEF);
+            elf__wr64(p + 8, e, 0);
+            elf__wr64(p + 16, e, 0);
         }
     }
 
@@ -303,14 +458,19 @@ static uint8_t *build_dynstr(const elfobj_t *obj, size_t *out_size) {
 
 elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz) {
     out_sec_t *secs = NULL;
+    out_group_t *groups = NULL;
     size_t sec_count = 0;
     size_t sec_cap = 0;
+    size_t group_count = 0;
     elf_strtab_t shstr;
     elf_strtab_t strtab;
     size_t symtab_index = 0;
     size_t strtab_index = 0;
     size_t shstr_index = 0;
     size_t i;
+    size_t *obj_sec_to_out = NULL;
+    const char **group_sig_names = NULL;
+    size_t *group_sig_indices = NULL;
     uint8_t *symtab_data = NULL;
     uint8_t *dynstr_data = NULL;
     size_t dynstr_size = 0;
@@ -347,6 +507,12 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         out_push(&secs, &sec_count, &sec_cap, &nulls);
     }
 
+    obj_sec_to_out = (size_t *)elf__calloc(obj->section_count, sizeof(*obj_sec_to_out));
+    if (obj_sec_to_out == NULL) {
+        err = ELF_ERR_OOM;
+        goto done;
+    }
+
     for (i = 0; i < obj->section_count; ++i) {
         const struct elf_section *s = obj->sections[i];
         const char *name = s->name ? s->name : "";
@@ -371,9 +537,14 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         out.entsize = s->entsize;
         out.data = s->data;
         out.size = s->type == SHT_NOBITS ? s->size : s->data_size;
+        out.source_index = i;
+        out.group_index = s->group_index;
+        out.group_signature = s->group_signature;
+        out.group_comdat = s->comdat;
         if (strcmp(name, ".dynstr") == 0) {
             has_dynstr_section = 1;
         }
+        obj_sec_to_out[i] = sec_count;
         if (out_push(&secs, &sec_count, &sec_cap, &out) != ELF_OK) {
             err = ELF_ERR_OOM;
             goto done;
@@ -430,7 +601,10 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
             out.size = rel_size;
             out.owns_data = 1;
             out.owns_name = 1;
-            out.info = (uint32_t)(i + 1);
+            out.info = obj_sec_to_out[i] != 0 ? (uint32_t)obj_sec_to_out[i] : 0;
+            out.group_index = target->group_index;
+            out.group_signature = target->group_signature;
+            out.group_comdat = target->comdat;
             if (out_push(&secs, &sec_count, &sec_cap, &out) != ELF_OK) {
                 free(name);
                 free(rel_data);
@@ -440,10 +614,55 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         }
     }
 
-    symtab_data = build_symtab(obj, obj->endian, obj->cls, &strtab, &symtab_size, &symtab_entsz);
+    err = collect_out_groups(secs, sec_count, &groups, &group_count);
+    if (err != ELF_OK) {
+        goto done;
+    }
+    if (group_count != 0) {
+        group_sig_names = (const char **)elf__calloc(group_count, sizeof(*group_sig_names));
+        group_sig_indices = (size_t *)elf__calloc(group_count, sizeof(*group_sig_indices));
+        if (group_sig_names == NULL || group_sig_indices == NULL) {
+            err = ELF_ERR_OOM;
+            goto done;
+        }
+        for (i = 0; i < group_count; ++i) {
+            group_sig_names[i] = groups[i].signature;
+        }
+    }
+
+    symtab_data = build_symtab(obj, obj->endian, obj->cls, &strtab, group_sig_names, group_count,
+                               group_sig_indices, &symtab_size, &symtab_entsz);
     if (symtab_data == NULL) {
         err = ELF_ERR_OOM;
         goto done;
+    }
+
+    for (i = 0; i < group_count; ++i) {
+        out_sec_t grpsec;
+        size_t grp_size = 0;
+        uint8_t *grp_data = build_group_data(&groups[i], obj->endian, &grp_size);
+
+        if (grp_data == NULL) {
+            err = ELF_ERR_OOM;
+            goto done;
+        }
+        groups[i].signature_sym_index = group_sig_indices[i];
+        memset(&grpsec, 0, sizeof(grpsec));
+        grpsec.name = ".group";
+        grpsec.type = SHT_GROUP;
+        grpsec.flags = 0;
+        grpsec.link = 0;
+        grpsec.info = (uint32_t)groups[i].signature_sym_index;
+        grpsec.addralign = 4;
+        grpsec.entsize = 4;
+        grpsec.data = grp_data;
+        grpsec.size = grp_size;
+        grpsec.owns_data = 1;
+        if (out_push(&secs, &sec_count, &sec_cap, &grpsec) != ELF_OK) {
+            free(grp_data);
+            err = ELF_ERR_OOM;
+            goto done;
+        }
     }
 
     {
@@ -539,6 +758,8 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
 
     for (i = 1; i < sec_count; ++i) {
         if (secs[i].type == SHT_RELA || secs[i].type == SHT_REL) {
+            secs[i].link = (uint32_t)symtab_index;
+        } else if (secs[i].type == SHT_GROUP) {
             secs[i].link = (uint32_t)symtab_index;
         }
     }
@@ -1173,6 +1394,10 @@ done:
     if (err != ELF_OK) {
         free(img);
     }
+    free(group_sig_indices);
+    free(group_sig_names);
+    free(obj_sec_to_out);
+    free_out_groups(groups, group_count);
     for (i = 0; i < sec_count; ++i) {
         if (secs[i].owns_data) {
             free((void *)secs[i].data);

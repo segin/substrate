@@ -152,6 +152,38 @@ static char *trim_copy(const char *s) {
     return out;
 }
 
+static uint32_t section_group_ordinal(const as_section_state_t *sections, size_t index) {
+    uint32_t ordinal = 0;
+    size_t i;
+
+    if (sections == NULL || index >= sections->count || sections->items[index].group == NULL) {
+        return 0;
+    }
+    for (i = 0; i <= index; ++i) {
+        const char *group = sections->items[i].group;
+        size_t j;
+        int first = 1;
+
+        if (group == NULL) {
+            continue;
+        }
+        for (j = 0; j < i; ++j) {
+            if (sections->items[j].group != NULL && strcmp(sections->items[j].group, group) == 0) {
+                first = 0;
+                break;
+            }
+        }
+        if (!first) {
+            continue;
+        }
+        ordinal++;
+        if (i == index) {
+            return ordinal;
+        }
+    }
+    return 0;
+}
+
 static int bytebuf_reserve(bytebuf_t *b, size_t extra) {
     unsigned char *next;
 
@@ -7211,9 +7243,23 @@ static int append_directive_data(bytebuf_t *buf, const as_directive_t *d) {
         return 1;
     }
 
-    if (strcmp(d->name, ".zero") == 0 || strcmp(d->name, ".space") == 0) {
+    if (strcmp(d->name, ".zero") == 0 || strcmp(d->name, ".space") == 0 || strcmp(d->name, ".skip") == 0) {
+        long long fill = 0;
+        size_t j;
         if (d->arg_count < 1 || parse_int64(d->args[0], &v) != 0 || v < 0) {
             return -1;
+        }
+        if ((strcmp(d->name, ".space") == 0 || strcmp(d->name, ".skip") == 0) &&
+            d->arg_count >= 2) {
+            if (parse_int64(d->args[1], &fill) != 0) {
+                return -1;
+            }
+            for (j = 0; j < (size_t)v; ++j) {
+                if (bytebuf_append_u64_le(buf, (uint64_t)fill, 1) != 0) {
+                    return -1;
+                }
+            }
+            return 1;
         }
         if (bytebuf_append_zeros(buf, (size_t)v) != 0) {
             return -1;
@@ -11431,7 +11477,11 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
             goto fail;
         }
         if (s->group != NULL) {
-            (void)elf_section_set_group(es, 1, s->comdat);
+            if (elf_section_set_group(es, section_group_ordinal(sections, i), s->comdat) != ELF_OK ||
+                elf_section_set_group_signature(es, s->group) != ELF_OK) {
+                set_err(&ctx, "failed to set group on %s", s->name);
+                goto fail;
+            }
         }
 
         if (strcmp(s->name, ".text") == 0 && s->subsection == 0) {

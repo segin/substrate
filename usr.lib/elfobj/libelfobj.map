@@ -73,6 +73,7 @@ ELFOBJ_1.0 {
 		elf_section_set_data;
 		elf_section_set_flags;
 		elf_section_set_group;
+		elf_section_set_group_signature;
 		elf_section_set_merge;
 		elf_section_set_note_info;
 		elf_section_set_tls;

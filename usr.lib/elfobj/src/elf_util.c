@@ -359,6 +359,7 @@ static void elf_free_sections(elfobj_t *obj) {
         }
         free(s->name);
         free(s->note_name);
+        free(s->group_signature);
         if (s->owns_data) {
             free(s->data);
         }

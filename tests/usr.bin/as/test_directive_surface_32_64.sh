@@ -48,6 +48,13 @@ al1:
 .p2align 5
 al2:
     .byte 2
+
+.section .grpsec,"axG",@progbits,grp_surface,comdat
+.globl grp_entry
+.type grp_entry,@function
+grp_entry:
+    ret
+.size grp_entry, .-grp_entry
 SRC
 
 sym_hex() {
@@ -62,8 +69,12 @@ check_obj() {
     readelf -S "$obj" | grep -q "\\.gamma"
     readelf -S "$obj" | grep -q "\\.orgsec"
     readelf -S "$obj" | grep -q "\\.alignsec"
+    readelf -S "$obj" | grep -q "\\.group"
 
     readelf --wide -s "$obj" | awk '$8 == "entry" && $4 == "FUNC" && $3 != "0" && $3 != "00000000" && $3 != "0000000000000000" { ok = 1 } END { exit ok ? 0 : 1 }'
+    readelf --wide -s "$obj" | awk '$8 == "grp_entry" && $4 == "FUNC" && $3 != "0" && $3 != "00000000" && $3 != "0000000000000000" { ok = 1 } END { exit ok ? 0 : 1 }'
+    readelf --section-groups "$obj" | grep -q "grp_surface"
+    readelf --section-groups "$obj" | grep -q "\\.grpsec"
 
     objdump -s -j .alpha "$obj" | grep -Eiq "0103"
     objdump -s -j .beta "$obj" | grep -Eiq "02"
