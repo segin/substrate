@@ -30,6 +30,15 @@ static size_t vt_scrollback_slot(const vt_state_t *vt, size_t logical_index) {
     return (oldest + logical_index) % VT_SCROLLBACK_LINES;
 }
 
+static void vt_init_tab_stops(vt_state_t *vt, int width) {
+    int col;
+
+    memset(vt->tab_stops, 0, sizeof(vt->tab_stops));
+    for (col = 8; col < width; col += 8) {
+        vt->tab_stops[col / 32] |= (uint32_t)1U << (col % 32);
+    }
+}
+
 int vt_set_geometry(int cols, int rows) {
     if (cols < 1 || cols > VT_MAX_WIDTH || rows < 2 || rows > VT_MAX_HEIGHT) {
         return -1;
@@ -66,6 +75,7 @@ void vt_init(void) {
         vt_states[i].row = 0;
         vt_states[i].col = 0;
         vt_states[i].color = 0x07; // Light Grey on Black
+        vt_states[i].attrs = 0;
         vt_states[i].tty = NULL;
         vt_states[i].scrollback_head = 0;
         vt_states[i].scrollback_count = 0;
@@ -73,9 +83,13 @@ void vt_init(void) {
         vt_states[i].saved_row = 0;
         vt_states[i].saved_col = 0;
         vt_states[i].saved_color = 0x07;
+        vt_states[i].saved_attrs = 0;
         vt_states[i].scroll_top = 0;
         vt_states[i].scroll_bottom = vt_get_visible_height() - 1;
         vt_states[i].cursor_visible = 1;
+        vt_states[i].cursor_blink = 1;
+        vt_states[i].tab_width = 8;
+        vt_init_tab_stops(&vt_states[i], vt_width);
         vt_states[i].autowrap = 1;         /* DECAWM on by default */
         vt_states[i].cursor_key_app = 0;   /* Normal cursor keys */
         vt_states[i].origin_mode = 0;      /* Absolute origin */
@@ -84,6 +98,7 @@ void vt_init(void) {
         vt_states[i].alt_row = 0;
         vt_states[i].alt_col = 0;
         vt_states[i].alt_color = 0x07;
+        vt_states[i].alt_attrs = 0;
         memset(vt_states[i].alt_buffer, 0, sizeof(vt_states[i].alt_buffer));
         
         // Initialize ansi state

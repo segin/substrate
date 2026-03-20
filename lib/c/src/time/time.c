@@ -573,3 +573,65 @@ clock_t clock(void) {
 double difftime(time_t time1, time_t time0) {
     return (double)(time1 - time0);
 }
+
+/* strptime: parse date/time string; stub implementation */
+char *strptime(const char *__restrict s, const char *__restrict format,
+               struct tm *__restrict tm) {
+    /* Minimal implementation: only handles common specifiers */
+    const char *p = s;
+    const char *f = format;
+    int v;
+
+    while (*f && *p) {
+        if (*f != '%') {
+            if (*f != *p)
+                return NULL;
+            f++;
+            p++;
+            continue;
+        }
+        f++; /* skip % */
+        switch (*f++) {
+        case 'Y': /* 4-digit year */
+            v = 0;
+            for (int d = 0; d < 4 && *p >= '0' && *p <= '9'; d++, p++)
+                v = v * 10 + (*p - '0');
+            tm->tm_year = v - 1900;
+            break;
+        case 'm': /* month 1-12 */
+            v = 0;
+            for (int d = 0; d < 2 && *p >= '0' && *p <= '9'; d++, p++)
+                v = v * 10 + (*p - '0');
+            tm->tm_mon = v - 1;
+            break;
+        case 'd': /* day 1-31 */
+            v = 0;
+            for (int d = 0; d < 2 && *p >= '0' && *p <= '9'; d++, p++)
+                v = v * 10 + (*p - '0');
+            tm->tm_mday = v;
+            break;
+        case 'H': /* hour 0-23 */
+            v = 0;
+            for (int d = 0; d < 2 && *p >= '0' && *p <= '9'; d++, p++)
+                v = v * 10 + (*p - '0');
+            tm->tm_hour = v;
+            break;
+        case 'M': /* minute 0-59 */
+            v = 0;
+            for (int d = 0; d < 2 && *p >= '0' && *p <= '9'; d++, p++)
+                v = v * 10 + (*p - '0');
+            tm->tm_min = v;
+            break;
+        case 'S': /* second 0-60 */
+            v = 0;
+            for (int d = 0; d < 2 && *p >= '0' && *p <= '9'; d++, p++)
+                v = v * 10 + (*p - '0');
+            tm->tm_sec = v;
+            break;
+        default:
+            /* Unrecognized specifier, skip */
+            break;
+        }
+    }
+    return (char *)p;
+}

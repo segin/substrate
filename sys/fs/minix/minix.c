@@ -1168,7 +1168,6 @@ static int minix_link(fs_node_t *dir, fs_node_t *node, const char *name) {
     }
     
     // Update mtime/ctime
-    extern int64_t get_time(void);
     dir->mtime = get_time();
     dir->ctime = dir->mtime;
     
@@ -1224,7 +1223,6 @@ static int minix_unlink(fs_node_t *dir, const char *name) {
                     minix_free_all_zones(fs, &target);
                     minix_free_inode(fs, target_inode_num);
                 } else {
-                    extern int64_t get_time(void);
                     t_inode->i_ctime = get_time();
                     minix_write_inode(fs, &target);
                 }
@@ -1236,7 +1234,6 @@ static int minix_unlink(fs_node_t *dir, const char *name) {
                     minix_free_all_zones(fs, &target);
                     minix_free_inode(fs, target_inode_num);
                 } else {
-                    extern int64_t get_time(void);
                     t_inode->i_time = (uint32_t)get_time();
                     minix_write_inode(fs, &target);
                 }
@@ -1245,7 +1242,6 @@ static int minix_unlink(fs_node_t *dir, const char *name) {
             kfree(target.ptr, sizeof(struct minix_inode_wrapper));
 
             // Update parent directory timestamps
-            extern int64_t get_time(void);
             dir->mtime = get_time();
             dir->ctime = dir->mtime;
             minix_write_inode(fs, dir);

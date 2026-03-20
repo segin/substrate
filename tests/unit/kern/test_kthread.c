@@ -1,4 +1,5 @@
 #include <sys/kthread.h>
+#include <kern/sched.h>
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -10,8 +11,6 @@ static void dummy_thread_func(void *arg) {
     (void)arg;
     kthread_exit();
 }
-
-extern void sched_init(void);
 
 bool test_kthread_creation(void) {
     sched_init();

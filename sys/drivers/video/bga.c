@@ -1,6 +1,8 @@
 #include <sys/types.h>
 #include <sys/file.h>
 #include <kern/console.h>
+#include <kern/cmdline.h>
+#include <string.h>
 #include <drivers/video/fb.h>
 #include <arch/x86-common/io.h>
 
@@ -28,9 +30,13 @@
 #define VBE_DISPI_DISABLED          0x00
 #define VBE_DISPI_ENABLED           0x01
 #define VBE_DISPI_LFB_ENABLED       0x40
+#define BGA_BANK_WINDOW_PHYS        0x000A0000U
+#define BGA_BANK_WINDOW_VIRT        0xC00A0000U
+#define BGA_BANK_SIZE               0x10000U
 
 void bga_scroll(int y_offset);
 static int bga_set_viewport(int x, int y);
+static void bga_banked_putpixel(int x, int y, uint32_t color);
 
 static void bga_write(uint16_t index, uint16_t value) {
     outw(VBE_DISPI_IOPORT_INDEX, index);
@@ -60,6 +66,77 @@ int bga_is_available(void) {
 extern uint32_t pci_read_config(uint32_t device, int offset);
 
 static uint32_t bga_lfb_addr = 0;
+static int bga_use_lfb = 1;
+static uint16_t bga_current_bank = 0xFFFFU;
+
+#ifdef HOST_TEST
+extern volatile uint8_t *bga_test_bank_window;
+#define BGA_BANK_WINDOW ((volatile uint8_t *)bga_test_bank_window)
+#else
+#define BGA_BANK_WINDOW ((volatile uint8_t *)(uintptr_t)BGA_BANK_WINDOW_VIRT)
+#endif
+
+static int bga_force_banked_mode(void) {
+    char value[16];
+
+    if (cmdline_get("bga", value, sizeof(value)) != 0) {
+        return 0;
+    }
+    return strcmp(value, "nolfb") == 0;
+}
+
+static uint32_t bga_pack_color(uint32_t color, uint8_t bpp) {
+    switch (bpp) {
+    case 32:
+        return color;
+    case 24:
+        return color & 0x00FFFFFFU;
+    case 16: {
+        uint32_t r = (color >> 16) & 0xFFU;
+        uint32_t g = (color >> 8) & 0xFFU;
+        uint32_t b = color & 0xFFU;
+        return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+    }
+    default:
+        return color;
+    }
+}
+
+static void bga_select_bank(uint16_t bank) {
+    if (bga_current_bank == bank) {
+        return;
+    }
+    bga_write(VBE_DISPI_INDEX_BANK, bank);
+    bga_current_bank = bank;
+}
+
+static void bga_banked_putpixel(int x, int y, uint32_t color) {
+    uintptr_t offset;
+    uint32_t raw;
+    int bytes_per_pixel;
+    int i;
+
+    if (x < 0 || y < 0 || x >= (int)fb.width || y >= (int)fb.height) {
+        return;
+    }
+
+    bytes_per_pixel = (fb.bpp + 7) / 8;
+    if (bytes_per_pixel <= 0) {
+        return;
+    }
+
+    offset = (uintptr_t)y * fb.pitch + (uintptr_t)x * (uintptr_t)bytes_per_pixel;
+    raw = bga_pack_color(color, fb.bpp);
+
+    for (i = 0; i < bytes_per_pixel; i++) {
+        uintptr_t byte_off = offset + (uintptr_t)i;
+        uint16_t bank = (uint16_t)(byte_off / BGA_BANK_SIZE);
+        uintptr_t in_bank = byte_off % BGA_BANK_SIZE;
+
+        bga_select_bank(bank);
+        BGA_BANK_WINDOW[in_bank] = (uint8_t)((raw >> (i * 8)) & 0xFFU);
+    }
+}
 
 
 /*
@@ -78,6 +155,9 @@ static void find_bga_pci(uint32_t device, uint16_t vendor_id, uint16_t device_id
 */
 
 int bga_init(fb_info_t *fb_out) {
+    uint16_t enable_flags;
+    uint16_t virt_height;
+
     if (!bga_is_available()) {
         kprint("BGA: Device not available on I/O ports.\n");
         return -1;
@@ -91,6 +171,7 @@ int bga_init(fb_info_t *fb_out) {
     // I'll assume I can scan or just use default specific to QEMU/Bochs if PCI fails.
     // Default fallback: 0xE0000000
     bga_lfb_addr = 0xE0000000;
+    bga_use_lfb = bga_force_banked_mode() ? 0 : 1;
     
     // Attempt scan (commented out until verified PCI API)
     // pci_scan_bus(find_bga_pci, 0);
@@ -98,7 +179,7 @@ int bga_init(fb_info_t *fb_out) {
     // Set resolution: 1024x768x32
     uint16_t width = 1024;
     uint16_t height = 768;
-    uint16_t virt_height = height * 2; // Double buffering for scrolling
+    virt_height = bga_use_lfb ? (uint16_t)(height * 2) : height;
     uint16_t bpp = 32;
 
     bga_write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_DISABLED);
@@ -109,10 +190,16 @@ int bga_init(fb_info_t *fb_out) {
     bga_write(VBE_DISPI_INDEX_VIRT_HEIGHT, virt_height);
     bga_write(VBE_DISPI_INDEX_X_OFFSET, 0);
     bga_write(VBE_DISPI_INDEX_Y_OFFSET, 0);
-    bga_write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_ENABLED | VBE_DISPI_LFB_ENABLED);
+    enable_flags = VBE_DISPI_ENABLED;
+    if (bga_use_lfb) {
+        enable_flags |= VBE_DISPI_LFB_ENABLED;
+    }
+    bga_write(VBE_DISPI_INDEX_ENABLE, enable_flags);
+    bga_current_bank = 0xFFFFU;
 
     // Update fb info
-    fb_out->addr = (uint32_t*)bga_lfb_addr;
+    fb_out->addr = bga_use_lfb ? (uint32_t*)bga_lfb_addr
+                               : (uint32_t *)(uintptr_t)BGA_BANK_WINDOW_VIRT;
     fb_out->width = width;
     fb_out->height = height;
     fb_out->virt_height = virt_height;
@@ -120,22 +207,31 @@ int bga_init(fb_info_t *fb_out) {
     fb_out->pitch = (width * bpp) / 8;
     fb_out->virt_width = width;
     fb_out->virt_height = virt_height;
-    fb_out->set_viewport = bga_set_viewport;
+    fb_out->set_viewport = bga_use_lfb ? bga_set_viewport : NULL;
+    fb_out->putpixel = bga_use_lfb ? linear_fb_putpixel : bga_banked_putpixel;
 
     /* Implement Hardware Scroll */
-    fb_out->scroll = bga_scroll;
+    fb_out->scroll = bga_use_lfb ? bga_scroll : NULL;
 
-    kprint("BGA: Mode set to 1024x768x32 with Hardware Scrolling.\n");
+    kprint(bga_use_lfb
+               ? "BGA: Mode set to 1024x768x32 with Hardware Scrolling.\n"
+               : "BGA: Mode set to 1024x768x32 using banked fallback.\n");
     return 0;
 }
 
 static int bga_set_viewport(int x, int y) {
+    if (!bga_use_lfb) {
+        return -1;
+    }
     bga_write(VBE_DISPI_INDEX_X_OFFSET, (uint16_t)x);
     bga_write(VBE_DISPI_INDEX_Y_OFFSET, (uint16_t)y);
     return 0;
 }
 
 void bga_scroll(int y_offset) {
+    if (!bga_use_lfb) {
+        return;
+    }
     bga_write(VBE_DISPI_INDEX_Y_OFFSET, (uint16_t)y_offset);
 }
 
@@ -172,7 +268,8 @@ static int bga_set_mode(int mode_id) {
     uint16_t width = (uint16_t)mode->width;
     uint16_t height = (uint16_t)mode->height;
     uint16_t bpp = (uint16_t)mode->bpp;
-    uint16_t virt_height = height * 2;
+    uint16_t virt_height = bga_use_lfb ? (uint16_t)(height * 2) : height;
+    uint16_t enable_flags = VBE_DISPI_ENABLED;
 
     bga_write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_DISABLED);
     bga_write(VBE_DISPI_INDEX_XRES, width);
@@ -182,18 +279,24 @@ static int bga_set_mode(int mode_id) {
     bga_write(VBE_DISPI_INDEX_VIRT_HEIGHT, virt_height);
     bga_write(VBE_DISPI_INDEX_X_OFFSET, 0);
     bga_write(VBE_DISPI_INDEX_Y_OFFSET, 0);
-    bga_write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_ENABLED | VBE_DISPI_LFB_ENABLED);
+    if (bga_use_lfb) {
+        enable_flags |= VBE_DISPI_LFB_ENABLED;
+    }
+    bga_write(VBE_DISPI_INDEX_ENABLE, enable_flags);
+    bga_current_bank = 0xFFFFU;
 
     /* Update global fb */
-    fb.addr = (uint32_t *)bga_lfb_addr;
+    fb.addr = bga_use_lfb ? (uint32_t *)bga_lfb_addr
+                          : (uint32_t *)(uintptr_t)BGA_BANK_WINDOW_VIRT;
     fb.width = width;
     fb.height = height;
     fb.bpp = bpp;
     fb.pitch = (width * bpp) / 8;
     fb.virt_width = width;
     fb.virt_height = virt_height;
-    fb.set_viewport = bga_set_viewport;
-    fb.scroll = bga_scroll;
+    fb.set_viewport = bga_use_lfb ? bga_set_viewport : NULL;
+    fb.scroll = bga_use_lfb ? bga_scroll : NULL;
+    fb.putpixel = bga_use_lfb ? linear_fb_putpixel : bga_banked_putpixel;
 
     return 0;
 }

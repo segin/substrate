@@ -1,7 +1,7 @@
 ." Copyright (c) 2026 Substrate Project
 ." All rights reserved.
 ."
-.Dd February 04, 2026
+.Dd March 18, 2026
 .Dt FB 4
 .Os Substrate
 .Sh NAME
@@ -25,6 +25,10 @@ or the Multiboot-provided framebuffer). If a linear framebuffer is available,
 exposes it to the system.
 .Pp
 The driver implements optimized drawing primitives, including accelerated clearing and scrolling, taking advantage of direct memory access and aligned writes for supported color depths (32, 24, 16, 15, and 8 bpp).
+.Pp
+Framebuffer memory is mapped write-combining when the i386 PAT facility is
+available. Systems without PAT support fall back to conservative uncached
+mappings.
 .Sh KERNEL COMMAND LINE
 The
 .Nm
