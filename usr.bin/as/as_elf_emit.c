@@ -79,6 +79,7 @@ static int parse_mmx_reg(const char *name, unsigned *out);
 static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_x86_operand_t *dst, int is64,
                                int intel_syntax, char *errbuf, size_t errbuf_sz);
 static int is_local_temp_symbol_name(const char *name);
+static int expr_is_local_temp_symbol(const as_expr_t *e);
 
 static void set_err(emit_ctx_t *ctx, const char *fmt, ...) {
     va_list ap;
@@ -96,6 +97,10 @@ static int is_local_temp_symbol_name(const char *name) {
         return 0;
     }
     return name[0] == '.' && name[1] == 'L';
+}
+
+static int expr_is_local_temp_symbol(const as_expr_t *e) {
+    return e != NULL && e->kind == AS_EXPR_SYMBOL && is_local_temp_symbol_name(e->symbol);
 }
 
 static char *xstrdup(const char *s) {
@@ -9002,6 +9007,61 @@ static uint64_t estimate_stmt_len(emit_ctx_t *ctx, unsigned x86_code_bits, const
     return (uint64_t)code_len;
 }
 
+static int estimate_stmt_len_at(emit_ctx_t *ctx, const char *section_name, unsigned x86_code_bits, uint64_t sec_off,
+                                const as_stmt_t *st, uint64_t *len_out) {
+    unsigned char code[32];
+    size_t code_len = 0;
+    char encerr[256];
+    as_elf_cfg_t stmt_cfg;
+    char mnbuf[32];
+    char suffix = '\0';
+    long long const_tmp = 0;
+
+    if (ctx == NULL || st == NULL || len_out == NULL) {
+        return -1;
+    }
+    *len_out = 0;
+    if (st->kind == AS_STMT_DIRECTIVE) {
+        bytebuf_t tmp;
+        memset(&tmp, 0, sizeof(tmp));
+        if (append_directive_data(&tmp, &st->u.directive) != 0) {
+            free(tmp.data);
+            return -1;
+        }
+        *len_out = (uint64_t)tmp.len;
+        free(tmp.data);
+        return 0;
+    }
+    if (st->kind != AS_STMT_INSTRUCTION) {
+        return 0;
+    }
+    if (!section_name_is_executable(ctx, section_name)) {
+        return 0;
+    }
+    if (ctx->cfg == NULL) {
+        return -1;
+    }
+    if (normalize_x86_mnemonic(st->u.instr.mnemonic, mnbuf, sizeof(mnbuf), &suffix) == 0 &&
+        is_rel_mnemonic(mnbuf) &&
+        st->u.instr.operand_count == 1 &&
+        st->u.instr.operands[0].u.expr != NULL &&
+        (st->u.instr.operands[0].kind == AS_OPERAND_LABEL_REF ||
+         st->u.instr.operands[0].kind == AS_OPERAND_IMMEDIATE) &&
+        eval_expr_const(st->u.instr.operands[0].u.expr, &const_tmp) != 0) {
+        *len_out = rel_forward_base_len(&st->u.instr, x86_code_bits, LLONG_MAX);
+        return 0;
+    }
+    stmt_cfg = *ctx->cfg;
+    stmt_cfg.x86_code_bits = x86_code_bits;
+    stmt_cfg.have_current_text_offset = 1u;
+    stmt_cfg.current_text_offset = sec_off;
+    if (encode_x86_stmt(&stmt_cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
+        return -1;
+    }
+    *len_out = (uint64_t)code_len;
+    return 0;
+}
+
 static int find_label_virtual_offset(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *base_st,
                                      const char *file, unsigned line, int digit, const char *sym_name,
                                      uint64_t *off_out) {
@@ -9095,9 +9155,11 @@ static int find_label_virtual_offset(emit_ctx_t *ctx, const char *section_name, 
     return -1;
 }
 
-static int find_numeric_local_virtual_offset(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *base_st,
-                                             uint64_t base_off, unsigned x86_code_bits,
-                                             const char *file, unsigned line, int digit, uint64_t *off_out) {
+static __attribute__((unused)) int find_numeric_local_virtual_offset(emit_ctx_t *ctx, const char *section_name,
+                                                                     const as_stmt_t *base_st, uint64_t base_off,
+                                                                     unsigned x86_code_bits,
+                                                                     const char *file, unsigned line, int digit,
+                                                                     uint64_t *off_out) {
     size_t base_idx = 0;
     size_t target_idx = (size_t)-1;
     size_t i;
@@ -9156,31 +9218,23 @@ static int find_numeric_local_virtual_offset(emit_ctx_t *ctx, const char *sectio
                 continue;
             }
             {
-                bytebuf_t tmp;
-                memset(&tmp, 0, sizeof(tmp));
-                if (append_directive_data(&tmp, &st->u.directive) < 0) {
+                uint64_t stmt_len = 0;
+                if (estimate_stmt_len_at(ctx, track.current, track.x86_code_bits, delta, st, &stmt_len) != 0) {
                     section_track_free(&track);
                     return -1;
                 }
-                delta += (uint64_t)tmp.len;
-                free(tmp.data);
+                delta += stmt_len;
             }
             continue;
         }
         if (st->kind == AS_STMT_INSTRUCTION && strcmp(track.current, section_name) == 0 &&
             section_name_is_executable(ctx, track.current)) {
-            unsigned char code[32];
-            size_t code_len = 0;
-            char encerr[256];
-            as_elf_cfg_t stmt_cfg = *ctx->cfg;
-            stmt_cfg.x86_code_bits = track.x86_code_bits;
-            stmt_cfg.have_current_text_offset = 1u;
-            stmt_cfg.current_text_offset = 0;
-            if (encode_x86_stmt(&stmt_cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
+            uint64_t stmt_len = 0;
+            if (estimate_stmt_len_at(ctx, track.current, track.x86_code_bits, delta, st, &stmt_len) != 0) {
                 section_track_free(&track);
                 return -1;
             }
-            delta += (uint64_t)code_len;
+            delta += stmt_len;
         }
     }
     section_track_free(&track);
@@ -9211,9 +9265,10 @@ static int find_numeric_local_virtual_offset(emit_ctx_t *ctx, const char *sectio
     }
 }
 
-static int find_named_label_virtual_offset(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *base_st,
-                                           uint64_t base_off, unsigned x86_code_bits,
-                                           const char *sym_name, uint64_t *off_out) {
+static __attribute__((unused)) int find_named_label_virtual_offset(emit_ctx_t *ctx, const char *section_name,
+                                                                   const as_stmt_t *base_st, uint64_t base_off,
+                                                                   unsigned x86_code_bits,
+                                                                   const char *sym_name, uint64_t *off_out) {
     size_t base_idx = 0;
     size_t target_idx = (size_t)-1;
     size_t i;
@@ -9268,31 +9323,23 @@ static int find_named_label_virtual_offset(emit_ctx_t *ctx, const char *section_
                 continue;
             }
             {
-                bytebuf_t tmp;
-                memset(&tmp, 0, sizeof(tmp));
-                if (append_directive_data(&tmp, &st->u.directive) < 0) {
+                uint64_t stmt_len = 0;
+                if (estimate_stmt_len_at(ctx, track.current, track.x86_code_bits, delta, st, &stmt_len) != 0) {
                     section_track_free(&track);
                     return -1;
                 }
-                delta += (uint64_t)tmp.len;
-                free(tmp.data);
+                delta += stmt_len;
             }
             continue;
         }
         if (st->kind == AS_STMT_INSTRUCTION && strcmp(track.current, section_name) == 0 &&
             section_name_is_executable(ctx, track.current)) {
-            unsigned char code[32];
-            size_t code_len = 0;
-            char encerr[256];
-            as_elf_cfg_t stmt_cfg = *ctx->cfg;
-            stmt_cfg.x86_code_bits = track.x86_code_bits;
-            stmt_cfg.have_current_text_offset = 1u;
-            stmt_cfg.current_text_offset = 0;
-            if (encode_x86_stmt(&stmt_cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
+            uint64_t stmt_len = 0;
+            if (estimate_stmt_len_at(ctx, track.current, track.x86_code_bits, delta, st, &stmt_len) != 0) {
                 section_track_free(&track);
                 return -1;
             }
-            delta += (uint64_t)code_len;
+            delta += stmt_len;
         }
     }
     section_track_free(&track);
@@ -9410,6 +9457,7 @@ static int encode_x86_stmt_for_layout(emit_ctx_t *ctx, const char *section_name,
 
         if ((op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) &&
             op->u.expr != NULL &&
+            !expr_is_local_temp_symbol(op->u.expr) &&
             eval_local_rel_expr_virtual(ctx, section_name, st, sec_off, x86_code_bits, op->u.expr, &disp) == 0) {
             as_stmt_t tmp = *st;
             as_instruction_t tin = st->u.instr;
@@ -11489,6 +11537,11 @@ static int emit_relocations(emit_ctx_t *ctx) {
                         op->kind == AS_OPERAND_MEMORY &&
                         op->u.mem.base_reg != NULL &&
                         streq_ci(op->u.mem.base_reg, "rip")) {
+                        skip_local_resolve = 1;
+                    }
+                    if (expr_is_local_temp_symbol(e) &&
+                        (op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) &&
+                        is_rel_mnemonic(st->u.instr.mnemonic)) {
                         skip_local_resolve = 1;
                     }
                     if (!skip_local_resolve &&
