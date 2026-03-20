@@ -11,6 +11,7 @@
 #include <arch/i386/pmm.h>
 #include <vm/vm_kmem.h>
 #include <kern/cmdline.h>
+#include <sys/lock.h>
 
 // mman.h flag definitions (duplicated here for kernel use)
 #define PROT_NONE  0x0
@@ -28,40 +29,90 @@ static int mmap_validate_flags(int flags) {
     return sharing == MAP_SHARED || sharing == MAP_PRIVATE;
 }
 
+typedef struct shared_file_object_entry {
+    fs_node_t *node;
+    uint64_t page_offset;
+    vm_object_t *object;
+    struct shared_file_object_entry *next;
+} shared_file_object_entry_t;
+
+static shared_file_object_entry_t *shared_file_objects;
+static spinlock_t shared_file_objects_lock = SPINLOCK_INIT("mmap_shared_fileobj");
+
+static vm_object_t *mmap_get_shared_backing_object(fs_node_t *node, size_t length,
+                                                    uint32_t vm_prot, uint64_t offset) {
+    uint64_t page_offset = offset >> 12;
+    shared_file_object_entry_t *entry;
+
+    spinlock_acquire(&shared_file_objects_lock);
+    for (entry = shared_file_objects; entry != NULL; entry = entry->next) {
+        if (entry->node == node && entry->page_offset == page_offset) {
+            vm_object_reference(entry->object);
+            spinlock_release(&shared_file_objects_lock);
+            return entry->object;
+        }
+    }
+    spinlock_release(&shared_file_objects_lock);
+
+    vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_VNODE, length);
+    if (!obj) {
+        return NULL;
+    }
+
+    obj->handle = node;
+    obj->pager = vm_pager_allocate(VM_OBJ_TYPE_VNODE, node, length, vm_prot, offset);
+    if (!obj->pager) {
+        vm_object_deallocate(obj);
+        return NULL;
+    }
+
+    entry = kmalloc(sizeof(shared_file_object_entry_t));
+    if (!entry) {
+        vm_object_deallocate(obj);
+        return NULL;
+    }
+
+    entry->node = node;
+    entry->page_offset = page_offset;
+    entry->object = obj;
+
+    spinlock_acquire(&shared_file_objects_lock);
+    for (shared_file_object_entry_t *cur = shared_file_objects; cur != NULL; cur = cur->next) {
+        if (cur->node == node && cur->page_offset == page_offset) {
+            vm_object_reference(cur->object);
+            spinlock_release(&shared_file_objects_lock);
+            vm_object_deallocate(obj);
+            kfree(entry, sizeof(shared_file_object_entry_t));
+            return cur->object;
+        }
+    }
+
+    entry->next = shared_file_objects;
+    shared_file_objects = entry;
+
+    /* Return a mapping reference while cache holds the original object reference. */
+    vm_object_reference(obj);
+    spinlock_release(&shared_file_objects_lock);
+
+    return obj;
+}
+
 static vm_object_t *mmap_create_file_object(fs_node_t *node, size_t length, uint32_t vm_prot,
                                             int flags, uint64_t offset) {
-    vm_object_t *obj;
-
     if (!node) {
         return NULL;
     }
 
     if (flags & MAP_SHARED) {
-        obj = vm_object_allocate(VM_OBJ_TYPE_VNODE, length);
-        if (!obj) {
-            return NULL;
-        }
-        obj->handle = node;
-        obj->pager = vm_pager_allocate(VM_OBJ_TYPE_VNODE, node, length, vm_prot, offset);
-        if (!obj->pager) {
-            vm_object_deallocate(obj);
-            return NULL;
-        }
-        return obj;
+        return mmap_get_shared_backing_object(node, length, vm_prot, offset);
     }
 
-    vm_object_t *backing = vm_object_allocate(VM_OBJ_TYPE_VNODE, length);
+    vm_object_t *backing = mmap_get_shared_backing_object(node, length, vm_prot, offset);
     if (!backing) {
         return NULL;
     }
-    backing->handle = node;
-    backing->pager = vm_pager_allocate(VM_OBJ_TYPE_VNODE, node, length, vm_prot, offset);
-    if (!backing->pager) {
-        vm_object_deallocate(backing);
-        return NULL;
-    }
 
-    obj = vm_object_shadow(backing);
+    vm_object_t *obj = vm_object_shadow(backing);
     if (!obj) {
         vm_object_deallocate(backing);
         return NULL;

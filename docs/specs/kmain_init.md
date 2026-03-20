@@ -38,7 +38,8 @@ It is intentionally implementation-oriented so kernel work can reason about orde
 
 The kernel parses `console=`, `debug=`, and related boot flags before runtime
 console registration so serial-console selection and early debug-channel policy
-are available during console bring-up.
+are available during console bring-up. `kmain()` parses the kernel command line
+before runtime console registration so `console=console0|serial0..serial3` can steer bring-up output policy.
 
 ### SMP Before UMA, Then Again After Full Mapping
 
@@ -56,7 +57,7 @@ Block providers and partition scanners are initialized before `init_root_fs()`:
 - GEOM core
 - GPT / MBR / BSD scanners
 - PCI and storage drivers
-- boot ramdisk registration from Multiboot modules
+- boot ramdisk registration from Multiboot modules: registered as RAM block devices before root mount, allowing `initrd`-style root selection via `/dev/storage/ram*`.
 
 That ordering allows root selection from raw disks, partitions, or ramdisks.
 
@@ -64,7 +65,7 @@ That ordering allows root selection from raw disks, partitions, or ramdisks.
 
 `init_root_fs()` does not assume `ext2` unconditionally anymore.
 
-- if `rootfstype=` is omitted, the kernel probes the supported block-backed root filesystems in kernel order
+- if `rootfstype=` is omitted, the kernel probes the supported block-backed root filesystems in kernel order (currently `ext2`, `fat`, `minix`, `udf`).
 - if `rootfstype=auto` is specified, the same ordered probe runs
 - if `rootfstype=` contains a comma-separated list, the kernel tries each named filesystem in the listed order
 - if mounting the requested `root=` fails, the same filesystem selection policy is retried against `/dev/storage/ram0`

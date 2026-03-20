@@ -26,5 +26,15 @@ void test_vnode_create(void) {
     }
     if (vp) vrele(vp);
 
+    /* Test 3: Create a block device vnode */
+    vp = NULL;
+    error = vnode_create(VBLK, NULL, NULL, &vp);
+    if (error == 0 && vp != NULL && vp->v_type == VBLK) {
+        kprint("PASS: vnode_create(VBLK) created VBLK vnode successfully\n");
+    } else {
+        kprintf("FAIL: vnode_create(VBLK) failed (error=%d, type=%d)\n", error, vp ? (int)vp->v_type : -1);
+    }
+    if (vp) vrele(vp);
+
     kprint("=== TEST COMPLETE ===\n");
 }

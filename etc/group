@@ -1,1 +1,9 @@
 root:x:0:
+daemon:x:1:
+bin:x:2:
+sys:x:3:
+tty:x:5:
+disk:x:6:
+wheel:x:10:root
+operator:x:37:
+nobody:x:65534:

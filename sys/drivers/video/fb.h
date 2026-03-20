@@ -22,6 +22,7 @@ typedef struct {
     uint32_t virt_width;
     int (*set_viewport)(int x, int y);
     void (*scroll)(int y_offset);
+    void (*flush)(int x, int y, int w, int h);
 } fb_info_t;
 
 extern fb_info_t fb;
