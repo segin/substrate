@@ -12,14 +12,17 @@ $(SUBDIRS):
 	$(MAKE) -C $@
 	@echo "<<< Leaving lib/$@"
 
+# Dependency ordering: libc must be built before other libraries.
+m pthreads dl sys edit usb: | c
+
 clean:
-	@for dir in $(SUBDIRS); do \
+	@set -e; for dir in $(SUBDIRS); do \
 		echo ">>> Cleaning lib/$$dir"; \
 		if [ -f "$$dir/Makefile" ]; then $(MAKE) -C $$dir clean; fi; \
 	done
 
 install:
-	@for dir in $(SUBDIRS); do \
+	@set -e; for dir in $(SUBDIRS); do \
 		echo ">>> Installing lib/$$dir"; \
-		if [ -f "$$dir/Makefile" ]; then $(MAKE) -C $$dir install; fi; \
+		if [ -f "$$dir/Makefile" ]; then $(MAKE) -C $$dir DESTDIR="$(DESTDIR)" NATIVE_BUILD="$(NATIVE_BUILD)" install; fi; \
 	done

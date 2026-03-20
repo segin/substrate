@@ -1,0 +1,60 @@
+.\" Copyright (c) 2026
+.Dd March 18, 2026
+.Dt VIRTIO_GPU 4
+.Os Substrate
+.Sh NAME
+.Nm virtio_gpu
+.Nd VirtIO GPU legacy PCI transport driver
+.Sh SYNOPSIS
+.Cd "device virtio_gpu"
+.Sh DESCRIPTION
+The
+.Nm
+driver attaches to transitional VirtIO GPU PCI devices and performs the
+transport-level initialization required for later display use.
+.Pp
+At this stage, the driver:
+.Bl -bullet -compact
+.It
+matches the VirtIO GPU PCI device
+.It
+obtains the legacy I/O BAR
+.It
+resets and acknowledges the device
+.It
+allocates the control and cursor virtqueues
+.It
+transitions the device to
+.Dv DRIVER_OK
+.El
+.Pp
+The driver can create a basic 2D resource, attach a single backing entry, and
+bind that resource to scanout 0.
+It can also transfer a dirty rectangle to the host and flush that rectangle to
+the visible scanout.
+It can query display geometry from the first enabled scanout.
+It can upload an ARGB cursor image and reposition that cursor through the
+dedicated cursor queue.
+It can also disable and later re-enable the currently uploaded cursor without
+destroying the underlying cursor resource.
+.Sh HARDWARE
+The
+.Nm
+driver supports transitional VirtIO GPU devices with vendor ID
+.Li 0x1af4
+and PCI device ID
+.Li 0x1010 .
+.Sh FILES
+.Bl -tag -width Pa
+.It Pa sys/drivers/virtio/virtio.c
+PCI driver-model registration.
+.It Pa sys/drivers/virtio/virtio_gpu.c
+VirtIO GPU transport setup.
+.El
+.Sh SEE ALSO
+.Xr fb 4 ,
+.Xr vga 4
+.Sh HISTORY
+The
+.Nm
+driver first appeared in Substrate.

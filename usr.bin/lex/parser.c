@@ -387,6 +387,7 @@ static void parse_rules(void) {
 
         char **start_conds = NULL;
         int sc_count = 0;
+        int sc_cap = 0;
         
         if (c == '<') {
             char sc_buf[256];
@@ -394,13 +395,11 @@ static void parse_rules(void) {
             while ((c = next_char()) != EOF && c != '>') {
                 if (c == ',') {
                     sc_buf[sc_len] = '\0';
-                    char *tmp = realloc(start_conds, (sc_count + 1) * sizeof(char*));
-                    if (!tmp) {
-                        perror("realloc");
-                        exit(1);
+                    if (sc_count >= sc_cap) {
+                        sc_cap = (sc_cap == 0) ? 8 : sc_cap * 2;
+                        start_conds = xrealloc(start_conds, sc_cap * sizeof(char*));
                     }
-                    start_conds = (char **)tmp;
-                    start_conds[sc_count++] = strdup(sc_buf);
+                    start_conds[sc_count++] = xstrdup(sc_buf);
                     sc_len = 0;
                 } else {
                     sc_buf[sc_len++] = c;
@@ -408,13 +407,11 @@ static void parse_rules(void) {
             }
             if (sc_len > 0) {
                 sc_buf[sc_len] = '\0';
-                char *tmp = realloc(start_conds, (sc_count + 1) * sizeof(char*));
-                if (!tmp) {
-                    perror("realloc");
-                    exit(1);
+                if (sc_count >= sc_cap) {
+                    sc_cap = (sc_cap == 0) ? 8 : sc_cap * 2;
+                    start_conds = xrealloc(start_conds, sc_cap * sizeof(char*));
                 }
-                start_conds = (char **)tmp;
-                start_conds[sc_count++] = strdup(sc_buf);
+                start_conds[sc_count++] = xstrdup(sc_buf);
             }
             c = next_char(); /* Get first char of pattern or { */
             

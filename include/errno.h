@@ -52,7 +52,9 @@ extern int errno;
 #define EDOM        33  /* Math argument out of domain of func */
 #define ERANGE      34  /* Math result not representable */
 #define ENOSYS      38  /* Function not implemented */
+#define ENOTEMPTY   39  /* Directory not empty */
 #define EDEADLK     35  /* Resource deadlock would occur */
+#define ENAMETOOLONG 63 /* File name too long */
 #define EWOULDBLOCK EAGAIN  /* Operation would block */
 #define EOWNERDEAD  130 /* Owner died */
 #define ENOTRECOVERABLE 131 /* State not recoverable */

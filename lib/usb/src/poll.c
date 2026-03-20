@@ -32,6 +32,10 @@ libusb__handle_events_inner(libusb_context *ctx, int timeout_ms, int *completed)
 	if (completed != NULL && *completed) {
 		return LIBUSB_SUCCESS;
 	}
+	ret = libusb__poll_hotplug(ctx);
+	if (ret != LIBUSB_SUCCESS) {
+		return ret;
+	}
 
 	ret = libusb__reap_urbs(ctx, timeout_ms);
 	if (ret < 0) {

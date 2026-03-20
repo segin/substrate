@@ -1,4 +1,5 @@
 #include <kern/console.h>
+#include <kern/sysrq.h>
 #include <drivers/console/uart/uart.h>
 #include <arch/x86-common/io.h>
 #include <arch/i386/idt.h>
@@ -11,6 +12,62 @@
 #include <stdio.h>
 
 int uart_received(void);
+
+#define UART_PORT_COUNT 4
+
+/* LSR (Line Status Register) bits — offset +5 */
+#define UART_LSR_DR         0x01  /* Data Ready */
+#define UART_LSR_OE         0x02  /* Overrun Error */
+#define UART_LSR_PE         0x04  /* Parity Error */
+#define UART_LSR_FE         0x08  /* Framing Error */
+#define UART_LSR_BI         0x10  /* Break Indicator */
+#define UART_LSR_THRE       0x20  /* Transmitter Holding Register Empty */
+#define UART_LSR_TEMT       0x40  /* Transmitter Empty */
+#define UART_LSR_FIFO_ERR   0x80  /* Error in FIFO */
+
+/* MCR (Modem Control Register) bits — offset +4 */
+#define UART_MCR_DTR        0x01
+#define UART_MCR_RTS        0x02
+#define UART_MCR_OUT1       0x04
+#define UART_MCR_OUT2       0x08
+#define UART_MCR_LOOP       0x10
+#define UART_MCR_AFE        0x20  /* Auto Flow Control Enable (16550A+) */
+
+/* MSR (Modem Status Register) bits — offset +6 */
+#define UART_MSR_DCTS       0x01  /* Delta CTS */
+#define UART_MSR_DDSR       0x02  /* Delta DSR */
+#define UART_MSR_TERI       0x04  /* Trailing Edge RI */
+#define UART_MSR_DDCD       0x08  /* Delta DCD */
+#define UART_MSR_CTS        0x10
+#define UART_MSR_DSR        0x20
+#define UART_MSR_RI         0x40
+#define UART_MSR_DCD        0x80
+
+/* IER (Interrupt Enable Register) bits — offset +1 */
+#define UART_IER_RDA        0x01  /* Received Data Available */
+#define UART_IER_THRE       0x02  /* Transmitter Holding Register Empty */
+#define UART_IER_RLS        0x04  /* Receiver Line Status */
+#define UART_IER_MS         0x08  /* Modem Status */
+
+/* TX output buffer */
+#define UART_TX_BUF_SIZE    256
+
+static struct {
+    uint8_t buf[UART_TX_BUF_SIZE];
+    unsigned int head;
+    unsigned int tail;
+    unsigned int count;
+    int xoff_held;       /* 1 = XON/XOFF flow stopped */
+} uart_tx;
+
+/* SysRq state for serial break detection */
+static int uart_sysrq_pending = 0;
+
+/* Error counters */
+static uint32_t uart_err_overrun;
+static uint32_t uart_err_parity;
+static uint32_t uart_err_framing;
+static uint32_t uart_err_break;
 
 #define UART_PORT_COUNT 4
 
@@ -106,10 +163,77 @@ static size_t uart_node_write(fs_node_t *node, off_t offset, size_t size, const 
 }
 
 static int uart_node_ioctl(fs_node_t *node, uint32_t request, void *arg) {
-    (void)node;
-    (void)request;
-    (void)arg;
-    return -ENOTTY;
+    uint16_t port = uart_node_port(node);
+    if (!port)
+        return -ENOTTY;
+
+    switch (request) {
+    case TIOCMGET: {
+        /* Read modem control/status lines */
+        uint8_t mcr = inb(port + 4);
+        uint8_t msr = inb(port + 6);
+        int bits = 0;
+        if (mcr & UART_MCR_DTR) bits |= TIOCM_DTR;
+        if (mcr & UART_MCR_RTS) bits |= TIOCM_RTS;
+        if (msr & UART_MSR_CTS) bits |= TIOCM_CTS;
+        if (msr & UART_MSR_DSR) bits |= TIOCM_DSR;
+        if (msr & UART_MSR_DCD) bits |= TIOCM_CD;
+        if (msr & UART_MSR_RI)  bits |= TIOCM_RI;
+        if (arg)
+            *(int *)arg = bits;
+        return 0;
+    }
+    case TIOCMSET: {
+        /* Set modem control lines */
+        if (!arg) return -EINVAL;
+        int bits = *(int *)arg;
+        uint8_t mcr = inb(port + 4) & ~(UART_MCR_DTR | UART_MCR_RTS);
+        if (bits & TIOCM_DTR) mcr |= UART_MCR_DTR;
+        if (bits & TIOCM_RTS) mcr |= UART_MCR_RTS;
+        outb(port + 4, mcr);
+        return 0;
+    }
+    case TIOCMBIS: {
+        /* Set indicated modem bits */
+        if (!arg) return -EINVAL;
+        int bits = *(int *)arg;
+        uint8_t mcr = inb(port + 4);
+        if (bits & TIOCM_DTR) mcr |= UART_MCR_DTR;
+        if (bits & TIOCM_RTS) mcr |= UART_MCR_RTS;
+        outb(port + 4, mcr);
+        return 0;
+    }
+    case TIOCMBIC: {
+        /* Clear indicated modem bits */
+        if (!arg) return -EINVAL;
+        int bits = *(int *)arg;
+        uint8_t mcr = inb(port + 4);
+        if (bits & TIOCM_DTR) mcr &= ~UART_MCR_DTR;
+        if (bits & TIOCM_RTS) mcr &= ~UART_MCR_RTS;
+        outb(port + 4, mcr);
+        return 0;
+    }
+    case TIOCSBRK: {
+        /* Start break */
+        uint8_t lcr = inb(port + 3);
+        outb(port + 3, lcr | 0x40);
+        return 0;
+    }
+    case TIOCCBRK: {
+        /* Clear break */
+        uint8_t lcr = inb(port + 3);
+        outb(port + 3, lcr & ~0x40);
+        return 0;
+    }
+    case TIOCOUTQ: {
+        /* Report TX bytes pending */
+        if (arg)
+            *(int *)arg = (int)uart_tx.count;
+        return 0;
+    }
+    default:
+        return -ENOTTY;
+    }
 }
 
 static int uart_node_poll(fs_node_t *node, void *waiter) {
@@ -261,8 +385,71 @@ int uart_init(void) {
     if (!uart_port_present(uart_base_index)) {
         return -1;
     }
+    uart_tx.head = 0;
+    uart_tx.tail = 0;
+    uart_tx.count = 0;
+    uart_tx.xoff_held = 0;
+    uart_sysrq_pending = 0;
+    uart_err_overrun = 0;
+    uart_err_parity = 0;
+    uart_err_framing = 0;
+    uart_err_break = 0;
+    /* Enable RDA + RLS interrupts (THRE enabled on demand) */
     uart_program_port(uart_base_port, 1);
+    outb(uart_base_port + 1, UART_IER_RDA | UART_IER_RLS);
     return 0;
+}
+
+/*
+ * uart_tx_drain - Transmit bytes from the TX ring buffer.
+ * Called from THRE interrupt or when XOFF is released.
+ */
+static void uart_tx_drain(void) {
+    while (uart_tx.count > 0 && !uart_tx.xoff_held) {
+        if (!(inb(uart_base_port + 5) & UART_LSR_THRE))
+            break;
+        outb(uart_base_port + 0, uart_tx.buf[uart_tx.tail]);
+        uart_tx.tail = (uart_tx.tail + 1) % UART_TX_BUF_SIZE;
+        uart_tx.count--;
+    }
+    /* Disable THRE interrupt if buffer is empty */
+    if (uart_tx.count == 0) {
+        uint8_t ier = inb(uart_base_port + 1);
+        outb(uart_base_port + 1, ier & ~UART_IER_THRE);
+    }
+}
+
+/*
+ * uart_tx_enqueue - Buffer a byte for interrupt-driven transmission.
+ * Falls back to polling if the buffer is full.
+ */
+static void uart_tx_enqueue(uint8_t byte) {
+    if (uart_tx.count >= UART_TX_BUF_SIZE) {
+        /* Buffer full — poll-wait and send directly */
+        while (!(inb(uart_base_port + 5) & UART_LSR_THRE))
+            ;
+        outb(uart_base_port + 0, byte);
+        return;
+    }
+    uart_tx.buf[uart_tx.head] = byte;
+    uart_tx.head = (uart_tx.head + 1) % UART_TX_BUF_SIZE;
+    uart_tx.count++;
+    /* Enable THRE interrupt so the buffer gets drained */
+    uint8_t ier = inb(uart_base_port + 1);
+    if (!(ier & UART_IER_THRE))
+        outb(uart_base_port + 1, ier | UART_IER_THRE);
+}
+
+/*
+ * uart_send_break - Transmit a break signal (~200ms).
+ */
+void uart_send_break(void) {
+    uint8_t lcr = inb(uart_base_port + 3);
+    outb(uart_base_port + 3, lcr | 0x40);  /* Set Break Enable (bit 6) */
+    /* Busy-wait ~200ms (at 100MHz+ this is conservative) */
+    for (volatile int i = 0; i < 2000000; i++)
+        ;
+    outb(uart_base_port + 3, lcr);         /* Clear Break Enable */
 }
 
 void uart_handler(registers_t *regs) {
@@ -272,44 +459,70 @@ void uart_handler(registers_t *regs) {
     while (1) {
         iir = inb(uart_base_port + 2);
         if (iir & 1) {
-            break; // No more pending interrupts
+            break; /* No more pending interrupts */
         }
 
         uint8_t type = (iir >> 1) & 7;
 
-        if (type == 2) {
-            // Received Data Available
-            while (inb(uart_base_port + 5) & 1) {
+        if (type == 2 || type == 6) {
+            /* Received Data Available / Character Timeout */
+            while (inb(uart_base_port + 5) & UART_LSR_DR) {
                 char c = inb(uart_base_port + 0);
 
-                // Debug triggers for Serial Console
-                if (c == 0x10) { // Ctrl+P - Process Dump
-                    extern void debug_dump_processes(void);
-                    debug_dump_processes();
-                } else if (c == 0x09) { // Ctrl+I - Info/State (Alternative)
-                    extern void console_push_char(char c);
-                    console_push_char(c);
-                } else {
-                    extern void console_push_char(char c);
-                    console_push_char(c);
+                /* SysRq over serial: break sets flag, next char = command */
+                if (uart_sysrq_pending) {
+                    uart_sysrq_pending = 0;
+                    sysrq_handle(c);
+                    continue;
                 }
-            }
-        } else if (type == 1) {
-            // Transmitter Holding Register Empty (unused in polling TX mode)
-            (void)inb(uart_base_port + 5);
-        } else if (type == 6) {
-            // Character Timeout (handle like RDA)
-            while (inb(uart_base_port + 5) & 1) {
-                char c = inb(uart_base_port + 0);
-                extern void console_push_char(char c);
+
+                /* XON/XOFF flow control for TX */
+                if (c == 0x13) {        /* XOFF (Ctrl+S) */
+                    uart_tx.xoff_held = 1;
+                    continue;
+                } else if (c == 0x11) { /* XON (Ctrl+Q) */
+                    uart_tx.xoff_held = 0;
+                    /* Kick TX if buffered data waiting */
+                    uart_tx_drain();
+                    continue;
+                }
+
                 console_push_char(c);
             }
+        } else if (type == 1) {
+            /* Transmitter Holding Register Empty — drain TX buffer */
+            uart_tx_drain();
         } else if (type == 3) {
-            // Receiver Line Status (error)
-            inb(uart_base_port + 5);
+            /* Receiver Line Status — error conditions */
+            uint8_t lsr = inb(uart_base_port + 5);
+
+            if (lsr & UART_LSR_BI) {
+                uart_err_break++;
+                /* Break condition: set SysRq pending flag */
+                uart_sysrq_pending = 1;
+                /* Consume the NUL byte that accompanies break */
+                if (lsr & UART_LSR_DR)
+                    (void)inb(uart_base_port + 0);
+            }
+            if (lsr & UART_LSR_FE) {
+                uart_err_framing++;
+                /* Discard the bad byte */
+                if (lsr & UART_LSR_DR)
+                    (void)inb(uart_base_port + 0);
+            }
+            if (lsr & UART_LSR_PE) {
+                uart_err_parity++;
+                /* Discard the bad byte */
+                if (lsr & UART_LSR_DR)
+                    (void)inb(uart_base_port + 0);
+            }
+            if (lsr & UART_LSR_OE) {
+                uart_err_overrun++;
+                /* Data already lost; just note it */
+            }
         } else if (type == 0) {
-            // Modem Status
-            inb(uart_base_port + 6);
+            /* Modem Status — clear by reading MSR */
+            (void)inb(uart_base_port + 6);
         }
     }
 }
@@ -332,8 +545,7 @@ int uart_is_transmit_empty(void) {
 }
 
 void uart_putc(char c) {
-    while (uart_is_transmit_empty() == 0);
-    outb(uart_base_port + 0, c);
+    uart_tx_enqueue((uint8_t)c);
 }
 
 void uart_write(const char* data, size_t size) {

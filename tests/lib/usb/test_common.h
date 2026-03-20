@@ -35,6 +35,12 @@ static unsigned char g_config_descriptor[] = {
 	9, LIBUSB_DT_INTERFACE, 0, 0, 1, LIBUSB_CLASS_VENDOR_SPEC, 0, 0, 0,
 	7, LIBUSB_DT_ENDPOINT, 0x81, LIBUSB_ENDPOINT_TRANSFER_TYPE_BULK, 64, 0, 0,
 };
+static unsigned char g_iso_config_descriptor[] = {
+	9, LIBUSB_DT_CONFIG, 25, 0, 1, 1, 0, 0x80, 50,
+	9, LIBUSB_DT_INTERFACE, 0, 0, 1, LIBUSB_CLASS_VENDOR_SPEC, 0, 0, 0,
+	7, LIBUSB_DT_ENDPOINT, 0x82, LIBUSB_ENDPOINT_TRANSFER_TYPE_ISOCHRONOUS,
+	0x00, 0x0c, 1,
+};
 static unsigned char g_string_descriptor[] = {
 	10, LIBUSB_DT_STRING, 'T', 0, 'e', 0, 's', 0, 't', 0,
 };
@@ -73,9 +79,15 @@ int ioctl(int fd, unsigned long request, ...)
 			return sizeof(g_device_descriptor);
 		}
 		if (type == LIBUSB_DT_CONFIG) {
-			memcpy(buf, g_config_descriptor,
-				ctrl->wLength < sizeof(g_config_descriptor) ? ctrl->wLength : sizeof(g_config_descriptor));
-			return ctrl->wLength < (int)sizeof(g_config_descriptor) ? ctrl->wLength : (int)sizeof(g_config_descriptor);
+			const unsigned char *config_data =
+				(ctrl->wValue & 0xff) == 1 ? g_iso_config_descriptor :
+				g_config_descriptor;
+			size_t config_size =
+				(ctrl->wValue & 0xff) == 1 ? sizeof(g_iso_config_descriptor) :
+				sizeof(g_config_descriptor);
+			memcpy(buf, config_data,
+				ctrl->wLength < config_size ? ctrl->wLength : config_size);
+			return ctrl->wLength < (int)config_size ? ctrl->wLength : (int)config_size;
 		}
 		if (type == LIBUSB_DT_STRING) {
 			memcpy(buf, g_string_descriptor,
@@ -143,6 +155,7 @@ __attribute__((unused))
 static void create_fake_tree(char *root, size_t rootsz)
 {
 	char path[256];
+	FILE *meta;
 	int fd;
 
 	snprintf(root, rootsz, "/tmp/libusb-host-test-%d", getpid());
@@ -156,11 +169,28 @@ static void create_fake_tree(char *root, size_t rootsz)
 	fd = open(path, O_CREAT | O_RDWR, 0600);
 	assert(fd >= 0);
 	close(fd);
+	snprintf(path, sizeof(path), "%s/bus1/dev2.meta", root);
+	meta = fopen(path, "w");
+	assert(meta != NULL);
+	fputs("port=1\n", meta);
+	fputs("speed=3\n", meta);
+	fputs("active_configuration=1\n", meta);
+	fputs("ep81_max_packet_size=64\n", meta);
+	fclose(meta);
 
 	make_path(path, sizeof(path), root, "bus2/dev7");
 	fd = open(path, O_CREAT | O_RDWR, 0600);
 	assert(fd >= 0);
 	close(fd);
+	snprintf(path, sizeof(path), "%s/bus2/dev7.meta", root);
+	meta = fopen(path, "w");
+	assert(meta != NULL);
+	fputs("port=2\n", meta);
+	fputs("parent=1:2\n", meta);
+	fputs("speed=4\n", meta);
+	fputs("active_configuration=1\n", meta);
+	fputs("ep82_iso_max_packet_size=1024\n", meta);
+	fclose(meta);
 }
 
 __attribute__((unused))
@@ -170,7 +200,11 @@ static void remove_fake_tree(const char *root)
 
 	make_path(path, sizeof(path), root, "bus1/dev2");
 	(void)unlink(path);
+	snprintf(path, sizeof(path), "%s/bus1/dev2.meta", root);
+	(void)unlink(path);
 	make_path(path, sizeof(path), root, "bus2/dev7");
+	(void)unlink(path);
+	snprintf(path, sizeof(path), "%s/bus2/dev7.meta", root);
 	(void)unlink(path);
 	make_path(path, sizeof(path), root, "bus1");
 	(void)rmdir(path);
@@ -183,6 +217,7 @@ static void remove_fake_tree(const char *root)
 
 struct test_env {
 	char root[128];
+	char events_path[256];
 	libusb_context *ctx;
 	libusb_device **list;
 	libusb_device_handle *handle;
@@ -194,6 +229,14 @@ static void test_env_setup(struct test_env *env)
 {
 	create_fake_tree(env->root, sizeof(env->root));
 	assert(setenv("LIBUSB_DEVFS_ROOT", env->root, 1) == 0);
+	snprintf(env->events_path, sizeof(env->events_path), "%s/device-events",
+		env->root);
+	{
+		int fd = open(env->events_path, O_CREAT | O_RDWR | O_TRUNC, 0600);
+		assert(fd >= 0);
+		close(fd);
+	}
+	assert(setenv("LIBUSB_DEVICE_EVENTS_PATH", env->events_path, 1) == 0);
 	assert(libusb_init(&env->ctx) == LIBUSB_SUCCESS);
 	env->count = libusb_get_device_list(env->ctx, &env->list);
 	assert(env->count >= 1);
@@ -206,8 +249,61 @@ static void test_env_teardown(struct test_env *env)
 	libusb_close(env->handle);
 	libusb_free_device_list(env->list, 1);
 	libusb_exit(env->ctx);
+	(void)unlink(env->events_path);
+	assert(unsetenv("LIBUSB_DEVICE_EVENTS_PATH") == 0);
 	assert(unsetenv("LIBUSB_DEVFS_ROOT") == 0);
 	remove_fake_tree(env->root);
+}
+
+__attribute__((unused))
+static void write_device_metadata(const char *root, const char *relative_path,
+	const char *contents)
+{
+	char path[256];
+	FILE *meta;
+
+	snprintf(path, sizeof(path), "%s/%s.meta", root, relative_path);
+	meta = fopen(path, "w");
+	assert(meta != NULL);
+	fputs(contents, meta);
+	fclose(meta);
+}
+
+__attribute__((unused))
+static void create_fake_device(const char *root, const char *relative_path,
+	const char *metadata)
+{
+	char path[256];
+	int fd;
+
+	snprintf(path, sizeof(path), "%s/%s", root, relative_path);
+	fd = open(path, O_CREAT | O_RDWR, 0600);
+	assert(fd >= 0);
+	close(fd);
+	write_device_metadata(root, relative_path, metadata);
+}
+
+__attribute__((unused))
+static void remove_fake_device(const char *root, const char *relative_path)
+{
+	char path[256];
+
+	snprintf(path, sizeof(path), "%s/%s", root, relative_path);
+	(void)unlink(path);
+	snprintf(path, sizeof(path), "%s/%s.meta", root, relative_path);
+	(void)unlink(path);
+}
+
+__attribute__((unused))
+static void append_device_event(const char *events_path, const char *action,
+	const char *subsystem, const char *name)
+{
+	FILE *stream;
+
+	stream = fopen(events_path, "a");
+	assert(stream != NULL);
+	fprintf(stream, "%s %s %s\n", action, subsystem, name);
+	fclose(stream);
 }
 
 #endif /* TEST_COMMON_H */

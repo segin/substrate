@@ -133,6 +133,32 @@ typedef struct {
     int relaxed_eval;
 } expr_parser_t;
 
+typedef struct {
+    unsigned long long u;
+    long long s;
+    int is_unsigned;
+} pp_num_t;
+
+static pp_num_t pp_num_from_signed(long long v) {
+    pp_num_t out;
+    out.s = v;
+    out.u = (unsigned long long)v;
+    out.is_unsigned = 0;
+    return out;
+}
+
+static pp_num_t pp_num_from_unsigned(unsigned long long v) {
+    pp_num_t out;
+    out.u = v;
+    out.s = (long long)v;
+    out.is_unsigned = 1;
+    return out;
+}
+
+static int pp_num_is_zero(pp_num_t v) {
+    return v.is_unsigned ? v.u == 0 : v.s == 0;
+}
+
 static const char *g_pp_diag_file = NULL;
 
 static void set_diag(cc_diag_t *diag, size_t line, size_t col, const char *msg) {
@@ -2856,11 +2882,12 @@ static int strip_comments_line(const char *in, int *in_block_comment, sb_t *out)
     return 0;
 }
 
-static int parse_int_literal(const char *s, long long *out) {
+static int parse_int_literal(const char *s, pp_num_t *out) {
     const char *p;
     char *end;
     unsigned long long uv;
     int has_unsigned = 0;
+    int is_neg = 0;
 
     if (s == NULL || *s == '\0') {
         return -1;
@@ -2868,6 +2895,9 @@ static int parse_int_literal(const char *s, long long *out) {
 
     p = s;
     if (*p == '+' || *p == '-') {
+        if (*p == '-') {
+            is_neg = 1;
+        }
         p++;
     }
     while (*p != '\0' && (isalnum((unsigned char)*p) || *p == 'x' || *p == 'X')) {
@@ -2898,10 +2928,16 @@ static int parse_int_literal(const char *s, long long *out) {
         return -1;
     }
 
-    if (has_unsigned && uv > (unsigned long long)LLONG_MAX) {
-        *out = LLONG_MAX;
+    if (is_neg && uv != 0) {
+        unsigned long long nv = (unsigned long long)(-(long long)uv);
+        *out = pp_num_from_signed((long long)nv);
+        return 0;
+    }
+
+    if (has_unsigned || uv > (unsigned long long)LLONG_MAX) {
+        *out = pp_num_from_unsigned(uv);
     } else {
-        *out = (long long)uv;
+        *out = pp_num_from_signed((long long)uv);
     }
     return 0;
 }
@@ -2999,7 +3035,7 @@ static int parse_pp_char_escape(const char *s, size_t *pos, long long *out) {
     return 0;
 }
 
-static int parse_pp_char_literal(expr_parser_t *p, long long *out) {
+static int parse_pp_char_literal(expr_parser_t *p, pp_num_t *out) {
     size_t i = p->pos;
     long long v = 0;
     int saw = 0;
@@ -3032,7 +3068,7 @@ static int parse_pp_char_literal(expr_parser_t *p, long long *out) {
     }
     i++;
     p->pos = i;
-    *out = v;
+    *out = pp_num_from_signed(v);
     return 1;
 }
 
@@ -3058,11 +3094,11 @@ static int expr_match(expr_parser_t *p, const char *tok) {
     return 0;
 }
 
-static long long parse_expr_or(expr_parser_t *p, int *ok);
-static long long parse_expr_cond(expr_parser_t *p, int *ok);
+static pp_num_t parse_expr_or(expr_parser_t *p, int *ok);
+static pp_num_t parse_expr_cond(expr_parser_t *p, int *ok);
 
-static long long parse_expr_primary(expr_parser_t *p, int *ok) {
-    long long v;
+static pp_num_t parse_expr_primary(expr_parser_t *p, int *ok) {
+    pp_num_t v = pp_num_from_signed(0);
     int chr;
     size_t start;
     char *tmp;
@@ -3071,14 +3107,14 @@ static long long parse_expr_primary(expr_parser_t *p, int *ok) {
         v = parse_expr_cond(p, ok);
         if (!expr_match(p, ")")) {
             *ok = 0;
-            return 0;
+            return pp_num_from_signed(0);
         }
         return v;
     }
     chr = parse_pp_char_literal(p, &v);
     if (chr < 0) {
         *ok = 0;
-        return 0;
+        return pp_num_from_signed(0);
     }
     if (chr > 0) {
         return v;
@@ -3087,7 +3123,7 @@ static long long parse_expr_primary(expr_parser_t *p, int *ok) {
         while (is_ident_char((unsigned char)p->s[p->pos])) {
             p->pos++;
         }
-        return 0;
+        return pp_num_from_signed(0);
     }
     start = p->pos;
     if (p->s[p->pos] == '+' || p->s[p->pos] == '-') {
@@ -3108,32 +3144,42 @@ static long long parse_expr_primary(expr_parser_t *p, int *ok) {
     }
     if (p->pos == start) {
         *ok = 0;
-        return 0;
+        return pp_num_from_signed(0);
     }
     tmp = xstrdup_n(p->s + start, p->pos - start);
     if (tmp == NULL) {
         *ok = 0;
-        return 0;
+        return pp_num_from_signed(0);
     }
     if (parse_int_literal(tmp, &v) != 0) {
         free(tmp);
         *ok = 0;
-        return 0;
+        return pp_num_from_signed(0);
     }
     free(tmp);
     return v;
 }
 
-static long long parse_expr_unary(expr_parser_t *p, int *ok) {
+static pp_num_t parse_expr_unary(expr_parser_t *p, int *ok) {
+    pp_num_t v;
     expr_skip_ws(p);
     if (expr_match(p, "!")) {
-        return !parse_expr_unary(p, ok);
+        v = parse_expr_unary(p, ok);
+        return pp_num_from_signed(pp_num_is_zero(v) ? 1 : 0);
     }
     if (expr_match(p, "~")) {
-        return ~parse_expr_unary(p, ok);
+        v = parse_expr_unary(p, ok);
+        if (v.is_unsigned) {
+            return pp_num_from_unsigned(~v.u);
+        }
+        return pp_num_from_signed(~v.s);
     }
     if (expr_match(p, "-")) {
-        return -parse_expr_unary(p, ok);
+        v = parse_expr_unary(p, ok);
+        if (v.is_unsigned) {
+            return pp_num_from_unsigned((unsigned long long)(0 - v.u));
+        }
+        return pp_num_from_signed(-v.s);
     }
     if (expr_match(p, "+")) {
         return parse_expr_unary(p, ok);
@@ -3141,33 +3187,46 @@ static long long parse_expr_unary(expr_parser_t *p, int *ok) {
     return parse_expr_primary(p, ok);
 }
 
-static long long parse_expr_mul(expr_parser_t *p, int *ok) {
-    long long lhs = parse_expr_unary(p, ok);
+static pp_num_t parse_expr_mul(expr_parser_t *p, int *ok) {
+    pp_num_t lhs = parse_expr_unary(p, ok);
     while (*ok) {
         if (expr_match(p, "*")) {
-            lhs *= parse_expr_unary(p, ok);
+            pp_num_t rhs = parse_expr_unary(p, ok);
+            if (lhs.is_unsigned || rhs.is_unsigned) {
+                lhs = pp_num_from_unsigned(lhs.u * rhs.u);
+            } else {
+                lhs = pp_num_from_signed(lhs.s * rhs.s);
+            }
         } else if (expr_match(p, "/")) {
-            long long rhs = parse_expr_unary(p, ok);
-            if (rhs == 0) {
+            pp_num_t rhs = parse_expr_unary(p, ok);
+            if (pp_num_is_zero(rhs)) {
                 if (!p->relaxed_eval) {
                     *ok = 0;
-                    return 0;
+                    return pp_num_from_signed(0);
                 }
-                lhs = 0;
+                lhs = pp_num_from_signed(0);
                 continue;
             }
-            lhs /= rhs;
+            if (lhs.is_unsigned || rhs.is_unsigned) {
+                lhs = pp_num_from_unsigned(lhs.u / rhs.u);
+            } else {
+                lhs = pp_num_from_signed(lhs.s / rhs.s);
+            }
         } else if (expr_match(p, "%")) {
-            long long rhs = parse_expr_unary(p, ok);
-            if (rhs == 0) {
+            pp_num_t rhs = parse_expr_unary(p, ok);
+            if (pp_num_is_zero(rhs)) {
                 if (!p->relaxed_eval) {
                     *ok = 0;
-                    return 0;
+                    return pp_num_from_signed(0);
                 }
-                lhs = 0;
+                lhs = pp_num_from_signed(0);
                 continue;
             }
-            lhs %= rhs;
+            if (lhs.is_unsigned || rhs.is_unsigned) {
+                lhs = pp_num_from_unsigned(lhs.u % rhs.u);
+            } else {
+                lhs = pp_num_from_signed(lhs.s % rhs.s);
+            }
         } else {
             break;
         }
@@ -3175,13 +3234,23 @@ static long long parse_expr_mul(expr_parser_t *p, int *ok) {
     return lhs;
 }
 
-static long long parse_expr_add(expr_parser_t *p, int *ok) {
-    long long lhs = parse_expr_mul(p, ok);
+static pp_num_t parse_expr_add(expr_parser_t *p, int *ok) {
+    pp_num_t lhs = parse_expr_mul(p, ok);
     while (*ok) {
         if (expr_match(p, "+")) {
-            lhs += parse_expr_mul(p, ok);
+            pp_num_t rhs = parse_expr_mul(p, ok);
+            if (lhs.is_unsigned || rhs.is_unsigned) {
+                lhs = pp_num_from_unsigned(lhs.u + rhs.u);
+            } else {
+                lhs = pp_num_from_signed(lhs.s + rhs.s);
+            }
         } else if (expr_match(p, "-")) {
-            lhs -= parse_expr_mul(p, ok);
+            pp_num_t rhs = parse_expr_mul(p, ok);
+            if (lhs.is_unsigned || rhs.is_unsigned) {
+                lhs = pp_num_from_unsigned(lhs.u - rhs.u);
+            } else {
+                lhs = pp_num_from_signed(lhs.s - rhs.s);
+            }
         } else {
             break;
         }
@@ -3189,13 +3258,25 @@ static long long parse_expr_add(expr_parser_t *p, int *ok) {
     return lhs;
 }
 
-static long long parse_expr_shift(expr_parser_t *p, int *ok) {
-    long long lhs = parse_expr_add(p, ok);
+static pp_num_t parse_expr_shift(expr_parser_t *p, int *ok) {
+    pp_num_t lhs = parse_expr_add(p, ok);
     while (*ok) {
         if (expr_match(p, "<<")) {
-            lhs <<= parse_expr_add(p, ok);
+            pp_num_t rhs = parse_expr_add(p, ok);
+            unsigned int sh = (unsigned int)rhs.u;
+            if (lhs.is_unsigned || rhs.is_unsigned) {
+                lhs = pp_num_from_unsigned(lhs.u << sh);
+            } else {
+                lhs = pp_num_from_signed(lhs.s << sh);
+            }
         } else if (expr_match(p, ">>")) {
-            lhs >>= parse_expr_add(p, ok);
+            pp_num_t rhs = parse_expr_add(p, ok);
+            unsigned int sh = (unsigned int)rhs.u;
+            if (lhs.is_unsigned || rhs.is_unsigned) {
+                lhs = pp_num_from_unsigned(lhs.u >> sh);
+            } else {
+                lhs = pp_num_from_signed(lhs.s >> sh);
+            }
         } else {
             break;
         }
@@ -3203,17 +3284,37 @@ static long long parse_expr_shift(expr_parser_t *p, int *ok) {
     return lhs;
 }
 
-static long long parse_expr_rel(expr_parser_t *p, int *ok) {
-    long long lhs = parse_expr_shift(p, ok);
+static pp_num_t parse_expr_rel(expr_parser_t *p, int *ok) {
+    pp_num_t lhs = parse_expr_shift(p, ok);
     while (*ok) {
         if (expr_match(p, "<=")) {
-            lhs = lhs <= parse_expr_shift(p, ok);
+            pp_num_t rhs = parse_expr_shift(p, ok);
+            if (lhs.is_unsigned || rhs.is_unsigned) {
+                lhs = pp_num_from_signed(lhs.u <= rhs.u);
+            } else {
+                lhs = pp_num_from_signed(lhs.s <= rhs.s);
+            }
         } else if (expr_match(p, ">=")) {
-            lhs = lhs >= parse_expr_shift(p, ok);
+            pp_num_t rhs = parse_expr_shift(p, ok);
+            if (lhs.is_unsigned || rhs.is_unsigned) {
+                lhs = pp_num_from_signed(lhs.u >= rhs.u);
+            } else {
+                lhs = pp_num_from_signed(lhs.s >= rhs.s);
+            }
         } else if (expr_match(p, "<")) {
-            lhs = lhs < parse_expr_shift(p, ok);
+            pp_num_t rhs = parse_expr_shift(p, ok);
+            if (lhs.is_unsigned || rhs.is_unsigned) {
+                lhs = pp_num_from_signed(lhs.u < rhs.u);
+            } else {
+                lhs = pp_num_from_signed(lhs.s < rhs.s);
+            }
         } else if (expr_match(p, ">")) {
-            lhs = lhs > parse_expr_shift(p, ok);
+            pp_num_t rhs = parse_expr_shift(p, ok);
+            if (lhs.is_unsigned || rhs.is_unsigned) {
+                lhs = pp_num_from_signed(lhs.u > rhs.u);
+            } else {
+                lhs = pp_num_from_signed(lhs.s > rhs.s);
+            }
         } else {
             break;
         }
@@ -3221,13 +3322,23 @@ static long long parse_expr_rel(expr_parser_t *p, int *ok) {
     return lhs;
 }
 
-static long long parse_expr_eq(expr_parser_t *p, int *ok) {
-    long long lhs = parse_expr_rel(p, ok);
+static pp_num_t parse_expr_eq(expr_parser_t *p, int *ok) {
+    pp_num_t lhs = parse_expr_rel(p, ok);
     while (*ok) {
         if (expr_match(p, "==")) {
-            lhs = lhs == parse_expr_rel(p, ok);
+            pp_num_t rhs = parse_expr_rel(p, ok);
+            if (lhs.is_unsigned || rhs.is_unsigned) {
+                lhs = pp_num_from_signed(lhs.u == rhs.u);
+            } else {
+                lhs = pp_num_from_signed(lhs.s == rhs.s);
+            }
         } else if (expr_match(p, "!=")) {
-            lhs = lhs != parse_expr_rel(p, ok);
+            pp_num_t rhs = parse_expr_rel(p, ok);
+            if (lhs.is_unsigned || rhs.is_unsigned) {
+                lhs = pp_num_from_signed(lhs.u != rhs.u);
+            } else {
+                lhs = pp_num_from_signed(lhs.s != rhs.s);
+            }
         } else {
             break;
         }
@@ -3235,90 +3346,105 @@ static long long parse_expr_eq(expr_parser_t *p, int *ok) {
     return lhs;
 }
 
-static long long parse_expr_band(expr_parser_t *p, int *ok) {
-    long long lhs = parse_expr_eq(p, ok);
+static pp_num_t parse_expr_band(expr_parser_t *p, int *ok) {
+    pp_num_t lhs = parse_expr_eq(p, ok);
     while (*ok && expr_match(p, "&")) {
-        lhs &= parse_expr_eq(p, ok);
+        pp_num_t rhs = parse_expr_eq(p, ok);
+        if (lhs.is_unsigned || rhs.is_unsigned) {
+            lhs = pp_num_from_unsigned(lhs.u & rhs.u);
+        } else {
+            lhs = pp_num_from_signed(lhs.s & rhs.s);
+        }
     }
     return lhs;
 }
 
-static long long parse_expr_bxor(expr_parser_t *p, int *ok) {
-    long long lhs = parse_expr_band(p, ok);
+static pp_num_t parse_expr_bxor(expr_parser_t *p, int *ok) {
+    pp_num_t lhs = parse_expr_band(p, ok);
     while (*ok && expr_match(p, "^")) {
-        lhs ^= parse_expr_band(p, ok);
+        pp_num_t rhs = parse_expr_band(p, ok);
+        if (lhs.is_unsigned || rhs.is_unsigned) {
+            lhs = pp_num_from_unsigned(lhs.u ^ rhs.u);
+        } else {
+            lhs = pp_num_from_signed(lhs.s ^ rhs.s);
+        }
     }
     return lhs;
 }
 
-static long long parse_expr_bor(expr_parser_t *p, int *ok) {
-    long long lhs = parse_expr_bxor(p, ok);
+static pp_num_t parse_expr_bor(expr_parser_t *p, int *ok) {
+    pp_num_t lhs = parse_expr_bxor(p, ok);
     while (*ok && expr_match(p, "|")) {
-        lhs |= parse_expr_bxor(p, ok);
+        pp_num_t rhs = parse_expr_bxor(p, ok);
+        if (lhs.is_unsigned || rhs.is_unsigned) {
+            lhs = pp_num_from_unsigned(lhs.u | rhs.u);
+        } else {
+            lhs = pp_num_from_signed(lhs.s | rhs.s);
+        }
     }
     return lhs;
 }
 
-static long long parse_expr_land(expr_parser_t *p, int *ok) {
-    long long lhs = parse_expr_bor(p, ok);
+static pp_num_t parse_expr_land(expr_parser_t *p, int *ok) {
+    pp_num_t lhs = parse_expr_bor(p, ok);
     while (*ok && expr_match(p, "&&")) {
-        long long rhs;
+        pp_num_t rhs;
         int prev_relaxed = p->relaxed_eval;
-        if (lhs == 0) {
+        if (pp_num_is_zero(lhs)) {
             p->relaxed_eval = 1;
         }
         rhs = parse_expr_bor(p, ok);
         p->relaxed_eval = prev_relaxed;
-        lhs = (lhs != 0 && rhs != 0) ? 1 : 0;
+        lhs = pp_num_from_signed(!pp_num_is_zero(lhs) && !pp_num_is_zero(rhs));
     }
     return lhs;
 }
 
-static long long parse_expr_or(expr_parser_t *p, int *ok) {
-    long long lhs = parse_expr_land(p, ok);
+static pp_num_t parse_expr_or(expr_parser_t *p, int *ok) {
+    pp_num_t lhs = parse_expr_land(p, ok);
     while (*ok && expr_match(p, "||")) {
-        long long rhs;
+        pp_num_t rhs;
         int prev_relaxed = p->relaxed_eval;
-        if (lhs != 0) {
+        if (!pp_num_is_zero(lhs)) {
             p->relaxed_eval = 1;
         }
         rhs = parse_expr_land(p, ok);
         p->relaxed_eval = prev_relaxed;
-        lhs = (lhs != 0 || rhs != 0) ? 1 : 0;
+        lhs = pp_num_from_signed(!pp_num_is_zero(lhs) || !pp_num_is_zero(rhs));
     }
     return lhs;
 }
 
-static long long parse_expr_cond(expr_parser_t *p, int *ok) {
-    long long cond = parse_expr_or(p, ok);
+static pp_num_t parse_expr_cond(expr_parser_t *p, int *ok) {
+    pp_num_t cond = parse_expr_or(p, ok);
     if (!*ok) {
-        return 0;
+        return pp_num_from_signed(0);
     }
     if (expr_match(p, "?")) {
-        long long lhs;
-        long long rhs;
+        pp_num_t lhs;
+        pp_num_t rhs;
         int prev_relaxed = p->relaxed_eval;
-        if (cond == 0) {
+        if (pp_num_is_zero(cond)) {
             p->relaxed_eval = 1;
         }
         lhs = parse_expr_cond(p, ok);
         p->relaxed_eval = prev_relaxed;
         if (!*ok) {
-            return 0;
+            return pp_num_from_signed(0);
         }
         if (!expr_match(p, ":")) {
             *ok = 0;
-            return 0;
+            return pp_num_from_signed(0);
         }
-        if (cond != 0) {
+        if (!pp_num_is_zero(cond)) {
             p->relaxed_eval = 1;
         }
         rhs = parse_expr_cond(p, ok);
         p->relaxed_eval = prev_relaxed;
         if (!*ok) {
-            return 0;
+            return pp_num_from_signed(0);
         }
-        return cond != 0 ? lhs : rhs;
+        return !pp_num_is_zero(cond) ? lhs : rhs;
     }
     return cond;
 }
@@ -4762,7 +4888,7 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
     char *expanded;
     expr_parser_t p;
     int ok = 1;
-    long long v;
+    pp_num_t v;
     {
         sb_t out;
         size_t i = 0;
@@ -5431,7 +5557,7 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
         free(expanded);
         return -1;
     }
-    *out_true = (v != 0);
+    *out_true = !pp_num_is_zero(v);
     free(expanded);
     return 0;
 }
@@ -5788,7 +5914,15 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                     int is_system = 0;
                     int include_next = ((size_t)(p - kw) == 12);
                     size_t n = 0;
+                    char *inc_expanded = NULL;
                     p = skip_ws(p);
+                    if (*p != '"' && *p != '<') {
+                        inc_expanded = expand_text(st, p, path, cur_line, 0, NULL, diag);
+                        if (inc_expanded == NULL) {
+                            goto fail;
+                        }
+                        p = skip_ws(inc_expanded);
+                    }
                     if (*p == '"' || *p == '<') {
                         char endc = *p == '"' ? '"' : '>';
                         quoted = (*p == '"');
@@ -5798,29 +5932,40 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                         }
                         inc_spec[n] = '\0';
                         if (*p != endc) {
+                            free(inc_expanded);
                             set_diag(diag, (size_t)cur_line, 1, "malformed #include");
                             goto fail;
                         }
                         if (include_next) {
                             if (resolve_include_next(st, path, inc_spec, quoted, inc_path, &is_system) != 0) {
+                                free(inc_expanded);
                                 set_diag(diag, (size_t)cur_line, 1, "include_next file not found");
                                 goto fail;
                             }
                         } else if (resolve_include(st, path, inc_spec, quoted, inc_path, &is_system) != 0) {
+                            free(inc_expanded);
                             set_diag(diag, (size_t)cur_line, 1, "include file not found");
                             goto fail;
                         }
                         if (dep_add_path(st, inc_path, is_system, 0) != 0) {
+                            free(inc_expanded);
                             goto fail;
                         }
                         if (preprocess_file(st, inc_path, out, depth + 1, macros_only, diag) != 0) {
                             fprintf(stderr, "cpp: note: in file included from %s:%d\n", path, cur_line);
+                            free(inc_expanded);
                             goto fail;
                         }
                         if (pp_emit_line_marker(st, out, line_no, path) != 0) {
+                            free(inc_expanded);
                             goto fail;
                         }
+                    } else {
+                        free(inc_expanded);
+                        set_diag(diag, (size_t)cur_line, 1, "malformed #include");
+                        goto fail;
                     }
+                    free(inc_expanded);
                 }
                 continue;
             }

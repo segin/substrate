@@ -665,7 +665,7 @@ vop_islocked(struct vnode *vp) {
     if(vp->v_op && vp->v_op->vop_islocked)
         return vp->v_op->vop_islocked(vp);
 
-    return vp->v_lockstate;
+    return lockstatus(&vp->v_lock);
 }
 
 /*

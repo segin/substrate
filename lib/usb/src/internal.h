@@ -9,6 +9,19 @@
 #define LIBUSB__MAX_CLAIMED_INTERFACES 32
 #define LIBUSB__MAX_OPEN_HANDLES       64
 #define LIBUSB__MAX_FLYING_TRANSFERS   256
+#define LIBUSB__MAX_HOTPLUG_CALLBACKS  32
+
+struct libusb__hotplug_callback {
+	int in_use;
+	libusb_hotplug_callback_handle handle;
+	int events;
+	int flags;
+	int vendor_id;
+	int product_id;
+	int dev_class;
+	libusb_hotplug_callback_fn cb_fn;
+	void *user_data;
+};
 
 struct libusb__transfer_priv {
 	struct usbdevfs_urb *urb;
@@ -44,6 +57,14 @@ struct libusb_context {
 	libusb_pollfd_added_cb pollfd_added_cb;
 	libusb_pollfd_removed_cb pollfd_removed_cb;
 	void *pollfd_cb_user_data;
+
+	/* Hotplug tracking */
+	struct libusb__hotplug_callback hotplug_callbacks[LIBUSB__MAX_HOTPLUG_CALLBACKS];
+	int next_hotplug_handle;
+	libusb_device **hotplug_devices;
+	size_t hotplug_device_count;
+	char *hotplug_event_snapshot;
+	size_t hotplug_event_snapshot_len;
 };
 
 struct libusb_device {
@@ -57,6 +78,12 @@ struct libusb_device {
 	int descriptor_valid;
 	struct libusb_device_descriptor descriptor;
 	libusb_device *parent;
+	uint8_t parent_bus_number;
+	uint8_t parent_device_address;
+	int parent_valid;
+	int active_configuration;
+	uint16_t endpoint_max_packet[256];
+	uint16_t endpoint_iso_max_packet[256];
 };
 
 struct libusb_device_handle {
@@ -74,6 +101,7 @@ libusb_context *libusb__resolve_context(libusb_context *ctx);
 int libusb__map_errno(int err);
 int libusb__context_rescan(libusb_context *ctx);
 void libusb__free_cached_devices(libusb_context *ctx);
+int libusb__poll_hotplug(libusb_context *ctx);
 
 void libusb__register_handle(libusb_context *ctx, libusb_device_handle *handle);
 void libusb__unregister_handle(libusb_context *ctx, libusb_device_handle *handle);

@@ -389,8 +389,14 @@ static inline int elks_build_load_plan(const struct elks_exec *hdr,
     plan->fartext_size = suph->esh_ftseg;
     plan->text_limit = plan->combined ? (uint16_t)len : hdr->tseg;
     plan->data_limit = (uint16_t)len;
+    if (plan->data_limit < 0xFFF0U) {
+        plan->data_limit = 0xFFF0U;
+    }
+    if (plan->combined && plan->text_limit < plan->data_limit) {
+        plan->text_limit = plan->data_limit;
+    }
     plan->brk_offset = (uint16_t)(hdr->dseg + hdr->bseg);
-    plan->stack_top = (uint16_t)(len & ~1U);
+    plan->stack_top = (uint16_t)(plan->data_limit & ~1U);
     return 1;
 }
 
