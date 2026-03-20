@@ -9299,18 +9299,19 @@ static int encode_x86_stmt_for_layout(emit_ctx_t *ctx, const char *section_name,
             as_operand_t tops[3];
             as_expr_t texpr;
             as_elf_cfg_t local_cfg = stmt_cfg;
+            long long abs_target = (long long)sec_off + disp;
 
             memcpy(tops, st->u.instr.operands, st->u.instr.operand_count * sizeof(*tops));
             memset(&texpr, 0, sizeof(texpr));
             texpr.kind = AS_EXPR_CONST;
-            texpr.value = disp;
+            texpr.value = abs_target;
             tops[0].kind = AS_OPERAND_IMMEDIATE;
             tops[0].u.expr = &texpr;
             tin.operands = tops;
             tmp.u.instr = tin;
-            local_cfg.x86_rel_is_disp = 1u;
-            local_cfg.have_current_text_offset = 0u;
-            local_cfg.current_text_offset = 0;
+            local_cfg.x86_rel_is_disp = 0u;
+            local_cfg.have_current_text_offset = 1u;
+            local_cfg.current_text_offset = sec_off;
             return encode_x86_stmt(&local_cfg, &tmp, code, code_cap, code_len, encerr, encerr_sz);
         }
     }
@@ -11366,7 +11367,15 @@ static int emit_relocations(emit_ctx_t *ctx) {
                 }
                 if (e != NULL) {
                     long long resolved_disp;
-                    if (eval_local_rel_expr_virtual(ctx, track.current, st, cur_off, track.x86_code_bits, e,
+                    int skip_local_resolve = 0;
+                    if (machine == EM_X86_64 &&
+                        op->kind == AS_OPERAND_MEMORY &&
+                        op->u.mem.base_reg != NULL &&
+                        streq_ci(op->u.mem.base_reg, "rip")) {
+                        skip_local_resolve = 1;
+                    }
+                    if (!skip_local_resolve &&
+                        eval_local_rel_expr_virtual(ctx, track.current, st, cur_off, track.x86_code_bits, e,
                                                     &resolved_disp) == 0) {
                         continue;
                     }
