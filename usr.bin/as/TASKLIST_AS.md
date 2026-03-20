@@ -212,8 +212,8 @@ Validation gate for Section 1:
   - symbol binding/type metadata
 
 ### 7.2 `libelfobj` Contract Validation
-- [ ] Add tests ensuring `as` output exercises `libelfobj` without host `elf.h` assumptions.
-- [ ] Add tests for section layout and note/metadata preservation in assembler-generated objects.
+- [x] Add tests ensuring `as` output exercises `libelfobj` without host `elf.h` assumptions.
+- [x] Add tests for section layout and note/metadata preservation in assembler-generated objects.
 
 ---
 

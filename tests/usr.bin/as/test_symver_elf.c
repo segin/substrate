@@ -106,6 +106,8 @@ int main(int argc, char **argv) {
     }
 
     {
+        elf_section_t *text = elf_find_section(obj, ".text");
+        elf_section_t *gnustack = elf_find_section(obj, ".note.GNU-stack");
         elf_section_t *versym = elf_find_section(obj, ".gnu.version");
         elf_section_t *verdef = elf_find_section(obj, ".gnu.version_d");
         elf_section_t *strtab = elf_find_section(obj, ".strtab");
@@ -125,6 +127,15 @@ int main(int argc, char **argv) {
         uint32_t vda_name;
         const char *vname;
 
+        if (text == NULL || gnustack == NULL) {
+            fail("missing expected sections");
+        }
+        if ((elf_section_flags(text) & (SHF_ALLOC | SHF_EXECINSTR)) != (SHF_ALLOC | SHF_EXECINSTR)) {
+            fail(".text flags mismatch");
+        }
+        if (elf_section_type(gnustack) != SHT_PROGBITS || (elf_section_flags(gnustack) & SHF_ALLOC) != 0) {
+            fail(".note.GNU-stack type/flags mismatch");
+        }
         if (versym == NULL || verdef == NULL || strtab == NULL) {
             fail("missing GNU version sections");
         }
