@@ -78,6 +78,7 @@ static int parse_zmm_reg(const char *name, unsigned *out);
 static int parse_mmx_reg(const char *name, unsigned *out);
 static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_x86_operand_t *dst, int is64,
                                int intel_syntax, char *errbuf, size_t errbuf_sz);
+static int is_local_temp_symbol_name(const char *name);
 
 static void set_err(emit_ctx_t *ctx, const char *fmt, ...) {
     va_list ap;
@@ -88,6 +89,13 @@ static void set_err(emit_ctx_t *ctx, const char *fmt, ...) {
     va_start(ap, fmt);
     vsnprintf(ctx->errbuf, ctx->errbuf_sz, fmt, ap);
     va_end(ap);
+}
+
+static int is_local_temp_symbol_name(const char *name) {
+    if (name == NULL) {
+        return 0;
+    }
+    return name[0] == '.' && name[1] == 'L';
 }
 
 static char *xstrdup(const char *s) {
@@ -9329,7 +9337,7 @@ static int eval_local_rel_expr_virtual(emit_ctx_t *ctx, const char *section_name
         *out = e->value;
         return 0;
     case AS_EXPR_SYMBOL:
-        if (e->symbol == NULL ||
+        if (e->symbol == NULL || !is_local_temp_symbol_name(e->symbol) ||
             find_named_label_virtual_offset(ctx, section_name, base_st, base_off, x86_code_bits,
                                             e->symbol, &target_off) != 0) {
             return -1;
