@@ -22,6 +22,7 @@ char *strstr(const char *haystack, const char *needle);
 size_t strlen(const char *s);
 size_t strnlen(const char *s, size_t maxlen);
 char *strdup(const char *s);
+char *strndup(const char *s, size_t n);
 char *strtok(char *str, const char *delim);
 size_t strspn(const char *s, const char *accept);
 size_t strcspn(const char *s, const char *reject);

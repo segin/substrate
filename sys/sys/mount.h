@@ -3,6 +3,7 @@
 
 #include <sys/types.h>
 #include <sys/queue.h>
+#include <sys/lock.h>
 #include <stdint.h>
 
 struct vnode;
@@ -47,6 +48,7 @@ TAILQ_HEAD(vnode_list, vnode);
 #define	MNT_NODEV	0x00000010	/* don't interpret special files */
 #define	MNT_UNION	0x00000020	/* union with underlying filesystem */
 #define	MNT_ASYNC	0x00000040	/* file system written asynchronously */
+#define	MNT_LOCAL	0x00001000	/* filesystem is stored locally */
 
 /*
  * Exported mount flags.
@@ -64,6 +66,12 @@ TAILQ_HEAD(vnode_list, vnode);
 #define	MNT_DELEXPORT	0x00020000	/* delete export host lists */
 #define	MNT_RELOAD	0x00040000	/* reload filesystem data */
 #define	MNT_FORCE	0x00080000	/* force unmount or downgrade */
+
+/*
+ * Flags for vfs_sync waitfor.
+ */
+#define MNT_WAIT	1		/* synchronous wait */
+#define MNT_NOWAIT	2		/* asynchronous, start write */
 
 /*
  * Structure per mounted file system. Each mounted file system has an
@@ -84,8 +92,12 @@ struct mount {
     uint32_t            mnt_flag;           /* flags */
     struct vnode_list   mnt_vnodelist;      /* list of active vnodes */
     struct statfs       mnt_stat;           /* cached filesystem statistics */
+    int                 mnt_maxsymlinklen;  /* max symlink target inline */
+    rwlock_t            mnt_lock;           /* mount-level reader/writer lock */
     struct fs_node      *mnt_node_covered;  /* Legacy: Node we mounted on */
     struct fs_node      *mnt_node_root;     /* Legacy: root node of this fs */
+    uint64_t            mnt_covered_ino;    /* inode of covered directory (snapshot) */
+    struct mount        *mnt_covered_mp;    /* mount of covered directory (snapshot) */
 };
 
 /*
@@ -119,6 +131,7 @@ struct vfsops {
 				struct vnode **vpp);
 	int	(*vfs_vptofh)(struct vnode *vp, struct fid *fhp);
 	int	(*vfs_init)(struct vfsconf *);
+	int	(*vfs_uninit)(struct vfsconf *);
 };
 
 #ifndef _KERNEL

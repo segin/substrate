@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import random
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -66,6 +65,18 @@ def expected_line_count(data):
     return count
 
 
+def test_prefix_count(out):
+    if not out:
+        return 0
+    got = 0
+    for line in out.split(b"\n"):
+        if line and line[0] in b" 0123456789":
+            idx = line.find(b"\t")
+            if idx > 0 and line[:idx].strip(b" ").isdigit():
+                got += 1
+    return got
+
+
 def main():
     if len(sys.argv) != 2:
         print("usage: test_cat_property.py /path/to/cat", file=sys.stderr)
@@ -86,7 +97,6 @@ def main():
         expect(len(out) == len(payload), f"raw length mismatch iter={i}")
 
     # Property: -n emits one numbered prefix per logical line.
-    prefix_re = re.compile(rb"^\s{0,5}[0-9]+\t", re.MULTILINE)
     for i in range(300):
         length = rng.randint(0, 2048)
         payload = bytes(rng.getrandbits(8) for _ in range(length))
@@ -94,7 +104,7 @@ def main():
         expect(rc == 0, f"-n property exit failed iter={i}: {err!r}")
 
         expected = expected_line_count(payload)
-        got = len(prefix_re.findall(out))
+        got = test_prefix_count(out)
         expect(got == expected, f"-n line-count property mismatch iter={i}: expected={expected} got={got}")
 
     # Property: visualization rules.

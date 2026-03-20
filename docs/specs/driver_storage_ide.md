@@ -94,6 +94,11 @@ Bus-master DMA support provides:
 - DMA transfer-mode programming via `SET FEATURES` subcommand `0x03`
   using the highest supported UDMA mode, or MWDMA as fallback
 
+PCI/native-mode discovery does not automatically switch the driver onto the
+DMA path. The default attach behavior remains PIO-first, even when bus-master
+DMA BARs are present, so that PCI BAR discovery does not change the transfer
+engine used for root I/O without an explicitly validated enable path.
+
 ATAPI transport supports PACKET commands over the same channel model and backs
 the SCSI mid-layer helper path. Removable-media change handling is surfaced to
 the higher SCSI removable-media path rather than being interpreted in the raw
@@ -112,3 +117,11 @@ The driver supports ATA software reset on a per-channel basis:
 
 Repeated transfer failures attempt a channel reset once before the driver marks
 the failing device offline.
+DMA failures are treated separately from generic media/offline failure: the
+driver blacklists DMA on the affected ATA device, clears its bus-master DMA
+enable bit, and falls back to PIO for future reads. Writes are demoted in the
+same way but are not transparently retried in the same call because a timed-out
+DMA write may already have reached the medium.
+Once a device has already been rescued by a successful channel reset, the next
+repeated transfer-failure cycle latches that device offline instead of looping
+through unbounded retry/reset spam.

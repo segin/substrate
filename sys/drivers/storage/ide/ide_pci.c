@@ -41,7 +41,6 @@ static void ide_pci_apply_channel(ide_channel_t *channel, uint8_t *irq_shared,
     }
     if (bm != 0) {
         channel->bm_base = (uint16_t)bm;
-        channel->dma_capable = 1;
     }
     if (pci_irq != PCI_IRQ_NONE) {
         channel->irq = (uint8_t)pci_irq;
@@ -55,7 +54,6 @@ static void ide_pci_apply_dma_only(ide_channel_t *channel, uintptr_t bm) {
     }
 
     channel->bm_base = (uint16_t)bm;
-    channel->dma_capable = 1;
 }
 
 size_t ide_pci_configure_channels(ide_channel_t channels[MAX_IDE_CHANNELS],

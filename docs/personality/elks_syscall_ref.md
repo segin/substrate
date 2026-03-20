@@ -37,7 +37,7 @@ Status meanings:
 | 18 | `stat` | Working | ELKS-width `struct stat` translation exists. |
 | 19 | `lseek` | Partial | Wrapper exists, but full ELKS width semantics are not yet broadly validated. |
 | 20 | `getpid` | Working | Personality wrapper is wired. |
-| 21 | `mount` | Partial | Translation exists, but full upstream ELKS mount ABI is not validated. |
+| 21 | `mount` | Partial | ELKS integer filesystem types (`minix`, `msdos`, `romfs`) and flag bits are translated; data-structure semantics still need broader upstream validation. |
 | 22 | `umount` | Partial | Translation exists, but upstream smoke is incomplete. |
 | 23 | `setuid` | Partial | Direct/native path exists; ELKS credential-width validation is incomplete. |
 | 24 | `getuid` | Working | Personality wrapper is wired. |

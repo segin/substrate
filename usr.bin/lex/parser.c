@@ -207,13 +207,6 @@ static void parse_definitions(void) {
         if (c == '%') {
             int c2 = next_char();
             if (c2 == '%') {
-                // Determine if this is truly the section delimiter
-                // POSIX: "The first %% marks the beginning of the Rules section"
-                // It must be at the beginning of a line.
-                // We are at beginning of logic (looping char by char, but logic needs to be valid)
-                // Wait, this loop is char-by-char. We need to handle line context.
-                // Let's assume we are at start of line for now or track column.
-                
                 // Unput to let caller handle section switch or just return?
                 // parse_input expects to handle the switch.
                 unput_char(c2);
@@ -394,6 +387,7 @@ static void parse_rules(void) {
 
         char **start_conds = NULL;
         int sc_count = 0;
+        int sc_cap = 0;
         
         if (c == '<') {
             char sc_buf[256];
@@ -401,13 +395,11 @@ static void parse_rules(void) {
             while ((c = next_char()) != EOF && c != '>') {
                 if (c == ',') {
                     sc_buf[sc_len] = '\0';
-                    char *tmp = realloc(start_conds, (sc_count + 1) * sizeof(char*));
-                    if (!tmp) {
-                        perror("realloc");
-                        exit(1);
+                    if (sc_count >= sc_cap) {
+                        sc_cap = (sc_cap == 0) ? 8 : sc_cap * 2;
+                        start_conds = xrealloc(start_conds, sc_cap * sizeof(char*));
                     }
-                    start_conds = (char **)tmp;
-                    start_conds[sc_count++] = strdup(sc_buf);
+                    start_conds[sc_count++] = xstrdup(sc_buf);
                     sc_len = 0;
                 } else {
                     sc_buf[sc_len++] = c;
@@ -415,13 +407,11 @@ static void parse_rules(void) {
             }
             if (sc_len > 0) {
                 sc_buf[sc_len] = '\0';
-                char *tmp = realloc(start_conds, (sc_count + 1) * sizeof(char*));
-                if (!tmp) {
-                    perror("realloc");
-                    exit(1);
+                if (sc_count >= sc_cap) {
+                    sc_cap = (sc_cap == 0) ? 8 : sc_cap * 2;
+                    start_conds = xrealloc(start_conds, sc_cap * sizeof(char*));
                 }
-                start_conds = (char **)tmp;
-                start_conds[sc_count++] = strdup(sc_buf);
+                start_conds[sc_count++] = xstrdup(sc_buf);
             }
             c = next_char(); /* Get first char of pattern or { */
             

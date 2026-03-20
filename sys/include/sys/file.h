@@ -8,6 +8,7 @@ struct uio;
 struct ucred;
 struct thread;
 struct file;
+struct stat;
 
 /*
  * File descriptor types
@@ -31,6 +32,7 @@ struct file;
 #define FHASLOCK        0x0100
 #define FDIRTY          0x0200
 #define O_DIRECT        0x0400
+/* O_CLOEXEC defined in <sys/fcntl.h> */
 
 struct fileops {
     int (*fo_read)(struct file *fp, struct uio *uio, struct ucred *cred, int flags, struct thread *td);
@@ -38,6 +40,7 @@ struct fileops {
     int (*fo_ioctl)(struct file *fp, unsigned long command, void *data, struct thread *td);
     int (*fo_poll)(struct file *fp, int events, struct thread *td);
     int (*fo_close)(struct file *fp, struct thread *td);
+    int (*fo_stat)(struct file *fp, struct stat *sb, struct thread *td);
 };
 
 struct file {

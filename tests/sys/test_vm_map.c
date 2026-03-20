@@ -8,6 +8,9 @@
 #include <arch/i386/pmap.h>
 #include <kern/console.h>
 #include <stdio.h>
+#include <sys/proc.h>
+
+extern void *sys_brk(void *addr);
 
 static int tests_passed = 0;
 static int tests_failed = 0;
@@ -312,6 +315,44 @@ void test_vm_map_merge_adjacent(void) {
     kprint("  PASS\n");
 }
 
+void test_sys_brk(void) {
+    kprint("Test: sys_brk\n");
+
+    process_t *orig_process = current_process;
+
+    process_t dummy_proc = {0};
+    dummy_proc.brk_start = 0x10000;
+    dummy_proc.brk = 0; // will be initialized to brk_start by sys_brk lazily
+    dummy_proc.pmap = pmap_create();
+
+    current_process = &dummy_proc;
+
+    // Test 1: Query uninitialized brk
+    void *res1 = sys_brk(NULL);
+    TEST_ASSERT(res1 == (void*)0x10000, "Query returns brk_start when brk is 0");
+    TEST_ASSERT(dummy_proc.brk == 0x10000, "brk lazily initialized");
+
+    // Test 2: Expand brk
+    void *res2 = sys_brk((void*)0x12000);
+    TEST_ASSERT(res2 == (void*)0x12000, "Expand brk returns new brk");
+    TEST_ASSERT(dummy_proc.brk == 0x12000, "brk updated on expand");
+
+    // Test 3: Shrink brk
+    void *res3 = sys_brk((void*)0x11000);
+    TEST_ASSERT(res3 == (void*)0x11000, "Shrink brk returns new brk");
+    TEST_ASSERT(dummy_proc.brk == 0x11000, "brk updated on shrink");
+
+    // Test 4: Below start
+    void *res4 = sys_brk((void*)0x0F000);
+    TEST_ASSERT(res4 == (void*)0x11000, "Shrink below brk_start returns old brk");
+    TEST_ASSERT(dummy_proc.brk == 0x11000, "brk not updated below brk_start");
+
+    pmap_destroy(dummy_proc.pmap);
+    current_process = orig_process;
+
+    kprint("  PASS\n");
+}
+
 void run_vm_map_tests(void) {
     kprint("\n=== VM Map Unit Tests ===\n");
     
@@ -325,6 +366,7 @@ void run_vm_map_tests(void) {
     test_vm_map_property_sorted_non_overlapping();
     test_vm_map_merge_adjacent();
     test_vm_map_benchmark();
+    test_sys_brk();
     
     kprint("\nVM Map Tests Complete\n");
 }

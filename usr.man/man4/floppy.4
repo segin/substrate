@@ -1,0 +1,55 @@
+.Dd March 13, 2026
+.Dt FLOPPY 4
+.Os
+.Sh NAME
+.Nm floppy
+.Nd ISA floppy disk controller and drive support
+.Sh SYNOPSIS
+.Cd "device floppy"
+.Sh DESCRIPTION
+The
+.Nm
+driver supports NEC uPD765 and Intel 82077AA compatible floppy disk
+controllers on the ISA bus.
+Detected drives are published as block devices under
+.Pa /dev/storage/fd0
+and
+.Pa /dev/storage/fd1 .
+.Pp
+The driver probes legacy controllers at:
+.Bl -tag -width Ds
+.It Li 0x3F0 / IRQ 6
+primary controller
+.It Li 0x370 / IRQ 10
+secondary controller
+.El
+.Pp
+Drive geometry is selected from CMOS register
+.Li 0x10
+for the first two drives.
+Supported media profiles include 360K, 720K, 1.2M, 1.44M, and 2.88M formats.
+.Pp
+Transfers use ISA DMA channel 2 through a low-memory bounce buffer below
+16MB.
+The current implementation performs sector I/O through CHS translation and
+retries failed transfers after recalibration.
+.Sh FILES
+.Bl -tag -width "/dev/storage/fd0"
+.It Pa /dev/storage/fd0
+first floppy drive
+.It Pa /dev/storage/fd1
+second floppy drive
+.El
+.Sh DIAGNOSTICS
+The driver logs controller initialization failures, recalibration failures,
+and transfer status-byte decodes with the
+.Li fdc:
+prefix.
+.Sh BUGS
+Reset completion still uses a settle-delay path instead of a strict reset IRQ
+handshake.
+Format-track commands, disk-change detection, and full four-drive support are
+not implemented yet.
+.Sh SEE ALSO
+.Xr ide 4 ,
+.Xr scsi 4

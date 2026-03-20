@@ -15,6 +15,17 @@
 #include <sys/proc.h>
 #include <string.h>
 
+#define LINUX_UTS_FIELD_LEN 65
+
+struct linux_utsname {
+    char sysname[LINUX_UTS_FIELD_LEN];
+    char nodename[LINUX_UTS_FIELD_LEN];
+    char release[LINUX_UTS_FIELD_LEN];
+    char version[LINUX_UTS_FIELD_LEN];
+    char machine[LINUX_UTS_FIELD_LEN];
+    char domainname[LINUX_UTS_FIELD_LEN];
+};
+
 /* Signal Translation Tables */
 #define LINUX_SIGHUP        1
 #define LINUX_SIGINT        2
@@ -475,6 +486,31 @@ int linux_sys_ftruncate(int fd, int32_t length) {
     return sys_ftruncate(fd, (uint32_t)length, 0);
 }
 
+static int linux_sys_uname(void *ubuf) {
+    struct utsname native;
+    struct linux_utsname compat;
+    int ret;
+
+    if (!ubuf) return -EFAULT;
+
+    ret = kern_uname(&native);
+    if (ret != 0) return ret;
+
+    memset(&compat, 0, sizeof(compat));
+    strlcpy(compat.sysname, native.sysname, sizeof(compat.sysname));
+    strlcpy(compat.nodename, native.nodename, sizeof(compat.nodename));
+    strlcpy(compat.release, native.release, sizeof(compat.release));
+    strlcpy(compat.version, native.version, sizeof(compat.version));
+    strlcpy(compat.machine, native.machine, sizeof(compat.machine));
+    strlcpy(compat.domainname, native.domainname, sizeof(compat.domainname));
+
+    if (copyout(&compat, ubuf, sizeof(compat)) != 0) {
+        return -EFAULT;
+    }
+
+    return 0;
+}
+
 static int linux_sys_clone(uint32_t flags, void *child_stack, int *parent_tidptr, void *tls, int *child_tidptr) {
     (void)parent_tidptr;
     (void)tls;
@@ -575,6 +611,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_kill]           = &linux_sys_kill,
     [LINUX_SYS_mkdir]          = &sys_mkdir,
     [LINUX_SYS_rmdir]          = &sys_rmdir,
+    [LINUX_SYS_dup]            = &sys_dup,
     [LINUX_SYS_pipe]           = &sys_pipe,
     [LINUX_SYS_times]          = &sys_times,
     [LINUX_SYS_brk]            = &sys_brk,
@@ -592,17 +629,19 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_setsid]         = &sys_setsid,
     [LINUX_SYS_lstat]          = (void*)linux_sys_lstat,
     [LINUX_SYS_readlink]       = &sys_readlink,
+    [LINUX_SYS_symlink]        = &sys_symlink,
     [LINUX_SYS_mmap]           = &linux_sys_mmap,
     [LINUX_SYS_munmap]         = &sys_munmap,
     [LINUX_SYS_truncate]       = &linux_sys_truncate,
     [LINUX_SYS_ftruncate]      = &linux_sys_ftruncate,
+    [LINUX_SYS_fchmod]         = &sys_fchmod,
     [LINUX_SYS_setitimer]      = &sys_setitimer,
     [LINUX_SYS_getitimer]      = &sys_getitimer,
     [LINUX_SYS_stat_new]       = (void*)linux_sys_stat,
     [LINUX_SYS_lstat_new]      = (void*)linux_sys_lstat,
     [LINUX_SYS_fstat_new]      = (void*)linux_sys_fstat,
     [LINUX_SYS_clone]          = (void*)linux_sys_clone,
-    [LINUX_SYS_uname]          = &sys_uname,
+    [LINUX_SYS_uname]          = &linux_sys_uname,
     [LINUX_SYS_modify_ldt]     = &sys_modify_ldt,
     [LINUX_SYS_getpgid]        = &sys_getpgid,
     [LINUX_SYS_fchdir]         = &sys_fchdir,
@@ -622,6 +661,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_getgid32]       = &sys_getgid,
     [LINUX_SYS_geteuid32]      = &sys_geteuid,
     [LINUX_SYS_getegid32]      = &sys_getegid,
+    [LINUX_SYS_fchown32]       = &sys_fchown,
     [LINUX_SYS_setgid32]       = &sys_setgid,
     [LINUX_SYS_getdents64]     = &sys_getdents64,
     [LINUX_SYS_fcntl64]        = &sys_fcntl,
@@ -677,7 +717,12 @@ static const char *linux_names[MAX_SYSCALLS] = {
     [LINUX_SYS_setsid]         = "setsid",
     [LINUX_SYS_lstat]          = "lstat",
     [LINUX_SYS_readlink]       = "readlink",
+    [LINUX_SYS_symlink]        = "symlink",
     [LINUX_SYS_mmap]           = "mmap",
+    [LINUX_SYS_munmap]         = "munmap",
+    [LINUX_SYS_truncate]       = "truncate",
+    [LINUX_SYS_ftruncate]      = "ftruncate",
+    [LINUX_SYS_fchmod]         = "fchmod",
     [LINUX_SYS_setitimer]      = "setitimer",
     [LINUX_SYS_getitimer]      = "getitimer",
     [LINUX_SYS_stat_new]       = "stat",
@@ -704,6 +749,7 @@ static const char *linux_names[MAX_SYSCALLS] = {
     [LINUX_SYS_getgid32]       = "getgid32",
     [LINUX_SYS_geteuid32]      = "geteuid32",
     [LINUX_SYS_getegid32]      = "getegid32",
+    [LINUX_SYS_fchown32]       = "fchown32",
     [LINUX_SYS_setgid32]       = "setgid32",
     [LINUX_SYS_getdents64]     = "getdents64",
     [LINUX_SYS_fcntl64]        = "fcntl64",
@@ -759,10 +805,12 @@ static struct syscall_fmt linux_fmts[MAX_SYSCALLS] = {
     [LINUX_SYS_setsid]         = { 0, { 0 } }, // setsid
     [LINUX_SYS_lstat]          = { 2, { ARG_STR, ARG_PTR } }, // lstat
     [LINUX_SYS_readlink]       = { 3, { ARG_STR, ARG_PTR, ARG_INT } }, // readlink
+    [LINUX_SYS_symlink]        = { 2, { ARG_STR, ARG_STR } }, // symlink
     [LINUX_SYS_mmap]           = { 1, { ARG_PTR } }, // mmap (old)
     [LINUX_SYS_munmap]         = { 2, { ARG_PTR, ARG_INT } }, // munmap
     [LINUX_SYS_truncate]       = { 2, { ARG_STR, ARG_INT } }, // truncate
     [LINUX_SYS_ftruncate]      = { 2, { ARG_INT, ARG_INT } }, // ftruncate
+    [LINUX_SYS_fchmod]         = { 2, { ARG_INT, ARG_HEX } }, // fchmod
     [LINUX_SYS_setitimer]      = { 3, { ARG_INT, ARG_PTR, ARG_PTR } }, // setitimer
     [LINUX_SYS_getitimer]      = { 2, { ARG_INT, ARG_PTR } }, // getitimer
     [LINUX_SYS_stat_new]       = { 2, { ARG_STR, ARG_PTR } }, // stat
@@ -789,6 +837,7 @@ static struct syscall_fmt linux_fmts[MAX_SYSCALLS] = {
     [LINUX_SYS_getgid32]       = { 0, { 0 } }, // getgid32
     [LINUX_SYS_geteuid32]      = { 0, { 0 } }, // geteuid32
     [LINUX_SYS_getegid32]      = { 0, { 0 } }, // getegid32
+    [LINUX_SYS_fchown32]       = { 3, { ARG_INT, ARG_INT, ARG_INT } }, // fchown32
     [LINUX_SYS_setgid32]       = { 1, { ARG_INT } }, // setgid32
     [LINUX_SYS_getdents64]     = { 3, { ARG_INT, ARG_PTR, ARG_INT } }, // getdents64
     [LINUX_SYS_fcntl64]        = { 3, { ARG_INT, ARG_INT, ARG_INT } }, // fcntl64

@@ -12,6 +12,7 @@
 #include <kern/version.h>
 #include <kern/panic.h>
 #include <kern/console.h>
+#include <kern/time.h>
 #include <exec/perso/personality.h>
 #include <pm/pm.h>
 #include <vm/vm_kmem.h>
@@ -24,6 +25,7 @@
 #include <include/sys/session.h>
 #include <kern/file.h>
 #include <vfs/vfs.h>
+#include <vfs/buf.h>
 #include <drivers/console/uart/uart.h>
 #include <include/sys/sysinfo.h>
 #include <sys/kern_syscalls.h>
@@ -219,12 +221,21 @@ int kern_write(int fd, const char *buf, int len) {
 
 int truncate_fs(fs_node_t *node, off_t length) {
     if (node->truncate != 0) {
-        return node->truncate(node, length);
+        int ret = node->truncate(node, length);
+        if (ret == 0) {
+            time_t now = get_time();
+            node->mtime = now;
+            node->ctime = now;
+        }
+        return ret;
     }
     
-    // Default: just update length if file is regular
+    /* Default: just update length if file is regular */
     if ((node->flags & 0x7) == FS_FILE) {
         node->length = length;
+        time_t now = get_time();
+        node->mtime = now;
+        node->ctime = now;
         return 0;
     }
     
@@ -854,8 +865,49 @@ int kern_mkdir(const char *p, int m) {
 int sys_rmdir(const char *p) { 
     char kpath[256];
     if (copyinstr(p, kpath, sizeof(kpath), NULL) != 0) return -14;
-    // kern_rmdir not in header yet, but following pattern
-    return 0; 
+    return kern_rmdir(kpath);
+}
+
+int kern_rmdir(const char *path) {
+    if (!path) return -EINVAL;
+
+    char dir[256];
+    char file[128];
+
+    const char *last_slash = NULL;
+    for (const char *p = path; *p; p++) {
+        if (*p == '/') last_slash = p;
+    }
+
+    fs_node_t *parent = NULL;
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
+
+    if (!last_slash) {
+        parent = cwd;
+        if (strlcpy(file, path, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
+    } else if (last_slash == path) {
+        parent = root;
+        if (strlcpy(file, path + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
+    } else {
+        size_t dirlen = (size_t)(last_slash - path);
+        if (dirlen >= sizeof(dir)) return -ENAMETOOLONG;
+        memcpy(dir, path, dirlen);
+        dir[dirlen] = '\0';
+
+        if (strlcpy(file, last_slash + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
+        parent = vfs_lookup((path[0] == '/') ? root : cwd, dir);
+    }
+
+    if (!parent) return -ENOENT;
+    if (!file[0]) return -EINVAL;
+
+    /* Verify target is a directory */
+    fs_node_t *target = parent->finddir ? parent->finddir(parent, file) : NULL;
+    if (!target) return -ENOENT;
+    if ((target->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
+
+    return rmdir_fs(parent, file);
 }
 int sys_getuid(void) { return current_process->uid; }
 int sys_getgid(void) { return current_process->gid; }
@@ -926,7 +978,9 @@ int sys_stat(const char *path, struct stat *buf) {
 int kern_stat(const char *path, struct stat *buf) {
     if (!path || !buf) return -EFAULT;
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
-    fs_node_t *node = vfs_lookup(root, path);
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
+    fs_node_t *start = (path[0] == '/') ? root : cwd;
+    fs_node_t *node = vfs_lookup(start, path);
     if (!node) return -ENOENT;
     fill_stat(buf, node);
     close_fs(node);
@@ -947,7 +1001,9 @@ int sys_lstat(const char *path, struct stat *buf) {
 int kern_lstat(const char *path, struct stat *buf) {
     if (!path || !buf) return -EFAULT;
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
-    fs_node_t *node = vfs_lookup_lstat(root, path);
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
+    fs_node_t *start = (path[0] == '/') ? root : cwd;
+    fs_node_t *node = vfs_lookup_lstat(start, path);
     if (!node) return -ENOENT;
     fill_stat(buf, node);
     close_fs(node);
@@ -979,9 +1035,19 @@ int sys_poll(struct pollfd *fds, unsigned int nfds, int timeout) {
 
 int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
     int ready = 0;
-    void *waiter = NULL; 
-    
+    uint64_t deadline = 0;
+
+    if (timeout > 0) {
+        uint64_t timeout_ticks = ((uint64_t)timeout * (uint64_t)HZ + 999ULL) / 1000ULL;
+        if (timeout_ticks == 0) {
+            timeout_ticks = 1;
+        }
+        deadline = get_ticks() + timeout_ticks;
+    }
+
     while (1) {
+        void *wait_chan = NULL;
+
         ready = 0;
         for (unsigned int i = 0; i < nfds; i++) {
             if (kfds[i].fd < 0) {
@@ -993,7 +1059,7 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
             short mask = 0;
             
             if (f && f->f_data) {
-                mask = poll_fs((fs_node_t*)f->f_data, waiter);
+                mask = poll_fs((fs_node_t*)f->f_data, &wait_chan);
                 short ret_mask = mask & (kfds[i].events | POLLERR | POLLHUP | POLLNVAL);
                 kfds[i].revents = ret_mask;
             } else {
@@ -1005,14 +1071,25 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
         
         if (ready > 0) break;
         if (timeout == 0) break;
-        
-        // Timeout handling (simplified)
-        if (timeout > 0 && timeout != -1) {
-             timeout -= 10; 
-             if (timeout <= 0) return 0;
+
+        if (timeout > 0) {
+            int sleep_ret = sched_sleep_until(wait_chan ? wait_chan : (void *)current_thread, deadline);
+            if (sleep_ret == -ETIMEDOUT) {
+                return 0;
+            }
+        } else {
+            if (wait_chan) {
+                sched_sleep(wait_chan);
+            } else {
+                sched_yield();
+            }
         }
-        
-        sched_yield();
+
+        if (current_thread &&
+            (current_thread->flags & THREAD_F_INTERRUPTIBLE) &&
+            (current_thread->sig_pending & ~current_thread->sig_mask)) {
+            return -EINTR;
+        }
     }
  
     return ready;
@@ -1052,9 +1129,18 @@ int kern_ioctl(int fd, uint32_t request, void *arg) {
     if (fd < 0 || fd >= MAX_FD) return -1;
     file_t *f = current_process->fds[fd];
     if (!f || !f->f_data) return -1;
-    
-    if (((fs_node_t*)f->f_data)->ioctl) {
-        return ((fs_node_t*)f->f_data)->ioctl((fs_node_t*)f->f_data, request, arg);
+
+    if ((uintptr_t)f->f_data < KERN_BASE) {
+        return -EIO;
+    }
+
+    fs_node_t *node = (fs_node_t *)f->f_data;
+
+    if (node->ioctl) {
+        if ((uintptr_t)node->ioctl < KERN_BASE) {
+            return -EIO;
+        }
+        return node->ioctl(node, request, arg);
     }
     
     return -1;
@@ -1071,7 +1157,7 @@ int sys_unlink(const char *path) {
 }
 
 int kern_unlink(const char *path) {
-    if (!path) return -1;
+    if (!path) return -EINVAL;
     
     char dir[256];
     char file[128];
@@ -1084,31 +1170,34 @@ int kern_unlink(const char *path) {
     
     fs_node_t *parent = NULL;
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
-    
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
+
     if (!last_slash) {
         // No slash - parent is CWD
-        parent = current_process->cwd_node ? current_process->cwd_node : root;
-        if (strlen(path) >= sizeof(file)) return -36; // ENAMETOOLONG
-        strcpy(file, path);
+        parent = cwd;
+        if (strlcpy(file, path, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
     } else if (last_slash == path) {
         // Only one slash at the beginning - parent is root
         parent = root;
-        if (strlen(path + 1) >= sizeof(file)) return -36; // ENAMETOOLONG
-        strcpy(file, path + 1);
+        if (strlcpy(file, path + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
     } else {
         // Split into dir and file
-        size_t dirlen = last_slash - path;
-        if (dirlen >= sizeof(dir)) return -36; // ENAMETOOLONG
+        size_t dirlen = (size_t)(last_slash - path);
+        if (dirlen >= sizeof(dir)) return -ENAMETOOLONG;
         memcpy(dir, path, dirlen);
         dir[dirlen] = '\0';
         
-        if (strlen(last_slash + 1) >= sizeof(file)) return -36; // ENAMETOOLONG
-        strcpy(file, last_slash + 1);
+        if (strlcpy(file, last_slash + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
         
-        parent = vfs_lookup(root, dir);
+        parent = vfs_lookup((path[0] == '/') ? root : cwd, dir);
     }
     
-    if (!parent || !file[0]) return -1;
+    if (!parent) return -ENOENT;
+    if (!file[0]) return -EINVAL;
+
+    fs_node_t *target = parent->finddir ? parent->finddir(parent, file) : NULL;
+    if (!target) return -ENOENT;
+    if ((target->flags & 0x7) == FS_DIRECTORY) return -EISDIR;
     
     return unlink_fs(parent, file);
 }
@@ -1121,14 +1210,14 @@ int sys_link(const char *oldpath, const char *newpath) {
 }
 
 int kern_link(const char *oldpath, const char *newpath) {
-    if (!oldpath || !newpath) return -1;
+    if (!oldpath || !newpath) return -EINVAL;
 
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
     fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
 
     // Resolve oldpath to source node
     fs_node_t *source = vfs_lookup(cwd, oldpath);
-    if (!source) return -1;
+    if (!source) return -ENOENT;
 
     // Resolve newpath to parent directory and name
     char dir[256];
@@ -1141,26 +1230,77 @@ int kern_link(const char *oldpath, const char *newpath) {
     fs_node_t *parent = NULL;
     if (!last_slash) {
         parent = cwd;
-        if (strlen(newpath) >= sizeof(file)) return -36; // ENAMETOOLONG
-        strcpy(file, newpath);
+        if (strlcpy(file, newpath, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
     } else if (last_slash == newpath) {
         parent = root;
-        if (strlen(newpath + 1) >= sizeof(file)) return -36; // ENAMETOOLONG
-        strcpy(file, newpath + 1);
+        if (strlcpy(file, newpath + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
     } else {
-        size_t dirlen = last_slash - newpath;
-        if (dirlen >= sizeof(dir)) return -36; // ENAMETOOLONG
+        size_t dirlen = (size_t)(last_slash - newpath);
+        if (dirlen >= sizeof(dir)) return -ENAMETOOLONG;
         memcpy(dir, newpath, dirlen);
         dir[dirlen] = '\0';
         
-        if (strlen(last_slash + 1) >= sizeof(file)) return -36; // ENAMETOOLONG
-        strcpy(file, last_slash + 1);
-        parent = vfs_lookup(root, dir);
+        if (strlcpy(file, last_slash + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
+        parent = vfs_lookup((newpath[0] == '/') ? root : cwd, dir);
     }
 
-    if (!parent || !file[0]) return -1;
+    if (!parent) return -ENOENT;
+    if (!file[0]) return -EINVAL;
+    if ((parent->flags & 0x07) != FS_DIRECTORY) return -ENOTDIR;
+    if (parent->finddir && parent->finddir(parent, file) != NULL) return -EEXIST;
 
-    return link_fs(parent, source, file);
+    int ret = link_fs(parent, source, file);
+    if (ret == 0) {
+        /* POSIX: ctime of source must be updated on link */
+        source->ctime = get_time();
+    }
+    return ret;
+}
+
+int sys_symlink(const char *target, const char *linkpath) {
+    char ktarget[256], klinkpath[256];
+    if (copyinstr(target, ktarget, sizeof(ktarget), NULL) != 0) return -EFAULT;
+    if (copyinstr(linkpath, klinkpath, sizeof(klinkpath), NULL) != 0) return -EFAULT;
+    return kern_symlink(ktarget, klinkpath);
+}
+
+int kern_symlink(const char *target, const char *linkpath) {
+    if (!target || !linkpath) return -EINVAL;
+    if (target[0] == '\0') return -ENOENT;
+
+    char dir[256];
+    char file[128];
+    const char *last_slash = NULL;
+    for (const char *p = linkpath; *p; p++) {
+        if (*p == '/') last_slash = p;
+    }
+
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
+    fs_node_t *parent = NULL;
+
+    if (!last_slash) {
+        parent = cwd;
+        if (strlcpy(file, linkpath, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
+    } else if (last_slash == linkpath) {
+        parent = root;
+        if (strlcpy(file, linkpath + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
+    } else {
+        size_t dirlen = (size_t)(last_slash - linkpath);
+        if (dirlen >= sizeof(dir)) return -ENAMETOOLONG;
+        memcpy(dir, linkpath, dirlen);
+        dir[dirlen] = '\0';
+
+        if (strlcpy(file, last_slash + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
+        parent = vfs_lookup((linkpath[0] == '/') ? root : cwd, dir);
+    }
+
+    if (!parent) return -ENOENT;
+    if (!file[0]) return -EINVAL;
+    if ((parent->flags & 0x07) != FS_DIRECTORY) return -ENOTDIR;
+    if (parent->finddir && parent->finddir(parent, file) != NULL) return -EEXIST;
+
+    return symlink_fs(parent, target, file);
 }
 
 int sys_readlink(const char *pathname, char *buf, size_t bufsiz) {
@@ -1240,9 +1380,7 @@ int sys_munlock(const void *addr, size_t len) {
 }
 
 int sys_sync(void) {
-    // In a real system, we'd iterate over all mounted filesystems
-    // and call their sync methods.
-    return 0;
+    return bufsync(0);
 }
 
 extern int sys_stat(const char *p, struct stat *buf);
@@ -1346,12 +1484,79 @@ int sys_dup2(int oldfd, int newfd) {
 }
 
 int sys_chmod(const char *path, int mode) {
-    (void)path; (void)mode;
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
+    fs_node_t *start = (kpath[0] == '/') ? root : cwd;
+    fs_node_t *node = vfs_lookup(start, kpath);
+    if (!node) return -ENOENT;
+
+    /* Only root or owner may chmod */
+    if (current_process->euid != 0 && current_process->euid != node->uid) {
+        close_fs(node);
+        return -EPERM;
+    }
+
+    node->mask = (uint32_t)(mode & 07777);
+    node->ctime = get_time();
+    close_fs(node);
     return 0;
 }
 
 int sys_lchown(const char *path, int uid, int gid) {
-    (void)path; (void)uid; (void)gid;
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
+    fs_node_t *start = (kpath[0] == '/') ? root : cwd;
+    fs_node_t *node = vfs_lookup_lstat(start, kpath);
+    if (!node) return -ENOENT;
+
+    /* Only root may chown */
+    if (current_process->euid != 0) {
+        close_fs(node);
+        return -EPERM;
+    }
+
+    if (uid != (int)-1) node->uid = (uint32_t)uid;
+    if (gid != (int)-1) node->gid = (uint32_t)gid;
+    node->ctime = get_time();
+    close_fs(node);
+    return 0;
+}
+
+int sys_fchmod(int fd, int mode) {
+    if (fd < 0 || fd >= MAX_FD) return -EBADF;
+
+    file_t *f = current_process->fds[fd];
+    if (!f || !f->f_data) return -EBADF;
+
+    fs_node_t *node = (fs_node_t *)f->f_data;
+
+    /* Only root or owner may chmod */
+    if (current_process->euid != 0 && current_process->euid != node->uid)
+        return -EPERM;
+
+    node->mask = (uint32_t)(mode & 07777);
+    node->ctime = get_time();
+    return 0;
+}
+
+int sys_fchown(int fd, int uid, int gid) {
+    if (fd < 0 || fd >= MAX_FD) return -EBADF;
+
+    file_t *f = current_process->fds[fd];
+    if (!f || !f->f_data) return -EBADF;
+
+    fs_node_t *node = (fs_node_t *)f->f_data;
+
+    /* Only root may chown */
+    if (current_process->euid != 0) return -EPERM;
+
+    if (uid != -1) node->uid = (uint32_t)uid;
+    if (gid != -1) node->gid = (uint32_t)gid;
+    node->ctime = get_time();
     return 0;
 }
 
@@ -1720,7 +1925,7 @@ int kern_proc_info(pid_t pid, sys_procinfo_t *info) {
     if (pid == 0) {
         target = current_process;
     } else {
-        for (int i = 0; i < 64; i++) {
+        for (int i = 0; i < MAX_PROCS; i++) {
             if (processes[i].pid == pid) {
                 target = &processes[i];
                 break;
@@ -1743,9 +1948,16 @@ int kern_proc_info(pid_t pid, sys_procinfo_t *info) {
     
     info->uid = target->uid;
     info->gid = target->gid;
+    info->euid = target->euid;
+    info->egid = target->egid;
     info->state = target->state;
     info->bitness = target->bitness;
+    info->perso_id = target->perso_id;
+    info->tty = -1;
+    info->nice = 0;
     info->start_time = target->start_time;
+    info->user_time = target->utime;
+    info->sys_time = target->stime;
     
     strncpy(info->name, target->comm, sizeof(info->name)-1);
     return 0;
@@ -1773,18 +1985,16 @@ int sys_proc_list(pid_t *pids, size_t count) {
 
 int kern_proc_list(pid_t *pids, size_t count) {
     int total_procs = 0;
-    for (int i = 0; i < 64; i++) {
+    for (int i = 0; i < MAX_PROCS; i++) {
         if (processes[i].pid != -1) total_procs++;
     }
     
     if (!pids || count == 0) return total_procs;
     
     int copied = 0;
-    for (int i = 0; i < 64 && copied < (int)count; i++) {
+    for (int i = 0; i < MAX_PROCS && copied < (int)count; i++) {
         if (processes[i].pid != -1) {
-            pid_t pid = processes[i].pid;
-            if (copyout(&pid, &pids[copied], sizeof(pid_t)) != 0) return -14;
-            copied++;
+            pids[copied++] = processes[i].pid;
         }
     }
     return copied;
@@ -1793,7 +2003,7 @@ int kern_proc_list(pid_t *pids, size_t count) {
 // sys_proc_count - Get total number of active processes
 int sys_proc_count(void) {
     int count = 0;
-    for (int i = 0; i < 64; i++) {
+    for (int i = 0; i < MAX_PROCS; i++) {
         if (processes[i].pid != -1) {
             count++;
         }
@@ -1914,8 +2124,7 @@ int sys_setpriority(int which, int who, int prio) {
         else if (which == PRIO_USER) target_id = current_process->uid;
     }
 
-    /* Iterate over processes using hardcoded limit matching syscall.c conventions */
-    for (int i = 0; i < 64; i++) {
+    for (int i = 0; i < MAX_PROCS; i++) {
         process_t *p = &processes[i];
         if (p->pid == -1) continue;
 
@@ -1989,7 +2198,7 @@ int sys_getpriority(int which, int who) {
     int found = 0;
     int best_nice = 20; /* Start with lowest priority (highest nice) */
 
-    for (int i = 0; i < 64; i++) {
+    for (int i = 0; i < MAX_PROCS; i++) {
         process_t *p = &processes[i];
         if (p->pid == -1) continue;
 

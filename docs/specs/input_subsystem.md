@@ -17,6 +17,10 @@ to Linux `evdev`, but currently exposes a single global queue as
     - `EV_KEY`: Keyboard buttons or mouse buttons.
     - `EV_REL`: Relative axis movement (Mouse).
     - `EV_ABS`: Absolute axis movement (Touchscreen).
+- **Mouse button codes:**
+    - `BTN_LEFT` = `0x110`
+    - `BTN_RIGHT` = `0x111`
+    - `BTN_MIDDLE` = `0x112`
 
 ## Global Event Queue
 - All input drivers push events to a single global queue in the kernel.
@@ -39,6 +43,15 @@ Removes an input producer from the global device list.
 
 ### `void input_report_event(input_dev_t *dev, uint16_t type, uint16_t code, int32_t value)`
 Kernel-side API for drivers to submit an input event.
+
+### `void input_report_key(input_dev_t *dev, uint16_t code, int32_t value)`
+Convenience wrapper for `EV_KEY` events.
+
+### `void input_report_rel(input_dev_t *dev, uint16_t code, int32_t value)`
+Convenience wrapper for `EV_REL` events.
+
+### `void input_report_abs(input_dev_t *dev, uint16_t code, int32_t value)`
+Convenience wrapper for `EV_ABS` events.
 
 ### `void input_sync(input_dev_t *dev)`
 Emits an `EV_SYN` event boundary after a batch of driver-generated events.

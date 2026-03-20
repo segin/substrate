@@ -81,9 +81,12 @@ int doname(struct nameblock *p, int reclevel, TIMETYPE *tval) {
 }
 
 int docom(struct shblock *q) {
-    char cmd[2048];
-    subst(q->shbp, cmd);
-    return dosys(cmd, 0);
+    char *cmd = malloc(OUTMAX);
+    if (!cmd) fatal("malloc failed in docom");
+    subst(q->shbp, cmd, OUTMAX);
+    int ret = dosys(cmd, 0);
+    free(cmd);
+    return ret;
 }
 
 void parse_cmd(char *cmd, char **argv, int max_args) {

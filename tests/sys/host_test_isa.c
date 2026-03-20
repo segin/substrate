@@ -123,7 +123,12 @@ int main(void) {
     dev = isa_first_device();
     assert(dev != NULL);
     assert(isa_find_device_by_name("serial0") != NULL);
+    assert(isa_device_present("serial0"));
+    assert(isa_device_present("serial1"));
+    assert(!isa_device_present("serial9"));
     assert(isa_find_device_by_name("parallel0") != NULL);
+    assert(isa_device_present("parallel0"));
+    assert(!isa_device_present("parallel1"));
     assert(isa_find_device_by_name("ide-primary") != NULL);
     assert(isa_find_device_by_name("ide-tertiary") != NULL);
     assert(isa_find_device_by_name("ide-quaternary") != NULL);

@@ -18,12 +18,15 @@ The mouse driver manages input from standard PS/2 mouse devices via the auxiliar
 - **Byte 1:** X movement.
 - **Byte 2:** Y movement.
 - **Scaling:** Signed 8-bit values are accumulated into global `mouse_x` and `mouse_y` coordinates.
+- **Realignment:** The first packet byte must have bit 3 set; malformed first bytes are discarded until alignment is re-established.
+- **Overflow:** If byte 0 overflow bits are set, the decoded delta is clamped to `+/-255` for that axis instead of wrapping.
 
 ## Event Queue
 - **Type:** Circular buffer.
 - **Size:** 64 events.
 - **Structure:** `mouse_event_t` contains `dx`, `dy`, and `buttons`.
 - **Interrupt Safety:** The handler pushes events while the consumer pops them.
+- **Input Events:** Each complete packet emits `REL_X`, `REL_Y`, `BTN_LEFT`, `BTN_RIGHT`, `BTN_MIDDLE`, then `EV_SYN`.
 
 ## API
 ### `void mouse_init(void)`

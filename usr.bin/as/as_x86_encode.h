@@ -64,6 +64,7 @@ typedef struct {
     as_x86_reg_t base;
     int has_index;
     as_x86_reg_t index;
+    unsigned addr_bits;
     unsigned scale;
     unsigned size_bits;
     int has_disp;
@@ -87,6 +88,10 @@ typedef struct {
 typedef struct {
     const char *mnemonic;
     as_x86_seg_t seg_override;
+    unsigned default_bits;
+    unsigned rel_is_disp;
+    unsigned has_section_offset;
+    uint64_t section_offset;
     int lock_prefix;
     int rep_prefix;
     int explicit_rex;

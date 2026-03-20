@@ -2,9 +2,18 @@
 #include <stdio.h>
 #include <string.h>
 #include <vm/vm_kmem.h>
+#include <stdarg.h>
+
+static char *call_kvasprintf(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    char *ret = kvasprintf(fmt, ap);
+    va_end(ap);
+    return ret;
+}
 
 void test_printf_new(void) {
-    kprint("Testing snprintf and kasprintf...\n");
+    kprint("Testing snprintf, kasprintf, and kvasprintf...\n");
 
     // Test snprintf
     char buf[32];
@@ -40,5 +49,33 @@ void test_printf_new(void) {
         kfree(kstr, strlen(kstr) + 1);
     } else {
         kprint("FAIL: kasprintf returned NULL\n");
+    }
+
+    // kvasprintf
+    char *kvstr = call_kvasprintf("Variadic %s %d", "Test", 99);
+    if (kvstr) {
+        if (strcmp(kvstr, "Variadic Test 99") == 0) {
+            kprint("PASS: kvasprintf\n");
+        } else {
+            kprint("FAIL: kvasprintf content\n");
+            kprintf("Expected 'Variadic Test 99', got '%s'\n", kvstr);
+        }
+        kfree(kvstr, strlen(kvstr) + 1);
+    } else {
+        kprint("FAIL: kvasprintf returned NULL\n");
+    }
+
+    // kvasprintf empty
+    char *kvemp = call_kvasprintf("");
+    if (kvemp) {
+        if (strcmp(kvemp, "") == 0) {
+            kprint("PASS: kvasprintf empty\n");
+        } else {
+            kprint("FAIL: kvasprintf empty content\n");
+            kprintf("Expected '', got '%s'\n", kvemp);
+        }
+        kfree(kvemp, strlen(kvemp) + 1);
+    } else {
+        kprint("FAIL: kvasprintf empty returned NULL\n");
     }
 }
