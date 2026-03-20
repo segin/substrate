@@ -244,7 +244,7 @@ jump_to_userspace:
     iret
 
 # void jump_to_elks(uint32_t entry_point, uint32_t user_stack, uint32_t cs,
-#                   uint32_t ds, uint32_t ss, uint32_t es)
+#                   uint32_t ds, uint32_t ss, uint32_t es, uint32_t stack_size)
 .global jump_to_elks
 jump_to_elks:
     # [esp+4] = entry_point
@@ -253,6 +253,7 @@ jump_to_elks:
     # [esp+16] = ds_selector
     # [esp+20] = ss_selector
     # [esp+24] = es_selector
+    # [esp+28] = stack_size
     
     mov 4(%esp), %ecx   # entry_point
     mov 8(%esp), %edx   # user_stack
@@ -260,6 +261,7 @@ jump_to_elks:
     mov 16(%esp), %ebx  # ds_selector
     mov 20(%esp), %esi  # ss_selector
     mov 24(%esp), %edi  # es_selector
+    mov 28(%esp), %ebp  # stack_size (ELKS expects DX)
     
     cli
     
@@ -283,7 +285,8 @@ jump_to_elks:
     xor %eax, %eax
     xor %ebx, %ebx
     xor %ecx, %ecx
-    xor %edx, %edx
+    mov %ebp, %edx
+    xor %ebp, %ebp
     xor %esi, %esi
     xor %edi, %edi
     

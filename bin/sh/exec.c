@@ -591,13 +591,13 @@ static int builtin_eval(int argc, char **argv) {
         }
         char *line = malloc(total_len);
         if (line) {
-            char *ptr = line;
+            size_t len = 0;
             for (int i = 1; i < argc; i++) {
                 memcpy(ptr, argv[i], lengths[i]);
                 ptr += lengths[i];
                 if (i < argc - 1) *ptr++ = ' ';
             }
-            *ptr = '\0';
+            line[len] = '\0';
             status = execute_line(line);
             free(line);
         }

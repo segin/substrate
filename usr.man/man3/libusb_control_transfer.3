@@ -1,0 +1,57 @@
+.TH LIBUSB_CONTROL_TRANSFER 3 "March 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+libusb_control_transfer \- issue a synchronous USB control request
+.SH LIBRARY
+.B libusb
+.SH SYNOPSIS
+.B #include <libusb.h>
+.PP
+.BI "int libusb_control_transfer(libusb_device_handle *" handle ", uint8_t " bmRequestType ", uint8_t " bRequest ", uint16_t " wValue ", uint16_t " wIndex ", unsigned char *" data ", uint16_t " wLength ", unsigned int " timeout ");"
+.SH DESCRIPTION
+.BR libusb_control_transfer ()
+sends a setup packet on endpoint 0 and optionally transfers a data phase.
+The request is issued synchronously through the usbdevfs control-transfer
+backend.
+.PP
+The
+.I timeout
+argument is expressed in milliseconds.
+A zero timeout requests the library default polling behavior.
+.SH RETURN VALUE
+On success,
+.BR libusb_control_transfer ()
+returns the number of bytes transferred.
+On failure, it returns a negative
+.B LIBUSB_ERROR_*
+code.
+.SH ERRORS
+.TP
+.B LIBUSB_ERROR_INVALID_PARAM
+The handle was NULL or one of the request arguments was invalid.
+.TP
+.B LIBUSB_ERROR_TIMEOUT
+The transfer did not complete before the requested timeout expired.
+.TP
+.B LIBUSB_ERROR_PIPE
+The endpoint stalled or the request was rejected by the device.
+.TP
+.B LIBUSB_ERROR_IO
+The backend transfer ioctl failed.
+.SH EXAMPLE
+.nf
+unsigned char buf[18];
+int rc;
+
+rc = libusb_control_transfer(handle,
+    LIBUSB_ENDPOINT_IN,
+    LIBUSB_REQUEST_GET_DESCRIPTOR,
+    (LIBUSB_DT_DEVICE << 8),
+    0,
+    buf,
+    sizeof(buf),
+    1000);
+.fi
+.SH SEE ALSO
+.BR libusb_open (3),
+.BR libusb_bulk_transfer (3),
+.BR libusb_submit_transfer (3)

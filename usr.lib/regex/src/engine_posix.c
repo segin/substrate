@@ -6,8 +6,47 @@
 #ifdef REGEX_USE_HOST_POSIX
 
 #define regex_t host_regex_t
+#define regoff_t host_regoff_t
+#define regmatch_t host_regmatch_t
+#define regcomp host_regcomp
+#define regexec host_regexec
+#define regerror host_regerror
+#define regfree host_regfree
 #include </usr/include/regex.h>
 #undef regex_t
+#undef regoff_t
+#undef regmatch_t
+#undef regcomp
+#undef regexec
+#undef regerror
+#undef regfree
+
+#undef REG_EXTENDED
+#undef REG_ICASE
+#undef REG_NOSUB
+#undef REG_NEWLINE
+#undef REG_NOTBOL
+#undef REG_NOTEOL
+#undef REG_NOMATCH
+#undef REG_BADPAT
+#undef REG_ECOLLATE
+#undef REG_ECTYPE
+#undef REG_EESCAPE
+#undef REG_ESUBREG
+#undef REG_EBRACK
+#undef REG_EPAREN
+#undef REG_EBRACE
+#undef REG_BADBR
+#undef REG_ERANGE
+#undef REG_ESPACE
+#undef REG_BADRPT
+
+#define regoff_t host_regoff_t
+#define regmatch_t host_regmatch_t
+#define regcomp host_regcomp
+#define regexec host_regexec
+#define regerror host_regerror
+#define regfree host_regfree
 
 typedef struct posix_regex_impl {
     host_regex_t re;

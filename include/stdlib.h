@@ -5,8 +5,28 @@
 #include <stdint.h>
 
 #define RAND_MAX 2147483647
+#define MB_CUR_MAX 4
+
+#define EXIT_SUCCESS 0
+#define EXIT_FAILURE 1
+
+typedef struct {
+    int quot;
+    int rem;
+} div_t;
+
+typedef struct {
+    long quot;
+    long rem;
+} ldiv_t;
+
+typedef struct {
+    long long quot;
+    long long rem;
+} lldiv_t;
 
 [[noreturn]] void exit(int status);
+[[noreturn]] void _Exit(int status);
 [[noreturn]] void abort(void);
 
 void *malloc(size_t size);
@@ -35,6 +55,7 @@ int system(const char *command);
 
 void quick_exit(int status);
 int at_quick_exit(void (*func)(void));
+int atexit(void (*func)(void));
 
 void qsort(void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *));
 void *bsearch(const void *key, const void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *));
@@ -43,11 +64,18 @@ int abs(int j);
 long labs(long j);
 long long llabs(long long j);
 
+div_t div(int numer, int denom);
+ldiv_t ldiv(long numer, long denom);
+lldiv_t lldiv(long long numer, long long denom);
+
 int rand(void);
 void srand(unsigned int seed);
 
 uint32_t arc4random(void);
 void arc4random_buf(void *buf, size_t n);
 uint32_t arc4random_uniform(uint32_t upper_bound);
+int mkstemp(char *tmpl);
+char *mkdtemp(char *tmpl);
+
 
 #endif

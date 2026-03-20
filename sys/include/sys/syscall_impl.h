@@ -59,6 +59,8 @@ extern int sys_fcntl(int, int, int);
 extern int sys_ioctl(int, uint32_t, void*);
 extern int sys_readlink(const char*, char*, size_t);
 extern int sys_lchown(const char*, int, int);
+extern int sys_fchmod(int, int);
+extern int sys_fchown(int, int, int);
 
 /* lseek/truncate - NATIVE uses 64-bit offset split into hi/lo */
 extern int64_t sys_lseek(int, uint32_t, uint32_t, int);
@@ -74,6 +76,7 @@ extern int sys_fstatfs(int, void*);
 
 /* File system operations */
 extern int sys_link(const char*, const char*);
+extern int sys_symlink(const char*, const char*);
 extern int sys_unlink(const char*);
 extern int sys_mkdir(const char*, int);
 extern int sys_rmdir(const char*);

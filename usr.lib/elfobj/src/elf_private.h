@@ -107,6 +107,7 @@ struct elf_section {
     uint64_t entsize;
     uint32_t group_index;
     uint8_t comdat;
+    char *group_signature;
     uint32_t note_type;
     char *note_name;
     uint8_t *data;
@@ -143,6 +144,8 @@ struct elf_symbol {
     uint8_t other;
     uint16_t shndx;
     uint16_t ver_index;
+    char *version_name;
+    uint8_t version_default;
     size_t index;
 };
 

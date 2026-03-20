@@ -67,9 +67,17 @@ Clear the history list.
 .TP
 .B H_LOAD
 Load history from a file.
+The file must have been written by
+.BR H_SAVE .
+Each line in the file represents one history entry.
+If the file does not exist or cannot be opened, the operation fails.
 .TP
 .B H_SAVE
-Save history to a file.
+Save all history entries to a file.
+Entries are written one per line in order from oldest to newest.
+The resulting file can later be passed to
+.BR H_LOAD
+to restore session history.
 .TP
 .B H_SETSIZE
 Set maximum number of history entries.
@@ -114,4 +122,6 @@ Load/save operation failed.
 .SH SEE ALSO
 .BR editline (3),
 .BR el_set (3),
+.BR tok_init (3),
+.BR readline (3),
 .BR editrc (5)

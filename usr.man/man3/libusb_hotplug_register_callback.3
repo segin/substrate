@@ -1,0 +1,70 @@
+.TH LIBUSB_HOTPLUG_REGISTER_CALLBACK 3 "March 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+libusb_hotplug_register_callback, libusb_hotplug_deregister_callback, libusb_hotplug_get_user_data \- register libusb hotplug notifications
+.SH LIBRARY
+.B libusb
+.SH SYNOPSIS
+.B #include <libusb.h>
+.PP
+.BI "int libusb_hotplug_register_callback(libusb_context *" ctx ", int " events ", int " flags ", int " vendor_id ", int " product_id ", int " dev_class ", libusb_hotplug_callback_fn " cb_fn ", void *" user_data ", libusb_hotplug_callback_handle *" callback_handle ");"
+.PP
+.BI "void libusb_hotplug_deregister_callback(libusb_context *" ctx ", libusb_hotplug_callback_handle " callback_handle ");"
+.PP
+.BI "void *libusb_hotplug_get_user_data(libusb_context *" ctx ", libusb_hotplug_callback_handle " callback_handle ");"
+.SH DESCRIPTION
+.BR libusb_hotplug_register_callback ()
+installs a callback that is invoked when matching USB devices arrive or leave.
+Callbacks may filter on vendor ID, product ID, and device class; any filter may
+be disabled with
+.BR LIBUSB_HOTPLUG_MATCH_ANY .
+.PP
+When
+.B LIBUSB_HOTPLUG_ENUMERATE
+is supplied and arrival events are requested, the callback is invoked
+immediately for already-present matching devices.
+.PP
+The current Substrate backend watches the device list and consults
+.B /proc/device-events
+for USB add/remove notifications during libusb event handling.
+.SH RETURN VALUE
+.BR libusb_hotplug_register_callback ()
+returns 0 on success or a negative
+.B LIBUSB_ERROR_*
+code on failure.
+.BR libusb_hotplug_get_user_data ()
+returns the registered user-data pointer or NULL if the callback handle is not
+active.
+.SH ERRORS
+.TP
+.B LIBUSB_ERROR_INVALID_PARAM
+The callback function, output handle, or event mask was invalid.
+.TP
+.B LIBUSB_ERROR_NO_MEM
+No callback slot or required internal snapshot storage was available.
+.TP
+.B LIBUSB_ERROR_OTHER
+The target context could not be resolved.
+.SH EXAMPLE
+.nf
+static int
+hotplug_cb(libusb_context *ctx, libusb_device *dev,
+    libusb_hotplug_event event, void *arg)
+{
+    return 0;
+}
+
+libusb_hotplug_register_callback(ctx,
+    LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED |
+    LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT,
+    LIBUSB_HOTPLUG_ENUMERATE,
+    LIBUSB_HOTPLUG_MATCH_ANY,
+    LIBUSB_HOTPLUG_MATCH_ANY,
+    LIBUSB_HOTPLUG_MATCH_ANY,
+    hotplug_cb,
+    NULL,
+    &handle);
+.fi
+.SH SEE ALSO
+.BR libusb_handle_events (3),
+.BR libusb_init (3),
+.BR proc (5)

@@ -106,7 +106,7 @@ const struct core_record *core_last_record(void) {
 }
 
 int coredump(process_t *p) {
-    char msg[160];
+    char msg[256];
 
     if (!p) {
         return -1;
@@ -122,6 +122,38 @@ int coredump(process_t *p) {
     sprintf(msg, "CORE: captured crash state for pid=%d perso=%d signal=%d\n",
             p->pid, p->perso_id, last_core_record.signal);
     kprint(msg);
+
+    sprintf(msg, "CORE: exec='%s' comm='%s' trap_addr=0x%08x trap_code=0x%08x\n",
+            last_core_record.exec_path,
+            last_core_record.comm,
+            last_core_record.trap_addr,
+            last_core_record.trap_code);
+    kprint(msg);
+
+    if (last_core_record.has_regs) {
+        sprintf(msg, "CORE: regs eip=0x%08x cs=0x%04x esp=0x%08x ss=0x%04x eflags=0x%08x\n",
+                last_core_record.regs.eip,
+                (unsigned int)(last_core_record.regs.cs & 0xFFFFU),
+                last_core_record.regs.useresp,
+                (unsigned int)(last_core_record.regs.ss & 0xFFFFU),
+                last_core_record.regs.eflags);
+        kprint(msg);
+    }
+
+    if (last_core_record.segment_count > 0) {
+        int i;
+        for (i = 0; i < last_core_record.segment_count; i++) {
+            sprintf(msg,
+                    "CORE: seg[%d] sel=0x%04x base=0x%08x limit=0x%08x access=0x%02x gran=0x%02x\n",
+                    i,
+                    last_core_record.segments[i].selector,
+                    last_core_record.segments[i].base,
+                    last_core_record.segments[i].limit,
+                    last_core_record.segments[i].access,
+                    last_core_record.segments[i].granularity);
+            kprint(msg);
+        }
+    }
 
     return 0;
 }
