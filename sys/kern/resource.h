@@ -83,6 +83,7 @@ void release_region(resource_size_t start, resource_size_t n);
 struct resource *request_mem_region(resource_size_t start, resource_size_t n, const char *name);
 void release_mem_region(resource_size_t start, resource_size_t n);
 void *ioremap(resource_size_t phys_addr, size_t size);
+void *ioremap_wc(resource_size_t phys_addr, size_t size);
 void *ioremap_resource(struct resource *res, size_t max_len);
 void iounmap(void *addr);
 

@@ -21,8 +21,24 @@ bool test_vnode_reclaim_basic(void) {
     /* Set up dummy state to ensure vnode_reclaim cleans it up without crashing */
     vp->v_type = VREG;
     vp->v_data = (void *)0xdeadbeef;
+    vp->v_usecount = 0;
+    vp->v_flag &= ~VONFREELIST;
 
     /* Reclaim the vnode */
+    vnode_reclaim(vp);
+
+    /* Allocate a second vnode to test free list removal in reclaim */
+    error = getnewvnode("test_reclaim_freelist", NULL, NULL, &vp);
+    if (error) {
+        return false;
+    }
+
+    /* Fake being on the free list */
+    vp->v_usecount = 0;
+    /* Normally handled by vrele putting it on free list, but we mock it. We must NOT set VONFREELIST
+       without properly inserting it in free list, as that causes panic in linked list macro.
+       Thus we only simulate what is safely mockable. */
+
     vnode_reclaim(vp);
 
     /*

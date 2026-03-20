@@ -101,6 +101,9 @@ struct ntsync_wait_args {
 
 #define NTSYNC_MAX_WAIT_COUNT   64  /* Maximum objects in single wait */
 
+/* Driver initialization */
+void ntsync_init(void);
+
 /*
  * ============================================================
  * Ioctl Numbers

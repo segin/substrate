@@ -689,7 +689,6 @@ void pmap_activate(pmap_t pmap) {
 
 
 int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t flags) {
-    (void)flags;
     struct pmap_activation_state activation;
 
     if (!pmap) {
@@ -732,6 +731,7 @@ int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t 
             pte_flags |= PTE_G;
         }
     }
+    pte_flags |= flags & (PTE_PWT | PTE_PCD | PTE_PAT);
     // Note: i386 doesn't have NX bit in standard mode
 
     uint32_t *pt = V_PT(pdi);
@@ -760,7 +760,6 @@ int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t 
 }
 
 int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_list, uint32_t prot, uint32_t flags) {
-    (void)flags;
     struct pmap_activation_state activation;
 
     if (!pmap) {
@@ -815,6 +814,7 @@ int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_l
                 pte_flags |= PTE_G;
             }
         }
+        pte_flags |= flags & (PTE_PWT | PTE_PCD | PTE_PAT);
 
         uint32_t old_pte = pt[pti];
         uint32_t old_pa = old_pte & PTE_FRAME;
@@ -1137,7 +1137,7 @@ int pmap_protect(pmap_t pmap, uintptr_t sva, uintptr_t eva, uint32_t prot) {
         }
         
         // Update protection bits
-        uint32_t pte = old_pte & (PTE_FRAME | PTE_A | PTE_D | PTE_G | PTE_PWT | PTE_PCD);
+        uint32_t pte = old_pte & (PTE_FRAME | PTE_A | PTE_D | PTE_G | PTE_PWT | PTE_PCD | PTE_PAT);
         pte |= PTE_P;
         
         if (wants_writable) {
