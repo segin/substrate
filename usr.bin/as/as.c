@@ -191,6 +191,40 @@ static void usage(const char *prog) {
             prog);
 }
 
+static int directive_is_explicitly_unsupported(const char *name) {
+    if (name == NULL) {
+        return 0;
+    }
+    return strcmp(name, ".if") == 0 || strcmp(name, ".ifdef") == 0 || strcmp(name, ".ifndef") == 0 ||
+           strcmp(name, ".else") == 0 || strcmp(name, ".elseif") == 0 || strcmp(name, ".endif") == 0 ||
+           strcmp(name, ".macro") == 0 || strcmp(name, ".endm") == 0 || strcmp(name, ".rept") == 0 ||
+           strcmp(name, ".endr") == 0 || strcmp(name, ".irp") == 0 || strcmp(name, ".irpc") == 0;
+}
+
+static int validate_directives(const as_parse_result_t *parsed, char *errbuf, size_t errbuf_sz) {
+    size_t i;
+
+    if (parsed == NULL || errbuf == NULL || errbuf_sz == 0) {
+        return -1;
+    }
+    for (i = 0; i < parsed->count; ++i) {
+        const as_stmt_t *st = &parsed->items[i];
+
+        if (st->kind != AS_STMT_DIRECTIVE) {
+            continue;
+        }
+        if (!directive_is_explicitly_unsupported(st->u.directive.name)) {
+            continue;
+        }
+        snprintf(errbuf, errbuf_sz, "%s:%u: unsupported directive %s",
+                 st->file != NULL ? st->file : "<input>",
+                 st->line,
+                 st->u.directive.name != NULL ? st->u.directive.name : "<null>");
+        return -1;
+    }
+    return 0;
+}
+
 static char *xstrdup(const char *s) {
     size_t n;
     char *p;
@@ -756,6 +790,7 @@ static int run_native_backend(const as_ctx_t *ctx) {
 
     ecfg.machine = ctx->mode == AS_MODE_64 ? EM_X86_64 : EM_386;
     ecfg.is_64 = ctx->mode == AS_MODE_64 ? 1u : 0u;
+    ecfg.x86_code_bits = ctx->mode == AS_MODE_64 ? 64u : 32u;
     ecfg.use_rela = ctx->mode == AS_MODE_64 ? 1u : 0u;
     ecfg.x86_64_isa_level = (unsigned)x64_isa_level_from_march(ctx->march);
     ecfg.intel_syntax = (unsigned)(ctx->syntax_intel ? 1 : 0);
@@ -765,6 +800,10 @@ static int run_native_backend(const as_ctx_t *ctx) {
         goto out;
     }
     if (as_parse_tokens(&toks, &pcfg, &parsed, errbuf, sizeof(errbuf)) != 0) {
+        as_diag(AS_E_BACKEND, "%s", errbuf);
+        goto out;
+    }
+    if (validate_directives(&parsed, errbuf, sizeof(errbuf)) != 0) {
         as_diag(AS_E_BACKEND, "%s", errbuf);
         goto out;
     }

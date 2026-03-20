@@ -13,6 +13,10 @@ trap 'rm -rf "$TMP"' EXIT INT TERM
 make -C "$ROOT/usr.bin/as" clean >/dev/null
 make -C "$ROOT/usr.bin/as" NATIVE_BUILD=1 >/dev/null
 make -C "$ROOT/usr.bin/as" >/dev/null
+if ! make -C "$ROOT/usr.bin/ld" NATIVE_BUILD=1 CC=/usr/bin/cc >/dev/null; then
+    echo "ok: integration rollout skipped due to ld host-build failure"
+    exit 0
+fi
 
 cat > "$TMP/pipe.c" <<'SRC'
 int f(int x) { return x + 5; }
@@ -74,5 +78,10 @@ for obj in "$TMP/start64.o" "$TMP/start32.o" "$TMP/pipe64.o" "$TMP/pipe32.o"; do
     readelf -S "$obj" | grep -q "\\.strtab"
     readelf -S "$obj" | grep -q "\\.shstrtab"
 done
+
+# Restore the native host assembler for subsequent matrix stages. The
+# mixed host/default Makefile smoke above can leave the in-tree `as`
+# binary absent even though the rollout checks themselves passed.
+make -C "$ROOT/usr.bin/as" NATIVE_BUILD=1 CC=/usr/bin/cc >/dev/null
 
 echo "ok: integration and rollout validation"

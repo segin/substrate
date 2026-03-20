@@ -130,11 +130,14 @@ Current device pager note:
 
 Current vnode pager contract:
 
-- `pager->priv` is an `fs_node_t *`
-- `getpage` reads one page through VFS `read`
-- short file reads are zero-filled to page size
-- `putpage` writes one page through VFS `write`
-- `haspage` is permissive and lets `getpage` resolve EOF/short-read behavior
+- `pager->priv` is an `fs_node_t *`.
+- Vnode-backed paging is implemented through `sys/vm/vm_pager.c` with explicit batch interfaces (`vnode_pager_getpages()` / `vnode_pager_putpages()`).
+- File-cache backing uses `vm_page_t` pages keyed by `(fs_node, file_page_index)` rather than `kmalloc` byte buffers.
+- `MAP_SHARED` mappings reuse cached file-backed VM objects for the same `(fs_node, page offset)` key so mmap-visible pages and pager-managed file cache share backing state.
+- `getpage` reads one page through VFS `read`.
+- short file reads are zero-filled to page size.
+- `putpage` writes one page through VFS `write`.
+- `haspage` is permissive and lets `getpage` resolve EOF/short-read behavior.
 
 ## Fault Handling Contract
 

@@ -61,6 +61,7 @@ void as_relax_result_init(as_relax_result_t *r) {
     }
     r->branches = NULL;
     r->branch_count = 0;
+    r->branch_cap = 0;
     r->passes = 0;
     r->stabilized = 0;
 }
