@@ -129,7 +129,7 @@ Validation gate for Section 1:
 
 ### 3.3 Real-Mode Output Validation
 - [x] Verify emitted relocatable objects preserve 16-bit intent.
-- [ ] Add flat-binary smoke tests once `-O binary` is live.
+- [x] Add flat-binary smoke tests once `-O binary` is live.
 
 ---
 

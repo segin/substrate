@@ -37,5 +37,6 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 "$ROOT/tests/usr.bin/as/test_numeric_local_labels.sh"
 "$ROOT/tests/usr.bin/as/test_cpp_path.sh"
 "$ROOT/tests/usr.bin/as/test_diagnostics_determinism.sh"
+"$ROOT/tests/usr.bin/as/test_output_binary.sh"
 
 echo "ok: unit matrix"
