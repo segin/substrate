@@ -4,8 +4,6 @@
 #include <string.h>
 #include "tests.h"
 
-extern void minix_init(void);
-
 static uint8_t mock_sb_buf[1024];
 
 static size_t mock_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {

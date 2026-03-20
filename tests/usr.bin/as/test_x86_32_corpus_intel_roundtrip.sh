@@ -82,7 +82,14 @@ def first_mnemonic(inst):
     return ''
 
 def is_skip_32bit_intel_roundtrip(inst):
+    # These are objdump artifacts for encodings that are not valid 32-bit Intel
+    # source, so skipping them is a disassembler filter, not an assembler crutch.
+    # Fixed-width loop/jcxz-family branches are also skipped here because this
+    # roundtrip intentionally drops non-sourceable objdump artifacts, which can
+    # invalidate the original rel8 span without reflecting a real assembler gap.
     mnem = first_mnemonic(inst)
+    if mnem in {'jcxz', 'jecxz', 'jrcxz', 'loop', 'loope', 'loopz', 'loopne', 'loopnz'}:
+        return True
     if mnem in {'swapgs'}:
         return True
     if mnem == 'bswap':
@@ -93,27 +100,45 @@ def is_skip_32bit_intel_roundtrip(inst):
                 return True
     return False
 
-def rewrite_targets(inst):
+def rewrite_targets(inst, kept_addrs):
+    # objdump prints resolved branch destinations, not source-level relative
+    # expressions. Reconstruct local labels so the round-trip stays meaningful.
     ok = True
     def repl(mm):
         nonlocal ok
         target = int(mm.group(1), 16)
-        if target in addrs:
+        if target in kept_addrs:
             return f'.L{target:04x}'
         if is_branch_like(inst):
             ok = False
         return '0x' + mm.group(1)
     return branch_target_re.sub(repl, inst), ok
 
+base_keep = {}
+for addr, inst in entries:
+    base_keep[addr] = not is_skip_32bit_intel_roundtrip(inst)
+
+keep = dict(base_keep)
+changed = True
+while changed:
+    changed = False
+    kept_addrs = {addr for addr, ok in keep.items() if ok}
+    for addr, inst in entries:
+        if not keep.get(addr, False):
+            continue
+        rewritten, ok = rewrite_targets(inst, kept_addrs)
+        if not ok:
+            keep[addr] = False
+            changed = True
+
 with open(dst, 'w', encoding='utf-8') as fout:
     fout.write('.intel_syntax noprefix\n')
     fout.write('.text\n')
+    kept_addrs = {addr for addr, ok in keep.items() if ok}
     for addr, inst in entries:
-        if is_skip_32bit_intel_roundtrip(inst):
+        if not keep.get(addr, False):
             continue
-        inst, ok = rewrite_targets(inst)
-        if not ok:
-            continue
+        inst, _ = rewrite_targets(inst, kept_addrs)
         fout.write(f'.L{addr:04x}:\n')
         fout.write(inst)
         fout.write('\n')

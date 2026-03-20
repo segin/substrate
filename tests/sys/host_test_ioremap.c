@@ -8,6 +8,7 @@ static int pmap_kremove_calls;
 static uintptr_t last_va;
 static uintptr_t last_pa;
 static uint32_t last_flags;
+static int fake_pat_wc_enabled;
 
 void *kmalloc(size_t size) {
     return malloc(size);
@@ -38,6 +39,10 @@ void pmap_kremove(uintptr_t va) {
     last_va = va;
 }
 
+int i386_cpu_pat_wc_enabled(void) {
+    return fake_pat_wc_enabled;
+}
+
 #define HOST_TEST 1
 #include "../../sys/kern/resource.c"
 #include "../../sys/kern/ioremap.c"
@@ -48,6 +53,7 @@ static void reset_state(void) {
     last_va = 0;
     last_pa = 0;
     last_flags = 0;
+    fake_pat_wc_enabled = 0;
     resource_init();
     ioremap_regions = NULL;
     ioremap_next = IOREMAP_BASE;
@@ -67,8 +73,26 @@ static void test_ioremap_maps_and_unmaps_uncached_pages(void) {
     assert(pmap_kremove_calls == 1);
 }
 
+static void test_ioremap_wc_uses_pat_when_available(void) {
+    void *addr;
+
+    reset_state();
+    fake_pat_wc_enabled = 1;
+    addr = ioremap_wc(0xE0001000U, 0x2000);
+    assert(addr != NULL);
+    assert(pmap_enter_calls == 2);
+    assert(last_pa == 0xE0002000U);
+    assert((last_flags & PTE_PAT) != 0);
+    assert((last_flags & PTE_PWT) != 0);
+    assert((last_flags & PTE_PCD) == 0);
+
+    iounmap(addr);
+    assert(pmap_kremove_calls == 2);
+}
+
 int main(void) {
     test_ioremap_maps_and_unmaps_uncached_pages();
+    test_ioremap_wc_uses_pat_when_available();
     puts("host_test_ioremap: PASS");
     return 0;
 }

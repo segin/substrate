@@ -16,6 +16,7 @@
 #define VT_MAX_HEIGHT 60
 #define VT_MAX_BUF_SIZE (VT_MAX_WIDTH * VT_MAX_HEIGHT)
 #define VT_SCROLLBACK_LINES 256
+#define VT_TABSTOP_WORDS ((VT_MAX_WIDTH + 31) / 32)
 
 /*
  * VT State
@@ -35,11 +36,13 @@ typedef struct vt_state {
     int row;
     int col;
     uint8_t color; // Current attribute
+    uint16_t attrs;
     
     // Saved Cursor (DECSC/DECRC / CSI s/u)
     int saved_row;
     int saved_col;
     uint8_t saved_color;
+    uint16_t saved_attrs;
     
     // Scroll Region (DECSTBM)
     int scroll_top;    // 0-based inclusive
@@ -47,6 +50,9 @@ typedef struct vt_state {
     
     // Cursor visibility
     int cursor_visible; // 1=visible (default), 0=hidden
+    int cursor_blink;   // 1=blinking (default), 0=steady
+    uint8_t tab_width; // Horizontal tab stop width in columns
+    uint32_t tab_stops[VT_TABSTOP_WORDS];
     
     // DEC modes
     int autowrap;       // DECAWM: 1=wrap at right margin (default), 0=clamp
@@ -60,6 +66,7 @@ typedef struct vt_state {
     int alt_row;
     int alt_col;
     uint8_t alt_color;
+    uint16_t alt_attrs;
     
     // ANSI Parser State
     struct ansi_ctx ansi;
