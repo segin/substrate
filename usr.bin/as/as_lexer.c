@@ -705,7 +705,7 @@ static int tokenize_line(const char *file, unsigned line_no, const char *line, i
             memcpy(tok, line + start, n);
             tok[n] = '\0';
 
-            if (n > 0 && tok[n - 1] == ':' && token_looks_like_segment_prefix(tok) == 0) {
+            if (n > 0 && tok[n - 1] == ':' && (token_looks_like_segment_prefix(tok) == 0 || !saw_mnemonic)) {
                 tok[n - 1] = '\0';
                 kind = AS_TOK_LABEL;
             } else {

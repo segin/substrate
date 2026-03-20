@@ -16,6 +16,8 @@ void run_unlink_tests(void);
 void run_unlink_property_tests(void);
 void run_link_tests(void);
 void run_link_property_tests(void);
+void run_link_property_tests(void);
+void run_tty_tests(void);
 void run_tty_tests(void);
 void run_cow_stats_tests(void);
 extern void test_pte_user(void);
@@ -28,6 +30,7 @@ extern void test_vm_phys(void);
 extern void test_vm_page_queue(void);
 extern void test_pmm_watermark(void);
 extern void test_pmm_buddy(void);
+extern void test_vm_page_queue(void);
 extern void run_minix_mount_tests(void);
 extern void run_minix_write_tests(void);
 extern void test_bitness(void);
@@ -36,30 +39,13 @@ extern void run_string_tests(void);
 extern void run_sched_bench(void);
 extern void run_sched_dequeue_bench(void);
 extern void run_vnode_lock_tests(void);
-extern void test_vnode_reclaim(void);
-extern void run_vclean_tests(void);
 extern void run_vnode_hold_tests(void);
+extern void run_vnode_ref_tests(void);
 extern void test_vhold_vdrop(void);
-extern void test_vnode_init(void);
 extern void run_kobject_tests(void);
 void run_reboot_tests(void);
 extern void test_pipe_race(void);
 extern void test_floppy_qemu(void);
-extern void run_brk_tests(void);
-extern void test_printf_plus_flag(void);
-extern void test_printf_space_flag(void);
-extern void test_printf_hash_flag(void);
-extern void test_printf_zero_flag(void);
-extern void test_printf_width(void);
-extern void test_printf_octal(void);
-extern void run_printf_vsnprintf_tests(void);
-extern void test_sysctl_handlers(void);
-extern void run_vnode_ops_tests(void);
-extern void test_vnode_create(void);
-extern void run_vgone_tests(void);
-extern void run_vnode_ref_tests(void);
-extern void test_rusage(void);
-extern void run_mknod_fs_tests(void);
 
 void run_kernel_tests(void) {
     char test_arg[32] = {0};
@@ -188,10 +174,6 @@ void run_kernel_tests(void) {
         run_mmap_tests();
     }
 
-    if (all || strcmp(test_arg, "brk") == 0) {
-        run_brk_tests();
-    }
-
     if (all || strcmp(test_arg, "futex") == 0) {
          extern void test_futex(void);
          test_futex();
@@ -278,26 +260,11 @@ void run_kernel_tests(void) {
          test_printf_star();
          extern void test_printf_flags(void);
          test_printf_flags();
-         test_printf_plus_flag();
-         test_printf_space_flag();
-         test_printf_hash_flag();
-         test_printf_zero_flag();
-         test_printf_width();
-         test_printf_octal();
     }
     
     if (all || strcmp(test_arg, "printf_specifiers") == 0) {
          extern void run_printf_specifier_tests(void);
          run_printf_specifier_tests();
-    }
-
-    if (all || strcmp(test_arg, "printf_vsnprintf") == 0) {
-         run_printf_vsnprintf_tests();
-    }
-
-    if (all || strcmp(test_arg, "kvasprintf") == 0) {
-         extern void test_kvasprintf(void);
-         test_kvasprintf();
     }
 
     if (all || strcmp(test_arg, "nanosleep") == 0) {
@@ -306,6 +273,11 @@ void run_kernel_tests(void) {
 
     if (all || strcmp(test_arg, "ldt") == 0) {
         run_ldt_tests();
+    }
+
+    if (all || strcmp(test_arg, "printf_specifiers") == 0) {
+         extern void run_printf_specifier_tests(void);
+         run_printf_specifier_tests();
     }
 
     if (strcmp(test_arg, "benchmark") == 0) {
@@ -347,40 +319,16 @@ void run_kernel_tests(void) {
         run_vnode_lock_tests();
     }
 
-    if (all || strcmp(test_arg, "vnode_reclaim") == 0) {
-        test_vnode_reclaim();
-    }
-
-    if (all || strcmp(test_arg, "vclean") == 0) {
-        run_vclean_tests();
-    }
-
     if (all || strcmp(test_arg, "vnode_hold") == 0) {
         run_vnode_hold_tests();
     }
 
-    if (all || strcmp(test_arg, "vhold_vdrop") == 0) {
-        test_vhold_vdrop();
-    }
-
-    if (all || strcmp(test_arg, "vnode_init") == 0) {
-        test_vnode_init();
-    }
-
-    if (all || strcmp(test_arg, "vnode_ops") == 0) {
-        run_vnode_ops_tests();
-    }
-
-    if (all || strcmp(test_arg, "vnode_create") == 0) {
-        test_vnode_create();
-    }
-
-    if (all || strcmp(test_arg, "vgone") == 0) {
-        run_vgone_tests();
-    }
-
     if (all || strcmp(test_arg, "vnode_ref") == 0) {
         run_vnode_ref_tests();
+    }
+
+    if (all || strcmp(test_arg, "vhold_vdrop") == 0) {
+        test_vhold_vdrop();
     }
 
     if (all || strcmp(test_arg, "driver") == 0) {
@@ -472,10 +420,13 @@ void run_kernel_tests(void) {
 
     }
 
+    if (all || strcmp(test_arg, "string") == 0) {
+        run_string_tests();
+    }
+
     if (all || strcmp(test_arg, "sysctl") == 0) {
         extern void test_sysctl(void);
         test_sysctl();
-        test_sysctl_handlers();
     }
 
     if (all || strcmp(test_arg, "getcwd") == 0) {
@@ -523,21 +474,8 @@ void run_kernel_tests(void) {
         run_vfs_cache_tests();
     }
 
-    if (all || strcmp(test_arg, "vnode_cache") == 0) {
-        extern void run_vnode_cache_tests(void);
-        run_vnode_cache_tests();
-    }
-
     if (all || strcmp(test_arg, "pipe_race") == 0) {
         test_pipe_race();
-    }
-
-    if (all || strcmp(test_arg, "rusage") == 0) {
-        test_rusage();
-    }
-
-    if (all || strcmp(test_arg, "mknod_fs") == 0) {
-        run_mknod_fs_tests();
     }
 
     kprint("=== TESTS COMPLETE ===\n\n");

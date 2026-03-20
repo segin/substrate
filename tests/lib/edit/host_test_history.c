@@ -67,15 +67,12 @@ void test_history_enter_duplicate() {
     history(h, &ev, H_ENTER, "duplicate");
     assert(h->size == 1);
 
+    /* Default unique=0 means no dedup: duplicates are added */
     history(h, &ev, H_ENTER, "duplicate");
-    assert(h->size == 1); // Size shouldn't change
-    assert(strcmp(h->tail->str, "duplicate") == 0);
-
-    history(h, &ev, H_ENTER, "different");
     assert(h->size == 2);
 
-    history(h, &ev, H_ENTER, "duplicate");
-    assert(h->size == 3); // Now it should add because it's not sequential duplicate
+    history(h, &ev, H_ENTER, "different");
+    assert(h->size == 3);
 
     history_end(h);
 }

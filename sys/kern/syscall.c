@@ -12,6 +12,7 @@
 #include <kern/version.h>
 #include <kern/panic.h>
 #include <kern/console.h>
+#include <kern/time.h>
 #include <exec/perso/personality.h>
 #include <pm/pm.h>
 #include <vm/vm_kmem.h>
@@ -24,6 +25,7 @@
 #include <include/sys/session.h>
 #include <kern/file.h>
 #include <vfs/vfs.h>
+#include <vfs/buf.h>
 #include <drivers/console/uart/uart.h>
 #include <include/sys/sysinfo.h>
 #include <sys/kern_syscalls.h>
@@ -219,12 +221,21 @@ int kern_write(int fd, const char *buf, int len) {
 
 int truncate_fs(fs_node_t *node, off_t length) {
     if (node->truncate != 0) {
-        return node->truncate(node, length);
+        int ret = node->truncate(node, length);
+        if (ret == 0) {
+            time_t now = get_time();
+            node->mtime = now;
+            node->ctime = now;
+        }
+        return ret;
     }
     
-    // Default: just update length if file is regular
+    /* Default: just update length if file is regular */
     if ((node->flags & 0x7) == FS_FILE) {
         node->length = length;
+        time_t now = get_time();
+        node->mtime = now;
+        node->ctime = now;
         return 0;
     }
     
@@ -1238,7 +1249,12 @@ int kern_link(const char *oldpath, const char *newpath) {
     if ((parent->flags & 0x07) != FS_DIRECTORY) return -ENOTDIR;
     if (parent->finddir && parent->finddir(parent, file) != NULL) return -EEXIST;
 
-    return link_fs(parent, source, file);
+    int ret = link_fs(parent, source, file);
+    if (ret == 0) {
+        /* POSIX: ctime of source must be updated on link */
+        source->ctime = get_time();
+    }
+    return ret;
 }
 
 int sys_symlink(const char *target, const char *linkpath) {
@@ -1364,9 +1380,7 @@ int sys_munlock(const void *addr, size_t len) {
 }
 
 int sys_sync(void) {
-    // In a real system, we'd iterate over all mounted filesystems
-    // and call their sync methods.
-    return 0;
+    return bufsync(0);
 }
 
 extern int sys_stat(const char *p, struct stat *buf);
@@ -1470,12 +1484,45 @@ int sys_dup2(int oldfd, int newfd) {
 }
 
 int sys_chmod(const char *path, int mode) {
-    (void)path; (void)mode;
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
+    fs_node_t *start = (kpath[0] == '/') ? root : cwd;
+    fs_node_t *node = vfs_lookup(start, kpath);
+    if (!node) return -ENOENT;
+
+    /* Only root or owner may chmod */
+    if (current_process->euid != 0 && current_process->euid != node->uid) {
+        close_fs(node);
+        return -EPERM;
+    }
+
+    node->mask = (uint32_t)(mode & 07777);
+    node->ctime = get_time();
+    close_fs(node);
     return 0;
 }
 
 int sys_lchown(const char *path, int uid, int gid) {
-    (void)path; (void)uid; (void)gid;
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
+    fs_node_t *start = (kpath[0] == '/') ? root : cwd;
+    fs_node_t *node = vfs_lookup_lstat(start, kpath);
+    if (!node) return -ENOENT;
+
+    /* Only root may chown */
+    if (current_process->euid != 0) {
+        close_fs(node);
+        return -EPERM;
+    }
+
+    if (uid != (int)-1) node->uid = (uint32_t)uid;
+    if (gid != (int)-1) node->gid = (uint32_t)gid;
+    node->ctime = get_time();
+    close_fs(node);
     return 0;
 }
 
@@ -1486,7 +1533,13 @@ int sys_fchmod(int fd, int mode) {
     if (!f || !f->f_data) return -EBADF;
 
     fs_node_t *node = (fs_node_t *)f->f_data;
+
+    /* Only root or owner may chmod */
+    if (current_process->euid != 0 && current_process->euid != node->uid)
+        return -EPERM;
+
     node->mask = (uint32_t)(mode & 07777);
+    node->ctime = get_time();
     return 0;
 }
 
@@ -1498,8 +1551,12 @@ int sys_fchown(int fd, int uid, int gid) {
 
     fs_node_t *node = (fs_node_t *)f->f_data;
 
+    /* Only root may chown */
+    if (current_process->euid != 0) return -EPERM;
+
     if (uid != -1) node->uid = (uint32_t)uid;
     if (gid != -1) node->gid = (uint32_t)gid;
+    node->ctime = get_time();
     return 0;
 }
 
@@ -1868,7 +1925,7 @@ int kern_proc_info(pid_t pid, sys_procinfo_t *info) {
     if (pid == 0) {
         target = current_process;
     } else {
-        for (int i = 0; i < 64; i++) {
+        for (int i = 0; i < MAX_PROCS; i++) {
             if (processes[i].pid == pid) {
                 target = &processes[i];
                 break;
@@ -1891,9 +1948,16 @@ int kern_proc_info(pid_t pid, sys_procinfo_t *info) {
     
     info->uid = target->uid;
     info->gid = target->gid;
+    info->euid = target->euid;
+    info->egid = target->egid;
     info->state = target->state;
     info->bitness = target->bitness;
+    info->perso_id = target->perso_id;
+    info->tty = -1;
+    info->nice = 0;
     info->start_time = target->start_time;
+    info->user_time = target->utime;
+    info->sys_time = target->stime;
     
     strncpy(info->name, target->comm, sizeof(info->name)-1);
     return 0;
@@ -1921,18 +1985,16 @@ int sys_proc_list(pid_t *pids, size_t count) {
 
 int kern_proc_list(pid_t *pids, size_t count) {
     int total_procs = 0;
-    for (int i = 0; i < 64; i++) {
+    for (int i = 0; i < MAX_PROCS; i++) {
         if (processes[i].pid != -1) total_procs++;
     }
     
     if (!pids || count == 0) return total_procs;
     
     int copied = 0;
-    for (int i = 0; i < 64 && copied < (int)count; i++) {
+    for (int i = 0; i < MAX_PROCS && copied < (int)count; i++) {
         if (processes[i].pid != -1) {
-            pid_t pid = processes[i].pid;
-            if (copyout(&pid, &pids[copied], sizeof(pid_t)) != 0) return -14;
-            copied++;
+            pids[copied++] = processes[i].pid;
         }
     }
     return copied;
@@ -1941,7 +2003,7 @@ int kern_proc_list(pid_t *pids, size_t count) {
 // sys_proc_count - Get total number of active processes
 int sys_proc_count(void) {
     int count = 0;
-    for (int i = 0; i < 64; i++) {
+    for (int i = 0; i < MAX_PROCS; i++) {
         if (processes[i].pid != -1) {
             count++;
         }
@@ -2062,8 +2124,7 @@ int sys_setpriority(int which, int who, int prio) {
         else if (which == PRIO_USER) target_id = current_process->uid;
     }
 
-    /* Iterate over processes using hardcoded limit matching syscall.c conventions */
-    for (int i = 0; i < 64; i++) {
+    for (int i = 0; i < MAX_PROCS; i++) {
         process_t *p = &processes[i];
         if (p->pid == -1) continue;
 
@@ -2137,7 +2198,7 @@ int sys_getpriority(int which, int who) {
     int found = 0;
     int best_nice = 20; /* Start with lowest priority (highest nice) */
 
-    for (int i = 0; i < 64; i++) {
+    for (int i = 0; i < MAX_PROCS; i++) {
         process_t *p = &processes[i];
         if (p->pid == -1) continue;
 

@@ -19,6 +19,7 @@
 #define VIRTIO_PCI_DEVICE_ID_BLK  0x1001
 #define VIRTIO_PCI_DEVICE_ID_SCSI 0x1008
 #define VIRTIO_PCI_DEVICE_ID_9P   0x1009
+#define VIRTIO_PCI_DEVICE_ID_GPU  0x1010
 
 // I/O Register Offsets (Legacy)
 #define VIRTIO_REG_HOST_FEATURES  0x00
@@ -76,9 +77,31 @@ void virtio_blk_setup(uint8_t bus, uint8_t slot, uint8_t func);
 
 // VirtIO 9P
 void virtio_9p_setup(uint8_t bus, uint8_t slot, uint8_t func);
+int virtio_9p_send(void *out_buf, uint32_t out_len, void *in_buf, uint32_t in_len);
 
 // VirtIO SCSI
 void virtio_scsi_setup(uint8_t bus, uint8_t slot, uint8_t func);
 void virtio_scsi_poll(void);
+
+// VirtIO GPU
+int virtio_gpu_setup(uint8_t bus, uint8_t slot, uint8_t func);
+int virtio_gpu_create_scanout_resource(uint32_t resource_id,
+                                       uint32_t width,
+                                       uint32_t height,
+                                       void *backing,
+                                       size_t backing_len);
+int virtio_gpu_flush_scanout(uint32_t x, uint32_t y, uint32_t width, uint32_t height);
+int virtio_gpu_query_display_info(uint32_t *width, uint32_t *height, uint32_t *format);
+int virtio_gpu_upload_cursor(uint32_t resource_id,
+                             uint32_t width,
+                             uint32_t height,
+                             void *backing,
+                             size_t backing_len,
+                             uint32_t hot_x,
+                             uint32_t hot_y,
+                             uint32_t x,
+                             uint32_t y);
+int virtio_gpu_move_cursor(uint32_t x, uint32_t y);
+int virtio_gpu_set_cursor_enabled(int enabled);
 
 #endif
