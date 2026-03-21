@@ -2,6 +2,7 @@
 
 #include <ctype.h>
 #include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -489,6 +490,11 @@ static void free_func(cc_function_t *f);
 static int enum_tag_find_n(const parser_t *p, const char *tag, size_t len);
 static int enum_tag_set(parser_t *p, const char *tag, size_t len, cc_type_t type, int complete);
 static void parser_free_enum_tags(parser_t *p);
+
+static cc_type_t parser_const_result_type(parser_t *p, const cc_expr_t *e);
+static int parser_const_type_bits(const parser_t *p, cc_type_t t, int struct_id);
+static uint64_t parser_const_unsigned_bits(const parser_t *p, long v, cc_type_t t, int struct_id);
+static long parser_const_cast_long(const parser_t *p, long v, cc_type_t t, int struct_id, int *ok);
 
 static int parser_push_hoisted_func(parser_t *p, const cc_function_t *f) {
     cc_function_t *next;
@@ -1135,6 +1141,111 @@ static long parser_type_align_bytes(const parser_t *p, cc_type_t t, int struct_i
         n = g_parser_pointer_size_bytes;
     }
     return n;
+}
+
+static int parser_const_type_bits(const parser_t *p, cc_type_t t, int struct_id) {
+    long sz;
+
+    if (t == CC_TYPE_BOOL) {
+        return 1;
+    }
+    if (is_pointer_type(t)) {
+        return g_parser_pointer_size_bytes * 8;
+    }
+    sz = parser_type_size_bytes(p, t, struct_id);
+    if (sz <= 0) {
+        return 0;
+    }
+    if (sz >= (long)(INT_MAX / 8)) {
+        return 0;
+    }
+    return (int)(sz * 8);
+}
+
+static uint64_t parser_const_unsigned_bits(const parser_t *p, long v, cc_type_t t, int struct_id) {
+    int bits = parser_const_type_bits(p, t, struct_id);
+    uint64_t u = (uint64_t)v;
+
+    if (bits > 0 && bits < 64) {
+        u &= (1ULL << bits) - 1ULL;
+    }
+    return u;
+}
+
+static long parser_const_cast_long(const parser_t *p, long v, cc_type_t t, int struct_id, int *ok) {
+    int bits;
+    uint64_t u;
+
+    if (ok != NULL) {
+        *ok = 0;
+    }
+    if (t == CC_TYPE_VOID) {
+        return 0;
+    }
+    if (t == CC_TYPE_BOOL) {
+        if (ok != NULL) {
+            *ok = 1;
+        }
+        return v != 0 ? 1 : 0;
+    }
+    bits = parser_const_type_bits(p, t, struct_id);
+    if (bits <= 0) {
+        return 0;
+    }
+    u = parser_const_unsigned_bits(p, v, t, struct_id);
+    if (!parser_is_unsigned_integral_type(t) && !is_pointer_type(t) && bits < 64 && (u & (1ULL << (bits - 1))) != 0) {
+        u |= ~((1ULL << bits) - 1ULL);
+    }
+    if (ok != NULL) {
+        *ok = 1;
+    }
+    return (long)u;
+}
+
+static cc_type_t parser_const_result_type(parser_t *p, const cc_expr_t *e) {
+    if (e == NULL) {
+        return CC_TYPE_INT;
+    }
+    switch (e->kind) {
+    case CC_EXPR_INT:
+        return e->value_type != CC_TYPE_VOID ? e->value_type : CC_TYPE_INT;
+    case CC_EXPR_CAST:
+        return e->aux_type;
+    case CC_EXPR_SIZEOF:
+        return g_parser_pointer_size_bytes >= 8 ? CC_TYPE_ULONG : CC_TYPE_UINT;
+    case CC_EXPR_TERNARY:
+        if (e->rhs != NULL && e->third != NULL) {
+            return parser_common_arith_type(parser_const_result_type(p, e->rhs), parser_const_result_type(p, e->third));
+        }
+        if (e->rhs != NULL) {
+            return parser_const_result_type(p, e->rhs);
+        }
+        if (e->third != NULL) {
+            return parser_const_result_type(p, e->third);
+        }
+        return CC_TYPE_INT;
+    case CC_EXPR_BIN:
+        switch (e->op) {
+        case CC_BIN_EQ:
+        case CC_BIN_NE:
+        case CC_BIN_LT:
+        case CC_BIN_LE:
+        case CC_BIN_GT:
+        case CC_BIN_GE:
+        case CC_BIN_LAND:
+        case CC_BIN_LOR:
+            return CC_TYPE_INT;
+        case CC_BIN_COMMA:
+            return parser_const_result_type(p, e->rhs);
+        case CC_BIN_SHL:
+        case CC_BIN_SHR:
+            return parser_const_result_type(p, e->lhs);
+        default:
+            return parser_common_arith_type(parser_const_result_type(p, e->lhs), parser_const_result_type(p, e->rhs));
+        }
+    default:
+        return e->value_type != CC_TYPE_VOID ? e->value_type : CC_TYPE_INT;
+    }
 }
 
 static int parser_is_bitfield_base_type(cc_type_t t) {
@@ -3651,7 +3762,21 @@ static int eval_const_array_bound_expr(parser_t *p, const cc_expr_t *e, long *ou
         *out = e->int_val;
         return 0;
     case CC_EXPR_CAST:
-        return eval_const_array_bound_expr(p, e->lhs, out);
+        if (e->aux_type == CC_TYPE_VOID) {
+            return -1;
+        }
+        if (eval_const_array_bound_expr(p, e->lhs, out) != 0) {
+            return -1;
+        }
+        {
+            int ok = 0;
+            long casted = parser_const_cast_long(p, *out, e->aux_type, e->aux_struct_id, &ok);
+            if (!ok) {
+                return -1;
+            }
+            *out = casted;
+        }
+        return 0;
     case CC_EXPR_SIZEOF:
         if (e->lhs != NULL && e->lhs->kind == CC_EXPR_STR) {
             long bound = parser_string_literal_array_bound(e->lhs);
@@ -3837,28 +3962,105 @@ static int eval_const_array_bound_expr(parser_t *p, const cc_expr_t *e, long *ou
             }
         }
         switch (e->op) {
-        case CC_BIN_ADD: *out = a + b; return 0;
-        case CC_BIN_SUB: *out = a - b; return 0;
-        case CC_BIN_MUL: *out = a * b; return 0;
+        case CC_BIN_ADD:
+        case CC_BIN_SUB:
+        case CC_BIN_MUL:
         case CC_BIN_DIV:
-            if (b == 0) return -1;
-            *out = a / b;
-            return 0;
         case CC_BIN_MOD:
-            if (b == 0) return -1;
-            *out = a % b;
-            return 0;
-        case CC_BIN_SHL: *out = a << (b & 63); return 0;
-        case CC_BIN_SHR: *out = a >> (b & 63); return 0;
-        case CC_BIN_BAND: *out = a & b; return 0;
-        case CC_BIN_BOR: *out = a | b; return 0;
-        case CC_BIN_BXOR: *out = a ^ b; return 0;
-        case CC_BIN_EQ: *out = (a == b) ? 1 : 0; return 0;
-        case CC_BIN_NE: *out = (a != b) ? 1 : 0; return 0;
-        case CC_BIN_LT: *out = (a < b) ? 1 : 0; return 0;
-        case CC_BIN_LE: *out = (a <= b) ? 1 : 0; return 0;
-        case CC_BIN_GT: *out = (a > b) ? 1 : 0; return 0;
-        case CC_BIN_GE: *out = (a >= b) ? 1 : 0; return 0;
+        case CC_BIN_BAND:
+        case CC_BIN_BOR:
+        case CC_BIN_BXOR:
+        case CC_BIN_SHL:
+        case CC_BIN_SHR:
+        case CC_BIN_EQ:
+        case CC_BIN_NE:
+        case CC_BIN_LT:
+        case CC_BIN_LE:
+        case CC_BIN_GT:
+        case CC_BIN_GE: {
+            cc_type_t lhs_ty = parser_const_result_type(p, e->lhs);
+            cc_type_t rhs_ty = parser_const_result_type(p, e->rhs);
+            cc_type_t op_ty;
+            uint64_t ua;
+            uint64_t ub;
+            long sa;
+            long sb;
+            int ok_a = 0;
+            int ok_b = 0;
+
+            if (e->op == CC_BIN_SHL || e->op == CC_BIN_SHR) {
+                op_ty = lhs_ty;
+            } else {
+                op_ty = parser_common_arith_type(lhs_ty, rhs_ty);
+            }
+            sa = parser_const_cast_long(p, a, op_ty, -1, &ok_a);
+            sb = parser_const_cast_long(p, b, op_ty, -1, &ok_b);
+            if (!ok_a || !ok_b) {
+                return -1;
+            }
+            ua = parser_const_unsigned_bits(p, sa, op_ty, -1);
+            ub = parser_const_unsigned_bits(p, sb, op_ty, -1);
+
+            switch (e->op) {
+            case CC_BIN_ADD:
+                *out = parser_is_unsigned_integral_type(op_ty) ? (long)(ua + ub) : sa + sb;
+                return 0;
+            case CC_BIN_SUB:
+                *out = parser_is_unsigned_integral_type(op_ty) ? (long)(ua - ub) : sa - sb;
+                return 0;
+            case CC_BIN_MUL:
+                *out = parser_is_unsigned_integral_type(op_ty) ? (long)(ua * ub) : sa * sb;
+                return 0;
+            case CC_BIN_DIV:
+                if ((parser_is_unsigned_integral_type(op_ty) ? ub : (uint64_t)sb) == 0) {
+                    return -1;
+                }
+                *out = parser_is_unsigned_integral_type(op_ty) ? (long)(ua / ub) : sa / sb;
+                return 0;
+            case CC_BIN_MOD:
+                if ((parser_is_unsigned_integral_type(op_ty) ? ub : (uint64_t)sb) == 0) {
+                    return -1;
+                }
+                *out = parser_is_unsigned_integral_type(op_ty) ? (long)(ua % ub) : sa % sb;
+                return 0;
+            case CC_BIN_SHL:
+                *out = parser_is_unsigned_integral_type(op_ty) ? (long)(ua << (ub & 63)) : sa << (ub & 63);
+                return 0;
+            case CC_BIN_SHR:
+                *out = parser_is_unsigned_integral_type(op_ty) ? (long)(ua >> (ub & 63)) : sa >> (ub & 63);
+                return 0;
+            case CC_BIN_BAND:
+                *out = (long)(ua & ub);
+                return 0;
+            case CC_BIN_BOR:
+                *out = (long)(ua | ub);
+                return 0;
+            case CC_BIN_BXOR:
+                *out = (long)(ua ^ ub);
+                return 0;
+            case CC_BIN_EQ:
+                *out = (ua == ub) ? 1 : 0;
+                return 0;
+            case CC_BIN_NE:
+                *out = (ua != ub) ? 1 : 0;
+                return 0;
+            case CC_BIN_LT:
+                *out = parser_is_unsigned_integral_type(op_ty) ? ((ua < ub) ? 1 : 0) : ((sa < sb) ? 1 : 0);
+                return 0;
+            case CC_BIN_LE:
+                *out = parser_is_unsigned_integral_type(op_ty) ? ((ua <= ub) ? 1 : 0) : ((sa <= sb) ? 1 : 0);
+                return 0;
+            case CC_BIN_GT:
+                *out = parser_is_unsigned_integral_type(op_ty) ? ((ua > ub) ? 1 : 0) : ((sa > sb) ? 1 : 0);
+                return 0;
+            case CC_BIN_GE:
+                *out = parser_is_unsigned_integral_type(op_ty) ? ((ua >= ub) ? 1 : 0) : ((sa >= sb) ? 1 : 0);
+                return 0;
+            default:
+                break;
+            }
+            return -1;
+        }
         case CC_BIN_LAND: *out = (a != 0 && b != 0) ? 1 : 0; return 0;
         case CC_BIN_LOR: *out = (a != 0 || b != 0) ? 1 : 0; return 0;
         default:
