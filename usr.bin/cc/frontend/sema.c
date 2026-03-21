@@ -2156,6 +2156,17 @@ static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t 
 
     case CC_EXPR_SIZEOF:
         if (e->lhs != NULL) {
+            if (e->lhs->kind == CC_EXPR_STR) {
+                int wide = (e->lhs->aux_type == CC_TYPE_INT || e->lhs->aux_type == CC_TYPE_UINT ||
+                            e->lhs->aux_type == CC_TYPE_LONG_LONG || e->lhs->aux_type == CC_TYPE_ULONG_LONG);
+                size_t units = decoded_string_unit_count(e->lhs, wide);
+                cc_type_t elem_type = ptr_base_type(e->lhs->value_type);
+                long elem_size = type_size_bytes_struct(tu, elem_type, e->lhs->struct_id);
+                if (units < (size_t)LONG_MAX && elem_size > 0 && (long)(units + 1) <= LONG_MAX / elem_size) {
+                    *out = (long)(units + 1) * elem_size;
+                    return 0;
+                }
+            }
             if (e->lhs->array_ndim > 0 && is_pointer_type(e->lhs->value_type)) {
                 *out = array_type_size_bytes(tu, e->lhs->value_type, e->lhs->struct_id,
                                              e->lhs->array_ndim, e->lhs->array_dims);

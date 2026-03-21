@@ -2041,7 +2041,26 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                         ty = te->value_type;
                         sid = te->struct_id;
                     }
-                    if (te->kind == CC_EXPR_IDENT && te->ident != NULL) {
+                    if (te->kind == CC_EXPR_STR) {
+                        long bound = parser_string_literal_array_bound(te);
+                        if (bound > 0) {
+                            ty = te->value_type;
+                            sid = te->struct_id;
+                            type_array_ndim = 1;
+                            memset(type_array_dims, 0, sizeof(type_array_dims));
+                            type_array_dims[0] = bound;
+                            type_array_len = bound;
+                        }
+                    } else if (te->kind == CC_EXPR_CAST && te->lhs != NULL && te->lhs->kind == CC_EXPR_INIT_LIST &&
+                               te->array_ndim > 0) {
+                        ty = te->value_type;
+                        sid = te->struct_id;
+                        type_array_ndim = te->array_ndim;
+                        memcpy(type_array_dims, te->array_dims, sizeof(type_array_dims));
+                        if (type_array_ndim > 0) {
+                            type_array_len = type_array_dims[0];
+                        }
+                    } else if (te->kind == CC_EXPR_IDENT && te->ident != NULL) {
                         int vidx = var_find_visible_n(p, te->ident, strlen(te->ident));
                         if (vidx >= 0 && p->vars[vidx].array_ndim > 0) {
                             type_array_ndim = p->vars[vidx].array_ndim;
@@ -3634,6 +3653,15 @@ static int eval_const_array_bound_expr(parser_t *p, const cc_expr_t *e, long *ou
     case CC_EXPR_CAST:
         return eval_const_array_bound_expr(p, e->lhs, out);
     case CC_EXPR_SIZEOF:
+        if (e->lhs != NULL && e->lhs->kind == CC_EXPR_STR) {
+            long bound = parser_string_literal_array_bound(e->lhs);
+            cc_type_t elem_type = ptr_deref_type(e->lhs->value_type);
+            long elem_size = parser_type_size_bytes(p, elem_type, e->lhs->struct_id);
+            if (bound > 0 && elem_size > 0 && bound <= LONG_MAX / elem_size) {
+                *out = bound * elem_size;
+                return 0;
+            }
+        }
         if (e->lhs != NULL && e->lhs->kind == CC_EXPR_IDENT && e->lhs->ident != NULL) {
             int vidx = var_find_visible_n(p, e->lhs->ident, strlen(e->lhs->ident));
             if (vidx >= 0 && p->vars[vidx].array_ndim > 0) {
@@ -3736,8 +3764,15 @@ static int eval_const_array_bound_expr(parser_t *p, const cc_expr_t *e, long *ou
         if (e->lhs != NULL && e->lhs->array_ndim > 0) {
             cc_type_t elem_type = e->lhs->value_type;
             long total;
+            long dims[CC_MAX_ARRAY_DIMS];
             int i;
 
+            memset(dims, 0, sizeof(dims));
+            memcpy(dims, e->lhs->array_dims, sizeof(dims));
+            if (dims[0] <= 0 && e->lhs->kind == CC_EXPR_CAST && e->lhs->lhs != NULL &&
+                e->lhs->lhs->kind == CC_EXPR_INIT_LIST) {
+                dims[0] = parser_init_list_array_bound(e->lhs->value_type, e->lhs->struct_id, e->lhs->lhs);
+            }
             if (is_pointer_type(elem_type)) {
                 elem_type = ptr_deref_type(elem_type);
             }
@@ -3747,10 +3782,10 @@ static int eval_const_array_bound_expr(parser_t *p, const cc_expr_t *e, long *ou
             }
             total = sz;
             for (i = 0; i < e->lhs->array_ndim; ++i) {
-                if (e->lhs->array_dims[i] <= 0) {
+                if (dims[i] <= 0) {
                     return -1;
                 }
-                total *= e->lhs->array_dims[i];
+                total *= dims[i];
             }
             *out = total;
             return 0;
@@ -7767,6 +7802,26 @@ static cc_expr_t *parse_unary(parser_t *p) {
                 free_expr(e);
                 return NULL;
             }
+            if (p->tok.kind == TOK_LBRACE) {
+                cc_expr_t *ce = new_expr(CC_EXPR_CAST);
+                if (ce == NULL) {
+                    free_expr(e);
+                    return NULL;
+                }
+                ce->aux_type = e->aux_type;
+                ce->aux_struct_id = e->aux_struct_id;
+                ce->array_ndim = e->array_ndim;
+                memcpy(ce->array_dims, e->array_dims, sizeof(ce->array_dims));
+                ce->lhs = parse_initializer_expr(p);
+                if (ce->lhs == NULL) {
+                    free_expr(ce);
+                    free_expr(e);
+                    return NULL;
+                }
+                e->lhs = ce;
+                e->aux_type = CC_TYPE_VOID;
+                e->aux_struct_id = -1;
+            }
             return e;
         }
         e->lhs = parse_unary(p);
@@ -7832,6 +7887,10 @@ static cc_expr_t *parse_unary(parser_t *p) {
         parser_t q = *p;
         cc_expr_t *e = new_expr(CC_EXPR_CAST);
         if (next_tok(&q) == 0 && is_declspec_start(&q)) {
+            long cast_array_len = -1;
+            int cast_array_ndim = 0;
+            long cast_array_dims[CC_MAX_ARRAY_DIMS];
+            memset(cast_array_dims, 0, sizeof(cast_array_dims));
             if (e == NULL) {
                 return NULL;
             }
@@ -7839,11 +7898,13 @@ static cc_expr_t *parse_unary(parser_t *p) {
                 free_expr(e);
                 return NULL;
             }
-            if (parse_type_name(p, &e->aux_type, &e->aux_struct_id, NULL, NULL, NULL, 1, "expected cast type") !=
-                0) {
+            if (parse_type_name(p, &e->aux_type, &e->aux_struct_id, &cast_array_len, &cast_array_ndim, cast_array_dims,
+                                1, "expected cast type") != 0) {
                 free_expr(e);
                 return NULL;
             }
+            e->array_ndim = cast_array_ndim;
+            memcpy(e->array_dims, cast_array_dims, sizeof(e->array_dims));
             if (p->tok.kind == TOK_LPAREN && is_ptr_declarator_tok(peek_kind(p))) {
                 if (next_tok(p) != 0) {
                     free_expr(e);
@@ -7888,13 +7949,13 @@ static cc_expr_t *parse_unary(parser_t *p) {
                     free_expr(e);
                     return NULL;
                 }
-                if (arr_ndim > 0) {
-                    int ai;
-                    e->array_ndim = arr_ndim;
-                    for (ai = 0; ai < arr_ndim; ++ai) {
-                        e->array_dims[ai] = arr_dims[ai];
-                    }
+                if (prepend_array_info(&cast_array_len, &cast_array_ndim, cast_array_dims, arr_len, arr_ndim, arr_dims) != 0) {
+                    set_diag(p->diag, p->tok.line, p->tok.col, "array rank > 4 is not yet supported");
+                    free_expr(e);
+                    return NULL;
                 }
+                e->array_ndim = cast_array_ndim;
+                memcpy(e->array_dims, cast_array_dims, sizeof(e->array_dims));
             }
             if (expect(p, TOK_RPAREN, "expected ')' after cast type") != 0) {
                 free_expr(e);
@@ -7988,10 +8049,24 @@ static cc_expr_t *parse_unary(parser_t *p) {
         }
         dty = ptr_deref_type(e->lhs->value_type);
         if (dty != CC_TYPE_VOID || e->lhs->value_type == CC_TYPE_PTR_VOID) {
+            int i;
             e->value_type = dty;
             e->struct_id = type_carries_struct_id(dty) ? e->lhs->struct_id : -1;
-            e->array_ndim = e->lhs->array_ndim;
-            memcpy(e->array_dims, e->lhs->array_dims, sizeof(e->array_dims));
+            if (e->lhs->array_ndim > 0 && is_pointer_type(e->value_type)) {
+                e->array_ndim = e->lhs->array_ndim - 1;
+                if (e->array_ndim < 0) {
+                    e->array_ndim = 0;
+                }
+                for (i = 0; i < e->array_ndim; ++i) {
+                    e->array_dims[i] = e->lhs->array_dims[i + 1];
+                }
+                for (; i < CC_MAX_ARRAY_DIMS; ++i) {
+                    e->array_dims[i] = 0;
+                }
+            } else {
+                e->array_ndim = 0;
+                memset(e->array_dims, 0, sizeof(e->array_dims));
+            }
         }
         return e;
     }

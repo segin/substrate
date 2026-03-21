@@ -236,6 +236,10 @@ test:
 	/tmp/cc_native_c99_string_concat
 	$(TOP)/usr.bin/cc/cc native_c99_global_string_embedded_nul.c -o /tmp/cc_native_c99_global_string_embedded_nul
 	/tmp/cc_native_c99_global_string_embedded_nul
+	$(TOP)/usr.bin/cc/cc native_c99_typeof_string_array.c -o /tmp/cc_native_c99_typeof_string_array
+	/tmp/cc_native_c99_typeof_string_array
+	$(TOP)/usr.bin/cc/cc native_c99_typeof_compound_array.c -o /tmp/cc_native_c99_typeof_compound_array
+	/tmp/cc_native_c99_typeof_compound_array
 	$(TOP)/usr.bin/cc/cc native_c99_func_name.c -o /tmp/cc_native_c99_func_name
 	/tmp/cc_native_c99_func_name
 	$(TOP)/usr.bin/cc/cc native_c99_atomic_fetch.c -o /tmp/cc_native_c99_atomic_fetch

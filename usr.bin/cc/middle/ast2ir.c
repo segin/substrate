@@ -1706,6 +1706,36 @@ static long string_literal_size_bytes(const char *lit) {
     return -1;
 }
 
+static long string_expr_size_bytes(const cc_translation_unit_t *tu, const cc_expr_t *e) {
+    unsigned long *units = NULL;
+    size_t unit_count = 0;
+    int wide;
+    cc_type_t elem_type;
+    long elem_size;
+    long count;
+
+    if (tu == NULL || e == NULL || e->kind != CC_EXPR_STR) {
+        return -1;
+    }
+    wide = (e->aux_type == CC_TYPE_INT || e->aux_type == CC_TYPE_UINT || e->aux_type == CC_TYPE_LONG_LONG ||
+            e->aux_type == CC_TYPE_ULONG_LONG);
+    if (decode_string_units(e, wide, &units, &unit_count) != 0) {
+        free(units);
+        return -1;
+    }
+    free(units);
+    elem_type = ptr_base_type(e->value_type);
+    elem_size = type_size_bytes_with_struct(tu, elem_type, e->struct_id);
+    if (elem_size <= 0 || unit_count >= (size_t)LONG_MAX) {
+        return -1;
+    }
+    count = (long)unit_count + 1;
+    if (count <= 0 || elem_size > LONG_MAX / count) {
+        return -1;
+    }
+    return elem_size * count;
+}
+
 static long array_size_bytes(const cc_translation_unit_t *tu, cc_type_t array_type, int struct_id, long array_len) {
     cc_type_t elem_type;
     long elem_size;
@@ -1821,9 +1851,13 @@ static long sizeof_expr_bytes(const cc_translation_unit_t *tu, var_entry_t *vars
         }
     }
     if (e->kind == CC_EXPR_STR) {
+        long n = string_expr_size_bytes(tu, e);
+        if (n > 0) {
+            return n;
+        }
         return string_literal_size_bytes(e->ident);
     }
-    if (e->kind == CC_EXPR_DEREF && e->array_ndim > 0 && is_pointer_type(e->value_type)) {
+    if (e->array_ndim > 0 && is_pointer_type(e->value_type)) {
         return array_type_size_bytes(tu, e->value_type, e->struct_id, e->array_ndim, e->array_dims);
     }
     return type_size_bytes_struct(tu, e->value_type, e->struct_id);
