@@ -3267,6 +3267,10 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
                                     var_entry_t *vars, size_t var_count, int depth, int base_ptr, int struct_id,
                                     const cc_expr_t *init, cc_diag_t *diag);
 static const cc_expr_t *unwrap_scalar_initializer_expr(const cc_expr_t *e, cc_diag_t *diag);
+static int lower_array_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                                   var_entry_t *vars, size_t var_count, int depth, cc_type_t array_type, int struct_id,
+                                   int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], const cc_expr_t *init,
+                                   cc_diag_t *diag);
 
 static int lower_member_addr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
                              var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
@@ -6774,6 +6778,10 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             set_diag(diag, "malformed cast expression in lowering");
             return -1;
         }
+        if (cast_src->kind == CC_EXPR_INIT_LIST && e->array_ndim > 0 && is_pointer_type(e->aux_type)) {
+            return lower_array_init_to_ptr(tu, sf, ctx, vars, var_count, depth, e->aux_type, e->aux_struct_id,
+                                           e->array_ndim, e->array_dims, cast_src, diag);
+        }
         if (aggregate_cast_target) {
             int dst_ptr;
             int storesrc;
@@ -7769,6 +7777,319 @@ static int lower_struct_array_member_init_to_ptr(const cc_translation_unit_t *tu
     }
 
     return 0;
+}
+
+static int lower_store_string_to_array_ptr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, cc_type_t array_type,
+                                           int struct_id, int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS],
+                                           int base_ptr, const cc_expr_t *item, cc_diag_t *diag) {
+    cc_type_t elem_type;
+    long elem_size;
+    long max_items;
+    unsigned long *units = NULL;
+    size_t unit_count = 0;
+    size_t i;
+    int wide;
+
+    if (item == NULL || item->kind != CC_EXPR_STR || !is_pointer_type(array_type) || array_ndim != 1) {
+        set_diag(diag, "invalid string compound-literal array initializer");
+        return -1;
+    }
+
+    elem_type = ptr_base_type(array_type);
+    elem_size = array_decl_scalar_size_bytes(tu, array_type, struct_id, array_ndim);
+    if (elem_size <= 0) {
+        elem_size = pointer_elem_size_bytes(tu, array_type, struct_id);
+    }
+    max_items = array_dims != NULL && array_dims[0] > 0 ? array_dims[0] : 1;
+    if (elem_size <= 0 || max_items <= 0) {
+        set_diag(diag, "unsupported string compound-literal array initializer");
+        return -1;
+    }
+
+    wide = (item->aux_type == CC_TYPE_INT || item->aux_type == CC_TYPE_UINT || item->aux_type == CC_TYPE_LONG_LONG ||
+            item->aux_type == CC_TYPE_ULONG_LONG);
+    if (!wide && !(elem_type == CC_TYPE_CHAR || elem_type == CC_TYPE_UCHAR)) {
+        set_diag(diag, "narrow string initializer requires character array compound literal");
+        return -1;
+    }
+    if (wide && !is_integral_type(elem_type)) {
+        set_diag(diag, "wide string initializer requires integral array compound literal");
+        return -1;
+    }
+
+    if (decode_string_units(item, wide, &units, &unit_count) != 0) {
+        set_diag(diag, "failed to decode compound-literal string initializer");
+        return -1;
+    }
+    if ((long)unit_count > max_items) {
+        free(units);
+        set_diag(diag, "string initializer exceeds compound-literal array size");
+        return -1;
+    }
+
+    for (i = 0; i < unit_count + (unit_count < (size_t)max_items ? 1 : 0); ++i) {
+        cc_ssa_instr_t in;
+        int elem_ptr = base_ptr;
+        int cval;
+
+        if (i > 0) {
+            int offv = emit_const_i64_instr(sf, (long)i * elem_size);
+            if (offv < 0) {
+                free(units);
+                return -1;
+            }
+            memset(&in, 0, sizeof(in));
+            in.op = CC_SSA_ADD;
+            in.dst = new_value(sf, CC_VAL_I64);
+            in.lhs = base_ptr;
+            in.rhs = offv;
+            if (in.dst < 0 || push_instr(sf, in) != 0) {
+                free(units);
+                set_diag(diag, "out of memory computing compound-literal string element address");
+                return -1;
+            }
+            elem_ptr = in.dst;
+        }
+
+        cval = emit_const_i64_instr(sf, i < unit_count ? (long)units[i] : 0);
+        if (cval < 0) {
+            free(units);
+            return -1;
+        }
+        cval = cast_value(sf, cval, type_to_val(elem_type), diag);
+        if (cval < 0) {
+            free(units);
+            return -1;
+        }
+
+        memset(&in, 0, sizeof(in));
+        in.op = CC_SSA_STORE;
+        in.dst = -1;
+        in.lhs = elem_ptr;
+        in.rhs = cval;
+        in.imm = elem_size;
+        if (push_instr(sf, in) != 0) {
+            free(units);
+            set_diag(diag, "out of memory storing compound-literal string element");
+            return -1;
+        }
+    }
+
+    free(units);
+    return 0;
+}
+
+static int lower_array_init_to_ptr_cursor(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                                          var_entry_t *vars, size_t var_count, int depth, cc_type_t array_type,
+                                          int struct_id, int array_ndim, const long *array_dims, const cc_expr_t *list,
+                                          size_t *cursor, int base_ptr, cc_diag_t *diag) {
+    cc_type_t elem_type;
+    long elem_size;
+    long max_items;
+    long i;
+
+    if (tu == NULL || sf == NULL || array_dims == NULL || list == NULL || list->kind != CC_EXPR_INIT_LIST ||
+        cursor == NULL || !is_pointer_type(array_type) || array_ndim <= 0) {
+        set_diag(diag, "invalid compound-literal array initializer");
+        return -1;
+    }
+
+    elem_type = ptr_base_type(array_type);
+    elem_size = array_decl_scalar_size_bytes(tu, array_type, struct_id, array_ndim);
+    if (elem_size <= 0) {
+        elem_size = pointer_elem_size_bytes(tu, array_type, struct_id);
+    }
+    max_items = array_dims[0] > 0 ? array_dims[0] : 1;
+    if (elem_size <= 0 || max_items <= 0) {
+        set_diag(diag, "unsupported compound-literal array element type");
+        return -1;
+    }
+
+    if (array_ndim == 1) {
+        if (*cursor == 0 && list->arg_count == 1) {
+            const cc_expr_t *only = unwrap_scalar_initializer_expr(list->args[0], diag);
+            if (only == NULL) {
+                return -1;
+            }
+            if (only->kind == CC_EXPR_STR) {
+                return lower_store_string_to_array_ptr(tu, sf, array_type, struct_id, array_ndim, array_dims, base_ptr,
+                                                       only, diag);
+            }
+        }
+
+        for (i = 0; i < max_items && *cursor < list->arg_count; ++i) {
+            const cc_expr_t *raw = list->args[*cursor];
+            int elem_ptr = base_ptr;
+            cc_ssa_instr_t in;
+
+            if (i > 0) {
+                int offv = emit_const_i64_instr(sf, i * elem_size);
+                if (offv < 0) {
+                    return -1;
+                }
+                memset(&in, 0, sizeof(in));
+                in.op = CC_SSA_ADD;
+                in.dst = new_value(sf, CC_VAL_I64);
+                in.lhs = base_ptr;
+                in.rhs = offv;
+                if (in.dst < 0 || push_instr(sf, in) != 0) {
+                    set_diag(diag, "out of memory computing compound-literal array element address");
+                    return -1;
+                }
+                elem_ptr = in.dst;
+            }
+
+            if (elem_type == CC_TYPE_VOID && struct_id >= 0) {
+                const cc_expr_t *elem_init = raw;
+                if (elem_init != NULL && elem_init->kind == CC_EXPR_CAST && elem_init->aux_type == CC_TYPE_VOID &&
+                    elem_init->aux_struct_id == struct_id && elem_init->lhs != NULL &&
+                    elem_init->lhs->kind == CC_EXPR_INIT_LIST) {
+                    elem_init = elem_init->lhs;
+                }
+                if (elem_init == NULL || elem_init->kind != CC_EXPR_INIT_LIST) {
+                    if (is_zero_initializer_expr(raw)) {
+                        (*cursor)++;
+                        continue;
+                    }
+                    set_diag(diag, "struct compound-literal array element requires braces");
+                    return -1;
+                }
+                if (lower_struct_init_to_ptr(tu, sf, ctx, vars, var_count, depth, elem_ptr, struct_id, elem_init,
+                                             diag) != 0) {
+                    return -1;
+                }
+            } else {
+                const cc_expr_t *elem_expr = unwrap_scalar_initializer_expr(raw, diag);
+                int v;
+                if (elem_expr == NULL) {
+                    return -1;
+                }
+                v = lower_expr(tu, sf, ctx, vars, var_count, depth, elem_expr, diag);
+                if (v < 0) {
+                    return -1;
+                }
+                v = cast_value(sf, v, type_to_val(elem_type), diag);
+                if (v < 0) {
+                    return -1;
+                }
+                memset(&in, 0, sizeof(in));
+                in.op = CC_SSA_STORE;
+                in.dst = -1;
+                in.lhs = elem_ptr;
+                in.rhs = v;
+                in.imm = elem_size;
+                if (push_instr(sf, in) != 0) {
+                    set_diag(diag, "out of memory storing compound-literal array element");
+                    return -1;
+                }
+            }
+
+            (*cursor)++;
+        }
+        return 0;
+    }
+
+    {
+        cc_type_t sub_type = ptr_base_type(array_type);
+        int sub_sid = (sub_type == CC_TYPE_VOID || is_pointer_type(sub_type)) ? struct_id : -1;
+        long sub_size = array_dims_step_size_bytes(tu, sub_type, sub_sid, array_ndim - 1, array_dims + 1, 0, elem_size);
+
+        if (sub_size <= 0) {
+            set_diag(diag, "unsupported nested compound-literal array stride");
+            return -1;
+        }
+
+        for (i = 0; i < max_items && *cursor < list->arg_count; ++i) {
+            const cc_expr_t *raw = list->args[*cursor];
+            int sub_ptr = base_ptr;
+            cc_ssa_instr_t in;
+
+            if (i > 0) {
+                int offv = emit_const_i64_instr(sf, i * sub_size);
+                if (offv < 0) {
+                    return -1;
+                }
+                memset(&in, 0, sizeof(in));
+                in.op = CC_SSA_ADD;
+                in.dst = new_value(sf, CC_VAL_I64);
+                in.lhs = base_ptr;
+                in.rhs = offv;
+                if (in.dst < 0 || push_instr(sf, in) != 0) {
+                    set_diag(diag, "out of memory computing nested compound-literal array address");
+                    return -1;
+                }
+                sub_ptr = in.dst;
+            }
+
+            if (raw != NULL && raw->kind == CC_EXPR_STR && array_ndim == 2) {
+                if (lower_store_string_to_array_ptr(tu, sf, sub_type, sub_sid, array_ndim - 1, array_dims + 1, sub_ptr,
+                                                   raw, diag) != 0) {
+                    return -1;
+                }
+                (*cursor)++;
+                continue;
+            }
+
+            if (raw != NULL && raw->kind == CC_EXPR_INIT_LIST) {
+                size_t sub_cur = 0;
+                (*cursor)++;
+                if (lower_array_init_to_ptr_cursor(tu, sf, ctx, vars, var_count, depth, sub_type, sub_sid,
+                                                   array_ndim - 1, array_dims + 1, raw, &sub_cur, sub_ptr, diag) != 0) {
+                    return -1;
+                }
+                if (sub_cur < raw->arg_count) {
+                    set_diag(diag, "too many nested compound-literal array initializers");
+                    return -1;
+                }
+            } else {
+                if (lower_array_init_to_ptr_cursor(tu, sf, ctx, vars, var_count, depth, sub_type, sub_sid,
+                                                   array_ndim - 1, array_dims + 1, list, cursor, sub_ptr, diag) != 0) {
+                    return -1;
+                }
+            }
+        }
+    }
+
+    return 0;
+}
+
+static int lower_array_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                                   var_entry_t *vars, size_t var_count, int depth, cc_type_t array_type, int struct_id,
+                                   int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], const cc_expr_t *init,
+                                   cc_diag_t *diag) {
+    long total_size;
+    int base_ptr;
+    size_t cursor = 0;
+
+    if (tu == NULL || sf == NULL || init == NULL || init->kind != CC_EXPR_INIT_LIST || !is_pointer_type(array_type) ||
+        array_ndim <= 0) {
+        set_diag(diag, "invalid compound-literal array expression");
+        return -1;
+    }
+
+    total_size = array_type_size_bytes(tu, array_type, struct_id, array_ndim, array_dims);
+    if (total_size <= 0) {
+        set_diag(diag, "unsupported compound-literal array size in lowering");
+        return -1;
+    }
+
+    base_ptr = emit_local_storage_alloc(sf, total_size, diag);
+    if (base_ptr < 0) {
+        return -1;
+    }
+    if (emit_memset_instr(sf, base_ptr, 0, total_size, diag) != 0) {
+        return -1;
+    }
+    if (lower_array_init_to_ptr_cursor(tu, sf, ctx, vars, var_count, depth, array_type, struct_id, array_ndim,
+                                       array_dims, init, &cursor, base_ptr, diag) != 0) {
+        return -1;
+    }
+    if (cursor < init->arg_count) {
+        set_diag(diag, "too many compound-literal array initializers");
+        return -1;
+    }
+
+    return base_ptr;
 }
 
 static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
