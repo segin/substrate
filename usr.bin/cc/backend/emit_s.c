@@ -2816,6 +2816,15 @@ static int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_lay
             pinned[in->dst] = 1;
             cross_block[in->dst] = 1;
         }
+        if (in->op == CC_SSA_ADDR && in->lhs >= 0 && in->lhs < nvals) {
+            /*
+             * Once a local's address escapes, indirect loads/stores can outlive
+             * the value's direct SSA uses. Keep that storage stable instead of
+             * reusing it for another stack-backed SSA value.
+             */
+            pinned[in->lhs] = 1;
+            cross_block[in->lhs] = 1;
+        }
 
         /* Track block-locality for safe reuse. */
         if (in->dst >= 0 && in->dst < nvals) {

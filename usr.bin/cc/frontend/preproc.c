@@ -1393,16 +1393,62 @@ static char *trim_dup(const char *s) {
     return xstrdup_n(a, (size_t)(b - a));
 }
 
+static int macro_set_builtin_fn1(pp_macro_table_t *t, const char *name, const char *param, const char *body) {
+    char **params = (char **)calloc(1, sizeof(*params));
+    if (params == NULL) {
+        return -1;
+    }
+    params[0] = xstrdup(param);
+    if (params[0] == NULL) {
+        free(params);
+        return -1;
+    }
+    if (macro_set(t, name, 1, 0, params, 1, body) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
 static int add_builtin_macros(pp_state_t *st) {
     const char *size_type = st->target_bits == 32 ? "unsigned int" : "unsigned long";
     const char *ptrdiff_type = st->target_bits == 32 ? "int" : "long int";
-    const char *wchar_type = "int";
+    const char *wchar_type = st->target_bits == 32 ? "long int" : "int";
+    const char *wint_type = "unsigned int";
+    const char *sig_atomic_type = "int";
+    const char *int8_type = "signed char";
+    const char *uint8_type = "unsigned char";
+    const char *int16_type = "short int";
+    const char *uint16_type = "short unsigned int";
+    const char *int32_type = "int";
+    const char *uint32_type = "unsigned int";
+    const char *int64_type = st->target_bits == 32 ? "long long int" : "long int";
+    const char *uint64_type = st->target_bits == 32 ? "long long unsigned int" : "long unsigned int";
+    const char *intptr_type = ptrdiff_type;
+    const char *uintptr_type = st->target_bits == 32 ? "unsigned int" : "long unsigned int";
+    const char *intmax_type = int64_type;
+    const char *uintmax_type = uint64_type;
+    const char *int_fast8_type = int8_type;
+    const char *uint_fast8_type = uint8_type;
+    const char *int_fast16_type = st->target_bits == 32 ? "int" : "long int";
+    const char *uint_fast16_type = st->target_bits == 32 ? "unsigned int" : "long unsigned int";
+    const char *int_fast32_type = int_fast16_type;
+    const char *uint_fast32_type = uint_fast16_type;
+    const char *int_fast64_type = int64_type;
+    const char *uint_fast64_type = uint64_type;
     const char *ptr_size = st->target_bits == 32 ? "4" : "8";
     const char *flt_eval_method = (st->target_bits == 64 || st->target_has_sse2) ? "0" : "2";
     const char *long_max = st->target_bits == 32 ? "2147483647L" : "9223372036854775807L";
     const char *size_max = st->target_bits == 32 ? "4294967295U" : "18446744073709551615UL";
     const char *ptrdiff_max = st->target_bits == 32 ? "2147483647" : "9223372036854775807L";
     const char *uintptr_max = st->target_bits == 32 ? "4294967295U" : "18446744073709551615UL";
+    const char *wchar_max = st->target_bits == 32 ? "0x7fffffffL" : "0x7fffffff";
+    const char *wchar_min = st->target_bits == 32 ? "(-0x7fffffffL - 1L)" : "(-0x7fffffff - 1)";
+    const char *int64_max = st->target_bits == 32 ? "0x7fffffffffffffffLL" : "0x7fffffffffffffffL";
+    const char *uint64_max = st->target_bits == 32 ? "0xffffffffffffffffULL" : "0xffffffffffffffffUL";
+    const char *int_fast_max = st->target_bits == 32 ? "0x7fffffff" : "0x7fffffffffffffffL";
+    const char *uint_fast_max = st->target_bits == 32 ? "0xffffffffU" : "0xffffffffffffffffUL";
+    const char *int64_c = st->target_bits == 32 ? "c ## LL" : "c ## L";
+    const char *uint64_c = st->target_bits == 32 ? "c ## ULL" : "c ## UL";
     char stdc_ver[32];
     if (macro_set(&st->macros, "__STDC__", 0, 0, NULL, 0, "1") != 0) {
         return -1;
@@ -1443,7 +1489,121 @@ static int add_builtin_macros(pp_state_t *st) {
     if (macro_set(&st->macros, "__WCHAR_TYPE__", 0, 0, NULL, 0, wchar_type) != 0) {
         return -1;
     }
+    if (macro_set(&st->macros, "__WINT_TYPE__", 0, 0, NULL, 0, wint_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__SIG_ATOMIC_TYPE__", 0, 0, NULL, 0, sig_atomic_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INT8_TYPE__", 0, 0, NULL, 0, int8_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINT8_TYPE__", 0, 0, NULL, 0, uint8_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INT16_TYPE__", 0, 0, NULL, 0, int16_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINT16_TYPE__", 0, 0, NULL, 0, uint16_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INT32_TYPE__", 0, 0, NULL, 0, int32_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINT32_TYPE__", 0, 0, NULL, 0, uint32_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INT64_TYPE__", 0, 0, NULL, 0, int64_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINT64_TYPE__", 0, 0, NULL, 0, uint64_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INT_LEAST8_TYPE__", 0, 0, NULL, 0, int8_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINT_LEAST8_TYPE__", 0, 0, NULL, 0, uint8_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INT_LEAST16_TYPE__", 0, 0, NULL, 0, int16_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINT_LEAST16_TYPE__", 0, 0, NULL, 0, uint16_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INT_LEAST32_TYPE__", 0, 0, NULL, 0, int32_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINT_LEAST32_TYPE__", 0, 0, NULL, 0, uint32_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INT_LEAST64_TYPE__", 0, 0, NULL, 0, int64_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINT_LEAST64_TYPE__", 0, 0, NULL, 0, uint64_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INT_FAST8_TYPE__", 0, 0, NULL, 0, int_fast8_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINT_FAST8_TYPE__", 0, 0, NULL, 0, uint_fast8_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INT_FAST16_TYPE__", 0, 0, NULL, 0, int_fast16_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINT_FAST16_TYPE__", 0, 0, NULL, 0, uint_fast16_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INT_FAST32_TYPE__", 0, 0, NULL, 0, int_fast32_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINT_FAST32_TYPE__", 0, 0, NULL, 0, uint_fast32_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INT_FAST64_TYPE__", 0, 0, NULL, 0, int_fast64_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINT_FAST64_TYPE__", 0, 0, NULL, 0, uint_fast64_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INTPTR_TYPE__", 0, 0, NULL, 0, intptr_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINTPTR_TYPE__", 0, 0, NULL, 0, uintptr_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INTMAX_TYPE__", 0, 0, NULL, 0, intmax_type) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINTMAX_TYPE__", 0, 0, NULL, 0, uintmax_type) != 0) {
+        return -1;
+    }
     if (macro_set(&st->macros, "__SIZEOF_POINTER__", 0, 0, NULL, 0, ptr_size) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__SIZEOF_SHORT__", 0, 0, NULL, 0, "2") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__SIZEOF_INT__", 0, 0, NULL, 0, "4") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__SIZEOF_LONG__", 0, 0, NULL, 0, st->target_bits == 32 ? "4" : "8") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__SIZEOF_LONG_LONG__", 0, 0, NULL, 0, "8") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__SIZEOF_SIZE_T__", 0, 0, NULL, 0, ptr_size) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__SIZEOF_PTRDIFF_T__", 0, 0, NULL, 0, ptr_size) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__SIZEOF_WCHAR_T__", 0, 0, NULL, 0, "4") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__SIZEOF_WINT_T__", 0, 0, NULL, 0, "4") != 0) {
         return -1;
     }
     if (macro_set(&st->macros, "__SIZEOF_INT128__", 0, 0, NULL, 0, "16") != 0) {
@@ -1461,13 +1621,40 @@ static int add_builtin_macros(pp_state_t *st) {
     if (macro_set(&st->macros, "__INT_MAX__", 0, 0, NULL, 0, "2147483647") != 0) {
         return -1;
     }
+    if (macro_set(&st->macros, "__INT8_MAX__", 0, 0, NULL, 0, "0x7f") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINT8_MAX__", 0, 0, NULL, 0, "0xff") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INT16_MAX__", 0, 0, NULL, 0, "0x7fff") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINT16_MAX__", 0, 0, NULL, 0, "0xffff") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INT32_MAX__", 0, 0, NULL, 0, "0x7fffffff") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINT32_MAX__", 0, 0, NULL, 0, "0xffffffffU") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INT64_MAX__", 0, 0, NULL, 0, int64_max) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINT64_MAX__", 0, 0, NULL, 0, uint64_max) != 0) {
+        return -1;
+    }
     if (macro_set(&st->macros, "__LONG_MAX__", 0, 0, NULL, 0, long_max) != 0) {
         return -1;
     }
     if (macro_set(&st->macros, "__LONG_LONG_MAX__", 0, 0, NULL, 0, "9223372036854775807LL") != 0) {
         return -1;
     }
-    if (macro_set(&st->macros, "__WCHAR_MAX__", 0, 0, NULL, 0, "2147483647") != 0) {
+    if (macro_set(&st->macros, "__WCHAR_MAX__", 0, 0, NULL, 0, wchar_max) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__WCHAR_MIN__", 0, 0, NULL, 0, wchar_min) != 0) {
         return -1;
     }
     if (macro_set(&st->macros, "__SIZE_MAX__", 0, 0, NULL, 0, size_max) != 0) {
@@ -1476,13 +1663,106 @@ static int add_builtin_macros(pp_state_t *st) {
     if (macro_set(&st->macros, "__PTRDIFF_MAX__", 0, 0, NULL, 0, ptrdiff_max) != 0) {
         return -1;
     }
-    if (macro_set(&st->macros, "__INTMAX_MAX__", 0, 0, NULL, 0, "9223372036854775807LL") != 0) {
+    if (macro_set(&st->macros, "__INTMAX_MAX__", 0, 0, NULL, 0, int64_max) != 0) {
         return -1;
     }
-    if (macro_set(&st->macros, "__UINTMAX_MAX__", 0, 0, NULL, 0, "18446744073709551615ULL") != 0) {
+    if (macro_set(&st->macros, "__UINTMAX_MAX__", 0, 0, NULL, 0, uint64_max) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INTPTR_MAX__", 0, 0, NULL, 0, ptrdiff_max) != 0) {
         return -1;
     }
     if (macro_set(&st->macros, "__UINTPTR_MAX__", 0, 0, NULL, 0, uintptr_max) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INT_LEAST8_MAX__", 0, 0, NULL, 0, "0x7f") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINT_LEAST8_MAX__", 0, 0, NULL, 0, "0xff") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INT_LEAST16_MAX__", 0, 0, NULL, 0, "0x7fff") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINT_LEAST16_MAX__", 0, 0, NULL, 0, "0xffff") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INT_LEAST32_MAX__", 0, 0, NULL, 0, "0x7fffffff") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINT_LEAST32_MAX__", 0, 0, NULL, 0, "0xffffffffU") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INT_LEAST64_MAX__", 0, 0, NULL, 0, int64_max) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINT_LEAST64_MAX__", 0, 0, NULL, 0, uint64_max) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INT_FAST8_MAX__", 0, 0, NULL, 0, "0x7f") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINT_FAST8_MAX__", 0, 0, NULL, 0, "0xff") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INT_FAST16_MAX__", 0, 0, NULL, 0, int_fast_max) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINT_FAST16_MAX__", 0, 0, NULL, 0, uint_fast_max) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INT_FAST32_MAX__", 0, 0, NULL, 0, int_fast_max) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINT_FAST32_MAX__", 0, 0, NULL, 0, uint_fast_max) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INT_FAST64_MAX__", 0, 0, NULL, 0, int64_max) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__UINT_FAST64_MAX__", 0, 0, NULL, 0, uint64_max) != 0) {
+        return -1;
+    }
+    if (macro_set_builtin_fn1(&st->macros, "__INT8_C", "c", "c") != 0) {
+        return -1;
+    }
+    if (macro_set_builtin_fn1(&st->macros, "__UINT8_C", "c", "c") != 0) {
+        return -1;
+    }
+    if (macro_set_builtin_fn1(&st->macros, "__INT16_C", "c", "c") != 0) {
+        return -1;
+    }
+    if (macro_set_builtin_fn1(&st->macros, "__UINT16_C", "c", "c") != 0) {
+        return -1;
+    }
+    if (macro_set_builtin_fn1(&st->macros, "__INT32_C", "c", "c") != 0) {
+        return -1;
+    }
+    if (macro_set_builtin_fn1(&st->macros, "__UINT32_C", "c", "c ## U") != 0) {
+        return -1;
+    }
+    if (macro_set_builtin_fn1(&st->macros, "__INT64_C", "c", int64_c) != 0) {
+        return -1;
+    }
+    if (macro_set_builtin_fn1(&st->macros, "__UINT64_C", "c", uint64_c) != 0) {
+        return -1;
+    }
+    if (macro_set_builtin_fn1(&st->macros, "__INTMAX_C", "c", int64_c) != 0) {
+        return -1;
+    }
+    if (macro_set_builtin_fn1(&st->macros, "__UINTMAX_C", "c", uint64_c) != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__SIG_ATOMIC_MAX__", 0, 0, NULL, 0, "0x7fffffff") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__SIG_ATOMIC_MIN__", 0, 0, NULL, 0, "(-__SIG_ATOMIC_MAX__ - 1)") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__WINT_MAX__", 0, 0, NULL, 0, "0xffffffffU") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__WINT_MIN__", 0, 0, NULL, 0, "0U") != 0) {
         return -1;
     }
     if (macro_set(&st->macros, "__SCHAR_WIDTH__", 0, 0, NULL, 0, "8") != 0) {
@@ -1503,10 +1783,22 @@ static int add_builtin_macros(pp_state_t *st) {
     if (macro_set(&st->macros, "__PTRDIFF_WIDTH__", 0, 0, NULL, 0, st->target_bits == 32 ? "32" : "64") != 0) {
         return -1;
     }
+    if (macro_set(&st->macros, "__INTPTR_WIDTH__", 0, 0, NULL, 0, st->target_bits == 32 ? "32" : "64") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INTMAX_WIDTH__", 0, 0, NULL, 0, "64") != 0) {
+        return -1;
+    }
     if (macro_set(&st->macros, "__SIZE_WIDTH__", 0, 0, NULL, 0, st->target_bits == 32 ? "32" : "64") != 0) {
         return -1;
     }
     if (macro_set(&st->macros, "__WCHAR_WIDTH__", 0, 0, NULL, 0, "32") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__WINT_WIDTH__", 0, 0, NULL, 0, "32") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__SIG_ATOMIC_WIDTH__", 0, 0, NULL, 0, "32") != 0) {
         return -1;
     }
     if (macro_set(&st->macros, "__FLT_RADIX__", 0, 0, NULL, 0, "2") != 0) {
