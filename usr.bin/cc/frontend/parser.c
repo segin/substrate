@@ -1008,7 +1008,7 @@ static int parser_is_unsigned_integral_type(cc_type_t t) {
 }
 
 static long parser_string_literal_array_bound(const cc_expr_t *e);
-static long parser_init_list_array_bound(cc_type_t array_type, int array_struct_id, const cc_expr_t *init);
+static long parser_init_list_array_bound(parser_t *p, cc_type_t array_type, int array_struct_id, const cc_expr_t *init);
 
 static cc_type_t parser_common_arith_type(cc_type_t a, cc_type_t b) {
     long sa;
@@ -3812,7 +3812,7 @@ static int eval_const_array_bound_expr(parser_t *p, const cc_expr_t *e, long *ou
                         }
                         if (dims[0] <= 0 && g->init != NULL && g->init->kind == CC_EXPR_INIT_LIST &&
                             g->init->arg_count > 0) {
-                            dims[0] = parser_init_list_array_bound(g->type, g->type_struct_id, g->init);
+                            dims[0] = parser_init_list_array_bound(p, g->type, g->type_struct_id, g->init);
                         }
                         break;
                     }
@@ -3858,7 +3858,7 @@ static int eval_const_array_bound_expr(parser_t *p, const cc_expr_t *e, long *ou
                         }
                         if (ndim > 0 && dims[0] <= 0 && g->init != NULL && g->init->kind == CC_EXPR_INIT_LIST &&
                             g->init->arg_count > 0) {
-                            dims[0] = parser_init_list_array_bound(g->type, g->type_struct_id, g->init);
+                            dims[0] = parser_init_list_array_bound(p, g->type, g->type_struct_id, g->init);
                         }
                         if (ndim <= 0) {
                             continue;
@@ -3897,7 +3897,7 @@ static int eval_const_array_bound_expr(parser_t *p, const cc_expr_t *e, long *ou
             memcpy(dims, e->lhs->array_dims, sizeof(dims));
             if (dims[0] <= 0 && e->lhs->kind == CC_EXPR_CAST && e->lhs->lhs != NULL &&
                 e->lhs->lhs->kind == CC_EXPR_INIT_LIST) {
-                dims[0] = parser_init_list_array_bound(e->lhs->value_type, e->lhs->struct_id, e->lhs->lhs);
+                dims[0] = parser_init_list_array_bound(p, e->lhs->value_type, e->lhs->struct_id, e->lhs->lhs);
             }
             if (is_pointer_type(elem_type)) {
                 elem_type = ptr_deref_type(elem_type);
@@ -4531,7 +4531,125 @@ static long parser_string_literal_array_bound(const cc_expr_t *e) {
     return (long)units + 1;
 }
 
-static long parser_init_list_array_bound(cc_type_t array_type, int array_struct_id, const cc_expr_t *init) {
+static long parser_struct_next_init_member_index(const cc_struct_def_t *sd, size_t member_idx) {
+    size_t next = member_idx + 1;
+    long off;
+
+    if (sd == NULL || member_idx >= sd->member_count) {
+        return next;
+    }
+    if (sd->members[member_idx].size == 0) {
+        return next;
+    }
+    off = sd->members[member_idx].offset;
+    while (next < sd->member_count && sd->members[next].offset == off) {
+        next++;
+    }
+    return next;
+}
+
+static long parser_struct_scalar_slots_for_init(parser_t *p, int struct_id, int depth) {
+    const cc_struct_def_t *sd;
+    long slots = 0;
+    size_t i;
+
+    if (p == NULL || struct_id < 0 || (size_t)struct_id >= p->struct_count || depth > 32) {
+        return -1;
+    }
+    sd = &p->structs[struct_id];
+    for (i = 0; i < sd->member_count; ++i) {
+        const cc_struct_member_t *m = &sd->members[i];
+        if (sd->has_flexible_array && i + 1 == sd->member_count) {
+            continue;
+        }
+        if (m->array_ndim > 0 && is_pointer_type(m->type)) {
+            long cnt = m->array_len > 0 ? m->array_len : 1;
+            cc_type_t elem = ptr_deref_type(m->type);
+            if (elem == CC_TYPE_VOID && m->type_struct_id >= 0) {
+                long sub = parser_struct_scalar_slots_for_init(p, m->type_struct_id, depth + 1);
+                if (sub < 0 || cnt > LONG_MAX / sub || slots > LONG_MAX - cnt * sub) {
+                    return -1;
+                }
+                slots += cnt * sub;
+            } else {
+                if (slots > LONG_MAX - cnt) {
+                    return -1;
+                }
+                slots += cnt;
+            }
+            continue;
+        }
+        if (m->type == CC_TYPE_VOID && m->type_struct_id >= 0) {
+            long sub = parser_struct_scalar_slots_for_init(p, m->type_struct_id, depth + 1);
+            if (sub < 0 || slots > LONG_MAX - sub) {
+                return -1;
+            }
+            slots += sub;
+            continue;
+        }
+        if (slots == LONG_MAX) {
+            return -1;
+        }
+        slots++;
+    }
+    return slots > 0 ? slots : 1;
+}
+
+static long parser_infer_struct_array_len_from_init_list(parser_t *p, int struct_id, const cc_expr_t *init) {
+    const cc_struct_def_t *sd;
+    long slots;
+    size_t cur = 0;
+    long elems = 0;
+    size_t next_member = 0;
+
+    if (p == NULL || struct_id < 0 || (size_t)struct_id >= p->struct_count || init == NULL || init->kind != CC_EXPR_INIT_LIST) {
+        return -1;
+    }
+    sd = &p->structs[struct_id];
+    slots = parser_struct_scalar_slots_for_init(p, struct_id, 0);
+    if (slots <= 0) {
+        return -1;
+    }
+    while (cur < init->arg_count) {
+        const cc_expr_t *raw = init->args[cur];
+        if (raw != NULL && raw->kind == CC_EXPR_INIT_LIST) {
+            elems++;
+            cur++;
+            next_member = 0;
+            continue;
+        }
+        if (raw != NULL && raw->kind == CC_EXPR_CAST && raw->aux_type == CC_TYPE_VOID && raw->aux_struct_id == struct_id &&
+            raw->lhs != NULL && raw->lhs->kind == CC_EXPR_INIT_LIST) {
+            elems++;
+            cur++;
+            next_member = 0;
+            continue;
+        }
+        {
+            long consumed = 0;
+            size_t member_idx = next_member;
+            while (cur < init->arg_count && consumed < slots) {
+                const cc_expr_t *it = init->args[cur];
+                if (consumed > 0 && it != NULL && it->kind == CC_EXPR_INIT_LIST) {
+                    break;
+                }
+                consumed++;
+                cur++;
+                if (member_idx < sd->member_count && !sd->is_union) {
+                    member_idx = parser_struct_next_init_member_index(sd, member_idx);
+                }
+            }
+            if (consumed == 0) {
+                cur++;
+            }
+            elems++;
+            next_member = 0;
+        }
+    }
+    return elems > 0 ? elems : 1;
+}
+
+static long parser_init_list_array_bound(parser_t *p, cc_type_t array_type, int array_struct_id, const cc_expr_t *init) {
     cc_type_t elem_type;
     const cc_expr_t *item;
     int wide;
@@ -4556,6 +4674,10 @@ static long parser_init_list_array_bound(cc_type_t array_type, int array_struct_
         }
     }
     if (elem_type == CC_TYPE_VOID && array_struct_id >= 0) {
+        long struct_elems = parser_infer_struct_array_len_from_init_list(p, array_struct_id, init);
+        if (struct_elems > 0) {
+            return struct_elems;
+        }
         return 0;
     }
     return (long)init->arg_count;
@@ -9401,15 +9523,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         if (s.array_ndim > 0 && s.array_dims[0] == 0 && s.expr != NULL) {
             long inferred = 0;
             if (s.expr->kind == CC_EXPR_INIT_LIST) {
-                cc_type_t elem_type = ptr_deref_type(s.type);
-                /*
-                 * Defer array-of-aggregate bound inference to sema, which has
-                 * full aggregate shape information and can handle brace-elided
-                 * struct/union element initializers.
-                 */
-                if (!(elem_type == CC_TYPE_VOID && s.type_struct_id >= 0)) {
-                    inferred = parser_init_list_array_bound(s.type, s.type_struct_id, s.expr);
-                }
+                inferred = parser_init_list_array_bound(p, s.type, s.type_struct_id, s.expr);
             } else if (s.expr->kind == CC_EXPR_STR) {
                 inferred = parser_string_literal_array_bound(s.expr);
             }

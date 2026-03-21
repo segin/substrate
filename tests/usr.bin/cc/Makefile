@@ -176,6 +176,8 @@ test:
 	/tmp/cc_native_c99_expr_conversions
 	$(TOP)/usr.bin/cc/cc native_c99_sizeof_array.c -o /tmp/cc_native_c99_sizeof_array
 	/tmp/cc_native_c99_sizeof_array
+	$(TOP)/usr.bin/cc/cc native_c99_sizeof_prev_struct_array_bound.c -o /tmp/cc_native_c99_sizeof_prev_struct_array_bound
+	/tmp/cc_native_c99_sizeof_prev_struct_array_bound
 	LD=/usr/bin/ld $(TOP)/usr.bin/cc/cc native_c99_sizeof_unsigned.c -o /tmp/cc_native_c99_sizeof_unsigned
 	/tmp/cc_native_c99_sizeof_unsigned
 	$(TOP)/usr.bin/cc/cc native_c99_sizeof_local_array_cmp.c -o /tmp/cc_native_c99_sizeof_local_array_cmp
