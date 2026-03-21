@@ -1647,6 +1647,11 @@ typedef enum {
     BUILTIN_INF,
     BUILTIN_INFF,
     BUILTIN_INFL,
+    BUILTIN_ISFINITE,
+    BUILTIN_ISINF,
+    BUILTIN_ISINF_SIGN,
+    BUILTIN_ISNAN,
+    BUILTIN_SIGNBIT,
     BUILTIN_NANF,
     BUILTIN_NAN,
     BUILTIN_NANL,
@@ -1790,6 +1795,24 @@ static builtin_kind_t builtin_kind(const char *name) {
     }
     if (strcmp(name, "__builtin_infl") == 0) {
         return BUILTIN_INFL;
+    }
+    if (strcmp(name, "__builtin_isfinite") == 0) {
+        return BUILTIN_ISFINITE;
+    }
+    if (strcmp(name, "__builtin_isinf") == 0 || strcmp(name, "__builtin_isinff") == 0 ||
+        strcmp(name, "__builtin_isinfl") == 0) {
+        return BUILTIN_ISINF;
+    }
+    if (strcmp(name, "__builtin_isinf_sign") == 0) {
+        return BUILTIN_ISINF_SIGN;
+    }
+    if (strcmp(name, "__builtin_isnan") == 0 || strcmp(name, "__builtin_isnanf") == 0 ||
+        strcmp(name, "__builtin_isnanl") == 0) {
+        return BUILTIN_ISNAN;
+    }
+    if (strcmp(name, "__builtin_signbit") == 0 || strcmp(name, "__builtin_signbitf") == 0 ||
+        strcmp(name, "__builtin_signbitl") == 0) {
+        return BUILTIN_SIGNBIT;
     }
     if (strcmp(name, "__builtin_nanf") == 0 || strcmp(name, "__builtin_nansf") == 0) {
         return BUILTIN_NANF;
@@ -1956,9 +1979,9 @@ static long array_type_size_bytes(const cc_translation_unit_t *tu, cc_type_t t, 
     return elem_size * count;
 }
 
-static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long *out) {
-    long a;
-    long b;
+static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long long *out) {
+    long long a;
+    long long b;
 
     if (e == NULL || out == NULL) {
         return -1;
@@ -2091,7 +2114,7 @@ static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t 
                     (u & (1ULL << (bits - 1))) != 0) {
                     u |= ~mask;
                 }
-                *out = (long)u;
+                *out = (long long)u;
             }
         }
         return 0;
@@ -2148,7 +2171,7 @@ static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t 
                 } else {
                     return -1;
                 }
-                *out = (long)uv;
+                *out = (long long)uv;
                 return 0;
             }
         }
@@ -2221,7 +2244,7 @@ static int atomic_memorder_valid_for_store(long mo) {
 static int atomic_memorder_check_arg(const cc_translation_unit_t *tu, cc_expr_t *arg, const char *builtin_name,
                                      const char *op_kind, int allow_load_orders, int allow_store_orders,
                                      cc_diag_t *diag) {
-    long mo = -1;
+    long long mo = -1;
     char msg[192];
 
     if (arg == NULL) {
@@ -2565,7 +2588,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 }
                 if (getenv("CC_DEBUG_SEMA_CMP") != NULL) {
                     fprintf(stderr,
-                            "cc-debug: eq/ne cmp lhs(kind=%d type=%d sid=%d ident=%s int=%ld) rhs(kind=%d type=%d sid=%d ident=%s int=%ld) line=%zu col=%zu\n",
+                            "cc-debug: eq/ne cmp lhs(kind=%d type=%d sid=%d ident=%s int=%lld) rhs(kind=%d type=%d sid=%d ident=%s int=%lld) line=%zu col=%zu\n",
                             (int)e->lhs->kind, (int)e->lhs->value_type, e->lhs->struct_id,
                             e->lhs->ident != NULL ? e->lhs->ident : "<null>", e->lhs->int_val, (int)e->rhs->kind,
                             (int)e->rhs->value_type, e->rhs->struct_id, e->rhs->ident != NULL ? e->rhs->ident : "<null>",
@@ -2721,6 +2744,23 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             }
             e->value_type = (bk == BUILTIN_HUGE_VALF || bk == BUILTIN_INFF) ? CC_TYPE_FLOAT :
                             (bk == BUILTIN_HUGE_VALL || bk == BUILTIN_INFL) ? CC_TYPE_LDOUBLE : CC_TYPE_DOUBLE;
+            e->struct_id = -1;
+            return 0;
+        }
+        if (bk == BUILTIN_ISFINITE || bk == BUILTIN_ISINF || bk == BUILTIN_ISINF_SIGN || bk == BUILTIN_ISNAN ||
+            bk == BUILTIN_SIGNBIT) {
+            if (e->arg_count != 1) {
+                set_diag(diag, "floating classification builtin expects exactly 1 argument");
+                return -1;
+            }
+            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (!is_numeric_type(e->args[0]->value_type)) {
+                set_diag(diag, "floating classification builtin expects numeric argument");
+                return -1;
+            }
+            e->value_type = CC_TYPE_INT;
             e->struct_id = -1;
             return 0;
         }
@@ -5148,8 +5188,8 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             int seen_default = 0;
             for (i1 = 0; i1 < s->then_branch->block_count; ++i1) {
                 const cc_stmt_t *ci = &s->then_branch->block_stmts[i1];
-                long vi = 0;
-                long vhi = 0;
+                long long vi = 0;
+                long long vhi = 0;
                 if (ci->kind == CC_STMT_DEFAULT) {
                     if (seen_default) {
                         set_diag(diag, "duplicate default label in switch");
@@ -5174,8 +5214,8 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                     size_t i2;
                     for (i2 = i1 + 1; i2 < s->then_branch->block_count; ++i2) {
                         const cc_stmt_t *cj = &s->then_branch->block_stmts[i2];
-                        long vj = 0;
-                        long vjhi = 0;
+                        long long vj = 0;
+                        long long vjhi = 0;
                         if (cj->kind != CC_STMT_CASE) {
                             continue;
                         }

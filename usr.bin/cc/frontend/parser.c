@@ -111,7 +111,7 @@ typedef struct {
     cc_tok_kind_t kind;
     const char *start;
     size_t len;
-    long num;
+    long long num;
     double fnum;
     int is_float;
     int float_is_single;
@@ -157,6 +157,7 @@ typedef struct {
 int cc_lexer_init(cc_lexer_t *lx, const char *src, size_t len, const char *path);
 void cc_lexer_deinit(cc_lexer_t *lx);
 int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out);
+void cc_lexer_set_pointer_size(int bytes);
 
 static char *xstrdup_n(const char *s, size_t n) {
     char *p = (char *)malloc(n + 1);
@@ -8285,7 +8286,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
     }
 
     if (p->tok.kind == TOK_MINUS) {
-        cc_expr_t *z;
+        cc_expr_t *neg_one;
         cc_expr_t *rhs;
         if (next_tok(p) != 0) {
             return NULL;
@@ -8294,12 +8295,12 @@ static cc_expr_t *parse_unary(parser_t *p) {
         if (rhs == NULL) {
             return NULL;
         }
-        z = new_int_expr(0);
-        if (z == NULL) {
+        neg_one = new_int_expr(-1);
+        if (neg_one == NULL) {
             free_expr(rhs);
             return NULL;
         }
-        return new_bin_expr(CC_BIN_SUB, z, rhs);
+        return new_bin_expr(CC_BIN_MUL, neg_one, rhs);
     }
     if (p->tok.kind == TOK_PLUS) {
         if (next_tok(p) != 0) {
@@ -11152,6 +11153,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
 void cc_parser_set_pointer_size(int bytes) {
     if (bytes == 4 || bytes == 8) {
         g_parser_pointer_size_bytes = bytes;
+        cc_lexer_set_pointer_size(bytes);
     }
 }
 

@@ -50,7 +50,7 @@ typedef struct {
     int dst;
     int lhs;
     int rhs;
-    long imm;
+    long long imm;
     double fimm;
     int label;
     int true_label;

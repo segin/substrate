@@ -67,7 +67,7 @@ typedef struct {
     int dst;
     int lhs;
     int rhs;
-    long imm;
+    long long imm;
     double fimm;
     int label;
     int true_label;
@@ -103,7 +103,7 @@ typedef struct {
 
 typedef struct {
     long init_size;
-    long init_i;
+    long long init_i;
     double init_f;
     int init_is_zero_fill;
     int init_is_float;
@@ -125,7 +125,7 @@ typedef struct {
     char *attr_section;
     char *attr_alias;
     int has_init;
-    long init_i;
+    long long init_i;
     double init_f;
     int init_is_float;
     int init_is_string;

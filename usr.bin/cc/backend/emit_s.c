@@ -947,7 +947,7 @@ static int resolve_asm_immediate_symbol(const cc_ssa_function_t *f, int value, s
         }
     }
     if (def->op == CC_SSA_CONST) {
-        snprintf(out, outsz, "$%ld", def->imm);
+        snprintf(out, outsz, "$%lld", def->imm);
         return 0;
     }
     if (def->op == CC_SSA_STR) {
@@ -3777,7 +3777,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             const cc_ssa_instr_t *in = &f->instrs[j];
             ist.cur_index = (int)j;
             if (debug_trace) {
-                fprintf(fp, "\t# ccdbg i=%zu op=%s dst=%d lhs=%d rhs=%d imm=%ld lbl=%d tl=%d fl=%d\n", j,
+                fprintf(fp, "\t# ccdbg i=%zu op=%s dst=%d lhs=%d rhs=%d imm=%lld lbl=%d tl=%d fl=%d\n", j,
                         ssa_op_name(in->op), in->dst, in->lhs, in->rhs, in->imm, in->label, in->true_label,
                         in->false_label);
             }
@@ -3859,7 +3859,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                     fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
                 } else {
                     int rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
-                    fprintf(fp, "\tmovq $%ld, %s\n", in->imm, ist.regs[rd]);
+                    fprintf(fp, "\tmovq $%lld, %s\n", in->imm, ist.regs[rd]);
                 }
                 break;
 

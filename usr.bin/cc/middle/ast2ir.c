@@ -62,7 +62,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                       const lower_ctx_t *ctx, int depth, int break_label, int continue_label, const cc_stmt_t *s,
                       int *saw_ret, cc_diag_t *diag);
 static int emit_local_storage_alloc(cc_ssa_function_t *sf, long total_size, cc_diag_t *diag);
-static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long *out_i, double *out_f,
+static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long long *out_i, double *out_f,
                                  int *out_is_float, char **out_sym);
 static int eval_global_addr_symbol_addend(const cc_translation_unit_t *tu, const cc_expr_t *e, char **out_sym,
                                           long *out_addend);
@@ -851,16 +851,23 @@ static int emit_label_instr(cc_ssa_function_t *sf, int label);
 static int emit_br_instr(cc_ssa_function_t *sf, int label);
 static int emit_br_cond_instr(cc_ssa_function_t *sf, int cond, int label_true, int label_false);
 static int emit_mov_instr(cc_ssa_function_t *sf, int dst, int src);
-static int emit_const_i64_instr(cc_ssa_function_t *sf, long v);
+static int emit_const_i64_instr(cc_ssa_function_t *sf, long long v);
 static int emit_const_f64_instr(cc_ssa_function_t *sf, double v);
+static int emit_cmp_instr(cc_ssa_function_t *sf, cc_cmp_kind_t cmp_kind, int lhs, int rhs, int is_unsigned,
+                          cc_diag_t *diag);
 static int emit_memcpy_instr(cc_ssa_function_t *sf, int dst_ptr, int src_ptr, long size, cc_diag_t *diag);
 static int emit_memset_instr(cc_ssa_function_t *sf, int dst_ptr, int fill_byte, long size, cc_diag_t *diag);
-static int eval_const_int_expr_simple(const cc_expr_t *e, long *out);
+static int eval_const_int_expr_simple(const cc_expr_t *e, long long *out);
 static int emit_atomic_compiler_barrier(cc_ssa_function_t *sf, cc_diag_t *diag);
 static int emit_atomic_full_barrier(cc_ssa_function_t *sf, cc_diag_t *diag);
 static int normalize_integral_value(cc_ssa_function_t *sf, int v, cc_type_t t, cc_diag_t *diag);
 static int normalize_float_value(cc_ssa_function_t *sf, int v, cc_type_t t, cc_diag_t *diag);
 static int lower_truthy_value(cc_ssa_function_t *sf, int v, cc_diag_t *diag);
+static int lower_fp_builtin_arg(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                                var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *arg,
+                                cc_type_t *out_storage_type, cc_diag_t *diag);
+static int emit_fp_signbit_from_value(cc_ssa_function_t *sf, int v, cc_type_t store_t, cc_diag_t *diag);
+static int emit_fp_isinf_sign_from_value(cc_ssa_function_t *sf, int v, cc_type_t store_t, cc_diag_t *diag);
 static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
                       var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag);
 static int lower_collect_labels_expr(cc_ssa_function_t *sf, const cc_expr_t *e, lower_ctx_t *ctx, cc_diag_t *diag);
@@ -1071,9 +1078,9 @@ static int push_instr(cc_ssa_function_t *f, cc_ssa_instr_t in) {
     return 0;
 }
 
-static int eval_const_int_expr_simple(const cc_expr_t *e, long *out) {
-    long a;
-    long b;
+static int eval_const_int_expr_simple(const cc_expr_t *e, long long *out) {
+    long long a;
+    long long b;
 
     if (e == NULL || out == NULL) {
         return -1;
@@ -1990,6 +1997,11 @@ typedef enum {
     BUILTIN_INF,
     BUILTIN_INFF,
     BUILTIN_INFL,
+    BUILTIN_ISFINITE,
+    BUILTIN_ISINF,
+    BUILTIN_ISINF_SIGN,
+    BUILTIN_ISNAN,
+    BUILTIN_SIGNBIT,
     BUILTIN_NANF,
     BUILTIN_NAN,
     BUILTIN_NANL,
@@ -2127,6 +2139,24 @@ static builtin_kind_t builtin_kind(const char *name) {
     }
     if (strcmp(name, "__builtin_infl") == 0) {
         return BUILTIN_INFL;
+    }
+    if (strcmp(name, "__builtin_isfinite") == 0) {
+        return BUILTIN_ISFINITE;
+    }
+    if (strcmp(name, "__builtin_isinf") == 0 || strcmp(name, "__builtin_isinff") == 0 ||
+        strcmp(name, "__builtin_isinfl") == 0) {
+        return BUILTIN_ISINF;
+    }
+    if (strcmp(name, "__builtin_isinf_sign") == 0) {
+        return BUILTIN_ISINF_SIGN;
+    }
+    if (strcmp(name, "__builtin_isnan") == 0 || strcmp(name, "__builtin_isnanf") == 0 ||
+        strcmp(name, "__builtin_isnanl") == 0) {
+        return BUILTIN_ISNAN;
+    }
+    if (strcmp(name, "__builtin_signbit") == 0 || strcmp(name, "__builtin_signbitf") == 0 ||
+        strcmp(name, "__builtin_signbitl") == 0) {
+        return BUILTIN_SIGNBIT;
     }
     if (strcmp(name, "__builtin_nanf") == 0 || strcmp(name, "__builtin_nansf") == 0) {
         return BUILTIN_NANF;
@@ -2496,9 +2526,9 @@ static int normalize_float_value(cc_ssa_function_t *sf, int v, cc_type_t t, cc_d
     return in.dst;
 }
 
-static int eval_const_i64_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long *out) {
-    long a;
-    long b;
+static int eval_const_i64_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long long *out) {
+    long long a;
+    long long b;
 
     if (e == NULL || out == NULL) {
         return -1;
@@ -4673,7 +4703,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         }
         if (bk == BUILTIN_CONSTANT_P) {
             int is_const = 0;
-            long dummy = 0;
+            long long dummy = 0;
             if (e->arg_count != 1 || e->args[0] == NULL) {
                 set_diag(diag, "__builtin_constant_p lowering expects 1 argument");
                 return -1;
@@ -4737,6 +4767,47 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             bk == BUILTIN_INF || bk == BUILTIN_INFF || bk == BUILTIN_INFL) {
             (void)e;
             return emit_const_f64_instr(sf, INFINITY);
+        }
+        if (bk == BUILTIN_ISFINITE || bk == BUILTIN_ISINF || bk == BUILTIN_ISINF_SIGN || bk == BUILTIN_ISNAN ||
+            bk == BUILTIN_SIGNBIT) {
+            int arg_v;
+            cc_type_t store_t;
+
+            if (e->arg_count != 1 || e->args[0] == NULL) {
+                set_diag(diag, "floating classification builtin lowering expects 1 argument");
+                return -1;
+            }
+            arg_v = lower_fp_builtin_arg(tu, sf, ctx, vars, var_count, depth, e->args[0], &store_t, diag);
+            if (arg_v < 0) {
+                return -1;
+            }
+            if (bk == BUILTIN_ISNAN) {
+                return emit_cmp_instr(sf, CC_CMP_NE, arg_v, arg_v, 0, diag);
+            }
+            if (bk == BUILTIN_SIGNBIT) {
+                return emit_fp_signbit_from_value(sf, arg_v, store_t, diag);
+            }
+            {
+                int inf_sign = emit_fp_isinf_sign_from_value(sf, arg_v, store_t, diag);
+                int zero = emit_const_i64_instr(sf, 0);
+                if (inf_sign < 0 || zero < 0) {
+                    return -1;
+                }
+                if (bk == BUILTIN_ISINF_SIGN) {
+                    return inf_sign;
+                }
+                if (bk == BUILTIN_ISINF) {
+                    return emit_cmp_instr(sf, CC_CMP_NE, inf_sign, zero, 1, diag);
+                }
+                {
+                    int self_eq = emit_cmp_instr(sf, CC_CMP_EQ, arg_v, arg_v, 0, diag);
+                    int not_inf = emit_cmp_instr(sf, CC_CMP_EQ, inf_sign, zero, 1, diag);
+                    if (self_eq < 0 || not_inf < 0) {
+                        return -1;
+                    }
+                    return emit_i64_binop_instr(sf, CC_SSA_AND, self_eq, not_inf, 0, diag);
+                }
+            }
         }
         if (bk == BUILTIN_NANF || bk == BUILTIN_NAN || bk == BUILTIN_NANL) {
             return emit_const_f64_instr(sf, NAN);
@@ -4963,10 +5034,12 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             int bv;
             int pv = -1;
             int rv;
+            int rv_exact;
             int ov = -1;
             int overflow_op;
             int has_store;
             cc_type_t out_type;
+            int out_bits = 0;
             long mem_size;
             cc_ssa_instr_t bin;
 
@@ -5009,7 +5082,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (bin.dst < 0 || push_instr(sf, bin) != 0) {
                 return -1;
             }
-            rv = bin.dst;
+            rv_exact = bin.dst;
+            rv = rv_exact;
 
             if (has_store) {
                 out_type = ptr_base_type(e->args[2]->value_type);
@@ -5032,6 +5106,13 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (rv < 0) {
                 return -1;
             }
+            if (is_integral_type(out_type) && !is_pointer_type(out_type)) {
+                rv = normalize_integral_value(sf, rv, out_type, diag);
+                if (rv < 0) {
+                    return -1;
+                }
+                out_bits = integral_type_bits(out_type);
+            }
             if (has_store) {
                 memset(&in, 0, sizeof(in));
                 in.op = CC_SSA_STORE;
@@ -5043,7 +5124,18 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 }
             }
 
-            if (is_unsigned_integral_type(out_type)) {
+            if (out_bits > 0 && out_bits < 64) {
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_CMP;
+                bin.cmp_kind = CC_CMP_NE;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = rv_exact;
+                bin.rhs = rv;
+                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                ov = bin.dst;
+            } else if (is_unsigned_integral_type(out_type)) {
                 if (overflow_op == 2) {
                     int z = emit_const_i64_instr(sf, 0);
                     int cmp_nz;
@@ -5469,7 +5561,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             return emit_const_i64_instr(sf, 0);
         }
         if (bk == BUILTIN_ATOMIC_THREAD_FENCE || bk == BUILTIN_ATOMIC_SIGNAL_FENCE) {
-            long mo = CC_ATOMIC_SEQ_CST;
+            long long mo = CC_ATOMIC_SEQ_CST;
             int mov;
 
             if (e->arg_count != 1 || e->args[0] == NULL) {
@@ -5559,7 +5651,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             int l_store = -1;
             int l_done = -1;
             long mem_size;
-            long memorder = CC_ATOMIC_SEQ_CST;
+            long long memorder = CC_ATOMIC_SEQ_CST;
             int need_pre_compiler = 0;
             int need_post_compiler = 0;
             int need_pre_full = 0;
@@ -7004,7 +7096,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
     }
 
     case CC_EXPR_TERNARY: {
-        long cond_const = 0;
+        long long cond_const = 0;
         int cond;
         int cond_raw;
         int dst;
@@ -7151,7 +7243,7 @@ static int emit_mov_instr(cc_ssa_function_t *sf, int dst, int src) {
     return push_instr(sf, in);
 }
 
-static int emit_const_i64_instr(cc_ssa_function_t *sf, long v) {
+static int emit_const_i64_instr(cc_ssa_function_t *sf, long long v) {
     cc_ssa_instr_t in;
     memset(&in, 0, sizeof(in));
     in.op = CC_SSA_CONST;
@@ -7174,6 +7266,24 @@ static int emit_const_f64_instr(cc_ssa_function_t *sf, double v) {
     in.rhs = -1;
     in.fimm = v;
     if (in.dst < 0 || push_instr(sf, in) != 0) {
+        return -1;
+    }
+    return in.dst;
+}
+
+static int emit_cmp_instr(cc_ssa_function_t *sf, cc_cmp_kind_t cmp_kind, int lhs, int rhs, int is_unsigned,
+                          cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_CMP;
+    in.cmp_kind = cmp_kind;
+    in.is_unsigned = is_unsigned ? 1 : 0;
+    in.dst = new_value(sf, CC_VAL_I64);
+    in.lhs = lhs;
+    in.rhs = rhs;
+    if (in.dst < 0 || push_instr(sf, in) != 0) {
+        set_diag(diag, "out of memory lowering compare");
         return -1;
     }
     return in.dst;
@@ -7287,6 +7397,117 @@ static int lower_truthy_value(cc_ssa_function_t *sf, int v, cc_diag_t *diag) {
         return -1;
     }
     return in.dst;
+}
+
+static cc_type_t fp_builtin_storage_type(cc_type_t t) {
+    return t == CC_TYPE_FLOAT ? CC_TYPE_FLOAT : CC_TYPE_DOUBLE;
+}
+
+static int lower_fp_builtin_arg(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                                var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *arg,
+                                cc_type_t *out_storage_type, cc_diag_t *diag) {
+    int v;
+    cc_type_t store_t;
+
+    if (arg == NULL) {
+        set_diag(diag, "floating builtin missing operand");
+        return -1;
+    }
+    v = lower_expr(tu, sf, ctx, vars, var_count, depth, arg, diag);
+    if (v < 0) {
+        return -1;
+    }
+    store_t = fp_builtin_storage_type(arg->value_type);
+    if (value_type(sf, v) != CC_VAL_F64) {
+        v = cast_value(sf, v, CC_VAL_F64, diag);
+        if (v < 0) {
+            return -1;
+        }
+    }
+    v = normalize_float_value(sf, v, store_t, diag);
+    if (v < 0) {
+        return -1;
+    }
+    if (out_storage_type != NULL) {
+        *out_storage_type = store_t;
+    }
+    return v;
+}
+
+static int emit_fp_signbit_from_value(cc_ssa_function_t *sf, int v, cc_type_t store_t, cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+    long store_size;
+    int tmp_ptr;
+    int bits;
+    int mask;
+    int masked;
+    int zero;
+
+    store_size = store_t == CC_TYPE_FLOAT ? 4 : 8;
+    tmp_ptr = emit_local_storage_alloc(sf, store_size, diag);
+    if (tmp_ptr < 0) {
+        return -1;
+    }
+
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_STORE;
+    in.lhs = tmp_ptr;
+    in.rhs = v;
+    in.imm = store_size;
+    if (push_instr(sf, in) != 0) {
+        set_diag(diag, "out of memory storing floating signbit operand");
+        return -1;
+    }
+
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_LOAD;
+    in.dst = new_value(sf, CC_VAL_I64);
+    in.lhs = tmp_ptr;
+    in.imm = store_size;
+    in.is_unsigned = 1;
+    if (in.dst < 0 || push_instr(sf, in) != 0) {
+        set_diag(diag, "out of memory loading floating signbit bits");
+        return -1;
+    }
+    bits = in.dst;
+
+    mask = emit_const_u64_instr(sf, store_size == 4 ? 0x80000000ULL : 0x8000000000000000ULL, diag);
+    if (mask < 0) {
+        return -1;
+    }
+    masked = emit_i64_binop_instr(sf, CC_SSA_AND, bits, mask, 0, diag);
+    if (masked < 0) {
+        return -1;
+    }
+    zero = emit_const_i64_instr(sf, 0);
+    if (zero < 0) {
+        return -1;
+    }
+    return emit_cmp_instr(sf, CC_CMP_NE, masked, zero, 1, diag);
+}
+
+static int emit_fp_isinf_sign_from_value(cc_ssa_function_t *sf, int v, cc_type_t store_t, cc_diag_t *diag) {
+    int pos_inf;
+    int neg_inf;
+    int pos_cmp;
+    int neg_cmp;
+
+    pos_inf = emit_const_f64_instr(sf, INFINITY);
+    neg_inf = emit_const_f64_instr(sf, -INFINITY);
+    if (pos_inf < 0 || neg_inf < 0) {
+        return -1;
+    }
+    pos_inf = normalize_float_value(sf, pos_inf, store_t, diag);
+    neg_inf = normalize_float_value(sf, neg_inf, store_t, diag);
+    if (pos_inf < 0 || neg_inf < 0) {
+        return -1;
+    }
+    pos_cmp = emit_cmp_instr(sf, CC_CMP_EQ, v, pos_inf, 0, diag);
+    neg_cmp = emit_cmp_instr(sf, CC_CMP_EQ, v, neg_inf, 0, diag);
+    if (pos_cmp < 0 || neg_cmp < 0) {
+        return -1;
+    }
+    return emit_i64_binop_instr(sf, CC_SSA_SUB, pos_cmp, neg_cmp, 0, diag);
 }
 
 typedef struct {
@@ -8343,7 +8564,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             cc_type_t elem_type = CC_TYPE_VOID;
             long elem_size = 0;
             long arr_elems = 1;
-            long init_i = 0;
+            long long init_i = 0;
             double init_f = 0.0;
             int init_is_float = 0;
             char *init_sym = NULL;
@@ -10465,7 +10686,7 @@ static int eval_global_addr_symbol_addend(const cc_translation_unit_t *tu, const
     char *sym = NULL;
     long ladd = 0;
     long radd = 0;
-    long iv = 0;
+    long long iv = 0;
     double fv = 0.0;
     int isf = 0;
     long step = 1;
@@ -10554,7 +10775,7 @@ static int eval_global_addr_symbol_addend(const cc_translation_unit_t *tu, const
     return -1;
 }
 
-static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long *out_i, double *out_f,
+static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long long *out_i, double *out_f,
                                  int *out_is_float, char **out_sym) {
     if (e == NULL) {
         *out_i = 0;
@@ -10679,7 +10900,7 @@ static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_
         return 0;
     }
     case CC_EXPR_TERNARY: {
-        long cv = 0;
+        long long cv = 0;
         double cf = 0.0;
         int cisf = 0;
         char *csym = NULL;
@@ -10710,8 +10931,8 @@ static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_
             return eval_global_init_expr(tu, e->rhs, out_i, out_f, out_is_float, out_sym);
         }
         {
-            long ai = 0;
-            long bi = 0;
+            long long ai = 0;
+            long long bi = 0;
             double af = 0.0;
             double bf = 0.0;
             int aisf = 0;
@@ -10875,7 +11096,7 @@ static int eval_global_init_item(const cc_translation_unit_t *tu, const cc_expr_
     }
 
     {
-        long iv = 0;
+        long long iv = 0;
         double fv = 0.0;
         int isf = 0;
         char *sym = NULL;
@@ -11258,7 +11479,7 @@ static char *global_char_list_to_quoted_string(const cc_translation_unit_t *tu, 
     }
     out[len++] = '"';
     for (i = 0; i < list->arg_count; ++i) {
-        long iv = 0;
+        long long iv = 0;
         double fv = 0.0;
         int isf = 0;
         char *sym = NULL;
@@ -11340,7 +11561,7 @@ static char *global_char_list_to_quoted_string(const cc_translation_unit_t *tu, 
 static int store_scalar_global_init(const cc_translation_unit_t *tu, cc_type_t type, int struct_id, long field_size,
                                     const cc_expr_t *expr, unsigned char *buf, long buf_size, long off,
                                     global_reloc_t **relocs, size_t *reloc_count, cc_diag_t *diag) {
-    long iv = 0;
+    long long iv = 0;
     double fv = 0.0;
     int isf = 0;
     char *sym = NULL;
@@ -11809,7 +12030,7 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
                 continue;
             }
             if (is_designator) {
-                long z_i = 0;
+                long long z_i = 0;
                 double z_f = 0.0;
                 int z_is_float = 0;
                 char *z_sym = NULL;
@@ -12205,7 +12426,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         }
         out->global_count = tu->global_count;
         for (i = 0; i < tu->global_count; ++i) {
-            long init_i = 0;
+            long long init_i = 0;
             double init_f = 0.0;
             int init_is_float = 0;
             int init_is_string = 0;
@@ -12557,7 +12778,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                         if (init->arg_count == 0) {
                             force_bss_zero = 1;
                         } else if (init->arg_count == 1) {
-                            long z_i = 0;
+                            long long z_i = 0;
                             double z_f = 0.0;
                             int z_is_float = 0;
                             char *z_sym = NULL;
@@ -12594,7 +12815,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                             out->globals[i].init_sym = NULL;
                             continue;
                         } else if (init->arg_count == 1) {
-                            long sv = 0;
+                            long long sv = 0;
                             double sf = 0.0;
                             int s_is_float = 0;
                             char *ssym = NULL;

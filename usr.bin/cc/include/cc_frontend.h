@@ -296,7 +296,7 @@ struct cc_expr {
     unsigned char paren_wrapped;
     int array_ndim;
     long array_dims[CC_MAX_ARRAY_DIMS];
-    long int_val;
+    long long int_val;
     double float_val;
     char *ident;
     cc_binop_t op;
