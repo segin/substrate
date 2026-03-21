@@ -4473,6 +4473,20 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
         set_diag(diag, "array initializer has unsupported element type");
         return -1;
     }
+    if (array_ndim == 1 && init->arg_count == 1) {
+        long string_len = array_len;
+        long inferred_len = -1;
+        int rc = check_array_string_initializer(name, array_type, &string_len, init->args[0], &inferred_len, diag);
+        if (rc < 0) {
+            return -1;
+        }
+        if (rc == 0) {
+            if (out_inferred_len != NULL && array_len == 0 && inferred_len > 0) {
+                *out_inferred_len = inferred_len;
+            }
+            return 0;
+        }
+    }
     if (array_len > 0 && init->arg_count > (size_t)array_len) {
         if (diag != NULL && diag->message[0] == '\0') {
             snprintf(diag->message, sizeof(diag->message), "too many initializers for array %s",

@@ -45,6 +45,120 @@ static char *xstrdup(const char *s) {
     return p;
 }
 
+int as_decode_string_literal(const char *src, char **bytes_out, size_t *len_out) {
+    size_t i;
+    size_t j;
+    size_t n;
+    char *out;
+
+    if (bytes_out == NULL || len_out == NULL) {
+        return -1;
+    }
+    *bytes_out = NULL;
+    *len_out = 0;
+    if (src == NULL) {
+        src = "";
+    }
+    n = strlen(src);
+    out = (char *)malloc(n + 1);
+    if (out == NULL) {
+        return -1;
+    }
+
+    i = 0;
+    j = 0;
+    while (i < n) {
+        unsigned char ch = (unsigned char)src[i++];
+
+        if (ch != '\\') {
+            out[j++] = (char)ch;
+            continue;
+        }
+        if (i >= n) {
+            free(out);
+            return -1;
+        }
+
+        ch = (unsigned char)src[i++];
+        switch (ch) {
+        case 'a':
+            out[j++] = '\a';
+            break;
+        case 'b':
+            out[j++] = '\b';
+            break;
+        case 'f':
+            out[j++] = '\f';
+            break;
+        case 'n':
+            out[j++] = '\n';
+            break;
+        case 'r':
+            out[j++] = '\r';
+            break;
+        case 't':
+            out[j++] = '\t';
+            break;
+        case 'v':
+            out[j++] = '\v';
+            break;
+        case '\\':
+            out[j++] = '\\';
+            break;
+        case '\'':
+            out[j++] = '\'';
+            break;
+        case '"':
+            out[j++] = '"';
+            break;
+        case '?':
+            out[j++] = '?';
+            break;
+        case 'x': {
+            unsigned value = 0;
+            int seen = 0;
+
+            while (i < n) {
+                unsigned char hex = (unsigned char)src[i];
+                if (hex >= '0' && hex <= '9') {
+                    value = (value << 4) | (unsigned)(hex - '0');
+                } else if (hex >= 'a' && hex <= 'f') {
+                    value = (value << 4) | (unsigned)(10 + (hex - 'a'));
+                } else if (hex >= 'A' && hex <= 'F') {
+                    value = (value << 4) | (unsigned)(10 + (hex - 'A'));
+                } else {
+                    break;
+                }
+                ++i;
+                seen = 1;
+            }
+            out[j++] = (char)(seen ? (value & 0xffu) : 'x');
+            break;
+        }
+        default:
+            if (ch >= '0' && ch <= '7') {
+                unsigned value = (unsigned)(ch - '0');
+                int digits = 1;
+
+                while (digits < 3 && i < n && src[i] >= '0' && src[i] <= '7') {
+                    value = (value << 3) | (unsigned)(src[i] - '0');
+                    ++i;
+                    ++digits;
+                }
+                out[j++] = (char)(value & 0xffu);
+            } else {
+                out[j++] = (char)ch;
+            }
+            break;
+        }
+    }
+
+    out[j] = '\0';
+    *bytes_out = out;
+    *len_out = j;
+    return 0;
+}
+
 static char *trim_copy(const char *s) {
     const char *b;
     const char *e;
@@ -321,8 +435,10 @@ static int parse_string_directive(data_ctx_t *ctx, const as_stmt_t *st, int nul_
     }
 
     for (i = 0; i < d->arg_count; ++i) {
-        char *bytes = trim_copy(d->args[i]);
-        if (bytes == NULL) {
+        char *bytes = NULL;
+        size_t len = 0;
+
+        if (as_decode_string_literal(d->args[i] != NULL ? d->args[i] : "", &bytes, &len) != 0) {
             return -1;
         }
 
@@ -333,7 +449,7 @@ static int parse_string_directive(data_ctx_t *ctx, const as_stmt_t *st, int nul_
 
         op.kind = AS_DATA_STRING;
         op.u.str.bytes = bytes;
-        op.u.str.len = strlen(bytes);
+        op.u.str.len = len;
         op.u.str.nul_terminated = nul_terminated;
 
         if (push_op(ctx->out, &op) != 0) {

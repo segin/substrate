@@ -333,8 +333,7 @@ static char *unescape_string(const char *in) {
             int c = in[++i];
             if (c == 'x' && i + 1 < n && isxdigit((unsigned char)in[i + 1])) {
                 int v = 0;
-                int k = 0;
-                while (k < 2 && i + 1 < n && isxdigit((unsigned char)in[i + 1])) {
+                while (i + 1 < n && isxdigit((unsigned char)in[i + 1])) {
                     int h = in[++i];
                     v <<= 4;
                     if (h >= '0' && h <= '9') {
@@ -344,6 +343,15 @@ static char *unescape_string(const char *in) {
                     } else {
                         v |= 10 + (h - 'A');
                     }
+                }
+                out[j++] = (char)v;
+                continue;
+            }
+            if (c >= '0' && c <= '7') {
+                int v = c - '0';
+                int k = 1;
+                while (k < 3 && i + 1 < n && in[i + 1] >= '0' && in[i + 1] <= '7') {
+                    v = (v << 3) | (in[++i] - '0');
                     k++;
                 }
                 out[j++] = (char)v;
@@ -619,7 +627,6 @@ static int tokenize_line(const char *file, unsigned line_no, const char *line, i
 
         if (line[i] == '"') {
             char *raw;
-            char *decoded;
             size_t n;
 
             i++;
@@ -645,18 +652,12 @@ static int tokenize_line(const char *file, unsigned line_no, const char *line, i
             }
             memcpy(raw, line + start + 1, n);
             raw[n] = '\0';
-            decoded = unescape_string(raw);
+            if (as_token_vec_push(line_tokens, AS_TOK_STRING, raw, file, line_no, col) != 0) {
+                free(raw);
+                set_err(ctx, "%s:%u: out of memory", file, line_no);
+                return -1;
+            }
             free(raw);
-            if (decoded == NULL) {
-                set_err(ctx, "%s:%u: out of memory", file, line_no);
-                return -1;
-            }
-            if (as_token_vec_push(line_tokens, AS_TOK_STRING, decoded, file, line_no, col) != 0) {
-                free(decoded);
-                set_err(ctx, "%s:%u: out of memory", file, line_no);
-                return -1;
-            }
-            free(decoded);
             i++;
             continue;
         }
@@ -808,14 +809,25 @@ static int lex_file_internal(lex_ctx_t *ctx, const char *path, unsigned depth) {
             line_tokens.items[0].kind == AS_TOK_DIRECTIVE &&
             strcmp(line_tokens.items[0].text, ".include") == 0 &&
             line_tokens.items[1].kind == AS_TOK_STRING) {
-            char *inc = resolve_include_path(ctx->cfg, path, line_tokens.items[1].text);
-            if (inc == NULL) {
-                set_err(ctx, "%s:%u: include file not found: %s", path, line_no, line_tokens.items[1].text);
+            char *inc_path = unescape_string(line_tokens.items[1].text);
+            char *inc;
+            if (inc_path == NULL) {
+                set_err(ctx, "%s:%u: out of memory", path, line_no);
                 as_token_vec_free(&line_tokens);
                 free(line);
                 fclose(fp);
                 return -1;
             }
+            inc = resolve_include_path(ctx->cfg, path, inc_path);
+            if (inc == NULL) {
+                set_err(ctx, "%s:%u: include file not found: %s", path, line_no, inc_path);
+                free(inc_path);
+                as_token_vec_free(&line_tokens);
+                free(line);
+                fclose(fp);
+                return -1;
+            }
+            free(inc_path);
 
             for (i = 0; i < ctx->include_stack_count; ++i) {
                 if (strcmp(ctx->include_stack[i], inc) == 0) {

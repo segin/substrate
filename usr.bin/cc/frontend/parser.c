@@ -1,5 +1,6 @@
 #include "cc_frontend.h"
 
+#include <ctype.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -998,6 +999,9 @@ static int parser_is_unsigned_integral_type(cc_type_t t) {
     return t == CC_TYPE_UCHAR || t == CC_TYPE_USHORT || t == CC_TYPE_UINT ||
            t == CC_TYPE_ULONG || t == CC_TYPE_ULONG_LONG;
 }
+
+static long parser_string_literal_array_bound(const cc_expr_t *e);
+static long parser_init_list_array_bound(cc_type_t array_type, int array_struct_id, const cc_expr_t *init);
 
 static cc_type_t parser_common_arith_type(cc_type_t a, cc_type_t b) {
     long sa;
@@ -3654,7 +3658,7 @@ static int eval_const_array_bound_expr(parser_t *p, const cc_expr_t *e, long *ou
                         }
                         if (dims[0] <= 0 && g->init != NULL && g->init->kind == CC_EXPR_INIT_LIST &&
                             g->init->arg_count > 0) {
-                            dims[0] = (long)g->init->arg_count;
+                            dims[0] = parser_init_list_array_bound(g->type, g->type_struct_id, g->init);
                         }
                         break;
                     }
@@ -3700,7 +3704,7 @@ static int eval_const_array_bound_expr(parser_t *p, const cc_expr_t *e, long *ou
                         }
                         if (ndim > 0 && dims[0] <= 0 && g->init != NULL && g->init->kind == CC_EXPR_INIT_LIST &&
                             g->init->arg_count > 0) {
-                            dims[0] = (long)g->init->arg_count;
+                            dims[0] = parser_init_list_array_bound(g->type, g->type_struct_id, g->init);
                         }
                         if (ndim <= 0) {
                             continue;
@@ -4217,6 +4221,106 @@ static cc_type_t string_token_char_type(const parser_t *p, const cc_token_t *tok
         }
     }
     return CC_TYPE_CHAR;
+}
+
+static size_t parser_utf8_seq_len(unsigned char b0) {
+    if ((b0 & 0x80u) == 0) return 1;
+    if ((b0 & 0xE0u) == 0xC0u) return 2;
+    if ((b0 & 0xF0u) == 0xE0u) return 3;
+    if ((b0 & 0xF8u) == 0xF0u) return 4;
+    return 1;
+}
+
+static long parser_string_literal_array_bound(const cc_expr_t *e) {
+    const unsigned char *s;
+    size_t n;
+    size_t i;
+    size_t units;
+    int wide;
+
+    if (e == NULL || e->kind != CC_EXPR_STR || e->ident == NULL) {
+        return 0;
+    }
+    s = (const unsigned char *)e->ident;
+    n = strlen(e->ident);
+    if (n < 2 || s[0] != '"' || s[n - 1] != '"') {
+        return 0;
+    }
+    wide = (e->aux_type == CC_TYPE_INT || e->aux_type == CC_TYPE_UINT || e->aux_type == CC_TYPE_LONG_LONG ||
+            e->aux_type == CC_TYPE_ULONG_LONG);
+    i = 1;
+    n -= 1;
+    units = 0;
+    while (i < n) {
+        if (s[i] == '\\') {
+            i++;
+            if (i >= n) {
+                return 0;
+            }
+            if (s[i] == 'x') {
+                i++;
+                while (i < n && isxdigit(s[i])) {
+                    i++;
+                }
+            } else if (s[i] >= '0' && s[i] <= '7') {
+                int k = 0;
+                while (i < n && k < 3 && s[i] >= '0' && s[i] <= '7') {
+                    i++;
+                    k++;
+                }
+            } else {
+                i++;
+            }
+            units++;
+            continue;
+        }
+        if (!wide) {
+            i++;
+            units++;
+            continue;
+        }
+        {
+            size_t adv = parser_utf8_seq_len(s[i]);
+            if (adv == 0) adv = 1;
+            if (i + adv > n) adv = 1;
+            i += adv;
+            units++;
+        }
+    }
+    if (units >= (size_t)LONG_MAX) {
+        return 0;
+    }
+    return (long)units + 1;
+}
+
+static long parser_init_list_array_bound(cc_type_t array_type, int array_struct_id, const cc_expr_t *init) {
+    cc_type_t elem_type;
+    const cc_expr_t *item;
+    int wide;
+    long inferred;
+
+    if (!is_pointer_type(array_type) || init == NULL || init->kind != CC_EXPR_INIT_LIST || init->arg_count == 0) {
+        return 0;
+    }
+    elem_type = ptr_deref_type(array_type);
+    if (init->arg_count == 1) {
+        item = init->args[0];
+        if (item != NULL && item->kind == CC_EXPR_STR) {
+            wide = (item->aux_type == CC_TYPE_INT || item->aux_type == CC_TYPE_UINT ||
+                    item->aux_type == CC_TYPE_LONG_LONG || item->aux_type == CC_TYPE_ULONG_LONG);
+            if ((wide && parser_is_integral_type(elem_type)) ||
+                (!wide && (elem_type == CC_TYPE_CHAR || elem_type == CC_TYPE_UCHAR))) {
+                inferred = parser_string_literal_array_bound(item);
+                if (inferred > 0) {
+                    return inferred;
+                }
+            }
+        }
+    }
+    if (elem_type == CC_TYPE_VOID && array_struct_id >= 0) {
+        return 0;
+    }
+    return (long)init->arg_count;
 }
 
 static int append_string_piece(char **dst, const char *piece) {
@@ -9015,16 +9119,10 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                  * struct/union element initializers.
                  */
                 if (!(elem_type == CC_TYPE_VOID && s.type_struct_id >= 0)) {
-                    inferred = (long)s.expr->arg_count;
+                    inferred = parser_init_list_array_bound(s.type, s.type_struct_id, s.expr);
                 }
             } else if (s.expr->kind == CC_EXPR_STR) {
-                const char *lit = s.expr->ident;
-                if (lit != NULL) {
-                    size_t n = strlen(lit);
-                    if (n >= 2 && lit[0] == '"' && lit[n - 1] == '"') {
-                        inferred = (long)(n - 1); /* payload bytes + terminating NUL */
-                    }
-                }
+                inferred = parser_string_literal_array_bound(s.expr);
             }
             if (inferred > 0) {
                 s.array_dims[0] = inferred;

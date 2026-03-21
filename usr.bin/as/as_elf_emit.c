@@ -7343,9 +7343,16 @@ static int append_directive_data(bytebuf_t *buf, const as_directive_t *d) {
         int nul = (strcmp(d->name, ".ascii") == 0) ? 0 : 1;
         for (i = 0; i < d->arg_count; ++i) {
             const char *s = d->args[i] != NULL ? d->args[i] : "";
-            if (bytebuf_append(buf, s, strlen(s)) != 0) {
+            char *bytes = NULL;
+            size_t len = 0;
+            if (as_decode_string_literal(s, &bytes, &len) != 0) {
                 return -1;
             }
+            if (bytebuf_append(buf, bytes, len) != 0) {
+                free(bytes);
+                return -1;
+            }
+            free(bytes);
             if (nul && bytebuf_append_zeros(buf, 1) != 0) {
                 return -1;
             }
@@ -10925,7 +10932,14 @@ static int append_data_directive_binary(emit_ctx_t *ctx, const as_stmt_t *st, bi
         *handled = 1;
         for (i = 0; i < d->arg_count; ++i) {
             const char *s = d->args[i] != NULL ? d->args[i] : "";
-            if (bytebuf_append(&sec->buf, s, strlen(s)) != 0) {
+            char *bytes = NULL;
+            size_t len = 0;
+            if (as_decode_string_literal(s, &bytes, &len) != 0) {
+                set_err(ctx, "%s:%u: malformed string literal", st->file != NULL ? st->file : "<input>", st->line);
+                return -1;
+            }
+            if (bytebuf_append(&sec->buf, bytes, len) != 0) {
+                free(bytes);
                 set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
                 return -1;
             }

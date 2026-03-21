@@ -80,6 +80,7 @@ fi
 "$ROOT/tests/usr.bin/as/test_x86_32_corpus_intel_roundtrip.sh"
 "$ROOT/tests/usr.bin/as/test_x86_64_corpus_intel_roundtrip.sh"
 "$ROOT/tests/usr.bin/as/test_output_binary.sh"
+"$ROOT/tests/usr.bin/as/test_string_embedded_nul.sh"
 gcc -c -x assembler -m64 -o "$TMP/gnu_obj.o" "$TMP/roundtrip.s"
 if [ -x "$SUB_LD" ]; then
     "$SUB_LD" -m64 -r -o "$TMP/sub_ld_on_gnu.o" "$TMP/gnu_obj.o"
