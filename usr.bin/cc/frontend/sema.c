@@ -5631,13 +5631,6 @@ fail_global_item:
                 goto fail_decl;
             }
         }
-        if ((f->attr_flags & CC_ATTR_NORETURN) != 0 && !(f->ret_type == CC_TYPE_VOID && f->ret_struct_id < 0)) {
-            if (diag != NULL && diag->message[0] == '\0') {
-                snprintf(diag->message, sizeof(diag->message), "noreturn function '%s' must have void return type",
-                         f->name);
-            }
-            goto fail_decl;
-        }
         if ((f->attr_flags & (CC_ATTR_CONSTRUCTOR | CC_ATTR_DESTRUCTOR)) != 0) {
             if (!(f->ret_type == CC_TYPE_VOID && f->ret_struct_id < 0)) {
                 if (diag != NULL && diag->message[0] == '\0') {

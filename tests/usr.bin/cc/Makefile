@@ -184,6 +184,8 @@ test:
 	/tmp/cc_native_c99_float_cmp
 	$(TOP)/usr.bin/cc/cc native_c99_math_classify_builtins.c -o /tmp/cc_native_c99_math_classify_builtins
 	/tmp/cc_native_c99_math_classify_builtins
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_c11_alignas_zero.c -o /tmp/cc_native_c11_alignas_zero
+	/tmp/cc_native_c11_alignas_zero
 	$(TOP)/usr.bin/cc/cc native_c99_long_double_type.c -o /tmp/cc_native_c99_long_double_type
 	/tmp/cc_native_c99_long_double_type
 	$(TOP)/usr.bin/cc/cc native_c99_unsigned.c -o /tmp/cc_native_c99_unsigned

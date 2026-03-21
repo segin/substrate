@@ -1995,9 +1995,9 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                     if (ae == NULL) {
                         return -1;
                     }
-                    if (eval_const_array_bound_expr(p, ae, &align) != 0 || align <= 0) {
+                    if (eval_const_array_bound_expr(p, ae, &align) != 0 || align < 0) {
                         free_expr(ae);
-                        set_diag(p->diag, p->tok.line, p->tok.col, "alignas requires a positive integer constant");
+                        set_diag(p->diag, p->tok.line, p->tok.col, "alignas requires a non-negative integer constant");
                         return -1;
                     }
                     free_expr(ae);
@@ -2005,7 +2005,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                 if (expect(p, TOK_RPAREN, "expected ')' after _Alignas/alignas") != 0) {
                     return -1;
                 }
-                if (out_attrs != NULL) {
+                if (out_attrs != NULL && align > 0) {
                     out_attrs->flags |= CC_ATTR_ALIGNED;
                     if (align > out_attrs->align) {
                         out_attrs->align = align;

@@ -360,6 +360,65 @@ static int is_ident_char(int c) {
     return c == '_' || isalnum((unsigned char)c);
 }
 
+static size_t pp_literal_prefix_len(const char *src, size_t i, int *out_quote) {
+    int q = 0;
+
+    if (src == NULL) {
+        if (out_quote != NULL) {
+            *out_quote = 0;
+        }
+        return 0;
+    }
+    if (src[i] == '"' || src[i] == '\'') {
+        q = (unsigned char)src[i];
+        if (out_quote != NULL) {
+            *out_quote = q;
+        }
+        return 0;
+    }
+    if (src[i] == 'u' && src[i + 1] == '8' && (src[i + 2] == '"' || src[i + 2] == '\'')) {
+        q = (unsigned char)src[i + 2];
+        if (out_quote != NULL) {
+            *out_quote = q;
+        }
+        return 2;
+    }
+    if ((src[i] == 'L' || src[i] == 'u' || src[i] == 'U') && (src[i + 1] == '"' || src[i + 1] == '\'')) {
+        q = (unsigned char)src[i + 1];
+        if (out_quote != NULL) {
+            *out_quote = q;
+        }
+        return 1;
+    }
+    if (out_quote != NULL) {
+        *out_quote = 0;
+    }
+    return 0;
+}
+
+static size_t pp_skip_prefixed_literal(const char *src, size_t i) {
+    size_t prefix_len;
+    int q = 0;
+
+    prefix_len = pp_literal_prefix_len(src, i, &q);
+    if (q == 0) {
+        return i;
+    }
+    i += prefix_len + 1;
+    while (src[i] != '\0') {
+        if (src[i] == '\\' && src[i + 1] != '\0') {
+            i += 2;
+            continue;
+        }
+        if ((unsigned char)src[i] == (unsigned char)q) {
+            i++;
+            break;
+        }
+        i++;
+    }
+    return i;
+}
+
 static int trigraph_replacement(int c) {
     switch (c) {
     case '=':
@@ -829,6 +888,14 @@ static size_t count_pp_tokens(const char *src) {
             i++;
             continue;
         }
+        {
+            size_t lit_end = pp_skip_prefixed_literal(src, i);
+            if (lit_end != i) {
+                i = lit_end;
+                count++;
+                continue;
+            }
+        }
         if (is_ident_start((unsigned char)src[i])) {
             i++;
             while (is_ident_char((unsigned char)src[i])) {
@@ -840,22 +907,6 @@ static size_t count_pp_tokens(const char *src) {
         if (isdigit((unsigned char)src[i]) || (src[i] == '.' && isdigit((unsigned char)src[i + 1]))) {
             i++;
             while (isalnum((unsigned char)src[i]) || src[i] == '_' || src[i] == '.' || src[i] == '+' || src[i] == '-') {
-                i++;
-            }
-            count++;
-            continue;
-        }
-        if (src[i] == '"' || src[i] == '\'') {
-            int q = (unsigned char)src[i++];
-            while (src[i] != '\0') {
-                if (src[i] == '\\' && src[i + 1] != '\0') {
-                    i += 2;
-                    continue;
-                }
-                if ((unsigned char)src[i] == (unsigned char)q) {
-                    i++;
-                    break;
-                }
                 i++;
             }
             count++;
@@ -3964,6 +4015,19 @@ static char *replace_params(const pp_macro_t *m, char **raw_args, char **exp_arg
     }
     has_va_args = va_args_exp[0] != '\0';
     while (m->body[i] != '\0') {
+        {
+            size_t lit_end = pp_skip_prefixed_literal(m->body, i);
+            if (lit_end != i) {
+                if (sb_append_n(&out, m->body + i, lit_end - i) != 0) {
+                    free(va_args_exp);
+                    free(va_args_raw);
+                    sb_free(&out);
+                    return NULL;
+                }
+                i = lit_end;
+                continue;
+            }
+        }
         if (m->is_variadic && !has_va_args && allow_gnu_ext && m->body[i] == ',') {
             size_t k = i + 1;
             while (m->body[k] == ' ' || m->body[k] == '\t') {
@@ -4026,38 +4090,6 @@ static char *replace_params(const pp_macro_t *m, char **raw_args, char **exp_arg
             }
             free(va_opt_text);
             i = end_pos;
-            continue;
-        }
-        if (m->body[i] == '"' || m->body[i] == '\'') {
-            char q = m->body[i];
-            if (sb_append_c(&out, q) != 0) {
-                free(va_args_exp);
-                free(va_args_raw);
-                sb_free(&out);
-                return NULL;
-            }
-            i++;
-            while (m->body[i] != '\0') {
-                if (sb_append_c(&out, m->body[i]) != 0) {
-                    free(va_args_exp);
-                    free(va_args_raw);
-                    sb_free(&out);
-                    return NULL;
-                }
-                if (m->body[i] == '\\' && m->body[i + 1] != '\0') {
-                    i++;
-                    if (sb_append_c(&out, m->body[i]) != 0) {
-                        free(va_args_exp);
-                        free(va_args_raw);
-                        sb_free(&out);
-                        return NULL;
-                    }
-                } else if (m->body[i] == q) {
-                    i++;
-                    break;
-                }
-                i++;
-            }
             continue;
         }
         if (m->body[i] == '#' && m->body[i + 1] != '#' && (i == 0 || m->body[i - 1] != '#')) {
@@ -4413,31 +4445,16 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
     sb_t out;
     memset(&out, 0, sizeof(out));
     while (src[i] != '\0') {
-        if (src[i] == '"' || src[i] == '\'') {
-            char q = src[i];
-            if (sb_append_c(&out, src[i]) != 0) {
-                sb_free(&out);
-                return NULL;
-            }
-            i++;
-            while (src[i] != '\0') {
-                if (sb_append_c(&out, src[i]) != 0) {
+        {
+            size_t lit_end = pp_skip_prefixed_literal(src, i);
+            if (lit_end != i) {
+                if (sb_append_n(&out, src + i, lit_end - i) != 0) {
                     sb_free(&out);
                     return NULL;
                 }
-                if (src[i] == '\\' && src[i + 1] != '\0') {
-                    i++;
-                    if (sb_append_c(&out, src[i]) != 0) {
-                        sb_free(&out);
-                        return NULL;
-                    }
-                } else if (src[i] == q) {
-                    i++;
-                    break;
-                }
-                i++;
+                i = lit_end;
+                continue;
             }
-            continue;
         }
         if (is_ident_start((unsigned char)src[i])) {
             size_t j = i + 1;
@@ -4985,6 +5002,17 @@ static char *mask_hidden_macro_name_tokens(const char *src, const char *name) {
     nlen = strlen(name);
     memset(&out, 0, sizeof(out));
     while (src[i] != '\0') {
+        {
+            size_t lit_end = pp_skip_prefixed_literal(src, i);
+            if (lit_end != i) {
+                if (sb_append_n(&out, src + i, lit_end - i) != 0) {
+                    sb_free(&out);
+                    return NULL;
+                }
+                i = lit_end;
+                continue;
+            }
+        }
         if (is_ident_start((unsigned char)src[i])) {
             size_t j = i + 1;
             while (is_ident_char((unsigned char)src[j])) {
