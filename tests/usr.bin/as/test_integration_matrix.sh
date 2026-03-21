@@ -12,6 +12,7 @@ trap 'rm -rf "$TMP"' EXIT INT TERM
 "$ROOT/tests/usr.bin/as/test_integration_rollout.sh"
 if [ -x "$SUB_LD" ]; then
     "$ROOT/tests/usr.bin/as/test_main_32_64.sh"
+    "$ROOT/tests/usr.bin/as/test_x86_local_temp_branch_runtime.sh"
 else
     echo "ok: main/ld integration skipped due to missing sub ld"
 fi
