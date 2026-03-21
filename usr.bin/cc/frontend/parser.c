@@ -436,7 +436,7 @@ static int parser_sync_block_stmt(parser_t *p) {
 }
 
 typedef struct {
-    int flags;
+    cc_attr_flags_t flags;
     long align;
     long format_index;
     long format_first_to_check;
@@ -4916,6 +4916,8 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     int is_visibility;
     int is_tls_model;
     int is_cleanup;
+    int is_constructor;
+    int is_destructor;
     int is_transparent_union;
     int is_vector_size;
     int is_ext_vector_type;
@@ -4964,6 +4966,8 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     is_visibility = tok_is_gnu_attr_name(p, "visibility");
     is_tls_model = tok_is_gnu_attr_name(p, "tls_model");
     is_cleanup = tok_is_gnu_attr_name(p, "cleanup");
+    is_constructor = tok_is_gnu_attr_name(p, "constructor");
+    is_destructor = tok_is_gnu_attr_name(p, "destructor");
     is_transparent_union = tok_is_gnu_attr_name(p, "transparent_union");
     is_vector_size = tok_is_gnu_attr_name(p, "vector_size");
     is_ext_vector_type = tok_is_gnu_attr_name(p, "ext_vector_type");
@@ -4972,7 +4976,8 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     any_known = is_aligned || is_section || is_packed || is_deprecated || is_noreturn || is_unused || is_used ||
                 is_always_inline ||
                 is_noinline || is_hot || is_cold || is_format || is_nonnull || is_malloc_fn || is_alias || is_weak ||
-                is_flatten || is_target || is_visibility || is_tls_model || is_cleanup || is_transparent_union ||
+                is_flatten || is_target || is_visibility || is_tls_model || is_cleanup || is_constructor ||
+                is_destructor || is_transparent_union ||
                 is_vector_size || is_ext_vector_type || is_may_alias || is_mode;
 
     if (next_tok(p) != 0) {
@@ -5042,6 +5047,12 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
         }
         if (is_cleanup) {
             out_attrs->flags |= CC_ATTR_CLEANUP;
+        }
+        if (is_constructor) {
+            out_attrs->flags |= CC_ATTR_CONSTRUCTOR;
+        }
+        if (is_destructor) {
+            out_attrs->flags |= CC_ATTR_DESTRUCTOR;
         }
         if (is_transparent_union) {
             out_attrs->flags |= CC_ATTR_TRANSPARENT_UNION;

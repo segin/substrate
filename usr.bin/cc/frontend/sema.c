@@ -264,12 +264,12 @@ static int validate_attr_section(const char *section, cc_diag_t *diag, const cha
     return -1;
 }
 
-static int attr_visibility_mask(void) {
+static cc_attr_flags_t attr_visibility_mask(void) {
     return CC_ATTR_VIS_DEFAULT | CC_ATTR_VIS_HIDDEN | CC_ATTR_VIS_PROTECTED | CC_ATTR_VIS_INTERNAL;
 }
 
-static int has_multiple_visibility_attrs(int flags) {
-    int v = flags & attr_visibility_mask();
+static int has_multiple_visibility_attrs(cc_attr_flags_t flags) {
+    cc_attr_flags_t v = flags & attr_visibility_mask();
     int n = 0;
     if ((v & CC_ATTR_VIS_DEFAULT) != 0) {
         n++;
@@ -2261,7 +2261,8 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
                                    size_t var_count, int depth, long *out_inferred_len, cc_diag_t *diag);
 static cc_expr_t *unwrap_scalar_initializer_expr(cc_expr_t *init, cc_diag_t *diag);
 static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t **vars, size_t *var_count, int depth,
-                      cc_type_t fn_ret_type, int fn_ret_struct_id, int fn_attr_flags, int loop_depth, int switch_depth,
+                      cc_type_t fn_ret_type, int fn_ret_struct_id, cc_attr_flags_t fn_attr_flags, int loop_depth,
+                      int switch_depth,
                       int *saw_return, cc_diag_t *diag);
 
 static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count, int depth,
@@ -4578,7 +4579,8 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
 }
 
 static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t **vars, size_t *var_count, int depth,
-                      cc_type_t fn_ret_type, int fn_ret_struct_id, int fn_attr_flags, int loop_depth, int switch_depth,
+                      cc_type_t fn_ret_type, int fn_ret_struct_id, cc_attr_flags_t fn_attr_flags, int loop_depth,
+                      int switch_depth,
                       int *saw_return, cc_diag_t *diag) {
     size_t i;
 
@@ -4606,9 +4608,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             int auto_type_decl = (s->storage & CC_STORAGE_AUTO_TYPE) != 0;
             int init_checked = 0;
             int sc_count = storage_class_count(s->storage);
-            int fn_only_attrs = CC_ATTR_ALWAYS_INLINE | CC_ATTR_NOINLINE | CC_ATTR_HOT | CC_ATTR_COLD |
-                                CC_ATTR_FORMAT | CC_ATTR_NONNULL | CC_ATTR_MALLOC_FN | CC_ATTR_ALIAS |
-                                CC_ATTR_FLATTEN | CC_ATTR_TARGET;
+            cc_attr_flags_t fn_only_attrs = CC_ATTR_ALWAYS_INLINE | CC_ATTR_NOINLINE | CC_ATTR_HOT | CC_ATTR_COLD |
+                                            CC_ATTR_FORMAT | CC_ATTR_NONNULL | CC_ATTR_MALLOC_FN | CC_ATTR_ALIAS |
+                                            CC_ATTR_FLATTEN | CC_ATTR_TARGET | CC_ATTR_CONSTRUCTOR | CC_ATTR_DESTRUCTOR;
             if ((s->attr_flags & CC_ATTR_NORETURN) != 0) {
                 set_diag(diag, "noreturn attribute is only valid on functions");
                 return -1;
@@ -5341,6 +5343,13 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
             }
             goto fail_global_item;
         }
+        if ((g->attr_flags & (CC_ATTR_CONSTRUCTOR | CC_ATTR_DESTRUCTOR)) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "constructor/destructor attributes are only valid on functions: %s", g->name);
+            }
+            goto fail_global_item;
+        }
         if ((g->attr_flags & CC_ATTR_ALIGNED) != 0 &&
             validate_attr_align(g->attr_align, diag, "aligned attribute on file-scope object") != 0) {
             goto fail_global_item;
@@ -5589,6 +5598,22 @@ fail_global_item:
             }
             goto fail_decl;
         }
+        if ((f->attr_flags & (CC_ATTR_CONSTRUCTOR | CC_ATTR_DESTRUCTOR)) != 0) {
+            if (!(f->ret_type == CC_TYPE_VOID && f->ret_struct_id < 0)) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "constructor/destructor function '%s' must have void return type", f->name);
+                }
+                goto fail_decl;
+            }
+            if (!f->has_prototype || f->param_count != 0 || f->is_variadic) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "constructor/destructor function '%s' must have prototype void(void)", f->name);
+                }
+                goto fail_decl;
+            }
+        }
         if ((f->attr_flags & CC_ATTR_ALIGNED) != 0 &&
             validate_attr_align(f->attr_align, diag, "aligned attribute on function") != 0) {
             goto fail_decl;
@@ -5759,7 +5784,7 @@ fail_decl:
         size_t j;
         size_t k;
         int saw_return = 0;
-        int fn_attr_flags = f->attr_flags;
+        cc_attr_flags_t fn_attr_flags = f->attr_flags;
 
         if (!f->has_body) {
             continue;

@@ -134,6 +134,14 @@ test:
 	grep -Eq "^[[:space:]]*\\.section \\.text\\.panic" /tmp/cc_native_c99_attr_codegen.s
 	grep -q "^\\.align 32$$" /tmp/cc_native_c99_attr_codegen.s
 	grep -q "^\\.align 16$$" /tmp/cc_native_c99_attr_codegen.s
+	LD=/usr/bin/ld $(TOP)/usr.bin/cc/cc native_c99_ctor_dtor_attr.c -o /tmp/cc_native_c99_ctor_dtor_attr
+	$(TOP)/usr.bin/cc/cc -S native_c99_ctor_dtor_attr.c -o /tmp/cc_native_c99_ctor_dtor_attr.s
+	grep -Eq "^[[:space:]]*\\.section \\.init_array" /tmp/cc_native_c99_ctor_dtor_attr.s
+	grep -Eq "^[[:space:]]*\\.(quad|long) ctor$$" /tmp/cc_native_c99_ctor_dtor_attr.s
+	grep -Eq "^[[:space:]]*\\.section \\.fini_array" /tmp/cc_native_c99_ctor_dtor_attr.s
+	grep -Eq "^[[:space:]]*\\.(quad|long) dtor$$" /tmp/cc_native_c99_ctor_dtor_attr.s
+	/tmp/cc_native_c99_ctor_dtor_attr 2>/tmp/cc_native_c99_ctor_dtor_attr.err
+	grep -q '^D$$' /tmp/cc_native_c99_ctor_dtor_attr.err
 	$(TOP)/usr.bin/cc/cc native_c99_gnu_declspec_aliases.c -o /tmp/cc_native_c99_gnu_declspec_aliases
 	/tmp/cc_native_c99_gnu_declspec_aliases
 	$(TOP)/usr.bin/cc/cc native_c99_multi_decl.c -o /tmp/cc_native_c99_multi_decl

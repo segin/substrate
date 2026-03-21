@@ -12629,7 +12629,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         size_t j;
         size_t k;
         int saw_ret = 0;
-        int eff_attr_flags;
+        cc_attr_flags_t eff_attr_flags;
         long eff_attr_align;
         const char *eff_attr_section;
         const char *eff_attr_alias = NULL;

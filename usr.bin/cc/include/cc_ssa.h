@@ -120,7 +120,7 @@ typedef struct {
     long array_len;
     long size_bytes;
     int storage;
-    int attr_flags;
+    cc_attr_flags_t attr_flags;
     long attr_align;
     char *attr_section;
     char *attr_alias;
@@ -141,7 +141,7 @@ typedef struct {
     char *name;
     cc_value_type_t ret_type;
     int storage;
-    int attr_flags;
+    cc_attr_flags_t attr_flags;
     long attr_align;
     char *attr_section;
     char *attr_alias;
