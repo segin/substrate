@@ -48,19 +48,29 @@ int test_util_is_newline(void) {
 }
 
 int test_ascii_toupper(void) {
-    TEST_ASSERT(regex_ascii_toupper('a') == 'A');
-    TEST_ASSERT(regex_ascii_toupper('z') == 'Z');
-    TEST_ASSERT(regex_ascii_toupper('m') == 'M');
-    TEST_ASSERT(regex_ascii_toupper('A') == 'A');
-    TEST_ASSERT(regex_ascii_toupper('Z') == 'Z');
-    TEST_ASSERT(regex_ascii_toupper('0') == '0');
-    TEST_ASSERT(regex_ascii_toupper('9') == '9');
-    TEST_ASSERT(regex_ascii_toupper('!') == '!');
-    TEST_ASSERT(regex_ascii_toupper('~') == '~');
-    TEST_ASSERT(regex_ascii_toupper(' ') == ' ');
-    TEST_ASSERT(regex_ascii_toupper('\n') == '\n');
-    TEST_ASSERT(regex_ascii_toupper('\0') == '\0');
-    TEST_ASSERT(regex_ascii_toupper(0x1F4A9) == 0x1F4A9);
+    for (uint32_t cp = 'a'; cp <= 'z'; cp++) {
+        TEST_ASSERT(regex_ascii_toupper(cp) == cp - 'a' + 'A');
+    }
+
+    for (uint32_t cp = 'A'; cp <= 'Z'; cp++) {
+        TEST_ASSERT(regex_ascii_toupper(cp) == cp);
+    }
+
+    for (uint32_t cp = '0'; cp <= '9'; cp++) {
+        TEST_ASSERT(regex_ascii_toupper(cp) == cp);
+    }
+
+    TEST_ASSERT(regex_ascii_toupper('@') == '@');
+    TEST_ASSERT(regex_ascii_toupper('[') == '[');
+    TEST_ASSERT(regex_ascii_toupper('`') == '`');
+    TEST_ASSERT(regex_ascii_toupper('{') == '{');
+
+    TEST_ASSERT(regex_ascii_toupper(0) == 0);
+    TEST_ASSERT(regex_ascii_toupper(127) == 127);
+    TEST_ASSERT(regex_ascii_toupper(128) == 128);
+    TEST_ASSERT(regex_ascii_toupper(255) == 255);
+    TEST_ASSERT(regex_ascii_toupper(REGEX_MAX_CODEPOINT) == REGEX_MAX_CODEPOINT);
+
     return 0;
 }
 
