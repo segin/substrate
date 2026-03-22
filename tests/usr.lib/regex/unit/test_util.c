@@ -107,12 +107,25 @@ int test_unicode_tolower(void) {
     TEST_ASSERT(regex_unicode_tolower('9') == '9');
     TEST_ASSERT(regex_unicode_tolower('!') == '!');
     TEST_ASSERT(regex_unicode_tolower(' ') == ' ');
+
+    /* Edge cases */
+    TEST_ASSERT(regex_unicode_tolower(0) == 0);
+    TEST_ASSERT(regex_unicode_tolower(127) == 127);
+    TEST_ASSERT(regex_unicode_tolower(128) == 128);
+    TEST_ASSERT(regex_unicode_tolower(255) == 255);
+    TEST_ASSERT(regex_unicode_tolower(REGEX_MAX_CODEPOINT) == REGEX_MAX_CODEPOINT);
+    TEST_ASSERT(regex_unicode_tolower(0xFFFFFFFF) == 0xFFFFFFFF);
+
 #ifdef REGEX_USE_ICU
     TEST_ASSERT(regex_unicode_tolower(0x00C4) == 0x00E4);
     TEST_ASSERT(regex_unicode_tolower(0x03A9) == 0x03C9);
+    TEST_ASSERT(regex_unicode_tolower(0x0410) == 0x0430); /* Cyrillic A */
+    TEST_ASSERT(regex_unicode_tolower(0x0100) == 0x0101); /* Latin A with macron */
 #else
     TEST_ASSERT(regex_unicode_tolower(0x00C4) == 0x00C4);
     TEST_ASSERT(regex_unicode_tolower(0x03A9) == 0x03A9);
+    TEST_ASSERT(regex_unicode_tolower(0x0410) == 0x0410);
+    TEST_ASSERT(regex_unicode_tolower(0x0100) == 0x0100);
 #endif
     return 0;
 }
@@ -126,12 +139,25 @@ int test_unicode_toupper(void) {
     TEST_ASSERT(regex_unicode_toupper('9') == '9');
     TEST_ASSERT(regex_unicode_toupper('!') == '!');
     TEST_ASSERT(regex_unicode_toupper(' ') == ' ');
+
+    /* Edge cases */
+    TEST_ASSERT(regex_unicode_toupper(0) == 0);
+    TEST_ASSERT(regex_unicode_toupper(127) == 127);
+    TEST_ASSERT(regex_unicode_toupper(128) == 128);
+    TEST_ASSERT(regex_unicode_toupper(255) == 255);
+    TEST_ASSERT(regex_unicode_toupper(REGEX_MAX_CODEPOINT) == REGEX_MAX_CODEPOINT);
+    TEST_ASSERT(regex_unicode_toupper(0xFFFFFFFF) == 0xFFFFFFFF);
+
 #ifdef REGEX_USE_ICU
     TEST_ASSERT(regex_unicode_toupper(0x00E4) == 0x00C4);
     TEST_ASSERT(regex_unicode_toupper(0x03C9) == 0x03A9);
+    TEST_ASSERT(regex_unicode_toupper(0x0430) == 0x0410); /* Cyrillic a */
+    TEST_ASSERT(regex_unicode_toupper(0x0101) == 0x0100); /* Latin a with macron */
 #else
     TEST_ASSERT(regex_unicode_toupper(0x00E4) == 0x00E4);
     TEST_ASSERT(regex_unicode_toupper(0x03C9) == 0x03C9);
+    TEST_ASSERT(regex_unicode_toupper(0x0430) == 0x0430);
+    TEST_ASSERT(regex_unicode_toupper(0x0101) == 0x0101);
 #endif
     return 0;
 }
