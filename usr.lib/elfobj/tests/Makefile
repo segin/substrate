@@ -91,6 +91,7 @@ test_strtab: test_strtab.c ../libelfobj.a
 test_ensure_symbols_relocs: test_ensure_symbols_relocs.c ../libelfobj.a
 	$(CC) $(CFLAGS) test_ensure_symbols_relocs.c ../libelfobj.a -o test_ensure_symbols_relocs
 
+
 clean:
 	rm -f $(TESTS) *.o tmp_*.o tmp_*.elf tmp_identity_*.o tmp_rel*.o tmp_rela*.o \
 		tmp_link_service_*.o tmp_debug_*.o tmp_debug_*.txt tmp_matrix_*.o tmp_matrix_*.elf \
