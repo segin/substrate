@@ -2,7 +2,7 @@ include ../../../Makefile.inc
 
 CFLAGS := $(CFLAGS) -I../../../include -I../../../sys -I../src
 
-TESTS = test_roundtrip test_invalid test_link test_reader_writer test_roundtrip_identity \
+TESTS = test_strtab test_roundtrip test_invalid test_link test_reader_writer test_roundtrip_identity \
 	test_section_segment test_symbols_hash test_reloc_backend test_link_services \
 	test_debug_unwind test_validate_hardening test_perf_io test_matrix test_multiarch_api \
 	test_write_to_buffer test_ensure_symbols_relocs test_push_section
@@ -10,6 +10,7 @@ TESTS = test_roundtrip test_invalid test_link test_reader_writer test_roundtrip_
 .PHONY: all clean
 
 all: $(TESTS)
+	./test_strtab
 	./test_push_section
 	./test_write_to_buffer
 	./test_roundtrip
@@ -88,3 +89,6 @@ clean:
 		tmp_link_service_*.o tmp_debug_*.o tmp_debug_*.txt tmp_matrix_*.o tmp_matrix_*.elf \
 		.perf_bench.out
 	rm -rf .tool_integration
+
+test_strtab: test_strtab.c ../libelfobj.a
+	$(CC) $(CFLAGS) test_strtab.c ../libelfobj.a -o test_strtab
