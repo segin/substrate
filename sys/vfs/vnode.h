@@ -78,14 +78,9 @@ enum vtagtype {
 #define VXWANT      0x0800  /* Want exclusive lock */
 #define VMODIFIED   0x1000  /* Vnode has been modified */
 #define VACCESSTIME 0x2000  /* Access time needs update */
+#define VEXECMAP    0x4000  /* Vnode mapped for exec */
 
-/*
- * Lock operations for vn_lock
- */
-#define LK_SHARED       0x01    /* Shared lock */
-#define LK_EXCLUSIVE    0x02    /* Exclusive lock */
-#define LK_NOWAIT       0x10    /* Don't wait for lock */
-#define LK_RETRY        0x20    /* Retry on failure */
+/* Lock operations for vn_lock are defined in <sys/lock.h> */
 
 /*
  * vop_open:
@@ -112,14 +107,14 @@ struct vnode {
     uint32_t        v_usecount;     /* Active references (holds vnode in use) */
     uint32_t        v_holdcount;    /* Weak references (for caching) */
     uint32_t        v_writecount;   /* Number of write opens */
+    int32_t         v_numoutput;    /* Pending async writes (for fsync) */
     
     /* Flags and state */
     uint32_t        v_flag;         /* Vnode flags */
     
     /* Locking */
     spinlock_t      v_interlock;    /* Protects vnode fields */
-    uint32_t        v_lockstate;    /* Current lock state */
-    struct thread   *v_lockowner;   /* Current exclusive lock owner */
+    struct lock     v_lock;         /* Lockmgr shared/exclusive lock */
     
     /* LRU list linkage (for vnode cache) */
     struct vnode    *v_freelist_next;
@@ -181,6 +176,11 @@ struct vnodeops {
                     int *runp, int *runb);
     int (*vop_pathconf)(struct vnode *vp, int name, register_t *retval);
     int (*vop_print)(struct vnode *vp);
+    int (*vop_lock)(struct vnode *vp, int flags);
+    int (*vop_unlock)(struct vnode *vp, int flags);
+    int (*vop_islocked)(struct vnode *vp);
+    int (*vop_advlock)(struct vnode *vp, void *id, int op,
+                       void *fl, int flags);
 };
 
 /*
@@ -238,6 +238,14 @@ struct vnodeops {
     ((vp)->v_op->vop_pathconf(vp, name, retval))
 #define VOP_PRINT(vp) \
     ((vp)->v_op->vop_print(vp))
+#define VOP_LOCK(vp, flags) \
+    ((vp)->v_op->vop_lock(vp, flags))
+#define VOP_UNLOCK(vp, flags) \
+    ((vp)->v_op->vop_unlock(vp, flags))
+#define VOP_ISLOCKED(vp) \
+    ((vp)->v_op->vop_islocked(vp))
+#define VOP_ADVLOCK(vp, id, op, fl, flags) \
+    ((vp)->v_op->vop_advlock(vp, id, op, fl, flags))
 
 /*
  * VFS macros for calling filesystem operations
@@ -264,6 +272,8 @@ struct vnodeops {
     ((mp)->mnt_op->vfs_vptofh(vp, fhp))
 #define VFS_INIT(vfsconf) \
     ((vfsconf)->vfc_vfsops->vfs_init(vfsconf))
+#define VFS_UNINIT(vfsconf) \
+    ((vfsconf)->vfc_vfsops->vfs_uninit(vfsconf))
 
 /*
  * Vnode attributes (for getattr/setattr)
@@ -325,6 +335,12 @@ void vgone(struct vnode *vp);
 
 /* Disassociate vnode from filesystem data */
 void vclean(struct vnode *vp, int flags);
+
+/* Invalidate all buffers for a vnode */
+int vinvalbuf(struct vnode *vp, int flags);
+
+/* Flush all vnodes for a mount point */
+int vflush(struct mount *mp, struct vnode *skipvp, int flags);
 
 /* Increment hold count (weak reference for caching) */
 void vhold(struct vnode *vp);

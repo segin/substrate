@@ -19,6 +19,7 @@ extern bool test_vm_object_lifecycle(void);
 extern bool test_vm_object_page_mgmt(void);
 extern bool test_vm_page_queue_ops(void);
 extern bool test_vm_page_flags(void);
+extern bool test_vm_page_try_to_free(void);
 extern bool test_vm_fault_anonymous(void);
 extern bool test_vm_fault_protection_violation(void);
 extern bool test_mmap_logic(void);
@@ -101,6 +102,12 @@ extern bool test_vop_symlink_notsupp(void);
 extern bool test_vop_readlink_basic(void);
 extern bool test_vop_readlink_notlink(void);
 extern bool test_vop_readlink_notsupp(void);
+extern bool test_vnode_cache_insert_basic(void);
+extern bool test_vnode_cache_insert_no_mount(void);
+extern bool test_vnode_cache_insert_zero_ino(void);
+extern bool test_vnode_reclaim_basic(void);
+extern bool test_vclean_basic(void);
+extern bool test_vclean_null_reclaim(void);
 
 // FUSE Tests
 extern bool test_fuse_read(void);
@@ -184,6 +191,7 @@ test_case_t tests[] = {
     {"object_page", test_vm_object_page_mgmt},
     {"page_queues", test_vm_page_queue_ops},
     {"page_flags", test_vm_page_flags},
+    {"page_try_to_free", test_vm_page_try_to_free},
     {"fault_anon", test_vm_fault_anonymous},
     {"fault_prot", test_vm_fault_protection_violation},
     {"mmap_logic", test_mmap_logic},
@@ -252,6 +260,12 @@ test_case_t tests[] = {
     { "vfs_readlink_basic", test_vop_readlink_basic },
     { "vfs_readlink_notlink", test_vop_readlink_notlink },
     { "vfs_readlink_notsupp", test_vop_readlink_notsupp },
+    { "vnode_cache_insert_basic", test_vnode_cache_insert_basic },
+    { "vnode_cache_insert_no_mount", test_vnode_cache_insert_no_mount },
+    { "vnode_cache_insert_zero_ino", test_vnode_cache_insert_zero_ino },
+    { "vnode_reclaim_basic", test_vnode_reclaim_basic },
+    { "vclean_basic", test_vclean_basic },
+    { "vclean_null_reclaim", test_vclean_null_reclaim },
     {"fuse_read", test_fuse_read},
     {"ansi_parsing", test_ansi_parsing},
     {"sched_prop", test_sched_properties},

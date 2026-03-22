@@ -391,6 +391,95 @@ static void test_free_list_integrity(void) {
     TEST_PASS("free_list_integrity");
 }
 
+
+/* Test: Contiguous below success */
+static void test_contiguous_below_success(void) {
+    uintptr_t limit = 0x20000; /* 128KB limit */
+    vm_page_t *page = vm_phys_alloc_contiguous_below(2, limit);
+    TEST_ASSERT(page != NULL, "contig_below_success: returned NULL");
+    TEST_ASSERT(page->phys_addr < limit, "contig_below_success: above limit");
+
+    vm_phys_free_contiguous(page, 2);
+    TEST_PASS("contiguous_below_success");
+}
+
+/* Test: Contiguous below limit */
+static void test_contiguous_below_limit(void) {
+    uintptr_t limit = 0x1000; /* Extremely low limit */
+    /* drain order 0 temporarily */
+    vm_page_t *drained = NULL;
+    while (vm_phys_get_order_free_count(0) > 0) {
+        vm_page_t *page = vm_phys_alloc_page_below(limit);
+        if (!page) break;
+        page->next = drained;
+        drained = page;
+    }
+
+    vm_page_t *page = vm_phys_alloc_contiguous_below(1, limit);
+    TEST_ASSERT(page == NULL, "contig_below_limit: should return NULL");
+
+    while (drained) {
+        vm_page_t *next = drained->next;
+        vm_phys_free_page(drained);
+        drained = next;
+    }
+    TEST_PASS("contiguous_below_limit");
+}
+
+/* Test: Contiguous below zero count */
+static void test_contiguous_below_zero(void) {
+    uintptr_t limit = 0x100000;
+    vm_page_t *page = vm_phys_alloc_contiguous_below(0, limit);
+    TEST_ASSERT(page == NULL, "contig_below_zero: should return NULL");
+    TEST_PASS("contiguous_below_zero");
+}
+
+/* Test: vm_phys_early_init correctly initializes page array and states */
+static void test_vm_phys_early_init(void) {
+    static vm_page_t test_pages[4];
+
+    vm_phys_early_init(NULL, 0, test_pages, 4);
+
+    TEST_ASSERT(vm_phys_get_free() == 0, "early_init: free count not zero");
+
+    for (size_t i = 0; i < 4; i++) {
+        TEST_ASSERT(test_pages[i].magic_head == VM_PAGE_MAGIC, "early_init: magic_head invalid");
+        TEST_ASSERT(test_pages[i].magic_tail == VM_PAGE_MAGIC, "early_init: magic_tail invalid");
+        TEST_ASSERT(test_pages[i].phys_addr == i * PMM_BLOCK_SIZE, "early_init: phys_addr invalid");
+        TEST_ASSERT(test_pages[i].flags == 0, "early_init: flags not zero");
+    }
+
+    TEST_PASS("vm_phys_early_init");
+}
+
+/* Test: vm_phys_add_range correctly adds memory ranges to buddy system */
+static void test_vm_phys_add_range(void) {
+    static vm_page_t test_pages[16];
+
+    /* Setup a fresh environment for testing */
+    vm_phys_early_init(NULL, 0, test_pages, 16);
+    TEST_ASSERT(vm_phys_get_free() == 0, "add_range: initial free count not zero");
+
+    /* Test empty range (start >= end) */
+    vm_phys_add_range(PMM_BLOCK_SIZE * 4, PMM_BLOCK_SIZE * 4);
+    TEST_ASSERT(vm_phys_get_free() == 0, "add_range: empty range modified free count");
+
+    /* Test inverted range */
+    vm_phys_add_range(PMM_BLOCK_SIZE * 8, PMM_BLOCK_SIZE * 4);
+    TEST_ASSERT(vm_phys_get_free() == 0, "add_range: inverted range modified free count");
+
+    /* Test adding a valid range (4 pages, order 2) */
+    vm_phys_add_range(0, PMM_BLOCK_SIZE * 4);
+    TEST_ASSERT(vm_phys_get_free() == 4, "add_range: 4 pages free count incorrect");
+    TEST_ASSERT(vm_phys_get_order_free_count(2) == 1, "add_range: 4 pages order 2 count incorrect");
+
+    /* Test adding remaining range (12 pages) */
+    vm_phys_add_range(PMM_BLOCK_SIZE * 4, PMM_BLOCK_SIZE * 16);
+    TEST_ASSERT(vm_phys_get_free() == 16, "add_range: 16 total pages free count incorrect");
+
+    TEST_PASS("vm_phys_add_range");
+}
+
 /* Test entry point */
 void test_vm_phys(void) {
     kprint("=== Physical Memory Manager Integration Tests ===\n");
@@ -414,8 +503,26 @@ void test_vm_phys(void) {
     test_mark_used_single_page_reservation();
     test_free_used_invariant();
     test_free_list_integrity();
+    test_contiguous_below_basic();
+    test_contiguous_below_success();
+    test_contiguous_below_limit();
+    test_contiguous_below_zero();
+    test_vm_phys_early_init();
+    test_vm_phys_add_range();
     
     char buf[64];
     sprintf(buf, "=== vm_phys tests: %d passed, %d failed ===\n", passed, failed);
     kprint(buf);
+}
+
+/* Test: Basic contiguous below allocation logic */
+static void test_contiguous_below_basic(void) {
+    uintptr_t limit = 0x80000;
+    vm_page_t *page = vm_phys_alloc_contiguous_below(4, limit);
+    TEST_ASSERT(page != NULL, "contig_below_basic: returned NULL");
+    TEST_ASSERT(page->phys_addr < limit, "contig_below_basic: above limit");
+    TEST_ASSERT((page->phys_addr & 0x3FFF) == 0, "contig_below_basic: not 16KB aligned");
+
+    vm_phys_free_contiguous(page, 4);
+    TEST_PASS("contiguous_below_basic");
 }

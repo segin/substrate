@@ -243,10 +243,7 @@ char *expand_prompt_escapes(const char *ps1, int command_count, int extended, in
                 case 'k':
                     buffer_append_str(&buf, &cap, &len, "\001\033[49m\002");
                     break;
-                case '(': { // %(cond.true.false)
-                    // Format: %(C<sep>TRUE<sep>FALSE)
-                    // C is condition char (? or #)
-                    // <sep> is the character immediately following C
+                case '(': { /* %(cond.true.false) format: %(C<sep>TRUE<sep>FALSE) where C is condition char (? or #) and <sep> is the character immediately following C */
                     char cond_char = *(p + 1);
                     if (!cond_char) {
                         buffer_append(&buf, &cap, &len, '%');

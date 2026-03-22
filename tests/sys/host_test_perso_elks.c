@@ -1004,14 +1004,21 @@ int main(void) {
 
     strcpy((char *)(ds_mem + 0x240), "/dev/storage/ide0");
     strcpy((char *)(ds_mem + 0x260), "/mnt");
-    strcpy((char *)(ds_mem + 0x280), "ext2");
+    strcpy((char *)(ds_mem + 0x280), "minix");
     memset(ds_mem + 0x2a0, 0x5A, 8);
     fn = (void *)personality_elks.syscall_table[ELKS_SYS_mount];
-    if (fn(0x240, 0x260, 0x280, 3, 0x2a0, 0, 0, 0) != 51 || strcmp(last_name, "mount") != 0 ||
+    if (fn(0x240, 0x260, 2, 3, 0x2a0, 0, 0, 0) != 51 || strcmp(last_name, "mount") != 0 ||
         last_ptr != ds_base + 0x240U || last_ptr2 != ds_base + 0x260U ||
-        last_ptr3 != ds_base + 0x280U || last_i0 != 3 ||
+        strcmp((const char *)(uintptr_t)last_ptr3, "fat") != 0 ||
+        last_i0 != (MNT_RDONLY | MNT_NOSUID) ||
         last_i1 != (int)(ds_base + 0x2a0U)) {
         fprintf(stderr, "FAIL: ELKS mount wrapper wrong\n");
+        return 1;
+    }
+
+    if (fn(0x240, 0x260, 0x280, 0, 0, 0, 0, 0) != 51 || strcmp(last_name, "mount") != 0 ||
+        strcmp((const char *)(uintptr_t)last_ptr3, "minix") != 0) {
+        fprintf(stderr, "FAIL: ELKS mount string fallback wrong\n");
         return 1;
     }
 

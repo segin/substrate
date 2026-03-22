@@ -80,7 +80,7 @@ struct nameblock *srchname(char *name);
 struct nameblock *makename(char *name);
 void setvar(char *name, char *val);
 struct varblock *varptr(char *name);
-char *subst(char *a, char *b);
+char *subst(char *a, char *b, size_t max_len);
 char *copys(char *s);
 char *concat(char *a, char *b, char *c);
 void fatal(char *s);
@@ -88,6 +88,7 @@ void fatal1(char *s, char *a);
 int doname(struct nameblock *p, int reclevel, TIMETYPE *tval);
 int docom(struct shblock *q);
 int dosys(char *comstring, int nohalt);
+int dosysv(char **argv);
 TIMETYPE exists(char *filename);
 void rddescf(char *descfile);
 

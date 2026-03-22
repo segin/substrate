@@ -66,26 +66,55 @@ int sys_execve(const char *path, char *const argv[], char *const envp[]) {
     (void)path; (void)argv; (void)envp;
     return 0;
 }
+#include <string.h>
+
+static int mock_copyinstr_ret = 0;
 int copyinstr(const void *uaddr, void *kaddr, size_t len, size_t *done) {
-    (void)uaddr; (void)kaddr; (void)len; (void)done;
-    return 0;
-}
-int copyout(const void *kaddr, void *uaddr, size_t len) {
-    (void)kaddr; (void)uaddr; (void)len;
+    if (mock_copyinstr_ret != 0) return mock_copyinstr_ret;
+    if (uaddr && kaddr) {
+        strncpy((char *)kaddr, (const char *)uaddr, len);
+        if (done) *done = strlen((const char *)uaddr) + 1;
+    }
     return 0;
 }
 
+static int mock_copyout_ret = 0;
+int copyout(const void *kaddr, void *uaddr, size_t len) {
+    if (mock_copyout_ret != 0) return mock_copyout_ret;
+    if (kaddr && uaddr) {
+        memcpy(uaddr, kaddr, len);
+    }
+    return 0;
+}
+
+static int mock_kern_stat_ret = 0;
+static struct stat mock_kern_stat_buf;
+static char mock_kern_stat_path[256];
+
 int kern_stat(const char *path, struct stat *st) {
-    (void)path; (void)st;
-    return 0;
+    if (path) strncpy(mock_kern_stat_path, path, sizeof(mock_kern_stat_path));
+    if (st) *st = mock_kern_stat_buf;
+    return mock_kern_stat_ret;
 }
+
+static int mock_kern_lstat_ret = 0;
+static struct stat mock_kern_lstat_buf;
+static char mock_kern_lstat_path[256];
+
 int kern_lstat(const char *path, struct stat *st) {
-    (void)path; (void)st;
-    return 0;
+    if (path) strncpy(mock_kern_lstat_path, path, sizeof(mock_kern_lstat_path));
+    if (st) *st = mock_kern_lstat_buf;
+    return mock_kern_lstat_ret;
 }
+
+static int mock_kern_fstat_ret = 0;
+static struct stat mock_kern_fstat_buf;
+static int mock_kern_fstat_fd = -1;
+
 int kern_fstat(int fd, struct stat *st) {
-    (void)fd; (void)st;
-    return 0;
+    mock_kern_fstat_fd = fd;
+    if (st) *st = mock_kern_fstat_buf;
+    return mock_kern_fstat_ret;
 }
 
 /* Now we can include compat.c directly! */
@@ -121,6 +150,83 @@ static void test_compat_lseek32(void) {
     assert(compat_lseek32(5, 100, 0) == (int32_t)-0x80000000LL);
 
     printf("All compat_lseek32 tests passed!\n");
+}
+
+static void test_sys_freebsd_stat(void) {
+    printf("Testing sys_freebsd_stat()...\n");
+
+    struct freebsd_stat fbsd_buf;
+    int ret;
+
+    /* Reset mocks */
+    mock_copyinstr_ret = 0;
+    mock_copyout_ret = 0;
+    mock_kern_stat_ret = 0;
+    mock_kern_lstat_ret = 0;
+    mock_kern_fstat_ret = 0;
+
+    memset(&fbsd_buf, 0, sizeof(fbsd_buf));
+    memset(&mock_kern_stat_buf, 0, sizeof(mock_kern_stat_buf));
+    mock_kern_stat_path[0] = '\0';
+
+    /* Setup success case */
+    mock_kern_stat_buf.st_dev = 123;
+    mock_kern_stat_buf.st_ino = 456;
+    mock_kern_stat_buf.st_mode = 0755;
+    mock_kern_stat_buf.st_nlink = 2;
+    mock_kern_stat_buf.st_uid = 1000;
+    mock_kern_stat_buf.st_gid = 1000;
+    mock_kern_stat_buf.st_rdev = 0;
+    mock_kern_stat_buf.st_size = 1024;
+    mock_kern_stat_buf.st_blksize = 512;
+    mock_kern_stat_buf.st_blocks = 2;
+    mock_kern_stat_buf.st_atime = 1600000000;
+    mock_kern_stat_buf.st_atime_nsec = 100;
+    mock_kern_stat_buf.st_mtime = 1600000001;
+    mock_kern_stat_buf.st_mtime_nsec = 200;
+    mock_kern_stat_buf.st_ctime = 1600000002;
+    mock_kern_stat_buf.st_ctime_nsec = 300;
+
+    /* Test 1: Success */
+    ret = sys_freebsd_stat("/test/path", &fbsd_buf);
+    assert(ret == 0);
+    assert(strcmp(mock_kern_stat_path, "/test/path") == 0);
+    assert(fbsd_buf.st_dev == 123);
+    assert(fbsd_buf.st_ino == 456);
+    assert(fbsd_buf.st_mode == 0755);
+    assert(fbsd_buf.st_nlink == 2);
+    assert(fbsd_buf.st_uid == 1000);
+    assert(fbsd_buf.st_gid == 1000);
+    assert(fbsd_buf.st_rdev == 0);
+    assert(fbsd_buf.st_size == 1024);
+    assert(fbsd_buf.st_blksize == 512);
+    assert(fbsd_buf.st_blocks == 2);
+    assert(fbsd_buf.st_atim.tv_sec == 1600000000);
+    assert(fbsd_buf.st_atim.tv_nsec == 100);
+    assert(fbsd_buf.st_mtim.tv_sec == 1600000001);
+    assert(fbsd_buf.st_mtim.tv_nsec == 200);
+    assert(fbsd_buf.st_ctim.tv_sec == 1600000002);
+    assert(fbsd_buf.st_ctim.tv_nsec == 300);
+
+    /* Test 2: copyinstr fails */
+    mock_copyinstr_ret = -EFAULT;
+    ret = sys_freebsd_stat("/test/path", &fbsd_buf);
+    assert(ret == -14);
+    mock_copyinstr_ret = 0;
+
+    /* Test 3: kern_stat fails */
+    mock_kern_stat_ret = -ENOENT;
+    ret = sys_freebsd_stat("/nonexistent", &fbsd_buf);
+    assert(ret == -ENOENT);
+    mock_kern_stat_ret = 0;
+
+    /* Test 4: copyout fails */
+    mock_copyout_ret = -EFAULT;
+    ret = sys_freebsd_stat("/test/path", &fbsd_buf);
+    assert(ret == -14);
+    mock_copyout_ret = 0;
+
+    printf("All sys_freebsd_stat tests passed!\n");
 }
 
 int main() {
@@ -170,6 +276,7 @@ int main() {
 
     printf("All compat_time32 tests passed!\n");
     test_compat_lseek32();
+    test_sys_freebsd_stat();
 
     return 0;
 }

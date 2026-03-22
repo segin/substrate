@@ -42,7 +42,6 @@ vgcore.*
 /pr_list_latest.txt
 /qemu.out
 /qemu.pid
-/root.img
 /stat_verify
 /substrate.iso
 /test.bc
@@ -82,6 +81,7 @@ vgcore.*
 /sys/kernel.freebsd
 /sys/kernel.multiboot
 /sys/kernel.zimage
+/sys/ksyms*.c
 /sys/ksyms_efi_table.c
 /sys/ksyms_table.c
 /sys/screen.png
@@ -228,3 +228,25 @@ sbin/*/*
 /y.tab.h
 /test_output.txt
 /tests/test_getpagesize
+tests/lib/usb/host_test_libusb
+usr.bin/lsusb/lsusb
+
+# USB test binaries
+tests/lib/usb/test_core
+tests/lib/usb/test_descriptor
+tests/lib/usb/test_device
+tests/lib/usb/test_io
+tests/lib/usb/test_async
+tests/lib/usb/test_hotplug
+tests/lib/edit/host_test_history
+tests/lib/edit/test_editline
+tests/lib/edit/test_editrc
+tests/lib/edit/test_emacs
+tests/lib/edit/test_fuzz
+tests/lib/edit/test_integration
+tests/lib/edit/test_keymap
+tests/lib/edit/test_line_buffer
+tests/lib/edit/test_property
+tests/lib/edit/test_tokenizer
+tests/lib/edit/test_vi
+tools/sbsh_expect.exp

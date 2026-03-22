@@ -72,6 +72,8 @@ thread_t *sched_alloc_thread(process_t *proc) {
     }
     if (i == MAX_THREADS) return NULL;
 
+    memset(&threads[i], 0, sizeof(threads[i]));
+
     // Allocate TID using generation index for O(1) lookup
     // TID = (generation << 6) | index
     // MAX_THREADS is 64, so 6 bits for index.
@@ -147,8 +149,16 @@ void sched_yield(void) {
     int highest_prio = -1;
     sched_class_t best_class = SCHED_IDLE;
 
+    /*
+     * Round-robin index: start scanning from the thread AFTER the last
+     * one we scheduled, so that equal-priority threads get fair turns.
+     */
+    static int rr_start = 0;
+    int start = rr_start;
+
     // Scan for best thread to run (Generic Policy)
-    for (int i = 0; i < MAX_THREADS; i++) {
+    for (int n = 0; n < MAX_THREADS; n++) {
+        int i = (start + n) % MAX_THREADS;
         if (threads[i].tid == -1 || threads[i].state != THREAD_READY) continue;
         if (!sched_can_run_on_cpu(&threads[i], cpu_id)) continue;
 
@@ -173,6 +183,8 @@ void sched_yield(void) {
     if (best_thread == current_thread && current_thread && current_thread->state == THREAD_RUNNING) return;
 
     if (best_thread) {
+        /* Advance round-robin start for next call */
+        rr_start = (int)((best_thread - threads) + 1) % MAX_THREADS;
         sched_context_switch(current_thread, best_thread);
     }
 }
@@ -265,6 +277,7 @@ void sched_wakeup(void *chan) {
 
 void sched_wakeup_n(void *chan, int n) {
     int woken = 0;
+
     for (int i = 0; i < MAX_THREADS; i++) {
         if (threads[i].tid != -1 && threads[i].state == THREAD_BLOCKED && threads[i].wait_chan == chan) {
             threads[i].state = THREAD_READY;
@@ -272,6 +285,10 @@ void sched_wakeup_n(void *chan, int n) {
             woken++;
             if (n > 0 && woken >= n) break;
         }
+    }
+
+    if (woken > 0 && current_thread) {
+        current_thread->needs_resched = 1;
     }
 }
 

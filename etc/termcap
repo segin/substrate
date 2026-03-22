@@ -1,8 +1,29 @@
-# Simple termcap for Substrate
-substrate|Substrate Console:\
-	:co#80:li#25:\
-	:am:bs:mi:ms:\
-	:cl=\E[2J:cm=\E[%i%d;%dH:ce=\E[K:\
-	:ho=\E[H:\
-	:af=\E[3%dm:ab=\E[4%dm:op=\E[39;49m:\
-	:md=\E[1m:me=\E[0m:
+# Substrate termcap database
+#
+# Keep this intentionally small and ASCII-only. The kernel currently exports
+# TERM=linux for its text console and TERM=ansi for some compatibility paths.
+#
+
+vt100|vt100-am|dec vt100:\
+	:do=^J:co#80:li#24:cl=\E[H\E[J:bs:am:cm=\E[%i%d;%dH:nd=\E[C:up=\E[A:\
+	:ce=\E[K:cd=\E[J:so=\E[7m:se=\E[27m:us=\E[4m:ue=\E[24m:md=\E[1m:\
+	:mr=\E[7m:me=\E[0m:mb=\E[5m:ho=\E[H:cr=^M:sf=^J:sr=\EM:\
+	:ku=\EOA:kd=\EOB:kr=\EOC:kl=\EOD:kh=\EOH:@7=\EOF:\
+	:kP=\E[5~:kN=\E[6~:kI=\E[2~:kD=\E[3~:
+
+ansi|ansi/pc-term compatible with color:\
+	:tc=vt100:\
+	:AF=\E[3%dm:AB=\E[4%dm:
+
+linux|linux console:\
+	:co#80:li#24:am:bs:km:mi:ms:xn:xo:\
+	:cl=\E[H\E[J:cm=\E[%i%d;%dH:nd=\E[C:up=\E[A:do=^J:cr=^M:\
+	:ce=\E[K:cd=\E[J:al=\E[L:dl=\E[M:dc=\E[P:ic=\E[@:ei=:im=:\
+	:so=\E[7m:se=\E[27m:us=\E[4m:ue=\E[24m:md=\E[1m:mh=\E[2m:\
+	:mr=\E[7m:me=\E[0m:mb=\E[5m:ho=\E[H:vb=\Eg:\
+	:AF=\E[3%dm:AB=\E[4%dm:op=\E[39;49m:\
+	:ku=\E[A:kd=\E[B:kr=\E[C:kl=\E[D:kh=\E[H:@7=\E[F:\
+	:kP=\E[5~:kN=\E[6~:kI=\E[2~:kD=\E[3~:
+
+substrate|Substrate kernel text console:\
+	:tc=linux:

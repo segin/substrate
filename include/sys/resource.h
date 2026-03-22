@@ -48,5 +48,6 @@ struct rusage {
 
 int getpriority(int which, id_t who);
 int setpriority(int which, id_t who, int prio);
+int getrusage(int who, struct rusage *usage);
 
 #endif

@@ -485,3 +485,84 @@ char *tmpnam(char *s) {
 	snprintf(p, L_tmpnam, "/tmp/tmp.%d.%d", getpid(), counter++);
 	return p;
 }
+
+/* --- popen / pclose --- */
+#include <sys/wait.h>
+
+#define POPEN_TABLE_SIZE 16
+static struct { FILE *fp; pid_t pid; } popen_table[POPEN_TABLE_SIZE];
+
+FILE *popen(const char *command, const char *type) {
+    int pipefd[2];
+    if (pipe(pipefd) < 0)
+        return NULL;
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(pipefd[0]);
+        close(pipefd[1]);
+        return NULL;
+    }
+
+    int is_read = (type[0] == 'r');
+
+    if (pid == 0) {
+        /* child */
+        if (is_read) {
+            close(pipefd[0]);
+            dup2(pipefd[1], STDOUT_FILENO);
+            close(pipefd[1]);
+        } else {
+            close(pipefd[1]);
+            dup2(pipefd[0], STDIN_FILENO);
+            close(pipefd[0]);
+        }
+        const char *argv[4];
+        argv[0] = "/bin/sh";
+        argv[1] = "-c";
+        argv[2] = command;
+        argv[3] = NULL;
+        execv("/bin/sh", (char *const *)argv);
+        _exit(127);
+    }
+
+    /* parent */
+    FILE *fp;
+    if (is_read) {
+        close(pipefd[1]);
+        fp = fdopen(pipefd[0], "r");
+        if (!fp) { close(pipefd[0]); goto err; }
+    } else {
+        close(pipefd[0]);
+        fp = fdopen(pipefd[1], "w");
+        if (!fp) { close(pipefd[1]); goto err; }
+    }
+
+    for (int i = 0; i < POPEN_TABLE_SIZE; i++) {
+        if (popen_table[i].fp == NULL) {
+            popen_table[i].fp = fp;
+            popen_table[i].pid = pid;
+            return fp;
+        }
+    }
+    fclose(fp);
+err:
+    waitpid(pid, NULL, 0);
+    return NULL;
+}
+
+int pclose(FILE *stream) {
+    for (int i = 0; i < POPEN_TABLE_SIZE; i++) {
+        if (popen_table[i].fp == stream) {
+            pid_t pid = popen_table[i].pid;
+            popen_table[i].fp = NULL;
+            popen_table[i].pid = 0;
+            fclose(stream);
+            int status = 0;
+            if (waitpid(pid, &status, 0) < 0)
+                return -1;
+            return WEXITSTATUS(status);
+        }
+    }
+    return -1;
+}

@@ -117,6 +117,40 @@ int test_unicode_tolower(void) {
     return 0;
 }
 
+int test_regex_unicode_tolower_extended(void) {
+    /* ASCII Boundaries */
+    TEST_ASSERT(regex_unicode_tolower(0) == 0);
+    TEST_ASSERT(regex_unicode_tolower('A' - 1) == 'A' - 1);
+    TEST_ASSERT(regex_unicode_tolower('Z' + 1) == 'Z' + 1);
+    TEST_ASSERT(regex_unicode_tolower(127) == 127);
+    TEST_ASSERT(regex_unicode_tolower(128) == 128);
+
+    /* Max Code Point Boundary */
+    TEST_ASSERT(regex_unicode_tolower(REGEX_MAX_CODEPOINT) == REGEX_MAX_CODEPOINT);
+    TEST_ASSERT(regex_unicode_tolower(REGEX_MAX_CODEPOINT + 1) == REGEX_MAX_CODEPOINT + 1);
+
+#ifdef REGEX_USE_ICU
+    /* Cyrillic Capital Letter A to Small Letter A */
+    TEST_ASSERT(regex_unicode_tolower(0x0410) == 0x0430);
+    /* Cyrillic Capital Letter YA to Small Letter YA */
+    TEST_ASSERT(regex_unicode_tolower(0x042F) == 0x044F);
+
+    /* Greek Capital Letter Alpha to Small Letter Alpha */
+    TEST_ASSERT(regex_unicode_tolower(0x0391) == 0x03B1);
+
+    /* Latin Capital Letter A with Macron */
+    TEST_ASSERT(regex_unicode_tolower(0x0100) == 0x0101);
+#else
+    /* Fallback ASCII mode: Cyrillic/Greek/Latin extended remain unchanged */
+    TEST_ASSERT(regex_unicode_tolower(0x0410) == 0x0410);
+    TEST_ASSERT(regex_unicode_tolower(0x042F) == 0x042F);
+    TEST_ASSERT(regex_unicode_tolower(0x0391) == 0x0391);
+    TEST_ASSERT(regex_unicode_tolower(0x0100) == 0x0100);
+#endif
+
+    return 0;
+}
+
 int test_unicode_toupper(void) {
     TEST_ASSERT(regex_unicode_toupper('a') == 'A');
     TEST_ASSERT(regex_unicode_toupper('z') == 'Z');

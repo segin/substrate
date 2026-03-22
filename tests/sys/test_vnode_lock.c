@@ -202,6 +202,49 @@ static void test_shared_blocks_exclusive(void) {
 }
 
 
+/* --- vput Test --- */
+static void test_vput(void) {
+    kprint("\n--- Test: vput ---\n");
+
+    /* Ensure vnode is unlocked */
+    if (vn_islocked(test_vp)) vn_unlock(test_vp);
+
+    uint32_t initial_usecount = test_vp->v_usecount;
+
+    /* Lock the vnode */
+    int error = vn_lock(test_vp, LK_EXCLUSIVE);
+    if (error) {
+        kprintf("FAIL: vn_lock failed: %d\n", error);
+        return;
+    }
+
+    /* Verify it is locked */
+    if (!vn_islocked(test_vp)) {
+        kprint("FAIL: vn_islocked returned false after vn_lock\n");
+        return;
+    }
+
+    /* Bump usecount as if we're adding another reference while locked */
+    vref(test_vp);
+
+    /* Call vput */
+    vput(test_vp);
+
+    /* Verify the vnode is unlocked and usecount is back to initial */
+    if (vn_islocked(test_vp)) {
+        kprint("FAIL: vnode still locked after vput\n");
+        return;
+    }
+
+    if (test_vp->v_usecount != initial_usecount) {
+        kprintf("FAIL: vnode usecount mismatch: expected %u, got %u\n", initial_usecount, test_vp->v_usecount);
+        return;
+    }
+
+    kprint("PASS: vput unlocked vnode and decremented usecount correctly.\n");
+}
+
+
 void run_vnode_lock_tests(void) {
     kprint("\n=== TEST: VNode Locking Semantics ===\n");
 
@@ -223,6 +266,13 @@ void run_vnode_lock_tests(void) {
     for(int i=0; i<100000; i++) __asm__ volatile("nop");
 
     test_shared_blocks_exclusive();
+
+    /* Ensure helper threads from previous tests have exited completely */
+    while (helper_started && !helper_done) {
+        sched_yield();
+    }
+
+    test_vput();
 
     kprint("=== TEST COMPLETE ===\n");
 }

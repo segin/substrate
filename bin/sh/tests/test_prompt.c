@@ -149,9 +149,6 @@ void test_colors() {
     ASSERT_STR_EQ(res, "\001\033[44m\002BG\001\033[49m\002");
     free(res);
     
-    // Invalid/Unknown color -> currently ignored (empty code) or unchanged?
-    // Implementation does 'if (code) append'. If code is NULL, nothing appended.
-    // So %F{invalid} -> "" (nothing).
     res = expand_prompt_escapes("A%F{invalid}B", 1, 1, 0);
     ASSERT_STR_EQ(res, "AB"); // "invalid" color produces no output
     free(res);
@@ -194,8 +191,6 @@ void test_conditional_tokens() {
     ASSERT_STR_EQ(res, "NONZERO");
     free(res);
     
-    // Nested colors in conditional
-    // If ? is 1 (nonzero), print Red ERROR
     shell_var_set("?", "1");
     res = expand_prompt_escapes("%(?.%F{red}ERROR%f.OK)", 1, 1, 0);
     ASSERT_STR_EQ(res, "\001\033[31m\002ERROR\001\033[39m\002");

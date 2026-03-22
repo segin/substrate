@@ -9,13 +9,14 @@
 #define UART_COM3 0x3E8
 #define UART_COM4 0x2E8
 
-void uart_init(void);
+int uart_init(void);
 void uart_devfs_init(void);
 int uart_select_port(uint32_t serial_index);
 struct console_backend; // Forward declaration
 struct console_backend *uart_get_console(void);
 void uart_putc(char c);
 void uart_write(const char* data, size_t size);
+void uart_send_break(void);
 struct registers;
 void uart_handler(struct registers *regs);
 char uart_getc(void);

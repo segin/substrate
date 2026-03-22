@@ -46,6 +46,13 @@ static int8_t  mouse_byte[3];
 static int32_t mouse_x = 0;
 static int32_t mouse_y = 0;
 
+static int32_t mouse_clamp_delta(int32_t delta, uint8_t overflow, uint8_t negative) {
+    if (!overflow) {
+        return delta;
+    }
+    return negative ? -255 : 255;
+}
+
 void mouse_handler(registers_t *regs) {
     uint8_t status = inb(PS2_STATUS_PORT);
     if (status & 1) {
@@ -81,6 +88,9 @@ void mouse_handler(registers_t *regs) {
                 if (mouse_byte[0] & 0x10) dx -= 256;
                 if (mouse_byte[0] & 0x20) dy -= 256;
 
+                dx = mouse_clamp_delta(dx, mouse_byte[0] & 0x40, mouse_byte[0] & 0x10);
+                dy = mouse_clamp_delta(dy, mouse_byte[0] & 0x80, mouse_byte[0] & 0x20);
+
                 mouse_x += dx;
                 mouse_y -= dy; // PS/2 Y-axis is inverted relative to screen coords
 
@@ -88,15 +98,11 @@ void mouse_handler(registers_t *regs) {
                 
                 input_report_rel(&mouse_dev, REL_X, dx);
                 input_report_rel(&mouse_dev, REL_Y, -dy);
-                input_report_key(&mouse_dev, 0x110, mouse_buttons & 1); // BTN_LEFT
-                input_report_key(&mouse_dev, 0x111, mouse_buttons & 2); // BTN_RIGHT
-                input_report_key(&mouse_dev, 0x112, mouse_buttons & 4); // BTN_MIDDLE
+                input_report_key(&mouse_dev, BTN_LEFT, (mouse_buttons & 1) ? 1 : 0);
+                input_report_key(&mouse_dev, BTN_RIGHT, (mouse_buttons & 2) ? 1 : 0);
+                input_report_key(&mouse_dev, BTN_MIDDLE, (mouse_buttons & 4) ? 1 : 0);
                 input_sync(&mouse_dev);
 
-                // Log movement (optional)
-                // char buf[64];
-                // snprintf(buf, 64, "Mouse: %d, %d buttons=%x\n", mouse_x, mouse_y, mouse_buttons);
-                // vga_write(buf, strlen(buf));
                 break;
         }
     }

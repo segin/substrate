@@ -28,6 +28,7 @@ idt_ptr_t   idt_ptr;
 #include <arch/i386/gdt.h>
 #include <sys/exec.h>
 #include <arch/i386/percpu.h>
+#include <vm/vm_fault.h>
 #include <exec/perso/personality.h>
 // isr externs are in idt.h now
 
@@ -184,7 +185,14 @@ void isr_handler(registers_t *regs) {
         (void)irq_dispatch(0, regs);
         if (regs->int_no >= PIC_SLAVE_REMAP_BASE) outb(PIC_SLAVE_CMD, PIC_EOI);
         outb(PIC_MASTER_CMD, PIC_EOI);
-        if (!current_thread || !(current_thread->flags & THREAD_F_NO_PREEMPT)) {
+        if (current_thread && !(current_thread->flags & THREAD_F_NO_PREEMPT)) {
+            if (is_usermode) {
+                current_thread->needs_resched = 0;
+                sched_yield();
+            } else {
+                current_thread->needs_resched = 1;
+            }
+        } else if (!current_thread && is_usermode) {
             sched_yield();
         }
         signal_handle_pending(regs);
@@ -231,6 +239,15 @@ void isr_handler(registers_t *regs) {
             if (pmap_fault(regs->err_code, cr2)) {
                 return;
             }
+            // Demand paging: try vm_fault for vm_map-backed regions
+            if (is_usermode && current_process && current_process->vm_map) {
+                uint8_t fault_prot = VM_PROT_READ;
+                if (regs->err_code & 0x02) fault_prot |= VM_PROT_WRITE;
+                if (regs->err_code & 0x10) fault_prot |= VM_PROT_EXEC;
+                if (vm_fault(current_process->vm_map, cr2, fault_prot) == VM_FAULT_SUCCESS) {
+                    return;
+                }
+            }
         }
 
         if (is_usermode) {
@@ -242,6 +259,21 @@ void isr_handler(registers_t *regs) {
                 i386_trap_to_signal(regs, cr2, &sig, &code, &addr)) {
                 if (current_thread && current_thread->proc == current_process) {
                     current_thread->trap_addr = addr;
+                }
+                if (current_process->perso_id == PERS_ELKS) {
+                    char elks_trapbuf[256];
+                    sprintf(elks_trapbuf,
+                            "TRAP[ELKS]: int=%u sig=%d code=%d addr=0x%08X eip=0x%08X cs=0x%04X ss=0x%04X esp=0x%08X ds=0x%04X\n",
+                            (unsigned int)regs->int_no,
+                            sig,
+                            code,
+                            (unsigned int)addr,
+                            (unsigned int)regs->eip,
+                            (unsigned int)regs->cs,
+                            (unsigned int)regs->ss,
+                            (unsigned int)regs->useresp,
+                            (unsigned int)regs->ds);
+                    kprint(elks_trapbuf);
                 }
                 if (cmdline_debug_enabled("trap")) {
                     char trapbuf[256];
@@ -333,6 +365,6 @@ void isr_handler(registers_t *regs) {
         if (regs->int_no >= 40) outb(0xA0, 0x20);
         outb(0x20, 0x20);
     }
-    
+
     signal_handle_pending(regs);
 }
