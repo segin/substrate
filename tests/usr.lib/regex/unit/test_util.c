@@ -107,12 +107,26 @@ int test_unicode_tolower(void) {
     TEST_ASSERT(regex_unicode_tolower('9') == '9');
     TEST_ASSERT(regex_unicode_tolower('!') == '!');
     TEST_ASSERT(regex_unicode_tolower(' ') == ' ');
+    TEST_ASSERT(regex_unicode_tolower('\0') == '\0');
+    TEST_ASSERT(regex_unicode_tolower(0x7F) == 0x7F);
+    TEST_ASSERT(regex_unicode_tolower(0x80) == 0x80);
+
 #ifdef REGEX_USE_ICU
     TEST_ASSERT(regex_unicode_tolower(0x00C4) == 0x00E4);
     TEST_ASSERT(regex_unicode_tolower(0x03A9) == 0x03C9);
+    TEST_ASSERT(regex_unicode_tolower(0x0411) == 0x0431); /* Cyrillic BE */
+    TEST_ASSERT(regex_unicode_tolower(0x03A3) == 0x03C3); /* Greek Sigma */
+    TEST_ASSERT(regex_unicode_tolower(0x1E9E) == 0x00DF); /* German sharp s */
+    TEST_ASSERT(regex_unicode_tolower(REGEX_MAX_CODEPOINT) == REGEX_MAX_CODEPOINT);
+    TEST_ASSERT(regex_unicode_tolower(REGEX_MAX_CODEPOINT + 1) == REGEX_MAX_CODEPOINT + 1);
+    TEST_ASSERT(regex_unicode_tolower(0xFFFFFFFF) == 0xFFFFFFFF);
 #else
     TEST_ASSERT(regex_unicode_tolower(0x00C4) == 0x00C4);
     TEST_ASSERT(regex_unicode_tolower(0x03A9) == 0x03A9);
+    TEST_ASSERT(regex_unicode_tolower(0x0411) == 0x0411);
+    TEST_ASSERT(regex_unicode_tolower(REGEX_MAX_CODEPOINT) == REGEX_MAX_CODEPOINT);
+    TEST_ASSERT(regex_unicode_tolower(REGEX_MAX_CODEPOINT + 1) == REGEX_MAX_CODEPOINT + 1);
+    TEST_ASSERT(regex_unicode_tolower(0xFFFFFFFF) == 0xFFFFFFFF);
 #endif
     return 0;
 }
@@ -126,12 +140,25 @@ int test_unicode_toupper(void) {
     TEST_ASSERT(regex_unicode_toupper('9') == '9');
     TEST_ASSERT(regex_unicode_toupper('!') == '!');
     TEST_ASSERT(regex_unicode_toupper(' ') == ' ');
+    TEST_ASSERT(regex_unicode_toupper('\0') == '\0');
+    TEST_ASSERT(regex_unicode_toupper(0x7F) == 0x7F);
+    TEST_ASSERT(regex_unicode_toupper(0x80) == 0x80);
+
 #ifdef REGEX_USE_ICU
     TEST_ASSERT(regex_unicode_toupper(0x00E4) == 0x00C4);
     TEST_ASSERT(regex_unicode_toupper(0x03C9) == 0x03A9);
+    TEST_ASSERT(regex_unicode_toupper(0x0431) == 0x0411); /* Cyrillic be */
+    TEST_ASSERT(regex_unicode_toupper(0x03C3) == 0x03A3); /* Greek sigma */
+    TEST_ASSERT(regex_unicode_toupper(REGEX_MAX_CODEPOINT) == REGEX_MAX_CODEPOINT);
+    TEST_ASSERT(regex_unicode_toupper(REGEX_MAX_CODEPOINT + 1) == REGEX_MAX_CODEPOINT + 1);
+    TEST_ASSERT(regex_unicode_toupper(0xFFFFFFFF) == 0xFFFFFFFF);
 #else
     TEST_ASSERT(regex_unicode_toupper(0x00E4) == 0x00E4);
     TEST_ASSERT(regex_unicode_toupper(0x03C9) == 0x03C9);
+    TEST_ASSERT(regex_unicode_toupper(0x0431) == 0x0431);
+    TEST_ASSERT(regex_unicode_toupper(REGEX_MAX_CODEPOINT) == REGEX_MAX_CODEPOINT);
+    TEST_ASSERT(regex_unicode_toupper(REGEX_MAX_CODEPOINT + 1) == REGEX_MAX_CODEPOINT + 1);
+    TEST_ASSERT(regex_unicode_toupper(0xFFFFFFFF) == 0xFFFFFFFF);
 #endif
     return 0;
 }
