@@ -501,7 +501,8 @@ static regex_err_t posix_split(const regex_t *re, const char *text, size_t text_
     }
 
     if (count == cap) {
-        char **next = (char **)realloc(items, (cap + 1) * sizeof(*items));
+        size_t new_cap = cap ? cap * 2 : 8;
+        char **next = (char **)realloc(items, new_cap * sizeof(*items));
         if (!next) {
             free(m);
             while (count) {
@@ -510,6 +511,7 @@ static regex_err_t posix_split(const regex_t *re, const char *text, size_t text_
             free(items);
             return REGEX_ERR_NOMEM;
         }
+        cap = new_cap;
         items = next;
     }
 
