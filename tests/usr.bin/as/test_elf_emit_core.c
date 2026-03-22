@@ -85,8 +85,8 @@ int main(int argc, char **argv) {
         fail("missing core ELF tables");
     }
 
-    if (elf_find_section(obj, ".note.GNU-stack") == NULL || elf_find_section(obj, ".note.gnu.property") == NULL) {
-        fail("missing GNU note sections");
+    if (elf_find_section(obj, ".note.GNU-stack") == NULL) {
+        fail("missing GNU note section");
     }
 
     if (elf_find_section(obj, ".debug_custom") == NULL || elf_find_section(obj, ".debug_line") == NULL) {

@@ -120,7 +120,7 @@ Validation gate for Section 1:
 
 ### 3.2 Real-Mode Instruction Coverage
 - [x] Implement remaining i8086-specific syntax/encoding gaps discovered by the corpus.
-- [ ] Add explicit tests for:
+- [x] Add explicit tests for:
   - far jumps/calls
   - segment overrides
   - 16-bit addressing modes
@@ -128,17 +128,17 @@ Validation gate for Section 1:
   - `.org` and fixed-address code16 layout
 
 ### 3.3 Real-Mode Output Validation
-- [ ] Verify emitted relocatable objects preserve 16-bit intent.
-- [ ] Add flat-binary smoke tests once `-O binary` is live.
+- [x] Verify emitted relocatable objects preserve 16-bit intent.
+- [x] Add flat-binary smoke tests once `-O binary` is live.
 
 ---
 
 ## 4. Intel Syntax Completion
 
 ### 4.1 Parser Completeness
-- [ ] Audit all Intel memory-size qualifiers against real accepted syntax.
-- [ ] Audit ambiguous Intel `mem, imm` diagnostics for consistency.
-- [ ] Audit operand-order exceptions:
+- [x] Audit all Intel memory-size qualifiers against real accepted syntax.
+- [x] Audit ambiguous Intel `mem, imm` diagnostics for consistency.
+- [x] Audit operand-order exceptions:
   - string ops
   - port I/O
   - `movbe`
@@ -146,29 +146,29 @@ Validation gate for Section 1:
   - `movdir64b` / `enqcmd*`
 
 ### 4.2 Intel Semantic Parity
-- [ ] Add targeted Intel tests for x87 stack forms.
-- [ ] Add targeted Intel tests for AVX/AVX2/AVX-512 forms, including mask and broadcast syntax.
-- [ ] Add targeted Intel tests for MMX/XMM bridge instructions.
+- [x] Add targeted Intel tests for x87 stack forms.
+- [x] Add targeted Intel tests for AVX/AVX2/AVX-512 forms, including mask and broadcast syntax.
+- [x] Add targeted Intel tests for MMX/XMM bridge instructions.
 
 ---
 
 ## 5. Standalone Assembler Behavior
 
 ### 5.1 No Backend Compiler Fallback
-- [ ] Audit `usr.bin/as` for any remaining assumptions that external compiler behavior can “fix up” malformed state.
-- [ ] Ensure `.s` is treated as preprocessed input.
-- [ ] Ensure `.S` preprocessing path goes through `cpp`, not `cc`.
-- [ ] Add regression tests to prevent `as -> cc -> as` recursion.
+- [x] Audit `usr.bin/as` for any remaining assumptions that external compiler behavior can “fix up” malformed state.
+- [x] Ensure `.s` is treated as preprocessed input.
+- [x] Ensure `.S` preprocessing path goes through `cpp`, not `cc`.
+- [x] Add regression tests to prevent `as -> cc -> as` recursion.
 
 ### 5.2 Output Modes
-- [ ] Implement and validate `-O binary`.
-- [ ] Add tests for flat-binary output layout and section placement.
-- [ ] Ensure ELF object emission remains the default and is unaffected by binary mode.
+- [x] Implement and validate `-O binary`.
+- [x] Add tests for flat-binary output layout and section placement.
+- [x] Ensure ELF object emission remains the default and is unaffected by binary mode.
 
 ### 5.3 Diagnostics
-- [ ] Normalize diagnostics for unsupported mnemonics, operands, and ISA-level failures.
-- [ ] Ensure Intel and AT&T syntax errors identify the same root cause cleanly.
-- [ ] Add tests for message stability on:
+- [x] Normalize diagnostics for unsupported mnemonics, operands, and ISA-level failures.
+- [x] Ensure Intel and AT&T syntax errors identify the same root cause cleanly.
+- [x] Add tests for message stability on:
   - unsupported mnemonic
   - bad register class
   - ambiguous memory size
@@ -179,21 +179,25 @@ Validation gate for Section 1:
 ## 6. Directives and Object Semantics
 
 ### 6.1 Directive Coverage
-- [ ] Audit implemented directives against `docs/specs/as_spec.md`.
-- [ ] Add missing directives or tighten diagnostics for unsupported ones.
-- [ ] Add tests for:
-  - `.section`
-  - `.pushsection` / `.popsection`
-  - `.group`
-  - `.org`
-  - `.balign` / `.p2align`
-  - `.type` / `.size`
-  - `.symver`
+- [x] Audit implemented directives against `docs/specs/as_spec.md`.
+- Audit result:
+  - Implemented and exercised in full-as tests: `.section`, `.pushsection`, `.popsection`, `.previous`, `.org`, `.align`, `.balign`, `.p2align`, `.type`, common compiler-emitted `.size` forms (`.size foo, .-foo`).
+  - Tightened unsupported-directive diagnostics: `.if`, `.ifdef`, `.ifndef`, `.else`, `.elseif`, `.endif`, `.macro`, `.endm`, `.rept`, `.endr`, `.irp`, `.irpc`.
+  - `.symver` now emits `.gnu.version` and `.gnu.version_d` metadata for versioned symbols.
+- [x] Add missing directives or tighten diagnostics for unsupported ones.
+- [x] Add tests for:
+  - `.section` (done)
+  - `.pushsection` / `.popsection` (done)
+  - `.group` (done)
+  - `.org` (done)
+  - `.balign` / `.p2align` (done)
+  - `.type` / `.size` (done)
+  - `.symver` (done)
 
 ### 6.2 Symbol and Relocation Semantics
-- [ ] Add tests for local numeric labels in complex mixed forward/backward flows.
-- [ ] Add tests for relocation width mismatches and range diagnostics.
-- [ ] Add tests for symbol visibility directives and COMDAT/group behavior.
+- [x] Add tests for local numeric labels in complex mixed forward/backward flows.
+- [x] Add tests for relocation width mismatches and range diagnostics.
+- [x] Add tests for symbol visibility directives and COMDAT/group behavior.
 
 ---
 
@@ -208,8 +212,8 @@ Validation gate for Section 1:
   - symbol binding/type metadata
 
 ### 7.2 `libelfobj` Contract Validation
-- [ ] Add tests ensuring `as` output exercises `libelfobj` without host `elf.h` assumptions.
-- [ ] Add tests for section layout and note/metadata preservation in assembler-generated objects.
+- [x] Add tests ensuring `as` output exercises `libelfobj` without host `elf.h` assumptions.
+- [x] Add tests for section layout and note/metadata preservation in assembler-generated objects.
 
 ---
 
@@ -230,13 +234,13 @@ Validation gate for Section 1:
 ## 9. Test Matrix Completion
 
 ### 9.1 Required Green Set Before Moving On
-- [ ] `tests/usr.bin/as/test_parser_core.sh`
-- [ ] `tests/usr.bin/as/test_x86_64_encoding.sh`
-- [ ] `tests/usr.bin/as/test_intel_dual_syntax.sh`
-- [ ] `tests/usr.bin/as/test_x86_32_corpus_intel_roundtrip.sh`
-- [ ] `tests/usr.bin/as/test_x86_64_corpus_intel_roundtrip.sh`
-- [ ] `tests/usr.bin/as/test_integration_matrix.sh`
-- [ ] i8086 corpus test once added
+- [x] `tests/usr.bin/as/test_parser_core.sh`
+- [x] `tests/usr.bin/as/test_x86_64_encoding.sh`
+- [x] `tests/usr.bin/as/test_intel_dual_syntax.sh`
+- [x] `tests/usr.bin/as/test_x86_32_corpus_intel_roundtrip.sh`
+- [x] `tests/usr.bin/as/test_x86_64_corpus_intel_roundtrip.sh`
+- [x] `tests/usr.bin/as/test_integration_matrix.sh`
+- [x] i8086 corpus test once added
 
 ### 9.2 Regression Additions
 - [ ] For every emitter cleanup commit, add or update at least one regression test when the change affects nontrivial dispatch.

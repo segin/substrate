@@ -157,6 +157,8 @@ typedef struct {
 
 static int dynstr_append_cstr(uint8_t **buf, size_t *len, size_t *cap, const char *name, uint32_t *out_off);
 static int dynsym_should_export(const ld_ctx_t *ctx, const elfobj_t *out, const elf_symbol_t *sym);
+static int resolve_symbol_addr(elfobj_t *obj, const elf_symbol_t *sym, int allow_undef,
+                               uint64_t *out_addr, const char **undef_name);
 static int is_relro_candidate_name(const char *name);
 
 static void usage(const char *prog) {
@@ -5821,6 +5823,45 @@ static int reloc_is_i386_runtime_data_ref(uint32_t type) {
     return type == R_386_32;
 }
 
+static int symbol_needs_runtime_relative_reloc(const elf_symbol_t *sym) {
+    uint16_t shndx;
+
+    if (sym == NULL) {
+        return 0;
+    }
+    shndx = elf_symbol_shndx(sym);
+    if (shndx == SHN_UNDEF || shndx == SHN_ABS || shndx == SHN_COMMON || shndx >= 0xff00) {
+        return 0;
+    }
+    return 1;
+}
+
+static int resolve_runtime_relative_addend(elfobj_t *obj, const elf_symbol_t *sym, int64_t addend,
+                                           uint64_t *out_addend) {
+    uint64_t sym_addr;
+
+    if (out_addend == NULL) {
+        return -1;
+    }
+    if (resolve_symbol_addr(obj, sym, 1, &sym_addr, NULL) != 0) {
+        return -1;
+    }
+    if (addend >= 0) {
+        uint64_t uadd = (uint64_t)addend;
+        if (sym_addr > UINT64_MAX - uadd) {
+            return -1;
+        }
+        *out_addend = sym_addr + uadd;
+    } else {
+        uint64_t neg = (uint64_t)(-(addend + 1)) + 1u;
+        if (sym_addr < neg) {
+            return -1;
+        }
+        *out_addend = sym_addr - neg;
+    }
+    return 0;
+}
+
 static size_t count_runtime_data_import_relocs_x64(elfobj_t *out) {
     size_t i;
     size_t n = 0;
@@ -5845,10 +5886,9 @@ static size_t count_runtime_data_import_relocs_x64(elfobj_t *out) {
                 continue;
             }
             sym = elf_reloc_symbol(rel);
-            if (!is_runtime_import_symbol(sym)) {
-                continue;
-            }
-            if (reloc_is_x64_runtime_data_ref(elf_reloc_type(rel))) {
+            if (reloc_is_x64_runtime_data_ref(elf_reloc_type(rel)) &&
+                (is_runtime_import_symbol(sym) ||
+                 (elf_type(out) == ET_DYN && symbol_needs_runtime_relative_reloc(sym)))) {
                 n++;
             }
         }
@@ -5880,10 +5920,9 @@ static size_t count_runtime_data_import_relocs_i386(elfobj_t *out) {
                 continue;
             }
             sym = elf_reloc_symbol(rel);
-            if (!is_runtime_import_symbol(sym)) {
-                continue;
-            }
-            if (reloc_is_i386_runtime_data_ref(elf_reloc_type(rel))) {
+            if (reloc_is_i386_runtime_data_ref(elf_reloc_type(rel)) &&
+                (is_runtime_import_symbol(sym) ||
+                 (elf_type(out) == ET_DYN && symbol_needs_runtime_relative_reloc(sym)))) {
                 n++;
             }
         }
@@ -6345,7 +6384,7 @@ static int finalize_dynamic_imports_x64(elfobj_t *out, const dyn_import_vec_t *i
     uint64_t dynamic_addr = 0;
     elfobj_endian_t e;
 
-    if (out == NULL || imports == NULL || imports->count == 0) {
+    if (out == NULL || imports == NULL) {
         return 0;
     }
     for (i = 0; i < imports->count; ++i) {
@@ -6550,22 +6589,17 @@ static int finalize_dynamic_imports_x64(elfobj_t *out, const dyn_import_vec_t *i
                 uint64_t slot_addr;
                 int64_t addend = 0;
                 size_t roff;
-                const uint8_t *sbuf;
-                size_t ssz = 0;
                 uint64_t off;
+                int emit = 0;
+                int relative = 0;
+                uint64_t relative_addend = 0;
 
                 if (rel == NULL) {
                     continue;
                 }
                 sym = elf_reloc_symbol(rel);
-                if (!is_runtime_import_symbol(sym)) {
-                    continue;
-                }
                 type = elf_reloc_type(rel);
                 if (!reloc_is_x64_runtime_data_ref(type)) {
-                    continue;
-                }
-                if (dynsym_index_by_name(out, elf_symbol_name(sym), &dynidx) != 0) {
                     continue;
                 }
                 off = elf_reloc_offset(rel);
@@ -6573,11 +6607,28 @@ static int finalize_dynamic_imports_x64(elfobj_t *out, const dyn_import_vec_t *i
                 if (elf_reloc_has_addend(rel)) {
                     addend = elf_reloc_addend(rel);
                 } else {
+                    const uint8_t *sbuf;
+                    size_t ssz = 0;
                     sbuf = (const uint8_t *)elf_section_data(sec, &ssz);
                     if (sbuf == NULL || off + 8 > ssz) {
                         continue;
                     }
                     addend = (int64_t)read_u64_endian(sbuf + off, e);
+                }
+                if (is_runtime_import_symbol(sym)) {
+                    if (dynsym_index_by_name(out, elf_symbol_name(sym), &dynidx) != 0) {
+                        continue;
+                    }
+                    emit = 1;
+                } else if (elf_type(out) == ET_DYN && symbol_needs_runtime_relative_reloc(sym)) {
+                    if (resolve_runtime_relative_addend(out, sym, addend, &relative_addend) != 0) {
+                        continue;
+                    }
+                    relative = 1;
+                    emit = 1;
+                }
+                if (!emit) {
+                    continue;
                 }
                 roff = (rela_dyn_base_count + extra_idx) * 24;
                 extra_idx++;
@@ -6585,8 +6636,12 @@ static int finalize_dynamic_imports_x64(elfobj_t *out, const dyn_import_vec_t *i
                     return -1;
                 }
                 write_u64_endian(rela_dyn_buf + roff + 0, e, slot_addr);
-                write_u64_endian(rela_dyn_buf + roff + 8, e, (((uint64_t)dynidx) << 32) | R_X86_64_64);
-                write_u64_endian(rela_dyn_buf + roff + 16, e, (uint64_t)addend);
+                if (relative) {
+                    write_u64_endian(rela_dyn_buf + roff + 8, e, R_X86_64_RELATIVE);
+                } else {
+                    write_u64_endian(rela_dyn_buf + roff + 8, e, (((uint64_t)dynidx) << 32) | R_X86_64_64);
+                }
+                write_u64_endian(rela_dyn_buf + roff + 16, e, relative ? relative_addend : (uint64_t)addend);
             }
         }
     }
@@ -6641,7 +6696,7 @@ static int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *
     elfobj_endian_t e;
     int plt_pic_mode;
 
-    if (out == NULL || imports == NULL || imports->count == 0) {
+    if (out == NULL || imports == NULL) {
         return 0;
     }
     for (i = 0; i < imports->count; ++i) {
@@ -6857,19 +6912,27 @@ static int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *
                 uint32_t dynidx = 0;
                 uint64_t slot_addr;
                 size_t roff;
+                int emit = 0;
+                int relative = 0;
 
                 if (rel == NULL) {
                     continue;
                 }
                 sym = elf_reloc_symbol(rel);
-                if (!is_runtime_import_symbol(sym)) {
-                    continue;
-                }
                 type = elf_reloc_type(rel);
                 if (!reloc_is_i386_runtime_data_ref(type)) {
                     continue;
                 }
-                if (dynsym_index_by_name(out, elf_symbol_name(sym), &dynidx) != 0) {
+                if (is_runtime_import_symbol(sym)) {
+                    if (dynsym_index_by_name(out, elf_symbol_name(sym), &dynidx) != 0) {
+                        continue;
+                    }
+                    emit = 1;
+                } else if (elf_type(out) == ET_DYN && symbol_needs_runtime_relative_reloc(sym)) {
+                    relative = 1;
+                    emit = 1;
+                }
+                if (!emit) {
                     continue;
                 }
                 slot_addr = elf_section_addr(sec) + elf_reloc_offset(rel);
@@ -6879,7 +6942,11 @@ static int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *
                     return -1;
                 }
                 write_u32_endian(rel_dyn_buf + roff + 0, e, (uint32_t)slot_addr);
-                write_u32_endian(rel_dyn_buf + roff + 4, e, (dynidx << 8) | R_386_32);
+                if (relative) {
+                    write_u32_endian(rel_dyn_buf + roff + 4, e, R_386_RELATIVE);
+                } else {
+                    write_u32_endian(rel_dyn_buf + roff + 4, e, (dynidx << 8) | R_386_32);
+                }
             }
         }
     }

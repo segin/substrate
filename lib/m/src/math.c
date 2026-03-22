@@ -680,6 +680,7 @@ long long llrint(double x) {
 float sinf(float x) { return(float)sin(x); }
 float cosf(float x) { return(float)cos(x); }
 float tanf(float x) { return(float)tan(x); }
+void sincosf(float x, float *s, float *c) { double ds, dc; sincos(x, &ds, &dc); *s = (float)ds; *c = (float)dc; }
 float sqrtf(float x) { return(float)sqrt(x); }
 float powf(float x, float y) { return(float)pow(x, y); }
 float fabsf(float x) { return (x < 0) ? -x : x; }
@@ -705,6 +706,7 @@ float fminimum_magf(float x, float y) { return(float)fminimum_mag(x, y); }
 long double sinl(long double x) { return sin(x); }
 long double cosl(long double x) { return cos(x); }
 long double tanl(long double x) { return tan(x); }
+void sincosl(long double x, long double *s, long double *c) { double ds, dc; sincos(x, &ds, &dc); *s = ds; *c = dc; }
 long double sqrtl(long double x) { return sqrt(x); }
 long double powl(long double x, long double y) { return pow(x, y); }
 long double fabsl(long double x) { return (x < 0) ? -x : x; }
