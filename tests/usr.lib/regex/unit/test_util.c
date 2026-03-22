@@ -31,6 +31,86 @@ int test_util_ascii_tolower(void) {
     return 0;
 }
 
+int test_util_utf8_decode(void) {
+    size_t index = 0;
+    uint32_t cp = 0;
+
+    // Valid 1-byte
+    TEST_ASSERT(regex_utf8_decode("A", 1, &index, &cp) == 1);
+    TEST_ASSERT(cp == 'A');
+    TEST_ASSERT(index == 1);
+
+    // Valid 2-byte
+    index = 0;
+    TEST_ASSERT(regex_utf8_decode("\xC3\xB1", 2, &index, &cp) == 1);
+    TEST_ASSERT(cp == 0x00F1);
+    TEST_ASSERT(index == 2);
+
+    // Valid 3-byte
+    index = 0;
+    TEST_ASSERT(regex_utf8_decode("\xE2\x9C\x93", 3, &index, &cp) == 1);
+    TEST_ASSERT(cp == 0x2713);
+    TEST_ASSERT(index == 3);
+
+    // Valid 4-byte
+    index = 0;
+    TEST_ASSERT(regex_utf8_decode("\xF0\x9F\x98\x8A", 4, &index, &cp) == 1);
+    TEST_ASSERT(cp == 0x1F60A);
+    TEST_ASSERT(index == 4);
+
+    // Invalid parameters
+    index = 0;
+    TEST_ASSERT(regex_utf8_decode(NULL, 1, &index, &cp) == 0);
+    TEST_ASSERT(regex_utf8_decode("A", 1, NULL, &cp) == 0);
+    TEST_ASSERT(regex_utf8_decode("A", 1, &index, NULL) == 0);
+
+    // Out of bounds initial index
+    index = 1;
+    TEST_ASSERT(regex_utf8_decode("A", 1, &index, &cp) == 0);
+
+    // Truncated sequences
+    index = 0;
+    TEST_ASSERT(regex_utf8_decode("\xC3", 1, &index, &cp) == 0);
+    index = 0;
+    TEST_ASSERT(regex_utf8_decode("\xE2\x9C", 2, &index, &cp) == 0);
+    index = 0;
+    TEST_ASSERT(regex_utf8_decode("\xF0\x9F\x98", 3, &index, &cp) == 0);
+
+    // Invalid continuations
+    index = 0;
+    TEST_ASSERT(regex_utf8_decode("\xC3\x28", 2, &index, &cp) == 0);
+    index = 0;
+    TEST_ASSERT(regex_utf8_decode("\xE2\x28\x93", 3, &index, &cp) == 0);
+    index = 0;
+    TEST_ASSERT(regex_utf8_decode("\xE2\x9C\x28", 3, &index, &cp) == 0);
+    index = 0;
+    TEST_ASSERT(regex_utf8_decode("\xF0\x28\x98\x8A", 4, &index, &cp) == 0);
+    index = 0;
+    TEST_ASSERT(regex_utf8_decode("\xF0\x9F\x28\x8A", 4, &index, &cp) == 0);
+    index = 0;
+    TEST_ASSERT(regex_utf8_decode("\xF0\x9F\x98\x28", 4, &index, &cp) == 0);
+
+    // Overlong encodings
+    index = 0;
+    TEST_ASSERT(regex_utf8_decode("\xC1\x81", 2, &index, &cp) == 0);
+    index = 0;
+    TEST_ASSERT(regex_utf8_decode("\xE0\x83\xB1", 3, &index, &cp) == 0);
+    index = 0;
+    TEST_ASSERT(regex_utf8_decode("\xF0\x82\x9C\x93", 4, &index, &cp) == 0);
+
+    // Invalid start bytes
+    index = 0;
+    TEST_ASSERT(regex_utf8_decode("\xFF", 1, &index, &cp) == 0);
+    index = 0;
+    TEST_ASSERT(regex_utf8_decode("\xF8\x88\x80\x80\x80", 5, &index, &cp) == 0);
+
+    // Out of bounds code point
+    index = 0;
+    TEST_ASSERT(regex_utf8_decode("\xF4\x90\x80\x80", 4, &index, &cp) == 0);
+
+    return 0;
+}
+
 int test_util_is_newline(void) {
     TEST_ASSERT(regex_is_newline('\n') != 0);
     TEST_ASSERT(regex_is_newline('\r') != 0);
@@ -158,6 +238,45 @@ int test_util_unicode_case(void) {
 #else
     TEST_ASSERT(regex_unicode_toupper(0x00E9) == 0x00E9);
 #endif
+
+    return 0;
+}
+
+extern char *regex_escape_literal(const char *s, size_t len);
+
+int test_util_escape_literal(void) {
+    char *escaped;
+
+    // Test NULL input
+    escaped = regex_escape_literal(NULL, 0);
+    TEST_ASSERT(escaped == NULL);
+
+    // Test empty string
+    escaped = regex_escape_literal("", 0);
+    TEST_ASSERT(escaped != NULL);
+    TEST_ASSERT(strcmp(escaped, "") == 0);
+    free(escaped);
+
+    // Test no special characters
+    const char *s1 = "hello world 123";
+    escaped = regex_escape_literal(s1, strlen(s1));
+    TEST_ASSERT(escaped != NULL);
+    TEST_ASSERT(strcmp(escaped, "hello world 123") == 0);
+    free(escaped);
+
+    // Test all special characters
+    const char *s2 = ".*+?()[]{}|^$\\";
+    escaped = regex_escape_literal(s2, strlen(s2));
+    TEST_ASSERT(escaped != NULL);
+    TEST_ASSERT(strcmp(escaped, "\\.\\*\\+\\?\\(\\)\\[\\]\\{\\}\\|\\^\\$\\\\") == 0);
+    free(escaped);
+
+    // Test mixed content
+    const char *s3 = "a(b)c.*d\\e";
+    escaped = regex_escape_literal(s3, strlen(s3));
+    TEST_ASSERT(escaped != NULL);
+    TEST_ASSERT(strcmp(escaped, "a\\(b\\)c\\.\\*d\\\\e") == 0);
+    free(escaped);
 
     return 0;
 }
