@@ -118,6 +118,18 @@ int test_unicode_tolower(void) {
 }
 
 int test_unicode_toupper(void) {
+    for (uint32_t cp = 'a'; cp <= 'z'; cp++) {
+        TEST_ASSERT(regex_unicode_toupper(cp) == cp - 'a' + 'A');
+    }
+    for (uint32_t cp = 'A'; cp <= 'Z'; cp++) {
+        TEST_ASSERT(regex_unicode_toupper(cp) == cp);
+    }
+    for (uint32_t cp = '0'; cp <= '9'; cp++) {
+        TEST_ASSERT(regex_unicode_toupper(cp) == cp);
+    }
+    TEST_ASSERT(regex_unicode_toupper(0) == 0);
+    TEST_ASSERT(regex_unicode_toupper(REGEX_MAX_CODEPOINT) == REGEX_MAX_CODEPOINT);
+
     TEST_ASSERT(regex_unicode_toupper('a') == 'A');
     TEST_ASSERT(regex_unicode_toupper('z') == 'Z');
     TEST_ASSERT(regex_unicode_toupper('A') == 'A');
