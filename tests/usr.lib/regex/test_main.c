@@ -1,6 +1,7 @@
 #include <stdio.h>
 
 int test_api_basic(void);
+int test_api_split_free(void);
 int test_api_match(void);
 int test_util_ascii_tolower(void);
 int test_util_toupper(void);
@@ -24,6 +25,7 @@ int test_ascii_toupper(void);
 int main(void) {
     int failures = 0;
     failures += test_api_basic();
+    failures += test_api_split_free();
     failures += test_api_match();
     failures += test_util_ascii_tolower();
     failures += test_util_toupper();
