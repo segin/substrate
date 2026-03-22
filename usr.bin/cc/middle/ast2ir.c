@@ -11735,9 +11735,9 @@ static void free_global_relocs(global_reloc_t *relocs, size_t count) {
     free(relocs);
 }
 
-static int __attribute__((unused)) expr_calls_named_fn(const cc_expr_t *e, const char *name);
+static int expr_calls_named_fn(const cc_expr_t *e, const char *name);
 
-static int __attribute__((unused)) stmt_calls_named_fn(const cc_stmt_t *s, const char *name) {
+static int stmt_calls_named_fn(const cc_stmt_t *s, const char *name) {
     size_t i;
 
     if (s == NULL || name == NULL || name[0] == '\0') {
@@ -11771,7 +11771,7 @@ static int __attribute__((unused)) stmt_calls_named_fn(const cc_stmt_t *s, const
     return 0;
 }
 
-static int __attribute__((unused)) expr_calls_named_fn(const cc_expr_t *e, const char *name) {
+static int expr_calls_named_fn(const cc_expr_t *e, const char *name) {
     size_t i;
 
     if (e == NULL || name == NULL || name[0] == '\0') {
@@ -11791,27 +11791,6 @@ static int __attribute__((unused)) expr_calls_named_fn(const cc_expr_t *e, const
     for (i = 0; i < e->stmt_expr_count; ++i) {
         if (stmt_calls_named_fn(&e->stmt_expr_stmts[i], name)) {
             return 1;
-        }
-    }
-    return 0;
-}
-
-static int __attribute__((unused)) tu_has_direct_call_to(const cc_translation_unit_t *tu, const char *name) {
-    size_t i;
-    size_t j;
-
-    if (tu == NULL || name == NULL || name[0] == '\0') {
-        return 0;
-    }
-    for (i = 0; i < tu->func_count; ++i) {
-        const cc_function_t *f = &tu->funcs[i];
-        if (!f->has_body) {
-            continue;
-        }
-        for (j = 0; j < f->stmt_count; ++j) {
-            if (stmt_calls_named_fn(&f->stmts[j], name)) {
-                return 1;
-            }
         }
     }
     return 0;
