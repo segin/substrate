@@ -5,12 +5,13 @@ CFLAGS := $(CFLAGS) -I../../../include -I../../../sys -I../src
 TESTS = test_roundtrip test_invalid test_link test_reader_writer test_roundtrip_identity \
 	test_section_segment test_symbols_hash test_reloc_backend test_link_services \
 	test_debug_unwind test_validate_hardening test_perf_io test_matrix test_multiarch_api \
-	test_write_to_buffer test_ensure_symbols_relocs test_push_section test_segment_align test_strtab test_layout
+	test_write_to_buffer test_ensure_symbols_relocs test_push_section test_segment_align test_strtab test_layout test_push_symbol
 
 .PHONY: all clean
 
 all: $(TESTS)
 	./test_strtab
+	./test_push_symbol
 	./test_push_section
 	./test_segment_align
 	./test_write_to_buffer
@@ -88,6 +89,10 @@ test_segment_align: test_segment_align.c ../libelfobj.a
 
 test_strtab: test_strtab.c ../libelfobj.a
 	$(CC) $(CFLAGS) test_strtab.c ../libelfobj.a -o test_strtab
+
+test_push_symbol: test_push_symbol.c ../libelfobj.a
+	$(CC) $(CFLAGS) test_push_symbol.c ../libelfobj.a -o test_push_symbol
+
 
 test_ensure_symbols_relocs: test_ensure_symbols_relocs.c ../libelfobj.a
 	$(CC) $(CFLAGS) test_ensure_symbols_relocs.c ../libelfobj.a -o test_ensure_symbols_relocs
