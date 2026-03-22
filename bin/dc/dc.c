@@ -428,7 +428,9 @@ void execute(input_t *in) {
                         next = get_char(in);
                     }
                     line[i] = 0;
-                    if (line[0]) system(line);
+                    if (line[0]) {
+                        fprintf(stderr, "dc: ! command execution is disabled for security reasons\n");
+                    }
                 }
                 break;
             }
