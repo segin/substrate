@@ -31,9 +31,8 @@ int doname(struct nameblock *p, int reclevel, TIMETYPE *tval) {
                     if (td > truedate) truedate = td;
                     
                     // Execute default CC command
-                    char cmd[512];
-                    sprintf(cmd, "cc -c %s -o %s", srcname, p->namep);
-                    dosys(cmd, 0);
+                    char *argv[] = {"cc", "-c", srcname, "-o", p->namep, NULL};
+                    dosys_argv(argv, 0);
                     *tval = time(NULL);
                     p->done = 2;
                     p->modtime = *tval;
@@ -128,23 +127,11 @@ void parse_cmd(char *cmd, char **argv, int max_args) {
     argv[argc] = NULL;
 }
 
-int dosys(char *comstring, int nohalt) {
-    if (silflag == 0) printf("%s\n", comstring);
-    if (noexflag) return 0;
-    
+static int execute_argv(char **argv, int nohalt) {
     int pid;
     int status;
 
-    char *cmd_copy = strdup(comstring);
-    if (!cmd_copy) {
-        fatal("strdup failed");
-    }
-
-    char *argv[128];
-    parse_cmd(cmd_copy, argv, 128);
-
     if (argv[0] == NULL) {
-        free(cmd_copy);
         return 0;
     }
 
@@ -152,14 +139,11 @@ int dosys(char *comstring, int nohalt) {
         execvp(argv[0], argv);
         _exit(127);
     } else if (pid < 0) {
-        free(cmd_copy);
         if (!ignerr && !nohalt) {
             fatal("fork failed");
         }
         return -1;
     }
-
-    free(cmd_copy);
 
     while (waitpid(pid, &status, 0) < 0) {
         if (errno != EINTR) {
@@ -177,4 +161,35 @@ int dosys(char *comstring, int nohalt) {
         fatal("Command failed");
     }
     return ret;
+}
+
+int dosys(char *comstring, int nohalt) {
+    if (silflag == 0) printf("%s\n", comstring);
+    if (noexflag) return 0;
+
+    char *cmd_copy = strdup(comstring);
+    if (!cmd_copy) {
+        fatal("strdup failed");
+    }
+
+    char *argv[128];
+    parse_cmd(cmd_copy, argv, 128);
+
+    int ret = execute_argv(argv, nohalt);
+
+    free(cmd_copy);
+
+    return ret;
+}
+
+int dosys_argv(char **argv, int nohalt) {
+    if (silflag == 0) {
+        for (int i = 0; argv[i] != NULL; i++) {
+            printf("%s%s", i == 0 ? "" : " ", argv[i]);
+        }
+        printf("\n");
+    }
+    if (noexflag) return 0;
+
+    return execute_argv(argv, nohalt);
 }
