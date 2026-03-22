@@ -2025,7 +2025,7 @@ static void slot_layout_free(slot_layout_t *lay) {
     lay->frame_bytes = 0;
 }
 
-static int __attribute__((unused)) allocate_slot(int *free_slots, int *free_count, int *next_slot) {
+static int allocate_slot(int *free_slots, int *free_count, int *next_slot) {
     int i;
     int best_i = -1;
     int best_slot = 0;
@@ -2045,7 +2045,7 @@ static int __attribute__((unused)) allocate_slot(int *free_slots, int *free_coun
     return best_slot;
 }
 
-static void __attribute__((unused)) mark_use(int *last_use, int nvals, int v, int at) {
+static void mark_use(int *last_use, int nvals, int v, int at) {
     if (v < 0 || v >= nvals) {
         return;
     }
