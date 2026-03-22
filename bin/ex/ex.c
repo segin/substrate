@@ -9,6 +9,8 @@
 #include <sys/types.h>
 #include <signal.h>
 #include <setjmp.h>
+#include <sys/wait.h>
+#include <errno.h>
 
 int secure_mode = 0;
 int batch_mode = 0;
@@ -873,8 +875,32 @@ void do_command(buffer_t *b, char *cmd) {
             fprintf(stderr, "Shell commands not allowed in secure mode\n");
             return;
         }
-        if (system(cmd + 1) == -1) {
-            perror("system");
+        char *shell = getenv("SHELL");
+        if (!shell || !*shell) shell = "/bin/sh";
+        pid_t pid = fork();
+        if (pid < 0) {
+            perror("fork");
+        } else if (pid == 0) {
+            if (setgid(getgid()) == -1) {
+                perror("setgid");
+                exit(127);
+            }
+            if (setuid(getuid()) == -1) {
+                perror("setuid");
+                exit(127);
+            }
+            execl(shell, shell, "-c", cmd + 1, (char *)NULL);
+            perror("execl");
+            exit(127);
+        } else {
+            int status;
+            void (*old_int)(int) = signal(SIGINT, SIG_IGN);
+            void (*old_quit)(int) = signal(SIGQUIT, SIG_IGN);
+            while (waitpid(pid, &status, 0) == -1) {
+                if (errno != EINTR) break;
+            }
+            signal(SIGINT, old_int);
+            signal(SIGQUIT, old_quit);
         }
     }
 }
