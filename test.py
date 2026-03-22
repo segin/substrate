@@ -27,4 +27,14 @@ def modify_parser():
     # Wait, `struct_member_push` already uses geometric allocation!
     pass
 
-modify_parser()
+import unittest
+from unittest.mock import patch, mock_open
+
+class TestModifyParser(unittest.TestCase):
+    @patch('builtins.open', new_callable=mock_open, read_data="fake content")
+    def test_modify_parser(self, mock_file):
+        modify_parser()
+        mock_file.assert_called_with("usr.bin/cc/frontend/parser.c", "r")
+
+if __name__ == '__main__':
+    unittest.main()
