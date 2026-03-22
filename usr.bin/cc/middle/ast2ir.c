@@ -11796,27 +11796,6 @@ static int __attribute__((unused)) expr_calls_named_fn(const cc_expr_t *e, const
     return 0;
 }
 
-static int __attribute__((unused)) tu_has_direct_call_to(const cc_translation_unit_t *tu, const char *name) {
-    size_t i;
-    size_t j;
-
-    if (tu == NULL || name == NULL || name[0] == '\0') {
-        return 0;
-    }
-    for (i = 0; i < tu->func_count; ++i) {
-        const cc_function_t *f = &tu->funcs[i];
-        if (!f->has_body) {
-            continue;
-        }
-        for (j = 0; j < f->stmt_count; ++j) {
-            if (stmt_calls_named_fn(&f->stmts[j], name)) {
-                return 1;
-            }
-        }
-    }
-    return 0;
-}
-
 static int should_skip_fn_body_for_codegen(const cc_translation_unit_t *tu, const cc_function_t *f) {
     size_t i;
     (void)tu;
