@@ -30,10 +30,9 @@ int doname(struct nameblock *p, int reclevel, TIMETYPE *tval) {
                     doname(srcnb, reclevel + 1, &td);
                     if (td > truedate) truedate = td;
                     
-                    // Execute default CC command
-                    char cmd[512];
-                    sprintf(cmd, "cc -c %s -o %s", srcname, p->namep);
-                    dosys(cmd, 0);
+                    // Execute default CC command safely
+                    char *argv[] = {"cc", "-c", srcname, "-o", p->namep, NULL};
+                    dosysv(argv);
                     *tval = time(NULL);
                     p->done = 2;
                     p->modtime = *tval;
@@ -126,6 +125,52 @@ void parse_cmd(char *cmd, char **argv, int max_args) {
         argv[argc++] = token_start;
     }
     argv[argc] = NULL;
+}
+
+int dosysv(char **argv) {
+    int i = 0;
+    if (silflag == 0) {
+        while (argv[i]) {
+            printf("%s ", argv[i]);
+            i++;
+        }
+        printf("\n");
+    }
+    if (noexflag) return 0;
+
+    int pid;
+    int status;
+
+    if (argv[0] == NULL) {
+        return 0;
+    }
+
+    if ((pid = fork()) == 0) {
+        execvp(argv[0], argv);
+        _exit(127);
+    } else if (pid < 0) {
+        if (!ignerr) {
+            fatal("fork failed");
+        }
+        return -1;
+    }
+
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno != EINTR) {
+            status = -1;
+            break;
+        }
+    }
+
+    int ret = -1;
+    if (WIFEXITED(status)) {
+        ret = WEXITSTATUS(status);
+    }
+
+    if (ret != 0 && !ignerr) {
+        fatal("Command failed");
+    }
+    return ret;
 }
 
 int dosys(char *comstring, int nohalt) {
