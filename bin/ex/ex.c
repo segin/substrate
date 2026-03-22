@@ -759,12 +759,12 @@ void do_command(buffer_t *b, char *cmd) {
         if (addr1 == -1) { addr1 = b->cur ? 1 : 0; addr2 = addr1; } // default to current
         if (addr1 > 0 && addr2 >= addr1) {
             line_t *l = buf_get_line(b, addr1);
+            size_t rep_len = strlen(repl_str);
             for (int i = 0; i < (addr2 - addr1 + 1) && l; i++) {
                 regmatch_t pm;
                 char *search_start = l->text;
                 int matches = 0;
                 // We'll build a new string
-                size_t rep_len = strlen(repl_str);
                 size_t new_len = 0;
                 char *new_text = malloc(1);
                 new_text[0] = '\0';
