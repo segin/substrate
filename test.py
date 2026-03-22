@@ -1,6 +1,3 @@
-with open("usr.bin/cc/frontend/parser.c", "r") as f:
-    text = f.read()
-
 import re
 
 # `push_stmt_arr` can't be easily modified directly because we need capacity.
@@ -27,4 +24,7 @@ def modify_parser():
     # Wait, `struct_member_push` already uses geometric allocation!
     pass
 
-modify_parser()
+if __name__ == '__main__':
+    with open("usr.bin/cc/frontend/parser.c", "r") as f:
+        text = f.read()
+    modify_parser()
