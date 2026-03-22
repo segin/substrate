@@ -31,9 +31,11 @@ int doname(struct nameblock *p, int reclevel, TIMETYPE *tval) {
                     if (td > truedate) truedate = td;
                     
                     // Execute default CC command
-                    char cmd[512];
-                    sprintf(cmd, "cc -c %s -o %s", srcname, p->namep);
-                    dosys(cmd, 0);
+                    if (silflag == 0) {
+                        printf("cc -c %s -o %s\n", srcname, p->namep);
+                    }
+                    char *argv[] = {"cc", "-c", srcname, "-o", p->namep, NULL};
+                    dosysv(argv, 0);
                     *tval = time(NULL);
                     p->done = 2;
                     p->modtime = *tval;
@@ -129,16 +131,12 @@ void parse_cmd(char *cmd, char **argv, int max_args) {
 }
 
 int dosys(char *comstring, int nohalt) {
-    if (silflag == 0) printf("%s\n", comstring);
-    if (noexflag) return 0;
-    
-    int pid;
-    int status;
-
     char *cmd_copy = strdup(comstring);
     if (!cmd_copy) {
         fatal("strdup failed");
     }
+
+    if (silflag == 0) printf("%s\n", comstring);
 
     char *argv[128];
     parse_cmd(cmd_copy, argv, 128);
@@ -148,18 +146,30 @@ int dosys(char *comstring, int nohalt) {
         return 0;
     }
 
+    int ret = dosysv(argv, nohalt);
+    free(cmd_copy);
+    return ret;
+}
+
+int dosysv(char **argv, int nohalt) {
+    if (noexflag) return 0;
+
+    int pid;
+    int status;
+
+    if (argv[0] == NULL) {
+        return 0;
+    }
+
     if ((pid = fork()) == 0) {
         execvp(argv[0], argv);
         _exit(127);
     } else if (pid < 0) {
-        free(cmd_copy);
         if (!ignerr && !nohalt) {
             fatal("fork failed");
         }
         return -1;
     }
-
-    free(cmd_copy);
 
     while (waitpid(pid, &status, 0) < 0) {
         if (errno != EINTR) {
