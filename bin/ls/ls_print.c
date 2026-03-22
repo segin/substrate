@@ -749,7 +749,7 @@ static void print_xattr_names(const file_info_t *f) {
                 printf("\t");
                 while (i < (size_t)got) {
                     const char *name = buf + i;
-                    if (name[0] == '\0') {
+                    if (*name == '\0') {
                         break;
                     }
                     if (!first) {
