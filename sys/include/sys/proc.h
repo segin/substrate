@@ -72,6 +72,7 @@ typedef struct process {
     
     // Process State
     uint8_t state; // process_state_t
+    uint8_t p_xsig; // Signal that stopped this process (for WSTOPSIG)
     uint16_t p_flag; // Process flags (P_CONTINUED, P_TRACED, etc.)
     
     // Hierarchy
