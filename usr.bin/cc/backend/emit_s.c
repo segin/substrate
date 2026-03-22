@@ -2053,15 +2053,6 @@ static int __attribute__((unused)) allocate_slot(int *free_slots, int *free_coun
     return best_slot;
 }
 
-static void __attribute__((unused)) mark_use(int *last_use, int nvals, int v, int at) {
-    if (v < 0 || v >= nvals) {
-        return;
-    }
-    if (at > last_use[v]) {
-        last_use[v] = at;
-    }
-}
-
 typedef void (*ssa_value_visit_fn)(int v, void *ctx);
 
 static void for_each_instr_def(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, ssa_value_visit_fn fn, void *ctx) {
@@ -2175,7 +2166,9 @@ static void slot_mark_use_cb(int v, void *ctxp) {
     if (ctx == NULL || v < 0 || v >= ctx->nvals) {
         return;
     }
-    mark_use(ctx->last_use, ctx->nvals, v, ctx->at);
+    if (ctx->at > ctx->last_use[v]) {
+        ctx->last_use[v] = ctx->at;
+    }
     if (ctx->first_use[v] < 0 || ctx->at < ctx->first_use[v]) {
         ctx->first_use[v] = ctx->at;
     }
