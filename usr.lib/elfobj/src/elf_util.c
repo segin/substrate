@@ -1,6 +1,7 @@
 #include "elf_private.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -308,12 +309,7 @@ elf_err_t elf__write_file_atomic(const char *path, const void *buf, size_t size)
         return ELF_ERR_OOM;
     }
 
-    if (dir_len != 0) {
-        memcpy(tmp_path, path, dir_len);
-    }
-    tmp_path[dir_len] = '.';
-    memcpy(tmp_path + dir_len + 1, base, base_len);
-    memcpy(tmp_path + dir_len + 1 + base_len, ".tmpXXXXXX", sizeof(".tmpXXXXXX"));
+    snprintf(tmp_path, tmp_len, "%.*s.%s.tmpXXXXXX", (int)dir_len, path, base);
 
     fd = mkstemp(tmp_path);
     if (fd < 0) {
