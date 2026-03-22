@@ -61,11 +61,16 @@ int main(void) {
     if (elf_hash_sysv("") != 0) fail("sysv hash empty");
     if (elf_hash_sysv("printf") != 0x077905a6) fail("sysv hash printf");
     if (elf_hash_sysv("exit") != 0x0006cf04) fail("sysv hash exit");
+    if (elf_hash_sysv("a") != 0x00000061) fail("sysv hash a");
+    if (elf_hash_sysv("libc.so.6") != 0x0865f4e6) fail("sysv hash libc.so.6");
+    if (elf_hash_sysv("a_very_long_symbol_name_for_testing") != 0x05683707) fail("sysv hash long name");
 
     if (elf_hash_gnu(NULL) != 0) fail("gnu hash NULL");
     if (elf_hash_gnu("") != 5381) fail("gnu hash empty");
     if (elf_hash_gnu("printf") != 0x156b2bb8) fail("gnu hash printf");
     if (elf_hash_gnu("exit") != 0x7c967e3f) fail("gnu hash exit");
+    if (elf_hash_gnu("libc.so.6") != 0x5fd7d493) fail("gnu hash libc.so.6");
+    if (elf_hash_gnu("a_very_long_symbol_name_for_testing") != 0xbf14c2f2) fail("gnu hash long name");
 
     return 0;
 }
