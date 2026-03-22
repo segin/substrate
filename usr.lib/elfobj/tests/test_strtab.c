@@ -3,60 +3,86 @@
 #include <string.h>
 #include "elf_private.h"
 
-static int test_strtab_init(void) {
-    elf_strtab_t tab;
-    elf_err_t err;
-
-    printf("Running test_strtab_init...\n");
-
-    /* Test 1: Null pointer */
-    err = elf__strtab_init(NULL);
-    if (err != ELF_ERR_STATE) {
-        printf("FAILED: Expected ELF_ERR_STATE for NULL input, got %d\n", err);
-        return 1;
-    }
-
-    /* Test 2: Valid initialization */
-    err = elf__strtab_init(&tab);
-    if (err != ELF_OK) {
-        printf("FAILED: Expected ELF_OK for valid initialization, got %d\n", err);
-        return 1;
-    }
-
-    /* Verify state */
-    if (tab.data == NULL) {
-        printf("FAILED: tab.data is NULL\n");
-        return 1;
-    }
-    if (tab.size != 1) {
-        printf("FAILED: Expected size 1, got %zu\n", tab.size);
-        return 1;
-    }
-    if (tab.cap != 1) {
-        printf("FAILED: Expected cap 1, got %zu\n", tab.cap);
-        return 1;
-    }
-    if (tab.data[0] != '\0') {
-        printf("FAILED: Expected data[0] to be '\\0'\n");
-        return 1;
-    }
-
-    elf__strtab_free(&tab);
-
-    printf("PASSED: test_strtab_init\n");
-    return 0;
+static void fail(const char *msg) {
+    fprintf(stderr, "test_strtab: %s\n", msg);
+    exit(1);
 }
 
 int main(void) {
-    int errors = 0;
+    elf_strtab_t tab;
+    uint32_t off1, off2, off3;
 
-    errors += test_strtab_init();
-
-    if (errors == 0) {
-        printf("All tests passed.\n");
-        return 0;
-    } else {
-        printf("%d tests failed.\n", errors);
-        return 1;
+    /* Test 1: NULL argument for init */
+    if (elf__strtab_init(NULL) != ELF_ERR_STATE) {
+        fail("elf__strtab_init(NULL) should return ELF_ERR_STATE");
     }
+
+    /* Test 2: Successful initialization */
+    if (elf__strtab_init(&tab) != ELF_OK) {
+        fail("elf__strtab_init failed");
+    }
+    if (tab.data == NULL || tab.size != 1 || tab.cap != 1 || tab.data[0] != '\0') {
+        fail("initialization state is incorrect");
+    }
+
+    /* Test 3: Adding strings */
+    off1 = elf__strtab_add(&tab, "hello");
+    if (off1 != 1) {
+        fail("first string offset should be 1");
+    }
+    if (strcmp(tab.data + off1, "hello") != 0) {
+        fail("first string content is incorrect");
+    }
+
+    off2 = elf__strtab_add(&tab, "world");
+    if (off2 != 1 + strlen("hello") + 1) {
+        fail("second string offset is incorrect");
+    }
+    if (strcmp(tab.data + off2, "world") != 0) {
+        fail("second string content is incorrect");
+    }
+
+    /* Test 4: Empty string */
+    off3 = elf__strtab_add(&tab, "");
+    if (off3 != off2 + strlen("world") + 1) {
+        fail("empty string offset is incorrect");
+    }
+    if (tab.data[off3] != '\0') {
+        fail("empty string content is incorrect");
+    }
+
+    /* Test 5: NULL cases for add */
+    if (elf__strtab_add(NULL, "test") != 0) {
+        fail("elf__strtab_add(NULL, ...) should return 0");
+    }
+    if (elf__strtab_add(&tab, NULL) != 0) {
+        fail("elf__strtab_add(..., NULL) should return 0");
+    }
+
+    /* Test 6: Resize trigger */
+    char large[256];
+    memset(large, 'a', sizeof(large) - 1);
+    large[sizeof(large) - 1] = '\0';
+    uint32_t off_large = elf__strtab_add(&tab, large);
+    if (off_large == 0) {
+        fail("adding large string failed");
+    }
+    if (strcmp(tab.data + off_large, large) != 0) {
+        fail("large string content is incorrect");
+    }
+    if (tab.cap < tab.size) {
+        fail("capacity should be at least size");
+    }
+
+    /* Test 7: Free */
+    elf__strtab_free(&tab);
+    if (tab.data != NULL || tab.size != 0 || tab.cap != 0) {
+        fail("free state is incorrect");
+    }
+
+    /* Test 8: Free NULL (should not crash) */
+    elf__strtab_free(NULL);
+
+    printf("test_strtab: all tests passed\n");
+    return 0;
 }
