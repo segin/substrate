@@ -17,7 +17,17 @@
 #include <errno.h>
 #include <sys/wait.h>
 
+#define ATEXIT_MAX 32
+static void (*__atexit_funcs[ATEXIT_MAX])(void);
+static int __atexit_count = 0;
+
 void exit(int status) {
+    /* Call atexit handlers in reverse order */
+    while (__atexit_count > 0) {
+        __atexit_funcs[--__atexit_count]();
+    }
+    /* Flush all open stdio streams (POSIX requirement) */
+    fflush(NULL);
     _exit(status);
 }
 
@@ -625,12 +635,154 @@ int abs(int j) { return j < 0 ? -j : j; }
 long labs(long j) { return j < 0 ? -j : j; }
 long long llabs(long long j) { return j < 0 ? -j : j; }
 
+div_t div(int numer, int denom) {
+    div_t result;
+    result.quot = numer / denom;
+    result.rem = numer % denom;
+    return result;
+}
+
+ldiv_t ldiv(long numer, long denom) {
+    ldiv_t result;
+    result.quot = numer / denom;
+    result.rem = numer % denom;
+    return result;
+}
+
+lldiv_t lldiv(long long numer, long long denom) {
+    lldiv_t result;
+    result.quot = numer / denom;
+    result.rem = numer % denom;
+    return result;
+}
+
+int atexit(void (*func)(void)) {
+    if (__atexit_count >= ATEXIT_MAX) return -1;
+    __atexit_funcs[__atexit_count++] = func;
+    return 0;
+}
+
+void _Exit(int status) {
+    _exit(status);
+}
+
+static void swap_bytes(char *a, char *b, size_t size) {
+    while (size--) {
+        char tmp = *a;
+        *a++ = *b;
+        *b++ = tmp;
+    }
+}
+
+static void insertion_sort(char *base, size_t nmemb, size_t size,
+                           int (*compar)(const void *, const void *)) {
+    for (size_t i = 1; i < nmemb; i++) {
+        size_t j = i;
+        while (j > 0 && compar(base + j * size, base + (j - 1) * size) < 0) {
+            swap_bytes(base + j * size, base + (j - 1) * size, size);
+            j--;
+        }
+    }
+}
+
+static size_t med3(char *base, size_t a, size_t b, size_t c, size_t size,
+                   int (*compar)(const void *, const void *)) {
+    int ab = compar(base + a * size, base + b * size);
+    int bc = compar(base + b * size, base + c * size);
+    int ac = compar(base + a * size, base + c * size);
+    if (ab <= 0) {
+        if (bc <= 0) return b;
+        return ac <= 0 ? c : a;
+    }
+    if (bc >= 0) return b;
+    return ac >= 0 ? c : a;
+}
+
 void qsort(void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *)) {
-    (void)base; (void)nmemb; (void)size; (void)compar;
+    if (nmemb < 2 || size == 0) return;
+
+    char *arr = (char *)base;
+
+    /* Use iterative quicksort with explicit stack to avoid recursion depth issues */
+    struct { size_t lo; size_t hi; } stack[64];
+    int top = 0;
+    stack[top].lo = 0;
+    stack[top].hi = nmemb - 1;
+
+    while (top >= 0) {
+        size_t lo = stack[top].lo;
+        size_t hi = stack[top].hi;
+        top--;
+
+        if (hi <= lo) continue;
+
+        /* Use insertion sort for small partitions */
+        if (hi - lo + 1 <= 16) {
+            insertion_sort(arr + lo * size, hi - lo + 1, size, compar);
+            continue;
+        }
+
+        /* Median-of-three pivot selection */
+        size_t mid = lo + (hi - lo) / 2;
+        size_t pivot_idx = med3(arr, lo, mid, hi, size, compar);
+        swap_bytes(arr + pivot_idx * size, arr + lo * size, size);
+
+        /* Partition */
+        size_t i = lo + 1;
+        size_t j = hi;
+        while (1) {
+            while (i <= hi && compar(arr + i * size, arr + lo * size) < 0) i++;
+            while (j > lo && compar(arr + j * size, arr + lo * size) > 0) j--;
+            if (i >= j) break;
+            swap_bytes(arr + i * size, arr + j * size, size);
+            i++;
+            j--;
+        }
+        swap_bytes(arr + lo * size, arr + j * size, size);
+
+        /* Push larger partition first so smaller is processed first (limits stack depth) */
+        if (j > lo + 1 && hi > j + 1) {
+            if (j - lo > hi - j) {
+                top++;
+                stack[top].lo = lo;
+                stack[top].hi = j > 0 ? j - 1 : 0;
+                top++;
+                stack[top].lo = j + 1;
+                stack[top].hi = hi;
+            } else {
+                top++;
+                stack[top].lo = j + 1;
+                stack[top].hi = hi;
+                top++;
+                stack[top].lo = lo;
+                stack[top].hi = j > 0 ? j - 1 : 0;
+            }
+        } else if (j > lo + 1) {
+            top++;
+            stack[top].lo = lo;
+            stack[top].hi = j > 0 ? j - 1 : 0;
+        } else if (hi > j + 1) {
+            top++;
+            stack[top].lo = j + 1;
+            stack[top].hi = hi;
+        }
+    }
 }
 
 void *bsearch(const void *key, const void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *)) {
-    (void)key; (void)base; (void)nmemb; (void)size; (void)compar;
+    const char *p = (const char *)base;
+    while (nmemb > 0) {
+        size_t mid = nmemb / 2;
+        const void *midp = p + mid * size;
+        int cmp = compar(key, midp);
+        if (cmp == 0) return (void *)midp;
+        if (cmp > 0) {
+            p = (const char *)midp + size;
+            nmemb -= mid + 1;
+        } else {
+            nmemb = mid;
+        }
+    }
     return NULL;
 }
 

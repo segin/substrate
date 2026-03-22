@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 static void fail(const char *msg) {
     fprintf(stderr, "test_section_segment: %s\n", msg);
@@ -10,7 +11,11 @@ static void fail(const char *msg) {
 
 int main(void) {
     elfobj_t *obj;
+    elfobj_t *group_obj;
+    elfobj_t *roundtrip;
     elf_section_t *text;
+    elf_section_t *group_text;
+    elf_section_t *group_sec;
     elf_section_t *data;
     elf_section_t *tdata;
     elf_section_t *note;
@@ -21,6 +26,8 @@ int main(void) {
     uint8_t text_bytes[] = {0x90, 0xC3};
     uint8_t data_bytes[] = {'a', 'b', 'c', 0};
     char *diag = NULL;
+    char tmp_path[] = "tmp_group_XXXXXX";
+    int fd;
 
     obj = elf_create(ET_DYN, 62, ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_LE);
     if (!obj) fail("elf_create");
@@ -37,8 +44,6 @@ int main(void) {
     if (elf_section_set_data(dyn, data_bytes, 2) != ELF_OK) fail("dyn data");
     if (elf_section_set_type(data, SHT_PROGBITS) != ELF_OK) fail("set type");
     if (elf_section_set_flags(data, SHF_ALLOC) != ELF_OK) fail("set flags");
-    if (elf_section_set_group(text, 1, 1) != ELF_OK) fail("set group");
-
     /* test elf_section_set_align coverage */
     if (elf_section_set_align(NULL, 16) != ELF_ERR_STATE) fail("set align NULL");
     if (elf_section_set_align(text, 0) != ELF_OK) fail("set align 0");
@@ -83,5 +88,24 @@ int main(void) {
     if (elf_section_set_align(text, 32) != ELF_ERR_STATE) fail("set align on immutable object");
 
     elf_close(obj);
+
+    group_obj = elf_create(ET_REL, 62, ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_LE);
+    if (!group_obj) fail("group obj");
+    group_text = elf_add_section(group_obj, ".text", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR);
+    if (!group_text) fail("group text");
+    if (elf_section_set_data(group_text, text_bytes, 1) != ELF_OK) fail("group text data");
+    if (elf_section_set_group(group_text, 1, 1) != ELF_OK) fail("set group");
+    if (elf_section_set_group_signature(group_text, "group_sig") != ELF_OK) fail("set group signature");
+    fd = mkstemp(tmp_path);
+    if (fd < 0) fail("mkstemp");
+    close(fd);
+    if (elf_write_file(group_obj, tmp_path) != ELF_OK) fail("write file");
+    if (elf_open(tmp_path, &roundtrip) != ELF_OK) fail("open roundtrip");
+    group_sec = elf_find_section(roundtrip, ".group");
+    if (group_sec == NULL || elf_section_type(group_sec) != SHT_GROUP) fail("missing .group");
+    if (elf_section_size(group_sec) < 8) fail("group payload too small");
+    elf_close(roundtrip);
+    unlink(tmp_path);
+    elf_close(group_obj);
     return 0;
 }

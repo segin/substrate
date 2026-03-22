@@ -22,3 +22,9 @@ libedit.a: $(OBJS)
 
 clean:
 	rm -f *.o libedit.a histedit.h
+
+install: histedit.h libedit.a
+	@mkdir -p $(DESTDIR)/usr/lib
+	@mkdir -p $(DESTDIR)/usr/include
+	cp libedit.a $(DESTDIR)/usr/lib/
+	cp ../../include/histedit.h $(DESTDIR)/usr/include/

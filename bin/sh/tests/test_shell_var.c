@@ -70,10 +70,39 @@ void test_positional_params(void) {
     printf("PASS: test_positional_params\n");
 }
 
+void test_envp(void) {
+    shell_var_init(NULL);
+    shell_var_export("VAR1", "val1");
+    shell_var_export("VAR2", "val2");
+    shell_var_set("VAR3", "val3"); // Not exported
+
+    char **envp = shell_var_get_envp();
+    assert(envp != NULL);
+
+    int found1 = 0, found2 = 0, found3 = 0, count = 0;
+    for (int i = 0; envp[i]; i++) {
+        if (strcmp(envp[i], "VAR1=val1") == 0) found1 = 1;
+        if (strcmp(envp[i], "VAR2=val2") == 0) found2 = 1;
+        if (strcmp(envp[i], "VAR3=val3") == 0) found3 = 1;
+        count++;
+    }
+
+    assert(found1 == 1);
+    assert(found2 == 1);
+    assert(found3 == 0);
+    assert(count == 2);
+
+    for (int i = 0; envp[i]; i++) free(envp[i]);
+    free(envp);
+
+    printf("PASS: test_envp\n");
+}
+
 int main(void) {
     test_basic_set_get();
     test_readonly();
     test_scoping();
     test_positional_params();
+    test_envp();
     return 0;
 }
