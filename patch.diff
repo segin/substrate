@@ -1,0 +1,48 @@
+diff --git a/usr.lib/elfobj/tests/test_ensure_symbols_relocs.c b/usr.lib/elfobj/tests/test_ensure_symbols_relocs.c
+index c49fb1f..b07042d 100644
+--- a/usr.lib/elfobj/tests/test_ensure_symbols_relocs.c
++++ b/usr.lib/elfobj/tests/test_ensure_symbols_relocs.c
+@@ -19,16 +19,43 @@ int main(void) {
+     if (obj == NULL) {
+         fprintf(stderr, "FAIL: failed to create ELF obj\n");
+         return 1;
+     }
+
++    // Test the first time (not loaded yet)
++    if (obj->symrel_loaded != 0) {
++        fprintf(stderr, "FAIL: expected obj->symrel_loaded to be 0 initially\n");
++        elf_close(obj);
++        return 1;
++    }
++
+     err = elf__ensure_symbols_relocs(obj);
+     if (err != ELF_OK) {
+         fprintf(stderr, "FAIL: expected ELF_OK for valid obj, got %d\n", err);
+         elf_close(obj);
+         return 1;
+     }
+
++    if (obj->symrel_loaded != 1) {
++        fprintf(stderr, "FAIL: expected obj->symrel_loaded to be 1 after first call\n");
++        elf_close(obj);
++        return 1;
++    }
++
++    // Call it a second time to hit the early return (symrel_loaded == 1)
++    err = elf__ensure_symbols_relocs(obj);
++    if (err != ELF_OK) {
++        fprintf(stderr, "FAIL: expected ELF_OK on second call, got %d\n", err);
++        elf_close(obj);
++        return 1;
++    }
++
++    if (obj->symrel_loaded != 1) {
++        fprintf(stderr, "FAIL: expected obj->symrel_loaded to remain 1 after second call\n");
++        elf_close(obj);
++        return 1;
++    }
++
+     elf_close(obj);
+     printf("PASS: elf__ensure_symbols_relocs\n");
+     return 0;
+ }
