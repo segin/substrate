@@ -87,6 +87,7 @@ void fatal(char *s);
 void fatal1(char *s, char *a);
 int doname(struct nameblock *p, int reclevel, TIMETYPE *tval);
 int docom(struct shblock *q);
+int dosysv(char **argv, int nohalt);
 int dosys(char *comstring, int nohalt);
 TIMETYPE exists(char *filename);
 void rddescf(char *descfile);
