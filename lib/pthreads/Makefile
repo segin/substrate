@@ -16,3 +16,7 @@ libpthread.a: $(OBJS)
 
 clean:
 	rm -f $(OBJS) libpthread.a
+
+install: libpthread.a
+	@mkdir -p $(DESTDIR)/usr/lib
+	cp libpthread.a $(DESTDIR)/usr/lib/

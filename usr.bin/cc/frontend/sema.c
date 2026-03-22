@@ -264,12 +264,12 @@ static int validate_attr_section(const char *section, cc_diag_t *diag, const cha
     return -1;
 }
 
-static int attr_visibility_mask(void) {
+static cc_attr_flags_t attr_visibility_mask(void) {
     return CC_ATTR_VIS_DEFAULT | CC_ATTR_VIS_HIDDEN | CC_ATTR_VIS_PROTECTED | CC_ATTR_VIS_INTERNAL;
 }
 
-static int has_multiple_visibility_attrs(int flags) {
-    int v = flags & attr_visibility_mask();
+static int has_multiple_visibility_attrs(cc_attr_flags_t flags) {
+    cc_attr_flags_t v = flags & attr_visibility_mask();
     int n = 0;
     if ((v & CC_ATTR_VIS_DEFAULT) != 0) {
         n++;
@@ -1647,6 +1647,11 @@ typedef enum {
     BUILTIN_INF,
     BUILTIN_INFF,
     BUILTIN_INFL,
+    BUILTIN_ISFINITE,
+    BUILTIN_ISINF,
+    BUILTIN_ISINF_SIGN,
+    BUILTIN_ISNAN,
+    BUILTIN_SIGNBIT,
     BUILTIN_NANF,
     BUILTIN_NAN,
     BUILTIN_NANL,
@@ -1790,6 +1795,24 @@ static builtin_kind_t builtin_kind(const char *name) {
     }
     if (strcmp(name, "__builtin_infl") == 0) {
         return BUILTIN_INFL;
+    }
+    if (strcmp(name, "__builtin_isfinite") == 0) {
+        return BUILTIN_ISFINITE;
+    }
+    if (strcmp(name, "__builtin_isinf") == 0 || strcmp(name, "__builtin_isinff") == 0 ||
+        strcmp(name, "__builtin_isinfl") == 0) {
+        return BUILTIN_ISINF;
+    }
+    if (strcmp(name, "__builtin_isinf_sign") == 0) {
+        return BUILTIN_ISINF_SIGN;
+    }
+    if (strcmp(name, "__builtin_isnan") == 0 || strcmp(name, "__builtin_isnanf") == 0 ||
+        strcmp(name, "__builtin_isnanl") == 0) {
+        return BUILTIN_ISNAN;
+    }
+    if (strcmp(name, "__builtin_signbit") == 0 || strcmp(name, "__builtin_signbitf") == 0 ||
+        strcmp(name, "__builtin_signbitl") == 0) {
+        return BUILTIN_SIGNBIT;
     }
     if (strcmp(name, "__builtin_nanf") == 0 || strcmp(name, "__builtin_nansf") == 0) {
         return BUILTIN_NANF;
@@ -1956,9 +1979,9 @@ static long array_type_size_bytes(const cc_translation_unit_t *tu, cc_type_t t, 
     return elem_size * count;
 }
 
-static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long *out) {
-    long a;
-    long b;
+static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long long *out) {
+    long long a;
+    long long b;
 
     if (e == NULL || out == NULL) {
         return -1;
@@ -2091,7 +2114,7 @@ static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t 
                     (u & (1ULL << (bits - 1))) != 0) {
                     u |= ~mask;
                 }
-                *out = (long)u;
+                *out = (long long)u;
             }
         }
         return 0;
@@ -2148,7 +2171,7 @@ static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t 
                 } else {
                     return -1;
                 }
-                *out = (long)uv;
+                *out = (long long)uv;
                 return 0;
             }
         }
@@ -2156,6 +2179,17 @@ static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t 
 
     case CC_EXPR_SIZEOF:
         if (e->lhs != NULL) {
+            if (e->lhs->kind == CC_EXPR_STR) {
+                int wide = (e->lhs->aux_type == CC_TYPE_INT || e->lhs->aux_type == CC_TYPE_UINT ||
+                            e->lhs->aux_type == CC_TYPE_LONG_LONG || e->lhs->aux_type == CC_TYPE_ULONG_LONG);
+                size_t units = decoded_string_unit_count(e->lhs, wide);
+                cc_type_t elem_type = ptr_base_type(e->lhs->value_type);
+                long elem_size = type_size_bytes_struct(tu, elem_type, e->lhs->struct_id);
+                if (units < (size_t)LONG_MAX && elem_size > 0 && (long)(units + 1) <= LONG_MAX / elem_size) {
+                    *out = (long)(units + 1) * elem_size;
+                    return 0;
+                }
+            }
             if (e->lhs->array_ndim > 0 && is_pointer_type(e->lhs->value_type)) {
                 *out = array_type_size_bytes(tu, e->lhs->value_type, e->lhs->struct_id,
                                              e->lhs->array_ndim, e->lhs->array_dims);
@@ -2210,7 +2244,7 @@ static int atomic_memorder_valid_for_store(long mo) {
 static int atomic_memorder_check_arg(const cc_translation_unit_t *tu, cc_expr_t *arg, const char *builtin_name,
                                      const char *op_kind, int allow_load_orders, int allow_store_orders,
                                      cc_diag_t *diag) {
-    long mo = -1;
+    long long mo = -1;
     char msg[192];
 
     if (arg == NULL) {
@@ -2250,7 +2284,8 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
                                    size_t var_count, int depth, long *out_inferred_len, cc_diag_t *diag);
 static cc_expr_t *unwrap_scalar_initializer_expr(cc_expr_t *init, cc_diag_t *diag);
 static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t **vars, size_t *var_count, int depth,
-                      cc_type_t fn_ret_type, int fn_ret_struct_id, int fn_attr_flags, int loop_depth, int switch_depth,
+                      cc_type_t fn_ret_type, int fn_ret_struct_id, cc_attr_flags_t fn_attr_flags, int loop_depth,
+                      int switch_depth,
                       int *saw_return, cc_diag_t *diag);
 
 static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t *vars, size_t var_count, int depth,
@@ -2553,7 +2588,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 }
                 if (getenv("CC_DEBUG_SEMA_CMP") != NULL) {
                     fprintf(stderr,
-                            "cc-debug: eq/ne cmp lhs(kind=%d type=%d sid=%d ident=%s int=%ld) rhs(kind=%d type=%d sid=%d ident=%s int=%ld) line=%zu col=%zu\n",
+                            "cc-debug: eq/ne cmp lhs(kind=%d type=%d sid=%d ident=%s int=%lld) rhs(kind=%d type=%d sid=%d ident=%s int=%lld) line=%zu col=%zu\n",
                             (int)e->lhs->kind, (int)e->lhs->value_type, e->lhs->struct_id,
                             e->lhs->ident != NULL ? e->lhs->ident : "<null>", e->lhs->int_val, (int)e->rhs->kind,
                             (int)e->rhs->value_type, e->rhs->struct_id, e->rhs->ident != NULL ? e->rhs->ident : "<null>",
@@ -2709,6 +2744,23 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             }
             e->value_type = (bk == BUILTIN_HUGE_VALF || bk == BUILTIN_INFF) ? CC_TYPE_FLOAT :
                             (bk == BUILTIN_HUGE_VALL || bk == BUILTIN_INFL) ? CC_TYPE_LDOUBLE : CC_TYPE_DOUBLE;
+            e->struct_id = -1;
+            return 0;
+        }
+        if (bk == BUILTIN_ISFINITE || bk == BUILTIN_ISINF || bk == BUILTIN_ISINF_SIGN || bk == BUILTIN_ISNAN ||
+            bk == BUILTIN_SIGNBIT) {
+            if (e->arg_count != 1) {
+                set_diag(diag, "floating classification builtin expects exactly 1 argument");
+                return -1;
+            }
+            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (!is_numeric_type(e->args[0]->value_type)) {
+                set_diag(diag, "floating classification builtin expects numeric argument");
+                return -1;
+            }
+            e->value_type = CC_TYPE_INT;
             e->struct_id = -1;
             return 0;
         }
@@ -4473,6 +4525,20 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
         set_diag(diag, "array initializer has unsupported element type");
         return -1;
     }
+    if (array_ndim == 1 && init->arg_count == 1) {
+        long string_len = array_len;
+        long inferred_len = -1;
+        int rc = check_array_string_initializer(name, array_type, &string_len, init->args[0], &inferred_len, diag);
+        if (rc < 0) {
+            return -1;
+        }
+        if (rc == 0) {
+            if (out_inferred_len != NULL && array_len == 0 && inferred_len > 0) {
+                *out_inferred_len = inferred_len;
+            }
+            return 0;
+        }
+    }
     if (array_len > 0 && init->arg_count > (size_t)array_len) {
         if (diag != NULL && diag->message[0] == '\0') {
             snprintf(diag->message, sizeof(diag->message), "too many initializers for array %s",
@@ -4553,7 +4619,8 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
 }
 
 static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t **vars, size_t *var_count, int depth,
-                      cc_type_t fn_ret_type, int fn_ret_struct_id, int fn_attr_flags, int loop_depth, int switch_depth,
+                      cc_type_t fn_ret_type, int fn_ret_struct_id, cc_attr_flags_t fn_attr_flags, int loop_depth,
+                      int switch_depth,
                       int *saw_return, cc_diag_t *diag) {
     size_t i;
 
@@ -4581,9 +4648,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             int auto_type_decl = (s->storage & CC_STORAGE_AUTO_TYPE) != 0;
             int init_checked = 0;
             int sc_count = storage_class_count(s->storage);
-            int fn_only_attrs = CC_ATTR_ALWAYS_INLINE | CC_ATTR_NOINLINE | CC_ATTR_HOT | CC_ATTR_COLD |
-                                CC_ATTR_FORMAT | CC_ATTR_NONNULL | CC_ATTR_MALLOC_FN | CC_ATTR_ALIAS |
-                                CC_ATTR_FLATTEN | CC_ATTR_TARGET;
+            cc_attr_flags_t fn_only_attrs = CC_ATTR_ALWAYS_INLINE | CC_ATTR_NOINLINE | CC_ATTR_HOT | CC_ATTR_COLD |
+                                            CC_ATTR_FORMAT | CC_ATTR_NONNULL | CC_ATTR_MALLOC_FN | CC_ATTR_ALIAS |
+                                            CC_ATTR_FLATTEN | CC_ATTR_TARGET | CC_ATTR_CONSTRUCTOR | CC_ATTR_DESTRUCTOR;
             if ((s->attr_flags & CC_ATTR_NORETURN) != 0) {
                 set_diag(diag, "noreturn attribute is only valid on functions");
                 return -1;
@@ -5121,8 +5188,8 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             int seen_default = 0;
             for (i1 = 0; i1 < s->then_branch->block_count; ++i1) {
                 const cc_stmt_t *ci = &s->then_branch->block_stmts[i1];
-                long vi = 0;
-                long vhi = 0;
+                long long vi = 0;
+                long long vhi = 0;
                 if (ci->kind == CC_STMT_DEFAULT) {
                     if (seen_default) {
                         set_diag(diag, "duplicate default label in switch");
@@ -5147,8 +5214,8 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                     size_t i2;
                     for (i2 = i1 + 1; i2 < s->then_branch->block_count; ++i2) {
                         const cc_stmt_t *cj = &s->then_branch->block_stmts[i2];
-                        long vj = 0;
-                        long vjhi = 0;
+                        long long vj = 0;
+                        long long vjhi = 0;
                         if (cj->kind != CC_STMT_CASE) {
                             continue;
                         }
@@ -5313,6 +5380,13 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message), "conflicting visibility attributes for object '%s'",
                          g->name);
+            }
+            goto fail_global_item;
+        }
+        if ((g->attr_flags & (CC_ATTR_CONSTRUCTOR | CC_ATTR_DESTRUCTOR)) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "constructor/destructor attributes are only valid on functions: %s", g->name);
             }
             goto fail_global_item;
         }
@@ -5557,12 +5631,21 @@ fail_global_item:
                 goto fail_decl;
             }
         }
-        if ((f->attr_flags & CC_ATTR_NORETURN) != 0 && !(f->ret_type == CC_TYPE_VOID && f->ret_struct_id < 0)) {
-            if (diag != NULL && diag->message[0] == '\0') {
-                snprintf(diag->message, sizeof(diag->message), "noreturn function '%s' must have void return type",
-                         f->name);
+        if ((f->attr_flags & (CC_ATTR_CONSTRUCTOR | CC_ATTR_DESTRUCTOR)) != 0) {
+            if (!(f->ret_type == CC_TYPE_VOID && f->ret_struct_id < 0)) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "constructor/destructor function '%s' must have void return type", f->name);
+                }
+                goto fail_decl;
             }
-            goto fail_decl;
+            if (!f->has_prototype || f->param_count != 0 || f->is_variadic) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "constructor/destructor function '%s' must have prototype void(void)", f->name);
+                }
+                goto fail_decl;
+            }
         }
         if ((f->attr_flags & CC_ATTR_ALIGNED) != 0 &&
             validate_attr_align(f->attr_align, diag, "aligned attribute on function") != 0) {
@@ -5734,7 +5817,7 @@ fail_decl:
         size_t j;
         size_t k;
         int saw_return = 0;
-        int fn_attr_flags = f->attr_flags;
+        cc_attr_flags_t fn_attr_flags = f->attr_flags;
 
         if (!f->has_body) {
             continue;
