@@ -11735,90 +11735,7 @@ static void free_global_relocs(global_reloc_t *relocs, size_t count) {
     free(relocs);
 }
 
-static int __attribute__((unused)) expr_calls_named_fn(const cc_expr_t *e, const char *name);
-
-static int __attribute__((unused)) stmt_calls_named_fn(const cc_stmt_t *s, const char *name) {
-    size_t i;
-
-    if (s == NULL || name == NULL || name[0] == '\0') {
-        return 0;
-    }
-    if (expr_calls_named_fn(s->expr, name)) {
-        return 1;
-    }
-    if (expr_calls_named_fn(s->init_expr, name) || expr_calls_named_fn(s->post_expr, name)) {
-        return 1;
-    }
-    if (stmt_calls_named_fn(s->init_stmt, name) || stmt_calls_named_fn(s->then_branch, name) ||
-        stmt_calls_named_fn(s->else_branch, name)) {
-        return 1;
-    }
-    for (i = 0; i < s->block_count; ++i) {
-        if (stmt_calls_named_fn(&s->block_stmts[i], name)) {
-            return 1;
-        }
-    }
-    for (i = 0; i < s->asm_output_count; ++i) {
-        if (expr_calls_named_fn(s->asm_outputs[i].expr, name)) {
-            return 1;
-        }
-    }
-    for (i = 0; i < s->asm_input_count; ++i) {
-        if (expr_calls_named_fn(s->asm_inputs[i].expr, name)) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
-static int __attribute__((unused)) expr_calls_named_fn(const cc_expr_t *e, const char *name) {
-    size_t i;
-
-    if (e == NULL || name == NULL || name[0] == '\0') {
-        return 0;
-    }
-    if (e->kind == CC_EXPR_CALL && e->ident != NULL && strcmp(e->ident, name) == 0) {
-        return 1;
-    }
-    if (expr_calls_named_fn(e->lhs, name) || expr_calls_named_fn(e->rhs, name) || expr_calls_named_fn(e->third, name)) {
-        return 1;
-    }
-    for (i = 0; i < e->arg_count; ++i) {
-        if (expr_calls_named_fn(e->args[i], name)) {
-            return 1;
-        }
-    }
-    for (i = 0; i < e->stmt_expr_count; ++i) {
-        if (stmt_calls_named_fn(&e->stmt_expr_stmts[i], name)) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
-static int __attribute__((unused)) tu_has_direct_call_to(const cc_translation_unit_t *tu, const char *name) {
-    size_t i;
-    size_t j;
-
-    if (tu == NULL || name == NULL || name[0] == '\0') {
-        return 0;
-    }
-    for (i = 0; i < tu->func_count; ++i) {
-        const cc_function_t *f = &tu->funcs[i];
-        if (!f->has_body) {
-            continue;
-        }
-        for (j = 0; j < f->stmt_count; ++j) {
-            if (stmt_calls_named_fn(&f->stmts[j], name)) {
-                return 1;
-            }
-        }
-    }
-    return 0;
-}
-
 static int should_skip_fn_body_for_codegen(const cc_translation_unit_t *tu, const cc_function_t *f) {
-    size_t i;
     (void)tu;
     if (f == NULL || !f->has_body) {
         return 1;
@@ -11831,12 +11748,6 @@ static int should_skip_fn_body_for_codegen(const cc_translation_unit_t *tu, cons
     if ((f->storage & CC_STORAGE_INLINE) != 0 && (f->storage & CC_STORAGE_EXTERN) != 0 && f->name != NULL &&
         strncmp(f->name, "__gmp", 5) == 0) {
         return 1;
-    }
-    for (i = 0; i < f->stmt_count; ++i) {
-        if (stmt_calls_named_fn(&f->stmts[i], "__builtin_va_arg_pack") ||
-            stmt_calls_named_fn(&f->stmts[i], "__builtin_va_arg_pack_len")) {
-            return 1;
-        }
     }
     if ((f->storage & CC_STORAGE_STATIC) == 0) {
         return 0;
