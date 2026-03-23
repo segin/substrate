@@ -57,6 +57,7 @@ static int ext2_remove_entry(fs_node_t *dir, const char *name);
 static int ext2_flush_super(ext2_fs_t *fs);
 static int ext2_flush_group_desc(ext2_fs_t *fs, uint32_t group);
 static uint8_t ext2_dirent_type_from_mode(uint16_t mode);
+static uint8_t ext2_file_type_to_dt(uint8_t ext2_type);
 static int ext2_free_indirect_tree(ext2_fs_t *fs, uint32_t block_num, uint32_t depth);
 static int ext2_free_inode_blocks(ext2_fs_t *fs, ext2_inode_t *inode);
 
@@ -707,9 +708,11 @@ struct dirent *ext2_readdir(fs_node_t *node, uint64_t index) {
         ext2_read_block(fs, block_num, ext2_dir_buf);
         
         // Parse entries in this block
-        while (block_off < fs->block_size && pos < dir_size) {
+        while (block_off + 8 <= fs->block_size && pos < dir_size) {
             ext2_dirent_t *de = (ext2_dirent_t *)(ext2_dir_buf + block_off);
             
+            if (de->rec_len < 8 || block_off + de->rec_len > fs->block_size) break;
+
             if (de->inode != 0 && de->name_len > 0) {
                 if (cur_idx == index) {
                     // Found it - store in context specific dirent
@@ -721,6 +724,9 @@ struct dirent *ext2_readdir(fs_node_t *node, uint64_t index) {
                     }
                     memcpy(ctx->current_dirent.d_name, de->name, len);
                     ctx->current_dirent.d_name[len] = '\0';
+                    ctx->current_dirent.d_namlen = (uint8_t)len;
+                    ctx->current_dirent.d_type = ext2_file_type_to_dt(de->file_type);
+                    ctx->current_dirent.d_reclen = (uint16_t)(((8 + len + 1 + 3) / 4) * 4);
                     result = &ctx->current_dirent;
 
                     // Update cache
@@ -804,9 +810,11 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
         if (block_num == 0) break;
         ext2_read_block(fs, block_num, ext2_dir_buf);
         
-        while (block_off < fs->block_size && pos < dir_size) {
+        while (block_off + 8 <= fs->block_size && pos < dir_size) {
             ext2_dirent_t *de = (ext2_dirent_t *)(ext2_dir_buf + block_off);
             
+            if (de->rec_len < 8 || block_off + de->rec_len > fs->block_size) break;
+
             if (de->inode != 0 && de->name_len > 0) {
                 // Compare names
                 if (de->name_len == name_len &&
@@ -1206,6 +1214,19 @@ static uint8_t ext2_dirent_type_from_mode(uint16_t mode) {
     }
 }
 
+static uint8_t ext2_file_type_to_dt(uint8_t ext2_type) {
+    switch (ext2_type) {
+        case EXT2_FT_REG_FILE: return DT_REG;
+        case EXT2_FT_DIR:      return DT_DIR;
+        case EXT2_FT_CHRDEV:   return DT_CHR;
+        case EXT2_FT_BLKDEV:   return DT_BLK;
+        case EXT2_FT_FIFO:     return DT_FIFO;
+        case EXT2_FT_SOCK:     return DT_SOCK;
+        case EXT2_FT_SYMLINK:  return DT_LNK;
+        default:               return DT_UNKNOWN;
+    }
+}
+
 static int ext2_free_indirect_tree(ext2_fs_t *fs, uint32_t block_num, uint32_t depth) {
     uint32_t entries_per_block;
     uint32_t *block_buf;
@@ -1358,10 +1379,10 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
         if (block_num == 0) break;
         ext2_read_block(fs, block_num, block_buf);
         
-        while (block_off < fs->block_size && pos < dir_size) {
+        while (block_off + 8 <= fs->block_size && pos < dir_size) {
             ext2_dirent_t *de = (ext2_dirent_t *)(block_buf + block_off);
             
-            if (de->rec_len == 0) break;
+            if (de->rec_len < 8 || block_off + de->rec_len > fs->block_size) break;
             
             // Calculate actual size needed by this entry
             uint32_t actual_size = ((8 + de->name_len + 3) / 4) * 4;
@@ -1512,10 +1533,10 @@ static int ext2_remove_entry(fs_node_t *dir, const char *name) {
         
         ext2_dirent_t *prev_de = NULL;
         
-        while (block_off < fs->block_size && pos < dir_size) {
+        while (block_off + 8 <= fs->block_size && pos < dir_size) {
             ext2_dirent_t *de = (ext2_dirent_t *)(block_buf + block_off);
             
-            if (de->rec_len == 0) break;
+            if (de->rec_len < 8 || block_off + de->rec_len > fs->block_size) break;
             
             // Is this the entry to remove?
             if (de->inode != 0 && de->name_len == name_len &&
