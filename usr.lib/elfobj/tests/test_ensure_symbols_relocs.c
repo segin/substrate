@@ -27,6 +27,13 @@ int main(void) {
         return 1;
     }
 
+    // Test the first time (not loaded yet)
+    if (obj->symrel_loaded != 0) {
+        fprintf(stderr, "FAIL: expected obj->symrel_loaded to be 0 initially\n");
+        elf_close(obj);
+        return 1;
+    }
+
     err = elf__ensure_symbols_relocs(obj);
     if (err != ELF_OK) {
         fprintf(stderr, "FAIL: expected ELF_OK for valid obj, got %d\n", err);
@@ -58,6 +65,26 @@ int main(void) {
     err = elf__ensure_symbols_relocs(obj);
     if (err != ELF_OK) {
         fprintf(stderr, "FAIL: expected ELF_OK when symrel_loaded=1, got %d\n", err);
+        elf_close(obj);
+        return 1;
+    }
+
+    if (obj->symrel_loaded != 1) {
+        fprintf(stderr, "FAIL: expected obj->symrel_loaded to be 1 after first call\n");
+        elf_close(obj);
+        return 1;
+    }
+
+    // Call it a second time to hit the early return (symrel_loaded == 1)
+    err = elf__ensure_symbols_relocs(obj);
+    if (err != ELF_OK) {
+        fprintf(stderr, "FAIL: expected ELF_OK on second call, got %d\n", err);
+        elf_close(obj);
+        return 1;
+    }
+
+    if (obj->symrel_loaded != 1) {
+        fprintf(stderr, "FAIL: expected obj->symrel_loaded to remain 1 after second call\n");
         elf_close(obj);
         return 1;
     }
