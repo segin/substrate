@@ -279,6 +279,8 @@ static int write_full(int fd, const uint8_t *buf, size_t size) {
     return 0;
 }
 
+#define TMP_SUFFIX ".tmpXXXXXX"
+
 elf_err_t elf__write_file_atomic(const char *path, const void *buf, size_t size) {
     const char *slash;
     const char *base;
@@ -303,7 +305,7 @@ elf_err_t elf__write_file_atomic(const char *path, const void *buf, size_t size)
         base = path;
     }
     base_len = strlen(base);
-    tmp_len = dir_len + 1 + base_len + sizeof(".tmpXXXXXX");
+    tmp_len = dir_len + 1 + base_len + sizeof(TMP_SUFFIX);
     tmp_path = (char *)malloc(tmp_len);
     if (tmp_path == NULL) {
         return ELF_ERR_OOM;
