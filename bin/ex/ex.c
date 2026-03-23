@@ -196,7 +196,6 @@ void buf_write_file(buffer_t *b, const char *filename, int append) {
         return;
     }
     
-    char tmp[1024];
     if (append) {
         FILE *f = fopen(filename, "a");
         if (!f) { perror(filename); return; }
@@ -207,11 +206,26 @@ void buf_write_file(buffer_t *b, const char *filename, int append) {
         }
         fclose(f);
     } else {
-        snprintf(tmp, sizeof(tmp), "%s.tmp.XXXXXX", filename);
+        char *tmp;
+        if (asprintf(&tmp, "%s.tmp.XXXXXX", filename) < 0) {
+            perror("asprintf");
+            return;
+        }
+
         int fd = mkstemp(tmp);
-        if (fd < 0) { perror(tmp); return; }
+        if (fd < 0) {
+            perror(tmp);
+            free(tmp);
+            return;
+        }
+
         FILE *f = fdopen(fd, "w");
-        if (!f) { close(fd); remove(tmp); return; }
+        if (!f) {
+            close(fd);
+            remove(tmp);
+            free(tmp);
+            return;
+        }
         
         line_t *curr = b->head;
         while (curr) {
@@ -222,8 +236,10 @@ void buf_write_file(buffer_t *b, const char *filename, int append) {
         if (rename(tmp, filename) < 0) {
             perror("rename");
             remove(tmp);
+            free(tmp);
             return;
         }
+        free(tmp);
     }
     b->modified = 0;
 }

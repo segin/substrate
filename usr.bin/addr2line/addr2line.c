@@ -158,9 +158,11 @@ typedef struct {
 
     char **include_dirs;
     size_t include_dir_count;
+    size_t include_dir_cap;
 
     line_file_t *files;
     size_t file_count;
+    size_t file_cap;
 
     const uint8_t *program;
     size_t program_size;
@@ -553,25 +555,33 @@ static int read_cstring_dup(const uint8_t **pp, const uint8_t *end, char **out) 
 }
 
 static int line_unit_add_dir(line_unit_t *u, char *dir) {
-    char **next = (char **)realloc(u->include_dirs,
-                                   (u->include_dir_count + 1u) * sizeof(*next));
-    if (next == NULL) {
-        free(dir);
-        return -1;
+    char **next;
+    if (u->include_dir_count == u->include_dir_cap) {
+        size_t new_cap = u->include_dir_cap == 0 ? 16u : u->include_dir_cap * 2u;
+        next = (char **)realloc(u->include_dirs, new_cap * sizeof(*next));
+        if (next == NULL) {
+            free(dir);
+            return -1;
+        }
+        u->include_dirs = next;
+        u->include_dir_cap = new_cap;
     }
-    u->include_dirs = next;
     u->include_dirs[u->include_dir_count++] = dir;
     return 0;
 }
 
 static int line_unit_add_file(line_unit_t *u, line_file_t file) {
-    line_file_t *next = (line_file_t *)realloc(u->files,
-                                               (u->file_count + 1u) * sizeof(*next));
-    if (next == NULL) {
-        free(file.name);
-        return -1;
+    line_file_t *next;
+    if (u->file_count == u->file_cap) {
+        size_t new_cap = u->file_cap == 0 ? 16u : u->file_cap * 2u;
+        next = (line_file_t *)realloc(u->files, new_cap * sizeof(*next));
+        if (next == NULL) {
+            free(file.name);
+            return -1;
+        }
+        u->files = next;
+        u->file_cap = new_cap;
     }
-    u->files = next;
     u->files[u->file_count++] = file;
     return 0;
 }

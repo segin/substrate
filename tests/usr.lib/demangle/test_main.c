@@ -334,6 +334,13 @@ test_9y(void)
     }
 }
 
+static void
+test_9z(void)
+{
+    expect_eq("9z-1", "_Z1fUt_", DEMANGLE_AUTO, "f({unnamed type})");
+    expect_eq("9z-2", "_Z1fUt1_", DEMANGLE_AUTO, "f({unnamed type#1})");
+}
+
 int
 main(void)
 {
@@ -360,6 +367,7 @@ main(void)
     test_9u();
     test_9v();
     test_9y();
+    test_9z();
 
     if (g_failed != 0) {
         fprintf(stderr, "demangle tests failed: %d\n", g_failed);
