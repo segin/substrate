@@ -537,14 +537,15 @@ static char *build_short_cell(const file_info_t *f, const ls_config_t *config,
             return NULL;
         }
 
-        cell = (char *)malloc(prefix_len + strlen(cp) + 1);
+        size_t cp_len = strlen(cp);
+        cell = (char *)malloc(prefix_len + cp_len + 1);
         if (cell == NULL) {
             free(plain);
             free(cp);
             return NULL;
         }
         memcpy(cell, prefix, prefix_len);
-        strcpy(cell + prefix_len, cp);
+        memcpy(cell + prefix_len, cp, cp_len + 1);
 
         *visible_width = (prefix_len) + name_w;
         free(plain);
@@ -710,14 +711,13 @@ static char detect_attr_indicator(const file_info_t *f) {
                 size_t i = 0;
                 while (i < (size_t)got) {
                     const char *name = buf + i;
-                    size_t l = strlen(name);
                     if (strcmp(name, "system.posix_acl_access") == 0 ||
                         strcmp(name, "system.posix_acl_default") == 0) {
                         has_acl = true;
                     } else {
                         has_other = true;
                     }
-                    i += l + 1;
+                    while (buf[i++] != '\0');
                 }
                 free(buf);
                 if (has_acl) {
@@ -750,8 +750,7 @@ static void print_xattr_names(const file_info_t *f) {
                 printf("\t");
                 while (i < (size_t)got) {
                     const char *name = buf + i;
-                    size_t l = strlen(name);
-                    if (l == 0) {
+                    if (*name == '\0') {
                         break;
                     }
                     if (!first) {
@@ -759,7 +758,7 @@ static void print_xattr_names(const file_info_t *f) {
                     }
                     printf("%s", name);
                     first = 0;
-                    i += l + 1;
+                    while (buf[i++] != '\0');
                 }
                 printf("\n");
             }

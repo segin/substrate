@@ -13,6 +13,8 @@ typedef struct {
 
 #define CC_MAX_ARRAY_DIMS 4
 
+typedef unsigned long long cc_attr_flags_t;
+
 #define CC_STORAGE_STATIC  (1 << 0)
 #define CC_STORAGE_EXTERN  (1 << 1)
 #define CC_STORAGE_INLINE  (1 << 2)
@@ -24,37 +26,39 @@ typedef struct {
 #define CC_STORAGE_VOLATILE (1 << 8)
 #define CC_STORAGE_RESTRICT (1 << 9)
 
-#define CC_ATTR_PACKED     (1 << 0)
-#define CC_ATTR_ALIGNED    (1 << 1)
-#define CC_ATTR_NORETURN   (1 << 2)
-#define CC_ATTR_UNUSED     (1 << 3)
-#define CC_ATTR_USED       (1 << 4)
-#define CC_ATTR_SECTION    (1 << 5)
-#define CC_ATTR_DEPRECATED (1 << 6)
-#define CC_ATTR_NODISCARD  (1 << 7)
-#define CC_ATTR_REPRODUCIBLE (1 << 8)
-#define CC_ATTR_UNSEQUENCED (1 << 9)
-#define CC_ATTR_FALLTHROUGH (1 << 10)
-#define CC_ATTR_ALWAYS_INLINE (1 << 11)
-#define CC_ATTR_NOINLINE (1 << 12)
-#define CC_ATTR_HOT (1 << 13)
-#define CC_ATTR_COLD (1 << 14)
-#define CC_ATTR_FORMAT (1 << 15)
-#define CC_ATTR_NONNULL (1 << 16)
-#define CC_ATTR_MALLOC_FN (1 << 17)
-#define CC_ATTR_WEAK (1 << 18)
-#define CC_ATTR_ALIAS (1 << 19)
-#define CC_ATTR_FLATTEN (1 << 20)
-#define CC_ATTR_TARGET (1 << 21)
-#define CC_ATTR_TLS_MODEL (1 << 22)
-#define CC_ATTR_CLEANUP (1 << 23)
-#define CC_ATTR_VIS_DEFAULT (1 << 24)
-#define CC_ATTR_VIS_HIDDEN (1 << 25)
-#define CC_ATTR_VIS_PROTECTED (1 << 26)
-#define CC_ATTR_VIS_INTERNAL (1 << 27)
-#define CC_ATTR_TRANSPARENT_UNION (1 << 28)
-#define CC_ATTR_VECTOR_SIZE (1 << 29)
-#define CC_ATTR_MAY_ALIAS (1 << 30)
+#define CC_ATTR_PACKED     (1ULL << 0)
+#define CC_ATTR_ALIGNED    (1ULL << 1)
+#define CC_ATTR_NORETURN   (1ULL << 2)
+#define CC_ATTR_UNUSED     (1ULL << 3)
+#define CC_ATTR_USED       (1ULL << 4)
+#define CC_ATTR_SECTION    (1ULL << 5)
+#define CC_ATTR_DEPRECATED (1ULL << 6)
+#define CC_ATTR_NODISCARD  (1ULL << 7)
+#define CC_ATTR_REPRODUCIBLE (1ULL << 8)
+#define CC_ATTR_UNSEQUENCED (1ULL << 9)
+#define CC_ATTR_FALLTHROUGH (1ULL << 10)
+#define CC_ATTR_ALWAYS_INLINE (1ULL << 11)
+#define CC_ATTR_NOINLINE (1ULL << 12)
+#define CC_ATTR_HOT (1ULL << 13)
+#define CC_ATTR_COLD (1ULL << 14)
+#define CC_ATTR_FORMAT (1ULL << 15)
+#define CC_ATTR_NONNULL (1ULL << 16)
+#define CC_ATTR_MALLOC_FN (1ULL << 17)
+#define CC_ATTR_WEAK (1ULL << 18)
+#define CC_ATTR_ALIAS (1ULL << 19)
+#define CC_ATTR_FLATTEN (1ULL << 20)
+#define CC_ATTR_TARGET (1ULL << 21)
+#define CC_ATTR_TLS_MODEL (1ULL << 22)
+#define CC_ATTR_CLEANUP (1ULL << 23)
+#define CC_ATTR_VIS_DEFAULT (1ULL << 24)
+#define CC_ATTR_VIS_HIDDEN (1ULL << 25)
+#define CC_ATTR_VIS_PROTECTED (1ULL << 26)
+#define CC_ATTR_VIS_INTERNAL (1ULL << 27)
+#define CC_ATTR_TRANSPARENT_UNION (1ULL << 28)
+#define CC_ATTR_VECTOR_SIZE (1ULL << 29)
+#define CC_ATTR_MAY_ALIAS (1ULL << 30)
+#define CC_ATTR_CONSTRUCTOR (1ULL << 31)
+#define CC_ATTR_DESTRUCTOR (1ULL << 32)
 
 typedef enum {
     CC_TYPE_VOID = 0,
@@ -292,7 +296,7 @@ struct cc_expr {
     unsigned char paren_wrapped;
     int array_ndim;
     long array_dims[CC_MAX_ARRAY_DIMS];
-    long int_val;
+    long long int_val;
     double float_val;
     char *ident;
     cc_binop_t op;
@@ -355,7 +359,7 @@ struct cc_stmt {
     int array_ndim;
     long array_dims[CC_MAX_ARRAY_DIMS];
     int storage;
-    int attr_flags;
+    cc_attr_flags_t attr_flags;
     long attr_align;
     char *attr_section;
     char *attr_alias;
@@ -422,7 +426,7 @@ typedef struct {
     size_t member_cap;
     long size;
     long align;
-    int attr_flags;
+    cc_attr_flags_t attr_flags;
     long attr_align;
     char *attr_alias;
     int is_union;
@@ -437,7 +441,7 @@ typedef struct {
     cc_type_t ret_type;
     int ret_struct_id;
     int storage;
-    int attr_flags;
+    cc_attr_flags_t attr_flags;
     long attr_align;
     long attr_format_index;
     long attr_format_first_to_check;
@@ -463,7 +467,7 @@ typedef struct {
     int array_ndim;
     long array_dims[CC_MAX_ARRAY_DIMS];
     int storage;
-    int attr_flags;
+    cc_attr_flags_t attr_flags;
     long attr_align;
     char *attr_section;
     char *attr_alias;

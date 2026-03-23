@@ -3,6 +3,8 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdarg.h>
+#include <unistd.h>
+#include <sys/wait.h>
 #include "../../usr.lib/bc/num.h"
 
 typedef enum { VAL_NUM, VAL_STR } val_type_t;
@@ -428,7 +430,35 @@ void execute(input_t *in) {
                         next = get_char(in);
                     }
                     line[i] = 0;
-                    if (line[0]) system(line);
+                    if (line[0]) {
+                        char *argv[128];
+                        int argc = 0;
+                        char *p = line;
+                        while (*p && argc < 127) {
+                            while (isspace((unsigned char)*p)) p++;
+                            if (!*p) break;
+                            argv[argc++] = p;
+                            while (*p && !isspace((unsigned char)*p)) p++;
+                            if (*p) {
+                                *p = '\0';
+                                p++;
+                            }
+                        }
+                        argv[argc] = NULL;
+                        if (argc > 0) {
+                            pid_t pid = fork();
+                            if (pid == -1) {
+                                perror("dc: fork");
+                            } else if (pid == 0) {
+                                execvp(argv[0], argv);
+                                perror(argv[0]);
+                                _exit(127);
+                            } else {
+                                int status;
+                                waitpid(pid, &status, 0);
+                            }
+                        }
+                    }
                 }
                 break;
             }
