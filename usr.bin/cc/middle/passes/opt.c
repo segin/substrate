@@ -7,7 +7,7 @@
 typedef struct {
     int known;
     cc_value_type_t type;
-    long i;
+    long long i;
     double f;
 } const_state_t;
 
@@ -90,11 +90,11 @@ static int fold_function(cc_ssa_function_t *f) {
 
         case CC_SSA_I2F:
             if (dst >= 0 && in->lhs >= 0 && st[in->lhs].known && st[in->lhs].type == CC_VAL_I64) {
-                long src = st[in->lhs].i;
+                long long src = st[in->lhs].i;
                 in->op = CC_SSA_CONST;
                 in->lhs = -1;
                 in->rhs = -1;
-                in->fimm = in->is_unsigned ? (double)(unsigned long)src : (double)src;
+                in->fimm = in->is_unsigned ? (double)(unsigned long long)src : (double)src;
                 st[dst].known = 1;
                 st[dst].type = CC_VAL_F64;
                 st[dst].f = in->fimm;
@@ -110,7 +110,7 @@ static int fold_function(cc_ssa_function_t *f) {
                 in->op = CC_SSA_CONST;
                 in->lhs = -1;
                 in->rhs = -1;
-                in->imm = (long)src;
+                in->imm = (long long)src;
                 st[dst].known = 1;
                 st[dst].type = CC_VAL_I64;
                 st[dst].i = in->imm;
@@ -150,9 +150,9 @@ static int fold_function(cc_ssa_function_t *f) {
                 ((in->rhs >= 0 && st[in->rhs].known && st[in->rhs].type == CC_VAL_I64) ||
                  ((in->op == CC_SSA_SHL || in->op == CC_SSA_SHR) && in->rhs < 0))) {
                 {
-                    long a = st[in->lhs].i;
-                    long b = (in->rhs >= 0) ? st[in->rhs].i : in->imm;
-                    long out = 0;
+                    long long a = st[in->lhs].i;
+                    long long b = (in->rhs >= 0) ? st[in->rhs].i : in->imm;
+                    long long out = 0;
                     if (in->op == CC_SSA_DIV && b == 0) {
                         st[dst].known = 0;
                         break;
@@ -165,7 +165,7 @@ static int fold_function(cc_ssa_function_t *f) {
                         out = a * b;
                     } else if (in->op == CC_SSA_DIV) {
                         if (in->is_unsigned) {
-                            out = (long)((unsigned long)a / (unsigned long)b);
+                            out = (long long)((unsigned long long)a / (unsigned long long)b);
                         } else {
                             out = a / b;
                         }
@@ -179,7 +179,7 @@ static int fold_function(cc_ssa_function_t *f) {
                         out = a << (b & 63);
                     } else {
                         if (in->is_unsigned) {
-                            out = (long)((unsigned long)a >> (b & 63));
+                            out = (long long)((unsigned long long)a >> (b & 63));
                         } else {
                             out = a >> (b & 63);
                         }
@@ -229,9 +229,9 @@ static int fold_function(cc_ssa_function_t *f) {
         case CC_SSA_CMP:
             if (dst >= 0 && in->lhs >= 0 && in->rhs >= 0 && st[in->lhs].known && st[in->rhs].known &&
                 st[in->lhs].type == CC_VAL_I64 && st[in->rhs].type == CC_VAL_I64) {
-                long a = st[in->lhs].i;
-                long b = st[in->rhs].i;
-                long out = 0;
+                long long a = st[in->lhs].i;
+                long long b = st[in->rhs].i;
+                long long out = 0;
                 if (in->cmp_kind == CC_CMP_EQ) {
                     out = (a == b);
                 } else if (in->cmp_kind == CC_CMP_NE) {

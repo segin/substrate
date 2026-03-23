@@ -238,3 +238,16 @@ tests/lib/usb/test_device
 tests/lib/usb/test_io
 tests/lib/usb/test_async
 tests/lib/usb/test_hotplug
+tests/lib/edit/host_test_history
+tests/lib/edit/test_editline
+tests/lib/edit/test_editrc
+tests/lib/edit/test_emacs
+tests/lib/edit/test_fuzz
+tests/lib/edit/test_integration
+tests/lib/edit/test_keymap
+tests/lib/edit/test_line_buffer
+tests/lib/edit/test_property
+tests/lib/edit/test_tokenizer
+tests/lib/edit/test_vi
+tools/sbsh_expect.exp
+/usr.lib/elfobj/tests/test_ensure_symbols_relocs

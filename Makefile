@@ -4,7 +4,7 @@ include Makefile.inc
 # Order matters: lib is usually a dependency for bin/usr.bin
 SUBDIRS = lib usr.lib sys sbin bin usr.bin usr.man
 
-.PHONY: all clean install efi multiboot freebsd zimage debug host_dist host_dist_install host_install $(SUBDIRS)
+.PHONY: all clean install efi multiboot freebsd zimage debug host_dist native_dist host_dist_install host_install $(SUBDIRS)
 
 all: $(SUBDIRS)
 
@@ -24,35 +24,38 @@ zimage:
 HOSTCC ?= cc
 HOSTCFLAGS ?= -O2 $(WARNFLAGS)
 HOST_DIST_PREFIX ?= /opt/substrate
+HOST_DIST_DIR ?= $(TOP)/host_dist
 export HOSTCC HOSTCFLAGS
 
 host_dist:
-	@rm -rf host_dist
-	@mkdir -p host_dist/bin
-	@mkdir -p host_dist/sbin
-	@mkdir -p host_dist/usr/lib
-	@mkdir -p host_dist/usr/man
+	@rm -rf "$(HOST_DIST_DIR)"
+	@mkdir -p "$(HOST_DIST_DIR)/bin"
+	@mkdir -p "$(HOST_DIST_DIR)/sbin"
+	@mkdir -p "$(HOST_DIST_DIR)/usr/lib"
+	@mkdir -p "$(HOST_DIST_DIR)/usr/man"
 	@echo ">>> Building host tools..."
 	-$(MAKE) -C usr.lib clean
 	$(MAKE) -C usr.lib NATIVE_BUILD=1
 	-$(MAKE) -C bin clean
-	$(MAKE) -C bin NATIVE_BUILD=1 DESTDIR=$(TOP)/host_dist install
+	$(MAKE) -C bin NATIVE_BUILD=1 DESTDIR="$(HOST_DIST_DIR)" install
 	-$(MAKE) -C sbin clean
-	$(MAKE) -C sbin NATIVE_BUILD=1 DESTDIR=$(TOP)/host_dist install
+	$(MAKE) -C sbin NATIVE_BUILD=1 DESTDIR="$(HOST_DIST_DIR)" install
 	-$(MAKE) -C usr.bin/cc clean
-	$(MAKE) -C usr.bin/cc NATIVE_BUILD=1 DESTDIR=$(TOP)/host_dist install
+	$(MAKE) -C usr.bin/cc NATIVE_BUILD=1 DESTDIR="$(HOST_DIST_DIR)" install
 	-$(MAKE) -C usr.bin clean
-	$(MAKE) -C usr.bin NATIVE_BUILD=1 DESTDIR=$(TOP)/host_dist install
-	$(MAKE) -C usr.man DESTDIR=$(TOP)/host_dist install
-	@test -x host_dist/usr/bin/cc
-	@echo ">>> Host tools installed to host_dist"
+	$(MAKE) -C usr.bin NATIVE_BUILD=1 DESTDIR="$(HOST_DIST_DIR)" install
+	$(MAKE) -C usr.man DESTDIR="$(HOST_DIST_DIR)" install
+	@test -x "$(HOST_DIST_DIR)/usr/bin/cc"
+	@echo ">>> Host tools installed to $(HOST_DIST_DIR)"
+
+native_dist: host_dist
 
 host_dist_install: host_dist
 	@test -n "$(HOST_DIST_PREFIX)"
 	@test "$(HOST_DIST_PREFIX)" != "/"
 	@mkdir -p "$(HOST_DIST_PREFIX)"
 	@find "$(HOST_DIST_PREFIX)" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-	@cp -a host_dist/. "$(HOST_DIST_PREFIX)/"
+	@cp -a "$(HOST_DIST_DIR)"/. "$(HOST_DIST_PREFIX)/"
 	@echo ">>> Host tools synchronized to $(HOST_DIST_PREFIX)"
 
 host_install: host_dist_install
@@ -69,7 +72,7 @@ sys sbin bin usr.bin usr.lib usr.man: | lib
 
 
 clean:
-	@for dir in $(SUBDIRS); do \
+	@set -e; for dir in $(SUBDIRS); do \
 		echo ">>> Cleaning $$dir"; \
 		if [ -f "$$dir/Makefile" ]; then $(MAKE) -C $$dir clean; fi; \
 	done
@@ -91,9 +94,9 @@ install:
 	@mkdir -p $(DESTDIR)/usr/local
 	@mkdir -p $(DESTDIR)/usr/man
 	@mkdir -p $(DESTDIR)/var
-	@for dir in $(SUBDIRS); do \
+	@set -e; for dir in $(SUBDIRS); do \
 		echo ">>> Installing $$dir"; \
-		if [ -f "$$dir/Makefile" ]; then $(MAKE) -C $$dir install; fi; \
+		if [ -f "$$dir/Makefile" ]; then $(MAKE) -C $$dir DESTDIR="$(DESTDIR)" NATIVE_BUILD="$(NATIVE_BUILD)" install; fi; \
 	done
 
 dist: install
