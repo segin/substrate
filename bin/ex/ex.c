@@ -9,6 +9,8 @@
 #include <sys/types.h>
 #include <signal.h>
 #include <setjmp.h>
+#include <sys/wait.h>
+#include <errno.h>
 
 int secure_mode = 0;
 int batch_mode = 0;
@@ -196,7 +198,6 @@ void buf_write_file(buffer_t *b, const char *filename, int append) {
         return;
     }
     
-    char tmp[1024];
     if (append) {
         FILE *f = fopen(filename, "a");
         if (!f) { perror(filename); return; }
@@ -207,11 +208,26 @@ void buf_write_file(buffer_t *b, const char *filename, int append) {
         }
         fclose(f);
     } else {
-        snprintf(tmp, sizeof(tmp), "%s.tmp.XXXXXX", filename);
+        char *tmp;
+        if (asprintf(&tmp, "%s.tmp.XXXXXX", filename) < 0) {
+            perror("asprintf");
+            return;
+        }
+
         int fd = mkstemp(tmp);
-        if (fd < 0) { perror(tmp); return; }
+        if (fd < 0) {
+            perror(tmp);
+            free(tmp);
+            return;
+        }
+
         FILE *f = fdopen(fd, "w");
-        if (!f) { close(fd); remove(tmp); return; }
+        if (!f) {
+            close(fd);
+            remove(tmp);
+            free(tmp);
+            return;
+        }
         
         line_t *curr = b->head;
         while (curr) {
@@ -222,8 +238,10 @@ void buf_write_file(buffer_t *b, const char *filename, int append) {
         if (rename(tmp, filename) < 0) {
             perror("rename");
             remove(tmp);
+            free(tmp);
             return;
         }
+        free(tmp);
     }
     b->modified = 0;
 }
@@ -759,12 +777,12 @@ void do_command(buffer_t *b, char *cmd) {
         if (addr1 == -1) { addr1 = b->cur ? 1 : 0; addr2 = addr1; } // default to current
         if (addr1 > 0 && addr2 >= addr1) {
             line_t *l = buf_get_line(b, addr1);
+            size_t rep_len = strlen(repl_str);
             for (int i = 0; i < (addr2 - addr1 + 1) && l; i++) {
                 regmatch_t pm;
                 char *search_start = l->text;
                 int matches = 0;
                 // We'll build a new string
-                size_t rep_len = strlen(repl_str);
                 size_t new_len = 0;
                 char *new_text = malloc(1);
                 new_text[0] = '\0';
@@ -873,9 +891,92 @@ void do_command(buffer_t *b, char *cmd) {
             fprintf(stderr, "Shell commands not allowed in secure mode\n");
             return;
         }
-        if (system(cmd + 1) == -1) {
-            perror("system");
+        char *shell = getenv("SHELL");
+        if (!shell || !*shell) shell = "/bin/sh";
+        pid_t pid = fork();
+        if (pid < 0) {
+            perror("fork");
+        } else if (pid == 0) {
+            if (setgid(getgid()) == -1) {
+                perror("setgid");
+                exit(127);
+            }
+            if (setuid(getuid()) == -1) {
+                perror("setuid");
+                exit(127);
+            }
+            execl(shell, shell, "-c", cmd + 1, (char *)NULL);
+            perror("execl");
+            exit(127);
+        } else {
+            int status;
+            void (*old_int)(int) = signal(SIGINT, SIG_IGN);
+            void (*old_quit)(int) = signal(SIGQUIT, SIG_IGN);
+            while (waitpid(pid, &status, 0) == -1) {
+                if (errno != EINTR) break;
+            }
+            signal(SIGINT, old_int);
+            signal(SIGQUIT, old_quit);
         }
+
+        char *args[256];
+        int arg_count = 0;
+        char *p = cmd_copy;
+        char *dest = cmd_copy;
+
+        while (*p && arg_count < 255) {
+            while (*p && isspace((unsigned char)*p)) p++;
+            if (!*p) break;
+
+            args[arg_count++] = dest;
+
+            int in_single = 0, in_double = 0;
+            while (*p) {
+                if (!in_single && !in_double && isspace((unsigned char)*p)) {
+                    p++;
+                    break;
+                } else if (!in_double && *p == '\'') {
+                    in_single = !in_single;
+                    p++;
+                } else if (!in_single && *p == '"') {
+                    in_double = !in_double;
+                    p++;
+                } else if (!in_single && *p == '\\' && *(p+1)) {
+                    p++;
+                    if (*p) *dest++ = *p++;
+                } else {
+                    if (*p) *dest++ = *p++;
+                }
+            }
+            *dest++ = '\0';
+        }
+        args[arg_count] = NULL;
+
+        if (arg_count > 0) {
+            pid_t pid = fork();
+            if (pid == -1) {
+                perror("fork");
+            } else if (pid == 0) {
+                // Restore default signal handlers for the child process
+                signal(SIGINT, SIG_DFL);
+                signal(SIGQUIT, SIG_DFL);
+                execvp(args[0], args);
+                perror("execvp");
+                exit(127);
+            } else {
+                // Ignore signals in parent while waiting for child
+                void (*old_sigint)(int) = signal(SIGINT, SIG_IGN);
+                void (*old_sigquit)(int) = signal(SIGQUIT, SIG_IGN);
+
+                int status;
+                waitpid(pid, &status, 0);
+
+                // Restore signals
+                signal(SIGINT, old_sigint);
+                signal(SIGQUIT, old_sigquit);
+            }
+        }
+        free(cmd_copy);
     }
 }
 
