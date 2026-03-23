@@ -41,6 +41,7 @@ Substrate is developed as one integrated system where the toolchain, libraries, 
 
 ```text
 sys/         kernel
+sys/boot/    Substrate BIOS bootloader (stage1 asm + stage2 C)
 bin/         base Unix userland
 sbin/        system utilities
 usr.bin/     compiler/toolchain and extended user tools
@@ -53,6 +54,8 @@ docs/tasks/  refactored task planning sections
 dist/        target root filesystem staging
 host_dist/   host install staging for native validation tools
 usr.man/     manual page source tree
+contrib/     third-party components (ext2-boot bootloader, ...)
+tools/       build and install helper scripts
 ```
 
 Detailed staging rules for `dist/` are defined in `docs/specs/rootfs.md`.
@@ -71,6 +74,7 @@ The kernel remains monolithic and is organized into logical layers:
 
 ### Subsystem Specifications
 - **Boot and Initialization:** See `docs/specs/kmain_init.md` and `docs/specs/arch_i386_boot.md`.
+- **ext2-boot Bootloader:** `sys/boot/` contains the native Substrate BIOS bootloader for ext2 partitions. Stage1 (`stage1.asm`, 1024-byte boot block) loads stage2 from ext2 inode 5 and enters protected mode. Stage2 (`stage2.c`) reads the ext2 filesystem, finds `/vmunix` by name, loads the ELF kernel with multiboot protocol, and offers an interactive `boot:` prompt with timeout. `build-rootfs.sh --image` builds and installs it into `rootfs.img` via `tools/ext2-install-boot`. Requires `nasm`, `gcc -m32`, and 1024-byte block / 128-byte inode ext2 images. `contrib/ext2-boot` (lazear/ext2-boot, MIT) is retained as a reference submodule.
 - **Memory Management:** See `docs/specs/pmm.md` (Physical) and `docs/specs/pmap.md` (Virtual).
 - **Process Model:** See `docs/specs/kern_process_exit.md` and `docs/specs/kern_pid1.md`.
 - **VFS and Filesystems:** See `docs/specs/vm_subsystem.md` (File cache) and `docs/specs/fs_devfs.md`.
