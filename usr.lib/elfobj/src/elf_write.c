@@ -658,6 +658,10 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
     phentsz = obj->cls == ELFOBJ_CLASS_64 ? sizeof(Elf64_Phdr) : sizeof(Elf32_Phdr);
     shentsz = obj->cls == ELFOBJ_CLASS_64 ? 64 : 40;
 
+    ehsize = obj->cls == ELFOBJ_CLASS_64 ? sizeof(Elf64_Ehdr) : sizeof(Elf32_Ehdr);
+    phentsz = obj->cls == ELFOBJ_CLASS_64 ? sizeof(Elf64_Phdr) : sizeof(Elf32_Phdr);
+    shentsz = obj->cls == ELFOBJ_CLASS_64 ? 64 : 40;
+
     err = elf__strtab_init(&shstr);
     if (err != ELF_OK) {
         return err;
