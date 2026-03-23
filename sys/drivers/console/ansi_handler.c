@@ -450,7 +450,7 @@ static void handle_csi(struct ansi_ctx *ctx, char c,
 
     case 'c': /* DA - Device Attributes */
         if (!ctx->private_mode) {
-            ansi_respond(cb, "\x1b[?6c", 5);
+            ansi_respond(cb, "\x1b[?1;0c", 7);
         }
         break;
     }
@@ -554,7 +554,7 @@ void ansi_process(struct ansi_ctx *ctx, char c, const struct ansi_callbacks *cb)
             ctx->state = ANSI_NORMAL;
             break;
         case 'Z': /* DECID - Identify terminal */
-            ansi_respond(cb, "\x1b[?6c", 5);
+            ansi_respond(cb, "\x1b[?1;0c", 7);
             ctx->state = ANSI_NORMAL;
             break;
         case ']': /* OSC - ignore until ST */
