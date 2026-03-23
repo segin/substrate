@@ -910,13 +910,13 @@ uint32_t arc4random_uniform(uint32_t upper_bound) {
     return r % upper_bound;
 }
 
-#define TEMP_SUFFIX "XXXXXX"
-#define TEMP_SUFFIX_LEN 6
+#define MKSTEMP_SUFFIX "XXXXXX"
+#define MKSTEMP_SUFFIX_LEN (sizeof(MKSTEMP_SUFFIX) - 1)
 
 static void fill_temp_suffix(char *suffix) {
     static const char alphabet[] =
         "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    for (int i = 0; i < TEMP_SUFFIX_LEN; i++) {
+    for (size_t i = 0; i < MKSTEMP_SUFFIX_LEN; i++) {
         suffix[i] = alphabet[arc4random_uniform((uint32_t)(sizeof(alphabet) - 1))];
     }
 }
@@ -928,12 +928,12 @@ int mkstemp(char *tmpl) {
     }
 
     size_t len = strlen(tmpl);
-    if (len < TEMP_SUFFIX_LEN || strcmp(tmpl + len - TEMP_SUFFIX_LEN, TEMP_SUFFIX) != 0) {
+    if (len < MKSTEMP_SUFFIX_LEN || strcmp(tmpl + len - MKSTEMP_SUFFIX_LEN, MKSTEMP_SUFFIX) != 0) {
         errno = EINVAL;
         return -1;
     }
 
-    char *suffix = tmpl + len - TEMP_SUFFIX_LEN;
+    char *suffix = tmpl + len - MKSTEMP_SUFFIX_LEN;
     for (int attempt = 0; attempt < 256; attempt++) {
         fill_temp_suffix(suffix);
         int fd = open(tmpl, O_CREAT | O_EXCL | O_RDWR, 0600);
@@ -952,12 +952,12 @@ char *mkdtemp(char *tmpl) {
     }
 
     size_t len = strlen(tmpl);
-    if (len < TEMP_SUFFIX_LEN || strcmp(tmpl + len - TEMP_SUFFIX_LEN, TEMP_SUFFIX) != 0) {
+    if (len < MKSTEMP_SUFFIX_LEN || strcmp(tmpl + len - MKSTEMP_SUFFIX_LEN, MKSTEMP_SUFFIX) != 0) {
         errno = EINVAL;
         return NULL;
     }
 
-    char *suffix = tmpl + len - TEMP_SUFFIX_LEN;
+    char *suffix = tmpl + len - MKSTEMP_SUFFIX_LEN;
     for (int attempt = 0; attempt < 256; attempt++) {
         fill_temp_suffix(suffix);
         if (mkdir(tmpl, 0700) == 0) return tmpl;

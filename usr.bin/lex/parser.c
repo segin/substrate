@@ -396,7 +396,7 @@ static void parse_rules(void) {
                 if (c == ',') {
                     sc_buf[sc_len] = '\0';
                     if (sc_count >= sc_cap) {
-                        sc_cap = (sc_cap == 0) ? 8 : sc_cap * 2;
+                        sc_cap = sc_cap == 0 ? 8 : sc_cap * 2;
                         start_conds = xrealloc(start_conds, sc_cap * sizeof(char*));
                     }
                     start_conds[sc_count++] = xstrdup(sc_buf);
@@ -408,7 +408,7 @@ static void parse_rules(void) {
             if (sc_len > 0) {
                 sc_buf[sc_len] = '\0';
                 if (sc_count >= sc_cap) {
-                    sc_cap = (sc_cap == 0) ? 8 : sc_cap * 2;
+                    sc_cap = sc_cap == 0 ? 8 : sc_cap * 2;
                     start_conds = xrealloc(start_conds, sc_cap * sizeof(char*));
                 }
                 start_conds[sc_count++] = xstrdup(sc_buf);
