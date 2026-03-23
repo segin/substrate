@@ -192,9 +192,13 @@ int test_unicode_toupper(void) {
 #ifdef REGEX_USE_ICU
     TEST_ASSERT(regex_unicode_toupper(0x00E4) == 0x00C4);
     TEST_ASSERT(regex_unicode_toupper(0x03C9) == 0x03A9);
+    TEST_ASSERT(regex_unicode_toupper(0x0430) == 0x0410); /* Cyrillic a -> A */
+    TEST_ASSERT(regex_unicode_toupper(0x00E9) == 0x00C9); /* e acute */
 #else
     TEST_ASSERT(regex_unicode_toupper(0x00E4) == 0x00E4);
     TEST_ASSERT(regex_unicode_toupper(0x03C9) == 0x03C9);
+    TEST_ASSERT(regex_unicode_toupper(0x0430) == 0x0430);
+    TEST_ASSERT(regex_unicode_toupper(0x00E9) == 0x00E9);
 #endif
     return 0;
 }
