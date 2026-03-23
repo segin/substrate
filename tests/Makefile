@@ -59,6 +59,7 @@ all: test_runner test_getuid test_minix test_ext2_perf test_ext2_read_blocks tes
 	./test_readline
 	./test_libedit
 	./test_bc
+	./test_arith
 	./host_test_wait_logic
 	./host_test_pgrp
 	./host_test_proc_tree
@@ -331,6 +332,9 @@ mocks_vm.o: mocks_vm.c
 
 test_bc: bin/bc/host_test_bc.c ../bin/bc/bc.c ../usr.lib/bc/num.c ../usr.lib/bc/arith.c
 	$(CC) $(CFLAGS_COMMON) $< ../usr.lib/bc/num.c ../usr.lib/bc/arith.c -o $@
+
+test_arith: usr.lib/bc/test_arith.c ../usr.lib/bc/num.c ../usr.lib/bc/arith.c
+	$(CC) $(CFLAGS_COMMON) -I../usr.lib/bc $< ../usr.lib/bc/num.c ../usr.lib/bc/arith.c -o $@
 
 test_ext2_write_block: unit/fs/test_ext2_write_block_host.c
 	$(CC) $(CFLAGS_KERN) $< -o $@
