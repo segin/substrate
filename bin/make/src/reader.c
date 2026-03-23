@@ -29,14 +29,14 @@ void rddescf(char *descfile) {
             len--;
             // Append
             accum = realloc(accum, accum_len + len + 1);
-            strcpy(accum + accum_len, buf);
+            memcpy(accum + accum_len, buf, len + 1);
             accum_len += len;
             continue;
         }
         
         if (accum) {
             accum = realloc(accum, accum_len + len + 1);
-            strcpy(accum + accum_len, buf);
+            memcpy(accum + accum_len, buf, len + 1);
             parse_line(accum);
             free(accum);
             accum = NULL;
