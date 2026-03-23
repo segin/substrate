@@ -171,6 +171,23 @@ int test_ascii_toupper(void) {
     return 0;
 }
 
+int test_ascii_tolower(void) {
+    TEST_ASSERT(regex_ascii_tolower('A') == 'a');
+    TEST_ASSERT(regex_ascii_tolower('Z') == 'z');
+    TEST_ASSERT(regex_ascii_tolower('M') == 'm');
+    TEST_ASSERT(regex_ascii_tolower('a') == 'a');
+    TEST_ASSERT(regex_ascii_tolower('z') == 'z');
+    TEST_ASSERT(regex_ascii_tolower('0') == '0');
+    TEST_ASSERT(regex_ascii_tolower('9') == '9');
+    TEST_ASSERT(regex_ascii_tolower('!') == '!');
+    TEST_ASSERT(regex_ascii_tolower('~') == '~');
+    TEST_ASSERT(regex_ascii_tolower(' ') == ' ');
+    TEST_ASSERT(regex_ascii_tolower('\n') == '\n');
+    TEST_ASSERT(regex_ascii_tolower('\0') == '\0');
+    TEST_ASSERT(regex_ascii_tolower(0x1F4A9) == 0x1F4A9);
+    return 0;
+}
+
 int test_util_toupper(void) {
     TEST_ASSERT(regex_ascii_toupper('a') == 'A');
     TEST_ASSERT(regex_ascii_toupper('z') == 'Z');
