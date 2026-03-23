@@ -14,3 +14,7 @@ libm.a: $(OBJS)
 
 clean:
 	rm -f src/*.o libm.a
+
+install: libm.a
+	@mkdir -p $(DESTDIR)/usr/lib
+	cp libm.a $(DESTDIR)/usr/lib/

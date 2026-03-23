@@ -3,7 +3,8 @@
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
-#include <errno.h>
+#include <sys/ioctl.h>
+#include <sys/time.h>
 #include <sys/select.h>
 #include <dirent.h>
 #include <sys/stat.h>
@@ -2389,8 +2390,8 @@ static unsigned char vi_search_prev_action(EditLine *el, int c) {
 
 static unsigned char vi_edit_external(EditLine *el, int c) {
     const char *editor;
-    char tmpfile[64];
-    char cmd[512];
+    char *tmpfile;
+    char *cmd;
     FILE *fp;
     char buf[4096];
     size_t nread;
@@ -2404,17 +2405,29 @@ static unsigned char vi_edit_external(EditLine *el, int c) {
 
     terminal_set_orig(el);
 
-    snprintf(tmpfile, sizeof(tmpfile), "/tmp/el_edit.XXXXXX");
+    tmpfile = strdup("/tmp/el_edit.XXXXXX");
+    if (!tmpfile) {
+        terminal_set_raw(el);
+        return CC_NORM;
+    }
+
     fd = mkstemp(tmpfile);
     if (fd < 0) {
+        free(tmpfile);
         terminal_set_raw(el);
         return CC_NORM;
     }
     (void)write(fd, el->line.buffer, el->line.len);
     close(fd);
 
-    snprintf(cmd, sizeof(cmd), "%s %s", editor, tmpfile);
+    if (asprintf(&cmd, "%s %s", editor, tmpfile) < 0) {
+        unlink(tmpfile);
+        free(tmpfile);
+        terminal_set_raw(el);
+        return CC_NORM;
+    }
     (void)system(cmd);
+    free(cmd);
 
     fp = fopen(tmpfile, "r");
     if (fp) {
@@ -2427,6 +2440,7 @@ static unsigned char vi_edit_external(EditLine *el, int c) {
         (void)line_set_text(el, buf);
     }
     unlink(tmpfile);
+    free(tmpfile);
 
     terminal_set_raw(el);
     refresh_line(el);
