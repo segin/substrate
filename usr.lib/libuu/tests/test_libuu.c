@@ -59,6 +59,45 @@ int main() {
     n = uu_decode_line(line, out, 2); // limit to 2 bytes
     assert(n == -1); // Should fail
 
+    /* Test NULL pointers */
+    assert(uu_decode_line(NULL, out, 100) == -1);
+    assert(uu_decode_line(line, NULL, 100) == -1);
+
+    /* Test invalid length character */
+    assert(uu_decode_line("\x1F", out, 100) == -1); /* Less than ' ' */
+    assert(uu_decode_line("a", out, 100) == -1);    /* Greater than '`' */
+
+    /* Test zero length (end of data) */
+    assert(uu_decode_line(" ", out, 100) == 0);
+    assert(uu_decode_line("`", out, 100) == 0);
+
+    /* Test unexpected end of line */
+    assert(uu_decode_line("!", out, 100) == 0); /* "!" means 1 byte, but string ends immediately. */
+    /* The while loop breaks, and it returns 0 written bytes. */
+
+    /* Test short line padded with 0 */
+    /* '!' (33) -> 1 byte. "00" instead of "00  ", incomplete string */
+    line = "!00";
+    memset(out, 0, 100);
+    n = uu_decode_line(line, out, 100);
+    assert(n == 1);
+    assert(out[0] == 'A');
+
+    /* Test maximum length standard line (45 bytes) */
+    /* M (length 45) -> 45 bytes encoded in 60 characters */
+    /* "Cat" is 3 bytes -> 4 chars "0V%T" */
+    /* 15 times "Cat" -> 45 bytes, 60 chars */
+    /* Length char 'M' = 77 */
+    line = "M0V%T0V%T0V%T0V%T0V%T0V%T0V%T0V%T0V%T0V%T0V%T0V%T0V%T0V%T0V%T";
+    memset(out, 0, 100);
+    n = uu_decode_line(line, out, 100);
+    assert(n == 45);
+    for (int i = 0; i < 15; i++) {
+        assert(out[i*3] == 'C');
+        assert(out[i*3+1] == 'a');
+        assert(out[i*3+2] == 't');
+    }
+
     printf("All tests passed!\n");
     return 0;
 }
