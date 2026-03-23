@@ -154,15 +154,30 @@ char *ast_to_string(ast_node_t *node) {
     }
     if (node->type == NODE_PIPELINE) {
         ast_pipeline_t *pipe = (ast_pipeline_t *)node;
-        char *res = strdup("");
+        size_t cap = 128;
+        size_t len = 0;
+        char *res = malloc(cap);
+        res[0] = '\0';
+
         for (int i = 0; i < pipe->command_count; i++) {
             char *s = ast_to_string(pipe->commands[i]);
-            size_t new_len = strlen(res) + strlen(s) + 4;
-            char *next = malloc(new_len);
-            sprintf(next, "%s%s%s", res, (i == 0 ? "" : " | "), s);
-            free(res);
+            size_t s_len = strlen(s);
+            const char *sep = (i == 0 ? "" : " | ");
+            size_t sep_len = strlen(sep);
+
+            if (len + sep_len + s_len + 1 > cap) {
+                while (len + sep_len + s_len + 1 > cap) cap *= 2;
+                res = realloc(res, cap);
+            }
+
+            if (sep_len > 0) {
+                memcpy(res + len, sep, sep_len);
+                len += sep_len;
+            }
+            memcpy(res + len, s, s_len);
+            len += s_len;
+            res[len] = '\0';
             free(s);
-            res = next;
         }
         return res;
     }
@@ -175,8 +190,9 @@ char *ast_to_string(ast_node_t *node) {
         else if (bin->op == OP_OR) op = " || ";
         else if (bin->op == OP_BACKGROUND) op = " & ";
         
-        char *res = malloc(strlen(s1) + strlen(s2) + strlen(op) + 1);
-        sprintf(res, "%s%s%s", s1, op, s2);
+        size_t len = strlen(s1) + strlen(s2) + strlen(op) + 1;
+        char *res = malloc(len);
+        snprintf(res, len, "%s%s%s", s1, op, s2);
         free(s1);
         free(s2);
         return res;

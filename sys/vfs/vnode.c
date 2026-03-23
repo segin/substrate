@@ -476,10 +476,6 @@ void vclean(struct vnode *vp, int flags)
  * vinvalbuf - Invalidate all buffers for a vnode
  *
  * flags: V_SAVE - sync dirty data before invalidating
- *
- * Once the buffer cache (bio.c) is implemented, this will walk
- * the vnode's buffer list and invalidate each buffer. For now,
- * we handle the vnode-side bookkeeping (v_numoutput).
  */
 #define V_SAVE 0x01
 int vinvalbuf(struct vnode *vp, int flags)

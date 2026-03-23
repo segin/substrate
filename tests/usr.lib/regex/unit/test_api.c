@@ -11,6 +11,44 @@ int test_api_basic(void) {
     return 0;
 }
 
+int test_api_split_free(void) {
+    /* Test NULL */
+    regex_split_free(NULL);
+
+    /* Test empty */
+    regex_split_result_t empty = {0};
+    regex_split_free(&empty);
+    TEST_ASSERT(empty.items == NULL);
+    TEST_ASSERT(empty.count == 0);
+
+    /* Test with items */
+    regex_split_result_t res = {0};
+    res.count = 2;
+    res.items = malloc(2 * sizeof(char *));
+    TEST_ASSERT(res.items != NULL);
+    res.items[0] = strdup("hello");
+    res.items[1] = strdup("world");
+    TEST_ASSERT(res.items[0] != NULL);
+    TEST_ASSERT(res.items[1] != NULL);
+
+    regex_split_free(&res);
+    TEST_ASSERT(res.items == NULL);
+    TEST_ASSERT(res.count == 0);
+
+    /* Test items allocated but count 0 */
+    regex_split_result_t res2 = {0};
+    res2.count = 0;
+    res2.items = malloc(1 * sizeof(char *));
+    TEST_ASSERT(res2.items != NULL);
+    res2.items[0] = NULL;
+
+    regex_split_free(&res2);
+    TEST_ASSERT(res2.items == NULL);
+    TEST_ASSERT(res2.count == 0);
+
+    return 0;
+}
+
 int test_api_match(void) {
     regex_err_t err;
     size_t caps[2];

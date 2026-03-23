@@ -214,6 +214,25 @@ elf_err_t elf_section_set_group(elf_section_t *section, uint32_t group, int comd
     return ELF_OK;
 }
 
+elf_err_t elf_section_set_group_signature(elf_section_t *section, const char *signature) {
+    char *dup;
+
+    if (section == NULL || section->obj == NULL || signature == NULL) {
+        return ELF_ERR_STATE;
+    }
+    if (!is_mutable_obj(section->obj)) {
+        return ELF_ERR_STATE;
+    }
+    dup = elf__strdup(signature);
+    if (dup == NULL) {
+        return ELF_ERR_OOM;
+    }
+    free(section->group_signature);
+    section->group_signature = dup;
+    section->obj->dirty = 1;
+    return ELF_OK;
+}
+
 elf_err_t elf_section_set_merge(elf_section_t *section, uint64_t entsize, int strings) {
     if (section == NULL || section->obj == NULL) {
         return ELF_ERR_STATE;
@@ -341,6 +360,7 @@ elf_err_t elf_remove_section(elfobj_t *obj, elf_section_t *section) {
     segment_compact_on_remove(obj, idx);
 
     free(section->note_name);
+    free(section->group_signature);
     free(section->name);
     if (section->owns_data) {
         free(section->data);

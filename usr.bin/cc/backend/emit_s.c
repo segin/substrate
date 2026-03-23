@@ -947,7 +947,7 @@ static int resolve_asm_immediate_symbol(const cc_ssa_function_t *f, int value, s
         }
     }
     if (def->op == CC_SSA_CONST) {
-        snprintf(out, outsz, "$%ld", def->imm);
+        snprintf(out, outsz, "$%lld", def->imm);
         return 0;
     }
     if (def->op == CC_SSA_STR) {
@@ -1197,7 +1197,7 @@ static cc_type_t ptr_base_type(cc_type_t t) {
     return cc_type_deref_once(t);
 }
 
-static void emit_visibility_attr(FILE *fp, const char *name, int attr_flags) {
+static void emit_visibility_attr(FILE *fp, const char *name, cc_attr_flags_t attr_flags) {
     if (name == NULL || name[0] == '\0') {
         return;
     }
@@ -1208,6 +1208,14 @@ static void emit_visibility_attr(FILE *fp, const char *name, int attr_flags) {
     } else if ((attr_flags & CC_ATTR_VIS_INTERNAL) != 0) {
         fprintf(fp, ".internal %s\n", name);
     }
+}
+
+static void emit_lifecycle_attr(FILE *fp, const char *section, const char *section_type, const char *name, int is_64bit) {
+    if (name == NULL || name[0] == '\0') {
+        return;
+    }
+    fprintf(fp, ".section %s,\"aw\",@%s\n", section, section_type);
+    fprintf(fp, "%s %s\n", is_64bit ? ".quad" : ".long", name);
 }
 
 static long global_type_size_bytes(cc_type_t t, int pointer_size) {
@@ -2025,7 +2033,7 @@ static void slot_layout_free(slot_layout_t *lay) {
     lay->frame_bytes = 0;
 }
 
-static int __attribute__((unused)) allocate_slot(int *free_slots, int *free_count, int *next_slot) {
+static int allocate_slot(int *free_slots, int *free_count, int *next_slot) {
     int i;
     int best_i = -1;
     int best_slot = 0;
@@ -2043,15 +2051,6 @@ static int __attribute__((unused)) allocate_slot(int *free_slots, int *free_coun
     free_slots[best_i] = free_slots[*free_count - 1];
     (*free_count)--;
     return best_slot;
-}
-
-static void __attribute__((unused)) mark_use(int *last_use, int nvals, int v, int at) {
-    if (v < 0 || v >= nvals) {
-        return;
-    }
-    if (at > last_use[v]) {
-        last_use[v] = at;
-    }
 }
 
 typedef void (*ssa_value_visit_fn)(int v, void *ctx);
@@ -2167,7 +2166,9 @@ static void slot_mark_use_cb(int v, void *ctxp) {
     if (ctx == NULL || v < 0 || v >= ctx->nvals) {
         return;
     }
-    mark_use(ctx->last_use, ctx->nvals, v, ctx->at);
+    if (ctx->at > ctx->last_use[v]) {
+        ctx->last_use[v] = ctx->at;
+    }
     if (ctx->first_use[v] < 0 || ctx->at < ctx->first_use[v]) {
         ctx->first_use[v] = ctx->at;
     }
@@ -2815,6 +2816,15 @@ static int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_lay
         if (in->op == CC_SSA_PARAM && in->dst >= 0 && in->dst < nvals) {
             pinned[in->dst] = 1;
             cross_block[in->dst] = 1;
+        }
+        if (in->op == CC_SSA_ADDR && in->lhs >= 0 && in->lhs < nvals) {
+            /*
+             * Once a local's address escapes, indirect loads/stores can outlive
+             * the value's direct SSA uses. Keep that storage stable instead of
+             * reusing it for another stack-backed SSA value.
+             */
+            pinned[in->lhs] = 1;
+            cross_block[in->lhs] = 1;
         }
 
         /* Track block-locality for safe reuse. */
@@ -3760,7 +3770,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             const cc_ssa_instr_t *in = &f->instrs[j];
             ist.cur_index = (int)j;
             if (debug_trace) {
-                fprintf(fp, "\t# ccdbg i=%zu op=%s dst=%d lhs=%d rhs=%d imm=%ld lbl=%d tl=%d fl=%d\n", j,
+                fprintf(fp, "\t# ccdbg i=%zu op=%s dst=%d lhs=%d rhs=%d imm=%lld lbl=%d tl=%d fl=%d\n", j,
                         ssa_op_name(in->op), in->dst, in->lhs, in->rhs, in->imm, in->label, in->true_label,
                         in->false_label);
             }
@@ -3842,7 +3852,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                     fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
                 } else {
                     int rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
-                    fprintf(fp, "\tmovq $%ld, %s\n", in->imm, ist.regs[rd]);
+                    fprintf(fp, "\tmovq $%lld, %s\n", in->imm, ist.regs[rd]);
                 }
                 break;
 
@@ -4269,6 +4279,12 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             fprintf(fp, "\t.cfi_endproc\n");
         }
         fprintf(fp, ".size %s, .-%s\n", f->name, f->name);
+        if ((f->attr_flags & CC_ATTR_CONSTRUCTOR) != 0) {
+            emit_lifecycle_attr(fp, ".init_array", "init_array", f->name, 1);
+        }
+        if ((f->attr_flags & CC_ATTR_DESTRUCTOR) != 0) {
+            emit_lifecycle_attr(fp, ".fini_array", "fini_array", f->name, 1);
+        }
         int_regs_free(&ist);
         slot_layout_free(&lay);
     }
@@ -5325,6 +5341,12 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
             fprintf(fp, "\t.cfi_endproc\n");
         }
         fprintf(fp, ".size %s, .-%s\n", f->name, f->name);
+        if ((f->attr_flags & CC_ATTR_CONSTRUCTOR) != 0) {
+            emit_lifecycle_attr(fp, ".init_array", "init_array", f->name, 0);
+        }
+        if ((f->attr_flags & CC_ATTR_DESTRUCTOR) != 0) {
+            emit_lifecycle_attr(fp, ".fini_array", "fini_array", f->name, 0);
+        }
         int_regs_free(&ist);
         slot_layout_free(&lay);
     }
