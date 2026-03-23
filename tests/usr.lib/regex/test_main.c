@@ -22,6 +22,8 @@ int test_utf8_decode_invalid(void);
 int test_unicode_case(void);
 int test_ascii_tolower(void);
 int test_ascii_toupper(void);
+int test_util_utf8_decode(void);
+int test_util_escape_literal(void);
 
 int main(void) {
     int failures = 0;
@@ -47,6 +49,8 @@ int main(void) {
     failures += test_unicode_case();
     failures += test_ascii_tolower();
     failures += test_ascii_toupper();
+    failures += test_util_utf8_decode();
+    failures += test_util_escape_literal();
 
     if (failures) {
         fprintf(stderr, "regex tests: %d failures\n", failures);
