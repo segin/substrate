@@ -153,6 +153,8 @@ int dosys(char *comstring, int nohalt) {
         fatal("strdup failed");
     }
 
+    if (silflag == 0) printf("%s\n", comstring);
+
     char *argv[128];
     parse_cmd(cmd_copy, argv, 128);
 
