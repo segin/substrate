@@ -3,6 +3,7 @@
 int test_api_basic(void);
 int test_api_split_free(void);
 int test_api_match(void);
+int test_api_split_free(void);
 int test_util_ascii_tolower(void);
 int test_util_toupper(void);
 int test_util_tolower(void);
@@ -31,6 +32,7 @@ int main(void) {
     failures += test_api_basic();
     failures += test_api_split_free();
     failures += test_api_match();
+    failures += test_api_split_free();
     failures += test_util_ascii_tolower();
     failures += test_util_toupper();
     failures += test_util_tolower();
