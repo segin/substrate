@@ -395,6 +395,13 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
             
             // Calculate page-aligned start and end
             uint32_t vaddr = phdr.p_vaddr + load_base;
+            
+            // SECURITY/ROBUSTNESS CHECK: Disallow loading ELF segments into kernel space
+            if (vaddr >= 0xC0000000 || (vaddr + phdr.p_memsz) >= 0xC0000000 || (vaddr + phdr.p_memsz) < vaddr) {
+                kprint("ELF: Refusing to load segment into kernel space\n");
+                kfree(image, sizeof(*image));
+                return 0;
+            }
             uint32_t va_start = vaddr & 0xFFFFF000;
             uint32_t va_end = (vaddr + phdr.p_memsz + 0xFFF) & 0xFFFFF000;
 

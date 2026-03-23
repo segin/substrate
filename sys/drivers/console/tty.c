@@ -563,8 +563,8 @@ void tty_flip_buffer_push_status(struct tty *tty, char c, uint32_t status) {
         }
     }
     
-    // Signal handling
-    if (!raw && (tty->termios.c_lflag & ISIG)) {
+    // Signal handling (POSIX: ISIG is independent of ICANON)
+    if (tty->termios.c_lflag & ISIG) {
         int sig = 0;
         if (c == tty->termios.c_cc[VINTR]) sig = SIGINT;
         else if (c == tty->termios.c_cc[VQUIT]) sig = SIGQUIT;

@@ -1,0 +1,190 @@
+#!/usr/bin/env python3
+"""
+ext2-install-boot - Install ext2-boot bootloader into an ext2 filesystem image.
+
+Writes stage1 to the boot block (bytes 0-1023) and stage2 to inode 5
+(EXT2_BOOT_LOADER_INO), which the stage1 bootloader reads during boot.
+
+The target image MUST be created with:
+    mkfs.ext2 -b 1024 -I 128 ...
+because ext2-boot hardcodes 1024-byte blocks and 128-byte inodes.
+
+Usage:
+    ext2-install-boot <image> <stage1.bin> <stage2.bin>
+"""
+
+import struct
+import sys
+import os
+import time
+
+EXT2_SUPER_MAGIC    = 0xEF53
+EXT2_BOOT_LOADER_INO = 5        # Reserved inode for bootloader
+SUPERBLOCK_OFFSET    = 1024
+
+def die(msg):
+    print(f"error: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+def main():
+    if len(sys.argv) != 4:
+        print(__doc__.strip(), file=sys.stderr)
+        sys.exit(1)
+
+    image_path  = sys.argv[1]
+    stage1_path = sys.argv[2]
+    stage2_path = sys.argv[3]
+
+    # Read stage binaries
+    with open(stage1_path, 'rb') as f:
+        stage1 = f.read()
+    if len(stage1) > 1024:
+        die(f"stage1 is {len(stage1)} bytes (max 1024)")
+
+    with open(stage2_path, 'rb') as f:
+        stage2 = f.read()
+
+    with open(image_path, 'r+b') as img:
+        # ---- Read and validate superblock ----
+        img.seek(SUPERBLOCK_OFFSET)
+        sb_raw = bytearray(img.read(1024))
+
+        s_inodes_count      = struct.unpack_from('<I', sb_raw, 0)[0]
+        s_blocks_count      = struct.unpack_from('<I', sb_raw, 4)[0]
+        s_free_blocks_count = struct.unpack_from('<I', sb_raw, 12)[0]
+        s_first_data_block  = struct.unpack_from('<I', sb_raw, 20)[0]
+        s_log_block_size    = struct.unpack_from('<I', sb_raw, 24)[0]
+        s_blocks_per_group  = struct.unpack_from('<I', sb_raw, 32)[0]
+        s_inodes_per_group  = struct.unpack_from('<I', sb_raw, 40)[0]
+        s_magic             = struct.unpack_from('<H', sb_raw, 56)[0]
+        s_inode_size        = struct.unpack_from('<H', sb_raw, 88)[0]
+
+        if s_magic != EXT2_SUPER_MAGIC:
+            die(f"not an ext2 filesystem (magic=0x{s_magic:04x})")
+
+        block_size = 1024 << s_log_block_size
+        if block_size != 1024:
+            die(f"ext2-boot requires 1024-byte blocks (image has {block_size})")
+
+        if s_inode_size == 0:
+            s_inode_size = 128
+        if s_inode_size != 128:
+            die(f"ext2-boot requires 128-byte inodes (image has {s_inode_size})")
+
+        # ---- Write stage1 to boot block (bytes 0-1023) ----
+        img.seek(0)
+        img.write(stage1.ljust(1024, b'\x00')[:1024])
+
+        # ---- Read block group descriptor table ----
+        # For 1024-byte blocks, the BGD table is at block 2 (byte 2048)
+        bgdt_offset = 2 * block_size
+        num_groups = (s_blocks_count + s_blocks_per_group - 1) // s_blocks_per_group
+
+        # Read BGD for group 0 (inode table location)
+        img.seek(bgdt_offset)
+        bgd0_raw = bytearray(img.read(32))
+
+        bg_inode_table   = struct.unpack_from('<I', bgd0_raw, 8)[0]
+
+        # ---- Allocate data blocks for stage2 ----
+        blocks_needed = (len(stage2) + block_size - 1) // block_size
+        if blocks_needed > 12:
+            die(f"stage2 needs {blocks_needed} blocks (max 12 direct)")
+
+        # Search all block groups for free blocks
+        free_blocks = []
+        alloc_map = {}  # group_idx -> list of (bit, blk) allocated in that group
+
+        for g in range(num_groups):
+            if len(free_blocks) >= blocks_needed:
+                break
+
+            img.seek(bgdt_offset + g * 32)
+            bgd_raw = bytearray(img.read(32))
+            bg_block_bitmap = struct.unpack_from('<I', bgd_raw, 0)[0]
+            bg_free = struct.unpack_from('<H', bgd_raw, 12)[0]
+
+            if bg_free == 0:
+                continue
+
+            # Read this group's block bitmap
+            img.seek(bg_block_bitmap * block_size)
+            bitmap = bytearray(img.read(block_size))
+
+            group_base = g * s_blocks_per_group + s_first_data_block
+            group_allocs = []
+
+            for bit in range(s_blocks_per_group):
+                blk = group_base + bit
+                if blk >= s_blocks_count:
+                    break
+                byte_idx = bit // 8
+                bit_idx  = bit % 8
+                if not (bitmap[byte_idx] & (1 << bit_idx)):
+                    free_blocks.append(blk)
+                    group_allocs.append((bit, blk))
+                    # Mark in bitmap
+                    bitmap[byte_idx] |= (1 << bit_idx)
+                    if len(free_blocks) >= blocks_needed:
+                        break
+
+            if group_allocs:
+                # Write updated bitmap
+                img.seek(bg_block_bitmap * block_size)
+                img.write(bytes(bitmap))
+
+                # Update BGD free block count
+                bg_free -= len(group_allocs)
+                struct.pack_into('<H', bgd_raw, 12, bg_free)
+                img.seek(bgdt_offset + g * 32)
+                img.write(bytes(bgd_raw))
+
+        if len(free_blocks) < blocks_needed:
+            die(f"need {blocks_needed} free blocks, only {len(free_blocks)} available")
+
+        # Write stage2 data to the allocated blocks
+        for i, blk in enumerate(free_blocks):
+            off = i * block_size
+            chunk = stage2[off:off + block_size]
+            if len(chunk) < block_size:
+                chunk += b'\x00' * (block_size - len(chunk))
+            img.seek(blk * block_size)
+            img.write(chunk)
+
+        # ---- Write inode 5 ----
+        inode_offset = bg_inode_table * block_size + \
+                       (EXT2_BOOT_LOADER_INO - 1) * s_inode_size
+        inode = bytearray(s_inode_size)
+
+        now = int(time.time())
+        struct.pack_into('<H', inode, 0, 0o100644)              # i_mode
+        struct.pack_into('<H', inode, 2, 0)                     # i_uid
+        struct.pack_into('<I', inode, 4, len(stage2))           # i_size
+        struct.pack_into('<I', inode, 8, now)                   # i_atime
+        struct.pack_into('<I', inode, 12, now)                  # i_ctime
+        struct.pack_into('<I', inode, 16, now)                  # i_mtime
+        struct.pack_into('<I', inode, 20, 0)                    # i_dtime
+        struct.pack_into('<H', inode, 24, 0)                    # i_gid
+        struct.pack_into('<H', inode, 26, 1)                    # i_links_count
+        sectors = blocks_needed * (block_size // 512)
+        struct.pack_into('<I', inode, 28, sectors)              # i_blocks
+        struct.pack_into('<I', inode, 32, 0)                    # i_flags
+        struct.pack_into('<I', inode, 36, 0)                    # i_osd1
+        for i, blk in enumerate(free_blocks):
+            struct.pack_into('<I', inode, 40 + i * 4, blk)      # i_block[i]
+
+        img.seek(inode_offset)
+        img.write(bytes(inode))
+
+        # ---- Update superblock free-block count ----
+        s_free_blocks_count -= blocks_needed
+        struct.pack_into('<I', sb_raw, 12, s_free_blocks_count)
+        img.seek(SUPERBLOCK_OFFSET)
+        img.write(bytes(sb_raw))
+
+    print(f"ext2-boot installed: stage1={len(stage1)}B  "
+          f"stage2={len(stage2)}B ({blocks_needed} blocks at "
+          f"{','.join(str(b) for b in free_blocks)})")
+
+if __name__ == '__main__':
+    main()

@@ -74,6 +74,8 @@ typedef struct {
 void as_data_program_init(as_data_program_t *p);
 void as_data_program_free(as_data_program_t *p);
 
+int as_decode_string_literal(const char *src, char **bytes_out, size_t *len_out);
+
 int as_data_build(const as_parse_result_t *parsed, as_data_program_t *out,
                   char *errbuf, size_t errbuf_sz);
 

@@ -108,7 +108,7 @@ typedef struct {
     cc_tok_kind_t kind;
     const char *start;
     size_t len;
-    long num;
+    long long num;
     double fnum;
     int is_float;
     int float_is_single;
@@ -120,6 +120,14 @@ typedef struct {
     size_t line;
     size_t col;
 } cc_token_t;
+
+static int g_lexer_pointer_size_bytes = 8;
+
+void cc_lexer_set_pointer_size(int bytes) {
+    if (bytes == 4 || bytes == 8) {
+        g_lexer_pointer_size_bytes = bytes;
+    }
+}
 
 static char *xstrdup_local(const char *s) {
     size_t n;
@@ -643,7 +651,7 @@ static int lex_ident_or_keyword(cc_lexer_t *lx, cc_token_t *out, size_t line, si
 }
 
 static int lex_char_literal(cc_lexer_t *lx, cc_token_t *out, size_t line, size_t col, int c) {
-    long v = 0;
+    long long v = 0;
     int is_plain = c == '\'';
     if (c != '\'') {
         lx_adv(lx);
@@ -693,7 +701,7 @@ static int lex_char_literal(cc_lexer_t *lx, cc_token_t *out, size_t line, size_t
             v = '\"';
             lx_adv(lx);
         } else if (c == 'x') {
-            long hv = 0;
+            long long hv = 0;
             int seen = 0;
             lx_adv(lx);
             while ((d = lx_peek(lx)) >= 0 && isxdigit(d)) {
@@ -722,9 +730,9 @@ static int lex_char_literal(cc_lexer_t *lx, cc_token_t *out, size_t line, size_t
     if (lx_peek(lx) == '\'') {
         lx_adv(lx);
     }
-    if (is_plain && (unsigned long)v <= 0xffUL) {
+    if (is_plain && (unsigned long long)v <= 0xffULL) {
         signed char sc = (signed char)(unsigned char)v;
-        v = (long)sc;
+        v = (long long)sc;
     }
     out->kind = TOK_NUM;
     out->num = v;
@@ -778,6 +786,8 @@ static int lex_numeric_literal(cc_lexer_t *lx, cc_token_t *out, size_t line, siz
     int base = 10;
     int had_binary_prefix = 0;
     unsigned long long val_u = 0;
+    unsigned long long long_signed_max;
+    unsigned long long long_unsigned_max;
     size_t start = lx->pos;
     if (c == '.') {
         saw_dot = 1;
@@ -896,7 +906,9 @@ static int lex_numeric_literal(cc_lexer_t *lx, cc_token_t *out, size_t line, siz
             parse_s = tmp + 2;
         }
         val_u = strtoull(parse_s, NULL, base == 10 ? 0 : base);
-        out->num = (long)val_u;
+        out->num = (long long)val_u;
+        long_signed_max = g_lexer_pointer_size_bytes >= 8 ? 0x7fffffffffffffffULL : 0x7fffffffULL;
+        long_unsigned_max = g_lexer_pointer_size_bytes >= 8 ? 0xffffffffffffffffULL : 0xffffffffULL;
         if (seen_u) {
             out->int_is_unsigned = 1;
             if (seen_l >= 2) {
@@ -904,23 +916,42 @@ static int lex_numeric_literal(cc_lexer_t *lx, cc_token_t *out, size_t line, siz
             } else if (seen_l == 1) {
                 out->int_is_long = 1;
             } else if (val_u > 0xffffffffULL) {
-                if (val_u <= (unsigned long long)ULONG_MAX) {
+                if (val_u <= long_unsigned_max) {
                     out->int_is_long = 1;
                 } else {
                     out->int_is_longlong = 1;
                 }
             }
         } else if (seen_l >= 1) {
-            out->int_is_unsigned = 0;
             if (seen_l >= 2) {
+                out->int_is_unsigned = 0;
                 out->int_is_longlong = 1;
+            } else if (base == 10) {
+                out->int_is_unsigned = 0;
+                if (val_u <= long_signed_max) {
+                    out->int_is_long = 1;
+                } else {
+                    out->int_is_longlong = 1;
+                }
             } else {
-                out->int_is_long = 1;
+                if (val_u <= long_signed_max) {
+                    out->int_is_unsigned = 0;
+                    out->int_is_long = 1;
+                } else if (val_u <= long_unsigned_max) {
+                    out->int_is_unsigned = 1;
+                    out->int_is_long = 1;
+                } else if (val_u <= 0x7fffffffffffffffULL) {
+                    out->int_is_unsigned = 0;
+                    out->int_is_longlong = 1;
+                } else {
+                    out->int_is_unsigned = 1;
+                    out->int_is_longlong = 1;
+                }
             }
         } else if (base == 10) {
             out->int_is_unsigned = 0;
             if (val_u > 0x7fffffffULL) {
-                if (val_u <= (unsigned long long)LONG_MAX) {
+                if (val_u <= long_signed_max) {
                     out->int_is_long = 1;
                 } else {
                     out->int_is_longlong = 1;
@@ -931,10 +962,10 @@ static int lex_numeric_literal(cc_lexer_t *lx, cc_token_t *out, size_t line, siz
                 out->int_is_unsigned = 0;
             } else if (val_u <= 0xffffffffULL) {
                 out->int_is_unsigned = 1;
-            } else if (val_u <= (unsigned long long)LONG_MAX) {
+            } else if (val_u <= long_signed_max) {
                 out->int_is_unsigned = 0;
                 out->int_is_long = 1;
-            } else if (val_u <= (unsigned long long)ULONG_MAX) {
+            } else if (val_u <= long_unsigned_max) {
                 out->int_is_unsigned = 1;
                 out->int_is_long = 1;
             } else {

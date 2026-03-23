@@ -100,6 +100,8 @@ check_obj() {
     # type/size metadata for functions
     readelf --wide -s "$obj" | awk '$8 == "dir_fn" && $4 == "FUNC" && strtonum("0x"$3) > 0 { ok = 1 } END { exit ok ? 0 : 1 }'
     readelf --wide -s "$obj" | awk '$8 == "comdat_fn" && $4 == "FUNC" && strtonum("0x"$3) > 0 { ok = 1 } END { exit ok ? 0 : 1 }'
+    readelf --section-groups "$obj" | grep -q "comdat_fn"
+    readelf --section-groups "$obj" | grep -q "\\.text.comdat_fn"
 
     # .org should place org_b at offset 16 relative to section start
     a_hex=$(sym_hex "$obj" org_a)

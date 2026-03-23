@@ -37,6 +37,40 @@ bool test_vm_page_queue_ops(void) {
     return true;
 }
 
+bool test_vm_page_try_to_free(void) {
+    // Need a valid allocated page so it can be added to the free queue safely
+    vm_page_t *p = vm_page_alloc(NULL, 0, 0);
+    if (!p) return false;
+
+    // Clean up its state for tests
+    p->flags &= ~PG_BUSY;
+
+    // Null check
+    if (vm_page_try_to_free(NULL) != 0) return false;
+
+    // Dirty page check
+    p->flags |= PG_DIRTY;
+    if (vm_page_try_to_free(p) != 0) return false;
+    p->flags &= ~PG_DIRTY;
+
+    // Busy page check
+    p->flags |= PG_BUSY;
+    if (vm_page_try_to_free(p) != 0) return false;
+    p->flags &= ~PG_BUSY;
+
+    // Wired page check
+    p->wire_count = 1;
+    if (vm_page_try_to_free(p) != 0) return false;
+    p->wire_count = 0;
+
+    // Valid page check (should succeed and free the page correctly to the VM subsystem)
+    int result = vm_page_try_to_free(p);
+
+    if (result != 1) return false;
+
+    return true;
+}
+
 bool test_vm_page_flags(void) {
     vm_page_t p;
     memset(&p, 0, sizeof(p));
