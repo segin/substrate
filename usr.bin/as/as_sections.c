@@ -49,6 +49,9 @@
 #ifndef SHF_GROUP
 #define SHF_GROUP 0x200
 #endif
+#ifndef SHF_TLS
+#define SHF_TLS 0x400
+#endif
 
 typedef struct {
     as_section_state_t *out;
@@ -283,6 +286,9 @@ static unsigned parse_flags_string(const char *raw) {
         case 'g':
             flags |= SHF_GROUP;
             break;
+        case 'T':
+            flags |= SHF_TLS;
+            break;
         default:
             break;
         }
@@ -392,6 +398,7 @@ static int process_section_like(sec_ctx_t *ctx, const as_stmt_t *st, int do_push
     const as_directive_t *d = &st->u.directive;
     as_section_state_t *s = ctx->out;
     char *name;
+    char *group = NULL;
     unsigned flags;
     unsigned type;
     ssize_t existing = -1;
@@ -429,6 +436,35 @@ static int process_section_like(sec_ctx_t *ctx, const as_stmt_t *st, int do_push
     if (switch_section(ctx, name, 0, flags, type, 1) != 0) {
         free(name);
         return -1;
+    }
+    if (d->arg_count >= 4) {
+        group = trim_copy(d->args[3]);
+        if (group == NULL) {
+            free(name);
+            return -1;
+        }
+    } else if (existing >= 0 && s->items[existing].group != NULL) {
+        group = trim_copy(s->items[existing].group);
+        if (group == NULL) {
+            free(name);
+            return -1;
+        }
+    }
+    free(s->items[s->current_index].group);
+    s->items[s->current_index].group = group;
+    if (d->arg_count >= 5) {
+        char *f = trim_copy(d->args[4]);
+        if (f == NULL) {
+            free(name);
+            return -1;
+        }
+        s->items[s->current_index].comdat = streq_ci(f, "comdat") ? 1 : 0;
+        free(f);
+    } else if (existing >= 0) {
+        s->items[s->current_index].comdat = s->items[existing].comdat;
+    }
+    if (s->items[s->current_index].group != NULL || s->items[s->current_index].comdat) {
+        s->items[s->current_index].flags |= SHF_GROUP;
     }
 
     free(name);

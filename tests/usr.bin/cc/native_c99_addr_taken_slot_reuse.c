@@ -1,0 +1,100 @@
+__attribute__((noinline)) static int read_ptr(const int *p) { return *p; }
+
+#define STEP(n, prev) int v##n = (prev) + (n)
+
+int main(void) {
+    int x = 5;
+    int *p = &x;
+    int y;
+
+    int v0 = 1;
+    STEP(1, v0);
+    STEP(2, v1);
+    STEP(3, v2);
+    STEP(4, v3);
+    STEP(5, v4);
+    STEP(6, v5);
+    STEP(7, v6);
+    STEP(8, v7);
+    STEP(9, v8);
+    STEP(10, v9);
+    STEP(11, v10);
+    STEP(12, v11);
+    STEP(13, v12);
+    STEP(14, v13);
+    STEP(15, v14);
+    STEP(16, v15);
+    STEP(17, v16);
+    STEP(18, v17);
+    STEP(19, v18);
+    STEP(20, v19);
+    STEP(21, v20);
+    STEP(22, v21);
+    STEP(23, v22);
+    STEP(24, v23);
+    STEP(25, v24);
+    STEP(26, v25);
+    STEP(27, v26);
+    STEP(28, v27);
+    STEP(29, v28);
+    STEP(30, v29);
+    STEP(31, v30);
+    STEP(32, v31);
+    STEP(33, v32);
+    STEP(34, v33);
+    STEP(35, v34);
+    STEP(36, v35);
+    STEP(37, v36);
+    STEP(38, v37);
+    STEP(39, v38);
+    STEP(40, v39);
+    STEP(41, v40);
+    STEP(42, v41);
+    STEP(43, v42);
+    STEP(44, v43);
+    STEP(45, v44);
+    STEP(46, v45);
+    STEP(47, v46);
+    STEP(48, v47);
+    STEP(49, v48);
+    STEP(50, v49);
+    STEP(51, v50);
+    STEP(52, v51);
+    STEP(53, v52);
+    STEP(54, v53);
+    STEP(55, v54);
+    STEP(56, v55);
+    STEP(57, v56);
+    STEP(58, v57);
+    STEP(59, v58);
+    STEP(60, v59);
+    STEP(61, v60);
+    STEP(62, v61);
+    STEP(63, v62);
+    STEP(64, v63);
+    STEP(65, v64);
+    STEP(66, v65);
+    STEP(67, v66);
+    STEP(68, v67);
+    STEP(69, v68);
+    STEP(70, v69);
+    STEP(71, v70);
+    STEP(72, v71);
+    STEP(73, v72);
+    STEP(74, v73);
+    STEP(75, v74);
+    STEP(76, v75);
+    STEP(77, v76);
+    STEP(78, v77);
+    STEP(79, v78);
+    STEP(80, v79);
+
+    y = v80 + 17;
+    if (read_ptr(p) != 5) return 1;
+    if (y != 3258) return 2;
+    *p = 9;
+    if (y != 3258) return 3;
+    if (read_ptr(p) != 9) return 4;
+    return 0;
+}
+

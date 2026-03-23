@@ -275,6 +275,7 @@ static symtab_index_t *find_symtab(symtab_index_t *maps, size_t n, size_t sec_in
 static elf_err_t parse_symbols(elfobj_t *obj, symtab_index_t **out_maps, size_t *out_count) {
     size_t i;
     size_t map_count = 0;
+    size_t map_capacity = 0;
     symtab_index_t *maps = NULL;
 
     for (i = 0; i < obj->section_count; ++i) {
@@ -379,8 +380,9 @@ static elf_err_t parse_symbols(elfobj_t *obj, symtab_index_t **out_maps, size_t 
             map.symbols[j] = sym;
         }
 
-        {
-            void *next = elf__reallocarray(maps, map_count + 1, sizeof(maps[0]));
+        if (map_count == map_capacity) {
+            size_t new_capacity = map_capacity == 0 ? 8 : map_capacity * 2;
+            void *next = elf__reallocarray(maps, new_capacity, sizeof(maps[0]));
             if (next == NULL) {
                 size_t k;
                 for (k = 0; k < map_count; ++k) {
@@ -391,6 +393,7 @@ static elf_err_t parse_symbols(elfobj_t *obj, symtab_index_t **out_maps, size_t 
                 return ELF_ERR_OOM;
             }
             maps = (symtab_index_t *)next;
+            map_capacity = new_capacity;
         }
         maps[map_count++] = map;
     }

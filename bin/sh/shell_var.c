@@ -416,15 +416,11 @@ char **shell_var_get_envp(void) {
     name_list_t *curr = seen;
     while (curr) {
         char *val = shell_var_get(curr->name);
-        if (val) {
-            size_t len = strlen(curr->name) + strlen(val) + 2;
-            envp[i] = malloc(len);
-            if (envp[i]) {
-                snprintf(envp[i], len, "%s=%s", curr->name, val);
-                i++;
-            }
-            free(val);
-        }
+        size_t len = strlen(curr->name) + strlen(val) + 2;
+        envp[i] = malloc(len);
+        snprintf(envp[i], len, "%s=%s", curr->name, val);
+        free(val);
+        i++;
         name_list_t *tmp = curr;
         curr = curr->next;
         free(tmp);
