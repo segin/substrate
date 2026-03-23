@@ -192,6 +192,29 @@ elf_err_t elf_symbol_set_version(elf_symbol_t *symbol, uint16_t version_index) {
     return ELF_OK;
 }
 
+elf_err_t elf_symbol_set_version_name(elf_symbol_t *symbol, const char *version, int is_default) {
+    char *copy;
+    if (symbol == NULL || symbol->obj == NULL) {
+        return ELF_ERR_STATE;
+    }
+    if (!is_mutable_obj(symbol->obj)) {
+        return ELF_ERR_STATE;
+    }
+    if (version == NULL || version[0] == '\0') {
+        return ELF_ERR_FORMAT;
+    }
+    copy = elf__strdup(version);
+    if (copy == NULL) {
+        return ELF_ERR_OOM;
+    }
+    free(symbol->version_name);
+    symbol->version_name = copy;
+    symbol->version_default = is_default ? 1 : 0;
+    symbol->obj->has_versioning = 1;
+    symbol->obj->dirty = 1;
+    return ELF_OK;
+}
+
 uint16_t elf_symbol_version(const elf_symbol_t *symbol) {
     return symbol == NULL ? 0 : symbol->ver_index;
 }

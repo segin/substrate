@@ -1925,7 +1925,7 @@ int kern_proc_info(pid_t pid, sys_procinfo_t *info) {
     if (pid == 0) {
         target = current_process;
     } else {
-        for (int i = 0; i < 64; i++) {
+        for (int i = 0; i < MAX_PROCS; i++) {
             if (processes[i].pid == pid) {
                 target = &processes[i];
                 break;
@@ -1948,9 +1948,16 @@ int kern_proc_info(pid_t pid, sys_procinfo_t *info) {
     
     info->uid = target->uid;
     info->gid = target->gid;
+    info->euid = target->euid;
+    info->egid = target->egid;
     info->state = target->state;
     info->bitness = target->bitness;
+    info->perso_id = target->perso_id;
+    info->tty = -1;
+    info->nice = 0;
     info->start_time = target->start_time;
+    info->user_time = target->utime;
+    info->sys_time = target->stime;
     
     strncpy(info->name, target->comm, sizeof(info->name)-1);
     return 0;
@@ -1978,18 +1985,16 @@ int sys_proc_list(pid_t *pids, size_t count) {
 
 int kern_proc_list(pid_t *pids, size_t count) {
     int total_procs = 0;
-    for (int i = 0; i < 64; i++) {
+    for (int i = 0; i < MAX_PROCS; i++) {
         if (processes[i].pid != -1) total_procs++;
     }
     
     if (!pids || count == 0) return total_procs;
     
     int copied = 0;
-    for (int i = 0; i < 64 && copied < (int)count; i++) {
+    for (int i = 0; i < MAX_PROCS && copied < (int)count; i++) {
         if (processes[i].pid != -1) {
-            pid_t pid = processes[i].pid;
-            if (copyout(&pid, &pids[copied], sizeof(pid_t)) != 0) return -14;
-            copied++;
+            pids[copied++] = processes[i].pid;
         }
     }
     return copied;
@@ -1998,7 +2003,7 @@ int kern_proc_list(pid_t *pids, size_t count) {
 // sys_proc_count - Get total number of active processes
 int sys_proc_count(void) {
     int count = 0;
-    for (int i = 0; i < 64; i++) {
+    for (int i = 0; i < MAX_PROCS; i++) {
         if (processes[i].pid != -1) {
             count++;
         }
@@ -2119,8 +2124,7 @@ int sys_setpriority(int which, int who, int prio) {
         else if (which == PRIO_USER) target_id = current_process->uid;
     }
 
-    /* Iterate over processes using hardcoded limit matching syscall.c conventions */
-    for (int i = 0; i < 64; i++) {
+    for (int i = 0; i < MAX_PROCS; i++) {
         process_t *p = &processes[i];
         if (p->pid == -1) continue;
 
@@ -2194,7 +2198,7 @@ int sys_getpriority(int which, int who) {
     int found = 0;
     int best_nice = 20; /* Start with lowest priority (highest nice) */
 
-    for (int i = 0; i < 64; i++) {
+    for (int i = 0; i < MAX_PROCS; i++) {
         process_t *p = &processes[i];
         if (p->pid == -1) continue;
 

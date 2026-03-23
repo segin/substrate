@@ -14,6 +14,9 @@ INC_DIR="-I$ROOT/include"
 "$CC_BIN" -std=c11 native_c11_align_thread_noreturn.c -o /tmp/cc_native_c11_align_thread_noreturn
 /tmp/cc_native_c11_align_thread_noreturn
 
+"$CC_BIN" -std=c11 native_c11_noreturn_nonvoid.c -o /tmp/cc_native_c11_noreturn_nonvoid
+/tmp/cc_native_c11_noreturn_nonvoid
+
 "$CC_BIN" -std=c11 $INC_DIR native_c11_atomic.c -o /tmp/cc_native_c11_atomic
 /tmp/cc_native_c11_atomic
 
@@ -31,6 +34,9 @@ grep -q "# asm clobber memory" /tmp/cc_native_c11_atomic_fence_32.s
 
 "$CC_BIN" -std=c11 native_c11_unicode_literals.c -o /tmp/cc_native_c11_unicode_literals
 /tmp/cc_native_c11_unicode_literals
+
+"$CC_BIN" -std=c11 native_c11_u8_macro_literal.c -o /tmp/cc_native_c11_u8_macro_literal
+/tmp/cc_native_c11_u8_macro_literal
 
 ! "$CC_BIN" -std=c11 -c native_bad_c11_static_assert_fail.c -o /tmp/cc_native_bad_c11_static_assert_fail.o
 ! "$CC_BIN" -std=c11 -c native_bad_c11_thread_local_local.c -o /tmp/cc_native_bad_c11_thread_local_local.o

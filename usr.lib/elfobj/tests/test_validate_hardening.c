@@ -176,6 +176,21 @@ static void test_program_section_coherence(void) {
     elf_close(broken);
 }
 
+static void test_validate_ex_null_obj(void) {
+    char *diag = NULL;
+    elf_validate_options_t opts;
+    opts.mode = ELF_VALIDATE_STRICT;
+    opts.max_errors = 1;
+
+    if (elf_validate_ex(NULL, &opts, &diag) != ELF_ERR_STATE) {
+        fail("elf_validate_ex with NULL obj should return ELF_ERR_STATE");
+    }
+    if (elf_validate(NULL, &diag) != ELF_ERR_STATE) {
+        fail("elf_validate with NULL obj should return ELF_ERR_STATE");
+    }
+    free(diag);
+}
+
 static void test_security_regression_inputs(void) {
     static const uint8_t corpus[][32] = {
         {0x00},
@@ -201,5 +216,6 @@ int main(void) {
     test_relocation_width_check();
     test_program_section_coherence();
     test_security_regression_inputs();
+    test_validate_ex_null_obj();
     return 0;
 }

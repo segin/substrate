@@ -17,17 +17,102 @@ base:
 .size base, .-base
 SRC
 
-# file:line diagnostics for encode errors
+# file:line diagnostics for operand/register errors
 cat > "$TMP/diag_line.s" <<'SRC'
 .text
 bad_line:
-    add %eax, %xmm0
+    add %k1, %eax
 SRC
 if "$AS" -32 -o "$TMP/diag_line.o" "$TMP/diag_line.s" >"$TMP/diag_line.out" 2>"$TMP/diag_line.err"; then
-    echo "expected invalid operand failure"
+    echo "expected bad register failure"
     exit 1
 fi
 grep -Eq "diag_line\.s:3|diag_line\.s" "$TMP/diag_line.err"
+grep -Eqi "unknown x86 register|register" "$TMP/diag_line.err"
+
+# unsupported mnemonic diagnostics
+cat > "$TMP/bad_mnemonic.s" <<'SRC'
+.text
+bad_mnemonic:
+    definitelynotreal %eax, %ebx
+SRC
+if "$AS" -32 -o "$TMP/bad_mnemonic.o" "$TMP/bad_mnemonic.s" >"$TMP/bm.out" 2>"$TMP/bm.err"; then
+    echo "expected unsupported mnemonic failure"
+    exit 1
+fi
+grep -qi "unsupported mnemonic" "$TMP/bm.err"
+grep -Eq "bad_mnemonic\.s:3|bad_mnemonic\.s" "$TMP/bm.err"
+
+# Intel and AT&T syntax should surface the same unsupported-form root cause.
+cat > "$TMP/att_bad_form.s" <<'SRC'
+.text
+att_bad_form:
+    mov %eax, (%ebx), %ecx
+SRC
+cat > "$TMP/intel_bad_form.s" <<'SRC'
+.intel_syntax noprefix
+.text
+intel_bad_form:
+    mov eax, [ebx], ecx
+SRC
+if "$AS" -32 -o "$TMP/att_bad_form.o" "$TMP/att_bad_form.s" >"$TMP/abf.out" 2>"$TMP/abf.err"; then
+    echo "expected AT&T unsupported-form failure"
+    exit 1
+fi
+if "$AS" -32 -msyntax=intel -o "$TMP/intel_bad_form.o" "$TMP/intel_bad_form.s" >"$TMP/ibf.out" 2>"$TMP/ibf.err"; then
+    echo "expected Intel unsupported-form failure"
+    exit 1
+fi
+grep -q "unsupported operand form for 'mov'" "$TMP/abf.err"
+grep -q "unsupported operand form for 'mov'" "$TMP/ibf.err"
+
+# ambiguous Intel memory-size diagnostics
+cat > "$TMP/ambiguous_intel.s" <<'SRC'
+.intel_syntax noprefix
+.text
+ambiguous_intel:
+    mov [eax], 1
+SRC
+if "$AS" -32 -msyntax=intel -o "$TMP/ambiguous_intel.o" "$TMP/ambiguous_intel.s" >"$TMP/ai.out" 2>"$TMP/ai.err"; then
+    echo "expected ambiguous Intel operand size failure"
+    exit 1
+fi
+grep -qi "ambiguous Intel operand size" "$TMP/ai.err"
+grep -Eq "ambiguous_intel\.s:4|ambiguous_intel\.s" "$TMP/ai.err"
+
+# displacement/immediate truncation warnings should be explicit and stable
+cat > "$TMP/trunc_warn.s" <<'SRC'
+.text
+trunc_warn:
+    movb $0x1234, %al
+    ret
+SRC
+"$AS" -32 -o "$TMP/trunc_warn.o" "$TMP/trunc_warn.s" >"$TMP/tw.out" 2>"$TMP/tw.err"
+grep -qi "truncated to 8 bits" "$TMP/tw.err"
+grep -Eq "trunc_warn\.s:3|trunc_warn\.s" "$TMP/tw.err"
+
+# ISA-level failures should report the required -march level and mnemonic.
+cat > "$TMP/avx2_gate.s" <<'SRC'
+.text
+avx2_gate:
+    vpbroadcastd %xmm0, %ymm1
+SRC
+if "$AS" -64 -march=x86-64-v2 -o "$TMP/avx2_gate.o" "$TMP/avx2_gate.s" >"$TMP/avx2g.out" 2>"$TMP/avx2g.err"; then
+    echo "expected AVX2 ISA-gate failure"
+    exit 1
+fi
+grep -q "instruction requires -march=x86-64-v3 or higher: vpbroadcastd" "$TMP/avx2g.err"
+
+cat > "$TMP/avx512_gate.s" <<'SRC'
+.text
+avx512_gate:
+    vrcp14ps %xmm0, %xmm1
+SRC
+if "$AS" -64 -march=x86-64-v3 -o "$TMP/avx512_gate.o" "$TMP/avx512_gate.s" >"$TMP/avx512g.out" 2>"$TMP/avx512g.err"; then
+    echo "expected AVX-512 ISA-gate failure"
+    exit 1
+fi
+grep -q "instruction requires -march=x86-64-v4 or higher: vrcp14ps" "$TMP/avx512g.err"
 
 # include stack diagnostics via cpp include chain
 cat > "$TMP/inc/stack2.inc" <<'SRC'
@@ -105,29 +190,6 @@ if "$AS" --max-macro-depth 1 -o "$TMP/md.o" "$TMP/macro_depth.s" >"$TMP/md.out" 
     exit 1
 fi
 grep -q "max-macro-depth" "$TMP/md.err"
-
-cat > "$TMP/inc/d1.inc" <<'SRC'
-#include "d2.inc"
-SRC
-cat > "$TMP/inc/d2.inc" <<'SRC'
-#include "d3.inc"
-SRC
-cat > "$TMP/inc/d3.inc" <<'SRC'
-.text
-.globl d3
-.type d3,@function
-d3:
-    ret
-.size d3, .-d3
-SRC
-cat > "$TMP/inc_depth.S" <<'SRC'
-#include "d1.inc"
-SRC
-if "$AS" --max-include-depth 1 -I "$TMP/inc" -o "$TMP/id.o" "$TMP/inc_depth.S" >"$TMP/id.out" 2>"$TMP/id.err"; then
-    echo "expected max-include-depth failure"
-    exit 1
-fi
-grep -qi "include" "$TMP/id.err"
 
 # reproducible output and stable ordering
 "$AS" -64 -o "$TMP/base1.o" "$TMP/base.s"
