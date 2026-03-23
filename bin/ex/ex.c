@@ -918,6 +918,65 @@ void do_command(buffer_t *b, char *cmd) {
             signal(SIGINT, old_int);
             signal(SIGQUIT, old_quit);
         }
+
+        char *args[256];
+        int arg_count = 0;
+        char *p = cmd_copy;
+        char *dest = cmd_copy;
+
+        while (*p && arg_count < 255) {
+            while (*p && isspace((unsigned char)*p)) p++;
+            if (!*p) break;
+
+            args[arg_count++] = dest;
+
+            int in_single = 0, in_double = 0;
+            while (*p) {
+                if (!in_single && !in_double && isspace((unsigned char)*p)) {
+                    p++;
+                    break;
+                } else if (!in_double && *p == '\'') {
+                    in_single = !in_single;
+                    p++;
+                } else if (!in_single && *p == '"') {
+                    in_double = !in_double;
+                    p++;
+                } else if (!in_single && *p == '\\' && *(p+1)) {
+                    p++;
+                    if (*p) *dest++ = *p++;
+                } else {
+                    if (*p) *dest++ = *p++;
+                }
+            }
+            *dest++ = '\0';
+        }
+        args[arg_count] = NULL;
+
+        if (arg_count > 0) {
+            pid_t pid = fork();
+            if (pid == -1) {
+                perror("fork");
+            } else if (pid == 0) {
+                // Restore default signal handlers for the child process
+                signal(SIGINT, SIG_DFL);
+                signal(SIGQUIT, SIG_DFL);
+                execvp(args[0], args);
+                perror("execvp");
+                exit(127);
+            } else {
+                // Ignore signals in parent while waiting for child
+                void (*old_sigint)(int) = signal(SIGINT, SIG_IGN);
+                void (*old_sigquit)(int) = signal(SIGQUIT, SIG_IGN);
+
+                int status;
+                waitpid(pid, &status, 0);
+
+                // Restore signals
+                signal(SIGINT, old_sigint);
+                signal(SIGQUIT, old_sigquit);
+            }
+        }
+        free(cmd_copy);
     }
 }
 
