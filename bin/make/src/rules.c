@@ -216,3 +216,34 @@ int dosys(char *comstring, int nohalt) {
     free(cmd_copy);
     return ret;
 }
+
+int dosys(char *comstring, int nohalt) {
+    if (silflag == 0) printf("%s\n", comstring);
+    if (noexflag) return 0;
+
+    char *cmd_copy = strdup(comstring);
+    if (!cmd_copy) {
+        fatal("strdup failed");
+    }
+
+    char *argv[128];
+    parse_cmd(cmd_copy, argv, 128);
+
+    int ret = execute_argv(argv, nohalt);
+
+    free(cmd_copy);
+
+    return ret;
+}
+
+int dosys_argv(char **argv, int nohalt) {
+    if (silflag == 0) {
+        for (int i = 0; argv[i] != NULL; i++) {
+            printf("%s%s", i == 0 ? "" : " ", argv[i]);
+        }
+        printf("\n");
+    }
+    if (noexflag) return 0;
+
+    return execute_argv(argv, nohalt);
+}
