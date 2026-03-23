@@ -79,6 +79,7 @@ all: test_runner test_getuid test_minix test_ext2_perf test_ext2_read_blocks tes
 	./test_getpagesize
 	./test_getuid
 	./test_getrusage
+	./host_test_bm2
 
 test_getpagesize: lib/sys/test_getpagesize.c ../lib/sys/getpagesize.c
 	$(CC) $(CFLAGS_COMMON) $^ -o $@
@@ -94,6 +95,9 @@ test_readline: lib/edit/test_readline.c ../lib/edit/readline.c
 
 test_libedit: lib/edit/test_editline.c ../lib/edit/editline.c
 	$(CC) $(CFLAGS_COMMON) -I../include -I../lib/edit $< ../lib/edit/editline.c -o $@
+
+host_test_bm2: sys/host_test_bm2.c
+	$(CC) $(CFLAGS_COMMON) $< -o $@
 
 host_test_wait_logic: sys/host_test_wait_logic.c
 	$(CC) $(CFLAGS_KERN) $< -o $@
