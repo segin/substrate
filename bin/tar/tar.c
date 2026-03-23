@@ -366,10 +366,22 @@ static int archive_path(FILE *out, const char *path, const struct snapshot *old,
         if (include && emit_header(out, d, &st, '5', NULL, 0)) return -1;
         DIR *dp = opendir(path);
         if (!dp) return -1;
+
+        char c[PATH_MAX];
+        size_t path_len = strlen(path);
+        size_t base_len = path_len < sizeof(c) - 1 ? path_len : sizeof(c) - 1;
+        memcpy(c, path, base_len);
+        if (base_len < sizeof(c) - 1) c[base_len++] = '/';
+        char *name_ptr = c + base_len;
+        size_t rem = sizeof(c) - base_len;
+
         struct dirent *de;
         while ((de = readdir(dp))) {
             if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) continue;
-            char c[PATH_MAX]; snprintf(c, sizeof(c), "%s/%s", path, de->d_name);
+            size_t name_len = strlen(de->d_name);
+            size_t copy_len = name_len < rem - 1 ? name_len : rem - 1;
+            memcpy(name_ptr, de->d_name, copy_len);
+            name_ptr[copy_len] = '\0';
             if (archive_path(out, c, old, new)) { closedir(dp); return -1; }
         }
         closedir(dp);

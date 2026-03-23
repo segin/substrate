@@ -14,11 +14,53 @@ static elfobj_t *mk(const char *secname, const char *symname) {
     return obj;
 }
 
+static int test_plan_destroy(void) {
+    elf_link_plan_t *plan;
+    elfobj_t *obj;
+
+    /* Test NULL handling */
+    elf_link_plan_destroy(NULL);
+
+    /* Test empty plan */
+    plan = elf_link_plan_create();
+    if (plan == NULL) return 1;
+    elf_link_plan_destroy(plan);
+
+    /* Test plan with inputs */
+    plan = elf_link_plan_create();
+    if (plan == NULL) return 1;
+
+    obj = mk(".text", "test");
+    if (obj == NULL) {
+        elf_link_plan_destroy(plan);
+        return 1;
+    }
+
+    if (elf_link_plan_add_input(plan, obj, "test_input") != ELF_OK) {
+        elf_close(obj);
+        elf_link_plan_destroy(plan);
+        return 1;
+    }
+
+    elf_link_plan_destroy(plan);
+    elf_close(obj);
+
+    return 0;
+}
+
 int main(void) {
-    elfobj_t *a = mk(".text", "a");
-    elfobj_t *b = mk(".text", "b");
+    elfobj_t *a;
+    elfobj_t *b;
     elfobj_t *out = NULL;
     elfobj_t *ins[2];
+
+    if (test_plan_destroy() != 0) {
+        fprintf(stderr, "test_plan_destroy failed\n");
+        return 1;
+    }
+
+    a = mk(".text", "a");
+    b = mk(".text", "b");
 
     if (!a || !b) return 1;
     ins[0] = a;

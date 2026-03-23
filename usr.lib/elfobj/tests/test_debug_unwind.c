@@ -208,10 +208,52 @@ static void test_readelf_compat(void) {
     if (!readelf_has("tmp_debug_a.o", ".rela.debug_line")) fail("readelf missing .rela.debug_line");
 }
 
+static void test_section_is_debug(void) {
+    elfobj_t *obj = elf_create(ET_REL, EM_X86_64, ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_LE);
+    if (!obj) fail("elf_create");
+
+    /* test NULL */
+    if (elf_section_is_debug(NULL)) fail("elf_section_is_debug(NULL) returned true");
+
+    /* test valid debug names */
+    elf_section_t *sec1 = elf_add_section(obj, ".debug_info", SHT_PROGBITS, 0);
+    if (!elf_section_is_debug(sec1)) fail("elf_section_is_debug(.debug_info) returned false");
+
+    elf_section_t *sec2 = elf_add_section(obj, ".zdebug_info", SHT_PROGBITS, 0);
+    if (!elf_section_is_debug(sec2)) fail("elf_section_is_debug(.zdebug_info) returned false");
+
+    elf_section_t *sec3 = elf_add_section(obj, ".gdb_index", SHT_PROGBITS, 0);
+    if (!elf_section_is_debug(sec3)) fail("elf_section_is_debug(.gdb_index) returned false");
+
+    /* test invalid debug names */
+    elf_section_t *sec4 = elf_add_section(obj, ".text", SHT_PROGBITS, 0);
+    if (elf_section_is_debug(sec4)) fail("elf_section_is_debug(.text) returned true");
+
+    elf_section_t *sec5 = elf_add_section(obj, ".data", SHT_PROGBITS, 0);
+    if (elf_section_is_debug(sec5)) fail("elf_section_is_debug(.data) returned true");
+
+    elf_section_t *sec6 = elf_add_section(obj, ".debug", SHT_PROGBITS, 0);
+    if (elf_section_is_debug(sec6)) fail("elf_section_is_debug(.debug) returned true");
+
+    elf_section_t *sec7 = elf_add_section(obj, "debug_info", SHT_PROGBITS, 0);
+    if (elf_section_is_debug(sec7)) fail("elf_section_is_debug(debug_info) returned true");
+
+    /* test empty name */
+    elf_section_t *sec8 = elf_add_section(obj, "", SHT_PROGBITS, 0);
+    if (elf_section_is_debug(sec8)) fail("elf_section_is_debug('') returned true");
+
+    /* test section with null name */
+    elf_section_t *sec9 = elf_add_section(obj, NULL, SHT_PROGBITS, 0);
+    if (sec9 != NULL && elf_section_is_debug(sec9)) fail("elf_section_is_debug(null name) returned true");
+
+    elf_close(obj);
+}
+
 int main(void) {
     test_deterministic_sorted_debug_sections();
     test_roundtrip_and_validate();
     test_malformed_cfi_validator();
     test_readelf_compat();
+    test_section_is_debug();
     return 0;
 }
