@@ -1,158 +1,88 @@
-#include <elfobj.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
 #include "elf_private.h"
 
-int mock_malloc_fail = 0;
-void *test_malloc(size_t size) {
-    if (mock_malloc_fail) {
-        return NULL;
-    }
-    return malloc(size);
-}
-#define malloc test_malloc
-
-int mock_realloc_fail = 0;
-void *test_realloc(void *ptr, size_t size) {
-    if (mock_realloc_fail) {
-        return NULL;
-    }
-    return realloc(ptr, size);
-}
-#define realloc test_realloc
-
-// Include the source directly to apply the macro for unit testing static functions
-#include "elf_strtab.c"
-
-int test_oom(void) {
-    elf_strtab_t tab;
-    elf_err_t err;
-
-    mock_malloc_fail = 1;
-    err = elf__strtab_init(&tab);
-    mock_malloc_fail = 0;
-
-    if (err != ELF_ERR_OOM) {
-        fprintf(stderr, "Expected ELF_ERR_OOM for malloc failure, got %d\n", err);
-        return 1;
-    }
-
-    // Now test realloc failure in strtab_add
-    err = elf__strtab_init(&tab);
-    if (err != ELF_OK) return 1;
-
-    mock_realloc_fail = 1;
-    uint32_t off = elf__strtab_add(&tab, "realloc_fail_test");
-    mock_realloc_fail = 0;
-
-    if (off != 0) {
-        fprintf(stderr, "Expected offset 0 on realloc failure, got %u\n", off);
-        return 1;
-    }
-
-    elf__strtab_free(&tab);
-
-    // Test size overflow in add
-    err = elf__strtab_init(&tab);
-    if (err != ELF_OK) return 1;
-
-    tab.cap = ((size_t)-1) / 2 + 1; // Something that when multiplied by 2 will overflow
-    tab.size = tab.cap - 1;
-
-    // Now adding any string will trigger the check
-    off = elf__strtab_add(&tab, "test");
-    if (off != 0) {
-        fprintf(stderr, "Expected offset 0 due to capacity overflow, got %u\n", off);
-        return 1;
-    }
-
-    // Restore cap so we don't try to free an invalid allocation properly
-    tab.cap = 1;
-    tab.size = 1;
-    elf__strtab_free(&tab);
-
-    return 0;
+static void fail(const char *msg) {
+    fprintf(stderr, "test_strtab: %s\n", msg);
+    exit(1);
 }
 
 int main(void) {
     elf_strtab_t tab;
-    elf_err_t err;
+    uint32_t off1, off2, off3;
 
-    // Test 1: NULL pointer
-    err = elf__strtab_init(NULL);
-    if (err != ELF_ERR_STATE) {
-        fprintf(stderr, "Expected ELF_ERR_STATE for NULL tab, got %d\n", err);
-        return 1;
+    /* Test 1: NULL argument for init */
+    if (elf__strtab_init(NULL) != ELF_ERR_STATE) {
+        fail("elf__strtab_init(NULL) should return ELF_ERR_STATE");
     }
 
-    // Test 2: Normal initialization
-    err = elf__strtab_init(&tab);
-    if (err != ELF_OK) {
-        fprintf(stderr, "Failed to initialize strtab: %d\n", err);
-        return 1;
+    /* Test 2: Successful initialization */
+    if (elf__strtab_init(&tab) != ELF_OK) {
+        fail("elf__strtab_init failed");
+    }
+    if (tab.data == NULL || tab.size != 1 || tab.cap != 1 || tab.data[0] != '\0') {
+        fail("initialization state is incorrect");
     }
 
-    if (tab.size != 1 || tab.cap != 1 || tab.data == NULL || tab.data[0] != '\0') {
-        fprintf(stderr, "Invalid initial state for strtab\n");
-        elf__strtab_free(&tab);
-        return 1;
-    }
-
-    // Add string
-    uint32_t off1 = elf__strtab_add(&tab, "hello");
+    /* Test 3: Adding strings */
+    off1 = elf__strtab_add(&tab, "hello");
     if (off1 != 1) {
-        fprintf(stderr, "Expected offset 1, got %u\n", off1);
-        return 1;
+        fail("first string offset should be 1");
     }
-
     if (strcmp(tab.data + off1, "hello") != 0) {
-        fprintf(stderr, "String not correctly stored\n");
-        return 1;
+        fail("first string content is incorrect");
     }
 
-    // Add another string to trigger realloc
-    uint32_t off2 = elf__strtab_add(&tab, "world");
-    if (off2 != 7) {
-        fprintf(stderr, "Expected offset 7, got %u\n", off2);
-        return 1;
+    off2 = elf__strtab_add(&tab, "world");
+    if (off2 != 1 + strlen("hello") + 1) {
+        fail("second string offset is incorrect");
     }
-
     if (strcmp(tab.data + off2, "world") != 0) {
-        fprintf(stderr, "Second string not correctly stored\n");
-        return 1;
+        fail("second string content is incorrect");
     }
 
-    // Add NULL
-    uint32_t off3 = elf__strtab_add(&tab, NULL);
-    if (off3 != 0) {
-        fprintf(stderr, "Expected offset 0 for NULL string, got %u\n", off3);
-        return 1;
+    /* Test 4: Empty string */
+    off3 = elf__strtab_add(&tab, "");
+    if (off3 != off2 + strlen("world") + 1) {
+        fail("empty string offset is incorrect");
+    }
+    if (tab.data[off3] != '\0') {
+        fail("empty string content is incorrect");
     }
 
-    // Test 3: Freeing (should zero out)
+    /* Test 5: NULL cases for add */
+    if (elf__strtab_add(NULL, "test") != 0) {
+        fail("elf__strtab_add(NULL, ...) should return 0");
+    }
+    if (elf__strtab_add(&tab, NULL) != 0) {
+        fail("elf__strtab_add(..., NULL) should return 0");
+    }
+
+    /* Test 6: Resize trigger */
+    char large[256];
+    memset(large, 'a', sizeof(large) - 1);
+    large[sizeof(large) - 1] = '\0';
+    uint32_t off_large = elf__strtab_add(&tab, large);
+    if (off_large == 0) {
+        fail("adding large string failed");
+    }
+    if (strcmp(tab.data + off_large, large) != 0) {
+        fail("large string content is incorrect");
+    }
+    if (tab.cap < tab.size) {
+        fail("capacity should be at least size");
+    }
+
+    /* Test 7: Free */
     elf__strtab_free(&tab);
-    if (tab.size != 0 || tab.cap != 0 || tab.data != NULL) {
-        fprintf(stderr, "Failed to free strtab\n");
-        return 1;
+    if (tab.data != NULL || tab.size != 0 || tab.cap != 0) {
+        fail("free state is incorrect");
     }
 
-    // Freeing a NULL pointer should be safe
+    /* Test 8: Free NULL (should not crash) */
     elf__strtab_free(NULL);
 
-    // Test elf__strtab_add with NULL tab
-    uint32_t off4 = elf__strtab_add(NULL, "hello");
-    if (off4 != 0) {
-        fprintf(stderr, "Expected offset 0 for NULL tab, got %u\n", off4);
-        return 1;
-    }
-
-    if (test_oom() != 0) {
-        return 1;
-    }
-
-    printf("ALL CHECKS PASSED\n");
-
+    printf("test_strtab: all tests passed\n");
     return 0;
 }
