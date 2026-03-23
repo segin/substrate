@@ -1,6 +1,7 @@
 #include <elfobj.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "elf_private.h"
 
 static void fail(const char *msg) {
@@ -12,16 +13,19 @@ int main(void) {
     elfobj_t *obj = NULL;
     elf_err_t err;
 
-    // Test with NULL object
+    // Test 1: NULL object
     err = elf__ensure_symbols_relocs(NULL);
     if (err != ELF_ERR_STATE) {
         fprintf(stderr, "FAIL: expected ELF_ERR_STATE for NULL obj, got %d\n", err);
         return 1;
     }
 
-    // Create an empty ELF object to test with valid obj
-    obj = elf_create(ET_EXEC, EM_X86_64, ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_LE);
-    if (obj == NULL) fail("failed to create empty ELF obj");
+    // Test 2: empty ELF object
+    obj = elf_create(ET_EXEC, EM_X86_64, ELFCLASS64, ELFDATA2LSB);
+    if (obj == NULL) {
+        fprintf(stderr, "FAIL: failed to create ELF obj\n");
+        return 1;
+    }
 
     err = elf__ensure_symbols_relocs(obj);
     if (err != ELF_OK) {
@@ -49,19 +53,98 @@ int main(void) {
     size_t sz = 0;
     if (elf__write_to_buffer(obj, &buf, &sz) != ELF_OK) fail("failed to write to buffer");
 
+    // Test 3: symrel_loaded already true
+    obj->symrel_loaded = 1;
+    err = elf__ensure_symbols_relocs(obj);
+    if (err != ELF_OK) {
+        fprintf(stderr, "FAIL: expected ELF_OK when symrel_loaded=1, got %d\n", err);
+        elf_close(obj);
+        return 1;
+    }
+
+    elf_close(obj);
+
+    // Test 4: lazy load actual symbols and relocations
+    obj = elf_create(ET_REL, EM_X86_64, ELFCLASS64, ELFDATA2LSB);
+    if (obj == NULL) {
+        fprintf(stderr, "FAIL: failed to create ELF obj for lazy load\n");
+        return 1;
+    }
+
+    struct elf_section *text = calloc(1, sizeof(*text));
+    if (!text) return 1;
+    text->name = elf__strdup(".text");
+    text->type = SHT_PROGBITS;
+    text->flags = SHF_ALLOC | SHF_EXECINSTR;
+    text->addralign = 1;
+    text->obj = obj;
+    err = elf__push_section(obj, text);
+    if (err != ELF_OK) return 1;
+
+    struct elf_symbol *sym = calloc(1, sizeof(*sym));
+    if (!sym) return 1;
+    sym->name = elf__strdup("main");
+    sym->bind = STB_GLOBAL;
+    sym->type = STT_FUNC;
+    sym->shndx = text->index;
+    sym->obj = obj;
+    err = elf__push_symbol(obj, sym);
+    if (err != ELF_OK) return 1;
+
+    uint8_t *buf = NULL;
+    size_t sz = 0;
+    err = elf__write_to_buffer(obj, &buf, &sz);
+    if (err != ELF_OK) {
+        fprintf(stderr, "FAIL: failed to write ELF obj to buffer, got %d\n", err);
+        elf_close(obj);
+        return 1;
+    }
     elf_close(obj);
 
     elfobj_t *lazy_obj = NULL;
-    if (elf_open_memory_with_options(buf, sz, ELFOBJ_OPEN_LAZY_PARSE, &lazy_obj) != ELF_OK) fail("failed to open memory with lazy parse");
+    err = elf_open_memory_with_options(buf, sz, ELFOBJ_OPEN_LAZY_PARSE, &lazy_obj);
+    if (err != ELF_OK) {
+        fprintf(stderr, "FAIL: failed to open memory with lazy parse, got %d\n", err);
+        free(buf);
+        return 1;
+    }
 
-    if (lazy_obj->symrel_loaded != 0) fail("symrel_loaded should be 0 initially");
+    if (lazy_obj->symrel_loaded != 0) {
+        fprintf(stderr, "FAIL: expected symrel_loaded=0 after lazy open, got %d\n", lazy_obj->symrel_loaded);
+        elf_close(lazy_obj);
+        free(buf);
+        return 1;
+    }
 
-    if (elf__ensure_symbols_relocs(lazy_obj) != ELF_OK) fail("failed to ensure symbols and relocs");
+    err = elf__ensure_symbols_relocs(lazy_obj);
+    if (err != ELF_OK) {
+        fprintf(stderr, "FAIL: expected ELF_OK from ensure_symbols_relocs after lazy open, got %d\n", err);
+        elf_close(lazy_obj);
+        free(buf);
+        return 1;
+    }
 
-    if (lazy_obj->symrel_loaded != 1) fail("symrel_loaded should be 1 after materialize");
+    if (lazy_obj->symrel_loaded != 1) {
+        fprintf(stderr, "FAIL: expected symrel_loaded=1 after ensure_symbols_relocs, got %d\n", lazy_obj->symrel_loaded);
+        elf_close(lazy_obj);
+        free(buf);
+        return 1;
+    }
 
-    // Check fast path
-    if (elf__ensure_symbols_relocs(lazy_obj) != ELF_OK) fail("fast path failed");
+    // verify the symbol is loaded
+    int found_main = 0;
+    for (size_t i = 0; i < lazy_obj->symbol_count; ++i) {
+        if (lazy_obj->symbols[i] != NULL && lazy_obj->symbols[i]->name != NULL && strcmp(lazy_obj->symbols[i]->name, "main") == 0) {
+            found_main = 1;
+            break;
+        }
+    }
+    if (!found_main) {
+        fprintf(stderr, "FAIL: 'main' symbol not found after ensure_symbols_relocs\n");
+        elf_close(lazy_obj);
+        free(buf);
+        return 1;
+    }
 
     elf_close(lazy_obj);
     free(buf);

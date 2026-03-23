@@ -2,7 +2,7 @@
 set -e
 
 EX_BIN="./bin/ex/ex"
-make -C bin/ex NATIVE_BUILD=1 >/dev/null
+
 
 TEST_FAILS=0
 TEST_PASS=0

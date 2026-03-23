@@ -177,7 +177,6 @@ char *ast_to_string(ast_node_t *node) {
             memcpy(res + len, s, s_len);
             len += s_len;
             res[len] = '\0';
-
             free(s);
         }
         return res;
