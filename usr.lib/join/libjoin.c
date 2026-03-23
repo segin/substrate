@@ -1,7 +1,12 @@
+#define _GNU_SOURCE
 #include <libjoin.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <errno.h>
+#include <stdio.h>
+
+extern ssize_t getdelim(char **lineptr, size_t *n, int delimiter, FILE *stream);
 
 typedef struct {
     char *line;
@@ -19,6 +24,8 @@ typedef struct {
     int buf_len;
     int buf_cap;
     bool eof;
+    join_record_t peek_rec;
+    bool has_peek;
 } join_reader_t;
 
 static void free_record(join_record_t *rec) {
@@ -76,6 +83,14 @@ static void split_fields(join_record_t *rec, const join_options_t *o) {
 
 static bool read_record(join_reader_t *r, join_record_t *rec, int join_field) {
     free_record(rec);
+
+    if (r->has_peek) {
+        *rec = r->peek_rec;
+        r->has_peek = false;
+        memset(&r->peek_rec, 0, sizeof(r->peek_rec));
+        return true;
+    }
+
     if (r->eof) return false;
 
     size_t cap = 0;
@@ -129,7 +144,6 @@ static void fill_buffer(join_reader_t *r, int join_field) {
         memset(&next_rec, 0, sizeof(next_rec));
 
         /* We must peek ahead. getdelim advances the file ptr, so we buffer it if it matches. */
-        off_t pos = ftello(r->f);
         if (!read_record(r, &next_rec, join_field)) break;
 
         int cmp;
@@ -146,10 +160,9 @@ static void fill_buffer(join_reader_t *r, int join_field) {
             }
             r->buf[r->buf_len++] = next_rec;
         } else {
-            /* Not a match, rewind and free peeked record */
-            fseeko(r->f, pos, SEEK_SET);
-            free_record(&next_rec);
-            r->eof = false; /* We might have hit EOF on the peek, restore state */
+            /* Not a match, save to peek buffer for next time */
+            r->peek_rec = next_rec;
+            r->has_peek = true;
             break;
         }
     }
@@ -238,10 +251,10 @@ static void print_paired(FILE *out, const join_record_t *r1, const join_record_t
 }
 
 int join_files(FILE *f1, const char *name1, FILE *f2, const char *name2, const join_options_t *opts, FILE *out) {
-    join_reader_t r1 = {f1, name1, opts, NULL, 0, 0, false};
-    join_reader_t r2 = {f2, name2, opts, NULL, 0, 0, false};
+    join_reader_t r1 = {f1, name1, opts, NULL, 0, 0, false, {0, 0, NULL, 0, NULL}, false};
+    join_reader_t r2 = {f2, name2, opts, NULL, 0, 0, false, {0, 0, NULL, 0, NULL}, false};
 
-    while (!r1.eof || !r2.eof || r1.buf_len > 0 || r2.buf_len > 0) {
+    while (!r1.eof || !r2.eof || r1.buf_len > 0 || r2.buf_len > 0 || r1.has_peek || r2.has_peek) {
         fill_buffer(&r1, opts->join_field_1);
         fill_buffer(&r2, opts->join_field_2);
 
@@ -292,6 +305,9 @@ int join_files(FILE *f1, const char *name1, FILE *f2, const char *name2, const j
 
     if (r1.buf) free(r1.buf);
     if (r2.buf) free(r2.buf);
+
+    if (r1.has_peek) free_record(&r1.peek_rec);
+    if (r2.has_peek) free_record(&r2.peek_rec);
 
     return 0;
 }

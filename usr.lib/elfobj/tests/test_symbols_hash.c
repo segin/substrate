@@ -61,11 +61,13 @@ int main(void) {
     if (elf_hash_sysv("") != 0) fail("sysv hash empty");
     if (elf_hash_sysv("printf") != 0x077905a6) fail("sysv hash printf");
     if (elf_hash_sysv("exit") != 0x0006cf04) fail("sysv hash exit");
+    if (elf_hash_sysv("long_string_to_trigger_g") != 0x04e66667) fail("sysv hash long_string_to_trigger_g");
 
     if (elf_hash_gnu(NULL) != 0) fail("gnu hash NULL");
     if (elf_hash_gnu("") != 5381) fail("gnu hash empty");
     if (elf_hash_gnu("printf") != 0x156b2bb8) fail("gnu hash printf");
     if (elf_hash_gnu("exit") != 0x7c967e3f) fail("gnu hash exit");
+    if (elf_hash_gnu("long_string_to_trigger_g") != 0x52156be6) fail("gnu hash long_string_to_trigger_g");
 
     return 0;
 }

@@ -73,6 +73,7 @@ ELFOBJ_1.0 {
 		elf_section_set_data;
 		elf_section_set_flags;
 		elf_section_set_group;
+		elf_section_set_group_signature;
 		elf_section_set_merge;
 		elf_section_set_note_info;
 		elf_section_set_tls;
@@ -99,6 +100,7 @@ ELFOBJ_1.0 {
 		elf_symbol_set_shndx;
 		elf_symbol_set_type;
 		elf_symbol_set_version;
+		elf_symbol_set_version_name;
 		elf_symbol_set_visibility;
 		elf_symbol_size;
 		elf_symbol_value;

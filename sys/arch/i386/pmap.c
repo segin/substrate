@@ -40,9 +40,6 @@ static pmap_t kernel_pmap_ptr = &kernel_pmap_store;
 static struct pmap *pmap_list_head = NULL;
 static volatile int pmap_list_lock = 0;
 
-// Global pmap lock for SMP safety
-static volatile int pmap_lock = 0;
-
 // Global Statistics
 static struct pmap_stats global_pmap_stats = {0};
 
@@ -101,18 +98,6 @@ static void pmap_list_remove(pmap_t pmap) {
     pmap->list_entry.prev = NULL;
     global_pmap_stats.total_pmaps--;
     __sync_lock_release(&pmap_list_lock);
-}
-
-static void __attribute__((unused)) pmap_lock_acquire(void) {
-    while (__sync_lock_test_and_set(&pmap_lock, 1)) {
-        while (pmap_lock) {
-            __asm__ volatile("pause");
-        }
-    }
-}
-
-static void __attribute__((unused)) pmap_lock_release(void) {
-    __sync_lock_release(&pmap_lock);
 }
 
 static void pmap_count_map_add(pmap_t pmap, uint32_t pages) {
@@ -290,9 +275,6 @@ void pmap_bootstrap(void) {
     kernel_pmap_store.resident_count = 0;
     kernel_pmap_store.wired_count = 0;
     kernel_pmap_store.mapped_count = 0;
-
-    // Initialize pmap lock
-    pmap_lock = 0;
 
     // Enable Paging (Reload CR3)
     __asm__ volatile("mov %0, %%cr3" :: "r"(kernel_pmap_store.pdir_phys));

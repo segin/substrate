@@ -1,6 +1,10 @@
+#include <limits.h>
+
 int main(void) {
+	int ir;
 	long long sr;
 	unsigned long long ur;
+	int io;
 	int so;
 	int uo;
 	int mo;
@@ -32,6 +36,18 @@ int main(void) {
 		return 7;
 	if (sr != 0LL)
 		return 8;
+
+	io = __builtin_add_overflow(2147483640, 8, &ir);
+	if (io != 1)
+		return 9;
+	if (ir != INT_MIN)
+		return 10;
+
+	io = __builtin_add_overflow(2147483640, 7, &ir);
+	if (io != 0)
+		return 11;
+	if (ir != INT_MAX)
+		return 12;
 
 	return 0;
 }

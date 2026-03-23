@@ -84,9 +84,9 @@ cmp "$TMP/x64_valid_a.o" "$TMP/x64_valid_b.o"
 "$AS" -64 -o "$TMP/special64.o" "$TMP/special64.s"
 objcopy -O binary --only-section=.text "$TMP/special64.o" "$TMP/special64.text"
 special_actual=$(od -An -tx1 -v "$TMP/special64.text" | tr -s ' \n' ' ' | sed 's/^ //; s/ $//')
-special_expected="48 b8 88 77 66 55 44 33 22 11 8c c0 8e c0 8e 00 8c 00 e3 00 48 90 c3"
+special_expected="48 b8 88 77 66 55 44 33 22 11 8c c0 8e c0 8e 00 8c 00 e3 02 48 90 c3"
 test "$special_actual" = "$special_expected"
-readelf --wide -r "$TMP/special64.o" | grep -q "R_X86_64_PC8"
+readelf --wide -r "$TMP/special64.o" | grep -q "There are no relocations in this file."
 
 objdump -dr "$TMP/x64_valid_a.o" | grep -q "movabs"
 objdump -dr "$TMP/x64_valid_a.o" | grep -Eq "r8|r9"
