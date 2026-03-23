@@ -144,8 +144,13 @@ void parse_cmd(char *cmd, char **argv, int max_args) {
     argv[argc] = NULL;
 }
 
-int dosys(char *comstring, int nohalt) {
-    if (silflag == 0) printf("%s\n", comstring);
+int dosysv(char **argv, int nohalt) {
+    if (silflag == 0) {
+        for (int i = 0; argv[i]; i++) {
+            printf("%s ", argv[i]);
+        }
+        printf("\n");
+    }
     if (noexflag) return 0;
     
     char *cmd_copy = strdup(comstring);
@@ -159,7 +164,6 @@ int dosys(char *comstring, int nohalt) {
     parse_cmd(cmd_copy, argv, 128);
 
     if (argv[0] == NULL) {
-        free(cmd_copy);
         return 0;
     }
 
@@ -195,5 +199,20 @@ int dosysv(char **argv) {
         ret = WEXITSTATUS(status);
     }
 
+    return ret;
+}
+
+int dosys(char *comstring, int nohalt) {
+    char *cmd_copy = strdup(comstring);
+    if (!cmd_copy) {
+        fatal("strdup failed");
+    }
+
+    char *argv[128];
+    parse_cmd(cmd_copy, argv, 128);
+
+    int ret = dosysv(argv, nohalt);
+
+    free(cmd_copy);
     return ret;
 }
