@@ -537,14 +537,15 @@ static char *build_short_cell(const file_info_t *f, const ls_config_t *config,
             return NULL;
         }
 
-        cell = (char *)malloc(prefix_len + strlen(cp) + 1);
+        size_t cp_len = strlen(cp);
+        cell = (char *)malloc(prefix_len + cp_len + 1);
         if (cell == NULL) {
             free(plain);
             free(cp);
             return NULL;
         }
         memcpy(cell, prefix, prefix_len);
-        strcpy(cell + prefix_len, cp);
+        memcpy(cell + prefix_len, cp, cp_len + 1);
 
         *visible_width = (prefix_len) + name_w;
         free(plain);
@@ -749,7 +750,7 @@ static void print_xattr_names(const file_info_t *f) {
                 printf("\t");
                 while (i < (size_t)got) {
                     const char *name = buf + i;
-                    if (name[0] == '\0') {
+                    if (*name == '\0') {
                         break;
                     }
                     if (!first) {
