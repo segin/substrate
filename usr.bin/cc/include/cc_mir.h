@@ -50,7 +50,7 @@ typedef struct {
     int dst;
     int lhs;
     int rhs;
-    long imm;
+    long long imm;
     double fimm;
     int label;
     int true_label;
@@ -72,7 +72,7 @@ typedef struct {
     char *name;
     cc_value_type_t ret_type;
     int storage;
-    int attr_flags;
+    cc_attr_flags_t attr_flags;
     long attr_align;
     char *attr_section;
     char *attr_alias;
