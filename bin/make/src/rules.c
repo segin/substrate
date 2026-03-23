@@ -18,9 +18,10 @@ int doname(struct nameblock *p, int reclevel, TIMETYPE *tval) {
         // No rules. Source file?
         if (ptime == 0) {
             // Try implicit rule .c.o
-            char srcname[256];
             size_t nlen = strlen(p->namep);
             if (nlen > 2 && strcmp(p->namep + nlen - 2, ".o") == 0) {
+                char *srcname = malloc(nlen + 1);
+                if (!srcname) fatal("malloc failed");
                 strcpy(srcname, p->namep);
                 strcpy(srcname + nlen - 2, ".c");
                 if (exists(srcname)) {
@@ -31,13 +32,29 @@ int doname(struct nameblock *p, int reclevel, TIMETYPE *tval) {
                     if (td > truedate) truedate = td;
                     
                     // Execute default CC command
-                    char *argv[] = {"cc", "-c", srcname, "-o", p->namep, NULL};
-                    dosysv(argv, 0);
+                    if (silflag == 0) printf("cc -c %s -o %s\n", srcname, p->namep);
+                    if (!noexflag) {
+                        char *argv[6];
+                        argv[0] = "cc";
+                        argv[1] = "-c";
+                        argv[2] = srcname;
+                        argv[3] = "-o";
+                        argv[4] = p->namep;
+                        argv[5] = NULL;
+                        int ret = dosysv(argv);
+                        if (ret != 0 && !ignerr) {
+                            free(srcname);
+                            fatal("Command failed");
+                        }
+                    }
+
                     *tval = time(NULL);
                     p->done = 2;
                     p->modtime = *tval;
+                    free(srcname);
                     return 0;
                 }
+                free(srcname);
             }
             if (keepgoing) return 1;
             fatal1("Don't know how to make %s", p->namep);
@@ -135,21 +152,38 @@ int dosysv(char **argv, int nohalt) {
         printf("\n");
     }
     if (noexflag) return 0;
+    
+    char *cmd_copy = strdup(comstring);
+    if (!cmd_copy) {
+        fatal("strdup failed");
+    }
 
-    int pid;
-    int status;
+    if (silflag == 0) printf("%s\n", comstring);
+
+    char *argv[128];
+    parse_cmd(cmd_copy, argv, 128);
 
     if (argv[0] == NULL) {
         return 0;
     }
 
+    int ret = dosysv(argv);
+    free(cmd_copy);
+
+    if (ret != 0 && !ignerr && !nohalt) {
+        fatal("Command failed");
+    }
+    return ret;
+}
+
+int dosysv(char **argv) {
+    int pid;
+    int status;
+
     if ((pid = fork()) == 0) {
         execvp(argv[0], argv);
         _exit(127);
     } else if (pid < 0) {
-        if (!ignerr && !nohalt) {
-            fatal("fork failed");
-        }
         return -1;
     }
 
@@ -165,9 +199,6 @@ int dosysv(char **argv, int nohalt) {
         ret = WEXITSTATUS(status);
     }
 
-    if (ret != 0 && !ignerr && !nohalt) {
-        fatal("Command failed");
-    }
     return ret;
 }
 

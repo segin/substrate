@@ -250,3 +250,4 @@ tests/lib/edit/test_property
 tests/lib/edit/test_tokenizer
 tests/lib/edit/test_vi
 tools/sbsh_expect.exp
+/usr.lib/elfobj/tests/test_ensure_symbols_relocs

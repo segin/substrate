@@ -542,6 +542,22 @@ static void test_entry_point(void) {
 }
 
 
+static void test_invalid_args(void) {
+	const char *t = "invalid_args";
+	elfobj_t *obj = elf_create(ET_REL, EM_386, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE);
+	uint8_t *buf = NULL;
+	size_t sz = 0;
+
+	require_true(t, obj != NULL, "elf_create failed");
+
+	require_true(t, elf__write_to_buffer(NULL, &buf, &sz) == ELF_ERR_STATE, "expected ELF_ERR_STATE for NULL obj");
+	require_true(t, elf__write_to_buffer(obj, NULL, &sz) == ELF_ERR_STATE, "expected ELF_ERR_STATE for NULL out_buf");
+	require_true(t, elf__write_to_buffer(obj, &buf, NULL) == ELF_ERR_STATE, "expected ELF_ERR_STATE for NULL out_sz");
+
+	elf_close(obj);
+}
+
+
 static void test_build_dynstr(void) {
 	const char *t = "build_dynstr";
 	elfobj_t *obj = elf_create(ET_DYN, EM_X86_64, ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_LE);
@@ -584,6 +600,7 @@ int main(void) {
 	test_tls();
 	test_entry_point();
 	test_build_dynstr();
+	test_invalid_args();
 	printf("test_write_to_buffer: ALL CHECKS PASSED\n");
 	return(0);
 }

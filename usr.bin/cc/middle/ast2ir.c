@@ -12369,9 +12369,7 @@ static int expr_uses_va_arg_pack(const cc_expr_t *e) {
     }
     return 0;
 }
-
 static int should_skip_fn_body_for_codegen(const cc_translation_unit_t *tu, const cc_function_t *f) {
-    size_t i;
     (void)tu;
     if (f == NULL || !f->has_body) {
         return 1;

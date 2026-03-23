@@ -89,6 +89,7 @@ int doname(struct nameblock *p, int reclevel, TIMETYPE *tval);
 int docom(struct shblock *q);
 int dosysv(char **argv, int nohalt);
 int dosys(char *comstring, int nohalt);
+int dosysv(char **argv);
 TIMETYPE exists(char *filename);
 void rddescf(char *descfile);
 
