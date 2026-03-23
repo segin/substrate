@@ -10,6 +10,12 @@
  *                   bold, underline, reverse, blink, hidden
  */
 
+/* Terminal Response Codes */
+#define ANSI_RESPONSE_DA_VT102 "\x1b[?6c"
+#define ANSI_RESPONSE_DA_VT102_LEN 5
+#define ANSI_RESPONSE_DSR_OK "\x1b[0n"
+#define ANSI_RESPONSE_DSR_OK_LEN 4
+
 #include <kern/ansi_handler.h>
 #include <stdio.h>
 
@@ -431,7 +437,7 @@ static void handle_csi(struct ansi_ctx *ctx, char c,
     case 'n': /* DSR - Device Status Report */
         n = (ctx->param_count > 0) ? ctx->params[0] : 0;
         if (n == 5) {
-            ansi_respond(cb, "\x1b[0n", 4);
+            ansi_respond(cb, ANSI_RESPONSE_DSR_OK, ANSI_RESPONSE_DSR_OK_LEN);
         } else if (n == 6) {
             char resp[32];
             size_t len;
