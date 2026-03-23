@@ -82,6 +82,26 @@ def is_branch_like(inst):
         mnemonic == 'loopz' or mnemonic == 'loopne' or mnemonic == 'loopnz' or \
         mnemonic.startswith('j')
 
+def first_mnemonic(inst):
+    prefixes = {
+        'lock', 'rep', 'repe', 'repz', 'repne', 'repnz', 'data16', 'addr16',
+        'cs', 'ds', 'es', 'fs', 'gs', 'ss', 'bnd', 'notrack', 'xacquire', 'xrelease',
+        '{evex}',
+    }
+    for tok in inst.split():
+        low = tok.lower()
+        if low in prefixes:
+            continue
+        return low
+    return ''
+
+def is_skip_64bit_intel_roundtrip(inst):
+    # The Intel roundtrip intentionally drops disassembler-only artifacts. The
+    # fixed-width loop/jrcxz family is also skipped because once those artifact
+    # lines are removed, the original rel8 span is no longer a stable property
+    # of the reconstructed source.
+    return first_mnemonic(inst) in {'jcxz', 'jecxz', 'jrcxz', 'loop', 'loope', 'loopz', 'loopne', 'loopnz'}
+
 def rewrite_targets(inst):
     # The remaining filtering here is for disassembler artifacts and label
     # recovery, not assembler syntax gaps.
@@ -89,20 +109,35 @@ def rewrite_targets(inst):
     def repl(mm):
         nonlocal ok
         target = int(mm.group(1), 16)
-        if target in addrs:
+        if target in kept_addrs:
             return f'.L{target:x}'
         if is_branch_like(inst):
             ok = False
         return '0x' + mm.group(1)
     return branch_target_re.sub(repl, inst), ok
 
+base_keep = {addr: not is_skip_64bit_intel_roundtrip(inst) for addr, inst in entries}
+keep = dict(base_keep)
+changed = True
+while changed:
+    changed = False
+    kept_addrs = {addr for addr, ok in keep.items() if ok}
+    for addr, inst in entries:
+        if not keep.get(addr, False):
+            continue
+        rewritten, ok = rewrite_targets(inst)
+        if not ok:
+            keep[addr] = False
+            changed = True
+
 with open(dst, 'w', encoding='utf-8') as fout:
     fout.write('.intel_syntax noprefix\n')
     fout.write('.text\n')
+    kept_addrs = {addr for addr, ok in keep.items() if ok}
     for addr, inst in entries:
-        inst, ok = rewrite_targets(inst)
-        if not ok:
+        if not keep.get(addr, False):
             continue
+        inst, _ = rewrite_targets(inst)
         fout.write(f'.L{addr:x}:\n')
         fout.write(inst)
         fout.write('\n')

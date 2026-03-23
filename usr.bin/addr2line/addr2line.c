@@ -158,9 +158,11 @@ typedef struct {
 
     char **include_dirs;
     size_t include_dir_count;
+    size_t include_dir_cap;
 
     line_file_t *files;
     size_t file_count;
+    size_t file_cap;
 
     const uint8_t *program;
     size_t program_size;
@@ -553,25 +555,33 @@ static int read_cstring_dup(const uint8_t **pp, const uint8_t *end, char **out) 
 }
 
 static int line_unit_add_dir(line_unit_t *u, char *dir) {
-    char **next = (char **)realloc(u->include_dirs,
-                                   (u->include_dir_count + 1u) * sizeof(*next));
-    if (next == NULL) {
-        free(dir);
-        return -1;
+    char **next;
+    if (u->include_dir_count == u->include_dir_cap) {
+        size_t new_cap = u->include_dir_cap == 0 ? 16u : u->include_dir_cap * 2u;
+        next = (char **)realloc(u->include_dirs, new_cap * sizeof(*next));
+        if (next == NULL) {
+            free(dir);
+            return -1;
+        }
+        u->include_dirs = next;
+        u->include_dir_cap = new_cap;
     }
-    u->include_dirs = next;
     u->include_dirs[u->include_dir_count++] = dir;
     return 0;
 }
 
 static int line_unit_add_file(line_unit_t *u, line_file_t file) {
-    line_file_t *next = (line_file_t *)realloc(u->files,
-                                               (u->file_count + 1u) * sizeof(*next));
-    if (next == NULL) {
-        free(file.name);
-        return -1;
+    line_file_t *next;
+    if (u->file_count == u->file_cap) {
+        size_t new_cap = u->file_cap == 0 ? 16u : u->file_cap * 2u;
+        next = (line_file_t *)realloc(u->files, new_cap * sizeof(*next));
+        if (next == NULL) {
+            free(file.name);
+            return -1;
+        }
+        u->files = next;
+        u->file_cap = new_cap;
     }
-    u->files = next;
     u->files[u->file_count++] = file;
     return 0;
 }
@@ -2424,9 +2434,7 @@ static int skip_form_value(const addr2line_image_t *img,
                            uint16_t version,
                            uint64_t form) {
     uint64_t len = 0;
-    uint16_t unused16 = 0;
-    uint32_t unused32 = 0;
-    uint64_t unused64 = 0;
+    uint64_t dummy = 0;
     const uint8_t *tmp;
 
     while (form == DW_FORM_indirect) {
@@ -2437,7 +2445,7 @@ static int skip_form_value(const addr2line_image_t *img,
 
     switch (form) {
     case DW_FORM_addr:
-        return read_addr_sized(pp, end, img->elf_endian, addr_size, &unused64);
+        return read_addr_sized(pp, end, img->elf_endian, addr_size, &dummy);
     case DW_FORM_data1:
     case DW_FORM_flag:
     case DW_FORM_ref1:
@@ -2446,14 +2454,14 @@ static int skip_form_value(const addr2line_image_t *img,
     case DW_FORM_data2:
     case DW_FORM_ref2:
     case DW_FORM_strx2:
-        return read_u16_cursor(pp, end, img->elf_endian, &unused16);
+        return read_exact(pp, end, 2u, NULL);
     case DW_FORM_data4:
     case DW_FORM_ref4:
     case DW_FORM_strx4:
-        return read_u32_cursor(pp, end, img->elf_endian, &unused32);
+        return read_exact(pp, end, 4u, NULL);
     case DW_FORM_data8:
     case DW_FORM_ref8:
-        return read_u64_cursor(pp, end, img->elf_endian, &unused64);
+        return read_exact(pp, end, 8u, NULL);
     case DW_FORM_data16:
         return read_exact(pp, end, 16u, NULL);
     case DW_FORM_udata:
@@ -2463,7 +2471,7 @@ static int skip_form_value(const addr2line_image_t *img,
     case DW_FORM_addrx:
     case DW_FORM_loclistx:
     case DW_FORM_rnglistx:
-        return read_uleb128(pp, end, &unused64);
+        return read_uleb128(pp, end, &dummy);
     case DW_FORM_string: {
         char *s = NULL;
         int rc = read_cstring_dup(pp, end, &s);
@@ -2473,12 +2481,12 @@ static int skip_form_value(const addr2line_image_t *img,
     case DW_FORM_strp:
     case DW_FORM_sec_offset:
     case DW_FORM_line_strp:
-        return read_offset(pp, end, img->elf_endian, offset_size, &unused64);
+        return read_offset(pp, end, img->elf_endian, offset_size, &dummy);
     case DW_FORM_ref_addr:
         if (version <= 2u) {
-            return read_addr_sized(pp, end, img->elf_endian, addr_size, &unused64);
+            return read_addr_sized(pp, end, img->elf_endian, addr_size, &dummy);
         }
-        return read_offset(pp, end, img->elf_endian, offset_size, &unused64);
+        return read_offset(pp, end, img->elf_endian, offset_size, &dummy);
     case DW_FORM_exprloc:
     case DW_FORM_block:
         if (read_uleb128(pp, end, &len) != 0) {
