@@ -2,17 +2,113 @@
 #include <string.h>
 #include <time.h>
 #include <stdlib.h>
+#include <ctype.h>
 
 #include <at.h>
 
-/* Phase 6.2: BSD extended time parsing */
+/*
+ * Helper to parse a time string.
+ * Handles:
+ * - HH:MM
+ * - HHMM
+ * - Keywords: now, noon, midnight, teatime, tomorrow
+ * Returns 0 on success, -1 on failure.
+ */
+static int parse_base_time(const char *buf, struct tm *info, time_t *t_base, const char **next) {
+    time_t now = *t_base;
+    int h, m, n;
+
+    if (strncmp(buf, "now", 3) == 0) {
+        *next = buf + 3;
+        return 0;
+    } else if (strncmp(buf, "noon", 4) == 0) {
+        info->tm_hour = 12; info->tm_min = 0; info->tm_sec = 0;
+        *t_base = mktime(info);
+        if (*t_base < now) *t_base += 86400;
+        *next = buf + 4;
+        return 0;
+    } else if (strncmp(buf, "midnight", 8) == 0) {
+        info->tm_hour = 0; info->tm_min = 0; info->tm_sec = 0;
+        *t_base = mktime(info);
+        if (*t_base < now) *t_base += 86400;
+        *next = buf + 8;
+        return 0;
+    } else if (strncmp(buf, "teatime", 7) == 0) {
+        info->tm_hour = 16; info->tm_min = 0; info->tm_sec = 0;
+        *t_base = mktime(info);
+        if (*t_base < now) *t_base += 86400;
+        *next = buf + 7;
+        return 0;
+    } else if (strncmp(buf, "tomorrow", 8) == 0) {
+        *t_base = now + 86400;
+        localtime_r(t_base, info);
+        *next = buf + 8;
+        return 0;
+    }
+
+    if (sscanf(buf, "%d:%d%n", &h, &m, &n) == 2) {
+        info->tm_hour = h; info->tm_min = m; info->tm_sec = 0;
+        *t_base = mktime(info);
+        if (*t_base < now) *t_base += 86400;
+        *next = buf + n;
+        return 0;
+    } else if (sscanf(buf, "%4d%n", &h, &n) == 1) {
+        if (h >= 100) {
+            info->tm_hour = h / 100;
+            info->tm_min = h % 100;
+        } else {
+            info->tm_hour = h;
+            info->tm_min = 0;
+        }
+        info->tm_sec = 0;
+        *t_base = mktime(info);
+        if (*t_base < now) *t_base += 86400;
+        *next = buf + n;
+        return 0;
+    }
+
+    return -1;
+}
+
+/*
+ * Helper to parse increments like "+ 5 minutes".
+ * Returns 0 on success, -1 on invalid format.
+ */
+static int parse_increment(const char *buf, time_t *t) {
+    while (isspace((unsigned char)*buf)) buf++;
+    if (*buf == '\0') return 0;
+    if (*buf != '+') return -1;
+    buf++;
+    while (isspace((unsigned char)*buf)) buf++;
+
+    int count;
+    int n;
+    if (sscanf(buf, "%d%n", &count, &n) != 1) return -1;
+    buf += n;
+    while (isspace((unsigned char)*buf)) buf++;
+
+    long unit_sec = 60;
+    if (strncmp(buf, "minute", 6) == 0) unit_sec = 60;
+    else if (strncmp(buf, "hour", 4) == 0) unit_sec = 3600;
+    else if (strncmp(buf, "day", 3) == 0) unit_sec = 86400;
+    else if (strncmp(buf, "week", 4) == 0) unit_sec = 86400 * 7;
+    else return -1;
+
+    *t += (time_t)count * unit_sec;
+    return 0;
+}
+
+/*
+ * at_parse_time: parses human readable timespecs.
+ * Support for keywords, absolute time (HH:MM), and relative increments.
+ */
 int at_parse_time(int argc, char *argv[], int optind, time_t *out_time) {
     if (optind >= argc) {
         *out_time = 0; // Immediate/now
         return 0;
     }
 
-    // Naive concatenation of remaining args into a timespec buffer
+    // Concatenate remaining args into a timespec buffer
     char buf[256] = {0};
     for (int i = optind; i < argc; i++) {
         strncat(buf, argv[i], sizeof(buf) - strlen(buf) - 1);
@@ -21,111 +117,20 @@ int at_parse_time(int argc, char *argv[], int optind, time_t *out_time) {
         }
     }
 
-    // Start with current time
     time_t now = time(NULL);
-    struct tm *info = localtime(&now);
+    struct tm info;
+    localtime_r(&now, &info);
 
-    if (strcmp(buf, "now") == 0) {
-        *out_time = now;
-        return 0;
-    } else if (strcmp(buf, "teatime") == 0) {
-        // BSD extension: 4:00 PM
-        info->tm_hour = 16;
-        info->tm_min = 0;
-        info->tm_sec = 0;
-        *out_time = mktime(info);
-        if (*out_time < now) {
-            info->tm_mday++;
-            *out_time = mktime(info);
-        }
-        return 0;
-    } else if (strcmp(buf, "noon") == 0) {
-        info->tm_hour = 12;
-        info->tm_min = 0;
-        info->tm_sec = 0;
-        *out_time = mktime(info);
-        if (*out_time < now) {
-            info->tm_mday++;
-            *out_time = mktime(info);
-        }
-        return 0;
-    } else if (strcmp(buf, "midnight") == 0) {
-        info->tm_hour = 0;
-        info->tm_min = 0;
-        info->tm_sec = 0;
-        *out_time = mktime(info);
-        if (*out_time < now) {
-            info->tm_mday++;
-            *out_time = mktime(info);
-        }
-        return 0;
-    } else if (strcmp(buf, "tomorrow") == 0) {
-        info->tm_mday++;
-        *out_time = mktime(info);
-        return 0;
+    time_t t_base = now;
+    const char *next = NULL;
+    if (parse_base_time(buf, &info, &t_base, &next) != 0) {
+        return -1;
     }
 
-    /* Additional parsing for "Jan 5", "now + 2 hours", "0400", etc. */
-    struct tm tm_parsed;
-    char *ret;
-
-    /* Check for "now + X units" */
-    if (strncmp(buf, "now + ", 6) == 0) {
-        int amount = 0;
-        char unit[32] = {0};
-        if (sscanf(buf + 6, "%d %31s", &amount, unit) == 2) {
-            if (strncmp(unit, "minute", 6) == 0) {
-                *out_time = now + (amount * 60);
-                return 0;
-            } else if (strncmp(unit, "hour", 4) == 0) {
-                *out_time = now + (amount * 3600);
-                return 0;
-            } else if (strncmp(unit, "day", 3) == 0) {
-                *out_time = now + (amount * 86400);
-                return 0;
-            } else if (strncmp(unit, "week", 4) == 0) {
-                *out_time = now + (amount * 604800);
-                return 0;
-            }
-        }
+    if (parse_increment(next, &t_base) != 0) {
+        return -1;
     }
 
-    /* Try "HHMM" or "HH:MM" */
-    memset(&tm_parsed, 0, sizeof(tm_parsed));
-    tm_parsed.tm_year = info->tm_year;
-    tm_parsed.tm_mon = info->tm_mon;
-    tm_parsed.tm_mday = info->tm_mday;
-    tm_parsed.tm_isdst = -1;
-
-    ret = strptime(buf, "%H:%M", &tm_parsed);
-    if (!ret) ret = strptime(buf, "%H%M", &tm_parsed);
-    if (ret && *ret == '\0') {
-        *out_time = mktime(&tm_parsed);
-        if (*out_time < now) {
-            tm_parsed.tm_mday++;
-            *out_time = mktime(&tm_parsed);
-        }
-        return 0;
-    }
-
-    /* Try "MMM DD" (e.g., "Jan 5") */
-    memset(&tm_parsed, 0, sizeof(tm_parsed));
-    tm_parsed.tm_year = info->tm_year;
-    tm_parsed.tm_isdst = -1;
-    ret = strptime(buf, "%b %d", &tm_parsed);
-    if (ret && *ret == '\0') {
-        /* If the date has already passed this year, assume next year */
-        tm_parsed.tm_hour = info->tm_hour;
-        tm_parsed.tm_min = info->tm_min;
-        tm_parsed.tm_sec = info->tm_sec;
-        *out_time = mktime(&tm_parsed);
-        if (*out_time < now) {
-            tm_parsed.tm_year++;
-            *out_time = mktime(&tm_parsed);
-        }
-        return 0;
-    }
-
-    // Since full parsing is complex, fail if unknown to satisfy "deterministic failure" rule
-    return -1;
+    *out_time = t_base;
+    return 0;
 }
