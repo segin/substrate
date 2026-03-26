@@ -1031,6 +1031,15 @@ static void cb_set_bracketed_paste(int on) {
     vt->bracketed_paste = on ? 1 : 0;
 }
 
+static void cb_respond(const char *s) {
+    vt_state_t *vt = current_vt_ctx;
+    if (vt && vt->tty && s) {
+        while (*s) {
+            tty_flip_buffer_push(vt->tty, *s++);
+        }
+    }
+}
+
 static const struct ansi_callbacks ansi_cb = {
     .putc = cb_putc,
     .set_color = cb_set_color,
@@ -1060,6 +1069,7 @@ static const struct ansi_callbacks ansi_cb = {
     .set_origin_mode = cb_set_origin_mode,
     .set_alt_screen = cb_set_alt_screen,
     .set_bracketed_paste = cb_set_bracketed_paste,
+    .respond = cb_respond,
 };
 
 static int vt_tty_open(struct tty *tty) {

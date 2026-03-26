@@ -58,6 +58,7 @@ struct ansi_callbacks {
     void (*set_origin_mode)(int on);   /* DECOM */
     void (*set_alt_screen)(int on);    /* alt screen buffer (47/1047/1049) */
     void (*set_bracketed_paste)(int on); /* DECSET 2004 */
+    void (*respond)(const char *s);    /* respond to terminal queries (DA, DSR, etc.) */
 };
 
 /* Attribute flags for set_attrs callback */

@@ -336,7 +336,10 @@ static void handle_csi(struct ansi_ctx *ctx, char c,
         break;
 
     case 'c': /* DA - Device Attributes */
-        /* TODO: Respond with terminal type */
+        if (!ctx->private_mode && (ctx->param_count == 0 || ctx->params[0] == 0)) {
+            if (cb->respond)
+                cb->respond("\x1b[?6c");
+        }
         break;
     }
 }

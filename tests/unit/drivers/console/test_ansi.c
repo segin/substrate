@@ -15,6 +15,8 @@ static int mock_last_erase_display_mode = -1;
 static int mock_erase_line_calls = 0;
 static int mock_last_erase_line_mode = -1;
 static int mock_move_cursor_calls = 0;
+static int mock_respond_calls = 0;
+static char mock_respond_buf[1024];
 static int mock_row = 0;
 static int mock_col = 0;
 static int mock_width = 80;
@@ -67,6 +69,11 @@ static void mock_get_color(uint8_t *fg, uint8_t *bg) {
     *bg = mock_bg;
 }
 
+static void mock_respond(const char *s) {
+    mock_respond_calls++;
+    strncpy(mock_respond_buf, s, sizeof(mock_respond_buf) - 1);
+}
+
 static struct ansi_callbacks callbacks = {
     .putc = mock_putc,
     .set_color = mock_set_color,
@@ -77,7 +84,8 @@ static struct ansi_callbacks callbacks = {
     .get_cursor = mock_get_cursor,
     .get_dimensions = mock_get_dimensions,
     .get_color = mock_get_color,
-    .scroll = NULL
+    .scroll = NULL,
+    .respond = mock_respond
 };
 
 static void reset_mocks(void) {
@@ -92,6 +100,8 @@ static void reset_mocks(void) {
     mock_erase_line_calls = 0;
     mock_last_erase_line_mode = -1;
     mock_move_cursor_calls = 0;
+    mock_respond_calls = 0;
+    mock_respond_buf[0] = '\0';
     mock_row = 0;
     mock_col = 0;
     mock_width = 80;
@@ -196,6 +206,19 @@ bool test_ansi_parsing(void) {
     if (mock_erase_line_calls != 1 || mock_last_erase_line_mode != 2) {
         printf("FAIL: Erase line expected one mode-2 call, got %d mode %d\n",
                mock_erase_line_calls, mock_last_erase_line_mode);
+        return false;
+    }
+
+    // Test 8: Device Attributes response -> \x1b[c
+    reset_mocks();
+    ansi_init(&ctx);
+    feed_string(&ctx, "\x1b[c");
+    if (mock_respond_calls != 1) {
+        printf("FAIL: DA response calls expected 1, got %d\n", mock_respond_calls);
+        return false;
+    }
+    if (strcmp(mock_respond_buf, "\x1b[?6c") != 0) {
+        printf("FAIL: DA response expected '\\x1b[?6c', got '%s'\n", mock_respond_buf);
         return false;
     }
 
