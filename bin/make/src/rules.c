@@ -18,9 +18,10 @@ int doname(struct nameblock *p, int reclevel, TIMETYPE *tval) {
         // No rules. Source file?
         if (ptime == 0) {
             // Try implicit rule .c.o
-            char srcname[256];
             size_t nlen = strlen(p->namep);
             if (nlen > 2 && strcmp(p->namep + nlen - 2, ".o") == 0) {
+                char *srcname = malloc(nlen + 1);
+                if (!srcname) fatal("malloc failed for srcname in rules.c");
                 strcpy(srcname, p->namep);
                 strcpy(srcname + nlen - 2, ".c");
                 if (exists(srcname)) {
@@ -31,14 +32,19 @@ int doname(struct nameblock *p, int reclevel, TIMETYPE *tval) {
                     if (td > truedate) truedate = td;
                     
                     // Execute default CC command
-                    char cmd[512];
-                    sprintf(cmd, "cc -c %s -o %s", srcname, p->namep);
+                    size_t cmd_len = nlen + nlen + 20;
+                    char *cmd = malloc(cmd_len);
+                    if (!cmd) fatal("malloc failed for cmd in rules.c");
+                    snprintf(cmd, cmd_len, "cc -c %s -o %s", srcname, p->namep);
                     dosys(cmd, 0);
+                    free(cmd);
+                    free(srcname);
                     *tval = time(NULL);
                     p->done = 2;
                     p->modtime = *tval;
                     return 0;
                 }
+                free(srcname);
             }
             if (keepgoing) return 1;
             fatal1("Don't know how to make %s", p->namep);
