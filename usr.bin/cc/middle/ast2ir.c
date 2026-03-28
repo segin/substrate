@@ -1987,6 +1987,7 @@ typedef enum {
     BUILTIN_MEMMOVE,
     BUILTIN_MEMSET,
     BUILTIN_PREFETCH,
+    BUILTIN_CPU_SUPPORTS,
     BUILTIN_STRLEN,
     BUILTIN_MEMCPY_CHK,
     BUILTIN_MEMMOVE_CHK,
@@ -2109,6 +2110,9 @@ static builtin_kind_t builtin_kind(const char *name) {
     }
     if (strcmp(name, "__builtin_prefetch") == 0) {
         return BUILTIN_PREFETCH;
+    }
+    if (strcmp(name, "__builtin_cpu_supports") == 0) {
+        return BUILTIN_CPU_SUPPORTS;
     }
     if (strcmp(name, "__builtin_strlen") == 0) {
         return BUILTIN_STRLEN;
@@ -5531,6 +5535,22 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 }
                 (void)v;
             }
+            return emit_const_i64_instr(sf, 0);
+        }
+        if (bk == BUILTIN_CPU_SUPPORTS) {
+            if (e->arg_count != 1 || e->args[0] == NULL) {
+                set_diag(diag, "__builtin_cpu_supports lowering expects 1 argument");
+                return -1;
+            }
+            if (e->args[0]->kind != CC_EXPR_STR) {
+                set_diag(diag, "__builtin_cpu_supports lowering expects a string literal");
+                return -1;
+            }
+            /*
+             * Conservative fallback until full runtime CPU dispatch is wired:
+             * report feature probes as unavailable rather than miscompile by
+             * claiming unsupported ISA at runtime.
+             */
             return emit_const_i64_instr(sf, 0);
         }
         if (bk == BUILTIN_CLZ || bk == BUILTIN_CTZ || bk == BUILTIN_FFS) {
@@ -12370,6 +12390,8 @@ static int expr_uses_va_arg_pack(const cc_expr_t *e) {
     return 0;
 }
 static int should_skip_fn_body_for_codegen(const cc_translation_unit_t *tu, const cc_function_t *f) {
+    size_t i;
+
     (void)tu;
     if (f == NULL || !f->has_body) {
         return 1;

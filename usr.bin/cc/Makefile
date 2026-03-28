@@ -42,3 +42,5 @@ install: $(PROGS)
 	install -D ir-verifier $(DESTDIR)/usr/bin/ir-verifier
 	install -D ir-normalize $(DESTDIR)/usr/bin/ir-normalize
 	install -D ir-diff $(DESTDIR)/usr/bin/ir-diff
+	install -d $(DESTDIR)/usr/lib/substratecc/include
+	install -m 644 resource/include/*.h $(DESTDIR)/usr/lib/substratecc/include/

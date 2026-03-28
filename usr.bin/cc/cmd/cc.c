@@ -482,6 +482,52 @@ static int add_gcc_system_includes(cc_opts_t *o) {
   return 0;
 }
 
+static int add_builtin_resource_includes(cc_opts_t *o) {
+  char path[PATH_MAX];
+  char self_buf[PATH_MAX];
+  const char *self;
+  const char *slash;
+  size_t dirlen;
+
+  if (o == NULL || o->nostdinc || strvec_has_flag(&o->cpp_flags, "-nostdinc") ||
+      o->self_path == NULL || o->self_path[0] == '\0') {
+    return 0;
+  }
+
+  self = o->self_path;
+  if (strchr(self, '/') == NULL) {
+    ssize_t n = readlink("/proc/self/exe", self_buf, sizeof(self_buf) - 1);
+    if (n > 0) {
+      self_buf[n] = '\0';
+      self = self_buf;
+    }
+  }
+  slash = strrchr(self, '/');
+  if (slash == NULL) {
+    return 0;
+  }
+  dirlen = (size_t)(slash - self);
+
+  if (snprintf(path, sizeof(path), "%.*s/resource/include", (int)dirlen, self) > 0 &&
+      access(path, R_OK | X_OK) == 0) {
+    if (!strvec_contains(&o->cpp_flags, path) &&
+        (strvec_push(&o->cpp_flags, "-isystem") != 0 || strvec_push(&o->cpp_flags, path) != 0)) {
+      return -1;
+    }
+    return 0;
+  }
+
+  if (snprintf(path, sizeof(path), "%.*s/../lib/substratecc/include", (int)dirlen, self) > 0 &&
+      access(path, R_OK | X_OK) == 0) {
+    if (!strvec_contains(&o->cpp_flags, path) &&
+        (strvec_push(&o->cpp_flags, "-isystem") != 0 || strvec_push(&o->cpp_flags, path) != 0)) {
+      return -1;
+    }
+  }
+
+  return 0;
+}
+
 static int make_temp_path(cc_opts_t *o, const char *prefix, const char *suffix,
                           char out[PATH_MAX]) {
   char *templ = NULL;
@@ -1838,6 +1884,10 @@ int cc_main(int argc, char **argv) {
     goto out;
   }
 
+  if (add_builtin_resource_includes(&o) != 0) {
+    fprintf(stderr, "cc: failed to add builtin include paths\n");
+    goto out;
+  }
   if (add_gcc_system_includes(&o) != 0) {
     fprintf(stderr, "cc: failed to add gcc include paths\n");
     goto out;
