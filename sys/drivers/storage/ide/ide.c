@@ -1434,6 +1434,18 @@ int ide_standby_immediate(uint16_t bus, uint8_t drive) {
                                       "standby-immediate");
 }
 
+int ide_idle_immediate(uint16_t bus, uint8_t drive) {
+    uint8_t channel;
+
+    if (ide_channel_index_from_io(bus, &channel) < 0) {
+        return -1;
+    }
+
+    return ide_issue_non_data_command(channel, drive,
+                                      ATA_CMD_IDLE_IMMEDIATE,
+                                      "idle-immediate");
+}
+
 /*
  * ============================================================
  * ATAPI Packet Command Interface

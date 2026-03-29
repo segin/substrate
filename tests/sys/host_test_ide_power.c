@@ -213,6 +213,23 @@ static void test_standby_immediate_primary_master(void) {
     assert(last_command_value == ATA_CMD_STANDBY_IMMEDIATE);
 }
 
+static void test_idle_immediate_primary_slave(void) {
+    int rc;
+
+    reset_state();
+    ide_channels[0].io_base = ATA_PRIMARY_IO;
+    ide_channels[0].ctrl_base = ATA_PRIMARY_CTRL;
+    mock_io[ATA_PRIMARY_IO + ATA_REG_STATUS] = ATA_SR_DRDY;
+    mock_io[ATA_PRIMARY_CTRL + ATA_REG_ALTSTATUS] = ATA_SR_DRDY;
+
+    rc = ide_idle_immediate(ATA_PRIMARY_IO, 1);
+    assert(rc == 0);
+    assert(last_device_port == ATA_PRIMARY_IO + ATA_REG_DEVICE);
+    assert(last_device_value == 0xB0);
+    assert(last_command_port == ATA_PRIMARY_IO + ATA_REG_COMMAND);
+    assert(last_command_value == ATA_CMD_IDLE_IMMEDIATE);
+}
+
 static void test_standby_immediate_rejects_unknown_bus(void) {
     reset_state();
     assert(ide_standby_immediate(0x1234, 0) < 0);
@@ -229,6 +246,7 @@ static void test_standby_immediate_rejects_absent_device(void) {
 
 int main(void) {
     test_standby_immediate_primary_master();
+    test_idle_immediate_primary_slave();
     test_standby_immediate_rejects_unknown_bus();
     test_standby_immediate_rejects_absent_device();
     puts("host_test_ide_power: PASS");

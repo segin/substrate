@@ -88,6 +88,7 @@
 
 /* Power Management */
 #define ATA_CMD_STANDBY_IMMEDIATE 0xE0 /* Standby Immediate */
+#define ATA_CMD_IDLE_IMMEDIATE    0xE1 /* Idle Immediate */
 
 /*
  * ============================================================
@@ -288,6 +289,7 @@ void ide_parse_identify_data(ide_device_t *dev, const uint16_t *buffer,
 int ide_select_dma_transfer_mode(const ide_device_t *dev, uint8_t *mode);
 size_t ide_decode_error(uint8_t error, char *buf, size_t size);
 int ide_standby_immediate(uint16_t bus, uint8_t drive);
+int ide_idle_immediate(uint16_t bus, uint8_t drive);
 
 /* ATAPI Packet Commands */
 int ide_atapi_packet(uint8_t channel, uint8_t drive, 
