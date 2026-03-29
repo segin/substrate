@@ -471,7 +471,7 @@
             - [ ] Login, discovery, full-feature phase. (REQ: REQ-03-0216)
             - [ ] PDU framing, session management. (REQ: REQ-03-0217)
 
-    - [ ] **Testing:** (REQ: REQ-03-0218, REQ-03-0317, REQ-03-0396, REQ-03-0594, REQ-03-0926, REQ-03-1120)
+    - [x] **Testing:** (REQ: REQ-03-0218, REQ-03-0317, REQ-03-0396, REQ-03-0594, REQ-03-0926, REQ-03-1120)
         - [x] **Unit Tests:** (REQ: REQ-03-0219, REQ-03-0595, REQ-03-1121)
             - [x] CDB builder correctness: verify byte layout for READ(10), WRITE(10), INQUIRY, READ CAPACITY. (REQ: REQ-03-0220)
             - [x] Sense data parsing: fixed format with all 16 sense keys. (REQ: REQ-03-0221)
