@@ -15,6 +15,9 @@ static uint8_t mock_mmio[4][64];
 static void *mock_mmio_map[4];
 static size_t mock_device_count;
 static int kprint_calls;
+static int64_t mock_time_ms;
+static int csts_read_count[4];
+static int csts_clear_after_reads[4];
 
 static void reset_state(void) {
     memset(mock_devices, 0, sizeof(mock_devices));
@@ -24,6 +27,9 @@ static void reset_state(void) {
     memset(mock_mmio_map, 0, sizeof(mock_mmio_map));
     mock_device_count = 0;
     kprint_calls = 0;
+    mock_time_ms = 0;
+    memset(csts_read_count, 0, sizeof(csts_read_count));
+    memset(csts_clear_after_reads, 0, sizeof(csts_clear_after_reads));
 }
 
 static pci_device_t *add_pci_device(uint16_t class_code, uint16_t subclass,
@@ -62,6 +68,22 @@ static size_t mock_index_for(const pci_device_t *pdev) {
     }
     assert(0 && "unknown pci device");
     return 0;
+}
+
+static int mock_mmio_index(const volatile uint8_t *mmio) {
+    size_t i;
+
+    for (i = 0; i < mock_device_count; i++) {
+        if (mock_mmio_map[i] == (const void *)mmio) {
+            return (int)i;
+        }
+    }
+    for (i = 0; i < (sizeof(mock_mmio) / sizeof(mock_mmio[0])); i++) {
+        if (mock_mmio[i] == (const uint8_t *)mmio) {
+            return (int)i;
+        }
+    }
+    return -1;
 }
 
 pci_device_t *pci_first_device(void) {
@@ -134,6 +156,30 @@ void kprint(const char *str) {
     kprint_calls++;
 }
 
+int64_t get_uptime_ms(void) {
+    return mock_time_ms++;
+}
+
+uint32_t nvme_test_mmio_read32(volatile uint8_t *mmio, uint32_t reg) {
+    int idx = mock_mmio_index(mmio);
+    uint32_t value;
+
+    memcpy(&value, (const void *)(mmio + reg), sizeof(value));
+    if (idx >= 0 && reg == NVME_REG_CSTS && (value & NVME_CSTS_RDY) != 0) {
+        csts_read_count[idx]++;
+        if (csts_clear_after_reads[idx] > 0 &&
+            csts_read_count[idx] >= csts_clear_after_reads[idx]) {
+            value &= ~NVME_CSTS_RDY;
+            memcpy((void *)(mmio + reg), &value, sizeof(value));
+        }
+    }
+    return value;
+}
+
+void nvme_test_mmio_write32(volatile uint8_t *mmio, uint32_t reg, uint32_t value) {
+    memcpy((void *)(mmio + reg), &value, sizeof(value));
+}
+
 #include "../../sys/drivers/storage/nvme/nvme.c"
 
 static void test_decode_cap_extracts_timeout_and_stride(void) {
@@ -202,10 +248,53 @@ static void test_init_publishes_scanned_controllers(void) {
     assert(ctrl->cap.timeout_ms == 2000);
 }
 
+static void test_disable_controller_clears_enable_and_waits_ready_down(void) {
+    nvme_controller_t ctrl;
+    uint32_t cc = NVME_CC_EN;
+    uint32_t csts = NVME_CSTS_RDY;
+
+    reset_state();
+    memset(&ctrl, 0, sizeof(ctrl));
+    ctrl.present = 1;
+    ctrl.mmio = mock_mmio[0];
+    ctrl.cap.timeout_ms = 5;
+    ctrl.enabled = 1;
+    memcpy(mock_mmio[0] + NVME_REG_CC, &cc, sizeof(cc));
+    memcpy(mock_mmio[0] + NVME_REG_CSTS, &csts, sizeof(csts));
+    csts_clear_after_reads[0] = 2;
+
+    assert(nvme_disable_controller(&ctrl) == 0);
+    memcpy(&cc, mock_mmio[0] + NVME_REG_CC, sizeof(cc));
+    assert((cc & NVME_CC_EN) == 0);
+    memcpy(&csts, mock_mmio[0] + NVME_REG_CSTS, sizeof(csts));
+    assert((csts & NVME_CSTS_RDY) == 0);
+    assert(ctrl.enabled == 0);
+}
+
+static void test_disable_controller_times_out_if_ready_stays_set(void) {
+    nvme_controller_t ctrl;
+    uint32_t cc = NVME_CC_EN;
+    uint32_t csts = NVME_CSTS_RDY;
+
+    reset_state();
+    memset(&ctrl, 0, sizeof(ctrl));
+    ctrl.present = 1;
+    ctrl.mmio = mock_mmio[1];
+    ctrl.cap.timeout_ms = 3;
+    memcpy(mock_mmio[1] + NVME_REG_CC, &cc, sizeof(cc));
+    memcpy(mock_mmio[1] + NVME_REG_CSTS, &csts, sizeof(csts));
+
+    assert(nvme_disable_controller(&ctrl) < 0);
+    memcpy(&cc, mock_mmio[1] + NVME_REG_CC, sizeof(cc));
+    assert((cc & NVME_CC_EN) == 0);
+}
+
 int main(void) {
     test_decode_cap_extracts_timeout_and_stride();
     test_scan_filters_nvme_functions_and_records_cap();
     test_init_publishes_scanned_controllers();
+    test_disable_controller_clears_enable_and_waits_ready_down();
+    test_disable_controller_times_out_if_ready_stays_set();
     puts("host_test_nvme: PASS");
     return 0;
 }

@@ -3,6 +3,7 @@
 #include <kern/console.h>
 #include <kern/device.h>
 #include <kern/pci.h>
+#include <kern/time.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -14,10 +15,33 @@
 static nvme_controller_t nvme_controllers[NVME_MAX_CONTROLLERS];
 static size_t nvme_controller_total;
 
+#ifdef HOST_TEST
+extern uint32_t nvme_test_mmio_read32(volatile uint8_t *mmio, uint32_t reg);
+extern void nvme_test_mmio_write32(volatile uint8_t *mmio, uint32_t reg, uint32_t value);
+#endif
+
 static uint64_t nvme_mmio_read64(volatile uint8_t *mmio, uint32_t reg) {
     volatile uint32_t *regs = (volatile uint32_t *)(mmio + reg);
 
     return (uint64_t)regs[0] | ((uint64_t)regs[1] << 32);
+}
+
+static uint32_t nvme_mmio_read32(volatile uint8_t *mmio, uint32_t reg) {
+#ifdef HOST_TEST
+    return nvme_test_mmio_read32(mmio, reg);
+#else
+    volatile uint32_t *regs = (volatile uint32_t *)(mmio + reg);
+    return regs[0];
+#endif
+}
+
+static void nvme_mmio_write32(volatile uint8_t *mmio, uint32_t reg, uint32_t value) {
+#ifdef HOST_TEST
+    nvme_test_mmio_write32(mmio, reg, value);
+#else
+    volatile uint32_t *regs = (volatile uint32_t *)(mmio + reg);
+    regs[0] = value;
+#endif
 }
 
 int nvme_decode_cap(uint64_t cap_raw, nvme_capability_t *cap) {
@@ -98,6 +122,39 @@ size_t nvme_scan_controllers(nvme_controller_t *controllers, size_t max_controll
     }
 
     return count;
+}
+
+int nvme_disable_controller(nvme_controller_t *ctrl) {
+    uint32_t cc;
+    uint64_t start_ms;
+    uint32_t timeout_ms;
+
+    if (ctrl == NULL || ctrl->mmio == NULL || !ctrl->present) {
+        return -1;
+    }
+
+    cc = nvme_mmio_read32(ctrl->mmio, NVME_REG_CC);
+    if ((cc & NVME_CC_EN) == 0) {
+        ctrl->enabled = 0;
+        return 0;
+    }
+
+    nvme_mmio_write32(ctrl->mmio, NVME_REG_CC, cc & ~NVME_CC_EN);
+    timeout_ms = ctrl->cap.timeout_ms;
+    if (timeout_ms == 0) {
+        timeout_ms = 500;
+    }
+
+    start_ms = (uint64_t)get_uptime_ms();
+    while ((nvme_mmio_read32(ctrl->mmio, NVME_REG_CSTS) & NVME_CSTS_RDY) != 0) {
+        if (((uint64_t)get_uptime_ms() - start_ms) >= timeout_ms) {
+            return -1;
+        }
+        __asm__ volatile("pause");
+    }
+
+    ctrl->enabled = 0;
+    return 0;
 }
 
 size_t nvme_controller_count(void) {
