@@ -46,6 +46,7 @@
 - Sector interface is exposed through the block-device layer
 - Driver converts `LBA <-> CHS` from the selected geometry
 - Read and write operations are DMA-backed and currently performed one sector at a time
+- Motors spin up on demand and are shut down from the periodic timer path after roughly 2.5s of inactivity
 - Error handling decodes `ST0`, `ST1`, and `ST2`
 - Recoverable failures trigger recalibrate + retry up to three attempts
 

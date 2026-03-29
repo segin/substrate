@@ -629,7 +629,7 @@
     - [ ] **Motor Control:** (REQ: REQ-03-0350)
         - [x] Motor on: set DOR motor bits (bits 4–7) for target drive. <!-- sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0351)
         - [x] Spin‑up delay: wait 300–500 ms after motor on before I/O. <!-- sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0352)
-        - [ ] Motor off timer: auto‑stop motor after 2–3 seconds of inactivity. (REQ: REQ-03-0353)
+        - [x] Motor off timer: auto‑stop motor after 2–3 seconds of inactivity. <!-- sys/drivers/storage/floppy/floppy.c, sys/kern/time.c --> (REQ: REQ-03-0353)
         - [x] Track motor state per drive to avoid redundant spin‑up. <!-- sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0354)
     - [x] **Media Types:** (REQ: REQ-03-0355)
         - [x] 3.5" HD: 1.44 MB — 80 cylinders, 2 heads, 18 sectors/track, 512 bytes/sector. <!-- sys/drivers/storage/floppy/floppy_geom.c --> (REQ: REQ-03-0356)

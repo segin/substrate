@@ -32,6 +32,7 @@
 
 #define FDC_TIMEOUT_MS 1000U
 #define FDC_MOTOR_SPINUP_MS 400U
+#define FDC_MOTOR_IDLE_MS 2500U
 #define FDC_RETRY_LIMIT 3
 #define FDC_POLL_SPINS_PER_MS 100U
 
@@ -56,6 +57,7 @@ typedef struct fdc_drive {
     uint8_t drive_select;
     uint8_t current_cylinder;
     uint8_t motor_on;
+    uint64_t last_activity_ms;
     const fdc_geometry_t *geom;
     blkdev_t bdev;
 } fdc_drive_t;
@@ -191,9 +193,11 @@ static void fdc_motor_set(fdc_drive_t *drive, int on) {
             fdc_update_dor(ctlr, drive->drive_select);
             (void)fdc_delay_ms(FDC_MOTOR_SPINUP_MS);
         }
+        drive->last_activity_ms = (uint64_t)get_uptime_ms();
     } else if ((ctlr->dor_shadow & motor_bit) != 0) {
         ctlr->dor_shadow &= (uint8_t)~motor_bit;
         drive->motor_on = 0;
+        drive->last_activity_ms = 0;
         fdc_update_dor(ctlr, drive->drive_select);
     }
 }
@@ -504,7 +508,7 @@ static int fdc_transfer_sector(fdc_drive_t *drive, uint32_t lba, uint8_t *buffer
             if (!write_to_drive) {
                 memcpy(buffer, ctlr->dma_buf, 512);
             }
-            fdc_motor_set(drive, 0);
+            drive->last_activity_ms = (uint64_t)get_uptime_ms();
             spinlock_release(&ctlr->lock);
             return 0;
         }
@@ -520,7 +524,7 @@ static int fdc_transfer_sector(fdc_drive_t *drive, uint32_t lba, uint8_t *buffer
                     chs.cylinder, chs.head, chs.sector);
         }
     }
-    fdc_motor_set(drive, 0);
+    drive->last_activity_ms = (uint64_t)get_uptime_ms();
     spinlock_release(&ctlr->lock);
     return -EIO;
 }
@@ -634,6 +638,30 @@ static const fdc_geometry_t *fdc_geometry_for_slot(uint8_t controller_index,
      * media-change handling refine this if needed.
      */
     return fdc_geometry_from_cmos(4);
+}
+
+void floppy_poll(void) {
+    uint64_t now = (uint64_t)get_uptime_ms();
+
+    for (size_t i = 0; i < FDC_MAX_DRIVES; i++) {
+        fdc_drive_t *drive = &fdc_drives[i];
+        fdc_controller_t *ctlr;
+
+        if (!drive->present || !drive->motor_on || drive->last_activity_ms == 0) {
+            continue;
+        }
+        if ((now - drive->last_activity_ms) < FDC_MOTOR_IDLE_MS) {
+            continue;
+        }
+
+        ctlr = &fdc_controllers[drive->controller_index];
+        spinlock_acquire(&ctlr->lock);
+        if (drive->motor_on && drive->last_activity_ms != 0 &&
+            (now - drive->last_activity_ms) >= FDC_MOTOR_IDLE_MS) {
+            fdc_motor_set(drive, 0);
+        }
+        spinlock_release(&ctlr->lock);
+    }
 }
 
 void floppy_init(void) {

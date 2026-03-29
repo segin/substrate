@@ -75,5 +75,6 @@ uint32_t fdc_chs_to_lba(const fdc_geometry_t *geom, uint16_t cylinder,
 int fdc_dma_window_valid(uintptr_t phys_addr, size_t len);
 
 void floppy_init(void);
+void floppy_poll(void);
 
 #endif
