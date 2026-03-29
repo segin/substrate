@@ -644,7 +644,7 @@
         - [x] SEEK command: move to target cylinder. <!-- sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0364)
         - [x] Wait for IRQ6 after seek; issue SENSE INTERRUPT to confirm. <!-- sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0365)
         - [x] Track current cylinder per drive to avoid redundant seeks. <!-- sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0366)
-    - [ ] **Read/Write Operations:** (REQ: REQ-03-0367)
+    - [x] **Read/Write Operations:** (REQ: REQ-03-0367)
         - [x] READ DATA command (MT=1, MFM=1): multi‑track read with DMA. <!-- sys/drivers/storage/floppy/floppy.c, tests/sys/test_floppy_qemu.c --> (REQ: REQ-03-0368)
         - [x] WRITE DATA command (MT=1, MFM=1): multi‑track write with DMA. <!-- sys/drivers/storage/floppy/floppy.c, tests/sys/test_floppy_qemu.c --> (REQ: REQ-03-0369)
         - [x] CHS‑to‑LBA and LBA‑to‑CHS conversion for block device interface. <!-- sys/drivers/storage/floppy/floppy_geom.c, tests/sys/host_test_floppy.c --> (REQ: REQ-03-0370)
