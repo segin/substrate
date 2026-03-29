@@ -186,6 +186,48 @@ ln_path_join(const char *left, const char *right)
 }
 
 static char *
+ln_build_normalized_path(char **segs, size_t seg_len, bool abs, size_t original_len)
+{
+    size_t out_cap;
+    char *out;
+    size_t pos;
+    size_t i;
+
+    out_cap = original_len + 4;
+    out = (char *)malloc(out_cap);
+    if (!out) {
+        return NULL;
+    }
+
+    pos = 0;
+    if (seg_len == 0) {
+        if (abs) {
+            out[pos++] = '/';
+        } else {
+            out[pos++] = '.';
+        }
+        out[pos] = '\0';
+        return out;
+    }
+
+    if (abs) {
+        out[pos++] = '/';
+    }
+
+    for (i = 0; i < seg_len; ++i) {
+        size_t slen = strlen(segs[i]);
+        if (i > 0) {
+            out[pos++] = '/';
+        }
+        memcpy(out + pos, segs[i], slen);
+        pos += slen;
+    }
+    out[pos] = '\0';
+
+    return out;
+}
+
+static char *
 ln_path_normalize_copy(const char *path)
 {
     size_t len;
@@ -196,10 +238,7 @@ ln_path_normalize_copy(const char *path)
     char **segs;
     size_t seg_cap;
     size_t seg_len;
-    size_t out_cap;
     char *out;
-    size_t pos;
-    size_t i;
 
     if (!path) {
         errno = EINVAL;
@@ -246,40 +285,7 @@ ln_path_normalize_copy(const char *path)
         tok = strtok_r(NULL, "/", &saveptr);
     }
 
-    out_cap = len + 4;
-    out = (char *)malloc(out_cap);
-    if (!out) {
-        free(segs);
-        free(tmp);
-        return NULL;
-    }
-
-    pos = 0;
-    if (seg_len == 0) {
-        if (abs) {
-            out[pos++] = '/';
-        } else {
-            out[pos++] = '.';
-        }
-        out[pos] = '\0';
-        free(segs);
-        free(tmp);
-        return out;
-    }
-
-    if (abs) {
-        out[pos++] = '/';
-    }
-
-    for (i = 0; i < seg_len; ++i) {
-        size_t slen = strlen(segs[i]);
-        if (i > 0) {
-            out[pos++] = '/';
-        }
-        memcpy(out + pos, segs[i], slen);
-        pos += slen;
-    }
-    out[pos] = '\0';
+    out = ln_build_normalized_path(segs, seg_len, abs, len);
 
     free(segs);
     free(tmp);
