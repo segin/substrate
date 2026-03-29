@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
@@ -8,6 +9,7 @@
 #include <sys/select.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include "el.h"
 
 /* Forward declarations for functions used before their definitions */
@@ -2391,7 +2393,6 @@ static unsigned char vi_search_prev_action(EditLine *el, int c) {
 static unsigned char vi_edit_external(EditLine *el, int c) {
     const char *editor;
     char *tmpfile;
-    char *cmd;
     FILE *fp;
     char buf[4096];
     size_t nread;
@@ -2420,14 +2421,85 @@ static unsigned char vi_edit_external(EditLine *el, int c) {
     (void)write(fd, el->line.buffer, el->line.len);
     close(fd);
 
-    if (asprintf(&cmd, "%s %s", editor, tmpfile) < 0) {
-        unlink(tmpfile);
-        free(tmpfile);
-        terminal_set_raw(el);
-        return CC_NORM;
+    {
+        pid_t pid;
+        int status;
+
+        pid = fork();
+        if (pid < 0) {
+            unlink(tmpfile);
+            free(tmpfile);
+            terminal_set_raw(el);
+            return CC_NORM;
+        } else if (pid == 0) {
+            char *editor_copy;
+            char *args[32];
+            char *p;
+            int argc = 0;
+            int in_squote = 0;
+            int in_dquote = 0;
+
+            if (setgid(getgid()) < 0) exit(127);
+            if (setuid(getuid()) < 0) exit(127);
+
+            editor_copy = strdup(editor);
+            if (!editor_copy) exit(127);
+
+            p = editor_copy;
+            while (*p && argc < 30) {
+                while (*p && isspace((unsigned char)*p)) p++;
+                if (!*p) break;
+
+                args[argc++] = p;
+
+                while (*p) {
+                    if (*p == '\'' && !in_dquote) {
+                        in_squote = !in_squote;
+                        memmove(p, p + 1, strlen(p));
+                        continue;
+                    } else if (*p == '"' && !in_squote) {
+                        in_dquote = !in_dquote;
+                        memmove(p, p + 1, strlen(p));
+                        continue;
+                    } else if (isspace((unsigned char)*p) && !in_squote && !in_dquote) {
+                        *p++ = '\0';
+                        break;
+                    }
+                    p++;
+                }
+            }
+            args[argc++] = tmpfile;
+            args[argc] = NULL;
+
+            execvp(args[0], args);
+            exit(127);
+        } else {
+            struct sigaction intact, quitact;
+            struct sigaction ign;
+            sigset_t newsigblock, oldsigblock;
+
+            ign.sa_handler = SIG_IGN;
+            sigemptyset(&ign.sa_mask);
+            ign.sa_flags = 0;
+            sigaction(SIGINT, &ign, &intact);
+            sigaction(SIGQUIT, &ign, &quitact);
+
+            sigemptyset(&newsigblock);
+            sigaddset(&newsigblock, SIGCHLD);
+            sigprocmask(SIG_BLOCK, &newsigblock, &oldsigblock);
+
+            while (waitpid(pid, &status, 0) < 0) {
+                if (errno != EINTR) {
+                    status = -1;
+                    break;
+                }
+            }
+
+            sigaction(SIGINT, &intact, NULL);
+            sigaction(SIGQUIT, &quitact, NULL);
+            sigprocmask(SIG_SETMASK, &oldsigblock, NULL);
+        }
     }
-    (void)system(cmd);
-    free(cmd);
 
     fp = fopen(tmpfile, "r");
     if (fp) {
