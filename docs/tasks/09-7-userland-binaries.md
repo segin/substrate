@@ -2092,6 +2092,13 @@
 - [ ] Investigate duplicate thread creation (PID 1 has TID 1 & 2) <!-- id: 8 --> (REQ: REQ-09-2083)
 - [ ] Investigate Page Fault at `0x08065d2b` (accessing `0x08124000`) <!-- id: 9 --> (REQ: REQ-09-2084)
     - [ ] **Editors:** (REQ: REQ-09-2085)
+        - Note: `ex`/`vi` are now tracked as a shared-core editor subsystem. See `docs/specs/exvi.md` and `ARCHITECTURE.md`. The existing "tiny clone" wording below should be read as obsolete implementation direction and migrated toward a shared `ex`/`vi` core with thin frontends.
+        - [ ] **Shared `ex`/`vi` Direction:**
+            - [ ] Create `usr.lib/exvi/` as the reusable shared editor core outside `bin/ex` and `bin/vi`.
+            - [ ] Reduce `bin/ex` to a line-mode frontend over the shared core.
+            - [ ] Replace the `bin/vi` stub with a real visual frontend over the shared core.
+            - [ ] Reuse `lib/edit` only for low-level terminal, input, prompt, and UTF-8 helpers.
+            - [ ] Add PTY integration tests and `ex(1)`/`vi(1)` manpages as the editor stack lands.
         - [ ] **`vi` Clone (Tiny/Busybox-like):** (REQ: REQ-09-2086)
             - [ ] **Buffer Management:** (REQ: REQ-09-2087)
                 - [ ] Gap buffer or Line-based linked list structure. (REQ: REQ-09-2088)

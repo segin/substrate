@@ -93,8 +93,19 @@ Userland is split by role (essential, admin, extended) and supported by a suite 
 
 ### Key Components
 - **`libsys`:** The canonical typed interface for system introspection and control.
+- **`ex`/`vi` Editor Stack:** The base editors are first-class userland programs in `bin/`, but they are not treated as independent implementations. The architectural direction is a shared editor core plus thin `bin/ex` and `bin/vi` frontends so ex command semantics, buffer state, undo, regex/search, and recovery do not drift across modes.
+- **`lib/edit`:** `lib/edit` remains the command-line editing and history library for shells and prompts. Its raw-mode, terminal capability, key decoding, history, and UTF-8/display-width helpers may be reused by the editor stack, but its line-editor vi mode is not the full-screen `vi` implementation.
 - **`find(1)`:** A multi-dialect file hierarchy walker. See `docs/find/architecture.md`.
 - **Native Toolchain:** Integrated compiler, assembler, and linker. See `docs/specs/as_spec.md`.
+
+### Editor Architecture
+
+The `ex`/`vi` subsystem is converging on three layers:
+- **Frontend binaries:** `bin/ex` for line-oriented ex mode and `bin/vi` for visual mode selection and terminal session startup.
+- **Shared editor core:** common buffer model, address and command parsing, file and recovery handling, marks/registers, options, tags, undo/redo, and regex-backed search/substitute logic. This shared core is intended to live in `usr.lib/exvi/` rather than inside the frontend `main()` files.
+- **Visual screen engine:** a full-screen terminal layer for `vi` with its own window/cursor/screen-diff model. It may reuse low-level helpers from `lib/edit`, but it is not built by extending `lib/edit`'s single-line vi state machine.
+
+This split keeps POSIX `ex` behavior and `vi` colon-command behavior aligned while preserving a clean separation between command language, buffer mechanics, and terminal presentation. Detailed editor design notes live in `docs/specs/exvi.md`.
 
 ## 7. ABI and Interface Boundaries
 
