@@ -27,6 +27,7 @@
 #define NVME_ADMIN_CQ_ENTRY_SIZE     16U
 #define NVME_ADMIN_SQ_ENTRY_EXP      6U
 #define NVME_ADMIN_CQ_ENTRY_EXP      4U
+#define NVME_MAX_NAMESPACES          16U
 
 typedef struct nvme_capability {
     uint16_t mqes;
@@ -35,6 +36,16 @@ typedef struct nvme_capability {
     uint32_t timeout_ms;
     uint32_t doorbell_stride_bytes;
 } nvme_capability_t;
+
+typedef struct nvme_namespace {
+    uint32_t nsid;
+    uint64_t nsze;
+    uint64_t ncap;
+    uint64_t nuse;
+    uint32_t block_size;
+    uint8_t lba_shift;
+    uint8_t valid;
+} nvme_namespace_t;
 
 typedef struct nvme_controller {
     uint8_t bus;
@@ -61,6 +72,9 @@ typedef struct nvme_controller {
     uint8_t admin_cq_phase;
     uint8_t identify_valid;
     uint16_t controller_id;
+    uint32_t namespace_count;
+    uint32_t namespace_total;
+    nvme_namespace_t namespaces[NVME_MAX_NAMESPACES];
     char serial[21];
     char model[41];
     char firmware[9];
@@ -76,6 +90,7 @@ int nvme_configure_admin_queue_attrs(nvme_controller_t *ctrl,
 int nvme_create_admin_queues(nvme_controller_t *ctrl);
 int nvme_enable_controller(nvme_controller_t *ctrl);
 int nvme_identify_controller(nvme_controller_t *ctrl);
+int nvme_identify_namespaces(nvme_controller_t *ctrl);
 size_t nvme_controller_count(void);
 const nvme_controller_t *nvme_get_controller(size_t index);
 

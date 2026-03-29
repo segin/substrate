@@ -23,6 +23,7 @@ static int csts_set_after_reads[4];
 static uintptr_t mock_dma_next;
 static int dma_alloc_fail_after;
 static uint8_t identify_data[4][4096];
+static uint8_t namespace_identify_data[4][NVME_MAX_NAMESPACES][4096];
 static uint16_t admin_status_code[4];
 static int admin_completion_seen[4];
 static void *mock_dma_ptrs[32];
@@ -42,6 +43,7 @@ static void reset_state(void) {
     memset(csts_clear_after_reads, 0, sizeof(csts_clear_after_reads));
     memset(csts_set_after_reads, 0, sizeof(csts_set_after_reads));
     memset(identify_data, ' ', sizeof(identify_data));
+    memset(namespace_identify_data, 0, sizeof(namespace_identify_data));
     memset(admin_status_code, 0, sizeof(admin_status_code));
     memset(admin_completion_seen, 0, sizeof(admin_completion_seen));
     memset(mock_dma_ptrs, 0, sizeof(mock_dma_ptrs));
@@ -285,6 +287,14 @@ void nvme_test_admin_kick(nvme_controller_t *ctrl, uint16_t sq_tail) {
                                             sizeof(identify_data[idx]));
         assert(id_buf != NULL);
         memcpy(id_buf, identify_data[idx], sizeof(identify_data[idx]));
+    } else if (cmd->opcode == NVME_ADMIN_OP_IDENTIFY &&
+               cmd->cdw10 == NVME_IDENTIFY_CNS_NAMESPACE) {
+        assert(cmd->nsid > 0 && cmd->nsid <= NVME_MAX_NAMESPACES);
+        id_buf = (uint8_t *)mock_dma_lookup((dma_addr_t)cmd->prp1,
+                                            sizeof(namespace_identify_data[idx][0]));
+        assert(id_buf != NULL);
+        memcpy(id_buf, namespace_identify_data[idx][cmd->nsid - 1],
+               sizeof(namespace_identify_data[idx][0]));
     }
 
     memset(&cq[ctrl->admin_cq_head], 0, sizeof(cq[0]));
@@ -565,11 +575,16 @@ static void test_identify_controller_submits_admin_command_and_parses_strings(vo
     memcpy(identify_data[0] + 64, "1.0A    ", 8);
     identify_data[0][78] = 0x34;
     identify_data[0][79] = 0x12;
+    identify_data[0][516] = 0x02;
+    identify_data[0][517] = 0x00;
+    identify_data[0][518] = 0x00;
+    identify_data[0][519] = 0x00;
 
     assert(nvme_identify_controller(&ctrl) == 0);
     assert(admin_completion_seen[0] == 1);
     assert(ctrl.identify_valid == 1);
     assert(ctrl.controller_id == 0x1234);
+    assert(ctrl.namespace_total == 2);
     assert(strcmp(ctrl.serial, "SUBSTRATE-NVME-0001") == 0);
     assert(strcmp(ctrl.model, "Substrate Test NVMe Controller") == 0);
     assert(strcmp(ctrl.firmware, "1.0A") == 0);
@@ -600,6 +615,71 @@ static void test_identify_controller_fails_on_admin_error_status(void) {
     dma_free_coherent(ctrl.admin_cq, ctrl.admin_cq_bytes);
 }
 
+static void test_identify_namespaces_discovers_active_nsids(void) {
+    nvme_controller_t ctrl;
+
+    reset_state();
+    memset(&ctrl, 0, sizeof(ctrl));
+    ctrl.present = 1;
+    ctrl.mmio = mock_mmio[0];
+    ctrl.identify_valid = 1;
+    ctrl.namespace_total = 3;
+    ctrl.cap.timeout_ms = 5;
+    ctrl.cap.doorbell_stride_bytes = 4;
+    ctrl.admin_sq_entries = 4;
+    ctrl.admin_cq_entries = 4;
+
+    assert(nvme_create_admin_queues(&ctrl) == 0);
+    ctrl.enabled = 1;
+
+    namespace_identify_data[0][0][0] = 0x00;
+    namespace_identify_data[0][0][1] = 0x10;
+    namespace_identify_data[0][0][8] = 0x00;
+    namespace_identify_data[0][0][9] = 0x10;
+    namespace_identify_data[0][0][16] = 0x00;
+    namespace_identify_data[0][0][17] = 0x08;
+    namespace_identify_data[0][0][26] = 0x00;
+    namespace_identify_data[0][0][128 + 2] = 12;
+
+    namespace_identify_data[0][1][0] = 0x00;
+
+    namespace_identify_data[0][2][0] = 0x34;
+    namespace_identify_data[0][2][1] = 0x12;
+    namespace_identify_data[0][2][8] = 0x00;
+    namespace_identify_data[0][2][16] = 0x78;
+    namespace_identify_data[0][2][26] = 0x00;
+    namespace_identify_data[0][2][128 + 2] = 9;
+
+    assert(nvme_identify_namespaces(&ctrl) == 0);
+    assert(ctrl.namespace_count == 2);
+    assert(ctrl.namespaces[0].valid == 1);
+    assert(ctrl.namespaces[0].nsid == 1);
+    assert(ctrl.namespaces[0].nsze == 0x1000);
+    assert(ctrl.namespaces[0].ncap == 0x1000);
+    assert(ctrl.namespaces[0].nuse == 0x0800);
+    assert(ctrl.namespaces[0].block_size == 4096);
+    assert(ctrl.namespaces[1].valid == 1);
+    assert(ctrl.namespaces[1].nsid == 3);
+    assert(ctrl.namespaces[1].nsze == 0x1234);
+    assert(ctrl.namespaces[1].nuse == 0x78);
+    assert(ctrl.namespaces[1].block_size == 512);
+    assert(admin_completion_seen[0] == 3);
+
+    dma_free_coherent(ctrl.admin_sq, ctrl.admin_sq_bytes);
+    dma_free_coherent(ctrl.admin_cq, ctrl.admin_cq_bytes);
+}
+
+static void test_identify_namespaces_requires_controller_identify(void) {
+    nvme_controller_t ctrl;
+
+    reset_state();
+    memset(&ctrl, 0, sizeof(ctrl));
+    ctrl.present = 1;
+    ctrl.mmio = mock_mmio[1];
+
+    assert(nvme_identify_namespaces(&ctrl) < 0);
+}
+
 int main(void) {
     test_decode_cap_extracts_timeout_and_stride();
     test_scan_filters_nvme_functions_and_records_cap();
@@ -616,6 +696,8 @@ int main(void) {
     test_enable_controller_times_out_if_ready_never_sets();
     test_identify_controller_submits_admin_command_and_parses_strings();
     test_identify_controller_fails_on_admin_error_status();
+    test_identify_namespaces_discovers_active_nsids();
+    test_identify_namespaces_requires_controller_identify();
     puts("host_test_nvme: PASS");
     return 0;
 }
