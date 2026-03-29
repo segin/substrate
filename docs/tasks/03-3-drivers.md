@@ -702,7 +702,7 @@
         - [x] Issue commands via Command Issue (CI) bitmask. (REQ: REQ-03-0420)
         - [x] Handle completion interrupts. (REQ: REQ-03-0421)
 - [ ] **NVMe:** (REQ: REQ-03-0422)
-    - [ ] **Controller Initialization:** (REQ: REQ-03-0423)
+    - [x] **Controller Initialization:** (REQ: REQ-03-0423)
         - [x] Check CAP (Capabilities) register (Timeout, Doorbell stride). <!-- sys/drivers/storage/nvme/nvme.c, nvme.h, tests/sys/host_test_nvme.c --> (REQ: REQ-03-0424)
         - [x] Disable Controller (CC.EN = 0) and wait for CSTS.RDY = 0. <!-- sys/drivers/storage/nvme/nvme.c, nvme.h, tests/sys/host_test_nvme.c --> (REQ: REQ-03-0425)
         - [x] Configure Admin Queue Attributes (AQA). <!-- sys/drivers/storage/nvme/nvme.c, nvme.h, tests/sys/host_test_nvme.c --> (REQ: REQ-03-0426)
