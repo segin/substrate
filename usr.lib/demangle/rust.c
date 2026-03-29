@@ -50,6 +50,7 @@ static int rust_buf_appendc(rust_buf_t *buf, char ch);
 static int rust_buf_insert(rust_buf_t *buf, size_t off, const char *s, size_t n);
 static char *rust_buf_take(rust_buf_t *buf);
 static void rust_buf_destroy(rust_buf_t *buf);
+static int rust_buf_append_base10(rust_buf_t *buf, size_t v);
 
 static int rust_parser_init(rust_parser_t *p, const char *mangled, int options);
 static void rust_parser_destroy(rust_parser_t *p);
@@ -187,6 +188,29 @@ static void
 rust_buf_destroy(rust_buf_t *buf)
 {
     demangle_buf_destroy(buf);
+}
+
+static int
+rust_buf_append_base10(rust_buf_t *buf, size_t v)
+{
+    char numbuf[32];
+    size_t n = 0u;
+
+    if (v == 0u) {
+        numbuf[n++] = '0';
+    } else {
+        char rev[32];
+        size_t r = 0u;
+        while (v > 0u && r < sizeof(rev)) {
+            rev[r++] = (char)('0' + (v % 10u));
+            v /= 10u;
+        }
+        while (r > 0u) {
+            numbuf[n++] = rev[--r];
+        }
+    }
+
+    return rust_buf_append(buf, numbuf, n);
 }
 
 static int
@@ -418,27 +442,8 @@ rust_parse_optional_disambiguator(rust_parser_t *p, int *present, size_t *value)
         if (rust_buf_append(&p->out, "{s", 2u) != 0) {
             return -1;
         }
-        {
-            char numbuf[32];
-            size_t n = 0u;
-            size_t v = tmp;
-
-            if (v == 0u) {
-                numbuf[n++] = '0';
-            } else {
-                char rev[32];
-                size_t r = 0u;
-                while (v > 0u && r < sizeof(rev)) {
-                    rev[r++] = (char)('0' + (v % 10u));
-                    v /= 10u;
-                }
-                while (r > 0u) {
-                    numbuf[n++] = rev[--r];
-                }
-            }
-            if (rust_buf_append(&p->out, numbuf, n) != 0) {
-                return -1;
-            }
+        if (rust_buf_append_base10(&p->out, tmp) != 0) {
+            return -1;
         }
         if (rust_buf_appendc(&p->out, '}') != 0) {
             return -1;
@@ -1316,29 +1321,11 @@ rust_parse_v0_path(rust_parser_t *p)
                     rust_parser_leave(p);
                     return -1;
                 }
-                {
-                    char numbuf[32];
-                    size_t n = 0u;
-                    size_t v = has_dis ? dis_val : 0u;
-                    if (v == 0u) {
-                        numbuf[n++] = '0';
-                    } else {
-                        char rev[32];
-                        size_t r = 0u;
-                        while (v > 0u && r < sizeof(rev)) {
-                            rev[r++] = (char)('0' + (v % 10u));
-                            v /= 10u;
-                        }
-                        while (r > 0u) {
-                            numbuf[n++] = rev[--r];
-                        }
-                    }
-                    if (rust_buf_append(&p->out, numbuf, n) != 0 ||
-                        rust_buf_appendc(&p->out, '}') != 0) {
-                        rust_mark_restore(p, &m);
-                        rust_parser_leave(p);
-                        return -1;
-                    }
+                if (rust_buf_append_base10(&p->out, has_dis ? dis_val : 0u) != 0 ||
+                    rust_buf_appendc(&p->out, '}') != 0) {
+                    rust_mark_restore(p, &m);
+                    rust_parser_leave(p);
+                    return -1;
                 }
             } else if (rust_ident_contains(p->out.data + ident_off, ident_len, "shim") ||
                        rust_ident_contains(p->out.data + ident_off, ident_len, "vtable")) {
@@ -1349,29 +1336,11 @@ rust_parse_v0_path(rust_parser_t *p)
                     rust_parser_leave(p);
                     return -1;
                 }
-                {
-                    char numbuf[32];
-                    size_t n = 0u;
-                    size_t v = has_dis ? dis_val : 0u;
-                    if (v == 0u) {
-                        numbuf[n++] = '0';
-                    } else {
-                        char rev[32];
-                        size_t r = 0u;
-                        while (v > 0u && r < sizeof(rev)) {
-                            rev[r++] = (char)('0' + (v % 10u));
-                            v /= 10u;
-                        }
-                        while (r > 0u) {
-                            numbuf[n++] = rev[--r];
-                        }
-                    }
-                    if (rust_buf_append(&p->out, numbuf, n) != 0 ||
-                        rust_buf_appendc(&p->out, '}') != 0) {
-                        rust_mark_restore(p, &m);
-                        rust_parser_leave(p);
-                        return -1;
-                    }
+                if (rust_buf_append_base10(&p->out, has_dis ? dis_val : 0u) != 0 ||
+                    rust_buf_appendc(&p->out, '}') != 0) {
+                    rust_mark_restore(p, &m);
+                    rust_parser_leave(p);
+                    return -1;
                 }
             } else {
                 if (rust_buf_insert(&p->out, ident_off, "{", 1u) != 0 ||
