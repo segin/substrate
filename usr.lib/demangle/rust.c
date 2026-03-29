@@ -75,6 +75,7 @@ static int rust_parse_v0_path(rust_parser_t *p);
 
 static int rust_parse_v0_symbol(rust_parser_t *p);
 static char *rust_demangle_v0(const char *mangled, int options);
+static int rust_legacy_process_component(const char *part, size_t len, int is_first, rust_buf_t *out);
 static char *rust_demangle_legacy(const char *mangled, int options);
 static int rust_parse_decimal_span(const char **cur, size_t *out);
 static int rust_legacy_is_hash_component(const char *s, size_t len);
@@ -1671,6 +1672,18 @@ rust_legacy_decode_component(const char *s, size_t len, rust_buf_t *out)
     return 0;
 }
 
+static int
+rust_legacy_process_component(const char *part, size_t len, int is_first, rust_buf_t *out)
+{
+    if (!is_first && rust_buf_append(out, "::", 2u) != 0) {
+        return -1;
+    }
+    if (rust_legacy_decode_component(part, len, out) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
 static char *
 rust_demangle_legacy(const char *mangled, int options)
 {
@@ -1709,11 +1722,7 @@ rust_demangle_legacy(const char *mangled, int options)
             break;
         }
 
-        if (!first && rust_buf_append(&out, "::", 2u) != 0) {
-            rust_buf_destroy(&out);
-            return NULL;
-        }
-        if (rust_legacy_decode_component(part, len, &out) != 0) {
+        if (rust_legacy_process_component(part, len, first, &out) != 0) {
             rust_buf_destroy(&out);
             return NULL;
         }
