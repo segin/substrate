@@ -218,6 +218,14 @@ run_stdout_test "Percent range prints whole file" \
 beta
 gamma"
 
+run_oracle_test "Copy defaults to current line" \
+    "line1\nline2\nline3\n" \
+    "2\n:t$\nwq\n"
+
+run_oracle_test "Move defaults to current line" \
+    "line1\nline2\nline3\n" \
+    "2\n:m$\nwq\n"
+
 run_stdout_with_auxfile_test "Read appends after current line by default" \
     "one\ntwo\n" \
     "inserted-a\ninserted-b\n" \
@@ -246,6 +254,18 @@ run_stderr_status_test "Set rejects unknown option" \
     ":set frobnicate\n:q!\n" \
     0 \
     "Unknown option: frobnicate"
+
+run_stderr_status_test "Copy requires destination" \
+    "one\ntwo\n" \
+    ":1copy\n:q!\n" \
+    0 \
+    "Destination required"
+
+run_stderr_status_test "Move rejects destination inside range" \
+    "one\ntwo\nthree\n" \
+    ":1,2move1\n:q!\n" \
+    0 \
+    "Destination not outside move range"
 
 run_stdout_test "Set number query reports state" \
     "one\ntwo\n" \

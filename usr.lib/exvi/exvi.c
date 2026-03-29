@@ -1232,8 +1232,15 @@ void do_command(buffer_t *b, char *cmd) {
         || match_command(cmd, "copy", "t", &args, NULL)) {
         char *ptr = (char *)args;
         int dest = parse_address(b, &ptr);
-        if (dest == -1) dest = b->cur ? 1 : 0; // fallback? Usually error if missing, but let's assume current
-        
+
+        if (!explicit_range) {
+            set_default_current_range(b, &addr1, &addr2);
+        }
+        if (dest == -1) {
+            fprintf(stderr, "Destination required\n");
+            return;
+        }
+
         save_undo(b);
         if (addr1 != -1 && addr2 != -1 && addr1 <= addr2) {
             line_t *pos = buf_get_line(b, dest); // can be NULL if dest=0
@@ -1246,7 +1253,19 @@ void do_command(buffer_t *b, char *cmd) {
     } else if (match_command(cmd, "move", "m", &args, NULL)) {
         char *ptr = (char *)args;
         int dest = parse_address(b, &ptr);
-        
+
+        if (!explicit_range) {
+            set_default_current_range(b, &addr1, &addr2);
+        }
+        if (dest == -1) {
+            fprintf(stderr, "Destination required\n");
+            return;
+        }
+        if (addr1 != -1 && addr2 != -1 && dest >= addr1 && dest <= addr2) {
+            fprintf(stderr, "Destination not outside move range\n");
+            return;
+        }
+
         save_undo(b);
         if (addr1 != -1 && addr2 != -1 && addr1 <= addr2) {
             // Move: Extract the nodes and place them after dest.
@@ -1306,7 +1325,6 @@ void do_command(buffer_t *b, char *cmd) {
             free(first->text);
             first->text = joined;
             first->len = cur_len;
-            first->len = total_len;
         }
     } else if (match_command(cmd, "yank", "y", &args, NULL)) {
         if (!explicit_range) {
