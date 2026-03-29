@@ -603,7 +603,7 @@
     > compatible). Up to 4 drives (2 per controller, though most PCs have 1 controller).
     > Naming: `fd0`–`fd3` at `/dev/storage/fdN`.
 
-    - [ ] **Controller Initialization (`fdc_init`):** (REQ: REQ-03-0328)
+    - [x] **Controller Initialization (`fdc_init`):** (REQ: REQ-03-0328)
         - [x] Detect FDC presence: read MSR (Main Status Register) at 0x3F4. <!-- sys/drivers/storage/floppy/floppy.c, sys/kern/isa.c --> (REQ: REQ-03-0329)
         - [x] Issue RESET command: assert bit 2 of DOR (Digital Output Register, 0x3F2), then deassert. <!-- sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0330)
         - [x] Wait for IRQ6 after reset; issue SENSE INTERRUPT for each drive (up to 4). <!-- sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0331)
