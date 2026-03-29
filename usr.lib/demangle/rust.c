@@ -65,6 +65,7 @@ static int rust_parse_decimal(rust_parser_t *p, size_t *out);
 static int rust_parse_base62(rust_parser_t *p, size_t *out);
 static int rust_parse_optional_disambiguator(rust_parser_t *p, int *present, size_t *value);
 static int rust_ident_contains(const char *s, size_t len, const char *needle);
+static int rust_append_unicode_identifier(rust_parser_t *p, const char *bytes, size_t len);
 static int rust_parse_v0_identifier(rust_parser_t *p);
 static int rust_parse_v0_type(rust_parser_t *p);
 static int rust_parse_v0_const(rust_parser_t *p);
@@ -693,6 +694,35 @@ rust_puny_decode(const char *in, size_t in_len, rust_buf_t *out, int *non_ascii)
 }
 
 static int
+rust_append_unicode_identifier(rust_parser_t *p, const char *bytes, size_t len)
+{
+    rust_buf_t decoded;
+    int non_ascii;
+
+    memset(&decoded, 0, sizeof(decoded));
+    if (rust_puny_decode(bytes, len, &decoded, &non_ascii) != 0) {
+        rust_buf_destroy(&decoded);
+        return -1;
+    }
+
+    if (non_ascii && rust_buf_appendc(&p->out, '{') != 0) {
+        rust_buf_destroy(&decoded);
+        return -1;
+    }
+    if (decoded.len > 0u && rust_buf_append(&p->out, decoded.data, decoded.len) != 0) {
+        rust_buf_destroy(&decoded);
+        return -1;
+    }
+    if (non_ascii && rust_buf_appendc(&p->out, '}') != 0) {
+        rust_buf_destroy(&decoded);
+        return -1;
+    }
+    rust_buf_destroy(&decoded);
+
+    return 0;
+}
+
+static int
 rust_parse_v0_identifier(rust_parser_t *p)
 {
     const char *bytes;
@@ -729,28 +759,9 @@ rust_parse_v0_identifier(rust_parser_t *p)
     }
 
     if (is_unicode) {
-        rust_buf_t decoded;
-        int non_ascii;
-
-        memset(&decoded, 0, sizeof(decoded));
-        if (rust_puny_decode(bytes, len, &decoded, &non_ascii) != 0) {
-            rust_buf_destroy(&decoded);
+        if (rust_append_unicode_identifier(p, bytes, len) != 0) {
             return -1;
         }
-
-        if (non_ascii && rust_buf_appendc(&p->out, '{') != 0) {
-            rust_buf_destroy(&decoded);
-            return -1;
-        }
-        if (decoded.len > 0u && rust_buf_append(&p->out, decoded.data, decoded.len) != 0) {
-            rust_buf_destroy(&decoded);
-            return -1;
-        }
-        if (non_ascii && rust_buf_appendc(&p->out, '}') != 0) {
-            rust_buf_destroy(&decoded);
-            return -1;
-        }
-        rust_buf_destroy(&decoded);
     } else if (rust_buf_append(&p->out, bytes, len) != 0) {
         return -1;
     }
