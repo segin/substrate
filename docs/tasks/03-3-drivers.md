@@ -597,7 +597,7 @@
         - [x] Internal doc: ATA/IDE register map and command reference. (REQ: REQ-03-0325)
         - [x] Internal doc: channel probing strategy (PCI native vs ISA compatibility vs legacy tertiary/quaternary). (REQ: REQ-03-0326)
 
-- [ ] **Floppy Disk Controller (`sys/drivers/storage/floppy/`):** (REQ: REQ-03-0327)
+- [x] **Floppy Disk Controller (`sys/drivers/storage/floppy/`):** (REQ: REQ-03-0327)
 
     > Supports standard PC floppy disk controller (Intel 82077AA / NEC µPD765
     > compatible). Up to 4 drives (2 per controller, though most PCs have 1 controller).
