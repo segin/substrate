@@ -1194,6 +1194,30 @@ ln_apply_parsed_option(ln_options_t *opts, char opt, const char *optval,
     }
 }
 
+struct ln_long_opt {
+    const char *name;
+    int arg_mode; /* 0: none, 1: required, 2: optional */
+    char short_opt;
+};
+
+static const struct ln_long_opt long_opts[] = {
+    {"help", 0, '\0'},
+    {"backup", 2, 'b'},
+    {"suffix", 1, 'S'},
+    {"target-directory", 1, 't'},
+    {"no-target-directory", 0, 'T'},
+    {"relative", 0, 'r'},
+    {"directory", 0, 'd'},
+    {"force", 0, 'f'},
+    {"interactive", 0, 'i'},
+    {"symbolic", 0, 's'},
+    {"logical", 0, 'L'},
+    {"physical", 0, 'P'},
+    {"no-dereference", 0, 'h'},
+    {"verbose", 0, 'v'},
+    {NULL, 0, 0}
+};
+
 static int
 ln_parse_long_option(ln_options_t *opts, const char *arg, int argc, char **argv, int *index,
                      int *show_help, bool *seen_force, bool *seen_interactive)
@@ -1202,127 +1226,43 @@ ln_parse_long_option(ln_options_t *opts, const char *arg, int argc, char **argv,
     const char *eq;
     const char *value;
     size_t nlen;
+    int i;
 
     name = arg + 2;
     eq = strchr(name, '=');
     nlen = eq ? (size_t)(eq - name) : strlen(name);
     value = eq ? (eq + 1) : NULL;
 
-    if (nlen == 4 && strncmp(name, "help", 4) == 0) {
-        if (value) {
-            ln_diag(opts, "--help does not accept an argument");
-            return -1;
-        }
-        *show_help = 1;
-        return 1;
-    }
-
-    if (nlen == 6 && strncmp(name, "backup", 6) == 0) {
-        return ln_apply_parsed_option(opts, 'b', value, seen_force, seen_interactive);
-    }
-
-    if (nlen == 6 && strncmp(name, "suffix", 6) == 0) {
-        if (!value) {
-            if (*index + 1 >= argc) {
-                ln_diag(opts, "--suffix requires an argument");
-                return -1;
+    for (i = 0; long_opts[i].name != NULL; i++) {
+        if (nlen == strlen(long_opts[i].name) && strncmp(name, long_opts[i].name, nlen) == 0) {
+            if (long_opts[i].name[0] == 'h' && long_opts[i].name[1] == 'e') {
+                if (value) {
+                    ln_diag(opts, "--help does not accept an argument");
+                    return -1;
+                }
+                *show_help = 1;
+                return 1;
             }
-            ++(*index);
-            value = argv[*index];
-        }
-        return ln_apply_parsed_option(opts, 'S', value, seen_force, seen_interactive);
-    }
 
-    if (nlen == 16 && strncmp(name, "target-directory", 16) == 0) {
-        if (!value) {
-            if (*index + 1 >= argc) {
-                ln_diag(opts, "--target-directory requires an argument");
-                return -1;
+            if (long_opts[i].arg_mode == 0) {
+                if (value) {
+                    ln_diag(opts, "--%s does not accept an argument", long_opts[i].name);
+                    return -1;
+                }
+                value = NULL;
+            } else if (long_opts[i].arg_mode == 1) {
+                if (!value) {
+                    if (*index + 1 >= argc) {
+                        ln_diag(opts, "--%s requires an argument", long_opts[i].name);
+                        return -1;
+                    }
+                    ++(*index);
+                    value = argv[*index];
+                }
             }
-            ++(*index);
-            value = argv[*index];
-        }
-        return ln_apply_parsed_option(opts, 't', value, seen_force, seen_interactive);
-    }
 
-    if (nlen == 19 && strncmp(name, "no-target-directory", 19) == 0) {
-        if (value) {
-            ln_diag(opts, "--no-target-directory does not accept an argument");
-            return -1;
+            return ln_apply_parsed_option(opts, long_opts[i].short_opt, value, seen_force, seen_interactive);
         }
-        return ln_apply_parsed_option(opts, 'T', NULL, seen_force, seen_interactive);
-    }
-
-    if (nlen == 8 && strncmp(name, "relative", 8) == 0) {
-        if (value) {
-            ln_diag(opts, "--relative does not accept an argument");
-            return -1;
-        }
-        return ln_apply_parsed_option(opts, 'r', NULL, seen_force, seen_interactive);
-    }
-
-    if (nlen == 9 && strncmp(name, "directory", 9) == 0) {
-        if (value) {
-            ln_diag(opts, "--directory does not accept an argument");
-            return -1;
-        }
-        return ln_apply_parsed_option(opts, 'd', NULL, seen_force, seen_interactive);
-    }
-
-    if (nlen == 5 && strncmp(name, "force", 5) == 0) {
-        if (value) {
-            ln_diag(opts, "--force does not accept an argument");
-            return -1;
-        }
-        return ln_apply_parsed_option(opts, 'f', NULL, seen_force, seen_interactive);
-    }
-
-    if (nlen == 11 && strncmp(name, "interactive", 11) == 0) {
-        if (value) {
-            ln_diag(opts, "--interactive does not accept an argument");
-            return -1;
-        }
-        return ln_apply_parsed_option(opts, 'i', NULL, seen_force, seen_interactive);
-    }
-
-    if (nlen == 8 && strncmp(name, "symbolic", 8) == 0) {
-        if (value) {
-            ln_diag(opts, "--symbolic does not accept an argument");
-            return -1;
-        }
-        return ln_apply_parsed_option(opts, 's', NULL, seen_force, seen_interactive);
-    }
-
-    if (nlen == 7 && strncmp(name, "logical", 7) == 0) {
-        if (value) {
-            ln_diag(opts, "--logical does not accept an argument");
-            return -1;
-        }
-        return ln_apply_parsed_option(opts, 'L', NULL, seen_force, seen_interactive);
-    }
-
-    if (nlen == 8 && strncmp(name, "physical", 8) == 0) {
-        if (value) {
-            ln_diag(opts, "--physical does not accept an argument");
-            return -1;
-        }
-        return ln_apply_parsed_option(opts, 'P', NULL, seen_force, seen_interactive);
-    }
-
-    if (nlen == 14 && strncmp(name, "no-dereference", 14) == 0) {
-        if (value) {
-            ln_diag(opts, "--no-dereference does not accept an argument");
-            return -1;
-        }
-        return ln_apply_parsed_option(opts, 'h', NULL, seen_force, seen_interactive);
-    }
-
-    if (nlen == 7 && strncmp(name, "verbose", 7) == 0) {
-        if (value) {
-            ln_diag(opts, "--verbose does not accept an argument");
-            return -1;
-        }
-        return ln_apply_parsed_option(opts, 'v', NULL, seen_force, seen_interactive);
     }
 
     ln_diag(opts, "invalid option: %s", arg);
