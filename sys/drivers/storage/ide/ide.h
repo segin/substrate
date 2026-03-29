@@ -86,6 +86,9 @@
 #define ATA_CMD_CACHE_FLUSH    0xE7  /* Flush Cache */
 #define ATA_CMD_CACHE_FLUSH_EXT 0xEA /* Flush Cache Ext (LBA48) */
 
+/* Power Management */
+#define ATA_CMD_STANDBY_IMMEDIATE 0xE0 /* Standby Immediate */
+
 /*
  * ============================================================
  * Status Register Bits
@@ -284,6 +287,7 @@ void ide_parse_identify_data(ide_device_t *dev, const uint16_t *buffer,
                              uint8_t type, uint8_t channel, uint8_t drive);
 int ide_select_dma_transfer_mode(const ide_device_t *dev, uint8_t *mode);
 size_t ide_decode_error(uint8_t error, char *buf, size_t size);
+int ide_standby_immediate(uint16_t bus, uint8_t drive);
 
 /* ATAPI Packet Commands */
 int ide_atapi_packet(uint8_t channel, uint8_t drive, 
