@@ -48,6 +48,8 @@ extern void run_kobject_tests(void);
 void run_reboot_tests(void);
 extern void test_pipe_race(void);
 extern void test_floppy_qemu(void);
+extern void test_floppy_format_qemu(void);
+extern void test_floppy_change_qemu(void);
 
 void run_kernel_tests(void) {
     char test_arg[32] = {0};
@@ -234,6 +236,14 @@ void run_kernel_tests(void) {
 
     if (all || strcmp(test_arg, "floppy_qemu") == 0 || strcmp(test_arg, "floppy") == 0) {
          test_floppy_qemu();
+    }
+
+    if (all || strcmp(test_arg, "floppy_format") == 0) {
+         test_floppy_format_qemu();
+    }
+
+    if (all || strcmp(test_arg, "floppy_change") == 0) {
+         test_floppy_change_qemu();
     }
 
     if (all || strcmp(test_arg, "minix") == 0) {
