@@ -624,8 +624,8 @@
         - [x] Query CMOS (RTC port 0x70/0x71, register 0x10) for drive types: <!-- sys/drivers/storage/floppy/floppy.c, sys/drivers/storage/floppy/floppy_geom.c, tests/sys/host_test_floppy.c --> (REQ: REQ-03-0347)
             - Bits 7–4: drive 0 type, bits 3–0: drive 1 type.
             - 0=none, 1=360K, 2=1.2M, 3=720K, 4=1.44M, 5=2.88M.
-        - [ ] Support up to 4 drives: drives 0–1 on primary FDC (0x3F0), drives 2–3 on secondary FDC (0x370, rare). (REQ: REQ-03-0348)
-        - [ ] Register detected drives with DevFS as `/dev/storage/fd0`..`/dev/storage/fd3`. (REQ: REQ-03-0349)
+        - [x] Support up to 4 drives: drives 0–1 on primary FDC (0x3F0), drives 2–3 on secondary FDC (0x370, rare). <!-- sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0348)
+        - [x] Register detected drives with DevFS as `/dev/storage/fd0`..`/dev/storage/fd3`. <!-- sys/drivers/storage/floppy/floppy.c, sys/drivers/storage/blkdev.c --> (REQ: REQ-03-0349)
     - [ ] **Motor Control:** (REQ: REQ-03-0350)
         - [x] Motor on: set DOR motor bits (bits 4–7) for target drive. <!-- sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0351)
         - [x] Spin‑up delay: wait 300–500 ms after motor on before I/O. <!-- sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0352)

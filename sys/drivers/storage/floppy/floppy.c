@@ -52,7 +52,8 @@ typedef struct fdc_controller {
 typedef struct fdc_drive {
     uint8_t present;
     uint8_t controller_index;
-    uint8_t drive_index;
+    uint8_t device_index;
+    uint8_t drive_select;
     uint8_t current_cylinder;
     uint8_t motor_on;
     const fdc_geometry_t *geom;
@@ -181,19 +182,19 @@ static void fdc_update_dor(fdc_controller_t *ctlr, uint8_t drive_select) {
 
 static void fdc_motor_set(fdc_drive_t *drive, int on) {
     fdc_controller_t *ctlr = &fdc_controllers[drive->controller_index];
-    uint8_t motor_bit = (uint8_t)(FDC_DOR_MOTOR0 << drive->drive_index);
+    uint8_t motor_bit = (uint8_t)(FDC_DOR_MOTOR0 << drive->drive_select);
 
     if (on) {
         if ((ctlr->dor_shadow & motor_bit) == 0) {
             ctlr->dor_shadow |= motor_bit;
             drive->motor_on = 1;
-            fdc_update_dor(ctlr, drive->drive_index);
+            fdc_update_dor(ctlr, drive->drive_select);
             (void)fdc_delay_ms(FDC_MOTOR_SPINUP_MS);
         }
     } else if ((ctlr->dor_shadow & motor_bit) != 0) {
         ctlr->dor_shadow &= (uint8_t)~motor_bit;
         drive->motor_on = 0;
-        fdc_update_dor(ctlr, drive->drive_index);
+        fdc_update_dor(ctlr, drive->drive_select);
     }
 }
 
@@ -314,7 +315,7 @@ static int fdc_seek_drive(fdc_drive_t *drive, uint8_t cylinder) {
     if (ret < 0) {
         return ret;
     }
-    ret = fdc_write_fifo(ctlr, (uint8_t)(drive->drive_index & 0x03));
+    ret = fdc_write_fifo(ctlr, (uint8_t)(drive->drive_select & 0x03));
     if (ret < 0) {
         return ret;
     }
@@ -349,7 +350,7 @@ static int fdc_recalibrate_drive(fdc_drive_t *drive) {
     if (ret < 0) {
         return ret;
     }
-    ret = fdc_write_fifo(ctlr, (uint8_t)(drive->drive_index & 0x03));
+    ret = fdc_write_fifo(ctlr, (uint8_t)(drive->drive_select & 0x03));
     if (ret < 0) {
         return ret;
     }
@@ -451,7 +452,7 @@ static int fdc_transfer_sector(fdc_drive_t *drive, uint32_t lba, uint8_t *buffer
         if (ret < 0) {
             continue;
         }
-        ret = fdc_write_fifo(ctlr, (uint8_t)((chs.head << 2) | (drive->drive_index & 0x03)));
+        ret = fdc_write_fifo(ctlr, (uint8_t)((chs.head << 2) | (drive->drive_select & 0x03)));
         if (ret < 0) {
             continue;
         }
@@ -512,7 +513,7 @@ static int fdc_transfer_sector(fdc_drive_t *drive, uint32_t lba, uint8_t *buffer
             char st1[32];
             char st2[32];
             kprintf("fdc: fd%u %s failed st0=%02x st1=%02x (%s) st2=%02x (%s) c=%u h=%u s=%u\n",
-                    drive->drive_index,
+                    drive->device_index,
                     write_to_drive ? "write" : "read",
                     result[0], result[1], fdc_decode_st1(result[1], st1, sizeof(st1)),
                     result[2], fdc_decode_st2(result[2], st2, sizeof(st2)),
@@ -594,7 +595,7 @@ static void fdc_register_drive(fdc_drive_t *drive) {
     uint64_t total_sectors;
 
     memset(&drive->bdev, 0, sizeof(drive->bdev));
-    snprintf(drive->bdev.name, sizeof(drive->bdev.name), "fd%u", drive->drive_index);
+    snprintf(drive->bdev.name, sizeof(drive->bdev.name), "fd%u", drive->device_index);
     total_sectors = (uint64_t)drive->geom->cylinders * drive->geom->heads * drive->geom->sectors_per_track;
     drive->bdev.sector_size = 512;
     drive->bdev.total_sectors = total_sectors;
@@ -620,10 +621,26 @@ static uint8_t fdc_read_cmos_drive_reg(void) {
     return inb(CMOS_DATA);
 }
 
+static const fdc_geometry_t *fdc_geometry_for_slot(uint8_t controller_index,
+                                                   uint8_t drive_select,
+                                                   const uint8_t cmos_types[2]) {
+    if (controller_index == 0 && drive_select < 2) {
+        return fdc_geometry_from_cmos(cmos_types[drive_select]);
+    }
+
+    /*
+     * Legacy CMOS only reports two drives. When a rare secondary controller is
+     * present, fall back to the most common PC floppy geometry and let later
+     * media-change handling refine this if needed.
+     */
+    return fdc_geometry_from_cmos(4);
+}
+
 void floppy_init(void) {
     uint8_t drive_types[2] = {0, 0};
     uint8_t cmos_reg;
     size_t i;
+    size_t j;
 
     if (floppy_initialized) {
         return;
@@ -676,25 +693,33 @@ void floppy_init(void) {
         }
     }
 
-    for (i = 0; i < 2; i++) {
-        fdc_drive_t *drive = &fdc_drives[i];
-        const fdc_geometry_t *geom = fdc_geometry_from_cmos(drive_types[i]);
-
-        if (geom == NULL || !fdc_controllers[0].present) {
+    for (i = 0; i < FDC_MAX_CONTROLLERS; i++) {
+        if (!fdc_controllers[i].present) {
             continue;
         }
 
-        memset(drive, 0, sizeof(*drive));
-        drive->present = 1;
-        drive->controller_index = 0;
-        drive->drive_index = (uint8_t)i;
-        drive->current_cylinder = 0xFF;
-        drive->geom = geom;
-        if (fdc_recalibrate_drive(drive) < 0) {
-            kprintf("fdc: fd%u recalibrate failed\n", drive->drive_index);
-            drive->present = 0;
-            continue;
+        for (j = 0; j < 2; j++) {
+            uint8_t device_index = (uint8_t)((i * 2) + j);
+            fdc_drive_t *drive = &fdc_drives[device_index];
+            const fdc_geometry_t *geom = fdc_geometry_for_slot((uint8_t)i, (uint8_t)j, drive_types);
+
+            if (geom == NULL) {
+                continue;
+            }
+
+            memset(drive, 0, sizeof(*drive));
+            drive->present = 1;
+            drive->controller_index = (uint8_t)i;
+            drive->device_index = device_index;
+            drive->drive_select = (uint8_t)j;
+            drive->current_cylinder = 0xFF;
+            drive->geom = geom;
+            if (fdc_recalibrate_drive(drive) < 0) {
+                kprintf("fdc: fd%u recalibrate failed\n", drive->device_index);
+                drive->present = 0;
+                continue;
+            }
+            fdc_register_drive(drive);
         }
-        fdc_register_drive(drive);
     }
 }
