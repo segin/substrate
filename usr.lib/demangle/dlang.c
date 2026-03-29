@@ -506,11 +506,50 @@ dlang_parse_template_value(dlang_parser_t *p)
 }
 
 static int
-dlang_parse_template_arg(dlang_parser_t *p)
+dlang_parse_template_arg_value(dlang_parser_t *p)
 {
     size_t off;
     char *ty;
     char *val;
+
+    p->cur++;
+    off = p->out.len;
+    if (dlang_parse_type(p) != 0) {
+        return -1;
+    }
+    ty = dlang_take_segment(p, off);
+    if (ty == NULL) {
+        return -1;
+    }
+
+    off = p->out.len;
+    if (dlang_parse_template_value(p) != 0) {
+        free(ty);
+        return -1;
+    }
+    val = dlang_take_segment(p, off);
+    if (val == NULL) {
+        free(ty);
+        return -1;
+    }
+
+    if (dlang_buf_append(&p->out, ty, strlen(ty)) != 0 ||
+        dlang_buf_appendc(&p->out, '(') != 0 ||
+        dlang_buf_append(&p->out, val, strlen(val)) != 0 ||
+        dlang_buf_appendc(&p->out, ')') != 0) {
+        free(ty);
+        free(val);
+        return -1;
+    }
+
+    free(ty);
+    free(val);
+    return 0;
+}
+
+static int
+dlang_parse_template_arg(dlang_parser_t *p)
+{
     size_t n;
 
     if (p->cur[0] == 'T') {
@@ -519,39 +558,7 @@ dlang_parse_template_arg(dlang_parser_t *p)
     }
 
     if (p->cur[0] == 'V') {
-        p->cur++;
-        off = p->out.len;
-        if (dlang_parse_type(p) != 0) {
-            return -1;
-        }
-        ty = dlang_take_segment(p, off);
-        if (ty == NULL) {
-            return -1;
-        }
-
-        off = p->out.len;
-        if (dlang_parse_template_value(p) != 0) {
-            free(ty);
-            return -1;
-        }
-        val = dlang_take_segment(p, off);
-        if (val == NULL) {
-            free(ty);
-            return -1;
-        }
-
-        if (dlang_buf_append(&p->out, ty, strlen(ty)) != 0 ||
-            dlang_buf_appendc(&p->out, '(') != 0 ||
-            dlang_buf_append(&p->out, val, strlen(val)) != 0 ||
-            dlang_buf_appendc(&p->out, ')') != 0) {
-            free(ty);
-            free(val);
-            return -1;
-        }
-
-        free(ty);
-        free(val);
-        return 0;
+        return dlang_parse_template_arg_value(p);
     }
 
     if (p->cur[0] == 'S') {
