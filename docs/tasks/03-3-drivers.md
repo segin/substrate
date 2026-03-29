@@ -570,7 +570,7 @@
         - [x] Issue SRST via device control register (bit 2). (REQ: REQ-03-0299)
         - [x] Wait for BSY clear on both master and slave. (REQ: REQ-03-0300)
         - [x] Re‑identify devices after reset. (REQ: REQ-03-0301)
-    - [ ] **Power Management (deferred):** (REQ: REQ-03-0302)
+    - [x] **Power Management (deferred):** (REQ: REQ-03-0302)
         - [x] STANDBY IMMEDIATE (0xE0). <!-- sys/drivers/storage/ide/ide.c, ide.h, tests/sys/host_test_ide_power.c --> (REQ: REQ-03-0303)
         - [x] IDLE IMMEDIATE (0xE1). <!-- sys/drivers/storage/ide/ide.c, ide.h, tests/sys/host_test_ide_power.c --> (REQ: REQ-03-0303)
         - [x] CHECK POWER MODE (0xE5). <!-- sys/drivers/storage/ide/ide.c, ide.h, tests/sys/host_test_ide_power.c --> (REQ: REQ-03-0304)
