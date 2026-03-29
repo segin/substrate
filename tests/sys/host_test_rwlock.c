@@ -141,10 +141,45 @@ static void test_rwlock_non_owner_panics(void) {
     assert(strstr(last_panic, "non-owner") != NULL);
 }
 
+static void test_rwlock_runlock_panics(void) {
+    rwlock_t rw;
+    thread_t *reader;
+    thread_t *writer;
+
+    reset_env();
+    reader = init_thread(0, 1);
+    writer = init_thread(1, 2);
+
+    rwlock_init(&rw, "panic");
+    current_thread = reader;
+
+    // Test runlock without reader ownership (no readers, no writers)
+    if (setjmp(panic_jmp) == 0) {
+        rw_runlock(&rw);
+        assert(!"expected panic");
+    }
+    assert(last_panic != NULL);
+    assert(strstr(last_panic, "rw_runlock without reader ownership") != NULL);
+
+    reset_env();
+    rwlock_init(&rw, "panic");
+    current_thread = writer;
+
+    // Test runlock with writer ownership instead of reader
+    rw_wlock(&rw);
+    if (setjmp(panic_jmp) == 0) {
+        rw_runlock(&rw);
+        assert(!"expected panic");
+    }
+    assert(last_panic != NULL);
+    assert(strstr(last_panic, "rw_runlock without reader ownership") != NULL);
+}
+
 int main(void) {
     test_rwlock_reader_and_writer_paths();
     test_rwlock_writer_preference_and_reader_wakeup();
     test_rwlock_non_owner_panics();
+    test_rwlock_runlock_panics();
     puts("host_test_rwlock: PASS");
     return 0;
 }
