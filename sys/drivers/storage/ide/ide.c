@@ -1446,6 +1446,42 @@ int ide_idle_immediate(uint16_t bus, uint8_t drive) {
                                       "idle-immediate");
 }
 
+int ide_check_power_mode(uint16_t bus, uint8_t drive, uint8_t *mode) {
+    uint8_t channel;
+    uint8_t status;
+
+    if (mode == NULL) {
+        return -1;
+    }
+
+    if (ide_channel_index_from_io(bus, &channel) < 0) {
+        return -1;
+    }
+
+    ide_select_drive(channel, drive);
+    status = ide_read_reg(channel, ATA_REG_STATUS);
+    if (status == 0 || status == 0xFF) {
+        return -1;
+    }
+
+    if (ide_wait_ready(channel, IDE_TIMEOUT_READY_MS) < 0) {
+        return -1;
+    }
+
+    ide_write_reg(channel, ATA_REG_COMMAND, ATA_CMD_CHECK_POWER_MODE);
+    if (ide_wait_bsy(channel, IDE_TIMEOUT_READY_MS, "check-power-mode") < 0) {
+        return -1;
+    }
+
+    status = ide_read_reg(channel, ATA_REG_STATUS);
+    if ((status & (ATA_SR_ERR | ATA_SR_DF)) != 0) {
+        return -1;
+    }
+
+    *mode = ide_read_reg(channel, ATA_REG_SEC_COUNT);
+    return 0;
+}
+
 /*
  * ============================================================
  * ATAPI Packet Command Interface
