@@ -42,6 +42,6 @@ void kmem_test_init(void) {
     strcpy((char*)kmem_test_buffer + kmem_test_size - strlen(end_msg) - 1, end_msg);
 
     char buf[128];
-    sprintf(buf, "kmem_test: buffer allocated at 0x%08x (size %d)\n", (unsigned int)kmem_test_buffer, kmem_test_size);
+    snprintf(buf, sizeof(buf), "kmem_test: buffer allocated at 0x%08x (size %d)\n", (unsigned int)kmem_test_buffer, kmem_test_size);
     kprint(buf);
 }
