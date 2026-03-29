@@ -19,6 +19,7 @@ static int kprint_calls;
 static int64_t mock_time_ms;
 static int csts_read_count[4];
 static int csts_clear_after_reads[4];
+static int csts_set_after_reads[4];
 static uintptr_t mock_dma_next;
 static int dma_alloc_fail_after;
 
@@ -33,6 +34,7 @@ static void reset_state(void) {
     mock_time_ms = 0;
     memset(csts_read_count, 0, sizeof(csts_read_count));
     memset(csts_clear_after_reads, 0, sizeof(csts_clear_after_reads));
+    memset(csts_set_after_reads, 0, sizeof(csts_set_after_reads));
     mock_dma_next = 0x20000000U;
     dma_alloc_fail_after = -1;
 }
@@ -170,11 +172,18 @@ uint32_t nvme_test_mmio_read32(volatile uint8_t *mmio, uint32_t reg) {
     uint32_t value;
 
     memcpy(&value, (const void *)(mmio + reg), sizeof(value));
-    if (idx >= 0 && reg == NVME_REG_CSTS && (value & NVME_CSTS_RDY) != 0) {
+    if (idx >= 0 && reg == NVME_REG_CSTS) {
         csts_read_count[idx]++;
-        if (csts_clear_after_reads[idx] > 0 &&
+        if ((value & NVME_CSTS_RDY) != 0 &&
+            csts_clear_after_reads[idx] > 0 &&
             csts_read_count[idx] >= csts_clear_after_reads[idx]) {
             value &= ~NVME_CSTS_RDY;
+            memcpy((void *)(mmio + reg), &value, sizeof(value));
+        }
+        if ((value & NVME_CSTS_RDY) == 0 &&
+            csts_set_after_reads[idx] > 0 &&
+            csts_read_count[idx] >= csts_set_after_reads[idx]) {
+            value |= NVME_CSTS_RDY;
             memcpy((void *)(mmio + reg), &value, sizeof(value));
         }
     }
@@ -419,6 +428,48 @@ static void test_create_admin_queues_frees_sq_if_cq_alloc_fails(void) {
     assert(ctrl.admin_cq_bytes == 0);
 }
 
+static void test_enable_controller_sets_cc_and_waits_for_ready(void) {
+    nvme_controller_t ctrl;
+    uint32_t cc = 0;
+    uint32_t csts = 0;
+
+    reset_state();
+    memset(&ctrl, 0, sizeof(ctrl));
+    ctrl.present = 1;
+    ctrl.mmio = mock_mmio[0];
+    ctrl.cap.timeout_ms = 5;
+    ctrl.admin_sq = (void *)0x1;
+    ctrl.admin_cq = (void *)0x2;
+    csts_set_after_reads[0] = 2;
+
+    assert(nvme_enable_controller(&ctrl) == 0);
+    memcpy(&cc, mock_mmio[0] + NVME_REG_CC, sizeof(cc));
+    memcpy(&csts, mock_mmio[0] + NVME_REG_CSTS, sizeof(csts));
+    assert((cc & NVME_CC_EN) != 0);
+    assert(((cc >> NVME_CC_IOSQES_SHIFT) & 0xFU) == NVME_ADMIN_SQ_ENTRY_EXP);
+    assert(((cc >> NVME_CC_IOCQES_SHIFT) & 0xFU) == NVME_ADMIN_CQ_ENTRY_EXP);
+    assert((csts & NVME_CSTS_RDY) != 0);
+    assert(ctrl.enabled == 1);
+}
+
+static void test_enable_controller_times_out_if_ready_never_sets(void) {
+    nvme_controller_t ctrl;
+    uint32_t cc = 0;
+
+    reset_state();
+    memset(&ctrl, 0, sizeof(ctrl));
+    ctrl.present = 1;
+    ctrl.mmio = mock_mmio[1];
+    ctrl.cap.timeout_ms = 3;
+    ctrl.admin_sq = (void *)0x1;
+    ctrl.admin_cq = (void *)0x2;
+
+    assert(nvme_enable_controller(&ctrl) < 0);
+    memcpy(&cc, mock_mmio[1] + NVME_REG_CC, sizeof(cc));
+    assert((cc & NVME_CC_EN) != 0);
+    assert(ctrl.enabled == 0);
+}
+
 int main(void) {
     test_decode_cap_extracts_timeout_and_stride();
     test_scan_filters_nvme_functions_and_records_cap();
@@ -431,6 +482,8 @@ int main(void) {
     test_create_admin_queues_allocates_and_programs_addresses();
     test_create_admin_queues_rejects_missing_queue_attrs();
     test_create_admin_queues_frees_sq_if_cq_alloc_fails();
+    test_enable_controller_sets_cc_and_waits_for_ready();
+    test_enable_controller_times_out_if_ready_never_sets();
     puts("host_test_nvme: PASS");
     return 0;
 }

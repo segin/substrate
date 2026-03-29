@@ -17,11 +17,15 @@
 
 #define NVME_CC_EN     (1U << 0)
 #define NVME_CSTS_RDY  (1U << 0)
+#define NVME_CC_IOSQES_SHIFT 16U
+#define NVME_CC_IOCQES_SHIFT 20U
 
 #define NVME_ADMIN_QUEUE_MIN_ENTRIES 2U
 #define NVME_ADMIN_QUEUE_MAX_ENTRIES 4096U
 #define NVME_ADMIN_SQ_ENTRY_SIZE     64U
 #define NVME_ADMIN_CQ_ENTRY_SIZE     16U
+#define NVME_ADMIN_SQ_ENTRY_EXP      6U
+#define NVME_ADMIN_CQ_ENTRY_EXP      4U
 
 typedef struct nvme_capability {
     uint16_t mqes;
@@ -60,6 +64,7 @@ int nvme_configure_admin_queue_attrs(nvme_controller_t *ctrl,
                                      uint16_t sq_entries,
                                      uint16_t cq_entries);
 int nvme_create_admin_queues(nvme_controller_t *ctrl);
+int nvme_enable_controller(nvme_controller_t *ctrl);
 size_t nvme_controller_count(void);
 const nvme_controller_t *nvme_get_controller(size_t index);
 

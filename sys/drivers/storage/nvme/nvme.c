@@ -244,6 +244,49 @@ int nvme_create_admin_queues(nvme_controller_t *ctrl) {
     return 0;
 }
 
+int nvme_enable_controller(nvme_controller_t *ctrl) {
+    uint32_t cc;
+    uint64_t start_ms;
+    uint32_t timeout_ms;
+
+    if (ctrl == NULL || ctrl->mmio == NULL || !ctrl->present) {
+        return -1;
+    }
+    if (ctrl->admin_sq == NULL || ctrl->admin_cq == NULL) {
+        return -1;
+    }
+
+    cc = nvme_mmio_read32(ctrl->mmio, NVME_REG_CC);
+    if ((cc & NVME_CC_EN) != 0) {
+        if ((nvme_mmio_read32(ctrl->mmio, NVME_REG_CSTS) & NVME_CSTS_RDY) != 0) {
+            ctrl->enabled = 1;
+            return 0;
+        }
+        return -1;
+    }
+
+    cc = ((uint32_t)NVME_ADMIN_SQ_ENTRY_EXP << NVME_CC_IOSQES_SHIFT) |
+         ((uint32_t)NVME_ADMIN_CQ_ENTRY_EXP << NVME_CC_IOCQES_SHIFT) |
+         NVME_CC_EN;
+    nvme_mmio_write32(ctrl->mmio, NVME_REG_CC, cc);
+
+    timeout_ms = ctrl->cap.timeout_ms;
+    if (timeout_ms == 0) {
+        timeout_ms = 500;
+    }
+
+    start_ms = (uint64_t)get_uptime_ms();
+    while ((nvme_mmio_read32(ctrl->mmio, NVME_REG_CSTS) & NVME_CSTS_RDY) == 0) {
+        if (((uint64_t)get_uptime_ms() - start_ms) >= timeout_ms) {
+            return -1;
+        }
+        __asm__ volatile("pause");
+    }
+
+    ctrl->enabled = 1;
+    return 0;
+}
+
 size_t nvme_controller_count(void) {
     return nvme_controller_total;
 }
