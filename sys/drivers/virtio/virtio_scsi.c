@@ -162,6 +162,7 @@ typedef struct virtio_scsi_queue {
     struct vring_used *used;
     void *mem;
     uint16_t last_used_idx;
+    volatile uint8_t busy;
 } virtio_scsi_queue_t;
 
 typedef struct virtio_scsi_dev {
@@ -235,6 +236,16 @@ static void *vscsi_get_req_buf(virtio_scsi_dev_t *dev, uint16_t index) {
         return NULL;
     }
     return dev->extra_req_bufs[index - 1];
+}
+
+static void vscsi_queue_lock(virtio_scsi_queue_t *q) {
+    while (__sync_lock_test_and_set(&q->busy, 1) != 0) {
+        __asm__ volatile("pause");
+    }
+}
+
+static void vscsi_queue_unlock(virtio_scsi_queue_t *q) {
+    __sync_lock_release(&q->busy);
 }
 
 static uint16_t vscsi_select_req_queue(virtio_scsi_dev_t *dev) {
@@ -320,6 +331,7 @@ static int vscsi_execute(scsi_link_t *link, scsi_request_t *req) {
     scsi_device_t *sdev = req->device;
     req_buf = vscsi_get_req_buf(dev, queue_index);
     if (!q || !req_buf) return -1;
+    vscsi_queue_lock(q);
 
     struct virtio_scsi_req_hdr *hdr = (struct virtio_scsi_req_hdr *)req_buf;
     struct virtio_scsi_resp_hdr *resp =
@@ -391,6 +403,7 @@ static int vscsi_execute(scsi_link_t *link, scsi_request_t *req) {
     if (resp->response != VIRTIO_SCSI_S_OK) {
         req->status = SCSI_STATUS_CHECK_CONDITION;
         req->error = resp->response;
+        vscsi_queue_unlock(q);
         return -1;
     }
     
@@ -405,6 +418,7 @@ static int vscsi_execute(scsi_link_t *link, scsi_request_t *req) {
         memcpy(req->sense, resp->sense, copy_len);
         req->sense_len = (uint8_t)copy_len;
     }
+    vscsi_queue_unlock(q);
     
     return (req->status == SCSI_STATUS_GOOD) ? 0 : -1;
 }
@@ -414,6 +428,7 @@ static int vscsi_send_tmf(virtio_scsi_dev_t *dev, uint32_t subtype,
     if (!dev) return -1;
     if (!dev->ctrl_buf) return -1;
     virtio_scsi_queue_t *q = &dev->ctrl_queue;
+    vscsi_queue_lock(q);
     struct virtio_scsi_ctrl_tmf_req *req =
         (struct virtio_scsi_ctrl_tmf_req *)dev->ctrl_buf;
     struct virtio_scsi_ctrl_tmf_resp *resp =
@@ -464,9 +479,11 @@ static int vscsi_send_tmf(virtio_scsi_dev_t *dev, uint32_t subtype,
     /* Check response */
     if (resp->response == VIRTIO_SCSI_S_FUNCTION_COMPLETE ||
         resp->response == VIRTIO_SCSI_S_FUNCTION_SUCCEEDED) {
+        vscsi_queue_unlock(q);
         return 0;
     }
 
+    vscsi_queue_unlock(q);
     return resp->response;
 }
 
@@ -479,6 +496,7 @@ static int vscsi_send_an(virtio_scsi_dev_t *dev, uint32_t subtype,
 
     if (!dev || !dev->ctrl_buf) return -1;
     q = &dev->ctrl_queue;
+    vscsi_queue_lock(q);
     req = (struct virtio_scsi_ctrl_an_req *)dev->ctrl_buf;
     resp = (struct virtio_scsi_ctrl_an_resp *)((uint8_t *)dev->ctrl_buf + sizeof(*req));
 
@@ -516,8 +534,10 @@ static int vscsi_send_an(virtio_scsi_dev_t *dev, uint32_t subtype,
     }
     if (resp->response == VIRTIO_SCSI_S_FUNCTION_COMPLETE ||
         resp->response == VIRTIO_SCSI_S_FUNCTION_SUCCEEDED) {
+        vscsi_queue_unlock(q);
         return 0;
     }
+    vscsi_queue_unlock(q);
     return resp->response;
 }
 
