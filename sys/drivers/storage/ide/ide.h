@@ -89,6 +89,7 @@
 /* Power Management */
 #define ATA_CMD_STANDBY_IMMEDIATE 0xE0 /* Standby Immediate */
 #define ATA_CMD_IDLE_IMMEDIATE    0xE1 /* Idle Immediate */
+#define ATA_CMD_STANDBY           0xE2 /* Standby with timer */
 #define ATA_CMD_CHECK_POWER_MODE  0xE5 /* Check Power Mode */
 
 #define ATA_POWER_MODE_STANDBY        0x00
@@ -296,6 +297,7 @@ size_t ide_decode_error(uint8_t error, char *buf, size_t size);
 int ide_standby_immediate(uint16_t bus, uint8_t drive);
 int ide_idle_immediate(uint16_t bus, uint8_t drive);
 int ide_check_power_mode(uint16_t bus, uint8_t drive, uint8_t *mode);
+int ide_configure_spindown_timer(uint16_t bus, uint8_t drive, uint8_t timer_code);
 
 /* ATAPI Packet Commands */
 int ide_atapi_packet(uint8_t channel, uint8_t drive, 

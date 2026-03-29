@@ -574,7 +574,7 @@
         - [x] STANDBY IMMEDIATE (0xE0). <!-- sys/drivers/storage/ide/ide.c, ide.h, tests/sys/host_test_ide_power.c --> (REQ: REQ-03-0303)
         - [x] IDLE IMMEDIATE (0xE1). <!-- sys/drivers/storage/ide/ide.c, ide.h, tests/sys/host_test_ide_power.c --> (REQ: REQ-03-0303)
         - [x] CHECK POWER MODE (0xE5). <!-- sys/drivers/storage/ide/ide.c, ide.h, tests/sys/host_test_ide_power.c --> (REQ: REQ-03-0304)
-        - [ ] Spin‑down timer configuration. (REQ: REQ-03-0305)
+        - [x] Spin‑down timer configuration. <!-- sys/drivers/storage/ide/ide.c, ide.h, tests/sys/host_test_ide_power.c --> (REQ: REQ-03-0305)
     - [x] **Naming Convention:** (REQ: REQ-03-0306)
         - [x] Primary master: `ide0`, primary slave: `ide1`. (REQ: REQ-03-0307)
         - [x] Secondary master: `ide2`, secondary slave: `ide3`. (REQ: REQ-03-0308)

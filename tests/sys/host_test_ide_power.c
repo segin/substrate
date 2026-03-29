@@ -23,6 +23,8 @@ static uint16_t last_command_port;
 static uint8_t last_command_value;
 static uint16_t last_device_port;
 static uint8_t last_device_value;
+static uint16_t last_sec_count_port;
+static uint8_t last_sec_count_value;
 
 uint8_t mock_inb(uint16_t port) {
     if ((port & 0x7) == ATA_REG_STATUS) {
@@ -46,6 +48,10 @@ void mock_outb(uint16_t port, uint8_t value) {
         last_command_port = port;
         last_command_value = value;
         return;
+    }
+    if ((port & 0x7) == ATA_REG_SEC_COUNT) {
+        last_sec_count_port = port;
+        last_sec_count_value = value;
     }
     if ((port & 0x7) == ATA_REG_DEVICE) {
         last_device_port = port;
@@ -192,6 +198,8 @@ static void reset_state(void) {
     last_command_value = 0;
     last_device_port = 0;
     last_device_value = 0;
+    last_sec_count_port = 0;
+    last_sec_count_value = 0;
 }
 
 #include "../../sys/drivers/storage/ide/ide.c"
@@ -253,6 +261,23 @@ static void test_check_power_mode_rejects_null_output(void) {
     assert(ide_check_power_mode(ATA_PRIMARY_IO, 0, NULL) < 0);
 }
 
+static void test_configure_spindown_timer_programs_sector_count(void) {
+    int rc;
+
+    reset_state();
+    ide_channels[0].io_base = ATA_PRIMARY_IO;
+    ide_channels[0].ctrl_base = ATA_PRIMARY_CTRL;
+    mock_io[ATA_PRIMARY_IO + ATA_REG_STATUS] = ATA_SR_DRDY;
+    mock_io[ATA_PRIMARY_CTRL + ATA_REG_ALTSTATUS] = ATA_SR_DRDY;
+
+    rc = ide_configure_spindown_timer(ATA_PRIMARY_IO, 0, 0x12);
+    assert(rc == 0);
+    assert(last_sec_count_port == ATA_PRIMARY_IO + ATA_REG_SEC_COUNT);
+    assert(last_sec_count_value == 0x12);
+    assert(last_command_port == ATA_PRIMARY_IO + ATA_REG_COMMAND);
+    assert(last_command_value == ATA_CMD_STANDBY);
+}
+
 static void test_standby_immediate_rejects_unknown_bus(void) {
     reset_state();
     assert(ide_standby_immediate(0x1234, 0) < 0);
@@ -272,6 +297,7 @@ int main(void) {
     test_idle_immediate_primary_slave();
     test_check_power_mode_reads_sector_count();
     test_check_power_mode_rejects_null_output();
+    test_configure_spindown_timer_programs_sector_count();
     test_standby_immediate_rejects_unknown_bus();
     test_standby_immediate_rejects_absent_device();
     puts("host_test_ide_power: PASS");
