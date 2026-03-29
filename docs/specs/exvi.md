@@ -12,8 +12,9 @@ It is a design baseline for refactoring the current monolithic `ex` implementati
 
 ## Current Repository Reality
 
-- [`bin/ex/ex.c`](/home/segin/test/bin/ex/ex.c) is a monolithic partial line editor with ad hoc buffer, file, command, and regex handling.
-- [`bin/vi/vi.c`](/home/segin/test/bin/vi/vi.c) is only a stub and does not provide full-screen editing.
+- [`usr.lib/exvi/exvi.c`](/home/segin/test/usr.lib/exvi/exvi.c) now carries the shared editor core extracted from the old monolithic `ex` implementation, but it is still only a phase-1 baseline and not yet a complete POSIX/BSD `ex`/`vi` engine.
+- [`bin/ex/ex.c`](/home/segin/test/bin/ex/ex.c) and [`bin/vi/vi.c`](/home/segin/test/bin/vi/vi.c) are now thin frontends over the shared core.
+- [`bin/vi/vi.c`](/home/segin/test/bin/vi/vi.c) no longer stands alone as a stub, but visual mode still needs a real screen engine rather than the current shared-core startup path.
 - [`lib/edit`](/home/segin/test/lib/edit) already provides useful low-level primitives:
   - raw terminal mode
   - termcap and ANSI fallback handling
@@ -92,12 +93,11 @@ Do not reuse as the editor core:
 
 ### Phase 1: Shared-core `ex`
 
-Build a stable shared editor core and reduce [`bin/ex/ex.c`](/home/segin/test/bin/ex/ex.c) to a thin frontend.
+Build a stable shared editor core in [`usr.lib/exvi/`](/home/segin/test/usr.lib/exvi/) and keep [`bin/ex/ex.c`](/home/segin/test/bin/ex/ex.c) as a thin frontend.
 
 Priority work:
 
-- create `usr.lib/exvi/` and its shared editor library layout
-- move buffer, command parsing, and file handling out of `bin/ex/ex.c`
+- finish separating buffer, command parsing, and file handling behind shared internal interfaces inside `usr.lib/exvi/`
 - fix command dispatch ordering and default-address handling
 - enforce modified-buffer safety on quit/edit/next/prev/rewind/tag transitions
 - remove in-place visual-mode placeholders from `ex`
