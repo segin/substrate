@@ -655,7 +655,7 @@
         - [x] FORMAT TRACK command: write sector headers for an entire track. <!-- sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0375)
         - [x] Build format buffer with (C, H, R, N) tuples for each sector. <!-- sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0376)
         - [x] Used by disk formatting utilities. <!-- include/sys/floppy.h, sys/drivers/storage/blkdev.c, sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0377)
-    - [ ] **Disk Change Detection:** (REQ: REQ-03-0378)
+    - [x] **Disk Change Detection:** (REQ: REQ-03-0378)
         - [x] Read DIR bit 7 (DSKCHG) to detect media removal/insertion. <!-- sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0379)
         - [x] On change: invalidate cached geometry, re‑detect media type. <!-- sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0378)
         - [x] Seek to cylinder 1 and back to cylinder 0 to clear DSKCHG bit. <!-- sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0381)
