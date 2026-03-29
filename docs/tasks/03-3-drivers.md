@@ -703,7 +703,7 @@
         - [x] Handle completion interrupts. (REQ: REQ-03-0421)
 - [ ] **NVMe:** (REQ: REQ-03-0422)
     - [ ] **Controller Initialization:** (REQ: REQ-03-0423)
-        - [ ] Check CAP (Capabilities) register (Timeout, Doorbell stride). (REQ: REQ-03-0424)
+        - [x] Check CAP (Capabilities) register (Timeout, Doorbell stride). <!-- sys/drivers/storage/nvme/nvme.c, nvme.h, tests/sys/host_test_nvme.c --> (REQ: REQ-03-0424)
         - [ ] Disable Controller (CC.EN = 0) and wait for CSTS.RDY = 0. (REQ: REQ-03-0425)
         - [ ] Configure Admin Queue Attributes (AQA). (REQ: REQ-03-0426)
         - [ ] Create Admin Submission/Completion Queues (ASQ/ACQ). (REQ: REQ-03-0427)
