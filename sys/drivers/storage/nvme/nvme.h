@@ -14,6 +14,7 @@
 #define NVME_REG_AQA   0x0024U
 #define NVME_REG_ASQ   0x0028U
 #define NVME_REG_ACQ   0x0030U
+#define NVME_REG_DBS   0x1000U
 
 #define NVME_CC_EN     (1U << 0)
 #define NVME_CSTS_RDY  (1U << 0)
@@ -54,6 +55,15 @@ typedef struct nvme_controller {
     dma_addr_t admin_cq_dma;
     size_t admin_sq_bytes;
     size_t admin_cq_bytes;
+    uint16_t admin_sq_tail;
+    uint16_t admin_cq_head;
+    uint16_t admin_cid_next;
+    uint8_t admin_cq_phase;
+    uint8_t identify_valid;
+    uint16_t controller_id;
+    char serial[21];
+    char model[41];
+    char firmware[9];
 } nvme_controller_t;
 
 void nvme_init(void);
@@ -65,6 +75,7 @@ int nvme_configure_admin_queue_attrs(nvme_controller_t *ctrl,
                                      uint16_t cq_entries);
 int nvme_create_admin_queues(nvme_controller_t *ctrl);
 int nvme_enable_controller(nvme_controller_t *ctrl);
+int nvme_identify_controller(nvme_controller_t *ctrl);
 size_t nvme_controller_count(void);
 const nvme_controller_t *nvme_get_controller(size_t index);
 

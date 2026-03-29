@@ -709,7 +709,7 @@
         - [x] Create Admin Submission/Completion Queues (ASQ/ACQ). <!-- sys/drivers/storage/nvme/nvme.c, nvme.h, tests/sys/host_test_nvme.c --> (REQ: REQ-03-0427)
         - [x] Enable Controller (CC.EN = 1) and wait for CSTS.RDY = 1. <!-- sys/drivers/storage/nvme/nvme.c, nvme.h, tests/sys/host_test_nvme.c --> (REQ: REQ-03-0428)
     - [ ] **Namespace Discovery:** (REQ: REQ-03-0429)
-        - [ ] Issue `Identify Controller` command. (REQ: REQ-03-0430)
+        - [x] Issue `Identify Controller` command. <!-- sys/drivers/storage/nvme/nvme.c, nvme.h, tests/sys/host_test_nvme.c --> (REQ: REQ-03-0430)
         - [ ] Issue `Identify Namespace` for active NSIDs. (REQ: REQ-03-0431)
     - [ ] **I/O Queue Creation:** (REQ: REQ-03-0432)
         - [ ] Determine number of queues supported. (REQ: REQ-03-0433)
