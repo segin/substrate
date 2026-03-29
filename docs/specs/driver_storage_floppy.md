@@ -46,11 +46,10 @@
 - Sector interface is exposed through the block-device layer
 - Driver converts `LBA <-> CHS` from the selected geometry
 - Read and write operations are DMA-backed and batched in up-to-4KB commands; when a command spans head 0 to head 1 on the same cylinder the driver sets the controller MT bit
+- Track formatting is exposed through `FLOPPY_IOCTL_FORMAT_TRACK` in [include/sys/floppy.h](/home/segin/test/include/sys/floppy.h), using a DMA-fed `(C,H,R,N)` tuple table for each sector header
 - Motors spin up on demand and are shut down from the periodic timer path after roughly 2.5s of inactivity
 - Error handling decodes `ST0`, `ST1`, and `ST2`
 - Recoverable failures trigger recalibrate + retry up to three attempts
 
 ## Current Limits
 - Disk-change handling is not yet implemented
-- Format-track support is not yet implemented
-- Multi-track command batching is not yet implemented

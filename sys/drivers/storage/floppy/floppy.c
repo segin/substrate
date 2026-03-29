@@ -8,7 +8,9 @@
 #include <kern/sched.h>
 #include <kern/time.h>
 #include <rtc.h>
+#include <sys/copy.h>
 #include <sys/errno.h>
+#include <sys/floppy.h>
 #include <sys/irq.h>
 #include <sys/lock.h>
 #include <sys/param.h>
@@ -569,6 +571,123 @@ static int fdc_transfer_sectors(fdc_drive_t *drive, uint32_t lba, uint32_t count
     return -EIO;
 }
 
+static int fdc_format_track(fdc_drive_t *drive, const struct floppy_format_track *fmt) {
+    fdc_controller_t *ctlr;
+    struct floppy_format_track local;
+    uint8_t result[7];
+    uint8_t gap3;
+    uint8_t sectors_per_track;
+    uint8_t sector_size_code;
+    size_t fmt_len;
+    int ret;
+    int attempt;
+
+    if (drive == NULL || drive->geom == NULL || fmt == NULL) {
+        return -EINVAL;
+    }
+
+    local = *fmt;
+    if (local.head >= drive->geom->heads || local.cylinder >= drive->geom->cylinders) {
+        return -EINVAL;
+    }
+
+    sectors_per_track = local.sectors_per_track ? local.sectors_per_track : drive->geom->sectors_per_track;
+    sector_size_code = local.sector_size_code ? local.sector_size_code : FDC_SECTOR_SHIFT_512;
+    gap3 = local.gap3 ? local.gap3 : (drive->geom->data_rate == 0 ? FDC_GAP3_HD : FDC_GAP3_DD);
+    fmt_len = (size_t)sectors_per_track * 4U;
+
+    if (sector_size_code != FDC_SECTOR_SHIFT_512 ||
+        sectors_per_track == 0 ||
+        fmt_len > FDC_DMA_BUFFER_SIZE) {
+        return -EINVAL;
+    }
+
+    ctlr = &fdc_controllers[drive->controller_index];
+    spinlock_acquire(&ctlr->lock);
+    for (attempt = 0; attempt < FDC_RETRY_LIMIT; attempt++) {
+        fdc_motor_set(drive, 1);
+        fdc_set_rate(ctlr, drive->geom->data_rate);
+
+        if (attempt == 0) {
+            ret = fdc_seek_drive(drive, (uint8_t)local.cylinder);
+        } else {
+            ret = fdc_recalibrate_drive(drive);
+            if (ret == 0) {
+                ret = fdc_seek_drive(drive, (uint8_t)local.cylinder);
+            }
+        }
+        if (ret < 0) {
+            continue;
+        }
+
+        for (uint8_t i = 0; i < sectors_per_track; i++) {
+            size_t off = (size_t)i * 4U;
+
+            ctlr->dma_buf[off + 0] = (uint8_t)local.cylinder;
+            ctlr->dma_buf[off + 1] = local.head;
+            ctlr->dma_buf[off + 2] = (uint8_t)(i + 1U);
+            ctlr->dma_buf[off + 3] = sector_size_code;
+        }
+
+        ret = fdc_program_dma(ctlr, 1, fmt_len);
+        if (ret < 0) {
+            continue;
+        }
+
+        ctlr->irq_seen = 0;
+        ret = fdc_write_fifo(ctlr, FDC_CMD_FORMAT_TRACK);
+        if (ret < 0) {
+            continue;
+        }
+        ret = fdc_write_fifo(ctlr, (uint8_t)((local.head << 2) | (drive->drive_select & 0x03)));
+        if (ret < 0) {
+            continue;
+        }
+        ret = fdc_write_fifo(ctlr, sector_size_code);
+        if (ret < 0) {
+            continue;
+        }
+        ret = fdc_write_fifo(ctlr, sectors_per_track);
+        if (ret < 0) {
+            continue;
+        }
+        ret = fdc_write_fifo(ctlr, gap3);
+        if (ret < 0) {
+            continue;
+        }
+        ret = fdc_write_fifo(ctlr, local.fill);
+        if (ret < 0) {
+            continue;
+        }
+
+        ret = fdc_wait_irq(ctlr, FDC_TIMEOUT_MS);
+        if (ret < 0) {
+            continue;
+        }
+
+        for (ret = 0; ret < 7; ret++) {
+            if (fdc_read_fifo(ctlr, &result[ret]) < 0) {
+                ret = -EIO;
+                break;
+            }
+        }
+        if (ret < 0) {
+            continue;
+        }
+
+        if ((result[0] & FDC_ST0_IC_MASK) == FDC_ST0_IC_NORMAL &&
+            result[1] == 0 && result[2] == 0) {
+            drive->last_activity_ms = (uint64_t)get_uptime_ms();
+            spinlock_release(&ctlr->lock);
+            return 0;
+        }
+    }
+
+    drive->last_activity_ms = (uint64_t)get_uptime_ms();
+    spinlock_release(&ctlr->lock);
+    return -EIO;
+}
+
 static int fdc_irq_handler(unsigned int irq, void *dev_id, void *frame) {
     fdc_controller_t *ctlr = (fdc_controller_t *)dev_id;
     (void)frame;
@@ -645,6 +764,32 @@ static int floppy_write(blkdev_t *dev, uint64_t sector, uint32_t count, const vo
     return 0;
 }
 
+static int floppy_ioctl(blkdev_t *dev, uint32_t request, void *arg) {
+    fdc_drive_t *drive = (fdc_drive_t *)dev->priv;
+    struct floppy_format_track fmt;
+    int kernel_arg;
+
+    if (drive == NULL || !drive->present) {
+        return -EINVAL;
+    }
+
+    switch (request) {
+    case FLOPPY_IOCTL_FORMAT_TRACK:
+        if (arg == NULL) {
+            return -EINVAL;
+        }
+        kernel_arg = ((uintptr_t)arg >= KERN_BASE);
+        if (kernel_arg) {
+            fmt = *(struct floppy_format_track *)arg;
+        } else if (copyin(arg, &fmt, sizeof(fmt)) != 0) {
+            return -EFAULT;
+        }
+        return fdc_format_track(drive, &fmt);
+    default:
+        return -ENOTTY;
+    }
+}
+
 static int fdc_controller_dma_init(fdc_controller_t *ctlr) {
     vm_page_t *page;
 
@@ -670,6 +815,7 @@ static void fdc_register_drive(fdc_drive_t *drive) {
     drive->bdev.priv = drive;
     drive->bdev.read = floppy_read;
     drive->bdev.write = floppy_write;
+    drive->bdev.ioctl = floppy_ioctl;
     blkdev_register_disk(&drive->bdev);
     kprintf("fdc: %s %s registered (%llu sectors)\n",
             drive->bdev.name,

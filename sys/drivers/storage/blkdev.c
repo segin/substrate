@@ -1,6 +1,7 @@
 #include <drivers/storage/blkdev.h>
 #include <kern/geom/geom.h>
 #include <kern/console.h>
+#include <sys/errno.h>
 #include <string.h>
 #include <vm/vm_kmem.h>
 
@@ -27,6 +28,15 @@ static size_t blkdev_vfs_write(fs_node_t *node, off_t offset, size_t size, const
     return blkdev_write_bytes(dev, offset, size, buffer);
 }
 
+static int blkdev_vfs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
+    blkdev_t *dev = (blkdev_t *)node->impl;
+
+    if (!dev || !dev->ioctl) {
+        return -ENOTTY;
+    }
+    return dev->ioctl(dev, request, arg);
+}
+
 void blkdev_register(blkdev_t *dev) {
     if (!dev) return;
     
@@ -38,6 +48,7 @@ void blkdev_register(blkdev_t *dev) {
     dev->node.impl = (uint32_t)(uintptr_t)dev;
     dev->node.read = blkdev_vfs_read;
     dev->node.write = blkdev_vfs_write;
+    dev->node.ioctl = blkdev_vfs_ioctl;
     
     // Register with DevFS
     devfs_register_device(&dev->node);
