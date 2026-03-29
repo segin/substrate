@@ -621,7 +621,7 @@
         - [x] Program DMA controller (ports 0x04, 0x05, 0x81, 0x0A, 0x0B, 0x0C) for read/write. <!-- sys/drivers/storage/floppy/floppy.c, docs/specs/driver_storage_floppy.md --> (REQ: REQ-03-0343)
         - [x] DMA buffer must be below 16 MB (ISA 24‑bit addressing). <!-- sys/drivers/storage/floppy/floppy_geom.c, tests/sys/host_test_floppy.c --> (REQ: REQ-03-0344)
         - [x] Allocate bounce buffer in low memory if kernel buffer is above 16 MB. <!-- sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0345)
-    - [ ] **Drive Detection:** (REQ: REQ-03-0346)
+    - [x] **Drive Detection:** (REQ: REQ-03-0346)
         - [x] Query CMOS (RTC port 0x70/0x71, register 0x10) for drive types: <!-- sys/drivers/storage/floppy/floppy.c, sys/drivers/storage/floppy/floppy_geom.c, tests/sys/host_test_floppy.c --> (REQ: REQ-03-0347)
             - Bits 7–4: drive 0 type, bits 3–0: drive 1 type.
             - 0=none, 1=360K, 2=1.2M, 3=720K, 4=1.44M, 5=2.88M.
