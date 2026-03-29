@@ -141,10 +141,52 @@ static void test_rwlock_non_owner_panics(void) {
     assert(strstr(last_panic, "non-owner") != NULL);
 }
 
+static void test_rwlock_wowned(void) {
+    rwlock_t rw;
+    thread_t *owner;
+    thread_t *other;
+
+    reset_env();
+    owner = init_thread(0, 1);
+    other = init_thread(1, 2);
+
+    rwlock_init(&rw, "wowned");
+
+    // Initially not owned
+    current_thread = owner;
+    assert(!rw_wowned(&rw));
+
+    // Writer acquires lock, owned by writer
+    assert(rw_try_wlock(&rw));
+    assert(rw_wowned(&rw));
+
+    // Another thread checks, should not be owned by it
+    current_thread = other;
+    assert(!rw_wowned(&rw));
+
+    // Owner releases lock, no longer owned
+    current_thread = owner;
+    rw_wunlock(&rw);
+    assert(!rw_wowned(&rw));
+
+    // Reader acquires lock, not owned by writer
+    assert(rw_try_rlock(&rw));
+    assert(!rw_wowned(&rw));
+
+    // Another thread checks while reader holds it, still not owned by writer
+    current_thread = other;
+    assert(!rw_wowned(&rw));
+
+    current_thread = owner;
+    rw_runlock(&rw);
+    assert(!rw_wowned(&rw));
+}
+
 int main(void) {
     test_rwlock_reader_and_writer_paths();
     test_rwlock_writer_preference_and_reader_wakeup();
     test_rwlock_non_owner_panics();
+    test_rwlock_wowned();
     puts("host_test_rwlock: PASS");
     return 0;
 }
