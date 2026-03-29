@@ -33,6 +33,7 @@
 #define FDC_TIMEOUT_MS 1000U
 #define FDC_MOTOR_SPINUP_MS 400U
 #define FDC_MOTOR_IDLE_MS 2500U
+#define FDC_DMA_BUFFER_SIZE 4096U
 #define FDC_RETRY_LIMIT 3
 #define FDC_POLL_SPINS_PER_MS 100U
 
@@ -405,25 +406,64 @@ static const char *fdc_decode_st2(uint8_t st2, char *buf, size_t size) {
     return buf;
 }
 
-static int fdc_transfer_sector(fdc_drive_t *drive, uint32_t lba, uint8_t *buffer,
-                               int write_to_drive) {
+static uint32_t fdc_transfer_chunk_sectors(const fdc_drive_t *drive, const fdc_chs_t *chs,
+                                           uint32_t requested) {
+    uint32_t sectors_per_track;
+    uint32_t sectors_per_cylinder;
+    uint32_t sector_index;
+    uint32_t cylinder_remaining;
+    uint32_t dma_limit;
+
+    if (drive == NULL || drive->geom == NULL || chs == NULL || requested == 0) {
+        return 0;
+    }
+
+    sectors_per_track = drive->geom->sectors_per_track;
+    sectors_per_cylinder = (uint32_t)drive->geom->heads * sectors_per_track;
+    sector_index = ((uint32_t)chs->head * sectors_per_track) + ((uint32_t)chs->sector - 1U);
+    cylinder_remaining = sectors_per_cylinder - sector_index;
+    dma_limit = FDC_DMA_BUFFER_SIZE / 512U;
+
+    if (requested > cylinder_remaining) {
+        requested = cylinder_remaining;
+    }
+    if (requested > dma_limit) {
+        requested = dma_limit;
+    }
+    return requested;
+}
+
+static int fdc_transfer_sectors(fdc_drive_t *drive, uint32_t lba, uint32_t count,
+                                uint8_t *buffer, int write_to_drive) {
     fdc_controller_t *ctlr = &fdc_controllers[drive->controller_index];
     fdc_chs_t chs;
     uint8_t result[7];
     uint8_t command;
     uint8_t gap3;
+    uint8_t mt;
+    uint32_t byte_count;
+    uint32_t sectors_per_track;
+    uint32_t sectors_this_cmd;
     int ret;
     int attempt;
 
-    if (drive->geom == NULL || buffer == NULL) {
+    if (drive->geom == NULL || buffer == NULL || count == 0) {
         return -EINVAL;
     }
     if (fdc_lba_to_chs(drive->geom, lba, &chs) < 0) {
         return -EINVAL;
     }
 
+    sectors_per_track = drive->geom->sectors_per_track;
+    sectors_this_cmd = fdc_transfer_chunk_sectors(drive, &chs, count);
+    if (sectors_this_cmd == 0) {
+        return -EINVAL;
+    }
+
+    byte_count = sectors_this_cmd * 512U;
     command = write_to_drive ? FDC_CMD_WRITE_DATA : FDC_CMD_READ_DATA;
     gap3 = drive->geom->data_rate == 0 ? FDC_GAP3_HD : FDC_GAP3_DD;
+    mt = (((uint32_t)chs.sector - 1U) + sectors_this_cmd > sectors_per_track) ? 0x80U : 0x00U;
 
     spinlock_acquire(&ctlr->lock);
     for (attempt = 0; attempt < FDC_RETRY_LIMIT; attempt++) {
@@ -443,16 +483,16 @@ static int fdc_transfer_sector(fdc_drive_t *drive, uint32_t lba, uint8_t *buffer
         }
 
         if (write_to_drive) {
-            memcpy(ctlr->dma_buf, buffer, 512);
+            memcpy(ctlr->dma_buf, buffer, byte_count);
         }
 
-        ret = fdc_program_dma(ctlr, write_to_drive, 512);
+        ret = fdc_program_dma(ctlr, write_to_drive, byte_count);
         if (ret < 0) {
             continue;
         }
 
         ctlr->irq_seen = 0;
-        ret = fdc_write_fifo(ctlr, command);
+        ret = fdc_write_fifo(ctlr, (uint8_t)(command | mt));
         if (ret < 0) {
             continue;
         }
@@ -506,7 +546,7 @@ static int fdc_transfer_sector(fdc_drive_t *drive, uint32_t lba, uint8_t *buffer
 
         if ((result[0] & FDC_ST0_IC_MASK) == FDC_ST0_IC_NORMAL && result[1] == 0 && result[2] == 0) {
             if (!write_to_drive) {
-                memcpy(buffer, ctlr->dma_buf, 512);
+                memcpy(buffer, ctlr->dma_buf, byte_count);
             }
             drive->last_activity_ms = (uint64_t)get_uptime_ms();
             spinlock_release(&ctlr->lock);
@@ -553,10 +593,22 @@ static int floppy_read(blkdev_t *dev, uint64_t sector, uint32_t count, void *buf
         return -EINVAL;
     }
 
-    for (i = 0; i < count; i++) {
-        if (fdc_transfer_sector(drive, (uint32_t)(sector + i), cursor + (i * 512U), 0) < 0) {
+    while (i < count) {
+        fdc_chs_t chs;
+        uint32_t chunk;
+
+        if (fdc_lba_to_chs(drive->geom, (uint32_t)(sector + i), &chs) < 0) {
+            return -EINVAL;
+        }
+        chunk = fdc_transfer_chunk_sectors(drive, &chs, count - i);
+        if (chunk == 0) {
             return -EIO;
         }
+        if (fdc_transfer_sectors(drive, (uint32_t)(sector + i), chunk,
+                                 cursor + (i * 512U), 0) < 0) {
+            return -EIO;
+        }
+        i += chunk;
     }
     return 0;
 }
@@ -573,10 +625,22 @@ static int floppy_write(blkdev_t *dev, uint64_t sector, uint32_t count, const vo
         return -EINVAL;
     }
 
-    for (i = 0; i < count; i++) {
-        if (fdc_transfer_sector(drive, (uint32_t)(sector + i), (uint8_t *)(uintptr_t)(cursor + (i * 512U)), 1) < 0) {
+    while (i < count) {
+        fdc_chs_t chs;
+        uint32_t chunk;
+
+        if (fdc_lba_to_chs(drive->geom, (uint32_t)(sector + i), &chs) < 0) {
+            return -EINVAL;
+        }
+        chunk = fdc_transfer_chunk_sectors(drive, &chs, count - i);
+        if (chunk == 0) {
             return -EIO;
         }
+        if (fdc_transfer_sectors(drive, (uint32_t)(sector + i), chunk,
+                                 (uint8_t *)(uintptr_t)(cursor + (i * 512U)), 1) < 0) {
+            return -EIO;
+        }
+        i += chunk;
     }
     return 0;
 }
@@ -591,8 +655,8 @@ static int fdc_controller_dma_init(fdc_controller_t *ctlr) {
     ctlr->dma_page = page;
     ctlr->dma_phys = vm_page_to_phys(page);
     ctlr->dma_buf = (uint8_t *)(uintptr_t)(ctlr->dma_phys + KERN_BASE);
-    memset(ctlr->dma_buf, 0, 4096);
-    return fdc_dma_window_valid(ctlr->dma_phys, 4096) ? 0 : -EINVAL;
+    memset(ctlr->dma_buf, 0, FDC_DMA_BUFFER_SIZE);
+    return fdc_dma_window_valid(ctlr->dma_phys, FDC_DMA_BUFFER_SIZE) ? 0 : -EINVAL;
 }
 
 static void fdc_register_drive(fdc_drive_t *drive) {
