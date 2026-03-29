@@ -72,20 +72,13 @@ The kernel remains monolithic and is organized into logical layers:
 - `sys/drivers/`: Device driver framework and hardware drivers.
 - `sys/exec/`: Executable loading and execution personalities.
 
-### Subsystem Specifications
-- **Boot and Initialization:** See `docs/specs/kmain_init.md` and `docs/specs/arch_i386_boot.md`.
-- **ext2-boot Bootloader:** `sys/boot/` contains the native Substrate BIOS bootloader for ext2 partitions. Stage1 (`stage1.asm`, 1024-byte boot block) loads stage2 from ext2 inode 5 and enters protected mode. Stage2 (`stage2.c`) reads the ext2 filesystem, finds `/vmunix` by name, loads the ELF kernel with multiboot protocol, and offers an interactive `boot:` prompt with timeout. `build-rootfs.sh --image` builds and installs it into `rootfs.img` via `tools/ext2-install-boot`. Requires `nasm`, `gcc -m32`, and 1024-byte block / 128-byte inode ext2 images. `contrib/ext2-boot` (lazear/ext2-boot, MIT) is retained as a reference submodule.
-- **Memory Management:** See `docs/specs/pmm.md` (Physical) and `docs/specs/pmap.md` (Virtual).
-- **Process Model:** See `docs/specs/kern_process_exit.md` and `docs/specs/kern_pid1.md`.
-- **VFS and Filesystems:** See `docs/specs/vm_subsystem.md` (File cache) and `docs/specs/fs_devfs.md`.
-- **Buffer Cache (`bio`):** BSD-style block I/O cache with hash lookup, four-queue lifecycle, delayed write, and 30s syncer kthread. See `docs/specs/vfs_bio.md`.
-- **VFS Locking (`lockmgr`):** BSD-style lock manager with shared/exclusive/upgrade/drain modes and turnstile PI. See `docs/specs/kern_locking.md`.
-- **Device Model:** See `docs/specs/driver_model.md`.
-- **Console and VT:** See `docs/specs/driver_tty.md` and `docs/specs/driver_vt.md`.
-- **Framebuffer Rendering:** Font parsers, glyph cache, blitting operations, and attributed character rendering. See `docs/specs/driver_fb_console.md`.
-- **Framebuffer Mapping:** Linear framebuffers use write-combining mappings when i386 PAT support is present, with uncached fallback on older CPUs.
-- **VirtIO Display Transport:** Legacy PCI VirtIO-GPU discovery and queue bring-up are tracked in `docs/specs/driver_virtio_gpu.md`.
-- **Personalities:** See `docs/specs/personality_targets.md` and `docs/specs/personality_elks.md`.
+Detailed subsystem behavior belongs in `docs/specs/`, including:
+- boot and initialization: `docs/specs/kmain_init.md`, `docs/specs/arch_i386_boot.md`, `docs/specs/bootloader_ext2_boot.md`
+- memory management: `docs/specs/pmm.md`, `docs/specs/pmap.md`
+- process model: `docs/specs/kern_process_exit.md`, `docs/specs/kern_pid1.md`
+- VFS and filesystems: `docs/specs/vm_subsystem.md`, `docs/specs/fs_devfs.md`, `docs/specs/vfs_bio.md`
+- device and terminal subsystems: `docs/specs/driver_model.md`, `docs/specs/driver_tty.md`, `docs/specs/driver_vt.md`, `docs/specs/driver_fb_console.md`, `docs/specs/driver_virtio_gpu.md`
+- execution personalities: `docs/specs/personality_targets.md`, `docs/specs/personality_elks.md`
 
 ## 6. Userland and Libraries
 
@@ -93,19 +86,10 @@ Userland is split by role (essential, admin, extended) and supported by a suite 
 
 ### Key Components
 - **`libsys`:** The canonical typed interface for system introspection and control.
-- **`ex`/`vi` Editor Stack:** The base editors are first-class userland programs in `bin/`, but they are not treated as independent implementations. The architectural direction is a shared editor core plus thin `bin/ex` and `bin/vi` frontends so ex command semantics, buffer state, undo, regex/search, and recovery do not drift across modes.
-- **`lib/edit`:** `lib/edit` remains the command-line editing and history library for shells and prompts. Its raw-mode, terminal capability, key decoding, history, and UTF-8/display-width helpers may be reused by the editor stack, but its line-editor vi mode is not the full-screen `vi` implementation.
+- **`ex`/`vi` Editor Stack:** The base editors remain first-class userland programs in `bin/`, with shared implementation planned in `usr.lib/exvi/`. Detailed editor design notes live in `docs/specs/exvi.md`.
+- **`lib/edit`:** Command-line editing and history library for shells and prompts. Reusable low-level pieces for the editor stack are documented in `docs/specs/exvi.md`.
 - **`find(1)`:** A multi-dialect file hierarchy walker. See `docs/find/architecture.md`.
 - **Native Toolchain:** Integrated compiler, assembler, and linker. See `docs/specs/as_spec.md`.
-
-### Editor Architecture
-
-The `ex`/`vi` subsystem is converging on three layers:
-- **Frontend binaries:** `bin/ex` for line-oriented ex mode and `bin/vi` for visual mode selection and terminal session startup.
-- **Shared editor core:** common buffer model, address and command parsing, file and recovery handling, marks/registers, options, tags, undo/redo, and regex-backed search/substitute logic. This shared core is intended to live in `usr.lib/exvi/` rather than inside the frontend `main()` files.
-- **Visual screen engine:** a full-screen terminal layer for `vi` with its own window/cursor/screen-diff model. It may reuse low-level helpers from `lib/edit`, but it is not built by extending `lib/edit`'s single-line vi state machine.
-
-This split keeps POSIX `ex` behavior and `vi` colon-command behavior aligned while preserving a clean separation between command language, buffer mechanics, and terminal presentation. Detailed editor design notes live in `docs/specs/exvi.md`.
 
 ## 7. ABI and Interface Boundaries
 
