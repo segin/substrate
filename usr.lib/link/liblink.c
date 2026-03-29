@@ -872,16 +872,61 @@ ln_compute_symlink_target(const ln_options_t *opts, const char *source, const ch
 }
 
 static int
+ln_handle_existing_dest(const ln_options_t *opts, const char *dest, bool replace_dir_with_f)
+{
+    bool need_replace;
+    int rc;
+
+    need_replace = false;
+
+    if (opts->replace_mode == LN_REPLACE_INTERACTIVE) {
+        if (!ln_prompt_replace(opts, dest)) {
+            ln_diag(opts, "not replacing %s", dest);
+            return -1;
+        }
+        need_replace = true;
+    } else if (opts->replace_mode == LN_REPLACE_FORCE) {
+        need_replace = true;
+    } else if (opts->backup_mode != LN_BACKUP_NONE) {
+        need_replace = true;
+    } else if (replace_dir_with_f) {
+        need_replace = true;
+    }
+
+    if (!need_replace) {
+        ln_diag(opts, "%s: destination exists", dest);
+        return -1;
+    }
+
+    if (opts->backup_mode != LN_BACKUP_NONE) {
+        if (ln_backup_destination(opts, dest) != 0) {
+            ln_diag_errno(opts, dest, "create backup");
+            return -1;
+        }
+    } else {
+        if (replace_dir_with_f) {
+            rc = rmdir(dest);
+        } else {
+            rc = unlink(dest);
+        }
+        if (rc != 0) {
+            ln_diag_errno(opts, dest, "remove destination");
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+static int
 ln_process_one(const ln_options_t *opts, const char *source, const char *dest)
 {
     struct stat dst_st;
     bool dst_exists;
     bool replace_dir_with_f;
-    bool need_replace;
     char *symlink_target;
     char *hard_source;
     const char *same_entry_source;
-    int rc;
     int source_is_dir;
 
     symlink_target = NULL;
@@ -933,50 +978,10 @@ ln_process_one(const ln_options_t *opts, const char *source, const char *dest)
                          dst_exists && S_ISDIR(dst_st.st_mode);
 
     if (dst_exists) {
-        need_replace = false;
-
-        if (opts->replace_mode == LN_REPLACE_INTERACTIVE) {
-            if (!ln_prompt_replace(opts, dest)) {
-                ln_diag(opts, "not replacing %s", dest);
-                free(symlink_target);
-                free(hard_source);
-                return -1;
-            }
-            need_replace = true;
-        } else if (opts->replace_mode == LN_REPLACE_FORCE) {
-            need_replace = true;
-        } else if (opts->backup_mode != LN_BACKUP_NONE) {
-            need_replace = true;
-        } else if (replace_dir_with_f) {
-            need_replace = true;
-        }
-
-        if (!need_replace) {
-            ln_diag(opts, "%s: destination exists", dest);
+        if (ln_handle_existing_dest(opts, dest, replace_dir_with_f) != 0) {
             free(symlink_target);
             free(hard_source);
             return -1;
-        }
-
-        if (opts->backup_mode != LN_BACKUP_NONE) {
-            if (ln_backup_destination(opts, dest) != 0) {
-                ln_diag_errno(opts, dest, "create backup");
-                free(symlink_target);
-                free(hard_source);
-                return -1;
-            }
-        } else {
-            if (replace_dir_with_f) {
-                rc = rmdir(dest);
-            } else {
-                rc = unlink(dest);
-            }
-            if (rc != 0) {
-                ln_diag_errno(opts, dest, "remove destination");
-                free(symlink_target);
-                free(hard_source);
-                return -1;
-            }
         }
     }
 
