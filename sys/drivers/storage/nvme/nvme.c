@@ -157,6 +157,41 @@ int nvme_disable_controller(nvme_controller_t *ctrl) {
     return 0;
 }
 
+int nvme_configure_admin_queue_attrs(nvme_controller_t *ctrl,
+                                     uint16_t sq_entries,
+                                     uint16_t cq_entries) {
+    uint32_t cc;
+    uint32_t aqa;
+    uint32_t max_entries;
+
+    if (ctrl == NULL || ctrl->mmio == NULL || !ctrl->present) {
+        return -1;
+    }
+    if (sq_entries < NVME_ADMIN_QUEUE_MIN_ENTRIES ||
+        cq_entries < NVME_ADMIN_QUEUE_MIN_ENTRIES ||
+        sq_entries > NVME_ADMIN_QUEUE_MAX_ENTRIES ||
+        cq_entries > NVME_ADMIN_QUEUE_MAX_ENTRIES) {
+        return -1;
+    }
+
+    max_entries = (uint32_t)ctrl->cap.mqes + 1U;
+    if (ctrl->cap.mqes != 0 &&
+        ((uint32_t)sq_entries > max_entries || (uint32_t)cq_entries > max_entries)) {
+        return -1;
+    }
+
+    cc = nvme_mmio_read32(ctrl->mmio, NVME_REG_CC);
+    if ((cc & NVME_CC_EN) != 0 || ctrl->enabled) {
+        return -1;
+    }
+
+    aqa = (((uint32_t)sq_entries - 1U) << 16) | ((uint32_t)cq_entries - 1U);
+    nvme_mmio_write32(ctrl->mmio, NVME_REG_AQA, aqa);
+    ctrl->admin_sq_entries = sq_entries;
+    ctrl->admin_cq_entries = cq_entries;
+    return 0;
+}
+
 size_t nvme_controller_count(void) {
     return nvme_controller_total;
 }

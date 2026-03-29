@@ -289,12 +289,60 @@ static void test_disable_controller_times_out_if_ready_stays_set(void) {
     assert((cc & NVME_CC_EN) == 0);
 }
 
+static void test_configure_admin_queue_attrs_programs_aqa(void) {
+    nvme_controller_t ctrl;
+    uint32_t aqa = 0;
+
+    reset_state();
+    memset(&ctrl, 0, sizeof(ctrl));
+    ctrl.present = 1;
+    ctrl.mmio = mock_mmio[0];
+    ctrl.cap.mqes = 63;
+
+    assert(nvme_configure_admin_queue_attrs(&ctrl, 32, 16) == 0);
+    memcpy(&aqa, mock_mmio[0] + NVME_REG_AQA, sizeof(aqa));
+    assert(aqa == 0x001f000fU);
+    assert(ctrl.admin_sq_entries == 32);
+    assert(ctrl.admin_cq_entries == 16);
+}
+
+static void test_configure_admin_queue_attrs_rejects_enabled_controller(void) {
+    nvme_controller_t ctrl;
+    uint32_t cc = NVME_CC_EN;
+
+    reset_state();
+    memset(&ctrl, 0, sizeof(ctrl));
+    ctrl.present = 1;
+    ctrl.mmio = mock_mmio[1];
+    ctrl.cap.mqes = 31;
+    ctrl.enabled = 1;
+    memcpy(mock_mmio[1] + NVME_REG_CC, &cc, sizeof(cc));
+
+    assert(nvme_configure_admin_queue_attrs(&ctrl, 8, 8) < 0);
+}
+
+static void test_configure_admin_queue_attrs_rejects_oversized_queues(void) {
+    nvme_controller_t ctrl;
+
+    reset_state();
+    memset(&ctrl, 0, sizeof(ctrl));
+    ctrl.present = 1;
+    ctrl.mmio = mock_mmio[2];
+    ctrl.cap.mqes = 7;
+
+    assert(nvme_configure_admin_queue_attrs(&ctrl, 9, 8) < 0);
+    assert(nvme_configure_admin_queue_attrs(&ctrl, 8, 9) < 0);
+}
+
 int main(void) {
     test_decode_cap_extracts_timeout_and_stride();
     test_scan_filters_nvme_functions_and_records_cap();
     test_init_publishes_scanned_controllers();
     test_disable_controller_clears_enable_and_waits_ready_down();
     test_disable_controller_times_out_if_ready_stays_set();
+    test_configure_admin_queue_attrs_programs_aqa();
+    test_configure_admin_queue_attrs_rejects_enabled_controller();
+    test_configure_admin_queue_attrs_rejects_oversized_queues();
     puts("host_test_nvme: PASS");
     return 0;
 }
