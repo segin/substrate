@@ -1236,6 +1236,47 @@ dlang_parse_type_core(dlang_parser_t *p)
 }
 
 static int
+dlang_apply_type_quals(char **seg, unsigned quals)
+{
+    char *tmp;
+
+    if ((quals & DLANG_QUAL_INOUT) != 0) {
+        tmp = dlang_wrap_type("inout(", *seg, ")");
+        free(*seg);
+        *seg = tmp;
+        if (*seg == NULL) {
+            return -1;
+        }
+    }
+    if ((quals & DLANG_QUAL_CONST) != 0) {
+        tmp = dlang_wrap_type("const(", *seg, ")");
+        free(*seg);
+        *seg = tmp;
+        if (*seg == NULL) {
+            return -1;
+        }
+    }
+    if ((quals & DLANG_QUAL_IMMUTABLE) != 0) {
+        tmp = dlang_wrap_type("immutable(", *seg, ")");
+        free(*seg);
+        *seg = tmp;
+        if (*seg == NULL) {
+            return -1;
+        }
+    }
+    if ((quals & DLANG_QUAL_SHARED) != 0) {
+        tmp = dlang_wrap_type("shared(", *seg, ")");
+        free(*seg);
+        *seg = tmp;
+        if (*seg == NULL) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+static int
 dlang_parse_type(dlang_parser_t *p)
 {
     int rc;
@@ -1243,7 +1284,6 @@ dlang_parse_type(dlang_parser_t *p)
     unsigned attrs;
     size_t off;
     char *seg;
-    char *tmp;
 
     if (dlang_parser_enter(p) != 0) {
         return -1;
@@ -1297,37 +1337,8 @@ dlang_parse_type(dlang_parser_t *p)
         goto out;
     }
 
-    if ((quals & DLANG_QUAL_INOUT) != 0) {
-        tmp = dlang_wrap_type("inout(", seg, ")");
-        free(seg);
-        seg = tmp;
-        if (seg == NULL) {
-            goto out;
-        }
-    }
-    if ((quals & DLANG_QUAL_CONST) != 0) {
-        tmp = dlang_wrap_type("const(", seg, ")");
-        free(seg);
-        seg = tmp;
-        if (seg == NULL) {
-            goto out;
-        }
-    }
-    if ((quals & DLANG_QUAL_IMMUTABLE) != 0) {
-        tmp = dlang_wrap_type("immutable(", seg, ")");
-        free(seg);
-        seg = tmp;
-        if (seg == NULL) {
-            goto out;
-        }
-    }
-    if ((quals & DLANG_QUAL_SHARED) != 0) {
-        tmp = dlang_wrap_type("shared(", seg, ")");
-        free(seg);
-        seg = tmp;
-        if (seg == NULL) {
-            goto out;
-        }
+    if (dlang_apply_type_quals(&seg, quals) != 0) {
+        goto out;
     }
 
     if (dlang_buf_append(&p->out, seg, strlen(seg)) != 0) {
