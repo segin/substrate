@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <kern/device.h>
@@ -18,6 +19,8 @@ static int kprint_calls;
 static int64_t mock_time_ms;
 static int csts_read_count[4];
 static int csts_clear_after_reads[4];
+static uintptr_t mock_dma_next;
+static int dma_alloc_fail_after;
 
 static void reset_state(void) {
     memset(mock_devices, 0, sizeof(mock_devices));
@@ -30,6 +33,8 @@ static void reset_state(void) {
     mock_time_ms = 0;
     memset(csts_read_count, 0, sizeof(csts_read_count));
     memset(csts_clear_after_reads, 0, sizeof(csts_clear_after_reads));
+    mock_dma_next = 0x20000000U;
+    dma_alloc_fail_after = -1;
 }
 
 static pci_device_t *add_pci_device(uint16_t class_code, uint16_t subclass,
@@ -178,6 +183,30 @@ uint32_t nvme_test_mmio_read32(volatile uint8_t *mmio, uint32_t reg) {
 
 void nvme_test_mmio_write32(volatile uint8_t *mmio, uint32_t reg, uint32_t value) {
     memcpy((void *)(mmio + reg), &value, sizeof(value));
+}
+
+void *dma_alloc_coherent(size_t size, dma_addr_t *dma_handle) {
+    void *ptr;
+
+    if (dma_alloc_fail_after == 0) {
+        return NULL;
+    }
+    if (dma_alloc_fail_after > 0) {
+        dma_alloc_fail_after--;
+    }
+
+    ptr = calloc(1, size);
+    assert(ptr != NULL);
+    if (dma_handle != NULL) {
+        *dma_handle = (dma_addr_t)mock_dma_next;
+        mock_dma_next += (uintptr_t)((size + 0xFFFU) & ~0xFFFU);
+    }
+    return ptr;
+}
+
+void dma_free_coherent(void *cpu_addr, size_t size) {
+    (void)size;
+    free(cpu_addr);
 }
 
 #include "../../sys/drivers/storage/nvme/nvme.c"
@@ -334,6 +363,62 @@ static void test_configure_admin_queue_attrs_rejects_oversized_queues(void) {
     assert(nvme_configure_admin_queue_attrs(&ctrl, 8, 9) < 0);
 }
 
+static void test_create_admin_queues_allocates_and_programs_addresses(void) {
+    nvme_controller_t ctrl;
+    uint64_t asq = 0;
+    uint64_t acq = 0;
+
+    reset_state();
+    memset(&ctrl, 0, sizeof(ctrl));
+    ctrl.present = 1;
+    ctrl.mmio = mock_mmio[0];
+    ctrl.admin_sq_entries = 8;
+    ctrl.admin_cq_entries = 16;
+
+    assert(nvme_create_admin_queues(&ctrl) == 0);
+    memcpy(&asq, mock_mmio[0] + NVME_REG_ASQ, sizeof(asq));
+    memcpy(&acq, mock_mmio[0] + NVME_REG_ACQ, sizeof(acq));
+    assert(asq == (uint64_t)ctrl.admin_sq_dma);
+    assert(acq == (uint64_t)ctrl.admin_cq_dma);
+    assert(ctrl.admin_sq != NULL);
+    assert(ctrl.admin_cq != NULL);
+    assert(ctrl.admin_sq_bytes == 8U * NVME_ADMIN_SQ_ENTRY_SIZE);
+    assert(ctrl.admin_cq_bytes == 16U * NVME_ADMIN_CQ_ENTRY_SIZE);
+
+    dma_free_coherent(ctrl.admin_sq, ctrl.admin_sq_bytes);
+    dma_free_coherent(ctrl.admin_cq, ctrl.admin_cq_bytes);
+}
+
+static void test_create_admin_queues_rejects_missing_queue_attrs(void) {
+    nvme_controller_t ctrl;
+
+    reset_state();
+    memset(&ctrl, 0, sizeof(ctrl));
+    ctrl.present = 1;
+    ctrl.mmio = mock_mmio[1];
+
+    assert(nvme_create_admin_queues(&ctrl) < 0);
+}
+
+static void test_create_admin_queues_frees_sq_if_cq_alloc_fails(void) {
+    nvme_controller_t ctrl;
+
+    reset_state();
+    memset(&ctrl, 0, sizeof(ctrl));
+    ctrl.present = 1;
+    ctrl.mmio = mock_mmio[2];
+    ctrl.admin_sq_entries = 4;
+    ctrl.admin_cq_entries = 4;
+    dma_alloc_fail_after = 1;
+
+    assert(nvme_create_admin_queues(&ctrl) < 0);
+    assert(ctrl.admin_sq == NULL);
+    assert(ctrl.admin_cq == NULL);
+    assert(ctrl.admin_sq_dma == (dma_addr_t)0);
+    assert(ctrl.admin_sq_bytes == 0);
+    assert(ctrl.admin_cq_bytes == 0);
+}
+
 int main(void) {
     test_decode_cap_extracts_timeout_and_stride();
     test_scan_filters_nvme_functions_and_records_cap();
@@ -343,6 +428,9 @@ int main(void) {
     test_configure_admin_queue_attrs_programs_aqa();
     test_configure_admin_queue_attrs_rejects_enabled_controller();
     test_configure_admin_queue_attrs_rejects_oversized_queues();
+    test_create_admin_queues_allocates_and_programs_addresses();
+    test_create_admin_queues_rejects_missing_queue_attrs();
+    test_create_admin_queues_frees_sq_if_cq_alloc_fails();
     puts("host_test_nvme: PASS");
     return 0;
 }

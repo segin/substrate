@@ -706,7 +706,7 @@
         - [x] Check CAP (Capabilities) register (Timeout, Doorbell stride). <!-- sys/drivers/storage/nvme/nvme.c, nvme.h, tests/sys/host_test_nvme.c --> (REQ: REQ-03-0424)
         - [x] Disable Controller (CC.EN = 0) and wait for CSTS.RDY = 0. <!-- sys/drivers/storage/nvme/nvme.c, nvme.h, tests/sys/host_test_nvme.c --> (REQ: REQ-03-0425)
         - [x] Configure Admin Queue Attributes (AQA). <!-- sys/drivers/storage/nvme/nvme.c, nvme.h, tests/sys/host_test_nvme.c --> (REQ: REQ-03-0426)
-        - [ ] Create Admin Submission/Completion Queues (ASQ/ACQ). (REQ: REQ-03-0427)
+        - [x] Create Admin Submission/Completion Queues (ASQ/ACQ). <!-- sys/drivers/storage/nvme/nvme.c, nvme.h, tests/sys/host_test_nvme.c --> (REQ: REQ-03-0427)
         - [ ] Enable Controller (CC.EN = 1) and wait for CSTS.RDY = 1. (REQ: REQ-03-0428)
     - [ ] **Namespace Discovery:** (REQ: REQ-03-0429)
         - [ ] Issue `Identify Controller` command. (REQ: REQ-03-0430)

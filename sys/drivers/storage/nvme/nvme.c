@@ -7,6 +7,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <sys/dma.h>
 
 #define NVME_PCI_CLASS_STORAGE 0x01
 #define NVME_PCI_SUBCLASS_NVM  0x08
@@ -42,6 +43,11 @@ static void nvme_mmio_write32(volatile uint8_t *mmio, uint32_t reg, uint32_t val
     volatile uint32_t *regs = (volatile uint32_t *)(mmio + reg);
     regs[0] = value;
 #endif
+}
+
+static void nvme_mmio_write64(volatile uint8_t *mmio, uint32_t reg, uint64_t value) {
+    nvme_mmio_write32(mmio, reg, (uint32_t)(value & 0xFFFFFFFFU));
+    nvme_mmio_write32(mmio, reg + 4U, (uint32_t)(value >> 32));
 }
 
 int nvme_decode_cap(uint64_t cap_raw, nvme_capability_t *cap) {
@@ -189,6 +195,52 @@ int nvme_configure_admin_queue_attrs(nvme_controller_t *ctrl,
     nvme_mmio_write32(ctrl->mmio, NVME_REG_AQA, aqa);
     ctrl->admin_sq_entries = sq_entries;
     ctrl->admin_cq_entries = cq_entries;
+    return 0;
+}
+
+int nvme_create_admin_queues(nvme_controller_t *ctrl) {
+    uint32_t cc;
+    uint64_t asq;
+    uint64_t acq;
+
+    if (ctrl == NULL || ctrl->mmio == NULL || !ctrl->present) {
+        return -1;
+    }
+    if (ctrl->admin_sq_entries < NVME_ADMIN_QUEUE_MIN_ENTRIES ||
+        ctrl->admin_cq_entries < NVME_ADMIN_QUEUE_MIN_ENTRIES) {
+        return -1;
+    }
+    if (ctrl->admin_sq != NULL || ctrl->admin_cq != NULL) {
+        return -1;
+    }
+
+    cc = nvme_mmio_read32(ctrl->mmio, NVME_REG_CC);
+    if ((cc & NVME_CC_EN) != 0 || ctrl->enabled) {
+        return -1;
+    }
+
+    ctrl->admin_sq_bytes = (size_t)ctrl->admin_sq_entries * NVME_ADMIN_SQ_ENTRY_SIZE;
+    ctrl->admin_cq_bytes = (size_t)ctrl->admin_cq_entries * NVME_ADMIN_CQ_ENTRY_SIZE;
+    ctrl->admin_sq = dma_alloc_coherent(ctrl->admin_sq_bytes, &ctrl->admin_sq_dma);
+    if (ctrl->admin_sq == NULL) {
+        ctrl->admin_sq_bytes = 0;
+        return -1;
+    }
+
+    ctrl->admin_cq = dma_alloc_coherent(ctrl->admin_cq_bytes, &ctrl->admin_cq_dma);
+    if (ctrl->admin_cq == NULL) {
+        dma_free_coherent(ctrl->admin_sq, ctrl->admin_sq_bytes);
+        ctrl->admin_sq = NULL;
+        ctrl->admin_sq_dma = (dma_addr_t)0;
+        ctrl->admin_sq_bytes = 0;
+        ctrl->admin_cq_bytes = 0;
+        return -1;
+    }
+
+    asq = (uint64_t)ctrl->admin_sq_dma;
+    acq = (uint64_t)ctrl->admin_cq_dma;
+    nvme_mmio_write64(ctrl->mmio, NVME_REG_ASQ, asq);
+    nvme_mmio_write64(ctrl->mmio, NVME_REG_ACQ, acq);
     return 0;
 }
 

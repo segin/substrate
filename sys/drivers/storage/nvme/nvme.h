@@ -4,18 +4,24 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <sys/dma.h>
+
 #define NVME_MAX_CONTROLLERS 4
 
 #define NVME_REG_CAP   0x0000U
 #define NVME_REG_CSTS  0x001cU
 #define NVME_REG_CC    0x0014U
 #define NVME_REG_AQA   0x0024U
+#define NVME_REG_ASQ   0x0028U
+#define NVME_REG_ACQ   0x0030U
 
 #define NVME_CC_EN     (1U << 0)
 #define NVME_CSTS_RDY  (1U << 0)
 
 #define NVME_ADMIN_QUEUE_MIN_ENTRIES 2U
 #define NVME_ADMIN_QUEUE_MAX_ENTRIES 4096U
+#define NVME_ADMIN_SQ_ENTRY_SIZE     64U
+#define NVME_ADMIN_CQ_ENTRY_SIZE     16U
 
 typedef struct nvme_capability {
     uint16_t mqes;
@@ -38,6 +44,12 @@ typedef struct nvme_controller {
     uint8_t enabled;
     uint16_t admin_sq_entries;
     uint16_t admin_cq_entries;
+    void *admin_sq;
+    void *admin_cq;
+    dma_addr_t admin_sq_dma;
+    dma_addr_t admin_cq_dma;
+    size_t admin_sq_bytes;
+    size_t admin_cq_bytes;
 } nvme_controller_t;
 
 void nvme_init(void);
@@ -47,6 +59,7 @@ int nvme_disable_controller(nvme_controller_t *ctrl);
 int nvme_configure_admin_queue_attrs(nvme_controller_t *ctrl,
                                      uint16_t sq_entries,
                                      uint16_t cq_entries);
+int nvme_create_admin_queues(nvme_controller_t *ctrl);
 size_t nvme_controller_count(void);
 const nvme_controller_t *nvme_get_controller(size_t index);
 
