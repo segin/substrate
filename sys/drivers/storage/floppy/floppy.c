@@ -61,7 +61,9 @@ typedef struct fdc_drive {
     uint8_t current_cylinder;
     uint8_t motor_on;
     uint64_t last_activity_ms;
+    uint8_t media_changed;
     const fdc_geometry_t *geom;
+    const fdc_geometry_t *default_geom;
     blkdev_t bdev;
 } fdc_drive_t;
 
@@ -408,6 +410,65 @@ static const char *fdc_decode_st2(uint8_t st2, char *buf, size_t size) {
     return buf;
 }
 
+static int fdc_disk_changed(fdc_drive_t *drive) {
+    fdc_controller_t *ctlr;
+
+    if (drive == NULL) {
+        return 0;
+    }
+
+    ctlr = &fdc_controllers[drive->controller_index];
+    fdc_update_dor(ctlr, drive->drive_select);
+    return (inb(fdc_reg(ctlr, FDC_DIR_OFFSET)) & 0x80U) != 0;
+}
+
+static void fdc_refresh_geometry(fdc_drive_t *drive) {
+    if (drive == NULL) {
+        return;
+    }
+
+    drive->geom = drive->default_geom;
+    if (drive->geom != NULL) {
+        drive->bdev.sector_size = 512;
+        drive->bdev.total_sectors =
+            (uint64_t)drive->geom->cylinders * drive->geom->heads *
+            drive->geom->sectors_per_track;
+        drive->bdev.node.length = (off_t)(drive->bdev.total_sectors * drive->bdev.sector_size);
+    } else {
+        drive->bdev.total_sectors = 0;
+        drive->bdev.node.length = 0;
+    }
+}
+
+static int fdc_handle_disk_change_locked(fdc_drive_t *drive) {
+    uint8_t probe_cyl;
+
+    if (!fdc_disk_changed(drive)) {
+        return 0;
+    }
+
+    drive->media_changed = 1;
+    drive->current_cylinder = 0xFF;
+    fdc_refresh_geometry(drive);
+    if (drive->geom == NULL) {
+        return -EIO;
+    }
+
+    fdc_motor_set(drive, 1);
+    fdc_set_rate(&fdc_controllers[drive->controller_index], drive->geom->data_rate);
+
+    probe_cyl = (drive->geom->cylinders > 1) ? 1U : 0U;
+    if (fdc_seek_drive(drive, probe_cyl) < 0) {
+        return -EIO;
+    }
+    if (fdc_seek_drive(drive, 0) < 0) {
+        return -EIO;
+    }
+
+    drive->media_changed = 0;
+    return 0;
+}
+
 static uint32_t fdc_transfer_chunk_sectors(const fdc_drive_t *drive, const fdc_chs_t *chs,
                                            uint32_t requested) {
     uint32_t sectors_per_track;
@@ -471,6 +532,11 @@ static int fdc_transfer_sectors(fdc_drive_t *drive, uint32_t lba, uint32_t count
     for (attempt = 0; attempt < FDC_RETRY_LIMIT; attempt++) {
         fdc_motor_set(drive, 1);
         fdc_set_rate(ctlr, drive->geom->data_rate);
+
+        ret = fdc_handle_disk_change_locked(drive);
+        if (ret < 0) {
+            continue;
+        }
 
         if (attempt == 0) {
             ret = fdc_seek_drive(drive, (uint8_t)chs.cylinder);
@@ -607,6 +673,11 @@ static int fdc_format_track(fdc_drive_t *drive, const struct floppy_format_track
     for (attempt = 0; attempt < FDC_RETRY_LIMIT; attempt++) {
         fdc_motor_set(drive, 1);
         fdc_set_rate(ctlr, drive->geom->data_rate);
+
+        ret = fdc_handle_disk_change_locked(drive);
+        if (ret < 0) {
+            continue;
+        }
 
         if (attempt == 0) {
             ret = fdc_seek_drive(drive, (uint8_t)local.cylinder);
@@ -952,6 +1023,7 @@ void floppy_init(void) {
             drive->drive_select = (uint8_t)j;
             drive->current_cylinder = 0xFF;
             drive->geom = geom;
+            drive->default_geom = geom;
             if (fdc_recalibrate_drive(drive) < 0) {
                 kprintf("fdc: fd%u recalibrate failed\n", drive->device_index);
                 drive->present = 0;

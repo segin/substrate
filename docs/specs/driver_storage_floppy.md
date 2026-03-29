@@ -48,8 +48,8 @@
 - Read and write operations are DMA-backed and batched in up-to-4KB commands; when a command spans head 0 to head 1 on the same cylinder the driver sets the controller MT bit
 - Track formatting is exposed through `FLOPPY_IOCTL_FORMAT_TRACK` in [include/sys/floppy.h](/home/segin/test/include/sys/floppy.h), using a DMA-fed `(C,H,R,N)` tuple table for each sector header
 - Motors spin up on demand and are shut down from the periodic timer path after roughly 2.5s of inactivity
+- Media-change handling checks `DIR.DSKCHG`, invalidates cached geometry/current-cylinder state, restores the drive baseline geometry, and clears the latch by seeking to cylinder 1 and back to cylinder 0
 - Error handling decodes `ST0`, `ST1`, and `ST2`
 - Recoverable failures trigger recalibrate + retry up to three attempts
 
 ## Current Limits
-- Disk-change handling is not yet implemented
