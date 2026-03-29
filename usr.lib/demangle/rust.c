@@ -532,6 +532,27 @@ rust_puny_digit(char ch)
     return 0xFFFFFFFFu;
 }
 
+static int
+rust_puny_insert(uint32_t **cps, size_t *cp_count, size_t *cp_cap, size_t ins, uint32_t val)
+{
+    if (*cp_count == *cp_cap) {
+        size_t next_cap = (*cp_cap == 0u) ? 16u : *cp_cap * 2u;
+        uint32_t *next = (uint32_t *)realloc(*cps, next_cap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        *cps = next;
+        *cp_cap = next_cap;
+    }
+
+    if (ins < *cp_count) {
+        memmove(&(*cps)[ins + 1u], &(*cps)[ins], (*cp_count - ins) * sizeof(**cps));
+    }
+    (*cps)[ins] = val;
+    (*cp_count)++;
+    return 0;
+}
+
 static unsigned
 rust_puny_adapt(unsigned delta, unsigned numpoints, int first_time)
 {
@@ -583,17 +604,10 @@ rust_puny_decode(const char *in, size_t in_len, rust_buf_t *out, int *non_ascii)
             continue;
         }
         cp = (uint32_t)(unsigned char)in[idx];
-        if (cp_count == cp_cap) {
-            size_t next_cap = (cp_cap == 0u) ? 16u : cp_cap * 2u;
-            uint32_t *next = (uint32_t *)realloc(cps, next_cap * sizeof(*next));
-            if (next == NULL) {
-                free(cps);
-                return -1;
-            }
-            cps = next;
-            cp_cap = next_cap;
+        if (rust_puny_insert(&cps, &cp_count, &cp_cap, cp_count, cp) != 0) {
+            free(cps);
+            return -1;
         }
-        cps[cp_count++] = cp;
     }
 
     n = 128u;
@@ -661,20 +675,10 @@ rust_puny_decode(const char *in, size_t in_len, rust_buf_t *out, int *non_ascii)
         ins = i % (unsigned)(cp_count + 1u);
         i = (unsigned)ins;
 
-        if (cp_count == cp_cap) {
-            size_t next_cap = (cp_cap == 0u) ? 16u : cp_cap * 2u;
-            uint32_t *next = (uint32_t *)realloc(cps, next_cap * sizeof(*next));
-            if (next == NULL) {
-                free(cps);
-                return -1;
-            }
-            cps = next;
-            cp_cap = next_cap;
+        if (rust_puny_insert(&cps, &cp_count, &cp_cap, ins, n) != 0) {
+            free(cps);
+            return -1;
         }
-
-        memmove(&cps[ins + 1u], &cps[ins], (cp_count - ins) * sizeof(*cps));
-        cps[ins] = n;
-        cp_count++;
         i++;
     }
 
