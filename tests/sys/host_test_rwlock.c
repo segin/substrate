@@ -118,6 +118,49 @@ static void test_rwlock_writer_preference_and_reader_wakeup(void) {
     assert(wake_all_calls >= 1);
 }
 
+static void test_rwlock_try_rlock(void) {
+    rwlock_t rw;
+    thread_t *reader1;
+    thread_t *reader2;
+
+    reset_env();
+    reader1 = init_thread(0, 1);
+    reader2 = init_thread(1, 2);
+
+    rwlock_init(&rw, "try_rlock");
+
+    /* 1. Happy path: No writers, no waiting writers */
+    current_thread = reader1;
+    assert(rw_try_rlock(&rw) == true);
+    assert(rw.readers == 1);
+
+    /* 2. Re-entrant/Concurrent read: Still no writers */
+    current_thread = reader2;
+    assert(rw_try_rlock(&rw) == true);
+    assert(rw.readers == 2);
+
+    /* Clean up readers */
+    current_thread = reader1;
+    rw_runlock(&rw);
+    current_thread = reader2;
+    rw_runlock(&rw);
+    assert(rw.readers == 0);
+
+    /* 3. Waiting writer condition: Readers should be blocked */
+    rw.waiting_writers = 1;
+    current_thread = reader1;
+    assert(rw_try_rlock(&rw) == false);
+    assert(rw.readers == 0);
+    rw.waiting_writers = 0;
+
+    /* 4. Active writer condition: Readers should be blocked */
+    rw.writer = 1;
+    current_thread = reader1;
+    assert(rw_try_rlock(&rw) == false);
+    assert(rw.readers == 0);
+    rw.writer = 0;
+}
+
 static void test_rwlock_non_owner_panics(void) {
     rwlock_t rw;
     thread_t *owner;
@@ -144,6 +187,7 @@ static void test_rwlock_non_owner_panics(void) {
 int main(void) {
     test_rwlock_reader_and_writer_paths();
     test_rwlock_writer_preference_and_reader_wakeup();
+    test_rwlock_try_rlock();
     test_rwlock_non_owner_panics();
     puts("host_test_rwlock: PASS");
     return 0;
