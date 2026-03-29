@@ -10,7 +10,7 @@
   - primary: `0x3F0`, IRQ `6`
   - secondary: `0x370`, IRQ `10`
 - Presence detection uses the main status register at `base + 0x04`.
-- Reset is issued by toggling `DOR.RESET` through `base + 0x02`.
+- Reset is issued by toggling `DOR.RESET` through `base + 0x02`, waiting for the controller IRQ, and draining `SENSE INTERRUPT STATUS` once per drive slot.
 - The current implementation configures the controller with:
   - `CONFIGURE`
   - `SPECIFY`
@@ -49,7 +49,6 @@
 - Recoverable failures trigger recalibrate + retry up to three attempts
 
 ## Current Limits
-- Reset bring-up does not currently wait on a dedicated reset IRQ completion path
 - Secondary-controller drives `fd2` and `fd3` are not yet enumerated
 - Disk-change handling is not yet implemented
 - Format-track support is not yet implemented

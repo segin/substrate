@@ -245,20 +245,19 @@ static int fdc_reset_controller(fdc_controller_t *ctlr) {
     io_wait();
     ctlr->dor_shadow = FDC_DOR_DMA_IRQ | FDC_DOR_RESET;
     outb(fdc_reg(ctlr, FDC_DOR_OFFSET), ctlr->dor_shadow);
+    ret = fdc_wait_irq(ctlr, FDC_TIMEOUT_MS);
+    if (ret < 0) {
+        kprintf("fdc: controller %u reset timed out waiting for irq\n",
+                ctlr->index);
+        return ret;
+    }
 
-    /*
-     * Treat controller reset as a pure settle delay instead of requiring the
-     * reset IRQ path. On QEMU's ISA FDC this is enough to bring the controller
-     * to command-accepting state, while waiting for IRQ6 here can wedge
-     * indefinitely.
-     */
-    fdc_delay_ms(20);
     for (i = 0; i < FDC_MAX_DRIVES; i++) {
         ret = fdc_sense_interrupt(ctlr, &st0, &cyl);
         if (ret < 0) {
             kprintf("fdc: controller %u sense interrupt %d failed during reset\n",
                     ctlr->index, i);
-            break;
+            return ret;
         }
     }
 

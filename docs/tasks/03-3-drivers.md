@@ -605,7 +605,7 @@
     - [ ] **Controller Initialization (`fdc_init`):** (REQ: REQ-03-0328)
         - [x] Detect FDC presence: read MSR (Main Status Register) at 0x3F4. <!-- sys/drivers/storage/floppy/floppy.c, sys/kern/isa.c --> (REQ: REQ-03-0329)
         - [x] Issue RESET command: assert bit 2 of DOR (Digital Output Register, 0x3F2), then deassert. <!-- sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0330)
-        - [ ] Wait for IRQ6 after reset; issue SENSE INTERRUPT for each drive (up to 4). (REQ: REQ-03-0331)
+        - [x] Wait for IRQ6 after reset; issue SENSE INTERRUPT for each drive (up to 4). <!-- sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0331)
         - [x] Configure controller: CONFIGURE command (implied seek, FIFO threshold). <!-- sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0332)
         - [x] Set data rate via CCR (Configuration Control Register, 0x3F7): 500kbps for HD, 300kbps for DD, 250kbps for SD. <!-- sys/drivers/storage/floppy/floppy.c, sys/drivers/storage/floppy/floppy_geom.c --> (REQ: REQ-03-0333)
         - [x] Enable DMA channel 2 for data transfers (ISA DMA). <!-- sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0334)
