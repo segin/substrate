@@ -651,7 +651,7 @@
         - [x] Convert sector addresses: `cylinder = LBA / (heads * spt)`, `head = (LBA / spt) % heads`, `sector = (LBA % spt) + 1`. <!-- sys/drivers/storage/floppy/floppy_geom.c, tests/sys/host_test_floppy.c --> (REQ: REQ-03-0371)
         - [x] Read result bytes (ST0, ST1, ST2, C, H, R, N) after each command to check success. <!-- sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0372)
         - [x] Retry on error: recalibrate and retry up to 3 times, then fail. <!-- sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0373)
-    - [ ] **Format Track:** (REQ: REQ-03-0374)
+    - [x] **Format Track:** (REQ: REQ-03-0374)
         - [x] FORMAT TRACK command: write sector headers for an entire track. <!-- sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0375)
         - [x] Build format buffer with (C, H, R, N) tuples for each sector. <!-- sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0376)
         - [x] Used by disk formatting utilities. <!-- include/sys/floppy.h, sys/drivers/storage/blkdev.c, sys/drivers/storage/floppy/floppy.c --> (REQ: REQ-03-0377)
