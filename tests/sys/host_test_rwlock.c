@@ -141,10 +141,51 @@ static void test_rwlock_non_owner_panics(void) {
     assert(strstr(last_panic, "non-owner") != NULL);
 }
 
+static void test_rwlock_wunlock_no_writer(void) {
+    rwlock_t rw;
+    thread_t *writer;
+
+    reset_env();
+    writer = init_thread(0, 1);
+    current_thread = writer;
+
+    rwlock_init(&rw, "panic2");
+
+    if (setjmp(panic_jmp) == 0) {
+        rw_wunlock(&rw);
+        assert(!"expected panic");
+    }
+
+    assert(last_panic != NULL);
+    assert(strstr(last_panic, "without writer ownership") != NULL);
+}
+
+static void test_rwlock_wunlock_wakeup_writers(void) {
+    rwlock_t rw;
+    thread_t *writer;
+
+    reset_env();
+    writer = init_thread(0, 1);
+    current_thread = writer;
+
+    rwlock_init(&rw, "wunlock");
+
+    rw_wlock(&rw);
+
+    rw.waiting_writers = 1;
+
+    rw_wunlock(&rw);
+
+    assert(wake_one_calls == 1);
+    assert(wake_all_calls == 0);
+}
+
 int main(void) {
     test_rwlock_reader_and_writer_paths();
     test_rwlock_writer_preference_and_reader_wakeup();
     test_rwlock_non_owner_panics();
+    test_rwlock_wunlock_no_writer();
+    test_rwlock_wunlock_wakeup_writers();
     puts("host_test_rwlock: PASS");
     return 0;
 }
