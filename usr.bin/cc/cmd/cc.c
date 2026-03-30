@@ -483,40 +483,49 @@ static int add_gcc_system_includes(cc_opts_t *o) {
     return 0;
 }
 
-static int make_temp_path(cc_opts_t *o, const char *prefix, const char *suffix, char out[PATH_MAX]) {
-    char templ[PATH_MAX];
+static int make_temp_path(cc_opts_t *o, const char *prefix, const char *suffix, const char **out) {
+    char *templ = NULL;
+    char *final_path = NULL;
     int fd;
 
-    if (snprintf(templ, sizeof(templ), "/tmp/%sXXXXXX", prefix) >= (int)sizeof(templ)) {
+    if (asprintf(&templ, "/tmp/%sXXXXXX", prefix) < 0) {
         return -1;
     }
 
     fd = mkstemp(templ);
     if (fd < 0) {
+        free(templ);
         return -1;
     }
     close(fd);
 
     if (suffix != NULL) {
-        char with_suffix[PATH_MAX];
-        if (snprintf(with_suffix, sizeof(with_suffix), "%s%s", templ, suffix) >= (int)sizeof(with_suffix)) {
+        if (asprintf(&final_path, "%s%s", templ, suffix) < 0) {
             unlink(templ);
+            free(templ);
             return -1;
         }
-        if (rename(templ, with_suffix) != 0) {
+        if (rename(templ, final_path) != 0) {
             unlink(templ);
+            free(templ);
+            free(final_path);
             return -1;
         }
-        if (snprintf(out, PATH_MAX, "%s", with_suffix) >= PATH_MAX) {
-            return -1;
-        }
+        free(templ);
     } else {
-        if (snprintf(out, PATH_MAX, "%s", templ) >= PATH_MAX) {
-            return -1;
-        }
+        final_path = templ;
     }
 
-    return strvec_push(&o->temp_files, out);
+    if (strvec_push(&o->temp_files, final_path) != 0) {
+        unlink(final_path);
+        free(final_path);
+        return -1;
+    }
+    if (out != NULL) {
+        *out = o->temp_files.items[o->temp_files.count - 1];
+    }
+    free(final_path);
+    return 0;
 }
 
 static void cleanup_temp_files(const cc_opts_t *o) {
@@ -1215,7 +1224,7 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out, i
     const char **pp_flags_aug = NULL;
     const char *pp_in = in;
     int use_stdin_tmp = 0;
-    char stdin_tmp[PATH_MAX];
+    char *stdin_tmp = NULL;
     FILE *tmpfp;
     int tfd;
     char buf[4096];
@@ -1223,9 +1232,13 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out, i
 
     memset(&diag, 0, sizeof(diag));
     if (strcmp(in, "-") == 0) {
-        snprintf(stdin_tmp, sizeof(stdin_tmp), "/tmp/ccstdinXXXXXX");
+        if (asprintf(&stdin_tmp, "/tmp/ccstdinXXXXXX") < 0) {
+            fprintf(stderr, "cpp: error: failed to allocate temporary stdin path\n");
+            return -1;
+        }
         tfd = mkstemp(stdin_tmp);
         if (tfd < 0) {
+            free(stdin_tmp);
             fprintf(stderr, "cpp: error: failed to create temporary stdin file\n");
             return -1;
         }
@@ -1233,6 +1246,7 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out, i
         if (tmpfp == NULL) {
             close(tfd);
             unlink(stdin_tmp);
+            free(stdin_tmp);
             fprintf(stderr, "cpp: error: failed to open temporary stdin file\n");
             return -1;
         }
@@ -1240,6 +1254,7 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out, i
             if (fwrite(buf, 1, nread, tmpfp) != nread) {
                 fclose(tmpfp);
                 unlink(stdin_tmp);
+                free(stdin_tmp);
                 fprintf(stderr, "cpp: error: failed writing temporary stdin file\n");
                 return -1;
             }
@@ -1255,6 +1270,7 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out, i
         if (pp_flags_aug == NULL) {
             if (use_stdin_tmp) {
                 unlink(stdin_tmp);
+                free(stdin_tmp);
             }
             fprintf(stderr, "cpp: error: failed to allocate preprocess flags\n");
             return -1;
@@ -1271,6 +1287,7 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out, i
         free(pp_flags_aug);
         if (use_stdin_tmp) {
             unlink(stdin_tmp);
+            free(stdin_tmp);
         }
         if (diag.line != 0) {
             if (diag.path[0] != '\0') {
@@ -1303,6 +1320,7 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out, i
             free(pp_flags_aug);
             if (use_stdin_tmp) {
                 unlink(stdin_tmp);
+                free(stdin_tmp);
             }
             fprintf(stderr, "cpp: error: failed to reopen preprocessed assembly output\n");
             return -1;
@@ -1312,6 +1330,7 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out, i
             free(pp_flags_aug);
             if (use_stdin_tmp) {
                 unlink(stdin_tmp);
+                free(stdin_tmp);
             }
             fprintf(stderr, "cpp: error: failed to size preprocessed assembly output\n");
             return -1;
@@ -1322,6 +1341,7 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out, i
             free(pp_flags_aug);
             if (use_stdin_tmp) {
                 unlink(stdin_tmp);
+                free(stdin_tmp);
             }
             fprintf(stderr, "cpp: error: failed to read preprocessed assembly output\n");
             return -1;
@@ -1335,6 +1355,7 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out, i
             free(pp_flags_aug);
             if (use_stdin_tmp) {
                 unlink(stdin_tmp);
+                free(stdin_tmp);
             }
             fprintf(stderr, "cpp: error: out of memory normalizing assembly output\n");
             return -1;
@@ -1347,6 +1368,7 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out, i
             free(pp_flags_aug);
             if (use_stdin_tmp) {
                 unlink(stdin_tmp);
+                free(stdin_tmp);
             }
             fprintf(stderr, "cpp: error: short read normalizing assembly output\n");
             return -1;
@@ -1398,6 +1420,7 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out, i
             free(pp_flags_aug);
             if (use_stdin_tmp) {
                 unlink(stdin_tmp);
+                free(stdin_tmp);
             }
             fprintf(stderr, "cpp: error: failed writing normalized assembly output\n");
             return -1;
@@ -1410,6 +1433,7 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out, i
     free(pp_flags_aug);
     if (use_stdin_tmp) {
         unlink(stdin_tmp);
+        free(stdin_tmp);
     }
     return 0;
 }
@@ -1798,16 +1822,21 @@ int cc_main(int argc, char **argv) {
         }
 
         if (input_is_S) {
-            char out_s[PATH_MAX];
-            char out_o[PATH_MAX];
-            char tmp_s[PATH_MAX];
+            const char *out_s;
+            char out_s_buf[PATH_MAX];
+            const char *out_o;
+            char out_o_buf[PATH_MAX];
+            const char *tmp_s;
 
             if (o.mode_S) {
                 if (o.output != NULL) {
-                    snprintf(out_s, sizeof(out_s), "%s", o.output);
-                } else if (derive_out(in, ".s", out_s) != 0) {
+                    snprintf(out_s_buf, sizeof(out_s_buf), "%s", o.output);
+                    out_s = out_s_buf;
+                } else if (derive_out(in, ".s", out_s_buf) != 0) {
                     fprintf(stderr, "cc: failed to derive .s output name\n");
                     goto out;
+                } else {
+                    out_s = out_s_buf;
                 }
                 if (run_preprocess(&o, in, out_s, 1) != 0) {
                     goto out;
@@ -1815,7 +1844,7 @@ int cc_main(int argc, char **argv) {
                 continue;
             }
 
-            if (make_temp_path(&o, "ccspp_", ".s", tmp_s) != 0) {
+            if (make_temp_path(&o, "ccspp_", ".s", &tmp_s) != 0) {
                 fprintf(stderr, "cc: failed to create temporary preprocessed assembly file\n");
                 goto out;
             }
@@ -1825,13 +1854,16 @@ int cc_main(int argc, char **argv) {
 
             if (o.mode_c) {
                 if (o.output != NULL) {
-                    snprintf(out_o, sizeof(out_o), "%s", o.output);
-                } else if (derive_out(in, ".o", out_o) != 0) {
+                    snprintf(out_o_buf, sizeof(out_o_buf), "%s", o.output);
+                    out_o = out_o_buf;
+                } else if (derive_out(in, ".o", out_o_buf) != 0) {
                     fprintf(stderr, "cc: failed to derive .o output name\n");
                     goto out;
+                } else {
+                    out_o = out_o_buf;
                 }
             } else {
-                if (make_temp_path(&o, "cco_", ".o", out_o) != 0) {
+                if (make_temp_path(&o, "cco_", ".o", &out_o) != 0) {
                     fprintf(stderr, "cc: failed to create temporary object file\n");
                     goto out;
                 }
@@ -1847,11 +1879,13 @@ int cc_main(int argc, char **argv) {
         }
 
         if (input_is_c) {
-            char out_pp[PATH_MAX];
-            char out_s[PATH_MAX];
-            char out_o[PATH_MAX];
+            const char *out_pp;
+            const char *out_s;
+            char out_s_buf[PATH_MAX];
+            const char *out_o;
+            char out_o_buf[PATH_MAX];
 
-            if (make_temp_path(&o, "ccpp_", ".i", out_pp) != 0) {
+            if (make_temp_path(&o, "ccpp_", ".i", &out_pp) != 0) {
                 fprintf(stderr, "cc: failed to create temporary preprocessed file\n");
                 goto out;
             }
@@ -1861,13 +1895,16 @@ int cc_main(int argc, char **argv) {
 
             if (o.mode_S) {
                 if (o.output != NULL) {
-                    snprintf(out_s, sizeof(out_s), "%s", o.output);
-                } else if (derive_out(in, ".s", out_s) != 0) {
+                    snprintf(out_s_buf, sizeof(out_s_buf), "%s", o.output);
+                    out_s = out_s_buf;
+                } else if (derive_out(in, ".s", out_s_buf) != 0) {
                     fprintf(stderr, "cc: failed to derive .s output name\n");
                     goto out;
+                } else {
+                    out_s = out_s_buf;
                 }
             } else {
-                if (make_temp_path(&o, "ccs_", ".s", out_s) != 0) {
+                if (make_temp_path(&o, "ccs_", ".s", &out_s) != 0) {
                     fprintf(stderr, "cc: failed to create temporary assembly file\n");
                     goto out;
                 }
@@ -1919,13 +1956,16 @@ int cc_main(int argc, char **argv) {
 
             if (o.mode_c) {
                 if (o.output != NULL) {
-                    snprintf(out_o, sizeof(out_o), "%s", o.output);
-                } else if (derive_out(in, ".o", out_o) != 0) {
+                    snprintf(out_o_buf, sizeof(out_o_buf), "%s", o.output);
+                    out_o = out_o_buf;
+                } else if (derive_out(in, ".o", out_o_buf) != 0) {
                     fprintf(stderr, "cc: failed to derive .o output name\n");
                     goto out;
+                } else {
+                    out_o = out_o_buf;
                 }
             } else {
-                if (make_temp_path(&o, "cco_", ".o", out_o) != 0) {
+                if (make_temp_path(&o, "cco_", ".o", &out_o) != 0) {
                     fprintf(stderr, "cc: failed to create temporary object file\n");
                     goto out;
                 }
@@ -1941,7 +1981,8 @@ int cc_main(int argc, char **argv) {
         }
 
         if (input_is_s) {
-            char out_o[PATH_MAX];
+            const char *out_o;
+            char out_o_buf[PATH_MAX];
 
             if (o.mode_S) {
                 if (o.output != NULL && strcmp(o.output, in) != 0) {
@@ -1959,13 +2000,16 @@ int cc_main(int argc, char **argv) {
 
             if (o.mode_c) {
                 if (o.output != NULL) {
-                    snprintf(out_o, sizeof(out_o), "%s", o.output);
-                } else if (derive_out(in, ".o", out_o) != 0) {
+                    snprintf(out_o_buf, sizeof(out_o_buf), "%s", o.output);
+                    out_o = out_o_buf;
+                } else if (derive_out(in, ".o", out_o_buf) != 0) {
                     fprintf(stderr, "cc: failed to derive .o output name\n");
                     goto out;
+                } else {
+                    out_o = out_o_buf;
                 }
             } else {
-                if (make_temp_path(&o, "cco_", ".o", out_o) != 0) {
+                if (make_temp_path(&o, "cco_", ".o", &out_o) != 0) {
                     fprintf(stderr, "cc: failed to create temporary object file\n");
                     goto out;
                 }
