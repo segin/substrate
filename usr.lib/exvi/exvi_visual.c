@@ -2519,17 +2519,68 @@ vi_backward_end_motion_target(buffer_t *b, vi_visual_t *vis, int count, int bigw
 
 static int
 vi_search_motion_target(buffer_t *b, vi_visual_t *vis, const char *pattern, int forward,
-    line_t **line_out, int *col_out)
+    int count, line_t **line_out, int *col_out)
 {
-    int line_no = exvi_search(b, pattern, forward);
+    line_t *saved_line = b->cur;
+    int line_no = -1;
 
+    if (count < 1) {
+        count = 1;
+    }
+    while (count-- > 0) {
+        line_no = exvi_search(b, pattern, forward);
+        if (line_no < 1) {
+            b->cur = saved_line;
+            return -1;
+        }
+        b->cur = buf_get_line(b, line_no);
+        pattern = "";
+    }
     if (line_no < 1) {
+        b->cur = saved_line;
         return -1;
     }
-    *line_out = buf_get_line(b, line_no);
+    *line_out = b->cur;
     *col_out = 0;
+    b->cur = saved_line;
     vis->last_search_forward = forward;
     return (*line_out != NULL) ? 0 : -1;
+}
+
+static int
+vi_apply_search_linewise_motion(buffer_t *b, vi_visual_t *vis, int current_line_no,
+    line_t *target_line, int target_col)
+{
+    int target_line_no;
+    int start;
+    int end;
+
+    if (target_col != 0 || vis->cursor_col != 0 || !target_line || target_line == b->cur) {
+        return -1;
+    }
+    target_line_no = vi_line_number_for_mark(b, target_line);
+    if (target_line_no < 1 || target_line_no == current_line_no) {
+        return -1;
+    }
+    if (target_line_no > current_line_no) {
+        start = current_line_no;
+        end = target_line_no - 1;
+    } else {
+        start = target_line_no;
+        end = current_line_no - 1;
+    }
+    if (start > end) {
+        return -1;
+    }
+    if (vis->pending_op == 'y') {
+        vi_linewise_yank(b, vis, start, end);
+    } else if (vis->pending_op == 'd') {
+        vi_linewise_delete(b, vis, start, end);
+        vi_set_last_change(vis, VI_REPEAT_DD, end - start + 1, 0);
+    } else {
+        vi_linewise_change(b, vis, start, end);
+    }
+    return 0;
 }
 
 static void
@@ -2979,7 +3030,7 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         pattern[0] = '\0';
         if (vi_prompt_input(b, vis, key, pattern, sizeof(pattern)) != 0) {
             write(STDOUT_FILENO, "\a", 1);
-        } else if (vi_search_motion_target(b, vis, pattern, forward,
+        } else if (vi_search_motion_target(b, vis, pattern, forward, count,
             &target_line, &target_col) != 0 ||
             vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
             write(STDOUT_FILENO, "\a", 1);
@@ -2990,8 +3041,10 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         line_t *target_line;
         int target_col;
 
-        if (vi_search_motion_target(b, vis, "", forward, &target_line, &target_col) != 0 ||
-            vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
+        if (vi_search_motion_target(b, vis, "", forward, count,
+            &target_line, &target_col) != 0 ||
+            (vi_apply_search_linewise_motion(b, vis, line_no, target_line, target_col) != 0 &&
+             vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0)) {
             write(STDOUT_FILENO, "\a", 1);
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
@@ -3002,9 +3055,10 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
 
         if (!pattern) {
             write(STDOUT_FILENO, "\a", 1);
-        } else if (vi_search_motion_target(b, vis, pattern, key == '*',
+        } else if (vi_search_motion_target(b, vis, pattern, key == '*', count,
             &target_line, &target_col) != 0 ||
-            vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
+            (vi_apply_search_linewise_motion(b, vis, line_no, target_line, target_col) != 0 &&
+             vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0)) {
             write(STDOUT_FILENO, "\a", 1);
         }
         free(pattern);

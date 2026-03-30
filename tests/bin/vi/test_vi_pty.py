@@ -733,7 +733,7 @@ def main():
         [b"/", b"b", b"e", b"t", b"a", b"\r", b"g", b"g", b"d", b"n"],
     )
     require(exit_code == 0, f"dn vi exited with status {exit_code}")
-    require(saved == "\nbeta\ngamma\ndelta\nbeta2\n",
+    require(saved == "beta\ngamma\ndelta\nbeta2\n",
             f"unexpected dn buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
@@ -742,7 +742,7 @@ def main():
         [b"d", b"*"],
     )
     require(exit_code == 0, f"d* vi exited with status {exit_code}")
-    require(saved == "\nword\n",
+    require(saved == "word\n",
             f"unexpected d* buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
@@ -761,7 +761,7 @@ def main():
         [b"G", b"d", b"#"],
     )
     require(exit_code == 0, f"d# vi exited with status {exit_code}")
-    require(saved == "\nword\n",
+    require(saved == "word\n",
             f"unexpected d# buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
@@ -773,6 +773,33 @@ def main():
     require("-- INSERT --" in decoded, "missing c# insert status")
     require(saved == "X\nword\n",
             f"unexpected c# buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "a\nmatch1\nx\nmatch2\ny\nmatch3\n",
+        [b"/", b"m", b"a", b"t", b"c", b"h", b"\r", b"g", b"g", b"d", b"2", b"n"],
+    )
+    require(exit_code == 0, f"d2n vi exited with status {exit_code}")
+    require(saved == "match2\ny\nmatch3\n",
+            f"unexpected d2n buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "word\nx\nword\ny\nword\n",
+        [b"g", b"g", b"d", b"2", b"*"],
+    )
+    require(exit_code == 0, f"d2* vi exited with status {exit_code}")
+    require(saved == "word\n",
+            f"unexpected d2* buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "word\nx\nword\ny\nword\n",
+        [b"G", b"d", b"2", b"#"],
+    )
+    require(exit_code == 0, f"d2# vi exited with status {exit_code}")
+    require(saved == "word\n",
+            f"unexpected d2# buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
