@@ -2,6 +2,10 @@
 #define _EXVI_INTERNAL_H
 
 #include <stddef.h>
+#include <setjmp.h>
+#include <signal.h>
+
+#include <exvi.h>
 
 typedef struct line {
     struct line *prev;
@@ -22,9 +26,24 @@ typedef struct {
 } buffer_t;
 
 extern int secure_mode;
+extern int batch_mode;
+extern int visual_mode;
+extern int recover_mode;
+extern int option_number;
+extern int option_list;
 extern buffer_t undo_buf;
 extern int undo_valid;
 extern char *last_search_pattern;
+extern char *last_sub_pattern;
+extern char *last_sub_replacement;
+extern char *alternate_filename;
+extern int last_sub_global;
+extern const char *exvi_progname;
+extern buffer_t regs[27];
+extern jmp_buf main_loop_jmp;
+extern buffer_t *global_buf_for_sighandler;
+extern int input_mode;
+extern line_t *input_insert_pos;
 
 void buf_init(buffer_t *b);
 line_t *buf_insert_after(buffer_t *b, line_t *pos, const char *text);
@@ -41,5 +60,16 @@ char *parse_delimited_text(char **cmd_ptr, char delim);
 int parse_address(buffer_t *b, char **cmd_ptr);
 int parse_range(buffer_t *b, char **cmd_ptr, int *addr1, int *addr2);
 void replace_saved_string(char **dst, const char *src);
+char *expand_filename_refs(buffer_t *b, const char *arg);
+char *recover_path_for(const char *filename);
+int load_recover_into_buffer(buffer_t *b, const char *filename);
+void load_startup_commands(buffer_t *b, void (*command_fn)(buffer_t *, char *));
+void set_visual_handoff_file(const char *filename);
+void exvi_reset_runtime(exvi_frontend_t frontend);
+void exvi_cleanup_runtime(void);
+void exvi_init_registers(void);
+void exvi_free_registers(void);
+void handle_sigint(int sig);
+void handle_sigterm(int sig);
 
 #endif

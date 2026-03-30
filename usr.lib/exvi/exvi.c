@@ -15,20 +15,6 @@
 #include <sys/wait.h>
 #include <errno.h>
 
-int secure_mode = 0;
-static int batch_mode = 0;
-static int visual_mode = 0;
-static int recover_mode = 0;
-static int option_number = 0;
-static int option_list = 0;
-char *last_search_pattern = NULL;
-static char *last_sub_pattern = NULL;
-static char *last_sub_replacement = NULL;
-static char *alternate_filename = NULL;
-static char *visual_handoff_file = NULL;
-static int last_sub_global = 0;
-static const char *exvi_progname = "ex";
-
 static char **ex_args = NULL;
 static int ex_argc = 0;
 static int ex_arg_idx = 0;
@@ -42,23 +28,13 @@ typedef struct {
 static tag_frame_t *tag_stack = NULL;
 static int tag_stack_len = 0;
 
-static buffer_t regs[27]; // 0-25 = a-z, 26 = unnamed
-
 buffer_t undo_buf;
 int undo_valid = 0;
-
-static jmp_buf main_loop_jmp;
-static buffer_t *global_buf_for_sighandler = NULL;
 
 static void do_command(buffer_t *b, char *cmd);
 void replace_saved_string(char **dst, const char *src);
 static void free_ex_arglist(void);
-static char *expand_filename_refs(buffer_t *b, const char *arg);
 static void free_tag_stack(void);
-static char *recover_path_for(const char *filename);
-static int load_recover_into_buffer(buffer_t *b, const char *filename);
-static void load_startup_commands(buffer_t *b);
-static void set_visual_handoff_file(const char *filename);
 static int default_read_destination(buffer_t *b, int addr2);
 static int apply_substitute_range(buffer_t *b, int addr1, int addr2,
     const char *pattern, const char *replacement, int global);
@@ -161,66 +137,6 @@ load_current_arg_file(buffer_t *b)
     }
 }
 
-static char *
-expand_filename_refs(buffer_t *b, const char *arg)
-{
-    size_t out_len = 0;
-    char *out;
-    const char *p;
-
-    if (!arg) {
-        return NULL;
-    }
-    if (arg[0] == '!') {
-        return strdup(arg);
-    }
-
-    for (p = arg; *p; p++) {
-        if (*p == '%') {
-            if (!b->filename) {
-                fprintf(stderr, "No current filename\n");
-                return NULL;
-            }
-            out_len += strlen(b->filename);
-        } else if (*p == '#') {
-            if (!alternate_filename) {
-                fprintf(stderr, "No alternate filename\n");
-                return NULL;
-            }
-            out_len += strlen(alternate_filename);
-        } else {
-            out_len++;
-        }
-    }
-
-    out = malloc(out_len + 1);
-    if (!out) {
-        return NULL;
-    }
-
-    out_len = 0;
-    for (p = arg; *p; p++) {
-        const char *src = NULL;
-        size_t len = 0;
-
-        if (*p == '%') {
-            src = b->filename;
-            len = strlen(src);
-        } else if (*p == '#') {
-            src = alternate_filename;
-            len = strlen(src);
-        } else {
-            out[out_len++] = *p;
-            continue;
-        }
-
-        memcpy(out + out_len, src, len);
-        out_len += len;
-    }
-    out[out_len] = '\0';
-    return out;
-}
-
 static void
 free_tag_stack(void)
 {
@@ -230,109 +146,6 @@ free_tag_stack(void)
     free(tag_stack);
     tag_stack = NULL;
     tag_stack_len = 0;
-}
-
-static char *
-recover_path_for(const char *filename)
-{
-    char *path = NULL;
-
-    if (!filename) {
-        return NULL;
-    }
-    if (asprintf(&path, "%s.recover", filename) < 0) {
-        return NULL;
-    }
-    return path;
-}
-
-static int
-load_recover_into_buffer(buffer_t *b, const char *filename)
-{
-    char *path;
-    struct stat st;
-
-    path = recover_path_for(filename);
-    if (!path) {
-        return -1;
-    }
-    if (stat(path, &st) != 0) {
-        free(path);
-        return -1;
-    }
-
-    buf_free(b);
-    buf_init(b);
-    b->filename = strdup(filename);
-    if (!b->filename) {
-        free(path);
-        return -1;
-    }
-    buf_read_file(b, path);
-    b->modified = 1;
-    free(path);
-    return 0;
-}
-
-static void
-load_startup_commands(buffer_t *b)
-{
-    char *exinit = getenv("EXINIT");
-
-    if (exinit) {
-        char *exinit_cpy = strdup(exinit);
-
-        if (exinit_cpy) {
-            do_command(b, exinit_cpy);
-            free(exinit_cpy);
-        }
-        return;
-    }
-
-    if (!secure_mode) {
-        char *home = getenv("HOME");
-
-        if (home) {
-            char path[1024];
-            struct stat st;
-
-            snprintf(path, sizeof(path), "%s/.exrc", home);
-            if (stat(path, &st) == 0
-                && S_ISREG(st.st_mode)
-                && (st.st_uid == getuid() || st.st_uid == 0)
-                && (st.st_mode & (S_IWGRP | S_IWOTH)) == 0) {
-                FILE *f = fopen(path, "r");
-
-                if (f) {
-                    char *rc_line = NULL;
-                    size_t rc_cap = 0;
-                    ssize_t rc_ret;
-
-                    while ((rc_ret = getline(&rc_line, &rc_cap, f)) != -1) {
-                        if (rc_ret > 0 && rc_line[rc_ret - 1] == '\n') {
-                            rc_line[rc_ret - 1] = '\0';
-                        }
-                        do_command(b, rc_line);
-                    }
-                    free(rc_line);
-                    fclose(f);
-                }
-            }
-        }
-    }
-}
-
-static void
-set_visual_handoff_file(const char *filename)
-{
-    free(visual_handoff_file);
-    visual_handoff_file = filename ? strdup(filename) : NULL;
-}
-
-const char *
-exvi_handoff_file(void)
-{
-    return visual_handoff_file;
 }
 
 static int
@@ -360,32 +173,6 @@ push_tag_frame(buffer_t *b)
     tag_stack[tag_stack_len].line = buf_current_line(b);
     tag_stack_len++;
     return 0;
-}
-
-void handle_sigint(int sig) {
-    (void)sig;
-    printf("\nInterrupt\n");
-    longjmp(main_loop_jmp, 1);
-}
-
-void handle_sigterm(int sig) {
-    (void)sig;
-    if (global_buf_for_sighandler && global_buf_for_sighandler->modified && global_buf_for_sighandler->filename && global_buf_for_sighandler->head) {
-        char *path = recover_path_for(global_buf_for_sighandler->filename);
-        if (path) {
-            FILE *f = fopen(path, "w");
-            if (f) {
-                line_t *curr = global_buf_for_sighandler->head;
-                while (curr) {
-                    fprintf(f, "%s\n", curr->text);
-                    curr = curr->next;
-                }
-                fclose(f);
-            }
-            free(path);
-        }
-    }
-    exit(1);
 }
 
 static void
@@ -431,9 +218,6 @@ match_command(const char *cmd, const char *name, const char *abbr, const char **
     }
     return 1;
 }
-
-static int input_mode = 0; // 0=cmd, 1=append, 2=insert, 3=change
-static line_t *input_insert_pos = NULL;
 
 static void
 print_line_text(line_t *l, int listed)
@@ -1806,24 +1590,8 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
     int interactive_prompt;
     int jump_status;
 
-    secure_mode = 0;
-    batch_mode = 0;
-    visual_mode = (frontend == EXVI_FRONTEND_VI);
-    recover_mode = 0;
-    option_number = 0;
-    option_list = 0;
-    free(last_search_pattern);
-    last_search_pattern = NULL;
-    free(last_sub_pattern);
-    last_sub_pattern = NULL;
-    free(last_sub_replacement);
-    last_sub_replacement = NULL;
-    last_sub_global = 0;
-    set_visual_handoff_file(NULL);
-    exvi_progname = (frontend == EXVI_FRONTEND_VI) ? "vi" : "ex";
+    exvi_reset_runtime(frontend);
     free_ex_arglist();
-    input_mode = 0;
-    input_insert_pos = NULL;
     while ((opt = getopt(argc, argv, "sSvr")) != -1) {
         switch (opt) {
         case 's':
@@ -1848,7 +1616,7 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
     buf_init(&buf);
     undo_valid = 0;
     buf_init(&undo_buf);
-    for (int i=0; i<27; i++) buf_init(&regs[i]);
+    exvi_init_registers();
 
     if (optind < argc) {
         ex_args = argv + optind;
@@ -1861,9 +1629,8 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
                 fprintf(stderr, "%s: no recover file for %s\n", exvi_progname, buf.filename);
                 buf_free(&buf);
                 buf_free(&undo_buf);
-                for (int i = 0; i < 27; i++) {
-                    buf_free(&regs[i]);
-                }
+                exvi_free_registers();
+                exvi_cleanup_runtime();
                 return 1;
             }
         } else {
@@ -1876,21 +1643,19 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
             set_visual_handoff_file(buf.filename);
             buf_free(&buf);
             buf_free(&undo_buf);
-            for (int i = 0; i < 27; i++) {
-                buf_free(&regs[i]);
-            }
+            exvi_free_registers();
+            exvi_cleanup_runtime();
             return EXVI_EXIT_VISUAL_HANDOFF;
         }
         fprintf(stderr, "%s: visual mode not implemented in this build.\n", exvi_progname);
         buf_free(&buf);
         buf_free(&undo_buf);
-        for (int i = 0; i < 27; i++) {
-            buf_free(&regs[i]);
-        }
+        exvi_free_registers();
+        exvi_cleanup_runtime();
         return 1;
     }
 
-    load_startup_commands(&buf);
+    load_startup_commands(&buf, do_command);
 
     char *line = NULL;
     size_t cap = 0;
@@ -1907,18 +1672,8 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
         free(line);
         buf_free(&buf);
         buf_free(&undo_buf);
-        for (int i = 0; i < 27; i++) {
-            buf_free(&regs[i]);
-        }
-        free(last_search_pattern);
-        last_search_pattern = NULL;
-        free(last_sub_pattern);
-        last_sub_pattern = NULL;
-        free(last_sub_replacement);
-        last_sub_replacement = NULL;
-        last_sub_global = 0;
-        free(alternate_filename);
-        alternate_filename = NULL;
+        exvi_free_registers();
+        exvi_cleanup_runtime();
         free_ex_arglist();
         free_tag_stack();
         return EXVI_EXIT_VISUAL_HANDOFF;
@@ -1957,16 +1712,8 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
     
     buf_free(&buf);
     buf_free(&undo_buf);
-    for (int i=0; i<27; i++) buf_free(&regs[i]);
-    free(last_search_pattern);
-    last_search_pattern = NULL;
-    free(last_sub_pattern);
-    last_sub_pattern = NULL;
-    free(last_sub_replacement);
-    last_sub_replacement = NULL;
-    last_sub_global = 0;
-    free(alternate_filename);
-    alternate_filename = NULL;
+    exvi_free_registers();
+    exvi_cleanup_runtime();
     free_ex_arglist();
     free_tag_stack();
     return 0;
