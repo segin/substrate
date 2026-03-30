@@ -347,6 +347,7 @@ handle_buffer_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
 void do_command(buffer_t *b, char *cmd) {
     exvi_command_break_t break_kind;
     char *break_pos;
+    int parse_error = 0;
 
     while (*cmd && isspace((unsigned char)*cmd)) cmd++;
 
@@ -363,7 +364,17 @@ void do_command(buffer_t *b, char *cmd) {
     }
     
     int addr1, addr2;
-    int explicit_range = parse_range(b, &cmd, &addr1, &addr2);
+    int explicit_range = parse_range_checked(b, &cmd, &addr1, &addr2,
+        &parse_error);
+
+    if (parse_error) {
+        if (visual_mode) {
+            exvi_set_pending_status("Bad address");
+        } else {
+            fprintf(stderr, "Bad address\n");
+        }
+        return;
+    }
     
     while (*cmd && isspace((unsigned char)*cmd)) cmd++;
 

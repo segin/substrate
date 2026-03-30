@@ -367,10 +367,19 @@ handle_copy_command(buffer_t *b, const char *args, int explicit_range, int addr1
     int addr2)
 {
     char *ptr = (char *)args;
-    int dest = parse_address(b, &ptr);
+    int parse_error = 0;
+    int dest = parse_address_checked(b, &ptr, &parse_error);
 
     if (!explicit_range) {
         set_default_current_range(b, &addr1, &addr2);
+    }
+    if (parse_error) {
+        if (visual_mode) {
+            exvi_set_pending_status("Bad address");
+        } else {
+            fprintf(stderr, "Bad address\n");
+        }
+        return 1;
     }
     if (dest == -1) {
         fprintf(stderr, "Destination required\n");
@@ -395,10 +404,19 @@ handle_move_command(buffer_t *b, const char *args, int explicit_range, int addr1
     int addr2)
 {
     char *ptr = (char *)args;
-    int dest = parse_address(b, &ptr);
+    int parse_error = 0;
+    int dest = parse_address_checked(b, &ptr, &parse_error);
 
     if (!explicit_range) {
         set_default_current_range(b, &addr1, &addr2);
+    }
+    if (parse_error) {
+        if (visual_mode) {
+            exvi_set_pending_status("Bad address");
+        } else {
+            fprintf(stderr, "Bad address\n");
+        }
+        return 1;
     }
     if (dest == -1) {
         fprintf(stderr, "Destination required\n");

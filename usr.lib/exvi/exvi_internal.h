@@ -78,7 +78,10 @@ int buf_current_line(buffer_t *b);
 char *parse_delimited_text(char **cmd_ptr, char delim);
 int exvi_search(buffer_t *b, const char *pattern, int forward);
 int parse_address(buffer_t *b, char **cmd_ptr);
+int parse_address_checked(buffer_t *b, char **cmd_ptr, int *errorp);
 int parse_range(buffer_t *b, char **cmd_ptr, int *addr1, int *addr2);
+int parse_range_checked(buffer_t *b, char **cmd_ptr, int *addr1, int *addr2,
+    int *errorp);
 char *find_command_break(buffer_t *b, char *cmd, exvi_command_break_t *kind);
 void replace_saved_string(char **dst, const char *src);
 void set_default_current_range(buffer_t *b, int *addr1, int *addr2);

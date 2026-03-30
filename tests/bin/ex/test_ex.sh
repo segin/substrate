@@ -1057,6 +1057,12 @@ run_stderr_status_test "Move rejects destination inside range" \
     0 \
     "Destination not outside move range"
 
+run_stderr_status_test "Malformed range reports bad address" \
+    "one\ntwo\nthree\n" \
+    ":1,?p\n:q!\n" \
+    0 \
+    "Bad address"
+
 run_stdout_test "Set number query reports state" \
     "one\ntwo\n" \
     ":set number?\n:q!\n" \
@@ -1109,6 +1115,12 @@ run_stdout_test "Set wrapscan query reports state" \
     "one\ntwo\n" \
     ":set wrapscan?\n:q!\n" \
     "wrapscan"
+
+run_stdout_test "Malformed range leaves current line unchanged" \
+    "one\ntwo\nthree\n" \
+    ":2p\n:1,?p\n:p\n:q!\n" \
+    "two
+two"
 
 run_oracle_test "Substitute replacement pipe does not split command line" \
     "foo\n" \

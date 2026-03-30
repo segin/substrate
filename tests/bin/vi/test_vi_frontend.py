@@ -203,6 +203,20 @@ def main():
     require(saved == "f|o\nbar\n",
             f"vi global-pipe parsing saved wrong buffer: {saved!r}")
 
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b":2p\r", b":1,?p\r", b":p\r", b":q!\r"],
+        final_keys=None,
+    )
+    require(exit_code == 0, f"vi malformed-range handling exited with status {exit_code}")
+    require(decoded.count("two") >= 2,
+            "vi malformed-range handling missing preserved current-line output")
+    require("Bad address" in decoded,
+            "vi malformed-range handling missing diagnostic")
+    require(saved == "one\ntwo\nthree\n",
+            f"vi malformed-range handling unexpectedly modified file: {saved!r}")
+
     return 0
 
 

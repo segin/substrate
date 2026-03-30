@@ -87,6 +87,20 @@ skip_address_atom_syntax(char *p)
     return NULL;
 }
 
+static int
+address_maybe_starts(char *p)
+{
+    p = skip_ws(p);
+    return isdigit((unsigned char)*p)
+        || *p == '.'
+        || *p == '$'
+        || *p == '\''
+        || *p == '/'
+        || *p == '?'
+        || *p == '+'
+        || *p == '-';
+}
+
 static char *
 skip_address_syntax(char *p, int *matched)
 {
@@ -492,12 +506,26 @@ parse_address(buffer_t *b, char **cmd_ptr)
 }
 
 int
-parse_range(buffer_t *b, char **cmd_ptr, int *addr1, int *addr2)
+parse_address_checked(buffer_t *b, char **cmd_ptr, int *errorp)
+{
+    int expected = address_maybe_starts(*cmd_ptr);
+    int addr = parse_address(b, cmd_ptr);
+
+    if (errorp) {
+        *errorp = (expected && addr == -1);
+    }
+    return addr;
+}
+
+int
+parse_range_checked(buffer_t *b, char **cmd_ptr, int *addr1, int *addr2,
+    int *errorp)
 {
     char *p;
     int explicit_range = 0;
     line_t *saved_cur = b->cur;
     int a1;
+    int parse_error = 0;
 
     *addr1 = -1;
     *addr2 = -1;
@@ -512,10 +540,20 @@ parse_range(buffer_t *b, char **cmd_ptr, int *addr1, int *addr2)
         *addr2 = b->line_count;
         *cmd_ptr = p + 1;
         b->cur = saved_cur;
+        if (errorp) {
+            *errorp = 0;
+        }
         return 1;
     }
 
-    a1 = parse_address(b, cmd_ptr);
+    a1 = parse_address_checked(b, cmd_ptr, &parse_error);
+    if (parse_error) {
+        b->cur = saved_cur;
+        if (errorp) {
+            *errorp = 1;
+        }
+        return 0;
+    }
     if (a1 != -1) {
         explicit_range = 1;
         *addr1 = a1;
@@ -534,7 +572,14 @@ parse_range(buffer_t *b, char **cmd_ptr, int *addr1, int *addr2)
             if (semicolon) {
                 b->cur = buf_get_line(b, a1);
             }
-            a2 = parse_address(b, cmd_ptr);
+            a2 = parse_address_checked(b, cmd_ptr, &parse_error);
+            if (parse_error) {
+                b->cur = saved_cur;
+                if (errorp) {
+                    *errorp = 1;
+                }
+                return 0;
+            }
             if (a2 != -1) {
                 *addr2 = a2;
             } else {
@@ -543,7 +588,18 @@ parse_range(buffer_t *b, char **cmd_ptr, int *addr1, int *addr2)
         }
     }
     b->cur = saved_cur;
+    if (errorp) {
+        *errorp = 0;
+    }
     return explicit_range;
+}
+
+int
+parse_range(buffer_t *b, char **cmd_ptr, int *addr1, int *addr2)
+{
+    int error = 0;
+
+    return parse_range_checked(b, cmd_ptr, addr1, addr2, &error);
 }
 
 char *

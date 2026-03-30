@@ -141,6 +141,28 @@ test_delete_and_undo(void)
 }
 
 static void
+test_malformed_range_preserves_current_line(void)
+{
+    static const char *lines[] = {"alpha", "beta", "gamma"};
+    buffer_t b;
+    char cmd[] = "1,?p";
+    char *ptr = cmd;
+    int addr1, addr2, explicit_range, error;
+
+    reset_shared_state();
+    fill_buffer(&b, lines, 3);
+    b.cur = buf_get_line(&b, 2);
+
+    explicit_range = parse_range_checked(&b, &ptr, &addr1, &addr2, &error);
+    assert(explicit_range == 0);
+    assert(error == 1);
+    assert(buf_current_line(&b) == 2);
+
+    free_buffer(&b);
+    cleanup_shared_state();
+}
+
+static void
 test_yank_put(void)
 {
     static const char *lines[] = {"one", "two", "three"};
@@ -165,6 +187,7 @@ main(void)
     test_parse_range_features();
     test_set_and_query_options();
     test_delete_and_undo();
+    test_malformed_range_preserves_current_line();
     test_yank_put();
     puts("exvi core tests: ok");
     return 0;
