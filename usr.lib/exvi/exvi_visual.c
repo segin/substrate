@@ -1692,6 +1692,33 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         }
     } else if (vis->pending_op == 'y' && key == 'y') {
         vi_linewise_yank(b, vis, line_no, last_line);
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+        key == 'l') {
+        line_t *cur = b->cur;
+        int end = vis->cursor_col + count;
+
+        if (!cur || (size_t)vis->cursor_col >= cur->len) {
+            write(STDOUT_FILENO, "\a", 1);
+        } else if (vis->pending_op == 'y') {
+            if (vi_yank_span(vis, cur, vis->cursor_col, end) != 0) {
+                write(STDOUT_FILENO, "\a", 1);
+            }
+        } else {
+            vi_delete_span(b, vis, vis->cursor_col, end, vis->pending_op == 'c');
+        }
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+        key == 'h') {
+        int start = vis->cursor_col - count;
+
+        if (start < 0 || vis->cursor_col <= 0) {
+            write(STDOUT_FILENO, "\a", 1);
+        } else if (vis->pending_op == 'y') {
+            if (vi_yank_span(vis, b->cur, start, vis->cursor_col) != 0) {
+                write(STDOUT_FILENO, "\a", 1);
+            }
+        } else {
+            vi_delete_span(b, vis, start, vis->cursor_col, vis->pending_op == 'c');
+        }
     } else if (vis->pending_op == 'y' && key == 'w') {
         vi_find_word_boundary_forward_count(b->cur, vis->cursor_col, count, &end);
         if (vi_yank_span(vis, b->cur, vis->cursor_col, end) != 0) {

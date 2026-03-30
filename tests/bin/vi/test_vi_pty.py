@@ -200,6 +200,24 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "abcd\n",
+        [b'y', b'l', b'$', b'p'],
+    )
+    require(exit_code == 0, f"char-hl-yank vi exited with status {exit_code}")
+    require(saved == "abcda\n",
+            f"unexpected char-hl-yank buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abcd\n",
+        [b'l', b'l', b'd', b'h'],
+    )
+    require(exit_code == 0, f"char-hl-delete vi exited with status {exit_code}")
+    require(saved == "acd\n",
+            f"unexpected char-hl-delete buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\n\n  two\nthree\n\nfour\n",
         [b"}", b"}", b"{"],
     )
