@@ -2674,6 +2674,16 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             write(STDOUT_FILENO, "\a", 1);
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+        key == '_') {
+        if (vis->pending_op == 'y') {
+            vi_linewise_yank(b, vis, line_no, last_line);
+        } else if (vis->pending_op == 'd') {
+            vi_linewise_delete(b, vis, line_no, last_line);
+            vi_set_last_change(vis, VI_REPEAT_DD, count, 0);
+        } else {
+            vi_linewise_change(b, vis, line_no, last_line);
+        }
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
         key == '|') {
         line_t *cur = b->cur;
         int target;
@@ -3786,9 +3796,15 @@ exvi_visual_main(buffer_t *b)
                 vis.cursor_col = vi_last_nonblank_col(b->cur);
                 vis.pending_g = 0;
             } else {
+                int line_no = buf_current_line(b);
+                int count = vi_take_count(&vis);
+                int target = vi_clamp_line_target(b, line_no + count - 1);
+
                 vis.pending_g = 0;
-                vis.pending_count = 0;
-                write(STDOUT_FILENO, "\a", 1);
+                if (b->line_count > 0) {
+                    b->cur = buf_get_line(b, target);
+                    vis.cursor_col = vi_first_nonblank_col(b->cur);
+                }
             }
             break;
         case '|':

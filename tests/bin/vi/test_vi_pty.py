@@ -482,6 +482,44 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "aa\n  bb\ncc\n",
+        [b"2", b"_", b"r", b"X"],
+    )
+    require(exit_code == 0, f"underscore-motion vi exited with status {exit_code}")
+    require("line 2/3" in decoded, "missing underscore-motion status")
+    require(saved == "aa\n  Xb\ncc\n",
+            f"unexpected underscore-motion buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"d", b"_"],
+    )
+    require(exit_code == 0, f"d_ vi exited with status {exit_code}")
+    require(saved == "two\nthree\n",
+            f"unexpected d_ buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"c", b"_", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"c_ vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing c_ insert status")
+    require(saved == "X\ntwo\nthree\n",
+            f"unexpected c_ buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\n",
+        [b"y", b"_", b"P"],
+    )
+    require(exit_code == 0, f"y_ vi exited with status {exit_code}")
+    require(saved == "one\none\ntwo\n",
+            f"unexpected y_ buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one two three four\n",
         [b"W", b"W", b"W", b"2", b"g", b"e", b"r", b"Y"],
     )
