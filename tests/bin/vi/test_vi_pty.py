@@ -125,6 +125,17 @@ def main():
     require("line 21/40" in decoded, "missing half-page down status")
     require(saved.startswith("line 1\nline 2\nline 3\n"),
             "unexpected half-page scroll buffer contents")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "aa\nmatch one\nbb\nmatch two\ncc\nmatch three\n",
+        [b"/", b"match\r", b"2", b"n", b"2", b"N"],
+    )
+    require(exit_code == 0, f"search-repeat vi exited with status {exit_code}")
+    require("line 2/6" in decoded, "missing initial search status")
+    require("line 6/6" in decoded, "missing counted n status")
+    require(saved == "aa\nmatch one\nbb\nmatch two\ncc\nmatch three\n",
+            "unexpected counted search buffer contents")
     print("vi pty test: ok")
     return 0
 

@@ -1058,6 +1058,22 @@ vi_apply_search(buffer_t *b, vi_visual_t *vis, const char *pattern, int forward)
 }
 
 static void
+vi_repeat_search(buffer_t *b, vi_visual_t *vis, int forward, int count)
+{
+    while (count-- > 0) {
+        int line_no = exvi_search(b, "", forward);
+
+        if (line_no < 1) {
+            write(STDOUT_FILENO, "\a", 1);
+            return;
+        }
+        b->cur = buf_get_line(b, line_no);
+        vis->cursor_col = 0;
+        vis->last_search_forward = forward;
+    }
+}
+
+static void
 vi_search_prompt(buffer_t *b, vi_visual_t *vis, int forward)
 {
     char pattern[256];
@@ -1458,13 +1474,11 @@ exvi_visual_main(buffer_t *b)
             break;
         case 'n':
             vis.pending_g = 0;
-            vi_take_count(&vis);
-            vi_apply_search(b, &vis, "", vis.last_search_forward);
+            vi_repeat_search(b, &vis, vis.last_search_forward, vi_take_count(&vis));
             break;
         case 'N':
             vis.pending_g = 0;
-            vi_take_count(&vis);
-            vi_apply_search(b, &vis, "", !vis.last_search_forward);
+            vi_repeat_search(b, &vis, !vis.last_search_forward, vi_take_count(&vis));
             break;
         case '\f':
             vis.pending_g = 0;
