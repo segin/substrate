@@ -1946,6 +1946,24 @@ vi_linewise_delete(buffer_t *b, vi_visual_t *vis, int start, int end)
 }
 
 static void
+vi_linewise_change(buffer_t *b, vi_visual_t *vis, int start, int end)
+{
+    char regarg[2];
+    line_t *before = (start > 1) ? buf_get_line(b, start - 1) : NULL;
+
+    vi_take_register_arg(vis, regarg);
+    handle_yank_command(b, regarg, 1, start, end);
+    handle_delete_command(b, 1, start, end);
+    b->cur = buf_insert_after(b, before, "");
+    if (!b->cur) {
+        b->cur = b->head;
+    }
+    vis->cursor_col = 0;
+    vis->insert_mode = 1;
+    vis->replace_mode = 0;
+}
+
+static void
 vi_substitute_line(buffer_t *b, vi_visual_t *vis)
 {
     if (!b->cur) {
@@ -1960,6 +1978,22 @@ vi_substitute_line(buffer_t *b, vi_visual_t *vis)
     vis->cursor_col = 0;
     vis->insert_mode = 1;
     vis->replace_mode = 0;
+}
+
+static int
+vi_line_number_for_mark(buffer_t *b, line_t *mark)
+{
+    int line_no = 1;
+    line_t *scan = b->head;
+
+    while (scan) {
+        if (scan == mark) {
+            return line_no;
+        }
+        scan = scan->next;
+        line_no++;
+    }
+    return -1;
 }
 
 static int
@@ -2015,6 +2049,36 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         }
     } else if (vis->pending_op == 'y' && key == 'y') {
         vi_linewise_yank(b, vis, line_no, last_line);
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+        key == '\'') {
+        int mark_key = vi_read_key();
+        int mark_line;
+        int start;
+
+        if (mark_key < 'a' || mark_key > 'z' || !b->marks[mark_key - 'a']) {
+            write(STDOUT_FILENO, "\a", 1);
+        } else {
+            mark_line = vi_line_number_for_mark(b, b->marks[mark_key - 'a']);
+            if (mark_line < 1) {
+                write(STDOUT_FILENO, "\a", 1);
+            } else {
+                start = line_no;
+                end = mark_line;
+                if (start > end) {
+                    int tmp = start;
+
+                    start = end;
+                    end = tmp;
+                }
+                if (vis->pending_op == 'y') {
+                    vi_linewise_yank(b, vis, start, end);
+                } else if (vis->pending_op == 'd') {
+                    vi_linewise_delete(b, vis, start, end);
+                } else {
+                    vi_linewise_change(b, vis, start, end);
+                }
+            }
+        }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
         key == 'l') {
         line_t *cur = b->cur;

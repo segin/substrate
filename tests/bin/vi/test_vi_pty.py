@@ -652,6 +652,43 @@ def main():
     require("line 2/3" in decoded, "missing mark jump status")
     require(saved == "one\n> two\nthree\n",
             f"unexpected visual-mark buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\nfour\n",
+        [b"G", b"m", b"a", b"g", b"g", b"d", b"'", b"a"],
+    )
+    require(exit_code == 0, f"visual-mark-delete vi exited with status {exit_code}")
+    require(saved == "",
+            f"unexpected visual-mark-delete buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\nfour\n",
+        [b"g", b"g", b"m", b"a", b"G", b"d", b"'", b"a"],
+    )
+    require(exit_code == 0, f"visual-mark-delete-upward vi exited with status {exit_code}")
+    require(saved == "",
+            f"unexpected visual-mark-delete-upward buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\nfour\n",
+        [b"G", b"m", b"a", b"g", b"g", b"c", b"'", b"a", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"visual-mark-change vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing visual-mark change insert status")
+    require(saved == "X\n",
+            f"unexpected visual-mark-change buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\nfour\n",
+        [b"G", b"m", b"a", b"g", b"g", b"y", b"'", b"a", b"P"],
+    )
+    require(exit_code == 0, f"visual-mark-yank vi exited with status {exit_code}")
+    require(saved == "one\ntwo\nthree\nfour\none\ntwo\nthree\nfour\n",
+            f"unexpected visual-mark-yank buffer: {saved!r}")
     print("vi pty test: ok")
     return 0
 
