@@ -304,6 +304,12 @@ void do_command(buffer_t *b, char *cmd) {
     }
 }
 
+void
+exvi_execute_command(buffer_t *b, char *cmd)
+{
+    do_command(b, cmd);
+}
+
 int
 exvi_main(int argc, char **argv, exvi_frontend_t frontend)
 {
@@ -357,6 +363,8 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
     }
     
     if (visual_mode) {
+        int ret;
+
         if (frontend == EXVI_FRONTEND_EX) {
             set_visual_handoff_file(buf.filename);
             buf_free(&buf);
@@ -365,12 +373,22 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
             exvi_cleanup_runtime();
             return EXVI_EXIT_VISUAL_HANDOFF;
         }
-        fprintf(stderr, "%s: visual mode not implemented in this build.\n", exvi_progname);
+        if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO)) {
+            fprintf(stderr, "%s: visual mode requires a terminal.\n", exvi_progname);
+            buf_free(&buf);
+            buf_free(&undo_buf);
+            exvi_free_registers();
+            exvi_cleanup_runtime();
+            exvi_cleanup_session_state();
+            return 1;
+        }
+        ret = exvi_visual_main(&buf);
         buf_free(&buf);
         buf_free(&undo_buf);
         exvi_free_registers();
         exvi_cleanup_runtime();
-        return 1;
+        exvi_cleanup_session_state();
+        return ret;
     }
 
     load_startup_commands(&buf, do_command);

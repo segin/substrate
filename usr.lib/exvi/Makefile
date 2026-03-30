@@ -1,7 +1,7 @@
 include ../../Makefile.inc
 
 LIB = libexvi.a
-SRCS = exvi.c exvi_buffer.c exvi_parse.c exvi_runtime.c exvi_cmd.c exvi_session.c
+SRCS = exvi.c exvi_buffer.c exvi_parse.c exvi_runtime.c exvi_cmd.c exvi_session.c exvi_visual.c
 OBJS = $(SRCS:.c=.o)
 BUILD_MODE := $(if $(NATIVE_BUILD),native,target)
 MODE_STAMP = .build-mode
@@ -22,14 +22,26 @@ ensure_build_mode:
 	cur=""; \
 	if [ -f "$(MODE_STAMP)" ]; then cur=$$(cat "$(MODE_STAMP)"); fi; \
 	if [ "$$cur" != "$$mode" ]; then \
-		rm -f $(OBJS) $(LIB); \
 		printf '%s\n' "$$mode" > "$(MODE_STAMP)"; \
 	fi
 
 $(LIB): ensure_build_mode $(OBJS)
 	$(AR) rcs $@ $(OBJS)
 
-%.o: %.c | ensure_build_mode
+$(OBJS): $(MODE_STAMP)
+
+$(MODE_STAMP):
+	@mode="$(BUILD_MODE)"; \
+	cur=""; \
+	if [ -f "$(MODE_STAMP)" ]; then cur=$$(cat "$(MODE_STAMP)"); fi; \
+	if [ "$$cur" != "$$mode" ]; then \
+		printf '%s\n' "$$mode" > "$(MODE_STAMP).tmp"; \
+		mv "$(MODE_STAMP).tmp" "$(MODE_STAMP)"; \
+	elif [ ! -f "$(MODE_STAMP)" ]; then \
+		printf '%s\n' "$$mode" > "$(MODE_STAMP)"; \
+	fi
+
+%.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:

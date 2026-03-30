@@ -75,6 +75,8 @@ void exvi_cleanup_session_state(void);
 void exvi_set_cli_arglist(int argc, char **argv, int optind);
 int exvi_has_arglist(void);
 const char *exvi_current_arg(void);
+void exvi_execute_command(buffer_t *b, char *cmd);
+int exvi_visual_main(buffer_t *b);
 void handle_sigint(int sig);
 void handle_sigterm(int sig);
 int handle_pop_command(buffer_t *b, int force);
