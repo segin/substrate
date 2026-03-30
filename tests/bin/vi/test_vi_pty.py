@@ -161,6 +161,16 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "if (alpha[beta{gamma}delta]omega)\nnext line\n",
+        [b"f", b"(", b"%", b"r", b"1", b"0", b"f", b"]", b"%", b"r", b"2"],
+    )
+    require(exit_code == 0, f"match-motion vi exited with status {exit_code}")
+    require("line 1/2" in decoded, "missing match-motion status")
+    require(saved == "if (alpha2beta{gamma}delta]omega1\nnext line\n",
+            f"unexpected match-motion buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "  one\n\tTwo\nthree\n",
         [b"+", b"\r", b"-"],
     )

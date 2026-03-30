@@ -710,6 +710,111 @@ vi_repeat_find_motion(buffer_t *b, vi_visual_t *vis, int reverse, int count)
 }
 
 static int
+vi_match_bracket(int ch, int *forward_out, int *match_out)
+{
+    switch (ch) {
+    case '(':
+        *forward_out = 1;
+        *match_out = ')';
+        return 0;
+    case '[':
+        *forward_out = 1;
+        *match_out = ']';
+        return 0;
+    case '{':
+        *forward_out = 1;
+        *match_out = '}';
+        return 0;
+    case ')':
+        *forward_out = 0;
+        *match_out = '(';
+        return 0;
+    case ']':
+        *forward_out = 0;
+        *match_out = '[';
+        return 0;
+    case '}':
+        *forward_out = 0;
+        *match_out = '{';
+        return 0;
+    default:
+        return -1;
+    }
+}
+
+static void
+vi_match_motion(buffer_t *b, vi_visual_t *vis)
+{
+    line_t *line = b->cur;
+    int open_ch;
+    int match_ch;
+    int forward;
+    int depth = 1;
+
+    if (!line || vis->cursor_col < 0 || (size_t)vis->cursor_col >= line->len) {
+        write(STDOUT_FILENO, "\a", 1);
+        return;
+    }
+    open_ch = (unsigned char)line->text[vis->cursor_col];
+    if (vi_match_bracket(open_ch, &forward, &match_ch) != 0) {
+        write(STDOUT_FILENO, "\a", 1);
+        return;
+    }
+
+    if (forward) {
+        size_t i;
+
+        for (i = (size_t)vis->cursor_col + 1; i < line->len; i++) {
+            if ((unsigned char)line->text[i] == (unsigned char)open_ch) {
+                depth++;
+            } else if ((unsigned char)line->text[i] == (unsigned char)match_ch &&
+                --depth == 0) {
+                vis->cursor_col = (int)i;
+                return;
+            }
+        }
+        for (line = line->next; line; line = line->next) {
+            for (i = 0; i < line->len; i++) {
+                if ((unsigned char)line->text[i] == (unsigned char)open_ch) {
+                    depth++;
+                } else if ((unsigned char)line->text[i] == (unsigned char)match_ch &&
+                    --depth == 0) {
+                    b->cur = line;
+                    vis->cursor_col = (int)i;
+                    return;
+                }
+            }
+        }
+    } else {
+        int i;
+
+        for (i = vis->cursor_col - 1; i >= 0; i--) {
+            if ((unsigned char)line->text[i] == (unsigned char)open_ch) {
+                depth++;
+            } else if ((unsigned char)line->text[i] == (unsigned char)match_ch &&
+                --depth == 0) {
+                vis->cursor_col = i;
+                return;
+            }
+        }
+        for (line = line->prev; line; line = line->prev) {
+            for (i = (int)line->len - 1; i >= 0; i--) {
+                if ((unsigned char)line->text[i] == (unsigned char)open_ch) {
+                    depth++;
+                } else if ((unsigned char)line->text[i] == (unsigned char)match_ch &&
+                    --depth == 0) {
+                    b->cur = line;
+                    vis->cursor_col = i;
+                    return;
+                }
+            }
+        }
+    }
+
+    write(STDOUT_FILENO, "\a", 1);
+}
+
+static int
 vi_find_motion_span(line_t *cur, int cursor_col, int ch, int forward, int till,
     int count, int *start_out, int *end_out)
 {
@@ -1721,6 +1826,11 @@ exvi_visual_main(buffer_t *b)
             if (cur) {
                 vis.cursor_col = (int)cur->len;
             }
+            break;
+        case '%':
+            vis.pending_g = 0;
+            vi_take_count(&vis);
+            vi_match_motion(b, &vis);
             break;
         case 'i':
             vis.pending_g = 0;
