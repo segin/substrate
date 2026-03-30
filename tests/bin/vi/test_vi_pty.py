@@ -347,6 +347,24 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one two three four\n",
+        [b"W", b"W", b"W", b"y", b"g", b"e", b"P"],
+    )
+    require(exit_code == 0, f"yge vi exited with status {exit_code}")
+    require(saved == "one two three fe four\n",
+            f"unexpected yge buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one,two   three\n",
+        [b"W", b"y", b"g", b"E", b"P"],
+    )
+    require(exit_code == 0, f"ygE vi exited with status {exit_code}")
+    require(saved == "one,two   to   three\n",
+            f"unexpected ygE buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\n\n  two\nthree\n\nfour\n",
         [b"}", b"}", b"{"],
     )

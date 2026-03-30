@@ -2023,7 +2023,8 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         if (vi_yank_span(vis, b->cur, vis->cursor_col, end) != 0) {
             write(STDOUT_FILENO, "\a", 1);
         }
-    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == 'g') {
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+        key == 'g') {
         int motion = vi_read_key();
         line_t *target_line;
         int target_col;
@@ -2034,6 +2035,12 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             &target_line, &target_col) != 0 ||
             target_line != b->cur || target_col > vis->cursor_col) {
             write(STDOUT_FILENO, "\a", 1);
+        } else if (vis->pending_op == 'y') {
+            if (vi_yank_span(vis, b->cur, target_col, vis->cursor_col + 1) != 0) {
+                write(STDOUT_FILENO, "\a", 1);
+            } else {
+                vis->cursor_col = target_col;
+            }
         } else {
             vi_delete_span(b, vis, target_col, vis->cursor_col + 1, vis->pending_op == 'c');
         }
