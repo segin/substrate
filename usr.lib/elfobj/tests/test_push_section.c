@@ -103,6 +103,19 @@ int main(void) {
 
     elf_close(obj);
 
+    // Test 4: Verify sequential index assignment
+    elfobj_t *obj2 = elf_create(ET_DYN, 62, ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_LE);
+    for (size_t i = 0; i < 20; i++) {
+        struct elf_section *s = calloc(1, sizeof(*s));
+        s->name = strdup("filler3");
+        s->obj = obj2;
+        elf__push_section(obj2, s);
+        if (s->index != i) {
+            return 1;
+        }
+    }
+    elf_close(obj2);
+
     // Test 3: OOM test
     if (test_oom() != 0) {
         return 1;
