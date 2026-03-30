@@ -484,6 +484,221 @@ replace_saved_string(char **dst, const char *src)
 }
 
 static int
+handle_pop_command(buffer_t *b, int force)
+{
+    tag_frame_t frame;
+
+    if (b->modified && !force) {
+        fprintf(stderr, "No write since last change (add ! to override)\n");
+        return 1;
+    }
+    if (tag_stack_len == 0) {
+        fprintf(stderr, "Tag stack empty\n");
+        return 1;
+    }
+
+    frame = tag_stack[--tag_stack_len];
+    if (tag_stack_len == 0) {
+        free(tag_stack);
+        tag_stack = NULL;
+    }
+    replace_saved_string(&alternate_filename, b->filename);
+    buf_free(b);
+    buf_init(b);
+    b->filename = frame.filename;
+    buf_read_file(b, b->filename);
+    if (frame.line > 0) {
+        b->cur = buf_get_line(b, frame.line);
+    }
+    if (!batch_mode) {
+        printf("\"%s\" %d lines\n", b->filename, b->line_count);
+    }
+    return 1;
+}
+
+static int
+handle_tag_command(buffer_t *b, const char *args)
+{
+    char *ptr = (char *)args;
+    FILE *f;
+    char *line = NULL;
+    size_t cap = 0;
+    ssize_t ret;
+    int found = 0;
+
+    while (*ptr && isspace((unsigned char)*ptr)) {
+        ptr++;
+    }
+    if (!*ptr) {
+        fprintf(stderr, "Usage: tag <name>\n");
+        return 1;
+    }
+
+    f = fopen("tags", "r");
+    if (!f) {
+        fprintf(stderr, "No tags file\n");
+        return 1;
+    }
+
+    while ((ret = getline(&line, &cap, f)) != -1) {
+        if (ret > 0 && line[ret - 1] == '\n') {
+            line[ret - 1] = '\0';
+        }
+        char *tname = strtok(line, "\t ");
+        char *tfile = strtok(NULL, "\t ");
+        char *tcmd = strtok(NULL, "");
+
+        if (tname && tfile && tcmd && strcmp(tname, ptr) == 0) {
+            char *old_filename;
+
+            if (b->modified) {
+                fprintf(stderr, "No write since last change\n");
+                free(line);
+                fclose(f);
+                return 1;
+            }
+            if (push_tag_frame(b) != 0) {
+                fprintf(stderr, "Out of memory\n");
+                free(line);
+                fclose(f);
+                return 1;
+            }
+            old_filename = b->filename ? strdup(b->filename) : NULL;
+            buf_free(b);
+            buf_init(b);
+            b->filename = strdup(tfile);
+            buf_read_file(b, b->filename);
+            replace_saved_string(&alternate_filename, old_filename);
+            free(old_filename);
+            if (!batch_mode) {
+                printf("\"%s\" %d lines\n", b->filename, b->line_count);
+            }
+
+            {
+                char *tcmt = strstr(tcmd, ";\"");
+                if (tcmt) {
+                    *tcmt = '\0';
+                }
+            }
+            do_command(b, tcmd);
+            found = 1;
+            break;
+        }
+    }
+    free(line);
+    fclose(f);
+    if (!found) {
+        fprintf(stderr, "Tag not found: %s\n", ptr);
+    }
+    return 1;
+}
+
+static int
+handle_set_command(const char *args)
+{
+    char *ptr = (char *)args;
+
+    while (*ptr && isspace((unsigned char)*ptr)) {
+        ptr++;
+    }
+
+    if (!*ptr) {
+        if (option_number) {
+            printf("number\n");
+        }
+        if (option_list) {
+            printf("list\n");
+        }
+        return 1;
+    }
+
+    while (*ptr) {
+        char *end = ptr;
+        size_t len;
+        int query = 0;
+
+        while (*end && !isspace((unsigned char)*end)) {
+            end++;
+        }
+        len = (size_t)(end - ptr);
+        if (len > 0 && end[-1] == '?') {
+            query = 1;
+            len--;
+        }
+
+        if (len == 3 && strncmp(ptr, "all", 3) == 0) {
+            if (query) {
+                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                return 1;
+            }
+            if (option_number) {
+                printf("number\n");
+            }
+            if (option_list) {
+                printf("list\n");
+            }
+        } else if (len == 2 && strncmp(ptr, "nu", 2) == 0) {
+            if (query) {
+                printf("%s\n", option_number ? "number" : "nonumber");
+            } else {
+                option_number = 1;
+            }
+        } else if (len == 6 && strncmp(ptr, "number", 6) == 0) {
+            if (query) {
+                printf("%s\n", option_number ? "number" : "nonumber");
+            } else {
+                option_number = 1;
+            }
+        } else if (len == 4 && strncmp(ptr, "nonu", 4) == 0) {
+            if (query) {
+                printf("%s\n", option_number ? "nonumber" : "number");
+            } else {
+                option_number = 0;
+            }
+        } else if (len == 8 && strncmp(ptr, "nonumber", 8) == 0) {
+            if (query) {
+                printf("%s\n", option_number ? "nonumber" : "number");
+            } else {
+                option_number = 0;
+            }
+        } else if (len == 2 && strncmp(ptr, "li", 2) == 0) {
+            if (query) {
+                printf("%s\n", option_list ? "list" : "nolist");
+            } else {
+                option_list = 1;
+            }
+        } else if (len == 4 && strncmp(ptr, "list", 4) == 0) {
+            if (query) {
+                printf("%s\n", option_list ? "list" : "nolist");
+            } else {
+                option_list = 1;
+            }
+        } else if (len == 4 && strncmp(ptr, "noli", 4) == 0) {
+            if (query) {
+                printf("%s\n", option_list ? "nolist" : "list");
+            } else {
+                option_list = 0;
+            }
+        } else if (len == 6 && strncmp(ptr, "nolist", 6) == 0) {
+            if (query) {
+                printf("%s\n", option_list ? "nolist" : "list");
+            } else {
+                option_list = 0;
+            }
+        } else {
+            fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+            return 1;
+        }
+
+        ptr = end;
+        while (*ptr && isspace((unsigned char)*ptr)) {
+            ptr++;
+        }
+    }
+    return 1;
+}
+
+static int
 apply_substitute_range(buffer_t *b, int addr1, int addr2, const char *pattern,
     const char *replacement, int global)
 {
@@ -758,196 +973,17 @@ void do_command(buffer_t *b, char *cmd) {
         printf("\"%s\" recovered, %d lines\n", b->filename, b->line_count);
         return;
     } else if (match_command(cmd, "pop", "po", &args, &force)) {
-        tag_frame_t frame;
-
-        if (b->modified && !force) {
-            fprintf(stderr, "No write since last change (add ! to override)\n");
+        if (handle_pop_command(b, force)) {
             return;
         }
-        if (tag_stack_len == 0) {
-            fprintf(stderr, "Tag stack empty\n");
-            return;
-        }
-
-        frame = tag_stack[--tag_stack_len];
-        if (tag_stack_len == 0) {
-            free(tag_stack);
-            tag_stack = NULL;
-        }
-        replace_saved_string(&alternate_filename, b->filename);
-        buf_free(b);
-        buf_init(b);
-        b->filename = frame.filename;
-        buf_read_file(b, b->filename);
-        if (frame.line > 0) {
-            b->cur = buf_get_line(b, frame.line);
-        }
-        if (!batch_mode) {
-            printf("\"%s\" %d lines\n", b->filename, b->line_count);
-        }
-        return;
     } else if (match_command(cmd, "tag", NULL, &args, NULL)) {
-        char *ptr = (char *)args;
-        while (*ptr && isspace((unsigned char)*ptr)) ptr++;
-        if (!*ptr) {
-            fprintf(stderr, "Usage: tag <name>\n");
+        if (handle_tag_command(b, args)) {
             return;
         }
-        
-        FILE *f = fopen("tags", "r");
-        if (!f) {
-            fprintf(stderr, "No tags file\n");
-            return;
-        }
-        
-        char *line = NULL;
-        size_t cap = 0;
-        ssize_t ret;
-        int found = 0;
-        while ((ret = getline(&line, &cap, f)) != -1) {
-            if (ret > 0 && line[ret-1] == '\n') line[ret-1] = '\0';
-            char *tname = strtok(line, "\t ");
-            char *tfile = strtok(NULL, "\t ");
-            char *tcmd = strtok(NULL, "");
-            
-            if (tname && tfile && tcmd && strcmp(tname, ptr) == 0) {
-                char *old_filename;
-
-                if (b->modified) {
-                    fprintf(stderr, "No write since last change\n");
-                    free(line);
-                    fclose(f);
-                    return;
-                }
-                if (push_tag_frame(b) != 0) {
-                    fprintf(stderr, "Out of memory\n");
-                    free(line);
-                    fclose(f);
-                    return;
-                }
-                old_filename = b->filename ? strdup(b->filename) : NULL;
-                buf_free(b);
-                buf_init(b);
-                b->filename = strdup(tfile);
-                buf_read_file(b, b->filename);
-                replace_saved_string(&alternate_filename, old_filename);
-                free(old_filename);
-                if (!batch_mode) printf("\"%s\" %d lines\n", b->filename, b->line_count);
-                
-                // execute the tag command (usually a search or line number)
-                // Remove trailing comments from vim tags like;"
-                char *tcmt = strstr(tcmd, ";\"");
-                if (tcmt) *tcmt = '\0';
-                do_command(b, tcmd);
-                found = 1;
-                break;
-            }
-        }
-        free(line);
-        fclose(f);
-        if (!found) fprintf(stderr, "Tag not found: %s\n", ptr);
-        return;
     } else if (match_command(cmd, "set", NULL, &args, NULL)) {
-        char *ptr = (char *)args;
-
-        while (*ptr && isspace((unsigned char)*ptr)) {
-            ptr++;
-        }
-
-        if (!*ptr) {
-            if (option_number) {
-                printf("number\n");
-            }
-            if (option_list) {
-                printf("list\n");
-            }
+        if (handle_set_command(args)) {
             return;
         }
-
-        while (*ptr) {
-            char *end = ptr;
-            size_t len;
-            int query = 0;
-
-            while (*end && !isspace((unsigned char)*end)) {
-                end++;
-            }
-            len = (size_t)(end - ptr);
-            if (len > 0 && end[-1] == '?') {
-                query = 1;
-                len--;
-            }
-
-            if (len == 3 && strncmp(ptr, "all", 3) == 0) {
-                if (query) {
-                    fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
-                    return;
-                }
-                if (option_number) {
-                    printf("number\n");
-                }
-                if (option_list) {
-                    printf("list\n");
-                }
-            } else if (len == 2 && strncmp(ptr, "nu", 2) == 0) {
-                if (query) {
-                    printf("%s\n", option_number ? "number" : "nonumber");
-                } else {
-                    option_number = 1;
-                }
-            } else if (len == 6 && strncmp(ptr, "number", 6) == 0) {
-                if (query) {
-                    printf("%s\n", option_number ? "number" : "nonumber");
-                } else {
-                    option_number = 1;
-                }
-            } else if (len == 4 && strncmp(ptr, "nonu", 4) == 0) {
-                if (query) {
-                    printf("%s\n", option_number ? "nonumber" : "number");
-                } else {
-                    option_number = 0;
-                }
-            } else if (len == 8 && strncmp(ptr, "nonumber", 8) == 0) {
-                if (query) {
-                    printf("%s\n", option_number ? "nonumber" : "number");
-                } else {
-                    option_number = 0;
-                }
-            } else if (len == 2 && strncmp(ptr, "li", 2) == 0) {
-                if (query) {
-                    printf("%s\n", option_list ? "list" : "nolist");
-                } else {
-                    option_list = 1;
-                }
-            } else if (len == 4 && strncmp(ptr, "list", 4) == 0) {
-                if (query) {
-                    printf("%s\n", option_list ? "list" : "nolist");
-                } else {
-                    option_list = 1;
-                }
-            } else if (len == 4 && strncmp(ptr, "noli", 4) == 0) {
-                if (query) {
-                    printf("%s\n", option_list ? "nolist" : "list");
-                } else {
-                    option_list = 0;
-                }
-            } else if (len == 6 && strncmp(ptr, "nolist", 6) == 0) {
-                if (query) {
-                    printf("%s\n", option_list ? "nolist" : "list");
-                } else {
-                    option_list = 0;
-                }
-            } else {
-                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
-                return;
-            }
-
-            ptr = end;
-            while (*ptr && isspace((unsigned char)*ptr)) {
-                ptr++;
-            }
-        }
-        return;
     } else if (match_command(cmd, "quit", "q", &args, &force)) {
         if (b->modified && !force) {
             fprintf(stderr, "No write since last change (add ! to override)\n");
