@@ -148,7 +148,7 @@ Completed architecture milestones already in tree are intentionally omitted here
 - [x] Finish historical `"` comment behavior, including quoted delimiter edge cases and command-tail parsing.
 - [x] Audit and tighten malformed address/range diagnostics so failures never mutate buffer state.
 - [x] Verify per-command default addresses against historical/POSIX behavior rather than relying on the current mostly-correct defaults.
-- [ ] Audit `%`, `;`, mark addresses, search addresses, empty search reuse, relative offsets, and empty-command printing against BSD/vim/ex reference behavior.
+- [x] Audit `%`, `;`, mark addresses, search addresses, empty search reuse, relative offsets, and empty-command printing against BSD/vim/ex reference behavior.
 - [ ] Add finer-grained parser tests for malformed substitutes, malformed globals, nested separators, escaped delimiters, ambiguous abbreviations, and bad marks.
 
 #### 2.2 Command-set completeness and command semantics

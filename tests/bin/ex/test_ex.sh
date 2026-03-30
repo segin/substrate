@@ -81,6 +81,51 @@ run_stdout_test() {
     rm -f "$file"
 }
 
+run_stdout_oracle_test() {
+    local name="$1"
+    local init_text="$2"
+    local script="$3"
+    local f_ex
+    local f_nvi
+    local f_vim
+    local out_ex
+    local out_nvi
+    local out_vim
+
+    f_ex=$(mktemp)
+    f_nvi=$(mktemp)
+    f_vim=$(mktemp)
+
+    printf "%b" "$init_text" >"$f_ex"
+    printf "%b" "$init_text" >"$f_nvi"
+    printf "%b" "$init_text" >"$f_vim"
+
+    out_ex=$(printf "%b" "$script" | "$EX_BIN" -s "$f_ex" 2>/dev/null || true)
+
+    if command -v nvi >/dev/null 2>&1; then
+        out_nvi=$(printf "%b" "$script" | nvi "$f_nvi" 2>/dev/null || true)
+        if [ "$out_nvi" != "$out_ex" ]; then
+            fail "$name (stdout differs from nvi)"
+            printf 'expected stdout:\n%s\nactual stdout:\n%s\n' "$out_nvi" "$out_ex"
+            rm -f "$f_ex" "$f_nvi" "$f_vim"
+            return
+        fi
+    fi
+
+    if command -v vim >/dev/null 2>&1; then
+        out_vim=$(printf "%b" "$script" | vim -es "$f_vim" 2>/dev/null || true)
+        if [ "$out_vim" != "$out_ex" ]; then
+            fail "$name (stdout differs from vim -es)"
+            printf 'expected stdout:\n%s\nactual stdout:\n%s\n' "$out_vim" "$out_ex"
+            rm -f "$f_ex" "$f_nvi" "$f_vim"
+            return
+        fi
+    fi
+
+    pass "$name"
+    rm -f "$f_ex" "$f_nvi" "$f_vim"
+}
+
 run_stdout_with_cliargs_test() {
     local name="$1"
     local init_text="$2"
@@ -1121,6 +1166,26 @@ run_stdout_test "Malformed range leaves current line unchanged" \
     ":2p\n:1,?p\n:p\n:q!\n" \
     "two
 two"
+
+run_stdout_oracle_test "Percent print matches vim" \
+    "alpha\nbeta\ngamma\n" \
+    ":%p\n:q!\n"
+
+run_stdout_oracle_test "Search addresses and reuse match vim" \
+    "alpha\nbeta\ngamma\ndelta\n" \
+    ":/gamma/-1p\n://p\n:q!\n"
+
+run_stdout_oracle_test "Semicolon range matches vim" \
+    "alpha\nbeta\ngamma\ndelta\n" \
+    ":1;/delta/-1p\n:q!\n"
+
+run_stdout_oracle_test "Mark address matches vim" \
+    "alpha\nbeta\ngamma\n" \
+    ":2ka\n:'ap\n:q!\n"
+
+run_stdout_oracle_test "Empty addressed command matches vim" \
+    "alpha\nbeta\ngamma\n" \
+    ":2\n:q!\n"
 
 run_oracle_test "Join without range uses current line and following line" \
     "one\ntwo\nthree\n" \
