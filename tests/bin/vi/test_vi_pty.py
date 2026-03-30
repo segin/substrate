@@ -654,6 +654,34 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "abcd\n",
+        [b"l", b"d", b"g", b"_"],
+    )
+    require(exit_code == 0, f"dg_ vi exited with status {exit_code}")
+    require(saved == "a\n",
+            f"unexpected dg_ buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abcd\n",
+        [b"l", b"c", b"g", b"_", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"cg_ vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing cg_ insert status")
+    require(saved == "aX\n",
+            f"unexpected cg_ buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abcd\n",
+        [b"l", b"y", b"g", b"_", b"P"],
+    )
+    require(exit_code == 0, f"yg_ vi exited with status {exit_code}")
+    require(saved == "abcdbcd\n",
+            f"unexpected yg_ buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one two three four\n",
         [b"W", b"W", b"W", b"2", b"g", b"e", b"r", b"Y"],
     )

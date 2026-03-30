@@ -2663,6 +2663,14 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             } else {
                 vi_linewise_change(b, vis, start, end_line);
             }
+        } else if (motion == '_') {
+            int target = vi_clamp_line_target(b, line_no + count - 1);
+
+            target_line = buf_get_line(b, target);
+            target_col = vi_last_nonblank_col(target_line);
+            if (vi_apply_charwise_motion(b, vis, target_line, target_col, 1) != 0) {
+                write(STDOUT_FILENO, "\a", 1);
+            }
         } else if (motion != 'e' && motion != 'E') {
             write(STDOUT_FILENO, "\a", 1);
         } else if (vi_backward_end_motion_target(b, vis, count, motion == 'E',
