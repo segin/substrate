@@ -1583,8 +1583,8 @@ vi_match_bracket(int ch, int *forward_out, int *match_out)
     }
 }
 
-static void
-vi_match_motion(buffer_t *b, vi_visual_t *vis)
+static int
+vi_match_motion_target(buffer_t *b, vi_visual_t *vis, line_t **line_out, int *col_out)
 {
     line_t *line = b->cur;
     int open_ch;
@@ -1593,13 +1593,11 @@ vi_match_motion(buffer_t *b, vi_visual_t *vis)
     int depth = 1;
 
     if (!line || vis->cursor_col < 0 || (size_t)vis->cursor_col >= line->len) {
-        write(STDOUT_FILENO, "\a", 1);
-        return;
+        return -1;
     }
     open_ch = (unsigned char)line->text[vis->cursor_col];
     if (vi_match_bracket(open_ch, &forward, &match_ch) != 0) {
-        write(STDOUT_FILENO, "\a", 1);
-        return;
+        return -1;
     }
 
     if (forward) {
@@ -1610,8 +1608,9 @@ vi_match_motion(buffer_t *b, vi_visual_t *vis)
                 depth++;
             } else if ((unsigned char)line->text[i] == (unsigned char)match_ch &&
                 --depth == 0) {
-                vis->cursor_col = (int)i;
-                return;
+                *line_out = line;
+                *col_out = (int)i;
+                return 0;
             }
         }
         for (line = line->next; line; line = line->next) {
@@ -1620,9 +1619,9 @@ vi_match_motion(buffer_t *b, vi_visual_t *vis)
                     depth++;
                 } else if ((unsigned char)line->text[i] == (unsigned char)match_ch &&
                     --depth == 0) {
-                    b->cur = line;
-                    vis->cursor_col = (int)i;
-                    return;
+                    *line_out = line;
+                    *col_out = (int)i;
+                    return 0;
                 }
             }
         }
@@ -1634,8 +1633,9 @@ vi_match_motion(buffer_t *b, vi_visual_t *vis)
                 depth++;
             } else if ((unsigned char)line->text[i] == (unsigned char)match_ch &&
                 --depth == 0) {
-                vis->cursor_col = i;
-                return;
+                *line_out = line;
+                *col_out = i;
+                return 0;
             }
         }
         for (line = line->prev; line; line = line->prev) {
@@ -1644,15 +1644,29 @@ vi_match_motion(buffer_t *b, vi_visual_t *vis)
                     depth++;
                 } else if ((unsigned char)line->text[i] == (unsigned char)match_ch &&
                     --depth == 0) {
-                    b->cur = line;
-                    vis->cursor_col = i;
-                    return;
+                    *line_out = line;
+                    *col_out = i;
+                    return 0;
                 }
             }
         }
     }
 
-    write(STDOUT_FILENO, "\a", 1);
+    return -1;
+}
+
+static void
+vi_match_motion(buffer_t *b, vi_visual_t *vis)
+{
+    line_t *target_line;
+    int target_col;
+
+    if (vi_match_motion_target(b, vis, &target_line, &target_col) != 0) {
+        write(STDOUT_FILENO, "\a", 1);
+        return;
+    }
+    b->cur = target_line;
+    vis->cursor_col = target_col;
 }
 
 static int
@@ -2250,6 +2264,32 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             }
         } else {
             write(STDOUT_FILENO, "\a", 1);
+        }
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y')
+        && key == '%') {
+        line_t *target_line;
+        int target_col;
+        int start;
+        int end;
+
+        if (vi_match_motion_target(b, vis, &target_line, &target_col) != 0
+                || target_line != b->cur || target_col == vis->cursor_col) {
+            write(STDOUT_FILENO, "\a", 1);
+        } else {
+            if (target_col > vis->cursor_col) {
+                start = vis->cursor_col;
+                end = target_col + 1;
+            } else {
+                start = target_col;
+                end = vis->cursor_col + 1;
+            }
+            if (vis->pending_op == 'y') {
+                if (vi_yank_span(vis, b->cur, start, end) != 0) {
+                    write(STDOUT_FILENO, "\a", 1);
+                }
+            } else {
+                vi_delete_span(b, vis, start, end, vis->pending_op == 'c');
+            }
         }
     } else {
         write(STDOUT_FILENO, "\a", 1);

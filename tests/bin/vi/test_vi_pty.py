@@ -477,6 +477,34 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "if (alpha[beta{gamma}delta]omega)\n",
+        [b"0", b"f", b"(", b"d", b"%"],
+    )
+    require(exit_code == 0, f"match-delete vi exited with status {exit_code}")
+    require(saved == "if \n",
+            f"unexpected match-delete buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "if (alpha[beta{gamma}delta]omega)\n",
+        [b"0", b"f", b"(", b"c", b"%", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"match-change vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing match-change insert status")
+    require(saved == "if X\n",
+            f"unexpected match-change buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "if (alpha[beta{gamma}delta]omega)\n",
+        [b"0", b"f", b"(", b"y", b"%", b"P"],
+    )
+    require(exit_code == 0, f"match-yank vi exited with status {exit_code}")
+    require(saved == "if (alpha[beta{gamma}delta]omega)(alpha[beta{gamma}delta]omega)\n",
+            f"unexpected match-yank buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "".join(f"line {i}\n" for i in range(1, 11)),
         [b"5", b"0", b"%"],
     )
