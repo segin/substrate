@@ -12,15 +12,15 @@ It began as the design baseline for refactoring the old monolithic `ex` and repl
 
 ## Current Repository Reality
 
-- [`usr.lib/exvi/`](/home/segin/test/usr.lib/exvi/) now holds a split shared editor core:
-  - [`exvi_buffer.c`](/home/segin/test/usr.lib/exvi/exvi_buffer.c) for buffer/file/undo primitives
-  - [`exvi_parse.c`](/home/segin/test/usr.lib/exvi/exvi_parse.c) for address and range parsing
-  - [`exvi_runtime.c`](/home/segin/test/usr.lib/exvi/exvi_runtime.c) for lifecycle/startup/recovery support
-  - [`exvi_cmd.c`](/home/segin/test/usr.lib/exvi/exvi_cmd.c) and [`exvi_session.c`](/home/segin/test/usr.lib/exvi/exvi_session.c) for command/session behavior
-  - [`exvi_visual.c`](/home/segin/test/usr.lib/exvi/exvi_visual.c) for the full-screen visual engine
-- [`bin/ex/ex.c`](/home/segin/test/bin/ex/ex.c) and [`bin/vi/vi.c`](/home/segin/test/bin/vi/vi.c) are thin frontends over the shared core.
-- [`bin/vi/vi.c`](/home/segin/test/bin/vi/vi.c) no longer stands alone as a stub: visual mode has a real raw-mode screen engine with motions, operators, insert/replace flow, `:` entry, search, counts, undo/redo, and PTY regression coverage.
-- [`lib/edit`](/home/segin/test/lib/edit) already provides useful low-level primitives:
+- [`usr.lib/exvi/`](../../usr.lib/exvi/) now holds a split shared editor core:
+  - [`exvi_buffer.c`](../../usr.lib/exvi/exvi_buffer.c) for buffer/file/undo primitives
+  - [`exvi_parse.c`](../../usr.lib/exvi/exvi_parse.c) for address and range parsing
+  - [`exvi_runtime.c`](../../usr.lib/exvi/exvi_runtime.c) for lifecycle/startup/recovery support
+  - [`exvi_cmd.c`](../../usr.lib/exvi/exvi_cmd.c) and [`exvi_session.c`](../../usr.lib/exvi/exvi_session.c) for command/session behavior
+  - [`exvi_visual.c`](../../usr.lib/exvi/exvi_visual.c) for the full-screen visual engine
+- [`bin/ex/ex.c`](../../bin/ex/ex.c) and [`bin/vi/vi.c`](../../bin/vi/vi.c) are thin frontends over the shared core.
+- [`bin/vi/vi.c`](../../bin/vi/vi.c) no longer stands alone as a stub: visual mode has a real raw-mode screen engine with motions, operators, insert/replace flow, `:` entry, search, counts, undo/redo, and PTY regression coverage.
+- [`lib/edit`](../../lib/edit) already provides useful low-level primitives:
   - raw terminal mode
   - termcap and ANSI fallback handling
   - escape-sequence decoding
@@ -98,7 +98,7 @@ Do not reuse as the editor core:
 
 ### Phase 1: Shared-core `ex`
 
-Build a stable shared editor core in [`usr.lib/exvi/`](/home/segin/test/usr.lib/exvi/) and keep [`bin/ex/ex.c`](/home/segin/test/bin/ex/ex.c) as a thin frontend.
+Build a stable shared editor core in [`usr.lib/exvi/`](../../usr.lib/exvi/) and keep [`bin/ex/ex.c`](../../bin/ex/ex.c) as a thin frontend.
 
 Current status: largely complete. The shared `ex` core exists, is split into internal units, and is covered by host regression tests plus native shared-core tests.
 
@@ -106,7 +106,7 @@ Detailed remaining work is tracked in the canonical checklist below.
 
 ### Phase 2: Real `vi`
 
-Replace [`bin/vi/vi.c`](/home/segin/test/bin/vi/vi.c) with a visual frontend over the same core.
+Replace [`bin/vi/vi.c`](../../bin/vi/vi.c) with a visual frontend over the same core.
 
 Current status: active and well underway. The screen/window model, raw terminal loop, insert/replace modes, `:` entry, search, counts, many motions/operators, bounded dot-repeat, redo, scrolling, tabstop-aware rendering, and PTY integration tests are all in tree.
 
@@ -252,20 +252,20 @@ Completed architecture milestones already in tree are intentionally omitted here
 
 ### 7. Testing backlog
 
-- [ ] Expand [`tests/usr.lib/exvi/test_main.c`](/home/segin/test/tests/usr.lib/exvi/test_main.c) well beyond the current parser/set/delete/yank basics.
-- [ ] Keep extending [`tests/bin/ex/test_ex.sh`](/home/segin/test/tests/bin/ex/test_ex.sh) until the remaining command-language gaps have direct regression coverage.
-- [ ] Keep extending [`tests/bin/vi/test_vi_pty.py`](/home/segin/test/tests/bin/vi/test_vi_pty.py) until every supported motion, operator, insert-mode control, resize path, and prompt path is covered.
+- [ ] Expand [`tests/usr.lib/exvi/test_main.c`](../../tests/usr.lib/exvi/test_main.c) well beyond the current parser/set/delete/yank basics.
+- [ ] Keep extending [`tests/bin/ex/test_ex.sh`](../../tests/bin/ex/test_ex.sh) until the remaining command-language gaps have direct regression coverage.
+- [ ] Keep extending [`tests/bin/vi/test_vi_pty.py`](../../tests/bin/vi/test_vi_pty.py) until every supported motion, operator, insert-mode control, resize path, and prompt path is covered.
 - [ ] Add fuzzing or property-based coverage for command parsing, escape-sequence parsing, and recovery-file handling.
 - [ ] Add stress tests for large files, long lines, narrow terminals, repeated resizes, and deep undo/redo histories.
 - [ ] Keep both target and host build/test paths green while coverage expands.
 
 ### 8. Documentation and conformance backlog
 
-- [ ] Write [`usr.man/man1/ex.1`](/home/segin/test/usr.man/man1/ex.1).
-- [ ] Write [`usr.man/man1/vi.1`](/home/segin/test/usr.man/man1/vi.1).
+- [ ] Write [`usr.man/man1/ex.1`](../../usr.man/man1/ex.1).
+- [ ] Write [`usr.man/man1/vi.1`](../../usr.man/man1/vi.1).
 - [ ] Add `view(1)` and any recovery/startup man pages if those entry points or subsystems are user-visible.
 - [ ] Add a POSIX/BSD/GNU/Substrate conformance matrix with explicit code/tests/docs references.
-- [ ] Keep [`ARCHITECTURE.md`](/home/segin/test/ARCHITECTURE.md), this file, and [`docs/tasks/09-7-userland-binaries.md`](/home/segin/test/docs/tasks/09-7-userland-binaries.md) synchronized as the backlog closes.
+- [ ] Keep [`ARCHITECTURE.md`](../../ARCHITECTURE.md), this file, and [`docs/tasks/09-7-userland-binaries.md`](../tasks/09-7-userland-binaries.md) synchronized as the backlog closes.
 
 ## Testing Strategy
 
@@ -276,18 +276,18 @@ Completed architecture milestones already in tree are intentionally omitted here
 - Fuzz/property coverage for parser and recovery-file handling as the implementation matures.
 
 Current in-tree coverage includes:
-- [`tests/bin/ex/test_ex.sh`](/home/segin/test/tests/bin/ex/test_ex.sh) for shared-core `ex` regressions
-- [`tests/usr.lib/exvi/test_main.c`](/home/segin/test/tests/usr.lib/exvi/test_main.c) for native shared-core coverage
-- [`tests/bin/vi/test_vi_pty.py`](/home/segin/test/tests/bin/vi/test_vi_pty.py) for PTY-driven full-screen `vi` behavior
+- [`tests/bin/ex/test_ex.sh`](../../tests/bin/ex/test_ex.sh) for shared-core `ex` regressions
+- [`tests/usr.lib/exvi/test_main.c`](../../tests/usr.lib/exvi/test_main.c) for native shared-core coverage
+- [`tests/bin/vi/test_vi_pty.py`](../../tests/bin/vi/test_vi_pty.py) for PTY-driven full-screen `vi` behavior
 
 ## Documentation Requirements
 
 Implementation work in this subsystem must keep these documents aligned:
 
-- [`ARCHITECTURE.md`](/home/segin/test/ARCHITECTURE.md)
+- [`ARCHITECTURE.md`](../../ARCHITECTURE.md)
 - `ex(1)` and `vi(1)` under `usr.man/man1/`
 - any supporting recovery/startup man pages added under `usr.man/`
-- task tracking under [`docs/tasks/09-7-userland-binaries.md`](/home/segin/test/docs/tasks/09-7-userland-binaries.md)
+- task tracking under [`docs/tasks/09-7-userland-binaries.md`](../tasks/09-7-userland-binaries.md)
 
 ## Immediate Planning Consequences
 
