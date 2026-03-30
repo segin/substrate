@@ -1878,7 +1878,9 @@
             - [x] Reduce [`bin/ex`](/home/segin/test/bin/ex) to a line-mode frontend over the shared core.
             - [x] Replace the [`bin/vi`](/home/segin/test/bin/vi) stub with a real visual frontend over the shared core.
             - [x] Reuse `lib/edit` only for low-level terminal, input, prompt, and UTF-8 helpers, per `docs/specs/exvi.md`.
-            - [ ] Implement editor behavior, testing, and manpages according to the phased architecture in [`docs/specs/exvi.md`](/home/segin/test/docs/specs/exvi.md).
+            - [ ] Close the remaining `ex` parity, testing, and manpage backlog tracked in the canonical checklist in [`docs/specs/exvi.md`](/home/segin/test/docs/specs/exvi.md).
+            - [ ] Close the remaining `vi` semantic, PTY, and rendering backlog tracked in the canonical checklist in [`docs/specs/exvi.md`](/home/segin/test/docs/specs/exvi.md).
+            - [ ] Close the remaining recovery, startup, multibyte, and conformance backlog tracked in the canonical checklist in [`docs/specs/exvi.md`](/home/segin/test/docs/specs/exvi.md).
         - [ ] **TUI Editor (Nano-like):** (REQ: REQ-09-2114)
             - [ ] **UI Rendering:** (REQ: REQ-09-2115)
                 - [ ] Top status bar (Version, File status). (REQ: REQ-09-2116)

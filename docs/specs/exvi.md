@@ -102,11 +102,7 @@ Build a stable shared editor core in [`usr.lib/exvi/`](/home/segin/test/usr.lib/
 
 Current status: largely complete. The shared `ex` core exists, is split into internal units, and is covered by host regression tests plus native shared-core tests.
 
-Remaining work:
-
-- finish parity cleanup against historical/POSIX/BSD `ex` corner cases
-- expand finer-grained native unit coverage beyond the existing regression harnesses
-- write and ship `ex(1)` and any supporting recovery/startup documentation
+Detailed remaining work is tracked in the canonical checklist below.
 
 ### Phase 2: Real `vi`
 
@@ -114,12 +110,7 @@ Replace [`bin/vi/vi.c`](/home/segin/test/bin/vi/vi.c) with a visual frontend ove
 
 Current status: active and well underway. The screen/window model, raw terminal loop, insert/replace modes, `:` entry, search, counts, many motions/operators, bounded dot-repeat, redo, scrolling, tabstop-aware rendering, and PTY integration tests are all in tree.
 
-Remaining work:
-
-- continue filling semantic gaps against historical/POSIX/BSD `vi`
-- improve live resize and screen-diff behavior where the current renderer is still simple
-- expand operator/motion completeness and insert-mode editing conveniences
-- write and ship `vi(1)`
+Detailed remaining work is tracked in the canonical checklist below.
 
 ### Phase 3: Recovery, tags, multibyte polish, and compatibility
 
@@ -131,6 +122,150 @@ Finish subsystem completeness:
 - argument-list and tag-stack behavior
 - UTF-8 and locale edge cases
 - conformance matrix and man pages
+
+Detailed remaining work is tracked in the canonical checklist below.
+
+## Canonical Remaining Work Checklist
+
+This is the authoritative backlog for `ex`/`vi` work that is still missing, still incomplete, or not yet tested/documented to the desired POSIX-plus-BSD standard.
+
+Completed architecture milestones already in tree are intentionally omitted here. If an item is listed below, treat it as still open even if there is already a partial implementation.
+
+### 1. Frontends, invocation, and startup semantics
+
+- [ ] Expand the shared option parser beyond the current `-s`, `-S`, `-v`, and `-r` baseline to the full supported `ex`/`vi` invocation contract.
+- [ ] Implement readonly/view-style startup behavior and option plumbing for both frontends.
+- [ ] Decide and implement startup command forms such as `-c`, `+cmd`, and tag-startup options if they are part of the supported contract.
+- [ ] Finish `ex`-to-`vi` and `vi`-to-`ex` mode handoff semantics so they match the documented frontend contract instead of only the current minimal path.
+- [ ] Centralize and document startup file loading order across `EXINIT`, home `.exrc`, local `.exrc`, and secure/restricted mode suppression.
+- [ ] Add frontend tests for interactive vs batch startup, prompt behavior, non-tty rejection, and readonly/view invocation.
+
+### 2. Shared-core `ex` command language parity
+
+#### 2.1 Addressing, ranges, separators, and parser fidelity
+
+- [ ] Replace the current naive `|` command splitting with delimiter-aware parsing so quoted/escaped separators do not misparse command lines.
+- [ ] Finish historical `"` comment behavior, including quoted delimiter edge cases and command-tail parsing.
+- [ ] Audit and tighten malformed address/range diagnostics so failures never mutate buffer state.
+- [ ] Verify per-command default addresses against historical/POSIX behavior rather than relying on the current mostly-correct defaults.
+- [ ] Audit `%`, `;`, mark addresses, search addresses, empty search reuse, relative offsets, and empty-command printing against BSD/vim/ex reference behavior.
+- [ ] Add finer-grained parser tests for malformed substitutes, malformed globals, nested separators, escaped delimiters, ambiguous abbreviations, and bad marks.
+
+#### 2.2 Command-set completeness and command semantics
+
+- [ ] Complete the remaining POSIX/BSD `ex` commands and accepted abbreviations that are still absent from the dispatcher.
+- [ ] Audit `print`, `number`, `list`, and `=` for exact current-line side effects and diagnostics.
+- [ ] Finish `write`, `write!`, append-write, and write-to-command semantics for all range/error/readonly cases.
+- [ ] Finish `read`, `read !cmd`, and insertion-point behavior for empty buffers, addressed reads, and shell-command reads.
+- [ ] Audit `global` and `v` against frozen-match-set semantics under destructive nested commands.
+- [ ] Deepen `substitute` flag handling and repeat behavior beyond the current baseline, including compatibility corner cases.
+- [ ] Complete shell escape handling and shell-capable commands under secure/restricted mode, with consistent diagnostics.
+- [ ] Tighten command error reporting so unknown commands, missing operands, bad destinations, and force-required paths all fail predictably.
+
+#### 2.3 Buffer, undo, registers, and state model
+
+- [ ] Replace the current single-snapshot undo model with a real multi-change undo/redo transaction model if historical parity requires it.
+- [ ] Audit exact trailing-newline, empty-buffer, and empty-file semantics across load, edit, write, append, preserve, and recover.
+- [ ] Complete register behavior so linewise vs charwise register typing is consistent across `ex` and `vi`.
+- [ ] Expand `:set` from `number`, `list`, and `tabstop` to the supported POSIX/BSD-first option matrix.
+- [ ] Implement readonly/view option state, forced-write interactions, and option-driven command restrictions.
+- [ ] Implement search/substitute-related options once their supported policy is chosen, such as `ignorecase`, `magic`, `wrapscan`, and related behavior knobs.
+
+#### 2.4 Files, arglists, tags, recovery, and startup support
+
+- [ ] Finish alternate-file reporting and filename expansion edge cases for `%` and `#`.
+- [ ] Deepen `args`, `next`, `prev`, and `rewind` behavior for replacement lists, unsaved buffers, diagnostics, and startup interactions.
+- [ ] Extend tag behavior beyond the current `tag`/`pop` baseline to the full supported tag-stack/reporting contract.
+- [ ] Replace the current flat `tags` lookup path with `tags` option and search-path behavior if that is part of the supported contract.
+- [ ] Harden preserve/recover naming, cleanup, signal-time preservation, and recover-file lifecycle behavior.
+- [ ] Decide and implement the supported `ex -r` UX, including any listing/selection behavior beyond direct filename recovery.
+
+### 3. Full-screen `vi` semantic parity
+
+#### 3.1 Screen model, redraw, resize, and terminal behavior
+
+- [ ] Replace the current repaint-heavy renderer with a real dirty-region or diff-based refresh strategy.
+- [ ] Audit resize behavior across normal, insert, replace, operator-pending, `:`, `/`, and `?` prompt states.
+- [ ] Finish redraw semantics such as `Ctrl-L` and any remaining `z` variants or screen-positioning details.
+- [ ] Tighten long-line, number, list, tabstop, and status-line interactions under horizontal scrolling and narrow terminals.
+- [ ] Audit ANSI/VT100 fallback behavior, keypad handling, and terminal capability use on simpler terminals.
+- [ ] Add PTY regressions specifically for redraw, resize, narrow terminals, long files, and repeated terminal-size changes.
+
+#### 3.2 Motion completeness
+
+- [ ] Complete the remaining classic `vi` motions that are still absent or only partially implemented.
+- [ ] Add remaining section- and structure-oriented motions if they are part of the supported BSD/POSIX contract.
+- [ ] Audit every counted motion for parity with real `vi`, especially mixed count-plus-motion and count-plus-operator forms.
+- [ ] Tighten search-repeat, find-repeat, mark-jump, and percent-motion edge cases across line boundaries and empty matches.
+- [ ] Audit movement across empty lines, blank paragraphs, short lines, and end-of-buffer conditions against reference behavior.
+
+#### 3.3 Operator completeness and region semantics
+
+- [ ] Complete the remaining operator/motion combinations still missing from delete/change/yank.
+- [ ] Finish cross-line charwise operator spans so they behave correctly for every motion family, not only the currently covered subsets.
+- [ ] Audit linewise-vs-charwise coercion rules for every operator path, including edge cases at column zero and end-of-line.
+- [ ] Complete operator support for search-based motions, mark-based motions, repeated find motions, and any remaining vertical motions.
+- [ ] Finish `p`/`P` cursor placement and register-type behavior after every delete/change/yank variant.
+- [ ] Complete named-register selection for delete/change/yank/put instead of only the currently covered register paths.
+
+#### 3.4 Insert mode, replace mode, and repeatability
+
+- [ ] Complete insert-mode editing conveniences that are still missing or only partially correct.
+- [ ] Finish replace-mode semantics across tabs, short lines, newlines, and mixed insert/replace transitions.
+- [ ] Replace the current bounded `.` support with full historical repeat-last-change behavior for insert/change/replace text replays.
+- [ ] Tighten undo/redo granularity so insert sessions, replace sessions, open-line commands, and repeated edits group like real `vi`.
+- [ ] Audit insert-mode cursor-key, modified-cursor-key, and terminal-escape decoding so no printable garbage leaks under older terminals.
+- [ ] Add PTY coverage for every insert/replace control key and repeat/undo/redo path that remains underspecified.
+
+#### 3.5 Prompt, search, and ex-entry integration
+
+- [ ] Ensure `:` in visual mode exposes the same command set, diagnostics, and option effects as standalone `ex`.
+- [ ] Finish `/` and `?` prompt editing behavior, prompt cancellation behavior, and search status feedback.
+- [ ] Complete `/`, `?`, `n`, `N`, `*`, and `#` interactions with operators, counts, wrapscan, and option state.
+- [ ] Add prompt-history behavior if it is part of the supported UX for `:`, `/`, and `?`.
+- [ ] Add PTY regressions for failed searches, cancelled prompts, wrapped searches, and search-driven operators.
+
+### 4. Options, modes, and policy completeness
+
+- [ ] Expand the shared option table to the real supported editor option set and document each option's ex/vi impact.
+- [ ] Implement readonly/view mode consistently in both frontends, including status display and write restrictions.
+- [ ] Implement secure and restricted modes consistently in both frontends, not only for the currently covered shell-command paths.
+- [ ] Decide and implement the supported extension policy for GNU-compatible spellings and non-conflicting aliases.
+- [ ] Document every supported option, alias, and deliberate divergence from historical BSD/nvi/vim behavior.
+
+### 5. Tags, arglists, startup files, and recovery completeness
+
+- [ ] Finish tag-stack introspection and any remaining stack-navigation commands or key bindings.
+- [ ] Add visual-mode tag navigation such as `Ctrl-]` and `Ctrl-T` if they are part of the supported BSD-style contract.
+- [ ] Complete multi-file arglist reporting and navigation interactions from both `ex` and `vi`.
+- [ ] Finalize `.exrc` security policy, ownership checks, directory policy, and local-vs-home precedence.
+- [ ] Harden preserve/recover format, crash-time preserve behavior, and recover-file cleanup.
+- [ ] Add tests for interrupted sessions, recover-on-startup flows, and tag/arglist state across file switches.
+
+### 6. Multibyte, locale, and display-width correctness
+
+- [ ] Audit all cursor motions for multibyte and UTF-8 correctness.
+- [ ] Audit all word/bigword/sentence/paragraph motions under multibyte text.
+- [ ] Audit display-width handling for tabs, combining characters, wide characters, and invalid byte sequences.
+- [ ] Add locale fallback behavior and tests for non-UTF-8 environments.
+- [ ] Add PTY and host tests for long UTF-8 lines, mixed-width text, combining marks, and invalid sequences.
+
+### 7. Testing backlog
+
+- [ ] Expand [`tests/usr.lib/exvi/test_main.c`](/home/segin/test/tests/usr.lib/exvi/test_main.c) well beyond the current parser/set/delete/yank basics.
+- [ ] Keep extending [`tests/bin/ex/test_ex.sh`](/home/segin/test/tests/bin/ex/test_ex.sh) until the remaining command-language gaps have direct regression coverage.
+- [ ] Keep extending [`tests/bin/vi/test_vi_pty.py`](/home/segin/test/tests/bin/vi/test_vi_pty.py) until every supported motion, operator, insert-mode control, resize path, and prompt path is covered.
+- [ ] Add fuzzing or property-based coverage for command parsing, escape-sequence parsing, and recovery-file handling.
+- [ ] Add stress tests for large files, long lines, narrow terminals, repeated resizes, and deep undo/redo histories.
+- [ ] Keep both target and host build/test paths green while coverage expands.
+
+### 8. Documentation and conformance backlog
+
+- [ ] Write [`usr.man/man1/ex.1`](/home/segin/test/usr.man/man1/ex.1).
+- [ ] Write [`usr.man/man1/vi.1`](/home/segin/test/usr.man/man1/vi.1).
+- [ ] Add `view(1)` and any recovery/startup man pages if those entry points or subsystems are user-visible.
+- [ ] Add a POSIX/BSD/GNU/Substrate conformance matrix with explicit code/tests/docs references.
+- [ ] Keep [`ARCHITECTURE.md`](/home/segin/test/ARCHITECTURE.md), this file, and [`docs/tasks/09-7-userland-binaries.md`](/home/segin/test/docs/tasks/09-7-userland-binaries.md) synchronized as the backlog closes.
 
 ## Testing Strategy
 
