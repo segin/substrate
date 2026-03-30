@@ -525,6 +525,23 @@ vi_linewise_put(buffer_t *b, vi_visual_t *vis, int before)
 }
 
 static void
+vi_substitute_line(buffer_t *b, vi_visual_t *vis)
+{
+    if (!b->cur) {
+        save_undo(b);
+        b->cur = buf_insert_after(b, b->tail, "");
+    } else {
+        save_undo(b);
+        if (vi_replace_current_text(b, "") != 0) {
+            return;
+        }
+    }
+    vis->cursor_col = 0;
+    vis->insert_mode = 1;
+    vis->replace_mode = 0;
+}
+
+static void
 vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
 {
     int line_no = buf_current_line(b);
@@ -537,14 +554,7 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         }
         vis->cursor_col = 0;
     } else if (vis->pending_op == 'c' && key == 'c') {
-        handle_delete_command(b, 1, line_no, line_no);
-        if (!b->cur) {
-            b->cur = buf_insert_after(b, NULL, "");
-        } else {
-            b->cur = buf_insert_after(b, b->cur->prev, "");
-        }
-        vis->cursor_col = 0;
-        vis->insert_mode = 1;
+        vi_substitute_line(b, vis);
     } else if (vis->pending_op == 'y' && key == 'y') {
         handle_yank_command(b, "", 1, line_no, line_no);
         vis->cursor_col = 0;
@@ -714,23 +724,6 @@ vi_open_line(buffer_t *b, vi_visual_t *vis, int above)
     }
     vis->cursor_col = 0;
     vis->insert_mode = 1;
-}
-
-static void
-vi_substitute_line(buffer_t *b, vi_visual_t *vis)
-{
-    if (!b->cur) {
-        save_undo(b);
-        b->cur = buf_insert_after(b, b->tail, "");
-    } else {
-        save_undo(b);
-        if (vi_replace_current_text(b, "") != 0) {
-            return;
-        }
-    }
-    vis->cursor_col = 0;
-    vis->insert_mode = 1;
-    vis->replace_mode = 0;
 }
 
 static void
