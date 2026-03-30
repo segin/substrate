@@ -1110,6 +1110,40 @@ run_stdout_test "Set wrapscan query reports state" \
     ":set wrapscan?\n:q!\n" \
     "wrapscan"
 
+run_oracle_test "Substitute replacement pipe does not split command line" \
+    "foo\n" \
+    ":%s/o/bar|baz/\n:wq!\n"
+
+run_oracle_test "Global nested substitute pipe does not split command line" \
+    "foo\nbar\n" \
+    ":g/foo/s/o/|/\n:wq!\n"
+
+run_oracle_test "Global nested command still allows later separator" \
+    "foo\nbar\n" \
+    ":g/foo/s/o/|/|d\n:wq!\n"
+
+run_oracle_test "Read shell pipeline does not split command line" \
+    "one\n" \
+    ":r !printf 'two\\n' | cat\n:wq!\n"
+
+run_stdout_test "Set trailing comment is ignored" \
+    "foo\n" \
+    ":set number\"tail\n:1p\n:q!\n" \
+    "      1 foo"
+
+run_stdout_test "Address trailing comment preserves empty-command print" \
+    "foo\nbar\n" \
+    ":1 \"tail\n:q!\n" \
+    "foo"
+
+run_oracle_test "Substitute quote in replacement is not a comment" \
+    "foo\n" \
+    ":%s/o/\"/\n:wq!\n"
+
+run_oracle_test "Global nested substitute quote is not a comment" \
+    "foo\nbar\n" \
+    ":g/foo/s/o/\"/\n:wq!\n"
+
 run_stdout_test "Set nowrapscan disables wrapscan" \
     "one\ntwo\n" \
     ":set nowrapscan\n:set wrapscan?\n:q!\n" \

@@ -144,8 +144,8 @@ Completed architecture milestones already in tree are intentionally omitted here
 
 #### 2.1 Addressing, ranges, separators, and parser fidelity
 
-- [ ] Replace the current naive `|` command splitting with delimiter-aware parsing so quoted/escaped separators do not misparse command lines.
-- [ ] Finish historical `"` comment behavior, including quoted delimiter edge cases and command-tail parsing.
+- [x] Replace the current naive `|` command splitting with delimiter-aware parsing so quoted/escaped separators do not misparse command lines.
+- [x] Finish historical `"` comment behavior, including quoted delimiter edge cases and command-tail parsing.
 - [ ] Audit and tighten malformed address/range diagnostics so failures never mutate buffer state.
 - [ ] Verify per-command default addresses against historical/POSIX behavior rather than relying on the current mostly-correct defaults.
 - [ ] Audit `%`, `;`, mark addresses, search addresses, empty search reuse, relative offsets, and empty-command printing against BSD/vim/ex reference behavior.

@@ -171,6 +171,38 @@ def main():
             "vi colon-command parity missing diagnostic output")
     require(saved == "two\n", f"vi colon-command parity saved wrong buffer: {saved!r}")
 
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "foo\n",
+        [b":set number\"tail\r", b":1p\r", b":q!\r"],
+        final_keys=None,
+    )
+    require(exit_code == 0, f"vi trailing-comment parsing exited with status {exit_code}")
+    require("      1 foo" in decoded,
+            "vi trailing-comment parsing missing numbered output")
+    require(saved == "foo\n",
+            f"vi trailing-comment parsing unexpectedly modified file: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "foo\n",
+        [b":%s/o/bar|baz/\r", b":wq\r"],
+        final_keys=None,
+    )
+    require(exit_code == 0, f"vi substitute-pipe parsing exited with status {exit_code}")
+    require(saved == "fbar|bazo\n",
+            f"vi substitute-pipe parsing saved wrong buffer: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "foo\nbar\n",
+        [b":g/foo/s/o/|/\r", b":wq\r"],
+        final_keys=None,
+    )
+    require(exit_code == 0, f"vi global-pipe parsing exited with status {exit_code}")
+    require(saved == "f|o\nbar\n",
+            f"vi global-pipe parsing saved wrong buffer: {saved!r}")
+
     return 0
 
 

@@ -5,6 +5,225 @@
 #include <stdlib.h>
 #include <string.h>
 
+static char *
+skip_ws(char *p)
+{
+    while (*p && isspace((unsigned char)*p)) {
+        p++;
+    }
+    return p;
+}
+
+static char *
+skip_delimited_syntax(char *p, char delim)
+{
+    while (*p) {
+        if (*p == '\\' && p[1] != '\0') {
+            p += 2;
+            continue;
+        }
+        if (*p == delim) {
+            return p + 1;
+        }
+        p++;
+    }
+    return p;
+}
+
+static int
+scan_command_match(const char *cmd, const char *name, const char *abbr,
+    const char **argp, int *forcep)
+{
+    size_t name_len = strlen(name);
+    size_t abbr_len = abbr ? strlen(abbr) : 0;
+    size_t used = 0;
+
+    if (strncmp(cmd, name, name_len) == 0) {
+        used = name_len;
+    } else if (abbr && strncmp(cmd, abbr, abbr_len) == 0) {
+        used = abbr_len;
+    } else {
+        return 0;
+    }
+
+    if (isalpha((unsigned char)cmd[used])) {
+        return 0;
+    }
+
+    if (forcep) {
+        *forcep = (cmd[used] == '!');
+    }
+    if (argp) {
+        *argp = cmd + used + ((cmd[used] == '!') ? 1 : 0);
+    }
+    return 1;
+}
+
+static char *
+skip_address_atom_syntax(char *p)
+{
+    p = skip_ws(p);
+
+    if (isdigit((unsigned char)*p)) {
+        while (isdigit((unsigned char)*p)) {
+            p++;
+        }
+        return p;
+    }
+    if (*p == '.' || *p == '$') {
+        return p + 1;
+    }
+    if (*p == '\'') {
+        if (p[1] >= 'a' && p[1] <= 'z') {
+            return p + 2;
+        }
+        return NULL;
+    }
+    if (*p == '/' || *p == '?') {
+        char delim = *p++;
+
+        return skip_delimited_syntax(p, delim);
+    }
+    return NULL;
+}
+
+static char *
+skip_address_syntax(char *p, int *matched)
+{
+    char *start = p;
+    char *next;
+
+    p = skip_ws(p);
+    if (*p == '+' || *p == '-') {
+        do {
+            p++;
+            p = skip_ws(p);
+            while (isdigit((unsigned char)*p)) {
+                p++;
+            }
+            p = skip_ws(p);
+        } while (*p == '+' || *p == '-');
+        *matched = 1;
+        return p;
+    }
+
+    next = skip_address_atom_syntax(p);
+    if (!next) {
+        *matched = 0;
+        return start;
+    }
+    p = next;
+
+    for (;;) {
+        char *q = skip_ws(p);
+
+        if (*q != '+' && *q != '-') {
+            break;
+        }
+        p = q + 1;
+        p = skip_ws(p);
+        while (isdigit((unsigned char)*p)) {
+            p++;
+        }
+    }
+
+    *matched = 1;
+    return p;
+}
+
+static char *
+skip_range_syntax(char *p)
+{
+    int matched = 0;
+
+    p = skip_ws(p);
+    if (*p == '%') {
+        return p + 1;
+    }
+
+    p = skip_address_syntax(p, &matched);
+    if (!matched) {
+        return p;
+    }
+
+    p = skip_ws(p);
+    if (*p == ',' || *p == ';') {
+        p++;
+        {
+            char *next = skip_address_syntax(p, &matched);
+
+            if (matched) {
+                p = next;
+            }
+        }
+    }
+
+    return p;
+}
+
+static char *
+scan_generic_break(char *p, exvi_command_break_t *kind)
+{
+    while (*p) {
+        if (*p == '\\' && p[1] != '\0') {
+            p += 2;
+            continue;
+        }
+        if (*p == '|') {
+            *kind = EXVI_COMMAND_BREAK_SEPARATOR;
+            return p;
+        }
+        if (*p == '"') {
+            *kind = EXVI_COMMAND_BREAK_COMMENT;
+            return p;
+        }
+        p++;
+    }
+    return NULL;
+}
+
+static char *
+scan_substitute_break(const char *args, exvi_command_break_t *kind)
+{
+    char *p = skip_ws((char *)args);
+    char delim;
+
+    if (*p == '\0') {
+        return NULL;
+    }
+
+    delim = *p++;
+    p = skip_delimited_syntax(p, delim);
+    if (*p == '\0') {
+        return NULL;
+    }
+    p = skip_delimited_syntax(p, delim);
+    return scan_generic_break(p, kind);
+}
+
+static char *
+scan_global_break(buffer_t *b, const char *args, exvi_command_break_t *kind)
+{
+    char *p = skip_ws((char *)args);
+    char delim;
+
+    if (*p == '\0') {
+        return NULL;
+    }
+
+    delim = *p++;
+    p = skip_delimited_syntax(p, delim);
+    p = skip_ws(p);
+    if (*p == '\0') {
+        return NULL;
+    }
+    if (*p == '"') {
+        *kind = EXVI_COMMAND_BREAK_COMMENT;
+        return p;
+    }
+    return find_command_break(b, p, kind);
+}
+
 static int
 buf_clamp_line(buffer_t *b, int line_num)
 {
@@ -325,4 +544,46 @@ parse_range(buffer_t *b, char **cmd_ptr, int *addr1, int *addr2)
     }
     b->cur = saved_cur;
     return explicit_range;
+}
+
+char *
+find_command_break(buffer_t *b, char *cmd, exvi_command_break_t *kind)
+{
+    char *p;
+    const char *args = NULL;
+    int force = 0;
+
+    *kind = EXVI_COMMAND_BREAK_NONE;
+    p = skip_range_syntax(cmd);
+    p = skip_ws(p);
+
+    if (*p == '\0') {
+        return NULL;
+    }
+    if (*p == '"') {
+        *kind = EXVI_COMMAND_BREAK_COMMENT;
+        return p;
+    }
+    if (*p == '!') {
+        return NULL;
+    }
+
+    if (scan_command_match(p, "substitute", "s", &args, NULL)) {
+        return scan_substitute_break(args, kind);
+    }
+    if (scan_command_match(p, "global", "g", &args, NULL)
+        || scan_command_match(p, "global", "v", &args, NULL)) {
+        return scan_global_break(b, args, kind);
+    }
+    if (scan_command_match(p, "read", "r", &args, NULL)
+        || scan_command_match(p, "write", "w", &args, &force)) {
+        char *q = skip_ws((char *)args);
+
+        (void)force;
+        if (*q == '!') {
+            return NULL;
+        }
+    }
+
+    return scan_generic_break(p, kind);
 }

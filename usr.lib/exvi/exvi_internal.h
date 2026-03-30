@@ -31,6 +31,12 @@ typedef struct {
     int mark_cols[26];
 } buffer_t;
 
+typedef enum {
+    EXVI_COMMAND_BREAK_NONE = 0,
+    EXVI_COMMAND_BREAK_SEPARATOR,
+    EXVI_COMMAND_BREAK_COMMENT,
+} exvi_command_break_t;
+
 extern int secure_mode;
 extern int batch_mode;
 extern int visual_mode;
@@ -73,6 +79,7 @@ char *parse_delimited_text(char **cmd_ptr, char delim);
 int exvi_search(buffer_t *b, const char *pattern, int forward);
 int parse_address(buffer_t *b, char **cmd_ptr);
 int parse_range(buffer_t *b, char **cmd_ptr, int *addr1, int *addr2);
+char *find_command_break(buffer_t *b, char *cmd, exvi_command_break_t *kind);
 void replace_saved_string(char **dst, const char *src);
 void set_default_current_range(buffer_t *b, int *addr1, int *addr2);
 void print_range(buffer_t *b, int addr1, int addr2, int numbered, int listed);

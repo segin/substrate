@@ -345,20 +345,22 @@ handle_buffer_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
 }
 
 void do_command(buffer_t *b, char *cmd) {
+    exvi_command_break_t break_kind;
+    char *break_pos;
+
     while (*cmd && isspace((unsigned char)*cmd)) cmd++;
-    
-    // Command Separator Handling `|`
-    // Note: this simple split will fail on quoted `|`.
-    char *pipe = strchr(cmd, '|');
-    if (pipe) {
-        *pipe = '\0';
-        do_command(b, cmd);
-        do_command(b, pipe + 1);
-        return;
-    }
-    
-    // Comments `"`
+
     if (*cmd == '"') return;
+
+    break_pos = find_command_break(b, cmd, &break_kind);
+    if (break_pos) {
+        *break_pos = '\0';
+        if (break_kind == EXVI_COMMAND_BREAK_SEPARATOR) {
+            do_command(b, cmd);
+            do_command(b, break_pos + 1);
+            return;
+        }
+    }
     
     int addr1, addr2;
     int explicit_range = parse_range(b, &cmd, &addr1, &addr2);
