@@ -53,6 +53,14 @@ def run_vi_session(vi_path, initial_text, key_steps, final_timeout=0.3, rows=24,
     fcntl.ioctl(master_fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
     output = read_some(master_fd, 0.4)
     for step in key_steps:
+        if isinstance(step, tuple) and step and step[0] == "winsize":
+            _, step_rows, step_cols, *rest = step
+            step_timeout = rest[0] if rest else 0.3
+
+            fcntl.ioctl(master_fd, termios.TIOCSWINSZ,
+                        struct.pack("HHHH", step_rows, step_cols, 0, 0))
+            output += read_some(master_fd, step_timeout)
+            continue
         output = send_keys(master_fd, output, step)
     if final_keys is not None:
         output = send_keys(master_fd, output, final_keys[:1])
@@ -375,6 +383,20 @@ def main():
     require("KLMNO" in decoded, "missing horizontally scrolled long-line content")
     require(saved == "0123456789abcdefghijKLMNOZQRST\n",
             f"unexpected long-line buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "0123456789abcdefghijKLMNOPQRST\n",
+        [("winsize", 8, 28, 0.5)],
+        rows=8,
+        cols=16,
+        final_keys=b":q\r",
+    )
+    require(exit_code == 0, f"resize vi exited with status {exit_code}")
+    require("0123456789abcdefghijKLMNOPQ" in decoded,
+            "missing immediate wide-line repaint after resize")
+    require(saved == "0123456789abcdefghijKLMNOPQRST\n",
+            f"unexpected resize buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,

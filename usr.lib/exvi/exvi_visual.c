@@ -2,6 +2,8 @@
 #include "exvi_internal.h"
 
 #include <ctype.h>
+#include <errno.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,6 +39,7 @@ enum {
     VI_KEY_PGUP,
     VI_KEY_PGDN,
     VI_KEY_DELETE,
+    VI_KEY_RESIZE,
 };
 
 typedef struct {
@@ -65,6 +68,7 @@ typedef struct {
 } vi_visual_t;
 
 static vi_visual_t *active_visual = NULL;
+static volatile sig_atomic_t vi_resize_pending = 0;
 
 static int vi_first_nonblank_col(line_t *cur);
 static void vi_move_word_forward_count(buffer_t *b, vi_visual_t *vis, int count);
@@ -80,6 +84,13 @@ vi_restore_terminal(void)
         active_visual->raw_active = 0;
         write(STDOUT_FILENO, "\x1b[?25h\x1b[0m\x1b[2J\x1b[H", 18);
     }
+}
+
+static void
+vi_handle_winch(int sig)
+{
+    (void)sig;
+    vi_resize_pending = 1;
 }
 
 static int
@@ -450,6 +461,9 @@ vi_read_key(void)
     char c;
 
     if (read(STDIN_FILENO, &c, 1) != 1) {
+        if (errno == EINTR && vi_resize_pending) {
+            return VI_KEY_RESIZE;
+        }
         return -1;
     }
     if (c == '\x1b') {
@@ -530,6 +544,21 @@ vi_read_key(void)
         return '\x1b';
     }
     return (unsigned char)c;
+}
+
+static int
+vi_read_visual_key(buffer_t *b, vi_visual_t *vis, char prompt_prefix, const char *prompt)
+{
+    int key;
+
+    for (;;) {
+        key = vi_read_key();
+        if (key != VI_KEY_RESIZE) {
+            return key;
+        }
+        vi_resize_pending = 0;
+        vi_render(b, vis, prompt_prefix, prompt);
+    }
 }
 
 static void
@@ -2488,7 +2517,7 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         vi_linewise_yank(b, vis, line_no, last_line);
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
         key == '\'') {
-        int mark_key = vi_read_key();
+        int mark_key = vi_read_visual_key(b, vis, ':', NULL);
         int mark_line;
         int start;
 
@@ -2518,7 +2547,7 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
         key == '`') {
-        int mark_key = vi_read_key();
+        int mark_key = vi_read_visual_key(b, vis, ':', NULL);
         int idx = mark_key - 'a';
 
         if (mark_key < 'a' || mark_key > 'z' || !b->marks[idx]
@@ -2596,7 +2625,7 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
         key == 'g') {
-        int motion = vi_read_key();
+        int motion = vi_read_visual_key(b, vis, ':', NULL);
         line_t *target_line;
         int target_col;
 
@@ -2620,7 +2649,7 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         int ch;
         int start;
 
-        ch = vi_read_key();
+        ch = vi_read_visual_key(b, vis, ':', NULL);
         if (ch == -1 || ch == '\x1b' || ch == '\r' || ch == '\n') {
             write(STDOUT_FILENO, "\a", 1);
         } else if (vi_find_motion_span(b->cur, vis->cursor_col, ch,
@@ -2732,7 +2761,7 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         int ch;
         int start;
 
-        ch = vi_read_key();
+        ch = vi_read_visual_key(b, vis, ':', NULL);
         if (ch == -1 || ch == '\x1b' || ch == '\r' || ch == '\n') {
             write(STDOUT_FILENO, "\a", 1);
         } else if (vi_find_motion_span(b->cur, vis->cursor_col, ch,
@@ -3100,7 +3129,7 @@ vi_command_prompt(buffer_t *b, vi_visual_t *vis)
         int key;
 
         vi_render(b, vis, ':', cmd);
-        key = vi_read_key();
+        key = vi_read_visual_key(b, vis, ':', cmd);
         if (key == -1) {
             return;
         }
@@ -3267,7 +3296,7 @@ vi_search_prompt(buffer_t *b, vi_visual_t *vis, int forward)
         int key;
 
         vi_render(b, vis, prefix, pattern);
-        key = vi_read_key();
+        key = vi_read_visual_key(b, vis, prefix, pattern);
         if (key == -1) {
             return;
         }
@@ -3363,6 +3392,9 @@ int
 exvi_visual_main(buffer_t *b)
 {
     vi_visual_t vis;
+    struct sigaction sa;
+    struct sigaction old_winch;
+    int have_winch = 0;
     int key;
 
     memset(&vis, 0, sizeof(vis));
@@ -3372,6 +3404,13 @@ exvi_visual_main(buffer_t *b)
     if (vi_enable_raw(&vis) != 0) {
         return 1;
     }
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = vi_handle_winch;
+    sigemptyset(&sa.sa_mask);
+    if (sigaction(SIGWINCH, &sa, &old_winch) == 0) {
+        have_winch = 1;
+    }
+    vi_resize_pending = 0;
     printf("\x1b[2J");
 
     for (;;) {
@@ -3379,7 +3418,7 @@ exvi_visual_main(buffer_t *b)
 
         vi_ensure_visible_line(b);
         vi_render(b, &vis, ':', NULL);
-        key = vi_read_key();
+        key = vi_read_visual_key(b, &vis, ':', NULL);
         if (key == -1) {
             break;
         }
@@ -3568,7 +3607,7 @@ exvi_visual_main(buffer_t *b)
 
         switch (key) {
         case '"':
-            key = vi_read_key();
+            key = vi_read_visual_key(b, &vis, ':', NULL);
             if (key >= 'a' && key <= 'z') {
                 vis.pending_reg = key;
             } else {
@@ -3682,7 +3721,7 @@ exvi_visual_main(buffer_t *b)
             break;
         case 'f':
             vis.pending_g = 0;
-            key = vi_read_key();
+            key = vi_read_visual_key(b, &vis, ':', NULL);
             if (key == -1 || key == '\x1b' || key == '\r' || key == '\n') {
                 write(STDOUT_FILENO, "\a", 1);
                 break;
@@ -3691,7 +3730,7 @@ exvi_visual_main(buffer_t *b)
             break;
         case 'F':
             vis.pending_g = 0;
-            key = vi_read_key();
+            key = vi_read_visual_key(b, &vis, ':', NULL);
             if (key == -1 || key == '\x1b' || key == '\r' || key == '\n') {
                 write(STDOUT_FILENO, "\a", 1);
                 break;
@@ -3700,7 +3739,7 @@ exvi_visual_main(buffer_t *b)
             break;
         case 't':
             vis.pending_g = 0;
-            key = vi_read_key();
+            key = vi_read_visual_key(b, &vis, ':', NULL);
             if (key == -1 || key == '\x1b' || key == '\r' || key == '\n') {
                 write(STDOUT_FILENO, "\a", 1);
                 break;
@@ -3709,7 +3748,7 @@ exvi_visual_main(buffer_t *b)
             break;
         case 'T':
             vis.pending_g = 0;
-            key = vi_read_key();
+            key = vi_read_visual_key(b, &vis, ':', NULL);
             if (key == -1 || key == '\x1b' || key == '\r' || key == '\n') {
                 write(STDOUT_FILENO, "\a", 1);
                 break;
@@ -3854,7 +3893,7 @@ exvi_visual_main(buffer_t *b)
             break;
         case 'r':
             vis.pending_g = 0;
-            key = vi_read_key();
+            key = vi_read_visual_key(b, &vis, ':', NULL);
             if (key == -1 || key == '\x1b' || key == '\r' || key == '\n') {
                 write(STDOUT_FILENO, "\a", 1);
                 break;
@@ -3959,7 +3998,7 @@ exvi_visual_main(buffer_t *b)
             break;
         case 'm':
             vis.pending_g = 0;
-            key = vi_read_key();
+            key = vi_read_visual_key(b, &vis, ':', NULL);
             if (key >= 'a' && key <= 'z' && b->cur) {
                 b->marks[key - 'a'] = b->cur;
                 b->mark_cols[key - 'a'] = vis.cursor_col;
@@ -3970,7 +4009,7 @@ exvi_visual_main(buffer_t *b)
         case '\'':
         case '`':
             vis.pending_g = 0;
-            key = vi_read_key();
+            key = vi_read_visual_key(b, &vis, ':', NULL);
             if (key >= 'a' && key <= 'z' && b->marks[key - 'a']) {
                 b->cur = b->marks[key - 'a'];
                 if (key == '\'') {
@@ -4103,6 +4142,9 @@ exvi_visual_main(buffer_t *b)
     }
 
 done:
+    if (have_winch) {
+        sigaction(SIGWINCH, &old_winch, NULL);
+    }
     vi_restore_terminal();
     return 0;
 }
