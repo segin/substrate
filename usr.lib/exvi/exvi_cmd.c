@@ -459,6 +459,11 @@ handle_join_command(buffer_t *b, int explicit_range, int addr1, int addr2)
 
         addr1 = cur;
         addr2 = (cur != -1) ? cur + 1 : -1;
+    } else if (addr1 == addr2 && addr1 != -1) {
+        addr2 = addr1 + 1;
+    }
+    if (addr2 > b->line_count) {
+        addr2 = b->line_count;
     }
     save_undo(b);
     if (addr1 != -1 && addr2 != -1 && addr1 < addr2) {

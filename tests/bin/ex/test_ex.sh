@@ -1122,6 +1122,14 @@ run_stdout_test "Malformed range leaves current line unchanged" \
     "two
 two"
 
+run_oracle_test "Join without range uses current line and following line" \
+    "one\ntwo\nthree\n" \
+    ":2p\n:j\n:wq!\n"
+
+run_oracle_test "Join single explicit address uses following line" \
+    "one\ntwo\nthree\n" \
+    ":2j\n:wq!\n"
+
 run_oracle_test "Substitute replacement pipe does not split command line" \
     "foo\n" \
     ":%s/o/bar|baz/\n:wq!\n"
