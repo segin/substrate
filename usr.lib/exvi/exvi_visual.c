@@ -377,6 +377,53 @@ vi_delete_char(buffer_t *b, vi_visual_t *vis)
 }
 
 static void
+vi_split_line(buffer_t *b, vi_visual_t *vis)
+{
+    line_t *cur = b->cur;
+    char *left;
+    char *right;
+
+    if (!cur) {
+        return;
+    }
+    left = malloc((size_t)vis->cursor_col + 1);
+    right = strdup(cur->text + vis->cursor_col);
+    if (!left || !right) {
+        free(left);
+        free(right);
+        return;
+    }
+    memcpy(left, cur->text, (size_t)vis->cursor_col);
+    left[vis->cursor_col] = '\0';
+    if (vi_replace_current_text(b, left) != 0) {
+        free(left);
+        free(right);
+        return;
+    }
+    b->cur = buf_insert_after(b, cur, right);
+    vis->cursor_col = 0;
+    free(left);
+    free(right);
+}
+
+static void
+vi_open_line(buffer_t *b, vi_visual_t *vis, int above)
+{
+    line_t *cur = b->cur ? b->cur : b->tail;
+    line_t *pos;
+
+    save_undo(b);
+    if (!cur) {
+        b->cur = buf_insert_after(b, NULL, "");
+    } else {
+        pos = above ? cur->prev : cur;
+        b->cur = buf_insert_after(b, pos, "");
+    }
+    vis->cursor_col = 0;
+    vis->insert_mode = 1;
+}
+
+static void
 vi_command_prompt(buffer_t *b, vi_visual_t *vis)
 {
     char cmd[256];
@@ -502,6 +549,10 @@ exvi_visual_main(buffer_t *b)
                     vis.cursor_col--;
                 }
                 break;
+            case '\r':
+            case '\n':
+                vi_split_line(b, &vis);
+                break;
             case 127:
             case '\b':
                 vi_backspace_char(b, &vis);
@@ -558,6 +609,14 @@ exvi_visual_main(buffer_t *b)
             }
             save_undo(b);
             vis.insert_mode = 1;
+            break;
+        case 'o':
+            vis.pending_g = 0;
+            vi_open_line(b, &vis, 0);
+            break;
+        case 'O':
+            vis.pending_g = 0;
+            vi_open_line(b, &vis, 1);
             break;
         case 'x':
             vis.pending_g = 0;
