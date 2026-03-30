@@ -172,6 +172,15 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "abcd\n",
+        [b"x", b"u", b"\x12"],
+    )
+    require(exit_code == 0, f"redo vi exited with status {exit_code}")
+    require(saved == "bcd\n",
+            f"unexpected redo buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "alpha beta\n",
         [b'd', b'w', b'P'],
     )

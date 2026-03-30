@@ -3854,7 +3854,9 @@ exvi_visual_main(buffer_t *b)
             vi_substitute_line(b, &vis);
             break;
         case 'u':
+        case 0x12:
             vis.pending_g = 0;
+            vis.pending_count = 0;
             handle_undo_command(b);
             vi_clamp_cursor(b, &vis);
             break;
