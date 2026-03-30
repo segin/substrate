@@ -219,7 +219,7 @@ Completed architecture milestones already in tree are intentionally omitted here
 
 #### 3.5 Prompt, search, and ex-entry integration
 
-- [ ] Ensure `:` in visual mode exposes the same command set, diagnostics, and option effects as standalone `ex`.
+- [x] Ensure `:` in visual mode exposes the same command set, diagnostics, and option effects as standalone `ex`.
 - [x] Finish `/` and `?` prompt editing behavior, prompt cancellation behavior, and search status feedback.
 - [x] Complete `/`, `?`, `n`, `N`, `*`, and `#` interactions with operators, counts, wrapscan, and option state.
 - [x] Add prompt-history behavior if it is part of the supported UX for `:`, `/`, and `?`.
