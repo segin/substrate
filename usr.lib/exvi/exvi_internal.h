@@ -60,6 +60,8 @@ char *parse_delimited_text(char **cmd_ptr, char delim);
 int parse_address(buffer_t *b, char **cmd_ptr);
 int parse_range(buffer_t *b, char **cmd_ptr, int *addr1, int *addr2);
 void replace_saved_string(char **dst, const char *src);
+void set_default_current_range(buffer_t *b, int *addr1, int *addr2);
+void print_range(buffer_t *b, int addr1, int addr2, int numbered, int listed);
 char *expand_filename_refs(buffer_t *b, const char *arg);
 char *recover_path_for(const char *filename);
 int load_recover_into_buffer(buffer_t *b, const char *filename);
@@ -71,5 +73,25 @@ void exvi_init_registers(void);
 void exvi_free_registers(void);
 void handle_sigint(int sig);
 void handle_sigterm(int sig);
+int handle_delete_command(buffer_t *b, int explicit_range, int addr1, int addr2);
+int default_read_destination(buffer_t *b, int addr2);
+int handle_undo_command(buffer_t *b);
+int handle_put_command(buffer_t *b, const char *args, int addr2);
+int handle_print_command(buffer_t *b, const char *cmd, int explicit_range,
+    int addr1, int addr2);
+int handle_mark_command(buffer_t *b, const char *cmd, const char *args, int addr2);
+int handle_file_command(buffer_t *b, const char *args);
+int handle_input_command(buffer_t *b, int mode, int explicit_range, int addr1,
+    int addr2);
+int handle_copy_command(buffer_t *b, const char *args, int explicit_range,
+    int addr1, int addr2);
+int handle_move_command(buffer_t *b, const char *args, int explicit_range,
+    int addr1, int addr2);
+int handle_join_command(buffer_t *b, int explicit_range, int addr1, int addr2);
+int handle_yank_command(buffer_t *b, const char *args, int explicit_range,
+    int addr1, int addr2);
+int handle_substitute_command(buffer_t *b, const char *args, int addr1, int addr2);
+int handle_repeat_substitute_command(buffer_t *b, int addr1, int addr2);
+int handle_shell_command(char *cmd);
 
 #endif
