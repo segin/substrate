@@ -47,6 +47,7 @@ extern char *last_sub_replacement;
 extern char *alternate_filename;
 extern int last_sub_global;
 extern const char *exvi_progname;
+extern exvi_frontend_t exvi_frontend;
 extern buffer_t regs[27];
 extern int reg_linewise[27];
 extern jmp_buf main_loop_jmp;

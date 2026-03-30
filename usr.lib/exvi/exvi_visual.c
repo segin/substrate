@@ -96,10 +96,12 @@ vi_set_insert_anchor(buffer_t *b, vi_visual_t *vis)
 static void
 vi_restore_terminal(void)
 {
+    static const char restore_seq[] = "\x1b[?25h\x1b[0m\x1b[2J\x1b[H";
+
     if (active_visual && active_visual->raw_active) {
         tcsetattr(STDIN_FILENO, TCSAFLUSH, &active_visual->saved_tio);
         active_visual->raw_active = 0;
-        write(STDOUT_FILENO, "\x1b[?25h\x1b[0m\x1b[2J\x1b[H", 18);
+        write(STDOUT_FILENO, restore_seq, sizeof(restore_seq) - 1);
     }
 }
 
@@ -4688,6 +4690,10 @@ exvi_visual_main(buffer_t *b)
             vis.pending_count = 0;
             vis.pending_big_z = 1;
             break;
+        case 'Q':
+            vis.pending_g = 0;
+            vis.pending_count = 0;
+            goto ex_mode;
         case 'G':
             vis.pending_g = 0;
             {
@@ -4827,4 +4833,11 @@ done:
     }
     vi_restore_terminal();
     return 0;
+
+ex_mode:
+    if (have_winch) {
+        sigaction(SIGWINCH, &old_winch, NULL);
+    }
+    vi_restore_terminal();
+    return EXVI_EXIT_EX_HANDOFF;
 }

@@ -17,6 +17,7 @@ test:
 	$(MAKE) -C $(TOP)/usr.lib clean all NATIVE_BUILD=1; \
 	$(MAKE) -C $(TOP)/bin/ex clean all NATIVE_BUILD=1; \
 	$(MAKE) -C $(TOP)/bin/vi clean all NATIVE_BUILD=1; \
-	bash ./test_ex.sh $(abspath $(TOP)/bin/ex/ex)
+	bash ./test_ex.sh $(abspath $(TOP)/bin/ex/ex); \
+	python3 ./test_ex_frontend.py $(abspath $(TOP)/bin/ex/ex)
 
 clean:

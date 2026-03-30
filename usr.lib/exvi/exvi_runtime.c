@@ -25,6 +25,7 @@ static char **startup_commands = NULL;
 static int startup_command_count = 0;
 int last_sub_global = 0;
 const char *exvi_progname = "ex";
+exvi_frontend_t exvi_frontend = EXVI_FRONTEND_EX;
 buffer_t regs[27];
 int reg_linewise[27];
 jmp_buf main_loop_jmp;
@@ -315,6 +316,7 @@ handle_sigterm(int sig)
 void
 exvi_reset_runtime(exvi_frontend_t frontend)
 {
+    exvi_frontend = frontend;
     secure_mode = 0;
     batch_mode = 0;
     visual_mode = (frontend == EXVI_FRONTEND_VI);

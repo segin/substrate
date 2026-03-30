@@ -201,11 +201,13 @@ handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
             fprintf(stderr, "%s: visual mode not implemented in this build.\n", exvi_progname);
             return 1;
         }
-        if (b->modified) {
+        if (exvi_frontend == EXVI_FRONTEND_EX && b->modified) {
             fprintf(stderr, "No write since last change (add ! to override)\n");
             return 1;
         }
-        set_visual_handoff_file(b->filename);
+        if (exvi_frontend == EXVI_FRONTEND_EX) {
+            set_visual_handoff_file(b->filename);
+        }
         longjmp(main_loop_jmp, EXVI_EXIT_VISUAL_HANDOFF);
     } else if (match_command(cmd, "args", NULL, &args, NULL)) {
         return handle_args_command(args);
@@ -362,11 +364,14 @@ int
 exvi_main(int argc, char **argv, exvi_frontend_t frontend)
 {
     int opt;
-    int interactive_prompt;
     int jump_status;
     int scan_plus_args;
+    volatile int status = 0;
     char **file_args = NULL;
     int file_argc = 0;
+    char *line = NULL;
+    size_t cap = 0;
+    ssize_t ret;
 
     exvi_reset_runtime(frontend);
     exvi_cleanup_session_state();
@@ -463,58 +468,51 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
         load_startup_commands(&buf, do_command);
     }
 
+enter_visual:
     if (visual_mode) {
         int ret;
 
         if (frontend == EXVI_FRONTEND_EX) {
             set_visual_handoff_file(buf.filename);
-            buf_free(&buf);
-            buf_free(&undo_buf);
-            exvi_free_registers();
-            exvi_cleanup_runtime();
-            return EXVI_EXIT_VISUAL_HANDOFF;
+            status = EXVI_EXIT_VISUAL_HANDOFF;
+            goto out;
         }
         if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO)) {
             fprintf(stderr, "%s: visual mode requires a terminal.\n", exvi_progname);
-            buf_free(&buf);
-            buf_free(&undo_buf);
-            exvi_free_registers();
-            exvi_cleanup_runtime();
-            exvi_cleanup_session_state();
-            return 1;
+            status = 1;
+            goto out;
         }
         ret = exvi_visual_main(&buf);
-        buf_free(&buf);
-        buf_free(&undo_buf);
-        exvi_free_registers();
-        exvi_cleanup_runtime();
-        exvi_cleanup_session_state();
-        return ret;
+        if (ret == EXVI_EXIT_EX_HANDOFF) {
+            visual_mode = 0;
+        } else {
+            status = ret;
+            goto out;
+        }
     }
 
-    char *line = NULL;
-    size_t cap = 0;
-    ssize_t ret;
-    
     global_buf_for_sighandler = &buf;
     signal(SIGINT, handle_sigint);
     signal(SIGHUP, handle_sigterm);
     signal(SIGTERM, handle_sigterm);
-    interactive_prompt = !batch_mode && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
 
     jump_status = setjmp(main_loop_jmp);
     if (jump_status == EXVI_EXIT_VISUAL_HANDOFF) {
         free(line);
-        buf_free(&buf);
-        buf_free(&undo_buf);
-        exvi_free_registers();
-        exvi_cleanup_runtime();
-        exvi_cleanup_session_state();
-        return EXVI_EXIT_VISUAL_HANDOFF;
+        line = NULL;
+        cap = 0;
+        if (frontend == EXVI_FRONTEND_VI) {
+            visual_mode = 1;
+            input_mode = 0;
+            input_insert_pos = NULL;
+            goto enter_visual;
+        }
+        status = EXVI_EXIT_VISUAL_HANDOFF;
+        goto out;
     }
 
     for (;;) {
-        if (interactive_prompt && !input_mode) {
+        if (!batch_mode && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO) && !input_mode) {
             fputs(":", stdout);
             fflush(stdout);
         }
@@ -543,11 +541,12 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
         do_command(&buf, cmd_line);
     }
     free(line);
-    
+
+out:
     buf_free(&buf);
     buf_free(&undo_buf);
     exvi_free_registers();
     exvi_cleanup_runtime();
     exvi_cleanup_session_state();
-    return 0;
+    return status;
 }

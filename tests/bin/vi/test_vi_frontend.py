@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+
+import importlib.util
+import os
+import subprocess
+import sys
+import tempfile
+
+
+def require(cond, msg):
+    if not cond:
+        print(f"FAIL: {msg}", file=sys.stderr)
+        raise SystemExit(1)
+
+
+def load_pty_helpers():
+    helper_path = os.path.join(os.path.dirname(__file__), "test_vi_pty.py")
+    spec = importlib.util.spec_from_file_location("test_vi_pty", helper_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def main():
+    if len(sys.argv) != 2:
+        print(f"usage: {sys.argv[0]} /path/to/vi", file=sys.stderr)
+        return 2
+
+    vi_path = sys.argv[1]
+    helpers = load_pty_helpers()
+
+    with tempfile.NamedTemporaryFile("w", delete=False) as f:
+        f.write("one\n")
+        path = f.name
+    try:
+        proc = subprocess.run([vi_path, path], input=b"",
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        require(proc.returncode == 1, f"vi non-tty status mismatch: {proc.returncode}")
+        require(proc.stderr.decode("latin1", "replace") == "vi: visual mode requires a terminal.\n",
+                f"vi non-tty stderr mismatch: {proc.stderr!r}")
+    finally:
+        os.unlink(path)
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "one\n",
+        [b":q!\r"],
+        final_keys=None,
+        extra_args=["-R"],
+    )
+    require(exit_code == 0, f"readonly vi exited with status {exit_code}")
+    require("[Readonly]" in decoded, "readonly vi missing readonly status")
+    require(saved == "one\n", f"readonly vi unexpectedly modified file: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "one\n",
+        [b":q!\r"],
+        final_keys=None,
+        argv0="view",
+    )
+    require(exit_code == 0, f"view vi exited with status {exit_code}")
+    require("[Readonly]" in decoded, "view vi missing readonly status")
+    require(saved == "one\n", f"view vi unexpectedly modified file: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "one\ntwo\n",
+        [b"Q", b"1d\n", b"visual\n", b"Q", b"q!\n"],
+        final_keys=None,
+    )
+    require(exit_code == 0, f"vi/ex round-trip exited with status {exit_code}")
+    require(decoded.count("\x1b[2J") >= 2,
+            "vi/ex round-trip missing visual repaint after :visual")
+    require(":1d" in decoded, "vi/ex round-trip missing ex-mode command echo")
+    require(":visual" in decoded, "vi/ex round-trip missing visual handoff command echo")
+    require(":q!" in decoded, "vi/ex round-trip missing final ex-mode quit prompt")
+    require(saved == "one\ntwo\n", f"vi/ex round-trip unexpectedly saved changes: {saved!r}")
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
