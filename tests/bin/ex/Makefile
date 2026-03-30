@@ -5,6 +5,7 @@ TOP = ../../..
 all: test
 
 test:
+	$(MAKE) -C $(TOP)/tests/usr.lib/exvi run
 	$(MAKE) -C $(TOP)/usr.lib
 	$(MAKE) -C $(TOP)/lib/c
 	$(MAKE) -C $(TOP)/bin/ex clean all
