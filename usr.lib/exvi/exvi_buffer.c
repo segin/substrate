@@ -12,6 +12,7 @@ buf_init(buffer_t *b)
     b->line_count = 0;
     b->filename = NULL;
     b->modified = 0;
+    b->empty_origin = 0;
     for (int i = 0; i < 26; i++) {
         b->marks[i] = NULL;
         b->mark_cols[i] = 0;
@@ -107,6 +108,7 @@ buf_free(buffer_t *b)
         free(b->filename);
         b->filename = NULL;
     }
+    b->empty_origin = 0;
     for (int i = 0; i < 26; i++) {
         b->marks[i] = NULL;
         b->mark_cols[i] = 0;
@@ -124,10 +126,12 @@ buf_copy(buffer_t *dst, buffer_t *src)
         dst->filename = strdup(src->filename);
     }
     dst->modified = src->modified;
+    dst->empty_origin = src->empty_origin;
     while (curr) {
         pos = buf_insert_after(dst, pos, curr->text);
         curr = curr->next;
     }
+    dst->modified = src->modified;
 }
 
 void
@@ -157,6 +161,9 @@ buf_read_file(buffer_t *b, const char *filename)
     }
     free(line);
     fclose(f);
+    if (b->line_count == 0) {
+        b->empty_origin = 1;
+    }
     b->cur = b->head;
     b->modified = 0;
 }
@@ -165,6 +172,7 @@ static int
 write_range_to_stream(buffer_t *b, FILE *f, int addr1, int addr2)
 {
     line_t *curr;
+    int all_empty = 1;
 
     if (addr1 == -1 || addr2 == -1) {
         addr1 = 1;
@@ -175,6 +183,23 @@ write_range_to_stream(buffer_t *b, FILE *f, int addr1, int addr2)
     }
     if (addr1 < 1 || addr2 < addr1 || addr2 > b->line_count) {
         return -1;
+    }
+
+    if (b->empty_origin) {
+        curr = buf_get_line(b, addr1);
+        for (int line = addr1; line <= addr2 && curr; line++) {
+            if (curr->len != 0) {
+                all_empty = 0;
+                break;
+            }
+            curr = curr->next;
+        }
+        if (all_empty) {
+            for (int line = addr1; line < addr2; line++) {
+                fputc('\n', f);
+            }
+            return 0;
+        }
     }
 
     curr = buf_get_line(b, addr1);

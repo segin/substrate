@@ -232,6 +232,67 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "",
+        [b"i", b"X", b"Y", b"\x1b"],
+    )
+    require(exit_code == 0, f"empty-insert vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing empty-insert insert status")
+    require(saved == "XY\n",
+            f"unexpected empty-insert buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "",
+        [b"i", b"\r", b"\x1b"],
+    )
+    require(exit_code == 0, f"empty-enter vi exited with status {exit_code}")
+    require("line 1/1" in decoded, "missing empty-enter initial line status")
+    require("-- INSERT --" in decoded, "missing empty-enter insert status")
+    require(saved == "\n",
+            f"unexpected empty-enter buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc\n",
+        [b"i", b"X", b"\x1b[A", b"\x1b[B", b"\x1b[C", b"\x1b[D", b"Y", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-arrow vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-arrow insert status")
+    require(saved == "XYabc\n",
+            f"unexpected insert-arrow buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\n",
+        [b"j", b"i", b"\x7f", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-backspace-join vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-backspace-join insert status")
+    require(saved == "onetwo\n",
+            f"unexpected insert-backspace-join buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three\n",
+        [b"i", b"\x1b[1;5C", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-ctrl-right vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-ctrl-right insert status")
+    require(saved == "one Xtwo three\n",
+            f"unexpected insert-ctrl-right buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three\n",
+        [b"A", b"\x1b[1;5D", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-ctrl-left vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-ctrl-left insert status")
+    require(saved == "one two Xthree\n",
+            f"unexpected insert-ctrl-left buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "0123456789abcdefghijKLMNOPQRST\n",
         [b"2", b"5", b"l", b"r", b"Z"],
         rows=8,

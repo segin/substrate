@@ -26,6 +26,7 @@ typedef struct {
     int line_count;
     char *filename;
     int modified;
+    int empty_origin;
     line_t *marks[26];
     int mark_cols[26];
 } buffer_t;

@@ -25,6 +25,15 @@ typedef enum {
     VI_REPEAT_P_BEFORE,
 } vi_repeat_kind_t;
 
+enum {
+    VI_KEY_UP = 0x100,
+    VI_KEY_DOWN,
+    VI_KEY_RIGHT,
+    VI_KEY_LEFT,
+    VI_KEY_CTRL_RIGHT,
+    VI_KEY_CTRL_LEFT,
+};
+
 typedef struct {
     struct termios saved_tio;
     int raw_active;
@@ -52,6 +61,8 @@ typedef struct {
 static vi_visual_t *active_visual = NULL;
 
 static int vi_first_nonblank_col(line_t *cur);
+static void vi_move_word_forward_count(buffer_t *b, vi_visual_t *vis, int count);
+static void vi_move_word_backward_count(buffer_t *b, vi_visual_t *vis, int count);
 
 static void
 vi_restore_terminal(void)
@@ -442,12 +453,49 @@ vi_read_key(void)
         if (!vi_read_timed_byte(&seq[1], 50)) {
             return '\x1b';
         }
+        if (seq[0] == '[' || seq[0] == 'O') {
+            switch (seq[1]) {
+            case 'A': return VI_KEY_UP;
+            case 'B': return VI_KEY_DOWN;
+            case 'C': return VI_KEY_RIGHT;
+            case 'D': return VI_KEY_LEFT;
+            default:
+                break;
+            }
+        }
+        if (seq[0] == '[' && seq[1] >= '0' && seq[1] <= '9') {
+            char seq2;
+
+            if (!vi_read_timed_byte(&seq2, 50)) {
+                return '\x1b';
+            }
+            if (seq2 == ';') {
+                char mod;
+                char final;
+
+                if (!vi_read_timed_byte(&mod, 50) ||
+                    !vi_read_timed_byte(&final, 50)) {
+                    return '\x1b';
+                }
+                if (mod == '5') {
+                    switch (final) {
+                    case 'C': return VI_KEY_CTRL_RIGHT;
+                    case 'D': return VI_KEY_CTRL_LEFT;
+                    default: return '\x1b';
+                    }
+                }
+                return '\x1b';
+            }
+            if (seq[1] == '5') {
+                switch (seq2) {
+                case 'C': return VI_KEY_CTRL_RIGHT;
+                case 'D': return VI_KEY_CTRL_LEFT;
+                default: return '\x1b';
+                }
+            }
+        }
         if (seq[0] == '[') {
             switch (seq[1]) {
-            case 'A': return 'k';
-            case 'B': return 'j';
-            case 'C': return 'l';
-            case 'D': return 'h';
             default: return '\x1b';
             }
         }
@@ -667,6 +715,98 @@ vi_move_vertical(buffer_t *b, int delta)
     if (target >= 1) {
         b->cur = buf_get_line(b, target);
     }
+}
+
+static void
+vi_move_left_insert(buffer_t *b, vi_visual_t *vis)
+{
+    line_t *cur = b->cur ? b->cur : b->head;
+
+    if (!cur) {
+        return;
+    }
+    if (vis->cursor_col > 0) {
+        vis->cursor_col--;
+    } else if (cur->prev) {
+        b->cur = cur->prev;
+        vis->cursor_col = (int)b->cur->len;
+    }
+}
+
+static void
+vi_move_right_insert(buffer_t *b, vi_visual_t *vis)
+{
+    line_t *cur = b->cur ? b->cur : b->head;
+
+    if (!cur) {
+        return;
+    }
+    if ((size_t)vis->cursor_col < cur->len) {
+        vis->cursor_col++;
+    } else if (cur->next) {
+        b->cur = cur->next;
+        vis->cursor_col = 0;
+    }
+}
+
+static void
+vi_move_arrow_insert(buffer_t *b, vi_visual_t *vis, int key)
+{
+    switch (key) {
+    case VI_KEY_UP:
+        vi_move_vertical(b, -1);
+        vi_clamp_cursor(b, vis);
+        break;
+    case VI_KEY_DOWN:
+        vi_move_vertical(b, 1);
+        vi_clamp_cursor(b, vis);
+        break;
+    case VI_KEY_LEFT:
+        vi_move_left_insert(b, vis);
+        break;
+    case VI_KEY_RIGHT:
+        vi_move_right_insert(b, vis);
+        break;
+    case VI_KEY_CTRL_LEFT:
+        vi_move_word_backward_count(b, vis, 1);
+        break;
+    case VI_KEY_CTRL_RIGHT:
+        vi_move_word_forward_count(b, vis, 1);
+        break;
+    default:
+        break;
+    }
+}
+
+static line_t *
+vi_ensure_current_line(buffer_t *b)
+{
+    if (b->cur) {
+        return b->cur;
+    }
+    if (b->head) {
+        b->cur = b->head;
+        return b->cur;
+    }
+    b->empty_origin = 1;
+    b->cur = buf_insert_after(b, NULL, "");
+    return b->cur;
+}
+
+static void
+vi_ensure_visible_line(buffer_t *b)
+{
+    int was_modified = b->modified;
+
+    if (b->head) {
+        if (!b->cur) {
+            b->cur = b->head;
+        }
+        return;
+    }
+    b->empty_origin = 1;
+    b->cur = buf_insert_after(b, NULL, "");
+    b->modified = was_modified;
 }
 
 static void
@@ -2134,9 +2274,7 @@ vi_linewise_delete(buffer_t *b, vi_visual_t *vis, int start, int end)
     vi_take_register_arg(vis, regarg);
     handle_yank_command(b, regarg, 1, start, end);
     handle_delete_command(b, 1, start, end);
-    if (!b->cur && b->head) {
-        b->cur = b->head;
-    }
+    vi_ensure_visible_line(b);
     vis->cursor_col = 0;
 }
 
@@ -2634,7 +2772,7 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
 static void
 vi_insert_char(buffer_t *b, vi_visual_t *vis, int ch)
 {
-    line_t *cur = b->cur;
+    line_t *cur = vi_ensure_current_line(b);
     char *text;
 
     if (!cur) {
@@ -2657,7 +2795,7 @@ vi_insert_char(buffer_t *b, vi_visual_t *vis, int ch)
 static void
 vi_replace_insert_char(buffer_t *b, vi_visual_t *vis, int ch)
 {
-    line_t *cur = b->cur;
+    line_t *cur = vi_ensure_current_line(b);
     char *text;
 
     if (!cur) {
@@ -2682,9 +2820,33 @@ static void
 vi_backspace_char(buffer_t *b, vi_visual_t *vis)
 {
     line_t *cur = b->cur;
+    line_t *prev;
     char *text;
+    char *merged;
+    size_t prev_len;
 
-    if (!cur || vis->cursor_col <= 0) {
+    if (!cur) {
+        return;
+    }
+    if (vis->cursor_col <= 0) {
+        if (!cur->prev) {
+            return;
+        }
+        prev = cur->prev;
+        prev_len = prev->len;
+        merged = malloc(prev->len + cur->len + 1);
+        if (!merged) {
+            return;
+        }
+        memcpy(merged, prev->text, prev->len);
+        memcpy(merged + prev->len, cur->text, cur->len + 1);
+        free(prev->text);
+        prev->text = merged;
+        prev->len += cur->len;
+        b->cur = cur;
+        buf_delete(b, cur);
+        b->cur = prev;
+        vis->cursor_col = (int)prev_len;
         return;
     }
     text = malloc(cur->len + 1);
@@ -3130,9 +3292,7 @@ exvi_visual_main(buffer_t *b)
     memset(&vis, 0, sizeof(vis));
     vis.top_line = 1;
     vis.last_search_forward = 1;
-    if (!b->cur) {
-        b->cur = b->head;
-    }
+    vi_ensure_visible_line(b);
     if (vi_enable_raw(&vis) != 0) {
         return 1;
     }
@@ -3141,6 +3301,7 @@ exvi_visual_main(buffer_t *b)
     for (;;) {
         line_t *cur;
 
+        vi_ensure_visible_line(b);
         vi_render(b, &vis, ':', NULL);
         key = vi_read_key();
         if (key == -1) {
@@ -3169,6 +3330,14 @@ exvi_visual_main(buffer_t *b)
                     vis.cursor_col--;
                 }
                 break;
+            case VI_KEY_UP:
+            case VI_KEY_DOWN:
+            case VI_KEY_LEFT:
+            case VI_KEY_RIGHT:
+            case VI_KEY_CTRL_LEFT:
+            case VI_KEY_CTRL_RIGHT:
+                vi_move_arrow_insert(b, &vis, key);
+                break;
             default:
                 if (isprint(key) || key == '\t') {
                     vi_replace_insert_char(b, &vis, key);
@@ -3193,6 +3362,14 @@ exvi_visual_main(buffer_t *b)
             case '\b':
                 vi_backspace_char(b, &vis);
                 break;
+            case VI_KEY_UP:
+            case VI_KEY_DOWN:
+            case VI_KEY_LEFT:
+            case VI_KEY_RIGHT:
+            case VI_KEY_CTRL_LEFT:
+            case VI_KEY_CTRL_RIGHT:
+                vi_move_arrow_insert(b, &vis, key);
+                break;
             default:
                 if (isprint(key) || key == '\t') {
                     vi_insert_char(b, &vis, key);
@@ -3200,6 +3377,28 @@ exvi_visual_main(buffer_t *b)
                 break;
             }
             continue;
+        }
+        switch (key) {
+        case VI_KEY_UP:
+            key = 'k';
+            break;
+        case VI_KEY_DOWN:
+            key = 'j';
+            break;
+        case VI_KEY_RIGHT:
+            key = 'l';
+            break;
+        case VI_KEY_LEFT:
+            key = 'h';
+            break;
+        case VI_KEY_CTRL_RIGHT:
+            key = 'w';
+            break;
+        case VI_KEY_CTRL_LEFT:
+            key = 'b';
+            break;
+        default:
+            break;
         }
         if (vis.pending_op) {
             if (key >= '1' && key <= '9') {
