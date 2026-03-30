@@ -2684,6 +2684,32 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             vi_linewise_change(b, vis, line_no, last_line);
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+        (key == 'j' || key == '+' || key == '\r' || key == '\n')) {
+        int start = line_no;
+        int end_line = vi_clamp_line_target(b, line_no + count);
+
+        if (vis->pending_op == 'y') {
+            vi_linewise_yank(b, vis, start, end_line);
+        } else if (vis->pending_op == 'd') {
+            vi_linewise_delete(b, vis, start, end_line);
+            vi_set_last_change(vis, VI_REPEAT_DD, end_line - start + 1, 0);
+        } else {
+            vi_linewise_change(b, vis, start, end_line);
+        }
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+        (key == 'k' || key == '-')) {
+        int start = vi_clamp_line_target(b, line_no - count);
+        int end_line = line_no;
+
+        if (vis->pending_op == 'y') {
+            vi_linewise_yank(b, vis, start, end_line);
+        } else if (vis->pending_op == 'd') {
+            vi_linewise_delete(b, vis, start, end_line);
+            vi_set_last_change(vis, VI_REPEAT_DD, end_line - start + 1, 0);
+        } else {
+            vi_linewise_change(b, vis, start, end_line);
+        }
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
         key == '|') {
         line_t *cur = b->cur;
         int target;

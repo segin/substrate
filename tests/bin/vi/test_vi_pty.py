@@ -520,6 +520,43 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one\ntwo\nthree\nfour\n",
+        [b"d", b"j"],
+    )
+    require(exit_code == 0, f"dj vi exited with status {exit_code}")
+    require(saved == "three\nfour\n",
+            f"unexpected dj buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\nfour\n",
+        [b"j", b"j", b"y", b"k", b"P"],
+    )
+    require(exit_code == 0, f"yk vi exited with status {exit_code}")
+    require(saved == "one\ntwo\ntwo\nthree\nthree\nfour\n",
+            f"unexpected yk buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\nfour\n",
+        [b"c", b"+", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"c+ vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing c+ insert status")
+    require(saved == "X\nthree\nfour\n",
+            f"unexpected c+ buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\nfour\n",
+        [b"j", b"j", b"d", b"-"],
+    )
+    require(exit_code == 0, f"d- vi exited with status {exit_code}")
+    require(saved == "one\nfour\n",
+            f"unexpected d- buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one two three four\n",
         [b"W", b"W", b"W", b"2", b"g", b"e", b"r", b"Y"],
     )
