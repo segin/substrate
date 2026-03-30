@@ -114,6 +114,17 @@ def main():
     require("line 2/2" in decoded, "missing operator second-line status")
     require(saved == "alpha  DONE\nsecond \n",
             f"unexpected operator-motion buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "".join(f"line {i}\n" for i in range(1, 41)),
+        [b"1", b"0", b"G", b"\x04", b"\x15"],
+    )
+    require(exit_code == 0, f"scroll vi exited with status {exit_code}")
+    require("line 10/40" in decoded, "missing initial half-page anchor")
+    require("line 21/40" in decoded, "missing half-page down status")
+    require(saved.startswith("line 1\nline 2\nline 3\n"),
+            "unexpected half-page scroll buffer contents")
     print("vi pty test: ok")
     return 0
 

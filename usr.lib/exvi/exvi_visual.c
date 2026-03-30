@@ -336,6 +336,17 @@ vi_page_scroll(buffer_t *b, vi_visual_t *vis, int direction)
     vi_move_vertical(b, direction * page);
 }
 
+static void
+vi_half_page_scroll(buffer_t *b, vi_visual_t *vis, int direction)
+{
+    int page = (vis->rows - 2) / 2;
+
+    if (page < 1) {
+        page = 1;
+    }
+    vi_move_vertical(b, direction * page);
+}
+
 static int
 vi_first_nonblank_col(line_t *cur)
 {
@@ -1464,9 +1475,17 @@ exvi_visual_main(buffer_t *b)
             vis.pending_g = 0;
             vi_page_scroll(b, &vis, -vi_take_count(&vis));
             break;
+        case 0x04:
+            vis.pending_g = 0;
+            vi_half_page_scroll(b, &vis, vi_take_count(&vis));
+            break;
         case 0x06:
             vis.pending_g = 0;
             vi_page_scroll(b, &vis, vi_take_count(&vis));
+            break;
+        case 0x15:
+            vis.pending_g = 0;
+            vi_half_page_scroll(b, &vis, -vi_take_count(&vis));
             break;
         case 'D':
             vis.pending_g = 0;
