@@ -139,10 +139,13 @@ vi_clamp_left_col(vi_visual_t *vis)
 }
 
 static int
-vi_char_display_width(unsigned char c)
+vi_char_display_width(unsigned char c, int col)
 {
     if (c == '\t') {
-        return 2;
+        if (option_list) {
+            return 2;
+        }
+        return EXVI_DEFAULT_TABSTOP - (col % EXVI_DEFAULT_TABSTOP);
     }
     if (isprint(c)) {
         return 1;
@@ -163,7 +166,7 @@ vi_display_col_for_index(line_t *cur, int idx)
         idx = (int)cur->len;
     }
     for (i = 0; i < (size_t)idx; i++) {
-        col += vi_char_display_width((unsigned char)cur->text[i]);
+        col += vi_char_display_width((unsigned char)cur->text[i], col);
     }
     return col;
 }
@@ -178,13 +181,15 @@ vi_index_for_display_col(line_t *cur, int target_col)
         return 0;
     }
     for (i = 0; i < cur->len; i++) {
+        int width = vi_char_display_width((unsigned char)cur->text[i], col);
+
         if (col >= target_col) {
             return (int)i;
         }
-        col += vi_char_display_width((unsigned char)cur->text[i]);
-        if (col > target_col) {
+        if (col + width > target_col) {
             return (int)i;
         }
+        col += width;
     }
     return (int)cur->len;
 }
@@ -199,10 +204,33 @@ vi_normalize_left_col(line_t *cur, int left_col)
         return 0;
     }
     for (i = 0; i < cur->len; i++) {
-        int width = vi_char_display_width((unsigned char)cur->text[i]);
+        int width = vi_char_display_width((unsigned char)cur->text[i], col);
 
         if (col + width > left_col) {
             break;
+        }
+        col += width;
+    }
+    return col;
+}
+
+static int
+vi_next_left_col(line_t *cur, int left_col)
+{
+    int col = 0;
+    size_t i;
+
+    if (!cur || left_col < 0) {
+        return 0;
+    }
+    for (i = 0; i < cur->len; i++) {
+        int width = vi_char_display_width((unsigned char)cur->text[i], col);
+
+        if (col >= left_col) {
+            return col + width;
+        }
+        if (col + width > left_col) {
+            return col + width;
         }
         col += width;
     }
@@ -258,31 +286,49 @@ vi_scroll_into_view(buffer_t *b, vi_visual_t *vis)
     }
     vi_clamp_left_col(vis);
     vis->left_col = vi_normalize_left_col(cur, vis->left_col);
+    while (cursor_disp >= vis->left_col + text_cols) {
+        int next_left = vi_next_left_col(cur, vis->left_col);
+
+        if (next_left <= vis->left_col) {
+            break;
+        }
+        vis->left_col = next_left;
+    }
 }
 
 static void
 vi_draw_line(const char *text, int cols, int number, int line_no, int left_col)
 {
     int used = 0;
-    int skipped = 0;
+    int display_col = 0;
 
     if (number) {
         used += printf("%6d  ", line_no);
     }
-    while (*text && skipped < left_col) {
-        skipped += vi_char_display_width((unsigned char)*text);
+    while (*text && display_col < left_col) {
+        display_col += vi_char_display_width((unsigned char)*text, display_col);
         text++;
     }
     while (*text && used < cols) {
         unsigned char c = (unsigned char)*text++;
+        int width = vi_char_display_width(c, display_col);
 
         if (c == '\t') {
-            if (used + 1 >= cols) {
-                break;
+            if (option_list) {
+                if (used + 1 >= cols) {
+                    break;
+                }
+                putchar('^');
+                putchar('I');
+                used += 2;
+            } else {
+                int spaces = width;
+
+                while (spaces-- > 0 && used < cols) {
+                    putchar(' ');
+                    used++;
+                }
             }
-            putchar('^');
-            putchar('I');
-            used += 2;
         } else if (isprint(c)) {
             putchar((int)c);
             used++;
@@ -294,6 +340,7 @@ vi_draw_line(const char *text, int cols, int number, int line_no, int left_col)
             putchar((c == 127) ? '?' : (char)(c + 64));
             used += 2;
         }
+        display_col += width;
     }
 }
 

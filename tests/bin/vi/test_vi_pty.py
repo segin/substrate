@@ -234,6 +234,19 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "a\tb\n",
+        [],
+        rows=8,
+        cols=16,
+    )
+    require(exit_code == 0, f"tab-render vi exited with status {exit_code}")
+    require("a       b" in decoded, "missing expanded tab rendering")
+    require("^I" not in decoded, "rendered tabs as caret escapes in normal visual mode")
+    require(saved == "a\tb\n",
+            f"unexpected tab-render buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "0123456789abcdefghijKLMNOPQRST\n",
         [b"3", b"0", b"|", b"r", b"Z"],
         rows=8,
@@ -252,8 +265,8 @@ def main():
         cols=16,
     )
     require(exit_code == 0, f"tab-column-motion vi exited with status {exit_code}")
-    require("defghijklmnopqrstuvZ" in decoded, "missing tab-aware far-right long-line content")
-    require(saved == "a\tbcdefghijklmnopqrstuvZxyz\n",
+    require("bcdefghijklmnopqZ" in decoded, "missing tab-aware far-right long-line content")
+    require(saved == "a\tbcdefghijklmnopqZstuvwxyz\n",
             f"unexpected tab-column-motion buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
@@ -276,7 +289,7 @@ def main():
     )
     require(exit_code == 0, f"tab-column-change vi exited with status {exit_code}")
     require("-- INSERT --" in decoded, "missing tab-column change insert status")
-    require(saved == "Xwxyz\n",
+    require(saved == "Xrstuvwxyz\n",
             f"unexpected tab-column-change buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(

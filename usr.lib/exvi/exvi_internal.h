@@ -7,6 +7,8 @@
 
 #include <exvi.h>
 
+#define EXVI_DEFAULT_TABSTOP 8
+
 typedef struct line {
     struct line *prev;
     struct line *next;
