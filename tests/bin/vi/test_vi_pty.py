@@ -220,6 +220,24 @@ def main():
     require("-- INSERT --" in decoded, "missing operator-find insert status")
     require(saved == "abcXdefXghiXTAIL\n",
             f"unexpected operator-find buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abcXdefXghiXj\n",
+        [b"0", b"d", b"f", b"X", b"."],
+    )
+    require(exit_code == 0, f"repeat-df vi exited with status {exit_code}")
+    require(saved == "ghiXj\n",
+            f"unexpected repeat-df buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abcXdefXghiXj\n",
+        [b"0", b"d", b"t", b"X", b"."],
+    )
+    require(exit_code == 0, f"repeat-dt vi exited with status {exit_code}")
+    require(saved == "XghiXj\n",
+            f"unexpected repeat-dt buffer: {saved!r}")
     print("vi pty test: ok")
     return 0
 

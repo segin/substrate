@@ -18,6 +18,7 @@ typedef enum {
     VI_REPEAT_TILDE,
     VI_REPEAT_DD,
     VI_REPEAT_DW,
+    VI_REPEAT_D_FIND,
     VI_REPEAT_D_EOL,
     VI_REPEAT_J,
     VI_REPEAT_P,
@@ -899,6 +900,12 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             (key == 't' || key == 'T'),
             count, &start, &end) == 0) {
             vi_delete_span(b, vis, start, end, vis->pending_op == 'c');
+            vis->last_find_char = ch;
+            vis->last_find_forward = (key == 'f' || key == 't');
+            vis->last_find_till = (key == 't' || key == 'T');
+            if (vis->pending_op == 'd') {
+                vi_set_last_change(vis, VI_REPEAT_D_FIND, count, 0);
+            }
         } else {
             write(STDOUT_FILENO, "\a", 1);
         }
@@ -1246,6 +1253,18 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
         vi_find_word_boundary_forward_count(b->cur, vis->cursor_col, count, &end);
         if (end >= vis->cursor_col) {
             vi_delete_span(b, vis, vis->cursor_col, end, 0);
+        }
+        break;
+    case VI_REPEAT_D_FIND:
+        {
+            int start;
+
+            if (vi_find_motion_span(b->cur, vis->cursor_col, vis->last_find_char,
+                vis->last_find_forward, vis->last_find_till, count, &start, &end) == 0) {
+                vi_delete_span(b, vis, start, end, 0);
+            } else {
+                write(STDOUT_FILENO, "\a", 1);
+            }
         }
         break;
     case VI_REPEAT_D_EOL:
