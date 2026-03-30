@@ -23,7 +23,7 @@ run_test() {
     echo -e "$init_text" > "$f_vim"
 
     # Run ex (our implementation)
-    echo -e "$script" | "$EX_BIN" "$f_ex" >/dev/null 2>&1 || true
+    echo -e "$script" | ./bin/ex/ex_host "$f_ex" >/dev/null 2>&1 || true
 
     # Run nvi (if installed, to serve as BSD reference oracle)
     if command -v nvi >/dev/null 2>&1; then

@@ -12,6 +12,156 @@
 #include <sys/wait.h>
 #include <errno.h>
 
+FILE *secure_popen(const char *cmd, const char *mode, pid_t *pid_out) {
+    int pfd[2];
+    if (pipe(pfd) < 0) return NULL;
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(pfd[0]);
+        close(pfd[1]);
+        return NULL;
+    }
+
+    if (pid == 0) {
+        if (setgid(getgid()) == -1) exit(127);
+        if (setuid(getuid()) == -1) exit(127);
+
+        if (mode[0] == 'r') {
+            dup2(pfd[1], STDOUT_FILENO);
+        } else {
+            dup2(pfd[0], STDIN_FILENO);
+        }
+        close(pfd[0]);
+        close(pfd[1]);
+
+        char *cmd_copy = strdup(cmd);
+        if (!cmd_copy) exit(127);
+
+        char *args[256];
+        int arg_count = 0;
+        char *p = cmd_copy;
+        char *dest = cmd_copy;
+
+        while (*p && arg_count < 255) {
+            while (*p && isspace((unsigned char)*p)) p++;
+            if (!*p) break;
+
+            args[arg_count++] = dest;
+
+            int in_single = 0, in_double = 0;
+            while (*p) {
+                if (!in_single && !in_double && isspace((unsigned char)*p)) {
+                    p++;
+                    break;
+                } else if (!in_double && *p == '\'') {
+                    in_single = !in_single;
+                    p++;
+                } else if (!in_single && *p == '"') {
+                    in_double = !in_double;
+                    p++;
+                } else if (!in_single && *p == '\\' && *(p+1)) {
+                    p++;
+                    if (*p) *dest++ = *p++;
+                } else {
+                    if (*p) *dest++ = *p++;
+                }
+            }
+            *dest++ = '\0';
+        }
+        args[arg_count] = NULL;
+
+        if (arg_count > 0) {
+            execvp(args[0], args);
+        }
+        exit(127);
+    }
+
+    if (mode[0] == 'r') {
+        close(pfd[1]);
+        *pid_out = pid;
+        return fdopen(pfd[0], "r");
+    } else {
+        close(pfd[0]);
+        *pid_out = pid;
+        return fdopen(pfd[1], "w");
+    }
+}
+
+int secure_pclose(FILE *f, pid_t pid) {
+    fclose(f);
+    int status;
+    void (*old_int)(int) = signal(SIGINT, SIG_IGN);
+    void (*old_quit)(int) = signal(SIGQUIT, SIG_IGN);
+    while (waitpid(pid, &status, 0) == -1) {
+        if (errno != EINTR) break;
+    }
+    signal(SIGINT, old_int);
+    signal(SIGQUIT, old_quit);
+    return status;
+}
+
+int secure_system(const char *cmd) {
+    pid_t pid = fork();
+    if (pid < 0) return -1;
+
+    if (pid == 0) {
+        if (setgid(getgid()) == -1) exit(127);
+        if (setuid(getuid()) == -1) exit(127);
+
+        char *cmd_copy = strdup(cmd);
+        if (!cmd_copy) exit(127);
+
+        char *args[256];
+        int arg_count = 0;
+        char *p = cmd_copy;
+        char *dest = cmd_copy;
+
+        while (*p && arg_count < 255) {
+            while (*p && isspace((unsigned char)*p)) p++;
+            if (!*p) break;
+
+            args[arg_count++] = dest;
+
+            int in_single = 0, in_double = 0;
+            while (*p) {
+                if (!in_single && !in_double && isspace((unsigned char)*p)) {
+                    p++;
+                    break;
+                } else if (!in_double && *p == '\'') {
+                    in_single = !in_single;
+                    p++;
+                } else if (!in_single && *p == '"') {
+                    in_double = !in_double;
+                    p++;
+                } else if (!in_single && *p == '\\' && *(p+1)) {
+                    p++;
+                    if (*p) *dest++ = *p++;
+                } else {
+                    if (*p) *dest++ = *p++;
+                }
+            }
+            *dest++ = '\0';
+        }
+        args[arg_count] = NULL;
+
+        if (arg_count > 0) {
+            execvp(args[0], args);
+        }
+        exit(127);
+    }
+
+    int status;
+    void (*old_int)(int) = signal(SIGINT, SIG_IGN);
+    void (*old_quit)(int) = signal(SIGQUIT, SIG_IGN);
+    while (waitpid(pid, &status, 0) == -1) {
+        if (errno != EINTR) break;
+    }
+    signal(SIGINT, old_int);
+    signal(SIGQUIT, old_quit);
+    return status;
+}
+
 int secure_mode = 0;
 int batch_mode = 0;
 int visual_mode = 0;
@@ -187,14 +337,15 @@ void buf_write_file(buffer_t *b, const char *filename, int append) {
             return;
         }
         // write to shell command
-        FILE *f = popen(filename + 1, "w");
+        pid_t pid;
+        FILE *f = secure_popen(filename + 1, "w", &pid);
         if (!f) return;
         line_t *curr = b->head;
         while (curr) {
             fprintf(f, "%s\n", curr->text);
             curr = curr->next;
         }
-        pclose(f);
+        secure_pclose(f, pid);
         return;
     }
     
@@ -539,6 +690,7 @@ void do_command(buffer_t *b, char *cmd) {
         while (*ptr && isspace((unsigned char)*ptr)) ptr++;
         
         FILE *f = NULL;
+        pid_t pid = -1;
         int is_pipe = 0;
         if (*ptr == '!') {
             if (secure_mode) {
@@ -546,7 +698,7 @@ void do_command(buffer_t *b, char *cmd) {
                 return;
             }
             is_pipe = 1;
-            f = popen(ptr + 1, "r");
+            f = secure_popen(ptr + 1, "r", &pid);
         } else {
             if (!*ptr) ptr = b->filename; // default to current file
             if (ptr) f = fopen(ptr, "r");
@@ -566,7 +718,7 @@ void do_command(buffer_t *b, char *cmd) {
             }
             free(line);
             
-            if (is_pipe) pclose(f);
+            if (is_pipe) secure_pclose(f, pid);
             else fclose(f);
             
             if (!batch_mode) printf("\"%s\" %d lines\n", *cmd == '!' ? ptr+1 : ptr, lines_read);
@@ -891,92 +1043,7 @@ void do_command(buffer_t *b, char *cmd) {
             fprintf(stderr, "Shell commands not allowed in secure mode\n");
             return;
         }
-        char *shell = getenv("SHELL");
-        if (!shell || !*shell) shell = "/bin/sh";
-        pid_t pid = fork();
-        if (pid < 0) {
-            perror("fork");
-        } else if (pid == 0) {
-            if (setgid(getgid()) == -1) {
-                perror("setgid");
-                exit(127);
-            }
-            if (setuid(getuid()) == -1) {
-                perror("setuid");
-                exit(127);
-            }
-            execl(shell, shell, "-c", cmd + 1, (char *)NULL);
-            perror("execl");
-            exit(127);
-        } else {
-            int status;
-            void (*old_int)(int) = signal(SIGINT, SIG_IGN);
-            void (*old_quit)(int) = signal(SIGQUIT, SIG_IGN);
-            while (waitpid(pid, &status, 0) == -1) {
-                if (errno != EINTR) break;
-            }
-            signal(SIGINT, old_int);
-            signal(SIGQUIT, old_quit);
-        }
-
-        char *args[256];
-        int arg_count = 0;
-        char *p = cmd_copy;
-        char *dest = cmd_copy;
-
-        while (*p && arg_count < 255) {
-            while (*p && isspace((unsigned char)*p)) p++;
-            if (!*p) break;
-
-            args[arg_count++] = dest;
-
-            int in_single = 0, in_double = 0;
-            while (*p) {
-                if (!in_single && !in_double && isspace((unsigned char)*p)) {
-                    p++;
-                    break;
-                } else if (!in_double && *p == '\'') {
-                    in_single = !in_single;
-                    p++;
-                } else if (!in_single && *p == '"') {
-                    in_double = !in_double;
-                    p++;
-                } else if (!in_single && *p == '\\' && *(p+1)) {
-                    p++;
-                    if (*p) *dest++ = *p++;
-                } else {
-                    if (*p) *dest++ = *p++;
-                }
-            }
-            *dest++ = '\0';
-        }
-        args[arg_count] = NULL;
-
-        if (arg_count > 0) {
-            pid_t pid = fork();
-            if (pid == -1) {
-                perror("fork");
-            } else if (pid == 0) {
-                // Restore default signal handlers for the child process
-                signal(SIGINT, SIG_DFL);
-                signal(SIGQUIT, SIG_DFL);
-                execvp(args[0], args);
-                perror("execvp");
-                exit(127);
-            } else {
-                // Ignore signals in parent while waiting for child
-                void (*old_sigint)(int) = signal(SIGINT, SIG_IGN);
-                void (*old_sigquit)(int) = signal(SIGQUIT, SIG_IGN);
-
-                int status;
-                waitpid(pid, &status, 0);
-
-                // Restore signals
-                signal(SIGINT, old_sigint);
-                signal(SIGQUIT, old_sigquit);
-            }
-        }
-        free(cmd_copy);
+        secure_system(cmd + 1);
     }
 }
 
