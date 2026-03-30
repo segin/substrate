@@ -15,25 +15,16 @@ OBJS = $(SRCS:.c=.o)
 BUILD_MODE := $(if $(NATIVE_BUILD),native,target)
 MODE_STAMP = .build-mode
 
-.PHONY: all clean install test fuzz bench examples
-.PHONY: ensure_build_mode
+.PHONY: all clean install test fuzz bench examples FORCE
 
 all: $(LIBNAME)
 
-ensure_build_mode:
-	@mode="$(BUILD_MODE)"; \
-	cur=""; \
-	if [ -f "$(MODE_STAMP)" ]; then cur=$$(cat "$(MODE_STAMP)"); fi; \
-	if [ "$$cur" != "$$mode" ]; then \
-		printf '%s\n' "$$mode" > "$(MODE_STAMP)"; \
-	fi
-
-$(LIBNAME): ensure_build_mode $(OBJS)
+$(LIBNAME): $(OBJS)
 	$(AR) rcs $@ $(OBJS)
 
 $(OBJS): $(MODE_STAMP)
 
-$(MODE_STAMP):
+$(MODE_STAMP): FORCE
 	@mode="$(BUILD_MODE)"; \
 	cur=""; \
 	if [ -f "$(MODE_STAMP)" ]; then cur=$$(cat "$(MODE_STAMP)"); fi; \

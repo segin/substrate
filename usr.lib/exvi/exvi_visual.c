@@ -8,6 +8,7 @@
 #include <termios.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <sys/select.h>
 
 typedef struct {
     struct termios saved_tio;
@@ -18,6 +19,7 @@ typedef struct {
     int cursor_col;
     int pending_g;
     int last_search_forward;
+    int insert_mode;
 } vi_visual_t;
 
 static vi_visual_t *active_visual = NULL;
@@ -185,6 +187,8 @@ vi_render(buffer_t *b, vi_visual_t *vis, char prompt_prefix, const char *prompt)
     printf("\x1b[K\r\n\x1b[7m");
     if (prompt) {
         printf("%c%s", prompt_prefix, prompt);
+    } else if (vis->insert_mode) {
+        printf("-- INSERT --");
     } else {
         printf("\"%s\"%s  line %d/%d",
             b->filename ? b->filename : "[No Name]",
@@ -210,6 +214,23 @@ vi_render(buffer_t *b, vi_visual_t *vis, char prompt_prefix, const char *prompt)
 }
 
 static int
+vi_read_timed_byte(char *out, int timeout_ms)
+{
+    fd_set rfds;
+    struct timeval tv;
+
+    FD_ZERO(&rfds);
+    FD_SET(STDIN_FILENO, &rfds);
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+
+    if (select(STDIN_FILENO + 1, &rfds, NULL, NULL, &tv) <= 0) {
+        return 0;
+    }
+    return read(STDIN_FILENO, out, 1) == 1;
+}
+
+static int
 vi_read_key(void)
 {
     char c;
@@ -220,10 +241,10 @@ vi_read_key(void)
     if (c == '\x1b') {
         char seq[2];
 
-        if (read(STDIN_FILENO, &seq[0], 1) != 1) {
+        if (!vi_read_timed_byte(&seq[0], 50)) {
             return '\x1b';
         }
-        if (read(STDIN_FILENO, &seq[1], 1) != 1) {
+        if (!vi_read_timed_byte(&seq[1], 50)) {
             return '\x1b';
         }
         if (seq[0] == '[') {
@@ -268,6 +289,93 @@ vi_page_scroll(buffer_t *b, vi_visual_t *vis, int direction)
     vi_move_vertical(b, direction * page);
 }
 
+static int
+vi_replace_current_text(buffer_t *b, const char *text)
+{
+    line_t *cur = b->cur;
+    char *copy;
+
+    if (!cur) {
+        return -1;
+    }
+    copy = strdup(text);
+    if (!copy) {
+        return -1;
+    }
+    free(cur->text);
+    cur->text = copy;
+    cur->len = strlen(copy);
+    b->modified = 1;
+    return 0;
+}
+
+static void
+vi_insert_char(buffer_t *b, vi_visual_t *vis, int ch)
+{
+    line_t *cur = b->cur;
+    char *text;
+
+    if (!cur) {
+        return;
+    }
+    text = malloc(cur->len + 2);
+    if (!text) {
+        return;
+    }
+    memcpy(text, cur->text, (size_t)vis->cursor_col);
+    text[vis->cursor_col] = (char)ch;
+    memcpy(text + vis->cursor_col + 1, cur->text + vis->cursor_col,
+        cur->len - (size_t)vis->cursor_col + 1);
+    if (vi_replace_current_text(b, text) == 0) {
+        vis->cursor_col++;
+    }
+    free(text);
+}
+
+static void
+vi_backspace_char(buffer_t *b, vi_visual_t *vis)
+{
+    line_t *cur = b->cur;
+    char *text;
+
+    if (!cur || vis->cursor_col <= 0) {
+        return;
+    }
+    text = malloc(cur->len + 1);
+    if (!text) {
+        return;
+    }
+    memcpy(text, cur->text, (size_t)vis->cursor_col - 1);
+    memcpy(text + vis->cursor_col - 1, cur->text + vis->cursor_col,
+        cur->len - (size_t)vis->cursor_col + 1);
+    if (vi_replace_current_text(b, text) == 0) {
+        vis->cursor_col--;
+    }
+    free(text);
+}
+
+static void
+vi_delete_char(buffer_t *b, vi_visual_t *vis)
+{
+    line_t *cur = b->cur;
+    char *text;
+
+    if (!cur || (size_t)vis->cursor_col >= cur->len) {
+        return;
+    }
+    save_undo(b);
+    text = malloc(cur->len);
+    if (!text) {
+        return;
+    }
+    memcpy(text, cur->text, (size_t)vis->cursor_col);
+    memcpy(text + vis->cursor_col, cur->text + vis->cursor_col + 1,
+        cur->len - (size_t)vis->cursor_col);
+    vi_replace_current_text(b, text);
+    free(text);
+    vi_clamp_cursor(b, vis);
+}
+
 static void
 vi_command_prompt(buffer_t *b, vi_visual_t *vis)
 {
@@ -286,6 +394,7 @@ vi_command_prompt(buffer_t *b, vi_visual_t *vis)
         if (key == '\r' || key == '\n') {
             cmd[len] = '\0';
             exvi_execute_command(b, cmd);
+            vi_clamp_cursor(b, vis);
             return;
         }
         if (key == '\x1b') {
@@ -385,6 +494,27 @@ exvi_visual_main(buffer_t *b)
         if (!cur) {
             cur = b->head;
         }
+        if (vis.insert_mode) {
+            switch (key) {
+            case '\x1b':
+                vis.insert_mode = 0;
+                if (vis.cursor_col > 0) {
+                    vis.cursor_col--;
+                }
+                break;
+            case 127:
+            case '\b':
+                vi_backspace_char(b, &vis);
+                break;
+            default:
+                if (isprint(key) || key == '\t') {
+                    vi_insert_char(b, &vis, key);
+                }
+                break;
+            }
+            continue;
+        }
+
         switch (key) {
         case 'h':
             vis.pending_g = 0;
@@ -415,6 +545,28 @@ exvi_visual_main(buffer_t *b)
             if (cur) {
                 vis.cursor_col = (int)cur->len;
             }
+            break;
+        case 'i':
+            vis.pending_g = 0;
+            save_undo(b);
+            vis.insert_mode = 1;
+            break;
+        case 'a':
+            vis.pending_g = 0;
+            if (cur && vis.cursor_col < (int)cur->len) {
+                vis.cursor_col++;
+            }
+            save_undo(b);
+            vis.insert_mode = 1;
+            break;
+        case 'x':
+            vis.pending_g = 0;
+            vi_delete_char(b, &vis);
+            break;
+        case 'u':
+            vis.pending_g = 0;
+            handle_undo_command(b);
+            vi_clamp_cursor(b, &vis);
             break;
         case 'g':
             if (vis.pending_g) {

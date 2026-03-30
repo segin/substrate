@@ -28,25 +28,16 @@ ifdef NATIVE_BUILD
 CFLAGS += -DREGEX_USE_HOST_POSIX
 endif
 
-.PHONY: all clean install
-.PHONY: ensure_build_mode
+.PHONY: all clean install FORCE
 
 all: $(LIBNAME)
 
-ensure_build_mode:
-	@mode="$(BUILD_MODE)"; \
-	cur=""; \
-	if [ -f "$(MODE_STAMP)" ]; then cur=$$(cat "$(MODE_STAMP)"); fi; \
-	if [ "$$cur" != "$$mode" ]; then \
-		printf '%s\n' "$$mode" > "$(MODE_STAMP)"; \
-	fi
-
-$(LIBNAME): ensure_build_mode $(OBJS)
+$(LIBNAME): $(OBJS)
 	$(AR) rcs $@ $(OBJS)
 
 $(OBJS): $(MODE_STAMP)
 
-$(MODE_STAMP):
+$(MODE_STAMP): FORCE
 	@mode="$(BUILD_MODE)"; \
 	cur=""; \
 	if [ -f "$(MODE_STAMP)" ]; then cur=$$(cat "$(MODE_STAMP)"); fi; \

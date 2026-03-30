@@ -31,6 +31,12 @@ def require(cond, msg):
         raise SystemExit(1)
 
 
+def send_keys(master_fd, output, data, timeout=0.2):
+    os.write(master_fd, data)
+    output += read_some(master_fd, timeout)
+    return output
+
+
 def main():
     if len(sys.argv) != 2:
         print(f"usage: {sys.argv[0]} /path/to/vi", file=sys.stderr)
@@ -46,24 +52,32 @@ def main():
         os.execv(vi_path, [vi_path, temp_path])
 
     output = read_some(master_fd, 0.4)
-    os.write(master_fd, b"G")
-    output += read_some(master_fd, 0.2)
-    os.write(master_fd, b"gg")
-    output += read_some(master_fd, 0.2)
-    os.write(master_fd, b"/two\r")
-    output += read_some(master_fd, 0.2)
-    os.write(master_fd, b"n")
-    output += read_some(master_fd, 0.2)
-    os.write(master_fd, b"N")
-    output += read_some(master_fd, 0.2)
-    os.write(master_fd, b"?one\r")
-    output += read_some(master_fd, 0.2)
-    os.write(master_fd, b":q\r")
-    output += read_some(master_fd, 0.3)
+    output = send_keys(master_fd, output, b"G")
+    output = send_keys(master_fd, output, b"g")
+    output = send_keys(master_fd, output, b"g")
+    output = send_keys(master_fd, output, b"/")
+    output = send_keys(master_fd, output, b"two\r")
+    output = send_keys(master_fd, output, b"n")
+    output = send_keys(master_fd, output, b"N")
+    output = send_keys(master_fd, output, b"?")
+    output = send_keys(master_fd, output, b"one\r")
+    output = send_keys(master_fd, output, b"g")
+    output = send_keys(master_fd, output, b"g")
+    output = send_keys(master_fd, output, b"i")
+    output = send_keys(master_fd, output, b"X")
+    output = send_keys(master_fd, output, b"\x1b")
+    output = send_keys(master_fd, output, b"j")
+    output = send_keys(master_fd, output, b"x")
+    output = send_keys(master_fd, output, b"j")
+    output = send_keys(master_fd, output, b"a")
+    output = send_keys(master_fd, output, b"!")
+    output = send_keys(master_fd, output, b"\x1b")
+    output = send_keys(master_fd, output, b"u")
+    output = send_keys(master_fd, output, b":")
+    output = send_keys(master_fd, output, b"wq\r", 0.3)
 
     _, status = os.waitpid(pid, 0)
     os.close(master_fd)
-    os.unlink(temp_path)
 
     exit_code = os.waitstatus_to_exitcode(status)
     decoded = output.decode("latin1", "replace")
@@ -75,7 +89,13 @@ def main():
     require("line 1/5" in decoded, "missing gg navigation status")
     require("line 2/5" in decoded, "missing forward search status")
     require("line 4/5" in decoded, "missing repeat search status")
-    require(":q" in decoded, "missing ex command prompt rendering")
+    require("-- INSERT --" in decoded, "missing insert mode status")
+    require(":wq" in decoded, "missing ex command prompt rendering")
+    with open(temp_path, "r", encoding="utf-8") as f:
+        saved = f.read()
+    os.unlink(temp_path)
+    require(saved == "Xone\nwo\nthree\ntwo again\nfive\n",
+            f"unexpected saved buffer: {saved!r}")
     print("vi pty test: ok")
     return 0
 
