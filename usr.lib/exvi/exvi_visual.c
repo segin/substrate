@@ -84,6 +84,7 @@ static int vi_first_nonblank_col(line_t *cur);
 static int vi_display_col_for_index(line_t *cur, int idx);
 static line_t *vi_ensure_current_line(buffer_t *b);
 static int vi_replace_current_text(buffer_t *b, const char *text);
+static int vi_clamp_line_target(buffer_t *b, int line_no);
 static void vi_move_word_forward_count(buffer_t *b, vi_visual_t *vis, int count);
 static void vi_move_word_backward_count(buffer_t *b, vi_visual_t *vis, int count);
 static void vi_page_scroll(buffer_t *b, vi_visual_t *vis, int direction);
@@ -1214,30 +1215,43 @@ vi_clamp_top_line(buffer_t *b, vi_visual_t *vis, int top_line)
 }
 
 static void
-vi_reposition_current(buffer_t *b, vi_visual_t *vis, int mode)
+vi_reposition_target(buffer_t *b, vi_visual_t *vis, int target_line, int mode, int keep_col)
 {
-    int cur_line = buf_current_line(b);
+    line_t *target;
     int visible_rows = vis->rows - 1;
     int top_line;
 
-    if (cur_line < 1) {
+    if (b->line_count < 1) {
         return;
     }
     if (visible_rows < 1) {
         visible_rows = 1;
     }
+    target_line = vi_clamp_line_target(b, target_line);
+    target = buf_get_line(b, target_line);
+    if (!target) {
+        return;
+    }
+    b->cur = target;
     switch (mode) {
     case 0:
-        top_line = cur_line - (visible_rows / 2);
+        top_line = target_line - (visible_rows / 2);
         break;
     case 1:
-        top_line = cur_line;
+        top_line = target_line;
         break;
     default:
-        top_line = cur_line - visible_rows + 1;
+        top_line = target_line - visible_rows + 1;
         break;
     }
     vis->top_line = vi_clamp_top_line(b, vis, top_line);
+    if (keep_col) {
+        if ((size_t)vis->cursor_col > target->len) {
+            vis->cursor_col = (int)target->len;
+        }
+    } else {
+        vis->cursor_col = vi_first_nonblank_col(target);
+    }
 }
 
 static int
@@ -4330,18 +4344,54 @@ exvi_visual_main(buffer_t *b)
             continue;
         }
         if (vis.pending_z) {
+            int count = vis.pending_count;
+
+            vis.pending_count = 0;
+
             vis.pending_z = 0;
             switch (key) {
             case 'z':
+                vi_reposition_target(b, &vis,
+                    count > 0 ? count : buf_current_line(b), 0, 1);
+                break;
             case '.':
-                vi_reposition_current(b, &vis, 0);
+                vi_reposition_target(b, &vis,
+                    count > 0 ? count : buf_current_line(b), 0, 0);
                 break;
             case '\r':
             case '\n':
-                vi_reposition_current(b, &vis, 1);
+                vi_reposition_target(b, &vis,
+                    count > 0 ? count : buf_current_line(b), 1, 0);
+                break;
+            case 't':
+                vi_reposition_target(b, &vis,
+                    count > 0 ? count : buf_current_line(b), 1, 1);
                 break;
             case '-':
-                vi_reposition_current(b, &vis, 2);
+                vi_reposition_target(b, &vis,
+                    count > 0 ? count : buf_current_line(b), 2, 0);
+                break;
+            case 'b':
+                vi_reposition_target(b, &vis,
+                    count > 0 ? count : buf_current_line(b), 2, 1);
+                break;
+            case '+':
+                if (count > 0) {
+                    vi_reposition_target(b, &vis, count, 1, 0);
+                } else {
+                    vi_reposition_target(b, &vis,
+                        vis.top_line + (vis.rows - 1), 1, 0);
+                }
+                break;
+            case '^':
+                if (count > 0) {
+                    int visible_rows = vis.rows - 1;
+                    int target_line = count - visible_rows + 1;
+
+                    vi_reposition_target(b, &vis, target_line, 2, 0);
+                } else {
+                    vi_reposition_target(b, &vis, vis.top_line - 1, 2, 0);
+                }
                 break;
             default:
                 write(STDOUT_FILENO, "\a", 1);

@@ -1459,6 +1459,41 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "".join(
+            "   abcdef\n" if i == 20 else f"line {i}\n"
+            for i in range(1, 41)
+        ),
+        [b"2", b"0", b"G", b"5", b"|", b"z", b".", b"r", b"X"],
+    )
+    require(exit_code == 0, f"z-dot vi exited with status {exit_code}")
+    require(saved.splitlines()[19] == "   Xbcdef",
+            f"unexpected z-dot cursor placement: {saved.splitlines()[19]!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "".join(
+            "   abcdef\n" if i == 20 else f"line {i}\n"
+            for i in range(1, 41)
+        ),
+        [b"2", b"0", b"G", b"5", b"|", b"z", b"z", b"r", b"Y"],
+    )
+    require(exit_code == 0, f"zz vi exited with status {exit_code}")
+    require(saved.splitlines()[19] == "   aYcdef",
+            f"unexpected zz cursor placement: {saved.splitlines()[19]!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "".join(f"line {i}\n" for i in range(1, 101)),
+        [b"2", b"0", b"G", b"z", b"\r", b"z", b"+", b"r", b"X", b"z", b"^", b"r", b"Y"],
+    )
+    require(exit_code == 0, f"z-plus-caret vi exited with status {exit_code}")
+    require("line 43/100" in decoded, "missing z+ status")
+    require("line 42/100" in decoded, "missing z^ status")
+    require("Yine 42" in saved, "missing z^ edit target")
+    require("Xine 43" in saved, "missing z+ edit target")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "aa\nmatch one\nbb\nmatch two\ncc\nmatch three\n",
         [b"/", b"match\r", b"2", b"n", b"2", b"N"],
     )
