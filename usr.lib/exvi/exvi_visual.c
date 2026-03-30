@@ -37,6 +37,7 @@ typedef struct {
     int last_search_forward;
     int last_find_char;
     int last_find_forward;
+    int last_find_till;
     int insert_mode;
     int replace_mode;
     vi_repeat_kind_t last_change;
@@ -622,7 +623,7 @@ vi_find_char_in_line(line_t *cur, int start, int ch, int forward, int count, int
 }
 
 static void
-vi_find_char_motion(buffer_t *b, vi_visual_t *vis, int ch, int forward, int count)
+vi_find_char_motion(buffer_t *b, vi_visual_t *vis, int ch, int forward, int till, int count)
 {
     int col;
 
@@ -630,9 +631,17 @@ vi_find_char_motion(buffer_t *b, vi_visual_t *vis, int ch, int forward, int coun
         write(STDOUT_FILENO, "\a", 1);
         return;
     }
+    if (till) {
+        if (forward && col > 0) {
+            col--;
+        } else if (!forward) {
+            col++;
+        }
+    }
     vis->cursor_col = col;
     vis->last_find_char = ch;
     vis->last_find_forward = forward;
+    vis->last_find_till = till;
 }
 
 static void
@@ -647,7 +656,7 @@ vi_repeat_find_motion(buffer_t *b, vi_visual_t *vis, int reverse, int count)
     if (reverse) {
         forward = !forward;
     }
-    vi_find_char_motion(b, vis, vis->last_find_char, forward, count);
+    vi_find_char_motion(b, vis, vis->last_find_char, forward, vis->last_find_till, count);
 }
 
 static int
@@ -1463,7 +1472,7 @@ exvi_visual_main(buffer_t *b)
                 write(STDOUT_FILENO, "\a", 1);
                 break;
             }
-            vi_find_char_motion(b, &vis, key, 1, vi_take_count(&vis));
+            vi_find_char_motion(b, &vis, key, 1, 0, vi_take_count(&vis));
             break;
         case 'F':
             vis.pending_g = 0;
@@ -1472,7 +1481,25 @@ exvi_visual_main(buffer_t *b)
                 write(STDOUT_FILENO, "\a", 1);
                 break;
             }
-            vi_find_char_motion(b, &vis, key, 0, vi_take_count(&vis));
+            vi_find_char_motion(b, &vis, key, 0, 0, vi_take_count(&vis));
+            break;
+        case 't':
+            vis.pending_g = 0;
+            key = vi_read_key();
+            if (key == -1 || key == '\x1b' || key == '\r' || key == '\n') {
+                write(STDOUT_FILENO, "\a", 1);
+                break;
+            }
+            vi_find_char_motion(b, &vis, key, 1, 1, vi_take_count(&vis));
+            break;
+        case 'T':
+            vis.pending_g = 0;
+            key = vi_read_key();
+            if (key == -1 || key == '\x1b' || key == '\r' || key == '\n') {
+                write(STDOUT_FILENO, "\a", 1);
+                break;
+            }
+            vi_find_char_motion(b, &vis, key, 0, 1, vi_take_count(&vis));
             break;
         case ';':
             vis.pending_g = 0;

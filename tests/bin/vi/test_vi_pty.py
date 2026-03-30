@@ -196,6 +196,15 @@ def main():
     require(exit_code == 0, f"find-motion vi exited with status {exit_code}")
     require(saved == "abca12a\n",
             f"unexpected find-motion buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abcXdefXghiXj\n",
+        [b"t", b"X", b"l", b";", b",", b"r", b"2", b"$", b"T", b"X", b"r", b"1"],
+    )
+    require(exit_code == 0, f"till-motion vi exited with status {exit_code}")
+    require(saved == "abcX2efXghiX1\n",
+            f"unexpected till-motion buffer: {saved!r}")
     print("vi pty test: ok")
     return 0
 
