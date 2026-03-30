@@ -62,6 +62,8 @@ typedef struct {
     int last_find_till;
     int insert_mode;
     int replace_mode;
+    line_t *insert_anchor_line;
+    int insert_anchor_col;
     vi_repeat_kind_t last_change;
     int last_change_count;
     int last_change_char;
@@ -78,6 +80,13 @@ static void vi_delete_char(buffer_t *b, vi_visual_t *vis);
 static int vi_prompt_input(buffer_t *b, vi_visual_t *vis, char prefix, char *buf,
     size_t buf_size);
 static char *vi_current_word_pattern(buffer_t *b, vi_visual_t *vis);
+
+static void
+vi_set_insert_anchor(buffer_t *b, vi_visual_t *vis)
+{
+    vis->insert_anchor_line = b->cur ? b->cur : b->head;
+    vis->insert_anchor_col = vis->cursor_col;
+}
 
 static void
 vi_restore_terminal(void)
@@ -2196,6 +2205,9 @@ vi_delete_span(buffer_t *b, vi_visual_t *vis, int start, int end, int enter_inse
         vis->cursor_col = start;
         vis->insert_mode = enter_insert;
         vis->replace_mode = 0;
+        if (enter_insert) {
+            vi_set_insert_anchor(b, vis);
+        }
     }
     free(text);
 }
@@ -2262,6 +2274,9 @@ vi_delete_range(buffer_t *b, vi_visual_t *vis, line_t *start_line, int start_col
         vis->cursor_col = start_col;
         vis->insert_mode = enter_insert;
         vis->replace_mode = 0;
+        if (enter_insert) {
+            vi_set_insert_anchor(b, vis);
+        }
     }
     free(text);
 }
@@ -2431,6 +2446,7 @@ vi_linewise_change(buffer_t *b, vi_visual_t *vis, int start, int end)
     vis->cursor_col = 0;
     vis->insert_mode = 1;
     vis->replace_mode = 0;
+    vi_set_insert_anchor(b, vis);
 }
 
 static void
@@ -2448,6 +2464,7 @@ vi_substitute_line(buffer_t *b, vi_visual_t *vis)
     vis->cursor_col = 0;
     vis->insert_mode = 1;
     vis->replace_mode = 0;
+    vi_set_insert_anchor(b, vis);
 }
 
 static int
@@ -3297,6 +3314,10 @@ vi_backspace_char(buffer_t *b, vi_visual_t *vis)
         buf_delete(b, cur);
         b->cur = prev;
         vis->cursor_col = (int)prev_len;
+        if (vis->insert_anchor_line == cur) {
+            vis->insert_anchor_line = prev;
+            vis->insert_anchor_col += (int)prev_len;
+        }
         return;
     }
     text = malloc(cur->len + 1);
@@ -3334,6 +3355,39 @@ vi_erase_word_backward_insert(buffer_t *b, vi_visual_t *vis)
         return;
     }
     if (start_line == end_line && start_col == end_col) {
+        return;
+    }
+    vi_delete_range(b, vis, start_line, start_col, end_line, end_col, 1);
+}
+
+static void
+vi_erase_to_insert_anchor(buffer_t *b, vi_visual_t *vis)
+{
+    line_t *end_line = b->cur ? b->cur : b->head;
+    int end_col = vis->cursor_col;
+    line_t *start_line = vis->insert_anchor_line;
+    int start_col = vis->insert_anchor_col;
+
+    if (!end_line) {
+        return;
+    }
+    if (!start_line) {
+        start_line = end_line;
+        start_col = 0;
+    }
+    if (start_line != end_line) {
+        start_line = end_line;
+        start_col = 0;
+        vis->insert_anchor_line = end_line;
+        vis->insert_anchor_col = 0;
+    }
+    if (start_col < 0) {
+        start_col = 0;
+    }
+    if (start_col > end_col) {
+        start_col = end_col;
+    }
+    if (start_col == end_col) {
         return;
     }
     vi_delete_range(b, vis, start_line, start_col, end_line, end_col, 1);
@@ -3469,6 +3523,7 @@ vi_split_line(buffer_t *b, vi_visual_t *vis)
     }
     b->cur = buf_insert_after(b, cur, right);
     vis->cursor_col = 0;
+    vi_set_insert_anchor(b, vis);
     free(left);
     free(right);
 }
@@ -3488,6 +3543,7 @@ vi_open_line(buffer_t *b, vi_visual_t *vis, int above)
     }
     vis->cursor_col = 0;
     vis->insert_mode = 1;
+    vi_set_insert_anchor(b, vis);
 }
 
 static int
@@ -3811,6 +3867,9 @@ exvi_visual_main(buffer_t *b)
             case 0x17:
                 vi_erase_word_backward_insert(b, &vis);
                 break;
+            case 0x15:
+                vi_erase_to_insert_anchor(b, &vis);
+                break;
             case VI_KEY_UP:
             case VI_KEY_DOWN:
             case VI_KEY_LEFT:
@@ -3823,6 +3882,7 @@ exvi_visual_main(buffer_t *b)
             case VI_KEY_PGDN:
             case VI_KEY_DELETE:
                 vi_move_arrow_insert(b, &vis, key);
+                vi_set_insert_anchor(b, &vis);
                 break;
             default:
                 if (isprint(key) || key == '\t') {
@@ -3851,6 +3911,9 @@ exvi_visual_main(buffer_t *b)
             case 0x17:
                 vi_erase_word_backward_insert(b, &vis);
                 break;
+            case 0x15:
+                vi_erase_to_insert_anchor(b, &vis);
+                break;
             case VI_KEY_UP:
             case VI_KEY_DOWN:
             case VI_KEY_LEFT:
@@ -3863,6 +3926,7 @@ exvi_visual_main(buffer_t *b)
             case VI_KEY_PGDN:
             case VI_KEY_DELETE:
                 vi_move_arrow_insert(b, &vis, key);
+                vi_set_insert_anchor(b, &vis);
                 break;
             default:
                 if (isprint(key) || key == '\t') {
@@ -4191,12 +4255,14 @@ exvi_visual_main(buffer_t *b)
             vis.pending_g = 0;
             save_undo(b);
             vis.insert_mode = 1;
+            vi_set_insert_anchor(b, &vis);
             break;
         case 'I':
             vis.pending_g = 0;
             vis.cursor_col = vi_first_nonblank_col(cur);
             save_undo(b);
             vis.insert_mode = 1;
+            vi_set_insert_anchor(b, &vis);
             break;
         case 'a':
             vis.pending_g = 0;
@@ -4205,6 +4271,7 @@ exvi_visual_main(buffer_t *b)
             }
             save_undo(b);
             vis.insert_mode = 1;
+            vi_set_insert_anchor(b, &vis);
             break;
         case 'A':
             vis.pending_g = 0;
@@ -4215,12 +4282,14 @@ exvi_visual_main(buffer_t *b)
             }
             save_undo(b);
             vis.insert_mode = 1;
+            vi_set_insert_anchor(b, &vis);
             break;
         case 'R':
             vis.pending_g = 0;
             save_undo(b);
             vis.insert_mode = 0;
             vis.replace_mode = 1;
+            vi_set_insert_anchor(b, &vis);
             break;
         case 'o':
             vis.pending_g = 0;
