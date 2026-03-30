@@ -207,7 +207,7 @@ vi_render(buffer_t *b, vi_visual_t *vis, char prompt_prefix, const char *prompt)
             putchar('~');
         }
         if (row < vis->rows - 2) {
-            putchar('\n');
+            fputs("\r\n", stdout);
         }
     }
 
@@ -451,6 +451,75 @@ vi_reposition_current(buffer_t *b, vi_visual_t *vis, int mode)
         break;
     }
     vis->top_line = vi_clamp_top_line(b, vis, top_line);
+}
+
+static int
+vi_line_is_blank(line_t *cur)
+{
+    size_t i;
+
+    if (!cur) {
+        return 1;
+    }
+    for (i = 0; i < cur->len; i++) {
+        if (cur->text[i] != ' ' && cur->text[i] != '\t') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static void
+vi_move_paragraph_forward(buffer_t *b, vi_visual_t *vis, int count)
+{
+    int line_no = buf_current_line(b);
+
+    if (line_no < 1) {
+        return;
+    }
+    while (count-- > 0) {
+        line_no++;
+        while (line_no <= b->line_count &&
+            !vi_line_is_blank(buf_get_line(b, line_no))) {
+            line_no++;
+        }
+        while (line_no <= b->line_count &&
+            vi_line_is_blank(buf_get_line(b, line_no))) {
+            line_no++;
+        }
+        if (line_no > b->line_count) {
+            line_no = b->line_count;
+            break;
+        }
+    }
+    b->cur = buf_get_line(b, line_no);
+    vis->cursor_col = vi_first_nonblank_col(b->cur);
+}
+
+static void
+vi_move_paragraph_backward(buffer_t *b, vi_visual_t *vis, int count)
+{
+    int line_no = buf_current_line(b);
+
+    if (line_no < 1) {
+        return;
+    }
+    while (count-- > 0) {
+        line_no--;
+        while (line_no >= 1 && vi_line_is_blank(buf_get_line(b, line_no))) {
+            line_no--;
+        }
+        while (line_no >= 1 && !vi_line_is_blank(buf_get_line(b, line_no))) {
+            line_no--;
+        }
+        line_no++;
+        if (line_no < 1) {
+            line_no = 1;
+            break;
+        }
+    }
+    b->cur = buf_get_line(b, line_no);
+    vis->cursor_col = vi_first_nonblank_col(b->cur);
 }
 
 static int
@@ -2028,6 +2097,14 @@ exvi_visual_main(buffer_t *b)
         case 'k':
             vis.pending_g = 0;
             vi_move_vertical(b, -vi_take_count(&vis));
+            break;
+        case '}':
+            vis.pending_g = 0;
+            vi_move_paragraph_forward(b, &vis, vi_take_count(&vis));
+            break;
+        case '{':
+            vis.pending_g = 0;
+            vi_move_paragraph_backward(b, &vis, vi_take_count(&vis));
             break;
         case '+':
         case '\r':

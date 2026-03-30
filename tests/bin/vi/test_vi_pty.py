@@ -97,6 +97,7 @@ def main():
     require("-- INSERT --" in decoded, "missing insert mode status")
     require("-- REPLACE --" in decoded, "missing replace mode status")
     require(":wq" in decoded, "missing ex command prompt rendering")
+    require("\r\n\x1b[K~" in decoded, "missing CRLF ladder rendering for screen filler")
     require(saved == "Top-split\nline\n1\n\nXone TWO THhree! >Two!\nDone\n",
             f"unexpected saved buffer: {saved!r}")
 
@@ -133,6 +134,17 @@ def main():
     require(exit_code == 0, f"bigword-operator vi exited with status {exit_code}")
     require(saved == "gamma\n",
             f"unexpected bigword-operator buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n\n  two\nthree\n\nfour\n",
+        [b"}", b"}", b"{"],
+    )
+    require(exit_code == 0, f"paragraph-motion vi exited with status {exit_code}")
+    require(decoded.count("line 3/6") >= 2, "missing paragraph backward/forward status")
+    require("line 6/6" in decoded, "missing paragraph forward-to-end status")
+    require(saved == "one\n\n  two\nthree\n\nfour\n",
+            f"unexpected paragraph-motion buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
