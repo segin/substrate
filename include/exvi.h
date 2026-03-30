@@ -6,6 +6,9 @@ typedef enum {
     EXVI_FRONTEND_VI = 1
 } exvi_frontend_t;
 
+#define EXVI_EXIT_VISUAL_HANDOFF 2
+
 int exvi_main(int argc, char **argv, exvi_frontend_t frontend);
+const char *exvi_handoff_file(void);
 
 #endif

@@ -11,6 +11,7 @@ test:
 	$(MAKE) -C $(TOP)/bin/vi clean all
 	$(MAKE) -C $(TOP)/usr.lib NATIVE_BUILD=1
 	$(MAKE) -C $(TOP)/bin/ex clean all NATIVE_BUILD=1
+	$(MAKE) -C $(TOP)/bin/vi clean all NATIVE_BUILD=1
 	bash ./test_ex.sh $(abspath $(TOP)/bin/ex/ex)
 
 clean:

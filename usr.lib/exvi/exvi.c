@@ -24,6 +24,7 @@ static char *last_search_pattern = NULL;
 static char *last_sub_pattern = NULL;
 static char *last_sub_replacement = NULL;
 static char *alternate_filename = NULL;
+static char *visual_handoff_file = NULL;
 static int last_sub_global = 0;
 static const char *exvi_progname = "ex";
 
@@ -80,6 +81,7 @@ static void free_tag_stack(void);
 static char *recover_path_for(const char *filename);
 static int load_recover_into_buffer(buffer_t *b, const char *filename);
 static void load_startup_commands(buffer_t *b);
+static void set_visual_handoff_file(const char *filename);
 
 static void
 free_ex_arglist(void)
@@ -338,6 +340,19 @@ load_startup_commands(buffer_t *b)
             }
         }
     }
+}
+
+static void
+set_visual_handoff_file(const char *filename)
+{
+    free(visual_handoff_file);
+    visual_handoff_file = filename ? strdup(filename) : NULL;
+}
+
+const char *
+exvi_handoff_file(void)
+{
+    return visual_handoff_file;
 }
 
 static int
@@ -1179,8 +1194,16 @@ void do_command(buffer_t *b, char *cmd) {
     int force = 0;
 
     if (match_command(cmd, "visual", "vi", &args, &force)) {
-        fprintf(stderr, "%s: visual mode not implemented in this build.\n", exvi_progname);
-        return;
+        if (visual_mode) {
+            fprintf(stderr, "%s: visual mode not implemented in this build.\n", exvi_progname);
+            return;
+        }
+        if (b->modified) {
+            fprintf(stderr, "No write since last change (add ! to override)\n");
+            return;
+        }
+        set_visual_handoff_file(b->filename);
+        longjmp(main_loop_jmp, EXVI_EXIT_VISUAL_HANDOFF);
     } else if (match_command(cmd, "args", NULL, &args, NULL)) {
         const char *ptr = args;
 
@@ -2030,6 +2053,7 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
 {
     int opt;
     int interactive_prompt;
+    int jump_status;
 
     secure_mode = 0;
     batch_mode = 0;
@@ -2044,6 +2068,7 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
     free(last_sub_replacement);
     last_sub_replacement = NULL;
     last_sub_global = 0;
+    set_visual_handoff_file(NULL);
     exvi_progname = (frontend == EXVI_FRONTEND_VI) ? "vi" : "ex";
     free_ex_arglist();
     input_mode = 0;
@@ -2096,6 +2121,15 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
     }
     
     if (visual_mode) {
+        if (frontend == EXVI_FRONTEND_EX) {
+            set_visual_handoff_file(buf.filename);
+            buf_free(&buf);
+            buf_free(&undo_buf);
+            for (int i = 0; i < 27; i++) {
+                buf_free(&regs[i]);
+            }
+            return EXVI_EXIT_VISUAL_HANDOFF;
+        }
         fprintf(stderr, "%s: visual mode not implemented in this build.\n", exvi_progname);
         buf_free(&buf);
         buf_free(&undo_buf);
@@ -2117,7 +2151,27 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
     signal(SIGTERM, handle_sigterm);
     interactive_prompt = !batch_mode && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
 
-    setjmp(main_loop_jmp);
+    jump_status = setjmp(main_loop_jmp);
+    if (jump_status == EXVI_EXIT_VISUAL_HANDOFF) {
+        free(line);
+        buf_free(&buf);
+        buf_free(&undo_buf);
+        for (int i = 0; i < 27; i++) {
+            buf_free(&regs[i]);
+        }
+        free(last_search_pattern);
+        last_search_pattern = NULL;
+        free(last_sub_pattern);
+        last_sub_pattern = NULL;
+        free(last_sub_replacement);
+        last_sub_replacement = NULL;
+        last_sub_global = 0;
+        free(alternate_filename);
+        alternate_filename = NULL;
+        free_ex_arglist();
+        free_tag_stack();
+        return EXVI_EXIT_VISUAL_HANDOFF;
+    }
 
     for (;;) {
         if (interactive_prompt && !input_mode) {
