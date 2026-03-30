@@ -150,6 +150,25 @@ def main():
     output = send_keys(master_fd, output, b"five\r")
     output = send_keys(master_fd, output, b"r")
     output = send_keys(master_fd, output, b"F")
+    output = send_keys(master_fd, output, b"/")
+    output = send_keys(master_fd, output, b"THhree\r")
+    output = send_keys(master_fd, output, b"A")
+    output = send_keys(master_fd, output, b"!")
+    output = send_keys(master_fd, output, b"\x1b")
+    output = send_keys(master_fd, output, b"/")
+    output = send_keys(master_fd, output, b"Two!\r")
+    output = send_keys(master_fd, output, b"I")
+    output = send_keys(master_fd, output, b">")
+    output = send_keys(master_fd, output, b"\x1b")
+    output = send_keys(master_fd, output, b"/")
+    output = send_keys(master_fd, output, b"Five\r")
+    output = send_keys(master_fd, output, b"S")
+    output = send_keys(master_fd, output, b"F")
+    output = send_keys(master_fd, output, b"i")
+    output = send_keys(master_fd, output, b"n")
+    output = send_keys(master_fd, output, b"a")
+    output = send_keys(master_fd, output, b"l")
+    output = send_keys(master_fd, output, b"\x1b")
     output = send_keys(master_fd, output, b":")
     output = send_keys(master_fd, output, b"wq\r", 0.3)
 
@@ -172,7 +191,7 @@ def main():
     with open(temp_path, "r", encoding="utf-8") as f:
         saved = f.read()
     os.unlink(temp_path)
-    require(saved == "Top-split\nline\nTAIL1\ntail\nXone\nTWO\nTHhree\nTwo!\nFive\n",
+    require(saved == "Top-split\nline\nTAIL1\ntail\nXone\nTWO\nTHhree!\n>Two!\nFinal\n",
             f"unexpected saved buffer: {saved!r}")
     print("vi pty test: ok")
     return 0

@@ -717,6 +717,23 @@ vi_open_line(buffer_t *b, vi_visual_t *vis, int above)
 }
 
 static void
+vi_substitute_line(buffer_t *b, vi_visual_t *vis)
+{
+    if (!b->cur) {
+        save_undo(b);
+        b->cur = buf_insert_after(b, b->tail, "");
+    } else {
+        save_undo(b);
+        if (vi_replace_current_text(b, "") != 0) {
+            return;
+        }
+    }
+    vis->cursor_col = 0;
+    vis->insert_mode = 1;
+    vis->replace_mode = 0;
+}
+
+static void
 vi_command_prompt(buffer_t *b, vi_visual_t *vis)
 {
     char cmd[256];
@@ -937,10 +954,26 @@ exvi_visual_main(buffer_t *b)
             save_undo(b);
             vis.insert_mode = 1;
             break;
+        case 'I':
+            vis.pending_g = 0;
+            vis.cursor_col = 0;
+            save_undo(b);
+            vis.insert_mode = 1;
+            break;
         case 'a':
             vis.pending_g = 0;
             if (cur && vis.cursor_col < (int)cur->len) {
                 vis.cursor_col++;
+            }
+            save_undo(b);
+            vis.insert_mode = 1;
+            break;
+        case 'A':
+            vis.pending_g = 0;
+            if (cur) {
+                vis.cursor_col = (int)cur->len;
+            } else {
+                vis.cursor_col = 0;
             }
             save_undo(b);
             vis.insert_mode = 1;
@@ -979,8 +1012,13 @@ exvi_visual_main(buffer_t *b)
             if (cur && (size_t)vis.cursor_col < cur->len) {
                 vi_delete_span(b, &vis, vis.cursor_col, vis.cursor_col + 1, 1);
             } else {
+                save_undo(b);
                 vis.insert_mode = 1;
             }
+            break;
+        case 'S':
+            vis.pending_g = 0;
+            vi_substitute_line(b, &vis);
             break;
         case 'u':
             vis.pending_g = 0;
