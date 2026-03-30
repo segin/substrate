@@ -149,6 +149,18 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "alpha\nbeta\nalpha two\nbeta again\nalpha three\n",
+        [b"*", b"n", b"#"],
+    )
+    require(exit_code == 0, f"word-search vi exited with status {exit_code}")
+    require(decoded.count("line 3/5") >= 1, "missing star-search status")
+    require(decoded.count("line 5/5") >= 1, "missing star repeat status")
+    require(decoded.count("line 3/5") >= 2, "missing hash-search status")
+    require(saved == "alpha\nbeta\nalpha two\nbeta again\nalpha three\n",
+            "unexpected word-search buffer contents")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "  one\n\tTwo\nthree\n",
         [b"+", b"\r", b"-"],
     )

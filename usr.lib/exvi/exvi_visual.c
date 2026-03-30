@@ -1415,6 +1415,73 @@ vi_search_prompt(buffer_t *b, vi_visual_t *vis, int forward)
     }
 }
 
+static char *
+vi_current_word_pattern(buffer_t *b, vi_visual_t *vis)
+{
+    line_t *cur = b->cur;
+    int start;
+    int end;
+    int pos;
+    size_t len;
+    const char *meta = ".^$*+?()[{\\|";
+    char *pattern;
+    size_t out_len = 0;
+
+    if (!cur || cur->len == 0) {
+        return NULL;
+    }
+    pos = vis->cursor_col;
+    if (pos >= (int)cur->len) {
+        pos = (int)cur->len - 1;
+    }
+    if (pos < 0 || !vi_is_word_char((unsigned char)cur->text[pos])) {
+        return NULL;
+    }
+    start = pos;
+    while (start > 0 && vi_is_word_char((unsigned char)cur->text[start - 1])) {
+        start--;
+    }
+    end = pos + 1;
+    while ((size_t)end < cur->len && vi_is_word_char((unsigned char)cur->text[end])) {
+        end++;
+    }
+    len = (size_t)(end - start);
+    for (size_t i = 0; i < len; i++) {
+        if (strchr(meta, cur->text[start + (int)i])) {
+            out_len++;
+        }
+        out_len++;
+    }
+    pattern = malloc(out_len + 1);
+    if (!pattern) {
+        return NULL;
+    }
+    out_len = 0;
+    for (size_t i = 0; i < len; i++) {
+        char ch = cur->text[start + (int)i];
+
+        if (strchr(meta, ch)) {
+            pattern[out_len++] = '\\';
+        }
+        pattern[out_len++] = ch;
+    }
+    pattern[out_len] = '\0';
+    return pattern;
+}
+
+static void
+vi_search_current_word(buffer_t *b, vi_visual_t *vis, int forward)
+{
+    char *pattern = vi_current_word_pattern(b, vis);
+
+    if (!pattern) {
+        write(STDOUT_FILENO, "\a", 1);
+        return;
+    }
+    vi_apply_search(b, vis, pattern, forward);
+    free(pattern);
+}
+
 int
 exvi_visual_main(buffer_t *b)
 {
@@ -1899,6 +1966,16 @@ exvi_visual_main(buffer_t *b)
             vis.pending_g = 0;
             vis.pending_count = 0;
             vi_search_prompt(b, &vis, 0);
+            break;
+        case '*':
+            vis.pending_g = 0;
+            vis.pending_count = 0;
+            vi_search_current_word(b, &vis, 1);
+            break;
+        case '#':
+            vis.pending_g = 0;
+            vis.pending_count = 0;
+            vi_search_current_word(b, &vis, 0);
             break;
         case 'n':
             vis.pending_g = 0;
