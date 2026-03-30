@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 
+import fcntl
 import os
 import pty
 import select
+import struct
 import sys
 import tempfile
 import time
+import termios
 
 
 def read_some(master_fd, timeout):
@@ -37,7 +40,7 @@ def send_keys(master_fd, output, data, timeout=0.2):
     return output
 
 
-def run_vi_session(vi_path, initial_text, key_steps, final_timeout=0.3):
+def run_vi_session(vi_path, initial_text, key_steps, final_timeout=0.3, rows=24, cols=80):
     fd, temp_path = tempfile.mkstemp(prefix="exvi-", text=True)
     os.write(fd, initial_text.encode("utf-8"))
     os.close(fd)
@@ -46,6 +49,7 @@ def run_vi_session(vi_path, initial_text, key_steps, final_timeout=0.3):
     if pid == 0:
         os.execv(vi_path, [vi_path, temp_path])
 
+    fcntl.ioctl(master_fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
     output = read_some(master_fd, 0.4)
     for step in key_steps:
         output = send_keys(master_fd, output, step)
@@ -215,6 +219,18 @@ def main():
     require(exit_code == 0, f"char-hl-delete vi exited with status {exit_code}")
     require(saved == "acd\n",
             f"unexpected char-hl-delete buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "0123456789abcdefghijKLMNOPQRST\n",
+        [b"2", b"5", b"l", b"r", b"Z"],
+        rows=8,
+        cols=20,
+    )
+    require(exit_code == 0, f"long-line vi exited with status {exit_code}")
+    require("KLMNO" in decoded, "missing horizontally scrolled long-line content")
+    require(saved == "0123456789abcdefghijKLMNOZQRST\n",
+            f"unexpected long-line buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,

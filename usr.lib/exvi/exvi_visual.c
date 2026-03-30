@@ -31,6 +31,7 @@ typedef struct {
     int rows;
     int cols;
     int top_line;
+    int left_col;
     int cursor_col;
     int pending_g;
     int pending_z;
@@ -130,10 +131,30 @@ vi_clamp_cursor(buffer_t *b, vi_visual_t *vis)
 }
 
 static void
+vi_clamp_left_col(vi_visual_t *vis)
+{
+    if (vis->left_col < 0) {
+        vis->left_col = 0;
+    }
+}
+
+static int
+vi_text_cols(vi_visual_t *vis)
+{
+    int cols = vis->cols - (option_number ? 8 : 0);
+
+    if (cols < 1) {
+        cols = 1;
+    }
+    return cols;
+}
+
+static void
 vi_scroll_into_view(buffer_t *b, vi_visual_t *vis)
 {
     int cur_line = buf_current_line(b);
     int visible_rows = vis->rows - 1;
+    int text_cols = vi_text_cols(vis);
 
     if (cur_line < 1) {
         cur_line = 1;
@@ -150,15 +171,28 @@ vi_scroll_into_view(buffer_t *b, vi_visual_t *vis)
     if (vis->top_line < 1) {
         vis->top_line = 1;
     }
+    vi_clamp_left_col(vis);
+    if (vis->cursor_col < vis->left_col) {
+        vis->left_col = vis->cursor_col;
+    }
+    if (vis->cursor_col >= vis->left_col + text_cols) {
+        vis->left_col = vis->cursor_col - text_cols + 1;
+    }
+    vi_clamp_left_col(vis);
 }
 
 static void
-vi_draw_line(const char *text, int cols, int number, int line_no)
+vi_draw_line(const char *text, int cols, int number, int line_no, int left_col)
 {
     int used = 0;
+    int skipped = 0;
 
     if (number) {
         used += printf("%6d  ", line_no);
+    }
+    while (*text && skipped < left_col) {
+        text++;
+        skipped++;
     }
     while (*text && used < cols) {
         unsigned char c = (unsigned char)*text++;
@@ -203,7 +237,7 @@ vi_render(buffer_t *b, vi_visual_t *vis, char prompt_prefix, const char *prompt)
 
         printf("\x1b[K");
         if (line) {
-            vi_draw_line(line->text, vis->cols, option_number, line_no);
+            vi_draw_line(line->text, vis->cols, option_number, line_no, vis->left_col);
         } else {
             putchar('~');
         }
@@ -235,7 +269,10 @@ vi_render(buffer_t *b, vi_visual_t *vis, char prompt_prefix, const char *prompt)
     if (cursor_row > vis->rows - 1) {
         cursor_row = vis->rows - 1;
     }
-    cursor_col = vis->cursor_col + 1 + (option_number ? 8 : 0);
+    cursor_col = (vis->cursor_col - vis->left_col) + 1 + (option_number ? 8 : 0);
+    if (cursor_col < 1 + (option_number ? 8 : 0)) {
+        cursor_col = 1 + (option_number ? 8 : 0);
+    }
     if (cursor_col > vis->cols) {
         cursor_col = vis->cols;
     }
