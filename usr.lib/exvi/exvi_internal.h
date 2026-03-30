@@ -24,6 +24,7 @@ typedef struct {
 extern int secure_mode;
 extern buffer_t undo_buf;
 extern int undo_valid;
+extern char *last_search_pattern;
 
 void buf_init(buffer_t *b);
 line_t *buf_insert_after(buffer_t *b, line_t *pos, const char *text);
@@ -36,5 +37,9 @@ void buf_write_file(buffer_t *b, const char *filename, int append);
 void buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int addr2);
 line_t *buf_get_line(buffer_t *b, int line_num);
 int buf_current_line(buffer_t *b);
+char *parse_delimited_text(char **cmd_ptr, char delim);
+int parse_address(buffer_t *b, char **cmd_ptr);
+int parse_range(buffer_t *b, char **cmd_ptr, int *addr1, int *addr2);
+void replace_saved_string(char **dst, const char *src);
 
 #endif
