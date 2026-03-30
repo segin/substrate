@@ -81,6 +81,45 @@ def main():
     finally:
         os.unlink(path)
 
+    with tempfile.NamedTemporaryFile("w", delete=False) as f:
+        f.write("alpha\n")
+        path = f.name
+    try:
+        exit_code, initial, decoded = run_ex_pty(
+            ex_path,
+            ["-R", path],
+            command=b"1change\nblocked\n.\nw\nq!\n",
+            final_timeout=0.4,
+        )
+        require(exit_code == 0, f"readonly ex exited with status {exit_code}")
+        require(initial == ":", f"readonly ex missing prompt: {initial!r}")
+        require("File is read only (add ! to override)" in decoded,
+                "readonly ex missing blocked-write diagnostic")
+        with open(path, "r", encoding="utf-8") as f2:
+            saved = f2.read()
+        require(saved == "alpha\n", f"readonly ex unexpectedly modified file: {saved!r}")
+    finally:
+        os.unlink(path)
+
+    with tempfile.NamedTemporaryFile("w", delete=False) as f:
+        f.write("alpha\n")
+        path = f.name
+    try:
+        exit_code, initial, decoded = run_ex_pty(
+            ex_path,
+            ["-R", path],
+            command=b"1change\nforced\n.\nw!\nq!\n",
+            final_timeout=0.4,
+        )
+        require(exit_code == 0, f"readonly force-write ex exited with status {exit_code}")
+        require(initial == ":", f"readonly force-write ex missing prompt: {initial!r}")
+        with open(path, "r", encoding="utf-8") as f2:
+            saved = f2.read()
+        require(saved == "forced\n",
+                f"readonly force-write ex saved wrong file contents: {saved!r}")
+    finally:
+        os.unlink(path)
+
     proc = subprocess.run([ex_path], input=b"version\nq!\n",
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     require(proc.returncode == 0, f"ex version status mismatch: {proc.returncode}")

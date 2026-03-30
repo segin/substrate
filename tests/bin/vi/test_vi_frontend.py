@@ -55,6 +55,19 @@ def main():
     exit_code, decoded, saved = helpers.run_vi_session(
         vi_path,
         "one\n",
+        [b"i", b"X", b"\x1b", b":wq\r", b":q!\r"],
+        final_keys=None,
+        extra_args=["-R"],
+    )
+    require(exit_code == 0, f"readonly blocked-write vi exited with status {exit_code}")
+    require("[Readonly]" in decoded, "readonly blocked-write vi missing readonly status")
+    require("File is read only (add ! to override)" in decoded,
+            "readonly blocked-write vi missing diagnostic")
+    require(saved == "one\n", f"readonly blocked-write vi unexpectedly modified file: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "one\n",
         [b":q!\r"],
         final_keys=None,
         argv0="view",
