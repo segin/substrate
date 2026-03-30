@@ -645,6 +645,110 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "alpha beta gamma\n",
+        [b"A", ("winsize", 8, 28, 0.5), b"Z", b"\x1b"],
+        rows=8,
+        cols=16,
+    )
+    require(exit_code == 0, f"insert-resize vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-mode status during resize test")
+    require(saved == "alpha beta gammaZ\n",
+            f"unexpected insert-resize buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha beta gamma\n",
+        [b"0", b"R", ("winsize", 8, 28, 0.5), b"Z", b"\x1b"],
+        rows=8,
+        cols=16,
+    )
+    require(exit_code == 0, f"replace-resize vi exited with status {exit_code}")
+    require("-- REPLACE --" in decoded, "missing replace-mode status during resize test")
+    require(saved == "Zlpha beta gamma\n",
+            f"unexpected replace-resize buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha beta gamma\n",
+        [b"d", ("winsize", 8, 28, 0.5), b"w"],
+        rows=8,
+        cols=16,
+    )
+    require(exit_code == 0, f"operator-resize vi exited with status {exit_code}")
+    require(saved == "beta gamma\n",
+            f"unexpected operator-resize buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b":", ("winsize", 8, 28, 0.5), b"1d\r"],
+        rows=8,
+        cols=16,
+    )
+    require(exit_code == 0, f"colon-prompt-resize vi exited with status {exit_code}")
+    require(saved == "two\nthree\n",
+            f"unexpected colon-prompt-resize buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"/", ("winsize", 8, 28, 0.5), b"two\r", b"r", b"Z"],
+        rows=8,
+        cols=16,
+    )
+    require(exit_code == 0, f"search-prompt-resize vi exited with status {exit_code}")
+    require(saved == "one\nZwo\nthree\n",
+            f"unexpected search-prompt-resize buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"G", b"?", ("winsize", 8, 28, 0.5), b"two\r", b"r", b"Z"],
+        rows=8,
+        cols=16,
+    )
+    require(exit_code == 0, f"backward-search-prompt-resize vi exited with status {exit_code}")
+    require(saved == "one\nZwo\nthree\n",
+            f"unexpected backward-search-prompt-resize buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "0123456789abcdefghijKLMNOPQRST\n",
+        [("winsize", 8, 28, 0.3), ("winsize", 8, 18, 0.3), ("winsize", 8, 30, 0.3),
+         b"3", b"0", b"|", b"r", b"Z"],
+        rows=8,
+        cols=16,
+    )
+    require(exit_code == 0, f"repeated-resize vi exited with status {exit_code}")
+    require(saved == "0123456789abcdefghijKLMNOPQRSZ\n",
+            f"unexpected repeated-resize buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"j", b"r", b"Z"],
+        rows=4,
+        cols=8,
+    )
+    require(exit_code == 0, f"narrow-terminal vi exited with status {exit_code}")
+    require(saved == "one\nZwo\nthree\n",
+            f"unexpected narrow-terminal buffer: {saved!r}")
+
+    long_file = "".join(f"line {i}\n" for i in range(1, 121))
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        long_file,
+        [b"G", b"r", b"Z"],
+        rows=8,
+        cols=24,
+    )
+    require(exit_code == 0, f"long-file vi exited with status {exit_code}")
+    require("line 120/120" in decoded, "missing long-file final-line status")
+    require(saved.endswith("Zine 120\n"),
+            f"unexpected long-file buffer tail: {saved[-16:]!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "redraw me\nsecond line\n",
         [b"j", b"\x0c"],
         final_keys=b":q\r",

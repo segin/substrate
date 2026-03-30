@@ -185,11 +185,11 @@ Completed architecture milestones already in tree are intentionally omitted here
 #### 3.1 Screen model, redraw, resize, and terminal behavior
 
 - [ ] Replace the current repaint-heavy renderer with a real dirty-region or diff-based refresh strategy.
-- [ ] Audit resize behavior across normal, insert, replace, operator-pending, `:`, `/`, and `?` prompt states.
+- [x] Audit resize behavior across normal, insert, replace, operator-pending, `:`, `/`, and `?` prompt states.
 - [ ] Finish redraw semantics such as `Ctrl-L` and any remaining `z` variants or screen-positioning details.
 - [ ] Tighten long-line, number, list, tabstop, and status-line interactions under horizontal scrolling and narrow terminals.
 - [ ] Audit ANSI/VT100 fallback behavior, keypad handling, and terminal capability use on simpler terminals.
-- [ ] Add PTY regressions specifically for redraw, resize, narrow terminals, long files, and repeated terminal-size changes.
+- [x] Add PTY regressions specifically for redraw, resize, narrow terminals, long files, and repeated terminal-size changes.
 
 #### 3.2 Motion completeness
 
