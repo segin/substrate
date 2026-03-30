@@ -805,6 +805,16 @@ run_stdout_test "Set tabstop query reports value" \
     ":set tabstop?\n:q!\n" \
     "tabstop=8"
 
+run_stdout_test "Set wrapscan query reports state" \
+    "one\ntwo\n" \
+    ":set wrapscan?\n:q!\n" \
+    "wrapscan"
+
+run_stdout_test "Set nowrapscan disables wrapscan" \
+    "one\ntwo\n" \
+    ":set nowrapscan\n:set wrapscan?\n:q!\n" \
+    "nowrapscan"
+
 run_stdout_test "Set tabstop assignment updates value" \
     "one\ntwo\n" \
     ":set ts=4\n:set ts?\n:q!\n" \
@@ -816,6 +826,7 @@ run_stdout_test "Set all prints enabled options" \
     "number
 list
 readonly
+wrapscan
 tabstop=8"
 
 run_stdout_test "Set noreadonly disables readonly option" \

@@ -61,9 +61,6 @@ buf_search_forward(buffer_t *b, const char *pattern)
     }
 
     start = b->cur ? b->cur->next : b->head;
-    if (!start) {
-        start = b->head;
-    }
 
     l = start;
     while (l) {
@@ -81,17 +78,19 @@ buf_search_forward(buffer_t *b, const char *pattern)
         l = l->next;
     }
 
-    for (l = b->head; l && l != start; l = l->next) {
-        if (regexec(&re, l->text, 0, NULL, 0) == 0) {
-            int line_num = 1;
-            line_t *scan = b->head;
+    if (option_wrapscan) {
+        for (l = b->head; l && l != start; l = l->next) {
+            if (regexec(&re, l->text, 0, NULL, 0) == 0) {
+                int line_num = 1;
+                line_t *scan = b->head;
 
-            while (scan && scan != l) {
-                line_num++;
-                scan = scan->next;
+                while (scan && scan != l) {
+                    line_num++;
+                    scan = scan->next;
+                }
+                regfree(&re);
+                return scan ? line_num : -1;
             }
-            regfree(&re);
-            return scan ? line_num : -1;
         }
     }
 
@@ -111,9 +110,6 @@ buf_search_backward(buffer_t *b, const char *pattern)
     }
 
     start = b->cur ? b->cur->prev : b->tail;
-    if (!start) {
-        start = b->tail;
-    }
 
     for (l = start; l; l = l->prev) {
         if (regexec(&re, l->text, 0, NULL, 0) == 0) {
@@ -129,17 +125,19 @@ buf_search_backward(buffer_t *b, const char *pattern)
         }
     }
 
-    for (l = b->tail; l && l != start; l = l->prev) {
-        if (regexec(&re, l->text, 0, NULL, 0) == 0) {
-            int line_num = 1;
-            line_t *scan = b->head;
+    if (option_wrapscan) {
+        for (l = b->tail; l && l != start; l = l->prev) {
+            if (regexec(&re, l->text, 0, NULL, 0) == 0) {
+                int line_num = 1;
+                line_t *scan = b->head;
 
-            while (scan && scan != l) {
-                line_num++;
-                scan = scan->next;
+                while (scan && scan != l) {
+                    line_num++;
+                    scan = scan->next;
+                }
+                regfree(&re);
+                return scan ? line_num : -1;
             }
-            regfree(&re);
-            return scan ? line_num : -1;
         }
     }
 

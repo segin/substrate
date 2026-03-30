@@ -39,6 +39,7 @@ extern int option_number;
 extern int option_list;
 extern int option_readonly;
 extern int option_tabstop;
+extern int option_wrapscan;
 extern buffer_t undo_buf;
 extern int undo_valid;
 extern char *last_search_pattern;

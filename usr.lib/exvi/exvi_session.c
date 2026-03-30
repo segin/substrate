@@ -349,6 +349,9 @@ handle_set_command(const char *args)
         if (option_readonly) {
             printf("readonly\n");
         }
+        if (option_wrapscan) {
+            printf("wrapscan\n");
+        }
         if (option_tabstop != EXVI_DEFAULT_TABSTOP) {
             printf("tabstop=%d\n", option_tabstop);
         }
@@ -391,6 +394,9 @@ handle_set_command(const char *args)
             }
             if (option_readonly) {
                 printf("readonly\n");
+            }
+            if (option_wrapscan) {
+                printf("wrapscan\n");
             }
             printf("tabstop=%d\n", option_tabstop);
         } else if (len == 2 && strncmp(ptr, "ro", 2) == 0) {
@@ -512,6 +518,46 @@ handle_set_command(const char *args)
                 printf("%s\n", option_list ? "nolist" : "list");
             } else {
                 option_list = 0;
+            }
+        } else if (len == 2 && strncmp(ptr, "ws", 2) == 0) {
+            if (eq) {
+                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                return 1;
+            }
+            if (query) {
+                printf("%s\n", option_wrapscan ? "wrapscan" : "nowrapscan");
+            } else {
+                option_wrapscan = 1;
+            }
+        } else if (len == 8 && strncmp(ptr, "wrapscan", 8) == 0) {
+            if (eq) {
+                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                return 1;
+            }
+            if (query) {
+                printf("%s\n", option_wrapscan ? "wrapscan" : "nowrapscan");
+            } else {
+                option_wrapscan = 1;
+            }
+        } else if (len == 4 && strncmp(ptr, "nows", 4) == 0) {
+            if (eq) {
+                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                return 1;
+            }
+            if (query) {
+                printf("%s\n", option_wrapscan ? "nowrapscan" : "wrapscan");
+            } else {
+                option_wrapscan = 0;
+            }
+        } else if (len == 10 && strncmp(ptr, "nowrapscan", 10) == 0) {
+            if (eq) {
+                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                return 1;
+            }
+            if (query) {
+                printf("%s\n", option_wrapscan ? "nowrapscan" : "wrapscan");
+            } else {
+                option_wrapscan = 0;
             }
         } else if ((len == 2 && strncmp(ptr, "ts", 2) == 0)
                 || (len == 7 && strncmp(ptr, "tabstop", 7) == 0)) {

@@ -187,6 +187,49 @@ def main():
     require(saved == "Zne\ntwo\none again\n",
             f"unexpected search-wrap buffer: {saved!r}")
 
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\none again\n",
+        [b":set nowrapscan\r", b"/", b"one\r", b"n", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"search-nowrap vi exited with status {exit_code}")
+    require("line 3/3" in decoded, "missing nowrap initial search status")
+    require("Pattern not found: one" in decoded, "missing nowrap n failure status")
+    require(saved == "one\ntwo\nZne again\n",
+            f"unexpected search-nowrap buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha\nbeta\ngamma\n",
+        [b"G", b":set nowrapscan\r", b"d", b"/", b"a", b"l", b"p", b"h", b"a", b"\r",
+         b"r", b"Z"],
+    )
+    require(exit_code == 0, f"d/search-nowrap vi exited with status {exit_code}")
+    require("Pattern not found: alpha" in decoded,
+            "missing nowrap operator-search failure status")
+    require(saved == "alpha\nbeta\nZamma\n",
+            f"unexpected d/search-nowrap buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "word\nmiddle\nword\n",
+        [b"G", b":set nowrapscan\r", b"*", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"star-nowrap vi exited with status {exit_code}")
+    require("Pattern not found: word" in decoded, "missing nowrap * failure status")
+    require(saved == "word\nmiddle\nZord\n",
+            f"unexpected star-nowrap buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "word\nmiddle\nword\n",
+        [b":set nowrapscan\r", b"#", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"hash-nowrap vi exited with status {exit_code}")
+    require("Pattern not found: word" in decoded, "missing nowrap # failure status")
+    require(saved == "Zord\nmiddle\nword\n",
+            f"unexpected hash-nowrap buffer: {saved!r}")
+
     exit_code, decoded, saved = run_vi_session(vi_path, "alpha beta gamma\nsecond line here\n", [
         b"w",
         b"d", b"e",

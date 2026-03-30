@@ -221,7 +221,7 @@ Completed architecture milestones already in tree are intentionally omitted here
 
 - [ ] Ensure `:` in visual mode exposes the same command set, diagnostics, and option effects as standalone `ex`.
 - [x] Finish `/` and `?` prompt editing behavior, prompt cancellation behavior, and search status feedback.
-- [ ] Complete `/`, `?`, `n`, `N`, `*`, and `#` interactions with operators, counts, wrapscan, and option state.
+- [x] Complete `/`, `?`, `n`, `N`, `*`, and `#` interactions with operators, counts, wrapscan, and option state.
 - [ ] Add prompt-history behavior if it is part of the supported UX for `:`, `/`, and `?`.
 - [x] Add PTY regressions for failed searches, cancelled prompts, wrapped searches, and search-driven operators.
 
