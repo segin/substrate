@@ -682,6 +682,34 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "One. Two. Three.\n",
+        [b"d", b")"],
+    )
+    require(exit_code == 0, f"d) vi exited with status {exit_code}")
+    require(saved == "Two. Three.\n",
+            f"unexpected d) buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "One. Two. Three.\n",
+        [b"c", b")", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"c) vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing c) insert status")
+    require(saved == "XTwo. Three.\n",
+            f"unexpected c) buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n\ntwo\nthree\n\nfour\n",
+        [b"d", b"}"],
+    )
+    require(exit_code == 0, f"d}} vi exited with status {exit_code}")
+    require(saved == "\ntwo\nthree\n\nfour\n",
+            f"unexpected d}} buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one two three four\n",
         [b"W", b"W", b"W", b"2", b"g", b"e", b"r", b"Y"],
     )

@@ -2477,6 +2477,24 @@ vi_apply_charwise_motion(buffer_t *b, vi_visual_t *vis, line_t *target_line,
 }
 
 static int
+vi_simulate_motion_target(buffer_t *b, vi_visual_t *vis,
+    void (*move_fn)(buffer_t *, vi_visual_t *, int), int count,
+    line_t **line_out, int *col_out)
+{
+    line_t *saved_line = b->cur;
+    vi_visual_t tmp = *vis;
+
+    move_fn(b, &tmp, count);
+    *line_out = b->cur;
+    *col_out = tmp.cursor_col;
+    b->cur = saved_line;
+    if (!*line_out || (*line_out == saved_line && *col_out == vis->cursor_col)) {
+        return -1;
+    }
+    return 0;
+}
+
+static int
 vi_backward_end_motion_target(buffer_t *b, vi_visual_t *vis, int count, int bigword,
     line_t **line_out, int *col_out)
 {
@@ -2910,6 +2928,28 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             } else {
                 write(STDOUT_FILENO, "\a", 1);
             }
+        }
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+        (key == ')' || key == '(' || key == '}' || key == '{')) {
+        line_t *target_line;
+        int target_col;
+        int rc;
+
+        if (key == ')') {
+            rc = vi_simulate_motion_target(b, vis, vi_move_sentence_forward, count,
+                &target_line, &target_col);
+        } else if (key == '(') {
+            rc = vi_simulate_motion_target(b, vis, vi_move_sentence_backward, count,
+                &target_line, &target_col);
+        } else if (key == '}') {
+            rc = vi_simulate_motion_target(b, vis, vi_move_paragraph_forward, count,
+                &target_line, &target_col);
+        } else {
+            rc = vi_simulate_motion_target(b, vis, vi_move_paragraph_backward, count,
+                &target_line, &target_col);
+        }
+        if (rc != 0 || vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
+            write(STDOUT_FILENO, "\a", 1);
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == '0') {
         if (vis->cursor_col > 0) {
