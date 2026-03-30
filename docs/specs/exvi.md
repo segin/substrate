@@ -1,7 +1,7 @@
 # ex/vi Shared-Core Architecture
 
 This document records the Substrate architecture direction for `bin/ex` and `bin/vi`.
-It is a design baseline for refactoring the current monolithic `ex` implementation and replacing the current `vi` stub with a real visual editor.
+It began as the design baseline for refactoring the old monolithic `ex` and replacing the `vi` stub, and now also serves as the implementation status note for the shared `usr.lib/exvi` editor stack.
 
 ## Goals
 
@@ -12,9 +12,14 @@ It is a design baseline for refactoring the current monolithic `ex` implementati
 
 ## Current Repository Reality
 
-- [`usr.lib/exvi/exvi.c`](/home/segin/test/usr.lib/exvi/exvi.c) now carries the shared editor core extracted from the old monolithic `ex` implementation, but it is still only a phase-1 baseline and not yet a complete POSIX/BSD `ex`/`vi` engine.
-- [`bin/ex/ex.c`](/home/segin/test/bin/ex/ex.c) and [`bin/vi/vi.c`](/home/segin/test/bin/vi/vi.c) are now thin frontends over the shared core.
-- [`bin/vi/vi.c`](/home/segin/test/bin/vi/vi.c) no longer stands alone as a stub, but visual mode still needs a real screen engine rather than the current shared-core startup path.
+- [`usr.lib/exvi/`](/home/segin/test/usr.lib/exvi/) now holds a split shared editor core:
+  - [`exvi_buffer.c`](/home/segin/test/usr.lib/exvi/exvi_buffer.c) for buffer/file/undo primitives
+  - [`exvi_parse.c`](/home/segin/test/usr.lib/exvi/exvi_parse.c) for address and range parsing
+  - [`exvi_runtime.c`](/home/segin/test/usr.lib/exvi/exvi_runtime.c) for lifecycle/startup/recovery support
+  - [`exvi_cmd.c`](/home/segin/test/usr.lib/exvi/exvi_cmd.c) and [`exvi_session.c`](/home/segin/test/usr.lib/exvi/exvi_session.c) for command/session behavior
+  - [`exvi_visual.c`](/home/segin/test/usr.lib/exvi/exvi_visual.c) for the full-screen visual engine
+- [`bin/ex/ex.c`](/home/segin/test/bin/ex/ex.c) and [`bin/vi/vi.c`](/home/segin/test/bin/vi/vi.c) are thin frontends over the shared core.
+- [`bin/vi/vi.c`](/home/segin/test/bin/vi/vi.c) no longer stands alone as a stub: visual mode has a real raw-mode screen engine with motions, operators, insert/replace flow, `:` entry, search, counts, undo/redo, and PTY regression coverage.
 - [`lib/edit`](/home/segin/test/lib/edit) already provides useful low-level primitives:
   - raw terminal mode
   - termcap and ANSI fallback handling
@@ -22,7 +27,7 @@ It is a design baseline for refactoring the current monolithic `ex` implementati
   - history and prompt support
   - UTF-8 and display-width helpers
 
-The design implication is straightforward: keep the helpers, replace the editor architecture.
+The design implication remains the same: keep the helpers, keep the shared-core architecture, and continue closing the remaining standards/conformance gaps rather than drifting back toward monolithic frontends.
 
 ## Target Architecture
 
@@ -95,25 +100,26 @@ Do not reuse as the editor core:
 
 Build a stable shared editor core in [`usr.lib/exvi/`](/home/segin/test/usr.lib/exvi/) and keep [`bin/ex/ex.c`](/home/segin/test/bin/ex/ex.c) as a thin frontend.
 
-Priority work:
+Current status: largely complete. The shared `ex` core exists, is split into internal units, and is covered by host regression tests plus native shared-core tests.
 
-- finish separating buffer, command parsing, and file handling behind shared internal interfaces inside `usr.lib/exvi/`
-- fix command dispatch ordering and default-address handling
-- enforce modified-buffer safety on quit/edit/next/prev/rewind/tag transitions
-- remove in-place visual-mode placeholders from `ex`
-- add host and target tests for parser, buffer, and command behavior
+Remaining work:
+
+- finish parity cleanup against historical/POSIX/BSD `ex` corner cases
+- expand finer-grained native unit coverage beyond the existing regression harnesses
+- write and ship `ex(1)` and any supporting recovery/startup documentation
 
 ### Phase 2: Real `vi`
 
 Replace [`bin/vi/vi.c`](/home/segin/test/bin/vi/vi.c) with a visual frontend over the same core.
 
-Priority work:
+Current status: active and well underway. The screen/window model, raw terminal loop, insert/replace modes, `:` entry, search, counts, many motions/operators, bounded dot-repeat, redo, scrolling, tabstop-aware rendering, and PTY integration tests are all in tree.
 
-- add screen/window model
-- add command, insert, replace, and `:` entry modes
-- implement motions, operators, counts, undo, and dot-repeat
-- integrate search and ex command entry
-- add PTY-driven terminal integration tests
+Remaining work:
+
+- continue filling semantic gaps against historical/POSIX/BSD `vi`
+- improve live resize and screen-diff behavior where the current renderer is still simple
+- expand operator/motion completeness and insert-mode editing conveniences
+- write and ship `vi(1)`
 
 ### Phase 3: Recovery, tags, multibyte polish, and compatibility
 
@@ -133,6 +139,11 @@ Finish subsystem completeness:
 - PTY-driven integration tests for visual mode, raw-mode restoration, and screen refresh behavior.
 - Host-mode builds for rapid iteration plus target builds for final integration.
 - Fuzz/property coverage for parser and recovery-file handling as the implementation matures.
+
+Current in-tree coverage includes:
+- [`tests/bin/ex/test_ex.sh`](/home/segin/test/tests/bin/ex/test_ex.sh) for shared-core `ex` regressions
+- [`tests/usr.lib/exvi/test_main.c`](/home/segin/test/tests/usr.lib/exvi/test_main.c) for native shared-core coverage
+- [`tests/bin/vi/test_vi_pty.py`](/home/segin/test/tests/bin/vi/test_vi_pty.py) for PTY-driven full-screen `vi` behavior
 
 ## Documentation Requirements
 

@@ -86,7 +86,7 @@ Userland is split by role (essential, admin, extended) and supported by a suite 
 
 ### Key Components
 - **`libsys`:** The canonical typed interface for system introspection and control.
-- **`ex`/`vi` Editor Stack:** The base editors remain first-class userland programs in `bin/`, with shared implementation planned in `usr.lib/exvi/`. Detailed editor design notes live in `docs/specs/exvi.md`.
+- **`ex`/`vi` Editor Stack:** The base editors remain first-class userland programs in `bin/`, with a shared implementation in `usr.lib/exvi/`, thin frontends in `bin/ex` and `bin/vi`, and an in-tree full-screen `vi` engine backed by PTY regression tests. Detailed editor design notes and remaining conformance work live in `docs/specs/exvi.md`.
 - **`lib/edit`:** Command-line editing and history library for shells and prompts. Reusable low-level pieces for the editor stack are documented in `docs/specs/exvi.md`.
 - **`find(1)`:** A multi-dialect file hierarchy walker. See `docs/find/architecture.md`.
 - **Native Toolchain:** Integrated compiler, assembler, and linker. See `docs/specs/as_spec.md`.

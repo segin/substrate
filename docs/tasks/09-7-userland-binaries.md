@@ -1874,10 +1874,10 @@
     - [ ] **Editors:** (REQ: REQ-09-2085)
         - Note: `bin/ex` and `bin/vi` are to be implemented per [`docs/specs/exvi.md`](/home/segin/test/docs/specs/exvi.md), with `usr.lib/exvi/` as the shared editor core and thin frontends in [`bin/ex`](/home/segin/test/bin/ex) and [`bin/vi`](/home/segin/test/bin/vi). The old standalone "tiny vi clone" direction is obsolete and should not be used as implementation guidance.
         - [ ] **Shared `ex`/`vi` Implementation (`docs/specs/exvi.md`):**
-            - [ ] Create `usr.lib/exvi/` as the reusable shared editor core outside `bin/ex` and `bin/vi`.
-            - [ ] Reduce [`bin/ex`](/home/segin/test/bin/ex) to a line-mode frontend over the shared core.
-            - [ ] Replace the [`bin/vi`](/home/segin/test/bin/vi) stub with a real visual frontend over the shared core.
-            - [ ] Reuse `lib/edit` only for low-level terminal, input, prompt, and UTF-8 helpers, per `docs/specs/exvi.md`.
+            - [x] Create `usr.lib/exvi/` as the reusable shared editor core outside `bin/ex` and `bin/vi`.
+            - [x] Reduce [`bin/ex`](/home/segin/test/bin/ex) to a line-mode frontend over the shared core.
+            - [x] Replace the [`bin/vi`](/home/segin/test/bin/vi) stub with a real visual frontend over the shared core.
+            - [x] Reuse `lib/edit` only for low-level terminal, input, prompt, and UTF-8 helpers, per `docs/specs/exvi.md`.
             - [ ] Implement editor behavior, testing, and manpages according to the phased architecture in [`docs/specs/exvi.md`](/home/segin/test/docs/specs/exvi.md).
         - [ ] **TUI Editor (Nano-like):** (REQ: REQ-09-2114)
             - [ ] **UI Rendering:** (REQ: REQ-09-2115)
