@@ -356,6 +356,16 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one two three\n",
+        [b"A", b"\x17", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-ctrl-w vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-ctrl-w insert status")
+    require(saved == "one two X\n",
+            f"unexpected insert-ctrl-w buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "0123456789abcdefghijKLMNOPQRST\n",
         [b"2", b"5", b"l", b"r", b"Z"],
         rows=8,

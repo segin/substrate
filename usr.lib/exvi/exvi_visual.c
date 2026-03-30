@@ -2912,6 +2912,33 @@ vi_backspace_char(buffer_t *b, vi_visual_t *vis)
 }
 
 static void
+vi_erase_word_backward_insert(buffer_t *b, vi_visual_t *vis)
+{
+    line_t *end_line = b->cur ? b->cur : b->head;
+    int end_col = vis->cursor_col;
+    line_t *start_line;
+    int start_col;
+    vi_visual_t tmp;
+
+    if (!end_line) {
+        return;
+    }
+    tmp = *vis;
+    vi_move_word_backward_count(b, &tmp, 1);
+    start_line = b->cur ? b->cur : b->head;
+    start_col = tmp.cursor_col;
+    b->cur = end_line;
+    vis->cursor_col = end_col;
+    if (!start_line) {
+        return;
+    }
+    if (start_line == end_line && start_col == end_col) {
+        return;
+    }
+    vi_delete_range(b, vis, start_line, start_col, end_line, end_col, 1);
+}
+
+static void
 vi_replace_char(buffer_t *b, vi_visual_t *vis, int ch)
 {
     line_t *cur = b->cur;
@@ -3379,6 +3406,9 @@ exvi_visual_main(buffer_t *b)
                     vis.cursor_col--;
                 }
                 break;
+            case 0x17:
+                vi_erase_word_backward_insert(b, &vis);
+                break;
             case VI_KEY_UP:
             case VI_KEY_DOWN:
             case VI_KEY_LEFT:
@@ -3415,6 +3445,9 @@ exvi_visual_main(buffer_t *b)
             case 127:
             case '\b':
                 vi_backspace_char(b, &vis);
+                break;
+            case 0x17:
+                vi_erase_word_backward_insert(b, &vis);
                 break;
             case VI_KEY_UP:
             case VI_KEY_DOWN:
