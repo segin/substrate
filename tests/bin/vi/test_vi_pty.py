@@ -238,6 +238,16 @@ def main():
     require(exit_code == 0, f"repeat-dt vi exited with status {exit_code}")
     require(saved == "XghiXj\n",
             f"unexpected repeat-dt buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n  two\nthree\n",
+        [b"j", b"m", b"a", b"G", b"'", b"a", b"r", b"T", b"G", b"`", b"a", b"r", b">"],
+    )
+    require(exit_code == 0, f"visual-mark vi exited with status {exit_code}")
+    require("line 2/3" in decoded, "missing mark jump status")
+    require(saved == "one\n> two\nthree\n",
+            f"unexpected visual-mark buffer: {saved!r}")
     print("vi pty test: ok")
     return 0
 

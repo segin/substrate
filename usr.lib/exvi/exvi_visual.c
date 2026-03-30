@@ -1762,6 +1762,30 @@ exvi_visual_main(buffer_t *b)
                 vis.pending_g = 1;
             }
             break;
+        case 'm':
+            vis.pending_g = 0;
+            key = vi_read_key();
+            if (key >= 'a' && key <= 'z' && b->cur) {
+                b->marks[key - 'a'] = b->cur;
+            } else {
+                write(STDOUT_FILENO, "\a", 1);
+            }
+            break;
+        case '\'':
+        case '`':
+            vis.pending_g = 0;
+            key = vi_read_key();
+            if (key >= 'a' && key <= 'z' && b->marks[key - 'a']) {
+                b->cur = b->marks[key - 'a'];
+                if (key == '\'') {
+                    vis.cursor_col = vi_first_nonblank_col(b->cur);
+                } else {
+                    vis.cursor_col = 0;
+                }
+            } else {
+                write(STDOUT_FILENO, "\a", 1);
+            }
+            break;
         case 'G':
             vis.pending_g = 0;
             {
