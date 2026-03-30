@@ -173,12 +173,30 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "alpha beta\n",
+        [b'y', b'w', b'$', b'p'],
+    )
+    require(exit_code == 0, f"char-yank-put vi exited with status {exit_code}")
+    require(saved == "alpha betaalpha \n",
+            f"unexpected char-yank-put buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "abcd\n",
         [b'"', b'a', b'x', b'l', b'"', b'a', b'p'],
     )
     require(exit_code == 0, f"named-char-put vi exited with status {exit_code}")
     require(saved == "bcad\n",
             f"unexpected named-char-put buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abcd\n",
+        [b'"', b'a', b'y', b'w', b'$', b'"', b'a', b'p'],
+    )
+    require(exit_code == 0, f"named-char-yank vi exited with status {exit_code}")
+    require(saved == "abcdabcd\n",
+            f"unexpected named-char-yank buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,

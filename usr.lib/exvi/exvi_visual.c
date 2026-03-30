@@ -378,6 +378,22 @@ vi_store_charwise_span(vi_visual_t *vis, line_t *cur, int start, int end)
     free(text);
 }
 
+static int
+vi_yank_span(vi_visual_t *vis, line_t *cur, int start, int end)
+{
+    if (!cur || start < 0 || end <= start || (size_t)start > cur->len) {
+        return -1;
+    }
+    if ((size_t)end > cur->len) {
+        end = (int)cur->len;
+    }
+    if (end <= start) {
+        return -1;
+    }
+    vi_store_charwise_span(vis, cur, start, end);
+    return 0;
+}
+
 static void
 vi_move_vertical(buffer_t *b, int delta)
 {
@@ -1676,6 +1692,83 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         }
     } else if (vis->pending_op == 'y' && key == 'y') {
         vi_linewise_yank(b, vis, line_no, last_line);
+    } else if (vis->pending_op == 'y' && key == 'w') {
+        vi_find_word_boundary_forward_count(b->cur, vis->cursor_col, count, &end);
+        if (vi_yank_span(vis, b->cur, vis->cursor_col, end) != 0) {
+            write(STDOUT_FILENO, "\a", 1);
+        }
+    } else if (vis->pending_op == 'y' && key == 'e') {
+        if (vi_find_word_end_exclusive_count(b->cur, vis->cursor_col, count, &end) == 0 &&
+            vi_yank_span(vis, b->cur, vis->cursor_col, end) == 0) {
+            /* nothing */
+        } else {
+            write(STDOUT_FILENO, "\a", 1);
+        }
+    } else if (vis->pending_op == 'y' && key == 'E') {
+        if (vi_find_bigword_end_exclusive_count(b->cur, vis->cursor_col, count, &end) == 0 &&
+            vi_yank_span(vis, b->cur, vis->cursor_col, end) == 0) {
+            /* nothing */
+        } else {
+            write(STDOUT_FILENO, "\a", 1);
+        }
+    } else if (vis->pending_op == 'y' && key == 'b') {
+        int start;
+
+        if (vi_find_word_start_backward_count(b->cur, vis->cursor_col, count, &start) == 0 &&
+            vi_yank_span(vis, b->cur, start, vis->cursor_col) == 0) {
+            /* nothing */
+        } else {
+            write(STDOUT_FILENO, "\a", 1);
+        }
+    } else if (vis->pending_op == 'y' && key == 'B') {
+        int start;
+
+        if (vi_find_bigword_start_backward_count(b->cur, vis->cursor_col, count, &start) == 0 &&
+            vi_yank_span(vis, b->cur, start, vis->cursor_col) == 0) {
+            /* nothing */
+        } else {
+            write(STDOUT_FILENO, "\a", 1);
+        }
+    } else if (vis->pending_op == 'y' && key == 'W') {
+        vi_find_bigword_boundary_forward_count(b->cur, vis->cursor_col, count, &end);
+        if (vi_yank_span(vis, b->cur, vis->cursor_col, end) != 0) {
+            write(STDOUT_FILENO, "\a", 1);
+        }
+    } else if (vis->pending_op == 'y' &&
+        (key == 'f' || key == 'F' || key == 't' || key == 'T')) {
+        int ch;
+        int start;
+
+        ch = vi_read_key();
+        if (ch == -1 || ch == '\x1b' || ch == '\r' || ch == '\n') {
+            write(STDOUT_FILENO, "\a", 1);
+        } else if (vi_find_motion_span(b->cur, vis->cursor_col, ch,
+            (key == 'f' || key == 't'),
+            (key == 't' || key == 'T'),
+            count, &start, &end) == 0 &&
+            vi_yank_span(vis, b->cur, start, end) == 0) {
+            vis->last_find_char = ch;
+            vis->last_find_forward = (key == 'f' || key == 't');
+            vis->last_find_till = (key == 't' || key == 'T');
+        } else {
+            write(STDOUT_FILENO, "\a", 1);
+        }
+    } else if (vis->pending_op == 'y' && key == '0') {
+        if (vi_yank_span(vis, b->cur, 0, vis->cursor_col) != 0) {
+            write(STDOUT_FILENO, "\a", 1);
+        }
+    } else if (vis->pending_op == 'y' && key == '^') {
+        int start = vi_first_nonblank_col(b->cur);
+
+        if (vi_yank_span(vis, b->cur, start, vis->cursor_col) != 0) {
+            write(STDOUT_FILENO, "\a", 1);
+        }
+    } else if (vis->pending_op == 'y' && key == '$') {
+        line_t *cur = b->cur;
+
+        if (!cur || vi_yank_span(vis, cur, vis->cursor_col, (int)cur->len) != 0) {
+            write(STDOUT_FILENO, "\a", 1);
+        }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == 'w') {
         vi_find_word_boundary_forward_count(b->cur, vis->cursor_col, count, &end);
         if (end >= vis->cursor_col) {
