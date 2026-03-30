@@ -1641,6 +1641,124 @@ default_read_destination(buffer_t *b, int addr2)
     return b->cur ? buf_current_line(b) : 0;
 }
 
+static int
+handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
+    int addr2)
+{
+    const char *args = NULL;
+    int force = 0;
+
+    if (match_command(cmd, "visual", "vi", &args, &force)) {
+        if (visual_mode) {
+            fprintf(stderr, "%s: visual mode not implemented in this build.\n", exvi_progname);
+            return 1;
+        }
+        if (b->modified) {
+            fprintf(stderr, "No write since last change (add ! to override)\n");
+            return 1;
+        }
+        set_visual_handoff_file(b->filename);
+        longjmp(main_loop_jmp, EXVI_EXIT_VISUAL_HANDOFF);
+    } else if (match_command(cmd, "args", NULL, &args, NULL)) {
+        return handle_args_command(args);
+    } else if (match_command(cmd, "next", "n", &args, &force)) {
+        return handle_next_command(b, args, force);
+    } else if (match_command(cmd, "prev", NULL, &args, &force)) {
+        return handle_prev_command(b, force);
+    } else if (match_command(cmd, "rewind", "rew", &args, &force)) {
+        return handle_rewind_command(b, force);
+    } else if (match_command(cmd, "preserve", "pre", &args, NULL)) {
+        return handle_preserve_command(b);
+    } else if (match_command(cmd, "recover", "rec", &args, NULL)) {
+        return handle_recover_command(b, args);
+    } else if (match_command(cmd, "pop", "po", &args, &force)) {
+        return handle_pop_command(b, force);
+    } else if (match_command(cmd, "tag", NULL, &args, NULL)) {
+        return handle_tag_command(b, args);
+    } else if (match_command(cmd, "set", NULL, &args, NULL)) {
+        return handle_set_command(args);
+    } else if (match_command(cmd, "quit", "q", &args, &force)) {
+        if (b->modified && !force) {
+            fprintf(stderr, "No write since last change (add ! to override)\n");
+            return 1;
+        }
+        exit(0);
+    } else if (match_command(cmd, "xit", "x", &args, &force)
+        || match_command(cmd, "wq", NULL, &args, &force)) {
+        if (!b->filename) {
+            fprintf(stderr, "No current filename\n");
+            return 1;
+        }
+        buf_write_file(b, b->filename, 0);
+        if (!b->modified || force) {
+            exit(0);
+        }
+        return 1;
+    } else if (match_command(cmd, "write", "w", &args, NULL)) {
+        return handle_write_command(b, args, explicit_range, addr1, addr2);
+    } else if (match_command(cmd, "edit", "e", &args, &force)) {
+        return handle_edit_command(b, args, force);
+    } else if (match_command(cmd, "read", "r", &args, NULL)) {
+        return handle_read_command(b, args, addr2);
+    }
+
+    return 0;
+}
+
+static int
+handle_buffer_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
+    int addr2)
+{
+    const char *args = NULL;
+
+    if (match_command(cmd, "delete", "d", &args, NULL)) {
+        return handle_delete_command(b, explicit_range, addr1, addr2);
+    } else if (match_command(cmd, "undo", "u", &args, NULL)) {
+        return handle_undo_command(b);
+    } else if (match_command(cmd, "put", "pu", &args, NULL)) {
+        return handle_put_command(b, args, addr2);
+    } else if (match_command(cmd, "print", "p", &args, NULL)
+        || match_command(cmd, "number", "#", &args, NULL)
+        || match_command(cmd, "list", "l", &args, NULL)) {
+        return handle_print_command(b, cmd, explicit_range, addr1, addr2);
+    } else if (cmd[0] == '=') {
+        int target = (addr2 != -1) ? addr2 : b->line_count;
+
+        printf("%d\n", target);
+        return 1;
+    } else if (cmd[0] == 'k' || match_command(cmd, "mark", NULL, &args, NULL)) {
+        return handle_mark_command(b, cmd, args, addr2);
+    } else if (match_command(cmd, "file", "f", &args, NULL)) {
+        return handle_file_command(b, args);
+    } else if (match_command(cmd, "append", "a", &args, NULL)) {
+        return handle_input_command(b, 1, explicit_range, addr1, addr2);
+    } else if (match_command(cmd, "insert", "i", &args, NULL)) {
+        return handle_input_command(b, 2, explicit_range, addr1, addr2);
+    } else if (match_command(cmd, "change", "c", &args, NULL)) {
+        return handle_input_command(b, 3, explicit_range, addr1, addr2);
+    } else if (match_command(cmd, "copy", "co", &args, NULL)
+        || match_command(cmd, "copy", "t", &args, NULL)) {
+        return handle_copy_command(b, args, explicit_range, addr1, addr2);
+    } else if (match_command(cmd, "move", "m", &args, NULL)) {
+        return handle_move_command(b, args, explicit_range, addr1, addr2);
+    } else if (match_command(cmd, "join", "j", &args, NULL)) {
+        return handle_join_command(b, explicit_range, addr1, addr2);
+    } else if (match_command(cmd, "yank", "y", &args, NULL)) {
+        return handle_yank_command(b, args, explicit_range, addr1, addr2);
+    } else if (match_command(cmd, "substitute", "s", &args, NULL)) {
+        return handle_substitute_command(b, args, addr1, addr2);
+    } else if (cmd[0] == '&' && cmd[1] == '\0') {
+        return handle_repeat_substitute_command(b, addr1, addr2);
+    } else if (match_command(cmd, "global", "g", &args, NULL)
+        || match_command(cmd, "global", "v", &args, NULL)) {
+        return handle_global_command(b, cmd, args, explicit_range, addr1, addr2);
+    } else if (cmd[0] == '!') {
+        return handle_shell_command(cmd);
+    }
+
+    return 0;
+}
+
 void do_command(buffer_t *b, char *cmd) {
     while (*cmd && isspace((unsigned char)*cmd)) cmd++;
     
@@ -1673,160 +1791,11 @@ void do_command(buffer_t *b, char *cmd) {
         return;
     }
     
-    // Commands implementation skeleton
-    const char *args = NULL;
-    int force = 0;
-
-    if (match_command(cmd, "visual", "vi", &args, &force)) {
-        if (visual_mode) {
-            fprintf(stderr, "%s: visual mode not implemented in this build.\n", exvi_progname);
-            return;
-        }
-        if (b->modified) {
-            fprintf(stderr, "No write since last change (add ! to override)\n");
-            return;
-        }
-        set_visual_handoff_file(b->filename);
-        longjmp(main_loop_jmp, EXVI_EXIT_VISUAL_HANDOFF);
-    } else if (match_command(cmd, "args", NULL, &args, NULL)) {
-        if (handle_args_command(args)) {
-            return;
-        }
-    } else if (match_command(cmd, "next", "n", &args, &force)) {
-        if (handle_next_command(b, args, force)) {
-            return;
-        }
-    } else if (match_command(cmd, "prev", NULL, &args, &force)) {
-        if (handle_prev_command(b, force)) {
-            return;
-        }
-    } else if (match_command(cmd, "rewind", "rew", &args, &force)) {
-        if (handle_rewind_command(b, force)) {
-            return;
-        }
-    } else if (match_command(cmd, "preserve", "pre", &args, NULL)) {
-        if (handle_preserve_command(b)) {
-            return;
-        }
-    } else if (match_command(cmd, "recover", "rec", &args, NULL)) {
-        if (handle_recover_command(b, args)) {
-            return;
-        }
-    } else if (match_command(cmd, "pop", "po", &args, &force)) {
-        if (handle_pop_command(b, force)) {
-            return;
-        }
-    } else if (match_command(cmd, "tag", NULL, &args, NULL)) {
-        if (handle_tag_command(b, args)) {
-            return;
-        }
-    } else if (match_command(cmd, "set", NULL, &args, NULL)) {
-        if (handle_set_command(args)) {
-            return;
-        }
-    } else if (match_command(cmd, "quit", "q", &args, &force)) {
-        if (b->modified && !force) {
-            fprintf(stderr, "No write since last change (add ! to override)\n");
-            return;
-        }
-        exit(0);
-    } else if (match_command(cmd, "xit", "x", &args, &force)
-        || match_command(cmd, "wq", NULL, &args, &force)) {
-        if (!b->filename) {
-            fprintf(stderr, "No current filename\n");
-            return;
-        }
-        buf_write_file(b, b->filename, 0);
-        if (!b->modified || force) {
-            exit(0);
-        }
-    } else if (match_command(cmd, "write", "w", &args, NULL)) {
-        if (handle_write_command(b, args, explicit_range, addr1, addr2)) {
-            return;
-        }
-    } else if (match_command(cmd, "edit", "e", &args, &force)) {
-        if (handle_edit_command(b, args, force)) {
-            return;
-        }
-    } else if (match_command(cmd, "read", "r", &args, NULL)) {
-        if (handle_read_command(b, args, addr2)) {
-            return;
-        }
-    } else if (match_command(cmd, "delete", "d", &args, NULL)) {
-        if (handle_delete_command(b, explicit_range, addr1, addr2)) {
-            return;
-        }
-    } else if (match_command(cmd, "undo", "u", &args, NULL)) {
-        if (handle_undo_command(b)) {
-            return;
-        }
-    } else if (match_command(cmd, "put", "pu", &args, NULL)) {
-        if (handle_put_command(b, args, addr2)) {
-            return;
-        }
-    } else if (match_command(cmd, "print", "p", &args, NULL)
-        || match_command(cmd, "number", "#", &args, NULL)
-        || match_command(cmd, "list", "l", &args, NULL)) {
-        if (handle_print_command(b, cmd, explicit_range, addr1, addr2)) {
-            return;
-        }
-    } else if (cmd[0] == '=') {
-        int target = (addr2 != -1) ? addr2 : b->line_count;
-        printf("%d\n", target);
-    } else if (cmd[0] == 'k' || match_command(cmd, "mark", NULL, &args, NULL)) {
-        if (handle_mark_command(b, cmd, args, addr2)) {
-            return;
-        }
-    } else if (match_command(cmd, "file", "f", &args, NULL)) {
-        if (handle_file_command(b, args)) {
-            return;
-        }
-    } else if (match_command(cmd, "append", "a", &args, NULL)) {
-        if (handle_input_command(b, 1, explicit_range, addr1, addr2)) {
-            return;
-        }
-    } else if (match_command(cmd, "insert", "i", &args, NULL)) {
-        if (handle_input_command(b, 2, explicit_range, addr1, addr2)) {
-            return;
-        }
-    } else if (match_command(cmd, "change", "c", &args, NULL)) {
-        if (handle_input_command(b, 3, explicit_range, addr1, addr2)) {
-            return;
-        }
-    } else if (match_command(cmd, "copy", "co", &args, NULL)
-        || match_command(cmd, "copy", "t", &args, NULL)) {
-        if (handle_copy_command(b, args, explicit_range, addr1, addr2)) {
-            return;
-        }
-    } else if (match_command(cmd, "move", "m", &args, NULL)) {
-        if (handle_move_command(b, args, explicit_range, addr1, addr2)) {
-            return;
-        }
-    } else if (match_command(cmd, "join", "j", &args, NULL)) {
-        if (handle_join_command(b, explicit_range, addr1, addr2)) {
-            return;
-        }
-    } else if (match_command(cmd, "yank", "y", &args, NULL)) {
-        if (handle_yank_command(b, args, explicit_range, addr1, addr2)) {
-            return;
-        }
-    } else if (match_command(cmd, "substitute", "s", &args, NULL)) {
-        if (handle_substitute_command(b, args, addr1, addr2)) {
-            return;
-        }
-    } else if (cmd[0] == '&' && cmd[1] == '\0') {
-        if (handle_repeat_substitute_command(b, addr1, addr2)) {
-            return;
-        }
-    } else if (match_command(cmd, "global", "g", &args, NULL)
-        || match_command(cmd, "global", "v", &args, NULL)) {
-        if (handle_global_command(b, cmd, args, explicit_range, addr1, addr2)) {
-            return;
-        }
-    } else if (cmd[0] == '!') {
-        if (handle_shell_command(cmd)) {
-            return;
-        }
+    if (handle_session_command(b, cmd, explicit_range, addr1, addr2)) {
+        return;
+    }
+    if (handle_buffer_command(b, cmd, explicit_range, addr1, addr2)) {
+        return;
     }
 }
 
