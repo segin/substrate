@@ -296,6 +296,34 @@ vi_is_word_char(int ch)
     return isalnum((unsigned char)ch) || ch == '_';
 }
 
+static int
+vi_find_word_boundary_forward(line_t *cur, int start, int *end_out)
+{
+    size_t i;
+
+    if (!cur || start < 0 || (size_t)start > cur->len) {
+        return -1;
+    }
+    i = (size_t)start;
+    if (i < cur->len && vi_is_word_char((unsigned char)cur->text[i])) {
+        while (i < cur->len && vi_is_word_char((unsigned char)cur->text[i])) {
+            i++;
+        }
+        while (i < cur->len && !vi_is_word_char((unsigned char)cur->text[i])) {
+            i++;
+        }
+    } else {
+        while (i < cur->len && !vi_is_word_char((unsigned char)cur->text[i])) {
+            i++;
+        }
+        while (i < cur->len && vi_is_word_char((unsigned char)cur->text[i])) {
+            i++;
+        }
+    }
+    *end_out = (int)i;
+    return 0;
+}
+
 static void
 vi_move_word_forward(buffer_t *b, vi_visual_t *vis)
 {
@@ -447,6 +475,32 @@ vi_replace_current_text(buffer_t *b, const char *text)
 }
 
 static void
+vi_delete_span(buffer_t *b, vi_visual_t *vis, int start, int end, int enter_insert)
+{
+    line_t *cur = b->cur;
+    char *text;
+
+    if (!cur || start < 0 || end < start || (size_t)start > cur->len) {
+        return;
+    }
+    if ((size_t)end > cur->len) {
+        end = (int)cur->len;
+    }
+    save_undo(b);
+    text = malloc(cur->len - (size_t)(end - start) + 1);
+    if (!text) {
+        return;
+    }
+    memcpy(text, cur->text, (size_t)start);
+    memcpy(text + start, cur->text + end, cur->len - (size_t)end + 1);
+    if (vi_replace_current_text(b, text) == 0) {
+        vis->cursor_col = start;
+        vis->insert_mode = enter_insert;
+    }
+    free(text);
+}
+
+static void
 vi_linewise_put(buffer_t *b, vi_visual_t *vis, int before)
 {
     int line_no = buf_current_line(b);
@@ -471,6 +525,7 @@ static void
 vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
 {
     int line_no = buf_current_line(b);
+    int end;
 
     if (vis->pending_op == 'd' && key == 'd') {
         handle_delete_command(b, 1, line_no, line_no);
@@ -478,9 +533,22 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             b->cur = b->head;
         }
         vis->cursor_col = 0;
+    } else if (vis->pending_op == 'c' && key == 'c') {
+        handle_delete_command(b, 1, line_no, line_no);
+        if (!b->cur) {
+            b->cur = buf_insert_after(b, NULL, "");
+        } else {
+            b->cur = buf_insert_after(b, b->cur->prev, "");
+        }
+        vis->cursor_col = 0;
+        vis->insert_mode = 1;
     } else if (vis->pending_op == 'y' && key == 'y') {
         handle_yank_command(b, "", 1, line_no, line_no);
         vis->cursor_col = 0;
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == 'w') {
+        if (vi_find_word_boundary_forward(b->cur, vis->cursor_col, &end) == 0) {
+            vi_delete_span(b, vis, vis->cursor_col, end, vis->pending_op == 'c');
+        }
     } else {
         write(STDOUT_FILENO, "\a", 1);
     }
@@ -821,6 +889,10 @@ exvi_visual_main(buffer_t *b)
             handle_undo_command(b);
             vi_clamp_cursor(b, &vis);
             break;
+        case 'c':
+            vis.pending_g = 0;
+            vis.pending_op = 'c';
+            break;
         case 'd':
             vis.pending_g = 0;
             vis.pending_op = 'd';
@@ -836,6 +908,16 @@ exvi_visual_main(buffer_t *b)
         case 'P':
             vis.pending_g = 0;
             vi_linewise_put(b, &vis, 1);
+            break;
+        case 'D':
+            vis.pending_g = 0;
+            vi_delete_span(b, &vis, vis.cursor_col,
+                cur ? (int)cur->len : vis.cursor_col, 0);
+            break;
+        case 'C':
+            vis.pending_g = 0;
+            vi_delete_span(b, &vis, vis.cursor_col,
+                cur ? (int)cur->len : vis.cursor_col, 1);
             break;
         case 'g':
             if (vis.pending_g) {
