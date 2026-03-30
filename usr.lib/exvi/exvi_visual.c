@@ -67,6 +67,8 @@ typedef struct {
     vi_repeat_kind_t last_change;
     int last_change_count;
     int last_change_char;
+    char status_msg[256];
+    int status_once;
 } vi_visual_t;
 
 static vi_visual_t *active_visual = NULL;
@@ -85,6 +87,33 @@ static int vi_prompt_input(buffer_t *b, vi_visual_t *vis, char prefix, char *buf
 static char *vi_current_word_text(buffer_t *b, vi_visual_t *vis);
 static char *vi_current_word_pattern(buffer_t *b, vi_visual_t *vis);
 static void vi_visual_apply_tag_target(buffer_t *b, char *cmd);
+
+static void
+vi_set_status(vi_visual_t *vis, const char *msg)
+{
+    if (!msg) {
+        vis->status_msg[0] = '\0';
+        vis->status_once = 0;
+        return;
+    }
+    snprintf(vis->status_msg, sizeof(vis->status_msg), "%s", msg);
+    vis->status_once = 1;
+}
+
+static void
+vi_set_search_failure_status(vi_visual_t *vis, const char *pattern)
+{
+    const char *effective = (pattern && *pattern) ? pattern : last_search_pattern;
+
+    if (effective && *effective) {
+        snprintf(vis->status_msg, sizeof(vis->status_msg),
+            "Pattern not found: %s", effective);
+    } else {
+        snprintf(vis->status_msg, sizeof(vis->status_msg),
+            "No previous search pattern");
+    }
+    vis->status_once = 1;
+}
 
 static void
 vi_set_insert_anchor(buffer_t *b, vi_visual_t *vis)
@@ -538,6 +567,8 @@ vi_render(buffer_t *b, vi_visual_t *vis, char prompt_prefix, const char *prompt)
         printf("-- REPLACE --");
     } else if (vis->insert_mode) {
         printf("-- INSERT --");
+    } else if (vis->status_msg[0] != '\0') {
+        printf("%s", vis->status_msg);
     } else {
         printf("\"%s\"%s%s  line %d/%d",
             b->filename ? b->filename : "[No Name]",
@@ -2705,6 +2736,7 @@ vi_search_motion_target(buffer_t *b, vi_visual_t *vis, const char *pattern, int 
     while (count-- > 0) {
         line_no = exvi_search(b, pattern, forward);
         if (line_no < 1) {
+            vi_set_search_failure_status(vis, pattern);
             b->cur = saved_line;
             return -1;
         }
@@ -3219,10 +3251,11 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
 
         pattern[0] = '\0';
         if (vi_prompt_input(b, vis, key, pattern, sizeof(pattern)) != 0) {
-            write(STDOUT_FILENO, "\a", 1);
+            /* Cancelled prompt: abandon the pending operator quietly. */
         } else if (vi_search_motion_target(b, vis, pattern, forward, count,
             &target_line, &target_col) != 0 ||
             vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
+            vi_set_search_failure_status(vis, pattern);
             write(STDOUT_FILENO, "\a", 1);
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
@@ -3693,6 +3726,20 @@ vi_prompt_input(buffer_t *b, vi_visual_t *vis, char prefix, char *buf, size_t bu
             }
             continue;
         }
+        if (key == 0x15) {
+            len = 0;
+            buf[0] = '\0';
+            continue;
+        }
+        if (key == 0x17) {
+            while (len > 0 && isspace((unsigned char)buf[len - 1])) {
+                buf[--len] = '\0';
+            }
+            while (len > 0 && !isspace((unsigned char)buf[len - 1])) {
+                buf[--len] = '\0';
+            }
+            continue;
+        }
         if (isprint(key) && len + 1 < buf_size) {
             buf[len++] = (char)key;
             buf[len] = '\0';
@@ -3828,12 +3875,14 @@ vi_apply_search(buffer_t *b, vi_visual_t *vis, const char *pattern, int forward)
     int line_no = exvi_search(b, pattern, forward);
 
     if (line_no < 1) {
+        vi_set_search_failure_status(vis, pattern);
         write(STDOUT_FILENO, "\a", 1);
         return;
     }
     b->cur = buf_get_line(b, line_no);
     vis->cursor_col = 0;
     vis->last_search_forward = forward;
+    vi_set_status(vis, NULL);
 }
 
 static void
@@ -3843,6 +3892,7 @@ vi_repeat_search(buffer_t *b, vi_visual_t *vis, int forward, int count)
         int line_no = exvi_search(b, "", forward);
 
         if (line_no < 1) {
+            vi_set_search_failure_status(vis, "");
             write(STDOUT_FILENO, "\a", 1);
             return;
         }
@@ -3850,6 +3900,7 @@ vi_repeat_search(buffer_t *b, vi_visual_t *vis, int forward, int count)
         vis->cursor_col = 0;
         vis->last_search_forward = forward;
     }
+    vi_set_status(vis, NULL);
 }
 
 static void
@@ -4003,10 +4054,17 @@ exvi_visual_main(buffer_t *b)
 
     for (;;) {
         line_t *cur;
+        int clear_status = 0;
 
         vi_ensure_visible_line(b);
+        if (vis.status_once && vis.status_msg[0] != '\0') {
+            clear_status = 1;
+        }
         vi_render(b, &vis, ':', NULL);
         key = vi_read_visual_key(b, &vis, ':', NULL);
+        if (clear_status) {
+            vi_set_status(&vis, NULL);
+        }
         if (key == -1) {
             break;
         }

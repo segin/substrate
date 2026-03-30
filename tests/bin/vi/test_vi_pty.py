@@ -137,6 +137,56 @@ def main():
     require(saved == "Top-split\nline\n1\n\nXone TWO THhree! >Two!\nDone\n",
             f"unexpected saved buffer: {saved!r}")
 
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"/", b"junk", b"\x15", b"two\r", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"search-prompt-ctrl-u vi exited with status {exit_code}")
+    require("line 2/3" in decoded, "missing forward-search status after Ctrl-U prompt edit")
+    require(saved == "one\nZwo\nthree\n",
+            f"unexpected search-prompt-ctrl-u buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"G", b"?", b"junk", b"\x17", b"two\r", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"search-prompt-ctrl-w vi exited with status {exit_code}")
+    require("line 2/3" in decoded, "missing backward-search status after Ctrl-W prompt edit")
+    require(saved == "one\nZwo\nthree\n",
+            f"unexpected search-prompt-ctrl-w buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"/", b"two", b"\x1b", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"search-cancel vi exited with status {exit_code}")
+    require(saved == "Zne\ntwo\nthree\n",
+            f"unexpected search-cancel buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"/", b"missing\r", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"search-fail vi exited with status {exit_code}")
+    require("Pattern not found: missing" in decoded, "missing failed-search status message")
+    require(saved == "Zne\ntwo\nthree\n",
+            f"unexpected search-fail buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\none again\n",
+        [b"/", b"one\r", b"n", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"search-wrap vi exited with status {exit_code}")
+    require("line 3/3" in decoded, "missing initial wrapped-search target status")
+    require("line 1/3" in decoded, "missing wrapped n repeat status")
+    require(saved == "Zne\ntwo\none again\n",
+            f"unexpected search-wrap buffer: {saved!r}")
+
     exit_code, decoded, saved = run_vi_session(vi_path, "alpha beta gamma\nsecond line here\n", [
         b"w",
         b"d", b"e",
