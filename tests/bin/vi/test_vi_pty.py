@@ -42,7 +42,7 @@ def send_keys(master_fd, output, data, timeout=0.2):
 
 def run_vi_session(vi_path, initial_text, key_steps, final_timeout=0.3, rows=24,
                    cols=80, final_keys=b":wq\r", extra_files=None,
-                   extra_args=None, argv0=None):
+                   extra_args=None, argv0=None, file_args=None):
     with tempfile.TemporaryDirectory(prefix="exvi-") as temp_dir:
         temp_path = os.path.join(temp_dir, "buffer.txt")
         with open(temp_path, "w", encoding="utf-8") as f:
@@ -60,7 +60,14 @@ def run_vi_session(vi_path, initial_text, key_steps, final_timeout=0.3, rows=24,
             argv = [argv0 or vi_path]
             if extra_args:
                 argv.extend(extra_args)
-            argv.append(temp_path)
+            if file_args:
+                for arg in file_args:
+                    if os.path.isabs(arg):
+                        argv.append(arg)
+                    else:
+                        argv.append(os.path.join(temp_dir, arg))
+            else:
+                argv.append(temp_path)
             os.chdir(temp_dir)
             os.execv(vi_path, argv)
 
@@ -234,6 +241,22 @@ def main():
     require(exit_code == 0, f"2Y vi exited with status {exit_code}")
     require(saved == "one\ntwo\none\ntwo\nthree\n",
             f"unexpected 2Y buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n",
+        [b":args\r", b":next\r", b":prev\r", b":rewind\r"],
+        final_keys=b":q!\r",
+        extra_files={"two.txt": "two\n"},
+        file_args=["buffer.txt", "two.txt"],
+    )
+    require(exit_code == 0, f"visual args/next/prev/rewind vi exited with status {exit_code}")
+    require("[/tmp/exvi-" in decoded and "/buffer.txt] /tmp/exvi-" in decoded and "/two.txt " in decoded,
+            "missing visual :args output")
+    require("\"/tmp/exvi-" in decoded and "/two.txt\" 1 lines" in decoded,
+            "missing visual :next file switch report")
+    require(decoded.count("/buffer.txt\" 1 lines") >= 1,
+            "missing visual rewind/prev return report")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
