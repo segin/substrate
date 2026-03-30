@@ -171,6 +171,16 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "".join(f"line {i}\n" for i in range(1, 11)),
+        [b"5", b"0", b"%"],
+    )
+    require(exit_code == 0, f"percent-goto vi exited with status {exit_code}")
+    require("line 5/10" in decoded, "missing percent-goto status")
+    require(saved.startswith("line 1\nline 2\nline 3\n"),
+            "unexpected percent-goto buffer contents")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "  one\n\tTwo\nthree\n",
         [b"+", b"\r", b"-"],
     )

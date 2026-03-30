@@ -902,6 +902,31 @@ vi_clamp_line_target(buffer_t *b, int line_no)
     return line_no;
 }
 
+static void
+vi_move_to_percent(buffer_t *b, vi_visual_t *vis, int percent)
+{
+    int target;
+
+    if (b->line_count < 1) {
+        return;
+    }
+    if (percent < 1) {
+        percent = 1;
+    }
+    if (percent > 100) {
+        percent = 100;
+    }
+    target = (percent * b->line_count + 99) / 100;
+    if (target < 1) {
+        target = 1;
+    }
+    if (target > b->line_count) {
+        target = b->line_count;
+    }
+    b->cur = buf_get_line(b, target);
+    vis->cursor_col = vi_first_nonblank_col(b->cur);
+}
+
 static int
 vi_replace_current_text(buffer_t *b, const char *text)
 {
@@ -1829,8 +1854,11 @@ exvi_visual_main(buffer_t *b)
             break;
         case '%':
             vis.pending_g = 0;
-            vi_take_count(&vis);
-            vi_match_motion(b, &vis);
+            if (vis.pending_count > 0) {
+                vi_move_to_percent(b, &vis, vi_take_count(&vis));
+            } else {
+                vi_match_motion(b, &vis);
+            }
             break;
         case 'i':
             vis.pending_g = 0;
