@@ -19,15 +19,26 @@ static int batch_mode = 0;
 static int visual_mode = 0;
 static int recover_mode = 0;
 static int option_number = 0;
+static int option_list = 0;
 static char *last_search_pattern = NULL;
 static char *last_sub_pattern = NULL;
 static char *last_sub_replacement = NULL;
+static char *alternate_filename = NULL;
 static int last_sub_global = 0;
 static const char *exvi_progname = "ex";
 
 static char **ex_args = NULL;
 static int ex_argc = 0;
 static int ex_arg_idx = 0;
+static int ex_args_owned = 0;
+
+typedef struct {
+    char *filename;
+    int line;
+} tag_frame_t;
+
+static tag_frame_t *tag_stack = NULL;
+static int tag_stack_len = 0;
 
 typedef struct line {
     struct line *prev;
@@ -55,7 +66,306 @@ static int undo_valid = 0;
 static jmp_buf main_loop_jmp;
 static buffer_t *global_buf_for_sighandler = NULL;
 
+static void buf_init(buffer_t *b);
+static void buf_free(buffer_t *b);
+static void buf_read_file(buffer_t *b, const char *filename);
+static void buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int addr2);
+static line_t *buf_get_line(buffer_t *b, int line_num);
+static int buf_current_line(buffer_t *b);
+static void do_command(buffer_t *b, char *cmd);
 static void replace_saved_string(char **dst, const char *src);
+static void free_ex_arglist(void);
+static char *expand_filename_refs(buffer_t *b, const char *arg);
+static void free_tag_stack(void);
+static char *recover_path_for(const char *filename);
+static int load_recover_into_buffer(buffer_t *b, const char *filename);
+static void load_startup_commands(buffer_t *b);
+
+static void
+free_ex_arglist(void)
+{
+    if (!ex_args_owned || !ex_args) {
+        ex_args = NULL;
+        ex_argc = 0;
+        ex_arg_idx = 0;
+        ex_args_owned = 0;
+        return;
+    }
+
+    for (int i = 0; i < ex_argc; i++) {
+        free(ex_args[i]);
+    }
+    free(ex_args);
+    ex_args = NULL;
+    ex_argc = 0;
+    ex_arg_idx = 0;
+    ex_args_owned = 0;
+}
+
+static int
+set_ex_arglist_from_words(const char *text)
+{
+    char **new_args = NULL;
+    int new_argc = 0;
+    const char *p = text;
+
+    while (*p) {
+        char *word;
+        char **grown;
+        const char *start;
+        size_t len;
+
+        while (*p && isspace((unsigned char)*p)) {
+            p++;
+        }
+        if (!*p) {
+            break;
+        }
+
+        start = p;
+        while (*p && !isspace((unsigned char)*p)) {
+            p++;
+        }
+        len = (size_t)(p - start);
+        word = malloc(len + 1);
+        if (!word) {
+            goto fail;
+        }
+        memcpy(word, start, len);
+        word[len] = '\0';
+
+        grown = realloc(new_args, sizeof(*new_args) * (size_t)(new_argc + 1));
+        if (!grown) {
+            free(word);
+            goto fail;
+        }
+        new_args = grown;
+        new_args[new_argc++] = word;
+    }
+
+    if (new_argc == 0) {
+        return -1;
+    }
+
+    free_ex_arglist();
+    ex_args = new_args;
+    ex_argc = new_argc;
+    ex_arg_idx = 0;
+    ex_args_owned = 1;
+    return 0;
+
+fail:
+    if (new_args) {
+        for (int i = 0; i < new_argc; i++) {
+            free(new_args[i]);
+        }
+    }
+    free(new_args);
+    return -1;
+}
+
+static void
+load_current_arg_file(buffer_t *b)
+{
+    replace_saved_string(&alternate_filename, b->filename);
+    buf_free(b);
+    buf_init(b);
+    b->filename = strdup(ex_args[ex_arg_idx]);
+    if (b->filename) {
+        buf_read_file(b, b->filename);
+        if (!batch_mode) {
+            printf("\"%s\" %d lines\n", b->filename, b->line_count);
+        }
+    }
+}
+
+static char *
+expand_filename_refs(buffer_t *b, const char *arg)
+{
+    size_t out_len = 0;
+    char *out;
+    const char *p;
+
+    if (!arg) {
+        return NULL;
+    }
+    if (arg[0] == '!') {
+        return strdup(arg);
+    }
+
+    for (p = arg; *p; p++) {
+        if (*p == '%') {
+            if (!b->filename) {
+                fprintf(stderr, "No current filename\n");
+                return NULL;
+            }
+            out_len += strlen(b->filename);
+        } else if (*p == '#') {
+            if (!alternate_filename) {
+                fprintf(stderr, "No alternate filename\n");
+                return NULL;
+            }
+            out_len += strlen(alternate_filename);
+        } else {
+            out_len++;
+        }
+    }
+
+    out = malloc(out_len + 1);
+    if (!out) {
+        return NULL;
+    }
+
+    out_len = 0;
+    for (p = arg; *p; p++) {
+        const char *src = NULL;
+        size_t len = 0;
+
+        if (*p == '%') {
+            src = b->filename;
+            len = strlen(src);
+        } else if (*p == '#') {
+            src = alternate_filename;
+            len = strlen(src);
+        } else {
+            out[out_len++] = *p;
+            continue;
+        }
+
+        memcpy(out + out_len, src, len);
+        out_len += len;
+    }
+    out[out_len] = '\0';
+    return out;
+}
+
+static void
+free_tag_stack(void)
+{
+    for (int i = 0; i < tag_stack_len; i++) {
+        free(tag_stack[i].filename);
+    }
+    free(tag_stack);
+    tag_stack = NULL;
+    tag_stack_len = 0;
+}
+
+static char *
+recover_path_for(const char *filename)
+{
+    char *path = NULL;
+
+    if (!filename) {
+        return NULL;
+    }
+    if (asprintf(&path, "%s.recover", filename) < 0) {
+        return NULL;
+    }
+    return path;
+}
+
+static int
+load_recover_into_buffer(buffer_t *b, const char *filename)
+{
+    char *path;
+    struct stat st;
+
+    path = recover_path_for(filename);
+    if (!path) {
+        return -1;
+    }
+    if (stat(path, &st) != 0) {
+        free(path);
+        return -1;
+    }
+
+    buf_free(b);
+    buf_init(b);
+    b->filename = strdup(filename);
+    if (!b->filename) {
+        free(path);
+        return -1;
+    }
+    buf_read_file(b, path);
+    b->modified = 1;
+    free(path);
+    return 0;
+}
+
+static void
+load_startup_commands(buffer_t *b)
+{
+    char *exinit = getenv("EXINIT");
+
+    if (exinit) {
+        char *exinit_cpy = strdup(exinit);
+
+        if (exinit_cpy) {
+            do_command(b, exinit_cpy);
+            free(exinit_cpy);
+        }
+        return;
+    }
+
+    if (!secure_mode) {
+        char *home = getenv("HOME");
+
+        if (home) {
+            char path[1024];
+            struct stat st;
+
+            snprintf(path, sizeof(path), "%s/.exrc", home);
+            if (stat(path, &st) == 0
+                && S_ISREG(st.st_mode)
+                && (st.st_uid == getuid() || st.st_uid == 0)
+                && (st.st_mode & (S_IWGRP | S_IWOTH)) == 0) {
+                FILE *f = fopen(path, "r");
+
+                if (f) {
+                    char *rc_line = NULL;
+                    size_t rc_cap = 0;
+                    ssize_t rc_ret;
+
+                    while ((rc_ret = getline(&rc_line, &rc_cap, f)) != -1) {
+                        if (rc_ret > 0 && rc_line[rc_ret - 1] == '\n') {
+                            rc_line[rc_ret - 1] = '\0';
+                        }
+                        do_command(b, rc_line);
+                    }
+                    free(rc_line);
+                    fclose(f);
+                }
+            }
+        }
+    }
+}
+
+static int
+push_tag_frame(buffer_t *b)
+{
+    tag_frame_t *grown;
+    char *filename;
+
+    if (!b->filename) {
+        return 0;
+    }
+
+    filename = strdup(b->filename);
+    if (!filename) {
+        return -1;
+    }
+
+    grown = realloc(tag_stack, sizeof(*tag_stack) * (size_t)(tag_stack_len + 1));
+    if (!grown) {
+        free(filename);
+        return -1;
+    }
+    tag_stack = grown;
+    tag_stack[tag_stack_len].filename = filename;
+    tag_stack[tag_stack_len].line = buf_current_line(b);
+    tag_stack_len++;
+    return 0;
+}
 
 void handle_sigint(int sig) {
     (void)sig;
@@ -66,16 +376,18 @@ void handle_sigint(int sig) {
 void handle_sigterm(int sig) {
     (void)sig;
     if (global_buf_for_sighandler && global_buf_for_sighandler->modified && global_buf_for_sighandler->filename && global_buf_for_sighandler->head) {
-        char path[1024];
-        snprintf(path, sizeof(path), "%s.recover", global_buf_for_sighandler->filename);
-        FILE *f = fopen(path, "w");
-        if (f) {
-            line_t *curr = global_buf_for_sighandler->head;
-            while (curr) {
-                fprintf(f, "%s\n", curr->text);
-                curr = curr->next;
+        char *path = recover_path_for(global_buf_for_sighandler->filename);
+        if (path) {
+            FILE *f = fopen(path, "w");
+            if (f) {
+                line_t *curr = global_buf_for_sighandler->head;
+                while (curr) {
+                    fprintf(f, "%s\n", curr->text);
+                    curr = curr->next;
+                }
+                fclose(f);
             }
-            fclose(f);
+            free(path);
         }
     }
     exit(1);
@@ -186,11 +498,46 @@ void buf_read_file(buffer_t *b, const char *filename) {
     }
     free(line);
     fclose(f);
-    b->cur = b->tail;
+    b->cur = b->head;
     b->modified = 0; // Freshly read
 }
 
-void buf_write_file(buffer_t *b, const char *filename, int append) {
+static int
+write_range_to_stream(buffer_t *b, FILE *f, int addr1, int addr2)
+{
+    line_t *curr;
+
+    if (addr1 == -1 || addr2 == -1) {
+        addr1 = 1;
+        addr2 = b->line_count;
+    }
+    if (b->line_count == 0 && addr1 == 1 && addr2 == 0) {
+        return 0;
+    }
+    if (addr1 < 1 || addr2 < addr1 || addr2 > b->line_count) {
+        return -1;
+    }
+
+    curr = buf_get_line(b, addr1);
+    for (int line = addr1; line <= addr2 && curr; line++) {
+        fprintf(f, "%s\n", curr->text);
+        curr = curr->next;
+    }
+    return 0;
+}
+
+static void
+buf_write_file(buffer_t *b, const char *filename, int append)
+{
+    buf_write_range(b, filename, append, 1, b->line_count);
+}
+
+static void
+buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int addr2)
+{
+    int wrote_current_file = 0;
+    int wrote_whole_buffer = 0;
+
     if (filename[0] == '!') {
         if (secure_mode) {
             fprintf(stderr, "Shell commands not allowed in secure mode\n");
@@ -199,22 +546,29 @@ void buf_write_file(buffer_t *b, const char *filename, int append) {
         // write to shell command
         FILE *f = popen(filename + 1, "w");
         if (!f) return;
-        line_t *curr = b->head;
-        while (curr) {
-            fprintf(f, "%s\n", curr->text);
-            curr = curr->next;
+        if (write_range_to_stream(b, f, addr1, addr2) != 0) {
+            pclose(f);
+            fprintf(stderr, "Invalid write range\n");
+            return;
         }
         pclose(f);
         return;
+    }
+
+    if (b->filename && strcmp(filename, b->filename) == 0) {
+        wrote_current_file = 1;
+    }
+    if (addr1 == 1 && addr2 == b->line_count) {
+        wrote_whole_buffer = 1;
     }
     
     if (append) {
         FILE *f = fopen(filename, "a");
         if (!f) { perror(filename); return; }
-        line_t *curr = b->head;
-        while (curr) {
-            fprintf(f, "%s\n", curr->text);
-            curr = curr->next;
+        if (write_range_to_stream(b, f, addr1, addr2) != 0) {
+            fclose(f);
+            fprintf(stderr, "Invalid write range\n");
+            return;
         }
         fclose(f);
     } else {
@@ -239,10 +593,12 @@ void buf_write_file(buffer_t *b, const char *filename, int append) {
             return;
         }
         
-        line_t *curr = b->head;
-        while (curr) {
-            fprintf(f, "%s\n", curr->text);
-            curr = curr->next;
+        if (write_range_to_stream(b, f, addr1, addr2) != 0) {
+            fclose(f);
+            remove(tmp);
+            free(tmp);
+            fprintf(stderr, "Invalid write range\n");
+            return;
         }
         fclose(f); // closes fd as well
         if (rename(tmp, filename) < 0) {
@@ -253,7 +609,9 @@ void buf_write_file(buffer_t *b, const char *filename, int append) {
         }
         free(tmp);
     }
-    b->modified = 0;
+    if (wrote_current_file && wrote_whole_buffer && !append) {
+        b->modified = 0;
+    }
 }
 
 
@@ -627,7 +985,28 @@ static int input_mode = 0; // 0=cmd, 1=append, 2=insert, 3=change
 static line_t *input_insert_pos = NULL;
 
 static void
-print_range(buffer_t *b, int addr1, int addr2, int numbered)
+print_line_text(line_t *l, int listed)
+{
+    if (listed) {
+        for (size_t j = 0; j < l->len; j++) {
+            unsigned char c = l->text[j];
+
+            if (c == '\t') {
+                printf("^I");
+            } else if (c < 32 || c == 127) {
+                printf("^%c", (c == 127) ? '?' : c + 64);
+            } else {
+                putchar(c);
+            }
+        }
+        printf("$\n");
+    } else {
+        printf("%s\n", l->text);
+    }
+}
+
+static void
+print_range(buffer_t *b, int addr1, int addr2, int numbered, int listed)
 {
     if (addr1 != -1 && addr2 != -1 && addr1 <= addr2) {
         line_t *l = buf_get_line(b, addr1);
@@ -636,7 +1015,7 @@ print_range(buffer_t *b, int addr1, int addr2, int numbered)
             if (numbered) {
                 printf("%6d  ", addr1 + i);
             }
-            printf("%s\n", l->text);
+            print_line_text(l, listed);
             b->cur = l;
             l = l->next;
         }
@@ -788,7 +1167,10 @@ void do_command(buffer_t *b, char *cmd) {
         if (!explicit_range) {
             set_default_current_range(b, &addr1, &addr2);
         }
-        print_range(b, addr1, addr2, option_number);
+        if (addr2 > 0) {
+            b->cur = buf_get_line(b, addr2);
+        }
+        print_range(b, addr1, addr2, option_number, option_list);
         return;
     }
     
@@ -800,6 +1182,17 @@ void do_command(buffer_t *b, char *cmd) {
         fprintf(stderr, "%s: visual mode not implemented in this build.\n", exvi_progname);
         return;
     } else if (match_command(cmd, "args", NULL, &args, NULL)) {
+        const char *ptr = args;
+
+        while (*ptr && isspace((unsigned char)*ptr)) {
+            ptr++;
+        }
+        if (*ptr) {
+            if (set_ex_arglist_from_words(ptr) != 0) {
+                fprintf(stderr, "Usage: args file ...\n");
+                return;
+            }
+        }
         if (ex_argc == 0) {
             printf("No files\n");
             return;
@@ -811,8 +1204,28 @@ void do_command(buffer_t *b, char *cmd) {
         printf("\n");
         return;
     } else if (match_command(cmd, "next", "n", &args, &force)) {
+        int replaced_args = 0;
+
         if (b->modified && !force) {
             fprintf(stderr, "No write since last change (add ! to override)\n");
+            return;
+        }
+        if (args) {
+            const char *ptr = args;
+
+            while (*ptr && isspace((unsigned char)*ptr)) {
+                ptr++;
+            }
+            if (*ptr) {
+                if (set_ex_arglist_from_words(ptr) != 0) {
+                    fprintf(stderr, "Usage: next [file ...]\n");
+                    return;
+                }
+                replaced_args = 1;
+            }
+        }
+        if (replaced_args) {
+            load_current_arg_file(b);
             return;
         }
         if (ex_arg_idx + 1 >= ex_argc) {
@@ -820,11 +1233,7 @@ void do_command(buffer_t *b, char *cmd) {
             return;
         }
         ex_arg_idx++;
-        buf_free(b);
-        buf_init(b);
-        b->filename = strdup(ex_args[ex_arg_idx]);
-        buf_read_file(b, b->filename);
-        if (!batch_mode) printf("\"%s\" %d lines\n", b->filename, b->line_count);
+        load_current_arg_file(b);
         return;
     } else if (match_command(cmd, "prev", NULL, &args, &force)) {
         if (b->modified && !force) {
@@ -836,11 +1245,7 @@ void do_command(buffer_t *b, char *cmd) {
             return;
         }
         ex_arg_idx--;
-        buf_free(b);
-        buf_init(b);
-        b->filename = strdup(ex_args[ex_arg_idx]);
-        buf_read_file(b, b->filename);
-        if (!batch_mode) printf("\"%s\" %d lines\n", b->filename, b->line_count);
+        load_current_arg_file(b);
         return;
     } else if (match_command(cmd, "rewind", "rew", &args, &force)) {
         if (b->modified && !force) {
@@ -852,34 +1257,78 @@ void do_command(buffer_t *b, char *cmd) {
             return;
         }
         ex_arg_idx = 0;
-        buf_free(b);
-        buf_init(b);
-        b->filename = strdup(ex_args[ex_arg_idx]);
-        buf_read_file(b, b->filename);
-        if (!batch_mode) printf("\"%s\" %d lines\n", b->filename, b->line_count);
+        load_current_arg_file(b);
         return;
     } else if (match_command(cmd, "preserve", "pre", &args, NULL)) {
         if (b->filename && b->modified && b->head) {
-            char path[1024];
-            snprintf(path, sizeof(path), "%s.recover", b->filename);
+            char *path = recover_path_for(b->filename);
+
+            if (!path) {
+                fprintf(stderr, "Out of memory\n");
+                return;
+            }
             buf_write_file(b, path, 0);
             printf("File preserved as %s\n", path);
+            free(path);
         } else {
             fprintf(stderr, "No modifications or filename to preserve\n");
         }
         return;
     } else if (match_command(cmd, "recover", "rec", &args, NULL)) {
-        if (!b->filename) {
+        char *recover_name;
+        char *ptr = (char *)args;
+
+        while (*ptr && isspace((unsigned char)*ptr)) {
+            ptr++;
+        }
+        if (*ptr) {
+            recover_name = expand_filename_refs(b, ptr);
+        } else if (b->filename) {
+            recover_name = expand_filename_refs(b, b->filename);
+        } else {
+            recover_name = NULL;
+        }
+
+        if (!recover_name) {
             fprintf(stderr, "No current filename\n");
             return;
         }
-        char path[1024];
-        snprintf(path, sizeof(path), "%s.recover", b->filename);
+        if (load_recover_into_buffer(b, recover_name) != 0) {
+            fprintf(stderr, "No recover file for %s\n", recover_name);
+            free(recover_name);
+            return;
+        }
+        free(recover_name);
+        printf("\"%s\" recovered, %d lines\n", b->filename, b->line_count);
+        return;
+    } else if (match_command(cmd, "pop", "po", &args, &force)) {
+        tag_frame_t frame;
+
+        if (b->modified && !force) {
+            fprintf(stderr, "No write since last change (add ! to override)\n");
+            return;
+        }
+        if (tag_stack_len == 0) {
+            fprintf(stderr, "Tag stack empty\n");
+            return;
+        }
+
+        frame = tag_stack[--tag_stack_len];
+        if (tag_stack_len == 0) {
+            free(tag_stack);
+            tag_stack = NULL;
+        }
+        replace_saved_string(&alternate_filename, b->filename);
         buf_free(b);
         buf_init(b);
-        buf_read_file(b, path);
-        printf("\"%s\" recovered, %d lines\n", b->filename, b->line_count);
-        b->modified = 1;
+        b->filename = frame.filename;
+        buf_read_file(b, b->filename);
+        if (frame.line > 0) {
+            b->cur = buf_get_line(b, frame.line);
+        }
+        if (!batch_mode) {
+            printf("\"%s\" %d lines\n", b->filename, b->line_count);
+        }
         return;
     } else if (match_command(cmd, "tag", NULL, &args, NULL)) {
         char *ptr = (char *)args;
@@ -906,16 +1355,27 @@ void do_command(buffer_t *b, char *cmd) {
             char *tcmd = strtok(NULL, "");
             
             if (tname && tfile && tcmd && strcmp(tname, ptr) == 0) {
+                char *old_filename;
+
                 if (b->modified) {
                     fprintf(stderr, "No write since last change\n");
                     free(line);
                     fclose(f);
                     return;
                 }
+                if (push_tag_frame(b) != 0) {
+                    fprintf(stderr, "Out of memory\n");
+                    free(line);
+                    fclose(f);
+                    return;
+                }
+                old_filename = b->filename ? strdup(b->filename) : NULL;
                 buf_free(b);
                 buf_init(b);
                 b->filename = strdup(tfile);
                 buf_read_file(b, b->filename);
+                replace_saved_string(&alternate_filename, old_filename);
+                free(old_filename);
                 if (!batch_mode) printf("\"%s\" %d lines\n", b->filename, b->line_count);
                 
                 // execute the tag command (usually a search or line number)
@@ -942,6 +1402,9 @@ void do_command(buffer_t *b, char *cmd) {
             if (option_number) {
                 printf("number\n");
             }
+            if (option_list) {
+                printf("list\n");
+            }
             return;
         }
 
@@ -967,6 +1430,9 @@ void do_command(buffer_t *b, char *cmd) {
                 if (option_number) {
                     printf("number\n");
                 }
+                if (option_list) {
+                    printf("list\n");
+                }
             } else if (len == 2 && strncmp(ptr, "nu", 2) == 0) {
                 if (query) {
                     printf("%s\n", option_number ? "number" : "nonumber");
@@ -990,6 +1456,30 @@ void do_command(buffer_t *b, char *cmd) {
                     printf("%s\n", option_number ? "nonumber" : "number");
                 } else {
                     option_number = 0;
+                }
+            } else if (len == 2 && strncmp(ptr, "li", 2) == 0) {
+                if (query) {
+                    printf("%s\n", option_list ? "list" : "nolist");
+                } else {
+                    option_list = 1;
+                }
+            } else if (len == 4 && strncmp(ptr, "list", 4) == 0) {
+                if (query) {
+                    printf("%s\n", option_list ? "list" : "nolist");
+                } else {
+                    option_list = 1;
+                }
+            } else if (len == 4 && strncmp(ptr, "noli", 4) == 0) {
+                if (query) {
+                    printf("%s\n", option_list ? "nolist" : "list");
+                } else {
+                    option_list = 0;
+                }
+            } else if (len == 6 && strncmp(ptr, "nolist", 6) == 0) {
+                if (query) {
+                    printf("%s\n", option_list ? "nolist" : "list");
+                } else {
+                    option_list = 0;
                 }
             } else {
                 fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
@@ -1020,7 +1510,15 @@ void do_command(buffer_t *b, char *cmd) {
         }
     } else if (match_command(cmd, "write", "w", &args, NULL)) {
         char *ptr = (char *)args;
+        char *target = NULL;
         int append = 0;
+        int write_addr1 = 1;
+        int write_addr2 = b->line_count;
+
+        if (explicit_range) {
+            write_addr1 = addr1;
+            write_addr2 = addr2;
+        }
         while (*ptr && isspace((unsigned char)*ptr)) ptr++;
         if (*ptr == '>' && *(ptr+1) == '>') {
             append = 1;
@@ -1028,15 +1526,21 @@ void do_command(buffer_t *b, char *cmd) {
             while (*ptr && isspace((unsigned char)*ptr)) ptr++;
         }
         if (*ptr) {
-            buf_write_file(b, ptr, append);
+            target = expand_filename_refs(b, ptr);
+            if (!target) {
+                return;
+            }
+            buf_write_range(b, target, append, write_addr1, write_addr2);
+            free(target);
         } else if (b->filename) {
-            buf_write_file(b, b->filename, append);
+            buf_write_range(b, b->filename, append, write_addr1, write_addr2);
         } else {
             fprintf(stderr, "No current filename\n");
         }
     } else if (match_command(cmd, "edit", "e", &args, &force)) {
         char *ptr = (char *)args;
         char *old_filename = NULL;
+        char *new_filename = NULL;
         while (*ptr && isspace((unsigned char)*ptr)) ptr++;
         
         if (b->modified && !force) {
@@ -1050,16 +1554,22 @@ void do_command(buffer_t *b, char *cmd) {
                 perror("strdup");
                 return;
             }
+        } else if (*ptr) {
+            new_filename = expand_filename_refs(b, ptr);
+            if (!new_filename) {
+                return;
+            }
         }
         
         buf_free(b);
         buf_init(b);
         if (*ptr) {
-            b->filename = strdup(ptr);
+            b->filename = new_filename;
         } else if (old_filename) {
             b->filename = old_filename;
             old_filename = NULL;
         }
+        replace_saved_string(&alternate_filename, old_filename);
         if (b->filename) {
             buf_read_file(b, b->filename);
             if (!batch_mode) printf("\"%s\" %d lines\n", b->filename, b->line_count);
@@ -1070,6 +1580,7 @@ void do_command(buffer_t *b, char *cmd) {
     } else if (match_command(cmd, "read", "r", &args, NULL)) {
         char *ptr = (char *)args;
         const char *display_name;
+        char *expanded_name = NULL;
         while (*ptr && isspace((unsigned char)*ptr)) ptr++;
         
         FILE *f = NULL;
@@ -1084,8 +1595,14 @@ void do_command(buffer_t *b, char *cmd) {
             f = popen(ptr + 1, "r");
         } else {
             if (!*ptr) ptr = b->filename; // default to current file
-            display_name = ptr;
-            if (ptr) f = fopen(ptr, "r");
+            if (ptr) {
+                expanded_name = expand_filename_refs(b, ptr);
+                if (!expanded_name) {
+                    return;
+                }
+            }
+            display_name = expanded_name;
+            if (expanded_name) f = fopen(expanded_name, "r");
         }
         
         if (f) {
@@ -1109,8 +1626,10 @@ void do_command(buffer_t *b, char *cmd) {
             if (!batch_mode && display_name) {
                 printf("\"%s\" %d lines\n", display_name, lines_read);
             }
+            free(expanded_name);
         } else {
-            perror(ptr);
+            perror(expanded_name ? expanded_name : ptr);
+            free(expanded_name);
         }
     } else if (match_command(cmd, "delete", "d", &args, NULL)) {
         if (!explicit_range) {
@@ -1154,25 +1673,15 @@ void do_command(buffer_t *b, char *cmd) {
         }
         if (addr1 != -1 && addr2 != -1 && addr1 <= addr2) {
             line_t *l = buf_get_line(b, addr1);
+            int numbered = (cmd[0] == '#' || strncmp(cmd, "number", 6) == 0
+                || ((cmd[0] == 'p' || strncmp(cmd, "print", 5) == 0) && option_number));
+            int listed = (cmd[0] == 'l' || strncmp(cmd, "list", 4) == 0
+                || ((cmd[0] == 'p' || strncmp(cmd, "print", 5) == 0) && option_list));
             for (int i = 0; i < (addr2 - addr1 + 1) && l; i++) {
-                if (cmd[0] == '#' || strncmp(cmd, "number", 6) == 0
-                    || ((cmd[0] == 'p' || strncmp(cmd, "print", 5) == 0) && option_number)) {
+                if (numbered) {
                     printf("%6d  ", addr1 + i);
                 }
-                if (cmd[0] == 'l' || strncmp(cmd, "list", 4) == 0) {
-                    for (size_t j = 0; j < l->len; j++) {
-                        unsigned char c = l->text[j];
-                        if (c == '\t') printf("^I");
-                        else if (c < 32 || c == 127) {
-                            printf("^%c", (c == 127) ? '?' : c + 64);
-                        } else {
-                            putchar(c);
-                        }
-                    }
-                    printf("$\n");
-                } else {
-                    printf("%s\n", l->text);
-                }
+                print_line_text(l, listed);
                 b->cur = l;
                 l = l->next;
             }
@@ -1199,11 +1708,16 @@ void do_command(buffer_t *b, char *cmd) {
         b->marks[*ptr - 'a'] = buf_get_line(b, target);
     } else if (match_command(cmd, "file", "f", &args, NULL)) {
         char *ptr = (char *)args;
+        char *new_name = NULL;
         while (*ptr && isspace((unsigned char)*ptr)) ptr++;
         if (*ptr) {
-            // set file
+            new_name = expand_filename_refs(b, ptr);
+            if (!new_name) {
+                return;
+            }
+            replace_saved_string(&alternate_filename, b->filename);
             if (b->filename) free(b->filename);
-            b->filename = strdup(ptr);
+            b->filename = new_name;
         }
         printf("\"%s\" %s %d lines\n", b->filename ? b->filename : "No File", b->modified ? "[Modified]" : "", b->line_count);
     } else if (match_command(cmd, "append", "a", &args, NULL)) {
@@ -1522,6 +2036,7 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
     visual_mode = (frontend == EXVI_FRONTEND_VI);
     recover_mode = 0;
     option_number = 0;
+    option_list = 0;
     free(last_search_pattern);
     last_search_pattern = NULL;
     free(last_sub_pattern);
@@ -1530,9 +2045,7 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
     last_sub_replacement = NULL;
     last_sub_global = 0;
     exvi_progname = (frontend == EXVI_FRONTEND_VI) ? "vi" : "ex";
-    ex_args = NULL;
-    ex_argc = 0;
-    ex_arg_idx = 0;
+    free_ex_arglist();
     input_mode = 0;
     input_insert_pos = NULL;
     while ((opt = getopt(argc, argv, "sSvr")) != -1) {
@@ -1565,12 +2078,18 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
         ex_args = argv + optind;
         ex_argc = argc - optind;
         ex_arg_idx = 0;
+        ex_args_owned = 0;
         buf.filename = strdup(ex_args[ex_arg_idx]);
         if (recover_mode) {
-            char path[1024];
-            snprintf(path, sizeof(path), "%s.recover", buf.filename);
-            buf_read_file(&buf, path);
-            buf.modified = 1;
+            if (load_recover_into_buffer(&buf, buf.filename) != 0) {
+                fprintf(stderr, "%s: no recover file for %s\n", exvi_progname, buf.filename);
+                buf_free(&buf);
+                buf_free(&undo_buf);
+                for (int i = 0; i < 27; i++) {
+                    buf_free(&regs[i]);
+                }
+                return 1;
+            }
         } else {
             buf_read_file(&buf, buf.filename);
         }
@@ -1586,34 +2105,7 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
         return 1;
     }
 
-    char *exinit = getenv("EXINIT");
-    if (exinit) {
-        char *exinit_cpy = strdup(exinit);
-        do_command(&buf, exinit_cpy);
-        free(exinit_cpy);
-    } else {
-        char *home = getenv("HOME");
-        if (home) {
-            char path[1024];
-            snprintf(path, sizeof(path), "%s/.exrc", home);
-            
-            struct stat st;
-            if (stat(path, &st) == 0 && (st.st_uid == getuid() || st.st_uid == 0)) {
-                FILE *f = fopen(path, "r");
-                if (f) {
-                    char *rc_line = NULL;
-                    size_t rc_cap = 0;
-                    ssize_t rc_ret;
-                    while ((rc_ret = getline(&rc_line, &rc_cap, f)) != -1) {
-                        if (rc_ret > 0 && rc_line[rc_ret-1] == '\n') rc_line[rc_ret-1] = '\0';
-                        do_command(&buf, rc_line);
-                    }
-                    free(rc_line);
-                    fclose(f);
-                }
-            }
-        }
-    }
+    load_startup_commands(&buf);
 
     char *line = NULL;
     size_t cap = 0;
@@ -1668,5 +2160,9 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
     free(last_sub_replacement);
     last_sub_replacement = NULL;
     last_sub_global = 0;
+    free(alternate_filename);
+    alternate_filename = NULL;
+    free_ex_arglist();
+    free_tag_stack();
     return 0;
 }
