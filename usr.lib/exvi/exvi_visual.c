@@ -77,6 +77,7 @@ static void vi_page_scroll(buffer_t *b, vi_visual_t *vis, int direction);
 static void vi_delete_char(buffer_t *b, vi_visual_t *vis);
 static int vi_prompt_input(buffer_t *b, vi_visual_t *vis, char prefix, char *buf,
     size_t buf_size);
+static char *vi_current_word_pattern(buffer_t *b, vi_visual_t *vis);
 
 static void
 vi_restore_terminal(void)
@@ -2993,6 +2994,20 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
             write(STDOUT_FILENO, "\a", 1);
         }
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+        (key == '*' || key == '#')) {
+        char *pattern = vi_current_word_pattern(b, vis);
+        line_t *target_line;
+        int target_col;
+
+        if (!pattern) {
+            write(STDOUT_FILENO, "\a", 1);
+        } else if (vi_search_motion_target(b, vis, pattern, key == '*',
+            &target_line, &target_col) != 0 ||
+            vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
+            write(STDOUT_FILENO, "\a", 1);
+        }
+        free(pattern);
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == '0') {
         if (vis->cursor_col > 0) {
             vi_delete_span(b, vis, 0, vis->cursor_col, vis->pending_op == 'c');
