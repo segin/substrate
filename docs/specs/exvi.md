@@ -154,7 +154,7 @@ Completed architecture milestones already in tree are intentionally omitted here
 #### 2.2 Command-set completeness and command semantics
 
 - [ ] Complete the remaining POSIX/BSD `ex` commands and accepted abbreviations that are still absent from the dispatcher.
-- [ ] Audit `print`, `number`, `list`, and `=` for exact current-line side effects and diagnostics.
+- [x] Audit `print`, `number`, `list`, and `=` for exact current-line side effects and diagnostics.
 - [ ] Finish `write`, `write!`, append-write, and write-to-command semantics for all range/error/readonly cases.
 - [ ] Finish `read`, `read !cmd`, and insertion-point behavior for empty buffers, addressed reads, and shell-command reads.
 - [ ] Audit `global` and `v` against frozen-match-set semantics under destructive nested commands.

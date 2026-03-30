@@ -607,7 +607,7 @@ run_stdout_test "Plain print starts at top after file load" \
 run_stdout_test "Set number enables numbered print" \
     "alpha\nbeta\n" \
     ":set nu\n:1p\n:q!\n" \
-    "     1  alpha"
+    "      1 alpha"
 
 run_stdout_test "Set nonumber disables numbered print" \
     "alpha\nbeta\n" \
@@ -635,6 +635,37 @@ run_stdout_test "Percent range prints whole file" \
     "alpha
 beta
 gamma"
+
+run_stdout_test "Equals prints last line number and leaves current unchanged" \
+    "alpha\nbeta\ngamma\n" \
+    ":=\n:p\n:q!\n" \
+    "3
+alpha"
+
+run_stdout_test "Addressed equals prints addressed line number and leaves current unchanged" \
+    "alpha\nbeta\ngamma\n" \
+    ":1,2=\n:p\n:q!\n" \
+    "2
+alpha"
+
+run_stdout_test "Equals prints zero for an empty buffer" \
+    "" \
+    ":=\n:q!\n" \
+    "0"
+
+run_stdout_test "Number command uses vim-style field width and updates current line" \
+    "alpha\nbeta\ngamma\n" \
+    ":1,2#\n:p\n:q!\n" \
+    "      1 alpha
+      2 beta
+beta"
+
+run_stdout_test "List command updates current line to the last listed line" \
+    "a\tb\nc\n" \
+    ":1,2l\n:p\n:q!\n" \
+    "a^Ib$
+c$
+c"
 
 run_write_file_test "Write range writes only addressed lines" \
     "alpha\nbeta\ngamma\n" \
@@ -788,7 +819,7 @@ run_startup_test "Safe .exrc is loaded" \
     "set number\n" \
     600 \
     ":1p\n:q!\n" \
-    "     1  alpha"
+    "      1 alpha"
 
 run_startup_test "Group-writable .exrc is ignored" \
     "alpha\nbeta\n" \
@@ -858,6 +889,30 @@ run_stderr_status_test "Set rejects unknown option" \
     ":set frobnicate\n:q!\n" \
     0 \
     "Unknown option: frobnicate"
+
+run_stderr_status_test "Print rejects empty buffer" \
+    "" \
+    ":p\n:q!\n" \
+    0 \
+    "No current line"
+
+run_stderr_status_test "Number rejects empty buffer" \
+    "" \
+    ":#\n:q!\n" \
+    0 \
+    "No current line"
+
+run_stderr_status_test "List rejects empty buffer" \
+    "" \
+    ":l\n:q!\n" \
+    0 \
+    "No current line"
+
+run_stderr_status_test "Empty command rejects empty buffer" \
+    "" \
+    ":\n:q!\n" \
+    0 \
+    "No current line"
 
 run_nofile_stderr_status_test "File percent rejects missing current filename" \
     ":file %\n:q!\n" \

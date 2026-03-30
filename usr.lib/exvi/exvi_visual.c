@@ -535,7 +535,7 @@ vi_draw_line(const char *text, int cols, int number, int line_no, int left_col)
     int display_col = 0;
 
     if (number) {
-        used += printf("%6d  ", line_no);
+        used += printf("%7d ", line_no);
     }
     while (*text && display_col < left_col) {
         display_col += vi_char_display_width((unsigned char)*text, display_col);

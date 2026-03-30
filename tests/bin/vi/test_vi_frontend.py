@@ -126,7 +126,7 @@ def main():
         final_keys=None,
     )
     require(exit_code == 0, f"vi colon-command parity exited with status {exit_code}")
-    require("     1  one" in decoded, "vi colon-command parity missing numbered render")
+    require("      1 one" in decoded, "vi colon-command parity missing numbered render")
     require("wrapscan" in decoded, "vi colon-command parity missing option query output")
     require("Unknown option: nope" in decoded,
             "vi colon-command parity missing diagnostic output")

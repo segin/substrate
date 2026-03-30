@@ -310,10 +310,7 @@ handle_buffer_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
         || match_command(cmd, "list", "l", &args, NULL)) {
         return handle_print_command(b, cmd, explicit_range, addr1, addr2);
     } else if (cmd[0] == '=') {
-        int target = (addr2 != -1) ? addr2 : b->line_count;
-
-        printf("%d\n", target);
-        return 1;
+        return handle_equal_command(b, explicit_range, addr2);
     } else if (cmd[0] == 'k' || match_command(cmd, "mark", NULL, &args, NULL)) {
         return handle_mark_command(b, cmd, args, addr2);
     } else if (match_command(cmd, "file", "f", &args, NULL)) {
@@ -371,6 +368,10 @@ void do_command(buffer_t *b, char *cmd) {
     if (!*cmd) {
         if (!explicit_range) {
             set_default_current_range(b, &addr1, &addr2);
+        }
+        if (addr1 < 1 || addr2 < 1) {
+            fprintf(stderr, "No current line\n");
+            return;
         }
         if (addr2 > 0) {
             b->cur = buf_get_line(b, addr2);

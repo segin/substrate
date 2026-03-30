@@ -31,6 +31,16 @@ print_line_text(line_t *l, int listed)
     }
 }
 
+static void
+print_line_number_prefix(int line_no)
+{
+    /*
+     * BSD/vim-style numbered print output uses a seven-column field plus a
+     * separating space, rather than the looser ad hoc spacing we had before.
+     */
+    printf("%7d ", line_no);
+}
+
 void
 set_default_current_range(buffer_t *b, int *addr1, int *addr2)
 {
@@ -54,7 +64,7 @@ print_range(buffer_t *b, int addr1, int addr2, int numbered, int listed)
 
         for (int i = 0; i < (addr2 - addr1 + 1) && l; i++) {
             if (numbered) {
-                printf("%6d  ", addr1 + i);
+                print_line_number_prefix(addr1 + i);
             }
             print_line_text(l, listed);
             b->cur = l;
@@ -240,11 +250,25 @@ handle_print_command(buffer_t *b, const char *cmd, int explicit_range, int addr1
     if (!explicit_range) {
         set_default_current_range(b, &addr1, &addr2);
     }
+    if (addr1 < 1 || addr2 < 1) {
+        fprintf(stderr, "No current line\n");
+        return 1;
+    }
     numbered = (cmd[0] == '#' || strncmp(cmd, "number", 6) == 0
         || ((cmd[0] == 'p' || strncmp(cmd, "print", 5) == 0) && option_number));
     listed = (cmd[0] == 'l' || strncmp(cmd, "list", 4) == 0
         || ((cmd[0] == 'p' || strncmp(cmd, "print", 5) == 0) && option_list));
     print_range(b, addr1, addr2, numbered, listed);
+    return 1;
+}
+
+int
+handle_equal_command(buffer_t *b, int explicit_range, int addr2)
+{
+    int target;
+
+    target = explicit_range ? addr2 : b->line_count;
+    printf("%d\n", target);
     return 1;
 }
 
