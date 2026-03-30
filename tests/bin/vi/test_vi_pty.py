@@ -132,6 +132,24 @@ def main():
     output = send_keys(master_fd, output, b"L")
     output = send_keys(master_fd, output, b"1")
     output = send_keys(master_fd, output, b"\x1b")
+    output = send_keys(master_fd, output, b"/")
+    output = send_keys(master_fd, output, b"three\r")
+    output = send_keys(master_fd, output, b"s")
+    output = send_keys(master_fd, output, b"T")
+    output = send_keys(master_fd, output, b"H")
+    output = send_keys(master_fd, output, b"\x1b")
+    output = send_keys(master_fd, output, b"/")
+    output = send_keys(master_fd, output, b"two \r")
+    output = send_keys(master_fd, output, b"R")
+    output = send_keys(master_fd, output, b"T")
+    output = send_keys(master_fd, output, b"w")
+    output = send_keys(master_fd, output, b"o")
+    output = send_keys(master_fd, output, b"!")
+    output = send_keys(master_fd, output, b"\x1b")
+    output = send_keys(master_fd, output, b"/")
+    output = send_keys(master_fd, output, b"five\r")
+    output = send_keys(master_fd, output, b"r")
+    output = send_keys(master_fd, output, b"F")
     output = send_keys(master_fd, output, b":")
     output = send_keys(master_fd, output, b"wq\r", 0.3)
 
@@ -149,11 +167,12 @@ def main():
     require("line 2/5" in decoded, "missing forward search status")
     require("line 4/5" in decoded, "missing repeat search status")
     require("-- INSERT --" in decoded, "missing insert mode status")
+    require("-- REPLACE --" in decoded, "missing replace mode status")
     require(":wq" in decoded, "missing ex command prompt rendering")
     with open(temp_path, "r", encoding="utf-8") as f:
         saved = f.read()
     os.unlink(temp_path)
-    require(saved == "Top-split\nline\nTAIL1\ntail\nXone\nTWO\nthree\ntwo \nfive\n",
+    require(saved == "Top-split\nline\nTAIL1\ntail\nXone\nTWO\nTHhree\nTwo!\nFive\n",
             f"unexpected saved buffer: {saved!r}")
     print("vi pty test: ok")
     return 0

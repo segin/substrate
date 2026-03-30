@@ -21,6 +21,7 @@ typedef struct {
     int pending_op;
     int last_search_forward;
     int insert_mode;
+    int replace_mode;
 } vi_visual_t;
 
 static vi_visual_t *active_visual = NULL;
@@ -188,6 +189,8 @@ vi_render(buffer_t *b, vi_visual_t *vis, char prompt_prefix, const char *prompt)
     printf("\x1b[K\r\n\x1b[7m");
     if (prompt) {
         printf("%c%s", prompt_prefix, prompt);
+    } else if (vis->replace_mode) {
+        printf("-- REPLACE --");
     } else if (vis->insert_mode) {
         printf("-- INSERT --");
     } else {
@@ -579,6 +582,30 @@ vi_insert_char(buffer_t *b, vi_visual_t *vis, int ch)
 }
 
 static void
+vi_replace_insert_char(buffer_t *b, vi_visual_t *vis, int ch)
+{
+    line_t *cur = b->cur;
+    char *text;
+
+    if (!cur) {
+        return;
+    }
+    if ((size_t)vis->cursor_col >= cur->len) {
+        vi_insert_char(b, vis, ch);
+        return;
+    }
+    text = strdup(cur->text);
+    if (!text) {
+        return;
+    }
+    text[vis->cursor_col] = (char)ch;
+    if (vi_replace_current_text(b, text) == 0) {
+        vis->cursor_col++;
+    }
+    free(text);
+}
+
+static void
 vi_backspace_char(buffer_t *b, vi_visual_t *vis)
 {
     line_t *cur = b->cur;
@@ -597,6 +624,26 @@ vi_backspace_char(buffer_t *b, vi_visual_t *vis)
     if (vi_replace_current_text(b, text) == 0) {
         vis->cursor_col--;
     }
+    free(text);
+}
+
+static void
+vi_replace_char(buffer_t *b, vi_visual_t *vis, int ch)
+{
+    line_t *cur = b->cur;
+    char *text;
+
+    if (!cur || (size_t)vis->cursor_col >= cur->len) {
+        write(STDOUT_FILENO, "\a", 1);
+        return;
+    }
+    save_undo(b);
+    text = strdup(cur->text);
+    if (!text) {
+        return;
+    }
+    text[vis->cursor_col] = (char)ch;
+    vi_replace_current_text(b, text);
     free(text);
 }
 
@@ -787,6 +834,32 @@ exvi_visual_main(buffer_t *b)
         if (!cur) {
             cur = b->head;
         }
+        if (vis.replace_mode) {
+            switch (key) {
+            case '\x1b':
+                vis.replace_mode = 0;
+                if (vis.cursor_col > 0) {
+                    vis.cursor_col--;
+                }
+                break;
+            case '\r':
+            case '\n':
+                vi_split_line(b, &vis);
+                break;
+            case 127:
+            case '\b':
+                if (vis.cursor_col > 0) {
+                    vis.cursor_col--;
+                }
+                break;
+            default:
+                if (isprint(key) || key == '\t') {
+                    vi_replace_insert_char(b, &vis, key);
+                }
+                break;
+            }
+            continue;
+        }
         if (vis.insert_mode) {
             switch (key) {
             case '\x1b':
@@ -872,6 +945,12 @@ exvi_visual_main(buffer_t *b)
             save_undo(b);
             vis.insert_mode = 1;
             break;
+        case 'R':
+            vis.pending_g = 0;
+            save_undo(b);
+            vis.insert_mode = 0;
+            vis.replace_mode = 1;
+            break;
         case 'o':
             vis.pending_g = 0;
             vi_open_line(b, &vis, 0);
@@ -883,6 +962,25 @@ exvi_visual_main(buffer_t *b)
         case 'x':
             vis.pending_g = 0;
             vi_delete_char(b, &vis);
+            break;
+        case 'r':
+            vis.pending_g = 0;
+            key = vi_read_key();
+            if (key == -1 || key == '\x1b' || key == '\r' || key == '\n') {
+                write(STDOUT_FILENO, "\a", 1);
+                break;
+            }
+            if (isprint(key) || key == '\t') {
+                vi_replace_char(b, &vis, key);
+            }
+            break;
+        case 's':
+            vis.pending_g = 0;
+            if (cur && (size_t)vis.cursor_col < cur->len) {
+                vi_delete_span(b, &vis, vis.cursor_col, vis.cursor_col + 1, 1);
+            } else {
+                vis.insert_mode = 1;
+            }
             break;
         case 'u':
             vis.pending_g = 0;
