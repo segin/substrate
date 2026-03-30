@@ -260,6 +260,26 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one\ntwo\nthree\n",
+        [b"x"],
+        extra_args=["+2"],
+    )
+    require(exit_code == 0, f"visual +cmd startup vi exited with status {exit_code}")
+    require(saved == "one\nwo\nthree\n",
+            f"unexpected visual +cmd startup buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"x"],
+        extra_args=["-c", "2"],
+    )
+    require(exit_code == 0, f"visual -c startup vi exited with status {exit_code}")
+    require(saved == "one\nwo\nthree\n",
+            f"unexpected visual -c startup buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "a\n\tb\n\tc\n",
         [b">", b">"],
     )

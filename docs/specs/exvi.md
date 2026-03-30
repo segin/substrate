@@ -135,7 +135,7 @@ Completed architecture milestones already in tree are intentionally omitted here
 
 - [ ] Expand the shared option parser beyond the current `-s`, `-S`, `-v`, and `-r` baseline to the full supported `ex`/`vi` invocation contract.
 - [x] Implement readonly/view-style startup behavior and option plumbing for both frontends.
-- [ ] Decide and implement startup command forms such as `-c`, `+cmd`, and tag-startup options if they are part of the supported contract.
+- [x] Decide and implement startup command forms such as `-c`, `+cmd`, and tag-startup options if they are part of the supported contract.
 - [ ] Finish `ex`-to-`vi` and `vi`-to-`ex` mode handoff semantics so they match the documented frontend contract instead of only the current minimal path.
 - [ ] Centralize and document startup file loading order across `EXINIT`, home `.exrc`, local `.exrc`, and secure/restricted mode suppression.
 - [ ] Add frontend tests for interactive vs batch startup, prompt behavior, non-tty rejection, and readonly/view invocation.

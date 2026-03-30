@@ -180,6 +180,16 @@ exvi_set_cli_arglist(int argc, char **argv, int optind)
     ex_args_owned = 0;
 }
 
+void
+exvi_set_owned_arglist(char **args, int argc)
+{
+    free_ex_arglist();
+    ex_args = args;
+    ex_argc = argc;
+    ex_arg_idx = 0;
+    ex_args_owned = 1;
+}
+
 int
 exvi_has_arglist(void)
 {

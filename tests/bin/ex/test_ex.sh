@@ -93,7 +93,7 @@ run_stdout_with_cliargs_test() {
     file=$(mktemp)
     printf "%b" "$init_text" >"$file"
     # shellcheck disable=SC2086
-    output=$(printf "%b" "$script" | "$EX_BIN" $cli_args -s "$file" 2>/dev/null || true)
+    output=$(printf "%b" "$script" | "$EX_BIN" -s $cli_args "$file" 2>/dev/null || true)
 
     if [ "$output" != "$expected" ]; then
         fail "$name"
@@ -117,7 +117,7 @@ run_file_with_cliargs_test() {
     file=$(mktemp)
     printf "%b" "$init_text" >"$file"
     # shellcheck disable=SC2086
-    printf "%b" "$script" | "$EX_BIN" $cli_args -s "$file" >/dev/null 2>&1 || true
+    printf "%b" "$script" | "$EX_BIN" -s $cli_args "$file" >/dev/null 2>&1 || true
 
     if ! diff -u <(printf "%b" "$expected") "$file" >/dev/null; then
         fail "$name"
@@ -691,6 +691,33 @@ run_stdout_with_cliargs_test "Readonly startup option reports state" \
     "-R" \
     ":set readonly?\n:q!\n" \
     "readonly"
+
+run_stdout_with_cliargs_test "Startup -c command runs before batch commands" \
+    "alpha\nbeta\ngamma\n" \
+    "-c2" \
+    ":p\n:q!\n" \
+    "beta
+beta"
+
+run_stdout_with_cliargs_test "Repeated -c commands preserve order" \
+    "alpha\nbeta\ngamma\n" \
+    "-c1d -c1p" \
+    ":q!\n" \
+    "beta"
+
+run_stdout_with_cliargs_test "Plus line command runs before batch commands" \
+    "alpha\nbeta\ngamma\n" \
+    "+2" \
+    ":p\n:q!\n" \
+    "beta
+beta"
+
+run_stdout_with_cliargs_test "Plus search command runs before batch commands" \
+    "alpha\nbeta\ngamma\n" \
+    "+/beta" \
+    ":p\n:q!\n" \
+    "beta
+beta"
 
 run_stdout_test "Set tabstop query reports value" \
     "one\ntwo\n" \

@@ -21,6 +21,8 @@ char *last_sub_pattern = NULL;
 char *last_sub_replacement = NULL;
 char *alternate_filename = NULL;
 static char *visual_handoff_file = NULL;
+static char **startup_commands = NULL;
+static int startup_command_count = 0;
 int last_sub_global = 0;
 const char *exvi_progname = "ex";
 buffer_t regs[27];
@@ -29,6 +31,17 @@ jmp_buf main_loop_jmp;
 buffer_t *global_buf_for_sighandler = NULL;
 int input_mode = 0;
 line_t *input_insert_pos = NULL;
+
+static void
+free_startup_commands(void)
+{
+    for (int i = 0; i < startup_command_count; i++) {
+        free(startup_commands[i]);
+    }
+    free(startup_commands);
+    startup_commands = NULL;
+    startup_command_count = 0;
+}
 
 char *
 expand_filename_refs(buffer_t *b, const char *arg)
@@ -132,6 +145,33 @@ load_recover_into_buffer(buffer_t *b, const char *filename)
     return 0;
 }
 
+int
+exvi_add_startup_command(const char *cmd)
+{
+    char **grown;
+    char *copy;
+
+    if (!cmd) {
+        return -1;
+    }
+
+    copy = strdup(cmd);
+    if (!copy) {
+        return -1;
+    }
+
+    grown = realloc(startup_commands,
+        sizeof(*startup_commands) * (size_t)(startup_command_count + 1));
+    if (!grown) {
+        free(copy);
+        return -1;
+    }
+
+    startup_commands = grown;
+    startup_commands[startup_command_count++] = copy;
+    return 0;
+}
+
 void
 load_startup_commands(buffer_t *b, void (*command_fn)(buffer_t *, char *))
 {
@@ -144,10 +184,7 @@ load_startup_commands(buffer_t *b, void (*command_fn)(buffer_t *, char *))
             command_fn(b, exinit_cpy);
             free(exinit_cpy);
         }
-        return;
-    }
-
-    if (!secure_mode) {
+    } else if (!secure_mode) {
         char *home = getenv("HOME");
 
         if (home) {
@@ -177,6 +214,10 @@ load_startup_commands(buffer_t *b, void (*command_fn)(buffer_t *, char *))
                 }
             }
         }
+    }
+
+    for (int i = 0; i < startup_command_count; i++) {
+        command_fn(b, startup_commands[i]);
     }
 }
 
@@ -252,6 +293,7 @@ exvi_reset_runtime(exvi_frontend_t frontend)
     last_sub_replacement = NULL;
     last_sub_global = 0;
     set_visual_handoff_file(NULL);
+    free_startup_commands();
     exvi_progname = (frontend == EXVI_FRONTEND_VI) ? "vi" : "ex";
     input_mode = 0;
     input_insert_pos = NULL;
@@ -271,6 +313,7 @@ exvi_cleanup_runtime(void)
     free(alternate_filename);
     alternate_filename = NULL;
     set_visual_handoff_file(NULL);
+    free_startup_commands();
     global_buf_for_sighandler = NULL;
 }
 

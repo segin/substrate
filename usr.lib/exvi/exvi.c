@@ -20,6 +20,36 @@ int undo_valid = 0;
 
 static void do_command(buffer_t *b, char *cmd);
 void replace_saved_string(char **dst, const char *src);
+
+static int
+queue_plus_command(const char *arg)
+{
+    const char *cmd = arg + 1;
+    char *search_cmd;
+    int ret;
+
+    if (*cmd == '\0') {
+        cmd = "$";
+    }
+
+    if ((cmd[0] == '/' || cmd[0] == '?') && strchr(cmd + 1, cmd[0]) == NULL) {
+        size_t len = strlen(cmd);
+
+        search_cmd = malloc(len + 2);
+        if (!search_cmd) {
+            return -1;
+        }
+        memcpy(search_cmd, cmd, len);
+        search_cmd[len] = cmd[0];
+        search_cmd[len + 1] = '\0';
+        ret = exvi_add_startup_command(search_cmd);
+        free(search_cmd);
+        return ret;
+    }
+
+    return exvi_add_startup_command(cmd);
+}
+
 static int
 invoked_as(const char *argv0, const char *name)
 {
@@ -334,14 +364,23 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
     int opt;
     int interactive_prompt;
     int jump_status;
+    int scan_plus_args;
+    char **file_args = NULL;
+    int file_argc = 0;
 
     exvi_reset_runtime(frontend);
     exvi_cleanup_session_state();
     if (invoked_as(argv[0], "view")) {
         option_readonly = 1;
     }
-    while ((opt = getopt(argc, argv, "sSvrR")) != -1) {
+    while ((opt = getopt(argc, argv, "+c:sSvrR")) != -1) {
         switch (opt) {
+        case 'c':
+            if (exvi_add_startup_command(optarg) != 0) {
+                fprintf(stderr, "%s: out of memory\n", exvi_progname);
+                exit(1);
+            }
+            break;
         case 's':
             batch_mode = 1;
             break;
@@ -358,8 +397,42 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
             option_readonly = 1;
             break;
         default:
-            fprintf(stderr, "Usage: %s [-s] [-S] [-v] [-r] [-R] [file ...]\n", argv[0]);
+            fprintf(stderr, "Usage: %s [-s] [-S] [-v] [-r] [-R] [-c cmd] [+cmd] [file ...]\n",
+                argv[0]);
             exit(1);
+        }
+    }
+
+    scan_plus_args = 1;
+    for (int i = optind; i < argc; i++) {
+        if (scan_plus_args && argv[i][0] == '+') {
+            if (queue_plus_command(argv[i]) != 0) {
+                fprintf(stderr, "%s: out of memory\n", exvi_progname);
+                exit(1);
+            }
+            continue;
+        }
+        scan_plus_args = 0;
+        {
+            char **grown = realloc(file_args,
+                sizeof(*file_args) * (size_t)(file_argc + 1));
+
+            if (!grown) {
+                fprintf(stderr, "%s: out of memory\n", exvi_progname);
+                free(file_args);
+                exit(1);
+            }
+            file_args = grown;
+            file_args[file_argc] = strdup(argv[i]);
+            if (!file_args[file_argc]) {
+                fprintf(stderr, "%s: out of memory\n", exvi_progname);
+                for (int j = 0; j < file_argc; j++) {
+                    free(file_args[j]);
+                }
+                free(file_args);
+                exit(1);
+            }
+            file_argc++;
         }
     }
 
@@ -369,8 +442,8 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
     buf_init(&undo_buf);
     exvi_init_registers();
 
-    if (optind < argc) {
-        exvi_set_cli_arglist(argc, argv, optind);
+    if (file_argc > 0) {
+        exvi_set_owned_arglist(file_args, file_argc);
         buf.filename = strdup(exvi_current_arg());
         if (recover_mode) {
             if (load_recover_into_buffer(&buf, buf.filename) != 0) {
@@ -386,6 +459,10 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
         }
     }
     
+    if (!(frontend == EXVI_FRONTEND_EX && visual_mode)) {
+        load_startup_commands(&buf, do_command);
+    }
+
     if (visual_mode) {
         int ret;
 
@@ -414,8 +491,6 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
         exvi_cleanup_session_state();
         return ret;
     }
-
-    load_startup_commands(&buf, do_command);
 
     char *line = NULL;
     size_t cap = 0;
