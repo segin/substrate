@@ -247,6 +247,18 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "a\tb\n",
+        [b":", b"set ts=4\r"],
+        rows=8,
+        cols=16,
+    )
+    require(exit_code == 0, f"tab-render-set vi exited with status {exit_code}")
+    require("a   b" in decoded, "missing tabstop=4 rendering")
+    require(saved == "a\tb\n",
+            f"unexpected tab-render-set buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "0123456789abcdefghijKLMNOPQRST\n",
         [b"3", b"0", b"|", b"r", b"Z"],
         rows=8,

@@ -14,6 +14,7 @@ int visual_mode = 0;
 int recover_mode = 0;
 int option_number = 0;
 int option_list = 0;
+int option_tabstop = EXVI_DEFAULT_TABSTOP;
 char *last_search_pattern = NULL;
 char *last_sub_pattern = NULL;
 char *last_sub_replacement = NULL;
@@ -234,6 +235,7 @@ exvi_reset_runtime(exvi_frontend_t frontend)
     recover_mode = 0;
     option_number = 0;
     option_list = 0;
+    option_tabstop = EXVI_DEFAULT_TABSTOP;
     free(last_search_pattern);
     last_search_pattern = NULL;
     free(last_sub_pattern);

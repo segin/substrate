@@ -8,6 +8,8 @@
 #include <exvi.h>
 
 #define EXVI_DEFAULT_TABSTOP 8
+#define EXVI_MIN_TABSTOP 1
+#define EXVI_MAX_TABSTOP 40
 
 typedef struct line {
     struct line *prev;
@@ -33,6 +35,7 @@ extern int visual_mode;
 extern int recover_mode;
 extern int option_number;
 extern int option_list;
+extern int option_tabstop;
 extern buffer_t undo_buf;
 extern int undo_valid;
 extern char *last_search_pattern;

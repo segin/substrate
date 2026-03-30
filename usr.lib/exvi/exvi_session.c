@@ -312,13 +312,19 @@ handle_set_command(const char *args)
         if (option_list) {
             printf("list\n");
         }
+        if (option_tabstop != EXVI_DEFAULT_TABSTOP) {
+            printf("tabstop=%d\n", option_tabstop);
+        }
         return 1;
     }
 
     while (*ptr) {
         char *end = ptr;
+        char *eq;
         size_t len;
+        size_t value_len = 0;
         int query = 0;
+        const char *value = NULL;
 
         while (*end && !isspace((unsigned char)*end)) {
             end++;
@@ -328,9 +334,15 @@ handle_set_command(const char *args)
             query = 1;
             len--;
         }
+        eq = memchr(ptr, '=', len);
+        if (eq) {
+            value = eq + 1;
+            value_len = (size_t)(end - value);
+            len = (size_t)(eq - ptr);
+        }
 
         if (len == 3 && strncmp(ptr, "all", 3) == 0) {
-            if (query) {
+            if (query || eq) {
                 fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
                 return 1;
             }
@@ -340,53 +352,109 @@ handle_set_command(const char *args)
             if (option_list) {
                 printf("list\n");
             }
+            printf("tabstop=%d\n", option_tabstop);
         } else if (len == 2 && strncmp(ptr, "nu", 2) == 0) {
+            if (eq) {
+                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                return 1;
+            }
             if (query) {
                 printf("%s\n", option_number ? "number" : "nonumber");
             } else {
                 option_number = 1;
             }
         } else if (len == 6 && strncmp(ptr, "number", 6) == 0) {
+            if (eq) {
+                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                return 1;
+            }
             if (query) {
                 printf("%s\n", option_number ? "number" : "nonumber");
             } else {
                 option_number = 1;
             }
         } else if (len == 4 && strncmp(ptr, "nonu", 4) == 0) {
+            if (eq) {
+                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                return 1;
+            }
             if (query) {
                 printf("%s\n", option_number ? "nonumber" : "number");
             } else {
                 option_number = 0;
             }
         } else if (len == 8 && strncmp(ptr, "nonumber", 8) == 0) {
+            if (eq) {
+                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                return 1;
+            }
             if (query) {
                 printf("%s\n", option_number ? "nonumber" : "number");
             } else {
                 option_number = 0;
             }
         } else if (len == 2 && strncmp(ptr, "li", 2) == 0) {
+            if (eq) {
+                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                return 1;
+            }
             if (query) {
                 printf("%s\n", option_list ? "list" : "nolist");
             } else {
                 option_list = 1;
             }
         } else if (len == 4 && strncmp(ptr, "list", 4) == 0) {
+            if (eq) {
+                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                return 1;
+            }
             if (query) {
                 printf("%s\n", option_list ? "list" : "nolist");
             } else {
                 option_list = 1;
             }
         } else if (len == 4 && strncmp(ptr, "noli", 4) == 0) {
+            if (eq) {
+                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                return 1;
+            }
             if (query) {
                 printf("%s\n", option_list ? "nolist" : "list");
             } else {
                 option_list = 0;
             }
         } else if (len == 6 && strncmp(ptr, "nolist", 6) == 0) {
+            if (eq) {
+                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                return 1;
+            }
             if (query) {
                 printf("%s\n", option_list ? "nolist" : "list");
             } else {
                 option_list = 0;
+            }
+        } else if ((len == 2 && strncmp(ptr, "ts", 2) == 0)
+                || (len == 7 && strncmp(ptr, "tabstop", 7) == 0)) {
+            if (query || (!eq && !query)) {
+                printf("tabstop=%d\n", option_tabstop);
+            } else {
+                char *num_end = NULL;
+                char buf[32];
+                long val;
+
+                if (!value || value_len == 0 || value_len >= sizeof(buf)) {
+                    fprintf(stderr, "Bad tabstop value\n");
+                    return 1;
+                }
+                memcpy(buf, value, value_len);
+                buf[value_len] = '\0';
+                val = strtol(buf, &num_end, 10);
+                if (!num_end || *num_end != '\0' || val < EXVI_MIN_TABSTOP
+                        || val > EXVI_MAX_TABSTOP) {
+                    fprintf(stderr, "Bad tabstop value\n");
+                    return 1;
+                }
+                option_tabstop = (int)val;
             }
         } else {
             fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);

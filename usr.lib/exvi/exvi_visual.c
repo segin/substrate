@@ -145,7 +145,7 @@ vi_char_display_width(unsigned char c, int col)
         if (option_list) {
             return 2;
         }
-        return EXVI_DEFAULT_TABSTOP - (col % EXVI_DEFAULT_TABSTOP);
+        return option_tabstop - (col % option_tabstop);
     }
     if (isprint(c)) {
         return 1;

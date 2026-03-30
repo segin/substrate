@@ -622,11 +622,22 @@ run_stdout_test "Set list query reports state" \
     ":set list?\n:q!\n" \
     "nolist"
 
+run_stdout_test "Set tabstop query reports value" \
+    "one\ntwo\n" \
+    ":set tabstop?\n:q!\n" \
+    "tabstop=8"
+
+run_stdout_test "Set tabstop assignment updates value" \
+    "one\ntwo\n" \
+    ":set ts=4\n:set ts?\n:q!\n" \
+    "tabstop=4"
+
 run_stdout_test "Set all prints enabled options" \
     "one\ntwo\n" \
     ":set number list\n:set all\n:q!\n" \
     "number
-list"
+list
+tabstop=8"
 
 echo "$TEST_PASS tests run."
 exit $((TEST_FAILS > 0 ? 1 : 0))
