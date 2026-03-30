@@ -1045,6 +1045,15 @@ exvi_visual_main(buffer_t *b)
             vis.pending_g = 0;
             vi_linewise_put(b, &vis, 1);
             break;
+        case 'J':
+            vis.pending_g = 0;
+            if (b->cur && b->cur->next) {
+                handle_join_command(b, 1, buf_current_line(b), buf_current_line(b) + 1);
+                vi_clamp_cursor(b, &vis);
+            } else {
+                write(STDOUT_FILENO, "\a", 1);
+            }
+            break;
         case 'D':
             vis.pending_g = 0;
             vi_delete_span(b, &vis, vis.cursor_col,
