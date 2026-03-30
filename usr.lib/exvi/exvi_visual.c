@@ -49,6 +49,7 @@ typedef struct {
     int cursor_col;
     int pending_g;
     int pending_z;
+    int pending_big_z;
     int pending_op;
     int pending_count;
     int pending_reg;
@@ -3505,6 +3506,26 @@ exvi_visual_main(buffer_t *b)
             }
             continue;
         }
+        if (vis.pending_big_z) {
+            vis.pending_big_z = 0;
+            switch (key) {
+            case 'Z':
+                if (b->modified) {
+                    if (!b->filename) {
+                        write(STDOUT_FILENO, "\a", 1);
+                        break;
+                    }
+                    buf_write_file(b, b->filename, 0);
+                }
+                goto done;
+            case 'Q':
+                goto done;
+            default:
+                write(STDOUT_FILENO, "\a", 1);
+                break;
+            }
+            continue;
+        }
 
         if (key >= '1' && key <= '9') {
             vis.pending_g = 0;
@@ -3735,7 +3756,7 @@ exvi_visual_main(buffer_t *b)
             break;
         case 'I':
             vis.pending_g = 0;
-            vis.cursor_col = 0;
+            vis.cursor_col = vi_first_nonblank_col(cur);
             save_undo(b);
             vis.insert_mode = 1;
             break;
@@ -3933,6 +3954,11 @@ exvi_visual_main(buffer_t *b)
             vis.pending_g = 0;
             vis.pending_z = 1;
             break;
+        case 'Z':
+            vis.pending_g = 0;
+            vis.pending_count = 0;
+            vis.pending_big_z = 1;
+            break;
         case 'G':
             vis.pending_g = 0;
             {
@@ -4041,6 +4067,7 @@ exvi_visual_main(buffer_t *b)
         }
     }
 
+done:
     vi_restore_terminal();
     return 0;
 }

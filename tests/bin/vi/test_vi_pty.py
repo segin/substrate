@@ -40,7 +40,8 @@ def send_keys(master_fd, output, data, timeout=0.2):
     return output
 
 
-def run_vi_session(vi_path, initial_text, key_steps, final_timeout=0.3, rows=24, cols=80):
+def run_vi_session(vi_path, initial_text, key_steps, final_timeout=0.3, rows=24,
+                   cols=80, final_keys=b":wq\r"):
     fd, temp_path = tempfile.mkstemp(prefix="exvi-", text=True)
     os.write(fd, initial_text.encode("utf-8"))
     os.close(fd)
@@ -53,8 +54,11 @@ def run_vi_session(vi_path, initial_text, key_steps, final_timeout=0.3, rows=24,
     output = read_some(master_fd, 0.4)
     for step in key_steps:
         output = send_keys(master_fd, output, step)
-    output = send_keys(master_fd, output, b":")
-    output = send_keys(master_fd, output, b"wq\r", final_timeout)
+    if final_keys is not None:
+        output = send_keys(master_fd, output, final_keys[:1])
+        output = send_keys(master_fd, output, final_keys[1:], final_timeout)
+    else:
+        output += read_some(master_fd, final_timeout)
 
     _, status = os.waitpid(pid, 0)
     os.close(master_fd)
@@ -229,6 +233,36 @@ def main():
     require("-- INSERT --" in decoded, "missing insert-tab insert status")
     require(saved == "X\tYabc\n",
             f"unexpected insert-tab buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n",
+        [b"i", b"X", b"\x1b", b"Z", b"Z"],
+        final_keys=None,
+    )
+    require(exit_code == 0, f"ZZ vi exited with status {exit_code}")
+    require(saved == "Xone\n",
+            f"unexpected ZZ buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n",
+        [b"i", b"X", b"\x1b", b"Z", b"Q"],
+        final_keys=None,
+    )
+    require(exit_code == 0, f"ZQ vi exited with status {exit_code}")
+    require(saved == "one\n",
+            f"unexpected ZQ buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "  abc\n",
+        [b"I", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"I-first-nonblank vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing I-first-nonblank insert status")
+    require(saved == "  Xabc\n",
+            f"unexpected I-first-nonblank buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
