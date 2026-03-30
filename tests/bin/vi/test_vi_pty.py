@@ -167,6 +167,16 @@ def main():
     require("line 1/1" in decoded, "missing backward-char status")
     require(saved == "a\n",
             f"unexpected backward-char buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "  alpha beta\n",
+        [b"$", b"d", b"^", b"u", b"$", b"c", b"0", b"D", b"O", b"N", b"E", b"\x1b"],
+    )
+    require(exit_code == 0, f"line-start-operator vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing line-start change insert status")
+    require(saved == "DONE\n",
+            f"unexpected line-start-operator buffer: {saved!r}")
     print("vi pty test: ok")
     return 0
 

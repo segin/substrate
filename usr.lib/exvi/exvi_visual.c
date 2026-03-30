@@ -797,6 +797,20 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         } else {
             write(STDOUT_FILENO, "\a", 1);
         }
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == '0') {
+        if (vis->cursor_col > 0) {
+            vi_delete_span(b, vis, 0, vis->cursor_col, vis->pending_op == 'c');
+        } else {
+            write(STDOUT_FILENO, "\a", 1);
+        }
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == '^') {
+        int start = vi_first_nonblank_col(b->cur);
+
+        if (start < vis->cursor_col) {
+            vi_delete_span(b, vis, start, vis->cursor_col, vis->pending_op == 'c');
+        } else {
+            write(STDOUT_FILENO, "\a", 1);
+        }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == '$') {
         line_t *cur = b->cur;
 
