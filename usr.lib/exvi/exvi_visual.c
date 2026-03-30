@@ -3055,12 +3055,40 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y')
         && key == '%') {
-        line_t *target_line;
-        int target_col;
+        if (raw_count > 0) {
+            int target = (raw_count * b->line_count + 99) / 100;
+            int start = line_no;
+            int end_line;
 
-        if (vi_match_motion_target(b, vis, &target_line, &target_col) != 0 ||
-            vi_apply_charwise_motion(b, vis, target_line, target_col, 1) != 0) {
-            write(STDOUT_FILENO, "\a", 1);
+            if (target < 1) {
+                target = 1;
+            }
+            if (target > b->line_count) {
+                target = b->line_count;
+            }
+            end_line = target;
+            if (start > end_line) {
+                int tmp = start;
+
+                start = end_line;
+                end_line = tmp;
+            }
+            if (vis->pending_op == 'y') {
+                vi_linewise_yank(b, vis, start, end_line);
+            } else if (vis->pending_op == 'd') {
+                vi_linewise_delete(b, vis, start, end_line);
+                vi_set_last_change(vis, VI_REPEAT_DD, end_line - start + 1, 0);
+            } else {
+                vi_linewise_change(b, vis, start, end_line);
+            }
+        } else {
+            line_t *target_line;
+            int target_col;
+
+            if (vi_match_motion_target(b, vis, &target_line, &target_col) != 0 ||
+                vi_apply_charwise_motion(b, vis, target_line, target_col, 1) != 0) {
+                write(STDOUT_FILENO, "\a", 1);
+            }
         }
     } else {
         write(STDOUT_FILENO, "\a", 1);
