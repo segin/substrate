@@ -314,6 +314,48 @@ vi_page_scroll(buffer_t *b, vi_visual_t *vis, int direction)
 }
 
 static int
+vi_first_nonblank_col(line_t *cur)
+{
+    size_t i;
+
+    if (!cur) {
+        return 0;
+    }
+    for (i = 0; i < cur->len; i++) {
+        if (cur->text[i] != ' ' && cur->text[i] != '\t') {
+            return (int)i;
+        }
+    }
+    return 0;
+}
+
+static void
+vi_move_to_screen_line(buffer_t *b, vi_visual_t *vis, int screen_row)
+{
+    int visible_rows = vis->rows - 1;
+    int target_line;
+
+    if (visible_rows < 1) {
+        visible_rows = 1;
+    }
+    if (screen_row < 0) {
+        screen_row = 0;
+    }
+    if (screen_row >= visible_rows) {
+        screen_row = visible_rows - 1;
+    }
+    target_line = vis->top_line + screen_row;
+    if (target_line < 1) {
+        target_line = 1;
+    }
+    if (target_line > b->line_count) {
+        target_line = b->line_count;
+    }
+    b->cur = buf_get_line(b, target_line);
+    vis->cursor_col = vi_first_nonblank_col(b->cur);
+}
+
+static int
 vi_is_word_char(int ch)
 {
     return isalnum((unsigned char)ch) || ch == '_';
@@ -1043,6 +1085,11 @@ exvi_visual_main(buffer_t *b)
                 vis.cursor_col = 0;
             }
             break;
+        case '^':
+            vis.pending_g = 0;
+            vi_take_count(&vis);
+            vis.cursor_col = vi_first_nonblank_col(cur);
+            break;
         case '$':
             vis.pending_g = 0;
             vi_take_count(&vis);
@@ -1208,6 +1255,21 @@ exvi_visual_main(buffer_t *b)
                     b->cur = buf_get_line(b, vi_clamp_line_target(b, target));
                 }
             }
+            break;
+        case 'H':
+            vis.pending_g = 0;
+            vi_take_count(&vis);
+            vi_move_to_screen_line(b, &vis, 0);
+            break;
+        case 'M':
+            vis.pending_g = 0;
+            vi_take_count(&vis);
+            vi_move_to_screen_line(b, &vis, (vis.rows - 2) / 2);
+            break;
+        case 'L':
+            vis.pending_g = 0;
+            vi_take_count(&vis);
+            vi_move_to_screen_line(b, &vis, vis.rows - 2);
             break;
         case ':':
             vis.pending_g = 0;
