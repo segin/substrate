@@ -2086,6 +2086,48 @@ vi_clamp_line_target(buffer_t *b, int line_no)
 }
 
 static void
+vi_move_to_eol_count(buffer_t *b, vi_visual_t *vis, int count)
+{
+    int target;
+
+    if (count < 1) {
+        count = 1;
+    }
+    target = vi_clamp_line_target(b, buf_current_line(b) + count - 1);
+    if (target < 1) {
+        return;
+    }
+    b->cur = buf_get_line(b, target);
+    if (!b->cur) {
+        vis->cursor_col = 0;
+        return;
+    }
+    vis->cursor_col = (b->cur->len > 0) ? (int)b->cur->len - 1 : 0;
+}
+
+static int
+vi_eol_motion_target(buffer_t *b, int count, line_t **line_out, int *col_out)
+{
+    int target;
+    line_t *line;
+
+    if (count < 1) {
+        count = 1;
+    }
+    target = vi_clamp_line_target(b, buf_current_line(b) + count - 1);
+    if (target < 1) {
+        return -1;
+    }
+    line = buf_get_line(b, target);
+    if (!line) {
+        return -1;
+    }
+    *line_out = line;
+    *col_out = (line->len > 0) ? (int)line->len - 1 : 0;
+    return 0;
+}
+
+static void
 vi_move_to_percent(buffer_t *b, vi_visual_t *vis, int percent)
 {
     int target;
@@ -2899,9 +2941,16 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             }
         }
     } else if (vis->pending_op == 'y' && key == '$') {
+        line_t *target_line;
+        int target_col;
         line_t *cur = b->cur;
 
-        if (!cur || vi_yank_span(vis, cur, vis->cursor_col, (int)cur->len) != 0) {
+        if (count > 1) {
+            if (vi_eol_motion_target(b, count, &target_line, &target_col) != 0 ||
+                vi_apply_charwise_motion(b, vis, target_line, target_col, 1) != 0) {
+                write(STDOUT_FILENO, "\a", 1);
+            }
+        } else if (!cur || vi_yank_span(vis, cur, vis->cursor_col, (int)cur->len) != 0) {
             write(STDOUT_FILENO, "\a", 1);
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == 'w') {
@@ -3077,9 +3126,28 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             write(STDOUT_FILENO, "\a", 1);
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == '$') {
+        line_t *target_line;
+        int target_col;
         line_t *cur = b->cur;
 
-        if (cur && (size_t)vis->cursor_col <= cur->len) {
+        if (count > 1) {
+            if (vi_eol_motion_target(b, count, &target_line, &target_col) != 0) {
+                write(STDOUT_FILENO, "\a", 1);
+            } else if (vis->pending_op == 'd' && vis->cursor_col == 0 &&
+                target_line != b->cur) {
+                int end_line = vi_line_number_for_mark(b, target_line);
+
+                if (end_line < line_no) {
+                    end_line = line_no;
+                }
+                vi_linewise_delete(b, vis, line_no, end_line);
+                vi_set_last_change(vis, VI_REPEAT_DD, end_line - line_no + 1, 0);
+            } else if (vi_apply_charwise_motion(b, vis, target_line, target_col, 1) != 0) {
+                write(STDOUT_FILENO, "\a", 1);
+            } else if (vis->pending_op == 'd') {
+                vi_set_last_change(vis, VI_REPEAT_D_EOL, count, 0);
+            }
+        } else if (cur && (size_t)vis->cursor_col <= cur->len) {
             vi_delete_span(b, vis, vis->cursor_col, (int)cur->len,
                 vis->pending_op == 'c');
             if (vis->pending_op == 'd') {
@@ -3537,8 +3605,18 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
         }
         break;
     case VI_REPEAT_D_EOL:
-        vi_delete_span(b, vis, vis->cursor_col,
-            cur ? (int)cur->len : vis->cursor_col, 0);
+        if (count <= 1 || !cur) {
+            vi_delete_span(b, vis, vis->cursor_col,
+                cur ? (int)cur->len : vis->cursor_col, 0);
+        } else {
+            line_t *target_line;
+            int target_col;
+
+            if (vi_eol_motion_target(b, count, &target_line, &target_col) != 0 ||
+                vi_apply_charwise_motion(b, vis, target_line, target_col, 1) != 0) {
+                write(STDOUT_FILENO, "\a", 1);
+            }
+        }
         break;
     case VI_REPEAT_J:
         last = vi_clamp_line_target(b, line_no + count - 1);
@@ -4099,10 +4177,7 @@ exvi_visual_main(buffer_t *b)
             break;
         case '$':
             vis.pending_g = 0;
-            vi_take_count(&vis);
-            if (cur) {
-                vis.cursor_col = (cur->len > 0) ? (int)cur->len - 1 : 0;
-            }
+            vi_move_to_eol_count(b, &vis, vi_take_count(&vis));
             break;
         case '%':
             vis.pending_g = 0;

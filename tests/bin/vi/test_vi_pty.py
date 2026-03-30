@@ -803,6 +803,43 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one\ntwo\nthree\n",
+        [b"2", b"$", b"r", b"X"],
+    )
+    require(exit_code == 0, f"2$ vi exited with status {exit_code}")
+    require(saved == "one\ntwX\nthree\n",
+            f"unexpected 2$ buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"d", b"2", b"$"],
+    )
+    require(exit_code == 0, f"d2$ vi exited with status {exit_code}")
+    require(saved == "three\n",
+            f"unexpected d2$ buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"c", b"2", b"$", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"c2$ vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing c2$ insert status")
+    require(saved == "X\nthree\n",
+            f"unexpected c2$ buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"y", b"2", b"$", b"P"],
+    )
+    require(exit_code == 0, f"y2$ vi exited with status {exit_code}")
+    require(saved == "one\ntwoone\ntwo\nthree\n",
+            f"unexpected y2$ buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n",
         [b"d", b"5", b"0", b"%"],
     )
