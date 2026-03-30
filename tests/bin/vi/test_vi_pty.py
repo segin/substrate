@@ -148,6 +148,28 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "Alpha one.  Beta two!\nGamma three?  Delta four.\n",
+        [b")", b"r", b"1", b")", b"r", b"2"],
+    )
+    require(exit_code == 0, f"sentence-forward vi exited with status {exit_code}")
+    require("line 1/2" in decoded, "missing sentence-forward line 1 status")
+    require("line 2/2" in decoded, "missing sentence-forward line 2 status")
+    require(saved == "Alpha one.  1eta two!\n2amma three?  Delta four.\n",
+            f"unexpected sentence-forward buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "Alpha one.  Beta two!\nGamma three?  Delta four.\n",
+        [b"G", b"$", b"(", b"r", b"3", b"(", b"r", b"4"],
+    )
+    require(exit_code == 0, f"sentence-backward vi exited with status {exit_code}")
+    require(decoded.count("line 2/2") >= 1, "missing sentence-backward line 2 status")
+    require(decoded.count("line 1/2") >= 1, "missing sentence-backward line 1 status")
+    require(saved == "Alpha one.  Beta two!\n4amma three?  3elta four.\n",
+            f"unexpected sentence-backward buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "".join(f"line {i}\n" for i in range(1, 41)),
         [b"1", b"0", b"G", b"\x04", b"\x15"],
     )

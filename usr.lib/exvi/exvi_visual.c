@@ -523,6 +523,164 @@ vi_move_paragraph_backward(buffer_t *b, vi_visual_t *vis, int count)
 }
 
 static int
+vi_is_sentence_end_char(int ch)
+{
+    return ch == '.' || ch == '!' || ch == '?';
+}
+
+static int
+vi_is_sentence_closer(int ch)
+{
+    return ch == ')' || ch == ']' || ch == '"' || ch == '\'';
+}
+
+static int
+vi_is_sentence_end_at(line_t *line, int col)
+{
+    size_t i;
+
+    if (!line || col < 0 || (size_t)col >= line->len ||
+        !vi_is_sentence_end_char((unsigned char)line->text[col])) {
+        return 0;
+    }
+    i = (size_t)col + 1;
+    while (i < line->len && vi_is_sentence_closer((unsigned char)line->text[i])) {
+        i++;
+    }
+    return i >= line->len || isspace((unsigned char)line->text[i]);
+}
+
+static int
+vi_find_first_nonblank(buffer_t *b, int *line_out, int *col_out)
+{
+    int line_no;
+
+    for (line_no = 1; line_no <= b->line_count; line_no++) {
+        line_t *line = buf_get_line(b, line_no);
+        int col = vi_first_nonblank_col(line);
+
+        if (line && (line->len > 0 || col == 0) && !vi_line_is_blank(line)) {
+            *line_out = line_no;
+            *col_out = col;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int
+vi_find_sentence_start_after(buffer_t *b, int line_no, int col, int *line_out, int *col_out)
+{
+    int ln;
+
+    if (line_no < 1) {
+        return -1;
+    }
+    for (ln = line_no; ln <= b->line_count; ln++) {
+        line_t *line = buf_get_line(b, ln);
+        size_t i = (ln == line_no) ? (size_t)col + 1 : 0;
+
+        if (!line) {
+            continue;
+        }
+        while (i < line->len && isspace((unsigned char)line->text[i])) {
+            i++;
+        }
+        if (i < line->len) {
+            *line_out = ln;
+            *col_out = (int)i;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static void
+vi_move_sentence_forward(buffer_t *b, vi_visual_t *vis, int count)
+{
+    int cur_line = buf_current_line(b);
+    int cur_col = vis->cursor_col;
+
+    if (cur_line < 1) {
+        return;
+    }
+    while (count-- > 0) {
+        int ln;
+        int found = 0;
+
+        for (ln = cur_line; ln <= b->line_count && !found; ln++) {
+            line_t *line = buf_get_line(b, ln);
+            int start = (ln == cur_line) ? cur_col + 1 : 0;
+            int col;
+
+            if (!line) {
+                continue;
+            }
+            for (col = start; (size_t)col < line->len; col++) {
+                if (vi_is_sentence_end_at(line, col) &&
+                    vi_find_sentence_start_after(b, ln, col, &cur_line, &cur_col) == 0) {
+                    found = 1;
+                    break;
+                }
+            }
+        }
+        if (!found) {
+            return;
+        }
+    }
+    b->cur = buf_get_line(b, cur_line);
+    vis->cursor_col = cur_col;
+}
+
+static void
+vi_move_sentence_backward(buffer_t *b, vi_visual_t *vis, int count)
+{
+    int cur_line = buf_current_line(b);
+    int cur_col = vis->cursor_col;
+
+    if (cur_line < 1) {
+        return;
+    }
+    while (count-- > 0) {
+        int ln;
+        int found = 0;
+
+        for (ln = cur_line; ln >= 1 && !found; ln--) {
+            line_t *line = buf_get_line(b, ln);
+            int start = (ln == cur_line) ? cur_col - 1 : (line ? (int)line->len - 1 : -1);
+            int col;
+
+            if (!line) {
+                continue;
+            }
+            for (col = start; col >= 0; col--) {
+                int target_line;
+                int target_col;
+
+                if (!vi_is_sentence_end_at(line, col)) {
+                    continue;
+                }
+                if (vi_find_sentence_start_after(b, ln, col, &target_line, &target_col) == 0 &&
+                    (target_line < cur_line ||
+                    (target_line == cur_line && target_col < cur_col))) {
+                    cur_line = target_line;
+                    cur_col = target_col;
+                    found = 1;
+                    break;
+                }
+            }
+        }
+        if (!found) {
+            if (vi_find_first_nonblank(b, &cur_line, &cur_col) != 0) {
+                return;
+            }
+        }
+    }
+    b->cur = buf_get_line(b, cur_line);
+    vis->cursor_col = cur_col;
+}
+
+static int
 vi_is_word_char(int ch)
 {
     return isalnum((unsigned char)ch) || ch == '_';
@@ -2097,6 +2255,14 @@ exvi_visual_main(buffer_t *b)
         case 'k':
             vis.pending_g = 0;
             vi_move_vertical(b, -vi_take_count(&vis));
+            break;
+        case ')':
+            vis.pending_g = 0;
+            vi_move_sentence_forward(b, &vis, vi_take_count(&vis));
+            break;
+        case '(':
+            vis.pending_g = 0;
+            vi_move_sentence_backward(b, &vis, vi_take_count(&vis));
             break;
         case '}':
             vis.pending_g = 0;
