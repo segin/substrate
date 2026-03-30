@@ -205,6 +205,21 @@ def main():
     require(exit_code == 0, f"till-motion vi exited with status {exit_code}")
     require(saved == "abcX2efXghiX1\n",
             f"unexpected till-motion buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abcXdefXghiXj\n",
+        [
+            b"0", b"d", b"f", b"X", b"u",
+            b"0", b"d", b"t", b"X", b"u",
+            b"$", b"c", b"F", b"X", b"D", b"O", b"N", b"E", b"\x1b", b"u",
+            b"$", b"c", b"T", b"X", b"T", b"A", b"I", b"L", b"\x1b",
+        ],
+    )
+    require(exit_code == 0, f"operator-find vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing operator-find insert status")
+    require(saved == "abcXdefXghiXTAIL\n",
+            f"unexpected operator-find buffer: {saved!r}")
     print("vi pty test: ok")
     return 0
 

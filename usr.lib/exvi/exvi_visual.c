@@ -660,6 +660,28 @@ vi_repeat_find_motion(buffer_t *b, vi_visual_t *vis, int reverse, int count)
 }
 
 static int
+vi_find_motion_span(line_t *cur, int cursor_col, int ch, int forward, int till,
+    int count, int *start_out, int *end_out)
+{
+    int col;
+
+    if (!cur || vi_find_char_in_line(cur, cursor_col, ch, forward, count, &col) != 0) {
+        return -1;
+    }
+    if (forward) {
+        *start_out = cursor_col;
+        *end_out = till ? col : col + 1;
+    } else {
+        *start_out = till ? col + 1 : col;
+        *end_out = cursor_col + 1;
+    }
+    if (*end_out <= *start_out) {
+        return -1;
+    }
+    return 0;
+}
+
+static int
 vi_find_word_end_exclusive_count(line_t *cur, int start, int count, int *end_out)
 {
     size_t i;
@@ -861,6 +883,22 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         if (vi_find_word_start_backward_count(b->cur, vis->cursor_col, count, &start) == 0 &&
             start < vis->cursor_col) {
             vi_delete_span(b, vis, start, vis->cursor_col, vis->pending_op == 'c');
+        } else {
+            write(STDOUT_FILENO, "\a", 1);
+        }
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') &&
+        (key == 'f' || key == 'F' || key == 't' || key == 'T')) {
+        int ch;
+        int start;
+
+        ch = vi_read_key();
+        if (ch == -1 || ch == '\x1b' || ch == '\r' || ch == '\n') {
+            write(STDOUT_FILENO, "\a", 1);
+        } else if (vi_find_motion_span(b->cur, vis->cursor_col, ch,
+            (key == 'f' || key == 't'),
+            (key == 't' || key == 'T'),
+            count, &start, &end) == 0) {
+            vi_delete_span(b, vis, start, end, vis->pending_op == 'c');
         } else {
             write(STDOUT_FILENO, "\a", 1);
         }
