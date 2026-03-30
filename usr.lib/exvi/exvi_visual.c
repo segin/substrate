@@ -4772,7 +4772,8 @@ exvi_visual_main(buffer_t *b)
         case '\f':
             vis.pending_g = 0;
             vis.pending_count = 0;
-            printf("\x1b[2J");
+            fputs("\x1b[2J", stdout);
+            fflush(stdout);
             break;
         case 0x02:
             vis.pending_g = 0;

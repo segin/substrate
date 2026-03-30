@@ -595,6 +595,18 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "redraw me\nsecond line\n",
+        [b"j", b"\x0c"],
+        final_keys=b":q\r",
+    )
+    require(exit_code == 0, f"ctrl-l redraw vi exited with status {exit_code}")
+    require(decoded.count("\x1b[2J") >= 2, "missing explicit Ctrl-L full-screen redraw")
+    require("line 2/2" in decoded, "missing redraw status after Ctrl-L")
+    require(saved == "redraw me\nsecond line\n",
+            f"unexpected ctrl-l redraw buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "a\tb\n",
         [],
         rows=8,
