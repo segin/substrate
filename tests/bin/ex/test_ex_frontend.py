@@ -81,6 +81,35 @@ def main():
     finally:
         os.unlink(path)
 
+    proc = subprocess.run([ex_path, "-r"], input=b"",
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    require(proc.returncode == 1, f"ex -r missing-file status mismatch: {proc.returncode}")
+    require(proc.stdout == b"", f"ex -r missing-file stdout mismatch: {proc.stdout!r}")
+    require(proc.stderr.decode("latin1", "replace") == "ex: -r requires a file operand\n",
+            f"ex -r missing-file stderr mismatch: {proc.stderr!r}")
+
+    with tempfile.NamedTemporaryFile("w", delete=False) as f:
+        f.write("one\n")
+        path = f.name
+    try:
+        with open(path + ".recover", "w", encoding="utf-8") as f2:
+            f2.write("RECOVERED\n")
+        proc = subprocess.run([ex_path, "-r", path], input=b"1p\nq!\n",
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        require(proc.returncode == 0, f"ex -r status mismatch: {proc.returncode}")
+        decoded = proc.stdout.decode("latin1", "replace")
+        require(f"\"{path}\" recovered, 1 lines" in decoded,
+                f"ex -r missing recovered banner: {decoded!r}")
+        require("RECOVERED\n" in decoded, f"ex -r missing recovered line print: {decoded!r}")
+        require(proc.stderr == b"", f"ex -r stderr mismatch: {proc.stderr!r}")
+        with open(path, "r", encoding="utf-8") as f2:
+            saved = f2.read()
+        require(saved == "one\n", f"ex -r unexpectedly modified file: {saved!r}")
+    finally:
+        if os.path.exists(path + ".recover"):
+            os.unlink(path + ".recover")
+        os.unlink(path)
+
     with tempfile.NamedTemporaryFile("w", delete=False) as f:
         f.write("alpha\n")
         path = f.name

@@ -4162,6 +4162,9 @@ exvi_visual_main(buffer_t *b)
     if (vi_enable_raw(&vis) != 0) {
         return 1;
     }
+    if (exvi_take_pending_status(vis.status_msg, sizeof(vis.status_msg))) {
+        vis.status_once = 1;
+    }
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = vi_handle_winch;
     sigemptyset(&sa.sa_mask);

@@ -21,6 +21,25 @@ int undo_valid = 0;
 static void do_command(buffer_t *b, char *cmd);
 void replace_saved_string(char **dst, const char *src);
 
+static void
+announce_startup_recovery(buffer_t *b, exvi_frontend_t frontend)
+{
+    char msg[512];
+
+    if (!b->filename) {
+        return;
+    }
+
+    snprintf(msg, sizeof(msg), "\"%s\" recovered, %d lines", b->filename,
+        b->line_count);
+
+    if (frontend == EXVI_FRONTEND_VI) {
+        exvi_set_pending_status(msg);
+    } else if (!batch_mode && !visual_mode) {
+        printf("%s\n", msg);
+    }
+}
+
 static int
 queue_plus_command(const char *arg)
 {
@@ -461,19 +480,43 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
     buf_init(&undo_buf);
     exvi_init_registers();
 
+    if (recover_mode && file_argc == 0) {
+        fprintf(stderr, "%s: -r requires a file operand\n", exvi_progname);
+        free(file_args);
+        buf_free(&buf);
+        buf_free(&undo_buf);
+        exvi_free_registers();
+        exvi_cleanup_runtime();
+        return 1;
+    }
+
     if (file_argc > 0) {
         exvi_set_owned_arglist(file_args, file_argc);
-        buf.filename = strdup(exvi_current_arg());
         if (recover_mode) {
-            if (load_recover_into_buffer(&buf, buf.filename) != 0) {
-                fprintf(stderr, "%s: no recover file for %s\n", exvi_progname, buf.filename);
+            char *recover_target = strdup(exvi_current_arg());
+
+            if (!recover_target) {
+                fprintf(stderr, "%s: out of memory\n", exvi_progname);
                 buf_free(&buf);
                 buf_free(&undo_buf);
                 exvi_free_registers();
                 exvi_cleanup_runtime();
                 return 1;
             }
+
+            if (load_recover_into_buffer(&buf, recover_target) != 0) {
+                fprintf(stderr, "%s: no recover file for %s\n", exvi_progname, recover_target);
+                free(recover_target);
+                buf_free(&buf);
+                buf_free(&undo_buf);
+                exvi_free_registers();
+                exvi_cleanup_runtime();
+                return 1;
+            }
+            free(recover_target);
+            announce_startup_recovery(&buf, frontend);
         } else {
+            buf.filename = strdup(exvi_current_arg());
             buf_read_file(&buf, buf.filename);
         }
     }

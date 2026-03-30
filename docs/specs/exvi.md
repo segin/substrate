@@ -178,7 +178,7 @@ Completed architecture milestones already in tree are intentionally omitted here
 - [ ] Extend tag behavior beyond the current `tag`/`pop` baseline to the full supported tag-stack/reporting contract.
 - [ ] Replace the current flat `tags` lookup path with `tags` option and search-path behavior if that is part of the supported contract.
 - [ ] Harden preserve/recover naming, cleanup, signal-time preservation, and recover-file lifecycle behavior.
-- [ ] Decide and implement the supported `ex -r` UX, including any listing/selection behavior beyond direct filename recovery.
+- [x] Decide and implement the supported `ex -r` UX, including any listing/selection behavior beyond direct filename recovery.
 
 ### 3. Full-screen `vi` semantic parity
 

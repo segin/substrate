@@ -41,6 +41,25 @@ def main():
     finally:
         os.unlink(path)
 
+    proc = subprocess.run([vi_path, "-r"], input=b"",
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    require(proc.returncode == 1, f"vi -r missing-file status mismatch: {proc.returncode}")
+    require(proc.stdout == b"", f"vi -r missing-file stdout mismatch: {proc.stdout!r}")
+    require(proc.stderr.decode("latin1", "replace") == "vi: -r requires a file operand\n",
+            f"vi -r missing-file stderr mismatch: {proc.stderr!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "one\n",
+        [b":q!\r"],
+        final_keys=None,
+        extra_args=["-r"],
+        extra_files={"buffer.txt.recover": "RECOVERED\n"},
+    )
+    require(exit_code == 0, f"vi -r recovery exited with status {exit_code}")
+    require("recovered, 1 lines" in decoded, "vi -r missing recovered status")
+    require(saved == "one\n", f"vi -r unexpectedly modified file: {saved!r}")
+
     exit_code, decoded, saved = helpers.run_vi_session(
         vi_path,
         "one\n",
