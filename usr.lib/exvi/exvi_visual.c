@@ -73,6 +73,9 @@ static vi_visual_t *active_visual = NULL;
 static volatile sig_atomic_t vi_resize_pending = 0;
 
 static int vi_first_nonblank_col(line_t *cur);
+static int vi_display_col_for_index(line_t *cur, int idx);
+static line_t *vi_ensure_current_line(buffer_t *b);
+static int vi_replace_current_text(buffer_t *b, const char *text);
 static void vi_move_word_forward_count(buffer_t *b, vi_visual_t *vis, int count);
 static void vi_move_word_backward_count(buffer_t *b, vi_visual_t *vis, int count);
 static void vi_page_scroll(buffer_t *b, vi_visual_t *vis, int direction);
@@ -193,6 +196,88 @@ vi_char_display_width(unsigned char c, int col)
         return 1;
     }
     return 2;
+}
+
+static int
+vi_indent_unit(void)
+{
+    return (option_tabstop > 0) ? option_tabstop : 8;
+}
+
+static int
+vi_leading_indent_len(line_t *cur)
+{
+    int len = 0;
+
+    if (!cur) {
+        return 0;
+    }
+    while ((size_t)len < cur->len &&
+        (cur->text[len] == ' ' || cur->text[len] == '\t')) {
+        len++;
+    }
+    return len;
+}
+
+static void
+vi_reindent_current_line(buffer_t *b, vi_visual_t *vis, int increase)
+{
+    line_t *cur = vi_ensure_current_line(b);
+    int old_prefix_len;
+    int old_cols;
+    int unit;
+    int target_cols;
+    int new_tabs;
+    int new_spaces;
+    int new_prefix_len;
+    int delta;
+    char *text;
+
+    if (!cur) {
+        return;
+    }
+    old_prefix_len = vi_leading_indent_len(cur);
+    old_cols = vi_display_col_for_index(cur, old_prefix_len);
+    unit = vi_indent_unit();
+    if (increase) {
+        target_cols = old_cols + unit;
+    } else {
+        if (old_cols <= 0) {
+            return;
+        }
+        target_cols = old_cols - ((old_cols % unit) ? (old_cols % unit) : unit);
+    }
+    new_tabs = target_cols / unit;
+    new_spaces = target_cols % unit;
+    new_prefix_len = new_tabs + new_spaces;
+    text = malloc((size_t)new_prefix_len + (cur->len - (size_t)old_prefix_len) + 1);
+    if (!text) {
+        return;
+    }
+    memset(text, '\t', (size_t)new_tabs);
+    memset(text + new_tabs, ' ', (size_t)new_spaces);
+    memcpy(text + new_prefix_len, cur->text + old_prefix_len,
+        cur->len - (size_t)old_prefix_len + 1);
+    if (vi_replace_current_text(b, text) == 0) {
+        delta = new_prefix_len - old_prefix_len;
+        if (vis->cursor_col >= old_prefix_len) {
+            vis->cursor_col += delta;
+        }
+        if (vis->cursor_col < 0) {
+            vis->cursor_col = 0;
+        }
+        if (vis->insert_anchor_line == cur) {
+            if (!(vis->insert_anchor_col == 0 && old_prefix_len == 0) &&
+                vis->insert_anchor_col >= old_prefix_len) {
+                vis->insert_anchor_col += delta;
+            }
+            if (vis->insert_anchor_col < 0) {
+                vis->insert_anchor_col = 0;
+            }
+        }
+        vi_clamp_cursor(b, vis);
+    }
+    free(text);
 }
 
 static int
@@ -3870,6 +3955,12 @@ exvi_visual_main(buffer_t *b)
             case 0x15:
                 vi_erase_to_insert_anchor(b, &vis);
                 break;
+            case 0x14:
+                vi_reindent_current_line(b, &vis, 1);
+                break;
+            case 0x04:
+                vi_reindent_current_line(b, &vis, 0);
+                break;
             case VI_KEY_UP:
             case VI_KEY_DOWN:
             case VI_KEY_LEFT:
@@ -3913,6 +4004,12 @@ exvi_visual_main(buffer_t *b)
                 break;
             case 0x15:
                 vi_erase_to_insert_anchor(b, &vis);
+                break;
+            case 0x14:
+                vi_reindent_current_line(b, &vis, 1);
+                break;
+            case 0x04:
+                vi_reindent_current_line(b, &vis, 0);
                 break;
             case VI_KEY_UP:
             case VI_KEY_DOWN:

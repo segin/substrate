@@ -271,6 +271,26 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "abc\n",
+        [b"i", b"\x14", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-ctrl-t vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-ctrl-t insert status")
+    require(saved == "\tXabc\n",
+            f"unexpected insert-ctrl-t buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc\n",
+        [b"i", b"\t", b"\x04", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-ctrl-d vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-ctrl-d insert status")
+    require(saved == "Xabc\n",
+            f"unexpected insert-ctrl-d buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "alpha beta\n",
         [b"i", b"1", b"2", b"3", b"\x15", b"X", b"\x1b"],
     )
@@ -288,6 +308,16 @@ def main():
     require("-- INSERT --" in decoded, "missing append-ctrl-u insert status")
     require(saved == "abZc\n",
             f"unexpected append-ctrl-u buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc\n",
+        [b"l", b"a", b"\x14", b"X", b"\x15", b"Y", b"\x1b"],
+    )
+    require(exit_code == 0, f"append-ctrl-t-ctrl-u vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing append-ctrl-t-ctrl-u insert status")
+    require(saved == "\tabYc\n",
+            f"unexpected append-ctrl-t-ctrl-u buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
