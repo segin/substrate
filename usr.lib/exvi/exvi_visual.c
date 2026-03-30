@@ -2239,6 +2239,33 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         } else {
             write(STDOUT_FILENO, "\a", 1);
         }
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y')
+        && (key == ';' || key == ',')) {
+        int start;
+        int forward = vis->last_find_forward;
+
+        if (!vis->last_find_char) {
+            write(STDOUT_FILENO, "\a", 1);
+        } else {
+            if (key == ',') {
+                forward = !forward;
+            }
+            if (vi_find_motion_span(b->cur, vis->cursor_col, vis->last_find_char,
+                forward, vis->last_find_till, count, &start, &end) == 0) {
+                if (vis->pending_op == 'y') {
+                    if (vi_yank_span(vis, b->cur, start, end) != 0) {
+                        write(STDOUT_FILENO, "\a", 1);
+                    }
+                } else {
+                    vi_delete_span(b, vis, start, end, vis->pending_op == 'c');
+                    if (vis->pending_op == 'd') {
+                        vi_set_last_change(vis, VI_REPEAT_D_FIND, count, 0);
+                    }
+                }
+            } else {
+                write(STDOUT_FILENO, "\a", 1);
+            }
+        }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == '0') {
         if (vis->cursor_col > 0) {
             vi_delete_span(b, vis, 0, vis->cursor_col, vis->pending_op == 'c');

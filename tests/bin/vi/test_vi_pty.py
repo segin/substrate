@@ -617,6 +617,34 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "abcXdefXghiXj\n",
+        [b"0", b"f", b"X", b"d", b";"],
+    )
+    require(exit_code == 0, f"operator-semicolon-delete vi exited with status {exit_code}")
+    require(saved == "abcghiXj\n",
+            f"unexpected operator-semicolon-delete buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abcXdefXghiXj\n",
+        [b"0", b"f", b"X", b"c", b";", b"T", b"A", b"I", b"L", b"\x1b"],
+    )
+    require(exit_code == 0, f"operator-semicolon-change vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing operator-semicolon change insert status")
+    require(saved == "abcTAILghiXj\n",
+            f"unexpected operator-semicolon-change buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abcXdefXghiXj\n",
+        [b"0", b"f", b"X", b"y", b";", b"P"],
+    )
+    require(exit_code == 0, f"operator-semicolon-yank vi exited with status {exit_code}")
+    require(saved == "abcXdefXXdefXghiXj\n",
+            f"unexpected operator-semicolon-yank buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\n  two\nthree\n",
         [b"j", b"m", b"a", b"G", b"'", b"a", b"r", b"T", b"G", b"`", b"a", b"r", b">"],
     )
