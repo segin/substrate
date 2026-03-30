@@ -41,41 +41,49 @@ def send_keys(master_fd, output, data, timeout=0.2):
 
 
 def run_vi_session(vi_path, initial_text, key_steps, final_timeout=0.3, rows=24,
-                   cols=80, final_keys=b":wq\r"):
-    fd, temp_path = tempfile.mkstemp(prefix="exvi-", text=True)
-    os.write(fd, initial_text.encode("utf-8"))
-    os.close(fd)
+                   cols=80, final_keys=b":wq\r", extra_files=None):
+    with tempfile.TemporaryDirectory(prefix="exvi-") as temp_dir:
+        temp_path = os.path.join(temp_dir, "buffer.txt")
+        with open(temp_path, "w", encoding="utf-8") as f:
+            f.write(initial_text)
 
-    pid, master_fd = pty.fork()
-    if pid == 0:
-        os.execv(vi_path, [vi_path, temp_path])
+        if extra_files:
+            for relpath, contents in extra_files.items():
+                full_path = os.path.join(temp_dir, relpath)
+                os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                with open(full_path, "w", encoding="utf-8") as f:
+                    f.write(contents)
 
-    fcntl.ioctl(master_fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
-    output = read_some(master_fd, 0.4)
-    for step in key_steps:
-        if isinstance(step, tuple) and step and step[0] == "winsize":
-            _, step_rows, step_cols, *rest = step
-            step_timeout = rest[0] if rest else 0.3
+        pid, master_fd = pty.fork()
+        if pid == 0:
+            os.chdir(temp_dir)
+            os.execv(vi_path, [vi_path, temp_path])
 
-            fcntl.ioctl(master_fd, termios.TIOCSWINSZ,
-                        struct.pack("HHHH", step_rows, step_cols, 0, 0))
-            output += read_some(master_fd, step_timeout)
-            continue
-        output = send_keys(master_fd, output, step)
-    if final_keys is not None:
-        output = send_keys(master_fd, output, final_keys[:1])
-        output = send_keys(master_fd, output, final_keys[1:], final_timeout)
-    else:
-        output += read_some(master_fd, final_timeout)
+        fcntl.ioctl(master_fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+        output = read_some(master_fd, 0.4)
+        for step in key_steps:
+            if isinstance(step, tuple) and step and step[0] == "winsize":
+                _, step_rows, step_cols, *rest = step
+                step_timeout = rest[0] if rest else 0.3
 
-    _, status = os.waitpid(pid, 0)
-    os.close(master_fd)
+                fcntl.ioctl(master_fd, termios.TIOCSWINSZ,
+                            struct.pack("HHHH", step_rows, step_cols, 0, 0))
+                output += read_some(master_fd, step_timeout)
+                continue
+            output = send_keys(master_fd, output, step)
+        if final_keys is not None:
+            output = send_keys(master_fd, output, final_keys[:1])
+            output = send_keys(master_fd, output, final_keys[1:], final_timeout)
+        else:
+            output += read_some(master_fd, final_timeout)
 
-    with open(temp_path, "r", encoding="utf-8") as f:
-        saved = f.read()
-    os.unlink(temp_path)
+        _, status = os.waitpid(pid, 0)
+        os.close(master_fd)
 
-    return os.waitstatus_to_exitcode(status), output.decode("latin1", "replace"), saved
+        with open(temp_path, "r", encoding="utf-8") as f:
+            saved = f.read()
+
+        return os.waitstatus_to_exitcode(status), output.decode("latin1", "replace"), saved
 
 
 def main():
@@ -1329,6 +1337,18 @@ def main():
     require("line 2/3" in decoded, "missing mark jump status")
     require(saved == "one\n> two\nthree\n",
             f"unexpected visual-mark buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"\x1d", b"\x14", b"A", b"?", b"\x1b"],
+        extra_files={"tags": "one\tbuffer.txt\t3\n"},
+    )
+    require(exit_code == 0, f"visual-tag-stack vi exited with status {exit_code}")
+    require("line 3/3" in decoded, "missing Ctrl-] tag jump status")
+    require("line 1/3" in decoded, "missing Ctrl-T tag pop status")
+    require(saved == "one?\ntwo\nthree\n",
+            f"unexpected visual-tag-stack buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,

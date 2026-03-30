@@ -236,7 +236,7 @@ Completed architecture milestones already in tree are intentionally omitted here
 ### 5. Tags, arglists, startup files, and recovery completeness
 
 - [ ] Finish tag-stack introspection and any remaining stack-navigation commands or key bindings.
-- [ ] Add visual-mode tag navigation such as `Ctrl-]` and `Ctrl-T` if they are part of the supported BSD-style contract.
+- [x] Add visual-mode tag navigation such as `Ctrl-]` and `Ctrl-T` if they are part of the supported BSD-style contract.
 - [ ] Complete multi-file arglist reporting and navigation interactions from both `ex` and `vi`.
 - [ ] Finalize `.exrc` security policy, ownership checks, directory policy, and local-vs-home precedence.
 - [ ] Harden preserve/recover format, crash-time preserve behavior, and recover-file cleanup.

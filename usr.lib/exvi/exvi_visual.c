@@ -82,7 +82,9 @@ static void vi_page_scroll(buffer_t *b, vi_visual_t *vis, int direction);
 static void vi_delete_char(buffer_t *b, vi_visual_t *vis);
 static int vi_prompt_input(buffer_t *b, vi_visual_t *vis, char prefix, char *buf,
     size_t buf_size);
+static char *vi_current_word_text(buffer_t *b, vi_visual_t *vis);
 static char *vi_current_word_pattern(buffer_t *b, vi_visual_t *vis);
+static void vi_visual_apply_tag_target(buffer_t *b, char *cmd);
 
 static void
 vi_set_insert_anchor(buffer_t *b, vi_visual_t *vis)
@@ -3859,8 +3861,9 @@ vi_search_prompt(buffer_t *b, vi_visual_t *vis, int forward)
     }
 }
 
-static char *
-vi_current_word_pattern(buffer_t *b, vi_visual_t *vis)
+static void
+vi_copy_current_word(buffer_t *b, vi_visual_t *vis, int escape_regex,
+    char **out_text)
 {
     line_t *cur = b->cur;
     int start;
@@ -3868,18 +3871,19 @@ vi_current_word_pattern(buffer_t *b, vi_visual_t *vis)
     int pos;
     size_t len;
     const char *meta = ".^$*+?()[{\\|";
-    char *pattern;
+    char *text;
     size_t out_len = 0;
 
+    *out_text = NULL;
     if (!cur || cur->len == 0) {
-        return NULL;
+        return;
     }
     pos = vis->cursor_col;
     if (pos >= (int)cur->len) {
         pos = (int)cur->len - 1;
     }
     if (pos < 0 || !vi_is_word_char((unsigned char)cur->text[pos])) {
-        return NULL;
+        return;
     }
     start = pos;
     while (start > 0 && vi_is_word_char((unsigned char)cur->text[start - 1])) {
@@ -3891,26 +3895,69 @@ vi_current_word_pattern(buffer_t *b, vi_visual_t *vis)
     }
     len = (size_t)(end - start);
     for (size_t i = 0; i < len; i++) {
-        if (strchr(meta, cur->text[start + (int)i])) {
+        if (escape_regex && strchr(meta, cur->text[start + (int)i])) {
             out_len++;
         }
         out_len++;
     }
-    pattern = malloc(out_len + 1);
-    if (!pattern) {
-        return NULL;
+    text = malloc(out_len + 1);
+    if (!text) {
+        return;
     }
     out_len = 0;
     for (size_t i = 0; i < len; i++) {
         char ch = cur->text[start + (int)i];
 
-        if (strchr(meta, ch)) {
-            pattern[out_len++] = '\\';
+        if (escape_regex && strchr(meta, ch)) {
+            text[out_len++] = '\\';
         }
-        pattern[out_len++] = ch;
+        text[out_len++] = ch;
     }
-    pattern[out_len] = '\0';
+    text[out_len] = '\0';
+    *out_text = text;
+}
+
+static char *
+vi_current_word_text(buffer_t *b, vi_visual_t *vis)
+{
+    char *text;
+
+    vi_copy_current_word(b, vis, 0, &text);
+    return text;
+}
+
+static char *
+vi_current_word_pattern(buffer_t *b, vi_visual_t *vis)
+{
+    char *pattern;
+
+    vi_copy_current_word(b, vis, 1, &pattern);
     return pattern;
+}
+
+static void
+vi_visual_apply_tag_target(buffer_t *b, char *cmd)
+{
+    char *ptr = cmd;
+    int addr = -1;
+
+    while (*ptr && isspace((unsigned char)*ptr)) {
+        ptr++;
+    }
+    if (!*ptr) {
+        return;
+    }
+
+    addr = parse_address(b, &ptr);
+    while (*ptr && isspace((unsigned char)*ptr)) {
+        ptr++;
+    }
+    if (*ptr == '\0' && addr > 0) {
+        b->cur = buf_get_line(b, addr);
+        return;
+    }
+
+    exvi_execute_command(b, cmd);
 }
 
 static void
@@ -4596,6 +4643,35 @@ exvi_visual_main(buffer_t *b)
                 }
             } else {
                 write(STDOUT_FILENO, "\a", 1);
+            }
+            break;
+        case 0x1d:
+            vis.pending_g = 0;
+            vis.pending_count = 0;
+            {
+                char *tag = vi_current_word_text(b, &vis);
+
+                if (!tag) {
+                    write(STDOUT_FILENO, "\a", 1);
+                    break;
+                }
+                handle_tag_command(b, tag, vi_visual_apply_tag_target);
+                free(tag);
+                if (b->cur) {
+                    vis.cursor_col = vi_first_nonblank_col(b->cur);
+                } else {
+                    vis.cursor_col = 0;
+                }
+            }
+            break;
+        case 0x14:
+            vis.pending_g = 0;
+            vis.pending_count = 0;
+            handle_pop_command(b, 0);
+            if (b->cur) {
+                vis.cursor_col = vi_first_nonblank_col(b->cur);
+            } else {
+                vis.cursor_col = 0;
             }
             break;
         case 'z':
