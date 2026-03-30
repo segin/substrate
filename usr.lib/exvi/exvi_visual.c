@@ -42,6 +42,8 @@ enum {
     VI_KEY_RESIZE,
 };
 
+#define VI_PROMPT_HISTORY_MAX 32
+
 typedef struct {
     struct termios saved_tio;
     int raw_active;
@@ -69,6 +71,10 @@ typedef struct {
     int last_change_char;
     char status_msg[256];
     int status_once;
+    char *cmd_history[VI_PROMPT_HISTORY_MAX];
+    int cmd_history_len;
+    char *search_history[VI_PROMPT_HISTORY_MAX];
+    int search_history_len;
 } vi_visual_t;
 
 static vi_visual_t *active_visual = NULL;
@@ -98,6 +104,45 @@ vi_set_status(vi_visual_t *vis, const char *msg)
     }
     snprintf(vis->status_msg, sizeof(vis->status_msg), "%s", msg);
     vis->status_once = 1;
+}
+
+static void
+vi_prompt_history_add(char **entries, int *count, const char *text)
+{
+    char *copy;
+
+    if (!entries || !count || !text || text[0] == '\0') {
+        return;
+    }
+    if (*count > 0 && strcmp(entries[*count - 1], text) == 0) {
+        return;
+    }
+
+    copy = strdup(text);
+    if (!copy) {
+        return;
+    }
+
+    if (*count == VI_PROMPT_HISTORY_MAX) {
+        free(entries[0]);
+        memmove(&entries[0], &entries[1],
+            sizeof(entries[0]) * (size_t)(VI_PROMPT_HISTORY_MAX - 1));
+        entries[VI_PROMPT_HISTORY_MAX - 1] = copy;
+        return;
+    }
+
+    entries[*count] = copy;
+    (*count)++;
+}
+
+static void
+vi_prompt_history_free(char **entries, int count)
+{
+    int i;
+
+    for (i = 0; i < count; i++) {
+        free(entries[i]);
+    }
 }
 
 static void
@@ -3714,7 +3759,21 @@ vi_open_line(buffer_t *b, vi_visual_t *vis, int above)
 static int
 vi_prompt_input(buffer_t *b, vi_visual_t *vis, char prefix, char *buf, size_t buf_size)
 {
+    char **history;
+    int *history_len;
+    int history_index = -1;
+    char scratch[256];
     size_t len = strlen(buf);
+
+    if (prefix == ':') {
+        history = vis->cmd_history;
+        history_len = &vis->cmd_history_len;
+    } else {
+        history = vis->search_history;
+        history_len = &vis->search_history_len;
+    }
+
+    scratch[0] = '\0';
 
     for (;;) {
         int key;
@@ -3726,20 +3785,54 @@ vi_prompt_input(buffer_t *b, vi_visual_t *vis, char prefix, char *buf, size_t bu
         }
         if (key == '\r' || key == '\n') {
             buf[len] = '\0';
+            vi_prompt_history_add(history, history_len, buf);
             return 0;
         }
+        if (key == VI_KEY_UP || key == 0x10) {
+            if (*history_len == 0) {
+                write(STDOUT_FILENO, "\a", 1);
+                continue;
+            }
+            if (history_index < 0) {
+                snprintf(scratch, sizeof(scratch), "%s", buf);
+                history_index = *history_len - 1;
+            } else if (history_index > 0) {
+                history_index--;
+            }
+            snprintf(buf, buf_size, "%s", history[history_index]);
+            len = strlen(buf);
+            continue;
+        }
+        if (key == VI_KEY_DOWN || key == 0x0e) {
+            if (history_index < 0) {
+                write(STDOUT_FILENO, "\a", 1);
+                continue;
+            }
+            if (history_index + 1 < *history_len) {
+                history_index++;
+                snprintf(buf, buf_size, "%s", history[history_index]);
+            } else {
+                history_index = -1;
+                snprintf(buf, buf_size, "%s", scratch);
+            }
+            len = strlen(buf);
+            continue;
+        }
         if (key == 127 || key == '\b') {
+            history_index = -1;
             if (len > 0) {
                 buf[--len] = '\0';
             }
             continue;
         }
         if (key == 0x15) {
+            history_index = -1;
             len = 0;
             buf[0] = '\0';
             continue;
         }
         if (key == 0x17) {
+            history_index = -1;
             while (len > 0 && isspace((unsigned char)buf[len - 1])) {
                 buf[--len] = '\0';
             }
@@ -3749,6 +3842,7 @@ vi_prompt_input(buffer_t *b, vi_visual_t *vis, char prefix, char *buf, size_t bu
             continue;
         }
         if (isprint(key) && len + 1 < buf_size) {
+            history_index = -1;
             buf[len++] = (char)key;
             buf[len] = '\0';
         }
@@ -4901,6 +4995,8 @@ done:
     if (have_winch) {
         sigaction(SIGWINCH, &old_winch, NULL);
     }
+    vi_prompt_history_free(vis.cmd_history, vis.cmd_history_len);
+    vi_prompt_history_free(vis.search_history, vis.search_history_len);
     vi_restore_terminal();
     return 0;
 
@@ -4908,6 +5004,8 @@ ex_mode:
     if (have_winch) {
         sigaction(SIGWINCH, &old_winch, NULL);
     }
+    vi_prompt_history_free(vis.cmd_history, vis.cmd_history_len);
+    vi_prompt_history_free(vis.search_history, vis.search_history_len);
     vi_restore_terminal();
     return EXVI_EXIT_EX_HANDOFF;
 }

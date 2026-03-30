@@ -230,6 +230,26 @@ def main():
     require(saved == "Zord\nmiddle\nword\n",
             f"unexpected hash-nowrap buffer: {saved!r}")
 
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n",
+        [b":ver\r", b":set tabstop?\r", b":\x1b[A\x1b[A\x1b[B\r", b":q!\r"],
+        final_keys=None,
+    )
+    require(exit_code == 0, f"command-history vi exited with status {exit_code}")
+    require(decoded.count("tabstop=8") >= 2, "missing command-history prompt recall")
+    require(saved == "one\n", f"unexpected command-history buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\ntwo\n",
+        [b"/two\r", b"/\x1b[A\r", b"?\x1b[A\r", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"search-history vi exited with status {exit_code}")
+    require("line 4/4" in decoded, "missing forward search-history repeat status")
+    require(saved == "one\nZwo\nthree\ntwo\n",
+            f"unexpected search-history buffer: {saved!r}")
+
     exit_code, decoded, saved = run_vi_session(vi_path, "alpha beta gamma\nsecond line here\n", [
         b"w",
         b"d", b"e",
