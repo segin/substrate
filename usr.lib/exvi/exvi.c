@@ -59,6 +59,7 @@ static char *recover_path_for(const char *filename);
 static int load_recover_into_buffer(buffer_t *b, const char *filename);
 static void load_startup_commands(buffer_t *b);
 static void set_visual_handoff_file(const char *filename);
+static int default_read_destination(buffer_t *b, int addr2);
 
 static void
 free_ex_arglist(void)
@@ -699,6 +700,312 @@ handle_set_command(const char *args)
 }
 
 static int
+handle_args_command(const char *args)
+{
+    const char *ptr = args;
+
+    while (*ptr && isspace((unsigned char)*ptr)) {
+        ptr++;
+    }
+    if (*ptr) {
+        if (set_ex_arglist_from_words(ptr) != 0) {
+            fprintf(stderr, "Usage: args file ...\n");
+            return 1;
+        }
+    }
+    if (ex_argc == 0) {
+        printf("No files\n");
+        return 1;
+    }
+    for (int i = 0; i < ex_argc; i++) {
+        if (i == ex_arg_idx) {
+            printf("[%s] ", ex_args[i]);
+        } else {
+            printf("%s ", ex_args[i]);
+        }
+    }
+    printf("\n");
+    return 1;
+}
+
+static int
+handle_next_command(buffer_t *b, const char *args, int force)
+{
+    int replaced_args = 0;
+
+    if (b->modified && !force) {
+        fprintf(stderr, "No write since last change (add ! to override)\n");
+        return 1;
+    }
+    if (args) {
+        const char *ptr = args;
+
+        while (*ptr && isspace((unsigned char)*ptr)) {
+            ptr++;
+        }
+        if (*ptr) {
+            if (set_ex_arglist_from_words(ptr) != 0) {
+                fprintf(stderr, "Usage: next [file ...]\n");
+                return 1;
+            }
+            replaced_args = 1;
+        }
+    }
+    if (replaced_args) {
+        load_current_arg_file(b);
+        return 1;
+    }
+    if (ex_arg_idx + 1 >= ex_argc) {
+        fprintf(stderr, "No more files\n");
+        return 1;
+    }
+    ex_arg_idx++;
+    load_current_arg_file(b);
+    return 1;
+}
+
+static int
+handle_prev_command(buffer_t *b, int force)
+{
+    if (b->modified && !force) {
+        fprintf(stderr, "No write since last change (add ! to override)\n");
+        return 1;
+    }
+    if (ex_arg_idx - 1 < 0) {
+        fprintf(stderr, "No previous files\n");
+        return 1;
+    }
+    ex_arg_idx--;
+    load_current_arg_file(b);
+    return 1;
+}
+
+static int
+handle_rewind_command(buffer_t *b, int force)
+{
+    if (b->modified && !force) {
+        fprintf(stderr, "No write since last change (add ! to override)\n");
+        return 1;
+    }
+    if (ex_argc == 0) {
+        fprintf(stderr, "No files\n");
+        return 1;
+    }
+    ex_arg_idx = 0;
+    load_current_arg_file(b);
+    return 1;
+}
+
+static int
+handle_preserve_command(buffer_t *b)
+{
+    if (b->filename && b->modified && b->head) {
+        char *path = recover_path_for(b->filename);
+
+        if (!path) {
+            fprintf(stderr, "Out of memory\n");
+            return 1;
+        }
+        buf_write_file(b, path, 0);
+        printf("File preserved as %s\n", path);
+        free(path);
+    } else {
+        fprintf(stderr, "No modifications or filename to preserve\n");
+    }
+    return 1;
+}
+
+static int
+handle_recover_command(buffer_t *b, const char *args)
+{
+    char *recover_name;
+    char *ptr = (char *)args;
+
+    while (*ptr && isspace((unsigned char)*ptr)) {
+        ptr++;
+    }
+    if (*ptr) {
+        recover_name = expand_filename_refs(b, ptr);
+    } else if (b->filename) {
+        recover_name = expand_filename_refs(b, b->filename);
+    } else {
+        recover_name = NULL;
+    }
+
+    if (!recover_name) {
+        fprintf(stderr, "No current filename\n");
+        return 1;
+    }
+    if (load_recover_into_buffer(b, recover_name) != 0) {
+        fprintf(stderr, "No recover file for %s\n", recover_name);
+        free(recover_name);
+        return 1;
+    }
+    free(recover_name);
+    printf("\"%s\" recovered, %d lines\n", b->filename, b->line_count);
+    return 1;
+}
+
+static int
+handle_write_command(buffer_t *b, const char *args, int explicit_range, int addr1, int addr2)
+{
+    char *ptr = (char *)args;
+    char *target = NULL;
+    int append = 0;
+    int write_addr1 = 1;
+    int write_addr2 = b->line_count;
+
+    if (explicit_range) {
+        write_addr1 = addr1;
+        write_addr2 = addr2;
+    }
+    while (*ptr && isspace((unsigned char)*ptr)) {
+        ptr++;
+    }
+    if (*ptr == '>' && *(ptr + 1) == '>') {
+        append = 1;
+        ptr += 2;
+        while (*ptr && isspace((unsigned char)*ptr)) {
+            ptr++;
+        }
+    }
+    if (*ptr) {
+        target = expand_filename_refs(b, ptr);
+        if (!target) {
+            return 1;
+        }
+        buf_write_range(b, target, append, write_addr1, write_addr2);
+        free(target);
+    } else if (b->filename) {
+        buf_write_range(b, b->filename, append, write_addr1, write_addr2);
+    } else {
+        fprintf(stderr, "No current filename\n");
+    }
+    return 1;
+}
+
+static int
+handle_edit_command(buffer_t *b, const char *args, int force)
+{
+    char *ptr = (char *)args;
+    char *old_filename = NULL;
+    char *new_filename = NULL;
+
+    while (*ptr && isspace((unsigned char)*ptr)) {
+        ptr++;
+    }
+
+    if (b->modified && !force) {
+        fprintf(stderr, "No write since last change (add ! to override)\n");
+        return 1;
+    }
+
+    if (!*ptr && b->filename) {
+        old_filename = strdup(b->filename);
+        if (!old_filename) {
+            perror("strdup");
+            return 1;
+        }
+    } else if (*ptr) {
+        new_filename = expand_filename_refs(b, ptr);
+        if (!new_filename) {
+            return 1;
+        }
+    }
+
+    buf_free(b);
+    buf_init(b);
+    if (*ptr) {
+        b->filename = new_filename;
+    } else if (old_filename) {
+        b->filename = old_filename;
+        old_filename = NULL;
+    }
+    replace_saved_string(&alternate_filename, old_filename);
+    if (b->filename) {
+        buf_read_file(b, b->filename);
+        if (!batch_mode) {
+            printf("\"%s\" %d lines\n", b->filename, b->line_count);
+        }
+    } else {
+        fprintf(stderr, "No current filename\n");
+    }
+    free(old_filename);
+    return 1;
+}
+
+static int
+handle_read_command(buffer_t *b, const char *args, int addr2)
+{
+    char *ptr = (char *)args;
+    const char *display_name;
+    char *expanded_name = NULL;
+    FILE *f = NULL;
+    int is_pipe = 0;
+
+    while (*ptr && isspace((unsigned char)*ptr)) {
+        ptr++;
+    }
+
+    if (*ptr == '!') {
+        if (secure_mode) {
+            fprintf(stderr, "Shell commands not allowed in secure mode\n");
+            return 1;
+        }
+        is_pipe = 1;
+        display_name = ptr + 1;
+        f = popen(ptr + 1, "r");
+    } else {
+        if (!*ptr) {
+            ptr = b->filename;
+        }
+        if (ptr) {
+            expanded_name = expand_filename_refs(b, ptr);
+            if (!expanded_name) {
+                return 1;
+            }
+        }
+        display_name = expanded_name;
+        if (expanded_name) {
+            f = fopen(expanded_name, "r");
+        }
+    }
+
+    if (f) {
+        int lines_read = 0;
+        char *line = NULL;
+        size_t cap = 0;
+        ssize_t ret;
+        int dest = default_read_destination(b, addr2);
+        line_t *pos = buf_get_line(b, dest);
+
+        while ((ret = getline(&line, &cap, f)) != -1) {
+            if (ret > 0 && line[ret - 1] == '\n') {
+                line[ret - 1] = '\0';
+            }
+            pos = buf_insert_after(b, pos, line);
+            lines_read++;
+        }
+        free(line);
+
+        if (is_pipe) {
+            pclose(f);
+        } else {
+            fclose(f);
+        }
+
+        if (!batch_mode && display_name) {
+            printf("\"%s\" %d lines\n", display_name, lines_read);
+        }
+        free(expanded_name);
+    } else {
+        perror(expanded_name ? expanded_name : ptr);
+        free(expanded_name);
+    }
+    return 1;
+}
+
+static int
 apply_substitute_range(buffer_t *b, int addr1, int addr2, const char *pattern,
     const char *replacement, int global)
 {
@@ -853,125 +1160,29 @@ void do_command(buffer_t *b, char *cmd) {
         set_visual_handoff_file(b->filename);
         longjmp(main_loop_jmp, EXVI_EXIT_VISUAL_HANDOFF);
     } else if (match_command(cmd, "args", NULL, &args, NULL)) {
-        const char *ptr = args;
-
-        while (*ptr && isspace((unsigned char)*ptr)) {
-            ptr++;
-        }
-        if (*ptr) {
-            if (set_ex_arglist_from_words(ptr) != 0) {
-                fprintf(stderr, "Usage: args file ...\n");
-                return;
-            }
-        }
-        if (ex_argc == 0) {
-            printf("No files\n");
+        if (handle_args_command(args)) {
             return;
         }
-        for (int i = 0; i < ex_argc; i++) {
-            if (i == ex_arg_idx) printf("[%s] ", ex_args[i]);
-            else printf("%s ", ex_args[i]);
-        }
-        printf("\n");
-        return;
     } else if (match_command(cmd, "next", "n", &args, &force)) {
-        int replaced_args = 0;
-
-        if (b->modified && !force) {
-            fprintf(stderr, "No write since last change (add ! to override)\n");
+        if (handle_next_command(b, args, force)) {
             return;
         }
-        if (args) {
-            const char *ptr = args;
-
-            while (*ptr && isspace((unsigned char)*ptr)) {
-                ptr++;
-            }
-            if (*ptr) {
-                if (set_ex_arglist_from_words(ptr) != 0) {
-                    fprintf(stderr, "Usage: next [file ...]\n");
-                    return;
-                }
-                replaced_args = 1;
-            }
-        }
-        if (replaced_args) {
-            load_current_arg_file(b);
-            return;
-        }
-        if (ex_arg_idx + 1 >= ex_argc) {
-            fprintf(stderr, "No more files\n");
-            return;
-        }
-        ex_arg_idx++;
-        load_current_arg_file(b);
-        return;
     } else if (match_command(cmd, "prev", NULL, &args, &force)) {
-        if (b->modified && !force) {
-            fprintf(stderr, "No write since last change (add ! to override)\n");
+        if (handle_prev_command(b, force)) {
             return;
         }
-        if (ex_arg_idx - 1 < 0) {
-            fprintf(stderr, "No previous files\n");
-            return;
-        }
-        ex_arg_idx--;
-        load_current_arg_file(b);
-        return;
     } else if (match_command(cmd, "rewind", "rew", &args, &force)) {
-        if (b->modified && !force) {
-            fprintf(stderr, "No write since last change (add ! to override)\n");
+        if (handle_rewind_command(b, force)) {
             return;
         }
-        if (ex_argc == 0) {
-            fprintf(stderr, "No files\n");
-            return;
-        }
-        ex_arg_idx = 0;
-        load_current_arg_file(b);
-        return;
     } else if (match_command(cmd, "preserve", "pre", &args, NULL)) {
-        if (b->filename && b->modified && b->head) {
-            char *path = recover_path_for(b->filename);
-
-            if (!path) {
-                fprintf(stderr, "Out of memory\n");
-                return;
-            }
-            buf_write_file(b, path, 0);
-            printf("File preserved as %s\n", path);
-            free(path);
-        } else {
-            fprintf(stderr, "No modifications or filename to preserve\n");
+        if (handle_preserve_command(b)) {
+            return;
         }
-        return;
     } else if (match_command(cmd, "recover", "rec", &args, NULL)) {
-        char *recover_name;
-        char *ptr = (char *)args;
-
-        while (*ptr && isspace((unsigned char)*ptr)) {
-            ptr++;
-        }
-        if (*ptr) {
-            recover_name = expand_filename_refs(b, ptr);
-        } else if (b->filename) {
-            recover_name = expand_filename_refs(b, b->filename);
-        } else {
-            recover_name = NULL;
-        }
-
-        if (!recover_name) {
-            fprintf(stderr, "No current filename\n");
+        if (handle_recover_command(b, args)) {
             return;
         }
-        if (load_recover_into_buffer(b, recover_name) != 0) {
-            fprintf(stderr, "No recover file for %s\n", recover_name);
-            free(recover_name);
-            return;
-        }
-        free(recover_name);
-        printf("\"%s\" recovered, %d lines\n", b->filename, b->line_count);
-        return;
     } else if (match_command(cmd, "pop", "po", &args, &force)) {
         if (handle_pop_command(b, force)) {
             return;
@@ -1001,127 +1212,16 @@ void do_command(buffer_t *b, char *cmd) {
             exit(0);
         }
     } else if (match_command(cmd, "write", "w", &args, NULL)) {
-        char *ptr = (char *)args;
-        char *target = NULL;
-        int append = 0;
-        int write_addr1 = 1;
-        int write_addr2 = b->line_count;
-
-        if (explicit_range) {
-            write_addr1 = addr1;
-            write_addr2 = addr2;
-        }
-        while (*ptr && isspace((unsigned char)*ptr)) ptr++;
-        if (*ptr == '>' && *(ptr+1) == '>') {
-            append = 1;
-            ptr += 2;
-            while (*ptr && isspace((unsigned char)*ptr)) ptr++;
-        }
-        if (*ptr) {
-            target = expand_filename_refs(b, ptr);
-            if (!target) {
-                return;
-            }
-            buf_write_range(b, target, append, write_addr1, write_addr2);
-            free(target);
-        } else if (b->filename) {
-            buf_write_range(b, b->filename, append, write_addr1, write_addr2);
-        } else {
-            fprintf(stderr, "No current filename\n");
-        }
-    } else if (match_command(cmd, "edit", "e", &args, &force)) {
-        char *ptr = (char *)args;
-        char *old_filename = NULL;
-        char *new_filename = NULL;
-        while (*ptr && isspace((unsigned char)*ptr)) ptr++;
-        
-        if (b->modified && !force) {
-            fprintf(stderr, "No write since last change (add ! to override)\n");
+        if (handle_write_command(b, args, explicit_range, addr1, addr2)) {
             return;
         }
-
-        if (!*ptr && b->filename) {
-            old_filename = strdup(b->filename);
-            if (!old_filename) {
-                perror("strdup");
-                return;
-            }
-        } else if (*ptr) {
-            new_filename = expand_filename_refs(b, ptr);
-            if (!new_filename) {
-                return;
-            }
+    } else if (match_command(cmd, "edit", "e", &args, &force)) {
+        if (handle_edit_command(b, args, force)) {
+            return;
         }
-        
-        buf_free(b);
-        buf_init(b);
-        if (*ptr) {
-            b->filename = new_filename;
-        } else if (old_filename) {
-            b->filename = old_filename;
-            old_filename = NULL;
-        }
-        replace_saved_string(&alternate_filename, old_filename);
-        if (b->filename) {
-            buf_read_file(b, b->filename);
-            if (!batch_mode) printf("\"%s\" %d lines\n", b->filename, b->line_count);
-        } else {
-            fprintf(stderr, "No current filename\n");
-        }
-        free(old_filename);
     } else if (match_command(cmd, "read", "r", &args, NULL)) {
-        char *ptr = (char *)args;
-        const char *display_name;
-        char *expanded_name = NULL;
-        while (*ptr && isspace((unsigned char)*ptr)) ptr++;
-        
-        FILE *f = NULL;
-        int is_pipe = 0;
-        if (*ptr == '!') {
-            if (secure_mode) {
-                fprintf(stderr, "Shell commands not allowed in secure mode\n");
-                return;
-            }
-            is_pipe = 1;
-            display_name = ptr + 1;
-            f = popen(ptr + 1, "r");
-        } else {
-            if (!*ptr) ptr = b->filename; // default to current file
-            if (ptr) {
-                expanded_name = expand_filename_refs(b, ptr);
-                if (!expanded_name) {
-                    return;
-                }
-            }
-            display_name = expanded_name;
-            if (expanded_name) f = fopen(expanded_name, "r");
-        }
-        
-        if (f) {
-            int lines_read = 0;
-            char *line = NULL;
-            size_t cap = 0;
-            ssize_t ret;
-            int dest = default_read_destination(b, addr2);
-            line_t *pos = buf_get_line(b, dest);
-            
-            while ((ret = getline(&line, &cap, f)) != -1) {
-                if (ret > 0 && line[ret-1] == '\n') line[ret-1] = '\0';
-                pos = buf_insert_after(b, pos, line);
-                lines_read++;
-            }
-            free(line);
-            
-            if (is_pipe) pclose(f);
-            else fclose(f);
-            
-            if (!batch_mode && display_name) {
-                printf("\"%s\" %d lines\n", display_name, lines_read);
-            }
-            free(expanded_name);
-        } else {
-            perror(expanded_name ? expanded_name : ptr);
-            free(expanded_name);
+        if (handle_read_command(b, args, addr2)) {
+            return;
         }
     } else if (match_command(cmd, "delete", "d", &args, NULL)) {
         if (!explicit_range) {
