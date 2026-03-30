@@ -157,6 +157,16 @@ def main():
     require("-- INSERT --" in decoded, "missing backward change insert status")
     require(saved == "alpha DONEgamma\n",
             f"unexpected backward-operator buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abcd\n",
+        [b"$", b"X", b".", b"u", b"$", b"2", b"X"],
+    )
+    require(exit_code == 0, f"backward-char vi exited with status {exit_code}")
+    require("line 1/1" in decoded, "missing backward-char status")
+    require(saved == "a\n",
+            f"unexpected backward-char buffer: {saved!r}")
     print("vi pty test: ok")
     return 0
 

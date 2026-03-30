@@ -13,6 +13,7 @@
 typedef enum {
     VI_REPEAT_NONE = 0,
     VI_REPEAT_X,
+    VI_REPEAT_X_BACK,
     VI_REPEAT_R,
     VI_REPEAT_DD,
     VI_REPEAT_DW,
@@ -926,6 +927,29 @@ vi_delete_char(buffer_t *b, vi_visual_t *vis)
 }
 
 static void
+vi_delete_prev_char(buffer_t *b, vi_visual_t *vis)
+{
+    line_t *cur = b->cur;
+    char *text;
+
+    if (!cur || vis->cursor_col <= 0) {
+        return;
+    }
+    save_undo(b);
+    text = malloc(cur->len);
+    if (!text) {
+        return;
+    }
+    memcpy(text, cur->text, (size_t)vis->cursor_col - 1);
+    memcpy(text + vis->cursor_col - 1, cur->text + vis->cursor_col,
+        cur->len - (size_t)vis->cursor_col + 1);
+    vi_replace_current_text(b, text);
+    free(text);
+    vis->cursor_col--;
+    vi_clamp_cursor(b, vis);
+}
+
+static void
 vi_split_line(buffer_t *b, vi_visual_t *vis)
 {
     line_t *cur = b->cur;
@@ -1033,6 +1057,15 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
             vi_delete_char(b, vis);
         } else {
             vi_delete_span(b, vis, vis->cursor_col, vis->cursor_col + count, 0);
+        }
+        break;
+    case VI_REPEAT_X_BACK:
+        if (!cur || vis->cursor_col <= 0) {
+            write(STDOUT_FILENO, "\a", 1);
+            return;
+        }
+        while (count-- > 0 && vis->cursor_col > 0) {
+            vi_delete_prev_char(b, vis);
         }
         break;
     case VI_REPEAT_R:
@@ -1387,6 +1420,18 @@ exvi_visual_main(buffer_t *b)
                     vi_delete_span(b, &vis, vis.cursor_col, end, 0);
                 }
                 vi_set_last_change(&vis, VI_REPEAT_X, count, 0);
+            }
+            break;
+        case 'X':
+            vis.pending_g = 0;
+            {
+                int count = vi_take_count(&vis);
+                int repeat_count = count;
+
+                while (count-- > 0 && vis.cursor_col > 0) {
+                    vi_delete_prev_char(b, &vis);
+                }
+                vi_set_last_change(&vis, VI_REPEAT_X_BACK, repeat_count, 0);
             }
             break;
         case 'r':
