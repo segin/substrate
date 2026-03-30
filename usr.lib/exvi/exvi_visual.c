@@ -139,6 +139,77 @@ vi_clamp_left_col(vi_visual_t *vis)
 }
 
 static int
+vi_char_display_width(unsigned char c)
+{
+    if (c == '\t') {
+        return 2;
+    }
+    if (isprint(c)) {
+        return 1;
+    }
+    return 2;
+}
+
+static int
+vi_display_col_for_index(line_t *cur, int idx)
+{
+    int col = 0;
+    size_t i;
+
+    if (!cur || idx <= 0) {
+        return 0;
+    }
+    if ((size_t)idx > cur->len) {
+        idx = (int)cur->len;
+    }
+    for (i = 0; i < (size_t)idx; i++) {
+        col += vi_char_display_width((unsigned char)cur->text[i]);
+    }
+    return col;
+}
+
+static int
+vi_index_for_display_col(line_t *cur, int target_col)
+{
+    int col = 0;
+    size_t i;
+
+    if (!cur || target_col <= 0) {
+        return 0;
+    }
+    for (i = 0; i < cur->len; i++) {
+        if (col >= target_col) {
+            return (int)i;
+        }
+        col += vi_char_display_width((unsigned char)cur->text[i]);
+        if (col > target_col) {
+            return (int)i;
+        }
+    }
+    return (int)cur->len;
+}
+
+static int
+vi_normalize_left_col(line_t *cur, int left_col)
+{
+    int col = 0;
+    size_t i;
+
+    if (!cur || left_col <= 0) {
+        return 0;
+    }
+    for (i = 0; i < cur->len; i++) {
+        int width = vi_char_display_width((unsigned char)cur->text[i]);
+
+        if (col + width > left_col) {
+            break;
+        }
+        col += width;
+    }
+    return col;
+}
+
+static int
 vi_text_cols(vi_visual_t *vis)
 {
     int cols = vis->cols - (option_number ? 8 : 0);
@@ -152,7 +223,9 @@ vi_text_cols(vi_visual_t *vis)
 static void
 vi_scroll_into_view(buffer_t *b, vi_visual_t *vis)
 {
+    line_t *cur = b->cur ? b->cur : b->head;
     int cur_line = buf_current_line(b);
+    int cursor_disp;
     int visible_rows = vis->rows - 1;
     int text_cols = vi_text_cols(vis);
 
@@ -172,13 +245,19 @@ vi_scroll_into_view(buffer_t *b, vi_visual_t *vis)
         vis->top_line = 1;
     }
     vi_clamp_left_col(vis);
-    if (vis->cursor_col < vis->left_col) {
-        vis->left_col = vis->cursor_col;
+    if (!cur) {
+        vis->left_col = 0;
+        return;
     }
-    if (vis->cursor_col >= vis->left_col + text_cols) {
-        vis->left_col = vis->cursor_col - text_cols + 1;
+    cursor_disp = vi_display_col_for_index(cur, vis->cursor_col);
+    if (cursor_disp < vis->left_col) {
+        vis->left_col = cursor_disp;
+    }
+    if (cursor_disp >= vis->left_col + text_cols) {
+        vis->left_col = cursor_disp - text_cols + 1;
     }
     vi_clamp_left_col(vis);
+    vis->left_col = vi_normalize_left_col(cur, vis->left_col);
 }
 
 static void
@@ -191,8 +270,8 @@ vi_draw_line(const char *text, int cols, int number, int line_no, int left_col)
         used += printf("%6d  ", line_no);
     }
     while (*text && skipped < left_col) {
+        skipped += vi_char_display_width((unsigned char)*text);
         text++;
-        skipped++;
     }
     while (*text && used < cols) {
         unsigned char c = (unsigned char)*text++;
@@ -222,6 +301,7 @@ static void
 vi_render(buffer_t *b, vi_visual_t *vis, char prompt_prefix, const char *prompt)
 {
     int cur_line = buf_current_line(b);
+    int cursor_disp = vi_display_col_for_index(b->cur ? b->cur : b->head, vis->cursor_col);
     int row;
     int cursor_row;
     int cursor_col;
@@ -237,7 +317,8 @@ vi_render(buffer_t *b, vi_visual_t *vis, char prompt_prefix, const char *prompt)
 
         printf("\x1b[K");
         if (line) {
-            vi_draw_line(line->text, vis->cols, option_number, line_no, vis->left_col);
+            vi_draw_line(line->text, vis->cols, option_number, line_no,
+                vi_normalize_left_col(line, vis->left_col));
         } else {
             putchar('~');
         }
@@ -269,7 +350,7 @@ vi_render(buffer_t *b, vi_visual_t *vis, char prompt_prefix, const char *prompt)
     if (cursor_row > vis->rows - 1) {
         cursor_row = vis->rows - 1;
     }
-    cursor_col = (vis->cursor_col - vis->left_col) + 1 + (option_number ? 8 : 0);
+    cursor_col = (cursor_disp - vis->left_col) + 1 + (option_number ? 8 : 0);
     if (cursor_col < 1 + (option_number ? 8 : 0)) {
         cursor_col = 1 + (option_number ? 8 : 0);
     }
@@ -2698,6 +2779,21 @@ exvi_visual_main(buffer_t *b)
             vis.pending_g = 0;
             vi_take_count(&vis);
             vis.cursor_col = vi_first_nonblank_col(cur);
+            break;
+        case '|':
+            vis.pending_g = 0;
+            {
+                int target = vi_take_count(&vis) - 1;
+
+                if (target < 0) {
+                    target = 0;
+                }
+                if (cur) {
+                    vis.cursor_col = vi_index_for_display_col(cur, target);
+                } else {
+                    vis.cursor_col = 0;
+                }
+            }
             break;
         case '$':
             vis.pending_g = 0;

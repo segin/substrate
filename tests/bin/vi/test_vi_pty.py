@@ -234,6 +234,30 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "0123456789abcdefghijKLMNOPQRST\n",
+        [b"3", b"0", b"|", b"r", b"Z"],
+        rows=8,
+        cols=20,
+    )
+    require(exit_code == 0, f"column-motion vi exited with status {exit_code}")
+    require("NOPQRSZ" in decoded, "missing far-right long-line content")
+    require(saved == "0123456789abcdefghijKLMNOPQRSZ\n",
+            f"unexpected column-motion buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "a\tbcdefghijklmnopqrstuvwxyz\n",
+        [b"2", b"5", b"|", b"r", b"Z"],
+        rows=8,
+        cols=16,
+    )
+    require(exit_code == 0, f"tab-column-motion vi exited with status {exit_code}")
+    require("defghijklmnopqrstuvZ" in decoded, "missing tab-aware far-right long-line content")
+    require(saved == "a\tbcdefghijklmnopqrstuvZxyz\n",
+            f"unexpected tab-column-motion buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\n\n  two\nthree\n\nfour\n",
         [b"}", b"}", b"{"],
     )
