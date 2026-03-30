@@ -1,7 +1,7 @@
 include ../../Makefile.inc
 
 LIB = libexvi.a
-SRCS = exvi.c
+SRCS = exvi.c exvi_buffer.c
 OBJS = $(SRCS:.c=.o)
 BUILD_MODE := $(if $(NATIVE_BUILD),native,target)
 MODE_STAMP = .build-mode
