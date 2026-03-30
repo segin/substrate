@@ -187,6 +187,15 @@ def main():
     require("line 1/1" in decoded, "missing toggle-case status")
     require(saved == "aBcD\n",
             f"unexpected toggle-case buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abcaXca\n",
+        [b"f", b"a", b";", b",", b"l", b"r", b"1", b"$", b"F", b"a", b"h", b"r", b"2"],
+    )
+    require(exit_code == 0, f"find-motion vi exited with status {exit_code}")
+    require(saved == "abca12a\n",
+            f"unexpected find-motion buffer: {saved!r}")
     print("vi pty test: ok")
     return 0
 
