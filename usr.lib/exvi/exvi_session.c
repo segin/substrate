@@ -1,0 +1,709 @@
+#include <exvi.h>
+#include "exvi_internal.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+
+static char **ex_args = NULL;
+static int ex_argc = 0;
+static int ex_arg_idx = 0;
+static int ex_args_owned = 0;
+
+typedef struct {
+    char *filename;
+    int line;
+} tag_frame_t;
+
+static tag_frame_t *tag_stack = NULL;
+static int tag_stack_len = 0;
+
+static void
+free_ex_arglist(void)
+{
+    if (!ex_args_owned || !ex_args) {
+        ex_args = NULL;
+        ex_argc = 0;
+        ex_arg_idx = 0;
+        ex_args_owned = 0;
+        return;
+    }
+
+    for (int i = 0; i < ex_argc; i++) {
+        free(ex_args[i]);
+    }
+    free(ex_args);
+    ex_args = NULL;
+    ex_argc = 0;
+    ex_arg_idx = 0;
+    ex_args_owned = 0;
+}
+
+static int
+set_ex_arglist_from_words(const char *text)
+{
+    char **new_args = NULL;
+    int new_argc = 0;
+    const char *p = text;
+
+    while (*p) {
+        char *word;
+        char **grown;
+        const char *start;
+        size_t len;
+
+        while (*p && isspace((unsigned char)*p)) {
+            p++;
+        }
+        if (!*p) {
+            break;
+        }
+
+        start = p;
+        while (*p && !isspace((unsigned char)*p)) {
+            p++;
+        }
+        len = (size_t)(p - start);
+        word = malloc(len + 1);
+        if (!word) {
+            goto fail;
+        }
+        memcpy(word, start, len);
+        word[len] = '\0';
+
+        grown = realloc(new_args, sizeof(*new_args) * (size_t)(new_argc + 1));
+        if (!grown) {
+            free(word);
+            goto fail;
+        }
+        new_args = grown;
+        new_args[new_argc++] = word;
+    }
+
+    if (new_argc == 0) {
+        return -1;
+    }
+
+    free_ex_arglist();
+    ex_args = new_args;
+    ex_argc = new_argc;
+    ex_arg_idx = 0;
+    ex_args_owned = 1;
+    return 0;
+
+fail:
+    if (new_args) {
+        for (int i = 0; i < new_argc; i++) {
+            free(new_args[i]);
+        }
+    }
+    free(new_args);
+    return -1;
+}
+
+static void
+load_current_arg_file(buffer_t *b)
+{
+    replace_saved_string(&alternate_filename, b->filename);
+    buf_free(b);
+    buf_init(b);
+    b->filename = strdup(ex_args[ex_arg_idx]);
+    if (b->filename) {
+        buf_read_file(b, b->filename);
+        if (!batch_mode) {
+            printf("\"%s\" %d lines\n", b->filename, b->line_count);
+        }
+    }
+}
+
+static void
+free_tag_stack(void)
+{
+    for (int i = 0; i < tag_stack_len; i++) {
+        free(tag_stack[i].filename);
+    }
+    free(tag_stack);
+    tag_stack = NULL;
+    tag_stack_len = 0;
+}
+
+static int
+push_tag_frame(buffer_t *b)
+{
+    tag_frame_t *grown;
+    char *filename;
+
+    if (!b->filename) {
+        return 0;
+    }
+
+    filename = strdup(b->filename);
+    if (!filename) {
+        return -1;
+    }
+
+    grown = realloc(tag_stack, sizeof(*tag_stack) * (size_t)(tag_stack_len + 1));
+    if (!grown) {
+        free(filename);
+        return -1;
+    }
+    tag_stack = grown;
+    tag_stack[tag_stack_len].filename = filename;
+    tag_stack[tag_stack_len].line = buf_current_line(b);
+    tag_stack_len++;
+    return 0;
+}
+
+void
+exvi_cleanup_session_state(void)
+{
+    free_ex_arglist();
+    free_tag_stack();
+}
+
+void
+exvi_set_cli_arglist(int argc, char **argv, int optind)
+{
+    ex_args = argv + optind;
+    ex_argc = argc - optind;
+    ex_arg_idx = 0;
+    ex_args_owned = 0;
+}
+
+int
+exvi_has_arglist(void)
+{
+    return ex_argc > 0;
+}
+
+const char *
+exvi_current_arg(void)
+{
+    if (ex_argc == 0 || ex_arg_idx < 0 || ex_arg_idx >= ex_argc) {
+        return NULL;
+    }
+    return ex_args[ex_arg_idx];
+}
+
+int
+handle_pop_command(buffer_t *b, int force)
+{
+    tag_frame_t frame;
+
+    if (b->modified && !force) {
+        fprintf(stderr, "No write since last change (add ! to override)\n");
+        return 1;
+    }
+    if (tag_stack_len == 0) {
+        fprintf(stderr, "Tag stack empty\n");
+        return 1;
+    }
+
+    frame = tag_stack[--tag_stack_len];
+    if (tag_stack_len == 0) {
+        free(tag_stack);
+        tag_stack = NULL;
+    }
+    replace_saved_string(&alternate_filename, b->filename);
+    buf_free(b);
+    buf_init(b);
+    b->filename = frame.filename;
+    buf_read_file(b, b->filename);
+    if (frame.line > 0) {
+        b->cur = buf_get_line(b, frame.line);
+    }
+    if (!batch_mode) {
+        printf("\"%s\" %d lines\n", b->filename, b->line_count);
+    }
+    return 1;
+}
+
+int
+handle_tag_command(buffer_t *b, const char *args, void (*command_fn)(buffer_t *, char *))
+{
+    char *ptr = (char *)args;
+    FILE *f;
+    char *line = NULL;
+    size_t cap = 0;
+    ssize_t ret;
+    int found = 0;
+
+    while (*ptr && isspace((unsigned char)*ptr)) {
+        ptr++;
+    }
+    if (!*ptr) {
+        fprintf(stderr, "Usage: tag <name>\n");
+        return 1;
+    }
+
+    f = fopen("tags", "r");
+    if (!f) {
+        fprintf(stderr, "No tags file\n");
+        return 1;
+    }
+
+    while ((ret = getline(&line, &cap, f)) != -1) {
+        if (ret > 0 && line[ret - 1] == '\n') {
+            line[ret - 1] = '\0';
+        }
+        char *tname = strtok(line, "\t ");
+        char *tfile = strtok(NULL, "\t ");
+        char *tcmd = strtok(NULL, "");
+
+        if (tname && tfile && tcmd && strcmp(tname, ptr) == 0) {
+            char *old_filename;
+
+            if (b->modified) {
+                fprintf(stderr, "No write since last change\n");
+                free(line);
+                fclose(f);
+                return 1;
+            }
+            if (push_tag_frame(b) != 0) {
+                fprintf(stderr, "Out of memory\n");
+                free(line);
+                fclose(f);
+                return 1;
+            }
+            old_filename = b->filename ? strdup(b->filename) : NULL;
+            buf_free(b);
+            buf_init(b);
+            b->filename = strdup(tfile);
+            buf_read_file(b, b->filename);
+            replace_saved_string(&alternate_filename, old_filename);
+            free(old_filename);
+            if (!batch_mode) {
+                printf("\"%s\" %d lines\n", b->filename, b->line_count);
+            }
+
+            {
+                char *tcmt = strstr(tcmd, ";\"");
+                if (tcmt) {
+                    *tcmt = '\0';
+                }
+            }
+            command_fn(b, tcmd);
+            found = 1;
+            break;
+        }
+    }
+    free(line);
+    fclose(f);
+    if (!found) {
+        fprintf(stderr, "Tag not found: %s\n", ptr);
+    }
+    return 1;
+}
+
+int
+handle_set_command(const char *args)
+{
+    char *ptr = (char *)args;
+
+    while (*ptr && isspace((unsigned char)*ptr)) {
+        ptr++;
+    }
+
+    if (!*ptr) {
+        if (option_number) {
+            printf("number\n");
+        }
+        if (option_list) {
+            printf("list\n");
+        }
+        return 1;
+    }
+
+    while (*ptr) {
+        char *end = ptr;
+        size_t len;
+        int query = 0;
+
+        while (*end && !isspace((unsigned char)*end)) {
+            end++;
+        }
+        len = (size_t)(end - ptr);
+        if (len > 0 && end[-1] == '?') {
+            query = 1;
+            len--;
+        }
+
+        if (len == 3 && strncmp(ptr, "all", 3) == 0) {
+            if (query) {
+                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                return 1;
+            }
+            if (option_number) {
+                printf("number\n");
+            }
+            if (option_list) {
+                printf("list\n");
+            }
+        } else if (len == 2 && strncmp(ptr, "nu", 2) == 0) {
+            if (query) {
+                printf("%s\n", option_number ? "number" : "nonumber");
+            } else {
+                option_number = 1;
+            }
+        } else if (len == 6 && strncmp(ptr, "number", 6) == 0) {
+            if (query) {
+                printf("%s\n", option_number ? "number" : "nonumber");
+            } else {
+                option_number = 1;
+            }
+        } else if (len == 4 && strncmp(ptr, "nonu", 4) == 0) {
+            if (query) {
+                printf("%s\n", option_number ? "nonumber" : "number");
+            } else {
+                option_number = 0;
+            }
+        } else if (len == 8 && strncmp(ptr, "nonumber", 8) == 0) {
+            if (query) {
+                printf("%s\n", option_number ? "nonumber" : "number");
+            } else {
+                option_number = 0;
+            }
+        } else if (len == 2 && strncmp(ptr, "li", 2) == 0) {
+            if (query) {
+                printf("%s\n", option_list ? "list" : "nolist");
+            } else {
+                option_list = 1;
+            }
+        } else if (len == 4 && strncmp(ptr, "list", 4) == 0) {
+            if (query) {
+                printf("%s\n", option_list ? "list" : "nolist");
+            } else {
+                option_list = 1;
+            }
+        } else if (len == 4 && strncmp(ptr, "noli", 4) == 0) {
+            if (query) {
+                printf("%s\n", option_list ? "nolist" : "list");
+            } else {
+                option_list = 0;
+            }
+        } else if (len == 6 && strncmp(ptr, "nolist", 6) == 0) {
+            if (query) {
+                printf("%s\n", option_list ? "nolist" : "list");
+            } else {
+                option_list = 0;
+            }
+        } else {
+            fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+            return 1;
+        }
+
+        ptr = end;
+        while (*ptr && isspace((unsigned char)*ptr)) {
+            ptr++;
+        }
+    }
+    return 1;
+}
+
+int
+handle_args_command(const char *args)
+{
+    const char *ptr = args;
+
+    while (*ptr && isspace((unsigned char)*ptr)) {
+        ptr++;
+    }
+    if (*ptr) {
+        if (set_ex_arglist_from_words(ptr) != 0) {
+            fprintf(stderr, "Usage: args file ...\n");
+            return 1;
+        }
+    }
+    if (ex_argc == 0) {
+        printf("No files\n");
+        return 1;
+    }
+    for (int i = 0; i < ex_argc; i++) {
+        if (i == ex_arg_idx) {
+            printf("[%s] ", ex_args[i]);
+        } else {
+            printf("%s ", ex_args[i]);
+        }
+    }
+    printf("\n");
+    return 1;
+}
+
+int
+handle_next_command(buffer_t *b, const char *args, int force)
+{
+    int replaced_args = 0;
+
+    if (b->modified && !force) {
+        fprintf(stderr, "No write since last change (add ! to override)\n");
+        return 1;
+    }
+    if (args) {
+        const char *ptr = args;
+
+        while (*ptr && isspace((unsigned char)*ptr)) {
+            ptr++;
+        }
+        if (*ptr) {
+            if (set_ex_arglist_from_words(ptr) != 0) {
+                fprintf(stderr, "Usage: next [file ...]\n");
+                return 1;
+            }
+            replaced_args = 1;
+        }
+    }
+    if (replaced_args) {
+        load_current_arg_file(b);
+        return 1;
+    }
+    if (ex_arg_idx + 1 >= ex_argc) {
+        fprintf(stderr, "No more files\n");
+        return 1;
+    }
+    ex_arg_idx++;
+    load_current_arg_file(b);
+    return 1;
+}
+
+int
+handle_prev_command(buffer_t *b, int force)
+{
+    if (b->modified && !force) {
+        fprintf(stderr, "No write since last change (add ! to override)\n");
+        return 1;
+    }
+    if (ex_arg_idx - 1 < 0) {
+        fprintf(stderr, "No previous files\n");
+        return 1;
+    }
+    ex_arg_idx--;
+    load_current_arg_file(b);
+    return 1;
+}
+
+int
+handle_rewind_command(buffer_t *b, int force)
+{
+    if (b->modified && !force) {
+        fprintf(stderr, "No write since last change (add ! to override)\n");
+        return 1;
+    }
+    if (ex_argc == 0) {
+        fprintf(stderr, "No files\n");
+        return 1;
+    }
+    ex_arg_idx = 0;
+    load_current_arg_file(b);
+    return 1;
+}
+
+int
+handle_preserve_command(buffer_t *b)
+{
+    if (b->filename && b->modified && b->head) {
+        char *path = recover_path_for(b->filename);
+
+        if (!path) {
+            fprintf(stderr, "Out of memory\n");
+            return 1;
+        }
+        buf_write_file(b, path, 0);
+        printf("File preserved as %s\n", path);
+        free(path);
+    } else {
+        fprintf(stderr, "No modifications or filename to preserve\n");
+    }
+    return 1;
+}
+
+int
+handle_recover_command(buffer_t *b, const char *args)
+{
+    char *recover_name;
+    char *ptr = (char *)args;
+
+    while (*ptr && isspace((unsigned char)*ptr)) {
+        ptr++;
+    }
+    if (*ptr) {
+        recover_name = expand_filename_refs(b, ptr);
+    } else if (b->filename) {
+        recover_name = expand_filename_refs(b, b->filename);
+    } else {
+        recover_name = NULL;
+    }
+
+    if (!recover_name) {
+        fprintf(stderr, "No current filename\n");
+        return 1;
+    }
+    if (load_recover_into_buffer(b, recover_name) != 0) {
+        fprintf(stderr, "No recover file for %s\n", recover_name);
+        free(recover_name);
+        return 1;
+    }
+    free(recover_name);
+    printf("\"%s\" recovered, %d lines\n", b->filename, b->line_count);
+    return 1;
+}
+
+int
+handle_write_command(buffer_t *b, const char *args, int explicit_range, int addr1,
+    int addr2)
+{
+    char *ptr = (char *)args;
+    char *target = NULL;
+    int append = 0;
+    int write_addr1 = 1;
+    int write_addr2 = b->line_count;
+
+    if (explicit_range) {
+        write_addr1 = addr1;
+        write_addr2 = addr2;
+    }
+    while (*ptr && isspace((unsigned char)*ptr)) {
+        ptr++;
+    }
+    if (*ptr == '>' && *(ptr + 1) == '>') {
+        append = 1;
+        ptr += 2;
+        while (*ptr && isspace((unsigned char)*ptr)) {
+            ptr++;
+        }
+    }
+    if (*ptr) {
+        target = expand_filename_refs(b, ptr);
+        if (!target) {
+            return 1;
+        }
+        buf_write_range(b, target, append, write_addr1, write_addr2);
+        free(target);
+    } else if (b->filename) {
+        buf_write_range(b, b->filename, append, write_addr1, write_addr2);
+    } else {
+        fprintf(stderr, "No current filename\n");
+    }
+    return 1;
+}
+
+int
+handle_edit_command(buffer_t *b, const char *args, int force)
+{
+    char *ptr = (char *)args;
+    char *old_filename = NULL;
+    char *new_filename = NULL;
+
+    while (*ptr && isspace((unsigned char)*ptr)) {
+        ptr++;
+    }
+
+    if (b->modified && !force) {
+        fprintf(stderr, "No write since last change (add ! to override)\n");
+        return 1;
+    }
+
+    if (!*ptr && b->filename) {
+        old_filename = strdup(b->filename);
+        if (!old_filename) {
+            perror("strdup");
+            return 1;
+        }
+    } else if (*ptr) {
+        new_filename = expand_filename_refs(b, ptr);
+        if (!new_filename) {
+            return 1;
+        }
+    }
+
+    buf_free(b);
+    buf_init(b);
+    if (*ptr) {
+        b->filename = new_filename;
+    } else if (old_filename) {
+        b->filename = old_filename;
+        old_filename = NULL;
+    }
+    replace_saved_string(&alternate_filename, old_filename);
+    if (b->filename) {
+        buf_read_file(b, b->filename);
+        if (!batch_mode) {
+            printf("\"%s\" %d lines\n", b->filename, b->line_count);
+        }
+    } else {
+        fprintf(stderr, "No current filename\n");
+    }
+    free(old_filename);
+    return 1;
+}
+
+int
+handle_read_command(buffer_t *b, const char *args, int addr2)
+{
+    char *ptr = (char *)args;
+    const char *display_name;
+    char *expanded_name = NULL;
+    FILE *f = NULL;
+    int is_pipe = 0;
+
+    while (*ptr && isspace((unsigned char)*ptr)) {
+        ptr++;
+    }
+
+    if (*ptr == '!') {
+        if (secure_mode) {
+            fprintf(stderr, "Shell commands not allowed in secure mode\n");
+            return 1;
+        }
+        is_pipe = 1;
+        display_name = ptr + 1;
+        f = popen(ptr + 1, "r");
+    } else {
+        if (!*ptr) {
+            ptr = b->filename;
+        }
+        if (ptr) {
+            expanded_name = expand_filename_refs(b, ptr);
+            if (!expanded_name) {
+                return 1;
+            }
+        }
+        display_name = expanded_name;
+        if (expanded_name) {
+            f = fopen(expanded_name, "r");
+        }
+    }
+
+    if (f) {
+        int lines_read = 0;
+        char *line = NULL;
+        size_t cap = 0;
+        ssize_t ret;
+        int dest = default_read_destination(b, addr2);
+        line_t *pos = buf_get_line(b, dest);
+
+        while ((ret = getline(&line, &cap, f)) != -1) {
+            if (ret > 0 && line[ret - 1] == '\n') {
+                line[ret - 1] = '\0';
+            }
+            pos = buf_insert_after(b, pos, line);
+            lines_read++;
+        }
+        free(line);
+
+        if (is_pipe) {
+            pclose(f);
+        } else {
+            fclose(f);
+        }
+
+        if (!batch_mode && display_name) {
+            printf("\"%s\" %d lines\n", display_name, lines_read);
+        }
+        free(expanded_name);
+    } else {
+        perror(expanded_name ? expanded_name : ptr);
+        free(expanded_name);
+    }
+    return 1;
+}
