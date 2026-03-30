@@ -193,6 +193,7 @@ def main():
     output = send_keys(master_fd, output, b"G")
     output = send_keys(master_fd, output, b"2")
     output = send_keys(master_fd, output, b"x")
+    output = send_keys(master_fd, output, b".")
     output = send_keys(master_fd, output, b"g")
     output = send_keys(master_fd, output, b"g")
     output = send_keys(master_fd, output, b"l")
@@ -226,7 +227,7 @@ def main():
     with open(temp_path, "r", encoding="utf-8") as f:
         saved = f.read()
     os.unlink(temp_path)
-    require(saved == "Top-split\nline\nIL1\n\nXone TWO THhree! >Two!\nDone\n",
+    require(saved == "Top-split\nline\n1\n\nXone TWO THhree! >Two!\nDone\n",
             f"unexpected saved buffer: {saved!r}")
     print("vi pty test: ok")
     return 0

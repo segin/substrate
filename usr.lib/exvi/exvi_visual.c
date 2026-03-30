@@ -10,6 +10,18 @@
 #include <sys/ioctl.h>
 #include <sys/select.h>
 
+typedef enum {
+    VI_REPEAT_NONE = 0,
+    VI_REPEAT_X,
+    VI_REPEAT_R,
+    VI_REPEAT_DD,
+    VI_REPEAT_DW,
+    VI_REPEAT_D_EOL,
+    VI_REPEAT_J,
+    VI_REPEAT_P,
+    VI_REPEAT_P_BEFORE,
+} vi_repeat_kind_t;
+
 typedef struct {
     struct termios saved_tio;
     int raw_active;
@@ -23,6 +35,9 @@ typedef struct {
     int last_search_forward;
     int insert_mode;
     int replace_mode;
+    vi_repeat_kind_t last_change;
+    int last_change_count;
+    int last_change_char;
 } vi_visual_t;
 
 static vi_visual_t *active_visual = NULL;
@@ -283,6 +298,14 @@ vi_take_count(vi_visual_t *vis)
 
     vis->pending_count = 0;
     return count > 0 ? count : 1;
+}
+
+static void
+vi_set_last_change(vi_visual_t *vis, vi_repeat_kind_t kind, int count, int ch)
+{
+    vis->last_change = kind;
+    vis->last_change_count = count;
+    vis->last_change_char = ch;
 }
 
 static void
@@ -658,6 +681,7 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             b->cur = b->head;
         }
         vis->cursor_col = 0;
+        vi_set_last_change(vis, VI_REPEAT_DD, count, 0);
     } else if (vis->pending_op == 'c' && key == 'c') {
         if (count == 1) {
             vi_substitute_line(b, vis);
@@ -678,6 +702,9 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         vi_find_word_boundary_forward_count(b->cur, vis->cursor_col, count, &end);
         if (end >= vis->cursor_col) {
             vi_delete_span(b, vis, vis->cursor_col, end, vis->pending_op == 'c');
+            if (vis->pending_op == 'd') {
+                vi_set_last_change(vis, VI_REPEAT_DW, count, 0);
+            }
         }
     } else {
         write(STDOUT_FILENO, "\a", 1);
@@ -877,6 +904,85 @@ vi_command_prompt(buffer_t *b, vi_visual_t *vis)
             cmd[len++] = (char)key;
             cmd[len] = '\0';
         }
+    }
+}
+
+static void
+vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
+{
+    line_t *cur = b->cur;
+    int count = vis->pending_count > 0 ? vis->pending_count : vis->last_change_count;
+    int line_no = buf_current_line(b);
+    int end;
+    int last;
+
+    vis->pending_count = 0;
+    if (count < 1) {
+        count = 1;
+    }
+
+    switch (vis->last_change) {
+    case VI_REPEAT_X:
+        if (!cur || (size_t)vis->cursor_col >= cur->len) {
+            write(STDOUT_FILENO, "\a", 1);
+            return;
+        }
+        if (count == 1) {
+            vi_delete_char(b, vis);
+        } else {
+            vi_delete_span(b, vis, vis->cursor_col, vis->cursor_col + count, 0);
+        }
+        break;
+    case VI_REPEAT_R:
+        if (!cur || (size_t)vis->cursor_col >= cur->len) {
+            write(STDOUT_FILENO, "\a", 1);
+            return;
+        }
+        vi_replace_char(b, vis, vis->last_change_char);
+        break;
+    case VI_REPEAT_DD:
+        last = vi_clamp_line_target(b, line_no + count - 1);
+        handle_delete_command(b, 1, line_no, last);
+        if (!b->cur && b->head) {
+            b->cur = b->head;
+        }
+        vis->cursor_col = 0;
+        break;
+    case VI_REPEAT_DW:
+        vi_find_word_boundary_forward_count(b->cur, vis->cursor_col, count, &end);
+        if (end >= vis->cursor_col) {
+            vi_delete_span(b, vis, vis->cursor_col, end, 0);
+        }
+        break;
+    case VI_REPEAT_D_EOL:
+        vi_delete_span(b, vis, vis->cursor_col,
+            cur ? (int)cur->len : vis->cursor_col, 0);
+        break;
+    case VI_REPEAT_J:
+        last = vi_clamp_line_target(b, line_no + count - 1);
+        if (b->cur && b->cur->next && last > line_no) {
+            handle_join_command(b, 1, line_no, last);
+            vi_clamp_cursor(b, vis);
+        } else if (b->cur && b->cur->next) {
+            handle_join_command(b, 1, line_no, line_no + 1);
+            vi_clamp_cursor(b, vis);
+        } else {
+            write(STDOUT_FILENO, "\a", 1);
+        }
+        break;
+    case VI_REPEAT_P:
+        while (count-- > 0) {
+            vi_linewise_put(b, vis, 0);
+        }
+        break;
+    case VI_REPEAT_P_BEFORE:
+        while (count-- > 0) {
+            vi_linewise_put(b, vis, 1);
+        }
+        break;
+    default:
+        write(STDOUT_FILENO, "\a", 1);
+        break;
     }
 }
 
@@ -1152,6 +1258,7 @@ exvi_visual_main(buffer_t *b)
 
                     vi_delete_span(b, &vis, vis.cursor_col, end, 0);
                 }
+                vi_set_last_change(&vis, VI_REPEAT_X, count, 0);
             }
             break;
         case 'r':
@@ -1163,6 +1270,7 @@ exvi_visual_main(buffer_t *b)
             }
             if (isprint(key) || key == '\t') {
                 vi_replace_char(b, &vis, key);
+                vi_set_last_change(&vis, VI_REPEAT_R, 1, key);
             }
             break;
         case 's':
@@ -1199,20 +1307,24 @@ exvi_visual_main(buffer_t *b)
             vis.pending_g = 0;
             {
                 int count = vi_take_count(&vis);
+                int repeat_count = count;
 
                 while (count-- > 0) {
                     vi_linewise_put(b, &vis, 0);
                 }
+                vi_set_last_change(&vis, VI_REPEAT_P, repeat_count, 0);
             }
             break;
         case 'P':
             vis.pending_g = 0;
             {
                 int count = vi_take_count(&vis);
+                int repeat_count = count;
 
                 while (count-- > 0) {
                     vi_linewise_put(b, &vis, 1);
                 }
+                vi_set_last_change(&vis, VI_REPEAT_P_BEFORE, repeat_count, 0);
             }
             break;
         case 'J':
@@ -1231,6 +1343,7 @@ exvi_visual_main(buffer_t *b)
                 } else {
                     write(STDOUT_FILENO, "\a", 1);
                 }
+                vi_set_last_change(&vis, VI_REPEAT_J, count, 0);
             }
             break;
         case 'g':
@@ -1314,12 +1427,17 @@ exvi_visual_main(buffer_t *b)
             vis.pending_count = 0;
             vi_delete_span(b, &vis, vis.cursor_col,
                 cur ? (int)cur->len : vis.cursor_col, 0);
+            vi_set_last_change(&vis, VI_REPEAT_D_EOL, 1, 0);
             break;
         case 'C':
             vis.pending_g = 0;
             vis.pending_count = 0;
             vi_delete_span(b, &vis, vis.cursor_col,
                 cur ? (int)cur->len : vis.cursor_col, 1);
+            break;
+        case '.':
+            vis.pending_g = 0;
+            vi_repeat_last_change(b, &vis);
             break;
         default:
             vis.pending_g = 0;
