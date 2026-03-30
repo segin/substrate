@@ -15,6 +15,7 @@ typedef enum {
     VI_REPEAT_X,
     VI_REPEAT_X_BACK,
     VI_REPEAT_R,
+    VI_REPEAT_TILDE,
     VI_REPEAT_DD,
     VI_REPEAT_DW,
     VI_REPEAT_D_EOL,
@@ -964,6 +965,43 @@ vi_delete_prev_char(buffer_t *b, vi_visual_t *vis)
 }
 
 static void
+vi_toggle_case(buffer_t *b, vi_visual_t *vis, int count)
+{
+    line_t *cur = b->cur;
+    char *text;
+    int start_col = vis->cursor_col;
+    size_t i;
+
+    if (!cur || (size_t)vis->cursor_col >= cur->len) {
+        write(STDOUT_FILENO, "\a", 1);
+        return;
+    }
+    save_undo(b);
+    text = strdup(cur->text);
+    if (!text) {
+        return;
+    }
+    for (i = (size_t)start_col; i < cur->len && count > 0; i++, count--) {
+        unsigned char ch = (unsigned char)text[i];
+
+        if (islower(ch)) {
+            text[i] = (char)toupper(ch);
+        } else if (isupper(ch)) {
+            text[i] = (char)tolower(ch);
+        }
+    }
+    if (vi_replace_current_text(b, text) == 0) {
+        if (i < cur->len) {
+            vis->cursor_col = (int)i;
+        } else if (cur->len > 0) {
+            vis->cursor_col = (int)cur->len - 1;
+        }
+        vi_clamp_cursor(b, vis);
+    }
+    free(text);
+}
+
+static void
 vi_split_line(buffer_t *b, vi_visual_t *vis)
 {
     line_t *cur = b->cur;
@@ -1088,6 +1126,9 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
             return;
         }
         vi_replace_char(b, vis, vis->last_change_char);
+        break;
+    case VI_REPEAT_TILDE:
+        vi_toggle_case(b, vis, count);
         break;
     case VI_REPEAT_DD:
         last = vi_clamp_line_target(b, line_no + count - 1);
@@ -1458,6 +1499,15 @@ exvi_visual_main(buffer_t *b)
             if (isprint(key) || key == '\t') {
                 vi_replace_char(b, &vis, key);
                 vi_set_last_change(&vis, VI_REPEAT_R, 1, key);
+            }
+            break;
+        case '~':
+            vis.pending_g = 0;
+            {
+                int count = vi_take_count(&vis);
+
+                vi_toggle_case(b, &vis, count);
+                vi_set_last_change(&vis, VI_REPEAT_TILDE, count, 0);
             }
             break;
         case 's':

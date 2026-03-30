@@ -177,6 +177,16 @@ def main():
     require("-- INSERT --" in decoded, "missing line-start change insert status")
     require(saved == "DONE\n",
             f"unexpected line-start-operator buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "AbCd\n",
+        [b"~", b".", b"2", b"~"],
+    )
+    require(exit_code == 0, f"toggle-case vi exited with status {exit_code}")
+    require("line 1/1" in decoded, "missing toggle-case status")
+    require(saved == "aBcD\n",
+            f"unexpected toggle-case buffer: {saved!r}")
     print("vi pty test: ok")
     return 0
 
