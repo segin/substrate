@@ -281,6 +281,16 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "abc   \ndef   \n",
+        [b"g", b"_", b"r", b"Z", b"2", b"g", b"_", b"r", b"Y"],
+    )
+    require(exit_code == 0, f"g_-motion vi exited with status {exit_code}")
+    require("line 2/2" in decoded, "missing counted g_ status")
+    require(saved == "abZ   \ndeY   \n",
+            f"unexpected g_-motion buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\n\n  two\nthree\n\nfour\n",
         [b"}", b"}", b"{"],
     )

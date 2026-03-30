@@ -574,6 +574,22 @@ vi_first_nonblank_col(line_t *cur)
     return 0;
 }
 
+static int
+vi_last_nonblank_col(line_t *cur)
+{
+    int i;
+
+    if (!cur || cur->len == 0) {
+        return 0;
+    }
+    for (i = (int)cur->len - 1; i >= 0; i--) {
+        if (cur->text[i] != ' ' && cur->text[i] != '\t') {
+            return i;
+        }
+    }
+    return 0;
+}
+
 static void
 vi_move_to_screen_line(buffer_t *b, vi_visual_t *vis, int screen_row)
 {
@@ -2811,6 +2827,21 @@ exvi_visual_main(buffer_t *b)
             vis.pending_g = 0;
             vi_take_count(&vis);
             vis.cursor_col = vi_first_nonblank_col(cur);
+            break;
+        case '_':
+            if (vis.pending_g) {
+                int line_no = buf_current_line(b);
+                int count = vi_take_count(&vis);
+                int target = vi_clamp_line_target(b, line_no + count - 1);
+
+                b->cur = buf_get_line(b, target);
+                vis.cursor_col = vi_last_nonblank_col(b->cur);
+                vis.pending_g = 0;
+            } else {
+                vis.pending_g = 0;
+                vis.pending_count = 0;
+                write(STDOUT_FILENO, "\a", 1);
+            }
             break;
         case '|':
             vis.pending_g = 0;
