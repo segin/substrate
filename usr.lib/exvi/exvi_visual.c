@@ -18,6 +18,7 @@ typedef struct {
     int top_line;
     int cursor_col;
     int pending_g;
+    int pending_op;
     int last_search_forward;
     int insert_mode;
 } vi_visual_t;
@@ -290,6 +291,142 @@ vi_page_scroll(buffer_t *b, vi_visual_t *vis, int direction)
 }
 
 static int
+vi_is_word_char(int ch)
+{
+    return isalnum((unsigned char)ch) || ch == '_';
+}
+
+static void
+vi_move_word_forward(buffer_t *b, vi_visual_t *vis)
+{
+    int line_no = buf_current_line(b);
+    line_t *cur = b->cur;
+    size_t i;
+
+    if (!cur) {
+        return;
+    }
+    i = (size_t)vis->cursor_col;
+    if (i < cur->len && vi_is_word_char((unsigned char)cur->text[i])) {
+        while (i < cur->len && vi_is_word_char((unsigned char)cur->text[i])) {
+            i++;
+        }
+    }
+    while (i < cur->len && !vi_is_word_char((unsigned char)cur->text[i])) {
+        i++;
+    }
+    if (i < cur->len) {
+        vis->cursor_col = (int)i;
+        return;
+    }
+
+    for (line_no++; line_no <= b->line_count; line_no++) {
+        cur = buf_get_line(b, line_no);
+        if (!cur) {
+            break;
+        }
+        for (i = 0; i < cur->len; i++) {
+            if (vi_is_word_char((unsigned char)cur->text[i])) {
+                b->cur = cur;
+                vis->cursor_col = (int)i;
+                return;
+            }
+        }
+    }
+    if (b->tail) {
+        b->cur = b->tail;
+        vis->cursor_col = (int)b->tail->len;
+    }
+}
+
+static void
+vi_move_word_backward(buffer_t *b, vi_visual_t *vis)
+{
+    int line_no = buf_current_line(b);
+    line_t *cur = b->cur;
+    int i;
+
+    if (!cur) {
+        return;
+    }
+    i = vis->cursor_col;
+    if (i > 0) {
+        i--;
+    }
+    while (i >= 0 && !vi_is_word_char((unsigned char)cur->text[i])) {
+        i--;
+    }
+    while (i > 0 && vi_is_word_char((unsigned char)cur->text[i - 1])) {
+        i--;
+    }
+    if (i >= 0 && vi_is_word_char((unsigned char)cur->text[i])) {
+        vis->cursor_col = i;
+        return;
+    }
+
+    for (line_no--; line_no >= 1; line_no--) {
+        cur = buf_get_line(b, line_no);
+        if (!cur) {
+            continue;
+        }
+        for (i = (int)cur->len - 1; i >= 0; i--) {
+            if (vi_is_word_char((unsigned char)cur->text[i])) {
+                while (i > 0 && vi_is_word_char((unsigned char)cur->text[i - 1])) {
+                    i--;
+                }
+                b->cur = cur;
+                vis->cursor_col = i;
+                return;
+            }
+        }
+    }
+    if (b->head) {
+        b->cur = b->head;
+        vis->cursor_col = 0;
+    }
+}
+
+static void
+vi_move_word_end(buffer_t *b, vi_visual_t *vis)
+{
+    int line_no = buf_current_line(b);
+    line_t *cur = b->cur;
+    size_t i;
+
+    if (!cur) {
+        return;
+    }
+    i = (size_t)vis->cursor_col;
+    while (i < cur->len && !vi_is_word_char((unsigned char)cur->text[i])) {
+        i++;
+    }
+    if (i < cur->len) {
+        while (i + 1 < cur->len && vi_is_word_char((unsigned char)cur->text[i + 1])) {
+            i++;
+        }
+        vis->cursor_col = (int)i;
+        return;
+    }
+
+    for (line_no++; line_no <= b->line_count; line_no++) {
+        cur = buf_get_line(b, line_no);
+        if (!cur) {
+            break;
+        }
+        for (i = 0; i < cur->len; i++) {
+            if (vi_is_word_char((unsigned char)cur->text[i])) {
+                while (i + 1 < cur->len && vi_is_word_char((unsigned char)cur->text[i + 1])) {
+                    i++;
+                }
+                b->cur = cur;
+                vis->cursor_col = (int)i;
+                return;
+            }
+        }
+    }
+}
+
+static int
 vi_replace_current_text(buffer_t *b, const char *text)
 {
     line_t *cur = b->cur;
@@ -307,6 +444,47 @@ vi_replace_current_text(buffer_t *b, const char *text)
     cur->len = strlen(copy);
     b->modified = 1;
     return 0;
+}
+
+static void
+vi_linewise_put(buffer_t *b, vi_visual_t *vis, int before)
+{
+    int line_no = buf_current_line(b);
+
+    if (line_no < 1) {
+        line_no = 1;
+    }
+    handle_put_command(b, "", before ? line_no - 1 : line_no);
+    if (before) {
+        if (line_no > 1) {
+            b->cur = buf_get_line(b, line_no);
+        } else {
+            b->cur = buf_get_line(b, 1);
+        }
+    } else {
+        b->cur = buf_get_line(b, line_no + 1);
+    }
+    vis->cursor_col = 0;
+}
+
+static void
+vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
+{
+    int line_no = buf_current_line(b);
+
+    if (vis->pending_op == 'd' && key == 'd') {
+        handle_delete_command(b, 1, line_no, line_no);
+        if (!b->cur && b->head) {
+            b->cur = b->head;
+        }
+        vis->cursor_col = 0;
+    } else if (vis->pending_op == 'y' && key == 'y') {
+        handle_yank_command(b, "", 1, line_no, line_no);
+        vis->cursor_col = 0;
+    } else {
+        write(STDOUT_FILENO, "\a", 1);
+    }
+    vis->pending_op = 0;
 }
 
 static void
@@ -565,6 +743,10 @@ exvi_visual_main(buffer_t *b)
             }
             continue;
         }
+        if (vis.pending_op) {
+            vi_handle_pending_operator(b, &vis, key);
+            continue;
+        }
 
         switch (key) {
         case 'h':
@@ -586,6 +768,18 @@ exvi_visual_main(buffer_t *b)
         case 'k':
             vis.pending_g = 0;
             vi_move_vertical(b, -1);
+            break;
+        case 'w':
+            vis.pending_g = 0;
+            vi_move_word_forward(b, &vis);
+            break;
+        case 'b':
+            vis.pending_g = 0;
+            vi_move_word_backward(b, &vis);
+            break;
+        case 'e':
+            vis.pending_g = 0;
+            vi_move_word_end(b, &vis);
             break;
         case '0':
             vis.pending_g = 0;
@@ -626,6 +820,22 @@ exvi_visual_main(buffer_t *b)
             vis.pending_g = 0;
             handle_undo_command(b);
             vi_clamp_cursor(b, &vis);
+            break;
+        case 'd':
+            vis.pending_g = 0;
+            vis.pending_op = 'd';
+            break;
+        case 'y':
+            vis.pending_g = 0;
+            vis.pending_op = 'y';
+            break;
+        case 'p':
+            vis.pending_g = 0;
+            vi_linewise_put(b, &vis, 0);
+            break;
+        case 'P':
+            vis.pending_g = 0;
+            vi_linewise_put(b, &vis, 1);
             break;
         case 'g':
             if (vis.pending_g) {
