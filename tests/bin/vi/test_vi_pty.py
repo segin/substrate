@@ -309,6 +309,44 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one two three four\n",
+        [b"W", b"W", b"W", b"d", b"g", b"e"],
+    )
+    require(exit_code == 0, f"dge vi exited with status {exit_code}")
+    require(saved == "one two threour\n",
+            f"unexpected dge buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four\n",
+        [b"W", b"W", b"W", b"c", b"g", b"e", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"cge vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing cge insert status")
+    require(saved == "one two threXour\n",
+            f"unexpected cge buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one,two   three\n",
+        [b"W", b"d", b"g", b"E"],
+    )
+    require(exit_code == 0, f"dgE vi exited with status {exit_code}")
+    require(saved == "one,twhree\n",
+            f"unexpected dgE buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one,two   three\n",
+        [b"W", b"c", b"g", b"E", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"cgE vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing cgE insert status")
+    require(saved == "one,twXhree\n",
+            f"unexpected cgE buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\n\n  two\nthree\n\nfour\n",
         [b"}", b"}", b"{"],
     )

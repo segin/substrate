@@ -1901,6 +1901,26 @@ vi_substitute_line(buffer_t *b, vi_visual_t *vis)
     vis->replace_mode = 0;
 }
 
+static int
+vi_backward_end_motion_target(buffer_t *b, vi_visual_t *vis, int count, int bigword,
+    line_t **line_out, int *col_out)
+{
+    line_t *saved_line = b->cur;
+    int saved_col = vis->cursor_col;
+    vi_visual_t tmp = *vis;
+
+    if (bigword) {
+        vi_move_bigword_end_backward_count(b, &tmp, count);
+    } else {
+        vi_move_word_end_backward_count(b, &tmp, count);
+    }
+    *line_out = b->cur;
+    *col_out = tmp.cursor_col;
+    b->cur = saved_line;
+    vis->cursor_col = saved_col;
+    return (*line_out != NULL) ? 0 : -1;
+}
+
 static void
 vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
 {
@@ -2002,6 +2022,20 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         vi_find_bigword_boundary_forward_count(b->cur, vis->cursor_col, count, &end);
         if (vi_yank_span(vis, b->cur, vis->cursor_col, end) != 0) {
             write(STDOUT_FILENO, "\a", 1);
+        }
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == 'g') {
+        int motion = vi_read_key();
+        line_t *target_line;
+        int target_col;
+
+        if (motion != 'e' && motion != 'E') {
+            write(STDOUT_FILENO, "\a", 1);
+        } else if (vi_backward_end_motion_target(b, vis, count, motion == 'E',
+            &target_line, &target_col) != 0 ||
+            target_line != b->cur || target_col > vis->cursor_col) {
+            write(STDOUT_FILENO, "\a", 1);
+        } else {
+            vi_delete_span(b, vis, target_col, vis->cursor_col + 1, vis->pending_op == 'c');
         }
     } else if (vis->pending_op == 'y' &&
         (key == 'f' || key == 'F' || key == 't' || key == 'T')) {
