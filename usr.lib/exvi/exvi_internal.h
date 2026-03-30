@@ -37,6 +37,7 @@ extern int visual_mode;
 extern int recover_mode;
 extern int option_number;
 extern int option_list;
+extern int option_readonly;
 extern int option_tabstop;
 extern buffer_t undo_buf;
 extern int undo_valid;
@@ -97,8 +98,9 @@ int handle_prev_command(buffer_t *b, int force);
 int handle_rewind_command(buffer_t *b, int force);
 int handle_preserve_command(buffer_t *b);
 int handle_recover_command(buffer_t *b, const char *args);
+int exvi_write_allowed(buffer_t *b, const char *filename, int force);
 int handle_write_command(buffer_t *b, const char *args, int explicit_range,
-    int addr1, int addr2);
+    int addr1, int addr2, int force);
 int handle_edit_command(buffer_t *b, const char *args, int force);
 int handle_read_command(buffer_t *b, const char *args, int addr2);
 int handle_delete_command(buffer_t *b, int explicit_range, int addr1, int addr2);

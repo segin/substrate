@@ -537,9 +537,10 @@ vi_render(buffer_t *b, vi_visual_t *vis, char prompt_prefix, const char *prompt)
     } else if (vis->insert_mode) {
         printf("-- INSERT --");
     } else {
-        printf("\"%s\"%s  line %d/%d",
+        printf("\"%s\"%s%s  line %d/%d",
             b->filename ? b->filename : "[No Name]",
             b->modified ? " [Modified]" : "",
+            option_readonly ? " [Readonly]" : "",
             cur_line > 0 ? cur_line : 1,
             b->line_count);
     }
@@ -4189,6 +4190,10 @@ exvi_visual_main(buffer_t *b)
             case 'Z':
                 if (b->modified) {
                     if (!b->filename) {
+                        write(STDOUT_FILENO, "\a", 1);
+                        break;
+                    }
+                    if (!exvi_write_allowed(b, b->filename, 0)) {
                         write(STDOUT_FILENO, "\a", 1);
                         break;
                     }

@@ -289,8 +289,10 @@ handle_file_command(buffer_t *b, const char *args)
         free(b->filename);
         b->filename = new_name;
     }
-    printf("\"%s\" %s %d lines\n", b->filename ? b->filename : "No File",
-        b->modified ? "[Modified]" : "", b->line_count);
+    printf("\"%s\"%s%s %d lines\n", b->filename ? b->filename : "No File",
+        b->modified ? " [Modified]" : "",
+        option_readonly ? " [Readonly]" : "",
+        b->line_count);
     return 1;
 }
 

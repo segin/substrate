@@ -14,6 +14,7 @@ int visual_mode = 0;
 int recover_mode = 0;
 int option_number = 0;
 int option_list = 0;
+int option_readonly = 0;
 int option_tabstop = EXVI_DEFAULT_TABSTOP;
 char *last_search_pattern = NULL;
 char *last_sub_pattern = NULL;
@@ -192,6 +193,12 @@ exvi_handoff_file(void)
     return visual_handoff_file;
 }
 
+int
+exvi_readonly_mode(void)
+{
+    return option_readonly;
+}
+
 void
 handle_sigint(int sig)
 {
@@ -235,6 +242,7 @@ exvi_reset_runtime(exvi_frontend_t frontend)
     recover_mode = 0;
     option_number = 0;
     option_list = 0;
+    option_readonly = 0;
     option_tabstop = EXVI_DEFAULT_TABSTOP;
     free(last_search_pattern);
     last_search_pattern = NULL;

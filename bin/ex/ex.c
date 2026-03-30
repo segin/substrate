@@ -9,11 +9,12 @@ launch_vi(char **argv)
 {
     const char *handoff_file = exvi_handoff_file();
     char sibling_path[1024];
-    char *vi_argv[3];
+    char *vi_argv[4];
 
     vi_argv[0] = "vi";
-    vi_argv[1] = (char *)handoff_file;
-    vi_argv[2] = NULL;
+    vi_argv[1] = exvi_readonly_mode() ? "-R" : (char *)handoff_file;
+    vi_argv[2] = exvi_readonly_mode() ? (char *)handoff_file : NULL;
+    vi_argv[3] = NULL;
 
     if (argv[0] && strchr(argv[0], '/')) {
         const char *slash = strrchr(argv[0], '/');

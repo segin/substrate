@@ -10,5 +10,6 @@ typedef enum {
 
 int exvi_main(int argc, char **argv, exvi_frontend_t frontend);
 const char *exvi_handoff_file(void);
+int exvi_readonly_mode(void);
 
 #endif

@@ -41,7 +41,8 @@ def send_keys(master_fd, output, data, timeout=0.2):
 
 
 def run_vi_session(vi_path, initial_text, key_steps, final_timeout=0.3, rows=24,
-                   cols=80, final_keys=b":wq\r", extra_files=None):
+                   cols=80, final_keys=b":wq\r", extra_files=None,
+                   extra_args=None, argv0=None):
     with tempfile.TemporaryDirectory(prefix="exvi-") as temp_dir:
         temp_path = os.path.join(temp_dir, "buffer.txt")
         with open(temp_path, "w", encoding="utf-8") as f:
@@ -56,8 +57,12 @@ def run_vi_session(vi_path, initial_text, key_steps, final_timeout=0.3, rows=24,
 
         pid, master_fd = pty.fork()
         if pid == 0:
+            argv = [argv0 or vi_path]
+            if extra_args:
+                argv.extend(extra_args)
+            argv.append(temp_path)
             os.chdir(temp_dir)
-            os.execv(vi_path, [vi_path, temp_path])
+            os.execv(vi_path, argv)
 
         fcntl.ioctl(master_fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
         output = read_some(master_fd, 0.4)
@@ -176,6 +181,41 @@ def main():
     require(exit_code == 0, f"named-delete-put vi exited with status {exit_code}")
     require(saved == "two\none\nthree\n",
             f"unexpected named-delete-put buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n",
+        [b"i", b"X", b"\x1b", b":wq\r", b":q!\r"],
+        final_keys=None,
+        extra_args=["-R"],
+    )
+    require(exit_code == 0, f"readonly vi exited with status {exit_code}")
+    require("[Readonly]" in decoded, "missing readonly status")
+    require(saved == "one\n",
+            f"unexpected readonly vi buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n",
+        [b":q!\r"],
+        final_keys=None,
+        argv0="view",
+    )
+    require(exit_code == 0, f"view-mode vi exited with status {exit_code}")
+    require("[Readonly]" in decoded, "missing view readonly status")
+    require(saved == "one\n",
+            f"unexpected view-mode buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n",
+        [b"i", b"X", b"\x1b", b":wq!\r"],
+        final_keys=None,
+        extra_args=["-R"],
+    )
+    require(exit_code == 0, f"readonly force-write vi exited with status {exit_code}")
+    require(saved == "Xone\n",
+            f"unexpected readonly force-write buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,

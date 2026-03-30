@@ -312,6 +312,9 @@ handle_set_command(const char *args)
         if (option_list) {
             printf("list\n");
         }
+        if (option_readonly) {
+            printf("readonly\n");
+        }
         if (option_tabstop != EXVI_DEFAULT_TABSTOP) {
             printf("tabstop=%d\n", option_tabstop);
         }
@@ -352,7 +355,50 @@ handle_set_command(const char *args)
             if (option_list) {
                 printf("list\n");
             }
+            if (option_readonly) {
+                printf("readonly\n");
+            }
             printf("tabstop=%d\n", option_tabstop);
+        } else if (len == 2 && strncmp(ptr, "ro", 2) == 0) {
+            if (eq) {
+                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                return 1;
+            }
+            if (query) {
+                printf("%s\n", option_readonly ? "readonly" : "noreadonly");
+            } else {
+                option_readonly = 1;
+            }
+        } else if (len == 8 && strncmp(ptr, "readonly", 8) == 0) {
+            if (eq) {
+                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                return 1;
+            }
+            if (query) {
+                printf("%s\n", option_readonly ? "readonly" : "noreadonly");
+            } else {
+                option_readonly = 1;
+            }
+        } else if (len == 4 && strncmp(ptr, "noro", 4) == 0) {
+            if (eq) {
+                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                return 1;
+            }
+            if (query) {
+                printf("%s\n", option_readonly ? "noreadonly" : "readonly");
+            } else {
+                option_readonly = 0;
+            }
+        } else if (len == 10 && strncmp(ptr, "noreadonly", 10) == 0) {
+            if (eq) {
+                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                return 1;
+            }
+            if (query) {
+                printf("%s\n", option_readonly ? "noreadonly" : "readonly");
+            } else {
+                option_readonly = 0;
+            }
         } else if (len == 2 && strncmp(ptr, "nu", 2) == 0) {
             if (eq) {
                 fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
@@ -467,6 +513,19 @@ handle_set_command(const char *args)
         }
     }
     return 1;
+}
+
+int
+exvi_write_allowed(buffer_t *b, const char *filename, int force)
+{
+    if (force || !option_readonly) {
+        return 1;
+    }
+    if (filename && b->filename && strcmp(filename, b->filename) != 0) {
+        return 1;
+    }
+    fprintf(stderr, "File is read only (add ! to override)\n");
+    return 0;
 }
 
 int
@@ -618,7 +677,7 @@ handle_recover_command(buffer_t *b, const char *args)
 
 int
 handle_write_command(buffer_t *b, const char *args, int explicit_range, int addr1,
-    int addr2)
+    int addr2, int force)
 {
     char *ptr = (char *)args;
     char *target = NULL;
@@ -645,9 +704,16 @@ handle_write_command(buffer_t *b, const char *args, int explicit_range, int addr
         if (!target) {
             return 1;
         }
+        if (!exvi_write_allowed(b, target, force)) {
+            free(target);
+            return 1;
+        }
         buf_write_range(b, target, append, write_addr1, write_addr2);
         free(target);
     } else if (b->filename) {
+        if (!exvi_write_allowed(b, b->filename, force)) {
+            return 1;
+        }
         buf_write_range(b, b->filename, append, write_addr1, write_addr2);
     } else {
         fprintf(stderr, "No current filename\n");

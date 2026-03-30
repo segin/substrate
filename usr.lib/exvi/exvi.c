@@ -21,6 +21,19 @@ int undo_valid = 0;
 static void do_command(buffer_t *b, char *cmd);
 void replace_saved_string(char **dst, const char *src);
 static int
+invoked_as(const char *argv0, const char *name)
+{
+    const char *base;
+
+    if (!argv0 || !name) {
+        return 0;
+    }
+    base = strrchr(argv0, '/');
+    base = base ? base + 1 : argv0;
+    return strcmp(base, name) == 0;
+}
+
+static int
 match_command(const char *cmd, const char *name, const char *abbr, const char **argp,
     int *forcep)
 {
@@ -194,13 +207,16 @@ handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
             fprintf(stderr, "No current filename\n");
             return 1;
         }
+        if (!exvi_write_allowed(b, b->filename, force)) {
+            return 1;
+        }
         buf_write_file(b, b->filename, 0);
         if (!b->modified || force) {
             exit(0);
         }
         return 1;
-    } else if (match_command(cmd, "write", "w", &args, NULL)) {
-        return handle_write_command(b, args, explicit_range, addr1, addr2);
+    } else if (match_command(cmd, "write", "w", &args, &force)) {
+        return handle_write_command(b, args, explicit_range, addr1, addr2, force);
     } else if (match_command(cmd, "edit", "e", &args, &force)) {
         return handle_edit_command(b, args, force);
     } else if (match_command(cmd, "read", "r", &args, NULL)) {
@@ -319,7 +335,10 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
 
     exvi_reset_runtime(frontend);
     exvi_cleanup_session_state();
-    while ((opt = getopt(argc, argv, "sSvr")) != -1) {
+    if (invoked_as(argv[0], "view")) {
+        option_readonly = 1;
+    }
+    while ((opt = getopt(argc, argv, "sSvrR")) != -1) {
         switch (opt) {
         case 's':
             batch_mode = 1;
@@ -333,8 +352,11 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
         case 'r':
             recover_mode = 1;
             break;
+        case 'R':
+            option_readonly = 1;
+            break;
         default:
-            fprintf(stderr, "Usage: %s [-s] [-S] [-v] [-r] [file ...]\n", argv[0]);
+            fprintf(stderr, "Usage: %s [-s] [-S] [-v] [-r] [-R] [file ...]\n", argv[0]);
             exit(1);
         }
     }

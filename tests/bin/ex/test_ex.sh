@@ -81,6 +81,55 @@ run_stdout_test() {
     rm -f "$file"
 }
 
+run_stdout_with_cliargs_test() {
+    local name="$1"
+    local init_text="$2"
+    local cli_args="$3"
+    local script="$4"
+    local expected="$5"
+    local file
+    local output
+
+    file=$(mktemp)
+    printf "%b" "$init_text" >"$file"
+    # shellcheck disable=SC2086
+    output=$(printf "%b" "$script" | "$EX_BIN" $cli_args -s "$file" 2>/dev/null || true)
+
+    if [ "$output" != "$expected" ]; then
+        fail "$name"
+        printf 'expected stdout:\n%s\nactual stdout:\n%s\n' "$expected" "$output"
+        rm -f "$file"
+        return
+    fi
+
+    pass "$name"
+    rm -f "$file"
+}
+
+run_file_with_cliargs_test() {
+    local name="$1"
+    local init_text="$2"
+    local cli_args="$3"
+    local script="$4"
+    local expected="$5"
+    local file
+
+    file=$(mktemp)
+    printf "%b" "$init_text" >"$file"
+    # shellcheck disable=SC2086
+    printf "%b" "$script" | "$EX_BIN" $cli_args -s "$file" >/dev/null 2>&1 || true
+
+    if ! diff -u <(printf "%b" "$expected") "$file" >/dev/null; then
+        fail "$name"
+        diff -u <(printf "%b" "$expected") "$file" || true
+        rm -f "$file"
+        return
+    fi
+
+    pass "$name"
+    rm -f "$file"
+}
+
 run_stdout_with_auxfile_test() {
     local name="$1"
     local init_text="$2"
@@ -622,6 +671,12 @@ run_stdout_test "Set list query reports state" \
     ":set list?\n:q!\n" \
     "nolist"
 
+run_stdout_with_cliargs_test "Readonly startup option reports state" \
+    "one\ntwo\n" \
+    "-R" \
+    ":set readonly?\n:q!\n" \
+    "readonly"
+
 run_stdout_test "Set tabstop query reports value" \
     "one\ntwo\n" \
     ":set tabstop?\n:q!\n" \
@@ -634,10 +689,28 @@ run_stdout_test "Set tabstop assignment updates value" \
 
 run_stdout_test "Set all prints enabled options" \
     "one\ntwo\n" \
-    ":set number list\n:set all\n:q!\n" \
+    ":set number list readonly\n:set all\n:q!\n" \
     "number
 list
+readonly
 tabstop=8"
+
+run_stdout_test "Set noreadonly disables readonly option" \
+    "one\ntwo\n" \
+    ":set readonly\n:set noreadonly\n:set readonly?\n:q!\n" \
+    "noreadonly"
+
+run_file_with_cliargs_test "Readonly startup blocks plain write" \
+    "alpha\n" \
+    "-R" \
+    "1change\nblocked\n.\nwq\n" \
+    "alpha\n"
+
+run_file_with_cliargs_test "Readonly startup allows forced write" \
+    "alpha\n" \
+    "-R" \
+    "1change\nforced\n.\nw!\nq!\n" \
+    "forced\n"
 
 echo "$TEST_PASS tests run."
 exit $((TEST_FAILS > 0 ? 1 : 0))
