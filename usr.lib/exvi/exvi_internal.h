@@ -57,6 +57,7 @@ void buf_write_range(buffer_t *b, const char *filename, int append, int addr1, i
 line_t *buf_get_line(buffer_t *b, int line_num);
 int buf_current_line(buffer_t *b);
 char *parse_delimited_text(char **cmd_ptr, char delim);
+int exvi_search(buffer_t *b, const char *pattern, int forward);
 int parse_address(buffer_t *b, char **cmd_ptr);
 int parse_range(buffer_t *b, char **cmd_ptr, int *addr1, int *addr2);
 void replace_saved_string(char **dst, const char *src);

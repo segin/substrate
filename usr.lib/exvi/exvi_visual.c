@@ -17,6 +17,7 @@ typedef struct {
     int top_line;
     int cursor_col;
     int pending_g;
+    int last_search_forward;
 } vi_visual_t;
 
 static vi_visual_t *active_visual = NULL;
@@ -154,7 +155,7 @@ vi_draw_line(const char *text, int cols, int number, int line_no)
 }
 
 static void
-vi_render(buffer_t *b, vi_visual_t *vis, const char *prompt)
+vi_render(buffer_t *b, vi_visual_t *vis, char prompt_prefix, const char *prompt)
 {
     int cur_line = buf_current_line(b);
     int row;
@@ -183,7 +184,7 @@ vi_render(buffer_t *b, vi_visual_t *vis, const char *prompt)
 
     printf("\x1b[K\r\n\x1b[7m");
     if (prompt) {
-        printf(":%s", prompt);
+        printf("%c%s", prompt_prefix, prompt);
     } else {
         printf("\"%s\"%s  line %d/%d",
             b->filename ? b->filename : "[No Name]",
@@ -277,7 +278,7 @@ vi_command_prompt(buffer_t *b, vi_visual_t *vis)
     for (;;) {
         int key;
 
-        vi_render(b, vis, cmd);
+        vi_render(b, vis, ':', cmd);
         key = vi_read_key();
         if (key == -1) {
             return;
@@ -303,6 +304,57 @@ vi_command_prompt(buffer_t *b, vi_visual_t *vis)
     }
 }
 
+static void
+vi_apply_search(buffer_t *b, vi_visual_t *vis, const char *pattern, int forward)
+{
+    int line_no = exvi_search(b, pattern, forward);
+
+    if (line_no < 1) {
+        write(STDOUT_FILENO, "\a", 1);
+        return;
+    }
+    b->cur = buf_get_line(b, line_no);
+    vis->cursor_col = 0;
+    vis->last_search_forward = forward;
+}
+
+static void
+vi_search_prompt(buffer_t *b, vi_visual_t *vis, int forward)
+{
+    char pattern[256];
+    size_t len = 0;
+    char prefix = forward ? '/' : '?';
+
+    pattern[0] = '\0';
+    for (;;) {
+        int key;
+
+        vi_render(b, vis, prefix, pattern);
+        key = vi_read_key();
+        if (key == -1) {
+            return;
+        }
+        if (key == '\r' || key == '\n') {
+            pattern[len] = '\0';
+            vi_apply_search(b, vis, pattern, forward);
+            return;
+        }
+        if (key == '\x1b') {
+            return;
+        }
+        if (key == 127 || key == '\b') {
+            if (len > 0) {
+                pattern[--len] = '\0';
+            }
+            continue;
+        }
+        if (isprint(key) && len + 1 < sizeof(pattern)) {
+            pattern[len++] = (char)key;
+            pattern[len] = '\0';
+        }
+    }
+}
+
 int
 exvi_visual_main(buffer_t *b)
 {
@@ -311,6 +363,7 @@ exvi_visual_main(buffer_t *b)
 
     memset(&vis, 0, sizeof(vis));
     vis.top_line = 1;
+    vis.last_search_forward = 1;
     if (!b->cur) {
         b->cur = b->head;
     }
@@ -322,7 +375,7 @@ exvi_visual_main(buffer_t *b)
     for (;;) {
         line_t *cur;
 
-        vi_render(b, &vis, NULL);
+        vi_render(b, &vis, ':', NULL);
         key = vi_read_key();
         if (key == -1) {
             break;
@@ -381,6 +434,22 @@ exvi_visual_main(buffer_t *b)
         case ':':
             vis.pending_g = 0;
             vi_command_prompt(b, &vis);
+            break;
+        case '/':
+            vis.pending_g = 0;
+            vi_search_prompt(b, &vis, 1);
+            break;
+        case '?':
+            vis.pending_g = 0;
+            vi_search_prompt(b, &vis, 0);
+            break;
+        case 'n':
+            vis.pending_g = 0;
+            vi_apply_search(b, &vis, "", vis.last_search_forward);
+            break;
+        case 'N':
+            vis.pending_g = 0;
+            vi_apply_search(b, &vis, "", !vis.last_search_forward);
             break;
         case '\f':
             vis.pending_g = 0;

@@ -147,6 +147,28 @@ buf_search_backward(buffer_t *b, const char *pattern)
     return -1;
 }
 
+int
+exvi_search(buffer_t *b, const char *pattern, int forward)
+{
+    char *search = NULL;
+    int addr;
+
+    if (pattern && pattern[0] != '\0') {
+        search = strdup(pattern);
+    } else if (last_search_pattern) {
+        search = strdup(last_search_pattern);
+    }
+    if (!search) {
+        return -1;
+    }
+
+    replace_saved_string(&last_search_pattern, search);
+    addr = forward ? buf_search_forward(b, search)
+                   : buf_search_backward(b, search);
+    free(search);
+    return addr;
+}
+
 static int
 parse_address_atom(buffer_t *b, char **cmd_ptr)
 {
@@ -190,16 +212,7 @@ parse_address_atom(buffer_t *b, char **cmd_ptr)
         if (!pattern) {
             return -1;
         }
-        if (pattern[0] == '\0') {
-            free(pattern);
-            pattern = last_search_pattern ? strdup(last_search_pattern) : NULL;
-            if (!pattern) {
-                return -1;
-            }
-        }
-        replace_saved_string(&last_search_pattern, pattern);
-        addr = (delim == '/') ? buf_search_forward(b, pattern)
-                              : buf_search_backward(b, pattern);
+        addr = exvi_search(b, pattern, delim == '/');
         free(pattern);
     }
 

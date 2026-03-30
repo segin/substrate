@@ -38,7 +38,7 @@ def main():
 
     vi_path = sys.argv[1]
     fd, temp_path = tempfile.mkstemp(prefix="exvi-", text=True)
-    os.write(fd, b"one\ntwo\nthree\nfour\nfive\n")
+    os.write(fd, b"one\ntwo\nthree\ntwo again\nfive\n")
     os.close(fd)
 
     pid, master_fd = pty.fork()
@@ -50,9 +50,13 @@ def main():
     output += read_some(master_fd, 0.2)
     os.write(master_fd, b"gg")
     output += read_some(master_fd, 0.2)
-    os.write(master_fd, b"\x06")
+    os.write(master_fd, b"/two\r")
     output += read_some(master_fd, 0.2)
-    os.write(master_fd, b"\x02")
+    os.write(master_fd, b"n")
+    output += read_some(master_fd, 0.2)
+    os.write(master_fd, b"N")
+    output += read_some(master_fd, 0.2)
+    os.write(master_fd, b"?one\r")
     output += read_some(master_fd, 0.2)
     os.write(master_fd, b":q\r")
     output += read_some(master_fd, 0.3)
@@ -69,6 +73,8 @@ def main():
     require("one" in decoded, "missing initial buffer content")
     require("line 5/5" in decoded, "missing G navigation status")
     require("line 1/5" in decoded, "missing gg navigation status")
+    require("line 2/5" in decoded, "missing forward search status")
+    require("line 4/5" in decoded, "missing repeat search status")
     require(":q" in decoded, "missing ex command prompt rendering")
     print("vi pty test: ok")
     return 0

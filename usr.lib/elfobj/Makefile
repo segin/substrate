@@ -25,14 +25,26 @@ ensure_build_mode:
 	cur=""; \
 	if [ -f "$(MODE_STAMP)" ]; then cur=$$(cat "$(MODE_STAMP)"); fi; \
 	if [ "$$cur" != "$$mode" ]; then \
-		rm -f $(OBJS) $(LIBNAME); \
 		printf '%s\n' "$$mode" > "$(MODE_STAMP)"; \
 	fi
 
 $(LIBNAME): ensure_build_mode $(OBJS)
 	$(AR) rcs $@ $(OBJS)
 
-%.o: %.c | ensure_build_mode
+$(OBJS): $(MODE_STAMP)
+
+$(MODE_STAMP):
+	@mode="$(BUILD_MODE)"; \
+	cur=""; \
+	if [ -f "$(MODE_STAMP)" ]; then cur=$$(cat "$(MODE_STAMP)"); fi; \
+	if [ "$$cur" != "$$mode" ]; then \
+		printf '%s\n' "$$mode" > "$(MODE_STAMP).tmp"; \
+		mv "$(MODE_STAMP).tmp" "$(MODE_STAMP)"; \
+	elif [ ! -f "$(MODE_STAMP)" ]; then \
+		printf '%s\n' "$$mode" > "$(MODE_STAMP)"; \
+	fi
+
+%.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 test: $(LIBNAME)
