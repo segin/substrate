@@ -42,6 +42,8 @@ typedef struct {
 
 static vi_visual_t *active_visual = NULL;
 
+static int vi_first_nonblank_col(line_t *cur);
+
 static void
 vi_restore_terminal(void)
 {
@@ -323,6 +325,13 @@ vi_move_vertical(buffer_t *b, int delta)
     if (target >= 1) {
         b->cur = buf_get_line(b, target);
     }
+}
+
+static void
+vi_move_line_first_nonblank(buffer_t *b, vi_visual_t *vis, int delta)
+{
+    vi_move_vertical(b, delta);
+    vis->cursor_col = vi_first_nonblank_col(b->cur);
 }
 
 static void
@@ -1237,6 +1246,16 @@ exvi_visual_main(buffer_t *b)
         case 'k':
             vis.pending_g = 0;
             vi_move_vertical(b, -vi_take_count(&vis));
+            break;
+        case '+':
+        case '\r':
+        case '\n':
+            vis.pending_g = 0;
+            vi_move_line_first_nonblank(b, &vis, vi_take_count(&vis));
+            break;
+        case '-':
+            vis.pending_g = 0;
+            vi_move_line_first_nonblank(b, &vis, -vi_take_count(&vis));
             break;
         case 'w':
             vis.pending_g = 0;

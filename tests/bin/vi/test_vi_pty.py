@@ -136,6 +136,17 @@ def main():
     require("line 6/6" in decoded, "missing counted n status")
     require(saved == "aa\nmatch one\nbb\nmatch two\ncc\nmatch three\n",
             "unexpected counted search buffer contents")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "  one\n\tTwo\nthree\n",
+        [b"+", b"\r", b"-"],
+    )
+    require(exit_code == 0, f"line-motion vi exited with status {exit_code}")
+    require("line 2/3" in decoded, "missing plus-motion status")
+    require("line 3/3" in decoded, "missing enter-motion status")
+    require(saved == "  one\n\tTwo\nthree\n",
+            "unexpected line-motion buffer contents")
     print("vi pty test: ok")
     return 0
 
