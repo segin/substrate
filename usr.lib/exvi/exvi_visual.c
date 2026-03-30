@@ -460,6 +460,12 @@ vi_is_word_char(int ch)
 }
 
 static int
+vi_is_bigword_char(int ch)
+{
+    return ch != '\0' && !isspace((unsigned char)ch);
+}
+
+static int
 vi_find_word_boundary_forward(line_t *cur, int start, int *end_out)
 {
     size_t i;
@@ -644,6 +650,248 @@ vi_move_word_end(buffer_t *b, vi_visual_t *vis)
             }
         }
     }
+}
+
+static int
+vi_find_bigword_boundary_forward(line_t *cur, int start, int *end_out)
+{
+    size_t i;
+
+    if (!cur || start < 0 || (size_t)start > cur->len) {
+        return -1;
+    }
+    i = (size_t)start;
+    if (i < cur->len && vi_is_bigword_char((unsigned char)cur->text[i])) {
+        while (i < cur->len && vi_is_bigword_char((unsigned char)cur->text[i])) {
+            i++;
+        }
+        while (i < cur->len && !vi_is_bigword_char((unsigned char)cur->text[i])) {
+            i++;
+        }
+    } else {
+        while (i < cur->len && !vi_is_bigword_char((unsigned char)cur->text[i])) {
+            i++;
+        }
+        while (i < cur->len && vi_is_bigword_char((unsigned char)cur->text[i])) {
+            i++;
+        }
+    }
+    *end_out = (int)i;
+    return 0;
+}
+
+static void
+vi_find_bigword_boundary_forward_count(line_t *cur, int start, int count, int *end_out)
+{
+    int end = start;
+
+    while (count-- > 0) {
+        if (vi_find_bigword_boundary_forward(cur, end, &end) != 0) {
+            break;
+        }
+    }
+    *end_out = end;
+}
+
+static void
+vi_move_bigword_forward(buffer_t *b, vi_visual_t *vis)
+{
+    int line_no = buf_current_line(b);
+    line_t *cur = b->cur;
+    size_t i;
+
+    if (!cur) {
+        return;
+    }
+    i = (size_t)vis->cursor_col;
+    if (i < cur->len && vi_is_bigword_char((unsigned char)cur->text[i])) {
+        while (i < cur->len && vi_is_bigword_char((unsigned char)cur->text[i])) {
+            i++;
+        }
+    }
+    while (i < cur->len && !vi_is_bigword_char((unsigned char)cur->text[i])) {
+        i++;
+    }
+    if (i < cur->len) {
+        vis->cursor_col = (int)i;
+        return;
+    }
+
+    for (line_no++; line_no <= b->line_count; line_no++) {
+        cur = buf_get_line(b, line_no);
+        if (!cur) {
+            break;
+        }
+        for (i = 0; i < cur->len; i++) {
+            if (vi_is_bigword_char((unsigned char)cur->text[i])) {
+                b->cur = cur;
+                vis->cursor_col = (int)i;
+                return;
+            }
+        }
+    }
+    if (b->tail) {
+        b->cur = b->tail;
+        vis->cursor_col = (int)b->tail->len;
+    }
+}
+
+static void
+vi_move_bigword_forward_count(buffer_t *b, vi_visual_t *vis, int count)
+{
+    while (count-- > 0) {
+        vi_move_bigword_forward(b, vis);
+    }
+}
+
+static void
+vi_move_bigword_backward(buffer_t *b, vi_visual_t *vis)
+{
+    int line_no = buf_current_line(b);
+    line_t *cur = b->cur;
+    int i;
+
+    if (!cur) {
+        return;
+    }
+    i = vis->cursor_col;
+    if (i > 0) {
+        i--;
+    }
+    while (i >= 0 && !vi_is_bigword_char((unsigned char)cur->text[i])) {
+        i--;
+    }
+    while (i > 0 && vi_is_bigword_char((unsigned char)cur->text[i - 1])) {
+        i--;
+    }
+    if (i >= 0 && vi_is_bigword_char((unsigned char)cur->text[i])) {
+        vis->cursor_col = i;
+        return;
+    }
+
+    for (line_no--; line_no >= 1; line_no--) {
+        cur = buf_get_line(b, line_no);
+        if (!cur) {
+            continue;
+        }
+        for (i = (int)cur->len - 1; i >= 0; i--) {
+            if (vi_is_bigword_char((unsigned char)cur->text[i])) {
+                while (i > 0 && vi_is_bigword_char((unsigned char)cur->text[i - 1])) {
+                    i--;
+                }
+                b->cur = cur;
+                vis->cursor_col = i;
+                return;
+            }
+        }
+    }
+    if (b->head) {
+        b->cur = b->head;
+        vis->cursor_col = 0;
+    }
+}
+
+static void
+vi_move_bigword_backward_count(buffer_t *b, vi_visual_t *vis, int count)
+{
+    while (count-- > 0) {
+        vi_move_bigword_backward(b, vis);
+    }
+}
+
+static void
+vi_move_bigword_end(buffer_t *b, vi_visual_t *vis)
+{
+    int line_no = buf_current_line(b);
+    line_t *cur = b->cur;
+    size_t i;
+
+    if (!cur) {
+        return;
+    }
+    i = (size_t)vis->cursor_col;
+    while (i < cur->len && !vi_is_bigword_char((unsigned char)cur->text[i])) {
+        i++;
+    }
+    if (i < cur->len) {
+        while (i + 1 < cur->len && vi_is_bigword_char((unsigned char)cur->text[i + 1])) {
+            i++;
+        }
+        vis->cursor_col = (int)i;
+        return;
+    }
+
+    for (line_no++; line_no <= b->line_count; line_no++) {
+        cur = buf_get_line(b, line_no);
+        if (!cur) {
+            break;
+        }
+        for (i = 0; i < cur->len; i++) {
+            if (vi_is_bigword_char((unsigned char)cur->text[i])) {
+                while (i + 1 < cur->len &&
+                    vi_is_bigword_char((unsigned char)cur->text[i + 1])) {
+                    i++;
+                }
+                b->cur = cur;
+                vis->cursor_col = (int)i;
+                return;
+            }
+        }
+    }
+}
+
+static int
+vi_find_bigword_end_exclusive_count(line_t *cur, int start, int count, int *end_out)
+{
+    size_t i;
+    int end;
+
+    if (!cur || start < 0 || (size_t)start >= cur->len) {
+        return -1;
+    }
+    end = start;
+    while (count-- > 0) {
+        i = (size_t)end;
+        while (i < cur->len && !vi_is_bigword_char((unsigned char)cur->text[i])) {
+            i++;
+        }
+        if (i >= cur->len) {
+            return -1;
+        }
+        while (i + 1 < cur->len && vi_is_bigword_char((unsigned char)cur->text[i + 1])) {
+            i++;
+        }
+        end = (int)i + 1;
+    }
+    *end_out = end;
+    return 0;
+}
+
+static int
+vi_find_bigword_start_backward_count(line_t *cur, int start, int count, int *start_out)
+{
+    int i;
+
+    if (!cur || start <= 0 || (size_t)start > cur->len) {
+        return -1;
+    }
+    i = start - 1;
+    while (count-- > 0) {
+        while (i >= 0 && !vi_is_bigword_char((unsigned char)cur->text[i])) {
+            i--;
+        }
+        if (i < 0) {
+            return -1;
+        }
+        while (i > 0 && vi_is_bigword_char((unsigned char)cur->text[i - 1])) {
+            i--;
+        }
+        if (count > 0) {
+            i--;
+        }
+    }
+    *start_out = i;
+    return 0;
 }
 
 static int
@@ -1057,6 +1305,13 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         } else {
             write(STDOUT_FILENO, "\a", 1);
         }
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == 'E') {
+        if (vi_find_bigword_end_exclusive_count(b->cur, vis->cursor_col, count, &end) == 0 &&
+            end > vis->cursor_col) {
+            vi_delete_span(b, vis, vis->cursor_col, end, vis->pending_op == 'c');
+        } else {
+            write(STDOUT_FILENO, "\a", 1);
+        }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == 'b') {
         int start;
 
@@ -1065,6 +1320,20 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             vi_delete_span(b, vis, start, vis->cursor_col, vis->pending_op == 'c');
         } else {
             write(STDOUT_FILENO, "\a", 1);
+        }
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == 'B') {
+        int start;
+
+        if (vi_find_bigword_start_backward_count(b->cur, vis->cursor_col, count, &start) == 0 &&
+            start < vis->cursor_col) {
+            vi_delete_span(b, vis, start, vis->cursor_col, vis->pending_op == 'c');
+        } else {
+            write(STDOUT_FILENO, "\a", 1);
+        }
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == 'W') {
+        vi_find_bigword_boundary_forward_count(b->cur, vis->cursor_col, count, &end);
+        if (end >= vis->cursor_col) {
+            vi_delete_span(b, vis, vis->cursor_col, end, vis->pending_op == 'c');
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') &&
         (key == 'f' || key == 'F' || key == 't' || key == 'T')) {
@@ -1785,6 +2054,24 @@ exvi_visual_main(buffer_t *b)
 
                 while (count-- > 0) {
                     vi_move_word_end(b, &vis);
+                }
+            }
+            break;
+        case 'W':
+            vis.pending_g = 0;
+            vi_move_bigword_forward_count(b, &vis, vi_take_count(&vis));
+            break;
+        case 'B':
+            vis.pending_g = 0;
+            vi_move_bigword_backward_count(b, &vis, vi_take_count(&vis));
+            break;
+        case 'E':
+            vis.pending_g = 0;
+            {
+                int count = vi_take_count(&vis);
+
+                while (count-- > 0) {
+                    vi_move_bigword_end(b, &vis);
                 }
             }
             break;

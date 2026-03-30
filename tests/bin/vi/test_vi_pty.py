@@ -117,6 +117,25 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "alpha,beta   gamma delta\n",
+        [b"E", b"r", b"4", b"0", b"W", b"r", b"1", b"$", b"B", b"r", b"3"],
+    )
+    require(exit_code == 0, f"bigword-motion vi exited with status {exit_code}")
+    require("line 1/1" in decoded, "missing bigword-motion status")
+    require(saved == "alpha,bet4   1amma 3elta\n",
+            f"unexpected bigword-motion buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha,beta   gamma\n",
+        [b"d", b"W"],
+    )
+    require(exit_code == 0, f"bigword-operator vi exited with status {exit_code}")
+    require(saved == "gamma\n",
+            f"unexpected bigword-operator buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "".join(f"line {i}\n" for i in range(1, 41)),
         [b"1", b"0", b"G", b"\x04", b"\x15"],
     )
