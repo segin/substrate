@@ -33,6 +33,7 @@ typedef struct {
     int top_line;
     int cursor_col;
     int pending_g;
+    int pending_z;
     int pending_op;
     int pending_count;
     int last_search_forward;
@@ -402,6 +403,54 @@ vi_move_to_screen_line(buffer_t *b, vi_visual_t *vis, int screen_row)
     }
     b->cur = buf_get_line(b, target_line);
     vis->cursor_col = vi_first_nonblank_col(b->cur);
+}
+
+static int
+vi_clamp_top_line(buffer_t *b, vi_visual_t *vis, int top_line)
+{
+    int visible_rows = vis->rows - 1;
+    int max_top = b->line_count - visible_rows + 1;
+
+    if (visible_rows < 1) {
+        visible_rows = 1;
+    }
+    if (max_top < 1) {
+        max_top = 1;
+    }
+    if (top_line < 1) {
+        top_line = 1;
+    }
+    if (top_line > max_top) {
+        top_line = max_top;
+    }
+    return top_line;
+}
+
+static void
+vi_reposition_current(buffer_t *b, vi_visual_t *vis, int mode)
+{
+    int cur_line = buf_current_line(b);
+    int visible_rows = vis->rows - 1;
+    int top_line;
+
+    if (cur_line < 1) {
+        return;
+    }
+    if (visible_rows < 1) {
+        visible_rows = 1;
+    }
+    switch (mode) {
+    case 0:
+        top_line = cur_line - (visible_rows / 2);
+        break;
+    case 1:
+        top_line = cur_line;
+        break;
+    default:
+        top_line = cur_line - visible_rows + 1;
+        break;
+    }
+    vis->top_line = vi_clamp_top_line(b, vis, top_line);
 }
 
 static int
@@ -1458,6 +1507,26 @@ exvi_visual_main(buffer_t *b)
             vi_handle_pending_operator(b, &vis, key);
             continue;
         }
+        if (vis.pending_z) {
+            vis.pending_z = 0;
+            switch (key) {
+            case 'z':
+            case '.':
+                vi_reposition_current(b, &vis, 0);
+                break;
+            case '\r':
+            case '\n':
+                vi_reposition_current(b, &vis, 1);
+                break;
+            case '-':
+                vi_reposition_current(b, &vis, 2);
+                break;
+            default:
+                write(STDOUT_FILENO, "\a", 1);
+                break;
+            }
+            continue;
+        }
 
         if (key >= '1' && key <= '9') {
             vis.pending_g = 0;
@@ -1785,6 +1854,10 @@ exvi_visual_main(buffer_t *b)
             } else {
                 write(STDOUT_FILENO, "\a", 1);
             }
+            break;
+        case 'z':
+            vis.pending_g = 0;
+            vis.pending_z = 1;
             break;
         case 'G':
             vis.pending_g = 0;

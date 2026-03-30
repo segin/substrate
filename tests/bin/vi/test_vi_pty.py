@@ -128,6 +128,16 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "".join(f"line {i}\n" for i in range(1, 41)),
+        [b"2", b"0", b"G", b"z", b"z", b"M", b"z", b"\r", b"H", b"z", b"-", b"L"],
+    )
+    require(exit_code == 0, f"z-position vi exited with status {exit_code}")
+    require(decoded.count("line 20/40") >= 4, "missing z-position status transitions")
+    require(saved.startswith("line 1\nline 2\nline 3\n"),
+            "unexpected z-position buffer contents")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "aa\nmatch one\nbb\nmatch two\ncc\nmatch three\n",
         [b"/", b"match\r", b"2", b"n", b"2", b"N"],
     )
