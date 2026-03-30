@@ -97,6 +97,45 @@ def main():
 
     exit_code, decoded, saved = helpers.run_vi_session(
         vi_path,
+        "one\n",
+        [b"i", b"X", b"\x1b", b":next\r", b":q!\r"],
+        final_keys=None,
+        file_args=["buffer.txt", "two.txt"],
+        extra_files={"two.txt": "two\n"},
+    )
+    require(exit_code == 0, f"visual modified-next vi exited with status {exit_code}")
+    require("No write since last change (add ! to override)" in decoded,
+            "visual modified-next vi missing diagnostic")
+    require(saved == "one\n", f"visual modified-next vi unexpectedly modified file: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "one\n",
+        [b"i", b"X", b"\x1b", b":next!\r", b":q!\r"],
+        final_keys=None,
+        file_args=["buffer.txt", "two.txt"],
+        extra_files={"two.txt": "two\n"},
+    )
+    require(exit_code == 0, f"visual forced-next vi exited with status {exit_code}")
+    require("/two.txt\" 1 lines" in decoded,
+            "visual forced-next vi missing file-switch report")
+    require(saved == "one\n", f"visual forced-next vi unexpectedly modified file: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "one\n",
+        [b":q!\r"],
+        final_keys=None,
+        extra_args=["+next"],
+        file_args=["buffer.txt", "two.txt"],
+        extra_files={"two.txt": "two\n"},
+    )
+    require(exit_code == 0, f"visual +next startup vi exited with status {exit_code}")
+    require("/two.txt" in decoded, "visual +next startup vi missing advanced file")
+    require(saved == "one\n", f"visual +next startup vi unexpectedly modified file: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
         "one\ntwo\n",
         [b"Q", b"1d\n", b"visual\n", b"Q", b"q!\n"],
         final_keys=None,

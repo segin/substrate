@@ -192,6 +192,77 @@ run_stdout_with_fileargs_test() {
     rm -f "$file1" "$file2"
 }
 
+run_stderr_status_with_fileargs_test() {
+    local name="$1"
+    local init_text1="$2"
+    local init_text2="$3"
+    local script="$4"
+    local expected_status="$5"
+    local expected_stderr="$6"
+    local file1
+    local file2
+    local resolved_script
+    local stdout_file
+    local stderr_file
+    local status
+    local stderr_text
+
+    file1=$(mktemp)
+    file2=$(mktemp)
+    stdout_file=$(mktemp)
+    stderr_file=$(mktemp)
+    printf "%b" "$init_text1" >"$file1"
+    printf "%b" "$init_text2" >"$file2"
+    resolved_script=${script//__FILE1__/$file1}
+    resolved_script=${resolved_script//__FILE2__/$file2}
+
+    set +e
+    printf "%b" "$resolved_script" | "$EX_BIN" -s "$file1" "$file2" >"$stdout_file" 2>"$stderr_file"
+    status=$?
+    set -e
+
+    stderr_text=$(cat "$stderr_file")
+    if [ "$status" -ne "$expected_status" ] || [ "$stderr_text" != "$expected_stderr" ]; then
+        fail "$name"
+        printf 'expected status=%s stderr=%s\nactual status=%s stderr=%s\n' \
+            "$expected_status" "$expected_stderr" "$status" "$stderr_text"
+        rm -f "$file1" "$file2" "$stdout_file" "$stderr_file"
+        return
+    fi
+
+    pass "$name"
+    rm -f "$file1" "$file2" "$stdout_file" "$stderr_file"
+}
+
+run_stdout_with_cliargs_and_fileargs_test() {
+    local name="$1"
+    local init_text1="$2"
+    local init_text2="$3"
+    local cli_args="$4"
+    local script="$5"
+    local expected="$6"
+    local file1
+    local file2
+    local output
+
+    file1=$(mktemp)
+    file2=$(mktemp)
+    printf "%b" "$init_text1" >"$file1"
+    printf "%b" "$init_text2" >"$file2"
+    # shellcheck disable=SC2086
+    output=$(printf "%b" "$script" | "$EX_BIN" -s $cli_args "$file1" "$file2" 2>/dev/null || true)
+
+    if [ "$output" != "$expected" ]; then
+        fail "$name"
+        printf 'expected stdout:\n%s\nactual stdout:\n%s\n' "$expected" "$output"
+        rm -f "$file1" "$file2"
+        return
+    fi
+
+    pass "$name"
+    rm -f "$file1" "$file2"
+}
+
 run_tag_test() {
     local name="$1"
     local file_text="$2"
@@ -726,6 +797,40 @@ run_stdout_with_fileargs_test "Rewind returns to first argument file" \
     "two\n" \
     ":next\n:rewind\n:1p\n:q!\n" \
     "one"
+
+run_stderr_status_with_fileargs_test "Next reports end of argument list" \
+    "one\n" \
+    "two\n" \
+    ":next\n:next\n:q!\n" \
+    0 \
+    "No more files"
+
+run_stderr_status_with_fileargs_test "Prev reports start of argument list" \
+    "one\n" \
+    "two\n" \
+    ":prev\n:q!\n" \
+    0 \
+    "No previous files"
+
+run_stderr_status_with_fileargs_test "Next rejects modified buffer" \
+    "one\n" \
+    "two\n" \
+    ":1change\nchanged\n.\n:next\n:q!\n" \
+    0 \
+    "No write since last change (add ! to override)"
+
+run_stdout_with_fileargs_test "Forced next discards modified buffer and advances" \
+    "one\n" \
+    "two\n" \
+    ":1change\nchanged\n.\n:next!\n:1p\n:q!\n" \
+    "two"
+
+run_stdout_with_cliargs_and_fileargs_test "Plus next startup advances argument list before batch commands" \
+    "one\n" \
+    "two\n" \
+    "+next" \
+    ":1p\n:q!\n" \
+    "two"
 
 run_stdout_with_fileargs_test "Edit hash expands alternate filename" \
     "one\n" \
