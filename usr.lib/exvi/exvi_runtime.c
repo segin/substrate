@@ -48,6 +48,55 @@ free_startup_commands(void)
 }
 
 static int
+exrc_dir_is_safe(const char *path)
+{
+    char *dir_copy;
+    char *slash;
+    const char *dir_path;
+    struct stat st;
+
+    if (!path || !*path) {
+        return 0;
+    }
+
+    dir_copy = strdup(path);
+    if (!dir_copy) {
+        return 0;
+    }
+
+    slash = strrchr(dir_copy, '/');
+    if (slash) {
+        if (slash == dir_copy) {
+            slash[1] = '\0';
+        } else {
+            *slash = '\0';
+        }
+        dir_path = dir_copy;
+    } else {
+        dir_path = ".";
+    }
+
+    if (stat(dir_path, &st) != 0) {
+        free(dir_copy);
+        return 0;
+    }
+
+    free(dir_copy);
+
+    if (!S_ISDIR(st.st_mode)) {
+        return 0;
+    }
+    if (!(st.st_uid == getuid() || st.st_uid == 0)) {
+        return 0;
+    }
+    if ((st.st_mode & (S_IWGRP | S_IWOTH)) != 0) {
+        return 0;
+    }
+
+    return 1;
+}
+
+static int
 load_exrc_file(buffer_t *b, void (*command_fn)(buffer_t *, char *), const char *path,
     dev_t *dev_out, ino_t *ino_out)
 {
@@ -58,6 +107,9 @@ load_exrc_file(buffer_t *b, void (*command_fn)(buffer_t *, char *), const char *
     ssize_t rc_ret;
 
     if (stat(path, &st) != 0) {
+        return 0;
+    }
+    if (!exrc_dir_is_safe(path)) {
         return 0;
     }
     if (!S_ISREG(st.st_mode)) {

@@ -391,6 +391,57 @@ run_startup_precedence_test() {
     rm -rf "$tmpdir"
 }
 
+run_startup_directory_policy_test() {
+    local name="$1"
+    local init_text="$2"
+    local home_exrc_text="$3"
+    local home_dir_mode="$4"
+    local local_exrc_text="$5"
+    local work_dir_mode="$6"
+    local script="$7"
+    local expected="$8"
+    local tmpdir
+    local home_dir
+    local work_dir
+    local file
+    local script_file
+    local output
+
+    tmpdir=$(mktemp -d)
+    home_dir="$tmpdir/home"
+    work_dir="$tmpdir/work"
+    file="$work_dir/sample.txt"
+    script_file="$tmpdir/script.ex"
+
+    mkdir -p "$home_dir" "$work_dir"
+    chmod "$home_dir_mode" "$home_dir"
+    chmod "$work_dir_mode" "$work_dir"
+    printf "%b" "$init_text" >"$file"
+    printf "%b" "$script" >"$script_file"
+
+    if [ -n "$home_exrc_text" ]; then
+        printf "%b" "$home_exrc_text" >"$home_dir/.exrc"
+        chmod 600 "$home_dir/.exrc"
+    fi
+    if [ -n "$local_exrc_text" ]; then
+        printf "%b" "$local_exrc_text" >"$work_dir/.exrc"
+        chmod 600 "$work_dir/.exrc"
+    fi
+
+    output=$(cd "$work_dir" && env HOME="$home_dir" "$EX_BIN" -s "$file" <"$script_file" \
+        2>/dev/null || true)
+
+    if [ "$output" != "$expected" ]; then
+        fail "$name"
+        printf 'expected stdout:\n%s\nactual stdout:\n%s\n' "$expected" "$output"
+        rm -rf "$tmpdir"
+        return
+    fi
+
+    pass "$name"
+    rm -rf "$tmpdir"
+}
+
 run_stderr_status_test() {
     local name="$1"
     local init_text="$2"
@@ -776,6 +827,25 @@ run_startup_precedence_test "EXINIT overrides exrc loading" \
     "nonumber
 nolist
 readonly"
+
+run_startup_directory_policy_test "Unsafe local directory .exrc is ignored" \
+    "alpha\nbeta\n" \
+    "set number\n" \
+    700 \
+    "set nonumber\nset list\n" \
+    777 \
+    ":set number?\n:set list?\n:q!\n" \
+    "number
+nolist"
+
+run_startup_directory_policy_test "Unsafe home directory .exrc is ignored" \
+    "alpha\nbeta\n" \
+    "set number\n" \
+    777 \
+    "" \
+    700 \
+    ":set number?\n:q!\n" \
+    "nonumber"
 
 run_stderr_status_test "Quit rejects modified buffer" \
     "one\ntwo\n" \
