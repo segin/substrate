@@ -189,6 +189,42 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "a\n\tb\n\tc\n",
+        [b">", b">"],
+    )
+    require(exit_code == 0, f">> vi exited with status {exit_code}")
+    require(saved == "\ta\n\tb\n\tc\n",
+            f"unexpected >> buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "a\n\tb\n\tc\n",
+        [b"2", b">", b">"],
+    )
+    require(exit_code == 0, f"2>> vi exited with status {exit_code}")
+    require(saved == "\ta\n\t\tb\n\tc\n",
+            f"unexpected 2>> buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "a\n\tb\n\tc\n",
+        [b"<", b"<"],
+    )
+    require(exit_code == 0, f"<< vi exited with status {exit_code}")
+    require(saved == "a\n\tb\n\tc\n",
+            f"unexpected << buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "a\n\tb\n\tc\n",
+        [b"2", b"<", b"<"],
+    )
+    require(exit_code == 0, f"2<< vi exited with status {exit_code}")
+    require(saved == "a\nb\n\tc\n",
+            f"unexpected 2<< buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "abcd\n",
         [b'x', b'p'],
     )

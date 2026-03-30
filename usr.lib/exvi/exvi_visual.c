@@ -281,6 +281,32 @@ vi_reindent_current_line(buffer_t *b, vi_visual_t *vis, int increase)
 }
 
 static int
+vi_shift_range(buffer_t *b, vi_visual_t *vis, int start_line_no, int end_line_no, int increase)
+{
+    line_t *orig;
+    int line_no;
+
+    if (start_line_no < 1 || end_line_no < start_line_no || b->line_count < 1) {
+        return -1;
+    }
+    orig = buf_get_line(b, start_line_no);
+    if (!orig) {
+        return -1;
+    }
+    save_undo(b);
+    for (line_no = start_line_no; line_no <= end_line_no; line_no++) {
+        b->cur = buf_get_line(b, line_no);
+        if (!b->cur) {
+            break;
+        }
+        vi_reindent_current_line(b, vis, increase);
+    }
+    b->cur = orig;
+    vis->cursor_col = vi_first_nonblank_col(orig);
+    return 0;
+}
+
+static int
 vi_display_col_for_index(line_t *cur, int idx)
 {
     int col = 0;
@@ -2736,7 +2762,15 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
     int end;
     int last_line = vi_clamp_line_target(b, line_no + count - 1);
 
-    if (vis->pending_op == 'd' && key == 'd') {
+    if (vis->pending_op == '>' && key == '>') {
+        if (vi_shift_range(b, vis, line_no, last_line, 1) != 0) {
+            write(STDOUT_FILENO, "\a", 1);
+        }
+    } else if (vis->pending_op == '<' && key == '<') {
+        if (vi_shift_range(b, vis, line_no, last_line, 0) != 0) {
+            write(STDOUT_FILENO, "\a", 1);
+        }
+    } else if (vis->pending_op == 'd' && key == 'd') {
         vi_linewise_delete(b, vis, line_no, last_line);
         vi_set_last_change(vis, VI_REPEAT_DD, count, 0);
     } else if (vis->pending_op == 'c' && key == 'c') {
@@ -4475,6 +4509,14 @@ exvi_visual_main(buffer_t *b)
         case 'y':
             vis.pending_g = 0;
             vis.pending_op = 'y';
+            break;
+        case '>':
+            vis.pending_g = 0;
+            vis.pending_op = '>';
+            break;
+        case '<':
+            vis.pending_g = 0;
+            vis.pending_op = '<';
             break;
         case 'p':
             vis.pending_g = 0;
