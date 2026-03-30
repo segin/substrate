@@ -54,6 +54,8 @@ extern jmp_buf main_loop_jmp;
 extern buffer_t *global_buf_for_sighandler;
 extern int input_mode;
 extern line_t *input_insert_pos;
+extern char exvi_pending_status[256];
+extern int exvi_pending_status_once;
 
 void buf_init(buffer_t *b);
 line_t *buf_insert_after(buffer_t *b, line_t *pos, const char *text);
@@ -83,6 +85,8 @@ void exvi_reset_runtime(exvi_frontend_t frontend);
 void exvi_cleanup_runtime(void);
 void exvi_init_registers(void);
 void exvi_free_registers(void);
+void exvi_set_pending_status(const char *msg);
+int exvi_take_pending_status(char *buf, size_t buf_size);
 void exvi_cleanup_session_state(void);
 void exvi_set_cli_arglist(int argc, char **argv, int optind);
 void exvi_set_owned_arglist(char **args, int argc);

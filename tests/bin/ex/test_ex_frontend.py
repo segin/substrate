@@ -81,6 +81,13 @@ def main():
     finally:
         os.unlink(path)
 
+    proc = subprocess.run([ex_path], input=b"version\nq!\n",
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    require(proc.returncode == 0, f"ex version status mismatch: {proc.returncode}")
+    require(proc.stdout.decode("latin1", "replace") == "Substrate vi v0.1\n",
+            f"ex version stdout mismatch: {proc.stdout!r}")
+    require(proc.stderr == b"", f"ex version stderr mismatch: {proc.stderr!r}")
+
     return 0
 
 

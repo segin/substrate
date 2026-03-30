@@ -241,6 +241,24 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one\ntwo\n",
+        [b'"', b'a', b'S', b'X', b'\x1b', b'"', b'a', b'P'],
+    )
+    require(exit_code == 0, f"named-substitute-put vi exited with status {exit_code}")
+    require(saved == "one\nX\ntwo\n",
+            f"unexpected named-substitute-put buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha beta\n",
+        [b'"', b'a', b'c', b'w', b'Z', b'\x1b', b'0', b'"', b'a', b'p'],
+    )
+    require(exit_code == 0, f"named-change-put vi exited with status {exit_code}")
+    require(saved == "Zalpha beta\n",
+            f"unexpected named-change-put buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\n",
         [b"i", b"X", b"\x1b", b":wq\r", b":q!\r"],
         final_keys=None,

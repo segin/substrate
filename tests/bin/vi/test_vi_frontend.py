@@ -77,6 +77,16 @@ def main():
     require(":q!" in decoded, "vi/ex round-trip missing final ex-mode quit prompt")
     require(saved == "one\ntwo\n", f"vi/ex round-trip unexpectedly saved changes: {saved!r}")
 
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "one\n",
+        [b":ver\r", b":q!\r"],
+        final_keys=None,
+    )
+    require(exit_code == 0, f"vi version status exited with status {exit_code}")
+    require("Substrate vi v0.1" in decoded, "vi version missing status-line message")
+    require(saved == "one\n", f"vi version unexpectedly modified file: {saved!r}")
+
     return 0
 
 

@@ -32,6 +32,8 @@ jmp_buf main_loop_jmp;
 buffer_t *global_buf_for_sighandler = NULL;
 int input_mode = 0;
 line_t *input_insert_pos = NULL;
+char exvi_pending_status[256];
+int exvi_pending_status_once = 0;
 
 static void
 free_startup_commands(void)
@@ -280,6 +282,30 @@ exvi_readonly_mode(void)
 }
 
 void
+exvi_set_pending_status(const char *msg)
+{
+    if (!msg) {
+        exvi_pending_status[0] = '\0';
+        exvi_pending_status_once = 0;
+        return;
+    }
+    snprintf(exvi_pending_status, sizeof(exvi_pending_status), "%s", msg);
+    exvi_pending_status_once = 1;
+}
+
+int
+exvi_take_pending_status(char *buf, size_t buf_size)
+{
+    if (!buf || buf_size == 0 || !exvi_pending_status_once) {
+        return 0;
+    }
+    snprintf(buf, buf_size, "%s", exvi_pending_status);
+    exvi_pending_status[0] = '\0';
+    exvi_pending_status_once = 0;
+    return 1;
+}
+
+void
 handle_sigint(int sig)
 {
     (void)sig;
@@ -338,6 +364,7 @@ exvi_reset_runtime(exvi_frontend_t frontend)
     input_mode = 0;
     input_insert_pos = NULL;
     global_buf_for_sighandler = NULL;
+    exvi_set_pending_status(NULL);
 }
 
 void
@@ -355,6 +382,7 @@ exvi_cleanup_runtime(void)
     set_visual_handoff_file(NULL);
     free_startup_commands();
     global_buf_for_sighandler = NULL;
+    exvi_set_pending_status(NULL);
 }
 
 void

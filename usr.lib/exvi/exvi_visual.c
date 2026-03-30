@@ -2597,8 +2597,16 @@ vi_linewise_change(buffer_t *b, vi_visual_t *vis, int start, int end)
 }
 
 static void
-vi_substitute_line(buffer_t *b, vi_visual_t *vis)
+vi_substitute_line(buffer_t *b, vi_visual_t *vis, int capture_register)
 {
+    int line_no = buf_current_line(b);
+
+    if (capture_register && line_no >= 1) {
+        char regarg[2];
+
+        vi_take_register_arg(vis, regarg);
+        handle_yank_command(b, regarg, 1, line_no, line_no);
+    }
     if (!b->cur) {
         save_undo(b);
         b->cur = buf_insert_after(b, b->tail, "");
@@ -2816,7 +2824,7 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
 
             vi_take_register_arg(vis, regarg);
             handle_yank_command(b, regarg, 1, line_no, last_line);
-            vi_substitute_line(b, vis);
+            vi_substitute_line(b, vis, 0);
         } else {
             line_t *start = buf_get_line(b, line_no);
             line_t *before = start ? start->prev : NULL;
@@ -3757,6 +3765,9 @@ vi_command_prompt(buffer_t *b, vi_visual_t *vis)
         return;
     }
     exvi_execute_command(b, cmd);
+    if (exvi_take_pending_status(vis->status_msg, sizeof(vis->status_msg))) {
+        vis->status_once = 1;
+    }
     vi_clamp_cursor(b, vis);
 }
 
@@ -4601,7 +4612,7 @@ exvi_visual_main(buffer_t *b)
             break;
         case 'S':
             vis.pending_g = 0;
-            vi_substitute_line(b, &vis);
+            vi_substitute_line(b, &vis, 1);
             break;
         case 'u':
         case 0x12:

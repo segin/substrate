@@ -196,6 +196,11 @@ handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
     const char *args = NULL;
     int force = 0;
 
+    (void)b;
+    (void)explicit_range;
+    (void)addr1;
+    (void)addr2;
+
     if (match_command(cmd, "visual", "vi", &args, &force)) {
         if (visual_mode) {
             fprintf(stderr, "%s: visual mode not implemented in this build.\n", exvi_progname);
@@ -209,6 +214,15 @@ handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
             set_visual_handoff_file(b->filename);
         }
         longjmp(main_loop_jmp, EXVI_EXIT_VISUAL_HANDOFF);
+    } else if (match_command(cmd, "version", "ver", &args, NULL)) {
+        const char *version = "Substrate vi v0.1";
+
+        if (visual_mode) {
+            exvi_set_pending_status(version);
+        } else {
+            printf("%s\n", version);
+        }
+        return 1;
     } else if (match_command(cmd, "args", NULL, &args, NULL)) {
         return handle_args_command(args);
     } else if (match_command(cmd, "next", "n", &args, &force)) {

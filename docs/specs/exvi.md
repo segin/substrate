@@ -206,7 +206,7 @@ Completed architecture milestones already in tree are intentionally omitted here
 - [ ] Audit linewise-vs-charwise coercion rules for every operator path, including edge cases at column zero and end-of-line.
 - [ ] Complete operator support for search-based motions, mark-based motions, repeated find motions, and any remaining vertical motions.
 - [ ] Finish `p`/`P` cursor placement and register-type behavior after every delete/change/yank variant.
-- [ ] Complete named-register selection for delete/change/yank/put instead of only the currently covered register paths.
+- [x] Complete named-register selection for delete/change/yank/put instead of only the currently covered register paths.
 
 #### 3.4 Insert mode, replace mode, and repeatability
 
