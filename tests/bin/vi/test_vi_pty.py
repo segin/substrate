@@ -178,6 +178,17 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one two three\nalpha two beta\n",
+        [b"/", b"two\r", b"r", b"Z", b"n", b"r", b"Y"],
+    )
+    require(exit_code == 0, f"search-column vi exited with status {exit_code}")
+    require("line 1/2" in decoded, "missing same-line search status")
+    require("line 2/2" in decoded, "missing repeated search status")
+    require(saved == "one Zwo three\nalpha Ywo beta\n",
+            f"unexpected search-column buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\ntwo\none again\n",
         [b"/", b"one\r", b"n", b"r", b"Z"],
     )
@@ -681,6 +692,16 @@ def main():
     exit_code, decoded, saved = run_vi_session(
         vi_path,
         "one two three\n",
+        [b"A", b"\x1b[1;5D", b"\x1b[127;5u", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-ctrl-backspace vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-ctrl-backspace insert status")
+    require(saved == "one Xthree\n",
+            f"unexpected insert-ctrl-backspace buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three\n",
         [b"A", b"\x1b[1;5D", b"X", b"\x1b"],
     )
     require(exit_code == 0, f"insert-ctrl-left vi exited with status {exit_code}")
@@ -697,6 +718,16 @@ def main():
     require("-- INSERT --" in decoded, "missing insert-ctrl-w insert status")
     require(saved == "one two X\n",
             f"unexpected insert-ctrl-w buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three\n",
+        [b"i", b"\x1b[1;5C", b"\x1b[3;5~", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-ctrl-delete vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-ctrl-delete insert status")
+    require(saved == "one Xthree\n",
+            f"unexpected insert-ctrl-delete buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,

@@ -3,6 +3,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <regex.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,12 +29,15 @@ typedef enum {
 } vi_repeat_kind_t;
 
 enum {
-    VI_KEY_UP = 0x100,
+    VI_KEY_UNKNOWN = 0x100,
+    VI_KEY_UP,
     VI_KEY_DOWN,
     VI_KEY_RIGHT,
     VI_KEY_LEFT,
     VI_KEY_CTRL_RIGHT,
     VI_KEY_CTRL_LEFT,
+    VI_KEY_CTRL_DELETE,
+    VI_KEY_CTRL_BACKSPACE,
     VI_KEY_HOME,
     VI_KEY_END,
     VI_KEY_PGUP,
@@ -661,6 +665,84 @@ vi_read_timed_byte(char *out, int timeout_ms)
 }
 
 static int
+vi_parse_csi_key(const char *seq)
+{
+    int num = 0;
+    int mod = 0;
+    char final = '\0';
+
+    if (seq[0] == '\0') {
+        return VI_KEY_UNKNOWN;
+    }
+
+    if (seq[1] == '\0') {
+        switch (seq[0]) {
+        case 'A': return VI_KEY_UP;
+        case 'B': return VI_KEY_DOWN;
+        case 'C': return VI_KEY_RIGHT;
+        case 'D': return VI_KEY_LEFT;
+        case 'H': return VI_KEY_HOME;
+        case 'F': return VI_KEY_END;
+        default: return VI_KEY_UNKNOWN;
+        }
+    }
+
+    if (sscanf(seq, "%d;%d%c", &num, &mod, &final) == 3) {
+        if (mod == 5) {
+            switch (final) {
+            case 'C':
+                return VI_KEY_CTRL_RIGHT;
+            case 'D':
+                return VI_KEY_CTRL_LEFT;
+            case '~':
+                if (num == 3) {
+                    return VI_KEY_CTRL_DELETE;
+                }
+                break;
+            case 'u':
+                if (num == 8 || num == 127) {
+                    return VI_KEY_CTRL_BACKSPACE;
+                }
+                break;
+            default:
+                break;
+            }
+        }
+        return VI_KEY_UNKNOWN;
+    }
+
+    if (sscanf(seq, "%d%c", &num, &final) == 2) {
+        switch (final) {
+        case '~':
+            switch (num) {
+            case 1:
+            case 7:
+                return VI_KEY_HOME;
+            case 3:
+                return VI_KEY_DELETE;
+            case 4:
+            case 8:
+                return VI_KEY_END;
+            case 5:
+                return VI_KEY_PGUP;
+            case 6:
+                return VI_KEY_PGDN;
+            default:
+                return VI_KEY_UNKNOWN;
+            }
+        case 'C':
+            return (num == 5) ? VI_KEY_CTRL_RIGHT : VI_KEY_UNKNOWN;
+        case 'D':
+            return (num == 5) ? VI_KEY_CTRL_LEFT : VI_KEY_UNKNOWN;
+        default:
+            return VI_KEY_UNKNOWN;
+        }
+    }
+
+    return VI_KEY_UNKNOWN;
+}
+
+static int
 vi_read_key(void)
 {
     char c;
@@ -672,81 +754,35 @@ vi_read_key(void)
         return -1;
     }
     if (c == '\x1b') {
-        char seq[2];
+        char prefix;
+        char seq[32];
+        size_t len = 0;
 
-        if (!vi_read_timed_byte(&seq[0], 50)) {
+        if (!vi_read_timed_byte(&prefix, 50)) {
             return '\x1b';
         }
-        if (!vi_read_timed_byte(&seq[1], 50)) {
-            return '\x1b';
-        }
-        if (seq[0] == '[' || seq[0] == 'O') {
-            switch (seq[1]) {
-            case 'A': return VI_KEY_UP;
-            case 'B': return VI_KEY_DOWN;
-            case 'C': return VI_KEY_RIGHT;
-            case 'D': return VI_KEY_LEFT;
-            case 'H': return VI_KEY_HOME;
-            case 'F': return VI_KEY_END;
-            default:
-                break;
-            }
-        }
-        if (seq[0] == '[' && seq[1] >= '0' && seq[1] <= '9') {
-            char seq2;
-
-            if (!vi_read_timed_byte(&seq2, 50)) {
-                return '\x1b';
-            }
-            if (seq2 == ';') {
-                char mod;
-                char final;
-
-                if (!vi_read_timed_byte(&mod, 50) ||
-                    !vi_read_timed_byte(&final, 50)) {
-                    return '\x1b';
+        if (prefix == '[' || prefix == 'O') {
+            for (;;) {
+                if (!vi_read_timed_byte(&seq[len], 50)) {
+                    return VI_KEY_UNKNOWN;
                 }
-                if (mod == '5') {
-                    switch (final) {
-                    case 'C': return VI_KEY_CTRL_RIGHT;
-                    case 'D': return VI_KEY_CTRL_LEFT;
-                    default: return '\x1b';
-                    }
+                if ((unsigned char)seq[len] >= 0x40 &&
+                    (unsigned char)seq[len] <= 0x7e) {
+                    len++;
+                    break;
                 }
-                return '\x1b';
-            }
-            if (seq2 == '~') {
-                switch (seq[1]) {
-                case '1':
-                case '7':
-                    return VI_KEY_HOME;
-                case '3':
-                    return VI_KEY_DELETE;
-                case '4':
-                case '8':
-                    return VI_KEY_END;
-                case '5':
-                    return VI_KEY_PGUP;
-                case '6':
-                    return VI_KEY_PGDN;
-                default:
-                    return '\x1b';
+                len++;
+                if (len + 1 >= sizeof(seq)) {
+                    break;
                 }
             }
-            if (seq[1] == '5') {
-                switch (seq2) {
-                case 'C': return VI_KEY_CTRL_RIGHT;
-                case 'D': return VI_KEY_CTRL_LEFT;
-                default: return '\x1b';
-                }
+            seq[len] = '\0';
+            if (prefix == 'O') {
+                return vi_parse_csi_key(seq);
             }
+            return vi_parse_csi_key(seq);
         }
-        if (seq[0] == '[') {
-            switch (seq[1]) {
-            default: return '\x1b';
-            }
-        }
-        return '\x1b';
+        return VI_KEY_UNKNOWN;
     }
     return (unsigned char)c;
 }
@@ -2791,34 +2827,231 @@ vi_backward_end_motion_target(buffer_t *b, vi_visual_t *vis, int count, int bigw
 }
 
 static int
-vi_search_motion_target(buffer_t *b, vi_visual_t *vis, const char *pattern, int forward,
+vi_search_forward_in_line(line_t *line, regex_t *re, int start_col, int max_col,
+    int *match_col)
+{
+    size_t offset;
+    regmatch_t match;
+
+    if (!line) {
+        return -1;
+    }
+    if (start_col < 0) {
+        start_col = 0;
+    }
+    if (max_col < start_col) {
+        return -1;
+    }
+    if ((size_t)start_col > line->len) {
+        return -1;
+    }
+    if (max_col > (int)line->len) {
+        max_col = (int)line->len;
+    }
+
+    offset = (size_t)start_col;
+    while (offset <= line->len) {
+        if (regexec(re, line->text + offset, 1, &match, 0) != 0) {
+            return -1;
+        }
+        if (match.rm_so < 0) {
+            return -1;
+        }
+        if ((int)(offset + (size_t)match.rm_so) > max_col) {
+            return -1;
+        }
+        *match_col = (int)(offset + (size_t)match.rm_so);
+        return 0;
+    }
+
+    return -1;
+}
+
+static int
+vi_search_backward_in_line(line_t *line, regex_t *re, int min_col, int max_col,
+    int *match_col)
+{
+    size_t offset;
+    regmatch_t match;
+    int found = -1;
+
+    if (!line) {
+        return -1;
+    }
+    if (min_col < 0) {
+        min_col = 0;
+    }
+    if (max_col < min_col) {
+        return -1;
+    }
+    if (max_col > (int)line->len) {
+        max_col = (int)line->len;
+    }
+    if ((size_t)min_col > line->len) {
+        return -1;
+    }
+
+    offset = (size_t)min_col;
+    while (offset <= line->len) {
+        size_t pos;
+
+        if (regexec(re, line->text + offset, 1, &match, 0) != 0) {
+            break;
+        }
+        if (match.rm_so < 0) {
+            break;
+        }
+        pos = offset + (size_t)match.rm_so;
+        if ((int)pos > max_col) {
+            break;
+        }
+        found = (int)pos;
+        if (match.rm_eo > match.rm_so) {
+            offset += (size_t)match.rm_eo;
+        } else {
+            offset = pos + 1;
+        }
+    }
+
+    if (found < 0) {
+        return -1;
+    }
+    *match_col = found;
+    return 0;
+}
+
+static int
+vi_search_once(buffer_t *b, regex_t *re, int forward, line_t *start_line, int start_col,
+    line_t **line_out, int *col_out)
+{
+    line_t *line;
+    int col;
+
+    if (!b->head) {
+        return -1;
+    }
+
+    if (forward) {
+        if (!start_line) {
+            start_line = b->head;
+            start_col = -1;
+        }
+        if (vi_search_forward_in_line(start_line, re, start_col + 1,
+            (int)start_line->len, &col) == 0) {
+            *line_out = start_line;
+            *col_out = col;
+            return 0;
+        }
+        for (line = start_line->next; line; line = line->next) {
+            if (vi_search_forward_in_line(line, re, 0, (int)line->len, &col) == 0) {
+                *line_out = line;
+                *col_out = col;
+                return 0;
+            }
+        }
+        if (!option_wrapscan) {
+            return -1;
+        }
+        for (line = b->head; line && line != start_line; line = line->next) {
+            if (vi_search_forward_in_line(line, re, 0, (int)line->len, &col) == 0) {
+                *line_out = line;
+                *col_out = col;
+                return 0;
+            }
+        }
+        if (vi_search_forward_in_line(start_line, re, 0, start_col, &col) == 0) {
+            *line_out = start_line;
+            *col_out = col;
+            return 0;
+        }
+        return -1;
+    }
+
+    if (!start_line) {
+        start_line = b->tail;
+        start_col = start_line ? (int)start_line->len : 0;
+    }
+    if (vi_search_backward_in_line(start_line, re, 0, start_col - 1, &col) == 0) {
+        *line_out = start_line;
+        *col_out = col;
+        return 0;
+    }
+    for (line = start_line->prev; line; line = line->prev) {
+        if (vi_search_backward_in_line(line, re, 0, (int)line->len, &col) == 0) {
+            *line_out = line;
+            *col_out = col;
+            return 0;
+        }
+    }
+    if (!option_wrapscan) {
+        return -1;
+    }
+    for (line = b->tail; line && line != start_line; line = line->prev) {
+        if (vi_search_backward_in_line(line, re, 0, (int)line->len, &col) == 0) {
+            *line_out = line;
+            *col_out = col;
+            return 0;
+        }
+    }
+    if (vi_search_backward_in_line(start_line, re, start_col + 1,
+        (int)start_line->len, &col) == 0) {
+        *line_out = start_line;
+        *col_out = col;
+        return 0;
+    }
+    return -1;
+}
+
+static int
+vi_search_target(buffer_t *b, vi_visual_t *vis, const char *pattern, int forward,
     int count, line_t **line_out, int *col_out)
 {
-    line_t *saved_line = b->cur;
-    int line_no = -1;
+    char *search = NULL;
+    regex_t re;
+    line_t *line = b->cur ? b->cur : (forward ? b->head : b->tail);
+    int col = vis->cursor_col;
 
     if (count < 1) {
         count = 1;
     }
-    while (count-- > 0) {
-        line_no = exvi_search(b, pattern, forward);
-        if (line_no < 1) {
-            vi_set_search_failure_status(vis, pattern);
-            b->cur = saved_line;
-            return -1;
+    if (pattern && pattern[0] != '\0') {
+        search = strdup(pattern);
+        if (search) {
+            replace_saved_string(&last_search_pattern, search);
         }
-        b->cur = buf_get_line(b, line_no);
-        pattern = "";
+    } else if (last_search_pattern) {
+        search = strdup(last_search_pattern);
     }
-    if (line_no < 1) {
-        b->cur = saved_line;
+    if (!search) {
         return -1;
     }
-    *line_out = b->cur;
-    *col_out = 0;
-    b->cur = saved_line;
+    if (regcomp(&re, search, REG_EXTENDED) != 0) {
+        free(search);
+        return -1;
+    }
+
+    while (count-- > 0) {
+        if (vi_search_once(b, &re, forward, line, col, &line, &col) != 0) {
+            vi_set_search_failure_status(vis, search);
+            regfree(&re);
+            free(search);
+            return -1;
+        }
+    }
+
+    regfree(&re);
+    free(search);
+    *line_out = line;
+    *col_out = col;
     vis->last_search_forward = forward;
-    return (*line_out != NULL) ? 0 : -1;
+    return 0;
+}
+
+static int
+vi_search_motion_target(buffer_t *b, vi_visual_t *vis, const char *pattern, int forward,
+    int count, line_t **line_out, int *col_out)
+{
+    return vi_search_target(b, vis, pattern, forward, count, line_out, col_out);
 }
 
 static int
@@ -3585,6 +3818,33 @@ vi_erase_word_backward_insert(buffer_t *b, vi_visual_t *vis)
 }
 
 static void
+vi_erase_word_forward_insert(buffer_t *b, vi_visual_t *vis)
+{
+    line_t *start_line = b->cur ? b->cur : b->head;
+    int start_col = vis->cursor_col;
+    line_t *end_line;
+    int end_col;
+    vi_visual_t tmp;
+
+    if (!start_line) {
+        return;
+    }
+    tmp = *vis;
+    vi_move_word_forward_count(b, &tmp, 1);
+    end_line = b->cur ? b->cur : b->head;
+    end_col = tmp.cursor_col;
+    b->cur = start_line;
+    vis->cursor_col = start_col;
+    if (!end_line) {
+        return;
+    }
+    if (start_line == end_line && start_col == end_col) {
+        return;
+    }
+    vi_delete_range(b, vis, start_line, start_col, end_line, end_col, 1);
+}
+
+static void
 vi_erase_to_insert_anchor(buffer_t *b, vi_visual_t *vis)
 {
     line_t *end_line = b->cur ? b->cur : b->head;
@@ -3991,34 +4251,30 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
 static void
 vi_apply_search(buffer_t *b, vi_visual_t *vis, const char *pattern, int forward)
 {
-    int line_no = exvi_search(b, pattern, forward);
+    line_t *target_line;
+    int target_col;
 
-    if (line_no < 1) {
-        vi_set_search_failure_status(vis, pattern);
+    if (vi_search_target(b, vis, pattern, forward, 1, &target_line, &target_col) != 0) {
         write(STDOUT_FILENO, "\a", 1);
         return;
     }
-    b->cur = buf_get_line(b, line_no);
-    vis->cursor_col = 0;
-    vis->last_search_forward = forward;
+    b->cur = target_line;
+    vis->cursor_col = target_col;
     vi_set_status(vis, NULL);
 }
 
 static void
 vi_repeat_search(buffer_t *b, vi_visual_t *vis, int forward, int count)
 {
-    while (count-- > 0) {
-        int line_no = exvi_search(b, "", forward);
+    line_t *target_line;
+    int target_col;
 
-        if (line_no < 1) {
-            vi_set_search_failure_status(vis, "");
-            write(STDOUT_FILENO, "\a", 1);
-            return;
-        }
-        b->cur = buf_get_line(b, line_no);
-        vis->cursor_col = 0;
-        vis->last_search_forward = forward;
+    if (vi_search_target(b, vis, "", forward, count, &target_line, &target_col) != 0) {
+        write(STDOUT_FILENO, "\a", 1);
+        return;
     }
+    b->cur = target_line;
+    vis->cursor_col = target_col;
     vi_set_status(vis, NULL);
 }
 
@@ -4214,7 +4470,11 @@ exvi_visual_main(buffer_t *b)
                 }
                 break;
             case 0x17:
+            case VI_KEY_CTRL_BACKSPACE:
                 vi_erase_word_backward_insert(b, &vis);
+                break;
+            case VI_KEY_CTRL_DELETE:
+                vi_erase_word_forward_insert(b, &vis);
                 break;
             case 0x15:
                 vi_erase_to_insert_anchor(b, &vis);
@@ -4264,7 +4524,11 @@ exvi_visual_main(buffer_t *b)
                 vi_backspace_char(b, &vis);
                 break;
             case 0x17:
+            case VI_KEY_CTRL_BACKSPACE:
                 vi_erase_word_backward_insert(b, &vis);
+                break;
+            case VI_KEY_CTRL_DELETE:
+                vi_erase_word_forward_insert(b, &vis);
                 break;
             case 0x15:
                 vi_erase_to_insert_anchor(b, &vis);
