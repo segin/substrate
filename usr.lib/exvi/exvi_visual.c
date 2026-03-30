@@ -1908,6 +1908,38 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         if (vi_yank_span(vis, b->cur, start, vis->cursor_col) != 0) {
             write(STDOUT_FILENO, "\a", 1);
         }
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+        key == '|') {
+        line_t *cur = b->cur;
+        int target;
+        int start;
+
+        if (!cur) {
+            write(STDOUT_FILENO, "\a", 1);
+        } else {
+            target = vi_index_for_display_col(cur, count - 1);
+            if (target == vis->cursor_col) {
+                write(STDOUT_FILENO, "\a", 1);
+            } else if (target > vis->cursor_col) {
+                start = vis->cursor_col;
+                if (vis->pending_op == 'y') {
+                    if (vi_yank_span(vis, cur, start, target) != 0) {
+                        write(STDOUT_FILENO, "\a", 1);
+                    }
+                } else {
+                    vi_delete_span(b, vis, start, target, vis->pending_op == 'c');
+                }
+            } else {
+                start = target;
+                if (vis->pending_op == 'y') {
+                    if (vi_yank_span(vis, cur, start, vis->cursor_col) != 0) {
+                        write(STDOUT_FILENO, "\a", 1);
+                    }
+                } else {
+                    vi_delete_span(b, vis, start, vis->cursor_col, vis->pending_op == 'c');
+                }
+            }
+        }
     } else if (vis->pending_op == 'y' && key == '$') {
         line_t *cur = b->cur;
 

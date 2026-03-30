@@ -258,6 +258,29 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "0123456789abcdefghijKLMNOPQRST\n",
+        [b"d", b"3", b"0", b"|"],
+        rows=8,
+        cols=20,
+    )
+    require(exit_code == 0, f"column-delete vi exited with status {exit_code}")
+    require(saved == "T\n",
+            f"unexpected column-delete buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "a\tbcdefghijklmnopqrstuvwxyz\n",
+        [b"c", b"2", b"5", b"|", b"X", b"\x1b"],
+        rows=8,
+        cols=16,
+    )
+    require(exit_code == 0, f"tab-column-change vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing tab-column change insert status")
+    require(saved == "Xwxyz\n",
+            f"unexpected tab-column-change buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\n\n  two\nthree\n\nfour\n",
         [b"}", b"}", b"{"],
     )
