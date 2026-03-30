@@ -330,6 +330,54 @@ vi_take_register_arg(vi_visual_t *vis, char regarg[2])
     vis->pending_reg = 0;
 }
 
+static int
+vi_take_register_index(vi_visual_t *vis)
+{
+    int idx = 26;
+
+    if (vis->pending_reg >= 'a' && vis->pending_reg <= 'z') {
+        idx = vis->pending_reg - 'a';
+    }
+    vis->pending_reg = 0;
+    return idx;
+}
+
+static void
+vi_store_register_text(int reg_idx, const char *text, int linewise)
+{
+    buf_free(&regs[reg_idx]);
+    buf_init(&regs[reg_idx]);
+    reg_linewise[reg_idx] = linewise;
+    if (text && *text) {
+        buf_insert_after(&regs[reg_idx], NULL, text);
+    } else if (text) {
+        buf_insert_after(&regs[reg_idx], NULL, "");
+    }
+}
+
+static void
+vi_store_charwise_span(vi_visual_t *vis, line_t *cur, int start, int end)
+{
+    int reg_idx;
+    char *text;
+
+    if (!cur || start < 0 || end < start || (size_t)start > cur->len) {
+        return;
+    }
+    if ((size_t)end > cur->len) {
+        end = (int)cur->len;
+    }
+    reg_idx = vi_take_register_index(vis);
+    text = malloc((size_t)(end - start) + 1);
+    if (!text) {
+        return;
+    }
+    memcpy(text, cur->text + start, (size_t)(end - start));
+    text[end - start] = '\0';
+    vi_store_register_text(reg_idx, text, 0);
+    free(text);
+}
+
 static void
 vi_move_vertical(buffer_t *b, int delta)
 {
@@ -1447,6 +1495,7 @@ vi_delete_span(buffer_t *b, vi_visual_t *vis, int start, int end, int enter_inse
     if ((size_t)end > cur->len) {
         end = (int)cur->len;
     }
+    vi_store_charwise_span(vis, cur, start, end);
     save_undo(b);
     text = malloc(cur->len - (size_t)(end - start) + 1);
     if (!text) {
@@ -1462,26 +1511,95 @@ vi_delete_span(buffer_t *b, vi_visual_t *vis, int start, int end, int enter_inse
 }
 
 static void
-vi_linewise_put(buffer_t *b, vi_visual_t *vis, int before)
+vi_put_from_register(buffer_t *b, vi_visual_t *vis, int before, int reg_idx, int count)
 {
     int line_no = buf_current_line(b);
     char regarg[2];
 
+    if (count < 1) {
+        count = 1;
+    }
     if (line_no < 1) {
         line_no = 1;
     }
-    vi_take_register_arg(vis, regarg);
-    handle_put_command(b, regarg, before ? line_no - 1 : line_no);
-    if (before) {
-        if (line_no > 1) {
-            b->cur = buf_get_line(b, line_no);
-        } else {
-            b->cur = buf_get_line(b, 1);
+    if (!reg_linewise[reg_idx]) {
+        line_t *cur = b->cur;
+        line_t *src = regs[reg_idx].head;
+        const char *ins;
+        char *rep;
+        char *text;
+        size_t ins_len;
+        size_t rep_len;
+        int pos;
+        int i;
+
+        if (!cur || !src || !src->text) {
+            return;
         }
+        ins = src->text;
+        ins_len = src->len;
+        rep_len = ins_len * (size_t)count;
+        rep = malloc(rep_len + 1);
+        if (!rep) {
+            return;
+        }
+        for (i = 0; i < count; i++) {
+            memcpy(rep + ((size_t)i * ins_len), ins, ins_len);
+        }
+        rep[rep_len] = '\0';
+        if (!before && (size_t)vis->cursor_col < cur->len) {
+            pos = vis->cursor_col + 1;
+        } else {
+            pos = vis->cursor_col;
+        }
+        if (pos < 0) {
+            pos = 0;
+        }
+        if ((size_t)pos > cur->len) {
+            pos = (int)cur->len;
+        }
+        save_undo(b);
+        text = malloc(cur->len + rep_len + 1);
+        if (!text) {
+            free(rep);
+            return;
+        }
+        memcpy(text, cur->text, (size_t)pos);
+        memcpy(text + pos, rep, rep_len);
+        memcpy(text + pos + rep_len, cur->text + pos, cur->len - (size_t)pos + 1);
+        if (vi_replace_current_text(b, text) == 0) {
+            vis->cursor_col = pos;
+        }
+        free(text);
+        free(rep);
+        return;
+    }
+    if (reg_idx >= 0 && reg_idx < 26) {
+        regarg[0] = (char)('a' + reg_idx);
+        regarg[1] = '\0';
     } else {
-        b->cur = buf_get_line(b, line_no + 1);
+        regarg[0] = '\0';
+    }
+    while (count-- > 0) {
+        handle_put_command(b, regarg, before ? line_no - 1 : line_no);
+        if (before) {
+            if (line_no > 1) {
+                b->cur = buf_get_line(b, line_no);
+            } else {
+                b->cur = buf_get_line(b, 1);
+            }
+        } else {
+            b->cur = buf_get_line(b, line_no + 1);
+            line_no++;
+        }
     }
     vis->cursor_col = 0;
+}
+
+static void
+vi_put(buffer_t *b, vi_visual_t *vis, int before, int count)
+{
+    vi_put_from_register(b, vis, before, vi_take_register_index(vis), count);
 }
 
 static void
@@ -1756,6 +1874,7 @@ vi_delete_char(buffer_t *b, vi_visual_t *vis)
     if (!cur || (size_t)vis->cursor_col >= cur->len) {
         return;
     }
+    vi_store_charwise_span(vis, cur, vis->cursor_col, vis->cursor_col + 1);
     save_undo(b);
     text = malloc(cur->len);
     if (!text) {
@@ -1778,6 +1897,7 @@ vi_delete_prev_char(buffer_t *b, vi_visual_t *vis)
     if (!cur || vis->cursor_col <= 0) {
         return;
     }
+    vi_store_charwise_span(vis, cur, vis->cursor_col - 1, vis->cursor_col);
     save_undo(b);
     text = malloc(cur->len);
     if (!text) {
@@ -2001,14 +2121,10 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
         }
         break;
     case VI_REPEAT_P:
-        while (count-- > 0) {
-            vi_linewise_put(b, vis, 0);
-        }
+        vi_put_from_register(b, vis, 0, 26, count);
         break;
     case VI_REPEAT_P_BEFORE:
-        while (count-- > 0) {
-            vi_linewise_put(b, vis, 1);
-        }
+        vi_put_from_register(b, vis, 1, 26, count);
         break;
     default:
         write(STDOUT_FILENO, "\a", 1);
@@ -2568,9 +2684,7 @@ exvi_visual_main(buffer_t *b)
                 int count = vi_take_count(&vis);
                 int repeat_count = count;
 
-                while (count-- > 0) {
-                    vi_linewise_put(b, &vis, 0);
-                }
+                vi_put(b, &vis, 0, count);
                 vi_set_last_change(&vis, VI_REPEAT_P, repeat_count, 0);
             }
             break;
@@ -2580,9 +2694,7 @@ exvi_visual_main(buffer_t *b)
                 int count = vi_take_count(&vis);
                 int repeat_count = count;
 
-                while (count-- > 0) {
-                    vi_linewise_put(b, &vis, 1);
-                }
+                vi_put(b, &vis, 1, count);
                 vi_set_last_change(&vis, VI_REPEAT_P_BEFORE, repeat_count, 0);
             }
             break;

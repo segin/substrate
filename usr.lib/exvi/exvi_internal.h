@@ -40,6 +40,7 @@ extern char *alternate_filename;
 extern int last_sub_global;
 extern const char *exvi_progname;
 extern buffer_t regs[27];
+extern int reg_linewise[27];
 extern jmp_buf main_loop_jmp;
 extern buffer_t *global_buf_for_sighandler;
 extern int input_mode;

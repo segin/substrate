@@ -474,6 +474,7 @@ handle_yank_command(buffer_t *b, const char *args, int explicit_range, int addr1
     }
 
     buf_free(&regs[reg_idx]);
+    reg_linewise[reg_idx] = 1;
     if (addr1 != -1 && addr2 != -1 && addr1 <= addr2) {
         line_t *src = buf_get_line(b, addr1);
         line_t *pos = NULL;

@@ -155,6 +155,33 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "abcd\n",
+        [b'x', b'p'],
+    )
+    require(exit_code == 0, f"char-put vi exited with status {exit_code}")
+    require(saved == "bacd\n",
+            f"unexpected char-put buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha beta\n",
+        [b'd', b'w', b'P'],
+    )
+    require(exit_code == 0, f"char-operator-put vi exited with status {exit_code}")
+    require(saved == "alpha beta\n",
+            f"unexpected char-operator-put buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abcd\n",
+        [b'"', b'a', b'x', b'l', b'"', b'a', b'p'],
+    )
+    require(exit_code == 0, f"named-char-put vi exited with status {exit_code}")
+    require(saved == "bcad\n",
+            f"unexpected named-char-put buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\n\n  two\nthree\n\nfour\n",
         [b"}", b"}", b"{"],
     )

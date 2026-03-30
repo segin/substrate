@@ -22,6 +22,7 @@ static char *visual_handoff_file = NULL;
 int last_sub_global = 0;
 const char *exvi_progname = "ex";
 buffer_t regs[27];
+int reg_linewise[27];
 jmp_buf main_loop_jmp;
 buffer_t *global_buf_for_sighandler = NULL;
 int input_mode = 0;
@@ -268,6 +269,7 @@ exvi_init_registers(void)
 {
     for (int i = 0; i < 27; i++) {
         buf_init(&regs[i]);
+        reg_linewise[i] = 1;
     }
 }
 
@@ -276,5 +278,6 @@ exvi_free_registers(void)
 {
     for (int i = 0; i < 27; i++) {
         buf_free(&regs[i]);
+        reg_linewise[i] = 1;
     }
 }
