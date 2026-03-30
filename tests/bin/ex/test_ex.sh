@@ -341,6 +341,56 @@ run_startup_test() {
     rm -rf "$tmpdir"
 }
 
+run_startup_precedence_test() {
+    local name="$1"
+    local init_text="$2"
+    local home_exrc_text="$3"
+    local local_exrc_text="$4"
+    local cli_args="$5"
+    local exinit_text="$6"
+    local script="$7"
+    local expected="$8"
+    local tmpdir
+    local home_dir
+    local work_dir
+    local file
+    local script_file
+    local output
+
+    tmpdir=$(mktemp -d)
+    home_dir="$tmpdir/home"
+    work_dir="$tmpdir/work"
+    file="$work_dir/sample.txt"
+    script_file="$tmpdir/script.ex"
+
+    mkdir -p "$home_dir" "$work_dir"
+    printf "%b" "$init_text" >"$file"
+    printf "%b" "$script" >"$script_file"
+
+    if [ -n "$home_exrc_text" ]; then
+        printf "%b" "$home_exrc_text" >"$home_dir/.exrc"
+        chmod 600 "$home_dir/.exrc"
+    fi
+    if [ -n "$local_exrc_text" ]; then
+        printf "%b" "$local_exrc_text" >"$work_dir/.exrc"
+        chmod 600 "$work_dir/.exrc"
+    fi
+
+    # shellcheck disable=SC2086
+    output=$(cd "$work_dir" && env HOME="$home_dir" EXINIT="$exinit_text" \
+        "$EX_BIN" -s $cli_args "$file" <"$script_file" 2>/dev/null || true)
+
+    if [ "$output" != "$expected" ]; then
+        fail "$name"
+        printf 'expected stdout:\n%s\nactual stdout:\n%s\n' "$expected" "$output"
+        rm -rf "$tmpdir"
+        return
+    fi
+
+    pass "$name"
+    rm -rf "$tmpdir"
+}
+
 run_stderr_status_test() {
     local name="$1"
     local init_text="$2"
@@ -645,6 +695,37 @@ run_startup_test "Group-writable .exrc is ignored" \
     662 \
     ":1p\n:q!\n" \
     "alpha"
+
+run_startup_precedence_test "Home .exrc loads before local .exrc" \
+    "alpha\nbeta\n" \
+    "set number\n" \
+    "set nonumber\nset list\n" \
+    "" \
+    "" \
+    ":set number?\n:set list?\n:q!\n" \
+    "nonumber
+list"
+
+run_startup_precedence_test "Secure mode skips home and local .exrc" \
+    "alpha\nbeta\n" \
+    "set number\n" \
+    "set list\n" \
+    "-S" \
+    "" \
+    ":set number?\n:set list?\n:q!\n" \
+    "nonumber
+nolist"
+
+run_startup_precedence_test "EXINIT overrides exrc loading" \
+    "alpha\nbeta\n" \
+    "set number\n" \
+    "set list\n" \
+    "" \
+    "set readonly" \
+    ":set number?\n:set list?\n:set readonly?\n:q!\n" \
+    "nonumber
+nolist
+readonly"
 
 run_stderr_status_test "Quit rejects modified buffer" \
     "one\ntwo\n" \

@@ -43,6 +43,52 @@ free_startup_commands(void)
     startup_command_count = 0;
 }
 
+static int
+load_exrc_file(buffer_t *b, void (*command_fn)(buffer_t *, char *), const char *path,
+    dev_t *dev_out, ino_t *ino_out)
+{
+    struct stat st;
+    FILE *f;
+    char *rc_line = NULL;
+    size_t rc_cap = 0;
+    ssize_t rc_ret;
+
+    if (stat(path, &st) != 0) {
+        return 0;
+    }
+    if (!S_ISREG(st.st_mode)) {
+        return 0;
+    }
+    if (!(st.st_uid == getuid() || st.st_uid == 0)) {
+        return 0;
+    }
+    if ((st.st_mode & (S_IWGRP | S_IWOTH)) != 0) {
+        return 0;
+    }
+
+    f = fopen(path, "r");
+    if (!f) {
+        return 0;
+    }
+
+    while ((rc_ret = getline(&rc_line, &rc_cap, f)) != -1) {
+        if (rc_ret > 0 && rc_line[rc_ret - 1] == '\n') {
+            rc_line[rc_ret - 1] = '\0';
+        }
+        command_fn(b, rc_line);
+    }
+    free(rc_line);
+    fclose(f);
+
+    if (dev_out) {
+        *dev_out = st.st_dev;
+    }
+    if (ino_out) {
+        *ino_out = st.st_ino;
+    }
+    return 1;
+}
+
 char *
 expand_filename_refs(buffer_t *b, const char *arg)
 {
@@ -177,7 +223,7 @@ load_startup_commands(buffer_t *b, void (*command_fn)(buffer_t *, char *))
 {
     char *exinit = getenv("EXINIT");
 
-    if (exinit) {
+    if (exinit && *exinit) {
         char *exinit_cpy = strdup(exinit);
 
         if (exinit_cpy) {
@@ -186,31 +232,23 @@ load_startup_commands(buffer_t *b, void (*command_fn)(buffer_t *, char *))
         }
     } else if (!secure_mode) {
         char *home = getenv("HOME");
+        dev_t home_dev = 0;
+        ino_t home_ino = 0;
+        int loaded_home = 0;
 
         if (home) {
             char path[1024];
-            struct stat st;
 
             snprintf(path, sizeof(path), "%s/.exrc", home);
-            if (stat(path, &st) == 0
-                && S_ISREG(st.st_mode)
-                && (st.st_uid == getuid() || st.st_uid == 0)
-                && (st.st_mode & (S_IWGRP | S_IWOTH)) == 0) {
-                FILE *f = fopen(path, "r");
+            loaded_home = load_exrc_file(b, command_fn, path, &home_dev, &home_ino);
+        }
 
-                if (f) {
-                    char *rc_line = NULL;
-                    size_t rc_cap = 0;
-                    ssize_t rc_ret;
+        {
+            struct stat st;
 
-                    while ((rc_ret = getline(&rc_line, &rc_cap, f)) != -1) {
-                        if (rc_ret > 0 && rc_line[rc_ret - 1] == '\n') {
-                            rc_line[rc_ret - 1] = '\0';
-                        }
-                        command_fn(b, rc_line);
-                    }
-                    free(rc_line);
-                    fclose(f);
+            if (stat(".exrc", &st) == 0) {
+                if (!(loaded_home && st.st_dev == home_dev && st.st_ino == home_ino)) {
+                    load_exrc_file(b, command_fn, ".exrc", NULL, NULL);
                 }
             }
         }
