@@ -291,6 +291,24 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one two three four\n",
+        [b"W", b"W", b"W", b"2", b"g", b"e", b"r", b"Y"],
+    )
+    require(exit_code == 0, f"ge-motion vi exited with status {exit_code}")
+    require(saved == "one twY three four\n",
+            f"unexpected ge-motion buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one,two   three\n",
+        [b"W", b"g", b"E", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"gE-motion vi exited with status {exit_code}")
+    require(saved == "one,twZ   three\n",
+            f"unexpected gE-motion buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\n\n  two\nthree\n\nfour\n",
         [b"}", b"}", b"{"],
     )
