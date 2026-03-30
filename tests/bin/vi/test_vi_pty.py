@@ -171,6 +171,24 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one\ntwo\nthree\n",
+        [b"Y", b"P"],
+    )
+    require(exit_code == 0, f"Y vi exited with status {exit_code}")
+    require(saved == "one\none\ntwo\nthree\n",
+            f"unexpected Y buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"2", b"Y", b"P"],
+    )
+    require(exit_code == 0, f"2Y vi exited with status {exit_code}")
+    require(saved == "one\ntwo\none\ntwo\nthree\n",
+            f"unexpected 2Y buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "abcd\n",
         [b'x', b'p'],
     )

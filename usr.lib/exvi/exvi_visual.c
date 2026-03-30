@@ -4577,6 +4577,16 @@ exvi_visual_main(buffer_t *b)
             vi_delete_span(b, &vis, vis.cursor_col,
                 cur ? (int)cur->len : vis.cursor_col, 1);
             break;
+        case 'Y':
+            vis.pending_g = 0;
+            {
+                int count = vi_take_count(&vis);
+                int line_no = buf_current_line(b);
+                int last_line = vi_clamp_line_target(b, line_no + count - 1);
+
+                vi_linewise_yank(b, &vis, line_no, last_line);
+            }
+            break;
         case '.':
             vis.pending_g = 0;
             vi_repeat_last_change(b, &vis);
