@@ -173,7 +173,7 @@ Completed architecture milestones already in tree are intentionally omitted here
 
 #### 2.4 Files, arglists, tags, recovery, and startup support
 
-- [ ] Finish alternate-file reporting and filename expansion edge cases for `%` and `#`.
+- [x] Finish alternate-file reporting and filename expansion edge cases for `%` and `#`.
 - [ ] Deepen `args`, `next`, `prev`, and `rewind` behavior for replacement lists, unsaved buffers, diagnostics, and startup interactions.
 - [ ] Extend tag behavior beyond the current `tag`/`pop` baseline to the full supported tag-stack/reporting contract.
 - [ ] Replace the current flat `tags` lookup path with `tags` option and search-path behavior if that is part of the supported contract.

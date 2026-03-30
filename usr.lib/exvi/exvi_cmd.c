@@ -276,6 +276,7 @@ handle_file_command(buffer_t *b, const char *args)
 {
     char *ptr = (char *)args;
     char *new_name = NULL;
+    int replace_alt = 0;
 
     while (*ptr && isspace((unsigned char)*ptr)) {
         ptr++;
@@ -285,7 +286,12 @@ handle_file_command(buffer_t *b, const char *args)
         if (!new_name) {
             return 1;
         }
-        replace_saved_string(&alternate_filename, b->filename);
+        if (b->filename && strcmp(b->filename, new_name) != 0) {
+            replace_alt = 1;
+        }
+        if (replace_alt) {
+            replace_saved_string(&alternate_filename, b->filename);
+        }
         free(b->filename);
         b->filename = new_name;
     }

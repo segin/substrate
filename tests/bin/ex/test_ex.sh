@@ -426,6 +426,37 @@ run_stderr_status_test() {
     rm -f "$file" "$stdout_file" "$stderr_file"
 }
 
+run_nofile_stderr_status_test() {
+    local name="$1"
+    local script="$2"
+    local expected_status="$3"
+    local expected_stderr="$4"
+    local stdout_file
+    local stderr_file
+    local rc
+    local stderr_text
+
+    stdout_file=$(mktemp)
+    stderr_file=$(mktemp)
+
+    set +e
+    printf "%b" "$script" | "$EX_BIN" -s >"$stdout_file" 2>"$stderr_file"
+    rc=$?
+    set -e
+
+    stderr_text=$(cat "$stderr_file")
+    if [ "$rc" -ne "$expected_status" ] || [ "$stderr_text" != "$expected_stderr" ]; then
+        fail "$name"
+        printf 'expected status=%s stderr=%s\nactual status=%s stderr=%s\n' \
+            "$expected_status" "$expected_stderr" "$rc" "$stderr_text"
+        rm -f "$stdout_file" "$stderr_file"
+        return
+    fi
+
+    pass "$name"
+    rm -f "$stdout_file" "$stderr_file"
+}
+
 run_stderr_status_with_outfile_test() {
     local name="$1"
     local init_text="$2"
@@ -635,6 +666,25 @@ one
 two
 two"
 
+run_stdout_with_fileargs_test "File percent preserves alternate filename" \
+    "one\n" \
+    "two\n" \
+    ":next\n:file %\n:file #\n:q!\n" \
+    "\"__FILE2__\" 1 lines
+\"__FILE1__\" 1 lines"
+
+run_stdout_with_fileargs_test "Edit percent preserves alternate filename" \
+    "one\n" \
+    "two\n" \
+    ":next\n:e %\n:e #\n:1p\n:q!\n" \
+    "one"
+
+run_stdout_with_fileargs_test "Edit hash preserves bounceable alternate filename" \
+    "one\n" \
+    "two\n" \
+    ":next\n:e #\n:e #\n:1p\n:q!\n" \
+    "two"
+
 run_recover_test "Preserve and -r recover modified buffer" \
     "one\ntwo\n" \
     ":1change\nRECOVERED\n.\n:preserve\n:q!\n" \
@@ -738,6 +788,26 @@ run_stderr_status_test "Set rejects unknown option" \
     ":set frobnicate\n:q!\n" \
     0 \
     "Unknown option: frobnicate"
+
+run_nofile_stderr_status_test "File percent rejects missing current filename" \
+    ":file %\n:q!\n" \
+    0 \
+    "No current filename"
+
+run_nofile_stderr_status_test "File hash rejects missing alternate filename" \
+    ":file #\n:q!\n" \
+    0 \
+    "No alternate filename"
+
+run_nofile_stderr_status_test "Recover percent reports missing current filename once" \
+    ":recover %\n:q!\n" \
+    0 \
+    "No current filename"
+
+run_nofile_stderr_status_test "Recover hash reports missing alternate filename once" \
+    ":recover #\n:q!\n" \
+    0 \
+    "No alternate filename"
 
 run_stderr_status_test "Copy requires destination" \
     "one\ntwo\n" \

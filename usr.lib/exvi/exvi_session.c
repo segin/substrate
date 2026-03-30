@@ -738,11 +738,10 @@ handle_recover_command(buffer_t *b, const char *args)
     } else if (b->filename) {
         recover_name = expand_filename_refs(b, b->filename);
     } else {
-        recover_name = NULL;
-    }
-
-    if (!recover_name) {
         fprintf(stderr, "No current filename\n");
+        return 1;
+    }
+    if (!recover_name) {
         return 1;
     }
     if (load_recover_into_buffer(b, recover_name) != 0) {
@@ -807,6 +806,7 @@ handle_edit_command(buffer_t *b, const char *args, int force)
     char *ptr = (char *)args;
     char *old_filename = NULL;
     char *new_filename = NULL;
+    int replace_alt = 0;
 
     while (*ptr && isspace((unsigned char)*ptr)) {
         ptr++;
@@ -817,28 +817,39 @@ handle_edit_command(buffer_t *b, const char *args, int force)
         return 1;
     }
 
-    if (!*ptr && b->filename) {
+    if (b->filename) {
         old_filename = strdup(b->filename);
         if (!old_filename) {
+            perror("strdup");
+            return 1;
+        }
+    }
+
+    if (!*ptr && old_filename) {
+        new_filename = strdup(old_filename);
+        if (!new_filename) {
+            free(old_filename);
             perror("strdup");
             return 1;
         }
     } else if (*ptr) {
         new_filename = expand_filename_refs(b, ptr);
         if (!new_filename) {
+            free(old_filename);
             return 1;
         }
     }
 
+    if (old_filename && new_filename && strcmp(old_filename, new_filename) != 0) {
+        replace_alt = 1;
+    }
+
     buf_free(b);
     buf_init(b);
-    if (*ptr) {
-        b->filename = new_filename;
-    } else if (old_filename) {
-        b->filename = old_filename;
-        old_filename = NULL;
+    b->filename = new_filename;
+    if (replace_alt) {
+        replace_saved_string(&alternate_filename, old_filename);
     }
-    replace_saved_string(&alternate_filename, old_filename);
     if (b->filename) {
         buf_read_file(b, b->filename);
         if (!batch_mode) {
