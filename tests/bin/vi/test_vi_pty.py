@@ -147,6 +147,16 @@ def main():
     require("line 3/3" in decoded, "missing enter-motion status")
     require(saved == "  one\n\tTwo\nthree\n",
             "unexpected line-motion buffer contents")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha beta gamma\n",
+        [b"w", b"w", b"d", b"b", b"u", b"w", b"c", b"b", b"D", b"O", b"N", b"E", b"\x1b"],
+    )
+    require(exit_code == 0, f"backward-operator vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing backward change insert status")
+    require(saved == "alpha DONEgamma\n",
+            f"unexpected backward-operator buffer: {saved!r}")
     print("vi pty test: ok")
     return 0
 

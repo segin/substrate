@@ -619,6 +619,33 @@ vi_find_word_end_exclusive_count(line_t *cur, int start, int count, int *end_out
 }
 
 static int
+vi_find_word_start_backward_count(line_t *cur, int start, int count, int *start_out)
+{
+    int i;
+
+    if (!cur || start <= 0 || (size_t)start > cur->len) {
+        return -1;
+    }
+    i = start - 1;
+    while (count-- > 0) {
+        while (i >= 0 && !vi_is_word_char((unsigned char)cur->text[i])) {
+            i--;
+        }
+        if (i < 0) {
+            return -1;
+        }
+        while (i > 0 && vi_is_word_char((unsigned char)cur->text[i - 1])) {
+            i--;
+        }
+        if (count > 0) {
+            i--;
+        }
+    }
+    *start_out = i;
+    return 0;
+}
+
+static int
 vi_clamp_line_target(buffer_t *b, int line_no)
 {
     if (line_no < 1) {
@@ -757,6 +784,15 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         if (vi_find_word_end_exclusive_count(b->cur, vis->cursor_col, count, &end) == 0 &&
             end > vis->cursor_col) {
             vi_delete_span(b, vis, vis->cursor_col, end, vis->pending_op == 'c');
+        } else {
+            write(STDOUT_FILENO, "\a", 1);
+        }
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == 'b') {
+        int start;
+
+        if (vi_find_word_start_backward_count(b->cur, vis->cursor_col, count, &start) == 0 &&
+            start < vis->cursor_col) {
+            vi_delete_span(b, vis, start, vis->cursor_col, vis->pending_op == 'c');
         } else {
             write(STDOUT_FILENO, "\a", 1);
         }
