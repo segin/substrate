@@ -948,14 +948,29 @@ vi_last_nonblank_col(line_t *cur)
     return 0;
 }
 
-static void
-vi_move_to_screen_line(buffer_t *b, vi_visual_t *vis, int screen_row)
+static int
+vi_screen_target_line(buffer_t *b, vi_visual_t *vis, int mode, int count)
 {
     int visible_rows = vis->rows - 1;
+    int screen_row;
     int target_line;
 
     if (visible_rows < 1) {
         visible_rows = 1;
+    }
+    switch (mode) {
+    case 0:
+        screen_row = (count > 0) ? count - 1 : 0;
+        break;
+    case 1:
+        screen_row = (visible_rows - 1) / 2;
+        break;
+    case 2:
+        screen_row = (count > 0) ? visible_rows - count : visible_rows - 1;
+        break;
+    default:
+        screen_row = 0;
+        break;
     }
     if (screen_row < 0) {
         screen_row = 0;
@@ -970,8 +985,7 @@ vi_move_to_screen_line(buffer_t *b, vi_visual_t *vis, int screen_row)
     if (target_line > b->line_count) {
         target_line = b->line_count;
     }
-    b->cur = buf_get_line(b, target_line);
-    vis->cursor_col = vi_first_nonblank_col(b->cur);
+    return target_line;
 }
 
 static int
@@ -2486,6 +2500,7 @@ static void
 vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
 {
     int line_no = buf_current_line(b);
+    int raw_count = vis->pending_count;
     int count = vi_take_count(vis);
     int end;
     int last_line = vi_clamp_line_target(b, line_no + count - 1);
@@ -2629,7 +2644,26 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         line_t *target_line;
         int target_col;
 
-        if (motion != 'e' && motion != 'E') {
+        if (motion == 'g') {
+            int target = (raw_count > 0) ? raw_count : 1;
+            int start = line_no;
+            int end_line = vi_clamp_line_target(b, target);
+
+            if (start > end_line) {
+                int tmp = start;
+
+                start = end_line;
+                end_line = tmp;
+            }
+            if (vis->pending_op == 'y') {
+                vi_linewise_yank(b, vis, start, end_line);
+            } else if (vis->pending_op == 'd') {
+                vi_linewise_delete(b, vis, start, end_line);
+                vi_set_last_change(vis, VI_REPEAT_DD, end_line - start + 1, 0);
+            } else {
+                vi_linewise_change(b, vis, start, end_line);
+            }
+        } else if (motion != 'e' && motion != 'E') {
             write(STDOUT_FILENO, "\a", 1);
         } else if (vi_backward_end_motion_target(b, vis, count, motion == 'E',
             &target_line, &target_col) != 0 ||
@@ -2688,6 +2722,34 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         int start = line_no;
         int end_line = vi_clamp_line_target(b, line_no + count);
 
+        if (vis->pending_op == 'y') {
+            vi_linewise_yank(b, vis, start, end_line);
+        } else if (vis->pending_op == 'd') {
+            vi_linewise_delete(b, vis, start, end_line);
+            vi_set_last_change(vis, VI_REPEAT_DD, end_line - start + 1, 0);
+        } else {
+            vi_linewise_change(b, vis, start, end_line);
+        }
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+        (key == 'H' || key == 'M' || key == 'L')) {
+        int target;
+        int start = line_no;
+        int end_line;
+
+        if (key == 'H') {
+            target = vi_screen_target_line(b, vis, 0, raw_count);
+        } else if (key == 'M') {
+            target = vi_screen_target_line(b, vis, 1, 0);
+        } else {
+            target = vi_screen_target_line(b, vis, 2, raw_count);
+        }
+        end_line = target;
+        if (start > end_line) {
+            int tmp = start;
+
+            start = end_line;
+            end_line = tmp;
+        }
         if (vis->pending_op == 'y') {
             vi_linewise_yank(b, vis, start, end_line);
         } else if (vis->pending_op == 'd') {
@@ -2866,6 +2928,25 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             }
         } else {
             write(STDOUT_FILENO, "\a", 1);
+        }
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+        key == 'G') {
+        int start = line_no;
+        int end_line = vi_clamp_line_target(b, (raw_count > 0) ? raw_count : b->line_count);
+
+        if (start > end_line) {
+            int tmp = start;
+
+            start = end_line;
+            end_line = tmp;
+        }
+        if (vis->pending_op == 'y') {
+            vi_linewise_yank(b, vis, start, end_line);
+        } else if (vis->pending_op == 'd') {
+            vi_linewise_delete(b, vis, start, end_line);
+            vi_set_last_change(vis, VI_REPEAT_DD, end_line - start + 1, 0);
+        } else {
+            vi_linewise_change(b, vis, start, end_line);
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y')
         && key == '%') {
@@ -4089,18 +4170,33 @@ exvi_visual_main(buffer_t *b)
             break;
         case 'H':
             vis.pending_g = 0;
-            vi_take_count(&vis);
-            vi_move_to_screen_line(b, &vis, 0);
+            if (b->line_count > 0) {
+                b->cur = buf_get_line(b, vi_screen_target_line(b, &vis, 0,
+                    vis.pending_count > 0 ? vi_take_count(&vis) : 0));
+                vis.cursor_col = vi_first_nonblank_col(b->cur);
+            } else {
+                vi_take_count(&vis);
+            }
             break;
         case 'M':
             vis.pending_g = 0;
-            vi_take_count(&vis);
-            vi_move_to_screen_line(b, &vis, (vis.rows - 2) / 2);
+            if (b->line_count > 0) {
+                vi_take_count(&vis);
+                b->cur = buf_get_line(b, vi_screen_target_line(b, &vis, 1, 0));
+                vis.cursor_col = vi_first_nonblank_col(b->cur);
+            } else {
+                vi_take_count(&vis);
+            }
             break;
         case 'L':
             vis.pending_g = 0;
-            vi_take_count(&vis);
-            vi_move_to_screen_line(b, &vis, vis.rows - 2);
+            if (b->line_count > 0) {
+                b->cur = buf_get_line(b, vi_screen_target_line(b, &vis, 2,
+                    vis.pending_count > 0 ? vi_take_count(&vis) : 0));
+                vis.cursor_col = vi_first_nonblank_col(b->cur);
+            } else {
+                vi_take_count(&vis);
+            }
             break;
         case ':':
             vis.pending_g = 0;
