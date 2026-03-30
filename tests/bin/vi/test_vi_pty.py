@@ -710,6 +710,34 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "alpha\nbeta\ngamma\n",
+        [b"d", b"/", b"g", b"a", b"m", b"m", b"a", b"\r"],
+    )
+    require(exit_code == 0, f"d/search vi exited with status {exit_code}")
+    require(saved == "\ngamma\n",
+            f"unexpected d/search buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha\nbeta\ngamma\n",
+        [b"c", b"/", b"g", b"a", b"m", b"m", b"a", b"\r", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"c/search vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing c/search insert status")
+    require(saved == "X\ngamma\n",
+            f"unexpected c/search buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha\nbeta\ngamma\ndelta\nbeta2\n",
+        [b"/", b"b", b"e", b"t", b"a", b"\r", b"g", b"g", b"d", b"n"],
+    )
+    require(exit_code == 0, f"dn vi exited with status {exit_code}")
+    require(saved == "\nbeta\ngamma\ndelta\nbeta2\n",
+            f"unexpected dn buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one two three four\n",
         [b"W", b"W", b"W", b"2", b"g", b"e", b"r", b"Y"],
     )

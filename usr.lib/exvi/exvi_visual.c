@@ -75,6 +75,8 @@ static void vi_move_word_forward_count(buffer_t *b, vi_visual_t *vis, int count)
 static void vi_move_word_backward_count(buffer_t *b, vi_visual_t *vis, int count);
 static void vi_page_scroll(buffer_t *b, vi_visual_t *vis, int direction);
 static void vi_delete_char(buffer_t *b, vi_visual_t *vis);
+static int vi_prompt_input(buffer_t *b, vi_visual_t *vis, char prefix, char *buf,
+    size_t buf_size);
 
 static void
 vi_restore_terminal(void)
@@ -2514,6 +2516,21 @@ vi_backward_end_motion_target(buffer_t *b, vi_visual_t *vis, int count, int bigw
     return (*line_out != NULL) ? 0 : -1;
 }
 
+static int
+vi_search_motion_target(buffer_t *b, vi_visual_t *vis, const char *pattern, int forward,
+    line_t **line_out, int *col_out)
+{
+    int line_no = exvi_search(b, pattern, forward);
+
+    if (line_no < 1) {
+        return -1;
+    }
+    *line_out = buf_get_line(b, line_no);
+    *col_out = 0;
+    vis->last_search_forward = forward;
+    return (*line_out != NULL) ? 0 : -1;
+}
+
 static void
 vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
 {
@@ -2951,6 +2968,31 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         if (rc != 0 || vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
             write(STDOUT_FILENO, "\a", 1);
         }
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+        (key == '/' || key == '?')) {
+        char pattern[256];
+        int forward = (key == '/');
+        line_t *target_line;
+        int target_col;
+
+        pattern[0] = '\0';
+        if (vi_prompt_input(b, vis, key, pattern, sizeof(pattern)) != 0) {
+            write(STDOUT_FILENO, "\a", 1);
+        } else if (vi_search_motion_target(b, vis, pattern, forward,
+            &target_line, &target_col) != 0 ||
+            vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
+            write(STDOUT_FILENO, "\a", 1);
+        }
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+        (key == 'n' || key == 'N')) {
+        int forward = (key == 'n') ? vis->last_search_forward : !vis->last_search_forward;
+        line_t *target_line;
+        int target_col;
+
+        if (vi_search_motion_target(b, vis, "", forward, &target_line, &target_col) != 0 ||
+            vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
+            write(STDOUT_FILENO, "\a", 1);
+        }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == '0') {
         if (vis->cursor_col > 0) {
             vi_delete_span(b, vis, 0, vis->cursor_col, vis->pending_op == 'c');
@@ -3283,41 +3325,47 @@ vi_open_line(buffer_t *b, vi_visual_t *vis, int above)
     vis->insert_mode = 1;
 }
 
+static int
+vi_prompt_input(buffer_t *b, vi_visual_t *vis, char prefix, char *buf, size_t buf_size)
+{
+    size_t len = strlen(buf);
+
+    for (;;) {
+        int key;
+
+        vi_render(b, vis, prefix, buf);
+        key = vi_read_visual_key(b, vis, prefix, buf);
+        if (key == -1 || key == '\x1b') {
+            return -1;
+        }
+        if (key == '\r' || key == '\n') {
+            buf[len] = '\0';
+            return 0;
+        }
+        if (key == 127 || key == '\b') {
+            if (len > 0) {
+                buf[--len] = '\0';
+            }
+            continue;
+        }
+        if (isprint(key) && len + 1 < buf_size) {
+            buf[len++] = (char)key;
+            buf[len] = '\0';
+        }
+    }
+}
+
 static void
 vi_command_prompt(buffer_t *b, vi_visual_t *vis)
 {
     char cmd[256];
-    size_t len = 0;
 
     cmd[0] = '\0';
-    for (;;) {
-        int key;
-
-        vi_render(b, vis, ':', cmd);
-        key = vi_read_visual_key(b, vis, ':', cmd);
-        if (key == -1) {
-            return;
-        }
-        if (key == '\r' || key == '\n') {
-            cmd[len] = '\0';
-            exvi_execute_command(b, cmd);
-            vi_clamp_cursor(b, vis);
-            return;
-        }
-        if (key == '\x1b') {
-            return;
-        }
-        if (key == 127 || key == '\b') {
-            if (len > 0) {
-                cmd[--len] = '\0';
-            }
-            continue;
-        }
-        if (isprint(key) && len + 1 < sizeof(cmd)) {
-            cmd[len++] = (char)key;
-            cmd[len] = '\0';
-        }
+    if (vi_prompt_input(b, vis, ':', cmd, sizeof(cmd)) != 0) {
+        return;
     }
+    exvi_execute_command(b, cmd);
+    vi_clamp_cursor(b, vis);
 }
 
 static void
@@ -3453,36 +3501,11 @@ static void
 vi_search_prompt(buffer_t *b, vi_visual_t *vis, int forward)
 {
     char pattern[256];
-    size_t len = 0;
     char prefix = forward ? '/' : '?';
 
     pattern[0] = '\0';
-    for (;;) {
-        int key;
-
-        vi_render(b, vis, prefix, pattern);
-        key = vi_read_visual_key(b, vis, prefix, pattern);
-        if (key == -1) {
-            return;
-        }
-        if (key == '\r' || key == '\n') {
-            pattern[len] = '\0';
-            vi_apply_search(b, vis, pattern, forward);
-            return;
-        }
-        if (key == '\x1b') {
-            return;
-        }
-        if (key == 127 || key == '\b') {
-            if (len > 0) {
-                pattern[--len] = '\0';
-            }
-            continue;
-        }
-        if (isprint(key) && len + 1 < sizeof(pattern)) {
-            pattern[len++] = (char)key;
-            pattern[len] = '\0';
-        }
+    if (vi_prompt_input(b, vis, prefix, pattern, sizeof(pattern)) == 0) {
+        vi_apply_search(b, vis, pattern, forward);
     }
 }
 
