@@ -32,6 +32,11 @@ enum {
     VI_KEY_LEFT,
     VI_KEY_CTRL_RIGHT,
     VI_KEY_CTRL_LEFT,
+    VI_KEY_HOME,
+    VI_KEY_END,
+    VI_KEY_PGUP,
+    VI_KEY_PGDN,
+    VI_KEY_DELETE,
 };
 
 typedef struct {
@@ -63,6 +68,8 @@ static vi_visual_t *active_visual = NULL;
 static int vi_first_nonblank_col(line_t *cur);
 static void vi_move_word_forward_count(buffer_t *b, vi_visual_t *vis, int count);
 static void vi_move_word_backward_count(buffer_t *b, vi_visual_t *vis, int count);
+static void vi_page_scroll(buffer_t *b, vi_visual_t *vis, int direction);
+static void vi_delete_char(buffer_t *b, vi_visual_t *vis);
 
 static void
 vi_restore_terminal(void)
@@ -459,6 +466,8 @@ vi_read_key(void)
             case 'B': return VI_KEY_DOWN;
             case 'C': return VI_KEY_RIGHT;
             case 'D': return VI_KEY_LEFT;
+            case 'H': return VI_KEY_HOME;
+            case 'F': return VI_KEY_END;
             default:
                 break;
             }
@@ -485,6 +494,24 @@ vi_read_key(void)
                     }
                 }
                 return '\x1b';
+            }
+            if (seq2 == '~') {
+                switch (seq[1]) {
+                case '1':
+                case '7':
+                    return VI_KEY_HOME;
+                case '3':
+                    return VI_KEY_DELETE;
+                case '4':
+                case '8':
+                    return VI_KEY_END;
+                case '5':
+                    return VI_KEY_PGUP;
+                case '6':
+                    return VI_KEY_PGDN;
+                default:
+                    return '\x1b';
+                }
             }
             if (seq[1] == '5') {
                 switch (seq2) {
@@ -752,6 +779,8 @@ vi_move_right_insert(buffer_t *b, vi_visual_t *vis)
 static void
 vi_move_arrow_insert(buffer_t *b, vi_visual_t *vis, int key)
 {
+    line_t *cur = b->cur ? b->cur : b->head;
+
     switch (key) {
     case VI_KEY_UP:
         vi_move_vertical(b, -1);
@@ -772,6 +801,25 @@ vi_move_arrow_insert(buffer_t *b, vi_visual_t *vis, int key)
         break;
     case VI_KEY_CTRL_RIGHT:
         vi_move_word_forward_count(b, vis, 1);
+        break;
+    case VI_KEY_HOME:
+        vis->cursor_col = 0;
+        break;
+    case VI_KEY_END:
+        vis->cursor_col = cur ? (int)cur->len : 0;
+        break;
+    case VI_KEY_PGUP:
+        vi_page_scroll(b, vis, -1);
+        vi_clamp_cursor(b, vis);
+        break;
+    case VI_KEY_PGDN:
+        vi_page_scroll(b, vis, 1);
+        vi_clamp_cursor(b, vis);
+        break;
+    case VI_KEY_DELETE:
+        if (cur && (size_t)vis->cursor_col < cur->len) {
+            vi_delete_char(b, vis);
+        }
         break;
     default:
         break;
@@ -3336,6 +3384,11 @@ exvi_visual_main(buffer_t *b)
             case VI_KEY_RIGHT:
             case VI_KEY_CTRL_LEFT:
             case VI_KEY_CTRL_RIGHT:
+            case VI_KEY_HOME:
+            case VI_KEY_END:
+            case VI_KEY_PGUP:
+            case VI_KEY_PGDN:
+            case VI_KEY_DELETE:
                 vi_move_arrow_insert(b, &vis, key);
                 break;
             default:
@@ -3368,6 +3421,11 @@ exvi_visual_main(buffer_t *b)
             case VI_KEY_RIGHT:
             case VI_KEY_CTRL_LEFT:
             case VI_KEY_CTRL_RIGHT:
+            case VI_KEY_HOME:
+            case VI_KEY_END:
+            case VI_KEY_PGUP:
+            case VI_KEY_PGDN:
+            case VI_KEY_DELETE:
                 vi_move_arrow_insert(b, &vis, key);
                 break;
             default:
@@ -3396,6 +3454,21 @@ exvi_visual_main(buffer_t *b)
             break;
         case VI_KEY_CTRL_LEFT:
             key = 'b';
+            break;
+        case VI_KEY_HOME:
+            key = '0';
+            break;
+        case VI_KEY_END:
+            key = '$';
+            break;
+        case VI_KEY_PGUP:
+            key = '\x02';
+            break;
+        case VI_KEY_PGDN:
+            key = '\x06';
+            break;
+        case VI_KEY_DELETE:
+            key = 'x';
             break;
         default:
             break;

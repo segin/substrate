@@ -263,6 +263,26 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "abcde\n",
+        [b"i", b"X", b"\x1b[H", b"Y", b"\x1b[F", b"Z", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-home-end vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-home-end insert status")
+    require(saved == "YXabcdeZ\n",
+            f"unexpected insert-home-end buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abcde\n",
+        [b"i", b"\x1b[C", b"\x1b[C", b"\x1b[3~", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-delete vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-delete insert status")
+    require(saved == "abde\n",
+            f"unexpected insert-delete buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\ntwo\n",
         [b"j", b"i", b"\x7f", b"\x1b"],
     )
@@ -494,6 +514,15 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "abcde\n",
+        [b"\x1b[F", b"r", b"Z", b"\x1b[H", b"r", b"Y"],
+    )
+    require(exit_code == 0, f"home-end-motion vi exited with status {exit_code}")
+    require(saved == "YbcdZ\n",
+            f"unexpected home-end-motion buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "".join(f"line {i}\n" for i in range(1, 41)),
         [b"1", b"0", b"G", b"\x04", b"\x15"],
     )
@@ -502,6 +531,18 @@ def main():
     require("line 21/40" in decoded, "missing half-page down status")
     require(saved.startswith("line 1\nline 2\nline 3\n"),
             "unexpected half-page scroll buffer contents")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "".join(f"line {i}\n" for i in range(1, 41)),
+        [b"\x1b[6~", b"r", b"X", b"\x1b[5~", b"r", b"Y"],
+    )
+    require(exit_code == 0, f"page-key-scroll vi exited with status {exit_code}")
+    require("line 23/40" in decoded, "missing page-down key status")
+    require("line 1/40" in decoded, "missing page-up key status")
+    require(saved.startswith("Yine 1\nline 2\nline 3\n"),
+            "unexpected page-key-scroll buffer contents")
+    require("Xine 23\n" in saved, "missing page-down key edit target")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
