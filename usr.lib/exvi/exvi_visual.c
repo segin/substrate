@@ -36,6 +36,7 @@ typedef struct {
     int pending_z;
     int pending_op;
     int pending_count;
+    int pending_reg;
     int last_search_forward;
     int last_find_char;
     int last_find_forward;
@@ -315,6 +316,18 @@ vi_set_last_change(vi_visual_t *vis, vi_repeat_kind_t kind, int count, int ch)
     vis->last_change = kind;
     vis->last_change_count = count;
     vis->last_change_char = ch;
+}
+
+static void
+vi_take_register_arg(vi_visual_t *vis, char regarg[2])
+{
+    if (vis->pending_reg >= 'a' && vis->pending_reg <= 'z') {
+        regarg[0] = (char)vis->pending_reg;
+        regarg[1] = '\0';
+    } else {
+        regarg[0] = '\0';
+    }
+    vis->pending_reg = 0;
 }
 
 static void
@@ -1452,11 +1465,13 @@ static void
 vi_linewise_put(buffer_t *b, vi_visual_t *vis, int before)
 {
     int line_no = buf_current_line(b);
+    char regarg[2];
 
     if (line_no < 1) {
         line_no = 1;
     }
-    handle_put_command(b, "", before ? line_no - 1 : line_no);
+    vi_take_register_arg(vis, regarg);
+    handle_put_command(b, regarg, before ? line_no - 1 : line_no);
     if (before) {
         if (line_no > 1) {
             b->cur = buf_get_line(b, line_no);
@@ -1465,6 +1480,30 @@ vi_linewise_put(buffer_t *b, vi_visual_t *vis, int before)
         }
     } else {
         b->cur = buf_get_line(b, line_no + 1);
+    }
+    vis->cursor_col = 0;
+}
+
+static void
+vi_linewise_yank(buffer_t *b, vi_visual_t *vis, int start, int end)
+{
+    char regarg[2];
+
+    vi_take_register_arg(vis, regarg);
+    handle_yank_command(b, regarg, 1, start, end);
+    vis->cursor_col = 0;
+}
+
+static void
+vi_linewise_delete(buffer_t *b, vi_visual_t *vis, int start, int end)
+{
+    char regarg[2];
+
+    vi_take_register_arg(vis, regarg);
+    handle_yank_command(b, regarg, 1, start, end);
+    handle_delete_command(b, 1, start, end);
+    if (!b->cur && b->head) {
+        b->cur = b->head;
     }
     vis->cursor_col = 0;
 }
@@ -1495,19 +1534,22 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
     int last_line = vi_clamp_line_target(b, line_no + count - 1);
 
     if (vis->pending_op == 'd' && key == 'd') {
-        handle_delete_command(b, 1, line_no, last_line);
-        if (!b->cur && b->head) {
-            b->cur = b->head;
-        }
-        vis->cursor_col = 0;
+        vi_linewise_delete(b, vis, line_no, last_line);
         vi_set_last_change(vis, VI_REPEAT_DD, count, 0);
     } else if (vis->pending_op == 'c' && key == 'c') {
         if (count == 1) {
+            char regarg[2];
+
+            vi_take_register_arg(vis, regarg);
+            handle_yank_command(b, regarg, 1, line_no, last_line);
             vi_substitute_line(b, vis);
         } else {
             line_t *start = buf_get_line(b, line_no);
             line_t *before = start ? start->prev : NULL;
+            char regarg[2];
 
+            vi_take_register_arg(vis, regarg);
+            handle_yank_command(b, regarg, 1, line_no, last_line);
             handle_delete_command(b, 1, line_no, last_line);
             b->cur = buf_insert_after(b, before, "");
             vis->cursor_col = 0;
@@ -1515,8 +1557,7 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             vis->replace_mode = 0;
         }
     } else if (vis->pending_op == 'y' && key == 'y') {
-        handle_yank_command(b, "", 1, line_no, last_line);
-        vis->cursor_col = 0;
+        vi_linewise_yank(b, vis, line_no, last_line);
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == 'w') {
         vi_find_word_boundary_forward_count(b->cur, vis->cursor_col, count, &end);
         if (end >= vis->cursor_col) {
@@ -1614,6 +1655,7 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         write(STDOUT_FILENO, "\a", 1);
     }
     vis->pending_op = 0;
+    vis->pending_reg = 0;
 }
 
 static void
@@ -2228,6 +2270,15 @@ exvi_visual_main(buffer_t *b)
         }
 
         switch (key) {
+        case '"':
+            key = vi_read_key();
+            if (key >= 'a' && key <= 'z') {
+                vis.pending_reg = key;
+            } else {
+                vis.pending_reg = 0;
+                write(STDOUT_FILENO, "\a", 1);
+            }
+            break;
         case 'h':
             vis.pending_g = 0;
             {
@@ -2695,6 +2746,9 @@ exvi_visual_main(buffer_t *b)
             vis.pending_g = 0;
             vis.pending_count = 0;
             break;
+        }
+        if (vis.pending_reg && key != '"' && key != 'd' && key != 'y' && key != 'c') {
+            vis.pending_reg = 0;
         }
     }
 

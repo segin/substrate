@@ -137,6 +137,24 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one\ntwo\nthree\n",
+        [b'"', b'a', b'y', b'y', b'j', b'"', b'a', b'p'],
+    )
+    require(exit_code == 0, f"named-yank-put vi exited with status {exit_code}")
+    require(saved == "one\ntwo\none\nthree\n",
+            f"unexpected named-yank-put buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b'j', b'"', b'b', b'd', b'd', b'g', b'g', b'"', b'b', b'P'],
+    )
+    require(exit_code == 0, f"named-delete-put vi exited with status {exit_code}")
+    require(saved == "two\none\nthree\n",
+            f"unexpected named-delete-put buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\n\n  two\nthree\n\nfour\n",
         [b"}", b"}", b"{"],
     )
