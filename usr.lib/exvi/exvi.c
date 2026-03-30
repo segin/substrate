@@ -191,6 +191,8 @@ handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
         return handle_recover_command(b, args);
     } else if (match_command(cmd, "pop", "po", &args, &force)) {
         return handle_pop_command(b, force);
+    } else if (match_command(cmd, "tags", NULL, &args, NULL)) {
+        return handle_tags_command(b);
     } else if (match_command(cmd, "tag", NULL, &args, NULL)) {
         return handle_tag_command(b, args, do_command);
     } else if (match_command(cmd, "set", NULL, &args, NULL)) {

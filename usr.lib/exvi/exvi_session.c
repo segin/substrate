@@ -155,6 +155,15 @@ push_tag_frame(buffer_t *b)
     return 0;
 }
 
+static const char *
+tag_display_filename(buffer_t *b)
+{
+    if (b->filename && *b->filename) {
+        return b->filename;
+    }
+    return "[No Name]";
+}
+
 void
 exvi_cleanup_session_state(void)
 {
@@ -216,6 +225,21 @@ handle_pop_command(buffer_t *b, int force)
     if (!batch_mode) {
         printf("\"%s\" %d lines\n", b->filename, b->line_count);
     }
+    return 1;
+}
+
+int
+handle_tags_command(buffer_t *b)
+{
+    if (tag_stack_len == 0) {
+        printf("Tag stack empty\n");
+        return 1;
+    }
+
+    for (int i = 0; i < tag_stack_len; i++) {
+        printf("%d %s:%d\n", i + 1, tag_stack[i].filename, tag_stack[i].line);
+    }
+    printf("> %s:%d\n", tag_display_filename(b), buf_current_line(b));
     return 1;
 }
 

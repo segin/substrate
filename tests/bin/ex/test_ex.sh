@@ -197,15 +197,17 @@ run_tag_test() {
     local file_text="$2"
     local tags_text="$3"
     local script="$4"
-    local expected="$5"
+    local expected_template="$5"
     local tmpdir
     local file
+    local expected
     local output
 
     tmpdir=$(mktemp -d)
     file="$tmpdir/sample.txt"
     printf "%b" "$file_text" >"$file"
     printf "%b" "$tags_text" >"$tmpdir/tags"
+    expected=${expected_template//__FILE__/$file}
 
     output=$(cd "$tmpdir" && printf "%b" "$script" | "$EX_BIN" -s "$file" 2>/dev/null || true)
 
@@ -608,6 +610,19 @@ run_tag_multifile_test "Cross-file tag jump and pop restore source file" \
 dst-two
 dst-two
 src-one"
+
+run_stdout_test "Tags reports empty stack" \
+    "alpha\nbeta\n" \
+    ":tags\n:q!\n" \
+    "Tag stack empty"
+
+run_tag_test "Tags reports saved and current tag locations" \
+    "alpha\nbeta\ngamma\n" \
+    "beta\tsample.txt\t2\n" \
+    ":tag beta\n:tags\n:q!\n" \
+    "beta
+1 __FILE__:1
+> sample.txt:2"
 
 run_oracle_test "Substitute empty pattern reuses previous regex" \
     "alpha beta\nbeta beta\n" \
