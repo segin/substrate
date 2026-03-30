@@ -27,6 +27,7 @@ typedef struct {
     char *filename;
     int modified;
     line_t *marks[26];
+    int mark_cols[26];
 } buffer_t;
 
 extern int secure_mode;

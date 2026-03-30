@@ -508,23 +508,97 @@ vi_take_register_index(vi_visual_t *vis)
 }
 
 static void
-vi_store_register_text(int reg_idx, const char *text, int linewise)
+vi_store_charwise_range_idx(int reg_idx, line_t *start_line, int start_col,
+    line_t *end_line, int end_col)
 {
+    line_t *line;
+    line_t *pos = NULL;
+    char *text;
+    size_t len;
+
+    if (!start_line || !end_line || start_col < 0 || end_col < 0) {
+        return;
+    }
+    if ((size_t)start_col > start_line->len) {
+        start_col = (int)start_line->len;
+    }
+    if ((size_t)end_col > end_line->len) {
+        end_col = (int)end_line->len;
+    }
+
     buf_free(&regs[reg_idx]);
     buf_init(&regs[reg_idx]);
-    reg_linewise[reg_idx] = linewise;
-    if (text && *text) {
+    reg_linewise[reg_idx] = 0;
+
+    if (start_line == end_line) {
+        if (end_col < start_col) {
+            return;
+        }
+        text = malloc((size_t)(end_col - start_col) + 1);
+        if (!text) {
+            return;
+        }
+        memcpy(text, start_line->text + start_col, (size_t)(end_col - start_col));
+        text[end_col - start_col] = '\0';
         buf_insert_after(&regs[reg_idx], NULL, text);
-    } else if (text) {
-        buf_insert_after(&regs[reg_idx], NULL, "");
+        free(text);
+        return;
     }
+
+    len = start_line->len - (size_t)start_col;
+    text = malloc(len + 1);
+    if (!text) {
+        return;
+    }
+    memcpy(text, start_line->text + start_col, len);
+    text[len] = '\0';
+    pos = buf_insert_after(&regs[reg_idx], pos, text);
+    free(text);
+
+    for (line = start_line->next; line && line != end_line; line = line->next) {
+        pos = buf_insert_after(&regs[reg_idx], pos, line->text);
+    }
+
+    text = malloc((size_t)end_col + 1);
+    if (!text) {
+        return;
+    }
+    memcpy(text, end_line->text, (size_t)end_col);
+    text[end_col] = '\0';
+    buf_insert_after(&regs[reg_idx], pos, text);
+    free(text);
+}
+
+static int
+vi_compare_positions(buffer_t *b, line_t *left, int left_col, line_t *right,
+    int right_col)
+{
+    line_t *line;
+
+    (void)b;
+
+    if (left == right) {
+        if (left_col < right_col) {
+            return -1;
+        }
+        if (left_col > right_col) {
+            return 1;
+        }
+        return 0;
+    }
+
+    for (line = left; line; line = line->next) {
+        if (line == right) {
+            return -1;
+        }
+    }
+    return 1;
 }
 
 static void
 vi_store_charwise_span(vi_visual_t *vis, line_t *cur, int start, int end)
 {
     int reg_idx;
-    char *text;
 
     if (!cur || start < 0 || end < start || (size_t)start > cur->len) {
         return;
@@ -533,14 +607,33 @@ vi_store_charwise_span(vi_visual_t *vis, line_t *cur, int start, int end)
         end = (int)cur->len;
     }
     reg_idx = vi_take_register_index(vis);
-    text = malloc((size_t)(end - start) + 1);
-    if (!text) {
-        return;
+    vi_store_charwise_range_idx(reg_idx, cur, start, cur, end);
+}
+
+static int
+vi_yank_range(buffer_t *b, vi_visual_t *vis, line_t *start_line, int start_col,
+    line_t *end_line, int end_col)
+{
+    int reg_idx;
+
+    if (!start_line || !end_line) {
+        return -1;
     }
-    memcpy(text, cur->text + start, (size_t)(end - start));
-    text[end - start] = '\0';
-    vi_store_register_text(reg_idx, text, 0);
-    free(text);
+    if (vi_compare_positions(b, start_line, start_col, end_line, end_col) > 0) {
+        line_t *tmp_line = start_line;
+        int tmp_col = start_col;
+
+        start_line = end_line;
+        start_col = end_col;
+        end_line = tmp_line;
+        end_col = tmp_col;
+    }
+    if (start_line == end_line && end_col <= start_col) {
+        return -1;
+    }
+    reg_idx = vi_take_register_index(vis);
+    vi_store_charwise_range_idx(reg_idx, start_line, start_col, end_line, end_col);
+    return 0;
 }
 
 static int
@@ -1825,6 +1918,73 @@ vi_delete_span(buffer_t *b, vi_visual_t *vis, int start, int end, int enter_inse
     if (vi_replace_current_text(b, text) == 0) {
         vis->cursor_col = start;
         vis->insert_mode = enter_insert;
+        vis->replace_mode = 0;
+    }
+    free(text);
+}
+
+static void
+vi_delete_range(buffer_t *b, vi_visual_t *vis, line_t *start_line, int start_col,
+    line_t *end_line, int end_col, int enter_insert)
+{
+    char *text;
+    size_t prefix_len;
+    size_t suffix_len;
+
+    if (!start_line || !end_line) {
+        return;
+    }
+    if (vi_compare_positions(b, start_line, start_col, end_line, end_col) > 0) {
+        line_t *tmp_line = start_line;
+        int tmp_col = start_col;
+
+        start_line = end_line;
+        start_col = end_col;
+        end_line = tmp_line;
+        end_col = tmp_col;
+    }
+    if (start_line == end_line) {
+        b->cur = start_line;
+        vi_delete_span(b, vis, start_col, end_col, enter_insert);
+        return;
+    }
+    if ((size_t)start_col > start_line->len) {
+        start_col = (int)start_line->len;
+    }
+    if ((size_t)end_col > end_line->len) {
+        end_col = (int)end_line->len;
+    }
+
+    vi_yank_range(b, vis, start_line, start_col, end_line, end_col);
+    save_undo(b);
+
+    prefix_len = (size_t)start_col;
+    suffix_len = end_line->len - (size_t)end_col;
+    text = malloc(prefix_len + suffix_len + 1);
+    if (!text) {
+        return;
+    }
+    memcpy(text, start_line->text, prefix_len);
+    memcpy(text + prefix_len, end_line->text + end_col, suffix_len);
+    text[prefix_len + suffix_len] = '\0';
+
+    b->cur = start_line;
+    if (vi_replace_current_text(b, text) == 0) {
+        line_t *line = start_line->next;
+
+        while (line) {
+            line_t *next = line->next;
+            int done = (line == end_line);
+
+            buf_delete(b, line);
+            if (done) {
+                break;
+            }
+            line = next;
+        }
+        vis->cursor_col = start_col;
+        vis->insert_mode = enter_insert;
+        vis->replace_mode = 0;
     }
     free(text);
 }
@@ -1842,55 +2002,90 @@ vi_put_from_register(buffer_t *b, vi_visual_t *vis, int before, int reg_idx, int
         line_no = 1;
     }
     if (!reg_linewise[reg_idx]) {
-        line_t *cur = b->cur;
-        line_t *src = regs[reg_idx].head;
-        const char *ins;
-        char *rep;
-        char *text;
-        size_t ins_len;
-        size_t rep_len;
-        int pos;
-        int i;
-
-        if (!cur || !src || !src->text) {
-            return;
-        }
-        ins = src->text;
-        ins_len = src->len;
-        rep_len = ins_len * (size_t)count;
-        rep = malloc(rep_len + 1);
-        if (!rep) {
-            return;
-        }
-        for (i = 0; i < count; i++) {
-            memcpy(rep + ((size_t)i * ins_len), ins, ins_len);
-        }
-        rep[rep_len] = '\0';
-        if (!before && (size_t)vis->cursor_col < cur->len) {
-            pos = vis->cursor_col + 1;
-        } else {
-            pos = vis->cursor_col;
-        }
-        if (pos < 0) {
-            pos = 0;
-        }
-        if ((size_t)pos > cur->len) {
-            pos = (int)cur->len;
-        }
         save_undo(b);
-        text = malloc(cur->len + rep_len + 1);
-        if (!text) {
-            free(rep);
-            return;
+        while (count-- > 0) {
+            line_t *cur = b->cur;
+            line_t *src = regs[reg_idx].head;
+            int pos;
+
+            if (!cur || !src || !src->text) {
+                return;
+            }
+            if (!before && (size_t)vis->cursor_col < cur->len) {
+                pos = vis->cursor_col + 1;
+            } else {
+                pos = vis->cursor_col;
+            }
+            if (pos < 0) {
+                pos = 0;
+            }
+            if ((size_t)pos > cur->len) {
+                pos = (int)cur->len;
+            }
+
+            if (regs[reg_idx].line_count == 1) {
+                char *text = malloc(cur->len + src->len + 1);
+
+                if (!text) {
+                    return;
+                }
+                memcpy(text, cur->text, (size_t)pos);
+                memcpy(text + pos, src->text, src->len);
+                memcpy(text + pos + src->len, cur->text + pos,
+                    cur->len - (size_t)pos + 1);
+                if (vi_replace_current_text(b, text) == 0) {
+                    vis->cursor_col = pos;
+                }
+                free(text);
+            } else {
+                char *suffix = strdup(cur->text + pos);
+                char *text;
+                line_t *dst;
+
+                if (!suffix) {
+                    return;
+                }
+                text = malloc((size_t)pos + src->len + 1);
+                if (!text) {
+                    free(suffix);
+                    return;
+                }
+                memcpy(text, cur->text, (size_t)pos);
+                memcpy(text + pos, src->text, src->len);
+                text[pos + (int)src->len] = '\0';
+                if (vi_replace_current_text(b, text) != 0) {
+                    free(text);
+                    free(suffix);
+                    return;
+                }
+                free(text);
+
+                dst = cur;
+                for (src = src->next; src && src->next; src = src->next) {
+                    dst = buf_insert_after(b, dst, src->text);
+                    if (!dst) {
+                        free(suffix);
+                        return;
+                    }
+                }
+
+                text = malloc(src->len + strlen(suffix) + 1);
+                if (!text) {
+                    free(suffix);
+                    return;
+                }
+                memcpy(text, src->text, src->len);
+                memcpy(text + src->len, suffix, strlen(suffix) + 1);
+                dst = buf_insert_after(b, dst, text);
+                free(text);
+                free(suffix);
+                if (!dst) {
+                    return;
+                }
+                b->cur = dst;
+                vis->cursor_col = (src->len > 0) ? (int)src->len - 1 : 0;
+            }
         }
-        memcpy(text, cur->text, (size_t)pos);
-        memcpy(text + pos, rep, rep_len);
-        memcpy(text + pos + rep_len, cur->text + pos, cur->len - (size_t)pos + 1);
-        if (vi_replace_current_text(b, text) == 0) {
-            vis->cursor_col = pos;
-        }
-        free(text);
-        free(rep);
         return;
     }
     if (reg_idx >= 0 && reg_idx < 26) {
@@ -1997,6 +2192,61 @@ vi_line_number_for_mark(buffer_t *b, line_t *mark)
 }
 
 static int
+vi_apply_charwise_motion(buffer_t *b, vi_visual_t *vis, line_t *target_line,
+    int target_col, int inclusive_end)
+{
+    line_t *start_line;
+    line_t *end_line;
+    int start_col;
+    int end_col;
+    int cmp;
+
+    if (!b->cur || !target_line) {
+        return -1;
+    }
+    if ((size_t)target_col > target_line->len) {
+        target_col = (int)target_line->len;
+    }
+
+    cmp = vi_compare_positions(b, b->cur, vis->cursor_col, target_line, target_col);
+    if (cmp == 0) {
+        return -1;
+    }
+    if (cmp < 0) {
+        start_line = b->cur;
+        start_col = vis->cursor_col;
+        end_line = target_line;
+        end_col = target_col + (inclusive_end ? 1 : 0);
+    } else {
+        start_line = target_line;
+        start_col = target_col;
+        end_line = b->cur;
+        end_col = vis->cursor_col + (inclusive_end ? 1 : 0);
+    }
+
+    if (!inclusive_end && start_line != end_line && end_col == 0) {
+        end_line = end_line->prev;
+        if (!end_line) {
+            return -1;
+        }
+        end_col = (int)end_line->len;
+    }
+
+    if (vis->pending_op == 'y') {
+        int rc = vi_yank_range(b, vis, start_line, start_col, end_line, end_col);
+
+        if (rc == 0) {
+            b->cur = start_line;
+            vis->cursor_col = start_col;
+        }
+        return rc;
+    }
+    vi_delete_range(b, vis, start_line, start_col, end_line, end_col,
+        vis->pending_op == 'c');
+    return 0;
+}
+
+static int
 vi_backward_end_motion_target(buffer_t *b, vi_visual_t *vis, int count, int bigword,
     line_t **line_out, int *col_out)
 {
@@ -2078,6 +2328,15 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
                     vi_linewise_change(b, vis, start, end);
                 }
             }
+        }
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+        key == '`') {
+        int mark_key = vi_read_key();
+        int idx = mark_key - 'a';
+
+        if (mark_key < 'a' || mark_key > 'z' || !b->marks[idx]
+            || vi_apply_charwise_motion(b, vis, b->marks[idx], b->mark_cols[idx], 0) != 0) {
+            write(STDOUT_FILENO, "\a", 1);
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
         key == 'l') {
@@ -2360,27 +2619,10 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         && key == '%') {
         line_t *target_line;
         int target_col;
-        int start;
-        int end;
 
-        if (vi_match_motion_target(b, vis, &target_line, &target_col) != 0
-                || target_line != b->cur || target_col == vis->cursor_col) {
+        if (vi_match_motion_target(b, vis, &target_line, &target_col) != 0 ||
+            vi_apply_charwise_motion(b, vis, target_line, target_col, 1) != 0) {
             write(STDOUT_FILENO, "\a", 1);
-        } else {
-            if (target_col > vis->cursor_col) {
-                start = vis->cursor_col;
-                end = target_col + 1;
-            } else {
-                start = target_col;
-                end = vis->cursor_col + 1;
-            }
-            if (vis->pending_op == 'y') {
-                if (vi_yank_span(vis, b->cur, start, end) != 0) {
-                    write(STDOUT_FILENO, "\a", 1);
-                }
-            } else {
-                vi_delete_span(b, vis, start, end, vis->pending_op == 'c');
-            }
         }
     } else {
         write(STDOUT_FILENO, "\a", 1);
@@ -3203,7 +3445,7 @@ exvi_visual_main(buffer_t *b)
             vis.pending_g = 0;
             vi_take_count(&vis);
             if (cur) {
-                vis.cursor_col = (int)cur->len;
+                vis.cursor_col = (cur->len > 0) ? (int)cur->len - 1 : 0;
             }
             break;
         case '%':
@@ -3379,6 +3621,7 @@ exvi_visual_main(buffer_t *b)
                 int target = vis.pending_count > 0 ? vis.pending_count : 1;
 
                 b->cur = buf_get_line(b, vi_clamp_line_target(b, target));
+                vis.cursor_col = vi_first_nonblank_col(b->cur);
                 vis.top_line = 1;
                 vis.pending_g = 0;
                 vis.pending_count = 0;
@@ -3391,6 +3634,7 @@ exvi_visual_main(buffer_t *b)
             key = vi_read_key();
             if (key >= 'a' && key <= 'z' && b->cur) {
                 b->marks[key - 'a'] = b->cur;
+                b->mark_cols[key - 'a'] = vis.cursor_col;
             } else {
                 write(STDOUT_FILENO, "\a", 1);
             }
@@ -3404,7 +3648,10 @@ exvi_visual_main(buffer_t *b)
                 if (key == '\'') {
                     vis.cursor_col = vi_first_nonblank_col(b->cur);
                 } else {
-                    vis.cursor_col = 0;
+                    vis.cursor_col = b->mark_cols[key - 'a'];
+                    if ((size_t)vis.cursor_col > b->cur->len) {
+                        vis.cursor_col = (int)b->cur->len;
+                    }
                 }
             } else {
                 write(STDOUT_FILENO, "\a", 1);
@@ -3422,6 +3669,7 @@ exvi_visual_main(buffer_t *b)
                 vis.pending_count = 0;
                 if (b->line_count > 0) {
                     b->cur = buf_get_line(b, vi_clamp_line_target(b, target));
+                    vis.cursor_col = vi_first_nonblank_col(b->cur);
                 }
             }
             break;

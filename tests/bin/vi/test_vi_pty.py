@@ -222,6 +222,16 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "abc\n",
+        [b"i", b"X", b"\t", b"Y", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-tab vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-tab insert status")
+    require(saved == "X\tYabc\n",
+            f"unexpected insert-tab buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "0123456789abcdefghijKLMNOPQRST\n",
         [b"2", b"5", b"l", b"r", b"Z"],
         rows=8,
@@ -541,7 +551,7 @@ def main():
     )
     require(exit_code == 0, f"backward-char vi exited with status {exit_code}")
     require("line 1/1" in decoded, "missing backward-char status")
-    require(saved == "a\n",
+    require(saved == "d\n",
             f"unexpected backward-char buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
@@ -551,7 +561,7 @@ def main():
     )
     require(exit_code == 0, f"line-start-operator vi exited with status {exit_code}")
     require("-- INSERT --" in decoded, "missing line-start change insert status")
-    require(saved == "DONE\n",
+    require(saved == "DONEa\n",
             f"unexpected line-start-operator buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
@@ -570,7 +580,7 @@ def main():
         [b"f", b"a", b";", b",", b"l", b"r", b"1", b"$", b"F", b"a", b"h", b"r", b"2"],
     )
     require(exit_code == 0, f"find-motion vi exited with status {exit_code}")
-    require(saved == "abca12a\n",
+    require(saved == "ab2a1ca\n",
             f"unexpected find-motion buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
@@ -689,6 +699,71 @@ def main():
     require(exit_code == 0, f"visual-mark-yank vi exited with status {exit_code}")
     require(saved == "one\ntwo\nthree\nfour\none\ntwo\nthree\nfour\n",
             f"unexpected visual-mark-yank buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "ab(cd\nef)gh\n",
+        [b"g", b"g", b"l", b"l", b"m", b"a", b"j", b"`", b"a", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"visual-backtick-jump vi exited with status {exit_code}")
+    require(saved == "abZcd\nef)gh\n",
+            f"unexpected visual-backtick-jump buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abcdef\n",
+        [b"l", b"l", b"m", b"a", b"$", b"d", b"`", b"a"],
+    )
+    require(exit_code == 0, f"visual-backtick-delete vi exited with status {exit_code}")
+    require(saved == "abf\n",
+            f"unexpected visual-backtick-delete buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "ab(cd\nef)gh\n",
+        [b"g", b"g", b"l", b"l", b"m", b"a", b"G", b"c", b"`", b"a", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"visual-backtick-change-cross vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing visual-backtick-change insert status")
+    require(saved == "abX\nef)gh\n",
+            f"unexpected visual-backtick-change-cross buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "ab(cd\nef)gh\n",
+        [b"g", b"g", b"l", b"l", b"m", b"a", b"G", b"y", b"`", b"a", b"P"],
+    )
+    require(exit_code == 0, f"visual-backtick-yank-cross vi exited with status {exit_code}")
+    require(saved == "ab(cd(cd\nef)gh\n",
+            f"unexpected visual-backtick-yank-cross buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "ab(cd\nef)gh\n",
+        [b"0", b"f", b"(", b"d", b"%"],
+    )
+    require(exit_code == 0, f"visual-percent-delete-cross vi exited with status {exit_code}")
+    require(saved == "abgh\n",
+            f"unexpected visual-percent-delete-cross buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "ab(cd\nef)gh\n",
+        [b"0", b"f", b"(", b"c", b"%", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"visual-percent-change-cross vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing visual-percent-change insert status")
+    require(saved == "abXgh\n",
+            f"unexpected visual-percent-change-cross buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "ab(cd\nef)gh\n",
+        [b"0", b"f", b"(", b"y", b"%", b"P"],
+    )
+    require(exit_code == 0, f"visual-percent-yank-cross vi exited with status {exit_code}")
+    require(saved == "ab(cd\nef)(cd\nef)gh\n",
+            f"unexpected visual-percent-yank-cross buffer: {saved!r}")
     print("vi pty test: ok")
     return 0
 

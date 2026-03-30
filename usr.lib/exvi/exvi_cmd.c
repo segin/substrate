@@ -267,6 +267,7 @@ handle_mark_command(buffer_t *b, const char *cmd, const char *args, int addr2)
         return 1;
     }
     b->marks[*ptr - 'a'] = buf_get_line(b, target);
+    b->mark_cols[*ptr - 'a'] = 0;
     return 1;
 }
 

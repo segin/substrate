@@ -14,6 +14,7 @@ buf_init(buffer_t *b)
     b->modified = 0;
     for (int i = 0; i < 26; i++) {
         b->marks[i] = NULL;
+        b->mark_cols[i] = 0;
     }
 }
 
@@ -54,6 +55,12 @@ buf_delete(buffer_t *b, line_t *l)
 {
     if (!l) {
         return;
+    }
+    for (int i = 0; i < 26; i++) {
+        if (b->marks[i] == l) {
+            b->marks[i] = NULL;
+            b->mark_cols[i] = 0;
+        }
     }
     if (l->prev) {
         l->prev->next = l->next;
@@ -102,6 +109,7 @@ buf_free(buffer_t *b)
     }
     for (int i = 0; i < 26; i++) {
         b->marks[i] = NULL;
+        b->mark_cols[i] = 0;
     }
 }
 
