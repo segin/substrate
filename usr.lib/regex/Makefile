@@ -42,6 +42,7 @@ $(MODE_STAMP): FORCE
 	cur=""; \
 	if [ -f "$(MODE_STAMP)" ]; then cur=$$(cat "$(MODE_STAMP)"); fi; \
 	if [ "$$cur" != "$$mode" ]; then \
+		rm -f $(OBJS) $(LIBNAME); \
 		printf '%s\n' "$$mode" > "$(MODE_STAMP).tmp"; \
 		mv "$(MODE_STAMP).tmp" "$(MODE_STAMP)"; \
 	elif [ ! -f "$(MODE_STAMP)" ]; then \

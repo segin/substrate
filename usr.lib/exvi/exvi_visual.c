@@ -572,6 +572,33 @@ vi_move_word_end(buffer_t *b, vi_visual_t *vis)
 }
 
 static int
+vi_find_word_end_exclusive_count(line_t *cur, int start, int count, int *end_out)
+{
+    size_t i;
+    int end;
+
+    if (!cur || start < 0 || (size_t)start >= cur->len) {
+        return -1;
+    }
+    end = start;
+    while (count-- > 0) {
+        i = (size_t)end;
+        while (i < cur->len && !vi_is_word_char((unsigned char)cur->text[i])) {
+            i++;
+        }
+        if (i >= cur->len) {
+            return -1;
+        }
+        while (i + 1 < cur->len && vi_is_word_char((unsigned char)cur->text[i + 1])) {
+            i++;
+        }
+        end = (int)i + 1;
+    }
+    *end_out = end;
+    return 0;
+}
+
+static int
 vi_clamp_line_target(buffer_t *b, int line_no)
 {
     if (line_no < 1) {
@@ -705,6 +732,25 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             if (vis->pending_op == 'd') {
                 vi_set_last_change(vis, VI_REPEAT_DW, count, 0);
             }
+        }
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == 'e') {
+        if (vi_find_word_end_exclusive_count(b->cur, vis->cursor_col, count, &end) == 0 &&
+            end > vis->cursor_col) {
+            vi_delete_span(b, vis, vis->cursor_col, end, vis->pending_op == 'c');
+        } else {
+            write(STDOUT_FILENO, "\a", 1);
+        }
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == '$') {
+        line_t *cur = b->cur;
+
+        if (cur && (size_t)vis->cursor_col <= cur->len) {
+            vi_delete_span(b, vis, vis->cursor_col, (int)cur->len,
+                vis->pending_op == 'c');
+            if (vis->pending_op == 'd') {
+                vi_set_last_change(vis, VI_REPEAT_D_EOL, 1, 0);
+            }
+        } else {
+            write(STDOUT_FILENO, "\a", 1);
         }
     } else {
         write(STDOUT_FILENO, "\a", 1);
