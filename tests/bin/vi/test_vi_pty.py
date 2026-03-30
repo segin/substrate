@@ -185,6 +185,14 @@ def main():
     output = send_keys(master_fd, output, b"n")
     output = send_keys(master_fd, output, b"e")
     output = send_keys(master_fd, output, b"\x1b")
+    output = send_keys(master_fd, output, b"/")
+    output = send_keys(master_fd, output, b"Xone\r")
+    output = send_keys(master_fd, output, b"3")
+    output = send_keys(master_fd, output, b"J")
+    output = send_keys(master_fd, output, b"3")
+    output = send_keys(master_fd, output, b"G")
+    output = send_keys(master_fd, output, b"2")
+    output = send_keys(master_fd, output, b"x")
     output = send_keys(master_fd, output, b":")
     output = send_keys(master_fd, output, b"wq\r", 0.3)
 
@@ -201,13 +209,14 @@ def main():
     require("line 1/5" in decoded, "missing gg navigation status")
     require("line 2/5" in decoded, "missing forward search status")
     require("line 4/5" in decoded, "missing repeat search status")
+    require("line 3/6" in decoded, "missing count-based G navigation status")
     require("-- INSERT --" in decoded, "missing insert mode status")
     require("-- REPLACE --" in decoded, "missing replace mode status")
     require(":wq" in decoded, "missing ex command prompt rendering")
     with open(temp_path, "r", encoding="utf-8") as f:
         saved = f.read()
     os.unlink(temp_path)
-    require(saved == "Top-split\nline\nTAIL1\n\nXone TWO\nTHhree!\n>Two!\nDone\n",
+    require(saved == "Top-split\nline\nIL1\n\nXone TWO THhree! >Two!\nDone\n",
             f"unexpected saved buffer: {saved!r}")
     print("vi pty test: ok")
     return 0

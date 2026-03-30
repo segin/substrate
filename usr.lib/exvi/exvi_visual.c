@@ -19,6 +19,7 @@ typedef struct {
     int cursor_col;
     int pending_g;
     int pending_op;
+    int pending_count;
     int last_search_forward;
     int insert_mode;
     int replace_mode;
@@ -266,6 +267,25 @@ vi_read_key(void)
 }
 
 static void
+vi_append_count(vi_visual_t *vis, int digit)
+{
+    if (vis->pending_count > 99999999) {
+        vis->pending_count = 99999999;
+        return;
+    }
+    vis->pending_count = vis->pending_count * 10 + digit;
+}
+
+static int
+vi_take_count(vi_visual_t *vis)
+{
+    int count = vis->pending_count;
+
+    vis->pending_count = 0;
+    return count > 0 ? count : 1;
+}
+
+static void
 vi_move_vertical(buffer_t *b, int delta)
 {
     int cur_line = buf_current_line(b);
@@ -328,6 +348,19 @@ vi_find_word_boundary_forward(line_t *cur, int start, int *end_out)
 }
 
 static void
+vi_find_word_boundary_forward_count(line_t *cur, int start, int count, int *end_out)
+{
+    int end = start;
+
+    while (count-- > 0) {
+        if (vi_find_word_boundary_forward(cur, end, &end) != 0) {
+            break;
+        }
+    }
+    *end_out = end;
+}
+
+static void
 vi_move_word_forward(buffer_t *b, vi_visual_t *vis)
 {
     int line_no = buf_current_line(b);
@@ -367,6 +400,14 @@ vi_move_word_forward(buffer_t *b, vi_visual_t *vis)
     if (b->tail) {
         b->cur = b->tail;
         vis->cursor_col = (int)b->tail->len;
+    }
+}
+
+static void
+vi_move_word_forward_count(buffer_t *b, vi_visual_t *vis, int count)
+{
+    while (count-- > 0) {
+        vi_move_word_forward(b, vis);
     }
 }
 
@@ -418,6 +459,14 @@ vi_move_word_backward(buffer_t *b, vi_visual_t *vis)
 }
 
 static void
+vi_move_word_backward_count(buffer_t *b, vi_visual_t *vis, int count)
+{
+    while (count-- > 0) {
+        vi_move_word_backward(b, vis);
+    }
+}
+
+static void
 vi_move_word_end(buffer_t *b, vi_visual_t *vis)
 {
     int line_no = buf_current_line(b);
@@ -455,6 +504,18 @@ vi_move_word_end(buffer_t *b, vi_visual_t *vis)
             }
         }
     }
+}
+
+static int
+vi_clamp_line_target(buffer_t *b, int line_no)
+{
+    if (line_no < 1) {
+        return 1;
+    }
+    if (line_no > b->line_count) {
+        return b->line_count;
+    }
+    return line_no;
 }
 
 static int
@@ -545,21 +606,35 @@ static void
 vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
 {
     int line_no = buf_current_line(b);
+    int count = vi_take_count(vis);
     int end;
+    int last_line = vi_clamp_line_target(b, line_no + count - 1);
 
     if (vis->pending_op == 'd' && key == 'd') {
-        handle_delete_command(b, 1, line_no, line_no);
+        handle_delete_command(b, 1, line_no, last_line);
         if (!b->cur && b->head) {
             b->cur = b->head;
         }
         vis->cursor_col = 0;
     } else if (vis->pending_op == 'c' && key == 'c') {
-        vi_substitute_line(b, vis);
+        if (count == 1) {
+            vi_substitute_line(b, vis);
+        } else {
+            line_t *start = buf_get_line(b, line_no);
+            line_t *before = start ? start->prev : NULL;
+
+            handle_delete_command(b, 1, line_no, last_line);
+            b->cur = buf_insert_after(b, before, "");
+            vis->cursor_col = 0;
+            vis->insert_mode = 1;
+            vis->replace_mode = 0;
+        }
     } else if (vis->pending_op == 'y' && key == 'y') {
-        handle_yank_command(b, "", 1, line_no, line_no);
+        handle_yank_command(b, "", 1, line_no, last_line);
         vis->cursor_col = 0;
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == 'w') {
-        if (vi_find_word_boundary_forward(b->cur, vis->cursor_col, &end) == 0) {
+        vi_find_word_boundary_forward_count(b->cur, vis->cursor_col, count, &end);
+        if (end >= vis->cursor_col) {
             vi_delete_span(b, vis, vis->cursor_col, end, vis->pending_op == 'c');
         }
     } else {
@@ -895,49 +970,82 @@ exvi_visual_main(buffer_t *b)
             continue;
         }
         if (vis.pending_op) {
+            if (key >= '1' && key <= '9') {
+                vi_append_count(&vis, key - '0');
+                continue;
+            }
+            if (key == '0' && vis.pending_count > 0) {
+                vi_append_count(&vis, 0);
+                continue;
+            }
             vi_handle_pending_operator(b, &vis, key);
+            continue;
+        }
+
+        if (key >= '1' && key <= '9') {
+            vis.pending_g = 0;
+            vi_append_count(&vis, key - '0');
             continue;
         }
 
         switch (key) {
         case 'h':
             vis.pending_g = 0;
-            if (vis.cursor_col > 0) {
-                vis.cursor_col--;
+            {
+                int count = vi_take_count(&vis);
+
+                while (count-- > 0 && vis.cursor_col > 0) {
+                    vis.cursor_col--;
+                }
             }
             break;
         case 'l':
             vis.pending_g = 0;
-            if (cur && vis.cursor_col < (int)cur->len) {
-                vis.cursor_col++;
+            {
+                int count = vi_take_count(&vis);
+
+                while (count-- > 0 && cur && vis.cursor_col < (int)cur->len) {
+                    vis.cursor_col++;
+                }
             }
             break;
         case 'j':
             vis.pending_g = 0;
-            vi_move_vertical(b, 1);
+            vi_move_vertical(b, vi_take_count(&vis));
             break;
         case 'k':
             vis.pending_g = 0;
-            vi_move_vertical(b, -1);
+            vi_move_vertical(b, -vi_take_count(&vis));
             break;
         case 'w':
             vis.pending_g = 0;
-            vi_move_word_forward(b, &vis);
+            vi_move_word_forward_count(b, &vis, vi_take_count(&vis));
             break;
         case 'b':
             vis.pending_g = 0;
-            vi_move_word_backward(b, &vis);
+            vi_move_word_backward_count(b, &vis, vi_take_count(&vis));
             break;
         case 'e':
             vis.pending_g = 0;
-            vi_move_word_end(b, &vis);
+            {
+                int count = vi_take_count(&vis);
+
+                while (count-- > 0) {
+                    vi_move_word_end(b, &vis);
+                }
+            }
             break;
         case '0':
-            vis.pending_g = 0;
-            vis.cursor_col = 0;
+            if (vis.pending_count > 0) {
+                vi_append_count(&vis, 0);
+            } else {
+                vis.pending_g = 0;
+                vis.cursor_col = 0;
+            }
             break;
         case '$':
             vis.pending_g = 0;
+            vi_take_count(&vis);
             if (cur) {
                 vis.cursor_col = (int)cur->len;
             }
@@ -987,7 +1095,17 @@ exvi_visual_main(buffer_t *b)
             break;
         case 'x':
             vis.pending_g = 0;
-            vi_delete_char(b, &vis);
+            {
+                int count = vi_take_count(&vis);
+
+                if (count == 1) {
+                    vi_delete_char(b, &vis);
+                } else if (cur && (size_t)vis.cursor_col < cur->len) {
+                    int end = vis.cursor_col + count;
+
+                    vi_delete_span(b, &vis, vis.cursor_col, end, 0);
+                }
+            }
             break;
         case 'r':
             vis.pending_g = 0;
@@ -1032,80 +1150,118 @@ exvi_visual_main(buffer_t *b)
             break;
         case 'p':
             vis.pending_g = 0;
-            vi_linewise_put(b, &vis, 0);
+            {
+                int count = vi_take_count(&vis);
+
+                while (count-- > 0) {
+                    vi_linewise_put(b, &vis, 0);
+                }
+            }
             break;
         case 'P':
             vis.pending_g = 0;
-            vi_linewise_put(b, &vis, 1);
+            {
+                int count = vi_take_count(&vis);
+
+                while (count-- > 0) {
+                    vi_linewise_put(b, &vis, 1);
+                }
+            }
             break;
         case 'J':
             vis.pending_g = 0;
-            if (b->cur && b->cur->next) {
-                handle_join_command(b, 1, buf_current_line(b), buf_current_line(b) + 1);
-                vi_clamp_cursor(b, &vis);
-            } else {
-                write(STDOUT_FILENO, "\a", 1);
+            {
+                int count = vi_take_count(&vis);
+                int line_no = buf_current_line(b);
+                int last = vi_clamp_line_target(b, line_no + count - 1);
+
+                if (b->cur && b->cur->next && last > line_no) {
+                    handle_join_command(b, 1, line_no, last);
+                    vi_clamp_cursor(b, &vis);
+                } else if (b->cur && b->cur->next) {
+                    handle_join_command(b, 1, line_no, line_no + 1);
+                    vi_clamp_cursor(b, &vis);
+                } else {
+                    write(STDOUT_FILENO, "\a", 1);
+                }
             }
-            break;
-        case 'D':
-            vis.pending_g = 0;
-            vi_delete_span(b, &vis, vis.cursor_col,
-                cur ? (int)cur->len : vis.cursor_col, 0);
-            break;
-        case 'C':
-            vis.pending_g = 0;
-            vi_delete_span(b, &vis, vis.cursor_col,
-                cur ? (int)cur->len : vis.cursor_col, 1);
             break;
         case 'g':
             if (vis.pending_g) {
-                b->cur = buf_get_line(b, 1);
+                int target = vis.pending_count > 0 ? vis.pending_count : 1;
+
+                b->cur = buf_get_line(b, vi_clamp_line_target(b, target));
                 vis.top_line = 1;
                 vis.pending_g = 0;
+                vis.pending_count = 0;
             } else {
                 vis.pending_g = 1;
             }
             break;
         case 'G':
             vis.pending_g = 0;
-            if (b->line_count > 0) {
-                b->cur = buf_get_line(b, b->line_count);
+            {
+                int target = vis.pending_count > 0 ? vis.pending_count : b->line_count;
+
+                vis.pending_count = 0;
+                if (b->line_count > 0) {
+                    b->cur = buf_get_line(b, vi_clamp_line_target(b, target));
+                }
             }
             break;
         case ':':
             vis.pending_g = 0;
+            vis.pending_count = 0;
             vi_command_prompt(b, &vis);
             break;
         case '/':
             vis.pending_g = 0;
+            vis.pending_count = 0;
             vi_search_prompt(b, &vis, 1);
             break;
         case '?':
             vis.pending_g = 0;
+            vis.pending_count = 0;
             vi_search_prompt(b, &vis, 0);
             break;
         case 'n':
             vis.pending_g = 0;
+            vi_take_count(&vis);
             vi_apply_search(b, &vis, "", vis.last_search_forward);
             break;
         case 'N':
             vis.pending_g = 0;
+            vi_take_count(&vis);
             vi_apply_search(b, &vis, "", !vis.last_search_forward);
             break;
         case '\f':
             vis.pending_g = 0;
+            vis.pending_count = 0;
             printf("\x1b[2J");
             break;
         case 0x02:
             vis.pending_g = 0;
-            vi_page_scroll(b, &vis, -1);
+            vi_page_scroll(b, &vis, -vi_take_count(&vis));
             break;
         case 0x06:
             vis.pending_g = 0;
-            vi_page_scroll(b, &vis, 1);
+            vi_page_scroll(b, &vis, vi_take_count(&vis));
+            break;
+        case 'D':
+            vis.pending_g = 0;
+            vis.pending_count = 0;
+            vi_delete_span(b, &vis, vis.cursor_col,
+                cur ? (int)cur->len : vis.cursor_col, 0);
+            break;
+        case 'C':
+            vis.pending_g = 0;
+            vis.pending_count = 0;
+            vi_delete_span(b, &vis, vis.cursor_col,
+                cur ? (int)cur->len : vis.cursor_col, 1);
             break;
         default:
             vis.pending_g = 0;
+            vis.pending_count = 0;
             break;
         }
     }
