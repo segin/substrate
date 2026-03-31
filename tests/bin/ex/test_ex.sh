@@ -485,6 +485,74 @@ run_write_file_test() {
     rm -f "$file" "$out_file"
 }
 
+run_write_side_effect_test() {
+    local name="$1"
+    local init_text="$2"
+    local script_template="$3"
+    local expected_status="$4"
+    local expected_stderr="$5"
+    local expected_main="$6"
+    local expected_out="$7"
+    local cli_args="${8:-}"
+    local decoded_expected_main
+    local decoded_expected_out
+    local tmpdir
+    local file
+    local out_file
+    local stdout_file
+    local stderr_file
+    local script
+    local status
+    local stderr_text
+    local main_text
+    local out_text
+
+    tmpdir=$(mktemp -d)
+    file="$tmpdir/main.txt"
+    out_file="$tmpdir/out.txt"
+    stdout_file="$tmpdir/stdout.txt"
+    stderr_file="$tmpdir/stderr.txt"
+    printf "%b" "$init_text" >"$file"
+    script=${script_template//__OUT_FILE__/$out_file}
+
+    set +e
+    # shellcheck disable=SC2086
+    printf "%b" "$script" | "$EX_BIN" -s $cli_args "$file" >"$stdout_file" 2>"$stderr_file"
+    status=$?
+    set -e
+
+    stderr_text=$(cat "$stderr_file")
+    main_text=$(cat "$file")
+
+    if [ -e "$out_file" ]; then
+        out_text=$(cat "$out_file")
+    else
+        out_text="__ABSENT__"
+    fi
+
+    decoded_expected_main=$(printf "%b" "$expected_main")
+    if [ "$expected_out" = "__ABSENT__" ]; then
+        decoded_expected_out="__ABSENT__"
+    else
+        decoded_expected_out=$(printf "%b" "$expected_out")
+    fi
+
+    if [ "$status" -ne "$expected_status" ] \
+        || [ "$stderr_text" != "$expected_stderr" ] \
+        || [ "$main_text" != "$decoded_expected_main" ] \
+        || [ "$out_text" != "$decoded_expected_out" ]; then
+        fail "$name"
+        printf 'expected status=%s stderr=%s main=%s out=%s\nactual status=%s stderr=%s main=%s out=%s\n' \
+            "$expected_status" "$expected_stderr" "$decoded_expected_main" "$decoded_expected_out" \
+            "$status" "$stderr_text" "$main_text" "$out_text"
+        rm -rf "$tmpdir"
+        return
+    fi
+
+    pass "$name"
+    rm -rf "$tmpdir"
+}
+
 run_startup_test() {
     local name="$1"
     local init_text="$2"
@@ -854,6 +922,62 @@ run_write_file_test "Write append appends only addressed lines" \
     ":2,3w >> __OUT_FILE__\n:q!\n" \
     "beta
 gamma"
+
+run_nofile_stderr_status_test "Write rejects missing current filename" \
+    ":w\n:q!\n" \
+    0 \
+    "No current filename"
+
+run_write_side_effect_test "Readonly current-file write is blocked" \
+    "alpha\n" \
+    ":1s/a/A/\n:w\n:q!\n" \
+    0 \
+    "File is read only (add ! to override)" \
+    "alpha" \
+    "__ABSENT__" \
+    "-R"
+
+run_write_side_effect_test "Readonly forced current-file write succeeds" \
+    "alpha\n" \
+    ":1s/a/A/\n:w!\n:q!\n" \
+    0 \
+    "" \
+    "Alpha" \
+    "__ABSENT__" \
+    "-R"
+
+run_write_side_effect_test "Readonly write to another file is allowed" \
+    "alpha\n" \
+    ":1s/a/A/\n:w __OUT_FILE__\n:q!\n" \
+    0 \
+    "" \
+    "alpha" \
+    "Alpha" \
+    "-R"
+
+run_write_side_effect_test "Invalid file write range leaves target absent" \
+    "alpha\n" \
+    ":2,3w __OUT_FILE__\n:q!\n" \
+    0 \
+    "Invalid write range" \
+    "alpha" \
+    "__ABSENT__"
+
+run_write_side_effect_test "Invalid shell write range leaves shell target empty" \
+    "alpha\n" \
+    ":2,3w !cat > __OUT_FILE__\n:q!\n" \
+    0 \
+    "Invalid write range" \
+    "alpha" \
+    ""
+
+run_write_side_effect_test "Write to shell command writes addressed range" \
+    "one\ntwo\nthree\n" \
+    ":2,3w !cat > __OUT_FILE__\n:q!\n" \
+    0 \
+    "" \
+    "one\ntwo\nthree" \
+    "two\nthree"
 
 run_oracle_test "Copy defaults to current line" \
     "line1\nline2\nline3\n" \

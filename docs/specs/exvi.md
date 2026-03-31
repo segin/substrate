@@ -155,7 +155,7 @@ Completed architecture milestones already in tree are intentionally omitted here
 
 - [ ] Complete the remaining POSIX/BSD `ex` commands and accepted abbreviations that are still absent from the dispatcher.
 - [x] Audit `print`, `number`, `list`, and `=` for exact current-line side effects and diagnostics.
-- [ ] Finish `write`, `write!`, append-write, and write-to-command semantics for all range/error/readonly cases.
+- [x] Finish `write`, `write!`, append-write, and write-to-command semantics for all range/error/readonly cases.
 - [x] Finish `read`, `read !cmd`, and insertion-point behavior for empty buffers, addressed reads, and shell-command reads.
 - [x] Audit `global` and `v` against frozen-match-set semantics under destructive nested commands.
 - [ ] Deepen `substitute` flag handling and repeat behavior beyond the current baseline, including compatibility corner cases.
