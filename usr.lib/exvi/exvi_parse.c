@@ -46,12 +46,16 @@ scan_command_match(const char *cmd, const char *name, const char *abbr,
         while (isalpha((unsigned char)cmd[cmd_len])) {
             cmd_len++;
         }
-        if (cmd_len > 0 && cmd_len <= name_len
-            && strncmp(cmd, name, cmd_len) == 0) {
-            size_t min_len = (abbr && abbr_len > 0
-                && isalpha((unsigned char)abbr[0])) ? abbr_len : name_len;
+        if (cmd_len > 0) {
+            if (cmd_len <= name_len && strncmp(cmd, name, cmd_len) == 0) {
+                size_t min_len = (abbr && abbr_len > 0
+                    && isalpha((unsigned char)abbr[0])) ? abbr_len : name_len;
 
-            if (cmd_len >= min_len) {
+                if (cmd_len >= min_len) {
+                    used = cmd_len;
+                }
+            } else if (abbr && abbr_len > 0 && isalpha((unsigned char)abbr[0])
+                && cmd_len == abbr_len && strncmp(cmd, abbr, abbr_len) == 0) {
                 used = cmd_len;
             }
         }
@@ -236,21 +240,16 @@ scan_global_break(buffer_t *b, const char *args, exvi_command_break_t *kind)
     char *p = skip_ws((char *)args);
     char delim;
 
+    (void)b;
+    (void)kind;
+
     if (*p == '\0') {
         return NULL;
     }
 
     delim = *p++;
     p = skip_delimited_syntax(p, delim);
-    p = skip_ws(p);
-    if (*p == '\0') {
-        return NULL;
-    }
-    if (*p == '"') {
-        *kind = EXVI_COMMAND_BREAK_COMMENT;
-        return p;
-    }
-    return find_command_break(b, p, kind);
+    return (*p == '\0') ? NULL : NULL;
 }
 
 static int

@@ -157,7 +157,7 @@ Completed architecture milestones already in tree are intentionally omitted here
 - [x] Audit `print`, `number`, `list`, and `=` for exact current-line side effects and diagnostics.
 - [ ] Finish `write`, `write!`, append-write, and write-to-command semantics for all range/error/readonly cases.
 - [x] Finish `read`, `read !cmd`, and insertion-point behavior for empty buffers, addressed reads, and shell-command reads.
-- [ ] Audit `global` and `v` against frozen-match-set semantics under destructive nested commands.
+- [x] Audit `global` and `v` against frozen-match-set semantics under destructive nested commands.
 - [ ] Deepen `substitute` flag handling and repeat behavior beyond the current baseline, including compatibility corner cases.
 - [ ] Complete shell escape handling and shell-capable commands under secure/restricted mode, with consistent diagnostics.
 - [ ] Tighten command error reporting so unknown commands, missing operands, bad destinations, and force-required paths all fail predictably.

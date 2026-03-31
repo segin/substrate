@@ -1296,6 +1296,10 @@ run_oracle_test "Global nested command still allows later separator" \
     "foo\nbar\n" \
     ":g/foo/s/o/|/|d\n:wq!\n"
 
+run_oracle_test "Inverse global nested command allows destructive separator" \
+    "foo\nbar\nfoo\nbaz\n" \
+    ":v/foo/s/a/A/|d\n:wq!\n"
+
 run_oracle_test "Read shell pipeline does not split command line" \
     "one\n" \
     ":r !printf 'two\\n' | cat\n:wq!\n"
