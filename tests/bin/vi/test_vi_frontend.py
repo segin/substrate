@@ -259,6 +259,48 @@ def main():
 
     exit_code, decoded, saved = helpers.run_vi_session(
         vi_path,
+        "",
+        [b":r insert.txt\r", b":wq\r"],
+        final_keys=None,
+        extra_files={"insert.txt": "A\nB\n"},
+    )
+    require(exit_code == 0, f"vi empty-read handling exited with status {exit_code}")
+    require(saved == "A\nB\n",
+            f"vi empty-read handling saved wrong buffer: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b":2r insert.txt\r", b":wq\r"],
+        final_keys=None,
+        extra_files={"insert.txt": "A\nB\n"},
+    )
+    require(exit_code == 0, f"vi addressed-read handling exited with status {exit_code}")
+    require(saved == "one\ntwo\nA\nB\nthree\n",
+            f"vi addressed-read handling saved wrong buffer: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "",
+        [b":r !printf 'A\\nB\\n'\r", b":wq\r"],
+        final_keys=None,
+    )
+    require(exit_code == 0, f"vi shell-read handling exited with status {exit_code}")
+    require(saved == "A\nB\n",
+            f"vi shell-read handling saved wrong buffer: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b":2r !printf 'A\\nB\\n'\r", b":wq\r"],
+        final_keys=None,
+    )
+    require(exit_code == 0, f"vi addressed shell-read handling exited with status {exit_code}")
+    require(saved == "one\ntwo\nA\nB\nthree\n",
+            f"vi addressed shell-read handling saved wrong buffer: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
         "one\ntwo\nthree\n",
         [b":2j\r", b":wq\r"],
         final_keys=None,

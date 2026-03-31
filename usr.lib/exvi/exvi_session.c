@@ -870,6 +870,7 @@ handle_read_command(buffer_t *b, const char *args, int addr2)
     char *expanded_name = NULL;
     FILE *f = NULL;
     int is_pipe = 0;
+    int replace_empty_line = 0;
 
     while (*ptr && isspace((unsigned char)*ptr)) {
         ptr++;
@@ -907,11 +908,41 @@ handle_read_command(buffer_t *b, const char *args, int addr2)
         int dest = default_read_destination(b, addr2);
         line_t *pos = buf_get_line(b, dest);
 
+        if (addr2 == -1 && b->empty_origin && b->line_count == 1 &&
+            b->head == b->tail && b->head && b->head->len == 0) {
+            replace_empty_line = 1;
+            pos = NULL;
+        }
+
         while ((ret = getline(&line, &cap, f)) != -1) {
             if (ret > 0 && line[ret - 1] == '\n') {
                 line[ret - 1] = '\0';
             }
-            pos = buf_insert_after(b, pos, line);
+            if (replace_empty_line) {
+                char *text = strdup(line);
+
+                if (!text) {
+                    free(line);
+                    if (is_pipe) {
+                        pclose(f);
+                    } else {
+                        fclose(f);
+                    }
+                    free(expanded_name);
+                    perror("strdup");
+                    return 1;
+                }
+                free(b->head->text);
+                b->head->text = text;
+                b->head->len = strlen(text);
+                b->cur = b->head;
+                b->modified = 1;
+                b->empty_origin = 0;
+                pos = b->head;
+                replace_empty_line = 0;
+            } else {
+                pos = buf_insert_after(b, pos, line);
+            }
             lines_read++;
         }
         free(line);

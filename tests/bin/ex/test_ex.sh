@@ -204,6 +204,34 @@ run_stdout_with_auxfile_test() {
     rm -f "$file" "$aux_file"
 }
 
+run_file_with_auxfile_test() {
+    local name="$1"
+    local init_text="$2"
+    local aux_text="$3"
+    local script_template="$4"
+    local expected="$5"
+    local file
+    local aux_file
+    local script
+
+    file=$(mktemp)
+    aux_file=$(mktemp)
+    printf "%b" "$init_text" >"$file"
+    printf "%b" "$aux_text" >"$aux_file"
+    script=${script_template//__READ_FILE__/$aux_file}
+    printf "%b" "$script" | "$EX_BIN" -s "$file" >/dev/null 2>&1 || true
+
+    if ! diff -u <(printf "%b" "$expected") "$file" >/dev/null; then
+        fail "$name"
+        diff -u <(printf "%b" "$expected") "$file" || true
+        rm -f "$file" "$aux_file"
+        return
+    fi
+
+    pass "$name"
+    rm -f "$file" "$aux_file"
+}
+
 run_stdout_with_fileargs_test() {
     local name="$1"
     local init_text1="$2"
@@ -1300,6 +1328,26 @@ run_file_with_cliargs_test "Readonly startup allows forced write" \
     "-R" \
     "1change\nforced\n.\nw!\nq!\n" \
     "forced\n"
+
+run_file_with_auxfile_test "Read file into empty buffer" \
+    "" \
+    "A\nB\n" \
+    ":r __READ_FILE__\nwq!\n" \
+    "A\nB\n"
+
+run_file_with_auxfile_test "Addressed read inserts after addressed line" \
+    "one\ntwo\nthree\n" \
+    "A\nB\n" \
+    ":2r __READ_FILE__\nwq!\n" \
+    "one\ntwo\nA\nB\nthree\n"
+
+run_oracle_test "Read shell command into empty buffer matches vim" \
+    "" \
+    ":r !printf 'A\\nB\\n'\nwq!\n"
+
+run_oracle_test "Addressed shell read inserts after addressed line" \
+    "one\ntwo\nthree\n" \
+    ":2r !printf 'A\\nB\\n'\nwq!\n"
 
 echo "$TEST_PASS tests run."
 exit $((TEST_FAILS > 0 ? 1 : 0))
