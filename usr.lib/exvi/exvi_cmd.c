@@ -27,7 +27,25 @@ print_line_text(line_t *l, int listed)
         }
         printf("$\n");
     } else {
-        printf("%s\n", l->text);
+        size_t col = 0;
+
+        for (size_t j = 0; j < l->len; j++) {
+            unsigned char c = l->text[j];
+
+            if (c == '\t') {
+                int tabstop = option_tabstop > 0 ? option_tabstop : 8;
+                int spaces = tabstop - (int)(col % (size_t)tabstop);
+
+                while (spaces-- > 0) {
+                    putchar(' ');
+                    col++;
+                }
+            } else {
+                putchar(c);
+                col++;
+            }
+        }
+        putchar('\n');
     }
 }
 
@@ -84,7 +102,7 @@ default_read_destination(buffer_t *b, int addr2)
 
 static int
 apply_substitute_range(buffer_t *b, int addr1, int addr2, const char *pattern,
-    const char *replacement, int global)
+    const char *replacement, int global, int print_mode)
 {
     regex_t re;
 
@@ -169,6 +187,14 @@ apply_substitute_range(buffer_t *b, int addr1, int addr2, const char *pattern,
                 l->len = new_len;
                 b->modified = 1;
                 b->cur = l;
+                if (print_mode == 'p') {
+                    print_line_text(l, 0);
+                } else if (print_mode == '#') {
+                    print_line_number_prefix(addr1 + i);
+                    print_line_text(l, 0);
+                } else if (print_mode == 'l') {
+                    print_line_text(l, 1);
+                }
             } else {
                 free(new_text);
             }
@@ -583,6 +609,7 @@ handle_substitute_command(buffer_t *b, const char *args, int addr1, int addr2)
     char *repl_str;
     char *re_str;
     int global = 0;
+    int print_mode = 0;
 
     save_undo(b);
     while (*ptr && isspace((unsigned char)*ptr)) {
@@ -603,8 +630,13 @@ handle_substitute_command(buffer_t *b, const char *args, int addr1, int addr2)
         free(pat_raw);
         return 1;
     }
-    if (strchr(spec, 'g')) {
-        global = 1;
+    while (*spec) {
+        if (*spec == 'g') {
+            global = 1;
+        } else if (*spec == 'p' || *spec == '#' || *spec == 'l') {
+            print_mode = *spec;
+        }
+        spec++;
     }
 
     if (*pat_raw == '\0') {
@@ -627,7 +659,8 @@ handle_substitute_command(buffer_t *b, const char *args, int addr1, int addr2)
         set_default_current_range(b, &addr1, &addr2);
     }
     if (addr1 > 0 && addr2 >= addr1
-        && apply_substitute_range(b, addr1, addr2, re_str, repl_str, global)) {
+        && apply_substitute_range(b, addr1, addr2, re_str, repl_str, global,
+            print_mode)) {
         replace_saved_string(&last_search_pattern, re_str);
         replace_saved_string(&last_sub_pattern, re_str);
         replace_saved_string(&last_sub_replacement, repl_str);
@@ -650,7 +683,7 @@ handle_repeat_substitute_command(buffer_t *b, int addr1, int addr2)
     }
     if (addr1 > 0 && addr2 >= addr1) {
         apply_substitute_range(b, addr1, addr2, last_sub_pattern,
-            last_sub_replacement, last_sub_global);
+            last_sub_replacement, last_sub_global, 0);
     }
     return 1;
 }

@@ -798,7 +798,7 @@ run_stdout_test "Set list enables list-style print" \
 run_stdout_test "Set nolist disables list-style print" \
     "a\tb\n" \
     ":set list\n:set nolist\n:1p\n:q!\n" \
-    "a	b"
+    "a       b"
 
 run_stdout_test "Empty command prints addressed line" \
     "alpha\nbeta\ngamma\n" \
@@ -1032,6 +1032,22 @@ run_oracle_test "Substitute empty pattern reuses previous regex" \
 run_oracle_test "Repeat substitute with ampersand" \
     "alpha beta\nbeta gamma\n" \
     "1s/beta/BETA/\n2&\nwq\n"
+
+run_stdout_oracle_test "Substitute p flag matches vim" \
+    "a a a\n" \
+    ":1s/a/A/p\n:q!\n"
+
+run_stdout_oracle_test "Substitute number flag output matches vim" \
+    "a\tb\n" \
+    ":1s/a/A/#\n:q!\n"
+
+run_stdout_oracle_test "Substitute list flag output matches vim" \
+    "a\tb\n" \
+    ":1s/a/A/l\n:q!\n"
+
+run_stdout_oracle_test "Substitute gp flag matches vim" \
+    "a a a\n" \
+    ":1s/a/A/gp\n:q!\n"
 
 run_startup_test "Safe .exrc is loaded" \
     "alpha\nbeta\n" \

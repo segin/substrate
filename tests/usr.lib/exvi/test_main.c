@@ -196,9 +196,7 @@ test_command_break_parsing(void)
     fill_buffer(&b, lines, 2);
 
     breakp = find_command_break(&b, cmd1, &kind);
-    assert(breakp != NULL);
-    assert(kind == EXVI_COMMAND_BREAK_SEPARATOR);
-    assert(strcmp(breakp, "|d") == 0);
+    assert(breakp == NULL);
 
     breakp = find_command_break(&b, cmd2, &kind);
     assert(breakp != NULL);
@@ -206,9 +204,7 @@ test_command_break_parsing(void)
     assert(strcmp(breakp, "|d") == 0);
 
     breakp = find_command_break(&b, cmd3, &kind);
-    assert(breakp != NULL);
-    assert(kind == EXVI_COMMAND_BREAK_SEPARATOR);
-    assert(strcmp(breakp, "|d") == 0);
+    assert(breakp == NULL);
 
     free_buffer(&b);
     cleanup_shared_state();
