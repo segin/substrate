@@ -214,7 +214,7 @@ Completed architecture milestones already in tree are intentionally omitted here
 - [ ] Finish replace-mode semantics across tabs, short lines, newlines, and mixed insert/replace transitions.
 - [ ] Replace the current bounded `.` support with full historical repeat-last-change behavior for insert/change/replace text replays.
 - [ ] Tighten undo/redo granularity so insert sessions, replace sessions, open-line commands, and repeated edits group like real `vi`.
-- [ ] Audit insert-mode cursor-key, modified-cursor-key, and terminal-escape decoding so no printable garbage leaks under older terminals.
+- [x] Audit insert-mode cursor-key, modified-cursor-key, and terminal-escape decoding so no printable garbage leaks under older terminals.
 - [ ] Add PTY coverage for every insert/replace control key and repeat/undo/redo path that remains underspecified.
 
 #### 3.5 Prompt, search, and ex-entry integration

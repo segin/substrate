@@ -651,6 +651,16 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "abc\n",
+        [b"i", b"X", b"\x1bOA", b"\x1bOB", b"\x1bOC", b"\x1bOD", b"Y", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-app-arrow vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-app-arrow insert status")
+    require(saved == "XYabc\n",
+            f"unexpected insert-app-arrow buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "abcde\n",
         [b"i", b"X", b"\x1b[H", b"Y", b"\x1b[F", b"Z", b"\x1b"],
     )
@@ -662,12 +672,32 @@ def main():
     exit_code, decoded, saved = run_vi_session(
         vi_path,
         "abcde\n",
+        [b"i", b"X", b"\x1bOH", b"Y", b"\x1bOF", b"Z", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-app-home-end vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-app-home-end insert status")
+    require(saved == "YXabcdeZ\n",
+            f"unexpected insert-app-home-end buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abcde\n",
         [b"i", b"\x1b[C", b"\x1b[C", b"\x1b[3~", b"\x1b"],
     )
     require(exit_code == 0, f"insert-delete vi exited with status {exit_code}")
     require("-- INSERT --" in decoded, "missing insert-delete insert status")
     require(saved == "abde\n",
             f"unexpected insert-delete buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc\n",
+        [b"i", b"\x1b[999~", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-unknown-escape vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-unknown-escape insert status")
+    require(saved == "Xabc\n",
+            f"unexpected insert-unknown-escape buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
