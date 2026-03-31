@@ -10,6 +10,7 @@
 #define EXVI_DEFAULT_TABSTOP 8
 #define EXVI_MIN_TABSTOP 1
 #define EXVI_MAX_TABSTOP 40
+#define EXVI_DEFAULT_TAGS "tags"
 
 typedef struct line {
     struct line *prev;
@@ -46,6 +47,7 @@ extern int option_list;
 extern int option_readonly;
 extern int option_tabstop;
 extern int option_wrapscan;
+extern char *option_tags;
 extern buffer_t undo_buf;
 extern int undo_valid;
 extern char *last_search_pattern;

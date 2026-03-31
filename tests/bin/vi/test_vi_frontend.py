@@ -302,6 +302,18 @@ def main():
     exit_code, decoded, saved = helpers.run_vi_session(
         vi_path,
         "one\ntwo\nthree\n",
+        [b":set tags=alt.tags\r", b":tag one\r", b":q!\r"],
+        final_keys=None,
+        extra_files={"alt.tags": "one\tbuffer.txt\t3\n"},
+    )
+    require(exit_code == 0, f"vi tags option handling exited with status {exit_code}")
+    require("line 3/3" in decoded, "vi tags option handling missing tag jump status")
+    require(saved == "one\ntwo\nthree\n",
+            f"vi tags option handling unexpectedly modified file: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
         [b":2j\r", b":wq\r"],
         final_keys=None,
     )

@@ -398,6 +398,38 @@ run_tag_multifile_test() {
     rm -rf "$tmpdir"
 }
 
+run_tag_searchpath_test() {
+    local name="$1"
+    local file_text="$2"
+    local tags1_name="$3"
+    local tags1_text="$4"
+    local tags2_name="$5"
+    local tags2_text="$6"
+    local script="$7"
+    local expected="$8"
+    local tmpdir
+    local file
+    local output
+
+    tmpdir=$(mktemp -d)
+    file="$tmpdir/sample.txt"
+    printf "%b" "$file_text" >"$file"
+    printf "%b" "$tags1_text" >"$tmpdir/$tags1_name"
+    printf "%b" "$tags2_text" >"$tmpdir/$tags2_name"
+
+    output=$(cd "$tmpdir" && printf "%b" "$script" | "$EX_BIN" -s "$file" 2>/dev/null || true)
+
+    if [ "$output" != "$expected" ]; then
+        fail "$name"
+        printf 'expected stdout:\n%s\nactual stdout:\n%s\n' "$expected" "$output"
+        rm -rf "$tmpdir"
+        return
+    fi
+
+    pass "$name"
+    rm -rf "$tmpdir"
+}
+
 run_recover_test() {
     local name="$1"
     local init_text="$2"
@@ -984,6 +1016,15 @@ run_tag_test "Tags reports saved and current tag locations" \
 1 __FILE__:1
 > sample.txt:2"
 
+run_tag_searchpath_test "Tag uses tags option search path" \
+    "one\ntwo\nthree\n" \
+    "first.tags" \
+    "other\tsample.txt\t1\n" \
+    "second.tags" \
+    "beta\tsample.txt\t3\n" \
+    ":set tags=missing.tags,first.tags,second.tags\n:tag beta\n:=\n:q!\n" \
+    "3"
+
 run_oracle_test "Substitute empty pattern reuses previous regex" \
     "alpha beta\nbeta beta\n" \
     "1s/beta/BETA/\n2s//BETA/g\nwq\n"
@@ -1303,6 +1344,11 @@ run_stdout_test "Set tabstop assignment updates value" \
     ":set ts=4\n:set ts?\n:q!\n" \
     "tabstop=4"
 
+run_stdout_test "Set tags assignment updates value" \
+    "one\ntwo\n" \
+    ":set tags=first.tags,second.tags\n:set tags?\n:q!\n" \
+    "tags=first.tags,second.tags"
+
 run_stdout_test "Set all prints enabled options" \
     "one\ntwo\n" \
     ":set number list readonly\n:set all\n:q!\n" \
@@ -1310,7 +1356,8 @@ run_stdout_test "Set all prints enabled options" \
 list
 readonly
 wrapscan
-tabstop=8"
+tabstop=8
+tags=tags"
 
 run_stdout_test "Set noreadonly disables readonly option" \
     "one\ntwo\n" \

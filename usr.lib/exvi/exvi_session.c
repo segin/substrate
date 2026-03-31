@@ -164,6 +164,63 @@ tag_display_filename(buffer_t *b)
     return "[No Name]";
 }
 
+static FILE *
+open_tags_file(char **path_out)
+{
+    const char *spec = (option_tags && *option_tags) ? option_tags : EXVI_DEFAULT_TAGS;
+    const char *p = spec;
+
+    if (path_out) {
+        *path_out = NULL;
+    }
+
+    while (*p) {
+        const char *start;
+        const char *end;
+        char *path;
+        FILE *f;
+
+        while (*p == ',' || isspace((unsigned char)*p)) {
+            p++;
+        }
+        if (!*p) {
+            break;
+        }
+
+        start = p;
+        while (*p && *p != ',') {
+            p++;
+        }
+        end = p;
+        while (end > start && isspace((unsigned char)end[-1])) {
+            end--;
+        }
+        if (end == start) {
+            continue;
+        }
+
+        path = malloc((size_t)(end - start) + 1);
+        if (!path) {
+            break;
+        }
+        memcpy(path, start, (size_t)(end - start));
+        path[end - start] = '\0';
+
+        f = fopen(path, "r");
+        if (f) {
+            if (path_out) {
+                *path_out = path;
+            } else {
+                free(path);
+            }
+            return f;
+        }
+        free(path);
+    }
+
+    return NULL;
+}
+
 void
 exvi_cleanup_session_state(void)
 {
@@ -259,6 +316,7 @@ handle_tag_command(buffer_t *b, const char *args, void (*command_fn)(buffer_t *,
     char *ptr = (char *)args;
     FILE *f;
     char *line = NULL;
+    char *tags_path = NULL;
     size_t cap = 0;
     ssize_t ret;
     int found = 0;
@@ -271,7 +329,7 @@ handle_tag_command(buffer_t *b, const char *args, void (*command_fn)(buffer_t *,
         return 1;
     }
 
-    f = fopen("tags", "r");
+    f = open_tags_file(&tags_path);
     if (!f) {
         fprintf(stderr, "No tags file\n");
         return 1;
@@ -324,6 +382,7 @@ handle_tag_command(buffer_t *b, const char *args, void (*command_fn)(buffer_t *,
     }
     free(line);
     fclose(f);
+    free(tags_path);
     if (!found) {
         fprintf(stderr, "Tag not found: %s\n", ptr);
     }
@@ -354,6 +413,9 @@ handle_set_command(const char *args)
         }
         if (option_tabstop != EXVI_DEFAULT_TABSTOP) {
             printf("tabstop=%d\n", option_tabstop);
+        }
+        if (option_tags && strcmp(option_tags, EXVI_DEFAULT_TAGS) != 0) {
+            printf("tags=%s\n", option_tags);
         }
         return 1;
     }
@@ -399,6 +461,7 @@ handle_set_command(const char *args)
                 printf("wrapscan\n");
             }
             printf("tabstop=%d\n", option_tabstop);
+            printf("tags=%s\n", option_tags ? option_tags : EXVI_DEFAULT_TAGS);
         } else if (len == 2 && strncmp(ptr, "ro", 2) == 0) {
             if (eq) {
                 fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
@@ -581,6 +644,26 @@ handle_set_command(const char *args)
                     return 1;
                 }
                 option_tabstop = (int)val;
+            }
+        } else if (len == 4 && strncmp(ptr, "tags", 4) == 0) {
+            if (query || (!eq && !query)) {
+                printf("tags=%s\n", option_tags ? option_tags : EXVI_DEFAULT_TAGS);
+            } else {
+                char *copy;
+
+                if (!value || value_len == 0) {
+                    fprintf(stderr, "Bad tags value\n");
+                    return 1;
+                }
+                copy = malloc(value_len + 1);
+                if (!copy) {
+                    perror("malloc");
+                    return 1;
+                }
+                memcpy(copy, value, value_len);
+                copy[value_len] = '\0';
+                replace_saved_string(&option_tags, copy);
+                free(copy);
             }
         } else {
             fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
