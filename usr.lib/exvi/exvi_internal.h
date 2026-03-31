@@ -143,7 +143,8 @@ int handle_join_command(buffer_t *b, int explicit_range, int addr1, int addr2);
 int handle_yank_command(buffer_t *b, const char *args, int explicit_range,
     int addr1, int addr2);
 int handle_substitute_command(buffer_t *b, const char *args, int addr1, int addr2);
-int handle_repeat_substitute_command(buffer_t *b, int addr1, int addr2);
+int handle_repeat_substitute_command(buffer_t *b, const char *args, int addr1,
+    int addr2);
 int handle_shell_command(char *cmd);
 
 #endif

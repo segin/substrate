@@ -351,8 +351,8 @@ handle_buffer_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
         return handle_yank_command(b, args, explicit_range, addr1, addr2);
     } else if (match_command(cmd, "substitute", "s", &args, NULL)) {
         return handle_substitute_command(b, args, addr1, addr2);
-    } else if (cmd[0] == '&' && cmd[1] == '\0') {
-        return handle_repeat_substitute_command(b, addr1, addr2);
+    } else if (cmd[0] == '&') {
+        return handle_repeat_substitute_command(b, cmd + 1, addr1, addr2);
     } else if (match_command(cmd, "global", "g", &args, NULL)
         || match_command(cmd, "global", "v", &args, NULL)) {
         return handle_global_command(b, cmd, args, explicit_range, addr1, addr2);

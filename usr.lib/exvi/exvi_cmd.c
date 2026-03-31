@@ -672,10 +672,26 @@ handle_substitute_command(buffer_t *b, const char *args, int addr1, int addr2)
 }
 
 int
-handle_repeat_substitute_command(buffer_t *b, int addr1, int addr2)
+handle_repeat_substitute_command(buffer_t *b, const char *args, int addr1,
+    int addr2)
 {
+    const char *ptr = args;
+    int global = 0;
+    int print_mode = 0;
+
     if (!last_sub_pattern || !last_sub_replacement) {
         return 1;
+    }
+    while (*ptr && isspace((unsigned char)*ptr)) {
+        ptr++;
+    }
+    while (*ptr) {
+        if (*ptr == 'g') {
+            global = 1;
+        } else if (*ptr == 'p' || *ptr == '#' || *ptr == 'l') {
+            print_mode = *ptr;
+        }
+        ptr++;
     }
     save_undo(b);
     if (addr1 == -1) {
@@ -683,7 +699,7 @@ handle_repeat_substitute_command(buffer_t *b, int addr1, int addr2)
     }
     if (addr1 > 0 && addr2 >= addr1) {
         apply_substitute_range(b, addr1, addr2, last_sub_pattern,
-            last_sub_replacement, last_sub_global, 0);
+            last_sub_replacement, global, print_mode);
     }
     return 1;
 }

@@ -1157,6 +1157,14 @@ run_oracle_test "Repeat substitute with ampersand" \
     "alpha beta\nbeta gamma\n" \
     "1s/beta/BETA/\n2&\nwq\n"
 
+run_oracle_test "Repeat substitute does not remember global flag" \
+    "a a a\na a a\n" \
+    "1s/a/A/g\n2&\nwq\n"
+
+run_oracle_test "Repeat substitute g flag matches vim" \
+    "a a a\na a a\n" \
+    "1s/a/A/\n2&g\nwq\n"
+
 run_stdout_oracle_test "Substitute p flag matches vim" \
     "a a a\n" \
     ":1s/a/A/p\n:q!\n"
@@ -1172,6 +1180,18 @@ run_stdout_oracle_test "Substitute list flag output matches vim" \
 run_stdout_oracle_test "Substitute gp flag matches vim" \
     "a a a\n" \
     ":1s/a/A/gp\n:q!\n"
+
+run_stdout_oracle_test "Repeat substitute p flag matches vim" \
+    "a a\na a\n" \
+    ":1s/a/A/\n:2&p\n:q!\n"
+
+run_stdout_oracle_test "Repeat substitute number flag matches vim" \
+    "a a\na a\n" \
+    ":1s/a/A/\n:2&#\n:q!\n"
+
+run_stdout_oracle_test "Repeat substitute list flag matches vim" \
+    "a a\na a\n" \
+    ":1s/a/A/\n:2&l\n:q!\n"
 
 run_startup_test "Safe .exrc is loaded" \
     "alpha\nbeta\n" \
