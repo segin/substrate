@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <regex.h>
 #include <unistd.h>
 #include <sys/stat.h>
 
@@ -14,6 +15,7 @@ int visual_mode = 0;
 int recover_mode = 0;
 int option_number = 0;
 int option_list = 0;
+int option_ignorecase = 0;
 int option_readonly = 0;
 int option_tabstop = EXVI_DEFAULT_TABSTOP;
 int option_wrapscan = 1;
@@ -46,6 +48,17 @@ free_startup_commands(void)
     free(startup_commands);
     startup_commands = NULL;
     startup_command_count = 0;
+}
+
+int
+exvi_regex_flags(void)
+{
+    int flags = REG_EXTENDED;
+
+    if (option_ignorecase) {
+        flags |= REG_ICASE;
+    }
+    return flags;
 }
 
 static int
@@ -403,6 +416,7 @@ exvi_reset_runtime(exvi_frontend_t frontend)
     recover_mode = 0;
     option_number = 0;
     option_list = 0;
+    option_ignorecase = 0;
     option_readonly = 0;
     option_tabstop = EXVI_DEFAULT_TABSTOP;
     option_wrapscan = 1;
@@ -427,6 +441,7 @@ void
 exvi_cleanup_runtime(void)
 {
     option_wrapscan = 1;
+    option_ignorecase = 0;
     free(option_tags);
     option_tags = NULL;
     free(last_search_pattern);

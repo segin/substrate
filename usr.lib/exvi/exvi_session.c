@@ -405,6 +405,9 @@ handle_set_command(const char *args)
         if (option_list) {
             printf("list\n");
         }
+        if (option_ignorecase) {
+            printf("ignorecase\n");
+        }
         if (option_readonly) {
             printf("readonly\n");
         }
@@ -454,6 +457,9 @@ handle_set_command(const char *args)
             if (option_list) {
                 printf("list\n");
             }
+            if (option_ignorecase) {
+                printf("ignorecase\n");
+            }
             if (option_readonly) {
                 printf("readonly\n");
             }
@@ -462,6 +468,46 @@ handle_set_command(const char *args)
             }
             printf("tabstop=%d\n", option_tabstop);
             printf("tags=%s\n", option_tags ? option_tags : EXVI_DEFAULT_TAGS);
+        } else if (len == 2 && strncmp(ptr, "ic", 2) == 0) {
+            if (eq) {
+                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                return 1;
+            }
+            if (query) {
+                printf("%s\n", option_ignorecase ? "ignorecase" : "noignorecase");
+            } else {
+                option_ignorecase = 1;
+            }
+        } else if (len == 10 && strncmp(ptr, "ignorecase", 10) == 0) {
+            if (eq) {
+                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                return 1;
+            }
+            if (query) {
+                printf("%s\n", option_ignorecase ? "ignorecase" : "noignorecase");
+            } else {
+                option_ignorecase = 1;
+            }
+        } else if (len == 4 && strncmp(ptr, "noic", 4) == 0) {
+            if (eq) {
+                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                return 1;
+            }
+            if (query) {
+                printf("%s\n", option_ignorecase ? "noignorecase" : "ignorecase");
+            } else {
+                option_ignorecase = 0;
+            }
+        } else if (len == 12 && strncmp(ptr, "noignorecase", 12) == 0) {
+            if (eq) {
+                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                return 1;
+            }
+            if (query) {
+                printf("%s\n", option_ignorecase ? "noignorecase" : "ignorecase");
+            } else {
+                option_ignorecase = 0;
+            }
         } else if (len == 2 && strncmp(ptr, "ro", 2) == 0) {
             if (eq) {
                 fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);

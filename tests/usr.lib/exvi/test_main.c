@@ -103,15 +103,18 @@ test_set_and_query_options(void)
 
     assert(option_number == 0);
     assert(option_list == 0);
+    assert(option_ignorecase == 0);
     assert(option_wrapscan == 1);
-    assert(handle_set_command("number list") == 1);
+    assert(handle_set_command("number list ignorecase") == 1);
     assert(option_number == 1);
     assert(option_list == 1);
+    assert(option_ignorecase == 1);
     assert(handle_set_command("nowrapscan") == 1);
     assert(option_wrapscan == 0);
-    assert(handle_set_command("nonumber nolist wrapscan") == 1);
+    assert(handle_set_command("nonumber nolist noignorecase wrapscan") == 1);
     assert(option_number == 0);
     assert(option_list == 0);
+    assert(option_ignorecase == 0);
     assert(option_wrapscan == 1);
 
     cleanup_shared_state();

@@ -303,7 +303,7 @@ buf_search_forward(buffer_t *b, const char *pattern)
     line_t *start;
     line_t *l;
 
-    if (regcomp(&re, pattern, REG_EXTENDED) != 0) {
+    if (regcomp(&re, pattern, exvi_regex_flags()) != 0) {
         return -1;
     }
 
@@ -352,7 +352,7 @@ buf_search_backward(buffer_t *b, const char *pattern)
     line_t *start;
     line_t *l;
 
-    if (regcomp(&re, pattern, REG_EXTENDED) != 0) {
+    if (regcomp(&re, pattern, exvi_regex_flags()) != 0) {
         return -1;
     }
 

@@ -183,7 +183,7 @@ handle_global_command(buffer_t *b, const char *cmd, const char *args,
         exec_cmd = "p";
     }
 
-    if (regcomp(&re, re_str, REG_EXTENDED) != 0) {
+    if (regcomp(&re, re_str, exvi_regex_flags()) != 0) {
         free(re_str);
         return 1;
     }

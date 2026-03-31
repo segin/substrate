@@ -109,7 +109,7 @@ apply_substitute_range(buffer_t *b, int addr1, int addr2, const char *pattern,
     if (!pattern || !replacement) {
         return 0;
     }
-    if (regcomp(&re, pattern, REG_EXTENDED) != 0) {
+    if (regcomp(&re, pattern, exvi_regex_flags()) != 0) {
         return 0;
     }
 

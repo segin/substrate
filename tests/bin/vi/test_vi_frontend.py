@@ -161,15 +161,29 @@ def main():
     exit_code, decoded, saved = helpers.run_vi_session(
         vi_path,
         "one\ntwo\n",
-        [b":set number\r", b":set wrapscan?\r", b":set nope\r", b":1delete\r", b":wq\r"],
+        [b":set number\r", b":set wrapscan?\r", b":set ignorecase?\r",
+         b":set ignorecase\r", b":set ignorecase?\r", b":set nope\r",
+         b":1delete\r", b":wq\r"],
         final_keys=None,
     )
     require(exit_code == 0, f"vi colon-command parity exited with status {exit_code}")
     require("      1 one" in decoded, "vi colon-command parity missing numbered render")
     require("wrapscan" in decoded, "vi colon-command parity missing option query output")
+    require("noignorecase" in decoded, "vi colon-command parity missing initial ignorecase query")
+    require("ignorecase" in decoded, "vi colon-command parity missing ignorecase query output")
     require("Unknown option: nope" in decoded,
             "vi colon-command parity missing diagnostic output")
     require(saved == "two\n", f"vi colon-command parity saved wrong buffer: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "alpha\nA a\n",
+        [b":set ignorecase\r", b"/ALPHA\r", b"r", b"X", b":wq\r"],
+        final_keys=None,
+    )
+    require(exit_code == 0, f"vi ignorecase search exited with status {exit_code}")
+    require(saved == "Xlpha\nA a\n",
+            f"vi ignorecase search saved wrong buffer: {saved!r}")
 
     exit_code, decoded, saved = helpers.run_vi_session(
         vi_path,

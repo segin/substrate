@@ -1402,6 +1402,16 @@ run_stdout_test "Set wrapscan query reports state" \
     ":set wrapscan?\n:q!\n" \
     "wrapscan"
 
+run_stdout_test "Set ignorecase query reports state" \
+    "one\ntwo\n" \
+    ":set ignorecase?\n:q!\n" \
+    "noignorecase"
+
+run_stdout_test "Set ignorecase enables ignorecase" \
+    "one\ntwo\n" \
+    ":set ignorecase\n:set ignorecase?\n:q!\n" \
+    "ignorecase"
+
 run_stdout_test "Malformed range leaves current line unchanged" \
     "one\ntwo\nthree\n" \
     ":2p\n:1,?p\n:p\n:q!\n" \
@@ -1503,6 +1513,18 @@ run_stdout_test "Set nowrapscan disables wrapscan" \
     ":set nowrapscan\n:set wrapscan?\n:q!\n" \
     "nowrapscan"
 
+run_stdout_oracle_test "Search respects ignorecase option" \
+    "alpha\nA a\n" \
+    ":set ignorecase\n:/ALPHA/p\n:q!\n"
+
+run_stdout_oracle_test "Search respects noignorecase option" \
+    "alpha\nA a\n" \
+    ":set noignorecase\n:/ALPHA/p\n:q!\n"
+
+run_oracle_test "Substitute respects ignorecase option" \
+    "alpha\nA a\n" \
+    ":set ignorecase\n:1s/a/X/\n:wq!\n"
+
 run_stdout_test "Set tabstop assignment updates value" \
     "one\ntwo\n" \
     ":set ts=4\n:set ts?\n:q!\n" \
@@ -1515,9 +1537,10 @@ run_stdout_test "Set tags assignment updates value" \
 
 run_stdout_test "Set all prints enabled options" \
     "one\ntwo\n" \
-    ":set number list readonly\n:set all\n:q!\n" \
+    ":set number list ignorecase readonly\n:set all\n:q!\n" \
     "number
 list
+ignorecase
 readonly
 wrapscan
 tabstop=8

@@ -3025,7 +3025,7 @@ vi_search_target(buffer_t *b, vi_visual_t *vis, const char *pattern, int forward
     if (!search) {
         return -1;
     }
-    if (regcomp(&re, search, REG_EXTENDED) != 0) {
+    if (regcomp(&re, search, exvi_regex_flags()) != 0) {
         free(search);
         return -1;
     }
