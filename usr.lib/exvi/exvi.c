@@ -414,6 +414,12 @@ void do_command(buffer_t *b, char *cmd) {
     if (handle_buffer_command(b, cmd, explicit_range, addr1, addr2)) {
         return;
     }
+
+    if (visual_mode) {
+        exvi_set_pending_status("Unknown command");
+    } else {
+        fprintf(stderr, "Unknown command\n");
+    }
 }
 
 void

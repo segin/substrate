@@ -4127,6 +4127,7 @@ static void
 vi_command_prompt(buffer_t *b, vi_visual_t *vis)
 {
     char cmd[256];
+    int have_status = 0;
 
     cmd[0] = '\0';
     if (vi_prompt_input(b, vis, ':', cmd, sizeof(cmd)) != 0) {
@@ -4135,8 +4136,12 @@ vi_command_prompt(buffer_t *b, vi_visual_t *vis)
     exvi_execute_command(b, cmd);
     if (exvi_take_pending_status(vis->status_msg, sizeof(vis->status_msg))) {
         vis->status_once = 1;
+        have_status = 1;
     }
     vi_clamp_cursor(b, vis);
+    if (have_status) {
+        vi_render(b, vis, ':', NULL);
+    }
 }
 
 static void

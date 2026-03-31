@@ -1114,6 +1114,12 @@ run_stderr_status_test "Bad mark reports bad address" \
     0 \
     "Bad address"
 
+run_stderr_status_test "Unknown command reports diagnostic" \
+    "one\ntwo\n" \
+    ":bogus\n:q!\n" \
+    0 \
+    "Unknown command"
+
 run_stdout_test "Set number query reports state" \
     "one\ntwo\n" \
     ":set number?\n:q!\n" \
