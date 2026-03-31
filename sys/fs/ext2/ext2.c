@@ -1345,16 +1345,6 @@ static uint8_t ext2_dirent_type_from_mode(uint16_t mode) {
     }
 }
 
-static uint8_t ext2_flags_to_dirent_type(uint32_t flags) {
-    if (flags & FS_DIRECTORY) return EXT2_FT_DIR;
-    if (flags & FS_CHARDEVICE) return EXT2_FT_CHRDEV;
-    if (flags & FS_BLOCKDEVICE) return EXT2_FT_BLKDEV;
-    if (flags & FS_FILE) return EXT2_FT_REG_FILE;
-    if (flags & FS_SYMLINK) return EXT2_FT_SYMLINK;
-    if (flags & FS_PIPE) return EXT2_FT_FIFO;
-    return EXT2_FT_UNKNOWN;
-}
-
 static uint8_t ext2_file_type_to_dt(uint8_t ext2_type) {
     switch (ext2_type) {
         case EXT2_FT_REG_FILE: return DT_REG;

@@ -16,6 +16,7 @@ struct timeval;
 struct timezone;
 struct itimerval;
 struct tms;
+struct statfs;
 
 /* Internal kernel versions of syscalls that take kernel pointers */
 struct sigaction;
@@ -46,11 +47,14 @@ int kern_fstat(int fd, struct stat *buf);
 int kern_ioctl(int fd, uint32_t request, void *arg);
 int kern_unlink(const char *path);
 int kern_link(const char *oldpath, const char *newpath);
+int kern_rename(const char *oldpath, const char *newpath);
 int kern_rmdir(const char *path);
 int kern_symlink(const char *target, const char *linkpath);
 int kern_readlink(const char *pathname, char *buf, size_t bufsiz);
 int kern_access(const char *path, int mode);
 int kern_pipe(int *fds);
+int kern_statfs(const char *path, struct statfs *buf);
+int kern_fstatfs(int fd, struct statfs *buf);
 struct rusage;
 int kern_wait4(pid_t pid, int *status, int options, struct rusage *rusage);
 int kern_waitpid(int pid, int *status, int options);

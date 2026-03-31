@@ -76,6 +76,7 @@ extern int sys_fstatfs(int, void*);
 
 /* File system operations */
 extern int sys_link(const char*, const char*);
+extern int sys_rename(const char*, const char*);
 extern int sys_symlink(const char*, const char*);
 extern int sys_unlink(const char*);
 extern int sys_mkdir(const char*, int);

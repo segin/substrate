@@ -11,26 +11,48 @@ CC_SRCS = cmd/cc.c cmd/pipeline.c \
 
 ifeq ($(NATIVE_BUILD),1)
     TOOL_CFLAGS = $(CFLAGS)
+    TOOL_LDFLAGS =
 else
-    TOOL_CFLAGS = $(USER_CFLAGS)
+    TOOL_CFLAGS = $(USER_CFLAGS) -fno-builtin
+    TOOL_LDFLAGS = $(USER_LDFLAGS)
 endif
 
 all: $(PROGS)
 
 cc: $(CC_SRCS) include/cc_driver.h include/cc_frontend.h include/cc_ssa.h include/cc_backend.h include/cc_mir.h include/cc_pipeline.h include/cc_middle.h include/cc_target.h
-	$(CC) $(TOOL_CFLAGS) -Iinclude -o $@ $(CC_SRCS)
+ifdef NATIVE_BUILD
+	$(CC) $(TOOL_CFLAGS) $(TOOL_LDFLAGS) -Iinclude -o $@ $(CC_SRCS)
+else
+	$(CC) $(TOOL_CFLAGS) $(TOOL_LDFLAGS) -Iinclude -o $@ $(CC_SRCS) $(TOP)/lib/c/crt0.o -L$(TOP)/lib/c -lc $(LIBGCC)
+	$(call BRAND_SUBSTRATE,$@)
+endif
 
 cpp: cc
 	ln -sf cc cpp
 
 ir-verifier: ir-verifier.c $(COMMON_SRCS) ir.h
-	$(CC) $(TOOL_CFLAGS) -o $@ ir-verifier.c $(COMMON_SRCS)
+ifdef NATIVE_BUILD
+	$(CC) $(TOOL_CFLAGS) $(TOOL_LDFLAGS) -o $@ ir-verifier.c $(COMMON_SRCS)
+else
+	$(CC) $(TOOL_CFLAGS) $(TOOL_LDFLAGS) -o $@ ir-verifier.c $(COMMON_SRCS) $(TOP)/lib/c/crt0.o -L$(TOP)/lib/c -lc $(LIBGCC)
+	$(call BRAND_SUBSTRATE,$@)
+endif
 
 ir-normalize: ir-normalize.c $(COMMON_SRCS) ir.h
-	$(CC) $(TOOL_CFLAGS) -o $@ ir-normalize.c $(COMMON_SRCS)
+ifdef NATIVE_BUILD
+	$(CC) $(TOOL_CFLAGS) $(TOOL_LDFLAGS) -o $@ ir-normalize.c $(COMMON_SRCS)
+else
+	$(CC) $(TOOL_CFLAGS) $(TOOL_LDFLAGS) -o $@ ir-normalize.c $(COMMON_SRCS) $(TOP)/lib/c/crt0.o -L$(TOP)/lib/c -lc $(LIBGCC)
+	$(call BRAND_SUBSTRATE,$@)
+endif
 
 ir-diff: ir-diff.c $(COMMON_SRCS) ir.h
-	$(CC) $(TOOL_CFLAGS) -o $@ ir-diff.c $(COMMON_SRCS)
+ifdef NATIVE_BUILD
+	$(CC) $(TOOL_CFLAGS) $(TOOL_LDFLAGS) -o $@ ir-diff.c $(COMMON_SRCS)
+else
+	$(CC) $(TOOL_CFLAGS) $(TOOL_LDFLAGS) -o $@ ir-diff.c $(COMMON_SRCS) $(TOP)/lib/c/crt0.o -L$(TOP)/lib/c -lc $(LIBGCC)
+	$(call BRAND_SUBSTRATE,$@)
+endif
 
 clean:
 	rm -f $(PROGS) *.o
