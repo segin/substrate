@@ -1514,6 +1514,30 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "".join(
+            "   abcdef\n" if i == 20 else f"line {i}\n"
+            for i in range(1, 41)
+        ),
+        [b"2", b"0", b"G", b"5", b"|", b"z", b"t", b"r", b"T"],
+    )
+    require(exit_code == 0, f"zt vi exited with status {exit_code}")
+    require(saved.splitlines()[19] == "   aTcdef",
+            f"unexpected zt cursor placement: {saved.splitlines()[19]!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "".join(
+            "   abcdef\n" if i == 20 else f"line {i}\n"
+            for i in range(1, 41)
+        ),
+        [b"2", b"0", b"G", b"5", b"|", b"z", b"b", b"r", b"B"],
+    )
+    require(exit_code == 0, f"zb vi exited with status {exit_code}")
+    require(saved.splitlines()[19] == "   aBcdef",
+            f"unexpected zb cursor placement: {saved.splitlines()[19]!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "".join(f"line {i}\n" for i in range(1, 101)),
         [b"2", b"0", b"G", b"z", b"\r", b"z", b"+", b"r", b"X", b"z", b"^", b"r", b"Y"],
     )

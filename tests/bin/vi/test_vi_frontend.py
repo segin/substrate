@@ -205,6 +205,48 @@ def main():
 
     exit_code, decoded, saved = helpers.run_vi_session(
         vi_path,
+        "foo\nbar\n",
+        [b":1s/foo/bar\r", b":wq\r"],
+        final_keys=None,
+    )
+    require(exit_code == 0, f"vi malformed-substitute parsing exited with status {exit_code}")
+    require(saved == "bar\nbar\n",
+            f"vi malformed-substitute parsing saved wrong buffer: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "foo\nbar\n",
+        [b":g/foo\r", b":wq\r"],
+        final_keys=None,
+    )
+    require(exit_code == 0, f"vi malformed-global parsing exited with status {exit_code}")
+    require(saved == "foo\nbar\n",
+            f"vi malformed-global parsing saved wrong buffer: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "a/b/c\n",
+        [b":%s/\\//:/g\r", b":wq\r"],
+        final_keys=None,
+    )
+    require(exit_code == 0, f"vi escaped-pattern parsing exited with status {exit_code}")
+    require(saved == "a:b:c\n",
+            f"vi escaped-pattern parsing saved wrong buffer: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "foo\nbar\n",
+        [b":'zp\r", b":q!\r"],
+        final_keys=None,
+    )
+    require(exit_code == 0, f"vi bad-mark parsing exited with status {exit_code}")
+    require("Bad address" in decoded,
+            "vi bad-mark parsing missing diagnostic")
+    require(saved == "foo\nbar\n",
+            f"vi bad-mark parsing unexpectedly modified file: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
         "one\ntwo\nthree\n",
         [b":2j\r", b":wq\r"],
         final_keys=None,

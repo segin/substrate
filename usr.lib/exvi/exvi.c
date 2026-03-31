@@ -88,13 +88,28 @@ match_command(const char *cmd, const char *name, const char *abbr, const char **
 {
     size_t name_len = strlen(name);
     size_t abbr_len = abbr ? strlen(abbr) : 0;
+    size_t cmd_len = 0;
     size_t used = 0;
 
-    if (strncmp(cmd, name, name_len) == 0) {
-        used = name_len;
-    } else if (abbr && strncmp(cmd, abbr, abbr_len) == 0) {
+    if (abbr && abbr_len > 0 && !isalpha((unsigned char)abbr[0])
+        && strncmp(cmd, abbr, abbr_len) == 0) {
         used = abbr_len;
     } else {
+        while (isalpha((unsigned char)cmd[cmd_len])) {
+            cmd_len++;
+        }
+        if (cmd_len > 0 && cmd_len <= name_len
+            && strncmp(cmd, name, cmd_len) == 0) {
+            size_t min_len = (abbr && abbr_len > 0
+                && isalpha((unsigned char)abbr[0])) ? abbr_len : name_len;
+
+            if (cmd_len >= min_len) {
+                used = cmd_len;
+            }
+        }
+    }
+
+    if (used == 0) {
         return 0;
     }
 

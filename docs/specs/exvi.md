@@ -149,7 +149,7 @@ Completed architecture milestones already in tree are intentionally omitted here
 - [x] Audit and tighten malformed address/range diagnostics so failures never mutate buffer state.
 - [x] Verify per-command default addresses against historical/POSIX behavior rather than relying on the current mostly-correct defaults.
 - [x] Audit `%`, `;`, mark addresses, search addresses, empty search reuse, relative offsets, and empty-command printing against BSD/vim/ex reference behavior.
-- [ ] Add finer-grained parser tests for malformed substitutes, malformed globals, nested separators, escaped delimiters, ambiguous abbreviations, and bad marks.
+- [x] Add finer-grained parser tests for malformed substitutes, malformed globals, nested separators, escaped delimiters, ambiguous abbreviations, and bad marks.
 
 #### 2.2 Command-set completeness and command semantics
 
@@ -186,7 +186,7 @@ Completed architecture milestones already in tree are intentionally omitted here
 
 - [ ] Replace the current repaint-heavy renderer with a real dirty-region or diff-based refresh strategy.
 - [x] Audit resize behavior across normal, insert, replace, operator-pending, `:`, `/`, and `?` prompt states.
-- [ ] Finish redraw semantics such as `Ctrl-L` and any remaining `z` variants or screen-positioning details.
+- [x] Finish redraw semantics such as `Ctrl-L` and any remaining `z` variants or screen-positioning details.
 - [ ] Tighten long-line, number, list, tabstop, and status-line interactions under horizontal scrolling and narrow terminals.
 - [ ] Audit ANSI/VT100 fallback behavior, keypad handling, and terminal capability use on simpler terminals.
 - [x] Add PTY regressions specifically for redraw, resize, narrow terminals, long files, and repeated terminal-size changes.

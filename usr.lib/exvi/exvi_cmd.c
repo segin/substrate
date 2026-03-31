@@ -180,6 +180,36 @@ apply_substitute_range(buffer_t *b, int addr1, int addr2, const char *pattern,
     return 1;
 }
 
+static char *
+parse_delimited_text_or_eol(char **cmd_ptr, char delim)
+{
+    char *src = *cmd_ptr;
+    size_t len = 0;
+    char *text = malloc(strlen(src) + 1);
+
+    if (!text) {
+        return NULL;
+    }
+
+    while (*src) {
+        if (*src == '\\' && src[1] != '\0') {
+            text[len++] = src[1];
+            src += 2;
+            continue;
+        }
+        if (*src == delim) {
+            text[len] = '\0';
+            *cmd_ptr = src + 1;
+            return text;
+        }
+        text[len++] = *src++;
+    }
+
+    text[len] = '\0';
+    *cmd_ptr = src;
+    return text;
+}
+
 int
 handle_delete_command(buffer_t *b, int explicit_range, int addr1, int addr2)
 {
@@ -568,7 +598,7 @@ handle_substitute_command(buffer_t *b, const char *args, int addr1, int addr2)
     if (!pat_raw) {
         return 1;
     }
-    repl_str = parse_delimited_text(&spec, delim);
+    repl_str = parse_delimited_text_or_eol(&spec, delim);
     if (!repl_str) {
         free(pat_raw);
         return 1;

@@ -181,6 +181,61 @@ test_yank_put(void)
     cleanup_shared_state();
 }
 
+static void
+test_command_break_parsing(void)
+{
+    static const char *lines[] = {"foo", "bar"};
+    buffer_t b;
+    exvi_command_break_t kind;
+    char cmd1[] = "g/foo/s/o/|/|d";
+    char cmd2[] = "s/o/\\//|d";
+    char cmd3[] = "g/foo/s/o/\\//|d";
+    char *breakp;
+
+    reset_shared_state();
+    fill_buffer(&b, lines, 2);
+
+    breakp = find_command_break(&b, cmd1, &kind);
+    assert(breakp != NULL);
+    assert(kind == EXVI_COMMAND_BREAK_SEPARATOR);
+    assert(strcmp(breakp, "|d") == 0);
+
+    breakp = find_command_break(&b, cmd2, &kind);
+    assert(breakp != NULL);
+    assert(kind == EXVI_COMMAND_BREAK_SEPARATOR);
+    assert(strcmp(breakp, "|d") == 0);
+
+    breakp = find_command_break(&b, cmd3, &kind);
+    assert(breakp != NULL);
+    assert(kind == EXVI_COMMAND_BREAK_SEPARATOR);
+    assert(strcmp(breakp, "|d") == 0);
+
+    free_buffer(&b);
+    cleanup_shared_state();
+}
+
+static void
+test_bad_mark_preserves_current_line(void)
+{
+    static const char *lines[] = {"alpha", "beta", "gamma"};
+    buffer_t b;
+    char cmd[] = "'zp";
+    char *ptr = cmd;
+    int addr1, addr2, explicit_range, error;
+
+    reset_shared_state();
+    fill_buffer(&b, lines, 3);
+    b.cur = buf_get_line(&b, 2);
+
+    explicit_range = parse_range_checked(&b, &ptr, &addr1, &addr2, &error);
+    assert(explicit_range == 0);
+    assert(error == 1);
+    assert(buf_current_line(&b) == 2);
+
+    free_buffer(&b);
+    cleanup_shared_state();
+}
+
 int
 main(void)
 {
@@ -189,6 +244,8 @@ main(void)
     test_delete_and_undo();
     test_malformed_range_preserves_current_line();
     test_yank_put();
+    test_command_break_parsing();
+    test_bad_mark_preserves_current_line();
     puts("exvi core tests: ok");
     return 0;
 }

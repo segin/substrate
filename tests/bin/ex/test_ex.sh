@@ -1108,6 +1108,12 @@ run_stderr_status_test "Malformed range reports bad address" \
     0 \
     "Bad address"
 
+run_stderr_status_test "Bad mark reports bad address" \
+    "one\ntwo\nthree\n" \
+    ":'zp\n:q!\n" \
+    0 \
+    "Bad address"
+
 run_stdout_test "Set number query reports state" \
     "one\ntwo\n" \
     ":set number?\n:q!\n" \
@@ -1199,6 +1205,14 @@ run_oracle_test "Substitute replacement pipe does not split command line" \
     "foo\n" \
     ":%s/o/bar|baz/\n:wq!\n"
 
+run_oracle_test "Malformed substitute missing delimiter matches vim" \
+    "foo\nbar\n" \
+    ":1s/foo/bar\n:wq!\n"
+
+run_oracle_test "Malformed global missing command matches vim" \
+    "foo\nbar\n" \
+    ":g/foo\n:wq!\n"
+
 run_oracle_test "Global nested substitute pipe does not split command line" \
     "foo\nbar\n" \
     ":g/foo/s/o/|/\n:wq!\n"
@@ -1225,9 +1239,25 @@ run_oracle_test "Substitute quote in replacement is not a comment" \
     "foo\n" \
     ":%s/o/\"/\n:wq!\n"
 
+run_oracle_test "Escaped delimiter in substitute pattern matches vim" \
+    "a/b/c\n" \
+    ":%s/\\//:/g\n:wq!\n"
+
+run_oracle_test "Escaped delimiter in substitute replacement matches vim" \
+    "foo\n" \
+    ":%s/o/\\//g\n:wq!\n"
+
 run_oracle_test "Global nested substitute quote is not a comment" \
     "foo\nbar\n" \
     ":g/foo/s/o/\"/\n:wq!\n"
+
+run_oracle_test "Read abbreviation matches vim" \
+    "foo\nbar\n" \
+    ":2\n:re\n:wq!\n"
+
+run_stdout_oracle_test "Print abbreviation matches vim" \
+    "foo\nbar\n" \
+    ":2\n:pr\n:q!\n"
 
 run_stdout_test "Set nowrapscan disables wrapscan" \
     "one\ntwo\n" \
