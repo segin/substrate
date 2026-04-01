@@ -321,6 +321,54 @@ def main():
 
     exit_code, decoded, saved = helpers.run_vi_session(
         vi_path,
+        "foo\nbar\n",
+        [b":tag\r", b":q!\r"],
+        final_keys=None,
+    )
+    require(exit_code == 0, f"vi missing-tag-operand handling exited with status {exit_code}")
+    require("Usage: tag <name>" in decoded,
+            "vi missing-tag-operand handling missing diagnostic")
+    require(saved == "foo\nbar\n",
+            f"vi missing-tag-operand handling unexpectedly modified file: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "foo\nbar\n",
+        [b":copy\r", b":q!\r"],
+        final_keys=None,
+    )
+    require(exit_code == 0, f"vi missing-copy-destination handling exited with status {exit_code}")
+    require("Destination required" in decoded,
+            "vi missing-copy-destination handling missing diagnostic")
+    require(saved == "foo\nbar\n",
+            f"vi missing-copy-destination handling unexpectedly modified file: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "foo\nbar\nbaz\n",
+        [b":1,2move1\r", b":q!\r"],
+        final_keys=None,
+    )
+    require(exit_code == 0, f"vi bad-move-destination handling exited with status {exit_code}")
+    require("Destination not outside move range" in decoded,
+            "vi bad-move-destination handling missing diagnostic")
+    require(saved == "foo\nbar\nbaz\n",
+            f"vi bad-move-destination handling unexpectedly modified file: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "foo\nbar\n",
+        [b"i", b"X", b"\x1b", b":q\r", b":q!\r"],
+        final_keys=None,
+    )
+    require(exit_code == 0, f"vi modified-quit handling exited with status {exit_code}")
+    require("No write since last change (add ! to override)" in decoded,
+            "vi modified-quit handling missing diagnostic")
+    require(saved == "foo\nbar\n",
+            f"vi modified-quit handling unexpectedly modified file: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
         "",
         [b":r insert.txt\r", b":wq\r"],
         final_keys=None,

@@ -325,13 +325,13 @@ handle_tag_command(buffer_t *b, const char *args, void (*command_fn)(buffer_t *,
         ptr++;
     }
     if (!*ptr) {
-        fprintf(stderr, "Usage: tag <name>\n");
+        exvi_report_error("Usage: tag <name>");
         return 1;
     }
 
     f = open_tags_file(&tags_path);
     if (!f) {
-        fprintf(stderr, "No tags file\n");
+        exvi_report_error("No tags file");
         return 1;
     }
 
@@ -347,7 +347,7 @@ handle_tag_command(buffer_t *b, const char *args, void (*command_fn)(buffer_t *,
             char *old_filename;
 
             if (b->modified) {
-                fprintf(stderr, "No write since last change\n");
+                exvi_report_error("No write since last change");
                 free(line);
                 fclose(f);
                 return 1;
@@ -384,7 +384,7 @@ handle_tag_command(buffer_t *b, const char *args, void (*command_fn)(buffer_t *,
     fclose(f);
     free(tags_path);
     if (!found) {
-        fprintf(stderr, "Tag not found: %s\n", ptr);
+        exvi_report_errorf("Tag not found: %s", ptr);
     }
     return 1;
 }
@@ -448,7 +448,7 @@ handle_set_command(const char *args)
 
         if (len == 3 && strncmp(ptr, "all", 3) == 0) {
             if (query || eq) {
-                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
                 return 1;
             }
             if (option_number) {
@@ -470,7 +470,7 @@ handle_set_command(const char *args)
             printf("tags=%s\n", option_tags ? option_tags : EXVI_DEFAULT_TAGS);
         } else if (len == 2 && strncmp(ptr, "ic", 2) == 0) {
             if (eq) {
-                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
                 return 1;
             }
             if (query) {
@@ -480,7 +480,7 @@ handle_set_command(const char *args)
             }
         } else if (len == 10 && strncmp(ptr, "ignorecase", 10) == 0) {
             if (eq) {
-                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
                 return 1;
             }
             if (query) {
@@ -490,7 +490,7 @@ handle_set_command(const char *args)
             }
         } else if (len == 4 && strncmp(ptr, "noic", 4) == 0) {
             if (eq) {
-                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
                 return 1;
             }
             if (query) {
@@ -500,7 +500,7 @@ handle_set_command(const char *args)
             }
         } else if (len == 12 && strncmp(ptr, "noignorecase", 12) == 0) {
             if (eq) {
-                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
                 return 1;
             }
             if (query) {
@@ -510,7 +510,7 @@ handle_set_command(const char *args)
             }
         } else if (len == 2 && strncmp(ptr, "ro", 2) == 0) {
             if (eq) {
-                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
                 return 1;
             }
             if (query) {
@@ -520,7 +520,7 @@ handle_set_command(const char *args)
             }
         } else if (len == 8 && strncmp(ptr, "readonly", 8) == 0) {
             if (eq) {
-                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
                 return 1;
             }
             if (query) {
@@ -530,7 +530,7 @@ handle_set_command(const char *args)
             }
         } else if (len == 4 && strncmp(ptr, "noro", 4) == 0) {
             if (eq) {
-                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
                 return 1;
             }
             if (query) {
@@ -540,7 +540,7 @@ handle_set_command(const char *args)
             }
         } else if (len == 10 && strncmp(ptr, "noreadonly", 10) == 0) {
             if (eq) {
-                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
                 return 1;
             }
             if (query) {
@@ -550,7 +550,7 @@ handle_set_command(const char *args)
             }
         } else if (len == 2 && strncmp(ptr, "nu", 2) == 0) {
             if (eq) {
-                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
                 return 1;
             }
             if (query) {
@@ -560,7 +560,7 @@ handle_set_command(const char *args)
             }
         } else if (len == 6 && strncmp(ptr, "number", 6) == 0) {
             if (eq) {
-                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
                 return 1;
             }
             if (query) {
@@ -570,7 +570,7 @@ handle_set_command(const char *args)
             }
         } else if (len == 4 && strncmp(ptr, "nonu", 4) == 0) {
             if (eq) {
-                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
                 return 1;
             }
             if (query) {
@@ -580,7 +580,7 @@ handle_set_command(const char *args)
             }
         } else if (len == 8 && strncmp(ptr, "nonumber", 8) == 0) {
             if (eq) {
-                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
                 return 1;
             }
             if (query) {
@@ -590,7 +590,7 @@ handle_set_command(const char *args)
             }
         } else if (len == 2 && strncmp(ptr, "li", 2) == 0) {
             if (eq) {
-                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
                 return 1;
             }
             if (query) {
@@ -600,7 +600,7 @@ handle_set_command(const char *args)
             }
         } else if (len == 4 && strncmp(ptr, "list", 4) == 0) {
             if (eq) {
-                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
                 return 1;
             }
             if (query) {
@@ -610,7 +610,7 @@ handle_set_command(const char *args)
             }
         } else if (len == 4 && strncmp(ptr, "noli", 4) == 0) {
             if (eq) {
-                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
                 return 1;
             }
             if (query) {
@@ -620,7 +620,7 @@ handle_set_command(const char *args)
             }
         } else if (len == 6 && strncmp(ptr, "nolist", 6) == 0) {
             if (eq) {
-                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
                 return 1;
             }
             if (query) {
@@ -630,7 +630,7 @@ handle_set_command(const char *args)
             }
         } else if (len == 2 && strncmp(ptr, "ws", 2) == 0) {
             if (eq) {
-                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
                 return 1;
             }
             if (query) {
@@ -640,7 +640,7 @@ handle_set_command(const char *args)
             }
         } else if (len == 8 && strncmp(ptr, "wrapscan", 8) == 0) {
             if (eq) {
-                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
                 return 1;
             }
             if (query) {
@@ -650,7 +650,7 @@ handle_set_command(const char *args)
             }
         } else if (len == 4 && strncmp(ptr, "nows", 4) == 0) {
             if (eq) {
-                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
                 return 1;
             }
             if (query) {
@@ -660,7 +660,7 @@ handle_set_command(const char *args)
             }
         } else if (len == 10 && strncmp(ptr, "nowrapscan", 10) == 0) {
             if (eq) {
-                fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
                 return 1;
             }
             if (query) {
@@ -678,7 +678,7 @@ handle_set_command(const char *args)
                 long val;
 
                 if (!value || value_len == 0 || value_len >= sizeof(buf)) {
-                    fprintf(stderr, "Bad tabstop value\n");
+                    exvi_report_error("Bad tabstop value");
                     return 1;
                 }
                 memcpy(buf, value, value_len);
@@ -686,7 +686,7 @@ handle_set_command(const char *args)
                 val = strtol(buf, &num_end, 10);
                 if (!num_end || *num_end != '\0' || val < EXVI_MIN_TABSTOP
                         || val > EXVI_MAX_TABSTOP) {
-                    fprintf(stderr, "Bad tabstop value\n");
+                    exvi_report_error("Bad tabstop value");
                     return 1;
                 }
                 option_tabstop = (int)val;
@@ -698,7 +698,7 @@ handle_set_command(const char *args)
                 char *copy;
 
                 if (!value || value_len == 0) {
-                    fprintf(stderr, "Bad tags value\n");
+                    exvi_report_error("Bad tags value");
                     return 1;
                 }
                 copy = malloc(value_len + 1);
@@ -712,7 +712,7 @@ handle_set_command(const char *args)
                 free(copy);
             }
         } else {
-            fprintf(stderr, "Unknown option: %.*s\n", (int)(end - ptr), ptr);
+            exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
             return 1;
         }
 
@@ -733,7 +733,7 @@ exvi_write_allowed(buffer_t *b, const char *filename, int force)
     if (filename && b->filename && strcmp(filename, b->filename) != 0) {
         return 1;
     }
-    fprintf(stderr, "File is read only (add ! to override)\n");
+    exvi_report_error("File is read only (add ! to override)");
     return 0;
 }
 
@@ -747,7 +747,7 @@ handle_args_command(const char *args)
     }
     if (*ptr) {
         if (set_ex_arglist_from_words(ptr) != 0) {
-            fprintf(stderr, "Usage: args file ...\n");
+            exvi_report_error("Usage: args file ...");
             return 1;
         }
     }
@@ -772,7 +772,7 @@ handle_next_command(buffer_t *b, const char *args, int force)
     int replaced_args = 0;
 
     if (b->modified && !force) {
-        fprintf(stderr, "No write since last change (add ! to override)\n");
+        exvi_report_error("No write since last change (add ! to override)");
         return 1;
     }
     if (args) {
@@ -783,7 +783,7 @@ handle_next_command(buffer_t *b, const char *args, int force)
         }
         if (*ptr) {
             if (set_ex_arglist_from_words(ptr) != 0) {
-                fprintf(stderr, "Usage: next [file ...]\n");
+                exvi_report_error("Usage: next [file ...]");
                 return 1;
             }
             replaced_args = 1;
@@ -794,7 +794,7 @@ handle_next_command(buffer_t *b, const char *args, int force)
         return 1;
     }
     if (ex_arg_idx + 1 >= ex_argc) {
-        fprintf(stderr, "No more files\n");
+        exvi_report_error("No more files");
         return 1;
     }
     ex_arg_idx++;
@@ -806,11 +806,11 @@ int
 handle_prev_command(buffer_t *b, int force)
 {
     if (b->modified && !force) {
-        fprintf(stderr, "No write since last change (add ! to override)\n");
+        exvi_report_error("No write since last change (add ! to override)");
         return 1;
     }
     if (ex_arg_idx - 1 < 0) {
-        fprintf(stderr, "No previous files\n");
+        exvi_report_error("No previous files");
         return 1;
     }
     ex_arg_idx--;
@@ -822,11 +822,11 @@ int
 handle_rewind_command(buffer_t *b, int force)
 {
     if (b->modified && !force) {
-        fprintf(stderr, "No write since last change (add ! to override)\n");
+        exvi_report_error("No write since last change (add ! to override)");
         return 1;
     }
     if (ex_argc == 0) {
-        fprintf(stderr, "No files\n");
+        exvi_report_error("No files");
         return 1;
     }
     ex_arg_idx = 0;
@@ -841,14 +841,14 @@ handle_preserve_command(buffer_t *b)
         char *path = recover_path_for(b->filename);
 
         if (!path) {
-            fprintf(stderr, "Out of memory\n");
+            exvi_report_error("Out of memory");
             return 1;
         }
         buf_write_file(b, path, 0);
         printf("File preserved as %s\n", path);
         free(path);
     } else {
-        fprintf(stderr, "No modifications or filename to preserve\n");
+        exvi_report_error("No modifications or filename to preserve");
     }
     return 1;
 }
@@ -867,14 +867,14 @@ handle_recover_command(buffer_t *b, const char *args)
     } else if (b->filename) {
         recover_name = expand_filename_refs(b, b->filename);
     } else {
-        fprintf(stderr, "No current filename\n");
+        exvi_report_error("No current filename");
         return 1;
     }
     if (!recover_name) {
         return 1;
     }
     if (load_recover_into_buffer(b, recover_name) != 0) {
-        fprintf(stderr, "No recover file for %s\n", recover_name);
+        exvi_report_errorf("No recover file for %s", recover_name);
         free(recover_name);
         return 1;
     }
@@ -924,7 +924,7 @@ handle_write_command(buffer_t *b, const char *args, int explicit_range, int addr
         }
         buf_write_range(b, b->filename, append, write_addr1, write_addr2);
     } else {
-        fprintf(stderr, "No current filename\n");
+        exvi_report_error("No current filename");
     }
     return 1;
 }
@@ -942,7 +942,7 @@ handle_edit_command(buffer_t *b, const char *args, int force)
     }
 
     if (b->modified && !force) {
-        fprintf(stderr, "No write since last change (add ! to override)\n");
+        exvi_report_error("No write since last change (add ! to override)");
         return 1;
     }
 
@@ -985,7 +985,7 @@ handle_edit_command(buffer_t *b, const char *args, int force)
             printf("\"%s\" %d lines\n", b->filename, b->line_count);
         }
     } else {
-        fprintf(stderr, "No current filename\n");
+        exvi_report_error("No current filename");
     }
     free(old_filename);
     return 1;

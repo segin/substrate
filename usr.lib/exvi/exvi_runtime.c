@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdarg.h>
 #include <regex.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -177,13 +178,13 @@ expand_filename_refs(buffer_t *b, const char *arg)
     for (p = arg; *p; p++) {
         if (*p == '%') {
             if (!b->filename) {
-                fprintf(stderr, "No current filename\n");
+                exvi_report_error("No current filename");
                 return NULL;
             }
             out_len += strlen(b->filename);
         } else if (*p == '#') {
             if (!alternate_filename) {
-                fprintf(stderr, "No alternate filename\n");
+                exvi_report_error("No alternate filename");
                 return NULL;
             }
             out_len += strlen(alternate_filename);
@@ -380,11 +381,29 @@ exvi_report_shell_forbidden(void)
         ? "Shell commands not allowed in restricted mode"
         : "Shell commands not allowed in secure mode";
 
+    exvi_report_error(msg);
+}
+
+void
+exvi_report_error(const char *msg)
+{
     if (visual_mode) {
         exvi_set_pending_status(msg);
     } else {
         fprintf(stderr, "%s\n", msg);
     }
+}
+
+void
+exvi_report_errorf(const char *fmt, ...)
+{
+    va_list ap;
+    char msg[256];
+
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+    exvi_report_error(msg);
 }
 
 void

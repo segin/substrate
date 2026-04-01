@@ -160,7 +160,7 @@ Completed architecture milestones already in tree are intentionally omitted here
 - [x] Audit `global` and `v` against frozen-match-set semantics under destructive nested commands.
 - [ ] Deepen `substitute` flag handling and repeat behavior beyond the current baseline, including compatibility corner cases.
 - [x] Complete shell escape handling and shell-capable commands under secure/restricted mode, with consistent diagnostics.
-- [ ] Tighten command error reporting so unknown commands, missing operands, bad destinations, and force-required paths all fail predictably.
+- [x] Tighten command error reporting so unknown commands, missing operands, bad destinations, and force-required paths all fail predictably.
 
 #### 2.3 Buffer, undo, registers, and state model
 

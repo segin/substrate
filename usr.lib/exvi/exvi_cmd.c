@@ -307,7 +307,7 @@ handle_print_command(buffer_t *b, const char *cmd, int explicit_range, int addr1
         set_default_current_range(b, &addr1, &addr2);
     }
     if (addr1 < 1 || addr2 < 1) {
-        fprintf(stderr, "No current line\n");
+        exvi_report_error("No current line");
         return 1;
     }
     numbered = (cmd[0] == '#' || strncmp(cmd, "number", 6) == 0
@@ -338,12 +338,12 @@ handle_mark_command(buffer_t *b, const char *cmd, const char *args, int addr2)
         ptr++;
     }
     if (*ptr < 'a' || *ptr > 'z') {
-        fprintf(stderr, "Usage: mark <a-z>\n");
+        exvi_report_error("Usage: mark <a-z>");
         return 1;
     }
     target = (addr2 != -1) ? addr2 : buf_current_line(b);
     if (target < 1) {
-        fprintf(stderr, "No current line\n");
+        exvi_report_error("No current line");
         return 1;
     }
     b->marks[*ptr - 'a'] = buf_get_line(b, target);
@@ -430,15 +430,11 @@ handle_copy_command(buffer_t *b, const char *args, int explicit_range, int addr1
         set_default_current_range(b, &addr1, &addr2);
     }
     if (parse_error) {
-        if (visual_mode) {
-            exvi_set_pending_status("Bad address");
-        } else {
-            fprintf(stderr, "Bad address\n");
-        }
+        exvi_report_error("Bad address");
         return 1;
     }
     if (dest == -1) {
-        fprintf(stderr, "Destination required\n");
+        exvi_report_error("Destination required");
         return 1;
     }
 
@@ -467,19 +463,15 @@ handle_move_command(buffer_t *b, const char *args, int explicit_range, int addr1
         set_default_current_range(b, &addr1, &addr2);
     }
     if (parse_error) {
-        if (visual_mode) {
-            exvi_set_pending_status("Bad address");
-        } else {
-            fprintf(stderr, "Bad address\n");
-        }
+        exvi_report_error("Bad address");
         return 1;
     }
     if (dest == -1) {
-        fprintf(stderr, "Destination required\n");
+        exvi_report_error("Destination required");
         return 1;
     }
     if (addr1 != -1 && addr2 != -1 && dest >= addr1 && dest <= addr2) {
-        fprintf(stderr, "Destination not outside move range\n");
+        exvi_report_error("Destination not outside move range");
         return 1;
     }
 

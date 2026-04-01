@@ -245,7 +245,7 @@ handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
             return 1;
         }
         if (exvi_frontend == EXVI_FRONTEND_EX && b->modified) {
-            fprintf(stderr, "No write since last change (add ! to override)\n");
+            exvi_report_error("No write since last change (add ! to override)");
             return 1;
         }
         if (exvi_frontend == EXVI_FRONTEND_EX) {
@@ -283,14 +283,14 @@ handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
         return handle_set_command(args);
     } else if (match_command(cmd, "quit", "q", &args, &force)) {
         if (b->modified && !force) {
-            fprintf(stderr, "No write since last change (add ! to override)\n");
+            exvi_report_error("No write since last change (add ! to override)");
             return 1;
         }
         exit(0);
     } else if (match_command(cmd, "xit", "x", &args, &force)
         || match_command(cmd, "wq", NULL, &args, &force)) {
         if (!b->filename) {
-            fprintf(stderr, "No current filename\n");
+            exvi_report_error("No current filename");
             return 1;
         }
         if (!exvi_write_allowed(b, b->filename, force)) {

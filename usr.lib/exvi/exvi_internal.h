@@ -103,6 +103,8 @@ void exvi_init_registers(void);
 void exvi_free_registers(void);
 void exvi_set_pending_status(const char *msg);
 int exvi_take_pending_status(char *buf, size_t buf_size);
+void exvi_report_error(const char *msg);
+void exvi_report_errorf(const char *fmt, ...);
 void exvi_report_shell_forbidden(void);
 void exvi_cleanup_session_state(void);
 void exvi_set_cli_arglist(int argc, char **argv, int optind);
