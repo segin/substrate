@@ -1109,6 +1109,7 @@ vi_ensure_current_line(buffer_t *b)
     }
     b->empty_origin = 1;
     b->cur = buf_insert_after(b, NULL, "");
+    b->trailing_newline = 0;
     return b->cur;
 }
 
@@ -1125,6 +1126,7 @@ vi_ensure_visible_line(buffer_t *b)
     }
     b->empty_origin = 1;
     b->cur = buf_insert_after(b, NULL, "");
+    b->trailing_newline = 0;
     b->modified = was_modified;
 }
 

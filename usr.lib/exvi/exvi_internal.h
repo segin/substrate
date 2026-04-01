@@ -25,6 +25,7 @@ typedef struct {
     line_t *tail;
     line_t *cur;
     int line_count;
+    int trailing_newline;
     char *filename;
     int modified;
     int empty_origin;

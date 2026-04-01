@@ -1031,21 +1031,27 @@ handle_read_command(buffer_t *b, const char *args, int addr2)
 
     if (f) {
         int lines_read = 0;
+        int last_had_newline = 0;
         char *line = NULL;
         size_t cap = 0;
         ssize_t ret;
         int dest = default_read_destination(b, addr2);
         line_t *pos = buf_get_line(b, dest);
+        int inserting_at_eof = (pos == b->tail);
 
         if (addr2 == -1 && b->empty_origin && b->line_count == 1 &&
             b->head == b->tail && b->head && b->head->len == 0) {
             replace_empty_line = 1;
             pos = NULL;
+            inserting_at_eof = 1;
         }
 
         while ((ret = getline(&line, &cap, f)) != -1) {
             if (ret > 0 && line[ret - 1] == '\n') {
                 line[ret - 1] = '\0';
+                last_had_newline = 1;
+            } else {
+                last_had_newline = 0;
             }
             if (replace_empty_line) {
                 char *text = strdup(line);
@@ -1067,6 +1073,7 @@ handle_read_command(buffer_t *b, const char *args, int addr2)
                 b->cur = b->head;
                 b->modified = 1;
                 b->empty_origin = 0;
+                b->trailing_newline = 1;
                 pos = b->head;
                 replace_empty_line = 0;
             } else {
@@ -1080,6 +1087,10 @@ handle_read_command(buffer_t *b, const char *args, int addr2)
             pclose(f);
         } else {
             fclose(f);
+        }
+
+        if (lines_read > 0 && inserting_at_eof) {
+            b->trailing_newline = last_had_newline;
         }
 
         if (!batch_mode && display_name) {

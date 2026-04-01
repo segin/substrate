@@ -177,7 +177,7 @@ All other historical `ex` commands and aliases are currently outside the support
 - [x] Finish `read`, `read !cmd`, and insertion-point behavior for empty buffers, addressed reads, and shell-command reads.
 - [x] Audit `global` and `v` against frozen-match-set semantics under destructive nested commands.
 - [x] Finish the remaining `substitute` compatibility work by making the supported flag/repeat contract explicit and testing it end to end:
-  - supported flags are `g`, `p`, `#`, and `l`; order is flexible, duplicate or unsupported flags report `Bad substitute flags`,
+  - supported flags are `g`, `p`, `#`, and `l`; order is flexible, repeated supported flags are normalized away, and unsupported flags report `Bad substitute flags`,
   - `:s` with no delimiter repeats the last successful substitute on the addressed range using the saved replacement and saved `g` state,
   - empty-pattern `:s//.../` reuses the last substitute/search regex,
   - `&` repeats the last successful substitute without implicitly remembering `g`, while explicit `&g`, `&p`, `&#`, and `&l` remain supported,
@@ -188,7 +188,7 @@ All other historical `ex` commands and aliases are currently outside the support
 #### 2.3 Buffer, undo, registers, and state model
 
 - [ ] Replace the current single-snapshot undo model with a real multi-change undo/redo transaction model if historical parity requires it.
-- [ ] Audit exact trailing-newline, empty-buffer, and empty-file semantics across load, edit, write, append, preserve, and recover.
+- [x] Audit exact trailing-newline, empty-buffer, and empty-file semantics across load, edit, write, append, preserve, and recover.
 - [ ] Complete register behavior so linewise vs charwise register typing is consistent across `ex` and `vi`.
 - [ ] Expand `:set` from `number`, `list`, and `tabstop` to the supported POSIX/BSD-first option matrix.
 - [x] Implement readonly/view option state, forced-write interactions, and option-driven command restrictions.

@@ -455,6 +455,56 @@ run_recover_test() {
     rm -f "$file" "$file.recover"
 }
 
+run_file_bytes_test() {
+    local name="$1"
+    local init_text="$2"
+    local script="$3"
+    local expected_hex="$4"
+    local file
+    local actual_hex
+
+    file=$(mktemp)
+    printf "%b" "$init_text" >"$file"
+    printf "%b" "$script" | "$EX_BIN" -s "$file" >/dev/null 2>&1 || true
+    actual_hex=$(od -An -tx1 -v "$file" | tr -d ' \n')
+
+    if [ "$actual_hex" != "$expected_hex" ]; then
+        fail "$name"
+        printf 'expected hex: %s\nactual hex: %s\n' "$expected_hex" "$actual_hex"
+        rm -f "$file" "$file.recover"
+        return
+    fi
+
+    pass "$name"
+    rm -f "$file" "$file.recover"
+}
+
+run_recover_bytes_test() {
+    local name="$1"
+    local init_text="$2"
+    local script="$3"
+    local recover_script="$4"
+    local expected_hex="$5"
+    local file
+    local actual_hex
+
+    file=$(mktemp)
+    printf "%b" "$init_text" >"$file"
+    printf "%b" "$script" | "$EX_BIN" -s "$file" >/dev/null 2>&1 || true
+    printf "%b" "$recover_script" | "$EX_BIN" -s -r "$file" >/dev/null 2>&1 || true
+    actual_hex=$(od -An -tx1 -v "$file" | tr -d ' \n')
+
+    if [ "$actual_hex" != "$expected_hex" ]; then
+        fail "$name"
+        printf 'expected hex: %s\nactual hex: %s\n' "$expected_hex" "$actual_hex"
+        rm -f "$file" "$file.recover"
+        return
+    fi
+
+    pass "$name"
+    rm -f "$file" "$file.recover"
+}
+
 run_write_file_test() {
     local name="$1"
     local init_text="$2"
@@ -1157,6 +1207,37 @@ run_recover_test "Preserve and -r recover modified buffer" \
     "RECOVERED
 two"
 
+run_file_bytes_test "Write preserves missing trailing newline" \
+    "abc" \
+    ":wq!\n" \
+    "616263"
+
+run_file_bytes_test "Write preserves empty file bytes" \
+    "" \
+    ":wq!\n" \
+    ""
+
+run_file_bytes_test "Write preserves newline-only file bytes" \
+    "\n" \
+    ":wq!\n" \
+    "0a"
+
+run_file_bytes_test "Append after no-eol file creates terminated new last line" \
+    "abc" \
+    ":a\ndef\n.\n:wq!\n" \
+    "6162630a6465660a"
+
+run_file_bytes_test "Append blank line to empty file creates one-byte newline file" \
+    "" \
+    ":a\n\n.\n:wq!\n" \
+    "0a"
+
+run_recover_bytes_test "Recover preserves missing trailing newline" \
+    "abc" \
+    ":1s/c/C/\n:preserve\n:q!\n" \
+    ":wq!\n" \
+    "616243"
+
 run_tag_test "Tag jump and pop restore prior location" \
     "alpha\nbeta\ngamma\n" \
     "beta\tsample.txt\t2\n" \
@@ -1246,12 +1327,10 @@ run_stdout_oracle_test "Substitute mixed print flags match vim" \
     "a a\n" \
     ":1s/a/A/lgp\n:q!\n"
 
-run_file_stderr_status_test "Substitute duplicate flags are rejected" \
+run_stdout_test "Substitute duplicate flags are normalized" \
     "a a\n" \
     ":1s/a/A/ggpp\n:q!\n" \
-    0 \
-    "Bad substitute flags" \
-    "a a\n"
+    "A A"
 
 run_stdout_oracle_test "Repeat substitute p flag matches vim" \
     "a a\na a\n" \
