@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 
 import importlib.util
+import fcntl
 import os
+import pty
+import shutil
+import signal
+import struct
 import subprocess
 import sys
 import tempfile
+import termios
 
 
 def require(cond, msg):
@@ -19,6 +25,41 @@ def load_pty_helpers():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def interrupt_vi_session(helpers, vi_path, initial_text, key_steps, extra_args=None):
+    temp_dir = tempfile.mkdtemp(prefix="exvi-")
+    temp_path = os.path.join(temp_dir, "buffer.txt")
+    with open(temp_path, "w", encoding="utf-8") as f:
+        f.write(initial_text)
+
+    pid, master_fd = pty.fork()
+    if pid == 0:
+        argv = [vi_path]
+        if extra_args:
+            argv.extend(extra_args)
+        argv.append(temp_path)
+        os.chdir(temp_dir)
+        os.execv(vi_path, argv)
+
+    fcntl.ioctl(master_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+    output = helpers.read_some(master_fd, 0.4)
+    for step in key_steps:
+        os.write(master_fd, step)
+        output += helpers.read_some(master_fd, 0.2)
+    os.kill(pid, signal.SIGTERM)
+    output += helpers.read_some(master_fd, 0.2)
+    _, status = os.waitpid(pid, 0)
+    os.close(master_fd)
+
+    recover_path = temp_path + ".recover"
+    recovered = None
+    if os.path.exists(recover_path):
+        with open(recover_path, "r", encoding="utf-8") as f:
+            recovered = f.read()
+
+    return (os.waitstatus_to_exitcode(status), output.decode("latin1", "replace"),
+            recovered, temp_path, temp_dir)
 
 
 def main():
@@ -59,6 +100,37 @@ def main():
     require(exit_code == 0, f"vi -r recovery exited with status {exit_code}")
     require("recovered, 1 lines" in decoded, "vi -r missing recovered status")
     require(saved == "one\n", f"vi -r unexpectedly modified file: {saved!r}")
+
+    exit_code, decoded, recovered, path, temp_dir = interrupt_vi_session(
+        helpers,
+        vi_path,
+        "one\n",
+        [b"i", b"X", b"\x1b"],
+    )
+    try:
+        require(exit_code in (-signal.SIGTERM, 1),
+                f"interrupted vi status mismatch: {exit_code}")
+        require(recovered == "Xone\n",
+                f"interrupted vi recover contents mismatch: {recovered!r}")
+
+        pid, master_fd = pty.fork()
+        if pid == 0:
+            os.chdir(os.path.dirname(path))
+            os.execv(vi_path, [vi_path, "-r", path])
+        fcntl.ioctl(master_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+        recover_output = helpers.read_some(master_fd, 0.4)
+        os.write(master_fd, b":q!\r")
+        recover_output += helpers.read_some(master_fd, 0.3)
+        _, status = os.waitpid(pid, 0)
+        os.close(master_fd)
+        require(os.waitstatus_to_exitcode(status) == 0,
+                "interrupted vi -r status mismatch")
+        require("recovered, 1 lines" in recover_output.decode("latin1", "replace"),
+                "interrupted vi -r missing recovered status")
+    finally:
+        if os.path.exists(path + ".recover"):
+            os.unlink(path + ".recover")
+        shutil.rmtree(temp_dir)
 
     exit_code, decoded, saved = helpers.run_vi_session(
         vi_path,

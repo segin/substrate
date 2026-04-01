@@ -241,7 +241,7 @@ Completed architecture milestones already in tree are intentionally omitted here
 - [x] Complete multi-file arglist reporting and navigation interactions from both `ex` and `vi`.
 - [x] Finalize `.exrc` security policy, ownership checks, directory policy, and local-vs-home precedence.
 - [ ] Harden preserve/recover format, crash-time preserve behavior, and recover-file cleanup.
-- [ ] Add tests for interrupted sessions, recover-on-startup flows, and tag/arglist state across file switches.
+- [x] Add tests for interrupted sessions, recover-on-startup flows, and tag/arglist state across file switches.
 
 ### 6. Multibyte, locale, and display-width correctness
 

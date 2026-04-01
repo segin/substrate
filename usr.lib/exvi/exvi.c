@@ -568,6 +568,11 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
         load_startup_commands(&buf, do_command);
     }
 
+    global_buf_for_sighandler = &buf;
+    signal(SIGINT, handle_sigint);
+    signal(SIGHUP, handle_sigterm);
+    signal(SIGTERM, handle_sigterm);
+
 enter_visual:
     if (visual_mode) {
         int ret;
@@ -590,11 +595,6 @@ enter_visual:
             goto out;
         }
     }
-
-    global_buf_for_sighandler = &buf;
-    signal(SIGINT, handle_sigint);
-    signal(SIGHUP, handle_sigterm);
-    signal(SIGTERM, handle_sigterm);
 
     jump_status = setjmp(main_loop_jmp);
     if (jump_status == EXVI_EXIT_VISUAL_HANDOFF) {
