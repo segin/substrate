@@ -10,6 +10,10 @@
 #include <sys/wait.h>
 #include <errno.h>
 
+#define EXVI_SUB_PRINT_PLAIN  0x01
+#define EXVI_SUB_PRINT_NUMBER 0x02
+#define EXVI_SUB_PRINT_LIST   0x04
+
 static void
 print_line_text(line_t *l, int listed)
 {
@@ -102,7 +106,7 @@ default_read_destination(buffer_t *b, int addr2)
 
 static int
 apply_substitute_range(buffer_t *b, int addr1, int addr2, const char *pattern,
-    const char *replacement, int global, int print_mode)
+    const char *replacement, int global, int print_flags)
 {
     regex_t re;
 
@@ -187,13 +191,14 @@ apply_substitute_range(buffer_t *b, int addr1, int addr2, const char *pattern,
                 l->len = new_len;
                 b->modified = 1;
                 b->cur = l;
-                if (print_mode == 'p') {
-                    print_line_text(l, 0);
-                } else if (print_mode == '#') {
+                if (print_flags & EXVI_SUB_PRINT_NUMBER) {
                     print_line_number_prefix(addr1 + i);
-                    print_line_text(l, 0);
-                } else if (print_mode == 'l') {
+                }
+                if (print_flags & EXVI_SUB_PRINT_LIST) {
                     print_line_text(l, 1);
+                } else if ((print_flags & EXVI_SUB_PRINT_PLAIN)
+                    || (print_flags & EXVI_SUB_PRINT_NUMBER)) {
+                    print_line_text(l, 0);
                 }
             } else {
                 free(new_text);
@@ -203,6 +208,27 @@ apply_substitute_range(buffer_t *b, int addr1, int addr2, const char *pattern,
     }
 
     regfree(&re);
+    return 1;
+}
+
+static int
+parse_substitute_flags(const char *spec, int *global, int *print_mode)
+{
+    while (*spec) {
+        if (*spec == 'g') {
+            *global = 1;
+        } else if (*spec == 'p') {
+            *print_mode |= EXVI_SUB_PRINT_PLAIN;
+        } else if (*spec == '#') {
+            *print_mode |= EXVI_SUB_PRINT_NUMBER;
+        } else if (*spec == 'l') {
+            *print_mode |= EXVI_SUB_PRINT_LIST;
+        } else if (!isspace((unsigned char)*spec)) {
+            exvi_report_error("Bad substitute flags");
+            return 0;
+        }
+        spec++;
+    }
     return 1;
 }
 
@@ -609,6 +635,17 @@ handle_substitute_command(buffer_t *b, const char *args, int addr1, int addr2)
     }
     delim = *ptr;
     if (!delim || delim == '\n') {
+        if (!last_sub_pattern || !last_sub_replacement) {
+            return 1;
+        }
+        if (addr1 == -1) {
+            set_default_current_range(b, &addr1, &addr2);
+        }
+        if (addr1 > 0 && addr2 >= addr1
+            && apply_substitute_range(b, addr1, addr2, last_sub_pattern,
+                last_sub_replacement, last_sub_global, 0)) {
+            replace_saved_string(&last_search_pattern, last_sub_pattern);
+        }
         return 1;
     }
 
@@ -622,13 +659,10 @@ handle_substitute_command(buffer_t *b, const char *args, int addr1, int addr2)
         free(pat_raw);
         return 1;
     }
-    while (*spec) {
-        if (*spec == 'g') {
-            global = 1;
-        } else if (*spec == 'p' || *spec == '#' || *spec == 'l') {
-            print_mode = *spec;
-        }
-        spec++;
+    if (!parse_substitute_flags(spec, &global, &print_mode)) {
+        free(pat_raw);
+        free(repl_str);
+        return 1;
     }
 
     if (*pat_raw == '\0') {
@@ -677,13 +711,8 @@ handle_repeat_substitute_command(buffer_t *b, const char *args, int addr1,
     while (*ptr && isspace((unsigned char)*ptr)) {
         ptr++;
     }
-    while (*ptr) {
-        if (*ptr == 'g') {
-            global = 1;
-        } else if (*ptr == 'p' || *ptr == '#' || *ptr == 'l') {
-            print_mode = *ptr;
-        }
-        ptr++;
+    if (!parse_substitute_flags(ptr, &global, &print_mode)) {
+        return 1;
     }
     save_undo(b);
     if (addr1 == -1) {

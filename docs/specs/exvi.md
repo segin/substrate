@@ -153,19 +153,35 @@ Completed architecture milestones already in tree are intentionally omitted here
 
 #### 2.2 Command-set completeness and command semantics
 
-- [ ] Build a command/abbreviation matrix against the supported POSIX/BSD `ex` contract, then for every command still marked "supported but absent" in the dispatcher:
+- [x] Build a command/abbreviation matrix against the supported POSIX/BSD `ex` contract, then for every command still marked "supported but absent" in the dispatcher:
   - add the dispatcher entry and accepted abbreviation spellings,
   - add direct regression coverage for the success path and the primary error path,
   - or explicitly document the command as intentionally unsupported and remove it from the supported contract.
+- Supported shared `ex`/visual-`:` command contract:
+
+| Command family | Accepted forms |
+| --- | --- |
+| visual handoff | `visual`, `vi` |
+| version | `version`, `ver` |
+| argument list | `args`, `ar`, `next`, `n`, `prev`, `rewind`, `rew` |
+| recovery/session | `preserve`, `pre`, `recover`, `rec`, `pop`, `po` |
+| tags/options | `tag`, `ta`, `tags`, `set`, `se` |
+| file lifecycle | `quit`, `q`, `xit`, `x`, `wq`, `write`, `w`, `edit`, `e`, `read`, `r` |
+| line/buffer ops | `delete`, `d`, `undo`, `u`, `put`, `pu`, `print`, `p`, `number`, `#`, `list`, `l`, `=`, `mark`, `ma`, `k{a-z}`, `file`, `f`, `append`, `a`, `insert`, `i`, `change`, `c` |
+| movement/copy ops | `copy`, `co`, `t`, `move`, `m`, `join`, `j`, `yank`, `y` |
+| regex/edit ops | `substitute`, `s`, `&`, `global`, `g`, `v`, `!` |
+
+All other historical `ex` commands and aliases are currently outside the supported contract unless and until they are added here with tests.
 - [x] Audit `print`, `number`, `list`, and `=` for exact current-line side effects and diagnostics.
 - [x] Finish `write`, `write!`, append-write, and write-to-command semantics for all range/error/readonly cases.
 - [x] Finish `read`, `read !cmd`, and insertion-point behavior for empty buffers, addressed reads, and shell-command reads.
 - [x] Audit `global` and `v` against frozen-match-set semantics under destructive nested commands.
-- [ ] Finish the remaining `substitute` compatibility work by making the supported flag/repeat contract explicit and testing it end to end:
-  - decide and document the exact supported flag set beyond the current `g`, `p`, `#`, and `l` baseline,
-  - make unknown or unsupported flags fail with predictable diagnostics,
-  - verify how `:s`, empty-pattern reuse, `&`, and any supported repeat aliases update or reuse the last-search and last-substitute state,
-  - add oracle tests for mixed flag orders, duplicate flags, no-match cases, addressed ranges, and repeat-after-failure behavior.
+- [x] Finish the remaining `substitute` compatibility work by making the supported flag/repeat contract explicit and testing it end to end:
+  - supported flags are `g`, `p`, `#`, and `l`; order is flexible, duplicate or unsupported flags report `Bad substitute flags`,
+  - `:s` with no delimiter repeats the last successful substitute on the addressed range using the saved replacement and saved `g` state,
+  - empty-pattern `:s//.../` reuses the last substitute/search regex,
+  - `&` repeats the last successful substitute without implicitly remembering `g`, while explicit `&g`, `&p`, `&#`, and `&l` remain supported,
+  - mixed flag orders, duplicate flags, no-match cases, addressed ranges, and repeat-after-failure behavior are covered by direct regressions and oracle checks.
 - [x] Complete shell escape handling and shell-capable commands under secure/restricted mode, with consistent diagnostics.
 - [x] Tighten command error reporting so unknown commands, missing operands, bad destinations, and force-required paths all fail predictably.
 

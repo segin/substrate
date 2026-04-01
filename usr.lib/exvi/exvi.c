@@ -261,7 +261,7 @@ handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
             printf("%s\n", version);
         }
         return 1;
-    } else if (match_command(cmd, "args", NULL, &args, NULL)) {
+    } else if (match_command(cmd, "args", "ar", &args, NULL)) {
         return handle_args_command(args);
     } else if (match_command(cmd, "next", "n", &args, &force)) {
         return handle_next_command(b, args, force);
@@ -277,9 +277,9 @@ handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
         return handle_pop_command(b, force);
     } else if (match_command(cmd, "tags", NULL, &args, NULL)) {
         return handle_tags_command(b);
-    } else if (match_command(cmd, "tag", NULL, &args, NULL)) {
+    } else if (match_command(cmd, "tag", "ta", &args, NULL)) {
         return handle_tag_command(b, args, do_command);
-    } else if (match_command(cmd, "set", NULL, &args, NULL)) {
+    } else if (match_command(cmd, "set", "se", &args, NULL)) {
         return handle_set_command(args);
     } else if (match_command(cmd, "quit", "q", &args, &force)) {
         if (b->modified && !force) {
@@ -330,7 +330,7 @@ handle_buffer_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
         return handle_print_command(b, cmd, explicit_range, addr1, addr2);
     } else if (cmd[0] == '=') {
         return handle_equal_command(b, explicit_range, addr2);
-    } else if (cmd[0] == 'k' || match_command(cmd, "mark", NULL, &args, NULL)) {
+    } else if (cmd[0] == 'k' || match_command(cmd, "mark", "ma", &args, NULL)) {
         return handle_mark_command(b, cmd, args, addr2);
     } else if (match_command(cmd, "file", "f", &args, NULL)) {
         return handle_file_command(b, args);

@@ -721,6 +721,49 @@ run_stderr_status_test() {
     rm -f "$file" "$stdout_file" "$stderr_file"
 }
 
+run_file_stderr_status_test() {
+    local name="$1"
+    local init_text="$2"
+    local script="$3"
+    local expected_status="$4"
+    local expected_stderr="$5"
+    local expected_file="$6"
+    local file
+    local stdout_file
+    local stderr_file
+    local status
+    local stderr_text
+
+    file=$(mktemp)
+    stdout_file=$(mktemp)
+    stderr_file=$(mktemp)
+    printf "%b" "$init_text" >"$file"
+
+    set +e
+    printf "%b" "$script" | "$EX_BIN" -s "$file" >"$stdout_file" 2>"$stderr_file"
+    status=$?
+    set -e
+
+    stderr_text=$(cat "$stderr_file")
+    if [ "$status" -ne "$expected_status" ] || [ "$stderr_text" != "$expected_stderr" ]; then
+        fail "$name"
+        printf 'expected status=%s stderr=%s\nactual status=%s stderr=%s\n' \
+            "$expected_status" "$expected_stderr" "$status" "$stderr_text"
+        rm -f "$file" "$stdout_file" "$stderr_file"
+        return
+    fi
+
+    if ! diff -u <(printf "%b" "$expected_file") "$file" >/dev/null; then
+        fail "$name"
+        diff -u <(printf "%b" "$expected_file") "$file" || true
+        rm -f "$file" "$stdout_file" "$stderr_file"
+        return
+    fi
+
+    pass "$name"
+    rm -f "$file" "$stdout_file" "$stderr_file"
+}
+
 run_nofile_stderr_status_test() {
     local name="$1"
     local script="$2"
@@ -1002,6 +1045,12 @@ run_stdout_with_fileargs_test "Args prints active argument list" \
     ":args\n:q!\n" \
     "[__FILE1__] __FILE2__ "
 
+run_stdout_with_fileargs_test "Args abbreviation prints active argument list" \
+    "one\n" \
+    "two\n" \
+    ":ar\n:q!\n" \
+    "[__FILE1__] __FILE2__ "
+
 run_stdout_with_fileargs_test "Next advances to next argument file" \
     "one\n" \
     "two\n" \
@@ -1117,6 +1166,14 @@ beta
 beta
 alpha"
 
+run_tag_test "Tag abbreviation jumps to tag" \
+    "alpha\nbeta\ngamma\n" \
+    "beta\tsample.txt\t2\n" \
+    ":1p\n:ta beta\n:p\n:q!\n" \
+    "alpha
+beta
+beta"
+
 run_tag_multifile_test "Cross-file tag jump and pop restore source file" \
     "src-one\nsrc-two\n" \
     "dst-one\ndst-two\n" \
@@ -1153,6 +1210,10 @@ run_oracle_test "Substitute empty pattern reuses previous regex" \
     "alpha beta\nbeta beta\n" \
     "1s/beta/BETA/\n2s//BETA/g\nwq\n"
 
+run_oracle_test "Bare substitute repeats previous substitute" \
+    "a a\na a\n" \
+    "1s/a/A/\n2s\nwq\n"
+
 run_oracle_test "Repeat substitute with ampersand" \
     "alpha beta\nbeta gamma\n" \
     "1s/beta/BETA/\n2&\nwq\n"
@@ -1181,6 +1242,17 @@ run_stdout_oracle_test "Substitute gp flag matches vim" \
     "a a a\n" \
     ":1s/a/A/gp\n:q!\n"
 
+run_stdout_oracle_test "Substitute mixed print flags match vim" \
+    "a a\n" \
+    ":1s/a/A/lgp\n:q!\n"
+
+run_file_stderr_status_test "Substitute duplicate flags are rejected" \
+    "a a\n" \
+    ":1s/a/A/ggpp\n:q!\n" \
+    0 \
+    "Bad substitute flags" \
+    "a a\n"
+
 run_stdout_oracle_test "Repeat substitute p flag matches vim" \
     "a a\na a\n" \
     ":1s/a/A/\n:2&p\n:q!\n"
@@ -1192,6 +1264,24 @@ run_stdout_oracle_test "Repeat substitute number flag matches vim" \
 run_stdout_oracle_test "Repeat substitute list flag matches vim" \
     "a a\na a\n" \
     ":1s/a/A/\n:2&l\n:q!\n"
+
+run_oracle_test "Substitute no-match keeps repeat state aligned with vim" \
+    "a a\na a\n" \
+    ":1s/a/A/\n:2s/x/X/\n:2s\n:wq!\n"
+
+run_file_stderr_status_test "Substitute rejects unknown flags" \
+    "a a\n" \
+    ":1s/a/A/z\n:q!\n" \
+    0 \
+    "Bad substitute flags" \
+    "a a\n"
+
+run_file_stderr_status_test "Repeat substitute rejects unknown flags" \
+    "a a\na a\n" \
+    ":1s/a/A/\n:2&z\n:q!\n" \
+    0 \
+    "Bad substitute flags" \
+    "a a\na a\n"
 
 run_startup_test "Safe .exrc is loaded" \
     "alpha\nbeta\n" \
@@ -1269,6 +1359,12 @@ run_stderr_status_test "Set rejects unknown option" \
     0 \
     "Unknown option: frobnicate"
 
+run_stderr_status_test "Set abbreviation rejects unknown option" \
+    "one\ntwo\n" \
+    ":se frobnicate\n:q!\n" \
+    0 \
+    "Unknown option: frobnicate"
+
 run_stderr_status_test "Print rejects empty buffer" \
     "" \
     ":p\n:q!\n" \
@@ -1343,6 +1439,18 @@ run_stderr_status_test "Bad mark reports bad address" \
     0 \
     "Bad address"
 
+run_stderr_status_test "Tag abbreviation requires operand" \
+    "one\ntwo\nthree\n" \
+    ":ta\n:q!\n" \
+    0 \
+    "Usage: tag <name>"
+
+run_stderr_status_test "Mark abbreviation requires mark name" \
+    "one\ntwo\nthree\n" \
+    ":ma 1\n:q!\n" \
+    0 \
+    "Usage: mark <a-z>"
+
 run_stderr_status_test "Unknown command reports diagnostic" \
     "one\ntwo\n" \
     ":bogus\n:q!\n" \
@@ -1352,6 +1460,11 @@ run_stderr_status_test "Unknown command reports diagnostic" \
 run_stdout_test "Set number query reports state" \
     "one\ntwo\n" \
     ":set number?\n:q!\n" \
+    "nonumber"
+
+run_stdout_test "Set abbreviation query reports state" \
+    "one\ntwo\n" \
+    ":se number?\n:q!\n" \
     "nonumber"
 
 run_stdout_test "Set list query reports state" \
