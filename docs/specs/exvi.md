@@ -153,12 +153,19 @@ Completed architecture milestones already in tree are intentionally omitted here
 
 #### 2.2 Command-set completeness and command semantics
 
-- [ ] Complete the remaining POSIX/BSD `ex` commands and accepted abbreviations that are still absent from the dispatcher.
+- [ ] Build a command/abbreviation matrix against the supported POSIX/BSD `ex` contract, then for every command still marked "supported but absent" in the dispatcher:
+  - add the dispatcher entry and accepted abbreviation spellings,
+  - add direct regression coverage for the success path and the primary error path,
+  - or explicitly document the command as intentionally unsupported and remove it from the supported contract.
 - [x] Audit `print`, `number`, `list`, and `=` for exact current-line side effects and diagnostics.
 - [x] Finish `write`, `write!`, append-write, and write-to-command semantics for all range/error/readonly cases.
 - [x] Finish `read`, `read !cmd`, and insertion-point behavior for empty buffers, addressed reads, and shell-command reads.
 - [x] Audit `global` and `v` against frozen-match-set semantics under destructive nested commands.
-- [ ] Deepen `substitute` flag handling and repeat behavior beyond the current baseline, including compatibility corner cases.
+- [ ] Finish the remaining `substitute` compatibility work by making the supported flag/repeat contract explicit and testing it end to end:
+  - decide and document the exact supported flag set beyond the current `g`, `p`, `#`, and `l` baseline,
+  - make unknown or unsupported flags fail with predictable diagnostics,
+  - verify how `:s`, empty-pattern reuse, `&`, and any supported repeat aliases update or reuse the last-search and last-substitute state,
+  - add oracle tests for mixed flag orders, duplicate flags, no-match cases, addressed ranges, and repeat-after-failure behavior.
 - [x] Complete shell escape handling and shell-capable commands under secure/restricted mode, with consistent diagnostics.
 - [x] Tighten command error reporting so unknown commands, missing operands, bad destinations, and force-required paths all fail predictably.
 
