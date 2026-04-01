@@ -447,6 +447,10 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
 
     exvi_reset_runtime(frontend);
     exvi_cleanup_session_state();
+    if (invoked_as(argv[0], "rex") || invoked_as(argv[0], "rvi")) {
+        restricted_mode = 1;
+        secure_mode = 1;
+    }
     if (invoked_as(argv[0], "view")) {
         option_readonly = 1;
     }

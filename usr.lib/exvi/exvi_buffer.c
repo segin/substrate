@@ -226,7 +226,7 @@ buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int ad
         FILE *f;
 
         if (secure_mode) {
-            fprintf(stderr, "Shell commands not allowed in secure mode\n");
+            exvi_report_shell_forbidden();
             return;
         }
         f = popen(filename + 1, "w");

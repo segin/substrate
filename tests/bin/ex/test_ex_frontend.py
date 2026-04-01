@@ -32,10 +32,11 @@ def require(cond, msg):
         raise SystemExit(1)
 
 
-def run_ex_pty(ex_path, argv, initial_timeout=0.4, command=b"q!\n", final_timeout=0.2):
+def run_ex_pty(ex_path, argv, initial_timeout=0.4, command=b"q!\n", final_timeout=0.2,
+               argv0=None):
     pid, master_fd = pty.fork()
     if pid == 0:
-        os.execv(ex_path, [ex_path] + argv)
+        os.execv(ex_path, [argv0 or ex_path] + argv)
 
     initial = read_some(master_fd, initial_timeout)
     if command is not None:
@@ -146,6 +147,87 @@ def main():
             saved = f2.read()
         require(saved == "forced\n",
                 f"readonly force-write ex saved wrong file contents: {saved!r}")
+    finally:
+        os.unlink(path)
+
+    with tempfile.NamedTemporaryFile("w", delete=False) as f:
+        f.write("alpha\n")
+        path = f.name
+    try:
+        exit_code, initial, decoded = run_ex_pty(
+            ex_path,
+            ["-S", path],
+            command=b"!true\nq!\n",
+            final_timeout=0.4,
+        )
+        require(exit_code == 0, f"secure ex shell escape exited with status {exit_code}")
+        require(initial == ":", f"secure ex shell escape missing prompt: {initial!r}")
+        require("Shell commands not allowed in secure mode" in decoded,
+                "secure ex shell escape missing diagnostic")
+        with open(path, "r", encoding="utf-8") as f2:
+            saved = f2.read()
+        require(saved == "alpha\n", f"secure ex shell escape modified file: {saved!r}")
+    finally:
+        os.unlink(path)
+
+    with tempfile.NamedTemporaryFile("w", delete=False) as f:
+        f.write("alpha\n")
+        path = f.name
+    try:
+        exit_code, initial, decoded = run_ex_pty(
+            ex_path,
+            ["-S", path],
+            command=b"r !printf 'A\\n'\nq!\n",
+            final_timeout=0.4,
+        )
+        require(exit_code == 0, f"secure ex shell read exited with status {exit_code}")
+        require(initial == ":", f"secure ex shell read missing prompt: {initial!r}")
+        require("Shell commands not allowed in secure mode" in decoded,
+                "secure ex shell read missing diagnostic")
+        with open(path, "r", encoding="utf-8") as f2:
+            saved = f2.read()
+        require(saved == "alpha\n", f"secure ex shell read modified file: {saved!r}")
+    finally:
+        os.unlink(path)
+
+    with tempfile.NamedTemporaryFile("w", delete=False) as f:
+        f.write("alpha\n")
+        path = f.name
+    try:
+        exit_code, initial, decoded = run_ex_pty(
+            ex_path,
+            ["-S", path],
+            command=b"w !cat\nq!\n",
+            final_timeout=0.4,
+        )
+        require(exit_code == 0, f"secure ex shell write exited with status {exit_code}")
+        require(initial == ":", f"secure ex shell write missing prompt: {initial!r}")
+        require("Shell commands not allowed in secure mode" in decoded,
+                "secure ex shell write missing diagnostic")
+        with open(path, "r", encoding="utf-8") as f2:
+            saved = f2.read()
+        require(saved == "alpha\n", f"secure ex shell write modified file: {saved!r}")
+    finally:
+        os.unlink(path)
+
+    with tempfile.NamedTemporaryFile("w", delete=False) as f:
+        f.write("alpha\n")
+        path = f.name
+    try:
+        exit_code, initial, decoded = run_ex_pty(
+            ex_path,
+            [path],
+            command=b"!true\nq!\n",
+            final_timeout=0.4,
+            argv0="rex",
+        )
+        require(exit_code == 0, f"restricted ex shell escape exited with status {exit_code}")
+        require(initial == ":", f"restricted ex shell escape missing prompt: {initial!r}")
+        require("Shell commands not allowed in restricted mode" in decoded,
+                "restricted ex shell escape missing diagnostic")
+        with open(path, "r", encoding="utf-8") as f2:
+            saved = f2.read()
+        require(saved == "alpha\n", f"restricted ex shell escape modified file: {saved!r}")
     finally:
         os.unlink(path)
 

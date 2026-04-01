@@ -98,6 +98,54 @@ def main():
     exit_code, decoded, saved = helpers.run_vi_session(
         vi_path,
         "one\n",
+        [b":!true\r", b":q!\r"],
+        final_keys=None,
+        extra_args=["-S"],
+    )
+    require(exit_code == 0, f"secure vi shell escape exited with status {exit_code}")
+    require("Shell commands not allowed in secure mode" in decoded,
+            "secure vi shell escape missing diagnostic")
+    require(saved == "one\n", f"secure vi shell escape unexpectedly modified file: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "one\n",
+        [b":r !printf 'A\\n'\r", b":q!\r"],
+        final_keys=None,
+        extra_args=["-S"],
+    )
+    require(exit_code == 0, f"secure vi shell read exited with status {exit_code}")
+    require("Shell commands not allowed in secure mode" in decoded,
+            "secure vi shell read missing diagnostic")
+    require(saved == "one\n", f"secure vi shell read unexpectedly modified file: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "one\n",
+        [b":w !cat\r", b":q!\r"],
+        final_keys=None,
+        extra_args=["-S"],
+    )
+    require(exit_code == 0, f"secure vi shell write exited with status {exit_code}")
+    require("Shell commands not allowed in secure mode" in decoded,
+            "secure vi shell write missing diagnostic")
+    require(saved == "one\n", f"secure vi shell write unexpectedly modified file: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "one\n",
+        [b":!true\r", b":q!\r"],
+        final_keys=None,
+        argv0="rvi",
+    )
+    require(exit_code == 0, f"restricted vi shell escape exited with status {exit_code}")
+    require("Shell commands not allowed in restricted mode" in decoded,
+            "restricted vi shell escape missing diagnostic")
+    require(saved == "one\n", f"restricted vi shell escape unexpectedly modified file: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "one\n",
         [b"i", b"X", b"\x1b", b":next\r", b":q!\r"],
         final_keys=None,
         file_args=["buffer.txt", "two.txt"],

@@ -39,6 +39,7 @@ typedef enum {
 } exvi_command_break_t;
 
 extern int secure_mode;
+extern int restricted_mode;
 extern int batch_mode;
 extern int visual_mode;
 extern int recover_mode;
@@ -102,6 +103,7 @@ void exvi_init_registers(void);
 void exvi_free_registers(void);
 void exvi_set_pending_status(const char *msg);
 int exvi_take_pending_status(char *buf, size_t buf_size);
+void exvi_report_shell_forbidden(void);
 void exvi_cleanup_session_state(void);
 void exvi_set_cli_arglist(int argc, char **argv, int optind);
 void exvi_set_owned_arglist(char **args, int argc);

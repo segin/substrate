@@ -1007,7 +1007,7 @@ handle_read_command(buffer_t *b, const char *args, int addr2)
 
     if (*ptr == '!') {
         if (secure_mode) {
-            fprintf(stderr, "Shell commands not allowed in secure mode\n");
+            exvi_report_shell_forbidden();
             return 1;
         }
         is_pipe = 1;

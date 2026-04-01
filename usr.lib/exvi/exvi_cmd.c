@@ -711,7 +711,7 @@ handle_shell_command(char *cmd)
     pid_t pid;
 
     if (secure_mode) {
-        fprintf(stderr, "Shell commands not allowed in secure mode\n");
+        exvi_report_shell_forbidden();
         return 1;
     }
     shell = getenv("SHELL");

@@ -10,6 +10,7 @@
 #include <sys/stat.h>
 
 int secure_mode = 0;
+int restricted_mode = 0;
 int batch_mode = 0;
 int visual_mode = 0;
 int recover_mode = 0;
@@ -373,6 +374,20 @@ exvi_take_pending_status(char *buf, size_t buf_size)
 }
 
 void
+exvi_report_shell_forbidden(void)
+{
+    const char *msg = restricted_mode
+        ? "Shell commands not allowed in restricted mode"
+        : "Shell commands not allowed in secure mode";
+
+    if (visual_mode) {
+        exvi_set_pending_status(msg);
+    } else {
+        fprintf(stderr, "%s\n", msg);
+    }
+}
+
+void
 handle_sigint(int sig)
 {
     (void)sig;
@@ -411,6 +426,7 @@ exvi_reset_runtime(exvi_frontend_t frontend)
 {
     exvi_frontend = frontend;
     secure_mode = 0;
+    restricted_mode = 0;
     batch_mode = 0;
     visual_mode = (frontend == EXVI_FRONTEND_VI);
     recover_mode = 0;
@@ -440,6 +456,7 @@ exvi_reset_runtime(exvi_frontend_t frontend)
 void
 exvi_cleanup_runtime(void)
 {
+    restricted_mode = 0;
     option_wrapscan = 1;
     option_ignorecase = 0;
     free(option_tags);
