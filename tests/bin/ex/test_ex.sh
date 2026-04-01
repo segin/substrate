@@ -902,6 +902,15 @@ run_oracle_test "Long copy command" "line1\nline2\nline3\n" "1,2copy\$\nwq\n"
 run_oracle_test "Long substitute command" "alpha beta\nbeta gamma\n" "1substitute/beta/BETA/\nwq\n"
 run_oracle_test "Long global command" "foo\nbar\nfoo\nbaz\n" "global/foo/delete\nwq\n"
 run_oracle_test "Percent range deletes whole file" "line1\nline2\nline3\n" "%delete\nwq\n"
+run_oracle_test "Delete updates unnamed register for put" \
+    "one\ntwo\nthree\n" \
+    "1delete\nput\nwq!\n"
+run_file_stderr_status_test "Change updates unnamed register for put" \
+    "one\ntwo\nthree\n" \
+    "1change\nX\n.\nput\nwq!\n" \
+    0 \
+    "" \
+    "X\none\ntwo\nthree\n"
 
 run_stdout_test "Search address with relative offset" \
     "alpha\nbeta\ngamma\ndelta\n" \

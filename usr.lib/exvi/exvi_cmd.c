@@ -268,6 +268,7 @@ handle_delete_command(buffer_t *b, int explicit_range, int addr1, int addr2)
     if (!explicit_range) {
         set_default_current_range(b, &addr1, &addr2);
     }
+    handle_yank_command(b, "", 1, addr1, addr2);
     save_undo(b);
     if (addr1 != -1 && addr2 != -1 && addr1 <= addr2) {
         for (int i = 0; i < (addr2 - addr1 + 1); i++) {
@@ -430,6 +431,7 @@ handle_input_command(buffer_t *b, int mode, int explicit_range, int addr1, int a
     if (!explicit_range) {
         set_default_current_range(b, &addr1, &addr2);
     }
+    handle_yank_command(b, "", 1, addr1, addr2);
     if (addr1 != -1 && addr2 != -1 && addr1 <= addr2) {
         for (int i = 0; i < (addr2 - addr1 + 1); i++) {
             line_t *l = buf_get_line(b, addr1);

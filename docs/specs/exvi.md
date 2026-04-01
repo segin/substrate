@@ -189,7 +189,7 @@ All other historical `ex` commands and aliases are currently outside the support
 
 - [ ] Replace the current single-snapshot undo model with a real multi-change undo/redo transaction model if historical parity requires it.
 - [x] Audit exact trailing-newline, empty-buffer, and empty-file semantics across load, edit, write, append, preserve, and recover.
-- [ ] Complete register behavior so linewise vs charwise register typing is consistent across `ex` and `vi`.
+- [x] Complete register behavior so linewise vs charwise register typing is consistent across `ex` and `vi`.
 - [ ] Expand `:set` from `number`, `list`, and `tabstop` to the supported POSIX/BSD-first option matrix.
 - [x] Implement readonly/view option state, forced-write interactions, and option-driven command restrictions.
 - [x] Implement search/substitute-related options once their supported policy is chosen, such as `ignorecase`, `magic`, `wrapscan`, and related behavior knobs.
