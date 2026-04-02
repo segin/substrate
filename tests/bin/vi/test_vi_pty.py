@@ -969,6 +969,104 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "abc def\n",
+        [b"0", b"R", b"X", b"Y", b"\x15", b"\x1b"],
+    )
+    require(exit_code == 0, f"replace-ctrl-u vi exited with status {exit_code}")
+    require("-- REPLACE --" in decoded, "missing replace-ctrl-u replace status")
+    require(saved == "abc def\n",
+            f"unexpected replace-ctrl-u buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc def\n",
+        [b"0", b"R", b"X", b"Y", b"\x17", b"\x1b"],
+    )
+    require(exit_code == 0, f"replace-ctrl-w vi exited with status {exit_code}")
+    require("-- REPLACE --" in decoded, "missing replace-ctrl-w replace status")
+    require(saved == "abc def\n",
+            f"unexpected replace-ctrl-w buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc def\n",
+        [b"0", b"R", b"X", b"Y", b"\x1b[127;5u", b"\x1b"],
+    )
+    require(exit_code == 0, f"replace-ctrl-backspace vi exited with status {exit_code}")
+    require("-- REPLACE --" in decoded, "missing replace-ctrl-backspace replace status")
+    require(saved == "abc def\n",
+            f"unexpected replace-ctrl-backspace buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc def\n",
+        [b"0", b"R", b"X", b"Y", b"\x1b[3;5~", b"\x1b"],
+    )
+    require(exit_code == 0, f"replace-ctrl-delete vi exited with status {exit_code}")
+    require("-- REPLACE --" in decoded, "missing replace-ctrl-delete replace status")
+    require(saved == "XYdef\n",
+            f"unexpected replace-ctrl-delete buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three\n",
+        [b"0", b"R", b"X", b"\x1b[1;5C", b"Y", b"\x1b[1;5D", b"Z", b"\x1b"],
+    )
+    require(exit_code == 0, f"replace-ctrl-left-right vi exited with status {exit_code}")
+    require("-- REPLACE --" in decoded, "missing replace-ctrl-left-right replace status")
+    require(saved == "Xne Zwo three\n",
+            f"unexpected replace-ctrl-left-right buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc def\n",
+        [b"0", b"R", b"X", b"Y", b"\x1b[H", b"Z", b"\x1b[F", b"\x1b[3~", b"\x1b"],
+    )
+    require(exit_code == 0, f"replace-home-end-delete vi exited with status {exit_code}")
+    require("-- REPLACE --" in decoded, "missing replace-home-end-delete replace status")
+    require(saved == "ZYc def\n",
+            f"unexpected replace-home-end-delete buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc\n",
+        [b"0", b"R", b"\x14", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"replace-ctrl-t vi exited with status {exit_code}")
+    require("-- REPLACE --" in decoded, "missing replace-ctrl-t replace status")
+    require(saved == "\tXbc\n",
+            f"unexpected replace-ctrl-t buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tabc\n",
+        [b"0", b"R", b"\x04", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"replace-ctrl-d vi exited with status {exit_code}")
+    require("-- REPLACE --" in decoded, "missing replace-ctrl-d replace status")
+    require(saved == "Xbc\n",
+            f"unexpected replace-ctrl-d buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc\n",
+        [b"i", b"X", b"Y", b"\x1b", b"u", b"\x12"],
+    )
+    require(exit_code == 0, f"insert-undo-redo vi exited with status {exit_code}")
+    require(saved == "XYabc\n",
+            f"unexpected insert-undo-redo buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc\n",
+        [b"0", b"R", b"X", b"Y", b"\x1b", b"u", b"\x12"],
+    )
+    require(exit_code == 0, f"replace-undo-redo vi exited with status {exit_code}")
+    require(saved == "XYc\n",
+            f"unexpected replace-undo-redo buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "alpha beta gamma\n",
         [b"d", ("winsize", 8, 28, 0.5), b"w"],
         rows=8,

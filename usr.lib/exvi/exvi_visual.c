@@ -272,6 +272,23 @@ vi_undo_replace_edit(buffer_t *b, vi_visual_t *vis)
     }
 }
 
+static int
+vi_rewind_replace_to(buffer_t *b, vi_visual_t *vis, line_t *target_line, int target_col)
+{
+    int progress = 0;
+
+    if (!target_line) {
+        return -1;
+    }
+    while (b->cur && (b->cur != target_line || vis->cursor_col != target_col)) {
+        if (vi_undo_replace_edit(b, vis) != 0) {
+            return progress ? 0 : -1;
+        }
+        progress = 1;
+    }
+    return 0;
+}
+
 static void
 vi_reset_replace_mode(vi_visual_t *vis)
 {
@@ -4188,6 +4205,10 @@ vi_erase_word_backward_insert(buffer_t *b, vi_visual_t *vis)
     if (start_line == end_line && start_col == end_col) {
         return;
     }
+    if (vis->replace_mode) {
+        vi_rewind_replace_to(b, vis, start_line, start_col);
+        return;
+    }
     vi_delete_range(b, vis, start_line, start_col, end_line, end_col, 1);
 }
 
@@ -4246,6 +4267,10 @@ vi_erase_to_insert_anchor(buffer_t *b, vi_visual_t *vis)
         start_col = end_col;
     }
     if (start_col == end_col) {
+        return;
+    }
+    if (vis->replace_mode) {
+        vi_rewind_replace_to(b, vis, start_line, start_col);
         return;
     }
     vi_delete_range(b, vis, start_line, start_col, end_line, end_col, 1);
