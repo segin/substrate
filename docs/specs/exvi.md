@@ -221,7 +221,7 @@ All other historical `ex` commands and aliases are currently outside the support
 - [ ] Complete the remaining classic `vi` motions that are still absent or only partially implemented.
 - [x] Add remaining section- and structure-oriented motions if they are part of the supported BSD/POSIX contract.
 - [ ] Audit every counted motion for parity with real `vi`, especially mixed count-plus-motion and count-plus-operator forms.
-- [ ] Tighten search-repeat, find-repeat, mark-jump, and percent-motion edge cases across line boundaries and empty matches.
+- [x] Tighten search-repeat, find-repeat, mark-jump, and percent-motion edge cases across line boundaries and empty matches.
 - [ ] Audit movement across empty lines, blank paragraphs, short lines, and end-of-buffer conditions against reference behavior.
 
 #### 3.3 Operator completeness and region semantics
