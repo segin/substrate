@@ -1100,6 +1100,8 @@ vi_move_arrow_insert(buffer_t *b, vi_visual_t *vis, int key)
 static line_t *
 vi_ensure_current_line(buffer_t *b)
 {
+    int was_modified = b->modified;
+
     if (b->cur) {
         return b->cur;
     }
@@ -1110,7 +1112,9 @@ vi_ensure_current_line(buffer_t *b)
     b->empty_origin = 1;
     b->started_empty = 1;
     b->cur = buf_insert_after(b, NULL, "");
+    b->empty_origin = 1;
     b->trailing_newline = 0;
+    b->modified = was_modified;
     return b->cur;
 }
 
@@ -1128,6 +1132,7 @@ vi_ensure_visible_line(buffer_t *b)
     b->empty_origin = 1;
     b->started_empty = 1;
     b->cur = buf_insert_after(b, NULL, "");
+    b->empty_origin = 1;
     b->trailing_newline = 0;
     b->modified = was_modified;
 }
