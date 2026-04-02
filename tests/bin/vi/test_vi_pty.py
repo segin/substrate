@@ -2628,6 +2628,33 @@ def main():
     require(exit_code == 0, f"visual-percent-yank-cross vi exited with status {exit_code}")
     require(saved == "ab(cd\nef)(cd\nef)gh\n",
             f"unexpected visual-percent-yank-cross buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+        [b"2", b"]", b"]", b"r", b"X"],
+    )
+    require(exit_code == 0, f"counted-section-motion vi exited with status {exit_code}")
+    require(saved == "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\nX\n",
+            f"unexpected counted-section-motion buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+        [b"2", b"d", b"]", b"]"],
+    )
+    require(exit_code == 0, f"counted-section-delete vi exited with status {exit_code}")
+    require(saved == "}\n",
+            f"unexpected counted-section-delete buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+        [b"2", b"y", b"]", b"]", b"P"],
+    )
+    require(exit_code == 0, f"counted-section-yank vi exited with status {exit_code}")
+    require(saved == "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\none two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+            f"unexpected counted-section-yank buffer: {saved!r}")
     print("vi pty test: ok")
     return 0
 

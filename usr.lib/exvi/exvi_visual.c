@@ -1708,7 +1708,7 @@ vi_is_section_line(line_t *line, int want_end)
     if (want_end) {
         return ch == '}';
     }
-    return ch == '{';
+    return ch == '{' || ch == '}';
 }
 
 static void
