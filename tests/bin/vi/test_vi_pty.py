@@ -579,6 +579,60 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one two\nthree four\n",
+        [b">", b"w"],
+    )
+    require(exit_code == 0, f">w vi exited with status {exit_code}")
+    require(saved == "\tone two\nthree four\n",
+            f"unexpected >w buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one,two\nthree four\n",
+        [b">", b"W"],
+    )
+    require(exit_code == 0, f">W vi exited with status {exit_code}")
+    require(saved == "\tone,two\nthree four\n",
+            f"unexpected >W buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two\nthree four\n",
+        [b">", b"E"],
+    )
+    require(exit_code == 0, f">E vi exited with status {exit_code}")
+    require(saved == "\tone two\nthree four\n",
+            f"unexpected >E buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tone\n\ttwo\nthree\n",
+        [b"G", b"0", b"<", b"b"],
+    )
+    require(exit_code == 0, f"<b vi exited with status {exit_code}")
+    require(saved == "\tone\ntwo\nthree\n",
+            f"unexpected <b buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tone,\n\ttwo\nthree\n",
+        [b"G", b"<", b"B"],
+    )
+    require(exit_code == 0, f"<B vi exited with status {exit_code}")
+    require(saved == "\tone,\ntwo\nthree\n",
+            f"unexpected <B buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tone,\n\ttwo\nthree\n",
+        [b"G", b"<", b"g", b"E"],
+    )
+    require(exit_code == 0, f"<gE vi exited with status {exit_code}")
+    require(saved == "\tone,\ntwo\nthree\n",
+            f"unexpected <gE buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "abcd\n",
         [b'x', b'p'],
     )

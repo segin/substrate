@@ -100,6 +100,8 @@ static void vi_replace_insert_char(buffer_t *b, vi_visual_t *vis, int ch);
 static void vi_split_line(buffer_t *b, vi_visual_t *vis);
 static void vi_move_word_forward_count(buffer_t *b, vi_visual_t *vis, int count);
 static void vi_move_word_backward_count(buffer_t *b, vi_visual_t *vis, int count);
+static void vi_move_word_end_count(buffer_t *b, vi_visual_t *vis, int count);
+static void vi_move_bigword_end_count(buffer_t *b, vi_visual_t *vis, int count);
 static void vi_page_scroll(buffer_t *b, vi_visual_t *vis, int direction);
 static void vi_delete_char(buffer_t *b, vi_visual_t *vis);
 static void vi_linewise_yank(buffer_t *b, vi_visual_t *vis, int start, int end);
@@ -2542,6 +2544,14 @@ vi_move_word_end(buffer_t *b, vi_visual_t *vis)
 }
 
 static void
+vi_move_word_end_count(buffer_t *b, vi_visual_t *vis, int count)
+{
+    while (count-- > 0) {
+        vi_move_word_end(b, vis);
+    }
+}
+
+static void
 vi_move_word_end_backward(buffer_t *b, vi_visual_t *vis)
 {
     int line_no = buf_current_line(b);
@@ -2809,6 +2819,14 @@ vi_move_bigword_end(buffer_t *b, vi_visual_t *vis)
                 return;
             }
         }
+    }
+}
+
+static void
+vi_move_bigword_end_count(buffer_t *b, vi_visual_t *vis, int count)
+{
+    while (count-- > 0) {
+        vi_move_bigword_end(b, vis);
     }
 }
 
@@ -4016,34 +4034,37 @@ vi_search_motion_target(buffer_t *b, vi_visual_t *vis, const char *pattern, int 
 }
 
 static int
-vi_apply_search_linewise_motion(buffer_t *b, vi_visual_t *vis, int current_line_no,
+vi_apply_charwise_linewise_motion(buffer_t *b, vi_visual_t *vis, int current_line_no,
     line_t *target_line, int target_col)
 {
     int target_line_no;
     int start;
     int end;
 
-    if (target_col != 0 || !target_line || target_line == b->cur) {
-        if ((vis->pending_op == '>' || vis->pending_op == '<') &&
-            target_line == b->cur) {
-            return vi_apply_linewise_operator(b, vis, current_line_no, current_line_no);
-        }
-        return -1;
-    }
-    if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
-        vis->cursor_col != 0) {
+    if (!target_line) {
         return -1;
     }
     target_line_no = vi_line_number_for_mark(b, target_line);
-    if (target_line_no < 1 || target_line_no == current_line_no) {
+    if (target_line_no < 1) {
         return -1;
     }
-    if (target_line_no > current_line_no) {
+    if (target_line_no == current_line_no) {
+        return vi_apply_linewise_operator(b, vis, current_line_no, current_line_no);
+    }
+    if (target_col == 0) {
+        if (target_line_no > current_line_no) {
+            start = current_line_no;
+            end = target_line_no - 1;
+        } else {
+            start = target_line_no;
+            end = current_line_no - 1;
+        }
+    } else if (target_line_no > current_line_no) {
         start = current_line_no;
-        end = target_line_no - 1;
+        end = target_line_no;
     } else {
         start = target_line_no;
-        end = current_line_no - 1;
+        end = current_line_no;
     }
     if (start > end) {
         return -1;
@@ -4052,6 +4073,18 @@ vi_apply_search_linewise_motion(buffer_t *b, vi_visual_t *vis, int current_line_
         return -1;
     }
     return 0;
+}
+
+static int
+vi_apply_search_linewise_motion(buffer_t *b, vi_visual_t *vis, int current_line_no,
+    line_t *target_line, int target_col)
+{
+    if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+        vis->cursor_col != 0) {
+        return -1;
+    }
+    return vi_apply_charwise_linewise_motion(b, vis, current_line_no, target_line,
+        target_col);
 }
 
 static void
@@ -4236,8 +4269,14 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             write(STDOUT_FILENO, "\a", 1);
         } else if (vi_backward_end_motion_target(b, vis, count, motion == 'E',
             &target_line, &target_col) != 0 ||
-            target_line != b->cur || target_col > vis->cursor_col) {
+            ((vis->pending_op != '>' && vis->pending_op != '<') && target_line != b->cur) ||
+            (target_line == b->cur && target_col > vis->cursor_col)) {
             write(STDOUT_FILENO, "\a", 1);
+        } else if (vis->pending_op == '>' || vis->pending_op == '<') {
+            if (vi_apply_charwise_linewise_motion(b, vis, line_no, target_line,
+                target_col) != 0) {
+                write(STDOUT_FILENO, "\a", 1);
+            }
         } else if (vis->pending_op == 'y') {
             if (vi_yank_span(vis, b->cur, target_col, vis->cursor_col + 1) != 0) {
                 write(STDOUT_FILENO, "\a", 1);
@@ -4371,6 +4410,16 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         } else if (!cur || vi_yank_span(vis, cur, vis->cursor_col, (int)cur->len) != 0) {
             write(STDOUT_FILENO, "\a", 1);
         }
+    } else if ((vis->pending_op == '>' || vis->pending_op == '<') && key == 'w') {
+        line_t *target_line;
+        int target_col;
+
+        if (vi_simulate_motion_target(b, vis, vi_move_word_forward_count, count,
+            &target_line, &target_col) != 0 ||
+            vi_apply_charwise_linewise_motion(b, vis, line_no, target_line,
+                target_col) != 0) {
+            write(STDOUT_FILENO, "\a", 1);
+        }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == 'w') {
         int rc;
 
@@ -4388,6 +4437,16 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         } else {
             write(STDOUT_FILENO, "\a", 1);
         }
+    } else if ((vis->pending_op == '>' || vis->pending_op == '<') && key == 'e') {
+        line_t *target_line;
+        int target_col;
+
+        if (vi_simulate_motion_target(b, vis, vi_move_word_end_count, count, &target_line,
+            &target_col) != 0 ||
+            vi_apply_charwise_linewise_motion(b, vis, line_no, target_line,
+                target_col) != 0) {
+            write(STDOUT_FILENO, "\a", 1);
+        }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == 'e') {
         if (vi_find_word_end_exclusive_count(b->cur, vis->cursor_col, count, &end) == 0 &&
             end > vis->cursor_col) {
@@ -4395,11 +4454,31 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         } else {
             write(STDOUT_FILENO, "\a", 1);
         }
+    } else if ((vis->pending_op == '>' || vis->pending_op == '<') && key == 'E') {
+        line_t *target_line;
+        int target_col;
+
+        if (vi_simulate_motion_target(b, vis, vi_move_bigword_end_count, count,
+            &target_line, &target_col) != 0 ||
+            vi_apply_charwise_linewise_motion(b, vis, line_no, target_line,
+                target_col) != 0) {
+            write(STDOUT_FILENO, "\a", 1);
+        }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == 'E') {
         if (vi_find_bigword_end_exclusive_count(b->cur, vis->cursor_col, count, &end) == 0 &&
             end > vis->cursor_col) {
             vi_delete_span(b, vis, vis->cursor_col, end, vis->pending_op == 'c');
         } else {
+            write(STDOUT_FILENO, "\a", 1);
+        }
+    } else if ((vis->pending_op == '>' || vis->pending_op == '<') && key == 'b') {
+        line_t *target_line;
+        int target_col;
+
+        if (vi_simulate_motion_target(b, vis, vi_move_word_backward_count, count,
+            &target_line, &target_col) != 0 ||
+            vi_apply_charwise_linewise_motion(b, vis, line_no, target_line,
+                target_col) != 0) {
             write(STDOUT_FILENO, "\a", 1);
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == 'b') {
@@ -4411,6 +4490,16 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         } else {
             write(STDOUT_FILENO, "\a", 1);
         }
+    } else if ((vis->pending_op == '>' || vis->pending_op == '<') && key == 'B') {
+        line_t *target_line;
+        int target_col;
+
+        if (vi_simulate_motion_target(b, vis, vi_move_bigword_backward_count, count,
+            &target_line, &target_col) != 0 ||
+            vi_apply_charwise_linewise_motion(b, vis, line_no, target_line,
+                target_col) != 0) {
+            write(STDOUT_FILENO, "\a", 1);
+        }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == 'B') {
         int start;
 
@@ -4418,6 +4507,16 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             start < vis->cursor_col) {
             vi_delete_span(b, vis, start, vis->cursor_col, vis->pending_op == 'c');
         } else {
+            write(STDOUT_FILENO, "\a", 1);
+        }
+    } else if ((vis->pending_op == '>' || vis->pending_op == '<') && key == 'W') {
+        line_t *target_line;
+        int target_col;
+
+        if (vi_simulate_motion_target(b, vis, vi_move_bigword_forward_count, count,
+            &target_line, &target_col) != 0 ||
+            vi_apply_charwise_linewise_motion(b, vis, line_no, target_line,
+                target_col) != 0) {
             write(STDOUT_FILENO, "\a", 1);
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == 'W') {
