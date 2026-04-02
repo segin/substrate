@@ -26,6 +26,7 @@ typedef enum {
     VI_REPEAT_J,
     VI_REPEAT_P,
     VI_REPEAT_P_BEFORE,
+    VI_REPEAT_INSERT,
 } vi_repeat_kind_t;
 
 typedef enum {
@@ -69,6 +70,7 @@ typedef struct {
     int insert_anchor_col;
     int last_insert_line_no;
     int last_insert_col;
+    int insert_entry_key;
     char *last_insert_text;
     vi_replace_edit_t *replace_edits;
     int replace_edit_count;
@@ -91,6 +93,7 @@ static int vi_first_nonblank_col(line_t *cur);
 static int vi_display_col_for_index(line_t *cur, int idx);
 static line_t *vi_ensure_current_line(buffer_t *b);
 static int vi_replace_current_text(buffer_t *b, const char *text);
+static void vi_open_line(buffer_t *b, vi_visual_t *vis, int above);
 static int vi_clamp_line_target(buffer_t *b, int line_no);
 static int vi_clamp_top_line(buffer_t *b, vi_visual_t *vis, int top_line);
 static int vi_compare_positions(buffer_t *b, line_t *left, int left_col, line_t *right,
@@ -117,7 +120,9 @@ static char *vi_current_word_pattern(buffer_t *b, vi_visual_t *vis);
 static void vi_visual_apply_tag_target(buffer_t *b, char *cmd);
 static void vi_reset_replace_mode(vi_visual_t *vis);
 static void vi_record_last_insert_site(buffer_t *b, vi_visual_t *vis);
+static void vi_set_insert_anchor(buffer_t *b, vi_visual_t *vis);
 static void vi_update_last_insert_text(buffer_t *b, vi_visual_t *vis);
+static int vi_current_insert_span_nonempty(buffer_t *b, vi_visual_t *vis);
 static void vi_start_change_insert(buffer_t *b, vi_visual_t *vis);
 static int vi_read_register_index_prompt(buffer_t *b, vi_visual_t *vis);
 static char *vi_capture_register_text(int reg_idx);
@@ -273,6 +278,79 @@ vi_update_last_insert_text(buffer_t *b, vi_visual_t *vis)
         vis->last_insert_text = text;
     } else {
         free(text);
+    }
+}
+
+static int
+vi_current_insert_span_nonempty(buffer_t *b, vi_visual_t *vis)
+{
+    char *text = vi_capture_insert_span(b, vis);
+    int nonempty = (text && text[0] != '\0');
+
+    free(text);
+    return nonempty;
+}
+
+static int
+vi_begin_repeat_insert(buffer_t *b, vi_visual_t *vis, int entry_key)
+{
+    line_t *cur = b->cur;
+
+    switch (entry_key) {
+    case 'i':
+        save_undo(b);
+        vis->insert_mode = 1;
+        vis->replace_mode = 0;
+        vis->insert_entry_key = entry_key;
+        vi_record_last_insert_site(b, vis);
+        vi_set_insert_anchor(b, vis);
+        return 0;
+    case 'a':
+        if (cur && vis->cursor_col < (int)cur->len) {
+            vis->cursor_col++;
+        }
+        save_undo(b);
+        vis->insert_mode = 1;
+        vis->replace_mode = 0;
+        vis->insert_entry_key = entry_key;
+        vi_record_last_insert_site(b, vis);
+        vi_set_insert_anchor(b, vis);
+        return 0;
+    case 'I':
+        vis->cursor_col = vi_first_nonblank_col(cur);
+        save_undo(b);
+        vis->insert_mode = 1;
+        vis->replace_mode = 0;
+        vis->insert_entry_key = entry_key;
+        vi_record_last_insert_site(b, vis);
+        vi_set_insert_anchor(b, vis);
+        return 0;
+    case 'A':
+        vis->cursor_col = cur ? (int)cur->len : 0;
+        save_undo(b);
+        vis->insert_mode = 1;
+        vis->replace_mode = 0;
+        vis->insert_entry_key = entry_key;
+        vi_record_last_insert_site(b, vis);
+        vi_set_insert_anchor(b, vis);
+        return 0;
+    case 'o':
+        vi_open_line(b, vis, 0);
+        return 0;
+    case 'O':
+        vi_open_line(b, vis, 1);
+        return 0;
+    case 'R':
+        save_undo(b);
+        vis->insert_mode = 0;
+        vi_clear_replace_edits(vis);
+        vis->replace_mode = 1;
+        vis->insert_entry_key = entry_key;
+        vi_record_last_insert_site(b, vis);
+        vi_set_insert_anchor(b, vis);
+        return 0;
+    default:
+        return -1;
     }
 }
 
@@ -3489,6 +3567,7 @@ vi_delete_span(buffer_t *b, vi_visual_t *vis, int start, int end, int enter_inse
         vis->insert_mode = enter_insert;
         vis->replace_mode = 0;
         if (enter_insert) {
+            vis->insert_entry_key = 0;
             vi_record_last_insert_site(b, vis);
             vi_set_insert_anchor(b, vis);
         }
@@ -3559,6 +3638,7 @@ vi_delete_range(buffer_t *b, vi_visual_t *vis, line_t *start_line, int start_col
         vis->insert_mode = enter_insert;
         vis->replace_mode = 0;
         if (enter_insert) {
+            vis->insert_entry_key = 0;
             vi_record_last_insert_site(b, vis);
             vi_set_insert_anchor(b, vis);
         }
@@ -3742,6 +3822,7 @@ vi_linewise_change(buffer_t *b, vi_visual_t *vis, int start, int end)
     vis->cursor_col = (int)indent_len;
     vis->insert_mode = 1;
     vis->replace_mode = 0;
+    vis->insert_entry_key = 0;
     vi_record_last_insert_site(b, vis);
     vi_set_insert_anchor(b, vis);
 }
@@ -3777,6 +3858,7 @@ vi_substitute_line(buffer_t *b, vi_visual_t *vis, int capture_register)
     vis->cursor_col = (int)indent_len;
     vis->insert_mode = 1;
     vis->replace_mode = 0;
+    vis->insert_entry_key = 0;
     vi_record_last_insert_site(b, vis);
     vi_set_insert_anchor(b, vis);
     free(indent);
@@ -5526,6 +5608,8 @@ vi_open_line(buffer_t *b, vi_visual_t *vis, int above)
     free(indent);
     vis->cursor_col = (int)indent_len;
     vis->insert_mode = 1;
+    vis->replace_mode = 0;
+    vis->insert_entry_key = above ? 'O' : 'o';
     vi_record_last_insert_site(b, vis);
     vi_set_insert_anchor(b, vis);
 }
@@ -5650,6 +5734,7 @@ vi_start_change_insert(buffer_t *b, vi_visual_t *vis)
     save_undo(b);
     vis->insert_mode = 1;
     vis->replace_mode = 0;
+    vis->insert_entry_key = 0;
     vi_record_last_insert_site(b, vis);
     vi_set_insert_anchor(b, vis);
 }
@@ -5756,6 +5841,31 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
         break;
     case VI_REPEAT_P_BEFORE:
         vi_put_from_register(b, vis, 1, 26, count);
+        break;
+    case VI_REPEAT_INSERT:
+        if (!vis->last_insert_text || vis->last_insert_text[0] == '\0') {
+            write(STDOUT_FILENO, "\a", 1);
+            return;
+        }
+        while (count-- > 0) {
+            if (vi_begin_repeat_insert(b, vis, vis->last_change_char) != 0) {
+                write(STDOUT_FILENO, "\a", 1);
+                return;
+            }
+            vi_replay_insert_text(b, vis, vis->last_insert_text);
+            if (vis->replace_mode) {
+                vi_update_last_insert_text(b, vis);
+                vi_record_last_insert_site(b, vis);
+                vi_reset_replace_mode(vis);
+            } else {
+                vi_update_last_insert_text(b, vis);
+                vi_record_last_insert_site(b, vis);
+                vis->insert_mode = 0;
+                if (vis->cursor_col > 0) {
+                    vis->cursor_col--;
+                }
+            }
+        }
         break;
     default:
         write(STDOUT_FILENO, "\a", 1);
@@ -5971,11 +6081,18 @@ exvi_visual_main(buffer_t *b)
         if (vis.replace_mode) {
             switch (key) {
             case '\x1b':
-                if (vis.replace_edit_count > 0 || b->cur != vis.insert_anchor_line ||
-                    vis.cursor_col != vis.insert_anchor_col) {
+                if (vi_current_insert_span_nonempty(b, &vis) ||
+                    vis.replace_edit_count > 0) {
                     vi_update_last_insert_text(b, &vis);
+                    if (vis.insert_entry_key != 0) {
+                        vi_set_last_change(&vis, VI_REPEAT_INSERT, 1,
+                            vis.insert_entry_key);
+                    } else {
+                        vis.last_change = VI_REPEAT_NONE;
+                    }
                 }
                 vi_record_last_insert_site(b, &vis);
+                vis.insert_entry_key = 0;
                 vi_reset_replace_mode(&vis);
                 if (vis.cursor_col > 0) {
                     vis.cursor_col--;
@@ -6056,8 +6173,17 @@ exvi_visual_main(buffer_t *b)
         if (vis.insert_mode) {
             switch (key) {
             case '\x1b':
-                vi_update_last_insert_text(b, &vis);
+                if (vi_current_insert_span_nonempty(b, &vis)) {
+                    vi_update_last_insert_text(b, &vis);
+                    if (vis.insert_entry_key != 0) {
+                        vi_set_last_change(&vis, VI_REPEAT_INSERT, 1,
+                            vis.insert_entry_key);
+                    } else {
+                        vis.last_change = VI_REPEAT_NONE;
+                    }
+                }
                 vi_record_last_insert_site(b, &vis);
+                vis.insert_entry_key = 0;
                 vis.insert_mode = 0;
                 if (vis.cursor_col > 0) {
                     vis.cursor_col--;
@@ -6535,6 +6661,7 @@ process_normal_key:
                     save_undo(b);
                     vis.insert_mode = 1;
                     vis.replace_mode = 0;
+                    vis.insert_entry_key = 0;
                     vi_record_last_insert_site(b, &vis);
                     vi_set_insert_anchor(b, &vis);
                 } else {
@@ -6545,6 +6672,7 @@ process_normal_key:
             vis.pending_g = 0;
             save_undo(b);
             vis.insert_mode = 1;
+            vis.insert_entry_key = 'i';
             vi_record_last_insert_site(b, &vis);
             vi_set_insert_anchor(b, &vis);
             break;
@@ -6556,6 +6684,7 @@ process_normal_key:
                 save_undo(b);
                 vis.insert_mode = 1;
                 vis.replace_mode = 0;
+                vis.insert_entry_key = 0;
                 vi_record_last_insert_site(b, &vis);
                 vi_set_insert_anchor(b, &vis);
                 break;
@@ -6564,6 +6693,7 @@ process_normal_key:
             vis.cursor_col = vi_first_nonblank_col(cur);
             save_undo(b);
             vis.insert_mode = 1;
+            vis.insert_entry_key = 'I';
             vi_record_last_insert_site(b, &vis);
             vi_set_insert_anchor(b, &vis);
             break;
@@ -6574,6 +6704,7 @@ process_normal_key:
             }
             save_undo(b);
             vis.insert_mode = 1;
+            vis.insert_entry_key = 'a';
             vi_record_last_insert_site(b, &vis);
             vi_set_insert_anchor(b, &vis);
             break;
@@ -6586,6 +6717,7 @@ process_normal_key:
             }
             save_undo(b);
             vis.insert_mode = 1;
+            vis.insert_entry_key = 'A';
             vi_record_last_insert_site(b, &vis);
             vi_set_insert_anchor(b, &vis);
             break;
@@ -6595,6 +6727,7 @@ process_normal_key:
             vis.insert_mode = 0;
             vi_clear_replace_edits(&vis);
             vis.replace_mode = 1;
+            vis.insert_entry_key = 'R';
             vi_record_last_insert_site(b, &vis);
             vi_set_insert_anchor(b, &vis);
             break;
