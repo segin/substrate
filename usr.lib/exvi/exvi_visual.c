@@ -27,6 +27,10 @@ typedef enum {
     VI_REPEAT_P,
     VI_REPEAT_P_BEFORE,
     VI_REPEAT_INSERT,
+    VI_REPEAT_C_WORD,
+    VI_REPEAT_S,
+    VI_REPEAT_C_EOL_CHANGE,
+    VI_REPEAT_S_LINE,
 } vi_repeat_kind_t;
 
 typedef enum {
@@ -124,6 +128,7 @@ static void vi_set_insert_anchor(buffer_t *b, vi_visual_t *vis);
 static void vi_update_last_insert_text(buffer_t *b, vi_visual_t *vis);
 static int vi_current_insert_span_nonempty(buffer_t *b, vi_visual_t *vis);
 static void vi_start_change_insert(buffer_t *b, vi_visual_t *vis);
+static void vi_finish_repeat_insert(buffer_t *b, vi_visual_t *vis);
 static int vi_read_register_index_prompt(buffer_t *b, vi_visual_t *vis);
 static char *vi_capture_register_text(int reg_idx);
 static void vi_insert_quoted_key(buffer_t *b, vi_visual_t *vis);
@@ -4614,6 +4619,8 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             vi_delete_span(b, vis, vis->cursor_col, end, vis->pending_op == 'c');
             if (vis->pending_op == 'd') {
                 vi_set_last_change(vis, VI_REPEAT_DW, count, 0);
+            } else {
+                vi_set_last_change(vis, VI_REPEAT_C_WORD, count, 0);
             }
         } else {
             write(STDOUT_FILENO, "\a", 1);
@@ -4711,6 +4718,9 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         }
         if (rc == 0 && end >= vis->cursor_col) {
             vi_delete_span(b, vis, vis->cursor_col, end, vis->pending_op == 'c');
+            if (vis->pending_op == 'c') {
+                vi_set_last_change(vis, VI_REPEAT_C_WORD, count, 1);
+            }
         } else {
             write(STDOUT_FILENO, "\a", 1);
         }
@@ -5740,6 +5750,25 @@ vi_start_change_insert(buffer_t *b, vi_visual_t *vis)
 }
 
 static void
+vi_finish_repeat_insert(buffer_t *b, vi_visual_t *vis)
+{
+    if (vis->replace_mode) {
+        vi_update_last_insert_text(b, vis);
+        vi_record_last_insert_site(b, vis);
+        vis->insert_entry_key = 0;
+        vi_reset_replace_mode(vis);
+    } else {
+        vi_update_last_insert_text(b, vis);
+        vi_record_last_insert_site(b, vis);
+        vis->insert_entry_key = 0;
+        vis->insert_mode = 0;
+        if (vis->cursor_col > 0) {
+            vis->cursor_col--;
+        }
+    }
+}
+
+static void
 vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
 {
     line_t *cur = b->cur;
@@ -5853,19 +5882,47 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
                 return;
             }
             vi_replay_insert_text(b, vis, vis->last_insert_text);
-            if (vis->replace_mode) {
-                vi_update_last_insert_text(b, vis);
-                vi_record_last_insert_site(b, vis);
-                vi_reset_replace_mode(vis);
-            } else {
-                vi_update_last_insert_text(b, vis);
-                vi_record_last_insert_site(b, vis);
-                vis->insert_mode = 0;
-                if (vis->cursor_col > 0) {
-                    vis->cursor_col--;
-                }
-            }
+            vi_finish_repeat_insert(b, vis);
         }
+        break;
+    case VI_REPEAT_C_WORD:
+        if (!cur) {
+            write(STDOUT_FILENO, "\a", 1);
+            return;
+        }
+        if (vi_find_change_word_target(cur, vis->cursor_col, count,
+            vis->last_change_char, &end) != 0 || end < vis->cursor_col) {
+            write(STDOUT_FILENO, "\a", 1);
+            return;
+        }
+        vi_delete_span(b, vis, vis->cursor_col, end, 1);
+        vi_replay_insert_text(b, vis, vis->last_insert_text);
+        vi_finish_repeat_insert(b, vis);
+        break;
+    case VI_REPEAT_S:
+        if (cur && (size_t)vis->cursor_col < cur->len) {
+            vi_delete_span(b, vis, vis->cursor_col, vis->cursor_col + 1, 1);
+        } else {
+            save_undo(b);
+            vis->insert_mode = 1;
+            vis->replace_mode = 0;
+            vis->insert_entry_key = 0;
+            vi_record_last_insert_site(b, vis);
+            vi_set_insert_anchor(b, vis);
+        }
+        vi_replay_insert_text(b, vis, vis->last_insert_text);
+        vi_finish_repeat_insert(b, vis);
+        break;
+    case VI_REPEAT_C_EOL_CHANGE:
+        vi_delete_span(b, vis, vis->cursor_col,
+            cur ? (int)cur->len : vis->cursor_col, 1);
+        vi_replay_insert_text(b, vis, vis->last_insert_text);
+        vi_finish_repeat_insert(b, vis);
+        break;
+    case VI_REPEAT_S_LINE:
+        vi_substitute_line(b, vis, 1);
+        vi_replay_insert_text(b, vis, vis->last_insert_text);
+        vi_finish_repeat_insert(b, vis);
         break;
     default:
         write(STDOUT_FILENO, "\a", 1);
@@ -6087,8 +6144,6 @@ exvi_visual_main(buffer_t *b)
                     if (vis.insert_entry_key != 0) {
                         vi_set_last_change(&vis, VI_REPEAT_INSERT, 1,
                             vis.insert_entry_key);
-                    } else {
-                        vis.last_change = VI_REPEAT_NONE;
                     }
                 }
                 vi_record_last_insert_site(b, &vis);
@@ -6178,8 +6233,6 @@ exvi_visual_main(buffer_t *b)
                     if (vis.insert_entry_key != 0) {
                         vi_set_last_change(&vis, VI_REPEAT_INSERT, 1,
                             vis.insert_entry_key);
-                    } else {
-                        vis.last_change = VI_REPEAT_NONE;
                     }
                 }
                 vi_record_last_insert_site(b, &vis);
@@ -6794,11 +6847,17 @@ process_normal_key:
             } else {
                 save_undo(b);
                 vis.insert_mode = 1;
+                vis.replace_mode = 0;
+                vis.insert_entry_key = 0;
+                vi_record_last_insert_site(b, &vis);
+                vi_set_insert_anchor(b, &vis);
             }
+            vi_set_last_change(&vis, VI_REPEAT_S, 1, 0);
             break;
         case 'S':
             vis.pending_g = 0;
             vi_substitute_line(b, &vis, 1);
+            vi_set_last_change(&vis, VI_REPEAT_S_LINE, 1, 0);
             break;
         case 'u':
         case 0x12:
@@ -7083,6 +7142,7 @@ process_normal_key:
             vis.pending_count = 0;
             vi_delete_span(b, &vis, vis.cursor_col,
                 cur ? (int)cur->len : vis.cursor_col, 1);
+            vi_set_last_change(&vis, VI_REPEAT_C_EOL_CHANGE, 1, 0);
             break;
         case 'Y':
             vis.pending_g = 0;
