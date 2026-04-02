@@ -28,6 +28,20 @@ typedef enum {
     VI_REPEAT_P_BEFORE,
 } vi_repeat_kind_t;
 
+typedef enum {
+    VI_REPLACE_EDIT_CHAR = 0,
+    VI_REPLACE_EDIT_INSERT,
+    VI_REPLACE_EDIT_SPLIT,
+} vi_replace_edit_kind_t;
+
+typedef struct {
+    vi_replace_edit_kind_t kind;
+    line_t *line;
+    line_t *aux_line;
+    int col;
+    char ch;
+} vi_replace_edit_t;
+
 enum {
     VI_KEY_UNKNOWN = 0x100,
     VI_KEY_UP,
@@ -70,6 +84,9 @@ typedef struct {
     int replace_mode;
     line_t *insert_anchor_line;
     int insert_anchor_col;
+    vi_replace_edit_t *replace_edits;
+    int replace_edit_count;
+    int replace_edit_cap;
     vi_repeat_kind_t last_change;
     int last_change_count;
     int last_change_char;
@@ -98,6 +115,169 @@ static int vi_prompt_input(buffer_t *b, vi_visual_t *vis, char prefix, char *buf
 static char *vi_current_word_text(buffer_t *b, vi_visual_t *vis);
 static char *vi_current_word_pattern(buffer_t *b, vi_visual_t *vis);
 static void vi_visual_apply_tag_target(buffer_t *b, char *cmd);
+static void vi_reset_replace_mode(vi_visual_t *vis);
+
+static void
+vi_clear_replace_edits(vi_visual_t *vis)
+{
+    free(vis->replace_edits);
+    vis->replace_edits = NULL;
+    vis->replace_edit_count = 0;
+    vis->replace_edit_cap = 0;
+}
+
+static int
+vi_push_replace_edit(vi_visual_t *vis, const vi_replace_edit_t *edit)
+{
+    vi_replace_edit_t *tmp;
+    int new_cap;
+
+    if (vis->replace_edit_count == vis->replace_edit_cap) {
+        new_cap = vis->replace_edit_cap ? vis->replace_edit_cap * 2 : 16;
+        tmp = realloc(vis->replace_edits, sizeof(*tmp) * (size_t)new_cap);
+        if (!tmp) {
+            return -1;
+        }
+        vis->replace_edits = tmp;
+        vis->replace_edit_cap = new_cap;
+    }
+    vis->replace_edits[vis->replace_edit_count++] = *edit;
+    return 0;
+}
+
+static void
+vi_record_replace_char(vi_visual_t *vis, line_t *line, int col, char ch)
+{
+    vi_replace_edit_t edit = {
+        .kind = VI_REPLACE_EDIT_CHAR,
+        .line = line,
+        .aux_line = NULL,
+        .col = col,
+        .ch = ch,
+    };
+
+    vi_push_replace_edit(vis, &edit);
+}
+
+static void
+vi_record_replace_insert(vi_visual_t *vis, line_t *line, int col)
+{
+    vi_replace_edit_t edit = {
+        .kind = VI_REPLACE_EDIT_INSERT,
+        .line = line,
+        .aux_line = NULL,
+        .col = col,
+        .ch = '\0',
+    };
+
+    vi_push_replace_edit(vis, &edit);
+}
+
+static void
+vi_record_replace_split(vi_visual_t *vis, line_t *left, line_t *right, int col)
+{
+    vi_replace_edit_t edit = {
+        .kind = VI_REPLACE_EDIT_SPLIT,
+        .line = left,
+        .aux_line = right,
+        .col = col,
+        .ch = '\0',
+    };
+
+    vi_push_replace_edit(vis, &edit);
+}
+
+static int
+vi_undo_replace_edit(buffer_t *b, vi_visual_t *vis)
+{
+    vi_replace_edit_t edit;
+    line_t *line;
+    char *text;
+    size_t right_len;
+
+    if (vis->replace_edit_count <= 0) {
+        return -1;
+    }
+
+    edit = vis->replace_edits[--vis->replace_edit_count];
+    switch (edit.kind) {
+    case VI_REPLACE_EDIT_CHAR:
+        line = edit.line;
+        if (!line || edit.col < 0 || (size_t)edit.col >= line->len) {
+            return -1;
+        }
+        text = strdup(line->text);
+        if (!text) {
+            vis->replace_edit_count++;
+            return -1;
+        }
+        text[edit.col] = edit.ch;
+        b->cur = line;
+        if (vi_replace_current_text(b, text) != 0) {
+            free(text);
+            vis->replace_edit_count++;
+            return -1;
+        }
+        free(text);
+        vis->cursor_col = edit.col;
+        return 0;
+    case VI_REPLACE_EDIT_INSERT:
+        line = edit.line;
+        if (!line || edit.col < 0 || (size_t)edit.col >= line->len) {
+            return -1;
+        }
+        text = malloc(line->len);
+        if (!text) {
+            vis->replace_edit_count++;
+            return -1;
+        }
+        memcpy(text, line->text, (size_t)edit.col);
+        memcpy(text + edit.col, line->text + edit.col + 1,
+            line->len - (size_t)edit.col);
+        b->cur = line;
+        if (vi_replace_current_text(b, text) != 0) {
+            free(text);
+            vis->replace_edit_count++;
+            return -1;
+        }
+        free(text);
+        vis->cursor_col = edit.col;
+        return 0;
+    case VI_REPLACE_EDIT_SPLIT:
+        if (!edit.line || !edit.aux_line) {
+            return -1;
+        }
+        right_len = edit.aux_line->len;
+        text = malloc(edit.line->len + right_len + 1);
+        if (!text) {
+            vis->replace_edit_count++;
+            return -1;
+        }
+        memcpy(text, edit.line->text, edit.line->len);
+        memcpy(text + edit.line->len, edit.aux_line->text, right_len + 1);
+        b->cur = edit.line;
+        if (vi_replace_current_text(b, text) != 0) {
+            free(text);
+            vis->replace_edit_count++;
+            return -1;
+        }
+        free(text);
+        b->cur = edit.aux_line;
+        buf_delete(b, edit.aux_line);
+        b->cur = edit.line;
+        vis->cursor_col = edit.col;
+        return 0;
+    default:
+        return -1;
+    }
+}
+
+static void
+vi_reset_replace_mode(vi_visual_t *vis)
+{
+    vis->replace_mode = 0;
+    vi_clear_replace_edits(vis);
+}
 
 static void
 vi_set_status(vi_visual_t *vis, const char *msg)
@@ -3907,20 +4087,28 @@ vi_replace_insert_char(buffer_t *b, vi_visual_t *vis, int ch)
 {
     line_t *cur = vi_ensure_current_line(b);
     char *text;
+    size_t old_len;
+    char replaced;
 
     if (!cur) {
         return;
     }
     if ((size_t)vis->cursor_col >= cur->len) {
+        old_len = cur->len;
         vi_insert_char(b, vis, ch);
+        if (cur->len == old_len + 1 && (size_t)(vis->cursor_col - 1) == old_len) {
+            vi_record_replace_insert(vis, cur, (int)old_len);
+        }
         return;
     }
+    replaced = cur->text[vis->cursor_col];
     text = strdup(cur->text);
     if (!text) {
         return;
     }
     text[vis->cursor_col] = (char)ch;
     if (vi_replace_current_text(b, text) == 0) {
+        vi_record_replace_char(vis, cur, vis->cursor_col, replaced);
         vis->cursor_col++;
     }
     free(text);
@@ -4215,6 +4403,9 @@ vi_split_line(buffer_t *b, vi_visual_t *vis)
         return;
     }
     b->cur = buf_insert_after(b, cur, newline_text);
+    if (vis->replace_mode) {
+        vi_record_replace_split(vis, cur, b->cur, vis->cursor_col);
+    }
     if (b->started_empty && b->line_count == 2 && b->head && b->tail
             && b->head->len == 0 && b->tail->len == 0) {
         b->trailing_newline = 0;
@@ -4685,7 +4876,7 @@ exvi_visual_main(buffer_t *b)
         if (vis.replace_mode) {
             switch (key) {
             case '\x1b':
-                vis.replace_mode = 0;
+                vi_reset_replace_mode(&vis);
                 if (vis.cursor_col > 0) {
                     vis.cursor_col--;
                 }
@@ -4696,8 +4887,8 @@ exvi_visual_main(buffer_t *b)
                 break;
             case 127:
             case '\b':
-                if (vis.cursor_col > 0) {
-                    vis.cursor_col--;
+                if (vi_undo_replace_edit(b, &vis) != 0) {
+                    write(STDOUT_FILENO, "\a", 1);
                 }
                 break;
             case 0x17:
@@ -5184,6 +5375,7 @@ exvi_visual_main(buffer_t *b)
             vis.pending_g = 0;
             save_undo(b);
             vis.insert_mode = 0;
+            vi_clear_replace_edits(&vis);
             vis.replace_mode = 1;
             vi_set_insert_anchor(b, &vis);
             break;
@@ -5543,6 +5735,7 @@ done:
     if (have_winch) {
         sigaction(SIGWINCH, &old_winch, NULL);
     }
+    vi_clear_replace_edits(&vis);
     vi_prompt_history_free(vis.cmd_history, vis.cmd_history_len);
     vi_prompt_history_free(vis.search_history, vis.search_history_len);
     vi_restore_terminal();
@@ -5552,6 +5745,7 @@ ex_mode:
     if (have_winch) {
         sigaction(SIGWINCH, &old_winch, NULL);
     }
+    vi_clear_replace_edits(&vis);
     vi_prompt_history_free(vis.cmd_history, vis.cmd_history_len);
     vi_prompt_history_free(vis.search_history, vis.search_history_len);
     vi_restore_terminal();

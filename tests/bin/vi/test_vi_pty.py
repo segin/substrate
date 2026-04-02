@@ -915,6 +915,60 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "abc\n",
+        [b"0", b"R", b"X", b"Y", b"\x08", b"\x1b"],
+    )
+    require(exit_code == 0, f"replace-backspace vi exited with status {exit_code}")
+    require(saved == "Xbc\n",
+            f"unexpected replace-backspace buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "a\tbc\n",
+        [b"0", b"R", b"Z", b"\x08", b"\x1b"],
+    )
+    require(exit_code == 0, f"replace-tab-backspace vi exited with status {exit_code}")
+    require(saved == "a\tbc\n",
+            f"unexpected replace-tab-backspace buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc\n",
+        [b"0", b"R", b"\r", b"\x08", b"\x1b"],
+    )
+    require(exit_code == 0, f"replace-newline-backspace vi exited with status {exit_code}")
+    require(saved == "abc\n",
+            f"unexpected replace-newline-backspace buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc\n",
+        [b"0", b"R", b"X", b"Y", b"Z", b"\x08", b"\x1b"],
+    )
+    require(exit_code == 0, f"replace-overrun-backspace vi exited with status {exit_code}")
+    require(saved == "XYc\n",
+            f"unexpected replace-overrun-backspace buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "a\n",
+        [b"0", b"R", b"X", b"Y", b"Z", b"\x08", b"\x1b"],
+    )
+    require(exit_code == 0, f"replace-short-backspace vi exited with status {exit_code}")
+    require(saved == "XY\n",
+            f"unexpected replace-short-backspace buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc\n",
+        [b"0", b"R", b"X", b"Y", b"\x1b[D", b"Z", b"\x08", b"\x1b"],
+    )
+    require(exit_code == 0, f"replace-mixed-backspace vi exited with status {exit_code}")
+    require(saved == "XYc\n",
+            f"unexpected replace-mixed-backspace buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "alpha beta gamma\n",
         [b"d", ("winsize", 8, 28, 0.5), b"w"],
         rows=8,
