@@ -3046,6 +3046,33 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "aa bb\ncc\n",
+        [b"0", b"l", b"m", b"a", b"0", b">", b"`", b"a"],
+    )
+    require(exit_code == 0, f"visual-backtick-shift-same-line vi exited with status {exit_code}")
+    require(saved == "\taa bb\ncc\n",
+            f"unexpected visual-backtick-shift-same-line buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "aa\nbb\ncc\ndd\n",
+        [b"g", b"g", b"0", b"m", b"a", b"G", b"$", b">", b"`", b"a"],
+    )
+    require(exit_code == 0, f"visual-backtick-shift-cross vi exited with status {exit_code}")
+    require(saved == "\taa\n\tbb\n\tcc\n\tdd\n",
+            f"unexpected visual-backtick-shift-cross buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "aa\nbb\ncc\ndd\n",
+        [b"g", b"g", b"0", b"m", b"a", b"G", b"$", b"<", b"`", b"a"],
+    )
+    require(exit_code == 0, f"visual-backtick-unshift-cross vi exited with status {exit_code}")
+    require(saved == "aa\nbb\ncc\ndd\n",
+            f"unexpected visual-backtick-unshift-cross buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "ab(cd\nef)gh\n",
         [b"0", b"f", b"(", b"d", b"%"],
     )

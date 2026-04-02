@@ -4323,12 +4323,34 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
                     }
                 }
             } else {
-                target_col = b->mark_cols[mark - 'a'];
-                if ((size_t)target_col > target_line->len) {
-                    target_col = (int)target_line->len;
-                }
-                if (vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
-                    write(STDOUT_FILENO, "\a", 1);
+                if (vis->pending_op == '>' || vis->pending_op == '<') {
+                    int target_no = vi_line_number_for_mark(b, target_line);
+                    int start_line;
+                    int end_line;
+
+                    if (target_no < 1) {
+                        write(STDOUT_FILENO, "\a", 1);
+                    } else {
+                        start_line = line_no;
+                        end_line = target_no;
+                        if (start_line > end_line) {
+                            int tmp = start_line;
+
+                            start_line = end_line;
+                            end_line = tmp;
+                        }
+                        if (vi_apply_linewise_operator(b, vis, start_line, end_line) != 0) {
+                            write(STDOUT_FILENO, "\a", 1);
+                        }
+                    }
+                } else {
+                    target_col = b->mark_cols[mark - 'a'];
+                    if ((size_t)target_col > target_line->len) {
+                        target_col = (int)target_line->len;
+                    }
+                    if (vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
+                        write(STDOUT_FILENO, "\a", 1);
+                    }
                 }
             }
         }
