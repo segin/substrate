@@ -3459,6 +3459,78 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one\ntwo\n",
+        [b"c", b"c", b"X", b"\x1b", b"j", b"."],
+    )
+    require(exit_code == 0, f"visual-dot-after-cc vi exited with status {exit_code}")
+    require(saved == "one\nX\n",
+            f"unexpected visual-dot-after-cc buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "ab\ncd\n",
+        [b"c", b"l", b"X", b"\x1b", b"j", b"."],
+    )
+    require(exit_code == 0, f"visual-dot-after-cl vi exited with status {exit_code}")
+    require(saved == "Xb\nXd\n",
+            f"unexpected visual-dot-after-cl buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "ab\ncd\n",
+        [b"l", b"c", b"h", b"X", b"\x1b", b"j", b"."],
+    )
+    require(exit_code == 0, f"visual-dot-after-ch vi exited with status {exit_code}")
+    require(saved == "Xb\nXcd\n",
+            f"unexpected visual-dot-after-ch buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha beta\ngamma beta\n",
+        [b"c", b"$", b"X", b"\x1b", b"j", b"."],
+    )
+    require(exit_code == 0, f"visual-dot-after-cdollar vi exited with status {exit_code}")
+    require(saved == "alpha beta\nX\n",
+            f"unexpected visual-dot-after-cdollar buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha beta\ngamma beta\n",
+        [b"c", b"e", b"X", b"\x1b", b"j", b"."],
+    )
+    require(exit_code == 0, f"visual-dot-after-ce vi exited with status {exit_code}")
+    require(saved == "alpha beta\nX beta\n",
+            f"unexpected visual-dot-after-ce buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha,beta\ngamma,beta\n",
+        [b"c", b"E", b"X", b"\x1b", b"j", b"."],
+    )
+    require(exit_code == 0, f"visual-dot-after-cE vi exited with status {exit_code}")
+    require(saved == "alpha,beta\nX\n",
+            f"unexpected visual-dot-after-cE buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha beta\ngamma beta\n",
+        [b"c", b"f", b"b", b"X", b"\x1b", b"j", b"."],
+    )
+    require(exit_code == 0, f"visual-dot-after-cf vi exited with status {exit_code}")
+    require(saved == "alpha beta\nXeta\n",
+            f"unexpected visual-dot-after-cf buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha beta\ngamma beta\n",
+        [b"c", b"t", b"b", b"X", b"\x1b", b"j", b"."],
+    )
+    require(exit_code == 0, f"visual-dot-after-ct vi exited with status {exit_code}")
+    require(saved == "alpha beta\nXbeta\n",
+            f"unexpected visual-dot-after-ct buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
         [b"d", b"]", b"]"],
     )
