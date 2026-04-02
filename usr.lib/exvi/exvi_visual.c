@@ -35,6 +35,8 @@ typedef enum {
     VI_REPEAT_C_CHARS,
     VI_REPEAT_C_END,
     VI_REPEAT_C_FIND,
+    VI_REPEAT_C_TO_COL0,
+    VI_REPEAT_C_TO_FIRST_NONBLANK,
 } vi_repeat_kind_t;
 
 typedef enum {
@@ -5046,6 +5048,12 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == '0') {
         if (vis->cursor_col > 0) {
             vi_delete_span(b, vis, 0, vis->cursor_col, vis->pending_op == 'c');
+            if (vis->pending_op == 'c') {
+                vi_set_last_change(vis, VI_REPEAT_C_TO_COL0, count, 0);
+            }
+        } else if (vis->pending_op == 'c') {
+            vi_start_change_insert(b, vis);
+            vi_set_last_change(vis, VI_REPEAT_C_TO_COL0, count, 0);
         } else {
             write(STDOUT_FILENO, "\a", 1);
         }
@@ -5054,6 +5062,13 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
 
         if (start < vis->cursor_col) {
             vi_delete_span(b, vis, start, vis->cursor_col, vis->pending_op == 'c');
+            if (vis->pending_op == 'c') {
+                vi_set_last_change(vis, VI_REPEAT_C_TO_FIRST_NONBLANK, count, 0);
+            }
+        } else if (vis->pending_op == 'c' && start == vis->cursor_col && b->cur &&
+            (size_t)start < b->cur->len) {
+            vi_delete_span(b, vis, start, start + 1, 1);
+            vi_set_last_change(vis, VI_REPEAT_C_TO_FIRST_NONBLANK, count, 0);
         } else {
             write(STDOUT_FILENO, "\a", 1);
         }
@@ -6011,6 +6026,28 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
             vi_replay_insert_text(b, vis, vis->last_insert_text);
             vi_finish_repeat_insert(b, vis);
         }
+        break;
+    case VI_REPEAT_C_TO_COL0:
+    case VI_REPEAT_C_TO_FIRST_NONBLANK:
+        if (!cur) {
+            write(STDOUT_FILENO, "\a", 1);
+            return;
+        }
+        end = (vis->last_change == VI_REPEAT_C_TO_FIRST_NONBLANK)
+            ? vi_first_nonblank_col(cur) : 0;
+        if (end < vis->cursor_col) {
+            vi_delete_span(b, vis, end, vis->cursor_col, 1);
+        } else {
+            save_undo(b);
+            vis->cursor_col = end;
+            vis->insert_mode = 1;
+            vis->replace_mode = 0;
+            vis->insert_entry_key = 0;
+            vi_record_last_insert_site(b, vis);
+            vi_set_insert_anchor(b, vis);
+        }
+        vi_replay_insert_text(b, vis, vis->last_insert_text);
+        vi_finish_repeat_insert(b, vis);
         break;
     default:
         write(STDOUT_FILENO, "\a", 1);
