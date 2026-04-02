@@ -40,6 +40,7 @@ typedef enum {
     VI_REPEAT_C_SEARCH_REPEAT,
     VI_REPEAT_C_PERCENT,
     VI_REPEAT_C_BACK_END,
+    VI_REPEAT_C_MOTION,
     VI_REPEAT_C_MARK_LINE,
     VI_REPEAT_C_MARK_EXACT,
     VI_REPEAT_C_LINE_MOTION,
@@ -4714,6 +4715,9 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         }
         if (vi_apply_linewise_operator(b, vis, start, end_line) != 0) {
             write(STDOUT_FILENO, "\a", 1);
+        } else if (vis->pending_op == 'c') {
+            vi_set_last_change(vis, VI_REPEAT_C_MOTION, count, key);
+            vis->last_change_aux = screen_count;
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y' ||
         vis->pending_op == '>' || vis->pending_op == '<') &&
@@ -4986,7 +4990,7 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
                     if (vis->pending_op == 'd') {
                         vi_set_last_change(vis, VI_REPEAT_D_FIND, count, 0);
                     } else if (vis->pending_op == 'c') {
-                        vi_set_last_change(vis, VI_REPEAT_C_FIND, count, 0);
+                        vi_set_last_change(vis, VI_REPEAT_C_FIND, count, key);
                     }
                 }
             } else {
@@ -5018,6 +5022,11 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             target_line = b->tail;
             target_col = (int)b->tail->len;
             rc = 0;
+        } else if (rc == 0 && key == '{' && target_line && !vi_line_is_blank(target_line) &&
+            target_col == vi_first_nonblank_col(target_line) && target_line->prev &&
+            vi_line_is_blank(target_line->prev)) {
+            target_line = target_line->prev;
+            target_col = 0;
         } else if (rc == 0 && (vis->pending_op == 'd' || vis->pending_op == 'c' ||
                 vis->pending_op == 'y') && (key == ')' || key == '}') && target_line == b->tail
             && target_line && !vi_line_is_blank(target_line)
@@ -5036,7 +5045,11 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             if (vis->pending_op == '>' || vis->pending_op == '<' ||
                 vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
                 write(STDOUT_FILENO, "\a", 1);
+            } else if (vis->pending_op == 'c') {
+                vi_set_last_change(vis, VI_REPEAT_C_MOTION, count, key);
             }
+        } else if (vis->pending_op == 'c') {
+            vi_set_last_change(vis, VI_REPEAT_C_MOTION, count, key);
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y' ||
         vis->pending_op == '>' || vis->pending_op == '<') &&
@@ -6220,6 +6233,8 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
                 vis->last_change_char == 't' || vis->last_change_char == 'T') {
                 forward = (vis->last_change_char == 'f' || vis->last_change_char == 't');
                 till = (vis->last_change_char == 't' || vis->last_change_char == 'T');
+            } else if (vis->last_change_char == ',') {
+                forward = !forward;
             }
             if (!cur) {
                 write(STDOUT_FILENO, "\a", 1);
@@ -6257,6 +6272,29 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
                 vi_start_change_insert(b, vis);
             } else {
                 vi_delete_span(b, vis, target_col, vis->cursor_col + 1, 1);
+            }
+            vi_replay_insert_text(b, vis, vis->last_insert_text);
+            vi_finish_repeat_insert(b, vis);
+        }
+        break;
+    case VI_REPEAT_C_MOTION:
+        {
+            int saved_pending_op = vis->pending_op;
+            int saved_pending_op_count = vis->pending_op_count;
+            int saved_pending_count = vis->pending_count;
+            int saved_pending_reg = vis->pending_reg;
+
+            vis->pending_op = 'c';
+            vis->pending_op_count = 1;
+            vis->pending_count = count;
+            vis->pending_reg = 0;
+            vi_handle_pending_operator(b, vis, vis->last_change_char);
+            vis->pending_op = saved_pending_op;
+            vis->pending_op_count = saved_pending_op_count;
+            vis->pending_count = saved_pending_count;
+            vis->pending_reg = saved_pending_reg;
+            if (!vis->insert_mode) {
+                return;
             }
             vi_replay_insert_text(b, vis, vis->last_insert_text);
             vi_finish_repeat_insert(b, vis);
