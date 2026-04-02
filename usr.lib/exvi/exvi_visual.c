@@ -3726,6 +3726,10 @@ vi_apply_search_linewise_motion(buffer_t *b, vi_visual_t *vis, int current_line_
     int end;
 
     if (target_col != 0 || !target_line || target_line == b->cur) {
+        if ((vis->pending_op == '>' || vis->pending_op == '<') &&
+            target_line == b->cur && target_col == 0) {
+            return vi_apply_linewise_operator(b, vis, current_line_no, current_line_no);
+        }
         return -1;
     }
     if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&

@@ -3073,6 +3073,15 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "aa\nbb\ncc\ndd\n",
+        [b"g", b"g", b"0", b">", b"*"],
+    )
+    require(exit_code == 0, f"visual-star-shift-wrap vi exited with status {exit_code}")
+    require(saved == "\taa\nbb\ncc\ndd\n",
+            f"unexpected visual-star-shift-wrap buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "ab(cd\nef)gh\n",
         [b"0", b"f", b"(", b"d", b"%"],
     )
