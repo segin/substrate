@@ -12,6 +12,7 @@ test:
 	$(MAKE) -C $(TOP)/usr.lib clean all NATIVE_BUILD=1; \
 	$(MAKE) -C $(TOP)/bin/vi clean all NATIVE_BUILD=1; \
 	python3 ./test_vi_pty.py $(abspath $(TOP)/bin/vi/vi); \
+	python3 ./test_vi_oracle.py $(abspath $(TOP)/bin/vi/vi); \
 	python3 ./test_vi_stress.py $(abspath $(TOP)/bin/vi/vi); \
 	python3 ./test_vi_frontend.py $(abspath $(TOP)/bin/vi/vi)
 
