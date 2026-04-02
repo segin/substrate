@@ -841,6 +841,46 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "alpha beta\n",
+        [b"y", b"w", b"A", b"\x12", b'"', b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-ctrl-r vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-ctrl-r insert status")
+    require(saved == "alpha betaalpha \n",
+            f"unexpected insert-ctrl-r buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\nalpha beta\n",
+        [b"j", b"y", b"w", b"k", b"0", b"R", b"\x12", b'"', b"\x1b"],
+    )
+    require(exit_code == 0, f"replace-ctrl-r vi exited with status {exit_code}")
+    require("-- REPLACE --" in decoded, "missing replace-ctrl-r replace status")
+    require(saved == "alpha \nalpha beta\n",
+            f"unexpected replace-ctrl-r buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n",
+        [b"i", b"\x16", b"\x01", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-ctrl-v vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-ctrl-v insert status")
+    require(saved == "\x01one\n",
+            f"unexpected insert-ctrl-v buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n",
+        [b"R", b"\x16", b"\x01", b"\x1b"],
+    )
+    require(exit_code == 0, f"replace-ctrl-v vi exited with status {exit_code}")
+    require("-- REPLACE --" in decoded, "missing replace-ctrl-v replace status")
+    require(saved == "\x01ne\n",
+            f"unexpected replace-ctrl-v buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "",
         [b"i", b"\r", b"\x1b"],
     )

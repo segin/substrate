@@ -108,12 +108,18 @@ static void vi_linewise_change(buffer_t *b, vi_visual_t *vis, int start, int end
 static void vi_set_last_change(vi_visual_t *vis, vi_repeat_kind_t kind, int count, int ch);
 static int vi_prompt_input(buffer_t *b, vi_visual_t *vis, char prefix, char *buf,
     size_t buf_size);
+static int vi_read_visual_key(buffer_t *b, vi_visual_t *vis, char prompt_prefix,
+    const char *prompt);
 static char *vi_current_word_text(buffer_t *b, vi_visual_t *vis);
 static char *vi_current_word_pattern(buffer_t *b, vi_visual_t *vis);
 static void vi_visual_apply_tag_target(buffer_t *b, char *cmd);
 static void vi_reset_replace_mode(vi_visual_t *vis);
 static void vi_record_last_insert_site(buffer_t *b, vi_visual_t *vis);
 static void vi_update_last_insert_text(buffer_t *b, vi_visual_t *vis);
+static int vi_read_register_index_prompt(buffer_t *b, vi_visual_t *vis);
+static char *vi_capture_register_text(int reg_idx);
+static void vi_insert_quoted_key(buffer_t *b, vi_visual_t *vis);
+static void vi_insert_register_text(buffer_t *b, vi_visual_t *vis);
 
 static void
 vi_record_last_insert_site(buffer_t *b, vi_visual_t *vis)
@@ -278,6 +284,100 @@ vi_replay_insert_text(buffer_t *b, vi_visual_t *vis, const char *text)
         }
         p++;
     }
+}
+
+static int
+vi_read_register_index_prompt(buffer_t *b, vi_visual_t *vis)
+{
+    int key = vi_read_visual_key(b, vis, '"', NULL);
+
+    if (key == -1) {
+        return -1;
+    }
+    if (key == '"') {
+        return 26;
+    }
+    if (key >= 'a' && key <= 'z') {
+        return key - 'a';
+    }
+    if (key >= 'A' && key <= 'Z') {
+        return key - 'A';
+    }
+    write(STDOUT_FILENO, "\a", 1);
+    return -1;
+}
+
+static char *
+vi_capture_register_text(int reg_idx)
+{
+    line_t *line;
+    char *text;
+    char *dst;
+    size_t total = 0;
+
+    if (reg_idx < 0 || reg_idx >= 27 || !regs[reg_idx].head) {
+        return NULL;
+    }
+    for (line = regs[reg_idx].head; line; line = line->next) {
+        total += line->len;
+        if (line->next || reg_linewise[reg_idx]) {
+            total++;
+        }
+    }
+    text = malloc(total + 1);
+    if (!text) {
+        return NULL;
+    }
+    dst = text;
+    for (line = regs[reg_idx].head; line; line = line->next) {
+        memcpy(dst, line->text, line->len);
+        dst += line->len;
+        if (line->next || reg_linewise[reg_idx]) {
+            *dst++ = '\n';
+        }
+    }
+    *dst = '\0';
+    return text;
+}
+
+static void
+vi_insert_quoted_key(buffer_t *b, vi_visual_t *vis)
+{
+    int key = vi_read_visual_key(b, vis, '^', NULL);
+    unsigned char ch;
+
+    if (key == -1) {
+        return;
+    }
+    if (key >= VI_KEY_UNKNOWN) {
+        write(STDOUT_FILENO, "\a", 1);
+        return;
+    }
+    ch = (unsigned char)key;
+    if (vis->replace_mode) {
+        vi_replace_insert_char(b, vis, (int)ch);
+    } else {
+        vi_insert_char(b, vis, (int)ch);
+    }
+}
+
+static void
+vi_insert_register_text(buffer_t *b, vi_visual_t *vis)
+{
+    int reg_idx = vi_read_register_index_prompt(b, vis);
+    char *text;
+
+    if (reg_idx < 0) {
+        return;
+    }
+    text = vi_capture_register_text(reg_idx);
+    if (!text || text[0] == '\0') {
+        free(text);
+        write(STDOUT_FILENO, "\a", 1);
+        return;
+    }
+    vi_replay_insert_text(b, vis, text);
+    free(text);
 }
 
 static int
@@ -5662,6 +5762,12 @@ exvi_visual_main(buffer_t *b)
             case 0x15:
                 vi_erase_to_insert_anchor(b, &vis);
                 break;
+            case 0x12:
+                vi_insert_register_text(b, &vis);
+                break;
+            case 0x16:
+                vi_insert_quoted_key(b, &vis);
+                break;
             case 0x01:
                 vi_replay_insert_text(b, &vis, vis.last_insert_text);
                 break;
@@ -5735,6 +5841,12 @@ exvi_visual_main(buffer_t *b)
                 break;
             case 0x15:
                 vi_erase_to_insert_anchor(b, &vis);
+                break;
+            case 0x12:
+                vi_insert_register_text(b, &vis);
+                break;
+            case 0x16:
+                vi_insert_quoted_key(b, &vis);
                 break;
             case 0x01:
                 vi_replay_insert_text(b, &vis, vis.last_insert_text);

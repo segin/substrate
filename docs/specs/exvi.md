@@ -235,7 +235,7 @@ All other historical `ex` commands and aliases are currently outside the support
 
 #### 3.4 Insert mode, replace mode, and repeatability
 
-- [ ] Complete insert-mode editing conveniences that are still missing or only partially correct.
+- [x] Complete insert-mode editing conveniences that are still missing or only partially correct.
 - [x] Finish replace-mode semantics across tabs, short lines, newlines, and mixed insert/replace transitions.
 - [ ] Replace the current bounded `.` support with full historical repeat-last-change behavior for insert/change/replace text replays.
 - [ ] Tighten undo/redo granularity so insert sessions, replace sessions, open-line commands, and repeated edits group like real `vi`.
