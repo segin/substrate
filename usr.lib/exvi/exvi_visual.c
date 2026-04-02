@@ -39,6 +39,7 @@ typedef enum {
     VI_REPEAT_C_TO_FIRST_NONBLANK,
     VI_REPEAT_C_SEARCH_REPEAT,
     VI_REPEAT_C_PERCENT,
+    VI_REPEAT_C_BACK_END,
     VI_REPEAT_C_MARK_LINE,
     VI_REPEAT_C_MARK_EXACT,
     VI_REPEAT_C_LINE_MOTION,
@@ -3414,6 +3415,21 @@ vi_find_change_motion_span(line_t *cur, int cursor_col, int ch, int forward, int
 }
 
 static int
+vi_change_find_is_zero_width_insert(line_t *cur, int cursor_col, int ch, int forward, int till,
+    int count)
+{
+    int col;
+
+    if (!cur || forward || !till || count != 1) {
+        return 0;
+    }
+    if (vi_find_char_in_line(cur, cursor_col, ch, 0, 1, &col) != 0) {
+        return 0;
+    }
+    return (col + 1 == cursor_col);
+}
+
+static int
 vi_find_word_end_exclusive_count(line_t *cur, int start, int count, int *end_out)
 {
     size_t i;
@@ -4619,6 +4635,9 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             }
         } else {
             vi_delete_span(b, vis, target_col, vis->cursor_col + 1, vis->pending_op == 'c');
+            if (vis->pending_op == 'c') {
+                vi_set_last_change(vis, VI_REPEAT_C_BACK_END, count, motion == 'E');
+            }
         }
     } else if (vis->pending_op == 'y' &&
         (key == 'f' || key == 'F' || key == 't' || key == 'T')) {
@@ -4896,6 +4915,14 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         ch = vi_read_visual_key(b, vis, ':', NULL);
         if (ch == -1 || ch == '\x1b' || ch == '\r' || ch == '\n') {
             write(STDOUT_FILENO, "\a", 1);
+        } else if (vis->pending_op == 'c' && vi_change_find_is_zero_width_insert(b->cur,
+            vis->cursor_col, ch, (key == 'f' || key == 't'), (key == 't' || key == 'T'),
+            count)) {
+            vis->last_find_char = ch;
+            vis->last_find_forward = (key == 'f' || key == 't');
+            vis->last_find_till = (key == 't' || key == 'T');
+            vi_start_change_insert(b, vis);
+            vi_set_last_change(vis, VI_REPEAT_C_FIND, count, key);
         } else if (((vis->pending_op == 'c')
                 ? vi_find_change_motion_span(b->cur, vis->cursor_col, ch,
                     (key == 'f' || key == 't'),
@@ -4921,7 +4948,7 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
                 if (vis->pending_op == 'd') {
                     vi_set_last_change(vis, VI_REPEAT_D_FIND, count, 0);
                 } else if (vis->pending_op == 'c') {
-                    vi_set_last_change(vis, VI_REPEAT_C_FIND, count, 0);
+                    vi_set_last_change(vis, VI_REPEAT_C_FIND, count, key);
                 }
             }
         } else {
@@ -4985,6 +5012,17 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         } else {
             rc = vi_simulate_motion_target(b, vis, vi_move_paragraph_backward, count,
                 &target_line, &target_col);
+        }
+        if (rc != 0 && (vis->pending_op == 'd' || vis->pending_op == 'c' ||
+                vis->pending_op == 'y') && key == ')' && b->tail) {
+            target_line = b->tail;
+            target_col = (int)b->tail->len;
+            rc = 0;
+        } else if (rc == 0 && (vis->pending_op == 'd' || vis->pending_op == 'c' ||
+                vis->pending_op == 'y') && (key == ')' || key == '}') && target_line == b->tail
+            && target_line && !vi_line_is_blank(target_line)
+            && target_col == vi_first_nonblank_col(target_line)) {
+            target_col = (int)target_line->len;
         }
         if (rc != 0) {
             write(STDOUT_FILENO, "\a", 1);
@@ -6174,14 +6212,52 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
         break;
     case VI_REPEAT_C_FIND:
         {
+            int forward = vis->last_find_forward;
+            int till = vis->last_find_till;
             int start;
 
-            if (!cur || vi_find_change_motion_span(cur, vis->cursor_col, vis->last_find_char,
-                vis->last_find_forward, vis->last_find_till, count, &start, &end) != 0) {
+            if (vis->last_change_char == 'f' || vis->last_change_char == 'F' ||
+                vis->last_change_char == 't' || vis->last_change_char == 'T') {
+                forward = (vis->last_change_char == 'f' || vis->last_change_char == 't');
+                till = (vis->last_change_char == 't' || vis->last_change_char == 'T');
+            }
+            if (!cur) {
+                write(STDOUT_FILENO, "\a", 1);
+                return;
+            }
+            if (vi_change_find_is_zero_width_insert(cur, vis->cursor_col, vis->last_find_char,
+                forward, till, count)) {
+                vi_start_change_insert(b, vis);
+                vi_replay_insert_text(b, vis, vis->last_insert_text);
+                vi_finish_repeat_insert(b, vis);
+                break;
+            }
+            if (vi_find_change_motion_span(cur, vis->cursor_col, vis->last_find_char,
+                forward, till, count, &start, &end) != 0) {
                 write(STDOUT_FILENO, "\a", 1);
                 return;
             }
             vi_delete_span(b, vis, start, end, 1);
+            vi_replay_insert_text(b, vis, vis->last_insert_text);
+            vi_finish_repeat_insert(b, vis);
+        }
+        break;
+    case VI_REPEAT_C_BACK_END:
+        {
+            line_t *target_line;
+            int target_col;
+
+            if (vi_backward_end_motion_target(b, vis, count, vis->last_change_char,
+                &target_line, &target_col) != 0 || target_line != b->cur ||
+                target_col > vis->cursor_col) {
+                write(STDOUT_FILENO, "\a", 1);
+                return;
+            }
+            if (target_col == vis->cursor_col) {
+                vi_start_change_insert(b, vis);
+            } else {
+                vi_delete_span(b, vis, target_col, vis->cursor_col + 1, 1);
+            }
             vi_replay_insert_text(b, vis, vis->last_insert_text);
             vi_finish_repeat_insert(b, vis);
         }

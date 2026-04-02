@@ -3233,6 +3233,33 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one two three four\nalpha beta gamma\n",
+        [b"$", b"c", b"T", b"t", b"X", b"\x1b", b"j", b"."],
+    )
+    require(exit_code == 0, f"visual-dot-after-cT vi exited with status {exit_code}")
+    require(saved == "one two tXr\nalpha betXa gamma\n",
+            f"unexpected visual-dot-after-cT buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four\nalpha beta gamma\n",
+        [b"$", b"c", b"g", b"e", b"X", b"\x1b", b"j", b"."],
+    )
+    require(exit_code == 0, f"visual-dot-after-cge vi exited with status {exit_code}")
+    require(saved == "one two threX\nalpha betXmma\n",
+            f"unexpected visual-dot-after-cge buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four\nalpha beta gamma\n",
+        [b"$", b"c", b"g", b"E", b"X", b"\x1b", b"j", b"."],
+    )
+    require(exit_code == 0, f"visual-dot-after-cgE vi exited with status {exit_code}")
+    require(saved == "one two threX\nalpha betXmma\n",
+            f"unexpected visual-dot-after-cgE buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\ntwo\nthree\nfour\n",
         [b"G", b"m", b"a", b"g", b"g", b"y", b"'", b"a", b"P"],
     )
@@ -3293,6 +3320,24 @@ def main():
     require(exit_code == 0, f"visual-paragraph-unshift vi exited with status {exit_code}")
     require(saved == "one\n\n\ttwo\n\nthree\n",
             f"unexpected visual-paragraph-unshift buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four\nalpha beta gamma\n{ block }\nmark here\n",
+        [b"c", b")", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"visual-sentence-change-eof vi exited with status {exit_code}")
+    require(saved == "X\n",
+            f"unexpected visual-sentence-change-eof buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four\nalpha beta gamma\n{ block }\nmark here\n",
+        [b"c", b"}", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"visual-paragraph-change-eof vi exited with status {exit_code}")
+    require(saved == "X\n",
+            f"unexpected visual-paragraph-change-eof buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
