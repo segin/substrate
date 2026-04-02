@@ -1644,19 +1644,31 @@ static void
 vi_move_paragraph_forward(buffer_t *b, vi_visual_t *vis, int count)
 {
     int line_no = buf_current_line(b);
+    line_t *line;
 
     if (line_no < 1) {
         return;
     }
     while (count-- > 0) {
-        line_no++;
-        while (line_no <= b->line_count &&
-            !vi_line_is_blank(buf_get_line(b, line_no))) {
-            line_no++;
+        line = buf_get_line(b, line_no);
+        if (!line) {
+            return;
         }
-        while (line_no <= b->line_count &&
-            vi_line_is_blank(buf_get_line(b, line_no))) {
+        if (vi_line_is_blank(line)) {
+            while (line_no <= b->line_count &&
+                vi_line_is_blank(buf_get_line(b, line_no))) {
+                line_no++;
+            }
+            while (line_no <= b->line_count &&
+                !vi_line_is_blank(buf_get_line(b, line_no))) {
+                line_no++;
+            }
+        } else {
             line_no++;
+            while (line_no <= b->line_count &&
+                !vi_line_is_blank(buf_get_line(b, line_no))) {
+                line_no++;
+            }
         }
         if (line_no > b->line_count) {
             line_no = b->line_count;
@@ -1664,33 +1676,61 @@ vi_move_paragraph_forward(buffer_t *b, vi_visual_t *vis, int count)
         }
     }
     b->cur = buf_get_line(b, line_no);
-    vis->cursor_col = vi_first_nonblank_col(b->cur);
+    if (b->cur && vi_line_is_blank(b->cur)) {
+        vis->cursor_col = 0;
+    } else {
+        vis->cursor_col = vi_first_nonblank_col(b->cur);
+    }
 }
 
 static void
 vi_move_paragraph_backward(buffer_t *b, vi_visual_t *vis, int count)
 {
     int line_no = buf_current_line(b);
+    line_t *line;
 
     if (line_no < 1) {
         return;
     }
     while (count-- > 0) {
-        line_no--;
-        while (line_no >= 1 && vi_line_is_blank(buf_get_line(b, line_no))) {
-            line_no--;
+        line = buf_get_line(b, line_no);
+        if (!line) {
+            return;
         }
-        while (line_no >= 1 && !vi_line_is_blank(buf_get_line(b, line_no))) {
-            line_no--;
+        if (vi_line_is_blank(line)) {
+            while (line_no >= 1 && vi_line_is_blank(buf_get_line(b, line_no))) {
+                line_no--;
+            }
+            while (line_no >= 1 && !vi_line_is_blank(buf_get_line(b, line_no))) {
+                line_no--;
+            }
+            line_no++;
+        } else {
+            int start = line_no;
+
+            while (start > 1 && !vi_line_is_blank(buf_get_line(b, start - 1))) {
+                start--;
+            }
+            if (start == line_no) {
+                line_no = start - 1;
+                if (line_no < 1) {
+                    line_no = 1;
+                }
+            } else {
+                line_no = start;
+            }
         }
-        line_no++;
         if (line_no < 1) {
             line_no = 1;
             break;
         }
     }
     b->cur = buf_get_line(b, line_no);
-    vis->cursor_col = vi_first_nonblank_col(b->cur);
+    if (b->cur && vi_line_is_blank(b->cur)) {
+        vis->cursor_col = 0;
+    } else {
+        vis->cursor_col = vi_first_nonblank_col(b->cur);
+    }
 }
 
 static int
@@ -1933,8 +1973,43 @@ vi_move_sentence_backward(buffer_t *b, vi_visual_t *vis, int count)
             }
         }
         if (!found) {
-            if (vi_find_first_nonblank(b, &cur_line, &cur_col) != 0) {
+            line_t *line = buf_get_line(b, cur_line);
+
+            if (!line) {
                 return;
+            }
+            if (vi_line_is_blank(line)) {
+                while (cur_line >= 1 && vi_line_is_blank(buf_get_line(b, cur_line))) {
+                    cur_line--;
+                }
+                if (cur_line < 1) {
+                    if (vi_find_first_nonblank(b, &cur_line, &cur_col) != 0) {
+                        return;
+                    }
+                } else {
+                    while (cur_line > 1 &&
+                        !vi_line_is_blank(buf_get_line(b, cur_line - 1))) {
+                        cur_line--;
+                    }
+                    cur_col = vi_first_nonblank_col(buf_get_line(b, cur_line));
+                }
+            } else {
+                int start = cur_line;
+                int start_col;
+
+                while (start > 1 && !vi_line_is_blank(buf_get_line(b, start - 1))) {
+                    start--;
+                }
+                start_col = vi_first_nonblank_col(buf_get_line(b, start));
+                if (start < cur_line || cur_col > start_col) {
+                    cur_line = start;
+                    cur_col = start_col;
+                } else if (start > 1) {
+                    cur_line = start - 1;
+                    cur_col = 0;
+                } else if (vi_find_first_nonblank(b, &cur_line, &cur_col) != 0) {
+                    return;
+                }
             }
         }
     }

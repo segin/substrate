@@ -2072,6 +2072,60 @@ def main():
     exit_code, decoded, saved = run_vi_session(
         vi_path,
         "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+        [b"}", b"r", b"X"],
+    )
+    require(exit_code == 0, f"blank-paragraph-forward vi exited with status {exit_code}")
+    require(saved == "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+            f"unexpected blank-paragraph-forward buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+        [b"2", b"}", b"r", b"X"],
+    )
+    require(exit_code == 0, f"blank-paragraph-forward-count vi exited with status {exit_code}")
+    require(saved == "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+            f"unexpected blank-paragraph-forward-count buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+        [b"d", b"}"],
+    )
+    require(exit_code == 0, f"blank-paragraph-delete vi exited with status {exit_code}")
+    require(saved == "\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+            f"unexpected blank-paragraph-delete buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+        [b"2", b"d", b"}"],
+    )
+    require(exit_code == 0, f"blank-paragraph-delete-count vi exited with status {exit_code}")
+    require(saved == "\nsec\n{\nbody\n}\n",
+            f"unexpected blank-paragraph-delete-count buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+        [b"c", b"}", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"blank-paragraph-change vi exited with status {exit_code}")
+    require(saved == "X\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+            f"unexpected blank-paragraph-change buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+        [b"y", b"}", b"P"],
+    )
+    require(exit_code == 0, f"blank-paragraph-yank vi exited with status {exit_code}")
+    require(saved == "one two three four five six\none two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+            f"unexpected blank-paragraph-yank buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
         [b")", b"r", b"X"],
     )
     require(exit_code == 0, f"blank-sentence-forward vi exited with status {exit_code}")
@@ -2122,6 +2176,60 @@ def main():
     require(exit_code == 0, f"blank-sentence-yank-count vi exited with status {exit_code}")
     require(saved == "one two three four five six\n\none two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
             f"unexpected blank-sentence-yank-count buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+        [b"G", b"(", b"r", b"X"],
+    )
+    require(exit_code == 0, f"blank-sentence-backward vi exited with status {exit_code}")
+    require(saved == "one two three four five six\n\nalpha beta gamma delta\n\nXec\n{\nbody\n}\n",
+            f"unexpected blank-sentence-backward buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+        [b"G", b"2", b"(", b"r", b"X"],
+    )
+    require(exit_code == 0, f"blank-sentence-backward-count vi exited with status {exit_code}")
+    require(saved == "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+            f"unexpected blank-sentence-backward-count buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+        [b"G", b"d", b"("],
+    )
+    require(exit_code == 0, f"blank-sentence-backward-delete vi exited with status {exit_code}")
+    require(saved == "one two three four five six\n\nalpha beta gamma delta\n\n}\n",
+            f"unexpected blank-sentence-backward-delete buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+        [b"G", b"2", b"d", b"("],
+    )
+    require(exit_code == 0, f"blank-sentence-backward-delete-count vi exited with status {exit_code}")
+    require(saved == "one two three four five six\n\nalpha beta gamma delta\n}\n",
+            f"unexpected blank-sentence-backward-delete-count buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+        [b"G", b"c", b"(", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"blank-sentence-backward-change vi exited with status {exit_code}")
+    require(saved == "one two three four five six\n\nalpha beta gamma delta\n\nX\n}\n",
+            f"unexpected blank-sentence-backward-change buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+        [b"G", b"y", b"(", b"P"],
+    )
+    require(exit_code == 0, f"blank-sentence-backward-yank vi exited with status {exit_code}")
+    require(saved == "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\nsec\n{\nbody\n}\n",
+            f"unexpected blank-sentence-backward-yank buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
