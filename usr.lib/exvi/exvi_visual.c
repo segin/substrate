@@ -37,6 +37,7 @@ typedef enum {
     VI_REPEAT_C_FIND,
     VI_REPEAT_C_TO_COL0,
     VI_REPEAT_C_TO_FIRST_NONBLANK,
+    VI_REPEAT_C_SEARCH_REPEAT,
 } vi_repeat_kind_t;
 
 typedef enum {
@@ -5009,7 +5010,9 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             &target_line, &target_col) != 0) {
             write(STDOUT_FILENO, "\a", 1);
         } else if (vi_apply_search_linewise_motion(b, vis, line_no, target_line, target_col) == 0) {
-            /* Handled as a linewise repeat-search motion. */
+            if (vis->pending_op == 'c') {
+                vi_set_last_change(vis, VI_REPEAT_C_SEARCH_REPEAT, count, key);
+            }
         } else if (vis->pending_op == '>' || vis->pending_op == '<') {
             if (vi_apply_search_linewise_motion(b, vis, line_no, target_line, target_col) != 0) {
                 write(STDOUT_FILENO, "\a", 1);
@@ -5017,8 +5020,11 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         } else if (vis->pending_op == 'c' && target_line == b->cur &&
             target_col == vis->cursor_col) {
             vi_start_change_insert(b, vis);
+            vi_set_last_change(vis, VI_REPEAT_C_SEARCH_REPEAT, count, key);
         } else if (vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
             write(STDOUT_FILENO, "\a", 1);
+        } else if (vis->pending_op == 'c') {
+            vi_set_last_change(vis, VI_REPEAT_C_SEARCH_REPEAT, count, key);
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y' ||
         vis->pending_op == '>' || vis->pending_op == '<') &&
@@ -6048,6 +6054,37 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
         }
         vi_replay_insert_text(b, vis, vis->last_insert_text);
         vi_finish_repeat_insert(b, vis);
+        break;
+    case VI_REPEAT_C_SEARCH_REPEAT:
+        {
+            int current_line_no = buf_current_line(b);
+            int saved_op = vis->pending_op;
+            int forward = (vis->last_change_char == 'n')
+                ? vis->last_search_forward : !vis->last_search_forward;
+            line_t *target_line;
+            int target_col;
+
+            vis->pending_op = 'c';
+            if (vi_search_motion_target(b, vis, "", forward, count,
+                &target_line, &target_col) != 0) {
+                vis->pending_op = saved_op;
+                write(STDOUT_FILENO, "\a", 1);
+                return;
+            }
+            if (vi_apply_search_linewise_motion(b, vis, current_line_no, target_line,
+                target_col) != 0) {
+                if (target_line == b->cur && target_col == vis->cursor_col) {
+                    vi_start_change_insert(b, vis);
+                } else if (vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
+                    vis->pending_op = saved_op;
+                    write(STDOUT_FILENO, "\a", 1);
+                    return;
+                }
+            }
+            vis->pending_op = saved_op;
+            vi_replay_insert_text(b, vis, vis->last_insert_text);
+            vi_finish_repeat_insert(b, vis);
+        }
         break;
     default:
         write(STDOUT_FILENO, "\a", 1);

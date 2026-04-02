@@ -3549,6 +3549,24 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one target\ntwo target\nthree target\n",
+        [b"/", b"target", b"\r", b"c", b"n", b"X", b"\x1b", b"n", b"."],
+    )
+    require(exit_code == 0, f"visual-dot-after-cn vi exited with status {exit_code}")
+    require(saved == "one XXtarget\n",
+            f"unexpected visual-dot-after-cn buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one target\ntwo target\nthree target\n",
+        [b"G", b"?", b"target", b"\r", b"c", b"N", b"X", b"\x1b", b"N", b"."],
+    )
+    require(exit_code == 0, f"visual-dot-after-cN vi exited with status {exit_code}")
+    require(saved == "one Xtarget\n",
+            f"unexpected visual-dot-after-cN buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
         [b"d", b"]", b"]"],
     )
