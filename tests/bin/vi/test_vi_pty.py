@@ -3215,6 +3215,15 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one\ntwo\nthree\nfour\nfive\n",
+        [b"2", b"G", b"c", b"M", b"X", b"\x1b", b"j", b"."],
+    )
+    require(exit_code == 0, f"visual-dot-after-cM vi exited with status {exit_code}")
+    require(saved == "one\nX\nfour\nfive\n",
+            f"unexpected visual-dot-after-cM buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\ntwo\nthree\nfour\n",
         [b"j", b"c", b"-", b"X", b"\x1b", b"j", b"."],
     )

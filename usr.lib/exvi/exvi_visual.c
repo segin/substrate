@@ -1957,11 +1957,19 @@ static int
 vi_screen_target_line(buffer_t *b, vi_visual_t *vis, int mode, int count)
 {
     int visible_rows = vis->rows - 1;
+    int remaining_lines;
     int screen_row;
     int target_line;
 
     if (visible_rows < 1) {
         visible_rows = 1;
+    }
+    remaining_lines = b->line_count - vis->top_line + 1;
+    if (remaining_lines < 1) {
+        remaining_lines = 1;
+    }
+    if (visible_rows > remaining_lines) {
+        visible_rows = remaining_lines;
     }
     switch (mode) {
     case 0:
