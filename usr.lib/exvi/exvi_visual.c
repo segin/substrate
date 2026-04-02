@@ -6315,6 +6315,7 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
         break;
     case VI_REPEAT_C_LINE_MOTION:
         {
+            int saved_op = vis->pending_op;
             int start = line_no;
             int target = vi_clamp_line_target(b, line_no + vis->last_change_aux);
 
@@ -6324,10 +6325,13 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
                 start = target;
                 target = tmp;
             }
+            vis->pending_op = 'c';
             if (vi_apply_linewise_operator(b, vis, start, target) != 0) {
+                vis->pending_op = saved_op;
                 write(STDOUT_FILENO, "\a", 1);
                 return;
             }
+            vis->pending_op = saved_op;
             vi_replay_insert_text(b, vis, vis->last_insert_text);
             vi_finish_repeat_insert(b, vis);
         }
