@@ -192,9 +192,8 @@ void file_free(file_t *f) {
     uma_zfree(file_zone, f);
 }
 
-int kern_write(int fd, const char *buf, int len) {
+ssize_t kern_write(int fd, const char *buf, size_t len) {
     if (fd < 0 || fd >= MAX_FD) return -1;
-    if (len < 0) return -22; // EINVAL
     if (len == 0) return 0;
 
     file_t *f = current_process->fds[fd];
@@ -207,7 +206,7 @@ int kern_write(int fd, const char *buf, int len) {
          * PERFORMANCE: We pass it directly to write_fs to avoid redundant double buffering (memcpy).
          * This Zero-Copy approach improves throughput by ~8% on large writes.
          */
-        int bytes = (int)write_fs((fs_node_t*)f->f_data, f->f_offset, len, (const uint8_t*)buf);
+        ssize_t bytes = (ssize_t)write_fs((fs_node_t*)f->f_data, f->f_offset, len, (const uint8_t*)buf);
 
         if (bytes > 0) {
             f->f_offset += bytes;
@@ -232,23 +231,22 @@ int truncate_fs(fs_node_t *node, off_t length) {
     return -1;
 }
 
-int sys_write(int fd, const char *buf, int len) {
-    if (len < 0) return -22; // EINVAL
+ssize_t sys_write(int fd, const char *buf, size_t len) {
     if (len == 0) return 0;
 
     void *kbuf = kmalloc(IO_CHUNK_SIZE);
     if (!kbuf) return -12; // ENOMEM
 
-    int total_written = 0;
+    ssize_t total_written = 0;
     while (len > 0) {
-        int to_write = (len > IO_CHUNK_SIZE) ? IO_CHUNK_SIZE : len;
+        size_t to_write = (len > IO_CHUNK_SIZE) ? IO_CHUNK_SIZE : len;
         if (copyin(buf + total_written, kbuf, to_write) != 0) {
             kfree(kbuf, IO_CHUNK_SIZE);
             if (total_written > 0) return total_written;
             return -14; // EFAULT
         }
 
-        int bytes = kern_write(fd, kbuf, to_write);
+        ssize_t bytes = kern_write(fd, kbuf, to_write);
         if (bytes <= 0) {
             if (total_written == 0) {
                 kfree(kbuf, IO_CHUNK_SIZE);
@@ -258,16 +256,15 @@ int sys_write(int fd, const char *buf, int len) {
         }
 
         total_written += bytes;
-        len -= bytes;
-        if (bytes < to_write) break;
+        len -= (size_t)bytes;
+        if ((size_t)bytes < to_write) break;
     }
     kfree(kbuf, IO_CHUNK_SIZE);
     return total_written;
 }
 
-int kern_read(int fd, char *buf, int len) {
+ssize_t kern_read(int fd, char *buf, size_t len) {
     if (fd < 0 || fd >= MAX_FD) return -1;
-    if (len < 0) return -22; // EINVAL
     if (len == 0) return 0;
 
     file_t *f = current_process->fds[fd];
@@ -278,7 +275,7 @@ int kern_read(int fd, char *buf, int len) {
      * buf is already a kernel pointer here when called from sys_read or internal code.
      * We pass it directly to read_fs to avoid redundant double buffering.
      */
-    int bytes = (int)read_fs((fs_node_t*)f->f_data, f->f_offset, len, (uint8_t*)buf);
+    ssize_t bytes = (ssize_t)read_fs((fs_node_t*)f->f_data, f->f_offset, len, (uint8_t*)buf);
 
     if (bytes > 0) {
         f->f_offset += bytes;
@@ -287,17 +284,16 @@ int kern_read(int fd, char *buf, int len) {
     return bytes;
 }
 
-int sys_read(int fd, char *buf, int len) {
-    if (len < 0) return -1;
+ssize_t sys_read(int fd, char *buf, size_t len) {
     if (len == 0) return 0;
 
     void *kbuf = kmalloc(4096);
     if (!kbuf) return -12; // ENOMEM
 
-    int total_read = 0;
+    ssize_t total_read = 0;
     while (len > 0) {
-        int to_read = (len > 4096) ? 4096 : len;
-        int bytes = kern_read(fd, kbuf, to_read);
+        size_t to_read = (len > 4096) ? 4096 : len;
+        ssize_t bytes = kern_read(fd, kbuf, to_read);
         if (bytes <= 0) {
             if (total_read == 0) {
                 kfree(kbuf, 4096);
@@ -312,8 +308,8 @@ int sys_read(int fd, char *buf, int len) {
         }
 
         total_read += bytes;
-        len -= bytes;
-        if (bytes < to_read) break;
+        len -= (size_t)bytes;
+        if ((size_t)bytes < to_read) break;
     }
     kfree(kbuf, 4096);
     return total_read;

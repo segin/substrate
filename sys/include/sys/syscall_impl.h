@@ -47,8 +47,8 @@ extern int sys_getegid(void);
 extern int sys_setgid(int);
 
 /* File I/O - NOTE: native uses 64-bit types! Foreign personalities need wrappers */
-extern int sys_read(int, char*, int);
-extern int sys_write(int, const char*, int);
+extern ssize_t sys_read(int, char*, size_t);
+extern ssize_t sys_write(int, const char*, size_t);
 extern int sys_open(const char*, int, int);
 extern int sys_close(int);
 extern int sys_creat(const char*, int);

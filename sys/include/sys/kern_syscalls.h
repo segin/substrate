@@ -25,8 +25,8 @@ struct sigaction;
 /* Internal kernel versions of syscalls that take kernel pointers */
 int kern_acct(const char *path);
 int kern_open(const char *path, int flags, int mode);
-int kern_read(int fd, char *buf, int len);
-int kern_write(int fd, const char *buf, int len);
+ssize_t kern_read(int fd, char *buf, size_t len);
+ssize_t kern_write(int fd, const char *buf, size_t len);
 int kern_close(int fd);
 int kern_stat(const char *path, struct stat *buf);
 int kern_lstat(const char *path, struct stat *buf);
