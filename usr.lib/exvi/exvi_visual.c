@@ -175,7 +175,8 @@ vi_set_insert_anchor(buffer_t *b, vi_visual_t *vis)
 static void
 vi_restore_terminal(void)
 {
-    static const char restore_seq[] = "\x1b[?25h\x1b[0m\x1b[2J\x1b[H";
+    static const char restore_seq[] =
+        "\x1b[?1l\x1b>\x1b[?25h\x1b[0m\x1b[2J\x1b[H";
 
     if (active_visual && active_visual->raw_active) {
         tcsetattr(STDIN_FILENO, TCSAFLUSH, &active_visual->saved_tio);
@@ -194,6 +195,7 @@ vi_handle_winch(int sig)
 static int
 vi_enable_raw(vi_visual_t *vis)
 {
+    static const char enter_seq[] = "\x1b[?1h\x1b=";
     struct termios raw;
 
     if (tcgetattr(STDIN_FILENO, &vis->saved_tio) != 0) {
@@ -213,6 +215,7 @@ vi_enable_raw(vi_visual_t *vis)
     }
     vis->raw_active = 1;
     active_visual = vis;
+    write(STDOUT_FILENO, enter_seq, sizeof(enter_seq) - 1);
     atexit(vi_restore_terminal);
     return 0;
 }

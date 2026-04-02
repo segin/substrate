@@ -189,6 +189,27 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one\ntwo\nthree\n",
+        [b"\x1bOB", b"\x1bOC", b"r", b"Z", b"\x1bOA", b"\x1bOH", b"r", b"Q",
+         b"\x1bOF", b"r", b"R"],
+    )
+    require(exit_code == 0, f"vt100-ss3-normal vi exited with status {exit_code}")
+    require("\x1b[?1h\x1b=" in decoded, "missing VT100 application-keypad enter sequence")
+    require("\x1b[?1l\x1b>" in decoded, "missing VT100 application-keypad restore sequence")
+    require(saved == "QnR\ntZo\nthree\n",
+            f"unexpected vt100-ss3-normal buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc\n",
+        [b"i", b"X", b"\x1bOD", b"Y", b"\x1bOH", b"Z", b"\x1b"],
+    )
+    require(exit_code == 0, f"vt100-ss3-insert vi exited with status {exit_code}")
+    require(saved == "ZYXabc\n",
+            f"unexpected vt100-ss3-insert buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\ntwo\none again\n",
         [b"/", b"one\r", b"n", b"r", b"Z"],
     )

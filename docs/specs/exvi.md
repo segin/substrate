@@ -213,7 +213,7 @@ All other historical `ex` commands and aliases are currently outside the support
 - [x] Audit resize behavior across normal, insert, replace, operator-pending, `:`, `/`, and `?` prompt states.
 - [x] Finish redraw semantics such as `Ctrl-L` and any remaining `z` variants or screen-positioning details.
 - [x] Tighten long-line, number, list, tabstop, and status-line interactions under horizontal scrolling and narrow terminals.
-- [ ] Audit ANSI/VT100 fallback behavior, keypad handling, and terminal capability use on simpler terminals.
+- [x] Audit ANSI/VT100 fallback behavior, keypad handling, and terminal capability use on simpler terminals.
 - [x] Add PTY regressions specifically for redraw, resize, narrow terminals, long files, and repeated terminal-size changes.
 
 #### 3.2 Motion completeness
