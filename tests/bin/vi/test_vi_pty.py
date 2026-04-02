@@ -3207,6 +3207,33 @@ def main():
     exit_code, decoded, saved = run_vi_session(
         vi_path,
         "one\ntwo\nthree\nfour\n",
+        [b"c", b"+", b"X", b"\x1b", b"j", b"."],
+    )
+    require(exit_code == 0, f"visual-dot-after-cplus vi exited with status {exit_code}")
+    require(saved == "X\nX\n",
+            f"unexpected visual-dot-after-cplus buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\nfour\n",
+        [b"j", b"c", b"-", b"X", b"\x1b", b"j", b"."],
+    )
+    require(exit_code == 0, f"visual-dot-after-cminus vi exited with status {exit_code}")
+    require(saved == "X\nfour\n",
+            f"unexpected visual-dot-after-cminus buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"c", b"_", b"X", b"\x1b", b"j", b"."],
+    )
+    require(exit_code == 0, f"visual-dot-after-cunderscore vi exited with status {exit_code}")
+    require(saved == "X\nX\nthree\n",
+            f"unexpected visual-dot-after-cunderscore buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\nfour\n",
         [b"G", b"m", b"a", b"g", b"g", b"y", b"'", b"a", b"P"],
     )
     require(exit_code == 0, f"visual-mark-yank vi exited with status {exit_code}")

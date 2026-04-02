@@ -41,6 +41,7 @@ typedef enum {
     VI_REPEAT_C_PERCENT,
     VI_REPEAT_C_MARK_LINE,
     VI_REPEAT_C_MARK_EXACT,
+    VI_REPEAT_C_LINE_MOTION,
 } vi_repeat_kind_t;
 
 typedef enum {
@@ -4653,6 +4654,9 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         key == '_') {
         if (vi_apply_linewise_operator(b, vis, line_no, last_line) != 0) {
             write(STDOUT_FILENO, "\a", 1);
+        } else if (vis->pending_op == 'c') {
+            vi_set_last_change(vis, VI_REPEAT_C_LINE_MOTION, count, '_');
+            vis->last_change_aux = count - 1;
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y' ||
         vis->pending_op == '>' || vis->pending_op == '<') &&
@@ -4662,6 +4666,9 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
 
         if (vi_apply_linewise_operator(b, vis, start, end_line) != 0) {
             write(STDOUT_FILENO, "\a", 1);
+        } else if (vis->pending_op == 'c') {
+            vi_set_last_change(vis, VI_REPEAT_C_LINE_MOTION, count, key);
+            vis->last_change_aux = count;
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y' ||
         vis->pending_op == '>' || vis->pending_op == '<') &&
@@ -4697,6 +4704,9 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
 
         if (vi_apply_linewise_operator(b, vis, start, end_line) != 0) {
             write(STDOUT_FILENO, "\a", 1);
+        } else if (vis->pending_op == 'c') {
+            vi_set_last_change(vis, VI_REPEAT_C_LINE_MOTION, count, key);
+            vis->last_change_aux = -count;
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
         key == '|') {
@@ -6296,6 +6306,25 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
                 !b->marks[mark_idx] ||
                 vi_apply_charwise_motion(b, vis, b->marks[mark_idx],
                     b->mark_cols[mark_idx], 0) != 0) {
+                write(STDOUT_FILENO, "\a", 1);
+                return;
+            }
+            vi_replay_insert_text(b, vis, vis->last_insert_text);
+            vi_finish_repeat_insert(b, vis);
+        }
+        break;
+    case VI_REPEAT_C_LINE_MOTION:
+        {
+            int start = line_no;
+            int target = vi_clamp_line_target(b, line_no + vis->last_change_aux);
+
+            if (start > target) {
+                int tmp = start;
+
+                start = target;
+                target = tmp;
+            }
+            if (vi_apply_linewise_operator(b, vis, start, target) != 0) {
                 write(STDOUT_FILENO, "\a", 1);
                 return;
             }
