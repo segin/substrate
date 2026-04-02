@@ -2071,6 +2071,60 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one\n\n two\nthree\n\n\nend\n",
+        [b"w", b"r", b"X"],
+    )
+    require(exit_code == 0, f"blank-word-forward vi exited with status {exit_code}")
+    require(saved == "one\n\n two\nthree\n\n\nend\n",
+            f"unexpected blank-word-forward buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n\n two\nthree\n\n\nend\n",
+        [b"2", b"w", b"r", b"X"],
+    )
+    require(exit_code == 0, f"blank-word-forward-count vi exited with status {exit_code}")
+    require(saved == "one\n\n Xwo\nthree\n\n\nend\n",
+            f"unexpected blank-word-forward-count buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n\n two\nthree\n\n\nend\n",
+        [b"2", b"e", b"r", b"X"],
+    )
+    require(exit_code == 0, f"blank-word-end-count vi exited with status {exit_code}")
+    require(saved == "one\n\n twX\nthree\n\n\nend\n",
+            f"unexpected blank-word-end-count buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n\n two\nthree\n\n\nend\n",
+        [b"G", b"b", b"r", b"X"],
+    )
+    require(exit_code == 0, f"blank-word-backward vi exited with status {exit_code}")
+    require(saved == "one\n\n two\nthree\n\n\nend\n",
+            f"unexpected blank-word-backward buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n\n two\nthree\n\n\nend\n",
+        [b"G", b"B", b"r", b"X"],
+    )
+    require(exit_code == 0, f"blank-bigword-backward vi exited with status {exit_code}")
+    require(saved == "one\n\n two\nthree\n\n\nend\n",
+            f"unexpected blank-bigword-backward buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n\n two\nthree\n\n\nend\n",
+        [b"W", b"r", b"X"],
+    )
+    require(exit_code == 0, f"blank-bigword-forward vi exited with status {exit_code}")
+    require(saved == "one\n\n two\nthree\n\n\nend\n",
+            f"unexpected blank-bigword-forward buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
         [b"}", b"r", b"X"],
     )

@@ -2099,6 +2099,11 @@ vi_move_word_forward(buffer_t *b, vi_visual_t *vis)
         if (!cur) {
             break;
         }
+        if (vi_line_is_blank(cur)) {
+            b->cur = cur;
+            vis->cursor_col = 0;
+            return;
+        }
         for (i = 0; i < cur->len; i++) {
             if (vi_is_word_char((unsigned char)cur->text[i])) {
                 b->cur = cur;
@@ -2127,13 +2132,18 @@ vi_move_word_backward(buffer_t *b, vi_visual_t *vis)
     int line_no = buf_current_line(b);
     line_t *cur = b->cur;
     int i;
+    int current_blank;
 
     if (!cur) {
         return;
     }
+    current_blank = vi_line_is_blank(cur);
     i = vis->cursor_col;
     if (i > 0) {
         i--;
+    } else if ((size_t)vis->cursor_col < cur->len &&
+        vi_is_word_char((unsigned char)cur->text[vis->cursor_col])) {
+        i = -1;
     }
     while (i >= 0 && !vi_is_word_char((unsigned char)cur->text[i])) {
         i--;
@@ -2149,6 +2159,14 @@ vi_move_word_backward(buffer_t *b, vi_visual_t *vis)
     for (line_no--; line_no >= 1; line_no--) {
         cur = buf_get_line(b, line_no);
         if (!cur) {
+            continue;
+        }
+        if (vi_line_is_blank(cur)) {
+            if (!current_blank) {
+                b->cur = cur;
+                vis->cursor_col = 0;
+                return;
+            }
             continue;
         }
         for (i = (int)cur->len - 1; i >= 0; i--) {
@@ -2187,8 +2205,19 @@ vi_move_word_end(buffer_t *b, vi_visual_t *vis)
         return;
     }
     i = (size_t)vis->cursor_col;
-    while (i < cur->len && !vi_is_word_char((unsigned char)cur->text[i])) {
+    if (i < cur->len && vi_is_word_char((unsigned char)cur->text[i])) {
+        while (i + 1 < cur->len && vi_is_word_char((unsigned char)cur->text[i + 1])) {
+            i++;
+        }
+        if ((int)i != vis->cursor_col) {
+            vis->cursor_col = (int)i;
+            return;
+        }
         i++;
+    } else {
+        while (i < cur->len && !vi_is_word_char((unsigned char)cur->text[i])) {
+            i++;
+        }
     }
     if (i < cur->len) {
         while (i + 1 < cur->len && vi_is_word_char((unsigned char)cur->text[i + 1])) {
@@ -2340,6 +2369,11 @@ vi_move_bigword_forward(buffer_t *b, vi_visual_t *vis)
         if (!cur) {
             break;
         }
+        if (vi_line_is_blank(cur)) {
+            b->cur = cur;
+            vis->cursor_col = 0;
+            return;
+        }
         for (i = 0; i < cur->len; i++) {
             if (vi_is_bigword_char((unsigned char)cur->text[i])) {
                 b->cur = cur;
@@ -2368,13 +2402,18 @@ vi_move_bigword_backward(buffer_t *b, vi_visual_t *vis)
     int line_no = buf_current_line(b);
     line_t *cur = b->cur;
     int i;
+    int current_blank;
 
     if (!cur) {
         return;
     }
+    current_blank = vi_line_is_blank(cur);
     i = vis->cursor_col;
     if (i > 0) {
         i--;
+    } else if ((size_t)vis->cursor_col < cur->len &&
+        vi_is_bigword_char((unsigned char)cur->text[vis->cursor_col])) {
+        i = -1;
     }
     while (i >= 0 && !vi_is_bigword_char((unsigned char)cur->text[i])) {
         i--;
@@ -2390,6 +2429,14 @@ vi_move_bigword_backward(buffer_t *b, vi_visual_t *vis)
     for (line_no--; line_no >= 1; line_no--) {
         cur = buf_get_line(b, line_no);
         if (!cur) {
+            continue;
+        }
+        if (vi_line_is_blank(cur)) {
+            if (!current_blank) {
+                b->cur = cur;
+                vis->cursor_col = 0;
+                return;
+            }
             continue;
         }
         for (i = (int)cur->len - 1; i >= 0; i--) {
@@ -2428,8 +2475,19 @@ vi_move_bigword_end(buffer_t *b, vi_visual_t *vis)
         return;
     }
     i = (size_t)vis->cursor_col;
-    while (i < cur->len && !vi_is_bigword_char((unsigned char)cur->text[i])) {
+    if (i < cur->len && vi_is_bigword_char((unsigned char)cur->text[i])) {
+        while (i + 1 < cur->len && vi_is_bigword_char((unsigned char)cur->text[i + 1])) {
+            i++;
+        }
+        if ((int)i != vis->cursor_col) {
+            vis->cursor_col = (int)i;
+            return;
+        }
         i++;
+    } else {
+        while (i < cur->len && !vi_is_bigword_char((unsigned char)cur->text[i])) {
+            i++;
+        }
     }
     if (i < cur->len) {
         while (i + 1 < cur->len && vi_is_bigword_char((unsigned char)cur->text[i + 1])) {
