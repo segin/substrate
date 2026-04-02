@@ -3984,9 +3984,52 @@ vi_backward_end_motion_target(buffer_t *b, vi_visual_t *vis, int count, int bigw
     vis->cursor_col = saved_col;
     return (*line_out != NULL) ? 0 : -1;
 }
+static void
+vi_pattern_word_boundaries(const char *pattern, int *word_start, int *word_end)
+{
+    size_t len;
+
+    *word_start = 0;
+    *word_end = 0;
+    if (!pattern) {
+        return;
+    }
+    len = strlen(pattern);
+    if (len >= 2 && pattern[0] == '\\' && pattern[1] == '<') {
+        *word_start = 1;
+    }
+    if (len >= 2 && pattern[len - 2] == '\\' && pattern[len - 1] == '>') {
+        *word_end = 1;
+    }
+}
+
+static int
+vi_match_respects_word_boundaries(line_t *line, int start_col, int end_col,
+    int word_start, int word_end)
+{
+    if (!line) {
+        return 0;
+    }
+    if (start_col < 0 || end_col < start_col || (size_t)end_col > line->len) {
+        return 0;
+    }
+    if (word_start && start_col > 0 &&
+        vi_is_word_char((unsigned char)line->text[start_col - 1]) &&
+        (size_t)start_col < line->len &&
+        vi_is_word_char((unsigned char)line->text[start_col])) {
+        return 0;
+    }
+    if (word_end && end_col > 0 && (size_t)end_col < line->len &&
+        vi_is_word_char((unsigned char)line->text[end_col - 1]) &&
+        vi_is_word_char((unsigned char)line->text[end_col])) {
+        return 0;
+    }
+    return 1;
+}
+
 static int
 vi_search_forward_in_line(line_t *line, regex_t *re, int start_col, int max_col,
-    int *match_col)
+    int word_start, int word_end, int *match_col)
 {
     size_t offset;
     regmatch_t match;
@@ -4008,17 +4051,29 @@ vi_search_forward_in_line(line_t *line, regex_t *re, int start_col, int max_col,
     }
     offset = (size_t)start_col;
     while (offset <= line->len) {
+        int start;
+        int end;
+
         if (regexec(re, line->text + offset, 1, &match, 0) != 0) {
             return -1;
         }
         if (match.rm_so < 0) {
             return -1;
         }
-        if ((int)(offset + (size_t)match.rm_so) > max_col) {
+        start = (int)(offset + (size_t)match.rm_so);
+        end = (int)(offset + (size_t)match.rm_eo);
+        if (start > max_col) {
             return -1;
         }
-        *match_col = (int)(offset + (size_t)match.rm_so);
-        return 0;
+        if (vi_match_respects_word_boundaries(line, start, end, word_start, word_end)) {
+            *match_col = start;
+            return 0;
+        }
+        if (match.rm_eo > match.rm_so) {
+            offset += (size_t)match.rm_eo;
+        } else {
+            offset = (size_t)start + 1;
+        }
     }
 
     return -1;
@@ -4026,7 +4081,7 @@ vi_search_forward_in_line(line_t *line, regex_t *re, int start_col, int max_col,
 
 static int
 vi_search_backward_in_line(line_t *line, regex_t *re, int min_col, int max_col,
-    int *match_col)
+    int word_start, int word_end, int *match_col)
 {
     size_t offset;
     regmatch_t match;
@@ -4050,6 +4105,7 @@ vi_search_backward_in_line(line_t *line, regex_t *re, int min_col, int max_col,
     offset = (size_t)min_col;
     while (offset <= line->len) {
         size_t pos;
+        size_t end;
 
         if (regexec(re, line->text + offset, 1, &match, 0) != 0) {
             break;
@@ -4061,7 +4117,11 @@ vi_search_backward_in_line(line_t *line, regex_t *re, int min_col, int max_col,
         if ((int)pos > max_col) {
             break;
         }
-        found = (int)pos;
+        end = offset + (size_t)match.rm_eo;
+        if (vi_match_respects_word_boundaries(line, (int)pos, (int)end,
+            word_start, word_end)) {
+            found = (int)pos;
+        }
         if (match.rm_eo > match.rm_so) {
             offset += (size_t)match.rm_eo;
         } else {
@@ -4078,7 +4138,7 @@ vi_search_backward_in_line(line_t *line, regex_t *re, int min_col, int max_col,
 
 static int
 vi_search_once(buffer_t *b, regex_t *re, int forward, line_t *start_line, int start_col,
-    line_t **line_out, int *col_out)
+    int word_start, int word_end, line_t **line_out, int *col_out)
 {
     line_t *line;
     int col;
@@ -4093,13 +4153,14 @@ vi_search_once(buffer_t *b, regex_t *re, int forward, line_t *start_line, int st
             start_col = -1;
         }
         if (vi_search_forward_in_line(start_line, re, start_col + 1,
-            (int)start_line->len, &col) == 0) {
+            (int)start_line->len, word_start, word_end, &col) == 0) {
             *line_out = start_line;
             *col_out = col;
             return 0;
         }
         for (line = start_line->next; line; line = line->next) {
-            if (vi_search_forward_in_line(line, re, 0, (int)line->len, &col) == 0) {
+            if (vi_search_forward_in_line(line, re, 0, (int)line->len,
+                word_start, word_end, &col) == 0) {
                 *line_out = line;
                 *col_out = col;
                 return 0;
@@ -4109,13 +4170,15 @@ vi_search_once(buffer_t *b, regex_t *re, int forward, line_t *start_line, int st
             return -1;
         }
         for (line = b->head; line && line != start_line; line = line->next) {
-            if (vi_search_forward_in_line(line, re, 0, (int)line->len, &col) == 0) {
+            if (vi_search_forward_in_line(line, re, 0, (int)line->len,
+                word_start, word_end, &col) == 0) {
                 *line_out = line;
                 *col_out = col;
                 return 0;
             }
         }
-        if (vi_search_forward_in_line(start_line, re, 0, start_col, &col) == 0) {
+        if (vi_search_forward_in_line(start_line, re, 0, start_col,
+            word_start, word_end, &col) == 0) {
             *line_out = start_line;
             *col_out = col;
             return 0;
@@ -4127,13 +4190,15 @@ vi_search_once(buffer_t *b, regex_t *re, int forward, line_t *start_line, int st
         start_line = b->tail;
         start_col = start_line ? (int)start_line->len : 0;
     }
-    if (vi_search_backward_in_line(start_line, re, 0, start_col - 1, &col) == 0) {
+    if (vi_search_backward_in_line(start_line, re, 0, start_col - 1,
+        word_start, word_end, &col) == 0) {
         *line_out = start_line;
         *col_out = col;
         return 0;
     }
     for (line = start_line->prev; line; line = line->prev) {
-        if (vi_search_backward_in_line(line, re, 0, (int)line->len, &col) == 0) {
+        if (vi_search_backward_in_line(line, re, 0, (int)line->len,
+            word_start, word_end, &col) == 0) {
             *line_out = line;
             *col_out = col;
             return 0;
@@ -4143,14 +4208,15 @@ vi_search_once(buffer_t *b, regex_t *re, int forward, line_t *start_line, int st
         return -1;
     }
     for (line = b->tail; line && line != start_line; line = line->prev) {
-        if (vi_search_backward_in_line(line, re, 0, (int)line->len, &col) == 0) {
+        if (vi_search_backward_in_line(line, re, 0, (int)line->len,
+            word_start, word_end, &col) == 0) {
             *line_out = line;
             *col_out = col;
             return 0;
         }
     }
     if (vi_search_backward_in_line(start_line, re, start_col,
-        (int)start_line->len, &col) == 0) {
+        (int)start_line->len, word_start, word_end, &col) == 0) {
         *line_out = start_line;
         *col_out = col;
         return 0;
@@ -4166,6 +4232,8 @@ vi_search_target(buffer_t *b, vi_visual_t *vis, const char *pattern, int forward
     regex_t re;
     line_t *line = b->cur ? b->cur : (forward ? b->head : b->tail);
     int col = vis->cursor_col;
+    int word_start = 0;
+    int word_end = 0;
 
     if (count < 1) {
         count = 1;
@@ -4181,13 +4249,15 @@ vi_search_target(buffer_t *b, vi_visual_t *vis, const char *pattern, int forward
     if (!search) {
         return -1;
     }
+    vi_pattern_word_boundaries(search, &word_start, &word_end);
     if (regcomp(&re, search, exvi_regex_flags()) != 0) {
         free(search);
         return -1;
     }
 
     while (count-- > 0) {
-        if (vi_search_once(b, &re, forward, line, col, &line, &col) != 0) {
+        if (vi_search_once(b, &re, forward, line, col, word_start, word_end,
+            &line, &col) != 0) {
             vi_set_search_failure_status(vis, search);
             regfree(&re);
             free(search);
@@ -5039,7 +5109,9 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             &target_line, &target_col) != 0) {
             write(STDOUT_FILENO, "\a", 1);
         } else if (vi_apply_search_linewise_motion(b, vis, line_no, target_line, target_col) == 0) {
-            /* Handled as a linewise word-search motion. */
+            if (vis->pending_op == 'c') {
+                vi_set_last_change(vis, VI_REPEAT_C_SEARCH_REPEAT, count, key);
+            }
         } else if (vis->pending_op == '>' || vis->pending_op == '<') {
             if (vi_apply_search_linewise_motion(b, vis, line_no, target_line, target_col) != 0) {
                 write(STDOUT_FILENO, "\a", 1);
@@ -5047,8 +5119,11 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         } else if (vis->pending_op == 'c' && target_line == b->cur &&
             target_col == vis->cursor_col) {
             vi_start_change_insert(b, vis);
+            vi_set_last_change(vis, VI_REPEAT_C_SEARCH_REPEAT, count, key);
         } else if (vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
             write(STDOUT_FILENO, "\a", 1);
+        } else if (vis->pending_op == 'c') {
+            vi_set_last_change(vis, VI_REPEAT_C_SEARCH_REPEAT, count, key);
         }
         free(pattern);
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == '0') {
@@ -6059,11 +6134,22 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
         {
             int current_line_no = buf_current_line(b);
             int saved_op = vis->pending_op;
-            int forward = (vis->last_change_char == 'n')
-                ? vis->last_search_forward : !vis->last_search_forward;
+            int forward;
             line_t *target_line;
             int target_col;
 
+            if (vis->last_change_char == 'n') {
+                forward = vis->last_search_forward;
+            } else if (vis->last_change_char == 'N') {
+                forward = !vis->last_search_forward;
+            } else if (vis->last_change_char == '*') {
+                forward = 1;
+            } else if (vis->last_change_char == '#') {
+                forward = 0;
+            } else {
+                write(STDOUT_FILENO, "\a", 1);
+                return;
+            }
             vis->pending_op = 'c';
             if (vi_search_motion_target(b, vis, "", forward, count,
                 &target_line, &target_col) != 0) {
@@ -6202,9 +6288,22 @@ vi_current_word_text(buffer_t *b, vi_visual_t *vis)
 static char *
 vi_current_word_pattern(buffer_t *b, vi_visual_t *vis)
 {
+    char *word;
     char *pattern;
+    size_t len;
 
-    vi_copy_current_word(b, vis, 1, &pattern);
+    vi_copy_current_word(b, vis, 1, &word);
+    if (!word) {
+        return NULL;
+    }
+    len = strlen(word);
+    pattern = malloc(len + 5);
+    if (!pattern) {
+        free(word);
+        return NULL;
+    }
+    snprintf(pattern, len + 5, "\\<%s\\>", word);
+    free(word);
     return pattern;
 }
 
