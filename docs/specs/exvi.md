@@ -187,7 +187,9 @@ All other historical `ex` commands and aliases are currently outside the support
 
 #### 2.3 Buffer, undo, registers, and state model
 
-- [ ] Replace the current single-snapshot undo model with a real multi-change undo/redo transaction model if historical parity requires it.
+- [ ] Decide the supported undo/redo contract against the POSIX/BSD-first policy in this document, and record whether Substrate `vi` promises single-step undo, multi-step undo, redo, or a narrower deliberate subset.
+- [ ] If multi-step undo/redo remains in contract, replace the current single-snapshot model with explicit undo and redo transaction stacks shared by `ex` and `vi`.
+- [ ] Add direct unit/frontend tests for undo and redo across insert sessions, replace sessions, open-line commands, deletes/changes/yanks/puts, joins, and ex-driven edits.
 - [x] Audit exact trailing-newline, empty-buffer, and empty-file semantics across load, edit, write, append, preserve, and recover.
 - [x] Complete register behavior so linewise vs charwise register typing is consistent across `ex` and `vi`.
 - [x] Expand `:set` from `number`, `list`, and `tabstop` to the supported POSIX/BSD-first option matrix.
@@ -209,7 +211,9 @@ All other historical `ex` commands and aliases are currently outside the support
 
 #### 3.1 Screen model, redraw, resize, and terminal behavior
 
-- [ ] Replace the current repaint-heavy renderer with a real dirty-region or diff-based refresh strategy.
+- [ ] Introduce explicit dirty-line and status/prompt invalidation tracking so cursor-only motions no longer force a full-screen repaint.
+- [ ] Route insert/delete/open/join/search updates through partial redraw helpers that touch only the changed viewport rows plus status line.
+- [ ] Add PTY regressions that distinguish cursor-only updates from text-changing redraws on ANSI/VT100 terminals.
 - [x] Audit resize behavior across normal, insert, replace, operator-pending, `:`, `/`, and `?` prompt states.
 - [x] Finish redraw semantics such as `Ctrl-L` and any remaining `z` variants or screen-positioning details.
 - [x] Tighten long-line, number, list, tabstop, and status-line interactions under horizontal scrolling and narrow terminals.
@@ -218,17 +222,21 @@ All other historical `ex` commands and aliases are currently outside the support
 
 #### 3.2 Motion completeness
 
-- [ ] Complete the remaining classic `vi` motions that are still absent or only partially implemented.
+- [ ] Build an explicit supported-motion matrix in this document that lists every normal-mode motion key (including `g` prefixed motions), its supported count forms, and its PTY oracle coverage.
+- [ ] Finish or explicitly de-support any remaining classic motion keys that are still absent once that matrix is written, so no motion is left in an implied “maybe supported” state.
 - [x] Add remaining section- and structure-oriented motions if they are part of the supported BSD/POSIX contract.
-- [ ] Audit every counted motion for parity with real `vi`, especially mixed count-plus-motion and count-plus-operator forms.
+- [ ] Add oracles for every supported counted motion family: line motions (`j`, `k`, `+`, `-`, `_`), screen motions (`H`, `M`, `L`, `Ctrl-D`, `Ctrl-U`, `Ctrl-E`, `Ctrl-Y`), word motions (`w`, `W`, `e`, `E`, `b`, `B`, `ge`, `gE`), sentence/paragraph motions, section motions, search motions, and `%`.
+- [ ] Add oracles for mixed count-plus-operator forms over those same motion families, with one success case and one edge-case/no-op case each.
 - [x] Tighten search-repeat, find-repeat, mark-jump, and percent-motion edge cases across line boundaries and empty matches.
-- [ ] Audit movement across empty lines, blank paragraphs, short lines, and end-of-buffer conditions against reference behavior.
+- [ ] Add explicit EOF, blank-line, blank-paragraph, and short-line motion oracles for `w/W`, `b/B`, `e/E`, `ge/gE`, `(`/`)`, `{`/`}`, and screen motions.
 
 #### 3.3 Operator completeness and region semantics
 
-- [ ] Complete the remaining operator/motion combinations still missing from delete/change/yank.
-- [ ] Finish cross-line charwise operator spans so they behave correctly for every motion family, not only the currently covered subsets.
-- [ ] Audit linewise-vs-charwise coercion rules for every operator path, including edge cases at column zero and end-of-line.
+- [ ] Build an operator/motion matrix for supported `d`, `c`, `y`, `>`, and `<` combinations, and add PTY coverage for every cell that is part of the supported contract.
+- [ ] Finish `d/c/y` behavior for backward word motions (`b`, `B`, `ge`, `gE`) and add direct PTY oracles for both same-line and cross-line cases.
+- [ ] Finish `d/c/y` behavior for sentence/paragraph motions (`(`, `)`, `{`, `}`) at blank separators, EOF, and empty-line boundaries.
+- [ ] Finish `d/c/y` cross-line charwise spans for search, find, mark, and match motions, with direct PTY oracles for forward and backward cases.
+- [ ] Audit and lock down linewise-vs-charwise coercion for `d/c/y/>/<` when targets land at column zero, first nonblank, end-of-line, or blank separator lines.
 - [x] Complete operator support for search-based motions, mark-based motions, repeated find motions, and any remaining vertical motions.
 - [x] Finish `p`/`P` cursor placement and register-type behavior after every delete/change/yank variant.
 - [x] Complete named-register selection for delete/change/yank/put instead of only the currently covered register paths.
@@ -237,8 +245,11 @@ All other historical `ex` commands and aliases are currently outside the support
 
 - [x] Complete insert-mode editing conveniences that are still missing or only partially correct.
 - [x] Finish replace-mode semantics across tabs, short lines, newlines, and mixed insert/replace transitions.
-- [ ] Replace the current bounded `.` support with full historical repeat-last-change behavior for insert/change/replace text replays.
-- [ ] Tighten undo/redo granularity so insert sessions, replace sessions, open-line commands, and repeated edits group like real `vi`.
+- [ ] Add `.` replay coverage for every supported change-entry command family: direct inserts (`i/a/I/A/o/O`), replace (`R`), charwise changes (`s`, `cl`, `ch`, `c0`, `c^`, `c$`, `ce`, `cE`, `cf/F/t/T`, `c;`, `c,`), linewise changes (`cc`, `c_`, `c+`, `c-`, `cH`, `cM`, `cL`), search-driven changes (`cn`, `cN`, `c*`, `c#`, `c/`, `c?`), match/mark changes (`c%`, `c'`, ``c` ``), and sentence/paragraph changes.
+- [ ] Add a direct PTY oracle matrix for each supported `.` replay family against the documented POSIX/BSD-first contract, using sanitized `vim` only as a secondary oracle where the documented behavior overlaps.
+- [ ] Introduce multi-step undo and redo stacks instead of the current single-snapshot model, with explicit transaction records for insert, replace, delete/change/yank/put, open-line, join, and ex-driven edits.
+- [ ] Define and test undo transaction boundaries so one insert session, one replace session, one open-line command, one `.` replay, and one ex command each undo as a single unit.
+- [ ] Define and test redo invalidation rules so any non-redo edit clears redo history and repeated redo replays the same transaction boundaries.
 - [x] Audit insert-mode cursor-key, modified-cursor-key, and terminal-escape decoding so no printable garbage leaks under older terminals.
 - [x] Add PTY coverage for every insert/replace control key and repeat/undo/redo path that remains underspecified.
 
@@ -295,17 +306,17 @@ All other historical `ex` commands and aliases are currently outside the support
 
 ### 6. Multibyte, locale, and display-width correctness
 
-- [ ] Audit all cursor motions for multibyte and UTF-8 correctness.
-- [ ] Audit all word/bigword/sentence/paragraph motions under multibyte text.
-- [ ] Audit display-width handling for tabs, combining characters, wide characters, and invalid byte sequences.
-- [ ] Add locale fallback behavior and tests for non-UTF-8 environments.
-- [ ] Add PTY and host tests for long UTF-8 lines, mixed-width text, combining marks, and invalid sequences.
+- [ ] Add host-side fixtures for UTF-8 cursor motions over multibyte code points, covering `h/l`, `0/^/$`, `f/F/t/T`, `;`, `,`, `|`, `%`, and visual column tracking.
+- [ ] Add host-side fixtures for word/bigword/sentence/paragraph motions over multibyte text, including mixed ASCII and non-ASCII word boundaries.
+- [ ] Add renderer fixtures for tabs, double-width characters, combining marks, zero-width code points, and invalid byte sequences, with explicit expected display columns.
+- [ ] Define the supported locale fallback policy (`C`/`POSIX` and non-UTF-8 locales), implement it in the frontend, and add host tests for that policy.
+- [ ] Add PTY coverage for long mixed-width UTF-8 lines, combining-mark edits, invalid byte sequences, and narrow-terminal redraw behavior under those inputs.
 
 ### 7. Testing backlog
 
 - [x] Expand [`tests/usr.lib/exvi/test_main.c`](../../tests/usr.lib/exvi/test_main.c) well beyond the current parser/set/delete/yank basics.
-- [ ] Keep extending [`tests/bin/ex/test_ex.sh`](../../tests/bin/ex/test_ex.sh) until the remaining command-language gaps have direct regression coverage.
-- [ ] Keep extending [`tests/bin/vi/test_vi_pty.py`](../../tests/bin/vi/test_vi_pty.py) until every supported motion, operator, insert-mode control, resize path, and prompt path is covered.
+- [ ] Build an `ex` command/feature coverage matrix from sections 2, 4, and 5, and add at least one direct success regression plus one direct failure/diagnostic regression for every supported command family still missing from `tests/bin/ex/test_ex.sh`.
+- [ ] Build a `vi` PTY coverage matrix from sections 3, 4, and 5, and add at least one direct PTY oracle for every supported motion, operator family, prompt path, resize path, and insert/replace control path not yet represented.
 - [x] Add fuzzing or property-based coverage for command parsing, escape-sequence parsing, and recovery-file handling.
 - [x] Add stress tests for large files, long lines, narrow terminals, repeated resizes, and deep undo/redo histories.
 - [x] Keep both target and host build/test paths green while coverage expands.
