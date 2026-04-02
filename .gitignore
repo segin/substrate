@@ -111,6 +111,7 @@ vgcore.*
 /tests/elks/*_elks
 /tests/elks/gen_hello
 /tests/usr.bin/cc/*.list
+/lib/edit/histedit.h
 
 # Host test binaries
 /host_test_*

@@ -51,9 +51,7 @@ fuzz_expand: expand.c lexer.c parser.c shell_var.c util.c tests/fuzz_expand.c
 
 sh_host: $(SRCS)
 	$(MAKE) -C $(TOP)/lib/edit NATIVE_BUILD=1 clean all
-	cp $(TOP)/include/histedit.h .
-	$(CC) -g -D_GNU_SOURCE -I. -o $@ $(SRCS) -L$(TOP)/lib/edit -l:libedit.a
-	rm histedit.h
+	$(CC) -g -D_GNU_SOURCE -I. -include $(TOP)/include/histedit.h -o $@ $(SRCS) -L$(TOP)/lib/edit -l:libedit.a
 
 test: all test_lexer test_parser test_expand test_shell_var test_job test_util test_exec test_prompt sh_host
 	./test_lexer
