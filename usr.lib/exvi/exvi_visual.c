@@ -1654,6 +1654,53 @@ vi_move_paragraph_backward(buffer_t *b, vi_visual_t *vis, int count)
 }
 
 static int
+vi_is_section_line(line_t *line, int want_end)
+{
+    unsigned char ch;
+
+    if (!line || line->len == 0) {
+        return 0;
+    }
+    ch = (unsigned char)line->text[0];
+    if (ch == '\f') {
+        return 1;
+    }
+    if (want_end) {
+        return ch == '}';
+    }
+    return ch == '{';
+}
+
+static void
+vi_move_section_boundary(buffer_t *b, vi_visual_t *vis, int forward, int want_end,
+    int count)
+{
+    int line_no = buf_current_line(b);
+
+    if (line_no < 1 || count < 1) {
+        return;
+    }
+    while (count-- > 0) {
+        int probe = line_no + (forward ? 1 : -1);
+        int found = 0;
+
+        while (probe >= 1 && probe <= b->line_count) {
+            if (vi_is_section_line(buf_get_line(b, probe), want_end)) {
+                line_no = probe;
+                found = 1;
+                break;
+            }
+            probe += forward ? 1 : -1;
+        }
+        if (!found) {
+            break;
+        }
+    }
+    b->cur = buf_get_line(b, line_no);
+    vis->cursor_col = 0;
+}
+
+static int
 vi_is_sentence_end_char(int ch)
 {
     return ch == '.' || ch == '!' || ch == '?';
@@ -5197,6 +5244,31 @@ exvi_visual_main(buffer_t *b)
         case '{':
             vis.pending_g = 0;
             vi_move_paragraph_backward(b, &vis, vi_take_count(&vis));
+            break;
+        case '[':
+        case ']':
+            {
+                int count = vi_take_count(&vis);
+                int key2;
+
+                vis.pending_g = 0;
+                key2 = vi_read_visual_key(b, &vis, ':', NULL);
+                if (key2 == -1 || key2 == '\x1b') {
+                    write(STDOUT_FILENO, "\a", 1);
+                    break;
+                }
+                if (key == '[' && key2 == '[') {
+                    vi_move_section_boundary(b, &vis, 0, 0, count);
+                } else if (key == ']' && key2 == ']') {
+                    vi_move_section_boundary(b, &vis, 1, 0, count);
+                } else if (key == '[' && key2 == ']') {
+                    vi_move_section_boundary(b, &vis, 0, 1, count);
+                } else if (key == ']' && key2 == '[') {
+                    vi_move_section_boundary(b, &vis, 1, 1, count);
+                } else {
+                    write(STDOUT_FILENO, "\a", 1);
+                }
+            }
             break;
         case '+':
         case '\r':

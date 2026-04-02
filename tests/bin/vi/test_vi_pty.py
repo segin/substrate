@@ -1924,6 +1924,39 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "head\n{\na\n}\nmid\n{\nb\n}\ntail\n",
+        [b"]", b"]", b"r", b"1", b"]", b"]", b"r", b"2"],
+    )
+    require(exit_code == 0, f"section-start-motion vi exited with status {exit_code}")
+    require("line 2/9" in decoded, "missing first section-start status")
+    require("line 6/9" in decoded, "missing second section-start status")
+    require(saved == "head\n1\na\n}\nmid\n2\nb\n}\ntail\n",
+            f"unexpected section-start-motion buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "head\n{\na\n}\nmid\n{\nb\n}\ntail\n",
+        [b"]", b"[", b"r", b"3", b"]", b"[", b"r", b"4"],
+    )
+    require(exit_code == 0, f"section-end-motion vi exited with status {exit_code}")
+    require("line 4/9" in decoded, "missing first section-end status")
+    require("line 8/9" in decoded, "missing second section-end status")
+    require(saved == "head\n{\na\n3\nmid\n{\nb\n4\ntail\n",
+            f"unexpected section-end-motion buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "head\n{\na\n}\nmid\n{\nb\n}\ntail\n",
+        [b"G", b"[", b"[", b"r", b"5", b"[", b"]", b"r", b"6"],
+    )
+    require(exit_code == 0, f"section-backward-motion vi exited with status {exit_code}")
+    require("line 6/9" in decoded, "missing backward section-start status")
+    require("line 4/9" in decoded, "missing backward section-end status")
+    require(saved == "head\n{\na\n6\nmid\n5\nb\n}\ntail\n",
+            f"unexpected section-backward-motion buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "Alpha one.  Beta two!\nGamma three?  Delta four.\n",
         [b")", b"r", b"1", b")", b"r", b"2"],
     )
