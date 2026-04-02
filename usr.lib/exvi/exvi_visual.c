@@ -1755,6 +1755,17 @@ vi_move_section_boundary(buffer_t *b, vi_visual_t *vis, int forward, int want_en
             }
             probe += forward ? 1 : -1;
         }
+        if (!found && forward && !want_end) {
+            probe = line_no + 1;
+            while (probe <= b->line_count) {
+                if (vi_is_section_line(buf_get_line(b, probe), 1)) {
+                    line_no = probe;
+                    found = 1;
+                    break;
+                }
+                probe++;
+            }
+        }
         if (!found) {
             break;
         }
