@@ -3215,6 +3215,24 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "zero\none\ntwo\n",
+        [b"0", b"j", b"m", b"a", b"k", b">", b"'", b"a"],
+    )
+    require(exit_code == 0, f"visual-mark-shift vi exited with status {exit_code}")
+    require(saved == "\tzero\n\tone\ntwo\n",
+            f"unexpected visual-mark-shift buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tzero\n\tone\ntwo\n",
+        [b"0", b"j", b"m", b"a", b"k", b"<", b"'", b"a"],
+    )
+    require(exit_code == 0, f"visual-mark-unshift vi exited with status {exit_code}")
+    require(saved == "zero\none\ntwo\n",
+            f"unexpected visual-mark-unshift buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "ab(cd\nef)gh\n",
         [b"g", b"g", b"l", b"l", b"m", b"a", b"j", b"`", b"a", b"r", b"Z"],
     )
