@@ -3233,6 +3233,42 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "One. Two. Three.\n",
+        [b">", b")"],
+    )
+    require(exit_code == 0, f"visual-sentence-shift vi exited with status {exit_code}")
+    require(saved == "\tOne. Two. Three.\n",
+            f"unexpected visual-sentence-shift buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tOne. Two. Three.\n",
+        [b"<", b")"],
+    )
+    require(exit_code == 0, f"visual-sentence-unshift vi exited with status {exit_code}")
+    require(saved == "One. Two. Three.\n",
+            f"unexpected visual-sentence-unshift buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n\ntwo\n\nthree\n",
+        [b">", b"}"],
+    )
+    require(exit_code == 0, f"visual-paragraph-shift vi exited with status {exit_code}")
+    require(saved == "\tone\n\ntwo\n\nthree\n",
+            f"unexpected visual-paragraph-shift buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tone\n\n\ttwo\n\nthree\n",
+        [b"<", b"}"],
+    )
+    require(exit_code == 0, f"visual-paragraph-unshift vi exited with status {exit_code}")
+    require(saved == "one\n\n\ttwo\n\nthree\n",
+            f"unexpected visual-paragraph-unshift buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
         [b"d", b"]", b"]"],
     )
