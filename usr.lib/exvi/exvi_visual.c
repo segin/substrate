@@ -2395,6 +2395,43 @@ vi_find_word_end_exclusive_count(line_t *cur, int start, int count, int *end_out
 }
 
 static int
+vi_find_change_word_target(line_t *cur, int start, int count, int bigword, int *end_out)
+{
+    int i;
+
+    if (!cur || start < 0 || (size_t)start > cur->len) {
+        return -1;
+    }
+    if (count < 1) {
+        count = 1;
+    }
+    if ((size_t)start >= cur->len) {
+        *end_out = (int)cur->len;
+        return 0;
+    }
+
+    if (isspace((unsigned char)cur->text[start])) {
+        i = start;
+        while ((size_t)i < cur->len && isspace((unsigned char)cur->text[i])) {
+            i++;
+        }
+        if (count == 1) {
+            *end_out = i;
+            return 0;
+        }
+        if (bigword) {
+            return vi_find_bigword_end_exclusive_count(cur, i, count - 1, end_out);
+        }
+        return vi_find_word_end_exclusive_count(cur, i, count - 1, end_out);
+    }
+
+    if (bigword) {
+        return vi_find_bigword_end_exclusive_count(cur, start, count, end_out);
+    }
+    return vi_find_word_end_exclusive_count(cur, start, count, end_out);
+}
+
+static int
 vi_find_word_start_backward_count(line_t *cur, int start, int count, int *start_out)
 {
     int i;
@@ -3554,12 +3591,21 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             write(STDOUT_FILENO, "\a", 1);
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == 'w') {
-        vi_find_word_boundary_forward_count(b->cur, vis->cursor_col, count, &end);
-        if (end >= vis->cursor_col) {
+        int rc;
+
+        if (vis->pending_op == 'c') {
+            rc = vi_find_change_word_target(b->cur, vis->cursor_col, count, 0, &end);
+        } else {
+            vi_find_word_boundary_forward_count(b->cur, vis->cursor_col, count, &end);
+            rc = (end >= vis->cursor_col) ? 0 : -1;
+        }
+        if (rc == 0 && end >= vis->cursor_col) {
             vi_delete_span(b, vis, vis->cursor_col, end, vis->pending_op == 'c');
             if (vis->pending_op == 'd') {
                 vi_set_last_change(vis, VI_REPEAT_DW, count, 0);
             }
+        } else {
+            write(STDOUT_FILENO, "\a", 1);
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == 'e') {
         if (vi_find_word_end_exclusive_count(b->cur, vis->cursor_col, count, &end) == 0 &&
@@ -3594,9 +3640,18 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             write(STDOUT_FILENO, "\a", 1);
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == 'W') {
-        vi_find_bigword_boundary_forward_count(b->cur, vis->cursor_col, count, &end);
-        if (end >= vis->cursor_col) {
+        int rc;
+
+        if (vis->pending_op == 'c') {
+            rc = vi_find_change_word_target(b->cur, vis->cursor_col, count, 1, &end);
+        } else {
+            vi_find_bigword_boundary_forward_count(b->cur, vis->cursor_col, count, &end);
+            rc = (end >= vis->cursor_col) ? 0 : -1;
+        }
+        if (rc == 0 && end >= vis->cursor_col) {
             vi_delete_span(b, vis, vis->cursor_col, end, vis->pending_op == 'c');
+        } else {
+            write(STDOUT_FILENO, "\a", 1);
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') &&
         (key == 'f' || key == 'F' || key == 't' || key == 'T')) {

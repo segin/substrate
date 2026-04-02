@@ -1915,6 +1915,51 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "abc def\n",
+        [b"c", b"w", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"cw vi exited with status {exit_code}")
+    require(saved == "X def\n",
+            f"unexpected cw buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc def ghi\n",
+        [b"c", b"2", b"w", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"c2w vi exited with status {exit_code}")
+    require(saved == "X ghi\n",
+            f"unexpected c2w buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc def\n",
+        [b"c", b"W", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"cW vi exited with status {exit_code}")
+    require(saved == "X def\n",
+            f"unexpected cW buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc def ghi\n",
+        [b"c", b"2", b"W", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"c2W vi exited with status {exit_code}")
+    require(saved == "X ghi\n",
+            f"unexpected c2W buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "a bc\n",
+        [b"l", b"c", b"w", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"space-cw vi exited with status {exit_code}")
+    require(saved == "aXbc\n",
+            f"unexpected space-cw buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "abcd\n",
         [b"$", b"X", b".", b"u", b"$", b"2", b"X"],
     )
