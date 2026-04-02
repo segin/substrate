@@ -3453,6 +3453,34 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "abc def\n",
+        [b"0", b"f", b"d", b"m", b"a", b"0", b"d", b"`", b"a"],
+    )
+    require(exit_code == 0, f"visual-exact-mark-delete vi exited with status {exit_code}")
+    require(saved == "def\n",
+            f"unexpected visual-exact-mark-delete buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc def\n",
+        [b"0", b"f", b"d", b"m", b"a", b"0", b"c", b"`", b"a", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"visual-exact-mark-change vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing visual-exact-mark change insert status")
+    require(saved == "Xdef\n",
+            f"unexpected visual-exact-mark-change buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc def\n",
+        [b"0", b"f", b"d", b"m", b"a", b"0", b"y", b"`", b"a", b"P"],
+    )
+    require(exit_code == 0, f"visual-exact-mark-yank vi exited with status {exit_code}")
+    require(saved == "abc abc def\n",
+            f"unexpected visual-exact-mark-yank buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
         [b"2", b"]", b"]", b"r", b"X"],
     )
