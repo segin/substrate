@@ -830,6 +830,7 @@ handle_set_command(const char *args)
                     return 1;
                 }
                 option_scroll = (int)val;
+                option_scroll_explicit = 1;
             }
         } else if (len == 4 && strncmp(ptr, "tags", 4) == 0) {
             if (query || (!eq && !query)) {

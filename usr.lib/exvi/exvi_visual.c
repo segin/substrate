@@ -1407,6 +1407,9 @@ vi_half_page_scroll(buffer_t *b, vi_visual_t *vis, int direction)
 {
     int page = option_scroll;
 
+    if (!option_scroll_explicit) {
+        page = (vis->rows - 2) / 2;
+    }
     if (page <= 0) {
         page = (vis->rows - 2) / 2;
         if (page < 1) {

@@ -23,6 +23,7 @@ int option_tabstop = EXVI_DEFAULT_TABSTOP;
 int option_autoindent = 0;
 int option_showmode = 1;
 int option_scroll = EXVI_DEFAULT_SCROLL;
+int option_scroll_explicit = 0;
 int option_wrapscan = 1;
 char *option_tags = NULL;
 char *last_search_pattern = NULL;
@@ -596,6 +597,7 @@ exvi_reset_runtime(exvi_frontend_t frontend)
     option_autoindent = 0;
     option_showmode = 1;
     option_scroll = EXVI_DEFAULT_SCROLL;
+    option_scroll_explicit = 0;
     option_wrapscan = 1;
     replace_saved_string(&option_tags, EXVI_DEFAULT_TAGS);
     free(last_search_pattern);
@@ -623,6 +625,7 @@ exvi_cleanup_runtime(void)
     option_autoindent = 0;
     option_showmode = 1;
     option_scroll = EXVI_DEFAULT_SCROLL;
+    option_scroll_explicit = 0;
     free(option_tags);
     option_tags = NULL;
     free(last_search_pattern);

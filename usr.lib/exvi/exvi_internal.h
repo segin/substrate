@@ -57,6 +57,7 @@ extern int option_tabstop;
 extern int option_autoindent;
 extern int option_showmode;
 extern int option_scroll;
+extern int option_scroll_explicit;
 extern int option_wrapscan;
 extern char *option_tags;
 extern buffer_t undo_buf;

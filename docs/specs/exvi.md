@@ -265,7 +265,7 @@ All other historical `ex` commands and aliases are currently outside the support
 | `showmode` | `showmode`, `smd`, `noshowmode`, `nosmd` | on | shared option state/query/reporting only | insert/replace mode banners are shown or suppressed |
 | `wrapscan` | `wrapscan`, `ws`, `nowrapscan`, `nows` | on | search-address and regex commands wrap at buffer ends | visual search and repeat-search wrap at buffer ends |
 | `tabstop` | `tabstop=`, `ts=` and query forms | `8` | affects list/print tab expansion | affects tab rendering, absolute-column motions, and indent helpers |
-| `scroll` | `scroll=`, `sc=` and query forms | `12` | shared option state/query/reporting only | `Ctrl-D` and `Ctrl-U` default to this scroll amount |
+| `scroll` | `scroll=`, `sc=` and query forms | `12` | shared option state/query/reporting only | until `scroll=` is set explicitly, `Ctrl-D` and `Ctrl-U` use the current visual half-screen amount; after that they use the configured value |
 | `tags` | `tags=` and query forms | `tags` | `:tag` lookup walks the configured comma-separated tag-file search path | visual `Ctrl-]` and visual `:tag` use the same search path |
 - [x] Implement readonly/view mode consistently in both frontends, including status display and write restrictions.
 - [x] Implement secure and restricted modes consistently in both frontends, not only for the currently covered shell-command paths.
