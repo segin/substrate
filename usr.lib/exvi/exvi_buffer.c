@@ -12,6 +12,7 @@ buf_init(buffer_t *b)
     b->line_count = 0;
     b->trailing_newline = 0;
     b->filename = NULL;
+    b->recover_filename = NULL;
     b->modified = 0;
     b->empty_origin = 0;
     b->started_empty = 0;
@@ -124,6 +125,10 @@ buf_free(buffer_t *b)
         free(b->filename);
         b->filename = NULL;
     }
+    if (b->recover_filename) {
+        free(b->recover_filename);
+        b->recover_filename = NULL;
+    }
     b->empty_origin = 0;
     b->started_empty = 0;
     for (int i = 0; i < 26; i++) {
@@ -141,6 +146,9 @@ buf_copy(buffer_t *dst, buffer_t *src)
     buf_free(dst);
     if (src->filename) {
         dst->filename = strdup(src->filename);
+    }
+    if (src->recover_filename) {
+        dst->recover_filename = strdup(src->recover_filename);
     }
     dst->modified = src->modified;
     dst->empty_origin = src->empty_origin;
@@ -340,7 +348,7 @@ buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int ad
     }
     if (wrote_current_file && wrote_whole_buffer && !append) {
         b->modified = 0;
-        exvi_cleanup_recover_file(b->filename);
+        exvi_cleanup_buffer_recover_file(b);
     }
 }
 

@@ -218,6 +218,59 @@ def main():
             os.unlink(path + ".recover")
         os.unlink(path)
 
+    with tempfile.TemporaryDirectory(prefix="exvi-") as temp_dir:
+        source_path = os.path.join(temp_dir, "source.txt")
+        renamed_path = os.path.join(temp_dir, "renamed.txt")
+        with open(source_path, "w", encoding="utf-8") as f:
+            f.write("one\n")
+
+        proc = subprocess.run(
+            [ex_path, "-s", source_path],
+            input=b"1s/o/O/\npreserve\nfile renamed.txt\nq!\n",
+            cwd=temp_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        require(proc.returncode == 0,
+                f"ex preserve-retarget status mismatch: {proc.returncode}")
+        require(not os.path.exists(source_path + ".recover"),
+                "old recover file remained after :file rename")
+        require(os.path.exists(renamed_path + ".recover"),
+                "renamed recover file missing after :file rename")
+
+        proc = subprocess.run([ex_path, "-r", renamed_path], input=b"1p\nq!\n",
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        require(proc.returncode == 0, f"ex renamed recover status mismatch: {proc.returncode}")
+        decoded = proc.stdout.decode("latin1", "replace")
+        require(f"\"{renamed_path}\" recovered, 1 lines" in decoded,
+                f"ex renamed recover missing banner: {decoded!r}")
+        require("One\n" in decoded,
+                f"ex renamed recover missing contents: {decoded!r}")
+
+    with tempfile.TemporaryDirectory(prefix="exvi-") as temp_dir:
+        source_path = os.path.join(temp_dir, "source.txt")
+        renamed_path = os.path.join(temp_dir, "renamed.txt")
+        with open(source_path, "w", encoding="utf-8") as f:
+            f.write("one\n")
+
+        proc = subprocess.run(
+            [ex_path, "-s", source_path],
+            input=b"1s/o/O/\npreserve\nfile renamed.txt\nwq!\n",
+            cwd=temp_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        require(proc.returncode == 0,
+                f"ex renamed write-cleanup status mismatch: {proc.returncode}")
+        require(not os.path.exists(source_path + ".recover"),
+                "old recover file remained after renamed write")
+        require(not os.path.exists(renamed_path + ".recover"),
+                "renamed recover file remained after successful write")
+        with open(renamed_path, "r", encoding="utf-8") as f:
+            saved = f.read()
+        require(saved == "One\n",
+                f"renamed write saved wrong file contents: {saved!r}")
+
     with tempfile.NamedTemporaryFile("w", delete=False) as f:
         f.write("alpha\n")
         path = f.name

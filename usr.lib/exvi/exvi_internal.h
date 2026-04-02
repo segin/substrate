@@ -30,6 +30,7 @@ typedef struct {
     int line_count;
     int trailing_newline;
     char *filename;
+    char *recover_filename;
     int modified;
     int empty_origin;
     int started_empty;
@@ -104,6 +105,9 @@ char *recover_path_for(const char *filename);
 int load_recover_into_buffer(buffer_t *b, const char *filename);
 int exvi_write_recover_snapshot(buffer_t *b, const char *path);
 void exvi_cleanup_recover_file(const char *filename);
+void exvi_note_recover_file(buffer_t *b, const char *filename);
+void exvi_retarget_recover_file(buffer_t *b, const char *filename);
+void exvi_cleanup_buffer_recover_file(buffer_t *b);
 int exvi_add_startup_command(const char *cmd);
 void load_startup_commands(buffer_t *b, void (*command_fn)(buffer_t *, char *));
 void set_visual_handoff_file(const char *filename);

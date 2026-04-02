@@ -262,6 +262,7 @@ load_recover_into_buffer(buffer_t *b, const char *filename)
     }
     buf_read_file(b, path);
     b->modified = 1;
+    exvi_note_recover_file(b, filename);
     free(path);
     return 0;
 }
@@ -346,6 +347,56 @@ exvi_cleanup_recover_file(const char *filename)
     }
     unlink(path);
     free(path);
+}
+
+void
+exvi_note_recover_file(buffer_t *b, const char *filename)
+{
+    if (!b) {
+        return;
+    }
+    replace_saved_string(&b->recover_filename, filename);
+}
+
+void
+exvi_retarget_recover_file(buffer_t *b, const char *filename)
+{
+    char *old_path;
+    char *new_path;
+
+    if (!b || !filename) {
+        return;
+    }
+    if (!b->recover_filename || strcmp(b->recover_filename, filename) == 0) {
+        exvi_note_recover_file(b, filename);
+        return;
+    }
+
+    old_path = recover_path_for(b->recover_filename);
+    new_path = recover_path_for(filename);
+    if (old_path && new_path && strcmp(old_path, new_path) != 0) {
+        if (access(old_path, F_OK) == 0) {
+            rename(old_path, new_path);
+        }
+    }
+    free(old_path);
+    free(new_path);
+    exvi_note_recover_file(b, filename);
+}
+
+void
+exvi_cleanup_buffer_recover_file(buffer_t *b)
+{
+    if (!b) {
+        return;
+    }
+    if (b->recover_filename) {
+        exvi_cleanup_recover_file(b->recover_filename);
+        free(b->recover_filename);
+        b->recover_filename = NULL;
+        return;
+    }
+    exvi_cleanup_recover_file(b->filename);
 }
 
 int

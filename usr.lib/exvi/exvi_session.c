@@ -967,7 +967,12 @@ handle_preserve_command(buffer_t *b)
             exvi_report_error("Out of memory");
             return 1;
         }
-        buf_write_file(b, path, 0);
+        if (exvi_write_recover_snapshot(b, path) != 0) {
+            exvi_report_error("Could not preserve file");
+            free(path);
+            return 1;
+        }
+        exvi_note_recover_file(b, b->filename);
         printf("File preserved as %s\n", path);
         free(path);
     } else {

@@ -403,6 +403,7 @@ handle_file_command(buffer_t *b, const char *args)
         if (replace_alt) {
             replace_saved_string(&alternate_filename, b->filename);
         }
+        exvi_retarget_recover_file(b, new_name);
         free(b->filename);
         b->filename = new_name;
     }
