@@ -1240,6 +1240,78 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "abc def\n",
+        [b"c", b"w", b"X", b"\x1b", b"P", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"cwP vi exited with status {exit_code}")
+    require(saved == "abZX def\n",
+            f"unexpected cwP buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc def\n",
+        [b"c", b"w", b"X", b"\x1b", b"p", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"cwp vi exited with status {exit_code}")
+    require(saved == "XabZ def\n",
+            f"unexpected cwp buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc def ghi\n",
+        [b"c", b"2", b"w", b"X", b"\x1b", b"P", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"c2wP vi exited with status {exit_code}")
+    require(saved == "abc deZX ghi\n",
+            f"unexpected c2wP buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc def ghi\n",
+        [b"c", b"2", b"w", b"X", b"\x1b", b"p", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"c2wp vi exited with status {exit_code}")
+    require(saved == "Xabc deZ ghi\n",
+            f"unexpected c2wp buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abcde\n",
+        [b"s", b"X", b"\x1b", b"P", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"sP vi exited with status {exit_code}")
+    require(saved == "ZXbcde\n",
+            f"unexpected sP buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abcde\n",
+        [b"s", b"X", b"\x1b", b"p", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"sp vi exited with status {exit_code}")
+    require(saved == "XZbcde\n",
+            f"unexpected sp buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc def\n",
+        [b"C", b"X", b"Y", b"Z", b"\x1b", b"P", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"CP vi exited with status {exit_code}")
+    require(saved == "XYabc deZZ\n",
+            f"unexpected CP buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc def\n",
+        [b"C", b"X", b"Y", b"Z", b"\x1b", b"p", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"Cp vi exited with status {exit_code}")
+    require(saved == "XYZabc deZ\n",
+            f"unexpected Cp buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\ntwo\nthree\nfour\n",
         [b"c", b"+", b"X", b"\x1b"],
     )
