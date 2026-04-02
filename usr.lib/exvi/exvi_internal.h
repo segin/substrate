@@ -95,6 +95,8 @@ void print_range(buffer_t *b, int addr1, int addr2, int numbered, int listed);
 char *expand_filename_refs(buffer_t *b, const char *arg);
 char *recover_path_for(const char *filename);
 int load_recover_into_buffer(buffer_t *b, const char *filename);
+int exvi_write_recover_snapshot(buffer_t *b, const char *path);
+void exvi_cleanup_recover_file(const char *filename);
 int exvi_add_startup_command(const char *cmd);
 void load_startup_commands(buffer_t *b, void (*command_fn)(buffer_t *, char *));
 void set_visual_handoff_file(const char *filename);

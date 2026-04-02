@@ -323,6 +323,7 @@ buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int ad
     }
     if (wrote_current_file && wrote_whole_buffer && !append) {
         b->modified = 0;
+        exvi_cleanup_recover_file(b->filename);
     }
 }
 

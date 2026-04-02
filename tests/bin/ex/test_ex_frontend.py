@@ -156,6 +156,43 @@ def main():
         os.unlink(path)
 
     with tempfile.NamedTemporaryFile("w", delete=False) as f:
+        f.write("one")
+        path = f.name
+    try:
+        exit_code, decoded = interrupt_ex_session(
+            ex_path,
+            path,
+            b"1s/o/O/\n",
+        )
+        require(exit_code == 1, f"interrupted no-eol ex status mismatch: {exit_code}")
+        require(os.path.exists(path + ".recover"),
+                "interrupted no-eol ex did not create a recover file")
+        with open(path + ".recover", "r", encoding="utf-8") as f2:
+            recovered = f2.read()
+        require(recovered == "One",
+                f"interrupted no-eol ex recover contents mismatch: {recovered!r}")
+    finally:
+        if os.path.exists(path + ".recover"):
+            os.unlink(path + ".recover")
+        os.unlink(path)
+
+    with tempfile.NamedTemporaryFile("w", delete=False) as f:
+        f.write("one\n")
+        path = f.name
+    try:
+        with open(path + ".recover", "w", encoding="utf-8") as f2:
+            f2.write("STALE\n")
+        proc = subprocess.run([ex_path, "-s", path], input=b"wq\n",
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        require(proc.returncode == 0, f"ex stale-recover cleanup status mismatch: {proc.returncode}")
+        require(not os.path.exists(path + ".recover"),
+                "ex successful write did not remove stale recover file")
+    finally:
+        if os.path.exists(path + ".recover"):
+            os.unlink(path + ".recover")
+        os.unlink(path)
+
+    with tempfile.NamedTemporaryFile("w", delete=False) as f:
         f.write("alpha\n")
         path = f.name
     try:

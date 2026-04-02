@@ -263,6 +263,77 @@ load_recover_into_buffer(buffer_t *b, const char *filename)
     return 0;
 }
 
+static int
+write_recover_stream(buffer_t *b, FILE *f)
+{
+    line_t *curr;
+    int omit_final_newline;
+
+    if (!b || !f) {
+        return -1;
+    }
+
+    if (b->line_count == 0) {
+        return 0;
+    }
+
+    if (b->empty_origin && b->line_count == 1 && b->head == b->tail
+        && b->head && b->head->len == 0 && !b->trailing_newline) {
+        return 0;
+    }
+
+    omit_final_newline = !b->trailing_newline;
+    curr = b->head;
+    while (curr) {
+        if (fputs(curr->text, f) == EOF) {
+            return -1;
+        }
+        if (!(omit_final_newline && curr == b->tail)) {
+            if (fputc('\n', f) == EOF) {
+                return -1;
+            }
+        }
+        curr = curr->next;
+    }
+
+    return fflush(f);
+}
+
+int
+exvi_write_recover_snapshot(buffer_t *b, const char *path)
+{
+    FILE *f;
+    int rc;
+
+    if (!b || !path) {
+        return -1;
+    }
+
+    f = fopen(path, "w");
+    if (!f) {
+        return -1;
+    }
+
+    rc = write_recover_stream(b, f);
+    if (fclose(f) != 0 && rc == 0) {
+        rc = -1;
+    }
+    return rc;
+}
+
+void
+exvi_cleanup_recover_file(const char *filename)
+{
+    char *path;
+
+    path = recover_path_for(filename);
+    if (!path) {
+        return;
+    }
+    unlink(path);
+    free(path);
+}
+
 int
 exvi_add_startup_command(const char *cmd)
 {
@@ -423,17 +494,7 @@ handle_sigterm(int sig)
         char *path = recover_path_for(global_buf_for_sighandler->filename);
 
         if (path) {
-            FILE *f = fopen(path, "w");
-
-            if (f) {
-                line_t *curr = global_buf_for_sighandler->head;
-
-                while (curr) {
-                    fprintf(f, "%s\n", curr->text);
-                    curr = curr->next;
-                }
-                fclose(f);
-            }
+            exvi_write_recover_snapshot(global_buf_for_sighandler, path);
             free(path);
         }
     }

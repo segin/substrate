@@ -132,6 +132,50 @@ def main():
             os.unlink(path + ".recover")
         shutil.rmtree(temp_dir)
 
+    exit_code, decoded, recovered, path, temp_dir = interrupt_vi_session(
+        helpers,
+        vi_path,
+        "one",
+        [b"r", b"O"],
+    )
+    try:
+        require(exit_code in (-signal.SIGTERM, 1),
+                f"interrupted no-eol vi status mismatch: {exit_code}")
+        require(recovered == "One",
+                f"interrupted no-eol vi recover contents mismatch: {recovered!r}")
+    finally:
+        if os.path.exists(path + ".recover"):
+            os.unlink(path + ".recover")
+        shutil.rmtree(temp_dir)
+
+    temp_dir = tempfile.mkdtemp(prefix="exvi-")
+    path = os.path.join(temp_dir, "buffer.txt")
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("one\n")
+        with open(path + ".recover", "w", encoding="utf-8") as f:
+            f.write("STALE\n")
+
+        pid, master_fd = pty.fork()
+        if pid == 0:
+            os.chdir(temp_dir)
+            os.execv(vi_path, [vi_path, path])
+
+        fcntl.ioctl(master_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+        output = helpers.read_some(master_fd, 0.4)
+        os.write(master_fd, b":wq\r")
+        output += helpers.read_some(master_fd, 0.3)
+        _, status = os.waitpid(pid, 0)
+        os.close(master_fd)
+        require(os.waitstatus_to_exitcode(status) == 0,
+                "vi stale-recover cleanup status mismatch")
+        require(not os.path.exists(path + ".recover"),
+                "vi successful write did not remove stale recover file")
+    finally:
+        if os.path.exists(path + ".recover"):
+            os.unlink(path + ".recover")
+        shutil.rmtree(temp_dir)
+
     exit_code, decoded, saved = helpers.run_vi_session(
         vi_path,
         "one\n",
