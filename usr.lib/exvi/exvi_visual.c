@@ -581,6 +581,55 @@ vi_draw_line(const char *text, int cols, int number, int line_no, int left_col)
 }
 
 static void
+vi_draw_status_text(const char *text, int cols)
+{
+    int used = 0;
+
+    if (!text || cols <= 0) {
+        return;
+    }
+    while (*text && used < cols) {
+        unsigned char c = (unsigned char)*text++;
+
+        if (!isprint(c)) {
+            c = '?';
+        }
+        putchar((int)c);
+        used++;
+    }
+}
+
+static void
+vi_draw_default_status(buffer_t *b, int cols, int cur_line)
+{
+    char prefix[384];
+    char suffix[96];
+    int prefix_cols;
+
+    snprintf(prefix, sizeof(prefix), "\"%s\"%s%s",
+        b->filename ? b->filename : "[No Name]",
+        b->modified ? " [Modified]" : "",
+        option_readonly ? " [Readonly]" : "");
+    snprintf(suffix, sizeof(suffix), "  line %d/%d",
+        cur_line > 0 ? cur_line : 1, b->line_count);
+
+    if ((int)(strlen(prefix) + strlen(suffix)) <= cols) {
+        vi_draw_status_text(prefix, cols);
+        vi_draw_status_text(suffix, cols - (int)strlen(prefix));
+        return;
+    }
+
+    if ((int)strlen(suffix) >= cols) {
+        vi_draw_status_text(suffix + (strlen(suffix) - (size_t)cols), cols);
+        return;
+    }
+
+    prefix_cols = cols - (int)strlen(suffix);
+    vi_draw_status_text(prefix, prefix_cols);
+    vi_draw_status_text(suffix, (int)strlen(suffix));
+}
+
+static void
 vi_render(buffer_t *b, vi_visual_t *vis, char prompt_prefix, const char *prompt)
 {
     int cur_line = buf_current_line(b);
@@ -612,20 +661,18 @@ vi_render(buffer_t *b, vi_visual_t *vis, char prompt_prefix, const char *prompt)
 
     printf("\x1b[K\r\n\x1b[7m");
     if (prompt) {
-        printf("%c%s", prompt_prefix, prompt);
+        char status_buf[512];
+
+        snprintf(status_buf, sizeof(status_buf), "%c%s", prompt_prefix, prompt);
+        vi_draw_status_text(status_buf, vis->cols);
     } else if (vis->replace_mode && option_showmode) {
-        printf("-- REPLACE --");
+        vi_draw_status_text("-- REPLACE --", vis->cols);
     } else if (vis->insert_mode && option_showmode) {
-        printf("-- INSERT --");
+        vi_draw_status_text("-- INSERT --", vis->cols);
     } else if (vis->status_msg[0] != '\0') {
-        printf("%s", vis->status_msg);
+        vi_draw_status_text(vis->status_msg, vis->cols);
     } else {
-        printf("\"%s\"%s%s  line %d/%d",
-            b->filename ? b->filename : "[No Name]",
-            b->modified ? " [Modified]" : "",
-            option_readonly ? " [Readonly]" : "",
-            cur_line > 0 ? cur_line : 1,
-            b->line_count);
+        vi_draw_default_status(b, vis->cols, cur_line);
     }
     printf("\x1b[K\x1b[m");
 

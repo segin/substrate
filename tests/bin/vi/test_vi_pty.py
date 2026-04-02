@@ -831,6 +831,32 @@ def main():
     exit_code, decoded, saved = run_vi_session(
         vi_path,
         "0123456789abcdefghijKLMNOPQRST\n",
+        [b":set number\r", b"2", b"5", b"l", b"r", b"Z"],
+        rows=8,
+        cols=20,
+    )
+    require(exit_code == 0, f"number-long-line vi exited with status {exit_code}")
+    require("      1 efghijKLMNOZ" in decoded,
+            "missing numbered horizontally scrolled long-line content")
+    require(saved == "0123456789abcdefghijKLMNOZQRST\n",
+            f"unexpected number-long-line buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "a\tbcdefghijklmnopqrstuvwxyz\n",
+        [b":set list\r", b"2", b"5", b"|", b"r", b"Z"],
+        rows=8,
+        cols=16,
+    )
+    require(exit_code == 0, f"list-long-line vi exited with status {exit_code}")
+    require("defghijklmnopqrstuvZ" in decoded,
+            "missing list-mode horizontally scrolled long-line content")
+    require(saved == "a\tbcdefghijklmnopqrstuvZxyz\n",
+            f"unexpected list-long-line buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "0123456789abcdefghijKLMNOPQRST\n",
         [("winsize", 8, 28, 0.5)],
         rows=8,
         cols=16,
@@ -932,6 +958,20 @@ def main():
     require(exit_code == 0, f"narrow-terminal vi exited with status {exit_code}")
     require(saved == "one\nZwo\nthree\n",
             f"unexpected narrow-terminal buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "0123456789abcdefghijKLMNOPQRST\n",
+        [b":set number\r"],
+        rows=4,
+        cols=12,
+        final_keys=b":q\r",
+    )
+    require(exit_code == 0, f"narrow-status vi exited with status {exit_code}")
+    require("buffer.txt\"  line 1/1" not in decoded,
+            "status line wrapped full filename/details in narrow terminal")
+    require(saved == "0123456789abcdefghijKLMNOPQRST\n",
+            f"unexpected narrow-status buffer: {saved!r}")
 
     long_file = "".join(f"line {i}\n" for i in range(1, 121))
     exit_code, decoded, saved = run_vi_session(
