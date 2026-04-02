@@ -1964,8 +1964,8 @@ def main():
         [b"}", b"}", b"{"],
     )
     require(exit_code == 0, f"paragraph-motion vi exited with status {exit_code}")
-    require(decoded.count("line 3/6") >= 2, "missing paragraph backward/forward status")
-    require("line 6/6" in decoded, "missing paragraph forward-to-end status")
+    require(decoded.count("line 2/6") >= 2, "missing paragraph backward/forward status")
+    require("line 5/6" in decoded, "missing paragraph forward-to-end status")
     require(saved == "one\n\n  two\nthree\n\nfour\n",
             f"unexpected paragraph-motion buffer: {saved!r}")
 

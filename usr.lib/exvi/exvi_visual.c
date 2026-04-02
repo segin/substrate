@@ -1685,7 +1685,9 @@ vi_move_paragraph_backward(buffer_t *b, vi_visual_t *vis, int count)
             while (line_no >= 1 && !vi_line_is_blank(buf_get_line(b, line_no))) {
                 line_no--;
             }
-            line_no++;
+            if (line_no < 1) {
+                line_no = 1;
+            }
         } else {
             int start = line_no;
 
@@ -1729,7 +1731,7 @@ vi_is_section_line(line_t *line, int want_end)
     if (want_end) {
         return ch == '}';
     }
-    return ch == '{' || ch == '}';
+    return ch == '{';
 }
 
 static void
@@ -3968,13 +3970,15 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         int target;
         int start = line_no;
         int end_line;
+        int screen_count = (raw_count > 0) ? raw_count :
+            ((vis->pending_op_count > 1) ? vis->pending_op_count : 0);
 
         if (key == 'H') {
-            target = vi_screen_target_line(b, vis, 0, raw_count);
+            target = vi_screen_target_line(b, vis, 0, screen_count);
         } else if (key == 'M') {
             target = vi_screen_target_line(b, vis, 1, 0);
         } else {
-            target = vi_screen_target_line(b, vis, 2, raw_count);
+            target = vi_screen_target_line(b, vis, 2, screen_count);
         }
         end_line = target;
         if (start > end_line) {
@@ -4375,7 +4379,9 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
         key == 'G') {
         int start = line_no;
-        int end_line = vi_clamp_line_target(b, (raw_count > 0) ? raw_count : b->line_count);
+        int target = (raw_count > 0) ? raw_count :
+            ((vis->pending_op_count > 1) ? vis->pending_op_count : b->line_count);
+        int end_line = vi_clamp_line_target(b, target);
 
         if (start > end_line) {
             int tmp = start;
