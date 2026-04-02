@@ -4384,6 +4384,8 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         if (vi_search_motion_target(b, vis, "", forward, count,
             &target_line, &target_col) != 0) {
             write(STDOUT_FILENO, "\a", 1);
+        } else if (vi_apply_search_linewise_motion(b, vis, line_no, target_line, target_col) == 0) {
+            /* Handled as a linewise repeat-search motion. */
         } else if (vis->pending_op == '>' || vis->pending_op == '<') {
             if (vi_apply_search_linewise_motion(b, vis, line_no, target_line, target_col) != 0) {
                 write(STDOUT_FILENO, "\a", 1);
