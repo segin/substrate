@@ -1700,6 +1700,30 @@ vi_move_section_boundary(buffer_t *b, vi_visual_t *vis, int forward, int want_en
     vis->cursor_col = 0;
 }
 
+static void
+vi_move_section_start_forward(buffer_t *b, vi_visual_t *vis, int count)
+{
+    vi_move_section_boundary(b, vis, 1, 0, count);
+}
+
+static void
+vi_move_section_start_backward(buffer_t *b, vi_visual_t *vis, int count)
+{
+    vi_move_section_boundary(b, vis, 0, 0, count);
+}
+
+static void
+vi_move_section_end_forward(buffer_t *b, vi_visual_t *vis, int count)
+{
+    vi_move_section_boundary(b, vis, 1, 1, count);
+}
+
+static void
+vi_move_section_end_backward(buffer_t *b, vi_visual_t *vis, int count)
+{
+    vi_move_section_boundary(b, vis, 0, 1, count);
+}
+
 static int
 vi_is_sentence_end_char(int ch)
 {
@@ -3967,6 +3991,59 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         }
         if (rc != 0 || vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
             write(STDOUT_FILENO, "\a", 1);
+        }
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+        (key == '[' || key == ']')) {
+        int key2;
+        line_t *target_line = NULL;
+        int target_col = 0;
+        int target_no;
+        int start_line;
+        int end_line;
+        int rc = -1;
+
+        key2 = vi_read_visual_key(b, vis, ':', NULL);
+        if (key2 == -1 || key2 == '\x1b') {
+            write(STDOUT_FILENO, "\a", 1);
+        } else {
+            if (key == '[' && key2 == '[') {
+                rc = vi_simulate_motion_target(b, vis, vi_move_section_start_backward, count,
+                    &target_line, &target_col);
+            } else if (key == ']' && key2 == ']') {
+                rc = vi_simulate_motion_target(b, vis, vi_move_section_start_forward, count,
+                    &target_line, &target_col);
+            } else if (key == '[' && key2 == ']') {
+                rc = vi_simulate_motion_target(b, vis, vi_move_section_end_backward, count,
+                    &target_line, &target_col);
+            } else if (key == ']' && key2 == '[') {
+                rc = vi_simulate_motion_target(b, vis, vi_move_section_end_forward, count,
+                    &target_line, &target_col);
+            }
+            if (rc != 0 || !target_line) {
+                write(STDOUT_FILENO, "\a", 1);
+            } else {
+                target_no = vi_line_number_for_mark(b, target_line);
+                if (target_no < 1 || target_no == line_no) {
+                    write(STDOUT_FILENO, "\a", 1);
+                } else {
+                    if (target_no < line_no) {
+                        start_line = target_no;
+                        end_line = line_no - 1;
+                    } else {
+                        start_line = line_no;
+                        end_line = target_no - 1;
+                    }
+                    if (end_line < start_line) {
+                        write(STDOUT_FILENO, "\a", 1);
+                    } else if (vis->pending_op == 'y') {
+                        vi_linewise_yank(b, vis, start_line, end_line);
+                    } else if (vis->pending_op == 'd') {
+                        vi_linewise_delete(b, vis, start_line, end_line);
+                    } else {
+                        vi_linewise_change(b, vis, start_line, end_line);
+                    }
+                }
+            }
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
         (key == '/' || key == '?')) {

@@ -1957,6 +1957,51 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "head\n{\na\n}\nmid\n{\nb\n}\ntail\n",
+        [b"d", b"]", b"]"],
+    )
+    require(exit_code == 0, f"section-delete-forward vi exited with status {exit_code}")
+    require(saved == "{\na\n}\nmid\n{\nb\n}\ntail\n",
+            f"unexpected section-delete-forward buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "head\n{\na\n}\nmid\n{\nb\n}\ntail\n",
+        [b"y", b"]", b"]", b"P"],
+    )
+    require(exit_code == 0, f"section-yank-forward vi exited with status {exit_code}")
+    require(saved == "head\nhead\n{\na\n}\nmid\n{\nb\n}\ntail\n",
+            f"unexpected section-yank-forward buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "head\n{\na\n}\nmid\n{\nb\n}\ntail\n",
+        [b"c", b"]", b"[", b"D", b"O", b"N", b"E", b"\x1b"],
+    )
+    require(exit_code == 0, f"section-change-forward vi exited with status {exit_code}")
+    require(saved == "DONE\n}\nmid\n{\nb\n}\ntail\n",
+            f"unexpected section-change-forward buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "head\n{\na\n}\nmid\n{\nb\n}\ntail\n",
+        [b"G", b"d", b"[", b"["],
+    )
+    require(exit_code == 0, f"section-delete-backward vi exited with status {exit_code}")
+    require(saved == "head\n{\na\n}\nmid\ntail\n",
+            f"unexpected section-delete-backward buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "head\n{\na\n}\nmid\n{\nb\n}\ntail\n",
+        [b"G", b"c", b"[", b"]", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"section-change-backward vi exited with status {exit_code}")
+    require(saved == "head\n{\na\n}\nmid\n{\nb\nX\ntail\n",
+            f"unexpected section-change-backward buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "Alpha one.  Beta two!\nGamma three?  Delta four.\n",
         [b")", b"r", b"1", b")", b"r", b"2"],
     )
