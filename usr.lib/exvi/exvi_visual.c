@@ -74,6 +74,7 @@ typedef struct {
     int pending_z;
     int pending_big_z;
     int pending_op;
+    int pending_op_count;
     int pending_count;
     int pending_reg;
     int last_search_forward;
@@ -1067,6 +1068,21 @@ vi_take_count(vi_visual_t *vis)
 
     vis->pending_count = 0;
     return count > 0 ? count : 1;
+}
+
+static int
+vi_multiply_counts(int left, int right)
+{
+    if (left <= 0) {
+        left = 1;
+    }
+    if (right <= 0) {
+        right = 1;
+    }
+    if (left > 99999999 / right) {
+        return 99999999;
+    }
+    return left * right;
 }
 
 static void
@@ -3551,7 +3567,9 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
 {
     int line_no = buf_current_line(b);
     int raw_count = vis->pending_count;
-    int count = vi_take_count(vis);
+    int motion_count = vi_take_count(vis);
+    int op_count = vis->pending_op_count > 0 ? vis->pending_op_count : 1;
+    int count = vi_multiply_counts(op_count, motion_count);
     int end;
     int last_line = vi_clamp_line_target(b, line_no + count - 1);
 
@@ -4263,6 +4281,7 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         write(STDOUT_FILENO, "\a", 1);
     }
     vis->pending_op = 0;
+    vis->pending_op_count = 0;
     vis->pending_reg = 0;
 }
 
@@ -5721,22 +5740,27 @@ process_normal_key:
         case 'c':
             vis.pending_g = 0;
             vis.pending_op = 'c';
+            vis.pending_op_count = vi_take_count(&vis);
             break;
         case 'd':
             vis.pending_g = 0;
             vis.pending_op = 'd';
+            vis.pending_op_count = vi_take_count(&vis);
             break;
         case 'y':
             vis.pending_g = 0;
             vis.pending_op = 'y';
+            vis.pending_op_count = vi_take_count(&vis);
             break;
         case '>':
             vis.pending_g = 0;
             vis.pending_op = '>';
+            vis.pending_op_count = vi_take_count(&vis);
             break;
         case '<':
             vis.pending_g = 0;
             vis.pending_op = '<';
+            vis.pending_op_count = vi_take_count(&vis);
             break;
         case 'p':
             vis.pending_g = 0;

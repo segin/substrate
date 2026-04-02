@@ -2344,6 +2344,42 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one two three four five six\n",
+        [b"2", b"d", b"2", b"w"],
+    )
+    require(exit_code == 0, f"2d2w vi exited with status {exit_code}")
+    require(saved == "five six\n",
+            f"unexpected 2d2w buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four five six\n",
+        [b"2", b"c", b"2", b"w", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"2c2w vi exited with status {exit_code}")
+    require(saved == "X five six\n",
+            f"unexpected 2c2w buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four five six\n",
+        [b"2", b"c", b"2", b"W", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"2c2W vi exited with status {exit_code}")
+    require(saved == "X five six\n",
+            f"unexpected 2c2W buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four five six\n",
+        [b"2", b"y", b"2", b"w", b"P"],
+    )
+    require(exit_code == 0, f"2y2wP vi exited with status {exit_code}")
+    require(saved == "one two three four one two three four five six\n",
+            f"unexpected 2y2wP buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "a bc\n",
         [b"l", b"c", b"w", b"X", b"\x1b"],
     )
