@@ -2181,6 +2181,16 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "abcXdefXghiXj\n",
+        [b"$", b"c", b"T", b"X", b"T", b"A", b"I", b"L", b"\x1b"],
+    )
+    require(exit_code == 0, f"$cTX vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing $cTX insert status")
+    require(saved == "abcXdefXghiXTAIL\n",
+            f"unexpected $cTX buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\n\n  two\nthree\n\nfour\n",
         [b"}", b"}", b"{"],
     )

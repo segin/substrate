@@ -3036,6 +3036,30 @@ vi_find_motion_span(line_t *cur, int cursor_col, int ch, int forward, int till,
 }
 
 static int
+vi_find_change_motion_span(line_t *cur, int cursor_col, int ch, int forward, int till,
+    int count, int *start_out, int *end_out)
+{
+    int col;
+
+    if (vi_find_motion_span(cur, cursor_col, ch, forward, till, count,
+        start_out, end_out) == 0) {
+        return 0;
+    }
+    if (!cur || forward || !till || count != 1) {
+        return -1;
+    }
+    if (vi_find_char_in_line(cur, cursor_col, ch, 0, 1, &col) != 0) {
+        return -1;
+    }
+    if (col + 1 != cursor_col) {
+        return -1;
+    }
+    *start_out = cursor_col;
+    *end_out = cursor_col + 1;
+    return 0;
+}
+
+static int
 vi_find_word_end_exclusive_count(line_t *cur, int start, int count, int *end_out)
 {
     size_t i;
@@ -4315,10 +4339,15 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         ch = vi_read_visual_key(b, vis, ':', NULL);
         if (ch == -1 || ch == '\x1b' || ch == '\r' || ch == '\n') {
             write(STDOUT_FILENO, "\a", 1);
-        } else if (vi_find_motion_span(b->cur, vis->cursor_col, ch,
-            (key == 'f' || key == 't'),
-            (key == 't' || key == 'T'),
-            count, &start, &end) == 0) {
+        } else if (((vis->pending_op == 'c')
+                ? vi_find_change_motion_span(b->cur, vis->cursor_col, ch,
+                    (key == 'f' || key == 't'),
+                    (key == 't' || key == 'T'),
+                    count, &start, &end)
+                : vi_find_motion_span(b->cur, vis->cursor_col, ch,
+                    (key == 'f' || key == 't'),
+                    (key == 't' || key == 'T'),
+                    count, &start, &end)) == 0) {
             if (vis->pending_op == '>' || vis->pending_op == '<') {
                 if (vi_apply_linewise_operator(b, vis, line_no, line_no) != 0) {
                     write(STDOUT_FILENO, "\a", 1);
@@ -4351,8 +4380,13 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             if (key == ',') {
                 forward = !forward;
             }
-            if (vi_find_motion_span(b->cur, vis->cursor_col, vis->last_find_char,
-                forward, vis->last_find_till, count, &start, &end) == 0) {
+            if (((vis->pending_op == 'c')
+                    ? vi_find_change_motion_span(b->cur, vis->cursor_col,
+                        vis->last_find_char, forward, vis->last_find_till,
+                        count, &start, &end)
+                    : vi_find_motion_span(b->cur, vis->cursor_col,
+                        vis->last_find_char, forward, vis->last_find_till,
+                        count, &start, &end)) == 0) {
                 if (vis->pending_op == '>' || vis->pending_op == '<') {
                     if (vi_apply_linewise_operator(b, vis, line_no, line_no) != 0) {
                         write(STDOUT_FILENO, "\a", 1);
