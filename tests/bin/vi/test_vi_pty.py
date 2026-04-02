@@ -2372,7 +2372,7 @@ def main():
         [b"j", b">", b"}"],
     )
     require(exit_code == 0, f"blank-paragraph-shift vi exited with status {exit_code}")
-    require(saved == "one\n\ntwo\nthree\n\nfour\n",
+    require(saved == "one\n\n\ttwo\n\tthree\n\nfour\n",
             f"unexpected blank-paragraph-shift buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
@@ -2381,16 +2381,16 @@ def main():
         [b"j", b"d", b"}"],
     )
     require(exit_code == 0, f"blank-paragraph-delete-separator vi exited with status {exit_code}")
-    require(saved == "one\n\ntwo\nthree\n\nfour\n",
+    require(saved == "one\n\nfour\n",
             f"unexpected blank-paragraph-delete-separator buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
         "one\n\ntwo\nthree\n\nfour\n",
-        [b"j", b"c", b"}"],
+        [b"j", b"c", b"}", b"X", b"\x1b"],
     )
     require(exit_code == 0, f"blank-paragraph-change-separator vi exited with status {exit_code}")
-    require(saved == "one\n\ntwo\nthree\n\nfour\n",
+    require(saved == "one\nX\n\nfour\n",
             f"unexpected blank-paragraph-change-separator buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
@@ -2399,7 +2399,7 @@ def main():
         [b"j", b"y", b"}", b"P"],
     )
     require(exit_code == 0, f"blank-paragraph-yank-separator vi exited with status {exit_code}")
-    require(saved == "one\n\ntwo\nthree\n\nfour\n",
+    require(saved == "one\n\ntwo\nthree\n\ntwo\nthree\n\nfour\n",
             f"unexpected blank-paragraph-yank-separator buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
@@ -3401,6 +3401,15 @@ def main():
     require(exit_code == 0, f"visual-dot-after-cbrace vi exited with status {exit_code}")
     require(saved == "one\nX\nthree\n",
             f"unexpected visual-dot-after-cbrace buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n\ntwo\n\nthree\n",
+        [b"c", b"}", b"X", b"\x1b", b"j", b"."],
+    )
+    require(exit_code == 0, f"visual-dot-after-cbrace-forward vi exited with status {exit_code}")
+    require(saved == "X\nX\n\nthree\n",
+            f"unexpected visual-dot-after-cbrace-forward buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,

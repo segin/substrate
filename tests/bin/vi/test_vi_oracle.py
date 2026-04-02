@@ -135,6 +135,11 @@ def main():
             "key_steps": [b"$", b"c", b"T", b"b", b"X", b"\x1b", b"j", b",", b"."],
         },
         {
+            "name": "paragraph-forward-repeat-change",
+            "initial_text": "one\n\ntwo\n\nthree\n",
+            "key_steps": [b"c", b"}", b"X", b"\x1b", b"j", b"."],
+        },
+        {
             "name": "paragraph-repeat-change",
             "initial_text": "one\n\ntwo\n\nthree\n",
             "key_steps": [b"G", b"c", b"{", b"X", b"\x1b", b"j", b"."],

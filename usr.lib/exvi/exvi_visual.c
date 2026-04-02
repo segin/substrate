@@ -5046,15 +5046,26 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             && target_line && !vi_line_is_blank(target_line)
             && target_col == vi_first_nonblank_col(target_line)) {
             target_col = (int)target_line->len;
+        } else if (rc == 0 && (vis->pending_op == '>' || vis->pending_op == '<') &&
+            key == '}' && b->cur && vi_line_is_blank(b->cur) && vis->cursor_col == 0 &&
+            target_line && target_line != b->cur && vi_line_is_blank(target_line) &&
+            target_col == 0) {
+            int target_line_no = vi_line_number_for_mark(b, target_line);
+            int start_line = line_no + 1;
+            int end_line = target_line_no - 1;
+
+            if (start_line <= end_line) {
+                if (vi_apply_linewise_operator(b, vis, start_line, end_line) != 0) {
+                    write(STDOUT_FILENO, "\a", 1);
+                }
+            }
+            vis->pending_op = 0;
+            vis->pending_op_count = 0;
+            vis->pending_reg = 0;
+            return;
         }
         if (rc != 0) {
             write(STDOUT_FILENO, "\a", 1);
-        } else if (b->cur && b->cur->len == 0 && vis->cursor_col == 0 &&
-            target_line && target_line != b->cur && target_col == 0) {
-            /*
-             * On a separator blank line, vim treats operator+sentence/paragraph
-             * as a no-op rather than consuming the next paragraph block.
-             */
         } else if (vi_apply_search_linewise_motion(b, vis, line_no, target_line, target_col) != 0) {
             if (vis->pending_op == '>' || vis->pending_op == '<' ||
                 vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
