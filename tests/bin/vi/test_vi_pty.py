@@ -1159,6 +1159,15 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one\ntwo\nthree\n",
+        [b"y", b"+", b"P"],
+    )
+    require(exit_code == 0, f"y+ vi exited with status {exit_code}")
+    require(saved == "one\ntwo\none\ntwo\nthree\n",
+            f"unexpected y+ buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\ntwo\nthree\nfour\n",
         [b"c", b"+", b"X", b"\x1b"],
     )
@@ -1350,12 +1359,39 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "alpha\nbeta\ngamma\n",
+        [b"y", b"/", b"g", b"a", b"m", b"m", b"a", b"\r", b"P"],
+    )
+    require(exit_code == 0, f"y/search vi exited with status {exit_code}")
+    require(saved == "alpha\nbetaalpha\nbeta\ngamma\n",
+            f"unexpected y/search buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "alpha\nbeta\ngamma\ndelta\nbeta2\n",
         [b"/", b"b", b"e", b"t", b"a", b"\r", b"g", b"g", b"d", b"n"],
     )
     require(exit_code == 0, f"dn vi exited with status {exit_code}")
     require(saved == "beta\ngamma\ndelta\nbeta2\n",
             f"unexpected dn buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "aa\nfoo\nbb\nfoo\ncc\n",
+        [b"/", b"f", b"o", b"o", b"\r", b"y", b"n", b"P"],
+    )
+    require(exit_code == 0, f"yn vi exited with status {exit_code}")
+    require(saved == "aa\nfoo\nbb\nfoo\nbb\nfoo\ncc\n",
+            f"unexpected yn buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "aa\nfoo\nbb\nfoo\ncc\n",
+        [b"G", b"?", b"f", b"o", b"o", b"\r", b"y", b"N", b"P"],
+    )
+    require(exit_code == 0, f"yN vi exited with status {exit_code}")
+    require(saved == "aa\nfoo\nbb\nfoo\nbb\nfoo\ncc\n",
+            f"unexpected yN buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
@@ -1378,6 +1414,15 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "foo\nbar\nfoo\n",
+        [b"y", b"*", b"P"],
+    )
+    require(exit_code == 0, f"y* vi exited with status {exit_code}")
+    require(saved == "foo\nbar\nfoo\nbar\nfoo\n",
+            f"unexpected y* buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "word\nmiddle\nword\n",
         [b"G", b"d", b"#"],
     )
@@ -1394,6 +1439,15 @@ def main():
     require("-- INSERT --" in decoded, "missing c# insert status")
     require(saved == "X\nword\n",
             f"unexpected c# buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "foo\nbar\nfoo\n",
+        [b"G", b"y", b"#", b"P"],
+    )
+    require(exit_code == 0, f"y# vi exited with status {exit_code}")
+    require(saved == "foo\nbar\nfoo\nbar\nfoo\n",
+            f"unexpected y# buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
@@ -1895,6 +1949,15 @@ def main():
     require(exit_code == 0, f"operator-semicolon-yank vi exited with status {exit_code}")
     require(saved == "abcXdefXXdefXghiXj\n",
             f"unexpected operator-semicolon-yank buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc def ghi jkl\n",
+        [b"f", b"j", b"c", b",", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"operator-comma-change vi exited with status {exit_code}")
+    require(saved == "abc def ghijkl\n",
+            f"unexpected operator-comma-change buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,

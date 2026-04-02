@@ -229,7 +229,7 @@ All other historical `ex` commands and aliases are currently outside the support
 - [ ] Complete the remaining operator/motion combinations still missing from delete/change/yank.
 - [ ] Finish cross-line charwise operator spans so they behave correctly for every motion family, not only the currently covered subsets.
 - [ ] Audit linewise-vs-charwise coercion rules for every operator path, including edge cases at column zero and end-of-line.
-- [ ] Complete operator support for search-based motions, mark-based motions, repeated find motions, and any remaining vertical motions.
+- [x] Complete operator support for search-based motions, mark-based motions, repeated find motions, and any remaining vertical motions.
 - [ ] Finish `p`/`P` cursor placement and register-type behavior after every delete/change/yank variant.
 - [x] Complete named-register selection for delete/change/yank/put instead of only the currently covered register paths.
 
