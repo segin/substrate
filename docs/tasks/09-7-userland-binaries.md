@@ -1872,7 +1872,7 @@
         - [ ] **Implementation:** (REQ: REQ-09-1707, REQ-09-2077)
             - [ ] `ttyname(STDIN_FILENO)`. (REQ: REQ-09-2078)
     - [ ] **Editors:** (REQ: REQ-09-2085)
-        - Note: `bin/ex` and `bin/vi` are to be implemented per [`docs/specs/exvi.md`](../specs/exvi.md), with `usr.lib/exvi/` as the shared editor core and thin frontends in [`bin/ex`](../../bin/ex) and [`bin/vi`](../../bin/vi). The old standalone "tiny vi clone" direction is obsolete and should not be used as implementation guidance.
+        - Note: `bin/ex` and `bin/vi` are implemented and continued per [`docs/specs/exvi.md`](../specs/exvi.md), with `usr.lib/exvi/` as the shared editor core and thin frontends in [`bin/ex`](../../bin/ex) and [`bin/vi`](../../bin/vi). Standards/compatibility tracking lives in [`docs/specs/exvi_conformance.md`](../specs/exvi_conformance.md), and user-facing manuals live in [`usr.man/man1/ex.1`](../../usr.man/man1/ex.1), [`usr.man/man1/vi.1`](../../usr.man/man1/vi.1), and [`usr.man/man1/view.1`](../../usr.man/man1/view.1). The old standalone "tiny vi clone" direction is obsolete and should not be used as implementation guidance.
         - [ ] **Shared `ex`/`vi` Implementation (`docs/specs/exvi.md`):**
             - [x] Create `usr.lib/exvi/` as the reusable shared editor core outside `bin/ex` and `bin/vi`.
             - [x] Reduce [`bin/ex`](../../bin/ex) to a line-mode frontend over the shared core.
