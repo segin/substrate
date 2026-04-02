@@ -780,8 +780,9 @@ do_boot:
 	putdec(ksize);
 	putc_both('\n');
 
-	/* Read entire kernel into a temp buffer above 0x200000 (2MB) */
-	uint8_t *kbuf = (uint8_t *)0x00200000;
+	/* Read entire kernel into a temp buffer above 0x01000000 (16MB)
+	 * This avoids collisions with the kernel's .bss section which now exceeds 6MB. */
+	uint8_t *kbuf = (uint8_t *)0x01000000;
 	ext2_read_file(kernel_inode, kbuf);
 
 	/* Load ELF segments to their physical addresses */
