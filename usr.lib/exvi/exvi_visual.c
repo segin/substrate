@@ -4861,6 +4861,9 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         if (vi_find_word_start_backward_count(b->cur, vis->cursor_col, count, &start) == 0 &&
             start < vis->cursor_col) {
             vi_delete_span(b, vis, start, vis->cursor_col, vis->pending_op == 'c');
+            if (vis->pending_op == 'c') {
+                vi_set_last_change(vis, VI_REPEAT_C_MOTION, count, key);
+            }
         } else {
             write(STDOUT_FILENO, "\a", 1);
         }
@@ -4880,6 +4883,9 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         if (vi_find_bigword_start_backward_count(b->cur, vis->cursor_col, count, &start) == 0 &&
             start < vis->cursor_col) {
             vi_delete_span(b, vis, start, vis->cursor_col, vis->pending_op == 'c');
+            if (vis->pending_op == 'c') {
+                vi_set_last_change(vis, VI_REPEAT_C_MOTION, count, key);
+            }
         } else {
             write(STDOUT_FILENO, "\a", 1);
         }

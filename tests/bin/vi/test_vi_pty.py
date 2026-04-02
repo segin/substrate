@@ -3242,6 +3242,24 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one two three four\nalpha beta gamma\n",
+        [b"$", b"c", b"b", b"X", b"\x1b", b"j", b"."],
+    )
+    require(exit_code == 0, f"visual-dot-after-cb vi exited with status {exit_code}")
+    require(saved == "one two three Xr\nalpha beta Xma\n",
+            f"unexpected visual-dot-after-cb buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four\nalpha beta gamma\n",
+        [b"$", b"c", b"B", b"X", b"\x1b", b"j", b"."],
+    )
+    require(exit_code == 0, f"visual-dot-after-cB vi exited with status {exit_code}")
+    require(saved == "one two three Xr\nalpha beta Xma\n",
+            f"unexpected visual-dot-after-cB buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "alpha beta gamma\nalpha beta gamma\n",
         [b"0", b"c", b"t", b"g", b"X", b"\x1b", b"j", b";", b"."],
     )
