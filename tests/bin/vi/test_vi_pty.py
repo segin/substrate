@@ -2256,6 +2256,60 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "alpha beta\n",
+        [b"d", b"g", b"e"],
+    )
+    require(exit_code == 0, f"dge-start vi exited with status {exit_code}")
+    require(saved == "alpha beta\n",
+            f"unexpected dge-start buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha, beta\n",
+        [b"d", b"g", b"E"],
+    )
+    require(exit_code == 0, f"dgE-start vi exited with status {exit_code}")
+    require(saved == "alpha, beta\n",
+            f"unexpected dgE-start buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha beta\n",
+        [b"c", b"g", b"e", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"cge-start vi exited with status {exit_code}")
+    require(saved == "alpha beta\n",
+            f"unexpected cge-start buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha, beta\n",
+        [b"c", b"g", b"E", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"cgE-start vi exited with status {exit_code}")
+    require(saved == "alpha, beta\n",
+            f"unexpected cgE-start buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha beta\n",
+        [b"y", b"g", b"e", b"P"],
+    )
+    require(exit_code == 0, f"yge-start vi exited with status {exit_code}")
+    require(saved == "alpha beta\n",
+            f"unexpected yge-start buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha, beta\n",
+        [b"y", b"g", b"E", b"P"],
+    )
+    require(exit_code == 0, f"ygE-start vi exited with status {exit_code}")
+    require(saved == "alpha, beta\n",
+            f"unexpected ygE-start buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "abc def ghi\n",
         [b"$", b"y", b"F", b"g", b"P"],
     )

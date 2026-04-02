@@ -4272,9 +4272,10 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             ((vis->pending_op != '>' && vis->pending_op != '<') && target_line != b->cur) ||
             (target_line == b->cur && target_col > vis->cursor_col)) {
             write(STDOUT_FILENO, "\a", 1);
+        } else if (target_line == b->cur && target_col == vis->cursor_col) {
+            write(STDOUT_FILENO, "\a", 1);
         } else if (vis->pending_op == '>' || vis->pending_op == '<') {
-            if ((target_line == b->cur && target_col == vis->cursor_col) ||
-                vi_apply_charwise_linewise_motion(b, vis, line_no, target_line,
+            if (vi_apply_charwise_linewise_motion(b, vis, line_no, target_line,
                 target_col) != 0) {
                 write(STDOUT_FILENO, "\a", 1);
             }
