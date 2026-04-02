@@ -94,6 +94,10 @@ static void vi_move_word_forward_count(buffer_t *b, vi_visual_t *vis, int count)
 static void vi_move_word_backward_count(buffer_t *b, vi_visual_t *vis, int count);
 static void vi_page_scroll(buffer_t *b, vi_visual_t *vis, int direction);
 static void vi_delete_char(buffer_t *b, vi_visual_t *vis);
+static void vi_linewise_yank(buffer_t *b, vi_visual_t *vis, int start, int end);
+static void vi_linewise_delete(buffer_t *b, vi_visual_t *vis, int start, int end);
+static void vi_linewise_change(buffer_t *b, vi_visual_t *vis, int start, int end);
+static void vi_set_last_change(vi_visual_t *vis, vi_repeat_kind_t kind, int count, int ch);
 static int vi_prompt_input(buffer_t *b, vi_visual_t *vis, char prefix, char *buf,
     size_t buf_size);
 static char *vi_current_word_text(buffer_t *b, vi_visual_t *vis);
@@ -571,6 +575,34 @@ vi_shift_range(buffer_t *b, vi_visual_t *vis, int start_line_no, int end_line_no
     b->cur = orig;
     vis->cursor_col = vi_first_nonblank_col(orig);
     return 0;
+}
+
+static int
+vi_apply_linewise_operator(buffer_t *b, vi_visual_t *vis, int start_line, int end_line)
+{
+    if (start_line < 1 || end_line < start_line) {
+        return -1;
+    }
+    if (vis->pending_op == 'y') {
+        vi_linewise_yank(b, vis, start_line, end_line);
+        return 0;
+    }
+    if (vis->pending_op == 'd') {
+        vi_linewise_delete(b, vis, start_line, end_line);
+        vi_set_last_change(vis, VI_REPEAT_DD, end_line - start_line + 1, 0);
+        return 0;
+    }
+    if (vis->pending_op == 'c') {
+        vi_linewise_change(b, vis, start_line, end_line);
+        return 0;
+    }
+    if (vis->pending_op == '>') {
+        return vi_shift_range(b, vis, start_line, end_line, 1);
+    }
+    if (vis->pending_op == '<') {
+        return vi_shift_range(b, vis, start_line, end_line, 0);
+    }
+    return -1;
 }
 
 static int
@@ -3768,7 +3800,8 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         }
     } else if (vis->pending_op == 'y' && key == 'y') {
         vi_linewise_yank(b, vis, line_no, last_line);
-    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y' ||
+        vis->pending_op == '>' || vis->pending_op == '<') &&
         key == '\'') {
         int mark_key = vi_read_visual_key(b, vis, ':', NULL);
         int mark_line;
@@ -3789,12 +3822,8 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
                     start = end;
                     end = tmp;
                 }
-                if (vis->pending_op == 'y') {
-                    vi_linewise_yank(b, vis, start, end);
-                } else if (vis->pending_op == 'd') {
-                    vi_linewise_delete(b, vis, start, end);
-                } else {
-                    vi_linewise_change(b, vis, start, end);
+                if (vi_apply_linewise_operator(b, vis, start, end) != 0) {
+                    write(STDOUT_FILENO, "\a", 1);
                 }
             }
         }
@@ -3876,7 +3905,8 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         if (vi_yank_span(vis, b->cur, vis->cursor_col, end) != 0) {
             write(STDOUT_FILENO, "\a", 1);
         }
-    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y' ||
+        vis->pending_op == '>' || vis->pending_op == '<') &&
         key == 'g') {
         int motion = vi_read_visual_key(b, vis, ':', NULL);
         line_t *target_line;
@@ -3893,13 +3923,8 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
                 start = end_line;
                 end_line = tmp;
             }
-            if (vis->pending_op == 'y') {
-                vi_linewise_yank(b, vis, start, end_line);
-            } else if (vis->pending_op == 'd') {
-                vi_linewise_delete(b, vis, start, end_line);
-                vi_set_last_change(vis, VI_REPEAT_DD, end_line - start + 1, 0);
-            } else {
-                vi_linewise_change(b, vis, start, end_line);
+            if (vi_apply_linewise_operator(b, vis, start, end_line) != 0) {
+                write(STDOUT_FILENO, "\a", 1);
             }
         } else if (motion == '_') {
             int target = vi_clamp_line_target(b, line_no + count - 1);
@@ -3953,30 +3978,23 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         if (vi_yank_span(vis, b->cur, start, vis->cursor_col) != 0) {
             write(STDOUT_FILENO, "\a", 1);
         }
-    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y' ||
+        vis->pending_op == '>' || vis->pending_op == '<') &&
         key == '_') {
-        if (vis->pending_op == 'y') {
-            vi_linewise_yank(b, vis, line_no, last_line);
-        } else if (vis->pending_op == 'd') {
-            vi_linewise_delete(b, vis, line_no, last_line);
-            vi_set_last_change(vis, VI_REPEAT_DD, count, 0);
-        } else {
-            vi_linewise_change(b, vis, line_no, last_line);
+        if (vi_apply_linewise_operator(b, vis, line_no, last_line) != 0) {
+            write(STDOUT_FILENO, "\a", 1);
         }
-    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y' ||
+        vis->pending_op == '>' || vis->pending_op == '<') &&
         (key == 'j' || key == '+' || key == '\r' || key == '\n')) {
         int start = line_no;
         int end_line = vi_clamp_line_target(b, line_no + count);
 
-        if (vis->pending_op == 'y') {
-            vi_linewise_yank(b, vis, start, end_line);
-        } else if (vis->pending_op == 'd') {
-            vi_linewise_delete(b, vis, start, end_line);
-            vi_set_last_change(vis, VI_REPEAT_DD, end_line - start + 1, 0);
-        } else {
-            vi_linewise_change(b, vis, start, end_line);
+        if (vi_apply_linewise_operator(b, vis, start, end_line) != 0) {
+            write(STDOUT_FILENO, "\a", 1);
         }
-    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y' ||
+        vis->pending_op == '>' || vis->pending_op == '<') &&
         (key == 'H' || key == 'M' || key == 'L')) {
         int target;
         int start = line_no;
@@ -3998,26 +4016,17 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             start = end_line;
             end_line = tmp;
         }
-        if (vis->pending_op == 'y') {
-            vi_linewise_yank(b, vis, start, end_line);
-        } else if (vis->pending_op == 'd') {
-            vi_linewise_delete(b, vis, start, end_line);
-            vi_set_last_change(vis, VI_REPEAT_DD, end_line - start + 1, 0);
-        } else {
-            vi_linewise_change(b, vis, start, end_line);
+        if (vi_apply_linewise_operator(b, vis, start, end_line) != 0) {
+            write(STDOUT_FILENO, "\a", 1);
         }
-    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y' ||
+        vis->pending_op == '>' || vis->pending_op == '<') &&
         (key == 'k' || key == '-')) {
         int start = vi_clamp_line_target(b, line_no - count);
         int end_line = line_no;
 
-        if (vis->pending_op == 'y') {
-            vi_linewise_yank(b, vis, start, end_line);
-        } else if (vis->pending_op == 'd') {
-            vi_linewise_delete(b, vis, start, end_line);
-            vi_set_last_change(vis, VI_REPEAT_DD, end_line - start + 1, 0);
-        } else {
-            vi_linewise_change(b, vis, start, end_line);
+        if (vi_apply_linewise_operator(b, vis, start, end_line) != 0) {
+            write(STDOUT_FILENO, "\a", 1);
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
         key == '|') {
@@ -4200,7 +4209,8 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
              vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0)) {
             write(STDOUT_FILENO, "\a", 1);
         }
-    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y' ||
+        vis->pending_op == '>' || vis->pending_op == '<') &&
         (key == '[' || key == ']')) {
         int key2;
         line_t *target_line = NULL;
@@ -4243,17 +4253,14 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
                     }
                     if (end_line < start_line) {
                         write(STDOUT_FILENO, "\a", 1);
-                    } else if (vis->pending_op == 'y') {
-                        vi_linewise_yank(b, vis, start_line, end_line);
-                    } else if (vis->pending_op == 'd') {
-                        vi_linewise_delete(b, vis, start_line, end_line);
-                    } else {
-                        vi_linewise_change(b, vis, start_line, end_line);
+                    } else if (vi_apply_linewise_operator(b, vis, start_line, end_line) != 0) {
+                        write(STDOUT_FILENO, "\a", 1);
                     }
                 }
             }
         }
-    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y' ||
+        vis->pending_op == '>' || vis->pending_op == '<') &&
         (key == '\'' || key == '`')) {
         int mark;
         line_t *target_line;
@@ -4281,12 +4288,8 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
                     }
                     if (end_line < start_line) {
                         write(STDOUT_FILENO, "\a", 1);
-                    } else if (vis->pending_op == 'y') {
-                        vi_linewise_yank(b, vis, start_line, end_line);
-                    } else if (vis->pending_op == 'd') {
-                        vi_linewise_delete(b, vis, start_line, end_line);
-                    } else {
-                        vi_linewise_change(b, vis, start_line, end_line);
+                    } else if (vi_apply_linewise_operator(b, vis, start_line, end_line) != 0) {
+                        write(STDOUT_FILENO, "\a", 1);
                     }
                 }
             } else {
@@ -4387,7 +4390,8 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         } else {
             write(STDOUT_FILENO, "\a", 1);
         }
-    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y' ||
+        vis->pending_op == '>' || vis->pending_op == '<') &&
         key == 'G') {
         int start = line_no;
         int target = (raw_count > 0) ? raw_count :
@@ -4400,13 +4404,8 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             start = end_line;
             end_line = tmp;
         }
-        if (vis->pending_op == 'y') {
-            vi_linewise_yank(b, vis, start, end_line);
-        } else if (vis->pending_op == 'd') {
-            vi_linewise_delete(b, vis, start, end_line);
-            vi_set_last_change(vis, VI_REPEAT_DD, end_line - start + 1, 0);
-        } else {
-            vi_linewise_change(b, vis, start, end_line);
+        if (vi_apply_linewise_operator(b, vis, start, end_line) != 0) {
+            write(STDOUT_FILENO, "\a", 1);
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y')
         && key == '%') {
