@@ -1758,6 +1758,33 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "aa\nmatch\nbb\nmatch\ncc\n",
+        [b">", b"/", b"m", b"a", b"t", b"c", b"h", b"\r"],
+    )
+    require(exit_code == 0, f">/search vi exited with status {exit_code}")
+    require(saved == "\taa\nmatch\nbb\nmatch\ncc\n",
+            f"unexpected >/search buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "aa\nmatch\nbb\nmatch\ncc\n",
+        [b"/", b"m", b"a", b"t", b"c", b"h", b"\r", b"g", b"g", b">", b"n"],
+    )
+    require(exit_code == 0, f">n vi exited with status {exit_code}")
+    require(saved == "\taa\nmatch\nbb\nmatch\ncc\n",
+            f"unexpected >n buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "aa\nmatch\nbb\nmatch\ncc\n",
+        [b"g", b"g", b">", b"/", b"m", b"a", b"t", b"c", b"h", b"\r", b"j", b">", b"n"],
+    )
+    require(exit_code == 0, f"search-shift-repeat vi exited with status {exit_code}")
+    require(saved == "\taa\n\tmatch\n\tbb\nmatch\ncc\n",
+            f"unexpected search-shift-repeat buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "alpha\nbeta\ngamma\ndelta\nbeta2\n",
         [b"/", b"b", b"e", b"t", b"a", b"\r", b"g", b"g", b"d", b"n"],
     )
@@ -2015,6 +2042,42 @@ def main():
     require("line 5/6" in decoded, "missing paragraph forward-to-end status")
     require(saved == "one\n\n  two\nthree\n\nfour\n",
             f"unexpected paragraph-motion buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n\ntwo\nthree\n\nfour\n",
+        [b"j", b">", b"}"],
+    )
+    require(exit_code == 0, f"blank-paragraph-shift vi exited with status {exit_code}")
+    require(saved == "one\n\ntwo\nthree\n\nfour\n",
+            f"unexpected blank-paragraph-shift buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n\ntwo\nthree\n\nfour\n",
+        [b"j", b"d", b"}"],
+    )
+    require(exit_code == 0, f"blank-paragraph-delete-separator vi exited with status {exit_code}")
+    require(saved == "one\n\ntwo\nthree\n\nfour\n",
+            f"unexpected blank-paragraph-delete-separator buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n\ntwo\nthree\n\nfour\n",
+        [b"j", b"c", b"}"],
+    )
+    require(exit_code == 0, f"blank-paragraph-change-separator vi exited with status {exit_code}")
+    require(saved == "one\n\ntwo\nthree\n\nfour\n",
+            f"unexpected blank-paragraph-change-separator buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n\ntwo\nthree\n\nfour\n",
+        [b"j", b"y", b"}", b"P"],
+    )
+    require(exit_code == 0, f"blank-paragraph-yank-separator vi exited with status {exit_code}")
+    require(saved == "one\n\ntwo\nthree\n\nfour\n",
+            f"unexpected blank-paragraph-yank-separator buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
