@@ -5238,6 +5238,8 @@ exvi_visual_main(buffer_t *b)
     struct sigaction old_winch;
     int have_winch = 0;
     int key;
+    int resume_insert_mode = 0;
+    int resume_replace_mode = 0;
 
     memset(&vis, 0, sizeof(vis));
     vis.top_line = 1;
@@ -5261,8 +5263,6 @@ exvi_visual_main(buffer_t *b)
     for (;;) {
         line_t *cur;
         int clear_status = 0;
-        int resume_insert_mode = 0;
-        int resume_replace_mode = 0;
 
         vi_ensure_visible_line(b);
         if (vis.status_once && vis.status_msg[0] != '\0') {
@@ -5291,6 +5291,7 @@ exvi_visual_main(buffer_t *b)
                 break;
             case 0x0f:
                 resume_replace_mode = 1;
+                resume_insert_mode = 0;
                 vis.replace_mode = 0;
                 key = vi_read_visual_key(b, &vis, ':', NULL);
                 if (key == -1) {
@@ -5355,6 +5356,7 @@ exvi_visual_main(buffer_t *b)
                 break;
             case 0x0f:
                 resume_insert_mode = 1;
+                resume_replace_mode = 0;
                 vis.insert_mode = 0;
                 key = vi_read_visual_key(b, &vis, ':', NULL);
                 if (key == -1) {
@@ -6202,12 +6204,16 @@ process_normal_key:
             break;
         }
 maybe_restore_insert_mode:
-        if (resume_insert_mode && !vis.insert_mode && !vis.replace_mode) {
+        if (resume_insert_mode && !vis.insert_mode && !vis.replace_mode &&
+            !vis.pending_op && !vis.pending_z && !vis.pending_big_z && !vis.pending_g) {
             vis.insert_mode = 1;
             vi_set_insert_anchor(b, &vis);
-        } else if (resume_replace_mode && !vis.insert_mode && !vis.replace_mode) {
+            resume_insert_mode = 0;
+        } else if (resume_replace_mode && !vis.insert_mode && !vis.replace_mode &&
+            !vis.pending_op && !vis.pending_z && !vis.pending_big_z && !vis.pending_g) {
             vis.replace_mode = 1;
             vi_set_insert_anchor(b, &vis);
+            resume_replace_mode = 0;
         }
         if (vis.pending_reg && key != '"' && key != 'd' && key != 'y' && key != 'c') {
             vis.pending_reg = 0;

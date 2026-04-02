@@ -886,6 +886,26 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "abc def\n",
+        [b"i", b"X", b"\x0f", b"d", b"w", b"Y", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-ctrl-o-dw vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-ctrl-o-dw insert status")
+    require(saved == "XYdef\n",
+            f"unexpected insert-ctrl-o-dw buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"G", b"A", b"X", b"\x0f", b"g", b"g", b"Y", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-ctrl-o-gg vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-ctrl-o-gg insert status")
+    require(saved == "Yone\ntwo\nthreeX\n",
+            f"unexpected insert-ctrl-o-gg buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "0123456789abcdefghijKLMNOPQRST\n",
         [b"2", b"5", b"l", b"r", b"Z"],
         rows=8,
