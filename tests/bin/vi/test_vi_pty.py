@@ -42,7 +42,8 @@ def send_keys(master_fd, output, data, timeout=0.2):
 
 def run_vi_session(vi_path, initial_text, key_steps, final_timeout=0.3, rows=24,
                    cols=80, final_keys=b":wq\r", extra_files=None,
-                   extra_args=None, argv0=None, file_args=None):
+                   extra_args=None, argv0=None, file_args=None,
+                   session_timeout=15.0):
     with tempfile.TemporaryDirectory(prefix="exvi-") as temp_dir:
         temp_path = os.path.join(temp_dir, "buffer.txt")
         with open(temp_path, "w", encoding="utf-8") as f:
@@ -89,7 +90,22 @@ def run_vi_session(vi_path, initial_text, key_steps, final_timeout=0.3, rows=24,
         else:
             output += read_some(master_fd, final_timeout)
 
-        _, status = os.waitpid(pid, 0)
+        deadline = time.time() + session_timeout
+        status = None
+        while time.time() < deadline:
+            pid_done, wait_status = os.waitpid(pid, os.WNOHANG)
+            if pid_done == pid:
+                status = wait_status
+                break
+            output += read_some(master_fd, 0.05)
+            time.sleep(0.01)
+        if status is None:
+            os.kill(pid, 9)
+            _, status = os.waitpid(pid, 0)
+            raise RuntimeError(
+                f"vi session timed out after {session_timeout:.1f}s; "
+                f"partial output tail={output.decode('latin1', 'replace')[-200:]!r}"
+            )
         os.close(master_fd)
 
         with open(temp_path, "r", encoding="utf-8") as f:
@@ -836,6 +852,37 @@ def main():
     require("-- INSERT --" in decoded, "missing insert-ctrl-delete insert status")
     require(saved == "one Xthree\n",
             f"unexpected insert-ctrl-delete buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc def\n",
+        [b"i", b"X", b"\x0f", b"x", b"Y", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-ctrl-o-delete vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-ctrl-o-delete insert status")
+    require(saved == "XYbc def\n",
+            f"unexpected insert-ctrl-o-delete buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc def\n",
+        [b"i", b"X", b"\x0f", b"w", b"Y", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-ctrl-o-motion vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-ctrl-o-motion insert status")
+    require(saved == "Xabc Ydef\n",
+            f"unexpected insert-ctrl-o-motion buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc def\n",
+        [b"i", b"X", b"\x0f", b":", b"set nu\r", b"Y", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-ctrl-o-ex vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-ctrl-o-ex insert status")
+    require(":set nu" in decoded, "missing insert-ctrl-o-ex command prompt output")
+    require(saved == "XYabc def\n",
+            f"unexpected insert-ctrl-o-ex buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,

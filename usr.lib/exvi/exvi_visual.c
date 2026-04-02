@@ -5074,6 +5074,8 @@ exvi_visual_main(buffer_t *b)
     for (;;) {
         line_t *cur;
         int clear_status = 0;
+        int resume_insert_mode = 0;
+        int resume_replace_mode = 0;
 
         vi_ensure_visible_line(b);
         if (vis.status_once && vis.status_msg[0] != '\0') {
@@ -5100,6 +5102,14 @@ exvi_visual_main(buffer_t *b)
                     vis.cursor_col--;
                 }
                 break;
+            case 0x0f:
+                resume_replace_mode = 1;
+                vis.replace_mode = 0;
+                key = vi_read_visual_key(b, &vis, ':', NULL);
+                if (key == -1) {
+                    goto done;
+                }
+                goto process_normal_key;
             case '\r':
             case '\n':
                 vi_split_line(b, &vis);
@@ -5156,6 +5166,14 @@ exvi_visual_main(buffer_t *b)
                     vis.cursor_col--;
                 }
                 break;
+            case 0x0f:
+                resume_insert_mode = 1;
+                vis.insert_mode = 0;
+                key = vi_read_visual_key(b, &vis, ':', NULL);
+                if (key == -1) {
+                    goto done;
+                }
+                goto process_normal_key;
             case '\r':
             case '\n':
                 vi_split_line(b, &vis);
@@ -5202,6 +5220,7 @@ exvi_visual_main(buffer_t *b)
             }
             continue;
         }
+process_normal_key:
         switch (key) {
         case VI_KEY_UP:
             key = 'k';
@@ -5242,14 +5261,14 @@ exvi_visual_main(buffer_t *b)
         if (vis.pending_op) {
             if (key >= '1' && key <= '9') {
                 vi_append_count(&vis, key - '0');
-                continue;
+                goto maybe_restore_insert_mode;
             }
             if (key == '0' && vis.pending_count > 0) {
                 vi_append_count(&vis, 0);
-                continue;
+                goto maybe_restore_insert_mode;
             }
             vi_handle_pending_operator(b, &vis, key);
-            continue;
+            goto maybe_restore_insert_mode;
         }
         if (vis.pending_z) {
             int count = vis.pending_count;
@@ -5305,7 +5324,7 @@ exvi_visual_main(buffer_t *b)
                 write(STDOUT_FILENO, "\a", 1);
                 break;
             }
-            continue;
+            goto maybe_restore_insert_mode;
         }
         if (vis.pending_big_z) {
             vis.pending_big_z = 0;
@@ -5329,13 +5348,13 @@ exvi_visual_main(buffer_t *b)
                 write(STDOUT_FILENO, "\a", 1);
                 break;
             }
-            continue;
+            goto maybe_restore_insert_mode;
         }
 
         if (key >= '1' && key <= '9') {
             vis.pending_g = 0;
             vi_append_count(&vis, key - '0');
-            continue;
+            goto maybe_restore_insert_mode;
         }
 
         switch (key) {
@@ -5989,6 +6008,14 @@ exvi_visual_main(buffer_t *b)
             vis.pending_g = 0;
             vis.pending_count = 0;
             break;
+        }
+maybe_restore_insert_mode:
+        if (resume_insert_mode && !vis.insert_mode && !vis.replace_mode) {
+            vis.insert_mode = 1;
+            vi_set_insert_anchor(b, &vis);
+        } else if (resume_replace_mode && !vis.insert_mode && !vis.replace_mode) {
+            vis.replace_mode = 1;
+            vi_set_insert_anchor(b, &vis);
         }
         if (vis.pending_reg && key != '"' && key != 'd' && key != 'y' && key != 'c') {
             vis.pending_reg = 0;
