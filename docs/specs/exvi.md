@@ -271,7 +271,18 @@ All other historical `ex` commands and aliases are currently outside the support
 - [x] Implement secure and restricted modes consistently in both frontends, not only for the currently covered shell-command paths.
 - [x] Decide and implement the supported extension policy for GNU-compatible spellings and non-conflicting aliases.
   Supported policy: only invocation forms, command names, command abbreviations, and `:set` aliases explicitly listed in this document are accepted. GNU/Vim-style long options such as `--version` and undocumented command/option spellings such as `magic` remain intentionally unsupported and are rejected with the normal frontend/command diagnostics, while Substrate-specific additions like `version`/`ver` and readonly `view`/`rex`/`rvi` remain part of the supported contract.
-- [ ] Document every supported option, alias, and deliberate divergence from historical BSD/nvi/vim behavior.
+- [x] Document every supported option, alias, and deliberate divergence from historical BSD/nvi/vim behavior.
+  Current supported alias/divergence record:
+
+| Area | Supported contract | Deliberate divergence / note |
+| --- | --- | --- |
+| frontend invocation | `-s`, `-S`, `-v`, `-r`, `-R`, `-c cmd`, `-t tag`, `+cmd`, plus `view`, `rex`, and `rvi` argv0 aliases | GNU/Vim long options such as `--version` are intentionally rejected |
+| ex command aliases | only the command forms listed in the section 2.2 matrix are supported | other historical `ex`, `nvi`, or Vim command names stay unsupported until listed with tests |
+| `:set` aliases | only the option names and short aliases listed in the shared option table are supported | undocumented knobs such as `magic` are intentionally unsupported |
+| regex/search policy | extended-regex engine with shared `ignorecase` and `wrapscan` options | no runtime `magic` option and no separate basic-regex compatibility mode |
+| version reporting | `:version` / `:ver` report `Substrate vi v0.1` | this is a Substrate-specific user-visible addition |
+| readonly/restricted frontends | `view`, `rex`, and `rvi` are supported readonly/restricted entry points | this follows BSD-style naming rather than adding new GNU-like option spellings |
+| visual repeat | bounded `.` repeat is currently supported for the implemented operation subset | full historical insert/change replay is still open and tracked in section 3.4 |
 
 ### 5. Tags, arglists, startup files, and recovery completeness
 
