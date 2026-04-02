@@ -253,7 +253,7 @@ All other historical `ex` commands and aliases are currently outside the support
 
 - [ ] Expand the shared option table to the real supported editor option set and document each option's ex/vi impact.
 - [x] Implement readonly/view mode consistently in both frontends, including status display and write restrictions.
-- [ ] Implement secure and restricted modes consistently in both frontends, not only for the currently covered shell-command paths.
+- [x] Implement secure and restricted modes consistently in both frontends, not only for the currently covered shell-command paths.
 - [ ] Decide and implement the supported extension policy for GNU-compatible spellings and non-conflicting aliases.
 - [ ] Document every supported option, alias, and deliberate divergence from historical BSD/nvi/vim behavior.
 

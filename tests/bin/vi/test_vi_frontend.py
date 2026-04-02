@@ -278,6 +278,33 @@ def main():
     exit_code, decoded, saved = helpers.run_vi_session(
         vi_path,
         "one\n",
+        [b":e two.txt\r", b":w two.txt\r", b":q!\r"],
+        final_keys=None,
+        argv0="rvi",
+        extra_files={"two.txt": "two\n"},
+    )
+    require(exit_code == 0, f"restricted vi file-change status mismatch: {exit_code}")
+    require("File changes not allowed in restricted mode" in decoded,
+            "restricted vi file-change missing diagnostics")
+    require(saved == "one\n", f"restricted vi file-change unexpectedly modified file: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "one\n",
+        [b":next\r", b":q!\r"],
+        final_keys=None,
+        argv0="rvi",
+        file_args=["buffer.txt", "two.txt"],
+        extra_files={"two.txt": "two\n"},
+    )
+    require(exit_code == 0, f"restricted vi next status mismatch: {exit_code}")
+    require("File changes not allowed in restricted mode" in decoded,
+            "restricted vi next missing diagnostic")
+    require(saved == "one\n", f"restricted vi next unexpectedly modified file: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "one\n",
         [b"i", b"X", b"\x1b", b":next\r", b":q!\r"],
         final_keys=None,
         file_args=["buffer.txt", "two.txt"],

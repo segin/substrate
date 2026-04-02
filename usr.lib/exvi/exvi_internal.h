@@ -109,6 +109,7 @@ int exvi_take_pending_status(char *buf, size_t buf_size);
 void exvi_report_error(const char *msg);
 void exvi_report_errorf(const char *fmt, ...);
 void exvi_report_shell_forbidden(void);
+int exvi_restricted_filename_change(buffer_t *b, const char *target);
 void exvi_cleanup_session_state(void);
 void exvi_set_cli_arglist(int argc, char **argv, int optind);
 void exvi_set_owned_arglist(char **args, int argc);

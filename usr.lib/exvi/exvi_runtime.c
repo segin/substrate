@@ -455,6 +455,19 @@ exvi_report_shell_forbidden(void)
     exvi_report_error(msg);
 }
 
+int
+exvi_restricted_filename_change(buffer_t *b, const char *target)
+{
+    if (!restricted_mode || !target) {
+        return 0;
+    }
+    if (b && b->filename && strcmp(b->filename, target) == 0) {
+        return 0;
+    }
+    exvi_report_error("File changes not allowed in restricted mode");
+    return 1;
+}
+
 void
 exvi_report_error(const char *msg)
 {

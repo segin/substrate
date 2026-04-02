@@ -393,6 +393,10 @@ handle_file_command(buffer_t *b, const char *args)
         if (!new_name) {
             return 1;
         }
+        if (exvi_restricted_filename_change(b, new_name)) {
+            free(new_name);
+            return 1;
+        }
         if (b->filename && strcmp(b->filename, new_name) != 0) {
             replace_alt = 1;
         }

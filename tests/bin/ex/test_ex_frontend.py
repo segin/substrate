@@ -338,6 +338,53 @@ def main():
     finally:
         os.unlink(path)
 
+    with tempfile.TemporaryDirectory(prefix="exvi-") as temp_dir:
+        main_path = os.path.join(temp_dir, "main.txt")
+        other_path = os.path.join(temp_dir, "other.txt")
+        with open(main_path, "w", encoding="utf-8") as f:
+            f.write("alpha\n")
+        with open(other_path, "w", encoding="utf-8") as f:
+            f.write("beta\n")
+
+        exit_code, initial, decoded = run_ex_pty(
+            ex_path,
+            ["main.txt"],
+            command=b"e other.txt\nw other.txt\nq!\n",
+            final_timeout=0.4,
+            argv0="rex",
+            cwd=temp_dir,
+        )
+        require(exit_code == 0, f"restricted ex file-change status mismatch: {exit_code}")
+        require(initial == ":", f"restricted ex file-change missing prompt: {initial!r}")
+        require("File changes not allowed in restricted mode" in decoded,
+                "restricted ex file-change missing diagnostics")
+        with open(main_path, "r", encoding="utf-8") as f:
+            saved_main = f.read()
+        with open(other_path, "r", encoding="utf-8") as f:
+            saved_other = f.read()
+        require(saved_main == "alpha\n",
+                f"restricted ex file-change modified current file: {saved_main!r}")
+        require(saved_other == "beta\n",
+                f"restricted ex file-change modified alternate file: {saved_other!r}")
+
+    with tempfile.TemporaryDirectory(prefix="exvi-") as temp_dir:
+        with open(os.path.join(temp_dir, "one.txt"), "w", encoding="utf-8") as f:
+            f.write("one\n")
+        with open(os.path.join(temp_dir, "two.txt"), "w", encoding="utf-8") as f:
+            f.write("two\n")
+
+        exit_code, initial, decoded = run_ex_pty(
+            ex_path,
+            ["one.txt", "two.txt"],
+            command=b"next\nq!\n",
+            final_timeout=0.4,
+            argv0="rex",
+            cwd=temp_dir,
+        )
+        require(exit_code == 0, f"restricted ex next status mismatch: {exit_code}")
+        require("File changes not allowed in restricted mode" in decoded,
+                "restricted ex next missing diagnostic")
+
     proc = subprocess.run([ex_path], input=b"version\nq!\n",
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     require(proc.returncode == 0, f"ex version status mismatch: {proc.returncode}")

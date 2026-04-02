@@ -277,6 +277,10 @@ handle_pop_command(buffer_t *b, int force)
     }
 
     frame = tag_stack[--tag_stack_len];
+    if (exvi_restricted_filename_change(b, frame.filename)) {
+        tag_stack[tag_stack_len++] = frame;
+        return 1;
+    }
     if (tag_stack_len == 0) {
         free(tag_stack);
         tag_stack = NULL;
@@ -346,6 +350,10 @@ handle_tag_command(buffer_t *b, const char *args, void (*command_fn)(buffer_t *,
         if (tname && tfile && tcmd && strcmp(tname, ptr) == 0) {
             char *old_filename;
 
+            if (exvi_restricted_filename_change(b, tfile)) {
+                found = 1;
+                break;
+            }
             if (b->modified) {
                 exvi_report_error("No write since last change");
                 free(line);
@@ -790,11 +798,17 @@ handle_next_command(buffer_t *b, const char *args, int force)
         }
     }
     if (replaced_args) {
+        if (exvi_restricted_filename_change(b, exvi_current_arg())) {
+            return 1;
+        }
         load_current_arg_file(b);
         return 1;
     }
     if (ex_arg_idx + 1 >= ex_argc) {
         exvi_report_error("No more files");
+        return 1;
+    }
+    if (exvi_restricted_filename_change(b, ex_args[ex_arg_idx + 1])) {
         return 1;
     }
     ex_arg_idx++;
@@ -813,6 +827,9 @@ handle_prev_command(buffer_t *b, int force)
         exvi_report_error("No previous files");
         return 1;
     }
+    if (exvi_restricted_filename_change(b, ex_args[ex_arg_idx - 1])) {
+        return 1;
+    }
     ex_arg_idx--;
     load_current_arg_file(b);
     return 1;
@@ -827,6 +844,9 @@ handle_rewind_command(buffer_t *b, int force)
     }
     if (ex_argc == 0) {
         exvi_report_error("No files");
+        return 1;
+    }
+    if (exvi_restricted_filename_change(b, ex_args[0])) {
         return 1;
     }
     ex_arg_idx = 0;
@@ -873,6 +893,10 @@ handle_recover_command(buffer_t *b, const char *args)
     if (!recover_name) {
         return 1;
     }
+    if (exvi_restricted_filename_change(b, recover_name)) {
+        free(recover_name);
+        return 1;
+    }
     if (load_recover_into_buffer(b, recover_name) != 0) {
         exvi_report_errorf("No recover file for %s", recover_name);
         free(recover_name);
@@ -910,6 +934,10 @@ handle_write_command(buffer_t *b, const char *args, int explicit_range, int addr
     if (*ptr) {
         target = expand_filename_refs(b, ptr);
         if (!target) {
+            return 1;
+        }
+        if (exvi_restricted_filename_change(b, target)) {
+            free(target);
             return 1;
         }
         if (!exvi_write_allowed(b, target, force)) {
@@ -972,6 +1000,11 @@ handle_edit_command(buffer_t *b, const char *args, int force)
     if (old_filename && new_filename && strcmp(old_filename, new_filename) != 0) {
         replace_alt = 1;
     }
+    if (exvi_restricted_filename_change(b, new_filename)) {
+        free(old_filename);
+        free(new_filename);
+        return 1;
+    }
 
     buf_free(b);
     buf_init(b);
@@ -1020,6 +1053,10 @@ handle_read_command(buffer_t *b, const char *args, int addr2)
         if (ptr) {
             expanded_name = expand_filename_refs(b, ptr);
             if (!expanded_name) {
+                return 1;
+            }
+            if (exvi_restricted_filename_change(b, expanded_name)) {
+                free(expanded_name);
                 return 1;
             }
         }
