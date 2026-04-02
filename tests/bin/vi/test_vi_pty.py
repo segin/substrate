@@ -633,6 +633,24 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one two\nthree four\n",
+        [b">", b"g", b"e"],
+    )
+    require(exit_code == 0, f">ge-start vi exited with status {exit_code}")
+    require(saved == "one two\nthree four\n",
+            f"unexpected >ge-start buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one,two\nthree four\n",
+        [b">", b"g", b"E"],
+    )
+    require(exit_code == 0, f">gE-start vi exited with status {exit_code}")
+    require(saved == "one,two\nthree four\n",
+            f"unexpected >gE-start buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "abcd\n",
         [b'x', b'p'],
     )
