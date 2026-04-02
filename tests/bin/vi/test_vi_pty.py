@@ -3380,11 +3380,20 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "if (x) {\nalpha\n}\n",
+        [b"0", b"%", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"visual-percent-scan-cross vi exited with status {exit_code}")
+    require(saved == "if (x) Z\nalpha\n}\n",
+            f"unexpected visual-percent-scan-cross buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "if (x) {\n    one\n    two\n}\n",
         [b"0", b">", b"%"],
     )
     require(exit_code == 0, f"visual-percent-shift-scan vi exited with status {exit_code}")
-    require(saved == "\tif (x) {\n    one\n    two\n}\n",
+    require(saved == "\tif (x) {\n\t    one\n\t    two\n\t}\n",
             f"unexpected visual-percent-shift-scan buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
