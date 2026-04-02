@@ -416,6 +416,10 @@ vi_undo_replace_edit(buffer_t *b, vi_visual_t *vis)
             return -1;
         }
         free(text);
+        if (vis->insert_anchor_line == edit.aux_line) {
+            vis->insert_anchor_line = edit.line;
+            vis->insert_anchor_col = edit.col;
+        }
         b->cur = edit.aux_line;
         buf_delete(b, edit.aux_line);
         b->cur = edit.line;
@@ -5619,7 +5623,10 @@ exvi_visual_main(buffer_t *b)
         if (vis.replace_mode) {
             switch (key) {
             case '\x1b':
-                vi_update_last_insert_text(b, &vis);
+                if (vis.replace_edit_count > 0 || b->cur != vis.insert_anchor_line ||
+                    vis.cursor_col != vis.insert_anchor_col) {
+                    vi_update_last_insert_text(b, &vis);
+                }
                 vi_record_last_insert_site(b, &vis);
                 vi_reset_replace_mode(&vis);
                 if (vis.cursor_col > 0) {
