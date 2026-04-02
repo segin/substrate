@@ -445,6 +445,13 @@ def main():
             f"ex version stdout mismatch: {proc.stdout!r}")
     require(proc.stderr == b"", f"ex version stderr mismatch: {proc.stderr!r}")
 
+    proc = subprocess.run([ex_path, "--version"], input=b"",
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    require(proc.returncode == 1, f"ex --version status mismatch: {proc.returncode}")
+    require(proc.stdout == b"", f"ex --version stdout mismatch: {proc.stdout!r}")
+    require("Usage:" in proc.stderr.decode("latin1", "replace"),
+            f"ex --version stderr mismatch: {proc.stderr!r}")
+
     return 0
 
 

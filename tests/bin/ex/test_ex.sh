@@ -1472,6 +1472,12 @@ run_stderr_status_test "Set abbreviation rejects unknown option" \
     0 \
     "Unknown option: frobnicate"
 
+run_stderr_status_test "Set magic query remains unsupported by policy" \
+    "one\ntwo\n" \
+    ":set magic?\n:q!\n" \
+    0 \
+    "Unknown option: magic?"
+
 run_stderr_status_test "Print rejects empty buffer" \
     "" \
     ":p\n:q!\n" \

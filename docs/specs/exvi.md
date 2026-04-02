@@ -269,7 +269,8 @@ All other historical `ex` commands and aliases are currently outside the support
 | `tags` | `tags=` and query forms | `tags` | `:tag` lookup walks the configured comma-separated tag-file search path | visual `Ctrl-]` and visual `:tag` use the same search path |
 - [x] Implement readonly/view mode consistently in both frontends, including status display and write restrictions.
 - [x] Implement secure and restricted modes consistently in both frontends, not only for the currently covered shell-command paths.
-- [ ] Decide and implement the supported extension policy for GNU-compatible spellings and non-conflicting aliases.
+- [x] Decide and implement the supported extension policy for GNU-compatible spellings and non-conflicting aliases.
+  Supported policy: only invocation forms, command names, command abbreviations, and `:set` aliases explicitly listed in this document are accepted. GNU/Vim-style long options such as `--version` and undocumented command/option spellings such as `magic` remain intentionally unsupported and are rejected with the normal frontend/command diagnostics, while Substrate-specific additions like `version`/`ver` and readonly `view`/`rex`/`rvi` remain part of the supported contract.
 - [ ] Document every supported option, alias, and deliberate divergence from historical BSD/nvi/vim behavior.
 
 ### 5. Tags, arglists, startup files, and recovery completeness

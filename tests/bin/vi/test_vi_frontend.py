@@ -627,6 +627,13 @@ def main():
     require(saved == "one\ntwo\nthree\n",
             f"vi malformed-range handling unexpectedly modified file: {saved!r}")
 
+    proc = subprocess.run([vi_path, "--version"], input=b"",
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    require(proc.returncode == 1, f"vi --version status mismatch: {proc.returncode}")
+    require(proc.stdout == b"", f"vi --version stdout mismatch: {proc.stdout!r}")
+    require("Usage:" in proc.stderr.decode("latin1", "replace"),
+            f"vi --version stderr mismatch: {proc.stderr!r}")
+
     return 0
 
 
