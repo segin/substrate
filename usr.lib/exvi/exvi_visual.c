@@ -2670,19 +2670,34 @@ vi_match_motion_target(buffer_t *b, vi_visual_t *vis, line_t **line_out, int *co
     int match_ch;
     int forward;
     int depth = 1;
+    int match_col;
 
     if (!line || vis->cursor_col < 0 || (size_t)vis->cursor_col >= line->len) {
         return -1;
     }
-    open_ch = (unsigned char)line->text[vis->cursor_col];
+    match_col = vis->cursor_col;
+    open_ch = (unsigned char)line->text[match_col];
     if (vi_match_bracket(open_ch, &forward, &match_ch) != 0) {
-        return -1;
+        size_t i;
+
+        for (i = (size_t)vis->cursor_col + 1; i < line->len; i++) {
+            open_ch = (unsigned char)line->text[i];
+            if (vi_match_bracket(open_ch, &forward, &match_ch) == 0) {
+                match_col = (int)i;
+                break;
+            }
+        }
+        if ((size_t)match_col >= line->len ||
+            vi_match_bracket((unsigned char)line->text[match_col], &forward, &match_ch) != 0) {
+            return -1;
+        }
+        open_ch = (unsigned char)line->text[match_col];
     }
 
     if (forward) {
         size_t i;
 
-        for (i = (size_t)vis->cursor_col + 1; i < line->len; i++) {
+        for (i = (size_t)match_col + 1; i < line->len; i++) {
             if ((unsigned char)line->text[i] == (unsigned char)open_ch) {
                 depth++;
             } else if ((unsigned char)line->text[i] == (unsigned char)match_ch &&
@@ -2707,7 +2722,7 @@ vi_match_motion_target(buffer_t *b, vi_visual_t *vis, line_t **line_out, int *co
     } else {
         int i;
 
-        for (i = vis->cursor_col - 1; i >= 0; i--) {
+        for (i = match_col - 1; i >= 0; i--) {
             if ((unsigned char)line->text[i] == (unsigned char)open_ch) {
                 depth++;
             } else if ((unsigned char)line->text[i] == (unsigned char)match_ch &&

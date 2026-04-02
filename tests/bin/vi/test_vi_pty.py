@@ -2793,6 +2793,43 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "a (b [c] d) e\nnext line\n",
+        [b"0", b"%", b"r", b"X"],
+    )
+    require(exit_code == 0, f"visual-percent-scan vi exited with status {exit_code}")
+    require(saved == "a (b [c] dX e\nnext line\n",
+            f"unexpected visual-percent-scan buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "a (b [c] d) e\nnext line\n",
+        [b"0", b"d", b"%"],
+    )
+    require(exit_code == 0, f"visual-percent-scan-delete vi exited with status {exit_code}")
+    require(saved == " e\nnext line\n",
+            f"unexpected visual-percent-scan-delete buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "a (b [c] d) e\nnext line\n",
+        [b"0", b"c", b"%", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"visual-percent-scan-change vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing visual-percent-scan change insert status")
+    require(saved == "X e\nnext line\n",
+            f"unexpected visual-percent-scan-change buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "a (b [c] d) e\nnext line\n",
+        [b"0", b"y", b"%", b"P"],
+    )
+    require(exit_code == 0, f"visual-percent-scan-yank vi exited with status {exit_code}")
+    require(saved == "a (b [c] d)a (b [c] d) e\nnext line\n",
+            f"unexpected visual-percent-scan-yank buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
         [b"2", b"]", b"]", b"r", b"X"],
     )
