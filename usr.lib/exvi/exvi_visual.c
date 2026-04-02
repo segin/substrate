@@ -42,24 +42,6 @@ typedef struct {
     char ch;
 } vi_replace_edit_t;
 
-enum {
-    VI_KEY_UNKNOWN = 0x100,
-    VI_KEY_UP,
-    VI_KEY_DOWN,
-    VI_KEY_RIGHT,
-    VI_KEY_LEFT,
-    VI_KEY_CTRL_RIGHT,
-    VI_KEY_CTRL_LEFT,
-    VI_KEY_CTRL_DELETE,
-    VI_KEY_CTRL_BACKSPACE,
-    VI_KEY_HOME,
-    VI_KEY_END,
-    VI_KEY_PGUP,
-    VI_KEY_PGDN,
-    VI_KEY_DELETE,
-    VI_KEY_RESIZE,
-};
-
 #define VI_PROMPT_HISTORY_MAX 32
 
 typedef struct {
@@ -913,18 +895,20 @@ vi_read_timed_byte(char *out, int timeout_ms)
     return read(STDIN_FILENO, out, 1) == 1;
 }
 
-static int
-vi_parse_csi_key(const char *seq)
+int
+exvi_decode_terminal_key_sequence(char prefix, const char *seq)
 {
     int num = 0;
     int mod = 0;
     char final = '\0';
 
+    (void)prefix;
+
     if (seq[0] == '\0') {
         return VI_KEY_UNKNOWN;
     }
 
-    if (seq[1] == '\0') {
+    if (seq[1] == '\0' && strchr("ABCDHF", seq[0])) {
         switch (seq[0]) {
         case 'A': return VI_KEY_UP;
         case 'B': return VI_KEY_DOWN;
@@ -1026,10 +1010,7 @@ vi_read_key(void)
                 }
             }
             seq[len] = '\0';
-            if (prefix == 'O') {
-                return vi_parse_csi_key(seq);
-            }
-            return vi_parse_csi_key(seq);
+            return exvi_decode_terminal_key_sequence(prefix, seq);
         }
         return VI_KEY_UNKNOWN;
     }

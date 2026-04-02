@@ -44,6 +44,24 @@ typedef enum {
     EXVI_COMMAND_BREAK_COMMENT,
 } exvi_command_break_t;
 
+enum {
+    VI_KEY_UNKNOWN = 0x100,
+    VI_KEY_UP,
+    VI_KEY_DOWN,
+    VI_KEY_RIGHT,
+    VI_KEY_LEFT,
+    VI_KEY_CTRL_RIGHT,
+    VI_KEY_CTRL_LEFT,
+    VI_KEY_CTRL_DELETE,
+    VI_KEY_CTRL_BACKSPACE,
+    VI_KEY_HOME,
+    VI_KEY_END,
+    VI_KEY_PGUP,
+    VI_KEY_PGDN,
+    VI_KEY_DELETE,
+    VI_KEY_RESIZE,
+};
+
 extern int secure_mode;
 extern int restricted_mode;
 extern int batch_mode;
@@ -92,6 +110,7 @@ int buf_current_line(buffer_t *b);
 int exvi_regex_flags(void);
 char *parse_delimited_text(char **cmd_ptr, char delim);
 int exvi_search(buffer_t *b, const char *pattern, int forward);
+int exvi_decode_terminal_key_sequence(char prefix, const char *seq);
 int parse_address(buffer_t *b, char **cmd_ptr);
 int parse_address_checked(buffer_t *b, char **cmd_ptr, int *errorp);
 int parse_range(buffer_t *b, char **cmd_ptr, int *addr1, int *addr2);

@@ -306,7 +306,7 @@ All other historical `ex` commands and aliases are currently outside the support
 - [x] Expand [`tests/usr.lib/exvi/test_main.c`](../../tests/usr.lib/exvi/test_main.c) well beyond the current parser/set/delete/yank basics.
 - [ ] Keep extending [`tests/bin/ex/test_ex.sh`](../../tests/bin/ex/test_ex.sh) until the remaining command-language gaps have direct regression coverage.
 - [ ] Keep extending [`tests/bin/vi/test_vi_pty.py`](../../tests/bin/vi/test_vi_pty.py) until every supported motion, operator, insert-mode control, resize path, and prompt path is covered.
-- [ ] Add fuzzing or property-based coverage for command parsing, escape-sequence parsing, and recovery-file handling.
+- [x] Add fuzzing or property-based coverage for command parsing, escape-sequence parsing, and recovery-file handling.
 - [ ] Add stress tests for large files, long lines, narrow terminals, repeated resizes, and deep undo/redo histories.
 - [ ] Keep both target and host build/test paths green while coverage expands.
 
