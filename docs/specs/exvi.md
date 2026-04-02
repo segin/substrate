@@ -308,7 +308,7 @@ All other historical `ex` commands and aliases are currently outside the support
 - [ ] Keep extending [`tests/bin/vi/test_vi_pty.py`](../../tests/bin/vi/test_vi_pty.py) until every supported motion, operator, insert-mode control, resize path, and prompt path is covered.
 - [x] Add fuzzing or property-based coverage for command parsing, escape-sequence parsing, and recovery-file handling.
 - [x] Add stress tests for large files, long lines, narrow terminals, repeated resizes, and deep undo/redo histories.
-- [ ] Keep both target and host build/test paths green while coverage expands.
+- [x] Keep both target and host build/test paths green while coverage expands.
 
 ### 8. Documentation and conformance backlog
 
