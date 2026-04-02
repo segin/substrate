@@ -2034,6 +2034,43 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "abc def ghi\n",
+        [b"$", b"y", b"F", b"g", b"P"],
+    )
+    require(exit_code == 0, f"$yFgP vi exited with status {exit_code}")
+    require(saved == "abc def ghghi\n",
+            f"unexpected $yFgP buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc def ghi\n",
+        [b"$", b"y", b"T", b"g", b"P"],
+    )
+    require(exit_code == 0, f"$yTgP vi exited with status {exit_code}")
+    require(saved == "abc def ghhi\n",
+            f"unexpected $yTgP buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc def ghi\n",
+        [b"$", b"d", b"F", b"g"],
+    )
+    require(exit_code == 0, f"$dFg vi exited with status {exit_code}")
+    require(saved == "abc def i\n",
+            f"unexpected $dFg buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc def ghi\n",
+        [b"$", b"c", b"T", b"g", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"$cTg vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing $cTg insert status")
+    require(saved == "abc def gXi\n",
+            f"unexpected $cTg buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\n\n  two\nthree\n\nfour\n",
         [b"}", b"}", b"{"],
     )

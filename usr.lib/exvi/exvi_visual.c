@@ -2861,7 +2861,7 @@ vi_find_motion_span(line_t *cur, int cursor_col, int ch, int forward, int till,
         *end_out = till ? col : col + 1;
     } else {
         *start_out = till ? col + 1 : col;
-        *end_out = cursor_col + 1;
+        *end_out = cursor_col;
     }
     if (*end_out <= *start_out) {
         return -1;
@@ -3491,7 +3491,6 @@ vi_backward_end_motion_target(buffer_t *b, vi_visual_t *vis, int count, int bigw
     vis->cursor_col = saved_col;
     return (*line_out != NULL) ? 0 : -1;
 }
-
 static int
 vi_search_forward_in_line(line_t *line, regex_t *re, int start_col, int max_col,
     int *match_col)
@@ -3514,7 +3513,6 @@ vi_search_forward_in_line(line_t *line, regex_t *re, int start_col, int max_col,
     if (max_col > (int)line->len) {
         max_col = (int)line->len;
     }
-
     offset = (size_t)start_col;
     while (offset <= line->len) {
         if (regexec(re, line->text + offset, 1, &match, 0) != 0) {
@@ -3556,7 +3554,6 @@ vi_search_backward_in_line(line_t *line, regex_t *re, int min_col, int max_col,
     if ((size_t)min_col > line->len) {
         return -1;
     }
-
     offset = (size_t)min_col;
     while (offset <= line->len) {
         size_t pos;
