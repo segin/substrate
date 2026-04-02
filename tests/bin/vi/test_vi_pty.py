@@ -3111,6 +3111,42 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "if (x) {\n    one\n    two\n}\n",
+        [b"0", b">", b"%"],
+    )
+    require(exit_code == 0, f"visual-percent-shift-scan vi exited with status {exit_code}")
+    require(saved == "\tif (x) {\n    one\n    two\n}\n",
+            f"unexpected visual-percent-shift-scan buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "if (x) {\n    one\n    two\n}\n",
+        [b"0", b"f", b"{", b">", b"%"],
+    )
+    require(exit_code == 0, f"visual-percent-shift-cross vi exited with status {exit_code}")
+    require(saved == "\tif (x) {\n\t    one\n\t    two\n\t}\n",
+            f"unexpected visual-percent-shift-cross buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "if (x) {\n    one\n    two\n}\n",
+        [b"5", b"0", b">", b"%"],
+    )
+    require(exit_code == 0, f"visual-percent-shift-count vi exited with status {exit_code}")
+    require(saved == "\tif (x) {\n\t    one\n    two\n}\n",
+            f"unexpected visual-percent-shift-count buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "if (x) {\n    one\n    two\n}\n",
+        [b"0", b"f", b"{", b"<", b"%"],
+    )
+    require(exit_code == 0, f"visual-percent-unshift-cross vi exited with status {exit_code}")
+    require(saved == "if (x) {\none\ntwo\n}\n",
+            f"unexpected visual-percent-unshift-cross buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
         [b"2", b"]", b"]", b"r", b"X"],
     )

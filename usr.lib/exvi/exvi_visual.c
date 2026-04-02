@@ -4431,10 +4431,14 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         if (vi_apply_linewise_operator(b, vis, start, end_line) != 0) {
             write(STDOUT_FILENO, "\a", 1);
         }
-    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y')
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y' ||
+        vis->pending_op == '>' || vis->pending_op == '<')
         && key == '%') {
-        if (raw_count > 0) {
-            int target = (raw_count * b->line_count + 99) / 100;
+        int percent_count = (raw_count > 0) ? raw_count :
+            ((vis->pending_op_count > 1) ? vis->pending_op_count : 0);
+
+        if (percent_count > 0) {
+            int target = (percent_count * b->line_count + 99) / 100;
             int start = line_no;
             int end_line;
 
@@ -4456,15 +4460,41 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             } else if (vis->pending_op == 'd') {
                 vi_linewise_delete(b, vis, start, end_line);
                 vi_set_last_change(vis, VI_REPEAT_DD, end_line - start + 1, 0);
+            } else if (vis->pending_op == '>' || vis->pending_op == '<') {
+                if (vi_apply_linewise_operator(b, vis, start, end_line) != 0) {
+                    write(STDOUT_FILENO, "\a", 1);
+                }
             } else {
                 vi_linewise_change(b, vis, start, end_line);
             }
         } else {
             line_t *target_line;
             int target_col;
+            int target_no;
+            int start;
+            int end_line;
 
             if (vi_match_motion_target(b, vis, &target_line, &target_col) != 0 ||
-                vi_apply_charwise_motion(b, vis, target_line, target_col, 1) != 0) {
+                !target_line) {
+                write(STDOUT_FILENO, "\a", 1);
+            } else if (vis->pending_op == '>' || vis->pending_op == '<') {
+                target_no = vi_line_number_for_mark(b, target_line);
+                if (target_no < 1) {
+                    write(STDOUT_FILENO, "\a", 1);
+                } else {
+                    start = line_no;
+                    end_line = target_no;
+                    if (start > end_line) {
+                        int tmp = start;
+
+                        start = end_line;
+                        end_line = tmp;
+                    }
+                    if (vi_apply_linewise_operator(b, vis, start, end_line) != 0) {
+                        write(STDOUT_FILENO, "\a", 1);
+                    }
+                }
+            } else if (vi_apply_charwise_motion(b, vis, target_line, target_col, 1) != 0) {
                 write(STDOUT_FILENO, "\a", 1);
             }
         }
