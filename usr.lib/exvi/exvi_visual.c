@@ -118,6 +118,7 @@ static void vi_visual_apply_tag_target(buffer_t *b, char *cmd);
 static void vi_reset_replace_mode(vi_visual_t *vis);
 static void vi_record_last_insert_site(buffer_t *b, vi_visual_t *vis);
 static void vi_update_last_insert_text(buffer_t *b, vi_visual_t *vis);
+static void vi_start_change_insert(buffer_t *b, vi_visual_t *vis);
 static int vi_read_register_index_prompt(buffer_t *b, vi_visual_t *vis);
 static char *vi_capture_register_text(int reg_idx);
 static void vi_insert_quoted_key(buffer_t *b, vi_visual_t *vis);
@@ -4161,8 +4162,22 @@ static int
 vi_apply_search_linewise_motion(buffer_t *b, vi_visual_t *vis, int current_line_no,
     line_t *target_line, int target_col)
 {
+    int target_line_no;
+
+    if (!target_line) {
+        return -1;
+    }
+    target_line_no = vi_line_number_for_mark(b, target_line);
+    if (target_line_no < 1) {
+        return -1;
+    }
     if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
-        vis->cursor_col != 0) {
+        (vis->cursor_col != 0 || target_line_no <= current_line_no)) {
+        /*
+         * Real vi only coerces search motions linewise for delete/change/yank
+         * when a column-zero search target lands on a later line.
+         * Backward and wrapped same-line matches stay charwise.
+         */
         return -1;
     }
     return vi_apply_charwise_linewise_motion(b, vis, current_line_no, target_line,
@@ -4746,6 +4761,9 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
                 vi_set_search_failure_status(vis, pattern);
                 write(STDOUT_FILENO, "\a", 1);
             }
+        } else if (vis->pending_op == 'c' && target_line == b->cur &&
+            target_col == vis->cursor_col) {
+            vi_start_change_insert(b, vis);
         } else if (vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
             vi_set_search_failure_status(vis, pattern);
             write(STDOUT_FILENO, "\a", 1);
@@ -4881,6 +4899,9 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             if (vi_apply_search_linewise_motion(b, vis, line_no, target_line, target_col) != 0) {
                 write(STDOUT_FILENO, "\a", 1);
             }
+        } else if (vis->pending_op == 'c' && target_line == b->cur &&
+            target_col == vis->cursor_col) {
+            vi_start_change_insert(b, vis);
         } else if (vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
             write(STDOUT_FILENO, "\a", 1);
         }
@@ -4902,6 +4923,9 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             if (vi_apply_search_linewise_motion(b, vis, line_no, target_line, target_col) != 0) {
                 write(STDOUT_FILENO, "\a", 1);
             }
+        } else if (vis->pending_op == 'c' && target_line == b->cur &&
+            target_col == vis->cursor_col) {
+            vi_start_change_insert(b, vis);
         } else if (vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
             write(STDOUT_FILENO, "\a", 1);
         }
@@ -5618,6 +5642,16 @@ vi_command_prompt(buffer_t *b, vi_visual_t *vis)
     if (have_status) {
         vi_render(b, vis, ':', NULL);
     }
+}
+
+static void
+vi_start_change_insert(buffer_t *b, vi_visual_t *vis)
+{
+    save_undo(b);
+    vis->insert_mode = 1;
+    vis->replace_mode = 0;
+    vi_record_last_insert_site(b, vis);
+    vi_set_insert_anchor(b, vis);
 }
 
 static void

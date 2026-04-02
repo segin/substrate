@@ -3305,6 +3305,52 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one target\nline two\ntarget three\nline four\ntarget five\n",
+        [b"G", b"?", b"t", b"a", b"r", b"g", b"e", b"t", b"\r", b"d", b"2", b"N"],
+    )
+    require(exit_code == 0, f"visual-counted-reverse-search-delete vi exited with status {exit_code}")
+    require(saved == "one \ntarget three\nline four\ntarget five\n",
+            f"unexpected visual-counted-reverse-search-delete buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one target\nline two\ntarget three\nline four\ntarget five\n",
+        [b"G", b"?", b"t", b"a", b"r", b"g", b"e", b"t", b"\r",
+         b"c", b"2", b"N", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"visual-counted-reverse-search-change vi exited with status {exit_code}")
+    require(saved == "one X\ntarget three\nline four\ntarget five\n",
+            f"unexpected visual-counted-reverse-search-change buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one target\nline two\ntarget three\nline four\ntarget five\n",
+        [b"0", b"d", b"2", b"*"],
+    )
+    require(exit_code == 0, f"visual-counted-word-search-delete vi exited with status {exit_code}")
+    require(saved == "one target\nline two\ntarget three\nline four\ntarget five\n",
+            f"unexpected visual-counted-word-search-delete buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one target\nline two\ntarget three\nline four\ntarget five\n",
+        [b"0", b"c", b"2", b"*", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"visual-counted-word-search-change vi exited with status {exit_code}")
+    require(saved == "Xone target\nline two\ntarget three\nline four\ntarget five\n",
+            f"unexpected visual-counted-word-search-change buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one target\nline two\ntarget three\nline four\ntarget five\n",
+        [b"G", b"0", b"y", b"2", b"#", b"P"],
+    )
+    require(exit_code == 0, f"visual-counted-word-search-yank vi exited with status {exit_code}")
+    require(saved == "one target\nline two\ntarget three\nline fourtarget\nline two\ntarget three\nline four\ntarget five\n",
+            f"unexpected visual-counted-word-search-yank buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
         [b"d", b"]", b"]"],
     )
