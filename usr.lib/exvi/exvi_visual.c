@@ -38,6 +38,9 @@ typedef enum {
     VI_REPEAT_C_TO_COL0,
     VI_REPEAT_C_TO_FIRST_NONBLANK,
     VI_REPEAT_C_SEARCH_REPEAT,
+    VI_REPEAT_C_PERCENT,
+    VI_REPEAT_C_MARK_LINE,
+    VI_REPEAT_C_MARK_EXACT,
 } vi_repeat_kind_t;
 
 typedef enum {
@@ -89,6 +92,7 @@ typedef struct {
     vi_repeat_kind_t last_change;
     int last_change_count;
     int last_change_char;
+    int last_change_aux;
     char status_msg[256];
     int status_once;
     char *cmd_history[VI_PROMPT_HISTORY_MAX];
@@ -148,6 +152,7 @@ static int vi_find_scanned_cross_bracket_span(line_t *line, int cursor_col,
     int *start_col_out, line_t **line_out, int *col_out);
 static int vi_match_operator_target(buffer_t *b, vi_visual_t *vis, line_t **line_out,
     int *col_out);
+static int vi_is_word_char(int ch);
 
 static void
 vi_record_last_insert_site(buffer_t *b, vi_visual_t *vis)
@@ -707,13 +712,50 @@ vi_prompt_history_free(char **entries, int count)
 }
 
 static void
+vi_display_search_pattern(const char *pattern, char *buf, size_t buf_size)
+{
+    size_t len;
+    size_t i;
+    size_t j = 0;
+
+    if (!buf || buf_size == 0) {
+        return;
+    }
+    buf[0] = '\0';
+    if (!pattern) {
+        return;
+    }
+    len = strlen(pattern);
+    if (len < 4 || strncmp(pattern, "\\<", 2) != 0 ||
+        pattern[len - 2] != '\\' || pattern[len - 1] != '>') {
+        strlcpy(buf, pattern, buf_size);
+        return;
+    }
+    for (i = 2; i + 2 < len; i++) {
+        unsigned char ch = (unsigned char)pattern[i];
+
+        if (ch == '\\' && i + 3 < len) {
+            ch = (unsigned char)pattern[++i];
+        }
+        if (!vi_is_word_char(ch) || j + 1 >= buf_size) {
+            strlcpy(buf, pattern, buf_size);
+            return;
+        }
+        buf[j++] = (char)ch;
+    }
+    buf[j] = '\0';
+}
+
+static void
 vi_set_search_failure_status(vi_visual_t *vis, const char *pattern)
 {
     const char *effective = (pattern && *pattern) ? pattern : last_search_pattern;
+    char display[256];
 
     if (effective && *effective) {
+        vi_display_search_pattern(effective, display, sizeof(display));
         snprintf(vis->status_msg, sizeof(vis->status_msg),
-            "Pattern not found: %s", effective);
+            "Pattern not found: %s", display);
     } else {
         snprintf(vis->status_msg, sizeof(vis->status_msg),
             "No previous search pattern");
@@ -1475,6 +1517,7 @@ vi_set_last_change(vi_visual_t *vis, vi_repeat_kind_t kind, int count, int ch)
     vis->last_change = kind;
     vis->last_change_count = count;
     vis->last_change_char = ch;
+    vis->last_change_aux = 0;
 }
 
 static void
@@ -3243,6 +3286,18 @@ vi_find_scanned_bracket_target(line_t *line, int cursor_col, int motion_mode,
 }
 
 static int
+vi_match_cursor_col(line_t *line, int cursor_col)
+{
+    if (!line || line->len == 0 || cursor_col < 0) {
+        return -1;
+    }
+    if ((size_t)cursor_col >= line->len) {
+        return (int)line->len - 1;
+    }
+    return cursor_col;
+}
+
+static int
 vi_find_scanned_cross_bracket_span(line_t *line, int cursor_col, int *start_col_out,
     line_t **line_out, int *col_out)
 {
@@ -3250,7 +3305,8 @@ vi_find_scanned_cross_bracket_span(line_t *line, int cursor_col, int *start_col_
     int match_ch;
     size_t i;
 
-    if (!line || cursor_col < 0 || (size_t)cursor_col >= line->len) {
+    cursor_col = vi_match_cursor_col(line, cursor_col);
+    if (cursor_col < 0) {
         return -1;
     }
     if (vi_match_bracket((unsigned char)line->text[cursor_col], &forward, &match_ch) == 0) {
@@ -3270,28 +3326,30 @@ static int
 vi_match_motion_target(buffer_t *b, vi_visual_t *vis, line_t **line_out, int *col_out)
 {
     line_t *line = b->cur;
+    int cursor_col = vi_match_cursor_col(line, vis->cursor_col);
 
-    if (!line || vis->cursor_col < 0 || (size_t)vis->cursor_col >= line->len) {
+    if (cursor_col < 0) {
         return -1;
     }
-    if (vi_find_match_for_bracket(line, vis->cursor_col, line_out, col_out) == 0) {
+    if (vi_find_match_for_bracket(line, cursor_col, line_out, col_out) == 0) {
         return 0;
     }
-    return vi_find_scanned_bracket_target(line, vis->cursor_col, 1, line_out, col_out);
+    return vi_find_scanned_bracket_target(line, cursor_col, 1, line_out, col_out);
 }
 
 static int
 vi_match_operator_target(buffer_t *b, vi_visual_t *vis, line_t **line_out, int *col_out)
 {
     line_t *line = b->cur;
+    int cursor_col = vi_match_cursor_col(line, vis->cursor_col);
 
-    if (!line || vis->cursor_col < 0 || (size_t)vis->cursor_col >= line->len) {
+    if (cursor_col < 0) {
         return -1;
     }
-    if (vi_find_match_for_bracket(line, vis->cursor_col, line_out, col_out) == 0) {
+    if (vi_find_match_for_bracket(line, cursor_col, line_out, col_out) == 0) {
         return 0;
     }
-    return vi_find_scanned_bracket_target(line, vis->cursor_col, 0, line_out, col_out);
+    return vi_find_scanned_bracket_target(line, cursor_col, 0, line_out, col_out);
 }
 
 static void
@@ -4417,6 +4475,9 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
                 }
                 if (vi_apply_linewise_operator(b, vis, start, end) != 0) {
                     write(STDOUT_FILENO, "\a", 1);
+                } else if (vis->pending_op == 'c') {
+                    vi_set_last_change(vis, VI_REPEAT_C_MARK_LINE, 1, mark_key);
+                    vis->last_change_aux = mark_line - line_no;
                 }
             }
         }
@@ -4428,6 +4489,8 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         if (mark_key < 'a' || mark_key > 'z' || !b->marks[idx]
             || vi_apply_charwise_motion(b, vis, b->marks[idx], b->mark_cols[idx], 0) != 0) {
             write(STDOUT_FILENO, "\a", 1);
+        } else if (vis->pending_op == 'c') {
+            vi_set_last_change(vis, VI_REPEAT_C_MARK_EXACT, 1, mark_key);
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
         key == 'l') {
@@ -5276,6 +5339,9 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
                 } else {
                     vi_delete_range(b, vis, b->cur, scan_start_col, target_line,
                         target_col + 1, vis->pending_op == 'c');
+                    if (vis->pending_op == 'c') {
+                        vi_set_last_change(vis, VI_REPEAT_C_PERCENT, 1, 0);
+                    }
                 }
             } else if (vi_match_operator_target(b, vis, &target_line, &target_col) != 0 ||
                 !target_line) {
@@ -5299,6 +5365,8 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
                 }
             } else if (vi_apply_charwise_motion(b, vis, target_line, target_col, 1) != 0) {
                 write(STDOUT_FILENO, "\a", 1);
+            } else if (vis->pending_op == 'c') {
+                vi_set_last_change(vis, VI_REPEAT_C_PERCENT, 1, 0);
             }
         }
     } else {
@@ -6168,6 +6236,69 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
                 }
             }
             vis->pending_op = saved_op;
+            vi_replay_insert_text(b, vis, vis->last_insert_text);
+            vi_finish_repeat_insert(b, vis);
+        }
+        break;
+    case VI_REPEAT_C_PERCENT:
+        {
+            int saved_op = vis->pending_op;
+            line_t *target_line;
+            int target_col;
+            int scan_start_col;
+
+            if (!b->cur) {
+                write(STDOUT_FILENO, "\a", 1);
+                return;
+            }
+            vis->pending_op = 'c';
+            if (vi_find_scanned_cross_bracket_span(b->cur, vis->cursor_col, &scan_start_col,
+                &target_line, &target_col) == 0) {
+                vi_delete_range(b, vis, b->cur, scan_start_col, target_line,
+                    target_col + 1, 1);
+            } else if (vi_match_operator_target(b, vis, &target_line, &target_col) != 0 ||
+                !target_line || vi_apply_charwise_motion(b, vis, target_line, target_col, 1) != 0) {
+                vis->pending_op = saved_op;
+                write(STDOUT_FILENO, "\a", 1);
+                return;
+            }
+            vis->pending_op = saved_op;
+            vi_replay_insert_text(b, vis, vis->last_insert_text);
+            vi_finish_repeat_insert(b, vis);
+        }
+        break;
+    case VI_REPEAT_C_MARK_LINE:
+        {
+            int start;
+            int mark_line = vi_clamp_line_target(b, line_no + vis->last_change_aux);
+
+            start = line_no;
+            last = mark_line;
+            if (start > last) {
+                int tmp = start;
+
+                start = last;
+                last = tmp;
+            }
+            if (vi_apply_linewise_operator(b, vis, start, last) != 0) {
+                write(STDOUT_FILENO, "\a", 1);
+                return;
+            }
+            vi_replay_insert_text(b, vis, vis->last_insert_text);
+            vi_finish_repeat_insert(b, vis);
+        }
+        break;
+    case VI_REPEAT_C_MARK_EXACT:
+        {
+            int mark_idx = vis->last_change_char - 'a';
+
+            if (vis->last_change_char < 'a' || vis->last_change_char > 'z' ||
+                !b->marks[mark_idx] ||
+                vi_apply_charwise_motion(b, vis, b->marks[mark_idx],
+                    b->mark_cols[mark_idx], 0) != 0) {
+                write(STDOUT_FILENO, "\a", 1);
+                return;
+            }
             vi_replay_insert_text(b, vis, vis->last_insert_text);
             vi_finish_repeat_insert(b, vis);
         }

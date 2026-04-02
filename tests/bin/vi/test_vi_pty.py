@@ -3585,6 +3585,33 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "if (x) {\n  foo();\n}\nif (y) {\n  bar();\n}\n",
+        [b"f", b"{", b"c", b"%", b"X", b"\x1b", b"j", b"j", b"j", b"f", b"{", b"."],
+    )
+    require(exit_code == 0, f"visual-dot-after-cpercent vi exited with status {exit_code}")
+    require(saved == "if (x) X\nif (y) X\n",
+            f"unexpected visual-dot-after-cpercent buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\nfour\n",
+        [b"j", b"m", b"a", b"j", b"c", b"'", b"a", b"X", b"\x1b", b"j", b"."],
+    )
+    require(exit_code == 0, f"visual-dot-after-cmark-line vi exited with status {exit_code}")
+    require(saved == "one\nX\n",
+            f"unexpected visual-dot-after-cmark-line buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "ab\ncd\nef\n",
+        [b"l", b"m", b"a", b"j", b"l", b"c", b"`", b"a", b"X", b"\x1b", b"j", b"."],
+    )
+    require(exit_code == 0, f"visual-dot-after-cmark-exact vi exited with status {exit_code}")
+    require(saved == "aXf\n",
+            f"unexpected visual-dot-after-cmark-exact buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
         [b"d", b"]", b"]"],
     )
