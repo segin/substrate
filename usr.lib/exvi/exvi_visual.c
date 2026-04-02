@@ -4046,6 +4046,52 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             }
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
+        (key == '\'' || key == '`')) {
+        int mark;
+        line_t *target_line;
+        int target_col;
+
+        mark = vi_read_visual_key(b, vis, ':', NULL);
+        if (mark < 'a' || mark > 'z' || !b->marks[mark - 'a']) {
+            write(STDOUT_FILENO, "\a", 1);
+        } else {
+            target_line = b->marks[mark - 'a'];
+            if (key == '\'') {
+                int target_no = vi_line_number_for_mark(b, target_line);
+                int start_line;
+                int end_line;
+
+                if (target_no < 1 || target_no == line_no) {
+                    write(STDOUT_FILENO, "\a", 1);
+                } else {
+                    if (target_no < line_no) {
+                        start_line = target_no;
+                        end_line = line_no - 1;
+                    } else {
+                        start_line = line_no;
+                        end_line = target_no - 1;
+                    }
+                    if (end_line < start_line) {
+                        write(STDOUT_FILENO, "\a", 1);
+                    } else if (vis->pending_op == 'y') {
+                        vi_linewise_yank(b, vis, start_line, end_line);
+                    } else if (vis->pending_op == 'd') {
+                        vi_linewise_delete(b, vis, start_line, end_line);
+                    } else {
+                        vi_linewise_change(b, vis, start_line, end_line);
+                    }
+                }
+            } else {
+                target_col = b->mark_cols[mark - 'a'];
+                if ((size_t)target_col > target_line->len) {
+                    target_col = (int)target_line->len;
+                }
+                if (vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
+                    write(STDOUT_FILENO, "\a", 1);
+                }
+            }
+        }
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
         (key == '/' || key == '?')) {
         char pattern[256];
         int forward = (key == '/');
