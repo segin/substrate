@@ -252,7 +252,21 @@ All other historical `ex` commands and aliases are currently outside the support
 
 ### 4. Options, modes, and policy completeness
 
-- [ ] Expand the shared option table to the real supported editor option set and document each option's ex/vi impact.
+- [x] Expand the shared option table to the real supported editor option set and document each option's ex/vi impact.
+  Current supported shared option table:
+
+| Option | Accepted forms | Default | `ex` impact | `vi` impact |
+| --- | --- | --- | --- | --- |
+| `number` | `number`, `nu`, `nonumber`, `nonu` | off | `print`/empty-command output can be numbered; `:set` query/reporting supported | line-number gutter on redraw |
+| `list` | `list`, `li`, `nolist`, `noli` | off | `print`/empty-command output uses list formatting | visual line rendering shows list-mode escapes |
+| `autoindent` | `autoindent`, `ai`, `noautoindent`, `noai` | off | shared option state/query/reporting only | `o`, `O`, split-newline, and linewise change/substitute reuse the current line's indentation |
+| `ignorecase` | `ignorecase`, `ic`, `noignorecase`, `noic` | off | search addresses, `global`, `v`, and `substitute` become case-insensitive | `/`, `?`, `n`, `N`, `*`, and `#` become case-insensitive |
+| `readonly` | `readonly`, `ro`, `noreadonly`, `noro` | off except `-R`/`view` | plain writes are blocked unless forced | status shows `[Readonly]`; visual `:write` obeys the same restriction |
+| `showmode` | `showmode`, `smd`, `noshowmode`, `nosmd` | on | shared option state/query/reporting only | insert/replace mode banners are shown or suppressed |
+| `wrapscan` | `wrapscan`, `ws`, `nowrapscan`, `nows` | on | search-address and regex commands wrap at buffer ends | visual search and repeat-search wrap at buffer ends |
+| `tabstop` | `tabstop=`, `ts=` and query forms | `8` | affects list/print tab expansion | affects tab rendering, absolute-column motions, and indent helpers |
+| `scroll` | `scroll=`, `sc=` and query forms | `12` | shared option state/query/reporting only | `Ctrl-D` and `Ctrl-U` default to this scroll amount |
+| `tags` | `tags=` and query forms | `tags` | `:tag` lookup walks the configured comma-separated tag-file search path | visual `Ctrl-]` and visual `:tag` use the same search path |
 - [x] Implement readonly/view mode consistently in both frontends, including status display and write restrictions.
 - [x] Implement secure and restricted modes consistently in both frontends, not only for the currently covered shell-command paths.
 - [ ] Decide and implement the supported extension policy for GNU-compatible spellings and non-conflicting aliases.
