@@ -2675,7 +2675,11 @@ vi_put_from_register(buffer_t *b, vi_visual_t *vis, int before, int reg_idx, int
                 memcpy(text + pos + src->len, cur->text + pos,
                     cur->len - (size_t)pos + 1);
                 if (vi_replace_current_text(b, text) == 0) {
-                    vis->cursor_col = pos;
+                    if (src->len > 0) {
+                        vis->cursor_col = pos + (int)src->len - 1;
+                    } else {
+                        vis->cursor_col = pos;
+                    }
                 }
                 free(text);
             } else {

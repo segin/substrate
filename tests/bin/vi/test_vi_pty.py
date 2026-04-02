@@ -1168,6 +1168,78 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "abcde\n",
+        [b"y", b"2", b"l", b"P", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"y2lP vi exited with status {exit_code}")
+    require(saved == "aZabcde\n",
+            f"unexpected y2lP buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abcde\n",
+        [b"y", b"2", b"l", b"p", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"y2lp vi exited with status {exit_code}")
+    require(saved == "aaZbcde\n",
+            f"unexpected y2lp buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abcde\n",
+        [b"d", b"2", b"l", b"P", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"d2lP vi exited with status {exit_code}")
+    require(saved == "aZcde\n",
+            f"unexpected d2lP buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abcde\n",
+        [b"d", b"2", b"l", b"p", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"d2lp vi exited with status {exit_code}")
+    require(saved == "caZde\n",
+            f"unexpected d2lp buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\n",
+        [b"y", b"y", b"P", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"yyP vi exited with status {exit_code}")
+    require(saved == "Zne\none\ntwo\n",
+            f"unexpected yyP buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\n",
+        [b"y", b"y", b"p", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"yyp vi exited with status {exit_code}")
+    require(saved == "one\nZne\ntwo\n",
+            f"unexpected yyp buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\n",
+        [b"d", b"d", b"P", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"ddP vi exited with status {exit_code}")
+    require(saved == "Zne\ntwo\n",
+            f"unexpected ddP buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\n",
+        [b"d", b"d", b"p", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"ddp vi exited with status {exit_code}")
+    require(saved == "two\nZne\n",
+            f"unexpected ddp buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\ntwo\nthree\nfour\n",
         [b"c", b"+", b"X", b"\x1b"],
     )
