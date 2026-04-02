@@ -1858,6 +1858,26 @@ vi_move_sentence_forward(buffer_t *b, vi_visual_t *vis, int count)
             if (!line) {
                 continue;
             }
+            if (vi_line_is_blank(line)) {
+                if (ln == cur_line && cur_col == 0) {
+                    int next = ln;
+
+                    while (next <= b->line_count &&
+                        vi_line_is_blank(buf_get_line(b, next))) {
+                        next++;
+                    }
+                    if (next <= b->line_count) {
+                        cur_line = next;
+                        cur_col = vi_first_nonblank_col(buf_get_line(b, next));
+                        found = 1;
+                    }
+                } else {
+                    cur_line = ln;
+                    cur_col = 0;
+                    found = 1;
+                }
+                break;
+            }
             for (col = start; (size_t)col < line->len; col++) {
                 if (vi_is_sentence_end_at(line, col) &&
                     vi_find_sentence_start_after(b, ln, col, &cur_line, &cur_col) == 0) {
@@ -4031,7 +4051,9 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             rc = vi_simulate_motion_target(b, vis, vi_move_paragraph_backward, count,
                 &target_line, &target_col);
         }
-        if (rc != 0 || vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
+        if (rc != 0 ||
+            (vi_apply_search_linewise_motion(b, vis, line_no, target_line, target_col) != 0 &&
+             vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0)) {
             write(STDOUT_FILENO, "\a", 1);
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&

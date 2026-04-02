@@ -2071,6 +2071,60 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+        [b")", b"r", b"X"],
+    )
+    require(exit_code == 0, f"blank-sentence-forward vi exited with status {exit_code}")
+    require(saved == "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+            f"unexpected blank-sentence-forward buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+        [b"2", b")", b"r", b"X"],
+    )
+    require(exit_code == 0, f"blank-sentence-forward-count vi exited with status {exit_code}")
+    require(saved == "one two three four five six\n\nXlpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+            f"unexpected blank-sentence-forward-count buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+        [b"d", b")"],
+    )
+    require(exit_code == 0, f"blank-sentence-delete vi exited with status {exit_code}")
+    require(saved == "\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+            f"unexpected blank-sentence-delete buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+        [b"2", b"d", b")"],
+    )
+    require(exit_code == 0, f"blank-sentence-delete-count vi exited with status {exit_code}")
+    require(saved == "alpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+            f"unexpected blank-sentence-delete-count buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+        [b"y", b")", b"P"],
+    )
+    require(exit_code == 0, f"blank-sentence-yank vi exited with status {exit_code}")
+    require(saved == "one two three four five six\none two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+            f"unexpected blank-sentence-yank buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+        [b"2", b"y", b")", b"P"],
+    )
+    require(exit_code == 0, f"blank-sentence-yank-count vi exited with status {exit_code}")
+    require(saved == "one two three four five six\n\none two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+            f"unexpected blank-sentence-yank-count buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "abcde\n",
         [b"\x1b[F", b"r", b"Z", b"\x1b[H", b"r", b"Y"],
     )
