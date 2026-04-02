@@ -4536,6 +4536,37 @@ vi_replace_insert_char(buffer_t *b, vi_visual_t *vis, int ch)
 }
 
 static void
+vi_insert_adjacent_char(buffer_t *b, vi_visual_t *vis, int below)
+{
+    line_t *cur = vi_ensure_current_line(b);
+    line_t *adj;
+    int display_col;
+    int adj_idx;
+    unsigned char ch;
+
+    if (!cur) {
+        return;
+    }
+    adj = below ? cur->next : cur->prev;
+    if (!adj) {
+        write(STDOUT_FILENO, "\a", 1);
+        return;
+    }
+    display_col = vi_display_col_for_index(cur, vis->cursor_col);
+    adj_idx = vi_index_for_display_col(adj, display_col);
+    if ((size_t)adj_idx >= adj->len) {
+        write(STDOUT_FILENO, "\a", 1);
+        return;
+    }
+    ch = (unsigned char)adj->text[adj_idx];
+    if (vis->replace_mode) {
+        vi_replace_insert_char(b, vis, (int)ch);
+    } else {
+        vi_insert_char(b, vis, (int)ch);
+    }
+}
+
+static void
 vi_backspace_char(buffer_t *b, vi_visual_t *vis)
 {
     line_t *cur = b->cur;
@@ -5344,6 +5375,12 @@ exvi_visual_main(buffer_t *b)
             case 0x14:
                 vi_reindent_current_line(b, &vis, 1);
                 break;
+            case 0x19:
+                vi_insert_adjacent_char(b, &vis, 0);
+                break;
+            case 0x05:
+                vi_insert_adjacent_char(b, &vis, 1);
+                break;
             case 0x04:
                 vi_reindent_current_line(b, &vis, 0);
                 break;
@@ -5406,6 +5443,12 @@ exvi_visual_main(buffer_t *b)
                 break;
             case 0x14:
                 vi_reindent_current_line(b, &vis, 1);
+                break;
+            case 0x19:
+                vi_insert_adjacent_char(b, &vis, 0);
+                break;
+            case 0x05:
+                vi_insert_adjacent_char(b, &vis, 1);
                 break;
             case 0x04:
                 vi_reindent_current_line(b, &vis, 0);

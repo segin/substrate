@@ -691,6 +691,66 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "abc\ndef\nghi\n",
+        [b"j", b"0", b"i", b"\x19", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-ctrl-y vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-ctrl-y insert status")
+    require(saved == "abc\nadef\nghi\n",
+            f"unexpected insert-ctrl-y buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc\ndef\nghi\n",
+        [b"j", b"0", b"i", b"\x05", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-ctrl-e vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-ctrl-e insert status")
+    require(saved == "abc\ngdef\nghi\n",
+            f"unexpected insert-ctrl-e buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc\ndef\nghi\n",
+        [b"j", b"l", b"i", b"\x19", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-ctrl-y-mid vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-ctrl-y-mid insert status")
+    require(saved == "abc\ndbef\nghi\n",
+            f"unexpected insert-ctrl-y-mid buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc\ndef\nghi\n",
+        [b"j", b"l", b"i", b"\x05", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-ctrl-e-mid vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-ctrl-e-mid insert status")
+    require(saved == "abc\ndhef\nghi\n",
+            f"unexpected insert-ctrl-e-mid buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc\nd\nghi\n",
+        [b"0", b"i", b"\x19", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-ctrl-y-top vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-ctrl-y-top insert status")
+    require(saved == "abc\nd\nghi\n",
+            f"unexpected insert-ctrl-y-top buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc\nd\nghi\n",
+        [b"G", b"0", b"i", b"\x05", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-ctrl-e-bottom vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-ctrl-e-bottom insert status")
+    require(saved == "abc\nd\nghi\n",
+            f"unexpected insert-ctrl-e-bottom buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "abc\n",
         [b"l", b"a", b"X", b"Y", b"\x15", b"Z", b"\x1b"],
     )
@@ -1070,6 +1130,26 @@ def main():
     require("-- REPLACE --" in decoded, "missing replace-ctrl-u replace status")
     require(saved == "abc def\n",
             f"unexpected replace-ctrl-u buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc\ndef\nghi\n",
+        [b"j", b"0", b"R", b"\x19", b"\x1b"],
+    )
+    require(exit_code == 0, f"replace-ctrl-y vi exited with status {exit_code}")
+    require("-- REPLACE --" in decoded, "missing replace-ctrl-y replace status")
+    require(saved == "abc\naef\nghi\n",
+            f"unexpected replace-ctrl-y buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc\ndef\nghi\n",
+        [b"j", b"0", b"R", b"\x05", b"\x1b"],
+    )
+    require(exit_code == 0, f"replace-ctrl-e vi exited with status {exit_code}")
+    require("-- REPLACE --" in decoded, "missing replace-ctrl-e replace status")
+    require(saved == "abc\ngef\nghi\n",
+            f"unexpected replace-ctrl-e buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
