@@ -253,6 +253,63 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one\n",
+        [b":set noshowmode\r", b"i", b"X", b"\x1b"],
+        final_keys=b":q!\r",
+    )
+    require(exit_code == 0, f"noshowmode vi exited with status {exit_code}")
+    require("-- INSERT --" not in decoded, "noshowmode still showed insert status")
+    require(saved == "one\n", f"unexpected noshowmode buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n",
+        [b":set noshowmode\r", b":set showmode\r", b"i", b"X", b"\x1b"],
+        final_keys=b":q!\r",
+    )
+    require(exit_code == 0, f"showmode vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "showmode did not restore insert status")
+    require(saved == "one\n", f"unexpected showmode buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "    one\n",
+        [b":set autoindent\r", b"o", b"a", b"\x1b"],
+    )
+    require(exit_code == 0, f"autoindent-open vi exited with status {exit_code}")
+    require(saved == "    one\n    a\n",
+            f"unexpected autoindent-open buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "    one\n",
+        [b":set autoindent\r", b"A", b"\r", b"x", b"\x1b"],
+    )
+    require(exit_code == 0, f"autoindent-split vi exited with status {exit_code}")
+    require(saved == "    one\n    x\n",
+            f"unexpected autoindent-split buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "    one\n",
+        [b":set autoindent\r", b":set noautoindent\r", b"o", b"a", b"\x1b"],
+    )
+    require(exit_code == 0, f"noautoindent vi exited with status {exit_code}")
+    require(saved == "    one\na\n",
+            f"unexpected noautoindent buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "1\n2\n3\n4\n5\n6\n7\n8\n",
+        [b":set scroll=3\r", b"\x04", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"scroll-option vi exited with status {exit_code}")
+    require("line 4/8" in decoded, "missing scroll-option target status")
+    require(saved == "1\n2\n3\nZ\n5\n6\n7\n8\n",
+            f"unexpected scroll-option buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\ntwo\nthree\ntwo\n",
         [b"/two\r", b"/\x1b[A\r", b"?\x1b[A\r", b"r", b"Z"],
     )

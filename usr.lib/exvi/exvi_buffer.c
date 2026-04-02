@@ -14,6 +14,7 @@ buf_init(buffer_t *b)
     b->filename = NULL;
     b->modified = 0;
     b->empty_origin = 0;
+    b->started_empty = 0;
     for (int i = 0; i < 26; i++) {
         b->marks[i] = NULL;
         b->mark_cols[i] = 0;
@@ -124,6 +125,7 @@ buf_free(buffer_t *b)
         b->filename = NULL;
     }
     b->empty_origin = 0;
+    b->started_empty = 0;
     for (int i = 0; i < 26; i++) {
         b->marks[i] = NULL;
         b->mark_cols[i] = 0;
@@ -142,6 +144,7 @@ buf_copy(buffer_t *dst, buffer_t *src)
     }
     dst->modified = src->modified;
     dst->empty_origin = src->empty_origin;
+    dst->started_empty = src->started_empty;
     dst->trailing_newline = src->trailing_newline;
     while (curr) {
         pos = buf_insert_after(dst, pos, curr->text);
@@ -184,9 +187,11 @@ buf_read_file(buffer_t *b, const char *filename)
     fclose(f);
     if (b->line_count == 0) {
         b->empty_origin = 1;
+        b->started_empty = 1;
         b->trailing_newline = 0;
     } else {
         b->empty_origin = 0;
+        b->started_empty = 0;
         b->trailing_newline = last_had_newline;
     }
     b->cur = b->head;
@@ -198,6 +203,8 @@ write_range_to_stream(buffer_t *b, FILE *f, int addr1, int addr2)
 {
     line_t *curr;
     int omit_final_newline;
+    int synthetic_empty_with_content;
+    int has_nonempty_line = 0;
 
     if (addr1 == -1 || addr2 == -1) {
         addr1 = 1;
@@ -216,7 +223,17 @@ write_range_to_stream(buffer_t *b, FILE *f, int addr1, int addr2)
         return 0;
     }
 
-    omit_final_newline = (addr2 == b->line_count && !b->trailing_newline);
+    for (curr = b->head; curr; curr = curr->next) {
+        if (curr->len > 0) {
+            has_nonempty_line = 1;
+            break;
+        }
+    }
+    synthetic_empty_with_content = b->started_empty
+        && b->line_count > 0
+        && has_nonempty_line;
+    omit_final_newline = (addr2 == b->line_count && !b->trailing_newline
+        && !synthetic_empty_with_content);
     curr = buf_get_line(b, addr1);
     for (int line = addr1; line <= addr2 && curr; line++) {
         fputs(curr->text, f);

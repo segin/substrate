@@ -613,9 +613,9 @@ vi_render(buffer_t *b, vi_visual_t *vis, char prompt_prefix, const char *prompt)
     printf("\x1b[K\r\n\x1b[7m");
     if (prompt) {
         printf("%c%s", prompt_prefix, prompt);
-    } else if (vis->replace_mode) {
+    } else if (vis->replace_mode && option_showmode) {
         printf("-- REPLACE --");
-    } else if (vis->insert_mode) {
+    } else if (vis->insert_mode && option_showmode) {
         printf("-- INSERT --");
     } else if (vis->status_msg[0] != '\0') {
         printf("%s", vis->status_msg);
@@ -1108,6 +1108,7 @@ vi_ensure_current_line(buffer_t *b)
         return b->cur;
     }
     b->empty_origin = 1;
+    b->started_empty = 1;
     b->cur = buf_insert_after(b, NULL, "");
     b->trailing_newline = 0;
     return b->cur;
@@ -1125,6 +1126,7 @@ vi_ensure_visible_line(buffer_t *b)
         return;
     }
     b->empty_origin = 1;
+    b->started_empty = 1;
     b->cur = buf_insert_after(b, NULL, "");
     b->trailing_newline = 0;
     b->modified = was_modified;
@@ -1151,10 +1153,13 @@ vi_page_scroll(buffer_t *b, vi_visual_t *vis, int direction)
 static void
 vi_half_page_scroll(buffer_t *b, vi_visual_t *vis, int direction)
 {
-    int page = (vis->rows - 2) / 2;
+    int page = option_scroll;
 
-    if (page < 1) {
-        page = 1;
+    if (page <= 0) {
+        page = (vis->rows - 2) / 2;
+        if (page < 1) {
+            page = 1;
+        }
     }
     vi_move_vertical(b, direction * page);
 }
@@ -1189,6 +1194,41 @@ vi_last_nonblank_col(line_t *cur)
         }
     }
     return 0;
+}
+
+static size_t
+vi_indent_len(line_t *cur)
+{
+    size_t i;
+
+    if (!cur) {
+        return 0;
+    }
+    for (i = 0; i < cur->len; i++) {
+        if (cur->text[i] != ' ' && cur->text[i] != '\t') {
+            break;
+        }
+    }
+    return i;
+}
+
+static char *
+vi_autoindent_prefix(line_t *cur, size_t *indent_len_out)
+{
+    size_t indent_len = (option_autoindent && cur) ? vi_indent_len(cur) : 0;
+    char *prefix = malloc(indent_len + 1);
+
+    if (!prefix) {
+        return NULL;
+    }
+    if (indent_len > 0) {
+        memcpy(prefix, cur->text, indent_len);
+    }
+    prefix[indent_len] = '\0';
+    if (indent_len_out) {
+        *indent_len_out = indent_len;
+    }
+    return prefix;
 }
 
 static int
@@ -2410,10 +2450,17 @@ vi_replace_current_text(buffer_t *b, const char *text)
 {
     line_t *cur = b->cur;
     char *copy;
+    int replacing_empty_placeholder;
 
     if (!cur) {
         return -1;
     }
+    replacing_empty_placeholder = b->empty_origin
+        && b->line_count == 1
+        && b->head == cur
+        && b->tail == cur
+        && cur->len == 0
+        && !b->trailing_newline;
     copy = strdup(text);
     if (!copy) {
         return -1;
@@ -2421,6 +2468,9 @@ vi_replace_current_text(buffer_t *b, const char *text)
     free(cur->text);
     cur->text = copy;
     cur->len = strlen(copy);
+    if (replacing_empty_placeholder && cur->len > 0) {
+        b->trailing_newline = 1;
+    }
     b->modified = 1;
     return 0;
 }
@@ -2679,15 +2729,22 @@ vi_linewise_change(buffer_t *b, vi_visual_t *vis, int start, int end)
 {
     char regarg[2];
     line_t *before = (start > 1) ? buf_get_line(b, start - 1) : NULL;
+    char *indent;
+    size_t indent_len = 0;
 
+    indent = vi_autoindent_prefix(buf_get_line(b, start), &indent_len);
+    if (!indent) {
+        return;
+    }
     vi_take_register_arg(vis, regarg);
     handle_yank_command(b, regarg, 1, start, end);
     handle_delete_command(b, 1, start, end);
-    b->cur = buf_insert_after(b, before, "");
+    b->cur = buf_insert_after(b, before, indent);
+    free(indent);
     if (!b->cur) {
         b->cur = b->head;
     }
-    vis->cursor_col = 0;
+    vis->cursor_col = (int)indent_len;
     vis->insert_mode = 1;
     vis->replace_mode = 0;
     vi_set_insert_anchor(b, vis);
@@ -2697,6 +2754,9 @@ static void
 vi_substitute_line(buffer_t *b, vi_visual_t *vis, int capture_register)
 {
     int line_no = buf_current_line(b);
+    line_t *cur = b->cur;
+    char *indent = NULL;
+    size_t indent_len = 0;
 
     if (capture_register && line_no >= 1) {
         char regarg[2];
@@ -2708,15 +2768,21 @@ vi_substitute_line(buffer_t *b, vi_visual_t *vis, int capture_register)
         save_undo(b);
         b->cur = buf_insert_after(b, b->tail, "");
     } else {
+        indent = vi_autoindent_prefix(cur, &indent_len);
+        if (!indent) {
+            return;
+        }
         save_undo(b);
-        if (vi_replace_current_text(b, "") != 0) {
+        if (vi_replace_current_text(b, indent) != 0) {
+            free(indent);
             return;
         }
     }
-    vis->cursor_col = 0;
+    vis->cursor_col = (int)indent_len;
     vis->insert_mode = 1;
     vis->replace_mode = 0;
     vi_set_insert_anchor(b, vis);
+    free(indent);
 }
 
 static int
@@ -3713,6 +3779,10 @@ vi_insert_char(buffer_t *b, vi_visual_t *vis, int ch)
     memcpy(text + vis->cursor_col + 1, cur->text + vis->cursor_col,
         cur->len - (size_t)vis->cursor_col + 1);
     if (vi_replace_current_text(b, text) == 0) {
+        if (b->empty_origin && b->line_count == 1 && b->head == cur
+                && b->tail == cur && cur->len > 0) {
+            b->trailing_newline = 1;
+        }
         vis->cursor_col++;
     }
     free(text);
@@ -3987,31 +4057,60 @@ static void
 vi_split_line(buffer_t *b, vi_visual_t *vis)
 {
     line_t *cur = b->cur;
+    char *indent = NULL;
     char *left;
     char *right;
+    char *newline_text = NULL;
+    size_t indent_len = 0;
+    size_t right_len;
 
     if (!cur) {
+        return;
+    }
+    indent = vi_autoindent_prefix(cur, &indent_len);
+    if (!indent) {
         return;
     }
     left = malloc((size_t)vis->cursor_col + 1);
     right = strdup(cur->text + vis->cursor_col);
     if (!left || !right) {
+        free(indent);
         free(left);
         free(right);
         return;
     }
     memcpy(left, cur->text, (size_t)vis->cursor_col);
     left[vis->cursor_col] = '\0';
-    if (vi_replace_current_text(b, left) != 0) {
+    right_len = strlen(right);
+    newline_text = malloc(indent_len + right_len + 1);
+    if (!newline_text) {
+        free(indent);
         free(left);
         free(right);
         return;
     }
-    b->cur = buf_insert_after(b, cur, right);
-    vis->cursor_col = 0;
+    if (indent_len > 0) {
+        memcpy(newline_text, indent, indent_len);
+    }
+    memcpy(newline_text + indent_len, right, right_len + 1);
+    if (vi_replace_current_text(b, left) != 0) {
+        free(indent);
+        free(left);
+        free(right);
+        free(newline_text);
+        return;
+    }
+    b->cur = buf_insert_after(b, cur, newline_text);
+    if (b->started_empty && b->line_count == 2 && b->head && b->tail
+            && b->head->len == 0 && b->tail->len == 0) {
+        b->trailing_newline = 0;
+    }
+    vis->cursor_col = (int)indent_len;
     vi_set_insert_anchor(b, vis);
+    free(indent);
     free(left);
     free(right);
+    free(newline_text);
 }
 
 static void
@@ -4019,15 +4118,26 @@ vi_open_line(buffer_t *b, vi_visual_t *vis, int above)
 {
     line_t *cur = b->cur ? b->cur : b->tail;
     line_t *pos;
+    char *indent;
+    size_t indent_len = 0;
 
     save_undo(b);
+    indent = vi_autoindent_prefix(cur, &indent_len);
+    if (!indent) {
+        return;
+    }
     if (!cur) {
-        b->cur = buf_insert_after(b, NULL, "");
+        b->cur = buf_insert_after(b, NULL, indent);
     } else {
         pos = above ? cur->prev : cur;
-        b->cur = buf_insert_after(b, pos, "");
+        b->cur = buf_insert_after(b, pos, indent);
     }
-    vis->cursor_col = 0;
+    if (b->started_empty && b->line_count == 2 && b->head && b->tail
+            && b->head->len == 0 && b->tail->len == 0) {
+        b->trailing_newline = 0;
+    }
+    free(indent);
+    vis->cursor_col = (int)indent_len;
     vis->insert_mode = 1;
     vi_set_insert_anchor(b, vis);
 }

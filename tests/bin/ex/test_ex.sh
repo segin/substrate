@@ -1560,6 +1560,16 @@ run_stdout_test "Set list query reports state" \
     ":set list?\n:q!\n" \
     "nolist"
 
+run_stdout_test "Set autoindent query reports state" \
+    "one\ntwo\n" \
+    ":set autoindent?\n:q!\n" \
+    "noautoindent"
+
+run_stdout_test "Set showmode query reports state" \
+    "one\ntwo\n" \
+    ":set showmode?\n:q!\n" \
+    "showmode"
+
 run_stdout_with_cliargs_test "Readonly startup option reports state" \
     "one\ntwo\n" \
     "-R" \
@@ -1598,6 +1608,11 @@ run_stdout_test "Set tabstop query reports value" \
     ":set tabstop?\n:q!\n" \
     "tabstop=8"
 
+run_stdout_test "Set scroll query reports value" \
+    "one\ntwo\n" \
+    ":set scroll?\n:q!\n" \
+    "scroll=12"
+
 run_stdout_test "Set wrapscan query reports state" \
     "one\ntwo\n" \
     ":set wrapscan?\n:q!\n" \
@@ -1612,6 +1627,11 @@ run_stdout_test "Set ignorecase enables ignorecase" \
     "one\ntwo\n" \
     ":set ignorecase\n:set ignorecase?\n:q!\n" \
     "ignorecase"
+
+run_stdout_test "Set autoindent enables autoindent" \
+    "one\ntwo\n" \
+    ":set autoindent\n:set autoindent?\n:q!\n" \
+    "autoindent"
 
 run_stdout_test "Malformed range leaves current line unchanged" \
     "one\ntwo\nthree\n" \
@@ -1731,6 +1751,11 @@ run_stdout_test "Set tabstop assignment updates value" \
     ":set ts=4\n:set ts?\n:q!\n" \
     "tabstop=4"
 
+run_stdout_test "Set scroll assignment updates value" \
+    "one\ntwo\n" \
+    ":set scroll=3\n:set scroll?\n:q!\n" \
+    "scroll=3"
+
 run_stdout_test "Set tags assignment updates value" \
     "one\ntwo\n" \
     ":set tags=first.tags,second.tags\n:set tags?\n:q!\n" \
@@ -1743,7 +1768,9 @@ run_stdout_test "Set all prints enabled options" \
 list
 ignorecase
 readonly
+showmode
 wrapscan
+scroll=12
 tabstop=8
 tags=tags"
 

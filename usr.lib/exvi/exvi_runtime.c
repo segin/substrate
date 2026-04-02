@@ -20,6 +20,9 @@ int option_list = 0;
 int option_ignorecase = 0;
 int option_readonly = 0;
 int option_tabstop = EXVI_DEFAULT_TABSTOP;
+int option_autoindent = 0;
+int option_showmode = 1;
+int option_scroll = EXVI_DEFAULT_SCROLL;
 int option_wrapscan = 1;
 char *option_tags = NULL;
 char *last_search_pattern = NULL;
@@ -268,6 +271,8 @@ write_recover_stream(buffer_t *b, FILE *f)
 {
     line_t *curr;
     int omit_final_newline;
+    int synthetic_empty_with_content;
+    int has_nonempty_line = 0;
 
     if (!b || !f) {
         return -1;
@@ -282,7 +287,16 @@ write_recover_stream(buffer_t *b, FILE *f)
         return 0;
     }
 
-    omit_final_newline = !b->trailing_newline;
+    for (curr = b->head; curr; curr = curr->next) {
+        if (curr->len > 0) {
+            has_nonempty_line = 1;
+            break;
+        }
+    }
+    synthetic_empty_with_content = b->started_empty
+        && b->line_count > 0
+        && has_nonempty_line;
+    omit_final_newline = !b->trailing_newline && !synthetic_empty_with_content;
     curr = b->head;
     while (curr) {
         if (fputs(curr->text, f) == EOF) {
@@ -528,6 +542,9 @@ exvi_reset_runtime(exvi_frontend_t frontend)
     option_ignorecase = 0;
     option_readonly = 0;
     option_tabstop = EXVI_DEFAULT_TABSTOP;
+    option_autoindent = 0;
+    option_showmode = 1;
+    option_scroll = EXVI_DEFAULT_SCROLL;
     option_wrapscan = 1;
     replace_saved_string(&option_tags, EXVI_DEFAULT_TAGS);
     free(last_search_pattern);
@@ -552,6 +569,9 @@ exvi_cleanup_runtime(void)
     restricted_mode = 0;
     option_wrapscan = 1;
     option_ignorecase = 0;
+    option_autoindent = 0;
+    option_showmode = 1;
+    option_scroll = EXVI_DEFAULT_SCROLL;
     free(option_tags);
     option_tags = NULL;
     free(last_search_pattern);

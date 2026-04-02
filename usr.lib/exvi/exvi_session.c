@@ -397,6 +397,42 @@ handle_tag_command(buffer_t *b, const char *args, void (*command_fn)(buffer_t *,
     return 1;
 }
 
+static void
+print_enabled_set_options(int include_numeric_defaults)
+{
+    if (option_number) {
+        printf("number\n");
+    }
+    if (option_list) {
+        printf("list\n");
+    }
+    if (option_autoindent) {
+        printf("autoindent\n");
+    }
+    if (option_ignorecase) {
+        printf("ignorecase\n");
+    }
+    if (option_readonly) {
+        printf("readonly\n");
+    }
+    if (option_showmode) {
+        printf("showmode\n");
+    }
+    if (option_wrapscan) {
+        printf("wrapscan\n");
+    }
+    if (include_numeric_defaults || option_scroll != EXVI_DEFAULT_SCROLL) {
+        printf("scroll=%d\n", option_scroll);
+    }
+    if (include_numeric_defaults || option_tabstop != EXVI_DEFAULT_TABSTOP) {
+        printf("tabstop=%d\n", option_tabstop);
+    }
+    if (include_numeric_defaults
+            || (option_tags && strcmp(option_tags, EXVI_DEFAULT_TAGS) != 0)) {
+        printf("tags=%s\n", option_tags ? option_tags : EXVI_DEFAULT_TAGS);
+    }
+}
+
 int
 handle_set_command(const char *args)
 {
@@ -407,27 +443,7 @@ handle_set_command(const char *args)
     }
 
     if (!*ptr) {
-        if (option_number) {
-            printf("number\n");
-        }
-        if (option_list) {
-            printf("list\n");
-        }
-        if (option_ignorecase) {
-            printf("ignorecase\n");
-        }
-        if (option_readonly) {
-            printf("readonly\n");
-        }
-        if (option_wrapscan) {
-            printf("wrapscan\n");
-        }
-        if (option_tabstop != EXVI_DEFAULT_TABSTOP) {
-            printf("tabstop=%d\n", option_tabstop);
-        }
-        if (option_tags && strcmp(option_tags, EXVI_DEFAULT_TAGS) != 0) {
-            printf("tags=%s\n", option_tags);
-        }
+        print_enabled_set_options(0);
         return 1;
     }
 
@@ -459,23 +475,47 @@ handle_set_command(const char *args)
                 exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
                 return 1;
             }
-            if (option_number) {
-                printf("number\n");
+            print_enabled_set_options(1);
+        } else if (len == 2 && strncmp(ptr, "ai", 2) == 0) {
+            if (eq) {
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
+                return 1;
             }
-            if (option_list) {
-                printf("list\n");
+            if (query) {
+                printf("%s\n", option_autoindent ? "autoindent" : "noautoindent");
+            } else {
+                option_autoindent = 1;
             }
-            if (option_ignorecase) {
-                printf("ignorecase\n");
+        } else if (len == 10 && strncmp(ptr, "autoindent", 10) == 0) {
+            if (eq) {
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
+                return 1;
             }
-            if (option_readonly) {
-                printf("readonly\n");
+            if (query) {
+                printf("%s\n", option_autoindent ? "autoindent" : "noautoindent");
+            } else {
+                option_autoindent = 1;
             }
-            if (option_wrapscan) {
-                printf("wrapscan\n");
+        } else if (len == 4 && strncmp(ptr, "noai", 4) == 0) {
+            if (eq) {
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
+                return 1;
             }
-            printf("tabstop=%d\n", option_tabstop);
-            printf("tags=%s\n", option_tags ? option_tags : EXVI_DEFAULT_TAGS);
+            if (query) {
+                printf("%s\n", option_autoindent ? "noautoindent" : "autoindent");
+            } else {
+                option_autoindent = 0;
+            }
+        } else if (len == 12 && strncmp(ptr, "noautoindent", 12) == 0) {
+            if (eq) {
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
+                return 1;
+            }
+            if (query) {
+                printf("%s\n", option_autoindent ? "noautoindent" : "autoindent");
+            } else {
+                option_autoindent = 0;
+            }
         } else if (len == 2 && strncmp(ptr, "ic", 2) == 0) {
             if (eq) {
                 exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
@@ -555,6 +595,46 @@ handle_set_command(const char *args)
                 printf("%s\n", option_readonly ? "noreadonly" : "readonly");
             } else {
                 option_readonly = 0;
+            }
+        } else if (len == 3 && strncmp(ptr, "smd", 3) == 0) {
+            if (eq) {
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
+                return 1;
+            }
+            if (query) {
+                printf("%s\n", option_showmode ? "showmode" : "noshowmode");
+            } else {
+                option_showmode = 1;
+            }
+        } else if (len == 8 && strncmp(ptr, "showmode", 8) == 0) {
+            if (eq) {
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
+                return 1;
+            }
+            if (query) {
+                printf("%s\n", option_showmode ? "showmode" : "noshowmode");
+            } else {
+                option_showmode = 1;
+            }
+        } else if (len == 5 && strncmp(ptr, "nosmd", 5) == 0) {
+            if (eq) {
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
+                return 1;
+            }
+            if (query) {
+                printf("%s\n", option_showmode ? "noshowmode" : "showmode");
+            } else {
+                option_showmode = 0;
+            }
+        } else if (len == 10 && strncmp(ptr, "noshowmode", 10) == 0) {
+            if (eq) {
+                exvi_report_errorf("Unknown option: %.*s", (int)(end - ptr), ptr);
+                return 1;
+            }
+            if (query) {
+                printf("%s\n", option_showmode ? "noshowmode" : "showmode");
+            } else {
+                option_showmode = 0;
             }
         } else if (len == 2 && strncmp(ptr, "nu", 2) == 0) {
             if (eq) {
@@ -698,6 +778,29 @@ handle_set_command(const char *args)
                     return 1;
                 }
                 option_tabstop = (int)val;
+            }
+        } else if ((len == 2 && strncmp(ptr, "sc", 2) == 0)
+                || (len == 6 && strncmp(ptr, "scroll", 6) == 0)) {
+            if (query || (!eq && !query)) {
+                printf("scroll=%d\n", option_scroll);
+            } else {
+                char *num_end = NULL;
+                char buf[32];
+                long val;
+
+                if (!value || value_len == 0 || value_len >= sizeof(buf)) {
+                    exvi_report_error("Bad scroll value");
+                    return 1;
+                }
+                memcpy(buf, value, value_len);
+                buf[value_len] = '\0';
+                val = strtol(buf, &num_end, 10);
+                if (!num_end || *num_end != '\0' || val < EXVI_MIN_SCROLL
+                        || val > EXVI_MAX_SCROLL) {
+                    exvi_report_error("Bad scroll value");
+                    return 1;
+                }
+                option_scroll = (int)val;
             }
         } else if (len == 4 && strncmp(ptr, "tags", 4) == 0) {
             if (query || (!eq && !query)) {
@@ -1110,6 +1213,7 @@ handle_read_command(buffer_t *b, const char *args, int addr2)
                 b->cur = b->head;
                 b->modified = 1;
                 b->empty_origin = 0;
+                b->started_empty = 0;
                 b->trailing_newline = 1;
                 pos = b->head;
                 replace_empty_line = 0;
