@@ -3908,10 +3908,20 @@ vi_linewise_change(buffer_t *b, vi_visual_t *vis, int start, int end)
     line_t *before = (start > 1) ? buf_get_line(b, start - 1) : NULL;
     char *indent;
     size_t indent_len = 0;
+    int retarget_marks[26] = {0};
+    line_t *scan;
 
     indent = vi_autoindent_prefix(buf_get_line(b, start), &indent_len);
     if (!indent) {
         return;
+    }
+    scan = buf_get_line(b, start);
+    for (int line_no = start; line_no <= end && scan; line_no++, scan = scan->next) {
+        for (int i = 0; i < 26; i++) {
+            if (b->marks[i] == scan) {
+                retarget_marks[i] = 1;
+            }
+        }
     }
     vi_take_register_arg(vis, regarg);
     handle_yank_command(b, regarg, 1, start, end);
@@ -3920,6 +3930,12 @@ vi_linewise_change(buffer_t *b, vi_visual_t *vis, int start, int end)
     free(indent);
     if (!b->cur) {
         b->cur = b->head;
+    }
+    for (int i = 0; i < 26; i++) {
+        if (retarget_marks[i]) {
+            b->marks[i] = b->cur;
+            b->mark_cols[i] = 0;
+        }
     }
     vis->cursor_col = (int)indent_len;
     vis->insert_mode = 1;
@@ -5158,10 +5174,10 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
                 } else {
                     if (target_no < line_no) {
                         start_line = target_no;
-                        end_line = line_no - 1;
+                        end_line = line_no;
                     } else {
                         start_line = line_no;
-                        end_line = target_no - 1;
+                        end_line = target_no;
                     }
                     if (end_line < start_line) {
                         write(STDOUT_FILENO, "\a", 1);
@@ -6440,21 +6456,35 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
         break;
     case VI_REPEAT_C_MARK_LINE:
         {
+            int mark_idx = vis->last_change_char - 'a';
+            int mark_line;
             int start;
-            int mark_line = vi_clamp_line_target(b, line_no + vis->last_change_aux);
+            int saved_op = vis->pending_op;
 
-            start = line_no;
-            last = mark_line;
-            if (start > last) {
-                int tmp = start;
-
-                start = last;
-                last = tmp;
-            }
-            if (vi_apply_linewise_operator(b, vis, start, last) != 0) {
+            if (vis->last_change_char < 'a' || vis->last_change_char > 'z' ||
+                !b->marks[mark_idx]) {
                 write(STDOUT_FILENO, "\a", 1);
                 return;
             }
+            mark_line = vi_line_number_for_mark(b, b->marks[mark_idx]);
+            if (mark_line < 1 || mark_line == line_no) {
+                write(STDOUT_FILENO, "\a", 1);
+                return;
+            }
+            if (mark_line < line_no) {
+                start = mark_line;
+                last = line_no;
+            } else {
+                start = line_no;
+                last = mark_line;
+            }
+            vis->pending_op = 'c';
+            if (last < start || vi_apply_linewise_operator(b, vis, start, last) != 0) {
+                vis->pending_op = saved_op;
+                write(STDOUT_FILENO, "\a", 1);
+                return;
+            }
+            vis->pending_op = saved_op;
             vi_replay_insert_text(b, vis, vis->last_insert_text);
             vi_finish_repeat_insert(b, vis);
         }

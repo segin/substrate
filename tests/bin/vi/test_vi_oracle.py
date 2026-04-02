@@ -105,6 +105,11 @@ def main():
             "key_steps": [b"$", b"c", b"b", b"X", b"\x1b", b"j", b"."],
         },
         {
+            "name": "big-backward-word-repeat-change",
+            "initial_text": "one two three four\nalpha beta gamma\n",
+            "key_steps": [b"$", b"c", b"B", b"X", b"\x1b", b"j", b"."],
+        },
+        {
             "name": "screen-middle-repeat-change",
             "initial_text": "one\ntwo\nthree\nfour\nfive\n",
             "key_steps": [b"2", b"G", b"c", b"M", b"X", b"\x1b", b"j", b"."],
@@ -147,6 +152,106 @@ def main():
             "key_steps": [b"$", b"c", b"T", b"b", b"X", b"\x1b", b"j", b",", b"."],
         },
         {
+            "name": "insert-repeat-change",
+            "initial_text": "one\ntwo\n",
+            "key_steps": [b"i", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "append-repeat-change",
+            "initial_text": "one\ntwo\n",
+            "key_steps": [b"a", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "insert-first-nonblank-repeat-change",
+            "initial_text": "  one\n  two\n",
+            "key_steps": [b"I", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "append-eol-repeat-change",
+            "initial_text": "one\ntwo\n",
+            "key_steps": [b"A", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "open-below-repeat-change",
+            "initial_text": "one\ntwo\n",
+            "key_steps": [b"o", b"X", b"\x1b", b"k", b"j", b"."],
+        },
+        {
+            "name": "open-above-repeat-change",
+            "initial_text": "one\ntwo\n",
+            "key_steps": [b"O", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "replace-repeat-change",
+            "initial_text": "abc\ndef\n",
+            "key_steps": [b"R", b"X", b"Y", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "change-word-repeat-change",
+            "initial_text": "alpha beta\ngamma beta\n",
+            "key_steps": [b"c", b"w", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "change-bigword-repeat-change",
+            "initial_text": "alpha,beta\ngamma,beta\n",
+            "key_steps": [b"c", b"W", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "substitute-repeat-change",
+            "initial_text": "ab\ncd\n",
+            "key_steps": [b"s", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "change-to-eol-repeat-change",
+            "initial_text": "alpha beta\ngamma beta\n",
+            "key_steps": [b"C", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "substitute-line-repeat-change",
+            "initial_text": "alpha\nbeta\n",
+            "key_steps": [b"S", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "change-line-repeat-change",
+            "initial_text": "one\ntwo\n",
+            "key_steps": [b"c", b"c", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "change-char-repeat-change",
+            "initial_text": "ab\ncd\n",
+            "key_steps": [b"c", b"l", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "change-back-char-repeat-change",
+            "initial_text": "ab\ncd\n",
+            "key_steps": [b"l", b"c", b"h", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "change-dollar-repeat-change",
+            "initial_text": "alpha beta\ngamma beta\n",
+            "key_steps": [b"c", b"$", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "change-word-end-repeat-change",
+            "initial_text": "alpha beta\ngamma beta\n",
+            "key_steps": [b"c", b"e", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "change-bigword-end-repeat-change",
+            "initial_text": "alpha,beta\ngamma,beta\n",
+            "key_steps": [b"c", b"E", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "change-to-col0-repeat-change",
+            "initial_text": "ab cd\nef gh\n",
+            "key_steps": [b"l", b"l", b"c", b"0", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "change-to-first-nonblank-repeat-change",
+            "initial_text": "  ab\n  cd\n",
+            "key_steps": [b"l", b"l", b"c", b"^", b"X", b"\x1b", b"j", b"."],
+        },
+        {
             "name": "paragraph-forward-repeat-change",
             "initial_text": "one\n\ntwo\n\nthree\n",
             "key_steps": [b"c", b"}", b"X", b"\x1b", b"j", b"."],
@@ -169,6 +274,21 @@ def main():
                 b"X", b"\x1b", b"k", b"."],
         },
         {
+            "name": "search-repeat-change-n",
+            "initial_text": "one target\ntwo target\nthree target\n",
+            "key_steps": [b"/", b"target", b"\r", b"c", b"n", b"X", b"\x1b", b"n", b"."],
+        },
+        {
+            "name": "search-repeat-change-N",
+            "initial_text": "one target\ntwo target\nthree target\n",
+            "key_steps": [b"G", b"?", b"target", b"\r", b"c", b"N", b"X", b"\x1b", b"N", b"."],
+        },
+        {
+            "name": "word-search-repeat-change-hash",
+            "initial_text": "one target\ntwo target\nthree target\n",
+            "key_steps": [b"G", b"w", b"#", b"c", b"#", b"X", b"\x1b", b"N", b"."],
+        },
+        {
             "name": "paragraph-repeat-change",
             "initial_text": "one\n\ntwo\n\nthree\n",
             "key_steps": [b"G", b"c", b"{", b"X", b"\x1b", b"j", b"."],
@@ -177,6 +297,56 @@ def main():
             "name": "match-repeat-change",
             "initial_text": "if (x) {\n  foo();\n}\nif (y) {\n  bar();\n}\n",
             "key_steps": [b"f", b"{", b"c", b"%", b"X", b"\x1b", b"j", b"j", b"j", b"f", b"{", b"."],
+        },
+        {
+            "name": "mark-line-repeat-change",
+            "initial_text": "one\ntwo\nthree\nfour\n",
+            "key_steps": [b"j", b"m", b"a", b"j", b"c", b"'", b"a", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "mark-exact-repeat-change",
+            "initial_text": "ab\ncd\nef\n",
+            "key_steps": [b"l", b"m", b"a", b"j", b"l", b"c", b"`", b"a", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "line-plus-repeat-change",
+            "initial_text": "one\ntwo\nthree\nfour\n",
+            "key_steps": [b"c", b"+", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "line-minus-repeat-change",
+            "initial_text": "one\ntwo\nthree\nfour\n",
+            "key_steps": [b"j", b"c", b"-", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "line-underscore-repeat-change",
+            "initial_text": "one\ntwo\nthree\n",
+            "key_steps": [b"c", b"_", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "screen-top-repeat-change",
+            "initial_text": "one\ntwo\nthree\nfour\nfive\n",
+            "key_steps": [b"3", b"G", b"c", b"H", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "backward-end-repeat-change",
+            "initial_text": "one two three four\nalpha beta gamma\n",
+            "key_steps": [b"$", b"c", b"g", b"e", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "backward-big-end-repeat-change",
+            "initial_text": "one two three four\nalpha beta gamma\n",
+            "key_steps": [b"$", b"c", b"g", b"E", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "repeat-find-semicolon-change",
+            "initial_text": "alpha beta gamma\nalpha beta gamma\n",
+            "key_steps": [b"0", b"c", b"t", b"g", b"X", b"\x1b", b"j", b";", b"."],
+        },
+        {
+            "name": "repeat-find-comma-change",
+            "initial_text": "alpha beta gamma\nalpha beta gamma\n",
+            "key_steps": [b"$", b"c", b"T", b"b", b"X", b"\x1b", b"j", b",", b"."],
         },
     ]
 
