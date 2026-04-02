@@ -5102,6 +5102,10 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             &target_line, &target_col) != 0) {
             write(STDOUT_FILENO, "\a", 1);
             vi_set_search_failure_status(vis, pattern);
+        } else if (vi_apply_search_linewise_motion(b, vis, line_no, target_line, target_col) == 0) {
+            if (vis->pending_op == 'c') {
+                vi_set_last_change(vis, VI_REPEAT_C_SEARCH_REPEAT, count, key);
+            }
         } else if (vis->pending_op == '>' || vis->pending_op == '<') {
             if (vi_apply_search_linewise_motion(b, vis, line_no, target_line, target_col) != 0) {
                 vi_set_search_failure_status(vis, pattern);
@@ -5110,9 +5114,12 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         } else if (vis->pending_op == 'c' && target_line == b->cur &&
             target_col == vis->cursor_col) {
             vi_start_change_insert(b, vis);
+            vi_set_last_change(vis, VI_REPEAT_C_SEARCH_REPEAT, count, key);
         } else if (vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
             vi_set_search_failure_status(vis, pattern);
             write(STDOUT_FILENO, "\a", 1);
+        } else if (vis->pending_op == 'c') {
+            vi_set_last_change(vis, VI_REPEAT_C_SEARCH_REPEAT, count, key);
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y' ||
         vis->pending_op == '>' || vis->pending_op == '<') &&
@@ -6373,6 +6380,10 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
             } else if (vis->last_change_char == '*') {
                 forward = 1;
             } else if (vis->last_change_char == '#') {
+                forward = 0;
+            } else if (vis->last_change_char == '/') {
+                forward = 1;
+            } else if (vis->last_change_char == '?') {
                 forward = 0;
             } else {
                 write(STDOUT_FILENO, "\a", 1);

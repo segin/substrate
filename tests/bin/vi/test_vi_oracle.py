@@ -110,6 +110,13 @@ def main():
             "key_steps": [b"2", b"G", b"c", b"M", b"X", b"\x1b", b"j", b"."],
         },
         {
+            "name": "screen-bottom-repeat-change",
+            "initial_text": "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\n",
+            "key_steps": [b"2", b"G", b"c", b"L", b"X", b"\x1b", b"j", b"."],
+            "rows": 6,
+            "cols": 20,
+        },
+        {
             "name": "find-change-repeat-forward",
             "initial_text": "alpha beta gamma\nalpha beta gamma\n",
             "key_steps": [b"0", b"c", b"f", b"g", b"X", b"\x1b", b"j", b"."],
@@ -118,6 +125,11 @@ def main():
             "name": "find-change-repeat-till",
             "initial_text": "alpha beta gamma\nalpha beta gamma\n",
             "key_steps": [b"0", b"c", b"t", b"g", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "find-change-repeat-backward",
+            "initial_text": "alpha beta gamma\nalpha beta gamma\n",
+            "key_steps": [b"$", b"c", b"F", b"b", b"X", b"\x1b", b"j", b"."],
         },
         {
             "name": "find-change-repeat-backward-till",
@@ -143,6 +155,18 @@ def main():
             "name": "sentence-forward-repeat-change",
             "initial_text": "one. two. three.\nalpha. beta. gamma.\n",
             "key_steps": [b"$", b"c", b")", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "search-forward-repeat-change",
+            "initial_text": "one target\nline two\ntarget three\n",
+            "key_steps": [b"c", b"/", b"t", b"a", b"r", b"g", b"e", b"t", b"\r",
+                b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "search-backward-repeat-change",
+            "initial_text": "one target\nline two\ntarget three\n",
+            "key_steps": [b"G", b"c", b"?", b"t", b"a", b"r", b"g", b"e", b"t", b"\r",
+                b"X", b"\x1b", b"k", b"."],
         },
         {
             "name": "paragraph-repeat-change",
