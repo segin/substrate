@@ -3499,6 +3499,24 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "abc def\n",
+        [b"0", b"f", b"d", b"m", b"a", b"0", b">", b"`", b"a"],
+    )
+    require(exit_code == 0, f"visual-exact-mark-shift vi exited with status {exit_code}")
+    require(saved == "\tabc def\n",
+            f"unexpected visual-exact-mark-shift buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tabc def\n",
+        [b"0", b"f", b"d", b"m", b"a", b"0", b"<", b"`", b"a"],
+    )
+    require(exit_code == 0, f"visual-exact-mark-unshift vi exited with status {exit_code}")
+    require(saved == "abc def\n",
+            f"unexpected visual-exact-mark-unshift buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
         [b"2", b"]", b"]", b"r", b"X"],
     )
