@@ -593,6 +593,19 @@ def main():
     exit_code, decoded, saved = helpers.run_vi_session(
         vi_path,
         "one\ntwo\nthree\n",
+        [b":tag one\r", b":tags\r", b":q!\r"],
+        final_keys=None,
+        extra_files={"tags": "one\tbuffer.txt\t3\n"},
+    )
+    require(exit_code == 0, f"vi tags reporting exited with status {exit_code}")
+    require("> one buffer.txt:3" in decoded,
+            "vi tags reporting missing current tag name")
+    require(saved == "one\ntwo\nthree\n",
+            f"vi tags reporting unexpectedly modified file: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
         [b":2j\r", b":wq\r"],
         final_keys=None,
     )

@@ -1285,7 +1285,26 @@ run_tag_test "Tags reports saved and current tag locations" \
     ":tag beta\n:tags\n:q!\n" \
     "beta
 1 __FILE__:1
-> sample.txt:2"
+> beta sample.txt:2"
+
+run_tag_test "Tags reports nested tag stack names" \
+    "alpha\nbeta\ngamma\n" \
+    "beta\tsample.txt\t2\ngamma\tsample.txt\t3\n" \
+    ":tag beta\n:tag gamma\n:tags\n:q!\n" \
+    "beta
+gamma
+1 __FILE__:1
+2 beta sample.txt:2
+> gamma sample.txt:3"
+
+run_tag_test "Pop restores active tag name for tags report" \
+    "alpha\nbeta\ngamma\n" \
+    "beta\tsample.txt\t2\ngamma\tsample.txt\t3\n" \
+    ":tag beta\n:tag gamma\n:pop\n:tags\n:q!\n" \
+    "beta
+gamma
+1 __FILE__:1
+> beta sample.txt:2"
 
 run_tag_searchpath_test "Tag uses tags option search path" \
     "one\ntwo\nthree\n" \

@@ -200,7 +200,7 @@ All other historical `ex` commands and aliases are currently outside the support
 
 - [x] Finish alternate-file reporting and filename expansion edge cases for `%` and `#`.
 - [x] Deepen `args`, `next`, `prev`, and `rewind` behavior for replacement lists, unsaved buffers, diagnostics, and startup interactions.
-- [ ] Extend tag behavior beyond the current `tag`/`pop` baseline to the full supported tag-stack/reporting contract.
+- [x] Extend tag behavior beyond the current `tag`/`pop` baseline to the full supported tag-stack/reporting contract.
 - [x] Replace the current flat `tags` lookup path with `tags` option and search-path behavior if that is part of the supported contract.
 - [x] Harden preserve/recover naming, cleanup, signal-time preservation, and recover-file lifecycle behavior.
 - [x] Decide and implement the supported `ex -r` UX, including any listing/selection behavior beyond direct filename recovery.

@@ -12,12 +12,14 @@ static int ex_arg_idx = 0;
 static int ex_args_owned = 0;
 
 typedef struct {
+    char *tagname;
     char *filename;
     int line;
 } tag_frame_t;
 
 static tag_frame_t *tag_stack = NULL;
 static int tag_stack_len = 0;
+static char *current_tag_name = NULL;
 
 static void
 free_ex_arglist(void)
@@ -121,17 +123,20 @@ static void
 free_tag_stack(void)
 {
     for (int i = 0; i < tag_stack_len; i++) {
+        free(tag_stack[i].tagname);
         free(tag_stack[i].filename);
     }
     free(tag_stack);
     tag_stack = NULL;
     tag_stack_len = 0;
+    replace_saved_string(&current_tag_name, NULL);
 }
 
 static int
 push_tag_frame(buffer_t *b)
 {
     tag_frame_t *grown;
+    char *tagname = NULL;
     char *filename;
 
     if (!b->filename) {
@@ -142,13 +147,22 @@ push_tag_frame(buffer_t *b)
     if (!filename) {
         return -1;
     }
+    if (current_tag_name) {
+        tagname = strdup(current_tag_name);
+        if (!tagname) {
+            free(filename);
+            return -1;
+        }
+    }
 
     grown = realloc(tag_stack, sizeof(*tag_stack) * (size_t)(tag_stack_len + 1));
     if (!grown) {
+        free(tagname);
         free(filename);
         return -1;
     }
     tag_stack = grown;
+    tag_stack[tag_stack_len].tagname = tagname;
     tag_stack[tag_stack_len].filename = filename;
     tag_stack[tag_stack_len].line = buf_current_line(b);
     tag_stack_len++;
@@ -285,6 +299,8 @@ handle_pop_command(buffer_t *b, int force)
         free(tag_stack);
         tag_stack = NULL;
     }
+    replace_saved_string(&current_tag_name, frame.tagname);
+    free(frame.tagname);
     replace_saved_string(&alternate_filename, b->filename);
     buf_free(b);
     buf_init(b);
@@ -303,14 +319,26 @@ int
 handle_tags_command(buffer_t *b)
 {
     if (tag_stack_len == 0) {
-        printf("Tag stack empty\n");
-        return 1;
+        if (!current_tag_name) {
+            printf("Tag stack empty\n");
+            return 1;
+        }
     }
 
     for (int i = 0; i < tag_stack_len; i++) {
-        printf("%d %s:%d\n", i + 1, tag_stack[i].filename, tag_stack[i].line);
+        if (tag_stack[i].tagname && *tag_stack[i].tagname) {
+            printf("%d %s %s:%d\n", i + 1, tag_stack[i].tagname,
+                tag_stack[i].filename, tag_stack[i].line);
+        } else {
+            printf("%d %s:%d\n", i + 1, tag_stack[i].filename, tag_stack[i].line);
+        }
     }
-    printf("> %s:%d\n", tag_display_filename(b), buf_current_line(b));
+    if (current_tag_name && *current_tag_name) {
+        printf("> %s %s:%d\n", current_tag_name, tag_display_filename(b),
+            buf_current_line(b));
+    } else {
+        printf("> %s:%d\n", tag_display_filename(b), buf_current_line(b));
+    }
     return 1;
 }
 
@@ -384,6 +412,7 @@ handle_tag_command(buffer_t *b, const char *args, void (*command_fn)(buffer_t *,
                 }
             }
             command_fn(b, tcmd);
+            replace_saved_string(&current_tag_name, ptr);
             found = 1;
             break;
         }
