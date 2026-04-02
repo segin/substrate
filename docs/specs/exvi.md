@@ -313,7 +313,7 @@ All other historical `ex` commands and aliases are currently outside the support
 ### 8. Documentation and conformance backlog
 
 - [x] Write [`usr.man/man1/ex.1`](../../usr.man/man1/ex.1).
-- [ ] Write [`usr.man/man1/vi.1`](../../usr.man/man1/vi.1).
+- [x] Write [`usr.man/man1/vi.1`](../../usr.man/man1/vi.1).
 - [ ] Add `view(1)` and any recovery/startup man pages if those entry points or subsystems are user-visible.
 - [ ] Add a POSIX/BSD/GNU/Substrate conformance matrix with explicit code/tests/docs references.
 - [ ] Keep [`ARCHITECTURE.md`](../../ARCHITECTURE.md), this file, and [`docs/tasks/09-7-userland-binaries.md`](../tasks/09-7-userland-binaries.md) synchronized as the backlog closes.
