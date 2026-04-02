@@ -831,6 +831,16 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "line\n",
+        [b"i", b"a", b"b", b"c", b"\x1b", b"A", b"\x01", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-ctrl-a vi exited with status {exit_code}")
+    require(decoded.count("-- INSERT --") >= 2, "missing insert-ctrl-a insert status")
+    require(saved == "abclineabc\n",
+            f"unexpected insert-ctrl-a buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "",
         [b"i", b"\r", b"\x1b"],
     )
