@@ -3269,6 +3269,42 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one target\nline two\ntarget three\n",
+        [b"/", b"t", b"a", b"r", b"g", b"e", b"t", b"\r", b">", b"n"],
+    )
+    require(exit_code == 0, f"visual-repeat-search-shift vi exited with status {exit_code}")
+    require(saved == "\tone target\n\tline two\ntarget three\n",
+            f"unexpected visual-repeat-search-shift buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tone target\n\tline two\ntarget three\n",
+        [b"/", b"t", b"a", b"r", b"g", b"e", b"t", b"\r", b"<", b"N"],
+    )
+    require(exit_code == 0, f"visual-repeat-search-unshift vi exited with status {exit_code}")
+    require(saved == "one target\nline two\ntarget three\n",
+            f"unexpected visual-repeat-search-unshift buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one target\nline two\ntarget three\n",
+        [b"0", b"/", b"t", b"a", b"r", b"g", b"e", b"t", b"\r", b">", b"*"],
+    )
+    require(exit_code == 0, f"visual-word-search-shift vi exited with status {exit_code}")
+    require(saved == "\tone target\n\tline two\ntarget three\n",
+            f"unexpected visual-word-search-shift buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tone target\n\tline two\ntarget three\n",
+        [b"G", b"0", b"<", b"#"],
+    )
+    require(exit_code == 0, f"visual-word-search-unshift vi exited with status {exit_code}")
+    require(saved == "one target\nline two\ntarget three\n",
+            f"unexpected visual-word-search-unshift buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
         [b"d", b"]", b"]"],
     )
