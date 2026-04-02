@@ -4,10 +4,17 @@
 
 #include <sys/vt.h>
 #include <drivers/video/hw_text.h>
+#include <drivers/video/fb_console.h>
+#include <drivers/video/fb_console.h>
 #include <drivers/input/keyboard.h>
 #include <kern/console.h>
 #include <string.h>
 #include <sys/tty.h>
+#include <kern/sched.h>
+#include <kern/time.h>
+#include <arch/x86-common/rtc.h>
+#include <stdio.h>
+#include <sys/kthread.h>
 
 static vt_state_t vt_states[VT_MAX];
 static int active_vt = 0;
@@ -151,7 +158,7 @@ void vt_activate(int n) {
         console_set_tty(vt->tty);
     }
     hw_text_redraw_active();
-    hw_text_refresh_statusline();
+    vt_render_statusline(vt);
 }
 
 int vt_get_scrollback_view(const vt_state_t *vt) {
@@ -293,4 +300,153 @@ void vt_scrollback_line_down(void) {
 
     vt->scrollback_view--;
     hw_text_redraw_active();
+}
+
+static volatile uint32_t vt_status_epoch = 0;
+static int vt_status_thread_started = 0;
+
+static void vt_civil_from_days(int64_t z, int *year, unsigned *month, unsigned *day) {
+    int64_t era;
+    unsigned doe;
+    unsigned yoe;
+    unsigned doy;
+    unsigned mp;
+
+    z += 719468;
+    era = (z >= 0 ? z : z - 146096) / 146097;
+    doe = (unsigned)(z - era * 146097);
+    yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    *year = (int)(yoe + era * 400);
+    doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    mp = (5 * doy + 2) / 153;
+    *day = doy - (153 * mp + 2) / 5 + 1;
+    *month = mp + (mp < 10 ? 3 : -9);
+    *year += (*month <= 2);
+}
+
+static void vt_format_iso8601(char *buf, size_t buf_len, time_t when) {
+    int year;
+    unsigned month;
+    unsigned day;
+    uint64_t secs;
+    uint64_t days;
+    uint64_t sod;
+    unsigned hour;
+    unsigned minute;
+    unsigned second;
+
+    if (!buf || buf_len == 0) return;
+    if (when < 0) when = 0;
+    
+    secs = (uint64_t)when;
+    days = secs / 86400ULL;
+    sod = secs % 86400ULL;
+    hour = (unsigned)(sod / 3600ULL);
+    minute = (unsigned)((sod % 3600ULL) / 60ULL);
+    second = (unsigned)(sod % 60ULL);
+    vt_civil_from_days((int64_t)days, &year, &month, &day);
+
+    snprintf(buf, buf_len, "%04d-%02u-%02uT%02u:%02u:%02uZ",
+             year, month, day, hour, minute, second);
+}
+
+static time_t vt_status_time(void) {
+    int64_t now = rtc_read_time();
+    if (now > 0) return (time_t)now;
+    return get_time();
+}
+
+void vt_render_statusline(vt_state_t *vt) {
+    char left[32];
+    char right[32];
+    char line[VT_MAX_WIDTH];
+    size_t left_len;
+    size_t right_len;
+    int cols;
+    int row;
+    int x;
+
+    if (!vt) return;
+
+    cols = vt_get_width();
+    row = vt_get_status_row();
+    if (vt_get_scrollback_view(vt) != 0) {
+        snprintf(left, sizeof(left), " VT%d +%u ", vt->id + 1, vt->scrollback_view);
+    } else {
+        snprintf(left, sizeof(left), " VT%d ", vt->id + 1);
+    }
+    vt_format_iso8601(right, sizeof(right), vt_status_time());
+    left_len = strlen(left);
+    right_len = strlen(right);
+
+    memset(line, ' ', sizeof(line));
+
+    for (x = 0; x < cols && (size_t)x < left_len; x++) {
+        line[x] = left[x];
+    }
+
+    if ((int)right_len < cols) {
+        size_t start = (size_t)(cols - (int)right_len);
+        for (x = 0; x < (int)right_len; x++) {
+            line[start + (size_t)x] = right[x];
+        }
+    }
+
+    /* 0x70 = Light Grey on pure grey/white background (STATUS COLOR) */
+    uint16_t status_color = 0x70;
+
+    for (x = 0; x < cols; x++) {
+        size_t index = (size_t)row * (size_t)cols + (size_t)x;
+        uint16_t entry = (uint16_t)((unsigned char)line[x]) | (status_color << 8);
+
+        if (vt->buffer[index] != entry) {
+            vt->buffer[index] = entry;
+            if (vt->id == vt_get_active()) {
+                /* We notify both backend drivers that the cell updated. Only the active driver draws. */
+#ifdef _SYS_DRIVERS_VIDEO_HW_TEXT_H
+                hw_text_console_write_shim_cell((size_t)x, (size_t)row, entry); /* Stub or we rely on full line sync */
+#endif
+            }
+        }
+    }
+    
+    /* Since we updated the vt->buffer directly above, we trigger a row resync */
+    if (vt->id == vt_get_active()) {
+        /* Call out to hardcoded drivers to refresh row if applicable. NOTE: fb_console might use its own redraw queue */
+        hw_text_redraw_active(); /* this redrawing the whole screen isn't ideal but we can optimize later with row syncs */
+#ifdef _SYS_DRIVERS_VIDEO_FB_CONSOLE_H
+        fb_console_sync_row(vt, row);
+#endif
+    }
+}
+
+static void vt_statusline_task(void *arg) {
+    uint32_t seen = 0;
+    (void)arg;
+
+    for (;;) {
+        while (seen == vt_status_epoch) {
+            sched_sleep((void *)&vt_status_epoch);
+        }
+        seen = vt_status_epoch;
+        vt_state_t *vt = vt_get_state(vt_get_active());
+        vt_render_statusline(vt);
+    }
+}
+
+void vt_tick_1hz(void) {
+    if (!vt_status_thread_started) {
+        thread_t *td;
+        if (kthread_create(vt_statusline_task, NULL, &td, "vtstatus") == 0) {
+            vt_status_thread_started = 1;
+        } else {
+            /* Fallback to inline processing if kthread fails */
+            vt_state_t *vt = vt_get_state(vt_get_active());
+            vt_render_statusline(vt);
+            return;
+        }
+    }
+
+    vt_status_epoch++;
+    sched_wakeup((void *)&vt_status_epoch);
 }

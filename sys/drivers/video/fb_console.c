@@ -205,11 +205,11 @@ static void fb_console_update_cursor_locked(vt_state_t *vt) {
     fb_console_show_cursor();
 }
 
-static void fb_console_sync_buffer_row_locked(vt_state_t *vt, int row) {
+void fb_console_sync_row(vt_state_t *vt, int row) {
     int col;
     size_t base;
 
-    if (!vt || row < 0 || row >= vt_get_visible_height()) {
+    if (!vt || row < 0 || row >= vt_get_height()) {
         return;
     }
 
@@ -231,7 +231,7 @@ static void fb_console_store_cell_locked(vt_state_t *vt,
     uint8_t effective;
 
     if (!vt || col < 0 || row < 0 ||
-        col >= vt_get_width() || row >= vt_get_visible_height()) {
+        col >= vt_get_width() || row >= vt_get_height()) {
         return;
     }
 
@@ -435,7 +435,7 @@ static void fb_console_scroll_region_up_locked(vt_state_t *vt, int top, int bott
             return;
         }
         for (row = top; row <= bottom; row++) {
-            fb_console_sync_buffer_row_locked(vt, row);
+            fb_console_sync_row(vt, row);
         }
     }
 }
@@ -467,7 +467,7 @@ static void fb_console_scroll_region_down_locked(vt_state_t *vt, int top, int bo
     }
     if (vt->id == vt_get_active()) {
         for (row = top; row <= bottom; row++) {
-            fb_console_sync_buffer_row_locked(vt, row);
+            fb_console_sync_row(vt, row);
         }
     }
 }
@@ -754,7 +754,7 @@ static void fb_cb_insert_chars(int n) {
         vt->buffer[row * width + x] = empty;
     }
     if (vt->id == vt_get_active()) {
-        fb_console_sync_buffer_row_locked(vt, row);
+        fb_console_sync_row(vt, row);
     }
 }
 
@@ -779,7 +779,7 @@ static void fb_cb_delete_chars(int n) {
         vt->buffer[row * width + x] = empty;
     }
     if (vt->id == vt_get_active()) {
-        fb_console_sync_buffer_row_locked(vt, row);
+        fb_console_sync_row(vt, row);
     }
 }
 
@@ -921,7 +921,7 @@ static void fb_cb_set_alt_screen(int on) {
         vt->alt_screen_active = 0;
         if (vt->id == vt_get_active()) {
             for (int row = 0; row < visible_rows; row++) {
-                fb_console_sync_buffer_row_locked(vt, row);
+                fb_console_sync_row(vt, row);
             }
         }
     }
