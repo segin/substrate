@@ -316,7 +316,8 @@ All other historical `ex` commands and aliases are currently outside the support
 - [x] Write [`usr.man/man1/vi.1`](../../usr.man/man1/vi.1).
 - [x] Add `view(1)` and any recovery/startup man pages if those entry points or subsystems are user-visible.
   Current documentation policy: `view(1)` is user-visible and documented as the readonly `vi` alias. Separate recovery/startup man pages are not added at this stage because the supported startup-file and recovery contracts are already fully documented in `ex(1)` and `vi(1)`, and there is no distinct standalone recovery binary beyond `ex -r` / `vi -r`.
-- [ ] Add a POSIX/BSD/GNU/Substrate conformance matrix with explicit code/tests/docs references.
+- [x] Add a POSIX/BSD/GNU/Substrate conformance matrix with explicit code/tests/docs references.
+  Current matrix: [`docs/specs/exvi_conformance.md`](./exvi_conformance.md)
 - [ ] Keep [`ARCHITECTURE.md`](../../ARCHITECTURE.md), this file, and [`docs/tasks/09-7-userland-binaries.md`](../tasks/09-7-userland-binaries.md) synchronized as the backlog closes.
 
 ## Testing Strategy
