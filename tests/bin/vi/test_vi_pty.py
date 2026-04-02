@@ -2493,6 +2493,15 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one. two. three.\nalpha. beta. gamma.\n",
+        [b"$", b")", b"r", b"Z"],
+    )
+    require(exit_code == 0, f"sentence-forward-line-end vi exited with status {exit_code}")
+    require(saved == "one. two. three.\nZlpha. beta. gamma.\n",
+            f"unexpected sentence-forward-line-end buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "Alpha one.  Beta two!\nGamma three?  Delta four.\n",
         [b"G", b"$", b"(", b"r", b"3", b"(", b"r", b"4"],
     )
@@ -3392,6 +3401,15 @@ def main():
     require(exit_code == 0, f"visual-dot-after-cparen vi exited with status {exit_code}")
     require(saved == "one. two. X.\nalpha. Xa. gamma.\n",
             f"unexpected visual-dot-after-cparen buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one. two. three.\nalpha. beta. gamma.\n",
+        [b"$", b"c", b")", b"X", b"\x1b", b"j", b"."],
+    )
+    require(exit_code == 0, f"visual-dot-after-cparen-forward vi exited with status {exit_code}")
+    require(saved == "one. two. threeX\nalpha. beta. gaX\n",
+            f"unexpected visual-dot-after-cparen-forward buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,

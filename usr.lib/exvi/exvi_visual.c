@@ -2340,6 +2340,12 @@ vi_move_sentence_forward(buffer_t *b, vi_visual_t *vis, int count)
     while (count-- > 0) {
         int ln;
         int found = 0;
+        line_t *cur = buf_get_line(b, cur_line);
+
+        if (cur && vi_is_sentence_end_at(cur, cur_col) &&
+            vi_find_sentence_start_after(b, cur_line, cur_col, &cur_line, &cur_col) == 0) {
+            continue;
+        }
 
         for (ln = cur_line; ln <= b->line_count && !found; ln++) {
             line_t *line = buf_get_line(b, ln);
@@ -5017,6 +5023,7 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         line_t *target_line;
         int target_col;
         int rc;
+        int eof_fallback = 0;
 
         if (key == ')') {
             rc = vi_simulate_motion_target(b, vis, vi_move_sentence_forward, count,
@@ -5036,15 +5043,19 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             target_line = b->tail;
             target_col = (int)b->tail->len;
             rc = 0;
+            eof_fallback = 1;
         } else if (rc == 0 && key == '{' && target_line && !vi_line_is_blank(target_line) &&
             target_col == vi_first_nonblank_col(target_line) && target_line->prev &&
             vi_line_is_blank(target_line->prev)) {
             target_line = target_line->prev;
             target_col = 0;
         } else if (rc == 0 && (vis->pending_op == 'd' || vis->pending_op == 'c' ||
-                vis->pending_op == 'y') && (key == ')' || key == '}') && target_line == b->tail
+                vis->pending_op == 'y') && key == '}' && target_line == b->tail
             && target_line && !vi_line_is_blank(target_line)
             && target_col == vi_first_nonblank_col(target_line)) {
+            target_col = (int)target_line->len;
+        } else if (rc == 0 && eof_fallback && (vis->pending_op == 'd' || vis->pending_op == 'c' ||
+                vis->pending_op == 'y') && key == ')' && target_line == b->tail) {
             target_col = (int)target_line->len;
         } else if (rc == 0 && (vis->pending_op == '>' || vis->pending_op == '<') &&
             key == '}' && b->cur && vi_line_is_blank(b->cur) && vis->cursor_col == 0 &&
