@@ -110,6 +110,21 @@ def main():
             "key_steps": [b"2", b"G", b"c", b"M", b"X", b"\x1b", b"j", b"."],
         },
         {
+            "name": "find-change-repeat-forward",
+            "initial_text": "alpha beta gamma\nalpha beta gamma\n",
+            "key_steps": [b"0", b"c", b"f", b"g", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "find-change-repeat-till",
+            "initial_text": "alpha beta gamma\nalpha beta gamma\n",
+            "key_steps": [b"0", b"c", b"t", b"g", b"X", b"\x1b", b"j", b"."],
+        },
+        {
+            "name": "find-change-repeat-backward-till",
+            "initial_text": "alpha beta gamma\nalpha beta gamma\n",
+            "key_steps": [b"$", b"c", b"T", b"b", b"X", b"\x1b", b"j", b"."],
+        },
+        {
             "name": "repeat-find-change",
             "initial_text": "alpha beta gamma\nalpha beta gamma\n",
             "key_steps": [b"0", b"c", b"t", b"g", b"X", b"\x1b", b"j", b";", b"."],
