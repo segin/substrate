@@ -2044,6 +2044,50 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "".join(f"line {i}\n" for i in range(1, 9)),
+        [b"j", b"\x05", b"r", b"Z"],
+        rows=5,
+        cols=20,
+    )
+    require(exit_code == 0, f"line-scroll-down vi exited with status {exit_code}")
+    require(saved == "line 1\nline 2\nZine 3\nline 4\nline 5\nline 6\nline 7\nline 8\n",
+            f"unexpected line-scroll-down buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "".join(f"line {i}\n" for i in range(1, 9)),
+        [b"j", b"2", b"\x05", b"r", b"Z"],
+        rows=5,
+        cols=20,
+    )
+    require(exit_code == 0, f"counted-line-scroll-down vi exited with status {exit_code}")
+    require(saved == "line 1\nline 2\nline 3\nZine 4\nline 5\nline 6\nline 7\nline 8\n",
+            f"unexpected counted line-scroll-down buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "".join(f"line {i}\n" for i in range(1, 9)),
+        [b"5", b"G", b"z", b"\r", b"\x19", b"r", b"Z"],
+        rows=5,
+        cols=20,
+    )
+    require(exit_code == 0, f"line-scroll-up vi exited with status {exit_code}")
+    require(saved == "line 1\nline 2\nline 3\nZine 4\nline 5\nline 6\nline 7\nline 8\n",
+            f"unexpected line-scroll-up buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "".join(f"line {i}\n" for i in range(1, 9)),
+        [b"5", b"G", b"z", b"\r", b"2", b"\x19", b"r", b"Z"],
+        rows=5,
+        cols=20,
+    )
+    require(exit_code == 0, f"counted-line-scroll-up vi exited with status {exit_code}")
+    require(saved == "line 1\nline 2\nZine 3\nline 4\nline 5\nline 6\nline 7\nline 8\n",
+            f"unexpected counted line-scroll-up buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "".join(f"line {i}\n" for i in range(1, 41)),
         [b"\x1b[6~", b"r", b"X", b"\x1b[5~", b"r", b"Y"],
     )

@@ -106,6 +106,7 @@ static int vi_display_col_for_index(line_t *cur, int idx);
 static line_t *vi_ensure_current_line(buffer_t *b);
 static int vi_replace_current_text(buffer_t *b, const char *text);
 static int vi_clamp_line_target(buffer_t *b, int line_no);
+static int vi_clamp_top_line(buffer_t *b, vi_visual_t *vis, int top_line);
 static void vi_move_word_forward_count(buffer_t *b, vi_visual_t *vis, int count);
 static void vi_move_word_backward_count(buffer_t *b, vi_visual_t *vis, int count);
 static void vi_page_scroll(buffer_t *b, vi_visual_t *vis, int direction);
@@ -1417,6 +1418,26 @@ vi_half_page_scroll(buffer_t *b, vi_visual_t *vis, int direction)
         }
     }
     vi_move_vertical(b, direction * page);
+}
+
+static void
+vi_line_scroll(buffer_t *b, vi_visual_t *vis, int direction)
+{
+    int old_top;
+    int new_top;
+    int delta;
+
+    if (!b->cur || b->line_count < 1) {
+        return;
+    }
+
+    old_top = vi_clamp_top_line(b, vis, vis->top_line);
+    new_top = vi_clamp_top_line(b, vis, old_top + direction);
+    delta = new_top - old_top;
+    vis->top_line = new_top;
+    if (delta != 0) {
+        vi_move_vertical(b, delta);
+    }
 }
 
 static int
@@ -5909,6 +5930,16 @@ exvi_visual_main(buffer_t *b)
             vis.pending_g = 0;
             vi_half_page_scroll(b, &vis, vi_take_count(&vis));
             break;
+        case 0x05:
+            vis.pending_g = 0;
+            {
+                int count = vi_take_count(&vis);
+
+                while (count-- > 0) {
+                    vi_line_scroll(b, &vis, 1);
+                }
+            }
+            break;
         case 0x06:
             vis.pending_g = 0;
             vi_page_scroll(b, &vis, vi_take_count(&vis));
@@ -5916,6 +5947,16 @@ exvi_visual_main(buffer_t *b)
         case 0x15:
             vis.pending_g = 0;
             vi_half_page_scroll(b, &vis, -vi_take_count(&vis));
+            break;
+        case 0x19:
+            vis.pending_g = 0;
+            {
+                int count = vi_take_count(&vis);
+
+                while (count-- > 0) {
+                    vi_line_scroll(b, &vis, -1);
+                }
+            }
             break;
         case 'D':
             vis.pending_g = 0;
