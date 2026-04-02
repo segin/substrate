@@ -2681,6 +2681,9 @@ vi_find_char_motion(buffer_t *b, vi_visual_t *vis, int ch, int forward, int till
 {
     int col;
 
+    vis->last_find_char = ch;
+    vis->last_find_forward = forward;
+    vis->last_find_till = till;
     if (!b->cur || vi_find_char_in_line(b->cur, vis->cursor_col, ch, forward, count, &col) != 0) {
         write(STDOUT_FILENO, "\a", 1);
         return;
@@ -2693,9 +2696,6 @@ vi_find_char_motion(buffer_t *b, vi_visual_t *vis, int ch, int forward, int till
         }
     }
     vis->cursor_col = col;
-    vis->last_find_char = ch;
-    vis->last_find_forward = forward;
-    vis->last_find_till = till;
 }
 
 static void
@@ -3656,7 +3656,7 @@ vi_search_once(buffer_t *b, regex_t *re, int forward, line_t *start_line, int st
             return 0;
         }
     }
-    if (vi_search_backward_in_line(start_line, re, start_col + 1,
+    if (vi_search_backward_in_line(start_line, re, start_col,
         (int)start_line->len, &col) == 0) {
         *line_out = start_line;
         *col_out = col;
@@ -3727,7 +3727,7 @@ vi_apply_search_linewise_motion(buffer_t *b, vi_visual_t *vis, int current_line_
 
     if (target_col != 0 || !target_line || target_line == b->cur) {
         if ((vis->pending_op == '>' || vis->pending_op == '<') &&
-            target_line == b->cur && target_col == 0) {
+            target_line == b->cur) {
             return vi_apply_linewise_operator(b, vis, current_line_no, current_line_no);
         }
         return -1;
@@ -4136,7 +4136,8 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         } else {
             write(STDOUT_FILENO, "\a", 1);
         }
-    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') &&
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' ||
+        vis->pending_op == '>' || vis->pending_op == '<') &&
         (key == 'f' || key == 'F' || key == 't' || key == 'T')) {
         int ch;
         int start;
@@ -4148,17 +4149,28 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             (key == 'f' || key == 't'),
             (key == 't' || key == 'T'),
             count, &start, &end) == 0) {
-            vi_delete_span(b, vis, start, end, vis->pending_op == 'c');
-            vis->last_find_char = ch;
-            vis->last_find_forward = (key == 'f' || key == 't');
-            vis->last_find_till = (key == 't' || key == 'T');
-            if (vis->pending_op == 'd') {
-                vi_set_last_change(vis, VI_REPEAT_D_FIND, count, 0);
+            if (vis->pending_op == '>' || vis->pending_op == '<') {
+                if (vi_apply_linewise_operator(b, vis, line_no, line_no) != 0) {
+                    write(STDOUT_FILENO, "\a", 1);
+                } else {
+                    vis->last_find_char = ch;
+                    vis->last_find_forward = (key == 'f' || key == 't');
+                    vis->last_find_till = (key == 't' || key == 'T');
+                }
+            } else {
+                vi_delete_span(b, vis, start, end, vis->pending_op == 'c');
+                vis->last_find_char = ch;
+                vis->last_find_forward = (key == 'f' || key == 't');
+                vis->last_find_till = (key == 't' || key == 'T');
+                if (vis->pending_op == 'd') {
+                    vi_set_last_change(vis, VI_REPEAT_D_FIND, count, 0);
+                }
             }
         } else {
             write(STDOUT_FILENO, "\a", 1);
         }
-    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y')
+    } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y' ||
+        vis->pending_op == '>' || vis->pending_op == '<')
         && (key == ';' || key == ',')) {
         int start;
         int forward = vis->last_find_forward;
@@ -4171,7 +4183,11 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             }
             if (vi_find_motion_span(b->cur, vis->cursor_col, vis->last_find_char,
                 forward, vis->last_find_till, count, &start, &end) == 0) {
-                if (vis->pending_op == 'y') {
+                if (vis->pending_op == '>' || vis->pending_op == '<') {
+                    if (vi_apply_linewise_operator(b, vis, line_no, line_no) != 0) {
+                        write(STDOUT_FILENO, "\a", 1);
+                    }
+                } else if (vis->pending_op == 'y') {
                     if (vi_yank_span(vis, b->cur, start, end) != 0) {
                         write(STDOUT_FILENO, "\a", 1);
                     }

@@ -3082,6 +3082,33 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "aa\nbb\ncc\ndd\n",
+        [b"g", b"g", b"0", b">", b"*", b">", b"n"],
+    )
+    require(exit_code == 0, f"visual-star-shift-repeat vi exited with status {exit_code}")
+    require(saved == "\t\taa\nbb\ncc\ndd\n",
+            f"unexpected visual-star-shift-repeat buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "aa\nbb\ncc\ndd\n",
+        [b"G", b"0", b">", b"#", b">", b"n"],
+    )
+    require(exit_code == 0, f"visual-hash-shift-repeat vi exited with status {exit_code}")
+    require(saved == "aa\nbb\ncc\n\t\tdd\n",
+            f"unexpected visual-hash-shift-repeat buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "aa\nbb\ncc\ndd\n",
+        [b"G", b"0", b"F", b"d", b">", b","],
+    )
+    require(exit_code == 0, f"visual-find-comma-shift vi exited with status {exit_code}")
+    require(saved == "aa\nbb\ncc\n\tdd\n",
+            f"unexpected visual-find-comma-shift buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "ab(cd\nef)gh\n",
         [b"0", b"f", b"(", b"d", b"%"],
     )
