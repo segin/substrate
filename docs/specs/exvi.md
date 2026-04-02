@@ -9,6 +9,7 @@ It began as the design baseline for refactoring the old monolithic `ex` and repl
 - Share one editor core so standalone `ex` and `vi` colon-command mode do not drift.
 - Reuse `lib/edit` where it reduces terminal duplication, without forcing full-screen `vi` into a line-editor architecture.
 - Prefer POSIX.1-2024 behavior first, with BSD/nvi-style behavior as the extension tie-breaker.
+- Retain documented, tested extensions that improve the editor contract; do not remove supported behavior solely because it is outside the strict POSIX/BSD baseline.
 
 ## Current Repository Reality
 
@@ -187,7 +188,7 @@ All other historical `ex` commands and aliases are currently outside the support
 
 #### 2.3 Buffer, undo, registers, and state model
 
-- [ ] Decide the supported undo/redo contract against the POSIX/BSD-first policy in this document, and record whether Substrate `vi` promises single-step undo, multi-step undo, redo, or a narrower deliberate subset.
+- [ ] Decide the supported undo/redo contract against the POSIX/BSD-first-plus-documented-extensions policy in this document, and record whether Substrate `vi` promises single-step undo, multi-step undo, redo, or a narrower deliberate subset.
 - [ ] If multi-step undo/redo remains in contract, replace the current single-snapshot model with explicit undo and redo transaction stacks shared by `ex` and `vi`.
 - [ ] Add direct unit/frontend tests for undo and redo across insert sessions, replace sessions, open-line commands, deletes/changes/yanks/puts, joins, and ex-driven edits.
 - [x] Audit exact trailing-newline, empty-buffer, and empty-file semantics across load, edit, write, append, preserve, and recover.
@@ -246,7 +247,7 @@ All other historical `ex` commands and aliases are currently outside the support
 - [x] Complete insert-mode editing conveniences that are still missing or only partially correct.
 - [x] Finish replace-mode semantics across tabs, short lines, newlines, and mixed insert/replace transitions.
 - [ ] Add `.` replay coverage for every supported change-entry command family: direct inserts (`i/a/I/A/o/O`), replace (`R`), charwise changes (`s`, `cl`, `ch`, `c0`, `c^`, `c$`, `ce`, `cE`, `cf/F/t/T`, `c;`, `c,`), linewise changes (`cc`, `c_`, `c+`, `c-`, `cH`, `cM`, `cL`), search-driven changes (`cn`, `cN`, `c*`, `c#`, `c/`, `c?`), match/mark changes (`c%`, `c'`, ``c` ``), and sentence/paragraph changes.
-- [ ] Add a direct PTY oracle matrix for each supported `.` replay family against the documented POSIX/BSD-first contract, using sanitized `vim` only as a secondary oracle where the documented behavior overlaps.
+- [ ] Add a direct PTY oracle matrix for each supported `.` replay family against the documented POSIX/BSD-first-plus-documented-extensions contract, using sanitized `vim` only as a secondary oracle where the documented behavior overlaps.
 - [ ] Introduce multi-step undo and redo stacks instead of the current single-snapshot model, with explicit transaction records for insert, replace, delete/change/yank/put, open-line, join, and ex-driven edits.
 - [ ] Define and test undo transaction boundaries so one insert session, one replace session, one open-line command, one `.` replay, and one ex command each undo as a single unit.
 - [ ] Define and test redo invalidation rules so any non-redo edit clears redo history and repeated redo replays the same transaction boundaries.
