@@ -70,6 +70,24 @@ queue_plus_command(const char *arg)
 }
 
 static int
+queue_tag_command(const char *tag)
+{
+    char *cmd;
+    int ret;
+
+    if (!tag || !*tag) {
+        return -1;
+    }
+
+    if (asprintf(&cmd, "tag %s", tag) < 0) {
+        return -1;
+    }
+    ret = exvi_add_startup_command(cmd);
+    free(cmd);
+    return ret;
+}
+
+static int
 invoked_as(const char *argv0, const char *name)
 {
     const char *base;
@@ -454,10 +472,16 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
     if (invoked_as(argv[0], "view")) {
         option_readonly = 1;
     }
-    while ((opt = getopt(argc, argv, "+c:sSvrR")) != -1) {
+    while ((opt = getopt(argc, argv, "+c:t:sSvrR")) != -1) {
         switch (opt) {
         case 'c':
             if (exvi_add_startup_command(optarg) != 0) {
+                fprintf(stderr, "%s: out of memory\n", exvi_progname);
+                exit(1);
+            }
+            break;
+        case 't':
+            if (queue_tag_command(optarg) != 0) {
                 fprintf(stderr, "%s: out of memory\n", exvi_progname);
                 exit(1);
             }
@@ -478,7 +502,7 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
             option_readonly = 1;
             break;
         default:
-            fprintf(stderr, "Usage: %s [-s] [-S] [-v] [-r] [-R] [-c cmd] [+cmd] [file ...]\n",
+            fprintf(stderr, "Usage: %s [-s] [-S] [-v] [-r] [-R] [-c cmd] [-t tag] [+cmd] [file ...]\n",
                 argv[0]);
             exit(1);
         }

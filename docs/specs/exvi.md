@@ -133,7 +133,7 @@ Completed architecture milestones already in tree are intentionally omitted here
 
 ### 1. Frontends, invocation, and startup semantics
 
-- [ ] Expand the shared option parser beyond the current `-s`, `-S`, `-v`, and `-r` baseline to the full supported `ex`/`vi` invocation contract.
+- [x] Expand the shared option parser beyond the current `-s`, `-S`, `-v`, and `-r` baseline to the full supported `ex`/`vi` invocation contract.
 - [x] Implement readonly/view-style startup behavior and option plumbing for both frontends.
 - [x] Decide and implement startup command forms such as `-c`, `+cmd`, and tag-startup options if they are part of the supported contract.
 - [x] Finish `ex`-to-`vi` and `vi`-to-`ex` mode handoff semantics so they match the documented frontend contract instead of only the current minimal path.

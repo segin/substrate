@@ -60,7 +60,7 @@ def run_vi_session(vi_path, initial_text, key_steps, final_timeout=0.3, rows=24,
             argv = [argv0 or vi_path]
             if extra_args:
                 argv.extend(extra_args)
-            if file_args:
+            if file_args is not None:
                 for arg in file_args:
                     if os.path.isabs(arg):
                         argv.append(arg)

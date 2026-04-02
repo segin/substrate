@@ -213,6 +213,22 @@ def main():
 
     exit_code, decoded, saved = helpers.run_vi_session(
         vi_path,
+        "",
+        [b":q!\r"],
+        final_keys=None,
+        extra_args=["-t", "two"],
+        file_args=[],
+        extra_files={
+            "target.txt": "alpha\nbeta\n",
+            "tags": "two\ttarget.txt\t2\n",
+        },
+    )
+    require(exit_code == 0, f"vi -t startup exited with status {exit_code}")
+    require("line 2/2" in decoded, "vi -t startup missing tag target status")
+    require(saved == "", f"vi -t startup unexpectedly modified default scratch file: {saved!r}")
+
+    exit_code, decoded, saved = helpers.run_vi_session(
+        vi_path,
         "one\n",
         [b":!true\r", b":q!\r"],
         final_keys=None,

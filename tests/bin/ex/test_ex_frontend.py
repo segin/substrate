@@ -34,9 +34,11 @@ def require(cond, msg):
 
 
 def run_ex_pty(ex_path, argv, initial_timeout=0.4, command=b"q!\n", final_timeout=0.2,
-               argv0=None):
+               argv0=None, cwd=None):
     pid, master_fd = pty.fork()
     if pid == 0:
+        if cwd is not None:
+            os.chdir(cwd)
         os.execv(ex_path, [argv0 or ex_path] + argv)
 
     initial = read_some(master_fd, initial_timeout)
@@ -97,6 +99,30 @@ def main():
                 f"ex -v non-tty stderr mismatch: {proc.stderr!r}")
     finally:
         os.unlink(path)
+
+    with tempfile.TemporaryDirectory(prefix="exvi-") as temp_dir:
+        target = os.path.join(temp_dir, "target.txt")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write("alpha\nbeta\n")
+        with open(os.path.join(temp_dir, "tags"), "w", encoding="utf-8") as f:
+            f.write("two\ttarget.txt\t2\n")
+
+        proc = subprocess.run([ex_path, "-s", "-t", "two"], input=b"1p\nq!\n",
+                              cwd=temp_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        require(proc.returncode == 0, f"ex -t batch status mismatch: {proc.returncode}")
+        require(proc.stdout.decode("latin1", "replace") == "beta\nalpha\n",
+                f"ex -t batch stdout mismatch: {proc.stdout!r}")
+        require(proc.stderr == b"", f"ex -t batch stderr mismatch: {proc.stderr!r}")
+
+        exit_code, initial, decoded = run_ex_pty(
+            ex_path,
+            ["-v", "-t", "two"],
+            command=b":q!\r",
+            final_timeout=0.4,
+            cwd=temp_dir,
+        )
+        require(exit_code == 0, f"ex -v -t status mismatch: {exit_code}")
+        require("line 2/2" in decoded, f"ex -v -t missing tag target status: {decoded!r}")
 
     proc = subprocess.run([ex_path, "-r"], input=b"",
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
