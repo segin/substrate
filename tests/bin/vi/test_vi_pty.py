@@ -3233,6 +3233,43 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+        [b"d", b"]", b"]"],
+    )
+    require(exit_code == 0, f"visual-section-delete-forward vi exited with status {exit_code}")
+    require(saved == "{\ntwo\n}\nthree\n{\nfour\n}\n",
+            f"unexpected visual-section-delete-forward buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+        [b"y", b"]", b"]", b"P"],
+    )
+    require(exit_code == 0, f"visual-section-yank-forward vi exited with status {exit_code}")
+    require(saved == "one\none\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            f"unexpected visual-section-yank-forward buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\n{\nthree\n}\n",
+        [b"c", b"]", b"]", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"visual-section-change-forward vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing visual-section-change insert status")
+    require(saved == "X\n{\nthree\n}\n",
+            f"unexpected visual-section-change-forward buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+        [b"G", b"d", b"[", b"["],
+    )
+    require(exit_code == 0, f"visual-section-delete-backward vi exited with status {exit_code}")
+    require(saved == "one\n{\ntwo\n}\nthree\n}\n",
+            f"unexpected visual-section-delete-backward buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "ab(cd\nef)gh\n",
         [b"g", b"g", b"l", b"l", b"m", b"a", b"j", b"`", b"a", b"r", b"Z"],
     )
