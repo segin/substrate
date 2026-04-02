@@ -801,6 +801,16 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "  abc\n",
+        [b"g", b"I", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"gI-basic vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing gI-basic insert status")
+    require(saved == "X  abc\n",
+            f"unexpected gI-basic buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "",
         [b"i", b"X", b"Y", b"\x1b"],
     )
@@ -808,6 +818,16 @@ def main():
     require("-- INSERT --" in decoded, "missing empty-insert insert status")
     require(saved == "XY\n",
             f"unexpected empty-insert buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc\n",
+        [b"i", b"X", b"Y", b"\x1b", b"0", b"g", b"i", b"Z", b"\x1b"],
+    )
+    require(exit_code == 0, f"gi-basic vi exited with status {exit_code}")
+    require(decoded.count("-- INSERT --") >= 2, "missing gi-basic insert re-entry status")
+    require(saved == "XYZabc\n",
+            f"unexpected gi-basic buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
