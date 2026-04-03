@@ -236,7 +236,7 @@ static int elf_machine_matches_kernel(const Elf32_Ehdr *ehdr) {
 #if defined(__i386__)
     if (ehdr->e_ident[EI_CLASS] != ELFCLASS32 || ehdr->e_machine != EM_386) {
         char buf[96];
-        sprintf(buf, "ELF: Unsupported machine/class for i386 kernel (machine=%u class=%u)\n",
+        snprintf(buf, sizeof(buf), "ELF: Unsupported machine/class for i386 kernel (machine=%u class=%u)\n",
                 (unsigned int)ehdr->e_machine, (unsigned int)ehdr->e_ident[EI_CLASS]);
         kprint(buf);
         return 0;
@@ -244,7 +244,7 @@ static int elf_machine_matches_kernel(const Elf32_Ehdr *ehdr) {
 #elif defined(__x86_64__)
     if (ehdr->e_ident[EI_CLASS] != ELFCLASS64 || ehdr->e_machine != EM_X86_64) {
         char buf[96];
-        sprintf(buf, "ELF: Unsupported machine/class for x86_64 kernel (machine=%u class=%u)\n",
+        snprintf(buf, sizeof(buf), "ELF: Unsupported machine/class for x86_64 kernel (machine=%u class=%u)\n",
                 (unsigned int)ehdr->e_machine, (unsigned int)ehdr->e_ident[EI_CLASS]);
         kprint(buf);
         return 0;

@@ -11,6 +11,7 @@
 #include <kern/sched.h>
 #include <kern/time.h>
 #include <stdio.h>
+#include <sys/lock.h>
 #include <sys/tty.h>
 #include <sys/vt.h>
 #include <sys/vtio.h>
@@ -47,6 +48,7 @@ static int dirty_y2 = 0;
 static unsigned int dirty_ticks = 0;
 static int fb_console_tty_count = 0;
 static vt_state_t *fb_current_vt_ctx = NULL;
+static spinlock_t fb_console_lock = SPINLOCK_INIT("fb_console");
 
 #define FB_CONSOLE_FLUSH_HZ 60U
 
@@ -54,6 +56,7 @@ static int fb_console_cursor_should_be_visible(void);
 static void fb_console_mark_dirty(int x, int y, int w, int h);
 static void fb_console_hide_cursor(void);
 static void fb_console_show_cursor(void);
+static const struct ansi_callbacks fb_ansi_cb;
 
 static const uint32_t fb_console_palette[16] = {
     0x00000000U, 0x000000AAU, 0x0000AA00U, 0x0000AAAAU,
@@ -205,11 +208,11 @@ static void fb_console_update_cursor_locked(vt_state_t *vt) {
     fb_console_show_cursor();
 }
 
-static void fb_console_sync_buffer_row_locked(vt_state_t *vt, int row) {
+void fb_console_sync_row(vt_state_t *vt, int row) {
     int col;
     size_t base;
 
-    if (!vt || row < 0 || row >= vt_get_visible_height()) {
+    if (!vt || row < 0 || row >= vt_get_height()) {
         return;
     }
 
@@ -219,6 +222,87 @@ static void fb_console_sync_buffer_row_locked(vt_state_t *vt, int row) {
         fb_console_draw_cell_at(col, row, (unsigned char)(entry & 0xFFU),
                                 (uint8_t)(entry >> 8), 0);
     }
+}
+
+int fb_console_active(void) {
+    return fb_active;
+}
+
+void fb_console_redraw_active(void) {
+    vt_state_t *vt;
+    int row;
+    int col;
+
+    vt = vt_get_state(vt_get_active());
+    if (!fb_console_active() || !vt) {
+        return;
+    }
+
+    spinlock_acquire(&fb_console_lock);
+    view_y_offset = 0;
+    if (fb.set_viewport) {
+        fb.set_viewport(0, 0);
+    }
+    (void)video_set_viewport(0, 0);
+    fb_console_hide_cursor();
+    for (row = 0; row < vt_get_visible_height(); row++) {
+        for (col = 0; col < vt_get_width(); col++) {
+            uint16_t entry = vt_get_display_cell(vt, row, col);
+
+            fb_console_draw_cell_at(col, row, (unsigned char)(entry & 0xFFU),
+                                    (uint8_t)(entry >> 8), 0);
+        }
+    }
+    fb_console_sync_row(vt, vt_get_status_row());
+    fb_console_update_cursor_locked(vt);
+    spinlock_release(&fb_console_lock);
+}
+
+void fb_console_draw_statusline(const char *line, int cols, int row) {
+    int col;
+    vt_state_t *vt;
+
+    vt = vt_get_state(vt_get_active());
+    if (!fb_console_active() || !line || !vt) {
+        return;
+    }
+    if (cols < 1) {
+        return;
+    }
+    if (cols > vt_get_width()) {
+        cols = vt_get_width();
+    }
+    if (row < 0 || row >= vt_get_height()) {
+        return;
+    }
+    if (spinlock_is_held(&fb_console_lock)) {
+        return;
+    }
+
+    spinlock_acquire(&fb_console_lock);
+    fb_console_hide_cursor();
+    for (col = 0; col < cols; col++) {
+        fb_console_draw_cell_at(col, row, (unsigned char)line[col], 0x70, 0);
+    }
+    fb_console_update_cursor_locked(vt);
+    spinlock_release(&fb_console_lock);
+}
+
+void fb_console_refresh_statusline(void) {
+    vt_state_t *vt;
+
+    vt = vt_get_state(vt_get_active());
+    if (!fb_console_active() || !vt) {
+        return;
+    }
+    if (spinlock_is_held(&fb_console_lock)) {
+        return;
+    }
+
+    spinlock_acquire(&fb_console_lock);
+    fb_console_sync_row(vt, vt_get_status_row());
+    fb_console_update_cursor_locked(vt);
+    spinlock_release(&fb_console_lock);
 }
 
 static void fb_console_store_cell_locked(vt_state_t *vt,
@@ -231,7 +315,7 @@ static void fb_console_store_cell_locked(vt_state_t *vt,
     uint8_t effective;
 
     if (!vt || col < 0 || row < 0 ||
-        col >= vt_get_width() || row >= vt_get_visible_height()) {
+        col >= vt_get_width() || row >= vt_get_height()) {
         return;
     }
 
@@ -432,11 +516,13 @@ static void fb_console_scroll_region_up_locked(vt_state_t *vt, int top, int bott
     if (vt->id == vt_get_active()) {
         if (top == 0 && bottom == vt_get_visible_height() - 1 && n == 1 &&
             fb_console_smooth_scroll_fullscreen(clear_color)) {
+            fb_console_sync_row(vt, vt_get_status_row());
             return;
         }
         for (row = top; row <= bottom; row++) {
-            fb_console_sync_buffer_row_locked(vt, row);
+            fb_console_sync_row(vt, row);
         }
+        fb_console_sync_row(vt, vt_get_status_row());
     }
 }
 
@@ -467,7 +553,7 @@ static void fb_console_scroll_region_down_locked(vt_state_t *vt, int top, int bo
     }
     if (vt->id == vt_get_active()) {
         for (row = top; row <= bottom; row++) {
-            fb_console_sync_buffer_row_locked(vt, row);
+            fb_console_sync_row(vt, row);
         }
     }
 }
@@ -754,7 +840,7 @@ static void fb_cb_insert_chars(int n) {
         vt->buffer[row * width + x] = empty;
     }
     if (vt->id == vt_get_active()) {
-        fb_console_sync_buffer_row_locked(vt, row);
+        fb_console_sync_row(vt, row);
     }
 }
 
@@ -779,7 +865,7 @@ static void fb_cb_delete_chars(int n) {
         vt->buffer[row * width + x] = empty;
     }
     if (vt->id == vt_get_active()) {
-        fb_console_sync_buffer_row_locked(vt, row);
+        fb_console_sync_row(vt, row);
     }
 }
 
@@ -921,7 +1007,7 @@ static void fb_cb_set_alt_screen(int on) {
         vt->alt_screen_active = 0;
         if (vt->id == vt_get_active()) {
             for (int row = 0; row < visible_rows; row++) {
-                fb_console_sync_buffer_row_locked(vt, row);
+                fb_console_sync_row(vt, row);
             }
         }
     }
@@ -931,6 +1017,22 @@ static void fb_cb_set_bracketed_paste(int on) {
     if (fb_current_vt_ctx) {
         fb_current_vt_ctx->bracketed_paste = on ? 1 : 0;
     }
+}
+
+static void fb_console_write_vt_locked(vt_state_t *vt, const char *buf, size_t len) {
+    size_t i;
+
+    if (!vt || !buf || len == 0) {
+        return;
+    }
+
+    fb_console_hide_cursor();
+    fb_current_vt_ctx = vt;
+    for (i = 0; i < len; i++) {
+        ansi_process(&vt->ansi, buf[i], &fb_ansi_cb);
+    }
+    fb_console_update_cursor_locked(vt);
+    fb_current_vt_ctx = NULL;
 }
 
 static const struct ansi_callbacks fb_ansi_cb = {
@@ -1017,7 +1119,6 @@ static void fb_vt_tty_remove(struct tty_driver *driver, struct tty *tty) {
 
 static int fb_vt_tty_write(struct tty *tty, const unsigned char *buf, int count) {
     vt_state_t *vt;
-    int i;
 
     if (!tty || !buf || count <= 0) {
         return 0;
@@ -1028,13 +1129,9 @@ static int fb_vt_tty_write(struct tty *tty, const unsigned char *buf, int count)
         return -1;
     }
 
-    fb_console_hide_cursor();
-    fb_current_vt_ctx = vt;
-    for (i = 0; i < count; i++) {
-        ansi_process(&vt->ansi, (char)buf[i], &fb_ansi_cb);
-    }
-    fb_console_update_cursor_locked(vt);
-    fb_current_vt_ctx = NULL;
+    spinlock_acquire(&fb_console_lock);
+    fb_console_write_vt_locked(vt, (const char *)buf, (size_t)count);
+    spinlock_release(&fb_console_lock);
     return count;
 }
 
@@ -1116,6 +1213,22 @@ static struct tty_driver fb_vt_driver = {
     .ioctl = fb_vt_tty_ioctl,
 };
 
+static int fb_console_get_terminal_size(int *cols, int *rows) {
+    if (!fb_active || !cols || !rows || fb.width == 0 || fb.height == 0) {
+        return -1;
+    }
+
+    *cols = (int)(fb.width / FB_FONT_WIDTH);
+    *rows = (int)(fb.height / FB_FONT_HEIGHT);
+    if (*cols < 1) {
+        *cols = 1;
+    }
+    if (*rows < 2) {
+        *rows = 2;
+    }
+    return 0;
+}
+
 static void fb_console_init_ttys_once(void) {
     struct tty *tty;
     vt_state_t *vt;
@@ -1132,6 +1245,15 @@ static void fb_console_init_ttys_once(void) {
             continue;
         }
         if (vt->tty) {
+            if (vt->tty->driver != &fb_vt_driver) {
+                vt->tty->driver = &fb_vt_driver;
+                if (fb_vt_tty_install(&fb_vt_driver, vt->tty) != 0) {
+                    continue;
+                }
+                if (i == vt_get_active()) {
+                    console_set_tty(vt->tty);
+                }
+            }
             if (fb_console_tty_count < i + 1) {
                 fb_console_tty_count = i + 1;
             }
@@ -1432,6 +1554,7 @@ static void fb_console_flush_dirty_internal(void) {
 /* ==================== Console Backend ==================== */
 
 static void fb_console_clear(void) {
+    spinlock_acquire(&fb_console_lock);
     cursor_drawn = 0;
     cursor_saved_valid = 0;
     cursor_blink_phase = 1;
@@ -1453,30 +1576,44 @@ static void fb_console_clear(void) {
     }
     fb_console_mark_dirty(0, 0, (int)fb.width, (int)fb.height);
     fb_console_show_cursor();
+    spinlock_release(&fb_console_lock);
+}
+
+static void fb_console_backend_write(const char *data, size_t len) {
+    vt_state_t *vt;
+
+    if (!fb_console_active() || !data || len == 0) {
+        return;
+    }
+
+    vt = vt_get_state(vt_get_active());
+    if (!vt) {
+        return;
+    }
+
+    spinlock_acquire(&fb_console_lock);
+    fb_console_write_vt_locked(vt, data, len);
+    spinlock_release(&fb_console_lock);
 }
 
 static console_backend_t fb_console_backend = {
     .name = "framebuffer",
-    .write = fb_write,
+    .write = fb_console_backend_write,
     .putchar = NULL,
-    .clear = NULL
+    .clear = NULL,
+    .get_terminal_size = fb_console_get_terminal_size,
 };
 
 void fb_console_init(void) {
     fb_console_backend.clear = fb_console_clear;
     console_register(&fb_console_backend);
 
-    /* Adjust VT geometry to match framebuffer character dimensions */
-    if (fb_active && fb.width > 0 && fb.height > 0) {
-        int cols = (int)(fb.width / FB_FONT_WIDTH);
-        int rows = (int)(fb.height / FB_FONT_HEIGHT);
-        if (cols < 1) cols = 1;
-        if (rows < 2) rows = 2;  /* VT requires at least 2 rows */
-        vt_set_geometry(cols, rows);
-    }
+    (void)vt_refresh_geometry_from_terminal();
 
     fb_console_init_ttys_once();
     fb_console_refresh_tty_winsizes();
+    fb_console_redraw_active();
+    vt_render_statusline(vt_get_state(vt_get_active()));
 }
 
 /* ==================== Character Rendering ==================== */
@@ -1755,6 +1892,10 @@ void fb_console_reset_dirty(void) {
 void fb_console_tick(void) {
     vt_state_t *vt = vt_get_state(vt_get_active());
 
+    if (spinlock_is_held(&fb_console_lock)) {
+        return;
+    }
+    spinlock_acquire(&fb_console_lock);
     if (vt && vt->cursor_visible) {
         if (!vt->cursor_blink) {
             cursor_blink_ticks = 0;
@@ -1781,6 +1922,7 @@ void fb_console_tick(void) {
     }
 
     if (!dirty_valid) {
+        spinlock_release(&fb_console_lock);
         return;
     }
 
@@ -1788,4 +1930,5 @@ void fb_console_tick(void) {
     if (dirty_ticks >= fb_console_flush_period_ticks()) {
         fb_console_flush_dirty_internal();
     }
+    spinlock_release(&fb_console_lock);
 }
