@@ -58,7 +58,9 @@ typedef struct scsi_ioctl_cmd {
     uint32_t data_len;
     void    *data;
     uint8_t  sense[18];
+    uint8_t  sense_len;
     uint8_t  status;
+    uint32_t data_xfer;
     int      error;
 } scsi_ioctl_cmd_t;
 
@@ -119,13 +121,19 @@ static int sg_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     }
     
     case SCSI_IOCTL_SEND_CMD: {
+        scsi_request_t *req = NULL;
+        uint32_t copy_len = 0;
+        int ret;
+
         if (!arg) return -EINVAL;
         if (!current_process || current_process->euid != 0) return -EPERM;
         scsi_ioctl_cmd_t kcmd;
         if (copyin(arg, &kcmd, sizeof(kcmd)) != 0) return -EFAULT;
 
         /* Validate CDB length */
-        if (kcmd.cdb_len > sizeof(kcmd.cdb)) return -EINVAL;
+        if (kcmd.cdb_len == 0 || kcmd.cdb_len > sizeof(kcmd.cdb)) return -EINVAL;
+        if (kcmd.direction > 2) return -EINVAL;
+        if (kcmd.data_len != 0 && kcmd.data == NULL) return -EINVAL;
 
         /* Limit data length to avoid excessive kernel allocation (64KB) */
         if (kcmd.data_len > 65536) return -EINVAL;
@@ -146,25 +154,54 @@ static int sg_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         uint16_t flags = 0;
         if (kcmd.direction == 1) flags = SCSI_REQ_READ;
         else if (kcmd.direction == 2) flags = SCSI_REQ_WRITE;
-        
-        int ret = scsi_execute_sync(sg->dev, kcmd.cdb, kcmd.cdb_len,
-                                     kdata, kcmd.data_len,
-                                     flags, 30000);
 
+        req = scsi_request_alloc();
+        if (!req) {
+            if (kdata) kfree(kdata, kcmd.data_len);
+            return -ENOMEM;
+        }
+
+        scsi_request_init(req, sg->dev);
+        memcpy(req->cdb, kcmd.cdb, kcmd.cdb_len);
+        req->cdb_len = kcmd.cdb_len;
+        req->data = kdata;
+        req->data_len = kcmd.data_len;
+        req->flags = flags | SCSI_REQ_SYNC;
+        req->timeout_ms = 30000;
+
+        ret = scsi_execute(req);
+
+        memset(kcmd.sense, 0, sizeof(kcmd.sense));
         kcmd.error = ret;
+        kcmd.status = req->status;
+        kcmd.data_xfer = req->data_xfer;
+        kcmd.sense_len = req->sense_len;
+        if (kcmd.sense_len > sizeof(kcmd.sense)) {
+            kcmd.sense_len = sizeof(kcmd.sense);
+        }
+        if (kcmd.sense_len != 0) {
+            memcpy(kcmd.sense, req->sense, kcmd.sense_len);
+        }
 
         if (ret >= 0 && kcmd.direction == 1 && kcmd.data_len > 0) { /* READ */
-            if (copyout(kdata, kcmd.data, kcmd.data_len) != 0) {
+            copy_len = req->data_xfer;
+            if (copy_len > kcmd.data_len) {
+                copy_len = kcmd.data_len;
+            }
+            if (copy_len != 0 && copyout(kdata, kcmd.data, copy_len) != 0) {
+                scsi_request_free(req);
                 if (kdata) kfree(kdata, kcmd.data_len);
                 return -EFAULT;
             }
         }
 
         if (copyout(&kcmd, arg, sizeof(kcmd)) != 0) {
+            scsi_request_free(req);
             if (kdata) kfree(kdata, kcmd.data_len);
             return -EFAULT;
         }
 
+        scsi_request_free(req);
         if (kdata) kfree(kdata, kcmd.data_len);
         return ret;
     }

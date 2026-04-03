@@ -202,6 +202,13 @@ struct dirent *ext2_readdir(fs_node_t *node, uint64_t index);
 fs_node_t *ext2_finddir(fs_node_t *node, char *name);
 int ext2_readlink(fs_node_t *node, char *buf, size_t size);
 int ext2_truncate(fs_node_t *node, off_t length);
+int ext2_mkdir(fs_node_t *node, const char *name, uint16_t permission);
+int ext2_rmdir(fs_node_t *node, const char *name);
+int ext2_unmount(fs_node_t *node);
+int ext2_link(fs_node_t *parent, fs_node_t *source, const char *name);
+int ext2_unlink(fs_node_t *node, const char *name);
+int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_parent, const char *new_name);
+int ext2_statfs(fs_node_t *node, struct statfs *buf);
 
 // Helpers
 int ext2_find_next_zero_bit(void *bitmap, uint32_t total_bits, uint32_t start, uint32_t end, uint32_t *found_idx);

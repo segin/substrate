@@ -177,6 +177,20 @@ static void test_attach_cdrom_uses_2048_sector_size(void) {
     assert(last_registered->sector_size == 2048);
 }
 
+static void test_attach_optical_keeps_reported_sector_size(void) {
+    scsi_device_t dev;
+
+    reset_state();
+    memset(&dev, 0, sizeof(dev));
+    dev.type = SCSI_TYPE_OPTICAL;
+    dev.capacity = 321;
+    dev.sector_size = 512;
+
+    assert(scsi_dev_attach(&dev) == 0);
+    assert(last_registered != NULL);
+    assert(last_registered->sector_size == 512);
+}
+
 static void test_attach_reads_capacity_when_missing(void) {
     scsi_device_t dev;
 
@@ -315,6 +329,7 @@ static void test_worm_write_is_rejected(void) {
 int main(void) {
     test_attach_disk_and_lookup();
     test_attach_cdrom_uses_2048_sector_size();
+    test_attach_optical_keeps_reported_sector_size();
     test_attach_reads_capacity_when_missing();
     test_attach_assigns_sequential_names();
     test_attach_rejects_non_block_types();

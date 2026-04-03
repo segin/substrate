@@ -410,3 +410,19 @@ void bcopy(const void *src, void *dst, size_t n) { memmove(dst, src, n); }
 int  bcmp(const void *s1, const void *s2, size_t n) { return memcmp(s1, s2, n); }
 char *index(const char *s, int c)  { return strchr(s, c); }
 char *rindex(const char *s, int c) { return strrchr(s, c); }
+
+/* In the C/POSIX locale, strcoll is identical to strcmp */
+int strcoll(const char *s1, const char *s2) {
+    return strcmp(s1, s2);
+}
+
+/* In the C/POSIX locale, strxfrm copies the string unchanged */
+size_t strxfrm(char *dest, const char *src, size_t n) {
+    size_t len = strlen(src);
+    if (n > 0) {
+        size_t copy = len < n ? len : n - 1;
+        memcpy(dest, src, copy);
+        dest[copy] = '\0';
+    }
+    return len;
+}

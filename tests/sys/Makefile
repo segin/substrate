@@ -3,30 +3,20 @@ include ../../Makefile.inc
 CFLAGS = -m32 -Wall -Wextra -Werror -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -std=c2x -nostdinc -I../../sys/include -I../../include -I/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include -ffreestanding -nostdlib -fno-builtin -fno-pie -I../../sys -I. -I../../sys/arch/i386 -I../..
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
-SRCS = test_runner.c test_mmap.c test_pmap.c property_pmap_protect.c test_vm_expanded.c test_pid.c test_unlink.c property_unlink.c test_link.c property_link.c test_cow_stats.c test_vm_map.c test_vm_map_benchmark.c test_vm_object.c test_vm_fault.c test_vm_cow.c test_vm_pager.c test_vm_policy.c test_uma.c test_futex.c test_futex_private.c test_ntsync.c test_geom.c test_pte_user.c test_stacktrace.c test_ksyms.c test_mmap_parsing.c test_e820_parsing.c test_vm_phys.c test_vm_page_queue.c test_pmm_watermark.c test_pmm_buddy.c test_vfs_mkdir.c test_scsi.c test_signal.c test_bitness.c test_rng.c test_ps2.c test_minix_mount.c test_minix_write.c test_minix_inode.c test_mount.c test_device_struct.c test_driver_struct.c test_bus_struct.c test_resource_struct.c test_device_create.c test_device_register.c test_device_unregister.c test_device_refcount.c test_device_find_child.c test_device_probe.c test_deferred_probe.c test_device_pm.c test_device_shutdown.c test_device_reset.c test_driver_register.c test_driver_unregister.c test_driver_attach.c test_driver_detach.c test_printf_new.c test_printf_flags.c test_printf_plus.c test_printf_space.c test_printf_hash.c test_printf_zero.c test_printf_width.c test_printf_octal.c test_udf_write.c test_udf.c test_sigstop.c test_bus_match.c test_driver_override.c test_vfs_error.c test_console_perf.c test_sysinfo.c test_kthread_create.c test_fb_perf.c test_fb_modes.c test_string.c test_sysctl.c test_sysctl_handlers.c test_pmap_cow_perf.c test_ide_perf.c test_ext2_perf.c test_ext2_read_perf.c test_sched_perf.c vnode_ops_test.c test_printf_star.c test_printf_specifiers.c test_printf_vsnprintf.c test_kvasprintf.c test_getcwd.c test_vnode_lock.c test_vnode_reclaim.c test_vnode_hold.c test_vhold_vdrop.c test_vclean.c test_vnode_init.c test_mem.c test_div64.c test_crc32.c test_dev_null_full_zero.c test_ldt.c test_linux_personality.c test_native_personality.c test_tty.c
+SRCS = test_runner.c test_mmap.c test_pmap.c property_pmap_protect.c test_vm_expanded.c test_pid.c test_unlink.c property_unlink.c test_link.c property_link.c test_cow_stats.c test_vm_map.c test_vm_map_benchmark.c test_vm_object.c test_vm_fault.c test_vm_cow.c test_vm_pager.c test_vm_policy.c test_uma.c test_futex.c test_futex_private.c test_ntsync.c test_geom.c test_pte_user.c test_stacktrace.c test_ksyms.c test_mmap_parsing.c test_e820_parsing.c test_vm_phys.c test_vm_page_queue.c test_pmm_watermark.c test_pmm_buddy.c test_vfs_mkdir.c test_scsi.c test_signal.c test_bitness.c test_rng.c test_ps2.c test_minix_mount.c test_minix_write.c test_minix_inode.c test_mount.c test_device_struct.c test_driver_struct.c test_bus_struct.c test_resource_struct.c test_device_create.c test_device_register.c test_device_unregister.c test_device_refcount.c test_device_find_child.c test_device_probe.c test_deferred_probe.c test_device_pm.c test_device_shutdown.c test_device_reset.c test_driver_register.c test_driver_unregister.c test_driver_attach.c test_driver_detach.c test_printf_new.c test_printf_flags.c test_printf_plus.c test_printf_space.c test_printf_hash.c test_printf_zero.c test_printf_width.c test_printf_octal.c test_udf_write.c test_udf.c test_sigstop.c test_bus_match.c test_driver_override.c test_vfs_error.c test_console_perf.c test_sysinfo.c test_kthread_create.c test_fb_perf.c test_fb_modes.c test_string.c test_sysctl.c test_sysctl_handlers.c test_pmap_cow_perf.c test_ide_perf.c test_ext2_perf.c test_ext2_read_perf.c test_sched_perf.c vnode_ops_test.c test_printf_star.c test_printf_specifiers.c test_printf_vsnprintf.c test_kvasprintf.c test_getcwd.c test_vnode_lock.c test_vnode_reclaim.c test_vnode_hold.c test_vhold_vdrop.c test_vdrop.c test_vclean.c test_vnode_init.c test_mem.c test_div64.c test_crc32.c test_dev_null_full_zero.c test_ldt.c test_linux_personality.c test_tty.c
 # test_wait_logic.c is for host-only testing via verify_wait_host.sh
 # Add more tests here: test_mmap.c test_gdt.c etc.
 # property_pmap.c needs fixing (missing headers) maybe? Excluding for now to ensure build.
 
 SRCS += test_minix_readdir.c
 SRCS += test_ide_dma.c test_ide_qemu.c
-SRCS += bench_sched.c bench_sched_dequeue.c test_kobject.c test_vfs_cache.c test_vnode_cache.c test_vfs_busy.c
+SRCS += bench_sched.c bench_sched_dequeue.c test_kobject.c test_vfs_cache.c test_vfs_busy.c
 SRCS += test_nanosleep.c test_reboot.c test_pipe_race.c test_chacha20.c
 SRCS += test_floppy_qemu.c
-SRCS += test_vnode_create.c test_vgone.c test_vnode_ref.c test_rusage.c test_mknod_fs.c
-SRCS += test_brk.c
 
 OBJS = $(SRCS:.c=.o)
 
-HOST_TESTS = host_test_udf_read_file host_test_kmem_test host_test_udf_large_write host_test_udf_truncate_expand host_test_minix_vuln host_test_crc32 host_test_compat_lseek32 host_test_elf_execve_toctou host_test_negdi2 host_test_string host_test_div64 host_test_printf_specifiers host_test_printf_vsnprintf host_test_kvasprintf host_test_vm_swap host_test_wait_bench host_test_acct_compress host_test_procfs host_test_kern_write host_test_cmdline property_cmdline host_test_perso_netbsd_rusage host_test_input_subsys host_test_compat host_test_keyboard host_test_mouse host_test_ps2 host_test_vt host_test_tty_console host_test_udf_read_vds host_test_udf_read_fe host_test_udf_read_fsd host_test_udf_read_tag host_test_udf_find_avdp host_test_ext2_read_block host_test_ext2_free_block host_test_ext2_alloc_inode_block host_test_ext2_readlink host_test_ext2_get_block_num host_test_ext2_get_blocks_extent host_test_fat_get_next_cluster host_test_fat_mount host_test_ntsync_fd host_test_uma_redzone host_test_uma_poison host_test_uma_coloring host_test_uma_depot host_test_uma_reclaim host_test_fat_inode_identity host_test_vm_kmem host_test_smp_discovery host_test_lapic host_test_percpu host_test_sched_ipi host_test_sched_steal host_test_sched_core host_test_sched_reap host_test_pmap_shootdown host_test_futex host_test_itimer host_test_gdt_iomap host_test_vm86 host_test_panic_diag host_test_idt_diag host_test_debug_dump host_test_devfs_register host_test_device_publish host_test_driver_register_attach host_test_isa host_test_kobject host_test_scsi_ctl host_test_scsi_core host_test_atapi_scsi host_test_scsi_nodes host_test_scsi_dev host_test_virtio_scsi host_test_fb_multiboot host_test_efi_gop host_test_fb_vga_mode host_test_vga_mode12 host_test_ide_identify host_test_ide_pci host_test_ide_prdt host_test_pci_config host_test_pci_scan host_test_pci_device host_test_pci_bar host_test_pci_caps host_test_pci_hotplug host_test_pci_ecam host_test_resource host_test_ioremap host_test_x86_64_gdt host_test_x86_64_idt host_test_x86_64_syscall host_test_x86_64_asm host_test_elks_aout host_test_exec_init host_test_elks_load_plan host_test_proc_fcntl host_test_i386_sched_ldt host_test_ldt_fuzz host_test_ldt_codec host_test_ldt_race host_test_ldt_lifecycle host_test_elks_core host_test_perso_elks host_test_elks_ptr_translation host_test_elks_exec_state host_test_elks_stack_image host_test_elks_syscall_abi host_test_elks_data_bounds host_test_elks_stack_bounds host_test_elks_segments host_test_floppy host_test_dma host_test_irq host_test_vdrop_panic host_test_linux_signal
-
-all: tests.bin $(HOST_TESTS)
-
-tests.bin: $(OBJS)
-	$(LD) $(LDFLAGS) -T tests.ld -o $@ $(OBJS)
-
-%.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
+HOST_TESTS = host_test_udf_read_file host_test_kmem_test host_test_udf_large_write host_test_udf_truncate_expand host_test_minix_vuln host_test_crc32 host_test_compat_stat host_test_compat_lseek32 host_test_elf_execve_toctou host_test_negdi2 host_test_string host_test_div64 host_test_printf_specifiers host_test_printf_vsnprintf host_test_vm_swap host_test_wait_bench host_test_acct_compress host_test_procfs host_test_kern_write host_test_cmdline property_cmdline host_test_perso_netbsd_rusage host_test_input_subsys host_test_compat host_test_keyboard host_test_ps2 host_test_udf_read_vds host_test_udf_read_fe host_test_udf_read_fsd host_test_udf_read_tag host_test_udf_find_avdp host_test_ext2_read_block host_test_ext2_free_block host_test_ext2_alloc_inode_block host_test_ext2_readlink host_test_ext2_get_block_num host_test_ext2_get_blocks_extent host_test_fat_get_next_cluster host_test_fat_mount host_test_fat_file_read host_test_ntsync_fd host_test_uma_redzone host_test_uma_poison host_test_uma_coloring host_test_uma_depot host_test_uma_reclaim host_test_fat_inode_identity host_test_vm_kmem host_test_smp_discovery host_test_lapic host_test_percpu host_test_sched_ipi host_test_sched_steal host_test_sched_core host_test_sched_reap host_test_pmap_shootdown host_test_futex host_test_itimer host_test_gdt_iomap host_test_vm86 host_test_panic_diag host_test_idt_diag host_test_debug_dump host_test_devfs_register host_test_device_publish host_test_driver_register_attach host_test_isa host_test_kobject host_test_scsi_ctl host_test_scsi_core host_test_atapi_scsi host_test_scsi_nodes host_test_scsi_dev host_test_ide_identify host_test_ide_pci host_test_ide_prdt host_test_ide_power host_test_nvme host_test_pci_config host_test_pci_scan host_test_pci_device host_test_pci_bar host_test_pci_caps host_test_pci_hotplug host_test_pci_ecam host_test_resource host_test_ioremap host_test_x86_64_gdt host_test_x86_64_idt host_test_x86_64_syscall host_test_x86_64_asm host_test_elks_aout host_test_exec_init host_test_elks_load_plan host_test_elks_segments host_test_elks_stack_bounds host_test_elks_data_bounds host_test_elks_syscall_abi host_test_elks_stack_image host_test_elks_exec_state host_test_elks_ptr_translation host_test_perso_elks host_test_elks_core host_test_ldt_lifecycle host_test_ldt_race host_test_ldt_codec host_test_ldt_fuzz host_test_i386_sched_ldt host_test_proc_fcntl host_test_virtio_scsi
 
 host_test_pci_config: host_test_pci_config.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_pci_config.c -o $@
@@ -109,9 +99,6 @@ host_test_gdt_iomap: host_test_gdt_iomap.c
 host_test_vm86: host_test_vm86.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I../../sys/arch/i386 -I. host_test_vm86.c -o $@
 
-host_test_linux_signal: host_test_linux_signal.c ../../sys/exec/perso/perso_linux.c ../../sys/exec/perso/linux/linux_sig.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_linux_signal.c -o $@
-
 host_test_panic_diag: host_test_panic_diag.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_panic_diag.c -o $@
 
@@ -139,35 +126,20 @@ host_test_tty_jobctl: host_test_tty_jobctl.c
 host_test_kobject: host_test_kobject.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_kobject.c -o $@
 
-host_test_scsi_ctl: host_test_scsi_ctl.c ../../sys/drivers/storage/scsi/scsi_ctl.c ../../sys/drivers/storage/scsi/scsi.h
+host_test_scsi_ctl: host_test_scsi_ctl.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_scsi_ctl.c -o $@
 
-host_test_scsi_core: host_test_scsi_core.c ../../sys/drivers/storage/scsi/scsi.c ../../sys/drivers/storage/scsi/scsi.h
+host_test_scsi_core: host_test_scsi_core.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_scsi_core.c -o $@
 
-host_test_atapi_scsi: host_test_atapi_scsi.c ../../sys/drivers/storage/scsi/atapi_scsi.c ../../sys/drivers/storage/scsi/atapi_scsi.h ../../sys/drivers/storage/scsi/scsi.h
+host_test_atapi_scsi: host_test_atapi_scsi.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_atapi_scsi.c -o $@
 
-host_test_scsi_nodes: host_test_scsi_nodes.c ../../sys/drivers/storage/scsi/scsi_ctl.c ../../sys/drivers/storage/scsi/scsi.h
+host_test_scsi_nodes: host_test_scsi_nodes.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_scsi_nodes.c -o $@
 
-host_test_scsi_dev: host_test_scsi_dev.c ../../sys/drivers/storage/scsi/scsi_dev.c ../../sys/drivers/storage/scsi/scsi.h
+host_test_scsi_dev: host_test_scsi_dev.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_scsi_dev.c -o $@
-
-host_test_virtio_scsi: host_test_virtio_scsi.c ../../sys/drivers/virtio/virtio_scsi.c ../../sys/drivers/virtio/virtio.h ../../sys/drivers/storage/scsi/scsi.h
-	$(CC) -g -Wall -Wextra -DHOST_TEST -no-pie -I../../sys/include -I../../include -I../../sys -I. host_test_virtio_scsi.c -o $@
-
-host_test_fb_multiboot: host_test_fb_multiboot.c ../../sys/drivers/video/fb.c ../../sys/drivers/video/fb.h ../../sys/arch/x86-common/multiboot.h
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_fb_multiboot.c -o $@
-
-host_test_efi_gop: host_test_efi_gop.c ../../sys/kern/efi_runtime.c ../../sys/kern/efi_runtime.h
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_efi_gop.c -o $@
-
-host_test_fb_vga_mode: host_test_fb_vga_mode.c ../../sys/drivers/video/fb.c ../../sys/drivers/video/fb.h ../../sys/arch/x86-common/multiboot.h
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_fb_vga_mode.c -o $@
-
-host_test_vga_mode12: host_test_vga_mode12.c ../../sys/drivers/video/vga.c ../../sys/drivers/video/vga.h ../../sys/drivers/video/fb.h
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_vga_mode12.c -o $@
 
 host_test_ide_identify: host_test_ide_identify.c ../../sys/drivers/storage/ide/ide_identify.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_ide_identify.c ../../sys/drivers/storage/ide/ide_identify.c -o $@
@@ -178,10 +150,19 @@ host_test_ide_pci: host_test_ide_pci.c
 host_test_ide_prdt: host_test_ide_prdt.c ../../sys/drivers/storage/ide/ide_dma.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_ide_prdt.c ../../sys/drivers/storage/ide/ide_dma.c -o $@
 
+host_test_ide_power: host_test_ide_power.c
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I. -I../../sys/include -I../../include -I../../sys -I../../sys/arch/i386 host_test_ide_power.c -o $@
+
+host_test_nvme: host_test_nvme.c
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_nvme.c -o $@
+
+host_test_virtio_scsi: host_test_virtio_scsi.c
+	$(CC) -m32 -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_virtio_scsi.c -o $@
+
 host_test_floppy: host_test_floppy.c ../../sys/drivers/storage/floppy/floppy_geom.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_floppy.c ../../sys/drivers/storage/floppy/floppy_geom.c -o $@
 
-host_test_keyboard: host_test_keyboard.c ../../sys/drivers/input/keyboard.c ../../sys/drivers/input/keyboard.h
+host_test_keyboard: host_test_keyboard.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_keyboard.c -o $@
 
 host_test_mouse: host_test_mouse.c
@@ -205,6 +186,8 @@ host_test_x86_64_syscall: host_test_x86_64_syscall.c
 host_test_x86_64_asm:
 	sh host_test_x86_64_asm.sh
 
+all: tests.o $(HOST_TESTS)
+
 host_test_kmem_test: host_test_kmem_test.c
 	$(CC) -g -Wall -DHOST_TEST -Wno-pointer-to-int-cast -Ikmem_test_mocks host_test_kmem_test.c -o $@
 
@@ -212,7 +195,7 @@ host_test_compat: host_test_compat.c
 	$(CC) -g -Wall -DHOST_TEST -I../../sys -I. -idirafter ../../sys/include -idirafter ../../include host_test_compat.c -o $@
 
 host_test_vm_swap: host_test_vm_swap.c
-	$(CC) -g -Wall -DHOST_TEST -I. -idirafter ../../sys/include -idirafter ../../include host_test_vm_swap.c -o $@
+	$(CC) -g -Wall -DHOST_TEST -I../../sys -I. -idirafter ../../sys/include -idirafter ../../include host_test_vm_swap.c -o $@
 
 host_test_wait_bench: host_test_wait_bench.c
 	$(CC) -g -Wall -DHOST_TEST -I. -I../../sys -idirafter ../../sys/include host_test_wait_bench.c -o $@
@@ -222,6 +205,7 @@ host_test_acct_compress: host_test_acct_compress.c
 
 host_test_negdi2: host_test_negdi2.c
 	$(CC) -g -Wall -DHOST_TEST -I. -idirafter ../../sys/include host_test_negdi2.c -o $@
+
 
 host_test_udf_large_write: host_test_udf_large_write.c
 	$(CC) -g -Wall -I../../sys -I. -idirafter ../../sys/include -idirafter ../../include host_test_udf_large_write.c -o $@
@@ -280,9 +264,6 @@ host_test_printf_specifiers: host_test_printf_specifiers.c
 host_test_printf_vsnprintf: host_test_printf_vsnprintf.c
 	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../sys -I. host_test_printf_vsnprintf.c -o $@
 
-host_test_kvasprintf: host_test_kvasprintf.c
-	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../sys -I. host_test_kvasprintf.c -o $@
-
 host_test_procfs: host_test_procfs.c
 	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../sys -I. host_test_procfs.c -o $@
 
@@ -321,6 +302,9 @@ host_test_fat_inode_identity: host_test_fat_inode_identity.c
 host_test_fat_mount: host_test_fat_mount.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_fat_mount.c -o $@
 
+host_test_fat_file_read: host_test_fat_file_read.c
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_fat_file_read.c -o $@
+
 host_test_vm_kmem: host_test_vm_kmem.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_vm_kmem.c -o $@
 
@@ -333,41 +317,17 @@ host_test_lapic: host_test_lapic.c
 host_test_percpu: host_test_percpu.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I../../sys/arch/i386 -I. host_test_percpu.c -o $@
 
-host_test_ipi: host_test_ipi.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I../../sys/arch/x86-common -I. host_test_ipi.c -o $@
-
-host_test_irq: host_test_irq.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_irq.c -o $@
-
-host_test_dma: host_test_dma.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_dma.c -o $@
-
-host_test_pci_caps: host_test_pci_caps.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_pci_caps.c -o $@
-
-host_test_pci_hotplug: host_test_pci_hotplug.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_pci_hotplug.c -o $@
-
-host_test_pci_ecam: host_test_pci_ecam.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_pci_ecam.c -o $@
-
-host_test_tty_console: host_test_tty_console.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_tty_console.c -o $@
-
-host_test_vdrop_panic: host_test_vdrop_panic.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_vdrop_panic.c -o $@
-
-host_test_sched_reap: host_test_sched_reap.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I../../sys/arch/i386 -I. host_test_sched_reap.c -o $@
-
-host_test_sched_core: host_test_sched_core.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_sched_core.c -o $@
+host_test_sched_ipi: host_test_sched_ipi.c
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I../../sys/arch/x86-common -I. host_test_sched_ipi.c -o $@
 
 host_test_sched_steal: host_test_sched_steal.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_sched_steal.c -o $@
 
-host_test_sched_ipi: host_test_sched_ipi.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I../../sys/arch/x86-common -I. host_test_sched_ipi.c -o $@
+host_test_sched_core: host_test_sched_core.c
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_sched_core.c -o $@
+
+host_test_sched_reap: host_test_sched_reap.c
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I../../sys/arch/i386 -I. host_test_sched_reap.c -o $@
 
 host_test_pmap_shootdown: host_test_pmap_shootdown.c
 	$(CC) -m32 -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I../../sys/arch/i386 -I../../sys/arch/x86-common -I. host_test_pmap_shootdown.c -o $@
@@ -386,3 +346,24 @@ clean:
 
 host_test_udf_read_file: host_test_udf_read_file.c
 	$(CC) -g -Wall -I../../sys -I. -Ivuln_mocks -idirafter ../../sys/include -idirafter ../../include host_test_udf_read_file.c -o $@
+
+host_test_udf_remove_fid: host_test_udf_remove_fid.c
+	$(CC) -g -Wall -I../../sys -I. -Ivuln_mocks -idirafter ../../sys/include -idirafter ../../include host_test_udf_remove_fid.c -o $@
+
+host_test_irq: host_test_irq.c
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_irq.c -o $@
+
+host_test_dma: host_test_dma.c
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_dma.c -o $@
+
+host_test_pci_caps: host_test_pci_caps.c
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_pci_caps.c -o $@
+
+host_test_pci_hotplug: host_test_pci_hotplug.c
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_pci_hotplug.c -o $@
+
+host_test_pci_ecam: host_test_pci_ecam.c
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_pci_ecam.c -o $@
+
+host_test_compat_stat: host_test_compat_stat.c
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -idirafter ../../sys/include -I../../include -I../../sys -I../../sys/exec/perso -I../../sys/exec/perso/linux -I../../sys/exec/perso/netbsd -I../../sys/exec/perso/sunos host_test_compat_stat.c -o $@

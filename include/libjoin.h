@@ -35,6 +35,7 @@ typedef struct {
         int field_idx; /* 1-based, unless file_idx is 0 */
     } *out_list;
     int out_list_len;
+    int out_list_cap;
 } join_options_t;
 
 int join_files(FILE *f1, const char *name1, FILE *f2, const char *name2, const join_options_t *opts, FILE *out);

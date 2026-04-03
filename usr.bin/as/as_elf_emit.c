@@ -68,10 +68,18 @@ static const char *first_symbol_in_expr(const as_expr_t *e);
 static int parse_symbol_addend_arg(const char *arg, char **sym_out, int64_t *add_out);
 static as_x86_seg_t map_seg(const char *s);
 static int emit_seg_override_byte(unsigned char *out, size_t out_cap, size_t *pos_io, const char *segment_reg);
+static int section_name_is_executable(emit_ctx_t *ctx, const char *name);
+static int is_numeric_local_label_name(const char *name);
+static int encode_x86_stmt_for_layout(emit_ctx_t *ctx, const char *section_name, uint64_t sec_off, unsigned x86_code_bits,
+                                      const as_stmt_t *st, unsigned char *code, size_t code_cap,
+                                      size_t *code_len, char *encerr, size_t encerr_sz);
 static int parse_xmm_reg(const char *name, unsigned *out);
+static int parse_zmm_reg(const char *name, unsigned *out);
 static int parse_mmx_reg(const char *name, unsigned *out);
 static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_x86_operand_t *dst, int is64,
                                int intel_syntax, char *errbuf, size_t errbuf_sz);
+static int is_local_temp_symbol_name(const char *name);
+static int expr_is_local_temp_symbol(const as_expr_t *e);
 
 static void set_err(emit_ctx_t *ctx, const char *fmt, ...) {
     va_list ap;
@@ -82,6 +90,17 @@ static void set_err(emit_ctx_t *ctx, const char *fmt, ...) {
     va_start(ap, fmt);
     vsnprintf(ctx->errbuf, ctx->errbuf_sz, fmt, ap);
     va_end(ap);
+}
+
+static int is_local_temp_symbol_name(const char *name) {
+    if (name == NULL) {
+        return 0;
+    }
+    return name[0] == '.' && name[1] == 'L';
+}
+
+static int expr_is_local_temp_symbol(const as_expr_t *e) {
+    return e != NULL && e->kind == AS_EXPR_SYMBOL && is_local_temp_symbol_name(e->symbol);
 }
 
 static char *xstrdup(const char *s) {
@@ -144,6 +163,38 @@ static char *trim_copy(const char *s) {
     memcpy(out, b, n);
     out[n] = '\0';
     return out;
+}
+
+static uint32_t section_group_ordinal(const as_section_state_t *sections, size_t index) {
+    uint32_t ordinal = 0;
+    size_t i;
+
+    if (sections == NULL || index >= sections->count || sections->items[index].group == NULL) {
+        return 0;
+    }
+    for (i = 0; i <= index; ++i) {
+        const char *group = sections->items[i].group;
+        size_t j;
+        int first = 1;
+
+        if (group == NULL) {
+            continue;
+        }
+        for (j = 0; j < i; ++j) {
+            if (sections->items[j].group != NULL && strcmp(sections->items[j].group, group) == 0) {
+                first = 0;
+                break;
+            }
+        }
+        if (!first) {
+            continue;
+        }
+        ordinal++;
+        if (i == index) {
+            return ordinal;
+        }
+    }
+    return 0;
 }
 
 static int bytebuf_reserve(bytebuf_t *b, size_t extra) {
@@ -261,6 +312,265 @@ static int parse_int64(const char *s, long long *out) {
     }
     *out = v;
     return 0;
+}
+
+typedef struct {
+    const char *s;
+    size_t i;
+} const_expr_parser_t;
+
+static void const_expr_skip_ws(const_expr_parser_t *p) {
+    while (p != NULL && p->s[p->i] != '\0' && isspace((unsigned char)p->s[p->i])) {
+        ++p->i;
+    }
+}
+
+static int const_expr_parse_or(const_expr_parser_t *p, long long *out);
+
+static int const_expr_parse_number(const_expr_parser_t *p, long long *out) {
+    const char *start;
+    char *end;
+    long long v;
+
+    if (p == NULL || out == NULL) {
+        return -1;
+    }
+    const_expr_skip_ws(p);
+    start = p->s + p->i;
+    if (*start == '\0') {
+        return -1;
+    }
+    v = strtoll(start, &end, 0);
+    if (end == start) {
+        return -1;
+    }
+    p->i += (size_t)(end - start);
+    *out = v;
+    return 0;
+}
+
+static int const_expr_parse_primary(const_expr_parser_t *p, long long *out) {
+    long long v;
+
+    if (p == NULL || out == NULL) {
+        return -1;
+    }
+    const_expr_skip_ws(p);
+    if (p->s[p->i] == '(') {
+        ++p->i;
+        if (const_expr_parse_or(p, &v) != 0) {
+            return -1;
+        }
+        const_expr_skip_ws(p);
+        if (p->s[p->i] != ')') {
+            return -1;
+        }
+        ++p->i;
+        *out = v;
+        return 0;
+    }
+    return const_expr_parse_number(p, out);
+}
+
+static int const_expr_parse_unary(const_expr_parser_t *p, long long *out) {
+    if (p == NULL || out == NULL) {
+        return -1;
+    }
+    const_expr_skip_ws(p);
+    if (p->s[p->i] == '+') {
+        ++p->i;
+        return const_expr_parse_unary(p, out);
+    }
+    if (p->s[p->i] == '-') {
+        ++p->i;
+        if (const_expr_parse_unary(p, out) != 0) {
+            return -1;
+        }
+        *out = -*out;
+        return 0;
+    }
+    if (p->s[p->i] == '~') {
+        ++p->i;
+        if (const_expr_parse_unary(p, out) != 0) {
+            return -1;
+        }
+        *out = ~*out;
+        return 0;
+    }
+    return const_expr_parse_primary(p, out);
+}
+
+static int const_expr_parse_mul(const_expr_parser_t *p, long long *out) {
+    long long lhs;
+
+    if (const_expr_parse_unary(p, &lhs) != 0) {
+        return -1;
+    }
+    for (;;) {
+        long long rhs;
+        const_expr_skip_ws(p);
+        if (p->s[p->i] == '*') {
+            ++p->i;
+            if (const_expr_parse_unary(p, &rhs) != 0) {
+                return -1;
+            }
+            lhs *= rhs;
+            continue;
+        }
+        if (p->s[p->i] == '/') {
+            ++p->i;
+            if (const_expr_parse_unary(p, &rhs) != 0 || rhs == 0) {
+                return -1;
+            }
+            lhs /= rhs;
+            continue;
+        }
+        if (p->s[p->i] == '%') {
+            ++p->i;
+            if (const_expr_parse_unary(p, &rhs) != 0 || rhs == 0) {
+                return -1;
+            }
+            lhs %= rhs;
+            continue;
+        }
+        break;
+    }
+    *out = lhs;
+    return 0;
+}
+
+static int const_expr_parse_add(const_expr_parser_t *p, long long *out) {
+    long long lhs;
+
+    if (const_expr_parse_mul(p, &lhs) != 0) {
+        return -1;
+    }
+    for (;;) {
+        long long rhs;
+        const_expr_skip_ws(p);
+        if (p->s[p->i] == '+') {
+            ++p->i;
+            if (const_expr_parse_mul(p, &rhs) != 0) {
+                return -1;
+            }
+            lhs += rhs;
+            continue;
+        }
+        if (p->s[p->i] == '-') {
+            ++p->i;
+            if (const_expr_parse_mul(p, &rhs) != 0) {
+                return -1;
+            }
+            lhs -= rhs;
+            continue;
+        }
+        break;
+    }
+    *out = lhs;
+    return 0;
+}
+
+static int const_expr_parse_shift(const_expr_parser_t *p, long long *out) {
+    long long lhs;
+
+    if (const_expr_parse_add(p, &lhs) != 0) {
+        return -1;
+    }
+    for (;;) {
+        long long rhs;
+        const_expr_skip_ws(p);
+        if (p->s[p->i] == '<' && p->s[p->i + 1] == '<') {
+            p->i += 2;
+            if (const_expr_parse_add(p, &rhs) != 0) {
+                return -1;
+            }
+            lhs <<= (rhs & 63);
+            continue;
+        }
+        if (p->s[p->i] == '>' && p->s[p->i + 1] == '>') {
+            p->i += 2;
+            if (const_expr_parse_add(p, &rhs) != 0) {
+                return -1;
+            }
+            lhs >>= (rhs & 63);
+            continue;
+        }
+        break;
+    }
+    *out = lhs;
+    return 0;
+}
+
+static int const_expr_parse_and(const_expr_parser_t *p, long long *out) {
+    long long lhs;
+
+    if (const_expr_parse_shift(p, &lhs) != 0) {
+        return -1;
+    }
+    while (p->s[p->i] == '&' && p->s[p->i + 1] != '&') {
+        long long rhs;
+        ++p->i;
+        if (const_expr_parse_shift(p, &rhs) != 0) {
+            return -1;
+        }
+        lhs &= rhs;
+        const_expr_skip_ws(p);
+    }
+    *out = lhs;
+    return 0;
+}
+
+static int const_expr_parse_xor(const_expr_parser_t *p, long long *out) {
+    long long lhs;
+
+    if (const_expr_parse_and(p, &lhs) != 0) {
+        return -1;
+    }
+    while (p->s[p->i] == '^') {
+        long long rhs;
+        ++p->i;
+        if (const_expr_parse_and(p, &rhs) != 0) {
+            return -1;
+        }
+        lhs ^= rhs;
+        const_expr_skip_ws(p);
+    }
+    *out = lhs;
+    return 0;
+}
+
+static int const_expr_parse_or(const_expr_parser_t *p, long long *out) {
+    long long lhs;
+
+    if (const_expr_parse_xor(p, &lhs) != 0) {
+        return -1;
+    }
+    while (p->s[p->i] == '|' && p->s[p->i + 1] != '|') {
+        long long rhs;
+        ++p->i;
+        if (const_expr_parse_xor(p, &rhs) != 0) {
+            return -1;
+        }
+        lhs |= rhs;
+        const_expr_skip_ws(p);
+    }
+    *out = lhs;
+    return 0;
+}
+
+static int parse_const_expr_string(const char *s, long long *out) {
+    const_expr_parser_t p;
+
+    if (s == NULL || out == NULL) {
+        return -1;
+    }
+    p.s = s;
+    p.i = 0;
+    if (const_expr_parse_or(&p, out) != 0) {
+        return -1;
+    }
+    const_expr_skip_ws(&p);
+    return p.s[p.i] == '\0' ? 0 : -1;
 }
 
 static int eval_expr_const(const as_expr_t *e, long long *out) {
@@ -468,6 +778,28 @@ static unsigned parse_x86_reg_bits(const char *name) {
         return 16;
     }
     return 0;
+}
+
+static unsigned infer_x86_mem_addr_bits(const as_mem_operand_t *mem) {
+    unsigned base_bits = 0;
+    unsigned index_bits = 0;
+
+    if (mem == NULL) {
+        return 0;
+    }
+    if (mem->base_reg != NULL) {
+        base_bits = parse_x86_reg_bits(mem->base_reg);
+    }
+    if (mem->index_reg != NULL) {
+        index_bits = parse_x86_reg_bits(mem->index_reg);
+    }
+    if (base_bits != 0 && index_bits != 0 && base_bits != index_bits) {
+        return 0;
+    }
+    if (base_bits != 0) {
+        return base_bits;
+    }
+    return index_bits;
 }
 
 static int parse_bnd_reg(const char *name, unsigned *out) {
@@ -1148,6 +1480,7 @@ static int lookup_i386_xmm_unprefixed_opcode(const char *mnemonic, unsigned char
         const char *mnemonic;
         unsigned char opcode2;
     } map[] = {
+        {"unpcklps", 0x14}, {"unpckhps", 0x15},
         {"sqrtps", 0x51}, {"rsqrtps", 0x52}, {"rcpps", 0x53}, {"andps", 0x54},
         {"andnps", 0x55}, {"orps", 0x56},    {"xorps", 0x57}, {"addps", 0x58},
         {"mulps", 0x59},  {"cvtps2pd", 0x5a},{"cvtdq2ps", 0x5b},{"subps", 0x5c},
@@ -1173,6 +1506,7 @@ static int lookup_i386_xmm_66_opcode(const char *mnemonic, unsigned char *opcode
         const char *mnemonic;
         unsigned char opcode2;
     } map[] = {
+        {"unpcklpd", 0x14}, {"unpckhpd", 0x15},
         {"sqrtpd", 0x51}, {"andpd", 0x54},   {"andnpd", 0x55}, {"orpd", 0x56},
         {"xorpd", 0x57},  {"addpd", 0x58},   {"mulpd", 0x59},  {"cvtpd2ps", 0x5a},
         {"cvtps2dq", 0x5b},{"subpd", 0x5c},  {"minpd", 0x5d},  {"divpd", 0x5e},
@@ -1798,6 +2132,43 @@ static int lookup_i386_x87_ipcompare_opcode(const char *mnemonic, unsigned char 
     return -1;
 }
 
+static int lookup_i386_x87_arith_opcode(const char *mnemonic, unsigned char *mem_d8_regf,
+                                        unsigned char *mem_dc_regf, int *stack_single_base,
+                                        unsigned char *stack_pair_base) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char mem_d8_regf;
+        unsigned char mem_dc_regf;
+        int stack_single_base;
+        unsigned char stack_pair_base;
+    } map[] = {
+        {"fadd", 0u, 0u, -1, 0xc0},
+        {"fmul", 1u, 1u, -1, 0xc8},
+        {"fcom", 2u, 2u, 0xd0, 0xd0},
+        {"fcomp", 3u, 3u, 0xd8, 0xd8},
+        {"fsub", 4u, 4u, -1, 0xe0},
+        {"fsubr", 5u, 5u, -1, 0xe8},
+        {"fdiv", 6u, 6u, -1, 0xf0},
+        {"fdivr", 7u, 7u, -1, 0xf8},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || mem_d8_regf == NULL || mem_dc_regf == NULL ||
+        stack_single_base == NULL || stack_pair_base == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *mem_d8_regf = map[i].mem_d8_regf;
+            *mem_dc_regf = map[i].mem_dc_regf;
+            *stack_single_base = map[i].stack_single_base;
+            *stack_pair_base = map[i].stack_pair_base;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static int lookup_i386_adcxo_prefix(const char *mnemonic, unsigned char *prefix) {
     static const struct {
         const char *mnemonic;
@@ -1840,6 +2211,474 @@ static int lookup_i386_encodekey_opcode(const char *mnemonic, unsigned char *opc
         }
     }
     return -1;
+}
+
+static int lookup_i386_bndcmp_opcode(const char *mnemonic, unsigned char *prefix, unsigned char *opcode2) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char prefix;
+        unsigned char opcode2;
+    } map[] = {
+        {"bndcl", 0xf3, 0x1a},
+        {"bndcu", 0xf2, 0x1a},
+        {"bndcn", 0xf2, 0x1b},
+        {"bndmk", 0xf3, 0x1b},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || prefix == NULL || opcode2 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *prefix = map[i].prefix;
+            *opcode2 = map[i].opcode2;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_x86_xmm_move_family(const char *mnemonic, unsigned char *prefix,
+                                      unsigned char *load_opcode2, unsigned char *store_opcode2,
+                                      int *is_partial) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char prefix;
+        unsigned char load_opcode2;
+        unsigned char store_opcode2;
+        int is_partial;
+    } map[] = {
+        {"movups", 0x00, 0x10, 0x11, 0},
+        {"movupd", 0x66, 0x10, 0x11, 0},
+        {"movlpd", 0x66, 0x12, 0x13, 1},
+        {"movhpd", 0x66, 0x16, 0x17, 1},
+        {"movlps", 0x00, 0x12, 0x13, 1},
+        {"movhps", 0x00, 0x16, 0x17, 1},
+        {"movaps", 0x00, 0x28, 0x29, 0},
+        {"movapd", 0x66, 0x28, 0x29, 0},
+        {"movsd", 0xf2, 0x10, 0x11, 0},
+        {"movss", 0xf3, 0x10, 0x11, 0},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || prefix == NULL || load_opcode2 == NULL || store_opcode2 == NULL || is_partial == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *prefix = map[i].prefix;
+            *load_opcode2 = map[i].load_opcode2;
+            *store_opcode2 = map[i].store_opcode2;
+            *is_partial = map[i].is_partial;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_movmsk_prefix(const char *mnemonic, unsigned char *prefix) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char prefix;
+    } map[] = {
+        {"movmskps", 0x00},
+        {"movmskpd", 0x66},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || prefix == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *prefix = map[i].prefix;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_mmx_xmm_bridge(const char *mnemonic, unsigned char *prefix, int *dst_is_xmm) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char prefix;
+        int dst_is_xmm;
+    } map[] = {
+        {"movdq2q", 0xf2, 0},
+        {"movq2dq", 0xf3, 1},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || prefix == NULL || dst_is_xmm == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *prefix = map[i].prefix;
+            *dst_is_xmm = map[i].dst_is_xmm;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_mmx_xmm_convert_to_xmm(const char *mnemonic, unsigned char *prefix, unsigned char *opcode2) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char prefix;
+        unsigned char opcode2;
+    } map[] = {
+        {"cvtpi2pd", 0x66, 0x2a},
+        {"cvtpi2ps", 0x00, 0x2a},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || prefix == NULL || opcode2 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *prefix = map[i].prefix;
+            *opcode2 = map[i].opcode2;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_mmx_xmm_convert_from_xmm(const char *mnemonic, unsigned char *prefix, unsigned char *opcode2) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char prefix;
+        unsigned char opcode2;
+    } map[] = {
+        {"cvttpd2pi", 0x66, 0x2c},
+        {"cvtpd2pi", 0x66, 0x2d},
+        {"cvttps2pi", 0x00, 0x2c},
+        {"cvtps2pi", 0x00, 0x2d},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || prefix == NULL || opcode2 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *prefix = map[i].prefix;
+            *opcode2 = map[i].opcode2;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_movnt_store_family(const char *mnemonic, unsigned char *prefix, unsigned char *opcode2,
+                                          int *use_xmm) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char prefix;
+        unsigned char opcode2;
+        int use_xmm;
+    } map[] = {
+        {"movntq", 0x00, 0xe7, 0},
+        {"movntdq", 0x66, 0xe7, 1},
+        {"movntps", 0x00, 0x2b, 1},
+        {"movntpd", 0x66, 0x2b, 1},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || prefix == NULL || opcode2 == NULL || use_xmm == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *prefix = map[i].prefix;
+            *opcode2 = map[i].opcode2;
+            *use_xmm = map[i].use_xmm;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_xmm_shiftdq_imm8(const char *mnemonic, unsigned char *reg_field) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char reg_field;
+    } map[] = {
+        {"psrldq", 3u},
+        {"pslldq", 7u},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || reg_field == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *reg_field = map[i].reg_field;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_xmm_shuffle_tail(const char *mnemonic, unsigned char *prefix, unsigned char *opcode2) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char prefix;
+        unsigned char opcode2;
+    } map[] = {
+        {"pshuflw", 0xf2, 0x70},
+        {"pshufhw", 0xf3, 0x70},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || prefix == NULL || opcode2 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *prefix = map[i].prefix;
+            *opcode2 = map[i].opcode2;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_xmm_regpair_opcode(const char *mnemonic, unsigned char *opcode2) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char opcode2;
+    } map[] = {
+        {"movhlps", 0x12},
+        {"movlhps", 0x16},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || opcode2 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *opcode2 = map[i].opcode2;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_comisd_opcode(const char *mnemonic, unsigned char *opcode2) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char opcode2;
+    } map[] = {
+        {"ucomisd", 0x2e},
+        {"comisd", 0x2f},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || opcode2 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *opcode2 = map[i].opcode2;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_cachehint_regf(const char *mnemonic, unsigned char *opcode2, unsigned char *regf) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char opcode2;
+        unsigned char regf;
+    } map[] = {
+        {"cldemote", 0x1c, 0u},
+        {"prefetch", 0x0d, 0u},
+        {"prefetchwt1", 0x0d, 2u},
+        {"prefetchnta", 0x18, 0u},
+        {"prefetcht0", 0x18, 1u},
+        {"prefetcht1", 0x18, 2u},
+        {"prefetcht2", 0x18, 3u},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || opcode2 == NULL || regf == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *opcode2 = map[i].opcode2;
+            *regf = map[i].regf;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_extrq_insertq_prefix(const char *mnemonic, unsigned char *prefix) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char prefix;
+    } map[] = {
+        {"extrq", 0x66},
+        {"insertq", 0xf2},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || prefix == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *prefix = map[i].prefix;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int select_x86_srcdst_operands(const as_instruction_t *insn, int intel_syntax,
+                                      const as_operand_t **src_op, const as_operand_t **dst_op) {
+    if (insn == NULL || src_op == NULL || dst_op == NULL || insn->operand_count != 2) {
+        return -1;
+    }
+    if (intel_syntax) {
+        *dst_op = &insn->operands[0];
+        *src_op = &insn->operands[1];
+    } else {
+        *src_op = &insn->operands[0];
+        *dst_op = &insn->operands[1];
+    }
+    return 0;
+}
+
+static int select_x86_dstsrc_tail_operand(const as_instruction_t *insn, int intel_syntax,
+                                          const as_operand_t **dst_op, const as_operand_t **src_op,
+                                          const as_operand_t **tail_op) {
+    if (insn == NULL || dst_op == NULL || src_op == NULL || tail_op == NULL || insn->operand_count != 3) {
+        return -1;
+    }
+    if (intel_syntax) {
+        *dst_op = &insn->operands[0];
+        *src_op = &insn->operands[1];
+        *tail_op = &insn->operands[2];
+    } else {
+        *tail_op = &insn->operands[0];
+        *src_op = &insn->operands[1];
+        *dst_op = &insn->operands[2];
+    }
+    return 0;
+}
+
+static int select_x86_dst_immimm_operands(const as_instruction_t *insn, int intel_syntax,
+                                          const as_operand_t **dst_op,
+                                          const as_operand_t **imm0_op,
+                                          const as_operand_t **imm1_op) {
+    if (insn == NULL || dst_op == NULL || imm0_op == NULL || imm1_op == NULL || insn->operand_count != 3) {
+        return -1;
+    }
+    if (intel_syntax) {
+        *dst_op = &insn->operands[0];
+        *imm0_op = &insn->operands[1];
+        *imm1_op = &insn->operands[2];
+    } else {
+        *imm0_op = &insn->operands[0];
+        *imm1_op = &insn->operands[1];
+        *dst_op = &insn->operands[2];
+    }
+    return 0;
+}
+
+static int select_x86_dstsrc_immimm_operands(const as_instruction_t *insn, int intel_syntax,
+                                             const as_operand_t **dst_op,
+                                             const as_operand_t **src_op,
+                                             const as_operand_t **imm0_op,
+                                             const as_operand_t **imm1_op) {
+    if (insn == NULL || dst_op == NULL || src_op == NULL || imm0_op == NULL || imm1_op == NULL ||
+        insn->operand_count != 4) {
+        return -1;
+    }
+    if (intel_syntax) {
+        *dst_op = &insn->operands[0];
+        *src_op = &insn->operands[1];
+        *imm0_op = &insn->operands[2];
+        *imm1_op = &insn->operands[3];
+    } else {
+        *imm0_op = &insn->operands[0];
+        *imm1_op = &insn->operands[1];
+        *src_op = &insn->operands[2];
+        *dst_op = &insn->operands[3];
+    }
+    return 0;
+}
+
+static int select_x86_vmread_vmwrite_operands(const as_instruction_t *insn, int intel_syntax,
+                                              const char *mnemonic,
+                                              const as_operand_t **rm_op,
+                                              const as_operand_t **reg_op) {
+    int is_vmread;
+
+    if (insn == NULL || mnemonic == NULL || rm_op == NULL || reg_op == NULL || insn->operand_count != 2) {
+        return -1;
+    }
+    is_vmread = (strcmp(mnemonic, "vmread") == 0);
+    if (is_vmread == intel_syntax) {
+        *rm_op = &insn->operands[0];
+        *reg_op = &insn->operands[1];
+    } else {
+        *reg_op = &insn->operands[0];
+        *rm_op = &insn->operands[1];
+    }
+    return 0;
+}
+
+static int select_i386_actual_reg_rm_operands(const as_instruction_t *insn,
+                                              const as_operand_t **reg_op,
+                                              const as_operand_t **rm_op) {
+    if (insn == NULL || reg_op == NULL || rm_op == NULL || insn->operand_count != 2) {
+        return -1;
+    }
+    if (insn->operands[0].kind == AS_OPERAND_REGISTER) {
+        *reg_op = &insn->operands[0];
+        *rm_op = &insn->operands[1];
+        return 0;
+    }
+    if (insn->operands[1].kind == AS_OPERAND_REGISTER) {
+        *rm_op = &insn->operands[0];
+        *reg_op = &insn->operands[1];
+        return 0;
+    }
+    return -1;
+}
+
+static int select_i386_syntax_reg_rm_operands(const as_instruction_t *insn, int intel_syntax, int intel_reg_first,
+                                              const as_operand_t **reg_op,
+                                              const as_operand_t **rm_op) {
+    if (insn == NULL || reg_op == NULL || rm_op == NULL || insn->operand_count != 2) {
+        return -1;
+    }
+    if (intel_reg_first) {
+        if (intel_syntax) {
+            *reg_op = &insn->operands[0];
+            *rm_op = &insn->operands[1];
+        } else {
+            *rm_op = &insn->operands[0];
+            *reg_op = &insn->operands[1];
+        }
+    } else if (intel_syntax) {
+        *rm_op = &insn->operands[0];
+        *reg_op = &insn->operands[1];
+    } else {
+        *reg_op = &insn->operands[0];
+        *rm_op = &insn->operands[1];
+    }
+    return 0;
 }
 
 static int lookup_i386_xmm_imm8_family(const char *mnemonic, unsigned char *prefix, unsigned char *opcode2) {
@@ -2041,7 +2880,8 @@ static int is_short_rel_mnemonic(const char *mn) {
     if (mn == NULL || mn[0] == '\0') {
         return 0;
     }
-    return streq_ci(mn, "jecxz") ||
+    return streq_ci(mn, "jcxz") ||
+           streq_ci(mn, "jecxz") ||
            streq_ci(mn, "jrcxz") ||
            streq_ci(mn, "loop") ||
            streq_ci(mn, "loope") ||
@@ -2226,13 +3066,6 @@ static int normalize_x86_mnemonic(const char *src, char *dst, size_t dst_sz, cha
         memcpy(dst, "lret", sizeof("lret"));
         return 0;
     }
-    if (strcmp(dst, "jcxz") == 0) {
-        if (dst_sz < sizeof("jecxz")) {
-            return -1;
-        }
-        memcpy(dst, "jecxz", sizeof("jecxz"));
-        return 0;
-    }
     if (strncmp(dst, "cvtsi2sd", 8) == 0 && n == 9 &&
         (dst[8] == 'q' || dst[8] == 'l' || dst[8] == 'w')) {
         dst[8] = '\0';
@@ -2394,6 +3227,34 @@ static int parse_ymm_reg(const char *name, unsigned *out) {
         ++p;
     }
     if (*p != '\0' || v > 15u) {
+        return -1;
+    }
+    *out = v;
+    return 0;
+}
+
+static int parse_zmm_reg(const char *name, unsigned *out) {
+    const char *p = name;
+    unsigned v = 0;
+
+    if (p == NULL || out == NULL) {
+        return -1;
+    }
+    while (*p == '%' || isspace((unsigned char)*p)) {
+        ++p;
+    }
+    if (!(p[0] == 'z' || p[0] == 'Z') || !(p[1] == 'm' || p[1] == 'M') || !(p[2] == 'm' || p[2] == 'M')) {
+        return -1;
+    }
+    p += 3;
+    if (!isdigit((unsigned char)*p)) {
+        return -1;
+    }
+    while (isdigit((unsigned char)*p)) {
+        v = (v * 10u) + (unsigned)(*p - '0');
+        ++p;
+    }
+    if (*p != '\0' || v > 31u) {
         return -1;
     }
     *out = v;
@@ -3000,83 +3861,6 @@ static int emit_i386_prefixed_1byte_x87_mem(const as_instruction_t *insn, unsign
     return emit_i386_prefixed_1byte_rm(insn, opcode, reg_field, op, out, out_cap, out_len);
 }
 
-static int operand_is_const_immediate(const as_operand_t *op, long long *out) {
-    if (op == NULL || out == NULL || op->kind != AS_OPERAND_IMMEDIATE || op->u.expr == NULL) {
-        return 0;
-    }
-    return eval_expr_const(op->u.expr, out) == 0;
-}
-
-static int patch_x86_numeric_rel(const as_stmt_t *st, size_t sec_off, unsigned char *code, size_t code_len,
-                                 char *errbuf, size_t errbuf_sz) {
-    char mnbuf[64];
-    char suffix = '\0';
-    long long target;
-    long long next;
-    long long disp;
-    size_t disp_off;
-    size_t disp_sz;
-
-    if (st == NULL || code == NULL || code_len == 0 || errbuf == NULL || errbuf_sz == 0) {
-        return -1;
-    }
-    if (st->kind != AS_STMT_INSTRUCTION || st->u.instr.operand_count != 1 ||
-        !operand_is_const_immediate(&st->u.instr.operands[0], &target)) {
-        return 0;
-    }
-    if (normalize_x86_mnemonic(st->u.instr.mnemonic, mnbuf, sizeof(mnbuf), &suffix) != 0 ||
-        !is_rel_mnemonic(mnbuf)) {
-        return 0;
-    }
-
-    disp_off = 0;
-    disp_sz = 0;
-    if (code_len >= 2 && code[0] == 0x0f && code[1] >= 0x80 && code[1] <= 0x8f) {
-        disp_sz = 4;
-    } else if (code[0] == 0xe8 || code[0] == 0xe9) {
-        disp_sz = (code_len == 3) ? 2 : 4;
-    } else if ((code[0] >= 0x70 && code[0] <= 0x7f) || code[0] == 0xe0 || code[0] == 0xe1 ||
-               code[0] == 0xe2 || code[0] == 0xe3 || code[0] == 0xeb) {
-        disp_sz = 1;
-    } else {
-        return 0;
-    }
-    if (code_len < disp_sz) {
-        snprintf(errbuf, errbuf_sz, "invalid x86 relative instruction encoding");
-        return -1;
-    }
-    disp_off = code_len - disp_sz;
-    /*
-     * Match GNU as for bare numeric x86 branch targets in source such as
-     * `jmp 0x10` or `loopne 0x10`: the encoded displacement is derived from
-     * the numeric expression relative to the current location plus the
-     * instruction size minus one.
-     */
-    next = (long long)sec_off + (long long)code_len - 1;
-    disp = target - next;
-
-    if (disp_sz == 1) {
-        if (disp < -128 || disp > 127) {
-            snprintf(errbuf, errbuf_sz, "loop target out of range");
-            return -1;
-        }
-        code[disp_off] = (unsigned char)((signed char)disp);
-    } else if (disp_sz == 2) {
-        if (disp < -32768 || disp > 32767) {
-            snprintf(errbuf, errbuf_sz, "relative target out of range");
-            return -1;
-        }
-        code[disp_off + 0] = (unsigned char)(disp & 0xff);
-        code[disp_off + 1] = (unsigned char)((disp >> 8) & 0xff);
-    } else {
-        code[disp_off + 0] = (unsigned char)(disp & 0xff);
-        code[disp_off + 1] = (unsigned char)((disp >> 8) & 0xff);
-        code[disp_off + 2] = (unsigned char)((disp >> 16) & 0xff);
-        code[disp_off + 3] = (unsigned char)((disp >> 24) & 0xff);
-    }
-    return 0;
-}
-
 static int emit_i386_x87_mem_by_size(const as_instruction_t *insn, const as_operand_t *op,
                                      int opcode32, unsigned reg32,
                                      int opcode64, unsigned reg64,
@@ -3138,6 +3922,204 @@ static int emit_i386_x87_mem16_32_64(const as_instruction_t *insn, const as_oper
     }
     if (bits == 64 && opcode64 >= 0) {
         return emit_i386_prefixed_1byte_x87_mem(insn, (unsigned char)opcode64, reg64, op, out, out_cap, out_len);
+    }
+    return -1;
+}
+
+static int operand_st_index(const as_operand_t *op, unsigned *out);
+
+static int lookup_i386_x87_mem_exact(const char *mnemonic, unsigned char *opcode, unsigned *reg_field) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char opcode;
+        unsigned char reg_field;
+    } map[] = {
+        {"fldl", 0xdd, 0u},
+        {"flds", 0xd9, 0u},
+        {"fldt", 0xdb, 5u},
+        {"fstpl", 0xdd, 3u},
+        {"fstps", 0xd9, 3u},
+        {"fstpt", 0xdb, 7u},
+        {"faddl", 0xdc, 0u},
+        {"fadds", 0xd8, 0u},
+        {"fsubl", 0xdc, 4u},
+        {"fsubs", 0xd8, 4u},
+        {"fsubrs", 0xd8, 5u},
+        {"fsubrl", 0xdc, 5u},
+        {"fmull", 0xdc, 1u},
+        {"fmuls", 0xd8, 1u},
+        {"fdivl", 0xdc, 6u},
+        {"fdivs", 0xd8, 6u},
+        {"fdivrs", 0xd8, 7u},
+        {"fdivrl", 0xdc, 7u},
+        {"fcoms", 0xd8, 2u},
+        {"fcomps", 0xd8, 3u},
+        {"fcoml", 0xdc, 2u},
+        {"fcompl", 0xdc, 3u},
+        {"fildl", 0xdb, 0u},
+        {"filds", 0xdf, 0u},
+        {"fildll", 0xdf, 5u},
+        {"fistl", 0xdb, 2u},
+        {"fistpl", 0xdb, 3u},
+        {"fists", 0xdf, 2u},
+        {"fistps", 0xdf, 3u},
+        {"fistpll", 0xdf, 7u},
+        {"fisttps", 0xdf, 1u},
+        {"fisttpl", 0xdb, 1u},
+        {"fisttpll", 0xdd, 1u},
+        {"fstl", 0xdd, 2u},
+        {"fbld", 0xdf, 4u},
+        {"fbstp", 0xdf, 6u},
+        {"fldcw", 0xd9, 5u},
+        {"fnstcw", 0xd9, 7u},
+        {"fsts", 0xd9, 2u},
+        {"fldenv", 0xd9, 4u},
+        {"fnstenv", 0xd9, 6u},
+        {"frstor", 0xdd, 4u},
+        {"fnsave", 0xdd, 6u},
+        {"fiaddl", 0xda, 0u},
+        {"fimull", 0xda, 1u},
+        {"fisubl", 0xda, 4u},
+        {"fisubrl", 0xda, 5u},
+        {"fidivl", 0xda, 6u},
+        {"fidivrl", 0xda, 7u},
+        {"fiadds", 0xde, 0u},
+        {"fimuls", 0xde, 1u},
+        {"fisubs", 0xde, 4u},
+        {"fisubrs", 0xde, 5u},
+        {"fidivs", 0xde, 6u},
+        {"fidivrs", 0xde, 7u},
+        {"ficoml", 0xda, 2u},
+        {"ficompl", 0xda, 3u},
+        {"ficoms", 0xde, 2u},
+        {"ficomps", 0xde, 3u},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || opcode == NULL || reg_field == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *opcode = map[i].opcode;
+            *reg_field = map[i].reg_field;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_x87_mem16_32_named(const char *mnemonic, unsigned char *opcode16, unsigned *reg16,
+                                          unsigned char *opcode32, unsigned *reg32) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char opcode16;
+        unsigned char reg16;
+        unsigned char opcode32;
+        unsigned char reg32;
+    } map[] = {
+        {"fiadd", 0xde, 0u, 0xda, 0u},
+        {"fimul", 0xde, 1u, 0xda, 1u},
+        {"ficom", 0xde, 2u, 0xda, 2u},
+        {"ficomp", 0xde, 3u, 0xda, 3u},
+        {"fisub", 0xde, 4u, 0xda, 4u},
+        {"fisubr", 0xde, 5u, 0xda, 5u},
+        {"fidiv", 0xde, 6u, 0xda, 6u},
+        {"fidivr", 0xde, 7u, 0xda, 7u},
+        {"fist", 0xdf, 2u, 0xdb, 2u},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || opcode16 == NULL || reg16 == NULL || opcode32 == NULL || reg32 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *opcode16 = map[i].opcode16;
+            *reg16 = map[i].reg16;
+            *opcode32 = map[i].opcode32;
+            *reg32 = map[i].reg32;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int lookup_i386_x87_mem16_32_64_named(const char *mnemonic, unsigned char *opcode16, unsigned *reg16,
+                                             unsigned char *opcode32, unsigned *reg32,
+                                             unsigned char *opcode64, unsigned *reg64) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char opcode16;
+        unsigned char reg16;
+        unsigned char opcode32;
+        unsigned char reg32;
+        unsigned char opcode64;
+        unsigned char reg64;
+    } map[] = {
+        {"fild", 0xdf, 0u, 0xdb, 0u, 0xdf, 5u},
+        {"fistp", 0xdf, 3u, 0xdb, 3u, 0xdf, 7u},
+        {"fisttp", 0xdf, 1u, 0xdb, 1u, 0xdd, 1u},
+    };
+    size_t i;
+
+    if (mnemonic == NULL || opcode16 == NULL || reg16 == NULL || opcode32 == NULL || reg32 == NULL ||
+        opcode64 == NULL || reg64 == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (strcmp(mnemonic, map[i].mnemonic) == 0) {
+            *opcode16 = map[i].opcode16;
+            *reg16 = map[i].reg16;
+            *opcode32 = map[i].opcode32;
+            *reg32 = map[i].reg32;
+            *opcode64 = map[i].opcode64;
+            *reg64 = map[i].reg64;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int emit_i386_x87_stack_load_exchange(const as_instruction_t *insn, const char *mnemonic, const as_operand_t *op,
+                                             unsigned char *out, size_t out_cap, size_t *out_len) {
+    unsigned stidx;
+
+    if (mnemonic == NULL || insn == NULL || out == NULL) {
+        return -1;
+    }
+    if (strcmp(mnemonic, "fld1") == 0) {
+        if (insn->operand_count != 0 || out_cap < 2) {
+            return -1;
+        }
+        out[0] = 0xd9;
+        out[1] = 0xe8;
+        if (out_len != NULL) *out_len = 2;
+        return 0;
+    }
+    if (strcmp(mnemonic, "fld") == 0) {
+        if (insn->operand_count != 1 || op == NULL) {
+            return -1;
+        }
+        if (op->kind == AS_OPERAND_MEMORY) {
+            return emit_i386_x87_mem_by_size(insn, op, 0xd9, 0u, 0xdd, 0u, 0xdb, 5u, out, out_cap, out_len);
+        }
+        if (operand_st_index(op, &stidx) != 0 || out_cap < 2) {
+            return -1;
+        }
+        out[0] = 0xd9;
+        out[1] = (unsigned char)(0xc0u + (stidx & 7u));
+        if (out_len != NULL) *out_len = 2;
+        return 0;
+    }
+    if (strcmp(mnemonic, "fxch") == 0) {
+        if (insn->operand_count != 1 || op == NULL || operand_st_index(op, &stidx) != 0 || out_cap < 2) {
+            return -1;
+        }
+        out[0] = 0xd9;
+        out[1] = (unsigned char)(0xc8u + (stidx & 7u));
+        if (out_len != NULL) *out_len = 2;
+        return 0;
     }
     return -1;
 }
@@ -3476,6 +4458,56 @@ static int emit_i386_movmsk(unsigned char prefix, const as_operand_t *src, const
     return 0;
 }
 
+static int emit_i386_movmask_family(const char *mnemonic, const as_operand_t *src, const as_operand_t *dst,
+                                    unsigned char *out, size_t out_cap, size_t *out_len) {
+    unsigned char prefix;
+    as_x86_reg_t gr;
+
+    if (mnemonic == NULL || src == NULL || dst == NULL) {
+        return -1;
+    }
+    if (lookup_i386_movmsk_prefix(mnemonic, &prefix) == 0) {
+        return emit_i386_movmsk(prefix, src, dst, out, out_cap, out_len);
+    }
+    if (strcmp(mnemonic, "pmovmskb") != 0 || out == NULL || out_len == NULL || out_cap < 4 ||
+        dst->kind != AS_OPERAND_REGISTER || src->kind != AS_OPERAND_REGISTER ||
+        parse_x86_reg(dst->u.reg, &gr) != 0 || (gr & 8u) != 0u) {
+        return -1;
+    }
+    {
+        unsigned mm;
+        unsigned xr;
+
+        if (parse_mmx_reg(src->u.reg, &mm) == 0) {
+            prefix = 0x00;
+        } else if (parse_xmm_reg(src->u.reg, &xr) == 0) {
+            prefix = 0x66;
+        } else {
+            return -1;
+        }
+    }
+    return emit_i386_prefixed_0f_rm(prefix, 0xd7, (unsigned)gr & 7u, src, out, out_cap, out_len);
+}
+
+static int emit_i386_comisd_family(const char *mnemonic, const as_operand_t *src, const as_operand_t *dst,
+                                   unsigned char *out, size_t out_cap, size_t *out_len) {
+    unsigned char opcode2;
+    unsigned xr;
+    unsigned xm;
+
+    if (mnemonic == NULL || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
+        parse_xmm_reg(dst->u.reg, &xr) != 0) {
+        return -1;
+    }
+    if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
+        return -1;
+    }
+    if (lookup_i386_comisd_opcode(mnemonic, &opcode2) != 0) {
+        return -1;
+    }
+    return emit_i386_prefixed_0f_rm(0x66, opcode2, xr, src, out, out_cap, out_len);
+}
+
 static int emit_i386_mmx_xmm_bridge(unsigned char prefix, const as_operand_t *src,
                                     const as_operand_t *dst, int src_is_mmx,
                                     unsigned char *out, size_t out_cap, size_t *out_len) {
@@ -3529,7 +4561,7 @@ static int emit_i386_maskmov(unsigned char prefix, int use_xmm, const as_operand
     return emit_i386_prefixed_0f_rm(prefix, 0xf7, xr, mask, out, out_cap, out_len);
 }
 
-static int emit_i386_movnt_store(unsigned char prefix, int use_xmm, int intel_syntax,
+static int emit_i386_movnt_store(unsigned char prefix, unsigned char opcode2, int use_xmm, int intel_syntax,
                                  const as_instruction_t *insn, unsigned char *out,
                                  size_t out_cap, size_t *out_len) {
     const as_operand_t *src_op;
@@ -3558,16 +4590,272 @@ static int emit_i386_movnt_store(unsigned char prefix, int use_xmm, int intel_sy
             return -1;
         }
     }
-    return emit_i386_prefixed_0f_rm(prefix, 0xe7, xr, dst_op, out, out_cap, out_len);
+    return emit_i386_prefixed_0f_rm(prefix, opcode2, xr, dst_op, out, out_cap, out_len);
 }
 
-static int emit_i386_prefetch_hint(unsigned char opcode2, unsigned char regf,
-                                   const as_operand_t *op, unsigned char *out,
-                                   size_t out_cap, size_t *out_len) {
+static int emit_i386_extrq_insertq_family(const char *mnemonic, const as_instruction_t *insn, int intel_syntax,
+                                          unsigned char *out, size_t out_cap, size_t *out_len) {
+    unsigned char prefix;
+
+    if (mnemonic == NULL || insn == NULL || out == NULL || out_len == NULL ||
+        lookup_i386_extrq_insertq_prefix(mnemonic, &prefix) != 0) {
+        return -1;
+    }
+    if (insn->operand_count == 2) {
+        const as_operand_t *src_op;
+        const as_operand_t *dst_op;
+        unsigned xr;
+        unsigned xm;
+
+        if (select_x86_srcdst_operands(insn, intel_syntax, &src_op, &dst_op) != 0 ||
+            dst_op->kind != AS_OPERAND_REGISTER || parse_xmm_reg(dst_op->u.reg, &xr) != 0) {
+            return -1;
+        }
+        if (src_op->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src_op->u.reg, &xm) != 0) {
+            return -1;
+        }
+        return emit_i386_prefixed_0f_rm(prefix, 0x79, xr, src_op, out, out_cap, out_len);
+    }
+    if (insn->operand_count == 3 && strcmp(mnemonic, "extrq") == 0) {
+        const as_operand_t *len_op;
+        const as_operand_t *off_op;
+        const as_operand_t *dst_op;
+        unsigned xr;
+        long long lenv;
+        long long offv;
+
+        if (select_x86_dst_immimm_operands(insn, intel_syntax, &dst_op, &len_op, &off_op) != 0 ||
+            dst_op->kind != AS_OPERAND_REGISTER || parse_xmm_reg(dst_op->u.reg, &xr) != 0 ||
+            (len_op->kind != AS_OPERAND_IMMEDIATE && len_op->kind != AS_OPERAND_LABEL_REF) ||
+            (off_op->kind != AS_OPERAND_IMMEDIATE && off_op->kind != AS_OPERAND_LABEL_REF) ||
+            eval_expr_const(len_op->u.expr, &lenv) != 0 || lenv < 0 || lenv > 255 ||
+            eval_expr_const(off_op->u.expr, &offv) != 0 || offv < 0 || offv > 255) {
+            return -1;
+        }
+        out[0] = prefix;
+        out[1] = 0x0f;
+        out[2] = 0x78;
+        out[3] = (unsigned char)(0xc0u | ((xr & 7u) << 3) | (xr & 7u));
+        out[4] = (unsigned char)lenv;
+        out[5] = (unsigned char)offv;
+        *out_len = 6;
+        return 0;
+    }
+    if (insn->operand_count == 4 && strcmp(mnemonic, "insertq") == 0) {
+        const as_operand_t *len_op;
+        const as_operand_t *off_op;
+        const as_operand_t *src_op;
+        const as_operand_t *dst_op;
+        unsigned xr;
+        unsigned xm;
+        long long lenv;
+        long long offv;
+
+        if (select_x86_dstsrc_immimm_operands(insn, intel_syntax, &dst_op, &src_op, &len_op, &off_op) != 0 ||
+            dst_op->kind != AS_OPERAND_REGISTER || src_op->kind != AS_OPERAND_REGISTER ||
+            parse_xmm_reg(dst_op->u.reg, &xr) != 0 || parse_xmm_reg(src_op->u.reg, &xm) != 0 ||
+            (len_op->kind != AS_OPERAND_IMMEDIATE && len_op->kind != AS_OPERAND_LABEL_REF) ||
+            (off_op->kind != AS_OPERAND_IMMEDIATE && off_op->kind != AS_OPERAND_LABEL_REF) ||
+            eval_expr_const(len_op->u.expr, &lenv) != 0 || lenv < 0 || lenv > 255 ||
+            eval_expr_const(off_op->u.expr, &offv) != 0 || offv < 0 || offv > 255) {
+            return -1;
+        }
+        out[0] = prefix;
+        out[1] = 0x0f;
+        out[2] = 0x78;
+        out[3] = (unsigned char)(0xc0u | ((xr & 7u) << 3) | (xm & 7u));
+        out[4] = (unsigned char)lenv;
+        out[5] = (unsigned char)offv;
+        *out_len = 6;
+        return 0;
+    }
+    return -1;
+}
+
+static int emit_i386_xmm_shiftdq_imm8_family(const char *mnemonic, const as_instruction_t *insn, int intel_syntax,
+                                             unsigned char *out, size_t out_cap, size_t *out_len) {
+    unsigned char reg_field;
+    const as_operand_t *imm_op;
+    const as_operand_t *dst_op;
+    unsigned xr;
+    long long immv;
+
+    if (mnemonic == NULL || insn == NULL || lookup_i386_xmm_shiftdq_imm8(mnemonic, &reg_field) != 0 ||
+        insn->operand_count != 2) {
+        return -1;
+    }
+    if (intel_syntax) {
+        dst_op = &insn->operands[0];
+        imm_op = &insn->operands[1];
+    } else {
+        imm_op = &insn->operands[0];
+        dst_op = &insn->operands[1];
+    }
+    if (dst_op->kind != AS_OPERAND_REGISTER || parse_xmm_reg(dst_op->u.reg, &xr) != 0 ||
+        (imm_op->kind != AS_OPERAND_IMMEDIATE && imm_op->kind != AS_OPERAND_LABEL_REF) ||
+        eval_expr_const(imm_op->u.expr, &immv) != 0 || immv < 0 || immv > 255) {
+        return -1;
+    }
+    return emit_i386_legacy_simd_rm_imm8(0x66, 0x73, reg_field, dst_op, (unsigned char)immv, out, out_cap, out_len);
+}
+
+static int emit_i386_xmm_shuffle_tail_family(const char *mnemonic, const as_instruction_t *insn, int intel_syntax,
+                                             unsigned char *out, size_t out_cap, size_t *out_len) {
+    unsigned char prefix;
+    unsigned char opcode2;
+    const as_operand_t *imm_op;
+    const as_operand_t *src_op;
+    const as_operand_t *dst_op;
+    unsigned xr;
+    unsigned xm;
+    long long immv;
+
+    if (mnemonic == NULL || insn == NULL || lookup_i386_xmm_shuffle_tail(mnemonic, &prefix, &opcode2) != 0) {
+        return -1;
+    }
+    if (select_x86_dstsrc_tail_operand(insn, intel_syntax, &dst_op, &src_op, &imm_op) != 0 ||
+        (imm_op->kind != AS_OPERAND_IMMEDIATE && imm_op->kind != AS_OPERAND_LABEL_REF) ||
+        eval_expr_const(imm_op->u.expr, &immv) != 0 || immv < 0 || immv > 255 ||
+        dst_op->kind != AS_OPERAND_REGISTER || parse_xmm_reg(dst_op->u.reg, &xr) != 0) {
+        return -1;
+    }
+    if (src_op->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src_op->u.reg, &xm) != 0) {
+        return -1;
+    }
+    return emit_i386_legacy_simd_rm_imm8(prefix, opcode2, xr, src_op, (unsigned char)immv, out, out_cap, out_len);
+}
+
+static int emit_i386_cachehint(unsigned char opcode2, unsigned char regf,
+                               const as_operand_t *op, unsigned char *out,
+                               size_t out_cap, size_t *out_len) {
     if (op == NULL || op->kind == AS_OPERAND_REGISTER || op->kind == AS_OPERAND_COPROCESSOR) {
         return -1;
     }
     return emit_i386_prefixed_0f_rm(0x00, opcode2, regf, op, out, out_cap, out_len);
+}
+
+static int emit_i386_cachehint_family(const char *mnemonic, const as_operand_t *op,
+                                      unsigned char *out, size_t out_cap, size_t *out_len) {
+    unsigned char opcode2;
+    unsigned char regf;
+
+    if (mnemonic == NULL || lookup_i386_cachehint_regf(mnemonic, &opcode2, &regf) != 0) {
+        return -1;
+    }
+    return emit_i386_cachehint(opcode2, regf, op, out, out_cap, out_len);
+}
+
+static int emit_x86_klogic(const as_instruction_t *insn, int intel_syntax, const char *mnemonic,
+                           unsigned char *out, size_t out_cap, size_t *out_len) {
+    const as_operand_t *op_rm;
+    const as_operand_t *op_vvvv;
+    const as_operand_t *op_dst;
+    unsigned krm;
+    unsigned kvvvv;
+    unsigned kdst;
+
+    if (insn == NULL || mnemonic == NULL || out == NULL || insn->operand_count != 3) {
+        return -1;
+    }
+    if (intel_syntax) {
+        op_dst = &insn->operands[0];
+        op_vvvv = &insn->operands[1];
+        op_rm = &insn->operands[2];
+    } else {
+        op_rm = &insn->operands[0];
+        op_vvvv = &insn->operands[1];
+        op_dst = &insn->operands[2];
+    }
+    if (op_rm->kind != AS_OPERAND_REGISTER || op_vvvv->kind != AS_OPERAND_REGISTER ||
+        op_dst->kind != AS_OPERAND_REGISTER || parse_k_reg(op_rm->u.reg, &krm) != 0 ||
+        parse_k_reg(op_vvvv->u.reg, &kvvvv) != 0 || parse_k_reg(op_dst->u.reg, &kdst) != 0) {
+        return -1;
+    }
+    return emit_i386_vex_klogic(mnemonic, krm, kvvvv, kdst, out, out_cap, out_len);
+}
+
+static int emit_x86_seg_pushpop(const char *mnemonic, const as_operand_t *op, int allow_legacy,
+                                unsigned char *out, size_t out_cap, size_t *out_len) {
+    as_x86_seg_t seg;
+
+    if (mnemonic == NULL || op == NULL || out == NULL || op->kind != AS_OPERAND_REGISTER) {
+        return -1;
+    }
+    if (parse_seg_reg_text(op->u.reg, &seg) != 0) {
+        return -1;
+    }
+    if (strcmp(mnemonic, "push") == 0) {
+        switch (seg) {
+        case AS_X86_SEG_ES:
+            if (!allow_legacy || out_cap < 1) return -1;
+            out[0] = 0x06;
+            if (out_len != NULL) *out_len = 1;
+            return 0;
+        case AS_X86_SEG_CS:
+            if (!allow_legacy || out_cap < 1) return -1;
+            out[0] = 0x0e;
+            if (out_len != NULL) *out_len = 1;
+            return 0;
+        case AS_X86_SEG_SS:
+            if (!allow_legacy || out_cap < 1) return -1;
+            out[0] = 0x16;
+            if (out_len != NULL) *out_len = 1;
+            return 0;
+        case AS_X86_SEG_DS:
+            if (!allow_legacy || out_cap < 1) return -1;
+            out[0] = 0x1e;
+            if (out_len != NULL) *out_len = 1;
+            return 0;
+        case AS_X86_SEG_FS:
+            if (out_cap < 2) return -1;
+            out[0] = 0x0f;
+            out[1] = 0xa0;
+            if (out_len != NULL) *out_len = 2;
+            return 0;
+        case AS_X86_SEG_GS:
+            if (out_cap < 2) return -1;
+            out[0] = 0x0f;
+            out[1] = 0xa8;
+            if (out_len != NULL) *out_len = 2;
+            return 0;
+        default:
+            return -1;
+        }
+    }
+    if (strcmp(mnemonic, "pop") == 0) {
+        switch (seg) {
+        case AS_X86_SEG_ES:
+            if (!allow_legacy || out_cap < 1) return -1;
+            out[0] = 0x07;
+            if (out_len != NULL) *out_len = 1;
+            return 0;
+        case AS_X86_SEG_SS:
+            if (!allow_legacy || out_cap < 1) return -1;
+            out[0] = 0x17;
+            if (out_len != NULL) *out_len = 1;
+            return 0;
+        case AS_X86_SEG_DS:
+            if (!allow_legacy || out_cap < 1) return -1;
+            out[0] = 0x1f;
+            if (out_len != NULL) *out_len = 1;
+            return 0;
+        case AS_X86_SEG_FS:
+            if (out_cap < 2) return -1;
+            out[0] = 0x0f;
+            out[1] = 0xa1;
+            if (out_len != NULL) *out_len = 2;
+            return 0;
+        case AS_X86_SEG_GS:
+            if (out_cap < 2) return -1;
+            out[0] = 0x0f;
+            out[1] = 0xa9;
+            if (out_len != NULL) *out_len = 2;
+            return 0;
+        default:
+            return -1;
+        }
+    }
+    return -1;
 }
 
 static int emit_i386_bnd_binary(unsigned char prefix, unsigned char opcode2,
@@ -3708,59 +4996,11 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
     }
     if (strncmp(mnbuf, "kand", 4) == 0 || strncmp(mnbuf, "kor", 3) == 0 || strncmp(mnbuf, "kxor", 4) == 0 ||
         strncmp(mnbuf, "kxnor", 5) == 0 || strncmp(mnbuf, "kadd", 4) == 0 || strncmp(mnbuf, "kunpck", 6) == 0) {
-        const as_operand_t *op_rm;
-        const as_operand_t *op_vvvv;
-        const as_operand_t *op_dst;
-        unsigned krm;
-        unsigned kvvvv;
-        unsigned kdst;
-
-        if (insn->operand_count != 3) {
-            return -1;
-        }
-        if (intel_syntax) {
-            op_dst = &insn->operands[0];
-            op_vvvv = &insn->operands[1];
-            op_rm = &insn->operands[2];
-        } else {
-            op_rm = &insn->operands[0];
-            op_vvvv = &insn->operands[1];
-            op_dst = &insn->operands[2];
-        }
-        if (op_rm->kind != AS_OPERAND_REGISTER || op_vvvv->kind != AS_OPERAND_REGISTER || op_dst->kind != AS_OPERAND_REGISTER ||
-            parse_k_reg(op_rm->u.reg, &krm) != 0 || parse_k_reg(op_vvvv->u.reg, &kvvvv) != 0 ||
-            parse_k_reg(op_dst->u.reg, &kdst) != 0) {
-            return -1;
-        }
-        return emit_i386_vex_klogic(mnbuf, krm, kvvvv, kdst, out, out_cap, out_len);
+        return emit_x86_klogic(insn, intel_syntax, mnbuf, out, out_cap, out_len);
     }
     if ((strcmp(mnbuf, "push") == 0 || strcmp(mnbuf, "pop") == 0) && insn->operand_count == 1 && a != NULL &&
         a->kind == AS_OPERAND_REGISTER) {
-        as_x86_seg_t seg;
-
-        if (parse_seg_reg_text(a->u.reg, &seg) != 0) {
-            return -1;
-        }
-        if (strcmp(mnbuf, "push") == 0) {
-            switch (seg) {
-            case AS_X86_SEG_ES: out[0] = 0x06; *out_len = 1; return 0;
-            case AS_X86_SEG_CS: out[0] = 0x0e; *out_len = 1; return 0;
-            case AS_X86_SEG_SS: out[0] = 0x16; *out_len = 1; return 0;
-            case AS_X86_SEG_DS: out[0] = 0x1e; *out_len = 1; return 0;
-            case AS_X86_SEG_FS: out[0] = 0x0f; out[1] = 0xa0; *out_len = 2; return 0;
-            case AS_X86_SEG_GS: out[0] = 0x0f; out[1] = 0xa8; *out_len = 2; return 0;
-            default: return -1;
-            }
-        } else {
-            switch (seg) {
-            case AS_X86_SEG_ES: out[0] = 0x07; *out_len = 1; return 0;
-            case AS_X86_SEG_SS: out[0] = 0x17; *out_len = 1; return 0;
-            case AS_X86_SEG_DS: out[0] = 0x1f; *out_len = 1; return 0;
-            case AS_X86_SEG_FS: out[0] = 0x0f; out[1] = 0xa1; *out_len = 2; return 0;
-            case AS_X86_SEG_GS: out[0] = 0x0f; out[1] = 0xa9; *out_len = 2; return 0;
-            default: return -1;
-            }
-        }
+        return emit_x86_seg_pushpop(mnbuf, a, 1, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "in") == 0 && insn->operand_count == 2 && src != NULL && dst != NULL) {
         const char *dstreg = NULL;
@@ -3812,40 +5052,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             }
         }
     }
-    if (strcmp(mnbuf, "fld1") == 0) {
-        if (insn->operand_count != 0) {
-            return -1;
-        }
-        out[0] = 0xd9;
-        out[1] = 0xe8;
-        if (out_len != NULL) {
-            *out_len = 2;
-        }
-        return 0;
-    }
-    if (strcmp(mnbuf, "fld") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        if (a->kind == AS_OPERAND_MEMORY) {
-            return emit_i386_x87_mem_by_size(insn, a, 0xd9, 0u, 0xdd, 0u, 0xdb, 5u, out, out_cap, out_len);
-        }
-        if (operand_st_index(a, &stidx) != 0) {
-            return -1;
-        }
-        out[0] = 0xd9;
-        out[1] = (unsigned char)(0xc0u + (stidx & 7u));
-        if (out_len != NULL) *out_len = 2;
-        return 0;
-    }
-    if (strcmp(mnbuf, "fxch") == 0) {
-        if (insn->operand_count != 1 || a == NULL || operand_st_index(a, &stidx) != 0) {
-            return -1;
-        }
-        out[0] = 0xd9;
-        out[1] = (unsigned char)(0xc8u + (stidx & 7u));
-        if (out_len != NULL) *out_len = 2;
-        return 0;
+    if (strcmp(mnbuf, "fld1") == 0 || strcmp(mnbuf, "fld") == 0 || strcmp(mnbuf, "fxch") == 0) {
+        return emit_i386_x87_stack_load_exchange(insn, mnbuf, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "fnop") == 0 || strcmp(mnbuf, "fchs") == 0 || strcmp(mnbuf, "f2xm1") == 0 || strcmp(mnbuf, "fprem") == 0) {
         unsigned char op1;
@@ -3884,44 +5092,25 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         strcmp(mnbuf, "fsub") == 0 || strcmp(mnbuf, "fsubr") == 0 || strcmp(mnbuf, "fdiv") == 0 || strcmp(mnbuf, "fdivr") == 0) {
         unsigned stsrc;
         unsigned stdst;
+        unsigned char mem_d8_regf;
+        unsigned char mem_dc_regf;
+        int stack_single_base;
         unsigned char base;
+
+        if (lookup_i386_x87_arith_opcode(mnbuf, &mem_d8_regf, &mem_dc_regf, &stack_single_base, &base) != 0) {
+            return -1;
+        }
         if (insn->operand_count == 1 && a != NULL) {
             if (a->kind == AS_OPERAND_MEMORY) {
-                if (strcmp(mnbuf, "fadd") == 0) {
-                    return emit_i386_x87_mem_by_size(insn, a, 0xd8, 0u, 0xdc, 0u, -1, 0u, out, out_cap, out_len);
-                }
-                if (strcmp(mnbuf, "fmul") == 0) {
-                    return emit_i386_x87_mem_by_size(insn, a, 0xd8, 1u, 0xdc, 1u, -1, 0u, out, out_cap, out_len);
-                }
-                if (strcmp(mnbuf, "fcom") == 0) {
-                    return emit_i386_x87_mem_by_size(insn, a, 0xd8, 2u, 0xdc, 2u, -1, 0u, out, out_cap, out_len);
-                }
-                if (strcmp(mnbuf, "fcomp") == 0) {
-                    return emit_i386_x87_mem_by_size(insn, a, 0xd8, 3u, 0xdc, 3u, -1, 0u, out, out_cap, out_len);
-                }
-                if (strcmp(mnbuf, "fsub") == 0) {
-                    return emit_i386_x87_mem_by_size(insn, a, 0xd8, 4u, 0xdc, 4u, -1, 0u, out, out_cap, out_len);
-                }
-                if (strcmp(mnbuf, "fsubr") == 0) {
-                    return emit_i386_x87_mem_by_size(insn, a, 0xd8, 5u, 0xdc, 5u, -1, 0u, out, out_cap, out_len);
-                }
-                if (strcmp(mnbuf, "fdiv") == 0) {
-                    return emit_i386_x87_mem_by_size(insn, a, 0xd8, 6u, 0xdc, 6u, -1, 0u, out, out_cap, out_len);
-                }
-                return emit_i386_x87_mem_by_size(insn, a, 0xd8, 7u, 0xdc, 7u, -1, 0u, out, out_cap, out_len);
+                return emit_i386_x87_mem_by_size(insn, a, 0xd8, mem_d8_regf, 0xdc, mem_dc_regf, -1, 0u,
+                                                 out, out_cap, out_len);
             }
             if (operand_st_index(a, &stsrc) != 0) {
                 return -1;
             }
-            if (strcmp(mnbuf, "fcom") == 0) {
+            if (stack_single_base >= 0) {
                 out[0] = 0xd8;
-                out[1] = (unsigned char)(0xd0u + (stsrc & 7u));
-                if (out_len != NULL) *out_len = 2;
-                return 0;
-            }
-            if (strcmp(mnbuf, "fcomp") == 0) {
-                out[0] = 0xd8;
-                out[1] = (unsigned char)(0xd8u + (stsrc & 7u));
+                out[1] = (unsigned char)((unsigned char)stack_single_base + (stsrc & 7u));
                 if (out_len != NULL) *out_len = 2;
                 return 0;
             }
@@ -3932,14 +5121,6 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             stdst != 0) {
             return -1;
         }
-        if (strcmp(mnbuf, "fadd") == 0) base = 0xc0;
-        else if (strcmp(mnbuf, "fmul") == 0) base = 0xc8;
-        else if (strcmp(mnbuf, "fcom") == 0) base = 0xd0;
-        else if (strcmp(mnbuf, "fcomp") == 0) base = 0xd8;
-        else if (strcmp(mnbuf, "fsub") == 0) base = 0xe0;
-        else if (strcmp(mnbuf, "fsubr") == 0) base = 0xe8;
-        else if (strcmp(mnbuf, "fdiv") == 0) base = 0xf0;
-        else base = 0xf8;
         out[0] = 0xd8;
         out[1] = (unsigned char)(base + (stsrc & 7u));
         if (out_len != NULL) {
@@ -4038,299 +5219,34 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_1byte_x87_mem(insn, 0xdd, 7u, a, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "fldl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
+    {
+        unsigned char opcode;
+        unsigned reg_field;
+
+        if (lookup_i386_x87_mem_exact(mnbuf, &opcode, &reg_field) == 0) {
+            if (insn->operand_count != 1 || a == NULL) {
+                return -1;
+            }
+            return emit_i386_prefixed_1byte_x87_mem(insn, opcode, reg_field, a, out, out_cap, out_len);
         }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdd, 0u, a, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "flds") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
+    {
+        unsigned char opcode16;
+        unsigned reg16;
+        unsigned char opcode32;
+        unsigned reg32;
+        unsigned char opcode64;
+        unsigned reg64;
+
+        if (lookup_i386_x87_mem16_32_named(mnbuf, &opcode16, &reg16, &opcode32, &reg32) == 0) {
+            if (insn->operand_count != 1 || a == NULL) return -1;
+            return emit_i386_x87_mem16_32(insn, a, opcode16, reg16, opcode32, reg32, out, out_cap, out_len);
         }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd9, 0u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fldt") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
+        if (lookup_i386_x87_mem16_32_64_named(mnbuf, &opcode16, &reg16, &opcode32, &reg32, &opcode64, &reg64) == 0) {
+            if (insn->operand_count != 1 || a == NULL) return -1;
+            return emit_i386_x87_mem16_32_64(insn, a, opcode16, reg16, opcode32, reg32, opcode64, reg64,
+                                             out, out_cap, out_len);
         }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdb, 5u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fstpl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdd, 3u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fstps") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd9, 3u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fstpt") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdb, 7u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "faddl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdc, 0u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fadds") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd8, 0u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fsubl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdc, 4u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fsubs") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd8, 4u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fsubrs") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd8, 5u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fsubrl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdc, 5u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fmull") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdc, 1u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fmuls") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd8, 1u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fdivl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdc, 6u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fdivs") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd8, 6u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fdivrs") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd8, 7u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fdivrl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdc, 7u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fcoms") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd8, 2u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fcomps") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd8, 3u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fcoml") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdc, 2u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fcompl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdc, 3u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fildl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdb, 0u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "filds") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdf, 0u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fildll") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdf, 5u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fistl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdb, 2u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fistpl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdb, 3u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fists") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdf, 2u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fistps") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdf, 3u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fistpll") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdf, 7u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fisttps") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdf, 1u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fisttpl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdb, 1u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fisttpll") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdd, 1u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fstl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdd, 2u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fbld") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdf, 4u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fbstp") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xdf, 6u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fldcw") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd9, 5u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fnstcw") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd9, 7u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fsts") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd9, 2u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fldenv") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd9, 4u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fnstenv") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xd9, 6u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fiadd") == 0) {
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        return emit_i386_x87_mem16_32(insn, a, 0xde, 0u, 0xda, 0u, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fimul") == 0) {
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        return emit_i386_x87_mem16_32(insn, a, 0xde, 1u, 0xda, 1u, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fisub") == 0) {
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        return emit_i386_x87_mem16_32(insn, a, 0xde, 4u, 0xda, 4u, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fisubr") == 0) {
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        return emit_i386_x87_mem16_32(insn, a, 0xde, 5u, 0xda, 5u, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fidiv") == 0) {
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        return emit_i386_x87_mem16_32(insn, a, 0xde, 6u, 0xda, 6u, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fidivr") == 0) {
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        return emit_i386_x87_mem16_32(insn, a, 0xde, 7u, 0xda, 7u, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "ficom") == 0) {
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        return emit_i386_x87_mem16_32(insn, a, 0xde, 2u, 0xda, 2u, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "ficomp") == 0) {
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        return emit_i386_x87_mem16_32(insn, a, 0xde, 3u, 0xda, 3u, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fild") == 0) {
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        return emit_i386_x87_mem16_32_64(insn, a, 0xdf, 0u, 0xdb, 0u, 0xdf, 5u, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fist") == 0) {
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        return emit_i386_x87_mem16_32(insn, a, 0xdf, 2u, 0xdb, 2u, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fistp") == 0) {
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        return emit_i386_x87_mem16_32_64(insn, a, 0xdf, 3u, 0xdb, 3u, 0xdf, 7u, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "fisttp") == 0) {
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        return emit_i386_x87_mem16_32_64(insn, a, 0xdf, 1u, 0xdb, 1u, 0xdd, 1u, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "fiaddl") == 0) {
         if (insn->operand_count != 1 || a == NULL) return -1;
@@ -4431,30 +5347,6 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         out[1] = (unsigned char)(base + (stsrc & 7u));
         if (out_len != NULL) *out_len = 2;
         return 0;
-    }
-    if (strcmp(mnbuf, "ficoml") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xda, 2u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "ficompl") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xda, 3u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "ficoms") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xde, 2u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "ficomps") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefixed_1byte_x87_mem(insn, 0xde, 3u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "pxor") == 0) {
         unsigned char prefix;
@@ -4694,25 +5586,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         const as_operand_t *reg_op;
         as_x86_reg_t gr;
 
-        if (insn->operand_count != 2) {
+        if (select_x86_vmread_vmwrite_operands(insn, intel_syntax, mnbuf, &rm_op, &reg_op) != 0) {
             return -1;
-        }
-        if (strcmp(mnbuf, "vmread") == 0) {
-            if (intel_syntax) {
-                rm_op = &insn->operands[0];
-                reg_op = &insn->operands[1];
-            } else {
-                reg_op = &insn->operands[0];
-                rm_op = &insn->operands[1];
-            }
-        } else {
-            if (intel_syntax) {
-                reg_op = &insn->operands[0];
-                rm_op = &insn->operands[1];
-            } else {
-                rm_op = &insn->operands[0];
-                reg_op = &insn->operands[1];
-            }
         }
         if (reg_op->kind != AS_OPERAND_REGISTER || parse_x86_reg(reg_op->u.reg, &gr) != 0 || (gr & 8u) != 0u) {
             return -1;
@@ -4754,17 +5629,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         unsigned char reg_opcode;
         unsigned char imm_opcode;
 
-        if (insn->operand_count != 3) {
+        if (select_x86_dstsrc_tail_operand(insn, intel_syntax, &dst_op, &src_op, &count_op) != 0) {
             return -1;
-        }
-        if (intel_syntax) {
-            dst_op = &insn->operands[0];
-            src_op = &insn->operands[1];
-            count_op = &insn->operands[2];
-        } else {
-            count_op = &insn->operands[0];
-            src_op = &insn->operands[1];
-            dst_op = &insn->operands[2];
         }
         if (src_op->kind != AS_OPERAND_REGISTER || parse_x86_reg(src_op->u.reg, &gr) != 0 || (gr & 8u) != 0u) {
             return -1;
@@ -4970,17 +5836,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         long long immv;
         as_x86_reg_t gr;
 
-        if (insn->operand_count != 3) {
+        if (select_x86_dstsrc_tail_operand(insn, intel_syntax, &dst_op, &src_op, &imm_op) != 0) {
             return -1;
-        }
-        if (intel_syntax) {
-            dst_op = &insn->operands[0];
-            src_op = &insn->operands[1];
-            imm_op = &insn->operands[2];
-        } else {
-            imm_op = &insn->operands[0];
-            src_op = &insn->operands[1];
-            dst_op = &insn->operands[2];
         }
         if ((imm_op->kind != AS_OPERAND_IMMEDIATE && imm_op->kind != AS_OPERAND_LABEL_REF) ||
             eval_expr_const(imm_op->u.expr, &immv) != 0 || immv < 0 || immv > 255) {
@@ -5065,44 +5922,13 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return emit_i386_prefixed_0f_rm(0x00, 0xc3, (unsigned)gr & 7u, mem_op, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "pmovmskb") == 0) {
-        const as_operand_t *src_op;
-        const as_operand_t *dst_op;
-        unsigned char prefix = 0x00;
-        as_x86_reg_t gr;
-
         if (insn->operand_count != 2) {
             return -1;
         }
-        if (intel_syntax) {
-            dst_op = &insn->operands[0];
-            src_op = &insn->operands[1];
-        } else {
-            src_op = &insn->operands[0];
-            dst_op = &insn->operands[1];
-        }
-        if (dst_op->kind != AS_OPERAND_REGISTER || parse_x86_reg(dst_op->u.reg, &gr) != 0 || (gr & 8u) != 0u) {
-            return -1;
-        }
-        if (src_op->kind != AS_OPERAND_REGISTER) {
-            return -1;
-        }
-        if (parse_mmx_reg(src_op->u.reg, &xm) == 0) {
-            prefix = 0x00;
-        } else if (parse_xmm_reg(src_op->u.reg, &xm) == 0) {
-            prefix = 0x66;
-        } else {
-            return -1;
-        }
-        return emit_i386_prefixed_0f_rm(prefix, 0xd7, (unsigned)gr & 7u, src_op, out, out_cap, out_len);
+        return emit_i386_movmask_family(mnbuf, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movntq") == 0) {
-        return emit_i386_movnt_store(0x00, 0, intel_syntax, insn, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "movdq2q") == 0) {
-        if (insn->operand_count != 2) {
-            return -1;
-        }
-        return emit_i386_mmx_xmm_bridge(0xf2, src, dst, 0, out, out_cap, out_len);
+        return emit_i386_movnt_store(0x00, 0xe7, 0, intel_syntax, insn, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "cvttpd2dq") == 0) {
         return emit_i386_prefixed_xmm_srcdst_rm(0x66, 0xe6, src, dst, out, out_cap, out_len);
@@ -5111,7 +5937,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return emit_i386_prefixed_xmm_srcdst_rm(0xf2, 0xe6, src, dst, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movntdq") == 0) {
-        return emit_i386_movnt_store(0x66, 1, intel_syntax, insn, out, out_cap, out_len);
+        return emit_i386_movnt_store(0x66, 0xe7, 1, intel_syntax, insn, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "maskmovq") == 0) {
         if (insn->operand_count != 2) {
@@ -5335,22 +6161,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             return -1;
         }
         first_is_reg = insn->operands[0].kind == AS_OPERAND_REGISTER ? 1 : 0;
-        if (intel_syntax) {
-            if (first_is_reg) {
-                reg_op = &insn->operands[0];
-                rm_op = &insn->operands[1];
-            } else {
-                rm_op = &insn->operands[0];
-                reg_op = &insn->operands[1];
-            }
-        } else {
-            if (first_is_reg) {
-                reg_op = &insn->operands[0];
-                rm_op = &insn->operands[1];
-            } else {
-                rm_op = &insn->operands[0];
-                reg_op = &insn->operands[1];
-            }
+        if (select_i386_actual_reg_rm_operands(insn, &reg_op, &rm_op) != 0) {
+            return -1;
         }
         if (reg_op->kind != AS_OPERAND_REGISTER || parse_x86_reg(reg_op->u.reg, &gr) != 0 || (gr & 8u) != 0u) {
             return -1;
@@ -5369,12 +6181,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (insn->operand_count != 2) {
             return -1;
         }
-        if (intel_syntax) {
-            reg_op = &insn->operands[0];
-            rm_op = &insn->operands[1];
-        } else {
-            rm_op = &insn->operands[0];
-            reg_op = &insn->operands[1];
+        if (select_i386_syntax_reg_rm_operands(insn, intel_syntax, 1, &reg_op, &rm_op) != 0) {
+            return -1;
         }
         if (reg_op->kind != AS_OPERAND_REGISTER || parse_x86_reg(reg_op->u.reg, &gr) != 0 || (gr & 8u) != 0u) {
             return -1;
@@ -5442,20 +6250,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (lookup_i386_memorder_opcode(mnbuf, &prefix, &opcode3, &reg_first) != 0) {
             return -1;
         }
-        if (reg_first) {
-            if (intel_syntax) {
-                reg_op = &insn->operands[0];
-                mem_op = &insn->operands[1];
-            } else {
-                mem_op = &insn->operands[0];
-                reg_op = &insn->operands[1];
-            }
-        } else if (intel_syntax) {
-            mem_op = &insn->operands[0];
-            reg_op = &insn->operands[1];
-        } else {
-            reg_op = &insn->operands[0];
-            mem_op = &insn->operands[1];
+        if (select_i386_syntax_reg_rm_operands(insn, intel_syntax, reg_first, &reg_op, &mem_op) != 0) {
+            return -1;
         }
         if (reg_op->kind != AS_OPERAND_REGISTER || parse_x86_reg(reg_op->u.reg, &gr) != 0 || (gr & 8u) != 0u) {
             return -1;
@@ -5510,14 +6306,19 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_0f_map_rm(0xf3, 0x38, opcode3, (unsigned)gr & 7u, src_op, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "movups") == 0) {
-        return emit_i386_xmm_move_rm(0x00, 0x10, 0x11, src, dst, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "movupd") == 0) {
-        return emit_i386_xmm_move_rm(0x66, 0x10, 0x11, src, dst, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "movlpd") == 0) {
-        return emit_i386_xmm_partial_move_rm(0x66, 0x12, 0x13, src, dst, out, out_cap, out_len);
+    {
+        unsigned char prefix;
+        unsigned char load_opcode2;
+        unsigned char store_opcode2;
+        int is_partial;
+
+        if (lookup_x86_xmm_move_family(mnbuf, &prefix, &load_opcode2, &store_opcode2, &is_partial) == 0 &&
+            (strcmp(mnbuf, "movhlps") != 0 && strcmp(mnbuf, "movlhps") != 0)) {
+            if (is_partial) {
+                return emit_i386_xmm_partial_move_rm(prefix, load_opcode2, store_opcode2, src, dst, out, out_cap, out_len);
+            }
+            return emit_i386_xmm_move_rm(prefix, load_opcode2, store_opcode2, src, dst, out, out_cap, out_len);
+        }
     }
     if (strcmp(mnbuf, "nopw") == 0) {
         if (insn->operand_count != 1 || a == NULL) {
@@ -5525,262 +6326,56 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         }
         return emit_i386_prefixed_0f_rm(0x66, 0x1d, 0u, a, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "unpcklpd") == 0) {
-        return emit_i386_prefixed_xmm_srcdst_rm(0x66, 0x14, src, dst, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "unpckhpd") == 0) {
-        return emit_i386_prefixed_xmm_srcdst_rm(0x66, 0x15, src, dst, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "movhpd") == 0) {
-        return emit_i386_xmm_partial_move_rm(0x66, 0x16, 0x17, src, dst, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "cvtpi2pd") == 0) {
-        if (insn->operand_count != 2) {
-            return -1;
-        }
-        return emit_i386_xmm_from_mmx_or_mem(0x66, 0x2a, src, dst, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "cvttpd2pi") == 0 || strcmp(mnbuf, "cvtpd2pi") == 0) {
-        if (insn->operand_count != 2) {
-            return -1;
-        }
-        return emit_i386_mmx_from_xmm_or_mem(0x66, strcmp(mnbuf, "cvttpd2pi") == 0 ? 0x2c : 0x2d,
-                                             src, dst, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "ucomisd") == 0 || strcmp(mnbuf, "comisd") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
-            parse_xmm_reg(dst->u.reg, &xr) != 0) {
-            return -1;
-        }
-        if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
-            return -1;
-        }
-        return emit_i386_prefixed_0f_rm(0x66, strcmp(mnbuf, "ucomisd") == 0 ? 0x2e : 0x2f,
-                                        xr, src, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "extrq") == 0 || strcmp(mnbuf, "insertq") == 0) {
-        unsigned char prefix = strcmp(mnbuf, "extrq") == 0 ? 0x66 : 0xf2;
+    {
+        unsigned char prefix;
+        unsigned char opcode2;
 
-        if (insn->operand_count == 2) {
-            const as_operand_t *src_op;
-            const as_operand_t *dst_op;
-
-            if (intel_syntax) {
-                dst_op = &insn->operands[0];
-                src_op = &insn->operands[1];
-            } else {
-                src_op = &insn->operands[0];
-                dst_op = &insn->operands[1];
-            }
-            if (dst_op->kind != AS_OPERAND_REGISTER || parse_xmm_reg(dst_op->u.reg, &xr) != 0) {
+        if (lookup_i386_mmx_xmm_convert_to_xmm(mnbuf, &prefix, &opcode2) == 0) {
+            if (insn->operand_count != 2) {
                 return -1;
             }
-            if (src_op->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src_op->u.reg, &xm) != 0) {
+            return emit_i386_xmm_from_mmx_or_mem(prefix, opcode2, src, dst, out, out_cap, out_len);
+        }
+        if (lookup_i386_mmx_xmm_convert_from_xmm(mnbuf, &prefix, &opcode2) == 0) {
+            if (insn->operand_count != 2) {
                 return -1;
             }
-            return emit_i386_prefixed_0f_rm(prefix, 0x79, xr, src_op, out, out_cap, out_len);
+            return emit_i386_mmx_from_xmm_or_mem(prefix, opcode2, src, dst, out, out_cap, out_len);
         }
-        if (insn->operand_count == 3 && strcmp(mnbuf, "extrq") == 0) {
-            const as_operand_t *len_op;
-            const as_operand_t *off_op;
-            const as_operand_t *dst_op;
-            long long lenv;
-            long long offv;
+    }
+    if (emit_i386_comisd_family(mnbuf, src, dst, out, out_cap, out_len) == 0) {
+        return 0;
+    }
+    if (emit_i386_extrq_insertq_family(mnbuf, insn, intel_syntax, out, out_cap, out_len) == 0) {
+        return 0;
+    }
+    if (emit_i386_xmm_shiftdq_imm8_family(mnbuf, insn, intel_syntax, out, out_cap, out_len) == 0) {
+        return 0;
+    }
+    if (emit_i386_xmm_shuffle_tail_family(mnbuf, insn, intel_syntax, out, out_cap, out_len) == 0) {
+        return 0;
+    }
+    {
+        unsigned char opcode2;
 
-            if (intel_syntax) {
-                dst_op = &insn->operands[0];
-                len_op = &insn->operands[1];
-                off_op = &insn->operands[2];
-            } else {
-                len_op = &insn->operands[0];
-                off_op = &insn->operands[1];
-                dst_op = &insn->operands[2];
-            }
-            if (dst_op->kind != AS_OPERAND_REGISTER || parse_xmm_reg(dst_op->u.reg, &xr) != 0 ||
-                (len_op->kind != AS_OPERAND_IMMEDIATE && len_op->kind != AS_OPERAND_LABEL_REF) ||
-                (off_op->kind != AS_OPERAND_IMMEDIATE && off_op->kind != AS_OPERAND_LABEL_REF) ||
-                eval_expr_const(len_op->u.expr, &lenv) != 0 || lenv < 0 || lenv > 255 ||
-                eval_expr_const(off_op->u.expr, &offv) != 0 || offv < 0 || offv > 255) {
+        if (lookup_i386_xmm_regpair_opcode(mnbuf, &opcode2) == 0) {
+            if (insn->operand_count != 2) {
                 return -1;
             }
-            out[0] = prefix;
-            out[1] = 0x0f;
-            out[2] = 0x78;
-            out[3] = (unsigned char)(0xc0u | ((xr & 7u) << 3) | (xr & 7u));
-            out[4] = (unsigned char)lenv;
-            out[5] = (unsigned char)offv;
-            if (out_len != NULL) *out_len = 6;
-            return 0;
+            return emit_i386_xmm_reg_srcdst_rm(0x00, opcode2, src, dst, out, out_cap, out_len);
         }
-        if (insn->operand_count == 4 && strcmp(mnbuf, "insertq") == 0) {
-            const as_operand_t *len_op;
-            const as_operand_t *off_op;
-            const as_operand_t *src_op;
-            const as_operand_t *dst_op;
-            long long lenv;
-            long long offv;
+    }
+    {
+        unsigned char prefix;
+        unsigned char opcode2;
+        int use_xmm;
 
-            if (intel_syntax) {
-                dst_op = &insn->operands[0];
-                src_op = &insn->operands[1];
-                len_op = &insn->operands[2];
-                off_op = &insn->operands[3];
-            } else {
-                len_op = &insn->operands[0];
-                off_op = &insn->operands[1];
-                src_op = &insn->operands[2];
-                dst_op = &insn->operands[3];
-            }
-            if (dst_op->kind != AS_OPERAND_REGISTER || src_op->kind != AS_OPERAND_REGISTER ||
-                parse_xmm_reg(dst_op->u.reg, &xr) != 0 || parse_xmm_reg(src_op->u.reg, &xm) != 0 ||
-                (len_op->kind != AS_OPERAND_IMMEDIATE && len_op->kind != AS_OPERAND_LABEL_REF) ||
-                (off_op->kind != AS_OPERAND_IMMEDIATE && off_op->kind != AS_OPERAND_LABEL_REF) ||
-                eval_expr_const(len_op->u.expr, &lenv) != 0 || lenv < 0 || lenv > 255 ||
-                eval_expr_const(off_op->u.expr, &offv) != 0 || offv < 0 || offv > 255) {
+        if (lookup_i386_movnt_store_family(mnbuf, &prefix, &opcode2, &use_xmm) == 0) {
+            if (insn->operand_count != 2) {
                 return -1;
             }
-            out[0] = prefix;
-            out[1] = 0x0f;
-            out[2] = 0x78;
-            out[3] = (unsigned char)(0xc0u | ((xr & 7u) << 3) | (xm & 7u));
-            out[4] = (unsigned char)lenv;
-            out[5] = (unsigned char)offv;
-            if (out_len != NULL) *out_len = 6;
-            return 0;
+            return emit_i386_movnt_store(prefix, opcode2, use_xmm, intel_syntax, insn, out, out_cap, out_len);
         }
-        return -1;
-    }
-    if (strcmp(mnbuf, "psrldq") == 0 || strcmp(mnbuf, "pslldq") == 0) {
-        const as_operand_t *imm_op;
-        const as_operand_t *dst_op;
-        long long immv;
-
-        if (insn->operand_count != 2) {
-            return -1;
-        }
-        if (intel_syntax) {
-            dst_op = &insn->operands[0];
-            imm_op = &insn->operands[1];
-        } else {
-            imm_op = &insn->operands[0];
-            dst_op = &insn->operands[1];
-        }
-        if (dst_op->kind != AS_OPERAND_REGISTER || parse_xmm_reg(dst_op->u.reg, &xr) != 0 ||
-            (imm_op->kind != AS_OPERAND_IMMEDIATE && imm_op->kind != AS_OPERAND_LABEL_REF) ||
-            eval_expr_const(imm_op->u.expr, &immv) != 0 || immv < 0 || immv > 255) {
-            return -1;
-        }
-        return emit_i386_legacy_simd_rm_imm8(0x66, 0x73, strcmp(mnbuf, "psrldq") == 0 ? 3u : 7u,
-                                             dst_op, (unsigned char)immv, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "pshuflw") == 0 || strcmp(mnbuf, "pshufhw") == 0) {
-        const as_operand_t *imm_op;
-        const as_operand_t *src_op;
-        const as_operand_t *dst_op;
-        long long immv;
-
-        if (insn->operand_count != 3) {
-            return -1;
-        }
-        if (intel_syntax) {
-            dst_op = &insn->operands[0];
-            src_op = &insn->operands[1];
-            imm_op = &insn->operands[2];
-        } else {
-            imm_op = &insn->operands[0];
-            src_op = &insn->operands[1];
-            dst_op = &insn->operands[2];
-        }
-        if ((imm_op->kind != AS_OPERAND_IMMEDIATE && imm_op->kind != AS_OPERAND_LABEL_REF) ||
-            eval_expr_const(imm_op->u.expr, &immv) != 0 || immv < 0 || immv > 255 ||
-            dst_op->kind != AS_OPERAND_REGISTER || parse_xmm_reg(dst_op->u.reg, &xr) != 0) {
-            return -1;
-        }
-        if (src_op->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src_op->u.reg, &xm) != 0) {
-            return -1;
-        }
-        return emit_i386_legacy_simd_rm_imm8(strcmp(mnbuf, "pshuflw") == 0 ? 0xf2 : 0xf3, 0x70, xr,
-                                             src_op, (unsigned char)immv, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "movhlps") == 0) {
-        if (insn->operand_count != 2) {
-            return -1;
-        }
-        return emit_i386_xmm_reg_srcdst_rm(0x00, 0x12, src, dst, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "movlps") == 0) {
-        return emit_i386_xmm_partial_move_rm(0x00, 0x12, 0x13, src, dst, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "unpcklps") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
-            parse_xmm_reg(dst->u.reg, &xr) != 0) {
-            return -1;
-        }
-        if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
-            return -1;
-        }
-        return emit_i386_legacy_simd_rm(0x00, 0x14, xr, src, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "unpckhps") == 0) {
-        if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
-            parse_xmm_reg(dst->u.reg, &xr) != 0) {
-            return -1;
-        }
-        if (src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &xm) != 0) {
-            return -1;
-        }
-        return emit_i386_legacy_simd_rm(0x00, 0x15, xr, src, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "movlhps") == 0) {
-        if (insn->operand_count != 2) {
-            return -1;
-        }
-        return emit_i386_xmm_reg_srcdst_rm(0x00, 0x16, src, dst, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "movhps") == 0) {
-        return emit_i386_xmm_partial_move_rm(0x00, 0x16, 0x17, src, dst, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "cldemote") == 0) {
-        if (insn->operand_count != 1 || a == NULL || a->kind == AS_OPERAND_REGISTER || a->kind == AS_OPERAND_COPROCESSOR) {
-            return -1;
-        }
-        return emit_i386_prefixed_0f_rm(0x00, 0x1c, 0u, a, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "movaps") == 0) {
-        return emit_i386_xmm_move_rm(0x00, 0x28, 0x29, src, dst, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "movapd") == 0) {
-        return emit_i386_xmm_move_rm(0x66, 0x28, 0x29, src, dst, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "cvtpi2ps") == 0) {
-        if (insn->operand_count != 2) {
-            return -1;
-        }
-        return emit_i386_xmm_from_mmx_or_mem(0x00, 0x2a, src, dst, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "movntps") == 0) {
-        if (insn->operand_count != 2) {
-            return -1;
-        }
-        return emit_i386_movnt_store(0x00, 1, intel_syntax, insn, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "movntpd") == 0) {
-        if (insn->operand_count != 2) {
-            return -1;
-        }
-        return emit_i386_movnt_store(0x66, 1, intel_syntax, insn, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "cvttps2pi") == 0) {
-        if (insn->operand_count != 2) {
-            return -1;
-        }
-        return emit_i386_mmx_from_xmm_or_mem(0x00, 0x2c, src, dst, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "cvtps2pi") == 0) {
-        if (insn->operand_count != 2) {
-            return -1;
-        }
-        return emit_i386_mmx_from_xmm_or_mem(0x00, 0x2d, src, dst, out, out_cap, out_len);
     }
     {
         unsigned char opcode2;
@@ -5789,17 +6384,12 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             return emit_i386_xmm_reg_srcdst_rm(0x00, opcode2, src, dst, out, out_cap, out_len);
         }
     }
-    if (strcmp(mnbuf, "movmskps") == 0) {
-        if (insn->operand_count != 2) {
-            return -1;
+    {
+        unsigned char prefix;
+
+        if (lookup_i386_movmsk_prefix(mnbuf, &prefix) == 0) {
+            return emit_i386_movmask_family(mnbuf, src, dst, out, out_cap, out_len);
         }
-        return emit_i386_movmsk(0x00, src, dst, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "movmskpd") == 0) {
-        if (insn->operand_count != 2) {
-            return -1;
-        }
-        return emit_i386_movmsk(0x66, src, dst, out, out_cap, out_len);
     }
     {
         unsigned char opcode2;
@@ -5808,30 +6398,22 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             return emit_i386_prefixed_xmm_srcdst_rm(0x66, opcode2, src, dst, out, out_cap, out_len);
         }
     }
-    if (strcmp(mnbuf, "movq2dq") == 0) {
-        if (insn->operand_count != 2) {
-            return -1;
+    {
+        unsigned char prefix;
+        int dst_is_xmm;
+
+        if (lookup_i386_mmx_xmm_bridge(mnbuf, &prefix, &dst_is_xmm) == 0) {
+            if (insn->operand_count != 2) {
+                return -1;
+            }
+            return emit_i386_mmx_xmm_bridge(prefix, src, dst, dst_is_xmm, out, out_cap, out_len);
         }
-        return emit_i386_mmx_xmm_bridge(0xf3, src, dst, 1, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "cvtdq2pd") == 0) return emit_i386_prefixed_xmm_srcdst_rm(0xf3, 0xe6, src, dst, out, out_cap, out_len);
-    if (strcmp(mnbuf, "prefetch") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefetch_hint(0x0d, 0u, a, out, out_cap, out_len);
+    if (strcmp(mnbuf, "cvtdq2pd") == 0) {
+        return emit_i386_prefixed_xmm_srcdst_rm(0xf3, 0xe6, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "prefetchnta") == 0 || strcmp(mnbuf, "prefetcht0") == 0 ||
-        strcmp(mnbuf, "prefetcht1") == 0 || strcmp(mnbuf, "prefetcht2") == 0) {
-        unsigned char regf;
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        if (strcmp(mnbuf, "prefetchnta") == 0) regf = 0u;
-        else if (strcmp(mnbuf, "prefetcht0") == 0) regf = 1u;
-        else if (strcmp(mnbuf, "prefetcht1") == 0) regf = 2u;
-        else regf = 3u;
-        return emit_i386_prefetch_hint(0x18, regf, a, out, out_cap, out_len);
+    if (emit_i386_cachehint_family(mnbuf, a, out, out_cap, out_len) == 0) {
+        return 0;
     }
     {
         static const struct {
@@ -5879,12 +6461,6 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             return emit_i386_3dnow_rm(xr, src, ops[i].imm8, out, out_cap, out_len);
         }
     }
-    if (strcmp(mnbuf, "prefetchwt1") == 0) {
-        if (insn->operand_count != 1 || a == NULL) {
-            return -1;
-        }
-        return emit_i386_prefetch_hint(0x0d, 2u, a, out, out_cap, out_len);
-    }
     if (strcmp(mnbuf, "nopl") == 0) {
         if (insn->operand_count != 1 || a == NULL || a->kind == AS_OPERAND_REGISTER || a->kind == AS_OPERAND_COPROCESSOR) {
             return -1;
@@ -5918,9 +6494,12 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
     }
     if (strcmp(mnbuf, "bndcl") == 0 || strcmp(mnbuf, "bndcu") == 0 || strcmp(mnbuf, "bndcn") == 0 ||
         strcmp(mnbuf, "bndmk") == 0) {
-        unsigned char prefix = (strcmp(mnbuf, "bndcl") == 0 || strcmp(mnbuf, "bndmk") == 0) ? 0xf3 : 0xf2;
-        unsigned char opcode2 = (strcmp(mnbuf, "bndcn") == 0 || strcmp(mnbuf, "bndmk") == 0) ? 0x1b : 0x1a;
+        unsigned char prefix;
+        unsigned char opcode2;
         if (insn->operand_count != 2) {
+            return -1;
+        }
+        if (lookup_i386_bndcmp_opcode(mnbuf, &prefix, &opcode2) != 0) {
             return -1;
         }
         return emit_i386_bnd_binary(prefix, opcode2, src, dst, out, out_cap, out_len);
@@ -6232,75 +6811,11 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
     }
     if (strncmp(mnbuf, "kand", 4) == 0 || strncmp(mnbuf, "kor", 3) == 0 || strncmp(mnbuf, "kxor", 4) == 0 ||
         strncmp(mnbuf, "kxnor", 5) == 0 || strncmp(mnbuf, "kadd", 4) == 0 || strncmp(mnbuf, "kunpck", 6) == 0) {
-        const as_operand_t *op_rm;
-        const as_operand_t *op_vvvv;
-        const as_operand_t *op_dst;
-        unsigned krm;
-        unsigned kvvvv;
-        unsigned kdst;
-
-        if (insn->operand_count != 3) {
-            return -1;
-        }
-        if (intel_syntax) {
-            op_dst = &insn->operands[0];
-            op_vvvv = &insn->operands[1];
-            op_rm = &insn->operands[2];
-        } else {
-            op_rm = &insn->operands[0];
-            op_vvvv = &insn->operands[1];
-            op_dst = &insn->operands[2];
-        }
-        if (op_rm->kind != AS_OPERAND_REGISTER || op_vvvv->kind != AS_OPERAND_REGISTER || op_dst->kind != AS_OPERAND_REGISTER ||
-            parse_k_reg(op_rm->u.reg, &krm) != 0 || parse_k_reg(op_vvvv->u.reg, &kvvvv) != 0 ||
-            parse_k_reg(op_dst->u.reg, &kdst) != 0) {
-            return -1;
-        }
-        return emit_i386_vex_klogic(mnbuf, krm, kvvvv, kdst, out, out_cap, out_len);
+        return emit_x86_klogic(insn, intel_syntax, mnbuf, out, out_cap, out_len);
     }
     if ((strcmp(mnbuf, "push") == 0 || strcmp(mnbuf, "pop") == 0) && insn->operand_count == 1 && a != NULL &&
         a->kind == AS_OPERAND_REGISTER) {
-        as_x86_seg_t seg;
-
-        if (parse_seg_reg_text(a->u.reg, &seg) != 0) {
-            return -1;
-        }
-        if (strcmp(mnbuf, "push") == 0) {
-            if (seg == AS_X86_SEG_FS) {
-                out[0] = 0x0f;
-                out[1] = 0xa0;
-                if (out_len != NULL) {
-                    *out_len = 2;
-                }
-                return 0;
-            }
-            if (seg == AS_X86_SEG_GS) {
-                out[0] = 0x0f;
-                out[1] = 0xa8;
-                if (out_len != NULL) {
-                    *out_len = 2;
-                }
-                return 0;
-            }
-            return -1;
-        }
-        if (seg == AS_X86_SEG_FS) {
-            out[0] = 0x0f;
-            out[1] = 0xa1;
-            if (out_len != NULL) {
-                *out_len = 2;
-            }
-            return 0;
-        }
-        if (seg == AS_X86_SEG_GS) {
-            out[0] = 0x0f;
-            out[1] = 0xa9;
-            if (out_len != NULL) {
-                *out_len = 2;
-            }
-            return 0;
-        }
-        return -1;
+        return emit_x86_seg_pushpop(mnbuf, a, 0, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "fldl") == 0) {
         if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
@@ -6317,29 +6832,16 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
         }
         return -1;
     }
-    if (strcmp(mnbuf, "fldt") == 0) {
+    {
         unsigned char opcode;
         unsigned reg_field;
 
-        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
-            return -1;
-        }
         if (lookup_x86_64_x87_mem_exact(mnbuf, &opcode, &reg_field) == 0) {
+            if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
+                return -1;
+            }
             return emit_x86_64_1byte_regfield_memop(opcode, reg_field, &a->u.mem, out, out_cap, out_len);
         }
-    }
-    if (strcmp(mnbuf, "fcoms") == 0 || strcmp(mnbuf, "fcomps") == 0 || strcmp(mnbuf, "fcoml") == 0 ||
-        strcmp(mnbuf, "fcompl") == 0 || strcmp(mnbuf, "fstpl") == 0) {
-        unsigned char opcode;
-        unsigned reg_field;
-
-        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
-            return -1;
-        }
-        if (lookup_x86_64_x87_mem_exact(mnbuf, &opcode, &reg_field) != 0) {
-            return -1;
-        }
-        return emit_x86_64_1byte_regfield_memop(opcode, reg_field, &a->u.mem, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "fst") == 0) {
         if (insn->operand_count != 1 || a == NULL) {
@@ -6365,21 +6867,18 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
         }
         return emit_x86_64_1byte_regfield_memop(0xdb, 7u, &a->u.mem, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "fiadd") == 0 || strcmp(mnbuf, "fimul") == 0 || strcmp(mnbuf, "ficom") == 0 ||
-        strcmp(mnbuf, "ficomp") == 0 || strcmp(mnbuf, "fisub") == 0 || strcmp(mnbuf, "fisubr") == 0 ||
-        strcmp(mnbuf, "fidiv") == 0 || strcmp(mnbuf, "fidivr") == 0 || strcmp(mnbuf, "fist") == 0) {
+    {
         unsigned char opcode16;
         unsigned reg16;
         unsigned char opcode32;
         unsigned reg32;
 
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        if (lookup_x86_64_x87_mem16_32(mnbuf, &opcode16, &reg16, &opcode32, &reg32) != 0) {
-            return -1;
+        if (lookup_x86_64_x87_mem16_32(mnbuf, &opcode16, &reg16, &opcode32, &reg32) == 0) {
+            if (insn->operand_count != 1 || a == NULL) return -1;
+            return emit_x86_64_x87_mem16_32(a, opcode16, reg16, opcode32, reg32, out, out_cap, out_len);
         }
-        return emit_x86_64_x87_mem16_32(a, opcode16, reg16, opcode32, reg32, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "fild") == 0 || strcmp(mnbuf, "fistp") == 0 || strcmp(mnbuf, "fisttp") == 0) {
+    {
         unsigned char opcode16;
         unsigned reg16;
         unsigned char opcode32;
@@ -6387,24 +6886,11 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
         unsigned char opcode64;
         unsigned reg64;
 
-        if (insn->operand_count != 1 || a == NULL) return -1;
-        if (lookup_x86_64_x87_mem16_32_64(mnbuf, &opcode16, &reg16, &opcode32, &reg32, &opcode64, &reg64) != 0) {
-            return -1;
+        if (lookup_x86_64_x87_mem16_32_64(mnbuf, &opcode16, &reg16, &opcode32, &reg32, &opcode64, &reg64) == 0) {
+            if (insn->operand_count != 1 || a == NULL) return -1;
+            return emit_x86_64_x87_mem16_32_64(a, opcode16, reg16, opcode32, reg32, opcode64, reg64, out, out_cap,
+                                                out_len);
         }
-        return emit_x86_64_x87_mem16_32_64(a, opcode16, reg16, opcode32, reg32, opcode64, reg64, out, out_cap,
-                                            out_len);
-    }
-    if (strcmp(mnbuf, "fbld") == 0 || strcmp(mnbuf, "fbstp") == 0) {
-        unsigned char opcode;
-        unsigned reg_field;
-
-        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_MEMORY) {
-            return -1;
-        }
-        if (lookup_x86_64_x87_mem_exact(mnbuf, &opcode, &reg_field) != 0) {
-            return -1;
-        }
-        return emit_x86_64_1byte_regfield_memop(opcode, reg_field, &a->u.mem, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "movdqa") == 0) {
         if (insn->operand_count != 2) {
@@ -6415,23 +6901,23 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
     if (strcmp(mnbuf, "movdqu") == 0) {
         return emit_x86_64_xmm_move_rm(0xf3, 0x6f, 0x6f, 0x7f, src, dst, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "movups") == 0) {
-        return emit_x86_64_xmm_move_rm(0x00, 0x10, 0x10, 0x11, src, dst, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "movaps") == 0) {
-        return emit_x86_64_xmm_move_rm(0x00, 0x28, 0x28, 0x29, src, dst, out, out_cap, out_len);
+    {
+        unsigned char prefix;
+        unsigned char load_opcode2;
+        unsigned char store_opcode2;
+        int is_partial;
+
+        if (lookup_x86_xmm_move_family(mnbuf, &prefix, &load_opcode2, &store_opcode2, &is_partial) == 0 &&
+            !is_partial) {
+            return emit_x86_64_xmm_move_rm(prefix, load_opcode2, load_opcode2, store_opcode2,
+                                           src, dst, out, out_cap, out_len);
+        }
     }
     if (strcmp(mnbuf, "prefetcht1") == 0) {
         if (insn->operand_count != 1 || src == NULL || src->kind != AS_OPERAND_MEMORY) {
             return -1;
         }
         return emit_x86_64_regfield_memop(0x00, 0x18, 2u, 0, &src->u.mem, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "movsd") == 0) {
-        return emit_x86_64_xmm_move_rm(0xf2, 0x10, 0x10, 0x11, src, dst, out, out_cap, out_len);
-    }
-    if (strcmp(mnbuf, "movss") == 0) {
-        return emit_x86_64_xmm_move_rm(0xf3, 0x10, 0x10, 0x11, src, dst, out, out_cap, out_len);
     }
     {
         unsigned char packed_opcode2;
@@ -6666,8 +7152,23 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
         dst->u.mem.disp = 0;
         return 0;
     case AS_OPERAND_MEMORY:
+        {
+            unsigned base_bits = op->u.mem.base_reg != NULL ? parse_x86_reg_bits(op->u.mem.base_reg) : 0;
+            unsigned index_bits = op->u.mem.index_reg != NULL ? parse_x86_reg_bits(op->u.mem.index_reg) : 0;
+            unsigned addr_bits = infer_x86_mem_addr_bits(&op->u.mem);
+
+            if (base_bits != 0 && index_bits != 0 && base_bits != index_bits) {
+                snprintf(errbuf, errbuf_sz, "mixed x86 memory addressing widths are not supported");
+                return -1;
+            }
+            if (addr_bits != 0 && addr_bits != 16 && addr_bits != 32 && addr_bits != 64) {
+                snprintf(errbuf, errbuf_sz, "unsupported x86 memory addressing width");
+                return -1;
+            }
+        }
         dst->kind = AS_X86_OP_MEM;
         memset(&dst->u.mem, 0, sizeof(dst->u.mem));
+        dst->u.mem.addr_bits = infer_x86_mem_addr_bits(&op->u.mem);
         dst->u.mem.size_bits = (unsigned)(op->u.mem.size_bits > 0 ? op->u.mem.size_bits : 0);
         if (op->u.mem.base_reg != NULL) {
             if (is64 && streq_ci(op->u.mem.base_reg, "rip")) {
@@ -6732,7 +7233,7 @@ static int append_directive_data(bytebuf_t *buf, const as_directive_t *d) {
 
     if (width != 0) {
         for (i = 0; i < d->arg_count; ++i) {
-            if (parse_int64(d->args[i], &v) == 0) {
+            if (parse_int64(d->args[i], &v) == 0 || parse_const_expr_string(d->args[i], &v) == 0) {
                 if (bytebuf_append_u64_le(buf, (uint64_t)v, width) != 0) {
                     return -1;
                 }
@@ -6755,12 +7256,48 @@ static int append_directive_data(bytebuf_t *buf, const as_directive_t *d) {
         return 1;
     }
 
-    if (strcmp(d->name, ".zero") == 0 || strcmp(d->name, ".space") == 0) {
+    if (strcmp(d->name, ".zero") == 0 || strcmp(d->name, ".space") == 0 || strcmp(d->name, ".skip") == 0) {
+        long long fill = 0;
+        size_t j;
         if (d->arg_count < 1 || parse_int64(d->args[0], &v) != 0 || v < 0) {
             return -1;
         }
+        if ((strcmp(d->name, ".space") == 0 || strcmp(d->name, ".skip") == 0) &&
+            d->arg_count >= 2) {
+            if (parse_int64(d->args[1], &fill) != 0) {
+                return -1;
+            }
+            for (j = 0; j < (size_t)v; ++j) {
+                if (bytebuf_append_u64_le(buf, (uint64_t)fill, 1) != 0) {
+                    return -1;
+                }
+            }
+            return 1;
+        }
         if (bytebuf_append_zeros(buf, (size_t)v) != 0) {
             return -1;
+        }
+        return 1;
+    }
+
+    if (strcmp(d->name, ".fill") == 0) {
+        long long repeat = 0;
+        long long size = 1;
+        long long value = 0;
+
+        if (d->arg_count < 1 || parse_int64(d->args[0], &repeat) != 0 || repeat < 0) {
+            return -1;
+        }
+        if (d->arg_count >= 2 && (parse_int64(d->args[1], &size) != 0 || size <= 0 || size > 8)) {
+            return -1;
+        }
+        if (d->arg_count >= 3 && parse_int64(d->args[2], &value) != 0) {
+            return -1;
+        }
+        for (i = 0; i < (size_t)repeat; ++i) {
+            if (bytebuf_append_u64_le(buf, (uint64_t)value, (unsigned)size) != 0) {
+                return -1;
+            }
         }
         return 1;
     }
@@ -6789,13 +7326,33 @@ static int append_directive_data(bytebuf_t *buf, const as_directive_t *d) {
         return 1;
     }
 
+    if (strcmp(d->name, ".org") == 0) {
+        if (d->arg_count < 1 || parse_int64(d->args[0], &v) != 0 || v < 0) {
+            return -1;
+        }
+        if ((size_t)v < buf->len) {
+            return -1;
+        }
+        if ((size_t)v > buf->len && bytebuf_append_zeros(buf, (size_t)v - buf->len) != 0) {
+            return -1;
+        }
+        return 1;
+    }
+
     if (strcmp(d->name, ".ascii") == 0 || strcmp(d->name, ".asciz") == 0 || strcmp(d->name, ".string") == 0) {
         int nul = (strcmp(d->name, ".ascii") == 0) ? 0 : 1;
         for (i = 0; i < d->arg_count; ++i) {
             const char *s = d->args[i] != NULL ? d->args[i] : "";
-            if (bytebuf_append(buf, s, strlen(s)) != 0) {
+            char *bytes = NULL;
+            size_t len = 0;
+            if (as_decode_string_literal(s, &bytes, &len) != 0) {
                 return -1;
             }
+            if (bytebuf_append(buf, bytes, len) != 0) {
+                free(bytes);
+                return -1;
+            }
+            free(bytes);
             if (nul && bytebuf_append_zeros(buf, 1) != 0) {
                 return -1;
             }
@@ -6893,6 +7450,7 @@ typedef struct {
 typedef struct {
     char *current;
     char *previous;
+    unsigned x86_code_bits;
     char **stack;
     size_t stack_count;
     size_t stack_cap;
@@ -6954,13 +7512,14 @@ static sec_buf_t *sec_buf_get_or_add(sec_buf_vec_t *v, const char *name) {
     return &v->items[v->count - 1];
 }
 
-static int section_track_init(section_track_t *st) {
+static int section_track_init(section_track_t *st, unsigned initial_code_bits) {
     if (st == NULL) {
         return -1;
     }
     memset(st, 0, sizeof(*st));
     st->current = xstrdup(".text");
     st->previous = xstrdup(".text");
+    st->x86_code_bits = initial_code_bits == 64u ? 64u : (initial_code_bits == 16u ? 16u : 32u);
     if (st->current == NULL || st->previous == NULL) {
         free(st->current);
         free(st->previous);
@@ -6981,11 +7540,19 @@ static unsigned infer_avx_vector_bits(const as_instruction_t *in) {
         unsigned vr;
 
         if (op->kind == AS_OPERAND_REGISTER && op->u.reg != NULL) {
+            if (parse_zmm_reg(op->u.reg, &vr) == 0) {
+                return 512;
+            }
             if (parse_ymm_reg(op->u.reg, &vr) == 0) {
                 return 256;
             }
-        } else if (op->kind == AS_OPERAND_MEMORY && op->u.mem.size_bits == 256) {
-            return 256;
+        } else if (op->kind == AS_OPERAND_MEMORY) {
+            if (op->u.mem.size_bits == 512) {
+                return 512;
+            }
+            if (op->u.mem.size_bits == 256) {
+                return 256;
+            }
         }
     }
     return 128;
@@ -7433,7 +8000,11 @@ static int try_encode_x86_avx512dq_generic_stmt(const as_instruction_t *in, int 
     memset(&ev, 0, sizeof(ev));
     ev.mnemonic = in->mnemonic;
     ev.vector_bits = infer_avx_vector_bits(in);
-    ev.rounding_mode = -1;
+    ev.opmask = (uint8_t)in->opmask;
+    ev.zeroing = in->zeroing;
+    ev.broadcast = in->broadcast;
+    ev.sae = in->sae;
+    ev.rounding_mode = in->rounding_mode;
 
     if (in->operand_count == 2) {
         dst_i = intel_syntax ? 0u : 1u;
@@ -7511,7 +8082,11 @@ static int try_encode_x86_avx512bw_generic_stmt(const as_instruction_t *in, int 
     memset(&ev, 0, sizeof(ev));
     ev.mnemonic = in->mnemonic;
     ev.vector_bits = infer_avx_vector_bits(in);
-    ev.rounding_mode = -1;
+    ev.opmask = (uint8_t)in->opmask;
+    ev.zeroing = in->zeroing;
+    ev.broadcast = in->broadcast;
+    ev.sae = in->sae;
+    ev.rounding_mode = in->rounding_mode;
 
     if (in->operand_count == 2) {
         dst_i = intel_syntax ? 0u : 1u;
@@ -7595,7 +8170,11 @@ static int try_encode_x86_avx512f_generic_stmt(const as_instruction_t *in, int i
         ev.mnemonic = mnbuf;
     }
     ev.vector_bits = infer_avx_vector_bits(in);
-    ev.rounding_mode = -1;
+    ev.opmask = (uint8_t)in->opmask;
+    ev.zeroing = in->zeroing;
+    ev.broadcast = in->broadcast;
+    ev.sae = in->sae;
+    ev.rounding_mode = in->rounding_mode;
     ev.evex_w_override = -1;
     if (suffix == 'q') {
         ev.evex_w_override = 1;
@@ -7808,6 +8387,18 @@ static int section_track_apply_directive(section_track_t *st, const as_directive
             return -1;
         }
         free((char *)sec_name);
+        return 1;
+    }
+    if (strcmp(d->name, ".code16") == 0) {
+        st->x86_code_bits = 16u;
+        return 1;
+    }
+    if (strcmp(d->name, ".code32") == 0) {
+        st->x86_code_bits = 32u;
+        return 1;
+    }
+    if (strcmp(d->name, ".code64") == 0) {
+        st->x86_code_bits = 64u;
         return 1;
     }
     sec_name = section_from_directive(d);
@@ -8023,6 +8614,65 @@ static int instruction_has_symbolic_reloc(const as_instruction_t *in) {
     return 0;
 }
 
+static int x86_mem_operand_is_dx_port(const as_x86_operand_t *op) {
+    return op != NULL &&
+           op->kind == AS_X86_OP_MEM &&
+           op->u.mem.has_base &&
+           op->u.mem.base == AS_X86_REG_RDX &&
+           !op->u.mem.has_index &&
+           !op->u.mem.has_disp;
+}
+
+static void set_x86_isa_requirement(char *encerr, size_t encerr_sz, const char *mnemonic, unsigned min_level) {
+    if (encerr == NULL || encerr_sz == 0) {
+        return;
+    }
+    snprintf(encerr, encerr_sz, "instruction requires -march=x86-64-v%u or higher: %s",
+             min_level, mnemonic != NULL ? mnemonic : "<null>");
+}
+
+static int x86_stmt_requires_v3(const as_instruction_t *insn, int intel_syntax, int is_64);
+
+static int x86_stmt_requires_v4(const as_instruction_t *insn, int intel_syntax) {
+    unsigned char probe[32];
+    size_t probe_len = 0;
+    char probe_err[128];
+
+    if (insn == NULL) {
+        return 0;
+    }
+    if (x86_stmt_requires_v3(insn, intel_syntax, 1)) {
+        return 0;
+    }
+    return try_encode_x86_avx512f_stmt(insn, intel_syntax, probe, sizeof(probe), &probe_len, probe_err, sizeof(probe_err)) == 0 ||
+           try_encode_x86_avx512bw_stmt(insn, intel_syntax, probe, sizeof(probe), &probe_len, probe_err, sizeof(probe_err)) == 0 ||
+           try_encode_x86_avx512bw_generic_stmt(insn, intel_syntax, probe, sizeof(probe), &probe_len, probe_err,
+                                                sizeof(probe_err)) == 0 ||
+           try_encode_x86_avx512dq_stmt(insn, intel_syntax, probe, sizeof(probe), &probe_len, probe_err, sizeof(probe_err)) == 0 ||
+           try_encode_x86_avx512f_generic_stmt(insn, intel_syntax, probe, sizeof(probe), &probe_len, probe_err,
+                                               sizeof(probe_err)) == 0 ||
+           try_encode_x86_avx512dq_generic_stmt(insn, intel_syntax, probe, sizeof(probe), &probe_len, probe_err,
+                                                sizeof(probe_err)) == 0;
+}
+
+static int x86_stmt_requires_v3(const as_instruction_t *insn, int intel_syntax, int is_64) {
+    unsigned char probe[32];
+    size_t probe_len = 0;
+    char probe_err[128];
+
+    if (insn == NULL) {
+        return 0;
+    }
+    return try_encode_x86_avx_stmt(insn, intel_syntax, is_64, probe, sizeof(probe), &probe_len, probe_err, sizeof(probe_err)) == 0 ||
+           try_encode_x86_avx2_stmt(insn, intel_syntax, is_64, probe, sizeof(probe), &probe_len, probe_err,
+                                    sizeof(probe_err)) == 0 ||
+           try_encode_x86_fma_stmt(insn, intel_syntax, is_64, probe, sizeof(probe), &probe_len, probe_err, sizeof(probe_err)) == 0 ||
+           try_encode_x86_bmi1_stmt(insn, intel_syntax, is_64, probe, sizeof(probe), &probe_len, probe_err,
+                                     sizeof(probe_err)) == 0 ||
+           try_encode_x86_bmi2_stmt(insn, intel_syntax, is_64, probe, sizeof(probe), &probe_len, probe_err,
+                                     sizeof(probe_err)) == 0;
+}
+
 static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code, size_t code_cap,
                            size_t *code_len, char *encerr, size_t encerr_sz) {
     as_x86_insn_t in;
@@ -8046,6 +8696,10 @@ static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigne
         return -1;
     }
     in.mnemonic = mnbuf;
+    in.default_bits = cfg->is_64 ? 64u : (cfg->x86_code_bits == 16u ? 16u : 32u);
+    in.rel_is_disp = (cfg->x86_rel_is_disp != 0);
+    in.has_section_offset = (cfg->have_current_text_offset != 0);
+    in.section_offset = cfg->current_text_offset;
     in.seg_override = map_seg(st->u.instr.segment_override);
     in.lock_prefix = (st->u.instr.prefixes & AS_PREFIX_LOCK) != 0;
     in.explicit_rex = (st->u.instr.prefixes & AS_PREFIX_REX) != 0;
@@ -8065,7 +8719,9 @@ static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigne
     if (suffix == 'b') {
         in.byte_op = 1;
     } else if (suffix == 'w') {
-        in.operand_size_override = 1;
+        in.operand_size_override = (in.default_bits != 16u);
+    } else if (suffix == 'l') {
+        in.operand_size_override = (in.default_bits == 16u);
     } else if (suffix == 'q') {
         in.rex_w = 1;
     }
@@ -8189,6 +8845,9 @@ static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigne
         if (try_encode_x86_avx512dq_generic_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0) {
             return 0;
         }
+    } else if (cfg->is_64 && x86_stmt_requires_v4(&st->u.instr, intel_syntax)) {
+        set_x86_isa_requirement(encerr, encerr_sz, mnbuf, 4);
+        return -1;
     }
     if (!cfg->is_64 || cfg->x86_64_isa_level >= 3) {
         if (try_encode_x86_avx_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0) {
@@ -8206,6 +8865,9 @@ static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigne
         if (try_encode_x86_bmi2_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0) {
             return 0;
         }
+    } else if (cfg->is_64 && x86_stmt_requires_v3(&st->u.instr, intel_syntax, cfg->is_64)) {
+        set_x86_isa_requirement(encerr, encerr_sz, mnbuf, 3);
+        return -1;
     }
     if (cfg->is_64) {
         int s64 = emit_x86_64_special(&st->u.instr, intel_syntax, cfg->x86_64_isa_level, code, code_cap, code_len);
@@ -8213,7 +8875,7 @@ static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigne
             return 0;
         }
         if (s64 == -2) {
-            snprintf(encerr, encerr_sz, "AVX2 instruction requires -march=x86-64-v3 or higher");
+            set_x86_isa_requirement(encerr, encerr_sz, mnbuf, 3);
             return -1;
         }
     }
@@ -8222,6 +8884,34 @@ static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigne
         if (convert_operand_x86(&st->u.instr.operands[op_index[j]], in.mnemonic, &in.ops[j], cfg->is_64, intel_syntax, encerr,
                                 encerr_sz) != 0) {
             return -1;
+        }
+    }
+    if (!cfg->is_64) {
+        unsigned mem_addr_bits = 0;
+
+        for (j = 0; j < in.op_count; ++j) {
+            if (in.ops[j].kind != AS_X86_OP_MEM || in.ops[j].u.mem.addr_bits == 0) {
+                continue;
+            }
+            if ((streq_ci(mnbuf, "in") || streq_ci(mnbuf, "out") ||
+                 streq_ci(mnbuf, "ins") || streq_ci(mnbuf, "insb") || streq_ci(mnbuf, "insw") ||
+                 streq_ci(mnbuf, "insd") || streq_ci(mnbuf, "insl") ||
+                 streq_ci(mnbuf, "outs") || streq_ci(mnbuf, "outsb") || streq_ci(mnbuf, "outsw") ||
+                 streq_ci(mnbuf, "outsd") || streq_ci(mnbuf, "outsl")) &&
+                x86_mem_operand_is_dx_port(&in.ops[j])) {
+                continue;
+            }
+            if (mem_addr_bits == 0) {
+                mem_addr_bits = in.ops[j].u.mem.addr_bits;
+                continue;
+            }
+            if (mem_addr_bits != in.ops[j].u.mem.addr_bits) {
+                snprintf(encerr, encerr_sz, "mixed x86 address sizes in one instruction are not supported");
+                return -1;
+            }
+        }
+        if (mem_addr_bits != 0 && mem_addr_bits != in.default_bits) {
+            in.address_size_override = 1;
         }
     }
     if (in.seg_override == AS_X86_SEG_NONE) {
@@ -8258,6 +8948,549 @@ static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigne
     return 0;
 }
 
+static int eval_local_rel_expr_virtual(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *base_st, uint64_t base_off,
+                                       unsigned x86_code_bits, const as_expr_t *e, long long *out);
+
+static int is_jcc_mnemonic(const char *mn) {
+    if (mn == NULL || mn[0] == '\0') {
+        return 0;
+    }
+    if (streq_ci(mn, "jmp")) {
+        return 0;
+    }
+    if (is_short_rel_mnemonic(mn)) {
+        return 0;
+    }
+    return (mn[0] == 'j' || mn[0] == 'J') && mn[1] != '\0';
+}
+
+static unsigned rel_forward_base_len(const as_instruction_t *in, unsigned x86_code_bits, long long delta) {
+    char mnbuf[32];
+    char suffix = '\0';
+
+    if (in == NULL || in->mnemonic == NULL) {
+        return 0;
+    }
+    if (normalize_x86_mnemonic(in->mnemonic, mnbuf, sizeof(mnbuf), &suffix) != 0) {
+        return 0;
+    }
+    if (!is_rel_mnemonic(mnbuf)) {
+        return 0;
+    }
+    if (suffix == 'b' || is_short_rel_mnemonic(mnbuf)) {
+        return 2u;
+    }
+    if (streq_ci(mnbuf, "call") || streq_ci(mnbuf, "jmp")) {
+        return x86_code_bits == 16u ? 3u : 5u;
+    }
+    if (streq_ci(mnbuf, "xbegin")) {
+        return 6u;
+    }
+    if (is_jcc_mnemonic(mnbuf)) {
+        if (delta >= -128 && delta <= 127) {
+            return 2u;
+        }
+        return x86_code_bits == 16u ? 4u : 6u;
+    }
+    return x86_code_bits == 16u ? 3u : 5u;
+}
+
+static uint64_t estimate_stmt_len(emit_ctx_t *ctx, unsigned x86_code_bits, const as_stmt_t *st) {
+    unsigned char code[32];
+    size_t code_len = 0;
+    char encerr[256];
+    as_elf_cfg_t stmt_cfg;
+
+    if (ctx == NULL || ctx->cfg == NULL || st == NULL || st->kind != AS_STMT_INSTRUCTION) {
+        return 0;
+    }
+    stmt_cfg = *ctx->cfg;
+    stmt_cfg.x86_code_bits = x86_code_bits;
+    stmt_cfg.have_current_text_offset = 1u;
+    stmt_cfg.current_text_offset = 0;
+    if (encode_x86_stmt(&stmt_cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
+        return 0;
+    }
+    return (uint64_t)code_len;
+}
+
+static int estimate_stmt_len_at(emit_ctx_t *ctx, const char *section_name, unsigned x86_code_bits, uint64_t sec_off,
+                                const as_stmt_t *st, uint64_t *len_out) {
+    unsigned char code[32];
+    size_t code_len = 0;
+    char encerr[256];
+    as_elf_cfg_t stmt_cfg;
+    char mnbuf[32];
+    char suffix = '\0';
+    long long const_tmp = 0;
+
+    if (ctx == NULL || st == NULL || len_out == NULL) {
+        return -1;
+    }
+    *len_out = 0;
+    if (st->kind == AS_STMT_DIRECTIVE) {
+        bytebuf_t tmp;
+        memset(&tmp, 0, sizeof(tmp));
+        if (append_directive_data(&tmp, &st->u.directive) != 0) {
+            free(tmp.data);
+            return -1;
+        }
+        *len_out = (uint64_t)tmp.len;
+        free(tmp.data);
+        return 0;
+    }
+    if (st->kind != AS_STMT_INSTRUCTION) {
+        return 0;
+    }
+    if (!section_name_is_executable(ctx, section_name)) {
+        return 0;
+    }
+    if (ctx->cfg == NULL) {
+        return -1;
+    }
+    if (normalize_x86_mnemonic(st->u.instr.mnemonic, mnbuf, sizeof(mnbuf), &suffix) == 0 &&
+        is_rel_mnemonic(mnbuf) &&
+        st->u.instr.operand_count == 1 &&
+        st->u.instr.operands[0].u.expr != NULL &&
+        (st->u.instr.operands[0].kind == AS_OPERAND_LABEL_REF ||
+         st->u.instr.operands[0].kind == AS_OPERAND_IMMEDIATE) &&
+        eval_expr_const(st->u.instr.operands[0].u.expr, &const_tmp) != 0) {
+        *len_out = rel_forward_base_len(&st->u.instr, x86_code_bits, LLONG_MAX);
+        return 0;
+    }
+    stmt_cfg = *ctx->cfg;
+    stmt_cfg.x86_code_bits = x86_code_bits;
+    stmt_cfg.have_current_text_offset = 1u;
+    stmt_cfg.current_text_offset = sec_off;
+    if (encode_x86_stmt(&stmt_cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
+        return -1;
+    }
+    *len_out = (uint64_t)code_len;
+    return 0;
+}
+
+static int find_label_virtual_offset(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *base_st,
+                                     const char *file, unsigned line, int digit, const char *sym_name,
+                                     uint64_t *off_out) {
+    size_t i;
+    sec_buf_vec_t secbufs;
+    section_track_t track;
+
+    if (ctx == NULL || section_name == NULL || off_out == NULL ||
+        (sym_name == NULL && file == NULL)) {
+        return -1;
+    }
+    *off_out = 0;
+    memset(&secbufs, 0, sizeof(secbufs));
+    if (section_track_init(&track, ctx->cfg != NULL && ctx->cfg->is_64 ? 64u :
+                                   (ctx->cfg != NULL && ctx->cfg->x86_code_bits == 16u ? 16u : 32u)) != 0) {
+        return -1;
+    }
+
+    for (i = 0; i < ctx->parsed->count; ++i) {
+        const as_stmt_t *st = &ctx->parsed->items[i];
+        sec_buf_t *sb;
+        size_t j;
+
+        sb = sec_buf_get_or_add(&secbufs, track.current);
+        if (sb == NULL) {
+            section_track_free(&track);
+            sec_buf_vec_free(&secbufs);
+            return -1;
+        }
+        for (j = 0; j < st->label_count; ++j) {
+            int matches = 0;
+
+            if (strcmp(track.current, section_name) != 0) {
+                continue;
+            }
+            if (sym_name != NULL) {
+                matches = (st->labels[j].name != NULL && strcmp(st->labels[j].name, sym_name) == 0);
+            } else if (is_numeric_local_label_name(st->labels[j].name) &&
+                       (st->labels[j].name[0] - '0') == digit &&
+                       st->labels[j].line == line &&
+                       st->labels[j].file != NULL &&
+                       strcmp(st->labels[j].file, file) == 0) {
+                matches = 1;
+            }
+            if (matches) {
+                *off_out = (uint64_t)sb->buf.len;
+                section_track_free(&track);
+                sec_buf_vec_free(&secbufs);
+                return 0;
+            }
+        }
+        if (st == base_st) {
+            continue;
+        }
+        if (st->kind == AS_STMT_DIRECTIVE) {
+            int trc = section_track_apply_directive(&track, &st->u.directive);
+            if (trc < 0) {
+                section_track_free(&track);
+                sec_buf_vec_free(&secbufs);
+                return -1;
+            }
+            if (trc > 0) {
+                continue;
+            }
+            if (append_directive_data(&sb->buf, &st->u.directive) < 0) {
+                section_track_free(&track);
+                sec_buf_vec_free(&secbufs);
+                return -1;
+            }
+            continue;
+        }
+        if (st->kind == AS_STMT_INSTRUCTION && section_name_is_executable(ctx, track.current)) {
+            unsigned char code[32];
+            size_t code_len = 0;
+            char encerr[256];
+            as_elf_cfg_t stmt_cfg = *ctx->cfg;
+            stmt_cfg.x86_code_bits = track.x86_code_bits;
+            stmt_cfg.have_current_text_offset = 1u;
+            stmt_cfg.current_text_offset = (uint64_t)sb->buf.len;
+            if (encode_x86_stmt(&stmt_cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0 ||
+                bytebuf_append(&sb->buf, code, code_len) != 0) {
+                section_track_free(&track);
+                sec_buf_vec_free(&secbufs);
+                return -1;
+            }
+        }
+    }
+
+    section_track_free(&track);
+    sec_buf_vec_free(&secbufs);
+    return -1;
+}
+
+static __attribute__((unused)) int find_numeric_local_virtual_offset(emit_ctx_t *ctx, const char *section_name,
+                                                                     const as_stmt_t *base_st, uint64_t base_off,
+                                                                     unsigned x86_code_bits,
+                                                                     const char *file, unsigned line, int digit,
+                                                                     uint64_t *off_out) {
+    size_t base_idx = 0;
+    size_t target_idx = (size_t)-1;
+    size_t i;
+    uint64_t delta = 0;
+    section_track_t track;
+
+    if (ctx == NULL || ctx->parsed == NULL || section_name == NULL || base_st == NULL ||
+        file == NULL || off_out == NULL) {
+        return -1;
+    }
+    while (base_idx < ctx->parsed->count && &ctx->parsed->items[base_idx] != base_st) {
+        base_idx++;
+    }
+    if (base_idx == ctx->parsed->count) {
+        return -1;
+    }
+    for (i = 0; i < ctx->parsed->count; ++i) {
+        const as_stmt_t *st = &ctx->parsed->items[i];
+        size_t j;
+        for (j = 0; j < st->label_count; ++j) {
+            if (is_numeric_local_label_name(st->labels[j].name) &&
+                (st->labels[j].name[0] - '0') == digit &&
+                st->labels[j].line == line &&
+                st->labels[j].file != NULL &&
+                strcmp(st->labels[j].file, file) == 0) {
+                target_idx = i;
+                break;
+            }
+        }
+        if (target_idx != (size_t)-1) {
+            break;
+        }
+    }
+    if (target_idx == (size_t)-1) {
+        return -1;
+    }
+    if (section_track_init(&track, x86_code_bits) != 0) {
+        return -1;
+    }
+    if (strcmp(track.current, section_name) != 0) {
+        section_track_free(&track);
+        return find_label_virtual_offset(ctx, section_name, base_st, file, line, digit, NULL, off_out);
+    }
+    for (i = target_idx < base_idx ? target_idx : base_idx + 1;
+         i < (target_idx < base_idx ? base_idx : target_idx);
+         ++i) {
+        const as_stmt_t *st = &ctx->parsed->items[i];
+
+        if (st->kind == AS_STMT_DIRECTIVE) {
+            int trc = section_track_apply_directive(&track, &st->u.directive);
+            if (trc < 0) {
+                section_track_free(&track);
+                return -1;
+            }
+            if (trc > 0 || strcmp(track.current, section_name) != 0) {
+                continue;
+            }
+            {
+                uint64_t stmt_len = 0;
+                if (estimate_stmt_len_at(ctx, track.current, track.x86_code_bits, delta, st, &stmt_len) != 0) {
+                    section_track_free(&track);
+                    return -1;
+                }
+                delta += stmt_len;
+            }
+            continue;
+        }
+        if (st->kind == AS_STMT_INSTRUCTION && strcmp(track.current, section_name) == 0 &&
+            section_name_is_executable(ctx, track.current)) {
+            uint64_t stmt_len = 0;
+            if (estimate_stmt_len_at(ctx, track.current, track.x86_code_bits, delta, st, &stmt_len) != 0) {
+                section_track_free(&track);
+                return -1;
+            }
+            delta += stmt_len;
+        }
+    }
+    section_track_free(&track);
+    if (target_idx < base_idx) {
+        *off_out = base_off - delta;
+        return 0;
+    }
+    {
+        uint64_t base_len = 0;
+
+        if (base_st->kind == AS_STMT_DIRECTIVE) {
+            bytebuf_t tmp;
+            memset(&tmp, 0, sizeof(tmp));
+            if (append_directive_data(&tmp, &base_st->u.directive) == 0) {
+                base_len = (uint64_t)tmp.len;
+            }
+            free(tmp.data);
+        } else if (base_st->kind == AS_STMT_INSTRUCTION && section_name_is_executable(ctx, section_name)) {
+            unsigned rel_len = rel_forward_base_len(&base_st->u.instr, x86_code_bits, (long long)delta);
+            if (rel_len != 0) {
+                base_len = rel_len;
+            } else {
+                base_len = estimate_stmt_len(ctx, x86_code_bits, base_st);
+            }
+        }
+        *off_out = base_off + base_len + delta;
+        return 0;
+    }
+}
+
+static __attribute__((unused)) int find_named_label_virtual_offset(emit_ctx_t *ctx, const char *section_name,
+                                                                   const as_stmt_t *base_st, uint64_t base_off,
+                                                                   unsigned x86_code_bits,
+                                                                   const char *sym_name, uint64_t *off_out) {
+    size_t base_idx = 0;
+    size_t target_idx = (size_t)-1;
+    size_t i;
+    uint64_t delta = 0;
+    section_track_t track;
+
+    if (ctx == NULL || ctx->parsed == NULL || section_name == NULL || base_st == NULL ||
+        sym_name == NULL || off_out == NULL) {
+        return -1;
+    }
+    while (base_idx < ctx->parsed->count && &ctx->parsed->items[base_idx] != base_st) {
+        base_idx++;
+    }
+    if (base_idx == ctx->parsed->count) {
+        return -1;
+    }
+    for (i = 0; i < ctx->parsed->count; ++i) {
+        const as_stmt_t *st = &ctx->parsed->items[i];
+        size_t j;
+        for (j = 0; j < st->label_count; ++j) {
+            if (st->labels[j].name != NULL && strcmp(st->labels[j].name, sym_name) == 0) {
+                target_idx = i;
+                break;
+            }
+        }
+        if (target_idx != (size_t)-1) {
+            break;
+        }
+    }
+    if (target_idx == (size_t)-1) {
+        return -1;
+    }
+    if (section_track_init(&track, x86_code_bits) != 0) {
+        return -1;
+    }
+    if (strcmp(track.current, section_name) != 0) {
+        section_track_free(&track);
+        return find_label_virtual_offset(ctx, section_name, base_st, NULL, 0, 0, sym_name, off_out);
+    }
+    for (i = target_idx < base_idx ? target_idx : base_idx + 1;
+         i < (target_idx < base_idx ? base_idx : target_idx);
+         ++i) {
+        const as_stmt_t *st = &ctx->parsed->items[i];
+
+        if (st->kind == AS_STMT_DIRECTIVE) {
+            int trc = section_track_apply_directive(&track, &st->u.directive);
+            if (trc < 0) {
+                section_track_free(&track);
+                return -1;
+            }
+            if (trc > 0 || strcmp(track.current, section_name) != 0) {
+                continue;
+            }
+            {
+                uint64_t stmt_len = 0;
+                if (estimate_stmt_len_at(ctx, track.current, track.x86_code_bits, delta, st, &stmt_len) != 0) {
+                    section_track_free(&track);
+                    return -1;
+                }
+                delta += stmt_len;
+            }
+            continue;
+        }
+        if (st->kind == AS_STMT_INSTRUCTION && strcmp(track.current, section_name) == 0 &&
+            section_name_is_executable(ctx, track.current)) {
+            uint64_t stmt_len = 0;
+            if (estimate_stmt_len_at(ctx, track.current, track.x86_code_bits, delta, st, &stmt_len) != 0) {
+                section_track_free(&track);
+                return -1;
+            }
+            delta += stmt_len;
+        }
+    }
+    section_track_free(&track);
+    if (target_idx < base_idx) {
+        *off_out = base_off - delta;
+        return 0;
+    }
+    {
+        uint64_t base_len = 0;
+
+        if (base_st->kind == AS_STMT_DIRECTIVE) {
+            bytebuf_t tmp;
+            memset(&tmp, 0, sizeof(tmp));
+            if (append_directive_data(&tmp, &base_st->u.directive) == 0) {
+                base_len = (uint64_t)tmp.len;
+            }
+            free(tmp.data);
+        } else if (base_st->kind == AS_STMT_INSTRUCTION && section_name_is_executable(ctx, section_name)) {
+            unsigned rel_len = rel_forward_base_len(&base_st->u.instr, x86_code_bits, (long long)delta);
+            if (rel_len != 0) {
+                base_len = rel_len;
+            } else {
+                base_len = estimate_stmt_len(ctx, x86_code_bits, base_st);
+            }
+        }
+        *off_out = base_off + base_len + delta;
+        return 0;
+    }
+}
+
+static int eval_local_rel_expr_virtual(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *base_st, uint64_t base_off,
+                                       unsigned x86_code_bits, const as_expr_t *e, long long *out) {
+    long long l;
+    long long r;
+    uint64_t target_off;
+
+    if (ctx == NULL || section_name == NULL || e == NULL || out == NULL) {
+        return -1;
+    }
+    switch (e->kind) {
+    case AS_EXPR_CONST:
+        *out = e->value;
+        return 0;
+    case AS_EXPR_SYMBOL:
+        if (e->symbol == NULL || !is_local_temp_symbol_name(e->symbol) ||
+            find_named_label_virtual_offset(ctx, section_name, base_st, base_off, x86_code_bits,
+                                            e->symbol, &target_off) != 0) {
+            return -1;
+        }
+        *out = (long long)target_off - (long long)base_off;
+        return 0;
+    case AS_EXPR_LOCAL_REF:
+        if (!e->local_resolved || e->src_file == NULL ||
+            find_numeric_local_virtual_offset(ctx, section_name, base_st, base_off, x86_code_bits,
+                                              e->src_file, e->local_target_line, e->local_digit, &target_off) != 0) {
+            return -1;
+        }
+        *out = (long long)target_off - (long long)base_off;
+        return 0;
+    case AS_EXPR_UNARY:
+        if (eval_local_rel_expr_virtual(ctx, section_name, base_st, base_off, x86_code_bits, e->lhs, &l) != 0) {
+            return -1;
+        }
+        if (e->op == AS_EXPR_OP_NEG) {
+            *out = -l;
+            return 0;
+        }
+        if (e->op == AS_EXPR_OP_BNOT) {
+            *out = ~l;
+            return 0;
+        }
+        return -1;
+    case AS_EXPR_BINARY:
+        if (eval_local_rel_expr_virtual(ctx, section_name, base_st, base_off, x86_code_bits, e->lhs, &l) != 0 ||
+            eval_local_rel_expr_virtual(ctx, section_name, base_st, base_off, x86_code_bits, e->rhs, &r) != 0) {
+            return -1;
+        }
+        switch (e->op) {
+        case AS_EXPR_OP_ADD: *out = l + r; return 0;
+        case AS_EXPR_OP_SUB: *out = l - r; return 0;
+        case AS_EXPR_OP_MUL: *out = l * r; return 0;
+        case AS_EXPR_OP_DIV: if (r == 0) return -1; *out = l / r; return 0;
+        case AS_EXPR_OP_MOD: if (r == 0) return -1; *out = l % r; return 0;
+        case AS_EXPR_OP_OR: *out = l | r; return 0;
+        case AS_EXPR_OP_AND: *out = l & r; return 0;
+        case AS_EXPR_OP_XOR: *out = l ^ r; return 0;
+        case AS_EXPR_OP_SHL: *out = l << (r & 63); return 0;
+        case AS_EXPR_OP_SHR: *out = l >> (r & 63); return 0;
+        default: return -1;
+        }
+    default:
+        return -1;
+    }
+}
+
+static int encode_x86_stmt_for_layout(emit_ctx_t *ctx, const char *section_name, uint64_t sec_off, unsigned x86_code_bits,
+                                      const as_stmt_t *st, unsigned char *code, size_t code_cap,
+                                      size_t *code_len, char *encerr, size_t encerr_sz) {
+    as_elf_cfg_t stmt_cfg;
+
+    if (ctx == NULL || ctx->cfg == NULL || st == NULL) {
+        return -1;
+    }
+    stmt_cfg = *ctx->cfg;
+    stmt_cfg.x86_code_bits = x86_code_bits;
+    stmt_cfg.have_current_text_offset = 1u;
+    stmt_cfg.current_text_offset = sec_off;
+
+    if ((stmt_cfg.machine == EM_386 || stmt_cfg.machine == EM_X86_64) &&
+        st->kind == AS_STMT_INSTRUCTION &&
+        st->u.instr.operand_count == 1 &&
+        is_rel_mnemonic(st->u.instr.mnemonic)) {
+        const as_operand_t *op = &st->u.instr.operands[0];
+        long long disp;
+
+        if ((op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) &&
+            op->u.expr != NULL &&
+            !expr_is_local_temp_symbol(op->u.expr) &&
+            eval_local_rel_expr_virtual(ctx, section_name, st, sec_off, x86_code_bits, op->u.expr, &disp) == 0) {
+            as_stmt_t tmp = *st;
+            as_instruction_t tin = st->u.instr;
+            as_operand_t tops[3];
+            as_expr_t texpr;
+            as_elf_cfg_t local_cfg = stmt_cfg;
+            long long abs_target = (long long)sec_off + disp;
+
+            memcpy(tops, st->u.instr.operands, st->u.instr.operand_count * sizeof(*tops));
+            memset(&texpr, 0, sizeof(texpr));
+            texpr.kind = AS_EXPR_CONST;
+            texpr.value = abs_target;
+            tops[0].kind = AS_OPERAND_IMMEDIATE;
+            tops[0].u.expr = &texpr;
+            tin.operands = tops;
+            tmp.u.instr = tin;
+            local_cfg.x86_rel_is_disp = 0u;
+            local_cfg.have_current_text_offset = 1u;
+            local_cfg.current_text_offset = sec_off;
+            return encode_x86_stmt(&local_cfg, &tmp, code, code_cap, code_len, encerr, encerr_sz);
+        }
+    }
+
+    return encode_x86_stmt(&stmt_cfg, st, code, code_cap, code_len, encerr, encerr_sz);
+}
+
 static int emit_text_program(emit_ctx_t *ctx) {
     sec_buf_vec_t secbufs;
     size_t i;
@@ -8268,7 +9501,8 @@ static int emit_text_program(emit_ctx_t *ctx) {
     int trc;
 
     memset(&secbufs, 0, sizeof(secbufs));
-    if (section_track_init(&track) != 0) {
+    if (section_track_init(&track, ctx->cfg != NULL && ctx->cfg->is_64 ? 64u :
+                                   (ctx->cfg != NULL && ctx->cfg->x86_code_bits == 16u ? 16u : 32u)) != 0) {
         return -1;
     }
 
@@ -8324,7 +9558,8 @@ static int emit_text_program(emit_ctx_t *ctx) {
         }
 
         {
-            if (encode_x86_stmt(ctx->cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
+            if (encode_x86_stmt_for_layout(ctx, track.current, (uint64_t)sb->buf.len, track.x86_code_bits,
+                                           st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
                 set_err(ctx, "%s:%u: %s", st->file != NULL ? st->file : "<input>", st->line, encerr);
                 section_track_free(&track);
                 sec_buf_vec_free(&secbufs);
@@ -8337,13 +9572,6 @@ static int emit_text_program(emit_ctx_t *ctx) {
                     sec_buf_vec_free(&secbufs);
                     return -1;
                 }
-            }
-            if ((ctx->cfg->machine == EM_386 || ctx->cfg->machine == EM_X86_64) &&
-                patch_x86_numeric_rel(st, sb->buf.len, code, code_len, encerr, sizeof(encerr)) != 0) {
-                set_err(ctx, "%s:%u: %s", st->file != NULL ? st->file : "<input>", st->line, encerr);
-                section_track_free(&track);
-                sec_buf_vec_free(&secbufs);
-                return -1;
             }
             if (bytebuf_append(&sb->buf, code, code_len) != 0) {
                 section_track_free(&track);
@@ -8582,7 +9810,8 @@ static int emit_data_program(emit_ctx_t *ctx, const as_data_program_t *data) {
 
     (void)data;
     memset(&secbufs, 0, sizeof(secbufs));
-    if (section_track_init(&track) != 0) {
+    if (section_track_init(&track, ctx->cfg != NULL && ctx->cfg->is_64 ? 64u :
+                                   (ctx->cfg != NULL && ctx->cfg->x86_code_bits == 16u ? 16u : 32u)) != 0) {
         return -1;
     }
 
@@ -8815,7 +10044,7 @@ static int directive_assigns_symbol(const as_directive_t *d, const char *sym_nam
     if (d == NULL || sym_name == NULL || d->name == NULL || d->arg_count < 1) {
         return 0;
     }
-    if (strcmp(d->name, ".set") != 0 && strcmp(d->name, ".equ") != 0) {
+    if (strcmp(d->name, ".set") != 0 && strcmp(d->name, ".equ") != 0 && strcmp(d->name, ".size") != 0) {
         return 0;
     }
     lhs = trim_copy(d->args[0]);
@@ -8842,7 +10071,8 @@ static int find_set_dot_location(emit_ctx_t *ctx, const char *sym_name, const ch
     *off_out = 0;
 
     memset(&secbufs, 0, sizeof(secbufs));
-    if (section_track_init(&track) != 0) {
+    if (section_track_init(&track, ctx->cfg != NULL && ctx->cfg->is_64 ? 64u :
+                                   (ctx->cfg != NULL && ctx->cfg->x86_code_bits == 16u ? 16u : 32u)) != 0) {
         return -1;
     }
 
@@ -8897,7 +10127,8 @@ static int find_set_dot_location(emit_ctx_t *ctx, const char *sym_name, const ch
             size_t code_len = 0;
             char encerr[256];
 
-            if (encode_x86_stmt(ctx->cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
+            if (encode_x86_stmt_for_layout(ctx, track.current, (uint64_t)sb->buf.len, track.x86_code_bits,
+                                           st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
                 section_track_free(&track);
                 sec_buf_vec_free(&secbufs);
                 return -1;
@@ -8930,7 +10161,8 @@ static int collect_symbol_locations(emit_ctx_t *ctx, sym_loc_t **locs, size_t *l
     loc_index->slots = NULL;
     loc_index->cap = 0;
     memset(&secbufs, 0, sizeof(secbufs));
-    if (section_track_init(&track) != 0) {
+    if (section_track_init(&track, ctx->cfg != NULL && ctx->cfg->is_64 ? 64u :
+                                   (ctx->cfg != NULL && ctx->cfg->x86_code_bits == 16u ? 16u : 32u)) != 0) {
         return -1;
     }
 
@@ -9004,7 +10236,8 @@ static int collect_symbol_locations(emit_ctx_t *ctx, sym_loc_t **locs, size_t *l
             unsigned char code[32];
             size_t code_len = 0;
             char encerr[256];
-            if (encode_x86_stmt(ctx->cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
+            if (encode_x86_stmt_for_layout(ctx, track.current, cur_off, track.x86_code_bits,
+                                           st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
                 free_sym_locs(*locs, *loc_count);
                 free_name_index(loc_index);
                 *locs = NULL;
@@ -9046,8 +10279,48 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
     for (i = 0; i < symtab->count; ++i) {
         const as_symbol_t *s = &symtab->items[i];
         elf_symbol_t *esym;
+        unsigned long long sym_size = s->size;
 
-        esym = elf_add_symbol(ctx->obj, s->name, 0, s->size, map_bind(s->bind), map_type(s->type));
+        if (s->size_target_symbol != NULL) {
+            const sym_loc_t *target_loc = find_sym_loc(locs, &loc_index, s->size_target_symbol);
+            elf_section_t *base_sec = NULL;
+            uint64_t base_off = 0;
+
+            if (target_loc == NULL || target_loc->sec == NULL) {
+                set_err(ctx, "cannot resolve size target for %s", s->name);
+                free_sym_locs(locs, loc_count);
+                free_name_index(&loc_index);
+                return -1;
+            }
+            if (s->size_base_from_dot) {
+                if (find_set_dot_location(ctx, s->name, s->size_anchor_file, s->size_anchor_line,
+                                          &base_sec, &base_off) != 0 || base_sec == NULL) {
+                    set_err(ctx, "cannot resolve symbolic size for %s", s->name);
+                    free_sym_locs(locs, loc_count);
+                    free_name_index(&loc_index);
+                    return -1;
+                }
+            } else {
+                const sym_loc_t *base_loc = find_sym_loc(locs, &loc_index, s->size_base_symbol);
+                if (base_loc == NULL || base_loc->sec == NULL) {
+                    set_err(ctx, "cannot resolve size base for %s", s->name);
+                    free_sym_locs(locs, loc_count);
+                    free_name_index(&loc_index);
+                    return -1;
+                }
+                base_sec = base_loc->sec;
+                base_off = base_loc->off;
+            }
+            if (base_sec != target_loc->sec || base_off < target_loc->off) {
+                set_err(ctx, "invalid symbolic size for %s", s->name);
+                free_sym_locs(locs, loc_count);
+                free_name_index(&loc_index);
+                return -1;
+            }
+            sym_size = (unsigned long long)(base_off - target_loc->off);
+        }
+
+        esym = elf_add_symbol(ctx->obj, s->name, 0, sym_size, map_bind(s->bind), map_type(s->type));
         if (esym == NULL) {
             free_sym_locs(locs, loc_count);
             free_name_index(&loc_index);
@@ -9058,10 +10331,25 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
             free_name_index(&loc_index);
             return -1;
         }
-        if (s->version != NULL && elf_symbol_set_version(esym, 1) != ELF_OK) {
-            free_sym_locs(locs, loc_count);
-            free_name_index(&loc_index);
-            return -1;
+        if (s->version != NULL) {
+            const char *ver = s->version;
+            const char *at = strrchr(ver, '@');
+            int is_default = 0;
+            const char *ver_name = NULL;
+
+            if (at != NULL && at > ver && at[1] != '\0') {
+                if (at > ver && at[-1] == '@') {
+                    is_default = 1;
+                }
+                ver_name = at + 1;
+            }
+            if (ver_name == NULL ||
+                elf_symbol_set_version_name(esym, ver_name, is_default) != ELF_OK) {
+                set_err(ctx, "invalid .symver mapping for %s", s->name ? s->name : "<anon>");
+                free_sym_locs(locs, loc_count);
+                free_name_index(&loc_index);
+                return -1;
+            }
         }
         if (append_emit_symbol(ctx, s->name, esym) != 0) {
             free_sym_locs(locs, loc_count);
@@ -9644,7 +10932,14 @@ static int append_data_directive_binary(emit_ctx_t *ctx, const as_stmt_t *st, bi
         *handled = 1;
         for (i = 0; i < d->arg_count; ++i) {
             const char *s = d->args[i] != NULL ? d->args[i] : "";
-            if (bytebuf_append(&sec->buf, s, strlen(s)) != 0) {
+            char *bytes = NULL;
+            size_t len = 0;
+            if (as_decode_string_literal(s, &bytes, &len) != 0) {
+                set_err(ctx, "%s:%u: malformed string literal", st->file != NULL ? st->file : "<input>", st->line);
+                return -1;
+            }
+            if (bytebuf_append(&sec->buf, bytes, len) != 0) {
+                free(bytes);
                 set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
                 return -1;
             }
@@ -9803,7 +11098,7 @@ static int append_data_directive_binary(emit_ctx_t *ctx, const as_stmt_t *st, bi
         }
         for (i = 0; i < d->arg_count; ++i) {
             long long v;
-            if (parse_int64(d->args[i], &v) != 0) {
+            if (parse_int64(d->args[i], &v) != 0 && parse_const_expr_string(d->args[i], &v) != 0) {
                 char *sym = NULL;
                 int64_t add = 0;
                 if (parse_symbol_addend_arg(d->args[i], &sym, &add) == 0 && sym != NULL) {
@@ -9987,6 +11282,7 @@ int as_elf_emit_binary_file(const as_parse_result_t *parsed,
     emit_ctx_t ctx;
     bin_section_vec_t sv;
     const char *cur_section = ".text";
+    unsigned cur_code_bits;
     size_t i;
 
     if (parsed == NULL || cfg == NULL || out_path == NULL) {
@@ -10011,6 +11307,7 @@ int as_elf_emit_binary_file(const as_parse_result_t *parsed,
         set_err(&ctx, "failed to initialize section layout");
         return -1;
     }
+    cur_code_bits = cfg->is_64 ? 64u : (cfg->x86_code_bits == 16u ? 16u : 32u);
 
     for (i = 0; i < parsed->count; ++i) {
         const as_stmt_t *st = &parsed->items[i];
@@ -10027,6 +11324,18 @@ int as_elf_emit_binary_file(const as_parse_result_t *parsed,
 
             if (next != NULL) {
                 cur_section = next;
+                continue;
+            }
+            if (strcmp(d->name, ".code16") == 0) {
+                cur_code_bits = 16u;
+                continue;
+            }
+            if (strcmp(d->name, ".code32") == 0) {
+                cur_code_bits = 32u;
+                continue;
+            }
+            if (strcmp(d->name, ".code64") == 0) {
+                cur_code_bits = 64u;
                 continue;
             }
             if (is_binary_metadata_directive(d->name)) {
@@ -10055,7 +11364,8 @@ int as_elf_emit_binary_file(const as_parse_result_t *parsed,
                         st->file != NULL ? st->file : "<input>", st->line);
                 goto fail;
             }
-            if (encode_x86_stmt(cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
+            if (encode_x86_stmt_for_layout(&ctx, sec->name, (uint64_t)sec->buf.len, cur_code_bits,
+                                           st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
                 set_err(&ctx, "%s:%u: %s", st->file != NULL ? st->file : "<input>", st->line, encerr);
                 goto fail;
             }
@@ -10124,7 +11434,8 @@ static int emit_relocations(emit_ctx_t *ctx) {
         trace_env = (v != NULL && v[0] != '\0') ? 1 : 0;
     }
     memset(&secbufs, 0, sizeof(secbufs));
-    if (section_track_init(&track) != 0) {
+    if (section_track_init(&track, ctx->cfg != NULL && ctx->cfg->is_64 ? 64u :
+                                   (ctx->cfg != NULL && ctx->cfg->x86_code_bits == 16u ? 16u : 32u)) != 0) {
         return -1;
     }
 
@@ -10204,7 +11515,8 @@ static int emit_relocations(emit_ctx_t *ctx) {
             char encerr[256];
             size_t rel_count = 0;
 
-            if (encode_x86_stmt(ctx->cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
+            if (encode_x86_stmt_for_layout(ctx, track.current, cur_off, track.x86_code_bits,
+                                           st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
                 set_err(ctx, "%s:%u: %s", st->file != NULL ? st->file : "<input>", st->line, encerr);
                 section_track_free(&track);
                 sec_buf_vec_free(&secbufs);
@@ -10231,6 +11543,26 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     e = op->u.expr;
                 } else if (op->kind == AS_OPERAND_MEMORY) {
                     e = op->u.mem.disp;
+                }
+                if (e != NULL) {
+                    long long resolved_disp;
+                    int skip_local_resolve = 0;
+                    if (machine == EM_X86_64 &&
+                        op->kind == AS_OPERAND_MEMORY &&
+                        op->u.mem.base_reg != NULL &&
+                        streq_ci(op->u.mem.base_reg, "rip")) {
+                        skip_local_resolve = 1;
+                    }
+                    if (expr_is_local_temp_symbol(e) &&
+                        (op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) &&
+                        is_rel_mnemonic(st->u.instr.mnemonic)) {
+                        skip_local_resolve = 1;
+                    }
+                    if (!skip_local_resolve &&
+                        eval_local_rel_expr_virtual(ctx, track.current, st, cur_off, track.x86_code_bits, e,
+                                                    &resolved_disp) == 0) {
+                        continue;
+                    }
                 }
                 sym = first_symbol_in_expr(e);
                 if (sym == NULL) {
@@ -10353,7 +11685,11 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
             goto fail;
         }
         if (s->group != NULL) {
-            (void)elf_section_set_group(es, 1, s->comdat);
+            if (elf_section_set_group(es, section_group_ordinal(sections, i), s->comdat) != ELF_OK ||
+                elf_section_set_group_signature(es, s->group) != ELF_OK) {
+                set_err(&ctx, "failed to set group on %s", s->name);
+                goto fail;
+            }
         }
 
         if (strcmp(s->name, ".text") == 0 && s->subsection == 0) {
@@ -10387,12 +11723,16 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
     }
 
     if (emit_data_program(&ctx, data) != 0) {
-        set_err(&ctx, "failed to emit data program");
+        if (ctx.errbuf == NULL || ctx.errbuf[0] == '\0') {
+            set_err(&ctx, "failed to emit data program");
+        }
         goto fail;
     }
 
     if (emit_symbols(&ctx, symtab) != 0) {
-        set_err(&ctx, "failed to emit symbols");
+        if (ctx.errbuf == NULL || ctx.errbuf[0] == '\0') {
+            set_err(&ctx, "failed to emit symbols");
+        }
         goto fail;
     }
 

@@ -4,14 +4,18 @@
 
 #ifndef HOST_TEST
 #include <arch/i386/pmap.h>
+#include <arch/i386/cpu.h>
 #else
 typedef void *pmap_t;
 #define VM_PROT_READ  0x01
 #define VM_PROT_WRITE 0x02
+#define PTE_PWT       0x08
 #define PTE_PCD       0x10
+#define PTE_PAT       0x80
 extern pmap_t pmap_kernel(void);
 extern int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t flags);
 extern void pmap_kremove(uintptr_t va);
+extern int i386_cpu_pat_wc_enabled(void);
 #endif
 
 #define IOREMAP_BASE  0xF7000000U
@@ -35,7 +39,8 @@ static size_t page_round_up(size_t size) {
     return (size + PAGE_SIZE - 1U) & ~(PAGE_SIZE - 1U);
 }
 
-static void *ioremap_internal(resource_size_t phys_addr, size_t size, struct resource *res) {
+static void *ioremap_internal(resource_size_t phys_addr, size_t size, struct resource *res,
+                              uint32_t pte_flags) {
     struct ioremap_region *region;
     uintptr_t page_phys;
     uintptr_t va_base;
@@ -78,7 +83,7 @@ static void *ioremap_internal(resource_size_t phys_addr, size_t size, struct res
 
     for (size_t offset = 0; offset < map_size; offset += PAGE_SIZE) {
         if (pmap_enter(pmap_kernel(), va_base + offset, page_phys + offset,
-                       VM_PROT_READ | VM_PROT_WRITE, PTE_PCD) != 0) {
+                       VM_PROT_READ | VM_PROT_WRITE, pte_flags) != 0) {
             while (offset > 0) {
                 offset -= PAGE_SIZE;
                 pmap_kremove(va_base + offset);
@@ -104,7 +109,16 @@ static void *ioremap_internal(resource_size_t phys_addr, size_t size, struct res
 }
 
 void *ioremap(resource_size_t phys_addr, size_t size) {
-    return ioremap_internal(phys_addr, size, NULL);
+    return ioremap_internal(phys_addr, size, NULL, PTE_PCD);
+}
+
+void *ioremap_wc(resource_size_t phys_addr, size_t size) {
+    uint32_t pte_flags = PTE_PCD;
+
+    if (i386_cpu_pat_wc_enabled()) {
+        pte_flags = PTE_PAT | PTE_PWT;
+    }
+    return ioremap_internal(phys_addr, size, NULL, pte_flags);
 }
 
 void *ioremap_resource(struct resource *res, size_t max_len) {
@@ -118,7 +132,7 @@ void *ioremap_resource(struct resource *res, size_t max_len) {
     if (max_len != 0 && size > max_len) {
         size = max_len;
     }
-    return ioremap_internal(res->start, size, res);
+    return ioremap_internal(res->start, size, res, PTE_PCD);
 }
 
 void iounmap(void *addr) {
