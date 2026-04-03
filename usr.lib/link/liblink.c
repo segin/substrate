@@ -414,6 +414,53 @@ ln_split_abs_components(const char *abs_path, char ***out_parts, size_t *out_cou
 }
 
 static char *
+ln_build_relative_path(char **target_parts, size_t target_count, size_t base_count, size_t common_len)
+{
+    size_t cap = 64;
+    size_t len = 0;
+    char *out = (char *)malloc(cap);
+    size_t i;
+
+    if (!out) {
+        return NULL;
+    }
+    out[0] = '\0';
+
+    for (i = common_len; i < base_count; ++i) {
+        if (ln_append_text(&out, &cap, &len, "../") != 0) {
+            free(out);
+            return NULL;
+        }
+    }
+
+    for (i = common_len; i < target_count; ++i) {
+        if (ln_append_text(&out, &cap, &len, target_parts[i]) != 0) {
+            free(out);
+            return NULL;
+        }
+        if (i + 1 < target_count) {
+            if (ln_append_text(&out, &cap, &len, "/") != 0) {
+                free(out);
+                return NULL;
+            }
+        }
+    }
+
+    if (len == 0) {
+        if (ln_append_text(&out, &cap, &len, ".") != 0) {
+            free(out);
+            return NULL;
+        }
+    }
+
+    if (len >= 3 && strcmp(out + len - 3, "../") == 0) {
+        out[len - 1] = '\0';
+    }
+
+    return out;
+}
+
+static char *
 ln_relative_from_to(const char *target_abs, const char *base_abs)
 {
     char **target_parts;
@@ -421,8 +468,6 @@ ln_relative_from_to(const char *target_abs, const char *base_abs)
     size_t target_count;
     size_t base_count;
     size_t i;
-    size_t cap;
-    size_t len;
     char *out;
 
     if (!target_abs || !base_abs || target_abs[0] != '/' || base_abs[0] != '/') {
@@ -444,64 +489,10 @@ ln_relative_from_to(const char *target_abs, const char *base_abs)
         ++i;
     }
 
-    cap = 64;
-    len = 0;
-    out = (char *)malloc(cap);
-    if (!out) {
-        ln_components_free(target_parts, target_count);
-        ln_components_free(base_parts, base_count);
-        return NULL;
-    }
-    out[0] = '\0';
-
-    while (i < base_count) {
-        if (ln_append_text(&out, &cap, &len, "../") != 0) {
-            free(out);
-            ln_components_free(target_parts, target_count);
-            ln_components_free(base_parts, base_count);
-            return NULL;
-        }
-        ++i;
-    }
-
-    i = 0;
-    while (i < target_count && i < base_count && strcmp(target_parts[i], base_parts[i]) == 0) {
-        ++i;
-    }
-
-    while (i < target_count) {
-        if (ln_append_text(&out, &cap, &len, target_parts[i]) != 0) {
-            free(out);
-            ln_components_free(target_parts, target_count);
-            ln_components_free(base_parts, base_count);
-            return NULL;
-        }
-        if (i + 1 < target_count) {
-            if (ln_append_text(&out, &cap, &len, "/") != 0) {
-                free(out);
-                ln_components_free(target_parts, target_count);
-                ln_components_free(base_parts, base_count);
-                return NULL;
-            }
-        }
-        ++i;
-    }
-
-    if (len == 0) {
-        if (ln_append_text(&out, &cap, &len, ".") != 0) {
-            free(out);
-            ln_components_free(target_parts, target_count);
-            ln_components_free(base_parts, base_count);
-            return NULL;
-        }
-    }
+    out = ln_build_relative_path(target_parts, target_count, base_count, i);
 
     ln_components_free(target_parts, target_count);
     ln_components_free(base_parts, base_count);
-
-    if (len >= 3 && strcmp(out + len - 3, "../") == 0) {
-        out[len - 1] = '\0';
-    }
 
     return out;
 }
