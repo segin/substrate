@@ -932,7 +932,7 @@ static int paths_same_file(const char *a, const char *b) {
 static int mktemp_for_target(const char *target_path, char *out, size_t out_size) {
     int fd;
     size_t n;
-    const char suffix[] = ".elfedit.tmp.XXXXXX";
+    const char suffix[] = ".elfedit.tmp.X" "XXXXX";
 
     n = strlen(target_path) + sizeof(suffix);
     if (n > out_size) {

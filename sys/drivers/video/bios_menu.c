@@ -79,10 +79,25 @@ struct vbe_detect_result {
     uint16_t modes[VBE_MODE_LIST_MAX];
 };
 
+struct bios_menu_option {
+    char key;
+    const char *label;
+    uint16_t mode;
+    int is_vbe;
+    int is_graphics;
+};
+
 struct vbe_pm_interface {
     uint16_t seg;
     uint16_t off;
     uint16_t len;
+};
+
+struct video_menu_entry {
+    char key;
+    const char *label;
+    uint16_t mode;
+    int is_text;
 };
 
 static void *vbe_far_ptr_to_linear(uint16_t seg, uint16_t off) {
@@ -151,6 +166,44 @@ static int vbe_mode_supported(const struct vbe_detect_result *vbe, uint16_t mode
             return 1;
         }
     }
+    return 0;
+}
+
+static uint16_t vbe_find_text_mode(const struct vbe_detect_result *vbe,
+                                   uint16_t cols,
+                                   uint16_t rows) {
+    struct vm86_regs regs;
+    struct vbe_mode_info_block *info;
+    uint16_t i;
+
+    if (!vbe || !vbe->ok) {
+        return 0;
+    }
+
+    info = (struct vbe_mode_info_block *)(uintptr_t)VBE_MODE_INFO_ADDR;
+    for (i = 0; i < vbe->mode_count; i++) {
+        memset(info, 0, sizeof(*info));
+        memset(&regs, 0, sizeof(regs));
+        regs.eax = 0x4F01;
+        regs.ecx = vbe->modes[i];
+        regs.es  = VBE_MODE_INFO_ADDR >> 4;
+        regs.edi = VBE_MODE_INFO_ADDR & 0xF;
+        vm86_bios_call(0x10, &regs);
+        if (!VBE_SUCCESS(regs.eax)) {
+            continue;
+        }
+
+        if ((info->mode_attributes & 0x0001U) == 0 ||
+            (info->mode_attributes & 0x0010U) != 0 ||
+            info->x_char_size == 0 || info->y_char_size == 0) {
+            continue;
+        }
+
+        if (info->x_resolution == cols && info->y_resolution == rows) {
+            return vbe->modes[i];
+        }
+    }
+
     return 0;
 }
 
@@ -278,6 +331,8 @@ int video_ask_mode(fb_info_t *fb) {
     
     struct vbe_detect_result vbe;
     struct vbe_pm_interface pm32;
+    struct video_menu_entry menu[8];
+    int menu_count = 0;
 
     if (vbe_detect_and_list(&vbe) == 0) {
         char msg[96];
@@ -303,32 +358,121 @@ int video_ask_mode(fb_info_t *fb) {
         bios_puts("VBE not detected; text mode only.\n");
     }
 
+    menu[menu_count++] = (struct video_menu_entry){
+        .key = '1',
+        .label = "Standard Text Mode (80x25)",
+        .mode = 0x0003,
+        .is_text = 1,
+    };
+    {
+        static const struct {
+            const char *label;
+            uint16_t cols;
+            uint16_t rows;
+        } text_modes[] = {
+            { "VBE Text Mode (132x25)", 132, 25 },
+            { "VBE Text Mode (132x43)", 132, 43 },
+            { "VBE Text Mode (132x50)", 132, 50 },
+            { "VBE Text Mode (132x60)", 132, 60 },
+        };
+        static const struct {
+            const char *label;
+            uint16_t mode;
+        } gfx_modes[] = {
+            { "VESA 1024x768x32", 0x118 },
+            { "VESA 800x600x32", 0x115 },
+            { "VESA 640x480x32", 0x112 },
+        };
+        size_t i;
+
+        for (i = 0; i < sizeof(text_modes) / sizeof(text_modes[0]); i++) {
+            uint16_t mode = vbe_find_text_mode(&vbe, text_modes[i].cols, text_modes[i].rows);
+            char key;
+
+            if (mode == 0) {
+                continue;
+            }
+            key = (char)('1' + menu_count);
+            menu[menu_count++] = (struct video_menu_entry){
+                .key = key,
+                .label = text_modes[i].label,
+                .mode = mode,
+                .is_text = 1,
+            };
+        }
+
+        for (i = 0; i < sizeof(gfx_modes) / sizeof(gfx_modes[0]); i++) {
+            char key;
+
+            if (!vbe_mode_supported(&vbe, gfx_modes[i].mode)) {
+                continue;
+            }
+            key = (char)('1' + menu_count);
+            menu[menu_count++] = (struct video_menu_entry){
+                .key = key,
+                .label = gfx_modes[i].label,
+                .mode = gfx_modes[i].mode,
+                .is_text = 0,
+            };
+        }
+    }
+
     /* 2. Loop Menu */
     while (1) {
+        int c;
+        int idx;
+        const struct video_menu_entry *selected = NULL;
+
         bios_puts("\nSubstrate Kernel Video Selection\n");
         bios_puts("================================\n\n");
-        bios_puts("1. Standard Text Mode (80x25)\n");
-        if (vbe_mode_supported(&vbe, 0x118)) bios_puts("2. VESA 1024x768x32\n");
-        if (vbe_mode_supported(&vbe, 0x115)) bios_puts("3. VESA 800x600x32\n");
-        if (vbe_mode_supported(&vbe, 0x112)) bios_puts("4. VESA 640x480x32\n");
-        bios_puts("\nSelect mode [1-4]: ");
-        
-        int c = bios_getc();
+        for (idx = 0; idx < menu_count; idx++) {
+            char line[64];
+
+            snprintf(line, sizeof(line), "%c. %s\n", menu[idx].key, menu[idx].label);
+            bios_puts(line);
+        }
+        {
+            char prompt[32];
+
+            snprintf(prompt, sizeof(prompt), "\nSelect mode [1-%d]: ", menu_count);
+            bios_puts(prompt);
+        }
+
+        c = bios_getc();
         bios_putc(c);
         bios_putc('\n');
-        
-        if (c == '1') {
-            regs.eax = 0x0003;
-            vm86_bios_call(0x10, &regs);
+
+        for (idx = 0; idx < menu_count; idx++) {
+            if (menu[idx].key == c) {
+                selected = &menu[idx];
+                break;
+            }
+        }
+
+        if (!selected) {
+            bios_puts("Invalid selection.\n");
+            continue;
+        }
+
+        if (selected->is_text) {
+            memset(&regs, 0, sizeof(regs));
+            if (selected->mode == 0x0003) {
+                regs.eax = 0x0003;
+                vm86_bios_call(0x10, &regs);
+            } else {
+                regs.eax = 0x4F02;
+                regs.ebx = selected->mode;
+                vm86_bios_call(0x10, &regs);
+                if (!VBE_SUCCESS(regs.eax)) {
+                    bios_puts("Error setting text mode!\n");
+                    continue;
+                }
+            }
             return 0; // Text mode
         }
-        
-        uint16_t vesa_mode = 0;
-        if (c == '2' && vbe_mode_supported(&vbe, 0x118)) vesa_mode = 0x118; // 1024x768 24/32
-        else if (c == '3' && vbe_mode_supported(&vbe, 0x115)) vesa_mode = 0x115; // 800x600 24/32
-        else if (c == '4' && vbe_mode_supported(&vbe, 0x112)) vesa_mode = 0x112; // 640x480 24/32
-        
-        if (vesa_mode) {
+
+        if (selected->mode) {
+            uint16_t vesa_mode = selected->mode;
             /* Try to set VESA mode */
             /* Add bit 14 for LFB */
             vesa_mode |= 0x4000;

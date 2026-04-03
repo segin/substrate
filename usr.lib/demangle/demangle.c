@@ -51,29 +51,9 @@ normalize_options(int options, unsigned *out)
 }
 
 static char *
-demangle_dispatch(const char *mangled, unsigned options)
+demangle_auto(const char *mangled, unsigned options)
 {
     char *out;
-
-    if (mangled == NULL || mangled[0] == '\0') {
-        return NULL;
-    }
-
-    if ((options & DEMANGLE_ITANIUM) != 0u) {
-        return demangle_itanium(mangled, (int)options);
-    }
-
-    if ((options & DEMANGLE_RUST) != 0u) {
-        return demangle_rust(mangled, (int)options);
-    }
-
-    if ((options & DEMANGLE_DLANG) != 0u) {
-        return demangle_dlang(mangled, (int)options);
-    }
-
-    if ((options & DEMANGLE_AUTO) == 0u) {
-        return NULL;
-    }
 
     if (starts_with(mangled, "_R")) {
         out = demangle_rust(mangled, (int)options);
@@ -107,6 +87,32 @@ demangle_dispatch(const char *mangled, unsigned options)
     }
 
     return NULL;
+}
+
+static char *
+demangle_dispatch(const char *mangled, unsigned options)
+{
+    if (mangled == NULL || mangled[0] == '\0') {
+        return NULL;
+    }
+
+    if ((options & DEMANGLE_ITANIUM) != 0u) {
+        return demangle_itanium(mangled, (int)options);
+    }
+
+    if ((options & DEMANGLE_RUST) != 0u) {
+        return demangle_rust(mangled, (int)options);
+    }
+
+    if ((options & DEMANGLE_DLANG) != 0u) {
+        return demangle_dlang(mangled, (int)options);
+    }
+
+    if ((options & DEMANGLE_AUTO) == 0u) {
+        return NULL;
+    }
+
+    return demangle_auto(mangled, options);
 }
 
 char *

@@ -1,10 +1,16 @@
 PROG=sh
 SRCS=sh.c lexer.c parser.c expand.c exec.c shell_var.c util.c job.c prompt.c
 OBJS=$(SRCS:.c=.o)
+LIBEDIT_A=$(TOP)/lib/edit/libedit.a
 
 include ../../Makefile.bin.inc
 
-LDADD = -L$(TOP)/lib/edit -ledit
+LDADD = -L$(TOP)/lib/edit -l:libedit.a
+
+$(LIBEDIT_A):
+	$(MAKE) -C $(TOP)/lib/edit clean all NATIVE_BUILD=$(NATIVE_BUILD)
+
+$(PROG): $(LIBEDIT_A)
 
 ifndef NATIVE_BUILD
 USER_CFLAGS += -I$(TOP)/sys
@@ -45,9 +51,7 @@ fuzz_expand: expand.c lexer.c parser.c shell_var.c util.c tests/fuzz_expand.c
 
 sh_host: $(SRCS)
 	$(MAKE) -C $(TOP)/lib/edit NATIVE_BUILD=1 clean all
-	cp $(TOP)/include/histedit.h .
-	$(CC) -g -D_GNU_SOURCE -I. -o $@ $(SRCS) -L$(TOP)/lib/edit -ledit
-	rm histedit.h
+	$(CC) -g -D_GNU_SOURCE -I. -include $(TOP)/include/histedit.h -o $@ $(SRCS) -L$(TOP)/lib/edit -l:libedit.a
 
 test: all test_lexer test_parser test_expand test_shell_var test_job test_util test_exec test_prompt sh_host
 	./test_lexer

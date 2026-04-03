@@ -11,6 +11,44 @@ int test_api_basic(void) {
     return 0;
 }
 
+int test_api_split_free(void) {
+    /* Test NULL */
+    regex_split_free(NULL);
+
+    /* Test empty */
+    regex_split_result_t empty = {0};
+    regex_split_free(&empty);
+    TEST_ASSERT(empty.items == NULL);
+    TEST_ASSERT(empty.count == 0);
+
+    /* Test with items */
+    regex_split_result_t res = {0};
+    res.count = 2;
+    res.items = malloc(2 * sizeof(char *));
+    TEST_ASSERT(res.items != NULL);
+    res.items[0] = strdup("hello");
+    res.items[1] = strdup("world");
+    TEST_ASSERT(res.items[0] != NULL);
+    TEST_ASSERT(res.items[1] != NULL);
+
+    regex_split_free(&res);
+    TEST_ASSERT(res.items == NULL);
+    TEST_ASSERT(res.count == 0);
+
+    /* Test items allocated but count 0 */
+    regex_split_result_t res2 = {0};
+    res2.count = 0;
+    res2.items = malloc(1 * sizeof(char *));
+    TEST_ASSERT(res2.items != NULL);
+    res2.items[0] = NULL;
+
+    regex_split_free(&res2);
+    TEST_ASSERT(res2.items == NULL);
+    TEST_ASSERT(res2.count == 0);
+
+    return 0;
+}
+
 int test_api_match(void) {
     regex_err_t err;
     size_t caps[2];
@@ -19,5 +57,30 @@ int test_api_match(void) {
     TEST_ASSERT(regex_match(re, "hello", 5, caps, 2, &err) >= 0);
     TEST_ASSERT(caps[0] == 0 && caps[1] == 5);
     regex_free(re);
+    return 0;
+}
+
+int test_api_split_free(void) {
+    regex_split_result_t out = {0};
+    out.count = 2;
+    out.items = malloc(2 * sizeof(char *));
+    TEST_ASSERT(out.items != NULL);
+    out.items[0] = strdup("hello");
+    out.items[1] = strdup("world");
+    TEST_ASSERT(out.items[0] != NULL);
+    TEST_ASSERT(out.items[1] != NULL);
+
+    /* Free the valid split result */
+    regex_split_free(&out);
+    TEST_ASSERT(out.items == NULL);
+    TEST_ASSERT(out.count == 0);
+
+    /* Test freeing NULL */
+    regex_split_free(NULL);
+
+    /* Test freeing empty result */
+    regex_split_result_t empty = {0};
+    regex_split_free(&empty);
+
     return 0;
 }

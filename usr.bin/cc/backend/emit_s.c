@@ -2033,7 +2033,7 @@ static void slot_layout_free(slot_layout_t *lay) {
     lay->frame_bytes = 0;
 }
 
-static int __attribute__((unused)) allocate_slot(int *free_slots, int *free_count, int *next_slot) {
+static int allocate_slot(int *free_slots, int *free_count, int *next_slot) {
     int i;
     int best_i = -1;
     int best_slot = 0;
@@ -2051,15 +2051,6 @@ static int __attribute__((unused)) allocate_slot(int *free_slots, int *free_coun
     free_slots[best_i] = free_slots[*free_count - 1];
     (*free_count)--;
     return best_slot;
-}
-
-static void __attribute__((unused)) mark_use(int *last_use, int nvals, int v, int at) {
-    if (v < 0 || v >= nvals) {
-        return;
-    }
-    if (at > last_use[v]) {
-        last_use[v] = at;
-    }
 }
 
 typedef void (*ssa_value_visit_fn)(int v, void *ctx);
@@ -2175,7 +2166,9 @@ static void slot_mark_use_cb(int v, void *ctxp) {
     if (ctx == NULL || v < 0 || v >= ctx->nvals) {
         return;
     }
-    mark_use(ctx->last_use, ctx->nvals, v, ctx->at);
+    if (ctx->at > ctx->last_use[v]) {
+        ctx->last_use[v] = ctx->at;
+    }
     if (ctx->first_use[v] < 0 || ctx->at < ctx->first_use[v]) {
         ctx->first_use[v] = ctx->at;
     }

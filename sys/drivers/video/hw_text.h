@@ -16,5 +16,7 @@ void hw_text_refresh_statusline(void);
 void hw_text_tick(void);
 void hw_text_tick_1hz(void);
 void hw_text_redraw_active(void);
+void hw_text_draw_statusline(const char *line, int cols, int row);
+int hw_text_get_terminal_size(int *cols, int *rows);
 
 #endif

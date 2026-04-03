@@ -1,0 +1,99 @@
+--- usr.lib/link/liblink.c
++++ usr.lib/link/liblink.c
+@@ -1330,6 +1330,48 @@
+     return -1;
+ }
+
++static int
++ln_parse_short_options(ln_options_t *opts, int argc, char **argv, int *i,
++                       bool *seen_force, bool *seen_interactive)
++{
++    char *arg = argv[*i];
++    size_t j = 1;
++    while (arg[j] != '\0') {
++        char opt = arg[j];
++        const char *optval = NULL;
++        int rc;
++
++        if (opt == 'S' || opt == 't') {
++            if (arg[j + 1] != '\0') {
++                optval = &arg[j + 1];
++                j = strlen(arg);
++            } else {
++                if (*i + 1 >= argc) {
++                    ln_diag(opts, "option requires an argument -- '%c'", opt);
++                    return -1;
++                }
++                ++(*i);
++                optval = argv[*i];
++            }
++        } else if (opt == 'b') {
++            if (arg[j + 1] != '\0') {
++                optval = &arg[j + 1];
++                j = strlen(arg);
++            }
++        }
++
++        rc = ln_apply_parsed_option(opts, opt, optval, seen_force, seen_interactive);
++        if (rc != 0) {
++            return -1;
++        }
++
++        if (opt == 'S' || opt == 't' || opt == 'b') {
++            break;
++        }
++
++        ++j;
++    }
++    return 0;
++}
++
+ int
+ ln_parse_options(ln_options_t *opts, int argc, char **argv, int *operand_index, int *show_help)
+ {
+@@ -1373,43 +1415,8 @@
+             continue;
+         }
+
+-        {
+-            size_t j = 1;
+-            while (arg[j] != '\0') {
+-                char opt = arg[j];
+-                const char *optval = NULL;
+-                int rc;
+-
+-                if (opt == 'S' || opt == 't') {
+-                    if (arg[j + 1] != '\0') {
+-                        optval = &arg[j + 1];
+-                        j = strlen(arg);
+-                    } else {
+-                        if (i + 1 >= argc) {
+-                            ln_diag(opts, "option requires an argument -- '%c'", opt);
+-                            return -1;
+-                        }
+-                        ++i;
+-                        optval = argv[i];
+-                    }
+-                } else if (opt == 'b') {
+-                    if (arg[j + 1] != '\0') {
+-                        optval = &arg[j + 1];
+-                        j = strlen(arg);
+-                    }
+-                }
+-
+-                rc = ln_apply_parsed_option(opts, opt, optval, &seen_force, &seen_interactive);
+-                if (rc != 0) {
+-                    return -1;
+-                }
+-
+-                if (opt == 'S' || opt == 't' || opt == 'b') {
+-                    break;
+-                }
+-
+-                ++j;
+-            }
++        if (ln_parse_short_options(opts, argc, argv, &i, &seen_force, &seen_interactive) != 0) {
++            return -1;
+         }
+
+         ++i;

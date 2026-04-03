@@ -1,0 +1,274 @@
+.Dd April 2, 2026
+.Dt VI 1
+.Os Substrate
+.Sh NAME
+.Nm vi
+.Nd full-screen visual text editor
+.Sh SYNOPSIS
+.Nm
+.Op Fl RrsSv
+.Op Fl c Ar command
+.Op Fl t Ar tag
+.Op Ar +command
+.Op Ar file
+.Op Ar file ...
+.Sh DESCRIPTION
+The
+.Nm
+utility is the full-screen visual frontend for Substrate's shared
+.Pa usr.lib/exvi
+editor core.
+It provides a BSD-first
+visual editing interface over the same buffer, command, tag, recovery,
+and option
+machinery used by
+.Xr ex 1 .
+.Pp
+Normal mode, insert mode, replace mode, search prompts, and visual
+.Ql \&:
+command entry are supported.
+The visual command line exposes the same documented command set and
+.Ic :set
+options as standalone
+.Xr ex 1 .
+.Pp
+The current visual frontend supports:
+.Bl -tag -width indent
+.It movement
+.Cm h
+.Cm j
+.Cm k
+.Cm l ,
+.Cm 0 ,
+.Cm ^ ,
+.Cm $ ,
+.Cm _
+.Cm g_
+.Cm gg ,
+.Cm G ,
+.Cm +
+.Cm - ,
+.Cm H ,
+.Cm M ,
+.Cm L ,
+.Cm Ctrl-F ,
+.Cm Ctrl-B ,
+.Cm Ctrl-D ,
+.Cm Ctrl-U ,
+.Cm Ctrl-E ,
+.Cm Ctrl-Y ,
+.Cm zz ,
+.Cm z<Enter> ,
+.Cm z-
+.Ql z.
+.Cm zt ,
+.Cm zb
+.It word and text motions
+.Cm w
+.Cm b
+.Cm e ,
+.Cm W
+.Cm B
+.Cm E ,
+.Cm ge ,
+.Cm gE ,
+.Ql (
+.Ql ) ,
+.Ql {
+.Ql } ,
+.Cm [[
+.Cm ]]
+.Cm []
+.Cm ][ ,
+.Cm %
+.Cm *
+.Cm #
+.It find and mark motions
+.Cm f
+.Cm F
+.Cm t
+.Cm T ,
+.Ql ; ,
+.Ql , ,
+.Cm ' Ns Ar mark
+.Cm ` Ns Ar mark ,
+.Cm m Ns Ar mark
+.It search and prompt entry
+.Ql /
+.Ql ?
+.Cm n
+.Cm N
+.Ql :
+.It editing and operators
+.Cm i
+.Cm a
+.Cm o
+.Cm O ,
+.Cm x
+.Cm X ,
+.Cm s
+.Cm S ,
+.Cm r
+.Cm R ,
+.Cm C
+.Cm D
+.Cm Y
+.Cm J
+.Cm ~ ,
+line shifts with
+.Cm >>
+and
+.Cm <<
+and delete, change, and yank with the supported motion families
+.It put, undo, and redo
+.Cm p
+.Cm P ,
+.Cm u ,
+.Cm Ctrl-R
+.It tag and mode handoff
+.Ql Ctrl-]
+.Cm Ctrl-T ,
+.Cm Q ,
+.Cm Ctrl-O
+for one-shot normal commands from insert or replace mode
+.El
+.Pp
+Counts are supported across a large subset of motions and operator-pending
+commands.
+The current implementation still has documented parity gaps in a few motion,
+undo, and repeat corner cases; see
+.Pa docs/specs/exvi.md
+for the tracked conformance backlog.
+.Sh OPTIONS
+.Bl -tag -width indent
+.It Fl R
+Start in readonly mode.
+Plain writes are rejected unless forced with
+.Ql \&! .
+.It Fl r
+Recover the named file from a preserved recovery image.
+.It Fl s
+Suppress interactive diagnostics where possible.
+.It Fl S
+Start in secure mode.
+Shell escapes and shell-capable commands are disabled.
+.It Fl v
+Accepted for shared parser compatibility.
+When invoking
+.Nm
+directly it keeps visual mode active.
+.It Fl c Ar command
+Execute
+.Ar command
+after startup processing.
+This option may be specified more than once.
+.It Fl t Ar tag
+Start by editing the file and location named by
+.Ar tag .
+.It Ar +command
+Execute
+.Ar command
+after startup processing.
+Common forms include
+.Ql +42
+to move to line 42 and
+.Ql +next
+to advance within the argument list.
+.It Ar file
+Open
+.Ar file
+as the current buffer.
+If multiple files are given, they become the initial argument list.
+.El
+.Sh SET OPTIONS
+The shared
+.Ic :set
+option table currently supports:
+.Bl -tag -width indent
+.It Ic number , nu
+Display line numbers in the visual gutter.
+.It Ic list , li
+Display tabs and line endings in list form.
+.It Ic autoindent , ai
+Reuse current-line indentation for
+.Cm o ,
+.Cm O ,
+split-newline, and linewise change/substitute helpers.
+.It Ic ignorecase , ic
+Make search, repeat-search, and word-search commands case-insensitive.
+.It Ic readonly , ro
+Mark the session readonly.
+.It Ic showmode , smd
+Show or suppress insert and replace mode banners.
+.It Ic wrapscan , ws
+Wrap searches at buffer boundaries.
+.It Ic tabstop= , ts=
+Set tab rendering width.
+The default is 8.
+.It Ic scroll= , sc=
+Set the half-page scroll amount after it is explicitly configured.
+.It Ic tags=
+Set the comma-separated tag-file search path used by
+.Ql Ctrl-]
+and
+.Ic :tag .
+.El
+.Sh ENVIRONMENT
+.Bl -tag -width indent
+.It Ev EXINIT
+If set, supplies startup commands.
+When
+.Ev EXINIT
+is present, home and local
+.Pa .exrc
+files are not loaded.
+.El
+.Sh FILES
+.Bl -tag -width indent
+.It Pa ~/.exrc
+Per-user startup commands, loaded only when ownership and directory safety
+checks pass.
+.It Pa ./.exrc
+Per-directory startup commands, loaded after
+.Pa ~/.exrc
+when safe and when
+.Ev EXINIT
+is not set.
+.It Pa tags
+Default tag file name when the
+.Ic tags
+option is left at its default value.
+.It Pa .*.recover
+Preserved recovery images written for interrupted sessions.
+.El
+.Sh EXIT STATUS
+The
+.Nm
+utility exits 0 on success and with a value greater than 0 if an error occurs.
+.Sh EXAMPLES
+.Bd -literal -offset indent
+vi file.txt
+vi +42 file.txt
+vi -R file.txt
+vi -t main tags-demo.c
+vi -c 'set number' file.txt
+.Ed
+.Sh NOTES
+The supported Substrate contract is intentionally narrower than the union of
+historical BSD, nvi, and Vim behavior.
+Only the command names, abbreviations, motions, options, and entry points
+documented here and in
+.Pa docs/specs/exvi.md
+are part of the supported interface.
+.Pp
+Readonly and restricted entry points such as
+.Cm view
+and
+.Cm rvi
+are implemented through the shared frontend parser even though they are not
+separate binaries today.
+.Pp
+The current renderer still uses a repaint-heavy refresh strategy rather than a
+dirty-region diff engine.
+.Sh SEE ALSO
+.Xr ex 1
