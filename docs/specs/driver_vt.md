@@ -7,9 +7,11 @@
 
 ## Current Contract
 - each VT owns a full text buffer sized to the current physical geometry.
+- the VT layer refreshes its geometry from the active console backend's reported terminal size so mode changes and framebuffer takeover keep the kernel and tty winsizes aligned.
 - each VT owns an ANSI/VT102 parser state machine, and the active hardware-text backend feeds printable characters and escape sequences through the shared `ansi_handler` callbacks.
 - the hardware text console treats the last physical text row as a kernel-owned status line rendered black-on-white; the usable tty geometry reported to userland excludes that row (e.g., `80x24` on an `80x25` mode).
-- a dedicated kernel `vtstatus` thread refreshes the status line once per second, showing the active VT number and wall-clock time in ISO 8601 UTC form.
+- the kernel-owned status line occupies the last physical row, is stored separately from the tty-visible rows in the VT buffer, and is excluded from normal scroll/erase operations.
+- `vt_tick_1hz()` refreshes the status line once per second and the active backend only syncs the already-rendered status row to hardware, avoiding backend-to-VT re-entry; full-screen VT redraws compose the status row up front and repaint the main area plus status row in one backend pass so the status bar does not blink during page refreshes.
 - each VT owns a fixed scrollback ring of `256` lines at the maximum supported width.
 - the hardware-text VT backend honors DECSTBM scroll regions through the shared ANSI callback table, so line insert/delete, index, reverse-index, and bulk scroll operations stay clipped to the configured top/bottom margins.
 - the hardware-text attribute byte is treated as a 4-bit foreground plus 4-bit background palette, so ANSI SGR color changes can address the full 16 VGA text colors for both foreground and background.

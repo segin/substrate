@@ -7,7 +7,7 @@
 
 #include <stdint.h>
 #include <kern/ansi_handler.h>
-#include <sys/tty.h>
+struct tty;
 
 #define VT_MAX 12
 #define VT_DEFAULT_WIDTH 80
@@ -85,6 +85,7 @@ int vt_get_active(void);
 vt_state_t *vt_get_state(int n);
 struct tty *vt_get_active_tty(void);
 int vt_set_geometry(int cols, int rows);
+int vt_refresh_geometry_from_terminal(void);
 int vt_get_width(void);
 int vt_get_height(void);
 int vt_get_visible_height(void);
@@ -98,16 +99,9 @@ void vt_scrollback_page_down(void);
 void vt_scrollback_line_up(void);
 void vt_scrollback_line_down(void);
 
-// To be called by the video driver when it updates the screen,
-// so the VT layer can keep the backing buffer in sync if it's active?
-// Actually, the driver should write to BOTH if active, or just VIDEO if active
-// and we save/restore on switch.
-//
-// Strategy:
-// - Inactive VT: Write to vt_state->buffer only.
-// - Active VT: Write to VGA RAM (and optionally sync to buffer, or valid on switch).
-//   Refined: Write to VGA RAM *and* buffer so buffer is always up to date?
-//   Or: Save VGA RAM to buffer on switch. (Classic approach).
-//   Let's go with Save-on-Switch for the active one.
+// generic tick hooks
+void vt_tick_1hz(void);
+void vt_render_statusline(vt_state_t *vt);
+void vt_redraw_active(void);
 
 #endif /* _SYS_VT_H */

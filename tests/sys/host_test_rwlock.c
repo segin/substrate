@@ -17,6 +17,7 @@ static jmp_buf panic_jmp;
 static const char *last_panic;
 static int wake_one_calls;
 static int wake_all_calls;
+static void (*yield_callback)(void);
 
 void spinlock_init(spinlock_t *lock, const char *name) {
     lock->locked = 0;
@@ -32,7 +33,11 @@ bool spinlock_try_acquire(spinlock_t *lock) {
 void spinlock_release(spinlock_t *lock) { lock->locked = 0; }
 bool spinlock_is_held(spinlock_t *lock) { return lock->locked != 0; }
 
-void sched_yield(void) {}
+void sched_yield(void) {
+    if (yield_callback) {
+        yield_callback();
+    }
+}
 void sleepq_add(void *chan, thread_t *t) { (void)chan; t->state = THREAD_BLOCKED; }
 thread_t *sleepq_wake_one(void *chan) { (void)chan; wake_one_calls++; return NULL; }
 int sleepq_wake_all(void *chan) { (void)chan; wake_all_calls++; return 0; }
@@ -52,6 +57,7 @@ static void reset_env(void) {
     last_panic = NULL;
     wake_one_calls = 0;
     wake_all_calls = 0;
+    yield_callback = NULL;
 }
 
 static thread_t *init_thread(int slot, int tid) {
@@ -118,6 +124,44 @@ static void test_rwlock_writer_preference_and_reader_wakeup(void) {
     assert(wake_all_calls >= 1);
 }
 
+static void test_rwlock_try_wlock(void) {
+    rwlock_t rw;
+    thread_t *t1;
+    thread_t *t2;
+
+    reset_env();
+    t1 = init_thread(0, 1);
+    t2 = init_thread(1, 2);
+
+    rwlock_init(&rw, "try_wlock");
+
+    // Success case
+    current_thread = t1;
+    assert(rw_try_wlock(&rw) == true);
+    assert(rw.writer == 1);
+    assert(rw.owner == t1);
+
+    // Failure case 1: Writer holds the lock
+    current_thread = t2;
+    assert(rw_try_wlock(&rw) == false);
+
+    // Release writer lock
+    current_thread = t1;
+    rw_wunlock(&rw);
+
+    // Failure case 2: Reader holds the lock
+    current_thread = t2;
+    rw_rlock(&rw);
+
+    current_thread = t1;
+    assert(rw_try_wlock(&rw) == false);
+    assert(rw.writer == 0);
+
+    // Clean up
+    current_thread = t2;
+    rw_runlock(&rw);
+}
+
 static void test_rwlock_non_owner_panics(void) {
     rwlock_t rw;
     thread_t *owner;
@@ -141,52 +185,95 @@ static void test_rwlock_non_owner_panics(void) {
     assert(strstr(last_panic, "non-owner") != NULL);
 }
 
-static void test_rwlock_wowned(void) {
+static void test_rwlock_recursive_wlock_panics(void) {
     rwlock_t rw;
-    thread_t *owner;
+    thread_t *me;
+
+    reset_env();
+    me = init_thread(0, 1);
+    current_thread = me;
+
+    rwlock_init(&rw, "recursive");
+    rw_wlock(&rw);
+    assert(rw.writer == 1);
+    assert(rw.owner == me);
+
+    if (setjmp(panic_jmp) == 0) {
+        rw_wlock(&rw);
+        assert(!"expected panic");
+    }
+
+    assert(last_panic != NULL);
+    assert(strstr(last_panic, "recursive") != NULL);
+}
+
+static rwlock_t *yield_rw;
+static void yield_clear_writer(void) {
+    yield_rw->writer = 0;
+    yield_rw->owner = NULL;
+}
+
+static void test_rwlock_wlock_blocks_on_writer(void) {
+    rwlock_t rw;
+    thread_t *me;
     thread_t *other;
 
     reset_env();
-    owner = init_thread(0, 1);
+    me = init_thread(0, 1);
     other = init_thread(1, 2);
+    current_thread = me;
 
-    rwlock_init(&rw, "wowned");
+    rwlock_init(&rw, "block_writer");
 
-    // Initially not owned
-    current_thread = owner;
-    assert(!rw_wowned(&rw));
+    // Simulate another thread holding the lock
+    rw.writer = 1;
+    rw.owner = other;
 
-    // Writer acquires lock, owned by writer
-    assert(rw_try_wlock(&rw));
-    assert(rw_wowned(&rw));
+    yield_rw = &rw;
+    yield_callback = yield_clear_writer;
 
-    // Another thread checks, should not be owned by it
-    current_thread = other;
-    assert(!rw_wowned(&rw));
+    rw_wlock(&rw);
 
-    // Owner releases lock, no longer owned
-    current_thread = owner;
-    rw_wunlock(&rw);
-    assert(!rw_wowned(&rw));
+    assert(rw.writer == 1);
+    assert(rw.owner == me);
+    assert(rw.waiting_writers == 0);
+}
 
-    // Reader acquires lock, not owned by writer
-    assert(rw_try_rlock(&rw));
-    assert(!rw_wowned(&rw));
+static void yield_clear_readers(void) {
+    yield_rw->readers = 0;
+}
 
-    // Another thread checks while reader holds it, still not owned by writer
-    current_thread = other;
-    assert(!rw_wowned(&rw));
+static void test_rwlock_wlock_blocks_on_reader(void) {
+    rwlock_t rw;
+    thread_t *me;
 
-    current_thread = owner;
-    rw_runlock(&rw);
-    assert(!rw_wowned(&rw));
+    reset_env();
+    me = init_thread(0, 1);
+    current_thread = me;
+
+    rwlock_init(&rw, "block_reader");
+
+    // Simulate readers holding the lock
+    rw.readers = 2;
+
+    yield_rw = &rw;
+    yield_callback = yield_clear_readers;
+
+    rw_wlock(&rw);
+
+    assert(rw.writer == 1);
+    assert(rw.owner == me);
+    assert(rw.readers == 0);
+    assert(rw.waiting_writers == 0);
 }
 
 int main(void) {
     test_rwlock_reader_and_writer_paths();
     test_rwlock_writer_preference_and_reader_wakeup();
     test_rwlock_non_owner_panics();
-    test_rwlock_wowned();
+    test_rwlock_recursive_wlock_panics();
+    test_rwlock_wlock_blocks_on_writer();
+    test_rwlock_wlock_blocks_on_reader();
     puts("host_test_rwlock: PASS");
     return 0;
 }
