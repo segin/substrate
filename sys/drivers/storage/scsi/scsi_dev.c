@@ -237,7 +237,7 @@ int scsi_dev_attach(scsi_device_t *scsi_dev) {
     snprintf(sbd->blkdev.name, sizeof(sbd->blkdev.name), "scsi%u", sbd->dev_num);
     
     /* Set sector size based on device type */
-    if (scsi_dev->type == SCSI_TYPE_ROM || scsi_dev->type == SCSI_TYPE_OPTICAL) {
+    if (scsi_dev->type == SCSI_TYPE_ROM) {
         sbd->blkdev.sector_size = CD_SECTOR_SIZE;
     } else {
         sbd->blkdev.sector_size = scsi_dev->sector_size ? scsi_dev->sector_size : 512;

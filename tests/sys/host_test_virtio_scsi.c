@@ -319,6 +319,7 @@ static void test_execute_builds_dma_descriptor_chain(void) {
     assert(vscsi_dev.req_queue.desc[1].addr == (uint32_t)(uintptr_t)read_data_buf);
     assert((vscsi_dev.req_queue.desc[1].flags & VRING_DESC_F_WRITE) != 0);
     assert((vscsi_dev.req_queue.desc[2].flags & VRING_DESC_F_WRITE) != 0);
+    assert(vscsi_dev.req_queue.busy == 0);
 }
 
 static void test_execute_marks_write_payload_read_only_to_device(void) {
@@ -345,6 +346,7 @@ static void test_execute_marks_write_payload_read_only_to_device(void) {
 
     assert(vscsi_execute(&vscsi_dev.link, &req) == 0);
     assert((vscsi_dev.req_queue.desc[1].flags & VRING_DESC_F_WRITE) == 0);
+    assert(vscsi_dev.req_queue.busy == 0);
 }
 
 static void test_event_buffers_rescan_and_requeue(void) {
@@ -437,6 +439,7 @@ static void test_control_queue_handles_tmf_and_subscriptions(void) {
     assert((last_ctrl_event_requested & VIRTIO_SCSI_EVT_ASYNC_NOTIFY) != 0);
     assert(vscsi_dev.supported_events == mock_ctrl_event_actual);
     assert(vscsi_dev.subscribed_events == mock_ctrl_event_actual);
+    assert(vscsi_dev.ctrl_queue.busy == 0);
 
     memset(&sdev, 0, sizeof(sdev));
     sdev.target = 4;
@@ -446,6 +449,7 @@ static void test_control_queue_handles_tmf_and_subscriptions(void) {
     assert(last_notified_queue == 0);
     assert(last_ctrl_type == VIRTIO_SCSI_T_TMF);
     assert(last_ctrl_subtype == VIRTIO_SCSI_T_TMF_LOGICAL_UNIT_RESET);
+    assert(vscsi_dev.ctrl_queue.busy == 0);
 }
 
 int main(void) {

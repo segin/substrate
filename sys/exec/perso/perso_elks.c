@@ -1138,7 +1138,7 @@ static int elks_sys_read(uint32_t fd, uint32_t buf_off, uint32_t count,
         kfree(kmem, ELKS_KMEM_IMAGE_CAP);
         return (int)to_copy;
     }
-    return sys_read((int)fd, (char *)(uintptr_t)linear, (int)count);
+    return sys_read((int)fd, (char *)(uintptr_t)linear, (size_t)count);
 }
 
 static int elks_sys_write(uint32_t fd, uint32_t buf_off, uint32_t count,
@@ -1150,7 +1150,7 @@ static int elks_sys_write(uint32_t fd, uint32_t buf_off, uint32_t count,
     if (elks_ds_pointer(buf_off, &linear) != 0) {
         return -EFAULT;
     }
-    return sys_write((int)fd, (const char *)(uintptr_t)linear, (int)count);
+    return sys_write((int)fd, (const char *)(uintptr_t)linear, (size_t)count);
 }
 
 static int elks_sys_open(uint32_t path_off, uint32_t flags, uint32_t mode,

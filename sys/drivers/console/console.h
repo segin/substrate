@@ -17,6 +17,7 @@ typedef struct console_backend {
     void (*clear)(void);
     struct console_backend *next;
     void (*set_termios)(struct termios *t);
+    int (*get_terminal_size)(int *cols, int *rows);
 } console_backend_t;
 
 // API
@@ -29,6 +30,7 @@ void geom_bsd_init(void);
 void geom_gpt_init(void);
 
 void console_register(console_backend_t *backend);
+int console_get_terminal_size(int *cols, int *rows);
 void console_set_tty(struct tty *tty);
 void console_write(const char *data, size_t len);
 int console_read(char *data, size_t len);
