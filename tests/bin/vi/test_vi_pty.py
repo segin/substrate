@@ -1544,6 +1544,18 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "alpha\nbeta\ngamma\n",
+        [b"j", b"r", b"Z"],
+        final_keys=b":wq\r",
+    )
+    require(exit_code == 0, f"text-change redraw vi exited with status {exit_code}")
+    require(decoded.count("\x1b[?25l\x1b[H") >= 2,
+            "text-changing edit did not trigger a body redraw")
+    require(saved == "alpha\nZeta\ngamma\n",
+            f"unexpected text-change redraw buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "redraw me\nsecond line\n",
         [b"j", b"\x0c"],
         final_keys=b":q\r",
