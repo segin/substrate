@@ -122,6 +122,58 @@ static void test_semaphore_post_wakes_waiter_path(void) {
     assert(wake_one_calls == 1);
 }
 
+static void test_mutex_untrack_owner_scenarios(void) {
+    mutex_t m1, m2, m3, m_not_in_list;
+    thread_t *owner;
+
+    reset_env();
+    owner = init_thread(0, 1);
+
+    // Test null parameters (should not crash)
+    mutex_untrack_owner(NULL, owner);
+    mutex_untrack_owner(&m1, NULL);
+    mutex_untrack_owner(NULL, NULL);
+
+    // Setup: link them manually
+    // m1 -> m2 -> m3 -> NULL
+    owner->held_mutexes = &m1;
+    m1.owned_next = &m2;
+    m2.owned_next = &m3;
+    m3.owned_next = NULL;
+
+    // 1. Remove from middle (m2)
+    mutex_untrack_owner(&m2, owner);
+    assert(owner->held_mutexes == &m1);
+    assert(m1.owned_next == &m3);
+    assert(m2.owned_next == NULL);
+
+    // 2. Remove from end (m3)
+    mutex_untrack_owner(&m3, owner);
+    assert(owner->held_mutexes == &m1);
+    assert(m1.owned_next == NULL);
+    assert(m3.owned_next == NULL);
+
+    // Reset list to m1 -> m2 -> NULL
+    owner->held_mutexes = &m1;
+    m1.owned_next = &m2;
+    m2.owned_next = NULL;
+
+    // 3. Remove from beginning (m1)
+    mutex_untrack_owner(&m1, owner);
+    assert(owner->held_mutexes == &m2);
+    assert(m1.owned_next == NULL);
+
+    // 4. Try removing mutex not in list
+    mutex_untrack_owner(&m_not_in_list, owner);
+    assert(owner->held_mutexes == &m2); // Should remain unchanged
+    assert(m2.owned_next == NULL);
+
+    // 5. Remove the last remaining mutex
+    mutex_untrack_owner(&m2, owner);
+    assert(owner->held_mutexes == NULL);
+    assert(m2.owned_next == NULL);
+}
+
 static void test_mutex_force_release_wakes_waiter(void) {
     mutex_t m;
     thread_t *owner;
@@ -146,12 +198,48 @@ static void test_mutex_force_release_wakes_waiter(void) {
     assert(wake_one_calls == 1);
 }
 
+static void test_mutex_track_owner_basic(void) {
+    mutex_t m1, m2;
+    thread_t *owner;
+
+    reset_env();
+    owner = init_thread(0, 1);
+
+    mutex_init(&m1, "m1");
+    mutex_init(&m2, "m2");
+
+    // Test null checks
+    mutex_track_owner(NULL, owner);
+    mutex_track_owner(&m1, NULL);
+    assert(owner->held_mutexes == NULL);
+
+    // Test single track
+    mutex_track_owner(&m1, owner);
+    assert(owner->held_mutexes == &m1);
+    assert(m1.owned_next == NULL);
+
+    // Test multiple track
+    mutex_track_owner(&m2, owner);
+    assert(owner->held_mutexes == &m2);
+    assert(m2.owned_next == &m1);
+    assert(m1.owned_next == NULL);
+
+    // Test untrack (clean up)
+    mutex_untrack_owner(&m1, owner);
+    assert(owner->held_mutexes == &m2);
+    assert(m2.owned_next == NULL);
+
+    mutex_untrack_owner(&m2, owner);
+    assert(owner->held_mutexes == NULL);
+}
+
 int main(void) {
     test_mutex_unlock_by_non_owner_panics();
     test_mutex_recursive_lock_panics();
     test_semaphore_negative_init_panics();
     test_semaphore_post_wakes_waiter_path();
     test_mutex_force_release_wakes_waiter();
+    test_mutex_untrack_owner_scenarios();
     puts("host_test_sync_guards: PASS");
     return 0;
 }

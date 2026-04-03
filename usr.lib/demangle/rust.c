@@ -65,9 +65,11 @@ static int rust_parse_decimal(rust_parser_t *p, size_t *out);
 static int rust_parse_base62(rust_parser_t *p, size_t *out);
 static int rust_parse_optional_disambiguator(rust_parser_t *p, int *present, size_t *value);
 static int rust_ident_contains(const char *s, size_t len, const char *needle);
+static int rust_append_unicode_identifier(rust_parser_t *p, const char *bytes, size_t len);
 static int rust_parse_v0_identifier(rust_parser_t *p);
 static int rust_parse_v0_type(rust_parser_t *p);
 static int rust_parse_v0_const(rust_parser_t *p);
+static int rust_parse_v0_const_int(rust_parser_t *p, char type_tag);
 static int rust_parse_v0_lifetime(rust_parser_t *p, int display);
 static int rust_parse_v0_dyn_trait(rust_parser_t *p);
 static int rust_parse_v0_generic_arg(rust_parser_t *p);
@@ -75,9 +77,11 @@ static int rust_parse_v0_path(rust_parser_t *p);
 
 static int rust_parse_v0_symbol(rust_parser_t *p);
 static char *rust_demangle_v0(const char *mangled, int options);
+static int rust_legacy_process_component(const char *part, size_t len, int is_first, rust_buf_t *out);
 static char *rust_demangle_legacy(const char *mangled, int options);
 static int rust_parse_decimal_span(const char **cur, size_t *out);
 static int rust_legacy_is_hash_component(const char *s, size_t len);
+static int rust_legacy_decode_token(const char *tok, size_t tok_len, rust_buf_t *out);
 static int rust_legacy_decode_component(const char *s, size_t len, rust_buf_t *out);
 static int rust_has_n_bytes(const char *s, size_t n);
 static int rust_utf8_append_codepoint(rust_buf_t *buf, uint32_t cp);
@@ -532,6 +536,27 @@ rust_puny_digit(char ch)
     return 0xFFFFFFFFu;
 }
 
+static int
+rust_puny_insert(uint32_t **cps, size_t *cp_count, size_t *cp_cap, size_t ins, uint32_t val)
+{
+    if (*cp_count == *cp_cap) {
+        size_t next_cap = (*cp_cap == 0u) ? 16u : *cp_cap * 2u;
+        uint32_t *next = (uint32_t *)realloc(*cps, next_cap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        *cps = next;
+        *cp_cap = next_cap;
+    }
+
+    if (ins < *cp_count) {
+        memmove(&(*cps)[ins + 1u], &(*cps)[ins], (*cp_count - ins) * sizeof(**cps));
+    }
+    (*cps)[ins] = val;
+    (*cp_count)++;
+    return 0;
+}
+
 static unsigned
 rust_puny_adapt(unsigned delta, unsigned numpoints, int first_time)
 {
@@ -583,17 +608,10 @@ rust_puny_decode(const char *in, size_t in_len, rust_buf_t *out, int *non_ascii)
             continue;
         }
         cp = (uint32_t)(unsigned char)in[idx];
-        if (cp_count == cp_cap) {
-            size_t next_cap = (cp_cap == 0u) ? 16u : cp_cap * 2u;
-            uint32_t *next = (uint32_t *)realloc(cps, next_cap * sizeof(*next));
-            if (next == NULL) {
-                free(cps);
-                return -1;
-            }
-            cps = next;
-            cp_cap = next_cap;
+        if (rust_puny_insert(&cps, &cp_count, &cp_cap, cp_count, cp) != 0) {
+            free(cps);
+            return -1;
         }
-        cps[cp_count++] = cp;
     }
 
     n = 128u;
@@ -661,20 +679,10 @@ rust_puny_decode(const char *in, size_t in_len, rust_buf_t *out, int *non_ascii)
         ins = i % (unsigned)(cp_count + 1u);
         i = (unsigned)ins;
 
-        if (cp_count == cp_cap) {
-            size_t next_cap = (cp_cap == 0u) ? 16u : cp_cap * 2u;
-            uint32_t *next = (uint32_t *)realloc(cps, next_cap * sizeof(*next));
-            if (next == NULL) {
-                free(cps);
-                return -1;
-            }
-            cps = next;
-            cp_cap = next_cap;
+        if (rust_puny_insert(&cps, &cp_count, &cp_cap, ins, n) != 0) {
+            free(cps);
+            return -1;
         }
-
-        memmove(&cps[ins + 1u], &cps[ins], (cp_count - ins) * sizeof(*cps));
-        cps[ins] = n;
-        cp_count++;
         i++;
     }
 
@@ -689,6 +697,35 @@ rust_puny_decode(const char *in, size_t in_len, rust_buf_t *out, int *non_ascii)
     }
 
     free(cps);
+    return 0;
+}
+
+static int
+rust_append_unicode_identifier(rust_parser_t *p, const char *bytes, size_t len)
+{
+    rust_buf_t decoded;
+    int non_ascii;
+
+    memset(&decoded, 0, sizeof(decoded));
+    if (rust_puny_decode(bytes, len, &decoded, &non_ascii) != 0) {
+        rust_buf_destroy(&decoded);
+        return -1;
+    }
+
+    if (non_ascii && rust_buf_appendc(&p->out, '{') != 0) {
+        rust_buf_destroy(&decoded);
+        return -1;
+    }
+    if (decoded.len > 0u && rust_buf_append(&p->out, decoded.data, decoded.len) != 0) {
+        rust_buf_destroy(&decoded);
+        return -1;
+    }
+    if (non_ascii && rust_buf_appendc(&p->out, '}') != 0) {
+        rust_buf_destroy(&decoded);
+        return -1;
+    }
+    rust_buf_destroy(&decoded);
+
     return 0;
 }
 
@@ -729,28 +766,9 @@ rust_parse_v0_identifier(rust_parser_t *p)
     }
 
     if (is_unicode) {
-        rust_buf_t decoded;
-        int non_ascii;
-
-        memset(&decoded, 0, sizeof(decoded));
-        if (rust_puny_decode(bytes, len, &decoded, &non_ascii) != 0) {
-            rust_buf_destroy(&decoded);
+        if (rust_append_unicode_identifier(p, bytes, len) != 0) {
             return -1;
         }
-
-        if (non_ascii && rust_buf_appendc(&p->out, '{') != 0) {
-            rust_buf_destroy(&decoded);
-            return -1;
-        }
-        if (decoded.len > 0u && rust_buf_append(&p->out, decoded.data, decoded.len) != 0) {
-            rust_buf_destroy(&decoded);
-            return -1;
-        }
-        if (non_ascii && rust_buf_appendc(&p->out, '}') != 0) {
-            rust_buf_destroy(&decoded);
-            return -1;
-        }
-        rust_buf_destroy(&decoded);
     } else if (rust_buf_append(&p->out, bytes, len) != 0) {
         return -1;
     }
@@ -862,8 +880,18 @@ rust_parse_v0_const(rust_parser_t *p)
         p->cur++;
     }
 
-    if (!is_hex_char(p->cur[0])) {
+    if (rust_parse_v0_const_int(p, type_tag) != 0) {
         rust_mark_restore(p, &m);
+        return -1;
+    }
+
+    return 0;
+}
+
+static int
+rust_parse_v0_const_int(rust_parser_t *p, char type_tag)
+{
+    if (!is_hex_char(p->cur[0])) {
         return -1;
     }
 
@@ -1573,6 +1601,72 @@ rust_legacy_is_hash_component(const char *s, size_t len)
 }
 
 static int
+rust_legacy_decode_token(const char *tok, size_t tok_len, rust_buf_t *out)
+{
+    if (tok_len == 2u && memcmp(tok, "LT", 2u) == 0) {
+        if (rust_buf_appendc(out, '<') != 0) return -1;
+    } else if (tok_len == 2u && memcmp(tok, "GT", 2u) == 0) {
+        if (rust_buf_appendc(out, '>') != 0) return -1;
+    } else if (tok_len == 2u && memcmp(tok, "RF", 2u) == 0) {
+        if (rust_buf_appendc(out, '&') != 0) return -1;
+    } else if (tok_len == 2u && memcmp(tok, "LP", 2u) == 0) {
+        if (rust_buf_appendc(out, '(') != 0) return -1;
+    } else if (tok_len == 2u && memcmp(tok, "RP", 2u) == 0) {
+        if (rust_buf_appendc(out, ')') != 0) return -1;
+    } else if (tok_len == 1u && memcmp(tok, "C", 1u) == 0) {
+        if (rust_buf_appendc(out, ',') != 0) return -1;
+    } else if (tok_len == 2u && memcmp(tok, "SP", 2u) == 0) {
+        if (rust_buf_appendc(out, '@') != 0) return -1;
+    } else if (tok_len == 2u && memcmp(tok, "BP", 2u) == 0) {
+        if (rust_buf_appendc(out, '*') != 0) return -1;
+    } else if (tok_len == 3u && memcmp(tok, "u20", 3u) == 0) {
+        if (rust_buf_appendc(out, ' ') != 0) return -1;
+    } else if (tok_len == 3u && memcmp(tok, "u27", 3u) == 0) {
+        if (rust_buf_appendc(out, '\'') != 0) return -1;
+    } else if (tok_len == 3u && memcmp(tok, "u5b", 3u) == 0) {
+        if (rust_buf_appendc(out, '[') != 0) return -1;
+    } else if (tok_len == 3u && memcmp(tok, "u5d", 3u) == 0) {
+        if (rust_buf_appendc(out, ']') != 0) return -1;
+    } else if (tok_len == 3u && memcmp(tok, "u7b", 3u) == 0) {
+        if (rust_buf_appendc(out, '{') != 0) return -1;
+    } else if (tok_len == 3u && memcmp(tok, "u7d", 3u) == 0) {
+        if (rust_buf_appendc(out, '}') != 0) return -1;
+    } else if (tok_len == 3u && memcmp(tok, "u3b", 3u) == 0) {
+        if (rust_buf_appendc(out, ';') != 0) return -1;
+    } else if (tok_len == 3u && memcmp(tok, "u7e", 3u) == 0) {
+        if (rust_buf_appendc(out, '~') != 0) return -1;
+    } else if (tok_len >= 2u && tok[0] == 'u') {
+        size_t k;
+        unsigned long cp = 0ul;
+
+        for (k = 1u; k < tok_len; k++) {
+            unsigned v;
+            if (!is_hex_char(tok[k])) {
+                return -1;
+            }
+            if (tok[k] >= '0' && tok[k] <= '9') {
+                v = (unsigned)(tok[k] - '0');
+            } else if (tok[k] >= 'a' && tok[k] <= 'f') {
+                v = 10u + (unsigned)(tok[k] - 'a');
+            } else {
+                v = 10u + (unsigned)(tok[k] - 'A');
+            }
+            if (cp > (ULONG_MAX - v) / 16ul) {
+                return -1;
+            }
+            cp = cp * 16ul + (unsigned long)v;
+        }
+        if (rust_utf8_append_codepoint(out, (uint32_t)cp) != 0) {
+            return -1;
+        }
+    } else {
+        return -1;
+    }
+
+    return 0;
+}
+
+static int
 rust_legacy_decode_component(const char *s, size_t len, rust_buf_t *out)
 {
     size_t i;
@@ -1603,63 +1697,7 @@ rust_legacy_decode_component(const char *s, size_t len, rust_buf_t *out)
                 const char *tok = s + i + 1u;
                 size_t tok_len = j - i - 1u;
 
-                if (tok_len == 2u && memcmp(tok, "LT", 2u) == 0) {
-                    if (rust_buf_appendc(out, '<') != 0) return -1;
-                } else if (tok_len == 2u && memcmp(tok, "GT", 2u) == 0) {
-                    if (rust_buf_appendc(out, '>') != 0) return -1;
-                } else if (tok_len == 2u && memcmp(tok, "RF", 2u) == 0) {
-                    if (rust_buf_appendc(out, '&') != 0) return -1;
-                } else if (tok_len == 2u && memcmp(tok, "LP", 2u) == 0) {
-                    if (rust_buf_appendc(out, '(') != 0) return -1;
-                } else if (tok_len == 2u && memcmp(tok, "RP", 2u) == 0) {
-                    if (rust_buf_appendc(out, ')') != 0) return -1;
-                } else if (tok_len == 1u && memcmp(tok, "C", 1u) == 0) {
-                    if (rust_buf_appendc(out, ',') != 0) return -1;
-                } else if (tok_len == 2u && memcmp(tok, "SP", 2u) == 0) {
-                    if (rust_buf_appendc(out, '@') != 0) return -1;
-                } else if (tok_len == 2u && memcmp(tok, "BP", 2u) == 0) {
-                    if (rust_buf_appendc(out, '*') != 0) return -1;
-                } else if (tok_len == 3u && memcmp(tok, "u20", 3u) == 0) {
-                    if (rust_buf_appendc(out, ' ') != 0) return -1;
-                } else if (tok_len == 3u && memcmp(tok, "u27", 3u) == 0) {
-                    if (rust_buf_appendc(out, '\'') != 0) return -1;
-                } else if (tok_len == 3u && memcmp(tok, "u5b", 3u) == 0) {
-                    if (rust_buf_appendc(out, '[') != 0) return -1;
-                } else if (tok_len == 3u && memcmp(tok, "u5d", 3u) == 0) {
-                    if (rust_buf_appendc(out, ']') != 0) return -1;
-                } else if (tok_len == 3u && memcmp(tok, "u7b", 3u) == 0) {
-                    if (rust_buf_appendc(out, '{') != 0) return -1;
-                } else if (tok_len == 3u && memcmp(tok, "u7d", 3u) == 0) {
-                    if (rust_buf_appendc(out, '}') != 0) return -1;
-                } else if (tok_len == 3u && memcmp(tok, "u3b", 3u) == 0) {
-                    if (rust_buf_appendc(out, ';') != 0) return -1;
-                } else if (tok_len == 3u && memcmp(tok, "u7e", 3u) == 0) {
-                    if (rust_buf_appendc(out, '~') != 0) return -1;
-                } else if (tok_len >= 2u && tok[0] == 'u') {
-                    size_t k;
-                    unsigned long cp = 0ul;
-
-                    for (k = 1u; k < tok_len; k++) {
-                        unsigned v;
-                        if (!is_hex_char(tok[k])) {
-                            return -1;
-                        }
-                        if (tok[k] >= '0' && tok[k] <= '9') {
-                            v = (unsigned)(tok[k] - '0');
-                        } else if (tok[k] >= 'a' && tok[k] <= 'f') {
-                            v = 10u + (unsigned)(tok[k] - 'a');
-                        } else {
-                            v = 10u + (unsigned)(tok[k] - 'A');
-                        }
-                        if (cp > (ULONG_MAX - v) / 16ul) {
-                            return -1;
-                        }
-                        cp = cp * 16ul + (unsigned long)v;
-                    }
-                    if (rust_utf8_append_codepoint(out, (uint32_t)cp) != 0) {
-                        return -1;
-                    }
-                } else {
+                if (rust_legacy_decode_token(tok, tok_len, out) != 0) {
                     return -1;
                 }
             }
@@ -1668,6 +1706,18 @@ rust_legacy_decode_component(const char *s, size_t len, rust_buf_t *out)
         }
     }
 
+    return 0;
+}
+
+static int
+rust_legacy_process_component(const char *part, size_t len, int is_first, rust_buf_t *out)
+{
+    if (!is_first && rust_buf_append(out, "::", 2u) != 0) {
+        return -1;
+    }
+    if (rust_legacy_decode_component(part, len, out) != 0) {
+        return -1;
+    }
     return 0;
 }
 
@@ -1709,11 +1759,7 @@ rust_demangle_legacy(const char *mangled, int options)
             break;
         }
 
-        if (!first && rust_buf_append(&out, "::", 2u) != 0) {
-            rust_buf_destroy(&out);
-            return NULL;
-        }
-        if (rust_legacy_decode_component(part, len, &out) != 0) {
+        if (rust_legacy_process_component(part, len, first, &out) != 0) {
             rust_buf_destroy(&out);
             return NULL;
         }

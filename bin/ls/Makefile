@@ -10,7 +10,7 @@ include $(TOP)/Makefile.bin.inc
 USER_CFLAGS += -I$(TOP)/sys
 
 ifdef NATIVE_BUILD
-USER_CFLAGS += -DNATIVE_BUILD=1
+USER_CFLAGS += -DNATIVE_BUILD=1 -D_GNU_SOURCE
 endif
 
 TEST_CFLAGS = -O2 -g -Wall -Wextra -Werror -DTEST -DNATIVE_BUILD=1 -D_GNU_SOURCE -I.

@@ -11,10 +11,14 @@ static void usage(FILE *f, const char *progname) {
 }
 
 static void add_out_list(join_options_t *o, int file_idx, int field_idx) {
-    o->out_list = realloc(o->out_list, (o->out_list_len + 1) * sizeof(*o->out_list));
-    if (!o->out_list) {
-        perror("realloc out_list");
-        exit(1);
+    if (o->out_list_len >= o->out_list_cap) {
+        o->out_list_cap = (o->out_list_cap == 0) ? 8 : o->out_list_cap * 2;
+        void *tmp = realloc(o->out_list, o->out_list_cap * sizeof(*o->out_list));
+        if (!tmp) {
+            perror("realloc out_list");
+            exit(1);
+        }
+        o->out_list = tmp;
     }
     o->out_list[o->out_list_len].file_idx = file_idx;
     o->out_list[o->out_list_len].field_idx = field_idx;
@@ -46,6 +50,7 @@ static void parse_out_list(join_options_t *o, const char *spec_list) {
     free(list_copy);
 }
 
+int main(int argc, char *argv[]) {
     join_options_t o;
     memset(&o, 0, sizeof(o));
     o.join_field_1 = 1;

@@ -12,6 +12,14 @@ static int redraw_calls;
 
 void hw_text_redraw_active(void) { redraw_calls++; }
 void hw_text_refresh_statusline(void) { }
+int fb_console_active(void) { return 0; }
+void fb_console_redraw_active(void) { }
+void fb_console_refresh_statusline(void) { }
+int console_get_terminal_size(int *cols, int *rows) { (void)cols; (void)rows; return -1; }
+uint8_t keyboard_get_led_state(void) { return 0; }
+void keyboard_set_led_state(uint8_t state) { (void)state; }
+int64_t rtc_read_time(void) { return 1710460800; }
+time_t get_time(void) { return (time_t)1710460800; }
 int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
 void ansi_init(struct ansi_ctx *ctx) { memset(ctx, 0, sizeof(*ctx)); }
 void console_set_tty(struct tty *tty) { mock_console_tty = tty; }

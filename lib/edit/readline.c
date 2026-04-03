@@ -8,6 +8,7 @@
 #include <sys/select.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <errno.h>
 #include "el.h"
 
 /* Forward declarations for functions used before their definitions */
