@@ -12,6 +12,37 @@
 #define NVME_PCI_CLASS_STORAGE 0x01
 #define NVME_PCI_SUBCLASS_NVM  0x08
 #define NVME_PCI_PROGIF_NVME   0x02
+#define NVME_ADMIN_OP_IDENTIFY 0x06U
+#define NVME_IDENTIFY_CNS_NAMESPACE  0x00U
+#define NVME_IDENTIFY_CNS_CONTROLLER 0x01U
+#define NVME_CQE_STATUS_PHASE 0x0001U
+#define NVME_CQE_STATUS_MASK  0xFFFEU
+
+typedef struct nvme_admin_cmd {
+    uint8_t opcode;
+    uint8_t flags;
+    uint16_t cid;
+    uint32_t nsid;
+    uint64_t reserved;
+    uint64_t metadata;
+    uint64_t prp1;
+    uint64_t prp2;
+    uint32_t cdw10;
+    uint32_t cdw11;
+    uint32_t cdw12;
+    uint32_t cdw13;
+    uint32_t cdw14;
+    uint32_t cdw15;
+} nvme_admin_cmd_t;
+
+typedef struct nvme_cqe {
+    uint32_t result;
+    uint32_t reserved;
+    uint16_t sq_head;
+    uint16_t sq_id;
+    uint16_t cid;
+    uint16_t status;
+} nvme_cqe_t;
 
 static nvme_controller_t nvme_controllers[NVME_MAX_CONTROLLERS];
 static size_t nvme_controller_total;
@@ -19,6 +50,7 @@ static size_t nvme_controller_total;
 #ifdef HOST_TEST
 extern uint32_t nvme_test_mmio_read32(volatile uint8_t *mmio, uint32_t reg);
 extern void nvme_test_mmio_write32(volatile uint8_t *mmio, uint32_t reg, uint32_t value);
+extern void nvme_test_admin_kick(nvme_controller_t *ctrl, uint16_t sq_tail);
 #endif
 
 static uint64_t nvme_mmio_read64(volatile uint8_t *mmio, uint32_t reg) {
@@ -48,6 +80,102 @@ static void nvme_mmio_write32(volatile uint8_t *mmio, uint32_t reg, uint32_t val
 static void nvme_mmio_write64(volatile uint8_t *mmio, uint32_t reg, uint64_t value) {
     nvme_mmio_write32(mmio, reg, (uint32_t)(value & 0xFFFFFFFFU));
     nvme_mmio_write32(mmio, reg + 4U, (uint32_t)(value >> 32));
+}
+
+static uint32_t nvme_sq0_doorbell_reg(const nvme_controller_t *ctrl) {
+    (void)ctrl;
+    return NVME_REG_DBS;
+}
+
+static uint32_t nvme_cq0_doorbell_reg(const nvme_controller_t *ctrl) {
+    return NVME_REG_DBS + ctrl->cap.doorbell_stride_bytes;
+}
+
+static void nvme_copy_trim_string(char *dst, size_t dst_len,
+                                  const uint8_t *src, size_t src_len) {
+    size_t copy_len;
+
+    if (dst == NULL || dst_len == 0) {
+        return;
+    }
+
+    copy_len = src_len;
+    while (copy_len > 0 && src[copy_len - 1] == ' ') {
+        copy_len--;
+    }
+    if (copy_len >= dst_len) {
+        copy_len = dst_len - 1;
+    }
+    memcpy(dst, src, copy_len);
+    dst[copy_len] = '\0';
+}
+
+static uint32_t nvme_get_le32(const uint8_t *buf) {
+    return (uint32_t)buf[0] |
+           ((uint32_t)buf[1] << 8) |
+           ((uint32_t)buf[2] << 16) |
+           ((uint32_t)buf[3] << 24);
+}
+
+static uint64_t nvme_get_le64(const uint8_t *buf) {
+    return (uint64_t)nvme_get_le32(buf) |
+           ((uint64_t)nvme_get_le32(buf + 4) << 32);
+}
+
+static int nvme_admin_submit_sync(nvme_controller_t *ctrl,
+                                  nvme_admin_cmd_t *cmd,
+                                  nvme_cqe_t *cqe,
+                                  uint32_t timeout_ms) {
+    nvme_admin_cmd_t *sq;
+    nvme_cqe_t *cq;
+    uint16_t tail;
+    uint16_t head;
+    uint16_t cid;
+    uint64_t start_ms;
+
+    if (ctrl == NULL || cmd == NULL || cqe == NULL) {
+        return -1;
+    }
+    if (!ctrl->enabled || ctrl->admin_sq == NULL || ctrl->admin_cq == NULL) {
+        return -1;
+    }
+
+    sq = (nvme_admin_cmd_t *)ctrl->admin_sq;
+    cq = (nvme_cqe_t *)ctrl->admin_cq;
+    tail = ctrl->admin_sq_tail;
+    head = ctrl->admin_cq_head;
+    cid = ctrl->admin_cid_next++;
+
+    memset(&sq[tail], 0, sizeof(*sq));
+    cmd->cid = cid;
+    sq[tail] = *cmd;
+
+    ctrl->admin_sq_tail = (uint16_t)((tail + 1U) % ctrl->admin_sq_entries);
+    nvme_mmio_write32(ctrl->mmio, nvme_sq0_doorbell_reg(ctrl), ctrl->admin_sq_tail);
+#ifdef HOST_TEST
+    nvme_test_admin_kick(ctrl, tail);
+#endif
+
+    start_ms = (uint64_t)get_uptime_ms();
+    while ((cq[head].status & NVME_CQE_STATUS_PHASE) != ctrl->admin_cq_phase) {
+        if (((uint64_t)get_uptime_ms() - start_ms) >= timeout_ms) {
+            return -1;
+        }
+        __asm__ volatile("pause");
+    }
+
+    *cqe = cq[head];
+    if ((cqe->status & NVME_CQE_STATUS_MASK) != 0 || cqe->cid != cid) {
+        return -1;
+    }
+
+    memset(&cq[head], 0, sizeof(*cq));
+    ctrl->admin_cq_head = (uint16_t)((head + 1U) % ctrl->admin_cq_entries);
+    if (ctrl->admin_cq_head == 0) {
+        ctrl->admin_cq_phase ^= 1U;
+    }
+    nvme_mmio_write32(ctrl->mmio, nvme_cq0_doorbell_reg(ctrl), ctrl->admin_cq_head);
+    return 0;
 }
 
 int nvme_decode_cap(uint64_t cap_raw, nvme_capability_t *cap) {
@@ -239,6 +367,10 @@ int nvme_create_admin_queues(nvme_controller_t *ctrl) {
 
     asq = (uint64_t)ctrl->admin_sq_dma;
     acq = (uint64_t)ctrl->admin_cq_dma;
+    ctrl->admin_sq_tail = 0;
+    ctrl->admin_cq_head = 0;
+    ctrl->admin_cid_next = 0;
+    ctrl->admin_cq_phase = 1;
     nvme_mmio_write64(ctrl->mmio, NVME_REG_ASQ, asq);
     nvme_mmio_write64(ctrl->mmio, NVME_REG_ACQ, acq);
     return 0;
@@ -284,6 +416,124 @@ int nvme_enable_controller(nvme_controller_t *ctrl) {
     }
 
     ctrl->enabled = 1;
+    return 0;
+}
+
+int nvme_identify_controller(nvme_controller_t *ctrl) {
+    nvme_admin_cmd_t cmd;
+    nvme_cqe_t cqe;
+    uint8_t *id_data;
+    dma_addr_t id_dma;
+    uint32_t timeout_ms;
+    int rc;
+
+    if (ctrl == NULL || ctrl->mmio == NULL || !ctrl->present) {
+        return -1;
+    }
+
+    id_data = dma_alloc_coherent(4096U, &id_dma);
+    if (id_data == NULL) {
+        return -1;
+    }
+
+    memset(&cmd, 0, sizeof(cmd));
+    cmd.opcode = NVME_ADMIN_OP_IDENTIFY;
+    cmd.prp1 = (uint64_t)id_dma;
+    cmd.cdw10 = NVME_IDENTIFY_CNS_CONTROLLER;
+
+    timeout_ms = ctrl->cap.timeout_ms;
+    if (timeout_ms == 0) {
+        timeout_ms = 500;
+    }
+
+    rc = nvme_admin_submit_sync(ctrl, &cmd, &cqe, timeout_ms);
+    if (rc == 0) {
+        ctrl->controller_id = (uint16_t)(id_data[78] | ((uint16_t)id_data[79] << 8));
+        ctrl->namespace_total = nvme_get_le32(id_data + 516);
+        nvme_copy_trim_string(ctrl->serial, sizeof(ctrl->serial), id_data + 4, 20);
+        nvme_copy_trim_string(ctrl->model, sizeof(ctrl->model), id_data + 24, 40);
+        nvme_copy_trim_string(ctrl->firmware, sizeof(ctrl->firmware), id_data + 64, 8);
+        ctrl->identify_valid = 1;
+    }
+
+    dma_free_coherent(id_data, 4096U);
+    return rc;
+}
+
+int nvme_identify_namespaces(nvme_controller_t *ctrl) {
+    nvme_admin_cmd_t cmd;
+    nvme_cqe_t cqe;
+    uint8_t *id_data;
+    dma_addr_t id_dma;
+    uint32_t timeout_ms;
+    uint32_t nsid;
+    uint32_t found;
+
+    if (ctrl == NULL || ctrl->mmio == NULL || !ctrl->present || !ctrl->identify_valid) {
+        return -1;
+    }
+
+    id_data = dma_alloc_coherent(4096U, &id_dma);
+    if (id_data == NULL) {
+        return -1;
+    }
+
+    timeout_ms = ctrl->cap.timeout_ms;
+    if (timeout_ms == 0) {
+        timeout_ms = 500;
+    }
+
+    memset(ctrl->namespaces, 0, sizeof(ctrl->namespaces));
+    ctrl->namespace_count = 0;
+    found = 0;
+    for (nsid = 1; nsid <= ctrl->namespace_total; nsid++) {
+        uint64_t nsze;
+        uint8_t flbas;
+        uint8_t lbaf_index;
+        uint8_t lba_shift;
+        uint32_t block_size;
+
+        memset(id_data, 0, 4096U);
+        memset(&cmd, 0, sizeof(cmd));
+        cmd.opcode = NVME_ADMIN_OP_IDENTIFY;
+        cmd.nsid = nsid;
+        cmd.prp1 = (uint64_t)id_dma;
+        cmd.cdw10 = NVME_IDENTIFY_CNS_NAMESPACE;
+
+        if (nvme_admin_submit_sync(ctrl, &cmd, &cqe, timeout_ms) < 0) {
+            dma_free_coherent(id_data, 4096U);
+            return -1;
+        }
+
+        nsze = nvme_get_le64(id_data + 0);
+        if (nsze == 0) {
+            continue;
+        }
+        if (found >= NVME_MAX_NAMESPACES) {
+            break;
+        }
+
+        flbas = id_data[26];
+        lbaf_index = (uint8_t)(flbas & 0x0FU);
+        lba_shift = id_data[128 + (lbaf_index * 16U) + 2U];
+        if (lba_shift >= 32U) {
+            block_size = 0;
+        } else {
+            block_size = 1U << lba_shift;
+        }
+
+        ctrl->namespaces[found].nsid = nsid;
+        ctrl->namespaces[found].nsze = nsze;
+        ctrl->namespaces[found].ncap = nvme_get_le64(id_data + 8);
+        ctrl->namespaces[found].nuse = nvme_get_le64(id_data + 16);
+        ctrl->namespaces[found].lba_shift = lba_shift;
+        ctrl->namespaces[found].block_size = block_size;
+        ctrl->namespaces[found].valid = 1;
+        found++;
+    }
+
+    ctrl->namespace_count = found;
+    dma_free_coherent(id_data, 4096U);
     return 0;
 }
 

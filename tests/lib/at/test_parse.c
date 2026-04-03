@@ -44,7 +44,6 @@ int main() {
     test_parse("teatime", true);
     test_parse("tomorrow", true);
 
-    // Currently unsupported but should be (according to FIXME)
     test_parse("10:00", true);
     test_parse("22:00", true);
     test_parse("1000", true);

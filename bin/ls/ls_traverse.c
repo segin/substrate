@@ -38,89 +38,104 @@ typedef struct {
 } visit_key_t;
 
 typedef struct {
-    visit_key_t *keys;
+    visit_key_t *items;
     size_t len;
     size_t cap;
+} visit_set_t;
+
+typedef struct {
+    const ls_config_t *config;
+    visit_set_t visited;
     int exit_code;
 } ls_runtime_t;
 
-static int needs_metadata_stat(const ls_config_t *config) {
-    if (config->long_fmt || config->show_blocks || config->inode) return 1;
-    if (config->sort_size || config->sort_time || config->dirs_first) return 1;
-    if (config->dereference || config->recursive || config->one_file_system) return 1;
-    if (config->classify || config->file_type || config->slash_dirs) return 1;
-    if (config->color != LS_COLOR_NEVER || config->list_xattr_names) return 1;
-    return 0;
-}
+typedef struct {
+    const char *path;
+    bool command_line_arg;
+    bool print_header;
+    dev_t root_dev;
+    bool root_dev_valid;
+} dir_list_ctx_t;
 
-static void file_info_clear(file_info_t *f) {
-    if (f == NULL) {
+static void file_info_clear(file_info_t *info) {
+    if (info == NULL) {
         return;
     }
-    free(f->name);
-    free(f->full_path);
-    free(f->link_target);
-    memset(f, 0, sizeof(*f));
+
+    free(info->name);
+    free(info->full_path);
+    free(info->link_target);
+    memset(info, 0, sizeof(*info));
+}
+
+static void file_vec_init(file_vec_t *vec) {
+    memset(vec, 0, sizeof(*vec));
 }
 
 static void file_vec_free(file_vec_t *vec) {
     size_t i;
+
     if (vec == NULL) {
         return;
     }
+
     for (i = 0; i < vec->len; i++) {
         file_info_clear(&vec->items[i]);
     }
+
     free(vec->items);
-    vec->items = NULL;
-    vec->len = 0;
-    vec->cap = 0;
+    memset(vec, 0, sizeof(*vec));
 }
 
 static int file_vec_push(file_vec_t *vec, const file_info_t *item) {
-    file_info_t *new_items;
-    size_t ncap;
+    file_info_t *grown;
+    size_t new_cap;
 
     if (vec->len == vec->cap) {
-        ncap = vec->cap == 0 ? 32 : vec->cap * 2;
-        new_items = (file_info_t *)realloc(vec->items, ncap * sizeof(file_info_t));
-        if (new_items == NULL) {
+        new_cap = (vec->cap == 0) ? 32 : vec->cap * 2;
+        grown = (file_info_t *)realloc(vec->items, new_cap * sizeof(*grown));
+        if (grown == NULL) {
             return -1;
         }
-        vec->items = new_items;
-        vec->cap = ncap;
+        vec->items = grown;
+        vec->cap = new_cap;
     }
 
     vec->items[vec->len++] = *item;
     return 0;
 }
 
+static void dir_vec_init(dir_vec_t *vec) {
+    memset(vec, 0, sizeof(*vec));
+}
+
 static void dir_vec_free(dir_vec_t *vec) {
     size_t i;
+
     if (vec == NULL) {
         return;
     }
+
     for (i = 0; i < vec->len; i++) {
         free(vec->items[i].path);
     }
+
     free(vec->items);
-    vec->items = NULL;
-    vec->len = 0;
-    vec->cap = 0;
+    memset(vec, 0, sizeof(*vec));
 }
 
 static int dir_vec_push(dir_vec_t *vec, const char *path, const struct stat *st) {
-    dir_operand_t *new_items;
-    size_t ncap;
+    dir_operand_t *grown;
+    size_t new_cap;
 
     if (vec->len == vec->cap) {
-        ncap = vec->cap == 0 ? 16 : vec->cap * 2;
-        new_items = (dir_operand_t *)realloc(vec->items, ncap * sizeof(dir_operand_t));
-        if (new_items == NULL) {
+        new_cap = (vec->cap == 0) ? 16 : vec->cap * 2;
+        grown = (dir_operand_t *)realloc(vec->items, new_cap * sizeof(*grown));
+        if (grown == NULL) {
             return -1;
         }
-        vec->items = new_items;
-        vec->cap = ncap;
+        vec->items = grown;
+        vec->cap = new_cap;
     }
 
     vec->items[vec->len].path = strdup(path);
@@ -132,64 +147,85 @@ static int dir_vec_push(dir_vec_t *vec, const char *path, const struct stat *st)
     return 0;
 }
 
+static void runtime_init(ls_runtime_t *rt, const ls_config_t *config) {
+    memset(rt, 0, sizeof(*rt));
+    rt->config = config;
+}
+
+static void runtime_free(ls_runtime_t *rt) {
+    free(rt->visited.items);
+    memset(rt, 0, sizeof(*rt));
+}
+
 static void set_exit_code(ls_runtime_t *rt, int code) {
     if (code > rt->exit_code) {
         rt->exit_code = code;
     }
 }
 
-static void warn_errno(ls_runtime_t *rt, const char *what, const char *path, int err, int serious) {
+static void warn_errno(ls_runtime_t *rt, const char *what, const char *path, int err, bool serious) {
     fprintf(stderr, "ls: %s '%s': %s\n", what, path, strerror(err));
     set_exit_code(rt, serious ? LS_EXIT_SERIOUS : LS_EXIT_MINOR);
 }
 
-static int visit_contains(const ls_runtime_t *rt, dev_t dev, ino_t ino) {
-    size_t i;
-    for (i = 0; i < rt->len; i++) {
-        if (rt->keys[i].dev == dev && rt->keys[i].ino == ino) {
-            return 1;
-        }
-    }
-    return 0;
+static bool needs_metadata_stat(const ls_config_t *config) {
+    if (config->long_fmt || config->show_blocks || config->inode) return true;
+    if (config->sort_size || config->sort_time || config->dirs_first) return true;
+    if (config->dereference || config->recursive || config->one_file_system) return true;
+    if (config->classify || config->file_type || config->slash_dirs) return true;
+    if (config->color != LS_COLOR_NEVER || config->list_xattr_names) return true;
+    return false;
 }
 
-static int visit_add(ls_runtime_t *rt, dev_t dev, ino_t ino) {
-    visit_key_t *new_keys;
-    size_t ncap;
+static bool visit_set_contains(const visit_set_t *set, dev_t dev, ino_t ino) {
+    size_t i;
 
-    if (visit_contains(rt, dev, ino)) {
+    for (i = 0; i < set->len; i++) {
+        if (set->items[i].dev == dev && set->items[i].ino == ino) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static int visit_set_add(visit_set_t *set, dev_t dev, ino_t ino) {
+    visit_key_t *grown;
+    size_t new_cap;
+
+    if (visit_set_contains(set, dev, ino)) {
         return 0;
     }
 
-    if (rt->len == rt->cap) {
-        ncap = rt->cap == 0 ? 32 : rt->cap * 2;
-        new_keys = (visit_key_t *)realloc(rt->keys, ncap * sizeof(visit_key_t));
-        if (new_keys == NULL) {
+    if (set->len == set->cap) {
+        new_cap = (set->cap == 0) ? 32 : set->cap * 2;
+        grown = (visit_key_t *)realloc(set->items, new_cap * sizeof(*grown));
+        if (grown == NULL) {
             return -1;
         }
-        rt->keys = new_keys;
-        rt->cap = ncap;
+        set->items = grown;
+        set->cap = new_cap;
     }
 
-    rt->keys[rt->len].dev = dev;
-    rt->keys[rt->len].ino = ino;
-    rt->len++;
+    set->items[set->len].dev = dev;
+    set->items[set->len].ino = ino;
+    set->len++;
     return 0;
 }
 
 static char *path_join(const char *dir, const char *name) {
-    size_t dl = strlen(dir);
-    size_t nl = strlen(name);
-    size_t need = dl + 1 + nl + 1;
+    size_t dir_len = strlen(dir);
+    size_t name_len = strlen(name);
+    size_t need = dir_len + 1 + name_len + 1;
     char *out = (char *)malloc(need);
 
     if (out == NULL) {
         return NULL;
     }
 
-    if (dl == 1 && dir[0] == '/') {
+    if (dir_len == 1 && dir[0] == '/') {
         snprintf(out, need, "/%s", name);
-    } else if (dl > 0 && dir[dl - 1] == '/') {
+    } else if (dir_len > 0 && dir[dir_len - 1] == '/') {
         snprintf(out, need, "%s%s", dir, name);
     } else {
         snprintf(out, need, "%s/%s", dir, name);
@@ -207,6 +243,7 @@ static char *readlink_dup(const char *path) {
     }
 
     for (;;) {
+        char *grown;
         ssize_t n = readlink(path, buf, cap - 1);
         if (n < 0) {
             free(buf);
@@ -216,58 +253,48 @@ static char *readlink_dup(const char *path) {
             buf[n] = '\0';
             return buf;
         }
+
         cap *= 2;
         if (cap > 65536) {
             free(buf);
             return NULL;
         }
-        {
-            char *nb = (char *)realloc(buf, cap);
-            if (nb == NULL) {
-                free(buf);
-                return NULL;
-            }
-            buf = nb;
+
+        grown = (char *)realloc(buf, cap);
+        if (grown == NULL) {
+            free(buf);
+            return NULL;
         }
+        buf = grown;
     }
 }
 
-static int match_pattern(const char *pattern, const char *name) {
+static bool match_pattern(const char *pattern, const char *name) {
     return pattern != NULL && fnmatch(pattern, name, 0) == 0;
 }
 
-static int should_include_name(const char *name, const ls_config_t *config) {
-    if (!config->all) {
-        if (name[0] == '.') {
-            if (!config->almost_all) {
-                return 0;
-            }
-            if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
-                return 0;
-            }
+static bool should_include_name(const char *name, const ls_config_t *config) {
+    if (!config->all && name[0] == '.') {
+        if (!config->almost_all) {
+            return false;
+        }
+        if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
+            return false;
         }
     }
 
     if (match_pattern(config->ignore_pattern, name)) {
-        return 0;
+        return false;
     }
 
     if (config->recursive && match_pattern(config->hide_pattern, name)) {
-        return 0;
+        return false;
     }
 
-    return 1;
+    return true;
 }
 
-static int collect_path_info(ls_runtime_t *rt,
-                             const char *display_name,
-                             const char *full_path,
-                             bool follow_symlink,
-                             bool serious_on_error,
-                             size_t index,
-                             file_info_t *out) {
-    struct stat lst;
-
+static int init_basic_info(file_info_t *out, const char *display_name, const char *full_path, size_t index) {
     memset(out, 0, sizeof(*out));
 
     out->name = strdup(display_name);
@@ -282,23 +309,48 @@ static int collect_path_info(ls_runtime_t *rt,
     }
 
     out->input_index = index;
+    return 0;
+}
+
+static int collect_name_only_info(const char *name, const char *full_path, size_t index, file_info_t *out) {
+    if (init_basic_info(out, name, full_path, index) != 0) {
+        return -1;
+    }
+
+    out->stat_ok = false;
+    out->st.st_mode = S_IFREG;
+    return 0;
+}
+
+static int collect_stat_info(ls_runtime_t *rt,
+                             const char *display_name,
+                             const char *full_path,
+                             bool follow_symlink,
+                             bool serious_on_error,
+                             size_t index,
+                             file_info_t *out) {
+    struct stat lst;
+
+    if (init_basic_info(out, display_name, full_path, index) != 0) {
+        return -1;
+    }
 
     if (lstat(full_path, &lst) != 0) {
-        warn_errno(rt, "cannot access", full_path, errno, serious_on_error ? 1 : 0);
+        warn_errno(rt, "cannot access", full_path, errno, serious_on_error);
         file_info_clear(out);
         return 1;
     }
 
+    out->st = lst;
+    out->stat_ok = true;
     out->display_as_symlink = S_ISLNK(lst.st_mode);
     if (out->display_as_symlink) {
         out->link_target = readlink_dup(full_path);
     }
 
-    out->st = lst;
-    out->stat_ok = true;
-
     if (follow_symlink && out->display_as_symlink) {
         struct stat st;
+
         if (stat(full_path, &st) == 0) {
             out->st = st;
             out->display_as_symlink = false;
@@ -309,7 +361,7 @@ static int collect_path_info(ls_runtime_t *rt,
             out->dangling_link = (errno == ENOENT);
             out->symlink_loop = (errno == ELOOP);
             if (errno == ELOOP) {
-                warn_errno(rt, "cannot dereference", full_path, errno, 0);
+                warn_errno(rt, "cannot dereference", full_path, errno, false);
             }
         }
     }
@@ -317,152 +369,150 @@ static int collect_path_info(ls_runtime_t *rt,
     return 0;
 }
 
-static int collect_name_only_info(const char *name, const char *full_path, size_t index, file_info_t *out) {
-    memset(out, 0, sizeof(*out));
-    out->name = strdup(name);
-    if (out->name == NULL) {
-        return -1;
+static int collect_entry(ls_runtime_t *rt,
+                         const char *display_name,
+                         const char *full_path,
+                         bool follow_symlink,
+                         bool serious_on_error,
+                         size_t index,
+                         bool want_stat,
+                         file_info_t *out) {
+    if (want_stat) {
+        return collect_stat_info(rt, display_name, full_path, follow_symlink, serious_on_error, index, out);
     }
-    out->full_path = strdup(full_path);
-    if (out->full_path == NULL) {
-        file_info_clear(out);
-        return -1;
-    }
-    out->input_index = index;
-    out->stat_ok = false;
-    out->st.st_mode = S_IFREG;
-    return 0;
+    return collect_name_only_info(display_name, full_path, index, out);
 }
 
-static int list_directory(ls_runtime_t *rt,
-                          const char *path,
-                          const ls_config_t *config,
-                          bool command_line_arg,
-                          bool print_header,
-                          dev_t root_dev,
-                          bool root_dev_valid);
+static int append_directory_entry(ls_runtime_t *rt,
+                                  file_vec_t *entries,
+                                  const char *dir_path,
+                                  const char *entry_name,
+                                  size_t index,
+                                  bool want_stat) {
+    file_info_t info;
+    char *full_path;
+    int rc;
 
-static int recurse_into_subdirs(ls_runtime_t *rt,
-                                const char *parent,
-                                file_vec_t *entries,
-                                const ls_config_t *config,
-                                dev_t root_dev,
-                                bool root_dev_valid) {
-    size_t i;
-
-    for (i = 0; i < entries->len; i++) {
-        file_info_t *f = &entries->items[i];
-
-        if (!S_ISDIR(f->st.st_mode)) {
-            continue;
-        }
-        if (strcmp(f->name, ".") == 0 || strcmp(f->name, "..") == 0) {
-            continue;
-        }
-
-        if (config->one_file_system && root_dev_valid && f->st.st_dev != root_dev) {
-            continue;
-        }
-
-        if (visit_contains(rt, f->st.st_dev, f->st.st_ino)) {
-            fprintf(stderr, "ls: skipping directory '%s': filesystem loop detected\n", f->full_path);
-            set_exit_code(rt, LS_EXIT_MINOR);
-            continue;
-        }
-
-        if (visit_add(rt, f->st.st_dev, f->st.st_ino) != 0) {
-            return -1;
-        }
-
-        (void)parent;
-        putchar('\n');
-        if (list_directory(rt, f->full_path, config, false, true, root_dev, root_dev_valid) != 0) {
-            return -1;
-        }
+    full_path = path_join(dir_path, entry_name);
+    if (full_path == NULL) {
+        return -1;
     }
 
-    return 0;
+    rc = collect_entry(rt,
+                       entry_name,
+                       full_path,
+                       rt->config->dereference,
+                       false,
+                       index,
+                       want_stat,
+                       &info);
+    free(full_path);
+
+    if (rc <= 0) {
+        if (rc == 0 && file_vec_push(entries, &info) != 0) {
+            file_info_clear(&info);
+            return -1;
+        }
+        return rc;
+    }
+
+    return 1;
 }
 
-static int list_directory(ls_runtime_t *rt,
-                          const char *path,
-                          const ls_config_t *config,
-                          bool command_line_arg,
-                          bool print_header,
-                          dev_t root_dev,
-                          bool root_dev_valid) {
+static int collect_directory_entries(ls_runtime_t *rt, const dir_list_ctx_t *ctx, file_vec_t *entries) {
     DIR *dir;
     struct dirent *ent;
-    file_vec_t entries;
-    size_t idx = 0;
-    int want_stat = needs_metadata_stat(config);
+    size_t index = 0;
+    bool want_stat = needs_metadata_stat(rt->config);
 
-    memset(&entries, 0, sizeof(entries));
-
-    dir = opendir(path);
+    dir = opendir(ctx->path);
     if (dir == NULL) {
-        warn_errno(rt, "cannot open directory", path, errno, command_line_arg ? 1 : 0);
+        warn_errno(rt, "cannot open directory", ctx->path, errno, ctx->command_line_arg);
         return 0;
     }
 
-    if (print_header) {
-        printf("%s:\n", path);
-    }
-
     while ((ent = readdir(dir)) != NULL) {
-        file_info_t fi;
-        char *full_path;
         int rc;
 
-        if (!should_include_name(ent->d_name, config)) {
+        if (!should_include_name(ent->d_name, rt->config)) {
             continue;
         }
 
-        full_path = path_join(path, ent->d_name);
-        if (full_path == NULL) {
-            closedir(dir);
-            file_vec_free(&entries);
-            return -1;
-        }
-
-        if (want_stat) {
-            rc = collect_path_info(rt,
-                                   ent->d_name,
-                                   full_path,
-                                   config->dereference,
-                                   false,
-                                   idx,
-                                   &fi);
-        } else {
-            rc = collect_name_only_info(ent->d_name, full_path, idx, &fi);
-        }
-        free(full_path);
+        rc = append_directory_entry(rt, entries, ctx->path, ent->d_name, index, want_stat);
         if (rc < 0) {
             closedir(dir);
-            file_vec_free(&entries);
             return -1;
         }
-        if (rc > 0) {
-            continue;
+        if (rc == 0) {
+            index++;
         }
-
-        if (file_vec_push(&entries, &fi) != 0) {
-            file_info_clear(&fi);
-            closedir(dir);
-            file_vec_free(&entries);
-            return -1;
-        }
-
-        idx++;
     }
 
     closedir(dir);
+    return 0;
+}
 
-    ls_sort_entries(entries.items, entries.len, config);
-    ls_print_list(path, entries.items, entries.len, config, true);
+static int list_directory(ls_runtime_t *rt, const dir_list_ctx_t *ctx);
 
-    if (config->recursive && !config->directory) {
-        if (recurse_into_subdirs(rt, path, &entries, config, root_dev, root_dev_valid) != 0) {
+static int recurse_into_subdirs(ls_runtime_t *rt, const dir_list_ctx_t *ctx, const file_vec_t *entries) {
+    size_t i;
+
+    for (i = 0; i < entries->len; i++) {
+        dir_list_ctx_t child;
+        const file_info_t *info = &entries->items[i];
+
+        if (!S_ISDIR(info->st.st_mode)) {
+            continue;
+        }
+        if (strcmp(info->name, ".") == 0 || strcmp(info->name, "..") == 0) {
+            continue;
+        }
+        if (rt->config->one_file_system && ctx->root_dev_valid && info->st.st_dev != ctx->root_dev) {
+            continue;
+        }
+        if (visit_set_contains(&rt->visited, info->st.st_dev, info->st.st_ino)) {
+            fprintf(stderr, "ls: skipping directory '%s': filesystem loop detected\n", info->full_path);
+            set_exit_code(rt, LS_EXIT_MINOR);
+            continue;
+        }
+        if (visit_set_add(&rt->visited, info->st.st_dev, info->st.st_ino) != 0) {
+            return -1;
+        }
+
+        putchar('\n');
+        child.path = info->full_path;
+        child.command_line_arg = false;
+        child.print_header = true;
+        child.root_dev = ctx->root_dev;
+        child.root_dev_valid = ctx->root_dev_valid;
+
+        if (list_directory(rt, &child) != 0) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+static int list_directory(ls_runtime_t *rt, const dir_list_ctx_t *ctx) {
+    file_vec_t entries;
+
+    file_vec_init(&entries);
+
+    if (collect_directory_entries(rt, ctx, &entries) != 0) {
+        file_vec_free(&entries);
+        return -1;
+    }
+
+    if (ctx->print_header) {
+        printf("%s:\n", ctx->path);
+    }
+
+    ls_sort_entries(entries.items, entries.len, rt->config);
+    ls_print_list(ctx->path, entries.items, entries.len, rt->config, true);
+
+    if (rt->config->recursive && !rt->config->directory) {
+        if (recurse_into_subdirs(rt, ctx, &entries) != 0) {
             file_vec_free(&entries);
             return -1;
         }
@@ -472,91 +522,128 @@ static int list_directory(ls_runtime_t *rt,
     return 0;
 }
 
+static int classify_operand(ls_runtime_t *rt,
+                            file_vec_t *files,
+                            dir_vec_t *dirs,
+                            const char *path,
+                            size_t input_index) {
+    file_info_t info;
+    bool follow_arg = rt->config->dereference || rt->config->dereference_args;
+    int rc;
+
+    rc = collect_entry(rt, path, path, follow_arg, true, input_index, true, &info);
+    if (rc != 0) {
+        if (rc < 0) {
+            set_exit_code(rt, LS_EXIT_SERIOUS);
+            return -1;
+        }
+        return 0;
+    }
+
+    if (S_ISDIR(info.st.st_mode) && !rt->config->directory) {
+        if (dir_vec_push(dirs, path, &info.st) != 0) {
+            file_info_clear(&info);
+            set_exit_code(rt, LS_EXIT_SERIOUS);
+            return -1;
+        }
+        file_info_clear(&info);
+        return 0;
+    }
+
+    if (file_vec_push(files, &info) != 0) {
+        file_info_clear(&info);
+        set_exit_code(rt, LS_EXIT_SERIOUS);
+        return -1;
+    }
+
+    return 0;
+}
+
+static int classify_operands(ls_runtime_t *rt, char **paths, int path_count, file_vec_t *files, dir_vec_t *dirs) {
+    size_t i;
+
+    for (i = 0; i < (size_t)path_count; i++) {
+        if (classify_operand(rt, files, dirs, paths[i], i) != 0) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+static int print_file_operands(ls_runtime_t *rt, file_vec_t *files) {
+    if (files->len == 0) {
+        return 0;
+    }
+
+    ls_sort_entries(files->items, files->len, rt->config);
+    ls_print_list(NULL, files->items, files->len, rt->config, false);
+    return 0;
+}
+
+static int print_directory_operands(ls_runtime_t *rt, const file_vec_t *files, const dir_vec_t *dirs) {
+    size_t i;
+
+    for (i = 0; i < dirs->len; i++) {
+        dir_list_ctx_t ctx;
+        bool print_header = (dirs->len > 1) || (files->len > 0) || rt->config->recursive;
+
+        if (i > 0 || (i == 0 && files->len > 0)) {
+            putchar('\n');
+        }
+
+        if (visit_set_add(&rt->visited, dirs->items[i].st.st_dev, dirs->items[i].st.st_ino) != 0) {
+            set_exit_code(rt, LS_EXIT_SERIOUS);
+            return -1;
+        }
+
+        ctx.path = dirs->items[i].path;
+        ctx.command_line_arg = true;
+        ctx.print_header = print_header;
+        ctx.root_dev = dirs->items[i].st.st_dev;
+        ctx.root_dev_valid = true;
+
+        if (list_directory(rt, &ctx) != 0) {
+            set_exit_code(rt, LS_EXIT_SERIOUS);
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
 int ls_run(const ls_config_t *config, char **paths, int path_count) {
     ls_runtime_t rt;
     file_vec_t files;
     dir_vec_t dirs;
-    size_t i;
-    const char *implicit[1] = {"."};
+    const char *implicit_paths[] = {"."};
+    int exit_code;
 
-    memset(&rt, 0, sizeof(rt));
-    memset(&files, 0, sizeof(files));
-    memset(&dirs, 0, sizeof(dirs));
+    runtime_init(&rt, config);
+    file_vec_init(&files);
+    dir_vec_init(&dirs);
 
     if (path_count == 0) {
-        paths = (char **)implicit;
+        paths = (char **)implicit_paths;
         path_count = 1;
     }
 
-    for (i = 0; i < (size_t)path_count; i++) {
-        file_info_t fi;
-        bool follow_arg = config->dereference || config->dereference_args;
-        int rc;
-
-        rc = collect_path_info(&rt,
-                               paths[i],
-                               paths[i],
-                               follow_arg,
-                               true,
-                               i,
-                               &fi);
-        if (rc < 0) {
-            set_exit_code(&rt, LS_EXIT_SERIOUS);
-            goto done;
-        }
-        if (rc > 0) {
-            continue;
-        }
-
-        if (S_ISDIR(fi.st.st_mode) && !config->directory) {
-            if (dir_vec_push(&dirs, paths[i], &fi.st) != 0) {
-                file_info_clear(&fi);
-                set_exit_code(&rt, LS_EXIT_SERIOUS);
-                goto done;
-            }
-            file_info_clear(&fi);
-        } else {
-            if (file_vec_push(&files, &fi) != 0) {
-                file_info_clear(&fi);
-                set_exit_code(&rt, LS_EXIT_SERIOUS);
-                goto done;
-            }
-        }
+    if (classify_operands(&rt, paths, path_count, &files, &dirs) != 0) {
+        goto done;
     }
 
-    if (files.len > 0) {
-        ls_sort_entries(files.items, files.len, config);
-        ls_print_list(NULL, files.items, files.len, config, false);
+    if (print_file_operands(&rt, &files) != 0) {
+        goto done;
     }
 
-    for (i = 0; i < dirs.len; i++) {
-        bool print_header = (dirs.len > 1) || (files.len > 0) || config->recursive;
-
-        if (i > 0 || (files.len > 0 && i == 0)) {
-            putchar('\n');
-        }
-
-        if (visit_add(&rt, dirs.items[i].st.st_dev, dirs.items[i].st.st_ino) != 0) {
-            set_exit_code(&rt, LS_EXIT_SERIOUS);
-            goto done;
-        }
-
-        if (list_directory(&rt,
-                           dirs.items[i].path,
-                           config,
-                           true,
-                           print_header,
-                           dirs.items[i].st.st_dev,
-                           true) != 0) {
-            set_exit_code(&rt, LS_EXIT_SERIOUS);
-            goto done;
-        }
+    if (print_directory_operands(&rt, &files, &dirs) != 0) {
+        goto done;
     }
 
 done:
-    free(rt.keys);
+    exit_code = rt.exit_code;
     file_vec_free(&files);
     dir_vec_free(&dirs);
-
-    return rt.exit_code;
+    runtime_free(&rt);
+    return exit_code;
 }
