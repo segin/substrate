@@ -1,48 +1,99 @@
-diff --git a/usr.lib/elfobj/tests/test_ensure_symbols_relocs.c b/usr.lib/elfobj/tests/test_ensure_symbols_relocs.c
-index c49fb1f..b07042d 100644
---- a/usr.lib/elfobj/tests/test_ensure_symbols_relocs.c
-+++ b/usr.lib/elfobj/tests/test_ensure_symbols_relocs.c
-@@ -19,16 +19,43 @@ int main(void) {
-     if (obj == NULL) {
-         fprintf(stderr, "FAIL: failed to create ELF obj\n");
-         return 1;
-     }
-
-+    // Test the first time (not loaded yet)
-+    if (obj->symrel_loaded != 0) {
-+        fprintf(stderr, "FAIL: expected obj->symrel_loaded to be 0 initially\n");
-+        elf_close(obj);
-+        return 1;
-+    }
-+
-     err = elf__ensure_symbols_relocs(obj);
-     if (err != ELF_OK) {
-         fprintf(stderr, "FAIL: expected ELF_OK for valid obj, got %d\n", err);
-         elf_close(obj);
-         return 1;
-     }
-
-+    if (obj->symrel_loaded != 1) {
-+        fprintf(stderr, "FAIL: expected obj->symrel_loaded to be 1 after first call\n");
-+        elf_close(obj);
-+        return 1;
-+    }
-+
-+    // Call it a second time to hit the early return (symrel_loaded == 1)
-+    err = elf__ensure_symbols_relocs(obj);
-+    if (err != ELF_OK) {
-+        fprintf(stderr, "FAIL: expected ELF_OK on second call, got %d\n", err);
-+        elf_close(obj);
-+        return 1;
-+    }
-+
-+    if (obj->symrel_loaded != 1) {
-+        fprintf(stderr, "FAIL: expected obj->symrel_loaded to remain 1 after second call\n");
-+        elf_close(obj);
-+        return 1;
-+    }
-+
-     elf_close(obj);
-     printf("PASS: elf__ensure_symbols_relocs\n");
-     return 0;
+--- usr.lib/link/liblink.c
++++ usr.lib/link/liblink.c
+@@ -1330,6 +1330,48 @@
+     return -1;
  }
+
++static int
++ln_parse_short_options(ln_options_t *opts, int argc, char **argv, int *i,
++                       bool *seen_force, bool *seen_interactive)
++{
++    char *arg = argv[*i];
++    size_t j = 1;
++    while (arg[j] != '\0') {
++        char opt = arg[j];
++        const char *optval = NULL;
++        int rc;
++
++        if (opt == 'S' || opt == 't') {
++            if (arg[j + 1] != '\0') {
++                optval = &arg[j + 1];
++                j = strlen(arg);
++            } else {
++                if (*i + 1 >= argc) {
++                    ln_diag(opts, "option requires an argument -- '%c'", opt);
++                    return -1;
++                }
++                ++(*i);
++                optval = argv[*i];
++            }
++        } else if (opt == 'b') {
++            if (arg[j + 1] != '\0') {
++                optval = &arg[j + 1];
++                j = strlen(arg);
++            }
++        }
++
++        rc = ln_apply_parsed_option(opts, opt, optval, seen_force, seen_interactive);
++        if (rc != 0) {
++            return -1;
++        }
++
++        if (opt == 'S' || opt == 't' || opt == 'b') {
++            break;
++        }
++
++        ++j;
++    }
++    return 0;
++}
++
+ int
+ ln_parse_options(ln_options_t *opts, int argc, char **argv, int *operand_index, int *show_help)
+ {
+@@ -1373,43 +1415,8 @@
+             continue;
+         }
+
+-        {
+-            size_t j = 1;
+-            while (arg[j] != '\0') {
+-                char opt = arg[j];
+-                const char *optval = NULL;
+-                int rc;
+-
+-                if (opt == 'S' || opt == 't') {
+-                    if (arg[j + 1] != '\0') {
+-                        optval = &arg[j + 1];
+-                        j = strlen(arg);
+-                    } else {
+-                        if (i + 1 >= argc) {
+-                            ln_diag(opts, "option requires an argument -- '%c'", opt);
+-                            return -1;
+-                        }
+-                        ++i;
+-                        optval = argv[i];
+-                    }
+-                } else if (opt == 'b') {
+-                    if (arg[j + 1] != '\0') {
+-                        optval = &arg[j + 1];
+-                        j = strlen(arg);
+-                    }
+-                }
+-
+-                rc = ln_apply_parsed_option(opts, opt, optval, &seen_force, &seen_interactive);
+-                if (rc != 0) {
+-                    return -1;
+-                }
+-
+-                if (opt == 'S' || opt == 't' || opt == 'b') {
+-                    break;
+-                }
+-
+-                ++j;
+-            }
++        if (ln_parse_short_options(opts, argc, argv, &i, &seen_force, &seen_interactive) != 0) {
++            return -1;
+         }
+
+         ++i;
