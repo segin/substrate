@@ -102,6 +102,10 @@ typedef struct {
     int cmd_history_len;
     char *search_history[VI_PROMPT_HISTORY_MAX];
     int search_history_len;
+    int screen_dirty;
+    int status_dirty;
+    int clear_screen;
+    int rendered_cur_line;
 } vi_visual_t;
 
 static vi_visual_t *active_visual = NULL;
@@ -669,10 +673,12 @@ vi_set_status(vi_visual_t *vis, const char *msg)
     if (!msg) {
         vis->status_msg[0] = '\0';
         vis->status_once = 0;
+        vis->status_dirty = 1;
         return;
     }
     snprintf(vis->status_msg, sizeof(vis->status_msg), "%s", msg);
     vis->status_once = 1;
+    vis->status_dirty = 1;
 }
 
 static void
@@ -1262,17 +1268,9 @@ vi_draw_default_status(buffer_t *b, int cols, int cur_line)
 }
 
 static void
-vi_render(buffer_t *b, vi_visual_t *vis, char prompt_prefix, const char *prompt)
+vi_render_body(buffer_t *b, vi_visual_t *vis)
 {
-    int cur_line = buf_current_line(b);
-    int cursor_disp = vi_display_col_for_index(b->cur ? b->cur : b->head, vis->cursor_col);
     int row;
-    int cursor_row;
-    int cursor_col;
-
-    vi_update_size(vis);
-    vi_clamp_cursor(b, vis);
-    vi_scroll_into_view(b, vis);
 
     printf("\x1b[?25l\x1b[H");
     for (row = 0; row < vis->rows - 1; row++) {
@@ -1290,8 +1288,13 @@ vi_render(buffer_t *b, vi_visual_t *vis, char prompt_prefix, const char *prompt)
             fputs("\r\n", stdout);
         }
     }
+}
 
-    printf("\x1b[K\r\n\x1b[7m");
+static void
+vi_render_status(buffer_t *b, vi_visual_t *vis, int cur_line, char prompt_prefix,
+    const char *prompt)
+{
+    printf("\x1b[%d;1H\x1b[K\x1b[7m", vis->rows);
     if (prompt) {
         char status_buf[512];
 
@@ -1307,6 +1310,15 @@ vi_render(buffer_t *b, vi_visual_t *vis, char prompt_prefix, const char *prompt)
         vi_draw_default_status(b, vis->cols, cur_line);
     }
     printf("\x1b[K\x1b[m");
+    vis->rendered_cur_line = cur_line;
+}
+
+static void
+vi_position_cursor(buffer_t *b, vi_visual_t *vis, int cur_line)
+{
+    int cursor_disp = vi_display_col_for_index(b->cur ? b->cur : b->head, vis->cursor_col);
+    int cursor_row;
+    int cursor_col;
 
     cursor_row = cur_line - vis->top_line + 1;
     if (cursor_row < 1) {
@@ -1323,6 +1335,45 @@ vi_render(buffer_t *b, vi_visual_t *vis, char prompt_prefix, const char *prompt)
         cursor_col = vis->cols;
     }
     printf("\x1b[%d;%dH\x1b[?25h", cursor_row, cursor_col);
+}
+
+static void
+vi_render(buffer_t *b, vi_visual_t *vis, char prompt_prefix, const char *prompt)
+{
+    int old_top = vis->top_line;
+    int old_left = vis->left_col;
+    int old_rows = vis->rows;
+    int old_cols = vis->cols;
+    int cur_line;
+
+    vi_update_size(vis);
+    vi_clamp_cursor(b, vis);
+    vi_scroll_into_view(b, vis);
+    cur_line = buf_current_line(b);
+
+    if (vis->rows != old_rows || vis->cols != old_cols || vis->top_line != old_top
+        || vis->left_col != old_left) {
+        vis->screen_dirty = 1;
+    }
+    if (prompt || vis->insert_mode || vis->replace_mode || vis->status_msg[0] != '\0'
+        || cur_line != vis->rendered_cur_line) {
+        vis->status_dirty = 1;
+    }
+
+    if (vis->screen_dirty) {
+        if (vis->clear_screen) {
+            printf("\x1b[2J");
+            vis->clear_screen = 0;
+        }
+        vi_render_body(b, vis);
+        vis->screen_dirty = 0;
+        vis->status_dirty = 1;
+    }
+    if (vis->status_dirty || prompt) {
+        vi_render_status(b, vis, cur_line, prompt_prefix, prompt);
+        vis->status_dirty = 0;
+    }
+    vi_position_cursor(b, vis, cur_line);
     fflush(stdout);
 }
 
@@ -6042,6 +6093,8 @@ vi_command_prompt(buffer_t *b, vi_visual_t *vis)
         return;
     }
     exvi_execute_command(b, cmd);
+    vis->screen_dirty = 1;
+    vis->status_dirty = 1;
     if (exvi_take_pending_status(vis->status_msg, sizeof(vis->status_msg))) {
         vis->status_once = 1;
         have_status = 1;
@@ -6721,6 +6774,10 @@ exvi_visual_main(buffer_t *b)
     memset(&vis, 0, sizeof(vis));
     vis.top_line = 1;
     vis.last_search_forward = 1;
+    vis.screen_dirty = 1;
+    vis.status_dirty = 1;
+    vis.clear_screen = 1;
+    vis.rendered_cur_line = -1;
     vi_ensure_visible_line(b);
     if (vi_enable_raw(&vis) != 0) {
         return 1;
@@ -6735,7 +6792,6 @@ exvi_visual_main(buffer_t *b)
         have_winch = 1;
     }
     vi_resize_pending = 0;
-    printf("\x1b[2J");
 
     for (;;) {
         line_t *cur;
@@ -6978,11 +7034,11 @@ process_normal_key:
                 vi_append_count(&vis, key - '0');
                 goto maybe_restore_insert_mode;
             }
-            if (key == '0' && vis.pending_count > 0) {
-                vi_append_count(&vis, 0);
-                goto maybe_restore_insert_mode;
-            }
-            vi_handle_pending_operator(b, &vis, key);
+        if (key == '0' && vis.pending_count > 0) {
+            vi_append_count(&vis, 0);
+            goto maybe_restore_insert_mode;
+        }
+        vi_handle_pending_operator(b, &vis, key);
             goto maybe_restore_insert_mode;
         }
         if (vis.pending_z) {
@@ -7072,6 +7128,7 @@ process_normal_key:
             goto maybe_restore_insert_mode;
         }
 
+        vis.screen_dirty = 1;
         switch (key) {
         case '"':
             key = vi_read_visual_key(b, &vis, ':', NULL);
@@ -7084,6 +7141,7 @@ process_normal_key:
             break;
         case 'h':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             {
                 int count = vi_take_count(&vis);
 
@@ -7094,6 +7152,7 @@ process_normal_key:
             break;
         case 'l':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             {
                 int count = vi_take_count(&vis);
 
@@ -7104,26 +7163,32 @@ process_normal_key:
             break;
         case 'j':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             vi_move_vertical(b, vi_take_count(&vis));
             break;
         case 'k':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             vi_move_vertical(b, -vi_take_count(&vis));
             break;
         case ')':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             vi_move_sentence_forward(b, &vis, vi_take_count(&vis));
             break;
         case '(':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             vi_move_sentence_backward(b, &vis, vi_take_count(&vis));
             break;
         case '}':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             vi_move_paragraph_forward(b, &vis, vi_take_count(&vis));
             break;
         case '{':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             vi_move_paragraph_backward(b, &vis, vi_take_count(&vis));
             break;
         case '[':
@@ -7133,9 +7198,11 @@ process_normal_key:
                 int key2;
 
                 vis.pending_g = 0;
+                vis.screen_dirty = 0;
                 key2 = vi_read_visual_key(b, &vis, ':', NULL);
                 if (key2 == -1 || key2 == '\x1b') {
                     write(STDOUT_FILENO, "\a", 1);
+                    vis.screen_dirty = 1;
                     break;
                 }
                 if (key == '[' && key2 == '[') {
@@ -7147,6 +7214,7 @@ process_normal_key:
                 } else if (key == ']' && key2 == '[') {
                     vi_move_section_boundary(b, &vis, 1, 1, count);
                 } else {
+                    vis.screen_dirty = 1;
                     write(STDOUT_FILENO, "\a", 1);
                 }
             }
@@ -7155,21 +7223,26 @@ process_normal_key:
         case '\r':
         case '\n':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             vi_move_line_first_nonblank(b, &vis, vi_take_count(&vis));
             break;
         case '-':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             vi_move_line_first_nonblank(b, &vis, -vi_take_count(&vis));
             break;
         case 'w':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             vi_move_word_forward_count(b, &vis, vi_take_count(&vis));
             break;
         case 'b':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             vi_move_word_backward_count(b, &vis, vi_take_count(&vis));
             break;
         case 'e':
+            vis.screen_dirty = 0;
             if (vis.pending_g) {
                 int count = vi_take_count(&vis);
 
@@ -7188,13 +7261,16 @@ process_normal_key:
             break;
         case 'W':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             vi_move_bigword_forward_count(b, &vis, vi_take_count(&vis));
             break;
         case 'B':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             vi_move_bigword_backward_count(b, &vis, vi_take_count(&vis));
             break;
         case 'E':
+            vis.screen_dirty = 0;
             if (vis.pending_g) {
                 int count = vi_take_count(&vis);
 
@@ -7213,8 +7289,10 @@ process_normal_key:
             break;
         case 'f':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             key = vi_read_visual_key(b, &vis, ':', NULL);
             if (key == -1 || key == '\x1b' || key == '\r' || key == '\n') {
+                vis.screen_dirty = 1;
                 write(STDOUT_FILENO, "\a", 1);
                 break;
             }
@@ -7222,8 +7300,10 @@ process_normal_key:
             break;
         case 'F':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             key = vi_read_visual_key(b, &vis, ':', NULL);
             if (key == -1 || key == '\x1b' || key == '\r' || key == '\n') {
+                vis.screen_dirty = 1;
                 write(STDOUT_FILENO, "\a", 1);
                 break;
             }
@@ -7231,8 +7311,10 @@ process_normal_key:
             break;
         case 't':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             key = vi_read_visual_key(b, &vis, ':', NULL);
             if (key == -1 || key == '\x1b' || key == '\r' || key == '\n') {
+                vis.screen_dirty = 1;
                 write(STDOUT_FILENO, "\a", 1);
                 break;
             }
@@ -7240,8 +7322,10 @@ process_normal_key:
             break;
         case 'T':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             key = vi_read_visual_key(b, &vis, ':', NULL);
             if (key == -1 || key == '\x1b' || key == '\r' || key == '\n') {
+                vis.screen_dirty = 1;
                 write(STDOUT_FILENO, "\a", 1);
                 break;
             }
@@ -7249,10 +7333,12 @@ process_normal_key:
             break;
         case ';':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             vi_repeat_find_motion(b, &vis, 0, vi_take_count(&vis));
             break;
         case ',':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             vi_repeat_find_motion(b, &vis, 1, vi_take_count(&vis));
             break;
         case '0':
@@ -7260,15 +7346,18 @@ process_normal_key:
                 vi_append_count(&vis, 0);
             } else {
                 vis.pending_g = 0;
+                vis.screen_dirty = 0;
                 vis.cursor_col = 0;
             }
             break;
         case '^':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             vi_take_count(&vis);
             vis.cursor_col = vi_first_nonblank_col(cur);
             break;
         case '_':
+            vis.screen_dirty = 0;
             if (vis.pending_g) {
                 int line_no = buf_current_line(b);
                 int count = vi_take_count(&vis);
@@ -7291,6 +7380,7 @@ process_normal_key:
             break;
         case '|':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             {
                 int target = vi_take_count(&vis) - 1;
 
@@ -7306,10 +7396,12 @@ process_normal_key:
             break;
         case '$':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             vi_move_to_eol_count(b, &vis, vi_take_count(&vis));
             break;
         case '%':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             if (vis.pending_count > 0) {
                 vi_move_to_percent(b, &vis, vi_take_count(&vis));
             } else {
@@ -7557,6 +7649,7 @@ process_normal_key:
             if (vis.pending_g) {
                 int target = vis.pending_count > 0 ? vis.pending_count : 1;
 
+                vis.screen_dirty = 0;
                 b->cur = buf_get_line(b, vi_clamp_line_target(b, target));
                 vis.cursor_col = vi_first_nonblank_col(b->cur);
                 vis.top_line = 1;
@@ -7579,6 +7672,7 @@ process_normal_key:
         case '\'':
         case '`':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             key = vi_read_visual_key(b, &vis, ':', NULL);
             if (key >= 'a' && key <= 'z' && b->marks[key - 'a']) {
                 b->cur = b->marks[key - 'a'];
@@ -7591,6 +7685,7 @@ process_normal_key:
                     }
                 }
             } else {
+                vis.screen_dirty = 1;
                 write(STDOUT_FILENO, "\a", 1);
             }
             break;
@@ -7638,6 +7733,7 @@ process_normal_key:
             goto ex_mode;
         case 'G':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             {
                 int target = vis.pending_count > 0 ? vis.pending_count : b->line_count;
 
@@ -7650,6 +7746,7 @@ process_normal_key:
             break;
         case 'H':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             if (b->line_count > 0) {
                 b->cur = buf_get_line(b, vi_screen_target_line(b, &vis, 0,
                     vis.pending_count > 0 ? vi_take_count(&vis) : 0));
@@ -7660,6 +7757,7 @@ process_normal_key:
             break;
         case 'M':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             if (b->line_count > 0) {
                 vi_take_count(&vis);
                 b->cur = buf_get_line(b, vi_screen_target_line(b, &vis, 1, 0));
@@ -7670,6 +7768,7 @@ process_normal_key:
             break;
         case 'L':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             if (b->line_count > 0) {
                 b->cur = buf_get_line(b, vi_screen_target_line(b, &vis, 2,
                     vis.pending_count > 0 ? vi_take_count(&vis) : 0));
@@ -7681,52 +7780,62 @@ process_normal_key:
         case ':':
             vis.pending_g = 0;
             vis.pending_count = 0;
+            vis.screen_dirty = 0;
             vi_command_prompt(b, &vis);
             break;
         case '/':
             vis.pending_g = 0;
             vis.pending_count = 0;
+            vis.screen_dirty = 0;
             vi_search_prompt(b, &vis, 1);
             break;
         case '?':
             vis.pending_g = 0;
             vis.pending_count = 0;
+            vis.screen_dirty = 0;
             vi_search_prompt(b, &vis, 0);
             break;
         case '*':
             vis.pending_g = 0;
             vis.pending_count = 0;
+            vis.screen_dirty = 0;
             vi_search_current_word(b, &vis, 1);
             break;
         case '#':
             vis.pending_g = 0;
             vis.pending_count = 0;
+            vis.screen_dirty = 0;
             vi_search_current_word(b, &vis, 0);
             break;
         case 'n':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             vi_repeat_search(b, &vis, vis.last_search_forward, vi_take_count(&vis));
             break;
         case 'N':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             vi_repeat_search(b, &vis, !vis.last_search_forward, vi_take_count(&vis));
             break;
         case '\f':
             vis.pending_g = 0;
             vis.pending_count = 0;
-            fputs("\x1b[2J", stdout);
-            fflush(stdout);
+            vis.screen_dirty = 1;
+            vis.clear_screen = 1;
             break;
         case 0x02:
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             vi_page_scroll(b, &vis, -vi_take_count(&vis));
             break;
         case 0x04:
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             vi_half_page_scroll(b, &vis, vi_take_count(&vis));
             break;
         case 0x05:
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             {
                 int count = vi_take_count(&vis);
 
@@ -7737,14 +7846,17 @@ process_normal_key:
             break;
         case 0x06:
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             vi_page_scroll(b, &vis, vi_take_count(&vis));
             break;
         case 0x15:
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             vi_half_page_scroll(b, &vis, -vi_take_count(&vis));
             break;
         case 0x19:
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             {
                 int count = vi_take_count(&vis);
 

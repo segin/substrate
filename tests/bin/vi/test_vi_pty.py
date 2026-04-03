@@ -1531,6 +1531,19 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "alpha\nbeta\ngamma\n",
+        [b"j", b"l", b"h", b"k"],
+        final_keys=b":q\r",
+    )
+    require(exit_code == 0, f"cursor-only redraw vi exited with status {exit_code}")
+    require(decoded.count("\x1b[?25l\x1b[H") == 1,
+            "cursor-only motions triggered a full body redraw")
+    require("line 2/3" in decoded, "missing status update during cursor-only motion")
+    require(saved == "alpha\nbeta\ngamma\n",
+            f"unexpected cursor-only redraw buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "redraw me\nsecond line\n",
         [b"j", b"\x0c"],
         final_keys=b":q\r",
