@@ -124,6 +124,44 @@ static void test_rwlock_writer_preference_and_reader_wakeup(void) {
     assert(wake_all_calls >= 1);
 }
 
+static void test_rwlock_try_wlock(void) {
+    rwlock_t rw;
+    thread_t *t1;
+    thread_t *t2;
+
+    reset_env();
+    t1 = init_thread(0, 1);
+    t2 = init_thread(1, 2);
+
+    rwlock_init(&rw, "try_wlock");
+
+    // Success case
+    current_thread = t1;
+    assert(rw_try_wlock(&rw) == true);
+    assert(rw.writer == 1);
+    assert(rw.owner == t1);
+
+    // Failure case 1: Writer holds the lock
+    current_thread = t2;
+    assert(rw_try_wlock(&rw) == false);
+
+    // Release writer lock
+    current_thread = t1;
+    rw_wunlock(&rw);
+
+    // Failure case 2: Reader holds the lock
+    current_thread = t2;
+    rw_rlock(&rw);
+
+    current_thread = t1;
+    assert(rw_try_wlock(&rw) == false);
+    assert(rw.writer == 0);
+
+    // Clean up
+    current_thread = t2;
+    rw_runlock(&rw);
+}
+
 static void test_rwlock_non_owner_panics(void) {
     rwlock_t rw;
     thread_t *owner;
