@@ -35,3 +35,32 @@ grep -q '^int avx2 = 0;$' /tmp/cc_simd_macro_avx.i
 "$CC_BIN" -E -P -mavx2 /tmp/cc_simd_macro_probe.c -o /tmp/cc_simd_macro_avx2.i
 grep -q '^int avx = 1;$' /tmp/cc_simd_macro_avx2.i
 grep -q '^int avx2 = 1;$' /tmp/cc_simd_macro_avx2.i
+
+cat > /tmp/cc_host_x86intrin_pclmul.c <<'EOF'
+#include <x86intrin.h>
+int main(void) {
+	__m128i a = _mm_setzero_si128();
+	__m128i b = _mm_set1_epi64x(1);
+	a = _mm_clmulepi64_si128(a, b, 0x00);
+	a = _mm_shuffle_epi8(a, b);
+	return __builtin_cpu_supports("pclmul") ? 0 : 0;
+}
+EOF
+
+"$CC_BIN" -std=gnu11 -c /tmp/cc_host_x86intrin_pclmul.c -o /tmp/cc_host_x86intrin_pclmul.o
+
+cat > /tmp/cc_host_x86intrin_target.c <<'EOF'
+#include <x86intrin.h>
+#if defined __GNUC__ || defined __clang__
+__attribute__((__target__("pclmul,avx")))
+#endif
+int probe(void) {
+	__m128i a = _mm_setzero_si128();
+	__m128i b = _mm_set1_epi64x(1);
+	a = _mm_clmulepi64_si128(a, b, 0x00);
+	a = _mm_shuffle_epi8(a, b);
+	return __builtin_cpu_supports("pclmul");
+}
+EOF
+
+"$CC_BIN" -std=gnu11 -c /tmp/cc_host_x86intrin_target.c -o /tmp/cc_host_x86intrin_target.o

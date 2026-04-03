@@ -37,11 +37,18 @@ void kmem_test_init(void) {
     memset(kmem_test_buffer, 0xAA, kmem_test_size);
 
     /* Write recognizable strings for verification */
-    strcpy((char*)kmem_test_buffer, "KMEM_TEST_START: This is a safe kernel buffer for testing.");
-    char *end_msg = "KMEM_TEST_END: End of buffer.";
-    strcpy((char*)kmem_test_buffer + kmem_test_size - strlen(end_msg) - 1, end_msg);
+    const char *start_msg = "KMEM_TEST_START: This is a safe kernel buffer for testing.";
+    const char *end_msg = "KMEM_TEST_END: End of buffer.";
+
+    if (kmem_test_size > 0) {
+        strlcpy((char*)kmem_test_buffer, start_msg, kmem_test_size);
+    }
+
+    if (kmem_test_size > (int)strlen(end_msg) + 1) {
+        strlcpy((char*)kmem_test_buffer + kmem_test_size - strlen(end_msg) - 1, end_msg, strlen(end_msg) + 1);
+    }
 
     char buf[128];
-    sprintf(buf, "kmem_test: buffer allocated at 0x%08x (size %d)\n", (unsigned int)kmem_test_buffer, kmem_test_size);
+    snprintf(buf, sizeof(buf), "kmem_test: buffer allocated at 0x%08x (size %d)\n", (unsigned int)kmem_test_buffer, kmem_test_size);
     kprint(buf);
 }

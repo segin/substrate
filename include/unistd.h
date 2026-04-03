@@ -64,6 +64,7 @@ unsigned int alarm(unsigned int seconds);
 int gethostname(char *name, size_t len);
 int sethostname(const char *name, size_t len);
 
+int chmod(const char *pathname, mode_t mode);
 int chown(const char *pathname, uid_t owner, gid_t group);
 int fchmod(int fd, mode_t mode);
 int fchown(int fd, uid_t owner, gid_t group);
@@ -94,4 +95,3 @@ long syscall(long number, ...);
 #define _SC_PHYS_PAGES   11
 
 long sysconf(int name);
-

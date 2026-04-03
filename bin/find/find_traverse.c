@@ -101,11 +101,27 @@ void traverse(const char *path, node_t *expr, int depth,
 			for (int i = 0; i < entry_count; i++) {
 				size_t plen = strlen(path);
 				size_t nlen = strlen(entries[i]);
-				char *child = malloc(plen + nlen + 2);
+				/* Check for integer overflow */
+				if (plen > ((size_t)-1) - nlen - 2) {
+					fprintf(stderr, "find: path too long: %s\n", path);
+					g_exit_status = 1;
+					free(entries[i]);
+					continue;
+				}
+
+				size_t alloc_size = plen + nlen + 2;
+				char *child = malloc(alloc_size);
+				if (!child) {
+					fprintf(stderr, "find: out of memory\n");
+					g_exit_status = 1;
+					free(entries[i]);
+					continue;
+				}
+
 				if (plen > 0 && path[plen - 1] == '/')
-					snprintf(child, plen + nlen + 2, "%s%s", path, entries[i]);
+					snprintf(child, alloc_size, "%s%s", path, entries[i]);
 				else
-					snprintf(child, plen + nlen + 2, "%s/%s", path, entries[i]);
+					snprintf(child, alloc_size, "%s/%s", path, entries[i]);
 				traverse(child, expr, depth + 1, 0, root_dev);
 				free(child);
 				free(entries[i]);
