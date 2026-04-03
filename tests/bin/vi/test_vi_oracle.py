@@ -281,6 +281,90 @@ def main():
             "key_steps": [b"5", b"0", b"%", b"r", b"X"],
         },
         {
+            "name": "mixed-count-line-delete-success",
+            "initial_text": "one\ntwo\nthree\nfour\nfive\nsix\n",
+            "key_steps": [b"2", b"d", b"2", b"j"],
+        },
+        {
+            "name": "mixed-count-line-delete-noop",
+            "initial_text": "one\ntwo\nthree\n",
+            "key_steps": [b"2", b"d", b"2", b"k"],
+        },
+        {
+            "name": "mixed-count-screen-delete-success",
+            "initial_text": "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\n",
+            "key_steps": [b"2", b"d", b"M"],
+            "rows": 6,
+            "cols": 20,
+        },
+        {
+            "name": "mixed-count-screen-delete-noop",
+            "initial_text": "only\n",
+            "key_steps": [b"2", b"d", b"H"],
+            "rows": 6,
+            "cols": 20,
+        },
+        {
+            "name": "mixed-count-word-delete-success",
+            "initial_text": "one two three four five\n",
+            "key_steps": [b"2", b"d", b"2", b"w"],
+        },
+        {
+            "name": "mixed-count-word-delete-noop",
+            "initial_text": "one two three\n",
+            "key_steps": [b"2", b"d", b"2", b"b"],
+        },
+        {
+            "name": "mixed-count-sentence-delete-success",
+            "initial_text": "one. two. three. four.\nalpha. beta.\n",
+            "key_steps": [b"2", b"d", b")"],
+        },
+        {
+            "name": "mixed-count-sentence-delete-noop",
+            "initial_text": "one. two. three.\n",
+            "key_steps": [b"2", b"d", b"2", b"("],
+        },
+        {
+            "name": "mixed-count-paragraph-delete-success",
+            "initial_text": "one\n\ntwo\n\nthree\n\nfour\n\nfive\n",
+            "key_steps": [b"2", b"d", b"2", b"}"],
+        },
+        {
+            "name": "mixed-count-paragraph-delete-noop",
+            "initial_text": "one\n\ntwo\n\nthree\n",
+            "key_steps": [b"2", b"d", b"2", b"{"],
+        },
+        {
+            "name": "mixed-count-section-delete-success",
+            "initial_text": "intro\n{\nbody1\n}\nmid\n{\nbody2\n}\noutro\n{\nbody3\n}\n",
+            "key_steps": [b"2", b"d", b"]", b"["],
+        },
+        {
+            "name": "mixed-count-section-delete-noop",
+            "initial_text": "intro\n{\nbody1\n}\nmid\n{\nbody2\n}\noutro\n",
+            "key_steps": [b"2", b"d", b"2", b"[", b"["],
+        },
+        {
+            "name": "mixed-count-search-delete-success",
+            "initial_text": "aa target bb\ncc target dd\nee target ff\n",
+            "key_steps": [b"/", b"target\r", b"w", b"2", b"d", b"n"],
+        },
+        {
+            "name": "mixed-count-search-delete-noop",
+            "initial_text": "aa target bb\n",
+            "key_steps": [b"/", b"target\r", b"w", b"2", b"d", b"N"],
+        },
+        {
+            "name": "mixed-count-percent-delete-success",
+            "initial_text": "if (x) {\n  foo();\n}\nif (y) {\n  bar();\n}\n",
+            "key_steps": [b"f", b"{", b"2", b"d", b"%"],
+        },
+        {
+            "name": "mixed-count-percent-delete-noop",
+            "initial_text": "plain text\nnext line\n",
+            "key_steps": [b"2", b"d", b"%"],
+        },
+        {
             "name": "word-search-repeat-change",
             "initial_text": "one target\ntwo target\nthree target\n",
             "key_steps": [b"w", b"*", b"c", b"*", b"X", b"\x1b", b"n", b"."],

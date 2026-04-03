@@ -4813,7 +4813,9 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         int start = vi_clamp_line_target(b, line_no - count);
         int end_line = line_no;
 
-        if (vi_apply_linewise_operator(b, vis, start, end_line) != 0) {
+        if (line_no - count < 1) {
+            write(STDOUT_FILENO, "\a", 1);
+        } else if (vi_apply_linewise_operator(b, vis, start, end_line) != 0) {
             write(STDOUT_FILENO, "\a", 1);
         } else if (vis->pending_op == 'c') {
             vi_set_last_change(vis, VI_REPEAT_C_LINE_MOTION, count, key);
@@ -5232,10 +5234,10 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
                 } else {
                     if (target_no < line_no) {
                         start_line = target_no;
-                        end_line = line_no;
+                        end_line = line_no - 1;
                     } else {
                         start_line = line_no;
-                        end_line = target_no;
+                        end_line = target_no - 1;
                     }
                     if (end_line < start_line) {
                         write(STDOUT_FILENO, "\a", 1);
