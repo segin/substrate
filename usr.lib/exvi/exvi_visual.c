@@ -3887,9 +3887,14 @@ static void
 vi_linewise_yank(buffer_t *b, vi_visual_t *vis, int start, int end)
 {
     char regarg[2];
+    line_t *orig;
 
     vi_take_register_arg(vis, regarg);
     handle_yank_command(b, regarg, 1, start, end);
+    orig = buf_get_line(b, start);
+    if (orig) {
+        b->cur = orig;
+    }
     vis->cursor_col = 0;
 }
 

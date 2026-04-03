@@ -611,6 +611,25 @@ def main():
             "key_steps": [b"G", b"l", b"m", b"a", b"g", b"g", b"y", b"`", b"a", b"P"],
         },
         {
+            "name": "line-minus-yank-put",
+            "initial_text": "  one\n  two\n  three\n",
+            "key_steps": [b"j", b"j", b"y", b"-", b"P"],
+        },
+        {
+            "name": "screen-top-yank-put",
+            "initial_text": "l1\nl2\nl3\nl4\nl5\nl6\n",
+            "key_steps": [b"4", b"G", b"y", b"H", b"P"],
+            "rows": 6,
+            "cols": 20,
+        },
+        {
+            "name": "screen-middle-yank-put",
+            "initial_text": "l1\nl2\nl3\nl4\nl5\nl6\n",
+            "key_steps": [b"5", b"G", b"y", b"M", b"P"],
+            "rows": 6,
+            "cols": 20,
+        },
+        {
             "name": "word-search-repeat-change",
             "initial_text": "one target\ntwo target\nthree target\n",
             "key_steps": [b"w", b"*", b"c", b"*", b"X", b"\x1b", b"n", b"."],

@@ -4494,6 +4494,37 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "  one\n  two\n  three\n",
+        [b"j", b"j", b"y", b"-", b"P"],
+    )
+    require(exit_code == 0, f"yminus-indent vi exited with status {exit_code}")
+    require(saved == "  one\n  two\n  three\n  two\n  three\n",
+            f"unexpected yminus-indent buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "l1\nl2\nl3\nl4\nl5\nl6\n",
+        [b"4", b"G", b"y", b"H", b"P"],
+        rows=6,
+        cols=20,
+    )
+    require(exit_code == 0, f"yH-screen vi exited with status {exit_code}")
+    require(saved == "l1\nl2\nl3\nl4\nl1\nl2\nl3\nl4\nl5\nl6\n",
+            f"unexpected yH-screen buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "l1\nl2\nl3\nl4\nl5\nl6\n",
+        [b"5", b"G", b"y", b"M", b"P"],
+        rows=6,
+        cols=20,
+    )
+    require(exit_code == 0, f"yM-screen vi exited with status {exit_code}")
+    require(saved == "l1\nl2\nl3\nl4\nl5\nl3\nl4\nl5\nl6\n",
+            f"unexpected yM-screen buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
         [b"2", b"]", b"]", b"r", b"X"],
     )
