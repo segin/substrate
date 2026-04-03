@@ -75,9 +75,7 @@ void console_register(console_backend_t *backend) {
     registered_backend = backend;
 }
 
-int vt_set_geometry(int cols, int rows) {
-    (void)cols;
-    (void)rows;
+int vt_refresh_geometry_from_terminal(void) {
     return 0;
 }
 
@@ -85,8 +83,27 @@ int vt_get_width(void) {
     return 80;
 }
 
+int vt_get_height(void) {
+    return 25;
+}
+
 int vt_get_visible_height(void) {
     return 24;
+}
+
+int vt_get_status_row(void) {
+    return 24;
+}
+
+uint16_t vt_get_display_cell(const vt_state_t *vt, int row, int col) {
+    if (!vt || row < 0 || row >= vt_get_visible_height() || col < 0 || col >= vt_get_width()) {
+        return 0;
+    }
+    return vt->buffer[(size_t)row * (size_t)vt_get_width() + (size_t)col];
+}
+
+void vt_render_statusline(vt_state_t *vt) {
+    (void)vt;
 }
 
 int vt_get_active(void) {
@@ -131,11 +148,19 @@ void console_set_tty(struct tty *tty) {
 }
 
 void spinlock_acquire(spinlock_t *lock) {
-    (void)lock;
+    if (lock) {
+        lock->locked = 1;
+    }
 }
 
 void spinlock_release(spinlock_t *lock) {
-    (void)lock;
+    if (lock) {
+        lock->locked = 0;
+    }
+}
+
+bool spinlock_is_held(spinlock_t *lock) {
+    return lock && lock->locked != 0;
 }
 
 void sched_wakeup(void *chan) {
@@ -209,7 +234,21 @@ static void test_init_preserves_existing_vt_ttys(void) {
     assert(tty_alloc_count == VT_MAX - 1);
     assert(tty_register_count == VT_MAX - 1);
     assert(test_vts[0].tty == &test_ttys[0]);
-    assert(console_tty == NULL);
+    assert(test_ttys[0].driver == &fb_vt_driver);
+    assert(console_tty == &test_ttys[0]);
+}
+
+static void test_console_backend_write_uses_vt_buffer(void) {
+    reset_state();
+    fb_console_init();
+
+    assert(registered_backend != NULL);
+    assert(registered_backend->write != NULL);
+
+    registered_backend->write("A", 1);
+
+    assert((unsigned char)(test_vts[0].buffer[0] & 0xFFU) == 'A');
+    assert((unsigned char)(test_vts[0].buffer[vt_get_status_row() * vt_get_width()] & 0xFFU) == 0);
 }
 
 static void test_tty_write_processes_ansi_sequences(void) {
@@ -386,23 +425,43 @@ static void test_software_cursor_blinks_on_tick(void) {
     assert(fb_mem[14U * 640U] == 0xFFFFFFFFU);
 }
 
+static void test_redraw_active_syncs_status_row(void) {
+    size_t index;
+
+    reset_state();
+    index = (size_t)vt_get_status_row() * (size_t)vt_get_width();
+    test_vts[0].buffer[index] = (uint16_t)' ' | (uint16_t)0x70U << 8;
+
+    fb_console_redraw_active();
+
+    assert(fb_mem[((size_t)vt_get_status_row() * FB_FONT_HEIGHT + (size_t)view_y_offset) *
+                  TEST_FB_WIDTH] ==
+           fb_console_palette[7]);
+}
+
 static void test_fullscreen_scroll_uses_smooth_viewport_steps(void) {
     reset_state();
 
     fb.scroll = mock_scroll;
     fb.virt_height = fb.height * 2U;
     test_vts[0].color = 0x1F;
+    test_vts[0].buffer[(size_t)vt_get_status_row() * (size_t)vt_get_width()] =
+        (uint16_t)' ' | (uint16_t)0x70U << 8;
 
     fb_console_scroll_region_up_locked(&test_vts[0], 0, 23, 1);
 
     assert(scroll_calls == FB_FONT_HEIGHT);
     assert(last_scroll_offset == FB_FONT_HEIGHT);
     assert(view_y_offset == FB_FONT_HEIGHT);
+    assert(fb_mem[((size_t)vt_get_status_row() * FB_FONT_HEIGHT + (size_t)view_y_offset) *
+                  TEST_FB_WIDTH] ==
+           fb_console_palette[7]);
 }
 
 int main(void) {
     test_init_registers_framebuffer_vt_ttys();
     test_init_preserves_existing_vt_ttys();
+    test_console_backend_write_uses_vt_buffer();
     test_tty_write_processes_ansi_sequences();
     test_tty_ioctl_exposes_framebuffer_controls();
     test_tty_winsize_tracks_framebuffer_geometry();
@@ -411,6 +470,7 @@ int main(void) {
     test_tick_batches_and_flushes_dirty_rectangle();
     test_software_cursor_preserves_background();
     test_software_cursor_blinks_on_tick();
+    test_redraw_active_syncs_status_row();
     test_fullscreen_scroll_uses_smooth_viewport_steps();
     puts("host_test_fb_console: PASS");
     return 0;

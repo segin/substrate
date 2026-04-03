@@ -139,26 +139,37 @@ void syscall_handler(registers_t *regs) {
         // Print Header
         // "SYSCALL: PID=1, Personality=Linux"
         char *pers_name = p->name ? (char*)p->name : "Unknown";
-        sprintf(buf, "SYSCALL: PID=%d, Personality=%s\n", current_process->pid, pers_name);
+        snprintf(buf, sizeof(buf), "SYSCALL: PID=%d, Personality=%s\n", current_process->pid, pers_name);
         kprint(buf);
 
         // Print Call start
         // "sys_write(0, "val", 14)"
         int len = 0;
-        if (name) len += sprintf(buf + len, "sys_%s(", name);
-        else len += sprintf(buf + len, "sys_%d(", syscall_num);
+
+        #define TRACE_APPEND(...) do { \
+            int _r = sizeof(buf) - len; \
+            if (_r > 0) { \
+                int _w = snprintf(buf + len, _r, __VA_ARGS__); \
+                if (_w > 0) { \
+                    len += (_w < _r) ? _w : _r - 1; \
+                } \
+            } \
+        } while (0)
+
+        if (name) TRACE_APPEND("sys_%s(", name);
+        else TRACE_APPEND("sys_%d(", syscall_num);
         
         if (fmt && fmt->nargs > 0) {
             for (int i = 0; i < fmt->nargs; i++) {
-                if (i > 0) len += sprintf(buf + len, ", ");
+                if (i > 0) TRACE_APPEND(", ");
                 switch (fmt->arg_types[i]) {
-                    case ARG_INT: len += sprintf(buf + len, "%d", (int)args[i]); break;
-                    case ARG_HEX: len += sprintf(buf + len, "0x%x", (unsigned int)args[i]); break;
-                    case ARG_PTR: len += sprintf(buf + len, "*%08x", (unsigned int)args[i]); break;
+                    case ARG_INT: TRACE_APPEND("%d", (int)args[i]); break;
+                    case ARG_HEX: TRACE_APPEND("0x%x", (unsigned int)args[i]); break;
+                    case ARG_PTR: TRACE_APPEND("*%08x", (unsigned int)args[i]); break;
                     case ARG_LONG: {
                         // Combine two 32-bit values into one 64-bit (lo, hi order on i386)
                         int64_t val64 = ((int64_t)args[i+1] << 32) | args[i];
-                        len += sprintf(buf + len, "%lld", (long long)val64);
+                        TRACE_APPEND("%lld", (long long)val64);
                         i++; // Skip next slot since we consumed it
                         break;
                     }
@@ -169,7 +180,7 @@ void syscall_handler(registers_t *regs) {
                          * For generic strings, use bounded copyinstr.
                          */
                         if (p->id == PERS_ELKS) {
-                            len += sprintf(buf + len, "off:0x%x", (unsigned int)args[i]);
+                            TRACE_APPEND("off:0x%x", (unsigned int)args[i]);
                             break;
                         }
                         if (args[i] && args[i] > 0x1000) {
@@ -225,22 +236,25 @@ void syscall_handler(registers_t *regs) {
                                     if (c < 32 || c > 126) quote[q] = '.';
                                 }
                                 quote[show] = '\0';
-                                len += sprintf(buf + len, "\"%s%s\"", quote, trunc ? "..." : "");
+                                TRACE_APPEND("\"%s%s\"", quote, trunc ? "..." : "");
                             } else {
-                                len += sprintf(buf + len, "*%08x", (unsigned int)args[i]);
+                                TRACE_APPEND("*%08x", (unsigned int)args[i]);
                             }
                         } else {
-                            len += sprintf(buf + len, "NULL");
+                            TRACE_APPEND("NULL");
                         }
                         break;
-                    default: len += sprintf(buf + len, "%x", (unsigned int)args[i]); break;
+                    default: TRACE_APPEND("%x", (unsigned int)args[i]); break;
                 }
             }
         } else {
              // Fallback
-             len += sprintf(buf + len, "0x%x, 0x%x, 0x%x", args[0], args[1], args[2]);
+             TRACE_APPEND("0x%x, 0x%x, 0x%x", args[0], args[1], args[2]);
         }
-        len += sprintf(buf + len, ")");
+        TRACE_APPEND(")");
+
+        #undef TRACE_APPEND
+
         kprint(buf); // Print the call part (no newline yet)
     }
     
@@ -248,7 +262,7 @@ void syscall_handler(registers_t *regs) {
     if (syscall_num >= p->syscall_count) {
         if (syscall_trace_enabled) {
             char buf[64];
-            sprintf(buf, "SYSCALL: Out of range #%u\n", (unsigned int)syscall_num);
+            snprintf(buf, sizeof(buf), "SYSCALL: Out of range #%u\n", (unsigned int)syscall_num);
             kprint(buf);
         }
         regs->eax = -38; // ENOSYS
@@ -274,7 +288,7 @@ void syscall_handler(registers_t *regs) {
     if ((uintptr_t)location < 0xC0000000U) {
         if (syscall_trace_enabled) {
             char buf[96];
-            sprintf(buf, "SYSCALL: Invalid handler %p for #%u\n",
+            snprintf(buf, sizeof(buf), "SYSCALL: Invalid handler %p for #%u\n",
                     location, (unsigned int)syscall_num);
             kprint(buf);
         }
@@ -308,7 +322,7 @@ void syscall_handler(registers_t *regs) {
 
     if (syscall_trace_enabled) {
         char buf[64];
-        sprintf(buf, " ret %d\n", (int)regs->eax);
+        snprintf(buf, sizeof(buf), " ret %d\n", (int)regs->eax);
         kprint(buf);
     }
 

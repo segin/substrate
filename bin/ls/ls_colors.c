@@ -6,18 +6,29 @@
 
 #include "ls_colors.h"
 
-static char color_di[32] = "\033[1;34m";
-static char color_ln[32] = "\033[1;36m";
-static char color_ex[32] = "\033[1;32m";
+static char color_di[32] = "\033[01;34m";
+static char color_ln[32] = "\033[01;36m";
+static char color_ex[32] = "\033[01;32m";
 static char color_fi[32] = "";
-static char color_so[32] = "\033[1;35m";
-static char color_pi[32] = "\033[33m";
-static char color_bd[32] = "\033[1;33m";
-static char color_cd[32] = "\033[1;33m";
-static char color_or[32] = "\033[1;31m";
+static char color_so[32] = "\033[01;35m";
+static char color_pi[32] = "\033[40;33m";
+static char color_bd[32] = "\033[40;33;01m";
+static char color_cd[32] = "\033[40;33;01m";
+static char color_or[32] = "\033[01;31m";
 static char color_reset[16] = "\033[0m";
 
-static bool initialized;
+static void reset_defaults(void) {
+    memcpy(color_di, "\033[01;34m", sizeof("\033[01;34m"));
+    memcpy(color_ln, "\033[01;36m", sizeof("\033[01;36m"));
+    memcpy(color_ex, "\033[01;32m", sizeof("\033[01;32m"));
+    color_fi[0] = '\0';
+    memcpy(color_so, "\033[01;35m", sizeof("\033[01;35m"));
+    memcpy(color_pi, "\033[40;33m", sizeof("\033[40;33m"));
+    memcpy(color_bd, "\033[40;33;01m", sizeof("\033[40;33;01m"));
+    memcpy(color_cd, "\033[40;33;01m", sizeof("\033[40;33;01m"));
+    memcpy(color_or, "\033[01;31m", sizeof("\033[01;31m"));
+    memcpy(color_reset, "\033[0m", sizeof("\033[0m"));
+}
 
 static void write_ansi_code(char *dst, size_t dstsz, const char *val, size_t vlen) {
     if (dst == NULL || dstsz < 4) {
@@ -62,10 +73,7 @@ static void assign_color(const char *key, size_t klen, const char *val, size_t v
 void ls_colors_init(void) {
     const char *spec;
 
-    if (initialized) {
-        return;
-    }
-    initialized = true;
+    reset_defaults();
 
     spec = getenv("LS_COLORS");
     if (spec == NULL || *spec == '\0') {

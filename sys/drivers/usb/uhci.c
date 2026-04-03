@@ -21,6 +21,7 @@
 #include <kern/console.h>
 #include <sys/dma.h>
 #include <sys/irq.h>
+#include <sys/lock.h>
 #include <vm/vm_kmem.h>
 #include <string.h>
 
@@ -73,6 +74,9 @@ typedef struct uhci_hc {
     /* Skeleton QH for async (bulk/control) transfers */
     struct uhci_qh *async_qh;
     dma_addr_t      async_qh_dma;
+
+    /* Serializes access to the shared async schedule and TD/QH pools. */
+    mutex_t submit_lock;
 
     /* USB HCD handle */
     usb_hcd_t hcd;
@@ -667,15 +671,19 @@ cleanup:
 static int uhci_submit(usb_hcd_t *hcd, usb_transfer_t *xfer)
 {
     uhci_hc_t *hc = hcd->priv;
+    int ret;
 
-    if (xfer->is_control)
-        return uhci_control_transfer(hc, xfer);
-
-    if (xfer->ep->type == USB_EP_TYPE_BULK)
-        return uhci_bulk_transfer(hc, xfer);
-
-    kprintf("uhci: unsupported transfer type %u\n", xfer->ep->type);
-    return USB_XFER_ERROR;
+    mutex_lock(&hc->submit_lock);
+    if (xfer->is_control) {
+        ret = uhci_control_transfer(hc, xfer);
+    } else if (xfer->ep->type == USB_EP_TYPE_BULK) {
+        ret = uhci_bulk_transfer(hc, xfer);
+    } else {
+        kprintf("uhci: unsupported transfer type %u\n", xfer->ep->type);
+        ret = USB_XFER_ERROR;
+    }
+    mutex_unlock(&hc->submit_lock);
+    return ret;
 }
 
 /*
@@ -710,6 +718,7 @@ static int uhci_pci_attach(struct device *dev)
                        cmd | PCI_COMMAND_IO | PCI_COMMAND_MASTER);
 
     uhci_ctrl.irq = (uint8_t)pci_get_irq(pdev);
+    mutex_init(&uhci_ctrl.submit_lock, "uhci_submit");
 
     kprintf("uhci: PCI %02x:%02x.%x iobase=0x%04x irq=%u\n",
             pdev->bus, pdev->slot, pdev->func,

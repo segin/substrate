@@ -16,6 +16,13 @@ LIBC_DIR = $(TOP)/lib/c
 
 .PHONY: all clean install
 
+ifneq ($(filter clean,$(MAKECMDGOALS)),)
+ifneq ($(filter all,$(MAKECMDGOALS)),)
+all: clean
+.NOTPARALLEL: clean all
+endif
+endif
+
 all: $(PROG)
 
 ifdef NATIVE_BUILD
