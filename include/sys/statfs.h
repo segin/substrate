@@ -16,18 +16,18 @@
 #define MINIX2_SUPER_MAGIC  0x2468
 
 struct statfs {
-    long    f_type;     /* type of file system */
-    long    f_bsize;    /* optimal transfer block size */
-    long    f_blocks;   /* total data blocks in fs */
-    long    f_bfree;    /* free blocks in fs */
-    long    f_bavail;   /* free blocks avail to unprivileged user */
-    long    f_files;    /* total file nodes in fs */
-    long    f_ffree;    /* free file nodes in fs */
-    long    f_fsid;     /* file system id */
-    long    f_namelen;  /* maximum length of filenames */
-    long    f_frsize;   /* fragment size */
-    long    f_flags;    /* mount flags */
-    long    f_spare[4]; /* spare for later */
+    uint32_t    f_type;     /* type of file system */
+    uint64_t    f_bsize;    /* optimal transfer block size */
+    uint64_t    f_blocks;   /* total data blocks in fs */
+    uint64_t    f_bfree;    /* free blocks in fs */
+    uint64_t    f_bavail;   /* free blocks avail to unprivileged user */
+    uint64_t    f_files;    /* total file nodes in fs */
+    uint64_t    f_ffree;    /* free file nodes in fs */
+    int64_t     f_fsid;     /* file system id */
+    uint32_t    f_namelen;  /* maximum length of filenames */
+    uint64_t    f_frsize;   /* fragment size */
+    uint32_t    f_flags;    /* mount flags */
+    uint64_t    f_spare[4]; /* spare for later */
 };
 
 int statfs(const char *path, struct statfs *buf);

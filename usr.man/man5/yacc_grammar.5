@@ -1,0 +1,123 @@
+.\" Conforms to POSIX.1-2017
+.TH YACC_GRAMMAR 5 "2026-04-02" "IEEE/The Open Group" "POSIX Programmer's Manual"
+.SH NAME
+yacc_grammar \- yacc grammar file format
+.SH SYNOPSIS
+.nf
+%{
+  \fI/* C declarations */\fP
+%}
+\fI/* yacc declarations */\fP
+%%
+\fI/* grammar rules */\fP
+%%
+\fI/* user C code */\fP
+.fi
+.SH DESCRIPTION
+A grammar file for the
+.BR yacc (1)
+compiler generator consists of three sections separated by lines containing only the double percent symbol
+.RB ( %% ).
+The first section is the declarations section, the second is the rules section, and the third is the user code section.
+.PP
+The third section is optional, and if it is omitted, the second
+.B %%
+separator may also be omitted.
+.SH DECLARATIONS SECTION
+The declarations section defines the tokens and nonterminal symbols used in the grammar, establishes their associative precedence, and allows the inclusion of arbitrary C code.
+.PP
+C code to be inserted at the beginning of the generated parser is enclosed within
+.B %{
+and
+.BR %} .
+This area is typically used to include headers and declare function prototypes (such as
+.BR yylex ()
+and
+.BR yyerror ()).
+.PP
+Tokens and associativity are declared using predefined macros:
+.TP
+.B %token \fIname\fP \fI...\fP
+Declares terminal symbols (tokens). Numeric values can be explicitly assigned using
+.B %token \fIname\fP \fIvalue\fP.
+.TP
+.B %left \fIname\fP \fI...\fP
+Declares a left-associative token, such as subtraction
+.RB ( \- ),
+used for precedence resolution.
+.TP
+.B %right \fIname\fP \fI...\fP
+Declares a right-associative token, such as an assignment operator
+.RB ( = ).
+.TP
+.B %nonassoc \fIname\fP \fI...\fP
+Declares a token that cannot be used associatively (for example, relational operators).
+.TP
+.B %union { \fItype_declarations\fP }
+Specifies the exact C structure of the
+.B YYSTYPE
+union used for semantic values.
+.TP
+.B %type <\fItag\fP> \fIname\fP \fI...\fP
+Assigns the specific union member
+.I tag
+to the listed nonterminal or token names to enable strong typing of semantic values.
+.TP
+.B %start \fIsymbol\fP
+Declares the root nonterminal of the grammar. If omitted, the left-hand side of the first rule is used.
+.SH RULES SECTION
+The rules section contains the production rules defining the context-free grammar. A rule consists of a left-hand side nonterminal followed by a colon
+.RB ( : ),
+and one or more right-hand side productions separated by vertical bars
+.RB ( | ).
+The rule is terminated with a semicolon
+.RB ( ; ).
+.PP
+.nf
+nonterminal : right_hand_side_1
+            | right_hand_side_2
+            ;
+.fi
+.PP
+Right-hand sides may contain terminal symbols (tokens), nonterminal symbols, character literals
+.RB ( 'c' ),
+and blocks of C code enclosed in braces
+.RB ( { " ... " } )
+representing the semantic actions to be executed when the production is reduced.
+.SH ACTIONS
+Within a semantic action block, the semantic value of the left-hand side nonterminal is denoted by
+.BR $$ .
+The semantic values of the right-hand side symbols are denoted by
+.BR $1 ,
+.BR $2 ,
+and so on, corresponding to their order of appearance in the rule.
+.PP
+If the semantic values are typed via
+.BR %union ,
+their members can be accessed directly using
+.BI $< tag >$
+and
+.BI $< tag >n\fR.
+.PP
+The default action for an empty rule is to set
+.B $$
+to an undefined state. The default action for a rule with elements is:
+.nf
+    { $$ = $1; }
+.fi
+.SH EXAMPLES
+.nf
+%token NUMBER
+%left '+' '\-'
+%%
+expr : expr '+' expr { $$ = $1 + $3; }
+     | expr '\-' expr { $$ = $1 \- $3; }
+     | NUMBER        { $$ = $1; }
+     ;
+%%
+int yylex(void) { /* ... */ }
+void yyerror(const char *s) { /* ... */ }
+.fi
+.SH SEE ALSO
+.BR yacc (1),
+.BR lex (1)

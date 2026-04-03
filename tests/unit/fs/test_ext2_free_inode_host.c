@@ -150,6 +150,10 @@ void run_ext2_free_inode_test(void) {
     // Initialize allocator cache
     ext2_block_cache = uma_zcreate("ext2-block", 4096, NULL, NULL, NULL, NULL, 0, 0);
 
+    // Initialize active block bitmap cache
+    fs.active_bg_group = (uint32_t)-1;
+    fs.active_bg_bitmap = uma_zalloc(ext2_block_cache, M_WAITOK);
+
     // Initialize active inode bitmap cache
     fs.active_inode_bg_group = (uint32_t)-1;
     fs.active_inode_bg_bitmap = uma_zalloc(ext2_block_cache, M_WAITOK);
@@ -208,9 +212,58 @@ void run_ext2_free_inode_test(void) {
         exit(1);
     }
 
+    // Additional tests: statfs, link, rename
+    ext2_inode_t root_inode;
+    memset(&root_inode, 0, sizeof(root_inode));
+    root_inode.i_mode = EXT2_S_IFDIR | 0755;
+    root_inode.i_links_count = 2;
+
+    uint32_t root_inode_num = ext2_alloc_inode(&fs, 1);
+    if (root_inode_num == 0) {
+        printf("FAILED: Could not allocate root inode\n");
+        exit(1);
+    }
+    ext2_write_inode(&fs, root_inode_num, &root_inode);
+    fs_node_t *root_node = ext2_alloc_node(&fs, root_inode_num, &root_inode);
+    if (!root_node) {
+        printf("FAILED: Could not allocate root node\n");
+        exit(1);
+    }
+
+    if (ext2_mknod(root_node, "testfile", S_IFREG | 0644, 0) != 0) {
+        printf("FAILED: ext2_mknod failed\n");
+        exit(1);
+    }
+
+    fs_node_t *file_node = ext2_finddir(root_node, "testfile");
+    if (!file_node) {
+        printf("FAILED: ext2_finddir(testfile) failed\n");
+        exit(1);
+    }
+
+    if (ext2_link(root_node, file_node, "testfile.link") != 0) {
+        printf("FAILED: ext2_link failed\n");
+        exit(1);
+    }
+
+    if (ext2_rename(root_node, "testfile.link", root_node, "testfile.renamed") != 0) {
+        printf("FAILED: ext2_rename failed\n");
+        exit(1);
+    }
+
+    struct statfs fsb;
+    if (ext2_statfs(root_node, &fsb) != 0) {
+        printf("FAILED: ext2_statfs failed\n");
+        exit(1);
+    }
+
+    if (fsb.f_type != EXT2_SUPER_MAGIC) {
+        printf("FAILED: ext2_statfs f_type wrong (%ld)\n", fsb.f_type);
+        exit(1);
+    }
+
     printf("SUCCESS: Free inode test passed\n");
 }
-
 int main() {
     run_ext2_free_inode_test();
     return 0;

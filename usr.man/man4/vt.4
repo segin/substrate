@@ -23,6 +23,13 @@ VT102/ANSI parser, but the parser state itself is maintained per VT so that
 cursor position, saved state, and pending sequence parameters survive console
 switches.
 .Pp
+The active console backend reports the physical terminal geometry to the
+.Nm
+layer, and the kernel reserves the last physical row for the status line.
+Processes attached to
+.Pa /dev/ttyN
+therefore observe one fewer usable text row than the physical mode provides.
+.Pp
 Substrate currently provides:
 .Bl -bullet
 .It
