@@ -938,7 +938,10 @@ vi_reindent_current_line(buffer_t *b, vi_visual_t *vis, int increase)
         if (old_cols <= 0) {
             return;
         }
-        target_cols = old_cols - ((old_cols % unit) ? (old_cols % unit) : unit);
+        target_cols = old_cols - unit;
+        if (target_cols < 0) {
+            target_cols = 0;
+        }
     }
     new_tabs = target_cols / unit;
     new_spaces = target_cols % unit;

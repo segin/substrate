@@ -4525,6 +4525,15 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "\t  one\n\t  two\n\t  three\n",
+        [b"<", b"+"],
+    )
+    require(exit_code == 0, f"unshift-plus-indent vi exited with status {exit_code}")
+    require(saved == "  one\n  two\n\t  three\n",
+            f"unexpected unshift-plus-indent buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
         [b"2", b"]", b"]", b"r", b"X"],
     )

@@ -630,6 +630,11 @@ def main():
             "cols": 20,
         },
         {
+            "name": "line-plus-unshift-tab-indent",
+            "initial_text": "\t  one\n\t  two\n\t  three\n",
+            "key_steps": [b"<", b"+"],
+        },
+        {
             "name": "word-search-repeat-change",
             "initial_text": "one target\ntwo target\nthree target\n",
             "key_steps": [b"w", b"*", b"c", b"*", b"X", b"\x1b", b"n", b"."],
