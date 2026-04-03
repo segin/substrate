@@ -1015,6 +1015,35 @@ ln_process_one(const ln_options_t *opts, const char *source, const char *dest)
 }
 
 static int
+ln_build_plan_two_operands(const ln_options_t *opts, int operand_index, const char *dst,
+                           struct ln_plan *plan)
+{
+    bool dst_is_dir = ln_is_existing_dir_operand(dst, opts->no_target_deref);
+
+    if (opts->symbolic && opts->bsd_remove_target_dir && dst_is_dir) {
+        plan->use_target_dir = false;
+        plan->single_target = dst;
+        plan->src_start = operand_index;
+        plan->src_count = 1;
+        return 0;
+    }
+
+    if (!opts->no_target_directory && dst_is_dir) {
+        plan->use_target_dir = true;
+        plan->target_dir = dst;
+        plan->src_start = operand_index;
+        plan->src_count = 1;
+        return 0;
+    }
+
+    plan->use_target_dir = false;
+    plan->single_target = dst;
+    plan->src_start = operand_index;
+    plan->src_count = 1;
+    return 0;
+}
+
+static int
 ln_build_plan(const ln_options_t *opts, int argc, char **argv, int operand_index,
               struct ln_plan *plan)
 {
@@ -1047,30 +1076,7 @@ ln_build_plan(const ln_options_t *opts, int argc, char **argv, int operand_index
     }
 
     if (n_operands == 2) {
-        const char *dst = argv[operand_index + 1];
-        bool dst_is_dir = ln_is_existing_dir_operand(dst, opts->no_target_deref);
-
-        if (opts->symbolic && opts->bsd_remove_target_dir && dst_is_dir) {
-            plan->use_target_dir = false;
-            plan->single_target = dst;
-            plan->src_start = operand_index;
-            plan->src_count = 1;
-            return 0;
-        }
-
-        if (!opts->no_target_directory && dst_is_dir) {
-            plan->use_target_dir = true;
-            plan->target_dir = dst;
-            plan->src_start = operand_index;
-            plan->src_count = 1;
-            return 0;
-        }
-
-        plan->use_target_dir = false;
-        plan->single_target = dst;
-        plan->src_start = operand_index;
-        plan->src_count = 1;
-        return 0;
+        return ln_build_plan_two_operands(opts, operand_index, argv[operand_index + 1], plan);
     }
 
     if (opts->no_target_directory) {
