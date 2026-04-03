@@ -69,6 +69,7 @@ static int rust_append_unicode_identifier(rust_parser_t *p, const char *bytes, s
 static int rust_parse_v0_identifier(rust_parser_t *p);
 static int rust_parse_v0_type(rust_parser_t *p);
 static int rust_parse_v0_const(rust_parser_t *p);
+static int rust_parse_v0_const_int(rust_parser_t *p, char type_tag);
 static int rust_parse_v0_lifetime(rust_parser_t *p, int display);
 static int rust_parse_v0_dyn_trait(rust_parser_t *p);
 static int rust_parse_v0_generic_arg(rust_parser_t *p);
@@ -878,8 +879,18 @@ rust_parse_v0_const(rust_parser_t *p)
         p->cur++;
     }
 
-    if (!is_hex_char(p->cur[0])) {
+    if (rust_parse_v0_const_int(p, type_tag) != 0) {
         rust_mark_restore(p, &m);
+        return -1;
+    }
+
+    return 0;
+}
+
+static int
+rust_parse_v0_const_int(rust_parser_t *p, char type_tag)
+{
+    if (!is_hex_char(p->cur[0])) {
         return -1;
     }
 
