@@ -2059,6 +2059,34 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "alpha\nbeta\ngamma\n",
+        [b"G", b"d", b"?", b"a", b"l", b"p", b"h", b"a", b"\r"],
+    )
+    require(exit_code == 0, f"d?search vi exited with status {exit_code}")
+    require(saved == "gamma\n",
+            f"unexpected d?search buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha\nbeta\ngamma\n",
+        [b"G", b"c", b"?", b"a", b"l", b"p", b"h", b"a", b"\r", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"c?search vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing c?search insert status")
+    require(saved == "X\ngamma\n",
+            f"unexpected c?search buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha\nbeta\ngamma\n",
+        [b"G", b"y", b"?", b"a", b"l", b"p", b"h", b"a", b"\r", b"P"],
+    )
+    require(exit_code == 0, f"y?search vi exited with status {exit_code}")
+    require(saved == "alpha\nbeta\nalpha\nbeta\ngamma\n",
+            f"unexpected y?search buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "aa\nmatch\nbb\nmatch\ncc\n",
         [b">", b"/", b"m", b"a", b"t", b"c", b"h", b"\r"],
     )
@@ -2498,6 +2526,34 @@ def main():
     require(exit_code == 0, f"ygE-cross vi exited with status {exit_code}")
     require(saved == "one,two\nalpha,betao\nalpha,beta\n",
             f"unexpected ygE-cross buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc def ghi\n",
+        [b"0", b"d", b"f", b"g"],
+    )
+    require(exit_code == 0, f"0dfg vi exited with status {exit_code}")
+    require(saved == "hi\n",
+            f"unexpected 0dfg buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc def ghi\n",
+        [b"0", b"c", b"t", b"g", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"0ctg vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing 0ctg insert status")
+    require(saved == "Xghi\n",
+            f"unexpected 0ctg buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc def ghi\n",
+        [b"0", b"y", b"f", b"g", b"P"],
+    )
+    require(exit_code == 0, f"0yfgP vi exited with status {exit_code}")
+    require(saved == "abc def gabc def ghi\n",
+            f"unexpected 0yfgP buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
@@ -4215,6 +4271,35 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "ab(cd\nef)gh\n",
+        [b"G", b"f", b")", b"d", b"%"],
+    )
+    require(exit_code == 0, f"visual-percent-delete-cross-backward vi exited with status {exit_code}")
+    require(saved == "abgh\n",
+            f"unexpected visual-percent-delete-cross-backward buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "ab(cd\nef)gh\n",
+        [b"G", b"f", b")", b"c", b"%", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"visual-percent-change-cross-backward vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded,
+            "missing visual-percent-change-cross-backward insert status")
+    require(saved == "abXgh\n",
+            f"unexpected visual-percent-change-cross-backward buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "ab(cd\nef)gh\n",
+        [b"G", b"f", b")", b"y", b"%", b"P"],
+    )
+    require(exit_code == 0, f"visual-percent-yank-cross-backward vi exited with status {exit_code}")
+    require(saved == "ab(cd\nef)(cd\nef)gh\n",
+            f"unexpected visual-percent-yank-cross-backward buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "a (b [c] d) e\nnext line\n",
         [b"0", b"%", b"r", b"X"],
     )
@@ -4368,6 +4453,44 @@ def main():
     require(exit_code == 0, f"visual-exact-mark-unshift vi exited with status {exit_code}")
     require(saved == "abc def\n",
             f"unexpected visual-exact-mark-unshift buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"j", b"l", b"m", b"a", b"G", b"d", b"`", b"a"],
+    )
+    require(exit_code == 0, f"visual-exact-mark-delete-cross-backward vi exited with status {exit_code}")
+    require(saved == "one\nt\nthree\n",
+            f"unexpected visual-exact-mark-delete-cross-backward buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"G", b"l", b"m", b"a", b"g", b"g", b"d", b"`", b"a"],
+    )
+    require(exit_code == 0, f"visual-exact-mark-delete-cross-forward vi exited with status {exit_code}")
+    require(saved == "hree\n",
+            f"unexpected visual-exact-mark-delete-cross-forward buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"G", b"l", b"m", b"a", b"g", b"g", b"c", b"`", b"a", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"visual-exact-mark-change-cross-forward vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded,
+            "missing visual-exact-mark-change-cross-forward insert status")
+    require(saved == "Xhree\n",
+            f"unexpected visual-exact-mark-change-cross-forward buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"G", b"l", b"m", b"a", b"g", b"g", b"y", b"`", b"a", b"P"],
+    )
+    require(exit_code == 0, f"visual-exact-mark-yank-cross-forward vi exited with status {exit_code}")
+    require(saved == "one\ntwo\ntone\ntwo\nthree\n",
+            f"unexpected visual-exact-mark-yank-cross-forward buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,

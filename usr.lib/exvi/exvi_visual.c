@@ -4108,6 +4108,20 @@ vi_apply_backward_start_motion(buffer_t *b, vi_visual_t *vis, line_t *target_lin
 }
 
 static int
+vi_apply_search_charwise_motion(buffer_t *b, vi_visual_t *vis, line_t *target_line,
+    int target_col)
+{
+    if (!b->cur || !target_line) {
+        return -1;
+    }
+    if (vis->cursor_col == 0 &&
+        vi_compare_positions(b, b->cur, vis->cursor_col, target_line, target_col) > 0) {
+        return vi_apply_backward_start_motion(b, vis, target_line, target_col);
+    }
+    return vi_apply_charwise_motion(b, vis, target_line, target_col, 0);
+}
+
+static int
 vi_simulate_motion_target(buffer_t *b, vi_visual_t *vis,
     void (*move_fn)(buffer_t *, vi_visual_t *, int), int count,
     line_t **line_out, int *col_out)
@@ -5223,7 +5237,7 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             target_col == vis->cursor_col) {
             vi_start_change_insert(b, vis);
             vi_set_last_change(vis, VI_REPEAT_C_SEARCH_REPEAT, count, key);
-        } else if (vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
+        } else if (vi_apply_search_charwise_motion(b, vis, target_line, target_col) != 0) {
             vi_set_search_failure_status(vis, pattern);
             write(STDOUT_FILENO, "\a", 1);
         } else if (vis->pending_op == 'c') {
@@ -5366,7 +5380,7 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             target_col == vis->cursor_col) {
             vi_start_change_insert(b, vis);
             vi_set_last_change(vis, VI_REPEAT_C_SEARCH_REPEAT, count, key);
-        } else if (vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
+        } else if (vi_apply_search_charwise_motion(b, vis, target_line, target_col) != 0) {
             write(STDOUT_FILENO, "\a", 1);
         } else if (vis->pending_op == 'c') {
             vi_set_last_change(vis, VI_REPEAT_C_SEARCH_REPEAT, count, key);
@@ -5395,7 +5409,7 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             target_col == vis->cursor_col) {
             vi_start_change_insert(b, vis);
             vi_set_last_change(vis, VI_REPEAT_C_SEARCH_REPEAT, count, key);
-        } else if (vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {
+        } else if (vi_apply_search_charwise_motion(b, vis, target_line, target_col) != 0) {
             write(STDOUT_FILENO, "\a", 1);
         } else if (vis->pending_op == 'c') {
             vi_set_last_change(vis, VI_REPEAT_C_SEARCH_REPEAT, count, key);

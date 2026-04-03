@@ -488,6 +488,129 @@ def main():
             "key_steps": [b"2", b"d", b"%"],
         },
         {
+            "name": "search-forward-delete-cross",
+            "initial_text": "alpha\nbeta\ngamma\n",
+            "key_steps": [b"d", b"/", b"g", b"a", b"m", b"m", b"a", b"\r"],
+        },
+        {
+            "name": "search-forward-change-cross",
+            "initial_text": "alpha\nbeta\ngamma\n",
+            "key_steps": [b"c", b"/", b"g", b"a", b"m", b"m", b"a", b"\r",
+                b"X", b"\x1b"],
+        },
+        {
+            "name": "search-forward-yank-cross",
+            "initial_text": "alpha\nbeta\ngamma\n",
+            "key_steps": [b"y", b"/", b"g", b"a", b"m", b"m", b"a", b"\r", b"P"],
+        },
+        {
+            "name": "search-backward-delete-cross",
+            "initial_text": "alpha\nbeta\ngamma\n",
+            "key_steps": [b"G", b"d", b"?", b"a", b"l", b"p", b"h", b"a", b"\r"],
+        },
+        {
+            "name": "search-backward-change-cross",
+            "initial_text": "alpha\nbeta\ngamma\n",
+            "key_steps": [b"G", b"c", b"?", b"a", b"l", b"p", b"h", b"a", b"\r",
+                b"X", b"\x1b"],
+        },
+        {
+            "name": "search-backward-yank-cross",
+            "initial_text": "alpha\nbeta\ngamma\n",
+            "key_steps": [b"G", b"y", b"?", b"a", b"l", b"p", b"h", b"a", b"\r", b"P"],
+        },
+        {
+            "name": "find-forward-delete",
+            "initial_text": "abc def ghi\n",
+            "key_steps": [b"0", b"d", b"f", b"g"],
+        },
+        {
+            "name": "find-forward-change",
+            "initial_text": "abc def ghi\n",
+            "key_steps": [b"0", b"c", b"t", b"g", b"X", b"\x1b"],
+        },
+        {
+            "name": "find-forward-yank",
+            "initial_text": "abc def ghi\n",
+            "key_steps": [b"0", b"y", b"f", b"g", b"P"],
+        },
+        {
+            "name": "find-backward-delete",
+            "initial_text": "abc def ghi\n",
+            "key_steps": [b"$", b"d", b"F", b"g"],
+        },
+        {
+            "name": "find-backward-change",
+            "initial_text": "abc def ghi\n",
+            "key_steps": [b"$", b"c", b"T", b"g", b"X", b"\x1b"],
+        },
+        {
+            "name": "find-backward-yank",
+            "initial_text": "abc def ghi\n",
+            "key_steps": [b"$", b"y", b"F", b"g", b"P"],
+        },
+        {
+            "name": "match-forward-delete-cross",
+            "initial_text": "ab(cd\nef)gh\n",
+            "key_steps": [b"0", b"f", b"(", b"d", b"%"],
+        },
+        {
+            "name": "match-forward-change-cross",
+            "initial_text": "ab(cd\nef)gh\n",
+            "key_steps": [b"0", b"f", b"(", b"c", b"%", b"X", b"\x1b"],
+        },
+        {
+            "name": "match-forward-yank-cross",
+            "initial_text": "ab(cd\nef)gh\n",
+            "key_steps": [b"0", b"f", b"(", b"y", b"%", b"P"],
+        },
+        {
+            "name": "match-backward-delete-cross",
+            "initial_text": "ab(cd\nef)gh\n",
+            "key_steps": [b"G", b"f", b")", b"d", b"%"],
+        },
+        {
+            "name": "match-backward-change-cross",
+            "initial_text": "ab(cd\nef)gh\n",
+            "key_steps": [b"G", b"f", b")", b"c", b"%", b"X", b"\x1b"],
+        },
+        {
+            "name": "match-backward-yank-cross",
+            "initial_text": "ab(cd\nef)gh\n",
+            "key_steps": [b"G", b"f", b")", b"y", b"%", b"P"],
+        },
+        {
+            "name": "mark-backward-delete-cross",
+            "initial_text": "one\ntwo\nthree\n",
+            "key_steps": [b"j", b"l", b"m", b"a", b"G", b"d", b"`", b"a"],
+        },
+        {
+            "name": "mark-backward-change-cross",
+            "initial_text": "one\ntwo\nthree\n",
+            "key_steps": [b"j", b"l", b"m", b"a", b"G", b"c", b"`", b"a", b"X", b"\x1b"],
+        },
+        {
+            "name": "mark-backward-yank-cross",
+            "initial_text": "one\ntwo\nthree\n",
+            "key_steps": [b"j", b"l", b"m", b"a", b"G", b"y", b"`", b"a", b"P"],
+        },
+        {
+            "name": "mark-forward-delete-cross",
+            "initial_text": "one\ntwo\nthree\n",
+            "key_steps": [b"G", b"l", b"m", b"a", b"g", b"g", b"d", b"`", b"a"],
+        },
+        {
+            "name": "mark-forward-change-cross",
+            "initial_text": "one\ntwo\nthree\n",
+            "key_steps": [b"G", b"l", b"m", b"a", b"g", b"g", b"c", b"`", b"a",
+                b"X", b"\x1b"],
+        },
+        {
+            "name": "mark-forward-yank-cross",
+            "initial_text": "one\ntwo\nthree\n",
+            "key_steps": [b"G", b"l", b"m", b"a", b"g", b"g", b"y", b"`", b"a", b"P"],
+        },
+        {
             "name": "word-search-repeat-change",
             "initial_text": "one target\ntwo target\nthree target\n",
             "key_steps": [b"w", b"*", b"c", b"*", b"X", b"\x1b", b"n", b"."],
