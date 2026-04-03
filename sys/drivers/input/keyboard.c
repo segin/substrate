@@ -18,6 +18,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <sys/vt.h>
+#include <sys/tty.h>
 
 /* ---- Key Buffer ---- */
 

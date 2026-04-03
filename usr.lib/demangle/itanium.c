@@ -583,8 +583,8 @@ parse_substitution(dm_itanium_parser_t *p)
     return parser_lookup_substitution(p, idx + 1u);
 }
 
-static int
-parse_operator_name(dm_itanium_parser_t *p)
+static const char *
+lookup_operator_name(const char *code)
 {
     static const struct {
         const char code[3];
@@ -633,6 +633,19 @@ parse_operator_name(dm_itanium_parser_t *p)
     };
     size_t i;
 
+    for (i = 0u; i < sizeof(ops) / sizeof(ops[0]); i++) {
+        if (code[0] == ops[i].code[0] && code[1] == ops[i].code[1]) {
+            return ops[i].name;
+        }
+    }
+    return NULL;
+}
+
+static int
+parse_operator_name(dm_itanium_parser_t *p)
+{
+    const char *name;
+
     if (p->cur[0] == 'c' && p->cur[1] == 'v') {
         p->cur += 2;
         if (buf_append(&p->out, "operator ", 9u) != 0) {
@@ -649,11 +662,10 @@ parse_operator_name(dm_itanium_parser_t *p)
         return parse_source_name(p);
     }
 
-    for (i = 0u; i < sizeof(ops) / sizeof(ops[0]); i++) {
-        if (p->cur[0] == ops[i].code[0] && p->cur[1] == ops[i].code[1]) {
-            p->cur += 2;
-            return buf_append(&p->out, ops[i].name, strlen(ops[i].name));
-        }
+    name = lookup_operator_name(p->cur);
+    if (name != NULL) {
+        p->cur += 2;
+        return buf_append(&p->out, name, strlen(name));
     }
 
     return -1;

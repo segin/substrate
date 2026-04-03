@@ -50,14 +50,17 @@ KERNEL_CFLAGS = $(FREESTANDING_CFLAGS) $(KERNEL_I386_BASELINE_FLAGS) -I$(KERNEL_
 # These will eventually link against our own libc
 # Userland flags (for standard libraries and utils)
 # These will eventually link against our own libc
+EXTRA_USER_CFLAGS := $(USER_CFLAGS)
+EXTRA_USER_LDFLAGS := $(USER_LDFLAGS)
+
 ifdef NATIVE_BUILD
     # Host build configuration
     HOSTCFLAGS ?= -O2 $(WARNFLAGS)
     CC := $(HOSTCC)
     CFLAGS := $(HOSTCFLAGS)
     # Start with empty/standard flags for host, but allow overrides.
-    USER_CFLAGS := $(CFLAGS) $(USER_CFLAGS)
-    USER_LDFLAGS := $(USER_LDFLAGS)
+    USER_CFLAGS := $(CFLAGS) $(EXTRA_USER_CFLAGS)
+    USER_LDFLAGS := $(EXTRA_USER_LDFLAGS)
     LIBGCC :=
 else
     # Target build configuration (Substrate i386)
@@ -67,7 +70,8 @@ ifneq ($(wildcard $(GCC_INCLUDE)),)
     USER_CFLAGS += -I$(GCC_INCLUDE)
 endif
 endif
-    USER_LDFLAGS := -m32 -nostdlib -fno-pie -no-pie $(USER_LDFLAGS)
+    USER_CFLAGS += $(EXTRA_USER_CFLAGS)
+    USER_LDFLAGS := -m32 -nostdlib -fno-pie -no-pie $(EXTRA_USER_LDFLAGS)
     LIBGCC = $(shell $(CC) -m32 -print-libgcc-file-name)
 endif
 

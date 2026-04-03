@@ -8951,123 +8951,8 @@ static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigne
 static int eval_local_rel_expr_virtual(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *base_st, uint64_t base_off,
                                        unsigned x86_code_bits, const as_expr_t *e, long long *out);
 
-static int is_jcc_mnemonic(const char *mn) {
-    if (mn == NULL || mn[0] == '\0') {
-        return 0;
-    }
-    if (streq_ci(mn, "jmp")) {
-        return 0;
-    }
-    if (is_short_rel_mnemonic(mn)) {
-        return 0;
-    }
-    return (mn[0] == 'j' || mn[0] == 'J') && mn[1] != '\0';
-}
 
-static unsigned rel_forward_base_len(const as_instruction_t *in, unsigned x86_code_bits, long long delta) {
-    char mnbuf[32];
-    char suffix = '\0';
 
-    if (in == NULL || in->mnemonic == NULL) {
-        return 0;
-    }
-    if (normalize_x86_mnemonic(in->mnemonic, mnbuf, sizeof(mnbuf), &suffix) != 0) {
-        return 0;
-    }
-    if (!is_rel_mnemonic(mnbuf)) {
-        return 0;
-    }
-    if (suffix == 'b' || is_short_rel_mnemonic(mnbuf)) {
-        return 2u;
-    }
-    if (streq_ci(mnbuf, "call") || streq_ci(mnbuf, "jmp")) {
-        return x86_code_bits == 16u ? 3u : 5u;
-    }
-    if (streq_ci(mnbuf, "xbegin")) {
-        return 6u;
-    }
-    if (is_jcc_mnemonic(mnbuf)) {
-        if (delta >= -128 && delta <= 127) {
-            return 2u;
-        }
-        return x86_code_bits == 16u ? 4u : 6u;
-    }
-    return x86_code_bits == 16u ? 3u : 5u;
-}
-
-static uint64_t estimate_stmt_len(emit_ctx_t *ctx, unsigned x86_code_bits, const as_stmt_t *st) {
-    unsigned char code[32];
-    size_t code_len = 0;
-    char encerr[256];
-    as_elf_cfg_t stmt_cfg;
-
-    if (ctx == NULL || ctx->cfg == NULL || st == NULL || st->kind != AS_STMT_INSTRUCTION) {
-        return 0;
-    }
-    stmt_cfg = *ctx->cfg;
-    stmt_cfg.x86_code_bits = x86_code_bits;
-    stmt_cfg.have_current_text_offset = 1u;
-    stmt_cfg.current_text_offset = 0;
-    if (encode_x86_stmt(&stmt_cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
-        return 0;
-    }
-    return (uint64_t)code_len;
-}
-
-static int estimate_stmt_len_at(emit_ctx_t *ctx, const char *section_name, unsigned x86_code_bits, uint64_t sec_off,
-                                const as_stmt_t *st, uint64_t *len_out) {
-    unsigned char code[32];
-    size_t code_len = 0;
-    char encerr[256];
-    as_elf_cfg_t stmt_cfg;
-    char mnbuf[32];
-    char suffix = '\0';
-    long long const_tmp = 0;
-
-    if (ctx == NULL || st == NULL || len_out == NULL) {
-        return -1;
-    }
-    *len_out = 0;
-    if (st->kind == AS_STMT_DIRECTIVE) {
-        bytebuf_t tmp;
-        memset(&tmp, 0, sizeof(tmp));
-        if (append_directive_data(&tmp, &st->u.directive) != 0) {
-            free(tmp.data);
-            return -1;
-        }
-        *len_out = (uint64_t)tmp.len;
-        free(tmp.data);
-        return 0;
-    }
-    if (st->kind != AS_STMT_INSTRUCTION) {
-        return 0;
-    }
-    if (!section_name_is_executable(ctx, section_name)) {
-        return 0;
-    }
-    if (ctx->cfg == NULL) {
-        return -1;
-    }
-    if (normalize_x86_mnemonic(st->u.instr.mnemonic, mnbuf, sizeof(mnbuf), &suffix) == 0 &&
-        is_rel_mnemonic(mnbuf) &&
-        st->u.instr.operand_count == 1 &&
-        st->u.instr.operands[0].u.expr != NULL &&
-        (st->u.instr.operands[0].kind == AS_OPERAND_LABEL_REF ||
-         st->u.instr.operands[0].kind == AS_OPERAND_IMMEDIATE) &&
-        eval_expr_const(st->u.instr.operands[0].u.expr, &const_tmp) != 0) {
-        *len_out = rel_forward_base_len(&st->u.instr, x86_code_bits, LLONG_MAX);
-        return 0;
-    }
-    stmt_cfg = *ctx->cfg;
-    stmt_cfg.x86_code_bits = x86_code_bits;
-    stmt_cfg.have_current_text_offset = 1u;
-    stmt_cfg.current_text_offset = sec_off;
-    if (encode_x86_stmt(&stmt_cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
-        return -1;
-    }
-    *len_out = (uint64_t)code_len;
-    return 0;
-}
 
 static int find_label_virtual_offset(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *base_st,
                                      const char *file, unsigned line, int digit, const char *sym_name,
@@ -9162,7 +9047,7 @@ static int find_label_virtual_offset(emit_ctx_t *ctx, const char *section_name, 
     return -1;
 }
 
-static __attribute__((unused)) int find_numeric_local_virtual_offset(emit_ctx_t *ctx, const char *section_name,
+static int find_numeric_local_virtual_offset(emit_ctx_t *ctx, const char *section_name,
                                                                      const as_stmt_t *base_st, uint64_t base_off,
                                                                      unsigned x86_code_bits,
                                                                      const char *file, unsigned line, int digit,
@@ -9272,7 +9157,7 @@ static __attribute__((unused)) int find_numeric_local_virtual_offset(emit_ctx_t 
     }
 }
 
-static __attribute__((unused)) int find_named_label_virtual_offset(emit_ctx_t *ctx, const char *section_name,
+static int find_named_label_virtual_offset(emit_ctx_t *ctx, const char *section_name,
                                                                    const as_stmt_t *base_st, uint64_t base_off,
                                                                    unsigned x86_code_bits,
                                                                    const char *sym_name, uint64_t *off_out) {
@@ -9392,16 +9277,17 @@ static int eval_local_rel_expr_virtual(emit_ctx_t *ctx, const char *section_name
         return 0;
     case AS_EXPR_SYMBOL:
         if (e->symbol == NULL || !is_local_temp_symbol_name(e->symbol) ||
-            find_named_label_virtual_offset(ctx, section_name, base_st, base_off, x86_code_bits,
-                                            e->symbol, &target_off) != 0) {
+            find_label_virtual_offset(ctx, section_name, base_st, NULL, 0, 0,
+                                      e->symbol, &target_off) != 0) {
             return -1;
         }
         *out = (long long)target_off - (long long)base_off;
         return 0;
     case AS_EXPR_LOCAL_REF:
         if (!e->local_resolved || e->src_file == NULL ||
-            find_numeric_local_virtual_offset(ctx, section_name, base_st, base_off, x86_code_bits,
-                                              e->src_file, e->local_target_line, e->local_digit, &target_off) != 0) {
+            find_label_virtual_offset(ctx, section_name, base_st,
+                                      e->src_file, e->local_target_line, e->local_digit,
+                                      NULL, &target_off) != 0) {
             return -1;
         }
         *out = (long long)target_off - (long long)base_off;
