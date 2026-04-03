@@ -113,7 +113,7 @@ void pseudo_init(void) {
     // /dev/port
     static fs_node_t port_node;
     memset(&port_node, 0, sizeof(fs_node_t));
-    strcpy(port_node.name, "port");
+    strlcpy(port_node.name, "port", sizeof(port_node.name));
     port_node.flags = FS_CHARDEVICE;
     port_node.mask = 0600;
     port_node.uid = 0;
@@ -126,7 +126,7 @@ void pseudo_init(void) {
     // /dev/stdin
     static fs_node_t stdin_node;
     memset(&stdin_node, 0, sizeof(fs_node_t));
-    strcpy(stdin_node.name, "stdin");
+    strlcpy(stdin_node.name, "stdin", sizeof(stdin_node.name));
     stdin_node.flags = FS_SYMLINK;
     stdin_node.readlink = &stdin_readlink;
     devfs_register_device(&stdin_node);
@@ -134,7 +134,7 @@ void pseudo_init(void) {
     // /dev/stdout
     static fs_node_t stdout_node;
     memset(&stdout_node, 0, sizeof(fs_node_t));
-    strcpy(stdout_node.name, "stdout");
+    strlcpy(stdout_node.name, "stdout", sizeof(stdout_node.name));
     stdout_node.flags = FS_SYMLINK;
     stdout_node.readlink = &stdout_readlink;
     devfs_register_device(&stdout_node);
@@ -142,7 +142,7 @@ void pseudo_init(void) {
     // /dev/stderr
     static fs_node_t stderr_node;
     memset(&stderr_node, 0, sizeof(fs_node_t));
-    strcpy(stderr_node.name, "stderr");
+    strlcpy(stderr_node.name, "stderr", sizeof(stderr_node.name));
     stderr_node.flags = FS_SYMLINK;
     stderr_node.readlink = &stderr_readlink;
     devfs_register_device(&stderr_node);

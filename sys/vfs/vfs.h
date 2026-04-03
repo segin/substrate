@@ -16,6 +16,7 @@
 
 struct fs_node;
 struct mount;
+struct statfs;
 
 typedef size_t (*read_type_t)(struct fs_node*, off_t, size_t, uint8_t*);
 typedef size_t (*write_type_t)(struct fs_node*, off_t, size_t, const uint8_t*);
@@ -37,6 +38,8 @@ typedef int (*mkdir_type_t)(struct fs_node*, const char *name, uint16_t permissi
 typedef int (*mknod_type_t)(struct fs_node*, const char *name, uint16_t mode, uint32_t dev);
 typedef int (*truncate_type_t)(struct fs_node*, off_t);
 typedef int (*unmount_type_t)(struct fs_node*);
+typedef int (*rename_type_t)(struct fs_node *old_parent, const char *old_name, struct fs_node *new_parent, const char *new_name);
+typedef int (*statfs_type_t)(struct fs_node *node, struct statfs *buf);
 
 typedef struct fs_node {
     char name[128];
@@ -72,6 +75,8 @@ typedef struct fs_node {
     mknod_type_t mknod;
     truncate_type_t truncate;
     unmount_type_t unmount;
+    rename_type_t rename;
+    statfs_type_t statfs;
     struct fs_node *ptr; // Used by mountpoints and symlinks.
     struct mount *mp;    // Mount point this node belongs to.
 } fs_node_t;
@@ -105,6 +110,8 @@ int symlink_fs(fs_node_t *parent, const char *target, const char *name);
 int link_fs(fs_node_t *parent, fs_node_t *source, const char *name);
 int unlink_fs(fs_node_t *node, const char *name);
 int rmdir_fs(fs_node_t *node, const char *name);
+int rename_fs(fs_node_t *old_parent, const char *old_name, fs_node_t *new_parent, const char *new_name);
+int statfs_fs(fs_node_t *node, struct statfs *buf);
 int mknod_fs(fs_node_t *node, const char *name, uint16_t mode, uint32_t dev);
 int vfs_mkdir(const char *path, uint16_t permission);
 int vfs_mknod(const char *path, uint16_t mode, uint32_t dev);

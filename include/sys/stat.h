@@ -62,10 +62,15 @@ struct stat {
 #define S_IWOTH 00002
 #define S_IXOTH 00001
 
-int mkdir(const char *pathname, int mode);
+int mkdir(const char *pathname, mode_t mode);
 int stat(const char *pathname, struct stat *statbuf);
 int fstat(int fd, struct stat *statbuf);
 int lstat(const char *pathname, struct stat *statbuf);
 int mknod(const char *pathname, mode_t mode, dev_t dev);
+int chmod(const char *pathname, mode_t mode);
+int chown(const char *pathname, uid_t owner, gid_t group);
+int fchmod(int fd, mode_t mode);
+int fchown(int fd, uid_t owner, gid_t group);
+mode_t umask(mode_t mask);
 
 #endif

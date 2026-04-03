@@ -22,6 +22,13 @@ static int csts_clear_after_reads[4];
 static int csts_set_after_reads[4];
 static uintptr_t mock_dma_next;
 static int dma_alloc_fail_after;
+static uint8_t identify_data[4][4096];
+static uint8_t namespace_identify_data[4][NVME_MAX_NAMESPACES][4096];
+static uint16_t admin_status_code[4];
+static int admin_completion_seen[4];
+static void *mock_dma_ptrs[32];
+static dma_addr_t mock_dma_addrs[32];
+static size_t mock_dma_sizes[32];
 
 static void reset_state(void) {
     memset(mock_devices, 0, sizeof(mock_devices));
@@ -35,6 +42,13 @@ static void reset_state(void) {
     memset(csts_read_count, 0, sizeof(csts_read_count));
     memset(csts_clear_after_reads, 0, sizeof(csts_clear_after_reads));
     memset(csts_set_after_reads, 0, sizeof(csts_set_after_reads));
+    memset(identify_data, ' ', sizeof(identify_data));
+    memset(namespace_identify_data, 0, sizeof(namespace_identify_data));
+    memset(admin_status_code, 0, sizeof(admin_status_code));
+    memset(admin_completion_seen, 0, sizeof(admin_completion_seen));
+    memset(mock_dma_ptrs, 0, sizeof(mock_dma_ptrs));
+    memset(mock_dma_addrs, 0, sizeof(mock_dma_addrs));
+    memset(mock_dma_sizes, 0, sizeof(mock_dma_sizes));
     mock_dma_next = 0x20000000U;
     dma_alloc_fail_after = -1;
 }
@@ -196,6 +210,7 @@ void nvme_test_mmio_write32(volatile uint8_t *mmio, uint32_t reg, uint32_t value
 
 void *dma_alloc_coherent(size_t size, dma_addr_t *dma_handle) {
     void *ptr;
+    size_t i;
 
     if (dma_alloc_fail_after == 0) {
         return NULL;
@@ -208,17 +223,88 @@ void *dma_alloc_coherent(size_t size, dma_addr_t *dma_handle) {
     assert(ptr != NULL);
     if (dma_handle != NULL) {
         *dma_handle = (dma_addr_t)mock_dma_next;
+        for (i = 0; i < (sizeof(mock_dma_ptrs) / sizeof(mock_dma_ptrs[0])); i++) {
+            if (mock_dma_ptrs[i] == NULL) {
+                mock_dma_ptrs[i] = ptr;
+                mock_dma_addrs[i] = *dma_handle;
+                mock_dma_sizes[i] = size;
+                break;
+            }
+        }
+        assert(i < (sizeof(mock_dma_ptrs) / sizeof(mock_dma_ptrs[0])));
         mock_dma_next += (uintptr_t)((size + 0xFFFU) & ~0xFFFU);
     }
     return ptr;
 }
 
 void dma_free_coherent(void *cpu_addr, size_t size) {
+    size_t i;
+
     (void)size;
+    for (i = 0; i < (sizeof(mock_dma_ptrs) / sizeof(mock_dma_ptrs[0])); i++) {
+        if (mock_dma_ptrs[i] == cpu_addr) {
+            mock_dma_ptrs[i] = NULL;
+            mock_dma_addrs[i] = (dma_addr_t)0;
+            mock_dma_sizes[i] = 0;
+            break;
+        }
+    }
     free(cpu_addr);
 }
 
+static void *mock_dma_lookup(dma_addr_t dma_addr, size_t min_size) {
+    size_t i;
+
+    for (i = 0; i < (sizeof(mock_dma_ptrs) / sizeof(mock_dma_ptrs[0])); i++) {
+        if (mock_dma_ptrs[i] != NULL && mock_dma_addrs[i] == dma_addr &&
+            mock_dma_sizes[i] >= min_size) {
+            return mock_dma_ptrs[i];
+        }
+    }
+    return NULL;
+}
+
+void nvme_test_admin_kick(nvme_controller_t *ctrl, uint16_t sq_tail);
+
 #include "../../sys/drivers/storage/nvme/nvme.c"
+
+void nvme_test_admin_kick(nvme_controller_t *ctrl, uint16_t sq_tail) {
+    nvme_admin_cmd_t *sq;
+    nvme_cqe_t *cq;
+    nvme_admin_cmd_t *cmd;
+    int idx;
+    uint8_t *id_buf;
+
+    idx = mock_mmio_index(ctrl->mmio);
+    assert(idx >= 0);
+    sq = (nvme_admin_cmd_t *)ctrl->admin_sq;
+    cq = (nvme_cqe_t *)ctrl->admin_cq;
+    cmd = &sq[sq_tail];
+
+    if (cmd->opcode == NVME_ADMIN_OP_IDENTIFY &&
+        cmd->cdw10 == NVME_IDENTIFY_CNS_CONTROLLER) {
+        id_buf = (uint8_t *)mock_dma_lookup((dma_addr_t)cmd->prp1,
+                                            sizeof(identify_data[idx]));
+        assert(id_buf != NULL);
+        memcpy(id_buf, identify_data[idx], sizeof(identify_data[idx]));
+    } else if (cmd->opcode == NVME_ADMIN_OP_IDENTIFY &&
+               cmd->cdw10 == NVME_IDENTIFY_CNS_NAMESPACE) {
+        assert(cmd->nsid > 0 && cmd->nsid <= NVME_MAX_NAMESPACES);
+        id_buf = (uint8_t *)mock_dma_lookup((dma_addr_t)cmd->prp1,
+                                            sizeof(namespace_identify_data[idx][0]));
+        assert(id_buf != NULL);
+        memcpy(id_buf, namespace_identify_data[idx][cmd->nsid - 1],
+               sizeof(namespace_identify_data[idx][0]));
+    }
+
+    memset(&cq[ctrl->admin_cq_head], 0, sizeof(cq[0]));
+    cq[ctrl->admin_cq_head].cid = cmd->cid;
+    cq[ctrl->admin_cq_head].sq_id = 0;
+    cq[ctrl->admin_cq_head].sq_head = ctrl->admin_sq_tail;
+    cq[ctrl->admin_cq_head].status =
+        (uint16_t)((admin_status_code[idx] << 1) | ctrl->admin_cq_phase);
+    admin_completion_seen[idx]++;
+}
 
 static void test_decode_cap_extracts_timeout_and_stride(void) {
     nvme_capability_t cap;
@@ -470,6 +556,130 @@ static void test_enable_controller_times_out_if_ready_never_sets(void) {
     assert(ctrl.enabled == 0);
 }
 
+static void test_identify_controller_submits_admin_command_and_parses_strings(void) {
+    nvme_controller_t ctrl;
+
+    reset_state();
+    memset(&ctrl, 0, sizeof(ctrl));
+    ctrl.present = 1;
+    ctrl.mmio = mock_mmio[0];
+    ctrl.cap.timeout_ms = 5;
+    ctrl.cap.doorbell_stride_bytes = 4;
+    ctrl.admin_sq_entries = 4;
+    ctrl.admin_cq_entries = 4;
+
+    assert(nvme_create_admin_queues(&ctrl) == 0);
+    ctrl.enabled = 1;
+    memcpy(identify_data[0] + 4, "SUBSTRATE-NVME-0001  ", 20);
+    memcpy(identify_data[0] + 24, "Substrate Test NVMe Controller          ", 40);
+    memcpy(identify_data[0] + 64, "1.0A    ", 8);
+    identify_data[0][78] = 0x34;
+    identify_data[0][79] = 0x12;
+    identify_data[0][516] = 0x02;
+    identify_data[0][517] = 0x00;
+    identify_data[0][518] = 0x00;
+    identify_data[0][519] = 0x00;
+
+    assert(nvme_identify_controller(&ctrl) == 0);
+    assert(admin_completion_seen[0] == 1);
+    assert(ctrl.identify_valid == 1);
+    assert(ctrl.controller_id == 0x1234);
+    assert(ctrl.namespace_total == 2);
+    assert(strcmp(ctrl.serial, "SUBSTRATE-NVME-0001") == 0);
+    assert(strcmp(ctrl.model, "Substrate Test NVMe Controller") == 0);
+    assert(strcmp(ctrl.firmware, "1.0A") == 0);
+
+    dma_free_coherent(ctrl.admin_sq, ctrl.admin_sq_bytes);
+    dma_free_coherent(ctrl.admin_cq, ctrl.admin_cq_bytes);
+}
+
+static void test_identify_controller_fails_on_admin_error_status(void) {
+    nvme_controller_t ctrl;
+
+    reset_state();
+    memset(&ctrl, 0, sizeof(ctrl));
+    ctrl.present = 1;
+    ctrl.mmio = mock_mmio[1];
+    ctrl.cap.timeout_ms = 5;
+    ctrl.cap.doorbell_stride_bytes = 4;
+    ctrl.admin_sq_entries = 2;
+    ctrl.admin_cq_entries = 2;
+    admin_status_code[1] = 1;
+
+    assert(nvme_create_admin_queues(&ctrl) == 0);
+    ctrl.enabled = 1;
+    assert(nvme_identify_controller(&ctrl) < 0);
+    assert(ctrl.identify_valid == 0);
+
+    dma_free_coherent(ctrl.admin_sq, ctrl.admin_sq_bytes);
+    dma_free_coherent(ctrl.admin_cq, ctrl.admin_cq_bytes);
+}
+
+static void test_identify_namespaces_discovers_active_nsids(void) {
+    nvme_controller_t ctrl;
+
+    reset_state();
+    memset(&ctrl, 0, sizeof(ctrl));
+    ctrl.present = 1;
+    ctrl.mmio = mock_mmio[0];
+    ctrl.identify_valid = 1;
+    ctrl.namespace_total = 3;
+    ctrl.cap.timeout_ms = 5;
+    ctrl.cap.doorbell_stride_bytes = 4;
+    ctrl.admin_sq_entries = 4;
+    ctrl.admin_cq_entries = 4;
+
+    assert(nvme_create_admin_queues(&ctrl) == 0);
+    ctrl.enabled = 1;
+
+    namespace_identify_data[0][0][0] = 0x00;
+    namespace_identify_data[0][0][1] = 0x10;
+    namespace_identify_data[0][0][8] = 0x00;
+    namespace_identify_data[0][0][9] = 0x10;
+    namespace_identify_data[0][0][16] = 0x00;
+    namespace_identify_data[0][0][17] = 0x08;
+    namespace_identify_data[0][0][26] = 0x00;
+    namespace_identify_data[0][0][128 + 2] = 12;
+
+    namespace_identify_data[0][1][0] = 0x00;
+
+    namespace_identify_data[0][2][0] = 0x34;
+    namespace_identify_data[0][2][1] = 0x12;
+    namespace_identify_data[0][2][8] = 0x00;
+    namespace_identify_data[0][2][16] = 0x78;
+    namespace_identify_data[0][2][26] = 0x00;
+    namespace_identify_data[0][2][128 + 2] = 9;
+
+    assert(nvme_identify_namespaces(&ctrl) == 0);
+    assert(ctrl.namespace_count == 2);
+    assert(ctrl.namespaces[0].valid == 1);
+    assert(ctrl.namespaces[0].nsid == 1);
+    assert(ctrl.namespaces[0].nsze == 0x1000);
+    assert(ctrl.namespaces[0].ncap == 0x1000);
+    assert(ctrl.namespaces[0].nuse == 0x0800);
+    assert(ctrl.namespaces[0].block_size == 4096);
+    assert(ctrl.namespaces[1].valid == 1);
+    assert(ctrl.namespaces[1].nsid == 3);
+    assert(ctrl.namespaces[1].nsze == 0x1234);
+    assert(ctrl.namespaces[1].nuse == 0x78);
+    assert(ctrl.namespaces[1].block_size == 512);
+    assert(admin_completion_seen[0] == 3);
+
+    dma_free_coherent(ctrl.admin_sq, ctrl.admin_sq_bytes);
+    dma_free_coherent(ctrl.admin_cq, ctrl.admin_cq_bytes);
+}
+
+static void test_identify_namespaces_requires_controller_identify(void) {
+    nvme_controller_t ctrl;
+
+    reset_state();
+    memset(&ctrl, 0, sizeof(ctrl));
+    ctrl.present = 1;
+    ctrl.mmio = mock_mmio[1];
+
+    assert(nvme_identify_namespaces(&ctrl) < 0);
+}
+
 int main(void) {
     test_decode_cap_extracts_timeout_and_stride();
     test_scan_filters_nvme_functions_and_records_cap();
@@ -484,6 +694,10 @@ int main(void) {
     test_create_admin_queues_frees_sq_if_cq_alloc_fails();
     test_enable_controller_sets_cc_and_waits_for_ready();
     test_enable_controller_times_out_if_ready_never_sets();
+    test_identify_controller_submits_admin_command_and_parses_strings();
+    test_identify_controller_fails_on_admin_error_status();
+    test_identify_namespaces_discovers_active_nsids();
+    test_identify_namespaces_requires_controller_identify();
     puts("host_test_nvme: PASS");
     return 0;
 }
