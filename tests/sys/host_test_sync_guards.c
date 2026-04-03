@@ -198,6 +198,41 @@ static void test_mutex_force_release_wakes_waiter(void) {
     assert(wake_one_calls == 1);
 }
 
+static void test_mutex_track_owner_basic(void) {
+    mutex_t m1, m2;
+    thread_t *owner;
+
+    reset_env();
+    owner = init_thread(0, 1);
+
+    mutex_init(&m1, "m1");
+    mutex_init(&m2, "m2");
+
+    // Test null checks
+    mutex_track_owner(NULL, owner);
+    mutex_track_owner(&m1, NULL);
+    assert(owner->held_mutexes == NULL);
+
+    // Test single track
+    mutex_track_owner(&m1, owner);
+    assert(owner->held_mutexes == &m1);
+    assert(m1.owned_next == NULL);
+
+    // Test multiple track
+    mutex_track_owner(&m2, owner);
+    assert(owner->held_mutexes == &m2);
+    assert(m2.owned_next == &m1);
+    assert(m1.owned_next == NULL);
+
+    // Test untrack (clean up)
+    mutex_untrack_owner(&m1, owner);
+    assert(owner->held_mutexes == &m2);
+    assert(m2.owned_next == NULL);
+
+    mutex_untrack_owner(&m2, owner);
+    assert(owner->held_mutexes == NULL);
+}
+
 int main(void) {
     test_mutex_unlock_by_non_owner_panics();
     test_mutex_recursive_lock_panics();
