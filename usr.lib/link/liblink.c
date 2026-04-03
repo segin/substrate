@@ -186,6 +186,48 @@ ln_path_join(const char *left, const char *right)
 }
 
 static char *
+ln_build_normalized_path(char **segs, size_t seg_len, bool abs, size_t original_len)
+{
+    size_t out_cap;
+    char *out;
+    size_t pos;
+    size_t i;
+
+    out_cap = original_len + 4;
+    out = (char *)malloc(out_cap);
+    if (!out) {
+        return NULL;
+    }
+
+    pos = 0;
+    if (seg_len == 0) {
+        if (abs) {
+            out[pos++] = '/';
+        } else {
+            out[pos++] = '.';
+        }
+        out[pos] = '\0';
+        return out;
+    }
+
+    if (abs) {
+        out[pos++] = '/';
+    }
+
+    for (i = 0; i < seg_len; ++i) {
+        size_t slen = strlen(segs[i]);
+        if (i > 0) {
+            out[pos++] = '/';
+        }
+        memcpy(out + pos, segs[i], slen);
+        pos += slen;
+    }
+    out[pos] = '\0';
+
+    return out;
+}
+
+static char *
 ln_path_normalize_copy(const char *path)
 {
     size_t len;
@@ -196,10 +238,7 @@ ln_path_normalize_copy(const char *path)
     char **segs;
     size_t seg_cap;
     size_t seg_len;
-    size_t out_cap;
     char *out;
-    size_t pos;
-    size_t i;
 
     if (!path) {
         errno = EINVAL;
@@ -246,40 +285,7 @@ ln_path_normalize_copy(const char *path)
         tok = strtok_r(NULL, "/", &saveptr);
     }
 
-    out_cap = len + 4;
-    out = (char *)malloc(out_cap);
-    if (!out) {
-        free(segs);
-        free(tmp);
-        return NULL;
-    }
-
-    pos = 0;
-    if (seg_len == 0) {
-        if (abs) {
-            out[pos++] = '/';
-        } else {
-            out[pos++] = '.';
-        }
-        out[pos] = '\0';
-        free(segs);
-        free(tmp);
-        return out;
-    }
-
-    if (abs) {
-        out[pos++] = '/';
-    }
-
-    for (i = 0; i < seg_len; ++i) {
-        size_t slen = strlen(segs[i]);
-        if (i > 0) {
-            out[pos++] = '/';
-        }
-        memcpy(out + pos, segs[i], slen);
-        pos += slen;
-    }
-    out[pos] = '\0';
+    out = ln_build_normalized_path(segs, seg_len, abs, len);
 
     free(segs);
     free(tmp);
@@ -1015,6 +1021,35 @@ ln_process_one(const ln_options_t *opts, const char *source, const char *dest)
 }
 
 static int
+ln_build_plan_two_operands(const ln_options_t *opts, int operand_index, const char *dst,
+                           struct ln_plan *plan)
+{
+    bool dst_is_dir = ln_is_existing_dir_operand(dst, opts->no_target_deref);
+
+    if (opts->symbolic && opts->bsd_remove_target_dir && dst_is_dir) {
+        plan->use_target_dir = false;
+        plan->single_target = dst;
+        plan->src_start = operand_index;
+        plan->src_count = 1;
+        return 0;
+    }
+
+    if (!opts->no_target_directory && dst_is_dir) {
+        plan->use_target_dir = true;
+        plan->target_dir = dst;
+        plan->src_start = operand_index;
+        plan->src_count = 1;
+        return 0;
+    }
+
+    plan->use_target_dir = false;
+    plan->single_target = dst;
+    plan->src_start = operand_index;
+    plan->src_count = 1;
+    return 0;
+}
+
+static int
 ln_build_plan(const ln_options_t *opts, int argc, char **argv, int operand_index,
               struct ln_plan *plan)
 {
@@ -1047,30 +1082,7 @@ ln_build_plan(const ln_options_t *opts, int argc, char **argv, int operand_index
     }
 
     if (n_operands == 2) {
-        const char *dst = argv[operand_index + 1];
-        bool dst_is_dir = ln_is_existing_dir_operand(dst, opts->no_target_deref);
-
-        if (opts->symbolic && opts->bsd_remove_target_dir && dst_is_dir) {
-            plan->use_target_dir = false;
-            plan->single_target = dst;
-            plan->src_start = operand_index;
-            plan->src_count = 1;
-            return 0;
-        }
-
-        if (!opts->no_target_directory && dst_is_dir) {
-            plan->use_target_dir = true;
-            plan->target_dir = dst;
-            plan->src_start = operand_index;
-            plan->src_count = 1;
-            return 0;
-        }
-
-        plan->use_target_dir = false;
-        plan->single_target = dst;
-        plan->src_start = operand_index;
-        plan->src_count = 1;
-        return 0;
+        return ln_build_plan_two_operands(opts, operand_index, argv[operand_index + 1], plan);
     }
 
     if (opts->no_target_directory) {
@@ -1112,28 +1124,34 @@ ln_usage(void)
 }
 
 static int
-ln_apply_parsed_option(ln_options_t *opts, char opt, const char *optval,
-                       bool *seen_force, bool *seen_interactive)
+ln_apply_backup_option(ln_options_t *opts, const char *optval)
 {
     bool ok;
     const char *version_control;
 
+    if (optval && *optval != '\0') {
+        opts->backup_mode = ln_backup_mode_from_string(optval, &ok);
+        if (!ok) {
+            ln_diag(opts, "invalid backup method '%s'", optval);
+            return -1;
+        }
+    } else {
+        version_control = getenv("VERSION_CONTROL");
+        opts->backup_mode = ln_backup_mode_from_string(version_control, &ok);
+        if (!ok) {
+            opts->backup_mode = LN_BACKUP_EXISTING;
+        }
+    }
+    return 0;
+}
+
+static int
+ln_apply_parsed_option(ln_options_t *opts, char opt, const char *optval,
+                       bool *seen_force, bool *seen_interactive)
+{
     switch (opt) {
     case 'b':
-        if (optval && *optval != '\0') {
-            opts->backup_mode = ln_backup_mode_from_string(optval, &ok);
-            if (!ok) {
-                ln_diag(opts, "invalid backup method '%s'", optval);
-                return -1;
-            }
-        } else {
-            version_control = getenv("VERSION_CONTROL");
-            opts->backup_mode = ln_backup_mode_from_string(version_control, &ok);
-            if (!ok) {
-                opts->backup_mode = LN_BACKUP_EXISTING;
-            }
-        }
-        return 0;
+        return ln_apply_backup_option(opts, optval);
     case 'S':
         if (!optval) {
             ln_diag(opts, "-S/--suffix requires an argument");
@@ -1329,6 +1347,50 @@ ln_parse_long_option(ln_options_t *opts, const char *arg, int argc, char **argv,
     return -1;
 }
 
+static int
+ln_parse_short_options(ln_options_t *opts, int argc, char **argv, int *i,
+                       bool *seen_force, bool *seen_interactive)
+{
+    char *arg = argv[*i];
+    size_t j = 1;
+    while (arg[j] != '\0') {
+        char opt = arg[j];
+        const char *optval = NULL;
+        int rc;
+
+        if (opt == 'S' || opt == 't') {
+            if (arg[j + 1] != '\0') {
+                optval = &arg[j + 1];
+                j = strlen(arg);
+            } else {
+                if (*i + 1 >= argc) {
+                    ln_diag(opts, "option requires an argument -- '%c'", opt);
+                    return -1;
+                }
+                ++(*i);
+                optval = argv[*i];
+            }
+        } else if (opt == 'b') {
+            if (arg[j + 1] != '\0') {
+                optval = &arg[j + 1];
+                j = strlen(arg);
+            }
+        }
+
+        rc = ln_apply_parsed_option(opts, opt, optval, seen_force, seen_interactive);
+        if (rc != 0) {
+            return -1;
+        }
+
+        if (opt == 'S' || opt == 't' || opt == 'b') {
+            break;
+        }
+
+        ++j;
+    }
+    return 0;
+}
+
 int
 ln_parse_options(ln_options_t *opts, int argc, char **argv, int *operand_index, int *show_help)
 {
@@ -1372,43 +1434,8 @@ ln_parse_options(ln_options_t *opts, int argc, char **argv, int *operand_index, 
             continue;
         }
 
-        {
-            size_t j = 1;
-            while (arg[j] != '\0') {
-                char opt = arg[j];
-                const char *optval = NULL;
-                int rc;
-
-                if (opt == 'S' || opt == 't') {
-                    if (arg[j + 1] != '\0') {
-                        optval = &arg[j + 1];
-                        j = strlen(arg);
-                    } else {
-                        if (i + 1 >= argc) {
-                            ln_diag(opts, "option requires an argument -- '%c'", opt);
-                            return -1;
-                        }
-                        ++i;
-                        optval = argv[i];
-                    }
-                } else if (opt == 'b') {
-                    if (arg[j + 1] != '\0') {
-                        optval = &arg[j + 1];
-                        j = strlen(arg);
-                    }
-                }
-
-                rc = ln_apply_parsed_option(opts, opt, optval, &seen_force, &seen_interactive);
-                if (rc != 0) {
-                    return -1;
-                }
-
-                if (opt == 'S' || opt == 't' || opt == 'b') {
-                    break;
-                }
-
-                ++j;
-            }
+        if (ln_parse_short_options(opts, argc, argv, &i, &seen_force, &seen_interactive) != 0) {
+            return -1;
         }
 
         ++i;

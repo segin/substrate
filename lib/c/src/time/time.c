@@ -537,12 +537,12 @@ size_t strftime(char *__restrict s, size_t maxsize, const char *__restrict forma
         p++;
         char tmp[64];
         switch (*p) {
-            case 'Y': sprintf(tmp, "%d", tp->tm_year + 1900); break;
-            case 'm': sprintf(tmp, "%.2d", tp->tm_mon + 1); break;
-            case 'd': sprintf(tmp, "%.2d", tp->tm_mday); break;
-            case 'H': sprintf(tmp, "%.2d", tp->tm_hour); break;
-            case 'M': sprintf(tmp, "%.2d", tp->tm_min); break;
-            case 'S': sprintf(tmp, "%.2d", tp->tm_sec); break;
+            case 'Y': snprintf(tmp, sizeof(tmp), "%d", tp->tm_year + 1900); break;
+            case 'm': snprintf(tmp, sizeof(tmp), "%.2d", tp->tm_mon + 1); break;
+            case 'd': snprintf(tmp, sizeof(tmp), "%.2d", tp->tm_mday); break;
+            case 'H': snprintf(tmp, sizeof(tmp), "%.2d", tp->tm_hour); break;
+            case 'M': snprintf(tmp, sizeof(tmp), "%.2d", tp->tm_min); break;
+            case 'S': snprintf(tmp, sizeof(tmp), "%.2d", tp->tm_sec); break;
             case '%': strcpy(tmp, "%"); break;
             default: tmp[0] = 0; break;
         }
