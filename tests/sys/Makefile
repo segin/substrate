@@ -373,3 +373,6 @@ host_test_pci_ecam: host_test_pci_ecam.c
 
 host_test_compat_stat: host_test_compat_stat.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -idirafter ../../sys/include -I../../include -I../../sys -I../../sys/exec/perso -I../../sys/exec/perso/linux -I../../sys/exec/perso/netbsd -I../../sys/exec/perso/sunos host_test_compat_stat.c -o $@
+
+host_test_rwlock: host_test_rwlock.c
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_rwlock.c -o $@
