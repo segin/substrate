@@ -2389,6 +2389,118 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one two\nalpha beta\n",
+        [b"G", b"d", b"b"],
+    )
+    require(exit_code == 0, f"db-cross vi exited with status {exit_code}")
+    require(saved == "one \nalpha beta\n",
+            f"unexpected db-cross buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two\nalpha beta\n",
+        [b"G", b"c", b"b", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"cb-cross vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing cb-cross insert status")
+    require(saved == "one X\nalpha beta\n",
+            f"unexpected cb-cross buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two\nalpha beta\n",
+        [b"G", b"y", b"b", b"P"],
+    )
+    require(exit_code == 0, f"yb-cross vi exited with status {exit_code}")
+    require(saved == "one twotwo\nalpha beta\n",
+            f"unexpected yb-cross buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one,two\nalpha,beta\n",
+        [b"G", b"d", b"B"],
+    )
+    require(exit_code == 0, f"dB-cross vi exited with status {exit_code}")
+    require(saved == "alpha,beta\n",
+            f"unexpected dB-cross buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one,two\nalpha,beta\n",
+        [b"G", b"c", b"B", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"cB-cross vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing cB-cross insert status")
+    require(saved == "X\nalpha,beta\n",
+            f"unexpected cB-cross buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one,two\nalpha,beta\n",
+        [b"G", b"y", b"B", b"P"],
+    )
+    require(exit_code == 0, f"yB-cross vi exited with status {exit_code}")
+    require(saved == "one,two\none,two\nalpha,beta\n",
+            f"unexpected yB-cross buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two\nalpha beta\n",
+        [b"G", b"$", b"d", b"g", b"e"],
+    )
+    require(exit_code == 0, f"dge-cross vi exited with status {exit_code}")
+    require(saved == "one two\nalph\n",
+            f"unexpected dge-cross buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two\nalpha beta\n",
+        [b"G", b"$", b"c", b"g", b"e", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"cge-cross vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing cge-cross insert status")
+    require(saved == "one two\nalphX\n",
+            f"unexpected cge-cross buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two\nalpha beta\n",
+        [b"G", b"$", b"y", b"g", b"e", b"P"],
+    )
+    require(exit_code == 0, f"yge-cross vi exited with status {exit_code}")
+    require(saved == "one two\nalpha betaa beta\n",
+            f"unexpected yge-cross buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one,two\nalpha,beta\n",
+        [b"G", b"$", b"d", b"g", b"E"],
+    )
+    require(exit_code == 0, f"dgE-cross vi exited with status {exit_code}")
+    require(saved == "one,tw\n",
+            f"unexpected dgE-cross buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one,two\nalpha,beta\n",
+        [b"G", b"$", b"c", b"g", b"E", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"cgE-cross vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing cgE-cross insert status")
+    require(saved == "one,twX\n",
+            f"unexpected cgE-cross buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one,two\nalpha,beta\n",
+        [b"G", b"$", b"y", b"g", b"E", b"P"],
+    )
+    require(exit_code == 0, f"ygE-cross vi exited with status {exit_code}")
+    require(saved == "one,two\nalpha,betao\nalpha,beta\n",
+            f"unexpected ygE-cross buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "abc def ghi\n",
         [b"$", b"y", b"F", b"g", b"P"],
     )
