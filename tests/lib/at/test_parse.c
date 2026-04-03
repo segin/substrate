@@ -3,6 +3,7 @@
 #include <string.h>
 #include <at.h>
 #include <assert.h>
+#include <stdbool.h>
 
 void test_parse(const char *timespec, bool expected_success) {
     char *argv[16];
@@ -54,6 +55,18 @@ int main() {
     test_parse("10:00 + 30 minutes", true);
     test_parse("noon + 1 day", true);
     test_parse("midnight + 1 hour", true);
+
+    // New AM/PM tests
+    test_parse("10am", true);
+    test_parse("10pm", true);
+    test_parse("10:00am", true);
+    test_parse("10:00pm", true);
+    test_parse("10:00 am", true);
+    test_parse("10:00 pm", true);
+    test_parse("12:00am", true);
+    test_parse("12:00pm", true);
+    test_parse("11:59pm", true);
+    test_parse("12:01am", true);
 
     test_parse("invalid_time", false);
 

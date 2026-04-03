@@ -3,20 +3,22 @@
 #include <time.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <strings.h>
 
 #include <at.h>
 
 /*
  * Helper to parse a time string.
  * Handles:
- * - HH:MM
- * - HHMM
+ * - HH:MM[am/pm]
+ * - HHMM[am/pm]
  * - Keywords: now, noon, midnight, teatime, tomorrow
  * Returns 0 on success, -1 on failure.
  */
 static int parse_base_time(const char *buf, struct tm *info, time_t *t_base, const char **next) {
     time_t now = *t_base;
     int h, m, n;
+    int is_numeric = 0;
 
     if (strncmp(buf, "now", 3) == 0) {
         *next = buf + 3;
@@ -49,10 +51,7 @@ static int parse_base_time(const char *buf, struct tm *info, time_t *t_base, con
     if (sscanf(buf, "%d:%d%n", &h, &m, &n) == 2) {
         if (h < 0 || h > 23 || m < 0 || m > 59) return -1;
         info->tm_hour = h; info->tm_min = m; info->tm_sec = 0;
-        *t_base = mktime(info);
-        if (*t_base < now) *t_base += 86400;
-        *next = buf + n;
-        return 0;
+        is_numeric = 1;
     } else if (sscanf(buf, "%4d%n", &h, &n) == 1) {
         int temp_h, temp_m;
         if (h >= 100) {
@@ -66,6 +65,22 @@ static int parse_base_time(const char *buf, struct tm *info, time_t *t_base, con
         info->tm_hour = temp_h;
         info->tm_min = temp_m;
         info->tm_sec = 0;
+        is_numeric = 1;
+    }
+
+    if (is_numeric) {
+        const char *p = buf + n;
+        int space_len = 0;
+        while (isspace((unsigned char)p[space_len])) {
+            space_len++;
+        }
+        if (strncasecmp(p + space_len, "am", 2) == 0) {
+            if (info->tm_hour == 12) info->tm_hour = 0;
+            n += space_len + 2;
+        } else if (strncasecmp(p + space_len, "pm", 2) == 0) {
+            if (info->tm_hour < 12) info->tm_hour += 12;
+            n += space_len + 2;
+        }
         *t_base = mktime(info);
         if (*t_base < now) *t_base += 86400;
         *next = buf + n;
