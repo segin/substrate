@@ -162,6 +162,20 @@ def main():
             "cols": 20,
         },
         {
+            "name": "line-scroll-up-motion",
+            "initial_text": "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\n",
+            "key_steps": [b"5", b"G", b"z", b"\r", b"\x19", b"r", b"Z"],
+            "rows": 5,
+            "cols": 20,
+        },
+        {
+            "name": "counted-line-scroll-up-motion",
+            "initial_text": "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\n",
+            "key_steps": [b"5", b"G", b"z", b"\r", b"2", b"\x19", b"r", b"Z"],
+            "rows": 5,
+            "cols": 20,
+        },
+        {
             "name": "word-search-repeat-change",
             "initial_text": "one target\ntwo target\nthree target\n",
             "key_steps": [b"w", b"*", b"c", b"*", b"X", b"\x1b", b"n", b"."],

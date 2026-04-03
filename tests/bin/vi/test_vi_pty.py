@@ -2831,7 +2831,7 @@ def main():
         cols=20,
     )
     require(exit_code == 0, f"line-scroll-up vi exited with status {exit_code}")
-    require(saved == "line 1\nline 2\nline 3\nZine 4\nline 5\nline 6\nline 7\nline 8\n",
+    require(saved == "line 1\nline 2\nline 3\nline 4\nZine 5\nline 6\nline 7\nline 8\n",
             f"unexpected line-scroll-up buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
@@ -2842,7 +2842,7 @@ def main():
         cols=20,
     )
     require(exit_code == 0, f"counted-line-scroll-up vi exited with status {exit_code}")
-    require(saved == "line 1\nline 2\nZine 3\nline 4\nline 5\nline 6\nline 7\nline 8\n",
+    require(saved == "line 1\nline 2\nline 3\nline 4\nZine 5\nline 6\nline 7\nline 8\n",
             f"unexpected counted line-scroll-up buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(

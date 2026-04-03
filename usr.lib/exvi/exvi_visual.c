@@ -1873,20 +1873,23 @@ vi_half_page_scroll(buffer_t *b, vi_visual_t *vis, int direction)
 static void
 vi_line_scroll(buffer_t *b, vi_visual_t *vis, int direction)
 {
+    int cur_line_no;
     int old_top;
     int new_top;
-    int delta;
 
     if (!b->cur || b->line_count < 1) {
         return;
     }
 
+    cur_line_no = buf_current_line(b);
     old_top = vi_clamp_top_line(b, vis, vis->top_line);
     new_top = vi_clamp_top_line(b, vis, old_top + direction);
-    delta = new_top - old_top;
     vis->top_line = new_top;
-    if (delta != 0) {
-        vi_move_vertical(b, delta);
+    if (direction > 0 && cur_line_no < new_top) {
+        b->cur = buf_get_line(b, new_top);
+        if (b->cur && (size_t)vis->cursor_col > b->cur->len) {
+            vis->cursor_col = (int)b->cur->len;
+        }
     }
 }
 
