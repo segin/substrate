@@ -68,6 +68,27 @@ static thread_t *init_thread(int slot, int tid) {
     return t;
 }
 
+static void test_rwlock_init(void) {
+    rwlock_t rw;
+
+    reset_env();
+
+    /* Initialize with garbage to ensure rwlock_init overwrites everything */
+    memset(&rw, 0xAA, sizeof(rw));
+
+    rwlock_init(&rw, "my_test_lock");
+
+    assert(rw.lock.locked == 0);
+    assert(rw.lock.cpu_id == 0xFFFFFFFFu);
+    assert(strcmp(rw.lock.name, "rwlock") == 0);
+
+    assert(rw.readers == 0);
+    assert(rw.writer == 0);
+    assert(rw.waiting_writers == 0);
+    assert(rw.owner == NULL);
+    assert(strcmp(rw.name, "my_test_lock") == 0);
+}
+
 static void test_rwlock_reader_and_writer_paths(void) {
     rwlock_t rw;
     thread_t *writer;
@@ -268,6 +289,7 @@ static void test_rwlock_wlock_blocks_on_reader(void) {
 }
 
 int main(void) {
+    test_rwlock_init();
     test_rwlock_reader_and_writer_paths();
     test_rwlock_writer_preference_and_reader_wakeup();
     test_rwlock_try_rlock();
