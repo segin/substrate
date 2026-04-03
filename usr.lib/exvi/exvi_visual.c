@@ -5461,7 +5461,20 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             (size_t)start < b->cur->len) {
             vi_delete_span(b, vis, start, start + 1, 1);
             vi_set_last_change(vis, VI_REPEAT_C_TO_FIRST_NONBLANK, count, 0);
+        } else if (vis->pending_op == 'c' && start > vis->cursor_col) {
+            save_undo(b);
+            vis->cursor_col = start;
+            vis->insert_mode = 1;
+            vis->replace_mode = 0;
+            vis->insert_entry_key = 0;
+            vi_record_last_insert_site(b, vis);
+            vi_set_insert_anchor(b, vis);
+            vi_set_last_change(vis, VI_REPEAT_C_TO_FIRST_NONBLANK, count, 0);
         } else {
+            write(STDOUT_FILENO, "\a", 1);
+        }
+    } else if ((vis->pending_op == '>' || vis->pending_op == '<') && key == '^') {
+        if (vi_apply_linewise_operator(b, vis, line_no, line_no) != 0) {
             write(STDOUT_FILENO, "\a", 1);
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == '$') {

@@ -4552,6 +4552,33 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "  one\n  two\n",
+        [b"c", b"^", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"change-caret-indent vi exited with status {exit_code}")
+    require(saved == "  Xone\n  two\n",
+            f"unexpected change-caret-indent buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "  one\n  two\n",
+        [b">", b"^"],
+    )
+    require(exit_code == 0, f"shift-caret-indent vi exited with status {exit_code}")
+    require(saved == "\t  one\n  two\n",
+            f"unexpected shift-caret-indent buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\t  one\n\t  two\n",
+        [b"<", b"^"],
+    )
+    require(exit_code == 0, f"unshift-caret-indent vi exited with status {exit_code}")
+    require(saved == "  one\n\t  two\n",
+            f"unexpected unshift-caret-indent buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "\t  one\n\t  two\n\t  three\n",
         [b"<", b"+"],
     )

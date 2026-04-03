@@ -645,6 +645,21 @@ def main():
             "key_steps": [b"j", b">", b")"],
         },
         {
+            "name": "change-caret-indent",
+            "initial_text": "  one\n  two\n",
+            "key_steps": [b"c", b"^", b"X", b"\x1b"],
+        },
+        {
+            "name": "shift-caret-indent",
+            "initial_text": "  one\n  two\n",
+            "key_steps": [b">", b"^"],
+        },
+        {
+            "name": "unshift-caret-indent",
+            "initial_text": "\t  one\n\t  two\n",
+            "key_steps": [b"<", b"^"],
+        },
+        {
             "name": "line-plus-unshift-tab-indent",
             "initial_text": "\t  one\n\t  two\n\t  three\n",
             "key_steps": [b"<", b"+"],
