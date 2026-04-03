@@ -23,17 +23,28 @@ void setvar(char *name, char *val) {
 
 static int depth = 0;
 
-char *subst(char *a, char *b) {
+#define APPEND_CHAR(c) do { \
+    if (len >= max_len - 1) fatal("macro expansion exceeded maximum buffer size"); \
+    *b++ = (c); \
+    len++; \
+} while (0)
+
+char *subst(char *a, char *b, size_t max_len) {
     if (++depth > 100) fatal("infinitely recursive macro");
     
     char *start_b = b;
-    if (!a) { *b = 0; depth--; return start_b; }
+    size_t len = 0;
+    if (!a || max_len == 0) {
+        if (max_len > 0) *b = 0;
+        depth--;
+        return start_b;
+    }
 
     while (*a) {
         if (*a == '$') {
             a++;
             if (*a == '$') {
-                *b++ = '$';
+                APPEND_CHAR('$');
                 a++;
                 continue;
             }
@@ -41,14 +52,14 @@ char *subst(char *a, char *b) {
             char *v = vname;
             if (*a == '(') {
                 a++;
-                while (*a && *a != ')') *v++ = *a++;
+                while (*a && *a != ')' && (v - vname) < 99) *v++ = *a++;
                 if (*a == ')') a++;
             } else if (*a == '{') {
                 a++;
-                while (*a && *a != '}') *v++ = *a++;
+                while (*a && *a != '}' && (v - vname) < 99) *v++ = *a++;
                 if (*a == '}') a++;
             } else {
-                if (*a) *v++ = *a++;
+                if (*a && (v - vname) < 99) *v++ = *a++;
             }
             *v = 0;
             
@@ -56,13 +67,14 @@ char *subst(char *a, char *b) {
             if (vp->varval) {
                 // Recursive expansion
                 char *expanded = malloc(OUTMAX);
-                subst(vp->varval, expanded);
+                if (!expanded) fatal("malloc failed");
+                subst(vp->varval, expanded, OUTMAX);
                 char *e = expanded;
-                while (*e) *b++ = *e++;
+                while (*e) APPEND_CHAR(*e++);
                 free(expanded);
             }
         } else {
-            *b++ = *a++;
+            APPEND_CHAR(*a++);
         }
     }
     *b = 0;

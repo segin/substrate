@@ -1,16 +1,16 @@
 include ../../Makefile.inc
 
 CFLAGS := $(CFLAGS) -I../../include -I../../sys/include
-CXXFLAGS := $(CXXFLAGS) -I../../include -I../../sys/include
 LDFLAGS := $(USER_LDFLAGS)
 
 SRCS = src/compile.c src/exec.c src/util.c src/engine_posix.c src/engine_safe.c \
-       src/engine_pcre2_adapter.c
-CPPSRCS = src/engine_re2_adapter.cpp
+       src/engine_pcre2_adapter.c src/posix_compat.c
 
-OBJS = $(SRCS:.c=.o) $(CPPSRCS:.cpp=.o)
+OBJS = $(SRCS:.c=.o)
 
 LIBNAME = libregex.a
+BUILD_MODE := $(if $(NATIVE_BUILD),native,target)
+MODE_STAMP = .build-mode
 
 # Optional integrations
 # USE_PCRE2=1 enables PCRE2 adapter (requires pcre2 headers/libs on host)
@@ -20,58 +20,40 @@ ifeq ($(USE_PCRE2),1)
 CFLAGS += -DREGEX_USE_PCRE2
 endif
 
-ifeq ($(USE_RE2),1)
-CFLAGS += -DREGEX_USE_RE2
-CXXFLAGS += -DREGEX_USE_RE2
-endif
-
-ifeq ($(DEFAULT_ENGINE_RE2),1)
-CFLAGS += -DREGEX_DEFAULT_ENGINE_RE2
-CXXFLAGS += -DREGEX_DEFAULT_ENGINE_RE2
-endif
 ifeq ($(USE_ICU),1)
 CFLAGS += -DREGEX_USE_ICU
-CXXFLAGS += -DREGEX_USE_ICU
 endif
 
 ifdef NATIVE_BUILD
 CFLAGS += -DREGEX_USE_HOST_POSIX
-
-# Fix CXX for native build (host)
-HOSTCXX ?= c++
-HOSTCXXFLAGS ?= -O2 -Wall
-CXX := $(HOSTCXX)
-# Use local include directory to avoid shadowing system headers with repo root includes
-CXXFLAGS := $(HOSTCXXFLAGS) -Iinclude
-# Ensure flags are preserved
-ifeq ($(USE_RE2),1)
-CXXFLAGS += -DREGEX_USE_RE2
-endif
-ifeq ($(DEFAULT_ENGINE_RE2),1)
-CXXFLAGS += -DREGEX_DEFAULT_ENGINE_RE2
-endif
-ifeq ($(USE_ICU),1)
-CXXFLAGS += -DREGEX_USE_ICU
 endif
 
-CXXFLAGS += -DREGEX_USE_HOST_POSIX
-endif
-
-.PHONY: all clean install
+.PHONY: all clean install FORCE
 
 all: $(LIBNAME)
 
 $(LIBNAME): $(OBJS)
 	$(AR) rcs $@ $(OBJS)
 
+$(OBJS): $(MODE_STAMP)
+
+$(MODE_STAMP): FORCE
+	@mode="$(BUILD_MODE)"; \
+	cur=""; \
+	if [ -f "$(MODE_STAMP)" ]; then cur=$$(cat "$(MODE_STAMP)"); fi; \
+	if [ "$$cur" != "$$mode" ]; then \
+		rm -f $(OBJS) $(LIBNAME); \
+		printf '%s\n' "$$mode" > "$(MODE_STAMP).tmp"; \
+		mv "$(MODE_STAMP).tmp" "$(MODE_STAMP)"; \
+	elif [ ! -f "$(MODE_STAMP)" ]; then \
+		printf '%s\n' "$$mode" > "$(MODE_STAMP)"; \
+	fi
+
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-%.o: %.cpp
-	$(CXX) $(CXXFLAGS) -c $< -o $@
-
 clean:
-	rm -f $(OBJS) $(LIBNAME)
+	rm -f $(OBJS) $(LIBNAME) $(MODE_STAMP)
 
 install:
 	@mkdir -p $(DESTDIR)/usr/lib

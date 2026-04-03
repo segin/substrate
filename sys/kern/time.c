@@ -14,7 +14,10 @@
 #include <pm/pm.h>
 #include <arch/i386/percpu.h>
 #include <arch/x86-common/io.h>
+#include <drivers/storage/floppy/floppy.h>
+#include <drivers/video/fb_console.h>
 #include <drivers/video/hw_text.h>
+#include <sys/vt.h>
 #include <sys/kern_syscalls.h>
 
 time_t boot_time = 0;
@@ -380,11 +383,14 @@ void timer_tick_context(int is_usermode) {
     if (cpu_id == 0) {
         ticks++;
         sched_tick();
+        hw_text_tick();
+        fb_console_tick();
+        floppy_poll();
         if ((ticks % (5 * HZ)) == 0) {
             sched_update_loadavg();
         }
         if ((ticks % HZ) == 0) {
-            hw_text_tick_1hz();
+            vt_tick_1hz();
         }
         for (int i = 0; i < MAX_PROCS; i++) {
             process_t *p = &processes[i];

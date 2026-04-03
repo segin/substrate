@@ -3,9 +3,16 @@
 #include <errno.h>
 #include <sys/syscall_impl.h>
 #include <sys/stat.h>
+#include <sys/proc.h>
+#include <sys/mount.h>
+#include <sys/file.h>
+#include <sys/kern_syscalls.h>
 #include <exec/perso/compat.h>
 #include <exec/perso/freebsd/freebsd_user.h>
 #include <exec/perso/freebsd/freebsd_syscalls.h>
+#include <kern/sched.h>
+#include <vfs/vfs.h>
+#include <string.h>
 
 
 
@@ -57,126 +64,6 @@ int32_t compat_time32(int32_t *tloc) {
 #include <sys/kern_syscalls.h>
 #include <string.h>
 
-/* FreeBSD Stat Translation */
-static void translate_stat_to_freebsd(struct stat *native, struct freebsd_stat *fbsd) {
-    memset(fbsd, 0, sizeof(struct freebsd_stat));
-    fbsd->st_dev = native->st_dev;
-    fbsd->st_ino = native->st_ino;
-    fbsd->st_mode = (uint16_t)native->st_mode;
-    fbsd->st_nlink = (uint16_t)native->st_nlink;
-    fbsd->st_uid = native->st_uid;
-    fbsd->st_gid = native->st_gid;
-    fbsd->st_rdev = native->st_rdev;
-    fbsd->st_atim.tv_sec = (int32_t)native->st_atime;
-    fbsd->st_atim.tv_nsec = (int32_t)native->st_atime_nsec;
-    fbsd->st_mtim.tv_sec = (int32_t)native->st_mtime;
-    fbsd->st_mtim.tv_nsec = (int32_t)native->st_mtime_nsec;
-    fbsd->st_ctim.tv_sec = (int32_t)native->st_ctime;
-    fbsd->st_ctim.tv_nsec = (int32_t)native->st_ctime_nsec;
-    fbsd->st_size = native->st_size;
-    fbsd->st_blocks = native->st_blocks;
-    fbsd->st_blksize = native->st_blksize;
-}
-
-int sys_freebsd_stat(const char *path, struct freebsd_stat *buf) {
-    char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
-    
-    struct stat native;
-    int ret = kern_stat(kpath, &native);
-    if (ret == 0) {
-        struct freebsd_stat kfbsd;
-        translate_stat_to_freebsd(&native, &kfbsd);
-        if (copyout(&kfbsd, buf, sizeof(struct freebsd_stat)) != 0) return -14;
-    }
-    return ret;
-}
-
-int sys_freebsd_lstat(const char *path, struct freebsd_stat *buf) {
-    char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
-    
-    struct stat native;
-    int ret = kern_lstat(kpath, &native);
-    if (ret == 0) {
-        struct freebsd_stat kfbsd;
-        translate_stat_to_freebsd(&native, &kfbsd);
-        if (copyout(&kfbsd, buf, sizeof(struct freebsd_stat)) != 0) return -14;
-    }
-    return ret;
-}
-
-int sys_freebsd_fstat(int fd, struct freebsd_stat *buf) {
-    struct stat native;
-    int ret = kern_fstat(fd, &native);
-    if (ret == 0) {
-        struct freebsd_stat kfbsd;
-        translate_stat_to_freebsd(&native, &kfbsd);
-        if (copyout(&kfbsd, buf, sizeof(struct freebsd_stat)) != 0) return -14;
-    }
-    return ret;
-}
-
-/* FreeBSD 11 Stat Translation */
-static void translate_stat_to_freebsd11(struct stat *native, struct freebsd11_stat *fbsd) {
-    memset(fbsd, 0, sizeof(struct freebsd11_stat));
-    fbsd->st_dev = native->st_dev;
-    fbsd->st_ino = (uint32_t)native->st_ino;
-    fbsd->st_mode = (uint16_t)native->st_mode;
-    fbsd->st_nlink = (uint16_t)native->st_nlink;
-    fbsd->st_uid = native->st_uid;
-    fbsd->st_gid = native->st_gid;
-    fbsd->st_rdev = native->st_rdev;
-    fbsd->st_atim.tv_sec = (int32_t)native->st_atime;
-    fbsd->st_atim.tv_nsec = (int32_t)native->st_atime_nsec;
-    fbsd->st_mtim.tv_sec = (int32_t)native->st_mtime;
-    fbsd->st_mtim.tv_nsec = (int32_t)native->st_mtime_nsec;
-    fbsd->st_ctim.tv_sec = (int32_t)native->st_ctime;
-    fbsd->st_ctim.tv_nsec = (int32_t)native->st_ctime_nsec;
-    fbsd->st_size = native->st_size;
-    fbsd->st_blocks = native->st_blocks;
-    fbsd->st_blksize = native->st_blksize;
-}
-
-int sys_freebsd11_stat(const char *path, struct freebsd11_stat *buf) {
-    char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
-    
-    struct stat native;
-    int ret = kern_stat(kpath, &native);
-    if (ret == 0) {
-        struct freebsd11_stat kfbsd;
-        translate_stat_to_freebsd11(&native, &kfbsd);
-        if (copyout(&kfbsd, buf, sizeof(struct freebsd11_stat)) != 0) return -14;
-    }
-    return ret;
-}
-
-int sys_freebsd11_lstat(const char *path, struct freebsd11_stat *buf) {
-    char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
-    
-    struct stat native;
-    int ret = kern_lstat(kpath, &native);
-    if (ret == 0) {
-        struct freebsd11_stat kfbsd;
-        translate_stat_to_freebsd11(&native, &kfbsd);
-        if (copyout(&kfbsd, buf, sizeof(struct freebsd11_stat)) != 0) return -14;
-    }
-    return ret;
-}
-
-int sys_freebsd11_fstat(int fd, struct freebsd11_stat *buf) {
-    struct stat native;
-    int ret = kern_fstat(fd, &native);
-    if (ret == 0) {
-        struct freebsd11_stat kfbsd;
-        translate_stat_to_freebsd11(&native, &kfbsd);
-        if (copyout(&kfbsd, buf, sizeof(struct freebsd11_stat)) != 0) return -14;
-    }
-    return ret;
-}
-
 int64_t sys_freebsd_lseek(int fd, int pad, uint32_t off_lo, uint32_t off_hi, int whence) {
     (void)pad;
     return sys_lseek(fd, off_lo, off_hi, whence);
@@ -195,14 +82,138 @@ void *sys_freebsd_mmap(void *addr, size_t len, int prot, int flags, int fd, int 
 /* Generic syscall stubs - returning -ENOSYS */
 
 
-int sys_nice(int inc) { (void)inc; return -ENOSYS; }
-int sys_mprotect(void *addr, size_t len, int prot) { (void)addr; (void)len; (void)prot; return -ENOSYS; }
+/*
+ * sys_nice - Adjust process scheduling priority
+ *
+ * BSD/POSIX nice(2): adds 'inc' to the current nice value.
+ * Nice values range from -20 (highest priority) to 19 (lowest).
+ * Only root can decrease nice value (increase priority).
+ */
+int sys_nice(int inc) {
+    int old_nice = current_thread->base_priority;
+    int new_nice = old_nice + inc;
+
+    /* Clamp to valid range */
+    if (new_nice < -20) new_nice = -20;
+    if (new_nice > 19) new_nice = 19;
+
+    /* Only root can increase priority (lower nice value) */
+    if (new_nice < old_nice && current_process->euid != 0)
+        return -EPERM;
+
+    current_thread->base_priority = new_nice;
+    current_thread->priority = new_nice;
+    return new_nice;
+}
+
+/*
+ * sys_mprotect - Change memory protection on a region
+ *
+ * Uses the pmap layer to change page protections.
+ * PROT_READ=0x1, PROT_WRITE=0x2, PROT_EXEC=0x4 match VM_PROT_* values.
+ */
+extern int pmap_protect(struct pmap *, uintptr_t, uintptr_t, uint32_t);
+
+int sys_mprotect(void *addr, size_t len, int prot) {
+    uintptr_t start = (uintptr_t)addr;
+
+    /* Address must be page-aligned */
+    if (start & 0xFFF)
+        return -EINVAL;
+
+    /* Length 0 is a no-op */
+    if (len == 0)
+        return 0;
+
+    /* Round up to page boundary */
+    uintptr_t end = (start + len + 0xFFF) & ~0xFFF;
+
+    /* Validate range is in user space (below 0xC0000000) */
+    if (start >= 0xC0000000 || end > 0xC0000000)
+        return -EINVAL;
+
+    if (!current_process->pmap)
+        return -ENOMEM;
+
+    /* VM_PROT_* values match PROT_* values by design */
+    uint32_t vm_prot = (uint32_t)prot & 0x7;
+
+    int ret = pmap_protect(current_process->pmap, start, end, vm_prot);
+    if (ret == -11) {
+        /* -EAGAIN from COW: need to copy page first, then retry.
+         * For now, return success - the fault handler will do COW on access. */
+        return 0;
+    }
+    return ret < 0 ? -ENOMEM : 0;
+}
+
 int sys_sigret(void) { return -ENOSYS; }
 int sys_ptrace(int req, int pid, int addr, int data) { (void)req; (void)pid; (void)addr; (void)data; return -ENOSYS; }
-int sys_pause(void) { return -ENOSYS; }
-int sys_utime(const char *path, void *times) { (void)path; (void)times; return -ENOSYS; }
-int sys_statfs(const char *path, void *buf) { (void)path; (void)buf; return -ENOSYS; }
-int sys_fstatfs(int fd, void *buf) { (void)fd; (void)buf; return -ENOSYS; }
+
+/*
+ * sys_pause - Suspend until signal delivery
+ *
+ * POSIX pause(2): sleeps until a signal is delivered that either
+ * terminates the process or invokes a signal handler.
+ * Always returns -1 with EINTR.
+ */
+int sys_pause(void) {
+    current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+
+    while (!(current_thread->sig_pending & ~current_thread->sig_mask)) {
+        sched_sleep(&current_thread->sig_pending);
+    }
+
+    current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+    return -EINTR;
+}
+
+/*
+ * sys_utime - Set file access and modification times
+ *
+ * If times is NULL, set both to current time.
+ * Otherwise, times points to struct { time_t actime; time_t modtime; }.
+ */
+extern time_t kern_time(time_t *);
+
+int sys_utime(const char *path, void *times) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+
+    extern fs_node_t *fs_root;
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
+    fs_node_t *start = (kpath[0] == '/') ? root : cwd;
+    fs_node_t *node = vfs_lookup(start, kpath);
+    if (!node) return -ENOENT;
+
+    /* Permission: owner or root, or times==NULL and write permission */
+    if (current_process->euid != 0 && current_process->euid != node->uid) {
+        if (times != NULL) {
+            close_fs(node);
+            return -EPERM;
+        }
+    }
+
+    if (times) {
+        /* struct utimbuf { time_t actime; time_t modtime; } */
+        struct { int64_t actime; int64_t modtime; } ktimes;
+        if (copyin(times, &ktimes, sizeof(ktimes)) != 0) {
+            close_fs(node);
+            return -EFAULT;
+        }
+        node->atime = ktimes.actime;
+        node->mtime = ktimes.modtime;
+    } else {
+        time_t now = kern_time(NULL);
+        node->atime = now;
+        node->mtime = now;
+    }
+    node->ctime = kern_time(NULL);
+    close_fs(node);
+    return 0;
+}
+
 int sys_ulimit(int cmd, long limit) { (void)cmd; (void)limit; return -ENOSYS; }
 int sys_prof(void *buf, size_t size, unsigned long offset, unsigned int scale) { (void)buf; (void)size; (void)offset; (void)scale; return -ENOSYS; }
 

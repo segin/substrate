@@ -1,0 +1,78 @@
+.Dd April 2, 2026
+.Dt VIEW 1
+.Os Substrate
+.Sh NAME
+.Nm view
+.Nd start vi in readonly mode
+.Sh SYNOPSIS
+.Nm
+.Op Fl sSv
+.Op Fl c Ar command
+.Op Fl t Ar tag
+.Op Ar +command
+.Op Ar file
+.Op Ar file ...
+.Sh DESCRIPTION
+The
+.Nm
+utility is the readonly entry point for
+.Xr vi 1 .
+It is implemented through the shared
+.Pa usr.lib/exvi
+frontend parser by recognizing
+.Nm
+as an invocation alias for
+.Ql vi\ -R .
+.Pp
+All normal visual editing, motion, search, tag, and prompt behavior remains
+available, but plain writes are rejected unless forced with
+.Ql \&! .
+.Pp
+This entry point exists so users can inspect files without accidentally
+overwriting them.
+The active status line shows
+.Ql [Readonly]
+while the session remains readonly.
+.Sh OPTIONS
+.Nm
+accepts the same options and startup command forms as
+.Xr vi 1 ,
+except that readonly mode is enabled implicitly.
+.Pp
+The following forms are commonly used:
+.Bl -tag -width indent
+.It Fl c Ar command
+Execute
+.Ar command
+after startup processing.
+.It Fl t Ar tag
+Start by editing the file and location named by
+.Ar tag .
+.It Ar +command
+Execute
+.Ar command
+after startup processing.
+.It Ar file
+Open
+.Ar file
+as the current buffer.
+If multiple files are given, they become the initial argument list.
+.El
+.Sh NOTES
+Readonly mode may be cleared inside the editor with
+.Ic :set noreadonly ,
+or bypassed for a single write with force forms such as
+.Ql :w!
+and
+.Ql :wq! .
+.Pp
+Substrate does not currently provide separate
+.Nm
+startup or recovery companion commands.
+Startup-file loading and recovery behavior are documented in
+.Xr vi 1
+and
+.Xr ex 1 .
+.Sh SEE ALSO
+.Xr ex 1 ,
+.Xr vi 1

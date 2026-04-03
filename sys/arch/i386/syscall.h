@@ -35,6 +35,7 @@
 #define SYS_PTRACE  26
 #define SYS_ALARM   27
 #define SYS_ACCESS  33
+#define SYS_SELECT  85
 #define SYS_SYNC    36
 #define SYS_KILL    37
 #define SYS_RENAME  38
@@ -53,13 +54,20 @@
 #define SYS_IOCTL   54
 #define SYS_CHROOT  61
 #define SYS_DUP2    63
+#define SYS_FCNTL   55
 #define SYS_READLINK 85
+#define SYS_SYMLINK  83
 #define SYS_REBOOT   88
 #define SYS_MMAP    90
 #define SYS_MUNMAP  91
 #define SYS_TRUNCATE 92
 #define SYS_FTRUNCATE 93
+#define SYS_FCHMOD  94
+#define SYS_FCHOWN  95
 #define SYS_SETPRIORITY 96
+#define SYS_GETGROUPS 80
+#define SYS_SETGROUPS 81
+#define SYS_WAIT4   114
 #define SYS_SETITIMER 104
 #define SYS_GETITIMER 105
 #define SYS_GETPRIORITY 100
@@ -113,6 +121,8 @@
 #define SYS_SETPGID     181
 #define SYS_GETPGID     182
 #define SYS_GETRUSAGE   117
+#define SYS_STATFS      157
+#define SYS_FSTATFS     158
 
 void syscall_init(void);
 

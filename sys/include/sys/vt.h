@@ -7,7 +7,7 @@
 
 #include <stdint.h>
 #include <kern/ansi_handler.h>
-#include <sys/tty.h>
+struct tty;
 
 #define VT_MAX 12
 #define VT_DEFAULT_WIDTH 80
@@ -16,6 +16,7 @@
 #define VT_MAX_HEIGHT 60
 #define VT_MAX_BUF_SIZE (VT_MAX_WIDTH * VT_MAX_HEIGHT)
 #define VT_SCROLLBACK_LINES 256
+#define VT_TABSTOP_WORDS ((VT_MAX_WIDTH + 31) / 32)
 
 /*
  * VT State
@@ -35,9 +36,43 @@ typedef struct vt_state {
     int row;
     int col;
     uint8_t color; // Current attribute
+    uint16_t attrs;
+    
+    // Saved Cursor (DECSC/DECRC / CSI s/u)
+    int saved_row;
+    int saved_col;
+    uint8_t saved_color;
+    uint16_t saved_attrs;
+    
+    // Scroll Region (DECSTBM)
+    int scroll_top;    // 0-based inclusive
+    int scroll_bottom; // 0-based inclusive (default: height-1)
+    
+    // Cursor visibility
+    int cursor_visible; // 1=visible (default), 0=hidden
+    int cursor_blink;   // 1=blinking (default), 0=steady
+    uint8_t tab_width; // Horizontal tab stop width in columns
+    uint32_t tab_stops[VT_TABSTOP_WORDS];
+    
+    // DEC modes
+    int autowrap;       // DECAWM: 1=wrap at right margin (default), 0=clamp
+    int cursor_key_app; // DECCKM: 0=normal (default), 1=application mode
+    int origin_mode;    // DECOM: 0=absolute (default), 1=relative to scroll region
+    int bracketed_paste;// DECSET 2004: 0=off (default), 1=on
+    
+    // Alternate screen buffer (DECSET 47/1047/1049)
+    int alt_screen_active;
+    uint16_t alt_buffer[VT_MAX_BUF_SIZE];
+    int alt_row;
+    int alt_col;
+    uint8_t alt_color;
+    uint16_t alt_attrs;
     
     // ANSI Parser State
     struct ansi_ctx ansi;
+    
+    // Keyboard LED state for this VT (Scroll Lock, Num Lock, Caps Lock)
+    uint8_t led_state;
     
     // Associated TTY (if any)
     struct tty *tty;
@@ -50,6 +85,7 @@ int vt_get_active(void);
 vt_state_t *vt_get_state(int n);
 struct tty *vt_get_active_tty(void);
 int vt_set_geometry(int cols, int rows);
+int vt_refresh_geometry_from_terminal(void);
 int vt_get_width(void);
 int vt_get_height(void);
 int vt_get_visible_height(void);
@@ -60,17 +96,12 @@ uint16_t vt_get_display_cell(const vt_state_t *vt, int row, int col);
 void vt_capture_scrollback_top(vt_state_t *vt);
 void vt_scrollback_page_up(void);
 void vt_scrollback_page_down(void);
+void vt_scrollback_line_up(void);
+void vt_scrollback_line_down(void);
 
-// To be called by the video driver when it updates the screen,
-// so the VT layer can keep the backing buffer in sync if it's active?
-// Actually, the driver should write to BOTH if active, or just VIDEO if active
-// and we save/restore on switch.
-//
-// Strategy:
-// - Inactive VT: Write to vt_state->buffer only.
-// - Active VT: Write to VGA RAM (and optionally sync to buffer, or valid on switch).
-//   Refined: Write to VGA RAM *and* buffer so buffer is always up to date?
-//   Or: Save VGA RAM to buffer on switch. (Classic approach).
-//   Let's go with Save-on-Switch for the active one.
+// generic tick hooks
+void vt_tick_1hz(void);
+void vt_render_statusline(vt_state_t *vt);
+void vt_redraw_active(void);
 
 #endif /* _SYS_VT_H */

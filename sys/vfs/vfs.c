@@ -1,17 +1,31 @@
 #include <vfs/vfs.h>
 #include <vfs/vnode.h>
+#include <vfs/buf.h>
 #include <sys/mount.h>
 #include <sys/namei.h>
 #include <sys/proc.h>
 
 #include <string.h>
 #include <kern/console.h>
+#include <kern/time.h>
 #include <stdio.h>
 #include <sys/poll.h>
 #include <sys/proc.h>
 #include <sys/file.h>
 #include <sys/errno.h>
 #include <sys/fcntl.h>
+#include <fs/ext2/ext2.h>
+#include <fs/fat/fat.h>
+#include <fs/exfat/exfat.h>
+#include <fs/minix/minix.h>
+#include <fs/udf/udf.h>
+#include <fs/procfs.h>
+#include <fs/sysfs.h>
+#include <fs/pseudofs.h>
+#include <fs/fuse.h>
+#include <fs/9p.h>
+#include <drivers/devices/full.h>
+#include <drivers/devices/cpuid.h>
 #include <drivers/storage/blkdev.h>
 #include <vm/vm_kmem.h>
 
@@ -32,24 +46,10 @@ static fs_node_t *vfs_cross_mountpoint(fs_node_t *node) {
     return node;
 }
 
-// External filesystem init functions
-extern void ext2_init(void);
-extern void fat_init(void);
-extern void exfat_init(void);
-extern void minix_init(void);
-extern void udf_init(void);
-extern void devfs_init(void);
-extern void procfs_init(void);
-extern void sysfs_init(void);
-extern void fuse_init(void);
-extern void fuse_fs_init(void);
-extern void p9_init(void);
-extern void pseudo_init(void);
-extern void full_init(void);
-extern void cpuid_init(void);
-
 void vfs_init(void) {
     kprint("VFS: Initializing...\n");
+
+    bio_init();
     
     // Register real filesystem drivers
     ext2_init();
@@ -204,6 +204,15 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
         mp->mnt_node_root = root;
         mp->mnt_node_covered = mountpoint;
 
+        /* Snapshot the covered node's identity for mount crossing.
+         * We cannot dereference mnt_node_covered later because
+         * filesystems like ext2 reuse a fixed-size node cache;
+         * the slot may be recycled and overwritten. */
+        if (mountpoint) {
+            mp->mnt_covered_ino = mountpoint->inode;
+            mp->mnt_covered_mp  = mountpoint->mp;
+        }
+
         // Set mount reference on root node
         root->mp = mp;
 
@@ -222,11 +231,7 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
 size_t read_fs(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     if (node->read != 0) {
         size_t result = node->read(node, offset, size, buffer);
-        
-        // Update access time
-        extern int64_t get_time(void);
         node->atime = get_time();
-        
         return result;
     } else
         return 0;
@@ -235,13 +240,9 @@ size_t read_fs(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
 size_t write_fs(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     if (node->write != 0) {
         size_t result = node->write(node, offset, size, buffer);
-        
-        // Update modification and change times
-        extern int64_t get_time(void);
         int64_t now = get_time();
         node->mtime = now;
         node->ctime = now;
-        
         return result;
     } else
         return 0;
@@ -259,9 +260,12 @@ void close_fs(fs_node_t *node) {
 }
 
 struct dirent *readdir_fs(fs_node_t *node, uint64_t index) {
-    if ((node->flags & 0x7) == FS_DIRECTORY && node->readdir != 0)
-        return node->readdir(node, index);
-    else
+    if ((node->flags & 0x7) == FS_DIRECTORY && node->readdir != 0) {
+        struct dirent *de = node->readdir(node, index);
+        if (de)
+            node->atime = get_time();
+        return de;
+    } else
         return 0;
 }
 
@@ -364,14 +368,11 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
 // Lookup a path from a root node
 fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
     if (!path || !root) return NULL;
-    int absolute = (path[0] == '/');
     if (path[0] == '/') path++; // Skip leading /
     if (path[0] == '\0') return root; // Root itself
     
     fs_node_t *current = root;
     static char component[256];
-    char resolved[512];
-    size_t resolved_len = 0;
     const char *p = path;
     
     while (*p) {
@@ -404,32 +405,29 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
         if (!current) return NULL;
 
         /*
-         * Mount crossing by pathname for covered nodes that are recreated
-         * per-lookup (e.g. ext2 dynamic fs_node instances).
+         * Mount crossing by node identity.
+         *
+         * Filesystems like ext2 return freshly-allocated fs_node_t
+         * instances on each finddir, so pointer comparison and the
+         * FS_MOUNTPOINT flag alone are unreliable.  Compare the
+         * (mp, inode) tuple — which uniquely identifies a directory
+         * across the entire VFS — against each mount's snapshot of
+         * the covered directory's identity taken at mount time.
+         * This works for both absolute and relative path lookups.
          */
-        if (absolute) {
-            size_t comp_len = strlen(component);
-            if (resolved_len == 0) {
-                if (comp_len + 1 < sizeof(resolved)) {
-                    resolved[0] = '/';
-                    memcpy(resolved + 1, component, comp_len + 1);
-                    resolved_len = comp_len + 1;
-                }
-            } else if (resolved_len + 1 + comp_len < sizeof(resolved)) {
-                resolved[resolved_len++] = '/';
-                memcpy(resolved + resolved_len, component, comp_len + 1);
-                resolved_len += comp_len;
-            }
-
-            struct mount *mp;
-            TAILQ_FOREACH(mp, &mountlist, mnt_list) {
-                if (mp->mnt_node_root && strcmp(mp->mnt_stat_path, resolved) == 0) {
-                    current = mp->mnt_node_root;
+        {
+            struct mount *mnt;
+            TAILQ_FOREACH(mnt, &mountlist, mnt_list) {
+                if (mnt->mnt_covered_ino != 0 &&
+                    current->inode == mnt->mnt_covered_ino &&
+                    current->mp == mnt->mnt_covered_mp) {
+                    current = mnt->mnt_node_root;
                     break;
                 }
             }
         }
-        
+
+        /* Flag-based fast path for nodes with FS_MOUNTPOINT set */
         current = vfs_cross_mountpoint(current);
 
         // Skip trailing slash
@@ -441,14 +439,11 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
 
 fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path) {
     if (!path || !root) return NULL;
-    int absolute = (path[0] == '/');
     if (path[0] == '/') path++; // Skip leading /
     if (path[0] == '\0') return root; // Root itself
     
     fs_node_t *current = root;
     static char component[256];
-    char resolved[512];
-    size_t resolved_len = 0;
     const char *p = path;
     
     while (*p) {
@@ -484,29 +479,20 @@ fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path) {
         current = finddir_fs_internal(current, component, 0, !is_last);
         if (!current) return NULL;
 
-        if (absolute) {
-            size_t comp_len = strlen(component);
-            if (resolved_len == 0) {
-                if (comp_len + 1 < sizeof(resolved)) {
-                    resolved[0] = '/';
-                    memcpy(resolved + 1, component, comp_len + 1);
-                    resolved_len = comp_len + 1;
-                }
-            } else if (resolved_len + 1 + comp_len < sizeof(resolved)) {
-                resolved[resolved_len++] = '/';
-                memcpy(resolved + resolved_len, component, comp_len + 1);
-                resolved_len += comp_len;
-            }
-
-            struct mount *mp;
-            TAILQ_FOREACH(mp, &mountlist, mnt_list) {
-                if (mp->mnt_node_root && strcmp(mp->mnt_stat_path, resolved) == 0) {
-                    current = mp->mnt_node_root;
+        /* Mount crossing by node identity (see vfs_lookup comment) */
+        {
+            struct mount *mnt;
+            TAILQ_FOREACH(mnt, &mountlist, mnt_list) {
+                if (mnt->mnt_covered_ino != 0 &&
+                    current->inode == mnt->mnt_covered_ino &&
+                    current->mp == mnt->mnt_covered_mp) {
+                    current = mnt->mnt_node_root;
                     break;
                 }
             }
         }
-        
+
+        /* Flag-based fast path for nodes with FS_MOUNTPOINT set */
         current = vfs_cross_mountpoint(current);
 
         // Skip trailing slash
@@ -591,6 +577,27 @@ int link_fs(fs_node_t *parent, fs_node_t *source, const char *name) {
 int unlink_fs(fs_node_t *node, const char *name) {
     if (node && node->unlink) {
         return node->unlink(node, name);
+    }
+    return -1;
+}
+
+int rmdir_fs(fs_node_t *node, const char *name) {
+    if (node && node->rmdir) {
+        return node->rmdir(node, name);
+    }
+    return -1;
+}
+
+int rename_fs(fs_node_t *old_parent, const char *old_name, fs_node_t *new_parent, const char *new_name) {
+    if (old_parent && old_parent->rename) {
+        return old_parent->rename(old_parent, old_name, new_parent, new_name);
+    }
+    return -1;
+}
+
+int statfs_fs(fs_node_t *node, struct statfs *buf) {
+    if (node && node->statfs) {
+        return node->statfs(node, buf);
     }
     return -1;
 }
@@ -741,25 +748,27 @@ int vfs_mknod(const char *path, uint16_t mode, uint32_t dev) {
 int vfs_unmount_legacy(const char *path) {
     if (!path) return -1;
     
-    // Lookup mount point (directory that was mounted ON)
-    // We need to find the node that has FS_MOUNTPOINT flag.
-    // If we use regular lookup, we might traverse into the mounted filesystem.
-    // But we want the COVERED node.
-    
-    // NOTE: vfs_lookup usually traverses mountpoints.
-    // We need a way to lookup without traversing the LAST mountpoint.
-    
-    // For now, let's assume we can match by path string if we had a mount list?
-    // But we didn't implement a global mount list with paths yet (except implicit tree).
-    
-    // Workaround: Use vfs_lookup_lstat? No, that stops at symlinks.
-    // We need to implement a lookup that returns the MOUNTPOINT node, not the root of the fs.
-    
-    // Actually, if we mount on /mnt, the node at /mnt (in root fs) has FS_MOUNTPOINT.
-    // Its 'ptr' points to the new root.
-    
-    // Strategy: Lookup parent directory, then find entry, but manually check flags
-    // without invoking the automatic traversal (or utilize a specialized finding function).
+    /*
+     * Lookup mount point (the directory that was mounted ON).
+     * We need to find the node that has the mount point flag.
+     * If we use standard lookup, we might traverse into the mounted filesystem.
+     * But we want the COVERED node.
+     *
+     * NOTE: Standard lookup usually traverses mount points.
+     * We need a way to lookup without traversing the LAST mount point.
+     *
+     * For now, let's assume we can match by path string if we had a mount list.
+     * But we didn't implement a global mount list with paths yet (except implicit tree).
+     *
+     * Workaround: Use standard lookup lstat. No, that stops at symlinks.
+     * We need to implement a lookup that returns the mount point node, not the root of the filesystem.
+     *
+     * Actually, if we mount on /mnt, the node at /mnt (in root filesystem) has the mount point flag.
+     * Its internal pointer points to the new root.
+     *
+     * Strategy: Lookup parent directory, then find entry, but manually check flags
+     * without invoking the automatic traversal (or utilize a specialized finding function).
+     */
     
     char path_buf[256];
     strncpy(path_buf, path, sizeof(path_buf));

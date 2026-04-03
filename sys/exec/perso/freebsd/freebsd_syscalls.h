@@ -39,6 +39,8 @@ struct freebsd_stat;
 #define FREEBSD_SYS_setgid     46
 #define FREEBSD_SYS_getgid     47
 #define FREEBSD_SYS_ioctl      54
+#define FREEBSD_SYS_readlink   58
+#define FREEBSD_SYS_symlink    57
 #define FREEBSD_SYS_execve     59
 #define FREEBSD_SYS_fstat      62
 #define FREEBSD_SYS_vfork      66

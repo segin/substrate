@@ -281,12 +281,27 @@ size_t strlen(const char *s) {
     return len;
 }
 
+size_t strnlen(const char *s, size_t maxlen) {
+    size_t len = 0;
+    while (len < maxlen && s[len]) len++;
+    return len;
+}
+
 char *strdup(const char *s) {
     size_t len = strlen(s) + 1;
     char *new_s = malloc(len);
     if (new_s) {
         memcpy(new_s, s, len);
     }
+    return new_s;
+}
+
+char *strndup(const char *s, size_t n) {
+    size_t len = strnlen(s, n);
+    char *new_s = malloc(len + 1);
+    if (!new_s) return NULL;
+    memcpy(new_s, s, len);
+    new_s[len] = '\0';
     return new_s;
 }
 
@@ -368,4 +383,46 @@ char *strtok_r(char *str, const char *delim, char **saveptr) {
 char *strerror(int errnum) {
     (void)errnum;
     return "Error";
+}
+int ffs(int i) {
+    if (i == 0) return 0;
+    int bit = 1;
+    while (!(i & 1)) { i >>= 1; bit++; }
+    return bit;
+}
+
+int ffsl(long i) {
+    if (i == 0) return 0;
+    int bit = 1;
+    while (!(i & 1)) { i >>= 1; bit++; }
+    return bit;
+}
+
+int ffsll(long long i) {
+    if (i == 0) return 0;
+    int bit = 1;
+    while (!(i & 1)) { i >>= 1; bit++; }
+    return bit;
+}
+
+void bzero(void *s, size_t n) { memset(s, 0, n); }
+void bcopy(const void *src, void *dst, size_t n) { memmove(dst, src, n); }
+int  bcmp(const void *s1, const void *s2, size_t n) { return memcmp(s1, s2, n); }
+char *index(const char *s, int c)  { return strchr(s, c); }
+char *rindex(const char *s, int c) { return strrchr(s, c); }
+
+/* In the C/POSIX locale, strcoll is identical to strcmp */
+int strcoll(const char *s1, const char *s2) {
+    return strcmp(s1, s2);
+}
+
+/* In the C/POSIX locale, strxfrm copies the string unchanged */
+size_t strxfrm(char *dest, const char *src, size_t n) {
+    size_t len = strlen(src);
+    if (n > 0) {
+        size_t copy = len < n ? len : n - 1;
+        memcpy(dest, src, copy);
+        dest[copy] = '\0';
+    }
+    return len;
 }

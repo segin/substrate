@@ -3,6 +3,7 @@
 
 #include <sys/types.h>
 #include <sys/queue.h>
+#include <sys/lock.h>
 #include <stdint.h>
 
 struct vnode;
@@ -17,22 +18,22 @@ struct vfsconf;
  * Filesystem statistics
  */
 struct statfs {
-    long    f_type;         /* type of filesystem */
-    long    f_bsize;        /* optimal transfer block size */
-    long    f_iosize;       /* optimal transfer block size */
-    long    f_blocks;       /* total data blocks in filesystem */
-    long    f_bfree;        /* free blocks in fs */
-    long    f_bavail;       /* free blocks avail to non-superuser */
-    long    f_files;        /* total file nodes in filesystem */
-    long    f_ffree;        /* free file nodes in fs */
-    long    f_fsid;         /* filesystem id */
-    uid_t   f_owner;        /* user that mounted the filesystem */
-    short   f_flags;        /* copy of mount exported flags */
-    short   f_syncwrites;   /* count of sync writes since mount */
-    short   f_asyncwrites;  /* count of async writes since mount */
-    char    f_fstypename[16]; /* fs type name */
-    char    f_mntonname[128]; /* directory on which mounted */
-    char    f_mntfromname[128]; /* mounted filesystem */
+    uint32_t    f_type;         /* type of filesystem */
+    uint64_t    f_bsize;        /* optimal transfer block size */
+    uint64_t    f_iosize;       /* optimal transfer block size */
+    uint64_t    f_blocks;       /* total data blocks in filesystem */
+    uint64_t    f_bfree;        /* free blocks in fs */
+    uint64_t    f_bavail;       /* free blocks avail to non-superuser */
+    uint64_t    f_files;        /* total file nodes in filesystem */
+    uint64_t    f_ffree;        /* free file nodes in fs */
+    int64_t     f_fsid;         /* filesystem id */
+    uid_t       f_owner;        /* user that mounted the filesystem */
+    short       f_flags;        /* copy of mount exported flags */
+    short       f_syncwrites;   /* count of sync writes since mount */
+    short       f_asyncwrites;  /* count of async writes since mount */
+    char        f_fstypename[16]; /* fs type name */
+    char        f_mntonname[128]; /* directory on which mounted */
+    char        f_mntfromname[128]; /* mounted filesystem */
 };
 
 TAILQ_HEAD(vnode_list, vnode);
@@ -92,9 +93,11 @@ struct mount {
     struct vnode_list   mnt_vnodelist;      /* list of active vnodes */
     struct statfs       mnt_stat;           /* cached filesystem statistics */
     int                 mnt_maxsymlinklen;  /* max symlink target inline */
-    uint32_t            mnt_lock;           /* mount-level rw lock state */
+    rwlock_t            mnt_lock;           /* mount-level reader/writer lock */
     struct fs_node      *mnt_node_covered;  /* Legacy: Node we mounted on */
     struct fs_node      *mnt_node_root;     /* Legacy: root node of this fs */
+    uint64_t            mnt_covered_ino;    /* inode of covered directory (snapshot) */
+    struct mount        *mnt_covered_mp;    /* mount of covered directory (snapshot) */
 };
 
 /*

@@ -236,7 +236,7 @@ void bc_print(bc_num *n) {
     int scale = n->scale;
 
     if (scale >= D) {
-        printf("0.");
+        printf(".");
         for (int i = 0; i < scale - D; i++) printf("0");
 
         for (int i = n->len - 1; i >= 0; i--) {
@@ -315,7 +315,9 @@ void bc_print_base(bc_num *n, int obase) {
     
     bc_num *curr_int = int_part; // Transfer ownership
     if (bc_is_zero(curr_int)) {
-        if (ds < max_digits) out_digits[ds++] = 0;
+        if (!(n->scale > 0 && obase > 10)) {
+            if (ds < max_digits) out_digits[ds++] = 0;
+        }
         bc_free(curr_int);
     } else {
         while (!bc_is_zero(curr_int)) {
@@ -357,7 +359,7 @@ void bc_print_base(bc_num *n, int obase) {
                 if (d < 10) printf("%d", d);
                 else printf("%c", 'A' + (d - 10));
             } else {
-                printf(" %02d", d);
+                printf(i == 0 && ds == 0 ? "%02d" : " %02d", d);
             }
 
             bc_free(curr_frac_int);
@@ -391,10 +393,8 @@ bc_num *bc_dup(bc_num *src) {
 // Returns 1 if |a| > |b|, -1 if |a| < |b|, 0 if equal
 // MUST handle scale correctly
 int bc_abs_cmp(bc_num *a, bc_num *b) {
-    // We cannot just compare length if scales differ.
-    // Align scales dynamically without allocating.
-    // Total decimal length (int + frac) ...
-    // Much easier: use align function
+    /* We cannot just compare length if scales differ.
+       Align scales dynamically using the align function. */
     bc_num *aa, *bb;
     bc_align_scale(a, b, &aa, &bb);
     

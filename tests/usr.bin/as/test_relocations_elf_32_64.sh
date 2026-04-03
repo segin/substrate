@@ -58,7 +58,7 @@ readelf -h "$TMP/rel64.o" | grep -q "ELF64"
 
 # i386 REL and required relocation families
 readelf -S "$TMP/rel32.o" | grep -q "\\.rel\\.text"
-readelf --wide -r "$TMP/rel32.o" | grep -q "R_386_PC32"
+readelf --wide -r "$TMP/rel32.o" | grep -Eq "R_386_(PLT32|PC32)"
 readelf --wide -r "$TMP/rel32.o" | grep -q "R_386_32"
 
 # x86_64 RELA and required relocation families

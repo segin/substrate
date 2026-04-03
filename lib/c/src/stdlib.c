@@ -17,7 +17,17 @@
 #include <errno.h>
 #include <sys/wait.h>
 
+#define ATEXIT_MAX 32
+static void (*__atexit_funcs[ATEXIT_MAX])(void);
+static int __atexit_count = 0;
+
 void exit(int status) {
+    /* Call atexit handlers in reverse order */
+    while (__atexit_count > 0) {
+        __atexit_funcs[--__atexit_count]();
+    }
+    /* Flush all open stdio streams (POSIX requirement) */
+    fflush(NULL);
     _exit(status);
 }
 
@@ -534,6 +544,78 @@ char *getenv(const char *name) {
     return NULL;
 }
 
+int setenv(const char *name, const char *value, int overwrite) {
+    if (!name || !*name || strchr(name, '=')) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (!value) value = "";
+
+    size_t name_len = strlen(name);
+    size_t value_len = strlen(value);
+
+    size_t count = 0;
+    if (environ) {
+        while (environ[count]) count++;
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        if (strncmp(environ[i], name, name_len) == 0 && environ[i][name_len] == '=') {
+            if (!overwrite) return 0;
+
+            char *entry = malloc(name_len + 1 + value_len + 1);
+            if (!entry) {
+                errno = ENOMEM;
+                return -1;
+            }
+            memcpy(entry, name, name_len);
+            entry[name_len] = '=';
+            memcpy(entry + name_len + 1, value, value_len + 1);
+            environ[i] = entry;
+            return 0;
+        }
+    }
+
+    char **new_env = realloc(environ, (count + 2) * sizeof(char *));
+    if (!new_env) {
+        errno = ENOMEM;
+        return -1;
+    }
+    environ = new_env;
+
+    char *entry = malloc(name_len + 1 + value_len + 1);
+    if (!entry) {
+        errno = ENOMEM;
+        return -1;
+    }
+    memcpy(entry, name, name_len);
+    entry[name_len] = '=';
+    memcpy(entry + name_len + 1, value, value_len + 1);
+
+    environ[count] = entry;
+    environ[count + 1] = NULL;
+    return 0;
+}
+
+int unsetenv(const char *name) {
+    if (!name || !*name || strchr(name, '=')) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (!environ) return 0;
+
+    size_t name_len = strlen(name);
+    size_t dst = 0;
+    for (size_t src = 0; environ[src]; src++) {
+        if (strncmp(environ[src], name, name_len) == 0 && environ[src][name_len] == '=') {
+            continue;
+        }
+        environ[dst++] = environ[src];
+    }
+    environ[dst] = NULL;
+    return 0;
+}
+
 int system(const char *command) {
     if (!command) return 1;
 
@@ -553,12 +635,154 @@ int abs(int j) { return j < 0 ? -j : j; }
 long labs(long j) { return j < 0 ? -j : j; }
 long long llabs(long long j) { return j < 0 ? -j : j; }
 
+div_t div(int numer, int denom) {
+    div_t result;
+    result.quot = numer / denom;
+    result.rem = numer % denom;
+    return result;
+}
+
+ldiv_t ldiv(long numer, long denom) {
+    ldiv_t result;
+    result.quot = numer / denom;
+    result.rem = numer % denom;
+    return result;
+}
+
+lldiv_t lldiv(long long numer, long long denom) {
+    lldiv_t result;
+    result.quot = numer / denom;
+    result.rem = numer % denom;
+    return result;
+}
+
+int atexit(void (*func)(void)) {
+    if (__atexit_count >= ATEXIT_MAX) return -1;
+    __atexit_funcs[__atexit_count++] = func;
+    return 0;
+}
+
+void _Exit(int status) {
+    _exit(status);
+}
+
+static void swap_bytes(char *a, char *b, size_t size) {
+    while (size--) {
+        char tmp = *a;
+        *a++ = *b;
+        *b++ = tmp;
+    }
+}
+
+static void insertion_sort(char *base, size_t nmemb, size_t size,
+                           int (*compar)(const void *, const void *)) {
+    for (size_t i = 1; i < nmemb; i++) {
+        size_t j = i;
+        while (j > 0 && compar(base + j * size, base + (j - 1) * size) < 0) {
+            swap_bytes(base + j * size, base + (j - 1) * size, size);
+            j--;
+        }
+    }
+}
+
+static size_t med3(char *base, size_t a, size_t b, size_t c, size_t size,
+                   int (*compar)(const void *, const void *)) {
+    int ab = compar(base + a * size, base + b * size);
+    int bc = compar(base + b * size, base + c * size);
+    int ac = compar(base + a * size, base + c * size);
+    if (ab <= 0) {
+        if (bc <= 0) return b;
+        return ac <= 0 ? c : a;
+    }
+    if (bc >= 0) return b;
+    return ac >= 0 ? c : a;
+}
+
 void qsort(void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *)) {
-    (void)base; (void)nmemb; (void)size; (void)compar;
+    if (nmemb < 2 || size == 0) return;
+
+    char *arr = (char *)base;
+
+    /* Use iterative quicksort with explicit stack to avoid recursion depth issues */
+    struct { size_t lo; size_t hi; } stack[64];
+    int top = 0;
+    stack[top].lo = 0;
+    stack[top].hi = nmemb - 1;
+
+    while (top >= 0) {
+        size_t lo = stack[top].lo;
+        size_t hi = stack[top].hi;
+        top--;
+
+        if (hi <= lo) continue;
+
+        /* Use insertion sort for small partitions */
+        if (hi - lo + 1 <= 16) {
+            insertion_sort(arr + lo * size, hi - lo + 1, size, compar);
+            continue;
+        }
+
+        /* Median-of-three pivot selection */
+        size_t mid = lo + (hi - lo) / 2;
+        size_t pivot_idx = med3(arr, lo, mid, hi, size, compar);
+        swap_bytes(arr + pivot_idx * size, arr + lo * size, size);
+
+        /* Partition */
+        size_t i = lo + 1;
+        size_t j = hi;
+        while (1) {
+            while (i <= hi && compar(arr + i * size, arr + lo * size) < 0) i++;
+            while (j > lo && compar(arr + j * size, arr + lo * size) > 0) j--;
+            if (i >= j) break;
+            swap_bytes(arr + i * size, arr + j * size, size);
+            i++;
+            j--;
+        }
+        swap_bytes(arr + lo * size, arr + j * size, size);
+
+        /* Push larger partition first so smaller is processed first (limits stack depth) */
+        if (j > lo + 1 && hi > j + 1) {
+            if (j - lo > hi - j) {
+                top++;
+                stack[top].lo = lo;
+                stack[top].hi = j > 0 ? j - 1 : 0;
+                top++;
+                stack[top].lo = j + 1;
+                stack[top].hi = hi;
+            } else {
+                top++;
+                stack[top].lo = j + 1;
+                stack[top].hi = hi;
+                top++;
+                stack[top].lo = lo;
+                stack[top].hi = j > 0 ? j - 1 : 0;
+            }
+        } else if (j > lo + 1) {
+            top++;
+            stack[top].lo = lo;
+            stack[top].hi = j > 0 ? j - 1 : 0;
+        } else if (hi > j + 1) {
+            top++;
+            stack[top].lo = j + 1;
+            stack[top].hi = hi;
+        }
+    }
 }
 
 void *bsearch(const void *key, const void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *)) {
-    (void)key; (void)base; (void)nmemb; (void)size; (void)compar;
+    const char *p = (const char *)base;
+    while (nmemb > 0) {
+        size_t mid = nmemb / 2;
+        const void *midp = p + mid * size;
+        int cmp = compar(key, midp);
+        if (cmp == 0) return (void *)midp;
+        if (cmp > 0) {
+            p = (const char *)midp + size;
+            nmemb -= mid + 1;
+        } else {
+            nmemb = mid;
+        }
+    }
     return NULL;
 }
 
@@ -686,54 +910,103 @@ uint32_t arc4random_uniform(uint32_t upper_bound) {
     return r % upper_bound;
 }
 
-/* getopt implementation */
-char *optarg = NULL;
-int optind = 1;
-int opterr = 1;
-int optopt = 0;
+#define MKSTEMP_SUFFIX "XXXXXX"
+#define MKSTEMP_SUFFIX_LEN (sizeof(MKSTEMP_SUFFIX) - 1)
 
-int getopt(int argc, char * const argv[], const char *optstring) {
-    static int sp = 1;
-    int c;
-    char *cp;
+static void fill_temp_suffix(char *suffix) {
+    static const char alphabet[] =
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    for (size_t i = 0; i < MKSTEMP_SUFFIX_LEN; i++) {
+        suffix[i] = alphabet[arc4random_uniform((uint32_t)(sizeof(alphabet) - 1))];
+    }
+}
 
-    if (sp == 1) {
-        if (optind >= argc ||
-            argv[optind][0] != '-' || argv[optind][1] == '\0')
-            return -1;
-        else if (strcmp(argv[optind], "--") == 0) {
-            optind++;
-            return -1;
-        }
+int mkstemp(char *tmpl) {
+    if (!tmpl) {
+        errno = EINVAL;
+        return -1;
     }
-    optopt = c = argv[optind][sp];
-    if (c == ':' || (cp = strchr(optstring, c)) == NULL) {
-        if (opterr)
-            fprintf(stderr, "%s: illegal option -- %c\n", argv[0], c);
-        if (argv[optind][++sp] == '\0') {
-            optind++;
-            sp = 1;
-        }
-        return '?';
+
+    size_t len = strlen(tmpl);
+    if (len < MKSTEMP_SUFFIX_LEN || strcmp(tmpl + len - MKSTEMP_SUFFIX_LEN, MKSTEMP_SUFFIX) != 0) {
+        errno = EINVAL;
+        return -1;
     }
-    if (*++cp == ':') {
-        if (argv[optind][sp+1] != '\0')
-            optarg = &argv[optind++][sp+1];
-        else if (++optind >= argc) {
-            if (opterr)
-                fprintf(stderr, "%s: option requires an argument -- %c\n",
-                    argv[0], c);
-            sp = 1;
-            return '?';
-        } else
-            optarg = argv[optind++];
-        sp = 1;
+
+    char *suffix = tmpl + len - MKSTEMP_SUFFIX_LEN;
+    for (int attempt = 0; attempt < 256; attempt++) {
+        fill_temp_suffix(suffix);
+        int fd = open(tmpl, O_CREAT | O_EXCL | O_RDWR, 0600);
+        if (fd >= 0) return fd;
+        if (errno != EEXIST) return -1;
+    }
+
+    errno = EEXIST;
+    return -1;
+}
+
+char *mkdtemp(char *tmpl) {
+    if (!tmpl) {
+        errno = EINVAL;
+        return NULL;
+    }
+
+    size_t len = strlen(tmpl);
+    if (len < MKSTEMP_SUFFIX_LEN || strcmp(tmpl + len - MKSTEMP_SUFFIX_LEN, MKSTEMP_SUFFIX) != 0) {
+        errno = EINVAL;
+        return NULL;
+    }
+
+    char *suffix = tmpl + len - MKSTEMP_SUFFIX_LEN;
+    for (int attempt = 0; attempt < 256; attempt++) {
+        fill_temp_suffix(suffix);
+        if (mkdir(tmpl, 0700) == 0) return tmpl;
+        if (errno != EEXIST) return NULL;
+    }
+
+    errno = EEXIST;
+    return NULL;
+}
+
+char *realpath(const char *restrict path, char *restrict resolved_path) {
+    if (!path || *path == '\0') {
+        errno = EINVAL;
+        return NULL;
+    }
+
+    char tmp[PATH_MAX];
+    if (path[0] == '/') {
+        if (strlcpy(tmp, path, sizeof(tmp)) >= sizeof(tmp)) {
+            errno = ENAMETOOLONG;
+            return NULL;
+        }
     } else {
-        if (argv[optind][++sp] == '\0') {
-            sp = 1;
-            optind++;
+        char cwd[PATH_MAX];
+        if (!getcwd(cwd, sizeof(cwd))) return NULL;
+        size_t cwd_len = strlen(cwd);
+        size_t path_len = strlen(path);
+        if (cwd_len + 1 + path_len + 1 > sizeof(tmp)) {
+            errno = ENAMETOOLONG;
+            return NULL;
         }
-        optarg = NULL;
+        memcpy(tmp, cwd, cwd_len);
+        tmp[cwd_len] = '/';
+        memcpy(tmp + cwd_len + 1, path, path_len + 1);
     }
-    return c;
+
+    char *out = resolved_path;
+    if (!out) {
+        out = malloc(PATH_MAX);
+        if (!out) {
+            errno = ENOMEM;
+            return NULL;
+        }
+    }
+
+    if (strlcpy(out, tmp, PATH_MAX) >= PATH_MAX) {
+        if (!resolved_path) free(out);
+        errno = ENAMETOOLONG;
+        return NULL;
+    }
+    return out;
 }

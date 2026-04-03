@@ -29,14 +29,14 @@ void rddescf(char *descfile) {
             len--;
             // Append
             accum = realloc(accum, accum_len + len + 1);
-            strcpy(accum + accum_len, buf);
+            memcpy(accum + accum_len, buf, len + 1);
             accum_len += len;
             continue;
         }
         
         if (accum) {
             accum = realloc(accum, accum_len + len + 1);
-            strcpy(accum + accum_len, buf);
+            memcpy(accum + accum_len, buf, len + 1);
             parse_line(accum);
             free(accum);
             accum = NULL;
@@ -138,8 +138,9 @@ void parse_line(char *line) {
         struct depblock *curr_dep = NULL;
         
         // Need to expand macros in deps?
-        char exp_deps[2048];
-        subst(deps, exp_deps);
+        char *exp_deps = malloc(OUTMAX);
+        if (!exp_deps) fatal("malloc failed in reader");
+        subst(deps, exp_deps, OUTMAX);
         
         char *d = strtok(exp_deps, " \t");
         while (d) {
@@ -156,6 +157,7 @@ void parse_line(char *line) {
             
             d = strtok(NULL, " \t");
         }
+        free(exp_deps);
         
         lb->depp = head_dep;
         

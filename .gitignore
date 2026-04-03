@@ -81,6 +81,7 @@ vgcore.*
 /sys/kernel.freebsd
 /sys/kernel.multiboot
 /sys/kernel.zimage
+/sys/ksyms*.c
 /sys/ksyms_efi_table.c
 /sys/ksyms_table.c
 /sys/screen.png
@@ -90,6 +91,27 @@ vgcore.*
 # Generated trees and logs
 /bench_objects/
 /tests/elks/logs/
+
+# Recursive per-directory build stamps
+/usr.bin/*/.build-mode
+/usr.lib/*/.build-mode
+
+# Patterns formerly carried in subtree .gitignore files
+/contrib/ext2-boot/*.bin
+/contrib/ext2-boot/boot
+/contrib/ext2-boot/bootloader
+/contrib/ext2-boot/ext2util
+/contrib/ext2-boot/kernel
+/contrib/ext2-boot/boot.img
+/contrib/ext2-boot/boot.img.bak
+/tests/test_libedit
+/tests/test_getuid
+/tests/lib/sys/test_getuid
+/tests/elks/build/
+/tests/elks/*_elks
+/tests/elks/gen_hello
+/tests/usr.bin/cc/*.list
+/lib/edit/histedit.h
 
 # Host test binaries
 /host_test_*
@@ -197,6 +219,7 @@ sbin/*/*
 /usr.bin/lex/test_posix
 /usr.bin/pax/pax
 /usr.bin/pr/pr
+/usr.bin/readelf/readelf
 /usr.bin/size/size
 /usr.bin/uudecode/uudecode
 /usr.bin/yacc/test_minimal.output
@@ -227,3 +250,26 @@ sbin/*/*
 /y.tab.h
 /test_output.txt
 /tests/test_getpagesize
+tests/lib/usb/host_test_libusb
+usr.bin/lsusb/lsusb
+
+# USB test binaries
+tests/lib/usb/test_core
+tests/lib/usb/test_descriptor
+tests/lib/usb/test_device
+tests/lib/usb/test_io
+tests/lib/usb/test_async
+tests/lib/usb/test_hotplug
+tests/lib/edit/host_test_history
+tests/lib/edit/test_editline
+tests/lib/edit/test_editrc
+tests/lib/edit/test_emacs
+tests/lib/edit/test_fuzz
+tests/lib/edit/test_integration
+tests/lib/edit/test_keymap
+tests/lib/edit/test_line_buffer
+tests/lib/edit/test_property
+tests/lib/edit/test_tokenizer
+tests/lib/edit/test_vi
+tools/sbsh_expect.exp
+/usr.lib/elfobj/tests/test_ensure_symbols_relocs

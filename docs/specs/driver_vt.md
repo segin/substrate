@@ -6,15 +6,33 @@
 - coordinates active-VT redraw through the VGA text backend
 
 ## Current Contract
-- each VT owns a full text buffer sized to the current physical geometry
-- each VT owns a fixed scrollback ring of `256` lines at the maximum supported width
-- each VT owns an ANSI/VT102 parser state machine for printable characters, cursor movement, erase sequences, and basic SGR color changes
-- `vt_activate(n)` switches the active VT, repoints `/dev/console` input to that VT's `tty`, and requests a backend redraw
-- `Shift+PageUp` and `Shift+PageDown` adjust the active VT scrollback view by one visible page
-- when scrollback is active, the VGA backend redraws historical lines and hides the hardware cursor
-- each VT owns an ANSI/VT102 parser state machine that handles cursor movement, erase-in-line/display, and SGR color changes through the shared `ansi_handler` callbacks
+- each VT owns a full text buffer sized to the current physical geometry.
+- the VT layer refreshes its geometry from the active console backend's reported terminal size so mode changes and framebuffer takeover keep the kernel and tty winsizes aligned.
+- each VT owns an ANSI/VT102 parser state machine, and the active hardware-text backend feeds printable characters and escape sequences through the shared `ansi_handler` callbacks.
+- the hardware text console treats the last physical text row as a kernel-owned status line rendered black-on-white; the usable tty geometry reported to userland excludes that row (e.g., `80x24` on an `80x25` mode).
+- the kernel-owned status line occupies the last physical row, is stored separately from the tty-visible rows in the VT buffer, and is excluded from normal scroll/erase operations.
+- `vt_tick_1hz()` refreshes the status line once per second and the active backend only syncs the already-rendered status row to hardware, avoiding backend-to-VT re-entry; full-screen VT redraws compose the status row up front and repaint the main area plus status row in one backend pass so the status bar does not blink during page refreshes.
+- each VT owns a fixed scrollback ring of `256` lines at the maximum supported width.
+- the hardware-text VT backend honors DECSTBM scroll regions through the shared ANSI callback table, so line insert/delete, index, reverse-index, and bulk scroll operations stay clipped to the configured top/bottom margins.
+- the hardware-text attribute byte is treated as a 4-bit foreground plus 4-bit background palette, so ANSI SGR color changes can address the full 16 VGA text colors for both foreground and background.
+- extended SGR true-color forms (`38;2;R;G;B` and `48;2;R;G;B`) are accepted by the parser and approximated onto the text palette rather than rejected.
+- the VGA text backend preserves SGR attribute state per VT and approximates bold, reverse video, and underline using palette/intensity transforms when a true text-mode rendering primitive is unavailable.
+- the hardware-text backend exposes a bulk write path for both console logging and `/dev/ttyN` output, so multi-byte writes traverse the same ANSI parser and cursor-update logic as single-character output.
+- ANSI status replies that are terminal input rather than display output, such as `CSI 5 n`, `CSI 6 n`, `CSI c`, and `ESC Z`, are reinjected into the active VT tty input queue instead of being rendered on screen.
+- each VT carries its own tab-stop bitmap, seeded with default stops every `8` columns; `ESC H` can set an additional stop at the current column, `CSI g` clears the current stop, `CSI 3 g` clears all stops, `CSI I`/`CSI Z` move forward/backward across the bitmap, and the existing tab-width control resets the bitmap to a uniform spacing when requested.
+- the ANSI parser now tracks G0..G3 charset designation state (`ESC (`, `)`, `*`, `+`) so later shift and DEC-special-graphics handling has real parser state to operate on.
+- `SI`/`SO` now switch the active GL set between G0 and G1 inside that parser state.
+- when the active GL set is designated as DEC Special Graphics, the parser maps the VT100 line-drawing subset onto CP437 box-drawing glyphs for the text backends.
+- UTF-8 multibyte sequences are decoded in the parser; codepoints that map cleanly onto the text backends' CP437-style glyph set are emitted as those glyphs, and unmappable codepoints currently degrade to `?`.
+- the VGA text `tty_driver->ioctl()` path exposes backend-specific controls for per-VT tab width, cursor visibility, cursor blink, and text blink mode, separate from generic termios handling.
+- the VGA text backend advances cursor blink from the real timer tick path and keeps blink state per VT, so a steady cursor and a blinking cursor are both supported without reusing the text-attribute blink bit.
+- the VGA text backend programs the attribute-controller mode register so blink mode can be toggled on and off, allowing bright backgrounds when blink is disabled.
+- the active VGA text VT uses the CRTC start-address registers for full-screen one-line scroll operations, so normal console scrolls can advance the visible text origin and only repaint the newly exposed line plus the status row.
+- `Alt+F1..F12` switches the active VT.
+- `Shift+PageUp` and `Shift+PageDown` enter/exit scrollback and adjust the active VT scrollback view.
+- when scrollback is active, the VGA backend redraws historical lines and hides the hardware cursor.
 
 ## Non-Goals
 - framebuffer console composition
 - full VT102 feature parity
-- hardware smooth-scroll via CRTC start-address programming
+- smooth pixel scrolling

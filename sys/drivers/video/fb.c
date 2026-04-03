@@ -19,6 +19,7 @@
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
 #include <vm/vm_pager.h>
+#include <kern/resource.h>
 
 #include <arch/i386/pmap.h>
 
@@ -32,6 +33,10 @@
 fb_info_t fb;
 int fb_active = 0;
 extern int hw_text_active;
+
+/* Multi-framebuffer device registry */
+fb_info_t fb_devices[FB_MAX_DEVICES];
+int fb_device_count = 0;
 
 /* ==================== Pixel Operations ==================== */
 
@@ -51,14 +56,65 @@ static uint8_t rgb_to_index(uint32_t color) {
     return i;
 }
 
+static uint32_t fb_scale_component(uint8_t component, uint8_t bits) {
+    uint64_t max_value;
+
+    if (bits == 0) {
+        return 0;
+    }
+    if (bits >= 31) {
+        return (uint32_t)component;
+    }
+    max_value = ((uint64_t)1 << bits) - 1;
+    return (uint32_t)(((uint64_t)component * max_value + 127) / 255);
+}
+
+static void fb_set_default_color_layout(fb_info_t *info) {
+    if (info->red_length != 0 || info->green_length != 0 || info->blue_length != 0) {
+        return;
+    }
+
+    switch (info->bpp) {
+    case 32:
+    case 24:
+        info->red_offset = 16;
+        info->red_length = 8;
+        info->green_offset = 8;
+        info->green_length = 8;
+        info->blue_offset = 0;
+        info->blue_length = 8;
+        break;
+    case 16:
+        info->red_offset = 11;
+        info->red_length = 5;
+        info->green_offset = 5;
+        info->green_length = 6;
+        info->blue_offset = 0;
+        info->blue_length = 5;
+        break;
+    case 15:
+        info->red_offset = 10;
+        info->red_length = 5;
+        info->green_offset = 5;
+        info->green_length = 5;
+        info->blue_offset = 0;
+        info->blue_length = 5;
+        break;
+    default:
+        break;
+    }
+}
+
 static uint32_t fb_get_raw_pixel(uint32_t color, uint8_t bpp) {
     if (bpp >= 15) {
-        switch (bpp) {
-            case 32: return color;
-            case 24: return color & 0xFFFFFF;
-            case 16: return ((color >> 8) & 0xF800) | ((color >> 5) & 0x07E0) | ((color >> 3) & 0x001F);
-            case 15: return ((color >> 9) & 0x7C00) | ((color >> 6) & 0x03E0) | ((color >> 3) & 0x001F);
-        }
+        uint8_t red = (color >> 16) & 0xFF;
+        uint8_t green = (color >> 8) & 0xFF;
+        uint8_t blue = color & 0xFF;
+
+        fb_set_default_color_layout(&fb);
+        return (fb_scale_component(red, fb.red_length) << fb.red_offset) |
+            (fb_scale_component(green, fb.green_length) << fb.green_offset) |
+            (fb_scale_component(blue, fb.blue_length) << fb.blue_offset);
     } else if (bpp == 8) {
         return rgb_to_index(color);
     }
@@ -268,6 +324,127 @@ void fb_clear(uint32_t color) {
 
 /* Track the currently active driver */
 static video_driver_t *current_driver = NULL;
+/* Video driver registry (used by mode matching and init) */
+static video_driver_t *video_drivers = NULL;
+
+/* ==================== VGA Mode Parsing ==================== */
+
+/*
+ * fb_parse_vga_mode - Parse "WxH@BPP" or "WxH" format string.
+ *
+ * Examples: "1024x768@32", "640x480", "320x200@8"
+ * Returns 0 on success, -1 on parse error.
+ */
+int fb_parse_vga_mode(const char *arg, uint32_t *width, uint32_t *height, uint32_t *bpp) {
+    uint32_t w = 0, h = 0, b = 0;
+    const char *p = arg;
+
+    if (!arg || !width || !height || !bpp) return -1;
+
+    /* Parse width */
+    while (*p >= '0' && *p <= '9') {
+        w = w * 10 + (*p - '0');
+        p++;
+    }
+    if (w == 0 || (*p != 'x' && *p != 'X')) return -1;
+    p++; /* skip 'x' */
+
+    /* Parse height */
+    while (*p >= '0' && *p <= '9') {
+        h = h * 10 + (*p - '0');
+        p++;
+    }
+    if (h == 0) return -1;
+
+    /* Parse optional @BPP */
+    if (*p == '@') {
+        p++;
+        while (*p >= '0' && *p <= '9') {
+            b = b * 10 + (*p - '0');
+            p++;
+        }
+        if (b == 0) return -1;
+    }
+
+    /* Trailing garbage check */
+    if (*p != '\0') return -1;
+
+    *width = w;
+    *height = h;
+    *bpp = b; /* 0 means "any bpp" */
+    return 0;
+}
+
+/*
+ * fb_find_matching_mode - Search all registered drivers for a mode matching
+ * the requested WxH@BPP. Returns the best driver and mode_id, preferring
+ * higher BPP when bpp==0.
+ */
+static int fb_find_matching_mode(uint32_t req_w, uint32_t req_h, uint32_t req_bpp,
+                                  video_driver_t **out_drv, int *out_mode_id) {
+    struct video_mode_info modes[32];
+    video_driver_t *best_drv = NULL;
+    int best_mode_id = -1;
+    int best_bpp = -1;
+    int best_prio = -1;
+
+    video_driver_t *drv = video_drivers;
+    while (drv) {
+        if (drv->probe && drv->probe() != 0) {
+            drv = drv->next;
+            continue;
+        }
+        if (!drv->list_modes) {
+            drv = drv->next;
+            continue;
+        }
+
+        int total = drv->list_modes(NULL, 0);
+        if (total <= 0) {
+            drv = drv->next;
+            continue;
+        }
+        if (total > 32) total = 32;
+        int count = drv->list_modes(modes, total);
+
+        for (int i = 0; i < count; i++) {
+            if (modes[i].width != req_w || modes[i].height != req_h)
+                continue;
+            if (req_bpp != 0 && modes[i].bpp != req_bpp)
+                continue;
+
+            /* Pick best match: prefer exact BPP, then highest BPP, then highest driver priority */
+            int score_bpp = (int)modes[i].bpp;
+            int score_prio = drv->priority;
+
+            if (best_drv == NULL ||
+                (req_bpp != 0 && score_bpp == (int)req_bpp) ||
+                score_bpp > best_bpp ||
+                (score_bpp == best_bpp && score_prio > best_prio)) {
+                best_drv = drv;
+                best_mode_id = modes[i].mode_id;
+                best_bpp = score_bpp;
+                best_prio = score_prio;
+            }
+        }
+        drv = drv->next;
+    }
+
+    if (best_drv) {
+        *out_drv = best_drv;
+        *out_mode_id = best_mode_id;
+        return 0;
+    }
+    return -1;
+}
+
+/* ==================== Multi-Framebuffer Registration ==================== */
+
+int fb_register_device(fb_info_t *info) {
+    if (!info || fb_device_count >= FB_MAX_DEVICES) return -1;
+    fb_devices[fb_device_count] = *info;
+    return fb_device_count++;
+}
 
 int video_set_viewport(int x, int y) {
     if (current_driver && current_driver->set_viewport) {
@@ -289,14 +466,14 @@ static int fb_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         vi->yres_virtual = fb.virt_height ? fb.virt_height : fb.height;
         vi->bits_per_pixel = fb.bpp;
 
-        if (fb.bpp == 32 || fb.bpp == 24) {
-            vi->red.offset = 16; vi->red.length = 8;
-            vi->green.offset = 8; vi->green.length = 8;
-            vi->blue.offset = 0; vi->blue.length = 8;
-        } else if (fb.bpp == 16) {
-            vi->red.offset = 11; vi->red.length = 5;
-            vi->green.offset = 5; vi->green.length = 6;
-            vi->blue.offset = 0; vi->blue.length = 5;
+        fb_set_default_color_layout(&fb);
+        if (fb.red_length || fb.green_length || fb.blue_length) {
+            vi->red.offset = fb.red_offset;
+            vi->red.length = fb.red_length;
+            vi->green.offset = fb.green_offset;
+            vi->green.length = fb.green_length;
+            vi->blue.offset = fb.blue_offset;
+            vi->blue.length = fb.blue_length;
         }
 
         return 0;
@@ -378,11 +555,10 @@ static void *fb_fs_mmap(fs_node_t *node, void *addr, size_t length, int prot, in
     return (void *)virt;
 }
 
-static fs_node_t fb_node;
+/* Per-device fb nodes for multi-framebuffer */
+static fs_node_t fb_nodes[FB_MAX_DEVICES];
 
 /* ==================== Video Subsystem / Registry ==================== */
-
-static video_driver_t *video_drivers = NULL;
 
 void video_register_driver(video_driver_t *drv) {
     if (!drv) return;
@@ -397,19 +573,63 @@ extern void vga_install(void);
 
 /* Default Multiboot Driver Wrapper */
 static multiboot_info_t *saved_mbi = NULL;
+static void *saved_mbi_fb_addr = NULL;
+static size_t saved_mbi_fb_len = 0;
 static int mb_probe(void) {
-    if (saved_mbi && (saved_mbi->flags & (1 << 12))) return 0;
+    if (saved_mbi && (saved_mbi->flags & MULTIBOOT_INFO_FRAMEBUFFER_INFO) &&
+        saved_mbi->framebuffer_type != MULTIBOOT_FRAMEBUFFER_TYPE_EGA_TEXT) return 0;
     return -1;
 }
 static int mb_init(fb_info_t *info) {
+    uint64_t fb_phys;
+
     if (!saved_mbi) return -1;
-    info->addr = (uint32_t *)(uintptr_t)saved_mbi->framebuffer_addr;
+    if ((saved_mbi->flags & MULTIBOOT_INFO_FRAMEBUFFER_INFO) == 0 ||
+        saved_mbi->framebuffer_type == MULTIBOOT_FRAMEBUFFER_TYPE_EGA_TEXT) {
+        return -1;
+    }
+
+    fb_phys = saved_mbi->framebuffer_addr;
+    if (fb_phys > UINT32_MAX) {
+        return -1;
+    }
+    if (saved_mbi_fb_addr == NULL) {
+        saved_mbi_fb_len = (size_t)saved_mbi->framebuffer_pitch * saved_mbi->framebuffer_height;
+        if (saved_mbi_fb_len == 0) {
+            return -1;
+        }
+        saved_mbi_fb_addr = ioremap_wc((resource_size_t)fb_phys, saved_mbi_fb_len);
+        if (saved_mbi_fb_addr == NULL) {
+            return -1;
+        }
+    }
+
+    info->addr = (uint32_t *)saved_mbi_fb_addr;
     info->width = saved_mbi->framebuffer_width;
+    info->height = saved_mbi->framebuffer_height;
+    info->pitch = saved_mbi->framebuffer_pitch;
+    info->bpp = saved_mbi->framebuffer_bpp;
     info->virt_width = info->width;
     info->virt_height = info->height;
+    info->red_offset = 0;
+    info->red_length = 0;
+    info->green_offset = 0;
+    info->green_length = 0;
+    info->blue_offset = 0;
+    info->blue_length = 0;
+    if (saved_mbi->framebuffer_type == MULTIBOOT_FRAMEBUFFER_TYPE_RGB) {
+        info->red_offset = saved_mbi->framebuffer_red_field_position;
+        info->red_length = saved_mbi->framebuffer_red_mask_size;
+        info->green_offset = saved_mbi->framebuffer_green_field_position;
+        info->green_length = saved_mbi->framebuffer_green_mask_size;
+        info->blue_offset = saved_mbi->framebuffer_blue_field_position;
+        info->blue_length = saved_mbi->framebuffer_blue_mask_size;
+    }
+    fb_set_default_color_layout(info);
     info->set_viewport = NULL;
     info->putpixel = linear_fb_putpixel;
     info->scroll = NULL;
+    info->flush = NULL;
     return 0;
 }
 
@@ -436,9 +656,51 @@ static video_driver_t mb_driver = {
 
 /* ==================== Initialization ==================== */
 
+/*
+ * fb_register_devfs_node - Register /dev/fbN for a framebuffer device.
+ */
+static void fb_register_devfs_node(int index) {
+    if (index < 0 || index >= FB_MAX_DEVICES) return;
+    fs_node_t *node = &fb_nodes[index];
+    memset(node, 0, sizeof(fs_node_t));
+
+    /* Format name: "fb0", "fb1", etc. */
+    node->name[0] = 'f';
+    node->name[1] = 'b';
+    if (index < 10) {
+        node->name[2] = '0' + index;
+        node->name[3] = '\0';
+    } else {
+        node->name[2] = '0' + (index / 10);
+        node->name[3] = '0' + (index % 10);
+        node->name[4] = '\0';
+    }
+    node->flags = FS_CHARDEVICE;
+    node->ioctl = fb_fs_ioctl;
+    node->mmap = fb_fs_mmap;
+    devfs_register_device(node);
+    kprintf("FB: Registered /dev/%s (%ux%u@%u)\n",
+            node->name, fb_devices[index].width,
+            fb_devices[index].height, fb_devices[index].bpp);
+}
+
 void fb_init(multiboot_info_t *mbi) {
-    char vid_arg[32];
-    if (cmdline_get("video", vid_arg, 32) == 0) {
+    char vid_arg[64];
+    char vga_arg[64];
+    int have_video_arg = 0;
+    int have_vga_arg = 0;
+    uint32_t req_w = 0, req_h = 0, req_bpp = 0;
+
+    saved_mbi = mbi;
+
+    /* Parse command line early */
+    if (cmdline_get("video", vid_arg, sizeof(vid_arg)) == 0)
+        have_video_arg = 1;
+    if (cmdline_get("vga", vga_arg, sizeof(vga_arg)) == 0)
+        have_vga_arg = 1;
+
+    /* Handle video=text/off/none early exits */
+    if (have_video_arg) {
         if (strcmp(vid_arg, "text") == 0 ||
             strncmp(vid_arg, "text:", 5) == 0) {
             fb_active = 0;
@@ -451,60 +713,81 @@ void fb_init(multiboot_info_t *mbi) {
         }
         if (strcmp(vid_arg, "ask") == 0) {
             if (video_ask_mode(&fb) == 1) {
-                fb_active = 1; /* VESA Mode Set successfully via BIOS */
-                /* fb struct populated by video_ask_mode */
-
-                /* Ensure virtual dimensions are set if missing */
+                fb_active = 1;
                 if (!fb.virt_width) fb.virt_width = fb.width;
                 if (!fb.virt_height) fb.virt_height = fb.height;
-                
-                /* Register console */
                 fb_console_init();
-                
-                /* Register FB device */
-                memset(&fb_node, 0, sizeof(fs_node_t));
-                strlcpy(fb_node.name, "fb0", sizeof(fb_node.name));
-                fb_node.flags = FS_CHARDEVICE;
-                fb_node.ioctl = fb_fs_ioctl;
-                fb_node.mmap = fb_fs_mmap;
-                devfs_register_device(&fb_node);
-                
+                fb_devices[0] = fb;
+                fb_device_count = 1;
+                fb_register_devfs_node(0);
                 kprint("Video: VESA BIOS Mode Active.\n");
                 return;
             } else {
-                /* Text mode selected */
                 fb_active = 0;
-                /* hw_text is likely active from kmain init, ensure it knows we want it. */
                 kprint("Video: Text mode selected.\n");
-                return; /* Logic below will try mb_driver etc, which might fail or override. */
-                /* If text mode selected, we just return. hw_text_init was called in kmain before fb_init. */
+                return;
             }
         }
     }
 
-    saved_mbi = mbi;
+    if (have_vga_arg && strcmp(vga_arg, "ask") == 0) {
+        if (video_ask_mode(&fb) == 1) {
+            fb_active = 1;
+            if (!fb.virt_width) fb.virt_width = fb.width;
+            if (!fb.virt_height) fb.virt_height = fb.height;
+            fb_console_init();
+            fb_devices[0] = fb;
+            fb_device_count = 1;
+            fb_register_devfs_node(0);
+            kprint("Video: VESA BIOS Mode Active.\n");
+            return;
+        }
+
+        fb_active = 0;
+        kprint("Video: Text mode selected.\n");
+        return;
+    }
     
-    /* Register Drivers */
+    /* Register all known drivers */
     video_register_driver(&mb_driver);
-    
-    /* Install other known drivers */
-    /* In a dynamic system, these would self-register or be scanned */
     #ifdef ENABLE_BGA
     bga_install();
     #endif
-    bga_install(); // Always include for now
+    bga_install();
     vga_install();
-    int use_cmdline = 0;
-    if (cmdline_get("video", vid_arg, 32) == 0) {
-        use_cmdline = 1;
+
+    /* Parse vga=WxH@BPP mode request */
+    if (have_vga_arg) {
+        if (fb_parse_vga_mode(vga_arg, &req_w, &req_h, &req_bpp) == 0) {
+            kprintf("Video: Requested mode %ux%u", req_w, req_h);
+            if (req_bpp)
+                kprintf("@%u", req_bpp);
+            kprint(" via vga= parameter.\n");
+        } else {
+            kprintf("Video: Invalid vga= parameter: '%s'\n", vga_arg);
+            have_vga_arg = 0;
+        }
     }
 
     /* Driver Selection Logic */
-    video_driver_t *best_drv = NULL;
     video_driver_t *selected_drv = NULL;
+    int selected_mode_id = -1;
+
+    /* Pass 1: vga=WxH@BPP mode-based selection */
+    if (have_vga_arg && req_w > 0 && req_h > 0) {
+        if (fb_find_matching_mode(req_w, req_h, req_bpp, &selected_drv, &selected_mode_id) == 0) {
+            kprintf("Video: Found matching mode %d on driver '%s'.\n",
+                    selected_mode_id, selected_drv->name);
+        } else {
+            kprintf("Video: No driver supports %ux%u", req_w, req_h);
+            if (req_bpp)
+                kprintf("@%u", req_bpp);
+            kprint(", falling back.\n");
+        }
+    }
     
-    /* Pass 1: Check command line override */
-    if (use_cmdline) {
+    /* Pass 2: video=<drivername> command line override */
+    if (!selected_drv && have_video_arg) {
         video_driver_t *curr = video_drivers;
         while (curr) {
             if (strcmp(curr->name, vid_arg) == 0) {
@@ -512,17 +795,15 @@ void fb_init(multiboot_info_t *mbi) {
                     selected_drv = curr;
                     break;
                 } else {
-                     kprint("Video: Requested driver '");
-                     kprint(vid_arg);
-                     kprint("' not available.\n");
+                     kprintf("Video: Requested driver '%s' not available.\n", vid_arg);
                 }
             }
             curr = curr->next;
         }
     }
     
-    /* Pass 2: Pick highest priority available if not selected yet */
-    if (!selected_drv && (use_cmdline || !hw_text_active)) {
+    /* Pass 3: Pick highest priority available if not selected yet */
+    if (!selected_drv && (have_video_arg || have_vga_arg || !hw_text_active)) {
         video_driver_t *curr = video_drivers;
         int max_prio = -1;
         
@@ -530,12 +811,11 @@ void fb_init(multiboot_info_t *mbi) {
             if (curr->probe() == 0) {
                 if (curr->priority > max_prio) {
                     max_prio = curr->priority;
-                    best_drv = curr;
+                    selected_drv = curr;
                 }
             }
             curr = curr->next;
         }
-        selected_drv = best_drv;
     }
 
     if (!selected_drv) {
@@ -545,47 +825,40 @@ void fb_init(multiboot_info_t *mbi) {
     }
 
     /* Initialize Selected Driver */
-    kprint("Video: Initializing driver: "); kprint(selected_drv->name); kprint("\n");
-    if (selected_drv->init(&fb) == 0) {
-        fb_active = 1;
-        current_driver = selected_drv;
-        fb.putpixel = fb.putpixel ? fb.putpixel : linear_fb_putpixel; // Ensure fallback
-        if (fb.virt_height == 0) fb.virt_height = fb.height; // Fallback
-        kprint("Video: Initialization success.\n");
-    } else {
+    kprintf("Video: Initializing driver: %s\n", selected_drv->name);
+    if (selected_drv->init(&fb) != 0) {
         kprint("Video: Initialization failed.\n");
         fb_active = 0;
         return;
     }
 
-    /* Register Console (unless hw_text active and not overridden) */
-    /* Logic: If user specifically asked for video=xxx, we assume they want FB console
-       even if hw_text was active. If we just fell back to multiboot/default, and hw_text
-       is active, maybe keep text?
-       Current logic: If hw_text_active, don't clobber unless cmdline requested video.
-    */
-    int register_console = 1;
-    if (hw_text_active && !use_cmdline) {
-        // If we are just using default (e.g. multiboot) but we have text mode working,
-        // we might prefer text mode for speed/stability unless explicit override?
-        // Actually, if we have FB, we probably want FB console?
-        // Previous logic: if (hw_text_active && cmdline != 0) -> skip.
-        // Wait, previous logic was: "Register console if hw_text is not active OR video override present"
-        // So:
-        register_console = (!hw_text_active) || use_cmdline;
+    fb_active = 1;
+    current_driver = selected_drv;
+
+    /* If vga= requested a specific mode and the driver supports set_mode, switch now */
+    if (selected_mode_id >= 0 && selected_drv->set_mode) {
+        if (selected_drv->set_mode(selected_mode_id) == 0) {
+            kprintf("Video: Mode %d set successfully.\n", selected_mode_id);
+        } else {
+            kprintf("Video: Failed to set mode %d, using default.\n", selected_mode_id);
+        }
     }
 
-    if (register_console) {
+    fb_set_default_color_layout(&fb);
+    if (!fb.putpixel) fb.putpixel = linear_fb_putpixel;
+    if (fb.virt_height == 0) fb.virt_height = fb.height;
+    if (fb.virt_width == 0) fb.virt_width = fb.width;
+    kprintf("Video: %ux%u@%u (pitch=%u)\n", fb.width, fb.height, fb.bpp, fb.pitch);
+
+    /* Register as fb0 in multi-fb registry */
+    fb_devices[0] = fb;
+    fb_device_count = 1;
+
+    /* Register Console (unless hw_text active and not overridden) */
+    if (!hw_text_active || have_video_arg || have_vga_arg) {
         fb_console_init();
     }
     
     /* Register /dev/fb0 */
-    memset(&fb_node, 0, sizeof(fs_node_t));
-    strlcpy(fb_node.name, "fb0", sizeof(fb_node.name));
-    fb_node.flags = FS_CHARDEVICE;
-    fb_node.ioctl = fb_fs_ioctl;
-    fb_node.mmap = fb_fs_mmap;
-    devfs_register_device(&fb_node);
-
-    kprint("FB: Initialized /dev/fb0.\n");
+    fb_register_devfs_node(0);
 }
