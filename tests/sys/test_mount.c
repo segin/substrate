@@ -147,15 +147,14 @@ void run_mount_tests(void) {
     kprint("TEST: Verifying content (lookup 'null')... ");
     // Lookup inside the NEW mount
     char file_path[64];
-    strcpy(file_path, mnt_point);
-    // strcat(file_path, "/null");
-    // Manual append
-    int len = strlen(file_path);
-    const char *suffix = "/null";
-    for(int i=0; suffix[i] && len < 63; i++) {
-        file_path[len++] = suffix[i];
-    }
-    file_path[len] = '\0';
+    int len = strlen(mnt_point);
+    if (len > 63) len = 63;
+    memcpy(file_path, mnt_point, len);
+
+    int suffix_len = 5; // "/null"
+    if (len + suffix_len > 63) suffix_len = 63 - len;
+    memcpy(file_path + len, "/null", suffix_len);
+    file_path[len + suffix_len] = '\0';
 
     
     fs_node_t *null_node = vfs_lookup(fs_root, file_path);

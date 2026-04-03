@@ -1,52 +1,49 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef REGEX_USE_HOST_POSIX
+#define SUBSTRATE_REGEX_OMIT_POSIX_COMPAT 1
+#endif
 #include "regex_internal.h"
+#ifdef REGEX_USE_HOST_POSIX
+#undef SUBSTRATE_REGEX_OMIT_POSIX_COMPAT
+#endif
 
 #ifdef REGEX_USE_HOST_POSIX
 
 #define regex_t host_regex_t
 #define regoff_t host_regoff_t
 #define regmatch_t host_regmatch_t
-#define regcomp host_regcomp
-#define regexec host_regexec
-#define regerror host_regerror
-#define regfree host_regfree
 #include </usr/include/regex.h>
+
+enum {
+    HOST_REG_EXTENDED = REG_EXTENDED,
+    HOST_REG_ICASE = REG_ICASE,
+    HOST_REG_NOSUB = REG_NOSUB,
+    HOST_REG_NEWLINE = REG_NEWLINE,
+    HOST_REG_NOTBOL = REG_NOTBOL,
+    HOST_REG_NOTEOL = REG_NOTEOL,
+    HOST_REG_NOMATCH = REG_NOMATCH,
+    HOST_REG_BADPAT = REG_BADPAT,
+    HOST_REG_ECOLLATE = REG_ECOLLATE,
+    HOST_REG_ECTYPE = REG_ECTYPE,
+    HOST_REG_EESCAPE = REG_EESCAPE,
+    HOST_REG_ESUBREG = REG_ESUBREG,
+    HOST_REG_EBRACK = REG_EBRACK,
+    HOST_REG_EPAREN = REG_EPAREN,
+    HOST_REG_EBRACE = REG_EBRACE,
+    HOST_REG_BADBR = REG_BADBR,
+    HOST_REG_ERANGE = REG_ERANGE,
+    HOST_REG_ESPACE = REG_ESPACE,
+    HOST_REG_BADRPT = REG_BADRPT
+};
+
 #undef regex_t
 #undef regoff_t
 #undef regmatch_t
-#undef regcomp
-#undef regexec
-#undef regerror
-#undef regfree
-
-#undef REG_EXTENDED
-#undef REG_ICASE
-#undef REG_NOSUB
-#undef REG_NEWLINE
-#undef REG_NOTBOL
-#undef REG_NOTEOL
-#undef REG_NOMATCH
-#undef REG_BADPAT
-#undef REG_ECOLLATE
-#undef REG_ECTYPE
-#undef REG_EESCAPE
-#undef REG_ESUBREG
-#undef REG_EBRACK
-#undef REG_EPAREN
-#undef REG_EBRACE
-#undef REG_BADBR
-#undef REG_ERANGE
-#undef REG_ESPACE
-#undef REG_BADRPT
 
 #define regoff_t host_regoff_t
 #define regmatch_t host_regmatch_t
-#define regcomp host_regcomp
-#define regexec host_regexec
-#define regerror host_regerror
-#define regfree host_regfree
 
 typedef struct posix_regex_impl {
     host_regex_t re;
@@ -128,7 +125,7 @@ static int posix_match_from(const regex_t *re, const char *text, size_t text_len
     rc = regexec(&impl->re, tmp, mcount, m, 0);
     free(tmp);
 
-    if (rc == REG_NOMATCH) {
+    if (rc == HOST_REG_NOMATCH) {
         if (out_err) {
             *out_err = REGEX_OK;
         }
@@ -167,13 +164,13 @@ static regex_err_t posix_compile(regex_t *re, const char *pattern, unsigned flag
     }
 
     if (flags & REGEX_FLAG_EXTENDED) {
-        cflags |= REG_EXTENDED;
+        cflags |= HOST_REG_EXTENDED;
     }
     if (flags & REGEX_FLAG_ICASE) {
-        cflags |= REG_ICASE;
+        cflags |= HOST_REG_ICASE;
     }
     if (flags & REGEX_FLAG_MULTILINE) {
-        cflags |= REG_NEWLINE;
+        cflags |= HOST_REG_NEWLINE;
     }
 
     if (flags & REGEX_FLAG_LITERAL) {
@@ -540,7 +537,8 @@ static regex_err_t posix_split(const regex_t *re, const char *text, size_t text_
     }
 
     if (count == cap) {
-        char **next = (char **)realloc(items, (cap + 1) * sizeof(*items));
+        size_t new_cap = cap ? cap * 2 : 8;
+        char **next = (char **)realloc(items, new_cap * sizeof(*items));
         if (!next) {
             free(m);
             while (count) {
@@ -549,6 +547,7 @@ static regex_err_t posix_split(const regex_t *re, const char *text, size_t text_
             free(items);
             return REGEX_ERR_NOMEM;
         }
+        cap = new_cap;
         items = next;
     }
 

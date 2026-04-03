@@ -9,6 +9,8 @@ SRCS = src/compile.c src/exec.c src/util.c src/engine_posix.c src/engine_safe.c 
 OBJS = $(SRCS:.c=.o)
 
 LIBNAME = libregex.a
+BUILD_MODE := $(if $(NATIVE_BUILD),native,target)
+MODE_STAMP = .build-mode
 
 # Optional integrations
 # USE_PCRE2=1 enables PCRE2 adapter (requires pcre2 headers/libs on host)
@@ -26,18 +28,32 @@ ifdef NATIVE_BUILD
 CFLAGS += -DREGEX_USE_HOST_POSIX
 endif
 
-.PHONY: all clean install
+.PHONY: all clean install FORCE
 
 all: $(LIBNAME)
 
 $(LIBNAME): $(OBJS)
 	$(AR) rcs $@ $(OBJS)
 
+$(OBJS): $(MODE_STAMP)
+
+$(MODE_STAMP): FORCE
+	@mode="$(BUILD_MODE)"; \
+	cur=""; \
+	if [ -f "$(MODE_STAMP)" ]; then cur=$$(cat "$(MODE_STAMP)"); fi; \
+	if [ "$$cur" != "$$mode" ]; then \
+		rm -f $(OBJS) $(LIBNAME); \
+		printf '%s\n' "$$mode" > "$(MODE_STAMP).tmp"; \
+		mv "$(MODE_STAMP).tmp" "$(MODE_STAMP)"; \
+	elif [ ! -f "$(MODE_STAMP)" ]; then \
+		printf '%s\n' "$$mode" > "$(MODE_STAMP)"; \
+	fi
+
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJS) $(LIBNAME)
+	rm -f $(OBJS) $(LIBNAME) $(MODE_STAMP)
 
 install:
 	@mkdir -p $(DESTDIR)/usr/lib

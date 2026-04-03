@@ -729,6 +729,24 @@ void fb_init(multiboot_info_t *mbi) {
             }
         }
     }
+
+    if (have_vga_arg && strcmp(vga_arg, "ask") == 0) {
+        if (video_ask_mode(&fb) == 1) {
+            fb_active = 1;
+            if (!fb.virt_width) fb.virt_width = fb.width;
+            if (!fb.virt_height) fb.virt_height = fb.height;
+            fb_console_init();
+            fb_devices[0] = fb;
+            fb_device_count = 1;
+            fb_register_devfs_node(0);
+            kprint("Video: VESA BIOS Mode Active.\n");
+            return;
+        }
+
+        fb_active = 0;
+        kprint("Video: Text mode selected.\n");
+        return;
+    }
     
     /* Register all known drivers */
     video_register_driver(&mb_driver);

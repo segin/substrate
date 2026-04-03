@@ -1634,6 +1634,7 @@ typedef enum {
     BUILTIN_FRAME_ADDRESS,
     BUILTIN_MEMCMP,
     BUILTIN_PREFETCH,
+    BUILTIN_CPU_SUPPORTS,
     BUILTIN_STRLEN,
     BUILTIN_MEMCPY,
     BUILTIN_MEMMOVE,
@@ -1756,6 +1757,9 @@ static builtin_kind_t builtin_kind(const char *name) {
     }
     if (strcmp(name, "__builtin_prefetch") == 0) {
         return BUILTIN_PREFETCH;
+    }
+    if (strcmp(name, "__builtin_cpu_supports") == 0) {
+        return BUILTIN_CPU_SUPPORTS;
     }
     if (strcmp(name, "__builtin_strlen") == 0) {
         return BUILTIN_STRLEN;
@@ -3094,6 +3098,22 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 return -1;
             }
             e->value_type = CC_TYPE_VOID;
+            e->struct_id = -1;
+            return 0;
+        }
+        if (bk == BUILTIN_CPU_SUPPORTS) {
+            if (e->arg_count != 1) {
+                set_diag(diag, "__builtin_cpu_supports expects exactly 1 argument");
+                return -1;
+            }
+            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (e->args[0]->kind != CC_EXPR_STR) {
+                set_diag(diag, "__builtin_cpu_supports argument must be a string literal");
+                return -1;
+            }
+            e->value_type = CC_TYPE_INT;
             e->struct_id = -1;
             return 0;
         }
