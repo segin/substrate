@@ -224,7 +224,22 @@ All other historical `ex` commands and aliases are currently outside the support
 
 #### 3.2 Motion completeness
 
-- [ ] Build an explicit supported-motion matrix in this document that lists every normal-mode motion key (including `g` prefixed motions), its supported count forms, and its PTY oracle coverage.
+- [x] Build an explicit supported-motion matrix in this document that lists every normal-mode motion key (including `g` prefixed motions), its supported count forms, and its PTY oracle coverage.
+- Supported normal-mode motion matrix:
+
+| Family | Supported keys | Supported count forms | PTY coverage status |
+| --- | --- | --- | --- |
+| character / column | `h`, `l`, `0`, `^`, `$`, `|` | `[count]h`, `[count]l`, `[count]\|`; `0`, `^`, `$` are bare motions | direct PTY in [`tests/bin/vi/test_vi_pty.py`](../../tests/bin/vi/test_vi_pty.py); overlap-oracle coverage present for replay-sensitive `c0` and `c^` families in [`test_vi_oracle.py`](../../tests/bin/vi/test_vi_oracle.py) |
+| vertical line | `j`, `k`, `+`, `<Enter>`, `<NL>`, `-`, `_`, `g_` | `[count]j`, `[count]k`, `[count]+`, `[count]-`, `[count]_`, `[count]g_` | direct PTY in [`test_vi_pty.py`](../../tests/bin/vi/test_vi_pty.py); overlap-oracle coverage present for `_`-driven change replay, but no standalone oracle matrix yet for every plain motion form |
+| screen / file position | `G`, `gg`, `H`, `M`, `L`, `Ctrl-D`, `Ctrl-U`, `Ctrl-E`, `Ctrl-Y` | `[count]G`, `[count]gg`, `[count]H`, `[count]L`; bare `M`; repeat counts on `Ctrl-D`, `Ctrl-U`, `Ctrl-E`, `Ctrl-Y` | direct PTY in [`test_vi_pty.py`](../../tests/bin/vi/test_vi_pty.py); no full motion-only oracle matrix yet |
+| word / bigword | `w`, `W`, `e`, `E`, `b`, `B`, `ge`, `gE` | `[count]w`, `[count]W`, `[count]e`, `[count]E`, `[count]b`, `[count]B`, `[count]ge`, `[count]gE` | direct PTY in [`test_vi_pty.py`](../../tests/bin/vi/test_vi_pty.py); overlap-oracle coverage present for replay-sensitive change families such as `cb`, `cB`, `ce`, `cE`, `cge`, and `cgE` |
+| sentence / paragraph | `(`, `)`, `{`, `}` | `[count](`, `[count])`, `[count]{`, `[count]}` | direct PTY in [`test_vi_pty.py`](../../tests/bin/vi/test_vi_pty.py); overlap-oracle coverage present for `c)` and `c}` replay families, but not yet for every plain counted motion form |
+| section / structure | `[[`, `]]`, `[]`, `][` | `[count][[`, `[count]]]`, `[count][]`, `[count]][` | direct PTY in [`test_vi_pty.py`](../../tests/bin/vi/test_vi_pty.py); no standalone side-by-side oracle matrix yet for all plain motion forms |
+| search / search-repeat | `/pattern`, `?pattern`, `n`, `N`, `*`, `#` | bare `/pattern`, `?pattern`, `*`, `#`; `[count]n`, `[count]N` | direct PTY in [`test_vi_pty.py`](../../tests/bin/vi/test_vi_pty.py); overlap-oracle coverage present for replay-sensitive `cn`, `cN`, `c*`, and `c#` families |
+| find / repeat-find | `f{char}`, `F{char}`, `t{char}`, `T{char}`, `;`, `,` | `[count]f{char}`, `[count]F{char}`, `[count]t{char}`, `[count]T{char}`, `[count];`, `[count],` | direct PTY in [`test_vi_pty.py`](../../tests/bin/vi/test_vi_pty.py); overlap-oracle coverage present for replay-sensitive `cf`, `cF`, `ct`, `cT`, `c;`, and `c,` families |
+| marks / matching | `'a`, `` `a ``, `%`, `[count]%` | bare mark jumps; bare `%`; `[count]%` percent-of-file target | direct PTY in [`test_vi_pty.py`](../../tests/bin/vi/test_vi_pty.py); overlap-oracle coverage present for replay-sensitive `c'`, ``c` ``, and `c%` families |
+
+Unsupported or intentionally out-of-scope normal-mode motion keys are not implied by omission here; they remain unsupported until they are added to this matrix with tests.
 - [ ] Finish or explicitly de-support any remaining classic motion keys that are still absent once that matrix is written, so no motion is left in an implied “maybe supported” state.
 - [x] Add remaining section- and structure-oriented motions if they are part of the supported BSD/POSIX contract.
 - [ ] Add oracles for every supported counted motion family: line motions (`j`, `k`, `+`, `-`, `_`), screen motions (`H`, `M`, `L`, `Ctrl-D`, `Ctrl-U`, `Ctrl-E`, `Ctrl-Y`), word motions (`w`, `W`, `e`, `E`, `b`, `B`, `ge`, `gE`), sentence/paragraph motions, section motions, search motions, and `%`.
