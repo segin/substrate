@@ -85,6 +85,7 @@ int vt_get_active(void);
 vt_state_t *vt_get_state(int n);
 struct tty *vt_get_active_tty(void);
 int vt_set_geometry(int cols, int rows);
+int vt_refresh_geometry_from_terminal(void);
 int vt_get_width(void);
 int vt_get_height(void);
 int vt_get_visible_height(void);
@@ -101,5 +102,6 @@ void vt_scrollback_line_down(void);
 // generic tick hooks
 void vt_tick_1hz(void);
 void vt_render_statusline(vt_state_t *vt);
+void vt_redraw_active(void);
 
 #endif /* _SYS_VT_H */

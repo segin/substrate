@@ -16,6 +16,7 @@ static inline void intr_restore(uint32_t flags) { (void)flags; }
 #include <arch/x86-common/rtc.h>
 #include <drivers/console/console.h>
 #include <drivers/video/font.h>
+#include <drivers/video/fb.h>
 #include <drivers/video/hw_text.h>
 #include <drivers/video/vga.h>
 #include <kern/ansi_handler.h>
@@ -35,6 +36,9 @@ static uint16_t *vga_buffer = (uint16_t *)0xC00B8000;
 static spinlock_t hw_text_lock = SPINLOCK_INIT("hw_text");
 static vt_state_t *current_vt_ctx = NULL;
 static volatile uint32_t hw_text_status_epoch = 0;
+static uint16_t hw_text_start_addr = 0;
+static int hw_text_cols = VT_DEFAULT_WIDTH;
+static int hw_text_rows = VT_DEFAULT_HEIGHT;
 
 static int hw_text_tty_count = 0;
 static int hw_text_blink_enabled = 0;
@@ -45,6 +49,8 @@ static uint32_t hw_text_cursor_blink_ticks = 0;
 #define HW_TEXT_VRAM_CELLS   16384U
 #define VGA_FONT_MEM_BASE ((volatile uint8_t *)(uintptr_t)0xC00A0000)
 
+static void hw_text_write_crtc(uint8_t index, uint8_t value);
+
 static inline uint16_t hw_text_entry(unsigned char uc, uint8_t color) {
     return (uint16_t)uc | (uint16_t)color << 8;
 }
@@ -54,11 +60,17 @@ static inline size_t hw_text_index(size_t x, size_t y) {
 }
 
 static inline size_t hw_text_vram_index(size_t x, size_t y) {
-    return (y * (size_t)vt_get_width() + x) % HW_TEXT_VRAM_CELLS;
+    return ((size_t)hw_text_start_addr + y * (size_t)vt_get_width() + x) % HW_TEXT_VRAM_CELLS;
 }
 
 static void hw_text_write_vga_cell_locked(size_t x, size_t y, uint16_t entry) {
     vga_buffer[hw_text_vram_index(x, y)] = entry;
+}
+
+static void hw_text_set_start_addr_locked(uint16_t start_addr) {
+    hw_text_start_addr = (uint16_t)(start_addr % HW_TEXT_VRAM_CELLS);
+    hw_text_write_crtc(VGA_CRTC_START_HI, (uint8_t)((hw_text_start_addr >> 8) & 0xFFU));
+    hw_text_write_crtc(VGA_CRTC_START_LO, (uint8_t)(hw_text_start_addr & 0xFFU));
 }
 
 
@@ -331,6 +343,43 @@ static int hw_text_requested_geometry_from_bios(void) {
            strcmp(flag, "1") == 0;
 }
 
+static int hw_text_query_geometry(int *cols, int *rows) {
+    uint8_t offset;
+    uint8_t max_scan;
+    uint8_t overflow;
+    uint8_t vdisp_end;
+    int detected_cols;
+    int detected_rows;
+    int char_height;
+    int visible_scanlines;
+
+    if (!cols || !rows) {
+        return -1;
+    }
+
+    offset = hw_text_read_crtc(VGA_CRTC_OFFSET);
+    max_scan = hw_text_read_crtc(VGA_CRTC_MAX_SCAN);
+    overflow = hw_text_read_crtc(VGA_CRTC_OVERFLOW);
+    vdisp_end = hw_text_read_crtc(VGA_CRTC_V_DISP_END);
+
+    detected_cols = (int)offset * 2;
+    char_height = (int)(max_scan & 0x1FU) + 1;
+    visible_scanlines = (int)vdisp_end |
+                        (((int)overflow & 0x02) << 7) |
+                        (((int)overflow & 0x40) << 3);
+    visible_scanlines += 1;
+    detected_rows = char_height > 0 ? visible_scanlines / char_height : 0;
+
+    if (detected_cols < 1 || detected_cols > VT_MAX_WIDTH ||
+        detected_rows < 2 || detected_rows > VT_MAX_HEIGHT) {
+        return -1;
+    }
+
+    *cols = detected_cols;
+    *rows = detected_rows;
+    return 0;
+}
+
 static void hw_text_apply_geometry_or_default(int *cols_out, int *rows_out) {
     int requested_cols = VT_DEFAULT_WIDTH;
     int requested_rows = VT_DEFAULT_HEIGHT;
@@ -339,14 +388,21 @@ static void hw_text_apply_geometry_or_default(int *cols_out, int *rows_out) {
     int have_request = (hw_text_get_requested_geometry(&requested_cols, &requested_rows) == 0);
     int bios_selected = hw_text_requested_geometry_from_bios();
 
+    if (hw_text_query_geometry(&actual_cols, &actual_rows) != 0) {
+        actual_cols = VT_DEFAULT_WIDTH;
+        actual_rows = VT_DEFAULT_HEIGHT;
+    }
+
     if (have_request) {
         if (requested_cols == 80 && requested_rows == 25) {
             hw_text_program_80x25();
             actual_cols = 80;
             actual_rows = 25;
         } else if (bios_selected) {
-            actual_cols = requested_cols;
-            actual_rows = requested_rows;
+            if (hw_text_query_geometry(&actual_cols, &actual_rows) != 0) {
+                actual_cols = requested_cols;
+                actual_rows = requested_rows;
+            }
         } else if (requested_cols == 80 && requested_rows == 50) {
             hw_text_program_80x50();
             actual_cols = 80;
@@ -575,7 +631,9 @@ static void hw_text_update_cursor_locked(vt_state_t *vt) {
         col = vt_get_width() - 1;
     }
 
-    pos = (uint16_t)((size_t)row * (size_t)vt_get_width() + (size_t)col);
+    pos = (uint16_t)(((size_t)hw_text_start_addr +
+                      (size_t)row * (size_t)vt_get_width() +
+                      (size_t)col) % HW_TEXT_VRAM_CELLS);
     outb(0x3D4, 0x0E);
     outb(0x3D5, (pos >> 8) & 0xFF);
     outb(0x3D4, 0x0F);
@@ -623,9 +681,13 @@ static void hw_text_scroll_region_up_locked(vt_state_t *vt, int top, int bottom,
 
     /* Sync to VGA if active */
     if (vt->id == vt_get_active() && vt_get_scrollback_view(vt) == 0) {
+        if (top == 0 && bottom == vt_get_visible_height() - 1 && n == 1) {
+            hw_text_set_start_addr_locked((uint16_t)(hw_text_start_addr + (uint16_t)width));
+        }
         for (y = top; y <= bottom; y++) {
             hw_text_sync_buffer_row_locked(vt, y);
         }
+        hw_text_sync_buffer_row_locked(vt, vt_get_status_row());
     }
 }
 
@@ -682,6 +744,7 @@ static void hw_text_redraw_vt_locked(vt_state_t *vt) {
                                           vt_get_display_cell(vt, row, col));
         }
     }
+    hw_text_sync_buffer_row_locked(vt, vt_get_status_row());
 
     hw_text_update_cursor_locked(vt);
 }
@@ -1389,13 +1452,16 @@ static void hw_text_init_ttys_once(void) {
 }
 
 void hw_text_console_write_shim(const char *data, size_t len) {
+    if (fb_active) {
+        return;
+    }
     hw_text_write(data, len);
 }
 
 void hw_text_redraw_active(void) {
     vt_state_t *vt = vt_get_state(vt_get_active());
 
-    if (!hw_text_active || !vt) {
+    if (!hw_text_active || fb_active || !vt) {
         return;
     }
 
@@ -1404,12 +1470,56 @@ void hw_text_redraw_active(void) {
     spinlock_release(&hw_text_lock);
 }
 
+void hw_text_refresh_statusline(void) {
+    vt_state_t *vt;
+
+    vt = vt_get_state(vt_get_active());
+    if (!hw_text_active || fb_active || !vt) {
+        return;
+    }
+    if (spinlock_is_held(&hw_text_lock)) {
+        return;
+    }
+
+    spinlock_acquire(&hw_text_lock);
+    hw_text_sync_buffer_row_locked(vt, vt_get_status_row());
+    hw_text_update_cursor_locked(vt);
+    spinlock_release(&hw_text_lock);
+}
+
+void hw_text_draw_statusline(const char *line, int cols, int row) {
+    int col;
+
+    if (!hw_text_active || fb_active || !line) {
+        return;
+    }
+    if (cols < 1) {
+        return;
+    }
+    if (cols > vt_get_width()) {
+        cols = vt_get_width();
+    }
+    if (row < 0 || row >= vt_get_height()) {
+        return;
+    }
+    if (spinlock_is_held(&hw_text_lock)) {
+        return;
+    }
+
+    spinlock_acquire(&hw_text_lock);
+    for (col = 0; col < cols; col++) {
+        hw_text_write_vga_cell_locked((size_t)col, (size_t)row,
+                                      hw_text_entry((unsigned char)line[col], HW_TEXT_STATUS_COLOR));
+    }
+    hw_text_update_cursor_locked(vt_get_state(vt_get_active()));
+    spinlock_release(&hw_text_lock);
+}
+
 static console_backend_t vt_kprint_backend = {
     .name = "vga_vt",
     .write = hw_text_console_write_shim,
+    .get_terminal_size = hw_text_get_terminal_size,
 };
-
-// hw_text_refresh_statusline migrated to vt_render_statusline
 
 void hw_text_tick(void) {
     vt_state_t *vt;
@@ -1438,6 +1548,9 @@ void hw_text_tick(void) {
     }
 
     hw_text_cursor_blink_phase ^= 1U;
+    if (spinlock_is_held(&hw_text_lock)) {
+        return;
+    }
     spinlock_acquire(&hw_text_lock);
     hw_text_update_cursor_locked(vt);
     spinlock_release(&hw_text_lock);
@@ -1490,13 +1603,29 @@ void hw_text_putc(char c) {
 void hw_text_write(const char *data, size_t len) {
     vt_state_t *vt = vt_get_state(vt_get_active());
 
-    if (!vt || !data || len == 0) {
+    if (!vt || !data || len == 0 || fb_active) {
         return;
     }
 
     spinlock_acquire(&hw_text_lock);
     hw_text_write_vt_locked(vt, data, len);
     spinlock_release(&hw_text_lock);
+}
+
+int hw_text_get_terminal_size(int *cols, int *rows) {
+    if (!hw_text_active || !cols || !rows) {
+        return -1;
+    }
+
+    if (hw_text_query_geometry(cols, rows) == 0) {
+        hw_text_cols = *cols;
+        hw_text_rows = *rows;
+        return 0;
+    }
+
+    *cols = hw_text_cols;
+    *rows = hw_text_rows;
+    return 0;
 }
 
 void hw_text_clear_screen(void) {
@@ -1519,14 +1648,18 @@ void hw_text_init(void) {
     int rows;
 
     hw_text_apply_geometry_or_default(&cols, &rows);
+    hw_text_cols = cols;
+    hw_text_rows = rows;
     vt_init();
     hw_text_tty_count = 0;
 
     hw_text_active = 1;
     hw_text_set_blink_mode_locked(0);
+    hw_text_set_start_addr_locked(0);
     hw_text_cursor_blink_phase = 1;
     hw_text_cursor_blink_ticks = 0;
     console_register(&vt_kprint_backend);
+    (void)vt_refresh_geometry_from_terminal();
 
     hw_text_redraw_active();
     kprintf("VGA VT Driver Initialized (%dx%d physical, %d usable rows).\n",

@@ -5,21 +5,22 @@
 #include <sys/vt.h>
 #include <drivers/video/hw_text.h>
 #include <drivers/video/fb_console.h>
-#include <drivers/video/fb_console.h>
 #include <drivers/input/keyboard.h>
 #include <kern/console.h>
 #include <string.h>
 #include <sys/tty.h>
-#include <kern/sched.h>
 #include <kern/time.h>
 #include <arch/x86-common/rtc.h>
 #include <stdio.h>
-#include <sys/kthread.h>
 
 static vt_state_t vt_states[VT_MAX];
 static int active_vt = 0;
 static int vt_width = VT_DEFAULT_WIDTH;
 static int vt_height = VT_DEFAULT_HEIGHT;
+static int vt_initialized = 0;
+static uint16_t vt_buffer_scratch[VT_MAX_BUF_SIZE];
+
+void vt_redraw_active(void);
 
 static size_t vt_cell_count_internal(void) {
     return (size_t)vt_width * (size_t)vt_height;
@@ -39,21 +40,243 @@ static size_t vt_scrollback_slot(const vt_state_t *vt, size_t logical_index) {
 
 static void vt_init_tab_stops(vt_state_t *vt, int width) {
     int col;
+    int spacing;
+
+    spacing = vt && vt->tab_width ? vt->tab_width : 8;
 
     memset(vt->tab_stops, 0, sizeof(vt->tab_stops));
-    for (col = 8; col < width; col += 8) {
+    for (col = spacing; col < width; col += spacing) {
         vt->tab_stops[col / 32] |= (uint32_t)1U << (col % 32);
     }
 }
 
+static void vt_get_terminal_geometry(const vt_state_t *vt, int *cols, int *rows) {
+    int effective_cols = vt_width;
+    int effective_rows = vt_height;
+
+    if (vt && vt->id == vt_get_active() &&
+        console_get_terminal_size(&effective_cols, &effective_rows) == 0) {
+        if (cols) {
+            *cols = effective_cols;
+        }
+        if (rows) {
+            *rows = effective_rows;
+        }
+        return;
+    }
+
+    if (effective_cols < 1 || effective_cols > VT_MAX_WIDTH) {
+        effective_cols = vt_width;
+    }
+    if (effective_rows < 2 || effective_rows > VT_MAX_HEIGHT) {
+        effective_rows = vt_height;
+    }
+
+    if (cols) {
+        *cols = effective_cols;
+    }
+    if (rows) {
+        *rows = effective_rows;
+    }
+}
+
+static int vt_clamp_int(int value, int min_value, int max_value) {
+    if (value < min_value) {
+        return min_value;
+    }
+    if (value > max_value) {
+        return max_value;
+    }
+    return value;
+}
+
+static void vt_reflow_buffer(uint16_t *buffer,
+                             int old_width,
+                             int old_height,
+                             int new_width,
+                             int new_height,
+                             uint16_t fill) {
+    int copy_rows;
+    int copy_cols;
+    int row;
+
+    memset(vt_buffer_scratch, 0, sizeof(vt_buffer_scratch));
+    for (row = 0; row < new_height; row++) {
+        int col;
+
+        for (col = 0; col < new_width; col++) {
+            vt_buffer_scratch[(size_t)row * (size_t)new_width + (size_t)col] = fill;
+        }
+    }
+
+    copy_rows = old_height < new_height ? old_height : new_height;
+    copy_cols = old_width < new_width ? old_width : new_width;
+    for (row = 0; row < copy_rows; row++) {
+        memcpy(&vt_buffer_scratch[(size_t)row * (size_t)new_width],
+               &buffer[(size_t)row * (size_t)old_width],
+               (size_t)copy_cols * sizeof(uint16_t));
+    }
+
+    memcpy(buffer, vt_buffer_scratch, sizeof(vt_buffer_scratch));
+}
+
+static void vt_reflow_scrollback(vt_state_t *vt, int old_width, int new_width, uint16_t fill) {
+    uint16_t scratch_line[VT_MAX_WIDTH];
+    size_t copy_cols;
+    int i;
+
+    if (!vt || old_width == new_width) {
+        return;
+    }
+
+    copy_cols = (size_t)(old_width < new_width ? old_width : new_width);
+    for (i = 0; i < VT_SCROLLBACK_LINES; i++) {
+        memset(scratch_line, 0, sizeof(scratch_line));
+        memcpy(scratch_line, vt->scrollback[i], copy_cols * sizeof(uint16_t));
+        for (int col = old_width; col < new_width; col++) {
+            scratch_line[col] = fill;
+        }
+        memcpy(vt->scrollback[i], scratch_line, sizeof(scratch_line));
+    }
+}
+
+static void vt_apply_geometry_to_state(vt_state_t *vt) {
+    int visible_rows;
+
+    if (!vt) {
+        return;
+    }
+
+    visible_rows = vt_get_visible_height();
+    if (visible_rows < 1) {
+        visible_rows = 1;
+    }
+
+    if (vt->row < 0) {
+        vt->row = 0;
+    } else if (vt->row >= visible_rows) {
+        vt->row = visible_rows - 1;
+    }
+    if (vt->saved_row < 0) {
+        vt->saved_row = 0;
+    } else if (vt->saved_row >= visible_rows) {
+        vt->saved_row = visible_rows - 1;
+    }
+    if (vt->alt_row < 0) {
+        vt->alt_row = 0;
+    } else if (vt->alt_row >= visible_rows) {
+        vt->alt_row = visible_rows - 1;
+    }
+
+    if (vt->col < 0) {
+        vt->col = 0;
+    } else if (vt->col >= vt_width) {
+        vt->col = vt_width - 1;
+    }
+    if (vt->saved_col < 0) {
+        vt->saved_col = 0;
+    } else if (vt->saved_col >= vt_width) {
+        vt->saved_col = vt_width - 1;
+    }
+    if (vt->alt_col < 0) {
+        vt->alt_col = 0;
+    } else if (vt->alt_col >= vt_width) {
+        vt->alt_col = vt_width - 1;
+    }
+
+    if (vt->scroll_top < 0 || vt->scroll_top >= visible_rows) {
+        vt->scroll_top = 0;
+    }
+    if (vt->scroll_bottom < vt->scroll_top || vt->scroll_bottom >= visible_rows) {
+        vt->scroll_bottom = visible_rows - 1;
+    }
+
+    if (vt->tab_width == 0) {
+        vt->tab_width = 8;
+    }
+    vt_init_tab_stops(vt, vt_width);
+
+    if (vt->tty) {
+        vt->tty->winsize.ws_col = (unsigned short)vt_width;
+        vt->tty->winsize.ws_row = (unsigned short)visible_rows;
+        vt->tty->winsize.ws_xpixel = 0;
+        vt->tty->winsize.ws_ypixel = 0;
+    }
+}
+
+static void vt_reconfigure_state(vt_state_t *vt,
+                                 int old_width,
+                                 int old_height,
+                                 int new_width,
+                                 int new_height) {
+    uint16_t blank;
+    int old_visible;
+    int new_visible;
+    int status_row;
+
+    if (!vt) {
+        return;
+    }
+
+    blank = (uint16_t)' ' | (uint16_t)0x07U << 8;
+    old_visible = old_height - 1;
+    new_visible = new_height - 1;
+
+    vt_reflow_buffer(vt->buffer, old_width, old_visible, new_width, new_visible, blank);
+    vt_reflow_buffer(vt->alt_buffer, old_width, old_visible, new_width, new_visible, blank);
+    vt_reflow_scrollback(vt, old_width, new_width, blank);
+
+    status_row = new_height - 1;
+    for (int col = 0; col < new_width; col++) {
+        vt->buffer[(size_t)status_row * (size_t)new_width + (size_t)col] = blank;
+    }
+
+    vt->row = vt_clamp_int(vt->row, 0, new_visible - 1);
+    vt->saved_row = vt_clamp_int(vt->saved_row, 0, new_visible - 1);
+    vt->alt_row = vt_clamp_int(vt->alt_row, 0, new_visible - 1);
+    vt->col = vt_clamp_int(vt->col, 0, new_width - 1);
+    vt->saved_col = vt_clamp_int(vt->saved_col, 0, new_width - 1);
+    vt->alt_col = vt_clamp_int(vt->alt_col, 0, new_width - 1);
+    vt->scrollback_view = (uint16_t)vt_clamp_int(vt->scrollback_view, 0, vt->scrollback_count);
+
+    vt_apply_geometry_to_state(vt);
+}
+
 int vt_set_geometry(int cols, int rows) {
+    int old_width;
+    int old_height;
+
     if (cols < 1 || cols > VT_MAX_WIDTH || rows < 2 || rows > VT_MAX_HEIGHT) {
         return -1;
     }
 
+    old_width = vt_width;
+    old_height = vt_height;
+    if (cols == old_width && rows == old_height) {
+        return 0;
+    }
+
     vt_width = cols;
     vt_height = rows;
+    if (!vt_initialized) {
+        return 0;
+    }
+
+    for (int i = 0; i < VT_MAX; i++) {
+        vt_reconfigure_state(&vt_states[i], old_width, old_height, cols, rows);
+    }
     return 0;
+}
+
+int vt_refresh_geometry_from_terminal(void) {
+    int cols;
+    int rows;
+
+    if (console_get_terminal_size(&cols, &rows) != 0) {
+        return -1;
+    }
+
+    return vt_set_geometry(cols, rows);
 }
 
 int vt_get_width(void) {
@@ -96,7 +319,6 @@ void vt_init(void) {
         vt_states[i].cursor_visible = 1;
         vt_states[i].cursor_blink = 1;
         vt_states[i].tab_width = 8;
-        vt_init_tab_stops(&vt_states[i], vt_width);
         vt_states[i].autowrap = 1;         /* DECAWM on by default */
         vt_states[i].cursor_key_app = 0;   /* Normal cursor keys */
         vt_states[i].origin_mode = 0;      /* Absolute origin */
@@ -115,6 +337,7 @@ void vt_init(void) {
         for (int j = 0; j < VT_MAX_BUF_SIZE; j++) {
             vt_states[i].buffer[j] = 0x0720; // Space with default attr
         }
+        vt_apply_geometry_to_state(&vt_states[i]);
     }
     
     // VT 0 is active by default. 
@@ -122,6 +345,7 @@ void vt_init(void) {
     // For consistency, we might want to clear or sync initial state.
     // But we'll leave it as is for now.
     active_vt = 0;
+    vt_initialized = 1;
 }
 
 int vt_get_active(void) {
@@ -157,8 +381,7 @@ void vt_activate(int n) {
     if (vt->tty) {
         console_set_tty(vt->tty);
     }
-    hw_text_redraw_active();
-    vt_render_statusline(vt);
+    vt_redraw_active();
 }
 
 int vt_get_scrollback_view(const vt_state_t *vt) {
@@ -242,7 +465,7 @@ void vt_scrollback_page_up(void) {
         return;
     }
     vt->scrollback_view = (uint16_t)new_view;
-    hw_text_redraw_active();
+    vt_redraw_active();
 }
 
 void vt_scrollback_page_down(void) {
@@ -267,7 +490,7 @@ void vt_scrollback_page_down(void) {
         return;
     }
     vt->scrollback_view = (uint16_t)new_view;
-    hw_text_redraw_active();
+    vt_redraw_active();
 }
 
 void vt_scrollback_line_up(void) {
@@ -287,7 +510,7 @@ void vt_scrollback_line_up(void) {
         return;
     }
     vt->scrollback_view = (uint16_t)new_view;
-    hw_text_redraw_active();
+    vt_redraw_active();
 }
 
 void vt_scrollback_line_down(void) {
@@ -299,11 +522,8 @@ void vt_scrollback_line_down(void) {
     }
 
     vt->scrollback_view--;
-    hw_text_redraw_active();
+    vt_redraw_active();
 }
-
-static volatile uint32_t vt_status_epoch = 0;
-static int vt_status_thread_started = 0;
 
 static void vt_civil_from_days(int64_t z, int *year, unsigned *month, unsigned *day) {
     int64_t era;
@@ -356,20 +576,30 @@ static time_t vt_status_time(void) {
     return get_time();
 }
 
-void vt_render_statusline(vt_state_t *vt) {
+static void vt_compose_statusline(vt_state_t *vt) {
     char left[32];
     char right[32];
     char line[VT_MAX_WIDTH];
     size_t left_len;
     size_t right_len;
     int cols;
+    int rows;
     int row;
+    uint16_t status_color = 0x70;
     int x;
 
-    if (!vt) return;
+    if (!vt) {
+        return;
+    }
 
-    cols = vt_get_width();
-    row = vt_get_status_row();
+    vt_get_terminal_geometry(vt, &cols, &rows);
+    if (cols < 1 || cols > vt_get_width()) {
+        cols = vt_get_width();
+    }
+    if (rows < 2 || rows > vt_get_height()) {
+        rows = vt_get_height();
+    }
+
     if (vt_get_scrollback_view(vt) != 0) {
         snprintf(left, sizeof(left), " VT%d +%u ", vt->id + 1, vt->scrollback_view);
     } else {
@@ -392,61 +622,45 @@ void vt_render_statusline(vt_state_t *vt) {
         }
     }
 
-    /* 0x70 = Light Grey on pure grey/white background (STATUS COLOR) */
-    uint16_t status_color = 0x70;
-
+    row = rows - 1;
     for (x = 0; x < cols; x++) {
-        size_t index = (size_t)row * (size_t)cols + (size_t)x;
-        uint16_t entry = (uint16_t)((unsigned char)line[x]) | (status_color << 8);
-
-        if (vt->buffer[index] != entry) {
-            vt->buffer[index] = entry;
-            if (vt->id == vt_get_active()) {
-                /* We notify both backend drivers that the cell updated. Only the active driver draws. */
-#ifdef _SYS_DRIVERS_VIDEO_HW_TEXT_H
-                hw_text_console_write_shim_cell((size_t)x, (size_t)row, entry); /* Stub or we rely on full line sync */
-#endif
-            }
-        }
+        size_t index = (size_t)row * (size_t)vt_get_width() + (size_t)x;
+        vt->buffer[index] = (uint16_t)((unsigned char)line[x]) | (status_color << 8);
     }
-    
-    /* Since we updated the vt->buffer directly above, we trigger a row resync */
+
+}
+
+void vt_render_statusline(vt_state_t *vt) {
+    if (!vt) {
+        return;
+    }
+
+    vt_compose_statusline(vt);
+
     if (vt->id == vt_get_active()) {
-        /* Call out to hardcoded drivers to refresh row if applicable. NOTE: fb_console might use its own redraw queue */
-        hw_text_redraw_active(); /* this redrawing the whole screen isn't ideal but we can optimize later with row syncs */
-#ifdef _SYS_DRIVERS_VIDEO_FB_CONSOLE_H
-        fb_console_sync_row(vt, row);
-#endif
+        if (fb_console_active()) {
+            fb_console_refresh_statusline();
+        } else {
+            hw_text_refresh_statusline();
+        }
     }
 }
 
-static void vt_statusline_task(void *arg) {
-    uint32_t seen = 0;
-    (void)arg;
+void vt_redraw_active(void) {
+    vt_state_t *vt = vt_get_state(vt_get_active());
 
-    for (;;) {
-        while (seen == vt_status_epoch) {
-            sched_sleep((void *)&vt_status_epoch);
-        }
-        seen = vt_status_epoch;
-        vt_state_t *vt = vt_get_state(vt_get_active());
-        vt_render_statusline(vt);
+    if (!vt) {
+        return;
+    }
+
+    vt_compose_statusline(vt);
+    if (fb_console_active()) {
+        fb_console_redraw_active();
+    } else {
+        hw_text_redraw_active();
     }
 }
 
 void vt_tick_1hz(void) {
-    if (!vt_status_thread_started) {
-        thread_t *td;
-        if (kthread_create(vt_statusline_task, NULL, &td, "vtstatus") == 0) {
-            vt_status_thread_started = 1;
-        } else {
-            /* Fallback to inline processing if kthread fails */
-            vt_state_t *vt = vt_get_state(vt_get_active());
-            vt_render_statusline(vt);
-            return;
-        }
-    }
-
-    vt_status_epoch++;
-    sched_wakeup((void *)&vt_status_epoch);
+    vt_render_statusline(vt_get_state(vt_get_active()));
 }

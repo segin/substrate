@@ -16,6 +16,7 @@
 
 const uint8_t font_8x16[256 * 16] = {0};
 const uint8_t font_8x8[256 * 8] = {0};
+int fb_active = 0;
 
 static uint16_t mock_vga_cells[VT_MAX_BUF_SIZE];
 static vt_state_t mock_vt;
@@ -28,6 +29,7 @@ static uint8_t mock_ac_regs[256];
 static uint8_t mock_last_crtc_index;
 static uint8_t mock_last_ac_index;
 static int mock_ac_expect_data;
+static int mock_status_render_calls;
 
 #ifndef HZ
 #define HZ 100
@@ -87,6 +89,10 @@ int cmdline_get(const char *key, char *value, size_t value_size) {
     return -1;
 }
 
+int vt_refresh_geometry_from_terminal(void) {
+    return 0;
+}
+
 void sched_sleep(void *chan) {
     (void)chan;
 }
@@ -123,11 +129,19 @@ void console_register(console_backend_t *backend) {
 }
 
 void spinlock_acquire(spinlock_t *lock) {
-    (void)lock;
+    if (lock) {
+        lock->locked = 1;
+    }
 }
 
 void spinlock_release(spinlock_t *lock) {
-    (void)lock;
+    if (lock) {
+        lock->locked = 0;
+    }
+}
+
+bool spinlock_is_held(spinlock_t *lock) {
+    return lock && lock->locked != 0;
 }
 
 int kprintf(const char *fmt, ...) {
@@ -210,6 +224,11 @@ uint16_t vt_get_display_cell(const vt_state_t *vt, int row, int col) {
     return vt->buffer[(size_t)row * (size_t)mock_vt_width + (size_t)col];
 }
 
+void vt_render_statusline(vt_state_t *vt) {
+    (void)vt;
+    mock_status_render_calls++;
+}
+
 void vt_capture_scrollback_top(vt_state_t *vt) {
     (void)vt;
 }
@@ -233,14 +252,15 @@ static void reset_state(void) {
     mock_vt_height = 25;
     vga_buffer = mock_vga_cells;
     hw_text_active = 1;
+    hw_text_start_addr = 0;
     current_vt_ctx = NULL;
     hw_text_status_epoch = 0;
-    hw_text_status_thread_started = 0;
     hw_text_tty_count = 0;
     hw_text_blink_enabled = 0;
     mock_last_crtc_index = 0;
     mock_last_ac_index = 0;
     mock_ac_expect_data = 0;
+    mock_status_render_calls = 0;
     vt_init();
 }
 
@@ -421,6 +441,50 @@ static void test_vt_tty_ioctl_toggles_cursor_blink_mode(void) {
     assert((mock_crtc_regs[VGA_CRTC_CURSOR_START] & 0x20U) == 0);
 }
 
+static void test_terminal_size_queries_current_crtc_geometry(void) {
+    int cols;
+    int rows;
+
+    reset_state();
+    mock_crtc_regs[VGA_CRTC_OFFSET] = 0x28;      /* 80 columns */
+    mock_crtc_regs[VGA_CRTC_MAX_SCAN] = 0x07;    /* 8 scanlines per character */
+    mock_crtc_regs[VGA_CRTC_V_DISP_END] = 0x8F;  /* low 8 bits of 399 */
+    mock_crtc_regs[VGA_CRTC_OVERFLOW] = 0x02;    /* VDE bit 8 set */
+
+    assert(hw_text_get_terminal_size(&cols, &rows) == 0);
+    assert(cols == 80);
+    assert(rows == 50);
+}
+
+static void test_refresh_statusline_syncs_status_row_without_rerender(void) {
+    size_t index;
+    uint16_t entry;
+
+    reset_state();
+    index = (size_t)vt_get_status_row() * (size_t)vt_get_width() + 3U;
+    entry = (uint16_t)'S' | (uint16_t)0x70U << 8;
+    mock_vt.buffer[index] = entry;
+
+    hw_text_refresh_statusline();
+
+    assert(mock_status_render_calls == 0);
+    assert(mock_vga_cells[hw_text_vram_index(3U, (size_t)vt_get_status_row())] == entry);
+}
+
+static void test_redraw_active_keeps_status_row_visible(void) {
+    size_t index;
+    uint16_t entry;
+
+    reset_state();
+    index = (size_t)vt_get_status_row() * (size_t)vt_get_width() + 2U;
+    entry = (uint16_t)'T' | (uint16_t)0x70U << 8;
+    mock_vt.buffer[index] = entry;
+
+    hw_text_redraw_active();
+
+    assert(mock_vga_cells[hw_text_vram_index(2U, (size_t)vt_get_status_row())] == entry);
+}
+
 static void test_full_screen_scroll_uses_crtc_start_address(void) {
     uint16_t before_start;
     uint16_t after_start;
@@ -448,6 +512,23 @@ static void test_full_screen_scroll_uses_crtc_start_address(void) {
     assert(mock_vga_cells[hw_text_vram_index(0, (size_t)(mock_vt_height - 2))] == blank);
 }
 
+static void test_cursor_position_tracks_crtc_start_address(void) {
+    uint16_t cursor_pos;
+
+    reset_state();
+    mock_vt.row = vt_get_visible_height() - 1;
+    mock_vt.col = 7;
+
+    hw_text_set_start_addr_locked((uint16_t)mock_vt_width);
+    hw_text_update_cursor_locked(&mock_vt);
+
+    cursor_pos = (uint16_t)(((uint16_t)mock_crtc_regs[VGA_CRTC_CURSOR_HI] << 8) |
+                            mock_crtc_regs[VGA_CRTC_CURSOR_LO]);
+    assert(cursor_pos == (uint16_t)(mock_vt_width +
+                                    (vt_get_visible_height() - 1) * mock_vt_width +
+                                    7));
+}
+
 static void test_text_attrs_emulate_bold_reverse_and_underline(void) {
     reset_state();
 
@@ -473,7 +554,11 @@ int main(void) {
     test_vt_tty_ioctl_exposes_vga_controls();
     test_vt_tty_ioctl_toggles_blink_mode();
     test_vt_tty_ioctl_toggles_cursor_blink_mode();
+    test_terminal_size_queries_current_crtc_geometry();
+    test_refresh_statusline_syncs_status_row_without_rerender();
+    test_redraw_active_keeps_status_row_visible();
     test_full_screen_scroll_uses_crtc_start_address();
+    test_cursor_position_tracks_crtc_start_address();
     test_text_attrs_emulate_bold_reverse_and_underline();
     puts("host_test_hw_text: PASS");
     return 0;

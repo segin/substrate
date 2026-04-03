@@ -78,6 +78,7 @@ Detailed subsystem behavior belongs in `docs/specs/`, including:
 - process model: `docs/specs/kern_process_exit.md`, `docs/specs/kern_pid1.md`
 - VFS and filesystems: `docs/specs/vm_subsystem.md`, `docs/specs/fs_devfs.md`, `docs/specs/vfs_bio.md`
 - device and terminal subsystems: `docs/specs/driver_model.md`, `docs/specs/driver_tty.md`, `docs/specs/driver_vt.md`, `docs/specs/driver_fb_console.md`, `docs/specs/driver_virtio_gpu.md`
+- virtual terminals derive their physical geometry from the active console backend and reserve the last hardware row for kernel status UI; tty-visible geometry excludes that row.
 - execution personalities: `docs/specs/personality_targets.md`, `docs/specs/personality_elks.md`
 
 ## 6. Userland and Libraries

@@ -15,6 +15,8 @@ static uint8_t g_drive;
 static uint32_t g_e820_count;
 static struct e820_entry *g_e820_map;
 static char cmdline_buf[256];
+extern uint8_t __bss_start[];
+extern uint8_t __bss_end[];
 
 /* Simple heap (bump allocator starting at 0x100000 - 256KB .. we use 64KB) */
 static uint32_t heap_ptr = 0x00060000;  /* above stage2, below stack */
@@ -24,6 +26,14 @@ static void *salloc(uint32_t size)
 	void *p = (void *)heap_ptr;
 	heap_ptr = (heap_ptr + size + 3) & ~3;  /* 4-byte align */
 	return p;
+}
+
+static void zero_bss(void)
+{
+	uint8_t *p;
+
+	for (p = __bss_start; p < __bss_end; p++)
+		*p = 0;
 }
 
 /* ==== Low-level I/O ==== */
@@ -222,7 +232,9 @@ static void putc_both(char c)
 	serial_putc(c);
 }
 
-/* ==== Keyboard input (PS/2 polling) ==== */
+/* ==== Keyboard input (i8042-compatible polling) ==== */
+
+static char kbd_pending_char;
 
 static int kbd_ready(void)
 {
@@ -234,6 +246,29 @@ static uint8_t kbd_read_raw(void)
 	return inb(0x60);
 }
 
+static void kbd_pause(void)
+{
+	__asm__ volatile ("pause");
+}
+
+static void kbd_flush(void)
+{
+	int drained;
+	int delay;
+
+	for (drained = 0; drained < 32 && kbd_ready(); drained++) {
+		(void)kbd_read_raw();
+		for (delay = 0; delay < 128; delay++)
+			kbd_pause();
+	}
+}
+
+static void kbd_prepare(void)
+{
+	kbd_pending_char = 0;
+	kbd_flush();
+}
+
 /* Simple scancode set 1 -> ASCII (US layout, lowercase only) */
 static const char scancode_ascii[128] = {
 	0, 27, '1','2','3','4','5','6','7','8','9','0','-','=', '\b',
@@ -243,30 +278,50 @@ static const char scancode_ascii[128] = {
 	'*', 0, ' '
 };
 
-static char kbd_getc(void)
+static char kbd_decode_scancode(uint8_t sc)
 {
-	uint8_t sc;
-	do {
-		while (!kbd_ready())
-			;
-		sc = kbd_read_raw();
-	} while (sc & 0x80);  /* skip key-up events */
+	if (sc == 0 || sc == 0xE0 || sc == 0xE1 || sc == 0xFA || sc == 0xFE || sc == 0xAA)
+		return 0;
+	if (sc & 0x80)
+		return 0;
 	if (sc < sizeof(scancode_ascii))
 		return scancode_ascii[sc];
 	return 0;
 }
 
+static char kbd_getc(void)
+{
+	char c;
+
+	if (kbd_pending_char) {
+		c = kbd_pending_char;
+		kbd_pending_char = 0;
+		return c;
+	}
+
+	for (;;) {
+		while (!kbd_ready())
+			kbd_pause();
+		c = kbd_decode_scancode(kbd_read_raw());
+		if (c != 0)
+			return c;
+	}
+}
+
 /* Non-blocking: returns char or 0 if no key */
 static char kbd_trygetc(void)
 {
+	char c;
+
+	if (kbd_pending_char) {
+		c = kbd_pending_char;
+		kbd_pending_char = 0;
+		return c;
+	}
+
 	if (!kbd_ready())
 		return 0;
-	uint8_t sc = kbd_read_raw();
-	if (sc & 0x80)
-		return 0;  /* key-up */
-	if (sc < sizeof(scancode_ascii))
-		return scancode_ascii[sc];
-	return 0;
+	return kbd_decode_scancode(kbd_read_raw());
 }
 
 /* ==== Timer ==== */
@@ -292,8 +347,11 @@ static int wait_for_key(int seconds)
 	int counted = 0;
 
 	while (counted < ticks) {
-		if (kbd_ready())
+		int c = kbd_trygetc();
+		if (c != 0) {
+			kbd_pending_char = (char)c;
 			return 1;
+		}
 
 		uint16_t cur = pit_read_count();
 		if (cur > prev)  /* counter wrapped (counts down) */
@@ -652,6 +710,8 @@ __attribute__((section(".text.entry")))
 void stage2_main(uint32_t e820_count, struct e820_entry *e820_map,
                  uint32_t drive_num)
 {
+	zero_bss();
+
 	g_e820_count = e820_count;
 	g_e820_map = e820_map;
 	g_drive = drive_num;
@@ -668,6 +728,7 @@ void stage2_main(uint32_t e820_count, struct e820_entry *e820_map,
 	}
 
 	puts("boot: ");
+	kbd_prepare();
 
 	/* Wait for keypress or timeout */
 	int got_key = wait_for_key(BOOT_TIMEOUT);
