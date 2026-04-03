@@ -52,6 +52,7 @@ static const builtin_name_t g_known_builtins[] = {
     {"__builtin_frame_address"},
     {"__builtin_memcmp"},
     {"__builtin_prefetch"},
+    {"__builtin_cpu_supports"},
     {"__builtin_strlen"},
     {"__builtin_memcpy"},
     {"__builtin_memmove"},

@@ -5,12 +5,10 @@
 
 #include "pax.h"
 
-void
-options(int argc, char **argv)
+static void
+parse_args(int argc, char **argv, int *rflag, int *wflag)
 {
     int c;
-    int rflag = 0;
-    int wflag = 0;
 
     /*
      * Parse arguments
@@ -18,10 +16,10 @@ options(int argc, char **argv)
     while ((c = getopt(argc, argv, "rwb:cf:diks:tuvx:Lnp:X")) != -1) {
         switch (c) {
         case 'r':
-            rflag = 1;
+            *rflag = 1;
             break;
         case 'w':
-            wflag = 1;
+            *wflag = 1;
             break;
         case 'f':
             arfile = optarg;
@@ -67,6 +65,15 @@ options(int argc, char **argv)
             usage();
         }
     }
+}
+
+void
+options(int argc, char **argv)
+{
+    int rflag = 0;
+    int wflag = 0;
+
+    parse_args(argc, argv, &rflag, &wflag);
 
     /* Set mode */
     if (rflag && wflag) {

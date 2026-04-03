@@ -92,6 +92,27 @@ vgcore.*
 /bench_objects/
 /tests/elks/logs/
 
+# Recursive per-directory build stamps
+/usr.bin/*/.build-mode
+/usr.lib/*/.build-mode
+
+# Patterns formerly carried in subtree .gitignore files
+/contrib/ext2-boot/*.bin
+/contrib/ext2-boot/boot
+/contrib/ext2-boot/bootloader
+/contrib/ext2-boot/ext2util
+/contrib/ext2-boot/kernel
+/contrib/ext2-boot/boot.img
+/contrib/ext2-boot/boot.img.bak
+/tests/test_libedit
+/tests/test_getuid
+/tests/lib/sys/test_getuid
+/tests/elks/build/
+/tests/elks/*_elks
+/tests/elks/gen_hello
+/tests/usr.bin/cc/*.list
+/lib/edit/histedit.h
+
 # Host test binaries
 /host_test_*
 /tests/sys/host_test_*
@@ -198,6 +219,7 @@ sbin/*/*
 /usr.bin/lex/test_posix
 /usr.bin/pax/pax
 /usr.bin/pr/pr
+/usr.bin/readelf/readelf
 /usr.bin/size/size
 /usr.bin/uudecode/uudecode
 /usr.bin/yacc/test_minimal.output
@@ -250,3 +272,4 @@ tests/lib/edit/test_property
 tests/lib/edit/test_tokenizer
 tests/lib/edit/test_vi
 tools/sbsh_expect.exp
+/usr.lib/elfobj/tests/test_ensure_symbols_relocs

@@ -186,6 +186,48 @@ ln_path_join(const char *left, const char *right)
 }
 
 static char *
+ln_build_normalized_path(char **segs, size_t seg_len, bool abs, size_t original_len)
+{
+    size_t out_cap;
+    char *out;
+    size_t pos;
+    size_t i;
+
+    out_cap = original_len + 4;
+    out = (char *)malloc(out_cap);
+    if (!out) {
+        return NULL;
+    }
+
+    pos = 0;
+    if (seg_len == 0) {
+        if (abs) {
+            out[pos++] = '/';
+        } else {
+            out[pos++] = '.';
+        }
+        out[pos] = '\0';
+        return out;
+    }
+
+    if (abs) {
+        out[pos++] = '/';
+    }
+
+    for (i = 0; i < seg_len; ++i) {
+        size_t slen = strlen(segs[i]);
+        if (i > 0) {
+            out[pos++] = '/';
+        }
+        memcpy(out + pos, segs[i], slen);
+        pos += slen;
+    }
+    out[pos] = '\0';
+
+    return out;
+}
+
+static char *
 ln_path_normalize_copy(const char *path)
 {
     size_t len;
@@ -196,10 +238,7 @@ ln_path_normalize_copy(const char *path)
     char **segs;
     size_t seg_cap;
     size_t seg_len;
-    size_t out_cap;
     char *out;
-    size_t pos;
-    size_t i;
 
     if (!path) {
         errno = EINVAL;
@@ -246,40 +285,7 @@ ln_path_normalize_copy(const char *path)
         tok = strtok_r(NULL, "/", &saveptr);
     }
 
-    out_cap = len + 4;
-    out = (char *)malloc(out_cap);
-    if (!out) {
-        free(segs);
-        free(tmp);
-        return NULL;
-    }
-
-    pos = 0;
-    if (seg_len == 0) {
-        if (abs) {
-            out[pos++] = '/';
-        } else {
-            out[pos++] = '.';
-        }
-        out[pos] = '\0';
-        free(segs);
-        free(tmp);
-        return out;
-    }
-
-    if (abs) {
-        out[pos++] = '/';
-    }
-
-    for (i = 0; i < seg_len; ++i) {
-        size_t slen = strlen(segs[i]);
-        if (i > 0) {
-            out[pos++] = '/';
-        }
-        memcpy(out + pos, segs[i], slen);
-        pos += slen;
-    }
-    out[pos] = '\0';
+    out = ln_build_normalized_path(segs, seg_len, abs, len);
 
     free(segs);
     free(tmp);
@@ -408,6 +414,53 @@ ln_split_abs_components(const char *abs_path, char ***out_parts, size_t *out_cou
 }
 
 static char *
+ln_build_relative_path(char **target_parts, size_t target_count, size_t base_count, size_t common_len)
+{
+    size_t cap = 64;
+    size_t len = 0;
+    char *out = (char *)malloc(cap);
+    size_t i;
+
+    if (!out) {
+        return NULL;
+    }
+    out[0] = '\0';
+
+    for (i = common_len; i < base_count; ++i) {
+        if (ln_append_text(&out, &cap, &len, "../") != 0) {
+            free(out);
+            return NULL;
+        }
+    }
+
+    for (i = common_len; i < target_count; ++i) {
+        if (ln_append_text(&out, &cap, &len, target_parts[i]) != 0) {
+            free(out);
+            return NULL;
+        }
+        if (i + 1 < target_count) {
+            if (ln_append_text(&out, &cap, &len, "/") != 0) {
+                free(out);
+                return NULL;
+            }
+        }
+    }
+
+    if (len == 0) {
+        if (ln_append_text(&out, &cap, &len, ".") != 0) {
+            free(out);
+            return NULL;
+        }
+    }
+
+    if (len >= 3 && strcmp(out + len - 3, "../") == 0) {
+        out[len - 1] = '\0';
+    }
+
+    return out;
+}
+
+static char *
 ln_relative_from_to(const char *target_abs, const char *base_abs)
 {
     char **target_parts;
@@ -415,8 +468,6 @@ ln_relative_from_to(const char *target_abs, const char *base_abs)
     size_t target_count;
     size_t base_count;
     size_t i;
-    size_t cap;
-    size_t len;
     char *out;
 
     if (!target_abs || !base_abs || target_abs[0] != '/' || base_abs[0] != '/') {
@@ -438,64 +489,10 @@ ln_relative_from_to(const char *target_abs, const char *base_abs)
         ++i;
     }
 
-    cap = 64;
-    len = 0;
-    out = (char *)malloc(cap);
-    if (!out) {
-        ln_components_free(target_parts, target_count);
-        ln_components_free(base_parts, base_count);
-        return NULL;
-    }
-    out[0] = '\0';
-
-    while (i < base_count) {
-        if (ln_append_text(&out, &cap, &len, "../") != 0) {
-            free(out);
-            ln_components_free(target_parts, target_count);
-            ln_components_free(base_parts, base_count);
-            return NULL;
-        }
-        ++i;
-    }
-
-    i = 0;
-    while (i < target_count && i < base_count && strcmp(target_parts[i], base_parts[i]) == 0) {
-        ++i;
-    }
-
-    while (i < target_count) {
-        if (ln_append_text(&out, &cap, &len, target_parts[i]) != 0) {
-            free(out);
-            ln_components_free(target_parts, target_count);
-            ln_components_free(base_parts, base_count);
-            return NULL;
-        }
-        if (i + 1 < target_count) {
-            if (ln_append_text(&out, &cap, &len, "/") != 0) {
-                free(out);
-                ln_components_free(target_parts, target_count);
-                ln_components_free(base_parts, base_count);
-                return NULL;
-            }
-        }
-        ++i;
-    }
-
-    if (len == 0) {
-        if (ln_append_text(&out, &cap, &len, ".") != 0) {
-            free(out);
-            ln_components_free(target_parts, target_count);
-            ln_components_free(base_parts, base_count);
-            return NULL;
-        }
-    }
+    out = ln_build_relative_path(target_parts, target_count, base_count, i);
 
     ln_components_free(target_parts, target_count);
     ln_components_free(base_parts, base_count);
-
-    if (len >= 3 && strcmp(out + len - 3, "../") == 0) {
-        out[len - 1] = '\0';
-    }
 
     return out;
 }
@@ -740,26 +737,11 @@ ln_backup_numbered_path(const char *dst, unsigned n)
 }
 
 static char *
-ln_backup_pick_path(const ln_options_t *opts, const char *dst)
+ln_backup_pick_numbered_path_logic(const char *dst, ln_backup_mode_t mode, const char *suffix)
 {
-    const char *suffix;
-    ln_backup_mode_t mode;
     unsigned n;
     bool saw_numbered;
     char *cand;
-
-    mode = opts->backup_mode;
-    suffix = opts->backup_suffix;
-    if (!suffix || *suffix == '\0') {
-        suffix = getenv("SIMPLE_BACKUP_SUFFIX");
-    }
-    if (!suffix || *suffix == '\0') {
-        suffix = "~";
-    }
-
-    if (mode == LN_BACKUP_SIMPLE) {
-        return ln_backup_simple_path(dst, suffix);
-    }
 
     saw_numbered = false;
     for (n = 1; n < 100000U; ++n) {
@@ -795,6 +777,28 @@ ln_backup_pick_path(const ln_options_t *opts, const char *dst)
     }
 
     return ln_backup_simple_path(dst, suffix);
+}
+
+static char *
+ln_backup_pick_path(const ln_options_t *opts, const char *dst)
+{
+    const char *suffix;
+    ln_backup_mode_t mode;
+
+    mode = opts->backup_mode;
+    suffix = opts->backup_suffix;
+    if (!suffix || *suffix == '\0') {
+        suffix = getenv("SIMPLE_BACKUP_SUFFIX");
+    }
+    if (!suffix || *suffix == '\0') {
+        suffix = "~";
+    }
+
+    if (mode == LN_BACKUP_SIMPLE) {
+        return ln_backup_simple_path(dst, suffix);
+    }
+
+    return ln_backup_pick_numbered_path_logic(dst, mode, suffix);
 }
 
 static int
@@ -872,16 +876,61 @@ ln_compute_symlink_target(const ln_options_t *opts, const char *source, const ch
 }
 
 static int
+ln_handle_existing_dest(const ln_options_t *opts, const char *dest, bool replace_dir_with_f)
+{
+    bool need_replace;
+    int rc;
+
+    need_replace = false;
+
+    if (opts->replace_mode == LN_REPLACE_INTERACTIVE) {
+        if (!ln_prompt_replace(opts, dest)) {
+            ln_diag(opts, "not replacing %s", dest);
+            return -1;
+        }
+        need_replace = true;
+    } else if (opts->replace_mode == LN_REPLACE_FORCE) {
+        need_replace = true;
+    } else if (opts->backup_mode != LN_BACKUP_NONE) {
+        need_replace = true;
+    } else if (replace_dir_with_f) {
+        need_replace = true;
+    }
+
+    if (!need_replace) {
+        ln_diag(opts, "%s: destination exists", dest);
+        return -1;
+    }
+
+    if (opts->backup_mode != LN_BACKUP_NONE) {
+        if (ln_backup_destination(opts, dest) != 0) {
+            ln_diag_errno(opts, dest, "create backup");
+            return -1;
+        }
+    } else {
+        if (replace_dir_with_f) {
+            rc = rmdir(dest);
+        } else {
+            rc = unlink(dest);
+        }
+        if (rc != 0) {
+            ln_diag_errno(opts, dest, "remove destination");
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+static int
 ln_process_one(const ln_options_t *opts, const char *source, const char *dest)
 {
     struct stat dst_st;
     bool dst_exists;
     bool replace_dir_with_f;
-    bool need_replace;
     char *symlink_target;
     char *hard_source;
     const char *same_entry_source;
-    int rc;
     int source_is_dir;
 
     symlink_target = NULL;
@@ -933,50 +982,10 @@ ln_process_one(const ln_options_t *opts, const char *source, const char *dest)
                          dst_exists && S_ISDIR(dst_st.st_mode);
 
     if (dst_exists) {
-        need_replace = false;
-
-        if (opts->replace_mode == LN_REPLACE_INTERACTIVE) {
-            if (!ln_prompt_replace(opts, dest)) {
-                ln_diag(opts, "not replacing %s", dest);
-                free(symlink_target);
-                free(hard_source);
-                return -1;
-            }
-            need_replace = true;
-        } else if (opts->replace_mode == LN_REPLACE_FORCE) {
-            need_replace = true;
-        } else if (opts->backup_mode != LN_BACKUP_NONE) {
-            need_replace = true;
-        } else if (replace_dir_with_f) {
-            need_replace = true;
-        }
-
-        if (!need_replace) {
-            ln_diag(opts, "%s: destination exists", dest);
+        if (ln_handle_existing_dest(opts, dest, replace_dir_with_f) != 0) {
             free(symlink_target);
             free(hard_source);
             return -1;
-        }
-
-        if (opts->backup_mode != LN_BACKUP_NONE) {
-            if (ln_backup_destination(opts, dest) != 0) {
-                ln_diag_errno(opts, dest, "create backup");
-                free(symlink_target);
-                free(hard_source);
-                return -1;
-            }
-        } else {
-            if (replace_dir_with_f) {
-                rc = rmdir(dest);
-            } else {
-                rc = unlink(dest);
-            }
-            if (rc != 0) {
-                ln_diag_errno(opts, dest, "remove destination");
-                free(symlink_target);
-                free(hard_source);
-                return -1;
-            }
         }
     }
 
@@ -1015,6 +1024,35 @@ ln_process_one(const ln_options_t *opts, const char *source, const char *dest)
 }
 
 static int
+ln_build_plan_two_operands(const ln_options_t *opts, int operand_index, const char *dst,
+                           struct ln_plan *plan)
+{
+    bool dst_is_dir = ln_is_existing_dir_operand(dst, opts->no_target_deref);
+
+    if (opts->symbolic && opts->bsd_remove_target_dir && dst_is_dir) {
+        plan->use_target_dir = false;
+        plan->single_target = dst;
+        plan->src_start = operand_index;
+        plan->src_count = 1;
+        return 0;
+    }
+
+    if (!opts->no_target_directory && dst_is_dir) {
+        plan->use_target_dir = true;
+        plan->target_dir = dst;
+        plan->src_start = operand_index;
+        plan->src_count = 1;
+        return 0;
+    }
+
+    plan->use_target_dir = false;
+    plan->single_target = dst;
+    plan->src_start = operand_index;
+    plan->src_count = 1;
+    return 0;
+}
+
+static int
 ln_build_plan(const ln_options_t *opts, int argc, char **argv, int operand_index,
               struct ln_plan *plan)
 {
@@ -1047,30 +1085,7 @@ ln_build_plan(const ln_options_t *opts, int argc, char **argv, int operand_index
     }
 
     if (n_operands == 2) {
-        const char *dst = argv[operand_index + 1];
-        bool dst_is_dir = ln_is_existing_dir_operand(dst, opts->no_target_deref);
-
-        if (opts->symbolic && opts->bsd_remove_target_dir && dst_is_dir) {
-            plan->use_target_dir = false;
-            plan->single_target = dst;
-            plan->src_start = operand_index;
-            plan->src_count = 1;
-            return 0;
-        }
-
-        if (!opts->no_target_directory && dst_is_dir) {
-            plan->use_target_dir = true;
-            plan->target_dir = dst;
-            plan->src_start = operand_index;
-            plan->src_count = 1;
-            return 0;
-        }
-
-        plan->use_target_dir = false;
-        plan->single_target = dst;
-        plan->src_start = operand_index;
-        plan->src_count = 1;
-        return 0;
+        return ln_build_plan_two_operands(opts, operand_index, argv[operand_index + 1], plan);
     }
 
     if (opts->no_target_directory) {
@@ -1112,28 +1127,34 @@ ln_usage(void)
 }
 
 static int
-ln_apply_parsed_option(ln_options_t *opts, char opt, const char *optval,
-                       bool *seen_force, bool *seen_interactive)
+ln_apply_backup_option(ln_options_t *opts, const char *optval)
 {
     bool ok;
     const char *version_control;
 
+    if (optval && *optval != '\0') {
+        opts->backup_mode = ln_backup_mode_from_string(optval, &ok);
+        if (!ok) {
+            ln_diag(opts, "invalid backup method '%s'", optval);
+            return -1;
+        }
+    } else {
+        version_control = getenv("VERSION_CONTROL");
+        opts->backup_mode = ln_backup_mode_from_string(version_control, &ok);
+        if (!ok) {
+            opts->backup_mode = LN_BACKUP_EXISTING;
+        }
+    }
+    return 0;
+}
+
+static int
+ln_apply_parsed_option(ln_options_t *opts, char opt, const char *optval,
+                       bool *seen_force, bool *seen_interactive)
+{
     switch (opt) {
     case 'b':
-        if (optval && *optval != '\0') {
-            opts->backup_mode = ln_backup_mode_from_string(optval, &ok);
-            if (!ok) {
-                ln_diag(opts, "invalid backup method '%s'", optval);
-                return -1;
-            }
-        } else {
-            version_control = getenv("VERSION_CONTROL");
-            opts->backup_mode = ln_backup_mode_from_string(version_control, &ok);
-            if (!ok) {
-                opts->backup_mode = LN_BACKUP_EXISTING;
-            }
-        }
-        return 0;
+        return ln_apply_backup_option(opts, optval);
     case 'S':
         if (!optval) {
             ln_diag(opts, "-S/--suffix requires an argument");
@@ -1194,6 +1215,30 @@ ln_apply_parsed_option(ln_options_t *opts, char opt, const char *optval,
     }
 }
 
+struct ln_long_opt {
+    const char *name;
+    int arg_mode; /* 0: none, 1: required, 2: optional */
+    char short_opt;
+};
+
+static const struct ln_long_opt long_opts[] = {
+    {"help", 0, '\0'},
+    {"backup", 2, 'b'},
+    {"suffix", 1, 'S'},
+    {"target-directory", 1, 't'},
+    {"no-target-directory", 0, 'T'},
+    {"relative", 0, 'r'},
+    {"directory", 0, 'd'},
+    {"force", 0, 'f'},
+    {"interactive", 0, 'i'},
+    {"symbolic", 0, 's'},
+    {"logical", 0, 'L'},
+    {"physical", 0, 'P'},
+    {"no-dereference", 0, 'h'},
+    {"verbose", 0, 'v'},
+    {NULL, 0, 0}
+};
+
 static int
 ln_parse_long_option(ln_options_t *opts, const char *arg, int argc, char **argv, int *index,
                      int *show_help, bool *seen_force, bool *seen_interactive)
@@ -1202,131 +1247,91 @@ ln_parse_long_option(ln_options_t *opts, const char *arg, int argc, char **argv,
     const char *eq;
     const char *value;
     size_t nlen;
+    int i;
 
     name = arg + 2;
     eq = strchr(name, '=');
     nlen = eq ? (size_t)(eq - name) : strlen(name);
     value = eq ? (eq + 1) : NULL;
 
-    if (nlen == 4 && strncmp(name, "help", 4) == 0) {
-        if (value) {
-            ln_diag(opts, "--help does not accept an argument");
-            return -1;
-        }
-        *show_help = 1;
-        return 1;
-    }
-
-    if (nlen == 6 && strncmp(name, "backup", 6) == 0) {
-        return ln_apply_parsed_option(opts, 'b', value, seen_force, seen_interactive);
-    }
-
-    if (nlen == 6 && strncmp(name, "suffix", 6) == 0) {
-        if (!value) {
-            if (*index + 1 >= argc) {
-                ln_diag(opts, "--suffix requires an argument");
-                return -1;
+    for (i = 0; long_opts[i].name != NULL; i++) {
+        if (nlen == strlen(long_opts[i].name) && strncmp(name, long_opts[i].name, nlen) == 0) {
+            if (long_opts[i].name[0] == 'h' && long_opts[i].name[1] == 'e') {
+                if (value) {
+                    ln_diag(opts, "--help does not accept an argument");
+                    return -1;
+                }
+                *show_help = 1;
+                return 1;
             }
-            ++(*index);
-            value = argv[*index];
-        }
-        return ln_apply_parsed_option(opts, 'S', value, seen_force, seen_interactive);
-    }
 
-    if (nlen == 16 && strncmp(name, "target-directory", 16) == 0) {
-        if (!value) {
-            if (*index + 1 >= argc) {
-                ln_diag(opts, "--target-directory requires an argument");
-                return -1;
+            if (long_opts[i].arg_mode == 0) {
+                if (value) {
+                    ln_diag(opts, "--%s does not accept an argument", long_opts[i].name);
+                    return -1;
+                }
+                value = NULL;
+            } else if (long_opts[i].arg_mode == 1) {
+                if (!value) {
+                    if (*index + 1 >= argc) {
+                        ln_diag(opts, "--%s requires an argument", long_opts[i].name);
+                        return -1;
+                    }
+                    ++(*index);
+                    value = argv[*index];
+                }
             }
-            ++(*index);
-            value = argv[*index];
-        }
-        return ln_apply_parsed_option(opts, 't', value, seen_force, seen_interactive);
-    }
 
-    if (nlen == 19 && strncmp(name, "no-target-directory", 19) == 0) {
-        if (value) {
-            ln_diag(opts, "--no-target-directory does not accept an argument");
-            return -1;
+            return ln_apply_parsed_option(opts, long_opts[i].short_opt, value, seen_force, seen_interactive);
         }
-        return ln_apply_parsed_option(opts, 'T', NULL, seen_force, seen_interactive);
-    }
-
-    if (nlen == 8 && strncmp(name, "relative", 8) == 0) {
-        if (value) {
-            ln_diag(opts, "--relative does not accept an argument");
-            return -1;
-        }
-        return ln_apply_parsed_option(opts, 'r', NULL, seen_force, seen_interactive);
-    }
-
-    if (nlen == 9 && strncmp(name, "directory", 9) == 0) {
-        if (value) {
-            ln_diag(opts, "--directory does not accept an argument");
-            return -1;
-        }
-        return ln_apply_parsed_option(opts, 'd', NULL, seen_force, seen_interactive);
-    }
-
-    if (nlen == 5 && strncmp(name, "force", 5) == 0) {
-        if (value) {
-            ln_diag(opts, "--force does not accept an argument");
-            return -1;
-        }
-        return ln_apply_parsed_option(opts, 'f', NULL, seen_force, seen_interactive);
-    }
-
-    if (nlen == 11 && strncmp(name, "interactive", 11) == 0) {
-        if (value) {
-            ln_diag(opts, "--interactive does not accept an argument");
-            return -1;
-        }
-        return ln_apply_parsed_option(opts, 'i', NULL, seen_force, seen_interactive);
-    }
-
-    if (nlen == 8 && strncmp(name, "symbolic", 8) == 0) {
-        if (value) {
-            ln_diag(opts, "--symbolic does not accept an argument");
-            return -1;
-        }
-        return ln_apply_parsed_option(opts, 's', NULL, seen_force, seen_interactive);
-    }
-
-    if (nlen == 7 && strncmp(name, "logical", 7) == 0) {
-        if (value) {
-            ln_diag(opts, "--logical does not accept an argument");
-            return -1;
-        }
-        return ln_apply_parsed_option(opts, 'L', NULL, seen_force, seen_interactive);
-    }
-
-    if (nlen == 8 && strncmp(name, "physical", 8) == 0) {
-        if (value) {
-            ln_diag(opts, "--physical does not accept an argument");
-            return -1;
-        }
-        return ln_apply_parsed_option(opts, 'P', NULL, seen_force, seen_interactive);
-    }
-
-    if (nlen == 14 && strncmp(name, "no-dereference", 14) == 0) {
-        if (value) {
-            ln_diag(opts, "--no-dereference does not accept an argument");
-            return -1;
-        }
-        return ln_apply_parsed_option(opts, 'h', NULL, seen_force, seen_interactive);
-    }
-
-    if (nlen == 7 && strncmp(name, "verbose", 7) == 0) {
-        if (value) {
-            ln_diag(opts, "--verbose does not accept an argument");
-            return -1;
-        }
-        return ln_apply_parsed_option(opts, 'v', NULL, seen_force, seen_interactive);
     }
 
     ln_diag(opts, "invalid option: %s", arg);
     return -1;
+}
+
+static int
+ln_parse_short_options(ln_options_t *opts, int argc, char **argv, int *i,
+                       bool *seen_force, bool *seen_interactive)
+{
+    char *arg = argv[*i];
+    size_t j = 1;
+    while (arg[j] != '\0') {
+        char opt = arg[j];
+        const char *optval = NULL;
+        int rc;
+
+        if (opt == 'S' || opt == 't') {
+            if (arg[j + 1] != '\0') {
+                optval = &arg[j + 1];
+                j = strlen(arg);
+            } else {
+                if (*i + 1 >= argc) {
+                    ln_diag(opts, "option requires an argument -- '%c'", opt);
+                    return -1;
+                }
+                ++(*i);
+                optval = argv[*i];
+            }
+        } else if (opt == 'b') {
+            if (arg[j + 1] != '\0') {
+                optval = &arg[j + 1];
+                j = strlen(arg);
+            }
+        }
+
+        rc = ln_apply_parsed_option(opts, opt, optval, seen_force, seen_interactive);
+        if (rc != 0) {
+            return -1;
+        }
+
+        if (opt == 'S' || opt == 't' || opt == 'b') {
+            break;
+        }
+
+        ++j;
+    }
+    return 0;
 }
 
 int
@@ -1372,43 +1377,8 @@ ln_parse_options(ln_options_t *opts, int argc, char **argv, int *operand_index, 
             continue;
         }
 
-        {
-            size_t j = 1;
-            while (arg[j] != '\0') {
-                char opt = arg[j];
-                const char *optval = NULL;
-                int rc;
-
-                if (opt == 'S' || opt == 't') {
-                    if (arg[j + 1] != '\0') {
-                        optval = &arg[j + 1];
-                        j = strlen(arg);
-                    } else {
-                        if (i + 1 >= argc) {
-                            ln_diag(opts, "option requires an argument -- '%c'", opt);
-                            return -1;
-                        }
-                        ++i;
-                        optval = argv[i];
-                    }
-                } else if (opt == 'b') {
-                    if (arg[j + 1] != '\0') {
-                        optval = &arg[j + 1];
-                        j = strlen(arg);
-                    }
-                }
-
-                rc = ln_apply_parsed_option(opts, opt, optval, &seen_force, &seen_interactive);
-                if (rc != 0) {
-                    return -1;
-                }
-
-                if (opt == 'S' || opt == 't' || opt == 'b') {
-                    break;
-                }
-
-                ++j;
-            }
+        if (ln_parse_short_options(opts, argc, argv, &i, &seen_force, &seen_interactive) != 0) {
+            return -1;
         }
 
         ++i;

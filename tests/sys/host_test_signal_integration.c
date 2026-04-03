@@ -64,11 +64,16 @@ void pgrp_signal(struct pgrp *pgrp, int sig) {
 }
 int pgrp_is_orphaned(struct pgrp *pgrp) { (void)pgrp; return 0; }
 void proc_exit(int status) { proc_exit_called = 1; proc_exit_status = status; }
+#ifndef HOST_TEST_EXTERNAL_COREDUMP
 int coredump(process_t *p) {
     coredump_called++;
     coredump_pid = p ? p->pid : -1;
     return coredump_result;
 }
+#endif
+
+void core_prepare_dump(struct process *p, int sig) { (void)p; (void)sig; }
+void core_capture_trapframe(struct process *p, const struct registers *regs) { (void)p; (void)regs; }
 
 #define HOST_TEST_EXTERNAL_COREDUMP 1
 #include "../../sys/kern/signal.c"

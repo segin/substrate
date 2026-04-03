@@ -5,7 +5,14 @@ SUBDIRS = bc cat chmod cp dc devtree echo ex false find getty grep head id kill 
 
 .PHONY: all clean install $(SUBDIRS)
 
-all: $(SUBDIRS)
+all: usr_libs $(SUBDIRS)
+
+usr_libs:
+	@echo ">>> Entering usr.lib"
+	$(MAKE) -C ../usr.lib NATIVE_BUILD="$(NATIVE_BUILD)"
+	@echo "<<< Leaving usr.lib"
+
+$(SUBDIRS): usr_libs
 
 $(SUBDIRS):
 	@echo ">>> Entering bin/$@"

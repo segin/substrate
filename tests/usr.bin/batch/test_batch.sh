@@ -41,6 +41,12 @@ run_test "GNU at -b test" 0 "echo 'ls' | $AT -b"
 run_test "GNU at without timespec should fail" 1 "echo 'ls' | $AT"
 run_test "GNU at with -f should work" 0 "echo 'ls' > /tmp/test_job.sh && $AT -f /tmp/test_job.sh noon"
 
+echo "=== Phase 9.3: Extended timespec parsing tests ==="
+run_test "at with HHMM timespec" 0 "echo 'ls' | $AT 0400"
+run_test "at with HH:MM timespec" 0 "echo 'ls' | $AT 14:30"
+run_test "at with now + X units timespec" 0 "echo 'ls' | $AT now + 2 hours"
+run_test "at with MMM DD timespec" 0 "echo 'ls' | $AT Jan 5"
+
 if [ $FAIL_COUNT -eq 0 ]; then
     echo "All batch/at frontend tests passed."
     exit 0

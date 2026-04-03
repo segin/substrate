@@ -58,17 +58,42 @@ int copyout(const void *src, void *dst, size_t size) {
 static int last_execute_flags = 0;
 static uint32_t last_execute_data_len = 0;
 static void *last_execute_data = NULL;
+static int mock_execute_ret = 0;
+static uint8_t mock_execute_status = SCSI_STATUS_GOOD;
+static uint32_t mock_execute_data_xfer = 0;
+static uint8_t mock_execute_sense_len = 0;
+static uint8_t mock_execute_sense[18];
+static scsi_request_t mock_request;
 static process_t mock_process;
 process_t *current_process = &mock_process;
 
-int scsi_execute_sync(scsi_device_t *dev, uint8_t *cdb, uint8_t cdb_len,
-                      void *data, uint32_t data_len, uint16_t flags,
-                      uint32_t timeout_ms) {
-    (void)dev; (void)cdb; (void)cdb_len; (void)timeout_ms;
-    last_execute_data = data;
-    last_execute_data_len = data_len;
-    last_execute_flags = flags;
-    return 0;
+scsi_request_t *scsi_request_alloc(void) {
+    memset(&mock_request, 0, sizeof(mock_request));
+    mock_request.state = SCSI_REQ_STATE_PENDING;
+    return &mock_request;
+}
+
+void scsi_request_free(scsi_request_t *req) {
+    assert(req == &mock_request);
+}
+
+void scsi_request_init(scsi_request_t *req, scsi_device_t *dev) {
+    memset(req, 0, sizeof(*req));
+    req->device = dev;
+    req->state = SCSI_REQ_STATE_PENDING;
+}
+
+int scsi_execute(scsi_request_t *req) {
+    last_execute_data = req->data;
+    last_execute_data_len = req->data_len;
+    last_execute_flags = req->flags;
+    req->status = mock_execute_status;
+    req->data_xfer = mock_execute_data_xfer ? mock_execute_data_xfer : req->data_len;
+    req->sense_len = mock_execute_sense_len;
+    if (mock_execute_sense_len != 0) {
+        memcpy(req->sense, mock_execute_sense, mock_execute_sense_len);
+    }
+    return mock_execute_ret;
 }
 
 /* Include the source file */
@@ -136,25 +161,58 @@ void test_send_cmd() {
 
     scsi_ioctl_cmd_t cmd;
     memset(&cmd, 0, sizeof(cmd));
+    cmd.cdb_len = 6;
+    cmd.cdb[0] = SCSI_CMD_INQUIRY;
     cmd.direction = 1; /* READ */
     cmd.data_len = 100;
     char data_buf[100];
     cmd.data = data_buf;
     current_process->euid = 0;
+    mock_execute_ret = 0;
+    mock_execute_status = SCSI_STATUS_GOOD;
+    mock_execute_data_xfer = 100;
+    mock_execute_sense_len = 0;
 
     int ret = sg_ioctl(&node, SCSI_IOCTL_SEND_CMD, &cmd);
     assert(ret == 0);
     assert(last_execute_data_len == 100);
     assert(last_execute_data != data_buf); /* Must use kernel buffer! */
     assert(last_execute_flags & SCSI_REQ_READ);
+    assert(cmd.status == SCSI_STATUS_GOOD);
+    assert(cmd.error == 0);
+    assert(cmd.data_xfer == 100);
+    assert(cmd.sense_len == 0);
 
     /* Test WRITE */
     cmd.direction = 2; /* WRITE */
+    mock_execute_data_xfer = 100;
     ret = sg_ioctl(&node, SCSI_IOCTL_SEND_CMD, &cmd);
     assert(ret == 0);
     assert(last_execute_flags & SCSI_REQ_WRITE);
 
+    /* Test CHECK CONDITION propagation */
+    cmd.direction = 1;
+    mock_execute_ret = -5;
+    mock_execute_status = SCSI_STATUS_CHECK_CONDITION;
+    mock_execute_data_xfer = 0;
+    mock_execute_sense_len = 4;
+    mock_execute_sense[0] = 0x70;
+    mock_execute_sense[1] = 0x00;
+    mock_execute_sense[2] = 0x05;
+    mock_execute_sense[3] = 0x24;
+    ret = sg_ioctl(&node, SCSI_IOCTL_SEND_CMD, &cmd);
+    assert(ret == -5);
+    assert(cmd.error == -5);
+    assert(cmd.status == SCSI_STATUS_CHECK_CONDITION);
+    assert(cmd.sense_len == 4);
+    assert(cmd.sense[0] == 0x70);
+    assert(cmd.sense[2] == 0x05);
+
     /* Test large data_len limit */
+    mock_execute_ret = 0;
+    mock_execute_status = SCSI_STATUS_GOOD;
+    mock_execute_data_xfer = 100;
+    mock_execute_sense_len = 0;
     cmd.data_len = 70000;
     ret = sg_ioctl(&node, SCSI_IOCTL_SEND_CMD, &cmd);
     assert(ret == -EINVAL);
@@ -216,6 +274,8 @@ void test_send_cmd_permissions() {
 
     sg.dev = &dev;
     node.impl = (uintptr_t)&sg;
+    cmd.cdb_len = 6;
+    cmd.cdb[0] = SCSI_CMD_INQUIRY;
     cmd.direction = 1;
     cmd.data_len = sizeof(data_buf);
     cmd.data = data_buf;
@@ -265,6 +325,41 @@ void test_send_cmd_cdb_overflow() {
     printf("SCSI_IOCTL_SEND_CMD overflow check pass\n");
 }
 
+void test_send_cmd_invalid_shape() {
+    printf("Testing SCSI_IOCTL_SEND_CMD invalid shape checks...\n");
+    scsi_device_t dev;
+    scsi_generic_node_t sg;
+    fs_node_t node;
+    scsi_ioctl_cmd_t cmd;
+    int ret;
+
+    memset(&dev, 0, sizeof(dev));
+    memset(&sg, 0, sizeof(sg));
+    memset(&node, 0, sizeof(node));
+    memset(&cmd, 0, sizeof(cmd));
+
+    sg.dev = &dev;
+    node.impl = (uintptr_t)&sg;
+    current_process->euid = 0;
+
+    cmd.cdb_len = 0;
+    ret = sg_ioctl(&node, SCSI_IOCTL_SEND_CMD, &cmd);
+    assert(ret == -EINVAL);
+
+    cmd.cdb_len = 6;
+    cmd.direction = 3;
+    ret = sg_ioctl(&node, SCSI_IOCTL_SEND_CMD, &cmd);
+    assert(ret == -EINVAL);
+
+    cmd.direction = 1;
+    cmd.data_len = 16;
+    cmd.data = NULL;
+    ret = sg_ioctl(&node, SCSI_IOCTL_SEND_CMD, &cmd);
+    assert(ret == -EINVAL);
+
+    printf("SCSI_IOCTL_SEND_CMD invalid shape checks pass\n");
+}
+
 void test_get_count() {
     printf("Testing SCSI_IOCTL_GET_COUNT...\n");
     scsi_bus_node_t bn;
@@ -303,6 +398,7 @@ int main() {
     test_send_cmd_permissions();
     test_get_count();
     test_send_cmd_cdb_overflow();
+    test_send_cmd_invalid_shape();
     printf("All scsi_ctl tests passed!\n");
     return 0;
 }

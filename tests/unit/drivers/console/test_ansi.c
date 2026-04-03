@@ -16,6 +16,8 @@ static int mock_last_erase_display_mode = -1;
 static int mock_erase_line_calls = 0;
 static int mock_last_erase_line_mode = -1;
 static int mock_move_cursor_calls = 0;
+static int mock_respond_calls = 0;
+static char mock_respond_buf[1024];
 static int mock_row = 0;
 static int mock_col = 0;
 static int mock_width = 80;
@@ -104,6 +106,8 @@ static void reset_mocks(void) {
     mock_erase_line_calls = 0;
     mock_last_erase_line_mode = -1;
     mock_move_cursor_calls = 0;
+    mock_respond_calls = 0;
+    mock_respond_buf[0] = '\0';
     mock_row = 0;
     mock_col = 0;
     mock_width = 80;

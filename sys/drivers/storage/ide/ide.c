@@ -83,6 +83,8 @@ static int ide_wait_ready(uint8_t channel, int timeout_ms);
 static int ide_identify_channel(uint8_t channel, uint8_t drive, void *buffer);
 static int ide_identify_atapi_channel(uint8_t channel, uint8_t drive, void *buffer);
 static void ide_select_drive(uint8_t channel, uint8_t drive);
+static int ide_issue_non_data_command(uint8_t channel, uint8_t drive,
+                                      uint8_t command, const char *op);
 static int ide_program_dma_mode(ide_device_t *dev);
 static int ide_irq_dispatch(unsigned int irq, void *dev_id, void *frame);
 static void ide_register_irqs(void);
@@ -830,6 +832,37 @@ static void ide_select_drive(uint8_t channel, uint8_t drive) {
     }
 }
 
+static int ide_issue_non_data_command(uint8_t channel, uint8_t drive,
+                                      uint8_t command, const char *op) {
+    uint8_t status;
+
+    if (channel >= MAX_IDE_CHANNELS || drive > 1) {
+        return -1;
+    }
+
+    ide_select_drive(channel, drive);
+    status = ide_read_reg(channel, ATA_REG_STATUS);
+    if (status == 0 || status == 0xFF) {
+        return -1;
+    }
+
+    if (ide_wait_ready(channel, IDE_TIMEOUT_READY_MS) < 0) {
+        return -1;
+    }
+
+    ide_write_reg(channel, ATA_REG_COMMAND, command);
+    if (ide_wait_bsy(channel, IDE_TIMEOUT_READY_MS, op) < 0) {
+        return -1;
+    }
+
+    status = ide_read_reg(channel, ATA_REG_STATUS);
+    if ((status & (ATA_SR_ERR | ATA_SR_DF)) != 0) {
+        return -1;
+    }
+
+    return 0;
+}
+
 /*
  * ============================================================
  * PRDT (Physical Region Descriptor Table) Management
@@ -1386,6 +1419,98 @@ int ide_identify_atapi(uint16_t bus, uint8_t drive, void *buffer) {
     }
 
     insw(bus + ATA_REG_DATA, buffer, 256);
+    return 0;
+}
+
+int ide_standby_immediate(uint16_t bus, uint8_t drive) {
+    uint8_t channel;
+
+    if (ide_channel_index_from_io(bus, &channel) < 0) {
+        return -1;
+    }
+
+    return ide_issue_non_data_command(channel, drive,
+                                      ATA_CMD_STANDBY_IMMEDIATE,
+                                      "standby-immediate");
+}
+
+int ide_idle_immediate(uint16_t bus, uint8_t drive) {
+    uint8_t channel;
+
+    if (ide_channel_index_from_io(bus, &channel) < 0) {
+        return -1;
+    }
+
+    return ide_issue_non_data_command(channel, drive,
+                                      ATA_CMD_IDLE_IMMEDIATE,
+                                      "idle-immediate");
+}
+
+int ide_check_power_mode(uint16_t bus, uint8_t drive, uint8_t *mode) {
+    uint8_t channel;
+    uint8_t status;
+
+    if (mode == NULL) {
+        return -1;
+    }
+
+    if (ide_channel_index_from_io(bus, &channel) < 0) {
+        return -1;
+    }
+
+    ide_select_drive(channel, drive);
+    status = ide_read_reg(channel, ATA_REG_STATUS);
+    if (status == 0 || status == 0xFF) {
+        return -1;
+    }
+
+    if (ide_wait_ready(channel, IDE_TIMEOUT_READY_MS) < 0) {
+        return -1;
+    }
+
+    ide_write_reg(channel, ATA_REG_COMMAND, ATA_CMD_CHECK_POWER_MODE);
+    if (ide_wait_bsy(channel, IDE_TIMEOUT_READY_MS, "check-power-mode") < 0) {
+        return -1;
+    }
+
+    status = ide_read_reg(channel, ATA_REG_STATUS);
+    if ((status & (ATA_SR_ERR | ATA_SR_DF)) != 0) {
+        return -1;
+    }
+
+    *mode = ide_read_reg(channel, ATA_REG_SEC_COUNT);
+    return 0;
+}
+
+int ide_configure_spindown_timer(uint16_t bus, uint8_t drive, uint8_t timer_code) {
+    uint8_t channel;
+    uint8_t status;
+
+    if (ide_channel_index_from_io(bus, &channel) < 0) {
+        return -1;
+    }
+
+    ide_select_drive(channel, drive);
+    status = ide_read_reg(channel, ATA_REG_STATUS);
+    if (status == 0 || status == 0xFF) {
+        return -1;
+    }
+
+    if (ide_wait_ready(channel, IDE_TIMEOUT_READY_MS) < 0) {
+        return -1;
+    }
+
+    ide_write_reg(channel, ATA_REG_SEC_COUNT, timer_code);
+    ide_write_reg(channel, ATA_REG_COMMAND, ATA_CMD_STANDBY);
+    if (ide_wait_bsy(channel, IDE_TIMEOUT_READY_MS, "standby-timer") < 0) {
+        return -1;
+    }
+
+    status = ide_read_reg(channel, ATA_REG_STATUS);
+    if ((status & (ATA_SR_ERR | ATA_SR_DF)) != 0) {
+        return -1;
+    }
+
     return 0;
 }
 
