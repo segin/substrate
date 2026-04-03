@@ -1268,6 +1268,7 @@ static const struct ansi_callbacks ansi_cb = {
     .set_origin_mode = cb_set_origin_mode,
     .set_alt_screen = cb_set_alt_screen,
     .set_bracketed_paste = cb_set_bracketed_paste,
+    .respond = cb_respond,
 };
 
 static int vt_tty_open(struct tty *tty) {
