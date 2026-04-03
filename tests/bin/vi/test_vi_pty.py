@@ -1383,6 +1383,60 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one\ntwo\n",
+        [b"o", b"X", b"\x1b", b"u", b"\x12"],
+    )
+    require(exit_code == 0, f"open-below-undo-redo vi exited with status {exit_code}")
+    require(saved == "one\nX\ntwo\n",
+            f"unexpected open-below-undo-redo buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\n",
+        [b"O", b"X", b"\x1b", b"u", b"\x12"],
+    )
+    require(exit_code == 0, f"open-above-undo-redo vi exited with status {exit_code}")
+    require(saved == "X\none\ntwo\n",
+            f"unexpected open-above-undo-redo buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\n",
+        [b"y", b"y", b"p", b"u", b"\x12"],
+    )
+    require(exit_code == 0, f"put-undo-redo vi exited with status {exit_code}")
+    require(saved == "one\none\ntwo\n",
+            f"unexpected put-undo-redo buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"J", b"u", b"\x12"],
+    )
+    require(exit_code == 0, f"join-undo-redo vi exited with status {exit_code}")
+    require(saved == "one two\nthree\n",
+            f"unexpected join-undo-redo buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha beta\n",
+        [b"c", b"w", b"X", b"\x1b", b"u", b"\x12"],
+    )
+    require(exit_code == 0, f"change-undo-redo vi exited with status {exit_code}")
+    require(saved == "X beta\n",
+            f"unexpected change-undo-redo buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b":", b"1", b"d", b"\r", b"u", b"\x12"],
+    )
+    require(exit_code == 0, f"ex-delete-undo-redo vi exited with status {exit_code}")
+    require(saved == "two\nthree\n",
+            f"unexpected ex-delete-undo-redo buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "alpha beta gamma\n",
         [b"d", ("winsize", 8, 28, 0.5), b"w"],
         rows=8,

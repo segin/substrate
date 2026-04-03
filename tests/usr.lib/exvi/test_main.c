@@ -206,6 +206,31 @@ test_yank_put(void)
 }
 
 static void
+test_put_and_undo(void)
+{
+    static const char *lines[] = {"one", "two", "three"};
+    buffer_t b;
+
+    reset_shared_state();
+    fill_buffer(&b, lines, 3);
+    b.cur = buf_get_line(&b, 2);
+
+    assert(handle_yank_command(&b, "", 0, -1, -1) == 1);
+    assert(handle_put_command(&b, "", 2) == 1);
+    assert(b.line_count == 4);
+    assert(strcmp(buf_get_line(&b, 3)->text, "two") == 0);
+
+    assert(handle_undo_command(&b) == 1);
+    assert(b.line_count == 3);
+    assert(strcmp(buf_get_line(&b, 1)->text, "one") == 0);
+    assert(strcmp(buf_get_line(&b, 2)->text, "two") == 0);
+    assert(strcmp(buf_get_line(&b, 3)->text, "three") == 0);
+
+    free_buffer(&b);
+    cleanup_shared_state();
+}
+
+static void
 test_command_break_parsing(void)
 {
     static const char *lines[] = {"foo", "bar"};
@@ -235,6 +260,31 @@ test_command_break_parsing(void)
 }
 
 static void
+test_join_and_undo(void)
+{
+    static const char *lines[] = {"one", "two", "three"};
+    buffer_t b;
+
+    reset_shared_state();
+    fill_buffer(&b, lines, 3);
+    b.cur = buf_get_line(&b, 1);
+
+    assert(handle_join_command(&b, 0, -1, -1) == 1);
+    assert(b.line_count == 2);
+    assert(strcmp(buf_get_line(&b, 1)->text, "one two") == 0);
+    assert(strcmp(buf_get_line(&b, 2)->text, "three") == 0);
+
+    assert(handle_undo_command(&b) == 1);
+    assert(b.line_count == 3);
+    assert(strcmp(buf_get_line(&b, 1)->text, "one") == 0);
+    assert(strcmp(buf_get_line(&b, 2)->text, "two") == 0);
+    assert(strcmp(buf_get_line(&b, 3)->text, "three") == 0);
+
+    free_buffer(&b);
+    cleanup_shared_state();
+}
+
+static void
 test_bad_mark_preserves_current_line(void)
 {
     static const char *lines[] = {"alpha", "beta", "gamma"};
@@ -251,6 +301,27 @@ test_bad_mark_preserves_current_line(void)
     assert(explicit_range == 0);
     assert(error == 1);
     assert(buf_current_line(&b) == 2);
+
+    free_buffer(&b);
+    cleanup_shared_state();
+}
+
+static void
+test_substitute_and_undo(void)
+{
+    static const char *lines[] = {"foo bar", "baz"};
+    buffer_t b;
+
+    reset_shared_state();
+    fill_buffer(&b, lines, 2);
+
+    assert(handle_substitute_command(&b, "/foo/qux/", 1, 1) == 1);
+    assert(strcmp(buf_get_line(&b, 1)->text, "qux bar") == 0);
+    assert(strcmp(buf_get_line(&b, 2)->text, "baz") == 0);
+
+    assert(handle_undo_command(&b) == 1);
+    assert(strcmp(buf_get_line(&b, 1)->text, "foo bar") == 0);
+    assert(strcmp(buf_get_line(&b, 2)->text, "baz") == 0);
 
     free_buffer(&b);
     cleanup_shared_state();
@@ -505,8 +576,11 @@ main(void)
     test_delete_and_undo();
     test_malformed_range_preserves_current_line();
     test_yank_put();
+    test_put_and_undo();
     test_command_break_parsing();
+    test_join_and_undo();
     test_bad_mark_preserves_current_line();
+    test_substitute_and_undo();
     test_filename_refs_and_write_permissions();
     test_recover_roundtrip_preserves_missing_newline();
     test_substitute_repeat_behavior();
