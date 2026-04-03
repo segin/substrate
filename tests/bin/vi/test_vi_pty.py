@@ -4525,6 +4525,33 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one two\nthree four\n",
+        [b">", b"$"],
+    )
+    require(exit_code == 0, f"shift-dollar-eol vi exited with status {exit_code}")
+    require(saved == "\tone two\nthree four\n",
+            f"unexpected shift-dollar-eol buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tone two\n\tthree four\n",
+        [b"<", b"$"],
+    )
+    require(exit_code == 0, f"unshift-dollar-eol vi exited with status {exit_code}")
+    require(saved == "one two\n\tthree four\n",
+            f"unexpected unshift-dollar-eol buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one.\n\ntwo.\nthree.\n\nfour.\n",
+        [b"j", b">", b")"],
+    )
+    require(exit_code == 0, f"blank-sep-shift-rparen vi exited with status {exit_code}")
+    require(saved == "one.\n\ntwo.\nthree.\n\nfour.\n",
+            f"unexpected blank-sep-shift-rparen buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "\t  one\n\t  two\n\t  three\n",
         [b"<", b"+"],
     )

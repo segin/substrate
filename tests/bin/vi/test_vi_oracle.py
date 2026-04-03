@@ -630,6 +630,21 @@ def main():
             "cols": 20,
         },
         {
+            "name": "shift-dollar-eol",
+            "initial_text": "one two\nthree four\n",
+            "key_steps": [b">", b"$"],
+        },
+        {
+            "name": "unshift-dollar-eol",
+            "initial_text": "\tone two\n\tthree four\n",
+            "key_steps": [b"<", b"$"],
+        },
+        {
+            "name": "blank-separator-shift-sentence-noop",
+            "initial_text": "one.\n\ntwo.\nthree.\n\nfour.\n",
+            "key_steps": [b"j", b">", b")"],
+        },
+        {
             "name": "line-plus-unshift-tab-indent",
             "initial_text": "\t  one\n\t  two\n\t  three\n",
             "key_steps": [b"<", b"+"],

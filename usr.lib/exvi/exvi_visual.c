@@ -5096,6 +5096,13 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         int eof_fallback = 0;
         int try_operator_linewise;
 
+        if ((vis->pending_op == '>' || vis->pending_op == '<') &&
+            key == ')' && b->cur && vi_line_is_blank(b->cur)) {
+            vis->pending_op = 0;
+            vis->pending_op_count = 0;
+            vis->pending_reg = 0;
+            return;
+        }
         if (key == ')') {
             rc = vi_simulate_motion_target(b, vis, vi_move_sentence_forward, count,
                 &target_line, &target_col);
@@ -5176,6 +5183,13 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
                 target_line = b->tail;
                 target_col = (int)b->tail->len;
             }
+        } else if (rc == 0 && (vis->pending_op == '>' || vis->pending_op == '<') &&
+            key == ')' && b->cur && vi_line_is_blank(b->cur) && vis->cursor_col == 0 &&
+            target_line == b->cur && target_col == 0) {
+            vis->pending_op = 0;
+            vis->pending_op_count = 0;
+            vis->pending_reg = 0;
+            return;
         } else if (rc == 0 && (vis->pending_op == '>' || vis->pending_op == '<') &&
             key == '}' && b->cur && vi_line_is_blank(b->cur) && vis->cursor_col == 0 &&
             target_line && target_line != b->cur && vi_line_is_blank(target_line) &&
@@ -5481,6 +5495,31 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
                 vi_set_last_change(vis, VI_REPEAT_C_EOL_CHANGE, 1, 0);
             }
         } else {
+            write(STDOUT_FILENO, "\a", 1);
+        }
+    } else if ((vis->pending_op == '>' || vis->pending_op == '<') && key == '$') {
+        line_t *target_line;
+        int target_col;
+
+        if (count > 1) {
+            int start = line_no;
+            int end_line;
+
+            if (vi_eol_motion_target(b, count, &target_line, &target_col) != 0) {
+                write(STDOUT_FILENO, "\a", 1);
+            } else {
+                end_line = vi_line_number_for_mark(b, target_line);
+                if (end_line < start) {
+                    int tmp = start;
+
+                    start = end_line;
+                    end_line = tmp;
+                }
+                if (vi_apply_linewise_operator(b, vis, start, end_line) != 0) {
+                    write(STDOUT_FILENO, "\a", 1);
+                }
+            }
+        } else if (vi_apply_linewise_operator(b, vis, line_no, line_no) != 0) {
             write(STDOUT_FILENO, "\a", 1);
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y' ||
