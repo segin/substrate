@@ -9162,7 +9162,7 @@ static int find_label_virtual_offset(emit_ctx_t *ctx, const char *section_name, 
     return -1;
 }
 
-static __attribute__((unused)) int find_numeric_local_virtual_offset(emit_ctx_t *ctx, const char *section_name,
+static int find_numeric_local_virtual_offset(emit_ctx_t *ctx, const char *section_name,
                                                                      const as_stmt_t *base_st, uint64_t base_off,
                                                                      unsigned x86_code_bits,
                                                                      const char *file, unsigned line, int digit,
@@ -9272,7 +9272,7 @@ static __attribute__((unused)) int find_numeric_local_virtual_offset(emit_ctx_t 
     }
 }
 
-static __attribute__((unused)) int find_named_label_virtual_offset(emit_ctx_t *ctx, const char *section_name,
+static int find_named_label_virtual_offset(emit_ctx_t *ctx, const char *section_name,
                                                                    const as_stmt_t *base_st, uint64_t base_off,
                                                                    unsigned x86_code_bits,
                                                                    const char *sym_name, uint64_t *off_out) {
