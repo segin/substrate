@@ -5072,6 +5072,7 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         int target_col;
         int rc;
         int eof_fallback = 0;
+        int try_operator_linewise;
 
         if (key == ')') {
             rc = vi_simulate_motion_target(b, vis, vi_move_sentence_forward, count,
@@ -5086,14 +5087,45 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             rc = vi_simulate_motion_target(b, vis, vi_move_paragraph_backward, count,
                 &target_line, &target_col);
         }
+        if ((vis->pending_op == 'd' || vis->pending_op == 'c' ||
+                vis->pending_op == 'y') && b->cur && vi_line_is_blank(b->cur) &&
+            vis->cursor_col == 0 && (key == ')' || key == '}')) {
+            if (key == ')') {
+                target_line = b->cur->next;
+                while (target_line && vi_line_is_blank(target_line)) {
+                    target_line = target_line->next;
+                }
+                if (target_line) {
+                    target_col = vi_first_nonblank_col(target_line);
+                    rc = 0;
+                }
+            } else if (b->tail) {
+                target_line = b->tail;
+                target_col = (int)b->tail->len;
+                rc = 0;
+            }
+        }
         if (rc != 0 && (vis->pending_op == 'd' || vis->pending_op == 'c' ||
-                vis->pending_op == 'y') && key == ')' && b->tail) {
+                vis->pending_op == 'y') && (key == ')' || key == '}') && b->tail) {
             target_line = b->tail;
-            target_col = (int)b->tail->len;
+            if (key == '}' && !vi_line_is_blank(b->tail)) {
+                target_col = (int)b->tail->len;
+            } else {
+                target_col = (int)b->tail->len;
+            }
             rc = 0;
             eof_fallback = 1;
-        } else if (rc == 0 && key == '{' && target_line && !vi_line_is_blank(target_line) &&
+        } else if (rc == 0 && key == '{' && target_line &&
+            !vi_line_is_blank(target_line) &&
             target_col == vi_first_nonblank_col(target_line) && target_line->prev &&
+            vi_line_is_blank(target_line->prev)) {
+            target_line = target_line->prev;
+            target_col = 0;
+        } else if (rc == 0 && (vis->pending_op == 'd' || vis->pending_op == 'c' ||
+                vis->pending_op == 'y') && (key == ')' || key == '}') &&
+            target_line && !vi_line_is_blank(target_line) &&
+            target_col == vi_first_nonblank_col(target_line) && target_line->prev &&
+            target_line->prev != b->cur &&
             vi_line_is_blank(target_line->prev)) {
             target_line = target_line->prev;
             target_col = 0;
@@ -5105,6 +5137,23 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         } else if (rc == 0 && eof_fallback && (vis->pending_op == 'd' || vis->pending_op == 'c' ||
                 vis->pending_op == 'y') && key == ')' && target_line == b->tail) {
             target_col = (int)target_line->len;
+        } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' ||
+                vis->pending_op == 'y') && b->cur && vi_line_is_blank(b->cur) &&
+            vis->cursor_col == 0 && rc == 0 && target_line == b->cur && target_col == 0) {
+            if (key == ')' && b->cur->next) {
+                target_line = b->cur->next;
+                while (target_line && vi_line_is_blank(target_line)) {
+                    target_line = target_line->next;
+                }
+                if (!target_line) {
+                    rc = -1;
+                } else {
+                    target_col = vi_first_nonblank_col(target_line);
+                }
+            } else if (key == '}' && b->tail) {
+                target_line = b->tail;
+                target_col = (int)b->tail->len;
+            }
         } else if (rc == 0 && (vis->pending_op == '>' || vis->pending_op == '<') &&
             key == '}' && b->cur && vi_line_is_blank(b->cur) && vis->cursor_col == 0 &&
             target_line && target_line != b->cur && vi_line_is_blank(target_line) &&
@@ -5123,8 +5172,19 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             vis->pending_reg = 0;
             return;
         }
+        try_operator_linewise = (vis->pending_op == 'd' || vis->pending_op == 'c' ||
+            vis->pending_op == 'y') && b->cur && target_line && target_line != b->cur &&
+            vis->cursor_col == 0 &&
+            (target_col == 0 || target_col == vi_first_nonblank_col(target_line));
         if (rc != 0) {
             write(STDOUT_FILENO, "\a", 1);
+        } else if (try_operator_linewise) {
+            if (vi_apply_charwise_linewise_motion(b, vis, line_no, target_line,
+                target_col) != 0) {
+                write(STDOUT_FILENO, "\a", 1);
+            } else if (vis->pending_op == 'c') {
+                vi_set_last_change(vis, VI_REPEAT_C_MOTION, count, key);
+            }
         } else if (vi_apply_search_linewise_motion(b, vis, line_no, target_line, target_col) != 0) {
             if (vis->pending_op == '>' || vis->pending_op == '<' ||
                 vi_apply_charwise_motion(b, vis, target_line, target_col, 0) != 0) {

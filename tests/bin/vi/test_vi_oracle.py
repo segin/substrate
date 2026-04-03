@@ -341,6 +341,16 @@ def main():
             "key_steps": [b"G", b"(", b"r", b"X"],
         },
         {
+            "name": "blank-sentence-forward-change",
+            "initial_text": "one two.\n\nalpha beta.\n\nsec\n{\nbody\n}\n",
+            "key_steps": [b"c", b")", b"X", b"\x1b"],
+        },
+        {
+            "name": "blank-sentence-backward-yank",
+            "initial_text": "one two.\n\nalpha beta.\n\nsec\n{\nbody\n}\n",
+            "key_steps": [b"G", b"y", b"(", b"P"],
+        },
+        {
             "name": "blank-paragraph-forward-count-motion",
             "initial_text": "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
             "key_steps": [b"2", b"}", b"r", b"X"],
@@ -349,6 +359,21 @@ def main():
             "name": "blank-paragraph-backward-count-motion",
             "initial_text": "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
             "key_steps": [b"G", b"2", b"{", b"r", b"X"],
+        },
+        {
+            "name": "blank-paragraph-backward-yank",
+            "initial_text": "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+            "key_steps": [b"G", b"y", b"{", b"P"],
+        },
+        {
+            "name": "blank-sentence-delete-emptyline",
+            "initial_text": "\nalpha beta.\n",
+            "key_steps": [b"d", b")"],
+        },
+        {
+            "name": "blank-paragraph-delete-emptyline",
+            "initial_text": "\nalpha beta gamma delta\n",
+            "key_steps": [b"d", b"}"],
         },
         {
             "name": "short-file-screen-top-motion",

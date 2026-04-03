@@ -2866,6 +2866,24 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one two.\n\nalpha beta. gamma delta.\n\nsec\n{\nbody\n}\n",
+        [b"c", b")", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"blank-sentence-change-separator vi exited with status {exit_code}")
+    require(saved == "X\n\nalpha beta. gamma delta.\n\nsec\n{\nbody\n}\n",
+            f"unexpected blank-sentence-change-separator buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\nalpha beta.\n",
+        [b"d", b")"],
+    )
+    require(exit_code == 0, f"blank-sentence-delete-emptyline vi exited with status {exit_code}")
+    require(saved == "alpha beta.\n",
+            f"unexpected blank-sentence-delete-emptyline buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
         [b"G", b"(", b"r", b"X"],
     )
@@ -2917,6 +2935,24 @@ def main():
     require(exit_code == 0, f"blank-sentence-backward-yank vi exited with status {exit_code}")
     require(saved == "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\nsec\n{\nbody\n}\n",
             f"unexpected blank-sentence-backward-yank buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
+        [b"G", b"y", b"{", b"P"],
+    )
+    require(exit_code == 0, f"blank-paragraph-backward-yank vi exited with status {exit_code}")
+    require(saved == "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n\nsec\n{\nbody\n}\n",
+            f"unexpected blank-paragraph-backward-yank buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\nalpha beta gamma delta\n",
+        [b"d", b"}"],
+    )
+    require(exit_code == 0, f"blank-paragraph-delete-emptyline vi exited with status {exit_code}")
+    require(saved == "",
+            f"unexpected blank-paragraph-delete-emptyline buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,

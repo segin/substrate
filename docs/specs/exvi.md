@@ -258,7 +258,7 @@ Unsupported or intentionally out-of-scope normal-mode motion keys are not implie
 
 - [ ] Build an operator/motion matrix for supported `d`, `c`, `y`, `>`, and `<` combinations, and add PTY coverage for every cell that is part of the supported contract.
 - [x] Finish `d/c/y` behavior for backward word motions (`b`, `B`, `ge`, `gE`) and add direct PTY oracles for both same-line and cross-line cases.
-- [ ] Finish `d/c/y` behavior for sentence/paragraph motions (`(`, `)`, `{`, `}`) at blank separators, EOF, and empty-line boundaries.
+- [x] Finish `d/c/y` behavior for sentence/paragraph motions (`(`, `)`, `{`, `}`) at blank separators, EOF, and empty-line boundaries.
 - [ ] Finish `d/c/y` cross-line charwise spans for search, find, mark, and match motions, with direct PTY oracles for forward and backward cases.
 - [ ] Audit and lock down linewise-vs-charwise coercion for `d/c/y/>/<` when targets land at column zero, first nonblank, end-of-line, or blank separator lines.
 - [x] Complete operator support for search-based motions, mark-based motions, repeated find motions, and any remaining vertical motions.
