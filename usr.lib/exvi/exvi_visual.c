@@ -758,7 +758,7 @@ vi_set_search_failure_status(vi_visual_t *vis, const char *pattern)
     if (effective && *effective) {
         vi_display_search_pattern(effective, display, sizeof(display));
         snprintf(vis->status_msg, sizeof(vis->status_msg),
-            "Pattern not found: %s", display);
+            "Pattern not found: %.236s", display);
     } else {
         snprintf(vis->status_msg, sizeof(vis->status_msg),
             "No previous search pattern");
@@ -1852,9 +1852,13 @@ vi_page_scroll(buffer_t *b, vi_visual_t *vis, int direction)
 static void
 vi_half_page_scroll(buffer_t *b, vi_visual_t *vis, int direction)
 {
+    int sign = (direction < 0) ? -1 : 1;
+    int count = (direction < 0) ? -direction : direction;
     int page = option_scroll;
 
-    if (!option_scroll_explicit) {
+    if (count > 1) {
+        page = count;
+    } else if (!option_scroll_explicit) {
         page = (vis->rows - 2) / 2;
     }
     if (page <= 0) {
@@ -1863,7 +1867,7 @@ vi_half_page_scroll(buffer_t *b, vi_visual_t *vis, int direction)
             page = 1;
         }
     }
-    vi_move_vertical(b, direction * page);
+    vi_move_vertical(b, sign * page);
 }
 
 static void
