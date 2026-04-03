@@ -236,6 +236,51 @@ def main():
             "key_steps": [b"G", b"2", b"{", b"r", b"X"],
         },
         {
+            "name": "counted-section-forward-start-motion",
+            "initial_text": "intro\n{\nbody1\n}\nmid\n{\nbody2\n}\noutro\n",
+            "key_steps": [b"2", b"]", b"]", b"r", b"X"],
+        },
+        {
+            "name": "counted-section-backward-start-motion",
+            "initial_text": "intro\n{\nbody1\n}\nmid\n{\nbody2\n}\noutro\n",
+            "key_steps": [b"G", b"2", b"[", b"[", b"r", b"X"],
+        },
+        {
+            "name": "counted-section-forward-end-motion",
+            "initial_text": "intro\n{\nbody1\n}\nmid\n{\nbody2\n}\noutro\n",
+            "key_steps": [b"2", b"]", b"[", b"r", b"X"],
+        },
+        {
+            "name": "counted-section-backward-end-motion",
+            "initial_text": "intro\n{\nbody1\n}\nmid\n{\nbody2\n}\noutro\n",
+            "key_steps": [b"G", b"2", b"[", b"]", b"r", b"X"],
+        },
+        {
+            "name": "counted-search-repeat-n-motion",
+            "initial_text": "target one\ntarget two\ntarget three\ntarget four\n",
+            "key_steps": [b"/", b"target\r", b"2", b"n", b"r", b"X"],
+        },
+        {
+            "name": "counted-search-repeat-N-motion",
+            "initial_text": "target one\ntarget two\ntarget three\ntarget four\n",
+            "key_steps": [b"G", b"?", b"target\r", b"2", b"N", b"r", b"X"],
+        },
+        {
+            "name": "counted-star-search-motion",
+            "initial_text": "word one\nword two\nword three\nword four\n",
+            "key_steps": [b"2", b"*", b"r", b"X"],
+        },
+        {
+            "name": "counted-hash-search-motion",
+            "initial_text": "word one\nword two\nword three\nword four\n",
+            "key_steps": [b"G", b"2", b"#", b"r", b"X"],
+        },
+        {
+            "name": "counted-percent-motion",
+            "initial_text": "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\n",
+            "key_steps": [b"5", b"0", b"%", b"r", b"X"],
+        },
+        {
             "name": "word-search-repeat-change",
             "initial_text": "one target\ntwo target\nthree target\n",
             "key_steps": [b"w", b"*", b"c", b"*", b"X", b"\x1b", b"n", b"."],

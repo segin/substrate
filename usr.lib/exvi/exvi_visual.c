@@ -6594,12 +6594,13 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
 }
 
 static void
-vi_apply_search(buffer_t *b, vi_visual_t *vis, const char *pattern, int forward)
+vi_apply_search(buffer_t *b, vi_visual_t *vis, const char *pattern, int forward,
+    int count)
 {
     line_t *target_line;
     int target_col;
 
-    if (vi_search_target(b, vis, pattern, forward, 1, &target_line, &target_col) != 0) {
+    if (vi_search_target(b, vis, pattern, forward, count, &target_line, &target_col) != 0) {
         write(STDOUT_FILENO, "\a", 1);
         return;
     }
@@ -6631,7 +6632,7 @@ vi_search_prompt(buffer_t *b, vi_visual_t *vis, int forward)
 
     pattern[0] = '\0';
     if (vi_prompt_input(b, vis, prefix, pattern, sizeof(pattern)) == 0) {
-        vi_apply_search(b, vis, pattern, forward);
+        vi_apply_search(b, vis, pattern, forward, 1);
     }
 }
 
@@ -6748,7 +6749,7 @@ vi_visual_apply_tag_target(buffer_t *b, char *cmd)
 }
 
 static void
-vi_search_current_word(buffer_t *b, vi_visual_t *vis, int forward)
+vi_search_current_word(buffer_t *b, vi_visual_t *vis, int forward, int count)
 {
     char *pattern = vi_current_word_pattern(b, vis);
 
@@ -6756,7 +6757,7 @@ vi_search_current_word(buffer_t *b, vi_visual_t *vis, int forward)
         write(STDOUT_FILENO, "\a", 1);
         return;
     }
-    vi_apply_search(b, vis, pattern, forward);
+    vi_apply_search(b, vis, pattern, forward, count);
     free(pattern);
 }
 
@@ -7797,15 +7798,13 @@ process_normal_key:
             break;
         case '*':
             vis.pending_g = 0;
-            vis.pending_count = 0;
             vis.screen_dirty = 0;
-            vi_search_current_word(b, &vis, 1);
+            vi_search_current_word(b, &vis, 1, vi_take_count(&vis));
             break;
         case '#':
             vis.pending_g = 0;
-            vis.pending_count = 0;
             vis.screen_dirty = 0;
-            vi_search_current_word(b, &vis, 0);
+            vi_search_current_word(b, &vis, 0, vi_take_count(&vis));
             break;
         case 'n':
             vis.pending_g = 0;
