@@ -737,26 +737,11 @@ ln_backup_numbered_path(const char *dst, unsigned n)
 }
 
 static char *
-ln_backup_pick_path(const ln_options_t *opts, const char *dst)
+ln_backup_pick_numbered_path_logic(const char *dst, ln_backup_mode_t mode, const char *suffix)
 {
-    const char *suffix;
-    ln_backup_mode_t mode;
     unsigned n;
     bool saw_numbered;
     char *cand;
-
-    mode = opts->backup_mode;
-    suffix = opts->backup_suffix;
-    if (!suffix || *suffix == '\0') {
-        suffix = getenv("SIMPLE_BACKUP_SUFFIX");
-    }
-    if (!suffix || *suffix == '\0') {
-        suffix = "~";
-    }
-
-    if (mode == LN_BACKUP_SIMPLE) {
-        return ln_backup_simple_path(dst, suffix);
-    }
 
     saw_numbered = false;
     for (n = 1; n < 100000U; ++n) {
@@ -792,6 +777,28 @@ ln_backup_pick_path(const ln_options_t *opts, const char *dst)
     }
 
     return ln_backup_simple_path(dst, suffix);
+}
+
+static char *
+ln_backup_pick_path(const ln_options_t *opts, const char *dst)
+{
+    const char *suffix;
+    ln_backup_mode_t mode;
+
+    mode = opts->backup_mode;
+    suffix = opts->backup_suffix;
+    if (!suffix || *suffix == '\0') {
+        suffix = getenv("SIMPLE_BACKUP_SUFFIX");
+    }
+    if (!suffix || *suffix == '\0') {
+        suffix = "~";
+    }
+
+    if (mode == LN_BACKUP_SIMPLE) {
+        return ln_backup_simple_path(dst, suffix);
+    }
+
+    return ln_backup_pick_numbered_path_logic(dst, mode, suffix);
 }
 
 static int
