@@ -176,6 +176,46 @@ def main():
             "cols": 20,
         },
         {
+            "name": "counted-word-forward-motion",
+            "initial_text": "one two three\nfour five six\n",
+            "key_steps": [b"2", b"w", b"r", b"X"],
+        },
+        {
+            "name": "counted-bigword-forward-motion",
+            "initial_text": "one,two three\nfour,five six\n",
+            "key_steps": [b"2", b"W", b"r", b"X"],
+        },
+        {
+            "name": "counted-word-end-motion",
+            "initial_text": "one two three\nfour five six\n",
+            "key_steps": [b"2", b"e", b"r", b"X"],
+        },
+        {
+            "name": "counted-bigword-end-motion",
+            "initial_text": "one,two three\nfour,five six\n",
+            "key_steps": [b"2", b"E", b"r", b"X"],
+        },
+        {
+            "name": "counted-word-backward-motion",
+            "initial_text": "one two three\nfour five six\n",
+            "key_steps": [b"G", b"2", b"b", b"r", b"X"],
+        },
+        {
+            "name": "counted-bigword-backward-motion",
+            "initial_text": "one,two three\nfour,five six\n",
+            "key_steps": [b"G", b"2", b"B", b"r", b"X"],
+        },
+        {
+            "name": "counted-word-end-backward-motion",
+            "initial_text": "one two three\nfour five six\n",
+            "key_steps": [b"G", b"2", b"g", b"e", b"r", b"X"],
+        },
+        {
+            "name": "counted-bigword-end-backward-motion",
+            "initial_text": "one,two three\nfour,five six\n",
+            "key_steps": [b"G", b"2", b"g", b"E", b"r", b"X"],
+        },
+        {
             "name": "word-search-repeat-change",
             "initial_text": "one target\ntwo target\nthree target\n",
             "key_steps": [b"w", b"*", b"c", b"*", b"X", b"\x1b", b"n", b"."],
