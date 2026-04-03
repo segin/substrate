@@ -4552,6 +4552,33 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one\n\ntwo\nthree\n\nfour\n",
+        [b"j", b"d", b"}"],
+    )
+    require(exit_code == 0, f"blank-sep-delete-rbrace vi exited with status {exit_code}")
+    require(saved == "one\n\nfour\n",
+            f"unexpected blank-sep-delete-rbrace buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n\ntwo\nthree\n\nfour\n",
+        [b"j", b"c", b"}", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"blank-sep-change-rbrace vi exited with status {exit_code}")
+    require(saved == "one\nX\n\nfour\n",
+            f"unexpected blank-sep-change-rbrace buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n\ntwo\nthree\n\nfour\n",
+        [b"j", b"y", b"}", b"P"],
+    )
+    require(exit_code == 0, f"blank-sep-yank-rbrace vi exited with status {exit_code}")
+    require(saved == "one\n\ntwo\nthree\n\ntwo\nthree\n\nfour\n",
+            f"unexpected blank-sep-yank-rbrace buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "  one\n  two\n",
         [b"c", b"^", b"X", b"\x1b"],
     )

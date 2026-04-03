@@ -645,6 +645,21 @@ def main():
             "key_steps": [b"j", b">", b")"],
         },
         {
+            "name": "blank-separator-delete-paragraph",
+            "initial_text": "one\n\ntwo\nthree\n\nfour\n",
+            "key_steps": [b"j", b"d", b"}"],
+        },
+        {
+            "name": "blank-separator-change-paragraph",
+            "initial_text": "one\n\ntwo\nthree\n\nfour\n",
+            "key_steps": [b"j", b"c", b"}", b"X", b"\x1b"],
+        },
+        {
+            "name": "blank-separator-yank-paragraph",
+            "initial_text": "one\n\ntwo\nthree\n\nfour\n",
+            "key_steps": [b"j", b"y", b"}", b"P"],
+        },
+        {
             "name": "change-caret-indent",
             "initial_text": "  one\n  two\n",
             "key_steps": [b"c", b"^", b"X", b"\x1b"],

@@ -5128,10 +5128,6 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
                     target_col = vi_first_nonblank_col(target_line);
                     rc = 0;
                 }
-            } else if (b->tail) {
-                target_line = b->tail;
-                target_col = (int)b->tail->len;
-                rc = 0;
             }
         }
         if (rc != 0 && (vis->pending_op == 'd' || vis->pending_op == 'c' ||
@@ -5179,9 +5175,6 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
                 } else {
                     target_col = vi_first_nonblank_col(target_line);
                 }
-            } else if (key == '}' && b->tail) {
-                target_line = b->tail;
-                target_col = (int)b->tail->len;
             }
         } else if (rc == 0 && (vis->pending_op == '>' || vis->pending_op == '<') &&
             key == ')' && b->cur && vi_line_is_blank(b->cur) && vis->cursor_col == 0 &&
