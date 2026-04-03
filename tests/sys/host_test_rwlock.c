@@ -270,6 +270,7 @@ static void test_rwlock_wlock_blocks_on_reader(void) {
 int main(void) {
     test_rwlock_reader_and_writer_paths();
     test_rwlock_writer_preference_and_reader_wakeup();
+    test_rwlock_try_rlock();
     test_rwlock_non_owner_panics();
     test_rwlock_recursive_wlock_panics();
     test_rwlock_wlock_blocks_on_writer();
