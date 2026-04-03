@@ -4552,6 +4552,24 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "\tone.\n\n\ttwo.\n\tthree.\n\n\tfour.\n",
+        [b"j", b">", b")"],
+    )
+    require(exit_code == 0, f"blank-sep-shift-rparen-indented vi exited with status {exit_code}")
+    require(saved == "\tone.\n\n\t\ttwo.\n\tthree.\n\n\tfour.\n",
+            f"unexpected blank-sep-shift-rparen-indented buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tone.\n\n\ttwo.\n\tthree.\n\n\tfour.\n",
+        [b"j", b"<", b")"],
+    )
+    require(exit_code == 0, f"blank-sep-unshift-rparen-indented vi exited with status {exit_code}")
+    require(saved == "\tone.\n\ntwo.\n\tthree.\n\n\tfour.\n",
+            f"unexpected blank-sep-unshift-rparen-indented buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\n\ntwo\nthree\n\nfour\n",
         [b"j", b"d", b"}"],
     )

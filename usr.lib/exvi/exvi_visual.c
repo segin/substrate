@@ -5096,8 +5096,20 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         int eof_fallback = 0;
         int try_operator_linewise;
 
-        if ((vis->pending_op == '>' || vis->pending_op == '<') &&
-            key == ')' && b->cur && vi_line_is_blank(b->cur)) {
+        if ((vis->pending_op == '>' || vis->pending_op == '<') && key == ')' &&
+            count == 1 && b->cur && vi_line_is_blank(b->cur)) {
+            line_t *next_line = b->cur->next;
+            int target_no;
+
+            while (next_line && vi_line_is_blank(next_line)) {
+                next_line = next_line->next;
+            }
+            if (next_line && vi_first_nonblank_col(next_line) > 0) {
+                target_no = vi_line_number_for_mark(b, next_line);
+                if (target_no < 1 || vi_apply_linewise_operator(b, vis, target_no, target_no) != 0) {
+                    write(STDOUT_FILENO, "\a", 1);
+                }
+            }
             vis->pending_op = 0;
             vis->pending_op_count = 0;
             vis->pending_reg = 0;

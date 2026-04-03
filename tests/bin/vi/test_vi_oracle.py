@@ -645,6 +645,16 @@ def main():
             "key_steps": [b"j", b">", b")"],
         },
         {
+            "name": "blank-separator-shift-sentence-indented",
+            "initial_text": "\tone.\n\n\ttwo.\n\tthree.\n\n\tfour.\n",
+            "key_steps": [b"j", b">", b")"],
+        },
+        {
+            "name": "blank-separator-unshift-sentence-indented",
+            "initial_text": "\tone.\n\n\ttwo.\n\tthree.\n\n\tfour.\n",
+            "key_steps": [b"j", b"<", b")"],
+        },
+        {
             "name": "blank-separator-delete-paragraph",
             "initial_text": "one\n\ntwo\nthree\n\nfour\n",
             "key_steps": [b"j", b"d", b"}"],
