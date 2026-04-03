@@ -47,19 +47,24 @@ static int parse_base_time(const char *buf, struct tm *info, time_t *t_base, con
     }
 
     if (sscanf(buf, "%d:%d%n", &h, &m, &n) == 2) {
+        if (h < 0 || h > 23 || m < 0 || m > 59) return -1;
         info->tm_hour = h; info->tm_min = m; info->tm_sec = 0;
         *t_base = mktime(info);
         if (*t_base < now) *t_base += 86400;
         *next = buf + n;
         return 0;
     } else if (sscanf(buf, "%4d%n", &h, &n) == 1) {
+        int temp_h, temp_m;
         if (h >= 100) {
-            info->tm_hour = h / 100;
-            info->tm_min = h % 100;
+            temp_h = h / 100;
+            temp_m = h % 100;
         } else {
-            info->tm_hour = h;
-            info->tm_min = 0;
+            temp_h = h;
+            temp_m = 0;
         }
+        if (temp_h < 0 || temp_h > 23 || temp_m < 0 || temp_m > 59) return -1;
+        info->tm_hour = temp_h;
+        info->tm_min = temp_m;
         info->tm_sec = 0;
         *t_base = mktime(info);
         if (*t_base < now) *t_base += 86400;
@@ -88,11 +93,25 @@ static int parse_increment(const char *buf, time_t *t) {
     while (isspace((unsigned char)*buf)) buf++;
 
     long unit_sec = 60;
-    if (strncmp(buf, "minute", 6) == 0) unit_sec = 60;
-    else if (strncmp(buf, "hour", 4) == 0) unit_sec = 3600;
-    else if (strncmp(buf, "day", 3) == 0) unit_sec = 86400;
-    else if (strncmp(buf, "week", 4) == 0) unit_sec = 86400 * 7;
-    else return -1;
+    if (strncmp(buf, "minutes", 7) == 0 && (isspace((unsigned char)buf[7]) || buf[7] == '\0')) {
+        unit_sec = 60;
+    } else if (strncmp(buf, "minute", 6) == 0 && (isspace((unsigned char)buf[6]) || buf[6] == '\0')) {
+        unit_sec = 60;
+    } else if (strncmp(buf, "hours", 5) == 0 && (isspace((unsigned char)buf[5]) || buf[5] == '\0')) {
+        unit_sec = 3600;
+    } else if (strncmp(buf, "hour", 4) == 0 && (isspace((unsigned char)buf[4]) || buf[4] == '\0')) {
+        unit_sec = 3600;
+    } else if (strncmp(buf, "days", 4) == 0 && (isspace((unsigned char)buf[4]) || buf[4] == '\0')) {
+        unit_sec = 86400;
+    } else if (strncmp(buf, "day", 3) == 0 && (isspace((unsigned char)buf[3]) || buf[3] == '\0')) {
+        unit_sec = 86400;
+    } else if (strncmp(buf, "weeks", 5) == 0 && (isspace((unsigned char)buf[5]) || buf[5] == '\0')) {
+        unit_sec = 86400 * 7;
+    } else if (strncmp(buf, "week", 4) == 0 && (isspace((unsigned char)buf[4]) || buf[4] == '\0')) {
+        unit_sec = 86400 * 7;
+    } else {
+        return -1;
+    }
 
     *t += (time_t)count * unit_sec;
     return 0;
