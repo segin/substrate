@@ -26,3 +26,8 @@ crt0.o: arch/i386/crt0.o
 
 clean:
 	rm -f $(OBJS) libc.a crt0.o
+
+install: libc.a crt0.o
+	@mkdir -p $(DESTDIR)/usr/lib
+	cp libc.a $(DESTDIR)/usr/lib/
+	cp crt0.o $(DESTDIR)/usr/lib/

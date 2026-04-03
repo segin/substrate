@@ -11,6 +11,7 @@
 #include <vfs/vfs.h>
 #include <vfs/vnode.h>
 
+int udf_find_avdp(fs_node_t *dev, struct udf_avdp *avdp);
 int udf_read_vds(fs_node_t *dev, struct udf_extent_ad *vds_extent,
                  struct udf_pvd *pvd, struct udf_pd *pd, struct udf_lvd *lvd);
 
@@ -185,6 +186,108 @@ static void write_descriptor(uint32_t sector, uint16_t tag_id, void *desc, uint3
 }
 
 // Test cases
+static void test_avdp_at_256(void) {
+    setup_mock_disk(1000);
+
+    fs_node_t dev;
+    dev.read = mock_read;
+    dev.length = 1000 * UDF_SECTOR_SIZE;
+
+    struct udf_avdp avdp_in, avdp_out;
+    memset(&avdp_in, 0, sizeof(avdp_in));
+
+    // Valid AVDP at 256
+    write_descriptor(256, UDF_TAG_ANCHOR_VDP, &avdp_in, sizeof(avdp_in));
+
+    int ret = udf_find_avdp(&dev, &avdp_out);
+    TEST_ASSERT(ret == 0);
+    TEST_ASSERT(avdp_out.tag.tag_id == UDF_TAG_ANCHOR_VDP);
+    TEST_ASSERT(avdp_out.tag.tag_location == 256);
+
+    teardown_mock_disk();
+    kprintf("test_avdp_at_256: PASSED\n");
+}
+
+static void test_avdp_at_last(void) {
+    setup_mock_disk(1000);
+
+    fs_node_t dev;
+    dev.read = mock_read;
+    dev.length = 1000 * UDF_SECTOR_SIZE;
+
+    struct udf_avdp avdp_in, avdp_out;
+    memset(&avdp_in, 0, sizeof(avdp_in));
+
+    // No AVDP at 256. Valid AVDP at last sector (999)
+    write_descriptor(999, UDF_TAG_ANCHOR_VDP, &avdp_in, sizeof(avdp_in));
+
+    int ret = udf_find_avdp(&dev, &avdp_out);
+    TEST_ASSERT(ret == 0);
+    TEST_ASSERT(avdp_out.tag.tag_id == UDF_TAG_ANCHOR_VDP);
+    TEST_ASSERT(avdp_out.tag.tag_location == 999);
+
+    teardown_mock_disk();
+    kprintf("test_avdp_at_last: PASSED\n");
+}
+
+static void test_avdp_at_last_256(void) {
+    setup_mock_disk(1000);
+
+    fs_node_t dev;
+    dev.read = mock_read;
+    dev.length = 1000 * UDF_SECTOR_SIZE;
+
+    struct udf_avdp avdp_in, avdp_out;
+    memset(&avdp_in, 0, sizeof(avdp_in));
+
+    // No AVDP at 256 or 999. Valid AVDP at last - 256 (743)
+    write_descriptor(999 - 256, UDF_TAG_ANCHOR_VDP, &avdp_in, sizeof(avdp_in));
+
+    int ret = udf_find_avdp(&dev, &avdp_out);
+    TEST_ASSERT(ret == 0);
+    TEST_ASSERT(avdp_out.tag.tag_id == UDF_TAG_ANCHOR_VDP);
+    TEST_ASSERT(avdp_out.tag.tag_location == 743);
+
+    teardown_mock_disk();
+    kprintf("test_avdp_at_last_256: PASSED\n");
+}
+
+static void test_avdp_not_found(void) {
+    setup_mock_disk(1000);
+
+    fs_node_t dev;
+    dev.read = mock_read;
+    dev.length = 1000 * UDF_SECTOR_SIZE;
+
+    struct udf_avdp avdp_out;
+
+    // Empty disk, no AVDP
+
+    int ret = udf_find_avdp(&dev, &avdp_out);
+    TEST_ASSERT(ret == -1);
+
+    teardown_mock_disk();
+    kprintf("test_avdp_not_found: PASSED\n");
+}
+
+static void test_avdp_short_disk(void) {
+    setup_mock_disk(100);
+
+    fs_node_t dev;
+    dev.read = mock_read;
+    dev.length = 100 * UDF_SECTOR_SIZE;
+
+    struct udf_avdp avdp_out;
+
+    // Disk is too short, should try 256 and fail, but skip last/last-256
+
+    int ret = udf_find_avdp(&dev, &avdp_out);
+    TEST_ASSERT(ret == -1);
+
+    teardown_mock_disk();
+    kprintf("test_avdp_short_disk: PASSED\n");
+}
+
 static void test_vds_success(void) {
     setup_mock_disk(100);
 
@@ -483,6 +586,12 @@ void run_udf_tests(void) {
     test_property_alloc_desc();
     test_property_fid_size();
     
+    test_avdp_at_256();
+    test_avdp_at_last();
+    test_avdp_at_last_256();
+    test_avdp_not_found();
+    test_avdp_short_disk();
+
     test_vds_success();
     test_vds_incomplete();
     test_vds_terminating();

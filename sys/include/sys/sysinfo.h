@@ -16,23 +16,28 @@ typedef enum {
 typedef struct sys_procinfo {
     pid_t pid;
     pid_t ppid;
-    pid_t pgid;      // Process group ID
-    pid_t sid;       // Session ID
+    pid_t pgid;          // Process group ID
+    pid_t sid;           // Session ID
     uid_t uid;
     gid_t gid;
-    uint8_t state;
-    uint8_t bitness; // proc_bitness_t
-    char name[32];   // Process name (comm)
-    
+    uid_t euid;          // Effective user ID
+    gid_t egid;          // Effective group ID
+    uint8_t state;       // 1=IDL, 2=RUN, 3=SLP, 4=STP, 5=ZOM, 6=DIE
+    uint8_t bitness;     // proc_bitness_t
+    int16_t perso_id;    // Personality ID (PERS_NATIVE, PERS_LINUX, etc.)
+    int16_t tty;         // Controlling terminal device (-1 if none)
+    uint16_t nice;       // Nice value
+    char name[32];       // Process name (comm)
+
     // Time accounting
-    uint32_t start_time;
-    uint32_t user_time;
-    uint32_t sys_time;
-    
+    uint32_t start_time; // Process start time (seconds since boot)
+    uint32_t user_time;  // User mode CPU time (jiffies)
+    uint32_t sys_time;   // System mode CPU time (jiffies)
+
     // Memory usage
-    uint32_t vsize;  // Virtual memory size
-    uint32_t rss;    // Resident Set Size (pages)
-    
+    uint32_t vsize;      // Virtual memory size (bytes)
+    uint32_t rss;        // Resident Set Size (pages)
+
 } sys_procinfo_t;
 
 typedef struct sys_fd {
@@ -79,6 +84,6 @@ typedef struct sys_vmstat {
 
 #ifndef _KERNEL
 int sysinfo(struct sysinfo *info);
-#endif // _SUBSTRATE_SYS_SYSINFO_H
+#endif
 
 #endif

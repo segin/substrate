@@ -13,11 +13,20 @@ static int mock_cursor_row = 0;
 static int mock_cursor_col = 0;
 static uint8_t mock_fg = 7;
 static uint8_t mock_bg = 0;
+static uint16_t mock_attrs = 0;
 static char output_buffer[1024];
 static int output_pos = 0;
+static char response_buffer[1024];
+static int response_pos = 0;
 static int screen_cleared = 0;
 static int erase_display_mode = -1;
 static int erase_line_mode = -1;
+static int scroll_region_top = -1;
+static int scroll_region_bottom = -1;
+static int tab_stop_set = 0;
+static int tab_stop_clear_mode = -1;
+static int tab_forward_count = 0;
+static int tab_backward_count = 0;
 
 /* Callback implementations */
 static void mock_putc(char c) {
@@ -25,6 +34,15 @@ static void mock_putc(char c) {
         output_buffer[output_pos++] = c;
         output_buffer[output_pos] = '\0';
     }
+}
+
+static void mock_respond(const char *buf, size_t len) {
+    size_t i;
+
+    for (i = 0; i < len && response_pos < 1024 - 1; i++) {
+        response_buffer[response_pos++] = buf[i];
+    }
+    response_buffer[response_pos] = '\0';
 }
 
 static void mock_set_color(uint8_t fg, uint8_t bg) {
@@ -36,12 +54,41 @@ static void mock_clear_screen(void) {
     screen_cleared = 1;
 }
 
+static void mock_get_attrs(uint16_t *flags) {
+    *flags = mock_attrs;
+}
+
+static void mock_set_attrs(uint16_t flags) {
+    mock_attrs = flags;
+}
+
 static void mock_erase_display(int mode) {
     erase_display_mode = mode;
 }
 
 static void mock_erase_line(int mode) {
     erase_line_mode = mode;
+}
+
+static void mock_set_scroll_region(int top, int bottom) {
+    scroll_region_top = top;
+    scroll_region_bottom = bottom;
+}
+
+static void mock_set_tab_stop(void) {
+    tab_stop_set++;
+}
+
+static void mock_clear_tab_stops(int mode) {
+    tab_stop_clear_mode = mode;
+}
+
+static void mock_tab_forward(int count) {
+    tab_forward_count = count;
+}
+
+static void mock_tab_backward(int count) {
+    tab_backward_count = count;
 }
 
 static void mock_move_cursor(int row, int col) {
@@ -70,6 +117,7 @@ static void mock_get_color(uint8_t *fg, uint8_t *bg) {
 /* Test helpers */
 static struct ansi_callbacks callbacks = {
     .putc = mock_putc,
+    .respond = mock_respond,
     .set_color = mock_set_color,
     .clear_screen = mock_clear_screen,
     .erase_display = mock_erase_display,
@@ -77,7 +125,14 @@ static struct ansi_callbacks callbacks = {
     .move_cursor = mock_move_cursor,
     .get_cursor = mock_get_cursor,
     .get_dimensions = mock_get_dimensions,
-    .get_color = mock_get_color
+    .get_color = mock_get_color,
+    .get_attrs = mock_get_attrs,
+    .set_attrs = mock_set_attrs,
+    .set_scroll_region = mock_set_scroll_region,
+    .set_tab_stop = mock_set_tab_stop,
+    .clear_tab_stops = mock_clear_tab_stops,
+    .tab_forward = mock_tab_forward,
+    .tab_backward = mock_tab_backward
 };
 
 static void reset_mocks() {
@@ -87,11 +142,20 @@ static void reset_mocks() {
     mock_cursor_col = 0;
     mock_fg = 7;
     mock_bg = 0;
+    mock_attrs = 0;
     output_pos = 0;
     output_buffer[0] = '\0';
+    response_pos = 0;
+    response_buffer[0] = '\0';
     screen_cleared = 0;
     erase_display_mode = -1;
     erase_line_mode = -1;
+    scroll_region_top = -1;
+    scroll_region_bottom = -1;
+    tab_stop_set = 0;
+    tab_stop_clear_mode = -1;
+    tab_forward_count = 0;
+    tab_backward_count = 0;
 }
 
 static void run_test(const char *name, void (*test_func)(void)) {
@@ -152,6 +216,51 @@ static void test_color_change(void) {
     assert(mock_bg == 0);
 }
 
+static void test_bright_color_change(void) {
+    struct ansi_ctx ctx;
+    ansi_init(&ctx);
+    reset_mocks();
+
+    /* ESC [ 97 ; 104 m -> bright white fg, bright blue bg */
+    const char *seq = "\x1b[97;104m";
+    while (*seq) {
+        ansi_process(&ctx, *seq++, &callbacks);
+    }
+
+    assert(mock_fg == 15);
+    assert(mock_bg == 12);
+}
+
+static void test_truecolor_sequences_are_accepted(void) {
+    struct ansi_ctx ctx;
+    ansi_init(&ctx);
+    reset_mocks();
+
+    const char *seq = "\x1b[38;2;250;250;250;48;2;1;2;3m";
+    while (*seq) {
+        ansi_process(&ctx, *seq++, &callbacks);
+    }
+
+    assert(mock_fg == 15);
+    assert(mock_bg == 0);
+}
+
+static void test_sgr_attrs_persist_across_sequences(void) {
+    struct ansi_ctx ctx;
+    ansi_init(&ctx);
+    reset_mocks();
+
+    const char *seq = "\x1b[1m\x1b[31m\x1b[4m\x1b[7m";
+    while (*seq) {
+        ansi_process(&ctx, *seq++, &callbacks);
+    }
+
+    assert((mock_attrs & ANSI_ATTR_BOLD) != 0);
+    assert((mock_attrs & ANSI_ATTR_UNDERLINE) != 0);
+    assert((mock_attrs & ANSI_ATTR_REVERSE) != 0);
+    assert(mock_fg == 9);
+}
+
 static void test_clear_screen(void) {
     struct ansi_ctx ctx;
     ansi_init(&ctx);
@@ -163,6 +272,149 @@ static void test_clear_screen(void) {
 
     assert(screen_cleared == 1);
     assert(erase_display_mode == -1);
+}
+
+static void test_device_status_report_ok(void) {
+    struct ansi_ctx ctx;
+    ansi_init(&ctx);
+    reset_mocks();
+
+    const char *seq = "\x1b[5n";
+    while (*seq) ansi_process(&ctx, *seq++, &callbacks);
+
+    assert(strcmp(response_buffer, "\x1b[0n") == 0);
+}
+
+static void test_cursor_position_report(void) {
+    struct ansi_ctx ctx;
+    ansi_init(&ctx);
+    reset_mocks();
+
+    mock_cursor_row = 4;
+    mock_cursor_col = 9;
+
+    const char *seq = "\x1b[6n";
+    while (*seq) ansi_process(&ctx, *seq++, &callbacks);
+
+    assert(strcmp(response_buffer, "\x1b[5;10R") == 0);
+}
+
+static void test_device_attributes_report(void) {
+    struct ansi_ctx ctx;
+    ansi_init(&ctx);
+    reset_mocks();
+
+    const char *seq = "\x1b[c";
+    while (*seq) ansi_process(&ctx, *seq++, &callbacks);
+
+    assert(strcmp(response_buffer, "\x1b[?6c") == 0);
+}
+
+static void test_horizontal_tab_set(void) {
+    struct ansi_ctx ctx;
+    ansi_init(&ctx);
+    reset_mocks();
+
+    const char *seq = "\x1bH";
+    while (*seq) ansi_process(&ctx, *seq++, &callbacks);
+
+    assert(tab_stop_set == 1);
+}
+
+static void test_charset_designation_targets_g_sets(void) {
+    struct ansi_ctx ctx;
+    ansi_init(&ctx);
+    reset_mocks();
+
+    const char *seq = "\x1b(0\x1b)B\x1b*0\x1b+B";
+    while (*seq) ansi_process(&ctx, *seq++, &callbacks);
+
+    assert(ctx.charsets[0] == ANSI_CHARSET_DEC_SPECIAL);
+    assert(ctx.charsets[1] == ANSI_CHARSET_ASCII);
+    assert(ctx.charsets[2] == ANSI_CHARSET_DEC_SPECIAL);
+    assert(ctx.charsets[3] == ANSI_CHARSET_ASCII);
+    assert(ctx.state == ANSI_NORMAL);
+}
+
+static void test_shift_in_out_selects_g0_or_g1(void) {
+    struct ansi_ctx ctx;
+    ansi_init(&ctx);
+    reset_mocks();
+
+    ansi_process(&ctx, '\x0e', &callbacks);
+    assert(ctx.active_gl == 1);
+
+    ansi_process(&ctx, '\x0f', &callbacks);
+    assert(ctx.active_gl == 0);
+}
+
+static void test_dec_special_graphics_maps_line_drawing(void) {
+    struct ansi_ctx ctx;
+    ansi_init(&ctx);
+    reset_mocks();
+
+    const char *seq = "\x1b(0qx";
+    while (*seq) ansi_process(&ctx, *seq++, &callbacks);
+
+    assert((unsigned char)output_buffer[0] == 0xC4U);
+    assert((unsigned char)output_buffer[1] == 0xB3U);
+}
+
+static void test_utf8_box_drawing_maps_to_text_glyphs(void) {
+    struct ansi_ctx ctx;
+    ansi_init(&ctx);
+    reset_mocks();
+
+    const unsigned char seq[] = { 0xE2, 0x94, 0x80, 0xE2, 0x94, 0x82, 0 };
+    const unsigned char *p = seq;
+
+    while (*p) {
+        ansi_process(&ctx, (char)*p++, &callbacks);
+    }
+
+    assert((unsigned char)output_buffer[0] == 0xC4U);
+    assert((unsigned char)output_buffer[1] == 0xB3U);
+}
+
+static void test_tab_clear_modes(void) {
+    struct ansi_ctx ctx;
+    ansi_init(&ctx);
+    reset_mocks();
+
+    const char *seq = "\x1b[g";
+    while (*seq) ansi_process(&ctx, *seq++, &callbacks);
+    assert(tab_stop_clear_mode == 0);
+
+    reset_mocks();
+    seq = "\x1b[3g";
+    while (*seq) ansi_process(&ctx, *seq++, &callbacks);
+    assert(tab_stop_clear_mode == 3);
+}
+
+static void test_cursor_tab_forward_and_backward(void) {
+    struct ansi_ctx ctx;
+    ansi_init(&ctx);
+    reset_mocks();
+
+    const char *seq = "\x1b[2I";
+    while (*seq) ansi_process(&ctx, *seq++, &callbacks);
+    assert(tab_forward_count == 2);
+
+    reset_mocks();
+    seq = "\x1b[3Z";
+    while (*seq) ansi_process(&ctx, *seq++, &callbacks);
+    assert(tab_backward_count == 3);
+}
+
+static void test_decid_report(void) {
+    struct ansi_ctx ctx;
+    ansi_init(&ctx);
+    reset_mocks();
+
+    const char *seq = "\x1bZ";
+    while (*seq) ansi_process(&ctx, *seq++, &callbacks);
+
+    assert(strcmp(response_buffer, "\x1b[?6c") == 0);
 }
 
 static void test_erase_display_default_mode(void) {
@@ -203,6 +455,26 @@ static void test_erase_line_modes(void) {
     seq = "\x1b[2K";
     while (*seq) ansi_process(&ctx, *seq++, &callbacks);
     assert(erase_line_mode == 2);
+}
+
+static void test_set_scroll_region(void) {
+    struct ansi_ctx ctx;
+    const char *seq;
+
+    ansi_init(&ctx);
+    reset_mocks();
+    mock_cursor_row = 7;
+    mock_cursor_col = 9;
+
+    seq = "\x1b[2;20r";
+    while (*seq) {
+        ansi_process(&ctx, *seq++, &callbacks);
+    }
+
+    assert(scroll_region_top == 1);
+    assert(scroll_region_bottom == 19);
+    assert(mock_cursor_row == 0);
+    assert(mock_cursor_col == 0);
 }
 
 static void test_relative_moves(void) {
@@ -260,9 +532,24 @@ int main(void) {
     run_test("Simple Char", test_simple_char);
     run_test("Cursor Movement", test_cursor_movement);
     run_test("Color Change", test_color_change);
+    run_test("Bright Color Change", test_bright_color_change);
+    run_test("Truecolor SGR", test_truecolor_sequences_are_accepted);
+    run_test("SGR Attr Persistence", test_sgr_attrs_persist_across_sequences);
     run_test("Clear Screen", test_clear_screen);
+    run_test("Device Status Report", test_device_status_report_ok);
+    run_test("Cursor Position Report", test_cursor_position_report);
+    run_test("Device Attributes", test_device_attributes_report);
+    run_test("Horizontal Tab Set", test_horizontal_tab_set);
+    run_test("Charset Designation", test_charset_designation_targets_g_sets);
+    run_test("Shift In/Out", test_shift_in_out_selects_g0_or_g1);
+    run_test("DEC Special Graphics", test_dec_special_graphics_maps_line_drawing);
+    run_test("UTF-8 Box Drawing", test_utf8_box_drawing_maps_to_text_glyphs);
+    run_test("Tab Clear", test_tab_clear_modes);
+    run_test("Cursor Tab Forward/Backward", test_cursor_tab_forward_and_backward);
+    run_test("DECID", test_decid_report);
     run_test("Erase Display Default", test_erase_display_default_mode);
     run_test("Erase Line Modes", test_erase_line_modes);
+    run_test("Set Scroll Region", test_set_scroll_region);
     run_test("Relative Moves", test_relative_moves);
     run_test("Partial Sequence", test_partial_sequence);
 

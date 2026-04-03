@@ -588,6 +588,20 @@ int rmdir_fs(fs_node_t *node, const char *name) {
     return -1;
 }
 
+int rename_fs(fs_node_t *old_parent, const char *old_name, fs_node_t *new_parent, const char *new_name) {
+    if (old_parent && old_parent->rename) {
+        return old_parent->rename(old_parent, old_name, new_parent, new_name);
+    }
+    return -1;
+}
+
+int statfs_fs(fs_node_t *node, struct statfs *buf) {
+    if (node && node->statfs) {
+        return node->statfs(node, buf);
+    }
+    return -1;
+}
+
 static int vfs_resolve_parent_path(const char *path, fs_node_t **parent_out,
                                    char *name_out, size_t name_out_size) {
     fs_node_t *root;

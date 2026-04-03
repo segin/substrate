@@ -15,6 +15,7 @@ typedef struct blkdev {
     // Driver callbacks
     int (*read)(struct blkdev *dev, uint64_t sector, uint32_t count, void *buffer);
     int (*write)(struct blkdev *dev, uint64_t sector, uint32_t count, const void *buffer);
+    int (*ioctl)(struct blkdev *dev, uint32_t request, void *arg);
     
     // VFS integration
     fs_node_t node;             // fs_node for DevFS

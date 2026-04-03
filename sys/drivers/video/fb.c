@@ -598,7 +598,7 @@ static int mb_init(fb_info_t *info) {
         if (saved_mbi_fb_len == 0) {
             return -1;
         }
-        saved_mbi_fb_addr = ioremap((resource_size_t)fb_phys, saved_mbi_fb_len);
+        saved_mbi_fb_addr = ioremap_wc((resource_size_t)fb_phys, saved_mbi_fb_len);
         if (saved_mbi_fb_addr == NULL) {
             return -1;
         }
@@ -629,6 +629,7 @@ static int mb_init(fb_info_t *info) {
     info->set_viewport = NULL;
     info->putpixel = linear_fb_putpixel;
     info->scroll = NULL;
+    info->flush = NULL;
     return 0;
 }
 
@@ -727,6 +728,24 @@ void fb_init(multiboot_info_t *mbi) {
                 return;
             }
         }
+    }
+
+    if (have_vga_arg && strcmp(vga_arg, "ask") == 0) {
+        if (video_ask_mode(&fb) == 1) {
+            fb_active = 1;
+            if (!fb.virt_width) fb.virt_width = fb.width;
+            if (!fb.virt_height) fb.virt_height = fb.height;
+            fb_console_init();
+            fb_devices[0] = fb;
+            fb_device_count = 1;
+            fb_register_devfs_node(0);
+            kprint("Video: VESA BIOS Mode Active.\n");
+            return;
+        }
+
+        fb_active = 0;
+        kprint("Video: Text mode selected.\n");
+        return;
     }
     
     /* Register all known drivers */

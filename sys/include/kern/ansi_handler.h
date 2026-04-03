@@ -11,8 +11,14 @@ enum ansi_state {
     ANSI_ESC,
     ANSI_CSI,
     ANSI_PARAM,
+    ANSI_CHARSET,
     ANSI_DCS,       /* Device Control String (ignored) */
     ANSI_OSC,       /* Operating System Command (ignored) */
+};
+
+enum ansi_charset {
+    ANSI_CHARSET_ASCII = 0,
+    ANSI_CHARSET_DEC_SPECIAL = 1,
 };
 
 struct ansi_ctx {
@@ -20,11 +26,17 @@ struct ansi_ctx {
     int params[ANSI_PARAMS_MAX];
     int param_count;
     int private_mode;  /* '?' prefix in CSI */
+    uint8_t charsets[4];
+    uint8_t active_gl;
+    uint8_t charset_target;
+    uint32_t utf8_codepoint;
+    uint8_t utf8_remaining;
 };
 
 /* Callbacks for the driver */
 struct ansi_callbacks {
     void (*putc)(char c);
+    void (*respond)(const char *buf, size_t len);
     void (*set_color)(uint8_t fg, uint8_t bg);
     void (*clear_screen)(void);
     void (*erase_display)(int mode);
@@ -36,10 +48,15 @@ struct ansi_callbacks {
     void (*get_cursor)(int *row, int *col);
     void (*get_dimensions)(int *width, int *height);
     void (*get_color)(uint8_t *fg, uint8_t *bg);
+    void (*get_attrs)(uint16_t *flags);
 
     /* Extended operations */
     void (*save_cursor)(void);
     void (*restore_cursor)(void);
+    void (*set_tab_stop)(void);
+    void (*clear_tab_stops)(int mode);
+    void (*tab_forward)(int count);
+    void (*tab_backward)(int count);
     void (*set_cursor_visible)(int visible);
     void (*insert_lines)(int n);
     void (*delete_lines)(int n);

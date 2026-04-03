@@ -5,9 +5,7 @@
 #include <string.h>
 #include <stddef.h>
 #include <vm/vm_kmem.h>
-#include <kern/console.h>
-
-extern fs_node_t *console_get_node(void);
+#include <drivers/console/console.h>
 
 static size_t tty_read_proxy(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node;

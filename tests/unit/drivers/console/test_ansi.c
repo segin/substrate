@@ -9,6 +9,7 @@ static char mock_last_char = 0;
 static int mock_set_color_calls = 0;
 static uint8_t mock_fg = 0;
 static uint8_t mock_bg = 0;
+static uint16_t mock_attrs = 0;
 static int mock_clear_screen_calls = 0;
 static int mock_erase_display_calls = 0;
 static int mock_last_erase_display_mode = -1;
@@ -69,9 +70,12 @@ static void mock_get_color(uint8_t *fg, uint8_t *bg) {
     *bg = mock_bg;
 }
 
-static void mock_respond(const char *s) {
-    mock_respond_calls++;
-    strncpy(mock_respond_buf, s, sizeof(mock_respond_buf) - 1);
+static void mock_get_attrs(uint16_t *flags) {
+    *flags = mock_attrs;
+}
+
+static void mock_set_attrs(uint16_t flags) {
+    mock_attrs = flags;
 }
 
 static struct ansi_callbacks callbacks = {
@@ -84,8 +88,9 @@ static struct ansi_callbacks callbacks = {
     .get_cursor = mock_get_cursor,
     .get_dimensions = mock_get_dimensions,
     .get_color = mock_get_color,
-    .scroll = NULL,
-    .respond = mock_respond
+    .get_attrs = mock_get_attrs,
+    .set_attrs = mock_set_attrs,
+    .scroll = NULL
 };
 
 static void reset_mocks(void) {
@@ -94,6 +99,7 @@ static void reset_mocks(void) {
     mock_set_color_calls = 0;
     mock_fg = 7;
     mock_bg = 0;
+    mock_attrs = 0;
     mock_clear_screen_calls = 0;
     mock_erase_display_calls = 0;
     mock_last_erase_display_mode = -1;
@@ -209,16 +215,18 @@ bool test_ansi_parsing(void) {
         return false;
     }
 
-    // Test 8: Device Attributes response -> \x1b[c
+    // Test 8: SGR attributes persist across separate color/attribute sequences
     reset_mocks();
     ansi_init(&ctx);
-    feed_string(&ctx, "\x1b[c");
-    if (mock_respond_calls != 1) {
-        printf("FAIL: DA response calls expected 1, got %d\n", mock_respond_calls);
+    feed_string(&ctx, "\x1b[1m\x1b[31m\x1b[4m\x1b[7m");
+    if ((mock_attrs & ANSI_ATTR_BOLD) == 0 ||
+        (mock_attrs & ANSI_ATTR_UNDERLINE) == 0 ||
+        (mock_attrs & ANSI_ATTR_REVERSE) == 0) {
+        printf("FAIL: Expected bold/underline/reverse attrs, got 0x%x\n", mock_attrs);
         return false;
     }
-    if (strcmp(mock_respond_buf, "\x1b[?6c") != 0) {
-        printf("FAIL: DA response expected '\\x1b[?6c', got '%s'\n", mock_respond_buf);
+    if (mock_fg != 9) {
+        printf("FAIL: Expected bright red fg 9, got %u\n", mock_fg);
         return false;
     }
 

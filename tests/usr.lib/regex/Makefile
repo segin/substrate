@@ -17,6 +17,7 @@ endif
 SRCS = test_main.c \
        unit/test_api.c \
        unit/test_util.c \
+       unit/test_engine_safe.c \
        integration/test_replace.c \
        integration/test_split.c \
        security/test_dos.c \

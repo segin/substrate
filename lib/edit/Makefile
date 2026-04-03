@@ -2,23 +2,27 @@ include ../../Makefile.inc
 
 CC = gcc
 ifdef NATIVE_BUILD
-CFLAGS := -Wall -g -I.
+CFLAGS := -Wall -g
+CPPFLAGS := -include ../../include/histedit.h
 else
-CFLAGS := -m32 -Wall -fno-builtin -fno-stack-protector -nostdinc -I../../include -I../../sys/include -I../../sys
+CFLAGS += -I../../include -I../../sys/include -I../../sys
 endif
 
-all: histedit.h libedit.a
+all: libedit.a
 
-histedit.h: ../../include/histedit.h
-	cp $< $@
-
-OBJS = editline.o readline.o terminal.o history.o
+OBJS = editline.o readline.o terminal.o history.o signal.o keymap.o tokenizer.o rl_compat.o utf8.o
 
 libedit.a: $(OBJS)
 	$(AR) rcs $@ $^
 
-%.o: %.c histedit.h el.h
-	$(CC) $(CFLAGS) -c -o $@ $<
+%.o: %.c el.h
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -f *.o libedit.a histedit.h
+	rm -f *.o libedit.a
+
+install: libedit.a
+	@mkdir -p $(DESTDIR)/usr/lib
+	@mkdir -p $(DESTDIR)/usr/include
+	cp libedit.a $(DESTDIR)/usr/lib/
+	cp ../../include/histedit.h $(DESTDIR)/usr/include/

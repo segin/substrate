@@ -4,12 +4,12 @@
  * Read-write UDF implementation based on ECMA-167 and OSTA UDF 2.60.
  */
 
-#include <fs/udf/udf.h>
 #include <vfs/vnode.h>
 #include <vfs/vfs.h>
 #include <kern/console.h>
 #include <sys/errno.h>
 #include <sys/namei.h>
+#include <fs/udf/udf.h>
 #include <sys/proc.h>
 #include <string.h>
 
@@ -409,13 +409,8 @@ struct vnodeops udf_vnodeops = {
 };
 
 /* External functions from udf_write.c */
-extern int udf_read_space_bitmap(fs_node_t *dev, uint32_t partition_start, uint32_t bitmap_loc, uint32_t bitmap_len);
-extern uint32_t udf_alloc_block(void);
-extern void udf_free_block(uint32_t block);
-extern int udf_create_fe(fs_node_t *dev, uint32_t block, uint8_t file_type, uint32_t uid, uint32_t gid, uint32_t permissions);
-extern int udf_add_fid(fs_node_t *dev, struct udf_fe *dir_fe, uint32_t dir_block, const char *name, struct udf_long_ad *icb, uint8_t characteristics);
 
-extern struct process *current_process;
+/* UDF context defined in udf.c, declared in udf.h */
 
 static fs_node_t *udf_alloc_node(struct udf_fs *fs, struct udf_long_ad *icb, struct udf_fe *fe) {
     int idx = udf_node_cache_idx++ % UDF_NODE_CACHE_SIZE;

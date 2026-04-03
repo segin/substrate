@@ -10,13 +10,94 @@
  *                   bold, underline, reverse, blink, hidden
  */
 
+/* Terminal Response Codes */
+#define ANSI_RESPONSE_DA_VT102 "\x1b[?6c"
+#define ANSI_RESPONSE_DA_VT102_LEN 5
+#define ANSI_RESPONSE_DSR_OK "\x1b[0n"
+#define ANSI_RESPONSE_DSR_OK_LEN 4
+
 #include <kern/ansi_handler.h>
+#include <stdio.h>
+
+static void ansi_respond(const struct ansi_callbacks *cb,
+                         const char *buf,
+                         size_t len) {
+    if (!cb || !cb->respond || !buf || len == 0) {
+        return;
+    }
+    cb->respond(buf, len);
+}
+
+static unsigned char ansi_translate_dec_special(unsigned char c) {
+    switch (c) {
+    case 'j': return 0xD9; /* lower right corner */
+    case 'k': return 0xBF; /* upper right corner */
+    case 'l': return 0xDA; /* upper left corner */
+    case 'm': return 0xC0; /* lower left corner */
+    case 'n': return 0xC5; /* crossing lines */
+    case 'q': return 0xC4; /* horizontal line */
+    case 't': return 0xC3; /* left tee */
+    case 'u': return 0xB4; /* right tee */
+    case 'v': return 0xC1; /* bottom tee */
+    case 'w': return 0xC2; /* top tee */
+    case 'x': return 0xB3; /* vertical line */
+    default:
+        return c;
+    }
+}
+
+static unsigned char ansi_translate_unicode(uint32_t cp) {
+    switch (cp) {
+    case 0x2500: return 0xC4; /* box drawings light horizontal */
+    case 0x2502: return 0xB3; /* box drawings light vertical */
+    case 0x250C: return 0xDA; /* box drawings light down and right */
+    case 0x2510: return 0xBF; /* box drawings light down and left */
+    case 0x2514: return 0xC0; /* box drawings light up and right */
+    case 0x2518: return 0xD9; /* box drawings light up and left */
+    case 0x251C: return 0xC3; /* box drawings light vertical and right */
+    case 0x2524: return 0xB4; /* box drawings light vertical and left */
+    case 0x252C: return 0xC2; /* box drawings light down and horizontal */
+    case 0x2534: return 0xC1; /* box drawings light up and horizontal */
+    case 0x253C: return 0xC5; /* box drawings light vertical and horizontal */
+    case 0x00A0: return ' ';
+    default:
+        if (cp < 0x80U) {
+            return (unsigned char)cp;
+        }
+        return '?';
+    }
+}
+
+static void ansi_emit_codepoint(struct ansi_ctx *ctx,
+                                uint32_t cp,
+                                const struct ansi_callbacks *cb) {
+    unsigned char out;
+
+    if (!cb || !cb->putc) {
+        return;
+    }
+
+    if (cp < 0x80U && ctx->charsets[ctx->active_gl] == ANSI_CHARSET_DEC_SPECIAL) {
+        out = ansi_translate_dec_special((unsigned char)cp);
+    } else {
+        out = ansi_translate_unicode(cp);
+    }
+    cb->putc((char)out);
+}
 
 void ansi_init(struct ansi_ctx *ctx) {
     if (!ctx) return;
     ctx->state = ANSI_NORMAL;
     ctx->param_count = 0;
     ctx->private_mode = 0;
+    ctx->charsets[0] = ANSI_CHARSET_ASCII;
+    ctx->charsets[1] = ANSI_CHARSET_ASCII;
+    ctx->charsets[2] = ANSI_CHARSET_ASCII;
+    ctx->charsets[3] = ANSI_CHARSET_ASCII;
+    ctx->active_gl = 0;
+    ctx->charset_target = 0;
+    ctx->utf8_codepoint = 0;
+    ctx->utf8_remaining = 0;
 }
 
 /* ---- SGR (Select Graphic Rendition) ---- */
@@ -26,6 +107,7 @@ static void handle_sgr(struct ansi_ctx *ctx, const struct ansi_callbacks *cb) {
     uint16_t attrs = 0;
 
     if (cb->get_color) cb->get_color(&cur_fg, &cur_bg);
+    if (cb->get_attrs) cb->get_attrs(&attrs);
 
     if (ctx->param_count == 0) {
         /* SGR with no params = reset */
@@ -258,11 +340,32 @@ static void handle_csi(struct ansi_ctx *ctx, char c,
             cb->move_cursor(cur_row, n - 1 < width ? n - 1 : width - 1);
         break;
 
+    case 'I': /* CHT - Cursor Horizontal Forward Tabulation */
+        n = (ctx->param_count > 0 && ctx->params[0] > 0) ? ctx->params[0] : 1;
+        if (cb->tab_forward) {
+            cb->tab_forward(n);
+        }
+        break;
+
+    case 'g': /* TBC - Tab Clear */
+        n = (ctx->param_count > 0) ? ctx->params[0] : 0;
+        if (cb->clear_tab_stops) {
+            cb->clear_tab_stops(n);
+        }
+        break;
+
     case 'd': /* VPA - Vertical Position Absolute */
         n = (ctx->param_count > 0) ? ctx->params[0] : 1;
         if (n < 1) n = 1;
         if (cb->move_cursor)
             cb->move_cursor(n - 1 < height ? n - 1 : height - 1, cur_col);
+        break;
+
+    case 'Z': /* CBT - Cursor Backward Tabulation */
+        n = (ctx->param_count > 0 && ctx->params[0] > 0) ? ctx->params[0] : 1;
+        if (cb->tab_backward) {
+            cb->tab_backward(n);
+        }
         break;
 
     case 'L': /* IL - Insert Lines */
@@ -332,13 +435,28 @@ static void handle_csi(struct ansi_ctx *ctx, char c,
         break;
 
     case 'n': /* DSR - Device Status Report */
-        /* TODO: Respond with cursor position report */
+        n = (ctx->param_count > 0) ? ctx->params[0] : 0;
+        if (n == 5) {
+            ansi_respond(cb, ANSI_RESPONSE_DSR_OK, ANSI_RESPONSE_DSR_OK_LEN);
+        } else if (n == 6) {
+            char resp[32];
+            size_t len;
+
+            len = 0;
+            if (cb->get_cursor) {
+                cb->get_cursor(&cur_row, &cur_col);
+            }
+            len = (size_t)snprintf(resp, sizeof(resp), "\x1b[%d;%dR",
+                cur_row + 1, cur_col + 1);
+            if (len < sizeof(resp)) {
+                ansi_respond(cb, resp, len);
+            }
+        }
         break;
 
     case 'c': /* DA - Device Attributes */
-        if (!ctx->private_mode && (ctx->param_count == 0 || ctx->params[0] == 0)) {
-            if (cb->respond)
-                cb->respond("\x1b[?6c");
+        if (!ctx->private_mode) {
+            ansi_respond(cb, "\x1b[?1;0c", 7);
         }
         break;
     }
@@ -353,8 +471,43 @@ void ansi_process(struct ansi_ctx *ctx, char c, const struct ansi_callbacks *cb)
     case ANSI_NORMAL:
         if (c == '\x1b') {
             ctx->state = ANSI_ESC;
+        } else if (c == '\x0e') {
+            ctx->active_gl = 1;
+        } else if (c == '\x0f') {
+            ctx->active_gl = 0;
         } else {
-            if (cb->putc) cb->putc(c);
+            unsigned char uc = (unsigned char)c;
+
+            if (ctx->utf8_remaining != 0) {
+                if ((uc & 0xC0U) == 0x80U) {
+                    ctx->utf8_codepoint = (ctx->utf8_codepoint << 6) | (uc & 0x3FU);
+                    ctx->utf8_remaining--;
+                    if (ctx->utf8_remaining == 0) {
+                        ansi_emit_codepoint(ctx, ctx->utf8_codepoint, cb);
+                        ctx->utf8_codepoint = 0;
+                    }
+                } else {
+                    ansi_emit_codepoint(ctx, '?', cb);
+                    ctx->utf8_codepoint = 0;
+                    ctx->utf8_remaining = 0;
+                    if (uc < 0x80U) {
+                        ansi_emit_codepoint(ctx, uc, cb);
+                    }
+                }
+            } else if (uc < 0x80U) {
+                ansi_emit_codepoint(ctx, uc, cb);
+            } else if ((uc & 0xE0U) == 0xC0U) {
+                ctx->utf8_codepoint = uc & 0x1FU;
+                ctx->utf8_remaining = 1;
+            } else if ((uc & 0xF0U) == 0xE0U) {
+                ctx->utf8_codepoint = uc & 0x0FU;
+                ctx->utf8_remaining = 2;
+            } else if ((uc & 0xF8U) == 0xF0U) {
+                ctx->utf8_codepoint = uc & 0x07U;
+                ctx->utf8_remaining = 3;
+            } else {
+                ansi_emit_codepoint(ctx, '?', cb);
+            }
         }
         break;
 
@@ -366,12 +519,32 @@ void ansi_process(struct ansi_ctx *ctx, char c, const struct ansi_callbacks *cb)
             ctx->params[0] = 0;
             ctx->private_mode = 0;
             break;
+        case '(':
+            ctx->charset_target = 0;
+            ctx->state = ANSI_CHARSET;
+            break;
+        case ')':
+            ctx->charset_target = 1;
+            ctx->state = ANSI_CHARSET;
+            break;
+        case '*':
+            ctx->charset_target = 2;
+            ctx->state = ANSI_CHARSET;
+            break;
+        case '+':
+            ctx->charset_target = 3;
+            ctx->state = ANSI_CHARSET;
+            break;
         case '7': /* DECSC - Save Cursor */
             if (cb->save_cursor) cb->save_cursor();
             ctx->state = ANSI_NORMAL;
             break;
         case '8': /* DECRC - Restore Cursor */
             if (cb->restore_cursor) cb->restore_cursor();
+            ctx->state = ANSI_NORMAL;
+            break;
+        case 'H': /* HTS - Horizontal Tab Set */
+            if (cb->set_tab_stop) cb->set_tab_stop();
             ctx->state = ANSI_NORMAL;
             break;
         case 'D': /* IND - Index (scroll up at bottom) */
@@ -384,6 +557,10 @@ void ansi_process(struct ansi_ctx *ctx, char c, const struct ansi_callbacks *cb)
             break;
         case 'c': /* RIS - Full Reset */
             if (cb->reset) cb->reset();
+            ctx->state = ANSI_NORMAL;
+            break;
+        case 'Z': /* DECID - Identify terminal */
+            ansi_respond(cb, "\x1b[?1;0c", 7);
             ctx->state = ANSI_NORMAL;
             break;
         case ']': /* OSC - ignore until ST */
@@ -436,6 +613,15 @@ void ansi_process(struct ansi_ctx *ctx, char c, const struct ansi_callbacks *cb)
         } else {
             ctx->state = ANSI_NORMAL;
         }
+        break;
+
+    case ANSI_CHARSET:
+        if (c == '0') {
+            ctx->charsets[ctx->charset_target] = ANSI_CHARSET_DEC_SPECIAL;
+        } else {
+            ctx->charsets[ctx->charset_target] = ANSI_CHARSET_ASCII;
+        }
+        ctx->state = ANSI_NORMAL;
         break;
 
     case ANSI_OSC:

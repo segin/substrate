@@ -1,0 +1,80 @@
+.Dd March 29, 2026
+.Dt PS 1
+.Os
+.Sh NAME
+.Nm ps
+.Nd display process status
+.Sh SYNOPSIS
+.Nm
+.Op Ar auxleb
+.Sh DESCRIPTION
+.Nm
+lists process information using Substrate's
+.Xr sys_proc_list 2
+and
+.Xr sys_proc_info 2
+interfaces.
+The implementation is BSD-first:
+the letters
+.Cm a ,
+.Cm u ,
+.Cm x ,
+.Cm l ,
+.Cm e ,
+and
+.Cm b
+may be given with or without a leading dash and may be clustered.
+.Pp
+The plain
+.Nm
+form prints a short, terminal-oriented listing.
+.Cm ax
+widens selection to all processes.
+.Cm u
+selects a user-oriented preset.
+.Cm l
+selects a long preset.
+.Cm e
+appends environment-oriented command tail rendering when available.
+.Cm b
+is a Substrate extension that inserts a
+.Cm BITS
+column showing process bitness.
+.Sh OPTIONS
+.Bl -tag -width indent
+.It Cm a
+Include terminal-associated processes for all users.
+.It Cm u
+Use the user-oriented output preset.
+.It Cm x
+Include processes without restricting selection to the default terminal-oriented view.
+.It Cm l
+Use the long output preset.
+.It Cm e
+Append environment data after the command text when available.
+.It Cm b
+Insert a
+.Cm BITS
+column.
+Valid values are
+.Cm 16 ,
+.Cm 32 ,
+and
+.Cm 64 .
+.El
+.Sh EXAMPLES
+.Bd -literal -offset indent
+ps
+ps ax
+ps aux
+ps auxle
+ps auxleb
+.Ed
+.Sh NOTES
+The current kernel ABI exposes a larger
+.Vt sys_procinfo_t
+than the kernel currently populates fully.
+Fields not yet populated by the kernel are rendered with stable fallbacks rather than guessed values.
+.Sh SEE ALSO
+.Xr sys_proc_info 2 ,
+.Xr sys_proc_list 2
