@@ -41,10 +41,11 @@ Substrate is developed as one integrated system where the toolchain, libraries, 
 
 ```text
 sys/         kernel
+sys/boot/    Substrate BIOS bootloader (stage1 asm + stage2 C)
 bin/         base Unix userland
 sbin/        system utilities
 usr.bin/     compiler/toolchain and extended user tools
-lib/         target runtime libraries (libc/libsys/libm/libpthread/libusb...)
+lib/         target runtime libraries (libc/libsys/libm/libpthread/libedit/libusb...)
 usr.lib/     shared libraries for tooling/runtime support (elfobj, demangle, ...)
 include/     userspace public headers
 tests/       unit/integration/regression/property/fuzz harnesses
@@ -53,6 +54,8 @@ docs/tasks/  refactored task planning sections
 dist/        target root filesystem staging
 host_dist/   host install staging for native validation tools
 usr.man/     manual page source tree
+contrib/     third-party components (ext2-boot bootloader, ...)
+tools/       build and install helper scripts
 ```
 
 Detailed staging rules for `dist/` are defined in `docs/specs/rootfs.md`.
@@ -69,17 +72,14 @@ The kernel remains monolithic and is organized into logical layers:
 - `sys/drivers/`: Device driver framework and hardware drivers.
 - `sys/exec/`: Executable loading and execution personalities.
 
-### Subsystem Specifications
-- **Boot and Initialization:** See `docs/specs/kmain_init.md` and `docs/specs/arch_i386_boot.md`.
-- **Memory Management:** See `docs/specs/pmm.md` (Physical) and `docs/specs/pmap.md` (Virtual).
-- **Process Model:** See `docs/specs/kern_process_exit.md` and `docs/specs/kern_pid1.md`.
-- **VFS and Filesystems:** See `docs/specs/vm_subsystem.md` (File cache) and `docs/specs/fs_devfs.md`.
-- **Buffer Cache (`bio`):** BSD-style block I/O cache with hash lookup, four-queue lifecycle, delayed write, and 30s syncer kthread. See `docs/specs/vfs_bio.md`.
-- **VFS Locking (`lockmgr`):** BSD-style lock manager with shared/exclusive/upgrade/drain modes and turnstile PI. See `docs/specs/kern_locking.md`.
-- **Device Model:** See `docs/specs/driver_model.md`.
-- **Console and VT:** See `docs/specs/driver_tty.md` and `docs/specs/driver_vt.md`.
-- **Framebuffer Rendering:** Font parsers, glyph cache, blitting operations, and attributed character rendering. See `docs/specs/driver_fb_console.md`.
-- **Personalities:** See `docs/specs/personality_targets.md` and `docs/specs/personality_elks.md`.
+Detailed subsystem behavior belongs in `docs/specs/`, including:
+- boot and initialization: `docs/specs/kmain_init.md`, `docs/specs/arch_i386_boot.md`, `docs/specs/bootloader_ext2_boot.md`
+- memory management: `docs/specs/pmm.md`, `docs/specs/pmap.md`
+- process model: `docs/specs/kern_process_exit.md`, `docs/specs/kern_pid1.md`
+- VFS and filesystems: `docs/specs/vm_subsystem.md`, `docs/specs/fs_devfs.md`, `docs/specs/vfs_bio.md`
+- device and terminal subsystems: `docs/specs/driver_model.md`, `docs/specs/driver_tty.md`, `docs/specs/driver_vt.md`, `docs/specs/driver_fb_console.md`, `docs/specs/driver_virtio_gpu.md`
+- virtual terminals derive their physical geometry from the active console backend and reserve the last hardware row for kernel status UI; tty-visible geometry excludes that row.
+- execution personalities: `docs/specs/personality_targets.md`, `docs/specs/personality_elks.md`
 
 ## 6. Userland and Libraries
 
@@ -87,6 +87,8 @@ Userland is split by role (essential, admin, extended) and supported by a suite 
 
 ### Key Components
 - **`libsys`:** The canonical typed interface for system introspection and control.
+- **`ex`/`vi` Editor Stack:** The base editors remain first-class userland programs in `bin/`, with a shared implementation in `usr.lib/exvi/`, thin frontends in `bin/ex` and `bin/vi`, and an in-tree full-screen `vi` engine backed by PTY regression tests. Detailed editor design notes and backlog tracking live in `docs/specs/exvi.md`; the current standards/compatibility record lives in `docs/specs/exvi_conformance.md`; user-facing manuals are in `usr.man/man1/ex.1`, `usr.man/man1/vi.1`, and `usr.man/man1/view.1`.
+- **`lib/edit`:** Command-line editing and history library for shells and prompts. Reusable low-level pieces for the editor stack are documented in `docs/specs/exvi.md`.
 - **`find(1)`:** A multi-dialect file hierarchy walker. See `docs/find/architecture.md`.
 - **Native Toolchain:** Integrated compiler, assembler, and linker. See `docs/specs/as_spec.md`.
 

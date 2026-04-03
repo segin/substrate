@@ -367,4 +367,11 @@ struct udf_fs {
 uint8_t udf_tag_checksum(struct udf_tag *tag);
 uint16_t udf_crc(const uint8_t *data, uint32_t len);
 
+extern struct udf_fs udf_ctx;
+int udf_read_space_bitmap(struct fs_node *dev, uint32_t partition_start, uint32_t bitmap_loc, uint32_t bitmap_len);
+uint32_t udf_alloc_block(void);
+void udf_free_block(uint32_t block);
+int udf_create_fe(struct fs_node *dev, uint32_t block, uint8_t file_type, uint32_t uid, uint32_t gid, uint32_t permissions);
+int udf_add_fid(struct fs_node *dev, struct udf_fe *dir_fe, uint32_t dir_block, const char *name, struct udf_long_ad *icb, uint8_t characteristics);
+
 #endif /* _FS_UDF_UDF_H */

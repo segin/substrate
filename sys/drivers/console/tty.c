@@ -563,8 +563,8 @@ void tty_flip_buffer_push_status(struct tty *tty, char c, uint32_t status) {
         }
     }
     
-    // Signal handling
-    if (!raw && (tty->termios.c_lflag & ISIG)) {
+    // Signal handling (POSIX: ISIG is independent of ICANON)
+    if (tty->termios.c_lflag & ISIG) {
         int sig = 0;
         if (c == tty->termios.c_cc[VINTR]) sig = SIGINT;
         else if (c == tty->termios.c_cc[VQUIT]) sig = SIGQUIT;
@@ -602,7 +602,9 @@ void tty_flip_buffer_push_status(struct tty *tty, char c, uint32_t status) {
         }
     }
     
-    if (raw || c == '\n' || c == tty->termios.c_cc[VEOF]) {
+    if (raw) {
+        wake_readers = 1;
+    } else if (c == '\n' || c == tty->termios.c_cc[VEOF]) {
         // Add delimiter
         if (tty_buf_put(&tty->raw_buf, (char)0xFF) == 0) {
             tty->delct++;
@@ -1175,6 +1177,9 @@ int tty_poll(struct tty *tty, void *waiter) {
         events |= POLLIN | POLLRDNORM;
     } else if (tty->delct > 0) {
         // We have a delimiter in raw buf, so read will succeed (after canon runs).
+        events |= POLLIN | POLLRDNORM;
+    } else if (!(tty->termios.c_lflag & ICANON) && tty->raw_buf.head != tty->raw_buf.tail) {
+        // In raw mode, any byte in raw buf is ready to read
         events |= POLLIN | POLLRDNORM;
     }
     

@@ -121,6 +121,8 @@
 #define SYS_SETPGID     181
 #define SYS_GETPGID     182
 #define SYS_GETRUSAGE   117
+#define SYS_STATFS      157
+#define SYS_FSTATFS     158
 
 void syscall_init(void);
 

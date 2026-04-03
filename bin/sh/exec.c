@@ -583,26 +583,21 @@ static int builtin_exec(int argc, char **argv) {
 static int builtin_eval(int argc, char **argv) {
     int status = 0;
     if (argc > 1) {
-        size_t cap = 256;
-        char *line = malloc(cap);
+        size_t total_len = 0;
+        size_t lengths[argc];
+        for (int i = 1; i < argc; i++) {
+            lengths[i] = strlen(argv[i]);
+            total_len += lengths[i] + 1;
+        }
+        char *line = malloc(total_len);
         if (line) {
-            size_t len = 0;
+            char *ptr = line;
             for (int i = 1; i < argc; i++) {
-                size_t arg_len = strlen(argv[i]);
-                if (len + arg_len + 2 > cap) {
-                    cap = (len + arg_len + 2) * 2;
-                    char *new_line = realloc(line, cap);
-                    if (!new_line) {
-                        free(line);
-                        return 1;
-                    }
-                    line = new_line;
-                }
-                memcpy(line + len, argv[i], arg_len);
-                len += arg_len;
-                if (i < argc - 1) line[len++] = ' ';
+                memcpy(ptr, argv[i], lengths[i]);
+                ptr += lengths[i];
+                if (i < argc - 1) *ptr++ = ' ';
             }
-            line[len] = '\0';
+            *ptr = '\0';
             status = execute_line(line);
             free(line);
         }

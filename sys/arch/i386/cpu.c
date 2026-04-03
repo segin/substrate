@@ -1,10 +1,16 @@
 #include <arch/i386/cpu.h>
+#include <arch/x86-common/msr.h>
 #include <kern/console.h>
 #include <stdio.h>
 #include <string.h>
 
 static struct i386_cpu_features cpu_features;
 static volatile uint32_t cpu_cycle_fallback = 0;
+
+#define IA32_PAT_TYPE_WC 1u
+#define IA32_PAT_ENTRY_SHIFT(index) ((index) * 8u)
+#define IA32_PAT_ENTRY_MASK(index) (0xFFull << IA32_PAT_ENTRY_SHIFT(index))
+#define IA32_PAT_WC_SLOT 5u
 
 static uint32_t i386_read_eflags(void) {
     uint32_t flags;
@@ -35,6 +41,20 @@ static void i386_cpuid_leaf(uint32_t leaf, uint32_t subleaf,
                      : "a"(leaf), "c"(subleaf));
 }
 
+static void i386_cpu_enable_pat_wc(void) {
+    uint64_t pat;
+
+    if (!cpu_features.has_msr || !cpu_features.has_pat) {
+        return;
+    }
+
+    pat = rdmsr(MSR_IA32_PAT);
+    pat &= ~IA32_PAT_ENTRY_MASK(IA32_PAT_WC_SLOT);
+    pat |= ((uint64_t)IA32_PAT_TYPE_WC << IA32_PAT_ENTRY_SHIFT(IA32_PAT_WC_SLOT));
+    wrmsr(MSR_IA32_PAT, pat);
+    cpu_features.pat_wc_enabled = 1;
+}
+
 void i386_cpu_init_early(void) {
     if (cpu_features.detected) {
         return;
@@ -46,10 +66,10 @@ void i386_cpu_init_early(void) {
     cpu_features.is_486_or_newer = i386_eflags_bit_toggle_supported(1u << 18);
     cpu_features.has_cpuid = i386_eflags_bit_toggle_supported(1u << 21);
 
-	    if (cpu_features.has_cpuid) {
-	        uint32_t eax, ebx, ecx, edx;
-	        uint32_t max_basic = 0;
-	        uint32_t base_family;
+    if (cpu_features.has_cpuid) {
+        uint32_t eax, ebx, ecx, edx;
+        uint32_t max_basic = 0;
+        uint32_t base_family;
         uint32_t ext_family;
         uint32_t base_model;
         uint32_t ext_model;
@@ -74,25 +94,27 @@ void i386_cpu_init_early(void) {
                 cpu_features.family += ext_family;
             }
 
-	            cpu_features.model = base_model;
-	            if (base_family == 0x06 || base_family == 0x0F) {
-	                cpu_features.model |= (ext_model << 4);
-	            }
-	            cpu_features.stepping = eax & 0x0F;
+            cpu_features.model = base_model;
+            if (base_family == 0x06 || base_family == 0x0F) {
+                cpu_features.model |= (ext_model << 4);
+            }
+            cpu_features.stepping = eax & 0x0F;
 
-	            if (cpu_features.family >= 5) {
-	                cpu_features.has_cr4 = 1;
-	            }
+            if (cpu_features.family >= 5) {
+                cpu_features.has_cr4 = 1;
+            }
 
-	            cpu_features.has_tsc = (edx >> 4) & 1u;
-	            cpu_features.has_apic = (edx >> 9) & 1u;
-	            cpu_features.has_pse = cpu_features.has_cr4 && ((edx >> 3) & 1u);
-	            cpu_features.has_pae = cpu_features.has_cr4 && ((edx >> 6) & 1u);
-	            cpu_features.has_pge = cpu_features.has_cr4 && ((edx >> 13) & 1u);
-	            cpu_features.has_fxsr = (edx >> 24) & 1u;
-	            cpu_features.has_pcid = cpu_features.has_cr4 && ((ecx >> 17) & 1u);
-	            cpu_features.has_rdrand = (ecx >> 30) & 1u;
-	        }
+            cpu_features.has_tsc = (edx >> 4) & 1u;
+            cpu_features.has_msr = (edx >> 5) & 1u;
+            cpu_features.has_apic = (edx >> 9) & 1u;
+            cpu_features.has_pse = cpu_features.has_cr4 && ((edx >> 3) & 1u);
+            cpu_features.has_pae = cpu_features.has_cr4 && ((edx >> 6) & 1u);
+            cpu_features.has_pge = cpu_features.has_cr4 && ((edx >> 13) & 1u);
+            cpu_features.has_pat = cpu_features.has_msr && ((edx >> 16) & 1u);
+            cpu_features.has_fxsr = (edx >> 24) & 1u;
+            cpu_features.has_pcid = cpu_features.has_cr4 && ((ecx >> 17) & 1u);
+            cpu_features.has_rdrand = (ecx >> 30) & 1u;
+        }
 
         if (max_basic >= 7) {
             i386_cpuid_leaf(7, 0, &eax, &ebx, &ecx, &edx);
@@ -106,6 +128,7 @@ void i386_cpu_init_early(void) {
         strcpy(cpu_features.vendor, "i386");
     }
 
+    i386_cpu_enable_pat_wc();
     cpu_features.detected = 1;
 
     kprint("CPU: ");
@@ -152,6 +175,9 @@ int i386_cpu_has_pse(void) { return cpu_features.has_pse; }
 int i386_cpu_has_pae(void) { return cpu_features.has_pae; }
 int i386_cpu_has_pge(void) { return cpu_features.has_pge; }
 int i386_cpu_has_fxsr(void) { return cpu_features.has_fxsr; }
+int i386_cpu_has_msr(void) { return cpu_features.has_msr; }
+int i386_cpu_has_pat(void) { return cpu_features.has_pat; }
+int i386_cpu_pat_wc_enabled(void) { return cpu_features.pat_wc_enabled; }
 int i386_cpu_has_pcid(void) { return cpu_features.has_pcid; }
 int i386_cpu_has_rdrand(void) { return cpu_features.has_rdrand; }
 int i386_cpu_has_rdseed(void) { return cpu_features.has_rdseed; }

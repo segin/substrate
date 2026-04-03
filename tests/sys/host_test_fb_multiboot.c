@@ -54,6 +54,7 @@ int hw_text_active;
 static uint32_t fake_fb[64];
 static uint64_t last_ioremap_phys;
 static size_t last_ioremap_len;
+static int last_ioremap_wc;
 
 int cmdline_get(const char *key, char *buf, size_t buflen) {
     (void)key;
@@ -104,6 +105,14 @@ void vga_install(void) {
 void *ioremap(uint64_t phys_addr, size_t size) {
     last_ioremap_phys = phys_addr;
     last_ioremap_len = size;
+    last_ioremap_wc = 0;
+    return fake_fb;
+}
+
+void *ioremap_wc(uint64_t phys_addr, size_t size) {
+    last_ioremap_phys = phys_addr;
+    last_ioremap_len = size;
+    last_ioremap_wc = 1;
     return fake_fb;
 }
 
@@ -167,6 +176,7 @@ static void reset_multiboot_state(void) {
     saved_mbi_fb_len = 0;
     last_ioremap_phys = 0;
     last_ioremap_len = 0;
+    last_ioremap_wc = 0;
 }
 
 static void test_mb_init_maps_framebuffer_and_layout(void) {
@@ -194,6 +204,7 @@ static void test_mb_init_maps_framebuffer_and_layout(void) {
     assert(mb_init(&info) == 0);
     assert(last_ioremap_phys == 0xE0000000u);
     assert(last_ioremap_len == (size_t)4096 * 768);
+    assert(last_ioremap_wc == 1);
     assert(info.addr == fake_fb);
     assert(info.width == 1024);
     assert(info.height == 768);
@@ -205,6 +216,32 @@ static void test_mb_init_maps_framebuffer_and_layout(void) {
 
     fb = info;
     assert(fb_get_raw_pixel(0x00112233, 32) == 0x00112233);
+}
+
+static void test_fb_format_conversion_routines(void) {
+    memset(&fb, 0, sizeof(fb));
+
+    fb.bpp = 32;
+    assert(fb_get_raw_pixel(0x00112233, 32) == 0x00112233);
+
+    memset(&fb, 0, sizeof(fb));
+    fb.bpp = 24;
+    assert(fb_get_raw_pixel(0x00ABCDEF, 24) == 0x00ABCDEF);
+
+    memset(&fb, 0, sizeof(fb));
+    fb.bpp = 16;
+    assert(fb_get_raw_pixel(0x00FF0000, 16) == 0xF800);
+    assert(fb_get_raw_pixel(0x0000FF00, 16) == 0x07E0);
+    assert(fb_get_raw_pixel(0x000000FF, 16) == 0x001F);
+
+    memset(&fb, 0, sizeof(fb));
+    fb.bpp = 15;
+    assert(fb_get_raw_pixel(0x00FF0000, 15) == 0x7C00);
+    assert(fb_get_raw_pixel(0x0000FF00, 15) == 0x03E0);
+    assert(fb_get_raw_pixel(0x000000FF, 15) == 0x001F);
+
+    assert(fb_get_raw_pixel(0x00FFFFFF, 8) == 0x0F);
+    assert(fb_get_raw_pixel(0x00000000, 8) == 0x00);
 }
 
 static void test_mb_init_rejects_text_mode(void) {
@@ -224,6 +261,7 @@ static void test_mb_init_rejects_text_mode(void) {
 
 int main(void) {
     test_mb_init_maps_framebuffer_and_layout();
+    test_fb_format_conversion_routines();
     test_mb_init_rejects_text_mode();
     puts("host_test_fb_multiboot: PASS");
     return 0;

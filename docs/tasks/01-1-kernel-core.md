@@ -6,6 +6,19 @@
 ## Reimplemented Checklist (All Open)
 
 ### 1. Kernel Core (`sys/core`, `sys/kern`)
+- [ ] **Imported Kernel Bring-Up & Debugging Backlog:** (Imported from `09-7`)
+
+    > **Scope:** These items were previously embedded in the userland-binaries
+    > task file even though they are kernel, architecture, boot, or EFI bring-up
+    > concerns. They now live here to keep `bin/` work separate from core-system
+    > debugging and boot integration work.
+
+    - [ ] Fix `pmap_dump` memory access logic (use `sys/proc.h` correctly) <!-- id: 4 --> (REQ: REQ-09-2079)
+    - [ ] Fix `init=` command line parsing <!-- id: 5 --> (REQ: REQ-09-2080)
+    - [ ] Fix `run_kernel_tests` linker error in EFI build <!-- id: 6 --> (REQ: REQ-09-2081)
+    - [ ] Add `syscall_log` kernel parameter for debugging <!-- id: 7 --> (REQ: REQ-09-2082)
+    - [ ] Investigate duplicate thread creation (PID 1 has TID 1 & 2) <!-- id: 8 --> (REQ: REQ-09-2083)
+    - [ ] Investigate Page Fault at `0x08065d2b` (accessing `0x08124000`) <!-- id: 9 --> (REQ: REQ-09-2084)
 - [x] **Memory Management:** (REQ: REQ-01-0001)
     - [x] **Physical Memory Manager (PMM Refactor):** (REQ: REQ-01-0002)
 
@@ -2150,6 +2163,12 @@
 - **US-01-1003**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to documentation: so that this capability is implemented with clear verification evidence.
 - **US-01-1004**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: /proc/mounts data model and formatting contract so that this capability is implemented with clear verification evidence.
 - **US-01-1005**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to emit a final SMP bring-up summary log in the form SMP: Brought up N CPU(s)! after AP startup completes so that this capability is implemented with clear verification evidence.
+- **US-09-2079**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to fix pmap_dump memory access logic (use sys/proc.h correctly) <!-- id: 4 --> so that this capability is implemented with clear verification evidence.
+- **US-09-2080**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to fix init= command line parsing <!-- id: 5 --> so that this capability is implemented with clear verification evidence.
+- **US-09-2081**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to fix run_kernel_tests linker error in EFI build <!-- id: 6 --> so that this capability is implemented with clear verification evidence.
+- **US-09-2082**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to add syscall_log kernel parameter for debugging <!-- id: 7 --> so that this capability is implemented with clear verification evidence.
+- **US-09-2083**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to investigate duplicate thread creation (PID 1 has TID 1 & 2) <!-- id: 8 --> so that this capability is implemented with clear verification evidence.
+- **US-09-2084**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to investigate Page Fault at 0x08065d2b (accessing 0x08124000) <!-- id: 9 --> so that this capability is implemented with clear verification evidence.
 
 ## INCOSE/EARS Requirements
 
@@ -5166,5 +5185,23 @@
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-1005** (EARS/Ubiquitous): The Substrate system shall emit a final SMP bring-up summary log in the form SMP: Brought up N CPU(s)! after AP startup completes.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-09-2079** (EARS/Ubiquitous): The Substrate system shall fix pmap_dump memory access logic (use sys/proc.h correctly) <!-- id: 4 -->.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-09-2080** (EARS/Ubiquitous): The Substrate system shall fix init= command line parsing <!-- id: 5 -->.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-09-2081** (EARS/Ubiquitous): The Substrate system shall fix run_kernel_tests linker error in EFI build <!-- id: 6 -->.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-09-2082** (EARS/Ubiquitous): The Substrate system shall add syscall_log kernel parameter for debugging <!-- id: 7 -->.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-09-2083** (EARS/Ubiquitous): The Substrate system shall investigate duplicate thread creation (PID 1 has TID 1 & 2) <!-- id: 8 -->.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-09-2084** (EARS/Ubiquitous): The Substrate system shall investigate Page Fault at 0x08065d2b (accessing 0x08124000) <!-- id: 9 -->.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.

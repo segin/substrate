@@ -12,13 +12,29 @@ SRCS = src/elf_read.c src/elf_write.c src/elf_sections.c src/elf_symbols.c \
        src/elf_gnu_ext.c src/elf_dwarf.c src/elf_validate.c src/elf_layout.c \
        src/elf_util.c
 OBJS = $(SRCS:.c=.o)
+BUILD_MODE := $(if $(NATIVE_BUILD),native,target)
+MODE_STAMP = .build-mode
 
-.PHONY: all clean install test fuzz bench examples
+.PHONY: all clean install test fuzz bench examples FORCE
 
 all: $(LIBNAME)
 
 $(LIBNAME): $(OBJS)
 	$(AR) rcs $@ $(OBJS)
+
+$(OBJS): $(MODE_STAMP)
+
+$(MODE_STAMP): FORCE
+	@mode="$(BUILD_MODE)"; \
+	cur=""; \
+	if [ -f "$(MODE_STAMP)" ]; then cur=$$(cat "$(MODE_STAMP)"); fi; \
+	if [ "$$cur" != "$$mode" ]; then \
+		rm -f $(OBJS) $(LIBNAME); \
+		printf '%s\n' "$$mode" > "$(MODE_STAMP).tmp"; \
+		mv "$(MODE_STAMP).tmp" "$(MODE_STAMP)"; \
+	elif [ ! -f "$(MODE_STAMP)" ]; then \
+		printf '%s\n' "$$mode" > "$(MODE_STAMP)"; \
+	fi
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -36,7 +52,7 @@ examples: $(LIBNAME)
 	$(MAKE) -C examples NATIVE_BUILD=1
 
 clean:
-	rm -f $(OBJS) $(LIBNAME)
+	rm -f $(OBJS) $(LIBNAME) $(MODE_STAMP)
 	$(MAKE) -C tests clean || true
 	$(MAKE) -C fuzz clean || true
 	$(MAKE) -C bench clean || true

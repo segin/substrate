@@ -3,14 +3,14 @@
 ## Overview
 - Driver location: `sys/drivers/storage/floppy/`
 - Hardware target: ISA NEC uPD765 / Intel 82077AA compatible floppy disk controller
-- Device nodes: `/dev/storage/fd0` and `/dev/storage/fd1` for currently detected drives
+- Device nodes: `/dev/storage/fd0` through `/dev/storage/fd3` for currently detected drives
 
 ## Controller Model
 - Controllers are probed at legacy ISA bases:
   - primary: `0x3F0`, IRQ `6`
   - secondary: `0x370`, IRQ `10`
 - Presence detection uses the main status register at `base + 0x04`.
-- Reset is issued by toggling `DOR.RESET` through `base + 0x02`.
+- Reset is issued by toggling `DOR.RESET` through `base + 0x02`, waiting for the controller IRQ, and draining `SENSE INTERRUPT STATUS` once per drive slot.
 - The current implementation configures the controller with:
   - `CONFIGURE`
   - `SPECIFY`
@@ -34,6 +34,7 @@
 
 ## Drive Detection
 - CMOS register `0x10` provides drive type hints for drives `0` and `1`
+- Secondary-controller drives are enumerated as `fd2` and `fd3`; because legacy CMOS does not describe them, the driver currently falls back to the common 1.44MB geometry until richer media detection lands
 - Supported geometries:
   - `360K`
   - `720K`
@@ -44,13 +45,11 @@
 ## I/O Path
 - Sector interface is exposed through the block-device layer
 - Driver converts `LBA <-> CHS` from the selected geometry
-- Read and write operations are DMA-backed and currently performed one sector at a time
+- Read and write operations are DMA-backed and batched in up-to-4KB commands; when a command spans head 0 to head 1 on the same cylinder the driver sets the controller MT bit
+- Track formatting is exposed through `FLOPPY_IOCTL_FORMAT_TRACK` in [include/sys/floppy.h](/home/segin/test/include/sys/floppy.h), using a DMA-fed `(C,H,R,N)` tuple table for each sector header
+- Motors spin up on demand and are shut down from the periodic timer path after roughly 2.5s of inactivity
+- Media-change handling checks `DIR.DSKCHG`, invalidates cached geometry/current-cylinder state, restores the drive baseline geometry, and clears the latch by seeking to cylinder 1 and back to cylinder 0
 - Error handling decodes `ST0`, `ST1`, and `ST2`
 - Recoverable failures trigger recalibrate + retry up to three attempts
 
 ## Current Limits
-- Reset bring-up does not currently wait on a dedicated reset IRQ completion path
-- Secondary-controller drives `fd2` and `fd3` are not yet enumerated
-- Disk-change handling is not yet implemented
-- Format-track support is not yet implemented
-- Multi-track command batching is not yet implemented

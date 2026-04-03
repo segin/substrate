@@ -62,11 +62,90 @@ Attributes can be combined via bitwise OR.
 ### `fb_write(const char *s, size_t n)`
 Writes a string of characters to the framebuffer console.
 
+## Format Conversion
+`fb_get_raw_pixel()` converts canonical RGB colors into the active framebuffer's
+native storage format. The current implementation covers:
+- direct-color 15/16/24/32bpp layouts using channel-offset/length scaling
+- 8bpp indexed output through palette adaptation
+- packed 1/2/4bpp fallback packing in `linear_fb_putpixel()`
+
 ## Scrolling
 Performed via `fb_copyarea` (overlap-safe blit) when the cursor reaches the bottom of the screen. The bottom line is cleared with `fb_fillrect`.
 
+When the active framebuffer exposes a hardware viewport (`fb.scroll`) and a
+double-height virtual surface, full-screen upward text scrolls animate one
+scanline at a time across the next text row instead of jumping directly by a
+full cell height. Partial-region scrolls and non-viewport backends keep the
+older immediate redraw path.
+
+## Dirty Tracking
+The framebuffer console maintains a single accumulated dirty rectangle over the
+current frame. Character draws, clears, and scroll operations expand that
+rectangle so later deferred-flush logic can submit one bounded update instead of
+rewriting the whole visible surface on every write.
+
+## Deferred Presentation
+Dirty framebuffer-console output is presented on a timer-driven cadence rather
+than forcing an immediate per-character flush. Drivers that need an explicit
+present step may provide an `fb.flush(x, y, w, h)` callback; the console batches
+all writes observed during the interval into one rectangle and submits that
+region on the next flush tick.
+
+## Mapping Policy
+Linear framebuffer memory is mapped through `ioremap_wc()` when the i386 PAT
+path is available. The CPU feature probe programs a dedicated PAT slot for write
+combining and the PMAP layer preserves `PTE_PWT`/`PTE_PCD`/`PTE_PAT` on page
+entries so framebuffer mappings can use WC semantics instead of the older
+always-uncached path. Machines without PAT support fall back to uncached
+`ioremap()` semantics.
+
+## Software Cursor
+The framebuffer console uses a software cursor when no hardware cursor path is
+available. The current implementation renders an underline cursor by XORing the
+bottom two pixel rows of the active text cell. This keeps the cursor visible on
+top of arbitrary foreground and background colors without requiring a separate
+backing store for the drawn shape itself. The console still preserves the
+underlying framebuffer bytes for those underline rows before drawing and
+restores them on hide, so later writes, blink transitions, and viewport updates
+do not accumulate XOR damage. Cursor hide/show operations participate in
+dirty-rectangle tracking so deferred presentation still flushes the correct
+bounds.
+
+Cursor blink runs through `fb_console_tick()` using the kernel timer cadence.
+When the active VT requests blinking, the software cursor toggles at roughly
+2 Hz and each blink transition is dirtied and flushed through the same deferred
+presentation path as ordinary text output.
+
 ## Integration
 The `vga_write` function is hooked to automatically use the framebuffer console if initialized and active. This allows seamless kernel logging through the standard console path.
+
+## VT / TTY Registration
+On framebuffer-only boots, the framebuffer console now allocates the standard
+VT tty set (`/dev/tty1` through `/dev/tty12`) if no earlier backend has already
+claimed those VTs. This keeps the visible graphical console on the normal tty
+namespace instead of requiring a framebuffer-specific userspace path. When VGA
+text mode has already installed those tty bindings, the framebuffer console
+detects the existing ownership and leaves it intact.
+
+TTY writes no longer bypass terminal semantics. The framebuffer VT driver now
+feeds tty output through the shared ANSI parser and updates per-VT cursor,
+color, attribute, tab-stop, scroll-region, and alternate-screen state before
+redrawing the affected framebuffer cells. That makes `/dev/tty[1-N]` on a
+framebuffer-only boot behave like a terminal instead of a raw glyph sink.
+
+The framebuffer VT tty backend currently exposes the per-VT controls that are
+actually implemented by the graphical console:
+- tab width get/set (`VTIOCGTABW`, `VTIOCSTABW`)
+- cursor visibility get/set (`VTIOCGCURSOR`, `VTIOCSCURSOR`)
+- cursor blink get/set (`VTIOCGCURBLINK`, `VTIOCSCURBLINK`)
+
+VGA text-blink mode ioctls remain specific to the hardware text backend and are
+rejected by the framebuffer tty path.
+
+Framebuffer VT tty registration also refreshes `winsize` from the active text
+geometry (`ws_col = cols`, `ws_row = visible_rows`) for both newly created tty
+instances and preexisting VT tty ownership. That keeps generic
+`TIOCGWINSZ`/`TIOCSWINSZ` behavior aligned with the framebuffer console layout.
 
 ## Constraints
 - Built-in font is limited to the PSF glyph set (typically 256 or 512 glyphs).

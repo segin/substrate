@@ -5,6 +5,13 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+/* C++ does not have the restrict keyword. */
+#ifdef __cplusplus
+#ifndef restrict
+#define restrict
+#endif
+#endif
+
 #include <regex/flags.h>
 
 #ifdef __cplusplus
@@ -83,6 +90,7 @@ void regex_iter_destroy(regex_iter_t *it);
 
 char *regex_escape_literal(const char *s, size_t len);
 
+#ifndef SUBSTRATE_REGEX_OMIT_POSIX_COMPAT
 /* -----------------------------------------------------------------------
  * POSIX compatibility layer
  * --------------------------------------------------------------------- */
@@ -124,6 +132,7 @@ int  regexec(const regex_t *restrict preg, const char *restrict string,
 void regfree(regex_t *preg);
 size_t regerror(int errcode, const regex_t *restrict preg,
                 char *restrict errbuf, size_t errbuf_size);
+#endif
 
 #ifdef __cplusplus
 }
