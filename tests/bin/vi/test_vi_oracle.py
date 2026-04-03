@@ -216,6 +216,26 @@ def main():
             "key_steps": [b"G", b"2", b"g", b"E", b"r", b"X"],
         },
         {
+            "name": "counted-sentence-forward-motion",
+            "initial_text": "one. two. three.\nalpha. beta. gamma.\n",
+            "key_steps": [b"$", b"2", b")", b"r", b"X"],
+        },
+        {
+            "name": "counted-sentence-backward-motion",
+            "initial_text": "one. two. three.\nalpha. beta. gamma.\n",
+            "key_steps": [b"G", b"$", b"2", b"(", b"r", b"X"],
+        },
+        {
+            "name": "counted-paragraph-forward-motion",
+            "initial_text": "one\n\ntwo\n\nthree\n\nfour\n",
+            "key_steps": [b"2", b"}", b"r", b"X"],
+        },
+        {
+            "name": "counted-paragraph-backward-motion",
+            "initial_text": "one\n\ntwo\n\nthree\n\nfour\n",
+            "key_steps": [b"G", b"2", b"{", b"r", b"X"],
+        },
+        {
             "name": "word-search-repeat-change",
             "initial_text": "one target\ntwo target\nthree target\n",
             "key_steps": [b"w", b"*", b"c", b"*", b"X", b"\x1b", b"n", b"."],
