@@ -64,6 +64,24 @@ void console_register(console_backend_t *backend) {
     backends = backend;
 }
 
+int console_get_terminal_size(int *cols, int *rows) {
+    console_backend_t *backend = backends;
+
+    if (!cols || !rows) {
+        return -1;
+    }
+
+    while (backend) {
+        if (backend->get_terminal_size &&
+            backend->get_terminal_size(cols, rows) == 0) {
+            return 0;
+        }
+        backend = backend->next;
+    }
+
+    return -1;
+}
+
 // Low-level backend write (used by kprint directly or via TTY)
 static void backend_write(const char *data, size_t len) {
     console_backend_t *b = backends;

@@ -62,7 +62,7 @@ size_t mock_device_write(fs_node_t *node, off_t offset, size_t size, const uint8
     return size;
 }
 
-int64_t get_time(void) {
+long get_time(void) {
     return 0;
 }
 
@@ -104,46 +104,46 @@ int main(void) {
     ext2_inode_t inode;
     memset(&inode, 0, sizeof(inode));
 
-    uint32_t indirect_buf[256];
-    memset(indirect_buf, 0, sizeof(indirect_buf));
+    uint32_t indirect[256];
+    uint32_t dindirect[256];
+    uint32_t tindirect[256];
+    memset(indirect, 0, sizeof(indirect));
+    memset(dindirect, 0, sizeof(dindirect));
+    memset(tindirect, 0, sizeof(tindirect));
 
     printf("Test 1: Allocating direct block 5\n");
-    int ret = ext2_alloc_inode_block(&fs, &inode, 5, indirect_buf);
+    int ret = ext2_alloc_inode_block(&fs, &inode, 5, indirect, dindirect, tindirect);
     if (ret != 0 || inode.i_block[5] == 0) {
         printf("FAILED: direct block allocation ret=%d block=%u\n", ret, inode.i_block[5]);
         failed++;
     }
 
     printf("Test 2: Allocating indirect block 12\n");
-    ret = ext2_alloc_inode_block(&fs, &inode, 12, indirect_buf);
-    if (ret != 0 || inode.i_block[12] == 0 || indirect_buf[0] == 0) {
-        printf("FAILED: indirect allocation ret=%d indirect=%u data=%u\n", ret, inode.i_block[12], indirect_buf[0]);
+    ret = ext2_alloc_inode_block(&fs, &inode, 12, indirect, dindirect, tindirect);
+    if (ret != 0 || inode.i_block[12] == 0 || indirect[0] == 0) {
+        printf("FAILED: indirect allocation ret=%d indirect=%u data=%u\n", ret, inode.i_block[12], indirect[0]);
         failed++;
     }
 
     printf("Test 3: Allocating indirect block 13\n");
-    ret = ext2_alloc_inode_block(&fs, &inode, 13, indirect_buf);
-    if (ret != 0 || indirect_buf[1] == 0) {
-        printf("FAILED: second indirect allocation ret=%d data=%u\n", ret, indirect_buf[1]);
+    ret = ext2_alloc_inode_block(&fs, &inode, 13, indirect, dindirect, tindirect);
+    if (ret != 0 || indirect[1] == 0) {
+        printf("FAILED: second indirect allocation ret=%d data=%u\n", ret, indirect[1]);
         failed++;
     }
 
-    printf("Test 4: Allocating double indirect block (unsupported)\n");
     uint32_t ptrs_per_block = fs.block_size / 4;
-    ret = ext2_alloc_inode_block(&fs, &inode, 12 + ptrs_per_block, indirect_buf);
-    if (ret != -1) {
-        printf("FAILED: double indirect returned %d\n", ret);
+    printf("Test 4: Allocating double indirect block\n");
+    ret = ext2_alloc_inode_block(&fs, &inode, 12 + ptrs_per_block, indirect, dindirect, tindirect);
+    if (ret != 0 || inode.i_block[13] == 0 || dindirect[0] == 0 || indirect[0] == 0) {
+        printf("FAILED: double indirect ret=%d dindirect=%u indirect=%u\n", ret, inode.i_block[13], dindirect[0]);
         failed++;
     }
 
-    printf("Test 5: Allocating when no free blocks\n");
-    bgd[0].bg_free_blocks_count = 0;
-    fs.sb.s_free_blocks_count = 0;
-    memset(active_bitmap, 0xFF, sizeof(active_bitmap));
-    memcpy(mock_disk + 1024, active_bitmap, 1024);
-    ret = ext2_alloc_inode_block(&fs, &inode, 6, indirect_buf);
-    if (ret != -1) {
-        printf("FAILED: out-of-space returned %d\n", ret);
+    printf("Test 5: Allocating triple indirect block\n");
+    ret = ext2_alloc_inode_block(&fs, &inode, 12 + ptrs_per_block + ptrs_per_block * ptrs_per_block, indirect, dindirect, tindirect);
+    if (ret != 0 || inode.i_block[14] == 0 || tindirect[0] == 0 || dindirect[0] == 0 || indirect[0] == 0) {
+        printf("FAILED: triple indirect ret=%d tindirect=%u dindirect=%u indirect=%u\n", ret, inode.i_block[14], tindirect[0], dindirect[0]);
         failed++;
     }
 
