@@ -240,7 +240,14 @@ All other historical `ex` commands and aliases are currently outside the support
 | marks / matching | `'a`, `` `a ``, `%`, `[count]%` | bare mark jumps; bare `%`; `[count]%` percent-of-file target | direct PTY in [`test_vi_pty.py`](../../tests/bin/vi/test_vi_pty.py); overlap-oracle coverage present for replay-sensitive `c'`, ``c` ``, and `c%` families |
 
 Unsupported or intentionally out-of-scope normal-mode motion keys are not implied by omission here; they remain unsupported until they are added to this matrix with tests.
-- [ ] Finish or explicitly de-support any remaining classic motion keys that are still absent once that matrix is written, so no motion is left in an implied “maybe supported” state.
+- Classic POSIX/BSD cursoring aliases that are intentionally unsupported today, and therefore outside the supported contract until added with tests, are:
+  - `<Space>` as an alias for `l`
+  - `<Ctrl-H>` as an alias for `h`
+  - `<Ctrl-N>` as an alias for `j`
+  - `<Ctrl-P>` as an alias for `k`
+  - `<Ctrl-F>` page-forward motion
+  - `<Ctrl-B>` page-backward motion
+- [x] Finish or explicitly de-support any remaining classic motion keys that are still absent once that matrix is written, so no motion is left in an implied “maybe supported” state.
 - [x] Add remaining section- and structure-oriented motions if they are part of the supported BSD/POSIX contract.
 - [ ] Add oracles for every supported counted motion family: line motions (`j`, `k`, `+`, `-`, `_`), screen motions (`H`, `M`, `L`, `Ctrl-D`, `Ctrl-U`, `Ctrl-E`, `Ctrl-Y`), word motions (`w`, `W`, `e`, `E`, `b`, `B`, `ge`, `gE`), sentence/paragraph motions, section motions, search motions, and `%`.
 - [ ] Add oracles for mixed count-plus-operator forms over those same motion families, with one success case and one edge-case/no-op case each.
