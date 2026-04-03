@@ -7,12 +7,12 @@
 
 ### 5. System Calls & Personalities
 - [ ] **System Call ABI (64-bit Clean):** (REQ: REQ-05-0001)
-    - [ ] **Type Definitions:** (REQ: REQ-05-0002)
-        - [ ] Define `off_t`, `time_t`, `ino_t`, `blkcnt_t` as 64-bit types in `sys/types.h`. (REQ: REQ-05-0003)
-        - [ ] Verify alignment requirements (8-byte alignment for 64-bit types on i386 stack). (REQ: REQ-05-0004)
-    - [ ] **System Call Audit:** (REQ: REQ-05-0005, REQ-05-0352)
-        - [ ] Audit all existing syscalls for argument types (int vs long vs long long). (REQ: REQ-05-0006)
-        - [ ] Identify syscalls needing 64-bit arguments pair splitting on 32-bit (e.g. `lseek`, `truncate`, `mmap`). (REQ: REQ-05-0007)
+    - [x] **Type Definitions:** (REQ: REQ-05-0002)
+        - [x] Define `off_t`, `time_t`, `ino_t`, `blkcnt_t` as 64-bit types in `sys/types.h`. (REQ: REQ-05-0003)
+        - [x] Verify alignment requirements (8-byte alignment for 64-bit types on i386 stack). (REQ: REQ-05-0004)
+    - [x] **System Call Audit:** (REQ: REQ-05-0005, REQ-05-0352)
+        - [x] Audit all existing syscalls for argument types (int vs long vs long long). (REQ: REQ-05-0006)
+        - [x] Identify syscalls needing 64-bit arguments pair splitting on 32-bit (e.g. `lseek`, `truncate`, `mmap`). (REQ: REQ-05-0007)
     - [ ] **Kernel Refactoring:** (REQ: REQ-05-0008, REQ-05-0357)
         - [ ] Native `sys_lseek` takes 64-bit offset (split hi/lo on 32-bit stack). (REQ: REQ-05-0009)
         - [ ] Native `sys_ftruncate` takes 64-bit length (split hi/lo on 32-bit stack). (REQ: REQ-05-0010)
