@@ -252,7 +252,7 @@ Unsupported or intentionally out-of-scope normal-mode motion keys are not implie
 - [x] Add oracles for every supported counted motion family: line motions (`j`, `k`, `+`, `-`, `_`), screen motions (`H`, `M`, `L`, `Ctrl-D`, `Ctrl-U`, `Ctrl-E`, `Ctrl-Y`), word motions (`w`, `W`, `e`, `E`, `b`, `B`, `ge`, `gE`), sentence/paragraph motions, section motions, search motions, and `%`.
 - [x] Add oracles for mixed count-plus-operator forms over those same motion families, with one success case and one edge-case/no-op case each.
 - [x] Tighten search-repeat, find-repeat, mark-jump, and percent-motion edge cases across line boundaries and empty matches.
-- [ ] Add explicit EOF, blank-line, blank-paragraph, and short-line motion oracles for `w/W`, `b/B`, `e/E`, `ge/gE`, `(`/`)`, `{`/`}`, and screen motions.
+- [x] Add explicit EOF, blank-line, blank-paragraph, and short-line motion oracles for `w/W`, `b/B`, `e/E`, `ge/gE`, `(`/`)`, `{`/`}`, and screen motions.
 
 #### 3.3 Operator completeness and region semantics
 
