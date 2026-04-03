@@ -59,6 +59,12 @@
 #define strcasecmp libc_strcasecmp
 #undef strncasecmp
 #define strncasecmp libc_strncasecmp
+#undef ffs
+#define ffs libc_ffs
+#undef ffsl
+#define ffsl libc_ffsl
+#undef ffsll
+#define ffsll libc_ffsll
 
 // Forward declarations for renamed functions
 char *libc_strfry(char *string);
@@ -87,6 +93,9 @@ char *libc_strtok_r(char *str, const char *delim, char **saveptr);
 char *libc_strerror(int errnum);
 int libc_strcasecmp(const char *s1, const char *s2);
 int libc_strncasecmp(const char *s1, const char *s2, size_t n);
+int libc_ffs(int i);
+int libc_ffsl(long i);
+int libc_ffsll(long long i);
 
 // Undef macros to restore original names if needed
 #undef strfry
@@ -112,6 +121,9 @@ int libc_strncasecmp(const char *s1, const char *s2, size_t n);
 #undef strpbrk
 #undef strtok_r
 #undef strerror
+#undef ffs
+#undef ffsl
+#undef ffsll
 
 // Helper macros for testing
 #define ASSERT_EQ(actual, expected, msg) do { \
@@ -867,6 +879,31 @@ bool test_libc_strdup(void) {
     return true;
 }
 
+void run_ffs_tests(void) {
+    printf("Running ffs tests...\n");
+    ASSERT_EQ(libc_ffs(0), 0, "ffs(0)");
+    ASSERT_EQ(libc_ffs(1), 1, "ffs(1)");
+    ASSERT_EQ(libc_ffs(2), 2, "ffs(2)");
+    ASSERT_EQ(libc_ffs(3), 1, "ffs(3)");
+    ASSERT_EQ(libc_ffs(4), 3, "ffs(4)");
+    ASSERT_EQ(libc_ffs(8), 4, "ffs(8)");
+    ASSERT_EQ(libc_ffs(0x80000000), 32, "ffs(0x80000000)");
+    ASSERT_EQ(libc_ffs(0xffffffff), 1, "ffs(0xffffffff)");
+
+    ASSERT_EQ(libc_ffsl(0L), 0, "ffsl(0)");
+    ASSERT_EQ(libc_ffsl(1L), 1, "ffsl(1)");
+    ASSERT_EQ(libc_ffsl(0x80000000L), 32, "ffsl(0x80000000)");
+
+    ASSERT_EQ(libc_ffsll(0LL), 0, "ffsll(0)");
+    ASSERT_EQ(libc_ffsll(1LL), 1, "ffsll(1)");
+    ASSERT_EQ(libc_ffsll(0x100000000LL), 33, "ffsll(0x100000000)");
+}
+
+bool test_libc_ffs(void) {
+    run_ffs_tests();
+    return true;
+}
+
 #ifndef NO_MAIN
 int main(void) {
     run_strcpy_tests();
@@ -891,6 +928,7 @@ int main(void) {
     run_strpbrk_tests();
     run_strncmp_tests();
     run_strdup_tests();
+    run_ffs_tests();
     return 0;
 }
 #endif
