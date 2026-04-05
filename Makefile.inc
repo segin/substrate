@@ -78,5 +78,17 @@ endif
 # Macro to brand a binary as Substrate native (OSABI=64)
 # Usage: $(call BRAND_SUBSTRATE,binary_name)
 define BRAND_SUBSTRATE
-	@if [ -x $(BRANDELF) ]; then $(BRANDELF) -t Substrate $(1); fi
+	@set -e; \
+	if [ -x $(BRANDELF) ]; then \
+		if $(BRANDELF) -t Substrate $(1); then \
+			:; \
+		else \
+			byte=$$(od -An -t u1 -j 7 -N 1 $(1) 2>/dev/null | tr -d '[:space:]'); \
+			if [ "$$byte" != "64" ]; then \
+				printf '\100' | dd of=$(1) bs=1 seek=7 conv=notrunc status=none; \
+			fi; \
+		fi; \
+	else \
+		printf '\100' | dd of=$(1) bs=1 seek=7 conv=notrunc status=none; \
+	fi
 endef
