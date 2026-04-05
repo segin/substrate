@@ -10,6 +10,7 @@ include ../../Makefile.inc
 SRCS ?= $(PROG).c
 OBJS = $(SRCS:.c=.o)
 EXTRA_CLEAN ?=
+BUILD_RULE_DEPS = Makefile $(TOP)/Makefile.inc $(TOP)/Makefile.bin.inc
 
 LDFLAGS := $(USER_LDFLAGS)
 LIBC_DIR = $(TOP)/lib/c
@@ -36,6 +37,8 @@ else
     LIBS = -L$(LIBC_DIR) -lc $(LIBGCC)
     BRAND_CMD = $(call BRAND_SUBSTRATE,$@)
 endif
+
+$(OBJS) $(PROG): $(BUILD_RULE_DEPS)
 
 $(PROG): $(OBJS)
 	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(CRT0) $(LDADD) $(LIBS)

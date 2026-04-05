@@ -53,6 +53,43 @@ static int elf_debug_enabled(void) {
     return cmdline_debug_enabled("elf");
 }
 
+static uint32_t elf_note_align4(uint32_t value) {
+    return (value + 3U) & ~3U;
+}
+
+static int elf_note_detect_os(const uint8_t *buf, uint32_t len) {
+    uint32_t off = 0;
+
+    while (off + sizeof(Elf32_Nhdr) <= len) {
+        const Elf32_Nhdr *nhdr = (const Elf32_Nhdr *)(const void *)(buf + off);
+        uint32_t namesz = nhdr->n_namesz;
+        uint32_t descsz = nhdr->n_descsz;
+        uint32_t name_off = off + sizeof(*nhdr);
+        uint32_t desc_off = name_off + elf_note_align4(namesz);
+        uint32_t next_off = desc_off + elf_note_align4(descsz);
+
+        if (next_off > len) {
+            break;
+        }
+
+        if (namesz >= 4 && memcmp(buf + name_off, "GNU", 4) == 0 &&
+            nhdr->n_type == NT_GNU_ABI_TAG && descsz >= sizeof(uint32_t)) {
+            const uint32_t *abi = (const uint32_t *)(const void *)(buf + desc_off);
+            if (*abi == 0) {
+                return ELFOSABI_LINUX;
+            }
+        }
+
+        if (namesz >= 8 && memcmp(buf + name_off, "FreeBSD", 8) == 0) {
+            return ELFOSABI_FREEBSD;
+        }
+
+        off = next_off;
+    }
+
+    return ELFOSABI_SUBSTRATE;
+}
+
 static int elf_personality_debug_enabled(int detected_os) {
     if (detected_os == ELFOSABI_LINUX) {
         return cmdline_debug_enabled("perso:linux");
@@ -162,17 +199,7 @@ static int elf_read_image_info(fs_node_t *file, elf_image_info_t *image) {
             char note_buf[256];
             uint32_t to_read = (phdr->p_filesz < sizeof(note_buf)) ? phdr->p_filesz : sizeof(note_buf);
             if (file->read(file, phdr->p_offset, to_read, (uint8_t *)note_buf) == to_read) {
-                /* Scan for "FreeBSD" or "GNU" */
-                for (uint32_t j = 0; j < to_read - 8; j++) {
-                    if (memcmp(&note_buf[j], "FreeBSD", 8) == 0) {
-                        image->detected_os = ELFOSABI_FREEBSD;
-                        break;
-                    }
-                    if (memcmp(&note_buf[j], "GNU", 4) == 0) {
-                        image->detected_os = ELFOSABI_LINUX;
-                        break;
-                    }
-                }
+                image->detected_os = elf_note_detect_os((const uint8_t *)note_buf, to_read);
             }
         }
     }
