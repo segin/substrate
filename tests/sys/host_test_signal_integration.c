@@ -23,13 +23,18 @@ static int proc_exit_status;
 static int coredump_called;
 static int coredump_pid;
 static int coredump_result;
+static int sched_wakeup_calls;
+static void *last_sched_wakeup_chan;
 
 void mutex_init(mutex_t *m, const char *name) { (void)m; (void)name; }
 void mutex_lock(mutex_t *m) { (void)m; }
 void mutex_unlock(mutex_t *m) { (void)m; }
 void sched_yield(void) {}
 void sched_sleep(void *chan) { (void)chan; }
-void sched_wakeup(void *chan) { (void)chan; }
+void sched_wakeup(void *chan) {
+    sched_wakeup_calls++;
+    last_sched_wakeup_chan = chan;
+}
 int sleepq_remove_thread(thread_t *t) { (void)t; return 0; }
 void kprint(const char *msg) { (void)msg; }
 void panic(const char *msg) { (void)msg; assert(!"panic"); }
@@ -86,6 +91,8 @@ static void reset_env(void) {
     coredump_called = 0;
     coredump_pid = -1;
     coredump_result = 0;
+    sched_wakeup_calls = 0;
+    last_sched_wakeup_chan = NULL;
     for (int i = 0; i < MAX_PROCS; i++) {
         processes[i].pid = -1;
         processes[i].rlimits[RLIMIT_CORE].rlim_cur = RLIM_INFINITY;
@@ -321,6 +328,8 @@ static void test_sigstop_stops_entire_process(void) {
     assert(leader->state == THREAD_STOPPED);
     assert(peer->state == THREAD_STOPPED);
     assert(leader->wait_reason != NULL);
+    assert(sched_wakeup_calls == 1);
+    assert(last_sched_wakeup_chan == &parent->p_children);
 }
 
 static void test_sigkill_resumes_stopped_threads_before_exit(void) {
@@ -396,17 +405,32 @@ static void test_sigchld_stop_continue_respect_nocldstop(void) {
 
     signal_handle_pending(&regs);
     assert(parent_thread->sig_pending & sigmask(SIGCHLD));
+    assert(sched_wakeup_calls == 1);
+    assert(last_sched_wakeup_chan == &parent->p_children);
 
     parent_thread->sig_pending = 0;
     parent->sig_actions[SIGCHLD - 1].sa_flags = SA_NOCLDSTOP;
+    child->p_flag = P_WAITED;
+    sched_wakeup_calls = 0;
+    last_sched_wakeup_chan = NULL;
     psignal(child, SIGCONT);
     assert((parent_thread->sig_pending & sigmask(SIGCHLD)) == 0);
+    assert((child->p_flag & P_WAITED) == 0);
+    assert(child->p_flag & P_CONTINUED);
+    assert(sched_wakeup_calls == 1);
+    assert(last_sched_wakeup_chan == &parent->p_children);
 
     parent->sig_actions[SIGCHLD - 1].sa_flags = 0;
     child->state = SSTOP;
     child_thread->state = THREAD_STOPPED;
+    child->p_flag = P_WAITED;
+    sched_wakeup_calls = 0;
+    last_sched_wakeup_chan = NULL;
     psignal(child, SIGCONT);
     assert(parent_thread->sig_pending & sigmask(SIGCHLD));
+    assert((child->p_flag & P_WAITED) == 0);
+    assert(sched_wakeup_calls == 1);
+    assert(last_sched_wakeup_chan == &parent->p_children);
 }
 
 static void test_sa_core_signal_invokes_coredump_hook(void) {

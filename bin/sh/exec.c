@@ -26,34 +26,6 @@ struct termios shell_tmodes;
 extern int tcsetpgrp(int fd, pid_t pgrp);
 extern int dup(int oldfd);
 extern int setpgid(pid_t pid, pid_t pgid);
-typedef void (*sig_t)(int);
-extern sig_t signal(int sig, sig_t func);
-
-#ifndef SIG_DFL
-#define SIG_DFL ((sig_t)0)
-#endif
-#ifndef SIG_IGN
-#define SIG_IGN ((sig_t)1)
-#endif
-
-#ifndef SIGINT
-#define SIGINT 2
-#endif
-#ifndef SIGQUIT
-#define SIGQUIT 3
-#endif
-#ifndef SIGTSTP
-#define SIGTSTP 18
-#endif
-#ifndef SIGTTIN
-#define SIGTTIN 21
-#endif
-#ifndef SIGTTOU
-#define SIGTTOU 22
-#endif
-#ifndef SIGCHLD
-#define SIGCHLD 20
-#endif
 #include <errno.h>
 
 /* Forward declarations of builtins */

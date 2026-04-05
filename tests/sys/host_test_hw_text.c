@@ -485,7 +485,7 @@ static void test_redraw_active_keeps_status_row_visible(void) {
     assert(mock_vga_cells[hw_text_vram_index(2U, (size_t)vt_get_status_row())] == entry);
 }
 
-static void test_full_screen_scroll_uses_crtc_start_address(void) {
+static void test_full_screen_scroll_stays_software_only(void) {
     uint16_t before_start;
     uint16_t after_start;
     uint16_t blank;
@@ -507,26 +507,9 @@ static void test_full_screen_scroll_uses_crtc_start_address(void) {
     after_start = (uint16_t)(((uint16_t)mock_crtc_regs[VGA_CRTC_START_HI] << 8) |
                              mock_crtc_regs[VGA_CRTC_START_LO]);
 
-    assert(after_start == (uint16_t)((before_start + (uint16_t)mock_vt_width) %
-                                     HW_TEXT_VRAM_CELLS));
+    assert(after_start == before_start);
+    assert((mock_vt.buffer[0] & 0x00ffU) == 'B');
     assert(mock_vga_cells[hw_text_vram_index(0, (size_t)(mock_vt_height - 2))] == blank);
-}
-
-static void test_cursor_position_tracks_crtc_start_address(void) {
-    uint16_t cursor_pos;
-
-    reset_state();
-    mock_vt.row = vt_get_visible_height() - 1;
-    mock_vt.col = 7;
-
-    hw_text_set_start_addr_locked((uint16_t)mock_vt_width);
-    hw_text_update_cursor_locked(&mock_vt);
-
-    cursor_pos = (uint16_t)(((uint16_t)mock_crtc_regs[VGA_CRTC_CURSOR_HI] << 8) |
-                            mock_crtc_regs[VGA_CRTC_CURSOR_LO]);
-    assert(cursor_pos == (uint16_t)(mock_vt_width +
-                                    (vt_get_visible_height() - 1) * mock_vt_width +
-                                    7));
 }
 
 static void test_text_attrs_emulate_bold_reverse_and_underline(void) {
@@ -557,8 +540,7 @@ int main(void) {
     test_terminal_size_queries_current_crtc_geometry();
     test_refresh_statusline_syncs_status_row_without_rerender();
     test_redraw_active_keeps_status_row_visible();
-    test_full_screen_scroll_uses_crtc_start_address();
-    test_cursor_position_tracks_crtc_start_address();
+    test_full_screen_scroll_stays_software_only();
     test_text_attrs_emulate_bold_reverse_and_underline();
     puts("host_test_hw_text: PASS");
     return 0;

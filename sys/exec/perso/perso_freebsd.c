@@ -5,8 +5,15 @@
 #include <exec/perso/personality.h>
 #include <kern/version.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <sys/syscall_impl.h>
 #include <sys/kern_syscalls.h>
+#include <sys/copy.h>
+#include <string.h>
+
+/* Personality Signal Hooks */
+extern void freebsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
+extern int freebsd_sys_sigreturn(void *regs);
 
 // FreeBSD syscall numbers (from sys/syscall.h)
 static void *freebsd_syscalls[MAX_SYSCALLS] = {
@@ -24,7 +31,7 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_chmod]    = &sys_chmod,
     [FREEBSD_SYS_chown]    = &sys_lchown,
     [FREEBSD_SYS_break]    = NULL,
-    [FREEBSD_SYS_lseek]    = &sys_freebsd_lseek,
+    [FREEBSD_SYS_lseek]    = (void *)&sys_freebsd_lseek,
     [FREEBSD_SYS_getpid]   = &sys_getpid,
     [FREEBSD_SYS_mount]    = &sys_mount,
     [FREEBSD_SYS_umount]   = &sys_umount,
@@ -34,11 +41,11 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_access]   = &sys_access,
     [FREEBSD_SYS_sync]     = &sys_sync,
     [FREEBSD_SYS_kill]     = &sys_kill,
-    [FREEBSD_SYS_stat]     = &sys_freebsd11_stat,
+    [FREEBSD_SYS_stat]     = (void *)&sys_freebsd11_stat,
     [FREEBSD_SYS_getppid]  = &sys_getpid,
-    [FREEBSD_SYS_lstat]    = &sys_freebsd11_lstat,
+    [FREEBSD_SYS_lstat]    = (void *)&sys_freebsd11_lstat,
     [FREEBSD_SYS_dup2]     = &sys_dup2,
-    [FREEBSD_SYS_pipe]     = &sys_pipe,
+    [FREEBSD_SYS_pipe]     = (void *)&sys_pipe,
     [FREEBSD_SYS_getegid]  = &sys_getegid,
     [FREEBSD_SYS_setgid]   = &sys_setgid,
     [FREEBSD_SYS_getgid]   = &sys_getgid,
@@ -46,7 +53,7 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_symlink]  = &sys_symlink,
     [FREEBSD_SYS_readlink] = &sys_readlink,
     [FREEBSD_SYS_execve]   = &sys_execve,
-    [FREEBSD_SYS_fstat]    = &sys_freebsd11_fstat,
+    [FREEBSD_SYS_fstat]    = (void *)&sys_freebsd11_fstat,
     [FREEBSD_SYS_vfork]    = &sys_vfork,
     [FREEBSD_SYS_mincore]  = NULL,
     [FREEBSD_SYS_mkdir]    = &sys_mkdir,
@@ -55,8 +62,9 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_freebsd11_stat]  = &sys_freebsd11_stat,
     [FREEBSD_SYS_freebsd11_fstat] = &sys_freebsd11_fstat,
     [FREEBSD_SYS_freebsd11_lstat] = &sys_freebsd11_lstat,
-    [FREEBSD_SYS_poll]     = &sys_poll,
-    [FREEBSD_SYS___getcwd] = &sys_getcwd,
+    [FREEBSD_SYS_poll]     = (void *)&sys_poll,
+    [FREEBSD_SYS_mmap_freebsd13] = (void *)&sys_freebsd_mmap,
+    [FREEBSD_SYS___getcwd] = (void *)&sys_getcwd,
     [FREEBSD_SYS_times]    = &sys_times,
 };
 
@@ -155,27 +163,6 @@ static struct syscall_fmt freebsd_fmts[MAX_SYSCALLS] = {
 
 extern char *strncpy(char *dest, const char *src, size_t n);
 extern void *memset(void *s, int c, size_t n);
-
-int sys_freebsd4_uname(void *vbuf) {
-    struct freebsd4_utsname kname;
-    if (!vbuf) return -1;
-    
-    memset(&kname, 0, sizeof(struct freebsd4_utsname));
-    strncpy(kname.sysname, "FreeBSD", 32);
-    strncpy(kname.nodename, kernel_hostname, 32);
-    strncpy(kname.release, "4.11-RELEASE", 32);
-    strncpy(kname.version, "FreeBSD 4.11-RELEASE #0", 32);
-#if defined(__x86_64__)
-    strncpy(kname.machine, "amd64", 32);
-#else
-    strncpy(kname.machine, "i386", 32);
-#endif
-
-    if (copyout(&kname, vbuf, sizeof(struct freebsd4_utsname)) != 0) return -14;
-    return 0;
-}
-
-
 
 struct personality personality_freebsd = {
     .name = "FreeBSD",

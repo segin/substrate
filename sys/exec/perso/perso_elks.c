@@ -1676,7 +1676,7 @@ static int elks_sys_brk(uint32_t brk_off, uint32_t unused1, uint32_t unused2,
     }
 
     linear = base + (uintptr_t)(uint16_t)brk_off;
-    current = (uintptr_t)sys_brk((uint32_t)linear);
+    current = (uintptr_t)sys_brk((void *)(uintptr_t)linear);
     if (current < base) {
         return -ENOMEM;
     }
@@ -1906,7 +1906,7 @@ static int elks_sys_sbrk(uint32_t increment, uint32_t oldbrk_off, uint32_t unuse
     if (new_brk < base || (new_brk - base) > (uintptr_t)(limit + 1U)) {
         return -ENOMEM;
     }
-    (void)sys_brk((uint32_t)new_brk);
+    (void)sys_brk((void *)(uintptr_t)new_brk);
     if ((uintptr_t)current_process->brk != new_brk) {
         return -ENOMEM;
     }

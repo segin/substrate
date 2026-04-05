@@ -15,6 +15,8 @@
 #include <sys/tty.h>
 #include <sys/vt.h>
 #include <sys/vtio.h>
+#include <sys/copy.h>
+#include <sys/errno.h>
 #include "fb.h"
 #include "fb_console.h"
 #include "fb_ops.h"
@@ -1146,46 +1148,63 @@ static int fb_vt_tty_write_room(struct tty *tty) {
 
 static int fb_vt_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
     vt_state_t *vt;
-    int *value;
+    int val;
 
     if (!tty || !arg) {
-        return -1;
+        return -EINVAL;
     }
 
     vt = (vt_state_t *)tty->driver_data;
     if (!vt) {
-        return -1;
+        return -EINVAL;
     }
 
-    value = (int *)(uintptr_t)arg;
     switch (cmd) {
     case VTIOCGTABW:
-        *value = (int)(vt->tab_width ? vt->tab_width : 8);
+        val = (int)(vt->tab_width ? vt->tab_width : 8);
+        if (copyout(&val, (void *)arg, sizeof(int)) != 0) {
+            return -EFAULT;
+        }
         return 0;
     case VTIOCSTABW:
-        if (*value < 1 || *value > 32) {
-            return -1;
+        if (copyin((void *)arg, &val, sizeof(int)) != 0) {
+            return -EFAULT;
         }
-        vt->tab_width = (uint8_t)*value;
+        if (val < 1 || val > 32) {
+            return -EINVAL;
+        }
+        vt->tab_width = (uint8_t)val;
         memset(vt->tab_stops, 0, sizeof(vt->tab_stops));
-        for (int col = *value; col < vt_get_width(); col += *value) {
+        for (int col = (int)vt->tab_width; col < vt_get_width(); col += (int)vt->tab_width) {
             vt->tab_stops[col / 32] |= (uint32_t)1U << (col % 32);
         }
         return 0;
     case VTIOCGCURSOR:
-        *value = vt->cursor_visible ? 1 : 0;
+        val = vt->cursor_visible ? 1 : 0;
+        if (copyout(&val, (void *)arg, sizeof(int)) != 0) {
+            return -EFAULT;
+        }
         return 0;
     case VTIOCSCURSOR:
-        vt->cursor_visible = *value ? 1 : 0;
+        if (copyin((void *)arg, &val, sizeof(int)) != 0) {
+            return -EFAULT;
+        }
+        vt->cursor_visible = val ? 1 : 0;
         if (vt->id == vt_get_active()) {
             fb_console_update_cursor_locked(vt);
         }
         return 0;
     case VTIOCGCURBLINK:
-        *value = vt->cursor_blink ? 1 : 0;
+        val = vt->cursor_blink ? 1 : 0;
+        if (copyout(&val, (void *)arg, sizeof(int)) != 0) {
+            return -EFAULT;
+        }
         return 0;
     case VTIOCSCURBLINK:
-        vt->cursor_blink = *value ? 1 : 0;
+        if (copyin((void *)arg, &val, sizeof(int)) != 0) {
+            return -EFAULT;
+        }
+        vt->cursor_blink = val ? 1 : 0;
         if (!vt->cursor_blink) {
             cursor_blink_phase = 1;
         }
@@ -1194,7 +1213,7 @@ static int fb_vt_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
         }
         return 0;
     default:
-        return -1;
+        return -ENOTTY;
     }
 }
 

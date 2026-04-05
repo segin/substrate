@@ -155,7 +155,7 @@ struct linux_mmap_arg_struct {
     uint32_t offset;
 };
 
-void *linux_sys_mmap(struct linux_mmap_arg_struct *args);
+void *linux_sys_mmap(void *uap);
 void *linux_sys_mmap2(void *addr, size_t len, int prot, int flags, int fd, uint32_t pgoffset);
 int   linux_sys_lseek(int fd, int32_t offset, int whence);
 int   linux_sys__llseek(int fd, uint32_t offset_hi, uint32_t offset_lo, int64_t *result, int whence);

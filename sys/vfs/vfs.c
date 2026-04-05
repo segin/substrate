@@ -723,6 +723,35 @@ int vfs_mkdir(const char *path, uint16_t permission) {
     return parent_node->mkdir(parent_node, name, permission);
 }
 
+int vfs_rmdir(const char *path) {
+    fs_node_t *parent_node = NULL;
+    char name[128];
+    int ret;
+
+    ret = vfs_resolve_parent_path(path, &parent_node, name, sizeof(name));
+    if (ret != 0) {
+        return ret;
+    }
+    if ((parent_node->flags & 0x7) != FS_DIRECTORY) {
+        return -ENOTDIR;
+    }
+    
+    // Check if it exists
+    fs_node_t *node = parent_node->finddir(parent_node, name);
+    if (!node) {
+        return -ENOENT;
+    }
+    if ((node->flags & 0x7) != FS_DIRECTORY) {
+        return -ENOTDIR;
+    }
+    
+    if (!parent_node->rmdir) {
+        return -EOPNOTSUPP;
+    }
+
+    return parent_node->rmdir(parent_node, name);
+}
+
 int vfs_mknod(const char *path, uint16_t mode, uint32_t dev) {
     fs_node_t *parent_node = NULL;
     char name[128];

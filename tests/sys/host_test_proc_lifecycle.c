@@ -267,6 +267,14 @@ static void test_waitpid_job_control_lifecycle(void) {
     assert(WIFCONTINUED(status));
     assert((child->p_flag & P_CONTINUED) == 0);
 
+    child->state = SSTOP;
+    child->p_flag &= (uint16_t)~P_WAITED;
+    child->p_xsig = SIGTSTP;
+    assert(kern_wait4(child->pid, &status, WUNTRACED, NULL) == child->pid);
+    assert(WIFSTOPPED(status));
+    assert(WSTOPSIG(status) == SIGTSTP);
+    assert(child->p_flag & P_WAITED);
+
     child->state = SZOMB;
     child->exit_code = 55;
     child->vm_map = (vm_map_t *)0x7777;

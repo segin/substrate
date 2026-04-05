@@ -114,6 +114,7 @@ int rename_fs(fs_node_t *old_parent, const char *old_name, fs_node_t *new_parent
 int statfs_fs(fs_node_t *node, struct statfs *buf);
 int mknod_fs(fs_node_t *node, const char *name, uint16_t mode, uint32_t dev);
 int vfs_mkdir(const char *path, uint16_t permission);
+int vfs_rmdir(const char *path);
 int vfs_mknod(const char *path, uint16_t mode, uint32_t dev);
 
 int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode);

@@ -3,7 +3,8 @@
  *
  * Loaded by stage1 at physical 0x5000.  Runs in 32-bit protected mode
  * with a flat memory model.  Reads the ext2 filesystem to find /vmunix,
- * displays a boot prompt with timeout, constructs a Multiboot info
+ * consumes the command line collected by stage1 (or falls back to its own
+ * protected-mode prompt), constructs a Multiboot info
  * structure, loads the ELF kernel at its physical addresses, and jumps
  * to the entry point with EAX=0x2BADB002 and EBX=multiboot_info pointer.
  */
@@ -235,6 +236,7 @@ static void putc_both(char c)
 /* ==== Keyboard input (i8042-compatible polling) ==== */
 
 static char kbd_pending_char;
+static uint8_t kbd_shift_down;
 
 static int kbd_ready(void)
 {
@@ -266,10 +268,11 @@ static void kbd_flush(void)
 static void kbd_prepare(void)
 {
 	kbd_pending_char = 0;
+	kbd_shift_down = 0;
 	kbd_flush();
 }
 
-/* Simple scancode set 1 -> ASCII (US layout, lowercase only) */
+/* Simple scancode set 1 -> ASCII (US layout) */
 static const char scancode_ascii[128] = {
 	0, 27, '1','2','3','4','5','6','7','8','9','0','-','=', '\b',
 	'\t','q','w','e','r','t','y','u','i','o','p','[',']', '\n',
@@ -278,14 +281,32 @@ static const char scancode_ascii[128] = {
 	'*', 0, ' '
 };
 
+static const char scancode_ascii_shift[128] = {
+	0, 27, '!','@','#','$','%','^','&','*','(',')','_','+', '\b',
+	'\t','Q','W','E','R','T','Y','U','I','O','P','{','}', '\n',
+	0, 'A','S','D','F','G','H','J','K','L',':','"', '~',
+	0, '|','Z','X','C','V','B','N','M', '<','>','?', 0,
+	'*', 0, ' '
+};
+
 static char kbd_decode_scancode(uint8_t sc)
 {
-	if (sc == 0 || sc == 0xE0 || sc == 0xE1 || sc == 0xFA || sc == 0xFE || sc == 0xAA)
+	if (sc == 0 || sc == 0xE0 || sc == 0xE1 || sc == 0xFA || sc == 0xFE)
 		return 0;
+
+	if (sc == 0x2A || sc == 0x36) {
+		kbd_shift_down = 1;
+		return 0;
+	}
+	if (sc == 0xAA || sc == 0xB6) {
+		kbd_shift_down = 0;
+		return 0;
+	}
 	if (sc & 0x80)
 		return 0;
-	if (sc < sizeof(scancode_ascii))
-		return scancode_ascii[sc];
+	if (sc < sizeof(scancode_ascii)) {
+		return kbd_shift_down ? scancode_ascii_shift[sc] : scancode_ascii[sc];
+	}
 	return 0;
 }
 
@@ -706,9 +727,26 @@ jump_to_kernel(uint32_t entry)
 #define DEFAULT_CMDLINE "vmunix serial_debug root=/dev/storage/ide0"
 #define BOOT_TIMEOUT   5            /* seconds to wait for input */
 
+static void copy_bootline(char *dst, uint32_t dst_size, const char *src)
+{
+	uint32_t i;
+
+	if (!dst || dst_size == 0) {
+		return;
+	}
+	if (!src) {
+		dst[0] = '\0';
+		return;
+	}
+
+	for (i = 0; i + 1 < dst_size && src[i] != '\0'; i++)
+		dst[i] = src[i];
+	dst[i] = '\0';
+}
+
 __attribute__((section(".text.entry")))
 void stage2_main(uint32_t e820_count, struct e820_entry *e820_map,
-                 uint32_t drive_num)
+                 uint32_t drive_num, const char *bootline)
 {
 	zero_bss();
 
@@ -727,14 +765,23 @@ void stage2_main(uint32_t e820_count, struct e820_entry *e820_map,
 		goto hang;
 	}
 
+	const char *kernel_name = DEFAULT_KERNEL;
+	cmdline_buf[0] = '\0';
+
+	if (bootline && *bootline != '\0') {
+		copy_bootline(cmdline_buf, sizeof(cmdline_buf), bootline);
+		goto do_boot;
+	}
+
+	if (bootline) {
+		goto do_boot;
+	}
+
 	puts("boot: ");
 	kbd_prepare();
 
 	/* Wait for keypress or timeout */
 	int got_key = wait_for_key(BOOT_TIMEOUT);
-
-	const char *kernel_name = DEFAULT_KERNEL;
-	cmdline_buf[0] = '\0';
 
 	if (got_key) {
 		/* User wants to type a command line */
@@ -796,6 +843,8 @@ do_boot:
 	/* Determine kernel filename from cmdline (first word) */
 	{
 		const char *p = cmdline_buf;
+		while (*p == ' ')
+			p++;
 		if (*p == '/')
 			p++;
 		/* If cmdline is empty, use default */

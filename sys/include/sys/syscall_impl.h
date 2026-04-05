@@ -100,7 +100,7 @@ extern void *sys_mmap(void*, size_t, int, int, int, uint64_t);
 extern int sys_munmap(void*, size_t);
 extern int sys_mprotect(void*, size_t, int);
 extern int sys_msync(void*, size_t, int);
-extern int sys_brk(uint32_t);
+extern void *sys_brk(void *);
 
 /* Signals */
 extern int sys_kill(int, int);

@@ -109,10 +109,8 @@ static size_t kmem_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buf
      */
     void *kva = (void *)(uintptr_t)offset;
 
-    /* copyout returns 0 on success, -1 on fault */
-    if (copyout(kva, buffer, size) != 0) {
-        return (size_t)-EFAULT;
-    }
+    /* buffer is a kernel pointer here (sys_read double-buffers via IO_CHUNK_SIZE) */
+    memcpy(buffer, kva, size);
 
     return size;
 }
@@ -142,11 +140,8 @@ static size_t kmem_write(fs_node_t *node, off_t offset, size_t size, const uint8
      */
     void *kva = (void *)(uintptr_t)offset;
 
-    /* copyin returns 0 on success, -1 on fault */
-    /* Note: casting const away is necessary for copyin prototype but we are reading from it */
-    if (copyin(buffer, kva, size) != 0) {
-        return (size_t)-EFAULT;
-    }
+    /* buffer is a kernel pointer here (sys_write double-buffers via IO_CHUNK_SIZE) */
+    memcpy(kva, (void *)buffer, size);
 
     return size;
 }

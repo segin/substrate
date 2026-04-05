@@ -77,12 +77,23 @@ static int elf_detect_osabi(const Elf32_Ehdr *ehdr) {
         return ELFOSABI_SUBSTRATE;
     }
 
-    if (ehdr->e_ident[EI_OSABI] == ELFOSABI_FREEBSD) {
-        return ELFOSABI_FREEBSD;
-    }
-    if (ehdr->e_ident[EI_OSABI] == ELFOSABI_LINUX) {
+    /* ELFOSABI_LINUX (3) or ELFOSABI_GNU (3) */
+    if (ehdr->e_ident[EI_OSABI] == 3) {
         return ELFOSABI_LINUX;
     }
+    /* ELFOSABI_FREEBSD (9) */
+    if (ehdr->e_ident[EI_OSABI] == 9) {
+        return ELFOSABI_FREEBSD;
+    }
+    /* ELFOSABI_NETBSD (2) */
+    if (ehdr->e_ident[EI_OSABI] == 2) {
+        return ELFOSABI_NETBSD;
+    }
+    /* ELFOSABI_OPENBSD (12) */
+    if (ehdr->e_ident[EI_OSABI] == 12) {
+        return ELFOSABI_OPENBSD;
+    }
+
     return ELFOSABI_SUBSTRATE;
 }
 
@@ -144,6 +155,25 @@ static int elf_read_image_info(fs_node_t *file, elf_image_info_t *image) {
                    image->ehdr.e_phoff >= phdr->p_offset &&
                    image->ehdr.e_phoff < (phdr->p_offset + phdr->p_filesz)) {
             image->at_phdr = phdr->p_vaddr + (image->ehdr.e_phoff - phdr->p_offset);
+        }
+
+        /* Check for personality notes if OSABI is NONE/SUBSTRATE */
+        if (phdr->p_type == PT_NOTE && image->detected_os == ELFOSABI_SUBSTRATE) {
+            char note_buf[256];
+            uint32_t to_read = (phdr->p_filesz < sizeof(note_buf)) ? phdr->p_filesz : sizeof(note_buf);
+            if (file->read(file, phdr->p_offset, to_read, (uint8_t *)note_buf) == to_read) {
+                /* Scan for "FreeBSD" or "GNU" */
+                for (uint32_t j = 0; j < to_read - 8; j++) {
+                    if (memcmp(&note_buf[j], "FreeBSD", 8) == 0) {
+                        image->detected_os = ELFOSABI_FREEBSD;
+                        break;
+                    }
+                    if (memcmp(&note_buf[j], "GNU", 4) == 0) {
+                        image->detected_os = ELFOSABI_LINUX;
+                        break;
+                    }
+                }
+            }
         }
     }
 
@@ -587,6 +617,8 @@ static int exec_count_args(char *const array[], int *count_out, const char *err_
 }
 
 static int exec_copy_args(char *const array[], int count, char **k_array, char **p_buf, size_t *remaining, const char *err_msg) {
+    int from_user = is_user_ptr(array);
+
     for (int i = 0; i < count; i++) {
         char *uarg;
         int ret;
@@ -596,23 +628,35 @@ static int exec_copy_args(char *const array[], int count, char **k_array, char *
         k_array[i] = *p_buf;
 
         size_t copied_len = 0;
-        if (is_user_ptr(uarg)) {
+        if (from_user) {
+            /* Full userspace call: all string pointers MUST be user pointers */
+            if (!is_user_ptr(uarg)) return -14; 
             ret = copyinstr(uarg, *p_buf, *remaining, &copied_len);
         } else {
-            size_t len = strlen(uarg) + 1;
-            if (len > *remaining) {
-                ret = -7; // E2BIG
+            /* 
+             * Internal kernel call (e.g. init or #! script interpreter).
+             * Pointers in the array can be either kernel or user (from original argv).
+             */
+            if (!uarg) {
+                ret = -14;
+            } else if (is_user_ptr(uarg)) {
+                ret = copyinstr(uarg, *p_buf, *remaining, &copied_len);
             } else {
-                strcpy(*p_buf, uarg);
-                copied_len = len;
-                ret = 0;
+                size_t len = strlen(uarg) + 1;
+                if (len > *remaining) {
+                    ret = -7; // E2BIG
+                } else {
+                    strcpy(*p_buf, uarg);
+                    copied_len = len;
+                    ret = 0;
+                }
             }
         }
 
         if (ret != 0) {
             kprint(err_msg);
             if (ret == -2) return -7; // E2BIG
-            if (ret == -1) return -14; // EFAULT
+            if (ret == -1 || ret == -14) return -14; // EFAULT
             return (ret < 0) ? ret : -1;
         }
 

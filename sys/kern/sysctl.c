@@ -181,7 +181,9 @@ int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, voi
         // req.oldidx is updated by handler to indicate how much was written
         // or how much would have been written
         size_t used = req.oldidx;
-        copyout(&used, oldlenp, sizeof( used ));
+        if (copyout(&used, oldlenp, sizeof(used)) != 0) {
+            error = EFAULT;
+        }
     }
 
     return error;

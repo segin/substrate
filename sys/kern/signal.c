@@ -451,10 +451,14 @@ void psignal(process_t *p, int sig) {
         if (p->state == SSTOP) {
             signal_resume_process_threads(p);
             p->p_flag |= P_CONTINUED;
+            p->p_flag &= (uint16_t)~P_WAITED;
             /* Notify parent if not SA_NOCLDSTOP */
-            if (p->p_parent && 
+            if (p->p_parent &&
                 !(p->p_parent->sig_actions[SIGCHLD-1].sa_flags & SA_NOCLDSTOP)) {
                 psignal(p->p_parent, SIGCHLD);
+            }
+            if (p->p_parent) {
+                sched_wakeup(&p->p_parent->p_children);
             }
         }
     }
@@ -803,9 +807,12 @@ void signal_handle_pending(registers_t *regs) {
              signal_stop_process_threads(current_process, "Signal");
              
              // Notify parent if not SA_NOCLDSTOP
-             if (current_process->p_parent && 
+             if (current_process->p_parent &&
                  !(current_process->p_parent->sig_actions[SIGCHLD-1].sa_flags & SA_NOCLDSTOP)) {
                  psignal(current_process->p_parent, SIGCHLD);
+             }
+             if (current_process->p_parent) {
+                 sched_wakeup(&current_process->p_parent->p_children);
              }
              signal_clear_trap_context(current_thread, sig);
              sched_yield();

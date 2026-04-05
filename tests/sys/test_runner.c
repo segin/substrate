@@ -178,6 +178,10 @@ void run_kernel_tests(void) {
         run_mmap_tests();
     }
 
+    if (all || strcmp(test_arg, "uname") == 0) {
+        test_uname();
+    }
+
     if (all || strcmp(test_arg, "futex") == 0) {
          extern void test_futex(void);
          test_futex();

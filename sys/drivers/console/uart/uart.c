@@ -8,6 +8,7 @@
 #include <sys/errno.h>
 #include <sys/poll.h>
 #include <vfs/vfs.h>
+#include <sys/copy.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -164,52 +165,50 @@ static size_t uart_node_write(fs_node_t *node, off_t offset, size_t size, const 
 
 static int uart_node_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     uint16_t port = uart_node_port(node);
-    if (!port)
+    int bits;
+
+    if (!port) {
         return -ENOTTY;
+    }
 
     switch (request) {
     case TIOCMGET: {
         /* Read modem control/status lines */
         uint8_t mcr = inb(port + 4);
         uint8_t msr = inb(port + 6);
-        int bits = 0;
+        bits = 0;
         if (mcr & UART_MCR_DTR) bits |= TIOCM_DTR;
         if (mcr & UART_MCR_RTS) bits |= TIOCM_RTS;
         if (msr & UART_MSR_CTS) bits |= TIOCM_CTS;
         if (msr & UART_MSR_DSR) bits |= TIOCM_DSR;
         if (msr & UART_MSR_DCD) bits |= TIOCM_CD;
         if (msr & UART_MSR_RI)  bits |= TIOCM_RI;
-        if (arg)
-            *(int *)arg = bits;
+        if (copyout(&bits, arg, sizeof(int)) != 0) {
+            return -EFAULT;
+        }
         return 0;
     }
-    case TIOCMSET: {
-        /* Set modem control lines */
-        if (!arg) return -EINVAL;
-        int bits = *(int *)arg;
-        uint8_t mcr = inb(port + 4) & ~(UART_MCR_DTR | UART_MCR_RTS);
-        if (bits & TIOCM_DTR) mcr |= UART_MCR_DTR;
-        if (bits & TIOCM_RTS) mcr |= UART_MCR_RTS;
-        outb(port + 4, mcr);
-        return 0;
-    }
-    case TIOCMBIS: {
-        /* Set indicated modem bits */
-        if (!arg) return -EINVAL;
-        int bits = *(int *)arg;
-        uint8_t mcr = inb(port + 4);
-        if (bits & TIOCM_DTR) mcr |= UART_MCR_DTR;
-        if (bits & TIOCM_RTS) mcr |= UART_MCR_RTS;
-        outb(port + 4, mcr);
-        return 0;
-    }
+    case TIOCMSET:
+    case TIOCMBIS:
     case TIOCMBIC: {
-        /* Clear indicated modem bits */
+        /* Modem control line modifications */
         if (!arg) return -EINVAL;
-        int bits = *(int *)arg;
+        if (copyin(arg, &bits, sizeof(int)) != 0) {
+            return -EFAULT;
+        }
+
         uint8_t mcr = inb(port + 4);
-        if (bits & TIOCM_DTR) mcr &= ~UART_MCR_DTR;
-        if (bits & TIOCM_RTS) mcr &= ~UART_MCR_RTS;
+        if (request == TIOCMSET) {
+            mcr &= ~(UART_MCR_DTR | UART_MCR_RTS);
+            if (bits & TIOCM_DTR) mcr |= UART_MCR_DTR;
+            if (bits & TIOCM_RTS) mcr |= UART_MCR_RTS;
+        } else if (request == TIOCMBIS) {
+            if (bits & TIOCM_DTR) mcr |= UART_MCR_DTR;
+            if (bits & TIOCM_RTS) mcr |= UART_MCR_RTS;
+        } else { /* TIOCMBIC */
+            if (bits & TIOCM_DTR) mcr &= ~UART_MCR_DTR;
+            if (bits & TIOCM_RTS) mcr &= ~UART_MCR_RTS;
+        }
         outb(port + 4, mcr);
         return 0;
     }
@@ -227,8 +226,10 @@ static int uart_node_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     }
     case TIOCOUTQ: {
         /* Report TX bytes pending */
-        if (arg)
-            *(int *)arg = (int)uart_tx.count;
+        bits = (int)uart_tx.count;
+        if (copyout(&bits, arg, sizeof(int)) != 0) {
+            return -EFAULT;
+        }
         return 0;
     }
     default:

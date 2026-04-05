@@ -125,18 +125,15 @@ static size_t mem_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buff
             if (chunk > size) chunk = size;
 
             uintptr_t kernel_va = 0xC0000000 + (uintptr_t)offset;
-            if (copyout((void*)kernel_va, buffer, chunk) != 0) {
-                return total_read ? total_read : (size_t)-EFAULT;
-            }
+            /* buffer is a kernel pointer here (sys_read double-buffers via IO_CHUNK_SIZE) */
+            memcpy(buffer, (void*)kernel_va, chunk);
         } else {
             /* HighMem access via pmap_kenter window */
             void *win = mem_window_setup(offset, size, &chunk);
             if (!win) return total_read ? total_read : (size_t)-EIO;
 
-            if (copyout(win, buffer, chunk) != 0) {
-                mem_window_teardown();
-                return total_read ? total_read : (size_t)-EFAULT;
-            }
+            /* buffer is a kernel pointer here */
+            memcpy(buffer, win, chunk);
 
             mem_window_teardown();
         }
@@ -170,18 +167,15 @@ static size_t mem_write(fs_node_t *node, off_t offset, size_t size, const uint8_
             if (chunk > size) chunk = size;
 
             uintptr_t kernel_va = 0xC0000000 + (uintptr_t)offset;
-            if (copyin(buffer, (void*)kernel_va, chunk) != 0) {
-                return total_written ? total_written : (size_t)-EFAULT;
-            }
+            /* buffer is a kernel pointer here (sys_write double-buffers via IO_CHUNK_SIZE) */
+            memcpy((void*)kernel_va, buffer, chunk);
         } else {
             /* HighMem access via pmap_kenter window */
             void *win = mem_window_setup(offset, size, &chunk);
             if (!win) return total_written ? total_written : (size_t)-EIO;
 
-            if (copyin(buffer, win, chunk) != 0) {
-                mem_window_teardown();
-                return total_written ? total_written : (size_t)-EFAULT;
-            }
+            /* buffer is a kernel pointer here */
+            memcpy(win, buffer, chunk);
 
             mem_window_teardown();
         }

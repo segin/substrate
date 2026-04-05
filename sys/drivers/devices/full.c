@@ -50,9 +50,8 @@ static size_t full_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buf
     while (remaining > 0) {
         size_t chunk = (remaining > sizeof(zeros)) ? sizeof(zeros) : remaining;
 
-        if (copyout(zeros, dst, chunk) != 0) {
-            return (size_t)-EFAULT;
-        }
+        /* dst is a kernel pointer here (sys_read double-buffers via 4096-byte blocks) */
+        memcpy(dst, zeros, chunk);
 
         dst += chunk;
         remaining -= chunk;

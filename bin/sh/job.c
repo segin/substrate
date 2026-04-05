@@ -8,9 +8,6 @@
 #include <termios.h>
 
 extern int tcsetpgrp(int fd, pid_t pgrp);
-#ifndef SIGCONT
-#define SIGCONT 18
-#endif
 #include "util.h"
 
 job_t *first_job = NULL;

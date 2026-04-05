@@ -183,6 +183,7 @@ static int elks_dup_vector(char *const src[], char ***out_vec) {
     int count = 0;
     int ret;
     int i;
+    int from_user = elks_is_user_ptr(src);
 
     *out_vec = NULL;
     ret = elks_count_vector(src, &count);
@@ -209,14 +210,35 @@ static int elks_dup_vector(char *const src[], char ***out_vec) {
             break;
         }
 
-        if (elks_is_user_ptr(item)) {
+        if (from_user) {
+            /* Full userspace call: all string pointers MUST be user pointers */
+            if (!elks_is_user_ptr(item)) {
+                ret = -EFAULT;
+                goto fail;
+            }
             ret = copyinstr(item, NULL, ELKS_ARG_MAX_BYTES, &copied_len);
             if (ret != 0) {
                 ret = (ret == ENAMETOOLONG) ? -E2BIG : -EFAULT;
                 goto fail;
             }
         } else {
-            copied_len = strlen(item) + 1U;
+            /* 
+             * Internal kernel call (e.g. init or #! script interpreter).
+             * Pointers in the array can be either kernel or user (from original argv).
+             */
+            if (!item) {
+                ret = -EFAULT;
+                goto fail;
+            }
+            if (elks_is_user_ptr(item)) {
+                ret = copyinstr(item, NULL, ELKS_ARG_MAX_BYTES, &copied_len);
+                if (ret != 0) {
+                    ret = (ret == ENAMETOOLONG) ? -E2BIG : -EFAULT;
+                    goto fail;
+                }
+            } else {
+                copied_len = strlen(item) + 1U;
+            }
         }
 
         copy = kmalloc(copied_len);
@@ -225,7 +247,7 @@ static int elks_dup_vector(char *const src[], char ***out_vec) {
             goto fail;
         }
 
-        if (elks_is_user_ptr(item)) {
+        if (from_user || elks_is_user_ptr(item)) {
             ret = copyinstr(item, copy, copied_len, NULL);
             if (ret != 0) {
                 kfree(copy, copied_len);

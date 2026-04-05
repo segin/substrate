@@ -14,9 +14,9 @@ This document captures the current Substrate `sys/boot/` BIOS bootloader archite
 ## Boot Flow
 
 - Stage 1 is a 1024-byte boot block.
-- Stage 1 loads stage 2 from ext2 inode 5 and enters protected mode.
+- Stage 1 loads stage 2 from ext2 inode 5, collects the `boot:` command line through BIOS keyboard services while firmware USB legacy support is still active, then enters protected mode.
 - Stage 2 reads the ext2 filesystem, finds `/vmunix` by name, and loads the kernel ELF image using the multiboot protocol.
-- Stage 2 provides an interactive `boot:` prompt with timeout handling.
+- Stage 2 consumes the Stage 1 command line and keeps its protected-mode keyboard path only as a fallback.
 
 ## Build and Install
 

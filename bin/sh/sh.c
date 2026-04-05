@@ -28,19 +28,6 @@ extern pid_t getpgrp(void);
 extern int setpgid(pid_t pid, pid_t pgid);
 extern int tcgetattr(int fd, struct termios *termios_p);
 
-#ifndef SIGTTIN
-#define SIGTTIN 21
-#endif
-#ifndef SIGTTOU
-#define SIGTTOU 22
-#endif
-#ifndef SIGCHLD
-#define SIGCHLD 20
-#endif
-#ifndef SIGTSTP
-#define SIGTSTP 18
-#endif
-
 int execute_line(char *buffer) {
     if (!buffer || !*buffer) return 0;
     
