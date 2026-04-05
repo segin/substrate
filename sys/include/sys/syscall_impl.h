@@ -12,6 +12,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 #include <sys/resource.h>
+#include <sys/sysinfo.h>
 
 struct thr_param;
 struct itimerval;
@@ -142,12 +143,12 @@ extern int sys_thr_self(void);
 extern int sys_thr_new(struct thr_param*, int);
 struct pmap_stats;
 extern int sys_pmap_stats(struct pmap_stats*);
-extern int sys_proc_info(int, void*);
-extern int sys_proc_list(int*, size_t);
+extern int sys_proc_info(pid_t, sys_procinfo_t*);
+extern int sys_proc_list(pid_t*, size_t);
 extern int sys_proc_count(void);
 extern int sys_proc_threads(pid_t, tid_t*, size_t*);
-extern int sys_proc_fds(pid_t, void*, size_t*);
-extern int sys_proc_maps(pid_t, void*, size_t*);
+extern int sys_proc_fds(pid_t, sys_fd_t*, size_t*);
+extern int sys_proc_maps(pid_t, sys_map_t*, size_t*);
 extern int sys_proc_cwd(pid_t, char*, size_t);
 extern int sys_proc_exe(pid_t, char*, size_t);
 extern int sys_proc_cmdline(pid_t, char**, size_t*);

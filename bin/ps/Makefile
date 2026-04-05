@@ -24,4 +24,6 @@ LDADD = -L$(TOP)/lib/sys -lsys
 
 include $(TOP)/Makefile.inc
 include $(TOP)/Makefile.bin.inc
+
+BRAND_CMD =
 endif

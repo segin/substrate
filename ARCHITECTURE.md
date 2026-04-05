@@ -71,6 +71,7 @@ The kernel remains monolithic and is organized into logical layers:
 - `sys/vfs/` and `sys/fs/`: Virtual Filesystem and concrete implementations.
 - `sys/drivers/`: Device driver framework and hardware drivers.
 - `sys/exec/`: Executable loading and execution personalities.
+- process and thread registries reserve embedded bootstrap slots for PID/TID 0 context, then grow with stable dynamically allocated slot chunks; live objects are not relocatable.
 
 Detailed subsystem behavior belongs in `docs/specs/`, including:
 - boot and initialization: `docs/specs/kmain_init.md`, `docs/specs/arch_i386_boot.md`, `docs/specs/bootloader_ext2_boot.md`

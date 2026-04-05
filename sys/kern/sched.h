@@ -4,10 +4,10 @@
 #include <sys/proc.h>
 #include <sys/smp.h>
 
-/* Thread and CPU limits */
+/* Base static thread slots. Additional slots may be grown dynamically. */
 #define MAX_THREADS 64
 
-extern thread_t threads[MAX_THREADS];
+extern thread_t threads[];
 extern thread_t *current_thread;
 
 /* IPI vector for scheduler preemption (must match IDT setup) */
@@ -58,6 +58,8 @@ void sched_wakeup(void *chan);
 void sched_wakeup_n(void *chan, int n);
 process_t *sched_create_process(struct personality *pers);
 thread_t *sched_get_thread(int tid);
+size_t sched_thread_slot_count(void);
+thread_t *sched_thread_slot(size_t index);
 void sched_iterate_threads(void (*callback)(thread_t *t, void *arg), void *arg);
 void sched_reap_process_threads(process_t *proc);
 

@@ -47,6 +47,7 @@ void rusage_finalize(process_t *p) { (void)p; }
 void acct_process(int code) { (void)code; }
 void futex_thread_exit(thread_t *t) { (void)t; }
 void close_fs(fs_node_t *node) { (void)node; }
+void open_fs(fs_node_t *node, uint8_t read, uint8_t write) { (void)node; (void)read; (void)write; }
 void file_close_ptr(file_t *f) { (void)f; }
 void tty_hangup(struct tty *tty) { (void)tty; }
 void kprint(const char *msg) { (void)msg; }
@@ -79,9 +80,11 @@ pmap_t pmap_kernel(void) { return (pmap_t)0xCAFE0000; }
 pmap_t pmap_fork(pmap_t src) { return src; }
 void pmap_release(pmap_t pmap) { (void)pmap; }
 void pmap_activate(pmap_t pmap) { (void)pmap; }
+vm_map_t *vm_map_fork(vm_map_t *src, pmap_t pmap) { (void)pmap; return src; }
 void *pmm_alloc_block(void) { return NULL; }
 void pmm_free_block(void *ptr) { (void)ptr; }
 void *pmm_alloc_contiguous(size_t pages) { (void)pages; return NULL; }
+void pmm_free_contiguous(void *ptr, size_t count) { (void)ptr; (void)count; }
 int mutex_release_owned_by_thread(thread_t *owner) { (void)owner; return 0; }
 int sched_fork_thread(process_t *proc, void *stack) { (void)proc; (void)stack; return -1; }
 thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void *), void *stack, void *arg) {
@@ -287,10 +290,38 @@ static void test_waitpid_job_control_lifecycle(void) {
     assert(kmalloc_calls == 0);
 }
 
+static void test_proc_create_wraps_pid_at_arch_limit(void) {
+    process_t *created[4];
+
+    reset_env();
+    current_process = init_proc(0, 500, 0);
+    current_thread = init_thread(0, 700, current_process);
+
+    next_pid = SUBSTRATE_PID_MAX - 1;
+    last_pid = next_pid - 1;
+
+    created[0] = proc_create(0);
+    created[1] = proc_create(0);
+    created[2] = proc_create(0);
+    created[3] = proc_create(0);
+
+    assert(created[0] != NULL);
+    assert(created[1] != NULL);
+    assert(created[2] != NULL);
+    assert(created[3] != NULL);
+
+    assert(created[0]->pid == SUBSTRATE_PID_MAX - 1);
+    assert(created[1]->pid == SUBSTRATE_PID_MAX);
+    assert(created[2]->pid == 1);
+    assert(created[3]->pid == 2);
+    assert(proc_get_last_pid() == 2);
+}
+
 int main(void) {
     test_no_zombie_leaks_after_reap_cycles();
     test_no_zombie_leaks_after_autoreap_cycles();
     test_waitpid_job_control_lifecycle();
+    test_proc_create_wraps_pid_at_arch_limit();
     puts("host_test_proc_lifecycle: PASS");
     return 0;
 }

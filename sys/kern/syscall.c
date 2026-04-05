@@ -22,6 +22,7 @@
 #include <include/sys/proc.h>
 #include <include/sys/signal.h>
 #include <include/sys/session.h>
+#include <include/sys/tty.h>
 #include <kern/file.h>
 #include <vfs/vfs.h>
 #include <drivers/console/uart/uart.h>
@@ -44,6 +45,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stddef.h>
+#include <vm/vm_map.h>
 
 #include <sys/kern_syscalls.h>
 #include <sys/utsname.h>
@@ -1880,12 +1882,7 @@ int kern_proc_info(pid_t pid, sys_procinfo_t *info) {
     if (pid == 0) {
         target = current_process;
     } else {
-        for (int i = 0; i < 64; i++) {
-            if (processes[i].pid == pid) {
-                target = &processes[i];
-                break;
-            }
-        }
+        target = proc_find(pid);
     }
     
     if (!target) return -1;
@@ -1903,9 +1900,18 @@ int kern_proc_info(pid_t pid, sys_procinfo_t *info) {
     
     info->uid = target->uid;
     info->gid = target->gid;
+    info->euid = target->euid;
+    info->egid = target->egid;
     info->state = target->state;
     info->bitness = target->bitness;
+    info->perso_id = (int16_t)target->perso_id;
+    info->tty = target->tty ? (int16_t)target->tty->index : (int16_t)-1;
+    info->nice = 0;
     info->start_time = target->start_time;
+    info->user_time = target->utime;
+    info->sys_time = target->stime;
+    info->vsize = target->vm_map ? (uint32_t)target->vm_map->size : 0;
+    info->rss = target->rusage.ru_maxrss > 0 ? (uint32_t)(target->rusage.ru_maxrss / 4) : 0;
     
     strncpy(info->name, target->comm, sizeof(info->name)-1);
     return 0;
@@ -1933,16 +1939,18 @@ int sys_proc_list(pid_t *pids, size_t count) {
 
 int kern_proc_list(pid_t *pids, size_t count) {
     int total_procs = 0;
-    for (int i = 0; i < 64; i++) {
-        if (processes[i].pid != -1) total_procs++;
+    for (size_t i = 0; i < proc_slot_count(); i++) {
+        process_t *proc = proc_slot(i);
+        if (proc && proc->pid != -1) total_procs++;
     }
     
     if (!pids || count == 0) return total_procs;
     
     int copied = 0;
-    for (int i = 0; i < 64 && copied < (int)count; i++) {
-        if (processes[i].pid != -1) {
-            pids[copied] = processes[i].pid;
+    for (size_t i = 0; i < proc_slot_count() && copied < (int)count; i++) {
+        process_t *proc = proc_slot(i);
+        if (proc && proc->pid != -1) {
+            pids[copied] = proc->pid;
             copied++;
         }
     }
@@ -1952,8 +1960,9 @@ int kern_proc_list(pid_t *pids, size_t count) {
 // sys_proc_count - Get total number of active processes
 int sys_proc_count(void) {
     int count = 0;
-    for (int i = 0; i < 64; i++) {
-        if (processes[i].pid != -1) {
+    for (size_t i = 0; i < proc_slot_count(); i++) {
+        process_t *proc = proc_slot(i);
+        if (proc && proc->pid != -1) {
             count++;
         }
     }
@@ -2025,17 +2034,7 @@ int sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count) {
 int sys_proc_cwd(pid_t pid, char *buf, size_t len) {
     if (!buf || len == 0) return -14;
     
-    process_t *target = NULL;
-    if (pid == 0) {
-        target = current_process;
-    } else {
-        for (int i = 0; i < 64; i++) {
-            if (processes[i].pid == pid) {
-                target = &processes[i];
-                break;
-            }
-        }
-    }
+    process_t *target = (pid == 0) ? current_process : proc_find(pid);
     
     if (!target) return -3; // ESRCH
     
@@ -2049,17 +2048,7 @@ int sys_proc_cwd(pid_t pid, char *buf, size_t len) {
 int sys_proc_exe(pid_t pid, char *buf, size_t len) {
     if (!buf || len == 0) return -14;
     
-    process_t *target = NULL;
-    if (pid == 0) {
-        target = current_process;
-    } else {
-        for (int i = 0; i < 64; i++) {
-            if (processes[i].pid == pid) {
-                target = &processes[i];
-                break;
-            }
-        }
-    }
+    process_t *target = (pid == 0) ? current_process : proc_find(pid);
     
     if (!target) return -3; // ESRCH
     
@@ -2072,17 +2061,7 @@ int sys_proc_exe(pid_t pid, char *buf, size_t len) {
 
 int sys_proc_cmdline(pid_t pid, char **argv, size_t *argc) {
     (void)argv;
-    process_t *target = NULL;
-    if (pid == 0) {
-        target = current_process;
-    } else {
-        for (int i = 0; i < 64; i++) {
-            if (processes[i].pid == pid) {
-                target = &processes[i];
-                break;
-            }
-        }
-    }
+    process_t *target = (pid == 0) ? current_process : proc_find(pid);
     
     if (!target) return -3; // ESRCH
     
@@ -2098,17 +2077,7 @@ int sys_proc_cmdline(pid_t pid, char **argv, size_t *argc) {
 
 int sys_proc_environ(pid_t pid, char **envp, size_t *envc) {
     (void)envp;
-    process_t *target = NULL;
-    if (pid == 0) {
-        target = current_process;
-    } else {
-        for (int i = 0; i < 64; i++) {
-            if (processes[i].pid == pid) {
-                target = &processes[i];
-                break;
-            }
-        }
-    }
+    process_t *target = (pid == 0) ? current_process : proc_find(pid);
     
     if (!target) return -3; // ESRCH
     
@@ -2163,9 +2132,9 @@ int sys_setpriority(int which, int who, int prio) {
     }
 
     /* Iterate over processes using hardcoded limit matching syscall.c conventions */
-    for (int i = 0; i < 64; i++) {
-        process_t *p = &processes[i];
-        if (p->pid == -1) continue;
+    for (size_t i = 0; i < proc_slot_count(); i++) {
+        process_t *p = proc_slot(i);
+        if (!p || p->pid == -1) continue;
 
         bool match = false;
         if (which == PRIO_PROCESS && p->pid == target_id) match = true;
@@ -2193,9 +2162,10 @@ int sys_setpriority(int which, int who, int prio) {
 
         /* Find a thread belonging to p to get its priority */
         /* Use MAX_THREADS from sched.h */
-        for (int t = 0; t < MAX_THREADS; t++) {
-            if (threads[t].tid != -1 && threads[t].proc == p) {
-                thread_prio = threads[t].base_priority;
+        for (size_t t = 0; t < sched_thread_slot_count(); t++) {
+            thread_t *thread = sched_thread_slot(t);
+            if (thread && thread->tid != -1 && thread->proc == p) {
+                thread_prio = thread->base_priority;
                 break;
             }
         }
@@ -2212,9 +2182,10 @@ int sys_setpriority(int which, int who, int prio) {
         if (new_base_prio < 1) new_base_prio = 1;
         if (new_base_prio > 40) new_base_prio = 40;
 
-        for (int t = 0; t < MAX_THREADS; t++) {
-            if (threads[t].tid != -1 && threads[t].proc == p) {
-                sched_set_priority(threads[t].tid, threads[t].sched_class, new_base_prio);
+        for (size_t t = 0; t < sched_thread_slot_count(); t++) {
+            thread_t *thread = sched_thread_slot(t);
+            if (thread && thread->tid != -1 && thread->proc == p) {
+                sched_set_priority(thread->tid, thread->sched_class, new_base_prio);
             }
         }
         affected++;
@@ -2237,9 +2208,9 @@ int sys_getpriority(int which, int who) {
     int found = 0;
     int best_nice = 20; /* Start with lowest priority (highest nice) */
 
-    for (int i = 0; i < 64; i++) {
-        process_t *p = &processes[i];
-        if (p->pid == -1) continue;
+    for (size_t i = 0; i < proc_slot_count(); i++) {
+        process_t *p = proc_slot(i);
+        if (!p || p->pid == -1) continue;
 
         bool match = false;
         if (which == PRIO_PROCESS && p->pid == target_id) match = true;
@@ -2250,9 +2221,10 @@ int sys_getpriority(int which, int who) {
         found++;
 
         int thread_prio = 20;
-        for (int t = 0; t < MAX_THREADS; t++) {
-            if (threads[t].tid != -1 && threads[t].proc == p) {
-                thread_prio = threads[t].base_priority;
+        for (size_t t = 0; t < sched_thread_slot_count(); t++) {
+            thread_t *thread = sched_thread_slot(t);
+            if (thread && thread->tid != -1 && thread->proc == p) {
+                thread_prio = thread->base_priority;
                 break;
             }
         }

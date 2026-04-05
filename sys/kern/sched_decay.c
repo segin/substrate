@@ -13,8 +13,6 @@
 static uint32_t last_decay_tick = 0;
 static uint32_t last_recalc_tick = 0;
 
-// Forward declaration
-extern thread_t threads[];
 extern int sched_interactivity_boost(thread_t *t);
 
 // Decay priority for a CPU-bound thread
@@ -102,12 +100,13 @@ void sched_decay_tick(uint32_t current_tick) {
     last_decay_tick = current_tick;
     
     // Decay all timeshare threads
-    for (int i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].tid < 0) continue;
-        if (threads[i].sched_class != SCHED_TIMESHARE) continue;
+    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
+        thread_t *thread = sched_thread_slot(i);
+        if (!thread || thread->tid < 0) continue;
+        if (thread->sched_class != SCHED_TIMESHARE) continue;
         
-        decay_thread_priority(&threads[i]);
-        boost_starved_thread(&threads[i], current_tick);
+        decay_thread_priority(thread);
+        boost_starved_thread(thread, current_tick);
     }
 }
 
@@ -116,16 +115,18 @@ void sched_recalc_all_priorities(uint32_t current_tick) {
     if (current_tick - last_recalc_tick < RECALC_PERIOD) return;
     last_recalc_tick = current_tick;
     
-    for (int i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].tid < 0) continue;
-        sched_recalc_priority(&threads[i]);
+    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
+        thread_t *thread = sched_thread_slot(i);
+        if (!thread || thread->tid < 0) continue;
+        sched_recalc_priority(thread);
     }
     
     // Reset epoch counters to allow priorities to recover
-    for (int i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].tid < 0) continue;
-        threads[i].run_time = threads[i].run_time / 2;
-        threads[i].sleep_time = threads[i].sleep_time / 2;
+    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
+        thread_t *thread = sched_thread_slot(i);
+        if (!thread || thread->tid < 0) continue;
+        thread->run_time = thread->run_time / 2;
+        thread->sleep_time = thread->sleep_time / 2;
     }
 }
 

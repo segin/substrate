@@ -3,12 +3,18 @@
 #include <kern/sched.h>
 #include <stddef.h>
 
-extern process_t processes[]; // Accessible from sched.c
-
 int kthread_create(void (*func)(void *), void *arg, thread_t **tdp, const char *name) {
     // 1. Threads created by kthread_create belong to the Kernel Process (PID 0)
     extern process_t *kernel_process;
-    process_t *proc = kernel_process ? kernel_process : &processes[0]; 
+    process_t *proc = kernel_process;
+
+    if (!proc) {
+        extern process_t *swapper_get_proc(void);
+        proc = swapper_get_proc();
+    }
+    if (!proc) {
+        return -1;
+    }
 
     // 2. Allocate a kernel stack
     extern void *pmm_alloc_contiguous(size_t count);

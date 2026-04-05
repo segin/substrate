@@ -4,6 +4,14 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#if defined(__x86_64__) || defined(_M_X64)
+#define SUBSTRATE_PID_MAX 9999999
+#define SUBSTRATE_TID_MAX 9999999
+#else
+#define SUBSTRATE_PID_MAX 99999
+#define SUBSTRATE_TID_MAX 99999
+#endif
+
 typedef int32_t pid_t;
 typedef int32_t tid_t;
 typedef uint32_t uid_t;

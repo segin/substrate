@@ -11,6 +11,15 @@ typedef enum {
     BITNESS_64 = 64
 } proc_bitness_t;
 
+typedef enum {
+    SYS_PROC_STATE_IDLE = 1,
+    SYS_PROC_STATE_RUN = 2,
+    SYS_PROC_STATE_SLEEP = 3,
+    SYS_PROC_STATE_STOP = 4,
+    SYS_PROC_STATE_ZOMBIE = 5,
+    SYS_PROC_STATE_DYING = 6
+} sys_proc_state_t;
+
 // Process Info Structure
 // Used by sys_proc_info syscall
 typedef struct sys_procinfo {
@@ -84,6 +93,16 @@ typedef struct sys_vmstat {
 
 #ifndef _KERNEL
 int sysinfo(struct sysinfo *info);
+int sys_proc_count(void);
+int sys_proc_list(pid_t *pids, size_t count);
+int sys_proc_info(pid_t pid, sys_procinfo_t *info);
+int sys_proc_threads(pid_t pid, tid_t *tids, size_t *count);
+int sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count);
+int sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count);
+int sys_proc_cwd(pid_t pid, char *buf, size_t len);
+int sys_proc_exe(pid_t pid, char *buf, size_t len);
+int sys_proc_cmdline(pid_t pid, char **argv, size_t *argc);
+int sys_proc_environ(pid_t pid, char **envp, size_t *envc);
 #endif
 
 #endif

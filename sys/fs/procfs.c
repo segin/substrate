@@ -29,6 +29,19 @@
 #include <kern/resource.h>
 #include <sys/kobject.h>
 
+#ifdef HOST_TEST
+__attribute__((weak)) size_t proc_slot_count(void) {
+    return (size_t)MAX_PROCS;
+}
+
+__attribute__((weak)) process_t *proc_slot(size_t index) {
+    if (index < (size_t)MAX_PROCS) {
+        return &processes[index];
+    }
+    return NULL;
+}
+#endif
+
 /* Forward declarations */
 static size_t procfs_generic_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
 static struct dirent *procfs_readdir(fs_node_t *node, uint64_t index);
@@ -36,6 +49,11 @@ static fs_node_t *procfs_finddir(fs_node_t *node, char *name);
 static int proc_self_readlink(fs_node_t *node, char *buf, size_t size);
 static int proc_pid_exe_readlink(fs_node_t *node, char *buf, size_t size);
 static int proc_pid_cwd_readlink(fs_node_t *node, char *buf, size_t size);
+static struct dirent *proc_pid_readdir(fs_node_t *node, uint64_t index);
+static fs_node_t *proc_pid_finddir(fs_node_t *node, char *name);
+static size_t proc_pid_status_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
+static size_t proc_pid_stat_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
+static size_t proc_pid_cmdline_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
 
 /*
  * ProcFS Entry Structure
@@ -353,13 +371,21 @@ static fs_node_t procfs_static_nodes[PROCFS_STATIC_COUNT];
 static struct procfs_driver_entry procfs_driver_entries[PROCFS_MAX_DRIVER_ENTRIES];
 static fs_node_t procfs_driver_nodes[PROCFS_MAX_DRIVER_ENTRIES];
 static fs_node_t procfs_self_node;
-static fs_node_t procfs_pid_dir_nodes[MAX_PROCS];
-static fs_node_t procfs_pid_status_nodes[MAX_PROCS];
-static fs_node_t procfs_pid_cmdline_nodes[MAX_PROCS];
-static fs_node_t procfs_pid_stat_nodes[MAX_PROCS];
-static fs_node_t procfs_pid_exe_nodes[MAX_PROCS];
-static fs_node_t procfs_pid_cwd_nodes[MAX_PROCS];
 static size_t procfs_driver_entry_count = 0;
+
+typedef struct procfs_pid_nodes {
+    int pid;
+    fs_node_t dir;
+    fs_node_t status;
+    fs_node_t cmdline;
+    fs_node_t stat;
+    fs_node_t exe;
+    fs_node_t cwd;
+} procfs_pid_nodes_t;
+
+static procfs_pid_nodes_t **procfs_pid_nodes = NULL;
+static size_t procfs_pid_nodes_count = 0;
+static size_t procfs_pid_nodes_capacity = 0;
 
 static struct procfs_runtime_entry *procfs_find_driver_entry(const char *name) {
     if (!name) return NULL;
@@ -400,16 +426,94 @@ int procfs_register_entry(const char *name, procfs_entry_generator_t generator, 
     return 0;
 }
 
-static int procfs_find_process_slot(int pid) {
-    if (pid <= 0) return -1;
+static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
+    procfs_pid_nodes_t **new_nodes;
+    procfs_pid_nodes_t *nodes;
+    size_t old_capacity;
+    size_t new_capacity;
+    size_t old_bytes;
+    size_t new_bytes;
 
-    for (int i = 0; i < MAX_PROCS; i++) {
-        if (processes[i].pid == pid) {
-            return i;
+    if (pid <= 0 || !proc_find(pid)) {
+        return NULL;
+    }
+
+    for (size_t i = 0; i < procfs_pid_nodes_count; i++) {
+        if (procfs_pid_nodes[i] && procfs_pid_nodes[i]->pid == pid) {
+            return procfs_pid_nodes[i];
         }
     }
 
-    return -1;
+    if (procfs_pid_nodes_count == procfs_pid_nodes_capacity) {
+        old_capacity = procfs_pid_nodes_capacity;
+        new_capacity = old_capacity ? old_capacity * 2U : (size_t)MAX_PROCS;
+        old_bytes = old_capacity * sizeof(*procfs_pid_nodes);
+        new_bytes = new_capacity * sizeof(*procfs_pid_nodes);
+
+        new_nodes = kmalloc(new_bytes);
+        if (!new_nodes) {
+            return NULL;
+        }
+        if (procfs_pid_nodes && old_bytes != 0) {
+            memcpy(new_nodes, procfs_pid_nodes, old_bytes);
+            kfree(procfs_pid_nodes, old_bytes);
+        }
+        memset(new_nodes + old_capacity, 0, (new_capacity - old_capacity) * sizeof(*new_nodes));
+        procfs_pid_nodes = new_nodes;
+        procfs_pid_nodes_capacity = new_capacity;
+    }
+
+    nodes = kmalloc(sizeof(*nodes));
+    if (!nodes) {
+        return NULL;
+    }
+    memset(nodes, 0, sizeof(*nodes));
+    procfs_pid_nodes[procfs_pid_nodes_count++] = nodes;
+    nodes->pid = pid;
+
+    nodes->dir.flags = FS_DIRECTORY;
+    nodes->dir.mask = 0555;
+    nodes->dir.uid = 0;
+    nodes->dir.gid = 0;
+    nodes->dir.readdir = &proc_pid_readdir;
+    nodes->dir.finddir = &proc_pid_finddir;
+
+    strncpy(nodes->status.name, "status", sizeof(nodes->status.name) - 1);
+    nodes->status.flags = FS_FILE;
+    nodes->status.mask = 0444;
+    nodes->status.uid = 0;
+    nodes->status.gid = 0;
+    nodes->status.read = &proc_pid_status_read;
+
+    strncpy(nodes->cmdline.name, "cmdline", sizeof(nodes->cmdline.name) - 1);
+    nodes->cmdline.flags = FS_FILE;
+    nodes->cmdline.mask = 0444;
+    nodes->cmdline.uid = 0;
+    nodes->cmdline.gid = 0;
+    nodes->cmdline.read = &proc_pid_cmdline_read;
+
+    strncpy(nodes->stat.name, "stat", sizeof(nodes->stat.name) - 1);
+    nodes->stat.flags = FS_FILE;
+    nodes->stat.mask = 0444;
+    nodes->stat.uid = 0;
+    nodes->stat.gid = 0;
+    nodes->stat.read = &proc_pid_stat_read;
+
+    strncpy(nodes->exe.name, "exe", sizeof(nodes->exe.name) - 1);
+    nodes->exe.flags = FS_SYMLINK;
+    nodes->exe.mask = 0777;
+    nodes->exe.uid = 0;
+    nodes->exe.gid = 0;
+    nodes->exe.readlink = &proc_pid_exe_readlink;
+
+    strncpy(nodes->cwd.name, "cwd", sizeof(nodes->cwd.name) - 1);
+    nodes->cwd.flags = FS_SYMLINK;
+    nodes->cwd.mask = 0777;
+    nodes->cwd.uid = 0;
+    nodes->cwd.gid = 0;
+    nodes->cwd.readlink = &proc_pid_cwd_readlink;
+
+    return nodes;
 }
 
 static fs_node_t *procfs_get_self_node(void) {
@@ -560,14 +664,7 @@ static int proc_generate_status(char *b, size_t s, process_t *proc) {
 
 static size_t proc_pid_status_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     int pid = node->inode;
-    process_t *p = NULL;
-    
-    for (int i = 0; i < MAX_PROCS; i++) {
-        if (processes[i].pid == pid) {
-            p = &processes[i];
-            break;
-        }
-    }
+    process_t *p = proc_find(pid);
     if (!p) return 0;
 
     char buf[1024];
@@ -722,31 +819,33 @@ static struct dirent *proc_pid_readdir(fs_node_t *node, uint64_t index) {
 }
 
 static fs_node_t *proc_pid_finddir(fs_node_t *node, char *name) {
+    procfs_pid_nodes_t *nodes;
+
     if (strcmp(name, ".") == 0) return node;
     if (strcmp(name, "..") == 0) return &procfs_root_node;
 
-    int slot = procfs_find_process_slot((int)node->inode);
-    if (slot < 0) return NULL;
+    nodes = procfs_get_pid_nodes((int)node->inode);
+    if (!nodes) return NULL;
 
     if (strcmp(name, "status") == 0) {
-        procfs_pid_status_nodes[slot].inode = node->inode;
-        return &procfs_pid_status_nodes[slot];
+        nodes->status.inode = node->inode;
+        return &nodes->status;
     }
     if (strcmp(name, "cmdline") == 0) {
-        procfs_pid_cmdline_nodes[slot].inode = node->inode;
-        return &procfs_pid_cmdline_nodes[slot];
+        nodes->cmdline.inode = node->inode;
+        return &nodes->cmdline;
     }
     if (strcmp(name, "stat") == 0) {
-        procfs_pid_stat_nodes[slot].inode = node->inode;
-        return &procfs_pid_stat_nodes[slot];
+        nodes->stat.inode = node->inode;
+        return &nodes->stat;
     }
     if (strcmp(name, "exe") == 0) {
-        procfs_pid_exe_nodes[slot].inode = node->inode;
-        return &procfs_pid_exe_nodes[slot];
+        nodes->exe.inode = node->inode;
+        return &nodes->exe;
     }
     if (strcmp(name, "cwd") == 0) {
-        procfs_pid_cwd_nodes[slot].inode = node->inode;
-        return &procfs_pid_cwd_nodes[slot];
+        nodes->cwd.inode = node->inode;
+        return &nodes->cwd;
     }
     return NULL;
 }
@@ -808,11 +907,12 @@ static struct dirent *procfs_readdir(fs_node_t *node, uint64_t index) {
     /* Process directories */
     uint64_t proc_idx = entry_idx;
     uint32_t count = 0;
-    for (int i = 0; i < MAX_PROCS; i++) {
-        if (processes[i].pid > 0) {
+    for (size_t i = 0; i < proc_slot_count(); i++) {
+        process_t *proc = proc_slot(i);
+        if (proc && proc->pid > 0) {
             if (count == proc_idx) {
-                snprintf(proc_dirent.d_name, sizeof(proc_dirent.d_name), "%d", processes[i].pid);
-                proc_dirent.d_ino = processes[i].pid;
+                snprintf(proc_dirent.d_name, sizeof(proc_dirent.d_name), "%d", proc->pid);
+                proc_dirent.d_ino = proc->pid;
                 return &proc_dirent;
             }
             count++;
@@ -850,11 +950,11 @@ static fs_node_t *procfs_finddir(fs_node_t *node, char *name) {
     }
 
     if (pid > 0 && *p == '\0') {
-        int slot = procfs_find_process_slot(pid);
-        if (slot >= 0) {
-            procfs_pid_dir_nodes[slot].inode = pid;
-            snprintf(procfs_pid_dir_nodes[slot].name, sizeof(procfs_pid_dir_nodes[slot].name), "%d", pid);
-            return &procfs_pid_dir_nodes[slot];
+        procfs_pid_nodes_t *nodes = procfs_get_pid_nodes(pid);
+        if (nodes) {
+            nodes->dir.inode = pid;
+            snprintf(nodes->dir.name, sizeof(nodes->dir.name), "%d", pid);
+            return &nodes->dir;
         }
     }
     return NULL;
@@ -906,61 +1006,6 @@ void procfs_init(void) {
     procfs_self_node.inode = PROCFS_SELF_INO;
     procfs_self_node.readlink = &proc_self_readlink;
     procfs_self_node.length = 8;
-
-    for (int i = 0; i < MAX_PROCS; i++) {
-        memset(&procfs_pid_dir_nodes[i], 0, sizeof(fs_node_t));
-        procfs_pid_dir_nodes[i].flags = FS_DIRECTORY;
-        procfs_pid_dir_nodes[i].mask = 0555;
-        procfs_pid_dir_nodes[i].uid = 0;
-        procfs_pid_dir_nodes[i].gid = 0;
-        procfs_pid_dir_nodes[i].readdir = &proc_pid_readdir;
-        procfs_pid_dir_nodes[i].finddir = &proc_pid_finddir;
-
-        memset(&procfs_pid_status_nodes[i], 0, sizeof(fs_node_t));
-        strncpy(procfs_pid_status_nodes[i].name, "status", sizeof(procfs_pid_status_nodes[i].name) - 1);
-        procfs_pid_status_nodes[i].name[sizeof(procfs_pid_status_nodes[i].name) - 1] = '\0';
-        procfs_pid_status_nodes[i].flags = FS_FILE;
-        procfs_pid_status_nodes[i].mask = 0444;
-        procfs_pid_status_nodes[i].uid = 0;
-        procfs_pid_status_nodes[i].gid = 0;
-        procfs_pid_status_nodes[i].read = &proc_pid_status_read;
-
-        memset(&procfs_pid_cmdline_nodes[i], 0, sizeof(fs_node_t));
-        strncpy(procfs_pid_cmdline_nodes[i].name, "cmdline", sizeof(procfs_pid_cmdline_nodes[i].name) - 1);
-        procfs_pid_cmdline_nodes[i].name[sizeof(procfs_pid_cmdline_nodes[i].name) - 1] = '\0';
-        procfs_pid_cmdline_nodes[i].flags = FS_FILE;
-        procfs_pid_cmdline_nodes[i].mask = 0444;
-        procfs_pid_cmdline_nodes[i].uid = 0;
-        procfs_pid_cmdline_nodes[i].gid = 0;
-        procfs_pid_cmdline_nodes[i].read = &proc_pid_cmdline_read;
-
-        memset(&procfs_pid_stat_nodes[i], 0, sizeof(fs_node_t));
-        strncpy(procfs_pid_stat_nodes[i].name, "stat", sizeof(procfs_pid_stat_nodes[i].name) - 1);
-        procfs_pid_stat_nodes[i].name[sizeof(procfs_pid_stat_nodes[i].name) - 1] = '\0';
-        procfs_pid_stat_nodes[i].flags = FS_FILE;
-        procfs_pid_stat_nodes[i].mask = 0444;
-        procfs_pid_stat_nodes[i].uid = 0;
-        procfs_pid_stat_nodes[i].gid = 0;
-        procfs_pid_stat_nodes[i].read = &proc_pid_stat_read;
-
-        memset(&procfs_pid_exe_nodes[i], 0, sizeof(fs_node_t));
-        strncpy(procfs_pid_exe_nodes[i].name, "exe", sizeof(procfs_pid_exe_nodes[i].name) - 1);
-        procfs_pid_exe_nodes[i].name[sizeof(procfs_pid_exe_nodes[i].name) - 1] = '\0';
-        procfs_pid_exe_nodes[i].flags = FS_SYMLINK;
-        procfs_pid_exe_nodes[i].mask = 0777;
-        procfs_pid_exe_nodes[i].uid = 0;
-        procfs_pid_exe_nodes[i].gid = 0;
-        procfs_pid_exe_nodes[i].readlink = &proc_pid_exe_readlink;
-
-        memset(&procfs_pid_cwd_nodes[i], 0, sizeof(fs_node_t));
-        strncpy(procfs_pid_cwd_nodes[i].name, "cwd", sizeof(procfs_pid_cwd_nodes[i].name) - 1);
-        procfs_pid_cwd_nodes[i].name[sizeof(procfs_pid_cwd_nodes[i].name) - 1] = '\0';
-        procfs_pid_cwd_nodes[i].flags = FS_SYMLINK;
-        procfs_pid_cwd_nodes[i].mask = 0777;
-        procfs_pid_cwd_nodes[i].uid = 0;
-        procfs_pid_cwd_nodes[i].gid = 0;
-        procfs_pid_cwd_nodes[i].readlink = &proc_pid_cwd_readlink;
-    }
 
     memset(&procfs_root_node, 0, sizeof(fs_node_t));
     strncpy(procfs_root_node.name, "proc", sizeof(procfs_root_node.name) - 1);

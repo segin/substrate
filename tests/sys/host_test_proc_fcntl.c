@@ -44,6 +44,7 @@ void pmap_activate(pmap_t pmap) { (void)pmap; }
 void *pmm_alloc_block(void) { return NULL; }
 void pmm_free_block(void *ptr) { (void)ptr; }
 void *pmm_alloc_contiguous(size_t pages) { (void)pages; return NULL; }
+void pmm_free_contiguous(void *ptr, size_t count) { (void)ptr; (void)count; }
 int mutex_release_owned_by_thread(thread_t *owner) { (void)owner; return 0; }
 int sched_fork_thread(process_t *proc, void *stack) { (void)proc; (void)stack; return -1; }
 thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void *), void *stack, void *arg) {

@@ -7,7 +7,7 @@ INCLUDES = -I../../../sys -I../../../sys/include
 all: test
 
 test_ps_state: test_ps_state.c
-	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $<
+	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $< ../../../bin/ps/ps_parse.c ../../../bin/ps/ps_format.c
 
 test: test_ps_state
 	./test_ps_state

@@ -17,8 +17,6 @@
 #include <kern/time.h>
 #include <sys/kern_syscalls.h>
 
-extern thread_t threads[MAX_THREADS];
-
 static void signal_interrupt_thread(thread_t *t) {
     if (!t) {
         return;
@@ -35,12 +33,14 @@ static void signal_stop_process_threads(process_t *p, const char *reason) {
         return;
     }
 
-    for (int i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].tid == -1 || threads[i].proc != p) {
+    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
+        thread_t *thread = sched_thread_slot(i);
+
+        if (!thread || thread->tid == -1 || thread->proc != p) {
             continue;
         }
-        threads[i].state = THREAD_STOPPED;
-        threads[i].wait_reason = reason;
+        thread->state = THREAD_STOPPED;
+        thread->wait_reason = reason;
     }
     p->state = SSTOP;
 }
@@ -50,13 +50,15 @@ static void signal_resume_process_threads(process_t *p) {
         return;
     }
 
-    for (int i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].tid == -1 || threads[i].proc != p) {
+    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
+        thread_t *thread = sched_thread_slot(i);
+
+        if (!thread || thread->tid == -1 || thread->proc != p) {
             continue;
         }
-        if (threads[i].state == THREAD_STOPPED) {
-            threads[i].state = THREAD_READY;
-            threads[i].wait_reason = NULL;
+        if (thread->state == THREAD_STOPPED) {
+            thread->state = THREAD_READY;
+            thread->wait_reason = NULL;
         }
     }
     if (p->state == SSTOP) {
@@ -442,9 +444,10 @@ void psignal(process_t *p, int sig) {
         uint32_t stop_mask = sigmask(SIGSTOP) | sigmask(SIGTSTP) | sigmask(SIGTTIN) | sigmask(SIGTTOU);
         
         // Clear pending stop signals on all threads
-        for (int i = 0; i < MAX_THREADS; i++) {
-            if (threads[i].tid != -1 && threads[i].proc == p) {
-                threads[i].sig_pending &= ~stop_mask;
+        for (size_t i = 0; i < sched_thread_slot_count(); i++) {
+            thread_t *thread = sched_thread_slot(i);
+            if (thread && thread->tid != -1 && thread->proc == p) {
+                thread->sig_pending &= ~stop_mask;
             }
         }
 
@@ -465,24 +468,23 @@ void psignal(process_t *p, int sig) {
 
     /* For SIGSTOP/SIGTSTP/SIGTTIN/SIGTTOU, clear SIGCONT */
     if (sig == SIGSTOP || sig == SIGTSTP || sig == SIGTTIN || sig == SIGTTOU) {
-        for (int i = 0; i < MAX_THREADS; i++) {
-            if (threads[i].tid != -1 && threads[i].proc == p) {
-                threads[i].sig_pending &= ~sigmask(SIGCONT);
+        for (size_t i = 0; i < sched_thread_slot_count(); i++) {
+            thread_t *thread = sched_thread_slot(i);
+            if (thread && thread->tid != -1 && thread->proc == p) {
+                thread->sig_pending &= ~sigmask(SIGCONT);
             }
         }
     }
 
     /* Select best thread for delivery and set pending on all threads */
-    extern thread_t threads[MAX_THREADS];
     uint32_t sig_mask = sigmask(sig);
     
     thread_t *best_thread = NULL;
     int best_priority = -1; // Higher is better
     
-    for (int i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].tid == -1 || threads[i].proc != p) continue;
-        
-        thread_t *t = &threads[i];
+    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
+        thread_t *t = sched_thread_slot(i);
+        if (!t || t->tid == -1 || t->proc != p) continue;
         
         /* SIGCONT Special: Wake up stopped threads */
         if (sig == SIGCONT && t->state == THREAD_STOPPED) {
@@ -672,12 +674,7 @@ int sys_kill(int pid, int sig) {
     if (pid > 0) {
         process_t *target = NULL;
         // Search process list
-        for (int i = 0; i < MAX_PROCS; i++) {
-            if (processes[i].pid == pid) {
-                target = &processes[i];
-                break;
-            }
-        }
+        target = proc_find(pid);
 
         if (!target) return -ESRCH;
         if (!signal_can_send(current_process, target)) {
@@ -707,9 +704,10 @@ int sys_kill(int pid, int sig) {
         // Send to all processes (except Init)
         int permitted = 0;
         int matched = 0;
-        for (int i = 0; i < MAX_PROCS; i++) {
-            if (processes[i].pid > 1) {
-                 signal_record_match(&processes[i], &matched, &permitted, sig);
+        for (size_t i = 0; i < proc_slot_count(); i++) {
+            process_t *proc = proc_slot(i);
+            if (proc && proc->pid > 1) {
+                 signal_record_match(proc, &matched, &permitted, sig);
             }
         }
         if (matched == 0) return -ESRCH;

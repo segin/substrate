@@ -39,7 +39,7 @@ void kfree(void *ptr, size_t size) {
     free(ptr);
 }
 
-uint32_t get_time(void) { return 123456789; }
+time_t get_time(void) { return 123456789; }
 int cmdline_get(const char *key, char *buf, size_t buf_len) {
     if (!key || !buf || buf_len == 0) return -1;
     if (strcmp(key, "root") == 0) {

@@ -40,6 +40,7 @@ void pmap_activate(pmap_t pmap) { (void)pmap; }
 void *pmm_alloc_block(void) { return NULL; }
 void pmm_free_block(void *ptr) { (void)ptr; }
 void *pmm_alloc_contiguous(size_t pages) { (void)pages; return NULL; }
+void pmm_free_contiguous(void *ptr, size_t count) { (void)ptr; (void)count; }
 int mutex_release_owned_by_thread(thread_t *owner) { (void)owner; return 0; }
 int sched_fork_thread(process_t *proc, void *stack) { (void)proc; (void)stack; return -1; }
 thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void *), void *stack, void *arg) {
@@ -65,6 +66,28 @@ void tty_hangup(struct tty *tty) { (void)tty; }
 void vm_map_destroy(struct vm_map *map) { (void)map; }
 void pgrp_remove_proc(struct process *proc) { (void)proc; }
 void sched_reap_process_threads(process_t *proc) { (void)proc; }
+void ldt_init_process(process_t *proc) {
+    if (proc) {
+        proc->ldt = NULL;
+        proc->ldt_entry_count = 0;
+    }
+}
+int ldt_clone_process(process_t *child, const process_t *parent) {
+    (void)child;
+    (void)parent;
+    return 0;
+}
+void ldt_free_process(process_t *proc) { (void)proc; }
+void open_fs(fs_node_t *node, uint8_t read, uint8_t write) {
+    (void)node;
+    (void)read;
+    (void)write;
+}
+struct vm_map *vm_map_fork(struct vm_map *src, pmap_t pmap) {
+    (void)src;
+    (void)pmap;
+    return NULL;
+}
 
 #include "../../sys/pm/process.c"
 

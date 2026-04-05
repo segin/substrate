@@ -347,14 +347,7 @@ static process_t *elks_active_process(void) {
 }
 
 static process_t *elks_swapper_process(void) {
-    int i;
-
-    for (i = 0; i < MAX_PROCS; i++) {
-        if (processes[i].pid == 0) {
-            return &processes[i];
-        }
-    }
-    return NULL;
+    return proc_find(0);
 }
 
 static int elks_proc_visible(const process_t *proc) {
@@ -623,6 +616,7 @@ static int elks_kmem_build_snapshot(uint8_t **buf_out, size_t *size_out) {
     int exported_count = 0;
     size_t seg_count = 0;
     size_t heap_count = 0;
+    size_t proc_slots;
     int i;
 
     if (!buf_out || !size_out) {
@@ -650,8 +644,9 @@ static int elks_kmem_build_snapshot(uint8_t **buf_out, size_t *size_out) {
     if (active && active != swapper && elks_proc_visible(active)) {
         exported[exported_count++] = active;
     }
-    for (i = 0; i < MAX_PROCS && exported_count < MAX_PROCS; i++) {
-        const process_t *proc = &processes[i];
+    proc_slots = proc_slot_count();
+    for (size_t slot = 0; slot < proc_slots && exported_count < MAX_PROCS; slot++) {
+        const process_t *proc = proc_slot(slot);
         int seen = 0;
         int j;
 

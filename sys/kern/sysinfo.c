@@ -45,8 +45,9 @@ int do_sysinfo(struct sysinfo *info) {
     // Process Count
     // Iterate global process table
     uint16_t procs = 0;
-    for (int i = 0; i < MAX_PROCS; i++) {
-        if (processes[i].pid != -1) {
+    for (size_t i = 0; i < proc_slot_count(); i++) {
+        process_t *proc = proc_slot(i);
+        if (proc && proc->pid != -1) {
             procs++;
         }
     }

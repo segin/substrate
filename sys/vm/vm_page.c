@@ -78,13 +78,15 @@ static int vm_page_process_has_live_threads(process_t *proc) {
 		return 0;
 	}
 
-	for (int i = 0; i < MAX_THREADS; i++) {
-		if (threads[i].tid == -1 || threads[i].proc != proc) {
-			continue;
-		}
-		if (threads[i].state != THREAD_ZOMBIE) {
-			return 1;
-		}
+    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
+        thread_t *thread = sched_thread_slot(i);
+
+        if (!thread || thread->tid == -1 || thread->proc != proc) {
+            continue;
+        }
+        if (thread->state != THREAD_ZOMBIE) {
+            return 1;
+        }
 	}
 
 	return 0;
@@ -124,13 +126,13 @@ process_t *vm_page_select_oom_victim(void) {
 	process_t *victim = NULL;
 	uint32_t best_score = 0;
 
-	for (int i = 0; i < MAX_PROCS; i++) {
-		process_t *proc = &processes[i];
-		uint32_t score;
+    for (size_t i = 0; i < proc_slot_count(); i++) {
+        process_t *proc = proc_slot(i);
+        uint32_t score;
 
-		if (proc->pid <= 1) {
-			continue;
-		}
+        if (!proc || proc->pid <= 1) {
+            continue;
+        }
 		if (proc->is_kernel_task) {
 			continue;
 		}
