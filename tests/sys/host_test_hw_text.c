@@ -149,6 +149,16 @@ int kprintf(const char *fmt, ...) {
     return 0;
 }
 
+int copyin(const void *src, void *dst, size_t len) {
+    memcpy(dst, src, len);
+    return 0;
+}
+
+int copyout(const void *src, void *dst, size_t len) {
+    memcpy(dst, src, len);
+    return 0;
+}
+
 void vt_init(void) {
     int col;
 
@@ -252,7 +262,6 @@ static void reset_state(void) {
     mock_vt_height = 25;
     vga_buffer = mock_vga_cells;
     hw_text_active = 1;
-    hw_text_start_addr = 0;
     current_vt_ctx = NULL;
     hw_text_status_epoch = 0;
     hw_text_tty_count = 0;

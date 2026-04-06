@@ -12,6 +12,7 @@
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/param.h>
+#include <vm/vm_kmem.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -1509,15 +1510,27 @@ void pmap_growkernel(uintptr_t va) {
 }
 
 static uint32_t pmap_count_active(void) {
-    pmap_t seen[MAX_THREADS];
+    size_t slot_count = sched_thread_slot_count();
+    pmap_t *seen;
     uint32_t seen_count = 0;
 
-    for (int i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].tid == -1 || threads[i].state == THREAD_ZOMBIE || !threads[i].proc) {
+    if (slot_count == 0) {
+        return 0;
+    }
+
+    seen = kmalloc(slot_count * sizeof(*seen));
+    if (!seen) {
+        return 0;
+    }
+
+    for (size_t i = 0; i < slot_count; i++) {
+        thread_t *thread = sched_thread_slot(i);
+
+        if (!thread || thread->tid == -1 || thread->state == THREAD_ZOMBIE || !thread->proc) {
             continue;
         }
 
-        pmap_t pmap = threads[i].proc->pmap;
+        pmap_t pmap = thread->proc->pmap;
         if (!pmap) {
             continue;
         }
@@ -1529,11 +1542,12 @@ static uint32_t pmap_count_active(void) {
                 break;
             }
         }
-        if (!duplicate && seen_count < MAX_THREADS) {
+        if (!duplicate && seen_count < slot_count) {
             seen[seen_count++] = pmap;
         }
     }
 
+    kfree(seen, slot_count * sizeof(*seen));
     return seen_count;
 }
 

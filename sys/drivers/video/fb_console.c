@@ -337,51 +337,9 @@ static void fb_console_fill_row_locked(vt_state_t *vt, int row, char c, uint8_t 
     }
 }
 
-static void fb_console_clear_scanlines(int start_y, int line_count, uint32_t color) {
-    int y;
-    int x;
-
-    if (start_y < 0) {
-        line_count += start_y;
-        start_y = 0;
-    }
-    if (line_count <= 0 || start_y >= (int)fb.virt_height) {
-        return;
-    }
-    if (start_y + line_count > (int)fb.virt_height) {
-        line_count = (int)fb.virt_height - start_y;
-    }
-
-    for (y = start_y; y < start_y + line_count; y++) {
-        for (x = 0; x < (int)fb.width; x++) {
-            fb_putpixel(x, y, color);
-        }
-    }
-}
-
 static int fb_console_smooth_scroll_fullscreen(uint32_t clear_color) {
-    int old_offset;
-    int target_offset;
-    int step;
-
-    if (!fb.scroll || fb.virt_height < fb.height * 2U) {
-        return 0;
-    }
-
-    old_offset = view_y_offset;
-    target_offset = old_offset + FB_FONT_HEIGHT;
-    if (target_offset + (int)fb.height > (int)fb.virt_height) {
-        return 0;
-    }
-
-    fb_console_clear_scanlines(target_offset + (int)fb.height - FB_FONT_HEIGHT,
-                               FB_FONT_HEIGHT, clear_color);
-    for (step = 1; step <= FB_FONT_HEIGHT; step++) {
-        fb.scroll(old_offset + step);
-    }
-    view_y_offset = target_offset;
-    fb_console_mark_dirty(0, view_y_offset, (int)fb.width, (int)fb.height);
-    return 1;
+    (void)clear_color;
+    return 0;
 }
 
 static void fb_console_erase_line_segment_locked(vt_state_t *vt,
@@ -1680,51 +1638,8 @@ void fb_putc(char c, uint32_t fg, uint32_t bg) {
     if (cursor_y + FB_FONT_HEIGHT > (int)fb.height) {
         if (fb_console_smooth_scroll_fullscreen((bg != FB_COLOR_TRANSPARENT) ? bg : FB_COLOR_BLACK)) {
             cursor_y -= FB_FONT_HEIGHT;
-        } else if (fb.scroll && fb.virt_height >= fb.height * 2) {
-            /* Hardware Scrolling Strategy */
-
-            /* Advance view offset */
-            view_y_offset += FB_FONT_HEIGHT;
-
-            /* Check if we need to wrap around the circular buffer */
-            if (view_y_offset + (int)fb.height > (int)fb.virt_height) {
-                 /*
-                  * Buffer wrap-around strategy:
-                  * When the view offset reaches the end of the virtual buffer, we must
-                  * copy the currently visible content (shifted up by one line) back to
-                  * the top of the buffer (offset 0) to continue scrolling.
-                  */
-
-                 void *dst = fb.addr;
-                 int previous_offset = view_y_offset - FB_FONT_HEIGHT;
-
-                 /* Source is the second line of the previous view */
-                 void *src = (void *)((uintptr_t)fb.addr + (previous_offset + FB_FONT_HEIGHT) * fb.pitch);
-                 size_t size = (fb.height - FB_FONT_HEIGHT) * fb.pitch;
-
-                 optimized_memcpy(dst, src, size);
-                 view_y_offset = 0;
-            }
-
-            /* Clear the new bottom line */
-            uint32_t clear_color = (bg != FB_COLOR_TRANSPARENT) ? bg : FB_COLOR_BLACK;
-            int clear_y = view_y_offset + (fb.height - FB_FONT_HEIGHT);
-
-            /* Fill the new line with background */
-            for (uint32_t y = 0; y < FB_FONT_HEIGHT; y++) {
-                for (uint32_t x = 0; x < fb.width; x++) {
-                    fb_putpixel(x, clear_y + y, clear_color);
-                }
-            }
-
-            /* Commit Scroll */
-            fb.scroll(view_y_offset);
-            fb_console_mark_dirty(0, view_y_offset, (int)fb.width, (int)fb.height);
-
-            cursor_y -= FB_FONT_HEIGHT;
-
         } else {
-            /* Fallback: Software Scroll (optimized memcpy) */
+            /* Software scroll keeps the status row decoupled from the viewport. */
             void *dst = fb.addr;
             void *src = (void *)((uintptr_t)fb.addr + FB_FONT_HEIGHT * fb.pitch);
             size_t size = (fb.height - FB_FONT_HEIGHT) * fb.pitch;
@@ -1840,26 +1755,6 @@ void fb_putc_attr(char c, uint32_t fg, uint32_t bg, uint8_t attr) {
     /* Handle scroll — reuse the same logic from fb_putc */
     if (cursor_y + FB_FONT_HEIGHT > (int)fb.height) {
         if (fb_console_smooth_scroll_fullscreen((bg != FB_COLOR_TRANSPARENT) ? bg : FB_COLOR_BLACK)) {
-            cursor_y -= FB_FONT_HEIGHT;
-        } else if (fb.scroll && fb.virt_height >= fb.height * 2) {
-            view_y_offset += FB_FONT_HEIGHT;
-            if (view_y_offset + (int)fb.height > (int)fb.virt_height) {
-                void *dst = fb.addr;
-                int previous_offset = view_y_offset - FB_FONT_HEIGHT;
-                void *src = (void *)((uintptr_t)fb.addr + (previous_offset + FB_FONT_HEIGHT) * fb.pitch);
-                size_t size = (fb.height - FB_FONT_HEIGHT) * fb.pitch;
-                optimized_memcpy(dst, src, size);
-                view_y_offset = 0;
-            }
-            uint32_t clear_color = (bg != FB_COLOR_TRANSPARENT) ? bg : FB_COLOR_BLACK;
-            int clear_y = view_y_offset + (fb.height - FB_FONT_HEIGHT);
-            for (uint32_t fy = 0; fy < FB_FONT_HEIGHT; fy++) {
-                for (uint32_t fx = 0; fx < fb.width; fx++) {
-                    fb_putpixel(fx, clear_y + fy, clear_color);
-                }
-            }
-            fb.scroll(view_y_offset);
-            fb_console_mark_dirty(0, view_y_offset, (int)fb.width, (int)fb.height);
             cursor_y -= FB_FONT_HEIGHT;
         } else {
             void *dst = fb.addr;

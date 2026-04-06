@@ -67,6 +67,16 @@ int video_set_viewport(int x, int y) {
     return 0;
 }
 
+int copyin(const void *src, void *dst, size_t len) {
+    memcpy(dst, src, len);
+    return 0;
+}
+
+int copyout(const void *src, void *dst, size_t len) {
+    memcpy(dst, src, len);
+    return 0;
+}
+
 uint32_t get_hz(void) {
     return 100;
 }
@@ -311,7 +321,7 @@ static void test_tty_ioctl_exposes_framebuffer_controls(void) {
     assert(value == 0);
 
     value = 1;
-    assert(tty->driver->ioctl(tty, VTIOCGBLINK, (unsigned long)&value) == -1);
+    assert(tty->driver->ioctl(tty, VTIOCGBLINK, (unsigned long)&value) == -ENOTTY);
 }
 
 static void test_tty_winsize_tracks_framebuffer_geometry(void) {
@@ -439,7 +449,7 @@ static void test_redraw_active_syncs_status_row(void) {
            fb_console_palette[7]);
 }
 
-static void test_fullscreen_scroll_uses_smooth_viewport_steps(void) {
+static void test_fullscreen_scroll_stays_software_only(void) {
     reset_state();
 
     fb.scroll = mock_scroll;
@@ -450,9 +460,9 @@ static void test_fullscreen_scroll_uses_smooth_viewport_steps(void) {
 
     fb_console_scroll_region_up_locked(&test_vts[0], 0, 23, 1);
 
-    assert(scroll_calls == FB_FONT_HEIGHT);
-    assert(last_scroll_offset == FB_FONT_HEIGHT);
-    assert(view_y_offset == FB_FONT_HEIGHT);
+    assert(scroll_calls == 0);
+    assert(last_scroll_offset == -1);
+    assert(view_y_offset == 0);
     assert(fb_mem[((size_t)vt_get_status_row() * FB_FONT_HEIGHT + (size_t)view_y_offset) *
                   TEST_FB_WIDTH] ==
            fb_console_palette[7]);
@@ -471,7 +481,7 @@ int main(void) {
     test_software_cursor_preserves_background();
     test_software_cursor_blinks_on_tick();
     test_redraw_active_syncs_status_row();
-    test_fullscreen_scroll_uses_smooth_viewport_steps();
+    test_fullscreen_scroll_stays_software_only();
     puts("host_test_fb_console: PASS");
     return 0;
 }

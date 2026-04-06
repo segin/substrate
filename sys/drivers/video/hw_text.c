@@ -38,7 +38,6 @@ static uint16_t *vga_buffer = (uint16_t *)0xC00B8000;
 static spinlock_t hw_text_lock = SPINLOCK_INIT("hw_text");
 static vt_state_t *current_vt_ctx = NULL;
 static volatile uint32_t hw_text_status_epoch = 0;
-static uint16_t hw_text_start_addr = 0;
 static int hw_text_cols = VT_DEFAULT_WIDTH;
 static int hw_text_rows = VT_DEFAULT_HEIGHT;
 
@@ -62,19 +61,12 @@ static inline size_t hw_text_index(size_t x, size_t y) {
 }
 
 static inline size_t hw_text_vram_index(size_t x, size_t y) {
-    return ((size_t)hw_text_start_addr + y * (size_t)vt_get_width() + x) % HW_TEXT_VRAM_CELLS;
+    return y * (size_t)vt_get_width() + x;
 }
 
 static void hw_text_write_vga_cell_locked(size_t x, size_t y, uint16_t entry) {
     vga_buffer[hw_text_vram_index(x, y)] = entry;
 }
-
-static void hw_text_set_start_addr_locked(uint16_t start_addr) {
-    hw_text_start_addr = (uint16_t)(start_addr % HW_TEXT_VRAM_CELLS);
-    hw_text_write_crtc(VGA_CRTC_START_HI, (uint8_t)((hw_text_start_addr >> 8) & 0xFFU));
-    hw_text_write_crtc(VGA_CRTC_START_LO, (uint8_t)(hw_text_start_addr & 0xFFU));
-}
-
 
 static void hw_text_sync_buffer_row_locked(vt_state_t *vt, int row) {
     int x;
@@ -1659,7 +1651,8 @@ void hw_text_init(void) {
 
     hw_text_active = 1;
     hw_text_set_blink_mode_locked(0);
-    hw_text_set_start_addr_locked(0);
+    hw_text_write_crtc(VGA_CRTC_START_HI, 0);
+    hw_text_write_crtc(VGA_CRTC_START_LO, 0);
     hw_text_cursor_blink_phase = 1;
     hw_text_cursor_blink_ticks = 0;
     console_register(&vt_kprint_backend);
