@@ -15,6 +15,11 @@
 #include <sys/file.h>
 #include <sys/errno.h>
 #include <arch/i386/pmm.h>
+#if defined(__i386__)
+#include <arch/i386/pmap.h>
+#elif defined(__x86_64__)
+#include <arch/x86_64/pmap.h>
+#endif
 #include <sys/ldt.h>
 #include <pm/pm.h>
 #include <kern/cmdline.h>
@@ -283,8 +288,39 @@ static void exec_reset_signals(void) {
 static int is_linux_ldso_path(const char *interp_path) {
     if (!interp_path) return 0;
     return strcmp(interp_path, "/lib/ld-linux.so.2") == 0 ||
+           strcmp(interp_path, "/usr/lib32/ld-linux.so.2") == 0 ||
            strcmp(interp_path, "/lib64/ld-linux-x86-64.so.2") == 0 ||
+           strcmp(interp_path, "/usr/lib64/ld-linux-x86-64.so.2") == 0 ||
            strcmp(interp_path, "/lib/ld-linux-x86-64.so.2") == 0;
+}
+
+static fs_node_t *elf_lookup_interpreter(fs_node_t *root, const char *interp_path) {
+    static const struct {
+        const char *requested;
+        const char *fallback;
+    } aliases[] = {
+        { "/usr/lib32/ld-linux.so.2", "/lib/ld-linux.so.2" },
+        { "/usr/lib64/ld-linux-x86-64.so.2", "/lib64/ld-linux-x86-64.so.2" },
+        { "/lib/ld-linux-x86-64.so.2", "/lib64/ld-linux-x86-64.so.2" },
+    };
+    fs_node_t *node;
+
+    if (!interp_path || !root) {
+        return NULL;
+    }
+
+    node = vfs_lookup(root, interp_path);
+    if (node) {
+        return node;
+    }
+
+    for (size_t i = 0; i < sizeof(aliases) / sizeof(aliases[0]); i++) {
+        if (strcmp(interp_path, aliases[i].requested) == 0) {
+            return vfs_lookup(root, aliases[i].fallback);
+        }
+    }
+
+    return NULL;
 }
 
 static int elf_machine_matches_kernel(const Elf32_Ehdr *ehdr) {
@@ -883,6 +919,10 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
 int elf_execve(int fd, const char *path, char *const argv[], char *const envp[]) {
     elf_image_info_t *image = NULL;
     fs_node_t *root = (current_process && current_process->root_node) ? current_process->root_node : fs_root;
+    pmap_t old_pmap = NULL;
+    int old_perso_id = current_process ? current_process->perso_id : PERS_NATIVE;
+    int switched_pmap = 0;
+    int vm_state_committed = 0;
     if (!root) {
         if (fd >= 0) kern_close(fd);
         return -1;
@@ -981,7 +1021,6 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     }
 
     // Create new address space for this process
-    extern pmap_t pmap_create(void);
     pmap_t new_pmap = pmap_create();
     if (!new_pmap) {
         kprint("execve: Failed to create pmap\n");
@@ -991,15 +1030,13 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
 
     // Assign to process immediately so elf_load uses it
     if (current_process) {
+        old_pmap = (pmap_t)(uintptr_t)current_process->pmap;
         current_process->pmap = (struct pmap *)(uintptr_t)new_pmap;
     }
 
-    // Reset signal handlers on exec (POSIX requirement)
-    exec_reset_signals();
-
     // Switch to new address space NOW so pmap_enter works (uses recursive mapping of active PD)
-    extern void pmap_activate(pmap_t pmap);
     pmap_activate(new_pmap);
+    switched_pmap = 1;
 
     // Load the ELF
     char interp_path[256];
@@ -1028,7 +1065,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
             current_process->perso_id = PERS_LINUX;
         }
 
-        fs_node_t *interp_file = vfs_lookup(fs_root, interp_path);
+        fs_node_t *interp_file = elf_lookup_interpreter(root, interp_path);
         if (!interp_file) {
             kprint("execve: Interpreter not found\n");
             goto cleanup;
@@ -1051,8 +1088,10 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     }
 
 
-    // Update process name
     if (current_process) {
+        // Reset signal handlers on successful exec (POSIX requirement)
+        exec_reset_signals();
+
         // Extract basename
         const char *name = path;
         for (const char *p = path; *p; p++) {
@@ -1077,6 +1116,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
         // min=0x10000: reserve low 64KB to catch NULL dereferences and
         // match typical Linux mmap_min_addr default.
         current_process->vm_map = vm_map_create((pmap_t)(uintptr_t)current_process->pmap, 0x10000, 0xC0000000);
+        vm_state_committed = 1;
     }
 
     // Set up kernel stack for this process in TSS
@@ -1149,6 +1189,20 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     return 0;
 
 cleanup:
+    if (!vm_state_committed && current_process) {
+        current_process->perso_id = old_perso_id;
+    }
+    if (!vm_state_committed && switched_pmap) {
+        if (old_pmap) {
+            pmap_activate(old_pmap);
+        }
+        if (current_process) {
+            current_process->pmap = (struct pmap *)(uintptr_t)old_pmap;
+        }
+    }
+    if (!vm_state_committed && new_pmap) {
+        pmap_destroy(new_pmap);
+    }
     if (k_argv) kfree(k_argv, (argc + 1) * sizeof(char*));
     if (k_envp) kfree(k_envp, (envc + 1) * sizeof(char*));
     if (arg_buffer) kfree(arg_buffer, ARG_MAX_BYTES);

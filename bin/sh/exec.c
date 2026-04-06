@@ -72,6 +72,19 @@ static volatile sig_atomic_t *pending_traps = NULL;
 static volatile sig_atomic_t trap_pending_any = 0;
 static int runtime_tables_ready = 0;
 
+static void child_exec_report_failure(const char *path) {
+    const char *msg = strerror(errno);
+
+    if (!path) {
+        path = "exec";
+    }
+
+    write(STDERR_FILENO, path, strlen(path));
+    write(STDERR_FILENO, ": ", 2);
+    write(STDERR_FILENO, msg, strlen(msg));
+    write(STDERR_FILENO, "\n", 1);
+}
+
 static void ensure_runtime_tables(void) {
     if (runtime_tables_ready) {
         return;
@@ -956,7 +969,7 @@ static int builtin_command(int argc, char **argv) {
                 signal(SIGQUIT, SIG_DFL);
                 char **envp = shell_var_get_envp();
                 execve(full, new_argv, envp);
-                perror(new_argv[0]);
+                child_exec_report_failure(new_argv[0]);
                 _exit(126);
             } else if (pid > 0) {
                 int wstatus;
@@ -1518,7 +1531,7 @@ static int execute_simple_command(ast_simple_command_t *cmd, exec_info_t *info) 
         }
         char **env = merge_env(shell_var_get_envp(), cmd->assign_count, cmd->assignments);
         execve(full_path, argv, env);
-        perror(argv[0]);
+        child_exec_report_failure(argv[0]);
         _exit(1);
     } else if (pid > 0) {
         job_t *job = info->job;
