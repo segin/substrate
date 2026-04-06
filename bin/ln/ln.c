@@ -1,4 +1,4 @@
-#include <liblink.h>
+#include "ln.h"
 #include <stdio.h>
 
 int
