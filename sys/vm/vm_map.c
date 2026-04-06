@@ -1,5 +1,6 @@
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
+#include <arch/i386/pmap.h>
 #include <stddef.h>
 
 #include <vm/vm_kmem.h>
@@ -50,6 +51,18 @@ static void update_max_gap(vm_map_hole_t *node) {
 
 static void free_entry(vm_map_entry_t *entry) {
     kfree(entry, sizeof(vm_map_entry_t));
+}
+
+static void vm_map_pmap_remove_range(vm_map_t *map, uintptr_t start, uintptr_t end) {
+    if (!map || !map->pmap || start >= end) {
+        return;
+    }
+
+    start &= ~((uintptr_t)0xFFF);
+    end = (end + 0xFFF) & ~((uintptr_t)0xFFF);
+    for (uintptr_t va = start; va < end; va += 0x1000) {
+        pmap_remove((pmap_t)map->pmap, va);
+    }
 }
 
 static void vm_map_tree_insert(vm_map_t *map, vm_map_entry_t *entry) {
@@ -802,6 +815,7 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
         
         if (cur->start >= start && cur->end <= end) {
             // Entirely within range, remove it
+            vm_map_pmap_remove_range(map, cur->start, cur->end);
             if (map->hint == cur) map->hint = cur->prev;
             cur->prev->next = cur->next;
             cur->next->prev = cur->prev;
@@ -823,6 +837,8 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
                 vm_map_unlock(map);
                 return -1;
             }
+
+            vm_map_pmap_remove_range(map, start, end);
 
             // Initialize new entry (right part)
             new_entry->start = end;
@@ -867,12 +883,14 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
             if (cur->start < start) {
                 // Trimming right side of entry
                 uintptr_t old_end = cur->end;
+                vm_map_pmap_remove_range(map, start, old_end);
                 map->size -= (old_end - start);
                 cur->end = start;
                 hole_insert(map, start, old_end);
             } else {
                 // Trimming left side of entry
                 uintptr_t old_start = cur->start;
+                vm_map_pmap_remove_range(map, old_start, end);
                 map->size -= (end - old_start);
                 cur->offset += (end - old_start);
                 cur->start = end;

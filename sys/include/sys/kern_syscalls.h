@@ -25,6 +25,7 @@ struct sigaction;
 /* Internal kernel versions of syscalls that take kernel pointers */
 int kern_acct(const char *path);
 int kern_open(const char *path, int flags, int mode);
+int kern_openat(int dirfd, const char *path, int flags, int mode);
 ssize_t kern_read(int fd, char *buf, size_t len);
 ssize_t kern_write(int fd, const char *buf, size_t len);
 int kern_close(int fd);
@@ -51,6 +52,7 @@ int kern_rename(const char *oldpath, const char *newpath);
 int kern_rmdir(const char *path);
 int kern_symlink(const char *target, const char *linkpath);
 int kern_readlink(const char *pathname, char *buf, size_t bufsiz);
+int kern_readlinkat(int dirfd, const char *pathname, char *buf, size_t bufsiz);
 int kern_access(const char *path, int mode);
 int kern_pipe(int *fds);
 int kern_statfs(const char *path, struct statfs *buf);

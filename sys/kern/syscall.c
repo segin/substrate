@@ -40,6 +40,7 @@
 #include <sys/fcntl.h>
 #include <sys/reboot.h>
 #include <sys/exec.h>
+#include <sys/namei.h>
 #include <arch/x86-common/io.h>
 #include <string.h>
 #include <stdbool.h>
@@ -98,17 +99,13 @@ static short file_flags_from_open_flags(int flags) {
     return f_flag;
 }
 
-static int kern_resolve_parent(const char *path, fs_node_t **parent_out, const char **name_out) {
+static int kern_resolve_parent_at(const char *path, fs_node_t *root, fs_node_t *cwd,
+                                  fs_node_t **parent_out, const char **name_out) {
     const char *last_slash;
-    fs_node_t *root;
-    fs_node_t *cwd;
     fs_node_t *parent;
     char dir[256];
 
     if (!path || !parent_out || !name_out) return -EINVAL;
-
-    root = current_process->root_node ? current_process->root_node : fs_root;
-    cwd = current_process->cwd_node ? current_process->cwd_node : root;
     last_slash = NULL;
     for (const char *p = path; *p; p++) {
         if (*p == '/') {
@@ -137,6 +134,13 @@ static int kern_resolve_parent(const char *path, fs_node_t **parent_out, const c
 
     *parent_out = parent;
     return 0;
+}
+
+static int kern_resolve_parent(const char *path, fs_node_t **parent_out, const char **name_out) {
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
+
+    return kern_resolve_parent_at(path, root, cwd, parent_out, name_out);
 }
 
 static fs_node_t *vfs_prepare_open_node(fs_node_t *node, struct file **f_out) {
@@ -323,7 +327,7 @@ int sys_open(const char *path, int flags, int mode) {
     return kern_open(kpath, flags, mode);
 }
 
-int kern_open(const char *path, int flags, int mode) {
+static int kern_open_from(const char *path, int flags, int mode, fs_node_t *root, fs_node_t *cwd) {
     const char *create_name = NULL;
     (void)mode;
     if (!path) return -EFAULT;
@@ -334,8 +338,6 @@ int kern_open(const char *path, int flags, int mode) {
 
     // Lookup file
     fs_node_t *node = 0;
-    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
-    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
 
     if (path[0] == '/') {
         node = vfs_lookup(root, path);
@@ -352,7 +354,7 @@ int kern_open(const char *path, int flags, int mode) {
             return -ENOENT;
         }
 
-        error = kern_resolve_parent(path, &parent, &create_name);
+        error = kern_resolve_parent_at(path, root, cwd, &parent, &create_name);
         if (error != 0) {
             proc_clear_fd(current_process, fd);
             return error;
@@ -425,6 +427,58 @@ int kern_open(const char *path, int flags, int mode) {
     }
 
     return fd;
+}
+
+int kern_open(const char *path, int flags, int mode) {
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
+
+    return kern_open_from(path, flags, mode, root, cwd);
+}
+
+int sys_openat(int dirfd, const char *path, int flags, int mode) {
+    char kpath[256];
+
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) {
+        return -EFAULT;
+    }
+    return kern_openat(dirfd, kpath, flags, mode);
+}
+
+int kern_openat(int dirfd, const char *path, int flags, int mode) {
+    fs_node_t *root;
+    fs_node_t *cwd;
+
+    if (!path) {
+        return -EFAULT;
+    }
+
+    root = current_process->root_node ? current_process->root_node : fs_root;
+    cwd = current_process->cwd_node ? current_process->cwd_node : root;
+
+    if (path[0] == '/') {
+        return kern_open_from(path, flags, mode, root, cwd);
+    }
+
+    if (dirfd == AT_FDCWD) {
+        return kern_open_from(path, flags, mode, root, cwd);
+    }
+
+    if (dirfd < 0 || dirfd >= MAX_FD) {
+        return -EBADF;
+    }
+
+    file_t *df = current_process->fds[dirfd];
+    if (!df || !df->f_data) {
+        return -EBADF;
+    }
+
+    cwd = (fs_node_t *)df->f_data;
+    if ((cwd->flags & 0x7) != FS_DIRECTORY) {
+        return -ENOTDIR;
+    }
+
+    return kern_open_from(path, flags, mode, root, cwd);
 }
 
 // Helper for internal use (and userspace via sys_close)
@@ -1319,20 +1373,54 @@ int sys_readlink(const char *pathname, char *buf, size_t bufsiz) {
     return ret;
 }
 
-int kern_readlink(const char *pathname, char *buf, size_t bufsiz) {
-    if (!pathname || !buf || bufsiz == 0) return -14; // EFAULT
-    
-    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
-    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
-    
-    // Lookup the symlink (using lstat-like behavior)
-    fs_node_t *node = vfs_lookup_lstat(cwd, pathname);
-    if (!node) return -2; // ENOENT
-    
-    // Check if it's a symlink
-    if ((node->flags & 0x07) != FS_SYMLINK) return -22; // EINVAL - not a symlink
+int sys_readlinkat(int dirfd, const char *pathname, char *buf, size_t bufsiz) {
+    char kpath[256];
 
-    // kern_readlink writes into a kernel buffer directly.
+    if (copyinstr(pathname, kpath, sizeof(kpath), NULL) != 0) return -14;
+    if (bufsiz > 4096) bufsiz = 4096;
+    char *kbuf = kmalloc(bufsiz);
+    if (!kbuf) return -12;
+    int ret = kern_readlinkat(dirfd, kpath, kbuf, bufsiz);
+    if (ret > 0) {
+        if (copyout(kbuf, buf, ret) != 0) {
+            kfree(kbuf, bufsiz);
+            return -14;
+        }
+    }
+    kfree(kbuf, bufsiz);
+    return ret;
+}
+
+int kern_readlink(const char *pathname, char *buf, size_t bufsiz) {
+    return kern_readlinkat(AT_FDCWD, pathname, buf, bufsiz);
+}
+
+int kern_readlinkat(int dirfd, const char *pathname, char *buf, size_t bufsiz) {
+    fs_node_t *root;
+    fs_node_t *cwd;
+    fs_node_t *node;
+    file_t *df;
+
+    if (!pathname || !buf || bufsiz == 0) return -14; // EFAULT
+
+    root = current_process->root_node ? current_process->root_node : fs_root;
+    cwd = current_process->cwd_node ? current_process->cwd_node : root;
+
+    if (pathname[0] != '/') {
+        if (dirfd == AT_FDCWD) {
+            /* use current cwd */
+        } else {
+            if (dirfd < 0 || dirfd >= MAX_FD) return -EBADF;
+            df = current_process->fds[dirfd];
+            if (!df || !df->f_data) return -EBADF;
+            cwd = (fs_node_t *)df->f_data;
+            if ((cwd->flags & 0x07) != FS_DIRECTORY) return -ENOTDIR;
+        }
+    }
+
+    node = vfs_lookup_lstat((pathname[0] == '/') ? root : cwd, pathname);
+    if (!node) return -ENOENT;
+    if ((node->flags & 0x07) != FS_SYMLINK) return -EINVAL;
     return readlink_fs(node, buf, bufsiz);
 }
 

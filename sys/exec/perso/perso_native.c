@@ -5,6 +5,7 @@
 #include <sys/resource.h>
 #include <sys/times.h>
 #include <include/sys/sysinfo.h>
+#include <kern/time.h>
 
 extern int sys_mlock(const void *addr, size_t len);
 extern int sys_munlock(const void *addr, size_t len);
@@ -23,6 +24,11 @@ extern int sys_setpriority(int which, int who, int prio);
 extern int sys_getpriority(int which, int who);
 
 /* Native-specific syscalls are now in syscall_impl.h */
+
+static void *native_sys_mmap(void *addr, size_t length, int prot, int flags,
+                             int fd, uint32_t page_offset) {
+    return sys_mmap(addr, length, prot, flags, fd, (uint64_t)page_offset << 12);
+}
 
 static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_EXIT] = &sys_exit,
@@ -72,7 +78,12 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_MODIFY_LDT] = &sys_modify_ldt,
     [SYS_READLINK] = &sys_readlink,
     [SYS_REBOOT] = &sys_reboot,
-    [SYS_MMAP] = &sys_mmap,
+    [SYS_MMAP] = &native_sys_mmap,
+    [SYS_MUNMAP] = &sys_munmap,
+    [SYS_TRUNCATE] = &sys_truncate,
+    [SYS_FTRUNCATE] = &sys_ftruncate,
+    [SYS_FCHMOD] = &sys_fchmod,
+    [SYS_FCHOWN] = &sys_fchown,
     [SYS_GETDENTS] = &sys_getdents, 
     [SYS_MSYNC] = &sys_msync,
     [SYS_NANOSLEEP] = &sys_nanosleep,
@@ -118,6 +129,7 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_GETPRIORITY] = &sys_getpriority,
     [SYS_SETITIMER] = &sys_setitimer,
     [SYS_GETITIMER] = &sys_getitimer,
+    [SYS_CLOCK_GETTIME] = &sys_clock_gettime,
 };
 
 static const char *native_names[MAX_SYSCALLS] = {
@@ -161,6 +173,12 @@ static const char *native_names[MAX_SYSCALLS] = {
     [SYS_DUP2] = "dup2",
     [SYS_READLINK] = "readlink",
     [SYS_REBOOT] = "reboot",
+    [SYS_MMAP] = "mmap",
+    [SYS_MUNMAP] = "munmap",
+    [SYS_TRUNCATE] = "truncate",
+    [SYS_FTRUNCATE] = "ftruncate",
+    [SYS_FCHMOD] = "fchmod",
+    [SYS_FCHOWN] = "fchown",
     [SYS_STAT] = "stat",
     [SYS_LSTAT] = "lstat",
     [SYS_FSTAT] = "fstat",
@@ -213,6 +231,7 @@ static const char *native_names[MAX_SYSCALLS] = {
     [SYS_GETPRIORITY] = "getpriority",
     [SYS_SETITIMER] = "setitimer",
     [SYS_GETITIMER] = "getitimer",
+    [SYS_CLOCK_GETTIME] = "clock_gettime",
 };
 
 static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
@@ -257,6 +276,12 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_DUP2] = { 2, { ARG_INT, ARG_INT } },
     [SYS_READLINK] = { 3, { ARG_STR, ARG_PTR, ARG_INT } },
     [SYS_REBOOT] = { 1, { ARG_INT } },
+    [SYS_MMAP] = { 6, { ARG_PTR, ARG_INT, ARG_INT, ARG_INT, ARG_INT, ARG_HEX } },
+    [SYS_MUNMAP] = { 2, { ARG_PTR, ARG_INT } },
+    [SYS_TRUNCATE] = { 3, { ARG_STR, ARG_LONG } },
+    [SYS_FTRUNCATE] = { 3, { ARG_INT, ARG_LONG } },
+    [SYS_FCHMOD] = { 2, { ARG_INT, ARG_HEX } },
+    [SYS_FCHOWN] = { 3, { ARG_INT, ARG_INT, ARG_INT } },
     [SYS_STAT] = { 2, { ARG_STR, ARG_PTR } },
     [SYS_LSTAT] = { 2, { ARG_STR, ARG_PTR } },
     [SYS_FSTAT] = { 2, { ARG_INT, ARG_PTR } },
@@ -308,6 +333,7 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_GETPRIORITY] = { 2, { ARG_INT, ARG_INT } },
     [SYS_SETITIMER] = { 3, { ARG_INT, ARG_PTR, ARG_PTR } },
     [SYS_GETITIMER] = { 2, { ARG_INT, ARG_PTR } },
+    [SYS_CLOCK_GETTIME] = { 2, { ARG_INT, ARG_PTR } },
 };
 
 extern void sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);

@@ -9,6 +9,7 @@
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/file.h>
+#include <sys/uio.h>
 #include "compat.h"
 #include "linux/linux_syscalls.h"
 #include "linux_user.h"
@@ -21,6 +22,7 @@
 #include <sys/syscall_impl.h>
 #include <sys/kern_syscalls.h>
 #include <vfs/vfs.h>
+#include <vm/vm_kmem.h>
 
 /* Missing in syscall_impl.h but used here */
 extern int sys_kill(int pid, int sig);
@@ -32,6 +34,8 @@ extern int sys_vm86(int func, void *ptr);
 extern void linux_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs_ptr);
 
 #define LINUX_UTS_FIELD_LEN 65
+#define LINUX_IOV_MAX 1024
+#define LINUX_UIO_CHUNK 4096
 
 struct linux_utsname {
     char sysname[LINUX_UTS_FIELD_LEN];
@@ -553,6 +557,117 @@ static void *linux_sys_break(void *addr) {
     return sys_brk(addr);
 }
 
+static ssize_t linux_sys_do_uio(int fd, const struct iovec *uiov, int iovcnt,
+                                enum uio_rw rw) {
+    struct iovec *kiov = NULL;
+    char *bounce = NULL;
+    size_t iov_bytes;
+    ssize_t total = 0;
+    ssize_t ret = 0;
+
+    if (iovcnt < 0 || iovcnt > LINUX_IOV_MAX) {
+        return -EINVAL;
+    }
+    if (iovcnt == 0) {
+        return 0;
+    }
+    if (!uiov) {
+        return -EFAULT;
+    }
+
+    iov_bytes = (size_t)iovcnt * sizeof(struct iovec);
+    kiov = kmalloc(iov_bytes);
+    if (!kiov) {
+        return -ENOMEM;
+    }
+    if (copyin(uiov, kiov, iov_bytes) != 0) {
+        ret = -EFAULT;
+        goto out;
+    }
+
+    bounce = kmalloc(LINUX_UIO_CHUNK);
+    if (!bounce) {
+        ret = -ENOMEM;
+        goto out;
+    }
+
+    for (int i = 0; i < iovcnt; i++) {
+        uintptr_t base;
+        size_t remaining;
+
+        if (kiov[i].iov_len == 0) {
+            continue;
+        }
+        if (!kiov[i].iov_base) {
+            ret = (total > 0) ? total : -EFAULT;
+            goto out;
+        }
+        if (kiov[i].iov_len > (size_t)0x7fffffff - (size_t)total) {
+            ret = (total > 0) ? total : -EINVAL;
+            goto out;
+        }
+
+        base = (uintptr_t)kiov[i].iov_base;
+        remaining = kiov[i].iov_len;
+
+        while (remaining > 0) {
+            size_t chunk = remaining > LINUX_UIO_CHUNK ? LINUX_UIO_CHUNK : remaining;
+            ssize_t done;
+
+            if (rw == UIO_WRITE) {
+                if (copyin((const void *)base, bounce, chunk) != 0) {
+                    ret = (total > 0) ? total : -EFAULT;
+                    goto out;
+                }
+                done = kern_write(fd, bounce, chunk);
+            } else {
+                done = kern_read(fd, bounce, chunk);
+                if (done > 0 && copyout(bounce, (void *)base, (size_t)done) != 0) {
+                    ret = (total > 0) ? total : -EFAULT;
+                    goto out;
+                }
+            }
+
+            if (done < 0) {
+                ret = (total > 0) ? total : done;
+                goto out;
+            }
+            if (done == 0) {
+                ret = total;
+                goto out;
+            }
+
+            total += done;
+            base += (uintptr_t)done;
+            remaining -= (size_t)done;
+
+            if ((size_t)done < chunk) {
+                ret = total;
+                goto out;
+            }
+        }
+    }
+
+    ret = total;
+
+out:
+    if (bounce) {
+        kfree(bounce, LINUX_UIO_CHUNK);
+    }
+    if (kiov) {
+        kfree(kiov, iov_bytes);
+    }
+    return ret;
+}
+
+static ssize_t linux_sys_readv(int fd, const struct iovec *uiov, int iovcnt) {
+    return linux_sys_do_uio(fd, uiov, iovcnt, UIO_READ);
+}
+
+static ssize_t linux_sys_writev(int fd, const struct iovec *uiov, int iovcnt) {
+    return linux_sys_do_uio(fd, uiov, iovcnt, UIO_WRITE);
+}
+
 /* Linux Block Device ioctl handler - 0x1200 range */
 static int linux_ioctl_blk(int fd, uint32_t request, void *arg) {
     if (fd < 0 || fd >= MAX_FD) return -EBADF;
@@ -866,8 +981,8 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS__newselect]     = (void *)&sys_select,
     [LINUX_SYS_flock]          = NULL,
     [LINUX_SYS_msync]          = (void *)&sys_msync,
-    [LINUX_SYS_readv]          = NULL,
-    [LINUX_SYS_writev]         = NULL,
+    [LINUX_SYS_readv]          = (void *)&linux_sys_readv,
+    [LINUX_SYS_writev]         = (void *)&linux_sys_writev,
     [LINUX_SYS_getsid]         = NULL,
     [LINUX_SYS_fdatasync]      = NULL,
     [LINUX_SYS__sysctl]        = NULL,
@@ -892,6 +1007,8 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_setresgid]      = NULL,
     [LINUX_SYS_getresgid]      = NULL,
     [LINUX_SYS_prctl]          = NULL,
+    [LINUX_SYS_openat]         = (void *)&sys_openat,
+    [LINUX_SYS_readlinkat]     = (void *)&sys_readlinkat,
     [LINUX_SYS_rt_sigreturn]   = (void *)&linux_sys_rt_sigreturn,
     [LINUX_SYS_rt_sigaction]   = (void *)&linux_sys_rt_sigaction,
     [LINUX_SYS_rt_sigprocmask] = (void *)&linux_sys_rt_sigprocmask,
