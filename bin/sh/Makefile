@@ -7,10 +7,13 @@ include ../../Makefile.bin.inc
 
 LDADD = -L$(TOP)/lib/edit -l:libedit.a
 
-$(LIBEDIT_A):
-	$(MAKE) -C $(TOP)/lib/edit clean all NATIVE_BUILD=$(NATIVE_BUILD)
+libedit_target:
+	$(MAKE) -C $(TOP)/lib/edit clean all
 
-$(PROG): $(LIBEDIT_A)
+libedit_host:
+	$(MAKE) -C $(TOP)/lib/edit NATIVE_BUILD=1 clean all
+
+$(PROG): libedit_target
 
 ifndef NATIVE_BUILD
 USER_CFLAGS += -I$(TOP)/sys
@@ -37,6 +40,9 @@ test_util: util.c tests/test_util.c
 test_exec: exec.c lexer.c parser.c expand.c shell_var.c job.c util.c prompt.c tests/test_exec.c
 	gcc -g -I. -o $@ exec.c lexer.c parser.c expand.c shell_var.c job.c util.c prompt.c tests/test_exec.c
 
+test_exec_property: exec.c lexer.c parser.c expand.c shell_var.c job.c util.c prompt.c tests/test_exec_property.c
+	gcc -g -I. -o $@ exec.c lexer.c parser.c expand.c shell_var.c job.c util.c prompt.c tests/test_exec_property.c
+
 fuzzer: lexer.c parser.c util.c shell_var.c tests/fuzz_parser.c
 	clang -g -fsanitize=fuzzer,address -I. -o $@ lexer.c parser.c util.c shell_var.c tests/fuzz_parser.c
 
@@ -44,16 +50,18 @@ fuzz_ps1: prompt.c util.c shell_var.c tests/fuzz_ps1_parser.c
 	clang -g -fsanitize=fuzzer,address -I. -o $@ prompt.c util.c shell_var.c tests/fuzz_ps1_parser.c
 
 fuzz_parser: lexer.c parser.c shell_var.c util.c tests/fuzz_parser.c
-	$(CC) -g -I. -o $@ $^
+	clang -g -fsanitize=fuzzer,address -I. -o $@ $^
 
 fuzz_expand: expand.c lexer.c parser.c shell_var.c util.c tests/fuzz_expand.c
 	clang -g -fsanitize=fuzzer,address -I. -o $@ expand.c lexer.c parser.c shell_var.c util.c tests/fuzz_expand.c
 
-sh_host: $(SRCS)
-	$(MAKE) -C $(TOP)/lib/edit NATIVE_BUILD=1 clean all
+fuzz_expand_status: expand.c lexer.c parser.c shell_var.c util.c tests/fuzz_expand_status.c
+	clang -g -fsanitize=fuzzer,address -I. -o $@ expand.c lexer.c parser.c shell_var.c util.c tests/fuzz_expand_status.c
+
+sh_host: $(SRCS) libedit_host
 	$(CC) -g -D_GNU_SOURCE -I. -include $(TOP)/include/histedit.h -o $@ $(SRCS) -L$(TOP)/lib/edit -l:libedit.a
 
-test: all test_lexer test_parser test_expand test_shell_var test_job test_util test_exec test_prompt sh_host
+test: all test_lexer test_parser test_expand test_shell_var test_job test_util test_exec test_exec_property test_prompt sh_host
 	./test_lexer
 	./test_parser
 	./test_expand
@@ -61,8 +69,10 @@ test: all test_lexer test_parser test_expand test_shell_var test_job test_util t
 	./test_job
 	./test_util
 	./test_exec
+	./test_exec_property
 	./test_prompt
 	SH="./sh_host" sh tests/test_prompt_mode.sh
+	SH="./sh_host" sh tests/test_regressions.sh
 
 test_prompt: prompt.c util.c shell_var.c tests/test_prompt.c
 	gcc -g -I. -o $@ prompt.c util.c shell_var.c tests/test_prompt.c

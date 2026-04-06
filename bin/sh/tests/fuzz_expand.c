@@ -4,6 +4,11 @@
 #include "../expand.h"
 #include "../shell_var.h"
 
+int execute_line(char *line) {
+    (void)line;
+    return 0;
+}
+
 int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
     if (Size == 0) return 0;
 

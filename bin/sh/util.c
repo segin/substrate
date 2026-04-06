@@ -134,3 +134,41 @@ void buffer_append_str(char **buf, size_t *cap, size_t *len, const char *str) {
         buffer_append(buf, cap, len, *str++);
     }
 }
+
+char *read_stream_all(FILE *stream) {
+    size_t cap = 256;
+    size_t len = 0;
+    char *buf = malloc(cap);
+    char chunk[256];
+
+    if (!buf) {
+        return NULL;
+    }
+    buf[0] = '\0';
+
+    while (!feof(stream)) {
+        size_t nread = fread(chunk, 1, sizeof(chunk), stream);
+
+        if (nread == 0) {
+            if (ferror(stream)) {
+                free(buf);
+                return NULL;
+            }
+            break;
+        }
+
+        while (len + nread + 1 > cap) {
+            cap *= 2;
+            buf = realloc(buf, cap);
+            if (!buf) {
+                return NULL;
+            }
+        }
+
+        memcpy(buf + len, chunk, nread);
+        len += nread;
+        buf[len] = '\0';
+    }
+
+    return buf;
+}

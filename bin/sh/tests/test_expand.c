@@ -5,6 +5,10 @@
 #include <string.h>
 #include <stdlib.h>
 
+#include <unistd.h>
+
+static int mock_execute_status = 0;
+
 void test_tilde(void) {
     shell_var_export("HOME", "/home/testuser");
     char *res = expand_word("~/foo");
@@ -185,6 +189,33 @@ void test_glob(void) {
     printf("PASS: test_glob\n");
 }
 
+void test_cmdsub_status_tracking(void) {
+    expand_state_t state = {0};
+    char *res = NULL;
+
+    mock_execute_status = 5;
+    assert(expand_word_ex("$(echo hi)", &res, &state) == 0);
+    assert(res != NULL);
+    assert(state.saw_cmdsub == 1);
+    assert(state.cmdsub_status == 5);
+    free(res);
+
+    printf("PASS: test_cmdsub_status_tracking\n");
+}
+
+void test_parameter_error_state(void) {
+    expand_state_t state = {0};
+    char *res = NULL;
+
+    shell_var_unset("MISSING");
+    assert(expand_word_ex("${MISSING:?boom}", &res, &state) == -1);
+    assert(state.fatal == 1);
+    assert(state.fatal_status == 1);
+    assert(res == NULL);
+
+    printf("PASS: test_parameter_error_state\n");
+}
+
 int main(void) {
     test_tilde();
     test_parameter();
@@ -193,10 +224,12 @@ int main(void) {
     test_advanced_expansion();
     test_ps1_expansion();
     test_glob();
+    test_cmdsub_status_tracking();
+    test_parameter_error_state();
     return 0;
 }
 
 int execute_line(char *line) {
     (void)line;
-    return 0;
+    return mock_execute_status;
 }

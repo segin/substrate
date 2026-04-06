@@ -9,6 +9,7 @@
 #include <sys/select.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <errno.h>
 #include "el.h"
 

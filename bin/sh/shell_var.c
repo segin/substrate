@@ -378,6 +378,15 @@ int shell_var_is_readonly(const char *name) {
     return v ? v->readonly : 0;
 }
 
+int shell_var_exists(const char *name) {
+    return find_var_recursive(name, NULL) != NULL;
+}
+
+int shell_var_is_exported(const char *name) {
+    shell_var_t *v = find_var_recursive(name, NULL);
+    return v ? v->exported : 0;
+}
+
 char **shell_var_get_envp(void) {
     ensure_global_scope();
     int count = 0;
@@ -487,5 +496,4 @@ void shell_var_push_args(void) {
     shell_argv = NULL;
     shell_name = NULL;
 }
-
 

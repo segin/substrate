@@ -12,7 +12,23 @@
 extern long strtol(const char *nptr, char **endptr, int base);
 extern int execute_line(char *line);
 
-static char *capture_command_output(const char *cmd_str) {
+static void expand_state_note_cmdsub(expand_state_t *state, int status) {
+    if (!state) {
+        return;
+    }
+    state->saw_cmdsub = 1;
+    state->cmdsub_status = status;
+}
+
+static void expand_state_fail(expand_state_t *state, int status) {
+    if (!state) {
+        return;
+    }
+    state->fatal = 1;
+    state->fatal_status = status > 0 ? status : 1;
+}
+
+static char *capture_command_output(const char *cmd_str, expand_state_t *state) {
     int pfd[2];
     if (pipe(pfd) < 0) return strdup("");
     
@@ -21,9 +37,7 @@ static char *capture_command_output(const char *cmd_str) {
         close(pfd[0]);
         dup2(pfd[1], STDOUT_FILENO);
         close(pfd[1]);
-        execute_line((char *)cmd_str);
-        fflush(stdout);
-        _exit(0);
+        _exit(execute_line((char *)cmd_str));
     } else if (pid > 0) {
         close(pfd[1]);
         size_t cap = 1024, len = 0;
@@ -40,7 +54,15 @@ static char *capture_command_output(const char *cmd_str) {
         }
         buf[len] = '\0';
         close(pfd[0]);
-        waitpid(pid, NULL, 0);
+        int status = 0;
+        waitpid(pid, &status, 0);
+        if (WIFEXITED(status)) {
+            expand_state_note_cmdsub(state, WEXITSTATUS(status));
+        } else if (WIFSIGNALED(status)) {
+            expand_state_note_cmdsub(state, 128 + WTERMSIG(status));
+        } else {
+            expand_state_note_cmdsub(state, 1);
+        }
         /* POSIX: strip trailing newlines */
         while (len > 0 && buf[len - 1] == '\n') {
             buf[--len] = '\0';
@@ -502,8 +524,19 @@ static void glob_word(const char *pattern, char ***list, size_t *cap, size_t *le
     }
 }
 
-static void expand_word_internal(const char *word, char ***list, size_t *cap, size_t *len, int split) {
-    if (!word) return;
+static void free_word_array_n(char **words, size_t count) {
+    if (!words) {
+        return;
+    }
+    for (size_t i = 0; i < count; i++) {
+        free(words[i]);
+    }
+    free(words);
+}
+
+static int expand_word_internal(const char *word, char ***list, size_t *cap,
+    size_t *len, int split, expand_state_t *state) {
+    if (!word) return 0;
     size_t cw_cap = 32, cw_len = 0;
     char *cw = malloc(cw_cap); cw[0] = 0;
     int in_sq = 0, in_dq = 0, escape = 0, quoted_any = 0;
@@ -570,7 +603,7 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
                 }
                 if (depth == 0) {
                     char *cmd = sh_strndup(start, p - start);
-                    char *output = capture_command_output(cmd);
+                    char *output = capture_command_output(cmd, state);
                     expand_str_split(output, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                     free(output);
                     free(cmd);
@@ -633,7 +666,13 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
                             // ${var:-word}: use word if unset or null
                             if (!is_nonnull) {
                                 // Recursively expand the word
-                                char *expanded = expand_word(word);
+                                char *expanded = NULL;
+                                if (expand_word_ex(word, &expanded, state) != 0) {
+                                    free(content);
+                                    free(varname);
+                                    free(cw);
+                                    return -1;
+                                }
                                 expand_str_split(expanded, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                                 free(expanded);
                             } else {
@@ -642,14 +681,26 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
                         } else if (op == '+') {
                             // ${var:+word}: use word if set and non-null
                             if (is_nonnull) {
-                                char *expanded = expand_word(word);
+                                char *expanded = NULL;
+                                if (expand_word_ex(word, &expanded, state) != 0) {
+                                    free(content);
+                                    free(varname);
+                                    free(cw);
+                                    return -1;
+                                }
                                 expand_str_split(expanded, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                                 free(expanded);
                             }
                         } else if (op == '=') {
                             // ${var:=word}: assign and use word if unset or null
                             if (!is_nonnull && varname) {
-                                char *expanded = expand_word(word);
+                                char *expanded = NULL;
+                                if (expand_word_ex(word, &expanded, state) != 0) {
+                                    free(content);
+                                    free(varname);
+                                    free(cw);
+                                    return -1;
+                                }
                                 shell_var_set(varname, expanded);
                                 expand_str_split(expanded, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                                 free(expanded);
@@ -659,10 +710,20 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
                         } else if (op == '?') {
                             // ${var:?word}: error if unset or null
                             if (!is_nonnull) {
-                                char *expanded = expand_word(word);
+                                char *expanded = NULL;
+                                if (expand_word_ex(word, &expanded, state) != 0) {
+                                    free(content);
+                                    free(varname);
+                                    free(cw);
+                                    return -1;
+                                }
                                 fprintf(stderr, "%s: %s: %s\n", shell_var_get_name(), varname ? varname : "", expanded);
                                 free(expanded);
-                                // Could exit here for non-interactive
+                                expand_state_fail(state, 1);
+                                free(content);
+                                free(varname);
+                                free(cw);
+                                return state ? -1 : 0;
                             } else {
                                 expand_str_split(val, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                             }
@@ -674,7 +735,13 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
                         
                         if (op == '-') {
                             if (!is_set) {
-                                char *expanded = expand_word(word);
+                                char *expanded = NULL;
+                                if (expand_word_ex(word, &expanded, state) != 0) {
+                                    free(content);
+                                    free(varname);
+                                    free(cw);
+                                    return -1;
+                                }
                                 expand_str_split(expanded, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                                 free(expanded);
                             } else {
@@ -682,13 +749,25 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
                             }
                         } else if (op == '+') {
                             if (is_set) {
-                                char *expanded = expand_word(word);
+                                char *expanded = NULL;
+                                if (expand_word_ex(word, &expanded, state) != 0) {
+                                    free(content);
+                                    free(varname);
+                                    free(cw);
+                                    return -1;
+                                }
                                 expand_str_split(expanded, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                                 free(expanded);
                             }
                         } else if (op == '=') {
                             if (!is_set && varname) {
-                                char *expanded = expand_word(word);
+                                char *expanded = NULL;
+                                if (expand_word_ex(word, &expanded, state) != 0) {
+                                    free(content);
+                                    free(varname);
+                                    free(cw);
+                                    return -1;
+                                }
                                 shell_var_set(varname, expanded);
                                 expand_str_split(expanded, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                                 free(expanded);
@@ -697,9 +776,20 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
                             }
                         } else if (op == '?') {
                             if (!is_set) {
-                                char *expanded = expand_word(word);
+                                char *expanded = NULL;
+                                if (expand_word_ex(word, &expanded, state) != 0) {
+                                    free(content);
+                                    free(varname);
+                                    free(cw);
+                                    return -1;
+                                }
                                 fprintf(stderr, "%s: %s: %s\n", shell_var_get_name(), varname ? varname : "", expanded);
                                 free(expanded);
+                                expand_state_fail(state, 1);
+                                free(content);
+                                free(varname);
+                                free(cw);
+                                return state ? -1 : 0;
                             } else {
                                 expand_str_split(val, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                             }
@@ -795,7 +885,7 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
                     src++;
                 }
                 *dst = '\0';
-                char *output = capture_command_output(cmd);
+                char *output = capture_command_output(cmd, state);
                 expand_str_split(output, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                 free(output);
                 free(cmd);
@@ -811,6 +901,7 @@ static void expand_word_internal(const char *word, char ***list, size_t *cap, si
     }
     finalize_word(&cw, &cw_cap, &cw_len, list, cap, len, quoted_any);
     free(cw);
+    return 0;
 }
 static void remove_quotes(char *word) {
     if (!word) return;
@@ -822,27 +913,58 @@ static void remove_quotes(char *word) {
     *dest = 0;
 }
 
-char *expand_word(const char *word) {
+int expand_word_ex(const char *word, char **out, expand_state_t *state) {
     size_t cap = 4, len = 0;
     char **list = malloc(cap * sizeof(char *));
-    expand_word_internal(word, &list, &cap, &len, 0); // No splitting
-    if (len == 0) { free(list); return strdup(""); }
-    char *res = strdup(list[0]);
+    char *res;
+
+    *out = NULL;
+    if (expand_word_internal(word, &list, &cap, &len, 0, state) != 0) {
+        free_word_array_n(list, len);
+        return -1;
+    }
+    if (len == 0) {
+        free(list);
+        *out = strdup("");
+        return 0;
+    }
+    res = strdup(list[0]);
     remove_quotes(res);
     for (size_t i = 0; i < len; i++) free(list[i]);
     free(list);
-    return res;
+    *out = res;
+    return 0;
 }
 
-char **expand_list(char **words) {
-    if (!words) return NULL;
+char *expand_word(const char *word) {
+    char *out = NULL;
+
+    if (expand_word_ex(word, &out, NULL) != 0) {
+        return NULL;
+    }
+    return out;
+}
+
+int expand_list_ex(char **words, char ***out, expand_state_t *state) {
+    if (!words) {
+        *out = NULL;
+        return 0;
+    }
     size_t cap = 16, len = 0;
     char **expanded = malloc(cap * sizeof(char *));
+    char **globbed;
+    size_t g_cap;
+    size_t g_len = 0;
+
+    *out = NULL;
     for (size_t i = 0; words[i]; i++) {
-        expand_word_internal(words[i], &expanded, &cap, &len, 1);
+        if (expand_word_internal(words[i], &expanded, &cap, &len, 1, state) != 0) {
+            free_word_array_n(expanded, len);
+            return -1;
+        }
     }
-    size_t g_cap = len + 1, g_len = 0;
-    char **globbed = malloc(g_cap * sizeof(char *));
+    g_cap = len + 1;
+    globbed = malloc(g_cap * sizeof(char *));
     for (size_t i = 0; i < len; i++) {
         glob_word(expanded[i], &globbed, &g_cap, &g_len);
         free(expanded[i]);
@@ -852,12 +974,29 @@ char **expand_list(char **words) {
         remove_quotes(globbed[i]);
     }
     globbed[g_len] = NULL;
-    return globbed;
+    *out = globbed;
+    return 0;
 }
 
-char *expand_heredoc(const char *content, int quoted) {
-    if (!content) return strdup("");
-    if (quoted) return strdup(content);
+char **expand_list(char **words) {
+    char **out = NULL;
+
+    if (expand_list_ex(words, &out, NULL) != 0) {
+        return NULL;
+    }
+    return out;
+}
+
+int expand_heredoc_ex(const char *content, int quoted, char **out,
+    expand_state_t *state) {
+    if (!content) {
+        *out = strdup("");
+        return 0;
+    }
+    if (quoted) {
+        *out = strdup(content);
+        return 0;
+    }
     
     size_t cap = strlen(content) + 1;
     size_t len = 0;
@@ -908,14 +1047,14 @@ char *expand_heredoc(const char *content, int quoted) {
                      else if (*p == ')') depth--;
                      if (depth > 0) p++;
                  }
-                 if (depth == 0) {
-                     char *cmd = sh_strndup(start, p - start);
-                     char *output = capture_command_output(cmd);
-                     buffer_append_str(&buf, &cap, &len, output);
-                     free(output);
-                     free(cmd);
-                 }
-            } else if (*p == '{') {
+	                if (depth == 0) {
+	                     char *cmd = sh_strndup(start, p - start);
+	                     char *output = capture_command_output(cmd, state);
+	                     buffer_append_str(&buf, &cap, &len, output);
+	                     free(output);
+	                     free(cmd);
+	                 }
+	            } else if (*p == '{') {
                 p++; const char *start = p;
                 while (*p && *p != '}') p++;
                 if (*p == '}') {
@@ -956,19 +1095,29 @@ char *expand_heredoc(const char *content, int quoted) {
                     }
                     src++;
                 }
-                *dst = '\0';
-                char *output = capture_command_output(cmd);
-                buffer_append_str(&buf, &cap, &len, output);
-                free(output);
-                free(cmd);
-            } else {
-                buffer_append(&buf, &cap, &len, '`');
+	                *dst = '\0';
+	                char *output = capture_command_output(cmd, state);
+	                buffer_append_str(&buf, &cap, &len, output);
+	                free(output);
+	                free(cmd);
+	            } else {
+	                buffer_append(&buf, &cap, &len, '`');
                 p = start - 1;
             }
         } else {
             buffer_append(&buf, &cap, &len, *p);
-        }
-        p++;
+	        }
+	        p++;
+	    }
+	    *out = buf;
+	    return 0;
+}
+
+char *expand_heredoc(const char *content, int quoted) {
+    char *out = NULL;
+
+    if (expand_heredoc_ex(content, quoted, &out, NULL) != 0) {
+        return NULL;
     }
-    return buf;
+    return out;
 }

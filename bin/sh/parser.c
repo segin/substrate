@@ -18,7 +18,7 @@ static int is_reserved(const char *val, const char *word);
 
 static void parser_error(lexer_t *l, const char *msg) {
     token_t *t = lexer_peek(l);
-    if (t) {
+    if (t && t->type != TOKEN_EOF && t->value) {
         fprintf(stderr, "%s: syntax error near unexpected token `%s'\n", shell_var_get_name(), t->value);
     } else {
         fprintf(stderr, "%s: syntax error: %s\n", shell_var_get_name(), msg ? msg : "unexpected EOF");
@@ -232,6 +232,23 @@ static void cmd_add_redir(ast_simple_command_t *cmd, int fd, redir_type_t type, 
         while (curr->next) curr = curr->next;
         curr->next = r;
     }
+}
+
+static void append_redirections(ast_node_t *node, ast_redirection_t *extra) {
+    ast_redirection_t *tail;
+
+    if (!extra) {
+        return;
+    }
+    if (!node->redirections) {
+        node->redirections = extra;
+        return;
+    }
+    tail = node->redirections;
+    while (tail->next) {
+        tail = tail->next;
+    }
+    tail->next = extra;
 }
 
 static ast_redirection_t *parse_redirections(lexer_t *l) {
@@ -636,6 +653,7 @@ static ast_node_t *parse_subshell(lexer_t *l) {
         return NULL;
     }
     token_free(t);
+    node->base.redirections = parse_redirections(l);
     return (ast_node_t*)node;
 }
 
@@ -651,7 +669,7 @@ static ast_node_t *parse_group(lexer_t *l) {
     }
     token_free(t);
     
-    node->redirections = parse_redirections(l); // base.redirections
+    append_redirections(node, parse_redirections(l));
     return node;
 }
 
@@ -816,7 +834,11 @@ static ast_node_t *parse_case(lexer_t *l) {
     ast_case_item_t *last_item = NULL;
     while (1) {
         t = lexer_peek(l);
-        if (!t) break;
+        if (!t || t->type == TOKEN_EOF) {
+            parser_error(l, "expected esac");
+            ast_free((ast_node_t*)node);
+            return NULL;
+        }
         if (is_reserved(t->value, "esac")) {
             token_free(lexer_next(l));
             node->base.redirections = parse_redirections(l);
@@ -858,7 +880,9 @@ static ast_node_t *parse_case(lexer_t *l) {
         }
         consume_newlines(l);
     }
-    return (ast_node_t*)node;
+    parser_error(l, "expected esac");
+    ast_free((ast_node_t*)node);
+    return NULL;
 }
 
 
@@ -1024,7 +1048,14 @@ ast_node_t *parser_parse(lexer_t *l) {
     if (!t || t->type == TOKEN_EOF) return NULL;
     
     ast_node_t *node = parse_list(l);
-    if (!node && lexer_peek(l)->type != TOKEN_EOF) {
+    consume_newlines(l);
+    t = lexer_peek(l);
+    if (node && t && t->type != TOKEN_EOF) {
+        parser_error(l, "unexpected trailing tokens");
+        ast_free(node);
+        return NULL;
+    }
+    if (!node && t && t->type != TOKEN_EOF) {
         parser_error(l, "unexpected list match failure");
     }
     return node;

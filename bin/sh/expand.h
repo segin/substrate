@@ -3,6 +3,13 @@
 
 #include <stddef.h>
 
+typedef struct expand_state {
+    int fatal;
+    int fatal_status;
+    int cmdsub_status;
+    int saw_cmdsub;
+} expand_state_t;
+
 /**
  * expand_word - Performs shell expansions on a single word.
  * @word: The input word string.
@@ -16,6 +23,7 @@
  * 3. Quote removal (strip outer "" and '')
  */
 char *expand_word(const char *word);
+int expand_word_ex(const char *word, char **out, expand_state_t *state);
 
 /**
  * expand_list - Expands a list of words.
@@ -25,6 +33,7 @@ char *expand_word(const char *word);
  * The caller must free the array and its contents.
  */
 char **expand_list(char **words);
+int expand_list_ex(char **words, char ***out, expand_state_t *state);
 
 /**
  * expand_heredoc - Performs expansions on here-document content.
@@ -34,5 +43,7 @@ char **expand_list(char **words);
  * Returns a newly allocated expanded string.
  */
 char *expand_heredoc(const char *content, int quoted);
+int expand_heredoc_ex(const char *content, int quoted, char **out,
+    expand_state_t *state);
 
 #endif

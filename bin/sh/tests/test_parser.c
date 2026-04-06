@@ -217,6 +217,35 @@ void test_compound_extended(void) {
     printf("PASS: test_compound_extended\n");
 }
 
+void test_subshell_redirection(void) {
+    lexer_t l;
+    lexer_init(&l, "(echo hi) > out");
+
+    ast_node_t *node = parser_parse(&l);
+    assert(node != NULL);
+    assert(node->type == NODE_SUBSHELL);
+    assert(node->redirections != NULL);
+    assert(node->redirections->type == REDIR_OUT);
+    assert(strcmp(node->redirections->filename, "out") == 0);
+    ast_free(node);
+
+    printf("PASS: test_subshell_redirection\n");
+}
+
+void test_unterminated_case_rejected(void) {
+    lexer_t l;
+    lexer_init(&l, "case x in a) echo hi ;;");
+    assert(parser_parse(&l) == NULL);
+    printf("PASS: test_unterminated_case_rejected\n");
+}
+
+void test_trailing_junk_rejected(void) {
+    lexer_t l;
+    lexer_init(&l, "echo hi )");
+    assert(parser_parse(&l) == NULL);
+    printf("PASS: test_trailing_junk_rejected\n");
+}
+
 int main(void) {
     test_simple_command();
     test_redirection_out();
@@ -225,5 +254,8 @@ int main(void) {
     test_list_logic();
     test_compound();
     test_compound_extended();
+    test_subshell_redirection();
+    test_unterminated_case_rejected();
+    test_trailing_junk_rejected();
     return 0;
 }

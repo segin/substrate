@@ -27,5 +27,7 @@ void shell_var_pop_scope(void);
 void shell_var_set_local(const char *name, const char *value);
 void shell_var_set_readonly(const char *name);
 int shell_var_is_readonly(const char *name);
+int shell_var_exists(const char *name);
+int shell_var_is_exported(const char *name);
 
 #endif

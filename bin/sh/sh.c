@@ -49,6 +49,10 @@ int execute_line(char *buffer) {
             ast_free(node);
         } else {
             // Parser error or empty
+            if (t && t->type != TOKEN_EOF) {
+                last_status = 2;
+                shell_var_set("?", "2");
+            }
             break;
         }
         
@@ -68,20 +72,14 @@ int execute_line(char *buffer) {
 // Source a file if it exists
 static void source_file(const char *path) {
     FILE *f = fopen(path, "r");
+    char *content;
+
     if (!f) return;
-    
-    fseek(f, 0, SEEK_END);
-    long fsize = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    
-    if (fsize > 0) {
-        char *content = malloc(fsize + 1);
-        if (content) {
-            size_t n = fread(content, 1, fsize, f);
-            content[n] = '\0';
-            execute_line(content);
-            free(content);
-        }
+
+    content = read_stream_all(f);
+    if (content) {
+        execute_line(content);
+        free(content);
     }
     fclose(f);
 }

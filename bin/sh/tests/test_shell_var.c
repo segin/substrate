@@ -98,11 +98,26 @@ void test_envp(void) {
     printf("PASS: test_envp\n");
 }
 
+void test_exists_and_export_state(void) {
+    shell_var_init(NULL);
+    shell_var_set("LOCAL", "value");
+    shell_var_export("EXPORTED", "value");
+
+    assert(shell_var_exists("LOCAL") == 1);
+    assert(shell_var_exists("EXPORTED") == 1);
+    assert(shell_var_exists("MISSING") == 0);
+    assert(shell_var_is_exported("LOCAL") == 0);
+    assert(shell_var_is_exported("EXPORTED") == 1);
+
+    printf("PASS: test_exists_and_export_state\n");
+}
+
 int main(void) {
     test_basic_set_get();
     test_readonly();
     test_scoping();
     test_positional_params();
     test_envp();
+    test_exists_and_export_state();
     return 0;
 }

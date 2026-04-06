@@ -256,6 +256,13 @@ typedef struct fd_save {
     struct fd_save *next;
 } fd_save_t;
 
+typedef struct temp_assignment {
+    char *name;
+    char *value;
+    int existed;
+    int exported;
+} temp_assignment_t;
+
 static int save_redirections(ast_redirection_t *redir, fd_save_t **out_list) {
     fd_save_t *head = NULL;
     ast_redirection_t *r = redir;
@@ -439,13 +446,18 @@ static int builtin_cd(int argc, char **argv) {
 }
 
 static int builtin_export(int argc, char **argv) {
-    if (argc > 1) {
-        char *eq = strchr(argv[1], '=');
+    for (int i = 1; i < argc; i++) {
+        char *eq = strchr(argv[i], '=');
         if (eq) {
-            *eq = 0;
-            shell_var_export(argv[1], eq + 1);
+            *eq = '\0';
+            shell_var_export(argv[i], eq + 1);
+            *eq = '=';
+        } else if (shell_var_exists(argv[i])) {
+            char *value = shell_var_get(argv[i]);
+            shell_var_export(argv[i], value ? value : "");
+            free(value);
         } else {
-            shell_var_export(argv[1], "");
+            shell_var_export(argv[i], "");
         }
     }
     return 0;
@@ -787,20 +799,19 @@ static int builtin_source(int argc, char **argv) {
         fprintf(stderr, "%s: %s: %s: No such file or directory\n", shell_var_get_name(), argv[0], argv[1]);
         return 1;
     }
-    fseek(f, 0, SEEK_END);
-    long fsize = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (fsize > 0) {
-        char *content = malloc(fsize + 1);
-        if (content) {
-            size_t n = fread(content, 1, fsize, f);
-            content[n] = 0;
-            execute_line(content);
-            free(content);
-        }
+    char *content = read_stream_all(f);
+    int status = 0;
+
+    if (!content && ferror(f)) {
+        fclose(f);
+        return 1;
     }
     fclose(f);
-    return 0;
+    if (content) {
+        status = execute_line(content);
+        free(content);
+    }
+    return status;
 }
 
 static int builtin_break(int argc, char **argv) {
@@ -1283,11 +1294,11 @@ static int apply_redirections(ast_redirection_t *redir) {
     while (redir) {
         int fd;
         char *expanded = NULL;
+        expand_state_t state = {0};
         
         // Expand filename (except for here-docs which use heredoc_content)
         if (redir->type != REDIR_HERE_DOC && redir->filename) {
-            expanded = expand_word(redir->filename);
-            if (!expanded) {
+            if (expand_word_ex(redir->filename, &expanded, &state) != 0 || !expanded) {
                 fprintf(stderr, "%s: expansion failed for redirection\n", shell_var_get_name());
                 return 1;
             }
@@ -1333,7 +1344,13 @@ static int apply_redirections(ast_redirection_t *redir) {
                     int p[2];
                     if (pipe(p) < 0) { perror("pipe"); return 1; }
                     if (redir->heredoc_content) {
-                        char *heredoc_expanded = expand_heredoc(redir->heredoc_content, redir->quoted);
+                        char *heredoc_expanded = NULL;
+                        if (expand_heredoc_ex(redir->heredoc_content, redir->quoted,
+                            &heredoc_expanded, &state) != 0) {
+                            close(p[0]);
+                            close(p[1]);
+                            return 1;
+                        }
                         if (heredoc_expanded) {
                             if (write(p[1], heredoc_expanded, strlen(heredoc_expanded)) < 0) perror("write");
                             free(heredoc_expanded);
@@ -1417,6 +1434,134 @@ static char **merge_env(char **base_env, int assign_count, char **assignments) {
     return new_env;
 }
 
+static void free_assignment_snapshot(temp_assignment_t *saved, int count) {
+    if (!saved) {
+        return;
+    }
+    for (int i = 0; i < count; i++) {
+        free(saved[i].name);
+        free(saved[i].value);
+    }
+    free(saved);
+}
+
+static void restore_temporary_assignments(temp_assignment_t *saved, int count) {
+    if (!saved) {
+        return;
+    }
+    for (int i = count - 1; i >= 0; i--) {
+        if (!saved[i].name) {
+            continue;
+        }
+        if (saved[i].existed) {
+            if (saved[i].exported) {
+                shell_var_export(saved[i].name, saved[i].value ? saved[i].value : "");
+            } else {
+                shell_var_set(saved[i].name, saved[i].value ? saved[i].value : "");
+            }
+        } else {
+            shell_var_unset(saved[i].name);
+        }
+    }
+    free_assignment_snapshot(saved, count);
+}
+
+static int expand_assignment(const char *assignment, char **name_out,
+    char **value_out, expand_state_t *state) {
+    const char *eq = strchr(assignment, '=');
+
+    *name_out = NULL;
+    *value_out = NULL;
+    if (!eq) {
+        return 0;
+    }
+
+    *name_out = sh_strndup(assignment, eq - assignment);
+    if (expand_word_ex(eq + 1, value_out, state) != 0) {
+        free(*name_out);
+        *name_out = NULL;
+        return -1;
+    }
+    return 0;
+}
+
+static int apply_persistent_assignments(ast_simple_command_t *cmd,
+    expand_state_t *state) {
+    for (int i = 0; i < cmd->assign_count; i++) {
+        char *name;
+        char *value;
+
+        if (expand_assignment(cmd->assignments[i], &name, &value, state) != 0) {
+            return state && state->fatal ? state->fatal_status : 1;
+        }
+        if (name) {
+            if (shell_var_is_readonly(name)) {
+                fprintf(stderr, "%s: %s: readonly variable\n",
+                    shell_var_get_name(), name);
+                free(name);
+                free(value);
+                return 1;
+            }
+            shell_var_set(name, value ? value : "");
+        }
+        free(name);
+        free(value);
+    }
+    return 0;
+}
+
+static int begin_temporary_assignments(ast_simple_command_t *cmd,
+    expand_state_t *state, temp_assignment_t **saved_out, int *saved_count_out) {
+    temp_assignment_t *saved;
+
+    *saved_out = NULL;
+    *saved_count_out = 0;
+    if (cmd->assign_count == 0) {
+        return 0;
+    }
+
+    saved = calloc(cmd->assign_count, sizeof(*saved));
+    if (!saved) {
+        return 1;
+    }
+
+    for (int i = 0; i < cmd->assign_count; i++) {
+        char *name;
+        char *value;
+
+        if (expand_assignment(cmd->assignments[i], &name, &value, state) != 0) {
+            restore_temporary_assignments(saved, i);
+            return state && state->fatal ? state->fatal_status : 1;
+        }
+        if (name) {
+            if (shell_var_is_readonly(name)) {
+                fprintf(stderr, "%s: %s: readonly variable\n",
+                    shell_var_get_name(), name);
+                free(name);
+                free(value);
+                restore_temporary_assignments(saved, i);
+                return 1;
+            }
+            saved[i].name = name;
+            saved[i].existed = shell_var_exists(name);
+            saved[i].exported = shell_var_is_exported(name);
+            if (saved[i].existed) {
+                saved[i].value = shell_var_get(name);
+            }
+            if (saved[i].exported) {
+                shell_var_export(name, value ? value : "");
+            } else {
+                shell_var_set(name, value ? value : "");
+            }
+        }
+        free(value);
+    }
+
+    *saved_out = saved;
+    *saved_count_out = cmd->assign_count;
+    return 0;
+}
+
 static int execute_simple_command(ast_simple_command_t *cmd, exec_info_t *info) {
     if (cmd->arg_count == 0) {
         /* Assignments only: VAR=val */
@@ -1432,27 +1577,47 @@ static int execute_simple_command(ast_simple_command_t *cmd, exec_info_t *info) 
             }
         }
 
-        for (int i = 0; i < cmd->assign_count; i++) {
-            char *eq = strchr(cmd->assignments[i], '=');
-            if (eq) {
-                *eq = '\0';
-                char *val = expand_word(eq + 1);
-                shell_var_set(cmd->assignments[i], val ? val : "");
-                if (val) free(val);
-                *eq = '=';
-            }
-        }
+        expand_state_t state = {0};
+        int status = apply_persistent_assignments(cmd, &state);
+
         if (saved_fds) restore_redirections(saved_fds);
+        if (status != 0) {
+            return status;
+        }
+        if (state.saw_cmdsub) {
+            return state.cmdsub_status;
+        }
         return 0;
     }
 
-    char **argv = expand_list(cmd->args);
+    expand_state_t state = {0};
+    char **argv = NULL;
     int argc = 0;
+
+    if (expand_list_ex(cmd->args, &argv, &state) != 0) {
+        return state.fatal_status ? state.fatal_status : 1;
+    }
     while (argv[argc]) argc++;
+
+    if (argc == 0) {
+        int status = apply_persistent_assignments(cmd, &state);
+
+        free(argv);
+        if (status != 0) {
+            return status;
+        }
+        if (state.saw_cmdsub) {
+            return state.cmdsub_status;
+        }
+        return 0;
+    }
 
     /* Builtins */
     int is_exec = (strcmp(argv[0], "exec") == 0);
     int status = -1;
+    temp_assignment_t *saved_assignments = NULL;
+    int saved_assignment_count = 0;
+    function_entry_t *func = functions;
 
     fd_save_t *saved_fds = NULL;
     if (cmd->base.redirections) {
@@ -1472,8 +1637,17 @@ static int execute_simple_command(ast_simple_command_t *cmd, exec_info_t *info) 
         }
     }
 
-    status = handle_builtin(argc, argv);
-    if (status != -1) {
+    if (is_builtin(argv[0])) {
+        status = begin_temporary_assignments(cmd, &state, &saved_assignments,
+            &saved_assignment_count);
+        if (status != 0) {
+            if (saved_fds) restore_redirections(saved_fds);
+            for (int i = 0; argv[i]; i++) free(argv[i]);
+            free(argv);
+            return status;
+        }
+        status = handle_builtin(argc, argv);
+        restore_temporary_assignments(saved_assignments, saved_assignment_count);
         if (saved_fds) restore_redirections(saved_fds);
         for (int i = 0; argv[i]; i++) free(argv[i]);
         free(argv);
@@ -1481,10 +1655,18 @@ static int execute_simple_command(ast_simple_command_t *cmd, exec_info_t *info) 
     }
 
     /* Functions */
-    function_entry_t *func = functions;
     while (func) {
         if (strcmp(func->name, argv[0]) == 0) {
+            status = begin_temporary_assignments(cmd, &state, &saved_assignments,
+                &saved_assignment_count);
+            if (status != 0) {
+                if (saved_fds) restore_redirections(saved_fds);
+                for (int i = 0; argv[i]; i++) free(argv[i]);
+                free(argv);
+                return status;
+            }
             int ret = execute_function(func, argc, argv, info);
+            restore_temporary_assignments(saved_assignments, saved_assignment_count);
             if (saved_fds) restore_redirections(saved_fds);
             for (int i = 0; argv[i]; i++) free(argv[i]);
             free(argv);
@@ -1589,6 +1771,7 @@ static int execute_simple_command(ast_simple_command_t *cmd, exec_info_t *info) 
 static int execute_pipeline(ast_pipeline_t *pipe_node, exec_info_t *info) {
     int n = pipe_node->command_count;
     int pipefds[2 * (n - 1)];
+    int last_status = 0;
 
     /* Create job if interactive and not already in one */
     job_t *job = info->job;
@@ -1678,6 +1861,9 @@ static int execute_pipeline(ast_pipeline_t *pipe_node, exec_info_t *info) {
         // Wait for job
         int wait_status;
         wait_status = job_wait(job);
+        last_status = 1;
+        if (WIFEXITED(wait_status)) last_status = WEXITSTATUS(wait_status);
+        else if (WIFSIGNALED(wait_status)) last_status = 128 + WTERMSIG(wait_status);
 
         if (WIFSTOPPED(wait_status)) {
             job->notified = 0;
@@ -1688,10 +1874,10 @@ static int execute_pipeline(ast_pipeline_t *pipe_node, exec_info_t *info) {
         
         tcsetpgrp(STDIN_FILENO, shell_pgid);
         tcsetattr(STDIN_FILENO, TCSADRAIN, &shell_tmodes);
+        return last_status;
     }
     
     /* Non-interactive or not the creator: wait for all children if not background */
-    int last_status = 0;
     if (!info->background) {
         for (int i = 0; i < n; i++) {
             int ws;
@@ -1875,6 +2061,9 @@ static int execute_subshell(ast_subshell_t *sub, exec_info_t *info) {
 
     if (pid == 0) {
         if (must_fork) reset_traps();
+        if (sub->base.redirections && apply_redirections(sub->base.redirections) != 0) {
+            _exit(1);
+        }
         
         /* New context for subshell */
         exec_info_t sub_info = *info;

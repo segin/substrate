@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <termios.h>
 
 void test_job_list(void) {
     job_t *j1 = job_new();
@@ -29,6 +30,7 @@ void test_job_list(void) {
 
 pid_t shell_pgid = 0;
 int shell_is_interactive = 0;
+struct termios shell_tmodes;
 
 int main(void) {
     test_job_list();
