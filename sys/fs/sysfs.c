@@ -1,9 +1,24 @@
 #include <vfs/vfs.h>
 #include <sys/kobject.h>
+#include <kern/time.h>
 #include <string.h>
 #include <stddef.h>
 
 static struct dirent sys_dirent;
+static fs_node_t sysfs_root_node;
+
+static void sysfs_refresh_timestamps(fs_node_t *node) {
+    time_t now;
+
+    if (!node) {
+        return;
+    }
+
+    now = get_time();
+    node->atime = now;
+    node->mtime = now;
+    node->ctime = get_boot_time();
+}
 
 static struct dirent *sysfs_readdir(fs_node_t *node, uint64_t index) {
     (void)node;
@@ -29,15 +44,16 @@ static fs_node_t *sysfs_finddir(fs_node_t *node, char *name) {
         sub_node.uid = 0;
         sub_node.gid = 0;
         sub_node.readdir = &sysfs_readdir; // Simple reuse for proto
+        sub_node.finddir = &sysfs_finddir;
+        sysfs_refresh_timestamps(&sub_node);
         return &sub_node;
     }
     return NULL;
 }
 
-static fs_node_t sysfs_root_node;
-
 static fs_node_t *sysfs_mount(const char *device, uint32_t flags, void *data) {
     (void)device; (void)flags; (void)data;
+    sysfs_refresh_timestamps(&sysfs_root_node);
     return &sysfs_root_node;
 }
 
@@ -55,6 +71,7 @@ void sysfs_init(void) {
     sysfs_root_node.gid = 0;
     sysfs_root_node.readdir = &sysfs_readdir;
     sysfs_root_node.finddir = &sysfs_finddir;
+    sysfs_refresh_timestamps(&sysfs_root_node);
 
     vfs_register_filesystem(&sysfs_fs);
 }

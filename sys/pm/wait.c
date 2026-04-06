@@ -22,6 +22,28 @@
 #define PROC_WAIT_DEBUG(...) kprintf(__VA_ARGS__)
 #endif
 
+static int wait_threads_all_zombie(process_t *proc) {
+    size_t slots;
+
+    if (!proc) {
+        return 1;
+    }
+
+    slots = sched_thread_slot_count();
+    for (size_t i = 0; i < slots; i++) {
+        thread_t *thread = sched_thread_slot(i);
+
+        if (!thread || thread->tid == -1 || thread->proc != proc) {
+            continue;
+        }
+        if (thread->state != THREAD_ZOMBIE) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
 /*
  * find_waitable_child: Search for a child matching the wait criteria.
  * 
@@ -82,9 +104,11 @@ static process_t *find_waitable_child(pid_t pid, process_t *parent, int options,
             
             // Check for zombie (always reported)
             if (child->state == SZOMB) {
-                found = child;
-                reason = 0; // Zombie
-                break;
+                if (wait_threads_all_zombie(child)) {
+                    found = child;
+                    reason = 0; // Zombie
+                    break;
+                }
             }
             
             // Check for stopped (WUNTRACED must be set)

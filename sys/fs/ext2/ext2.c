@@ -705,6 +705,9 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
     node->mask = inode->i_mode & 0xFFF;
     node->uid = inode->i_uid;
     node->gid = inode->i_gid;
+    node->atime = inode->i_atime;
+    node->mtime = inode->i_mtime;
+    node->ctime = inode->i_ctime;
     node->impl = (uintptr_t)ctx;
     node->open = ext2_node_open;
     node->close = ext2_node_close;
@@ -1065,6 +1068,9 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     ext2_root.mask = root_inode.i_mode & 0x0FFF;
     ext2_root.uid = root_inode.i_uid;
     ext2_root.gid = root_inode.i_gid;
+    ext2_root.atime = root_inode.i_atime;
+    ext2_root.mtime = root_inode.i_mtime;
+    ext2_root.ctime = root_inode.i_ctime;
     ext2_root.impl = (uintptr_t)&ext2_root_ctx;
     ext2_root.readdir = ext2_readdir;
     ext2_root.finddir = ext2_finddir;

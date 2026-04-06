@@ -12,6 +12,9 @@ uint64_t get_ticks(void);
 // Get current Unix timestamp (wall-clock time)
 time_t get_time(void);
 
+// Get the wall-clock time recorded at boot
+time_t get_boot_time(void);
+
 // Get uptime in seconds since boot (monotonic)
 time_t get_uptime(void);
 

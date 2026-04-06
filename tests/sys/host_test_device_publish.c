@@ -26,12 +26,16 @@ void spinlock_release(spinlock_t *lock) { (void)lock; }
 bool spinlock_is_held(spinlock_t *lock) { (void)lock; return false; }
 
 process_t *current_process = NULL;
+static time_t mock_now = 5000;
+static time_t mock_boot = 4500;
 struct fs_node *console_get_node(void) { return NULL; }
 void vfs_register_filesystem(struct filesystem *fs) { (void)fs; }
 int tty_read(struct tty *tty, char *buf, int len) { (void)tty; (void)buf; (void)len; return 0; }
 int tty_write(struct tty *tty, const char *buf, int len) { (void)tty; (void)buf; (void)len; return 0; }
 int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) { (void)tty; (void)cmd; (void)arg; return 0; }
 int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
+time_t get_time(void) { return mock_now; }
+time_t get_boot_time(void) { return mock_boot; }
 void kobject_uevent(const char *action, const char *subsystem, const char *name) {
     (void)action; (void)subsystem; (void)name;
 }
@@ -89,11 +93,17 @@ int main(void) {
     disk = devfs_find_child(storage, "disk0");
     assert(disk != NULL);
     assert(disk->node == node);
+    assert(node->atime == mock_now);
+    assert(node->mtime == mock_now);
+    assert(node->ctime == mock_boot);
 
     by_id = devfs_find_child(root_entry, "by-id");
     assert(by_id != NULL);
     alias = devfs_find_child(by_id, "disk-serial");
     assert(alias != NULL);
+    assert(alias->node->atime == mock_now);
+    assert(alias->node->mtime == mock_now);
+    assert(alias->node->ctime == mock_boot);
 
     assert(device_unregister(dev) == 0);
     assert(devfs_find_child(storage, "disk0") == NULL);

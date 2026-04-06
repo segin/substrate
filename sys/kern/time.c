@@ -164,6 +164,10 @@ time_t get_time(void) {
     return boot_time + (ticks / HZ);
 }
 
+time_t get_boot_time(void) {
+    return boot_time;
+}
+
 time_t get_uptime(void) {
     return ticks / HZ;
 }

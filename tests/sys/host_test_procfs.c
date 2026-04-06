@@ -28,6 +28,8 @@ process_t *current_process;
 mutex_t proctree_lock;
 struct mountlist mountlist;
 int kmalloc_should_fail = 0;
+static time_t mock_now = 123456789;
+static time_t mock_boot = 111111111;
 
 void *kmalloc(size_t size) {
     if (kmalloc_should_fail) return NULL;
@@ -39,7 +41,8 @@ void kfree(void *ptr, size_t size) {
     free(ptr);
 }
 
-time_t get_time(void) { return 123456789; }
+time_t get_time(void) { return mock_now; }
+time_t get_boot_time(void) { return mock_boot; }
 int cmdline_get(const char *key, char *buf, size_t buf_len) {
     if (!key || !buf || buf_len == 0) return -1;
     if (strcmp(key, "root") == 0) {
@@ -182,9 +185,13 @@ void setup_mounts(void) {
 
 void test_procfs_finddir_static(void) {
     printf("Test: procfs_finddir static entries...\n");
+    mock_now = 123456800;
     fs_node_t *node = procfs_finddir(NULL, "cpuinfo");
     assert(node != NULL);
     assert(strcmp(node->name, "cpuinfo") == 0);
+    assert(node->atime == mock_now);
+    assert(node->mtime == mock_now);
+    assert(node->ctime == mock_boot);
     if (node->close) node->close(node);
 
     node = procfs_finddir(NULL, "meminfo");
@@ -219,6 +226,9 @@ void test_procfs_finddir_static(void) {
     assert(node != NULL);
     assert(strcmp(node->name, "self") == 0);
     assert(node->flags == FS_SYMLINK);
+    assert(node->atime == mock_now);
+    assert(node->mtime == mock_now);
+    assert(node->ctime == mock_boot);
     if (node->close) node->close(node);
 
     node = procfs_finddir(NULL, "nonexistent");
@@ -302,12 +312,16 @@ void test_procfs_self_dynamic_target(void) {
 
 void test_procfs_finddir_pid(void) {
     printf("Test: procfs_finddir PID entries...\n");
+    mock_now = 123456810;
 
     fs_node_t *node = procfs_finddir(NULL, "1");
     assert(node != NULL);
     assert(strcmp(node->name, "1") == 0);
     assert(node->inode == 1);
     assert(node->flags == FS_DIRECTORY);
+    assert(node->atime == mock_now);
+    assert(node->mtime == mock_now);
+    assert(node->ctime == mock_boot);
     if (node->close) node->close(node);
 
     node = procfs_finddir(NULL, "123");
@@ -333,6 +347,7 @@ void test_procfs_finddir_pid(void) {
 
 void test_proc_pid_finddir(void) {
     printf("Test: proc_pid_finddir entries...\n");
+    mock_now = 123456820;
 
     fs_node_t *node = procfs_finddir(NULL, "1");
     assert(node != NULL);
@@ -342,6 +357,9 @@ void test_proc_pid_finddir(void) {
     assert(status != NULL);
     assert(strcmp(status->name, "status") == 0);
     assert(status->flags == FS_FILE);
+    assert(status->atime == mock_now);
+    assert(status->mtime == mock_now);
+    assert(status->ctime == mock_boot);
     if (status->close) status->close(status);
 
     // Test finding cmdline
@@ -349,6 +367,9 @@ void test_proc_pid_finddir(void) {
     assert(cmdline != NULL);
     assert(strcmp(cmdline->name, "cmdline") == 0);
     assert(cmdline->flags == FS_FILE);
+    assert(cmdline->atime == mock_now);
+    assert(cmdline->mtime == mock_now);
+    assert(cmdline->ctime == mock_boot);
     if (cmdline->close) cmdline->close(cmdline);
 
     // Test finding invalid
@@ -357,6 +378,32 @@ void test_proc_pid_finddir(void) {
 
     if (node->close) node->close(node);
 
+    printf("PASS\n");
+}
+
+void test_procfs_timestamp_policy(void) {
+    printf("Test: procfs synthetic timestamps...\n");
+
+    mock_now = 123456789;
+    procfs_init();
+    assert(procfs_root_node.atime == mock_now);
+    assert(procfs_root_node.mtime == mock_now);
+    assert(procfs_root_node.ctime == mock_boot);
+
+    mock_now = 123456999;
+    fs_node_t *node = procfs_finddir(NULL, "meminfo");
+    assert(node != NULL);
+    assert(node->atime == mock_now);
+    assert(node->mtime == mock_now);
+    assert(node->ctime == mock_boot);
+
+    node = procfs_finddir(NULL, "1");
+    assert(node != NULL);
+    fs_node_t *status = node->finddir(node, "status");
+    assert(status != NULL);
+    assert(status->atime == mock_now);
+    assert(status->mtime == mock_now);
+    assert(status->ctime == mock_boot);
     printf("PASS\n");
 }
 
@@ -489,6 +536,7 @@ int main() {
     setup_processes();
     setup_mounts();
 
+    test_procfs_timestamp_policy();
     test_procfs_finddir_static();
     test_procfs_finddir_pid();
     test_proc_pid_finddir();

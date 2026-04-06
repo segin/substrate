@@ -5,9 +5,6 @@
 #include <stdint.h>
 #include <assert.h>
 
-// Define HOST_TEST to prevent redefinition of types in sys/types.h
-#define HOST_TEST
-
 // Include host headers first if needed (already done above)
 
 // Mock things needed by sysfs.c
@@ -38,6 +35,10 @@
 // We need to mock vfs_register_filesystem
 typedef struct filesystem filesystem_t;
 void vfs_register_filesystem(filesystem_t *fs) { (void)fs; }
+static time_t mock_now = 6000;
+static time_t mock_boot = 5500;
+time_t get_time(void) { return mock_now; }
+time_t get_boot_time(void) { return mock_boot; }
 
 // We need to include sysfs.c
 // But first we need to make sure its includes work.
@@ -51,6 +52,9 @@ int main() {
 
     // Initialize sysfs (optional, but good practice)
     sysfs_init();
+    assert(sysfs_root_node.atime == mock_now);
+    assert(sysfs_root_node.mtime == mock_now);
+    assert(sysfs_root_node.ctime == mock_boot);
 
     // 1. Test valid inputs
     // sysfs_finddir uses a static buffer for sub_node.
@@ -58,9 +62,13 @@ int main() {
 
     const char *valid_names[] = {"bus", "class", "devices"};
     for (int i = 0; i < 3; i++) {
+        mock_now++;
         fs_node_t *node = sysfs_finddir(NULL, (char*)valid_names[i]);
         assert(node != NULL);
         assert(strcmp(node->name, valid_names[i]) == 0);
+        assert(node->atime == mock_now);
+        assert(node->mtime == mock_now);
+        assert(node->ctime == mock_boot);
         printf("PASS: sysfs_finddir(\"%s\") returned correct node.\n", valid_names[i]);
     }
 
