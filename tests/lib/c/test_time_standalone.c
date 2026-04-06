@@ -169,6 +169,35 @@ bool test_difftime(void) {
     return passed;
 }
 
+bool test_strftime_ls_tokens(void) {
+    bool passed = true;
+    struct tm t;
+    char buf[64];
+
+    printf("Running strftime ls-token tests...\n");
+
+    memset(&t, 0, sizeof(t));
+    t.tm_year = 126;
+    t.tm_mon = 3;
+    t.tm_mday = 5;
+    t.tm_hour = 7;
+    t.tm_min = 8;
+
+    if (substrate_strftime(buf, sizeof(buf), "%b %e %H:%M", &t) == 0) {
+        printf("FAILED: strftime returned 0 for ls format\n");
+        return false;
+    }
+    if (strcmp(buf, "Apr  5 07:08") != 0) {
+        printf("FAILED: strftime ls format got '%s'\n", buf);
+        passed = false;
+    }
+
+    if (passed) {
+        printf("strftime ls-token tests passed!\n");
+    }
+    return passed;
+}
+
 bool test_asctime_r_security(void) {
     bool passed = true;
     printf("Running asctime_r security tests...\n");
@@ -227,6 +256,7 @@ int main(void) {
     bool all_passed = true;
     if (!test_gmtime_negative_years()) all_passed = false;
     if (!test_difftime()) all_passed = false;
+    if (!test_strftime_ls_tokens()) all_passed = false;
     if (!test_asctime_r_security()) all_passed = false;
 
     if (all_passed) {

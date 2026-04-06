@@ -137,11 +137,34 @@ bool test_libc_time(void) {
     return all_passed;
 }
 
+bool test_libc_strftime_ls_tokens(void) {
+    struct tm tm_buf;
+    char buf[64];
+
+    memset(&tm_buf, 0, sizeof(tm_buf));
+    tm_buf.tm_year = 126;
+    tm_buf.tm_mon = 3;
+    tm_buf.tm_mday = 5;
+    tm_buf.tm_hour = 7;
+    tm_buf.tm_min = 8;
+
+    if (our_strftime(buf, sizeof(buf), "%b %e %H:%M", &tm_buf) == 0) {
+        printf("FAILED: strftime returned 0 for ls format\n");
+        return false;
+    }
+    if (strcmp(buf, "Apr  5 07:08") != 0) {
+        printf("FAILED: strftime ls format got '%s'\n", buf);
+        return false;
+    }
+    return true;
+}
+
 #ifdef STANDALONE
 int main() {
     bool p1 = test_gmtime_negative_years();
     bool p2 = test_libc_time();
-    if (p1 && p2) {
+    bool p3 = test_libc_strftime_ls_tokens();
+    if (p1 && p2 && p3) {
         printf("PASS\n");
         return 0;
     } else {

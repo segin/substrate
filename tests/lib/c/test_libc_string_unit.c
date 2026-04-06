@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include <assert.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -55,6 +56,8 @@
 #define strtok_r libc_strtok_r
 #undef strerror
 #define strerror libc_strerror
+#undef geterror
+#define geterror libc_geterror
 #undef strcasecmp
 #define strcasecmp libc_strcasecmp
 #undef strncasecmp
@@ -91,6 +94,7 @@ char *libc_strtok(char *str, const char *delim);
 char *libc_strpbrk(const char *s1, const char *s2);
 char *libc_strtok_r(char *str, const char *delim, char **saveptr);
 char *libc_strerror(int errnum);
+char *libc_geterror(int errnum);
 int libc_strcasecmp(const char *s1, const char *s2);
 int libc_strncasecmp(const char *s1, const char *s2, size_t n);
 int libc_ffs(int i);
@@ -121,6 +125,7 @@ int libc_ffsll(long long i);
 #undef strpbrk
 #undef strtok_r
 #undef strerror
+#undef geterror
 #undef ffs
 #undef ffsl
 #undef ffsll
@@ -602,6 +607,19 @@ void run_strncpy_tests(void) {
     ASSERT_MEM_EQ(dest, "xxxxxxxxxx", 10, "strncpy zero n");
 }
 
+void run_strerror_tests(void) {
+    printf("Running strerror/geterror tests...\n");
+    ASSERT_STREQ(libc_strerror(0), "Success", "strerror success");
+    ASSERT_STREQ(libc_strerror(ENOENT), "No such file or directory", "strerror ENOENT");
+    ASSERT_STREQ(libc_strerror(EINVAL), "Invalid argument", "strerror EINVAL");
+    ASSERT_STREQ(libc_strerror(123456), "Unknown error", "strerror unknown");
+
+    ASSERT_STREQ(libc_geterror(0), "Success", "geterror success");
+    ASSERT_STREQ(libc_geterror(ENOENT), "No such file or directory", "geterror ENOENT");
+    ASSERT_STREQ(libc_geterror(EINVAL), "Invalid argument", "geterror EINVAL");
+    ASSERT_STREQ(libc_geterror(123456), "Unknown error", "geterror unknown");
+}
+
 void run_strlcpy_tests(void) {
     printf("Running strlcpy tests...\n");
     char dest[20];
@@ -639,6 +657,11 @@ void run_strlcpy_tests(void) {
 
 bool test_libc_strncpy(void) {
     run_strncpy_tests();
+    return true;
+}
+
+bool test_libc_strerror(void) {
+    run_strerror_tests();
     return true;
 }
 
@@ -919,6 +942,7 @@ int main(void) {
     run_strcspn_tests();
     run_strcasecmp_tests();
     run_strncpy_tests();
+    run_strerror_tests();
     run_strncasecmp_tests();
     run_strlcpy_tests();
     run_strchr_tests();

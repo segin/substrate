@@ -192,7 +192,7 @@ test_ext2_remove_perf: unit/fs/test_ext2_remove_perf.c
 test_minix: unit/fs/test_minix_standalone.c
 	$(CC) $(CFLAGS_KERN) $< -o $@
 
-test_libc_string: lib/c/test_libc_string_unit.c ../lib/c/src/string.c
+test_libc_string: lib/c/test_libc_string_unit.c ../lib/c/src/string.c string_prefixed.o libc_wrappers.o
 	$(CC) $(CFLAGS_COMMON) -fno-builtin -c ../lib/c/src/string.c -o string_raw.o
 	objcopy --prefix-symbols=libc_ string_raw.o string_prefixed.o
 	$(CC) $(CFLAGS_COMMON) lib/c/test_libc_string_unit.c string_prefixed.o libc_wrappers.o -o $@

@@ -33,5 +33,6 @@ size_t strnlen(const char *s, size_t maxlen);
 char *strdup(const char *s);
 char *strndup(const char *s, size_t n);
 char *strerror(int errnum);
+char *geterror(int errnum);
 
 #endif
