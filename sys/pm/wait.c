@@ -155,8 +155,13 @@ int kern_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
             
             switch (reason) {
             case 0: // Zombie - reap it
-                // Return Status (exited: low 7 bits = 0, high 8 bits = exit code)
-                if (status) *status = (target->exit_code << 8);
+                if (status) {
+                    if (target->p_flag & P_SIGEXIT) {
+                        *status = target->exit_code;
+                    } else {
+                        *status = ((target->exit_code & 0xff) << 8);
+                    }
+                }
                 
                 // Handle Rusage - Copy to user buffer and accumulate to parent
                 if (rusage) *rusage = target->rusage;
@@ -208,6 +213,7 @@ int kern_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
                 target->p_parent = NULL;
                 target->p_sibling = NULL;
                 target->state = 0;
+                target->p_flag = 0;
                 
                 return pid_val;
                 

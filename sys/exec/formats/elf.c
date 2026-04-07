@@ -15,7 +15,7 @@
 #include <sys/file.h>
 #include <sys/errno.h>
 #include <arch/i386/pmm.h>
-#if defined(__i386__)
+#if defined(__i386__) || defined(HOST_TEST)
 #include <arch/i386/pmap.h>
 #elif defined(__x86_64__)
 #include <arch/x86_64/pmap.h>
@@ -39,6 +39,8 @@ typedef struct {
     uint32_t va;
     void *pa;
 } elf_page_map_t;
+
+#define ELF_ET_DYN_LOAD_BASE_I386 0x08048000u
 
 typedef struct elf_image_cache_entry {
     uint8_t valid;
@@ -360,7 +362,28 @@ int elf_check_file(Elf32_Ehdr *hdr) {
 
 // Load ELF from file node and prepare for execution
 // Returns entry point address on success, 0 on failure
-uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32_t *interp_len) {
+static uint32_t elf_exec_main_load_base(const elf_image_info_t *image) {
+    if (!image) {
+        return 0;
+    }
+
+    if (image->ehdr.e_type == 3) {
+        return ELF_ET_DYN_LOAD_BASE_I386;
+    }
+
+    return 0;
+}
+
+static uint32_t elf_runtime_phdr_addr(const elf_image_info_t *image, uint32_t load_base) {
+    if (!image) {
+        return 0;
+    }
+
+    return image->at_phdr + load_base;
+}
+
+uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
+                  char *interp_path, uint32_t *interp_len) {
     elf_image_info_t *image;
     const Elf32_Ehdr *ehdr;
     uint32_t entry;
@@ -636,7 +659,7 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
         }
 
         
-        if (load_base == 0) {
+        if (is_main_image) {
             current_process->brk_start = max_vaddr;
             current_process->brk = max_vaddr;
         }
@@ -731,7 +754,8 @@ static int exec_copy_args(char *const array[], int count, char **k_array, char *
 
 // Helper to set up the user stack
 static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int argc, char **k_envp, int envc,
-                            uint32_t at_entry, uint32_t at_base, const elf_image_info_t *image) {
+                            uint32_t at_entry, uint32_t at_base, uint32_t at_phdr,
+                            const elf_image_info_t *image) {
     uint32_t user_stack_top = 0xC0000000;
     uint32_t user_stack_size = 256; // 1MB initial user stack
     uint32_t user_stack_base = user_stack_top - (user_stack_size * 0x1000);
@@ -821,7 +845,7 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
     sp -= 4; STACK_WRITE32(sp, image->ehdr.e_phentsize);
     sp -= 4; STACK_WRITE32(sp, AT_PHENT);
 
-    sp -= 4; STACK_WRITE32(sp, image->at_phdr);
+    sp -= 4; STACK_WRITE32(sp, at_phdr);
     sp -= 4; STACK_WRITE32(sp, AT_PHDR);
     
     sp -= 4; STACK_WRITE32(sp, 4096);
@@ -1042,7 +1066,9 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     char interp_path[256];
     uint32_t interp_len = sizeof(interp_path);
     uint32_t at_base = 0;
-    uint32_t main_entry = elf_load(file, 0, interp_path, &interp_len);
+    uint32_t main_load_base = elf_exec_main_load_base(image);
+    uint32_t at_phdr = elf_runtime_phdr_addr(image, main_load_base);
+    uint32_t main_entry = elf_load(file, main_load_base, 1, interp_path, &interp_len);
     if (main_entry == 0) {
         kprint("execve: Failed to load ELF\n");
         goto cleanup;
@@ -1072,7 +1098,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
         }
 
         uint32_t interp_base = 0x40000000;
-        uint32_t interp_entry = elf_load(interp_file, interp_base, NULL, NULL);
+        uint32_t interp_entry = elf_load(interp_file, interp_base, 0, NULL, NULL);
         if (interp_entry == 0) {
             kprint("execve: Failed to load interpreter\n");
             goto cleanup;
@@ -1124,7 +1150,8 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     set_kernel_stack((uint32_t)current_thread->kstack_top);
 
     uint32_t sp;
-    if (exec_setup_stack(new_pmap, &sp, k_argv, argc, k_envp, envc, main_entry, at_base, image) < 0) {
+    if (exec_setup_stack(new_pmap, &sp, k_argv, argc, k_envp, envc,
+                         main_entry, at_base, at_phdr, image) < 0) {
         goto cleanup;
     }
 

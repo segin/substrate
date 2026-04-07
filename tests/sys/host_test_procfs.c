@@ -11,6 +11,7 @@
 /* Include mocks first */
 #include <vfs/vfs.h>
 #include <include/sys/proc.h>
+#include <sys/file.h>
 #include <pm/pm.h>
 #include <kern/sched.h>
 #include <exec/perso/personality.h>
@@ -30,6 +31,8 @@ struct mountlist mountlist;
 int kmalloc_should_fail = 0;
 static time_t mock_now = 123456789;
 static time_t mock_boot = 111111111;
+static file_t proc_fd3;
+static file_t proc_fd7;
 
 void *kmalloc(size_t size) {
     if (kmalloc_should_fail) return NULL;
@@ -141,6 +144,8 @@ static uint32_t mock_cpuinfo_gen(char *buf, size_t size, void *opaque) {
 void setup_processes() {
     memset(processes, 0, sizeof(processes));
     for(int i=0; i<MAX_PROCS; i++) processes[i].pid = -1;
+    memset(&proc_fd3, 0, sizeof(proc_fd3));
+    memset(&proc_fd7, 0, sizeof(proc_fd7));
 
     processes[0].pid = 1;
     strcpy(processes[0].comm, "init");
@@ -151,6 +156,16 @@ void setup_processes() {
     strcpy(processes[1].comm, "testproc");
     processes[1].uid = 1000;
     processes[1].gid = 1000;
+    strcpy(processes[1].cwd_path, "/home/testproc");
+    strcpy(processes[1].exec_path, "/bin/testproc");
+
+    strcpy(proc_fd3.f_path, "/lib/vi");
+    proc_fd3.f_type = DTYPE_VNODE;
+    processes[1].fds[3] = &proc_fd3;
+
+    strcpy(proc_fd7.f_path, "pipe:[write]");
+    proc_fd7.f_type = DTYPE_PIPE;
+    processes[1].fds[7] = &proc_fd7;
 
     current_process = &processes[0];
 }
@@ -491,6 +506,49 @@ void test_procfs_cmdline_read(void) {
     printf("PASS\n");
 }
 
+void test_procfs_fd_links(void) {
+    fs_node_t *pid_dir;
+    fs_node_t *fd_dir;
+    fs_node_t *fd_link;
+    struct dirent *de;
+    char target[256];
+
+    printf("Test: procfs fd links...\n");
+    setup_processes();
+
+    pid_dir = procfs_finddir(NULL, "123");
+    assert(pid_dir != NULL);
+
+    fd_dir = proc_pid_finddir(pid_dir, "fd");
+    assert(fd_dir != NULL);
+    assert(fd_dir->flags == FS_DIRECTORY);
+
+    de = proc_pid_fd_readdir(fd_dir, 0);
+    assert(de != NULL && strcmp(de->d_name, ".") == 0);
+    de = proc_pid_fd_readdir(fd_dir, 1);
+    assert(de != NULL && strcmp(de->d_name, "..") == 0);
+    de = proc_pid_fd_readdir(fd_dir, 2);
+    assert(de != NULL && strcmp(de->d_name, "3") == 0);
+    de = proc_pid_fd_readdir(fd_dir, 3);
+    assert(de != NULL && strcmp(de->d_name, "7") == 0);
+
+    fd_link = proc_pid_fd_finddir(fd_dir, "3");
+    assert(fd_link != NULL);
+    memset(target, 0, sizeof(target));
+    assert(fd_link->readlink(fd_link, target, sizeof(target)) > 0);
+    assert(strcmp(target, "/lib/vi") == 0);
+
+    fd_link = proc_pid_fd_finddir(fd_dir, "7");
+    assert(fd_link != NULL);
+    memset(target, 0, sizeof(target));
+    assert(fd_link->readlink(fd_link, target, sizeof(target)) > 0);
+    assert(strcmp(target, "pipe:[write]") == 0);
+
+    assert(proc_pid_fd_finddir(fd_dir, "9") == NULL);
+
+    printf("PASS\n");
+}
+
 void test_procfs_mounts_read(void) {
     printf("Test: procfs mounts read...\n");
 
@@ -545,6 +603,7 @@ int main() {
     test_procfs_self_dynamic_target();
     test_procfs_cow_stats_read();
     test_procfs_cmdline_read();
+    test_procfs_fd_links();
     test_procfs_mounts_read();
     test_procfs_driver_model_entries();
     test_procfs_kmalloc_fail();

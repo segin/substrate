@@ -21,6 +21,7 @@
 #define P_TRACED     0x0002  // Being traced (ptrace)
 #define P_WAITED     0x0004  // Stopped state already reported
 #define P_AUTOREAP   0x0008  // Zombie should be reaped asynchronously
+#define P_SIGEXIT    0x0010  // Zombie status is signal/core encoded already
 
 #define PROC_ITIMER_COUNT 3
 #define PROC_CMDLINE_MAX  512

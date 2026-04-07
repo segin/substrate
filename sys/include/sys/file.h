@@ -50,6 +50,7 @@ struct file {
     struct ucred    *f_cred;        /* credentials at open time */
     struct fileops  *f_ops;         /* file operations vector */
     off_t           f_offset;       /* current offset */
+    char            f_path[256];    /* best-effort procfs/readlink path */
     void            *f_data;        /* vnode/socket/pipe/etc. */
     struct file     *f_next;        /* next file in global list */
 };

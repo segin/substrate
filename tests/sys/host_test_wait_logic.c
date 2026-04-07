@@ -259,6 +259,18 @@ static void test_wait_job_control_states(void) {
     assert((mock_child2.p_flag & P_CONTINUED) == 0);
 }
 
+static void test_wait_preserves_signaled_status(void) {
+    int status = 0;
+
+    setup_mocks();
+    mock_child1.exit_code = SIGSEGV | 0x80;
+    mock_child1.p_flag |= P_SIGEXIT;
+    assert(kern_wait4(101, &status, WNOHANG, NULL) == 101);
+    assert(WIFSIGNALED(status));
+    assert(WTERMSIG(status) == SIGSEGV);
+    assert(WCOREDUMP(status));
+}
+
 #include "../../sys/pm/wait.c"
 
 int main(void) {
@@ -266,6 +278,7 @@ int main(void) {
     test_wait_wnohang_and_blocking();
     test_wait_defers_reap_until_threads_zombie();
     test_wait_job_control_states();
+    test_wait_preserves_signaled_status();
     puts("host_test_wait_logic: PASS");
     return 0;
 }

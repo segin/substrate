@@ -18,6 +18,7 @@
 #include <sys/session.h>
 #include <sys/mount.h>
 #include <sys/tty.h>
+#include <sys/file.h>
 #include <string.h>
 #include <stdio.h>
 #include <stddef.h>
@@ -49,8 +50,11 @@ static fs_node_t *procfs_finddir(fs_node_t *node, char *name);
 static int proc_self_readlink(fs_node_t *node, char *buf, size_t size);
 static int proc_pid_exe_readlink(fs_node_t *node, char *buf, size_t size);
 static int proc_pid_cwd_readlink(fs_node_t *node, char *buf, size_t size);
+static int proc_pid_fd_readlink(fs_node_t *node, char *buf, size_t size);
 static struct dirent *proc_pid_readdir(fs_node_t *node, uint64_t index);
 static fs_node_t *proc_pid_finddir(fs_node_t *node, char *name);
+static struct dirent *proc_pid_fd_readdir(fs_node_t *node, uint64_t index);
+static fs_node_t *proc_pid_fd_finddir(fs_node_t *node, char *name);
 static size_t proc_pid_status_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
 static size_t proc_pid_stat_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
 static size_t proc_pid_cmdline_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
@@ -394,6 +398,8 @@ typedef struct procfs_pid_nodes {
     fs_node_t stat;
     fs_node_t exe;
     fs_node_t cwd;
+    fs_node_t fd_dir;
+    fs_node_t fd_links[MAX_FD];
 } procfs_pid_nodes_t;
 
 static procfs_pid_nodes_t **procfs_pid_nodes = NULL;
@@ -532,6 +538,30 @@ static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
     nodes->cwd.readlink = &proc_pid_cwd_readlink;
     procfs_refresh_timestamps(&nodes->cwd);
 
+    strncpy(nodes->fd_dir.name, "fd", sizeof(nodes->fd_dir.name) - 1);
+    nodes->fd_dir.flags = FS_DIRECTORY;
+    nodes->fd_dir.mask = 0555;
+    nodes->fd_dir.uid = 0;
+    nodes->fd_dir.gid = 0;
+    nodes->fd_dir.readdir = &proc_pid_fd_readdir;
+    nodes->fd_dir.finddir = &proc_pid_fd_finddir;
+    procfs_refresh_timestamps(&nodes->fd_dir);
+
+    for (int fd = 0; fd < MAX_FD; fd++) {
+        fs_node_t *link = &nodes->fd_links[fd];
+
+        memset(link, 0, sizeof(*link));
+        snprintf(link->name, sizeof(link->name), "%d", fd);
+        link->flags = FS_SYMLINK;
+        link->mask = 0777;
+        link->uid = 0;
+        link->gid = 0;
+        link->inode = pid;
+        link->impl = (uintptr_t)fd;
+        link->readlink = &proc_pid_fd_readlink;
+        procfs_refresh_timestamps(link);
+    }
+
     return nodes;
 }
 
@@ -600,6 +630,35 @@ static int proc_pid_cwd_readlink(fs_node_t *node, char *buf, size_t size) {
         return proc_copy_process_link_target(p, "/", buf, size);
     }
     return proc_copy_process_link_target(p, p->cwd_path, buf, size);
+}
+
+static int proc_pid_fd_readlink(fs_node_t *node, char *buf, size_t size) {
+    process_t *p = proc_find((int)node->inode);
+    int fd = (int)node->impl;
+    file_t *file;
+    const char *target;
+
+    if (!p || fd < 0 || fd >= MAX_FD) {
+        return -1;
+    }
+
+    file = p->fds[fd];
+    if (!file) {
+        return -1;
+    }
+
+    target = file->f_path[0] ? file->f_path : NULL;
+    if (!target) {
+        if (file->f_type == DTYPE_PIPE) {
+            target = "pipe:";
+        } else if (file->f_type == DTYPE_SOCKET) {
+            target = "socket:";
+        } else {
+            target = "unknown:";
+        }
+    }
+
+    return proc_copy_process_link_target(p, target, buf, size);
 }
 
 /*
@@ -831,12 +890,49 @@ static size_t proc_pid_cmdline_read(fs_node_t *node, off_t offset, size_t size, 
 
 static struct dirent *proc_pid_readdir(fs_node_t *node, uint64_t index) {
     (void)node;
-    const char *entries[] = { ".", "..", "status", "cmdline", "stat", "exe", "cwd", NULL };
-    if (index >= 7) return NULL;
+    const char *entries[] = { ".", "..", "status", "cmdline", "stat", "exe", "cwd", "fd", NULL };
+    if (index >= 8) return NULL;
     strncpy(proc_dirent.d_name, entries[index], sizeof(proc_dirent.d_name) - 1);
     proc_dirent.d_name[sizeof(proc_dirent.d_name) - 1] = '\0';
     proc_dirent.d_ino = node->inode;
     return &proc_dirent;
+}
+
+static struct dirent *proc_pid_fd_readdir(fs_node_t *node, uint64_t index) {
+    process_t *p = proc_find((int)node->inode);
+    uint64_t fd_index;
+
+    if (!p) {
+        return NULL;
+    }
+
+    if (index == 0) {
+        strncpy(proc_dirent.d_name, ".", sizeof(proc_dirent.d_name) - 1);
+        proc_dirent.d_name[sizeof(proc_dirent.d_name) - 1] = '\0';
+        proc_dirent.d_ino = node->inode;
+        return &proc_dirent;
+    }
+    if (index == 1) {
+        strncpy(proc_dirent.d_name, "..", sizeof(proc_dirent.d_name) - 1);
+        proc_dirent.d_name[sizeof(proc_dirent.d_name) - 1] = '\0';
+        proc_dirent.d_ino = node->inode;
+        return &proc_dirent;
+    }
+
+    fd_index = index - 2;
+    for (int fd = 0; fd < MAX_FD; fd++) {
+        if (!p->fds[fd]) {
+            continue;
+        }
+        if (fd_index == 0) {
+            snprintf(proc_dirent.d_name, sizeof(proc_dirent.d_name), "%d", fd);
+            proc_dirent.d_ino = node->inode;
+            return &proc_dirent;
+        }
+        fd_index--;
+    }
+
+    return NULL;
 }
 
 static fs_node_t *proc_pid_finddir(fs_node_t *node, char *name) {
@@ -879,7 +975,62 @@ static fs_node_t *proc_pid_finddir(fs_node_t *node, char *name) {
         procfs_refresh_timestamps(&nodes->cwd);
         return &nodes->cwd;
     }
+    if (strcmp(name, "fd") == 0) {
+        nodes->fd_dir.inode = node->inode;
+        procfs_refresh_timestamps(&nodes->fd_dir);
+        return &nodes->fd_dir;
+    }
     return NULL;
+}
+
+static fs_node_t *proc_pid_fd_finddir(fs_node_t *node, char *name) {
+    procfs_pid_nodes_t *nodes;
+    process_t *p;
+    int fd = 0;
+    char *scan;
+
+    if (strcmp(name, ".") == 0) {
+        procfs_refresh_timestamps(node);
+        return node;
+    }
+    if (strcmp(name, "..") == 0) {
+        nodes = procfs_get_pid_nodes((int)node->inode);
+        if (!nodes) {
+            return NULL;
+        }
+        nodes->dir.inode = node->inode;
+        procfs_refresh_timestamps(&nodes->dir);
+        return &nodes->dir;
+    }
+
+    p = proc_find((int)node->inode);
+    if (!p) {
+        return NULL;
+    }
+
+    if (!name[0]) {
+        return NULL;
+    }
+    scan = name;
+    while (*scan >= '0' && *scan <= '9') {
+        fd = (fd * 10) + (*scan - '0');
+        if (fd >= MAX_FD) {
+            return NULL;
+        }
+        scan++;
+    }
+    if (*scan != '\0' || !p->fds[fd]) {
+        return NULL;
+    }
+
+    nodes = procfs_get_pid_nodes((int)node->inode);
+    if (!nodes) {
+        return NULL;
+    }
+
+    nodes->fd_links[fd].inode = node->inode;
+    procfs_refresh_timestamps(&nodes->fd_links[fd]);
+    return &nodes->fd_links[fd];
 }
 
 /* Root /proc directory operations */

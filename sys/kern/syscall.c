@@ -99,6 +99,47 @@ static short file_flags_from_open_flags(int flags) {
     return f_flag;
 }
 
+static void file_set_path(file_t *f, const char *path) {
+    if (!f) {
+        return;
+    }
+    if (!path) {
+        f->f_path[0] = '\0';
+        return;
+    }
+    strncpy(f->f_path, path, sizeof(f->f_path) - 1);
+    f->f_path[sizeof(f->f_path) - 1] = '\0';
+}
+
+static void file_build_path(char *out, size_t out_sz, const char *path, const char *cwd_path) {
+    if (!out || out_sz == 0) {
+        return;
+    }
+
+    out[0] = '\0';
+    if (!path || !path[0]) {
+        return;
+    }
+
+    if (path[0] == '/') {
+        strncpy(out, path, out_sz - 1);
+        out[out_sz - 1] = '\0';
+        return;
+    }
+
+    if (cwd_path && cwd_path[0]) {
+        if (strcmp(cwd_path, "/") == 0) {
+            snprintf(out, out_sz, "/%s", path);
+        } else {
+            snprintf(out, out_sz, "%s/%s", cwd_path, path);
+        }
+        return;
+    }
+
+    strncpy(out, path, out_sz - 1);
+    out[out_sz - 1] = '\0';
+}
+
 static int kern_resolve_parent_at(const char *path, fs_node_t *root, fs_node_t *cwd,
                                   fs_node_t **parent_out, const char **name_out) {
     const char *last_slash;
@@ -327,8 +368,10 @@ int sys_open(const char *path, int flags, int mode) {
     return kern_open(kpath, flags, mode);
 }
 
-static int kern_open_from(const char *path, int flags, int mode, fs_node_t *root, fs_node_t *cwd) {
+static int kern_open_from(const char *path, int flags, int mode, fs_node_t *root, fs_node_t *cwd,
+                          const char *cwd_path) {
     const char *create_name = NULL;
+    char full_path[sizeof(((file_t *)0)->f_path)];
     (void)mode;
     if (!path) return -EFAULT;
     
@@ -406,6 +449,8 @@ static int kern_open_from(const char *path, int flags, int mode, fs_node_t *root
     f->f_offset = 0;
     f->f_flag = file_flags_from_open_flags(flags);
     f->f_count = 1;
+    file_build_path(full_path, sizeof(full_path), path, cwd_path);
+    file_set_path(f, full_path);
 
     proc_set_fd(current_process, fd, f);
     if (flags & O_CLOEXEC) {
@@ -433,7 +478,7 @@ int kern_open(const char *path, int flags, int mode) {
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
     fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
 
-    return kern_open_from(path, flags, mode, root, cwd);
+    return kern_open_from(path, flags, mode, root, cwd, current_process ? current_process->cwd_path : NULL);
 }
 
 int sys_openat(int dirfd, const char *path, int flags, int mode) {
@@ -457,11 +502,11 @@ int kern_openat(int dirfd, const char *path, int flags, int mode) {
     cwd = current_process->cwd_node ? current_process->cwd_node : root;
 
     if (path[0] == '/') {
-        return kern_open_from(path, flags, mode, root, cwd);
+        return kern_open_from(path, flags, mode, root, cwd, current_process ? current_process->cwd_path : NULL);
     }
 
     if (dirfd == AT_FDCWD) {
-        return kern_open_from(path, flags, mode, root, cwd);
+        return kern_open_from(path, flags, mode, root, cwd, current_process ? current_process->cwd_path : NULL);
     }
 
     if (dirfd < 0 || dirfd >= MAX_FD) {
@@ -478,7 +523,7 @@ int kern_openat(int dirfd, const char *path, int flags, int mode) {
         return -ENOTDIR;
     }
 
-    return kern_open_from(path, flags, mode, root, cwd);
+    return kern_open_from(path, flags, mode, root, cwd, df->f_path[0] ? df->f_path : NULL);
 }
 
 // Helper for internal use (and userspace via sys_close)
@@ -1517,6 +1562,7 @@ int kern_pipe(int *fds) {
     }
     rf->f_data = read_node;
     rf->f_flag = FREAD;
+    file_set_path(rf, "pipe:[read]");
     proc_set_fd(current_process, f1, rf);
 
     file_t *wf = file_alloc();
@@ -1531,6 +1577,7 @@ int kern_pipe(int *fds) {
     }
     wf->f_data = write_node;
     wf->f_flag = FWRITE;
+    file_set_path(wf, "pipe:[write]");
     proc_set_fd(current_process, f2, wf);
 
     fds[0] = f1;

@@ -45,6 +45,8 @@ void test_linux_personality(void) {
                 "Linux syscall table wires umount to sys_umount");
     test_assert(linux->syscall_table[LINUX_SYS_dup] == (void *)&sys_dup,
                 "Linux syscall table wires dup to sys_dup");
+    test_assert(linux->syscall_table[LINUX_SYS_mprotect] == (void *)&sys_mprotect,
+                "Linux syscall table wires mprotect to sys_mprotect");
     test_assert(linux->syscall_table[LINUX_SYS_uname] != (void *)&sys_uname,
                 "Linux uname uses compatibility wrapper, not native struct copyout");
     test_assert(linux->syscall_names[LINUX_SYS_modify_ldt] != NULL &&
@@ -56,6 +58,9 @@ void test_linux_personality(void) {
     test_assert(linux->syscall_names[LINUX_SYS_umount] != NULL &&
                     strcmp(linux->syscall_names[LINUX_SYS_umount], "umount") == 0,
                 "Linux syscall name table exposes umount");
+    test_assert(linux->syscall_names[LINUX_SYS_mprotect] != NULL &&
+                    strcmp(linux->syscall_names[LINUX_SYS_mprotect], "mprotect") == 0,
+                "Linux syscall name table exposes mprotect");
     test_assert(linux->syscall_fmts[LINUX_SYS_modify_ldt].nargs == 3,
                 "Linux modify_ldt trace format has three arguments");
     test_assert(linux->syscall_fmts[LINUX_SYS_mount].nargs == 5,
@@ -69,6 +74,11 @@ void test_linux_personality(void) {
     test_assert(linux->syscall_fmts[LINUX_SYS_umount].nargs == 1 &&
                     linux->syscall_fmts[LINUX_SYS_umount].arg_types[0] == ARG_STR,
                 "Linux umount trace format matches ABI");
+    test_assert(linux->syscall_fmts[LINUX_SYS_mprotect].nargs == 3 &&
+                    linux->syscall_fmts[LINUX_SYS_mprotect].arg_types[0] == ARG_PTR &&
+                    linux->syscall_fmts[LINUX_SYS_mprotect].arg_types[1] == ARG_INT &&
+                    linux->syscall_fmts[LINUX_SYS_mprotect].arg_types[2] == ARG_HEX,
+                "Linux mprotect trace format matches ABI");
     test_assert(linux->syscall_fmts[LINUX_SYS_modify_ldt].arg_types[0] == ARG_INT &&
                     linux->syscall_fmts[LINUX_SYS_modify_ldt].arg_types[1] == ARG_PTR &&
                     linux->syscall_fmts[LINUX_SYS_modify_ldt].arg_types[2] == ARG_LONG,

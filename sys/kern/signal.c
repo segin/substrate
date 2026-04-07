@@ -622,6 +622,7 @@ void sigexit(process_t *p, int sig) {
     
     /* Terminate the process */
     extern void proc_exit(int status);
+    p->p_flag |= P_SIGEXIT;
     p->exit_code = exit_status;
     proc_exit(exit_status);
 }

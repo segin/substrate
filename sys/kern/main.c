@@ -648,6 +648,8 @@ static void init_root_fs(void) {
 void kinit_task(void *arg) {
     (void)arg;  // Unused now that we use cmdline_get
     char *init_path = NULL;
+    char init_arg_buf[256];
+    char *init_arg = NULL;
     char *const init_envp[] = {
         "PATH=/bin:/sbin:/usr/bin:/usr/sbin",
         "HOME=/",
@@ -670,10 +672,17 @@ void kinit_task(void *arg) {
     char init_buf[256];
     if (cmdline_get("init", init_buf, sizeof(init_buf)) == 0) {
         init_path = init_buf;
+        if (cmdline_get("initarg", init_arg_buf, sizeof(init_arg_buf)) == 0) {
+            init_arg = init_arg_buf;
+        }
         kprint("kinit: Trying ");
         kprint(init_path);
+        if (init_arg) {
+            kprint(" ");
+            kprint(init_arg);
+        }
         kprint("\n");
-        char *init_argv[] = { init_path, NULL };
+        char *init_argv[] = { init_path, init_arg, NULL };
         if (kern_execve(init_path, init_argv, init_envp) == 0) {
             goto exec_success;
         }
