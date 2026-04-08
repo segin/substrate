@@ -185,7 +185,7 @@ static fs_node_t kmem_node;
  */
 void kmem_dev_init(void) {
     memset(&kmem_node, 0, sizeof(fs_node_t));
-    strcpy(kmem_node.name, "kmem");
+    strlcpy(kmem_node.name, "kmem", sizeof(kmem_node.name));
     kmem_node.flags = FS_CHARDEVICE;
     kmem_node.uid = 0;
     kmem_node.gid = 0;
