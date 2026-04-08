@@ -4851,6 +4851,46 @@ def main():
     require(saved == "  one\n  two\n\t  three\n",
             f"unexpected unshift-plus-indent buffer: {saved!r}")
 
+    scroll_operator_initial = (
+        "line 1\nline 2\nline 3\nline 4\n"
+        "line 5\nline 6\nline 7\nline 8\n"
+    )
+    for name, keys in [
+        ("d-ctrl-d-noop", [b"4", b"G", b"d", b"\x04"]),
+        ("c-ctrl-d-noop", [b"4", b"G", b"c", b"\x04", b"X", b"\x1b"]),
+        ("y-ctrl-d-noop", [b"4", b"G", b"y", b"\x04", b"P"]),
+        ("shift-ctrl-d-noop", [b"4", b"G", b">", b"\x04"]),
+        ("unshift-ctrl-d-noop", [b"4", b"G", b"<", b"\x04"]),
+        ("d-ctrl-u-noop", [b"4", b"G", b"d", b"\x15"]),
+        ("c-ctrl-u-noop", [b"4", b"G", b"c", b"\x15", b"X", b"\x1b"]),
+        ("y-ctrl-u-noop", [b"4", b"G", b"y", b"\x15", b"P"]),
+        ("shift-ctrl-u-noop", [b"4", b"G", b">", b"\x15"]),
+        ("unshift-ctrl-u-noop", [b"4", b"G", b"<", b"\x15"]),
+        ("d-ctrl-e-noop", [b"4", b"G", b"d", b"\x05"]),
+        ("c-ctrl-e-noop", [b"4", b"G", b"c", b"\x05", b"X", b"\x1b"]),
+        ("y-ctrl-e-noop", [b"4", b"G", b"y", b"\x05", b"P"]),
+        ("shift-ctrl-e-noop", [b"4", b"G", b">", b"\x05"]),
+        ("unshift-ctrl-e-noop", [b"4", b"G", b"<", b"\x05"]),
+        ("d-ctrl-y-noop", [b"4", b"G", b"d", b"\x19"]),
+        ("c-ctrl-y-noop", [b"4", b"G", b"c", b"\x19", b"X", b"\x1b"]),
+        ("y-ctrl-y-noop", [b"4", b"G", b"y", b"\x19", b"P"]),
+        ("shift-ctrl-y-noop", [b"4", b"G", b">", b"\x19"]),
+        ("unshift-ctrl-y-noop", [b"4", b"G", b"<", b"\x19"]),
+    ]:
+        exit_code, decoded, saved = run_vi_session(
+            vi_path,
+            scroll_operator_initial,
+            keys,
+            rows=6,
+            cols=20,
+        )
+        require(exit_code == 0, f"{name} vi exited with status {exit_code}")
+        require(saved == scroll_operator_initial,
+                f"unexpected {name} buffer: {saved!r}")
+        if name.startswith("c-"):
+            require("-- INSERT --" not in decoded,
+                    f"{name} unexpectedly entered insert mode")
+
     exit_code, decoded, saved = run_vi_session(
         vi_path,
         "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
