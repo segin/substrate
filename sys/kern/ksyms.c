@@ -102,6 +102,6 @@ void ksym_print(uint32_t addr) {
  */
 void ksym_init(void) {
     char buf[64];
-    sprintf(buf, "KSYMS: Loaded %d symbols\n", ksym_count);
+    snprintf(buf, sizeof(buf), "KSYMS: Loaded %d symbols\n", ksym_count);
     kprint(buf);
 }

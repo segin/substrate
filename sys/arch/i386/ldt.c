@@ -277,7 +277,7 @@ static void ldt_warn_suspicious(const struct user_desc *info) {
         return;
     }
 
-    sprintf(buf, "LDT: suspicious entry=%u limit=0x%x pages=%u\n",
+    snprintf(buf, sizeof(buf), "LDT: suspicious entry=%u limit=0x%x pages=%u\n",
             info->entry_number, info->limit, info->limit_in_pages ? 1U : 0U);
     kprint(buf);
 }

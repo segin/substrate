@@ -262,7 +262,7 @@ void isr_handler(registers_t *regs) {
                 }
                 if (current_process->perso_id == PERS_ELKS) {
                     char elks_trapbuf[256];
-                    sprintf(elks_trapbuf,
+                    snprintf(elks_trapbuf, sizeof(elks_trapbuf),
                             "TRAP[ELKS]: int=%u sig=%d code=%d addr=0x%08X eip=0x%08X cs=0x%04X ss=0x%04X esp=0x%08X ds=0x%04X\n",
                             (unsigned int)regs->int_no,
                             sig,
@@ -277,7 +277,7 @@ void isr_handler(registers_t *regs) {
                 }
                 if (cmdline_debug_enabled("trap")) {
                     char trapbuf[256];
-                    sprintf(trapbuf,
+                    snprintf(trapbuf, sizeof(trapbuf),
                             "TRAP: user exception %u -> signal %d code %d addr 0x%08X eip=0x%08X cs=0x%04X ss=0x%04X esp=0x%08X ds=0x%04X\n",
                             (unsigned int)regs->int_no,
                             sig,
@@ -304,11 +304,11 @@ void isr_handler(registers_t *regs) {
         } else {
             kprint(" (in kernel)\n");
         }
-        sprintf(buf, "EIP: 0x%08X  CS: 0x%04X  ERR: 0x%08X\n", (unsigned int)regs->eip, (unsigned int)regs->cs, (unsigned int)regs->err_code);
+        snprintf(buf, sizeof(buf), "EIP: 0x%08X  CS: 0x%04X  ERR: 0x%08X\n", (unsigned int)regs->eip, (unsigned int)regs->cs, (unsigned int)regs->err_code);
         kprint(buf);
-        sprintf(buf, "EAX: 0x%08X  EBX: 0x%08X  ECX: 0x%08X  EDX: 0x%08X\n", (unsigned int)regs->eax, (unsigned int)regs->ebx, (unsigned int)regs->ecx, (unsigned int)regs->edx);
+        snprintf(buf, sizeof(buf), "EAX: 0x%08X  EBX: 0x%08X  ECX: 0x%08X  EDX: 0x%08X\n", (unsigned int)regs->eax, (unsigned int)regs->ebx, (unsigned int)regs->ecx, (unsigned int)regs->edx);
         kprint(buf);
-        sprintf(buf, "ESI: 0x%08X  EDI: 0x%08X  EBP: 0x%08X  ESP: 0x%08X\n", (unsigned int)regs->esi, (unsigned int)regs->edi, (unsigned int)regs->ebp, (unsigned int)regs->esp);
+        snprintf(buf, sizeof(buf), "ESI: 0x%08X  EDI: 0x%08X  EBP: 0x%08X  ESP: 0x%08X\n", (unsigned int)regs->esi, (unsigned int)regs->edi, (unsigned int)regs->ebp, (unsigned int)regs->esp);
         kprint(buf);
         
         /* TASKS.md L566: Invalid Opcode Decoding - dump instruction bytes at EIP */
@@ -318,7 +318,7 @@ void isr_handler(registers_t *regs) {
             /* Dump up to 16 bytes if address is valid */
             if (regs->eip >= 0xC0000000 || !is_usermode) {
                 for (int i = 0; i < 16; i++) {
-                    sprintf(buf, "%02X ", (unsigned int)eip_ptr[i]);
+                    snprintf(buf, sizeof(buf), "%02X ", (unsigned int)eip_ptr[i]);
                     kprint(buf);
                 }
             } else {
@@ -327,7 +327,7 @@ void isr_handler(registers_t *regs) {
             kprint("\n");
         }
         if (regs->int_no == 14) {
-            sprintf(buf, "CR2: 0x%08X\n", (unsigned int)cr2);
+            snprintf(buf, sizeof(buf), "CR2: 0x%08X\n", (unsigned int)cr2);
             kprint(buf);
         }
         
