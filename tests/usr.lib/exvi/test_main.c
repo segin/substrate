@@ -7,6 +7,11 @@
 #include <exvi.h>
 #include "../../../usr.lib/exvi/exvi_internal.h"
 
+#pragma GCC diagnostic ignored "-Wunused-result"
+#define exvi_decode_terminal_key_sequence exvi_decode_terminal_key_sequence_mock
+#define exvi_visual_main exvi_visual_main_mock
+#include "../../../usr.lib/exvi/exvi_visual.c"
+
 static void
 reset_shared_state(void)
 {
@@ -499,6 +504,43 @@ test_arglist_navigation_and_replacement(void)
 }
 
 static void
+test_vi_record_replace_insert(void)
+{
+    vi_visual_t vis;
+    line_t mock_line;
+
+    reset_shared_state();
+
+    memset(&vis, 0, sizeof(vis));
+    memset(&mock_line, 0, sizeof(mock_line));
+
+    assert(vis.replace_edit_count == 0);
+    assert(vis.replace_edits == NULL);
+
+    vi_record_replace_insert(&vis, &mock_line, 5);
+
+    assert(vis.replace_edit_count == 1);
+    assert(vis.replace_edits != NULL);
+    assert(vis.replace_edits[0].kind == VI_REPLACE_EDIT_INSERT);
+    assert(vis.replace_edits[0].line == &mock_line);
+    assert(vis.replace_edits[0].col == 5);
+    assert(vis.replace_edits[0].ch == '\0');
+
+    vi_record_replace_insert(&vis, &mock_line, 10);
+    assert(vis.replace_edit_count == 2);
+    assert(vis.replace_edits[1].kind == VI_REPLACE_EDIT_INSERT);
+    assert(vis.replace_edits[1].line == &mock_line);
+    assert(vis.replace_edits[1].col == 10);
+    assert(vis.replace_edits[1].ch == '\0');
+
+    vi_clear_replace_edits(&vis);
+    assert(vis.replace_edit_count == 0);
+    assert(vis.replace_edits == NULL);
+
+    cleanup_shared_state();
+}
+
+static void
 test_read_command_replaces_empty_origin_placeholder(void)
 {
     buffer_t b;
@@ -586,6 +628,7 @@ main(void)
     test_substitute_repeat_behavior();
     test_arglist_navigation_and_replacement();
     test_read_command_replaces_empty_origin_placeholder();
+    test_vi_record_replace_insert();
     puts("exvi core tests: ok");
     return 0;
 }

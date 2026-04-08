@@ -18,10 +18,10 @@ libexvi_native:
 	$(MAKE) -C ../../../usr.lib/exvi NATIVE_BUILD=1
 
 test_main.o: test_main.c
-	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
+	$(CC) $(CFLAGS) -idirafter ../../../include -idirafter ../../../sys/include -idirafter ../../../sys -I../../../usr.lib/exvi -c $< -o $@
 
 test_property.o: test_property.c
-	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
+	$(CC) $(CFLAGS) -idirafter ../../../include -idirafter ../../../sys/include -idirafter ../../../sys -I../../../usr.lib/exvi -c $< -o $@
 
 run: test_exvi_core test_exvi_prop
 	./test_exvi_core
