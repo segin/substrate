@@ -376,7 +376,6 @@ void *percpu_get(void) { return &mock_percpu_data; }
 int percpu_get_cpu_id(void) { return 0; }
 int sched_can_run_on_cpu(void) { return 1; }
 void host_wait_for_interrupt(void) {}
-void vm_map_destroy(vm_map_t *map) { (void)map; }
 void cmdline_get_full(char *buf, size_t buf_len) { if(buf && buf_len > 0) buf[0] = '\0'; }
 
 void wait_for_interrupt() {}
@@ -386,6 +385,21 @@ int cmdline_debug_enabled(const char *subsystem) { (void)subsystem; return 0; }
 void vm_map_lock_read(vm_map_t *map) { (void)map; }
 void vm_map_unlock_read(vm_map_t *map) { (void)map; }
 int hw_text_tick_1hz(void) { return 0; }
+void hw_text_tick(void) {}
+void fb_console_tick(void) {}
+void floppy_poll(void) {}
+void vt_tick_1hz(void) {}
+int pmap_protect(pmap_t pmap, uintptr_t start, uintptr_t end, uint32_t prot) { (void)pmap; (void)start; (void)end; (void)prot; return 0; }
+void bio_init(void) {}
+void binval_vnode(struct vnode *vp) { (void)vp; }
+void rwlock_init(rwlock_t *rw, const char *name) { (void)rw; (void)name; }
+void rw_wlock(rwlock_t *rw) { (void)rw; }
+void rw_wunlock(rwlock_t *rw) { (void)rw; }
+void rw_rlock(rwlock_t *rw) { (void)rw; }
+void rw_runlock(rwlock_t *rw) { (void)rw; }
+void lockinit(struct lock *lp, int prio, const char *descr, int flags) { (void)lp; (void)prio; (void)descr; (void)flags; }
+int lockmgr(struct lock *lp, uint32_t flags, spinlock_t *interlock) { (void)lp; (void)flags; (void)interlock; return 0; }
+int lockstatus(struct lock *lp) { (void)lp; return 0; }
 void core_prepare_dump(struct process *p, int sig) { (void)p; (void)sig; }
 int coredump(struct process *p) { (void)p; return -1; }
 vm_map_t *vm_map_fork(vm_map_t *src_map, pmap_t dst_pmap) { (void)src_map; (void)dst_pmap; return NULL; }

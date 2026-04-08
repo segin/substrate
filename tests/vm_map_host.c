@@ -6,15 +6,8 @@
 
 // Fixed host-side implementation of vm_map.c
 
-#define MAX_BOOTSTRAP_ENTRIES 64
-static vm_map_entry_t bootstrap_entries[MAX_BOOTSTRAP_ENTRIES];
-static int next_bootstrap_entry = 0;
-
 static vm_map_entry_t *alloc_entry(void) {
-    if (next_bootstrap_entry < MAX_BOOTSTRAP_ENTRIES) {
-        return &bootstrap_entries[next_bootstrap_entry++];
-    }
-    return NULL;
+    return malloc(sizeof(vm_map_entry_t));
 }
 
 void vm_map_init(vm_map_t *map, pmap_t pmap, uintptr_t min, uintptr_t max) {
@@ -26,11 +19,33 @@ void vm_map_init(vm_map_t *map, pmap_t pmap, uintptr_t min, uintptr_t max) {
     
     // Fix: Allocate unique sentinel
     vm_map_entry_t *sentinel = malloc(sizeof(vm_map_entry_t));
+    if (!sentinel) {
+        // In a test environment, failing to allocate the sentinel is fatal.
+        abort();
+    }
     memset(sentinel, 0, sizeof(vm_map_entry_t));
     sentinel->next = sentinel;
     sentinel->prev = sentinel;
     sentinel->start = sentinel->end = 0;
     map->header = sentinel;
+}
+
+void vm_map_destroy(vm_map_t *map) {
+    if (!map) return;
+    vm_map_entry_t *header = map->header;
+    if (header) {
+        vm_map_entry_t *cur = header->next;
+        while (cur != header) {
+            vm_map_entry_t *next = cur->next;
+            free(cur);
+            cur = next;
+        }
+        free(header);
+    }
+    // Note: map itself might be on stack or heap;
+    // this function follows vm_map_destroy signature.
+    // In some contexts it might be kmalloced, but here it's
+    // often used with vm_map_init on a stack-allocated map in tests.
 }
 
 static bool vm_map_lookup_entry(vm_map_t *map, uintptr_t va, vm_map_entry_t **entry) {
