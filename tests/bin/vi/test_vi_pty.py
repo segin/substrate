@@ -4732,6 +4732,118 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one\ntwo\nthree\n",
+        [b"d", b"+"],
+    )
+    require(exit_code == 0, f"d-plus vi exited with status {exit_code}")
+    require(saved == "three\n",
+            f"unexpected d-plus buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"c", b"\r", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"c-enter vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing c-enter insert status")
+    require(saved == "X\nthree\n",
+            f"unexpected c-enter buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"G", b"y", b"-", b"P"],
+    )
+    require(exit_code == 0, f"y-minus vi exited with status {exit_code}")
+    require(saved == "one\ntwo\nthree\ntwo\nthree\n",
+            f"unexpected y-minus buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b">", b"_"],
+    )
+    require(exit_code == 0, f"shift-underscore-line vi exited with status {exit_code}")
+    require(saved == "\tone\ntwo\nthree\n",
+            f"unexpected shift-underscore-line buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tone\n\ttwo\n\tthree\n",
+        [b"<", b"_"],
+    )
+    require(exit_code == 0, f"unshift-underscore-line vi exited with status {exit_code}")
+    require(saved == "one\n\ttwo\n\tthree\n",
+            f"unexpected unshift-underscore-line buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\nfour\nfive\n",
+        [b"4", b"G", b">", b"H"],
+        rows=5,
+        cols=20,
+    )
+    require(exit_code == 0, f"shift-H vi exited with status {exit_code}")
+    require(saved == "\tone\n\ttwo\n\tthree\n\tfour\nfive\n",
+            f"unexpected shift-H buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tone\n\ttwo\n\tthree\n\tfour\n\tfive\n",
+        [b"4", b"G", b"<", b"H"],
+        rows=5,
+        cols=20,
+    )
+    require(exit_code == 0, f"unshift-H vi exited with status {exit_code}")
+    require(saved == "one\ntwo\nthree\nfour\n\tfive\n",
+            f"unexpected unshift-H buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\nfour\nfive\n",
+        [b"2", b"G", b">", b"M"],
+        rows=5,
+        cols=20,
+    )
+    require(exit_code == 0, f"shift-M vi exited with status {exit_code}")
+    require(saved == "one\n\ttwo\nthree\nfour\nfive\n",
+            f"unexpected shift-M buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tone\n\ttwo\n\tthree\n\tfour\n\tfive\n",
+        [b"2", b"G", b"<", b"M"],
+        rows=5,
+        cols=20,
+    )
+    require(exit_code == 0, f"unshift-M vi exited with status {exit_code}")
+    require(saved == "\tone\ntwo\n\tthree\n\tfour\n\tfive\n",
+            f"unexpected unshift-M buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\nfour\nfive\n",
+        [b">", b"L"],
+        rows=5,
+        cols=20,
+    )
+    require(exit_code == 0, f"shift-L vi exited with status {exit_code}")
+    require(saved == "\tone\n\ttwo\n\tthree\n\tfour\nfive\n",
+            f"unexpected shift-L buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tone\n\ttwo\n\tthree\n\tfour\n\tfive\n",
+        [b"<", b"L"],
+        rows=5,
+        cols=20,
+    )
+    require(exit_code == 0, f"unshift-L vi exited with status {exit_code}")
+    require(saved == "one\ntwo\nthree\nfour\n\tfive\n",
+            f"unexpected unshift-L buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "\t  one\n\t  two\n\t  three\n",
         [b"<", b"+"],
     )
