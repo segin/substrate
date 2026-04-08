@@ -391,6 +391,69 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one two three\n",
+        [b"d", b"w"],
+    )
+    require(exit_code == 0, f"dw vi exited with status {exit_code}")
+    require(saved == "two three\n",
+            f"unexpected dw buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three\n",
+        [b"y", b"w", b"P"],
+    )
+    require(exit_code == 0, f"yw vi exited with status {exit_code}")
+    require(saved == "one one two three\n",
+            f"unexpected yw buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one,two   three\n",
+        [b"y", b"W", b"P"],
+    )
+    require(exit_code == 0, f"yW vi exited with status {exit_code}")
+    require(saved == "one,two   one,two   three\n",
+            f"unexpected yW buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three\n",
+        [b"d", b"e"],
+    )
+    require(exit_code == 0, f"de vi exited with status {exit_code}")
+    require(saved == " two three\n",
+            f"unexpected de buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two three\n",
+        [b"y", b"e", b"P"],
+    )
+    require(exit_code == 0, f"ye vi exited with status {exit_code}")
+    require(saved == "oneone two three\n",
+            f"unexpected ye buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one,two   three\n",
+        [b"d", b"E"],
+    )
+    require(exit_code == 0, f"dE vi exited with status {exit_code}")
+    require(saved == "   three\n",
+            f"unexpected dE buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one,two   three\n",
+        [b"y", b"E", b"P"],
+    )
+    require(exit_code == 0, f"yE vi exited with status {exit_code}")
+    require(saved == "one,twoone,two   three\n",
+            f"unexpected yE buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\ntwo\nthree\n",
         [b'"', b'a', b'y', b'y', b'j', b'"', b'a', b'p'],
     )

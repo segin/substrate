@@ -856,6 +856,41 @@ def main():
             "key_steps": [b"<", b"+"],
         },
         {
+            "name": "delete-word-forward",
+            "initial_text": "one two three\n",
+            "key_steps": [b"d", b"w"],
+        },
+        {
+            "name": "yank-word-forward",
+            "initial_text": "one two three\n",
+            "key_steps": [b"y", b"w", b"P"],
+        },
+        {
+            "name": "yank-bigword-forward",
+            "initial_text": "one,two   three\n",
+            "key_steps": [b"y", b"W", b"P"],
+        },
+        {
+            "name": "delete-word-end",
+            "initial_text": "one two three\n",
+            "key_steps": [b"d", b"e"],
+        },
+        {
+            "name": "yank-word-end",
+            "initial_text": "one two three\n",
+            "key_steps": [b"y", b"e", b"P"],
+        },
+        {
+            "name": "delete-bigword-end",
+            "initial_text": "one,two   three\n",
+            "key_steps": [b"d", b"E"],
+        },
+        {
+            "name": "yank-bigword-end",
+            "initial_text": "one,two   three\n",
+            "key_steps": [b"y", b"E", b"P"],
+        },
+        {
             "name": "word-search-repeat-change",
             "initial_text": "one target\ntwo target\nthree target\n",
             "key_steps": [b"w", b"*", b"c", b"*", b"X", b"\x1b", b"n", b"."],
