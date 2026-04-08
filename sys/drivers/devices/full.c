@@ -90,7 +90,7 @@ static fs_node_t full_node;
 
 void full_init(void) {
     memset(&full_node, 0, sizeof(fs_node_t));
-    strcpy(full_node.name, "full");
+    strlcpy(full_node.name, "full", sizeof(full_node.name));
     full_node.flags = FS_CHARDEVICE;
     full_node.mask = 0666;
     full_node.uid = 0;
