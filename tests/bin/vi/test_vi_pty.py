@@ -4660,6 +4660,78 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "one\ntwo\nthree\n",
+        [b"3", b"G", b">", b"g", b"g"],
+    )
+    require(exit_code == 0, f"shift-gg vi exited with status {exit_code}")
+    require(saved == "\tone\n\ttwo\n\tthree\n",
+            f"unexpected shift-gg buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tone\n\ttwo\n\tthree\n",
+        [b"3", b"G", b"<", b"g", b"g"],
+    )
+    require(exit_code == 0, f"unshift-gg vi exited with status {exit_code}")
+    require(saved == "one\ntwo\nthree\n",
+            f"unexpected unshift-gg buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b">", b"G"],
+    )
+    require(exit_code == 0, f"shift-G vi exited with status {exit_code}")
+    require(saved == "\tone\n\ttwo\n\tthree\n",
+            f"unexpected shift-G buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tone\n\ttwo\n\tthree\n",
+        [b"<", b"G"],
+    )
+    require(exit_code == 0, f"unshift-G vi exited with status {exit_code}")
+    require(saved == "one\ntwo\nthree\n",
+            f"unexpected unshift-G buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b">", b"+"],
+    )
+    require(exit_code == 0, f"shift-plus-line vi exited with status {exit_code}")
+    require(saved == "\tone\n\ttwo\nthree\n",
+            f"unexpected shift-plus-line buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tone\n\ttwo\n\tthree\n",
+        [b"<", b"+"],
+    )
+    require(exit_code == 0, f"unshift-plus-line vi exited with status {exit_code}")
+    require(saved == "one\ntwo\n\tthree\n",
+            f"unexpected unshift-plus-line buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b">", b"\r"],
+    )
+    require(exit_code == 0, f"shift-enter-line vi exited with status {exit_code}")
+    require(saved == "\tone\n\ttwo\nthree\n",
+            f"unexpected shift-enter-line buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tone\n\ttwo\n\tthree\n",
+        [b"<", b"\r"],
+    )
+    require(exit_code == 0, f"unshift-enter-line vi exited with status {exit_code}")
+    require(saved == "one\ntwo\n\tthree\n",
+            f"unexpected unshift-enter-line buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "\t  one\n\t  two\n\t  three\n",
         [b"<", b"+"],
     )

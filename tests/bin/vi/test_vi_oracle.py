@@ -705,6 +705,46 @@ def main():
             "key_steps": [b"<", b"1", b"|"],
         },
         {
+            "name": "shift-gg",
+            "initial_text": "one\ntwo\nthree\n",
+            "key_steps": [b"3", b"G", b">", b"g", b"g"],
+        },
+        {
+            "name": "unshift-gg",
+            "initial_text": "\tone\n\ttwo\n\tthree\n",
+            "key_steps": [b"3", b"G", b"<", b"g", b"g"],
+        },
+        {
+            "name": "shift-G",
+            "initial_text": "one\ntwo\nthree\n",
+            "key_steps": [b">", b"G"],
+        },
+        {
+            "name": "unshift-G",
+            "initial_text": "\tone\n\ttwo\n\tthree\n",
+            "key_steps": [b"<", b"G"],
+        },
+        {
+            "name": "shift-plus-line",
+            "initial_text": "one\ntwo\nthree\n",
+            "key_steps": [b">", b"+"],
+        },
+        {
+            "name": "unshift-plus-line",
+            "initial_text": "\tone\n\ttwo\n\tthree\n",
+            "key_steps": [b"<", b"+"],
+        },
+        {
+            "name": "shift-enter-line",
+            "initial_text": "one\ntwo\nthree\n",
+            "key_steps": [b">", b"\r"],
+        },
+        {
+            "name": "unshift-enter-line",
+            "initial_text": "\tone\n\ttwo\n\tthree\n",
+            "key_steps": [b"<", b"\r"],
+        },
+        {
             "name": "line-plus-unshift-tab-indent",
             "initial_text": "\t  one\n\t  two\n\t  three\n",
             "key_steps": [b"<", b"+"],
