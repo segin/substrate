@@ -259,11 +259,6 @@ void run_kernel_tests(void) {
          run_minix_readdir_tests();
     }
 
-    // Wait logic tests are run on host via verify_wait_host.sh
-    // if (all || strcmp(test_arg, "wait") == 0) {
-    //     test_wait_logic();
-    // }
-
     if (all || strcmp(test_arg, "mount") == 0) {
          extern void run_mount_tests(void);
          run_mount_tests();
