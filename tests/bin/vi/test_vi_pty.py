@@ -4624,6 +4624,42 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "  one\n  two\n",
+        [b">", b"0"],
+    )
+    require(exit_code == 0, f"shift-zero vi exited with status {exit_code}")
+    require(saved == "\t  one\n  two\n",
+            f"unexpected shift-zero buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\t  one\n\t  two\n",
+        [b"<", b"0"],
+    )
+    require(exit_code == 0, f"unshift-zero vi exited with status {exit_code}")
+    require(saved == "  one\n\t  two\n",
+            f"unexpected unshift-zero buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "  one\n  two\n",
+        [b">", b"1", b"|"],
+    )
+    require(exit_code == 0, f"shift-pipe vi exited with status {exit_code}")
+    require(saved == "\t  one\n  two\n",
+            f"unexpected shift-pipe buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\t  one\n\t  two\n",
+        [b"<", b"1", b"|"],
+    )
+    require(exit_code == 0, f"unshift-pipe vi exited with status {exit_code}")
+    require(saved == "  one\n\t  two\n",
+            f"unexpected unshift-pipe buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "\t  one\n\t  two\n\t  three\n",
         [b"<", b"+"],
     )

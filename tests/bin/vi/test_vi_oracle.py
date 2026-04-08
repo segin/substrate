@@ -685,6 +685,26 @@ def main():
             "key_steps": [b"<", b"^"],
         },
         {
+            "name": "shift-zero",
+            "initial_text": "  one\n  two\n",
+            "key_steps": [b">", b"0"],
+        },
+        {
+            "name": "unshift-zero",
+            "initial_text": "\t  one\n\t  two\n",
+            "key_steps": [b"<", b"0"],
+        },
+        {
+            "name": "shift-pipe",
+            "initial_text": "  one\n  two\n",
+            "key_steps": [b">", b"1", b"|"],
+        },
+        {
+            "name": "unshift-pipe",
+            "initial_text": "\t  one\n\t  two\n",
+            "key_steps": [b"<", b"1", b"|"],
+        },
+        {
             "name": "line-plus-unshift-tab-indent",
             "initial_text": "\t  one\n\t  two\n\t  three\n",
             "key_steps": [b"<", b"+"],

@@ -257,6 +257,15 @@ Unsupported or intentionally out-of-scope normal-mode motion keys are not implie
 #### 3.3 Operator completeness and region semantics
 
 - [ ] Build an operator/motion matrix for supported `d`, `c`, `y`, `>`, and `<` combinations, and add PTY coverage for every cell that is part of the supported contract.
+  Remaining concrete slices for that matrix:
+  - [ ] Lock down direct PTY coverage for column-motions (`0`, `^`, `$`, `|`) across supported operator families, including linewise coercion cases for `>` and `<`.
+  - [ ] Lock down direct PTY coverage for line-motions (`_`, `+`, `<Enter>`, `<NL>`, `-`, `H`, `M`, `L`, `G`, `gg`, `Ctrl-D`, `Ctrl-U`, `Ctrl-E`, `Ctrl-Y`) across supported operator families.
+  - [ ] Lock down direct PTY coverage for word and bigword motions (`w`, `W`, `e`, `E`, `b`, `B`, `ge`, `gE`) across supported operator families.
+  - [ ] Lock down direct PTY coverage for sentence and paragraph motions (`(`, `)`, `{`, `}`) across supported operator families, including blank-separator and EOF cases.
+  - [ ] Lock down direct PTY coverage for section/structure motions (`[[`, `]]`, `[]`, `][`) across supported operator families.
+  - [ ] Lock down direct PTY coverage for search/repeat-search motions (`/`, `?`, `n`, `N`, `*`, `#`) across supported operator families.
+  - [ ] Lock down direct PTY coverage for find/repeat-find motions (`f`, `F`, `t`, `T`, `;`, `,`) across supported operator families.
+  - [ ] Lock down direct PTY coverage for mark and match motions (`'`, `` ` ``, `%`) across supported operator families.
 - [x] Finish `d/c/y` behavior for backward word motions (`b`, `B`, `ge`, `gE`) and add direct PTY oracles for both same-line and cross-line cases.
 - [x] Finish `d/c/y` behavior for sentence/paragraph motions (`(`, `)`, `{`, `}`) at blank separators, EOF, and empty-line boundaries.
 - [x] Finish `d/c/y` cross-line charwise spans for search, find, mark, and match motions, with direct PTY oracles for forward and backward cases.

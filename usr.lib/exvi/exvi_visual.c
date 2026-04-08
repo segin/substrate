@@ -4739,6 +4739,10 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         } else {
             write(STDOUT_FILENO, "\a", 1);
         }
+    } else if ((vis->pending_op == '>' || vis->pending_op == '<') && key == '0') {
+        if (vi_apply_linewise_operator(b, vis, line_no, line_no) != 0) {
+            write(STDOUT_FILENO, "\a", 1);
+        }
     } else if (vis->pending_op == 'y' && key == '0') {
         if (vi_yank_span(vis, b->cur, 0, vis->cursor_col) != 0) {
             write(STDOUT_FILENO, "\a", 1);
@@ -4812,6 +4816,10 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         } else if (vis->pending_op == 'c') {
             vi_set_last_change(vis, VI_REPEAT_C_LINE_MOTION, count, key);
             vis->last_change_aux = -count;
+        }
+    } else if ((vis->pending_op == '>' || vis->pending_op == '<') && key == '|') {
+        if (vi_apply_linewise_operator(b, vis, line_no, line_no) != 0) {
+            write(STDOUT_FILENO, "\a", 1);
         }
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y') &&
         key == '|') {
