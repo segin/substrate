@@ -259,7 +259,7 @@ Unsupported or intentionally out-of-scope normal-mode motion keys are not implie
 - [ ] Build an operator/motion matrix for supported `d`, `c`, `y`, `>`, and `<` combinations, and add PTY coverage for every cell that is part of the supported contract.
   Remaining concrete slices for that matrix:
   - [x] Lock down direct PTY coverage for column-motions (`0`, `^`, `$`, `|`) across supported operator families, including linewise coercion cases for `>` and `<`.
-  - [ ] Lock down direct PTY coverage for operator-pending line-motions (`_`, `+`, `<Enter>/<NL>`, `-`, `H`, `M`, `L`, `G`, `gg`) across supported operator families.
+  - [x] Lock down direct PTY coverage for operator-pending line-motions (`_`, `+`, `<Enter>/<NL>`, `-`, `H`, `M`, `L`, `G`, `gg`) across supported operator families.
   - [x] Explicitly document that `Ctrl-D`, `Ctrl-U`, `Ctrl-E`, and `Ctrl-Y` remain supported as standalone/countable scrolling motions only, not operator-pending targets, and add regressions showing prefixed `d/c/y/>/<` does not create a hidden edit path.
   - [ ] Lock down direct PTY coverage for word and bigword motions (`w`, `W`, `e`, `E`, `b`, `B`, `ge`, `gE`) across supported operator families.
   - [ ] Lock down direct PTY coverage for sentence and paragraph motions (`(`, `)`, `{`, `}`) across supported operator families, including blank-separator and EOF cases.

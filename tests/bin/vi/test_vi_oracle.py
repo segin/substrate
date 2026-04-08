@@ -760,6 +760,21 @@ def main():
             "key_steps": [b"G", b"y", b"-", b"P"],
         },
         {
+            "name": "delete-enter-line",
+            "initial_text": "one\ntwo\nthree\n",
+            "key_steps": [b"d", b"\r"],
+        },
+        {
+            "name": "yank-enter-line",
+            "initial_text": "one\ntwo\nthree\n",
+            "key_steps": [b"y", b"\r", b"P"],
+        },
+        {
+            "name": "change-minus-line",
+            "initial_text": "one\ntwo\nthree\nfour\n",
+            "key_steps": [b"j", b"j", b"c", b"-", b"X", b"\x1b"],
+        },
+        {
             "name": "shift-underscore-line",
             "initial_text": "one\ntwo\nthree\n",
             "key_steps": [b">", b"_"],
@@ -810,6 +825,30 @@ def main():
             "key_steps": [b"<", b"L"],
             "rows": 5,
             "cols": 20,
+        },
+        {
+            "name": "delete-screen-middle",
+            "initial_text": "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n",
+            "key_steps": [b"j", b"j", b"d", b"M"],
+            "rows": 7,
+        },
+        {
+            "name": "change-screen-top",
+            "initial_text": "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n",
+            "key_steps": [b"j", b"j", b"j", b"c", b"H", b"X", b"\x1b"],
+            "rows": 6,
+        },
+        {
+            "name": "change-screen-bottom",
+            "initial_text": "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n",
+            "key_steps": [b"c", b"L", b"X", b"\x1b"],
+            "rows": 6,
+        },
+        {
+            "name": "delete-screen-bottom",
+            "initial_text": "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n",
+            "key_steps": [b"d", b"L"],
+            "rows": 6,
         },
         {
             "name": "line-plus-unshift-tab-indent",

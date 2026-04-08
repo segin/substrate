@@ -1945,6 +1945,27 @@ def main():
     exit_code, decoded, saved = run_vi_session(
         vi_path,
         "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n",
+        [b"j", b"j", b"d", b"M"],
+        rows=7,
+    )
+    require(exit_code == 0, f"dM vi exited with status {exit_code}")
+    require(saved == "one\ntwo\nfour\nfive\nsix\nseven\neight\n",
+            f"unexpected dM buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n",
+        [b"j", b"j", b"j", b"c", b"H", b"X", b"\x1b"],
+        rows=6,
+    )
+    require(exit_code == 0, f"cH vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing cH insert status")
+    require(saved == "X\nfive\nsix\nseven\neight\n",
+            f"unexpected cH buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n",
         [b"j", b"c", b"M", b"X", b"\x1b"],
         rows=7,
     )
@@ -1956,12 +1977,33 @@ def main():
     exit_code, decoded, saved = run_vi_session(
         vi_path,
         "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n",
+        [b"c", b"L", b"X", b"\x1b"],
+        rows=6,
+    )
+    require(exit_code == 0, f"cL vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing cL insert status")
+    require(saved == "X\nsix\nseven\neight\n",
+            f"unexpected cL buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n",
         [b"j", b"2", b"y", b"L", b"P"],
         rows=6,
     )
     require(exit_code == 0, f"2yL vi exited with status {exit_code}")
     require(saved == "one\ntwo\nthree\nfour\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n",
             f"unexpected 2yL buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n",
+        [b"d", b"L"],
+        rows=6,
+    )
+    require(exit_code == 0, f"dL vi exited with status {exit_code}")
+    require(saved == "six\nseven\neight\n",
+            f"unexpected dL buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
@@ -4733,6 +4775,24 @@ def main():
     exit_code, decoded, saved = run_vi_session(
         vi_path,
         "one\ntwo\nthree\n",
+        [b">", b"\n"],
+    )
+    require(exit_code == 0, f"shift-newline-line vi exited with status {exit_code}")
+    require(saved == "\tone\n\ttwo\nthree\n",
+            f"unexpected shift-newline-line buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tone\n\ttwo\n\tthree\n",
+        [b"<", b"\n"],
+    )
+    require(exit_code == 0, f"unshift-newline-line vi exited with status {exit_code}")
+    require(saved == "one\ntwo\n\tthree\n",
+            f"unexpected unshift-newline-line buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
         [b"d", b"+"],
     )
     require(exit_code == 0, f"d-plus vi exited with status {exit_code}")
@@ -4757,6 +4817,62 @@ def main():
     require(exit_code == 0, f"y-minus vi exited with status {exit_code}")
     require(saved == "one\ntwo\nthree\ntwo\nthree\n",
             f"unexpected y-minus buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"d", b"\r"],
+    )
+    require(exit_code == 0, f"d-enter vi exited with status {exit_code}")
+    require(saved == "three\n",
+            f"unexpected d-enter buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"y", b"\r", b"P"],
+    )
+    require(exit_code == 0, f"y-enter vi exited with status {exit_code}")
+    require(saved == "one\ntwo\none\ntwo\nthree\n",
+            f"unexpected y-enter buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"d", b"\n"],
+    )
+    require(exit_code == 0, f"d-newline vi exited with status {exit_code}")
+    require(saved == "three\n",
+            f"unexpected d-newline buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"c", b"\n", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"c-newline vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing c-newline insert status")
+    require(saved == "X\nthree\n",
+            f"unexpected c-newline buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"y", b"\n", b"P"],
+    )
+    require(exit_code == 0, f"y-newline vi exited with status {exit_code}")
+    require(saved == "one\ntwo\none\ntwo\nthree\n",
+            f"unexpected y-newline buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\nfour\n",
+        [b"j", b"j", b"c", b"-", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"c-minus vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing c-minus insert status")
+    require(saved == "one\nX\nfour\n",
+            f"unexpected c-minus buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
