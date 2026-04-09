@@ -4633,6 +4633,25 @@ def main():
     require(saved == "one\n{\ntwo\n}\nthree\n}\n",
             f"unexpected visual-section-delete-backward buffer: {saved!r}")
 
+    line_mark_operator_cases = [
+        ("d'a", "one\ntwo\nthree\nfour\n",
+            [b"j", b"m", b"a", b"G", b"d", b"'", b"a"], "one\n", None),
+        ("c'a", "one\ntwo\nthree\nfour\n",
+            [b"j", b"m", b"a", b"G", b"c", b"'", b"a", b"X", b"\x1b"], "one\nX\n", "-- INSERT --"),
+        ("y'aP", "one\ntwo\nthree\nfour\n",
+            [b"j", b"m", b"a", b"G", b"y", b"'", b"a", b"P"], "one\ntwo\nthree\nfour\ntwo\nthree\nfour\n", None),
+        (">'a", "one\ntwo\nthree\nfour\n",
+            [b"j", b"m", b"a", b"G", b">", b"'", b"a"], "one\n\ttwo\n\tthree\n\tfour\n", None),
+        ("<'a", "\tone\n\ttwo\n\tthree\n\tfour\n",
+            [b"j", b"m", b"a", b"G", b"<", b"'", b"a"], "\tone\ntwo\nthree\nfour\n", None),
+    ]
+    for name, initial_text, key_steps, expected, status_text in line_mark_operator_cases:
+        exit_code, decoded, saved = run_vi_session(vi_path, initial_text, key_steps)
+        require(exit_code == 0, f"{name} vi exited with status {exit_code}")
+        if status_text is not None:
+            require(status_text in decoded, f"missing {name} insert status")
+        require(saved == expected, f"unexpected {name} buffer: {saved!r}")
+
     exit_code, decoded, saved = run_vi_session(
         vi_path,
         "ab(cd\nef)gh\n",

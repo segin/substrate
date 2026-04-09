@@ -285,6 +285,31 @@ def main():
             "key_steps": [b"$", b"F", b"a", b"<", b","],
         },
         {
+            "name": "delete-line-mark",
+            "initial_text": "one\ntwo\nthree\nfour\n",
+            "key_steps": [b"j", b"m", b"a", b"G", b"d", b"'", b"a"],
+        },
+        {
+            "name": "change-line-mark",
+            "initial_text": "one\ntwo\nthree\nfour\n",
+            "key_steps": [b"j", b"m", b"a", b"G", b"c", b"'", b"a", b"X", b"\x1b"],
+        },
+        {
+            "name": "yank-line-mark",
+            "initial_text": "one\ntwo\nthree\nfour\n",
+            "key_steps": [b"j", b"m", b"a", b"G", b"y", b"'", b"a", b"P"],
+        },
+        {
+            "name": "shift-line-mark",
+            "initial_text": "one\ntwo\nthree\nfour\n",
+            "key_steps": [b"j", b"m", b"a", b"G", b">", b"'", b"a"],
+        },
+        {
+            "name": "unshift-line-mark",
+            "initial_text": "\tone\n\ttwo\n\tthree\n\tfour\n",
+            "key_steps": [b"j", b"m", b"a", b"G", b"<", b"'", b"a"],
+        },
+        {
             "name": "counted-line-down-motion",
             "initial_text": "one\ntwo\nthree\nfour\n",
             "key_steps": [b"2", b"j", b"r", b"X"],
