@@ -1865,12 +1865,12 @@
                 - [ ] `cooked`: Re-enable processing. (REQ: REQ-09-2070)
                 - [ ] `size`: Print terminal rows and columns. (REQ: REQ-09-2071)
                 - [ ] `rows N`, `cols N`: Set window size manually. (REQ: REQ-09-2072)
-    - [ ] **`tty` - Return user's terminal name:** (REQ: REQ-09-2073)
-        - [ ] **Standards:** POSIX.1-2017. (REQ: REQ-09-1555, REQ-09-1572, REQ-09-1589, REQ-09-1605, REQ-09-1622, REQ-09-1639, REQ-09-1656, REQ-09-1697, REQ-09-1714, REQ-09-1729, REQ-09-1804, REQ-09-1820, REQ-09-1856, REQ-09-1877, REQ-09-1894, REQ-09-1909, REQ-09-1918, REQ-09-1926, REQ-09-1967, REQ-09-1992, REQ-09-2030, REQ-09-2074)
-        - [ ] **Options:** (REQ: REQ-09-1698, REQ-09-2031, REQ-09-2075)
-            - [ ] `-s`: Silent mode. (REQ: REQ-09-2076)
-        - [ ] **Implementation:** (REQ: REQ-09-1707, REQ-09-2077)
-            - [ ] `ttyname(STDIN_FILENO)`. (REQ: REQ-09-2078)
+    - [x] **`tty` - Return user's terminal name:** (REQ: REQ-09-2073)
+        - [x] **Standards:** POSIX.1-2017. (REQ: REQ-09-1555, REQ-09-1572, REQ-09-1589, REQ-09-1605, REQ-09-1622, REQ-09-1639, REQ-09-1656, REQ-09-1697, REQ-09-1714, REQ-09-1729, REQ-09-1804, REQ-09-1820, REQ-09-1856, REQ-09-1877, REQ-09-1894, REQ-09-1909, REQ-09-1918, REQ-09-1926, REQ-09-1967, REQ-09-1992, REQ-09-2030, REQ-09-2074)
+        - [x] **Options:** (REQ: REQ-09-1698, REQ-09-2031, REQ-09-2075)
+            - [x] `-s`: Silent mode. (REQ: REQ-09-2076)
+        - [x] **Implementation:** (REQ: REQ-09-1707, REQ-09-2077)
+            - [x] `ttyname(STDIN_FILENO)`. (REQ: REQ-09-2078)
     - [ ] **Editors:** (REQ: REQ-09-2085)
         - Note: `bin/ex` and `bin/vi` are implemented and continued per [`docs/specs/exvi.md`](../specs/exvi.md), with `usr.lib/exvi/` as the shared editor core and thin frontends in [`bin/ex`](../../bin/ex) and [`bin/vi`](../../bin/vi). Standards/compatibility tracking lives in [`docs/specs/exvi_conformance.md`](../specs/exvi_conformance.md), and user-facing manuals live in [`usr.man/man1/ex.1`](../../usr.man/man1/ex.1), [`usr.man/man1/vi.1`](../../usr.man/man1/vi.1), and [`usr.man/man1/view.1`](../../usr.man/man1/view.1). The old standalone "tiny vi clone" direction is obsolete and should not be used as implementation guidance.
         - [x] **Shared `ex`/`vi` Implementation (`docs/specs/exvi.md`):**
