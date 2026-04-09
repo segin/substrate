@@ -2141,10 +2141,18 @@ vi_line_is_blank(line_t *cur)
     return 1;
 }
 
+static int
+vi_line_is_paragraph_break(line_t *cur)
+{
+    return cur == NULL || cur->len == 0;
+}
+
 static void
 vi_move_paragraph_forward(buffer_t *b, vi_visual_t *vis, int count)
 {
     int line_no = buf_current_line(b);
+    int orig_line_no = line_no;
+    int hit_eof = 0;
     line_t *line;
 
     if (line_no < 1) {
@@ -2155,30 +2163,34 @@ vi_move_paragraph_forward(buffer_t *b, vi_visual_t *vis, int count)
         if (!line) {
             return;
         }
-        if (vi_line_is_blank(line)) {
+        if (vi_line_is_paragraph_break(line)) {
             while (line_no <= b->line_count &&
-                vi_line_is_blank(buf_get_line(b, line_no))) {
+                vi_line_is_paragraph_break(buf_get_line(b, line_no))) {
                 line_no++;
             }
             while (line_no <= b->line_count &&
-                !vi_line_is_blank(buf_get_line(b, line_no))) {
+                !vi_line_is_paragraph_break(buf_get_line(b, line_no))) {
                 line_no++;
             }
         } else {
             line_no++;
             while (line_no <= b->line_count &&
-                !vi_line_is_blank(buf_get_line(b, line_no))) {
+                !vi_line_is_paragraph_break(buf_get_line(b, line_no))) {
                 line_no++;
             }
         }
         if (line_no > b->line_count) {
             line_no = b->line_count;
+            hit_eof = 1;
             break;
         }
     }
     b->cur = buf_get_line(b, line_no);
-    if (b->cur && vi_line_is_blank(b->cur)) {
+    if (b->cur && vi_line_is_paragraph_break(b->cur)) {
         vis->cursor_col = 0;
+    } else if (b->cur &&
+        (hit_eof || (line_no == b->line_count && line_no != orig_line_no))) {
+        vis->cursor_col = (b->cur->len > 0) ? (int)b->cur->len - 1 : 0;
     } else {
         vis->cursor_col = vi_first_nonblank_col(b->cur);
     }
@@ -2198,11 +2210,11 @@ vi_move_paragraph_backward(buffer_t *b, vi_visual_t *vis, int count)
         if (!line) {
             return;
         }
-        if (vi_line_is_blank(line)) {
-            while (line_no >= 1 && vi_line_is_blank(buf_get_line(b, line_no))) {
+        if (vi_line_is_paragraph_break(line)) {
+            while (line_no >= 1 && vi_line_is_paragraph_break(buf_get_line(b, line_no))) {
                 line_no--;
             }
-            while (line_no >= 1 && !vi_line_is_blank(buf_get_line(b, line_no))) {
+            while (line_no >= 1 && !vi_line_is_paragraph_break(buf_get_line(b, line_no))) {
                 line_no--;
             }
             if (line_no < 1) {
@@ -2211,7 +2223,7 @@ vi_move_paragraph_backward(buffer_t *b, vi_visual_t *vis, int count)
         } else {
             int start = line_no;
 
-            while (start > 1 && !vi_line_is_blank(buf_get_line(b, start - 1))) {
+            while (start > 1 && !vi_line_is_paragraph_break(buf_get_line(b, start - 1))) {
                 start--;
             }
             if (start == line_no) {
@@ -2229,7 +2241,7 @@ vi_move_paragraph_backward(buffer_t *b, vi_visual_t *vis, int count)
         }
     }
     b->cur = buf_get_line(b, line_no);
-    if (b->cur && vi_line_is_blank(b->cur)) {
+    if (b->cur && vi_line_is_paragraph_break(b->cur)) {
         vis->cursor_col = 0;
     } else {
         vis->cursor_col = vi_first_nonblank_col(b->cur);
@@ -5186,22 +5198,24 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             rc = 0;
             eof_fallback = 1;
         } else if (rc == 0 && key == '{' && target_line &&
-            !vi_line_is_blank(target_line) &&
+            !vi_line_is_paragraph_break(target_line) &&
             target_col == vi_first_nonblank_col(target_line) && target_line->prev &&
-            vi_line_is_blank(target_line->prev)) {
+            vi_line_is_paragraph_break(target_line->prev)) {
             target_line = target_line->prev;
             target_col = 0;
         } else if (rc == 0 && (vis->pending_op == 'd' || vis->pending_op == 'c' ||
                 vis->pending_op == 'y') && (key == ')' || key == '}') &&
-            target_line && !vi_line_is_blank(target_line) &&
+            target_line && !(key == '}' ? vi_line_is_paragraph_break(target_line) :
+            vi_line_is_blank(target_line)) &&
             target_col == vi_first_nonblank_col(target_line) && target_line->prev &&
             target_line->prev != b->cur &&
-            vi_line_is_blank(target_line->prev)) {
+            (key == '}' ? vi_line_is_paragraph_break(target_line->prev) :
+            vi_line_is_blank(target_line->prev))) {
             target_line = target_line->prev;
             target_col = 0;
         } else if (rc == 0 && (vis->pending_op == 'd' || vis->pending_op == 'c' ||
                 vis->pending_op == 'y') && key == '}' && target_line == b->tail
-            && target_line && !vi_line_is_blank(target_line)
+            && target_line && !vi_line_is_paragraph_break(target_line)
             && target_col == vi_first_nonblank_col(target_line)) {
             target_col = (int)target_line->len;
         } else if (rc == 0 && eof_fallback && (vis->pending_op == 'd' || vis->pending_op == 'c' ||
@@ -5229,8 +5243,20 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
             vis->pending_reg = 0;
             return;
         } else if (rc == 0 && (vis->pending_op == '>' || vis->pending_op == '<') &&
-            key == '}' && b->cur && vi_line_is_blank(b->cur) && vis->cursor_col == 0 &&
-            target_line && target_line != b->cur && vi_line_is_blank(target_line) &&
+            key == '{' && b->cur && !vi_line_is_blank(b->cur) &&
+            (!b->cur->prev || vi_line_is_paragraph_break(b->cur->prev))) {
+            if (vis->cursor_col > 0) {
+                if (vi_apply_linewise_operator(b, vis, line_no, line_no) != 0) {
+                    write(STDOUT_FILENO, "\a", 1);
+                }
+            }
+            vis->pending_op = 0;
+            vis->pending_op_count = 0;
+            vis->pending_reg = 0;
+            return;
+        } else if (rc == 0 && (vis->pending_op == '>' || vis->pending_op == '<') &&
+            key == '}' && b->cur && vi_line_is_paragraph_break(b->cur) && vis->cursor_col == 0 &&
+            target_line && target_line != b->cur && vi_line_is_paragraph_break(target_line) &&
             target_col == 0) {
             int target_line_no = vi_line_number_for_mark(b, target_line);
             int start_line = line_no + 1;

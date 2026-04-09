@@ -2237,12 +2237,159 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "One.\nTwo.\nThree.\n",
+        [b"G", b"$", b"c", b"(", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"c( vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing c( insert status")
+    require(saved == "One.\nTwo.\nX.\n",
+            f"unexpected c( buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "One.\nTwo.\nThree.\n",
+        [b"G", b">", b"("],
+    )
+    require(exit_code == 0, f">( vi exited with status {exit_code}")
+    require(saved == "One.\n\tTwo.\nThree.\n",
+            f"unexpected >( buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tOne.\n\tTwo.\n\tThree.\n",
+        [b"G", b"<", b"("],
+    )
+    require(exit_code == 0, f"<( vi exited with status {exit_code}")
+    require(saved == "\tOne.\nTwo.\nThree.\n",
+            f"unexpected <( buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "One.\nTwo.\nThree.\n",
+        [b">", b")"],
+    )
+    require(exit_code == 0, f">) vi exited with status {exit_code}")
+    require(saved == "\tOne.\nTwo.\nThree.\n",
+            f"unexpected >) buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tOne.\n\tTwo.\n\tThree.\n",
+        [b"<", b")"],
+    )
+    require(exit_code == 0, f"<) vi exited with status {exit_code}")
+    require(saved == "One.\nTwo.\n\tThree.\n",
+            f"unexpected <) buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\n\ntwo\nthree\n\nfour\n",
         [b"d", b"}"],
     )
     require(exit_code == 0, f"d}} vi exited with status {exit_code}")
     require(saved == "\ntwo\nthree\n\nfour\n",
             f"unexpected d}} buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n\ntwo\n\nthree\n",
+        [b"G", b"d", b"{"],
+    )
+    require(exit_code == 0, f"d{{ vi exited with status {exit_code}")
+    require(saved == "one\n\ntwo\nthree\n",
+            f"unexpected d{{ buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n\ntwo\n\nthree\n",
+        [b"G", b"c", b"{", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"c{{ vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing c{ insert status")
+    require(saved == "one\n\ntwo\nX\nthree\n",
+            f"unexpected c{{ buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n\ntwo\n\nthree\n",
+        [b"G", b"y", b"{", b"P"],
+    )
+    require(exit_code == 0, f"y{{ vi exited with status {exit_code}")
+    require(saved == "one\n\ntwo\n\n\nthree\n",
+            f"unexpected y{{ buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n\ntwo\n\nthree\n",
+        [b"G", b">", b"{"],
+    )
+    require(exit_code == 0, f">{{ vi exited with status {exit_code}")
+    require(saved == "one\n\ntwo\n\nthree\n",
+            f"unexpected >{{ buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tone\n\t\n\ttwo\n\t\n\tthree\n",
+        [b"G", b"<", b"{"],
+    )
+    require(exit_code == 0, f"<{{ vi exited with status {exit_code}")
+    require(saved == "one\n\ntwo\n\nthree\n",
+            f"unexpected <{{ buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n\ntwo\n\nthree\n",
+        [b"c", b"}", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"c}} vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing c} insert status")
+    require(saved == "X\n\ntwo\n\nthree\n",
+            f"unexpected c}} buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n\ntwo\n\nthree\n",
+        [b"y", b"}", b"P"],
+    )
+    require(exit_code == 0, f"y}} vi exited with status {exit_code}")
+    require(saved == "one\none\n\ntwo\n\nthree\n",
+            f"unexpected y}} buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n\ntwo\n\nthree\n",
+        [b">", b"}"],
+    )
+    require(exit_code == 0, f">}} vi exited with status {exit_code}")
+    require(saved == "\tone\n\ntwo\n\nthree\n",
+            f"unexpected >}} buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tone\n\t\n\ttwo\n\t\n\tthree\n",
+        [b"<", b"}"],
+    )
+    require(exit_code == 0, f"<}} vi exited with status {exit_code}")
+    require(saved == "one\n\ntwo\n\nthree\n",
+            f"unexpected <}} buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tone\n\t\n\ttwo\n\t\n\tthree\n",
+        [b"}", b"r", b"X"],
+    )
+    require(exit_code == 0, f"}}-tab-separator vi exited with status {exit_code}")
+    require(saved == "\tone\n\t\n\ttwo\n\t\n\tthreX\n",
+            f"unexpected }}-tab-separator buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "\tone\n\t\n\ttwo\n\t\n\tthree\n",
+        [b">", b"}"],
+    )
+    require(exit_code == 0, f">}}-tab-separator vi exited with status {exit_code}")
+    require(saved == "\t\tone\n\t\t\n\t\ttwo\n\t\t\n\t\tthree\n",
+            f"unexpected >}}-tab-separator buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
@@ -3497,6 +3644,15 @@ def main():
     require(exit_code == 0, f"c2W vi exited with status {exit_code}")
     require(saved == "X ghi\n",
             f"unexpected c2W buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one,two   three\n",
+        [b"d", b"W"],
+    )
+    require(exit_code == 0, f"dW vi exited with status {exit_code}")
+    require(saved == "three\n",
+            f"unexpected dW buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,

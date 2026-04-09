@@ -376,6 +376,21 @@ def main():
             "key_steps": [b"d", b"}"],
         },
         {
+            "name": "paragraph-motion-forward-tab-separator",
+            "initial_text": "\tone\n\t\n\ttwo\n\t\n\tthree\n",
+            "key_steps": [b"}", b"r", b"X"],
+        },
+        {
+            "name": "shift-paragraph-forward-tab-separator",
+            "initial_text": "\tone\n\t\n\ttwo\n\t\n\tthree\n",
+            "key_steps": [b">", b"}"],
+        },
+        {
+            "name": "unshift-paragraph-forward-tab-separator",
+            "initial_text": "\tone\n\t\n\ttwo\n\t\n\tthree\n",
+            "key_steps": [b"<", b"}"],
+        },
+        {
             "name": "short-file-screen-top-motion",
             "initial_text": "line 1\nline 2\nline 3\n",
             "key_steps": [b"H", b"r", b"X"],
@@ -645,6 +660,31 @@ def main():
             "key_steps": [b"j", b">", b")"],
         },
         {
+            "name": "change-sentence-backward",
+            "initial_text": "One.\nTwo.\nThree.\n",
+            "key_steps": [b"G", b"$", b"c", b"(", b"X", b"\x1b"],
+        },
+        {
+            "name": "shift-sentence-backward",
+            "initial_text": "One.\nTwo.\nThree.\n",
+            "key_steps": [b"G", b">", b"("],
+        },
+        {
+            "name": "unshift-sentence-backward",
+            "initial_text": "\tOne.\n\tTwo.\n\tThree.\n",
+            "key_steps": [b"G", b"<", b"("],
+        },
+        {
+            "name": "shift-sentence-forward",
+            "initial_text": "One.\nTwo.\nThree.\n",
+            "key_steps": [b">", b")"],
+        },
+        {
+            "name": "unshift-sentence-forward",
+            "initial_text": "\tOne.\n\tTwo.\n\tThree.\n",
+            "key_steps": [b"<", b")"],
+        },
+        {
             "name": "blank-separator-shift-sentence-indented",
             "initial_text": "\tone.\n\n\ttwo.\n\tthree.\n\n\tfour.\n",
             "key_steps": [b"j", b">", b")"],
@@ -668,6 +708,51 @@ def main():
             "name": "blank-separator-yank-paragraph",
             "initial_text": "one\n\ntwo\nthree\n\nfour\n",
             "key_steps": [b"j", b"y", b"}", b"P"],
+        },
+        {
+            "name": "delete-paragraph-backward",
+            "initial_text": "one\n\ntwo\n\nthree\n",
+            "key_steps": [b"G", b"d", b"{"],
+        },
+        {
+            "name": "change-paragraph-backward",
+            "initial_text": "one\n\ntwo\n\nthree\n",
+            "key_steps": [b"G", b"c", b"{", b"X", b"\x1b"],
+        },
+        {
+            "name": "yank-paragraph-backward",
+            "initial_text": "one\n\ntwo\n\nthree\n",
+            "key_steps": [b"G", b"y", b"{", b"P"],
+        },
+        {
+            "name": "shift-paragraph-backward",
+            "initial_text": "one\n\ntwo\n\nthree\n",
+            "key_steps": [b"G", b">", b"{"],
+        },
+        {
+            "name": "unshift-paragraph-backward",
+            "initial_text": "\tone\n\t\n\ttwo\n\t\n\tthree\n",
+            "key_steps": [b"G", b"<", b"{"],
+        },
+        {
+            "name": "change-paragraph-forward",
+            "initial_text": "one\n\ntwo\n\nthree\n",
+            "key_steps": [b"c", b"}", b"X", b"\x1b"],
+        },
+        {
+            "name": "yank-paragraph-forward",
+            "initial_text": "one\n\ntwo\n\nthree\n",
+            "key_steps": [b"y", b"}", b"P"],
+        },
+        {
+            "name": "shift-paragraph-forward",
+            "initial_text": "one\n\ntwo\n\nthree\n",
+            "key_steps": [b">", b"}"],
+        },
+        {
+            "name": "unshift-paragraph-forward",
+            "initial_text": "\tone\n\t\n\ttwo\n\t\n\tthree\n",
+            "key_steps": [b"<", b"}"],
         },
         {
             "name": "change-caret-indent",
@@ -909,6 +994,11 @@ def main():
             "name": "delete-word-forward",
             "initial_text": "one two three\n",
             "key_steps": [b"d", b"w"],
+        },
+        {
+            "name": "delete-bigword-forward",
+            "initial_text": "one,two   three\n",
+            "key_steps": [b"d", b"W"],
         },
         {
             "name": "yank-word-forward",
