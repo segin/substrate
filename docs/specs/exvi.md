@@ -284,7 +284,8 @@ Unsupported or intentionally out-of-scope normal-mode motion keys are not implie
 - [x] Introduce multi-step undo and redo stacks instead of the current single-snapshot model, with explicit transaction records for insert, replace, delete/change/yank/put, open-line, join, and ex-driven edits.
 - [x] Define and test undo transaction boundaries so one insert session, one replace session, one open-line command, one `.` replay, and one ex command each undo as a single unit.
   Transaction-boundary contract: one entry into insert mode or replace mode runs until the terminating `<Esc>` and undoes as a single transaction; each `o`/`O` open-line command is its own transaction; one `.` replay undoes as one transaction even when it replays a change command internally; and each submitted ex command line undoes as one transaction even if it edits multiple lines within its addressed range.
-- [ ] Define and test redo invalidation rules so any non-redo edit clears redo history and repeated redo replays the same transaction boundaries.
+- [x] Define and test redo invalidation rules so any non-redo edit clears redo history and repeated redo replays the same transaction boundaries.
+  Redo contract: once one or more undo steps have populated redo history, the next non-redo edit clears that redo stack when the new transaction first mutates the buffer, and each subsequent `<Ctrl-R>` replays exactly one saved transaction boundary at a time using the same per-session/per-command grouping described above.
 - [x] Audit insert-mode cursor-key, modified-cursor-key, and terminal-escape decoding so no printable garbage leaks under older terminals.
 - [x] Add PTY coverage for every insert/replace control key and repeat/undo/redo path that remains underspecified.
 

@@ -1718,6 +1718,24 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "abc\n",
+        [b"i", b"X", b"\x1b", b"A", b"Y", b"\x1b", b"u", b"a", b"Z", b"\x1b", b"\x12"],
+    )
+    require(exit_code == 0, f"redo-invalidation vi exited with status {exit_code}")
+    require(saved == "XabcZ\n",
+            f"unexpected redo-invalidation buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc\n",
+        [b"i", b"X", b"\x1b", b"A", b"Y", b"\x1b", b"u", b"u", b"\x12", b"\x12"],
+    )
+    require(exit_code == 0, f"redo-transaction-boundaries vi exited with status {exit_code}")
+    require(saved == "XabcY\n",
+            f"unexpected redo-transaction-boundaries buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "alpha beta gamma\n",
         [b"d", ("winsize", 8, 28, 0.5), b"w"],
         rows=8,

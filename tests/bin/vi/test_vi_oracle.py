@@ -1651,6 +1651,18 @@ def main():
             "initial_text": "one\ntwo\n",
             "key_steps": [b":", b"1", b",", b"2", b"s", b"/o/O/g\r", b"u"],
         },
+        {
+            "name": "redo-invalidation-after-edit",
+            "initial_text": "abc\n",
+            "key_steps": [b"i", b"X", b"\x1b", b"A", b"Y", b"\x1b", b"u", b"a",
+                b"Z", b"\x1b", b"\x12"],
+        },
+        {
+            "name": "redo-replays-transaction-boundaries",
+            "initial_text": "abc\n",
+            "key_steps": [b"i", b"X", b"\x1b", b"A", b"Y", b"\x1b", b"u", b"u",
+                b"\x12", b"\x12"],
+        },
     ]
 
     for case in cases:

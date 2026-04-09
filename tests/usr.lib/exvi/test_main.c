@@ -390,6 +390,33 @@ test_ex_command_undo_boundary(void)
 }
 
 static void
+test_redo_invalidation(void)
+{
+    static const char *lines[] = {"one", "two", "three"};
+    buffer_t b;
+
+    reset_shared_state();
+    fill_buffer(&b, lines, 3);
+    b.cur = buf_get_line(&b, 2);
+
+    assert(handle_delete_command(&b, 0, -1, -1) == 1);
+    assert(handle_put_command(&b, "", 1) == 1);
+    assert(handle_undo_command(&b) == 1);
+
+    b.cur = buf_get_line(&b, 2);
+    assert(handle_delete_command(&b, 0, -1, -1) == 1);
+    assert(b.line_count == 1);
+    assert(strcmp(buf_get_line(&b, 1)->text, "one") == 0);
+
+    assert(handle_redo_command(&b) == 1);
+    assert(b.line_count == 1);
+    assert(strcmp(buf_get_line(&b, 1)->text, "one") == 0);
+
+    free_buffer(&b);
+    cleanup_shared_state();
+}
+
+static void
 test_filename_refs_and_write_permissions(void)
 {
     buffer_t b;
@@ -645,6 +672,7 @@ main(void)
     test_substitute_and_undo();
     test_multi_undo_stack();
     test_ex_command_undo_boundary();
+    test_redo_invalidation();
     test_filename_refs_and_write_permissions();
     test_recover_roundtrip_preserves_missing_newline();
     test_substitute_repeat_behavior();
