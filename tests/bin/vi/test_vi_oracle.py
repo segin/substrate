@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import argparse
 import importlib.util
 import os
 import shutil
@@ -76,18 +77,43 @@ def compare_case(helpers, vi_path, vim_path, name, initial_text, key_steps, rows
     print(f"PASS: {name}")
 
 
+def parse_args(argv):
+    parser = argparse.ArgumentParser(
+        description="Compare Substrate vi against sanitized vim overlap cases.",
+    )
+    parser.add_argument("vi_path", help="path to the Substrate vi binary")
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="list selected oracle case names and exit",
+    )
+    parser.add_argument(
+        "--match",
+        action="append",
+        default=[],
+        metavar="SUBSTR",
+        help="run only cases whose names contain SUBSTR; repeatable",
+    )
+    parser.add_argument(
+        "--start-at",
+        metavar="CASE",
+        help="start at CASE (inclusive) in oracle order",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        metavar="N",
+        help="run at most N selected cases",
+    )
+    args = parser.parse_args(argv[1:])
+    if args.limit is not None and args.limit < 0:
+        parser.error("--limit must be non-negative")
+    return args
+
+
 def main():
-    if len(sys.argv) != 2:
-        print(f"usage: {sys.argv[0]} /path/to/vi", file=sys.stderr)
-        return 2
-
-    vi_path = sys.argv[1]
-    vim_path = shutil.which("vim")
-    if not vim_path:
-        print("SKIP: vim not found")
-        return 0
-
-    helpers = load_pty_helpers()
+    args = parse_args(sys.argv)
+    vi_path = args.vi_path
     cases = [
         {
             "name": "search-column-repeat",
@@ -1769,6 +1795,42 @@ def main():
                 b"\x12", b"\x12"],
         },
     ]
+
+    if args.start_at:
+        start_index = next(
+            (index for index, case in enumerate(cases)
+             if case["name"] == args.start_at),
+            None,
+        )
+        if start_index is None:
+            print(f"unknown oracle case: {args.start_at}", file=sys.stderr)
+            return 2
+        cases = cases[start_index:]
+
+    if args.match:
+        cases = [
+            case for case in cases
+            if any(pattern in case["name"] for pattern in args.match)
+        ]
+
+    if args.limit is not None:
+        cases = cases[:args.limit]
+
+    if args.list:
+        for case in cases:
+            print(case["name"])
+        return 0
+
+    if not cases:
+        print("SKIP: no oracle cases selected")
+        return 0
+
+    vim_path = shutil.which("vim")
+    if not vim_path:
+        print("SKIP: vim not found")
+        return 0
+
+    helpers = load_pty_helpers()
 
     for case in cases:
         compare_case(
