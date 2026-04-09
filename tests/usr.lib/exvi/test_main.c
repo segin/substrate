@@ -12,9 +12,7 @@ reset_shared_state(void)
 {
     exvi_reset_runtime(EXVI_FRONTEND_EX);
     exvi_cleanup_session_state();
-    buf_free(&undo_buf);
-    buf_init(&undo_buf);
-    undo_valid = 0;
+    exvi_reset_undo_state();
     exvi_free_registers();
     exvi_init_registers();
 }
@@ -23,8 +21,7 @@ static void
 cleanup_shared_state(void)
 {
     exvi_free_registers();
-    buf_free(&undo_buf);
-    buf_init(&undo_buf);
+    exvi_reset_undo_state();
     exvi_cleanup_runtime();
     exvi_cleanup_session_state();
 }
@@ -328,6 +325,47 @@ test_substitute_and_undo(void)
 }
 
 static void
+test_multi_undo_stack(void)
+{
+    static const char *lines[] = {"one", "two", "three"};
+    buffer_t b;
+
+    reset_shared_state();
+    fill_buffer(&b, lines, 3);
+    b.cur = buf_get_line(&b, 2);
+
+    assert(handle_delete_command(&b, 0, -1, -1) == 1);
+    assert(b.line_count == 2);
+    assert(strcmp(buf_get_line(&b, 1)->text, "one") == 0);
+    assert(strcmp(buf_get_line(&b, 2)->text, "three") == 0);
+
+    assert(handle_put_command(&b, "", 1) == 1);
+    assert(b.line_count == 3);
+    assert(strcmp(buf_get_line(&b, 2)->text, "two") == 0);
+
+    b.cur = buf_get_line(&b, 3);
+    assert(handle_substitute_command(&b, "/three/THREE/", 3, 3) == 1);
+    assert(strcmp(buf_get_line(&b, 3)->text, "THREE") == 0);
+
+    assert(handle_undo_command(&b) == 1);
+    assert(strcmp(buf_get_line(&b, 3)->text, "three") == 0);
+
+    assert(handle_undo_command(&b) == 1);
+    assert(b.line_count == 2);
+    assert(strcmp(buf_get_line(&b, 1)->text, "one") == 0);
+    assert(strcmp(buf_get_line(&b, 2)->text, "three") == 0);
+
+    assert(handle_undo_command(&b) == 1);
+    assert(b.line_count == 3);
+    assert(strcmp(buf_get_line(&b, 1)->text, "one") == 0);
+    assert(strcmp(buf_get_line(&b, 2)->text, "two") == 0);
+    assert(strcmp(buf_get_line(&b, 3)->text, "three") == 0);
+
+    free_buffer(&b);
+    cleanup_shared_state();
+}
+
+static void
 test_filename_refs_and_write_permissions(void)
 {
     buffer_t b;
@@ -581,6 +619,7 @@ main(void)
     test_join_and_undo();
     test_bad_mark_preserves_current_line();
     test_substitute_and_undo();
+    test_multi_undo_stack();
     test_filename_refs_and_write_permissions();
     test_recover_roundtrip_preserves_missing_newline();
     test_substitute_repeat_behavior();

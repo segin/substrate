@@ -16,8 +16,11 @@
 #include <sys/wait.h>
 #include <errno.h>
 
-buffer_t undo_buf;
-int undo_valid = 0;
+exvi_history_t undo_history = {0};
+exvi_history_t redo_history = {0};
+buffer_t pending_undo_buf;
+int pending_undo_valid = 0;
+int exvi_history_suspended = 0;
 
 static void do_command(buffer_t *b, char *cmd);
 void replace_saved_string(char **dst, const char *src);
@@ -551,15 +554,14 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
     (void)setlocale(LC_CTYPE, "C");
 
     buf_init(&buf);
-    undo_valid = 0;
-    buf_init(&undo_buf);
+    exvi_reset_undo_state();
     exvi_init_registers();
 
     if (recover_mode && file_argc == 0) {
         fprintf(stderr, "%s: -r requires a file operand\n", exvi_progname);
         free(file_args);
         buf_free(&buf);
-        buf_free(&undo_buf);
+        exvi_reset_undo_state();
         exvi_free_registers();
         exvi_cleanup_runtime();
         return 1;
@@ -573,7 +575,7 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
             if (!recover_target) {
                 fprintf(stderr, "%s: out of memory\n", exvi_progname);
                 buf_free(&buf);
-                buf_free(&undo_buf);
+                exvi_reset_undo_state();
                 exvi_free_registers();
                 exvi_cleanup_runtime();
                 return 1;
@@ -583,7 +585,7 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
                 fprintf(stderr, "%s: no recover file for %s\n", exvi_progname, recover_target);
                 free(recover_target);
                 buf_free(&buf);
-                buf_free(&undo_buf);
+                exvi_reset_undo_state();
                 exvi_free_registers();
                 exvi_cleanup_runtime();
                 return 1;
@@ -676,7 +678,7 @@ enter_visual:
 
 out:
     buf_free(&buf);
-    buf_free(&undo_buf);
+    exvi_reset_undo_state();
     exvi_free_registers();
     exvi_cleanup_runtime();
     exvi_cleanup_session_state();

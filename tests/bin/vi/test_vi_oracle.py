@@ -1609,6 +1609,23 @@ def main():
             "initial_text": "alpha beta gamma\nalpha beta gamma\n",
             "key_steps": [b"$", b"c", b"T", b"b", b"X", b"\x1b", b"j", b",", b"."],
         },
+        {
+            "name": "multi-undo-redo-insert",
+            "initial_text": "abc\n",
+            "key_steps": [b"i", b"X", b"\x1b", b"A", b"Z", b"\x1b", b"u", b"u",
+                b"\x12", b"\x12"],
+        },
+        {
+            "name": "multi-undo-join",
+            "initial_text": "one\ntwo\nthree\n",
+            "key_steps": [b"J", b"J", b"u", b"u"],
+        },
+        {
+            "name": "multi-undo-change",
+            "initial_text": "alpha beta gamma\n",
+            "key_steps": [b"c", b"w", b"X", b"\x1b", b"0", b"w", b"c", b"w",
+                b"Y", b"\x1b", b"u", b"u"],
+        },
     ]
 
     for case in cases:

@@ -5,6 +5,103 @@
 #include <string.h>
 #include <unistd.h>
 
+static void
+exvi_history_free(exvi_history_t *history)
+{
+    for (int i = 0; i < history->len; i++) {
+        buf_free(&history->items[i]);
+    }
+    free(history->items);
+    history->items = NULL;
+    history->len = 0;
+    history->cap = 0;
+}
+
+static int
+exvi_history_grow(exvi_history_t *history)
+{
+    int new_cap = history->cap > 0 ? history->cap * 2 : 8;
+    buffer_t *items = realloc(history->items, sizeof(*items) * (size_t)new_cap);
+
+    if (!items) {
+        return -1;
+    }
+    history->items = items;
+    history->cap = new_cap;
+    return 0;
+}
+
+int
+exvi_history_push_snapshot(exvi_history_t *history, buffer_t *src)
+{
+    if (history->len >= history->cap && exvi_history_grow(history) != 0) {
+        return -1;
+    }
+    buf_init(&history->items[history->len]);
+    exvi_history_suspended++;
+    buf_copy(&history->items[history->len], src);
+    exvi_history_suspended--;
+    history->len++;
+    return 0;
+}
+
+static int
+exvi_history_push_move(exvi_history_t *history, buffer_t *src)
+{
+    if (history->len >= history->cap && exvi_history_grow(history) != 0) {
+        return -1;
+    }
+    history->items[history->len++] = *src;
+    buf_init(src);
+    return 0;
+}
+
+int
+exvi_history_pop_snapshot(exvi_history_t *history, buffer_t *out)
+{
+    if (history->len <= 0) {
+        return -1;
+    }
+    *out = history->items[--history->len];
+    buf_init(&history->items[history->len]);
+    return 0;
+}
+
+void
+exvi_reset_undo_state(void)
+{
+    exvi_history_free(&undo_history);
+    exvi_history_free(&redo_history);
+    buf_free(&pending_undo_buf);
+    buf_init(&pending_undo_buf);
+    pending_undo_valid = 0;
+}
+
+void
+exvi_discard_pending_undo(void)
+{
+    if (!pending_undo_valid) {
+        return;
+    }
+    buf_free(&pending_undo_buf);
+    buf_init(&pending_undo_buf);
+    pending_undo_valid = 0;
+}
+
+void
+exvi_note_buffer_change(void)
+{
+    if (exvi_history_suspended || !pending_undo_valid) {
+        return;
+    }
+    if (exvi_history_push_move(&undo_history, &pending_undo_buf) != 0) {
+        exvi_report_error("out of memory");
+        return;
+    }
+    exvi_history_free(&redo_history);
+    pending_undo_valid = 0;
+}
+
 void
 buf_init(buffer_t *b)
 {
@@ -32,7 +129,12 @@ buf_insert_after(buffer_t *b, line_t *pos, const char *text)
         return NULL;
     }
     l->text = strdup(text);
+    if (!l->text) {
+        free(l);
+        return NULL;
+    }
     l->len = strlen(text);
+    exvi_note_buffer_change();
 
     if (!b->head) {
         b->head = b->tail = b->cur = l;
@@ -67,6 +169,7 @@ buf_delete(buffer_t *b, line_t *l)
     if (!l) {
         return;
     }
+    exvi_note_buffer_change();
     deleting_tail = (l == b->tail);
     for (int i = 0; i < 26; i++) {
         if (b->marks[i] == l) {
@@ -143,6 +246,7 @@ buf_copy(buffer_t *dst, buffer_t *src)
     line_t *curr = src->head;
     line_t *pos = NULL;
 
+    exvi_history_suspended++;
     buf_free(dst);
     if (src->filename) {
         dst->filename = strdup(src->filename);
@@ -160,13 +264,15 @@ buf_copy(buffer_t *dst, buffer_t *src)
     }
     dst->modified = src->modified;
     dst->trailing_newline = src->trailing_newline;
+    exvi_history_suspended--;
 }
 
 void
 save_undo(buffer_t *current)
 {
-    buf_copy(&undo_buf, current);
-    undo_valid = 1;
+    exvi_discard_pending_undo();
+    buf_copy(&pending_undo_buf, current);
+    pending_undo_valid = 1;
 }
 
 void

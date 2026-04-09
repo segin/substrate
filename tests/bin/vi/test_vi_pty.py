@@ -1610,6 +1610,69 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "abc\n",
+        [b"i", b"X", b"\x1b", b"A", b"!", b"\x1b", b"u", b"u", b"\x12", b"\x12"],
+    )
+    require(exit_code == 0, f"insert-multi-undo-redo vi exited with status {exit_code}")
+    require(saved == "Xabc!\n",
+            f"unexpected insert-multi-undo-redo buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc\n",
+        [b"0", b"R", b"X", b"\x1b", b"0", b"l", b"R", b"Y", b"\x1b", b"u", b"u"],
+    )
+    require(exit_code == 0, f"replace-multi-undo vi exited with status {exit_code}")
+    require(saved == "abc\n",
+            f"unexpected replace-multi-undo buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\n",
+        [b"o", b"A", b"\x1b", b"O", b"B", b"\x1b", b"u", b"u"],
+    )
+    require(exit_code == 0, f"open-multi-undo vi exited with status {exit_code}")
+    require(saved == "one\ntwo\n",
+            f"unexpected open-multi-undo buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\n",
+        [b"y", b"y", b"p", b"p", b"u", b"u"],
+    )
+    require(exit_code == 0, f"put-multi-undo vi exited with status {exit_code}")
+    require(saved == "one\ntwo\n",
+            f"unexpected put-multi-undo buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b"J", b"J", b"u", b"u"],
+    )
+    require(exit_code == 0, f"join-multi-undo vi exited with status {exit_code}")
+    require(saved == "one\ntwo\nthree\n",
+            f"unexpected join-multi-undo buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha beta gamma\n",
+        [b"c", b"w", b"X", b"\x1b", b"0", b"w", b"c", b"w", b"Y", b"\x1b", b"u", b"u"],
+    )
+    require(exit_code == 0, f"change-multi-undo vi exited with status {exit_code}")
+    require(saved == "alpha beta gamma\n",
+            f"unexpected change-multi-undo buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\nthree\n",
+        [b":", b"1", b"d", b"\r", b":", b"1", b"s/two/TWO/\r", b"u", b"u"],
+    )
+    require(exit_code == 0, f"ex-multi-undo vi exited with status {exit_code}")
+    require(saved == "one\ntwo\nthree\n",
+            f"unexpected ex-multi-undo buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "alpha beta gamma\n",
         [b"d", ("winsize", 8, 28, 0.5), b"w"],
         rows=8,

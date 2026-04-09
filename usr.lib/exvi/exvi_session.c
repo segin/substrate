@@ -1242,6 +1242,7 @@ handle_read_command(buffer_t *b, const char *args, int addr2)
                     perror("strdup");
                     return 1;
                 }
+                exvi_note_buffer_change();
                 free(b->head->text);
                 b->head->text = text;
                 b->head->len = strlen(text);

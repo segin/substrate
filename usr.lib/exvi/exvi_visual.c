@@ -3733,6 +3733,7 @@ vi_replace_current_text(buffer_t *b, const char *text)
     if (!copy) {
         return -1;
     }
+    exvi_note_buffer_change();
     free(cur->text);
     cur->text = copy;
     cur->len = strlen(copy);
@@ -5982,6 +5983,7 @@ vi_backspace_char(buffer_t *b, vi_visual_t *vis)
         if (!merged) {
             return;
         }
+        exvi_note_buffer_change();
         memcpy(merged, prev->text, prev->len);
         memcpy(merged + prev->len, cur->text, cur->len + 1);
         free(prev->text);
@@ -7967,10 +7969,15 @@ process_normal_key:
             vi_set_last_change(&vis, VI_REPEAT_S_LINE, 1, 0);
             break;
         case 'u':
-        case 0x12:
             vis.pending_g = 0;
             vis.pending_count = 0;
             handle_undo_command(b);
+            vi_clamp_cursor(b, &vis);
+            break;
+        case 0x12:
+            vis.pending_g = 0;
+            vis.pending_count = 0;
+            handle_redo_command(b);
             vi_clamp_cursor(b, &vis);
             break;
         case 'c':

@@ -38,6 +38,12 @@ typedef struct {
     int mark_cols[26];
 } buffer_t;
 
+typedef struct {
+    buffer_t *items;
+    int len;
+    int cap;
+} exvi_history_t;
+
 typedef enum {
     EXVI_COMMAND_BREAK_NONE = 0,
     EXVI_COMMAND_BREAK_SEPARATOR,
@@ -78,8 +84,11 @@ extern int option_scroll;
 extern int option_scroll_explicit;
 extern int option_wrapscan;
 extern char *option_tags;
-extern buffer_t undo_buf;
-extern int undo_valid;
+extern exvi_history_t undo_history;
+extern exvi_history_t redo_history;
+extern buffer_t pending_undo_buf;
+extern int pending_undo_valid;
+extern int exvi_history_suspended;
 extern char *last_search_pattern;
 extern char *last_sub_pattern;
 extern char *last_sub_replacement;
@@ -102,6 +111,11 @@ void buf_delete(buffer_t *b, line_t *l);
 void buf_free(buffer_t *b);
 void buf_copy(buffer_t *dst, buffer_t *src);
 void save_undo(buffer_t *current);
+void exvi_note_buffer_change(void);
+void exvi_discard_pending_undo(void);
+void exvi_reset_undo_state(void);
+int exvi_history_push_snapshot(exvi_history_t *history, buffer_t *src);
+int exvi_history_pop_snapshot(exvi_history_t *history, buffer_t *out);
 void buf_read_file(buffer_t *b, const char *filename);
 void buf_write_file(buffer_t *b, const char *filename, int append);
 void buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int addr2);
@@ -168,6 +182,7 @@ int handle_read_command(buffer_t *b, const char *args, int addr2);
 int handle_delete_command(buffer_t *b, int explicit_range, int addr1, int addr2);
 int default_read_destination(buffer_t *b, int addr2);
 int handle_undo_command(buffer_t *b);
+int handle_redo_command(buffer_t *b);
 int handle_put_command(buffer_t *b, const char *args, int addr2);
 int handle_print_command(buffer_t *b, const char *cmd, int explicit_range,
     int addr1, int addr2);
