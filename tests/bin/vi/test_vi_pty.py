@@ -2557,6 +2557,44 @@ def main():
     require(saved == "foo\nbar\nfoo\nbar\nfoo\n",
             f"unexpected y# buffer: {saved!r}")
 
+    search_operator_cases = [
+        ("</search", "\taa\n\tmatch\n\tbb\n\tmatch\n\tcc\n",
+            [b"<", b"/", b"match\r"], "aa\nmatch\n\tbb\n\tmatch\n\tcc\n", None),
+        (">?search", "\taa\n\tmatch\n\tbb\n\tmatch\n\tcc\n",
+            [b"G", b">", b"?", b"match\r"], "\taa\n\tmatch\n\tbb\n\t\tmatch\n\t\tcc\n", None),
+        ("<?search", "\taa\n\tmatch\n\tbb\n\tmatch\n\tcc\n",
+            [b"G", b"<", b"?", b"match\r"], "\taa\n\tmatch\n\tbb\nmatch\ncc\n", None),
+        ("cn", "aa\nmatch\nbb\nmatch\ncc\n",
+            [b"/", b"match\r", b"g", b"g", b"c", b"n", b"X", b"\x1b"],
+            "X\nmatch\nbb\nmatch\ncc\n", "-- INSERT --"),
+        ("dN", "aa\nfoo\nbb\nfoo\ncc\n",
+            [b"G", b"?", b"foo\r", b"d", b"N"], "aa\nfoo\ncc\n", None),
+        ("cN", "aa\nfoo\nbb\nfoo\ncc\n",
+            [b"G", b"?", b"foo\r", b"c", b"N", b"X", b"\x1b"],
+            "aa\nX\nfoo\ncc\n", "-- INSERT --"),
+        (">N", "\taa\n\tfoo\n\tbb\n\tfoo\n\tcc\n",
+            [b"G", b"?", b"foo\r", b"g", b"g", b">", b"N"],
+            "\t\taa\n\t\tfoo\n\tbb\n\tfoo\n\tcc\n", None),
+        ("<n", "\taa\n\tmatch\n\tbb\n\tmatch\n\tcc\n",
+            [b"/", b"match\r", b"g", b"g", b"<", b"n"], "aa\nmatch\n\tbb\n\tmatch\n\tcc\n", None),
+        ("<N", "\taa\n\tfoo\n\tbb\n\tfoo\n\tcc\n",
+            [b"G", b"?", b"foo\r", b"g", b"g", b"<", b"N"], "aa\nfoo\n\tbb\n\tfoo\n\tcc\n", None),
+        (">*", "\tword\n\tmiddle\n\tword\n",
+            [b">", b"*"], "\t\tword\n\t\tmiddle\n\t\tword\n", None),
+        ("<*", "\tword\n\tmiddle\n\tword\n",
+            [b"<", b"*"], "word\nmiddle\nword\n", None),
+        (">#", "\tword\n\tmiddle\n\tword\n",
+            [b"G", b">", b"#"], "\t\tword\n\t\tmiddle\n\t\tword\n", None),
+        ("<#", "\tword\n\tmiddle\n\tword\n",
+            [b"G", b"<", b"#"], "word\nmiddle\nword\n", None),
+    ]
+    for name, initial_text, key_steps, expected, status_text in search_operator_cases:
+        exit_code, decoded, saved = run_vi_session(vi_path, initial_text, key_steps)
+        require(exit_code == 0, f"{name} vi exited with status {exit_code}")
+        if status_text is not None:
+            require(status_text in decoded, f"missing {name} status")
+        require(saved == expected, f"unexpected {name} buffer: {saved!r}")
+
     exit_code, decoded, saved = run_vi_session(
         vi_path,
         "a\nmatch1\nx\nmatch2\ny\nmatch3\n",

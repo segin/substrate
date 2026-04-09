@@ -95,6 +95,71 @@ def main():
             "key_steps": [b"/", b"two\r", b"r", b"Z", b"n", b"r", b"Y"],
         },
         {
+            "name": "unshift-search-forward",
+            "initial_text": "\taa\n\tmatch\n\tbb\n\tmatch\n\tcc\n",
+            "key_steps": [b"<", b"/", b"match\r"],
+        },
+        {
+            "name": "shift-search-backward",
+            "initial_text": "\taa\n\tmatch\n\tbb\n\tmatch\n\tcc\n",
+            "key_steps": [b"G", b">", b"?", b"match\r"],
+        },
+        {
+            "name": "unshift-search-backward",
+            "initial_text": "\taa\n\tmatch\n\tbb\n\tmatch\n\tcc\n",
+            "key_steps": [b"G", b"<", b"?", b"match\r"],
+        },
+        {
+            "name": "change-repeat-search-forward",
+            "initial_text": "aa\nmatch\nbb\nmatch\ncc\n",
+            "key_steps": [b"/", b"match\r", b"g", b"g", b"c", b"n", b"X", b"\x1b"],
+        },
+        {
+            "name": "delete-repeat-search-backward",
+            "initial_text": "aa\nfoo\nbb\nfoo\ncc\n",
+            "key_steps": [b"G", b"?", b"foo\r", b"d", b"N"],
+        },
+        {
+            "name": "change-repeat-search-backward",
+            "initial_text": "aa\nfoo\nbb\nfoo\ncc\n",
+            "key_steps": [b"G", b"?", b"foo\r", b"c", b"N", b"X", b"\x1b"],
+        },
+        {
+            "name": "shift-repeat-search-backward",
+            "initial_text": "\taa\n\tfoo\n\tbb\n\tfoo\n\tcc\n",
+            "key_steps": [b"G", b"?", b"foo\r", b"g", b"g", b">", b"N"],
+        },
+        {
+            "name": "unshift-repeat-search-forward",
+            "initial_text": "\taa\n\tmatch\n\tbb\n\tmatch\n\tcc\n",
+            "key_steps": [b"/", b"match\r", b"g", b"g", b"<", b"n"],
+        },
+        {
+            "name": "unshift-repeat-search-backward",
+            "initial_text": "\taa\n\tfoo\n\tbb\n\tfoo\n\tcc\n",
+            "key_steps": [b"G", b"?", b"foo\r", b"g", b"g", b"<", b"N"],
+        },
+        {
+            "name": "shift-star-search",
+            "initial_text": "\tword\n\tmiddle\n\tword\n",
+            "key_steps": [b">", b"*"],
+        },
+        {
+            "name": "unshift-star-search",
+            "initial_text": "\tword\n\tmiddle\n\tword\n",
+            "key_steps": [b"<", b"*"],
+        },
+        {
+            "name": "shift-hash-search",
+            "initial_text": "\tword\n\tmiddle\n\tword\n",
+            "key_steps": [b"G", b">", b"#"],
+        },
+        {
+            "name": "unshift-hash-search",
+            "initial_text": "\tword\n\tmiddle\n\tword\n",
+            "key_steps": [b"G", b"<", b"#"],
+        },
+        {
             "name": "counted-line-down-motion",
             "initial_text": "one\ntwo\nthree\nfour\n",
             "key_steps": [b"2", b"j", b"r", b"X"],

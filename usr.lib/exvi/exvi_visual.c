@@ -139,6 +139,8 @@ static int vi_read_visual_key(buffer_t *b, vi_visual_t *vis, char prompt_prefix,
     const char *prompt);
 static char *vi_current_word_text(buffer_t *b, vi_visual_t *vis);
 static char *vi_current_word_pattern(buffer_t *b, vi_visual_t *vis);
+static int vi_search_current_word_target(buffer_t *b, vi_visual_t *vis, int forward,
+    int count, line_t **line_out, int *col_out);
 static void vi_visual_apply_tag_target(buffer_t *b, char *cmd);
 static void vi_reset_replace_mode(vi_visual_t *vis);
 static void vi_record_last_insert_site(buffer_t *b, vi_visual_t *vis);
@@ -5496,13 +5498,10 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c' || vis->pending_op == 'y' ||
         vis->pending_op == '>' || vis->pending_op == '<') &&
         (key == '*' || key == '#')) {
-        char *pattern = vi_current_word_pattern(b, vis);
         line_t *target_line;
         int target_col;
 
-        if (!pattern) {
-            write(STDOUT_FILENO, "\a", 1);
-        } else if (vi_search_motion_target(b, vis, pattern, key == '*', count,
+        if (vi_search_current_word_target(b, vis, key == '*', count,
             &target_line, &target_col) != 0) {
             write(STDOUT_FILENO, "\a", 1);
         } else if (vi_apply_search_linewise_motion(b, vis, line_no, target_line, target_col) == 0) {
@@ -5522,7 +5521,6 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
         } else if (vis->pending_op == 'c') {
             vi_set_last_change(vis, VI_REPEAT_C_SEARCH_REPEAT, count, key);
         }
-        free(pattern);
     } else if ((vis->pending_op == 'd' || vis->pending_op == 'c') && key == '0') {
         if (vis->cursor_col > 0) {
             vi_delete_span(b, vis, 0, vis->cursor_col, vis->pending_op == 'c');
@@ -6830,29 +6828,28 @@ vi_search_prompt(buffer_t *b, vi_visual_t *vis, int forward)
     }
 }
 
-static void
-vi_copy_current_word(buffer_t *b, vi_visual_t *vis, int escape_regex,
-    char **out_text)
+static int
+vi_current_word_span(buffer_t *b, vi_visual_t *vis, int *start_out, int *end_out)
 {
     line_t *cur = b->cur;
     int start;
     int end;
     int pos;
-    size_t len;
-    const char *meta = ".^$*+?()[{\\|";
-    char *text;
-    size_t out_len = 0;
-
-    *out_text = NULL;
+    
     if (!cur || cur->len == 0) {
-        return;
+        return -1;
     }
     pos = vis->cursor_col;
     if (pos >= (int)cur->len) {
         pos = (int)cur->len - 1;
     }
-    if (pos < 0 || !vi_is_word_char((unsigned char)cur->text[pos])) {
-        return;
+    while (pos >= 0 && (size_t)pos < cur->len &&
+        !vi_is_word_char((unsigned char)cur->text[pos])) {
+        pos++;
+    }
+    if (pos < 0 || (size_t)pos >= cur->len ||
+        !vi_is_word_char((unsigned char)cur->text[pos])) {
+        return -1;
     }
     start = pos;
     while (start > 0 && vi_is_word_char((unsigned char)cur->text[start - 1])) {
@@ -6861,6 +6858,27 @@ vi_copy_current_word(buffer_t *b, vi_visual_t *vis, int escape_regex,
     end = pos + 1;
     while ((size_t)end < cur->len && vi_is_word_char((unsigned char)cur->text[end])) {
         end++;
+    }
+    *start_out = start;
+    *end_out = end;
+    return 0;
+}
+
+static void
+vi_copy_current_word(buffer_t *b, vi_visual_t *vis, int escape_regex,
+    char **out_text)
+{
+    line_t *cur = b->cur;
+    int start;
+    int end;
+    size_t len;
+    const char *meta = ".^$*+?()[{\\|";
+    char *text;
+    size_t out_len = 0;
+
+    *out_text = NULL;
+    if (vi_current_word_span(b, vis, &start, &end) != 0) {
+        return;
     }
     len = (size_t)(end - start);
     for (size_t i = 0; i < len; i++) {
@@ -6917,6 +6935,31 @@ vi_current_word_pattern(buffer_t *b, vi_visual_t *vis)
     return pattern;
 }
 
+static int
+vi_search_current_word_target(buffer_t *b, vi_visual_t *vis, int forward, int count,
+    line_t **line_out, int *col_out)
+{
+    char *pattern;
+    int start;
+    int end;
+    int saved_col;
+    int rc;
+
+    if (vi_current_word_span(b, vis, &start, &end) != 0) {
+        return -1;
+    }
+    pattern = vi_current_word_pattern(b, vis);
+    if (!pattern) {
+        return -1;
+    }
+    saved_col = vis->cursor_col;
+    vis->cursor_col = forward ? end - 1 : start;
+    rc = vi_search_target(b, vis, pattern, forward, count, line_out, col_out);
+    vis->cursor_col = saved_col;
+    free(pattern);
+    return rc;
+}
+
 static void
 vi_visual_apply_tag_target(buffer_t *b, char *cmd)
 {
@@ -6945,14 +6988,17 @@ vi_visual_apply_tag_target(buffer_t *b, char *cmd)
 static void
 vi_search_current_word(buffer_t *b, vi_visual_t *vis, int forward, int count)
 {
-    char *pattern = vi_current_word_pattern(b, vis);
+    line_t *target_line;
+    int target_col;
 
-    if (!pattern) {
+    if (vi_search_current_word_target(b, vis, forward, count,
+        &target_line, &target_col) != 0) {
         write(STDOUT_FILENO, "\a", 1);
         return;
     }
-    vi_apply_search(b, vis, pattern, forward, count);
-    free(pattern);
+    b->cur = target_line;
+    vis->cursor_col = target_col;
+    vi_set_status(vis, NULL);
 }
 
 int

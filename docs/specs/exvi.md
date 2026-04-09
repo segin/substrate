@@ -264,7 +264,7 @@ Unsupported or intentionally out-of-scope normal-mode motion keys are not implie
   - [x] Lock down direct PTY coverage for word and bigword motions (`w`, `W`, `e`, `E`, `b`, `B`, `ge`, `gE`) across supported operator families.
   - [x] Lock down direct PTY coverage for sentence and paragraph motions (`(`, `)`, `{`, `}`) across supported operator families, including blank-separator and EOF cases.
   - [x] Lock down direct PTY coverage for section/structure motions (`[[`, `]]`, `[]`, `][`) across supported operator families.
-  - [ ] Lock down direct PTY coverage for search/repeat-search motions (`/`, `?`, `n`, `N`, `*`, `#`) across supported operator families.
+  - [x] Lock down direct PTY coverage for search/repeat-search motions (`/`, `?`, `n`, `N`, `*`, `#`) across supported operator families.
   - [ ] Lock down direct PTY coverage for find/repeat-find motions (`f`, `F`, `t`, `T`, `;`, `,`) across supported operator families.
   - [ ] Lock down direct PTY coverage for mark and match motions (`'`, `` ` ``, `%`) across supported operator families.
 - [x] Finish `d/c/y` behavior for backward word motions (`b`, `B`, `ge`, `gE`) and add direct PTY oracles for both same-line and cross-line cases.
