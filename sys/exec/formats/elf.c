@@ -8,6 +8,7 @@
 #include <vm/vm_map.h>
 #include <vm/vm_kmem.h>
 #include <exec/perso/personality.h>
+#include <exec/perso/linux/linux_exec.h>
 #include <sys/exec.h>
 #include <sys/random.h>
 #include <sys/signal.h> // For copyin/copyout
@@ -212,7 +213,7 @@ static int elf_read_image_info(fs_node_t *file, elf_image_info_t *image) {
     }
 
     if (image->at_phdr == 0) {
-        image->at_phdr = 0x08048000 + image->ehdr.e_phoff;
+        image->at_phdr = image->ehdr.e_phoff;
     }
 
     return 0;
@@ -856,6 +857,14 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
     
     sp -= 4; STACK_WRITE32(sp, at_base);
     sp -= 4; STACK_WRITE32(sp, AT_BASE);
+
+    if (current_process && current_process->perso_id == PERS_LINUX) {
+        sp -= 4; STACK_WRITE32(sp, HZ);
+        sp -= 4; STACK_WRITE32(sp, AT_CLKTCK);
+
+        sp -= 4; STACK_WRITE32(sp, 0);
+        sp -= 4; STACK_WRITE32(sp, AT_HWCAP);
+    }
 
     uint32_t rand_ptr;
     sp -= 16;

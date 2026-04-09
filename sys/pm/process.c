@@ -1059,6 +1059,9 @@ void proc_exit(int code) {
     // 1. Set State
     current_process->state = SDYING;
     current_process->exit_code = code;
+    if ((current_process->p_flag & P_SIGEXIT) == 0) {
+        current_process->p_flag &= (uint16_t)~P_SIGEXIT;
+    }
     
     // 1b. Thread Cleanup (Robust Futexes & Pending Signals)
     extern void futex_thread_exit(thread_t *t);

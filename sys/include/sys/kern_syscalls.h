@@ -32,6 +32,7 @@ int kern_close(int fd);
 int kern_stat(const char *path, struct stat *buf);
 int kern_lstat(const char *path, struct stat *buf);
 int kern_fstat(int fd, struct stat *buf);
+int kern_fstatat(int dirfd, const char *path, struct stat *buf, int flags);
 int kern_lseek(int fd, off_t offset, int whence);
 int kern_sigaction(int sig, const struct sigaction *act, struct sigaction *oact);
 int kern_sigaltstack(const stack_t *ss, stack_t *oss);

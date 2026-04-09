@@ -204,12 +204,13 @@ jump_to_userspace:
     # NOW turn off interrupts
     cli
     
-    # A freshly exec'd image must not inherit a stale TLS selector from the
-    # previous process image. Start all user data segments on the flat user
-    # data selector; userland will install TLS explicitly via set_thread_area.
+    # A freshly exec'd image must not inherit stale TLS selectors from the
+    # previous process image. i386 Linux starts with DS/ES flat, but FS/GS
+    # cleared until userland installs TLS explicitly via set_thread_area.
     mov $0x23, %ax
     mov %ax, %ds
     mov %ax, %es  
+    xor %ax, %ax
     mov %ax, %fs
     mov %ax, %gs
     

@@ -1158,6 +1158,41 @@ int kern_fstat(int fd, struct stat *buf) {
     return 0;
 }
 
+int kern_fstatat(int dirfd, const char *path, struct stat *buf, int flags) {
+    fs_node_t *root;
+    fs_node_t *cwd;
+    fs_node_t *node;
+    file_t *df;
+    int nofollow;
+
+    if (!path || !buf) return -EFAULT;
+
+    root = current_process->root_node ? current_process->root_node : fs_root;
+    cwd = current_process->cwd_node ? current_process->cwd_node : root;
+    nofollow = (flags & 0x100) != 0; /* AT_SYMLINK_NOFOLLOW */
+
+    if (path[0] != '/') {
+        if (dirfd == AT_FDCWD) {
+            /* use current cwd */
+        } else {
+            if (dirfd < 0 || dirfd >= MAX_FD) return -EBADF;
+            df = current_process->fds[dirfd];
+            if (!df || !df->f_data) return -EBADF;
+            cwd = (fs_node_t *)df->f_data;
+            if ((cwd->flags & 0x07) != FS_DIRECTORY) return -ENOTDIR;
+        }
+    }
+
+    node = nofollow
+        ? vfs_lookup_lstat((path[0] == '/') ? root : cwd, path)
+        : vfs_lookup((path[0] == '/') ? root : cwd, path);
+    if (!node) return -ENOENT;
+
+    fill_stat(buf, node);
+    close_fs(node);
+    return 0;
+}
+
 // ioctl - device control
 int sys_ioctl(int fd, uint32_t request, void *arg) {
     // ioctl arg can be anything. For security, we should really know the size.
