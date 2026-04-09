@@ -43,18 +43,27 @@ def send_keys(master_fd, output, data, timeout=0.2):
 def run_vi_session(vi_path, initial_text, key_steps, final_timeout=0.3, rows=24,
                    cols=80, final_keys=b":wq\r", extra_files=None,
                    extra_args=None, argv0=None, file_args=None,
-                   session_timeout=15.0):
+                   session_timeout=15.0, initial_bytes=None,
+                   return_saved_bytes=False):
     with tempfile.TemporaryDirectory(prefix="exvi-") as temp_dir:
         temp_path = os.path.join(temp_dir, "buffer.txt")
-        with open(temp_path, "w", encoding="utf-8") as f:
-            f.write(initial_text)
+        if initial_bytes is not None:
+            with open(temp_path, "wb") as f:
+                f.write(initial_bytes)
+        else:
+            with open(temp_path, "w", encoding="utf-8") as f:
+                f.write(initial_text)
 
         if extra_files:
             for relpath, contents in extra_files.items():
                 full_path = os.path.join(temp_dir, relpath)
                 os.makedirs(os.path.dirname(full_path), exist_ok=True)
-                with open(full_path, "w", encoding="utf-8") as f:
-                    f.write(contents)
+                if isinstance(contents, bytes):
+                    with open(full_path, "wb") as f:
+                        f.write(contents)
+                else:
+                    with open(full_path, "w", encoding="utf-8") as f:
+                        f.write(contents)
 
         pid, master_fd = pty.fork()
         if pid == 0:
@@ -108,8 +117,12 @@ def run_vi_session(vi_path, initial_text, key_steps, final_timeout=0.3, rows=24,
             )
         os.close(master_fd)
 
-        with open(temp_path, "r", encoding="utf-8") as f:
-            saved = f.read()
+        if return_saved_bytes:
+            with open(temp_path, "rb") as f:
+                saved = f.read()
+        else:
+            with open(temp_path, "r", encoding="utf-8") as f:
+                saved = f.read()
 
         return os.waitstatus_to_exitcode(status), output.decode("latin1", "replace"), saved
 

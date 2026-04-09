@@ -274,6 +274,36 @@ def main():
         require(exit_code == 0, f"{name} vi exited with status {exit_code}")
         require(saved == expected, f"{name} buffer mismatch: {saved!r}")
 
+    for name, initial_text, key_steps, expected in (
+        ("display-tab-inside", "\tb\n", [b"2|", b"i", b"X", b"\x1b"], "X\tb\n"),
+        ("display-tab-after", "\tb\n", [b"9|", b"i", b"X", b"\x1b"], "\tXb\n"),
+        ("display-doublewidth-fallback", "漢b\n",
+            [b"2|", b"i", b"X", b"\x1b"], "漢Xb\n"),
+        ("display-combining-fallback", "a\u0301b\n",
+            [b"3|", b"i", b"X", b"\x1b"], "a\u0301Xb\n"),
+        ("display-zero-width-fallback", "a\u200bb\n",
+            [b"3|", b"i", b"X", b"\x1b"], "a\u200bXb\n"),
+    ):
+        exit_code, decoded, saved = helpers.run_vi_session(vi_path, initial_text, key_steps)
+        require(exit_code == 0, f"{name} vi exited with status {exit_code}")
+        require(saved == expected, f"{name} buffer mismatch: {saved!r}")
+
+    for name, initial_bytes, key_steps, expected in (
+        ("display-invalid-byte-inside", b"a\xffb\n",
+            [b"3|", b"i", b"X", b"\x1b"], b"aX\xffb\n"),
+        ("display-invalid-byte-after", b"a\xffb\n",
+            [b"4|", b"i", b"X", b"\x1b"], b"a\xffXb\n"),
+    ):
+        exit_code, decoded, saved = helpers.run_vi_session(
+            vi_path,
+            "",
+            key_steps,
+            initial_bytes=initial_bytes,
+            return_saved_bytes=True,
+        )
+        require(exit_code == 0, f"{name} vi exited with status {exit_code}")
+        require(saved == expected, f"{name} buffer mismatch: {saved!r}")
+
     exit_code, decoded, saved = helpers.run_vi_session(
         vi_path,
         "",
