@@ -160,6 +160,131 @@ def main():
             "key_steps": [b"G", b"<", b"#"],
         },
         {
+            "name": "change-find-forward",
+            "initial_text": "abczdef\n",
+            "key_steps": [b"0", b"c", b"f", b"z", b"X", b"\x1b"],
+        },
+        {
+            "name": "delete-till-forward",
+            "initial_text": "abczdef\n",
+            "key_steps": [b"0", b"d", b"t", b"z"],
+        },
+        {
+            "name": "yank-till-forward",
+            "initial_text": "abczdef\n",
+            "key_steps": [b"0", b"y", b"t", b"z", b"P"],
+        },
+        {
+            "name": "shift-find-forward",
+            "initial_text": "abczdef\n",
+            "key_steps": [b">", b"f", b"z"],
+        },
+        {
+            "name": "unshift-find-forward",
+            "initial_text": "\tabczdef\n",
+            "key_steps": [b"<", b"f", b"z"],
+        },
+        {
+            "name": "shift-till-forward",
+            "initial_text": "abczdef\n",
+            "key_steps": [b">", b"t", b"z"],
+        },
+        {
+            "name": "unshift-till-forward",
+            "initial_text": "\tabczdef\n",
+            "key_steps": [b"<", b"t", b"z"],
+        },
+        {
+            "name": "change-find-backward",
+            "initial_text": "abczdef\n",
+            "key_steps": [b"$", b"c", b"F", b"b", b"X", b"\x1b"],
+        },
+        {
+            "name": "yank-find-backward",
+            "initial_text": "abczdef\n",
+            "key_steps": [b"$", b"y", b"F", b"b", b"P"],
+        },
+        {
+            "name": "delete-till-backward",
+            "initial_text": "abczdef\n",
+            "key_steps": [b"$", b"d", b"T", b"b"],
+        },
+        {
+            "name": "yank-till-backward",
+            "initial_text": "abczdef\n",
+            "key_steps": [b"$", b"y", b"T", b"b", b"P"],
+        },
+        {
+            "name": "shift-find-backward",
+            "initial_text": "abczdef\n",
+            "key_steps": [b"$", b">", b"F", b"b"],
+        },
+        {
+            "name": "unshift-find-backward",
+            "initial_text": "\tabczdef\n",
+            "key_steps": [b"$", b"<", b"F", b"b"],
+        },
+        {
+            "name": "shift-till-backward",
+            "initial_text": "abczdef\n",
+            "key_steps": [b"$", b">", b"T", b"b"],
+        },
+        {
+            "name": "unshift-till-backward",
+            "initial_text": "\tabczdef\n",
+            "key_steps": [b"$", b"<", b"T", b"b"],
+        },
+        {
+            "name": "delete-repeat-find-forward",
+            "initial_text": "alpha beta gamma\n",
+            "key_steps": [b"0", b"f", b"a", b"d", b";"],
+        },
+        {
+            "name": "change-repeat-find-forward",
+            "initial_text": "alpha beta gamma\n",
+            "key_steps": [b"0", b"f", b"a", b"c", b";", b"X", b"\x1b"],
+        },
+        {
+            "name": "yank-repeat-find-forward",
+            "initial_text": "alpha beta gamma\n",
+            "key_steps": [b"0", b"f", b"a", b"y", b";", b"P"],
+        },
+        {
+            "name": "shift-repeat-find-forward",
+            "initial_text": "alpha beta gamma\n",
+            "key_steps": [b"0", b"f", b"a", b">", b";"],
+        },
+        {
+            "name": "unshift-repeat-find-forward",
+            "initial_text": "\talpha beta gamma\n",
+            "key_steps": [b"0", b"f", b"a", b"<", b";"],
+        },
+        {
+            "name": "delete-repeat-find-backward",
+            "initial_text": "alpha beta gamma\n",
+            "key_steps": [b"$", b"F", b"a", b"d", b","],
+        },
+        {
+            "name": "change-repeat-find-backward",
+            "initial_text": "alpha beta gamma\n",
+            "key_steps": [b"$", b"F", b"a", b"c", b",", b"X", b"\x1b"],
+        },
+        {
+            "name": "yank-repeat-find-backward",
+            "initial_text": "alpha beta gamma\n",
+            "key_steps": [b"$", b"F", b"a", b"y", b",", b"P"],
+        },
+        {
+            "name": "shift-repeat-find-backward",
+            "initial_text": "alpha beta gamma\n",
+            "key_steps": [b"$", b"F", b"a", b">", b","],
+        },
+        {
+            "name": "unshift-repeat-find-backward",
+            "initial_text": "\talpha beta gamma\n",
+            "key_steps": [b"$", b"F", b"a", b"<", b","],
+        },
+        {
             "name": "counted-line-down-motion",
             "initial_text": "one\ntwo\nthree\nfour\n",
             "key_steps": [b"2", b"j", b"r", b"X"],

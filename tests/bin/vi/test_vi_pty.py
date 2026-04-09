@@ -2992,6 +2992,40 @@ def main():
     require(saved == "abc def gXi\n",
             f"unexpected $cTg buffer: {saved!r}")
 
+    find_operator_cases = [
+        ("0cfg", "abczdef\n", [b"0", b"c", b"f", b"z", b"X", b"\x1b"], "Xdef\n", "-- INSERT --"),
+        ("0dtz", "abczdef\n", [b"0", b"d", b"t", b"z"], "zdef\n", None),
+        ("0ytzP", "abczdef\n", [b"0", b"y", b"t", b"z", b"P"], "abcabczdef\n", None),
+        (">fz", "abczdef\n", [b">", b"f", b"z"], "\tabczdef\n", None),
+        ("<fz", "\tabczdef\n", [b"<", b"f", b"z"], "abczdef\n", None),
+        (">tz", "abczdef\n", [b">", b"t", b"z"], "\tabczdef\n", None),
+        ("<tz", "\tabczdef\n", [b"<", b"t", b"z"], "abczdef\n", None),
+        ("$cFb", "abczdef\n", [b"$", b"c", b"F", b"b", b"X", b"\x1b"], "aXf\n", "-- INSERT --"),
+        ("$yFbP", "abczdef\n", [b"$", b"y", b"F", b"b", b"P"], "abczdebczdef\n", None),
+        ("$dTb", "abczdef\n", [b"$", b"d", b"T", b"b"], "abf\n", None),
+        ("$yTbP", "abczdef\n", [b"$", b"y", b"T", b"b", b"P"], "abczdeczdef\n", None),
+        ("$>Fb", "abczdef\n", [b"$", b">", b"F", b"b"], "\tabczdef\n", None),
+        ("$<Fb", "\tabczdef\n", [b"$", b"<", b"F", b"b"], "abczdef\n", None),
+        ("$>Tb", "abczdef\n", [b"$", b">", b"T", b"b"], "\tabczdef\n", None),
+        ("$<Tb", "\tabczdef\n", [b"$", b"<", b"T", b"b"], "abczdef\n", None),
+        ("d;", "alpha beta gamma\n", [b"0", b"f", b"a", b"d", b";"], "alph gamma\n", None),
+        ("c;", "alpha beta gamma\n", [b"0", b"f", b"a", b"c", b";", b"X", b"\x1b"], "alphX gamma\n", "-- INSERT --"),
+        ("y;P", "alpha beta gamma\n", [b"0", b"f", b"a", b"y", b";", b"P"], "alpha betaa beta gamma\n", None),
+        (">;", "alpha beta gamma\n", [b"0", b"f", b"a", b">", b";"], "\talpha beta gamma\n", None),
+        ("<;", "\talpha beta gamma\n", [b"0", b"f", b"a", b"<", b";"], "alpha beta gamma\n", None),
+        ("d,", "alpha beta gamma\n", [b"$", b"F", b"a", b"d", b","], "alpha beta g\n", None),
+        ("c,", "alpha beta gamma\n", [b"$", b"F", b"a", b"c", b",", b"X", b"\x1b"], "alpha beta gX\n", "-- INSERT --"),
+        ("y,P", "alpha beta gamma\n", [b"$", b"F", b"a", b"y", b",", b"P"], "alpha beta gammaamma\n", None),
+        (">,", "alpha beta gamma\n", [b"$", b"F", b"a", b">", b","], "\talpha beta gamma\n", None),
+        ("<,", "\talpha beta gamma\n", [b"$", b"F", b"a", b"<", b","], "alpha beta gamma\n", None),
+    ]
+    for name, initial_text, key_steps, expected, status_text in find_operator_cases:
+        exit_code, decoded, saved = run_vi_session(vi_path, initial_text, key_steps)
+        require(exit_code == 0, f"{name} vi exited with status {exit_code}")
+        if status_text is not None:
+            require(status_text in decoded, f"missing {name} insert status")
+        require(saved == expected, f"unexpected {name} buffer: {saved!r}")
+
     exit_code, decoded, saved = run_vi_session(
         vi_path,
         "abcXdefXghiXj\n",
