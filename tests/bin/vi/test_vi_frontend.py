@@ -231,6 +231,29 @@ def main():
         require(saved == "one\ntwoZ\n",
                 f"locale-fallback-{label} buffer mismatch: {saved!r}")
 
+    for name, initial_text, key_steps, expected in (
+        ("utf8-motion-0ll", "aéb\n", [b"0", b"l", b"l", b"r", b"X"], "aéX\n"),
+        ("utf8-motion-dollar-hh", "aéb\n", [b"$", b"h", b"h", b"r", b"X"], "Xéb\n"),
+        ("utf8-motion-caret-ll", "  aéb\n", [b"^", b"l", b"l", b"r", b"X"], "  aéX\n"),
+        ("utf8-motion-bar", "aéb\n", [b"3|", b"r", b"X"], "aéX\n"),
+        ("utf8-motion-till-forward", "aébc\n",
+            [b"0", b"t", b"b", b"i", b"X", b"\x1b"], "aXébc\n"),
+        ("utf8-motion-till-backward", "abécd\n",
+            [b"$", b"T", b"b", b"i", b"X", b"\x1b"], "abXécd\n"),
+        ("utf8-motion-find-forward", "aébcd\n",
+            [b"0", b"f", b"c", b"r", b"X"], "aébXd\n"),
+        ("utf8-motion-find-backward", "abécd\n",
+            [b"$", b"F", b"b", b"r", b"X"], "aXécd\n"),
+        ("utf8-motion-repeat-find", "aébcdebc\n",
+            [b"0", b"f", b"b", b";", b"r", b"X"], "aébcdeXc\n"),
+        ("utf8-motion-repeat-reverse", "abécdbfg\n",
+            [b"$", b"F", b"b", b",", b"r", b"X"], "abécdXfg\n"),
+        ("utf8-motion-percent", "(é)\n", [b"%", b"r", b"X"], "(éX\n"),
+    ):
+        exit_code, decoded, saved = helpers.run_vi_session(vi_path, initial_text, key_steps)
+        require(exit_code == 0, f"{name} vi exited with status {exit_code}")
+        require(saved == expected, f"{name} buffer mismatch: {saved!r}")
+
     exit_code, decoded, saved = helpers.run_vi_session(
         vi_path,
         "",

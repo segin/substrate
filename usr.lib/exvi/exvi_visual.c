@@ -170,6 +170,9 @@ static int vi_line_number_for_line(buffer_t *b, line_t *line);
 static void vi_mark_body_dirty_lines(vi_visual_t *vis, int start_line, int end_line);
 static void vi_mark_body_dirty_through_eof(vi_visual_t *vis, int start_line);
 static void vi_mark_body_dirty_current_line(buffer_t *b, vi_visual_t *vis);
+static int vi_next_char_col(line_t *cur, int col);
+static int vi_prev_char_col(line_t *cur, int col);
+static int vi_last_char_col(line_t *cur);
 
 static void
 vi_record_last_insert_site(buffer_t *b, vi_visual_t *vis)
@@ -341,7 +344,7 @@ vi_begin_repeat_insert(buffer_t *b, vi_visual_t *vis, int entry_key)
         return 0;
     case 'a':
         if (cur && vis->cursor_col < (int)cur->len) {
-            vis->cursor_col++;
+            vis->cursor_col = vi_next_char_col(cur, vis->cursor_col);
         }
         save_undo(b);
         vis->insert_mode = 1;
@@ -875,6 +878,11 @@ vi_clamp_cursor(buffer_t *b, vi_visual_t *vis)
     }
     if (vis->cursor_col < 0) {
         vis->cursor_col = 0;
+    } else if ((size_t)vis->cursor_col < cur->len) {
+        while (vis->cursor_col > 0 &&
+            (((unsigned char)cur->text[vis->cursor_col]) & 0xc0) == 0x80) {
+            vis->cursor_col--;
+        }
     }
 }
 
@@ -884,6 +892,120 @@ vi_clamp_left_col(vi_visual_t *vis)
     if (vis->left_col < 0) {
         vis->left_col = 0;
     }
+}
+
+static int
+vi_is_utf8_continuation_byte(unsigned char c)
+{
+    return (c & 0xc0) == 0x80;
+}
+
+static int
+vi_utf8_decode_text_at(const char *text, size_t len, int idx, unsigned int *cp_out)
+{
+    unsigned char c0;
+    unsigned int cp;
+    int need;
+    int i;
+
+    if (!text || idx < 0 || (size_t)idx >= len) {
+        return 1;
+    }
+    c0 = (unsigned char)text[idx];
+    if (c0 < 0x80) {
+        if (cp_out) {
+            *cp_out = c0;
+        }
+        return 1;
+    }
+    if (c0 < 0xc2 || c0 > 0xf4) {
+        return 1;
+    }
+    if (c0 < 0xe0) {
+        need = 2;
+        cp = c0 & 0x1f;
+    } else if (c0 < 0xf0) {
+        need = 3;
+        cp = c0 & 0x0f;
+    } else {
+        need = 4;
+        cp = c0 & 0x07;
+    }
+    if ((size_t)(idx + need) > len) {
+        return 1;
+    }
+    for (i = 1; i < need; i++) {
+        unsigned char cx = (unsigned char)text[idx + i];
+
+        if (!vi_is_utf8_continuation_byte(cx)) {
+            return 1;
+        }
+        cp = (cp << 6) | (unsigned int)(cx & 0x3f);
+    }
+    if ((need == 2 && cp < 0x80) ||
+        (need == 3 && (cp < 0x800 || (cp >= 0xd800 && cp <= 0xdfff))) ||
+        (need == 4 && (cp < 0x10000 || cp > 0x10ffff))) {
+        return 1;
+    }
+    if (cp_out) {
+        *cp_out = cp;
+    }
+    return need;
+}
+
+static int
+vi_normalize_char_index(line_t *cur, int idx)
+{
+    if (!cur || idx <= 0) {
+        return 0;
+    }
+    if ((size_t)idx >= cur->len) {
+        return (int)cur->len;
+    }
+    while (idx > 0 && vi_is_utf8_continuation_byte((unsigned char)cur->text[idx])) {
+        idx--;
+    }
+    return idx;
+}
+
+static int
+vi_prev_char_index(line_t *cur, int idx)
+{
+    if (!cur) {
+        return 0;
+    }
+    idx = vi_normalize_char_index(cur, idx);
+    if (idx <= 0) {
+        return 0;
+    }
+    idx--;
+    while (idx > 0 && vi_is_utf8_continuation_byte((unsigned char)cur->text[idx])) {
+        idx--;
+    }
+    return idx;
+}
+
+static int
+vi_next_char_index(line_t *cur, int idx)
+{
+    int width;
+
+    if (!cur) {
+        return 0;
+    }
+    idx = vi_normalize_char_index(cur, idx);
+    if ((size_t)idx >= cur->len) {
+        return (int)cur->len;
+    }
+    width = vi_utf8_decode_text_at(cur->text, cur->len, idx, NULL);
+    if (width < 1) {
+        width = 1;
+    }
+    idx += width;
+    if ((size_t)idx > cur->len) {
+        idx = (int)cur->len;
+    }
+    return idx;
 }
 
 static int
@@ -899,6 +1021,24 @@ vi_char_display_width(unsigned char c, int col)
         return 1;
     }
     return 2;
+}
+
+static int
+vi_char_display_width_at(line_t *cur, int idx, int col)
+{
+    unsigned char c;
+
+    if (!cur || idx < 0 || (size_t)idx >= cur->len) {
+        return 1;
+    }
+    c = (unsigned char)cur->text[idx];
+    if (c < 0x80) {
+        return vi_char_display_width(c, col);
+    }
+    if (vi_utf8_decode_text_at(cur->text, cur->len, idx, NULL) > 1) {
+        return 1;
+    }
+    return vi_char_display_width(c, col);
 }
 
 static int
@@ -1045,16 +1185,17 @@ static int
 vi_display_col_for_index(line_t *cur, int idx)
 {
     int col = 0;
-    size_t i;
+    int i;
 
     if (!cur || idx <= 0) {
         return 0;
     }
+    idx = vi_normalize_char_index(cur, idx);
     if ((size_t)idx > cur->len) {
         idx = (int)cur->len;
     }
-    for (i = 0; i < (size_t)idx; i++) {
-        col += vi_char_display_width((unsigned char)cur->text[i], col);
+    for (i = 0; i < idx; i = vi_next_char_index(cur, i)) {
+        col += vi_char_display_width_at(cur, i, col);
     }
     return col;
 }
@@ -1063,19 +1204,19 @@ static int
 vi_index_for_display_col(line_t *cur, int target_col)
 {
     int col = 0;
-    size_t i;
+    int i;
 
     if (!cur || target_col <= 0) {
         return 0;
     }
-    for (i = 0; i < cur->len; i++) {
-        int width = vi_char_display_width((unsigned char)cur->text[i], col);
+    for (i = 0; (size_t)i < cur->len; i = vi_next_char_index(cur, i)) {
+        int width = vi_char_display_width_at(cur, i, col);
 
         if (col >= target_col) {
-            return (int)i;
+            return i;
         }
         if (col + width > target_col) {
-            return (int)i;
+            return i;
         }
         col += width;
     }
@@ -1086,13 +1227,13 @@ static int
 vi_normalize_left_col(line_t *cur, int left_col)
 {
     int col = 0;
-    size_t i;
+    int i;
 
     if (!cur || left_col <= 0) {
         return 0;
     }
-    for (i = 0; i < cur->len; i++) {
-        int width = vi_char_display_width((unsigned char)cur->text[i], col);
+    for (i = 0; (size_t)i < cur->len; i = vi_next_char_index(cur, i)) {
+        int width = vi_char_display_width_at(cur, i, col);
 
         if (col + width > left_col) {
             break;
@@ -1106,13 +1247,13 @@ static int
 vi_next_left_col(line_t *cur, int left_col)
 {
     int col = 0;
-    size_t i;
+    int i;
 
     if (!cur || left_col < 0) {
         return 0;
     }
-    for (i = 0; i < cur->len; i++) {
-        int width = vi_char_display_width((unsigned char)cur->text[i], col);
+    for (i = 0; (size_t)i < cur->len; i = vi_next_char_index(cur, i)) {
+        int width = vi_char_display_width_at(cur, i, col);
 
         if (col >= left_col) {
             return col + width;
@@ -1189,19 +1330,53 @@ vi_draw_line(const char *text, int cols, int number, int line_no, int left_col)
 {
     int used = 0;
     int display_col = 0;
+    size_t idx = 0;
+    size_t len = text ? strlen(text) : 0;
 
     if (number) {
         used += printf("%7d ", line_no);
     }
-    while (*text && display_col < left_col) {
-        display_col += vi_char_display_width((unsigned char)*text, display_col);
-        text++;
-    }
-    while (*text && used < cols) {
-        unsigned char c = (unsigned char)*text++;
-        int width = vi_char_display_width(c, display_col);
+    while (idx < len && display_col < left_col) {
+        unsigned char c = (unsigned char)text[idx];
+        int width;
+        int bytes = 1;
 
-        if (c == '\t') {
+        if (c < 0x80) {
+            width = vi_char_display_width(c, display_col);
+        } else {
+            bytes = vi_utf8_decode_text_at(text, len, (int)idx, NULL);
+            if (bytes > 1) {
+                width = 1;
+            } else {
+                width = vi_char_display_width(c, display_col);
+            }
+        }
+        display_col += width;
+        idx += (size_t)bytes;
+    }
+    while (idx < len && used < cols) {
+        unsigned char c = (unsigned char)text[idx];
+        int width;
+        int bytes = 1;
+
+        if (c < 0x80) {
+            width = vi_char_display_width(c, display_col);
+        } else {
+            bytes = vi_utf8_decode_text_at(text, len, (int)idx, NULL);
+            if (bytes > 1) {
+                width = 1;
+            } else {
+                width = vi_char_display_width(c, display_col);
+            }
+        }
+
+        if (bytes > 1) {
+            if (used + width > cols) {
+                break;
+            }
+            fwrite(text + idx, 1, (size_t)bytes, stdout);
+            used += width;
+        } else if (c == '\t') {
             if (option_list) {
                 if (used + 1 >= cols) {
                     break;
@@ -1229,6 +1404,7 @@ vi_draw_line(const char *text, int cols, int number, int line_no, int left_col)
             used += 2;
         }
         display_col += width;
+        idx += (size_t)bytes;
     }
 }
 
@@ -1837,7 +2013,7 @@ vi_move_left_insert(buffer_t *b, vi_visual_t *vis)
         return;
     }
     if (vis->cursor_col > 0) {
-        vis->cursor_col--;
+        vis->cursor_col = vi_prev_char_index(cur, vis->cursor_col);
     } else if (cur->prev) {
         b->cur = cur->prev;
         vis->cursor_col = (int)b->cur->len;
@@ -1853,7 +2029,7 @@ vi_move_right_insert(buffer_t *b, vi_visual_t *vis)
         return;
     }
     if ((size_t)vis->cursor_col < cur->len) {
-        vis->cursor_col++;
+        vis->cursor_col = vi_next_char_index(cur, vis->cursor_col);
     } else if (cur->next) {
         b->cur = cur->next;
         vis->cursor_col = 0;
@@ -2036,12 +2212,44 @@ vi_last_nonblank_col(line_t *cur)
     if (!cur || cur->len == 0) {
         return 0;
     }
-    for (i = (int)cur->len - 1; i >= 0; i--) {
-        if (cur->text[i] != ' ' && cur->text[i] != '\t') {
-            return i;
+    for (i = (int)cur->len; i > 0; i = vi_prev_char_index(cur, i)) {
+        int idx = vi_prev_char_index(cur, i);
+
+        if (cur->text[idx] != ' ' && cur->text[idx] != '\t') {
+            return idx;
+        }
+        if (idx == 0) {
+            break;
         }
     }
     return 0;
+}
+
+static int
+vi_last_char_col(line_t *cur)
+{
+    if (!cur || cur->len == 0) {
+        return 0;
+    }
+    return vi_prev_char_index(cur, (int)cur->len);
+}
+
+static int
+vi_next_char_col(line_t *cur, int col)
+{
+    if (!cur) {
+        return 0;
+    }
+    return vi_next_char_index(cur, col);
+}
+
+static int
+vi_prev_char_col(line_t *cur, int col)
+{
+    if (!cur) {
+        return 0;
+    }
+    return vi_prev_char_index(cur, col);
 }
 
 static size_t
@@ -3263,9 +3471,9 @@ vi_find_char_motion(buffer_t *b, vi_visual_t *vis, int ch, int forward, int till
     }
     if (till) {
         if (forward && col > 0) {
-            col--;
+            col = vi_prev_char_col(b->cur, col);
         } else if (!forward) {
-            col++;
+            col = vi_next_char_col(b->cur, col);
         }
     }
     vis->cursor_col = col;
@@ -3435,9 +3643,9 @@ vi_match_cursor_col(line_t *line, int cursor_col)
         return -1;
     }
     if ((size_t)cursor_col >= line->len) {
-        return (int)line->len - 1;
+        return vi_last_char_col(line);
     }
-    return cursor_col;
+    return vi_normalize_char_index(line, cursor_col);
 }
 
 static int
@@ -3663,7 +3871,7 @@ vi_move_to_eol_count(buffer_t *b, vi_visual_t *vis, int count)
         vis->cursor_col = 0;
         return;
     }
-    vis->cursor_col = (b->cur->len > 0) ? (int)b->cur->len - 1 : 0;
+    vis->cursor_col = vi_last_char_col(b->cur);
 }
 
 static int
@@ -3684,7 +3892,7 @@ vi_eol_motion_target(buffer_t *b, int count, line_t **line_out, int *col_out)
         return -1;
     }
     *line_out = line;
-    *col_out = (line->len > 0) ? (int)line->len - 1 : 0;
+    *col_out = vi_last_char_col(line);
     return 0;
 }
 
@@ -6460,7 +6668,7 @@ vi_finish_repeat_insert(buffer_t *b, vi_visual_t *vis)
         vis->insert_entry_key = 0;
         vis->insert_mode = 0;
         if (vis->cursor_col > 0) {
-            vis->cursor_col--;
+            vis->cursor_col = vi_prev_char_col(b->cur, vis->cursor_col);
         }
     }
 }
@@ -7210,7 +7418,7 @@ exvi_visual_main(buffer_t *b)
                 vis.insert_entry_key = 0;
                 vi_reset_replace_mode(&vis);
                 if (vis.cursor_col > 0) {
-                    vis.cursor_col--;
+                    vis.cursor_col = vi_prev_char_col(b->cur, vis.cursor_col);
                 }
                 break;
             case 0x0f:
@@ -7299,7 +7507,7 @@ exvi_visual_main(buffer_t *b)
                 vis.insert_entry_key = 0;
                 vis.insert_mode = 0;
                 if (vis.cursor_col > 0) {
-                    vis.cursor_col--;
+                    vis.cursor_col = vi_prev_char_col(b->cur, vis.cursor_col);
                 }
                 break;
             case 0x0f:
@@ -7527,7 +7735,7 @@ process_normal_key:
                 int count = vi_take_count(&vis);
 
                 while (count-- > 0 && vis.cursor_col > 0) {
-                    vis.cursor_col--;
+                    vis.cursor_col = vi_prev_char_col(cur, vis.cursor_col);
                 }
             }
             break;
@@ -7538,7 +7746,7 @@ process_normal_key:
                 int count = vi_take_count(&vis);
 
                 while (count-- > 0 && cur && vis.cursor_col < (int)cur->len) {
-                    vis.cursor_col++;
+                    vis.cursor_col = vi_next_char_col(cur, vis.cursor_col);
                 }
             }
             break;
@@ -7853,7 +8061,7 @@ process_normal_key:
         case 'a':
             vis.pending_g = 0;
             if (cur && vis.cursor_col < (int)cur->len) {
-                vis.cursor_col++;
+                vis.cursor_col = vi_next_char_col(cur, vis.cursor_col);
             }
             save_undo(b);
             vis.screen_dirty = 0;

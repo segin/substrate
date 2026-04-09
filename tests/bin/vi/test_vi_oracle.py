@@ -95,6 +95,61 @@ def main():
             "key_steps": [b"/", b"two\r", b"r", b"Z", b"n", b"r", b"Y"],
         },
         {
+            "name": "utf8-motion-0ll",
+            "initial_text": "aéb\n",
+            "key_steps": [b"0", b"l", b"l", b"r", b"X"],
+        },
+        {
+            "name": "utf8-motion-dollar-hh",
+            "initial_text": "aéb\n",
+            "key_steps": [b"$", b"h", b"h", b"r", b"X"],
+        },
+        {
+            "name": "utf8-motion-caret-ll",
+            "initial_text": "  aéb\n",
+            "key_steps": [b"^", b"l", b"l", b"r", b"X"],
+        },
+        {
+            "name": "utf8-motion-bar",
+            "initial_text": "aéb\n",
+            "key_steps": [b"3|", b"r", b"X"],
+        },
+        {
+            "name": "utf8-motion-till-forward",
+            "initial_text": "aébc\n",
+            "key_steps": [b"0", b"t", b"b", b"i", b"X", b"\x1b"],
+        },
+        {
+            "name": "utf8-motion-till-backward",
+            "initial_text": "abécd\n",
+            "key_steps": [b"$", b"T", b"b", b"i", b"X", b"\x1b"],
+        },
+        {
+            "name": "utf8-motion-find-forward",
+            "initial_text": "aébcd\n",
+            "key_steps": [b"0", b"f", b"c", b"r", b"X"],
+        },
+        {
+            "name": "utf8-motion-find-backward",
+            "initial_text": "abécd\n",
+            "key_steps": [b"$", b"F", b"b", b"r", b"X"],
+        },
+        {
+            "name": "utf8-motion-repeat-find",
+            "initial_text": "aébcdebc\n",
+            "key_steps": [b"0", b"f", b"b", b";", b"r", b"X"],
+        },
+        {
+            "name": "utf8-motion-repeat-reverse",
+            "initial_text": "abécdbfg\n",
+            "key_steps": [b"$", b"F", b"b", b",", b"r", b"X"],
+        },
+        {
+            "name": "utf8-motion-percent",
+            "initial_text": "(é)\n",
+            "key_steps": [b"%", b"r", b"X"],
+        },
+        {
             "name": "unshift-search-forward",
             "initial_text": "\taa\n\tmatch\n\tbb\n\tmatch\n\tcc\n",
             "key_steps": [b"<", b"/", b"match\r"],
