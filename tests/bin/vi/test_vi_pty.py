@@ -1718,6 +1718,67 @@ def main():
     exit_code, decoded, saved = run_vi_session(
         vi_path,
         "alpha\nbeta\ngamma\n",
+        [b"j", b"A", b"Z", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-partial-redraw vi exited with status {exit_code}")
+    require(decoded.count("\x1b[?25l\x1b[H") == 1,
+            "insert edit triggered a full body redraw")
+    require("\x1b[2;1H\x1b[K" in decoded, "missing row-local redraw for insert edit")
+    require(saved == "alpha\nbetaZ\ngamma\n",
+            f"unexpected insert-partial-redraw buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha\nbeta\ngamma\n",
+        [b"j", b"x"],
+    )
+    require(exit_code == 0, f"delete-partial-redraw vi exited with status {exit_code}")
+    require(decoded.count("\x1b[?25l\x1b[H") == 1,
+            "delete edit triggered a full body redraw")
+    require("\x1b[2;1H\x1b[K" in decoded, "missing row-local redraw for delete edit")
+    require(saved == "alpha\neta\ngamma\n",
+            f"unexpected delete-partial-redraw buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha\nbeta\ngamma\n",
+        [b"j", b"o", b"Z", b"\x1b"],
+    )
+    require(exit_code == 0, f"open-partial-redraw vi exited with status {exit_code}")
+    require(decoded.count("\x1b[?25l\x1b[H") == 1,
+            "open-line edit triggered a full body redraw")
+    require("\x1b[3;1H\x1b[K" in decoded, "missing row-local redraw for open-line edit")
+    require(saved == "alpha\nbeta\nZ\ngamma\n",
+            f"unexpected open-partial-redraw buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha\nbeta\ngamma\n",
+        [b"J"],
+    )
+    require(exit_code == 0, f"join-partial-redraw vi exited with status {exit_code}")
+    require(decoded.count("\x1b[?25l\x1b[H") == 1,
+            "join edit triggered a full body redraw")
+    require("\x1b[1;1H\x1b[K" in decoded, "missing row-local redraw for join edit")
+    require(saved == "alpha beta\ngamma\n",
+            f"unexpected join-partial-redraw buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha\nbeta\ngamma\n",
+        [b"/", b"beta\r"],
+        final_keys=b":q\r",
+    )
+    require(exit_code == 0, f"search-partial-redraw vi exited with status {exit_code}")
+    require(decoded.count("\x1b[?25l\x1b[H") == 1,
+            "search update triggered a full body redraw")
+    require("line 2/3" in decoded, "missing status update during search motion")
+    require(saved == "alpha\nbeta\ngamma\n",
+            f"unexpected search-partial-redraw buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "alpha\nbeta\ngamma\n",
         [b"j", b"r", b"Z"],
         final_keys=b":wq\r",
     )

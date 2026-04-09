@@ -104,6 +104,8 @@ typedef struct {
     int search_history_len;
     int screen_dirty;
     int status_dirty;
+    int body_dirty_start;
+    int body_dirty_end;
     int clear_screen;
     int rendered_cur_line;
 } vi_visual_t;
@@ -164,6 +166,10 @@ static int vi_match_operator_target(buffer_t *b, vi_visual_t *vis, line_t **line
 static int vi_is_word_char(int ch);
 static int vi_apply_charwise_linewise_motion(buffer_t *b, vi_visual_t *vis,
     int current_line_no, line_t *target_line, int target_col);
+static int vi_line_number_for_line(buffer_t *b, line_t *line);
+static void vi_mark_body_dirty_lines(vi_visual_t *vis, int start_line, int end_line);
+static void vi_mark_body_dirty_through_eof(vi_visual_t *vis, int start_line);
+static void vi_mark_body_dirty_current_line(buffer_t *b, vi_visual_t *vis);
 
 static void
 vi_record_last_insert_site(buffer_t *b, vi_visual_t *vis)
@@ -976,6 +982,7 @@ vi_reindent_current_line(buffer_t *b, vi_visual_t *vis, int increase)
             }
         }
         vi_clamp_cursor(b, vis);
+        vi_mark_body_dirty_current_line(b, vis);
     }
     free(text);
 }
@@ -1298,6 +1305,36 @@ vi_render_body(buffer_t *b, vi_visual_t *vis)
 }
 
 static void
+vi_render_body_range(buffer_t *b, vi_visual_t *vis, int start_row, int end_row)
+{
+    int row;
+
+    if (start_row < 0) {
+        start_row = 0;
+    }
+    if (end_row > vis->rows - 2) {
+        end_row = vis->rows - 2;
+    }
+    if (start_row > end_row) {
+        return;
+    }
+
+    printf("\x1b[?25l");
+    for (row = start_row; row <= end_row; row++) {
+        int line_no = vis->top_line + row;
+        line_t *line = buf_get_line(b, line_no);
+
+        printf("\x1b[%d;1H\x1b[K", row + 1);
+        if (line) {
+            vi_draw_line(line->text, vis->cols, option_number, line_no,
+                vi_normalize_left_col(line, vis->left_col));
+        } else {
+            putchar('~');
+        }
+    }
+}
+
+static void
 vi_render_status(buffer_t *b, vi_visual_t *vis, int cur_line, char prompt_prefix,
     const char *prompt)
 {
@@ -1374,7 +1411,31 @@ vi_render(buffer_t *b, vi_visual_t *vis, char prompt_prefix, const char *prompt)
         }
         vi_render_body(b, vis);
         vis->screen_dirty = 0;
+        vis->body_dirty_start = 0;
+        vis->body_dirty_end = 0;
         vis->status_dirty = 1;
+    } else if (vis->body_dirty_start > 0) {
+        int visible_start = vis->top_line;
+        int visible_end = vis->top_line + vis->rows - 2;
+        int redraw_start = vis->body_dirty_start;
+        int redraw_end = vis->body_dirty_end;
+
+        if (redraw_end <= 0) {
+            redraw_end = b->line_count + vis->rows;
+        }
+        if (redraw_start < visible_start) {
+            redraw_start = visible_start;
+        }
+        if (redraw_end > visible_end) {
+            redraw_end = visible_end;
+        }
+        if (redraw_start <= redraw_end) {
+            vi_render_body_range(b, vis, redraw_start - vis->top_line,
+                redraw_end - vis->top_line);
+            vis->status_dirty = 1;
+        }
+        vis->body_dirty_start = 0;
+        vis->body_dirty_end = 0;
     }
     if (vis->status_dirty || prompt) {
         vi_render_status(b, vis, cur_line, prompt_prefix, prompt);
@@ -3706,6 +3767,7 @@ vi_delete_span(buffer_t *b, vi_visual_t *vis, int start, int end, int enter_inse
         vis->cursor_col = start;
         vis->insert_mode = enter_insert;
         vis->replace_mode = 0;
+        vi_mark_body_dirty_current_line(b, vis);
         if (enter_insert) {
             vis->insert_entry_key = 0;
             vi_record_last_insert_site(b, vis);
@@ -3722,6 +3784,7 @@ vi_delete_range(buffer_t *b, vi_visual_t *vis, line_t *start_line, int start_col
     char *text;
     size_t prefix_len;
     size_t suffix_len;
+    int start_line_no;
 
     if (!start_line || !end_line) {
         return;
@@ -3749,6 +3812,7 @@ vi_delete_range(buffer_t *b, vi_visual_t *vis, line_t *start_line, int start_col
 
     vi_yank_range(b, vis, start_line, start_col, end_line, end_col);
     save_undo(b);
+    start_line_no = vi_line_number_for_line(b, start_line);
 
     prefix_len = (size_t)start_col;
     suffix_len = end_line->len - (size_t)end_col;
@@ -3777,6 +3841,7 @@ vi_delete_range(buffer_t *b, vi_visual_t *vis, line_t *start_line, int start_col
         vis->cursor_col = start_col;
         vis->insert_mode = enter_insert;
         vis->replace_mode = 0;
+        vi_mark_body_dirty_through_eof(vis, start_line_no);
         if (enter_insert) {
             vis->insert_entry_key = 0;
             vi_record_last_insert_site(b, vis);
@@ -3790,6 +3855,7 @@ static void
 vi_put_from_register(buffer_t *b, vi_visual_t *vis, int before, int reg_idx, int count)
 {
     int line_no = buf_current_line(b);
+    int dirty_start_line;
     char regarg[2];
 
     if (count < 1) {
@@ -3798,6 +3864,7 @@ vi_put_from_register(buffer_t *b, vi_visual_t *vis, int before, int reg_idx, int
     if (line_no < 1) {
         line_no = 1;
     }
+    dirty_start_line = before ? line_no : line_no + 1;
     if (!reg_linewise[reg_idx]) {
         save_undo(b);
         while (count-- > 0) {
@@ -3836,6 +3903,7 @@ vi_put_from_register(buffer_t *b, vi_visual_t *vis, int before, int reg_idx, int
                     } else {
                         vis->cursor_col = pos;
                     }
+                    vi_mark_body_dirty_current_line(b, vis);
                 }
                 free(text);
             } else {
@@ -3885,6 +3953,7 @@ vi_put_from_register(buffer_t *b, vi_visual_t *vis, int before, int reg_idx, int
                 }
                 b->cur = dst;
                 vis->cursor_col = (src->len > 0) ? (int)src->len - 1 : 0;
+                vi_mark_body_dirty_through_eof(vis, line_no);
             }
         }
         return;
@@ -3909,6 +3978,7 @@ vi_put_from_register(buffer_t *b, vi_visual_t *vis, int before, int reg_idx, int
         }
     }
     vis->cursor_col = 0;
+    vi_mark_body_dirty_through_eof(vis, dirty_start_line);
 }
 
 static void
@@ -3942,6 +4012,7 @@ vi_linewise_delete(buffer_t *b, vi_visual_t *vis, int start, int end)
     handle_delete_command(b, 1, start, end);
     vi_ensure_visible_line(b);
     vis->cursor_col = 0;
+    vi_mark_body_dirty_through_eof(vis, start);
 }
 
 static void
@@ -3984,6 +4055,7 @@ vi_linewise_change(buffer_t *b, vi_visual_t *vis, int start, int end)
     vis->insert_mode = 1;
     vis->replace_mode = 0;
     vis->insert_entry_key = 0;
+    vi_mark_body_dirty_through_eof(vis, start);
     vi_record_last_insert_site(b, vis);
     vi_set_insert_anchor(b, vis);
 }
@@ -4020,25 +4092,72 @@ vi_substitute_line(buffer_t *b, vi_visual_t *vis, int capture_register)
     vis->insert_mode = 1;
     vis->replace_mode = 0;
     vis->insert_entry_key = 0;
+    vi_mark_body_dirty_lines(vis, line_no, line_no);
     vi_record_last_insert_site(b, vis);
     vi_set_insert_anchor(b, vis);
     free(indent);
 }
 
 static int
-vi_line_number_for_mark(buffer_t *b, line_t *mark)
+vi_line_number_for_line(buffer_t *b, line_t *line)
 {
     int line_no = 1;
     line_t *scan = b->head;
 
     while (scan) {
-        if (scan == mark) {
+        if (scan == line) {
             return line_no;
         }
         scan = scan->next;
         line_no++;
     }
     return -1;
+}
+
+static void
+vi_mark_body_dirty_lines(vi_visual_t *vis, int start_line, int end_line)
+{
+    if (start_line < 1) {
+        return;
+    }
+    if (end_line > 0 && end_line < start_line) {
+        return;
+    }
+    if (vis->body_dirty_start <= 0) {
+        vis->body_dirty_start = start_line;
+        vis->body_dirty_end = end_line;
+        return;
+    }
+    if (start_line < vis->body_dirty_start) {
+        vis->body_dirty_start = start_line;
+    }
+    if (vis->body_dirty_end == 0 || end_line == 0) {
+        vis->body_dirty_end = 0;
+    } else if (end_line > vis->body_dirty_end) {
+        vis->body_dirty_end = end_line;
+    }
+}
+
+static void
+vi_mark_body_dirty_through_eof(vi_visual_t *vis, int start_line)
+{
+    vi_mark_body_dirty_lines(vis, start_line, 0);
+}
+
+static void
+vi_mark_body_dirty_current_line(buffer_t *b, vi_visual_t *vis)
+{
+    int line_no = buf_current_line(b);
+
+    if (line_no > 0) {
+        vi_mark_body_dirty_lines(vis, line_no, line_no);
+    }
+}
+
+static int
+vi_line_number_for_mark(buffer_t *b, line_t *mark)
+{
+    return vi_line_number_for_line(b, mark);
 }
 
 static int
@@ -5770,6 +5889,7 @@ vi_insert_char(buffer_t *b, vi_visual_t *vis, int ch)
             b->trailing_newline = 1;
         }
         vis->cursor_col++;
+        vi_mark_body_dirty_current_line(b, vis);
     }
     free(text);
 }
@@ -5802,6 +5922,7 @@ vi_replace_insert_char(buffer_t *b, vi_visual_t *vis, int ch)
     if (vi_replace_current_text(b, text) == 0) {
         vi_record_replace_char(vis, cur, vis->cursor_col, replaced);
         vis->cursor_col++;
+        vi_mark_body_dirty_current_line(b, vis);
     }
     free(text);
 }
@@ -5845,6 +5966,7 @@ vi_backspace_char(buffer_t *b, vi_visual_t *vis)
     char *text;
     char *merged;
     size_t prev_len;
+    int start_line_no;
 
     if (!cur) {
         return;
@@ -5854,6 +5976,7 @@ vi_backspace_char(buffer_t *b, vi_visual_t *vis)
             return;
         }
         prev = cur->prev;
+        start_line_no = vi_line_number_for_line(b, prev);
         prev_len = prev->len;
         merged = malloc(prev->len + cur->len + 1);
         if (!merged) {
@@ -5868,6 +5991,7 @@ vi_backspace_char(buffer_t *b, vi_visual_t *vis)
         buf_delete(b, cur);
         b->cur = prev;
         vis->cursor_col = (int)prev_len;
+        vi_mark_body_dirty_through_eof(vis, start_line_no);
         if (vis->insert_anchor_line == cur) {
             vis->insert_anchor_line = prev;
             vis->insert_anchor_col += (int)prev_len;
@@ -5883,6 +6007,7 @@ vi_backspace_char(buffer_t *b, vi_visual_t *vis)
         cur->len - (size_t)vis->cursor_col + 1);
     if (vi_replace_current_text(b, text) == 0) {
         vis->cursor_col--;
+        vi_mark_body_dirty_current_line(b, vis);
     }
     free(text);
 }
@@ -5998,7 +6123,9 @@ vi_replace_char(buffer_t *b, vi_visual_t *vis, int ch)
         return;
     }
     text[vis->cursor_col] = (char)ch;
-    vi_replace_current_text(b, text);
+    if (vi_replace_current_text(b, text) == 0) {
+        vi_mark_body_dirty_current_line(b, vis);
+    }
     free(text);
 }
 
@@ -6020,7 +6147,9 @@ vi_delete_char(buffer_t *b, vi_visual_t *vis)
     memcpy(text, cur->text, (size_t)vis->cursor_col);
     memcpy(text + vis->cursor_col, cur->text + vis->cursor_col + 1,
         cur->len - (size_t)vis->cursor_col);
-    vi_replace_current_text(b, text);
+    if (vi_replace_current_text(b, text) == 0) {
+        vi_mark_body_dirty_current_line(b, vis);
+    }
     free(text);
     vi_clamp_cursor(b, vis);
 }
@@ -6043,9 +6172,11 @@ vi_delete_prev_char(buffer_t *b, vi_visual_t *vis)
     memcpy(text, cur->text, (size_t)vis->cursor_col - 1);
     memcpy(text + vis->cursor_col - 1, cur->text + vis->cursor_col,
         cur->len - (size_t)vis->cursor_col + 1);
-    vi_replace_current_text(b, text);
+    if (vi_replace_current_text(b, text) == 0) {
+        vis->cursor_col--;
+        vi_mark_body_dirty_current_line(b, vis);
+    }
     free(text);
-    vis->cursor_col--;
     vi_clamp_cursor(b, vis);
 }
 
@@ -6082,6 +6213,7 @@ vi_toggle_case(buffer_t *b, vi_visual_t *vis, int count)
             vis->cursor_col = (int)cur->len - 1;
         }
         vi_clamp_cursor(b, vis);
+        vi_mark_body_dirty_current_line(b, vis);
     }
     free(text);
 }
@@ -6096,10 +6228,12 @@ vi_split_line(buffer_t *b, vi_visual_t *vis)
     char *newline_text = NULL;
     size_t indent_len = 0;
     size_t right_len;
+    int start_line_no;
 
     if (!cur) {
         return;
     }
+    start_line_no = buf_current_line(b);
     indent = vi_autoindent_prefix(cur, &indent_len);
     if (!indent) {
         return;
@@ -6142,6 +6276,7 @@ vi_split_line(buffer_t *b, vi_visual_t *vis)
         b->trailing_newline = 0;
     }
     vis->cursor_col = (int)indent_len;
+    vi_mark_body_dirty_through_eof(vis, start_line_no);
     vi_set_insert_anchor(b, vis);
     free(indent);
     free(left);
@@ -6177,6 +6312,7 @@ vi_open_line(buffer_t *b, vi_visual_t *vis, int above)
     vis->insert_mode = 1;
     vis->replace_mode = 0;
     vis->insert_entry_key = above ? 'O' : 'o';
+    vi_mark_body_dirty_through_eof(vis, buf_current_line(b));
     vi_record_last_insert_site(b, vis);
     vi_set_insert_anchor(b, vis);
 }
@@ -6417,9 +6553,11 @@ vi_repeat_last_change(buffer_t *b, vi_visual_t *vis)
         if (b->cur && b->cur->next && last > line_no) {
             handle_join_command(b, 1, line_no, last);
             vi_clamp_cursor(b, vis);
+            vi_mark_body_dirty_through_eof(vis, line_no);
         } else if (b->cur && b->cur->next) {
             handle_join_command(b, 1, line_no, line_no + 1);
             vi_clamp_cursor(b, vis);
+            vi_mark_body_dirty_through_eof(vis, line_no);
         } else {
             write(STDOUT_FILENO, "\a", 1);
         }
@@ -7668,6 +7806,7 @@ process_normal_key:
                         vis.cursor_col = 0;
                     }
                     save_undo(b);
+                    vis.screen_dirty = 0;
                     vis.insert_mode = 1;
                     vis.replace_mode = 0;
                     vis.insert_entry_key = 0;
@@ -7680,6 +7819,7 @@ process_normal_key:
             }
             vis.pending_g = 0;
             save_undo(b);
+            vis.screen_dirty = 0;
             vis.insert_mode = 1;
             vis.insert_entry_key = 'i';
             vi_record_last_insert_site(b, &vis);
@@ -7691,6 +7831,7 @@ process_normal_key:
                 vi_take_count(&vis);
                 vis.cursor_col = 0;
                 save_undo(b);
+                vis.screen_dirty = 0;
                 vis.insert_mode = 1;
                 vis.replace_mode = 0;
                 vis.insert_entry_key = 0;
@@ -7701,6 +7842,7 @@ process_normal_key:
             vis.pending_g = 0;
             vis.cursor_col = vi_first_nonblank_col(cur);
             save_undo(b);
+            vis.screen_dirty = 0;
             vis.insert_mode = 1;
             vis.insert_entry_key = 'I';
             vi_record_last_insert_site(b, &vis);
@@ -7712,6 +7854,7 @@ process_normal_key:
                 vis.cursor_col++;
             }
             save_undo(b);
+            vis.screen_dirty = 0;
             vis.insert_mode = 1;
             vis.insert_entry_key = 'a';
             vi_record_last_insert_site(b, &vis);
@@ -7725,6 +7868,7 @@ process_normal_key:
                 vis.cursor_col = 0;
             }
             save_undo(b);
+            vis.screen_dirty = 0;
             vis.insert_mode = 1;
             vis.insert_entry_key = 'A';
             vi_record_last_insert_site(b, &vis);
@@ -7733,6 +7877,7 @@ process_normal_key:
         case 'R':
             vis.pending_g = 0;
             save_undo(b);
+            vis.screen_dirty = 0;
             vis.insert_mode = 0;
             vi_clear_replace_edits(&vis);
             vis.replace_mode = 1;
@@ -7742,14 +7887,17 @@ process_normal_key:
             break;
         case 'o':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             vi_open_line(b, &vis, 0);
             break;
         case 'O':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             vi_open_line(b, &vis, 1);
             break;
         case 'x':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             {
                 int count = vi_take_count(&vis);
 
@@ -7765,6 +7913,7 @@ process_normal_key:
             break;
         case 'X':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             {
                 int count = vi_take_count(&vis);
                 int repeat_count = count;
@@ -7798,6 +7947,7 @@ process_normal_key:
             break;
         case 's':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             if (cur && (size_t)vis.cursor_col < cur->len) {
                 vi_delete_span(b, &vis, vis.cursor_col, vis.cursor_col + 1, 1);
             } else {
@@ -7812,6 +7962,7 @@ process_normal_key:
             break;
         case 'S':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             vi_substitute_line(b, &vis, 1);
             vi_set_last_change(&vis, VI_REPEAT_S_LINE, 1, 0);
             break;
@@ -7869,6 +8020,7 @@ process_normal_key:
             break;
         case 'J':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             {
                 int count = vi_take_count(&vis);
                 int line_no = buf_current_line(b);
@@ -7877,9 +8029,11 @@ process_normal_key:
                 if (b->cur && b->cur->next && last > line_no) {
                     handle_join_command(b, 1, line_no, last);
                     vi_clamp_cursor(b, &vis);
+                    vi_mark_body_dirty_through_eof(&vis, line_no);
                 } else if (b->cur && b->cur->next) {
                     handle_join_command(b, 1, line_no, line_no + 1);
                     vi_clamp_cursor(b, &vis);
+                    vi_mark_body_dirty_through_eof(&vis, line_no);
                 } else {
                     write(STDOUT_FILENO, "\a", 1);
                 }
@@ -8130,6 +8284,7 @@ process_normal_key:
             break;
         case '.':
             vis.pending_g = 0;
+            vis.screen_dirty = 0;
             vi_repeat_last_change(b, &vis);
             break;
         default:
