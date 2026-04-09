@@ -348,7 +348,7 @@ Current locale fallback policy:
 - `C`, `POSIX`, and non-UTF-8 locale environments are explicitly supported through that shared byte fallback while the UTF-8-specific work below remains open.
 
 - [x] Add host-side fixtures for UTF-8 cursor motions over multibyte code points, covering `h/l`, `0/^/$`, `f/F/t/T`, `;`, `,`, `|`, `%`, and visual column tracking.
-- [ ] Add host-side fixtures for word/bigword/sentence/paragraph motions over multibyte text, including mixed ASCII and non-ASCII word boundaries.
+- [x] Add host-side fixtures for word/bigword/sentence/paragraph motions over multibyte text, including mixed ASCII and non-ASCII word boundaries.
 - [ ] Add renderer fixtures for tabs, double-width characters, combining marks, zero-width code points, and invalid byte sequences, with explicit expected display columns.
 - [x] Define the supported locale fallback policy (`C`/`POSIX` and non-UTF-8 locales), implement it in the frontend, and add host tests for that policy.
 - [ ] Add PTY coverage for long mixed-width UTF-8 lines, combining-mark edits, invalid byte sequences, and narrow-terminal redraw behavior under those inputs.

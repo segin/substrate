@@ -150,6 +150,56 @@ def main():
             "key_steps": [b"%", b"r", b"X"],
         },
         {
+            "name": "utf8-word-motion-w",
+            "initial_text": "aé bc\n",
+            "key_steps": [b"0", b"w", b"r", b"X"],
+        },
+        {
+            "name": "utf8-word-motion-b",
+            "initial_text": "a bcé\n",
+            "key_steps": [b"$", b"b", b"r", b"X"],
+        },
+        {
+            "name": "utf8-word-motion-e",
+            "initial_text": "aébc de\n",
+            "key_steps": [b"0", b"e", b"r", b"X"],
+        },
+        {
+            "name": "utf8-word-motion-ge",
+            "initial_text": "ab cé\n",
+            "key_steps": [b"$", b"g", b"e", b"i", b"X", b"\x1b"],
+        },
+        {
+            "name": "utf8-bigword-motion-W",
+            "initial_text": "aé bc\n",
+            "key_steps": [b"0", b"W", b"r", b"X"],
+        },
+        {
+            "name": "utf8-bigword-motion-B",
+            "initial_text": "a bcé\n",
+            "key_steps": [b"$", b"B", b"r", b"X"],
+        },
+        {
+            "name": "utf8-bigword-motion-E",
+            "initial_text": "aébc de\n",
+            "key_steps": [b"0", b"E", b"r", b"X"],
+        },
+        {
+            "name": "utf8-bigword-motion-gE",
+            "initial_text": "ab cé\n",
+            "key_steps": [b"$", b"g", b"E", b"i", b"X", b"\x1b"],
+        },
+        {
+            "name": "utf8-sentence-motion",
+            "initial_text": "Hi é. Bye.\n",
+            "key_steps": [b"0", b")", b"r", b"X"],
+        },
+        {
+            "name": "utf8-paragraph-motion",
+            "initial_text": "aa\n\néé\n\nbb\n",
+            "key_steps": [b"0", b"}", b"r", b"X"],
+        },
+        {
             "name": "unshift-search-forward",
             "initial_text": "\taa\n\tmatch\n\tbb\n\tmatch\n\tcc\n",
             "key_steps": [b"<", b"/", b"match\r"],

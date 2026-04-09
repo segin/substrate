@@ -2838,7 +2838,7 @@ vi_move_sentence_backward(buffer_t *b, vi_visual_t *vis, int count)
 static int
 vi_is_word_char(int ch)
 {
-    return isalnum((unsigned char)ch) || ch == '_';
+    return isalnum((unsigned char)ch) || ch == '_' || (unsigned char)ch >= 0x80;
 }
 
 static int

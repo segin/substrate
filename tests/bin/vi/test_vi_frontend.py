@@ -254,6 +254,26 @@ def main():
         require(exit_code == 0, f"{name} vi exited with status {exit_code}")
         require(saved == expected, f"{name} buffer mismatch: {saved!r}")
 
+    for name, initial_text, key_steps, expected in (
+        ("utf8-word-motion-w", "aé bc\n", [b"0", b"w", b"r", b"X"], "aé Xc\n"),
+        ("utf8-word-motion-b", "a bcé\n", [b"$", b"b", b"r", b"X"], "a Xcé\n"),
+        ("utf8-word-motion-e", "aébc de\n", [b"0", b"e", b"r", b"X"], "aébX de\n"),
+        ("utf8-word-motion-ge", "ab cé\n",
+            [b"$", b"g", b"e", b"i", b"X", b"\x1b"], "aXb cé\n"),
+        ("utf8-bigword-motion-W", "aé bc\n", [b"0", b"W", b"r", b"X"], "aé Xc\n"),
+        ("utf8-bigword-motion-B", "a bcé\n", [b"$", b"B", b"r", b"X"], "a Xcé\n"),
+        ("utf8-bigword-motion-E", "aébc de\n", [b"0", b"E", b"r", b"X"], "aébX de\n"),
+        ("utf8-bigword-motion-gE", "ab cé\n",
+            [b"$", b"g", b"E", b"i", b"X", b"\x1b"], "aXb cé\n"),
+        ("utf8-sentence-motion", "Hi é. Bye.\n",
+            [b"0", b")", b"r", b"X"], "Hi é. Xye.\n"),
+        ("utf8-paragraph-motion", "aa\n\néé\n\nbb\n",
+            [b"0", b"}", b"r", b"X"], "aa\n\néé\n\nbb\n"),
+    ):
+        exit_code, decoded, saved = helpers.run_vi_session(vi_path, initial_text, key_steps)
+        require(exit_code == 0, f"{name} vi exited with status {exit_code}")
+        require(saved == expected, f"{name} buffer mismatch: {saved!r}")
+
     exit_code, decoded, saved = helpers.run_vi_session(
         vi_path,
         "",
