@@ -1673,6 +1673,51 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "abc\n",
+        [b"i", b"X", b"Y", b"\x1b", b"u"],
+    )
+    require(exit_code == 0, f"insert-undo-boundary vi exited with status {exit_code}")
+    require(saved == "abc\n",
+            f"unexpected insert-undo-boundary buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "abc\n",
+        [b"R", b"X", b"Y", b"\x1b", b"u"],
+    )
+    require(exit_code == 0, f"replace-undo-boundary vi exited with status {exit_code}")
+    require(saved == "abc\n",
+            f"unexpected replace-undo-boundary buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\n",
+        [b"o", b"A", b"B", b"\x1b", b"u"],
+    )
+    require(exit_code == 0, f"open-undo-boundary vi exited with status {exit_code}")
+    require(saved == "one\n",
+            f"unexpected open-undo-boundary buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one two\nthree four\n",
+        [b"c", b"w", b"X", b"\x1b", b"j", b".", b"u"],
+    )
+    require(exit_code == 0, f"dot-undo-boundary vi exited with status {exit_code}")
+    require(saved == "X two\nthree four\n",
+            f"unexpected dot-undo-boundary buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "one\ntwo\n",
+        [b":", b"1", b",", b"2", b"s", b"/o/O/g\r", b"u"],
+    )
+    require(exit_code == 0, f"ex-undo-boundary vi exited with status {exit_code}")
+    require(saved == "one\ntwo\n",
+            f"unexpected ex-undo-boundary buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "alpha beta gamma\n",
         [b"d", ("winsize", 8, 28, 0.5), b"w"],
         rows=8,

@@ -366,6 +366,30 @@ test_multi_undo_stack(void)
 }
 
 static void
+test_ex_command_undo_boundary(void)
+{
+    static const char *lines[] = {"one", "two", "three"};
+    buffer_t b;
+
+    reset_shared_state();
+    fill_buffer(&b, lines, 3);
+    b.cur = buf_get_line(&b, 1);
+
+    assert(handle_substitute_command(&b, "/o/O/g", 1, 2) == 1);
+    assert(strcmp(buf_get_line(&b, 1)->text, "One") == 0);
+    assert(strcmp(buf_get_line(&b, 2)->text, "twO") == 0);
+    assert(strcmp(buf_get_line(&b, 3)->text, "three") == 0);
+
+    assert(handle_undo_command(&b) == 1);
+    assert(strcmp(buf_get_line(&b, 1)->text, "one") == 0);
+    assert(strcmp(buf_get_line(&b, 2)->text, "two") == 0);
+    assert(strcmp(buf_get_line(&b, 3)->text, "three") == 0);
+
+    free_buffer(&b);
+    cleanup_shared_state();
+}
+
+static void
 test_filename_refs_and_write_permissions(void)
 {
     buffer_t b;
@@ -620,6 +644,7 @@ main(void)
     test_bad_mark_preserves_current_line();
     test_substitute_and_undo();
     test_multi_undo_stack();
+    test_ex_command_undo_boundary();
     test_filename_refs_and_write_permissions();
     test_recover_roundtrip_preserves_missing_newline();
     test_substitute_repeat_behavior();

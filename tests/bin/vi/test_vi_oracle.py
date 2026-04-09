@@ -1626,6 +1626,31 @@ def main():
             "key_steps": [b"c", b"w", b"X", b"\x1b", b"0", b"w", b"c", b"w",
                 b"Y", b"\x1b", b"u", b"u"],
         },
+        {
+            "name": "undo-boundary-insert-session",
+            "initial_text": "abc\n",
+            "key_steps": [b"i", b"X", b"Y", b"\x1b", b"u"],
+        },
+        {
+            "name": "undo-boundary-replace-session",
+            "initial_text": "abc\n",
+            "key_steps": [b"R", b"X", b"Y", b"\x1b", b"u"],
+        },
+        {
+            "name": "undo-boundary-open-line",
+            "initial_text": "one\n",
+            "key_steps": [b"o", b"A", b"B", b"\x1b", b"u"],
+        },
+        {
+            "name": "undo-boundary-dot-replay",
+            "initial_text": "one two\nthree four\n",
+            "key_steps": [b"c", b"w", b"X", b"\x1b", b"j", b".", b"u"],
+        },
+        {
+            "name": "undo-boundary-ex-command",
+            "initial_text": "one\ntwo\n",
+            "key_steps": [b":", b"1", b",", b"2", b"s", b"/o/O/g\r", b"u"],
+        },
     ]
 
     for case in cases:
