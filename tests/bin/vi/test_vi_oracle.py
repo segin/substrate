@@ -856,6 +856,56 @@ def main():
             "key_steps": [b"<", b"+"],
         },
         {
+            "name": "shift-e",
+            "initial_text": "one two\nthree four\n",
+            "key_steps": [b">", b"e"],
+        },
+        {
+            "name": "unshift-w",
+            "initial_text": "\tone two\n\tthree four\n",
+            "key_steps": [b"<", b"w"],
+        },
+        {
+            "name": "unshift-W",
+            "initial_text": "\tone,two\n\tthree four\n",
+            "key_steps": [b"<", b"W"],
+        },
+        {
+            "name": "unshift-e",
+            "initial_text": "\tone two\n\tthree four\n",
+            "key_steps": [b"<", b"e"],
+        },
+        {
+            "name": "unshift-E",
+            "initial_text": "\tone,two\n\tthree four\n",
+            "key_steps": [b"<", b"E"],
+        },
+        {
+            "name": "shift-b",
+            "initial_text": "one two\nthree four\n",
+            "key_steps": [b"G", b">", b"b"],
+        },
+        {
+            "name": "shift-B",
+            "initial_text": "one,two\nthree,four\n",
+            "key_steps": [b"G", b">", b"B"],
+        },
+        {
+            "name": "shift-ge",
+            "initial_text": "one two\nthree four\n",
+            "key_steps": [b"G", b">", b"g", b"e"],
+        },
+        {
+            "name": "shift-gE",
+            "initial_text": "one,two\nthree,four\n",
+            "key_steps": [b"G", b">", b"g", b"E"],
+        },
+        {
+            "name": "unshift-ge",
+            "initial_text": "\tone two\n\tthree four\n",
+            "key_steps": [b"G", b"<", b"g", b"e"],
+        },
+        {
             "name": "delete-word-forward",
             "initial_text": "one two three\n",
             "key_steps": [b"d", b"w"],
@@ -876,6 +926,11 @@ def main():
             "key_steps": [b"d", b"e"],
         },
         {
+            "name": "change-word-end",
+            "initial_text": "one two three\n",
+            "key_steps": [b"c", b"e", b"X", b"\x1b"],
+        },
+        {
             "name": "yank-word-end",
             "initial_text": "one two three\n",
             "key_steps": [b"y", b"e", b"P"],
@@ -889,6 +944,11 @@ def main():
             "name": "yank-bigword-end",
             "initial_text": "one,two   three\n",
             "key_steps": [b"y", b"E", b"P"],
+        },
+        {
+            "name": "change-bigword-end",
+            "initial_text": "one,two   three\n",
+            "key_steps": [b"c", b"E", b"X", b"\x1b"],
         },
         {
             "name": "word-search-repeat-change",

@@ -160,6 +160,8 @@ static int vi_find_scanned_cross_bracket_span(line_t *line, int cursor_col,
 static int vi_match_operator_target(buffer_t *b, vi_visual_t *vis, line_t **line_out,
     int *col_out);
 static int vi_is_word_char(int ch);
+static int vi_apply_charwise_linewise_motion(buffer_t *b, vi_visual_t *vis,
+    int current_line_no, line_t *target_line, int target_col);
 
 static void
 vi_record_last_insert_site(buffer_t *b, vi_visual_t *vis)
@@ -4116,6 +4118,29 @@ vi_apply_backward_start_motion(buffer_t *b, vi_visual_t *vis, line_t *target_lin
 }
 
 static int
+vi_apply_backward_start_linewise_motion(buffer_t *b, vi_visual_t *vis, int current_line_no,
+    line_t *target_line, int target_col)
+{
+    int target_line_no;
+
+    if (!target_line) {
+        return -1;
+    }
+    target_line_no = vi_line_number_for_mark(b, target_line);
+    if (target_line_no < 1) {
+        return -1;
+    }
+    if (target_line == b->cur) {
+        return vi_apply_linewise_operator(b, vis, current_line_no, current_line_no);
+    }
+    if (vis->cursor_col == 0 && target_line_no < current_line_no) {
+        return vi_apply_linewise_operator(b, vis, target_line_no, current_line_no - 1);
+    }
+    return vi_apply_charwise_linewise_motion(b, vis, current_line_no, target_line,
+        target_col);
+}
+
+static int
 vi_apply_search_charwise_motion(buffer_t *b, vi_visual_t *vis, line_t *target_line,
     int target_col)
 {
@@ -4941,7 +4966,7 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
 
         if (vi_simulate_motion_target(b, vis, vi_move_word_backward_count, count,
             &target_line, &target_col) != 0 ||
-            vi_apply_charwise_linewise_motion(b, vis, line_no, target_line,
+            vi_apply_backward_start_linewise_motion(b, vis, line_no, target_line,
                 target_col) != 0) {
             write(STDOUT_FILENO, "\a", 1);
         }
@@ -4964,7 +4989,7 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
 
         if (vi_simulate_motion_target(b, vis, vi_move_bigword_backward_count, count,
             &target_line, &target_col) != 0 ||
-            vi_apply_charwise_linewise_motion(b, vis, line_no, target_line,
+            vi_apply_backward_start_linewise_motion(b, vis, line_no, target_line,
                 target_col) != 0) {
             write(STDOUT_FILENO, "\a", 1);
         }
