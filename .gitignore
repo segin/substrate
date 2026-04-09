@@ -13,6 +13,7 @@
 *.out
 *.profdata
 *.profraw
+**/*.pyc
 *.so
 *.su
 *.tmp
