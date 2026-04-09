@@ -211,6 +211,26 @@ def main():
     require("[Readonly]" in decoded, "view vi missing readonly status")
     require(saved == "one\n", f"view vi unexpectedly modified file: {saved!r}")
 
+    env_path = shutil.which("env") or "/usr/bin/env"
+    for label, locale_args in (
+        ("c", ["LC_ALL=C", "LC_CTYPE=C", "LANG=C"]),
+        ("posix", ["LC_ALL=POSIX", "LC_CTYPE=POSIX", "LANG=POSIX"]),
+        ("latin1", ["LC_ALL=en_US.ISO-8859-1", "LC_CTYPE=en_US.ISO-8859-1",
+            "LANG=en_US.ISO-8859-1"]),
+    ):
+        exit_code, decoded, saved = helpers.run_vi_session(
+            env_path,
+            "one\ntwo\n",
+            [b"/", b"two\r", b"A", b"Z", b"\x1b"],
+            extra_args=locale_args + [vi_path],
+            argv0="env",
+        )
+        require(exit_code == 0, f"locale-fallback-{label} vi exited with status {exit_code}")
+        require("line 2/2" in decoded,
+                f"locale-fallback-{label} missing search status under fallback locale")
+        require(saved == "one\ntwoZ\n",
+                f"locale-fallback-{label} buffer mismatch: {saved!r}")
+
     exit_code, decoded, saved = helpers.run_vi_session(
         vi_path,
         "",

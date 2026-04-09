@@ -340,10 +340,15 @@ Unsupported or intentionally out-of-scope normal-mode motion keys are not implie
 
 ### 6. Multibyte, locale, and display-width correctness
 
+Current locale fallback policy:
+- The editor currently runs its character classification and display logic in the byte-oriented `C` locale, even when the host environment advertises some other locale.
+- `LC_ALL`, `LC_CTYPE`, and `LANG` therefore do not yet enable locale-specific multibyte or width semantics in either frontend.
+- `C`, `POSIX`, and non-UTF-8 locale environments are explicitly supported through that shared byte fallback while the UTF-8-specific work below remains open.
+
 - [ ] Add host-side fixtures for UTF-8 cursor motions over multibyte code points, covering `h/l`, `0/^/$`, `f/F/t/T`, `;`, `,`, `|`, `%`, and visual column tracking.
 - [ ] Add host-side fixtures for word/bigword/sentence/paragraph motions over multibyte text, including mixed ASCII and non-ASCII word boundaries.
 - [ ] Add renderer fixtures for tabs, double-width characters, combining marks, zero-width code points, and invalid byte sequences, with explicit expected display columns.
-- [ ] Define the supported locale fallback policy (`C`/`POSIX` and non-UTF-8 locales), implement it in the frontend, and add host tests for that policy.
+- [x] Define the supported locale fallback policy (`C`/`POSIX` and non-UTF-8 locales), implement it in the frontend, and add host tests for that policy.
 - [ ] Add PTY coverage for long mixed-width UTF-8 lines, combining-mark edits, invalid byte sequences, and narrow-terminal redraw behavior under those inputs.
 
 ### 7. Testing backlog

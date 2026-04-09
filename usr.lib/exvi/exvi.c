@@ -6,6 +6,7 @@
 #include <string.h>
 #include <regex.h>
 #include <ctype.h>
+#include <locale.h>
 #include <unistd.h>
 #include <getopt.h>
 #include <sys/stat.h>
@@ -542,6 +543,13 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
     }
 
     buffer_t buf;
+
+    /*
+     * Until the section-6 multibyte work lands, keep editor classification
+     * and rendering in the byte-oriented C locale regardless of host env.
+     */
+    (void)setlocale(LC_CTYPE, "C");
+
     buf_init(&buf);
     undo_valid = 0;
     buf_init(&undo_buf);
