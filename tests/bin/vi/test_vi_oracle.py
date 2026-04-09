@@ -74,7 +74,7 @@ def compare_case(helpers, vi_path, vim_path, name, initial_text, key_steps, rows
     require(vim_exit == 0, f"{name}: vim exited with status {vim_exit}")
     require(vi_saved == vim_saved,
             f"{name}: vi {vi_saved!r} != vim {vim_saved!r}")
-    print(f"PASS: {name}")
+    print(f"PASS: {name}", flush=True)
 
 
 def parse_args(argv):
