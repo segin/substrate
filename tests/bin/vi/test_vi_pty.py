@@ -5702,6 +5702,59 @@ def main():
     require(exit_code == 0, f"counted-section-yank vi exited with status {exit_code}")
     require(saved == "one two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\none two three four five six\n\nalpha beta gamma delta\n\nsec\n{\nbody\n}\n",
             f"unexpected counted-section-yank buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "aa漢bb\ta\u0301c\u200bddeeffgghh\n",
+        [b"20|", b"i", b"X", b"\x1b"],
+        rows=6,
+        cols=12,
+    )
+    require(exit_code == 0, f"utf8-narrow-mixed-line vi exited with status {exit_code}")
+    require(decoded.count("\x1b[?25l\x1b[H") >= 2,
+            "utf8-narrow-mixed-line did not trigger expected narrow redraws")
+    require("\x1b[6;1H\x1b[K" in decoded,
+            "utf8-narrow-mixed-line missing status redraw")
+    require("line 1/1" in decoded, "utf8-narrow-mixed-line missing status text")
+    require(saved == "aa漢bb\ta\u0301c\u200bddeeffgXghh\n",
+            f"unexpected utf8-narrow-mixed-line buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "pre a\u0301b post\n",
+        [b"6|", b"i", b"X", b"\x1b"],
+        rows=6,
+        cols=10,
+    )
+    require(exit_code == 0, f"utf8-combining-narrow-edit vi exited with status {exit_code}")
+    require(decoded.count("\x1b[?25l\x1b[H") == 1,
+            "utf8-combining-narrow-edit unexpectedly forced a full redraw")
+    require("\x1b[1;1H\x1b[K" in decoded,
+            "utf8-combining-narrow-edit missing row redraw")
+    require("\x1b[6;1H\x1b[K" in decoded,
+            "utf8-combining-narrow-edit missing status redraw")
+    require(saved == "pre aX\u0301b post\n",
+            f"unexpected utf8-combining-narrow-edit buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "",
+        [b"4|", b"i", b"X", b"\x1b"],
+        rows=6,
+        cols=10,
+        initial_bytes=b"aa\xffbbccddeeff\n",
+        return_saved_bytes=True,
+    )
+    require(exit_code == 0, f"utf8-invalid-byte-narrow-edit vi exited with status {exit_code}")
+    require(decoded.count("\x1b[?25l\x1b[H") == 1,
+            "utf8-invalid-byte-narrow-edit unexpectedly forced a full redraw")
+    require("\x1b[1;1H\x1b[K" in decoded,
+            "utf8-invalid-byte-narrow-edit missing row redraw")
+    require("\x1b[6;1H\x1b[K" in decoded,
+            "utf8-invalid-byte-narrow-edit missing status redraw")
+    require(saved == b"aaX\xffbbccddeeff\n",
+            f"unexpected utf8-invalid-byte-narrow-edit buffer: {saved!r}")
+
     print("vi pty test: ok")
     return 0
 
