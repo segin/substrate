@@ -356,7 +356,20 @@ Current locale fallback policy:
 ### 7. Testing backlog
 
 - [x] Expand [`tests/usr.lib/exvi/test_main.c`](../../tests/usr.lib/exvi/test_main.c) well beyond the current parser/set/delete/yank basics.
-- [ ] Build an `ex` command/feature coverage matrix from sections 2, 4, and 5, and add at least one direct success regression plus one direct failure/diagnostic regression for every supported command family still missing from `tests/bin/ex/test_ex.sh`.
+- [x] Build an `ex` command/feature coverage matrix from sections 2, 4, and 5, and add at least one direct success regression plus one direct failure/diagnostic regression for every supported command family still missing from `tests/bin/ex/test_ex.sh`.
+  Current `ex` coverage matrix:
+
+| Command family | Primary direct coverage | Notes |
+| --- | --- | --- |
+| visual handoff | [`tests/bin/ex/test_ex_frontend.py`](../../tests/bin/ex/test_ex_frontend.py) | frontend-only; `visual`/`vi` require a terminal, so batch `test_ex.sh` intentionally does not claim the success path |
+| version | [`tests/bin/ex/test_ex.sh`](../../tests/bin/ex/test_ex.sh), [`tests/bin/ex/test_ex_frontend.py`](../../tests/bin/ex/test_ex_frontend.py) | direct batch success for `:version`; CLI rejection for unsupported `--version` stays in frontend coverage |
+| argument list | [`tests/bin/ex/test_ex.sh`](../../tests/bin/ex/test_ex.sh), [`tests/bin/ex/test_ex_frontend.py`](../../tests/bin/ex/test_ex_frontend.py) | `args`, `next`, `prev`, `rewind`, replacement arglists, and restricted-mode diagnostics covered |
+| recovery/session | [`tests/bin/ex/test_ex.sh`](../../tests/bin/ex/test_ex.sh), [`tests/bin/ex/test_ex_frontend.py`](../../tests/bin/ex/test_ex_frontend.py) | `preserve`, direct `recover %`, `-r`, recover lifecycle, and tag-stack `pop` coverage present |
+| tags/options | [`tests/bin/ex/test_ex.sh`](../../tests/bin/ex/test_ex.sh), [`tests/bin/ex/test_ex_frontend.py`](../../tests/bin/ex/test_ex_frontend.py) | `tag`, `tags`, `set`, `readonly`, startup `-t`, and option diagnostics covered |
+| file lifecycle | [`tests/bin/ex/test_ex.sh`](../../tests/bin/ex/test_ex.sh), [`tests/bin/ex/test_ex_frontend.py`](../../tests/bin/ex/test_ex_frontend.py) | `quit`, `wq`, `write`, `edit`, `read`, alternate/current filename expansion, readonly/restricted paths covered |
+| line/buffer ops | [`tests/bin/ex/test_ex.sh`](../../tests/bin/ex/test_ex.sh), [`tests/usr.lib/exvi/test_main.c`](../../tests/usr.lib/exvi/test_main.c) | direct `delete`, `undo`, `put`, `print`, `number`, `list`, `=`, `mark`, `file`, `append`, `insert`, `change` coverage present |
+| movement/copy ops | [`tests/bin/ex/test_ex.sh`](../../tests/bin/ex/test_ex.sh) | direct `copy`, `move`, `join`, and `yank` success/error coverage present |
+| regex/edit ops | [`tests/bin/ex/test_ex.sh`](../../tests/bin/ex/test_ex.sh), [`tests/bin/ex/test_ex_frontend.py`](../../tests/bin/ex/test_ex_frontend.py) | `substitute`, `&`, `global`, `v`, and shell-command restrictions covered |
 - [ ] Build a `vi` PTY coverage matrix from sections 3, 4, and 5, and add at least one direct PTY oracle for every supported motion, operator family, prompt path, resize path, and insert/replace control path not yet represented.
 - [x] Add fuzzing or property-based coverage for command parsing, escape-sequence parsing, and recovery-file handling.
 - [x] Add stress tests for large files, long lines, narrow terminals, repeated resizes, and deep undo/redo histories.
