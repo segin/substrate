@@ -3089,6 +3089,55 @@ def main():
     require(saved == "head\n{\na\n}\nmid\n{\nb\nX\ntail\n",
             f"unexpected section-change-backward buffer: {saved!r}")
 
+    section_operator_cases = [
+        ("delete-section-start-forward", "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+         [b"d", b"]", b"]"], "{\ntwo\n}\nthree\n{\nfour\n}\n", 0),
+        ("change-section-start-forward", "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+         [b"c", b"]", b"]", b"X", b"\x1b"], "X\n{\ntwo\n}\nthree\n{\nfour\n}\n", 1),
+        ("yank-section-start-forward", "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+         [b"y", b"]", b"]", b"P"], "one\none\n{\ntwo\n}\nthree\n{\nfour\n}\n", 0),
+        ("shift-section-start-forward", "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+         [b">", b"]", b"]"], "\tone\n{\ntwo\n}\nthree\n{\nfour\n}\n", 0),
+        ("unshift-section-start-forward", "\tone\n\t{\n\ttwo\n\t}\n\tthree\n\t{\n\tfour\n\t}\n",
+         [b"<", b"]", b"]"], "one\n{\ntwo\n}\nthree\n{\nfour\n}\n", 0),
+        ("delete-section-start-backward", "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+         [b"G", b"d", b"[", b"["], "one\n{\ntwo\n}\nthree\n}\n", 0),
+        ("change-section-start-backward", "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+         [b"G", b"c", b"[", b"[", b"X", b"\x1b"], "one\n{\ntwo\n}\nthree\nX\n}\n", 1),
+        ("yank-section-start-backward", "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+         [b"G", b"y", b"[", b"[", b"P"], "one\n{\ntwo\n}\nthree\n{\nfour\n{\nfour\n}\n", 0),
+        ("shift-section-start-backward", "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+         [b"G", b">", b"[", b"["], "one\n{\ntwo\n}\nthree\n\t{\n\tfour\n}\n", 0),
+        ("unshift-section-start-backward", "\tone\n\t{\n\ttwo\n\t}\n\tthree\n\t{\n\tfour\n\t}\n",
+         [b"G", b"<", b"[", b"["], "one\n{\ntwo\n}\nthree\n{\nfour\n}\n", 0),
+        ("delete-section-end-forward", "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+         [b"d", b"]", b"["], "}\nthree\n{\nfour\n}\n", 0),
+        ("change-section-end-forward", "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+         [b"c", b"]", b"[", b"X", b"\x1b"], "X\n}\nthree\n{\nfour\n}\n", 1),
+        ("yank-section-end-forward", "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+         [b"y", b"]", b"[", b"P"], "one\n{\ntwo\none\n{\ntwo\n}\nthree\n{\nfour\n}\n", 0),
+        ("shift-section-end-forward", "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+         [b">", b"]", b"["], "\tone\n\t{\n\ttwo\n}\nthree\n{\nfour\n}\n", 0),
+        ("unshift-section-end-forward", "\tone\n\t{\n\ttwo\n\t}\n\tthree\n\t{\n\tfour\n\t}\n",
+         [b"<", b"]", b"["], "one\n{\ntwo\n}\nthree\n{\nfour\n\t}\n", 0),
+        ("delete-section-end-backward", "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+         [b"G", b"d", b"[", b"]"], "one\n{\ntwo\n}\n", 0),
+        ("change-section-end-backward", "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+         [b"G", b"c", b"[", b"]", b"X", b"\x1b"], "one\n{\ntwo\nX\n}\n", 1),
+        ("yank-section-end-backward", "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+         [b"G", b"y", b"[", b"]", b"P"], "one\n{\ntwo\n}\nthree\n{\nfour\n}\nthree\n{\nfour\n}\n", 0),
+        ("shift-section-end-backward", "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+         [b"G", b">", b"[", b"]"], "one\n{\ntwo\n\t}\n\tthree\n\t{\n\tfour\n}\n", 0),
+        ("unshift-section-end-backward", "\tone\n\t{\n\ttwo\n\t}\n\tthree\n\t{\n\tfour\n\t}\n",
+         [b"G", b"<", b"[", b"]"], "one\n{\ntwo\n}\nthree\n{\nfour\n}\n", 0),
+    ]
+    for name, initial_text, keys, expected, want_insert in section_operator_cases:
+        exit_code, decoded, saved = run_vi_session(vi_path, initial_text, keys)
+        require(exit_code == 0, f"{name} vi exited with status {exit_code}")
+        if want_insert:
+            require("-- INSERT --" in decoded, f"missing {name} insert status")
+        require(saved == expected, f"unexpected {name} buffer: {saved!r}")
+
     exit_code, decoded, saved = run_vi_session(
         vi_path,
         "Alpha one.  Beta two!\nGamma three?  Delta four.\n",

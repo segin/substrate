@@ -256,6 +256,106 @@ def main():
             "key_steps": [b"G", b"2", b"[", b"]", b"r", b"X"],
         },
         {
+            "name": "delete-section-start-forward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"d", b"]", b"]"],
+        },
+        {
+            "name": "change-section-start-forward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"c", b"]", b"]", b"X", b"\x1b"],
+        },
+        {
+            "name": "yank-section-start-forward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"y", b"]", b"]", b"P"],
+        },
+        {
+            "name": "shift-section-start-forward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b">", b"]", b"]"],
+        },
+        {
+            "name": "unshift-section-start-forward",
+            "initial_text": "\tone\n\t{\n\ttwo\n\t}\n\tthree\n\t{\n\tfour\n\t}\n",
+            "key_steps": [b"<", b"]", b"]"],
+        },
+        {
+            "name": "delete-section-start-backward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"G", b"d", b"[", b"["],
+        },
+        {
+            "name": "change-section-start-backward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"G", b"c", b"[", b"[", b"X", b"\x1b"],
+        },
+        {
+            "name": "yank-section-start-backward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"G", b"y", b"[", b"[", b"P"],
+        },
+        {
+            "name": "shift-section-start-backward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"G", b">", b"[", b"["],
+        },
+        {
+            "name": "unshift-section-start-backward",
+            "initial_text": "\tone\n\t{\n\ttwo\n\t}\n\tthree\n\t{\n\tfour\n\t}\n",
+            "key_steps": [b"G", b"<", b"[", b"["],
+        },
+        {
+            "name": "delete-section-end-forward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"d", b"]", b"["],
+        },
+        {
+            "name": "change-section-end-forward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"c", b"]", b"[", b"X", b"\x1b"],
+        },
+        {
+            "name": "yank-section-end-forward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"y", b"]", b"[", b"P"],
+        },
+        {
+            "name": "shift-section-end-forward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b">", b"]", b"["],
+        },
+        {
+            "name": "unshift-section-end-forward",
+            "initial_text": "\tone\n\t{\n\ttwo\n\t}\n\tthree\n\t{\n\tfour\n\t}\n",
+            "key_steps": [b"<", b"]", b"["],
+        },
+        {
+            "name": "delete-section-end-backward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"G", b"d", b"[", b"]"],
+        },
+        {
+            "name": "change-section-end-backward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"G", b"c", b"[", b"]", b"X", b"\x1b"],
+        },
+        {
+            "name": "yank-section-end-backward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"G", b"y", b"[", b"]", b"P"],
+        },
+        {
+            "name": "shift-section-end-backward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"G", b">", b"[", b"]"],
+        },
+        {
+            "name": "unshift-section-end-backward",
+            "initial_text": "\tone\n\t{\n\ttwo\n\t}\n\tthree\n\t{\n\tfour\n\t}\n",
+            "key_steps": [b"G", b"<", b"[", b"]"],
+        },
+        {
             "name": "counted-search-repeat-n-motion",
             "initial_text": "target one\ntarget two\ntarget three\ntarget four\n",
             "key_steps": [b"/", b"target\r", b"2", b"n", b"r", b"X"],

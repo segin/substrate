@@ -263,7 +263,7 @@ Unsupported or intentionally out-of-scope normal-mode motion keys are not implie
   - [x] Explicitly document that `Ctrl-D`, `Ctrl-U`, `Ctrl-E`, and `Ctrl-Y` remain supported as standalone/countable scrolling motions only, not operator-pending targets, and add regressions showing prefixed `d/c/y/>/<` does not create a hidden edit path.
   - [x] Lock down direct PTY coverage for word and bigword motions (`w`, `W`, `e`, `E`, `b`, `B`, `ge`, `gE`) across supported operator families.
   - [x] Lock down direct PTY coverage for sentence and paragraph motions (`(`, `)`, `{`, `}`) across supported operator families, including blank-separator and EOF cases.
-  - [ ] Lock down direct PTY coverage for section/structure motions (`[[`, `]]`, `[]`, `][`) across supported operator families.
+  - [x] Lock down direct PTY coverage for section/structure motions (`[[`, `]]`, `[]`, `][`) across supported operator families.
   - [ ] Lock down direct PTY coverage for search/repeat-search motions (`/`, `?`, `n`, `N`, `*`, `#`) across supported operator families.
   - [ ] Lock down direct PTY coverage for find/repeat-find motions (`f`, `F`, `t`, `T`, `;`, `,`) across supported operator families.
   - [ ] Lock down direct PTY coverage for mark and match motions (`'`, `` ` ``, `%`) across supported operator families.

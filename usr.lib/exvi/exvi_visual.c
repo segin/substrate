@@ -2271,6 +2271,8 @@ vi_move_section_boundary(buffer_t *b, vi_visual_t *vis, int forward, int want_en
     int count)
 {
     int line_no = buf_current_line(b);
+    int bof_fallback = 0;
+    int eof_fallback = 0;
 
     if (line_no < 1 || count < 1) {
         return;
@@ -2298,12 +2300,25 @@ vi_move_section_boundary(buffer_t *b, vi_visual_t *vis, int forward, int want_en
                 probe++;
             }
         }
+        if (!found && forward && b->line_count > 0) {
+            line_no = b->line_count;
+            eof_fallback = 1;
+            found = 1;
+        } else if (!found && !forward && b->line_count > 0) {
+            line_no = 1;
+            bof_fallback = 1;
+            found = 1;
+        }
         if (!found) {
             break;
         }
     }
     b->cur = buf_get_line(b, line_no);
-    vis->cursor_col = 0;
+    if (b->cur && (eof_fallback || bof_fallback)) {
+        vis->cursor_col = vi_first_nonblank_col(b->cur);
+    } else {
+        vis->cursor_col = 0;
+    }
 }
 
 static void
@@ -5367,9 +5382,16 @@ vi_handle_pending_operator(buffer_t *b, vi_visual_t *vis, int key)
                     if (target_no < line_no) {
                         start_line = target_no;
                         end_line = line_no - 1;
+                        if (target_col > 0) {
+                            end_line = line_no;
+                        }
                     } else {
                         start_line = line_no;
-                        end_line = target_no - 1;
+                        if (key == ']' && key2 == '[') {
+                            end_line = target_no - 1;
+                        } else {
+                            end_line = target_no - ((target_col == 0) ? 1 : 0);
+                        }
                     }
                     if (end_line < start_line) {
                         write(STDOUT_FILENO, "\a", 1);
