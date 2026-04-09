@@ -25,7 +25,7 @@ usage() {
 clean_dist() {
     echo "Cleaning dist directory..."
     rm -rf "$DIST"
-    mkdir -p "$DIST"/{bin,sbin,usr/{bin,lib,include},lib,dev,etc,proc,tmp,var,home,root,boot}
+    mkdir -p "$DIST"/{bin,sbin,usr/{bin,lib,include},lib,dev,etc,proc,tmp,var,var/empty,home,root,boot}
 }
 
 build_ext2boot() {
@@ -76,9 +76,7 @@ install_to_dist() {
     done
 
     echo "Installing configuration from etc/..."
-    cp "$TOP/etc/passwd" "$DIST/etc/"
-    cp "$TOP/etc/group" "$DIST/etc/"
-    cp "$TOP/etc/fstab" "$DIST/etc/"
+    cp -r "$TOP/etc/." "$DIST/etc/"
     cp "$TOP/etc/init.sh" "$DIST/sbin/init"
     chmod +x "$DIST/sbin/init"
 
