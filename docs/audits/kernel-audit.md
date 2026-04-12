@@ -10,15 +10,13 @@
 
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
-| **MEDIUM** | 4 | Races, alignment |
+| **MEDIUM** | 3 | Races, alignment |
 | **LOW** | 12 | Code style, comments, hardcoded constants, performance |
-| **TOTAL** | **16** | |
+| **TOTAL** | **15** | |
 
 ---
 
 ## MEDIUM Findings
-
-45. **Wait.c vm_map_destroy race** — `sys/pm/wait.c`: Destroys vmmap while another CPU might be mid-page-fault.
 
 46. **Linux signal stack alignment** — `sys/exec/perso/linux/linux_sig.c`: 16-byte alignment may not satisfy x86 ABI pre-call requirement.
 
