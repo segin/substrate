@@ -747,6 +747,40 @@ test_pop_modified_buffer_sets_status(void)
     cleanup_shared_state();
 }
 
+static void
+test_utf8_prev_offset(void)
+{
+    /* ASCII: each backspace removes exactly one byte */
+    assert(vi_utf8_prev_offset("abc", 3) == 2);
+    assert(vi_utf8_prev_offset("abc", 2) == 1);
+    assert(vi_utf8_prev_offset("abc", 1) == 0);
+    assert(vi_utf8_prev_offset("abc", 0) == 0);
+
+    /* 2-byte UTF-8: U+00E9 "é" = 0xC3 0xA9 */
+    {
+        const char s[] = "caf\xc3\xa9";  /* "café" */
+
+        assert(vi_utf8_prev_offset(s, 5) == 3);  /* back over é */
+        assert(vi_utf8_prev_offset(s, 3) == 2);  /* back over f */
+    }
+
+    /* 3-byte UTF-8: U+4E16 "世" = 0xE4 0xB8 0x96 */
+    {
+        const char s[] = "a\xe4\xb8\x96";  /* "a世" */
+
+        assert(vi_utf8_prev_offset(s, 4) == 1);  /* back over 世 */
+        assert(vi_utf8_prev_offset(s, 1) == 0);  /* back over a */
+    }
+
+    /* 4-byte UTF-8: U+1F600 "😀" = 0xF0 0x9F 0x98 0x80 */
+    {
+        const char s[] = "x\xf0\x9f\x98\x80";  /* "x😀" */
+
+        assert(vi_utf8_prev_offset(s, 5) == 1);  /* back over 😀 */
+        assert(vi_utf8_prev_offset(s, 1) == 0);  /* back over x */
+    }
+}
+
 int
 main(void)
 {
@@ -773,6 +807,7 @@ main(void)
     test_successful_command_no_pending_status();
     test_pop_empty_tag_stack_sets_status();
     test_pop_modified_buffer_sets_status();
+    test_utf8_prev_offset();
     puts("exvi core tests: ok");
     return 0;
 }

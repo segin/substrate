@@ -900,6 +900,19 @@ vi_is_utf8_continuation_byte(unsigned char c)
     return (c & 0xc0) == 0x80;
 }
 
+size_t
+vi_utf8_prev_offset(const char *buf, size_t pos)
+{
+    if (pos == 0) {
+        return 0;
+    }
+    pos--;
+    while (pos > 0 && vi_is_utf8_continuation_byte((unsigned char)buf[pos])) {
+        pos--;
+    }
+    return pos;
+}
+
 static int
 vi_utf8_decode_text_at(const char *text, size_t len, int idx, unsigned int *cp_out)
 {
@@ -6601,7 +6614,8 @@ vi_prompt_input(buffer_t *b, vi_visual_t *vis, char prefix, char *buf, size_t bu
         if (key == 127 || key == '\b') {
             history_index = -1;
             if (len > 0) {
-                buf[--len] = '\0';
+                len = vi_utf8_prev_offset(buf, len);
+                buf[len] = '\0';
             }
             continue;
         }

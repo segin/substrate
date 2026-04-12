@@ -198,6 +198,8 @@ int handle_move_command(buffer_t *b, const char *args, int explicit_range,
 int handle_join_command(buffer_t *b, int explicit_range, int addr1, int addr2);
 int handle_yank_command(buffer_t *b, const char *args, int explicit_range,
     int addr1, int addr2);
+
+size_t vi_utf8_prev_offset(const char *buf, size_t pos);
 int handle_substitute_command(buffer_t *b, const char *args, int addr1, int addr2);
 int handle_repeat_substitute_command(buffer_t *b, const char *args, int addr1,
     int addr2);
