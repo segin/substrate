@@ -10,15 +10,13 @@
 
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
-| **MEDIUM** | 9 | Integer overflows, lock ordering gaps, static buffer races, hash sizing |
+| **MEDIUM** | 8 | Integer overflows, lock ordering gaps, static buffer races, hash sizing |
 | **LOW** | 12 | Code style, comments, hardcoded constants, performance |
-| **TOTAL** | **21** | |
+| **TOTAL** | **20** | |
 
 ---
 
 ## MEDIUM Findings
-
-40. **timeval_to_ticks overflow** — `sys/kern/time.c`: Large `tv_sec` overflows the multiplication.
 
 41. **DMA address assumes direct-map** — `sys/kern/dma.c`: `cpu_addr - KERNEL_BASE` assumes identity mapping for all kernel memory.
 
