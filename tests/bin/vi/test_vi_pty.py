@@ -239,6 +239,15 @@ def main():
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
+        "        x\n\tx\n",
+        [b"0", b"8l", b"\x1b[B", b"i", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"normal-arrow-tabstop vi exited with status {exit_code}")
+    require(saved == "        x\n\tXx\n",
+            f"unexpected normal-arrow-tabstop buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
         "one\ntwo\none again\n",
         [b"/", b"one\r", b"n", b"r", b"Z"],
     )
@@ -1157,6 +1166,19 @@ def main():
     require("-- INSERT --" in decoded, "missing insert-arrow insert status")
     require(saved == "XYabc\n",
             f"unexpected insert-arrow buffer: {saved!r}")
+
+    exit_code, decoded, saved = run_vi_session(
+        vi_path,
+        "        x\n\tx\n        x\n",
+        [b"G", b"i",
+         b"\x1b[C", b"\x1b[C", b"\x1b[C", b"\x1b[C",
+         b"\x1b[C", b"\x1b[C", b"\x1b[C", b"\x1b[C",
+         b"\x1b[A", b"X", b"\x1b"],
+    )
+    require(exit_code == 0, f"insert-arrow-tabstop vi exited with status {exit_code}")
+    require("-- INSERT --" in decoded, "missing insert-arrow-tabstop insert status")
+    require(saved == "        x\n\txX\n        x\n",
+            f"unexpected insert-arrow-tabstop buffer: {saved!r}")
 
     exit_code, decoded, saved = run_vi_session(
         vi_path,
