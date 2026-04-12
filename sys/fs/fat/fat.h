@@ -101,6 +101,7 @@ typedef struct fat_node {
     uint32_t current_cluster;       // Current cluster (for sequential access)
     uint32_t current_offset;        // Current offset within file
     uint8_t attr;                   // FAT attributes
+    struct dirent current_dirent;   // Per-node readdir result (avoids static)
 } fat_node_t;
 
 // Public functions

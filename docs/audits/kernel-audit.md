@@ -10,15 +10,13 @@
 
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
-| **MEDIUM** | 7 | Lock ordering gaps, static buffer races, hash sizing |
+| **MEDIUM** | 6 | Lock ordering gaps, static buffer races, hash sizing |
 | **LOW** | 12 | Code style, comments, hardcoded constants, performance |
-| **TOTAL** | **19** | |
+| **TOTAL** | **18** | |
 
 ---
 
 ## MEDIUM Findings
-
-42. **Static readdir buffers** — ext2, FAT, minix all use `static struct dirent` → data race if concurrent.
 
 43. **Name cache weak hash** — `sys/vfs/vfs_cache.c`: Simple multiplicative hash into 1024 buckets → collision DoS.
 

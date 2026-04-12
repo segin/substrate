@@ -279,7 +279,7 @@ struct dirent *fat_readdir(fs_node_t *node, uint64_t index) {
     fat_node_t *ctx = (fat_node_t *)(uintptr_t)node->impl;
     fat_fs_t *fs = ctx->fs;
     
-    static struct dirent dirent;
+    struct dirent *dirent = &ctx->current_dirent;
     static uint8_t dir_buf[32768];
     static char lfn_buffer[256];
     uint32_t bytes_per_sector = fs->bpb.bytes_per_sector;
@@ -317,16 +317,16 @@ struct dirent *fat_readdir(fs_node_t *node, uint64_t index) {
                 if (current_idx == index) {
                     if (lfn_len > 0) {
                         lfn_buffer[lfn_len] = '\0';
-                        strncpy(dirent.d_name, lfn_buffer, 127);
-                        dirent.d_name[127] = '\0';
+                        strncpy(dirent->d_name, lfn_buffer, 127);
+                        dirent->d_name[127] = '\0';
                         lfn_len = 0;
                     } else {
-                        fat_parse_short_name(entry->name, dirent.d_name);
+                        fat_parse_short_name(entry->name, dirent->d_name);
                     }
 
                     uint32_t cluster_num = ((uint32_t)entry->cluster_high << 16) | entry->cluster_low;
-                    dirent.d_ino = fat_make_synth_inode(fs, 0, sector_i, i, cluster_num);
-                    return &dirent;
+                    dirent->d_ino = fat_make_synth_inode(fs, 0, sector_i, i, cluster_num);
+                    return dirent;
                 }
 
                 current_idx++;
@@ -378,16 +378,16 @@ struct dirent *fat_readdir(fs_node_t *node, uint64_t index) {
             if (current_idx == index) {
                 if (lfn_len > 0) {
                     lfn_buffer[lfn_len] = '\0';
-                    strncpy(dirent.d_name, lfn_buffer, 127);
-                    dirent.d_name[127] = '\0';
+                    strncpy(dirent->d_name, lfn_buffer, 127);
+                    dirent->d_name[127] = '\0';
                     lfn_len = 0;
                 } else {
-                    fat_parse_short_name(entry->name, dirent.d_name);
+                    fat_parse_short_name(entry->name, dirent->d_name);
                 }
                 
                 uint32_t cluster_num = ((uint32_t)entry->cluster_high << 16) | entry->cluster_low;
-                dirent.d_ino = fat_make_synth_inode(fs, ctx->first_cluster, 0, i, cluster_num);
-                return &dirent;
+                dirent->d_ino = fat_make_synth_inode(fs, ctx->first_cluster, 0, i, cluster_num);
+                return dirent;
             }
             
             current_idx++;
