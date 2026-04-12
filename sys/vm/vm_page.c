@@ -144,6 +144,12 @@ process_t *vm_page_select_oom_victim(void) {
 		}
 
 		score = vm_page_oom_score(proc);
+
+		/* Re-check process validity after scoring (concurrent exit defense) */
+		if (!proc || proc->pid <= 1 || proc->state == SDYING || proc->state == SZOMB) {
+			continue;
+		}
+
 		if (!victim || score > best_score ||
 		    (score == best_score && proc->pid > victim->pid)) {
 			victim = proc;

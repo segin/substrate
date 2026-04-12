@@ -10,17 +10,13 @@
 
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
-| **MEDIUM** | 15 | Integer overflows, lock ordering gaps, static buffer races, hash sizing |
+| **MEDIUM** | 13 | Integer overflows, lock ordering gaps, static buffer races, hash sizing |
 | **LOW** | 12 | Code style, comments, hardcoded constants, performance |
-| **TOTAL** | **27** | |
+| **TOTAL** | **25** | |
 
 ---
 
 ## MEDIUM Findings
-
-33. **vm_kmem integer overflow** — `sys/vm/vm_kmem.c`: `size + sizeof(header)` can wrap → too-small allocation → heap overflow.
-
-35. **OOM victim selection no proc_lock** — `sys/vm/vm_page.c`: Iterates process slots without locking → UAF on concurrent exit.
 
 36. **P2V macro inconsistency in vm_swap** — `sys/vm/vm_swap.c`: Some code paths may double-offset `phys_addr`.
 
