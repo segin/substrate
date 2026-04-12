@@ -550,6 +550,11 @@ pmap_t pmap_fork(pmap_t src_pmap) {
         
         // Get source page table
         uint32_t src_pt_phys = src_pd[pdi] & ~0xFFF;
+        /* Bounds check: ensure physical address is in direct-map range (finding #14) */
+        if (src_pt_phys >= 0x40000000) {
+            pmap_destroy(dst_pmap);
+            return 0;
+        }
         uint32_t *src_pt = (uint32_t *)(src_pt_phys + 0xC0000000);
         
         // Allocate page table for child (checkbox 141)
@@ -1175,6 +1180,8 @@ int pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, uintptr_t sva, uintptr_t eva, in
     if (src_pmap->pdir_phys != cr3) return -1;
     
     // Map dst page directory temporarily
+    /* Bounds check: ensure physical address is in direct-map range (finding #15) */
+    if (dst_pmap->pdir_phys >= 0x40000000) return -1;
     uint32_t *dst_pd = (uint32_t *)(dst_pmap->pdir_phys + 0xC0000000);
     
     // Walk range page by page

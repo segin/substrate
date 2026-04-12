@@ -102,10 +102,11 @@ int irq_dispatch(unsigned int irq, void *frame) {
     while (curr != NULL) {
         irq_handler_t handler = curr->handler;
         void *dev_id = curr->dev_id;
+        irq_action_t *next = curr->next; /* Save next before releasing lock (finding #17) */
         spinlock_release(&irq_lock);
         handled |= handler(irq, dev_id, frame);
         spinlock_acquire(&irq_lock);
-        curr = curr->next;
+        curr = next;
     }
     spinlock_release(&irq_lock);
     return handled;

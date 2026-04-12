@@ -559,6 +559,8 @@ static void *uma_slab_alloc_item(uma_zone_t *zone, uma_slab_t *slab) {
     if (slab->us_freecount == 0) return NULL;
     
     uint32_t idx = slab->us_firstfree;
+    /* Bounds check index before use (finding #23) */
+    if (idx >= zone->uz_ipers) return NULL;
     void *obj = (void *)((uintptr_t)slab->us_data + slab->us_offset +
                          idx * zone->uz_rsize);
     
@@ -587,6 +589,9 @@ static void uma_slab_free_item(uma_zone_t *zone, uma_slab_t *slab, void *item) {
     /* Calculate index */
     uint32_t idx = ((uintptr_t)item - ((uintptr_t)slab->us_data + slab->us_offset)) /
                    zone->uz_rsize;
+    
+    /* Bounds check index before use (finding #23) */
+    if (idx >= zone->uz_ipers) return;
     
     /* Add to free list */
     slab->us_freelist[idx] = slab->us_firstfree;

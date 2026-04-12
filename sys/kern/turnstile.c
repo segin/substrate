@@ -26,9 +26,11 @@ static turnstile_t *turnstile_hash[TURNSTILE_HASH_SIZE];
 static volatile uint32_t turnstile_lock = 0;
 
 // Pre-allocated turnstile pool
-#define TURNSTILE_POOL_SIZE 64
+#define TURNSTILE_POOL_SIZE 128
 static turnstile_t turnstile_pool[TURNSTILE_POOL_SIZE];
 static int turnstile_pool_next = 0;
+/* Free list for recycled turnstiles */
+static turnstile_t *turnstile_free_list = NULL;
 
 // Hash function for lock objects
 static inline int turnstile_hash_func(void *lockobj) {
@@ -50,11 +52,24 @@ static inline void ts_unlock(void) {
 
 // Allocate a turnstile
 static turnstile_t *turnstile_alloc(void) {
+    /* Try free list first (recycled entries) */
+    if (turnstile_free_list) {
+        turnstile_t *ts = turnstile_free_list;
+        turnstile_free_list = ts->ts_next;
+        memset(ts, 0, sizeof(*ts));
+        return ts;
+    }
     if (turnstile_pool_next >= TURNSTILE_POOL_SIZE)
         return(NULL);
     turnstile_t *ts = &turnstile_pool[turnstile_pool_next++];
     memset(ts, 0, sizeof(*ts));
     return(ts);
+}
+
+// Return a turnstile to the free list
+static void turnstile_free_entry(turnstile_t *ts) {
+    ts->ts_next = turnstile_free_list;
+    turnstile_free_list = ts;
 }
 
 // Find turnstile for a lock object
@@ -164,8 +179,9 @@ void turnstile_release(void *lockobj) {
         waiter = next;
     }
     
-    // Remove turnstile
+    // Remove and recycle turnstile
     turnstile_remove(ts);
+    turnstile_free_entry(ts);
     
     ts_unlock();
 }

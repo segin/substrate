@@ -289,7 +289,7 @@ void vrele(struct vnode *vp)
         if (vp->v_flag & VDOOMED) {
             spinlock_release(&vp->v_interlock);
             vnode_reclaim(vp);
-            return;
+            return; /* vp is freed by vnode_reclaim, do not touch (finding #18) */
         }
         
         /* Add to free list for potential recycling */

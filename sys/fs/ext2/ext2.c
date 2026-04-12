@@ -757,6 +757,8 @@ int ext2_readlink(fs_node_t *node, char *buf, size_t size) {
     
     // Fast symlink: if size <= 60, target is stored in i_block[]
     if (inode->i_size <= 60) {
+        /* Clamp to sizeof(i_block) to prevent overflow (finding #26) */
+        if (link_size > 60) link_size = 60;
         memcpy(buf, (char *)inode->i_block, link_size);
     } else {
         // Slow symlink: target is in data blocks

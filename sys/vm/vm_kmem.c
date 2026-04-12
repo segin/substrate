@@ -114,6 +114,11 @@ void *kmalloc(size_t size) {
     
     /* Large allocation: bypass UMA, allocate pages directly */
     size_t total = size + sizeof(kmem_large_header_t);
+    if (total < size) {
+        /* Integer overflow */
+        kmem_stats.bytes_outstanding -= size;
+        return NULL;
+    }
     size_t pages = (total + 4095) / 4096;
     
     void *mem = pmm_alloc_contiguous(pages);

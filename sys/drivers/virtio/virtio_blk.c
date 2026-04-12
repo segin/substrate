@@ -140,17 +140,17 @@ static int virtio_blk_read_sectors(geom_disk_t *disk, uint64_t lba, size_t count
     int id1 = 1;
     int id2 = 2;
     
-    vblk.desc[id0].addr = (uint64_t)(uint32_t)&hdr;
+    vblk.desc[id0].addr = (uint64_t)((uint32_t)(uintptr_t)&hdr - 0xC0000000);
     vblk.desc[id0].len = sizeof(hdr);
     vblk.desc[id0].flags = VRING_DESC_F_NEXT;
     vblk.desc[id0].next = id1;
     
-    vblk.desc[id1].addr = (uint64_t)(uint32_t)buf;
+    vblk.desc[id1].addr = (uint64_t)((uint32_t)(uintptr_t)buf - 0xC0000000);
     vblk.desc[id1].len = 512 * count;
     vblk.desc[id1].flags = VRING_DESC_F_NEXT | VRING_DESC_F_WRITE;
     vblk.desc[id1].next = id2;
     
-    vblk.desc[id2].addr = (uint64_t)(uint32_t)&status;
+    vblk.desc[id2].addr = (uint64_t)((uint32_t)(uintptr_t)&status - 0xC0000000);
     vblk.desc[id2].len = 1;
     vblk.desc[id2].flags = VRING_DESC_F_WRITE;
     vblk.desc[id2].next = 0;
@@ -159,7 +159,8 @@ static int virtio_blk_read_sectors(geom_disk_t *disk, uint64_t lba, size_t count
     vblk.avail->ring[vblk.avail->idx % vblk.q_size] = id0;
     __asm__ volatile("lock addw $1, %0" : "+m"(vblk.avail->idx)); // Memory Barrier implicit
     
-    // 3. Notify
+    // 3. Notify (memory barrier before device notification)
+    __asm__ volatile("mfence" ::: "memory");
     outw(vblk.io_base + VIRTIO_REG_QUEUE_NOTIFY, 0); // Queue 0
     
     // 4. Poll Used Ring

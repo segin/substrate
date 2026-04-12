@@ -334,8 +334,8 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
 
             // Check recursion depth limit
             if (depth >= MAX_SYMLINK_DEPTH) {
-                // Too many symlink levels - return the symlink node itself (ELOOP)
-                return result;
+                // Too many symlink levels - return NULL to signal ELOOP (finding #32)
+                return NULL;
             }
             
             static char link_target[256];

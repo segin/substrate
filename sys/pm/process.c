@@ -579,27 +579,20 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     // Copy limits, etc. if implemented
     
     // Create Thread for child
-    // Implementation of this part relies on sched logic (threading).
-    // So PM depends on SCHED for thread creation.
-    
-    // sched_fork_thread logic?
-    // In sched.c it was inlined.
-    // We need sched_create_thread implementation to support "fork" style (copy regs).
-    // Or we just call sched_create_thread with a special entry point?
-    
-    // The previous implementation manually manipulated thread array to copy state.
-    // This implies sched.c should handle the thread part of fork.
-    // Maybe proc_fork should call `sched_fork_thread(child_proc, stack)`?
-    
-    // We'll declare `sched_fork_thread` in sched.h and assume it exists (we'll move it there).
-    extern int sched_fork_thread(process_t *proc, void *stack);
     
     /* 
-     * Link child into parent's list.
+     * Create thread first, then make child visible (findings #12, #13).
+     * This ensures wait() cannot reap a half-initialized child.
      */
+    extern int sched_fork_thread(process_t *proc, void *stack);
+    int fork_result = sched_fork_thread(child_proc, stack);
+    if (fork_result < 0) {
+        return fork_result;
+    }
+    
     proc_add_child(parent, child_proc);
     
-    return sched_fork_thread(child_proc, stack);
+    return fork_result;
 }
 
 static void proc_sysvipc_exit(process_t *proc) {

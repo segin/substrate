@@ -45,15 +45,15 @@ vm_object_t *vm_object_allocate(vm_object_type_t type, size_t size) {
 
 void vm_object_reference(vm_object_t *object) {
     if (object) {
-        object->ref_count++;
+        __sync_fetch_and_add(&object->ref_count, 1);
     }
 }
 
 void vm_object_deallocate(vm_object_t *object) {
     if (!object) return;
 
-    object->ref_count--;
-    if (object->ref_count == 0) {
+    /* Atomic decrement and check (finding #19) */
+    if (__sync_sub_and_fetch(&object->ref_count, 1) == 0) {
         vm_object_t *shadow = object->shadow;
         struct vm_pager *pager = object->pager;
 

@@ -280,6 +280,10 @@ uint32_t udf_read_file(struct udf_fs *fs, struct udf_fe *fe,
             
             /* Read from this extent */
             uint32_t ext_off = (offset > file_pos) ? offset - file_pos : 0;
+            if (ext_off > ext_len) {
+                file_pos += ext_len;
+                continue;
+            }
             uint32_t ext_read = ext_len - ext_off;
             if (ext_read > size) ext_read = size;
             
@@ -338,6 +342,10 @@ uint32_t udf_read_file(struct udf_fs *fs, struct udf_fe *fe,
 
             /* Read from this extent */
             uint32_t ext_off = (offset > file_pos) ? offset - file_pos : 0;
+            if (ext_off > ext_len) {
+                file_pos += ext_len;
+                continue;
+            }
             uint32_t ext_read = ext_len - ext_off;
             if (ext_read > size) ext_read = size;
 
