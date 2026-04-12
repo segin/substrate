@@ -8417,6 +8417,9 @@ process_normal_key:
             vis.pending_count = 0;
             vis.screen_dirty = 0;
             vi_command_prompt(b, &vis);
+            if (exvi_exit_requested) {
+                goto done;
+            }
             break;
         case '/':
             vis.pending_g = 0;

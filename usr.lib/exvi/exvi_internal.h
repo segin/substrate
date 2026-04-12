@@ -104,6 +104,7 @@ extern int input_mode;
 extern line_t *input_insert_pos;
 extern char exvi_pending_status[256];
 extern int exvi_pending_status_once;
+extern int exvi_exit_requested;
 
 void buf_init(buffer_t *b);
 line_t *buf_insert_after(buffer_t *b, line_t *pos, const char *text);

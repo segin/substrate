@@ -21,6 +21,7 @@ exvi_history_t redo_history = {0};
 buffer_t pending_undo_buf;
 int pending_undo_valid = 0;
 int exvi_history_suspended = 0;
+int exvi_exit_requested = 0;
 
 static void do_command(buffer_t *b, char *cmd);
 void replace_saved_string(char **dst, const char *src);
@@ -241,6 +242,9 @@ handle_global_command(buffer_t *b, const char *cmd, const char *args,
             }
             do_command(b, cmd_cpy);
             free(cmd_cpy);
+            if (exvi_exit_requested) {
+                break;
+            }
         }
         curr = next;
     }
@@ -308,7 +312,8 @@ handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
             exvi_report_error("No write since last change (add ! to override)");
             return 1;
         }
-        exit(0);
+        exvi_exit_requested = 1;
+        return 1;
     } else if (match_command(cmd, "xit", "x", &args, &force)
         || match_command(cmd, "wq", NULL, &args, &force)) {
         if (!b->filename) {
@@ -320,7 +325,8 @@ handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
         }
         buf_write_file(b, b->filename, 0);
         if (!b->modified || force) {
-            exit(0);
+            exvi_exit_requested = 1;
+            return 1;
         }
         return 1;
     } else if (match_command(cmd, "write", "w", &args, &force)) {
@@ -469,6 +475,7 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
 
     exvi_reset_runtime(frontend);
     exvi_cleanup_session_state();
+    exvi_exit_requested = 0;
     if (invoked_as(argv[0], "rex") || invoked_as(argv[0], "rvi")) {
         restricted_mode = 1;
         secure_mode = 1;
@@ -673,6 +680,9 @@ enter_visual:
         if (*cmd_line == ':') cmd_line++;
         
         do_command(&buf, cmd_line);
+        if (exvi_exit_requested) {
+            break;
+        }
     }
     free(line);
 

@@ -781,6 +781,37 @@ test_utf8_prev_offset(void)
     }
 }
 
+static void
+test_quit_sets_exit_flag(void)
+{
+    static const char *lines[] = {"hello", "world"};
+    buffer_t b;
+
+    reset_shared_state();
+    fill_buffer(&b, lines, 2);
+    visual_mode = 0;
+
+    /* :q on unmodified buffer should set exit flag instead of exit(0) */
+    exvi_exit_requested = 0;
+    exvi_execute_command(&b, "q");
+    assert(exvi_exit_requested == 1);
+
+    /* :q on modified buffer should NOT set exit flag */
+    exvi_exit_requested = 0;
+    b.modified = 1;
+    exvi_execute_command(&b, "q");
+    assert(exvi_exit_requested == 0);
+
+    /* :q! on modified buffer should set exit flag */
+    exvi_exit_requested = 0;
+    exvi_execute_command(&b, "q!");
+    assert(exvi_exit_requested == 1);
+
+    exvi_exit_requested = 0;
+    free_buffer(&b);
+    cleanup_shared_state();
+}
+
 int
 main(void)
 {
@@ -808,6 +839,7 @@ main(void)
     test_pop_empty_tag_stack_sets_status();
     test_pop_modified_buffer_sets_status();
     test_utf8_prev_offset();
+    test_quit_sets_exit_flag();
     puts("exvi core tests: ok");
     return 0;
 }
