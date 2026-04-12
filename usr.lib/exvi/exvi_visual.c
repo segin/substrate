@@ -6628,11 +6628,12 @@ vi_prompt_input(buffer_t *b, vi_visual_t *vis, char prefix, char *buf, size_t bu
         if (key == 0x17) {
             history_index = -1;
             while (len > 0 && isspace((unsigned char)buf[len - 1])) {
-                buf[--len] = '\0';
+                len = vi_utf8_prev_offset(buf, len);
             }
             while (len > 0 && !isspace((unsigned char)buf[len - 1])) {
-                buf[--len] = '\0';
+                len = vi_utf8_prev_offset(buf, len);
             }
+            buf[len] = '\0';
             continue;
         }
         if (isprint(key) && len + 1 < buf_size) {
