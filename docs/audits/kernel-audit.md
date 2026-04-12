@@ -10,15 +10,13 @@
 
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
-| **MEDIUM** | 3 | Races, alignment |
+| **MEDIUM** | 1 | pmap documentation |
 | **LOW** | 12 | Code style, comments, hardcoded constants, performance |
-| **TOTAL** | **15** | |
+| **TOTAL** | **13** | |
 
 ---
 
 ## MEDIUM Findings
-
-46. **Linux signal stack alignment** — `sys/exec/perso/linux/linux_sig.c`: 16-byte alignment may not satisfy x86 ABI pre-call requirement.
 
 48. **pmap_enter no PTE_D for writable** — `sys/arch/i386/pmap.c`: Relies entirely on hardware dirty bit; no comment documenting this.
 
