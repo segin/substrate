@@ -424,7 +424,7 @@ void do_command(buffer_t *b, char *cmd) {
             set_default_current_range(b, &addr1, &addr2);
         }
         if (addr1 < 1 || addr2 < 1) {
-            fprintf(stderr, "No current line\n");
+            exvi_report_error("No current line");
             return;
         }
         if (addr2 > 0) {

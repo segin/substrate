@@ -704,6 +704,49 @@ test_successful_command_no_pending_status(void)
     cleanup_shared_state();
 }
 
+static void
+test_pop_empty_tag_stack_sets_status(void)
+{
+    static const char *lines[] = {"hello", "world"};
+    buffer_t b;
+    char status[256];
+
+    reset_shared_state();
+    fill_buffer(&b, lines, 2);
+    visual_mode = 1;
+
+    /* :pop with empty tag stack should set pending status */
+    handle_pop_command(&b, 0);
+    assert(exvi_pending_status_once == 1);
+    assert(exvi_take_pending_status(status, sizeof(status)) == 1);
+    assert(strstr(status, "Tag stack empty") != NULL);
+
+    free_buffer(&b);
+    cleanup_shared_state();
+}
+
+static void
+test_pop_modified_buffer_sets_status(void)
+{
+    static const char *lines[] = {"hello", "world"};
+    buffer_t b;
+    char status[256];
+
+    reset_shared_state();
+    fill_buffer(&b, lines, 2);
+    b.modified = 1;
+    visual_mode = 1;
+
+    /* :pop with modified buffer should set pending status */
+    handle_pop_command(&b, 0);
+    assert(exvi_pending_status_once == 1);
+    assert(exvi_take_pending_status(status, sizeof(status)) == 1);
+    assert(strstr(status, "No write since last change") != NULL);
+
+    free_buffer(&b);
+    cleanup_shared_state();
+}
+
 int
 main(void)
 {
@@ -728,6 +771,8 @@ main(void)
     test_read_command_replaces_empty_origin_placeholder();
     test_quit_modified_sets_pending_status();
     test_successful_command_no_pending_status();
+    test_pop_empty_tag_stack_sets_status();
+    test_pop_modified_buffer_sets_status();
     puts("exvi core tests: ok");
     return 0;
 }
