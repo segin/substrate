@@ -281,6 +281,7 @@ static vm_map_hole_t *rb_minimum(vm_map_hole_t *x) {
 static void rb_delete_fixup(vm_map_t *map, vm_map_hole_t *x, vm_map_hole_t *x_parent) {
     while (x != map->holes_root && (!x || !x->is_red)) {
         vm_map_hole_t *p = x ? x->parent : x_parent;
+        if (!p) break;
         if (x == p->left) {
             vm_map_hole_t *w = p->right;
             if (w->is_red) {
