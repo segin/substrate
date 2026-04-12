@@ -10,15 +10,13 @@
 
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
-| **MEDIUM** | 12 | Integer overflows, lock ordering gaps, static buffer races, hash sizing |
+| **MEDIUM** | 11 | Integer overflows, lock ordering gaps, static buffer races, hash sizing |
 | **LOW** | 12 | Code style, comments, hardcoded constants, performance |
-| **TOTAL** | **24** | |
+| **TOTAL** | **23** | |
 
 ---
 
 ## MEDIUM Findings
-
-37. **Mutex adaptive spin TOCTOU** — `sys/kern/mutex.c`: Owner pointer read and checked across multiple statements without synchronization.
 
 38. **lockmgr NULL holder race** — `sys/kern/lockmgr.c`: `lk_lockholder` checked and then used without lock.
 
