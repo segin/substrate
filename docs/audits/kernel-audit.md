@@ -10,15 +10,13 @@
 
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
-| **MEDIUM** | 5 | Lock ordering gaps, hash sizing |
+| **MEDIUM** | 4 | Races, alignment |
 | **LOW** | 12 | Code style, comments, hardcoded constants, performance |
-| **TOTAL** | **17** | |
+| **TOTAL** | **16** | |
 
 ---
 
 ## MEDIUM Findings
-
-44. **Lock ordering undocumented** — No documented hierarchy between bio_lock, vnode_freelist_lock, mount_lock → deadlock risk.
 
 45. **Wait.c vm_map_destroy race** — `sys/pm/wait.c`: Destroys vmmap while another CPU might be mid-page-fault.
 

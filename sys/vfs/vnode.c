@@ -9,6 +9,15 @@
  * - vget(): Lock and vref
  * - vgone(): Mark vnode for destruction
  * - vclean(): Disassociate vnode from filesystem
+ *
+ * Lock ordering (acquire in this order to avoid deadlocks):
+ *   1. vnode lock (lockmgr per-vnode)
+ *   2. vnode_freelist_lock (spinlock, protects freelist/LRU)
+ *   3. bio_lock (spinlock, protects buffer cache hash/queues)
+ *   4. nchash_lock (rwlock, protects name cache)
+ *
+ * Never acquire a higher-numbered lock while holding a lower-numbered one.
+ * Per-vnode locks are ordered by address to avoid A-B / B-A deadlocks.
  */
 
 #include <vfs/vnode.h>
