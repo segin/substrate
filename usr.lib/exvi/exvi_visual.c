@@ -1988,10 +1988,16 @@ vi_yank_span(vi_visual_t *vis, line_t *cur, int start, int end)
 }
 
 static void
-vi_move_vertical(buffer_t *b, int delta)
+vi_move_vertical(buffer_t *b, vi_visual_t *vis, int delta)
 {
+    line_t *cur = b->cur ? b->cur : b->head;
     int cur_line = buf_current_line(b);
     int target = cur_line + delta;
+    int display_col = 0;
+
+    if (cur && vis) {
+        display_col = vi_display_col_for_index(cur, vis->cursor_col);
+    }
 
     if (target < 1) {
         target = 1;
@@ -2001,6 +2007,9 @@ vi_move_vertical(buffer_t *b, int delta)
     }
     if (target >= 1) {
         b->cur = buf_get_line(b, target);
+        if (vis) {
+            vis->cursor_col = vi_index_for_display_col(b->cur, display_col);
+        }
     }
 }
 
@@ -2043,11 +2052,11 @@ vi_move_arrow_insert(buffer_t *b, vi_visual_t *vis, int key)
 
     switch (key) {
     case VI_KEY_UP:
-        vi_move_vertical(b, -1);
+        vi_move_vertical(b, vis, -1);
         vi_clamp_cursor(b, vis);
         break;
     case VI_KEY_DOWN:
-        vi_move_vertical(b, 1);
+        vi_move_vertical(b, vis, 1);
         vi_clamp_cursor(b, vis);
         break;
     case VI_KEY_LEFT:
@@ -2129,7 +2138,7 @@ vi_ensure_visible_line(buffer_t *b)
 static void
 vi_move_line_first_nonblank(buffer_t *b, vi_visual_t *vis, int delta)
 {
-    vi_move_vertical(b, delta);
+    vi_move_vertical(b, vis, delta);
     vis->cursor_col = vi_first_nonblank_col(b->cur);
 }
 
@@ -2141,7 +2150,7 @@ vi_page_scroll(buffer_t *b, vi_visual_t *vis, int direction)
     if (page < 1) {
         page = 1;
     }
-    vi_move_vertical(b, direction * page);
+    vi_move_vertical(b, vis, direction * page);
 }
 
 static void
@@ -2162,7 +2171,7 @@ vi_half_page_scroll(buffer_t *b, vi_visual_t *vis, int direction)
             page = 1;
         }
     }
-    vi_move_vertical(b, sign * page);
+    vi_move_vertical(b, vis, sign * page);
 }
 
 static void
@@ -6636,6 +6645,7 @@ vi_command_prompt(buffer_t *b, vi_visual_t *vis)
     if (exvi_take_pending_status(vis->status_msg, sizeof(vis->status_msg))) {
         vis->status_once = 1;
         have_status = 1;
+        write(STDOUT_FILENO, "\a", 1);
     }
     vi_clamp_cursor(b, vis);
     if (have_status) {
@@ -7753,12 +7763,12 @@ process_normal_key:
         case 'j':
             vis.pending_g = 0;
             vis.screen_dirty = 0;
-            vi_move_vertical(b, vi_take_count(&vis));
+            vi_move_vertical(b, &vis, vi_take_count(&vis));
             break;
         case 'k':
             vis.pending_g = 0;
             vis.screen_dirty = 0;
-            vi_move_vertical(b, -vi_take_count(&vis));
+            vi_move_vertical(b, &vis, -vi_take_count(&vis));
             break;
         case ')':
             vis.pending_g = 0;

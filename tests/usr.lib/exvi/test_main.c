@@ -656,6 +656,54 @@ test_set_extended_options(void)
     cleanup_shared_state();
 }
 
+static void
+test_quit_modified_sets_pending_status(void)
+{
+    static const char *lines[] = {"hello", "world"};
+    buffer_t b;
+    char status[256];
+    char cmd_q[] = "q";
+
+    reset_shared_state();
+    fill_buffer(&b, lines, 2);
+    b.modified = 1;
+    visual_mode = 1;
+
+    /* :q on a modified buffer must set pending status with error message */
+    exvi_execute_command(&b, cmd_q);
+    assert(exvi_pending_status_once == 1);
+    assert(exvi_take_pending_status(status, sizeof(status)) == 1);
+    assert(strstr(status, "No write since last change") != NULL);
+
+    /* After taking it, pending status should be cleared */
+    assert(exvi_pending_status_once == 0);
+
+    free_buffer(&b);
+    cleanup_shared_state();
+}
+
+static void
+test_successful_command_no_pending_status(void)
+{
+    static const char *lines[] = {"hello", "world"};
+    buffer_t b;
+
+    reset_shared_state();
+    fill_buffer(&b, lines, 2);
+    visual_mode = 1;
+
+    /* :set number should NOT set pending error status */
+    {
+        char cmd_set[] = "set number";
+
+        exvi_execute_command(&b, cmd_set);
+    }
+    assert(exvi_pending_status_once == 0);
+
+    free_buffer(&b);
+    cleanup_shared_state();
+}
+
 int
 main(void)
 {
@@ -678,6 +726,8 @@ main(void)
     test_substitute_repeat_behavior();
     test_arglist_navigation_and_replacement();
     test_read_command_replaces_empty_origin_placeholder();
+    test_quit_modified_sets_pending_status();
+    test_successful_command_no_pending_status();
     puts("exvi core tests: ok");
     return 0;
 }
