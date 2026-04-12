@@ -709,6 +709,9 @@ int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t 
     uint32_t pte_flags = PTE_P;
     if (prot & VM_PROT_WRITE) {
         pte_flags |= PTE_W;
+        /* Note: PTE_D (dirty bit) is NOT pre-set here. We rely on the
+         * x86 hardware to set PTE_D automatically on the first write.
+         * This is the standard approach and avoids unnecessary TLB shootdowns. */
     }
     if ((va < 0xC0000000) || (prot & VM_PROT_USER)) {
         pte_flags |= PTE_U;  // User accessible if in user space or requested

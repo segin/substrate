@@ -10,15 +10,15 @@
 
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
-| **MEDIUM** | 1 | pmap documentation |
+| **MEDIUM** | 0 | *(all resolved)* |
 | **LOW** | 12 | Code style, comments, hardcoded constants, performance |
-| **TOTAL** | **13** | |
+| **TOTAL** | **12** | |
 
 ---
 
 ## MEDIUM Findings
 
-48. **pmap_enter no PTE_D for writable** — `sys/arch/i386/pmap.c`: Relies entirely on hardware dirty bit; no comment documenting this.
+*(All resolved)*
 
 ---
 
