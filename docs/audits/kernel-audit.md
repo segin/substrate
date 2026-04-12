@@ -10,15 +10,13 @@
 
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
-| **MEDIUM** | 13 | Integer overflows, lock ordering gaps, static buffer races, hash sizing |
+| **MEDIUM** | 12 | Integer overflows, lock ordering gaps, static buffer races, hash sizing |
 | **LOW** | 12 | Code style, comments, hardcoded constants, performance |
-| **TOTAL** | **25** | |
+| **TOTAL** | **24** | |
 
 ---
 
 ## MEDIUM Findings
-
-36. **P2V macro inconsistency in vm_swap** — `sys/vm/vm_swap.c`: Some code paths may double-offset `phys_addr`.
 
 37. **Mutex adaptive spin TOCTOU** — `sys/kern/mutex.c`: Owner pointer read and checked across multiple statements without synchronization.
 
