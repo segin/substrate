@@ -10,15 +10,13 @@
 
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
-| **MEDIUM** | 10 | Integer overflows, lock ordering gaps, static buffer races, hash sizing |
+| **MEDIUM** | 9 | Integer overflows, lock ordering gaps, static buffer races, hash sizing |
 | **LOW** | 12 | Code style, comments, hardcoded constants, performance |
-| **TOTAL** | **22** | |
+| **TOTAL** | **21** | |
 
 ---
 
 ## MEDIUM Findings
-
-39. **Ramdisk sector bounds wrap** — `sys/drivers/storage/ramdisk.c`: `offset + size` can wrap unsigned → OOB access.
 
 40. **timeval_to_ticks overflow** — `sys/kern/time.c`: Large `tv_sec` overflows the multiplication.
 
