@@ -163,6 +163,8 @@ int exvi_has_arglist(void);
 const char *exvi_current_arg(void);
 void exvi_execute_command(buffer_t *b, char *cmd);
 int exvi_visual_main(buffer_t *b);
+void exvi_visual_shell_suspend(void);
+void exvi_visual_shell_resume(void);
 void handle_sigint(int sig);
 void handle_sigterm(int sig);
 int handle_pop_command(buffer_t *b, int force);

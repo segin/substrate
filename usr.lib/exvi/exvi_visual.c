@@ -797,12 +797,43 @@ static void
 vi_restore_terminal(void)
 {
     static const char restore_seq[] =
-        "\x1b[?1l\x1b>\x1b[?25h\x1b[0m\x1b[2J\x1b[H";
+        "\x1b[?1l\x1b>\x1b[?25h\x1b[0m\x1b[?1049l";
 
     if (active_visual && active_visual->raw_active) {
         tcsetattr(STDIN_FILENO, TCSAFLUSH, &active_visual->saved_tio);
         active_visual->raw_active = 0;
         write(STDOUT_FILENO, restore_seq, sizeof(restore_seq) - 1);
+    }
+}
+
+void
+exvi_visual_shell_suspend(void)
+{
+    static const char suspend_seq[] = "\x1b[?1049l";
+
+    if (active_visual && active_visual->raw_active) {
+        write(STDOUT_FILENO, suspend_seq, sizeof(suspend_seq) - 1);
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &active_visual->saved_tio);
+    }
+}
+
+void
+exvi_visual_shell_resume(void)
+{
+    static const char resume_seq[] = "\x1b[?1049h";
+    struct termios raw;
+
+    if (active_visual) {
+        raw = active_visual->saved_tio;
+        raw.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
+        raw.c_oflag &= ~(OPOST);
+        raw.c_cflag |= CS8;
+        raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
+        raw.c_cc[VMIN] = 1;
+        raw.c_cc[VTIME] = 0;
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+        write(STDOUT_FILENO, resume_seq, sizeof(resume_seq) - 1);
+        active_visual->raw_active = 1;
     }
 }
 
@@ -816,7 +847,7 @@ vi_handle_winch(int sig)
 static int
 vi_enable_raw(vi_visual_t *vis)
 {
-    static const char enter_seq[] = "\x1b[?1h\x1b=";
+    static const char enter_seq[] = "\x1b[?1049h\x1b[?1h\x1b=";
     struct termios raw;
 
     if (tcgetattr(STDIN_FILENO, &vis->saved_tio) != 0) {

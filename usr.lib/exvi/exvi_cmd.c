@@ -774,6 +774,9 @@ handle_shell_command(char *cmd)
     if (!shell || !*shell) {
         shell = "/bin/sh";
     }
+    if (visual_mode) {
+        exvi_visual_shell_suspend();
+    }
     pid = fork();
     if (pid < 0) {
         perror("fork");
@@ -801,6 +804,9 @@ handle_shell_command(char *cmd)
         }
         signal(SIGINT, old_int);
         signal(SIGQUIT, old_quit);
+    }
+    if (visual_mode) {
+        exvi_visual_shell_resume();
     }
     return 1;
 }
