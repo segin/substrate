@@ -10,15 +10,13 @@
 
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
-| **MEDIUM** | 6 | Lock ordering gaps, static buffer races, hash sizing |
+| **MEDIUM** | 5 | Lock ordering gaps, hash sizing |
 | **LOW** | 12 | Code style, comments, hardcoded constants, performance |
-| **TOTAL** | **18** | |
+| **TOTAL** | **17** | |
 
 ---
 
 ## MEDIUM Findings
-
-43. **Name cache weak hash** — `sys/vfs/vfs_cache.c`: Simple multiplicative hash into 1024 buckets → collision DoS.
 
 44. **Lock ordering undocumented** — No documented hierarchy between bio_lock, vnode_freelist_lock, mount_lock → deadlock risk.
 
