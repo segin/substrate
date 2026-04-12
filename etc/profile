@@ -1,0 +1,4 @@
+# Substrate default shell profile
+
+prompt='%n@%m[%T]:{%~}%% '
+
