@@ -10,15 +10,13 @@
 
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
-| **MEDIUM** | 8 | Integer overflows, lock ordering gaps, static buffer races, hash sizing |
+| **MEDIUM** | 7 | Lock ordering gaps, static buffer races, hash sizing |
 | **LOW** | 12 | Code style, comments, hardcoded constants, performance |
-| **TOTAL** | **20** | |
+| **TOTAL** | **19** | |
 
 ---
 
 ## MEDIUM Findings
-
-41. **DMA address assumes direct-map** — `sys/kern/dma.c`: `cpu_addr - KERNEL_BASE` assumes identity mapping for all kernel memory.
 
 42. **Static readdir buffers** — ext2, FAT, minix all use `static struct dirent` → data race if concurrent.
 
