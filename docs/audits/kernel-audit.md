@@ -10,15 +10,13 @@
 
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
-| **MEDIUM** | 11 | Integer overflows, lock ordering gaps, static buffer races, hash sizing |
+| **MEDIUM** | 10 | Integer overflows, lock ordering gaps, static buffer races, hash sizing |
 | **LOW** | 12 | Code style, comments, hardcoded constants, performance |
-| **TOTAL** | **23** | |
+| **TOTAL** | **22** | |
 
 ---
 
 ## MEDIUM Findings
-
-38. **lockmgr NULL holder race** — `sys/kern/lockmgr.c`: `lk_lockholder` checked and then used without lock.
 
 39. **Ramdisk sector bounds wrap** — `sys/drivers/storage/ramdisk.c`: `offset + size` can wrap unsigned → OOB access.
 
