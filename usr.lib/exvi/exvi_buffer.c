@@ -5,6 +5,42 @@
 #include <string.h>
 #include <unistd.h>
 
+static int
+buf_line_array_grow(buffer_t *b, int needed)
+{
+    int new_cap;
+    line_t **arr;
+
+    if (needed <= b->line_array_cap) {
+        return 0;
+    }
+    new_cap = b->line_array_cap > 0 ? b->line_array_cap : 64;
+    while (new_cap < needed) {
+        new_cap *= 2;
+    }
+    arr = realloc(b->line_array, sizeof(*arr) * (size_t)new_cap);
+    if (!arr) {
+        return -1;
+    }
+    b->line_array = arr;
+    b->line_array_cap = new_cap;
+    return 0;
+}
+
+static int
+buf_line_index(buffer_t *b, line_t *l)
+{
+    if (!l || !b->line_array) {
+        return -1;
+    }
+    for (int i = 0; i < b->line_count; i++) {
+        if (b->line_array[i] == l) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 static void
 exvi_history_free(exvi_history_t *history)
 {
@@ -113,6 +149,8 @@ buf_init(buffer_t *b)
     b->modified = 0;
     b->empty_origin = 0;
     b->started_empty = 0;
+    b->line_array = NULL;
+    b->line_array_cap = 0;
     for (int i = 0; i < 26; i++) {
         b->marks[i] = NULL;
         b->mark_cols[i] = 0;
@@ -124,6 +162,7 @@ buf_insert_after(buffer_t *b, line_t *pos, const char *text)
 {
     line_t *l = calloc(1, sizeof(line_t));
     int inserted_at_end = (b->head == NULL || pos == b->tail);
+    int idx;
 
     if (!l) {
         return NULL;
@@ -152,12 +191,29 @@ buf_insert_after(buffer_t *b, line_t *pos, const char *text)
         }
         pos->next = l;
     }
+
+    /* Update line array before incrementing line_count so that
+       buf_line_index only scans the valid (old) entries. */
+    if (buf_line_array_grow(b, b->line_count + 1) == 0) {
+        if (!pos) {
+            idx = 0;
+        } else {
+            idx = buf_line_index(b, pos) + 1;
+        }
+        if (idx < b->line_count) {
+            memmove(&b->line_array[idx + 1], &b->line_array[idx],
+                sizeof(*b->line_array) * (size_t)(b->line_count - idx));
+        }
+        b->line_array[idx] = l;
+    }
+
     b->line_count++;
     b->empty_origin = 0;
     if (inserted_at_end) {
         b->trailing_newline = 1;
     }
     b->modified = 1;
+
     return l;
 }
 
@@ -165,12 +221,16 @@ void
 buf_delete(buffer_t *b, line_t *l)
 {
     int deleting_tail;
+    int idx;
 
     if (!l) {
         return;
     }
     exvi_note_buffer_change();
     deleting_tail = (l == b->tail);
+
+    idx = buf_line_index(b, l);
+
     for (int i = 0; i < 26; i++) {
         if (b->marks[i] == l) {
             b->marks[i] = NULL;
@@ -201,6 +261,14 @@ buf_delete(buffer_t *b, line_t *l)
     free(l->text);
     free(l);
     b->line_count--;
+
+    if (idx >= 0 && b->line_array) {
+        if (idx < b->line_count) {
+            memmove(&b->line_array[idx], &b->line_array[idx + 1],
+                sizeof(*b->line_array) * (size_t)(b->line_count - idx));
+        }
+    }
+
     if (b->line_count == 0) {
         b->trailing_newline = 0;
     } else if (deleting_tail) {
@@ -232,6 +300,9 @@ buf_free(buffer_t *b)
         free(b->recover_filename);
         b->recover_filename = NULL;
     }
+    free(b->line_array);
+    b->line_array = NULL;
+    b->line_array_cap = 0;
     b->empty_origin = 0;
     b->started_empty = 0;
     for (int i = 0; i < 26; i++) {
@@ -461,32 +532,41 @@ buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int ad
 line_t *
 buf_get_line(buffer_t *b, int line_num)
 {
-    line_t *l = b->head;
-
     if (line_num < 1 || line_num > b->line_count) {
         return NULL;
     }
-    for (int i = 1; i < line_num && l; i++) {
-        l = l->next;
+    if (b->line_array) {
+        return b->line_array[line_num - 1];
     }
-    return l;
+    {
+        line_t *l = b->head;
+
+        for (int i = 1; i < line_num && l; i++) {
+            l = l->next;
+        }
+        return l;
+    }
 }
 
 int
 buf_current_line(buffer_t *b)
 {
-    line_t *l;
-    int idx = 1;
-
     if (!b->cur) {
         return -1;
     }
+    if (b->line_array) {
+        int idx = buf_line_index(b, b->cur);
 
-    l = b->head;
-    while (l && l != b->cur) {
-        idx++;
-        l = l->next;
+        return idx >= 0 ? idx + 1 : -1;
     }
+    {
+        line_t *l = b->head;
+        int idx = 1;
 
-    return l ? idx : -1;
+        while (l && l != b->cur) {
+            idx++;
+            l = l->next;
+        }
+        return l ? idx : -1;
+    }
 }

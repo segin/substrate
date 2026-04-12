@@ -36,6 +36,8 @@ typedef struct {
     int started_empty;
     line_t *marks[26];
     int mark_cols[26];
+    line_t **line_array;
+    int line_array_cap;
 } buffer_t;
 
 typedef struct {

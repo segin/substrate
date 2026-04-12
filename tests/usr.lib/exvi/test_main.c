@@ -812,6 +812,65 @@ test_quit_sets_exit_flag(void)
     cleanup_shared_state();
 }
 
+static void
+test_line_array_random_access(void)
+{
+    buffer_t b;
+
+    reset_shared_state();
+    buf_init(&b);
+
+    /* Build a 100-line buffer */
+    {
+        line_t *pos = NULL;
+        char text[32];
+
+        for (int i = 0; i < 100; i++) {
+            snprintf(text, sizeof(text), "line %d", i + 1);
+            pos = buf_insert_after(&b, pos, text);
+        }
+    }
+    assert(b.line_count == 100);
+
+    /* buf_get_line O(1) correctness for every line */
+    for (int i = 1; i <= 100; i++) {
+        char expected[32];
+        line_t *l = buf_get_line(&b, i);
+
+        snprintf(expected, sizeof(expected), "line %d", i);
+        assert(l != NULL);
+        assert(strcmp(l->text, expected) == 0);
+    }
+
+    /* buf_current_line matches for random positions */
+    b.cur = buf_get_line(&b, 50);
+    assert(buf_current_line(&b) == 50);
+    b.cur = buf_get_line(&b, 1);
+    assert(buf_current_line(&b) == 1);
+    b.cur = buf_get_line(&b, 100);
+    assert(buf_current_line(&b) == 100);
+
+    /* Delete line 50, verify array consistency */
+    {
+        line_t *l50 = buf_get_line(&b, 50);
+
+        b.cur = b.head;
+        buf_delete(&b, l50);
+    }
+    assert(b.line_count == 99);
+    assert(strcmp(buf_get_line(&b, 50)->text, "line 51") == 0);
+    assert(strcmp(buf_get_line(&b, 49)->text, "line 49") == 0);
+
+    /* Insert after line 49, verify array consistency */
+    buf_insert_after(&b, buf_get_line(&b, 49), "inserted");
+    assert(b.line_count == 100);
+    assert(strcmp(buf_get_line(&b, 50)->text, "inserted") == 0);
+    assert(strcmp(buf_get_line(&b, 51)->text, "line 51") == 0);
+
+    buf_free(&b);
+    cleanup_shared_state();
+}
+
 int
 main(void)
 {
@@ -840,6 +899,7 @@ main(void)
     test_pop_modified_buffer_sets_status();
     test_utf8_prev_offset();
     test_quit_sets_exit_flag();
+    test_line_array_random_access();
     puts("exvi core tests: ok");
     return 0;
 }
