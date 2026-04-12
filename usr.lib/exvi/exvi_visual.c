@@ -108,6 +108,7 @@ typedef struct {
     int body_dirty_end;
     int clear_screen;
     int rendered_cur_line;
+    int zq_pending;
 } vi_visual_t;
 
 static vi_visual_t *active_visual = NULL;
@@ -7428,6 +7429,9 @@ exvi_visual_main(buffer_t *b)
         if (!cur) {
             cur = b->head;
         }
+        if (key != 'Z' && !vis.pending_big_z) {
+            vis.zq_pending = 0;
+        }
         if (vis.replace_mode) {
             switch (key) {
             case '\x1b':
@@ -7728,6 +7732,13 @@ process_normal_key:
                 }
                 goto done;
             case 'Q':
+                if (b->modified && !vis.zq_pending) {
+                    vi_set_status(&vis,
+                        "No write since last change (use ZQ again to discard)");
+                    write(STDOUT_FILENO, "\a", 1);
+                    vis.zq_pending = 1;
+                    break;
+                }
                 goto done;
             default:
                 write(STDOUT_FILENO, "\a", 1);
