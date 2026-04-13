@@ -12,23 +12,14 @@
 |----------|-------|
 | CRITICAL | 0     |
 | HIGH     | 0     |
-| MEDIUM   | 9     |
+| MEDIUM   | 8     |
 | LOW      | 8     |
 | INFO     | 4     |
-| **Total**| **21**|
+| **Total**| **20**|
 
 ---
 
 ## MEDIUM
-
-### M-1: `arith_ptr` global makes arithmetic non-reentrant
-
-**File:** `expand.c`, line 137  
-**Impact:** The arithmetic parser uses a global `static const char *arith_ptr`. If arithmetic expansion triggers a command substitution that itself contains arithmetic (e.g., `$((1 + $(echo $((2+3)))))`), the nested expansion will corrupt the outer parser state.
-
-**Fix:** Pass the pointer as a parameter through all parse functions, or use a parser context struct.
-
----
 
 ### M-2: `shell_var_stack.c` is dead code with duplicate definitions
 

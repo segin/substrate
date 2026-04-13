@@ -590,10 +590,15 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
                 }
                 if (depth == 0) {
                     char *expr = sh_strndup(start, p - start - 1);
+                    const char *saved_arith_ptr = arith_ptr;
+                    int saved_arith_error = arith_error;
                     arith_ptr = expr;
                     arith_error = 0;
                     long val = parse_assign();
-                    if (arith_error) {
+                    int had_error = arith_error;
+                    arith_ptr = saved_arith_ptr;
+                    arith_error = saved_arith_error;
+                    if (had_error) {
                         expand_state_fail(state, 1);
                         free(expr);
                     } else {
@@ -1040,11 +1045,21 @@ int expand_heredoc_ex(const char *content, int quoted, char **out,
                  }
                  if (depth == 0) {
                      char *expr = sh_strndup(start, p - start - 1);
+                     const char *saved_arith_ptr = arith_ptr;
+                     int saved_arith_error = arith_error;
                      arith_ptr = expr;
+                     arith_error = 0;
                      long val = parse_assign();
-                     char val_buf[32];
-                     snprintf(val_buf, sizeof(val_buf), "%ld", val);
-                     buffer_append_str(&buf, &cap, &len, val_buf);
+                     int had_error = arith_error;
+                     arith_ptr = saved_arith_ptr;
+                     arith_error = saved_arith_error;
+                     if (had_error) {
+                         expand_state_fail(state, 1);
+                     } else {
+                         char val_buf[32];
+                         snprintf(val_buf, sizeof(val_buf), "%ld", val);
+                         buffer_append_str(&buf, &cap, &len, val_buf);
+                     }
                      free(expr);
                  }
             } else if (*p == '(') {
