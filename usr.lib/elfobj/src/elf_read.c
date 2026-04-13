@@ -552,9 +552,12 @@ static elf_err_t parse_relocations(elfobj_t *obj, symtab_index_t *maps, size_t m
             rel->type = r_type;
             rel->addend = addend;
             rel->has_addend = sec->type == SHT_RELA;
-            if (sym_index < map->count) {
-                rel->symbol = map->symbols[sym_index];
+            rel->symbol = NULL;
+            if (sym_index >= map->count) {
+                free(rel);
+                return ELF_ERR_FORMAT;
             }
+            rel->symbol = map->symbols[sym_index];
 
             if (elf__push_reloc(obj, rel) != ELF_OK) {
                 free(rel);

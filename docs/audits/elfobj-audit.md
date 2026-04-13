@@ -9,11 +9,11 @@
 
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
-| **CRITICAL** | 3 | String table validation, relocation symbol index, section link validation |
+| **CRITICAL** | 2 | String table validation, section link validation |
 | **HIGH** | 5 | Integer overflow, section overlap, relocation offset, unbounded allocation, OOM cleanup |
 | **MEDIUM** | 6 | Strtab growth, NULL dereference, entsize DoS, group signature, reloc info, compression header |
 | **LOW** | 4 | Alignment validation, REL/RELA arch checks, diagnostic buffer, version index |
-| **TOTAL** | **18** | |
+| **TOTAL** | **17** | |
 
 This library parses untrusted ELF files supplied to the assembler/linker. All input data must be treated as adversarial.
 
@@ -38,20 +38,6 @@ This library parses untrusted ELF files supplied to the assembler/linker. All in
   ```
 - **Risk:** If any code path uses strtab data without going through `safe_str()`, it reads until it hits a zero byte — potentially far beyond the section.
 - **Fix:** Audit all strtab access paths to ensure they go through `safe_str()`. Consider forcing a null byte at `strtab[size-1]` during parse.
-
-### 2. Relocation Symbol Index — Uninitialized on Out-of-Bounds
-
-- **File:** `usr.lib/elfobj/src/elf_read.c`, lines 527-558
-- **Function:** `parse_relocations()`
-- **Issue:** When the extracted symbol index is >= the symbol map count, `rel->symbol` is never assigned:
-  ```c
-  if (sym_index < map->count) {
-      rel->symbol = map->symbols[sym_index];
-      // No else: rel->symbol left at whatever value it had
-  }
-  ```
-- **Impact:** Uninitialized or stale pointer in `rel->symbol`. Downstream code (linker) dereferences it → crash or wrong symbol resolution.
-- **Fix:** Initialize `rel->symbol = NULL` before the check, or return an error on out-of-bounds index.
 
 ### 3. Section sh_link Validation — Partial State Corruption
 
