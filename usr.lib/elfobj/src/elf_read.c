@@ -323,6 +323,74 @@ static symtab_index_t *find_symtab(symtab_index_t *maps, size_t n, size_t sec_in
     return NULL;
 }
 
+static uint32_t count_gnu_verdef_entries(const struct elf_section *sec, elfobj_endian_t endian) {
+    size_t off = 0;
+    uint32_t count = 0;
+
+    if (sec == NULL || sec->data == NULL || sec->data_size < 20) {
+        return 0;
+    }
+    while (off + 20 <= sec->data_size) {
+        uint32_t next = elf__rd32(sec->data + off + 16, endian);
+        count++;
+        if (next == 0) {
+            break;
+        }
+        if (next < 20 || next > sec->data_size - off) {
+            break;
+        }
+        off += next;
+    }
+    return count;
+}
+
+static uint32_t count_gnu_verneed_entries(const struct elf_section *sec, elfobj_endian_t endian) {
+    size_t off = 0;
+    uint32_t count = 0;
+
+    if (sec == NULL || sec->data == NULL || sec->data_size < 16) {
+        return 0;
+    }
+    while (off + 16 <= sec->data_size) {
+        uint32_t next = elf__rd32(sec->data + off + 12, endian);
+        count++;
+        if (next == 0) {
+            break;
+        }
+        if (next < 16 || next > sec->data_size - off) {
+            break;
+        }
+        off += next;
+    }
+    return count;
+}
+
+static uint16_t max_known_version_index(elfobj_t *obj) {
+    size_t i;
+    uint32_t verdef_count = 0;
+    uint32_t verneed_count = 0;
+    uint32_t max_u32;
+
+    for (i = 0; i < obj->section_count; ++i) {
+        struct elf_section *sec = obj->sections[i];
+
+        if (sec == NULL || sec->data == NULL) {
+            continue;
+        }
+        if (sec->type == SHT_GNU_verdef) {
+            verdef_count += count_gnu_verdef_entries(sec, obj->endian);
+        } else if (sec->type == SHT_GNU_verneed) {
+            verneed_count += count_gnu_verneed_entries(sec, obj->endian);
+        }
+    }
+
+    max_u32 = 1u + verdef_count + verneed_count;
+    if (max_u32 > 0x7fffu) {
+        max_u32 = 0x7fffu;
+    }
+    return (uint16_t)max_u32;
+}
+
 static elf_err_t parse_symbols(elfobj_t *obj, symtab_index_t **out_maps, size_t *out_count) {
     size_t i;
     size_t map_count = 0;
@@ -477,6 +545,7 @@ static elf_err_t parse_symbols(elfobj_t *obj, symtab_index_t **out_maps, size_t 
 
 static elf_err_t parse_symbol_versions(elfobj_t *obj, symtab_index_t *maps, size_t map_count) {
     size_t i;
+    uint16_t max_ver_index = max_known_version_index(obj);
 
     for (i = 0; i < obj->section_count; ++i) {
         struct elf_section *sec = obj->sections[i];
@@ -506,7 +575,13 @@ static elf_err_t parse_symbol_versions(elfobj_t *obj, symtab_index_t *maps, size
         }
         limit = map->count;
         for (j = 0; j < limit; ++j) {
-            map->symbols[j]->ver_index = elf__rd16(sec->data + (j * entsz), obj->endian);
+            uint16_t raw = elf__rd16(sec->data + (j * entsz), obj->endian);
+            uint16_t base = (uint16_t)(raw & 0x7fffu);
+
+            if (base > max_ver_index) {
+                return ELF_ERR_FORMAT;
+            }
+            map->symbols[j]->ver_index = raw;
         }
         obj->has_versioning = 1;
     }

@@ -12,8 +12,8 @@
 | **CRITICAL** | 0 | *(all resolved)* |
 | **HIGH** | 0 | *(all resolved)* |
 | **MEDIUM** | 2 | NULL dereference, group signature |
-| **LOW** | 1 | version index |
-| **TOTAL** | **3** | |
+| **LOW** | 0 | *(all resolved)* |
+| **TOTAL** | **2** | |
 
 This library parses untrusted ELF files supplied to the assembler/linker. All input data must be treated as adversarial.
 
@@ -49,10 +49,7 @@ This library parses untrusted ELF files supplied to the assembler/linker. All in
 
 ## LOW Findings
 
-### 18. Symbol Version Index Not Cross-Checked
-
-- **File:** `usr.lib/elfobj/src/elf_read.c`, lines 451-475
-- **Issue:** GNU `.gnu.version` entries are stored as raw `uint16_t` values without validating against the version definition/need tables.
+*(All resolved)*
 
 ---
 
