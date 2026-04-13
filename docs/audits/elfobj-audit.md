@@ -12,8 +12,8 @@
 | **CRITICAL** | 2 | String table validation, section link validation |
 | **HIGH** | 2 | Integer overflow, section overlap |
 | **MEDIUM** | 2 | NULL dereference, group signature |
-| **LOW** | 3 | REL/RELA arch checks, diagnostic buffer, version index |
-| **TOTAL** | **9** | |
+| **LOW** | 2 | diagnostic buffer, version index |
+| **TOTAL** | **8** | |
 
 This library parses untrusted ELF files supplied to the assembler/linker. All input data must be treated as adversarial.
 
@@ -90,12 +90,6 @@ This library parses untrusted ELF files supplied to the assembler/linker. All in
 ---
 
 ## LOW Findings
-
-### 16. Machine=0 Bypasses REL/RELA Architecture Checks
-
-- **File:** `usr.lib/elfobj/src/elf_read.c`, lines 494-517
-- **Issue:** Architecture-specific relocation format checks (REL vs RELA) are only applied for known machines (ARM, x86, etc.). `machine=0` skips all checks.
-- **Fix:** Reject `machine=0` or apply a default strict check.
 
 ### 17. Diagnostic Buffer Grows Without Limit
 
