@@ -14,19 +14,12 @@
 | HIGH     | 0     |
 | MEDIUM   | 0     |
 | LOW      | 0     |
-| INFO     | 2     |
-| **Total**| **2** |
+| INFO     | 1     |
+| **Total**| **1** |
 
 ---
 
 ## INFO
-
-### I-3: No SIGPIPE handling in prompt evaluation
-
-**File:** `prompt.c`  
-**Impact:** If prompt evaluation involves command substitution via `expand_word()`, a broken pipe could terminate the shell. The signal masking in `evaluate_prompt()` blocks SIGINT/SIGTERM/SIGCHLD but not SIGPIPE.
-
----
 
 ### I-4: `extern` declarations in .c files instead of headers
 

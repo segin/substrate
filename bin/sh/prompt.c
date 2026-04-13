@@ -405,6 +405,7 @@ char *evaluate_prompt(const char *ps1, int command_count, int extended) {
     sigaddset(&blocked, SIGINT);
     sigaddset(&blocked, SIGTERM);
     sigaddset(&blocked, SIGCHLD);
+    sigaddset(&blocked, SIGPIPE);
     sigprocmask(SIG_BLOCK, &blocked, &old_mask);
     
     // Save state

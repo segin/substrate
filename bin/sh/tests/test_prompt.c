@@ -20,6 +20,7 @@ char *last_expand_word_input = NULL;
 
 int shell_xtrace = 0;
 int shell_errexit = 0;
+int shell_is_interactive = 0;
 int shell_promptvars = 0;
 
 char *expand_word(const char *word) { 
