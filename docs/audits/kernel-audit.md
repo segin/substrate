@@ -11,8 +11,8 @@
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
 | **MEDIUM** | 0 | *(all resolved)* |
-| **LOW** | 3 | Hardcoded constants, performance |
-| **TOTAL** | **3** | |
+| **LOW** | 2 | Hardcoded constants, performance |
+| **TOTAL** | **2** | |
 
 ---
 
@@ -23,8 +23,6 @@
 ---
 
 ## LOW Findings
-
-58. `boot.S` maps 4MB for LAPIC when 4KB suffices.
 
 59. Early GDT → full GDT transition not documented.
 
