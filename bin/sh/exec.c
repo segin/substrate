@@ -1425,10 +1425,11 @@ static int apply_redirections(ast_redirection_t *redir) {
 static char *find_in_path(const char *cmd) {
     if (strchr(cmd, '/')) return strdup(cmd);
 
-    char *path = shell_var_get("PATH");
-    if (!path) path = "/bin:/usr/bin";
+    char *path_alloc = shell_var_get("PATH");
+    const char *path = path_alloc ? path_alloc : "/bin:/usr/bin";
 
     char *path_copy = strdup(path);
+    free(path_alloc);
     char *dir = strtok(path_copy, ":");
     while (dir) {
         char full_path[1024];

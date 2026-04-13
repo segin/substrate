@@ -12,29 +12,14 @@
 |----------|-------|
 | CRITICAL | 0     |
 | HIGH     | 0     |
-| MEDIUM   | 6     |
+| MEDIUM   | 5     |
 | LOW      | 8     |
 | INFO     | 4     |
-| **Total**| **18**|
+| **Total**| **17**|
 
 ---
 
 ## MEDIUM
-
-### M-4: `find_in_path()` leaks `shell_var_get("PATH")` return value
-
-**File:** `exec.c`, `find_in_path()` (~line 1440)  
-**Impact:** `shell_var_get("PATH")` returns `strdup()`'d memory. The function does `strdup(path)` into `path_copy` but the original `path` from `shell_var_get()` is never freed. Leaks on every external command lookup.
-
-```c
-char *path = shell_var_get("PATH");
-if (!path) path = "/bin:/usr/bin";
-char *path_copy = strdup(path);  // path (from shell_var_get) leaked
-```
-
-**Fix:** Track whether `path` was allocated and free it after `strdup`.
-
----
 
 ### M-5: VLAs in `builtin_eval()` and `execute_pipeline()`
 
@@ -204,7 +189,6 @@ The shell has a pervasive pattern of calling `shell_var_get()` (which returns `s
 
 | Location | Variable | Severity |
 |----------|----------|----------|
-| `exec.c` `find_in_path()` | PATH | MEDIUM |
 | `exec.c` `builtin_command()` | PATH | MEDIUM |
 | `exec.c` `builtin_exec()` | envp array | HIGH (but moot due to exec) |
 | `sh.c` interactive loop | prompt, PS1 | LOW |
