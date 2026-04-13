@@ -27,7 +27,9 @@ _start:
     push %ebx # argv
     push %eax # argc
     
-    # Align stack?
+    # Align stack to 16-byte boundary before call main (System V ABI requirement)
+    andl $0xFFFFFFF0, %esp
+    subl $12, %esp # Account for 3 push above; maintain 16-byte alignment
     
     call __stdio_init
     call main
