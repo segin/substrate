@@ -11,9 +11,9 @@
 |----------|-------|-----------|
 | **CRITICAL** | 0 | *(all resolved)* |
 | **HIGH** | 0 | *(all resolved)* |
-| **MEDIUM** | 1 | group signature |
+| **MEDIUM** | 0 | *(all resolved)* |
 | **LOW** | 0 | *(all resolved)* |
-| **TOTAL** | **1** | |
+| **TOTAL** | **0** | |
 
 This library parses untrusted ELF files supplied to the assembler/linker. All input data must be treated as adversarial.
 
@@ -33,10 +33,7 @@ This library parses untrusted ELF files supplied to the assembler/linker. All in
 
 ## MEDIUM Findings
 
-### 12. Group Signature Name Extraction
-
-- **File:** `usr.lib/elfobj/src/elf_link.c`, lines 113-160
-- **Issue:** Group section's symtab link re-used without re-validation in linking context. If object was modified between parse and link, stale pointers possible.
+*(All resolved)*
 
 ---
 

@@ -89,6 +89,7 @@ static char *group_signature_name(const elfobj_t *obj, const struct elf_section 
     uint32_t st_name = 0;
     const char *sig_name = NULL;
     size_t entsz;
+    size_t min_entsz;
     size_t nsyms;
 
     if (obj == NULL || group_sec == NULL || group_sec->type != SHT_GROUP) {
@@ -101,8 +102,9 @@ static char *group_signature_name(const elfobj_t *obj, const struct elf_section 
     if (symtab == NULL || (symtab->type != SHT_SYMTAB && symtab->type != SHT_DYNSYM) || symtab->data == NULL) {
         return NULL;
     }
-    entsz = (size_t)(symtab->entsize ? symtab->entsize : (obj->cls == ELFOBJ_CLASS_32 ? 16 : 24));
-    if (entsz == 0 || symtab->data_size % entsz != 0) {
+    min_entsz = obj->cls == ELFOBJ_CLASS_32 ? 16u : 24u;
+    entsz = (size_t)(symtab->entsize ? symtab->entsize : min_entsz);
+    if (entsz < min_entsz || symtab->data_size % entsz != 0) {
         return NULL;
     }
     nsyms = symtab->data_size / entsz;
