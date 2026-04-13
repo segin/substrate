@@ -11,9 +11,9 @@
 |----------|-------|-----------|
 | **CRITICAL** | 2 | String table validation, section link validation |
 | **HIGH** | 2 | Integer overflow, section overlap |
-| **MEDIUM** | 4 | Strtab growth, NULL dereference, group signature, compression header |
+| **MEDIUM** | 3 | NULL dereference, group signature, compression header |
 | **LOW** | 4 | Alignment validation, REL/RELA arch checks, diagnostic buffer, version index |
-| **TOTAL** | **12** | |
+| **TOTAL** | **11** | |
 
 This library parses untrusted ELF files supplied to the assembler/linker. All input data must be treated as adversarial.
 
@@ -74,19 +74,6 @@ This library parses untrusted ELF files supplied to the assembler/linker. All in
 ---
 
 ## MEDIUM Findings
-
-### 9. Strtab Growth Silent Failure on Extreme Sizes
-
-- **File:** `usr.lib/elfobj/src/elf_strtab.c`, lines 31-59
-- **Function:** `elf__strtab_add()`
-- **Issue:** Doubling loop can reach the `(size_t)-1 / 2` limit and return 0 (success offset 0, which is the empty string slot) rather than signaling an error:
-  ```c
-  while (new_cap < tab->size + len) {
-      if (new_cap > ((size_t)-1) / 2) return 0;  // looks like success!
-      new_cap *= 2;
-  }
-  ```
-- **Fix:** Return a distinct error value (e.g., `(uint32_t)-1`) on overflow.
 
 ### 10. Missing NULL Check After Allocation in Write Path
 

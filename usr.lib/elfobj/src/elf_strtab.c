@@ -31,7 +31,7 @@ uint32_t elf__strtab_add(elf_strtab_t *tab, const char *s) {
     char *next;
 
     if (tab == NULL || s == NULL) {
-        return 0;
+        return UINT32_MAX;
     }
 
     len = strlen(s) + 1;
@@ -40,18 +40,21 @@ uint32_t elf__strtab_add(elf_strtab_t *tab, const char *s) {
         size_t new_cap = tab->cap == 0 ? 16 : tab->cap;
         while (new_cap < tab->size + len) {
             if (new_cap > ((size_t)-1) / 2) {
-                return 0;
+                return UINT32_MAX;
             }
             new_cap *= 2;
         }
         next = (char *)realloc(tab->data, new_cap);
         if (next == NULL) {
-            return 0;
+            return UINT32_MAX;
         }
         tab->data = next;
         tab->cap = new_cap;
     }
 
+    if (off > UINT32_MAX) {
+        return UINT32_MAX;
+    }
     memcpy(tab->data + tab->size, s, len);
     tab->size += len;
     return (uint32_t)off;

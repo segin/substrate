@@ -278,6 +278,10 @@ static uint8_t *build_symtab(const elfobj_t *obj, elfobj_endian_t e, elfobj_clas
         uint8_t st_info = ELF32_ST_INFO(sym->bind, sym->type);
         if (!(has_null && i == 0)) {
             st_name = elf__strtab_add(strtab, sym->name ? sym->name : "");
+            if (st_name == UINT32_MAX) {
+                free(buf);
+                return NULL;
+            }
         }
         if (cls == ELFOBJ_CLASS_32) {
             elf__wr32(p + 0, e, st_name);
@@ -301,6 +305,11 @@ static uint8_t *build_symtab(const elfobj_t *obj, elfobj_endian_t e, elfobj_clas
         uint8_t *p = buf + (sym_index * entsz);
         uint32_t st_name = elf__strtab_add(strtab, extra_names[i] ? extra_names[i] : "");
         uint8_t st_info = ELF32_ST_INFO(STB_GLOBAL, STT_NOTYPE);
+
+        if (st_name == UINT32_MAX) {
+            free(buf);
+            return NULL;
+        }
 
         if (extra_indices != NULL) {
             extra_indices[i] = sym_index;
@@ -462,6 +471,11 @@ static uint8_t *build_gnu_verdef(elfobj_endian_t e, elf_strtab_t *strtab,
         uint32_t name_off = elf__strtab_add(strtab, names[i].name ? names[i].name : "");
         uint32_t hash = elf_hash_sysv(names[i].name ? names[i].name : "");
 
+        if (name_off == UINT32_MAX) {
+            free(buf);
+            return NULL;
+        }
+
         elf__wr16(p + 0, e, 1);
         elf__wr16(p + 2, e, 0);
         elf__wr16(p + 4, e, names[i].index);
@@ -605,7 +619,10 @@ static uint8_t *build_dynstr(const elfobj_t *obj, size_t *out_size) {
             continue;
         }
         if (sym->bind == STB_GLOBAL || sym->bind == STB_WEAK) {
-            (void)elf__strtab_add(&tab, sym->name);
+            if (elf__strtab_add(&tab, sym->name) == UINT32_MAX) {
+                elf__strtab_free(&tab);
+                return NULL;
+            }
         }
     }
     *out_size = tab.size;
@@ -969,6 +986,10 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
 
     for (i = 1; i < sec_count; ++i) {
         secs[i].sh_name = elf__strtab_add(&shstr, secs[i].name ? secs[i].name : "");
+        if (secs[i].sh_name == UINT32_MAX) {
+            err = ELF_ERR_OOM;
+            goto done;
+        }
     }
     secs[shstr_index].data = (const uint8_t *)shstr.data;
     secs[shstr_index].size = shstr.size;
