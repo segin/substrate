@@ -622,7 +622,8 @@ static int builtin_eval(int argc, char **argv) {
     int status = 0;
     if (argc > 1) {
         size_t total_len = 0;
-        size_t lengths[argc];
+        size_t *lengths = malloc(argc * sizeof(size_t));
+        if (!lengths) return 1;
         for (int i = 1; i < argc; i++) {
             lengths[i] = strlen(argv[i]);
             total_len += lengths[i] + 1;
@@ -639,6 +640,7 @@ static int builtin_eval(int argc, char **argv) {
             status = execute_line(line);
             free(line);
         }
+        free(lengths);
     }
     return status;
 }
@@ -1823,8 +1825,15 @@ static int execute_simple_command(ast_simple_command_t *cmd, exec_info_t *info) 
 
 static int execute_pipeline(ast_pipeline_t *pipe_node, exec_info_t *info) {
     int n = pipe_node->command_count;
-    int pipefds[2 * (n - 1)];
+    int *pipefds = malloc(2 * (n - 1) * sizeof(int));
+    pid_t *pids = malloc(n * sizeof(pid_t));
     int last_status = 0;
+
+    if (!pipefds || !pids) {
+        free(pipefds);
+        free(pids);
+        return 1;
+    }
 
     /* Create job if interactive and not already in one */
     job_t *job = info->job;
@@ -1838,6 +1847,8 @@ static int execute_pipeline(ast_pipeline_t *pipe_node, exec_info_t *info) {
     for (int i = 0; i < n - 1; i++) {
         if (pipe(pipefds + i * 2) < 0) {
             perror("pipe");
+            free(pipefds);
+            free(pids);
             return 1;
         }
     }
@@ -1887,6 +1898,8 @@ static int execute_pipeline(ast_pipeline_t *pipe_node, exec_info_t *info) {
             exit(execute_ast(pipe_node->commands[i], &child_info));
         } else if (pids[i] < 0) {
              perror("fork");
+             free(pipefds);
+             free(pids);
              return 1;
         }
         
@@ -1908,6 +1921,8 @@ static int execute_pipeline(ast_pipeline_t *pipe_node, exec_info_t *info) {
         
         if (info->background) {
             printf("[%d] %d %s\n", job->id, (int)job->pgid, job->command);
+            free(pipefds);
+            free(pids);
             return 0;
         }
         
@@ -1927,6 +1942,8 @@ static int execute_pipeline(ast_pipeline_t *pipe_node, exec_info_t *info) {
         
         tcsetpgrp(STDIN_FILENO, shell_pgid);
         tcsetattr(STDIN_FILENO, TCSADRAIN, &shell_tmodes);
+        free(pipefds);
+        free(pids);
         return last_status;
     }
     
@@ -1942,6 +1959,8 @@ static int execute_pipeline(ast_pipeline_t *pipe_node, exec_info_t *info) {
         }
     }
 
+    free(pipefds);
+    free(pids);
     return last_status;
 }
 

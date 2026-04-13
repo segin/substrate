@@ -12,23 +12,14 @@
 |----------|-------|
 | CRITICAL | 0     |
 | HIGH     | 0     |
-| MEDIUM   | 5     |
+| MEDIUM   | 4     |
 | LOW      | 8     |
 | INFO     | 4     |
-| **Total**| **17**|
+| **Total**| **16**|
 
 ---
 
 ## MEDIUM
-
-### M-5: VLAs in `builtin_eval()` and `execute_pipeline()`
-
-**File:** `exec.c`  
-**Impact:** `builtin_eval()` uses `size_t lengths[argc]` and `execute_pipeline()` uses `int pipefds[2*(n-1)]` and `pid_t pids[n]`. These are variable-length arrays. With large `argc` or pipeline depth, they can overflow the stack. VLAs are optional in C11 and not supported in C89.
-
-**Fix:** Replace with `malloc()`/`free()` for safety and portability.
-
----
 
 ### M-7: `get_ifs()` in expand.c returns allocated or static memory depending on path
 
