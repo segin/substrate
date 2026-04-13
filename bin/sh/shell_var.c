@@ -207,6 +207,14 @@ char *shell_var_get(const char *name) {
     // $* - all positional parameters as single word (IFS-joined)
     if (strcmp(name, "*") == 0) {
         if (shell_argc == 0) return strdup("");
+        char *ifs = shell_var_get("IFS");
+        char sep = ' ';        /* default when IFS unset */
+        int has_sep = 1;
+        if (ifs) {
+            if (ifs[0]) sep = ifs[0];  /* first char of IFS */
+            else has_sep = 0;          /* IFS="" -> no separator */
+            free(ifs);
+        }
         size_t total = 0;
         for (int i = 0; i < shell_argc; i++) {
             total += strlen(shell_argv[i]) + 1;
@@ -214,7 +222,7 @@ char *shell_var_get(const char *name) {
         char *buf = malloc(total + 1);
         char *ptr = buf;
         for (int i = 0; i < shell_argc; i++) {
-            if (i > 0) *ptr++ = ' ';
+            if (i > 0 && has_sep) *ptr++ = sep;
             size_t len = strlen(shell_argv[i]);
             memcpy(ptr, shell_argv[i], len);
             ptr += len;

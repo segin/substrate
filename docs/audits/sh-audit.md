@@ -13,20 +13,13 @@
 | CRITICAL | 0     |
 | HIGH     | 0     |
 | MEDIUM   | 0     |
-| LOW      | 5     |
+| LOW      | 4     |
 | INFO     | 4     |
-| **Total**| **9** |
+| **Total**| **8** |
 
 ---
 
 ## LOW
-
-### L-4: `$*` does not use first character of IFS
-
-**File:** `shell_var.c`, `shell_var_get("*")` (~line 226)  
-**Impact:** POSIX requires `"$*"` to join positional parameters with the first character of IFS. The implementation always joins with space.
-
----
 
 ### L-5: Prompt variable `p` leaked from `shell_var_get("prompt")` / `shell_var_get("PS1")`
 
@@ -109,6 +102,5 @@ The shell has a pervasive pattern of calling `shell_var_get()` (which returns `s
 
 ## POSIX Compliance Gaps
 
-1. **$*:** Doesn't use first char of IFS for joining
 5. **echo:** Missing `-n` flag
 7. **case:** Single pattern per item (no `|` alternatives)
