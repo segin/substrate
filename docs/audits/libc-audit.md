@@ -12,8 +12,8 @@
 | **CRITICAL** | 4 | Buffer overflows (sprintf, strcpy, strcat), libgen edge cases |
 | **HIGH** | 3 | setjmp ABI, signal safety |
 | **MEDIUM** | 6 | UTF-8 validation, alignment, division by zero, float precision |
-| **LOW** | 6 | Stub implementations, error handling, atexit ordering |
-| **TOTAL** | **19** | |
+| **LOW** | 4 | Stub implementations, atexit ordering |
+| **TOTAL** | **17** | |
 
 ---
 
@@ -125,21 +125,10 @@
 - **File:** `lib/c/fnmatch.c`, lines 77-95
 - **Issue:** `[a\-z]` doesn't correctly match literal `-` in all cases.
 
-### 29. `getenv()` Doesn't Set errno
-
-- **File:** `lib/c/src/stdlib.c`, line 379
-- **Issue:** Returns NULL without setting errno. Caller can't distinguish "not found" from error.
-
 ### 31. `atexit()` Handler Re-Registration
 
 - **File:** `lib/c/src/stdlib.c`, lines 730-735
 - **Issue:** If `atexit()` is called from within an atexit handler, the new handler won't run. POSIX allows this, but it should be documented.
-
-### 32. FILE Structure Not Fully Initialized
-
-- **File:** `lib/c/stdio/stdio_core.c`, lines 25-45
-- **Issue:** `fdopen()` doesn't zero all FILE fields in some paths. Uninitialized fields can cause subtle bugs.
-- **Fix:** `memset(f, 0, sizeof(FILE))` on allocation.
 
 ---
 
