@@ -6,6 +6,8 @@
 #include <unistd.h>
 
 #define ELFOBJ_MAX_ALLOC_BYTES (256u * 1024u * 1024u)
+#define ELFOBJ_MAX_DIAG_BYTES (1u * 1024u * 1024u)
+#define ELFOBJ_MAX_DIAG_ITEMS 4096u
 
 static int mul_overflow(size_t a, size_t b, size_t *out) {
     if (a == 0 || b == 0) {
@@ -198,6 +200,9 @@ elf_err_t elf__diag_append(elfobj_t *obj, elf_diag_level_t level, elf_err_t code
     }
 
     need = strlen(msg) + 1;
+    if (obj->diag.len > ELFOBJ_MAX_DIAG_BYTES || need > ELFOBJ_MAX_DIAG_BYTES - obj->diag.len) {
+        return ELF_ERR_OOM;
+    }
     if (obj->diag.cap < obj->diag.len + need) {
         size_t new_cap = obj->diag.cap == 0 ? 128 : obj->diag.cap;
         while (new_cap < obj->diag.len + need) {
@@ -205,6 +210,12 @@ elf_err_t elf__diag_append(elfobj_t *obj, elf_diag_level_t level, elf_err_t code
                 return ELF_ERR_OOM;
             }
             new_cap *= 2;
+        }
+        if (new_cap > ELFOBJ_MAX_DIAG_BYTES) {
+            new_cap = ELFOBJ_MAX_DIAG_BYTES;
+            if (new_cap < obj->diag.len + need) {
+                return ELF_ERR_OOM;
+            }
         }
         next = (char *)realloc(obj->diag.buf, new_cap);
         if (next == NULL) {
@@ -221,6 +232,12 @@ elf_err_t elf__diag_append(elfobj_t *obj, elf_diag_level_t level, elf_err_t code
 
     if (obj->diag_item_count == obj->diag_item_cap) {
         size_t new_cap = obj->diag_item_cap == 0 ? 16 : obj->diag_item_cap * 2;
+        if (obj->diag_item_cap >= ELFOBJ_MAX_DIAG_ITEMS) {
+            return ELF_ERR_OOM;
+        }
+        if (new_cap > ELFOBJ_MAX_DIAG_ITEMS) {
+            new_cap = ELFOBJ_MAX_DIAG_ITEMS;
+        }
         items_next = elf__reallocarray(obj->diag_items, new_cap, sizeof(obj->diag_items[0]));
         if (items_next == NULL) {
             return ELF_ERR_OOM;

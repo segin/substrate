@@ -12,8 +12,8 @@
 | **CRITICAL** | 2 | String table validation, section link validation |
 | **HIGH** | 2 | Integer overflow, section overlap |
 | **MEDIUM** | 2 | NULL dereference, group signature |
-| **LOW** | 2 | diagnostic buffer, version index |
-| **TOTAL** | **8** | |
+| **LOW** | 1 | version index |
+| **TOTAL** | **7** | |
 
 This library parses untrusted ELF files supplied to the assembler/linker. All input data must be treated as adversarial.
 
@@ -90,12 +90,6 @@ This library parses untrusted ELF files supplied to the assembler/linker. All in
 ---
 
 ## LOW Findings
-
-### 17. Diagnostic Buffer Grows Without Limit
-
-- **File:** `usr.lib/elfobj/src/elf_util.c`, lines 248-290
-- **Issue:** Crafted ELF with many validation errors causes unbounded diagnostic buffer growth.
-- **Fix:** Add a maximum diagnostic buffer size.
 
 ### 18. Symbol Version Index Not Cross-Checked
 
