@@ -322,7 +322,7 @@ long strtol(const char *nptr, char **endptr, int base) {
     }
     if (base == 0) base = *s == '0' ? 8 : 10;
 
-    cutoff = neg ? -(unsigned long)-2147483648L : 2147483647L; // Simplified LONG_MAX/MIN for 32-bit
+    cutoff = neg ? (unsigned long)(-(LONG_MIN + 1L)) + 1u : (unsigned long)LONG_MAX;
     cutlim = cutoff % (unsigned long)base;
     cutoff /= (unsigned long)base;
     for (acc = 0, any = 0, c = *s++;; c = *s++) {

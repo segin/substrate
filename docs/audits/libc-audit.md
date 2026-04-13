@@ -10,10 +10,10 @@
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
 | **CRITICAL** | 4 | Buffer overflows (sprintf, strcpy, strcat), libgen edge cases |
-| **HIGH** | 4 | setjmp ABI, signal safety |
+| **HIGH** | 3 | setjmp ABI, signal safety |
 | **MEDIUM** | 6 | UTF-8 validation, alignment, division by zero, float precision |
 | **LOW** | 6 | Stub implementations, error handling, atexit ordering |
-| **TOTAL** | **20** | |
+| **TOTAL** | **19** | |
 
 ---
 
@@ -61,12 +61,6 @@
 - **File:** `lib/c/stdio/printf.c`, lines 590-615
 - **Issue:** `printf()`, `fprintf()`, etc. use a fixed `char buf[4096]` on the stack. Format strings producing >4096 bytes overflow.
 - **Fix:** Use dynamic allocation or chunked output.
-
-### 12. Hardcoded Limits in `strtol()`/`strtoll()`
-
-- **File:** `lib/c/src/stdlib.c`, lines 255-335
-- **Issue:** Overflow cutoff uses hardcoded `2147483647L` instead of `LONG_MAX` macro. Fragile if types change.
-- **Fix:** Use `LONG_MIN`/`LONG_MAX` macros.
 
 ### 13. Signal Safety in malloc/free
 
