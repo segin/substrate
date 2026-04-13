@@ -11,8 +11,8 @@
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
 | **MEDIUM** | 0 | *(all resolved)* |
-| **LOW** | 5 | Hardcoded constants, performance |
-| **TOTAL** | **5** | |
+| **LOW** | 4 | Hardcoded constants, performance |
+| **TOTAL** | **4** | |
 
 ---
 
@@ -23,8 +23,6 @@
 ---
 
 ## LOW Findings
-
-56. Console input ring buffer not fully atomic on SMP.
 
 57. Futex robust list walk limit of 4096 could miss entries.
 
