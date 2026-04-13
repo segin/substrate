@@ -11,8 +11,8 @@
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
 | **MEDIUM** | 0 | *(all resolved)* |
-| **LOW** | 12 | Code style, comments, hardcoded constants, performance |
-| **TOTAL** | **12** | |
+| **LOW** | 11 | Code style, comments, hardcoded constants, performance |
+| **TOTAL** | **11** | |
 
 ---
 
@@ -23,8 +23,6 @@
 ---
 
 ## LOW Findings
-
-49. Fixed pool sizes hardcoded (sleepq 128, turnstile 64, pgrp hash 16).
 
 50. Inconsistent error return codes (-1 vs -errno vs positive errno).
 
