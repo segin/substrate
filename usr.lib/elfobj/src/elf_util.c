@@ -5,6 +5,8 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+#define ELFOBJ_MAX_ALLOC_BYTES (256u * 1024u * 1024u)
+
 static int mul_overflow(size_t a, size_t b, size_t *out) {
     if (a == 0 || b == 0) {
         *out = 0;
@@ -53,12 +55,18 @@ void *elf__calloc(size_t n, size_t sz) {
     if (mul_overflow(n, sz, &total)) {
         return NULL;
     }
+    if (total > ELFOBJ_MAX_ALLOC_BYTES) {
+        return NULL;
+    }
     return calloc(1, total);
 }
 
 void *elf__reallocarray(void *ptr, size_t n, size_t sz) {
     size_t total = 0;
     if (mul_overflow(n, sz, &total)) {
+        return NULL;
+    }
+    if (total > ELFOBJ_MAX_ALLOC_BYTES) {
         return NULL;
     }
     return realloc(ptr, total);

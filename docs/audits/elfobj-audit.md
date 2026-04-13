@@ -10,10 +10,10 @@
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
 | **CRITICAL** | 2 | String table validation, section link validation |
-| **HIGH** | 4 | Integer overflow, section overlap, unbounded allocation, OOM cleanup |
+| **HIGH** | 3 | Integer overflow, section overlap, OOM cleanup |
 | **MEDIUM** | 5 | Strtab growth, NULL dereference, entsize DoS, group signature, compression header |
 | **LOW** | 4 | Alignment validation, REL/RELA arch checks, diagnostic buffer, version index |
-| **TOTAL** | **15** | |
+| **TOTAL** | **14** | |
 
 This library parses untrusted ELF files supplied to the assembler/linker. All input data must be treated as adversarial.
 
@@ -70,13 +70,6 @@ This library parses untrusted ELF files supplied to the assembler/linker. All in
 - **Issue:** Only non-NOBITS, non-zero-size sections are checked for overlaps. Two NOBITS sections with conflicting `sh_addr` values are not detected.
 - **Impact:** Confusing memory layout; linker may allocate overlapping BSS regions.
 - **Fix:** Also validate `sh_addr` ranges for NOBITS sections.
-
-### 7. Unbounded Memory Allocation from Untrusted Counts
-
-- **File:** `usr.lib/elfobj/src/elf_util.c`, lines 15-43
-- **Issue:** `elf__calloc(n, sz)` checks for multiply overflow but not for excessive total size. A crafted ELF with `shnum = 100000` and `entsize = 40` allocates 4MB — and larger values are possible.
-- **Impact:** Denial of service via memory exhaustion. A linker processing a malicious `.o` file runs out of memory.
-- **Fix:** Add a configurable maximum allocation size (e.g., 256MB) as a sanity check.
 
 ### 8. OOM Cleanup Off-by-One in Symbol Parsing
 
