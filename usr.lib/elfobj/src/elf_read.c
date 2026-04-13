@@ -171,6 +171,13 @@ static elf_err_t parse_sections(elfobj_t *obj, uint64_t shoff, uint16_t entsize,
             sec->data = obj->image + sec->offset;
             sec->data_size = (size_t)sec->size;
             sec->owns_data = 0;
+
+            if (sec->type == SHT_STRTAB && sec->data_size > 0 &&
+                sec->data[sec->data_size - 1] != '\0') {
+                free(sec->name);
+                free(sec);
+                return ELF_ERR_FORMAT;
+            }
         }
 
         if ((sec->flags & SHF_ALLOC) != 0 && sec->size > 0) {

@@ -9,35 +9,17 @@
 
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
-| **CRITICAL** | 2 | String table validation, section link validation |
+| **CRITICAL** | 1 | section link validation |
 | **HIGH** | 1 | section overlap |
 | **MEDIUM** | 2 | NULL dereference, group signature |
 | **LOW** | 1 | version index |
-| **TOTAL** | **6** | |
+| **TOTAL** | **5** | |
 
 This library parses untrusted ELF files supplied to the assembler/linker. All input data must be treated as adversarial.
 
 ---
 
 ## CRITICAL Findings
-
-### 1. String Table Access Without Null-Terminator Guarantee
-
-- **File:** `usr.lib/elfobj/src/elf_read.c`, lines 21-35
-- **Function:** `safe_str()`
-- **Issue:** The function scans for a null terminator within bounds, returning NULL if none found. This is correct in isolation. However, callers that use `safe_str()` for display/diagnostics but fall back to raw pointer access on NULL bypass the protection.
-- **Code:**
-  ```c
-  static const char *safe_str(const uint8_t *base, size_t len, uint32_t off) {
-      if (base == NULL || off >= len) return NULL;
-      for (size_t i = off; i < len; ++i) {
-          if (base[i] == '\0') return (const char *)(base + off);
-      }
-      return NULL;  // no null terminator found
-  }
-  ```
-- **Risk:** If any code path uses strtab data without going through `safe_str()`, it reads until it hits a zero byte — potentially far beyond the section.
-- **Fix:** Audit all strtab access paths to ensure they go through `safe_str()`. Consider forcing a null byte at `strtab[size-1]` during parse.
 
 ### 3. Section sh_link Validation — Partial State Corruption
 
