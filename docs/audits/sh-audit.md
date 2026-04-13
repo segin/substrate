@@ -12,27 +12,14 @@
 |----------|-------|
 | CRITICAL | 0     |
 | HIGH     | 0     |
-| MEDIUM   | 7     |
+| MEDIUM   | 6     |
 | LOW      | 8     |
 | INFO     | 4     |
-| **Total**| **19**|
+| **Total**| **18**|
 
 ---
 
 ## MEDIUM
-
-### M-3: `buffer_append()` silently truncates at 64KB
-
-**File:** `util.c`, `buffer_append()` (~line 70)  
-**Impact:** Command substitution output, prompt expansion, and word expansion all use `buffer_append()`. If output exceeds 64KB, it is silently truncated without error. This can corrupt script output with no indication.
-
-```c
-#define BUFFER_MAX_SIZE (64 * 1024)
-```
-
-**Fix:** Either raise the limit significantly, make it configurable, or print a diagnostic and set an error flag.
-
----
 
 ### M-4: `find_in_path()` leaks `shell_var_get("PATH")` return value
 
