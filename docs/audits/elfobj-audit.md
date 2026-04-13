@@ -10,10 +10,10 @@
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
 | **CRITICAL** | 2 | String table validation, section link validation |
-| **HIGH** | 5 | Integer overflow, section overlap, relocation offset, unbounded allocation, OOM cleanup |
+| **HIGH** | 4 | Integer overflow, section overlap, unbounded allocation, OOM cleanup |
 | **MEDIUM** | 5 | Strtab growth, NULL dereference, entsize DoS, group signature, compression header |
 | **LOW** | 4 | Alignment validation, REL/RELA arch checks, diagnostic buffer, version index |
-| **TOTAL** | **16** | |
+| **TOTAL** | **15** | |
 
 This library parses untrusted ELF files supplied to the assembler/linker. All input data must be treated as adversarial.
 
@@ -70,13 +70,6 @@ This library parses untrusted ELF files supplied to the assembler/linker. All in
 - **Issue:** Only non-NOBITS, non-zero-size sections are checked for overlaps. Two NOBITS sections with conflicting `sh_addr` values are not detected.
 - **Impact:** Confusing memory layout; linker may allocate overlapping BSS regions.
 - **Fix:** Also validate `sh_addr` ranges for NOBITS sections.
-
-### 6. Relocation Offset Not Validated Against Target Section
-
-- **File:** `usr.lib/elfobj/src/elf_read.c`, lines 520-560
-- **Issue:** `rel->offset` is stored as-is from the ELF data. No check that it falls within the target section's bounds.
-- **Impact:** When the linker applies relocations, it writes at `target_base + rel->offset` — if offset is out-of-bounds, this is an arbitrary write.
-- **Fix:** Validate `rel->offset < target_section->size` during parse.
 
 ### 7. Unbounded Memory Allocation from Untrusted Counts
 

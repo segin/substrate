@@ -543,6 +543,10 @@ static elf_err_t parse_relocations(elfobj_t *obj, symtab_index_t *maps, size_t m
                 r_type = (uint32_t)ELF64_R_TYPE(r_info);
             }
 
+            if (r_offset >= target->size) {
+                return ELF_ERR_FORMAT;
+            }
+
             rel = (struct elf_reloc *)elf__calloc(1, sizeof(*rel));
             if (rel == NULL) {
                 return ELF_ERR_OOM;
