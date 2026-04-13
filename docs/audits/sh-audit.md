@@ -13,20 +13,13 @@
 | CRITICAL | 0     |
 | HIGH     | 0     |
 | MEDIUM   | 0     |
-| LOW      | 6     |
+| LOW      | 5     |
 | INFO     | 4     |
-| **Total**| **10**|
+| **Total**| **9** |
 
 ---
 
 ## LOW
-
-### L-3: Duplicate forward declaration of `parse_for` in parser.c
-
-**File:** `parser.c`  
-**Impact:** Cosmetic issue, compiles fine but indicates sloppy maintenance.
-
----
 
 ### L-4: `$*` does not use first character of IFS
 

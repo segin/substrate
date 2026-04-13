@@ -9,7 +9,6 @@ static ast_node_t *parse_command(lexer_t *l);
 static ast_node_t *parse_if(lexer_t *l);
 static ast_node_t *parse_while(lexer_t *l);
 static ast_node_t *parse_for(lexer_t *l);
-static ast_node_t *parse_for(lexer_t *l);
 static ast_node_t *parse_case(lexer_t *l);
 static ast_node_t *parse_subshell(lexer_t *l);
 static ast_node_t *parse_group(lexer_t *l);
