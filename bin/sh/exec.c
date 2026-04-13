@@ -787,6 +787,102 @@ static int builtin_echo(int argc, char **argv) {
     return 0;
 }
 
+static int test_unary_file(const char *op, const char *path) {
+    struct stat st;
+    if (strcmp(op, "-e") == 0) return stat(path, &st) == 0;
+    if (strcmp(op, "-f") == 0) return stat(path, &st) == 0 && S_ISREG(st.st_mode);
+    if (strcmp(op, "-d") == 0) return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+    if (strcmp(op, "-r") == 0) return access(path, R_OK) == 0;
+    if (strcmp(op, "-w") == 0) return access(path, W_OK) == 0;
+    if (strcmp(op, "-x") == 0) return access(path, X_OK) == 0;
+    if (strcmp(op, "-s") == 0) return stat(path, &st) == 0 && st.st_size > 0;
+    if (strcmp(op, "-L") == 0 || strcmp(op, "-h") == 0) return lstat(path, &st) == 0 && S_ISLNK(st.st_mode);
+    if (strcmp(op, "-b") == 0) return stat(path, &st) == 0 && S_ISBLK(st.st_mode);
+    if (strcmp(op, "-c") == 0) return stat(path, &st) == 0 && S_ISCHR(st.st_mode);
+    if (strcmp(op, "-p") == 0) return stat(path, &st) == 0 && S_ISFIFO(st.st_mode);
+    if (strcmp(op, "-S") == 0) return stat(path, &st) == 0 && S_ISSOCK(st.st_mode);
+    if (strcmp(op, "-t") == 0) return isatty(atoi(path));
+    return 0;
+}
+
+static int test_primary(int argc, char **argv, int *pos) {
+    if (*pos >= argc) return 0;
+
+    /* ! negation */
+    if (strcmp(argv[*pos], "!") == 0) {
+        (*pos)++;
+        return !test_primary(argc, argv, pos);
+    }
+
+    /* ( expr ) grouping */
+    if (strcmp(argv[*pos], "(") == 0) {
+        (*pos)++;
+        int val = test_primary(argc, argv, pos);
+        if (*pos < argc && strcmp(argv[*pos], ")") == 0) (*pos)++;
+        return val;
+    }
+
+    /* Unary string tests */
+    if (strcmp(argv[*pos], "-z") == 0 && *pos + 1 < argc) {
+        (*pos) += 2;
+        return argv[*pos - 1][0] == '\0';
+    }
+    if (strcmp(argv[*pos], "-n") == 0 && *pos + 1 < argc) {
+        (*pos) += 2;
+        return argv[*pos - 1][0] != '\0';
+    }
+
+    /* Unary file tests */
+    if (argv[*pos][0] == '-' && argv[*pos][1] && !argv[*pos][2] && *pos + 1 < argc) {
+        char *op = argv[*pos];
+        if (strchr("efdrwxsLhbcpSt", op[1])) {
+            (*pos) += 2;
+            return test_unary_file(op, argv[*pos - 1]);
+        }
+    }
+
+    /* Binary operators: check if next token is binary op */
+    if (*pos + 2 < argc) {
+        char *left = argv[*pos];
+        char *op = argv[*pos + 1];
+        char *right = argv[*pos + 2];
+
+        /* String comparisons */
+        if (strcmp(op, "=") == 0) { *pos += 3; return strcmp(left, right) == 0; }
+        if (strcmp(op, "!=") == 0) { *pos += 3; return strcmp(left, right) != 0; }
+
+        /* Integer comparisons */
+        if (strcmp(op, "-eq") == 0) { *pos += 3; return atol(left) == atol(right); }
+        if (strcmp(op, "-ne") == 0) { *pos += 3; return atol(left) != atol(right); }
+        if (strcmp(op, "-lt") == 0) { *pos += 3; return atol(left) < atol(right); }
+        if (strcmp(op, "-le") == 0) { *pos += 3; return atol(left) <= atol(right); }
+        if (strcmp(op, "-gt") == 0) { *pos += 3; return atol(left) > atol(right); }
+        if (strcmp(op, "-ge") == 0) { *pos += 3; return atol(left) >= atol(right); }
+    }
+
+    /* Single string: true if non-empty */
+    (*pos)++;
+    return argv[*pos - 1][0] != '\0';
+}
+
+static int test_and(int argc, char **argv, int *pos) {
+    int val = test_primary(argc, argv, pos);
+    while (*pos < argc && strcmp(argv[*pos], "-a") == 0) {
+        (*pos)++;
+        val = test_primary(argc, argv, pos) && val;
+    }
+    return val;
+}
+
+static int test_or(int argc, char **argv, int *pos) {
+    int val = test_and(argc, argv, pos);
+    while (*pos < argc && strcmp(argv[*pos], "-o") == 0) {
+        (*pos)++;
+        val = test_and(argc, argv, pos) || val;
+    }
+    return val;
+}
+
 static int builtin_test(int argc, char **argv) {
     int is_bracket = (argv[0][0] == '[');
     int real_argc = argc;
@@ -798,32 +894,11 @@ static int builtin_test(int argc, char **argv) {
         real_argc--;
     }
     
-    /* [ ] or test with no args is false */
     if (real_argc == 1) return 1;
 
-    if (real_argc == 2) {
-        /* [ string ] or test string -> true if string not empty */
-        return (argv[1][0] == '\0');
-    }
-
-    if (real_argc == 3) {
-        if (strcmp(argv[1], "-z") == 0) return (argv[2][0] == '\0') ? 0 : 1;
-        if (strcmp(argv[1], "-n") == 0) return (argv[2][0] != '\0') ? 0 : 1;
-    }
-    
-    if (real_argc == 4) {
-        char *left = argv[1];
-        char *op = argv[2];
-        char *right = argv[3];
-
-        if (strcmp(op, "=") == 0) return strcmp(left, right) != 0;
-        if (strcmp(op, "!=") == 0) return strcmp(left, right) == 0;
-        if (strcmp(op, "-lt") == 0) return (atoi(left) < atoi(right)) ? 0 : 1;
-        if (strcmp(op, "-gt") == 0) return (atoi(left) > atoi(right)) ? 0 : 1;
-        if (strcmp(op, "-eq") == 0) return (atoi(left) == atoi(right)) ? 0 : 1;
-        if (strcmp(op, "-ne") == 0) return (atoi(left) != atoi(right)) ? 0 : 1;
-    }
-    return 1;
+    int pos = 1;
+    int result = test_or(real_argc, argv, &pos);
+    return result ? 0 : 1;
 }
 
 static int builtin_true(int argc, char **argv) {

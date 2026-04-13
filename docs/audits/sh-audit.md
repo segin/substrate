@@ -12,21 +12,10 @@
 |----------|-------|
 | CRITICAL | 0     |
 | HIGH     | 0     |
-| MEDIUM   | 1     |
+| MEDIUM   | 0     |
 | LOW      | 8     |
 | INFO     | 4     |
-| **Total**| **13**|
-
----
-
-## MEDIUM
-
-### M-10: `builtin_test` is incomplete
-
-**File:** `exec.c`, `builtin_test()` (~line 750)  
-**Impact:** The `test`/`[` builtin only handles a very limited subset: `-z`, `-n` (3 args), and `=`, `!=`, `-lt`, `-gt`, `-eq`, `-ne` (4 args). Missing: file tests (`-e`, `-f`, `-d`, `-r`, `-w`, `-x`, `-s`, `-L`, etc.), `-a`/`-o` logical operators, `!` negation, string comparison (`<`, `>`), `-le`, `-ge`. Many standard shell scripts will fail.
-
-**Fix:** Implement at least the POSIX-required primary expressions.
+| **Total**| **12**|
 
 ---
 
@@ -142,7 +131,6 @@ The shell has a pervasive pattern of calling `shell_var_get()` (which returns `s
 ## POSIX Compliance Gaps
 
 1. **$*:** Doesn't use first char of IFS for joining
-4. **test:** Missing file tests, logic operators, negation
 5. **echo:** Missing `-n` flag
 7. **case:** Single pattern per item (no `|` alternatives)
 8. **~user:** Not expanded
