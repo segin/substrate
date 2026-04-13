@@ -11,33 +11,15 @@
 | Severity | Count |
 |----------|-------|
 | CRITICAL | 0     |
-| HIGH     | 2     |
+| HIGH     | 1     |
 | MEDIUM   | 9     |
 | LOW      | 8     |
 | INFO     | 4     |
-| **Total**| **23**|
+| **Total**| **22**|
 
 ---
 
 ## HIGH
-
-### H-5: `init_environment()` and `get_last_status()` leak `shell_var_get()` return values
-
-**File:** `sh.c`, `init_environment()` (~line 115) and `get_last_status()` (~line 136)  
-**Impact:** Both functions call `shell_var_get()` (which returns `strdup()`'d memory) and never free the result.
-
-```c
-// init_environment:
-if (!shell_var_get("IFS")) { ... }  // Leaked if non-NULL
-
-// get_last_status:
-char *s = shell_var_get("?");
-return s ? atoi(s) : 0;  // s never freed
-```
-
-**Fix:** Store return value, use it, then `free()`.
-
----
 
 ### H-6: Arithmetic division/modulo by zero silently returns 0
 
@@ -273,8 +255,6 @@ The shell has a pervasive pattern of calling `shell_var_get()` (which returns `s
 | `exec.c` `find_in_path()` | PATH | MEDIUM |
 | `exec.c` `builtin_command()` | PATH | MEDIUM |
 | `exec.c` `builtin_exec()` | envp array | HIGH (but moot due to exec) |
-| `sh.c` `init_environment()` | IFS | HIGH |
-| `sh.c` `get_last_status()` | ? | HIGH |
 | `sh.c` interactive loop | prompt, PS1 | LOW |
 | `prompt.c` `evaluate_prompt()` | ? | LOW |
 | `prompt.c` `expand_prompt_escapes()` | ? | LOW |

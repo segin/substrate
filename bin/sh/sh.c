@@ -112,9 +112,11 @@ static void process_startup_files(int is_login_shell, int is_interactive) {
 // Initialize default environment values
 static void init_environment(void) {
     // POSIX: IFS default is space, tab, newline
-    if (!shell_var_get("IFS")) {
+    char *ifs = shell_var_get("IFS");
+    if (!ifs) {
         shell_var_set("IFS", " \t\n");
     }
+    free(ifs);
     
     // Set PATH if not already set
     if (!getenv("PATH")) {
@@ -134,7 +136,9 @@ static void sigchld_handler(int sig) {
 // Helper to get last exit status
 static int get_last_status(void) {
     char *s = shell_var_get("?");
-    return s ? atoi(s) : 0;
+    int status = s ? atoi(s) : 0;
+    free(s);
+    return status;
 }
 
 
