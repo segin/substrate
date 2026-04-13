@@ -11,8 +11,8 @@
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
 | **MEDIUM** | 0 | *(all resolved)* |
-| **LOW** | 4 | Hardcoded constants, performance |
-| **TOTAL** | **4** | |
+| **LOW** | 3 | Hardcoded constants, performance |
+| **TOTAL** | **3** | |
 
 ---
 
@@ -23,8 +23,6 @@
 ---
 
 ## LOW Findings
-
-57. Futex robust list walk limit of 4096 could miss entries.
 
 58. `boot.S` maps 4MB for LAPIC when 4KB suffices.
 
