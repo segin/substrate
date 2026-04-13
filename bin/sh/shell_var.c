@@ -438,6 +438,13 @@ char **shell_var_get_envp(void) {
     return envp;
 }
 
+void shell_var_free_envp(char **envp) {
+    if (!envp) return;
+    for (int i = 0; envp[i]; i++)
+        free(envp[i]);
+    free(envp);
+}
+
 void shell_var_unset(const char *name) {
     shell_scope_t *s = scope_stack;
     while (s) {

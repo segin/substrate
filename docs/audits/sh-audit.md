@@ -10,29 +10,12 @@
 
 | Severity | Count |
 |----------|-------|
-| CRITICAL | 1     |
+| CRITICAL | 0     |
 | HIGH     | 6     |
 | MEDIUM   | 9     |
 | LOW      | 8     |
 | INFO     | 4     |
-| **Total**| **28**|
-
----
-
-## CRITICAL
-
-### C-2: `shell_var_get_envp()` leaks entire envp array on every external command
-
-**File:** `shell_var.c`, `shell_var_get_envp()` (~line 430)  
-**Impact:** Every external command execution allocates a fresh `char **envp` array plus individual `name=value` strings. The caller (`merge_env()` and `execute_simple_command()`) never frees this array. In a long-running interactive shell or a script running many commands, this causes unbounded memory growth.
-
-**Evidence:** `shell_var_get_envp()` returns `calloc`'d array of `malloc`'d strings. In `execute_simple_command()` at the `execve()` call path (~line 1730), `merge_env(shell_var_get_envp(), ...)` is called but the result is only used by `execve()` in the child (which either replaces the process or `_exit()`s). However, in `builtin_command()` (~line 1000), `shell_var_get_envp()` is called and the result is passed to `execve()` in a forked child — the parent never frees it.
-
-In `builtin_exec()` (~line 585): `shell_var_get_envp()` is called but `exec` replaces the process (or exits), so the leak is moot there.
-
-The main leak site is `merge_env()`: it takes `base_env` (the envp) and builds a new `new_env` array, but never frees `base_env`. The individual strings from `base_env` are also leaked when replaced.
-
-**Fix:** Free the envp array and its strings after `execve()` fails or after `merge_env()` returns. Consider caching the envp and only rebuilding on change.
+| **Total**| **27**|
 
 ---
 
@@ -357,7 +340,6 @@ The shell has a pervasive pattern of calling `shell_var_get()` (which returns `s
 | `prompt.c` `evaluate_prompt()` | ? | LOW |
 | `prompt.c` `expand_prompt_escapes()` | ? | LOW |
 | `expand.c` `get_ifs()` | IFS | MEDIUM |
-| `shell_var.c` `shell_var_get_envp()` | envp array | CRITICAL |
 
 **Recommendation:** Consider changing `shell_var_get()` to return a non-owning pointer (to the internal storage) and only returning copies for special variables ($#, $$, $*, etc.), or introduce a `shell_var_peek()` that returns the internal pointer without copying.
 

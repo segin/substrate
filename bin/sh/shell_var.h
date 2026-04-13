@@ -8,6 +8,7 @@ void shell_var_set(const char *name, const char *value);
 void shell_var_force_set(const char *name, const char *value);
 void shell_var_export(const char *name, const char *value);
 char **shell_var_get_envp(void);
+void shell_var_free_envp(char **envp);
 void shell_var_unset(const char *name);
 void shell_var_print(void);
 const char *shell_var_get_name(void);
