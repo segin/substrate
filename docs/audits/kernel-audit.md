@@ -11,8 +11,8 @@
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
 | **MEDIUM** | 0 | *(all resolved)* |
-| **LOW** | 11 | Code style, comments, hardcoded constants, performance |
-| **TOTAL** | **11** | |
+| **LOW** | 10 | Code style, comments, hardcoded constants, performance |
+| **TOTAL** | **10** | |
 
 ---
 
@@ -23,8 +23,6 @@
 ---
 
 ## LOW Findings
-
-50. Inconsistent error return codes (-1 vs -errno vs positive errno).
 
 51. Naive O(nm) `strstr()` in `main.c`.
 
