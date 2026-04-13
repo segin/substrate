@@ -629,6 +629,7 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
                         expand_str_split(buf, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                         free(expr);
                     }
+                }
             } else if (*p == '(') {
                 p++;
                 const char *start = p;

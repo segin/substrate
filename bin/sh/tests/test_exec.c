@@ -165,6 +165,13 @@ static void test_parameter_error_aborts_command(void) {
     printf("PASS: test_parameter_error_aborts_command\n");
 }
 
+static void test_case_multiple_patterns(void) {
+    reset_shell_state();
+    assert(run_command("case b in a|b) true ;; *) false ;; esac") == 0);
+    assert(run_command("case z in a|b) true ;; *) false ;; esac") == 1);
+    printf("PASS: test_case_multiple_patterns\n");
+}
+
 int main(void) {
     test_builtin_true();
     test_builtin_false();
@@ -176,6 +183,7 @@ int main(void) {
     test_source_returns_child_status();
     test_assignment_only_cmdsub_status();
     test_parameter_error_aborts_command();
+    test_case_multiple_patterns();
     shell_var_destroy();
     return 0;
 }

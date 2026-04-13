@@ -1935,7 +1935,6 @@ static int execute_pipeline(ast_pipeline_t *pipe_node, exec_info_t *info) {
     child_info.pipeline = 1;
     child_info.job = job;
 
-    pid_t pids[n];
     for (int i = 0; i < n; i++) {
         pids[i] = fork();
         if (pids[i] == 0) {
@@ -2176,14 +2175,17 @@ static int execute_case(ast_case_t *c, exec_info_t *info) {
     
     ast_case_item_t *item = c->items;
     while (item) {
-        char *pattern = expand_word(item->pattern); 
-        if (!pattern) pattern = strdup("");
-        
         int match = 0;
-        if (match_pattern(pattern, word)) {
-             match = 1;
+        for (int i = 0; i < item->pattern_count; i++) {
+            char *pattern = expand_word(item->patterns[i]);
+            if (!pattern) pattern = strdup("");
+            if (match_pattern(pattern, word)) {
+                match = 1;
+                free(pattern);
+                break;
+            }
+            free(pattern);
         }
-        free(pattern);
         
         if (match) {
             status = execute_ast(item->body, info);

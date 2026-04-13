@@ -13,20 +13,13 @@
 | CRITICAL | 0     |
 | HIGH     | 0     |
 | MEDIUM   | 0     |
-| LOW      | 2     |
+| LOW      | 1     |
 | INFO     | 4     |
-| **Total**| **6** |
+| **Total**| **5** |
 
 ---
 
 ## LOW
-
-### L-7: Case statement expansion only matches first pattern per item
-
-**File:** `exec.c`, `execute_case()` (~line 2025)  
-**Impact:** POSIX case items can have multiple `|`-separated patterns. Only the first pattern is matched. This is actually a parser-level issue — the AST `case_item` only stores one pattern string.
-
----
 
 ### L-8: `builtin_echo` doesn't handle `-n` flag
 
@@ -81,4 +74,3 @@ The shell has a pervasive pattern of calling `shell_var_get()` (which returns `s
 ## POSIX Compliance Gaps
 
 5. **echo:** Missing `-n` flag
-7. **case:** Single pattern per item (no `|` alternatives)
