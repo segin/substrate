@@ -185,13 +185,14 @@ void free(void *ptr) {
 }
 
 void *calloc(size_t nmemb, size_t size) {
-    size_t total = nmemb * size;
-    // Check for overflow
-    if (nmemb != 0 && total / nmemb != size) return NULL;
+    /* Check overflow before multiplication to prevent allocating too-small buffer. */
+    if (nmemb != 0 && size > SIZE_MAX / nmemb) {
+        return NULL;
+    }
 
-    void *ptr = malloc(total);
+    void *ptr = malloc(nmemb * size);
     if (ptr) {
-        memset(ptr, 0, total);
+        memset(ptr, 0, nmemb * size);
     }
     return ptr;
 }
