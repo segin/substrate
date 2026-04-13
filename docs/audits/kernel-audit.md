@@ -11,8 +11,8 @@
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
 | **MEDIUM** | 0 | *(all resolved)* |
-| **LOW** | 7 | Comments, hardcoded constants, performance |
-| **TOTAL** | **7** | |
+| **LOW** | 6 | Hardcoded constants, performance |
+| **TOTAL** | **6** | |
 
 ---
 
@@ -23,8 +23,6 @@
 ---
 
 ## LOW Findings
-
-54. ELF image cache has no LRU/collision strategy.
 
 55. DevFS 128-byte name field could overflow from long paths.
 
