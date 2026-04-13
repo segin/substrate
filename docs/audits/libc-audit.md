@@ -10,10 +10,10 @@
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
 | **CRITICAL** | 5 | Buffer overflows (sprintf, strcpy, strcat), libgen edge cases, dirent bounds |
-| **HIGH** | 6 | setjmp ABI, signal safety, thread safety |
+| **HIGH** | 4 | setjmp ABI, signal safety |
 | **MEDIUM** | 8 | UTF-8 validation, alignment, division by zero, float precision |
 | **LOW** | 6 | Stub implementations, error handling, atexit ordering |
-| **TOTAL** | **25** | |
+| **TOTAL** | **23** | |
 
 ---
 
@@ -80,18 +80,6 @@
 - **File:** `lib/c/src/stdlib.c`, lines 140-200
 - **Issue:** `malloc()`, `free()`, `realloc()` use unprotected global state (`global_base`, `last` pointers, block metadata). If a signal handler calls `malloc()` while the main thread is in `malloc()`, heap corruption occurs.
 - **Fix:** Mask signals around heap operations or document "no malloc in signal handlers."
-
-### 14. Thread Safety of `strtok()`
-
-- **File:** `lib/c/src/string.c`, line 327
-- **Issue:** Static `saveptr` variable shared across all threads.
-- **Fix:** Use `_Thread_local` storage or deprecate in favor of `strtok_r()`.
-
-### 15. Thread Safety of `atexit()`
-
-- **File:** `lib/c/src/stdlib.c`, lines 1-50
-- **Issue:** `__atexit_funcs[]` and `__atexit_count` are global with no synchronization.
-- **Fix:** Use atomic operations for the counter.
 
 ---
 
@@ -191,7 +179,6 @@
 1. **Immediate:** Resolve the remaining unbounded string/printf entry points (#1, #2, #3).
 2. **Immediate:** Add bounds validation for `readdir()` records (#7).
 3. **Short-term:** Mask signals in malloc/free (#13) or document the restriction.
-4. **Short-term:** Make `strtok()` and `atexit()` thread-safe (#14, #15).
-5. **Medium-term:** Implement proper `aligned_alloc()` (#21).
-6. **Medium-term:** Read `/etc/passwd` and `/etc/group` in pwd/grp (#27).
-7. **Testing:** Fuzz printf/scanf with extreme format strings and values.
+4. **Medium-term:** Implement proper `aligned_alloc()` (#21).
+5. **Medium-term:** Read `/etc/passwd` and `/etc/group` in pwd/grp (#27).
+6. **Testing:** Fuzz printf/scanf with extreme format strings and values.

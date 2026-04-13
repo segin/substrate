@@ -348,7 +348,7 @@ size_t strcspn(const char *s, const char *reject) {
 }
 
 char *strtok(char *str, const char *delim) {
-    static char *saveptr;
+    static _Thread_local char *saveptr;
     if (str) saveptr = str;
     else if (!saveptr) return NULL;
     

@@ -20,11 +20,38 @@
 #define ATEXIT_MAX 32
 static void (*__atexit_funcs[ATEXIT_MAX])(void);
 static int __atexit_count = 0;
+static atomic_int __atexit_lock = ATOMIC_VAR_INIT(0);
+
+static void
+__atexit_lock_acquire(void)
+{
+    int expected;
+
+    for (;;) {
+        expected = 0;
+        if (atomic_compare_exchange_weak(&__atexit_lock, &expected, 1)) {
+            return;
+        }
+    }
+}
+
+static void
+__atexit_lock_release(void)
+{
+    atomic_store(&__atexit_lock, 0);
+}
 
 void exit(int status) {
+    int count;
+
+    __atexit_lock_acquire();
+    count = __atexit_count;
+    __atexit_count = 0;
+    __atexit_lock_release();
+
     /* Call atexit handlers in reverse order */
-    while (__atexit_count > 0) {
-        __atexit_funcs[--__atexit_count]();
+    while (count > 0) {
+        __atexit_funcs[--count]();
     }
     /* Flush all open stdio streams (POSIX requirement) */
     fflush(NULL);
@@ -658,8 +685,15 @@ lldiv_t lldiv(long long numer, long long denom) {
 }
 
 int atexit(void (*func)(void)) {
-    if (__atexit_count >= ATEXIT_MAX) return -1;
+    if (func == NULL) return -1;
+
+    __atexit_lock_acquire();
+    if (__atexit_count >= ATEXIT_MAX) {
+        __atexit_lock_release();
+        return -1;
+    }
     __atexit_funcs[__atexit_count++] = func;
+    __atexit_lock_release();
     return 0;
 }
 
