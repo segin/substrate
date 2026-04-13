@@ -9,11 +9,11 @@
 
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
-| **CRITICAL** | 5 | Buffer overflows (sprintf, strcpy, strcat), libgen edge cases, dirent bounds |
+| **CRITICAL** | 4 | Buffer overflows (sprintf, strcpy, strcat), libgen edge cases |
 | **HIGH** | 4 | setjmp ABI, signal safety |
-| **MEDIUM** | 8 | UTF-8 validation, alignment, division by zero, float precision |
+| **MEDIUM** | 7 | UTF-8 validation, alignment, division by zero, float precision |
 | **LOW** | 6 | Stub implementations, error handling, atexit ordering |
-| **TOTAL** | **23** | |
+| **TOTAL** | **21** | |
 
 ---
 
@@ -45,13 +45,6 @@
 - **Issue:** Functions modify input buffer in-place with `*(end + 1) = '\0'`. Return pointers into modified input.
 - **Impact:** Writes null terminator at unexpected positions if pointer arithmetic is off. Callers unaware of in-place modification get corrupted data.
 - **Fix:** Document in-place modification clearly; consider using static buffers per POSIX allowance.
-
-### 7. Buffer Overflow in `readdir()` / `findirp`
-
-- **File:** `lib/c/src/dirent.c`, line 22
-- **Issue:** `readdir()` trusts `d_reclen` from kernel without bounds checking against the directory buffer.
-- **Impact:** Malformed directory entry overruns `dirp->buf`.
-- **Fix:** Add `if (dirp->buf_pos + d->d_reclen > sizeof(dirp->buf)) return NULL;`
 
 ---
 
@@ -123,11 +116,6 @@
 - **File:** `lib/c/src/sys.c`, line 133
 - **Issue:** POSIX says if `buf` is NULL, `getcwd()` should allocate internally. This implementation doesn't.
 
-### 25. `readdir()` assumes valid `d_reclen` from kernel  
-
-- **File:** `lib/c/src/dirent.c`
-- **Issue:** See CRITICAL #7 — this is the bounds-checking gap.
-
 ---
 
 ## LOW Findings
@@ -177,8 +165,7 @@
 ## Recommendations
 
 1. **Immediate:** Resolve the remaining unbounded string/printf entry points (#1, #2, #3).
-2. **Immediate:** Add bounds validation for `readdir()` records (#7).
-3. **Short-term:** Mask signals in malloc/free (#13) or document the restriction.
-4. **Medium-term:** Implement proper `aligned_alloc()` (#21).
-5. **Medium-term:** Read `/etc/passwd` and `/etc/group` in pwd/grp (#27).
-6. **Testing:** Fuzz printf/scanf with extreme format strings and values.
+2. **Short-term:** Mask signals in malloc/free (#13) or document the restriction.
+3. **Medium-term:** Implement proper `aligned_alloc()` (#21).
+4. **Medium-term:** Read `/etc/passwd` and `/etc/group` in pwd/grp (#27).
+5. **Testing:** Fuzz printf/scanf with extreme format strings and values.
