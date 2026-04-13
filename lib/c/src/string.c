@@ -195,6 +195,13 @@ size_t strlcpy(char *dst, const char *src, size_t size) {
     return src_len;
 }
 
+size_t strlcat(char *dst, const char *src, size_t size) {
+    size_t dst_len = strnlen(dst, size);
+    if (dst_len == size)
+        return size + strlen(src);
+    return dst_len + strlcpy(dst + dst_len, src, size - dst_len);
+}
+
 char *strcat(char *dest, const char *src) {
     char *ret = dest;
     while (*dest) dest++;

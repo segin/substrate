@@ -476,48 +476,86 @@ int asprintf(char **strp, const char *fmt, ...) {
     return ret;
 }
 
-int printf(const char *format, ...) {
-    va_list ap; va_start(ap, format);
+/*
+ * Internal helper: format to FILE with stack buffer + heap fallback.
+ * This avoids a buffer overread when vsnprintf returns a length exceeding
+ * the stack buffer size.
+ */
+static int __vfprintf_impl(FILE *stream, const char *format, va_list ap) {
+    va_list ap2;
+    va_copy(ap2, ap);
     char buf[4096];
     int ret = vsnprintf(buf, sizeof(buf), format, ap);
+    if (ret >= 0) {
+        if ((size_t)ret < sizeof(buf)) {
+            fwrite(buf, 1, ret, stream);
+        } else {
+            char *big = malloc((size_t)ret + 1);
+            if (big) {
+                vsnprintf(big, (size_t)ret + 1, format, ap2);
+                fwrite(big, 1, ret, stream);
+                free(big);
+            } else {
+                fwrite(buf, 1, sizeof(buf) - 1, stream);
+            }
+        }
+    }
+    va_end(ap2);
+    return ret;
+}
+
+static int __vdprintf_impl(int fd, const char *format, va_list ap) {
+    va_list ap2;
+    va_copy(ap2, ap);
+    char buf[4096];
+    int ret = vsnprintf(buf, sizeof(buf), format, ap);
+    if (ret > 0) {
+        if ((size_t)ret < sizeof(buf)) {
+            write(fd, buf, ret);
+        } else {
+            char *big = malloc((size_t)ret + 1);
+            if (big) {
+                vsnprintf(big, (size_t)ret + 1, format, ap2);
+                write(fd, big, ret);
+                free(big);
+            } else {
+                write(fd, buf, sizeof(buf) - 1);
+            }
+        }
+    }
+    va_end(ap2);
+    return ret;
+}
+
+int printf(const char *format, ...) {
+    va_list ap; va_start(ap, format);
+    int ret = __vfprintf_impl(stdout, format, ap);
     va_end(ap);
-    fwrite(buf, 1, ret, stdout);
     return ret;
 }
 
 int fprintf(FILE *stream, const char *format, ...) {
     va_list ap; va_start(ap, format);
-    char buf[4096];
-    int ret = vsnprintf(buf, sizeof(buf), format, ap);
+    int ret = __vfprintf_impl(stream, format, ap);
     va_end(ap);
-    fwrite(buf, 1, ret, stream);
     return ret;
 }
 
 int vprintf(const char *format, va_list ap) {
-    char buf[4096];
-    int ret = vsnprintf(buf, sizeof(buf), format, ap);
-    fwrite(buf, 1, ret, stdout);
-    return ret;
+    return __vfprintf_impl(stdout, format, ap);
 }
 
 int vfprintf(FILE *stream, const char *format, va_list ap) {
-    char buf[4096];
-    int ret = vsnprintf(buf, sizeof(buf), format, ap);
-    fwrite(buf, 1, ret, stream);
-    return ret;
+    return __vfprintf_impl(stream, format, ap);
 }
 
 int vdprintf(int fd, const char *format, va_list ap) {
-    char buf[4096];
-    int ret = vsnprintf(buf, sizeof(buf), format, ap);
-    if(ret > 0) write(fd, buf, ret);
-    return ret;
+    return __vdprintf_impl(fd, format, ap);
 }
 
 int dprintf(int fd, const char *format, ...) {
     va_list ap; va_start(ap, format);
-    int ret = vdprintf(fd, format, ap);
+    int ret = __vdprintf_impl(fd, format, ap);
     va_end(ap);
     return ret;
 }

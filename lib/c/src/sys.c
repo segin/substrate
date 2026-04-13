@@ -502,7 +502,7 @@ int isatty(int fd) {
 char *ttyname(int fd) {
     if (!isatty(fd)) return NULL;
     static char buf[32];
-    sprintf(buf, "/dev/tty%d", fd);
+    snprintf(buf, sizeof(buf), "/dev/tty%d", fd);
     return buf;
 }
 

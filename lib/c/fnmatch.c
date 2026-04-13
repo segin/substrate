@@ -108,7 +108,9 @@ int fnmatch(const char *pattern, const char *string, int flags) {
                     if (end == '\\' && !(flags & FNM_NOESCAPE)) {
                          if (*pattern) end = *pattern++;
                     }
-                    if (*string >= c && *string <= end) match = 1;
+                    if ((unsigned char)*string >= (unsigned char)c &&
+                        (unsigned char)*string <= (unsigned char)end)
+                        match = 1;
                 } else {
                     if (*string == c) match = 1;
                 }
