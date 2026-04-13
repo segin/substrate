@@ -11,8 +11,8 @@
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
 | **MEDIUM** | 0 | *(all resolved)* |
-| **LOW** | 1 | Hardcoded constants, performance |
-| **TOTAL** | **1** | |
+| **LOW** | 0 | *(all resolved)* |
+| **TOTAL** | **0** | |
 
 ---
 
@@ -24,7 +24,7 @@
 
 ## LOW Findings
 
-60. Framebuffer luma calculation not cached.
+*(All resolved)*
 
 ---
 
