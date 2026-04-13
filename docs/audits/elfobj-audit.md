@@ -11,9 +11,9 @@
 |----------|-------|-----------|
 | **CRITICAL** | 0 | *(all resolved)* |
 | **HIGH** | 0 | *(all resolved)* |
-| **MEDIUM** | 2 | NULL dereference, group signature |
+| **MEDIUM** | 1 | group signature |
 | **LOW** | 0 | *(all resolved)* |
-| **TOTAL** | **2** | |
+| **TOTAL** | **1** | |
 
 This library parses untrusted ELF files supplied to the assembler/linker. All input data must be treated as adversarial.
 
@@ -32,13 +32,6 @@ This library parses untrusted ELF files supplied to the assembler/linker. All in
 ---
 
 ## MEDIUM Findings
-
-### 10. Missing NULL Check After Allocation in Write Path
-
-- **File:** `usr.lib/elfobj/src/elf_write.c`, lines 100-150
-- **Function:** `build_symtab()`
-- **Issue:** `elf__calloc()` return value is checked, but subsequent write operations within the buffer don't re-validate bounds.
-- **Fix:** Defensive programming — add assertions.
 
 ### 12. Group Signature Name Extraction
 
