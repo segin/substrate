@@ -410,8 +410,7 @@ char *evaluate_prompt(const char *ps1, int command_count, int extended) {
     // Save state
     int saved_xtrace = shell_xtrace;
     int saved_errexit = shell_errexit;
-    char *saved_status_str = shell_var_get("?");
-    char *saved_status = saved_status_str ? strdup(saved_status_str) : NULL;
+    char *saved_status = shell_var_get("?");
     
     // Disable tracing and error exit for prompt evaluation
     shell_xtrace = 0;

@@ -13,26 +13,13 @@
 | CRITICAL | 0     |
 | HIGH     | 0     |
 | MEDIUM   | 0     |
-| LOW      | 3     |
+| LOW      | 2     |
 | INFO     | 4     |
-| **Total**| **7** |
+| **Total**| **6** |
 
 ---
 
 ## LOW
-
-### L-6: `evaluate_prompt` leaks `shell_var_get("?")` saved status
-
-**File:** `prompt.c`, `evaluate_prompt()` (~line 410)  
-**Impact:** `shell_var_get("?")` returns strdup'd memory stored in `saved_status_str`, then `saved_status = strdup(saved_status_str)`. But `saved_status_str` itself (`shell_var_get`'s return) is never freed.
-
-```c
-char *saved_status_str = shell_var_get("?");
-char *saved_status = saved_status_str ? strdup(saved_status_str) : NULL;
-// saved_status_str never freed
-```
-
----
 
 ### L-7: Case statement expansion only matches first pattern per item
 
@@ -84,7 +71,6 @@ The shell has a pervasive pattern of calling `shell_var_get()` (which returns `s
 
 | Location | Variable | Severity |
 |----------|----------|----------|
-| `prompt.c` `evaluate_prompt()` | ? | LOW |
 | `prompt.c` `expand_prompt_escapes()` | ? | LOW |
 | `expand.c` `get_ifs()` | IFS | MEDIUM |
 
