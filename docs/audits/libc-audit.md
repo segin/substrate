@@ -9,11 +9,11 @@
 
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
-| **CRITICAL** | 7 | Buffer overflows (sprintf, strcpy, strcat), integer overflow in calloc, fnmatch NULL deref, dirent bounds |
-| **HIGH** | 9 | Syscall pointer casts, setjmp ABI, signal safety, thread safety, errno |
-| **MEDIUM** | 9 | Missing malloc checks, UTF-8 validation, alignment, division by zero, float precision |
-| **LOW** | 7 | Stub implementations, error handling, stack alignment, atexit ordering |
-| **TOTAL** | **32** | |
+| **CRITICAL** | 5 | Buffer overflows (sprintf, strcpy, strcat), libgen edge cases, dirent bounds |
+| **HIGH** | 6 | setjmp ABI, signal safety, thread safety |
+| **MEDIUM** | 8 | UTF-8 validation, alignment, division by zero, float precision |
+| **LOW** | 6 | Stub implementations, error handling, atexit ordering |
+| **TOTAL** | **25** | |
 
 ---
 
@@ -46,25 +46,6 @@
 - **Impact:** Writes null terminator at unexpected positions if pointer arithmetic is off. Callers unaware of in-place modification get corrupted data.
 - **Fix:** Document in-place modification clearly; consider using static buffers per POSIX allowance.
 
-### 5. Integer Overflow in `calloc()`
-
-- **File:** `lib/c/src/stdlib.c`, line 276
-- **Issue:** `total = nmemb * size` overflows on 32-bit before the division check `total / nmemb != size`.
-- **Code:**
-  ```c
-  size_t total = nmemb * size;        // overflows here
-  if (nmemb != 0 && total / nmemb != size)  // check is too late
-  ```
-- **Impact:** Allocates too-small buffer → heap overflow on subsequent writes.
-- **Fix:** Check before multiplication: `if (nmemb && size > SIZE_MAX / nmemb) return NULL;`
-
-### 6. NULL Pointer Dereference in `fnmatch()`
-
-- **File:** `lib/c/fnmatch.c`
-- **Issue:** No NULL checks on `pattern` or `string` parameters at entry.
-- **Impact:** Immediate segfault if called with NULL.
-- **Fix:** Add `if (!pattern || !string) return FNM_NOMATCH;`
-
 ### 7. Buffer Overflow in `readdir()` / `findirp`
 
 - **File:** `lib/c/src/dirent.c`, line 22
@@ -75,20 +56,6 @@
 ---
 
 ## HIGH Findings
-
-### 8. Missing NULL Checks in Multiple Functions
-
-- `lib/c/src/pwd.c`: `getpwnam()` passes `name` to `strcmp()` without NULL check.
-- `lib/c/src/grp.c`: Same for `getgrnam()`.
-- `lib/c/src/string.c`, line 228: `strdup()` calls `strlen()` on potentially NULL `s`.
-- `lib/c/src/time/time.c`, line 29: `gmtime_r()` dereferences without NULL check.
-
-### 9. Syscall ABI: Pointer-to-int Truncation
-
-- **File:** `lib/c/src/sys.c`, lines 100-125
-- **Issue:** Syscall wrappers cast `const char *` → `int` for 32-bit syscall convention. This truncates pointers on future x86_64 builds.
-- **Code:** `_syscall3(SYS_READ, fd, (int)buf, (int)count)`
-- **Fix:** Use `(uintptr_t)` or a proper syscall argument typedef.
 
 ### 10. setjmp/longjmp ESP Restoration
 
@@ -126,22 +93,9 @@
 - **Issue:** `__atexit_funcs[]` and `__atexit_count` are global with no synchronization.
 - **Fix:** Use atomic operations for the counter.
 
-### 16. errno Not Thread-Local
-
-- **File:** `lib/c/src/sys.c`, line 40
-- **Issue:** `int errno = 0;` — plain global, not `_Thread_local`.
-- **Impact:** Two threads setting errno clobber each other.
-- **Fix:** `_Thread_local int errno = 0;`
-
 ---
 
 ## MEDIUM Findings
-
-### 17. Missing malloc Error Check in `execl()`
-
-- **File:** `lib/c/src/sys.c`, lines 108-122
-- **Issue:** `malloc()` return not checked → NULL dereference on OOM.
-- **Fix:** `if (!argv) { errno = ENOMEM; return -1; }`
 
 ### 18. Incomplete UTF-8 Validation in wchar
 
@@ -211,12 +165,6 @@
 - **File:** `lib/c/src/stdlib.c`, line 379
 - **Issue:** Returns NULL without setting errno. Caller can't distinguish "not found" from error.
 
-### 30. crt0.S Missing Stack Alignment
-
-- **File:** `lib/c/arch/i386/crt0.S`, line 24
-- **Issue:** Stack may not be 16-byte aligned before `call main`. SSE code in main will fault.
-- **Fix:** Add `andl $0xFFFFFFF0, %esp` before `call main`.
-
 ### 31. `atexit()` Handler Re-Registration
 
 - **File:** `lib/c/src/stdlib.c`, lines 730-735
@@ -240,12 +188,10 @@
 
 ## Recommendations
 
-1. **Immediate:** Fix `calloc()` integer overflow (#5) — this is exploitable.
-2. **Immediate:** Make errno `_Thread_local` (#16) — required for any threading.
-3. **Immediate:** Fix crt0.S stack alignment (#30) — silent SSE crashes.
-4. **Short-term:** Add NULL checks to all public-facing string functions (#8).
-5. **Short-term:** Fix syscall pointer casts to `uintptr_t` (#9) — needed for x86_64.
-6. **Short-term:** Mask signals in malloc/free (#13) or document the restriction.
-7. **Medium-term:** Implement proper `aligned_alloc()` (#21).
-8. **Medium-term:** Read `/etc/passwd` and `/etc/group` in pwd/grp (#27).
-9. **Testing:** Fuzz printf/scanf with extreme format strings and values.
+1. **Immediate:** Resolve the remaining unbounded string/printf entry points (#1, #2, #3).
+2. **Immediate:** Add bounds validation for `readdir()` records (#7).
+3. **Short-term:** Mask signals in malloc/free (#13) or document the restriction.
+4. **Short-term:** Make `strtok()` and `atexit()` thread-safe (#14, #15).
+5. **Medium-term:** Implement proper `aligned_alloc()` (#21).
+6. **Medium-term:** Read `/etc/passwd` and `/etc/group` in pwd/grp (#27).
+7. **Testing:** Fuzz printf/scanf with extreme format strings and values.
