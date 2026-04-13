@@ -13,20 +13,13 @@
 | CRITICAL | 0     |
 | HIGH     | 0     |
 | MEDIUM   | 0     |
-| LOW      | 4     |
+| LOW      | 3     |
 | INFO     | 4     |
-| **Total**| **8** |
+| **Total**| **7** |
 
 ---
 
 ## LOW
-
-### L-5: Prompt variable `p` leaked from `shell_var_get("prompt")` / `shell_var_get("PS1")`
-
-**File:** `sh.c`, interactive loop (~line 350)  
-**Impact:** Each iteration of the interactive loop calls `shell_var_get("prompt")` or `shell_var_get("PS1")`, getting strdup'd memory that is never freed. Slow leak during interactive use.
-
----
 
 ### L-6: `evaluate_prompt` leaks `shell_var_get("?")` saved status
 
@@ -91,7 +84,6 @@ The shell has a pervasive pattern of calling `shell_var_get()` (which returns `s
 
 | Location | Variable | Severity |
 |----------|----------|----------|
-| `sh.c` interactive loop | prompt, PS1 | LOW |
 | `prompt.c` `evaluate_prompt()` | ? | LOW |
 | `prompt.c` `expand_prompt_escapes()` | ? | LOW |
 | `expand.c` `get_ifs()` | IFS | MEDIUM |

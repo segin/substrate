@@ -357,6 +357,7 @@ int main(int argc, char **argv, char **envp) {
                     p = shell_var_get("PS1");
                     extended = 0;  // PS1 uses bash-style \escapes
                 }
+                int p_alloc = (p != NULL);
                 if (!p) p = "$ ";
                 char *expanded = evaluate_prompt(p, command_count, extended);
                 
@@ -365,6 +366,7 @@ int main(int argc, char **argv, char **envp) {
                     line = (char *)el_gets(el, &count);
                     if (!line) {
                         if (expanded) free(expanded);
+                        if (p_alloc) free(p);
                         break;
                     }
                 } else {
@@ -373,6 +375,7 @@ int main(int argc, char **argv, char **envp) {
                 }
                 
                 if (expanded) free(expanded);
+                if (p_alloc) free(p);
             }
             
             if (!line) {
