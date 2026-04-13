@@ -408,9 +408,31 @@ static int builtin_exit(int argc, char **argv) {
 
 static int builtin_cd(int argc, char **argv) {
     (void)argc;
-    char *path = argv[1];
-    if (!path) path = shell_var_get("HOME");
-    if (!path) path = "/";
+    char *allocated_path = NULL;  /* track memory we need to free */
+    const char *path = argv[1];
+
+    /* cd with no arg: go to $HOME */
+    if (!path) {
+        allocated_path = shell_var_get("HOME");
+        path = allocated_path;
+        if (!path) path = "/";
+    }
+
+    /* cd -: go to $OLDPWD */
+    if (strcmp(path, "-") == 0) {
+        free(allocated_path);
+        allocated_path = shell_var_get("OLDPWD");
+        path = allocated_path;
+        if (!path) {
+            fprintf(stderr, "%s: cd: OLDPWD not set\n", shell_var_get_name());
+            return 1;
+        }
+    }
+
+    /* Save old cwd for OLDPWD before changing */
+    char oldcwd[1024];
+    if (!getcwd(oldcwd, sizeof(oldcwd)))
+        oldcwd[0] = '\0';
 
     /* POSIX: CDPATH handling - only for relative paths not starting with . or .. */
     int is_dot_ref = (path[0] == '.' && (path[1] == '\0' || path[1] == '/' ||
@@ -420,6 +442,7 @@ static int builtin_cd(int argc, char **argv) {
         char *cdpath = shell_var_get("CDPATH");
         if (cdpath && *cdpath) {
             char *cp = strdup(cdpath);
+            free(cdpath);
             char *saveptr;
             char *dir = strtok_r(cp, ":", &saveptr);
             while (dir) {
@@ -429,19 +452,37 @@ static int builtin_cd(int argc, char **argv) {
                     /* POSIX: If found via CDPATH, print the destination */
                     char cwd[1024];
                     if (getcwd(cwd, sizeof(cwd))) printf("%s\n", cwd);
+                    shell_var_set("OLDPWD", oldcwd);
+                    shell_var_set("PWD", cwd);
                     free(cp);
+                    free(allocated_path);
                     return 0;
                 }
                 dir = strtok_r(NULL, ":", &saveptr);
             }
             free(cp);
+        } else {
+            free(cdpath);
         }
     }
 
     if (chdir(path) < 0) {
         perror(path);
+        free(allocated_path);
         return 1;
     }
+
+    /* Update OLDPWD and PWD */
+    shell_var_set("OLDPWD", oldcwd);
+    char newcwd[1024];
+    if (getcwd(newcwd, sizeof(newcwd)))
+        shell_var_set("PWD", newcwd);
+
+    /* cd -: print destination */
+    if (argv[1] && strcmp(argv[1], "-") == 0)
+        printf("%s\n", newcwd);
+
+    free(allocated_path);
     return 0;
 }
 
