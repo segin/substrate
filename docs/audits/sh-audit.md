@@ -14,19 +14,12 @@
 | HIGH     | 0     |
 | MEDIUM   | 0     |
 | LOW      | 0     |
-| INFO     | 4     |
-| **Total**| **4** |
+| INFO     | 3     |
+| **Total**| **3** |
 
 ---
 
 ## INFO
-
-### I-1: `shell_promptvars` / SHELL_PROMPT_MODE is set readonly at init
-
-**File:** `sh.c`, `init_environment()` (~line 125)  
-**Impact:** `SHELL_PROMPT_MODE` is exported and set readonly. However, `builtin_set -o promptvars` calls `shell_var_force_set()` to bypass readonly. This is intentional but surprising — the readonly is for user scripts, not the shell itself. Consider documenting this behavior.
-
----
 
 ### I-2: `capture_command_output()` has no size limit
 

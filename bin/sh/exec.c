@@ -533,6 +533,8 @@ static int builtin_set(int argc, char **argv) {
                     }
                     if (strcmp(opt, "promptvars") == 0) {
                         shell_promptvars = 1;
+                        /* Internal state transition: this shell-managed variable is readonly to scripts,
+                         * but the shell itself updates it when prompt mode changes. */
                         shell_var_force_set("SHELL_PROMPT_MODE", "EXTENDED");
                     } else {
                         fprintf(stderr, "%s: set: unknown option %s\n", shell_var_get_name(), opt);
@@ -554,6 +556,8 @@ static int builtin_set(int argc, char **argv) {
                     }
                     if (strcmp(opt, "promptvars") == 0) {
                         shell_promptvars = 0;
+                        /* Internal state transition: this shell-managed variable is readonly to scripts,
+                         * but the shell itself updates it when prompt mode changes. */
                         shell_var_force_set("SHELL_PROMPT_MODE", "POSIX");
                     } else {
                         fprintf(stderr, "%s: set: unknown option %s\n", shell_var_get_name(), opt);
