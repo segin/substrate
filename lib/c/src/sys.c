@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <ctype.h>
 #include <wchar.h>
+#include <limits.h>
 #include <sys/syscall.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
@@ -151,9 +152,34 @@ int chdir(const char *path) {
 }
 
 char *getcwd(char *buf, size_t size) {
-    int ret = (int)_syscall2(SYS_GETCWD, (uintptr_t)buf, size);
-    if (ret < 0) { errno = -ret; return NULL; }
-    return buf;
+    char *out = buf;
+    int allocated = 0;
+    int ret;
+
+    if (out == NULL) {
+        if (size == 0u) {
+            size = PATH_MAX;
+        }
+        out = malloc(size);
+        if (out == NULL) {
+            errno = ENOMEM;
+            return NULL;
+        }
+        allocated = 1;
+    } else if (size == 0u) {
+        errno = EINVAL;
+        return NULL;
+    }
+
+    ret = (int)_syscall2(SYS_GETCWD, (uintptr_t)out, size);
+    if (ret < 0) {
+        if (allocated) {
+            free(out);
+        }
+        errno = -ret;
+        return NULL;
+    }
+    return out;
 }
 
 pid_t getpid(void) {

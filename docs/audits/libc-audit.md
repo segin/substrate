@@ -11,9 +11,9 @@
 |----------|-------|-----------|
 | **CRITICAL** | 4 | Buffer overflows (sprintf, strcpy, strcat), libgen edge cases |
 | **HIGH** | 4 | setjmp ABI, signal safety |
-| **MEDIUM** | 7 | UTF-8 validation, alignment, division by zero, float precision |
+| **MEDIUM** | 6 | UTF-8 validation, alignment, division by zero, float precision |
 | **LOW** | 6 | Stub implementations, error handling, atexit ordering |
-| **TOTAL** | **21** | |
+| **TOTAL** | **20** | |
 
 ---
 
@@ -110,11 +110,6 @@
 
 - **File:** `lib/c/stdio/printf.c`, lines 70-80
 - **Issue:** Simple rounding can accumulate errors. `%.20f` may not produce exactly 20 correct digits.
-
-### 24. Incomplete `getcwd()` Implementation
-
-- **File:** `lib/c/src/sys.c`, line 133
-- **Issue:** POSIX says if `buf` is NULL, `getcwd()` should allocate internally. This implementation doesn't.
 
 ---
 
