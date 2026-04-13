@@ -30,6 +30,8 @@ static void expand_state_fail(expand_state_t *state, int status) {
 }
 
 static char *capture_command_output(const char *cmd_str, expand_state_t *state) {
+    #define CMDSUB_MAX_OUTPUT_SIZE (256 * 1024)
+
     int pfd[2];
     if (pipe(pfd) < 0) return strdup("");
     
@@ -43,15 +45,33 @@ static char *capture_command_output(const char *cmd_str, expand_state_t *state) 
         close(pfd[1]);
         size_t cap = 1024, len = 0;
         char *buf = malloc(cap);
+        int overflow = 0;
         char read_buf[256];
         ssize_t n;
         while ((n = read(pfd[0], read_buf, sizeof(read_buf))) > 0) {
-            if (len + n >= cap) {
-                cap *= 2;
-                buf = realloc(buf, cap);
+            if (len >= CMDSUB_MAX_OUTPUT_SIZE) {
+                overflow = 1;
+                continue;
             }
-            memcpy(buf + len, read_buf, n);
-            len += n;
+
+            size_t avail = CMDSUB_MAX_OUTPUT_SIZE - len;
+            size_t chunk = (size_t)n > avail ? avail : (size_t)n;
+            if ((size_t)n > avail) {
+                overflow = 1;
+            }
+
+            if (len + chunk + 1 >= cap) {
+                while (len + chunk + 1 >= cap) {
+                    cap *= 2;
+                }
+                buf = realloc(buf, cap);
+                if (!buf) {
+                    close(pfd[0]);
+                    return strdup("");
+                }
+            }
+            memcpy(buf + len, read_buf, chunk);
+            len += chunk;
         }
         buf[len] = '\0';
         close(pfd[0]);
@@ -68,6 +88,13 @@ static char *capture_command_output(const char *cmd_str, expand_state_t *state) 
         while (len > 0 && buf[len - 1] == '\n') {
             buf[--len] = '\0';
         }
+
+        if (overflow) {
+            fprintf(stderr, "%s: command substitution output exceeds %d bytes\n",
+                shell_var_get_name(), CMDSUB_MAX_OUTPUT_SIZE);
+            expand_state_fail(state, 1);
+        }
+
         return buf;
     } else {
         close(pfd[0]); close(pfd[1]);

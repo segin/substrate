@@ -3,6 +3,10 @@
 #include <stdio.h>
 #include <string.h>
 
+int shell_errexit = 0;
+int shell_is_interactive = 0;
+int shell_xtrace = 0;
+
 void test_simple(void) {
     lexer_t l;
     lexer_init(&l, "ls -la");

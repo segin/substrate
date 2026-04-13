@@ -14,19 +14,12 @@
 | HIGH     | 0     |
 | MEDIUM   | 0     |
 | LOW      | 0     |
-| INFO     | 3     |
-| **Total**| **3** |
+| INFO     | 2     |
+| **Total**| **2** |
 
 ---
 
 ## INFO
-
-### I-2: `capture_command_output()` has no size limit
-
-**File:** `expand.c`, `capture_command_output()` (~line 35)  
-**Impact:** Command substitution reads unlimited output into a dynamically grown buffer. A malicious or buggy command could exhaust memory. Consider adding a configurable limit.
-
----
 
 ### I-3: No SIGPIPE handling in prompt evaluation
 

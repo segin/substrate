@@ -2,6 +2,10 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+
+int shell_errexit = 0;
+int shell_is_interactive = 0;
+int shell_xtrace = 0;
 #include <stdlib.h>
 
 void test_basic_set_get(void) {

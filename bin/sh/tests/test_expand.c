@@ -5,6 +5,10 @@
 #include <string.h>
 #include <stdlib.h>
 
+int shell_errexit = 0;
+int shell_is_interactive = 0;
+int shell_xtrace = 0;
+
 #include <unistd.h>
 
 static int mock_execute_status = 0;
