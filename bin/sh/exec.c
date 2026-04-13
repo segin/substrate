@@ -1105,18 +1105,27 @@ static int builtin_read(int argc, char **argv) {
         return 1;
     }
 
-    char line[4096];
-    if (!fgets(line, sizeof(line), stdin)) return 1;  /* EOF */
+    /* Dynamic line buffer */
+    size_t cap = 4096, len = 0;
+    char *line = malloc(cap);
+    if (!line) return 1;
 
-    /* Remove trailing newline */
-    size_t len = strlen(line);
+    if (!fgets(line, cap, stdin)) { free(line); return 1; }  /* EOF */
+
+    len = strlen(line);
     if (len > 0 && line[len-1] == '\n') line[--len] = '\0';
 
     /* Handle backslash continuation unless -r */
     if (!opt_r) {
         while (len > 0 && line[len-1] == '\\') {
             line[--len] = '\0';
-            if (!fgets(line + len, sizeof(line) - len, stdin)) break;
+            if (len + 4096 >= cap) {
+                cap = len + 4096;
+                char *tmp = realloc(line, cap);
+                if (!tmp) { free(line); return 1; }
+                line = tmp;
+            }
+            if (!fgets(line + len, cap - len, stdin)) break;
             len = strlen(line);
             if (len > 0 && line[len-1] == '\n') line[--len] = '\0';
         }
@@ -1124,7 +1133,7 @@ static int builtin_read(int argc, char **argv) {
 
     /* Split by IFS and assign to variables */
     char *ifs = shell_var_get("IFS");
-    if (!ifs) ifs = " \t\n";
+    if (!ifs) ifs = strdup(" \t\n");
 
     char *saveptr = NULL;
     char *token = strtok_r(line, ifs, &saveptr);
@@ -1132,7 +1141,6 @@ static int builtin_read(int argc, char **argv) {
         if (i == argc - 1) {
             /* Last variable gets rest of line */
             if (token) {
-                char *rest = token;
                 if (saveptr && *saveptr) {
                     /* Reconstruct remaining with original spacing */
                     size_t rest_len = strlen(token) + 1 + strlen(saveptr);
@@ -1141,7 +1149,7 @@ static int builtin_read(int argc, char **argv) {
                     shell_var_set(argv[i], buf);
                     free(buf);
                 } else {
-                    shell_var_set(argv[i], rest);
+                    shell_var_set(argv[i], token);
                 }
             } else {
                 shell_var_set(argv[i], "");
@@ -1151,6 +1159,8 @@ static int builtin_read(int argc, char **argv) {
             token = strtok_r(NULL, ifs, &saveptr);
         }
     }
+    free(ifs);  /* shell_var_get() or strdup'd default — always allocated */
+    free(line);
     return 0;
 }
 

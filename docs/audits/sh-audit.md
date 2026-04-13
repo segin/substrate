@@ -11,45 +11,15 @@
 | Severity | Count |
 |----------|-------|
 | CRITICAL | 0     |
-| HIGH     | 4     |
+| HIGH     | 2     |
 | MEDIUM   | 9     |
 | LOW      | 8     |
 | INFO     | 4     |
-| **Total**| **25**|
+| **Total**| **23**|
 
 ---
 
 ## HIGH
-
-### H-3: `builtin_read` uses fixed 4096-byte line buffer
-
-**File:** `exec.c`, `builtin_read()` (~line 1070)  
-**Impact:** Lines longer than 4095 bytes are silently truncated. This can cause data corruption in scripts processing large inputs. The backslash-continuation loop can also write past the end if `line` is nearly full.
-
-```c
-char line[4096];
-if (!fgets(line, sizeof(line), stdin)) return 1;
-```
-
-**Fix:** Use dynamic allocation (`getline()` or manual growth loop).
-
----
-
-### H-4: `builtin_read` leaks memory from `shell_var_get("IFS")`
-
-**File:** `exec.c`, `builtin_read()` (~line 1097)  
-**Impact:** `shell_var_get()` returns `strdup()`'d memory, but the return value of `shell_var_get("IFS")` is never freed. This leaks on every `read` invocation.
-
-```c
-char *ifs = shell_var_get("IFS");
-if (!ifs) ifs = " \t\n";  // Never freed when non-NULL
-```
-
-Additionally, `strtok_r` then uses the `ifs` string to split `line`, but the last-variable reconstruction uses `*ifs` (only the first IFS character) as a separator —  this is incorrect when IFS contains multiple characters.
-
-**Fix:** Free the IFS string after use. Fix the last-variable reconstruction to use the original whitespace from the input rather than just `*ifs`.
-
----
 
 ### H-5: `init_environment()` and `get_last_status()` leak `shell_var_get()` return values
 
@@ -300,7 +270,6 @@ The shell has a pervasive pattern of calling `shell_var_get()` (which returns `s
 
 | Location | Variable | Severity |
 |----------|----------|----------|
-| `exec.c` `builtin_read()` | IFS | HIGH |
 | `exec.c` `find_in_path()` | PATH | MEDIUM |
 | `exec.c` `builtin_command()` | PATH | MEDIUM |
 | `exec.c` `builtin_exec()` | envp array | HIGH (but moot due to exec) |
