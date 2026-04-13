@@ -11,8 +11,8 @@
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
 | **MEDIUM** | 0 | *(all resolved)* |
-| **LOW** | 9 | Code style, comments, hardcoded constants, performance |
-| **TOTAL** | **9** | |
+| **LOW** | 8 | Comments, hardcoded constants, performance |
+| **TOTAL** | **8** | |
 
 ---
 
@@ -23,8 +23,6 @@
 ---
 
 ## LOW Findings
-
-52. Missing thread-safety documentation on most functions.
 
 53. `pmap_activate` has misplaced PCID comment.
 
