@@ -50,6 +50,18 @@ static void setup_tss(gdt_entry_t *gdt, tss_entry_t *tss, int32_t num, uint16_t 
     tss->iomap_end = 0xFF;
 }
 
+/*
+ * Full GDT initialization (replaces early_gdt_init() from early_boot.c).
+ *
+ * The early GDT (3 entries: null, kernel CS, kernel DS) is set up in
+ * early_gdt_init() at the very start of kmain() to enable early exception
+ * handling.  Once percpu structures are available, gdt_init() installs the
+ * full per-CPU GDT with user-mode segments, TSS, and TLS support.
+ *
+ * Transition: kmain() → early_gdt_init() → ... → init_core_subsystems()
+ *             → percpu_init() → gdt_init() (overwrites early GDT via lgdt).
+ */
+
 // Initialize GDT and TSS for a specific CPU
 void gdt_init_cpu(int cpu_id) {
     struct percpu_data *pcpu = percpu_get_cpu(cpu_id);

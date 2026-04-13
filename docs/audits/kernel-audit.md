@@ -11,8 +11,8 @@
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
 | **MEDIUM** | 0 | *(all resolved)* |
-| **LOW** | 2 | Hardcoded constants, performance |
-| **TOTAL** | **2** | |
+| **LOW** | 1 | Hardcoded constants, performance |
+| **TOTAL** | **1** | |
 
 ---
 
@@ -23,8 +23,6 @@
 ---
 
 ## LOW Findings
-
-59. Early GDT → full GDT transition not documented.
 
 60. Framebuffer luma calculation not cached.
 
