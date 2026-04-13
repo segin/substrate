@@ -9,11 +9,11 @@
 
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
-| **CRITICAL** | 1 | section link validation |
+| **CRITICAL** | 0 | *(all resolved)* |
 | **HIGH** | 0 | *(all resolved)* |
 | **MEDIUM** | 2 | NULL dereference, group signature |
 | **LOW** | 1 | version index |
-| **TOTAL** | **4** | |
+| **TOTAL** | **3** | |
 
 This library parses untrusted ELF files supplied to the assembler/linker. All input data must be treated as adversarial.
 
@@ -21,13 +21,7 @@ This library parses untrusted ELF files supplied to the assembler/linker. All in
 
 ## CRITICAL Findings
 
-### 3. Section sh_link Validation — Partial State Corruption
-
-- **File:** `usr.lib/elfobj/src/elf_read.c`, lines 393-410
-- **Function:** `parse_symbols()`
-- **Issue:** When `sec->link >= obj->section_count`, the function returns `ELF_ERR_FORMAT`. But earlier iterations of the loop may have already pushed symbols into the object. The object is left in an inconsistent state — some symbol tables loaded, others not.
-- **Impact:** Callers that check for errors after `parse_symbols()` may still see partial data, leading to incorrect link output.
-- **Fix:** Either validate all sections upfront before loading any, or roll back on error.
+*(All resolved)*
 
 ---
 

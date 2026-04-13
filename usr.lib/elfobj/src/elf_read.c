@@ -331,6 +331,33 @@ static elf_err_t parse_symbols(elfobj_t *obj, symtab_index_t **out_maps, size_t 
 
     for (i = 0; i < obj->section_count; ++i) {
         struct elf_section *sec = obj->sections[i];
+        size_t entsz;
+        size_t min_entsz;
+        struct elf_section *strsec;
+
+        if (sec->type != SHT_SYMTAB && sec->type != SHT_DYNSYM) {
+            continue;
+        }
+        if (sec->data == NULL) {
+            continue;
+        }
+
+        min_entsz = obj->cls == ELFOBJ_CLASS_32 ? 16u : 24u;
+        entsz = (size_t)(sec->entsize ? sec->entsize : min_entsz);
+        if (entsz < min_entsz || sec->data_size % entsz != 0) {
+            return ELF_ERR_FORMAT;
+        }
+        if (sec->link >= obj->section_count) {
+            return ELF_ERR_FORMAT;
+        }
+        strsec = obj->sections[sec->link];
+        if (strsec->type != SHT_STRTAB || strsec->data == NULL) {
+            return ELF_ERR_FORMAT;
+        }
+    }
+
+    for (i = 0; i < obj->section_count; ++i) {
+        struct elf_section *sec = obj->sections[i];
         size_t nsyms;
         size_t j;
         size_t entsz;
@@ -353,15 +380,7 @@ static elf_err_t parse_symbols(elfobj_t *obj, symtab_index_t **out_maps, size_t 
         }
         nsyms = sec->data_size / entsz;
 
-        if (sec->link >= obj->section_count) {
-            free(maps);
-            return ELF_ERR_FORMAT;
-        }
         strsec = obj->sections[sec->link];
-        if (strsec->type != SHT_STRTAB || strsec->data == NULL) {
-            free(maps);
-            return ELF_ERR_FORMAT;
-        }
 
         map.sec_index = i;
         map.count = nsyms;
