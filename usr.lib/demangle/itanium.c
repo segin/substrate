@@ -721,9 +721,14 @@ parse_unnamed_type_name(dm_itanium_parser_t *p)
         first = 1;
         while (p->cur[0] != '\0' && p->cur[0] != 'E') {
             size_t before = p->out.len;
-            if (parse_type(p) != 0) {
+            if (parser_enter(p) != 0) {
                 return -1;
             }
+            if (parse_type(p) != 0) {
+                parser_leave(p);
+                return -1;
+            }
+            parser_leave(p);
             if (!first && buf_insert(&p->out, before, ", ", 2u) != 0) {
                 return -1;
             }
@@ -833,12 +838,17 @@ parse_name_component(dm_itanium_parser_t *p, size_t prev_off, size_t prev_len,
 static int
 parse_nested_name(dm_itanium_parser_t *p)
 {
+    int rc = -1;
     size_t name_off;
     size_t last_off;
     size_t last_len;
     int first;
 
     if (p->cur[0] != 'N') {
+        return -1;
+    }
+
+    if (parser_enter(p) != 0) {
         return -1;
     }
 
@@ -869,27 +879,30 @@ parse_nested_name(dm_itanium_parser_t *p)
 
     while (p->cur[0] != '\0' && p->cur[0] != 'E') {
         if (!first && buf_append(&p->out, "::", 2u) != 0) {
-            return -1;
+            goto out;
         }
 
         if (parse_name_component(p, last_off, last_len, &last_off, &last_len) != 0) {
-            return -1;
+            goto out;
         }
 
         first = 0;
     }
 
     if (first || p->cur[0] != 'E') {
-        return -1;
+        goto out;
     }
 
     p->cur++;
 
     if (parser_add_substitution(p, name_off, p->out.len - name_off) != 0) {
-        return -1;
+        goto out;
     }
 
-    return 0;
+    rc = 0;
+out:
+    parser_leave(p);
+    return rc;
 }
 
 static int

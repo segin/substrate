@@ -9,51 +9,17 @@
 
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
-| **CRITICAL** | 3 | Stack exhaustion via recursion bypass, snprintf buffer over-read |
+| **CRITICAL** | 0 | *(all resolved)* |
 | **HIGH** | 3 | Substitution array limits, template depth, D language recursion |
 | **MEDIUM** | 2 | Punycode overflow complexity, legacy format string logic |
 | **LOW** | 2 | Buffer arithmetic fragility, stack buffer sizing |
-| **TOTAL** | **10** | |
+| **TOTAL** | **7** | |
 
 ---
 
 ## CRITICAL Findings
 
-### 1. Stack Exhaustion via Lambda Recursion — No Depth Check
-
-- **File:** `usr.lib/demangle/itanium.c`, lines 704-730
-- **Issue:** `parse_unnamed_type_name()` calls `parse_type()` in a loop without calling `parser_enter()` for recursion depth tracking. Since `parse_type()` can call back into name parsing, this creates unbounded mutual recursion.
-- **Code:**
-  ```c
-  while (p->cur[0] != '\0' && p->cur[0] != 'E') {
-      if (parse_type(p) != 0) {   // recursive, no depth check
-          return -1;
-      }
-  }
-  ```
-- **Impact:** Crafted mangled name with deeply nested lambdas overflows the stack. DoS on any tool using libdemangle (e.g., profiler, debugger, `nm`).
-- **Fix:** Add `parser_enter(p)` / `parser_leave(p)` around the `parse_type()` call.
-
-### 2. Recursion Bypass in `parse_nested_name()`
-
-- **File:** `usr.lib/demangle/itanium.c`, lines 834-880
-- **Issue:** `parse_nested_name()` never calls `parser_enter()`. The recursion path `parse_nested_name()` → `parse_name_component()` → name parsing → `parse_nested_name()` bypasses the 256-deep limit entirely.
-- **Impact:** Same as above — stack exhaustion via crafted input.
-- **Fix:** Add `parser_enter(p)` at function entry.
-
-### 3. snprintf Buffer Over-Read in D Language Parser
-
-- **File:** `usr.lib/demangle/dlang.c`, lines 1030-1033
-- **Issue:** `snprintf()` into a 32-byte stack buffer returns the number of characters that *would* have been written. The return value is then passed to `dlang_buf_append()` as a length, which reads beyond the 32-byte buffer when the formatted number exceeds 31 characters.
-- **Code:**
-  ```c
-  char numbuf[32];
-  int numlen = snprintf(numbuf, sizeof(numbuf), "%zu", n);
-  // numlen can be > 32 if n is very large
-  dlang_buf_append(&p->out, numbuf, (size_t)numlen);  // reads past buffer
-  ```
-- **Impact:** Information disclosure — leaks stack contents into demangled output.
-- **Fix:** Clamp `numlen` to `sizeof(numbuf) - 1` before passing to append.
+*(All resolved)*
 
 ---
 

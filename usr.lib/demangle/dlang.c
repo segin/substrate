@@ -1029,7 +1029,16 @@ dlang_parse_type_core(dlang_parser_t *p)
         {
             char numbuf[32];
             int numlen = snprintf(numbuf, sizeof(numbuf), "%zu", n);
-            if (numlen < 0 || dlang_buf_append(&p->out, numbuf, (size_t)numlen) != 0 ||
+            size_t app_len;
+            if (numlen < 0) {
+                free(inner);
+                return -1;
+            }
+            app_len = (size_t)numlen;
+            if (app_len >= sizeof(numbuf)) {
+                app_len = sizeof(numbuf) - 1u;
+            }
+            if (dlang_buf_append(&p->out, numbuf, app_len) != 0 ||
                 dlang_buf_appendc(&p->out, ']') != 0) {
                 free(inner);
                 return -1;
