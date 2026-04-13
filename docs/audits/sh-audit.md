@@ -12,23 +12,14 @@
 |----------|-------|
 | CRITICAL | 0     |
 | HIGH     | 0     |
-| MEDIUM   | 8     |
+| MEDIUM   | 7     |
 | LOW      | 8     |
 | INFO     | 4     |
-| **Total**| **20**|
+| **Total**| **19**|
 
 ---
 
 ## MEDIUM
-
-### M-2: `shell_var_stack.c` is dead code with duplicate definitions
-
-**File:** `shell_var_stack.c`  
-**Impact:** This file defines `shell_var_push_args()` and `shell_var_pop_args()` which are also defined in `shell_var.c`. It references `shell_argc`, `shell_argv`, and `shell_name` as if they were extern, but they are `static` in `shell_var.c`. The Makefile's `SRCS` does not include this file, so it's harmless dead code.
-
-**Fix:** Delete `shell_var_stack.c`.
-
----
 
 ### M-3: `buffer_append()` silently truncates at 64KB
 
