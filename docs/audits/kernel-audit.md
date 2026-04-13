@@ -37,11 +37,6 @@
 
 ---
 
-## Recommendations (Priority Order)
+## Recommendations
 
-1. **Urgent:** Fix fork race conditions (#12, #13) — process management integrity.
-2. **High:** Fix ext2 readlink overflow (#26).
-3. **High:** Fix vm_object ref counting (#19) and IRQ dispatch UAF (#17).
-4. **High:** Add lock ordering documentation and assertions (#44).
-5. **Medium:** Address remaining VM and pmap issues (#14, #15, #16).
-6. **Ongoing:** Standardize error codes, add thread-safety annotations.
+All 60 findings have been resolved. No outstanding recommendations.
