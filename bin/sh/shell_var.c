@@ -1,4 +1,5 @@
 #include "shell_var.h"
+#include "exec.h"
 #include "util.h"
 #include <stdlib.h>
 #include <string.h>
@@ -194,8 +195,13 @@ char *shell_var_get(const char *name) {
     
     // $- - current shell options
     if (strcmp(name, "-") == 0) {
-        // Return empty for now - we'd need to track set options
-        return strdup("");
+        char flags[16];
+        int n = 0;
+        if (shell_errexit) flags[n++] = 'e';
+        if (shell_is_interactive) flags[n++] = 'i';
+        if (shell_xtrace) flags[n++] = 'x';
+        flags[n] = '\0';
+        return strdup(flags);
     }
     
     // $* - all positional parameters as single word (IFS-joined)

@@ -11,30 +11,15 @@
 | Severity | Count |
 |----------|-------|
 | CRITICAL | 0     |
-| HIGH     | 5     |
+| HIGH     | 4     |
 | MEDIUM   | 9     |
 | LOW      | 8     |
 | INFO     | 4     |
-| **Total**| **26**|
+| **Total**| **25**|
 
 ---
 
 ## HIGH
-
-### H-2: `$-` returns empty string instead of shell option flags
-
-**File:** `shell_var.c`, `shell_var_get()` (~line 214)  
-**Impact:** POSIX requires `$-` to expand to the current option flags (e.g., `"eix"` if `-e`, `-i`, `-x` are set). Returning empty string breaks scripts that check current shell options.
-
-```c
-if (strcmp(name, "-") == 0) {
-    return strdup("");  // Should return "eix" or similar
-}
-```
-
-**Fix:** Build the flags string from `shell_errexit`, `shell_xtrace`, `shell_is_interactive`, etc.
-
----
 
 ### H-3: `builtin_read` uses fixed 4096-byte line buffer
 
@@ -332,8 +317,7 @@ The shell has a pervasive pattern of calling `shell_var_get()` (which returns `s
 
 ## POSIX Compliance Gaps
 
-1. **$-:** Returns empty instead of option flags
-3. **$*:** Doesn't use first char of IFS for joining
+1. **$*:** Doesn't use first char of IFS for joining
 4. **test:** Missing file tests, logic operators, negation
 5. **unset:** Only unsets first argument
 6. **echo:** Missing `-n` flag
