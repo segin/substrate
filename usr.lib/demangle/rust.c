@@ -648,6 +648,10 @@ rust_puny_decode(const char *in, size_t in_len, rust_buf_t *out, int *non_ascii)
                 return -1;
             }
 
+            /*
+             * Punycode accumulation is i += digit * w. Guard the multiply and
+             * add together by bounding digit against the remaining headroom.
+             */
             if (digit > (UINT32_MAX - i) / w) {
                 free(cps);
                 return -1;
@@ -667,6 +671,7 @@ rust_puny_decode(const char *in, size_t in_len, rust_buf_t *out, int *non_ascii)
             }
 
             step = 36u - t;
+            /* w *= step for the next digit position; keep it in uint32_t. */
             if (w > UINT32_MAX / step) {
                 free(cps);
                 return -1;

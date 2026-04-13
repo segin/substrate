@@ -7,6 +7,21 @@
 
 #define DEMANGLE_BUF_INITIAL_CAP 256u
 
+static int
+demangle_buf_compute_need(const demangle_buf_t *buf, size_t extra, size_t *need)
+{
+    if (buf == NULL || need == NULL) {
+        return -1;
+    }
+
+    if (extra > (size_t)-1 - buf->len - 1u) {
+        return -1;
+    }
+
+    *need = buf->len + extra + 1u;
+    return 0;
+}
+
 int
 demangle_buf_reserve(demangle_buf_t *buf, size_t extra)
 {
@@ -18,11 +33,9 @@ demangle_buf_reserve(demangle_buf_t *buf, size_t extra)
         return -1;
     }
 
-    if (extra > (size_t)-1 - buf->len - 1u) {
+    if (demangle_buf_compute_need(buf, extra, &need) != 0) {
         return -1;
     }
-
-    need = buf->len + extra + 1u;
     if (need <= buf->cap) {
         return 0;
     }

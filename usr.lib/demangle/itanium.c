@@ -9,8 +9,8 @@
 
 #include <demangle.h>
 
-#define DM_SUBST_CAP 256u
-#define DM_TEMPLATE_STACK_CAP 64u
+#define DM_SUBST_INITIAL_CAP 256u
+#define DM_TEMPLATE_STACK_INITIAL_CAP 64u
 #define DM_TEMPLATE_ARG_CAP 64u
 #define DM_RECURSION_DEFAULT_LIMIT 256
 
@@ -48,11 +48,13 @@ typedef struct dm_itanium_parser {
 
     dm_buf_t out;
 
-    dm_subst_t substitutions[DM_SUBST_CAP];
+    dm_subst_t *substitutions;
     size_t substitution_count;
+    size_t substitution_cap;
 
-    dm_template_frame_t template_frames[DM_TEMPLATE_STACK_CAP];
+    dm_template_frame_t *template_frames;
     size_t template_depth;
+    size_t template_cap;
 
     size_t last_template_off[DM_TEMPLATE_ARG_CAP];
     size_t last_template_len[DM_TEMPLATE_ARG_CAP];
@@ -77,8 +79,11 @@ static char *buf_take(dm_buf_t *buf);
 static void buf_destroy(dm_buf_t *buf);
 
 static int parser_begin(dm_itanium_parser_t *p);
+static void parser_destroy(dm_itanium_parser_t *p);
 static int parser_enter(dm_itanium_parser_t *p);
 static void parser_leave(dm_itanium_parser_t *p);
+static int parser_ensure_substitution_capacity(dm_itanium_parser_t *p, size_t need);
+static int parser_ensure_template_capacity(dm_itanium_parser_t *p, size_t need);
 static int parser_push_template_frame(dm_itanium_parser_t *p);
 static int parser_pop_template_frame(dm_itanium_parser_t *p);
 static int parser_record_template_arg(dm_itanium_parser_t *p, size_t off, size_t len);
@@ -225,12 +230,49 @@ parser_begin(dm_itanium_parser_t *p)
     memset(p, 0, sizeof(*p));
     p->recursion_limit = DM_RECURSION_DEFAULT_LIMIT;
 
+    p->substitutions = (dm_subst_t *)calloc(DM_SUBST_INITIAL_CAP, sizeof(*p->substitutions));
+    if (p->substitutions == NULL) {
+        return -1;
+    }
+    p->substitution_cap = DM_SUBST_INITIAL_CAP;
+
+    p->template_frames = (dm_template_frame_t *)calloc(DM_TEMPLATE_STACK_INITIAL_CAP,
+                                                       sizeof(*p->template_frames));
+    if (p->template_frames == NULL) {
+        free(p->substitutions);
+        p->substitutions = NULL;
+        p->substitution_cap = 0u;
+        return -1;
+    }
+    p->template_cap = DM_TEMPLATE_STACK_INITIAL_CAP;
+
     if (buf_reserve(&p->out, 0u) != 0) {
+        parser_destroy(p);
         return -1;
     }
 
     p->out.data[0] = '\0';
     return 0;
+}
+
+static void
+parser_destroy(dm_itanium_parser_t *p)
+{
+    if (p == NULL) {
+        return;
+    }
+
+    free(p->substitutions);
+    p->substitutions = NULL;
+    p->substitution_count = 0u;
+    p->substitution_cap = 0u;
+
+    free(p->template_frames);
+    p->template_frames = NULL;
+    p->template_depth = 0u;
+    p->template_cap = 0u;
+
+    buf_destroy(&p->out);
 }
 
 static int
@@ -253,9 +295,67 @@ parser_leave(dm_itanium_parser_t *p)
 }
 
 static int
+parser_ensure_substitution_capacity(dm_itanium_parser_t *p, size_t need)
+{
+    size_t cap;
+    dm_subst_t *next;
+
+    if (need <= p->substitution_cap) {
+        return 0;
+    }
+
+    cap = (p->substitution_cap == 0u) ? DM_SUBST_INITIAL_CAP : p->substitution_cap;
+    while (cap < need) {
+        size_t doubled = cap << 1;
+        if (doubled < cap || doubled > (size_t)-1 / sizeof(*p->substitutions)) {
+            return -1;
+        }
+        cap = doubled;
+    }
+
+    next = (dm_subst_t *)realloc(p->substitutions, cap * sizeof(*p->substitutions));
+    if (next == NULL) {
+        return -1;
+    }
+
+    p->substitutions = next;
+    p->substitution_cap = cap;
+    return 0;
+}
+
+static int
+parser_ensure_template_capacity(dm_itanium_parser_t *p, size_t need)
+{
+    size_t cap;
+    dm_template_frame_t *next;
+
+    if (need <= p->template_cap) {
+        return 0;
+    }
+
+    cap = (p->template_cap == 0u) ? DM_TEMPLATE_STACK_INITIAL_CAP : p->template_cap;
+    while (cap < need) {
+        size_t doubled = cap << 1;
+        if (doubled < cap || doubled > (size_t)-1 / sizeof(*p->template_frames)) {
+            return -1;
+        }
+        cap = doubled;
+    }
+
+    next = (dm_template_frame_t *)realloc(p->template_frames, cap * sizeof(*p->template_frames));
+    if (next == NULL) {
+        return -1;
+    }
+
+    p->template_frames = next;
+    p->template_cap = cap;
+    return 0;
+}
+
+static int
 parser_push_template_frame(dm_itanium_parser_t *p)
 {
-    if (p->template_depth >= DM_TEMPLATE_STACK_CAP) {
+    if (parser_ensure_template_capacity(p, p->template_depth + 1u) != 0) {
         return -1;
     }
 
@@ -323,7 +423,7 @@ parser_add_substitution(dm_itanium_parser_t *p, size_t off, size_t len)
         return 0;
     }
 
-    if (p->substitution_count >= DM_SUBST_CAP) {
+    if (parser_ensure_substitution_capacity(p, p->substitution_count + 1u) != 0) {
         return -1;
     }
 
@@ -1318,6 +1418,10 @@ parse_expression_operator(dm_itanium_parser_t *p)
     size_t i;
     int argi;
 
+    /*
+     * Expression opcodes are a fixed two-byte token stream from the ABI.
+     * Keep this table flat and exhaustive so transition behavior is explicit.
+     */
     for (i = 0u; i < sizeof(ops) / sizeof(ops[0]); i++) {
         if (p->cur[0] == ops[i].code[0] && p->cur[1] == ops[i].code[1]) {
             p->cur += 2;
@@ -1880,20 +1984,20 @@ demangle_itanium(const char *mangled, int options)
     }
 
     if (parser_enter(&parser) != 0) {
-        buf_destroy(&parser.out);
+        parser_destroy(&parser);
         return NULL;
     }
 
     if (mangled[0] == '_' && mangled[1] == 'Z') {
         if (parse_encoding(&parser) != 0 || parser.cur[0] != '\0') {
             parser_leave(&parser);
-            buf_destroy(&parser.out);
+            parser_destroy(&parser);
             return NULL;
         }
     } else {
         if ((options & DEMANGLE_TYPES) == 0 || parse_type(&parser) != 0 || parser.cur[0] != '\0') {
             parser_leave(&parser);
-            buf_destroy(&parser.out);
+            parser_destroy(&parser);
             return NULL;
         }
     }
@@ -1901,6 +2005,6 @@ demangle_itanium(const char *mangled, int options)
     parser_leave(&parser);
 
     ret = buf_take(&parser.out);
-    buf_destroy(&parser.out);
+    parser_destroy(&parser);
     return ret;
 }
