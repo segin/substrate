@@ -135,6 +135,7 @@ static char *lookup_variable(const char *name) {
 
 // Full recursive descent parser for POSIX arithmetic
 static const char *arith_ptr;
+static int arith_error;
 
 static long parse_assign(void);
 static long parse_log_or(void);
@@ -197,10 +198,14 @@ static long parse_mul(void) {
         while (isspace(*arith_ptr)) arith_ptr++;
         if (*arith_ptr == '*' && *(arith_ptr+1) != '=') { arith_ptr++; left *= parse_unary(); }
         else if (*arith_ptr == '/' && *(arith_ptr+1) != '=') { 
-            arith_ptr++; long r = parse_unary(); if (r) left /= r; 
+            arith_ptr++; long r = parse_unary();
+            if (r) { left /= r; }
+            else { fprintf(stderr, "sh: arithmetic: division by zero\n"); arith_error = 1; return 0; }
         }
         else if (*arith_ptr == '%' && *(arith_ptr+1) != '=') { 
-            arith_ptr++; long r = parse_unary(); if (r) left %= r; 
+            arith_ptr++; long r = parse_unary();
+            if (r) { left %= r; }
+            else { fprintf(stderr, "sh: arithmetic: division by zero\n"); arith_error = 1; return 0; }
         }
         else break;
     }
@@ -586,12 +591,17 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
                 if (depth == 0) {
                     char *expr = sh_strndup(start, p - start - 1);
                     arith_ptr = expr;
+                    arith_error = 0;
                     long val = parse_assign();
-                    char buf[32];
-                    snprintf(buf, sizeof(buf), "%ld", val);
-                    expand_str_split(buf, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
-                    free(expr);
-                }
+                    if (arith_error) {
+                        expand_state_fail(state, 1);
+                        free(expr);
+                    } else {
+                        char buf[32];
+                        snprintf(buf, sizeof(buf), "%ld", val);
+                        expand_str_split(buf, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                        free(expr);
+                    }
             } else if (*p == '(') {
                 p++;
                 const char *start = p;

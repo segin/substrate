@@ -11,28 +11,11 @@
 | Severity | Count |
 |----------|-------|
 | CRITICAL | 0     |
-| HIGH     | 1     |
+| HIGH     | 0     |
 | MEDIUM   | 9     |
 | LOW      | 8     |
 | INFO     | 4     |
-| **Total**| **22**|
-
----
-
-## HIGH
-
-### H-6: Arithmetic division/modulo by zero silently returns 0
-
-**File:** `expand.c`, `parse_mul()` (~line 200)  
-**Impact:** POSIX specifies that division or modulo by zero in arithmetic expansion is an error. The shell silently returns 0 for the left operand, hiding bugs.
-
-```c
-else if (*arith_ptr == '/' ...) { 
-    arith_ptr++; long r = parse_unary(); if (r) left /= r; 
-}
-```
-
-**Fix:** When `r == 0`, print an error to stderr and set error state via `expand_state_fail()`.
+| **Total**| **21**|
 
 ---
 
@@ -272,4 +255,3 @@ The shell has a pervasive pattern of calling `shell_var_get()` (which returns `s
 6. **echo:** Missing `-n` flag
 7. **case:** Single pattern per item (no `|` alternatives)
 8. **~user:** Not expanded
-9. **Arithmetic:** Division by zero not an error
