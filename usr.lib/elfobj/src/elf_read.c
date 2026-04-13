@@ -100,10 +100,18 @@ static struct elf_section *parse_shdr64(elfobj_t *obj, const uint8_t *p) {
 static elf_err_t parse_sections(elfobj_t *obj, uint64_t shoff, uint16_t entsize, uint16_t shnum) {
     size_t i;
     uint64_t table_size;
+    uint64_t table_end;
+    uint64_t image_size_u64 = (uint64_t)obj->image_size;
     if (shnum == 0) {
         return ELF_OK;
     }
     if (!elf__u64_mul((uint64_t)entsize, (uint64_t)shnum, &table_size)) {
+        return ELF_ERR_BOUNDS;
+    }
+    if (!elf__u64_add(shoff, table_size, &table_end)) {
+        return ELF_ERR_BOUNDS;
+    }
+    if (table_end > image_size_u64) {
         return ELF_ERR_BOUNDS;
     }
     if (shoff > SIZE_MAX || table_size > SIZE_MAX) {
@@ -114,7 +122,11 @@ static elf_err_t parse_sections(elfobj_t *obj, uint64_t shoff, uint16_t entsize,
     }
 
     for (i = 0; i < shnum; ++i) {
-        const uint8_t *p = obj->image + shoff + ((size_t)entsize * i);
+        uint64_t row_off;
+        if (!elf__u64_add(shoff, (uint64_t)entsize * i, &row_off) || row_off > SIZE_MAX) {
+            return ELF_ERR_BOUNDS;
+        }
+        const uint8_t *p = obj->image + (size_t)row_off;
         struct elf_section *sec;
 
         if (obj->cls == ELFOBJ_CLASS_32) {
@@ -159,6 +171,21 @@ static elf_err_t parse_sections(elfobj_t *obj, uint64_t shoff, uint16_t entsize,
             sec->data = obj->image + sec->offset;
             sec->data_size = (size_t)sec->size;
             sec->owns_data = 0;
+        }
+
+        if ((sec->flags & SHF_ALLOC) != 0 && sec->size > 0) {
+            size_t j;
+            for (j = 0; j < obj->section_count; ++j) {
+                struct elf_section *prev = obj->sections[j];
+                if (prev == NULL || prev->size == 0 || (prev->flags & SHF_ALLOC) == 0) {
+                    continue;
+                }
+                if (ranges_overlap_u64(prev->addr, prev->size, sec->addr, sec->size)) {
+                    free(sec->name);
+                    free(sec);
+                    return ELF_ERR_FORMAT;
+                }
+            }
         }
 
         if (elf__push_section(obj, sec) != ELF_OK) {

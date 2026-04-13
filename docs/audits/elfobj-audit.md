@@ -10,10 +10,10 @@
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
 | **CRITICAL** | 2 | String table validation, section link validation |
-| **HIGH** | 2 | Integer overflow, section overlap |
+| **HIGH** | 1 | section overlap |
 | **MEDIUM** | 2 | NULL dereference, group signature |
 | **LOW** | 1 | version index |
-| **TOTAL** | **7** | |
+| **TOTAL** | **6** | |
 
 This library parses untrusted ELF files supplied to the assembler/linker. All input data must be treated as adversarial.
 
@@ -50,19 +50,6 @@ This library parses untrusted ELF files supplied to the assembler/linker. All in
 ---
 
 ## HIGH Findings
-
-### 4. Integer Overflow in Section Table Size Calculation
-
-- **File:** `usr.lib/elfobj/src/elf_read.c`, lines 88-99
-- **Function:** `parse_sections()`
-- **Issue:** `shoff + table_size` is checked against file size, but the individual calculations use `elf__u64_mul()` which returns a `uint64_t`. On 32-bit targets, the subsequent `size_t` cast can truncate:
-  ```c
-  if (!elf__u64_mul((uint64_t)entsize, (uint64_t)shnum, &table_size))
-      return ELF_ERR_BOUNDS;
-  if (shoff > SIZE_MAX || table_size > SIZE_MAX)  // correct, but late
-      return ELF_ERR_BOUNDS;
-  ```
-- **Fix:** Validate SIZE_MAX bounds immediately after the multiply, before any cast.
 
 ### 5. Section Overlap Detection Excludes NOBITS
 
