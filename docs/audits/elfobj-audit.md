@@ -11,9 +11,9 @@
 |----------|-------|-----------|
 | **CRITICAL** | 2 | String table validation, section link validation |
 | **HIGH** | 2 | Integer overflow, section overlap |
-| **MEDIUM** | 3 | NULL dereference, group signature, compression header |
+| **MEDIUM** | 2 | NULL dereference, group signature |
 | **LOW** | 4 | Alignment validation, REL/RELA arch checks, diagnostic buffer, version index |
-| **TOTAL** | **11** | |
+| **TOTAL** | **10** | |
 
 This library parses untrusted ELF files supplied to the assembler/linker. All input data must be treated as adversarial.
 
@@ -87,16 +87,6 @@ This library parses untrusted ELF files supplied to the assembler/linker. All in
 - **File:** `usr.lib/elfobj/src/elf_link.c`, lines 113-160
 - **Issue:** Group section's symtab link re-used without re-validation in linking context. If object was modified between parse and link, stale pointers possible.
 
-### 14. DWARF Compression Header Overflow
-
-- **File:** `usr.lib/elfobj/src/elf_dwarf.c`, lines 148-180
-- **Issue:** 64-bit payload sizes from untrusted data are checked via `elf__u64_add()`, but the SIZE_MAX comparison happens after the addition:
-  ```c
-  if (total_size > SIZE_MAX || off + (size_t)total_size > size)
-  ```
-  On 32-bit, if `total_size > SIZE_MAX`, the cast `(size_t)total_size` silently truncates.
-- **Fix:** Check `total_size > SIZE_MAX` before casting to `size_t`.
-
 ---
 
 ## LOW Findings
@@ -138,12 +128,11 @@ This library parses untrusted ELF files supplied to the assembler/linker. All in
 
 ## Recommendations
 
-1. **Immediate:** Initialize `rel->symbol = NULL` before conditional assignment (#2).
-2. **Immediate:** Fix OOM cleanup to free in-progress map (#8).
-3. **Immediate:** Validate relocation offsets against target section size (#6).
-4. **Short-term:** Add maximum allocation size limit to prevent DoS (#7).
-5. **Short-term:** Validate entsize against section-type minimums (#11).
-6. **Short-term:** Audit all strtab access for `safe_str()` usage (#1).
-7. **Medium-term:** Extend section overlap detection to NOBITS sections (#5).
-8. **Medium-term:** Fix strtab growth silent failure (#9).
-9. **Testing:** Run existing fuzz harnesses with extended corpus; add relocation-focused fuzzer.
+1. **Immediate:** Audit all strtab access for `safe_str()` usage (#1).
+2. **Immediate:** Ensure symbol parsing is atomic/rollback-safe on failure (#3).
+3. **Short-term:** Strengthen section layout overlap checks for NOBITS memory ranges (#5).
+4. **Short-term:** Add bounds assertions around write-path symbol table emission (#10).
+5. **Short-term:** Re-validate group signature dependencies at final link use sites (#12).
+6. **Medium-term:** Validate section alignment values and architecture relocation policy edge-cases (#15, #16).
+7. **Medium-term:** Add cap for diagnostic buffer growth and cross-check version indexes (#17, #18).
+8. **Testing:** Run existing fuzz harnesses with extended corpus; add relocation-focused fuzzer.
