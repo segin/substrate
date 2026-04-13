@@ -13,18 +13,9 @@
 | CRITICAL | 0     |
 | HIGH     | 0     |
 | MEDIUM   | 0     |
-| LOW      | 1     |
+| LOW      | 0     |
 | INFO     | 4     |
-| **Total**| **5** |
-
----
-
-## LOW
-
-### L-8: `builtin_echo` doesn't handle `-n` flag
-
-**File:** `exec.c`, `builtin_echo()` (~line 722)  
-**Impact:** The `-n` flag (suppress trailing newline) is a common extension supported by nearly all shells. The current implementation always outputs a newline and would print `-n` as literal text.
+| **Total**| **4** |
 
 ---
 
@@ -71,6 +62,3 @@ The shell has a pervasive pattern of calling `shell_var_get()` (which returns `s
 
 ---
 
-## POSIX Compliance Gaps
-
-5. **echo:** Missing `-n` flag

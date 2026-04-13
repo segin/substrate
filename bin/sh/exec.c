@@ -779,10 +779,33 @@ static int builtin_local(int argc, char **argv) {
 }
 
 static int builtin_echo(int argc, char **argv) {
-    for (int i = 1; i < argc; i++) {
+    int newline = 1;
+    int start = 1;
+
+    while (start < argc && argv[start][0] == '-') {
+        int only_n = 1;
+        if (argv[start][1] == '\0') {
+            break;
+        }
+        for (int j = 1; argv[start][j] != '\0'; j++) {
+            if (argv[start][j] != 'n') {
+                only_n = 0;
+                break;
+            }
+        }
+        if (!only_n) {
+            break;
+        }
+        newline = 0;
+        start++;
+    }
+
+    for (int i = start; i < argc; i++) {
         printf("%s%s", argv[i], (i == argc - 1) ? "" : " ");
     }
-    printf("\n");
+    if (newline) {
+        printf("\n");
+    }
     fflush(stdout);
     return 0;
 }
