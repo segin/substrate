@@ -32,7 +32,7 @@ extern int64_t _syscall5(int, int, int, int, int, int);
 extern int64_t _syscall6(int, int, int, int, int, int, int);
 
 #undef errno
-int errno = 0;
+_Thread_local int errno = 0;
 char **environ = NULL;
 
 /* Provide __errno_location for code compiled with __linux__ defined */
