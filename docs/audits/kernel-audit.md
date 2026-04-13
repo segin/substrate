@@ -11,8 +11,8 @@
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
 | **MEDIUM** | 0 | *(all resolved)* |
-| **LOW** | 8 | Comments, hardcoded constants, performance |
-| **TOTAL** | **8** | |
+| **LOW** | 7 | Comments, hardcoded constants, performance |
+| **TOTAL** | **7** | |
 
 ---
 
@@ -23,8 +23,6 @@
 ---
 
 ## LOW Findings
-
-53. `pmap_activate` has misplaced PCID comment.
 
 54. ELF image cache has no LRU/collision strategy.
 
