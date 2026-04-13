@@ -7,6 +7,7 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <pwd.h>
 #include <sys/wait.h>
 
 extern long strtol(const char *nptr, char **endptr, int base);
@@ -548,10 +549,30 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
     int in_sq = 0, in_dq = 0, escape = 0, quoted_any = 0;
     const char *p = word;
     if (*p == '~' && !in_sq && !in_dq) {
-        char *home = lookup_variable("HOME");
-        if (home) {
-            expand_str_split(home, 0, list, cap, len, &cw, &cw_cap, &cw_len);
-            p++;
+        p++;
+        const char *start = p;
+        while (*p && *p != '/') p++;
+        size_t ulen = p - start;
+        if (ulen == 0) {
+            /* bare ~ -> $HOME */
+            char *home = lookup_variable("HOME");
+            if (home) {
+                expand_str_split(home, 0, list, cap, len, &cw, &cw_cap, &cw_len);
+                free(home);
+            }
+        } else {
+            /* ~user -> getpwnam */
+            char *user = sh_strndup(start, ulen);
+            struct passwd *pw = getpwnam(user);
+            if (pw) {
+                expand_str_split(pw->pw_dir, 0, list, cap, len, &cw, &cw_cap, &cw_len);
+            } else {
+                /* Not found: emit literal ~user */
+                buffer_append(&cw, &cw_cap, &cw_len, '~');
+                for (size_t i = 0; i < ulen; i++)
+                    buffer_append(&cw, &cw_cap, &cw_len, start[i]);
+            }
+            free(user);
         }
     }
     while (*p) {

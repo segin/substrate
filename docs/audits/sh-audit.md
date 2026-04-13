@@ -13,20 +13,13 @@
 | CRITICAL | 0     |
 | HIGH     | 0     |
 | MEDIUM   | 0     |
-| LOW      | 8     |
+| LOW      | 7     |
 | INFO     | 4     |
-| **Total**| **12**|
+| **Total**| **11**|
 
 ---
 
 ## LOW
-
-### L-1: Tilde expansion only handles bare `~`
-
-**File:** `expand.c`  
-**Impact:** `~user` form is not expanded (POSIX says `~login` should expand to the user's home directory via `getpwnam()`). Only bare `~` is expanded to `$HOME`.
-
----
 
 ### L-2: `builtin_fg` doesn't return the job's exit status
 
@@ -133,4 +126,3 @@ The shell has a pervasive pattern of calling `shell_var_get()` (which returns `s
 1. **$*:** Doesn't use first char of IFS for joining
 5. **echo:** Missing `-n` flag
 7. **case:** Single pattern per item (no `|` alternatives)
-8. **~user:** Not expanded
