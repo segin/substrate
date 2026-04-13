@@ -11,8 +11,8 @@
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
 | **MEDIUM** | 0 | *(all resolved)* |
-| **LOW** | 10 | Code style, comments, hardcoded constants, performance |
-| **TOTAL** | **10** | |
+| **LOW** | 9 | Code style, comments, hardcoded constants, performance |
+| **TOTAL** | **9** | |
 
 ---
 
@@ -23,8 +23,6 @@
 ---
 
 ## LOW Findings
-
-51. Naive O(nm) `strstr()` in `main.c`.
 
 52. Missing thread-safety documentation on most functions.
 
