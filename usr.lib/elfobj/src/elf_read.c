@@ -283,6 +283,7 @@ static elf_err_t parse_symbols(elfobj_t *obj, symtab_index_t **out_maps, size_t 
         size_t nsyms;
         size_t j;
         size_t entsz;
+        size_t min_entsz;
         struct elf_section *strsec;
         symtab_index_t map;
 
@@ -293,8 +294,9 @@ static elf_err_t parse_symbols(elfobj_t *obj, symtab_index_t **out_maps, size_t 
             continue;
         }
 
-        entsz = (size_t)(sec->entsize ? sec->entsize : (obj->cls == ELFOBJ_CLASS_32 ? 16 : 24));
-        if (entsz == 0 || sec->data_size % entsz != 0) {
+        min_entsz = obj->cls == ELFOBJ_CLASS_32 ? 16u : 24u;
+        entsz = (size_t)(sec->entsize ? sec->entsize : min_entsz);
+        if (entsz < min_entsz || sec->data_size % entsz != 0) {
             free(maps);
             return ELF_ERR_FORMAT;
         }

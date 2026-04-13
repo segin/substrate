@@ -11,9 +11,9 @@
 |----------|-------|-----------|
 | **CRITICAL** | 2 | String table validation, section link validation |
 | **HIGH** | 2 | Integer overflow, section overlap |
-| **MEDIUM** | 5 | Strtab growth, NULL dereference, entsize DoS, group signature, compression header |
+| **MEDIUM** | 4 | Strtab growth, NULL dereference, group signature, compression header |
 | **LOW** | 4 | Alignment validation, REL/RELA arch checks, diagnostic buffer, version index |
-| **TOTAL** | **13** | |
+| **TOTAL** | **12** | |
 
 This library parses untrusted ELF files supplied to the assembler/linker. All input data must be treated as adversarial.
 
@@ -94,12 +94,6 @@ This library parses untrusted ELF files supplied to the assembler/linker. All in
 - **Function:** `build_symtab()`
 - **Issue:** `elf__calloc()` return value is checked, but subsequent write operations within the buffer don't re-validate bounds.
 - **Fix:** Defensive programming — add assertions.
-
-### 11. Untrusted entsize Allows DoS via Tiny Values
-
-- **File:** `usr.lib/elfobj/src/elf_read.c`, lines 388-393
-- **Issue:** `entsize = 1` is accepted. For a 10MB data section, this means 10 million "symbols" — massive allocation.
-- **Fix:** Validate `entsize` against known minimum sizes for the section type (16 for 32-bit symtab, 24 for 64-bit).
 
 ### 12. Group Signature Name Extraction
 
