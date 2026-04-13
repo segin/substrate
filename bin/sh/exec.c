@@ -1466,6 +1466,7 @@ static char **merge_env(char **base_env, int assign_count, char **assignments) {
 
         char *entry = strdup(buf);
         if (found != -1) {
+            free(new_env[found]);
             new_env[found] = entry;
         } else {
             new_env[current_count++] = entry;

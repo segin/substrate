@@ -11,30 +11,15 @@
 | Severity | Count |
 |----------|-------|
 | CRITICAL | 0     |
-| HIGH     | 6     |
+| HIGH     | 5     |
 | MEDIUM   | 9     |
 | LOW      | 8     |
 | INFO     | 4     |
-| **Total**| **27**|
+| **Total**| **26**|
 
 ---
 
 ## HIGH
-
-### H-1: `merge_env()` leaks replaced environment entries
-
-**File:** `exec.c`, `merge_env()` (~line 1470)  
-**Impact:** When a temporary assignment overrides an existing environment variable, the old `base_env[found]` string is replaced with a new `strdup(buf)` but the old string is never freed.
-
-```c
-if (found != -1) {
-    new_env[found] = entry;  // Old base_env[found] leaked
-}
-```
-
-**Fix:** `free(new_env[found])` before replacing if it was dynamically allocated.
-
----
 
 ### H-2: `$-` returns empty string instead of shell option flags
 
