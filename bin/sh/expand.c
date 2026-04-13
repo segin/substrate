@@ -94,7 +94,7 @@ static void finalize_word(char **cw, size_t *cw_cap, size_t *cw_len, char ***lis
 
 static char *get_ifs() {
     char *ifs = shell_var_get("IFS");
-    if (!ifs) return " \t\n";
+    if (!ifs) return strdup(" \t\n");
     return ifs;
 }
 
@@ -108,7 +108,7 @@ static void expand_str_split(const char *val, int split, char ***list, size_t *c
         return;
     }
 
-    const char *ifs = get_ifs();
+    char *ifs = get_ifs();
     const char *p = val;
     // Skip initial IFS whitespace if splitting
     while (*p && isspace(*p) && strchr(ifs, *p)) p++;
@@ -125,6 +125,7 @@ static void expand_str_split(const char *val, int split, char ***list, size_t *c
         }
         if (*p) p++;
     }
+    free(ifs);
 }
 
 

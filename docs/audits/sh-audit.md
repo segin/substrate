@@ -12,31 +12,14 @@
 |----------|-------|
 | CRITICAL | 0     |
 | HIGH     | 0     |
-| MEDIUM   | 4     |
+| MEDIUM   | 3     |
 | LOW      | 8     |
 | INFO     | 4     |
-| **Total**| **16**|
+| **Total**| **15**|
 
 ---
 
 ## MEDIUM
-
-### M-7: `get_ifs()` in expand.c returns allocated or static memory depending on path
-
-**File:** `expand.c`, `get_ifs()` (~line 98)  
-**Impact:** When IFS is set, `shell_var_get("IFS")` returns `strdup()`'d memory. When IFS is unset, it returns `" \t\n"` (a static string). Callers cannot know whether to free the result. Currently no caller frees it — always leaks.
-
-```c
-static char *get_ifs() {
-    char *ifs = shell_var_get("IFS");
-    if (!ifs) return " \t\n";
-    return ifs;
-}
-```
-
-**Fix:** Always return an allocated string (strdup the default too), and have callers free it.
-
----
 
 ### M-8: `builtin_command -v/-V` leaks `shell_var_get("PATH")` for `-p` option
 
@@ -181,7 +164,6 @@ The shell has a pervasive pattern of calling `shell_var_get()` (which returns `s
 | Location | Variable | Severity |
 |----------|----------|----------|
 | `exec.c` `builtin_command()` | PATH | MEDIUM |
-| `exec.c` `builtin_exec()` | envp array | HIGH (but moot due to exec) |
 | `sh.c` interactive loop | prompt, PS1 | LOW |
 | `prompt.c` `evaluate_prompt()` | ? | LOW |
 | `prompt.c` `expand_prompt_escapes()` | ? | LOW |
