@@ -13,20 +13,13 @@
 | CRITICAL | 0     |
 | HIGH     | 0     |
 | MEDIUM   | 0     |
-| LOW      | 7     |
+| LOW      | 6     |
 | INFO     | 4     |
-| **Total**| **11**|
+| **Total**| **10**|
 
 ---
 
 ## LOW
-
-### L-2: `builtin_fg` doesn't return the job's exit status
-
-**File:** `job.c`, `builtin_fg()` (~line 260)  
-**Impact:** POSIX requires `fg` to return the exit status of the foregrounded job. The current implementation always returns 0.
-
----
 
 ### L-3: Duplicate forward declaration of `parse_for` in parser.c
 

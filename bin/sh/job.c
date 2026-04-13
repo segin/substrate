@@ -273,11 +273,14 @@ int builtin_fg(int argc, char **argv) {
     }
 
     kill(-j->pgid, SIGCONT);
-    job_wait(j);
+    int status = job_wait(j);
     
     tcsetpgrp(STDIN_FILENO, shell_pgid);
     tcsetattr(STDIN_FILENO, TCSADRAIN, &shell_tmodes);
-    return 0;
+
+    if (WIFEXITED(status)) return WEXITSTATUS(status);
+    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+    return 1;
 }
 
 int builtin_bg(int argc, char **argv) {
