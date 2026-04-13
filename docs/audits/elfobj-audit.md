@@ -10,10 +10,10 @@
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
 | **CRITICAL** | 1 | section link validation |
-| **HIGH** | 1 | section overlap |
+| **HIGH** | 0 | *(all resolved)* |
 | **MEDIUM** | 2 | NULL dereference, group signature |
 | **LOW** | 1 | version index |
-| **TOTAL** | **5** | |
+| **TOTAL** | **4** | |
 
 This library parses untrusted ELF files supplied to the assembler/linker. All input data must be treated as adversarial.
 
@@ -33,12 +33,7 @@ This library parses untrusted ELF files supplied to the assembler/linker. All in
 
 ## HIGH Findings
 
-### 5. Section Overlap Detection Excludes NOBITS
-
-- **File:** `usr.lib/elfobj/src/elf_read.c`, lines 123-135
-- **Issue:** Only non-NOBITS, non-zero-size sections are checked for overlaps. Two NOBITS sections with conflicting `sh_addr` values are not detected.
-- **Impact:** Confusing memory layout; linker may allocate overlapping BSS regions.
-- **Fix:** Also validate `sh_addr` ranges for NOBITS sections.
+*(All resolved)*
 
 ---
 
