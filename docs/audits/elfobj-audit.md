@@ -10,10 +10,10 @@
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
 | **CRITICAL** | 2 | String table validation, section link validation |
-| **HIGH** | 3 | Integer overflow, section overlap, OOM cleanup |
+| **HIGH** | 2 | Integer overflow, section overlap |
 | **MEDIUM** | 5 | Strtab growth, NULL dereference, entsize DoS, group signature, compression header |
 | **LOW** | 4 | Alignment validation, REL/RELA arch checks, diagnostic buffer, version index |
-| **TOTAL** | **14** | |
+| **TOTAL** | **13** | |
 
 This library parses untrusted ELF files supplied to the assembler/linker. All input data must be treated as adversarial.
 
@@ -70,24 +70,6 @@ This library parses untrusted ELF files supplied to the assembler/linker. All in
 - **Issue:** Only non-NOBITS, non-zero-size sections are checked for overlaps. Two NOBITS sections with conflicting `sh_addr` values are not detected.
 - **Impact:** Confusing memory layout; linker may allocate overlapping BSS regions.
 - **Fix:** Also validate `sh_addr` ranges for NOBITS sections.
-
-### 8. OOM Cleanup Off-by-One in Symbol Parsing
-
-- **File:** `usr.lib/elfobj/src/elf_read.c`, lines 405-435
-- **Function:** `parse_symbols()`
-- **Issue:** On OOM during symbol allocation, the cleanup loop frees `maps[k].symbols` for `k < map_count`. But the current map being built (`map`) is not yet in the `maps[]` array, so `map.symbols` is leaked.
-- **Code:**
-  ```c
-  if (sym->name == NULL || elf__push_symbol(obj, sym) != ELF_OK) {
-      free(sym->name);
-      free(sym);
-      for (k = 0; k < map_count; ++k) free(maps[k].symbols);
-      // map.symbols NOT freed here
-      free(maps);
-      return ELF_ERR_OOM;
-  }
-  ```
-- **Fix:** Add `free(map.symbols);` before `free(maps);` in the error path.
 
 ---
 
