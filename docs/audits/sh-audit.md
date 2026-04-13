@@ -12,29 +12,14 @@
 |----------|-------|
 | CRITICAL | 0     |
 | HIGH     | 0     |
-| MEDIUM   | 3     |
+| MEDIUM   | 2     |
 | LOW      | 8     |
 | INFO     | 4     |
-| **Total**| **15**|
+| **Total**| **14**|
 
 ---
 
 ## MEDIUM
-
-### M-8: `builtin_command -v/-V` leaks `shell_var_get("PATH")` for `-p` option
-
-**File:** `exec.c`, `builtin_command()` (~line 950)  
-**Impact:** `shell_var_get("PATH")` return value is used to save/restore PATH when `-p` is specified, but the intermediate strdup'd return from `shell_var_get` has inconsistent freeing — `saved_path` is freed but the original `cur` pointer returned by `shell_var_get()` is aliased into `saved_path` via `strdup(cur)`, while `cur` itself (which IS `shell_var_get()`'s return) is leaked.
-
-```c
-char *cur = shell_var_get("PATH");
-saved_path = cur ? strdup(cur) : strdup("");
-// cur is never freed
-```
-
-**Fix:** Free `cur` after the `strdup`.
-
----
 
 ### M-9: `builtin_unset` only unsets one variable
 
@@ -163,7 +148,6 @@ The shell has a pervasive pattern of calling `shell_var_get()` (which returns `s
 
 | Location | Variable | Severity |
 |----------|----------|----------|
-| `exec.c` `builtin_command()` | PATH | MEDIUM |
 | `sh.c` interactive loop | prompt, PS1 | LOW |
 | `prompt.c` `evaluate_prompt()` | ? | LOW |
 | `prompt.c` `expand_prompt_escapes()` | ? | LOW |

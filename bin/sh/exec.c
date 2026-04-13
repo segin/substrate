@@ -977,6 +977,7 @@ static int builtin_command(int argc, char **argv) {
         if (opt_p) {
             char *cur = shell_var_get("PATH");
             saved_path = cur ? strdup(cur) : strdup("");
+            free(cur);
             shell_var_export("PATH", "/bin:/usr/bin");
         }
         char *full = find_in_path(cmd_name);
@@ -999,6 +1000,7 @@ static int builtin_command(int argc, char **argv) {
     if (opt_p) {
         char *cur = shell_var_get("PATH");
         saved_path = cur ? strdup(cur) : strdup("");
+        free(cur);
         shell_var_export("PATH", "/bin:/usr/bin");
     }
 
