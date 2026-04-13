@@ -6,8 +6,6 @@
 #include <string.h>
 #include <signal.h>
 #include <termios.h>
-
-extern int tcsetpgrp(int fd, pid_t pgrp);
 #include "util.h"
 
 job_t *first_job = NULL;

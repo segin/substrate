@@ -22,12 +22,6 @@ int shell_promptvars = 0;
 static EditLine *el = NULL;
 static History *hist = NULL;
 
-extern int tcsetpgrp(int fd, pid_t pgrp);
-extern pid_t tcgetpgrp(int fd);
-extern pid_t getpgrp(void);
-extern int setpgid(pid_t pid, pid_t pgid);
-extern int tcgetattr(int fd, struct termios *termios_p);
-
 int execute_line(char *buffer) {
     if (!buffer || !*buffer) return 0;
     

@@ -14,17 +14,14 @@
 | HIGH     | 0     |
 | MEDIUM   | 0     |
 | LOW      | 0     |
-| INFO     | 1     |
-| **Total**| **1** |
+| INFO     | 0     |
+| **Total**| **0** |
 
 ---
 
 ## INFO
 
-### I-4: `extern` declarations in .c files instead of headers
-
-**File:** `exec.c` (lines 27-29), `expand.c` (lines 12-13), `shell_var.c` (line 8)  
-**Impact:** Multiple files have manual `extern` declarations for standard library functions (`strtol`, `tcsetpgrp`, `dup`, `setpgid`, `execute_line`). Per AGENTS.md rules, these should use proper `#include` directives. This also risks prototype mismatches.
+All previously tracked informational findings are now resolved.
 
 ---
 

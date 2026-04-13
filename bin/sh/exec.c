@@ -14,6 +14,8 @@
 #include "util.h"
 #include "parser.h"
 #include <signal.h>
+#include <termios.h>
+#include <errno.h>
 
 int shell_is_interactive = 0;
 int shell_errexit = 0;
@@ -21,12 +23,6 @@ int shell_xtrace = 0;
 int errexit_disabled = 0;
 pid_t shell_pgid;
 struct termios shell_tmodes;
-#include <termios.h>
-
-extern int tcsetpgrp(int fd, pid_t pgrp);
-extern int dup(int oldfd);
-extern int setpgid(pid_t pid, pid_t pgid);
-#include <errno.h>
 
 /* Forward declarations of builtins */
 static int builtin_exit(int argc, char **argv);

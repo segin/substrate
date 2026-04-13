@@ -1,4 +1,5 @@
 #include "expand.h"
+#include "exec.h"
 #include "shell_var.h"
 #include "util.h"
 #include <stdio.h>
@@ -9,9 +10,6 @@
 #include <unistd.h>
 #include <pwd.h>
 #include <sys/wait.h>
-
-extern long strtol(const char *nptr, char **endptr, int base);
-extern int execute_line(char *line);
 
 static void expand_state_note_cmdsub(expand_state_t *state, int status) {
     if (!state) {

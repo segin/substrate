@@ -6,8 +6,6 @@
 #include <stdio.h>
 #include <unistd.h>
 
-extern long strtol(const char *nptr, char **endptr, int base);
-
 typedef struct shell_var {
     char *name;
     char *value;
