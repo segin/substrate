@@ -505,8 +505,8 @@ static int builtin_export(int argc, char **argv) {
 }
 
 static int builtin_unset(int argc, char **argv) {
-    if (argc > 1) {
-        shell_var_unset(argv[1]);
+    for (int i = 1; i < argc; i++) {
+        shell_var_unset(argv[i]);
     }
     return 0;
 }

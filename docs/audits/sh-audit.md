@@ -12,32 +12,14 @@
 |----------|-------|
 | CRITICAL | 0     |
 | HIGH     | 0     |
-| MEDIUM   | 2     |
+| MEDIUM   | 1     |
 | LOW      | 8     |
 | INFO     | 4     |
-| **Total**| **14**|
+| **Total**| **13**|
 
 ---
 
 ## MEDIUM
-
-### M-9: `builtin_unset` only unsets one variable
-
-**File:** `exec.c`, `builtin_unset()` (~line 478)  
-**Impact:** POSIX specifies `unset name...` (multiple names). The implementation only unsets `argv[1]`, ignoring any additional arguments.
-
-```c
-static int builtin_unset(int argc, char **argv) {
-    if (argc > 1) {
-        shell_var_unset(argv[1]);
-    }
-    return 0;
-}
-```
-
-**Fix:** Loop from 1 to argc.
-
----
 
 ### M-10: `builtin_test` is incomplete
 
@@ -161,7 +143,6 @@ The shell has a pervasive pattern of calling `shell_var_get()` (which returns `s
 
 1. **$*:** Doesn't use first char of IFS for joining
 4. **test:** Missing file tests, logic operators, negation
-5. **unset:** Only unsets first argument
-6. **echo:** Missing `-n` flag
+5. **echo:** Missing `-n` flag
 7. **case:** Single pattern per item (no `|` alternatives)
 8. **~user:** Not expanded
