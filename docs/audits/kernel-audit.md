@@ -11,8 +11,8 @@
 | Severity | Count | Key Areas |
 |----------|-------|-----------|
 | **MEDIUM** | 0 | *(all resolved)* |
-| **LOW** | 6 | Hardcoded constants, performance |
-| **TOTAL** | **6** | |
+| **LOW** | 5 | Hardcoded constants, performance |
+| **TOTAL** | **5** | |
 
 ---
 
@@ -23,8 +23,6 @@
 ---
 
 ## LOW Findings
-
-55. DevFS 128-byte name field could overflow from long paths.
 
 56. Console input ring buffer not fully atomic on SMP.
 
