@@ -12,8 +12,8 @@
 | **CRITICAL** | 2 | String table validation, section link validation |
 | **HIGH** | 2 | Integer overflow, section overlap |
 | **MEDIUM** | 2 | NULL dereference, group signature |
-| **LOW** | 4 | Alignment validation, REL/RELA arch checks, diagnostic buffer, version index |
-| **TOTAL** | **10** | |
+| **LOW** | 3 | REL/RELA arch checks, diagnostic buffer, version index |
+| **TOTAL** | **9** | |
 
 This library parses untrusted ELF files supplied to the assembler/linker. All input data must be treated as adversarial.
 
@@ -90,12 +90,6 @@ This library parses untrusted ELF files supplied to the assembler/linker. All in
 ---
 
 ## LOW Findings
-
-### 15. Missing Validation of Section Alignment Values
-
-- **File:** `usr.lib/elfobj/src/elf_read.c`, lines 58-62
-- **Issue:** Alignment values are only corrected from 0→1. Values like `0x80000000` (2GB alignment) are accepted.
-- **Fix:** Require alignment to be a power of two and <= some reasonable maximum.
 
 ### 16. Machine=0 Bypasses REL/RELA Architecture Checks
 

@@ -10,6 +10,8 @@ typedef struct {
     size_t count;
 } symtab_index_t;
 
+#define ELFOBJ_MAX_SECTION_ALIGN (1ULL << 20)
+
 static int is_elf_magic(const uint8_t *buf, size_t size) {
     if (size < EI_NIDENT) {
         return 0;
@@ -41,6 +43,16 @@ static int ranges_overlap_u64(uint64_t a_off, uint64_t a_sz, uint64_t b_off, uin
         return 1;
     }
     return a_off < b_end && b_off < a_end;
+}
+
+static int valid_section_align(uint64_t align) {
+    if (align == 0) {
+        return 0;
+    }
+    if ((align & (align - 1)) != 0) {
+        return 0;
+    }
+    return align <= ELFOBJ_MAX_SECTION_ALIGN;
 }
 
 static struct elf_section *parse_shdr32(elfobj_t *obj, const uint8_t *p) {
@@ -119,6 +131,11 @@ static elf_err_t parse_sections(elfobj_t *obj, uint64_t shoff, uint16_t entsize,
 
         if (sec == NULL) {
             return ELF_ERR_OOM;
+        }
+        if (!valid_section_align(sec->addralign)) {
+            free(sec->name);
+            free(sec);
+            return ELF_ERR_FORMAT;
         }
 
         if (sec->type != SHT_NOBITS && sec->size > 0) {
