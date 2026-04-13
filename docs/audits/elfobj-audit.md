@@ -11,9 +11,9 @@
 |----------|-------|-----------|
 | **CRITICAL** | 2 | String table validation, section link validation |
 | **HIGH** | 5 | Integer overflow, section overlap, relocation offset, unbounded allocation, OOM cleanup |
-| **MEDIUM** | 6 | Strtab growth, NULL dereference, entsize DoS, group signature, reloc info, compression header |
+| **MEDIUM** | 5 | Strtab growth, NULL dereference, entsize DoS, group signature, compression header |
 | **LOW** | 4 | Alignment validation, REL/RELA arch checks, diagnostic buffer, version index |
-| **TOTAL** | **17** | |
+| **TOTAL** | **16** | |
 
 This library parses untrusted ELF files supplied to the assembler/linker. All input data must be treated as adversarial.
 
@@ -137,12 +137,6 @@ This library parses untrusted ELF files supplied to the assembler/linker. All in
 
 - **File:** `usr.lib/elfobj/src/elf_link.c`, lines 113-160
 - **Issue:** Group section's symtab link re-used without re-validation in linking context. If object was modified between parse and link, stale pointers possible.
-
-### 13. Relocation Info Field — Uninitialized Default
-
-- **File:** `usr.lib/elfobj/src/elf_read.c`, lines 540-560
-- **Issue:** When `sym_index >= map->count`, `rel->symbol` is not explicitly set to NULL (see CRITICAL #2). The `rel->type` field IS set correctly.
-- **Fix:** Zero-initialize the entire `rel` struct before populating fields.
 
 ### 14. DWARF Compression Header Overflow
 
