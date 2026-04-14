@@ -3157,6 +3157,9 @@ static int parse_u64_dec(const char *s, size_t n, uint64_t *out) {
             return -1;
         }
         saw = 1;
+        if (v > (UINT64_MAX - (uint64_t)(c - '0')) / 10) {
+            return -1;
+        }
         v = v * 10 + (uint64_t)(c - '0');
     }
     if (!saw) {
@@ -9192,10 +9195,11 @@ static int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr) {
         phnum = 1;
         for (i = 0; i < elf_section_count(obj); ++i) {
             const elf_section_t *sec = elf_section_get(obj, i);
-            const char *nm = elf_section_name(sec);
+            const char *nm;
             if (sec == NULL) {
                 continue;
             }
+            nm = elf_section_name(sec);
             if (elf_section_type(sec) == SHT_DYNAMIC) {
                 has_dynamic = 1;
             }
