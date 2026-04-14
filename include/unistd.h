@@ -33,6 +33,7 @@ int chdir(const char *path);
 char *getcwd(char *buf, size_t size);
 
 int pipe(int pipefd[2]);
+int dup(int oldfd);
 int dup2(int oldfd, int newfd);
 void sync(void);
 
@@ -44,6 +45,11 @@ uid_t geteuid(void);
 gid_t getegid(void);
 int setuid(uid_t uid);
 int setgid(gid_t gid);
+pid_t getpgrp(void);
+int setpgid(pid_t pid, pid_t pgid);
+pid_t tcgetpgrp(int fd);
+int tcsetpgrp(int fd, pid_t pgrp);
+pid_t setsid(void);
 
 int access(const char *pathname, int mode);
 #define R_OK 4
@@ -79,7 +85,6 @@ int getopt(int argc, char * const argv[], const char *optstring);
 
 long syscall(long number, ...);
 
-#endif
 /* sysconf() constants */
 #define _SC_ARG_MAX      0
 #define _SC_CHILD_MAX    1
@@ -96,3 +101,5 @@ long syscall(long number, ...);
 #define _SC_PHYS_PAGES   11
 
 long sysconf(int name);
+
+#endif

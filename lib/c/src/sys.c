@@ -231,8 +231,6 @@ int tcsetattr(int fd, int optional_actions, const struct termios *termios_p) {
     return ioctl(fd, 0x5402, termios_p); 
 }
 
-extern int setpgid(pid_t pid, pid_t pgid);
-extern mode_t umask(mode_t mask);
 typedef void (*sig_t)(int);
 
 int setpgid(pid_t pid, pid_t pgid) {
