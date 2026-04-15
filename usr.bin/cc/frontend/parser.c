@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define CC_MAX_PARSE_DEPTH 256
+
 typedef struct {
     const char *src;
     size_t len;
@@ -284,6 +286,7 @@ typedef struct {
     size_t hoisted_func_count;
     size_t hoisted_func_cap;
     int scope_depth;
+    int parse_depth;
     int last_storage;
 } parser_t;
 
@@ -9034,7 +9037,16 @@ static cc_expr_t *parse_comma(parser_t *p) {
 }
 
 static cc_expr_t *parse_expr(parser_t *p) {
-    return parse_comma(p);
+    cc_expr_t *e;
+    if (p->parse_depth >= CC_MAX_PARSE_DEPTH) {
+        set_diag(p->diag, p->tok.line, p->tok.col,
+                 "expression nesting depth exceeds limit");
+        return NULL;
+    }
+    p->parse_depth++;
+    e = parse_comma(p);
+    p->parse_depth--;
+    return e;
 }
 
 static int apply_auto_type_deduction(parser_t *p, cc_stmt_t *s) {
@@ -9872,7 +9884,22 @@ static int parse_switch_body_stmt(parser_t *p, cc_stmt_t *s) {
     return 0;
 }
 
+static int parse_stmt_impl(parser_t *p, cc_stmt_t *s);
+
 static int parse_stmt(parser_t *p, cc_stmt_t *s) {
+    int rc;
+    if (p->parse_depth >= CC_MAX_PARSE_DEPTH) {
+        set_diag(p->diag, p->tok.line, p->tok.col,
+                 "statement nesting depth exceeds limit");
+        return -1;
+    }
+    p->parse_depth++;
+    rc = parse_stmt_impl(p, s);
+    p->parse_depth--;
+    return rc;
+}
+
+static int parse_stmt_impl(parser_t *p, cc_stmt_t *s) {
     parser_t saved;
     memset(s, 0, sizeof(*s));
     s->line = p->tok.line;
