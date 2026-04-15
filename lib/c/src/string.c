@@ -355,7 +355,11 @@ size_t strcspn(const char *s, const char *reject) {
 }
 
 char *strtok(char *str, const char *delim) {
-    static _Thread_local char *saveptr;
+    /*
+     * Match the current native libc reality: there is no target TLS bootstrap
+     * yet, so keep strtok's legacy internal state process-global for now.
+     */
+    static char *saveptr;
     if (str) saveptr = str;
     else if (!saveptr) return NULL;
     

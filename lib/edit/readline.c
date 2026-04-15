@@ -75,6 +75,12 @@ static int read_esc_byte(EditLine *el, char *out, int timeout_ms) {
     int ret;
 
     if (!el || !out) return 0;
+    if (el->push_buf && el->push_pos < el->push_len) {
+        return el_getc(el, out) == 1;
+    }
+    if (el->read_func) {
+        return el_getc(el, out) == 1;
+    }
     fd = fileno(el->fin);
 
     FD_ZERO(&rfds);
@@ -84,7 +90,7 @@ static int read_esc_byte(EditLine *el, char *out, int timeout_ms) {
 
     ret = select(fd + 1, &rfds, NULL, NULL, &tv);
     if (ret <= 0) return 0;
-    if (read(fd, out, 1) != 1) return 0;
+    if (el_getc(el, out) != 1) return 0;
     return 1;
 }
 
@@ -638,6 +644,7 @@ static void line_update_cache(EditLine *el) {
 }
 
 static void refresh_line(EditLine *el) {
+    const char *prompt;
     size_t cols;
     size_t prompt_bytes;
     size_t prompt_dw;
@@ -653,9 +660,10 @@ static void refresh_line(EditLine *el) {
     cols = get_terminal_columns(el);
     if (cols == 0) cols = 80;
 
-    prompt_bytes = el->prompt ? strlen(el->prompt) : 0;
+    prompt = el_current_prompt(el);
+    prompt_bytes = prompt ? strlen(prompt) : 0;
     if (el->utf8_enabled)
-        prompt_dw = (size_t)utf8_display_width(el->prompt, prompt_bytes);
+        prompt_dw = (size_t)utf8_display_width(prompt, prompt_bytes);
     else
         prompt_dw = prompt_bytes;
 
@@ -720,7 +728,7 @@ static void refresh_line(EditLine *el) {
     if (el->refresh_rows > 1) terminal_printf(el, "\033[%zuA", el->refresh_rows - 1);
     terminal_putc(el, '\r');
 
-    if (el->prompt) terminal_write(el, el->prompt, prompt_bytes);
+    if (prompt && prompt_bytes > 0) terminal_write(el, prompt, prompt_bytes);
     if (el->line.len > 0) terminal_write(el, el->line.buffer, el->line.len);
 
     /* Reposition cursor from render end to logical cursor location. */
@@ -812,6 +820,7 @@ static void history_incremental_search(EditLine *el, int reverse) {
     char query[256];
     size_t qlen;
     const char *match;
+    char chbuf;
     int ch;
 
     if (!el || !el->history) return;
@@ -827,8 +836,8 @@ static void history_incremental_search(EditLine *el, int reverse) {
                 match ? match : "");
         terminal_flush(el);
 
-        if (read(fileno(el->fin), &ch, 1) != 1) break;
-        ch &= 0xFF;
+        if (el_getc(el, &chbuf) != 1) break;
+        ch = (unsigned char)chbuf;
 
         if (ch == '\n' || ch == '\r') {
             if (match) {
@@ -1113,6 +1122,7 @@ static void vi_history_search(EditLine *el, int reverse) {
     char query[256];
     size_t qlen = 0;
     const char *match;
+    char chbuf;
     int ch;
 
     query[0] = '\0';
@@ -1122,8 +1132,8 @@ static void vi_history_search(EditLine *el, int reverse) {
                 reverse ? '/' : '?', query);
         terminal_flush(el);
 
-        if (read(fileno(el->fin), &ch, 1) != 1) break;
-        ch &= 0xFF;
+        if (el_getc(el, &chbuf) != 1) break;
+        ch = (unsigned char)chbuf;
 
         if (ch == '\n' || ch == '\r') {
             if (qlen > 0) {
@@ -1243,13 +1253,16 @@ static unsigned char ed_delete_next_char(EditLine *el, int c) {
 }
 
 static unsigned char ed_tty_sigint(EditLine *el, int c) {
+    const char *prompt;
+
     (void)c;
     el->last_cmd_was_kill = 0;
     el->yank_active = 0;
     terminal_puts(el, "^C\r\n");
     el_reset(el);
-    if (el->prompt) {
-        terminal_puts(el, el->prompt);
+    prompt = el_current_prompt(el);
+    if (prompt && *prompt) {
+        terminal_puts(el, prompt);
         terminal_flush(el);
     }
     return CC_NORM;
@@ -2079,13 +2092,14 @@ static unsigned char vi_substitute_line(EditLine *el, int c) {
 }
 
 static unsigned char vi_delete_motion(EditLine *el, int c) {
+    char motion_ch;
     int motion;
     int count = el->vi_count > 0 ? el->vi_count : 1;
     size_t target, start, end;
     (void)c;
     el->vi_count = 0;
-    if (read(fileno(el->fin), &motion, 1) != 1) return CC_NORM;
-    motion &= 0xFF;
+    if (el_getc(el, &motion_ch) != 1) return CC_NORM;
+    motion = (unsigned char)motion_ch;
     if (motion == 'd') {
         undo_push(el);
         vi_record_repeat(el, 'd', 'd', count);
@@ -2131,13 +2145,14 @@ static unsigned char vi_delete_to_end(EditLine *el, int c) {
 }
 
 static unsigned char vi_change_motion(EditLine *el, int c) {
+    char motion_ch;
     int motion;
     int count = el->vi_count > 0 ? el->vi_count : 1;
     size_t target, start, end;
     (void)c;
     el->vi_count = 0;
-    if (read(fileno(el->fin), &motion, 1) != 1) return CC_NORM;
-    motion &= 0xFF;
+    if (el_getc(el, &motion_ch) != 1) return CC_NORM;
+    motion = (unsigned char)motion_ch;
     if (motion == 'c') {
         undo_push(el);
         vi_record_repeat(el, 'c', 'c', count);
@@ -2183,13 +2198,14 @@ static unsigned char vi_change_to_end(EditLine *el, int c) {
 }
 
 static unsigned char vi_yank_motion(EditLine *el, int c) {
+    char motion_ch;
     int motion;
     int count = el->vi_count > 0 ? el->vi_count : 1;
     size_t target, start, end;
     (void)c;
     el->vi_count = 0;
-    if (read(fileno(el->fin), &motion, 1) != 1) return CC_NORM;
-    motion &= 0xFF;
+    if (el_getc(el, &motion_ch) != 1) return CC_NORM;
+    motion = (unsigned char)motion_ch;
     if (motion == 'y') {
         kill_ring_push(el, el->line.buffer, el->line.len, 0);
         return CC_NORM;
@@ -2683,7 +2699,9 @@ int el_read_esc_byte(EditLine *el, char *out, int timeout_ms) {
 /* el_gets: main entry point — keymap-based dispatch                  */
 /* ================================================================== */
 const char *el_gets(EditLine *el, int *count) {
+    const char *prompt;
     size_t i;
+    char chbuf;
     int c;
     unsigned char result;
     ssize_t n;
@@ -2721,13 +2739,14 @@ const char *el_gets(EditLine *el, int *count) {
     el_signals_install(el);
 
     /* Display prompt (flushed before blocking read) */
-    if (el->prompt) {
-        terminal_puts(el, el->prompt);
+    prompt = el_current_prompt(el);
+    if (prompt && *prompt) {
+        terminal_puts(el, prompt);
         terminal_flush(el);
     }
 
     for (;;) {
-        n = read(fileno(el->fin), &c, 1);
+        n = el_getc(el, &chbuf);
         if (n == -1) {
             if (errno == EINTR) {
                 el_signal_handle(el);
@@ -2738,7 +2757,7 @@ const char *el_gets(EditLine *el, int *count) {
         }
         if (n == 0) break;  /* EOF */
 
-        c &= 0xFF;
+        c = (unsigned char)chbuf;
 
         /* Select keymap based on current mode */
         if (el->editor_mode == ED_EMACS) {
