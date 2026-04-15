@@ -226,6 +226,9 @@ static as_symbol_t *get_or_create_symbol(sym_ctx_t *ctx, const char *name) {
 
     if (ctx->tab->count == ctx->tab->cap) {
         size_t ncap = ctx->tab->cap == 0 ? 32 : ctx->tab->cap * 2;
+        if (ncap < ctx->tab->cap || ncap > SIZE_MAX / sizeof(*next)) {
+            return NULL;
+        }
         next = (as_symbol_t *)realloc(ctx->tab->items, ncap * sizeof(*next));
         if (next == NULL) {
             return NULL;

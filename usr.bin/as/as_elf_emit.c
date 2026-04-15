@@ -206,6 +206,9 @@ static int bytebuf_reserve(bytebuf_t *b, size_t extra) {
     {
         size_t ncap = b->cap == 0 ? 256 : b->cap;
         while (ncap < b->len + extra) {
+            if (ncap > SIZE_MAX / 2) {
+                return -1;
+            }
             ncap *= 2;
         }
         next = (unsigned char *)realloc(b->data, ncap);

@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -503,6 +504,9 @@ static char *path_join2(const char *a, const char *b) {
     alen = strlen(a);
     blen = strlen(b);
     slash = (alen > 0 && a[alen - 1] != '/');
+    if (alen > SIZE_MAX - blen - 2) {
+        return NULL;
+    }
     out = (char *)malloc(alen + (size_t)slash + blen + 1);
     if (out == NULL) {
         return NULL;

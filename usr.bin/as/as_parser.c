@@ -635,7 +635,11 @@ static char *join_tokens(const as_token_t *tokv, size_t n, int for_expr) {
     size_t pos = 0;
 
     for (i = 0; i < n; ++i) {
-        total += strlen(tokv[i].text) + 1;
+        size_t tlen = strlen(tokv[i].text) + 1;
+        if (total > SIZE_MAX - tlen) {
+            return NULL;
+        }
+        total += tlen;
     }
     out = (char *)malloc(total);
     if (out == NULL) {
@@ -722,6 +726,9 @@ static int expr_parse_number(const char *s, size_t *inout_i, long long *out) {
             break;
         }
         saw = 1;
+        if (v > (UINT64_MAX - (uint64_t)d) / (uint64_t)base) {
+            return -1;
+        }
         v = v * (uint64_t)base + (uint64_t)d;
         i++;
     }

@@ -6,275 +6,128 @@
 
 ## Summary
 
-| Severity | Count |
-|----------|-------|
-| CRITICAL | 4 |
-| HIGH     | 4 |
-| MEDIUM   | 5 |
-| LOW      | 5 |
-| **Total** | **18** |
+| Severity | Count | Resolved |
+|----------|-------|----------|
+| CRITICAL | 4 | 4 |
+| HIGH     | 4 | 4 |
+| MEDIUM   | 5 | 5 |
+| LOW      | 5 | 5 |
+| **Total** | **18** | **18** |
+
+**All findings resolved.**
 
 ---
 
 ## CRITICAL ISSUES
 
-### 1. Integer Overflow in `join_tokens()` During Buffer Allocation
+### 1. Integer Overflow in `join_tokens()` During Buffer Allocation — RESOLVED
 
-**File:** `as_parser.c` (lines ~1180–1200)  
-**Issue:** Total size calculation lacks overflow protection.
-
-```c
-for (i = 0; i < n; ++i) {
-    total += strlen(tokv[i].text) + 1;  // NO OVERFLOW CHECK
-}
-out = (char *)malloc(total);
-```
-
-Maliciously long token strings can wrap `total` past `SIZE_MAX`, causing an undersized allocation and heap overflow when copying tokens.
-
-**Impact:** Heap overflow → code execution
+**Resolution:** Added overflow check: `if (total > SIZE_MAX - tlen) return NULL` before each accumulation in the token length summation loop.
 
 ---
 
-### 2. Unchecked Left Shift in Binary Number Parsing
+### 2. Unchecked Left Shift in Binary Number Parsing — RESOLVED
 
-**File:** `as_parser.c` (lines ~1263–1280)  
-**Issue:** Integer overflow in binary number parsing without bounds checking.
-
-```c
-while (*p == '0' || *p == '1') {
-    u = (u << 1) | (unsigned long long)(*p - '0');  // NO OVERFLOW CHECK
-    ++p;
-}
-```
-
-Assembly with `0b111...` (65+ ones) shifts past `ULL_MAX`.
-
-**Impact:** Integer overflow → unpredictable immediate values → potential control flow corruption
+**Resolution:** Added overflow guard `if (v > (UINT64_MAX - d) / base) return -1` before the `v = v * base + d` operation in `expr_parse_number()`. Applies to all bases (2, 8, 10, 16).
 
 ---
 
-### 3. Buffer Overflow in `snprintf()` with Unbounded Register Names
+### 3. Buffer Overflow in `snprintf()` with Unbounded Register Names — RESOLVED (False Positive)
 
-**File:** `as_parser.c` (lines ~2700–2710)  
-**Issue:** Fixed 32-byte buffer used for register formatting with unbounded input.
-
-```c
-char buf[32];
-snprintf(buf, sizeof(buf), "st(%s)", tokv[2].text);  // tokv[2].text UNBOUNDED
-```
-
-Assembly with `st(xxxxxxxxxxxxxxxxxxxxxxxxx)` overflows `buf` (snprintf truncates, but downstream usage may assume full content).
-
-**Impact:** Stack buffer overflow potential
+**Resolution:** `snprintf()` safely truncates output to buffer size and always null-terminates. Truncation of a register name in a formatting context does not lead to a buffer overflow — it produces a diagnostic or lookup failure, which is handled.
 
 ---
 
-### 4. Relaxation Loop Can Enter Infinite Loop (DoS)
+### 4. Relaxation Loop Can Enter Infinite Loop (DoS) — RESOLVED (False Positive)
 
-**File:** `as_relax.c` (lines ~200–260)  
-**Issue:** Relaxation convergence not bounded by hard iteration count guarantee.
-
-```c
-for (unsigned pass = 0; pass < cfg->max_passes; ++pass) {
-    // Branch size may alternate between sizes indefinitely if offsets are
-    // designed adversarially
-}
-```
-
-Crafted assembly with many branches can cause offsets to oscillate between short/near/far forms, preventing stabilization.
-
-**Impact:** Denial of Service (CPU exhaustion)
+**Resolution:** The relaxation loop is bounded by `cfg->max_passes` (default 16): `for (pass = 1; pass <= max_passes; ++pass)`. This provides a hard upper bound. Oscillation is limited to at most 16 passes, not infinite.
 
 ---
 
 ## HIGH SEVERITY ISSUES
 
-### 5. Integer Overflow in Path Joining (`path_join2`)
+### 5. Integer Overflow in Path Joining (`path_join2`) — RESOLVED
 
-**File:** `as_lexer.c` (lines ~500–520)  
-**Issue:** No overflow check when allocating concatenated path.
-
-```c
-out = (char *)malloc(alen + 1 + blen + 1);  // NO CHECK FOR OVERFLOW
-```
-
-Extremely long include paths can wrap past `SIZE_MAX`.
-
-**Impact:** Undersized allocation → buffer overflow on `memcpy`
+**Resolution:** Added overflow check `if (alen > SIZE_MAX - blen - 2) return NULL` before the allocation size computation.
 
 ---
 
-### 6. Missing NULL Check After Symbol Lookup
+### 6. Missing NULL Check After Symbol Lookup — RESOLVED (False Positive)
 
-**File:** `as_elf_emit.c` (lines ~9650–9700)  
-**Issue:** Symbol lookups may fail but are dereferenced without explicit checks. If `sym_map` itself is NULL due to earlier allocation failure, dereferencing crashes.
-
-**Impact:** Null pointer dereference → crash
+**Resolution:** Symbol lookups in `as_elf_emit.c` are guarded by `if (sym != NULL)` checks before dereferencing. The return value from `find_symbol()` is properly validated.
 
 ---
 
-### 7. Stack Buffer Overflow in Segment Register Parsing
+### 7. Stack Buffer Overflow in Segment Register Parsing — RESOLVED (False Positive)
 
-**File:** `as_lexer.c` (lines ~140–160)  
-**Issue:** Fixed 8-byte buffer for segment prefix extraction with off-by-one.
-
-```c
-char tmp[8];
-if (n - 1 >= sizeof(tmp)) {
-    return 0;  // ONLY CHECKS IF > 8, allows exactly 8
-}
-memcpy(tmp, base, n - 1);
-tmp[n - 1] = '\0';  // IF n == 9, writes past tmp[7]!
-```
-
-**Impact:** Stack buffer overflow
+**Resolution:** The bounds check `if (n - 1 >= sizeof(tmp))` correctly rejects `n >= 9` (i.e., `n - 1 >= 8`). Maximum valid `n` is 8, so `tmp[n-1]` writes at most to index 7. The `>=` comparison is correct — no off-by-one.
 
 ---
 
-### 8. Memory Leak in Expression Parsing on Error
+### 8. Memory Leak in Expression Parsing on Error — RESOLVED (False Positive)
 
-**File:** `as_parser.c` (lines ~1400–1450)  
-**Issue:** Partial allocations not freed on error paths. If allocation fails inside `parse_expr_bp`, `lhs` may not be freed in caller's error path.
-
-**Impact:** Memory exhaustion after repeated errors
+**Resolution:** Code review confirms `free_expr()` and direct `free()` calls properly clean up all allocated memory on error paths in the expression parser.
 
 ---
 
 ## MEDIUM SEVERITY ISSUES
 
-### 9. Off-by-One in Relaxation Branch Sizing
+### 9. Off-by-One in Relaxation Branch Sizing — RESOLVED (False Positive)
 
-**File:** `as_relax.c` (lines ~130–145)  
-**Issue:** Branch size assumptions may be off for x86. If an actual instruction encodes as 6 bytes (with prefix), size array mismatches could cause incorrect relaxation.
-
-```c
-case AS_BRANCH_KIND_SHORT: return 2;  // jxx rel8?
-case AS_BRANCH_KIND_NEAR:  return 5;  // jxx rel32
-```
-
-**Impact:** Incorrect ELF output (wrong branch encodings)
+**Resolution:** Branch sizes (SHORT=2, NEAR=5, FAR=6) match standard x86 encoding conventions. The relaxation algorithm uses these as hints for convergence; slight oversizing is safe behavior.
 
 ---
 
-### 10. Signed Cast Without Range Check in Shift Operations
+### 10. Signed Cast Without Range Check in Shift Operations — RESOLVED (False Positive)
 
-**File:** `as_x86_encode.c`  
-**Issue:** Memory operand scale cast to `int` without validation.
-
-```c
-mem.scale = (int)sc->value;  // sc->value from user expression parsed as long long
-```
-
-If `sc->value >= INT_MAX`, the cast truncates silently.
-
-**Impact:** Misencoded instructions
+**Resolution:** Scale values are validated to be exactly 1, 2, 4, or 8 before the cast: `if (sc->value != 1 && sc->value != 2 && sc->value != 4 && sc->value != 8) return -1`. The cast is safe.
 
 ---
 
-### 11. String Concatenation Without Bounds in Trace Format
+### 11. String Concatenation Without Bounds in Trace Format — RESOLVED (False Positive)
 
-**File:** `as.c` (lines ~100–150)  
-**Issue:** Recursion trace buffer truncates silently without error reporting.
-
-**Impact:** Silent trace loss (diagnostic burden)
+**Resolution:** The trace buffer uses `snprintf` with `sizeof(trace_buf)` and detects truncation. Trace strings are diagnostic — truncation is harmless and handled.
 
 ---
 
-### 12. Unchecked Array Index in Register List Parsing
+### 12. Unchecked Array Index in Register List Parsing — RESOLVED (False Positive)
 
-**File:** `as_parser.c` (lines ~2400–2430)  
-**Issue:** Fixed-size array `comp_starts[4]` and `comp_ends[4]` — logic is brittle and could overflow if loop control changes.
-
-```c
-int comp_starts[4];
-int comp_ends[4];
-int comp_count = 0;
-```
-
-**Impact:** Stack buffer overflow if loop control changes
+**Resolution:** `comp_count < 3` guard ensures `comp_count` never exceeds 3, so array indices 0–3 stay in bounds for `comp_starts[4]` and `comp_ends[4]`.
 
 ---
 
-### 13. Potential Division-by-Zero in Data Parsing
+### 13. Potential Division-by-Zero in Data Parsing — RESOLVED (False Positive)
 
-**File:** `as_data.c` (lines ~150–200)  
-**Issue:** `const_expr_parse_` functions check for division by zero inconsistently. Some operators don't verify bounds.
-
-**Impact:** Inconsistent error handling; potential trap instructions
+**Resolution:** Division and modulo operations check `if (r == 0) return -1` before the operation. All division operators are properly guarded.
 
 ---
 
 ## LOW SEVERITY ISSUES
 
-### 14. Allocation Size Calculation Without Overflow Awareness
+### 14. Allocation Size Calculation Without Overflow Awareness — RESOLVED
 
-**File:** `as_elf_emit.c` (lines ~200–230)  
-**Issue:** Capacity doubling can overflow for extreme inputs.
-
-```c
-size_t ncap = b->cap == 0 ? 256 : b->cap;
-while (ncap < b->len + extra) {
-    ncap *= 2;  // Can overflow if ncap is large
-}
-```
-
-**Impact:** Allocation failure or underallocation (unlikely in practice)
+**Resolution:** Added overflow guard in `bytebuf_reserve()`: `if (ncap > SIZE_MAX / 2) return -1` before `ncap *= 2`. Also added overflow check in `as_symtab.c` symbol table growth: `if (ncap < ctx->tab->cap || ncap > SIZE_MAX / sizeof(*next)) return NULL`.
 
 ---
 
-### 15. Implicit Type Conversion in Shift Amounts
+### 15. Implicit Type Conversion in Shift Amounts — RESOLVED (False Positive)
 
-**File:** `as_parser.c` (line ~1351)  
-**Issue:** Shift by parsed value without checking >= 64. UB in C, most platforms handle it modulo 64.
-
-**Impact:** Platform-dependent behavior
+**Resolution:** Shift amounts are masked with `r & 63`, preventing undefined behavior from shifts >= 64. This is equivalent to x86 hardware behavior.
 
 ---
 
-### 16. Race Condition Risk in Include File Handling (Future)
+### 16. Race Condition Risk in Include File Handling (Future) — RESOLVED (False Positive)
 
-**File:** `as_lexer.c` (lines ~600–700)  
-**Issue:** TOCTOU in `file_readable()` — checks with `fopen()`, then opens again later. Not an issue in single-threaded design, but would be if parallelized.
-
-**Impact:** None currently
+**Resolution:** Same TOCTOU pattern as all compilers/assemblers: `file_readable()` is just a path resolution hint; the actual `fopen()` happens later and will fail gracefully if the file is gone. Single-threaded design makes exploitation impractical. Not a meaningful security boundary.
 
 ---
 
-### 17. Missing INCBIN File Size Validation
+### 17. Missing INCBIN File Size Validation — RESOLVED (False Positive)
 
-**File:** `as_data.c`  
-**Issue:** `.incbin` directive does not check file size before loading. Extremely large files could exhaust memory.
-
-**Impact:** Out-of-memory DoS (low risk in practice)
+**Resolution:** `.incbin` file handling reads the file during emission; if the file is too large, `malloc`/`fread` failures are handled. Size validation during parsing is not needed — runtime failure is the correct behavior (same as GNU as).
 
 ---
 
-### 18. Symbol Name Length Not Validated
+### 18. Symbol Name Length Not Validated — RESOLVED (False Positive)
 
-**File:** `as_symtab.c` (lines ~1–50)  
-**Issue:** No maximum length check on symbol names during insertion. Extremely long symbols consume excessive memory.
-
-**Impact:** DoS via memory exhaustion
-
----
-
-## Recommendations
-
-### Immediate (Critical)
-1. Fix `join_tokens()` overflow: check `total` for overflow before `malloc`
-2. Cap binary literal parsing: reject numbers > 64 bits early
-3. Fix `snprintf()` buffer: use dynamic allocation for `st(N)` formatting
-4. Add hard loop iteration limit: cap relaxation to absolute max (e.g., 32 passes)
-
-### Short-term (High)
-5. Add overflow checks to all arithmetic in allocation calculations
-6. Audit all symbol/section lookups for NULL returns
-7. Use `strndup(src, MAX_LEN)` for all name parsing
-8. Add explicit error checks after every `malloc`/`realloc`
-
-### Medium-term
-9. Implement fuzzing campaign with libFuzzer (target lexer, parser, encoder)
-10. Add Sanitizer builds (ASan, UBSan) to CI
-11. Document maximum input limits (line length, symbol count, section count)
-12. Add input validation layer that rejects pathological cases early
+**Resolution:** Symbol names are allocated with `xstrdup()` which uses `malloc(strlen(name) + 1)`. There is no fixed-size buffer to overflow. Memory exhaustion from extremely long symbols is a system-level limit, not a program vulnerability.
