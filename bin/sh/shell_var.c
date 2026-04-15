@@ -58,10 +58,6 @@ static void ensure_global_scope(void) {
 
 
 void shell_var_set_args(int argc, char **argv) {
-    if (shell_name) free(shell_name);
-    if (argc > 0) shell_name = strdup(argv[0]);
-    else shell_name = strdup("sh");
-
     if (shell_argv) {
         for (int i = 0; i < shell_argc; i++) free(shell_argv[i]);
         free(shell_argv);
@@ -78,6 +74,11 @@ void shell_var_set_args(int argc, char **argv) {
         shell_argc = 0;
         shell_argv = NULL;
     }
+}
+
+void shell_var_set_name(const char *name) {
+    if (shell_name) free(shell_name);
+    shell_name = strdup((name && *name) ? name : "sh");
 }
 
 void shell_var_shift(int n) {
@@ -114,7 +115,7 @@ char **shell_var_get_positional(int *count) {
     return shell_argv;
 }
 
-const char *shell_var_get_name(void) { return shell_name; }
+const char *shell_var_get_name(void) { return shell_name ? shell_name : "sh"; }
 
 void shell_var_destroy(void) {
     while (scope_stack) {
@@ -508,11 +509,9 @@ void shell_var_push_args(void) {
     arg_stack_frame_t *frame = malloc(sizeof(arg_stack_frame_t));
     frame->argc = shell_argc;
     frame->argv = shell_argv;
-    frame->name = shell_name; 
+    frame->name = shell_name ? strdup(shell_name) : NULL;
     frame->next = arg_stack;
     arg_stack = frame;
     shell_argc = 0;
     shell_argv = NULL;
-    shell_name = NULL;
 }
-

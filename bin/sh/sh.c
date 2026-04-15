@@ -21,6 +21,12 @@ int shell_promptvars = 0;
 
 static EditLine *el = NULL;
 static History *hist = NULL;
+static const char *editline_prompt = "$ ";
+
+static const char *editline_prompt_callback(EditLine *editline) {
+    (void)editline;
+    return editline_prompt ? editline_prompt : "$ ";
+}
 
 int execute_line(char *buffer) {
     if (!buffer || !*buffer) return 0;
@@ -122,11 +128,6 @@ static void init_environment(void) {
     shell_var_set_readonly("SHELL_PROMPT_MODE");
 }
 
-static void sigchld_handler(int sig) {
-    (void)sig;
-    // job_update_status will be called by the main loop.
-}
-
 // Helper to get last exit status
 static int get_last_status(void) {
     char *s = shell_var_get("?");
@@ -141,6 +142,7 @@ static int get_last_status(void) {
 int main(int argc, char **argv, char **envp) {
     shell_var_init(envp);
     init_environment();
+    shell_var_set_name((argv[0] && argv[0][0]) ? argv[0] : "sh");
     
     // Shell flags
     int opt_c = 0;           // -c: Execute string
@@ -218,7 +220,7 @@ int main(int argc, char **argv, char **envp) {
             perror(argv[optind]);
             return 127;
         }
-        shell_var_set("0", argv[optind]);
+        shell_var_set_name(argv[optind]);
         optind++;
         reading_script = 1;
     } else {
@@ -226,7 +228,7 @@ int main(int argc, char **argv, char **envp) {
         if (optind < argc && strcmp(argv[optind], "-") == 0) {
             optind++;  // Skip the "-"
         }
-        shell_var_set("0", argv[0] ? argv[0] : "sh");
+        shell_var_set_name((argv[0] && argv[0][0]) ? argv[0] : "sh");
     }
     
     // Set positional parameters from remaining args
@@ -248,7 +250,6 @@ int main(int argc, char **argv, char **envp) {
             signal(SIGTSTP, SIG_IGN);
             signal(SIGTTIN, SIG_IGN);
             signal(SIGTTOU, SIG_IGN);
-            signal(SIGCHLD, sigchld_handler);
             
             shell_pgid = getpid();
             if (setpgid(shell_pgid, shell_pgid) < 0) {
@@ -265,6 +266,7 @@ int main(int argc, char **argv, char **envp) {
         if (el && hist) {
             el_set(el, EL_HIST, history, hist);
             el_set(el, EL_EDITOR, "emacs");
+            el_set(el, EL_PROMPT, editline_prompt_callback);
         }
     }
     
@@ -356,8 +358,9 @@ int main(int argc, char **argv, char **envp) {
                 char *expanded = evaluate_prompt(p, command_count, extended);
                 
                 if (el) {
-                    el_set(el, EL_PROMPT, expanded ? expanded : p);
+                    editline_prompt = expanded ? expanded : p;
                     line = (char *)el_gets(el, &count);
+                    editline_prompt = "$ ";
                     if (!line) {
                         if (expanded) free(expanded);
                         if (p_alloc) free(p);

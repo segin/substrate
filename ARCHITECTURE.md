@@ -53,6 +53,7 @@ docs/specs/  detailed subsystem specs
 docs/tasks/  refactored task planning sections
 dist/        target root filesystem staging
 host_dist/   host install staging for native validation tools
+linux/       Linux-host compatibility tools (binfmt_misc runner, host bridges)
 usr.man/     manual page source tree
 contrib/     third-party components (ext2-boot bootloader, ...)
 tools/       build and install helper scripts
@@ -103,6 +104,9 @@ Testing is a first-class citizen, utilizing a multi-layer approach:
 - **Isolated Unit Tests:** Validating individual modules.
 - **System Integration Tests:** Verifying toolchain and kernel interoperability.
 - **Host-Based Validation:** Using `NATIVE_BUILD=1` for rapid feedback.
+- **Linux Compatibility Harnesses:** Linux-host execution bridges live under
+  `linux/`; `linux/runner/` provides the binfmt_misc-oriented Substrate i386
+  ELF runner used for host-side ABI experiments.
 - **Property and Fuzz Testing:** Ensuring robustness of parsers and ABI handlers.
 
 For detailed testing policies, see `docs/specs/vm_page.md` (as a template) and the `tests/` directory.

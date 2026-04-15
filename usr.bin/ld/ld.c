@@ -17,7 +17,7 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 
-#define LD_MAX_SCRIPT_INCLUDE_DEPTH 64
+#define LD_MAX_SCRIPT_INCLUDE_DEPTH 16
 #define LD_MAX_TRACKED_SYMBOLS 262144U
 #define LD_MAX_INPUT_OBJECTS 131072U
 #define LD_MAX_ARCHIVE_SCAN_PASSES 1024
@@ -760,6 +760,17 @@ static int add_u64_checked(uint64_t a, uint64_t b, uint64_t *out) {
         return 0;
     }
     *out = a + b;
+    return 1;
+}
+
+static int mul_u64_checked(uint64_t a, uint64_t b, uint64_t *out) {
+    if (out == NULL) {
+        return 0;
+    }
+    if (a != 0 && b > UINT64_MAX / a) {
+        return 0;
+    }
+    *out = a * b;
     return 1;
 }
 
@@ -1687,7 +1698,12 @@ static int lds_ast_push(lds_ast_t *ast, lds_ast_kind_t kind, const char *name, c
     return 0;
 }
 
+#define LD_MAX_SCRIPT_TOKEN_LEN (1u << 20)  /* 1 MiB per token */
+
 static int lds_lex_push_text(lds_tok_t *tok, const unsigned char *start, size_t n) {
+    if (n > LD_MAX_SCRIPT_TOKEN_LEN) {
+        return -1;
+    }
     tok->text = (char *)malloc(n + 1);
     if (tok->text == NULL) {
         return -1;
@@ -2429,13 +2445,13 @@ static int parse_linker_script_file_rec(const char *path, strvec_t *include_stac
     }
     memset(&assign_name_tok, 0, sizeof(assign_name_tok));
     memset(&assign_expr_tokens, 0, sizeof(assign_expr_tokens));
-    if (depth > LD_MAX_SCRIPT_INCLUDE_DEPTH) {
+    if (depth >= LD_MAX_SCRIPT_INCLUDE_DEPTH) {
         lds_tok_t fake;
         memset(&fake, 0, sizeof(fake));
         fake.path = path;
         fake.line = 1;
         fake.col = 1;
-        lds_report_error(include_stack, &fake, "INCLUDE depth exceeds limit (64)");
+        lds_report_error(include_stack, &fake, "INCLUDE depth exceeds limit");
         return -1;
     }
     if (strvec_push(include_stack, path) != 0) {
@@ -4606,6 +4622,9 @@ static char *make_versioned_symbol(const char *base, size_t base_len, const char
     }
     sep_len = strlen(sep);
     ver_len = strlen(ver_name);
+    if (base_len > SIZE_MAX - sep_len - ver_len - 1) {
+        return NULL;
+    }
     out = (char *)malloc(base_len + sep_len + ver_len + 1);
     if (out == NULL) {
         return NULL;
@@ -5622,6 +5641,9 @@ static uint8_t *build_sysv_hash_section(const uint8_t *dynsym, size_t dynsym_len
         return NULL;
     }
     nsyms = dynsym_len / entsz;
+    if (nsyms > SIZE_MAX / 8 - 1) {
+        return NULL;
+    }
     nbucket = nsyms > 1 ? nsyms - 1 : 1;
     nchain = nsyms;
     buckets = (uint32_t *)calloc(nbucket, sizeof(*buckets));
@@ -9221,8 +9243,13 @@ static int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr) {
         }
     }
 
-    if (!add_u64_checked(ehsize, phnum * phentsz, &off) || !add_u64_checked(base_vaddr, off, &mem_end)) {
-        return -1;
+    {
+        uint64_t ph_total;
+        if (!mul_u64_checked(phnum, phentsz, &ph_total) ||
+            !add_u64_checked(ehsize, ph_total, &off) ||
+            !add_u64_checked(base_vaddr, off, &mem_end)) {
+            return -1;
+        }
     }
     for (i = 0; i < elf_section_count(obj); ++i) {
         elf_section_t *sec = elf_section_get(obj, i);

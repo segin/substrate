@@ -12,6 +12,7 @@ void shell_var_free_envp(char **envp);
 void shell_var_unset(const char *name);
 void shell_var_print(void);
 const char *shell_var_get_name(void);
+void shell_var_set_name(const char *name);
 
 // Positional parameters
 void shell_var_set_args(int argc, char **argv);

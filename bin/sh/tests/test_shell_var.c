@@ -60,6 +60,7 @@ void test_scoping(void) {
 void test_positional_params(void) {
     shell_var_init(NULL);
     char *argv[] = {"sh", "arg1", "arg2", NULL};
+    shell_var_set_name("sh");
     shell_var_set_args(3, argv);
     
     assert(shell_var_get_argc() == 2);

@@ -2064,16 +2064,64 @@ static int execute_pipeline(ast_pipeline_t *pipe_node, exec_info_t *info) {
 }
 
 static int execute_binary_op(ast_binary_op_t *bin, exec_info_t *info) {
-    // Handle background execution by passing it down to avoid double-forking
+    /*
+     * A background list needs its own supervising child. Merely tagging the
+     * subtree as "background" suppresses later forks and lets an external
+     * command replace the shell process outright.
+     */
     if (bin->op == OP_BACKGROUND) {
+        job_t *job = job_new();
+        pid_t pid;
+        char pid_buf[32];
+
+        if (!job) {
+            perror("job_new");
+            return 1;
+        }
+        job->command = ast_to_string(bin->left);
+
+        pid = fork();
+        if (pid < 0) {
+            perror("fork");
+            job_free(job);
+            return 1;
+        }
+
+        if (pid == 0) {
+            exec_info_t bg_info = *info;
+
+            reset_traps();
+            bg_info.background = 1;
+            bg_info.job = NULL;
+            bg_info.subshell = 1;
+
+            if (setpgid(0, 0) < 0 && errno != EACCES) {
+                perror("setpgid");
+                _exit(1);
+            }
+            _exit(execute_ast(bin->left, &bg_info));
+        }
+
+        if (setpgid(pid, pid) < 0 && errno != EACCES) {
+            perror("setpgid");
+        }
+        job->pgid = pid;
+        job_add_process(job, pid, NULL);
+        snprintf(pid_buf, sizeof(pid_buf), "%d", (int)pid);
+        shell_var_set("!", pid_buf);
+
+        if (shell_is_interactive) {
+            printf("[%d] %d %s\n", job->id, (int)pid,
+                   job->command ? job->command : "(unknown)");
+        }
+
         exec_info_t bg_info = *info;
-        bg_info.background = 1;
-        execute_ast(bin->left, &bg_info);
-        
+
         if (bin->right) {
             return execute_ast(bin->right, info);
         }
-        return 0; // Background commands return 0
+        (void)bg_info;
+        return 0;
     }
     
     int left_status;
