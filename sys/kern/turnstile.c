@@ -7,6 +7,7 @@
 
 #include <kern/turnstile.h>
 #include <sys/proc.h>
+#include <kern/panic.h>
 #include <stdint.h>
 #include <string.h>
 
