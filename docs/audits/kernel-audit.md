@@ -8,11 +8,11 @@
 
 | Severity | Count | Resolved |
 |----------|-------|----------|
-| CRITICAL | 16 | 11 |
-| HIGH     | 11 | 0 |
+| CRITICAL | 16 | 12 |
+| HIGH     | 11 | 1 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **42** | **11** |
+| **Total** | **42** | **13** |
 
 ---
 
@@ -21,33 +21,6 @@
 
 
 
-### 5. ELF Loader: Integer Overflow in Segment Size Validation — UNRESOLVED
-
-**File:** [sys/exec/formats/elf.c](sys/exec/formats/elf.c#L536-L541)  
-**Severity:** CRITICAL — Privilege Escalation / Kernel Memory Write
-
-**Issue:** The kernel-space boundary check for ELF segments evaluates `vaddr + phdr.p_memsz` which is a 32-bit unsigned addition that can overflow. While the code checks `(vaddr + phdr.p_memsz) < vaddr` to detect overflow, this check occurs in the same `||` expression as the `>= 0xC0000000` check. On some compiler optimization levels, the undefined behavior from overflow may cause the whole expression to be elided.
-
-More critically, `segment_pages` is computed as `(va_end - va_start) / 0x1000` — if `va_end` wraps due to `p_memsz` being near `0xFFFFFFFF`, `va_end` becomes a small number, `segment_pages` becomes huge, and the page allocation loop will either exhaust memory or underflow.
-
-**Problematic Code:**
-```c
-if (vaddr >= 0xC0000000 || (vaddr + phdr.p_memsz) >= 0xC0000000 || (vaddr + phdr.p_memsz) < vaddr) {
-```
-
-**Impact:** A crafted ELF binary could map segments into kernel address space, overwriting kernel code/data.
-
-**Fix:** Check overflow explicitly before the addition:
-```c
-if (phdr.p_memsz > 0xFFFFFFFF - vaddr) {
-    kprint("ELF: Segment size overflow\n");
-    kfree(image, sizeof(*image));
-    return 0;
-}
-if (vaddr >= 0xC0000000 || (vaddr + phdr.p_memsz) >= 0xC0000000) {
-```
-
----
 
 ### 7. pmap_fork() Local-Only TLB Flush on SMP — COW Race — UNRESOLVED
 
@@ -305,25 +278,6 @@ On SMP, both CPUs could read `sysctl_initialized == 0`, both proceed, and `mutex
 if (__sync_bool_compare_and_swap(&sysctl_initialized, 0, 1) == false)
     return;
 ```
-
----
-
-### 23. ELF Segment Overlap Detection Silently Stops at 256 — UNRESOLVED
-
-**File:** [sys/exec/formats/elf.c](sys/exec/formats/elf.c#L554-L558)  
-**Severity:** HIGH — Privilege Escalation
-
-**Issue:** The overlap detection array is fixed at 256 entries. If an ELF has more than 256 PT_LOAD segments, subsequent segments bypass overlap detection entirely, potentially allowing overlapping mappings that corrupt process memory:
-
-**Problematic Code:**
-```c
-if (mapped_range_count < 256) {
-    mapped_ranges[mapped_range_count].start = va_start;
-    // ... silently drops tracking if >= 256
-}
-```
-
-**Fix:** Reject ELF files with more than a reasonable number of PT_LOAD segments (e.g., 64), or dynamically allocate the tracking array.
 
 ---
 

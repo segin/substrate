@@ -532,8 +532,15 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
                 return 0;
             }
 
+            // SECURITY CHECK: Detect overflow in p_memsz + vaddr before performing addition
+            if (phdr.p_memsz > 0xFFFFFFFFU - vaddr) {
+                kprint("ELF: Segment size overflow\n");
+                kfree(image, sizeof(*image));
+                return 0;
+            }
+
             // SECURITY/ROBUSTNESS CHECK: Disallow loading ELF segments into kernel space
-            if (vaddr >= 0xC0000000 || (vaddr + phdr.p_memsz) >= 0xC0000000 || (vaddr + phdr.p_memsz) < vaddr) {
+            if (vaddr >= 0xC0000000 || (vaddr + phdr.p_memsz) >= 0xC0000000) {
                 kprint("ELF: Refusing to load segment into kernel space\n");
                 kfree(image, sizeof(*image));
                 return 0;
@@ -553,6 +560,10 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
                 mapped_ranges[mapped_range_count].start = va_start;
                 mapped_ranges[mapped_range_count].end = va_end;
                 mapped_range_count++;
+            } else {
+                kprint("ELF: Too many PT_LOAD segments (>256)\n");
+                kfree(image, sizeof(*image));
+                return 0;
             }
 
             
