@@ -11,8 +11,8 @@
 | CRITICAL | 16 | 16 |
 | HIGH     | 11 | 11 |
 | MEDIUM   | 10 | 3 |
-| LOW      | 5 | 3 |
-| **Total** | **42** | **33** |
+| LOW      | 5 | 4 |
+| **Total** | **42** | **34** |
 
 ---
 
@@ -117,13 +117,6 @@ if (size > KMEM_MAX_ALLOC) return NULL;
 **Issue:** ChaCha20 RNG state is not zeroed after generating random bytes. If the memory containing RNG state is freed and reallocated, previous outputs could theoretically be recovered.
 
 ---
-
-### 42. elf_lookup_interpreter() May Return NULL to Caller — UNRESOLVED
-
-**File:** [sys/exec/formats/elf.c](sys/exec/formats/elf.c#L326-L329)  
-**Severity:** LOW — NULL Dereference
-
-**Issue:** The final `return vfs_lookup(root, aliases[i].fallback)` in `elf_lookup_interpreter()` can return NULL. Callers should check the return value, and the function's contract should make NULL return clear.
 
 ---
 
