@@ -82,12 +82,14 @@ typedef struct kmem_large_header {
 } kmem_large_header_t;
 
 #define KMEM_LARGE_MAGIC 0x4C41524D /* "LAML" */
+#define KMEM_MAX_ALLOC (128U * 1024U * 1024U)
 
 /*
  * Allocate kernel memory
  */
 void *kmalloc(size_t size) {
     if (size == 0) return NULL;
+    if (size > KMEM_MAX_ALLOC) return NULL;
     
     kmem_stats.allocs++;
     kmem_stats.bytes_allocated += size;

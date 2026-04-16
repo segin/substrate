@@ -192,7 +192,7 @@ void futex_thread_exit(thread_t *t) {
     
     struct robust_list *entry;
     int count = 0;
-    const int MAX_ROBUST_WALK = 4096;  /* Prevent infinite loops */
+    const int MAX_ROBUST_WALK = 256;  /* Bound exit-path work for malformed robust lists */
     
     /* Process pending entry first (in case we died mid-lock/unlock) */
     if (khead.list_op_pending) {

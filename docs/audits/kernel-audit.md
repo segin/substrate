@@ -10,9 +10,9 @@
 |----------|-------|----------|
 | CRITICAL | 16 | 16 |
 | HIGH     | 11 | 11 |
-| MEDIUM   | 10 | 3 |
+| MEDIUM   | 10 | 5 |
 | LOW      | 5 | 5 |
-| **Total** | **42** | **35** |
+| **Total** | **42** | **37** |
 
 ---
 
@@ -26,31 +26,6 @@
 ## HIGH SEVERITY ISSUES
 
 ## MEDIUM SEVERITY ISSUES
-
-### 28. Futex Robust List Walk: 4096-Iteration Kernel CPU Consumption — UNRESOLVED
-
-**File:** [sys/kern/futex.c](sys/kern/futex.c#L200-L240)  
-**Severity:** MEDIUM — Denial of Service
-
-**Issue:** A malicious robust list with valid but circular pointers forces the kernel to iterate 4096 times during thread exit, consuming kernel CPU. While bounded, this is still significant during high-frequency thread exit.
-
-**Fix:** Reduce `MAX_ROBUST_WALK` or add a time limit.
-
----
-
-### 29. kmalloc Large Allocation: Secondary Integer Overflow in Pages Calculation — UNRESOLVED
-
-**File:** [sys/vm/vm_kmem.c](sys/vm/vm_kmem.c#L116-L120)  
-**Severity:** MEDIUM — Memory Corruption
-
-**Issue:** While the initial `total < size` overflow check is correct, `(total + 4095) / 4096` can still produce 0 if `total` is 0 (from the overflow check failing silently). However, the code correctly returns NULL on overflow. The remaining risk: on architectures where `size_t` is 32-bit, `total = 0xFFFFF001 + 16 = 0xFFFFF011`, `pages = (0xFFFFF011 + 0xFFF) / 0x1000 = 0x100000`, requesting 4GB of pages — this won't succeed but wastes time.
-
-**Fix:** Add a maximum allocation size check:
-```c
-if (size > KMEM_MAX_ALLOC) return NULL;
-```
-
----
 
 ### 30. Spinlock Panic on Double-Acquire: Non-Recoverable DoS — UNRESOLVED
 
