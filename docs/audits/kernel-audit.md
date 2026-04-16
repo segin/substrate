@@ -9,10 +9,10 @@
 | Severity | Count | Resolved |
 |----------|-------|----------|
 | CRITICAL | 16 | 16 |
-| HIGH     | 11 | 7 |
+| HIGH     | 11 | 8 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **42** | **23** |
+| **Total** | **42** | **24** |
 
 ---
 
@@ -55,17 +55,6 @@ if (__sync_sub_and_fetch(&object->ref_count, 1) == 0) {
 The `request_irq()` function also has a TOCTOU: it checks for conflicts under the lock, releases it, allocates memory, then re-acquires to insert. Another CPU could register the same IRQ in between.
 
 **Fix:** Use RCU-style deferred freeing for irq_action entries, or keep the lock held during handler dispatch (with appropriate nesting considerations).
-
----
-
-### 25. Vnode Reference Count Race in vref() — UNRESOLVED
-
-**File:** [sys/vfs/vnode.c](sys/vfs/vnode.c)  
-**Severity:** HIGH — Use-After-Free
-
-**Issue:** `vref()` drops and re-acquires `v_interlock` around `vnode_freelist_remove()`. During this window, another CPU could recycle the vnode (usecount is still 0), causing a use-after-free when `vref()` re-acquires the lock and increments `v_usecount`.
-
-**Fix:** Increment `v_usecount` BEFORE releasing the interlock, then remove from freelist. Or hold the freelist lock and interlock simultaneously.
 
 ---
 

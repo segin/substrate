@@ -256,16 +256,17 @@ void vref(struct vnode *vp)
 {
     spinlock_acquire(&vp->v_interlock);
     
-    /* Remove from free list if on it */
-    if (vp->v_usecount == 0 && (vp->v_flag & VONFREELIST)) {
-        spinlock_release(&vp->v_interlock);
-        vnode_freelist_remove(vp);
-        spinlock_acquire(&vp->v_interlock);
-    }
-    
+    /* Increment usecount first so the vnode cannot be reclaimed
+     * while we drop v_interlock to remove from freelist. */
     vp->v_usecount++;
     
-    spinlock_release(&vp->v_interlock);
+    /* Remove from free list if it was on it (transition from 0->1) */
+    if (vp->v_usecount == 1 && (vp->v_flag & VONFREELIST)) {
+        spinlock_release(&vp->v_interlock);
+        vnode_freelist_remove(vp);
+    } else {
+        spinlock_release(&vp->v_interlock);
+    }
 }
 
 /*
