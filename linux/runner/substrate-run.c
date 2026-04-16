@@ -12,6 +12,7 @@
 
 #include <sys/mman.h>
 #include <sys/ptrace.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/uio.h>
@@ -355,13 +356,35 @@ struct tracee {
     bool live;
     bool ready;
     enum tracee_mode mode;
+    pid_t guest_parent;
+    pid_t guest_pgid;
+    bool group_stopped;
+    bool replaying;
+    bool pending_status_valid;
+    int pending_status;
     bool tls_ready;
     uint16_t tls_selector;
     uint32_t tls_trampoline;
 };
 
+struct child_event {
+    bool live;
+    pid_t parent_pid;
+    pid_t pid;
+    pid_t pgid;
+    int status;
+};
+
+struct pending_stop {
+    bool live;
+    pid_t pid;
+    int status;
+};
+
 struct runner {
     struct tracee tracees[MAX_TRACEES];
+    struct child_event child_events[MAX_TRACEES * 4];
+    struct pending_stop pending_stops[MAX_TRACEES];
     pid_t root;
     int live_count;
     int root_status;
@@ -369,6 +392,8 @@ struct runner {
     bool trace;
     bool trace_ioctl;
 };
+
+static int dispatch_tracee_status(struct runner *runner, pid_t pid, int status);
 
 static noreturn void
 usage(const char *prog)
@@ -493,6 +518,158 @@ runner_remove(struct runner *runner, pid_t pid, int status)
     runner->live_count--;
 }
 
+static bool
+child_wait_target_matches(pid_t target, pid_t child_pid, pid_t child_pgid,
+                          pid_t caller_pgid)
+{
+    if (target > 0) {
+        return child_pid == target;
+    }
+    if (target == -1) {
+        return true;
+    }
+    if (target == 0) {
+        return child_pgid == caller_pgid;
+    }
+    return child_pgid == -target;
+}
+
+static void
+runner_note_child_event(struct runner *runner, pid_t parent_pid, pid_t pid,
+                        pid_t pgid, int status)
+{
+    size_t slot = ARRAY_SIZE(runner->child_events);
+
+    if (parent_pid <= 0) {
+        return;
+    }
+
+    for (size_t i = 0; i < ARRAY_SIZE(runner->child_events); i++) {
+        if (!runner->child_events[i].live) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == ARRAY_SIZE(runner->child_events)) {
+        slot = 0;
+    }
+
+    runner->child_events[slot].live = true;
+    runner->child_events[slot].parent_pid = parent_pid;
+    runner->child_events[slot].pid = pid;
+    runner->child_events[slot].pgid = pgid;
+    runner->child_events[slot].status = status;
+}
+
+static void
+runner_note_pending_stop(struct runner *runner, pid_t pid, int status)
+{
+    size_t slot = ARRAY_SIZE(runner->pending_stops);
+
+    for (size_t i = 0; i < ARRAY_SIZE(runner->pending_stops); i++) {
+        if (!runner->pending_stops[i].live &&
+            slot == ARRAY_SIZE(runner->pending_stops)) {
+            slot = i;
+        }
+    }
+    if (slot == ARRAY_SIZE(runner->pending_stops)) {
+        slot = 0;
+    }
+
+    runner->pending_stops[slot].live = true;
+    runner->pending_stops[slot].pid = pid;
+    runner->pending_stops[slot].status = status;
+}
+
+static bool
+runner_consume_pending_stop(struct runner *runner, pid_t pid, int *status)
+{
+    for (size_t i = 0; i < ARRAY_SIZE(runner->pending_stops); i++) {
+        struct pending_stop *pending = &runner->pending_stops[i];
+
+        if (!pending->live || pending->pid != pid) {
+            continue;
+        }
+        *status = pending->status;
+        pending->live = false;
+        return true;
+    }
+    return false;
+}
+
+static bool
+runner_dispatch_pending_stop(struct runner *runner)
+{
+    for (size_t i = 0; i < ARRAY_SIZE(runner->pending_stops); i++) {
+        struct pending_stop pending = runner->pending_stops[i];
+
+        if (!pending.live) {
+            continue;
+        }
+        runner->pending_stops[i].live = false;
+        (void)dispatch_tracee_status(runner, pending.pid, pending.status);
+        return true;
+    }
+    return false;
+}
+
+static bool
+runner_consume_child_event(struct runner *runner, pid_t parent_pid, pid_t target,
+                           int options, pid_t caller_pgid, pid_t *out_pid,
+                           int *out_status)
+{
+    for (size_t i = 0; i < ARRAY_SIZE(runner->child_events); i++) {
+        struct child_event *event = &runner->child_events[i];
+
+        if (!event->live || event->parent_pid != parent_pid) {
+            continue;
+        }
+        if (!child_wait_target_matches(target, event->pid, event->pgid,
+                                       caller_pgid)) {
+            continue;
+        }
+        if (WIFSTOPPED(event->status) && !(options & WUNTRACED)) {
+            continue;
+        }
+
+        *out_pid = event->pid;
+        *out_status = event->status;
+        event->live = false;
+        return true;
+    }
+    return false;
+}
+
+static bool
+runner_has_matching_child(struct runner *runner, pid_t parent_pid, pid_t target,
+                          pid_t caller_pgid)
+{
+    for (size_t i = 0; i < ARRAY_SIZE(runner->child_events); i++) {
+        struct child_event *event = &runner->child_events[i];
+
+        if (!event->live || event->parent_pid != parent_pid) {
+            continue;
+        }
+        if (child_wait_target_matches(target, event->pid, event->pgid,
+                                      caller_pgid)) {
+            return true;
+        }
+    }
+
+    for (size_t i = 0; i < ARRAY_SIZE(runner->tracees); i++) {
+        struct tracee *child = &runner->tracees[i];
+
+        if (!child->live || child->guest_parent != parent_pid) {
+            continue;
+        }
+        if (child_wait_target_matches(target, child->pid, child->guest_pgid,
+                                      caller_pgid)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static int
 set_ptrace_options(pid_t pid)
 {
@@ -524,6 +701,13 @@ static int write_mem(pid_t pid, uint32_t addr, const void *buf, size_t len);
 static uint32_t regs_ip(const struct user_regs_struct *regs);
 static void regs_set_ip(struct user_regs_struct *regs, uint32_t ip);
 static bool is_syscall_stop(int status);
+static bool looks_like_substrate_syscall_stop(pid_t pid);
+static bool is_job_control_stop_signal(int sig);
+static bool is_ptrace_group_stop(pid_t pid, int sig);
+static bool signal_target_matches(pid_t target, pid_t pid, pid_t pgid,
+                                  pid_t caller_pgid);
+static int check_int80(pid_t pid, uint32_t ip);
+static void normalize_sysemu_stop(pid_t pid, struct user_regs_struct *regs);
 static int adopt_event_child(struct runner *runner, struct tracee *parent,
                              pid_t child);
 static int resume_tracee(struct runner *runner, struct tracee *tracee,
@@ -553,6 +737,17 @@ dispatch_tracee_status(struct runner *runner, pid_t pid, int status)
     }
 
     if (WIFEXITED(status) || WIFSIGNALED(status)) {
+        if (runner->trace) {
+            if (WIFEXITED(status)) {
+                trace_log(runner, pid, "exit status=%d", WEXITSTATUS(status));
+            } else {
+                trace_log(runner, pid, "signaled sig=%d", WTERMSIG(status));
+            }
+        }
+        if (tracee->guest_parent > 0) {
+            runner_note_child_event(runner, tracee->guest_parent, pid,
+                                    tracee->guest_pgid, status);
+        }
         runner_remove(runner, pid, status);
         return 0;
     }
@@ -602,11 +797,32 @@ dispatch_tracee_status(struct runner *runner, pid_t pid, int status)
         return 0;
     }
 
-    if (tracee->mode == TRACEE_SUBSTRATE && is_syscall_stop(status)) {
+    if (tracee->mode == TRACEE_SUBSTRATE &&
+        is_syscall_stop(status) &&
+        looks_like_substrate_syscall_stop(pid)) {
         enum syscall_action action = handle_substrate_syscall(runner, tracee);
 
         if (action == SYSCALL_STOPPED || action == SYSCALL_EXECED) {
             (void)resume_tracee(runner, tracee, tracee_resume_request(tracee), 0);
+        }
+        return 0;
+    }
+
+    if (sig == SIGTRAP && event == 0) {
+        (void)resume_tracee(runner, tracee, tracee_resume_request(tracee), 0);
+        return 0;
+    }
+
+    if (tracee->guest_parent > 0 && is_job_control_stop_signal(sig)) {
+        if (is_ptrace_group_stop(pid, sig)) {
+            tracee->group_stopped = true;
+            runner_note_child_event(runner, tracee->guest_parent, pid,
+                                    tracee->guest_pgid, status);
+            if (runner->trace) {
+                trace_log(runner, pid, "job-control group-stop sig=%d", sig);
+            }
+        } else {
+            (void)resume_tracee(runner, tracee, tracee_resume_request(tracee), sig);
         }
         return 0;
     }
@@ -720,6 +936,62 @@ is_syscall_stop(int status)
 
     sig = WSTOPSIG(status);
     return sig == (SIGTRAP | 0x80) || sig == SIGTRAP;
+}
+
+static bool
+looks_like_substrate_syscall_stop(pid_t pid)
+{
+    struct user_regs_struct regs;
+
+    if (get_regs(pid, &regs) < 0) {
+        return false;
+    }
+    normalize_sysemu_stop(pid, &regs);
+    return check_int80(pid, regs_ip(&regs)) == 0;
+}
+
+static bool
+is_job_control_stop_signal(int sig)
+{
+    switch (sig) {
+    case SIGSTOP:
+    case SIGTSTP:
+    case SIGTTIN:
+    case SIGTTOU:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool
+is_ptrace_group_stop(pid_t pid, int sig)
+{
+    siginfo_t info;
+
+    if (!is_job_control_stop_signal(sig)) {
+        return false;
+    }
+    errno = 0;
+    if (ptrace(PTRACE_GETSIGINFO, pid, 0, &info) == 0) {
+        return false;
+    }
+    return errno == EINVAL;
+}
+
+static bool
+signal_target_matches(pid_t target, pid_t pid, pid_t pgid, pid_t caller_pgid)
+{
+    if (target > 0) {
+        return pid == target;
+    }
+    if (target == 0) {
+        return pgid == caller_pgid;
+    }
+    if (target == -1) {
+        return true;
+    }
+    return pgid == -target;
 }
 
 static int
@@ -979,6 +1251,8 @@ static void
 regs_set_linux_syscall(struct user_regs_struct *regs, long nr,
                        const uint32_t args[6], uint32_t int80_ip)
 {
+    uint32_t saved_ebp = regs->ebp;
+
     regs->eax = (uint32_t)nr;
     regs->orig_eax = (uint32_t)-1;
     regs->ebx = args[0];
@@ -986,7 +1260,7 @@ regs_set_linux_syscall(struct user_regs_struct *regs, long nr,
     regs->edx = args[2];
     regs->esi = args[3];
     regs->edi = args[4];
-    regs->ebp = args[5];
+    regs->ebp = (nr == LINUX32_NR_MMAP2) ? args[5] : saved_ebp;
     regs->eip = int80_ip;
 }
 
@@ -1215,9 +1489,11 @@ adopt_fork_child(struct runner *runner, const struct user_regs_struct *saved,
     struct tracee *tracee;
     int ret;
 
-    ret = wait_for_specific(child, &status);
-    if (ret < 0) {
-        return ret;
+    if (!runner_consume_pending_stop(runner, child, &status)) {
+        ret = wait_for_specific(child, &status);
+        if (ret < 0) {
+            return ret;
+        }
     }
     if (!WIFSTOPPED(status)) {
         return -ECHILD;
@@ -1227,6 +1503,8 @@ adopt_fork_child(struct runner *runner, const struct user_regs_struct *saved,
     if (!tracee) {
         return -ENOMEM;
     }
+    tracee->guest_parent = parent->pid;
+    tracee->guest_pgid = parent->guest_pgid;
     tracee_reset_tls(tracee);
 
     ret = set_ptrace_options(child);
@@ -1264,6 +1542,8 @@ adopt_event_child(struct runner *runner, struct tracee *parent, pid_t child)
     if (!tracee) {
         return -ENOMEM;
     }
+    tracee->guest_parent = parent->pid;
+    tracee->guest_pgid = parent->guest_pgid;
     tracee_reset_tls(tracee);
 
     ret = set_ptrace_options(child);
@@ -1318,29 +1598,45 @@ remote_linux_syscall(struct runner *runner, struct tracee *tracee,
         *retval = ret;
         return SYSCALL_STOPPED;
     }
+    tracee->replaying = true;
 
     for (;;) {
         int status;
         unsigned int event;
         pid_t got;
 
-        for (;;) {
-            got = waitpid(-1, &status, __WALL);
-            if (got < 0 && errno == EINTR) {
-                continue;
+        if (tracee->pending_status_valid) {
+            got = pid;
+            status = tracee->pending_status;
+            tracee->pending_status_valid = false;
+        } else {
+            for (;;) {
+                got = waitpid(-1, &status, __WALL);
+                if (got < 0 && errno == EINTR) {
+                    continue;
+                }
+                break;
             }
-            break;
         }
         if (got < 0) {
+            tracee->replaying = false;
             *retval = -host_errno();
             return SYSCALL_STOPPED;
         }
         if (got != pid) {
-            (void)dispatch_tracee_status(runner, got, status);
+            struct tracee *other = runner_find(runner, got);
+
+            if (other && other->replaying && !other->pending_status_valid) {
+                other->pending_status = status;
+                other->pending_status_valid = true;
+            } else {
+                runner_note_pending_stop(runner, got, status);
+            }
             continue;
         }
 
         if (WIFEXITED(status) || WIFSIGNALED(status)) {
+            tracee->replaying = false;
             runner_remove(runner, pid, status);
             return SYSCALL_EXITED;
         }
@@ -1351,6 +1647,7 @@ remote_linux_syscall(struct runner *runner, struct tracee *tracee,
 
         event = (unsigned int)status >> 16;
         if (event == PTRACE_EVENT_EXEC && may_exec) {
+            tracee->replaying = false;
             tracee->ready = true;
             (void)set_ptrace_options(pid);
             return SYSCALL_EXECED;
@@ -1365,6 +1662,7 @@ remote_linux_syscall(struct runner *runner, struct tracee *tracee,
             }
             ret = cont_tracee(pid, PTRACE_CONT, 0);
             if (ret < 0) {
+                tracee->replaying = false;
                 if (breakpoint_set) {
                     (void)clear_breakpoint(pid, ip, saved_break);
                 }
@@ -1377,6 +1675,7 @@ remote_linux_syscall(struct runner *runner, struct tracee *tracee,
         if (WSTOPSIG(status) == SIGTRAP && event == 0) {
             ret = get_regs(pid, &call_regs);
             if (ret < 0) {
+                tracee->replaying = false;
                 if (breakpoint_set) {
                     (void)clear_breakpoint(pid, ip, saved_break);
                 }
@@ -1395,6 +1694,7 @@ remote_linux_syscall(struct runner *runner, struct tracee *tracee,
 
         ret = cont_tracee(pid, PTRACE_CONT, WSTOPSIG(status));
         if (ret < 0) {
+            tracee->replaying = false;
             if (breakpoint_set) {
                 (void)clear_breakpoint(pid, ip, saved_break);
             }
@@ -1402,6 +1702,7 @@ remote_linux_syscall(struct runner *runner, struct tracee *tracee,
             return SYSCALL_STOPPED;
         }
     }
+    tracee->replaying = false;
 
     call_regs = *saved;
     regs_set_return(&call_regs, *retval);
@@ -2520,6 +2821,174 @@ emulate_execve(struct runner *runner, struct tracee *tracee,
     return retval;
 }
 
+static long
+emulate_setpgid(struct runner *runner, struct tracee *tracee,
+                const struct user_regs_struct *saved, const uint32_t args[6])
+{
+    long retval;
+    pid_t target_pid;
+    pid_t target_pgid;
+    struct tracee *target;
+
+    if (remote_linux_syscall(runner, tracee, saved, LINUX32_NR_SETPGID, args,
+                             false, false, &retval) == SYSCALL_EXITED) {
+        return -EINTR;
+    }
+    if (retval < 0) {
+        return retval;
+    }
+
+    target_pid = (pid_t)(int32_t)args[0];
+    if (target_pid == 0) {
+        target_pid = tracee->pid;
+    }
+    target_pgid = (pid_t)(int32_t)args[1];
+    if (target_pgid == 0) {
+        target_pgid = target_pid;
+    }
+
+    target = runner_find(runner, target_pid);
+    if (target) {
+        target->guest_pgid = target_pgid;
+    }
+    return retval;
+}
+
+static long
+emulate_wait_common(struct runner *runner, struct tracee *tracee,
+                    const uint32_t args[6], bool with_rusage)
+{
+    pid_t target = (pid_t)(int32_t)args[0];
+    uint32_t status_addr = args[1];
+    int options = (int)(int32_t)args[2];
+    uint32_t rusage_addr = with_rusage ? args[3] : 0;
+    pid_t caller_pgid = tracee->guest_pgid > 0 ? tracee->guest_pgid : tracee->pid;
+    pid_t child_pid;
+    int child_status;
+
+    if (runner_consume_child_event(runner, tracee->pid, target, options,
+                                   caller_pgid, &child_pid, &child_status)) {
+        goto deliver;
+    }
+    if (!runner_has_matching_child(runner, tracee->pid, target, caller_pgid)) {
+        return -ECHILD;
+    }
+    if (options & WNOHANG) {
+        return 0;
+    }
+
+    for (;;) {
+        int status;
+        pid_t got;
+
+        if (runner_dispatch_pending_stop(runner)) {
+            if (runner_consume_child_event(runner, tracee->pid, target, options,
+                                           caller_pgid, &child_pid,
+                                           &child_status)) {
+                break;
+            }
+            if (!runner_has_matching_child(runner, tracee->pid, target,
+                                           caller_pgid)) {
+                return -ECHILD;
+            }
+            continue;
+        }
+
+        got = waitpid(-1, &status, __WALL);
+        if (got < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            if (errno == ECHILD &&
+                !runner_has_matching_child(runner, tracee->pid, target,
+                                           caller_pgid)) {
+                return -ECHILD;
+            }
+            return -host_errno();
+        }
+
+        {
+            struct tracee *other = runner_find(runner, got);
+
+            if (other && other->replaying && !other->pending_status_valid) {
+                other->pending_status = status;
+                other->pending_status_valid = true;
+            } else {
+                runner_note_pending_stop(runner, got, status);
+            }
+        }
+
+        if (runner_consume_child_event(runner, tracee->pid, target, options,
+                                       caller_pgid, &child_pid, &child_status)) {
+            break;
+        }
+        if (!runner_has_matching_child(runner, tracee->pid, target,
+                                       caller_pgid)) {
+            return -ECHILD;
+        }
+    }
+
+deliver:
+    if (status_addr != 0) {
+        int ret = write_mem(tracee->pid, status_addr, &child_status,
+                            sizeof(child_status));
+        if (ret < 0) {
+            return ret;
+        }
+    }
+    if (rusage_addr != 0) {
+        struct rusage ru;
+
+        memset(&ru, 0, sizeof(ru));
+        if (write_mem(tracee->pid, rusage_addr, &ru, sizeof(ru)) < 0) {
+            return -EFAULT;
+        }
+    }
+    return child_pid;
+}
+
+static long
+emulate_kill(struct runner *runner, struct tracee *tracee,
+             const struct user_regs_struct *saved, const uint32_t args[6])
+{
+    pid_t target = (pid_t)(int32_t)args[0];
+    int sig = (int)(int32_t)args[1];
+    pid_t caller_pgid = tracee->guest_pgid > 0 ? tracee->guest_pgid : tracee->pid;
+    long retval;
+
+    if (remote_linux_syscall(runner, tracee, saved, SUB_SYS_KILL, args,
+                             false, false, &retval) == SYSCALL_EXITED) {
+        return -EINTR;
+    }
+    if (retval < 0 || sig != SIGCONT) {
+        return retval;
+    }
+
+    for (size_t i = 0; i < ARRAY_SIZE(runner->tracees); i++) {
+        struct tracee *child = &runner->tracees[i];
+
+        if (!child->live || !child->group_stopped) {
+            continue;
+        }
+        if (!signal_target_matches(target, child->pid, child->guest_pgid,
+                                   caller_pgid)) {
+            continue;
+        }
+        child->group_stopped = false;
+        if (resume_tracee(runner, child, tracee_resume_request(child), 0) < 0) {
+            child->group_stopped = true;
+            if (runner->trace) {
+                trace_log(runner, child->pid,
+                          "failed to resume stopped tracee after SIGCONT");
+            }
+        } else if (runner->trace) {
+            trace_log(runner, child->pid, "resumed after SIGCONT");
+        }
+    }
+
+    return retval;
+}
+
 static bool
 direct_linux_number(long sub_nr, long *linux_nr)
 {
@@ -2742,9 +3211,27 @@ handle_substrate_syscall(struct runner *runner, struct tracee *tracee)
             return SYSCALL_EXITED;
         }
         break;
+    case SUB_SYS_WAITPID:
+        retval = emulate_wait_common(runner, tracee, args, false);
+        break;
+    case SUB_SYS_WAIT4:
+        retval = emulate_wait_common(runner, tracee, args, true);
+        break;
+    case SUB_SYS_KILL:
+        retval = emulate_kill(runner, tracee, &saved, args);
+        if (retval == -EINTR) {
+            return SYSCALL_EXITED;
+        }
+        break;
     case SUB_SYS_MMAP:
         return remote_linux_syscall(runner, tracee, &saved, LINUX32_NR_MMAP2, args,
                                     false, false, &retval);
+    case SUB_SYS_SETPGID:
+        retval = emulate_setpgid(runner, tracee, &saved, args);
+        if (retval == -EINTR) {
+            return SYSCALL_EXITED;
+        }
+        break;
     case SUB_SYS_PTRACE:
     case SUB_SYS_SIGRETURN:
     case SUB_SYS_CLONE:
@@ -2818,6 +3305,15 @@ start_tracee(struct runner *runner, char *const argv[], char *const envp[])
     if (!runner_add(runner, child, false, TRACEE_SUBSTRATE)) {
         return -1;
     }
+    {
+        struct tracee *root = runner_find(runner, child);
+        if (root) {
+            root->guest_pgid = getpgid(child);
+            if (root->guest_pgid <= 0) {
+                root->guest_pgid = child;
+            }
+        }
+    }
 
     if (set_ptrace_options(child) < 0) {
         perror("substrate-run: ptrace SETOPTIONS");
@@ -2837,7 +3333,13 @@ runner_loop(struct runner *runner)
 {
     while (runner->live_count > 0) {
         int status;
-        pid_t pid = waitpid(-1, &status, __WALL);
+        pid_t pid;
+
+        if (runner_dispatch_pending_stop(runner)) {
+            continue;
+        }
+
+        pid = waitpid(-1, &status, __WALL);
 
         if (pid < 0) {
             if (errno == EINTR) {

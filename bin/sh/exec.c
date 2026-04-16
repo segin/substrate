@@ -1896,6 +1896,7 @@ static int execute_simple_command(ast_simple_command_t *cmd, exec_info_t *info) 
             tcsetattr(STDIN_FILENO, TCSADRAIN, &shell_tmodes);
 
             if (WIFSTOPPED(wait_status)) {
+                job_mark_process_status(pid, wait_status);
                 job->notified = 0;
                 printf("\n[%d]+ Stopped\t%s\n", job->id, job->command);
             } else {
@@ -2090,6 +2091,12 @@ static int execute_binary_op(ast_binary_op_t *bin, exec_info_t *info) {
         if (pid == 0) {
             exec_info_t bg_info = *info;
 
+            /*
+             * The parent created this bookkeeping node for its own jobs list.
+             * In the supervising child it is just an inherited ghost entry,
+             * and keeping it around yields bogus "[n] 0 Done" notifications.
+             */
+            job_free(job);
             reset_traps();
             bg_info.background = 1;
             bg_info.job = NULL;
