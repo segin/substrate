@@ -11,6 +11,7 @@
 #include <sys/smp.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
+#include <sys/lock.h>
 #include <sys/param.h>
 #include <vm/vm_kmem.h>
 #include <string.h>
@@ -1416,29 +1417,43 @@ void pmap_shootdown_all(void) {
 // Deferred shootdown: accumulate pages for batch invalidation
 static uint32_t deferred_pages[16];
 static int deferred_count = 0;
+static spinlock_t deferred_lock = SPINLOCK_INIT("pmap_deferred");
 
 void pmap_shootdown_defer(uintptr_t va) {
+    spinlock_acquire(&deferred_lock);
     if (deferred_count < 16) {
         deferred_pages[deferred_count++] = va;
+        spinlock_release(&deferred_lock);
     } else {
         // Overflow: flush all instead
-        pmap_shootdown_all();
         deferred_count = 0;
+        spinlock_release(&deferred_lock);
+        pmap_shootdown_all();
     }
 }
 
 void pmap_shootdown_commit(void) {
-    if (deferred_count == 0) return;
+    spinlock_acquire(&deferred_lock);
+    if (deferred_count == 0) {
+        spinlock_release(&deferred_lock);
+        return;
+    }
     
-    if (deferred_count > 4) {
+    int count = deferred_count;
+    uint32_t pages[16];
+    for (int i = 0; i < count; i++)
+        pages[i] = deferred_pages[i];
+    deferred_count = 0;
+    spinlock_release(&deferred_lock);
+
+    if (count > 4) {
         // Too many: full flush is cheaper
         pmap_shootdown_all();
     } else {
-        for (int i = 0; i < deferred_count; i++) {
-            pmap_shootdown_page(deferred_pages[i]);
+        for (int i = 0; i < count; i++) {
+            pmap_shootdown_page(pages[i]);
         }
     }
-    deferred_count = 0;
 }
 
 // Wait for all shootdown acknowledgments

@@ -8,11 +8,11 @@
 
 | Severity | Count | Resolved |
 |----------|-------|----------|
-| CRITICAL | 16 | 14 |
+| CRITICAL | 16 | 15 |
 | HIGH     | 11 | 1 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **42** | **15** |
+| **Total** | **42** | **16** |
 
 ---
 
@@ -21,35 +21,6 @@
 
 
 
-
-### 8. Deferred TLB Shootdown: Unprotected Static Globals on SMP — UNRESOLVED
-
-**File:** [sys/arch/i386/pmap.c](sys/arch/i386/pmap.c#L1421-L1445)  
-**Severity:** CRITICAL — TLB Corruption / Memory Access Violation
-
-**Issue:** `pmap_shootdown_defer()` uses static global `deferred_pages[16]` and `deferred_count` with NO locking. On SMP, concurrent pmap operations on different CPUs will race on these globals, corrupting the deferred page list or missing entries entirely.
-
-**Problematic Code:**
-```c
-static uint32_t deferred_pages[16];  // Global, no lock
-static int deferred_count = 0;       // Global, no lock
-
-void pmap_shootdown_defer(uintptr_t va) {
-    if (deferred_count < 16) {
-        deferred_pages[deferred_count++] = va;  // Two CPUs race here
-    }
-}
-```
-
-**Impact:** Missed TLB shootdowns cause stale TLB entries to persist, allowing access to freed/remapped physical pages. Can cause silent memory corruption.
-
-**Fix:** Either make deferred state per-CPU (preferred), or protect with a spinlock:
-```c
-static DEFINE_PER_CPU(uint32_t, deferred_pages[16]);
-static DEFINE_PER_CPU(int, deferred_count);
-```
-
----
 
 ### 9. VirtIO 9P DMA Uses Virtual Addresses Instead of Physical — UNRESOLVED
 
