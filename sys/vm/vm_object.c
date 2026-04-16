@@ -1,6 +1,7 @@
 #include <vm/vm_object.h>
 #include <vm/vm_kmem.h>
 #include <vm/vm_pager.h>
+#include <sys/lock.h>
 #include <stddef.h>
 
 // Static pool for bootstrap objects (until kmalloc is ready)
@@ -8,6 +9,7 @@
 static vm_object_t bootstrap_objects[MAX_BOOTSTRAP_OBJECTS];
 static int next_bootstrap_object = 0;
 static int kmalloc_ready = 0;
+static spinlock_t vm_object_teardown_lock = SPINLOCK_INIT("vmobj_teardown");
 
 static vm_object_t *alloc_object(void) {
     if (next_bootstrap_object < MAX_BOOTSTRAP_OBJECTS)
@@ -52,16 +54,29 @@ void vm_object_reference(vm_object_t *object) {
 void vm_object_deallocate(vm_object_t *object) {
     if (!object) return;
 
-    /* Atomic decrement and check (finding #19) */
+    /* Atomic decrement and check */
     if (__sync_sub_and_fetch(&object->ref_count, 1) == 0) {
+        vm_page_t *pages;
+
+        spinlock_acquire(&vm_object_teardown_lock);
+
+        /* Mark dead immediately to prevent concurrent page fault traversal */
+        object->type = VM_OBJ_TYPE_DEAD;
+        __sync_synchronize();  /* Full barrier: ensure DEAD is visible before teardown */
+
         vm_object_t *shadow = object->shadow;
         struct vm_pager *pager = object->pager;
 
         object->shadow = NULL;
         object->pager = NULL;
+        pages = object->pages;
+        object->pages = NULL;
+        object->page_count = 0;
+
+        spinlock_release(&vm_object_teardown_lock);
 
         // Free all pages
-        vm_page_t *p = object->pages;
+        vm_page_t *p = pages;
         while (p) {
             vm_page_t *next = p->next;
             vm_page_free(p);

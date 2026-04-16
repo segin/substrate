@@ -9,10 +9,10 @@
 | Severity | Count | Resolved |
 |----------|-------|----------|
 | CRITICAL | 16 | 16 |
-| HIGH     | 11 | 10 |
+| HIGH     | 11 | 11 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **42** | **26** |
+| **Total** | **42** | **27** |
 
 ---
 
@@ -24,26 +24,6 @@
 
 
 ## HIGH SEVERITY ISSUES
-
-### 18. vm_object_deallocate() Race: Concurrent Teardown Without Lock — UNRESOLVED
-
-**File:** [sys/vm/vm_object.c](sys/vm/vm_object.c#L55-L85)  
-**Severity:** HIGH — Use-After-Free / Double-Free
-
-**Issue:** After the atomic decrement reaches zero, the function tears down shadow, pager, and pages without any lock. If another CPU is concurrently accessing the object (e.g., via a page fault traversing the shadow chain), it could see partially-torn-down state.
-
-**Problematic Code:**
-```c
-if (__sync_sub_and_fetch(&object->ref_count, 1) == 0) {
-    vm_object_t *shadow = object->shadow;
-    object->shadow = NULL;  // Race window: no lock held
-    // ... free pages, shadow, pager
-}
-```
-
-**Fix:** Add a per-object lock or use a global VM object lock for teardown, or use RCU-style deferred freeing.
-
----
 
 ## MEDIUM SEVERITY ISSUES
 
