@@ -11,8 +11,8 @@
 | CRITICAL | 16 | 16 |
 | HIGH     | 11 | 11 |
 | MEDIUM   | 10 | 3 |
-| LOW      | 5 | 1 |
-| **Total** | **42** | **31** |
+| LOW      | 5 | 2 |
+| **Total** | **42** | **32** |
 
 ---
 
@@ -108,15 +108,6 @@ if (size > KMEM_MAX_ALLOC) return NULL;
 ---
 
 ## LOW SEVERITY ISSUES
-
-### 39. Kernel printf itoa/utoa_hex: No Buffer Bounds Check in Internal Helpers — UNRESOLVED
-
-**File:** [sys/lib/printf.c](sys/lib/printf.c#L10-L100)  
-**Severity:** LOW — Buffer Overflow (Internal)
-
-**Issue:** `itoa()` uses `char tmp[32]` and `utoa_hex()` uses `char tmp[32]`, which are sufficient for 64-bit values (max 20 decimal digits, 16 hex digits). However, neither function validates `i < sizeof(tmp)` in the conversion loop. While safe with current types, a future change to 128-bit types could overflow.
-
----
 
 ### 40. ELF Page Map Leak on pmap_enter Failure — UNRESOLVED
 
