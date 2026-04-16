@@ -8,11 +8,11 @@
 
 | Severity | Count | Resolved |
 |----------|-------|----------|
-| CRITICAL | 16 | 15 |
+| CRITICAL | 16 | 16 |
 | HIGH     | 11 | 1 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **42** | **16** |
+| **Total** | **42** | **17** |
 
 ---
 
@@ -21,35 +21,6 @@
 
 
 
-
-### 9. VirtIO 9P DMA Uses Virtual Addresses Instead of Physical — UNRESOLVED
-
-**File:** [sys/drivers/virtio/virtio_9p.c](sys/drivers/virtio/virtio_9p.c#L85-L95)  
-**Severity:** CRITICAL — DMA Corruption / Wrong Memory Access
-
-**Issue:** `virtio_9p_send()` writes buffer pointers directly into vring descriptors without converting from virtual to physical addresses. VirtIO descriptors contain physical addresses for device DMA. The VirtIO block driver correctly converts (`(uint32_t)&hdr - 0xC0000000`), but the 9P driver does not.
-
-**Problematic Code:**
-```c
-// WRONG: passes virtual address (>= 0xC0000000) to device
-v9p.desc[id0].addr = (uint64_t)(uint32_t)out_buf;
-v9p.desc[id1].addr = (uint64_t)(uint32_t)in_buf;
-```
-
-**Compare with VirtIO block (CORRECT):**
-```c
-vblk.desc[id0].addr = (uint64_t)((uint32_t)(uintptr_t)&hdr - 0xC0000000);
-```
-
-**Impact:** Device DMA hits wrong physical addresses. Reads return garbage; writes corrupt random physical memory. The 9P filesystem is completely non-functional due to this.
-
-**Fix:**
-```c
-v9p.desc[id0].addr = (uint64_t)((uint32_t)(uintptr_t)out_buf - 0xC0000000);
-v9p.desc[id1].addr = (uint64_t)((uint32_t)(uintptr_t)in_buf - 0xC0000000);
-```
-
----
 
 ### 10. ext2: Block Group Descriptor Table Fixed-Size Array Overflow — UNRESOLVED
 
