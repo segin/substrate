@@ -10,9 +10,9 @@
 |----------|-------|----------|
 | CRITICAL | 16 | 16 |
 | HIGH     | 11 | 11 |
-| MEDIUM   | 10 | 9 |
+| MEDIUM   | 10 | 10 |
 | LOW      | 5 | 5 |
-| **Total** | **42** | **41** |
+| **Total** | **42** | **42** |
 
 ---
 
@@ -26,17 +26,6 @@
 ## HIGH SEVERITY ISSUES
 
 ## MEDIUM SEVERITY ISSUES
-
-### 35. Pipe Implementation: Potential Missed Wakeup — UNRESOLVED
-
-**File:** [sys/fs/pipe.c](sys/fs/pipe.c)  
-**Severity:** MEDIUM — Deadlock
-
-**Issue:** The pipe sleep/wake pattern releases the mutex before yielding and re-acquires after. If a wakeup is delivered between the mutex release and the actual sleep, the thread misses the wakeup and sleeps indefinitely.
-
-**Fix:** Use proper condvar semantics where the sleep is atomic with the mutex release.
-
----
 
 ## LOW SEVERITY ISSUES
 
