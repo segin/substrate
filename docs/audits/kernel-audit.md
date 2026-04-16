@@ -9,10 +9,10 @@
 | Severity | Count | Resolved |
 |----------|-------|----------|
 | CRITICAL | 16 | 16 |
-| HIGH     | 11 | 1 |
+| HIGH     | 11 | 2 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **42** | **17** |
+| **Total** | **42** | **18** |
 
 ---
 
@@ -24,25 +24,6 @@
 
 
 ## HIGH SEVERITY ISSUES
-
-### 17. Mutex Adaptive Spin: Use-After-Free on Owner Thread — UNRESOLVED
-
-**File:** [sys/kern/mutex.c](sys/kern/mutex.c#L66-L85)  
-**Severity:** HIGH — Race Condition / Crash
-
-**Issue:** The adaptive spin path loads `m->owner`, then dereferences `owner->state` without holding any lock. Between the load and the dereference, another CPU could release the mutex, the owner thread could exit and be freed, making `owner->state` a use-after-free.
-
-**Problematic Code:**
-```c
-thread_t *owner = __atomic_load_n(&m->owner, __ATOMIC_ACQUIRE);
-if (owner) {
-    if (m->locked && __atomic_load_n(&m->owner, __ATOMIC_RELAXED) == owner) {
-        if (owner->state != THREAD_RUNNING) {  // UAF if owner freed
-```
-
-**Fix:** Either hold a lock during the check, use thread reference counting, or simply remove the `owner->state` check from the fast path.
-
----
 
 ### 18. vm_object_deallocate() Race: Concurrent Teardown Without Lock — UNRESOLVED
 
