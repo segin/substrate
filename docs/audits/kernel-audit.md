@@ -9,10 +9,10 @@
 | Severity | Count | Resolved |
 |----------|-------|----------|
 | CRITICAL | 16 | 16 |
-| HIGH     | 11 | 9 |
+| HIGH     | 11 | 10 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **42** | **25** |
+| **Total** | **42** | **26** |
 
 ---
 
@@ -42,19 +42,6 @@ if (__sync_sub_and_fetch(&object->ref_count, 1) == 0) {
 ```
 
 **Fix:** Add a per-object lock or use a global VM object lock for teardown, or use RCU-style deferred freeing.
-
----
-
-### 21. IRQ Handler Dispatch: TOCTOU Between Lock Release and Handler Call — UNRESOLVED
-
-**File:** [sys/kern/irq.c](sys/kern/irq.c) (dispatch function, not shown in read but inferred from structure)  
-**Severity:** HIGH — Use-After-Free
-
-**Issue:** The IRQ dispatch pattern (confirmed by the `free_irq` implementation) releases the spinlock before calling handlers. If `free_irq()` is called from a handler or concurrently, the `next` pointer saved before lock release may point to freed memory.
-
-The `request_irq()` function also has a TOCTOU: it checks for conflicts under the lock, releases it, allocates memory, then re-acquires to insert. Another CPU could register the same IRQ in between.
-
-**Fix:** Use RCU-style deferred freeing for irq_action entries, or keep the lock held during handler dispatch (with appropriate nesting considerations).
 
 ---
 

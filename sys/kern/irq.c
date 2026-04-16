@@ -28,21 +28,6 @@ int request_irq(unsigned int irq, irq_handler_t handler, unsigned long flags,
         return -EINVAL;
     }
 
-    spinlock_acquire(&irq_lock);
-    curr = irq_lines[irq];
-    while (curr != NULL) {
-        if (!(curr->flags & IRQF_SHARED) || !(flags & IRQF_SHARED)) {
-            spinlock_release(&irq_lock);
-            return -EBUSY;
-        }
-        if (curr->dev_id == dev_id && dev_id != NULL) {
-            spinlock_release(&irq_lock);
-            return -EEXIST;
-        }
-        curr = curr->next;
-    }
-    spinlock_release(&irq_lock);
-
     action = kmalloc(sizeof(*action));
     if (action == NULL) {
         return -ENOMEM;
@@ -55,7 +40,23 @@ int request_irq(unsigned int irq, irq_handler_t handler, unsigned long flags,
         strncpy(action->name, name, sizeof(action->name) - 1);
     }
 
+    /* Perform conflict checks and insertion under one lock hold. */
     spinlock_acquire(&irq_lock);
+    curr = irq_lines[irq];
+    while (curr != NULL) {
+        if (!(curr->flags & IRQF_SHARED) || !(flags & IRQF_SHARED)) {
+            spinlock_release(&irq_lock);
+            kfree(action, sizeof(*action));
+            return -EBUSY;
+        }
+        if (curr->dev_id == dev_id && dev_id != NULL) {
+            spinlock_release(&irq_lock);
+            kfree(action, sizeof(*action));
+            return -EEXIST;
+        }
+        curr = curr->next;
+    }
+
     action->next = irq_lines[irq];
     irq_lines[irq] = action;
     spinlock_release(&irq_lock);
@@ -100,13 +101,8 @@ int irq_dispatch(unsigned int irq, void *frame) {
     spinlock_acquire(&irq_lock);
     curr = irq_lines[irq];
     while (curr != NULL) {
-        irq_handler_t handler = curr->handler;
-        void *dev_id = curr->dev_id;
-        irq_action_t *next = curr->next; /* Save next before releasing lock (finding #17) */
-        spinlock_release(&irq_lock);
-        handled |= handler(irq, dev_id, frame);
-        spinlock_acquire(&irq_lock);
-        curr = next;
+        handled |= curr->handler(irq, curr->dev_id, frame);
+        curr = curr->next;
     }
     spinlock_release(&irq_lock);
     return handled;
