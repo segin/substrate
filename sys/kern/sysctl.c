@@ -69,8 +69,8 @@ SYSCTL_INT(hw, HW_PAGESIZE, pagesize, CTLFLAG_RD, &hw_pagesize, 0, "System page 
 extern void early_uart_print(const char *s);
 
 void sysctl_init(void) {
-    if (sysctl_initialized) return;
-    sysctl_initialized = 1;
+    if (__sync_bool_compare_and_swap(&sysctl_initialized, 0, 1) == 0)
+        return;
 
     hw_ncpu = smp_get_cpu_count();
 

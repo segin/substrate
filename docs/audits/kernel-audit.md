@@ -9,10 +9,10 @@
 | Severity | Count | Resolved |
 |----------|-------|----------|
 | CRITICAL | 16 | 16 |
-| HIGH     | 11 | 3 |
+| HIGH     | 11 | 4 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **42** | **19** |
+| **Total** | **42** | **20** |
 
 ---
 
@@ -73,31 +73,6 @@ proc_add_child(parent, child_proc);  // Only now visible to wait()
 The `request_irq()` function also has a TOCTOU: it checks for conflicts under the lock, releases it, allocates memory, then re-acquires to insert. Another CPU could register the same IRQ in between.
 
 **Fix:** Use RCU-style deferred freeing for irq_action entries, or keep the lock held during handler dispatch (with appropriate nesting considerations).
-
----
-
-### 22. sysctl_init() Race: Double-Initialization on SMP — UNRESOLVED
-
-**File:** [sys/kern/sysctl.c](sys/kern/sysctl.c#L78-L83)  
-**Severity:** HIGH — Data Corruption
-
-**Issue:** `sysctl_init()` uses a non-atomic check-and-set pattern:
-
-**Problematic Code:**
-```c
-void sysctl_init(void) {
-    if (sysctl_initialized) return;  // Non-atomic read
-    sysctl_initialized = 1;          // Non-atomic write
-    // ... mutex_init, register OIDs ...
-```
-
-On SMP, both CPUs could read `sysctl_initialized == 0`, both proceed, and `mutex_init()` would be called twice, corrupting the mutex.
-
-**Fix:** Use atomic compare-and-swap:
-```c
-if (__sync_bool_compare_and_swap(&sysctl_initialized, 0, 1) == false)
-    return;
-```
 
 ---
 
