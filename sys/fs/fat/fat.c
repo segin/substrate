@@ -595,6 +595,16 @@ fs_node_t *fat_mount(const char *device, uint32_t flags, void *data) {
         kprint("FAT: Unsupported sector size\n");
         return NULL;
     }
+
+    // Validate sectors_per_cluster: must be power of 2, cluster size <= 32KB
+    if ((fs->bpb.sectors_per_cluster & (fs->bpb.sectors_per_cluster - 1)) != 0) {
+        kprint("FAT: Invalid sectors_per_cluster (not power of 2)\n");
+        return NULL;
+    }
+    if ((uint32_t)fs->bpb.bytes_per_sector * fs->bpb.sectors_per_cluster > 32768) {
+        kprint("FAT: Cluster size exceeds 32KB limit\n");
+        return NULL;
+    }
     
     // Determine FAT type
     uint32_t root_dir_sectors = ((fs->bpb.root_entries * 32) + (fs->bpb.bytes_per_sector - 1)) / fs->bpb.bytes_per_sector;

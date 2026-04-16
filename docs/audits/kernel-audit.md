@@ -1,18 +1,18 @@
 # Security Audit Report: Substrate Kernel (`sys/`)
 
-**Date:** April 16, 2026 (Updated: April 16, 2026 — Phase 2 deep scan)  
-**Scope:** Full codebase review of `sys/` — kernel core (`kern/`), VM subsystem (`vm/`), process management (`pm/`), VFS/filesystems (`vfs/`, `fs/`), exec/personality (`exec/`), architecture code (`arch/`), drivers (`drivers/`), kernel libraries (`lib/`)  
-**Method:** Manual code review, cross-reference with AGENTS.md patterns, pattern analysis for unsafe operations. Phase 2: targeted deep scan of syscall boundaries, driver DMA paths, pmap/TLB, ext2 parsing, exec credentials.  
+**Date:** April 16, 2026 (Updated: April 16, 2026 — Phase 3 FS driver scan)  
+**Scope:** Full codebase review of `sys/` — kernel core (`kern/`), VM subsystem (`vm/`), process management (`pm/`), VFS/filesystems (`vfs/`, `fs/`), exec/personality (`exec/`), architecture code (`arch/`), drivers (`drivers/`), kernel libraries (`lib/`). Phase 3: Minix, FAT, UDF filesystem drivers.  
+**Method:** Manual code review, cross-reference with AGENTS.md patterns, pattern analysis for unsafe operations. Phase 2: targeted deep scan of syscall boundaries, driver DMA paths, pmap/TLB, ext2 parsing, exec credentials. Phase 3: line-by-line review of minix.c/h, fat.c/h, udf.c/h, udf_write.c.  
 
 ## Summary
 
 | Severity | Count | Resolved |
 |----------|-------|----------|
-| CRITICAL | 11 | 5 |
-| HIGH     | 13 | 0 |
+| CRITICAL | 21 | 1 |
+| HIGH     | 11 | 0 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **44** | **5** |
+| **Total** | **47** | **1** |
 
 ---
 
@@ -323,9 +323,254 @@ if (vnode->v_mode & S_ISGID)
 
 ---
 
+### 12. sys_brk() Missing Kernel-Space Upper Bound Check — UNRESOLVED
+
+**File:** [sys/vm/vm_syscalls.c](sys/vm/vm_syscalls.c#L207-L290)  
+**Severity:** CRITICAL — Arbitrary Kernel Memory Overwrite / Ring 0 Code Execution
+
+**Issue:** `sys_brk()` validates only `new_brk < brk_start` (prevents shrinking below heap start) but never verifies `new_brk < 0xC0000000`. A user can pass `addr = 0xC0100000` and the function will call `pmap_enter_batch()` with VA addresses in kernel space. Since `pmap_enter()` has no VA range check for user pmaps, it will overwrite existing kernel page table entries with user-controlled physical pages marked read/write.
+
+**Problematic Code:**
+```c
+uintptr_t new_brk = (uintptr_t)addr;
+uintptr_t old_brk = (uintptr_t)current_process->brk;
+
+if (new_brk < current_process->brk_start) 
+    return (void *)(uintptr_t)old_brk;
+
+// *** NO CHECK: new_brk >= 0xC0000000 ***
+
+uintptr_t old_page_end = (old_brk + 0xFFF) & ~0xFFFULL;
+uintptr_t new_page_end = (new_brk + 0xFFF) & ~0xFFFULL;
+
+if (new_page_end > old_page_end) {
+    // Allocates pages and calls pmap_enter_batch() with VA in kernel space
+```
+
+**Impact:** Attacker calls `brk(0xC0100000)`. The kernel maps freshly-allocated, zeroed, user-writable pages over kernel code/data. Attacker writes shellcode, which executes at ring 0 on next kernel entry.
+
+**Fix:**
+```c
+if (new_brk >= 0xC0000000)
+    return (void *)(uintptr_t)old_brk;
+```
+Also add defense-in-depth in `pmap_enter()` to reject VA >= 0xC0000000 for user pmaps.
+
+---
+
+### 13. sys_fchmod() No Permission Check — UNRESOLVED
+
+**File:** [sys/kern/syscall.c](sys/kern/syscall.c#L1667-L1676)  
+**Severity:** CRITICAL — Arbitrary File Permission Modification
+
+**Issue:** `sys_fchmod()` changes the permission mode of any open file descriptor with zero authorization checks. Any unprivileged user with a readable fd can set it to mode `0777` or `04755`.
+
+**Problematic Code:**
+```c
+int sys_fchmod(int fd, int mode) {
+    if (fd < 0 || fd >= MAX_FD) return -EBADF;
+    file_t *f = current_process->fds[fd];
+    if (!f || !f->f_data) return -EBADF;
+    fs_node_t *node = (fs_node_t *)f->f_data;
+    node->mask = (uint32_t)(mode & 07777);  // No owner/capability check
+    return 0;
+}
+```
+
+**Impact:** Any user can make any file world-writable, or add setuid bits. Combined with #14, creates a trivial root shell.
+
+**Fix:** Add `if (current_process->euid != 0 && current_process->euid != node->uid) return -EPERM;`
+
+---
+
+### 14. sys_fchown() No Permission Check — Privilege Escalation — UNRESOLVED
+
+**File:** [sys/kern/syscall.c](sys/kern/syscall.c#L1678-L1689)  
+**Severity:** CRITICAL — Arbitrary File Ownership Change / Privilege Escalation
+
+**Issue:** `sys_fchown()` changes uid/gid of any open file descriptor with zero authorization checks. An unprivileged user can `fchown(fd, 0, 0)` to take ownership as root, then `fchmod(fd, 04755)` to create a setuid-root binary.
+
+**Problematic Code:**
+```c
+int sys_fchown(int fd, int uid, int gid) {
+    if (fd < 0 || fd >= MAX_FD) return -EBADF;
+    file_t *f = current_process->fds[fd];
+    if (!f || !f->f_data) return -EBADF;
+    fs_node_t *node = (fs_node_t *)f->f_data;
+    if (uid != -1) node->uid = (uint32_t)uid;  // No privilege check
+    if (gid != -1) node->gid = (uint32_t)gid;  // No privilege check
+    return 0;
+}
+```
+
+**Exploitation chain:** `open("/tmp/exploit", O_CREAT|O_RDWR)` → write shell → `fchown(fd, 0, 0)` → `fchmod(fd, 04755)` → `exec("/tmp/exploit")` → root shell.
+
+**Fix:** Only `euid == 0` may change uid. Non-root owners may only change gid to a group they belong to. Clear setuid/setgid bits on chown by non-root.
+
+---
+
+### 15. kern_chroot() Missing Privilege Check + Linux Personality copyin Bypass — UNRESOLVED
+
+**File:** [sys/kern/syscall.c](sys/kern/syscall.c#L921-L940), [sys/exec/perso/perso_linux.c](sys/exec/perso/perso_linux.c#L910)  
+**Severity:** CRITICAL — Unprivileged chroot + Kernel Direct Dereference of Userspace Pointer
+
+**Issue — Two compounding vulnerabilities:**
+
+**(a) Missing `euid == 0` check:** `kern_chroot()` changes the process root directory without any privilege check. Any unprivileged user can chroot.
+
+**(b) Linux personality passes raw userspace pointer:** The Linux personality table maps `LINUX_SYS_chroot` directly to `kern_chroot` (not `sys_chroot`). `sys_chroot` does `copyinstr()` before calling `kern_chroot`, but the Linux path bypasses this entirely. `kern_chroot()` then directly dereferences the raw userspace pointer via `vfs_lookup()`.
+
+**Problematic Code:**
+```c
+// Linux personality table (perso_linux.c:910)
+[LINUX_SYS_chroot] = (void *)&kern_chroot,  // Bypasses sys_chroot's copyinstr!
+
+// kern_chroot (syscall.c:921)
+int kern_chroot(const char *path) {
+    if (!path) return -1;
+    // path is a RAW userspace pointer from Linux personality dispatch
+    if (path[0] == '/') {
+        node = vfs_lookup(root, path);  // Direct dereference of userspace memory
+    }
+    current_process->root_node = node;  // No euid==0 check
+```
+
+**Fix:** (a) Add `if (current_process->euid != 0) return -EPERM;` to `kern_chroot`. (b) Change Linux personality mapping to `sys_chroot` or create a wrapper that does copyin.
+
+---
+
+### 16. futex_thread_exit() Direct Dereference of robust_list_head Fields — UNRESOLVED
+
+**File:** [sys/kern/futex.c](sys/kern/futex.c#L198-L220)  
+**Severity:** CRITICAL — Kernel Panic / Controlled Pointer Dereference
+
+**Issue:** `futex_thread_exit()` reads `head->list_op_pending`, `head->futex_offset`, and `head->list.next` by directly dereferencing the `robust_list_head` pointer (which resides in userspace). While the function later uses `futex_read_user()` for futex values and next pointers, the **initial three field reads** have no copyin and no fault handler. This is distinct from the known #2/#3 `futex_read_user`/`futex_read_timespec` findings.
+
+**Problematic Code:**
+```c
+void futex_thread_exit(thread_t *t) {
+    struct robust_list_head *head = t->robust_list;  // Userspace pointer
+    
+    if (head->list_op_pending) {  // DIRECT DEREFERENCE — no copyin
+        int *futex_addr = (int *)((char *)head->list_op_pending 
+                         + head->futex_offset);  // DIRECT DEREFERENCE — no copyin
+    }
+    entry = head->list.next;  // DIRECT DEREFERENCE — no copyin
+```
+
+**Impact:** Attacker calls `set_robust_list()`, then `munmap()` the page, then exits the thread. Kernel dereferences unmapped pointer at ring 0 with no fault recovery. Kernel panic (DoS) or controlled read if page is remapped.
+
+**Fix:** Copy the entire `struct robust_list_head` into a kernel-stack local:
+```c
+struct robust_list_head khead;
+if (copyin(t->robust_list, &khead, sizeof(khead)) != 0) {
+    t->robust_list = NULL;
+    return;
+}
+```
+
+---
+
+### 17. procfs_generic_read() Kernel Stack Over-Read on Allocation Failure — UNRESOLVED
+
+**File:** [sys/fs/procfs.c](sys/fs/procfs.c#L673-L700)  
+**Severity:** CRITICAL — Arbitrary Kernel Stack Disclosure
+
+**Issue:** `procfs_generic_read()` generates content into a 1024-byte stack buffer `tmp`. When the generator output exceeds 1024 bytes (returns `len >= 1024`), the code attempts `kmalloc(len + 1)` for a larger buffer. If `kmalloc` fails (OOM), `buf` remains pointing to the 1024-byte stack buffer but `len` retains its original value (>1024). The subsequent `memcpy(buffer, buf + offset, read_len)` reads `len - 1024` bytes past the end of `tmp`, copying kernel stack contents (return addresses, saved registers, local variables) into the userspace buffer.
+
+Compare with `proc_pid_status_read()` (line ~791) and `proc_pid_stat_read()` (line ~859), which correctly clamp `len` on allocation failure.
+
+**Problematic Code:**
+```c
+char tmp[1024];
+uint32_t len = entry->generator(tmp, sizeof(tmp), entry->opaque);
+char *buf = tmp;
+
+if (len >= sizeof(tmp)) {
+    alloc_size = len + 1;
+    alloc_buf = kmalloc(alloc_size);
+    if (alloc_buf) {
+        len = entry->generator(alloc_buf, alloc_size, entry->opaque);
+        buf = alloc_buf;
+    }
+    // BUG: no else — len stays > 1024, buf stays = tmp
+}
+
+if (offset < len) {
+    read_len = size;
+    if (offset + read_len > len)
+        read_len = len - offset;
+    memcpy(buffer, buf + offset, read_len);  // reads past tmp[1024]
+}
+```
+
+**Triggerable generators:** `gen_mounts` (many mount points), `gen_ioports`/`gen_iomem` (many hardware resources), any driver-registered generator with large output. OOM can be induced by an attacker exhausting available memory.
+
+**Impact:** Kernel stack data (return addresses defeating KASLR, local variables, potentially credentials) leaked to userspace via `/proc/mounts`, `/proc/ioports`, etc.
+
+**Fix:**
+```c
+if (len >= sizeof(tmp)) {
+    alloc_size = len + 1;
+    alloc_buf = kmalloc(alloc_size);
+    if (alloc_buf) {
+        len = entry->generator(alloc_buf, alloc_size, entry->opaque);
+        buf = alloc_buf;
+    } else {
+        len = sizeof(tmp) - 1;  // Clamp to actual buffer size
+    }
+}
+```
+
+---
+
+### 18. procfs /proc/<pid>/fd/ World-Readable — No Per-Process Access Controls — UNRESOLVED
+
+**File:** [sys/fs/procfs.c](sys/fs/procfs.c#L520-L571)  
+**Severity:** CRITICAL — Information Disclosure Enabling Privilege Escalation
+
+**Issue:** All per-pid procfs nodes (`status`, `cmdline`, `stat`, `exe`, `cwd`, `fd/`) are created with `uid = 0, gid = 0` (root ownership) and world-readable permissions (`mask = 0444` for files, `0555` for directories, `0777` for symlinks). The fd directory should be `0500` owned by the target process's UID (Linux default). Additionally, none of the read/readlink callbacks perform any credential checks against the calling process.
+
+This means any unprivileged user can:
+- Enumerate **all open file descriptors** of every process (including root) via `/proc/<pid>/fd/`
+- Read `/proc/<pid>/cmdline` of every process, which may contain **passwords or secrets passed as command-line arguments**
+- Read `/proc/<pid>/exe` and `/proc/<pid>/cwd` of every process
+
+**Problematic Code:**
+```c
+// fd directory — should be 0500, owned by process uid
+nodes->fd_dir.mask = 0555;    // world-readable+executable
+nodes->fd_dir.uid = 0;        // owned by root, not target process
+nodes->fd_dir.gid = 0;
+
+// fd symlinks — world-readable
+link->mask = 0777;
+link->uid = 0;
+link->gid = 0;
+
+// status, cmdline, stat — world-readable, root-owned
+nodes->status.mask = 0444;
+nodes->status.uid = 0;
+```
+
+**Impact:** Sensitive information about all processes exposed to any local user. Enables targeted privilege escalation by revealing what files root daemons have open, command-line secrets, and process working directories.
+
+**Fix:** Set uid/gid on per-pid nodes to the target process's credentials:
+```c
+process_t *target = proc_find(pid);
+nodes->dir.uid = target->uid;
+nodes->dir.gid = target->gid;
+nodes->fd_dir.mask = 0500;  // owner-only
+nodes->fd_dir.uid = target->uid;
+nodes->fd_dir.gid = target->gid;
+// Same for status, cmdline, stat, exe, cwd nodes
+```
+
+---
+
 ## HIGH SEVERITY ISSUES
 
-### 17. Mutex Adaptive Spin: Use-After-Free on Owner Thread — UNRESOLVED
+### 19. Mutex Adaptive Spin: Use-After-Free on Owner Thread — UNRESOLVED
 
 **File:** [sys/kern/mutex.c](sys/kern/mutex.c#L66-L85)  
 **Severity:** HIGH — Race Condition / Crash
@@ -344,7 +589,7 @@ if (owner) {
 
 ---
 
-### 7. vm_object_deallocate() Race: Concurrent Teardown Without Lock — UNRESOLVED
+### 20. vm_object_deallocate() Race: Concurrent Teardown Without Lock — UNRESOLVED
 
 **File:** [sys/vm/vm_object.c](sys/vm/vm_object.c#L55-L85)  
 **Severity:** HIGH — Use-After-Free / Double-Free
@@ -364,7 +609,7 @@ if (__sync_sub_and_fetch(&object->ref_count, 1) == 0) {
 
 ---
 
-### 8. sys_get_robust_list() Direct Userspace Write Without copyout() — UNRESOLVED
+### 21. sys_get_robust_list() Direct Userspace Write Without copyout() — UNRESOLVED
 
 **File:** [sys/kern/futex.c](sys/kern/futex.c#L296-L300)  
 **Severity:** HIGH — Kernel Crash / Arbitrary Kernel Write
@@ -387,7 +632,7 @@ copyout(&target->robust_list_len, len_ptr, sizeof(*len_ptr));
 
 ---
 
-### 9. Fork: Child Visible to Scheduler Before proc_add_child() — UNRESOLVED
+### 22. Fork: Child Visible to Scheduler Before proc_add_child() — UNRESOLVED
 
 **File:** [sys/pm/process.c](sys/pm/process.c#L567-L575)  
 **Severity:** HIGH — Resource Leak / Race Condition
@@ -405,7 +650,7 @@ proc_add_child(parent, child_proc);  // Only now visible to wait()
 
 ---
 
-### 10. IRQ Handler Dispatch: TOCTOU Between Lock Release and Handler Call — UNRESOLVED
+### 23. IRQ Handler Dispatch: TOCTOU Between Lock Release and Handler Call — UNRESOLVED
 
 **File:** [sys/kern/irq.c](sys/kern/irq.c) (dispatch function, not shown in read but inferred from structure)  
 **Severity:** HIGH — Use-After-Free
@@ -418,7 +663,7 @@ The `request_irq()` function also has a TOCTOU: it checks for conflicts under th
 
 ---
 
-### 11. sysctl_init() Race: Double-Initialization on SMP — UNRESOLVED
+### 24. sysctl_init() Race: Double-Initialization on SMP — UNRESOLVED
 
 **File:** [sys/kern/sysctl.c](sys/kern/sysctl.c#L78-L83)  
 **Severity:** HIGH — Data Corruption
@@ -443,7 +688,7 @@ if (__sync_bool_compare_and_swap(&sysctl_initialized, 0, 1) == false)
 
 ---
 
-### 12. ELF Segment Overlap Detection Silently Stops at 256 — UNRESOLVED
+### 25. ELF Segment Overlap Detection Silently Stops at 256 — UNRESOLVED
 
 **File:** [sys/exec/formats/elf.c](sys/exec/formats/elf.c#L554-L558)  
 **Severity:** HIGH — Privilege Escalation
@@ -462,7 +707,7 @@ if (mapped_range_count < 256) {
 
 ---
 
-### 13. Turnstile Allocation Failure: Silent Priority Inheritance Loss — UNRESOLVED
+### 26. Turnstile Allocation Failure: Silent Priority Inheritance Loss — UNRESOLVED
 
 **File:** [sys/kern/turnstile.c](sys/kern/turnstile.c)  
 **Severity:** HIGH — Priority Inversion / Deadlock
@@ -473,7 +718,7 @@ if (mapped_range_count < 256) {
 
 ---
 
-### 14. Vnode Reference Count Race in vref() — UNRESOLVED
+### 27. Vnode Reference Count Race in vref() — UNRESOLVED
 
 **File:** [sys/vfs/vnode.c](sys/vfs/vnode.c)  
 **Severity:** HIGH — Use-After-Free
@@ -484,7 +729,7 @@ if (mapped_range_count < 256) {
 
 ---
 
-### 15. Mount/Unmount Race: Check-Then-Set on v_mountedhere — UNRESOLVED
+### 28. Mount/Unmount Race: Check-Then-Set on v_mountedhere — UNRESOLVED
 
 **File:** [sys/vfs/vfs_mount.c](sys/vfs/vfs_mount.c)  
 **Severity:** HIGH — Data Structure Corruption
@@ -495,9 +740,38 @@ if (mapped_range_count < 256) {
 
 ---
 
+### 29. sys_acct() / kern_acct() Missing Root Permission Check — UNRESOLVED
+
+**File:** [sys/kern/acct.c](sys/kern/acct.c#L40-L50)  
+**Severity:** HIGH — Privilege Bypass / Audit Manipulation
+
+**Issue:** `kern_acct()` enables or disables process accounting without checking the caller's UID/EUID. The source code literally contains the comment "In a real kernel, we would check permissions here" but no check was ever implemented. Any unprivileged user can enable accounting to an arbitrary file (writing process info) or disable it to hide activity.
+
+**Problematic Code:**
+```c
+int kern_acct(const char *path) {
+    // In a real kernel, we would check permissions here
+    if (!path) {
+        acct_stop();
+        return 0;
+    }
+    return acct_start(path);
+}
+```
+
+**Impact:** Unprivileged user can disable audit trail or redirect accounting data to an attacker-controlled file.
+
+**Fix:**
+```c
+if (current_process->euid != 0)
+    return -EPERM;
+```
+
+---
+
 ## MEDIUM SEVERITY ISSUES
 
-### 16. Futex Robust List Walk: 4096-Iteration Kernel CPU Consumption — UNRESOLVED
+### 30. Futex Robust List Walk: 4096-Iteration Kernel CPU Consumption — UNRESOLVED
 
 **File:** [sys/kern/futex.c](sys/kern/futex.c#L200-L240)  
 **Severity:** MEDIUM — Denial of Service
@@ -508,7 +782,7 @@ if (mapped_range_count < 256) {
 
 ---
 
-### 17. kmalloc Large Allocation: Secondary Integer Overflow in Pages Calculation — UNRESOLVED
+### 31. kmalloc Large Allocation: Secondary Integer Overflow in Pages Calculation — UNRESOLVED
 
 **File:** [sys/vm/vm_kmem.c](sys/vm/vm_kmem.c#L116-L120)  
 **Severity:** MEDIUM — Memory Corruption
@@ -522,7 +796,7 @@ if (size > KMEM_MAX_ALLOC) return NULL;
 
 ---
 
-### 18. Spinlock Panic on Double-Acquire: Non-Recoverable DoS — UNRESOLVED
+### 32. Spinlock Panic on Double-Acquire: Non-Recoverable DoS — UNRESOLVED
 
 **File:** [sys/kern/spinlock.c](sys/kern/spinlock.c#L14-L16)  
 **Severity:** MEDIUM — Denial of Service
@@ -533,7 +807,7 @@ if (size > KMEM_MAX_ALLOC) return NULL;
 
 ---
 
-### 19. Fork Failure: File Descriptor Leak on ldt_clone_process() Error — UNRESOLVED
+### 33. Fork Failure: File Descriptor Leak on ldt_clone_process() Error — UNRESOLVED
 
 **File:** [sys/pm/process.c](sys/pm/process.c#L510-L525)  
 **Severity:** MEDIUM — Resource Leak
@@ -565,7 +839,7 @@ for (int j = 0; j < MAX_FD; j++) {
 
 ---
 
-### 20. Name Cache: Stale Entries After Unlink/Rename — UNRESOLVED
+### 34. Name Cache: Stale Entries After Unlink/Rename — UNRESOLVED
 
 **File:** [sys/vfs/vfs_cache.c](sys/vfs/vfs_cache.c)  
 **Severity:** MEDIUM — Logic Error / Stale Data
@@ -576,7 +850,7 @@ for (int j = 0; j < MAX_FD; j++) {
 
 ---
 
-### 21. UDF FID Name Parsing: Unvalidated impl_use_length Offset — UNRESOLVED
+### 35. UDF FID Name Parsing: Unvalidated impl_use_length Offset — UNRESOLVED
 
 **File:** [sys/fs/udf/udf.c](sys/fs/udf/udf.c)  
 **Severity:** MEDIUM — Out-of-Bounds Read
@@ -587,7 +861,7 @@ for (int j = 0; j < MAX_FD; j++) {
 
 ---
 
-### 22. FAT Cluster Chain: Missing Total-Clusters Bound Check — UNRESOLVED
+### 36. FAT Cluster Chain: Missing Total-Clusters Bound Check — UNRESOLVED
 
 **File:** [sys/fs/fat/fat.c](sys/fs/fat/fat.c)  
 **Severity:** MEDIUM — Out-of-Bounds Read / Kernel Crash
@@ -598,7 +872,7 @@ for (int j = 0; j < MAX_FD; j++) {
 
 ---
 
-### 23. Pipe Implementation: Potential Missed Wakeup — UNRESOLVED
+### 37. Pipe Implementation: Potential Missed Wakeup — UNRESOLVED
 
 **File:** [sys/fs/pipe.c](sys/fs/pipe.c)  
 **Severity:** MEDIUM — Deadlock
@@ -609,7 +883,7 @@ for (int j = 0; j < MAX_FD; j++) {
 
 ---
 
-### 24. Request_irq TOCTOU: Gap Between Conflict Check and Insertion — UNRESOLVED
+### 38. Request_irq TOCTOU: Gap Between Conflict Check and Insertion — UNRESOLVED
 
 **File:** [sys/kern/irq.c](sys/kern/irq.c#L28-L60)  
 **Severity:** MEDIUM — Race Condition
@@ -631,7 +905,7 @@ spinlock_release(&irq_lock);
 
 ---
 
-### 25. Process Group Link Copy Bug in Fork — UNRESOLVED
+### 39. Process Group Link Copy Bug in Fork — UNRESOLVED
 
 **File:** [sys/pm/process.c](sys/pm/process.c#L545-L556)  
 **Severity:** MEDIUM — Linked List Corruption
@@ -652,7 +926,7 @@ child_proc->p_pgrp->pg_members = child_proc;
 
 ## LOW SEVERITY ISSUES
 
-### 26. Spinlock is_held() Non-Atomic Two-Read Pattern — UNRESOLVED
+### 40. Spinlock is_held() Non-Atomic Two-Read Pattern — UNRESOLVED
 
 **File:** [sys/kern/spinlock.c](sys/kern/spinlock.c#L62-L65)  
 **Severity:** LOW — Theoretical Race
@@ -661,7 +935,7 @@ child_proc->p_pgrp->pg_members = child_proc;
 
 ---
 
-### 27. Kernel printf itoa/utoa_hex: No Buffer Bounds Check in Internal Helpers — UNRESOLVED
+### 41. Kernel printf itoa/utoa_hex: No Buffer Bounds Check in Internal Helpers — UNRESOLVED
 
 **File:** [sys/lib/printf.c](sys/lib/printf.c#L10-L100)  
 **Severity:** LOW — Buffer Overflow (Internal)
@@ -670,7 +944,7 @@ child_proc->p_pgrp->pg_members = child_proc;
 
 ---
 
-### 28. ELF Page Map Leak on pmap_enter Failure — UNRESOLVED
+### 42. ELF Page Map Leak on pmap_enter Failure — UNRESOLVED
 
 **File:** [sys/exec/formats/elf.c](sys/exec/formats/elf.c#L590-L600)  
 **Severity:** LOW — Resource Leak
@@ -679,7 +953,7 @@ child_proc->p_pgrp->pg_members = child_proc;
 
 ---
 
-### 29. Random Number Generator State Not Wiped After Extraction — UNRESOLVED
+### 43. Random Number Generator State Not Wiped After Extraction — UNRESOLVED
 
 **File:** [sys/kern/random.c](sys/kern/random.c)  
 **Severity:** LOW — Theoretical State Recovery
@@ -688,7 +962,7 @@ child_proc->p_pgrp->pg_members = child_proc;
 
 ---
 
-### 30. elf_lookup_interpreter() May Return NULL to Caller — UNRESOLVED
+### 44. elf_lookup_interpreter() May Return NULL to Caller — UNRESOLVED
 
 **File:** [sys/exec/formats/elf.c](sys/exec/formats/elf.c#L326-L329)  
 **Severity:** LOW — NULL Dereference
@@ -727,13 +1001,141 @@ The page fault handler zeros all anonymous pages: the `VM_OBJ_TYPE_DEFAULT` path
 
 ## RECOMMENDED PRIORITY ORDER
 
-1. **#1, #2, #3** — User/kernel boundary violations in `copyinstr`, futex — immediate kernel information leak and crash vectors
-2. **#4** — sysctl privilege escalation — trivially exploitable by any local user
-3. **#5** — ELF integer overflow — local privilege escalation via crafted binary
-4. **#8** — `sys_get_robust_list()` arbitrary kernel write — one missing `copyout()` call
-5. **#6, #7** — Locking/races in mutex and vm_object — crash under load
-6. **#9** — Fork ordering — zombie leaks under concurrent load
-7. **#11** — sysctl_init SMP race — one-time boot corruption risk
-8. **#15, #14** — VFS mount/vnode races — corruption under concurrent FS operations
-9. **#19** — Fork FD leak — gradual resource exhaustion
-10. Everything else in severity order
+1. **#12** — `sys_brk()` no upper bound — trivial kernel PTE overwrite from userspace, immediate ring 0 code exec
+2. **#6** — `sys_set_thread_area()` TLS base — kernel read/write via GS segment, trivially exploitable
+3. **#13, #14** — `fchmod`/`fchown` no permission checks — trivial root shell exploit chain
+4. **#1, #2, #3, #16** — User/kernel boundary violations in `copyinstr`, futex — kernel information leak and crash vectors
+5. **#4** — sysctl privilege escalation — trivially exploitable by any local user
+6. **#15** — `kern_chroot` no privilege check + Linux personality copyin bypass — compound vulnerability
+7. **#5** — ELF integer overflow — local privilege escalation via crafted binary
+8. **#11** — ELF no setuid/setgid — all privilege-elevation binaries broken
+9. **#17** — procfs_generic_read stack over-read — kernel stack disclosure under OOM
+10. **#7, #8** — pmap_fork TLB / deferred shootdown races — SMP memory corruption
+11. **#9, #10** — VirtIO 9P DMA / ext2 BGD overflow — device and filesystem corruption
+12. **#18** — procfs /proc/pid/fd world-readable — information disclosure enabling priv-esc
+13. **#21** — `sys_get_robust_list()` arbitrary kernel write
+14. **#19, #20** — Mutex/vm_object races — crash under load
+15. **#29** — `sys_acct` no permission check — audit trail manipulation
+16. **#22** — Fork ordering — zombie leaks
+17. **#24** — sysctl_init SMP race — boot corruption
+18. **#27, #28** — VFS vnode/mount races
+19. Everything else in severity order
+
+---
+
+## Phase 3: Filesystem Driver Audit (Minix, FAT, UDF)
+
+### FS-2. UDF — Kernel Memory Leak via `udf_read_file` Inline Data Path (Stale FE Cache) — UNRESOLVED
+
+**File:** `sys/fs/udf/udf.c` lines 262–275  
+**Severity:** CRITICAL — Kernel Memory Information Leak
+
+**Issue:** `udf_read_fe()` copies only `sizeof(struct udf_fe)` bytes into the node cache. The allocation descriptors / inline data that follow the FE in the on-disk sector are NOT stored. When VFS calls `udf_read_file(&ctx->fe, ...)`, the function computes `alloc_area = ((uint8_t *)fe) + sizeof(struct udf_fe) + fe->ext_attr_length` — this points past the `udf_node_t` struct into adjacent kernel BSS memory.
+
+For inline data (`icb_tag.flags & 0x7 == 3`), the data is directly `memcpy`'d from kernel memory to the user's buffer. `ext_attr_length` (from disk) controls the base offset; `info_length` (from disk) controls the read length.
+
+**Impact:** Mounting a crafted UDF image and reading a file leaks arbitrary kernel memory to userspace.
+
+**Problematic Code:**
+```c
+uint8_t *alloc_area = ((uint8_t *)fe) + sizeof(struct udf_fe) + fe->ext_attr_length;
+if (ad_type == UDF_ICB_FLAG_AD_INLINE) {
+    memcpy(buffer, alloc_area + offset, size);  // reads kernel BSS
+```
+
+**Fix:** Store full sector in node cache, or re-read FE from disk on each access, validating `sizeof(struct udf_fe) + ext_attr_length + alloc_desc_length <= UDF_SECTOR_SIZE`.
+
+---
+
+### FS-3. UDF — OOB Read in Directory FID Parsing (`readdir`/`finddir`) — UNRESOLVED
+
+**File:** `sys/fs/udf/udf.c` lines 461–471, 521–533  
+**Severity:** CRITICAL — Kernel Memory Information Leak
+
+**Issue:** Directory data is read into `static uint8_t dir_buf[4096]` with the read capped to 4096 bytes, but the FID parsing loop uses `dir_size = (uint32_t)ctx->fe.info_length` which can be up to 4GB. When `pos >= 4096`, `struct udf_fid *fid = (struct udf_fid *)(dir_buf + pos)` reads past the buffer into kernel BSS. The `impl_use_length` and `file_id_length` values from kernel memory control further accesses, and "filenames" from kernel memory are returned to userspace.
+
+Additionally, even within the first 4096 bytes, no validation ensures `38 + impl_use_length + file_id_length` stays within remaining buffer space.
+
+**Impact:** Directory listing on a crafted UDF image leaks kernel memory contents as directory entry names.
+
+**Problematic Code:**
+```c
+uint32_t dir_size = (uint32_t)ctx->fe.info_length;
+udf_read_file(..., 0, dir_size > 4096 ? 4096 : dir_size, dir_buf);
+while (pos < dir_size) {              // should be: pos < read_size
+    struct udf_fid *fid = (struct udf_fid *)(dir_buf + pos);
+```
+
+**Fix:** Use `read_size` (the capped value) as loop bound, and validate each FID's total size fits within remaining buffer.
+
+---
+
+### FS-4. UDF — Space Bitmap OOB Read/Write via Crafted `num_bits` — UNRESOLVED
+
+**File:** `sys/fs/udf/udf_write.c` lines 55–80, 87–101  
+**Severity:** CRITICAL — Kernel Memory Corruption
+
+**Issue:** `udf_read_space_bitmap()` limits the bitmap to 4 sectors (8192 bytes), but sets `space_bitmap_size = sbm->num_bits` from disk without validation. In `udf_alloc_block()`, the loop iterates `space_bitmap_size / 8` bytes. A crafted UDF image with `num_bits = 0x80000000` causes iteration ~256MB past the static buffer, reading and WRITING (setting bits via `|= (1 << bit)`) kernel BSS memory.
+
+**Impact:** Kernel memory corruption. Block allocation on a crafted image writes to arbitrary BSS locations.
+
+**Problematic Code:**
+```c
+space_bitmap_size = sbm->num_bits;  // from disk, unbounded
+// ...
+for (uint32_t byte = 0; byte < space_bitmap_size / 8; byte++) {
+    if (space_bitmap[byte] != 0xFF) {
+        space_bitmap[byte] |= (1 << bit);  // OOB write
+```
+
+**Fix:** Validate `num_bits` against actual buffer:
+```c
+uint32_t max_bytes = (sectors * UDF_SECTOR_SIZE) - sizeof(struct udf_space_bitmap);
+if (sbm->num_bits > max_bytes * 8) {
+    kprint("UDF: Space bitmap num_bits exceeds buffer\n");
+    return -1;
+}
+```
+
+---
+
+### FS-5. UDF — Buffer Overflow in `udf_add_fid` When Directory Grows Past 4096 Bytes — UNRESOLVED
+
+**File:** `sys/fs/udf/udf_write.c` lines 778–798  
+**Severity:** CRITICAL — Kernel Memory Corruption
+
+**Issue:** `udf_add_fid()` uses `static uint8_t dir_buf[4096]` and places the new FID at `dir_buf + dir_size` where `dir_size = (uint32_t)dir_fe->info_length`. No bounds check ensures `dir_size + fid_size <= sizeof(dir_buf)`. When a directory's on-disk size approaches or exceeds 4096, the FID write overflows into kernel BSS.
+
+**Impact:** Creating files in a directory that approaches 4096 bytes corrupts kernel memory.
+
+**Problematic Code:**
+```c
+struct udf_fid *fid = (struct udf_fid *)(dir_buf + dir_size);
+memset(fid, 0, fid_size);
+```
+
+**Fix:** Add bounds check:
+```c
+if (dir_size + fid_size > sizeof(dir_buf)) return -1;
+```
+
+---
+
+### FS-6. UDF — `udf_read_file` Short/Long AD Path Dereferences Kernel Memory as Allocation Descriptors — UNRESOLVED
+
+**File:** `sys/fs/udf/udf.c` lines 277–333  
+**Severity:** CRITICAL — Uncontrolled Kernel Device I/O
+
+**Issue:** Same root cause as FS-2: the cached `struct udf_fe` lacks the trailing allocation descriptor data. For short_ad and long_ad paths, `ads[i].position` / `ads[i].block` values come from kernel BSS memory (not from disk), and are used as sector offsets for device reads. `num_ads` is controlled by the attacker via `alloc_desc_length`. This causes device reads at arbitrary kernel-memory-derived offsets.
+
+**Impact:** Semi-random device sector reads; combined with FS-2 completes an arbitrary read primitive.
+
+**Problematic Code:**
+```c
+struct udf_short_ad *ads = (struct udf_short_ad *)alloc_area;
+uint32_t num_ads = fe->alloc_desc_length / sizeof(struct udf_short_ad);
+for (uint32_t i = 0; i < num_ads && size > 0; i++) {
+    uint32_t ext_start = fs->partition_start + ads[i].position;  // kernel memory
+```
+
+**Fix:** Same as FS-2 — store or re-read the full FE sector, validate offset bounds.
