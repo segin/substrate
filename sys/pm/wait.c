@@ -251,9 +251,22 @@ int kern_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
             return -EINTR;
         }
 
-        // Sleep on p_children channel
-        // current_process->p_children address is unique to this process
-        sched_sleep(&cur->p_children);
+        /*
+         * Sleep on p_children channel with a recheck to avoid missed wakeups.
+         * Child exit can race with the gap between the scan above and blocking.
+         */
+        current_thread->wait_chan = &cur->p_children;
+        current_thread->state = THREAD_BLOCKED;
+
+        target = find_waitable_child(pid, cur, options, &any_exists, &reason);
+        if (target || !any_exists ||
+            (current_thread->sig_pending & ~current_thread->sig_mask)) {
+            current_thread->state = THREAD_READY;
+            current_thread->wait_chan = NULL;
+            continue;
+        }
+
+        sched_yield();
     }
 }
 
