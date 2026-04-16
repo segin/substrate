@@ -8,11 +8,11 @@
 
 | Severity | Count | Resolved |
 |----------|-------|----------|
-| CRITICAL | 17 | 5 |
+| CRITICAL | 16 | 6 |
 | HIGH     | 11 | 0 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **43** | **5** |
+| **Total** | **42** | **6** |
 
 ---
 
@@ -926,22 +926,4 @@ The page fault handler zeros all anonymous pages: the `VM_OBJ_TYPE_DEFAULT` path
 
 ## Phase 3: Filesystem Driver Audit (Minix, FAT, UDF)
 
-### FS-5. UDF — Buffer Overflow in `udf_add_fid` When Directory Grows Past 4096 Bytes — UNRESOLVED
-
-**File:** `sys/fs/udf/udf_write.c` lines 778–798  
-**Severity:** CRITICAL — Kernel Memory Corruption
-
-**Issue:** `udf_add_fid()` uses `static uint8_t dir_buf[4096]` and places the new FID at `dir_buf + dir_size` where `dir_size = (uint32_t)dir_fe->info_length`. No bounds check ensures `dir_size + fid_size <= sizeof(dir_buf)`. When a directory's on-disk size approaches or exceeds 4096, the FID write overflows into kernel BSS.
-
-**Impact:** Creating files in a directory that approaches 4096 bytes corrupts kernel memory.
-
-**Problematic Code:**
-```c
-struct udf_fid *fid = (struct udf_fid *)(dir_buf + dir_size);
-memset(fid, 0, fid_size);
-```
-
-**Fix:** Add bounds check:
-```c
-if (dir_size + fid_size > sizeof(dir_buf)) return -1;
-```
+All Phase 3 findings have been resolved.

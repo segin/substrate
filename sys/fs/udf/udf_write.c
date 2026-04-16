@@ -777,6 +777,12 @@ int udf_add_fid(fs_node_t *dev, struct udf_fe *dir_fe, uint32_t dir_block,
     uint32_t fid_size = 38 + 0 + (name_len + 1);  /* +1 for compression type */
     fid_size = (fid_size + 3) & ~3;  /* Pad to 4 bytes */
     
+    /* Bounds check: ensure FID fits in buffer */
+    if (dir_size + fid_size > sizeof(dir_buf)) {
+        kprint("UDF: Directory full, cannot add entry\n");
+        return -1;
+    }
+    
     /* Create FID at end of directory */
     struct udf_fid *fid = (struct udf_fid *)(dir_buf + dir_size);
     memset(fid, 0, fid_size);
@@ -820,13 +826,17 @@ int udf_remove_fid(fs_node_t *dev, struct udf_fe *dir_fe, uint32_t dir_block,
     dev->read(dev, disk_off, UDF_SECTOR_SIZE, dir_buf);
     
     uint32_t dir_size = (uint32_t)dir_fe->info_length;
+    if (dir_size > sizeof(dir_buf))
+        dir_size = sizeof(dir_buf);
     uint32_t pos = 0;
     
-    while (pos < dir_size) {
+    while (pos + 38 <= dir_size) {
         struct udf_fid *fid = (struct udf_fid *)(dir_buf + pos);
         
         uint32_t fid_size = 38 + fid->impl_use_length + fid->file_id_length;
         fid_size = (fid_size + 3) & ~3;
+        if (fid_size < 40 || pos + fid_size > dir_size)
+            break;
         
         /* Extract and compare name */
         char fname[256];
