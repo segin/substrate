@@ -22,42 +22,6 @@
 
 
 
-### 10. ext2: Block Group Descriptor Table Fixed-Size Array Overflow — UNRESOLVED
-
-**File:** [sys/fs/ext2/ext2.c](sys/fs/ext2/ext2.c#L14-L15)  
-**Severity:** CRITICAL — Heap/BSS Buffer Overflow
-
-**Issue:** `ext2_bgd_table[64]` is a static array of 64 block group descriptors, but `group_count` is derived from the superblock's `s_blocks_count / s_blocks_per_group` with NO bounds check. A crafted ext2 filesystem with >64 block groups causes the BGD read loop to write past the array, corrupting adjacent BSS data.
-
-**Problematic Code:**
-```c
-static ext2_group_desc_t ext2_bgd_table[64]; // Max 64 block groups
-
-// Mount code:
-ext2_fs.group_count = (ext2_fs.sb.s_blocks_count + ext2_fs.blocks_per_group - 1) / ext2_fs.blocks_per_group;
-// No check: if (ext2_fs.group_count > 64) ...
-
-uint32_t bgd_size = ext2_fs.group_count * sizeof(ext2_group_desc_t);
-for (uint32_t i = 0; i < bgd_blocks && i < 2; i++) {
-    ext2_read_block(&ext2_fs, bgd_block + i,
-                   ((uint8_t *)ext2_bgd_table) + i * ext2_fs.block_size);
-    // Writes up to 2 * block_size bytes into 64-entry array
-}
-```
-
-**Impact:** BSS corruption from crafted filesystem image. Could be exploited via USB drive or disk image mount.
-
-**Fix:**
-```c
-if (ext2_fs.group_count > 64) {
-    kprint("EXT2: Too many block groups (%u > 64)\n", ext2_fs.group_count);
-    return NULL;
-}
-```
-
----
-
-
 
 ## HIGH SEVERITY ISSUES
 

@@ -1026,6 +1026,10 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
         return NULL;
     }
     ext2_fs.group_count = (ext2_fs.sb.s_blocks_count + ext2_fs.blocks_per_group - 1) / ext2_fs.blocks_per_group;
+    if (ext2_fs.group_count > 64) {
+        kprint("EXT2: Too many block groups (> 64)\n");
+        return NULL;
+    }
     ext2_fs.inode_size = (ext2_fs.sb.s_rev_level >= 1) ? ext2_fs.sb.s_inode_size : EXT2_GOOD_OLD_INODE_SIZE;
 
     // Validate inode_size is non-zero and fits within a block
