@@ -1693,7 +1693,9 @@ static int run_ld(const cc_opts_t *o, const strvec_t *objs, const char *out) {
   char crtend[PATH_MAX];
   char crtn[PATH_MAX];
   char libc_path[PATH_MAX];
+  char libc_nonshared[PATH_MAX];
   char libm_path[PATH_MAX];
+  char libmvec_path[PATH_MAX];
   char libgcc[PATH_MAX];
   const int want_default_runtime =
       !o->shared && !o->nostdlib && !o->nodefaultlibs;
@@ -1721,12 +1723,16 @@ static int run_ld(const cc_opts_t *o, const strvec_t *objs, const char *out) {
         gcc_print_runtime_file("crtend.o", o->target, crtend) != 0 ||
         gcc_print_runtime_file("crtn.o", o->target, crtn) != 0 ||
         gcc_print_runtime_file("libc.so.6", o->target, libc_path) != 0 ||
+        gcc_print_runtime_file("libc_nonshared.a", o->target, libc_nonshared) != 0 ||
         gcc_print_runtime_file("libm.so.6", o->target, libm_path) != 0 ||
         gcc_print_libgcc(o->target, libgcc) != 0) {
       fprintf(stderr,
               "cc: failed to discover runtime crt/libgcc paths via gcc\n");
       free(argv);
       return -1;
+    }
+    if (gcc_print_runtime_file("libmvec.so.1", o->target, libmvec_path) != 0) {
+      libmvec_path[0] = '\0';
     }
     argv[at++] = "-dynamic-linker";
     argv[at++] = o->target == CC_TARGET_I386 ? "/lib/ld-linux.so.2"
@@ -1745,7 +1751,11 @@ static int run_ld(const cc_opts_t *o, const strvec_t *objs, const char *out) {
   }
   if (want_default_runtime) {
     argv[at++] = libc_path;
+    argv[at++] = libc_nonshared;
     argv[at++] = libm_path;
+    if (libmvec_path[0] != '\0') {
+      argv[at++] = libmvec_path;
+    }
     argv[at++] = libgcc;
     argv[at++] = crtend;
     argv[at++] = crtn;

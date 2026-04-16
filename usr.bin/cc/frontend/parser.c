@@ -509,6 +509,8 @@ static uint64_t parser_const_unsigned_value(const parser_t *p, uint64_t bits, cc
 static int64_t parser_const_signed_value(const parser_t *p, uint64_t bits, cc_type_t t, int struct_id);
 static uint64_t parser_const_cast_value_bits(const parser_t *p, uint64_t src_bits, cc_type_t src_type, int src_struct_id,
                                              cc_type_t dst_type, int dst_struct_id, int *ok);
+static int parser_const_cast_expr_value(const parser_t *p, const parser_const_value_t *src, cc_type_t dst_type,
+                                        int dst_struct_id, parser_const_value_t *out);
 
 static int parser_push_hoisted_func(parser_t *p, const cc_function_t *f) {
     cc_function_t *next;
@@ -1232,6 +1234,22 @@ static uint64_t parser_const_cast_value_bits(const parser_t *p, uint64_t src_bit
         *ok = 1;
     }
     return parser_const_mask_bits(p, raw, dst_type, dst_struct_id);
+}
+
+static int parser_const_cast_expr_value(const parser_t *p, const parser_const_value_t *src, cc_type_t dst_type,
+                                        int dst_struct_id, parser_const_value_t *out) {
+    int ok = 0;
+
+    if (src == NULL || out == NULL) {
+        return -1;
+    }
+    out->bits = parser_const_cast_value_bits(p, src->bits, src->type, src->struct_id, dst_type, dst_struct_id, &ok);
+    if (!ok) {
+        return -1;
+    }
+    out->type = dst_type;
+    out->struct_id = dst_struct_id;
+    return 0;
 }
 
 static cc_type_t parser_const_result_type(parser_t *p, const cc_expr_t *e) {
@@ -4159,12 +4177,26 @@ static int eval_const_expr_value(parser_t *p, const cc_expr_t *e, parser_const_v
                  ? parser_const_unsigned_value(p, cond.bits, cond.type, cond.struct_id)
                  : (uint64_t)parser_const_signed_value(p, cond.bits, cond.type, cond.struct_id)) != 0) {
             if (e->rhs == NULL) {
-                *out = cond;
+                if (parser_const_cast_expr_value(p, &cond, e->value_type, e->struct_id, out) != 0) {
+                    return -1;
+                }
                 return 0;
             }
-            return eval_const_expr_value(p, e->rhs, out);
+            if (eval_const_expr_value(p, e->rhs, out) != 0) {
+                return -1;
+            }
+            if (parser_const_cast_expr_value(p, out, e->value_type, e->struct_id, out) != 0) {
+                return -1;
+            }
+            return 0;
         }
-        return eval_const_expr_value(p, e->third, out);
+        if (eval_const_expr_value(p, e->third, out) != 0) {
+            return -1;
+        }
+        if (parser_const_cast_expr_value(p, out, e->value_type, e->struct_id, out) != 0) {
+            return -1;
+        }
+        return 0;
     default:
         return -1;
     }

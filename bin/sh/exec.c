@@ -1897,7 +1897,7 @@ static int execute_simple_command(ast_simple_command_t *cmd, exec_info_t *info) 
 
             if (WIFSTOPPED(wait_status)) {
                 job_mark_process_status(pid, wait_status);
-                job->notified = 0;
+                job->notified = 1;
                 printf("\n[%d]+ Stopped\t%s\n", job->id, job->command);
             } else {
                 job_free(job);

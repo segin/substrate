@@ -98,34 +98,11 @@ static long parse_env_long(const char *s, long fallback) {
 }
 
 static int as_set_env_owned(const char *name, const char *value) {
-    size_t nlen;
-    size_t vlen;
-    char *entry;
-
     if (name == NULL || value == NULL) {
         errno = EINVAL;
         return -1;
     }
-    if (setenv(name, value, 1) == 0) {
-        return 0;
-    }
-
-    nlen = strlen(name);
-    vlen = strlen(value);
-    entry = (char *)malloc(nlen + 1 + vlen + 1);
-    if (entry == NULL) {
-        return -1;
-    }
-    memcpy(entry, name, nlen);
-    entry[nlen] = '=';
-    memcpy(entry + nlen + 1, value, vlen + 1);
-    if (putenv(entry) != 0) {
-        int saved = errno;
-        free(entry);
-        errno = saved;
-        return -1;
-    }
-    return 0;
+    return setenv(name, value, 1);
 }
 
 static int toolchain_guard_enter(const char *tool) {

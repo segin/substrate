@@ -560,6 +560,7 @@ double atof(const char *nptr) {
 }
 
 extern char **environ;
+static int environ_owned = 0;
 
 char *getenv(const char *name) {
     if (!name || !environ) return NULL;
@@ -604,10 +605,23 @@ int setenv(const char *name, const char *value, int overwrite) {
         }
     }
 
-    char **new_env = realloc(environ, (count + 2) * sizeof(char *));
-    if (!new_env) {
-        errno = ENOMEM;
-        return -1;
+    char **new_env;
+    if (environ_owned) {
+        new_env = realloc(environ, (count + 2) * sizeof(char *));
+        if (!new_env) {
+            errno = ENOMEM;
+            return -1;
+        }
+    } else {
+        new_env = malloc((count + 2) * sizeof(char *));
+        if (!new_env) {
+            errno = ENOMEM;
+            return -1;
+        }
+        for (size_t i = 0; i < count; ++i) {
+            new_env[i] = environ[i];
+        }
+        environ_owned = 1;
     }
     environ = new_env;
 

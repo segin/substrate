@@ -723,8 +723,7 @@ static int proc_generate_status(char *b, size_t s, process_t *proc) {
         }
     }
 
-    struct personality *pers = perso_lookup(current_process->perso_id);
-    if (pers && strcmp(pers->name, "Linux") == 0) {
+    if (proc->perso_id == PERS_LINUX) {
         return snprintf(b, s,
             "Name:\t%s\n"
             "State:\tR (running)\n"

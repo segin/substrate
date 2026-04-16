@@ -849,7 +849,42 @@ static elf_err_t merge_relocations(elf_link_plan_t *plan, elfobj_t *out,
                 continue;
             }
         }
-        if (r->symbol->name == NULL || r->symbol->name[0] == '\0') {
+        if (r->symbol->bind == STB_LOCAL) {
+            char local_name[160];
+            uint64_t local_value = r->symbol->value;
+            uint16_t local_shndx = r->symbol->shndx;
+            uint8_t local_type = r->symbol->type;
+            size_t sym_src_sec = 0;
+
+            if (resolve_src_sec_index(input->obj, r->symbol->shndx, &sym_src_sec)) {
+                struct elf_section *src_sym_sec = input->obj->sections[sym_src_sec];
+                struct elf_section *dst_sym_sec;
+
+                if (src_sym_sec == NULL || !sec_included[sym_src_sec]) {
+                    continue;
+                }
+                dst_sym_sec = elf_find_section(out, src_sym_sec->name);
+                if (dst_sym_sec == NULL) {
+                    continue;
+                }
+                if (!elf__u64_add(r->symbol->value, sec_bases[sym_src_sec], &local_value)) {
+                    return ELF_ERR_BOUNDS;
+                }
+                local_shndx = (uint16_t)(dst_sym_sec->index + 1);
+            }
+
+            if (snprintf(local_name, sizeof(local_name), "__elfobj_local_%zu_%u_%zu",
+                         input_index, (unsigned)r->symbol->index, i) < 0) {
+                return ELF_ERR_STATE;
+            }
+            dst_sym = elf_add_symbol(out, local_name, local_value, r->symbol->size, STB_LOCAL, local_type);
+            if (dst_sym == NULL) {
+                return out->last_err == ELF_OK ? ELF_ERR_OOM : out->last_err;
+            }
+            dst_sym->other = r->symbol->other;
+            dst_sym->shndx = local_shndx;
+            dst_sym->ver_index = r->symbol->ver_index;
+        } else if (r->symbol->name == NULL || r->symbol->name[0] == '\0') {
             char anon_name[96];
             uint64_t anon_value = r->symbol->value;
             uint16_t anon_shndx = r->symbol->shndx;

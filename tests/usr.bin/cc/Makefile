@@ -125,6 +125,8 @@ test:
 	/tmp/cc_native_c99_typedef_fnptr
 	$(TOP)/usr.bin/cc/cc native_c99_typedef_fnptr_retptr.c -o /tmp/cc_native_c99_typedef_fnptr_retptr
 	/tmp/cc_native_c99_typedef_fnptr_retptr
+	$(TOP)/usr.bin/cc/cc native_c99_indirect_call_deref.c -o /tmp/cc_native_c99_indirect_call_deref
+	/tmp/cc_native_c99_indirect_call_deref
 	$(TOP)/usr.bin/cc/cc native_c99_grouped_fn_param_decay.c -o /tmp/cc_native_c99_grouped_fn_param_decay
 	/tmp/cc_native_c99_grouped_fn_param_decay
 	$(TOP)/usr.bin/cc/cc native_c99_attr_codegen.c -o /tmp/cc_native_c99_attr_codegen

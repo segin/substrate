@@ -2,13 +2,14 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
+TEST_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 CC_BIN="$ROOT/usr.bin/cc/cc"
 INC_DIR="-I$ROOT/include"
 
-"$CC_BIN" -std=gnu11 $INC_DIR native_c99_simd_intrinsics.c -o /tmp/cc_native_c99_simd_intrinsics
+"$CC_BIN" -std=gnu11 $INC_DIR "$TEST_DIR/native_c99_simd_intrinsics.c" -o /tmp/cc_native_c99_simd_intrinsics
 /tmp/cc_native_c99_simd_intrinsics
 
-"$CC_BIN" -std=gnu11 -m32 $INC_DIR -c native_c99_simd_intrinsics.c -o /tmp/cc_native_c99_simd_intrinsics_32.o
+"$CC_BIN" -std=gnu11 -m32 $INC_DIR -c "$TEST_DIR/native_c99_simd_intrinsics.c" -o /tmp/cc_native_c99_simd_intrinsics_32.o
 file /tmp/cc_native_c99_simd_intrinsics_32.o | grep -q "ELF 32-bit"
 
 cat > /tmp/cc_simd_macro_probe.c <<'EOF'
@@ -68,3 +69,25 @@ int probe(void) {
 EOF
 
 "$CC_BIN" -std=gnu11 -c /tmp/cc_host_x86intrin_target.c -o /tmp/cc_host_x86intrin_target.o
+
+cat > /tmp/cc_host_x86intrin_avx2.c <<'EOF'
+#include <x86intrin.h>
+int probe(void) {
+	__m256i matches = _mm256_setzero_si256();
+	matches = _mm256_cmpeq_epi8(matches, _mm256_set1_epi8(0));
+	return _mm256_movemask_epi8(matches);
+}
+EOF
+
+"$CC_BIN" -std=gnu11 -mavx2 -c /tmp/cc_host_x86intrin_avx2.c -o /tmp/cc_host_x86intrin_avx2.o
+
+cat > /tmp/cc_host_x86intrin_avx512.c <<'EOF'
+#include <x86intrin.h>
+int probe(void) {
+	__m512i matches = _mm512_setzero_si512();
+	__m512i nl = _mm512_set1_epi8('\n');
+	return (int)_mm512_cmpeq_epi8_mask(matches, nl);
+}
+EOF
+
+"$CC_BIN" -std=gnu11 -mavx512bw -mavx512f -c /tmp/cc_host_x86intrin_avx512.c -o /tmp/cc_host_x86intrin_avx512.o

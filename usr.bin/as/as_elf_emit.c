@@ -2879,7 +2879,7 @@ static int is_rel_mnemonic(const char *mn) {
     return 0;
 }
 
-static int is_short_rel_mnemonic(const char *mn) {
+static int is_fixed_short_rel_mnemonic(const char *mn) {
     if (mn == NULL || mn[0] == '\0') {
         return 0;
     }
@@ -8701,6 +8701,7 @@ static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigne
     in.mnemonic = mnbuf;
     in.default_bits = cfg->is_64 ? 64u : (cfg->x86_code_bits == 16u ? 16u : 32u);
     in.rel_is_disp = (cfg->x86_rel_is_disp != 0);
+    in.force_rel32 = 0u;
     in.has_section_offset = (cfg->have_current_text_offset != 0);
     in.section_offset = cfg->current_text_offset;
     in.seg_override = map_seg(st->u.instr.segment_override);
@@ -8727,6 +8728,12 @@ static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigne
         in.operand_size_override = (in.default_bits == 16u);
     } else if (suffix == 'q') {
         in.rex_w = 1;
+    }
+
+    if (st->u.instr.operand_count == 1 &&
+        is_rel_mnemonic(st->u.instr.mnemonic) &&
+        !is_fixed_short_rel_mnemonic(st->u.instr.mnemonic)) {
+        in.force_rel32 = 1u;
     }
 
     if (!intel_syntax && in.op_count == 2) {
@@ -9138,7 +9145,15 @@ static int encode_x86_stmt_for_layout(emit_ctx_t *ctx, const char *section_name,
 
         if ((op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) &&
             op->u.expr != NULL &&
-            !expr_is_local_temp_symbol(op->u.expr) &&
+            op->kind == AS_OPERAND_LABEL_REF &&
+            !is_fixed_short_rel_mnemonic(st->u.instr.mnemonic)) {
+            stmt_cfg.have_current_text_offset = 0u;
+            stmt_cfg.current_text_offset = 0u;
+        }
+
+        if ((op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) &&
+            op->u.expr != NULL &&
+            (!expr_is_local_temp_symbol(op->u.expr) || is_fixed_short_rel_mnemonic(st->u.instr.mnemonic)) &&
             eval_local_rel_expr_virtual(ctx, section_name, st, sec_off, x86_code_bits, op->u.expr, &disp) == 0) {
             as_stmt_t tmp = *st;
             as_instruction_t tin = st->u.instr;
@@ -11066,7 +11081,7 @@ static uint32_t default_text_reloc_type(unsigned machine, const as_instruction_t
     if (machine == EM_386) {
         if (op != NULL && (op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) &&
             in != NULL && is_rel_mnemonic(in->mnemonic)) {
-            if (is_short_rel_mnemonic(in->mnemonic)) {
+            if (is_fixed_short_rel_mnemonic(in->mnemonic)) {
                 return R_386_PC8;
             }
             if (streq_ci(in->mnemonic, "call")) {
@@ -11079,7 +11094,7 @@ static uint32_t default_text_reloc_type(unsigned machine, const as_instruction_t
     if (machine == EM_X86_64) {
         if (op != NULL && (op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) &&
             in != NULL && is_rel_mnemonic(in->mnemonic)) {
-            if (is_short_rel_mnemonic(in->mnemonic)) {
+            if (is_fixed_short_rel_mnemonic(in->mnemonic)) {
                 return R_X86_64_PC8;
             }
             if (streq_ci(in->mnemonic, "call")) {
@@ -11114,6 +11129,17 @@ static void adjust_x86_rel_reloc_to_encoding(unsigned machine, const as_instruct
         (code[0] == 0xeb || (code[0] >= 0x70 && code[0] <= 0x7f) || (code[0] >= 0xe0 && code[0] <= 0xe3))) {
         *type = (machine == EM_X86_64) ? R_X86_64_PC8 : R_386_PC8;
         *width = 1;
+        return;
+    }
+
+    if ((code_len == 5 && (code[0] == 0xe8 || code[0] == 0xe9)) ||
+        (code_len == 6 && code[0] == 0x0f && (code[1] & 0xf0) == 0x80)) {
+        if (machine == EM_X86_64) {
+            *type = streq_ci(in->mnemonic, "call") ? R_X86_64_PLT32 : R_X86_64_PC32;
+        } else {
+            *type = streq_ci(in->mnemonic, "call") ? R_386_PLT32 : R_386_PC32;
+        }
+        *width = 4;
         return;
     }
 
@@ -11263,7 +11289,8 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     }
                     if (expr_is_local_temp_symbol(e) &&
                         (op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) &&
-                        is_rel_mnemonic(st->u.instr.mnemonic)) {
+                        is_rel_mnemonic(st->u.instr.mnemonic) &&
+                        !is_fixed_short_rel_mnemonic(st->u.instr.mnemonic)) {
                         skip_local_resolve = 1;
                     }
                     if (!skip_local_resolve &&

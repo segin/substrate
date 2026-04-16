@@ -1133,14 +1133,16 @@ static int encode_jcc_rel32(enc_ctx_t *ctx, const char *mnemonic, int32_t rel_ta
                 }
                 return 0;
             }
-            if (resolve_rel_target(ctx, rel_target, 2u, &disp) != 0) {
-                return -1;
-            }
-            if (disp >= -128 && disp <= 127) {
-                if (emit8(ctx, (uint8_t)(0x70 | map[i].cc)) != 0 || emit8(ctx, (uint8_t)((signed char)disp)) != 0) {
+            if (!ctx->insn->force_rel32) {
+                if (resolve_rel_target(ctx, rel_target, 2u, &disp) != 0) {
                     return -1;
                 }
-                return 0;
+                if (disp >= -128 && disp <= 127) {
+                    if (emit8(ctx, (uint8_t)(0x70 | map[i].cc)) != 0 || emit8(ctx, (uint8_t)((signed char)disp)) != 0) {
+                        return -1;
+                    }
+                    return 0;
+                }
             }
             near_bits = (ctx->insn != NULL && ctx->insn->default_bits == 16u) ? 16u : 32u;
             near_len = near_bits == 16u ? 4u : 6u;
@@ -1728,7 +1730,7 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
     } else if (streq_ci(insn->mnemonic, "jmp")) {
         if (insn->op_count == 1 && a->kind == AS_X86_OP_REL) {
             unsigned rel_bits = effective_i386_operand_bits(insn);
-            if (insn->byte_op && (insn->rel_is_disp || !insn->has_section_offset)) {
+            if (insn->byte_op && !insn->force_rel32 && (insn->rel_is_disp || !insn->has_section_offset)) {
                 long long disp;
 
                 if (resolve_rel_target(&ctx, a->u.rel, 2u, &disp) != 0) {
@@ -4515,7 +4517,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         }
     } else if (streq_ci(insn->mnemonic, "jmp")) {
         if (insn->op_count == 1 && a->kind == AS_X86_OP_REL) {
-            if (insn->byte_op && (insn->rel_is_disp || !insn->has_section_offset)) {
+            if (insn->byte_op && !insn->force_rel32 && (insn->rel_is_disp || !insn->has_section_offset)) {
                 long long disp;
 
                 if (resolve_rel_target(&ctx, a->u.rel, 2u, &disp) != 0) {

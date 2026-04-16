@@ -22,6 +22,18 @@ typedef struct __attribute__((aligned(32))) {
 	double d[4];
 } __m256d;
 
+typedef struct __attribute__((aligned(64))) {
+	int64_t q[8];
+} __m512i;
+
+typedef struct __attribute__((aligned(64))) {
+	float f[16];
+} __m512;
+
+typedef struct __attribute__((aligned(64))) {
+	double d[8];
+} __m512d;
+
 typedef union {
 	__m256i v;
 	uint8_t u8[32];
@@ -33,6 +45,45 @@ typedef union {
 	uint64_t u64[4];
 	int64_t i64[4];
 } __m256i_u;
+
+typedef union {
+	__m512i v;
+	uint8_t u8[64];
+	int8_t i8[64];
+	uint16_t u16[32];
+	int16_t i16[32];
+	uint32_t u32[16];
+	int32_t i32[16];
+	uint64_t u64[8];
+	int64_t i64[8];
+} __m512i_u;
+
+typedef unsigned long long __mmask64;
+
+static __inline__ __m512i __substrate_mm512_set_epi64_impl(const long long vals[8]) {
+	__m512i_u r;
+	int i;
+	for(i=0;i<8;i++) r.i64[i] = vals[7 - i];
+	return(r.v);
+}
+
+static __inline__ __m512i __substrate_mm512_set_epi32_impl(const int vals[16]) {
+	__m512i_u r;
+	int i;
+	for(i=0;i<16;i++) r.i32[i] = vals[15 - i];
+	return(r.v);
+}
+
+static __inline__ __m512i __substrate_mm512_set_epi8_impl(const signed char vals[64]) {
+	__m512i_u r;
+	int i;
+	for(i=0;i<64;i++) r.i8[i] = vals[63 - i];
+	return(r.v);
+}
+
+#define _mm512_set_epi64(...) __substrate_mm512_set_epi64_impl((const long long[8]){__VA_ARGS__})
+#define _mm512_set_epi32(...) __substrate_mm512_set_epi32_impl((const int[16]){__VA_ARGS__})
+#define _mm512_set_epi8(...) __substrate_mm512_set_epi8_impl((const signed char[64]){__VA_ARGS__})
 
 static __inline__ void __substrate_clmul64(uint64_t x, uint64_t y, uint64_t *lo, uint64_t *hi) {
 	uint64_t rlo = 0;
@@ -79,6 +130,13 @@ static __inline__ __m256i _mm256_set1_epi32(int x) {
 	__m256i_u r;
 	int i;
 	for(i=0;i<8;i++) r.i32[i] = x;
+	return(r.v);
+}
+
+static __inline__ __m256i _mm256_set1_epi8(char x) {
+	__m256i_u r;
+	int i;
+	for(i=0;i<32;i++) r.i8[i] = x;
 	return(r.v);
 }
 
@@ -231,6 +289,26 @@ static __inline__ __m256i _mm256_cmpeq_epi32(__m256i a, __m256i b) {
 	return(r.v);
 }
 
+static __inline__ __m256i _mm256_cmpeq_epi8(__m256i a, __m256i b) {
+	__m256i_u ua, ub, r;
+	int i;
+	ua.v = a;
+	ub.v = b;
+	for(i=0;i<32;i++) r.u8[i] = (ua.i8[i] == ub.i8[i]) ? 0xffu : 0u;
+	return(r.v);
+}
+
+static __inline__ int _mm256_movemask_epi8(__m256i a) {
+	__m256i_u ua;
+	unsigned int mask = 0u;
+	int i;
+	ua.v = a;
+	for(i=0;i<32;i++) {
+		if((ua.u8[i] & 0x80u) != 0) mask |= 1u << i;
+	}
+	return((int)mask);
+}
+
 static __inline__ __m128i _mm_shuffle_epi8(__m128i a, __m128i mask) {
 	__m128i_u ua, um, r;
 	int i;
@@ -284,6 +362,93 @@ static __inline__ __m128i _mm256_castsi256_si128(__m256i a) {
 	r.i64[0] = ua.i64[0];
 	r.i64[1] = ua.i64[1];
 	return(r.v);
+}
+
+static __inline__ __m512i _mm512_setzero_si512(void) {
+	__m512i_u r;
+	int i;
+	for(i=0;i<8;i++) r.u64[i] = 0u;
+	return(r.v);
+}
+
+static __inline__ __m512i _mm512_set1_epi8(char x) {
+	__m512i_u r;
+	int i;
+	for(i=0;i<64;i++) r.i8[i] = x;
+	return(r.v);
+}
+
+static __inline__ __m512i _mm512_loadu_si512(const __m512i *p) {
+	return(*p);
+}
+
+static __inline__ __m512i _mm512_load_si512(const __m512i *p) {
+	return(*p);
+}
+
+static __inline__ void _mm512_storeu_si512(__m512i *p, __m512i a) {
+	*p = a;
+}
+
+static __inline__ void _mm512_store_si512(__m512i *p, __m512i a) {
+	*p = a;
+}
+
+static __inline__ __m512i _mm512_xor_si512(__m512i a, __m512i b) {
+	__m512i_u ua, ub, r;
+	int i;
+	ua.v = a;
+	ub.v = b;
+	for(i=0;i<8;i++) r.u64[i] = ua.u64[i] ^ ub.u64[i];
+	return(r.v);
+}
+
+static __inline__ __m512i _mm512_shuffle_epi8(__m512i a, __m512i mask) {
+	__m512i_u ua, um, r;
+	int lane, i;
+	ua.v = a;
+	um.v = mask;
+	for(lane=0;lane<4;lane++) {
+		int base = lane * 16;
+		for(i=0;i<16;i++) {
+			unsigned char sel = um.u8[base + i];
+			if((sel & 0x80u) != 0) {
+				r.u8[base + i] = 0u;
+			} else {
+				r.u8[base + i] = ua.u8[base + (sel & 0x0fu)];
+			}
+		}
+	}
+	return(r.v);
+}
+
+static __inline__ __m512i _mm512_clmulepi64_epi128(__m512i a, __m512i b, const int imm8) {
+	__m512i_u ua, ub, r;
+	unsigned lane;
+	ua.v = a;
+	ub.v = b;
+	for(lane=0; lane<4; lane++) {
+		uint64_t lo, hi;
+		unsigned base = lane * 2u;
+		unsigned sa = (((unsigned)imm8 & 0x10u) ? 1u : 0u) + base;
+		unsigned sb = (((unsigned)imm8 & 0x01u) ? 1u : 0u) + base;
+		__substrate_clmul64(ua.u64[sa], ub.u64[sb], &lo, &hi);
+		r.u64[base + 0u] = lo;
+		r.u64[base + 1u] = hi;
+	}
+	return(r.v);
+}
+
+static __inline__ __mmask64 _mm512_cmpeq_epi8_mask(__m512i a, __m512i b) {
+	__m512i_u ua, ub;
+	__mmask64 mask = 0u;
+	int i;
+	ua.v = a;
+	ub.v = b;
+	for(i=0;i<64;i++) {
+		if(ua.i8[i] == ub.i8[i]) mask |= ((__mmask64)1u) << i;
+	}
+	return(mask);
 }
 
 static __inline__ unsigned long long _lzcnt_u64(unsigned long long x) {
