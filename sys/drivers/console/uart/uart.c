@@ -52,6 +52,7 @@ int uart_received(void);
 
 /* TX output buffer */
 #define UART_TX_BUF_SIZE    256
+#define UART_TX_SPIN_LIMIT  100000U
 
 static struct {
     uint8_t buf[UART_TX_BUF_SIZE];
@@ -130,6 +131,19 @@ static int uart_port_is_transmit_empty(uint16_t port) {
     return inb(port + 5) & 0x20;
 }
 
+static int uart_poll_putc(uint16_t port, uint8_t byte, uint32_t max_spins) {
+    uint32_t spins = 0;
+
+    while (!uart_port_is_transmit_empty(port)) {
+        if (++spins > max_spins) {
+            return 0;
+        }
+    }
+
+    outb(port + 0, byte);
+    return 1;
+}
+
 static size_t uart_node_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)offset;
     uint16_t port = uart_node_port(node);
@@ -151,13 +165,10 @@ static size_t uart_node_write(fs_node_t *node, off_t offset, size_t size, const 
     size_t count = 0;
 
     while (count < size) {
-        uint32_t spins = 0;
-        while (!uart_port_is_transmit_empty(port)) {
-            if (++spins > 100000) {
-                return count;
-            }
+        if (!uart_poll_putc(port, buffer[count], UART_TX_SPIN_LIMIT)) {
+            return count;
         }
-        outb(port + 0, buffer[count++]);
+        count++;
     }
 
     return count;
@@ -425,11 +436,18 @@ static void uart_tx_drain(void) {
  * Falls back to polling if the buffer is full.
  */
 static void uart_tx_enqueue(uint8_t byte) {
-    if (uart_tx.count >= UART_TX_BUF_SIZE) {
-        /* Buffer full — poll-wait and send directly */
-        while (!(inb(uart_base_port + 5) & UART_LSR_THRE))
-            ;
+    uart_tx_drain();
+
+    if (uart_tx.count == 0 && !uart_tx.xoff_held &&
+        uart_port_is_transmit_empty(uart_base_port)) {
         outb(uart_base_port + 0, byte);
+        return;
+    }
+
+    if (uart_tx.count >= UART_TX_BUF_SIZE) {
+        if (!uart_tx.xoff_held) {
+            (void)uart_poll_putc(uart_base_port, byte, UART_TX_SPIN_LIMIT);
+        }
         return;
     }
     uart_tx.buf[uart_tx.head] = byte;
