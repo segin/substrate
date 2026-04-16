@@ -8,11 +8,11 @@
 
 | Severity | Count | Resolved |
 |----------|-------|----------|
-| CRITICAL | 21 | 1 |
+| CRITICAL | 18 | 1 |
 | HIGH     | 11 | 0 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **47** | **1** |
+| **Total** | **44** | **1** |
 
 ---
 
@@ -471,60 +471,7 @@ if (copyin(t->robust_list, &khead, sizeof(khead)) != 0) {
 
 ---
 
-### 17. procfs_generic_read() Kernel Stack Over-Read on Allocation Failure — UNRESOLVED
-
-**File:** [sys/fs/procfs.c](sys/fs/procfs.c#L673-L700)  
-**Severity:** CRITICAL — Arbitrary Kernel Stack Disclosure
-
-**Issue:** `procfs_generic_read()` generates content into a 1024-byte stack buffer `tmp`. When the generator output exceeds 1024 bytes (returns `len >= 1024`), the code attempts `kmalloc(len + 1)` for a larger buffer. If `kmalloc` fails (OOM), `buf` remains pointing to the 1024-byte stack buffer but `len` retains its original value (>1024). The subsequent `memcpy(buffer, buf + offset, read_len)` reads `len - 1024` bytes past the end of `tmp`, copying kernel stack contents (return addresses, saved registers, local variables) into the userspace buffer.
-
-Compare with `proc_pid_status_read()` (line ~791) and `proc_pid_stat_read()` (line ~859), which correctly clamp `len` on allocation failure.
-
-**Problematic Code:**
-```c
-char tmp[1024];
-uint32_t len = entry->generator(tmp, sizeof(tmp), entry->opaque);
-char *buf = tmp;
-
-if (len >= sizeof(tmp)) {
-    alloc_size = len + 1;
-    alloc_buf = kmalloc(alloc_size);
-    if (alloc_buf) {
-        len = entry->generator(alloc_buf, alloc_size, entry->opaque);
-        buf = alloc_buf;
-    }
-    // BUG: no else — len stays > 1024, buf stays = tmp
-}
-
-if (offset < len) {
-    read_len = size;
-    if (offset + read_len > len)
-        read_len = len - offset;
-    memcpy(buffer, buf + offset, read_len);  // reads past tmp[1024]
-}
-```
-
-**Triggerable generators:** `gen_mounts` (many mount points), `gen_ioports`/`gen_iomem` (many hardware resources), any driver-registered generator with large output. OOM can be induced by an attacker exhausting available memory.
-
-**Impact:** Kernel stack data (return addresses defeating KASLR, local variables, potentially credentials) leaked to userspace via `/proc/mounts`, `/proc/ioports`, etc.
-
-**Fix:**
-```c
-if (len >= sizeof(tmp)) {
-    alloc_size = len + 1;
-    alloc_buf = kmalloc(alloc_size);
-    if (alloc_buf) {
-        len = entry->generator(alloc_buf, alloc_size, entry->opaque);
-        buf = alloc_buf;
-    } else {
-        len = sizeof(tmp) - 1;  // Clamp to actual buffer size
-    }
-}
-```
-
----
-
-### 18. procfs /proc/<pid>/fd/ World-Readable — No Per-Process Access Controls — UNRESOLVED
+### 17. procfs /proc/<pid>/fd/ World-Readable — No Per-Process Access Controls — UNRESOLVED
 
 **File:** [sys/fs/procfs.c](sys/fs/procfs.c#L520-L571)  
 **Severity:** CRITICAL — Information Disclosure Enabling Privilege Escalation
@@ -1009,17 +956,16 @@ The page fault handler zeros all anonymous pages: the `VM_OBJ_TYPE_DEFAULT` path
 6. **#15** — `kern_chroot` no privilege check + Linux personality copyin bypass — compound vulnerability
 7. **#5** — ELF integer overflow — local privilege escalation via crafted binary
 8. **#11** — ELF no setuid/setgid — all privilege-elevation binaries broken
-9. **#17** — procfs_generic_read stack over-read — kernel stack disclosure under OOM
-10. **#7, #8** — pmap_fork TLB / deferred shootdown races — SMP memory corruption
-11. **#9, #10** — VirtIO 9P DMA / ext2 BGD overflow — device and filesystem corruption
-12. **#18** — procfs /proc/pid/fd world-readable — information disclosure enabling priv-esc
-13. **#21** — `sys_get_robust_list()` arbitrary kernel write
-14. **#19, #20** — Mutex/vm_object races — crash under load
-15. **#29** — `sys_acct` no permission check — audit trail manipulation
-16. **#22** — Fork ordering — zombie leaks
-17. **#24** — sysctl_init SMP race — boot corruption
-18. **#27, #28** — VFS vnode/mount races
-19. Everything else in severity order
+9. **#7, #8** — pmap_fork TLB / deferred shootdown races — SMP memory corruption
+10. **#9, #10** — VirtIO 9P DMA / ext2 BGD overflow — device and filesystem corruption
+11. **#17** — procfs /proc/pid/fd world-readable — information disclosure enabling priv-esc
+12. **#21** — `sys_get_robust_list()` arbitrary kernel write
+13. **#19, #20** — Mutex/vm_object races — crash under load
+14. **#29** — `sys_acct` no permission check — audit trail manipulation
+15. **#22** — Fork ordering — zombie leaks
+16. **#24** — sysctl_init SMP race — boot corruption
+17. **#27, #28** — VFS vnode/mount races
+18. Everything else in severity order
 
 ---
 

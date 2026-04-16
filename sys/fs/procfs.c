@@ -683,6 +683,8 @@ static size_t procfs_generic_read(fs_node_t *node, off_t offset, size_t size, ui
         if (alloc_buf) {
             len = entry->generator(alloc_buf, alloc_size, entry->opaque);
             buf = alloc_buf;
+        } else {
+            len = sizeof(tmp) - 1;
         }
     }
     
