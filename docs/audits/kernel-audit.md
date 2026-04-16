@@ -18,34 +18,6 @@
 
 ## CRITICAL ISSUES
 
-### 1. copyinstr() Missing User Address Validation — UNRESOLVED
-
-**File:** [sys/kern/subr_copy.c](sys/kern/subr_copy.c#L120-L155)  
-**Severity:** CRITICAL — User/Kernel Boundary Information Leak
-
-**Issue:** `copyinstr()` does not call `validate_user_addr()` before entering the byte-copy loop. Both `copyin()` and `copyout()` correctly validate the address range against `KERN_BASE`, but `copyinstr()` only relies on the `on_fault` handler. If a caller passes a kernel-space address (≥ 0xC0000000), the function will happily copy kernel memory byte-by-byte into the destination buffer until a NUL terminator is found, leaking arbitrary kernel data.
-
-**Problematic Code:**
-```c
-int copyinstr(const void *src, void *dst, size_t maxlen, size_t *len) {
-    const char *s = (const char *)src;
-    char *d = (char *)dst;
-    // NO validate_user_addr(src, ...) call!
-    current_thread->on_fault = (uintptr_t)&&fault;
-    for (i = 0; i < maxlen; i++) {
-        char c = *s;  // Reads kernel memory if src >= KERN_BASE
-```
-
-**Impact:** Kernel memory disclosure to userspace. A malicious process can read kernel secrets, credentials, or cryptographic keys.
-
-**Fix:** Add address validation at the top of the function:
-```c
-if (validate_user_addr(src, 1) != 0)
-    return EFAULT;
-```
-
----
-
 ### 2. futex_read_user() / futex_cmpxchg_user() Direct User Pointer Dereference Without Fault Handler — UNRESOLVED
 
 **File:** [sys/kern/futex.c](sys/kern/futex.c#L97-L135)  

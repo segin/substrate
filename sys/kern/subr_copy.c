@@ -124,6 +124,10 @@ int copyinstr(const void *src, void *dst, size_t maxlen, size_t *len) {
     char *d = (char *)dst;
     size_t i;
 
+    /* Reject kernel-space source addresses */
+    if (validate_user_addr(src, 1) != 0)
+        return EFAULT;
+
     /* Set up fault handler */
     current_thread->on_fault = (uintptr_t)&&fault;
 
