@@ -1011,11 +1011,35 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     }
     
     ext2_fs.device = dev;
+
+    // Validate s_log_block_size before shifting (max 64KB blocks, i.e. log=6)
+    if (ext2_fs.sb.s_log_block_size > 6) {
+        kprint("EXT2: Invalid s_log_block_size\n");
+        return NULL;
+    }
     ext2_fs.block_size = 1024 << ext2_fs.sb.s_log_block_size;
+
     ext2_fs.inodes_per_group = ext2_fs.sb.s_inodes_per_group;
     ext2_fs.blocks_per_group = ext2_fs.sb.s_blocks_per_group;
+    if (ext2_fs.blocks_per_group == 0) {
+        kprint("EXT2: Invalid blocks_per_group\n");
+        return NULL;
+    }
     ext2_fs.group_count = (ext2_fs.sb.s_blocks_count + ext2_fs.blocks_per_group - 1) / ext2_fs.blocks_per_group;
     ext2_fs.inode_size = (ext2_fs.sb.s_rev_level >= 1) ? ext2_fs.sb.s_inode_size : EXT2_GOOD_OLD_INODE_SIZE;
+
+    // Validate inode_size is non-zero and fits within a block
+    if (ext2_fs.inode_size == 0 || ext2_fs.inode_size > ext2_fs.block_size) {
+        kprint("EXT2: Invalid inode_size\n");
+        return NULL;
+    }
+
+    // Recreate block cache zone to match actual block_size (may differ from init default)
+    if (ext2_block_cache) {
+        uma_zdestroy(ext2_block_cache);
+    }
+    ext2_block_cache = uma_zcreate("ext2-block", ext2_fs.block_size, NULL, NULL, NULL, NULL, 0, 0);
+
     ext2_fs.bgd = ext2_bgd_table;
     ext2_fs.last_alloc_group = 0;
     ext2_fs.last_alloc_bit = 0;
