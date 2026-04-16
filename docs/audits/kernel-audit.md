@@ -10,9 +10,9 @@
 |----------|-------|----------|
 | CRITICAL | 16 | 16 |
 | HIGH     | 11 | 11 |
-| MEDIUM   | 10 | 2 |
+| MEDIUM   | 10 | 3 |
 | LOW      | 5 | 0 |
-| **Total** | **42** | **29** |
+| **Total** | **42** | **30** |
 
 ---
 
@@ -104,28 +104,6 @@ if (size > KMEM_MAX_ALLOC) return NULL;
 **Issue:** The pipe sleep/wake pattern releases the mutex before yielding and re-acquires after. If a wakeup is delivered between the mutex release and the actual sleep, the thread misses the wakeup and sleeps indefinitely.
 
 **Fix:** Use proper condvar semantics where the sleep is atomic with the mutex release.
-
----
-
-### 36. Request_irq TOCTOU: Gap Between Conflict Check and Insertion — UNRESOLVED
-
-**File:** [sys/kern/irq.c](sys/kern/irq.c#L28-L60)  
-**Severity:** MEDIUM — Race Condition
-
-**Issue:** `request_irq()` checks for conflicts under `irq_lock`, releases the lock, calls `kmalloc()`, then re-acquires the lock to insert. Another CPU could register the same IRQ with conflicting flags in the gap.
-
-**Problematic Code:**
-```c
-spinlock_acquire(&irq_lock);
-// ... check for conflicts ...
-spinlock_release(&irq_lock);   // Gap here!
-action = kmalloc(sizeof(*action));
-spinlock_acquire(&irq_lock);
-action->next = irq_lines[irq]; // Insert without re-checking
-spinlock_release(&irq_lock);
-```
-
-**Fix:** Pre-allocate the action structure, then do the check-and-insert atomically under one lock acquisition.
 
 ---
 
