@@ -9,10 +9,10 @@
 | Severity | Count | Resolved |
 |----------|-------|----------|
 | CRITICAL | 16 | 16 |
-| HIGH     | 11 | 8 |
+| HIGH     | 11 | 9 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **42** | **24** |
+| **Total** | **42** | **25** |
 
 ---
 
@@ -55,17 +55,6 @@ if (__sync_sub_and_fetch(&object->ref_count, 1) == 0) {
 The `request_irq()` function also has a TOCTOU: it checks for conflicts under the lock, releases it, allocates memory, then re-acquires to insert. Another CPU could register the same IRQ in between.
 
 **Fix:** Use RCU-style deferred freeing for irq_action entries, or keep the lock held during handler dispatch (with appropriate nesting considerations).
-
----
-
-### 26. Mount/Unmount Race: Check-Then-Set on v_mountedhere — UNRESOLVED
-
-**File:** [sys/vfs/vfs_mount.c](sys/vfs/vfs_mount.c)  
-**Severity:** HIGH — Data Structure Corruption
-
-**Issue:** Mount checks `vp->v_mountedhere != NULL`, then later sets it. Without holding the vnode lock across both operations, two concurrent mounts on the same vnode could both pass the check and create a corrupted mount state.
-
-**Fix:** Hold `vnode_lock(vp)` from the check through the assignment.
 
 ---
 
