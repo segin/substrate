@@ -296,57 +296,6 @@ if (vnode->v_mode & S_ISGID)
 
 ---
 
-### 13. sys_fchmod() No Permission Check — UNRESOLVED
-
-**File:** [sys/kern/syscall.c](sys/kern/syscall.c#L1667-L1676)  
-**Severity:** CRITICAL — Arbitrary File Permission Modification
-
-**Issue:** `sys_fchmod()` changes the permission mode of any open file descriptor with zero authorization checks. Any unprivileged user with a readable fd can set it to mode `0777` or `04755`.
-
-**Problematic Code:**
-```c
-int sys_fchmod(int fd, int mode) {
-    if (fd < 0 || fd >= MAX_FD) return -EBADF;
-    file_t *f = current_process->fds[fd];
-    if (!f || !f->f_data) return -EBADF;
-    fs_node_t *node = (fs_node_t *)f->f_data;
-    node->mask = (uint32_t)(mode & 07777);  // No owner/capability check
-    return 0;
-}
-```
-
-**Impact:** Any user can make any file world-writable, or add setuid bits. Combined with #14, creates a trivial root shell.
-
-**Fix:** Add `if (current_process->euid != 0 && current_process->euid != node->uid) return -EPERM;`
-
----
-
-### 14. sys_fchown() No Permission Check — Privilege Escalation — UNRESOLVED
-
-**File:** [sys/kern/syscall.c](sys/kern/syscall.c#L1678-L1689)  
-**Severity:** CRITICAL — Arbitrary File Ownership Change / Privilege Escalation
-
-**Issue:** `sys_fchown()` changes uid/gid of any open file descriptor with zero authorization checks. An unprivileged user can `fchown(fd, 0, 0)` to take ownership as root, then `fchmod(fd, 04755)` to create a setuid-root binary.
-
-**Problematic Code:**
-```c
-int sys_fchown(int fd, int uid, int gid) {
-    if (fd < 0 || fd >= MAX_FD) return -EBADF;
-    file_t *f = current_process->fds[fd];
-    if (!f || !f->f_data) return -EBADF;
-    fs_node_t *node = (fs_node_t *)f->f_data;
-    if (uid != -1) node->uid = (uint32_t)uid;  // No privilege check
-    if (gid != -1) node->gid = (uint32_t)gid;  // No privilege check
-    return 0;
-}
-```
-
-**Exploitation chain:** `open("/tmp/exploit", O_CREAT|O_RDWR)` → write shell → `fchown(fd, 0, 0)` → `fchmod(fd, 04755)` → `exec("/tmp/exploit")` → root shell.
-
-**Fix:** Only `euid == 0` may change uid. Non-root owners may only change gid to a group they belong to. Clear setuid/setgid bits on chown by non-root.
-
----
-
 ### 15. kern_chroot() Missing Privilege Check + Linux Personality copyin Bypass — UNRESOLVED
 
 **File:** [sys/kern/syscall.c](sys/kern/syscall.c#L921-L940), [sys/exec/perso/perso_linux.c](sys/exec/perso/perso_linux.c#L910)  

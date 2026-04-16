@@ -1671,6 +1671,15 @@ int sys_fchmod(int fd, int mode) {
     if (!f || !f->f_data) return -EBADF;
 
     fs_node_t *node = (fs_node_t *)f->f_data;
+
+    /* Only root or file owner may change permissions */
+    if (current_process->euid != 0 && current_process->euid != node->uid)
+        return -EPERM;
+
+    /* Non-root callers cannot set setuid/setgid bits */
+    if (current_process->euid != 0)
+        mode &= ~(04000 | 02000);
+
     node->mask = (uint32_t)(mode & 07777);
     return 0;
 }
@@ -1682,8 +1691,22 @@ int sys_fchown(int fd, int uid, int gid) {
     if (!f || !f->f_data) return -EBADF;
 
     fs_node_t *node = (fs_node_t *)f->f_data;
+
+    /* Only root may change file owner */
+    if (uid != -1 && current_process->euid != 0)
+        return -EPERM;
+
+    /* Only root or file owner may change group */
+    if (gid != -1 && current_process->euid != 0 && current_process->euid != node->uid)
+        return -EPERM;
+
     if (uid != -1) node->uid = (uint32_t)uid;
     if (gid != -1) node->gid = (uint32_t)gid;
+
+    /* Clear setuid/setgid bits on chown by non-root (POSIX requirement) */
+    if (current_process->euid != 0)
+        node->mask &= ~(uint32_t)(04000 | 02000);
+
     return 0;
 }
 
