@@ -7,10 +7,11 @@
 typedef struct {
     uint32_t locked;
     uint32_t cpu_id;
+    uint32_t recursion;
     const char *name;
 } spinlock_t;
 
-#define SPINLOCK_INIT(name) { 0, 0xFFFFFFFF, (name) }
+#define SPINLOCK_INIT(name) { 0, 0xFFFFFFFF, 0, (name) }
 
 void spinlock_init(spinlock_t *lock, const char *name);
 void spinlock_acquire(spinlock_t *lock);

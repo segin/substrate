@@ -7,6 +7,7 @@ extern uint32_t lapic_get_id(void);
 void spinlock_init(spinlock_t *lock, const char *name) {
     lock->locked = 0;
     lock->cpu_id = 0xFFFFFFFF;
+    lock->recursion = 0;
     lock->name = name;
 }
 
@@ -14,7 +15,8 @@ void spinlock_acquire(spinlock_t *lock) {
     uint32_t id = lapic_get_id();
 
     if (spinlock_is_held(lock)) {
-        panic("Deadlock: Spinlock already held by current CPU");
+        __atomic_fetch_add(&lock->recursion, 1, __ATOMIC_RELAXED);
+        return;
     }
 
     // Spin until acquired
@@ -27,20 +29,23 @@ void spinlock_acquire(spinlock_t *lock) {
         }
     }
 
-    /* Set cpu_id atomically after acquisition (finding #27) */
+    /* Set owner atomically after acquisition. */
     __atomic_store_n(&lock->cpu_id, id, __ATOMIC_RELEASE);
+    __atomic_store_n(&lock->recursion, 1, __ATOMIC_RELEASE);
 }
 
 bool spinlock_try_acquire(spinlock_t *lock) {
     uint32_t id = lapic_get_id();
 
     if (spinlock_is_held(lock)) {
-        return false;
+        __atomic_fetch_add(&lock->recursion, 1, __ATOMIC_RELAXED);
+        return true;
     }
 
     /* Try once to acquire the lock */
     if (__atomic_exchange_n(&lock->locked, 1, __ATOMIC_ACQUIRE) == 0) {
         __atomic_store_n(&lock->cpu_id, id, __ATOMIC_RELEASE);
+        __atomic_store_n(&lock->recursion, 1, __ATOMIC_RELEASE);
         return true;
     }
 
@@ -51,6 +56,14 @@ void spinlock_release(spinlock_t *lock) {
     if (!spinlock_is_held(lock)) {
         panic("Error: Releasing spinlock not held by current CPU");
     }
+
+    uint32_t depth = __atomic_load_n(&lock->recursion, __ATOMIC_RELAXED);
+    if (depth > 1) {
+        __atomic_store_n(&lock->recursion, depth - 1, __ATOMIC_RELEASE);
+        return;
+    }
+
+    __atomic_store_n(&lock->recursion, 0, __ATOMIC_RELAXED);
 
     __atomic_store_n(&lock->cpu_id, 0xFFFFFFFF, __ATOMIC_RELAXED);
     

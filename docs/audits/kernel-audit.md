@@ -10,9 +10,9 @@
 |----------|-------|----------|
 | CRITICAL | 16 | 16 |
 | HIGH     | 11 | 11 |
-| MEDIUM   | 10 | 7 |
+| MEDIUM   | 10 | 8 |
 | LOW      | 5 | 5 |
-| **Total** | **42** | **39** |
+| **Total** | **42** | **40** |
 
 ---
 
@@ -26,17 +26,6 @@
 ## HIGH SEVERITY ISSUES
 
 ## MEDIUM SEVERITY ISSUES
-
-### 30. Spinlock Panic on Double-Acquire: Non-Recoverable DoS — UNRESOLVED
-
-**File:** [sys/kern/spinlock.c](sys/kern/spinlock.c#L14-L16)  
-**Severity:** MEDIUM — Denial of Service
-
-**Issue:** If a spinlock holder takes an interrupt that also tries to acquire the same spinlock, the kernel panics. While this is a legitimate deadlock detection, it's non-recoverable and a driver bug could take down the entire system.
-
-**Fix:** Require `spinlock_acquire_irqsave()` for locks used in interrupt context (disable interrupts first). Consider a warning instead of panic for debug builds.
-
----
 
 ### 32. Name Cache: Stale Entries After Unlink/Rename — UNRESOLVED
 
