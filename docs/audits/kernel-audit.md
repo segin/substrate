@@ -9,10 +9,10 @@
 | Severity | Count | Resolved |
 |----------|-------|----------|
 | CRITICAL | 16 | 16 |
-| HIGH     | 11 | 6 |
+| HIGH     | 11 | 7 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **42** | **22** |
+| **Total** | **42** | **23** |
 
 ---
 
@@ -55,17 +55,6 @@ if (__sync_sub_and_fetch(&object->ref_count, 1) == 0) {
 The `request_irq()` function also has a TOCTOU: it checks for conflicts under the lock, releases it, allocates memory, then re-acquires to insert. Another CPU could register the same IRQ in between.
 
 **Fix:** Use RCU-style deferred freeing for irq_action entries, or keep the lock held during handler dispatch (with appropriate nesting considerations).
-
----
-
-### 24. Turnstile Allocation Failure: Silent Priority Inheritance Loss — UNRESOLVED
-
-**File:** [sys/kern/turnstile.c](sys/kern/turnstile.c)  
-**Severity:** HIGH — Priority Inversion / Deadlock
-
-**Issue:** If turnstile allocation fails during `turnstile_block()`, the function silently returns without setting up priority inheritance. This breaks the invariant that priority-inheriting locks always boost the holder's priority, allowing unbounded priority inversion and potential deadlocks in real-time workloads.
-
-**Fix:** Pre-allocate turnstiles per-thread at thread creation time (like FreeBSD), guaranteeing availability.
 
 ---
 

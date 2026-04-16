@@ -127,7 +127,8 @@ void turnstile_block(void *lockobj, thread_t *owner) {
         ts = turnstile_alloc();
         if (!ts) {
             ts_unlock();
-            return;  // Out of turnstiles
+            panic("turnstile_block: pool exhausted");
+            return;
         }
         ts->ts_lockobj = lockobj;
         ts->ts_owner = owner;
