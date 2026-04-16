@@ -8,11 +8,11 @@
 
 | Severity | Count | Resolved |
 |----------|-------|----------|
-| CRITICAL | 13 | 3 |
+| CRITICAL | 12 | 4 |
 | HIGH     | 13 | 0 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **44** | **3** |
+| **Total** | **44** | **4** |
 
 ---
 
@@ -320,26 +320,6 @@ if (vnode->v_mode & S_ISUID)
 if (vnode->v_mode & S_ISGID)
     current_process->egid = vnode->v_gid;
 ```
-
----
-
-### 15. COFF Loader: No Kernel-Space Check on Section Virtual Addresses — UNRESOLVED
-
-**File:** [sys/exec/formats/coff.c](sys/exec/formats/coff.c#L37-L84)  
-**Severity:** CRITICAL — Arbitrary Kernel Memory Write
-
-**Issue:** The COFF loader uses `scnhdr[i].s_vaddr` directly as a user VA for `pmap_enter` without checking that it's below 0xC0000000. Unlike the ELF loader (which has explicit kernel-space checks), a crafted COFF binary can map pages into kernel address space. Additionally, `filehdr->f_opthdr` and `filehdr->f_nscns` are used without bounds validation against file size.
-
-**Problematic Code:**
-```c
-coff_scnhdr_t *scnhdr = (coff_scnhdr_t *)((uintptr_t)file + sizeof(coff_filehdr_t) + filehdr->f_opthdr);
-for (int i = 0; i < filehdr->f_nscns; i++) {
-    // s_vaddr used directly — no >= 0xC0000000 check
-```
-
-**Impact:** Arbitrary kernel memory write from unprivileged userspace via crafted COFF binary (requires SVR3 personality or default exec path).
-
-**Fix:** Add `if (map_start >= 0xC0000000 || map_end > 0xC0000000) return -1;` and validate `f_opthdr + f_nscns * sizeof(scnhdr) <= size`.
 
 ---
 
