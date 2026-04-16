@@ -589,6 +589,35 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     int fork_result = sched_fork_thread(child_proc, stack);
     if (fork_result < 0) {
         proc_remove_child(parent, child_proc);
+
+        if (child_proc->p_pgrp) {
+            pgrp_remove_proc(child_proc);
+        }
+
+        for (int j = 0; j < MAX_FD; j++) {
+            if (child_proc->fds[j]) {
+                child_proc->fds[j]->f_count--;
+                child_proc->fds[j] = NULL;
+            }
+        }
+
+        if (child_proc->cwd_node) {
+            close_fs(child_proc->cwd_node);
+            child_proc->cwd_node = NULL;
+        }
+
+        ldt_free_process(child_proc);
+
+        if (child_proc->vm_map) {
+            vm_map_destroy(child_proc->vm_map);
+            child_proc->vm_map = NULL;
+        }
+        if (child_proc->pmap) {
+            pmap_release(child_proc->pmap);
+            child_proc->pmap = NULL;
+        }
+
+        child_proc->pid = -1;
         return fork_result;
     }
     

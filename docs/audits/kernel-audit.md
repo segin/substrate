@@ -10,9 +10,9 @@
 |----------|-------|----------|
 | CRITICAL | 16 | 16 |
 | HIGH     | 11 | 11 |
-| MEDIUM   | 10 | 1 |
+| MEDIUM   | 10 | 2 |
 | LOW      | 5 | 0 |
-| **Total** | **42** | **28** |
+| **Total** | **42** | **29** |
 
 ---
 
@@ -60,38 +60,6 @@ if (size > KMEM_MAX_ALLOC) return NULL;
 **Issue:** If a spinlock holder takes an interrupt that also tries to acquire the same spinlock, the kernel panics. While this is a legitimate deadlock detection, it's non-recoverable and a driver bug could take down the entire system.
 
 **Fix:** Require `spinlock_acquire_irqsave()` for locks used in interrupt context (disable interrupts first). Consider a warning instead of panic for debug builds.
-
----
-
-### 31. Fork Failure: File Descriptor Leak on ldt_clone_process() Error — UNRESOLVED
-
-**File:** [sys/pm/process.c](sys/pm/process.c#L510-L525)  
-**Severity:** MEDIUM — Resource Leak
-
-**Issue:** If `ldt_clone_process()` fails, `vm_map` and `pmap` are freed, but file descriptors that were already inherited (with incremented `f_count`) are not released:
-
-**Problematic Code:**
-```c
-for(int j=0; j<MAX_FD; j++) {
-    if (parent->fds[j]) {
-        child_proc->fds[j] = parent->fds[j];
-        child_proc->fds[j]->f_count++;  // Incremented here
-    }
-}
-// ... later, if ldt_clone fails:
-if (ldt_clone_process(child_proc, parent) != 0) {
-    // vm_map and pmap cleaned up, but NOT file descriptors!
-```
-
-**Fix:** Add FD cleanup to the error path:
-```c
-for (int j = 0; j < MAX_FD; j++) {
-    if (child_proc->fds[j]) {
-        child_proc->fds[j]->f_count--;
-        child_proc->fds[j] = NULL;
-    }
-}
-```
 
 ---
 
