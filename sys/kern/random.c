@@ -133,6 +133,7 @@ void chacha20_extract(struct chacha20_ctx *ctx, void *buf, size_t len) {
         size_t to_copy = (len < available) ? len : available;
         
         memcpy(out, ctx->block + ctx->block_offset, to_copy);
+        memset(ctx->block + ctx->block_offset, 0, to_copy);
         
         out += to_copy;
         len -= to_copy;

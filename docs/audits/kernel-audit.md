@@ -11,8 +11,8 @@
 | CRITICAL | 16 | 16 |
 | HIGH     | 11 | 11 |
 | MEDIUM   | 10 | 3 |
-| LOW      | 5 | 4 |
-| **Total** | **42** | **34** |
+| LOW      | 5 | 5 |
+| **Total** | **42** | **35** |
 
 ---
 
@@ -108,13 +108,6 @@ if (size > KMEM_MAX_ALLOC) return NULL;
 ---
 
 ## LOW SEVERITY ISSUES
-
-### 41. Random Number Generator State Not Wiped After Extraction — UNRESOLVED
-
-**File:** [sys/kern/random.c](sys/kern/random.c)  
-**Severity:** LOW — Theoretical State Recovery
-
-**Issue:** ChaCha20 RNG state is not zeroed after generating random bytes. If the memory containing RNG state is freed and reallocated, previous outputs could theoretically be recovered.
 
 ---
 
