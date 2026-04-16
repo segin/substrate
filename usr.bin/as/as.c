@@ -97,6 +97,37 @@ static long parse_env_long(const char *s, long fallback) {
     return v;
 }
 
+static int as_set_env_owned(const char *name, const char *value) {
+    size_t nlen;
+    size_t vlen;
+    char *entry;
+
+    if (name == NULL || value == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (setenv(name, value, 1) == 0) {
+        return 0;
+    }
+
+    nlen = strlen(name);
+    vlen = strlen(value);
+    entry = (char *)malloc(nlen + 1 + vlen + 1);
+    if (entry == NULL) {
+        return -1;
+    }
+    memcpy(entry, name, nlen);
+    entry[nlen] = '=';
+    memcpy(entry + nlen + 1, value, vlen + 1);
+    if (putenv(entry) != 0) {
+        int saved = errno;
+        free(entry);
+        errno = saved;
+        return -1;
+    }
+    return 0;
+}
+
 static int toolchain_guard_enter(const char *tool) {
     long depth;
     long max_depth;
@@ -125,8 +156,8 @@ static int toolchain_guard_enter(const char *tool) {
     }
 
     snprintf(depth_buf, sizeof(depth_buf), "%ld", depth + 1);
-    if (setenv(SUBSTRATE_TC_DEPTH_ENV, depth_buf, 1) != 0) {
-        as_diag(AS_E_INTERNAL, "failed to set recursion depth env");
+    if (as_set_env_owned(SUBSTRATE_TC_DEPTH_ENV, depth_buf) != 0) {
+        as_diag(AS_E_INTERNAL, "failed to set recursion depth env: %s", strerror(errno));
         return -1;
     }
     trace = getenv(SUBSTRATE_TC_TRACE_ENV);
@@ -142,8 +173,8 @@ static int toolchain_guard_enter(const char *tool) {
     if ((size_t)n >= sizeof(trace_buf)) {
         trace_buf[sizeof(trace_buf) - 1] = '\0';
     }
-    if (setenv(SUBSTRATE_TC_TRACE_ENV, trace_buf, 1) != 0) {
-        as_diag(AS_E_INTERNAL, "failed to set recursion trace env");
+    if (as_set_env_owned(SUBSTRATE_TC_TRACE_ENV, trace_buf) != 0) {
+        as_diag(AS_E_INTERNAL, "failed to set recursion trace env: %s", strerror(errno));
         return -1;
     }
     return 0;

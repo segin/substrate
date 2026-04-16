@@ -326,6 +326,33 @@ static int gcc_print_file_name(const char *name, cc_target_t target,
   return 0;
 }
 
+static int canonicalize_path(const char *in, char out[PATH_MAX]) {
+  char *resolved;
+
+  if (in == NULL || in[0] == '\0') {
+    return -1;
+  }
+  resolved = realpath(in, out);
+  if (resolved != NULL) {
+    return 0;
+  }
+  if (strlen(in) >= PATH_MAX) {
+    return -1;
+  }
+  memcpy(out, in, strlen(in) + 1);
+  return 0;
+}
+
+static int gcc_print_runtime_file(const char *name, cc_target_t target,
+                                  char out[PATH_MAX]) {
+  char raw[PATH_MAX];
+
+  if (gcc_print_file_name(name, target, raw) != 0) {
+    return -1;
+  }
+  return canonicalize_path(raw, out);
+}
+
 static int gcc_print_libgcc(cc_target_t target, char out[PATH_MAX]) {
   char *argv[4];
 
@@ -336,7 +363,7 @@ static int gcc_print_libgcc(cc_target_t target, char out[PATH_MAX]) {
   if (capture_cmd_output(argv, out, PATH_MAX) != 0) {
     return -1;
   }
-  return 0;
+  return canonicalize_path(out, out);
 }
 
 static int has_ext(const char *path, const char *ext) {
@@ -1665,6 +1692,8 @@ static int run_ld(const cc_opts_t *o, const strvec_t *objs, const char *out) {
   char crtbegin[PATH_MAX];
   char crtend[PATH_MAX];
   char crtn[PATH_MAX];
+  char libc_path[PATH_MAX];
+  char libm_path[PATH_MAX];
   char libgcc[PATH_MAX];
   const int want_default_runtime =
       !o->shared && !o->nostdlib && !o->nodefaultlibs;
@@ -1686,11 +1715,13 @@ static int run_ld(const cc_opts_t *o, const strvec_t *objs, const char *out) {
     argv[at++] = "-shared";
   }
   if (want_default_runtime) {
-    if (gcc_print_file_name("crt1.o", o->target, crt1) != 0 ||
-        gcc_print_file_name("crti.o", o->target, crti) != 0 ||
-        gcc_print_file_name("crtbegin.o", o->target, crtbegin) != 0 ||
-        gcc_print_file_name("crtend.o", o->target, crtend) != 0 ||
-        gcc_print_file_name("crtn.o", o->target, crtn) != 0 ||
+    if (gcc_print_runtime_file("crt1.o", o->target, crt1) != 0 ||
+        gcc_print_runtime_file("crti.o", o->target, crti) != 0 ||
+        gcc_print_runtime_file("crtbegin.o", o->target, crtbegin) != 0 ||
+        gcc_print_runtime_file("crtend.o", o->target, crtend) != 0 ||
+        gcc_print_runtime_file("crtn.o", o->target, crtn) != 0 ||
+        gcc_print_runtime_file("libc.so.6", o->target, libc_path) != 0 ||
+        gcc_print_runtime_file("libm.so.6", o->target, libm_path) != 0 ||
         gcc_print_libgcc(o->target, libgcc) != 0) {
       fprintf(stderr,
               "cc: failed to discover runtime crt/libgcc paths via gcc\n");
@@ -1713,8 +1744,8 @@ static int run_ld(const cc_opts_t *o, const strvec_t *objs, const char *out) {
     argv[at++] = o->ld_flags.items[i];
   }
   if (want_default_runtime) {
-    argv[at++] = "-lc";
-    argv[at++] = "-lm";
+    argv[at++] = libc_path;
+    argv[at++] = libm_path;
     argv[at++] = libgcc;
     argv[at++] = crtend;
     argv[at++] = crtn;

@@ -40,8 +40,10 @@ cat > /tmp/cc_host_x86intrin_pclmul.c <<'EOF'
 #include <x86intrin.h>
 int main(void) {
 	__m128i a = _mm_setzero_si128();
+	__m128i c = _mm_set_epi64x(2, 3);
 	__m128i b = _mm_set1_epi64x(1);
 	a = _mm_clmulepi64_si128(a, b, 0x00);
+	a = _mm_xor_si128(a, c);
 	a = _mm_shuffle_epi8(a, b);
 	return __builtin_cpu_supports("pclmul") ? 0 : 0;
 }
@@ -56,8 +58,10 @@ __attribute__((__target__("pclmul,avx")))
 #endif
 int probe(void) {
 	__m128i a = _mm_setzero_si128();
+	__m128i c = _mm_set_epi64x(2, 3);
 	__m128i b = _mm_set1_epi64x(1);
 	a = _mm_clmulepi64_si128(a, b, 0x00);
+	a = _mm_xor_si128(a, c);
 	a = _mm_shuffle_epi8(a, b);
 	return __builtin_cpu_supports("pclmul");
 }

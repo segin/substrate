@@ -159,6 +159,7 @@ static int dynstr_append_cstr(uint8_t **buf, size_t *len, size_t *cap, const cha
 static int dynsym_should_export(const ld_ctx_t *ctx, const elfobj_t *out, const elf_symbol_t *sym);
 static int resolve_symbol_addr(elfobj_t *obj, const elf_symbol_t *sym, int allow_undef,
                                uint64_t *out_addr, const char **undef_name);
+static int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *state);
 static int is_relro_candidate_name(const char *name);
 
 static void usage(const char *prog) {
@@ -4079,6 +4080,11 @@ static int load_object_input(const char *path, ld_ctx_t *ctx, objvec_t *objs, sy
         return -1;
     }
     if (elf_type(obj) != ET_REL) {
+        if (elf_type(obj) == ET_DYN && ctx != NULL &&
+            (ctx->expect_type == ET_EXEC || ctx->expect_type == ET_DYN)) {
+            elf_close(obj);
+            return register_dso_provider(ctx, path, state);
+        }
         if (!quiet) {
             fprintf(stderr, "ld: input %s is not relocatable (only ET_REL supported)\n", path);
         }

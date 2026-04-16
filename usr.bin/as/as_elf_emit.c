@@ -11096,6 +11096,40 @@ static uint32_t default_text_reloc_type(unsigned machine, const as_instruction_t
     return reloc_type_for_machine(machine);
 }
 
+static void adjust_x86_rel_reloc_to_encoding(unsigned machine, const as_instruction_t *in,
+                                             const as_operand_t *op, const unsigned char *code,
+                                             size_t code_len, uint32_t *type, uint64_t *width) {
+    if (type == NULL || width == NULL || in == NULL || op == NULL || code == NULL) {
+        return;
+    }
+    if (!(machine == EM_386 || machine == EM_X86_64)) {
+        return;
+    }
+    if (!(op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) ||
+        !is_rel_mnemonic(in->mnemonic) || code_len == 0) {
+        return;
+    }
+
+    if (code_len == 2 &&
+        (code[0] == 0xeb || (code[0] >= 0x70 && code[0] <= 0x7f) || (code[0] >= 0xe0 && code[0] <= 0xe3))) {
+        *type = (machine == EM_X86_64) ? R_X86_64_PC8 : R_386_PC8;
+        *width = 1;
+        return;
+    }
+
+    if (machine == EM_386 && code_len == 3 && (code[0] == 0xe8 || code[0] == 0xe9)) {
+        *type = R_386_PC16;
+        *width = 2;
+        return;
+    }
+
+    if (machine == EM_386 && code_len == 4 && code[0] == 0x0f && (code[1] & 0xf0) == 0x80) {
+        *type = R_386_PC16;
+        *width = 2;
+        return;
+    }
+}
+
 static int emit_relocations(emit_ctx_t *ctx) {
     size_t i;
     unsigned machine = ctx->cfg != NULL ? ctx->cfg->machine : EM_386;
@@ -11259,6 +11293,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
                         reloc_width = 4;
                     }
                 }
+                adjust_x86_rel_reloc_to_encoding(machine, &st->u.instr, op, code, code_len, &t, &reloc_width);
                 if (code_len < reloc_width) {
                     set_err(ctx, "%s:%u: relocation width exceeds encoded instruction size",
                             st->file != NULL ? st->file : "<input>", st->line);

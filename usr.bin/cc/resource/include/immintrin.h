@@ -82,6 +82,28 @@ static __inline__ __m256i _mm256_set1_epi32(int x) {
 	return(r.v);
 }
 
+static __inline__ __m256i _mm256_set_epi32(int e7, int e6, int e5, int e4, int e3, int e2, int e1, int e0) {
+	__m256i_u r;
+	r.i32[0] = e0;
+	r.i32[1] = e1;
+	r.i32[2] = e2;
+	r.i32[3] = e3;
+	r.i32[4] = e4;
+	r.i32[5] = e5;
+	r.i32[6] = e6;
+	r.i32[7] = e7;
+	return(r.v);
+}
+
+static __inline__ __m256i _mm256_set_epi64x(long long e3, long long e2, long long e1, long long e0) {
+	__m256i_u r;
+	r.i64[0] = e0;
+	r.i64[1] = e1;
+	r.i64[2] = e2;
+	r.i64[3] = e3;
+	return(r.v);
+}
+
 static __inline__ __m256i _mm256_setr_epi32(int e0, int e1, int e2, int e3, int e4, int e5, int e6, int e7) {
 	__m256i_u r;
 	r.i32[0] = e0;
@@ -144,6 +166,22 @@ static __inline__ __m256i _mm256_setr_epi8(
 	r.i8[24] = e24; r.i8[25] = e25; r.i8[26] = e26; r.i8[27] = e27;
 	r.i8[28] = e28; r.i8[29] = e29; r.i8[30] = e30; r.i8[31] = e31;
 	return(r.v);
+}
+
+static __inline__ __m256i _mm256_set_epi8(
+	signed char e31, signed char e30, signed char e29, signed char e28,
+	signed char e27, signed char e26, signed char e25, signed char e24,
+	signed char e23, signed char e22, signed char e21, signed char e20,
+	signed char e19, signed char e18, signed char e17, signed char e16,
+	signed char e15, signed char e14, signed char e13, signed char e12,
+	signed char e11, signed char e10, signed char e09, signed char e08,
+	signed char e07, signed char e06, signed char e05, signed char e04,
+	signed char e03, signed char e02, signed char e01, signed char e00) {
+	return _mm256_setr_epi8(
+		e00, e01, e02, e03, e04, e05, e06, e07,
+		e08, e09, e10, e11, e12, e13, e14, e15,
+		e16, e17, e18, e19, e20, e21, e22, e23,
+		e24, e25, e26, e27, e28, e29, e30, e31);
 }
 
 static __inline__ __m256i _mm256_add_epi64(__m256i a, __m256i b) {
