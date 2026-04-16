@@ -10,9 +10,9 @@
 |----------|-------|----------|
 | CRITICAL | 16 | 16 |
 | HIGH     | 11 | 11 |
-| MEDIUM   | 10 | 6 |
+| MEDIUM   | 10 | 7 |
 | LOW      | 5 | 5 |
-| **Total** | **42** | **38** |
+| **Total** | **42** | **39** |
 
 ---
 
@@ -46,17 +46,6 @@
 **Issue:** After `unlink()` or `rename()`, the name cache may still return stale entries if `cache_purge()` is not called for all affected paths. This can cause phantom files to appear in lookups or deletions to appear to fail.
 
 **Fix:** Implement generation-number-based invalidation, or ensure every VFS mutation path calls `cache_purge()` on affected vnodes.
-
----
-
-### 34. FAT Cluster Chain: Missing Total-Clusters Bound Check — UNRESOLVED
-
-**File:** [sys/fs/fat/fat.c](sys/fs/fat/fat.c)  
-**Severity:** MEDIUM — Out-of-Bounds Read / Kernel Crash
-
-**Issue:** When following cluster chains, the code checks for the EOC marker (≥ 0x0FFFFFFF) but does not validate that cluster numbers are within the valid range (2..total_clusters). A corrupted FAT table with large cluster values could cause sector calculations to overflow, reading from invalid device offsets.
-
-**Fix:** Add `if (cluster < 2 || cluster > fs->total_clusters) return 0;` before each cluster dereference.
 
 ---
 
