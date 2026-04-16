@@ -8,11 +8,11 @@
 
 | Severity | Count | Resolved |
 |----------|-------|----------|
-| CRITICAL | 16 | 10 |
+| CRITICAL | 16 | 11 |
 | HIGH     | 11 | 0 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **42** | **10** |
+| **Total** | **42** | **11** |
 
 ---
 
@@ -183,36 +183,6 @@ if (vnode->v_mode & S_ISUID)
 if (vnode->v_mode & S_ISGID)
     current_process->egid = vnode->v_gid;
 ```
-
----
-
-### 15. kern_chroot() Missing Privilege Check + Linux Personality copyin Bypass — UNRESOLVED
-
-**File:** [sys/kern/syscall.c](sys/kern/syscall.c#L921-L940), [sys/exec/perso/perso_linux.c](sys/exec/perso/perso_linux.c#L910)  
-**Severity:** CRITICAL — Unprivileged chroot + Kernel Direct Dereference of Userspace Pointer
-
-**Issue — Two compounding vulnerabilities:**
-
-**(a) Missing `euid == 0` check:** `kern_chroot()` changes the process root directory without any privilege check. Any unprivileged user can chroot.
-
-**(b) Linux personality passes raw userspace pointer:** The Linux personality table maps `LINUX_SYS_chroot` directly to `kern_chroot` (not `sys_chroot`). `sys_chroot` does `copyinstr()` before calling `kern_chroot`, but the Linux path bypasses this entirely. `kern_chroot()` then directly dereferences the raw userspace pointer via `vfs_lookup()`.
-
-**Problematic Code:**
-```c
-// Linux personality table (perso_linux.c:910)
-[LINUX_SYS_chroot] = (void *)&kern_chroot,  // Bypasses sys_chroot's copyinstr!
-
-// kern_chroot (syscall.c:921)
-int kern_chroot(const char *path) {
-    if (!path) return -1;
-    // path is a RAW userspace pointer from Linux personality dispatch
-    if (path[0] == '/') {
-        node = vfs_lookup(root, path);  // Direct dereference of userspace memory
-    }
-    current_process->root_node = node;  // No euid==0 check
-```
-
-**Fix:** (a) Add `if (current_process->euid != 0) return -EPERM;` to `kern_chroot`. (b) Change Linux personality mapping to `sys_chroot` or create a wrapper that does copyin.
 
 ---
 

@@ -921,6 +921,9 @@ int sys_chroot(const char *path) {
 int kern_chroot(const char *path) {
     if (!path) return -1;
 
+    /* Only root may chroot */
+    if (current_process->euid != 0) return -EPERM;
+
     fs_node_t *node = 0;
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
     fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
