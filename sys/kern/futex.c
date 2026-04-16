@@ -314,9 +314,11 @@ int sys_get_robust_list(int pid, struct robust_list_head **head_ptr, size_t *len
         return -EFAULT;
     }
     
-    /* Write results to userspace */
-    *head_ptr = target->robust_list;
-    *len_ptr = target->robust_list_len;
+    /* Write results to userspace via copyout */
+    if (copyout(&target->robust_list, head_ptr, sizeof(*head_ptr)) != 0)
+        return -EFAULT;
+    if (copyout(&target->robust_list_len, len_ptr, sizeof(*len_ptr)) != 0)
+        return -EFAULT;
     
     return 0;
 }

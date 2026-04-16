@@ -9,10 +9,10 @@
 | Severity | Count | Resolved |
 |----------|-------|----------|
 | CRITICAL | 16 | 16 |
-| HIGH     | 11 | 2 |
+| HIGH     | 11 | 3 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **42** | **18** |
+| **Total** | **42** | **19** |
 
 ---
 
@@ -42,29 +42,6 @@ if (__sync_sub_and_fetch(&object->ref_count, 1) == 0) {
 ```
 
 **Fix:** Add a per-object lock or use a global VM object lock for teardown, or use RCU-style deferred freeing.
-
----
-
-### 19. sys_get_robust_list() Direct Userspace Write Without copyout() — UNRESOLVED
-
-**File:** [sys/kern/futex.c](sys/kern/futex.c#L296-L300)  
-**Severity:** HIGH — Kernel Crash / Arbitrary Kernel Write
-
-**Issue:** Output values are written directly to userspace pointers without copyout():
-
-**Problematic Code:**
-```c
-*head_ptr = target->robust_list;     // Direct write to userspace!
-*len_ptr = target->robust_list_len;  // Direct write to userspace!
-```
-
-If `head_ptr` or `len_ptr` point to kernel space, this is an arbitrary kernel write.
-
-**Fix:** Use `copyout()`:
-```c
-copyout(&target->robust_list, head_ptr, sizeof(*head_ptr));
-copyout(&target->robust_list_len, len_ptr, sizeof(*len_ptr));
-```
 
 ---
 
