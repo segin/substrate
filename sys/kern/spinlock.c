@@ -59,6 +59,16 @@ void spinlock_release(spinlock_t *lock) {
 }
 
 bool spinlock_is_held(spinlock_t *lock) {
-    return (__atomic_load_n(&lock->locked, __ATOMIC_RELAXED) &&
-            __atomic_load_n(&lock->cpu_id, __ATOMIC_RELAXED) == lapic_get_id());
+    uint32_t locked_before;
+    uint32_t owner_cpu;
+    uint32_t locked_after;
+
+    /* Read a stable snapshot to avoid mixed-state observations. */
+    do {
+        locked_before = __atomic_load_n(&lock->locked, __ATOMIC_ACQUIRE);
+        owner_cpu = __atomic_load_n(&lock->cpu_id, __ATOMIC_ACQUIRE);
+        locked_after = __atomic_load_n(&lock->locked, __ATOMIC_ACQUIRE);
+    } while (locked_before != locked_after);
+
+    return (locked_before != 0) && (owner_cpu == lapic_get_id());
 }

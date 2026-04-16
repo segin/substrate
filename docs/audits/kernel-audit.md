@@ -11,8 +11,8 @@
 | CRITICAL | 16 | 16 |
 | HIGH     | 11 | 11 |
 | MEDIUM   | 10 | 3 |
-| LOW      | 5 | 0 |
-| **Total** | **42** | **30** |
+| LOW      | 5 | 1 |
+| **Total** | **42** | **31** |
 
 ---
 
@@ -108,15 +108,6 @@ if (size > KMEM_MAX_ALLOC) return NULL;
 ---
 
 ## LOW SEVERITY ISSUES
-
-### 38. Spinlock is_held() Non-Atomic Two-Read Pattern — UNRESOLVED
-
-**File:** [sys/kern/spinlock.c](sys/kern/spinlock.c#L62-L65)  
-**Severity:** LOW — Theoretical Race
-
-**Issue:** `spinlock_is_held()` reads `locked` and `cpu_id` as two separate atomic loads. Between the two reads, the lock could be released and re-acquired by a different CPU, returning a false positive. In practice, this only matters for debug assertions.
-
----
 
 ### 39. Kernel printf itoa/utoa_hex: No Buffer Bounds Check in Internal Helpers — UNRESOLVED
 
