@@ -9,10 +9,10 @@
 | Severity | Count | Resolved |
 |----------|-------|----------|
 | CRITICAL | 16 | 16 |
-| HIGH     | 11 | 4 |
+| HIGH     | 11 | 5 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **42** | **20** |
+| **Total** | **42** | **21** |
 
 ---
 
@@ -106,35 +106,6 @@ The `request_irq()` function also has a TOCTOU: it checks for conflicts under th
 **Issue:** Mount checks `vp->v_mountedhere != NULL`, then later sets it. Without holding the vnode lock across both operations, two concurrent mounts on the same vnode could both pass the check and create a corrupted mount state.
 
 **Fix:** Hold `vnode_lock(vp)` from the check through the assignment.
-
----
-
-### 27. sys_acct() / kern_acct() Missing Root Permission Check — UNRESOLVED
-
-**File:** [sys/kern/acct.c](sys/kern/acct.c#L40-L50)  
-**Severity:** HIGH — Privilege Bypass / Audit Manipulation
-
-**Issue:** `kern_acct()` enables or disables process accounting without checking the caller's UID/EUID. The source code literally contains the comment "In a real kernel, we would check permissions here" but no check was ever implemented. Any unprivileged user can enable accounting to an arbitrary file (writing process info) or disable it to hide activity.
-
-**Problematic Code:**
-```c
-int kern_acct(const char *path) {
-    // In a real kernel, we would check permissions here
-    if (!path) {
-        acct_stop();
-        return 0;
-    }
-    return acct_start(path);
-}
-```
-
-**Impact:** Unprivileged user can disable audit trail or redirect accounting data to an attacker-controlled file.
-
-**Fix:**
-```c
-if (current_process->euid != 0)
-    return -EPERM;
-```
 
 ---
 

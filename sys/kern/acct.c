@@ -32,6 +32,9 @@ comp_t compress(uint32_t t) {
 }
 
 int kern_acct(const char *path) {
+    /* Only root may enable/disable process accounting */
+    if (current_process && current_process->euid != 0) return -EPERM;
+
     if (path == 0) {
         if (acct_node) {
             close_fs(acct_node);
