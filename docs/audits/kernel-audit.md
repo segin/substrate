@@ -159,33 +159,6 @@ if (vaddr >= 0xC0000000 || (vaddr + phdr.p_memsz) >= 0xC0000000) {
 
 ---
 
-### 6. sys_set_thread_area() Missing TLS Base Address Validation — UNRESOLVED
-
-**File:** [sys/arch/i386/syscall.c](sys/arch/i386/syscall.c#L43-L75)  
-**Severity:** CRITICAL — Kernel Memory Read/Write via GS Segment
-
-**Issue:** `sys_set_thread_area()` validates the GDT entry number (lines 58-62) but does NOT validate that the TLS `base_addr` is in user space. A user process can set `info.base_addr = 0xC0000000` or higher, then use `%gs:[offset]` instructions to read and write arbitrary kernel memory.
-
-**Problematic Code:**
-```c
-int sys_set_thread_area(struct user_desc *u_info) {
-    struct user_desc info;
-    copyin(u_info, &info, sizeof(info));
-    // entry_number validation exists (lines 58-62)
-    // BUT NO CHECK: if (info.base_addr >= 0xC0000000) return -EINVAL;
-    gdt_set_tls_entry(info.entry_number, info.base_addr, ...);
-```
-
-**Impact:** Complete kernel memory read/write from userspace. Any unprivileged process can read secrets, overwrite kernel code, or escalate to ring 0.
-
-**Fix:**
-```c
-if (info.base_addr >= 0xC0000000)
-    return -EINVAL;
-```
-
----
-
 ### 7. pmap_fork() Local-Only TLB Flush on SMP — COW Race — UNRESOLVED
 
 **File:** [sys/arch/i386/pmap.c](sys/arch/i386/pmap.c#L616-L620)  

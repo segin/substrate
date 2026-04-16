@@ -44,7 +44,12 @@ int sys_set_thread_area(struct user_desc *u_info) {
     if (!u_info) return -14; // EFAULT
     
     struct user_desc info;
-    memcpy(&info, u_info, sizeof(info));
+    if (copyin(u_info, &info, sizeof(info)) != 0)
+        return -14; // EFAULT
+    
+    // Reject TLS base addresses in kernel space
+    if (info.base_addr >= 0xC0000000)
+        return -22; // EINVAL
     
     // If entry_number is -1, allocate a new TLS entry
     if (info.entry_number == (unsigned int)-1) {
