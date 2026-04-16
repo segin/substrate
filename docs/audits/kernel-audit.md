@@ -8,11 +8,11 @@
 
 | Severity | Count | Resolved |
 |----------|-------|----------|
-| CRITICAL | 19 | 3 |
+| CRITICAL | 17 | 5 |
 | HIGH     | 11 | 0 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **45** | **3** |
+| **Total** | **43** | **5** |
 
 ---
 
@@ -925,58 +925,6 @@ The page fault handler zeros all anonymous pages: the `VM_OBJ_TYPE_DEFAULT` path
 ---
 
 ## Phase 3: Filesystem Driver Audit (Minix, FAT, UDF)
-
-### FS-3. UDF — OOB Read in Directory FID Parsing (`readdir`/`finddir`) — UNRESOLVED
-
-**File:** `sys/fs/udf/udf.c` lines 461–471, 521–533  
-**Severity:** CRITICAL — Kernel Memory Information Leak
-
-**Issue:** Directory data is read into `static uint8_t dir_buf[4096]` with the read capped to 4096 bytes, but the FID parsing loop uses `dir_size = (uint32_t)ctx->fe.info_length` which can be up to 4GB. When `pos >= 4096`, `struct udf_fid *fid = (struct udf_fid *)(dir_buf + pos)` reads past the buffer into kernel BSS. The `impl_use_length` and `file_id_length` values from kernel memory control further accesses, and "filenames" from kernel memory are returned to userspace.
-
-Additionally, even within the first 4096 bytes, no validation ensures `38 + impl_use_length + file_id_length` stays within remaining buffer space.
-
-**Impact:** Directory listing on a crafted UDF image leaks kernel memory contents as directory entry names.
-
-**Problematic Code:**
-```c
-uint32_t dir_size = (uint32_t)ctx->fe.info_length;
-udf_read_file(..., 0, dir_size > 4096 ? 4096 : dir_size, dir_buf);
-while (pos < dir_size) {              // should be: pos < read_size
-    struct udf_fid *fid = (struct udf_fid *)(dir_buf + pos);
-```
-
-**Fix:** Use `read_size` (the capped value) as loop bound, and validate each FID's total size fits within remaining buffer.
-
----
-
-### FS-4. UDF — Space Bitmap OOB Read/Write via Crafted `num_bits` — UNRESOLVED
-
-**File:** `sys/fs/udf/udf_write.c` lines 55–80, 87–101  
-**Severity:** CRITICAL — Kernel Memory Corruption
-
-**Issue:** `udf_read_space_bitmap()` limits the bitmap to 4 sectors (8192 bytes), but sets `space_bitmap_size = sbm->num_bits` from disk without validation. In `udf_alloc_block()`, the loop iterates `space_bitmap_size / 8` bytes. A crafted UDF image with `num_bits = 0x80000000` causes iteration ~256MB past the static buffer, reading and WRITING (setting bits via `|= (1 << bit)`) kernel BSS memory.
-
-**Impact:** Kernel memory corruption. Block allocation on a crafted image writes to arbitrary BSS locations.
-
-**Problematic Code:**
-```c
-space_bitmap_size = sbm->num_bits;  // from disk, unbounded
-// ...
-for (uint32_t byte = 0; byte < space_bitmap_size / 8; byte++) {
-    if (space_bitmap[byte] != 0xFF) {
-        space_bitmap[byte] |= (1 << bit);  // OOB write
-```
-
-**Fix:** Validate `num_bits` against actual buffer:
-```c
-uint32_t max_bytes = (sectors * UDF_SECTOR_SIZE) - sizeof(struct udf_space_bitmap);
-if (sbm->num_bits > max_bytes * 8) {
-    kprint("UDF: Space bitmap num_bits exceeds buffer\n");
-    return -1;
-}
-```
-
----
 
 ### FS-5. UDF — Buffer Overflow in `udf_add_fid` When Directory Grows Past 4096 Bytes — UNRESOLVED
 

@@ -72,8 +72,16 @@ int udf_read_space_bitmap(fs_node_t *dev, uint32_t partition_start,
     }
     
     space_bitmap = sector_buf + sizeof(struct udf_space_bitmap);
-    space_bitmap_size = sbm->num_bits;
     space_bitmap_sector = sector;
+
+    /* Validate num_bits against actual buffer capacity */
+    uint32_t max_bitmap_bytes = (sectors * UDF_SECTOR_SIZE) - sizeof(struct udf_space_bitmap);
+    if (sbm->num_bits > max_bitmap_bytes * 8) {
+        kprint("UDF: Space bitmap num_bits exceeds buffer capacity\n");
+        space_bitmap = NULL;
+        return -1;
+    }
+    space_bitmap_size = sbm->num_bits;
     
     return 0;
 }
