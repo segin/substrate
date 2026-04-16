@@ -239,6 +239,10 @@ void *sys_brk(void *addr) {
     if (new_brk < current_process->brk_start) 
         return (void *)(uintptr_t)old_brk;
 
+    // Don't allow mapping into kernel address space
+    if (new_brk >= 0xC0000000)
+        return (void *)(uintptr_t)old_brk;
+
     // Align to page boundaries
     uintptr_t old_page_end = (old_brk + 0xFFF) & ~0xFFFULL;
     uintptr_t new_page_end = (new_brk + 0xFFF) & ~0xFFFULL;

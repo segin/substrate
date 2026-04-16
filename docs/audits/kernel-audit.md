@@ -323,41 +323,6 @@ if (vnode->v_mode & S_ISGID)
 
 ---
 
-### 12. sys_brk() Missing Kernel-Space Upper Bound Check — UNRESOLVED
-
-**File:** [sys/vm/vm_syscalls.c](sys/vm/vm_syscalls.c#L207-L290)  
-**Severity:** CRITICAL — Arbitrary Kernel Memory Overwrite / Ring 0 Code Execution
-
-**Issue:** `sys_brk()` validates only `new_brk < brk_start` (prevents shrinking below heap start) but never verifies `new_brk < 0xC0000000`. A user can pass `addr = 0xC0100000` and the function will call `pmap_enter_batch()` with VA addresses in kernel space. Since `pmap_enter()` has no VA range check for user pmaps, it will overwrite existing kernel page table entries with user-controlled physical pages marked read/write.
-
-**Problematic Code:**
-```c
-uintptr_t new_brk = (uintptr_t)addr;
-uintptr_t old_brk = (uintptr_t)current_process->brk;
-
-if (new_brk < current_process->brk_start) 
-    return (void *)(uintptr_t)old_brk;
-
-// *** NO CHECK: new_brk >= 0xC0000000 ***
-
-uintptr_t old_page_end = (old_brk + 0xFFF) & ~0xFFFULL;
-uintptr_t new_page_end = (new_brk + 0xFFF) & ~0xFFFULL;
-
-if (new_page_end > old_page_end) {
-    // Allocates pages and calls pmap_enter_batch() with VA in kernel space
-```
-
-**Impact:** Attacker calls `brk(0xC0100000)`. The kernel maps freshly-allocated, zeroed, user-writable pages over kernel code/data. Attacker writes shellcode, which executes at ring 0 on next kernel entry.
-
-**Fix:**
-```c
-if (new_brk >= 0xC0000000)
-    return (void *)(uintptr_t)old_brk;
-```
-Also add defense-in-depth in `pmap_enter()` to reject VA >= 0xC0000000 for user pmaps.
-
----
-
 ### 13. sys_fchmod() No Permission Check — UNRESOLVED
 
 **File:** [sys/kern/syscall.c](sys/kern/syscall.c#L1667-L1676)  
