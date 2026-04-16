@@ -8,11 +8,11 @@
 
 | Severity | Count | Resolved |
 |----------|-------|----------|
-| CRITICAL | 18 | 1 |
+| CRITICAL | 18 | 2 |
 | HIGH     | 11 | 0 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **44** | **1** |
+| **Total** | **44** | **2** |
 
 ---
 
@@ -471,53 +471,9 @@ if (copyin(t->robust_list, &khead, sizeof(khead)) != 0) {
 
 ---
 
-### 17. procfs /proc/<pid>/fd/ World-Readable — No Per-Process Access Controls — UNRESOLVED
-
-**File:** [sys/fs/procfs.c](sys/fs/procfs.c#L520-L571)  
-**Severity:** CRITICAL — Information Disclosure Enabling Privilege Escalation
-
-**Issue:** All per-pid procfs nodes (`status`, `cmdline`, `stat`, `exe`, `cwd`, `fd/`) are created with `uid = 0, gid = 0` (root ownership) and world-readable permissions (`mask = 0444` for files, `0555` for directories, `0777` for symlinks). The fd directory should be `0500` owned by the target process's UID (Linux default). Additionally, none of the read/readlink callbacks perform any credential checks against the calling process.
-
-This means any unprivileged user can:
-- Enumerate **all open file descriptors** of every process (including root) via `/proc/<pid>/fd/`
-- Read `/proc/<pid>/cmdline` of every process, which may contain **passwords or secrets passed as command-line arguments**
-- Read `/proc/<pid>/exe` and `/proc/<pid>/cwd` of every process
-
-**Problematic Code:**
-```c
-// fd directory — should be 0500, owned by process uid
-nodes->fd_dir.mask = 0555;    // world-readable+executable
-nodes->fd_dir.uid = 0;        // owned by root, not target process
-nodes->fd_dir.gid = 0;
-
-// fd symlinks — world-readable
-link->mask = 0777;
-link->uid = 0;
-link->gid = 0;
-
-// status, cmdline, stat — world-readable, root-owned
-nodes->status.mask = 0444;
-nodes->status.uid = 0;
-```
-
-**Impact:** Sensitive information about all processes exposed to any local user. Enables targeted privilege escalation by revealing what files root daemons have open, command-line secrets, and process working directories.
-
-**Fix:** Set uid/gid on per-pid nodes to the target process's credentials:
-```c
-process_t *target = proc_find(pid);
-nodes->dir.uid = target->uid;
-nodes->dir.gid = target->gid;
-nodes->fd_dir.mask = 0500;  // owner-only
-nodes->fd_dir.uid = target->uid;
-nodes->fd_dir.gid = target->gid;
-// Same for status, cmdline, stat, exe, cwd nodes
-```
-
----
-
 ## HIGH SEVERITY ISSUES
 
-### 19. Mutex Adaptive Spin: Use-After-Free on Owner Thread — UNRESOLVED
+### 17. Mutex Adaptive Spin: Use-After-Free on Owner Thread — UNRESOLVED
 
 **File:** [sys/kern/mutex.c](sys/kern/mutex.c#L66-L85)  
 **Severity:** HIGH — Race Condition / Crash
@@ -536,7 +492,7 @@ if (owner) {
 
 ---
 
-### 20. vm_object_deallocate() Race: Concurrent Teardown Without Lock — UNRESOLVED
+### 18. vm_object_deallocate() Race: Concurrent Teardown Without Lock — UNRESOLVED
 
 **File:** [sys/vm/vm_object.c](sys/vm/vm_object.c#L55-L85)  
 **Severity:** HIGH — Use-After-Free / Double-Free
@@ -556,7 +512,7 @@ if (__sync_sub_and_fetch(&object->ref_count, 1) == 0) {
 
 ---
 
-### 21. sys_get_robust_list() Direct Userspace Write Without copyout() — UNRESOLVED
+### 19. sys_get_robust_list() Direct Userspace Write Without copyout() — UNRESOLVED
 
 **File:** [sys/kern/futex.c](sys/kern/futex.c#L296-L300)  
 **Severity:** HIGH — Kernel Crash / Arbitrary Kernel Write
@@ -579,7 +535,7 @@ copyout(&target->robust_list_len, len_ptr, sizeof(*len_ptr));
 
 ---
 
-### 22. Fork: Child Visible to Scheduler Before proc_add_child() — UNRESOLVED
+### 20. Fork: Child Visible to Scheduler Before proc_add_child() — UNRESOLVED
 
 **File:** [sys/pm/process.c](sys/pm/process.c#L567-L575)  
 **Severity:** HIGH — Resource Leak / Race Condition
@@ -597,7 +553,7 @@ proc_add_child(parent, child_proc);  // Only now visible to wait()
 
 ---
 
-### 23. IRQ Handler Dispatch: TOCTOU Between Lock Release and Handler Call — UNRESOLVED
+### 21. IRQ Handler Dispatch: TOCTOU Between Lock Release and Handler Call — UNRESOLVED
 
 **File:** [sys/kern/irq.c](sys/kern/irq.c) (dispatch function, not shown in read but inferred from structure)  
 **Severity:** HIGH — Use-After-Free
@@ -610,7 +566,7 @@ The `request_irq()` function also has a TOCTOU: it checks for conflicts under th
 
 ---
 
-### 24. sysctl_init() Race: Double-Initialization on SMP — UNRESOLVED
+### 22. sysctl_init() Race: Double-Initialization on SMP — UNRESOLVED
 
 **File:** [sys/kern/sysctl.c](sys/kern/sysctl.c#L78-L83)  
 **Severity:** HIGH — Data Corruption
@@ -635,7 +591,7 @@ if (__sync_bool_compare_and_swap(&sysctl_initialized, 0, 1) == false)
 
 ---
 
-### 25. ELF Segment Overlap Detection Silently Stops at 256 — UNRESOLVED
+### 23. ELF Segment Overlap Detection Silently Stops at 256 — UNRESOLVED
 
 **File:** [sys/exec/formats/elf.c](sys/exec/formats/elf.c#L554-L558)  
 **Severity:** HIGH — Privilege Escalation
@@ -654,7 +610,7 @@ if (mapped_range_count < 256) {
 
 ---
 
-### 26. Turnstile Allocation Failure: Silent Priority Inheritance Loss — UNRESOLVED
+### 24. Turnstile Allocation Failure: Silent Priority Inheritance Loss — UNRESOLVED
 
 **File:** [sys/kern/turnstile.c](sys/kern/turnstile.c)  
 **Severity:** HIGH — Priority Inversion / Deadlock
@@ -665,7 +621,7 @@ if (mapped_range_count < 256) {
 
 ---
 
-### 27. Vnode Reference Count Race in vref() — UNRESOLVED
+### 25. Vnode Reference Count Race in vref() — UNRESOLVED
 
 **File:** [sys/vfs/vnode.c](sys/vfs/vnode.c)  
 **Severity:** HIGH — Use-After-Free
@@ -676,7 +632,7 @@ if (mapped_range_count < 256) {
 
 ---
 
-### 28. Mount/Unmount Race: Check-Then-Set on v_mountedhere — UNRESOLVED
+### 26. Mount/Unmount Race: Check-Then-Set on v_mountedhere — UNRESOLVED
 
 **File:** [sys/vfs/vfs_mount.c](sys/vfs/vfs_mount.c)  
 **Severity:** HIGH — Data Structure Corruption
@@ -687,7 +643,7 @@ if (mapped_range_count < 256) {
 
 ---
 
-### 29. sys_acct() / kern_acct() Missing Root Permission Check — UNRESOLVED
+### 27. sys_acct() / kern_acct() Missing Root Permission Check — UNRESOLVED
 
 **File:** [sys/kern/acct.c](sys/kern/acct.c#L40-L50)  
 **Severity:** HIGH — Privilege Bypass / Audit Manipulation
@@ -718,7 +674,7 @@ if (current_process->euid != 0)
 
 ## MEDIUM SEVERITY ISSUES
 
-### 30. Futex Robust List Walk: 4096-Iteration Kernel CPU Consumption — UNRESOLVED
+### 28. Futex Robust List Walk: 4096-Iteration Kernel CPU Consumption — UNRESOLVED
 
 **File:** [sys/kern/futex.c](sys/kern/futex.c#L200-L240)  
 **Severity:** MEDIUM — Denial of Service
@@ -729,7 +685,7 @@ if (current_process->euid != 0)
 
 ---
 
-### 31. kmalloc Large Allocation: Secondary Integer Overflow in Pages Calculation — UNRESOLVED
+### 29. kmalloc Large Allocation: Secondary Integer Overflow in Pages Calculation — UNRESOLVED
 
 **File:** [sys/vm/vm_kmem.c](sys/vm/vm_kmem.c#L116-L120)  
 **Severity:** MEDIUM — Memory Corruption
@@ -743,7 +699,7 @@ if (size > KMEM_MAX_ALLOC) return NULL;
 
 ---
 
-### 32. Spinlock Panic on Double-Acquire: Non-Recoverable DoS — UNRESOLVED
+### 30. Spinlock Panic on Double-Acquire: Non-Recoverable DoS — UNRESOLVED
 
 **File:** [sys/kern/spinlock.c](sys/kern/spinlock.c#L14-L16)  
 **Severity:** MEDIUM — Denial of Service
@@ -754,7 +710,7 @@ if (size > KMEM_MAX_ALLOC) return NULL;
 
 ---
 
-### 33. Fork Failure: File Descriptor Leak on ldt_clone_process() Error — UNRESOLVED
+### 31. Fork Failure: File Descriptor Leak on ldt_clone_process() Error — UNRESOLVED
 
 **File:** [sys/pm/process.c](sys/pm/process.c#L510-L525)  
 **Severity:** MEDIUM — Resource Leak
@@ -786,7 +742,7 @@ for (int j = 0; j < MAX_FD; j++) {
 
 ---
 
-### 34. Name Cache: Stale Entries After Unlink/Rename — UNRESOLVED
+### 32. Name Cache: Stale Entries After Unlink/Rename — UNRESOLVED
 
 **File:** [sys/vfs/vfs_cache.c](sys/vfs/vfs_cache.c)  
 **Severity:** MEDIUM — Logic Error / Stale Data
@@ -797,7 +753,7 @@ for (int j = 0; j < MAX_FD; j++) {
 
 ---
 
-### 35. UDF FID Name Parsing: Unvalidated impl_use_length Offset — UNRESOLVED
+### 33. UDF FID Name Parsing: Unvalidated impl_use_length Offset — UNRESOLVED
 
 **File:** [sys/fs/udf/udf.c](sys/fs/udf/udf.c)  
 **Severity:** MEDIUM — Out-of-Bounds Read
@@ -808,7 +764,7 @@ for (int j = 0; j < MAX_FD; j++) {
 
 ---
 
-### 36. FAT Cluster Chain: Missing Total-Clusters Bound Check — UNRESOLVED
+### 34. FAT Cluster Chain: Missing Total-Clusters Bound Check — UNRESOLVED
 
 **File:** [sys/fs/fat/fat.c](sys/fs/fat/fat.c)  
 **Severity:** MEDIUM — Out-of-Bounds Read / Kernel Crash
@@ -819,7 +775,7 @@ for (int j = 0; j < MAX_FD; j++) {
 
 ---
 
-### 37. Pipe Implementation: Potential Missed Wakeup — UNRESOLVED
+### 35. Pipe Implementation: Potential Missed Wakeup — UNRESOLVED
 
 **File:** [sys/fs/pipe.c](sys/fs/pipe.c)  
 **Severity:** MEDIUM — Deadlock
@@ -830,7 +786,7 @@ for (int j = 0; j < MAX_FD; j++) {
 
 ---
 
-### 38. Request_irq TOCTOU: Gap Between Conflict Check and Insertion — UNRESOLVED
+### 36. Request_irq TOCTOU: Gap Between Conflict Check and Insertion — UNRESOLVED
 
 **File:** [sys/kern/irq.c](sys/kern/irq.c#L28-L60)  
 **Severity:** MEDIUM — Race Condition
@@ -852,7 +808,7 @@ spinlock_release(&irq_lock);
 
 ---
 
-### 39. Process Group Link Copy Bug in Fork — UNRESOLVED
+### 37. Process Group Link Copy Bug in Fork — UNRESOLVED
 
 **File:** [sys/pm/process.c](sys/pm/process.c#L545-L556)  
 **Severity:** MEDIUM — Linked List Corruption
@@ -873,7 +829,7 @@ child_proc->p_pgrp->pg_members = child_proc;
 
 ## LOW SEVERITY ISSUES
 
-### 40. Spinlock is_held() Non-Atomic Two-Read Pattern — UNRESOLVED
+### 38. Spinlock is_held() Non-Atomic Two-Read Pattern — UNRESOLVED
 
 **File:** [sys/kern/spinlock.c](sys/kern/spinlock.c#L62-L65)  
 **Severity:** LOW — Theoretical Race
@@ -882,7 +838,7 @@ child_proc->p_pgrp->pg_members = child_proc;
 
 ---
 
-### 41. Kernel printf itoa/utoa_hex: No Buffer Bounds Check in Internal Helpers — UNRESOLVED
+### 39. Kernel printf itoa/utoa_hex: No Buffer Bounds Check in Internal Helpers — UNRESOLVED
 
 **File:** [sys/lib/printf.c](sys/lib/printf.c#L10-L100)  
 **Severity:** LOW — Buffer Overflow (Internal)
@@ -891,7 +847,7 @@ child_proc->p_pgrp->pg_members = child_proc;
 
 ---
 
-### 42. ELF Page Map Leak on pmap_enter Failure — UNRESOLVED
+### 40. ELF Page Map Leak on pmap_enter Failure — UNRESOLVED
 
 **File:** [sys/exec/formats/elf.c](sys/exec/formats/elf.c#L590-L600)  
 **Severity:** LOW — Resource Leak
@@ -900,7 +856,7 @@ child_proc->p_pgrp->pg_members = child_proc;
 
 ---
 
-### 43. Random Number Generator State Not Wiped After Extraction — UNRESOLVED
+### 41. Random Number Generator State Not Wiped After Extraction — UNRESOLVED
 
 **File:** [sys/kern/random.c](sys/kern/random.c)  
 **Severity:** LOW — Theoretical State Recovery
@@ -909,7 +865,7 @@ child_proc->p_pgrp->pg_members = child_proc;
 
 ---
 
-### 44. elf_lookup_interpreter() May Return NULL to Caller — UNRESOLVED
+### 42. elf_lookup_interpreter() May Return NULL to Caller — UNRESOLVED
 
 **File:** [sys/exec/formats/elf.c](sys/exec/formats/elf.c#L326-L329)  
 **Severity:** LOW — NULL Dereference
@@ -958,14 +914,13 @@ The page fault handler zeros all anonymous pages: the `VM_OBJ_TYPE_DEFAULT` path
 8. **#11** — ELF no setuid/setgid — all privilege-elevation binaries broken
 9. **#7, #8** — pmap_fork TLB / deferred shootdown races — SMP memory corruption
 10. **#9, #10** — VirtIO 9P DMA / ext2 BGD overflow — device and filesystem corruption
-11. **#17** — procfs /proc/pid/fd world-readable — information disclosure enabling priv-esc
-12. **#21** — `sys_get_robust_list()` arbitrary kernel write
-13. **#19, #20** — Mutex/vm_object races — crash under load
-14. **#29** — `sys_acct` no permission check — audit trail manipulation
-15. **#22** — Fork ordering — zombie leaks
-16. **#24** — sysctl_init SMP race — boot corruption
-17. **#27, #28** — VFS vnode/mount races
-18. Everything else in severity order
+11. **#19** — `sys_get_robust_list()` arbitrary kernel write
+12. **#17, #18** — Mutex/vm_object races — crash under load
+13. **#27** — `sys_acct` no permission check — audit trail manipulation
+14. **#20** — Fork ordering — zombie leaks
+15. **#22** — sysctl_init SMP race — boot corruption
+16. **#25, #26** — VFS vnode/mount races
+17. Everything else in severity order
 
 ---
 

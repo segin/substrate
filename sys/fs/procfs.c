@@ -452,8 +452,10 @@ static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
     size_t new_capacity;
     size_t old_bytes;
     size_t new_bytes;
+    process_t *target;
 
-    if (pid <= 0 || !proc_find(pid)) {
+    target = (pid > 0) ? proc_find(pid) : NULL;
+    if (!target) {
         return NULL;
     }
 
@@ -492,8 +494,8 @@ static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
 
     nodes->dir.flags = FS_DIRECTORY;
     nodes->dir.mask = 0555;
-    nodes->dir.uid = 0;
-    nodes->dir.gid = 0;
+    nodes->dir.uid = target->uid;
+    nodes->dir.gid = target->gid;
     nodes->dir.readdir = &proc_pid_readdir;
     nodes->dir.finddir = &proc_pid_finddir;
     procfs_refresh_timestamps(&nodes->dir);
@@ -501,48 +503,48 @@ static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
     strncpy(nodes->status.name, "status", sizeof(nodes->status.name) - 1);
     nodes->status.flags = FS_FILE;
     nodes->status.mask = 0444;
-    nodes->status.uid = 0;
-    nodes->status.gid = 0;
+    nodes->status.uid = target->uid;
+    nodes->status.gid = target->gid;
     nodes->status.read = &proc_pid_status_read;
     procfs_refresh_timestamps(&nodes->status);
 
     strncpy(nodes->cmdline.name, "cmdline", sizeof(nodes->cmdline.name) - 1);
     nodes->cmdline.flags = FS_FILE;
     nodes->cmdline.mask = 0444;
-    nodes->cmdline.uid = 0;
-    nodes->cmdline.gid = 0;
+    nodes->cmdline.uid = target->uid;
+    nodes->cmdline.gid = target->gid;
     nodes->cmdline.read = &proc_pid_cmdline_read;
     procfs_refresh_timestamps(&nodes->cmdline);
 
     strncpy(nodes->stat.name, "stat", sizeof(nodes->stat.name) - 1);
     nodes->stat.flags = FS_FILE;
     nodes->stat.mask = 0444;
-    nodes->stat.uid = 0;
-    nodes->stat.gid = 0;
+    nodes->stat.uid = target->uid;
+    nodes->stat.gid = target->gid;
     nodes->stat.read = &proc_pid_stat_read;
     procfs_refresh_timestamps(&nodes->stat);
 
     strncpy(nodes->exe.name, "exe", sizeof(nodes->exe.name) - 1);
     nodes->exe.flags = FS_SYMLINK;
     nodes->exe.mask = 0777;
-    nodes->exe.uid = 0;
-    nodes->exe.gid = 0;
+    nodes->exe.uid = target->uid;
+    nodes->exe.gid = target->gid;
     nodes->exe.readlink = &proc_pid_exe_readlink;
     procfs_refresh_timestamps(&nodes->exe);
 
     strncpy(nodes->cwd.name, "cwd", sizeof(nodes->cwd.name) - 1);
     nodes->cwd.flags = FS_SYMLINK;
     nodes->cwd.mask = 0777;
-    nodes->cwd.uid = 0;
-    nodes->cwd.gid = 0;
+    nodes->cwd.uid = target->uid;
+    nodes->cwd.gid = target->gid;
     nodes->cwd.readlink = &proc_pid_cwd_readlink;
     procfs_refresh_timestamps(&nodes->cwd);
 
     strncpy(nodes->fd_dir.name, "fd", sizeof(nodes->fd_dir.name) - 1);
     nodes->fd_dir.flags = FS_DIRECTORY;
-    nodes->fd_dir.mask = 0555;
-    nodes->fd_dir.uid = 0;
-    nodes->fd_dir.gid = 0;
+    nodes->fd_dir.mask = 0500;
+    nodes->fd_dir.uid = target->uid;
+    nodes->fd_dir.gid = target->gid;
     nodes->fd_dir.readdir = &proc_pid_fd_readdir;
     nodes->fd_dir.finddir = &proc_pid_fd_finddir;
     procfs_refresh_timestamps(&nodes->fd_dir);
@@ -553,9 +555,9 @@ static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
         memset(link, 0, sizeof(*link));
         snprintf(link->name, sizeof(link->name), "%d", fd);
         link->flags = FS_SYMLINK;
-        link->mask = 0777;
-        link->uid = 0;
-        link->gid = 0;
+        link->mask = 0700;
+        link->uid = target->uid;
+        link->gid = target->gid;
         link->inode = pid;
         link->impl = (uintptr_t)fd;
         link->readlink = &proc_pid_fd_readlink;
