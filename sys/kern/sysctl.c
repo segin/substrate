@@ -147,10 +147,17 @@ int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, voi
         return ENOENT;
     }
 
-    /* 5. Permission checks (Basic) */
-    if ((oid->oid_kind & CTLFLAG_WR) == 0 && newp != NULL) {
-        mutex_unlock(&sysctl_mutex);
-        return EPERM;
+    /* 5. Permission checks */
+    if (newp != NULL) {
+        if ((oid->oid_kind & CTLFLAG_WR) == 0) {
+            mutex_unlock(&sysctl_mutex);
+            return EPERM;
+        }
+        /* Only root may write to sysctl variables */
+        if (current_process && current_process->euid != 0) {
+            mutex_unlock(&sysctl_mutex);
+            return EPERM;
+        }
     }
 
     /* 6. Lock dropping and Call parameters setup */

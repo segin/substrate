@@ -8,11 +8,11 @@
 
 | Severity | Count | Resolved |
 |----------|-------|----------|
-| CRITICAL | 16 | 9 |
+| CRITICAL | 16 | 10 |
 | HIGH     | 11 | 0 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **42** | **9** |
+| **Total** | **42** | **10** |
 
 ---
 
@@ -20,41 +20,6 @@
 
 
 
-### 4. sysctl: Writable Variables Lack UID Permission Checks — UNRESOLVED
-
-**File:** [sys/kern/sysctl.c](sys/kern/sysctl.c#L127-L133)  
-**Severity:** CRITICAL — Privilege Escalation
-
-**Issue:** `sys_sysctl()` only checks if the OID has `CTLFLAG_WR` set. It does not check the caller's UID/EUID. Any unprivileged user can write to any writable sysctl variable, including `securelevel`:
-
-**Problematic Code:**
-```c
-if ((oid->oid_kind & CTLFLAG_WR) == 0 && newp != NULL) {
-    mutex_unlock(&sysctl_mutex);
-    return EPERM;
-}
-// NO uid/euid check — any user can write!
-```
-
-With `SYSCTL_INT(kern, KERN_SECURELVL, securelevel, CTLFLAG_RW, &securelevel, ...)`, any process can lower or set the system securelevel.
-
-**Impact:** Complete privilege escalation — unprivileged user can disable securelevel protections, modify hostname, domainname, and any other RW sysctl.
-
-**Fix:** Add credential check:
-```c
-if (newp != NULL) {
-    if ((oid->oid_kind & CTLFLAG_WR) == 0) {
-        mutex_unlock(&sysctl_mutex);
-        return EPERM;
-    }
-    if (current_process && current_process->euid != 0) {
-        mutex_unlock(&sysctl_mutex);
-        return EPERM;
-    }
-}
-```
-
----
 
 ### 5. ELF Loader: Integer Overflow in Segment Size Validation — UNRESOLVED
 
