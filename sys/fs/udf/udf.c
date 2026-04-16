@@ -243,6 +243,26 @@ int udf_read_fe(struct udf_fs *fs, struct udf_long_ad *icb, struct udf_fe *fe) {
 }
 
 /*
+ * Read full File Entry sector into caller-provided buffer
+ * Returns 0 on success, -1 on failure
+ */
+static int udf_read_fe_sector(struct udf_fs *fs, struct udf_long_ad *icb, uint8_t *sector_out) {
+    struct udf_tag tag;
+    uint32_t sector = fs->partition_start + icb->block;
+
+    if (udf_read_tag(fs->device, sector, &tag, sector_out, UDF_SECTOR_SIZE) != 0) {
+        return -1;
+    }
+
+    if (tag.tag_id != UDF_TAG_FE && tag.tag_id != UDF_TAG_EFE) {
+        kprint("UDF: Invalid FE/EFE tag\n");
+        return -1;
+    }
+
+    return 0;
+}
+
+/*
  * Read file data via allocation descriptors
  * For now: only handles inline (embedded) data and short_ad
  */
@@ -251,6 +271,15 @@ uint32_t udf_read_file(struct udf_fs *fs, struct udf_fe *fe,
     static uint8_t sector_buf[UDF_SECTOR_SIZE];
     
     uint8_t ad_type = fe->icb_tag.flags & 0x7;
+
+    /* Validate ext_attr_length + alloc_desc_length fit within sector */
+    if (sizeof(struct udf_fe) + fe->ext_attr_length > UDF_SECTOR_SIZE) {
+        return 0;
+    }
+    if (sizeof(struct udf_fe) + fe->ext_attr_length + fe->alloc_desc_length > UDF_SECTOR_SIZE) {
+        return 0;
+    }
+
     uint8_t *alloc_area = ((uint8_t *)fe) + sizeof(struct udf_fe) + fe->ext_attr_length;
     
     if (ad_type == UDF_ICB_FLAG_AD_INLINE) {
@@ -391,7 +420,7 @@ uint32_t udf_read_file(struct udf_fs *fs, struct udf_fe *fe,
 typedef struct {
     struct udf_fs *fs;
     struct udf_long_ad icb;
-    struct udf_fe fe;
+    uint8_t fe_sector[UDF_SECTOR_SIZE]; /* Full on-disk FE sector (includes alloc descriptors) */
 } udf_node_t;
 
 #define UDF_NODE_CACHE_SIZE 64
@@ -420,15 +449,16 @@ struct vnodeops udf_vnodeops = {
 
 /* UDF context defined in udf.c, declared in udf.h */
 
-static fs_node_t *udf_alloc_node(struct udf_fs *fs, struct udf_long_ad *icb, struct udf_fe *fe) {
+static fs_node_t *udf_alloc_node(struct udf_fs *fs, struct udf_long_ad *icb, uint8_t *fe_sector) {
     int idx = udf_node_cache_idx++ % UDF_NODE_CACHE_SIZE;
     
     udf_node_t *ctx = &udf_node_cache[idx];
     fs_node_t *node = &udf_fs_node_cache[idx];
+    struct udf_fe *fe = (struct udf_fe *)fe_sector;
     
     ctx->fs = fs;
     memcpy(&ctx->icb, icb, sizeof(struct udf_long_ad));
-    memcpy(&ctx->fe, fe, sizeof(struct udf_fe));
+    memcpy(ctx->fe_sector, fe_sector, UDF_SECTOR_SIZE);
     
     memset(node, 0, sizeof(fs_node_t));
     node->length = (uint32_t)fe->info_length;
@@ -451,7 +481,7 @@ static fs_node_t *udf_alloc_node(struct udf_fs *fs, struct udf_long_ad *icb, str
 
 static size_t udf_vfs_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     udf_node_t *ctx = (udf_node_t *)(uintptr_t)node->impl;
-    return udf_read_file(ctx->fs, &ctx->fe, (uint32_t)offset, size, buffer);
+    return udf_read_file(ctx->fs, (struct udf_fe *)ctx->fe_sector, (uint32_t)offset, size, buffer);
 }
 
 /*
@@ -460,21 +490,24 @@ static size_t udf_vfs_read(fs_node_t *node, off_t offset, size_t size, uint8_t *
 static struct dirent *udf_vfs_readdir(fs_node_t *node, uint64_t index) {
     udf_node_t *ctx = (udf_node_t *)(uintptr_t)node->impl;
     static uint8_t dir_buf[4096];
+    struct udf_fe *fe = (struct udf_fe *)ctx->fe_sector;
     
     /* Read directory data */
-    uint32_t dir_size = (uint32_t)ctx->fe.info_length;
-    udf_read_file(ctx->fs, &ctx->fe, 0, dir_size > 4096 ? 4096 : dir_size, dir_buf);
+    uint32_t dir_size = (uint32_t)fe->info_length;
+    uint32_t read_size = dir_size > sizeof(dir_buf) ? sizeof(dir_buf) : dir_size;
+    udf_read_file(ctx->fs, fe, 0, read_size, dir_buf);
     
     /* Iterate FIDs */
     uint32_t pos = 0;
     uint32_t cur_idx = 0;
     
-    while (pos < dir_size) {
+    while (pos + 38 <= read_size) {
         struct udf_fid *fid = (struct udf_fid *)(dir_buf + pos);
         
         /* Calculate FID size (38 + impl_use + file_id, padded to 4 bytes) */
         uint32_t fid_size = 38 + fid->impl_use_length + fid->file_id_length;
         fid_size = (fid_size + 3) & ~3;
+        if (fid_size < 40 || pos + fid_size > read_size) break;
         
         if (!(fid->characteristics & UDF_FID_DELETED)) {
             if (cur_idx == index) {
@@ -520,16 +553,19 @@ static struct dirent *udf_vfs_readdir(fs_node_t *node, uint64_t index) {
 static fs_node_t *udf_vfs_finddir(fs_node_t *node, char *name) {
     udf_node_t *ctx = (udf_node_t *)(uintptr_t)node->impl;
     static uint8_t dir_buf[4096];
+    struct udf_fe *fe = (struct udf_fe *)ctx->fe_sector;
     
-    uint32_t dir_size = (uint32_t)ctx->fe.info_length;
-    udf_read_file(ctx->fs, &ctx->fe, 0, dir_size > 4096 ? 4096 : dir_size, dir_buf);
+    uint32_t dir_size = (uint32_t)fe->info_length;
+    uint32_t read_size = dir_size > sizeof(dir_buf) ? sizeof(dir_buf) : dir_size;
+    udf_read_file(ctx->fs, fe, 0, read_size, dir_buf);
     
     uint32_t pos = 0;
-    while (pos < dir_size) {
+    while (pos + 38 <= read_size) {
         struct udf_fid *fid = (struct udf_fid *)(dir_buf + pos);
         
         uint32_t fid_size = 38 + fid->impl_use_length + fid->file_id_length;
         fid_size = (fid_size + 3) & ~3;
+        if (fid_size < 40 || pos + fid_size > read_size) break;
         
         if (!(fid->characteristics & UDF_FID_DELETED)) {
             char fname[256];
@@ -545,10 +581,10 @@ static fs_node_t *udf_vfs_finddir(fs_node_t *node, char *name) {
             }
             
             if (strcmp(fname, name) == 0) {
-                /* Found - read file entry */
-                struct udf_fe fe;
-                if (udf_read_fe(ctx->fs, &fid->icb, &fe) == 0) {
-                    fs_node_t *result = udf_alloc_node(ctx->fs, &fid->icb, &fe);
+                /* Found - read full file entry sector */
+                uint8_t fe_sec[UDF_SECTOR_SIZE];
+                if (udf_read_fe_sector(ctx->fs, &fid->icb, fe_sec) == 0) {
+                    fs_node_t *result = udf_alloc_node(ctx->fs, &fid->icb, fe_sec);
                     /* Ensure null-termination and prevent buffer overflow by truncating if necessary */
                     strncpy(result->name, fname, sizeof(result->name) - 1);
                     result->name[sizeof(result->name) - 1] = '\0';
@@ -591,7 +627,8 @@ static int udf_vfs_mkdir(fs_node_t *parent, const char *name, uint16_t permissio
     memset(new_icb.impl_use, 0, 6);
     
     /* Add entry to parent directory */
-    if (udf_add_fid(fs->device, &pctx->fe, pctx->icb.block, name, &new_icb, UDF_FID_DIRECTORY) != 0) {
+    struct udf_fe *pfe = (struct udf_fe *)pctx->fe_sector;
+    if (udf_add_fid(fs->device, pfe, pctx->icb.block, name, &new_icb, UDF_FID_DIRECTORY) != 0) {
         udf_free_block(block);
         return -1;
     }
@@ -608,7 +645,7 @@ static int udf_vfs_mkdir(fs_node_t *parent, const char *name, uint16_t permissio
     }
     
     // Update parent node size
-    parent->length = (uint32_t)pctx->fe.info_length;
+    parent->length = (uint32_t)pfe->info_length;
     
     return 0;
 }
@@ -703,23 +740,24 @@ static fs_node_t *udf_mount(const char *device, uint32_t flags, void *data) {
     /* Save root ICB */
     memcpy(&udf_ctx.root_icb, &fsd.root_dir_icb, sizeof(struct udf_long_ad));
     
-    /* Read root directory file entry */
-    struct udf_fe root_fe;
-    if (udf_read_fe(&udf_ctx, &udf_ctx.root_icb, &root_fe) != 0) {
+    /* Read root directory file entry (full sector) */
+    uint8_t root_fe_sector[UDF_SECTOR_SIZE];
+    if (udf_read_fe_sector(&udf_ctx, &udf_ctx.root_icb, root_fe_sector) != 0) {
         kprint("UDF: Failed to read root directory\n");
         return NULL;
     }
+    struct udf_fe *root_fe = (struct udf_fe *)root_fe_sector;
     
     /* Set up root node */
     udf_root_ctx.fs = &udf_ctx;
     memcpy(&udf_root_ctx.icb, &udf_ctx.root_icb, sizeof(struct udf_long_ad));
-    memcpy(&udf_root_ctx.fe, &root_fe, sizeof(struct udf_fe));
+    memcpy(udf_root_ctx.fe_sector, root_fe_sector, UDF_SECTOR_SIZE);
     
     memset(&udf_root, 0, sizeof(fs_node_t));
     strncpy(udf_root.name, "/", sizeof(udf_root.name) - 1);
     udf_root.name[sizeof(udf_root.name) - 1] = '\0';
     udf_root.flags = FS_DIRECTORY;
-    udf_root.length = (uint32_t)root_fe.info_length;
+    udf_root.length = (uint32_t)root_fe->info_length;
     udf_root.impl = (uintptr_t)&udf_root_ctx;
     udf_root.readdir = udf_vfs_readdir;
     udf_root.finddir = udf_vfs_finddir;

@@ -8,11 +8,11 @@
 
 | Severity | Count | Resolved |
 |----------|-------|----------|
-| CRITICAL | 18 | 2 |
+| CRITICAL | 19 | 3 |
 | HIGH     | 11 | 0 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **44** | **2** |
+| **Total** | **45** | **3** |
 
 ---
 
@@ -926,28 +926,6 @@ The page fault handler zeros all anonymous pages: the `VM_OBJ_TYPE_DEFAULT` path
 
 ## Phase 3: Filesystem Driver Audit (Minix, FAT, UDF)
 
-### FS-2. UDF — Kernel Memory Leak via `udf_read_file` Inline Data Path (Stale FE Cache) — UNRESOLVED
-
-**File:** `sys/fs/udf/udf.c` lines 262–275  
-**Severity:** CRITICAL — Kernel Memory Information Leak
-
-**Issue:** `udf_read_fe()` copies only `sizeof(struct udf_fe)` bytes into the node cache. The allocation descriptors / inline data that follow the FE in the on-disk sector are NOT stored. When VFS calls `udf_read_file(&ctx->fe, ...)`, the function computes `alloc_area = ((uint8_t *)fe) + sizeof(struct udf_fe) + fe->ext_attr_length` — this points past the `udf_node_t` struct into adjacent kernel BSS memory.
-
-For inline data (`icb_tag.flags & 0x7 == 3`), the data is directly `memcpy`'d from kernel memory to the user's buffer. `ext_attr_length` (from disk) controls the base offset; `info_length` (from disk) controls the read length.
-
-**Impact:** Mounting a crafted UDF image and reading a file leaks arbitrary kernel memory to userspace.
-
-**Problematic Code:**
-```c
-uint8_t *alloc_area = ((uint8_t *)fe) + sizeof(struct udf_fe) + fe->ext_attr_length;
-if (ad_type == UDF_ICB_FLAG_AD_INLINE) {
-    memcpy(buffer, alloc_area + offset, size);  // reads kernel BSS
-```
-
-**Fix:** Store full sector in node cache, or re-read FE from disk on each access, validating `sizeof(struct udf_fe) + ext_attr_length + alloc_desc_length <= UDF_SECTOR_SIZE`.
-
----
-
 ### FS-3. UDF — OOB Read in Directory FID Parsing (`readdir`/`finddir`) — UNRESOLVED
 
 **File:** `sys/fs/udf/udf.c` lines 461–471, 521–533  
@@ -1019,24 +997,3 @@ memset(fid, 0, fid_size);
 ```c
 if (dir_size + fid_size > sizeof(dir_buf)) return -1;
 ```
-
----
-
-### FS-6. UDF — `udf_read_file` Short/Long AD Path Dereferences Kernel Memory as Allocation Descriptors — UNRESOLVED
-
-**File:** `sys/fs/udf/udf.c` lines 277–333  
-**Severity:** CRITICAL — Uncontrolled Kernel Device I/O
-
-**Issue:** Same root cause as FS-2: the cached `struct udf_fe` lacks the trailing allocation descriptor data. For short_ad and long_ad paths, `ads[i].position` / `ads[i].block` values come from kernel BSS memory (not from disk), and are used as sector offsets for device reads. `num_ads` is controlled by the attacker via `alloc_desc_length`. This causes device reads at arbitrary kernel-memory-derived offsets.
-
-**Impact:** Semi-random device sector reads; combined with FS-2 completes an arbitrary read primitive.
-
-**Problematic Code:**
-```c
-struct udf_short_ad *ads = (struct udf_short_ad *)alloc_area;
-uint32_t num_ads = fe->alloc_desc_length / sizeof(struct udf_short_ad);
-for (uint32_t i = 0; i < num_ads && size > 0; i++) {
-    uint32_t ext_start = fs->partition_start + ads[i].position;  // kernel memory
-```
-
-**Fix:** Same as FS-2 — store or re-read the full FE sector, validate offset bounds.
