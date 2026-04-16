@@ -8,11 +8,11 @@
 
 | Severity | Count | Resolved |
 |----------|-------|----------|
-| CRITICAL | 16 | 12 |
+| CRITICAL | 16 | 13 |
 | HIGH     | 11 | 1 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **42** | **13** |
+| **Total** | **42** | **14** |
 
 ---
 
@@ -136,25 +136,6 @@ if (ext2_fs.group_count > 64) {
     kprint("EXT2: Too many block groups (%u > 64)\n", ext2_fs.group_count);
     return NULL;
 }
-```
-
----
-
-### 11. ELF Loader: No setuid/setgid Credential Handling — UNRESOLVED
-
-**File:** [sys/exec/formats/elf.c](sys/exec/formats/elf.c)  
-**Severity:** CRITICAL — Privilege Escalation Mechanism Broken
-
-**Issue:** The ELF loader and exec subsystem have NO handling for `S_ISUID` or `S_ISGID` file permission bits. There are zero references to `setuid`, `seteuid`, `S_ISUID`, or credential changes anywhere in `sys/exec/`. Setuid binaries (like `su`, `passwd`, `login`) execute with the caller's UID/GID, completely defeating the setuid mechanism.
-
-**Impact:** No setuid/setgid support means `su`, `sudo`, `passwd`, `login`, and any other privilege-changing utility cannot function. Any program requiring elevated privileges via setuid is broken.
-
-**Fix:** In the exec path, after loading the binary and before returning to userspace:
-```c
-if (vnode->v_mode & S_ISUID)
-    current_process->euid = vnode->v_uid;
-if (vnode->v_mode & S_ISGID)
-    current_process->egid = vnode->v_gid;
 ```
 
 ---

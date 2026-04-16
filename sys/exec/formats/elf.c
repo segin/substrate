@@ -15,6 +15,7 @@
 #include <sys/kern_syscalls.h>
 #include <sys/file.h>
 #include <sys/errno.h>
+#include <sys/stat.h>
 #include <arch/i386/pmm.h>
 #if defined(__i386__) || defined(HOST_TEST)
 #include <arch/i386/pmap.h>
@@ -1176,6 +1177,12 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     if (current_process) {
         // Reset signal handlers on successful exec (POSIX requirement)
         exec_reset_signals();
+
+        // Handle setuid/setgid bits (POSIX exec credential change)
+        if (file && (file->mask & S_ISUID))
+            current_process->euid = file->uid;
+        if (file && (file->mask & S_ISGID))
+            current_process->egid = file->gid;
 
         // Extract basename
         const char *name = path;
