@@ -594,6 +594,7 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
                     kprint("ELF: Out of physical memory\n");
                     /* Free already-mapped pages for this segment (finding #11) */
                     for (int pi = 0; pi < num_pages; pi++) {
+                        pmap_remove(pmap, page_maps[pi].va);
                         pmm_free_block(page_maps[pi].pa);
                     }
                     kfree(page_maps, segment_pages * sizeof(*page_maps));
@@ -606,6 +607,11 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
                 uint32_t pa_phys = (uint32_t)(uintptr_t)pa - 0xC0000000;
                 if (pmap_enter(pmap, va, pa_phys, prot, 0) < 0) {
                     kprint("ELF: Failed to map page\n");
+                    pmm_free_block(pa);
+                    for (int pi = 0; pi < num_pages; pi++) {
+                        pmap_remove(pmap, page_maps[pi].va);
+                        pmm_free_block(page_maps[pi].pa);
+                    }
                     kfree(page_maps, segment_pages * sizeof(*page_maps));
                     kfree(image, sizeof(*image));
                     return 0;
@@ -650,6 +656,10 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
                         uint8_t *dest = (uint8_t *)page_maps[pi].pa + offset_in_page;
                         if (file->read(file, phdr.p_offset + offset_in_segment, copy_size, dest) != copy_size) {
                             kprint("ELF: Failed to read segment data directly\n");
+                            for (int ri = 0; ri < num_pages; ri++) {
+                                pmap_remove(pmap, page_maps[ri].va);
+                                pmm_free_block(page_maps[ri].pa);
+                            }
                             kfree(page_maps, segment_pages * sizeof(*page_maps));
                             kfree(image, sizeof(*image));
                             return 0;

@@ -11,8 +11,8 @@
 | CRITICAL | 16 | 16 |
 | HIGH     | 11 | 11 |
 | MEDIUM   | 10 | 3 |
-| LOW      | 5 | 2 |
-| **Total** | **42** | **32** |
+| LOW      | 5 | 3 |
+| **Total** | **42** | **33** |
 
 ---
 
@@ -108,15 +108,6 @@ if (size > KMEM_MAX_ALLOC) return NULL;
 ---
 
 ## LOW SEVERITY ISSUES
-
-### 40. ELF Page Map Leak on pmap_enter Failure — UNRESOLVED
-
-**File:** [sys/exec/formats/elf.c](sys/exec/formats/elf.c#L590-L600)  
-**Severity:** LOW — Resource Leak
-
-**Issue:** When `pmap_enter()` fails for a page in the middle of a segment, only the `page_maps` array is freed but the already-mapped pages from earlier in the loop are not unmapped or freed.
-
----
 
 ### 41. Random Number Generator State Not Wiped After Extraction — UNRESOLVED
 
