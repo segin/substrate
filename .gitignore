@@ -276,3 +276,4 @@ tools/sbsh_expect.exp
 /usr.lib/elfobj/tests/test_ensure_symbols_relocs
 tests/usr.lib/exvi/test_exvi_prop
 tests/usr.lib/exvi/test_exvi_core
+**/.build-mode
