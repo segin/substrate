@@ -8,11 +8,11 @@
 
 | Severity | Count | Resolved |
 |----------|-------|----------|
-| CRITICAL | 14 | 2 |
+| CRITICAL | 13 | 3 |
 | HIGH     | 13 | 0 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **44** | **2** |
+| **Total** | **44** | **3** |
 
 ---
 
@@ -320,30 +320,6 @@ if (vnode->v_mode & S_ISUID)
 if (vnode->v_mode & S_ISGID)
     current_process->egid = vnode->v_gid;
 ```
-
----
-
-### 14. Script Handler `script_recursion_depth` Global Static — Race Enables Unlimited Kernel Stack Recursion — UNRESOLVED
-
-**File:** [sys/exec/formats/script.c](sys/exec/formats/script.c#L21)  
-**Severity:** CRITICAL — Kernel Stack Overflow → Arbitrary Code Execution
-
-**Issue:** `script_recursion_depth` is a global static shared across all processes. Concurrent `exec()` calls race: process A checks `depth < 4`, gets preempted, process B checks `depth < 4`, both proceed. The `exec_dispatch → script_load → exec_dispatch` chain consumes significant kernel stack per level; unbounded recursion causes kernel stack overflow.
-
-**Problematic Code:**
-```c
-static int script_recursion_depth = 0; // Global, not per-thread!
-if (script_recursion_depth >= SCRIPT_MAX_RECURSION) {
-    return -ELOOP;
-}
-script_recursion_depth++;
-ret = exec_dispatch(interp, new_argv, envp);
-script_recursion_depth--;
-```
-
-**Impact:** Kernel stack overflow from unprivileged userspace via concurrent script execution.
-
-**Fix:** Move recursion depth to per-thread state (`current_thread->script_depth`).
 
 ---
 

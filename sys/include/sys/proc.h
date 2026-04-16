@@ -231,6 +231,9 @@ typedef struct thread {
     
     // Fault Recovery (copyin/copyout)
     uintptr_t                on_fault;
+
+    // Exec recursion tracking (shebang scripts)
+    int                      script_depth;
     
     // Syscall registers (for fork/vfork)
     void *syscall_regs;
