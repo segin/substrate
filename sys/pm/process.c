@@ -581,16 +581,18 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     // Create Thread for child
     
     /* 
-     * Create thread first, then make child visible (findings #12, #13).
-     * This ensures wait() cannot reap a half-initialized child.
+     * Add child to parent's child list BEFORE making it schedulable.
+     * This ensures wait() sees a fully linked child and the child
+     * cannot run before it appears in the process tree.
      */
+    proc_add_child(parent, child_proc);
+
     extern int sched_fork_thread(process_t *proc, void *stack);
     int fork_result = sched_fork_thread(child_proc, stack);
     if (fork_result < 0) {
+        proc_remove_child(parent, child_proc);
         return fork_result;
     }
-    
-    proc_add_child(parent, child_proc);
     
     return fork_result;
 }

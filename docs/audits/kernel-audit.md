@@ -9,10 +9,10 @@
 | Severity | Count | Resolved |
 |----------|-------|----------|
 | CRITICAL | 16 | 16 |
-| HIGH     | 11 | 5 |
+| HIGH     | 11 | 6 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **42** | **21** |
+| **Total** | **42** | **22** |
 
 ---
 
@@ -42,24 +42,6 @@ if (__sync_sub_and_fetch(&object->ref_count, 1) == 0) {
 ```
 
 **Fix:** Add a per-object lock or use a global VM object lock for teardown, or use RCU-style deferred freeing.
-
----
-
-### 20. Fork: Child Visible to Scheduler Before proc_add_child() — UNRESOLVED
-
-**File:** [sys/pm/process.c](sys/pm/process.c#L567-L575)  
-**Severity:** HIGH — Resource Leak / Race Condition
-
-**Issue:** `sched_fork_thread()` makes the child thread schedulable, but `proc_add_child()` is called afterward. If the child thread runs and exits (becoming a zombie) before `proc_add_child()`, the parent's `wait()` will never see it, causing a permanent zombie leak. Conversely, if the parent calls `wait()` between these two operations, it won't find the child.
-
-**Problematic Code:**
-```c
-int fork_result = sched_fork_thread(child_proc, stack);  // Child is now schedulable!
-// ... window where child could run and exit ...
-proc_add_child(parent, child_proc);  // Only now visible to wait()
-```
-
-**Fix:** Add child to parent's child list BEFORE calling `sched_fork_thread()`, or keep the child in a `SIDL` (idle/new) state until all setup is complete.
 
 ---
 
