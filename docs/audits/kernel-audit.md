@@ -8,11 +8,11 @@
 
 | Severity | Count | Resolved |
 |----------|-------|----------|
-| CRITICAL | 16 | 13 |
+| CRITICAL | 16 | 14 |
 | HIGH     | 11 | 1 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **42** | **14** |
+| **Total** | **42** | **15** |
 
 ---
 
@@ -21,31 +21,6 @@
 
 
 
-
-### 7. pmap_fork() Local-Only TLB Flush on SMP — COW Race — UNRESOLVED
-
-**File:** [sys/arch/i386/pmap.c](sys/arch/i386/pmap.c#L616-L620)  
-**Severity:** CRITICAL — Memory Corruption / Data Loss
-
-**Issue:** `pmap_fork()` marks parent page table entries read-only for COW, then calls `pmap_invalidate_all()` which is a LOCAL-CPU-ONLY TLB flush. On SMP, other CPUs retain stale WRITABLE TLB entries for the parent's pages. A parent thread running on another CPU can write to a COW page without faulting, corrupting the child's shared physical page.
-
-**Problematic Code:**
-```c
-if (cr3 == src_pmap->pdir_phys) {
-    pmap_invalidate_all();  // LOCAL flush only! Other CPUs still have writable TLB entries
-}
-```
-
-**Impact:** Silent data corruption between parent and child after fork. Parent writes to COW pages without triggering COW fault, corrupting child's memory.
-
-**Fix:** Replace with `pmap_shootdown_all()` to IPI all CPUs:
-```c
-if (cr3 == src_pmap->pdir_phys) {
-    pmap_shootdown_all();  // IPI all CPUs to flush stale writable entries
-}
-```
-
----
 
 ### 8. Deferred TLB Shootdown: Unprotected Static Globals on SMP — UNRESOLVED
 

@@ -607,14 +607,13 @@ pmap_t pmap_fork(pmap_t src_pmap) {
 
     /*
      * Parent mappings were rewritten read-only for COW.
-     * If parent's pmap is currently active, flush stale writable TLB entries
-     * so subsequent parent writes fault and trigger COW instead of corrupting
-     * shared child pages.
+     * Flush stale writable TLB entries on ALL CPUs so subsequent parent
+     * writes fault and trigger COW instead of corrupting shared child pages.
      */
     uint32_t cr3;
     __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
     if (cr3 == src_pmap->pdir_phys) {
-        pmap_invalidate_all();
+        pmap_shootdown_all();
     }
     
     return dst_pmap;
