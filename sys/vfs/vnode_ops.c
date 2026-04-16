@@ -126,11 +126,20 @@ vop_mkdir(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp, stru
 int
 vop_remove(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
 {
+    int error;
+
     if (dvp->v_type != VDIR)
         return ENOTDIR;
 
-    if (dvp->v_op && dvp->v_op->vop_remove)
-        return dvp->v_op->vop_remove(dvp, vp, cnp);
+    if (dvp->v_op && dvp->v_op->vop_remove) {
+        error = dvp->v_op->vop_remove(dvp, vp, cnp);
+        if (error == 0) {
+            cache_purge(dvp);
+            if (vp)
+                cache_purge(vp);
+        }
+        return error;
+    }
 
     return EOPNOTSUPP;
 }
@@ -142,11 +151,20 @@ vop_remove(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
 int
 vop_rmdir(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
 {
+    int error;
+
     if (dvp->v_type != VDIR)
         return ENOTDIR;
 
-    if (dvp->v_op && dvp->v_op->vop_rmdir)
-        return dvp->v_op->vop_rmdir(dvp, vp, cnp);
+    if (dvp->v_op && dvp->v_op->vop_rmdir) {
+        error = dvp->v_op->vop_rmdir(dvp, vp, cnp);
+        if (error == 0) {
+            cache_purge(dvp);
+            if (vp)
+                cache_purge(vp);
+        }
+        return error;
+    }
 
     return EOPNOTSUPP;
 }
@@ -546,14 +564,26 @@ int
 vop_rename(struct vnode *fdvp, struct vnode *fvp, struct componentname *fcnp,
            struct vnode *tdvp, struct vnode *tvp, struct componentname *tcnp)
 {
+    int error;
+
     if (fdvp->v_type != VDIR || tdvp->v_type != VDIR)
         return ENOTDIR;
 
     if (fdvp->v_mount != tdvp->v_mount)
         return EXDEV;
 
-    if (fdvp->v_op && fdvp->v_op->vop_rename)
-        return fdvp->v_op->vop_rename(fdvp, fvp, fcnp, tdvp, tvp, tcnp);
+    if (fdvp->v_op && fdvp->v_op->vop_rename) {
+        error = fdvp->v_op->vop_rename(fdvp, fvp, fcnp, tdvp, tvp, tcnp);
+        if (error == 0) {
+            cache_purge(fdvp);
+            cache_purge(tdvp);
+            if (fvp)
+                cache_purge(fvp);
+            if (tvp)
+                cache_purge(tvp);
+        }
+        return error;
+    }
 
     return EOPNOTSUPP;
 }

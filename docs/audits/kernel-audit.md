@@ -10,9 +10,9 @@
 |----------|-------|----------|
 | CRITICAL | 16 | 16 |
 | HIGH     | 11 | 11 |
-| MEDIUM   | 10 | 8 |
+| MEDIUM   | 10 | 9 |
 | LOW      | 5 | 5 |
-| **Total** | **42** | **40** |
+| **Total** | **42** | **41** |
 
 ---
 
@@ -26,17 +26,6 @@
 ## HIGH SEVERITY ISSUES
 
 ## MEDIUM SEVERITY ISSUES
-
-### 32. Name Cache: Stale Entries After Unlink/Rename — UNRESOLVED
-
-**File:** [sys/vfs/vfs_cache.c](sys/vfs/vfs_cache.c)  
-**Severity:** MEDIUM — Logic Error / Stale Data
-
-**Issue:** After `unlink()` or `rename()`, the name cache may still return stale entries if `cache_purge()` is not called for all affected paths. This can cause phantom files to appear in lookups or deletions to appear to fail.
-
-**Fix:** Implement generation-number-based invalidation, or ensure every VFS mutation path calls `cache_purge()` on affected vnodes.
-
----
 
 ### 35. Pipe Implementation: Potential Missed Wakeup — UNRESOLVED
 
