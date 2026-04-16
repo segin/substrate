@@ -10,9 +10,9 @@
 |----------|-------|----------|
 | CRITICAL | 16 | 16 |
 | HIGH     | 11 | 11 |
-| MEDIUM   | 10 | 0 |
+| MEDIUM   | 10 | 1 |
 | LOW      | 5 | 0 |
-| **Total** | **42** | **27** |
+| **Total** | **42** | **28** |
 
 ---
 
@@ -158,25 +158,6 @@ spinlock_release(&irq_lock);
 ```
 
 **Fix:** Pre-allocate the action structure, then do the check-and-insert atomically under one lock acquisition.
-
----
-
-### 37. Process Group Link Copy Bug in Fork — UNRESOLVED
-
-**File:** [sys/pm/process.c](sys/pm/process.c#L545-L556)  
-**Severity:** MEDIUM — Linked List Corruption
-
-**Issue:** Fork initially copies `p_pgrp_link` from parent, then overwrites it correctly. However, the initial copy creates a brief window where two processes share the same link pointer, which could corrupt the process group linked list if another CPU iterates it during this window.
-
-**Problematic Code:**
-```c
-child_proc->p_pgrp_link = parent->p_pgrp_link; // WRONG copy first
-// Then overwrite:
-child_proc->p_pgrp_link = child_proc->p_pgrp->pg_members; // Correct
-child_proc->p_pgrp->pg_members = child_proc;
-```
-
-**Fix:** Remove the initial stale copy; only set the correct link under `proctree_lock`.
 
 ---
 

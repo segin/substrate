@@ -552,11 +552,9 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     // Copy Process Group and Session (inherit from parent)
     mutex_lock(&proctree_lock);
     child_proc->p_pgrp = parent->p_pgrp;
-    child_proc->p_pgrp_link = parent->p_pgrp_link; // Wait, we need to link into the group list properly!
     
     /* 
      * Correctly adding to process group:
-     * We can't just copy the pointer 'p_pgrp_link' - that would corrupt the linked list.
      * We need to add 'child_proc' to the process group's member list.
      */
     if (child_proc->p_pgrp) {
