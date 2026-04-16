@@ -8,64 +8,17 @@
 
 | Severity | Count | Resolved |
 |----------|-------|----------|
-| CRITICAL | 16 | 6 |
+| CRITICAL | 16 | 9 |
 | HIGH     | 11 | 0 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **42** | **6** |
+| **Total** | **42** | **9** |
 
 ---
 
 ## CRITICAL ISSUES
 
-### 2. futex_read_user() / futex_cmpxchg_user() Direct User Pointer Dereference Without Fault Handler — UNRESOLVED
 
-**File:** [sys/kern/futex.c](sys/kern/futex.c#L97-L135)  
-**Severity:** CRITICAL — Kernel Crash / Information Leak
-
-**Issue:** Both functions validate the address range and check that the page is mapped via `futex_get_key()`, then directly dereference the user pointer (`*value = *uaddr`) and execute `lock cmpxchgl` on user memory without setting `current_thread->on_fault`. If the page is unmapped between the check and the access (TOCTOU), or if the page is swapped out, the kernel will take an unhandled page fault and panic.
-
-**Problematic Code:**
-```c
-static int futex_read_user(int *uaddr, int *value) {
-    void *key = futex_get_key((uintptr_t)uaddr);
-    if (!key) return -EFAULT;
-    *value = *uaddr;  // No fault handler! Kernel panic on page fault
-    return 0;
-}
-```
-
-**Impact:** Kernel crash (DoS). A process can trigger this by munmap()'ing the futex page from another thread between the check and the dereference.
-
-**Fix:** Use `copyin()` instead of direct dereference:
-```c
-return copyin(uaddr, value, sizeof(int));
-```
-For `futex_cmpxchg_user()`, set `on_fault` around the inline assembly.
-
----
-
-### 3. futex_read_timespec() Direct User Pointer Dereference — UNRESOLVED
-
-**File:** [sys/kern/futex.c](sys/kern/futex.c#L50-L65)  
-**Severity:** CRITICAL — Kernel Crash / Information Leak
-
-**Issue:** `futex_read_timespec()` validates bounds but then does `*out = *(struct timespec *)uaddr` — a direct dereference without `copyin()` or fault handler. The code comments even acknowledge this: "Direct copy since we share address space and validated bounds / In a full model we'd use copyin() to handle faults."
-
-**Problematic Code:**
-```c
-static int futex_read_timespec(void *uaddr, struct timespec *out) {
-    // ... bounds check ...
-    *out = *(struct timespec *)uaddr;  // Direct dereference!
-    return 0;
-}
-```
-
-**Impact:** Same as #2 — kernel panic on unmapped pages, plus potential information leak if address near kernel boundary passes the bounds check.
-
-**Fix:** Replace with `copyin(uaddr, out, sizeof(struct timespec))`.
-
----
 
 ### 4. sysctl: Writable Variables Lack UID Permission Checks — UNRESOLVED
 
@@ -298,37 +251,7 @@ int kern_chroot(const char *path) {
 
 ---
 
-### 16. futex_thread_exit() Direct Dereference of robust_list_head Fields — UNRESOLVED
 
-**File:** [sys/kern/futex.c](sys/kern/futex.c#L198-L220)  
-**Severity:** CRITICAL — Kernel Panic / Controlled Pointer Dereference
-
-**Issue:** `futex_thread_exit()` reads `head->list_op_pending`, `head->futex_offset`, and `head->list.next` by directly dereferencing the `robust_list_head` pointer (which resides in userspace). While the function later uses `futex_read_user()` for futex values and next pointers, the **initial three field reads** have no copyin and no fault handler. This is distinct from the known #2/#3 `futex_read_user`/`futex_read_timespec` findings.
-
-**Problematic Code:**
-```c
-void futex_thread_exit(thread_t *t) {
-    struct robust_list_head *head = t->robust_list;  // Userspace pointer
-    
-    if (head->list_op_pending) {  // DIRECT DEREFERENCE — no copyin
-        int *futex_addr = (int *)((char *)head->list_op_pending 
-                         + head->futex_offset);  // DIRECT DEREFERENCE — no copyin
-    }
-    entry = head->list.next;  // DIRECT DEREFERENCE — no copyin
-```
-
-**Impact:** Attacker calls `set_robust_list()`, then `munmap()` the page, then exits the thread. Kernel dereferences unmapped pointer at ring 0 with no fault recovery. Kernel panic (DoS) or controlled read if page is remapped.
-
-**Fix:** Copy the entire `struct robust_list_head` into a kernel-stack local:
-```c
-struct robust_list_head khead;
-if (copyin(t->robust_list, &khead, sizeof(khead)) != 0) {
-    t->robust_list = NULL;
-    return;
-}
-```
-
----
 
 ## HIGH SEVERITY ISSUES
 

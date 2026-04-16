@@ -56,9 +56,9 @@ static int futex_read_timespec(void *uaddr, struct timespec *out) {
         return -EFAULT;
     }
 
-    /* Direct copy since we share address space and validated bounds */
-    /* In a full model we'd use copyin() to handle faults */
-    *out = *(struct timespec *)uaddr;
+    /* Use copyin() to safely copy from userspace with fault handling */
+    if (copyin(uaddr, out, sizeof(struct timespec)) != 0)
+        return -EFAULT;
 
     return 0;
 }
@@ -91,24 +91,12 @@ void *futex_get_key(uintptr_t uaddr) {
  * Returns 0 on success, -EFAULT on failure.
  */
 static int futex_read_user(int *uaddr, int *value) {
-    /* In a real implementation, this would use safe copy functions
-     * to handle page faults gracefully. For now, direct access
-     * with validation that page is mapped. */
     if (!validate_uaddr((uintptr_t)uaddr)) return -EFAULT;
     
-    /* We only need to check mapping presence if we are about to access it.
-       If we trust validate_uaddr and pmap, we might skip full key check here
-       if performance critical, but for safety lets check mapping exists.
-       However, for private futexes we might want to avoid pmap_extract.
-       But we still need to know if memory is accessible.
-       Let's assume validate_uaddr is enough for VA range,
-       and page fault handler handles the rest (if we had copyin).
-       Since we dereference directly, we MUST ensure mapping exists.
-    */
-    void *key = futex_get_key((uintptr_t)uaddr);
-    if (!key) return -EFAULT;
+    /* Use copyin() for safe userspace access with fault handling */
+    if (copyin(uaddr, value, sizeof(int)) != 0)
+        return -EFAULT;
     
-    *value = *uaddr;
     return 0;
 }
 
@@ -122,33 +110,27 @@ static int futex_cmpxchg_user(int *uaddr, int oldval, int newval, int *err) {
         return 0;
     }
     
-    void *key = futex_get_key((uintptr_t)uaddr);
-    if (!key) {
-        *err = -EFAULT;
-        return 0;
-    }
-    
     *err = 0;
     
-    /* Inline atomic cmpxchg */
-    int prev;
-#ifdef __x86_64__
-    __asm__ volatile(
-        "lock cmpxchgl %2, %1"
-        : "=a"(prev), "+m"(*uaddr)
-        : "r"(newval), "0"(oldval)
-        : "memory"
-    );
-#else
-    __asm__ volatile(
-        "lock cmpxchgl %2, %1"
-        : "=a"(prev), "+m"(*uaddr)
-        : "r"(newval), "0"(oldval)
-        : "memory"
-    );
-#endif
+    /* Set up fault handler for userspace access */
+    current_thread->on_fault = (uintptr_t)&&fault;
     
+    /* Inline atomic cmpxchg on userspace memory */
+    int prev;
+    __asm__ volatile(
+        "lock cmpxchgl %2, %1"
+        : "=a"(prev), "+m"(*uaddr)
+        : "r"(newval), "0"(oldval)
+        : "memory"
+    );
+    
+    current_thread->on_fault = 0;
     return prev;
+
+fault:
+    current_thread->on_fault = 0;
+    *err = -EFAULT;
+    return 0;
 }
 
 /* Forward declarations for PI functions */
@@ -198,14 +180,23 @@ static void futex_handle_dead_owner(int *uaddr) {
 void futex_thread_exit(thread_t *t) {
     if (!t || !t->robust_list) return;
     
-    struct robust_list_head *head = t->robust_list;
+    /* Copy the robust_list_head from userspace into a kernel-stack local
+     * to avoid direct dereferences of the userspace pointer */
+    struct robust_list_head *uhead = t->robust_list;
+    struct robust_list_head khead;
+    if (copyin(uhead, &khead, sizeof(khead)) != 0) {
+        t->robust_list = NULL;
+        t->robust_list_len = 0;
+        return;
+    }
+    
     struct robust_list *entry;
     int count = 0;
     const int MAX_ROBUST_WALK = 4096;  /* Prevent infinite loops */
     
     /* Process pending entry first (in case we died mid-lock/unlock) */
-    if (head->list_op_pending) {
-        int *futex_addr = (int *)((char *)head->list_op_pending + head->futex_offset);
+    if (khead.list_op_pending) {
+        int *futex_addr = (int *)((char *)khead.list_op_pending + khead.futex_offset);
         int val;
         
         if (futex_read_user(futex_addr, &val) == 0) {
@@ -215,16 +206,18 @@ void futex_thread_exit(thread_t *t) {
         }
     }
     
-    /* Walk the circular list */
-    entry = head->list.next;
-    while (entry != &head->list && count < MAX_ROBUST_WALK) {
+    /* Walk the circular list.
+     * The list head sentinel is at &uhead->list (userspace address),
+     * so we compare against that for list termination. */
+    entry = khead.list.next;
+    while (entry != &uhead->list && count < MAX_ROBUST_WALK) {
         struct robust_list *next;
         
         /* Read next pointer safely before processing */
         if (futex_read_user((int *)&entry->next, (int *)&next) != 0) break;
         
         /* Calculate futex address from entry */
-        int *futex_addr = (int *)((char *)entry + head->futex_offset);
+        int *futex_addr = (int *)((char *)entry + khead.futex_offset);
         int val;
         
         if (futex_read_user(futex_addr, &val) == 0) {
