@@ -125,8 +125,62 @@ int execv(const char *filename, char *const argv[]) {
 }
 
 int execvp(const char *file, char *const argv[]) {
-    // Stub: no PATH search yet
-    return execv(file, argv);
+    const char *path;
+    const char *p;
+    const char *end;
+    char buf[4096];
+
+    if (file == NULL || file[0] == '\0') {
+        errno = ENOENT;
+        return -1;
+    }
+
+    /* If file contains a slash, use it directly. */
+    if (strchr(file, '/') != NULL) {
+        return execv(file, argv);
+    }
+
+    path = getenv("PATH");
+    if (path == NULL || path[0] == '\0') {
+        path = "/bin:/usr/bin";
+    }
+
+    for (p = path; ; p = end + 1) {
+        size_t dirlen;
+        size_t filelen = strlen(file);
+
+        end = strchr(p, ':');
+        dirlen = end ? (size_t)(end - p) : strlen(p);
+
+        if (dirlen == 0) {
+            /* Empty component means current directory. */
+            if (filelen + 1 > sizeof(buf)) {
+                if (!end) break;
+                continue;
+            }
+            memcpy(buf, file, filelen + 1);
+        } else {
+            if (dirlen + 1 + filelen + 1 > sizeof(buf)) {
+                if (!end) break;
+                continue;
+            }
+            memcpy(buf, p, dirlen);
+            buf[dirlen] = '/';
+            memcpy(buf + dirlen + 1, file, filelen + 1);
+        }
+
+        execv(buf, argv);
+
+        /* ENOENT/EACCES: try next component. Anything else: stop. */
+        if (errno != ENOENT && errno != ENOTDIR && errno != EACCES) {
+            return -1;
+        }
+
+        if (!end) break;
+    }
+
+    errno = ENOENT;
+    return -1;
 }
 
 int execl(const char *path, const char *arg, ...) {
