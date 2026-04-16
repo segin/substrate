@@ -10,9 +10,9 @@
 |----------|-------|----------|
 | CRITICAL | 16 | 16 |
 | HIGH     | 11 | 11 |
-| MEDIUM   | 10 | 5 |
+| MEDIUM   | 10 | 6 |
 | LOW      | 5 | 5 |
-| **Total** | **42** | **37** |
+| **Total** | **42** | **38** |
 
 ---
 
@@ -46,17 +46,6 @@
 **Issue:** After `unlink()` or `rename()`, the name cache may still return stale entries if `cache_purge()` is not called for all affected paths. This can cause phantom files to appear in lookups or deletions to appear to fail.
 
 **Fix:** Implement generation-number-based invalidation, or ensure every VFS mutation path calls `cache_purge()` on affected vnodes.
-
----
-
-### 33. UDF FID Name Parsing: Unvalidated impl_use_length Offset — UNRESOLVED
-
-**File:** [sys/fs/udf/udf.c](sys/fs/udf/udf.c)  
-**Severity:** MEDIUM — Out-of-Bounds Read
-
-**Issue:** When parsing File ID descriptors, the filename pointer is computed as `(char *)fid + 38 + fid->impl_use_length`. If `fid->impl_use_length` is crafted to be large (from a malicious UDF image), the pointer can read beyond the FID structure into unrelated kernel memory.
-
-**Fix:** Validate that `38 + fid->impl_use_length + fid->file_id_length` does not exceed the FID's total length or the sector size.
 
 ---
 
