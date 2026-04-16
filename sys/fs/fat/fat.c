@@ -245,15 +245,18 @@ size_t fat_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer
     // Skip to starting cluster
     uint32_t skip_clusters = offset / cluster_size;
     uint32_t cluster_offset = offset % cluster_size;
+    uint32_t visited = 0;
     
     for (uint32_t i = 0; i < skip_clusters; i++) {
         cluster = fat_get_next_cluster(fs, cluster);
         if (cluster >= 0x0FFFFFFF) return 0;
+        if (++visited > fs->total_clusters) return 0; // Cycle detection
     }
     
     // Read data
     static uint8_t cluster_buf[32768]; // Max cluster size
     while (size > 0 && cluster < 0x0FFFFFFF) {
+        if (++visited > fs->total_clusters) break; // Cycle detection
         uint32_t sector = fat_cluster_to_sector(fs, cluster);
         
         if (fat_read_sectors(fs, sector, fs->bpb.sectors_per_cluster, cluster_buf) != 0) {
@@ -341,8 +344,10 @@ struct dirent *fat_readdir(fs_node_t *node, uint64_t index) {
     if (cluster_size > sizeof(dir_buf)) return NULL;
     uint64_t current_idx = 0;
     int lfn_len = 0;
+    uint32_t visited = 0;
     
     while (cluster < 0x0FFFFFFF) {
+        if (++visited > fs->total_clusters) return NULL; // Cycle detection
         uint32_t sector = fat_cluster_to_sector(fs, cluster);
         if (fat_read_sectors(fs, sector, fs->bpb.sectors_per_cluster, dir_buf) != 0) {
             return NULL;
@@ -498,8 +503,10 @@ fs_node_t *fat_finddir(fs_node_t *node, char *name) {
     static uint8_t dir_buf[32768];
     static char lfn_buffer[256];
     int lfn_len = 0;
+    uint32_t visited = 0;
     
     while (cluster < 0x0FFFFFFF) {
+        if (++visited > fs->total_clusters) return NULL; // Cycle detection
         uint32_t sector = fat_cluster_to_sector(fs, cluster);
         if (fat_read_sectors(fs, sector, fs->bpb.sectors_per_cluster, dir_buf) != 0) {
             return NULL;

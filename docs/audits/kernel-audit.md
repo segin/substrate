@@ -8,11 +8,11 @@
 
 | Severity | Count | Resolved |
 |----------|-------|----------|
-| CRITICAL | 12 | 4 |
+| CRITICAL | 11 | 5 |
 | HIGH     | 13 | 0 |
 | MEDIUM   | 10 | 0 |
 | LOW      | 5 | 0 |
-| **Total** | **44** | **4** |
+| **Total** | **44** | **5** |
 
 ---
 
@@ -319,35 +319,6 @@ if (vnode->v_mode & S_ISUID)
     current_process->euid = vnode->v_uid;
 if (vnode->v_mode & S_ISGID)
     current_process->egid = vnode->v_gid;
-```
-
----
-
-### 16. FAT Cluster Chain Cycle — Kernel Infinite Loop / Hang — UNRESOLVED
-
-**File:** [sys/fs/fat/fat.c](sys/fs/fat/fat.c) (`fat_file_read`, `fat_readdir`, `fat_finddir`)  
-**Severity:** CRITICAL — Denial of Service (Kernel Hang)
-
-**Issue:** `fat_get_next_cluster()` checks for EOC markers but the callers (`fat_file_read`, `fat_readdir`, `fat_finddir`) follow cluster chains with no cycle detection. A crafted FAT image with a circular cluster chain (e.g., cluster 3 → 4 → 3) causes an infinite loop in kernel context with no preemption point.
-
-**Problematic Code:**
-```c
-while (current_cluster < 0x0FFFFFF8 && current_cluster != 0) {
-    // ... read data ...
-    current_cluster = fat_get_next_cluster(fs, current_cluster);
-    // No cycle detection, no iteration limit
-}
-```
-
-**Impact:** Complete kernel hang from a crafted FAT filesystem image. Requires root to mount, but if auto-mount or USB hotplug is implemented, exploitable without root.
-
-**Fix:** Add a visited-cluster counter bounded by `fs->total_clusters`:
-```c
-uint32_t max_clusters = fs->total_clusters;
-uint32_t visited = 0;
-while (...) {
-    if (++visited > max_clusters) break; // Cycle detected
-}
 ```
 
 ---
