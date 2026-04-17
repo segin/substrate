@@ -338,9 +338,10 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
                 return NULL;
             }
             
-            static char link_target[256];
-            int len = result->readlink(result, link_target, sizeof(link_target));
+            char link_target[256];
+            int len = result->readlink(result, link_target, sizeof(link_target) - 1);
             if (len > 0) {
+                if ((size_t)len >= sizeof(link_target)) return NULL;
                 link_target[len] = '\0';
                 
                 // Resolve the target path
@@ -373,7 +374,7 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
     if (path[0] == '\0') return root; // Root itself
     
     fs_node_t *current = root;
-    static char component[256];
+    char component[256];
     const char *p = path;
     
     while (*p) {
@@ -444,7 +445,7 @@ fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path) {
     if (path[0] == '\0') return root; // Root itself
     
     fs_node_t *current = root;
-    static char component[256];
+    char component[256];
     const char *p = path;
     
     while (*p) {

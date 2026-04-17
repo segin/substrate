@@ -825,21 +825,32 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
     // Track physical addresses for kernel-space access
     typedef struct { uint32_t va; void *pa; } stack_page_t;
     stack_page_t stack_pages[256];
+    uint32_t mapped_stack_pages = 0;
     
     for (uint32_t i = 0; i < user_stack_size; i++) {
         uint32_t va = user_stack_base + i * 0x1000;
         void *pa = pmm_alloc_block();
         if (!pa) {
             kprint("execve: Out of memory for user stack\n");
+            for (uint32_t j = 0; j < mapped_stack_pages; j++) {
+                pmap_remove(pmap, stack_pages[j].va);
+                pmm_free_block(stack_pages[j].pa);
+            }
             return -1;
         }
         uint32_t pa_phys = (uint32_t)(uintptr_t)pa - 0xC0000000;
         if (pmap_enter(pmap, va, pa_phys, VM_PROT_WRITE, 0) < 0) {
             kprint("execve: Failed to map user stack\n");
+            pmm_free_block(pa);
+            for (uint32_t j = 0; j < mapped_stack_pages; j++) {
+                pmap_remove(pmap, stack_pages[j].va);
+                pmm_free_block(stack_pages[j].pa);
+            }
             return -1;
         }
         stack_pages[i].va = va;
         stack_pages[i].pa = pa;
+        mapped_stack_pages++;
         memset(pa, 0, 0x1000);
     }
     

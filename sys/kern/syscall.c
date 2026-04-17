@@ -333,6 +333,11 @@ ssize_t kern_read(int fd, char *buf, size_t len) {
 
 ssize_t sys_read(int fd, char *buf, size_t len) {
     if (len == 0) return 0;
+    if (!current_process) return -1;
+    if (fd < 0 || fd >= MAX_FD) return -1;
+
+    file_t *f = current_process->fds[fd];
+    if (!f || !f->f_data) return -1;
 
     void *kbuf = kmalloc(4096);
     if (!kbuf) return -12; // ENOMEM
@@ -340,7 +345,7 @@ ssize_t sys_read(int fd, char *buf, size_t len) {
     ssize_t total_read = 0;
     while (len > 0) {
         size_t to_read = (len > 4096) ? 4096 : len;
-        ssize_t bytes = kern_read(fd, kbuf, to_read);
+        ssize_t bytes = (ssize_t)read_fs((fs_node_t*)f->f_data, f->f_offset, to_read, (uint8_t*)kbuf);
         if (bytes <= 0) {
             if (total_read == 0) {
                 kfree(kbuf, 4096);
@@ -351,9 +356,11 @@ ssize_t sys_read(int fd, char *buf, size_t len) {
 
         if (copyout(kbuf, buf + total_read, bytes) != 0) {
             kfree(kbuf, 4096);
+            if (total_read > 0) return total_read;
             return -14; // EFAULT
         }
 
+        f->f_offset += bytes;
         total_read += bytes;
         len -= (size_t)bytes;
         if ((size_t)bytes < to_read) break;
@@ -631,12 +638,20 @@ struct linux_dirent64 {
 };
 
 int sys_getdents(unsigned int fd, void *dirp, unsigned int count) {
+    if (!current_process) return -1;
     if (count > 65536) count = 65536;
     void *kdirp = kmalloc(count);
     if (!kdirp) return -12;
+    uint64_t old_offset = 0;
+    file_t *f = NULL;
+    if (fd < MAX_FD) {
+        f = current_process->fds[fd];
+        if (f) old_offset = f->f_offset;
+    }
     int ret = kern_getdents(fd, kdirp, count);
     if (ret > 0) {
         if (copyout(kdirp, dirp, ret) != 0) {
+            if (f) f->f_offset = old_offset;
             kfree(kdirp, count);
             return -14;
         }
@@ -646,12 +661,20 @@ int sys_getdents(unsigned int fd, void *dirp, unsigned int count) {
 }
 
 int sys_getdents64(unsigned int fd, void *dirp, unsigned int count) {
+    if (!current_process) return -1;
     if (count > 65536) count = 65536;
     void *kdirp = kmalloc(count);
     if (!kdirp) return -12;
+    uint64_t old_offset = 0;
+    file_t *f = NULL;
+    if (fd < MAX_FD) {
+        f = current_process->fds[fd];
+        if (f) old_offset = f->f_offset;
+    }
     int ret = kern_getdents64(fd, kdirp, count);
     if (ret > 0) {
         if (copyout(kdirp, dirp, ret) != 0) {
+            if (f) f->f_offset = old_offset;
             kfree(kdirp, count);
             return -14;
         }
@@ -1657,13 +1680,63 @@ int sys_dup2(int oldfd, int newfd) {
     return newfd;
 }
 
+static fs_node_t *sys_lookup_path(const char *path, int follow_final_symlink) {
+    fs_node_t *root;
+    fs_node_t *cwd;
+
+    if (!current_process || !path) return NULL;
+
+    root = current_process->root_node ? current_process->root_node : fs_root;
+    cwd = current_process->cwd_node ? current_process->cwd_node : root;
+    if (!root) return NULL;
+
+    if (follow_final_symlink) {
+        return vfs_lookup((path[0] == '/') ? root : cwd, path);
+    }
+    return vfs_lookup_lstat((path[0] == '/') ? root : cwd, path);
+}
+
 int sys_chmod(const char *path, int mode) {
-    (void)path; (void)mode;
+    char kpath[256];
+    fs_node_t *node;
+
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    node = sys_lookup_path(kpath, 1);
+    if (!node) return -ENOENT;
+
+    if (current_process->euid != 0 && current_process->euid != node->uid)
+        return -EPERM;
+
+    if (current_process->euid != 0)
+        mode &= ~(04000 | 02000);
+
+    node->mask = (uint32_t)(mode & 07777);
+    node->ctime = get_time();
     return 0;
 }
 
 int sys_lchown(const char *path, int uid, int gid) {
-    (void)path; (void)uid; (void)gid;
+    char kpath[256];
+    fs_node_t *node;
+
+    if (uid < -1 || gid < -1) return -EINVAL;
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    node = sys_lookup_path(kpath, 0);
+    if (!node) return -ENOENT;
+
+    /* Match fchown's current policy until supplementary groups exist. */
+    if (uid != -1 && current_process->euid != 0)
+        return -EPERM;
+    if (gid != -1 && current_process->euid != 0 && current_process->euid != node->uid)
+        return -EPERM;
+
+    if (uid != -1) node->uid = (uint32_t)uid;
+    if (gid != -1) node->gid = (uint32_t)gid;
+
+    if (current_process->euid != 0)
+        node->mask &= ~(uint32_t)(04000 | 02000);
+
+    node->ctime = get_time();
     return 0;
 }
 
@@ -1684,6 +1757,7 @@ int sys_fchmod(int fd, int mode) {
         mode &= ~(04000 | 02000);
 
     node->mask = (uint32_t)(mode & 07777);
+    node->ctime = get_time();
     return 0;
 }
 
@@ -1710,6 +1784,7 @@ int sys_fchown(int fd, int uid, int gid) {
     if (current_process->euid != 0)
         node->mask &= ~(uint32_t)(04000 | 02000);
 
+    node->ctime = get_time();
     return 0;
 }
 
@@ -1773,6 +1848,8 @@ extern int sys_vfork(void);
 int sys_mknod(const char *p, int m, int d) {
     char kpath[256];
     if (copyinstr(p, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    if (!current_process) return -EPERM;
+    if ((m & S_IFMT) != S_IFIFO && current_process->euid != 0) return -EPERM;
     return vfs_mknod(kpath, (uint16_t)m, (uint32_t)d);
 }
 

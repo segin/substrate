@@ -124,14 +124,20 @@ int copyinstr(const void *src, void *dst, size_t maxlen, size_t *len) {
     char *d = (char *)dst;
     size_t i;
 
-    /* Reject kernel-space source addresses */
-    if (validate_user_addr(src, 1) != 0)
-        return EFAULT;
+    if (maxlen == 0) {
+        if (len) *len = 0;
+        return ENAMETOOLONG;
+    }
 
     /* Set up fault handler */
     current_thread->on_fault = (uintptr_t)&&fault;
 
     for (i = 0; i < maxlen; i++) {
+        if (validate_user_addr(s, 1) != 0) {
+            current_thread->on_fault = 0;
+            return EFAULT;
+        }
+
         /* This access may trigger a page fault */
         char c = *s;
         if (d) *d = c;

@@ -135,12 +135,21 @@ blkdev_t *blkdev_get(const char *name) {
 // Byte-oriented read - handles sector alignment
 size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buffer) {
     if (!dev || !dev->read || dev->sector_size == 0) return 0;
+    if (size == 0) return 0;
     
     uint32_t sector_size = dev->sector_size;
     uint64_t start_sector = offset / sector_size;
     uint32_t sector_offset = offset % sector_size;
     size_t total_read = 0;
     uint8_t *buf = (uint8_t *)buffer;
+
+    if (start_sector >= dev->total_sectors) return 0;
+    uint64_t sectors_left = dev->total_sectors - start_sector;
+    uint64_t bytes_left = (sectors_left > UINT64_MAX / sector_size) ?
+        UINT64_MAX : sectors_left * sector_size;
+    if (bytes_left <= sector_offset) return 0;
+    bytes_left -= sector_offset;
+    if ((uint64_t)size > bytes_left) size = (size_t)bytes_left;
     
     // Use stack buffer for small sectors to avoid kmalloc overhead
     uint8_t stack_buf[STACK_BUF_SIZE];
@@ -172,8 +181,13 @@ size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buff
     }
 
     // 2. Handle aligned full sectors (Bulk Read)
-    if (size >= sector_size) {
-        uint32_t sector_count = size / sector_size;
+    while (size >= sector_size) {
+        uint64_t sectors = size / sector_size;
+        if (sectors > UINT32_MAX) sectors = UINT32_MAX;
+        if (sectors > dev->total_sectors - start_sector)
+            sectors = dev->total_sectors - start_sector;
+        if (sectors == 0) break;
+        uint32_t sector_count = (uint32_t)sectors;
 
         // Read directly into user buffer
         if (dev->read(dev, start_sector, sector_count, buf) != 0) {
@@ -181,7 +195,7 @@ size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buff
             return total_read;
         }
 
-        uint32_t bytes_read = sector_count * sector_size;
+        size_t bytes_read = (size_t)sector_count * sector_size;
         buf += bytes_read;
         total_read += bytes_read;
         size -= bytes_read;
@@ -214,12 +228,21 @@ size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buff
 // Byte-oriented write - handles sector alignment (read-modify-write for unaligned)
 size_t blkdev_write_bytes(blkdev_t *dev, uint64_t offset, size_t size, const void *buffer) {
     if (!dev || !dev->write || dev->sector_size == 0) return 0;
+    if (size == 0) return 0;
     
     uint32_t sector_size = dev->sector_size;
     uint64_t start_sector = offset / sector_size;
     uint32_t sector_offset = offset % sector_size;
     size_t total_written = 0;
     const uint8_t *buf = (const uint8_t *)buffer;
+
+    if (start_sector >= dev->total_sectors) return 0;
+    uint64_t sectors_left = dev->total_sectors - start_sector;
+    uint64_t bytes_left = (sectors_left > UINT64_MAX / sector_size) ?
+        UINT64_MAX : sectors_left * sector_size;
+    if (bytes_left <= sector_offset) return 0;
+    bytes_left -= sector_offset;
+    if ((uint64_t)size > bytes_left) size = (size_t)bytes_left;
     
     // Use stack buffer for small sectors to avoid kmalloc overhead
     uint8_t stack_buf[STACK_BUF_SIZE];
@@ -227,6 +250,7 @@ size_t blkdev_write_bytes(blkdev_t *dev, uint64_t offset, size_t size, const voi
     
     // 1. Handle unaligned start
     if (sector_offset > 0) {
+        if (!dev->read) return 0;
         if (sector_size <= STACK_BUF_SIZE) {
             sector_buf = stack_buf;
         } else {
@@ -238,7 +262,7 @@ size_t blkdev_write_bytes(blkdev_t *dev, uint64_t offset, size_t size, const voi
         if (copy_size > size) copy_size = size;
         
         // Read-Modify-Write
-        if (dev->read && dev->read(dev, start_sector, 1, sector_buf) != 0) {
+        if (dev->read(dev, start_sector, 1, sector_buf) != 0) {
             if (sector_buf && sector_buf != stack_buf) kfree(sector_buf, sector_size);
             return 0;
         }
@@ -257,8 +281,13 @@ size_t blkdev_write_bytes(blkdev_t *dev, uint64_t offset, size_t size, const voi
     }
     
     // 2. Handle aligned full sectors (Bulk Write)
-    if (size >= sector_size) {
-        uint32_t sector_count = size / sector_size;
+    while (size >= sector_size) {
+        uint64_t sectors = size / sector_size;
+        if (sectors > UINT32_MAX) sectors = UINT32_MAX;
+        if (sectors > dev->total_sectors - start_sector)
+            sectors = dev->total_sectors - start_sector;
+        if (sectors == 0) break;
+        uint32_t sector_count = (uint32_t)sectors;
 
         // Write directly from user buffer
         if (dev->write(dev, start_sector, sector_count, buf) != 0) {
@@ -266,7 +295,7 @@ size_t blkdev_write_bytes(blkdev_t *dev, uint64_t offset, size_t size, const voi
             return total_written;
         }
 
-        uint32_t bytes_written = sector_count * sector_size;
+        size_t bytes_written = (size_t)sector_count * sector_size;
         buf += bytes_written;
         total_written += bytes_written;
         size -= bytes_written;
@@ -275,6 +304,7 @@ size_t blkdev_write_bytes(blkdev_t *dev, uint64_t offset, size_t size, const voi
 
     // 3. Handle unaligned end (tail)
     if (size > 0) {
+        if (!dev->read) return total_written;
         if (!sector_buf) {
             if (sector_size <= STACK_BUF_SIZE) {
                 sector_buf = stack_buf;
@@ -285,7 +315,7 @@ size_t blkdev_write_bytes(blkdev_t *dev, uint64_t offset, size_t size, const voi
         }
 
         // Read-Modify-Write
-        if (dev->read && dev->read(dev, start_sector, 1, sector_buf) != 0) {
+        if (dev->read(dev, start_sector, 1, sector_buf) != 0) {
             if (sector_buf && sector_buf != stack_buf) kfree(sector_buf, sector_size);
             return total_written;
         }
