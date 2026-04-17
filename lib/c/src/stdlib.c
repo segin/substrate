@@ -82,6 +82,8 @@ struct block_meta {
 };
 
 static struct block_meta *global_base = NULL;
+static struct block_meta *global_tail = NULL;
+static struct block_meta *search_hint = NULL;
 
 static struct block_meta *request_space(struct block_meta *last, size_t size) {
     struct block_meta *block;
@@ -114,17 +116,28 @@ static struct block_meta *request_space(struct block_meta *last, size_t size) {
     if (!global_base) {
         global_base = block;
     }
+    global_tail = block;
+    search_hint = block;
 
     return block;
 }
 
-static struct block_meta *find_free_block(struct block_meta **last, size_t size) {
-    struct block_meta *current = global_base;
-    while (current && !(current->free && current->size >= size)) {
-        *last = current;
-        current = current->next;
+static struct block_meta *find_free_block(size_t size) {
+    struct block_meta *start;
+    struct block_meta *current;
+
+    if (global_base == NULL) {
+        return NULL;
     }
-    return current;
+    start = search_hint != NULL ? search_hint : global_base;
+    current = start;
+    do {
+        if (current->free && current->size >= size) {
+            return current;
+        }
+        current = current->next != NULL ? current->next : global_base;
+    } while (current != start);
+    return NULL;
 }
 
 static void split_block(struct block_meta *block, size_t size) {
@@ -138,22 +151,28 @@ static void split_block(struct block_meta *block, size_t size) {
 
         if (new_block->next) {
             new_block->next->prev = new_block;
+        } else {
+            global_tail = new_block;
         }
 
         block->size = size;
         block->next = new_block;
+        search_hint = new_block;
     }
 }
 
-static void coalesce_block(struct block_meta *block) {
+static struct block_meta *coalesce_block(struct block_meta *block) {
     // Coalesce with next
     if (block->next && block->next->free) {
         // Check adjacency
         if ((char*)block + BLOCK_META_SIZE + block->size == (char*)block->next) {
+            struct block_meta *next = block->next;
             block->size += BLOCK_META_SIZE + block->next->size;
             block->next = block->next->next;
             if (block->next) {
                 block->next->prev = block;
+            } else if (global_tail == next) {
+                global_tail = block;
             }
         }
     }
@@ -161,30 +180,33 @@ static void coalesce_block(struct block_meta *block) {
     if (block->prev && block->prev->free) {
         // Check adjacency
         if ((char*)block->prev + BLOCK_META_SIZE + block->prev->size == (char*)block) {
-            block->prev->size += BLOCK_META_SIZE + block->size;
-            block->prev->next = block->next;
+            struct block_meta *prev = block->prev;
+            prev->size += BLOCK_META_SIZE + block->size;
+            prev->next = block->next;
             if (block->next) {
-                block->next->prev = block->prev;
+                block->next->prev = prev;
+            } else if (global_tail == block) {
+                global_tail = prev;
             }
+            block = prev;
         }
     }
+    return block;
 }
 
 void *malloc(size_t size) {
     if (size <= 0) return NULL;
 
     struct block_meta *block;
-    struct block_meta *last = global_base;
     size_t aligned_size = ALIGN(size);
 
     if (!global_base) {
         block = request_space(NULL, aligned_size);
         if (!block) return NULL;
-        last = block;
     } else {
-        block = find_free_block(&last, aligned_size);
+        block = find_free_block(aligned_size);
         if (!block) {
-            block = request_space(last, aligned_size);
+            block = request_space(global_tail, aligned_size);
             if (!block) return NULL;
         }
     }
@@ -196,6 +218,9 @@ void *malloc(size_t size) {
 
     block->free = 0;
     block->magic = MAGIC;
+    if (search_hint == block) {
+        search_hint = block->next != NULL ? block->next : global_base;
+    }
     return (block + 1);
 }
 
@@ -208,7 +233,7 @@ void free(void *ptr) {
     }
 
     block->free = 1;
-    coalesce_block(block);
+    search_hint = coalesce_block(block);
 }
 
 void *calloc(size_t nmemb, size_t size) {
@@ -246,11 +271,16 @@ void *realloc(void *ptr, size_t size) {
     if (block->next && block->next->free &&
         ((char*)block + BLOCK_META_SIZE + block->size == (char*)block->next) &&
         (block->size + BLOCK_META_SIZE + block->next->size >= ALIGN(size))) {
+        struct block_meta *next = block->next;
 
         // Merge next block
-        block->size += BLOCK_META_SIZE + block->next->size;
-        block->next = block->next->next;
-        if (block->next) block->next->prev = block;
+        block->size += BLOCK_META_SIZE + next->size;
+        block->next = next->next;
+        if (block->next) {
+            block->next->prev = block;
+        } else if (global_tail == next) {
+            global_tail = block;
+        }
 
         // Now split if too big
         if (block->size >= ALIGN(size) + BLOCK_META_SIZE + ALIGNMENT) {

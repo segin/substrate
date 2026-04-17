@@ -1184,6 +1184,8 @@ static void
 regs_set_linux_syscall(struct user_regs_struct *regs, long nr,
                        const uint32_t args[6], uint32_t int80_ip)
 {
+    uint32_t saved_ebp = (uint32_t)regs->rbp;
+
     regs->rax = (unsigned long)nr;
     regs->orig_rax = (unsigned long)-1L;
     regs->rbx = args[0];
@@ -1191,7 +1193,7 @@ regs_set_linux_syscall(struct user_regs_struct *regs, long nr,
     regs->rdx = args[2];
     regs->rsi = args[3];
     regs->rdi = args[4];
-    regs->rbp = args[5];
+    regs->rbp = (nr == LINUX32_NR_MMAP2) ? args[5] : saved_ebp;
     regs->rip = int80_ip;
 }
 
@@ -1309,6 +1311,8 @@ trace_stop_state(const struct runner *runner, pid_t pid, int sig)
 {
     struct user_regs_struct regs;
     siginfo_t info;
+    uint32_t stack_words[8];
+    uint32_t sp = 0;
     int ret;
 
     if (!runner->trace) {
@@ -1325,6 +1329,7 @@ trace_stop_state(const struct runner *runner, pid_t pid, int sig)
     memset(&info, 0, sizeof(info));
     if (ptrace(PTRACE_GETSIGINFO, pid, 0, &info) == 0) {
 #if defined(__x86_64__)
+        sp = (uint32_t)regs.rsp;
         trace_log(runner, pid,
                   "signal %d code=%d addr=%p eip=%#x esp=%#x eax=%#x ebx=%#x ecx=%#x edx=%#x esi=%#x edi=%#x ebp=%#x gs=%#llx gs_base=%#llx",
                   sig, info.si_code, info.si_addr, (uint32_t)regs.rip,
@@ -1333,6 +1338,7 @@ trace_stop_state(const struct runner *runner, pid_t pid, int sig)
                   (uint32_t)regs.rdi, (uint32_t)regs.rbp, regs.gs,
                   regs.gs_base);
 #elif defined(__i386__)
+        sp = (uint32_t)regs.esp;
         trace_log(runner, pid,
                   "signal %d code=%d addr=%p eip=%#x esp=%#x eax=%#x ebx=%#x ecx=%#x edx=%#x esi=%#x edi=%#x ebp=%#x gs=%#x",
                   sig, info.si_code, info.si_addr, regs.eip, regs.esp,
@@ -1341,6 +1347,7 @@ trace_stop_state(const struct runner *runner, pid_t pid, int sig)
 #endif
     } else {
 #if defined(__x86_64__)
+        sp = (uint32_t)regs.rsp;
         trace_log(runner, pid,
                   "signal %d eip=%#x esp=%#x eax=%#x ebx=%#x ecx=%#x edx=%#x esi=%#x edi=%#x ebp=%#x gs=%#llx gs_base=%#llx",
                   sig, (uint32_t)regs.rip, (uint32_t)regs.rsp,
@@ -1348,11 +1355,19 @@ trace_stop_state(const struct runner *runner, pid_t pid, int sig)
                   (uint32_t)regs.rdx, (uint32_t)regs.rsi, (uint32_t)regs.rdi,
                   (uint32_t)regs.rbp, regs.gs, regs.gs_base);
 #elif defined(__i386__)
+        sp = (uint32_t)regs.esp;
         trace_log(runner, pid,
                   "signal %d eip=%#x esp=%#x eax=%#x ebx=%#x ecx=%#x edx=%#x esi=%#x edi=%#x ebp=%#x gs=%#x",
                   sig, regs.eip, regs.esp, regs.eax, regs.ebx, regs.ecx,
                   regs.edx, regs.esi, regs.edi, regs.ebp, regs.xgs);
 #endif
+    }
+    if (sp != 0 && read_mem(pid, sp, stack_words, sizeof(stack_words)) == 0) {
+        trace_log(runner, pid,
+                  "stack esp=%#x [%#x %#x %#x %#x %#x %#x %#x %#x]",
+                  sp, stack_words[0], stack_words[1], stack_words[2],
+                  stack_words[3], stack_words[4], stack_words[5],
+                  stack_words[6], stack_words[7]);
     }
 }
 

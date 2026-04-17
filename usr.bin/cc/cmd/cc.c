@@ -1498,6 +1498,7 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out,
   const char *const *pp_flags_base = (const char *const *)o->cpp_flags.items;
   size_t pp_count = o->cpp_flags.count;
   const char **pp_flags = (const char **)pp_flags_base;
+  const char *target_flag = target_gcc_flag(o->target);
   const char *as_def1 = "-D__ASSEMBLY__";
   const char *as_def2 = "-D__ASSEMBLER__";
   const char **pp_flags_aug = NULL;
@@ -1545,9 +1546,14 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out,
     use_stdin_tmp = 1;
   }
 
-  if (as_cpp_mode && strcmp(out, "/dev/stdout") != 0 && strcmp(out, "-") != 0) {
+  if ((target_flag != NULL && target_flag[0] != '\0') ||
+      (as_cpp_mode && strcmp(out, "/dev/stdout") != 0 && strcmp(out, "-") != 0)) {
     size_t j;
-    pp_flags_aug = (const char **)calloc(pp_count + 2, sizeof(*pp_flags_aug));
+    size_t extra = (target_flag != NULL && target_flag[0] != '\0') ? 1 : 0;
+    if (as_cpp_mode && strcmp(out, "/dev/stdout") != 0 && strcmp(out, "-") != 0) {
+      extra += 2;
+    }
+    pp_flags_aug = (const char **)calloc(pp_count + extra, sizeof(*pp_flags_aug));
     if (pp_flags_aug == NULL) {
       if (use_stdin_tmp) {
         unlink(stdin_tmp);
@@ -1559,8 +1565,13 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out,
     for (j = 0; j < pp_count; ++j) {
       pp_flags_aug[j] = pp_flags_base[j];
     }
-    pp_flags_aug[pp_count++] = as_def1;
-    pp_flags_aug[pp_count++] = as_def2;
+    if (target_flag != NULL && target_flag[0] != '\0') {
+      pp_flags_aug[pp_count++] = target_flag;
+    }
+    if (as_cpp_mode && strcmp(out, "/dev/stdout") != 0 && strcmp(out, "-") != 0) {
+      pp_flags_aug[pp_count++] = as_def1;
+      pp_flags_aug[pp_count++] = as_def2;
+    }
     pp_flags = pp_flags_aug;
   }
 

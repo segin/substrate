@@ -81,6 +81,7 @@ typedef struct {
     char *sym;
     int *args;
     unsigned char *call_arg_abi;
+    unsigned char *call_arg_sizes;
     size_t arg_count;
     int asm_volatile;
     int asm_is_goto;
@@ -159,6 +160,7 @@ typedef struct {
 
     cc_value_type_t *value_types;
     unsigned char *value_is_unsigned;
+    unsigned char *value_sizes;
     size_t value_cap;
     int value_count;
     int label_count;

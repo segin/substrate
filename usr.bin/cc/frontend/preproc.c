@@ -2062,6 +2062,12 @@ static int add_builtin_macros(pp_state_t *st) {
         if (macro_set(&st->macros, "__i386__", 0, 0, NULL, 0, "1") != 0) {
             return -1;
         }
+        if (macro_set(&st->macros, "__ILP32__", 0, 0, NULL, 0, "1") != 0) {
+            return -1;
+        }
+        if (macro_set(&st->macros, "_ILP32", 0, 0, NULL, 0, "1") != 0) {
+            return -1;
+        }
         if (st->target_has_mmx) {
             if (macro_set(&st->macros, "__MMX__", 0, 0, NULL, 0, "1") != 0) {
                 return -1;

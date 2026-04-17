@@ -736,6 +736,12 @@ static int collect_include_dirs(const as_ctx_t *ctx, const char ***dirs_out, siz
     return 0;
 }
 
+static unsigned long long wallclock_us(void);
+static void print_phase_stat(const as_ctx_t *ctx, const char *phase, unsigned long long start_us);
+
+#define AS_PHASE_BEGIN() unsigned long long phase_start_us = wallclock_us()
+#define AS_PHASE_END(ctx_, name_) print_phase_stat((ctx_), (name_), phase_start_us)
+
 static int run_native_backend(const as_ctx_t *ctx) {
     as_token_vec_t toks;
     as_parse_result_t parsed;
@@ -803,40 +809,68 @@ static int run_native_backend(const as_ctx_t *ctx) {
     ecfg.x86_64_isa_level = (unsigned)x64_isa_level_from_march(ctx->march);
     ecfg.intel_syntax = (unsigned)(ctx->syntax_intel ? 1 : 0);
 
-    if (as_lex_file(src_path, &lcfg, &toks, errbuf, sizeof(errbuf)) != 0) {
-        as_diag(AS_E_BACKEND, "%s", errbuf);
-        goto out;
+    {
+        AS_PHASE_BEGIN();
+        if (as_lex_file(src_path, &lcfg, &toks, errbuf, sizeof(errbuf)) != 0) {
+            as_diag(AS_E_BACKEND, "%s", errbuf);
+            goto out;
+        }
+        AS_PHASE_END(ctx, "lex");
     }
-    if (as_parse_tokens(&toks, &pcfg, &parsed, errbuf, sizeof(errbuf)) != 0) {
-        as_diag(AS_E_BACKEND, "%s", errbuf);
-        goto out;
+    {
+        AS_PHASE_BEGIN();
+        if (as_parse_tokens(&toks, &pcfg, &parsed, errbuf, sizeof(errbuf)) != 0) {
+            as_diag(AS_E_BACKEND, "%s", errbuf);
+            goto out;
+        }
+        AS_PHASE_END(ctx, "parse");
     }
-    if (validate_directives(&parsed, errbuf, sizeof(errbuf)) != 0) {
-        as_diag(AS_E_BACKEND, "%s", errbuf);
-        goto out;
+    {
+        AS_PHASE_BEGIN();
+        if (validate_directives(&parsed, errbuf, sizeof(errbuf)) != 0) {
+            as_diag(AS_E_BACKEND, "%s", errbuf);
+            goto out;
+        }
+        AS_PHASE_END(ctx, "validate");
     }
-    if (as_symtab_build(&parsed, &syms, errbuf, sizeof(errbuf)) != 0) {
-        as_diag(AS_E_BACKEND, "%s", errbuf);
-        goto out;
+    {
+        AS_PHASE_BEGIN();
+        if (as_symtab_build(&parsed, &syms, errbuf, sizeof(errbuf)) != 0) {
+            as_diag(AS_E_BACKEND, "%s", errbuf);
+            goto out;
+        }
+        AS_PHASE_END(ctx, "symtab");
     }
-    if (as_sections_build(&parsed, &secs, errbuf, sizeof(errbuf)) != 0) {
-        as_diag(AS_E_BACKEND, "%s", errbuf);
-        goto out;
+    {
+        AS_PHASE_BEGIN();
+        if (as_sections_build(&parsed, &secs, errbuf, sizeof(errbuf)) != 0) {
+            as_diag(AS_E_BACKEND, "%s", errbuf);
+            goto out;
+        }
+        AS_PHASE_END(ctx, "sections");
     }
-    if (as_data_build(&parsed, &data, errbuf, sizeof(errbuf)) != 0) {
-        as_diag(AS_E_BACKEND, "%s", errbuf);
-        goto out;
+    {
+        AS_PHASE_BEGIN();
+        if (as_data_build(&parsed, &data, errbuf, sizeof(errbuf)) != 0) {
+            as_diag(AS_E_BACKEND, "%s", errbuf);
+            goto out;
+        }
+        AS_PHASE_END(ctx, "data");
     }
     if (ctx->output == AS_OUTPUT_BINARY) {
+        AS_PHASE_BEGIN();
         if (as_elf_emit_binary_file(&parsed, &secs, &ecfg, ctx->out_path, errbuf, sizeof(errbuf)) != 0) {
             as_diag(AS_E_BACKEND, "%s", errbuf);
             goto out;
         }
+        AS_PHASE_END(ctx, "emit-binary");
     } else {
+        AS_PHASE_BEGIN();
         if (as_elf_emit_file(&parsed, &secs, &syms, &data, &ecfg, ctx->out_path, errbuf, sizeof(errbuf)) != 0) {
             as_diag(AS_E_BACKEND, "%s", errbuf);
             goto out;
         }
+        AS_PHASE_END(ctx, "emit-elf");
     }
 
     rc = 0;
@@ -905,6 +939,17 @@ static unsigned long long wallclock_us(void) {
         return 0;
     }
     return (unsigned long long)tv.tv_sec * 1000000ULL + (unsigned long long)tv.tv_usec;
+}
+
+static void print_phase_stat(const as_ctx_t *ctx, const char *phase, unsigned long long start_us) {
+    unsigned long long now;
+
+    if (ctx == NULL || !ctx->statistics || phase == NULL) {
+        return;
+    }
+    now = wallclock_us();
+    fprintf(stderr, "as: statistics: phase=%s wall_us=%llu\n", phase,
+            now >= start_us ? now - start_us : 0ULL);
 }
 
 static void print_target_help(const as_ctx_t *ctx) {

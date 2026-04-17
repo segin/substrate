@@ -7,7 +7,7 @@ USER_CFLAGS += -iquote ../../include
 ifeq ($(NATIVE_BUILD),1)
 USER_CFLAGS += -DAS_NATIVE_BUILD=1
 else
-USER_CFLAGS += -DAS_SUBSTRATE_BUILD=1
+USER_CFLAGS += -O2 -DAS_SUBSTRATE_BUILD=1
 endif
 
 include ../../Makefile.bin.inc

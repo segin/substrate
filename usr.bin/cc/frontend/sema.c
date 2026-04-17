@@ -4559,12 +4559,21 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
             return 0;
         }
     }
-    if (array_len > 0 && init->arg_count > (size_t)array_len) {
-        if (diag != NULL && diag->message[0] == '\0') {
-            snprintf(diag->message, sizeof(diag->message), "too many initializers for array %s",
-                     name != NULL ? name : "<anon>");
+    if (array_len > 0) {
+        long init_elems = (long)init->arg_count;
+        if (elem_type == CC_TYPE_VOID && array_struct_id >= 0) {
+            init_elems = infer_struct_array_len_from_init(tu, array_struct_id, init);
+            if (init_elems <= 0) {
+                init_elems = (long)init->arg_count;
+            }
         }
-        return -1;
+        if (init_elems > array_len) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "too many initializers for array %s",
+                         name != NULL ? name : "<anon>");
+            }
+            return -1;
+        }
     }
     if (array_len == 0 && init->arg_count == 0) {
         if (diag != NULL && diag->message[0] == '\0') {
