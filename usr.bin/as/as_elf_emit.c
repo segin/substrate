@@ -255,6 +255,14 @@ static int bytebuf_append_u64_le(bytebuf_t *b, uint64_t v, unsigned width) {
     return 0;
 }
 
+static void write_u64_le_at(unsigned char *p, uint64_t v, unsigned width) {
+    unsigned i;
+
+    for (i = 0; i < width; ++i) {
+        p[i] = (unsigned char)((v >> (i * 8)) & 0xffu);
+    }
+}
+
 static int streq_ci(const char *a, const char *b) {
     size_t i;
 
@@ -8732,7 +8740,8 @@ static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigne
 
     if (st->u.instr.operand_count == 1 &&
         is_rel_mnemonic(st->u.instr.mnemonic) &&
-        !is_fixed_short_rel_mnemonic(st->u.instr.mnemonic)) {
+        !is_fixed_short_rel_mnemonic(st->u.instr.mnemonic) &&
+        suffix != 'b') {
         in.force_rel32 = 1u;
     }
 
@@ -9281,6 +9290,7 @@ static int emit_text_program(emit_ctx_t *ctx) {
             return -1;
         }
     }
+
     section_track_free(&track);
     sec_buf_vec_free(&secbufs);
     return 0;
@@ -10224,6 +10234,47 @@ static const char *first_symbol_in_expr(const as_expr_t *e) {
     return NULL;
 }
 
+static int expr_symbol_addend(const as_expr_t *e, const char **sym_out, int64_t *add_out, int sign) {
+    if (e == NULL || sym_out == NULL || add_out == NULL) {
+        return -1;
+    }
+    switch (e->kind) {
+    case AS_EXPR_CONST:
+        *add_out += (int64_t)(sign * e->value);
+        return 0;
+    case AS_EXPR_SYMBOL:
+        if (e->symbol == NULL) {
+            return -1;
+        }
+        if (*sym_out == NULL) {
+            *sym_out = e->symbol;
+            return 0;
+        }
+        return strcmp(*sym_out, e->symbol) == 0 ? 0 : -1;
+    case AS_EXPR_BINARY:
+        if (e->op == AS_EXPR_OP_ADD) {
+            return expr_symbol_addend(e->lhs, sym_out, add_out, sign) == 0 &&
+                           expr_symbol_addend(e->rhs, sym_out, add_out, sign) == 0
+                       ? 0
+                       : -1;
+        }
+        if (e->op == AS_EXPR_OP_SUB) {
+            return expr_symbol_addend(e->lhs, sym_out, add_out, sign) == 0 &&
+                           expr_symbol_addend(e->rhs, sym_out, add_out, -sign) == 0
+                       ? 0
+                       : -1;
+        }
+        return -1;
+    case AS_EXPR_UNARY:
+        if (e->op == AS_EXPR_OP_NEG) {
+            return expr_symbol_addend(e->lhs, sym_out, add_out, -sign);
+        }
+        return -1;
+    default:
+        return -1;
+    }
+}
+
 static char *trim_copy_arg(const char *s) {
     const char *p;
     const char *q;
@@ -11156,6 +11207,10 @@ static void adjust_x86_rel_reloc_to_encoding(unsigned machine, const as_instruct
     }
 }
 
+static int machine_relocation_addend_is_in_place(unsigned machine) {
+    return machine == EM_386;
+}
+
 static int emit_relocations(emit_ctx_t *ctx) {
     size_t i;
     unsigned machine = ctx->cfg != NULL ? ctx->cfg->machine : EM_386;
@@ -11193,6 +11248,7 @@ static int emit_relocations(emit_ctx_t *ctx) {
         if (st->kind == AS_STMT_DIRECTIVE) {
             const as_directive_t *d = &st->u.directive;
             int drc;
+            unsigned width = 0;
 
             trc = section_track_apply_directive(&track, d);
             if (trc < 0) {
@@ -11203,37 +11259,40 @@ static int emit_relocations(emit_ctx_t *ctx) {
             if (trc > 0) {
                 continue;
             }
-            {
-                unsigned width = 0;
-                if (strcmp(d->name, ".byte") == 0) width = 1;
-                else if (strcmp(d->name, ".word") == 0 || strcmp(d->name, ".short") == 0 ||
-                         strcmp(d->name, ".hword") == 0 || strcmp(d->name, ".2byte") == 0) width = 2;
-                else if (strcmp(d->name, ".long") == 0 || strcmp(d->name, ".4byte") == 0) width = 4;
-                else if (strcmp(d->name, ".quad") == 0 || strcmp(d->name, ".8byte") == 0) width = 8;
+            if (strcmp(d->name, ".byte") == 0) width = 1;
+            else if (strcmp(d->name, ".word") == 0 || strcmp(d->name, ".short") == 0 ||
+                     strcmp(d->name, ".hword") == 0 || strcmp(d->name, ".2byte") == 0) width = 2;
+            else if (strcmp(d->name, ".long") == 0 || strcmp(d->name, ".4byte") == 0) width = 4;
+            else if (strcmp(d->name, ".quad") == 0 || strcmp(d->name, ".8byte") == 0) width = 8;
 
-                if (width != 0) {
-                    for (j = 0; j < d->arg_count; ++j) {
-                        char *sym = NULL;
-                        int64_t addend = 0;
-                        if (parse_symbol_addend_arg(d->args[j], &sym, &addend) == 0 && sym != NULL) {
-                            uint32_t t = reloc_type_for_machine(machine);
-                            if (add_reloc_for_symbol_ex(ctx, cur_sec, sym, cur_off + (uint64_t)(j * width), t, addend) != 0) {
-                                free(sym);
-                                section_track_free(&track);
-                                sec_buf_vec_free(&secbufs);
-                                return -1;
-                            }
-                            free(sym);
-                        }
-                    }
-                }
-            }
             drc = append_directive_data(&sb->buf, d);
             if (drc < 0) {
                 set_err(ctx, "%s:%u: malformed directive data", st->file != NULL ? st->file : "<input>", st->line);
                 section_track_free(&track);
                 sec_buf_vec_free(&secbufs);
                 return -1;
+            }
+            if (width != 0) {
+                for (j = 0; j < d->arg_count; ++j) {
+                    char *sym = NULL;
+                    int64_t addend = 0;
+                    uint64_t reloc_off;
+                    if (parse_symbol_addend_arg(d->args[j], &sym, &addend) == 0 && sym != NULL) {
+                        uint32_t t = reloc_type_for_machine(machine);
+                        reloc_off = cur_off + (uint64_t)(j * width);
+                        if (machine_relocation_addend_is_in_place(machine) &&
+                            reloc_off + width <= (uint64_t)sb->buf.len) {
+                            write_u64_le_at(sb->buf.data + reloc_off, (uint64_t)addend, width);
+                        }
+                        if (add_reloc_for_symbol_ex(ctx, cur_sec, sym, reloc_off, t, addend) != 0) {
+                            free(sym);
+                            section_track_free(&track);
+                            sec_buf_vec_free(&secbufs);
+                            return -1;
+                        }
+                        free(sym);
+                    }
+                }
             }
             continue;
         }
@@ -11303,6 +11362,14 @@ static int emit_relocations(emit_ctx_t *ctx) {
                 if (sym == NULL) {
                     continue;
                 }
+                {
+                    const char *expr_sym = NULL;
+                    int64_t expr_addend = 0;
+                    if (expr_symbol_addend(e, &expr_sym, &expr_addend, 1) == 0 &&
+                        expr_sym != NULL && strcmp(expr_sym, sym) == 0) {
+                        addend = expr_addend;
+                    }
+                }
                 t = default_text_reloc_type(machine, &st->u.instr, op);
                 if (t == R_386_PC8 || t == R_X86_64_PC8) {
                     reloc_width = 1;
@@ -11329,19 +11396,19 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     return -1;
                 }
                 if (t == R_386_PC8 || t == R_X86_64_PC8) {
-                    addend = -1;
+                    addend += -1;
                 } else if (t == R_386_PC16 || t == R_X86_64_PC16) {
-                    addend = -2;
+                    addend += -2;
                 } else if ((t == R_386_PC32 || t == R_386_PLT32 ||
                             t == R_X86_64_PC32 || t == R_X86_64_PLT32) &&
                            (op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) &&
                            is_rel_mnemonic(st->u.instr.mnemonic)) {
-                    addend = -4;
+                    addend += -4;
                 } else if (machine == EM_X86_64 &&
                            op->kind == AS_OPERAND_MEMORY &&
                            op->u.mem.base_reg != NULL &&
                            streq_ci(op->u.mem.base_reg, "rip")) {
-                    addend = -4;
+                    addend += -4;
                 }
                 if (rel_count > 0) {
                     set_err(ctx, "%s:%u: multiple symbolic relocations in one x86 instruction are not yet supported",
@@ -11351,6 +11418,12 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     return -1;
                 }
                 reloc_off = cur_off + (uint64_t)code_len - reloc_width;
+                if (machine_relocation_addend_is_in_place(machine)) {
+                    uint64_t code_rel_off = reloc_off - cur_off;
+                    if (code_rel_off + reloc_width <= (uint64_t)code_len) {
+                        write_u64_le_at(code + code_rel_off, (uint64_t)addend, (unsigned)reloc_width);
+                    }
+                }
                 if (trace_env) {
                     fprintf(stderr, "as: reloc-trace   -> sym=%s type=%u off=0x%llx addend=%lld\n",
                             sym, (unsigned)t, (unsigned long long)reloc_off, (long long)addend);
@@ -11367,6 +11440,18 @@ static int emit_relocations(emit_ctx_t *ctx) {
                 sec_buf_vec_free(&secbufs);
                 return -1;
             }
+        }
+    }
+
+    for (i = 0; i < secbufs.count; ++i) {
+        elf_section_t *sec = section_for_name(ctx, secbufs.items[i].name);
+        if (sec == NULL) {
+            continue;
+        }
+        if (elf_section_set_data(sec, secbufs.items[i].buf.data, secbufs.items[i].buf.len) != ELF_OK) {
+            section_track_free(&track);
+            sec_buf_vec_free(&secbufs);
+            return -1;
         }
     }
 

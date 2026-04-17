@@ -64,7 +64,7 @@ ifdef NATIVE_BUILD
     LIBGCC :=
 else
     # Target build configuration (Substrate i386)
-    USER_CFLAGS := $(COMMON_FLAGS) -std=c2x -nostdinc -I$(USR_INCLUDE) -I$(SYS_INCLUDE) -I$(TOP)/sys
+    USER_CFLAGS := $(COMMON_FLAGS) -std=c2x -nostdinc -fno-pie -I$(USR_INCLUDE) -I$(SYS_INCLUDE) -I$(TOP)/sys
 ifneq ($(strip $(GCC_INCLUDE)),)
 ifneq ($(wildcard $(GCC_INCLUDE)),)
     USER_CFLAGS += -I$(GCC_INCLUDE)

@@ -11073,9 +11073,11 @@ done:
 
 int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag) {
     FILE *fp;
-    long sz;
+    size_t sz;
     char *buf;
     parser_t p;
+    size_t cap;
+    size_t nread;
 
     memset(out, 0, sizeof(*out));
     if (diag != NULL) {
@@ -11092,25 +11094,38 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
         set_diag(diag, 0, 0, "failed to open source file");
         return -1;
     }
-    if (fseek(fp, 0, SEEK_END) != 0) {
-        fclose(fp);
-        set_diag(diag, 0, 0, "failed to seek source file");
-        return -1;
-    }
-    sz = ftell(fp);
-    if (sz < 0 || fseek(fp, 0, SEEK_SET) != 0) {
-        fclose(fp);
-        set_diag(diag, 0, 0, "failed to size source file");
-        return -1;
-    }
-
-    buf = (char *)malloc((size_t)sz + 1);
+    cap = 4096;
+    buf = (char *)malloc(cap + 1);
     if (buf == NULL) {
         fclose(fp);
         set_diag(diag, 0, 0, "out of memory");
         return -1;
     }
-    if (fread(buf, 1, (size_t)sz, fp) != (size_t)sz) {
+    sz = 0;
+    while ((nread = fread(buf + sz, 1, cap - sz, fp)) > 0) {
+        sz += nread;
+        if (sz == cap) {
+            size_t new_cap;
+            char *new_buf;
+            if (cap > ((size_t)-1) / 2 - 1) {
+                free(buf);
+                fclose(fp);
+                set_diag(diag, 0, 0, "source file too large");
+                return -1;
+            }
+            new_cap = cap * 2;
+            new_buf = (char *)realloc(buf, new_cap + 1);
+            if (new_buf == NULL) {
+                free(buf);
+                fclose(fp);
+                set_diag(diag, 0, 0, "out of memory");
+                return -1;
+            }
+            buf = new_buf;
+            cap = new_cap;
+        }
+    }
+    if (ferror(fp)) {
         free(buf);
         fclose(fp);
         set_diag(diag, 0, 0, "failed to read source file");
@@ -11119,7 +11134,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
     buf[sz] = '\0';
     fclose(fp);
     if (g_parser_enable_trigraphs) {
-        sz = (long)normalize_c95_trigraphs(buf, (size_t)sz);
+        sz = normalize_c95_trigraphs(buf, sz);
         buf[sz] = '\0';
     }
 
@@ -11127,7 +11142,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
     p.diag = diag;
     p.tu = out;
     p.scope_depth = 0;
-    cc_lexer_init(&p.lx, buf, (size_t)sz, path);
+    cc_lexer_init(&p.lx, buf, sz, path);
     if (next_tok(&p) != 0) {
         cc_lexer_deinit(&p.lx);
         parser_free_hoisted_funcs(&p);

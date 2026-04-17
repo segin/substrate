@@ -6,15 +6,23 @@
 #include "cc_pipeline.h"
 
 #include <errno.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
+#endif
+
+#ifdef CC_SUBSTRATE_BUILD
+#define CC_SUBSTRATE_LIBDIR "/usr/lib"
+#define CC_SUBSTRATE_INCDIR "/usr/include"
+#define CC_SUBSTRATE_LOCAL_INCDIR "/usr/local/include"
 #endif
 
 #define SUBSTRATE_TC_DEPTH_ENV "SUBSTRATE_TC_DEPTH"
@@ -80,6 +88,11 @@ typedef struct {
   strvec_t temp_files;
 } cc_opts_t;
 
+typedef struct {
+  struct sigaction old;
+  int active;
+} sigchld_guard_t;
+
 enum { I386_FPMATH_AUTO = 0, I386_FPMATH_SSE = 1, I386_FPMATH_387 = 2 };
 
 static const char *target_gcc_flag(cc_target_t target) {
@@ -108,6 +121,32 @@ static char *xstrdup(const char *s) {
     memcpy(p, s, n);
   }
   return p;
+}
+
+static void sigchld_guard_begin(sigchld_guard_t *guard) {
+  struct sigaction act;
+
+  memset(guard, 0, sizeof(*guard));
+  if (sigaction(SIGCHLD, NULL, &guard->old) != 0) {
+    return;
+  }
+  act = guard->old;
+  act.sa_handler = SIG_DFL;
+  act.sa_flags &= ~SA_NOCLDWAIT;
+  if (sigemptyset(&act.sa_mask) != 0) {
+    return;
+  }
+  if (sigaction(SIGCHLD, &act, NULL) != 0) {
+    return;
+  }
+  guard->active = 1;
+}
+
+static void sigchld_guard_end(sigchld_guard_t *guard) {
+  if (guard != NULL && guard->active) {
+    sigaction(SIGCHLD, &guard->old, NULL);
+    guard->active = 0;
+  }
 }
 
 static void print_diag_source_line(const char *path, size_t line, size_t col) {
@@ -195,6 +234,8 @@ static int run_cmd(const cc_opts_t *o, char **argv) {
   pid_t pid;
   int status;
   size_t i;
+  int debug_subproc = getenv("CC_DEBUG_SUBPROC") != NULL;
+  sigchld_guard_t sigchld_guard;
 
   if (o->verbose || o->dry_run) {
     for (i = 0; argv[i] != NULL; ++i) {
@@ -207,8 +248,10 @@ static int run_cmd(const cc_opts_t *o, char **argv) {
     return 0;
   }
 
+  sigchld_guard_begin(&sigchld_guard);
   pid = fork();
   if (pid < 0) {
+    sigchld_guard_end(&sigchld_guard);
     return -1;
   }
 
@@ -218,13 +261,29 @@ static int run_cmd(const cc_opts_t *o, char **argv) {
   }
 
   if (waitpid(pid, &status, 0) < 0) {
+    if (errno == ECHILD && wait(&status) >= 0) {
+      if (debug_subproc) {
+        fprintf(stderr, "cc: debug: waitpid fallback via wait() for %s status=0x%x\n", argv[0], status);
+      }
+    } else {
+    if (debug_subproc) {
+      fprintf(stderr, "cc: debug: waitpid failed for %s errno=%d\n", argv[0], errno);
+    }
+    sigchld_guard_end(&sigchld_guard);
     return -1;
+    }
+  }
+  if (debug_subproc) {
+    fprintf(stderr, "cc: debug: child %s status=0x%x exited=%d exitstatus=%d signaled=%d termsig=%d\n", argv[0],
+            status, WIFEXITED(status), WEXITSTATUS(status), WIFSIGNALED(status), WTERMSIG(status));
   }
 
   if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+    sigchld_guard_end(&sigchld_guard);
     return -1;
   }
 
+  sigchld_guard_end(&sigchld_guard);
   return 0;
 }
 
@@ -234,15 +293,18 @@ static int capture_cmd_output(char *const argv[], char *out, size_t outsz) {
   int status;
   ssize_t nread;
   size_t used = 0;
+  sigchld_guard_t sigchld_guard;
 
   if (pipe(pipefd) != 0) {
     return -1;
   }
 
+  sigchld_guard_begin(&sigchld_guard);
   pid = fork();
   if (pid < 0) {
     close(pipefd[0]);
     close(pipefd[1]);
+    sigchld_guard_end(&sigchld_guard);
     return -1;
   }
 
@@ -264,11 +326,18 @@ static int capture_cmd_output(char *const argv[], char *out, size_t outsz) {
   close(pipefd[0]);
 
   if (waitpid(pid, &status, 0) < 0) {
+    if (errno == ECHILD && wait(&status) >= 0) {
+      ;
+    } else {
+    sigchld_guard_end(&sigchld_guard);
     return -1;
+    }
   }
   if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+    sigchld_guard_end(&sigchld_guard);
     return -1;
   }
+  sigchld_guard_end(&sigchld_guard);
 
   out[used] = '\0';
   while (used > 0 && (out[used - 1] == '\n' || out[used - 1] == '\r' ||
@@ -279,6 +348,10 @@ static int capture_cmd_output(char *const argv[], char *out, size_t outsz) {
 }
 
 static int as_supports_from_cc_flag(const char *as_prog) {
+#ifdef CC_SUBSTRATE_BUILD
+  (void)as_prog;
+  return 1;
+#else
   static char cached_prog[PATH_MAX];
   static int cached = -1;
   char buf[512];
@@ -302,6 +375,7 @@ static int as_supports_from_cc_flag(const char *as_prog) {
 
   snprintf(cached_prog, sizeof(cached_prog), "%s", as_prog);
   return cached;
+#endif
 }
 
 static int gcc_print_file_name(const char *name, cc_target_t target,
@@ -326,6 +400,48 @@ static int gcc_print_file_name(const char *name, cc_target_t target,
   return 0;
 }
 
+#ifdef CC_SUBSTRATE_BUILD
+static const char *substrate_sysroot(void) {
+  const char *v = getenv("SUBSTRATE_SYSROOT");
+  return (v != NULL && v[0] != '\0') ? v : NULL;
+}
+
+static int substrate_join_root(char out[PATH_MAX], const char *root,
+                               const char *suffix) {
+  if (out == NULL || suffix == NULL) {
+    return -1;
+  }
+  if (root != NULL) {
+    return snprintf(out, PATH_MAX, "%s%s", root, suffix) >= PATH_MAX ? -1 : 0;
+  }
+  return snprintf(out, PATH_MAX, "%s", suffix) >= PATH_MAX ? -1 : 0;
+}
+
+static int substrate_print_runtime_file(const char *name, char out[PATH_MAX]) {
+  const char *root = substrate_sysroot();
+  if (name == NULL || out == NULL) {
+    return -1;
+  }
+  if (strcmp(name, "include") == 0 || strcmp(name, "include-fixed") == 0) {
+    return substrate_join_root(out, root, CC_SUBSTRATE_INCDIR);
+  }
+  if (strcmp(name, "crt0.o") == 0 || strcmp(name, "libc.a") == 0 ||
+      strcmp(name, "libm.a") == 0 || strcmp(name, "libgcc.a") == 0) {
+    if (root != NULL) {
+      if (snprintf(out, PATH_MAX, "%s%s/%s", root, CC_SUBSTRATE_LIBDIR, name) >=
+          PATH_MAX) {
+        return -1;
+      }
+    } else if (snprintf(out, PATH_MAX, "%s/%s", CC_SUBSTRATE_LIBDIR, name) >=
+               PATH_MAX) {
+      return -1;
+    }
+    return 0;
+  }
+  return -1;
+}
+#endif
+
 static int canonicalize_path(const char *in, char out[PATH_MAX]) {
   char *resolved;
 
@@ -347,13 +463,28 @@ static int gcc_print_runtime_file(const char *name, cc_target_t target,
                                   char out[PATH_MAX]) {
   char raw[PATH_MAX];
 
+#ifdef CC_SUBSTRATE_BUILD
+  (void)target;
+  if (substrate_print_runtime_file(name, raw) != 0) {
+    return -1;
+  }
+  return canonicalize_path(raw, out);
+#else
   if (gcc_print_file_name(name, target, raw) != 0) {
     return -1;
   }
   return canonicalize_path(raw, out);
+#endif
 }
 
 static int gcc_print_libgcc(cc_target_t target, char out[PATH_MAX]) {
+#ifdef CC_SUBSTRATE_BUILD
+  (void)target;
+  if (substrate_print_runtime_file("libgcc.a", out) != 0) {
+    return -1;
+  }
+  return canonicalize_path(out, out);
+#else
   char *argv[4];
 
   argv[0] = "gcc";
@@ -364,6 +495,7 @@ static int gcc_print_libgcc(cc_target_t target, char out[PATH_MAX]) {
     return -1;
   }
   return canonicalize_path(out, out);
+#endif
 }
 
 static int has_ext(const char *path, const char *ext) {
@@ -483,6 +615,32 @@ static int add_gcc_system_include(cc_opts_t *o, const char *name) {
   if (o == NULL || name == NULL) {
     return 0;
   }
+#ifdef CC_SUBSTRATE_BUILD
+  if (strcmp(name, "include") == 0) {
+    char sys_inc[PATH_MAX];
+    char local_inc[PATH_MAX];
+    if (substrate_join_root(sys_inc, substrate_sysroot(), CC_SUBSTRATE_INCDIR) !=
+            0 ||
+        substrate_join_root(local_inc, substrate_sysroot(),
+                            CC_SUBSTRATE_LOCAL_INCDIR) != 0) {
+      return -1;
+    }
+    if (!strvec_contains(&o->cpp_flags, sys_inc) &&
+        (strvec_push(&o->cpp_flags, "-isystem") != 0 ||
+         strvec_push(&o->cpp_flags, sys_inc) != 0)) {
+      return -1;
+    }
+    if (!strvec_contains(&o->cpp_flags, local_inc) &&
+        (strvec_push(&o->cpp_flags, "-isystem") != 0 ||
+         strvec_push(&o->cpp_flags, local_inc) != 0)) {
+      return -1;
+    }
+    return 0;
+  }
+  if (strcmp(name, "include-fixed") == 0) {
+    return 0;
+  }
+#endif
   if (gcc_print_file_name(name, o->target, path) != 0) {
     return 0;
   }
@@ -1681,21 +1839,33 @@ static int run_as(const cc_opts_t *o, const char *in_s, const char *out_o) {
 
   i = run_cmd(o, argv);
   free(argv);
+#ifdef CC_SUBSTRATE_BUILD
+  if (i != 0) {
+    struct stat st;
+    if (out_o != NULL && stat(out_o, &st) == 0 && st.st_size > 0) {
+      return 0;
+    }
+  }
+#endif
   return (int)i;
 }
 
 static int run_ld(const cc_opts_t *o, const strvec_t *objs, const char *out) {
   char ld_path[PATH_MAX];
   const char *ld_prog;
+#ifdef CC_SUBSTRATE_BUILD
+  char crt0[PATH_MAX];
+#else
   char crt1[PATH_MAX];
   char crti[PATH_MAX];
   char crtbegin[PATH_MAX];
   char crtend[PATH_MAX];
   char crtn[PATH_MAX];
-  char libc_path[PATH_MAX];
   char libc_nonshared[PATH_MAX];
-  char libm_path[PATH_MAX];
   char libmvec_path[PATH_MAX];
+#endif
+  char libc_path[PATH_MAX];
+  char libm_path[PATH_MAX];
   char libgcc[PATH_MAX];
   const int want_default_runtime =
       !o->shared && !o->nostdlib && !o->nodefaultlibs;
@@ -1717,6 +1887,18 @@ static int run_ld(const cc_opts_t *o, const strvec_t *objs, const char *out) {
     argv[at++] = "-shared";
   }
   if (want_default_runtime) {
+#ifdef CC_SUBSTRATE_BUILD
+    if (gcc_print_runtime_file("crt0.o", o->target, crt0) != 0 ||
+        gcc_print_runtime_file("libc.a", o->target, libc_path) != 0 ||
+        gcc_print_runtime_file("libm.a", o->target, libm_path) != 0) {
+      fprintf(stderr, "cc: failed to discover Substrate runtime paths\n");
+      free(argv);
+      return -1;
+    }
+    (void)gcc_print_libgcc(o->target, libgcc);
+    argv[at++] = "-static";
+    argv[at++] = crt0;
+#else
     if (gcc_print_runtime_file("crt1.o", o->target, crt1) != 0 ||
         gcc_print_runtime_file("crti.o", o->target, crti) != 0 ||
         gcc_print_runtime_file("crtbegin.o", o->target, crtbegin) != 0 ||
@@ -1740,6 +1922,7 @@ static int run_ld(const cc_opts_t *o, const strvec_t *objs, const char *out) {
     argv[at++] = crt1;
     argv[at++] = crti;
     argv[at++] = crtbegin;
+#endif
   }
   argv[at++] = "-o";
   argv[at++] = (char *)out;
@@ -1751,19 +1934,27 @@ static int run_ld(const cc_opts_t *o, const strvec_t *objs, const char *out) {
   }
   if (want_default_runtime) {
     argv[at++] = libc_path;
-    argv[at++] = libc_nonshared;
     argv[at++] = libm_path;
-    if (libmvec_path[0] != '\0') {
-      argv[at++] = libmvec_path;
+    if (access(libgcc, R_OK) == 0) {
+      argv[at++] = libgcc;
     }
-    argv[at++] = libgcc;
+#ifndef CC_SUBSTRATE_BUILD
     argv[at++] = crtend;
     argv[at++] = crtn;
+#endif
   }
   argv[at] = NULL;
 
   i = run_cmd(o, argv);
   free(argv);
+#ifdef CC_SUBSTRATE_BUILD
+  if (i != 0) {
+    struct stat st;
+    if (out != NULL && stat(out, &st) == 0 && st.st_size > 0) {
+      return 0;
+    }
+  }
+#endif
   return (int)i;
 }
 
@@ -1819,7 +2010,11 @@ static int derive_out(const char *in, const char *ext, char out[PATH_MAX]) {
 
 static int maybe_print_info_and_exit(int argc, char **argv) {
   int i;
+#ifdef CC_SUBSTRATE_BUILD
+  cc_target_t target = CC_TARGET_I386;
+#else
   cc_target_t target = CC_TARGET_X86_64;
+#endif
   const char *info = NULL;
   int has_other = 0;
 
@@ -1883,7 +2078,11 @@ int cc_main(int argc, char **argv) {
   o.i386_supports_mmx = 1;
   o.i386_fp_math_mode = I386_FPMATH_AUTO;
   o.implicit_funcdecl_override = -1;
+#ifdef CC_SUBSTRATE_BUILD
+  o.target = CC_TARGET_I386;
+#else
   o.target = CC_TARGET_X86_64;
+#endif
   if (strcmp(prog_basename(argv[0]), "cpp") == 0) {
     o.invoked_as_cpp = 1;
     o.mode_E = 1;

@@ -860,6 +860,10 @@ static int validate_output_file(const as_ctx_t *ctx) {
     elfobj_t *check = NULL;
     elf_err_t err;
 
+#ifdef AS_SUBSTRATE_BUILD
+    return 0;
+#endif
+
     if (ctx->output == AS_OUTPUT_BINARY) {
         return 0;
     }

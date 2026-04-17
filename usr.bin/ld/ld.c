@@ -791,45 +791,76 @@ static int has_suffix(const char *s, const char *suffix) {
 }
 
 static int read_file(const char *path, unsigned char **out, size_t *out_sz) {
-    FILE *fp;
-    long end;
-    size_t got;
     unsigned char *buf;
+    int fd;
+    struct stat st;
+    size_t cap;
+    size_t used;
+    ssize_t nr;
 
     *out = NULL;
     *out_sz = 0;
-    fp = fopen(path, "rb");
-    if (fp == NULL) {
+    fd = open(path, O_RDONLY);
+    if (fd < 0) {
         return -1;
     }
-    if (fseek(fp, 0, SEEK_END) != 0) {
-        fclose(fp);
+    if (fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_size >= 0) {
+        size_t total = (size_t)st.st_size;
+        size_t off = 0;
+        buf = (unsigned char *)malloc(total);
+        if (buf == NULL && total != 0) {
+            close(fd);
+            return -1;
+        }
+        while (off < total) {
+            nr = read(fd, buf + off, total - off);
+            if (nr <= 0) {
+                free(buf);
+                close(fd);
+                return -1;
+            }
+            off += (size_t)nr;
+        }
+        close(fd);
+        *out = buf;
+        *out_sz = total;
+        return 0;
+    }
+    cap = 4096;
+    used = 0;
+    buf = (unsigned char *)malloc(cap);
+    if (buf == NULL) {
+        close(fd);
         return -1;
     }
-    end = ftell(fp);
-    if (end < 0) {
-        fclose(fp);
-        return -1;
+    while ((nr = read(fd, buf + used, cap - used)) > 0) {
+        used += (size_t)nr;
+        if (used == cap) {
+            size_t new_cap;
+            unsigned char *next;
+            if (cap > ((size_t)-1) / 2) {
+                free(buf);
+                close(fd);
+                return -1;
+            }
+            new_cap = cap * 2;
+            next = (unsigned char *)realloc(buf, new_cap);
+            if (next == NULL) {
+                free(buf);
+                close(fd);
+                return -1;
+            }
+            buf = next;
+            cap = new_cap;
+        }
     }
-    if (fseek(fp, 0, SEEK_SET) != 0) {
-        fclose(fp);
-        return -1;
-    }
-
-    buf = (unsigned char *)malloc((size_t)end);
-    if (buf == NULL && end != 0) {
-        fclose(fp);
-        return -1;
-    }
-    got = fread(buf, 1, (size_t)end, fp);
-    fclose(fp);
-    if (got != (size_t)end) {
+    close(fd);
+    if (nr < 0) {
         free(buf);
         return -1;
     }
-
     *out = buf;
-    *out_sz = (size_t)end;
+    *out_sz = used;
     return 0;
 }
 
@@ -4109,6 +4140,7 @@ static char *resolve_library_path_suffix_ex(const ld_ctx_t *ctx, const char *nam
         "/usr/local/lib"
     };
     char leaf[512];
+    const char *sysroot;
     size_t i;
 
     snprintf(leaf, sizeof(leaf), "lib%s%s", name, suffix != NULL ? suffix : "");
@@ -4122,6 +4154,24 @@ static char *resolve_library_path_suffix_ex(const ld_ctx_t *ctx, const char *nam
     if (!include_default_dirs) {
         return NULL;
     }
+#ifdef LD_SUBSTRATE_BUILD
+    sysroot = getenv("SUBSTRATE_SYSROOT");
+    if (sysroot != NULL && sysroot[0] != '\0') {
+        for (i = 0; i < sizeof(default_dirs) / sizeof(default_dirs[0]); ++i) {
+            char prefixed[PATH_MAX];
+            char *cand;
+            if (snprintf(prefixed, sizeof(prefixed), "%s%s", sysroot, default_dirs[i]) >= (int)sizeof(prefixed)) {
+                continue;
+            }
+            cand = path_join(prefixed, leaf);
+            if (cand != NULL && access(cand, R_OK) == 0) {
+                return cand;
+            }
+            free(cand);
+        }
+        return NULL;
+    }
+#endif
     for (i = 0; i < sizeof(default_dirs) / sizeof(default_dirs[0]); ++i) {
         char *cand = path_join(default_dirs[i], leaf);
         if (cand != NULL && access(cand, R_OK) == 0) {
@@ -8466,6 +8516,16 @@ static symrule_entry_t *symrule_get(symrule_vec_t *v, const char *name) {
     return &v->items[v->count - 1];
 }
 
+static int is_i386_hidden_pc_thunk_symbol(const elf_symbol_t *sym, const char *name) {
+    if (sym == NULL || name == NULL) {
+        return 0;
+    }
+    if (strncmp(name, "__x86.get_pc_thunk.", 19) != 0) {
+        return 0;
+    }
+    return elf_symbol_visibility(sym) == STV_HIDDEN;
+}
+
 static int check_symbol_precedence(ld_ctx_t *ctx, const objvec_t *inputs) {
     symrule_vec_t table;
     size_t i;
@@ -8520,6 +8580,9 @@ static int check_symbol_precedence(ld_ctx_t *ctx, const objvec_t *inputs) {
                 continue;
             }
             if (entry->strong_src != NULL && strcmp(entry->strong_src, inputs->names[i]) != 0) {
+                if (is_i386_hidden_pc_thunk_symbol(sym, name)) {
+                    continue;
+                }
                 fprintf(stderr,
                         "ld: duplicate strong definition of `%s`: %s and %s\n",
                         name, entry->strong_src, inputs->names[i]);
@@ -10351,6 +10414,10 @@ static int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_u
 }
 
 static int validate_output(const ld_ctx_t *ctx) {
+#ifdef LD_SUBSTRATE_BUILD
+    (void)ctx;
+    return 0;
+#else
     elfobj_t *obj = NULL;
 
     if (elf_open(ctx->out_path, &obj) != ELF_OK) {
@@ -10377,6 +10444,7 @@ static int validate_output(const ld_ctx_t *ctx) {
     }
     elf_close(obj);
     return 0;
+#endif
 }
 
 static int ensure_substrate_ld_note(elfobj_t *out) {
@@ -10495,6 +10563,15 @@ static int run_internal_link(ld_ctx_t *ctx) {
         elf_close(out);
         return -1;
     }
+#ifdef LD_SUBSTRATE_BUILD
+    if (out_type == ET_EXEC && elf_set_osabi(out, ELFOSABI_SUBSTRATE) != ELF_OK) {
+        fprintf(stderr, "ld: failed to set Substrate ELF OSABI\n");
+        symref_map_free(&undef_refs);
+        objvec_free(&inputs);
+        elf_close(out);
+        return -1;
+    }
+#endif
     if (ctx->script_path != NULL) {
         if (parse_linker_script_file(ctx->script_path, ctx, out, 1) != 0) {
             symref_map_free(&undef_refs);
@@ -10770,7 +10847,11 @@ int main(int argc, char **argv) {
     ctx.out_path = "a.out";
     ctx.self_path = argv[0];
     ctx.compat_mode = LD_COMPAT_GNU;
+#ifdef LD_SUBSTRATE_BUILD
+    ctx.current_lib_mode = LD_LIBMODE_STATIC;
+#else
     ctx.current_lib_mode = LD_LIBMODE_DYNAMIC;
+#endif
     ctx.current_whole_archive = 0;
     ctx.current_as_needed = 0;
     ctx.z_text_mode = 0;

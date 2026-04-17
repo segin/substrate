@@ -1190,14 +1190,14 @@ elf_err_t elf_open_memory_with_options(const void *buf, size_t size, uint32_t fl
 }
 
 elf_err_t elf_open_with_options(const char *path, uint32_t flags, elfobj_t **out) {
-    FILE *fp;
     uint8_t *buf;
-    long end;
-    size_t got;
     int fd;
     struct stat st;
     void *map = MAP_FAILED;
     elf_err_t err;
+    size_t cap;
+    size_t used;
+    ssize_t nr;
 
     if (path == NULL || out == NULL) {
         return ELF_ERR_STATE;
@@ -1234,38 +1234,67 @@ elf_err_t elf_open_with_options(const char *path, uint32_t flags, elfobj_t **out
         }
     }
 
-    fp = fopen(path, "rb");
-    if (fp == NULL) {
+    fd = open(path, O_RDONLY);
+    if (fd < 0) {
         return ELF_ERR_IO;
     }
-    if (fseek(fp, 0, SEEK_END) != 0) {
-        fclose(fp);
-        return ELF_ERR_IO;
-    }
-    end = ftell(fp);
-    if (end < 0) {
-        fclose(fp);
-        return ELF_ERR_IO;
-    }
-    if (fseek(fp, 0, SEEK_SET) != 0) {
-        fclose(fp);
-        return ELF_ERR_IO;
-    }
+    if (fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_size >= 0) {
+        size_t total = (size_t)st.st_size;
+        size_t off = 0;
 
-    buf = (uint8_t *)malloc((size_t)end);
-    if (buf == NULL && end != 0) {
-        fclose(fp);
+        buf = (uint8_t *)malloc(total);
+        if (buf == NULL && total != 0) {
+            close(fd);
+            return ELF_ERR_OOM;
+        }
+        while (off < total) {
+            nr = read(fd, buf + off, total - off);
+            if (nr <= 0) {
+                free(buf);
+                close(fd);
+                return ELF_ERR_IO;
+            }
+            off += (size_t)nr;
+        }
+        close(fd);
+        err = open_memory_common(buf, total, flags, out);
+        free(buf);
+        return err;
+    }
+    cap = 4096;
+    used = 0;
+    buf = (uint8_t *)malloc(cap);
+    if (buf == NULL) {
+        close(fd);
         return ELF_ERR_OOM;
     }
-
-    got = fread(buf, 1, (size_t)end, fp);
-    fclose(fp);
-    if (got != (size_t)end) {
+    while ((nr = read(fd, buf + used, cap - used)) > 0) {
+        used += (size_t)nr;
+        if (used == cap) {
+            size_t new_cap;
+            uint8_t *next;
+            if (cap > ((size_t)-1) / 2) {
+                free(buf);
+                close(fd);
+                return ELF_ERR_BOUNDS;
+            }
+            new_cap = cap * 2;
+            next = (uint8_t *)realloc(buf, new_cap);
+            if (next == NULL) {
+                free(buf);
+                close(fd);
+                return ELF_ERR_OOM;
+            }
+            buf = next;
+            cap = new_cap;
+        }
+    }
+    close(fd);
+    if (nr < 0) {
         free(buf);
         return ELF_ERR_IO;
     }
-
-    err = open_memory_common(buf, (size_t)end, flags, out);
+    err = open_memory_common(buf, used, flags, out);
     free(buf);
     return err;
 }

@@ -19,6 +19,11 @@
 #define PATH_MAX 4096
 #endif
 
+#ifdef CC_SUBSTRATE_BUILD
+#define CC_SUBSTRATE_INCDIR "/usr/include"
+#define CC_SUBSTRATE_LOCAL_INCDIR "/usr/local/include"
+#endif
+
 #define PP_MAX_INCLUDE_DEPTH 128
 #define PP_MAX_EXPAND_DEPTH 32
 #define PP_MAX_EXPAND_PASSES 2
@@ -160,6 +165,23 @@ static int pp_num_is_zero(pp_num_t v) {
 }
 
 static const char *g_pp_diag_file = NULL;
+
+#ifdef CC_SUBSTRATE_BUILD
+static const char *substrate_pp_sysroot(void) {
+    const char *v = getenv("SUBSTRATE_SYSROOT");
+    return (v != NULL && v[0] != '\0') ? v : NULL;
+}
+
+static int substrate_pp_join_root(char out[PATH_MAX], const char *root, const char *suffix) {
+    if (out == NULL || suffix == NULL) {
+        return -1;
+    }
+    if (root != NULL) {
+        return snprintf(out, PATH_MAX, "%s%s", root, suffix) >= PATH_MAX ? -1 : 0;
+    }
+    return snprintf(out, PATH_MAX, "%s", suffix) >= PATH_MAX ? -1 : 0;
+}
+#endif
 
 static void set_diag(cc_diag_t *diag, size_t line, size_t col, const char *msg) {
     if (diag == NULL || diag->message[0] != '\0') {
@@ -2281,6 +2303,7 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
     }
 }
 
+#ifndef CC_SUBSTRATE_BUILD
 static FILE *safe_popen_read(const char *cmd, const char *arg1, pid_t *out_pid) {
     int fds[2];
     if (pipe(fds) < 0) {
@@ -2304,22 +2327,44 @@ static FILE *safe_popen_read(const char *cmd, const char *arg1, pid_t *out_pid) 
     *out_pid = pid;
     return fdopen(fds[0], "r");
 }
+#endif
 
 static int add_default_include_paths(pp_state_t *st) {
     DIR *d;
     struct dirent *ent;
+#ifdef CC_SUBSTRATE_BUILD
+    const char *root;
+    char local_inc[PATH_MAX];
+    char sys_inc[PATH_MAX];
+#else
     const char *tool_dirs[] = {"include", "include-fixed"};
     const char *host_cc = NULL;
     size_t ti;
+#endif
     if (st->no_default_includes) {
         return 0;
     }
+#ifdef CC_SUBSTRATE_BUILD
+    root = substrate_pp_sysroot();
+    if (substrate_pp_join_root(local_inc, root, CC_SUBSTRATE_LOCAL_INCDIR) != 0 ||
+        substrate_pp_join_root(sys_inc, root, CC_SUBSTRATE_INCDIR) != 0) {
+        return -1;
+    }
+    if (strvec_push_unique(&st->system_include_paths, local_inc) != 0) {
+        return -1;
+    }
+    if (strvec_push_unique(&st->system_include_paths, sys_inc) != 0) {
+        return -1;
+    }
+#else
     if (strvec_push_unique(&st->system_include_paths, "/usr/local/include") != 0) {
         return -1;
     }
     if (strvec_push_unique(&st->system_include_paths, "/usr/include") != 0) {
         return -1;
     }
+#endif
+#ifndef CC_SUBSTRATE_BUILD
     host_cc = getenv("CC_BOOTSTRAP");
     if (host_cc == NULL || host_cc[0] == '\0') {
         host_cc = getenv("HOSTCC");
@@ -2362,7 +2407,12 @@ static int add_default_include_paths(pp_state_t *st) {
         fclose(fp);
         waitpid(child_pid, NULL, 0);
     }
+#endif
+#ifdef CC_SUBSTRATE_BUILD
+    d = opendir(sys_inc);
+#else
     d = opendir("/usr/include");
+#endif
     if (d == NULL) {
         return 0;
     }
@@ -2372,9 +2422,15 @@ static int add_default_include_paths(pp_state_t *st) {
         if (ent->d_name[0] == '.') {
             continue;
         }
+#ifdef CC_SUBSTRATE_BUILD
+        if (snprintf(base, sizeof(base), "%s/%s", sys_inc, ent->d_name) >= (int)sizeof(base)) {
+            continue;
+        }
+#else
         if (snprintf(base, sizeof(base), "/usr/include/%s", ent->d_name) >= (int)sizeof(base)) {
             continue;
         }
+#endif
         if (!dir_exists(base)) {
             continue;
         }
