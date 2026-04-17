@@ -144,6 +144,7 @@ typedef struct {
     const char *reproduce_path;
     ld_compat_mode_t compat_mode;
     ld_lib_mode_t current_lib_mode;
+    int explicit_lib_mode;
     int current_whole_archive;
     int current_as_needed;
     strvec_t lib_paths;
@@ -4140,7 +4141,9 @@ static char *resolve_library_path_suffix_ex(const ld_ctx_t *ctx, const char *nam
         "/usr/local/lib"
     };
     char leaf[512];
+#ifdef LD_SUBSTRATE_BUILD
     const char *sysroot;
+#endif
     size_t i;
 
     snprintf(leaf, sizeof(leaf), "lib%s%s", name, suffix != NULL ? suffix : "");
@@ -4153,6 +4156,57 @@ static char *resolve_library_path_suffix_ex(const ld_ctx_t *ctx, const char *nam
     }
     if (!include_default_dirs) {
         return NULL;
+    }
+#ifdef LD_SUBSTRATE_BUILD
+    sysroot = getenv("SUBSTRATE_SYSROOT");
+    if (sysroot != NULL && sysroot[0] != '\0') {
+        for (i = 0; i < sizeof(default_dirs) / sizeof(default_dirs[0]); ++i) {
+            char prefixed[PATH_MAX];
+            char *cand;
+            if (snprintf(prefixed, sizeof(prefixed), "%s%s", sysroot, default_dirs[i]) >= (int)sizeof(prefixed)) {
+                continue;
+            }
+            cand = path_join(prefixed, leaf);
+            if (cand != NULL && access(cand, R_OK) == 0) {
+                return cand;
+            }
+            free(cand);
+        }
+        return NULL;
+    }
+#endif
+    for (i = 0; i < sizeof(default_dirs) / sizeof(default_dirs[0]); ++i) {
+        char *cand = path_join(default_dirs[i], leaf);
+        if (cand != NULL && access(cand, R_OK) == 0) {
+            return cand;
+        }
+        free(cand);
+    }
+    return NULL;
+}
+
+static char *resolve_library_path_exact(const ld_ctx_t *ctx, const char *leaf) {
+    static const char *default_dirs[] = {
+        "/usr/lib",
+        "/usr/local/lib"
+    };
+#ifdef LD_SUBSTRATE_BUILD
+    const char *sysroot;
+#endif
+    size_t i;
+
+    if (leaf == NULL || leaf[0] == '\0') {
+        return NULL;
+    }
+    if (strchr(leaf, '/') != NULL) {
+        return access(leaf, R_OK) == 0 ? xstrdup(leaf) : NULL;
+    }
+    for (i = 0; i < ctx->lib_paths.count; ++i) {
+        char *cand = path_join(ctx->lib_paths.items[i], leaf);
+        if (cand != NULL && access(cand, R_OK) == 0) {
+            return cand;
+        }
+        free(cand);
     }
 #ifdef LD_SUBSTRATE_BUILD
     sysroot = getenv("SUBSTRATE_SYSROOT");
@@ -7386,7 +7440,7 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
         free(gnu_hash_buf);
         return -1;
     }
-    emit_versym = verdef_count != 0 || verneed_count != 0;
+    emit_versym = dynsym_len > entsz || verdef_count != 0 || verneed_count != 0;
     if (emit_versym) {
         versym_sec = elf_find_section(out, ".gnu.version");
         if (versym_sec == NULL) {
@@ -8177,6 +8231,38 @@ static int load_library_input(ld_ctx_t *ctx, const ld_input_t *in, objvec_t *obj
     int have_shared_match = 0;
     int handled = 0;
 
+    if (in->text != NULL && in->text[0] == ':') {
+        char *path_exact = resolve_library_path_exact(ctx, in->text + 1);
+        if (path_exact == NULL) {
+            fprintf(stderr, "ld: cannot find -l%s\n", in->text);
+            return -1;
+        }
+        if (has_suffix(path_exact, ".so") &&
+            load_library_script(path_exact, ctx, objs, state, in->whole_archive, in->as_needed, &handled) == 0 &&
+            handled) {
+            free(path_exact);
+            return 0;
+        }
+        if (has_suffix(path_exact, ".so") && (ctx->expect_type == ET_DYN || ctx->expect_type == ET_EXEC)) {
+            if (in->as_needed &&
+                shared_object_matches_unresolved(path_exact, ctx, state, &shared_matches) == 0 &&
+                !shared_matches) {
+                free(path_exact);
+                return 0;
+            }
+            if (register_dso_provider(ctx, path_exact, state) == 0) {
+                free(path_exact);
+                return 0;
+            }
+        }
+        if (load_path_input(path_exact, ctx, objs, state, in->whole_archive, 0) != 0) {
+            free(path_exact);
+            return -1;
+        }
+        free(path_exact);
+        return 0;
+    }
+
     if (in->lib_mode == LD_LIBMODE_STATIC) {
         path_a = resolve_library_path_suffix(ctx, in->text, ".a");
         if (path_a == NULL) {
@@ -8210,10 +8296,6 @@ static int load_library_input(ld_ctx_t *ctx, const ld_input_t *in, objvec_t *obj
         free(path_so);
         return 0;
     }
-    if (path_so != NULL && load_path_input(path_so, ctx, objs, state, in->whole_archive, 1) == 0) {
-        free(path_so);
-        return 0;
-    }
     if (path_so != NULL && (ctx->expect_type == ET_DYN || ctx->expect_type == ET_EXEC)) {
         if (in->as_needed) {
             if (shared_object_matches_unresolved(path_so, ctx, state, &shared_matches) == 0) {
@@ -8228,6 +8310,10 @@ static int load_library_input(ld_ctx_t *ctx, const ld_input_t *in, objvec_t *obj
             free(path_so);
             return 0;
         }
+    }
+    if (path_so != NULL && load_path_input(path_so, ctx, objs, state, in->whole_archive, 1) == 0) {
+        free(path_so);
+        return 0;
     }
     if (path_so != NULL && in->as_needed) {
         if (shared_object_matches_unresolved(path_so, ctx, state, &shared_matches) == 0) {
@@ -11009,19 +11095,25 @@ int main(int argc, char **argv) {
         }
         if (strcmp(a, "-shared") == 0 || strcmp(a, "-pie") == 0) {
             ctx.expect_type = ET_DYN;
+            if (!ctx.explicit_lib_mode) {
+                ctx.current_lib_mode = LD_LIBMODE_DYNAMIC;
+            }
             continue;
         }
         if (strcmp(a, "-static") == 0) {
             ctx.expect_type = ET_EXEC;
             ctx.current_lib_mode = LD_LIBMODE_STATIC;
+            ctx.explicit_lib_mode = 1;
             continue;
         }
         if (strcmp(a, "-Bstatic") == 0) {
             ctx.current_lib_mode = LD_LIBMODE_STATIC;
+            ctx.explicit_lib_mode = 1;
             continue;
         }
         if (strcmp(a, "-Bdynamic") == 0) {
             ctx.current_lib_mode = LD_LIBMODE_DYNAMIC;
+            ctx.explicit_lib_mode = 1;
             continue;
         }
         if (strcmp(a, "--whole-archive") == 0) {

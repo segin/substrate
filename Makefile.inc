@@ -4,7 +4,7 @@
 ARCH ?= i386
 
 # Toolchain definitions
-CC ?= gcc
+CC ?= cc
 LD ?= ld
 AR ?= ar
 AS ?= as
@@ -72,7 +72,8 @@ endif
 endif
     USER_CFLAGS += $(EXTRA_USER_CFLAGS)
     USER_LDFLAGS := -m32 -nostdlib -fno-pie -no-pie $(EXTRA_USER_LDFLAGS)
-    LIBGCC = $(shell $(CC) -m32 -print-libgcc-file-name)
+    _LIBGCC_PATH := $(shell $(CC) -m32 -print-libgcc-file-name 2>/dev/null)
+    LIBGCC = $(if $(wildcard $(_LIBGCC_PATH)),$(_LIBGCC_PATH),)
 endif
 
 # Macro to brand a binary as Substrate native (OSABI=64)

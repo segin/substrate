@@ -2140,7 +2140,7 @@ int cc_main(int argc, char **argv) {
     goto out;
   }
   if (add_gcc_system_includes(&o) != 0) {
-    fprintf(stderr, "cc: failed to add gcc include paths\n");
+    fprintf(stderr, "cc: failed to add system include paths\n");
     goto out;
   }
 

@@ -49,6 +49,18 @@ build_components() {
     echo "Building libc..."
     make -C "$TOP/lib/c" -j4
 
+    echo "Building runtime libraries..."
+    make -C "$TOP/lib/sys" -j4
+    make -C "$TOP/lib/m" -j4
+    make -C "$TOP/usr.lib/elfobj" -j4
+
+    echo "Building target toolchain..."
+    for dir in cc as ld ar ranlib nm objdump objcopy readelf strip strings size addr2line elfedit; do
+        if [ -f "$TOP/usr.bin/$dir/Makefile" ]; then
+            make -C "$TOP/usr.bin/$dir" -j4
+        fi
+    done
+
     echo "Building userland..."
     make -C "$TOP/bin" -j4
 }
@@ -103,8 +115,8 @@ install_to_dist() {
     done
     # CC resource directory (SIMD headers)
     if [ -d "$TOP/usr.bin/cc/resource" ]; then
-        mkdir -p "$DIST/usr/bin/resource"
-        cp -r "$TOP/usr.bin/cc/resource/"* "$DIST/usr/bin/resource/"
+        mkdir -p "$DIST/usr/lib/substratecc"
+        cp -r "$TOP/usr.bin/cc/resource/include" "$DIST/usr/lib/substratecc/"
     fi
 
     echo "Installing usr.sbin binaries..."

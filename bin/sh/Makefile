@@ -20,28 +20,28 @@ USER_CFLAGS += -I$(TOP)/sys
 endif
 
 test_lexer: lexer.c util.c shell_var.c tests/test_lexer.c
-	gcc -g -I. -o $@ lexer.c util.c shell_var.c tests/test_lexer.c
+	$(HOSTCC) -g -I. -o $@ lexer.c util.c shell_var.c tests/test_lexer.c
 
 test_parser: lexer.c parser.c util.c shell_var.c tests/test_parser.c
-	gcc -g -I. -o $@ lexer.c parser.c util.c shell_var.c tests/test_parser.c
+	$(HOSTCC) -g -I. -o $@ lexer.c parser.c util.c shell_var.c tests/test_parser.c
 
 test_expand: expand.c shell_var.c util.c tests/test_expand.c
-	gcc -g -I. -o $@ expand.c shell_var.c util.c tests/test_expand.c
+	$(HOSTCC) -g -I. -o $@ expand.c shell_var.c util.c tests/test_expand.c
 
 test_shell_var: shell_var.c util.c tests/test_shell_var.c
-	gcc -g -I. -o $@ shell_var.c util.c tests/test_shell_var.c
+	$(HOSTCC) -g -I. -o $@ shell_var.c util.c tests/test_shell_var.c
 
 test_job: job.c tests/test_job.c
-	gcc -g -I. -o $@ job.c tests/test_job.c
+	$(HOSTCC) -g -I. -o $@ job.c tests/test_job.c
 
 test_util: util.c tests/test_util.c
-	gcc -g -I. -o $@ util.c tests/test_util.c
+	$(HOSTCC) -g -I. -o $@ util.c tests/test_util.c
 
 test_exec: exec.c lexer.c parser.c expand.c shell_var.c job.c util.c prompt.c tests/test_exec.c
-	gcc -g -I. -o $@ exec.c lexer.c parser.c expand.c shell_var.c job.c util.c prompt.c tests/test_exec.c
+	$(HOSTCC) -g -I. -o $@ exec.c lexer.c parser.c expand.c shell_var.c job.c util.c prompt.c tests/test_exec.c
 
 test_exec_property: exec.c lexer.c parser.c expand.c shell_var.c job.c util.c prompt.c tests/test_exec_property.c
-	gcc -g -I. -o $@ exec.c lexer.c parser.c expand.c shell_var.c job.c util.c prompt.c tests/test_exec_property.c
+	$(HOSTCC) -g -I. -o $@ exec.c lexer.c parser.c expand.c shell_var.c job.c util.c prompt.c tests/test_exec_property.c
 
 fuzzer: lexer.c parser.c util.c shell_var.c tests/fuzz_parser.c
 	clang -g -fsanitize=fuzzer,address -I. -o $@ lexer.c parser.c util.c shell_var.c tests/fuzz_parser.c
@@ -75,4 +75,4 @@ test: all test_lexer test_parser test_expand test_shell_var test_job test_util t
 	SH="./sh_host" sh tests/test_regressions.sh
 
 test_prompt: prompt.c util.c shell_var.c tests/test_prompt.c
-	gcc -g -I. -o $@ prompt.c util.c shell_var.c tests/test_prompt.c
+	$(HOSTCC) -g -I. -o $@ prompt.c util.c shell_var.c tests/test_prompt.c
