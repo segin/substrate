@@ -85,6 +85,14 @@ static struct block_meta *global_base = NULL;
 static struct block_meta *global_tail = NULL;
 static struct block_meta *search_hint = NULL;
 
+static void *block_payload(struct block_meta *block) {
+    return (void *)((char *)block + BLOCK_META_SIZE);
+}
+
+static struct block_meta *payload_block(void *ptr) {
+    return (struct block_meta *)((char *)ptr - BLOCK_META_SIZE);
+}
+
 static struct block_meta *request_space(struct block_meta *last, size_t size) {
     struct block_meta *block;
     size_t total_size = size + BLOCK_META_SIZE;
@@ -221,13 +229,13 @@ void *malloc(size_t size) {
     if (search_hint == block) {
         search_hint = block->next != NULL ? block->next : global_base;
     }
-    return (block + 1);
+    return block_payload(block);
 }
 
 void free(void *ptr) {
     if (!ptr) return;
 
-    struct block_meta *block = (struct block_meta*)ptr - 1;
+    struct block_meta *block = payload_block(ptr);
     if (block->magic != MAGIC) {
         return;
     }
@@ -256,7 +264,7 @@ void *realloc(void *ptr, size_t size) {
         return NULL;
     }
 
-    struct block_meta *block = (struct block_meta*)ptr - 1;
+    struct block_meta *block = payload_block(ptr);
     if (block->magic != MAGIC) return NULL;
 
     if (block->size >= size) {
@@ -272,6 +280,7 @@ void *realloc(void *ptr, size_t size) {
         ((char*)block + BLOCK_META_SIZE + block->size == (char*)block->next) &&
         (block->size + BLOCK_META_SIZE + block->next->size >= ALIGN(size))) {
         struct block_meta *next = block->next;
+        int hint_was_next = (search_hint == next);
 
         // Merge next block
         block->size += BLOCK_META_SIZE + next->size;
@@ -280,6 +289,9 @@ void *realloc(void *ptr, size_t size) {
             block->next->prev = block;
         } else if (global_tail == next) {
             global_tail = block;
+        }
+        if (hint_was_next) {
+            search_hint = block->next != NULL ? block->next : global_base;
         }
 
         // Now split if too big

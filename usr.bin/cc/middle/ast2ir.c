@@ -2581,6 +2581,7 @@ static int integral_type_bits(cc_type_t t) {
         return 32;
     case CC_TYPE_LONG:
     case CC_TYPE_ULONG:
+        return (int)(g_pointer_size_bytes * 8);
     case CC_TYPE_LONG_LONG:
     case CC_TYPE_ULONG_LONG:
         return 64;
