@@ -1699,6 +1699,7 @@ static fs_node_t *sys_lookup_path(const char *path, int follow_final_symlink) {
 int sys_chmod(const char *path, int mode) {
     char kpath[256];
     fs_node_t *node;
+    int ret;
 
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
     node = sys_lookup_path(kpath, 1);
@@ -1710,9 +1711,8 @@ int sys_chmod(const char *path, int mode) {
     if (current_process->euid != 0)
         mode &= ~(04000 | 02000);
 
-    node->mask = (uint32_t)(mode & 07777);
-    node->ctime = get_time();
-    return 0;
+    ret = vfs_chmod_node(node, (uint32_t)mode);
+    return ret;
 }
 
 int sys_lchown(const char *path, int uid, int gid) {
@@ -1741,6 +1741,8 @@ int sys_lchown(const char *path, int uid, int gid) {
 }
 
 int sys_fchmod(int fd, int mode) {
+    int ret;
+
     if (fd < 0 || fd >= MAX_FD) return -EBADF;
 
     file_t *f = current_process->fds[fd];
@@ -1756,9 +1758,8 @@ int sys_fchmod(int fd, int mode) {
     if (current_process->euid != 0)
         mode &= ~(04000 | 02000);
 
-    node->mask = (uint32_t)(mode & 07777);
-    node->ctime = get_time();
-    return 0;
+    ret = vfs_chmod_node(node, (uint32_t)mode);
+    return ret;
 }
 
 int sys_fchown(int fd, int uid, int gid) {

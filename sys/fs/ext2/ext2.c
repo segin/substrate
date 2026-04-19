@@ -65,6 +65,7 @@ static uint8_t ext2_dirent_type_from_mode(uint16_t mode);
 static uint8_t ext2_file_type_to_dt(uint8_t ext2_type);
 static int ext2_free_indirect_tree(ext2_fs_t *fs, uint32_t block_num, uint32_t depth);
 static int ext2_free_inode_blocks(ext2_fs_t *fs, ext2_inode_t *inode);
+static int ext2_chmod(fs_node_t *node, uint32_t mode);
 
 // Helper to find a zero bit in a bitmap range
 int ext2_find_next_zero_bit(void *bitmap, uint32_t total_bits, uint32_t start, uint32_t end, uint32_t *found_idx) {
@@ -711,6 +712,7 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
     node->impl = (uintptr_t)ctx;
     node->open = ext2_node_open;
     node->close = ext2_node_close;
+    node->chmod = ext2_chmod;
     ctx->cache_slot = (uint16_t)idx;
     ctx->pin_count = 0;
     
@@ -745,6 +747,24 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
         node->rdev = inode->i_block[0];
     }
     return node;
+}
+
+static int ext2_chmod(fs_node_t *node, uint32_t mode) {
+    ext2_node_t *ctx;
+
+    if (!node) return -EINVAL;
+
+    ctx = (ext2_node_t *)(uintptr_t)node->impl;
+    if (!ctx || !ctx->fs) return -EINVAL;
+
+    ctx->inode.i_mode = (uint16_t)((ctx->inode.i_mode & 0xF000U) | (mode & 0x0FFFU));
+    ctx->inode.i_ctime = (uint32_t)node->ctime;
+
+    if (ext2_write_inode(ctx->fs, ctx->inode_num, &ctx->inode) != 0) {
+        return -EIO;
+    }
+
+    return 0;
 }
 
 // Read symlink target

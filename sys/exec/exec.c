@@ -114,7 +114,7 @@ int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
     }
 
     fs_node_t *node = (fs_node_t *)f->f_data;
-    if (vfs_check_permissions(node, current_process->uid, current_process->gid, X_OK) != 0) {
+    if (vfs_check_permissions(node, current_process->euid, current_process->egid, X_OK) != 0) {
         kern_close(fd);
         return -EACCES;
     }

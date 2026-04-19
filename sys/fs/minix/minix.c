@@ -2,6 +2,7 @@
 #include <kern/console.h>
 #include <vm/vm_kmem.h>
 #include <vfs/vfs.h>
+#include <sys/errno.h>
 #include <sys/stat.h>
 #include <kern/time.h>
 #include <string.h>
@@ -39,6 +40,7 @@ static int minix_read_inode(minix_fs_t *fs, uint32_t inode_num, fs_node_t *node)
 static int minix_write_inode(minix_fs_t *fs, fs_node_t *node);
 static int minix_write_inode_raw(minix_fs_t *fs, uint32_t inode_num, struct minix_inode_v1 *inode);
 static void minix_free_block(minix_fs_t *fs, uint32_t zone);
+static int minix_chmod(fs_node_t *node, uint32_t mode);
 
 static uint16_t minix_type_bits_from_flags(uint32_t flags) {
     if (flags & FS_DIRECTORY) return 0x4000;
@@ -470,6 +472,7 @@ static int minix_read_inode(minix_fs_t *fs, uint32_t inode_num, fs_node_t *node)
     } else node->flags = 0;
 
     node->mask = mode & 0xFFF;
+    node->chmod = minix_chmod;
 
     // Hook operations
     if (node->flags & FS_DIRECTORY) {
@@ -489,6 +492,22 @@ static int minix_read_inode(minix_fs_t *fs, uint32_t inode_num, fs_node_t *node)
          node->unlink = minix_unlink;
             node->rmdir = minix_rmdir;
          node->mknod = minix_mknod;
+    }
+
+    return 0;
+}
+
+static int minix_chmod(fs_node_t *node, uint32_t mode) {
+    minix_fs_t *fs;
+
+    if (!node) return -EINVAL;
+
+    fs = (minix_fs_t *)(uintptr_t)node->impl;
+    if (!fs) return -EINVAL;
+
+    node->mask = mode & 07777U;
+    if (minix_write_inode(fs, node) != 0) {
+        return -EIO;
     }
 
     return 0;

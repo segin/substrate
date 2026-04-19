@@ -40,6 +40,7 @@ struct fs_node {
     struct dirent *(*readdir)(struct fs_node *, uint64_t);
     struct fs_node *(*finddir)(struct fs_node *, char *name);
     int (*readlink)(struct fs_node *, char *, size_t);
+    int (*chmod)(struct fs_node *, uint32_t);
 };
 
 typedef struct filesystem {

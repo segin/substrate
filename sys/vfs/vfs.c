@@ -554,6 +554,35 @@ int vfs_may_open(fs_node_t *node, uint32_t uid, uint32_t gid, int flags) {
     return vfs_check_permissions(node, uid, gid, mode);
 }
 
+int vfs_chmod_node(fs_node_t *node, uint32_t mode) {
+    uint32_t old_mask;
+    int64_t old_ctime;
+    int ret;
+
+    if (node == NULL) {
+        return -EINVAL;
+    }
+
+    old_mask = node->mask;
+    old_ctime = node->ctime;
+
+    node->mask = mode & 07777U;
+    node->ctime = get_time();
+
+    if (node->chmod == NULL) {
+        return 0;
+    }
+
+    ret = node->chmod(node, node->mask);
+    if (ret != 0) {
+        node->mask = old_mask;
+        node->ctime = old_ctime;
+        return ret;
+    }
+
+    return 0;
+}
+
 
 int readlink_fs(fs_node_t *node, char *buf, size_t size) {
     if (node && node->readlink) {

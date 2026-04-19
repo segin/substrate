@@ -35,6 +35,7 @@ typedef int (*link_type_t)(struct fs_node*, struct fs_node*, const char*);
 typedef int (*unlink_type_t)(struct fs_node*, const char *name);
 typedef int (*mkdir_type_t)(struct fs_node*, const char *name, uint16_t permission);
 typedef int (*mknod_type_t)(struct fs_node*, const char *name, uint16_t mode, uint32_t dev);
+typedef int (*chmod_type_t)(struct fs_node*, uint32_t mode);
 
 typedef struct fs_node {
     char name[128];
@@ -66,6 +67,7 @@ typedef struct fs_node {
     unlink_type_t unlink;
     mkdir_type_t mkdir;
     mknod_type_t mknod;
+    chmod_type_t chmod;
     struct fs_node *ptr; // Used by mountpoints and symlinks.
 } fs_node_t;
 
@@ -109,6 +111,7 @@ int vfs_mkdir(const char *path, uint16_t permission);
 int vfs_mknod(const char *path, uint16_t mode, uint32_t dev);
 
 int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode);
+int vfs_chmod_node(fs_node_t *node, uint32_t mode);
 
 void vfs_register_filesystem(filesystem_t *fs);
 filesystem_t *vfs_get_filesystems(void);
