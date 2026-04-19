@@ -281,6 +281,94 @@ bool test_minix_symlink_v2(void) {
     return true;
 }
 
+bool test_minix_chmod_v1(void) {
+    fs_node_t file_fresh;
+    fs_node_t *root;
+    fs_node_t *file;
+
+    printf("Test: Minix V1 chmod persistence\n");
+    init_minix_v1();
+    root = minix_mount("ramdisk", 0, &ramdisk_node);
+    if (!root) return false;
+
+    if (minix_mknod(root, "chmod_v1", 0x81A4, 0) != 0) {
+        printf("FAIL: mknod failed\n");
+        return false;
+    }
+    file = minix_finddir(root, "chmod_v1");
+    if (!file || !file->chmod) {
+        printf("FAIL: chmod target missing\n");
+        return false;
+    }
+
+    file->mask = 0750;
+    file->ctime = 12345;
+    if (file->chmod(file, file->mask) != 0) {
+        printf("FAIL: chmod callback failed\n");
+        return false;
+    }
+
+    memset(&file_fresh, 0, sizeof(file_fresh));
+    if (minix_read_inode((minix_fs_t *)root->impl, file->inode, &file_fresh) != 0) {
+        printf("FAIL: reread inode failed\n");
+        return false;
+    }
+    if ((file_fresh.mask & 07777) != 0750) {
+        printf("FAIL: on-disk mode mismatch got %o\n", file_fresh.mask);
+        return false;
+    }
+
+    kfree(file_fresh.ptr, sizeof(struct minix_inode_v1));
+    kfree(file->ptr, sizeof(struct minix_inode_v1));
+    kfree(file, sizeof(fs_node_t));
+    minix_unmount(root);
+    return true;
+}
+
+bool test_minix_chmod_v2(void) {
+    fs_node_t file_fresh;
+    fs_node_t *root;
+    fs_node_t *file;
+
+    printf("Test: Minix V2 chmod persistence\n");
+    init_minix_v2();
+    root = minix_mount("ramdisk", 0, &ramdisk_node);
+    if (!root) return false;
+
+    if (minix_mknod(root, "chmod_v2", 0x81A4, 0) != 0) {
+        printf("FAIL: mknod failed\n");
+        return false;
+    }
+    file = minix_finddir(root, "chmod_v2");
+    if (!file || !file->chmod) {
+        printf("FAIL: chmod target missing\n");
+        return false;
+    }
+
+    file->mask = 0711;
+    file->ctime = 67890;
+    if (file->chmod(file, file->mask) != 0) {
+        printf("FAIL: chmod callback failed\n");
+        return false;
+    }
+
+    memset(&file_fresh, 0, sizeof(file_fresh));
+    if (minix_read_inode((minix_fs_t *)root->impl, file->inode, &file_fresh) != 0) {
+        printf("FAIL: reread inode failed\n");
+        return false;
+    }
+    if ((file_fresh.mask & 07777) != 0711) {
+        printf("FAIL: on-disk mode mismatch got %o\n", file_fresh.mask);
+        return false;
+    }
+
+    kfree(file_fresh.ptr, sizeof(struct minix_inode_v2));
+    kfree(file->ptr, sizeof(struct minix_inode_v2));
+    kfree(file, sizeof(fs_node_t));
+    minix_unmount(root);
+    return true;
+}
+
 int main() {
     setvbuf(stdout, NULL, _IONBF, 0);
     printf("Starting test_minix...\n");
@@ -289,6 +377,8 @@ int main() {
     pass &= test_minix_link_v2();
     pass &= test_minix_symlink_v1();
     pass &= test_minix_symlink_v2();
+    pass &= test_minix_chmod_v1();
+    pass &= test_minix_chmod_v2();
 
     if (pass) {
         printf("ALL TESTS PASSED\n");
