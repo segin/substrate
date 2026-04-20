@@ -220,9 +220,15 @@ vop_access(struct vnode *vp, int mode, struct ucred *cred)
     if (error)
         return error;
 
-    /* Root always has access */
-    if (cred->cr_uid == 0)
+    /*
+     * Root bypasses read/write checks, but execute still requires at least
+     * one execute bit to be present.
+     */
+    if (cred->cr_uid == 0) {
+        if ((mode & 1) && (va.va_mode & 0111) == 0)
+            return EACCES;
         return 0;
+    }
 
     int mask = 0;
     if (cred->cr_uid == va.va_uid) {
@@ -253,7 +259,7 @@ vop_access(struct vnode *vp, int mode, struct ucred *cred)
         }
     }
 
-    return (va.va_mode & mask) == mask ? 0 : -13; /* EACCES */
+    return ((unsigned int)va.va_mode & (unsigned int)mask) == (unsigned int)mask ? 0 : EACCES;
 }
 
 /*

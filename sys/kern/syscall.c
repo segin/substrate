@@ -1537,6 +1537,8 @@ int sys_access(const char *path, int mode) {
 }
 
 int kern_access(const char *path, int mode) {
+    int ret;
+
     if (!path) return -EFAULT;
 
     fs_node_t *node = 0;
@@ -1554,7 +1556,12 @@ int kern_access(const char *path, int mode) {
     // F_OK check
     if (mode == F_OK) return 0;
 
-    return vfs_check_permissions(node, current_process->uid, current_process->gid, mode);
+    ret = vfs_check_permissions(node, current_process->uid, current_process->gid, mode);
+    if (ret != 0) {
+        return -EACCES;
+    }
+
+    return 0;
 }
 
 int sys_mlock(const void *addr, size_t len) {

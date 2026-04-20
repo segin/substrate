@@ -150,6 +150,23 @@ int main(void) {
         return 1;
     }
 
+    current_process->uid = 0;
+    current_process->gid = 0;
+    current_process->euid = 0;
+    current_process->egid = 0;
+    permission_result = -1;
+    last_perm_uid = 1234;
+    last_perm_gid = 5678;
+    last_perm_mode = 0;
+    if (exec_dispatch("/bin/test", NULL, NULL) != -EACCES) {
+        fprintf(stderr, "FAIL: exec_dispatch did not propagate root execute denial\n");
+        return 1;
+    }
+    if (last_perm_uid != 0 || last_perm_gid != 0 || last_perm_mode != X_OK) {
+        fprintf(stderr, "FAIL: exec_dispatch did not use root effective credentials for X_OK check\n");
+        return 1;
+    }
+
     puts("host_test_exec_init: ok");
     return 0;
 }

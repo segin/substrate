@@ -506,7 +506,12 @@ fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path) {
 
 
 int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode) {
-    if (uid == 0) return 0; // Root always has access
+    if (uid == 0) {
+        if ((mode & 1) && (node->mask & 0111) == 0) {
+            return -1;
+        }
+        return 0;
+    }
 
     uint32_t mask = 0;
     if (uid == node->uid) {
