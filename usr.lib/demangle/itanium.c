@@ -59,6 +59,13 @@ typedef struct dm_itanium_parser {
     size_t last_template_off[DM_TEMPLATE_ARG_CAP];
     size_t last_template_len[DM_TEMPLATE_ARG_CAP];
     size_t last_template_count;
+
+    int in_type_context;
+    int has_return_type;
+
+    size_t func_tmpl_off[DM_TEMPLATE_ARG_CAP];
+    size_t func_tmpl_len[DM_TEMPLATE_ARG_CAP];
+    size_t func_tmpl_count;
 } dm_itanium_parser_t;
 
 typedef struct dm_parse_mark {
@@ -102,8 +109,6 @@ static int parse_name(dm_itanium_parser_t *p);
 static int parse_nested_name(dm_itanium_parser_t *p);
 static int parse_unscoped_name(dm_itanium_parser_t *p);
 static int parse_local_name(dm_itanium_parser_t *p);
-static int parse_name_component(dm_itanium_parser_t *p, size_t prev_off, size_t prev_len,
-                                size_t *comp_off, size_t *comp_len);
 static int parse_unqualified_name(dm_itanium_parser_t *p, size_t prev_off, size_t prev_len,
                                   size_t *comp_off, size_t *comp_len);
 static int parse_source_name(dm_itanium_parser_t *p);
@@ -433,6 +438,7 @@ parser_add_substitution(dm_itanium_parser_t *p, size_t off, size_t len)
 
     p->substitutions[p->substitution_count].off = off;
     p->substitutions[p->substitution_count].len = len;
+
     p->substitution_count++;
     return 0;
 }
@@ -610,7 +616,6 @@ parse_source_name(dm_itanium_parser_t *p)
 {
     const char *id;
     size_t len;
-    size_t off;
 
     if (parse_number(p, &len) != 0) {
         return -1;
@@ -621,14 +626,25 @@ parse_source_name(dm_itanium_parser_t *p)
         return -1;
     }
 
-    off = p->out.len;
     if (buf_append(&p->out, id, len) != 0) {
         return -1;
     }
 
     p->cur += len;
-    if (parser_add_substitution(p, off, len) != 0) {
-        return -1;
+
+    if (p->cur[0] == 'B') {
+        size_t tag_len;
+        p->cur++;
+        if (parse_number(p, &tag_len) != 0 || tag_len == 0u || !has_n_bytes(p->cur, tag_len)) {
+            return -1;
+        }
+        if (buf_appendc(&p->out, '[') != 0 ||
+            buf_append(&p->out, "abi:", 4u) != 0 ||
+            buf_append(&p->out, p->cur, tag_len) != 0 ||
+            buf_appendc(&p->out, ']') != 0) {
+            return -1;
+        }
+        p->cur += tag_len;
     }
 
     return 0;
@@ -908,32 +924,6 @@ parse_unqualified_name(dm_itanium_parser_t *p, size_t prev_off, size_t prev_len,
     return -1;
 }
 
-static int
-parse_name_component(dm_itanium_parser_t *p, size_t prev_off, size_t prev_len,
-                     size_t *comp_off, size_t *comp_len)
-{
-    dm_parse_mark_t m;
-    size_t off;
-    size_t len;
-
-    if (parse_unqualified_name(p, prev_off, prev_len, &off, &len) != 0) {
-        mark_save(p, &m);
-        off = p->out.len;
-        if (parse_substitution(p) != 0) {
-            mark_restore(p, &m);
-            return -1;
-        }
-        len = p->out.len - off;
-    }
-
-    if (p->cur[0] == 'I' && parse_template_args(p) != 0) {
-        return -1;
-    }
-
-    *comp_off = off;
-    *comp_len = p->out.len - off;
-    return 0;
-}
 
 static int
 parse_nested_name(dm_itanium_parser_t *p)
@@ -978,12 +968,60 @@ parse_nested_name(dm_itanium_parser_t *p)
     }
 
     while (p->cur[0] != '\0' && p->cur[0] != 'E') {
+        int is_wellknown_sub;
+        int from_sub;
+        size_t comp_off, comp_len;
+        size_t name_only_off, name_only_len;
+        dm_parse_mark_t comp_mark;
+
         if (!first && buf_append(&p->out, "::", 2u) != 0) {
             goto out;
         }
 
-        if (parse_name_component(p, last_off, last_len, &last_off, &last_len) != 0) {
-            goto out;
+        is_wellknown_sub = (p->cur[0] == 'S' &&
+                            (p->cur[1] == 't' || p->cur[1] == 'a' ||
+                             p->cur[1] == 'b' || p->cur[1] == 's' ||
+                             p->cur[1] == 'i' || p->cur[1] == 'o' ||
+                             p->cur[1] == 'd'));
+
+        from_sub = 0;
+        if (parse_unqualified_name(p, last_off, last_len, &comp_off, &comp_len) != 0) {
+            mark_save(p, &comp_mark);
+            comp_off = p->out.len;
+            if (parse_substitution(p) != 0) {
+                mark_restore(p, &comp_mark);
+                goto out;
+            }
+            comp_len = p->out.len - comp_off;
+            from_sub = 1;
+        }
+
+        name_only_off = comp_off;
+        name_only_len = comp_len;
+
+        if (p->cur[0] == 'I') {
+            if (!is_wellknown_sub && !from_sub) {
+                if (parser_add_substitution(p, name_off, p->out.len - name_off) != 0) {
+                    goto out;
+                }
+            }
+
+            if (parse_template_args(p) != 0) {
+                goto out;
+            }
+            comp_len = p->out.len - comp_off;
+            p->has_return_type = 1;
+        } else {
+            p->has_return_type = 0;
+        }
+
+        last_off = name_only_off;
+        last_len = name_only_len;
+
+        if (!is_wellknown_sub && (p->cur[0] != 'E' || p->in_type_context)) {
+            if (parser_add_substitution(p, name_off, p->out.len - name_off) != 0) {
+                goto out;
+            }
         }
 
         first = 0;
@@ -995,10 +1033,6 @@ parse_nested_name(dm_itanium_parser_t *p)
 
     p->cur++;
 
-    if (parser_add_substitution(p, name_off, p->out.len - name_off) != 0) {
-        goto out;
-    }
-
     rc = 0;
 out:
     parser_leave(p);
@@ -1009,13 +1043,53 @@ static int
 parse_unscoped_name(dm_itanium_parser_t *p)
 {
     size_t name_off;
-    size_t dummy_off;
-    size_t dummy_len;
+    size_t comp_off;
+    size_t comp_len;
+    int has_std_prefix;
+    int from_sub;
+    dm_parse_mark_t m;
 
     name_off = p->out.len;
+    has_std_prefix = 0;
+    from_sub = 0;
 
-    if (parse_name_component(p, 0u, 0u, &dummy_off, &dummy_len) != 0) {
-        return -1;
+    if (p->cur[0] == 'S' && p->cur[1] == 't') {
+        p->cur += 2;
+        if (buf_append(&p->out, "std::", 5u) != 0) {
+            return -1;
+        }
+        has_std_prefix = 1;
+    }
+
+    if (parse_unqualified_name(p, 0u, 0u, &comp_off, &comp_len) != 0) {
+        mark_save(p, &m);
+        comp_off = p->out.len;
+        if (parse_substitution(p) != 0) {
+            mark_restore(p, &m);
+            if (has_std_prefix) {
+                p->out.len = name_off;
+                p->out.data[p->out.len] = '\0';
+                p->cur -= 2;
+            }
+            return -1;
+        }
+        comp_len = p->out.len - comp_off;
+        from_sub = 1;
+    }
+
+    if (p->cur[0] == 'I') {
+        if (!from_sub) {
+            if (parser_add_substitution(p, name_off, p->out.len - name_off) != 0) {
+                return -1;
+            }
+        }
+
+        if (parse_template_args(p) != 0) {
+            return -1;
+        }
+        p->has_return_type = 1;
+    } else {
+        p->has_return_type = 0;
     }
 
     if (parser_add_substitution(p, name_off, p->out.len - name_off) != 0) {
@@ -1125,6 +1199,47 @@ parse_bare_function_type(dm_itanium_parser_t *p)
 
     suppress_params = ((p->options & DEMANGLE_NO_PARAMS) != 0);
 
+    /* Template functions have an explicit return type as the first type */
+    if (p->has_return_type && p->cur[0] != '\0') {
+        size_t ret_off = p->out.len;
+        if (parse_type(p) != 0) {
+            return -1;
+        }
+        size_t ret_len = p->out.len - ret_off;
+        if (ret_len > 0) {
+            /* Extract return type text, remove from end, insert at beginning */
+            char *ret_text = (char *)malloc(ret_len + 1);
+            if (!ret_text) return -1;
+            memcpy(ret_text, p->out.data + ret_off, ret_len);
+            p->out.len = ret_off;
+            p->out.data[p->out.len] = '\0';
+            if (buf_insert(&p->out, 0, " ", 1u) != 0) {
+                free(ret_text);
+                return -1;
+            }
+            if (buf_insert(&p->out, 0, ret_text, ret_len) != 0) {
+                free(ret_text);
+                return -1;
+            }
+            free(ret_text);
+            /* Adjust all substitution offsets for the insertion */
+            {
+                size_t shift = ret_len + 1; /* ret_text + space */
+                size_t si;
+                for (si = 0; si < p->substitution_count; si++) {
+                    p->substitutions[si].off += shift;
+                }
+                for (si = 0; si < p->last_template_count; si++) {
+                    p->last_template_off[si] += shift;
+                }
+                for (si = 0; si < p->func_tmpl_count; si++) {
+                    p->func_tmpl_off[si] += shift;
+                }
+            }
+        }
+        p->has_return_type = 0;
+    }
+
     if (!suppress_params && buf_appendc(&p->out, '(') != 0) {
         return -1;
     }
@@ -1190,18 +1305,23 @@ parse_template_args(dm_itanium_parser_t *p)
     first = 1;
     while (p->cur[0] != '\0' && p->cur[0] != 'E') {
         size_t arg_off;
+        int arg_rc;
 
         if (!first && buf_append(&p->out, ", ", 2u) != 0) {
             goto fail;
         }
 
         arg_off = p->out.len;
-        if (parse_template_arg(p) != 0) {
+        arg_rc = parse_template_arg(p);
+        if (arg_rc < 0) {
             goto fail;
         }
 
-        if (parser_record_template_arg(p, arg_off, p->out.len - arg_off) != 0) {
-            goto fail;
+        /* arg_rc == 1 means pack (elements already recorded individually) */
+        if (arg_rc == 0) {
+            if (parser_record_template_arg(p, arg_off, p->out.len - arg_off) != 0) {
+                goto fail;
+            }
         }
 
         first = 0;
@@ -1250,29 +1370,37 @@ parse_template_arg(dm_itanium_parser_t *p)
 
     if (p->cur[0] == 'J') {
         int first;
+        int is_in_template_args;
 
         p->cur++;
-        if (buf_append(&p->out, "pack<", 5u) != 0) {
-            return -1;
-        }
+        /* Check if we're being called from parse_template_args (has a pushed frame) */
+        is_in_template_args = (p->template_depth > 0);
 
         first = 1;
         while (p->cur[0] != '\0' && p->cur[0] != 'E') {
+            size_t elem_off;
             if (!first && buf_append(&p->out, ", ", 2u) != 0) {
                 return -1;
             }
+            elem_off = p->out.len;
             if (parse_template_arg(p) != 0) {
                 return -1;
+            }
+            /* Record each pack element as a separate template arg */
+            if (is_in_template_args) {
+                if (parser_record_template_arg(p, elem_off, p->out.len - elem_off) != 0) {
+                    return -1;
+                }
             }
             first = 0;
         }
 
-        if (p->cur[0] != 'E' || buf_appendc(&p->out, '>') != 0) {
+        if (p->cur[0] != 'E') {
             return -1;
         }
 
         p->cur++;
-        return 0;
+        return 1; /* Return 1 to indicate pack (elements already recorded) */
     }
 
     mark_save(p, &m);
@@ -1521,6 +1649,14 @@ parse_template_param(dm_itanium_parser_t *p)
         idx = seq + 1u;
     }
 
+    /* Prefer function-level template args when available */
+    if (p->func_tmpl_count > 0) {
+        if (idx >= p->func_tmpl_count) {
+            return -1;
+        }
+        return parser_append_output_slice(p, p->func_tmpl_off[idx], p->func_tmpl_len[idx]);
+    }
+
     if (idx >= p->last_template_count) {
         return -1;
     }
@@ -1703,8 +1839,54 @@ parse_vendor_type(dm_itanium_parser_t *p)
     return buf_appendc(&p->out, ')');
 }
 
+static int parse_type_inner(dm_itanium_parser_t *p);
+
 static int
 parse_type(dm_itanium_parser_t *p)
+{
+    size_t type_off;
+    int rc;
+    char ch;
+    int needs_sub;
+    int saved_type_ctx;
+
+    type_off = p->out.len;
+    ch = p->cur[0];
+
+    saved_type_ctx = p->in_type_context;
+    p->in_type_context = 1;
+
+    rc = parse_type_inner(p);
+    p->in_type_context = saved_type_ctx;
+    if (rc != 0) {
+        return rc;
+    }
+
+    needs_sub = 0;
+    switch (ch) {
+    case 'P': case 'R': case 'O':
+    case 'K': case 'V': case 'r':
+    case 'A':
+    case 'F':
+    case 'M':
+    case 'C': case 'G':
+        needs_sub = 1;
+        break;
+    default:
+        break;
+    }
+
+    if (needs_sub && p->out.len > type_off) {
+        if (parser_add_substitution(p, type_off, p->out.len - type_off) != 0) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+static int
+parse_type_inner(dm_itanium_parser_t *p)
 {
     static const struct {
         char code;
@@ -1736,17 +1918,66 @@ parse_type(dm_itanium_parser_t *p)
 
     if (p->cur[0] == 'P' || p->cur[0] == 'R' || p->cur[0] == 'O') {
         char kind = p->cur[0];
+        const char *suffix;
+        size_t suffix_len;
+        size_t before;
+        size_t bracket;
+
         p->cur++;
+        before = p->out.len;
         if (parse_type(p) != 0) {
             return -1;
         }
+
+        /* Reference collapsing: & + & = &, & + && = &, && + & = &, && + && = && */
+        if ((kind == 'R' || kind == 'O') && p->out.len > before) {
+            if (p->out.data[p->out.len - 1] == '&') {
+                /* Inner type already has a reference — collapse */
+                if (kind == 'R') {
+                    /* R + R or R + O → & (already there) */
+                    return 0;
+                }
+                /* O + R → & (already there), O + O → && (already there if &&) */
+                if (p->out.len >= before + 2 && p->out.data[p->out.len - 2] == '&') {
+                    /* Inner is && → O + O = && (keep) */
+                    return 0;
+                }
+                /* Inner is & → O + R = & (keep) */
+                return 0;
+            }
+            /* Check for array ref: (&) or (&&) before [] */
+            /* If inner has (&)[...] or (&&)[...], it's already a ref */
+            {
+                size_t i;
+                for (i = before; i < p->out.len; i++) {
+                    if (p->out.data[i] == '(' && i + 2 < p->out.len && p->out.data[i+1] == '&') {
+                        /* Already has reference in array context — collapse */
+                        return 0;
+                    }
+                }
+            }
+        }
+
         if (kind == 'P') {
-            return buf_appendc(&p->out, '*');
+            suffix = "*"; suffix_len = 1;
+        } else if (kind == 'R') {
+            suffix = "&"; suffix_len = 1;
+        } else {
+            suffix = "&&"; suffix_len = 2;
         }
-        if (kind == 'R') {
-            return buf_appendc(&p->out, '&');
+        /* Check if inner type has array dimension — insert before '[' */
+        for (bracket = before; bracket < p->out.len; bracket++) {
+            if (p->out.data[bracket] == '[') break;
         }
-        return buf_append(&p->out, "&&", 2u);
+        if (bracket < p->out.len) {
+            /* Array type: insert " (&)" or " (*)" or " (&&)" before '[' */
+            if (buf_insert(&p->out, bracket, ")", 1u) != 0) return -1;
+            if (buf_insert(&p->out, bracket, suffix, suffix_len) != 0) return -1;
+            if (buf_insert(&p->out, bracket, " (", 2u) != 0) return -1;
+        } else {
+            if (buf_append(&p->out, suffix, suffix_len) != 0) return -1;
+        }
+        return 0;
     }
 
     if (p->cur[0] == 'K' || p->cur[0] == 'V' || p->cur[0] == 'r') {
@@ -1756,12 +1987,13 @@ parse_type(dm_itanium_parser_t *p)
             return -1;
         }
         if (qual == 'K') {
-            return buf_append(&p->out, " const", 6u);
+            if (buf_append(&p->out, " const", 6u) != 0) return -1;
+        } else if (qual == 'V') {
+            if (buf_append(&p->out, " volatile", 9u) != 0) return -1;
+        } else {
+            if (buf_append(&p->out, " restrict", 9u) != 0) return -1;
         }
-        if (qual == 'V') {
-            return buf_append(&p->out, " volatile", 9u);
-        }
-        return buf_append(&p->out, " restrict", 9u);
+        return 0;
     }
 
     if (p->cur[0] == 'C') {
@@ -1778,6 +2010,50 @@ parse_type(dm_itanium_parser_t *p)
             return -1;
         }
         return buf_append(&p->out, " _Imaginary", 11u);
+    }
+
+    if (p->cur[0] == 'D' && p->cur[1] == 'p') {
+        const char *inner_start;
+        p->cur += 2;
+        inner_start = p->cur;
+
+        /* Parse the first element normally */
+        if (parse_type(p) != 0) {
+            return -1;
+        }
+
+        /* If we're in a function signature with pack template args,
+         * re-parse for remaining pack elements */
+        if (p->func_tmpl_count > 0) {
+            /* Determine which T_ param was used and how many elements it has.
+             * We saved func_tmpl args individually, and T_ (index 0) is the first.
+             * For now, assume all func_tmpl args beyond those used by the name
+             * are pack elements. Output additional comma-separated elements. */
+            size_t pack_start = 0; /* first pack element index */
+            size_t pack_end = p->func_tmpl_count;
+            size_t ei;
+
+            for (ei = pack_start + 1; ei < pack_end; ei++) {
+                const char *saved_cur = p->cur;
+                if (buf_append(&p->out, ", ", 2u) != 0) {
+                    return -1;
+                }
+                /* Temporarily make func_tmpl point to this element as T_ */
+                size_t saved_off_0 = p->func_tmpl_off[0];
+                size_t saved_len_0 = p->func_tmpl_len[0];
+                p->func_tmpl_off[0] = p->func_tmpl_off[ei];
+                p->func_tmpl_len[0] = p->func_tmpl_len[ei];
+                p->cur = inner_start;
+                if (parse_type(p) != 0) {
+                    return -1;
+                }
+                p->func_tmpl_off[0] = saved_off_0;
+                p->func_tmpl_len[0] = saved_len_0;
+                (void)saved_cur; /* cur is restored by re-parse */
+            }
+        }
+
+        return 0;
     }
 
     if (parse_function_type(p) == 0 ||
@@ -1949,9 +2225,16 @@ parse_encoding(dm_itanium_parser_t *p)
     }
 
     if (p->cur[0] != '\0') {
+        /* Save function's template args for T_ references in the signature */
+        p->func_tmpl_count = p->last_template_count;
+        if (p->func_tmpl_count > 0) {
+            memcpy(p->func_tmpl_off, p->last_template_off, p->func_tmpl_count * sizeof(size_t));
+            memcpy(p->func_tmpl_len, p->last_template_len, p->func_tmpl_count * sizeof(size_t));
+        }
         if (parse_bare_function_type(p) != 0) {
             return -1;
         }
+        p->func_tmpl_count = 0;
     }
 
     return 0;

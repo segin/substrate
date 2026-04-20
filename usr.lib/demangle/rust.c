@@ -1651,10 +1651,17 @@ rust_legacy_decode_component(const char *s, size_t len, rust_buf_t *out)
 
     for (i = 0u; i < len; ) {
         if (s[i] != '$') {
-            if (rust_buf_appendc(out, s[i]) != 0) {
-                return -1;
+            if (s[i] == '.' && i + 1u < len && s[i + 1u] == '.') {
+                if (rust_buf_append(out, "::", 2u) != 0) {
+                    return -1;
+                }
+                i += 2u;
+            } else {
+                if (rust_buf_appendc(out, s[i]) != 0) {
+                    return -1;
+                }
+                i++;
             }
-            i++;
             continue;
         }
 
@@ -1686,11 +1693,20 @@ rust_legacy_decode_component(const char *s, size_t len, rust_buf_t *out)
 static int
 rust_legacy_process_component(const char *part, size_t len, int is_first, rust_buf_t *out)
 {
+    size_t start_off;
+
     if (!is_first && rust_buf_append(out, "::", 2u) != 0) {
         return -1;
     }
+    start_off = out->len;
     if (rust_legacy_decode_component(part, len, out) != 0) {
         return -1;
+    }
+    if (out->len > start_off + 1u && out->data[start_off] == '_' &&
+        (out->data[start_off + 1u] == '<' || out->data[start_off + 1u] == '(')) {
+        memmove(out->data + start_off, out->data + start_off + 1u,
+                out->len - start_off);
+        out->len--;
     }
     return 0;
 }
