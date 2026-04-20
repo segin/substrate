@@ -20,7 +20,8 @@ typedef enum {
 
 typedef enum {
     CC_CALL_ARG_ABI_DEFAULT = 0,
-    CC_CALL_ARG_ABI_LDOUBLE = 1
+    CC_CALL_ARG_ABI_LDOUBLE = 1,
+    CC_CALL_ARG_ABI_AGG_MEM = 2
 } cc_call_arg_abi_t;
 
 typedef enum {

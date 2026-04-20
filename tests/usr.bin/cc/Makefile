@@ -733,6 +733,14 @@ test:
 	sh run_postc99_mode_matrix.sh
 	sh run_postc99_diff_modes.sh
 	sh run_postc99_abi_modes.sh
+	$(TOP)/usr.bin/cc/cc -std=c23 native_c23_float16_storage.c -o /tmp/cc_native_c23_float16_storage
+	/tmp/cc_native_c23_float16_storage
+	$(TOP)/usr.bin/cc/cc native_global_ulong_div_init.c -o /tmp/cc_native_global_ulong_div_init
+	/tmp/cc_native_global_ulong_div_init
+	$(TOP)/usr.bin/cc/cc native_link_atexit.c -o /tmp/cc_native_link_atexit
+	/tmp/cc_native_link_atexit
+	$(TOP)/usr.bin/cc/cc native_x86_64_large_struct_byval.c -o /tmp/cc_native_x86_64_large_struct_byval
+	/tmp/cc_native_x86_64_large_struct_byval
 	sh run_pp_postc99.sh
 	sh run_pp_c99_baseline.sh
 	sh run_pp_fuzz_smoke.sh
@@ -880,7 +888,8 @@ clean:
 	      /tmp/cc_native_c23_keywords /tmp/cc_native_c23_nullptr /tmp/cc_native_c23_typeof \
 	      /tmp/cc_native_c23_bitint /tmp/cc_native_c23_bitint_size /tmp/cc_native_c23_binary_sep /tmp/cc_native_c23_empty_init \
 	      /tmp/cc_native_c23_enum_underlying /tmp/cc_native_c23_label_decl /tmp/cc_native_c23_constexpr_auto_decimal /tmp/cc_native_c23_decimal_sizes \
-	      /tmp/cc_native_c23_empty_param /tmp/cc_native_c23_asm_extension \
+	      /tmp/cc_native_c23_empty_param /tmp/cc_native_c23_asm_extension /tmp/cc_native_c23_float16_storage \
+	      /tmp/cc_native_global_ulong_div_init /tmp/cc_native_link_atexit /tmp/cc_native_x86_64_large_struct_byval \
 	      /tmp/cc_native_bad_c23_auto_no_init.o /tmp/cc_native_bad_c23_bitint_zero.o \
 	      /tmp/cc_native_bad_c23_static_assert_single_fail.o /tmp/cc_native_bad_c23_empty_param_call.o /tmp/cc_native_c23_pp_version.i \
 	      /tmp/cc_native_c23_attr_std /tmp/cc_native_c23_attr_std.log /tmp/cc_native_c23_attr_std_werror \

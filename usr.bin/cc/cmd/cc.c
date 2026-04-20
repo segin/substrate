@@ -1945,6 +1945,11 @@ static int run_ld(const cc_opts_t *o, const strvec_t *objs, const char *out) {
   }
   if (want_default_runtime) {
     argv[at++] = libc_path;
+#ifndef CC_SUBSTRATE_BUILD
+    if (access(libc_nonshared, R_OK) == 0) {
+      argv[at++] = libc_nonshared;
+    }
+#endif
     argv[at++] = libm_path;
     if (access(libgcc, R_OK) == 0) {
       argv[at++] = libgcc;

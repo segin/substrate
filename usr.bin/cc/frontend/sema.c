@@ -1101,7 +1101,7 @@ static int func_decl_compatible(const cc_function_t *a, const cc_function_t *b) 
 }
 
 static int is_float_type(cc_type_t t) {
-    return t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE || t == CC_TYPE_LDOUBLE || t == CC_TYPE_DECIMAL32 ||
+    return t == CC_TYPE_FLOAT16 || t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE || t == CC_TYPE_LDOUBLE || t == CC_TYPE_DECIMAL32 ||
            t == CC_TYPE_DECIMAL64 || t == CC_TYPE_DECIMAL128;
 }
 
@@ -1557,6 +1557,9 @@ static cc_type_t common_arith_type(cc_type_t a, cc_type_t b) {
     if (a == CC_TYPE_FLOAT || b == CC_TYPE_FLOAT) {
         return CC_TYPE_FLOAT;
     }
+    if (a == CC_TYPE_FLOAT16 || b == CC_TYPE_FLOAT16) {
+        return CC_TYPE_FLOAT16;
+    }
 
     ap = integral_promo_type(a);
     bp = integral_promo_type(b);
@@ -1884,6 +1887,8 @@ static long type_size_bytes(cc_type_t t) {
         return 1;
     case CC_TYPE_SHORT:
     case CC_TYPE_USHORT:
+        return 2;
+    case CC_TYPE_FLOAT16:
         return 2;
     case CC_TYPE_INT:
     case CC_TYPE_UINT:

@@ -1002,7 +1002,7 @@ static int parser_generic_assoc_matches(cc_type_t assoc_type, int assoc_struct_i
 }
 
 static int parser_is_float_type(cc_type_t t) {
-    return t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE || t == CC_TYPE_LDOUBLE ||
+    return t == CC_TYPE_FLOAT16 || t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE || t == CC_TYPE_LDOUBLE ||
            t == CC_TYPE_DECIMAL32 || t == CC_TYPE_DECIMAL64 || t == CC_TYPE_DECIMAL128;
 }
 
@@ -1033,6 +1033,7 @@ static cc_type_t parser_common_arith_type(cc_type_t a, cc_type_t b) {
         if (a == CC_TYPE_LDOUBLE || b == CC_TYPE_LDOUBLE) return CC_TYPE_LDOUBLE;
         if (a == CC_TYPE_DOUBLE || b == CC_TYPE_DOUBLE) return CC_TYPE_DOUBLE;
         if (a == CC_TYPE_FLOAT || b == CC_TYPE_FLOAT) return CC_TYPE_FLOAT;
+        if (a == CC_TYPE_FLOAT16 || b == CC_TYPE_FLOAT16) return CC_TYPE_FLOAT16;
         if (a == CC_TYPE_DECIMAL128 || b == CC_TYPE_DECIMAL128) return CC_TYPE_DECIMAL128;
         if (a == CC_TYPE_DECIMAL64 || b == CC_TYPE_DECIMAL64) return CC_TYPE_DECIMAL64;
         if (a == CC_TYPE_DECIMAL32 || b == CC_TYPE_DECIMAL32) return CC_TYPE_DECIMAL32;
@@ -1061,6 +1062,8 @@ static long scalar_type_size_bytes(cc_type_t t) {
         return 1;
     case CC_TYPE_SHORT:
     case CC_TYPE_USHORT:
+        return 2;
+    case CC_TYPE_FLOAT16:
         return 2;
     case CC_TYPE_INT:
     case CC_TYPE_UINT:
@@ -2263,9 +2266,22 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                 continue;
             }
             if (tok_is_floatn_spelling(p)) {
+                cc_type_t floatn_type = CC_TYPE_LDOUBLE;
                 seen = 1;
                 seen_type = 1;
-                seen_double = 1;
+                seen_alias = 1;
+                if (tok_is_ident(p, "_Float16")) {
+                    floatn_type = CC_TYPE_FLOAT16;
+                } else if (tok_is_ident(p, "_Float32")) {
+                    floatn_type = CC_TYPE_FLOAT;
+                } else if (tok_is_ident(p, "_Float64")) {
+                    floatn_type = CC_TYPE_DOUBLE;
+                }
+                alias_type = floatn_type;
+                alias_struct_id = -1;
+                alias_array_len = -1;
+                alias_array_ndim = 0;
+                memset(alias_array_dims, 0, sizeof(alias_array_dims));
                 if (next_tok(p) != 0) {
                     return -1;
                 }
