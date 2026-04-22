@@ -208,9 +208,36 @@ void isr_handler(registers_t *regs) {
     } else if (regs->int_no == 36) {
         uart_handler(regs);
     } else if (regs->int_no < 32) {
-        // Exception - check if from user mode or kernel mode
+        // Exception handling
+
+        // Page fault (14): try demand-paging BEFORE on_fault recovery so that
+        // copyout/copyin on mmap'd anonymous pages (not yet faulted in) can
+        // succeed via vm_fault instead of being short-circuited to EFAULT.
+        uint32_t cr2 = 0;
+        if (regs->int_no == 14) {
+            cr2 = idt_read_cr2();
+            // COW and lazy fault handling are expected for normal process execution.
+            if (pmap_fault(regs->err_code, cr2)) {
+                return;
+            }
+            // Demand paging: try vm_fault for vm_map-backed regions.
+            // This must work for BOTH usermode AND kernel mode (copyout/copyin)
+            // so that syscalls like read/write can copy to/from demand-paged
+            // user buffers backed by mmap(MAP_ANONYMOUS).
+            if (current_process && current_process->vm_map) {
+                uint8_t fault_prot = VM_PROT_READ;
+                if (regs->err_code & 0x02) fault_prot |= VM_PROT_WRITE;
+                if (regs->err_code & 0x10) fault_prot |= VM_PROT_EXEC;
+                if (vm_fault(current_process->vm_map, cr2, fault_prot) == VM_FAULT_SUCCESS) {
+                    return;
+                }
+            }
+        }
+
         // Fault Recovery (copyin/copyout safe handlers)
         // If a fault occurs in kernel mode while on_fault is set, resume there.
+        // This is checked AFTER page fault handling so demand-paging can service
+        // the fault first; on_fault is the fallback for truly invalid accesses.
         if (!is_usermode && current_thread && current_thread->on_fault) {
              regs->eip = (uint32_t)current_thread->on_fault;
              current_thread->on_fault = 0; // Reset to avoid loop if handler faults
@@ -229,24 +256,6 @@ void isr_handler(registers_t *regs) {
             if (pers && pers->handle_trap && pers->handle_trap(regs)) {
                 signal_handle_pending(regs);
                 return;
-            }
-        }
-
-        uint32_t cr2 = 0;
-        if (regs->int_no == 14) {
-            cr2 = idt_read_cr2();
-            // COW and lazy fault handling are expected for normal process execution.
-            if (pmap_fault(regs->err_code, cr2)) {
-                return;
-            }
-            // Demand paging: try vm_fault for vm_map-backed regions
-            if (is_usermode && current_process && current_process->vm_map) {
-                uint8_t fault_prot = VM_PROT_READ;
-                if (regs->err_code & 0x02) fault_prot |= VM_PROT_WRITE;
-                if (regs->err_code & 0x10) fault_prot |= VM_PROT_EXEC;
-                if (vm_fault(current_process->vm_map, cr2, fault_prot) == VM_FAULT_SUCCESS) {
-                    return;
-                }
             }
         }
 
