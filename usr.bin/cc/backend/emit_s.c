@@ -4385,18 +4385,18 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                     }
                     fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", sret_ptr_off);
                 } else if (in->lhs >= 0) {
-                    if (in->imm > 0 && in->imm <= 16) {
-                        int_regs_flush(fp, f, &lay, &ist);
-                        fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
-                        if (in->imm > 8 && in->rhs >= 0) {
-                            fprintf(fp, "\tmovq %d(%%rbp), %%rdx\n", slot_off(&lay, in->rhs));
-                        }
-                    } else if (f->ret_type == CC_VAL_F64) {
+                    if (f->ret_type == CC_VAL_F64) {
                         int_regs_flush(fp, f, &lay, &ist);
                         if (f->ret_abi == CC_CALL_ARG_ABI_LDOUBLE) {
                             fprintf(fp, "\tfldl %d(%%rbp)\n", slot_off(&lay, in->lhs));
                         } else {
                             fprintf(fp, "\tmovsd %d(%%rbp), %%xmm0\n", slot_off(&lay, in->lhs));
+                        }
+                    } else if (in->imm > 0 && in->imm <= 16) {
+                        int_regs_flush(fp, f, &lay, &ist);
+                        fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
+                        if (in->imm > 8 && in->rhs >= 0) {
+                            fprintf(fp, "\tmovq %d(%%rbp), %%rdx\n", slot_off(&lay, in->rhs));
                         }
                     } else {
                         int rl = int_regs_load(fp, f, &lay, &ist, in->lhs, int_reg_index(&ist, "%rax"), -1);

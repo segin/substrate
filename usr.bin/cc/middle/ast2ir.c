@@ -6356,6 +6356,15 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     is_pointer_type(callee_expr->lhs->value_type)) {
                     int keep_deref = 0;
                     const cc_expr_t *d = callee_expr->lhs;
+                    if (pointer_depth(callee_expr->lhs->value_type) > 1) {
+                        /*
+                         * Explicit indirect calls through pointer-to-function-pointer
+                         * chains need one real load before the final CALLI target is
+                         * available. Only elide the dereference for plain function
+                         * pointers, where `(*fp)()` is semantically just `fp()`.
+                         */
+                        keep_deref = 1;
+                    }
                     if (expr_is_array_pointer_chain(tu, vars, var_count, depth, d)) {
                         keep_deref = 1;
                     }
