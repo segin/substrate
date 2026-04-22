@@ -221,7 +221,7 @@
         - [ ] Unit: vop_read/write/fsync round-trip. (REQ: REQ-04-0192)
         - [x] Unit: buffer cache — getblk/bread/bwrite/brelse lifecycle. (REQ: REQ-04-0193)
         - [x] Unit: buffer cache — bdwrite delayed write, then sync flushes. (REQ: REQ-04-0194)
-        - [ ] Unit: lockmgr — shared/exclusive/upgrade/downgrade/nowait. (REQ: REQ-04-0195)
+        - [x] Unit: lockmgr — shared/exclusive/upgrade/downgrade/nowait. (REQ: REQ-04-0195)
         - [ ] Property: vnode refcount never goes negative. (REQ: REQ-04-0196)
         - [ ] Property: no buffer leaks after mount/unmount cycle. (REQ: REQ-04-0197)
         - [ ] Integration: mount ext2 → create file → write → read → unlink → unmount. (REQ: REQ-04-0198)
