@@ -21,6 +21,12 @@ UNIT_SRCS = unit/drivers/console/test_ansi.c unit/vm/test_kmem.c unit/vm/test_zo
              unit/vfs/test_fd.c unit/vfs/test_permissions.c unit/vfs/test_chroot.c unit/vfs/test_readdir.c \
              unit/vfs/test_link.c unit/vfs/test_rename.c unit/vfs/test_symlink.c unit/vfs/test_readlink.c \
              unit/vfs/test_vnode_reclaim.c \
+             unit/vfs/test_vnode_init.c \
+             unit/vfs/test_vnode_create.c \
+             unit/vfs/test_vnode_cache.c \
+             unit/vfs/test_vclean.c \
+             unit/vfs/test_vnode_lifecycle.c \
+             unit/vfs/test_namecache.c \
              unit/fs/test_fuse.c unit/fs/test_ext2_blocks_extent.c \
              unit/kern/prop_sched.c fuzz/fuzz_sched.c \
              unit/perso/test_att.c ../sys/exec/perso/perso_svr3.c ../sys/exec/perso/perso_svr4.c \

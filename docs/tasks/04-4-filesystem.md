@@ -213,8 +213,8 @@
         - [x] **Buffer Lock:** per-buffer `B_BUSY` flag with sleep/wakeup. (REQ: REQ-04-0185)
 
     - [ ] **Testing:** (REQ: REQ-04-0186, REQ-04-0224, REQ-04-0244, REQ-04-0277, REQ-04-0305, REQ-04-0328, REQ-04-0339, REQ-04-0360)
-        - [ ] Unit: vnode lifecycle — `getnewvnode`, `vref`, `vrele`, `vput`, `vget`, `vgone`. (REQ: REQ-04-0187)
-        - [ ] Unit: name cache — `cache_lookup` hit/miss, `cache_enter`, `cache_purge`, negative entries. (REQ: REQ-04-0188)
+        - [x] Unit: vnode lifecycle — `getnewvnode`, `vref`, `vrele`, `vput`, `vget`, `vgone`. (REQ: REQ-04-0187)
+        - [x] Unit: name cache — `cache_lookup` hit/miss, `cache_enter`, `cache_purge`, negative entries. (REQ: REQ-04-0188)
         - [ ] Unit: namei — simple path, `.`/`..`, mount crossing, symlink resolution, MAXSYMLINKS. (REQ: REQ-04-0189)
         - [ ] Unit: vop_create/remove/mkdir/rmdir on ext2. (REQ: REQ-04-0190)
         - [ ] Unit: vop_rename same-dir and cross-dir. (REQ: REQ-04-0191)

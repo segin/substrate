@@ -8,6 +8,8 @@
 #include "../sys/arch/i386/pmap.h"
 #include "../sys/arch/i386/cpu.h"
 #include "../sys/vm/vm_map.h"
+#include "../sys/include/sys/lock.h"
+#include "../sys/include/sys/proc.h"
 
 // VGA/UART Mocks
 void vga_write(const char *s, size_t n) { (void)s; (void)n; }
@@ -434,3 +436,60 @@ void i386_cpu_cycle_counter_split(uint32_t *lo, uint32_t *hi) {
     if (lo) *lo = 0;
     if (hi) *hi = 0;
 }
+
+/* ---- Lock / rwlock mocks ---- */
+void rwlock_init(rwlock_t *rw, const char *name) { (void)rw; (void)name; }
+void rw_rlock(rwlock_t *rw) { (void)rw; }
+bool rw_try_rlock(rwlock_t *rw) { (void)rw; return true; }
+void rw_runlock(rwlock_t *rw) { (void)rw; }
+void rw_wlock(rwlock_t *rw) { (void)rw; }
+bool rw_try_wlock(rwlock_t *rw) { (void)rw; return true; }
+void rw_wunlock(rwlock_t *rw) { (void)rw; }
+bool rw_wowned(rwlock_t *rw) { (void)rw; return false; }
+
+void lockinit(struct lock *lkp, int prio, const char *name, int flags) {
+    (void)prio; (void)name; (void)flags;
+    if (lkp) { lkp->lk_flags = 0; lkp->lk_sharecount = 0; lkp->lk_exclusivecount = 0; }
+}
+void lockdestroy(struct lock *lkp) { (void)lkp; }
+int lockmgr(struct lock *lkp, uint32_t flags, spinlock_t *interlock) {
+    (void)interlock;
+    if (!lkp) return -1;
+    if (flags & LK_RELEASE) {
+        if (lkp->lk_exclusivecount > 0)
+            lkp->lk_exclusivecount--;
+        else if (lkp->lk_sharecount > 0)
+            lkp->lk_sharecount--;
+    } else if (flags & LK_EXCLUSIVE) {
+        lkp->lk_exclusivecount++;
+    } else if (flags & LK_SHARED) {
+        lkp->lk_sharecount++;
+    }
+    return 0;
+}
+int lockstatus(struct lock *lkp) {
+    if (!lkp) return 0;
+    if (lkp->lk_exclusivecount > 0) return LK_EXCLUSIVE;
+    if (lkp->lk_sharecount > 0) return LK_SHARED;
+    return 0;
+}
+int lockcount(struct lock *lkp) {
+    if (!lkp) return 0;
+    return (int)(lkp->lk_exclusivecount + lkp->lk_sharecount);
+}
+
+/* ---- Misc kernel stubs needed by vfs.c / kthread.c / time.c ---- */
+process_t *swapper_get_proc(void) { return NULL; }
+void bio_init(void) {}
+void hw_text_tick(void) {}
+void fb_console_tick(void) {}
+void floppy_poll(void) {}
+void vt_tick_1hz(void) {}
+int pmap_protect(pmap_t pmap, uintptr_t sva, uintptr_t eva, uint32_t prot) {
+    (void)pmap; (void)sva; (void)eva; (void)prot;
+    return 0;
+}
+
+/* Buffer cache / zone stubs */
+int binval_vnode(struct vnode *vp, int save) { (void)vp; (void)save; return 0; }
+void uma_zdestroy(uma_zone_t *zone) { (void)zone; }

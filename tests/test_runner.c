@@ -108,6 +108,25 @@ extern bool test_vnode_cache_insert_zero_ino(void);
 extern bool test_vnode_reclaim_basic(void);
 extern bool test_vclean_basic(void);
 extern bool test_vclean_null_reclaim(void);
+extern bool test_vnode_init_basic(void);
+extern bool test_vnode_create_basic(void);
+
+// Vnode lifecycle Tests (REQ-04-0187)
+extern bool test_vnode_lifecycle_getnewvnode(void);
+extern bool test_vnode_lifecycle_vref_vrele(void);
+extern bool test_vnode_lifecycle_refcount_nonneg(void);
+extern bool test_vnode_lifecycle_vget(void);
+extern bool test_vnode_lifecycle_vput(void);
+extern bool test_vnode_lifecycle_vgone(void);
+extern bool test_vnode_lifecycle_multi_ref(void);
+
+// Name cache Tests (REQ-04-0188)
+extern bool test_namecache_hit(void);
+extern bool test_namecache_miss(void);
+extern bool test_namecache_negative(void);
+extern bool test_namecache_purge(void);
+extern bool test_namecache_multiple_entries(void);
+extern bool test_namecache_purgevfs(void);
 
 // FUSE Tests
 extern bool test_fuse_read(void);
@@ -265,8 +284,25 @@ test_case_t tests[] = {
     { "vnode_cache_insert_no_mount", test_vnode_cache_insert_no_mount },
     { "vnode_cache_insert_zero_ino", test_vnode_cache_insert_zero_ino },
     { "vnode_reclaim_basic", test_vnode_reclaim_basic },
+    { "vnode_init_basic", test_vnode_init_basic },
+    { "vnode_create_basic", test_vnode_create_basic },
     { "vclean_basic", test_vclean_basic },
     { "vclean_null_reclaim", test_vclean_null_reclaim },
+    /* vnode lifecycle (REQ-04-0187) */
+    { "vnode_lc_getnewvnode", test_vnode_lifecycle_getnewvnode },
+    { "vnode_lc_vref_vrele", test_vnode_lifecycle_vref_vrele },
+    { "vnode_lc_refcount_nonneg", test_vnode_lifecycle_refcount_nonneg },
+    { "vnode_lc_vget", test_vnode_lifecycle_vget },
+    { "vnode_lc_vput", test_vnode_lifecycle_vput },
+    { "vnode_lc_vgone", test_vnode_lifecycle_vgone },
+    { "vnode_lc_multi_ref", test_vnode_lifecycle_multi_ref },
+    /* name cache (REQ-04-0188) */
+    { "nc_hit", test_namecache_hit },
+    { "nc_miss", test_namecache_miss },
+    { "nc_negative", test_namecache_negative },
+    { "nc_purge", test_namecache_purge },
+    { "nc_multi_entry", test_namecache_multiple_entries },
+    { "nc_purgevfs", test_namecache_purgevfs },
     {"fuse_read", test_fuse_read},
     {"ansi_parsing", test_ansi_parsing},
     {"sched_prop", test_sched_properties},
