@@ -217,7 +217,7 @@
         - [x] Unit: name cache — `cache_lookup` hit/miss, `cache_enter`, `cache_purge`, negative entries. (REQ: REQ-04-0188)
         - [x] Unit: namei — simple path, `.`/`..`, mount crossing, symlink resolution, MAXSYMLINKS. (REQ: REQ-04-0189)
         - [x] Unit: vop_create/remove/mkdir/rmdir on ext2. (REQ: REQ-04-0190)
-        - [ ] Unit: vop_rename same-dir and cross-dir. (REQ: REQ-04-0191)
+        - [x] Unit: vop_rename same-dir and cross-dir. (REQ: REQ-04-0191)
         - [ ] Unit: vop_read/write/fsync round-trip. (REQ: REQ-04-0192)
         - [ ] Unit: buffer cache — getblk/bread/bwrite/brelse lifecycle. (REQ: REQ-04-0193)
         - [ ] Unit: buffer cache — bdwrite delayed write, then sync flushes. (REQ: REQ-04-0194)
