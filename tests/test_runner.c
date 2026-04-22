@@ -102,6 +102,11 @@ extern bool test_vop_symlink_notsupp(void);
 extern bool test_vop_readlink_basic(void);
 extern bool test_vop_readlink_notlink(void);
 extern bool test_vop_readlink_notsupp(void);
+extern bool test_namei_simple_path(void);
+extern bool test_namei_dot_and_dotdot(void);
+extern bool test_namei_mount_crossing(void);
+extern bool test_namei_symlink_resolution(void);
+extern bool test_namei_maxsymlinks(void);
 extern bool test_vnode_cache_insert_basic(void);
 extern bool test_vnode_cache_insert_no_mount(void);
 extern bool test_vnode_cache_insert_zero_ino(void);
@@ -280,6 +285,11 @@ test_case_t tests[] = {
     { "vfs_readlink_basic", test_vop_readlink_basic },
     { "vfs_readlink_notlink", test_vop_readlink_notlink },
     { "vfs_readlink_notsupp", test_vop_readlink_notsupp },
+    { "namei_simple", test_namei_simple_path },
+    { "namei_dots", test_namei_dot_and_dotdot },
+    { "namei_mount_cross", test_namei_mount_crossing },
+    { "namei_symlink", test_namei_symlink_resolution },
+    { "namei_maxsymlinks", test_namei_maxsymlinks },
     { "vnode_cache_insert_basic", test_vnode_cache_insert_basic },
     { "vnode_cache_insert_no_mount", test_vnode_cache_insert_no_mount },
     { "vnode_cache_insert_zero_ino", test_vnode_cache_insert_zero_ino },

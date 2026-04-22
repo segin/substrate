@@ -33,7 +33,6 @@ void fuse_init() {}
 void fuse_fs_init() {}
 void p9_init() {}
 void devfs_init(void) {}
-void namei_init(void) {}
 void vfs_init_mock_root(void);
 // nchinit and fs_root removed (linked from vfs)
 
@@ -297,9 +296,6 @@ const uint8_t sigprop[NSIG] = {0};
 int exec_dispatch(const char *path, char *const argv[], char *const envp[]) { (void)path; (void)argv; (void)envp; return 0; }
 
 struct fs_node *devfs_root_node_ptr;
-struct nameidata;
-int namei(const char *path, struct nameidata *ndp) { (void)path; (void)ndp; return -1; }
-int namei_simple(const char *path, struct nameidata *ndp) { (void)path; (void)ndp; return -1; }
 struct vnode;
 
 // vm_map_lookup stub
