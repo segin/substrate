@@ -351,6 +351,8 @@ static void init_runtime_console(int serial_console) {
 
     console_init();
     hw_text_init();
+    isa_init();
+    isa_probe_pnp();
 
     if (serial_console >= 0) {
         (void)uart_select_port((uint32_t)serial_console);
@@ -451,6 +453,7 @@ static void init_storage_and_vfs(multiboot_info_t *mboot_info) {
     pci_init();
     isa_init();
     isa_probe_legacy();
+    isa_probe_pnp();
     scsi_init();
     floppy_init();
     ide_init();

@@ -19,7 +19,7 @@
     - [x] Migrate VirtIO storage/controller attachment onto the driver model rather than relying on ad hoc discovery.
         - Files: `sys/drivers/virtio/*.c`
         - Acceptance: VirtIO controller-family drivers bind through bus/device registration instead of bespoke attach paths
-    - [ ] Implement ISA Plug-and-Play protocol support on top of the legacy ISA bus framework.
+    - [x] Implement ISA Plug-and-Play protocol support on top of the legacy ISA bus framework.
         - Files: `sys/kern/isapnp.c`, `sys/kern/isapnp.h`, relevant ISA drivers
         - Acceptance: ISA-PnP cards can be isolated, assigned resources, and activated without bypassing the driver model
     - [x] Implement the USB host stack on top of the shared bus/resource/device framework.

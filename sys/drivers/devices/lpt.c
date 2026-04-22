@@ -1,6 +1,9 @@
 #include <arch/x86-common/io.h>
 #include <kern/console.h>
+#include <kern/device.h>
 #include <kern/isa.h>
+#include <kern/isapnp.h>
+#include <kern/resource.h>
 #include <sys/errno.h>
 #include <sys/poll.h>
 #include <vfs/vfs.h>
@@ -11,8 +14,79 @@
 #define LPT_MAJOR      6
 
 static const uint16_t lpt_ports[LPT_PORT_COUNT] = { 0x378, 0x278, 0x3BC };
+static uint16_t lpt_detected_ports[LPT_PORT_COUNT];
+static int lpt_ports_scanned = 0;
 static fs_node_t lpt_nodes[LPT_PORT_COUNT];
 static int lpt_nodes_registered = 0;
+
+static int lpt_port_already_assigned(uint16_t port) {
+    for (uint32_t i = 0; i < LPT_PORT_COUNT; i++) {
+        if (lpt_detected_ports[i] == port) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void lpt_assign_detected_port(uint16_t port) {
+    if (!port || lpt_port_already_assigned(port)) {
+        return;
+    }
+
+    for (uint32_t i = 0; i < LPT_PORT_COUNT; i++) {
+        if (lpt_ports[i] == port) {
+            lpt_detected_ports[i] = port;
+            return;
+        }
+    }
+
+    for (uint32_t i = 0; i < LPT_PORT_COUNT; i++) {
+        if (lpt_detected_ports[i] == 0) {
+            lpt_detected_ports[i] = port;
+            return;
+        }
+    }
+}
+
+static int lpt_is_pnp_parallel(const struct device *dev) {
+    if (dev == NULL) {
+        return 0;
+    }
+    if (dev->vendor_id != ISAPNP_VENDOR('P', 'N', 'P')) {
+        return 0;
+    }
+    return dev->device_id == 0x0400 || dev->device_id == 0x0401;
+}
+
+static void lpt_scan_ports(void) {
+    if (lpt_ports_scanned) {
+        return;
+    }
+
+    memset(lpt_detected_ports, 0, sizeof(lpt_detected_ports));
+    for (uint32_t i = 0; i < LPT_PORT_COUNT; i++) {
+        char isa_name[16];
+
+        snprintf(isa_name, sizeof(isa_name), "parallel%u", i);
+        if (isa_device_present(isa_name)) {
+            lpt_detected_ports[i] = lpt_ports[i];
+        }
+    }
+
+    for (struct device *dev = isa_first_device(); dev != NULL; dev = isa_next_device(dev)) {
+        struct resource *io;
+
+        if (!lpt_is_pnp_parallel(dev)) {
+            continue;
+        }
+        io = isa_device_resource(dev, RES_IO, 0);
+        if (io != NULL) {
+            lpt_assign_detected_port((uint16_t)io->start);
+        }
+    }
+
+    lpt_ports_scanned = 1;
+}
 
 static uint16_t lpt_node_port(const fs_node_t *node) {
     return (uint16_t)(node ? node->impl : 0);
@@ -92,13 +166,13 @@ static int lpt_poll(fs_node_t *node, void *waiter) {
 void lpt_init(void) {
     if (lpt_nodes_registered) return;
 
+    lpt_scan_ports();
+
     for (uint32_t i = 0; i < LPT_PORT_COUNT; i++) {
         fs_node_t *node = &lpt_nodes[i];
-        uint16_t port = lpt_ports[i];
-        char isa_name[16];
+        uint16_t port = lpt_detected_ports[i];
 
-        snprintf(isa_name, sizeof(isa_name), "parallel%u", i);
-        if (!isa_device_present(isa_name)) {
+        if (!port) {
             continue;
         }
 
