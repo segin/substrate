@@ -1053,7 +1053,8 @@ int sys_stat(const char *path, struct stat *buf) {
 int kern_stat(const char *path, struct stat *buf) {
     if (!path || !buf) return -EFAULT;
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
-    fs_node_t *node = vfs_lookup(root, path);
+    fs_node_t *cwd  = current_process->cwd_node  ? current_process->cwd_node  : root;
+    fs_node_t *node = vfs_lookup((path[0] == '/') ? root : cwd, path);
     if (!node) return -ENOENT;
     fill_stat(buf, node);
     close_fs(node);
@@ -1074,7 +1075,8 @@ int sys_lstat(const char *path, struct stat *buf) {
 int kern_lstat(const char *path, struct stat *buf) {
     if (!path || !buf) return -EFAULT;
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
-    fs_node_t *node = vfs_lookup_lstat(root, path);
+    fs_node_t *cwd  = current_process->cwd_node  ? current_process->cwd_node  : root;
+    fs_node_t *node = vfs_lookup_lstat((path[0] == '/') ? root : cwd, path);
     if (!node) return -ENOENT;
     fill_stat(buf, node);
     close_fs(node);
