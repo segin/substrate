@@ -12,7 +12,7 @@ SRCS += test_minix_readdir.c
 SRCS += test_ide_dma.c test_ide_qemu.c
 SRCS += bench_sched.c bench_sched_dequeue.c test_kobject.c test_vfs_cache.c test_vfs_busy.c
 SRCS += test_nanosleep.c test_reboot.c test_pipe_race.c test_chacha20.c
-SRCS += test_floppy_qemu.c test_uname.c
+SRCS += test_floppy_qemu.c test_uname.c test_native_personality.c test_freebsd_personality.c
 
 OBJS = $(SRCS:.c=.o)
 
@@ -84,9 +84,9 @@ host_test_i386_sched_ldt: host_test_i386_sched_ldt.c
 host_test_proc_fcntl: host_test_proc_fcntl.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_proc_fcntl.c -o $@
 
-
 host_test_rwlock: host_test_rwlock.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_rwlock.c -o $@
+
 host_test_elks_load_plan: host_test_elks_load_plan.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_elks_load_plan.c -o $@
 
@@ -229,7 +229,6 @@ host_test_acct_compress: host_test_acct_compress.c
 
 host_test_negdi2: host_test_negdi2.c
 	$(CC) -g -Wall -DHOST_TEST -I. -idirafter ../../sys/include host_test_negdi2.c -o $@
-
 
 host_test_udf_large_write: host_test_udf_large_write.c
 	$(CC) -g -Wall -I../../sys -I. -idirafter ../../sys/include -idirafter ../../include host_test_udf_large_write.c -o $@
