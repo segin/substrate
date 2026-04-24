@@ -95,6 +95,19 @@ int open(const char *pathname, int flags, ...) {
     return __set_errno((int)_syscall3(SYS_OPEN, (uintptr_t)pathname, flags, mode));
 }
 
+int openat(int dirfd, const char *pathname, int flags, ...) {
+    int mode = 0;
+
+    if (flags & O_CREAT) {
+        va_list ap;
+
+        va_start(ap, flags);
+        mode = va_arg(ap, int);
+        va_end(ap);
+    }
+    return __set_errno((int)_syscall4(SYS_OPENAT, dirfd, (uintptr_t)pathname, flags, mode));
+}
+
 int fcntl(int fd, int cmd, ...) {
     long arg = 0;
     va_list ap;
@@ -106,6 +119,10 @@ int fcntl(int fd, int cmd, ...) {
 
 int unlink(const char *pathname) {
     return __set_errno((int)_syscall1(SYS_UNLINK, (uintptr_t)pathname));
+}
+
+int unlinkat(int dirfd, const char *pathname, int flags) {
+    return __set_errno((int)_syscall3(SYS_UNLINKAT, dirfd, (uintptr_t)pathname, flags));
 }
 
 int link(const char *oldpath, const char *newpath) {
@@ -424,6 +441,10 @@ int fstat(int fd, struct stat *buf) {
     return __set_errno((int)_syscall2(SYS_FSTAT, fd, (uintptr_t)buf));
 }
 
+int fstatat(int dirfd, const char *pathname, struct stat *buf, int flags) {
+    return __set_errno((int)_syscall4(SYS_FSTATAT, dirfd, (uintptr_t)pathname, (uintptr_t)buf, flags));
+}
+
 int chown(const char *pathname, uid_t owner, gid_t group) {
     return __set_errno((int)_syscall3(SYS_LCHOWN, (uintptr_t)pathname, owner, group));
 }
@@ -456,6 +477,10 @@ clock_t times(struct tms *buf) {
 
 int mkdir(const char *pathname, mode_t mode) {
     return __set_errno((int)_syscall2(SYS_MKDIR, (uintptr_t)pathname, mode));
+}
+
+int mkdirat(int dirfd, const char *pathname, mode_t mode) {
+    return __set_errno((int)_syscall3(SYS_MKDIRAT, dirfd, (uintptr_t)pathname, mode));
 }
 
 int rmdir(const char *pathname) {

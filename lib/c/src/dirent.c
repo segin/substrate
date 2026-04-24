@@ -8,20 +8,29 @@
 
 extern int _syscall3(int, uintptr_t, uintptr_t, uintptr_t);
 
-DIR *opendir(const char *name) {
-    int fd = open(name, O_RDONLY | O_DIRECTORY);
-    if (fd < 0) return NULL;
-    
+DIR *fdopendir(int fd) {
+    if (fd < 0) {
+        errno = EBADF;
+        return NULL;
+    }
+
     DIR *dir = malloc(sizeof(DIR));
     if (!dir) {
         close(fd);
         return NULL;
     }
-    
+
     dir->fd = fd;
     dir->buf_pos = 0;
     dir->buf_end = 0;
     return dir;
+}
+
+DIR *opendir(const char *name) {
+    int fd = open(name, O_RDONLY | O_DIRECTORY);
+    if (fd < 0) return NULL;
+
+    return fdopendir(fd);
 }
 
 struct dirent *readdir(DIR *dirp) {
@@ -62,4 +71,12 @@ int closedir(DIR *dirp) {
     close(dirp->fd);
     free(dirp);
     return 0;
+}
+
+int dirfd(DIR *dirp) {
+    if (dirp == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+    return dirp->fd;
 }

@@ -114,6 +114,11 @@
 #define SYS_PROC_ENVIRON 254
 #define SYS_VM_STATS     255
 #define SYS_CLOCK_GETTIME 265
+#define SYS_GETRANDOM    266
+#define SYS_OPENAT       295
+#define SYS_MKDIRAT      296
+#define SYS_FSTATAT      300
+#define SYS_UNLINKAT     301
 #define SYS_mlock       150
 #define SYS_munlock     151
 #define SYS_SETSID      147

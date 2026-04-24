@@ -25,6 +25,7 @@ ssize_t write(int fd, const void *buf, size_t count);
 int close(int fd);
 int mkstemp(char *template);
 int unlink(const char *pathname);
+int unlinkat(int dirfd, const char *pathname, int flags);
 int rmdir(const char *pathname);
 int link(const char *oldpath, const char *newpath);
 int symlink(const char *target, const char *linkpath);
