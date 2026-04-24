@@ -50,6 +50,7 @@ extern int sys_setgid(int);
 /* File I/O - NOTE: native uses 64-bit types! Foreign personalities need wrappers */
 extern ssize_t sys_read(int, char*, size_t);
 extern ssize_t sys_write(int, const char*, size_t);
+extern int sys_getrandom(void*, size_t, unsigned int);
 extern int sys_open(const char*, int, int);
 extern int sys_openat(int, const char*, int, int);
 extern int sys_close(int);
@@ -74,6 +75,7 @@ extern int sys_ftruncate(int, uint32_t, uint32_t);
 extern int sys_stat(const char*, void*);
 extern int sys_lstat(const char*, void*);
 extern int sys_fstat(int, void*);
+extern int sys_fstatat(int, const char*, void*, int);
 extern int sys_statfs(const char*, void*);
 extern int sys_fstatfs(int, void*);
 
@@ -82,7 +84,9 @@ extern int sys_link(const char*, const char*);
 extern int sys_rename(const char*, const char*);
 extern int sys_symlink(const char*, const char*);
 extern int sys_unlink(const char*);
+extern int sys_unlinkat(int, const char*, int);
 extern int sys_mkdir(const char*, int);
+extern int sys_mkdirat(int, const char*, int);
 extern int sys_rmdir(const char*);
 extern int sys_mknod(const char*, int, int);
 extern int sys_chmod(const char*, int);

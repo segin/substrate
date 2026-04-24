@@ -533,6 +533,105 @@ int kern_openat(int dirfd, const char *path, int flags, int mode) {
     return kern_open_from(path, flags, mode, root, cwd, df->f_path[0] ? df->f_path : NULL);
 }
 
+static int
+kern_path_roots_from_dirfd(int dirfd, const char *path, fs_node_t **root_out, fs_node_t **cwd_out) {
+    fs_node_t *root;
+    fs_node_t *cwd;
+    file_t *df;
+
+    if (!path || !root_out || !cwd_out) {
+        return -EFAULT;
+    }
+
+    root = current_process->root_node ? current_process->root_node : fs_root;
+    cwd = current_process->cwd_node ? current_process->cwd_node : root;
+    if (!root || !cwd) {
+        return -ENOENT;
+    }
+
+    if (path[0] == '/' || dirfd == AT_FDCWD) {
+        *root_out = root;
+        *cwd_out = cwd;
+        return 0;
+    }
+
+    if (dirfd < 0 || dirfd >= MAX_FD) {
+        return -EBADF;
+    }
+
+    df = current_process->fds[dirfd];
+    if (!df || !df->f_data) {
+        return -EBADF;
+    }
+
+    cwd = (fs_node_t *)df->f_data;
+    if ((cwd->flags & 0x7) != FS_DIRECTORY) {
+        return -ENOTDIR;
+    }
+
+    *root_out = root;
+    *cwd_out = cwd;
+    return 0;
+}
+
+static int
+kern_resolve_parent_dirfd(int dirfd, const char *path, fs_node_t **parent_out, char *name_out, size_t name_out_size) {
+    fs_node_t *root;
+    fs_node_t *cwd;
+    fs_node_t *parent;
+    const char *last_slash;
+    char dir[256];
+    int error;
+
+    if (!path || !parent_out || !name_out || name_out_size == 0) {
+        return -EINVAL;
+    }
+    if (path[0] == '\0') {
+        return -EINVAL;
+    }
+
+    error = kern_path_roots_from_dirfd(dirfd, path, &root, &cwd);
+    if (error != 0) {
+        return error;
+    }
+
+    last_slash = strrchr(path, '/');
+    if (!last_slash) {
+        parent = cwd;
+        if (strlcpy(name_out, path, name_out_size) >= name_out_size) {
+            return -ENAMETOOLONG;
+        }
+    } else if (last_slash == path) {
+        parent = root;
+        if (strlcpy(name_out, path + 1, name_out_size) >= name_out_size) {
+            return -ENAMETOOLONG;
+        }
+    } else {
+        size_t dirlen = (size_t)(last_slash - path);
+        fs_node_t *lookup_root = (path[0] == '/') ? root : cwd;
+
+        if (dirlen >= sizeof(dir)) {
+            return -ENAMETOOLONG;
+        }
+        memcpy(dir, path, dirlen);
+        dir[dirlen] = '\0';
+        if (strlcpy(name_out, last_slash + 1, name_out_size) >= name_out_size) {
+            return -ENAMETOOLONG;
+        }
+        parent = vfs_lookup(lookup_root, dir);
+    }
+
+    if (!parent) {
+        return -ENOENT;
+    }
+    if (name_out[0] == '\0') {
+        return -EINVAL;
+    }
+
+    *parent_out = parent;
+    return 0;
+}
+
 // Helper for internal use (and userspace via sys_close)
 void file_close_ptr(file_t *f) {
     if (!f) return;
@@ -971,10 +1070,42 @@ int sys_mkdir(const char *p, int m) {
     return kern_mkdir(kpath, m);
 }
 
+int sys_mkdirat(int dirfd, const char *p, int m) {
+    char kpath[256];
+
+    if (copyinstr(p, kpath, sizeof(kpath), NULL) != 0) return -14;
+    return kern_mkdirat(dirfd, kpath, m);
+}
+
 int kern_mkdir(const char *p, int m) {
     if (!p) return -1;
     return vfs_mkdir(p, (uint16_t)m);
 }
+
+int kern_mkdirat(int dirfd, const char *p, int m) {
+    fs_node_t *parent_node = NULL;
+    char name[128];
+    int ret;
+
+    if (!p) return -EFAULT;
+
+    ret = kern_resolve_parent_dirfd(dirfd, p, &parent_node, name, sizeof(name));
+    if (ret != 0) {
+        return ret;
+    }
+    if ((parent_node->flags & 0x7) != FS_DIRECTORY) {
+        return -ENOTDIR;
+    }
+    if (parent_node->finddir && parent_node->finddir(parent_node, name) != NULL) {
+        return -EEXIST;
+    }
+    if (!parent_node->mkdir) {
+        return -EOPNOTSUPP;
+    }
+
+    return parent_node->mkdir(parent_node, name, (uint16_t)m);
+}
+
 int kern_rmdir(const char *p) {
     if (!p) return -EFAULT;
     return vfs_rmdir(p);
@@ -1197,7 +1328,7 @@ int kern_fstatat(int dirfd, const char *path, struct stat *buf, int flags) {
 
     root = current_process->root_node ? current_process->root_node : fs_root;
     cwd = current_process->cwd_node ? current_process->cwd_node : root;
-    nofollow = (flags & 0x100) != 0; /* AT_SYMLINK_NOFOLLOW */
+    nofollow = (flags & AT_SYMLINK_NOFOLLOW) != 0;
 
     if (path[0] != '/') {
         if (dirfd == AT_FDCWD) {
@@ -1264,45 +1395,54 @@ int sys_unlink(const char *path) {
     return kern_unlink(kpath);
 }
 
-int kern_unlink(const char *path) {
-    if (!path) return -EINVAL;
-    
-    char dir[256];
-    char file[128];
-    
-    // Find the last slash to separate directory and filename
-    const char *last_slash = NULL;
-    for (const char *p = path; *p; p++) {
-        if (*p == '/') last_slash = p;
-    }
-    
-    fs_node_t *parent = NULL;
-    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
-    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
+int sys_unlinkat(int dirfd, const char *path, int flags) {
+    char kpath[256];
 
-    if (!last_slash) {
-        // No slash - parent is CWD
-        parent = cwd;
-        if (strlcpy(file, path, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
-    } else if (last_slash == path) {
-        // Only one slash at the beginning - parent is root
-        parent = root;
-        if (strlcpy(file, path + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
-    } else {
-        // Split into dir and file
-        size_t dirlen = (size_t)(last_slash - path);
-        if (dirlen >= sizeof(dir)) return -ENAMETOOLONG;
-        memcpy(dir, path, dirlen);
-        dir[dirlen] = '\0';
-        
-        if (strlcpy(file, last_slash + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
-        
-        parent = vfs_lookup((path[0] == '/') ? root : cwd, dir);
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    return kern_unlinkat(dirfd, kpath, flags);
+}
+
+int kern_unlink(const char *path) {
+    return kern_unlinkat(AT_FDCWD, path, 0);
+}
+
+int kern_unlinkat(int dirfd, const char *path, int flags) {
+    fs_node_t *parent = NULL;
+    char file[128];
+    int ret;
+
+    if (!path) return -EINVAL;
+    if ((flags & ~AT_REMOVEDIR) != 0) return -EINVAL;
+
+    ret = kern_resolve_parent_dirfd(dirfd, path, &parent, file, sizeof(file));
+    if (ret != 0) {
+        return ret;
     }
-    
-    if (!parent) return -ENOENT;
-    if (!file[0]) return -EINVAL;
-    
+
+    if (flags & AT_REMOVEDIR) {
+        fs_node_t *node;
+
+        if ((parent->flags & 0x7) != FS_DIRECTORY) {
+            return -ENOTDIR;
+        }
+        if (!parent->finddir) {
+            return -EOPNOTSUPP;
+        }
+
+        node = parent->finddir(parent, file);
+        if (!node) {
+            return -ENOENT;
+        }
+        if ((node->flags & 0x7) != FS_DIRECTORY) {
+            return -ENOTDIR;
+        }
+        if (!parent->rmdir) {
+            return -EOPNOTSUPP;
+        }
+
+        return parent->rmdir(parent, file);
+    }
+
     return unlink_fs(parent, file);
 }
 
@@ -2538,4 +2678,17 @@ int sys_select(int nfds, void *rfds, void *wfds, void *efds, void *timeout) {
 int sys_freebsd4_uname(void *ubuf) {
     (void)ubuf;
     return -ENOTSUP;
+}
+
+int sys_fstatat(int dirfd, const char *path, void *buf, int flags) {
+    char kpath[256];
+    struct stat kbuf;
+    int ret;
+
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    ret = kern_fstatat(dirfd, kpath, &kbuf, flags);
+    if (ret == 0) {
+        if (copyout(&kbuf, buf, sizeof(struct stat)) != 0) return -14;
+    }
+    return ret;
 }

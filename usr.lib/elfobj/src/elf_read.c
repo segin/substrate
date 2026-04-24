@@ -387,6 +387,61 @@ static symtab_index_t *find_symtab(symtab_index_t *maps, size_t n, size_t sec_in
     return NULL;
 }
 
+static void free_symtab_maps(symtab_index_t *maps, size_t count) {
+    size_t i;
+
+    if (maps == NULL) {
+        return;
+    }
+    for (i = 0; i < count; ++i) {
+        free(maps[i].symbols);
+    }
+    free(maps);
+}
+
+static void rollback_symbols(elfobj_t *obj, size_t base_count) {
+    if (obj == NULL) {
+        return;
+    }
+    while (obj->symbol_count > base_count) {
+        struct elf_symbol *sym;
+        size_t index = obj->symbol_count - 1;
+
+        sym = obj->symbols[index];
+        obj->symbols[index] = NULL;
+        obj->symbol_count = index;
+        if (sym == NULL) {
+            continue;
+        }
+        free(sym->version_name);
+        free(sym->name);
+        free(sym);
+    }
+}
+
+static void rollback_relocs(elfobj_t *obj, size_t base_count) {
+    if (obj == NULL) {
+        return;
+    }
+    while (obj->reloc_count > base_count) {
+        struct elf_reloc *rel;
+        size_t index = obj->reloc_count - 1;
+
+        rel = obj->relocs[index];
+        obj->relocs[index] = NULL;
+        obj->reloc_count = index;
+        if (rel == NULL) {
+            continue;
+        }
+        if (rel->section != NULL && rel->section->reloc_count != 0 &&
+            rel->section->relocs[rel->section->reloc_count - 1] == rel) {
+            rel->section->relocs[rel->section->reloc_count - 1] = NULL;
+            rel->section->reloc_count--;
+        }
+        free(rel);
+    }
+}
+
 static struct elf_section *find_runtime_reloc_target(elfobj_t *obj, uint64_t r_offset, uint64_t *out_rel_off) {
     size_t i;
 
@@ -910,7 +965,9 @@ static elf_err_t parse_relocations(elfobj_t *obj, symtab_index_t *maps, size_t m
 static elf_err_t materialize_symbols_relocs(elfobj_t *obj) {
     symtab_index_t *maps = NULL;
     size_t map_count = 0;
-    size_t i;
+    size_t symbol_base;
+    size_t reloc_base;
+    uint8_t has_versioning_base;
     elf_err_t err;
 
     if (obj == NULL) {
@@ -920,11 +977,16 @@ static elf_err_t materialize_symbols_relocs(elfobj_t *obj) {
         return ELF_OK;
     }
 
+    symbol_base = obj->symbol_count;
+    reloc_base = obj->reloc_count;
+    has_versioning_base = obj->has_versioning;
+
     err = parse_symbols(obj, &maps, &map_count);
     if (err != ELF_OK) {
         if (debug_open_enabled()) {
             fprintf(stderr, "elfobj: parse_symbols err=%d\n", (int)err);
         }
+        rollback_symbols(obj, symbol_base);
         return err;
     }
     err = parse_symbol_versions(obj, maps, map_count);
@@ -932,21 +994,20 @@ static elf_err_t materialize_symbols_relocs(elfobj_t *obj) {
         if (debug_open_enabled()) {
             fprintf(stderr, "elfobj: parse_symbol_versions err=%d\n", (int)err);
         }
-        for (i = 0; i < map_count; ++i) {
-            free(maps[i].symbols);
-        }
-        free(maps);
+        free_symtab_maps(maps, map_count);
+        rollback_symbols(obj, symbol_base);
+        obj->has_versioning = has_versioning_base;
         return err;
     }
     err = parse_relocations(obj, maps, map_count);
     if (err != ELF_OK && debug_open_enabled()) {
         fprintf(stderr, "elfobj: parse_relocations err=%d\n", (int)err);
     }
-    for (i = 0; i < map_count; ++i) {
-        free(maps[i].symbols);
-    }
-    free(maps);
+    free_symtab_maps(maps, map_count);
     if (err != ELF_OK) {
+        rollback_relocs(obj, reloc_base);
+        rollback_symbols(obj, symbol_base);
+        obj->has_versioning = has_versioning_base;
         return err;
     }
 

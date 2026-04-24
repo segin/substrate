@@ -51,6 +51,8 @@ void test_linux_personality(void) {
                 "Linux syscall table wires fstatat64");
     test_assert(linux->syscall_table[LINUX_SYS_statx] != NULL,
                 "Linux syscall table wires statx");
+    test_assert(linux->syscall_table[LINUX_SYS_getrandom] == (void *)&sys_getrandom,
+                "Linux syscall table wires getrandom to sys_getrandom");
     test_assert(linux->syscall_table[LINUX_SYS_uname] != (void *)&sys_uname,
                 "Linux uname uses compatibility wrapper, not native struct copyout");
     test_assert(linux->syscall_names[LINUX_SYS_modify_ldt] != NULL &&
@@ -71,6 +73,9 @@ void test_linux_personality(void) {
     test_assert(linux->syscall_names[LINUX_SYS_statx] != NULL &&
                     strcmp(linux->syscall_names[LINUX_SYS_statx], "statx") == 0,
                 "Linux syscall name table exposes statx");
+    test_assert(linux->syscall_names[LINUX_SYS_getrandom] != NULL &&
+                    strcmp(linux->syscall_names[LINUX_SYS_getrandom], "getrandom") == 0,
+                "Linux syscall name table exposes getrandom");
     test_assert(linux->syscall_fmts[LINUX_SYS_modify_ldt].nargs == 3,
                 "Linux modify_ldt trace format has three arguments");
     test_assert(linux->syscall_fmts[LINUX_SYS_mount].nargs == 5,
@@ -102,6 +107,11 @@ void test_linux_personality(void) {
                     linux->syscall_fmts[LINUX_SYS_statx].arg_types[3] == ARG_HEX &&
                     linux->syscall_fmts[LINUX_SYS_statx].arg_types[4] == ARG_PTR,
                 "Linux statx trace format matches ABI");
+    test_assert(linux->syscall_fmts[LINUX_SYS_getrandom].nargs == 3 &&
+                    linux->syscall_fmts[LINUX_SYS_getrandom].arg_types[0] == ARG_PTR &&
+                    linux->syscall_fmts[LINUX_SYS_getrandom].arg_types[1] == ARG_INT &&
+                    linux->syscall_fmts[LINUX_SYS_getrandom].arg_types[2] == ARG_HEX,
+                "Linux getrandom trace format matches ABI");
     test_assert(linux->syscall_fmts[LINUX_SYS_modify_ldt].arg_types[0] == ARG_INT &&
                     linux->syscall_fmts[LINUX_SYS_modify_ldt].arg_types[1] == ARG_PTR &&
                     linux->syscall_fmts[LINUX_SYS_modify_ldt].arg_types[2] == ARG_LONG,

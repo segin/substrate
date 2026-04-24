@@ -11,11 +11,14 @@
  */
 
 #include <sys/random.h>
+#include <sys/copy.h>
+#include <sys/errno.h>
 #include <arch/i386/cpu.h>
 #include <kern/random.h>
 #include <kern/console.h>
 #include <kern/sched.h>
 #include <vfs/vfs.h>
+#include <vm/vm_kmem.h>
 #include <string.h>
 
 /* Global RNG state */
@@ -27,6 +30,8 @@ static spinlock_t output_lock;
 
 /* Wait Channel */
 static int random_wait_channel = 0;
+
+#define RANDOM_SYSCALL_CHUNK 4096
 
 /*
  * ChaCha20 Implementation
@@ -454,6 +459,55 @@ int random_get_bytes_flags(void *buf, size_t len, unsigned int flags) {
     
     return len;
 }
+
+int sys_getrandom(void *buf, size_t len, unsigned int flags) {
+    uint8_t *kbuf;
+    size_t remaining;
+    size_t total;
+
+    if (!buf || len == 0) {
+        return 0;
+    }
+
+    if ((flags & ~(GRND_NONBLOCK | GRND_RANDOM | GRND_INSECURE)) != 0) {
+        return -EINVAL;
+    }
+
+    kbuf = kmalloc(RANDOM_SYSCALL_CHUNK);
+    if (!kbuf) {
+        return -ENOMEM;
+    }
+
+    remaining = len;
+    total = 0;
+
+    while (remaining > 0) {
+        size_t chunk = remaining > RANDOM_SYSCALL_CHUNK ? RANDOM_SYSCALL_CHUNK : remaining;
+        int ret = random_get_bytes_flags(kbuf, chunk, flags);
+
+        if (ret < 0) {
+            memset(kbuf, 0, RANDOM_SYSCALL_CHUNK);
+            kfree(kbuf, RANDOM_SYSCALL_CHUNK);
+            return total > 0 ? (int)total : ret;
+        }
+
+        if (copyout(kbuf, (uint8_t *)buf + total, (size_t)ret) != 0) {
+            memset(kbuf, 0, RANDOM_SYSCALL_CHUNK);
+            kfree(kbuf, RANDOM_SYSCALL_CHUNK);
+            return total > 0 ? (int)total : -EFAULT;
+        }
+
+        total += (size_t)ret;
+        remaining -= (size_t)ret;
+        if ((size_t)ret < chunk) {
+            break;
+        }
+    }
+
+    memset(kbuf, 0, RANDOM_SYSCALL_CHUNK);
+    kfree(kbuf, RANDOM_SYSCALL_CHUNK);
+    return (int)total;
+ }
 
 /*
  * Device Node Callbacks (fs_node_t compatible)

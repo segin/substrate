@@ -1051,6 +1051,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_set_thread_area] = (void *)&sys_set_thread_area,
     [LINUX_SYS_exit_group]     = (void *)&sys_exit,
     [LINUX_SYS_pipe2]          = (void *)&linux_sys_pipe2,
+    [LINUX_SYS_getrandom]      = (void *)&sys_getrandom,
     [LINUX_SYS_statx]          = (void *)linux_sys_statx,
 };
 
@@ -1370,6 +1371,7 @@ static const char *linux_names[MAX_SYSCALLS] = {
     [LINUX_SYS_epoll_create1]  = "epoll_create1",
     [LINUX_SYS_dup3]           = "dup3",
     [LINUX_SYS_pipe2]          = "pipe2",
+    [LINUX_SYS_getrandom]      = "getrandom",
     [LINUX_SYS_statx]          = "statx",
     [LINUX_SYS_inotify_init1]  = "inotify_init1",
     [LINUX_SYS_preadv]         = "preadv",
@@ -1663,6 +1665,7 @@ static struct syscall_fmt linux_fmts[MAX_SYSCALLS] = {
     [LINUX_SYS_epoll_create1]  = { 1, { ARG_INT } },
     [LINUX_SYS_dup3]           = { 3, { ARG_INT, ARG_INT, ARG_INT } },
     [LINUX_SYS_pipe2]          = { 2, { ARG_PTR, ARG_INT } },
+    [LINUX_SYS_getrandom]      = { 3, { ARG_PTR, ARG_INT, ARG_HEX } },
     [LINUX_SYS_statx]          = { 5, { ARG_INT, ARG_STR, ARG_HEX, ARG_HEX, ARG_PTR } },
     [LINUX_SYS_inotify_init1]  = { 1, { ARG_INT } },
     [LINUX_SYS_preadv]         = { 4, { ARG_INT, ARG_PTR, ARG_INT, ARG_LONG } },

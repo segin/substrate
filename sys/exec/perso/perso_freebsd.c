@@ -66,6 +66,7 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_mmap_freebsd13] = (void *)&sys_freebsd_mmap,
     [FREEBSD_SYS___getcwd] = (void *)&sys_getcwd,
     [FREEBSD_SYS_times]    = &sys_times,
+    [FREEBSD_SYS_getrandom] = &sys_getrandom,
 };
 
 /* FreeBSD syscall names */
@@ -114,6 +115,7 @@ static const char *freebsd_names[MAX_SYSCALLS] = {
     [FREEBSD_SYS_poll]     = "poll",
     [FREEBSD_SYS___getcwd] = "__getcwd",
     [FREEBSD_SYS_times]    = "times",
+    [FREEBSD_SYS_getrandom] = "getrandom",
 };
 
 
@@ -159,6 +161,7 @@ static struct syscall_fmt freebsd_fmts[MAX_SYSCALLS] = {
     [FREEBSD_SYS_poll]   = { 3, { ARG_PTR, ARG_INT, ARG_INT } },
     [FREEBSD_SYS___getcwd] = { 2, { ARG_PTR, ARG_INT } },
     [FREEBSD_SYS_times]  = { 1, { ARG_PTR } },
+    [FREEBSD_SYS_getrandom] = { 3, { ARG_PTR, ARG_INT, ARG_HEX } },
 };
 
 extern char *strncpy(char *dest, const char *src, size_t n);
