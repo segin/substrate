@@ -115,6 +115,7 @@ typedef struct {
     size_t len;
     long long num;
     double fnum;
+    long double fnum_ld;
     int is_float;
     int float_is_single;
     int float_is_long;
@@ -482,6 +483,8 @@ static cc_expr_t *parse_unary(parser_t *p);
 static cc_expr_t *new_bin_expr(cc_binop_t op, cc_expr_t *lhs, cc_expr_t *rhs);
 static void free_expr(cc_expr_t *e);
 static void free_stmt(cc_stmt_t *s);
+static int is_static_assert_tok(parser_t *p);
+static int parse_static_assert_decl(parser_t *p, int require_semi);
 typedef struct {
     uint64_t bits;
     cc_type_t type;
@@ -571,6 +574,10 @@ static int parser_is_gnu_mode(void) {
 }
 
 static int parser_relax_static_asserts(void) {
+    return 0;
+}
+
+static int parser_allow_static_assert_extension(void) {
     return parser_is_gnu_mode();
 }
 
@@ -1980,16 +1987,8 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
             }
             if (parser_is_gnu_mode() &&
                 (tok_is_ident(p, "__int128") || tok_is_ident(p, "__int128_t") || tok_is_ident(p, "__uint128_t"))) {
-                seen = 1;
-                seen_type = 1;
-                seen_long = 1;
-                if (tok_is_ident(p, "__uint128_t")) {
-                    seen_unsigned = 1;
-                }
-                if (next_tok(p) != 0) {
-                    return -1;
-                }
-                continue;
+                set_diag(p->diag, p->tok.line, p->tok.col, "__int128 is not supported");
+                return -1;
             }
             if (tok_is_ident(p, "_Thread_local") || (parser_is_c23_or_newer() && tok_is_ident(p, "thread_local"))) {
                 if (!parser_is_c11_or_newer()) {
@@ -2506,6 +2505,13 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                     set_diag(p->diag, p->tok.line, p->tok.col, "unterminated aggregate declaration");
                     return -1;
                 }
+                if (is_static_assert_tok(p)) {
+                    if (parse_static_assert_decl(p, 1) != 0) {
+                        decl_attrs_clear(&struct_attrs);
+                        return -1;
+                    }
+                    continue;
+                }
                 if (!(is_declspec_start(p) || p->tok.kind == TOK_KW_EXTENSION)) {
                     /* tolerate unsupported member forms by brace-skip */
                     brace_depth = 0;
@@ -2709,6 +2715,17 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                     }
                     msize = parser_type_size_bytes(p, mtype, mstruct);
                     malign = parser_type_align_bytes(p, mtype, mstruct);
+                    if (mbase_arr_ndim > 0 && is_pointer_type(mtype)) {
+                        cc_type_t elem_type = ptr_deref_type(mtype);
+                        long elem_size = parser_type_size_bytes(p, elem_type, mstruct);
+                        long elem_align = parser_type_align_bytes(p, elem_type, mstruct);
+                        if (elem_size > 0) {
+                            msize = elem_size;
+                        }
+                        if (elem_align > 0) {
+                            malign = elem_align;
+                        }
+                    }
                     if (msize < 0) {
                         msize = g_parser_pointer_size_bytes;
                     }
@@ -4273,6 +4290,11 @@ static int parse_array_extent(parser_t *p, long *out_n, int *out_const_n, cc_exp
         return -1;
     }
     if (eval_const_array_bound_expr(p, bound, &n) == 0) {
+        if (n < 0 || (!parser_is_gnu_mode() && n == 0)) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "array bound must be positive");
+            free_expr(bound);
+            return -1;
+        }
         if (n > 0 || (parser_is_gnu_mode() && n == 0)) {
             is_const = 1;
         }
@@ -4340,6 +4362,11 @@ static int parse_param_array_extent(parser_t *p, long *out_n, int *out_const_n, 
         return -1;
     }
     if (eval_const_array_bound_expr(p, bound, &n) == 0) {
+        if (n < 0 || (!parser_is_gnu_mode() && n == 0)) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "array bound must be positive");
+            free_expr(bound);
+            return -1;
+        }
         if (n > 0 || (parser_is_gnu_mode() && n == 0)) {
             is_const = 1;
         }
@@ -4602,6 +4629,127 @@ static char *dup_string_token(const cc_token_t *tok) {
         return xstrdup_n("", 0);
     }
     return xstrdup_n(tok->start + begin, end - begin);
+}
+
+static int parser_hex_value(int c) {
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return 10 + (c - 'a');
+    }
+    if (c >= 'A' && c <= 'F') {
+        return 10 + (c - 'A');
+    }
+    return -1;
+}
+
+static unsigned parser_decode_escape_unit(const unsigned char *s, size_t n, size_t *adv_out) {
+    unsigned v = 0;
+    size_t i = 0;
+
+    if (adv_out != NULL) {
+        *adv_out = 0;
+    }
+    if (n == 0) {
+        return 0;
+    }
+    if (s[0] == 'x') {
+        int hv;
+        int seen = 0;
+        i = 1;
+        while (i < n && (hv = parser_hex_value(s[i])) >= 0) {
+            seen = 1;
+            v = (v << 4) | (unsigned)hv;
+            i++;
+        }
+        if (!seen) {
+            v = 'x';
+        }
+        if (adv_out != NULL) {
+            *adv_out = i;
+        }
+        return v & 0xffu;
+    }
+    if (s[0] >= '0' && s[0] <= '7') {
+        int digits = 0;
+        while (i < n && digits < 3 && s[i] >= '0' && s[i] <= '7') {
+            v = (v << 3) | (unsigned)(s[i] - '0');
+            i++;
+            digits++;
+        }
+        if (adv_out != NULL) {
+            *adv_out = i;
+        }
+        return v & 0xffu;
+    }
+    switch (s[0]) {
+    case 'a': v = '\a'; break;
+    case 'b': v = '\b'; break;
+    case 'f': v = '\f'; break;
+    case 'n': v = '\n'; break;
+    case 'r': v = '\r'; break;
+    case 't': v = '\t'; break;
+    case 'v': v = '\v'; break;
+    case '\\': v = '\\'; break;
+    case '\'': v = '\''; break;
+    case '"': v = '"'; break;
+    case '?': v = '?'; break;
+    default: v = s[0]; break;
+    }
+    if (adv_out != NULL) {
+        *adv_out = 1;
+    }
+    return v & 0xffu;
+}
+
+static char *canonicalize_narrow_string_token(const cc_token_t *tok) {
+    const unsigned char *s;
+    size_t begin = 0;
+    size_t end;
+    size_t i;
+    size_t w = 0;
+    size_t cap;
+    char *out;
+
+    if (tok == NULL || tok->kind != TOK_STR || tok->start == NULL) {
+        return NULL;
+    }
+    end = tok->len;
+    if (tok->len >= 2 && tok->start[0] == '"' && tok->start[tok->len - 1] == '"') {
+        begin = 1;
+        end = tok->len - 1;
+    }
+    cap = (end - begin) * 4 + 3;
+    out = (char *)malloc(cap);
+    if (out == NULL) {
+        return NULL;
+    }
+    s = (const unsigned char *)tok->start;
+    out[w++] = '"';
+    i = begin;
+    while (i < end) {
+        unsigned ch;
+        size_t adv = 1;
+        if (s[i] == '\\') {
+            i++;
+            if (i >= end) {
+                break;
+            }
+            ch = parser_decode_escape_unit(s + i, end - i, &adv);
+            if (adv == 0) {
+                adv = 1;
+            }
+            i += adv;
+        } else {
+            ch = s[i++];
+        }
+        snprintf(out + w, cap - w, "\\%03o", ch & 0xffu);
+        w += 4;
+    }
+    out[w++] = '"';
+    out[w] = '\0';
+    return out;
 }
 
 static cc_type_t string_token_char_type(const parser_t *p, const cc_token_t *tok) {
@@ -6736,7 +6884,7 @@ static int parse_static_assert_decl(parser_t *p, int require_semi) {
     if (!is_static_assert_tok(p)) {
         return -1;
     }
-    if (!parser_is_c11_or_newer() && !parser_relax_static_asserts()) {
+    if (!parser_is_c11_or_newer() && !parser_allow_static_assert_extension()) {
         set_diag(p->diag, p->tok.line, p->tok.col, "_Static_assert requires C11 or newer");
         return -1;
     }
@@ -6760,7 +6908,7 @@ static int parse_static_assert_decl(parser_t *p, int require_semi) {
             free_expr(cond_expr);
             return -1;
         }
-    } else if (!parser_is_c23_or_newer() && !parser_relax_static_asserts()) {
+    } else if (!parser_is_c23_or_newer() && !parser_allow_static_assert_extension()) {
         free_expr(cond_expr);
         set_diag(p->diag, p->tok.line, p->tok.col, "C11 static assertion requires a message string");
         return -1;
@@ -7017,6 +7165,7 @@ static cc_expr_t *parse_primary(parser_t *p) {
                 return NULL;
             }
             e->float_val = p->tok.fnum;
+            e->float_val_ld = p->tok.fnum_ld;
             if (p->tok.float_is_single) {
                 e->value_type = CC_TYPE_FLOAT;
             } else if (p->tok.float_is_long) {
@@ -7051,7 +7200,8 @@ static cc_expr_t *parse_primary(parser_t *p) {
 
     if (p->tok.kind == TOK_STR) {
         cc_type_t str_ty = string_token_char_type(p, &p->tok);
-        char *lit = xstrdup_n(p->tok.start, p->tok.len);
+        char *lit = str_ty == CC_TYPE_CHAR ? canonicalize_narrow_string_token(&p->tok)
+                                           : xstrdup_n(p->tok.start, p->tok.len);
         e = new_expr(CC_EXPR_STR);
         if (e == NULL || lit == NULL) {
             free(lit);
@@ -7066,7 +7216,8 @@ static cc_expr_t *parse_primary(parser_t *p) {
         }
         while (p->tok.kind == TOK_STR) {
             cc_type_t part_ty = string_token_char_type(p, &p->tok);
-            char *part = xstrdup_n(p->tok.start, p->tok.len);
+            char *part = part_ty == CC_TYPE_CHAR ? canonicalize_narrow_string_token(&p->tok)
+                                                 : xstrdup_n(p->tok.start, p->tok.len);
             size_t alen;
             size_t plen;
             char *next_lit;
@@ -7997,6 +8148,7 @@ static cc_expr_t *clone_expr(const cc_expr_t *src) {
     memcpy(dst->array_dims, src->array_dims, sizeof(dst->array_dims));
     dst->int_val = src->int_val;
     dst->float_val = src->float_val;
+    dst->float_val_ld = src->float_val_ld;
     dst->op = src->op;
     dst->member_is_arrow = src->member_is_arrow;
     dst->member_offset = src->member_offset;
@@ -8586,10 +8738,26 @@ static cc_expr_t *parse_unary(parser_t *p) {
         return new_bin_expr(CC_BIN_MUL, neg_one, rhs);
     }
     if (p->tok.kind == TOK_PLUS) {
+        cc_expr_t *one;
+        cc_expr_t *rhs;
         if (next_tok(p) != 0) {
             return NULL;
         }
-        return parse_unary(p);
+        rhs = parse_unary(p);
+        if (rhs == NULL) {
+            return NULL;
+        }
+        /*
+         * Unary plus performs integer promotions. Model it as multiplication
+         * by one so existing usual-arithmetic-conversion semantics apply, and
+         * non-arithmetic operands are still rejected.
+         */
+        one = new_int_expr(1);
+        if (one == NULL) {
+            free_expr(rhs);
+            return NULL;
+        }
+        return new_bin_expr(CC_BIN_MUL, one, rhs);
     }
     if (p->tok.kind == TOK_BANG) {
         cc_expr_t *rhs;

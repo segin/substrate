@@ -299,6 +299,7 @@ struct cc_expr {
     long array_dims[CC_MAX_ARRAY_DIMS];
     long long int_val;
     double float_val;
+    long double float_val_ld;
     char *ident;
     cc_binop_t op;
     int member_is_arrow;

@@ -21,7 +21,8 @@ typedef enum {
 typedef enum {
     CC_CALL_ARG_ABI_DEFAULT = 0,
     CC_CALL_ARG_ABI_LDOUBLE = 1,
-    CC_CALL_ARG_ABI_AGG_MEM = 2
+    CC_CALL_ARG_ABI_AGG_MEM = 2,
+    CC_CALL_ARG_ABI_AGG_REG = 3
 } cc_call_arg_abi_t;
 
 typedef enum {
@@ -70,6 +71,7 @@ typedef struct {
     int rhs;
     long long imm;
     double fimm;
+    long double fimm_ld;
     int label;
     int true_label;
     int false_label;
@@ -107,6 +109,7 @@ typedef struct {
     long init_size;
     long long init_i;
     double init_f;
+    long double init_f_ld;
     int init_is_zero_fill;
     int init_is_float;
     int init_is_string;
@@ -129,6 +132,7 @@ typedef struct {
     int has_init;
     long long init_i;
     double init_f;
+    long double init_f_ld;
     int init_is_float;
     int init_is_string;
     int init_is_symbol;

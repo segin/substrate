@@ -1679,9 +1679,6 @@ static int add_builtin_macros(pp_state_t *st) {
     if (macro_set(&st->macros, "__SIZEOF_WINT_T__", 0, 0, NULL, 0, "4") != 0) {
         return -1;
     }
-    if (macro_set(&st->macros, "__SIZEOF_INT128__", 0, 0, NULL, 0, "16") != 0) {
-        return -1;
-    }
     if (macro_set(&st->macros, "__CHAR_BIT__", 0, 0, NULL, 0, "8") != 0) {
         return -1;
     }
@@ -2003,13 +2000,13 @@ static int add_builtin_macros(pp_state_t *st) {
     if (macro_set(&st->macros, "__LDBL_EPSILON__", 0, 0, NULL, 0, "1.08420217248550443401e-19L") != 0) {
         return -1;
     }
-    if (macro_set(&st->macros, "__LDBL_MIN__", 0, 0, NULL, 0, "3.36210314311209350626e-4932L") != 0) {
+    if (macro_set(&st->macros, "__LDBL_MIN__", 0, 0, NULL, 0, "__builtin_ldbl_min()") != 0) {
         return -1;
     }
-    if (macro_set(&st->macros, "__LDBL_DENORM_MIN__", 0, 0, NULL, 0, "3.64519953188247460253e-4951L") != 0) {
+    if (macro_set(&st->macros, "__LDBL_DENORM_MIN__", 0, 0, NULL, 0, "__builtin_ldbl_denorm_min()") != 0) {
         return -1;
     }
-    if (macro_set(&st->macros, "__LDBL_MAX__", 0, 0, NULL, 0, "1.18973149535723176502e+4932L") != 0) {
+    if (macro_set(&st->macros, "__LDBL_MAX__", 0, 0, NULL, 0, "__builtin_ldbl_max()") != 0) {
         return -1;
     }
     if (macro_set(&st->macros, "__DECIMAL_DIG__", 0, 0, NULL, 0, "21") != 0) {

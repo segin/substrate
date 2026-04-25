@@ -1,5 +1,6 @@
 #include "cc_backend.h"
 
+#include <float.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,6 +51,23 @@ static size_t align_up_size(size_t v, size_t align);
 static long x86_64_param_size_bytes(const cc_ssa_function_t *f, int param_index, long fallback);
 static void emit_x86_64_load_int_value_to_reg(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int value,
                                               const char *reg);
+
+static long double x86_64_special_ldouble_const(long code) {
+    if (code == 1) {
+        return LDBL_MIN;
+    }
+    if (code == 2) {
+#ifdef __LDBL_DENORM_MIN__
+        return __LDBL_DENORM_MIN__;
+#else
+        return 0.0L;
+#endif
+    }
+    if (code == 3) {
+        return LDBL_MAX;
+    }
+    return 0.0L;
+}
 
 void cc_backend_set_i386_isa_level(int level) {
     if (level < 3) level = 3;
@@ -1355,6 +1373,51 @@ static void emit_integer_data(FILE *fp, long size, long value) {
     }
 }
 
+static void emit_raw_bytes(FILE *fp, const unsigned char *bytes, long size) {
+    long i;
+    for (i = 0; i < size; ++i) {
+        fprintf(fp, "\t.byte 0x%02x\n", bytes[i]);
+    }
+}
+
+static void emit_float_data(FILE *fp, long size, long double value) {
+    if (size == 4) {
+        union {
+            float f;
+            unsigned char b[4];
+        } u;
+        u.f = (float)value;
+        emit_raw_bytes(fp, u.b, 4);
+    } else if (size == 8) {
+        union {
+            double d;
+            unsigned char b[8];
+        } u;
+        u.d = (double)value;
+        emit_raw_bytes(fp, u.b, 8);
+    } else {
+        unsigned char raw[16];
+        long ncopy = (long)sizeof(long double);
+        memset(raw, 0, sizeof(raw));
+#if LDBL_MANT_DIG == 64 && LDBL_MAX_EXP == 16384
+        if (ncopy > 10) {
+            ncopy = 10;
+        }
+#endif
+        if (ncopy > 16) {
+            ncopy = 16;
+        }
+        memcpy(raw, &value, (size_t)ncopy);
+        emit_raw_bytes(fp, raw, size < 16 ? size : 16);
+        if (size > 16) {
+            long i;
+            for (i = 16; i < size; ++i) {
+                fprintf(fp, "\t.byte 0x00\n");
+            }
+        }
+    }
+}
+
 static long default_object_align(long sz) {
     if (sz >= 8) {
         return 8;
@@ -1535,12 +1598,8 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
                         emitted += item_size;
                         continue;
                     }
-                    if (it->init_is_float && (item_size == 4 || item_size == 8)) {
-                        if (item_size == 4) {
-                            fprintf(fp, "\t.float %f\n", (float)it->init_f);
-                        } else {
-                            fprintf(fp, "\t.double %f\n", it->init_f);
-                        }
+                    if (it->init_is_float && (item_size == 4 || item_size == 8 || item_size == 16)) {
+                        emit_float_data(fp, item_size, it->init_f_ld);
                         emitted += item_size;
                         continue;
                     }
@@ -1636,12 +1695,9 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
                     } else {
                         fprintf(fp, "\t.quad %s\n", it->init_sym != NULL ? it->init_sym : "0");
                     }
-                } else if (it->init_is_float && (elem_type == CC_TYPE_FLOAT || elem_type == CC_TYPE_DOUBLE)) {
-                    if (elem_type == CC_TYPE_FLOAT) {
-                        fprintf(fp, "\t.float %f\n", (float)it->init_f);
-                    } else {
-                        fprintf(fp, "\t.double %f\n", it->init_f);
-                    }
+                } else if (it->init_is_float &&
+                           (elem_type == CC_TYPE_FLOAT || elem_type == CC_TYPE_DOUBLE || elem_type == CC_TYPE_LDOUBLE)) {
+                    emit_float_data(fp, elem_size, it->init_f_ld);
                 } else {
                     emit_integer_data(fp, elem_size, it->init_i);
                 }
@@ -1686,12 +1742,8 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
             }
             continue;
         }
-        if (g->init_is_float && (g->type == CC_TYPE_FLOAT || g->type == CC_TYPE_DOUBLE)) {
-            if (g->type == CC_TYPE_FLOAT) {
-                fprintf(fp, "\t.float %f\n", (float)g->init_f);
-            } else {
-                fprintf(fp, "\t.double %f\n", g->init_f);
-            }
+        if (g->init_is_float && (g->type == CC_TYPE_FLOAT || g->type == CC_TYPE_DOUBLE || g->type == CC_TYPE_LDOUBLE)) {
+            emit_float_data(fp, sz, g->init_f_ld);
             continue;
         }
         emit_integer_data(fp, sz, g->init_i);
@@ -1732,11 +1784,19 @@ static int stackalloc_off(const slot_layout_t *lay, int v) {
 }
 
 static long value_size_bytes(const cc_ssa_function_t *f, int v, long fallback) {
+    size_t i;
     if (fallback <= 0) {
         fallback = 4;
     }
     if (f == NULL || v < 0 || v >= f->value_count || f->value_sizes == NULL || f->value_sizes[v] == 0) {
         return fallback;
+    }
+    if (f->param_values != NULL && f->param_abi != NULL) {
+        for (i = 0; i < f->param_count; ++i) {
+            if (f->param_values[i] == v && f->param_abi[i] == CC_CALL_ARG_ABI_LDOUBLE) {
+                return 16;
+            }
+        }
     }
     return f->value_sizes[v];
 }
@@ -2984,6 +3044,7 @@ static abi_loc_t abi64_param_loc(const cc_ssa_function_t *f, int param_index, si
     for (i = 0; i <= param_index; ++i) {
         int is_ldouble = (f->param_abi != NULL && f->param_abi[i] == CC_CALL_ARG_ABI_LDOUBLE) ? 1 : 0;
         int is_agg_mem = (f->param_abi != NULL && f->param_abi[i] == CC_CALL_ARG_ABI_AGG_MEM) ? 1 : 0;
+        int is_agg_reg = (f->param_abi != NULL && f->param_abi[i] == CC_CALL_ARG_ABI_AGG_REG) ? 1 : 0;
         cc_value_type_t vt = f->param_types[i];
         if (is_agg_mem) {
             long size = x86_64_param_size_bytes(f, i, 8);
@@ -2995,6 +3056,32 @@ static abi_loc_t abi64_param_loc(const cc_ssa_function_t *f, int param_index, si
                 return loc;
             }
             stack_bytes += slot_size;
+            continue;
+        }
+        if (is_agg_reg) {
+            long size = x86_64_param_size_bytes(f, i, 8);
+            size_t nregs = ((size_t)(size > 0 ? size : 8) + 7u) / 8u;
+            if (nregs == 0) {
+                nregs = 1;
+            }
+            if (gpr + nregs <= 6) {
+                if (i == param_index) {
+                    loc.kind = ABI_LOC_GPR;
+                    loc.index = gpr;
+                    loc.size = size > 0 ? (size_t)size : 8;
+                    return loc;
+                }
+                gpr += nregs;
+            } else {
+                size_t slot_size = align_up_size((size_t)(size > 0 ? size : 8), 8);
+                if (i == param_index) {
+                    loc.kind = ABI_LOC_STACK;
+                    loc.index = stack_bytes;
+                    loc.size = size > 0 ? (size_t)size : 8;
+                    return loc;
+                }
+                stack_bytes += slot_size;
+            }
             continue;
         }
         if (is_ldouble) {
@@ -3064,6 +3151,13 @@ static int call_arg_is_agg_mem_abi(const cc_ssa_instr_t *in, size_t arg_index) {
     return in->call_arg_abi[arg_index] == CC_CALL_ARG_ABI_AGG_MEM ? 1 : 0;
 }
 
+static int call_arg_is_agg_reg_abi(const cc_ssa_instr_t *in, size_t arg_index) {
+    if (in == NULL || in->call_arg_abi == NULL || arg_index >= in->arg_count) {
+        return 0;
+    }
+    return in->call_arg_abi[arg_index] == CC_CALL_ARG_ABI_AGG_REG ? 1 : 0;
+}
+
 static long call_arg_size_bytes(const cc_ssa_instr_t *in, size_t arg_index, long fallback) {
     if (fallback <= 0) {
         fallback = 4;
@@ -3116,6 +3210,26 @@ static void abi64_classify_call_args(const cc_ssa_function_t *f, const cc_ssa_in
             stack_bytes += slot_size;
             continue;
         }
+        if (call_arg_is_agg_reg_abi(in, i)) {
+            long size = call_arg_size_bytes(in, i, 8);
+            size_t nregs = ((size_t)(size > 0 ? size : 8) + 7u) / 8u;
+            if (nregs == 0) {
+                nregs = 1;
+            }
+            if (gpr + nregs <= 6) {
+                locs[i].kind = ABI_LOC_GPR;
+                locs[i].index = gpr;
+                locs[i].size = size > 0 ? (size_t)size : 8;
+                gpr += nregs;
+            } else {
+                size_t slot_size = align_up_size((size_t)(size > 0 ? size : 8), 8);
+                locs[i].kind = ABI_LOC_STACK;
+                locs[i].index = stack_bytes;
+                locs[i].size = size > 0 ? (size_t)size : 8;
+                stack_bytes += slot_size;
+            }
+            continue;
+        }
         if (call_arg_is_ldouble_abi(in, i)) {
             stack_bytes = align_up_size(stack_bytes, 16);
             locs[i].kind = ABI_LOC_STACK;
@@ -3161,7 +3275,8 @@ static void abi64_fixed_usage(const cc_ssa_function_t *f, int fixed_count, size_
     for (i = 0; i < fixed_count; ++i) {
         abi_loc_t loc = abi64_param_loc(f, i, gpr_start);
         if (loc.kind == ABI_LOC_GPR) {
-            gpr++;
+            size_t nregs = (loc.size + 7u) / 8u;
+            gpr += nregs == 0 ? 1 : nregs;
         } else if (loc.kind == ABI_LOC_XMM) {
             xmm++;
         } else {
@@ -3186,9 +3301,29 @@ static const char *x86_64_fp_tmp_reg(void) {
     return "%xmm15";
 }
 
-static int emit_x86_64_float_binop(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in, cc_diag_t *diag) {
+static int emit_x86_64_float_binop(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay,
+                                    const cc_ssa_instr_t *in, cc_diag_t *diag) {
     const char *op = NULL;
     const char *tmp = x86_64_fp_tmp_reg();
+
+    if (value_size_bytes(f, in->dst, 8) >= 16 || value_size_bytes(f, in->lhs, 8) >= 16 ||
+        value_size_bytes(f, in->rhs, 8) >= 16) {
+        if (in->op == CC_SSA_ADD) op = "faddp";
+        else if (in->op == CC_SSA_SUB) op = "fsubrp";
+        else if (in->op == CC_SSA_MUL) op = "fmulp";
+        else if (in->op == CC_SSA_DIV) op = "fdivrp";
+        else {
+            set_diag(diag, "invalid long double arithmetic opcode");
+            return -1;
+        }
+        if (value_size_bytes(f, in->lhs, 8) >= 16) fprintf(fp, "\tfldt %d(%%rbp)\n", slot_off(lay, in->lhs));
+        else fprintf(fp, "\tfldl %d(%%rbp)\n", slot_off(lay, in->lhs));
+        if (value_size_bytes(f, in->rhs, 8) >= 16) fprintf(fp, "\tfldt %d(%%rbp)\n", slot_off(lay, in->rhs));
+        else fprintf(fp, "\tfldl %d(%%rbp)\n", slot_off(lay, in->rhs));
+        fprintf(fp, "\t%s %%st, %%st(1)\n", op);
+        fprintf(fp, "\tfstpt %d(%%rbp)\n", slot_off(lay, in->dst));
+        return 0;
+    }
 
     if (in->op == CC_SSA_ADD) op = "addsd";
     else if (in->op == CC_SSA_SUB) op = "subsd";
@@ -3205,8 +3340,14 @@ static int emit_x86_64_float_binop(FILE *fp, const slot_layout_t *lay, const cc_
     return 0;
 }
 
-static void emit_x86_64_mov_fp(FILE *fp, const slot_layout_t *lay, const cc_ssa_instr_t *in) {
+static void emit_x86_64_mov_fp(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, const cc_ssa_instr_t *in) {
     const char *tmp = x86_64_fp_tmp_reg();
+    if (value_size_bytes(f, in->dst, 8) >= 16 || value_size_bytes(f, in->lhs, 8) >= 16) {
+        if (value_size_bytes(f, in->lhs, 8) >= 16) fprintf(fp, "\tfldt %d(%%rbp)\n", slot_off(lay, in->lhs));
+        else fprintf(fp, "\tfldl %d(%%rbp)\n", slot_off(lay, in->lhs));
+        fprintf(fp, "\tfstpt %d(%%rbp)\n", slot_off(lay, in->dst));
+        return;
+    }
     fprintf(fp, "\tmovsd %d(%%rbp), %s\n", slot_off(lay, in->lhs), tmp);
     fprintf(fp, "\tmovsd %s, %d(%%rbp)\n", tmp, slot_off(lay, in->dst));
 }
@@ -3229,7 +3370,8 @@ static void emit_x86_64_load_fp_indirect(FILE *fp, const cc_ssa_function_t *f, c
         fprintf(fp, "\tcvtss2sd %s, %s\n", tmp, tmp);
     } else if (mem_size >= 16) {
         fprintf(fp, "\tfldt (%s)\n", ist->regs[rp]);
-        fprintf(fp, "\tfstpl %d(%%rbp)\n", slot_off(lay, in->dst));
+        if (value_size_bytes(f, in->dst, 8) >= 16) fprintf(fp, "\tfstpt %d(%%rbp)\n", slot_off(lay, in->dst));
+        else fprintf(fp, "\tfstpl %d(%%rbp)\n", slot_off(lay, in->dst));
         return;
     } else {
         fprintf(fp, "\tmovsd (%s), %s\n", ist->regs[rp], tmp);
@@ -3258,7 +3400,7 @@ static void emit_x86_64_store_fp_indirect(FILE *fp, const cc_ssa_function_t *f, 
             fprintf(fp, "\tcvtsd2ss %s, %s\n", tmp, tmp);
             fprintf(fp, "\tmovss %s, (%s)\n", tmp, ist->regs[rp]);
         } else if (mem_size >= 16) {
-            fprintf(fp, "\tfldl %d(%%rbp)\n", slot_off(lay, in->rhs));
+            fprintf(fp, "\tfldt %d(%%rbp)\n", slot_off(lay, in->rhs));
             fprintf(fp, "\tfstpt (%s)\n", ist->regs[rp]);
         } else {
             fprintf(fp, "\tmovsd %s, (%s)\n", tmp, ist->regs[rp]);
@@ -3269,6 +3411,38 @@ static void emit_x86_64_store_fp_indirect(FILE *fp, const cc_ssa_function_t *f, 
 static void emit_x86_64_i2f(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
                             const cc_ssa_instr_t *in) {
     const char *tmp = x86_64_fp_tmp_reg();
+    if (value_size_bytes(f, in->dst, 8) >= 16) {
+        int dst_off = slot_off(lay, in->dst);
+        if (in->is_unsigned) {
+            unsigned long lid = next_aux_label_id();
+            int_regs_flush(fp, f, lay, ist);
+            int_regs_clobber_reg(fp, f, lay, ist, int_reg_index(ist, "%rax"));
+            int_regs_clobber_reg(fp, f, lay, ist, int_reg_index(ist, "%rcx"));
+            emit_x86_64_load_int_value_to_reg(fp, f, lay, in->lhs, "%rax");
+            fprintf(fp, "\ttestq %%rax, %%rax\n");
+            fprintf(fp, "\tjns .L__cc_u64told_small_%lu\n", lid);
+            fprintf(fp, "\tmovq %%rax, %%rcx\n");
+            fprintf(fp, "\tshrq $1, %%rcx\n");
+            fprintf(fp, "\tandq $1, %%rax\n");
+            fprintf(fp, "\torq %%rax, %%rcx\n");
+            fprintf(fp, "\tmovq %%rcx, %d(%%rbp)\n", dst_off);
+            fprintf(fp, "\tfildll %d(%%rbp)\n", dst_off);
+            fprintf(fp, "\tfadd %%st(0), %%st\n");
+            fprintf(fp, "\tfstpt %d(%%rbp)\n", dst_off);
+            fprintf(fp, "\tjmp .L__cc_u64told_done_%lu\n", lid);
+            fprintf(fp, ".L__cc_u64told_small_%lu:\n", lid);
+            fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", dst_off);
+            fprintf(fp, "\tfildll %d(%%rbp)\n", dst_off);
+            fprintf(fp, "\tfstpt %d(%%rbp)\n", dst_off);
+            fprintf(fp, ".L__cc_u64told_done_%lu:\n", lid);
+        } else {
+            int rl = int_regs_load(fp, f, lay, ist, in->lhs, -1, -1);
+            fprintf(fp, "\tmovq %s, %d(%%rbp)\n", ist->regs[rl], dst_off);
+            fprintf(fp, "\tfildll %d(%%rbp)\n", dst_off);
+            fprintf(fp, "\tfstpt %d(%%rbp)\n", dst_off);
+        }
+        return;
+    }
     if (in->is_unsigned) {
         unsigned long lid = next_aux_label_id();
         int rax = int_reg_index(ist, "%rax");
@@ -3340,8 +3514,19 @@ static int emit_x86_64_cmp_float(FILE *fp, const cc_ssa_function_t *f, const slo
     const char *tmp = x86_64_fp_tmp_reg();
     int rd;
     int_regs_flush(fp, f, lay, ist);
-    fprintf(fp, "\tmovsd %d(%%rbp), %s\n", slot_off(lay, in->lhs), tmp);
-    fprintf(fp, "\tucomisd %d(%%rbp), %s\n", slot_off(lay, in->rhs), tmp);
+    if (value_size_bytes(f, in->lhs, 8) >= 16 || value_size_bytes(f, in->rhs, 8) >= 16) {
+        int_regs_clobber_reg(fp, f, lay, ist, int_reg_index(ist, "%rax"));
+        if (value_size_bytes(f, in->rhs, 8) >= 16) fprintf(fp, "\tfldt %d(%%rbp)\n", slot_off(lay, in->rhs));
+        else fprintf(fp, "\tfldl %d(%%rbp)\n", slot_off(lay, in->rhs));
+        if (value_size_bytes(f, in->lhs, 8) >= 16) fprintf(fp, "\tfldt %d(%%rbp)\n", slot_off(lay, in->lhs));
+        else fprintf(fp, "\tfldl %d(%%rbp)\n", slot_off(lay, in->lhs));
+        fprintf(fp, "\tfucompp\n");
+        fprintf(fp, "\tfnstsw %%ax\n");
+        fprintf(fp, "\tsahf\n");
+    } else {
+        fprintf(fp, "\tmovsd %d(%%rbp), %s\n", slot_off(lay, in->lhs), tmp);
+        fprintf(fp, "\tucomisd %d(%%rbp), %s\n", slot_off(lay, in->rhs), tmp);
+    }
     rd = int_regs_define(fp, f, lay, ist, in->dst, -1, -1);
     emit_float_setcc_to_reg(fp, in->cmp_kind, ist->regs[rd], 1);
     return 0;
@@ -3402,9 +3587,13 @@ static int emit_x86_64_store_ldouble_to_rsp(FILE *fp, const cc_ssa_function_t *f
         set_diag(diag, "internal error: non-float assigned to long double argument");
         return -1;
     }
-    fprintf(fp, "\tmovsd %d(%%rbp), %%xmm15\n", slot_off(lay, value));
-    fprintf(fp, "\tmovsd %%xmm15, %zu(%%rsp)\n", off_rsp);
-    fprintf(fp, "\tfldl %zu(%%rsp)\n", off_rsp);
+    if (value_size_bytes(f, value, 8) >= 16) {
+        fprintf(fp, "\tfldt %d(%%rbp)\n", slot_off(lay, value));
+    } else {
+        fprintf(fp, "\tmovsd %d(%%rbp), %%xmm15\n", slot_off(lay, value));
+        fprintf(fp, "\tmovsd %%xmm15, %zu(%%rsp)\n", off_rsp);
+        fprintf(fp, "\tfldl %zu(%%rsp)\n", off_rsp);
+    }
     fprintf(fp, "\tfstpt %zu(%%rsp)\n", off_rsp);
     /*
      * Keep the upper 2 padding bytes deterministic. Use byte stores instead
@@ -3446,6 +3635,30 @@ static int emit_x86_64_store_agg_mem_to_rsp(FILE *fp, const cc_ssa_function_t *f
     return 0;
 }
 
+static void emit_x86_64_load_agg_part_to_reg(FILE *fp, size_t off, size_t bytes, const char *reg) {
+    if (bytes >= 8) {
+        fprintf(fp, "\tmovq %zu(%%r11), %s\n", off, reg);
+    } else if (bytes >= 4) {
+        fprintf(fp, "\tmovl %zu(%%r11), %s\n", off, reg64_to32(reg));
+    } else if (bytes >= 2) {
+        fprintf(fp, "\tmovw %zu(%%r11), %s\n", off, reg64_to16(reg));
+    } else if (bytes > 0) {
+        fprintf(fp, "\tmovb %zu(%%r11), %s\n", off, reg64_to8(reg));
+    }
+}
+
+static void emit_x86_64_store_agg_part_from_reg(FILE *fp, const char *reg, int base_off, size_t off, size_t bytes) {
+    if (bytes >= 8) {
+        fprintf(fp, "\tmovq %s, %d(%%rbp)\n", reg, base_off + (int)off);
+    } else if (bytes >= 4) {
+        fprintf(fp, "\tmovl %s, %d(%%rbp)\n", reg64_to32(reg), base_off + (int)off);
+    } else if (bytes >= 2) {
+        fprintf(fp, "\tmovw %s, %d(%%rbp)\n", reg64_to16(reg), base_off + (int)off);
+    } else if (bytes > 0) {
+        fprintf(fp, "\tmovb %s, %d(%%rbp)\n", reg64_to8(reg), base_off + (int)off);
+    }
+}
+
 static int emit_x86_64_move_value_to_abi_loc(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay,
                                              const cc_ssa_instr_t *in, size_t arg_index, int value,
                                              const abi_loc_t *loc, cc_diag_t *diag) {
@@ -3473,6 +3686,20 @@ static int emit_x86_64_move_value_to_abi_loc(FILE *fp, const cc_ssa_function_t *
             set_diag(diag, "call with unsupported integer argument index");
             return -1;
         }
+        if (call_arg_is_agg_reg_abi(in, arg_index)) {
+            size_t size = loc->size > 0 ? loc->size : 8;
+            emit_x86_64_load_int_value_to_reg(fp, f, lay, value, "%r11");
+            emit_x86_64_load_agg_part_to_reg(fp, 0, size > 8 ? 8 : size, reg);
+            if (size > 8) {
+                const char *reg2 = arg_reg64_gpr(loc->index + 1);
+                if (reg2 == NULL) {
+                    set_diag(diag, "call with unsupported aggregate argument register index");
+                    return -1;
+                }
+                emit_x86_64_load_agg_part_to_reg(fp, 8, size - 8, reg2);
+            }
+            return 0;
+        }
         if (f->value_types[value] == CC_VAL_F64) {
             set_diag(diag, "internal error: float assigned to integer argument register");
             return -1;
@@ -3486,7 +3713,7 @@ static int emit_x86_64_move_value_to_abi_loc(FILE *fp, const cc_ssa_function_t *
         return 0;
     }
     if (loc->kind == ABI_LOC_STACK) {
-        if (call_arg_is_agg_mem_abi(in, arg_index)) {
+        if (call_arg_is_agg_mem_abi(in, arg_index) || call_arg_is_agg_reg_abi(in, arg_index)) {
             return emit_x86_64_store_agg_mem_to_rsp(fp, f, lay, value, loc->index, loc->size, diag);
         }
         if (call_arg_is_ldouble_abi(in, arg_index)) {
@@ -3698,7 +3925,8 @@ static int emit_x86_64_call(FILE *fp, const cc_ssa_function_t *f, const slot_lay
     if (in->dst >= 0) {
         if (f->value_types[in->dst] == CC_VAL_F64) {
             if (in->call_ret_x87) {
-                fprintf(fp, "\tfstpl %d(%%rbp)\n", slot_off(lay, in->dst));
+                if (value_size_bytes(f, in->dst, 8) >= 16) fprintf(fp, "\tfstpt %d(%%rbp)\n", slot_off(lay, in->dst));
+                else fprintf(fp, "\tfstpl %d(%%rbp)\n", slot_off(lay, in->dst));
             } else {
                 fprintf(fp, "\tmovsd %%xmm0, %d(%%rbp)\n", slot_off(lay, in->dst));
             }
@@ -3792,7 +4020,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
         has_sret = sret_mem_size > 16 ? 1 : 0;
         param_gpr_bias = has_sret ? 1 : 0;
 
-        if (build_slot_layout(f, 8, &lay, diag) != 0) {
+        if (build_slot_layout(f, 16, &lay, diag) != 0) {
             if (diag != NULL && diag->message[0] == '\0') {
                 set_diag(diag, "x86_64: failed to build slot layout");
             }
@@ -3916,6 +4144,12 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                      f->param_abi[in->param_index] == CC_CALL_ARG_ABI_AGG_MEM)
                         ? 1
                         : 0;
+                int param_is_agg_reg =
+                    (f->param_abi != NULL && in->param_index >= 0 &&
+                     (size_t)in->param_index < f->param_count &&
+                     f->param_abi[in->param_index] == CC_CALL_ARG_ABI_AGG_REG)
+                        ? 1
+                        : 0;
                 long pbytes = in->imm > 0 ? in->imm : 8;
                 if (param_is_agg_mem) {
                     int rd;
@@ -3927,6 +4161,57 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                     }
                     rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
                     fprintf(fp, "\tleaq %zu(%%rbp), %s\n", (size_t)(16 + loc.index), ist.regs[rd]);
+                    break;
+                }
+                if (param_is_agg_reg) {
+                    int storage_off;
+                    int rd;
+                    if (in->lhs < 0 || !is_stackalloc_value(&lay, in->lhs)) {
+                        int_regs_free(&ist);
+                        slot_layout_free(&lay);
+                        set_diag(diag, "aggregate register parameter missing local storage");
+                        return -1;
+                    }
+                    storage_off = stackalloc_off(&lay, in->lhs);
+                    if (loc.kind == ABI_LOC_GPR) {
+                        const char *reg0 = arg_reg64_gpr(loc.index);
+                        if (reg0 == NULL) {
+                            int_regs_free(&ist);
+                            slot_layout_free(&lay);
+                            set_diag(diag, "unsupported aggregate parameter register index");
+                            return -1;
+                        }
+                        emit_x86_64_store_agg_part_from_reg(fp, reg0, storage_off, 0, pbytes > 8 ? 8 : (size_t)pbytes);
+                        if (pbytes > 8) {
+                            const char *reg1 = arg_reg64_gpr(loc.index + 1);
+                            if (reg1 == NULL) {
+                                int_regs_free(&ist);
+                                slot_layout_free(&lay);
+                                set_diag(diag, "unsupported aggregate parameter register index");
+                                return -1;
+                            }
+                            emit_x86_64_store_agg_part_from_reg(fp, reg1, storage_off, 8, (size_t)pbytes - 8);
+                        }
+                    } else if (loc.kind == ABI_LOC_STACK) {
+                        size_t off = 0;
+                        int poff = 16 + (int)loc.index;
+                        while (off + 8 <= (size_t)pbytes) {
+                            fprintf(fp, "\tmovq %d(%%rbp), %%r11\n", poff + (int)off);
+                            fprintf(fp, "\tmovq %%r11, %d(%%rbp)\n", storage_off + (int)off);
+                            off += 8;
+                        }
+                        if (off < (size_t)pbytes) {
+                            fprintf(fp, "\tmovq %d(%%rbp), %%r11\n", poff + (int)off);
+                            emit_x86_64_store_agg_part_from_reg(fp, "%r11", storage_off, off, (size_t)pbytes - off);
+                        }
+                    } else {
+                        int_regs_free(&ist);
+                        slot_layout_free(&lay);
+                        set_diag(diag, "aggregate register parameter was not assigned an integer or stack location");
+                        return -1;
+                    }
+                    rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
+                    fprintf(fp, "\tleaq %d(%%rbp), %s\n", storage_off, ist.regs[rd]);
                     break;
                 }
                 if (loc.kind == ABI_LOC_XMM) {
@@ -3969,7 +4254,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                     if (param_is_ldouble && vt == CC_VAL_F64) {
                         int_regs_flush(fp, f, &lay, &ist);
                         fprintf(fp, "\tfldt %d(%%rbp)\n", poff);
-                        fprintf(fp, "\tfstpl %d(%%rbp)\n", slot_off(&lay, in->dst));
+                        fprintf(fp, "\tfstpt %d(%%rbp)\n", slot_off(&lay, in->dst));
                     } else if (vt == CC_VAL_F64) {
                         int_regs_flush(fp, f, &lay, &ist);
                         fprintf(fp, "\tmovsd %d(%%rbp), %s\n", poff, x86_64_fp_tmp_reg());
@@ -3985,13 +4270,36 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             case CC_SSA_CONST:
                 if (f->value_types[in->dst] == CC_VAL_F64) {
                     int_regs_flush(fp, f, &lay, &ist);
-                    union {
-                        double d;
-                        uint64_t u;
-                    } cvt;
-                    cvt.d = in->fimm;
-                    fprintf(fp, "\tmovabsq $0x%llx, %%rax\n", (unsigned long long)cvt.u);
-                    fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
+                    if (value_size_bytes(f, in->dst, 8) >= 16) {
+                        unsigned char raw[16];
+                        uint64_t lo;
+                        uint64_t hi;
+                        long double cvt = (in->is_unsigned && in->imm >= 1 && in->imm <= 3)
+                                              ? x86_64_special_ldouble_const(in->imm)
+                                              : in->fimm_ld;
+                        size_t ncopy = sizeof(cvt) < sizeof(raw) ? sizeof(cvt) : sizeof(raw);
+                        memset(raw, 0, sizeof(raw));
+#if LDBL_MANT_DIG == 64 && LDBL_MAX_EXP == 16384
+                        if (ncopy > 10) {
+                            ncopy = 10;
+                        }
+#endif
+                        memcpy(raw, &cvt, ncopy);
+                        memcpy(&lo, raw, sizeof(lo));
+                        memcpy(&hi, raw + 8, sizeof(hi));
+                        fprintf(fp, "\tmovabsq $0x%llx, %%rax\n", (unsigned long long)lo);
+                        fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
+                        fprintf(fp, "\tmovabsq $0x%llx, %%rax\n", (unsigned long long)hi);
+                        fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst) + 8);
+                    } else {
+                        union {
+                            double d;
+                            uint64_t u;
+                        } cvt;
+                        cvt.d = in->fimm;
+                        fprintf(fp, "\tmovabsq $0x%llx, %%rax\n", (unsigned long long)cvt.u);
+                        fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
+                    }
                 } else {
                     int rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
                     fprintf(fp, "\tmovq $%lld, %s\n", in->imm, ist.regs[rd]);
@@ -4013,7 +4321,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             case CC_SSA_MOV:
                 if (f->value_types[in->dst] == CC_VAL_F64) {
                     int_regs_flush(fp, f, &lay, &ist);
-                    emit_x86_64_mov_fp(fp, &lay, in);
+                    emit_x86_64_mov_fp(fp, f, &lay, in);
                 } else {
                     int rl = int_regs_load(fp, f, &lay, &ist, in->lhs, -1, -1);
                     int_regs_remap_dst(fp, f, &lay, &ist, in->dst, rl);
@@ -4164,7 +4472,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                         set_diag(diag, "bitwise/shift operation on floating value");
                         return -1;
                     }
-                    if (emit_x86_64_float_binop(fp, &lay, in, diag) != 0) {
+                    if (emit_x86_64_float_binop(fp, f, &lay, in, diag) != 0) {
                         int_regs_free(&ist);
                         slot_layout_free(&lay);
                         if (diag != NULL && diag->message[0] == '\0') {
@@ -4297,8 +4605,24 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
 
             case CC_SSA_F2I:
                 {
-                    int rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
-                    fprintf(fp, "\tcvttsd2siq %d(%%rbp), %s\n", slot_off(&lay, in->lhs), ist.regs[rd]);
+                    if (value_size_bytes(f, in->lhs, 8) >= 16) {
+                        int rd;
+                        int_regs_flush(fp, f, &lay, &ist);
+                        int_regs_clobber_reg(fp, f, &lay, &ist, int_reg_index(&ist, "%rax"));
+                        fprintf(fp, "\tfnstcw -16(%%rsp)\n");
+                        fprintf(fp, "\tmovw -16(%%rsp), %%ax\n");
+                        fprintf(fp, "\torw $0x0c00, %%ax\n");
+                        fprintf(fp, "\tmovw %%ax, -14(%%rsp)\n");
+                        fprintf(fp, "\tfldcw -14(%%rsp)\n");
+                        fprintf(fp, "\tfldt %d(%%rbp)\n", slot_off(&lay, in->lhs));
+                        fprintf(fp, "\tfistpll -8(%%rsp)\n");
+                        fprintf(fp, "\tfldcw -16(%%rsp)\n");
+                        rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
+                        fprintf(fp, "\tmovq -8(%%rsp), %s\n", ist.regs[rd]);
+                    } else {
+                        int rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
+                        fprintf(fp, "\tcvttsd2siq %d(%%rbp), %s\n", slot_off(&lay, in->lhs), ist.regs[rd]);
+                    }
                 }
                 break;
 
@@ -4388,7 +4712,8 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                     if (f->ret_type == CC_VAL_F64) {
                         int_regs_flush(fp, f, &lay, &ist);
                         if (f->ret_abi == CC_CALL_ARG_ABI_LDOUBLE) {
-                            fprintf(fp, "\tfldl %d(%%rbp)\n", slot_off(&lay, in->lhs));
+                            if (value_size_bytes(f, in->lhs, 8) >= 16) fprintf(fp, "\tfldt %d(%%rbp)\n", slot_off(&lay, in->lhs));
+                            else fprintf(fp, "\tfldl %d(%%rbp)\n", slot_off(&lay, in->lhs));
                         } else {
                             fprintf(fp, "\tmovsd %d(%%rbp), %%xmm0\n", slot_off(&lay, in->lhs));
                         }

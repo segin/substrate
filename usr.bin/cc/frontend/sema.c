@@ -1651,6 +1651,9 @@ typedef enum {
     BUILTIN_INF,
     BUILTIN_INFF,
     BUILTIN_INFL,
+    BUILTIN_LDBL_MIN,
+    BUILTIN_LDBL_DENORM_MIN,
+    BUILTIN_LDBL_MAX,
     BUILTIN_ISFINITE,
     BUILTIN_ISINF,
     BUILTIN_ISINF_SIGN,
@@ -1802,6 +1805,15 @@ static builtin_kind_t builtin_kind(const char *name) {
     }
     if (strcmp(name, "__builtin_infl") == 0) {
         return BUILTIN_INFL;
+    }
+    if (strcmp(name, "__builtin_ldbl_min") == 0) {
+        return BUILTIN_LDBL_MIN;
+    }
+    if (strcmp(name, "__builtin_ldbl_denorm_min") == 0) {
+        return BUILTIN_LDBL_DENORM_MIN;
+    }
+    if (strcmp(name, "__builtin_ldbl_max") == 0) {
+        return BUILTIN_LDBL_MAX;
     }
     if (strcmp(name, "__builtin_isfinite") == 0) {
         return BUILTIN_ISFINITE;
@@ -2753,6 +2765,15 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             }
             e->value_type = (bk == BUILTIN_HUGE_VALF || bk == BUILTIN_INFF) ? CC_TYPE_FLOAT :
                             (bk == BUILTIN_HUGE_VALL || bk == BUILTIN_INFL) ? CC_TYPE_LDOUBLE : CC_TYPE_DOUBLE;
+            e->struct_id = -1;
+            return 0;
+        }
+        if (bk == BUILTIN_LDBL_MIN || bk == BUILTIN_LDBL_DENORM_MIN || bk == BUILTIN_LDBL_MAX) {
+            if (e->arg_count != 0) {
+                set_diag(diag, "long double limit builtin expects no arguments");
+                return -1;
+            }
+            e->value_type = CC_TYPE_LDOUBLE;
             e->struct_id = -1;
             return 0;
         }
@@ -4204,6 +4225,9 @@ static size_t struct_next_init_member(const cc_struct_def_t *sd, size_t member_i
     size_t next = member_idx + 1;
     long off;
     if (sd == NULL || member_idx >= sd->member_count) {
+        return next;
+    }
+    if (sd->members[member_idx].is_bitfield && sd->members[member_idx].bit_width > 0) {
         return next;
     }
     if (sd->members[member_idx].size == 0) {
