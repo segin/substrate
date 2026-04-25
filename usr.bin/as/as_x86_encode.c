@@ -2712,6 +2712,10 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         if (insn->op_count != 0 || emit8(&ctx, 0xd9) != 0 || emit8(&ctx, 0xf8) != 0) {
             return -1;
         }
+    } else if (streq_ci(insn->mnemonic, "fucompp")) {
+        if (insn->op_count != 0 || emit8(&ctx, 0xda) != 0 || emit8(&ctx, 0xe9) != 0) {
+            return -1;
+        }
     } else if (streq_ci(insn->mnemonic, "fcmovb") || streq_ci(insn->mnemonic, "fcmove") ||
                streq_ci(insn->mnemonic, "fcmovbe") || streq_ci(insn->mnemonic, "fcmovu") ||
                streq_ci(insn->mnemonic, "fcmovnb") || streq_ci(insn->mnemonic, "fcmovne") ||

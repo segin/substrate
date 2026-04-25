@@ -6903,6 +6903,20 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
                                                 out_len);
         }
     }
+    if (strcmp(mnbuf, "fucompp") == 0) {
+        if (insn->operand_count != 0) {
+            return -1;
+        }
+        if (out_cap < 2) {
+            return -1;
+        }
+        out[0] = 0xda;
+        out[1] = 0xe9;
+        if (out_len != NULL) {
+            *out_len = 2;
+        }
+        return 0;
+    }
     if (strcmp(mnbuf, "movdqa") == 0) {
         if (insn->operand_count != 2) {
             return -1;
@@ -10308,7 +10322,6 @@ static int parse_symbol_addend_arg(const char *arg, char **sym_out, int64_t *add
     size_t i;
     size_t n;
     char *sep = NULL;
-    int sign = 1;
     long long v = 0;
 
     if (sym_out == NULL || add_out == NULL) {
@@ -10351,13 +10364,50 @@ static int parse_symbol_addend_arg(const char *arg, char **sym_out, int64_t *add
         }
     }
     if (sep != NULL) {
-        long long addv;
-        char opch = *sep;
-        *sep = '\0';
-        sign = opch == '-' ? -1 : 1;
-        if (parse_int64(sep + 1, &addv) == 0) {
-            *add_out = (int64_t)(sign > 0 ? addv : -addv);
+        char *terms;
+        char *p;
+        int sign;
+
+        terms = xstrdup(sep);
+        if (terms == NULL) {
+            free(compact);
+            return -1;
         }
+        *sep = '\0';
+        p = terms;
+        while (*p != '\0') {
+            char *term_start;
+            char *term_end;
+            char saved;
+            long long addv;
+
+            sign = 1;
+            if (*p == '+' || *p == '-') {
+                sign = *p == '-' ? -1 : 1;
+                ++p;
+            }
+            term_start = p;
+            while (*p != '\0' && *p != '+' && *p != '-') {
+                ++p;
+            }
+            term_end = p;
+            if (term_end == term_start) {
+                free(terms);
+                free(compact);
+                return -1;
+            }
+            saved = *term_end;
+            *term_end = '\0';
+            if (parse_int64(term_start, &addv) != 0) {
+                *term_end = saved;
+                free(terms);
+                free(compact);
+                return -1;
+            }
+            *term_end = saved;
+            *add_out += (int64_t)(sign > 0 ? addv : -addv);
+        }
+        free(terms);
     }
     if (compact[0] == '\0') {
         free(compact);

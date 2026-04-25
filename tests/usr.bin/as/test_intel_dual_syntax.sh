@@ -180,6 +180,7 @@ x87stack32:
     fucomi %st(1), %st
     fcomi %st(1), %st
     fucomip %st(1), %st
+    fucompp
     ret
 .size x87stack32, .-x87stack32
 SRC
@@ -196,6 +197,7 @@ x87stack32:
     fucomi st, st(1)
     fcomi st, st(1)
     fucomip st, st(1)
+    fucompp
     ret
 .size x87stack32, .-x87stack32
 .att_syntax prefix
@@ -206,6 +208,34 @@ SRC
 objcopy -O binary --only-section=.text "$TMP/x87stack_att.o" "$TMP/x87stack_att.text"
 objcopy -O binary --only-section=.text "$TMP/x87stack_intel.o" "$TMP/x87stack_intel.text"
 cmp "$TMP/x87stack_att.text" "$TMP/x87stack_intel.text"
+
+cat > "$TMP/x87stack64_att.s" <<'SRC'
+.text
+.globl x87stack64
+.type x87stack64,@function
+x87stack64:
+    fucompp
+    ret
+.size x87stack64, .-x87stack64
+SRC
+
+cat > "$TMP/x87stack64_intel.s" <<'SRC'
+.intel_syntax noprefix
+.text
+.globl x87stack64
+.type x87stack64,@function
+x87stack64:
+    fucompp
+    ret
+.size x87stack64, .-x87stack64
+.att_syntax prefix
+SRC
+
+"$AS" -64 -o "$TMP/x87stack64_att.o" "$TMP/x87stack64_att.s"
+"$AS" -64 -o "$TMP/x87stack64_intel.o" "$TMP/x87stack64_intel.s"
+objcopy -O binary --only-section=.text "$TMP/x87stack64_att.o" "$TMP/x87stack64_att.text"
+objcopy -O binary --only-section=.text "$TMP/x87stack64_intel.o" "$TMP/x87stack64_intel.text"
+cmp "$TMP/x87stack64_att.text" "$TMP/x87stack64_intel.text"
 
 cat > "$TMP/mmxbridge_att.s" <<'SRC'
 .text
