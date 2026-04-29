@@ -371,11 +371,20 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
 fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
     if (!path || !root) return NULL;
     
-    /* 
+    /*
      * Implement personality shadowing:
      * Non-native processes try /perso/<name>/<path> first.
+     *
+     * Skip when the path is already under /perso/ — otherwise the
+     * recursive lookup below re-enters this branch and rewrites the
+     * path again ("/perso/linux/perso/linux/..."), each call adding
+     * ~800 bytes of stack, blowing past the 8 KB kernel stack and
+     * corrupting saved return addresses on the way down.  The earlier
+     * "Internal direct lookup to avoid infinite recursion" comment
+     * promised this guard but the code never enforced it.
      */
-    if (current_process && current_process->perso_id != 0 && path[0] == '/') {
+    if (current_process && current_process->perso_id != 0 && path[0] == '/' &&
+        strncmp(path, "/perso/", 7) != 0) {
         extern const char *perso_name(int id);
         const char *pname = perso_name(current_process->perso_id);
         if (pname) {
@@ -395,8 +404,6 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
 
             if (count > 0) {
                 snprintf(ppath, sizeof(ppath), "/perso/%s%s", lname, path);
-                
-                // Internal direct lookup to avoid infinite recursion
                 fs_node_t *pnode = vfs_lookup(fs_root, ppath);
                 if (pnode) return pnode;
             }
