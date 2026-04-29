@@ -319,7 +319,7 @@ void syscall_handler(registers_t *regs) {
     
     typedef int64_t (*sys_func_t)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
     sys_func_t func = (sys_func_t)location;
-    
+
     // Dispatch
     int64_t ret = func(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
     if (p->id == PERS_ELKS) {

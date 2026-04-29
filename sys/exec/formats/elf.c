@@ -176,11 +176,34 @@ static int elf_read_image_info(fs_node_t *file, elf_image_info_t *image) {
     image->phnum = image->ehdr.e_phnum;
     image->detected_os = elf_detect_osabi(&image->ehdr);
 
+    /* e_phentsize must at least span Elf32_Phdr; reject pathological
+     * values up front so the multiply below stays bounded. */
+    if (image->ehdr.e_phentsize < sizeof(Elf32_Phdr) ||
+        image->ehdr.e_phentsize > 0x1000) {
+        return -ENOEXEC;
+    }
+
     for (uint16_t i = 0; i < image->phnum; i++) {
-        uint32_t ph_offset = image->ehdr.e_phoff + i * image->ehdr.e_phentsize;
+        /* 64-bit math + explicit overflow rejection — a hostile ELF can
+         * set e_phoff close to UINT32_MAX and pick e_phentsize so that
+         * uint32_t addition wraps and we end up reading the ELF header
+         * itself as a phdr. */
+        uint64_t ph_offset64 = (uint64_t)image->ehdr.e_phoff +
+                               (uint64_t)i * (uint64_t)image->ehdr.e_phentsize;
+        if (ph_offset64 + sizeof(Elf32_Phdr) > 0xFFFFFFFFULL) {
+            return -ENOEXEC;
+        }
+        uint32_t ph_offset = (uint32_t)ph_offset64;
         Elf32_Phdr *phdr = &image->phdrs[i];
 
         if (file->read(file, ph_offset, sizeof(Elf32_Phdr), (uint8_t *)phdr) != sizeof(Elf32_Phdr)) {
+            return -ENOEXEC;
+        }
+
+        /* Reject overflow of p_offset + p_filesz (used in arithmetic
+         * below and in the segment loader) before any caller observes
+         * a wrapped value. */
+        if (phdr->p_filesz > 0xFFFFFFFFU - phdr->p_offset) {
             return -ENOEXEC;
         }
 
@@ -654,6 +677,9 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
                         
                         // Read directly to kernel-mapped page (pa is already virtual)
                         uint8_t *dest = (uint8_t *)page_maps[pi].pa + offset_in_page;
+                        /* p_offset+p_filesz was already overflow-checked
+                         * at parse time; offset_in_segment is bounded by
+                         * the segment so this addition is safe. */
                         if (file->read(file, phdr.p_offset + offset_in_segment, copy_size, dest) != copy_size) {
                             kprint("ELF: Failed to read segment data directly\n");
                             for (int ri = 0; ri < num_pages; ri++) {

@@ -538,8 +538,16 @@ static void *fb_fs_mmap(fs_node_t *node, void *addr, size_t length, int prot, in
     size_t aligned_length;
     uint32_t vm_prot = 0;
 
-    uint32_t fb_size = fb.pitch * fb.height;
-    if (offset + length > fb_size) return (void *)-1;
+    /*
+     * Use 64-bit math for the size and the bounds compare; otherwise a
+     * crafted mode (e.g. via `vga=` cmdline) where pitch * height wraps
+     * a uint32_t lets `offset + length > fb_size` admit any window into
+     * physical RAM via /dev/fb0 mmap.
+     */
+    uint64_t fb_size = (uint64_t)fb.pitch * (uint64_t)fb.height;
+    if (offset < 0 || length == 0) return (void *)-1;
+    if ((uint64_t)offset > fb_size) return (void *)-1;
+    if ((uint64_t)length > fb_size - (uint64_t)offset) return (void *)-1;
     if ((offset & 0xFFF) != 0) return (void *)-1;
 
     aligned_length = (length + 0xFFF) & ~0xFFFU;
