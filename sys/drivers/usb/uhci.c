@@ -61,10 +61,14 @@ typedef struct uhci_hc {
     uint32_t    *frame_list;
     dma_addr_t   frame_list_dma;
 
-    /* TD pool */
+    /* TD pool.  td_alloc_hint is a rotating cursor: a fresh search starts
+     * here and wraps.  Without it the linear scan was O(N²) per transfer
+     * — a 64 KB bulk transfer needing 1024 TDs scanned 1+2+...+1024 ≈
+     * 524 K slots, and a multi-MB read repeated that for every chunk. */
     struct uhci_td *td_pool;
     dma_addr_t      td_pool_dma;
     uint8_t         td_used[UHCI_MAX_TDS];
+    uint32_t        td_alloc_hint;
 
     /* QH pool */
     struct uhci_qh *qh_pool;
@@ -121,9 +125,16 @@ static inline void uhci_writel(uhci_hc_t *hc, uint16_t reg, uint32_t val)
 
 static struct uhci_td *uhci_alloc_td(uhci_hc_t *hc, dma_addr_t *phys)
 {
-    for (int i = 0; i < UHCI_MAX_TDS; i++) {
+    /* Search from the hint, wrap once.  After freeing a chunk's worth
+     * of TDs the next allocation typically finds a free slot in O(1)
+     * because the hint is already past the previously-used range. */
+    uint32_t start = hc->td_alloc_hint;
+    for (uint32_t step = 0; step < UHCI_MAX_TDS; step++) {
+        uint32_t i = start + step;
+        if (i >= UHCI_MAX_TDS) i -= UHCI_MAX_TDS;
         if (!hc->td_used[i]) {
             hc->td_used[i] = 1;
+            hc->td_alloc_hint = (i + 1U) % UHCI_MAX_TDS;
             struct uhci_td *td = &hc->td_pool[i];
             memset(td, 0, sizeof(*td));
             /* Initialise link to terminate (T bit set).  memset alone
@@ -225,6 +236,8 @@ static int uhci_alloc_structures(uhci_hc_t *hc)
         return -1;
     }
     memset(hc->qh_used, 0, sizeof(hc->qh_used));
+
+    hc->td_alloc_hint = 0;
 
     /* Single 8-byte DMA buffer for control SETUP packets (reused). */
     hc->setup_buf = dma_alloc_coherent(8, &hc->setup_buf_dma);

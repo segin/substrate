@@ -81,7 +81,13 @@ struct usb_msc_csw {
  * fall-back doesn't double the round-trip count for very large I/Os.
  */
 #define USB_MSC_BOUNCE_SIZE     65536
-#define USB_MSC_DIRECT_CHUNK    65536  /* limit per Bulk transfer to keep TD pool happy */
+/* Max bytes per Bulk transfer.  At max_packet=64 (USB 1.1 bulk) one
+ * TD covers 64 bytes, so 128 KB needs 2048 TDs — exactly the UHCI
+ * pool size.  Submit_lock serializes everything, so concurrent control
+ * transfers can't race for TDs.  Doubling from 64 KB halves the
+ * per-chunk software overhead (lock acquire, descriptor wiring,
+ * schedule insert/remove). */
+#define USB_MSC_DIRECT_CHUNK    131072
 #define USB_MSC_KERN_BASE       0xC0000000U
 
 typedef struct usb_msc_dev {
