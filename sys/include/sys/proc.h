@@ -201,6 +201,7 @@ typedef struct thread {
     uint8_t        needs_resched; // Set by IPI to trigger reschedule
     uint8_t        exec_pin_active; // Exec path temporarily pinned this thread
     uint8_t        exec_saved_no_preempt; // Preserve preempt state across exec pin
+    uint8_t        vfs_symlink_depth; // Current symlink-follow recursion depth
     
     void         *wait_chan; // Channel thread is sleeping on
     const char   *wait_reason; // Description of wait event

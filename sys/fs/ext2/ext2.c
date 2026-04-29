@@ -233,21 +233,28 @@ static int ext2_flush_super(ext2_fs_t *fs) {
     // Write backups if necessary (EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER = 0x0001)
     int sparse = (fs->sb.s_feature_ro_compat & 0x0001);
     
+    int backup_err = 0;
     for (uint32_t i = 1; i < fs->group_count; i++) {
         if (sparse && !is_sparse_backup(i)) continue;
-        
+
         uint32_t block = i * fs->sb.s_blocks_per_group + fs->sb.s_first_data_block;
         // Superblock backups are at the start of the block
         uint8_t *tmp = kmalloc(fs->block_size);
-        if (tmp) {
-            memset(tmp, 0, fs->block_size);
-            memcpy(tmp, &fs->sb, 1024);
-            ext2_write_block(fs, block, tmp);
-            kfree(tmp, fs->block_size);
+        if (!tmp) {
+            backup_err = -ENOMEM;
+            continue;
         }
+        memset(tmp, 0, fs->block_size);
+        memcpy(tmp, &fs->sb, 1024);
+        /* Don't drop write errors silently — a failed backup write
+         * leaves the on-disk image inconsistent with the primary. */
+        if (ext2_write_block(fs, block, tmp) != fs->block_size) {
+            backup_err = -EIO;
+        }
+        kfree(tmp, fs->block_size);
     }
-    
-    return 0;
+
+    return backup_err;
 }
 
 static int ext2_flush_group_desc(ext2_fs_t *fs, uint32_t group) {
@@ -1137,7 +1144,18 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
         return NULL;
     }
 
-    uint32_t raw_bgd_size = fs->group_count * sizeof(ext2_group_desc_t);
+    /* Sanity-cap the group descriptor table.  group_count is derived
+     * from attacker-controllable s_blocks_count / s_blocks_per_group;
+     * without a ceiling here a crafted superblock could ask for an
+     * arbitrarily huge kmalloc.  16 MiB of BGDs covers >500k groups,
+     * which is well past any realistic ext2/3/4 filesystem. */
+    uint64_t raw_bgd_size64 = (uint64_t)fs->group_count * sizeof(ext2_group_desc_t);
+    if (raw_bgd_size64 > (16ULL << 20)) {
+        kprint("EXT2: group descriptor table too large; refusing mount\n");
+        kfree(fs, sizeof(ext2_fs_t));
+        return NULL;
+    }
+    uint32_t raw_bgd_size = (uint32_t)raw_bgd_size64;
     uint32_t bgd_blocks = (raw_bgd_size + fs->block_size - 1) / fs->block_size;
     uint32_t bgd_size = bgd_blocks * fs->block_size;
 

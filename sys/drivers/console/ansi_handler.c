@@ -599,9 +599,20 @@ void ansi_process(struct ansi_ctx *ctx, char c, const struct ansi_callbacks *cb)
 
     case ANSI_PARAM:
         if (c >= '0' && c <= '9') {
-            if (ctx->param_count > 0)
-                ctx->params[ctx->param_count - 1] =
-                    ctx->params[ctx->param_count - 1] * 10 + (c - '0');
+            if (ctx->param_count > 0) {
+                /* Saturate at 99999 — well beyond any reasonable cursor
+                 * coordinate or SGR code.  Without this an attacker with
+                 * /dev/tty write access feeds e.g. \x1b[99999999999...m
+                 * and wraps the int32_t accumulator, then downstream
+                 * cursor/scroll math operates on negative-as-unsigned
+                 * indices. */
+                int32_t cur = ctx->params[ctx->param_count - 1];
+                if (cur < 99999) {
+                    cur = cur * 10 + (c - '0');
+                    if (cur > 99999) cur = 99999;
+                    ctx->params[ctx->param_count - 1] = cur;
+                }
+            }
         } else if (c == ';') {
             if (ctx->param_count < ANSI_PARAMS_MAX) {
                 ctx->params[ctx->param_count] = 0;

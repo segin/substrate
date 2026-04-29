@@ -405,6 +405,11 @@ typedef struct procfs_pid_nodes {
 static procfs_pid_nodes_t **procfs_pid_nodes = NULL;
 static size_t procfs_pid_nodes_count = 0;
 static size_t procfs_pid_nodes_capacity = 0;
+/* Serializes the (procfs_pid_nodes, count, capacity) triple — without
+ * it concurrent procfs_get_pid_nodes() from two threads can both grow
+ * the array, both kfree the old pointer, double-free or use-after-free. */
+static spinlock_t procfs_pid_nodes_lock = { 0 };
+static int procfs_pid_nodes_lock_init = 0;
 
 static struct procfs_runtime_entry *procfs_find_driver_entry(const char *name) {
     if (!name) return NULL;
@@ -459,9 +464,17 @@ static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
         return NULL;
     }
 
+    if (!procfs_pid_nodes_lock_init) {
+        spinlock_init(&procfs_pid_nodes_lock, "procfs_pid");
+        procfs_pid_nodes_lock_init = 1;
+    }
+    spinlock_acquire(&procfs_pid_nodes_lock);
+
     for (size_t i = 0; i < procfs_pid_nodes_count; i++) {
         if (procfs_pid_nodes[i] && procfs_pid_nodes[i]->pid == pid) {
-            return procfs_pid_nodes[i];
+            procfs_pid_nodes_t *r = procfs_pid_nodes[i];
+            spinlock_release(&procfs_pid_nodes_lock);
+            return r;
         }
     }
 
@@ -473,6 +486,7 @@ static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
 
         new_nodes = kmalloc(new_bytes);
         if (!new_nodes) {
+            spinlock_release(&procfs_pid_nodes_lock);
             return NULL;
         }
         if (procfs_pid_nodes && old_bytes != 0) {
@@ -486,6 +500,7 @@ static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
 
     nodes = kmalloc(sizeof(*nodes));
     if (!nodes) {
+        spinlock_release(&procfs_pid_nodes_lock);
         return NULL;
     }
     memset(nodes, 0, sizeof(*nodes));
@@ -678,15 +693,21 @@ static size_t procfs_generic_read(fs_node_t *node, off_t offset, size_t size, ui
     char *alloc_buf = NULL;
     size_t alloc_size = 0;
 
-    /* Check for truncation and retry with larger buffer if needed */
+    /* Check for truncation and retry with larger buffer if needed.
+     * Cap at 1 MiB so a buggy or hostile generator can't DoS the
+     * kernel by claiming it needs hundreds of MB. */
     if (len >= sizeof(tmp)) {
-        alloc_size = len + 1;
-        alloc_buf = kmalloc(alloc_size);
-        if (alloc_buf) {
-            len = entry->generator(alloc_buf, alloc_size, entry->opaque);
-            buf = alloc_buf;
-        } else {
+        if (len > (1U << 20)) {
             len = sizeof(tmp) - 1;
+        } else {
+            alloc_size = len + 1;
+            alloc_buf = kmalloc(alloc_size);
+            if (alloc_buf) {
+                len = entry->generator(alloc_buf, alloc_size, entry->opaque);
+                buf = alloc_buf;
+            } else {
+                len = sizeof(tmp) - 1;
+            }
         }
     }
     

@@ -25,6 +25,7 @@ process_t *current_process = NULL;
 
 /* sched stubs */
 void sched_yield(void) {}
+void sched_sleep(void *chan) { (void)chan; }
 int  sched_sleep_until(void *chan, uint64_t deadline)
     { (void)chan; (void)deadline; return 0; }
 

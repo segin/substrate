@@ -41,7 +41,16 @@ static int blkdev_vfs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
 
 void blkdev_register(blkdev_t *dev) {
     if (!dev) return;
-    
+    /* A driver registering with sector_size==0 silently produces a
+     * zero-length device (length = total_sectors * 0).  Surface the
+     * misconfiguration here rather than letting downstream callers
+     * fail with mysterious EIOs. */
+    if (dev->sector_size == 0) {
+        kprintf("blkdev_register: refusing %s, sector_size is 0\n",
+                dev->name[0] ? dev->name : "(unnamed)");
+        return;
+    }
+
     // Setup VFS node
     memset(&dev->node, 0, sizeof(fs_node_t));
     strncpy(dev->node.name, dev->name, sizeof(dev->node.name) - 1);

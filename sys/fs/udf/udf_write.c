@@ -33,11 +33,18 @@ static void udf_write_space_bitmap(struct udf_fs *fs) {
     uint32_t total_size = sizeof(struct udf_space_bitmap) + sbm->num_bytes;
     uint32_t sectors = (total_size + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
 
-    /* Write to disk */
+    /* Write to disk.  Don't drop write errors silently — a partial
+     * bitmap update leaves the on-disk state inconsistent with the
+     * in-memory state, and the next allocator call would either
+     * double-allocate or leak blocks. */
     for (uint32_t i = 0; i < sectors; i++) {
         off_t offset = (off_t)(fs->space_bitmap_sector + i) * UDF_SECTOR_SIZE;
         uint8_t *buf = (uint8_t *)sbm + (i * UDF_SECTOR_SIZE);
-        fs->device->write(fs->device, offset, UDF_SECTOR_SIZE, buf);
+        if (fs->device->write(fs->device, offset, UDF_SECTOR_SIZE, buf)
+                != UDF_SECTOR_SIZE) {
+            kprint("UDF: space bitmap write failed; on-disk state may be inconsistent\n");
+            return;
+        }
     }
 }
 

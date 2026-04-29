@@ -338,6 +338,13 @@ static video_driver_t *video_drivers = NULL;
  * Examples: "1024x768@32", "640x480", "320x200@8"
  * Returns 0 on success, -1 on parse error.
  */
+/* Sane upper bounds — any real display mode is well under these.
+ * Keeping the cap small means a malicious cmdline can't drive
+ * width*pitch arithmetic into wraparound territory. */
+#define FB_MODE_MAX_WIDTH   16384
+#define FB_MODE_MAX_HEIGHT  16384
+#define FB_MODE_MAX_BPP     64
+
 int fb_parse_vga_mode(const char *arg, uint32_t *width, uint32_t *height, uint32_t *bpp) {
     uint32_t w = 0, h = 0, b = 0;
     const char *p = arg;
@@ -347,6 +354,7 @@ int fb_parse_vga_mode(const char *arg, uint32_t *width, uint32_t *height, uint32
     /* Parse width */
     while (*p >= '0' && *p <= '9') {
         w = w * 10 + (*p - '0');
+        if (w > FB_MODE_MAX_WIDTH) return -1;
         p++;
     }
     if (w == 0 || (*p != 'x' && *p != 'X')) return -1;
@@ -355,6 +363,7 @@ int fb_parse_vga_mode(const char *arg, uint32_t *width, uint32_t *height, uint32
     /* Parse height */
     while (*p >= '0' && *p <= '9') {
         h = h * 10 + (*p - '0');
+        if (h > FB_MODE_MAX_HEIGHT) return -1;
         p++;
     }
     if (h == 0) return -1;
@@ -364,6 +373,7 @@ int fb_parse_vga_mode(const char *arg, uint32_t *width, uint32_t *height, uint32
         p++;
         while (*p >= '0' && *p <= '9') {
             b = b * 10 + (*p - '0');
+            if (b > FB_MODE_MAX_BPP) return -1;
             p++;
         }
         if (b == 0) return -1;

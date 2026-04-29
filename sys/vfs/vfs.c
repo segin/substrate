@@ -343,15 +343,25 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
             if (len > 0) {
                 if ((size_t)len >= sizeof(link_target)) return NULL;
                 link_target[len] = '\0';
-                
-                // Resolve the target path
+
+                // Resolve the target path.
+                //
+                // Both branches must enforce a symlink-depth cap.  The
+                // relative branch carries `depth` directly; the absolute
+                // branch hands off to vfs_lookup() which discards it,
+                // so we use a per-thread counter to bound the chain
+                // across re-entry.
                 fs_node_t *target;
                 if (link_target[0] == '/') {
-                    // Absolute symlink - start from root
+                    if (current_thread &&
+                        current_thread->vfs_symlink_depth >= MAX_SYMLINK_DEPTH) {
+                        return NULL;
+                    }
+                    if (current_thread) current_thread->vfs_symlink_depth++;
                     target = vfs_lookup(fs_root, link_target);
+                    if (current_thread) current_thread->vfs_symlink_depth--;
                 } else {
-                    // Relative symlink - recurse
-                    target = finddir_fs_internal(node, link_target, depth + 1, 1); // Follow nested
+                    target = finddir_fs_internal(node, link_target, depth + 1, 1);
                 }
                 
                 if (target) {

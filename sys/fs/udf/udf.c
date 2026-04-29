@@ -507,14 +507,24 @@ static size_t udf_vfs_read(fs_node_t *node, off_t offset, size_t size, uint8_t *
  */
 static struct dirent *udf_vfs_readdir(fs_node_t *node, uint64_t index) {
     udf_node_t *ctx = (udf_node_t *)(uintptr_t)node->impl;
-    uint8_t *dir_buf = kmalloc(4096);
-    if (!dir_buf) return NULL;
     struct udf_fe *fe = (struct udf_fe *)ctx->fe_sector;
-    
-    /* Read directory data */
+
+    /* Read directory data.  The previous implementation used
+     * sizeof(dir_buf) where dir_buf is a uint8_t * (= 4 bytes on i386,
+     * not the buffer length), so the loop below saw only the first
+     * four bytes of the directory and returned no entries at all.
+     *
+     * Allocate the actual directory size, capped at 1 MiB to bound a
+     * pathological filesystem. */
     uint32_t dir_size = (uint32_t)fe->info_length;
-    uint32_t read_size = dir_size > sizeof(dir_buf) ? sizeof(dir_buf) : dir_size;
-    udf_read_file(ctx->fs, fe, 0, read_size, dir_buf);
+    if (dir_size > (1U << 20)) dir_size = 1U << 20;
+    uint32_t buf_size = dir_size > 0 ? dir_size : 4096;
+    uint8_t *dir_buf = kmalloc(buf_size);
+    if (!dir_buf) return NULL;
+
+    uint32_t read_size = dir_size;
+    if (read_size > 0)
+        udf_read_file(ctx->fs, fe, 0, read_size, dir_buf);
     
     /* Iterate FIDs */
     uint32_t pos = 0;
@@ -555,7 +565,7 @@ static struct dirent *udf_vfs_readdir(fs_node_t *node, uint64_t index) {
                     }
                 }
                 udf_dirent.d_ino = fid->icb.block;
-                kfree(dir_buf, 4096);
+                kfree(dir_buf, buf_size);
                 return &udf_dirent;
             }
             cur_idx++;
@@ -563,7 +573,8 @@ static struct dirent *udf_vfs_readdir(fs_node_t *node, uint64_t index) {
         
         pos += fid_size;
     }
-    
+
+    kfree(dir_buf, buf_size);
     return NULL;
 }
 
@@ -572,13 +583,19 @@ static struct dirent *udf_vfs_readdir(fs_node_t *node, uint64_t index) {
  */
 static fs_node_t *udf_vfs_finddir(fs_node_t *node, char *name) {
     udf_node_t *ctx = (udf_node_t *)(uintptr_t)node->impl;
-    uint8_t *dir_buf = kmalloc(4096);
-    if (!dir_buf) return NULL;
     struct udf_fe *fe = (struct udf_fe *)ctx->fe_sector;
-    
+
+    /* Same sizeof(uint8_t *) bug as udf_vfs_readdir — see comment there.
+     * Allocate the actual directory size, capped at 1 MiB. */
     uint32_t dir_size = (uint32_t)fe->info_length;
-    uint32_t read_size = dir_size > sizeof(dir_buf) ? sizeof(dir_buf) : dir_size;
-    udf_read_file(ctx->fs, fe, 0, read_size, dir_buf);
+    if (dir_size > (1U << 20)) dir_size = 1U << 20;
+    uint32_t buf_size = dir_size > 0 ? dir_size : 4096;
+    uint8_t *dir_buf = kmalloc(buf_size);
+    if (!dir_buf) return NULL;
+
+    uint32_t read_size = dir_size;
+    if (read_size > 0)
+        udf_read_file(ctx->fs, fe, 0, read_size, dir_buf);
     
     uint32_t pos = 0;
     while (pos + 38 <= read_size) {
@@ -609,7 +626,7 @@ static fs_node_t *udf_vfs_finddir(fs_node_t *node, char *name) {
                     /* Ensure null-termination and prevent buffer overflow by truncating if necessary */
                     strncpy(result->name, fname, sizeof(result->name) - 1);
                     result->name[sizeof(result->name) - 1] = '\0';
-                    kfree(dir_buf, 4096);
+                    kfree(dir_buf, buf_size);
                     return result;
                 }
             }
@@ -617,7 +634,8 @@ static fs_node_t *udf_vfs_finddir(fs_node_t *node, char *name) {
         
         pos += fid_size;
     }
-    
+
+    kfree(dir_buf, buf_size);
     return NULL;
 }
 

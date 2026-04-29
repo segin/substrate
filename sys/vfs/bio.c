@@ -222,9 +222,15 @@ retry_lookup:
     bp = bio_lookup_locked(vp, blkno);
     if (bp) {
         while (bp->b_flags & B_BUSY) {
+            /* Block on the buffer's sleep channel.  Plain sched_yield()
+             * would just reorder the runqueue (yield clears RUNNING→
+             * READY but leaves us schedulable), giving us a busy-yield
+             * loop on UP.  sched_sleep() sets THREAD_BLOCKED so we are
+             * not reconsidered until sleepq_wake_all(bp) flips us
+             * back to READY. */
             sleepq_add(bp, current_thread);
             spinlock_release(&bio_lock);
-            sched_yield();
+            sched_sleep(bp);
             spinlock_acquire(&bio_lock);
             bp = bio_lookup_locked(vp, blkno);
             if (!bp) {

@@ -144,7 +144,10 @@ static int nvme_admin_submit_sync(nvme_controller_t *ctrl,
     cq = (nvme_cqe_t *)ctrl->admin_cq;
     tail = ctrl->admin_sq_tail;
     head = ctrl->admin_cq_head;
-    cid = ctrl->admin_cid_next++;
+    /* Modulo by queue depth so the CID can't wrap into the
+     * 16-bit field and alias an in-flight command's id. */
+    cid = ctrl->admin_cid_next;
+    ctrl->admin_cid_next = (uint16_t)((cid + 1U) % ctrl->admin_sq_entries);
 
     memset(&sq[tail], 0, sizeof(*sq));
     cmd->cid = cid;

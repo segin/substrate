@@ -205,8 +205,14 @@ static void fat_parse_short_name(const char *fat_name, char *output) {
 
 // Parse long filename entry
 int fat_parse_lfn(fat_lfn_t *lfn, char *buffer, int max_len) {
-    // Security: Validate index to prevent buffer overflow
-    int idx = ((lfn->order & 0x3F) - 1) * 13;  // Each LFN holds 13 chars
+    /* FAT LFN spec caps the order field at 20 (0x14); higher values
+     * are pathological even though the per-byte idx>=max_len checks
+     * below would still bound the writes.  Reject up front to keep
+     * the contract tight. */
+    uint8_t order = lfn->order & 0x3F;
+    if (order == 0 || order > 20) return -1;
+
+    int idx = (order - 1) * 13;  // Each LFN holds 13 chars
 
     if (idx < 0 || idx >= max_len) return -1;
     
