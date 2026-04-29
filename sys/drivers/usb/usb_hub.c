@@ -42,6 +42,7 @@ typedef struct usb_hub_dev {
 	usb_device_t    *udev;
 	uint8_t          nports;
 	uint8_t          active;
+	uint8_t          pwr_on_2_pwr_good_2ms;  /* hub descriptor field */
 } usb_hub_dev_t;
 
 static usb_hub_dev_t hub_devices[USB_HUB_MAX_DEVICES];
@@ -102,10 +103,18 @@ static void usb_hub_enumerate_ports(usb_hub_dev_t *hub)
 		                         USB_HUB_FEAT_PORT_POWER);
 	}
 
-	/* Wait for power to stabilize (bPwrOn2PwrGood * 2ms, minimum 100ms) */
-	deadline = (uint64_t)get_uptime_ms() + 100;
-	while((uint64_t)get_uptime_ms() < deadline)
-		__asm__ volatile("pause");
+	/* Wait for power to stabilize.  USB spec: hub descriptor's
+	 * bPwrOn2PwrGood is the time in 2ms units; minimum 100ms.
+	 * Trusting only the hard-coded 100ms breaks slow-turn-on hubs
+	 * that report e.g. 200ms — devices behind those hubs would be
+	 * reset before they had power. */
+	{
+		uint32_t pwr_ms = hub->pwr_on_2_pwr_good_2ms * 2u;
+		if (pwr_ms < 100u) pwr_ms = 100u;
+		deadline = (uint64_t)get_uptime_ms() + pwr_ms;
+		while ((uint64_t)get_uptime_ms() < deadline)
+			__asm__ volatile("pause");
+	}
 
 	for(uint8_t port = 1; port <= hub->nports; port++) {
 		/* Read port status */
@@ -238,6 +247,7 @@ static int usb_hub_attach(usb_device_t *dev)
 	hub->nports = hdesc.bNbrPorts;
 	if(hub->nports > USB_HUB_MAX_PORTS)
 		hub->nports = USB_HUB_MAX_PORTS;
+	hub->pwr_on_2_pwr_good_2ms = hdesc.bPwrOn2PwrGood;
 
 	hub->active = 1;
 	dev->driver_data = hub;

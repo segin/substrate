@@ -18,7 +18,24 @@
  */
 
 static usb_device_t *usb_devices[USB_MAX_DEVICES];
-static uint8_t       usb_next_address = 1;
+/* Bitmap of allocated USB device addresses (1..127).  Bit 0 is unused
+ * since address 0 is the default-address pseudo-state.  Replaces a
+ * monotonic counter that would have run out of addresses after ~127
+ * cumulative hot-plug attach cycles. */
+static uint32_t      usb_addr_bitmap[4];   /* 128 bits */
+static inline int    usb_addr_alloc(void) {
+    for (int a = 1; a < 128; a++) {
+        if (!(usb_addr_bitmap[a >> 5] & (1U << (a & 31)))) {
+            usb_addr_bitmap[a >> 5] |= (1U << (a & 31));
+            return a;
+        }
+    }
+    return -1;
+}
+static inline void   usb_addr_free(uint8_t a) {
+    if (a == 0 || a >= 128) return;
+    usb_addr_bitmap[a >> 5] &= ~(1U << (a & 31));
+}
 
 static usb_hcd_t           *usb_hcd_list;
 static usb_class_driver_t  *usb_class_drivers;
@@ -128,6 +145,12 @@ void usb_free_device(usb_device_t *dev)
 {
     if (!dev)
         return;
+
+    /* Return the USB address to the pool so a future enumeration can
+     * reuse it.  Without this the system runs out of addresses after
+     * ~127 cumulative attach cycles. */
+    if (dev->address)
+        usb_addr_free(dev->address);
 
     if (dev->slot < USB_MAX_DEVICES)
         usb_devices[dev->slot] = NULL;
@@ -312,13 +335,27 @@ static void usb_parse_config(usb_device_t *dev)
                 (struct usb_endpoint_descriptor *)ptr;
 
             if (dev->num_endpoints < USB_MAX_ENDPOINTS) {
-                usb_endpoint_t *ep = &dev->endpoints[dev->num_endpoints];
-                ep->address = ep_desc->bEndpointAddress;
-                ep->type = ep_desc->bmAttributes & USB_EP_TYPE_MASK;
-                ep->max_packet = ep_desc->wMaxPacketSize;
-                ep->interval = ep_desc->bInterval;
-                ep->toggle = 0;
-                dev->num_endpoints++;
+                uint8_t addr = ep_desc->bEndpointAddress;
+                /* Reject duplicate endpoint addresses — a malicious
+                 * device could otherwise list the same address twice
+                 * with different attributes, leaving the cache in an
+                 * inconsistent state for usb_find_endpoint(). */
+                int duplicate = 0;
+                for (uint8_t k = 0; k < dev->num_endpoints; k++) {
+                    if (dev->endpoints[k].address == addr) {
+                        duplicate = 1;
+                        break;
+                    }
+                }
+                if (!duplicate) {
+                    usb_endpoint_t *ep = &dev->endpoints[dev->num_endpoints];
+                    ep->address = addr;
+                    ep->type = ep_desc->bmAttributes & USB_EP_TYPE_MASK;
+                    ep->max_packet = ep_desc->wMaxPacketSize;
+                    ep->interval = ep_desc->bInterval;
+                    ep->toggle = 0;
+                    dev->num_endpoints++;
+                }
             }
         }
 
@@ -354,13 +391,22 @@ static void usb_match_driver(usb_device_t *dev)
         if (drv->probe && drv->probe(dev) != 0)
             continue;
 
-        /* Attach */
+        /* Attach.  Each driver's attach() is responsible for cleaning
+         * up its own partial state on failure (allocated buffers,
+         * spawned threads, etc.) — but reset driver_data here so a
+         * subsequent driver in the match list can't see the failed
+         * driver's pointer. */
         if (drv->attach) {
+            dev->driver_data = NULL;
             if (drv->attach(dev) == 0) {
                 kprintf("usb: device %u:%u bound to driver '%s'\n",
                         dev->hcd->hcd_index, dev->address, drv->name);
                 return;
             }
+            /* Defensive: if attach failed but left a dangling pointer,
+             * clear it so a future driver match doesn't dereference
+             * freed memory. */
+            dev->driver_data = NULL;
         }
     }
 
@@ -375,7 +421,32 @@ static void usb_match_driver(usb_device_t *dev)
  * ============================================================
  */
 
+/* USB spec allows at most 7 tiers of hubs.  usb_enumerate_device →
+ * hub attach → enumerate_ports → usb_enumerate_device is the recursion
+ * shape; each frame carries ~600-1000 bytes of locals (device/config
+ * descriptors, port-status struct, snprintf buffers).  An 8 KB kernel
+ * stack puts us within margin of overflow at the deepest legal tree;
+ * a malicious or buggy hub claiming to be deeper still would push us
+ * over.  Bound it explicitly. */
+#define USB_MAX_ENUM_DEPTH 7
+static int usb_enum_depth = 0;
+
+static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t speed);
+
 int usb_enumerate_device(usb_hcd_t *hcd, uint8_t port, uint8_t speed)
+{
+    if (usb_enum_depth >= USB_MAX_ENUM_DEPTH) {
+        kprintf("usb: enumeration depth limit (%d) reached at port %u; refusing\n",
+                USB_MAX_ENUM_DEPTH, port);
+        return -1;
+    }
+    usb_enum_depth++;
+    int ret = usb_enumerate_device_inner(hcd, port, speed);
+    usb_enum_depth--;
+    return ret;
+}
+
+static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t speed)
 {
     usb_device_t *dev;
     struct usb_device_descriptor dd;
@@ -407,14 +478,17 @@ int usb_enumerate_device(usb_hcd_t *hcd, uint8_t port, uint8_t speed)
     if (dev->ep0.max_packet == 0)
         dev->ep0.max_packet = 8;
 
-    /* Assign unique address */
-    addr = usb_next_address;
-    if (addr > 127) {
-        kprintf("usb: address space exhausted\n");
-        usb_free_device(dev);
-        return -1;
+    /* Assign unique address from the bitmap; address is freed on detach
+     * via usb_free_device, so hot-plug cycles don't leak addresses. */
+    {
+        int a = usb_addr_alloc();
+        if (a < 0) {
+            kprintf("usb: address space exhausted\n");
+            usb_free_device(dev);
+            return -1;
+        }
+        addr = (uint8_t)a;
     }
-    usb_next_address++;
 
     ret = usb_set_address(dev, addr);
     if (ret != USB_XFER_OK) {
@@ -455,10 +529,18 @@ int usb_enumerate_device(usb_hcd_t *hcd, uint8_t port, uint8_t speed)
         return -1;
     }
 
-    /* Read full configuration descriptor */
+    /* Read full configuration descriptor.  USB_MAX_CONFIG_SIZE bounds
+     * the per-device cache so a hostile/buggy device can't make us
+     * allocate unbounded memory; reject the device if its config
+     * legitimately exceeds the cache so we don't silently lose
+     * trailing endpoints / interfaces. */
+    if (cd.wTotalLength > USB_MAX_CONFIG_SIZE) {
+        kprintf("usb: addr %u: config descriptor %u B exceeds cache (%u); skipping\n",
+                addr, cd.wTotalLength, USB_MAX_CONFIG_SIZE);
+        usb_free_device(dev);
+        return -1;
+    }
     dev->config_len = cd.wTotalLength;
-    if (dev->config_len > USB_MAX_CONFIG_SIZE)
-        dev->config_len = USB_MAX_CONFIG_SIZE;
 
     ret = usb_get_descriptor(dev, USB_DT_CONFIG, 0,
                              dev->config_data, dev->config_len);
@@ -538,7 +620,8 @@ void usb_init(void)
     usb_hcd_t *hcd;
 
     memset(usb_devices, 0, sizeof(usb_devices));
-    usb_next_address = 1;
+    memset(usb_addr_bitmap, 0, sizeof(usb_addr_bitmap));
+    usb_enum_depth = 0;
 
     kprintf("usb: subsystem initialized\n");
 

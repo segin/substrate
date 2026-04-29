@@ -469,12 +469,20 @@ static int usb_msc_attach(usb_device_t *dev)
     msc->bounce_buf = dma_alloc_coherent(USB_MSC_BOUNCE_SIZE, &msc->bounce_dma);
     if (!msc->cbw || !msc->csw || !msc->bounce_buf) {
         kprintf("usb_msc: failed to allocate DMA buffers\n");
-        if (msc->cbw)
+        /* Free what we got and zero the pointers so a future attach on
+         * the same slot can't double-free a stale value. */
+        if (msc->cbw) {
             dma_free_coherent(msc->cbw, sizeof(struct usb_msc_cbw));
-        if (msc->csw)
+            msc->cbw = NULL;
+        }
+        if (msc->csw) {
             dma_free_coherent(msc->csw, sizeof(struct usb_msc_csw));
-        if (msc->bounce_buf)
+            msc->csw = NULL;
+        }
+        if (msc->bounce_buf) {
             dma_free_coherent(msc->bounce_buf, USB_MSC_BOUNCE_SIZE);
+            msc->bounce_buf = NULL;
+        }
         return -1;
     }
 

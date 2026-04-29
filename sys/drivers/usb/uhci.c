@@ -126,6 +126,11 @@ static struct uhci_td *uhci_alloc_td(uhci_hc_t *hc, dma_addr_t *phys)
             hc->td_used[i] = 1;
             struct uhci_td *td = &hc->td_pool[i];
             memset(td, 0, sizeof(*td));
+            /* Initialise link to terminate (T bit set).  memset alone
+             * leaves link=0, which the cleanup walker treats as a
+             * forward pointer, dereferencing 0xC0000000 if a transfer
+             * setup aborts before the chain is wired up. */
+            td->link = UHCI_TD_LINK_T;
             *phys = hc->td_pool_dma + (dma_addr_t)(i * sizeof(struct uhci_td));
             return td;
         }
@@ -318,13 +323,19 @@ static int uhci_port_reset(usb_hcd_t *hcd, uint8_t port)
     uint16_t portsc;
     uint64_t deadline;
 
+    /* CSC and PEC are write-1-to-clear: blindly OR-ing into PORTSC
+     * accidentally clears any pending change bits the next layer
+     * still needs to see (= missed hot-plug events).  Mask them out
+     * before every modify. */
+    const uint16_t W1C = UHCI_PORTSC_CSC | UHCI_PORTSC_PEC;
+
     if (port < 1 || port > UHCI_NUM_PORTS)
         return -1;
 
     reg = uhci_portsc_reg(port);
 
     /* Assert reset */
-    portsc = uhci_readw(hc, reg);
+    portsc = uhci_readw(hc, reg) & ~W1C;
     uhci_writew(hc, reg, portsc | UHCI_PORTSC_PR);
 
     /* Hold reset for 50ms (USB spec minimum 10ms, UHCI recommends 50ms) */
@@ -333,7 +344,7 @@ static int uhci_port_reset(usb_hcd_t *hcd, uint8_t port)
         __asm__ volatile("pause");
 
     /* Deassert reset */
-    portsc = uhci_readw(hc, reg);
+    portsc = uhci_readw(hc, reg) & ~W1C;
     uhci_writew(hc, reg, portsc & ~UHCI_PORTSC_PR);
 
     /* Wait for reset to complete and port to stabilize */
@@ -342,7 +353,7 @@ static int uhci_port_reset(usb_hcd_t *hcd, uint8_t port)
         __asm__ volatile("pause");
 
     /* Enable port */
-    portsc = uhci_readw(hc, reg);
+    portsc = uhci_readw(hc, reg) & ~W1C;
     uhci_writew(hc, reg, portsc | UHCI_PORTSC_PE);
 
     /* Clear status change bits (write-1-to-clear) */
@@ -352,8 +363,8 @@ static int uhci_port_reset(usb_hcd_t *hcd, uint8_t port)
     /* Verify port is enabled */
     portsc = uhci_readw(hc, reg);
     if (!(portsc & UHCI_PORTSC_PE)) {
-        /* Try enabling again */
-        uhci_writew(hc, reg, portsc | UHCI_PORTSC_PE);
+        /* Try enabling again — same masking */
+        uhci_writew(hc, reg, (portsc & ~W1C) | UHCI_PORTSC_PE);
         deadline = (uint64_t)get_uptime_ms() + 50;
         while ((uint64_t)get_uptime_ms() < deadline)
             __asm__ volatile("pause");
@@ -398,10 +409,13 @@ static int uhci_poll_td(uhci_hc_t *hc, struct uhci_td *td,
 {
     uint64_t deadline = (uint64_t)get_uptime_ms() + timeout_ms;
     uint32_t total = 0;
+    /* Cap the chain walk at the TD pool size — a corrupt link pointing
+     * back into already-walked TDs would otherwise loop forever. */
+    uint32_t walk_budget = UHCI_MAX_TDS;
 
     (void)hc;
 
-    while (td) {
+    while (td && walk_budget--) {
         /* Poll until this TD is no longer active */
         while (td->ctrl_status & UHCI_TD_CTRL_ACTIVE) {
             if ((uint64_t)get_uptime_ms() > deadline)
