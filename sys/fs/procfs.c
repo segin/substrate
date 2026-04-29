@@ -579,6 +579,7 @@ static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
         procfs_refresh_timestamps(link);
     }
 
+    spinlock_release(&procfs_pid_nodes_lock);
     return nodes;
 }
 
