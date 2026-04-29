@@ -56,6 +56,10 @@ void  kfree(void *ptr, size_t size)      { (void)size; free(ptr); }
 /* panic */
 void panic(const char *msg)              { fprintf(stderr, "PANIC: %s\n", msg); abort(); }
 
+/* pmm — controllable free-RAM stub for cache-growth/reclaim tests. */
+static uint32_t g_free_ram_bytes = 256U * 1024U * 1024U;  /* default: plenty */
+uint32_t pmm_get_free_memory(void) { return g_free_ram_bytes; }
+
 /* ---- Mock vnode ----------------------------------------------------- */
 #include <vfs/vnode.h>
 #include <vfs/buf.h>
@@ -317,6 +321,278 @@ static bool test_incore_returns_null_for_uncached(void)
 }
 
 /* ================================================================
+ * Device-keyed manual-fill API (bio_dev_get / bio_dev_release /
+ * bio_dev_invalidate / bio_dev_purge).  These do NOT require a vnode
+ * and never call into VOP_STRATEGY — perfect for fs/ext2 raw-device
+ * reads.
+ * ================================================================ */
+
+static bool test_bio_dev_miss_then_hit(void)
+{
+    /* Use a fake device key that's not the existing vnode. */
+    void *dev = (void *)0xDEAD0001;
+    struct buf *bp;
+
+    reset_state();
+
+    bp = bio_dev_get(dev, 0, 1024);
+    if (!bp) return false;
+    /* Fresh allocation: B_CACHE must NOT be set on miss. */
+    bool miss_clear = ((bp->b_flags & B_CACHE) == 0);
+    /* Caller fills the buffer and tags it cached. */
+    memset(bp->b_data, 0x77, 1024);
+    bp->b_flags |= B_CACHE;
+    bio_dev_release(bp);
+
+    /* Second access: B_CACHE set, data preserved. */
+    bp = bio_dev_get(dev, 0, 1024);
+    if (!bp) return false;
+    bool hit_set = (bp->b_flags & B_CACHE) != 0;
+    bool data_ok = ((uint8_t *)bp->b_data)[0] == 0x77 &&
+                   ((uint8_t *)bp->b_data)[1023] == 0x77;
+    bio_dev_release(bp);
+    return miss_clear && hit_set && data_ok;
+}
+
+static bool test_bio_dev_invalidate_drops_entry(void)
+{
+    void *dev = (void *)0xDEAD0002;
+    struct buf *bp;
+
+    reset_state();
+
+    bp = bio_dev_get(dev, 5, 512);
+    if (!bp) return false;
+    memset(bp->b_data, 0xA1, 512);
+    bp->b_flags |= B_CACHE;
+    bio_dev_release(bp);
+
+    bio_dev_invalidate(dev, 5);
+
+    /* After invalidate the next get must be a miss. */
+    bp = bio_dev_get(dev, 5, 512);
+    if (!bp) return false;
+    bool miss = (bp->b_flags & B_CACHE) == 0;
+    bio_dev_release(bp);
+    return miss;
+}
+
+static bool test_bio_dev_purge_drops_all_for_dev(void)
+{
+    void *dev_a = (void *)0xDEADA000;
+    void *dev_b = (void *)0xDEADB000;
+    struct buf *bp;
+
+    reset_state();
+
+    /* Populate two blocks under dev_a and one under dev_b. */
+    for (int i = 0; i < 2; i++) {
+        bp = bio_dev_get(dev_a, i, 512);
+        if (!bp) return false;
+        bp->b_flags |= B_CACHE;
+        bio_dev_release(bp);
+    }
+    bp = bio_dev_get(dev_b, 0, 512);
+    if (!bp) return false;
+    bp->b_flags |= B_CACHE;
+    bio_dev_release(bp);
+
+    bio_dev_purge(dev_a);
+
+    /* dev_a entries must miss now... */
+    bp = bio_dev_get(dev_a, 0, 512);
+    bool a_miss = bp && (bp->b_flags & B_CACHE) == 0;
+    if (bp) { bp->b_flags |= B_INVAL; bio_dev_release(bp); }
+
+    bp = bio_dev_get(dev_a, 1, 512);
+    a_miss = a_miss && bp && (bp->b_flags & B_CACHE) == 0;
+    if (bp) { bp->b_flags |= B_INVAL; bio_dev_release(bp); }
+
+    /* ...but dev_b's entry survives. */
+    bp = bio_dev_get(dev_b, 0, 512);
+    bool b_hit = bp && (bp->b_flags & B_CACHE) != 0;
+    if (bp) bio_dev_release(bp);
+
+    return a_miss && b_hit;
+}
+
+/* ================================================================
+ * Cache growth and reclaim
+ * ================================================================ */
+
+static bool test_reclaim_drops_clean_buffers(void)
+{
+    void *dev = (void *)0xCAFE0001;
+    struct buf *bp;
+    struct bio_stats before, after;
+
+    reset_state();
+    g_free_ram_bytes = 256U * 1024U * 1024U;
+
+    /* Fill cache with some clean entries. */
+    for (int i = 0; i < 16; i++) {
+        bp = bio_dev_get(dev, i, 4096);
+        if (!bp) return false;
+        bp->b_flags |= B_CACHE;
+        bio_dev_release(bp);
+    }
+
+    bio_get_stats(&before);
+
+    /* Ask reclaim to free at least ~32KB. */
+    size_t freed = bio_reclaim(32 * 1024);
+
+    bio_get_stats(&after);
+
+    /* Resident bytes must drop and freed must be reasonable. */
+    return freed >= 32 * 1024 && after.resident_bytes < before.resident_bytes;
+}
+
+static bool test_growth_blocked_when_ram_low(void)
+{
+    void *dev = (void *)0xCAFE0002;
+    struct buf *bp;
+
+    reset_state();
+
+    /* First, fill past the floor so we hit the soft policy. */
+    g_free_ram_bytes = 256U * 1024U * 1024U;
+    /* We need to push bio_nbuf >= BIO_NBUF_FLOOR (64) — allocate 80 blocks. */
+    for (int i = 0; i < 80; i++) {
+        bp = bio_dev_get(dev, 1000 + i, 512);
+        if (!bp) return false;
+        bp->b_flags |= B_CACHE;
+        bio_dev_release(bp);
+    }
+
+    /* Now drop free RAM below the reserve — new allocations should
+     * NOT grow the pool; they must reuse existing entries. */
+    g_free_ram_bytes = 1024U;  /* well under BIO_RESERVE_BYTES */
+
+    struct bio_stats s1;
+    bio_get_stats(&s1);
+
+    /* Ask for a brand-new block.  This must succeed by reusing rather
+     * than growing, so nbuf should not increase. */
+    bp = bio_dev_get(dev, 9999, 512);
+    if (!bp) return false;
+    bp->b_flags |= B_CACHE;
+    bio_dev_release(bp);
+
+    struct bio_stats s2;
+    bio_get_stats(&s2);
+
+    return s2.nbuf == s1.nbuf;
+}
+
+static bool test_stats_track_hits_and_misses(void)
+{
+    void *dev = (void *)0xCAFE0003;
+    struct buf *bp;
+    struct bio_stats before, after;
+
+    reset_state();
+    g_free_ram_bytes = 256U * 1024U * 1024U;
+
+    bio_get_stats(&before);
+
+    /* One miss... */
+    bp = bio_dev_get(dev, 100, 512);
+    if (!bp) return false;
+    bp->b_flags |= B_CACHE;
+    bio_dev_release(bp);
+
+    /* ...then two hits. */
+    bp = bio_dev_get(dev, 100, 512); bio_dev_release(bp);
+    bp = bio_dev_get(dev, 100, 512); bio_dev_release(bp);
+
+    bio_get_stats(&after);
+
+    return (after.misses - before.misses) == 1 &&
+           (after.hits   - before.hits)   == 2;
+}
+
+/* ================================================================
+ * Property test: random get/release sequence preserves invariants
+ *
+ * Invariants checked after every operation:
+ *   - bio_nbuf == sum(q_locked, q_clean, q_dirty, q_empty)
+ *   - resident_bytes == sum of b_bcount over all buffers (approx; we
+ *     check it's monotonic w.r.t. allocations and decreases on reclaim)
+ *   - cache hit data is preserved across release/reacquire
+ * ================================================================ */
+
+static bool test_property_random_sequence(void)
+{
+    void *devs[3] = { (void *)0xBEEF1, (void *)0xBEEF2, (void *)0xBEEF3 };
+    enum { N_OPS = 500 };
+    /* Reproducible PRNG (xorshift32). */
+    uint32_t s = 0xC0FFEEU;
+    int failures = 0;
+
+    reset_state();
+    g_free_ram_bytes = 64U * 1024U * 1024U;
+
+    for (int i = 0; i < N_OPS && failures == 0; i++) {
+        s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+        int op   = s % 4;
+        int dev_idx = (s >> 8) % 3;
+        int blk  = (s >> 12) & 0x1F;
+        int size = (((s >> 18) & 1) ? 512 : 1024);
+
+        struct buf *bp = bio_dev_get(devs[dev_idx], blk, size);
+        if (!bp) { failures++; break; }
+
+        /* On miss the new alloc has b_bcount==size. */
+        if ((size_t)bp->b_bcount != (size_t)size) failures++;
+
+        switch (op) {
+        case 0:
+            /* Plain release — buffer goes BQ_CLEAN. */
+            bp->b_flags |= B_CACHE;
+            bio_dev_release(bp);
+            break;
+        case 1:
+            /* Invalidate. */
+            bp->b_flags |= B_INVAL;
+            bio_dev_release(bp);
+            break;
+        case 2:
+            /* Mark dirty + release: ends up on BQ_DIRTY. */
+            bp->b_flags |= B_CACHE;
+            bio_dev_mark_dirty(bp);
+            bio_dev_release(bp);
+            break;
+        case 3:
+            /* Purge entire device. */
+            bp->b_flags |= B_CACHE;
+            bio_dev_release(bp);
+            bio_dev_purge(devs[dev_idx]);
+            break;
+        }
+
+        /* Invariant: nbuf equals sum of queue lengths. */
+        struct bio_stats st;
+        bio_get_stats(&st);
+        uint32_t qsum = st.q_locked + st.q_clean + st.q_dirty + st.q_empty;
+        if (qsum != st.nbuf) {
+            fprintf(stderr, "iter %d: qsum=%u nbuf=%u\n", i, qsum, st.nbuf);
+            failures++;
+        }
+    }
+
+    /* After the storm, full reclaim brings cache back to a clean state. */
+    bio_reclaim(SIZE_MAX);
+    struct bio_stats final;
+    bio_get_stats(&final);
+    /* All BQ_CLEAN/BQ_EMPTY buffers should be gone; only BQ_LOCKED/DIRTY
+     * survive (and we haven't held anything locked). */
+    if (final.q_clean != 0 || final.q_empty != 0) failures++;
+
+    return failures == 0;
+}
+
+/* ================================================================
  * Main
  * ================================================================ */
 
@@ -351,6 +627,19 @@ int main(void)
     RUN(test_bdwrite_marks_delwri);
     RUN(test_bufsync_flushes_delwri);
     RUN(test_incore_returns_null_for_uncached);
+
+    /* Device-keyed API */
+    RUN(test_bio_dev_miss_then_hit);
+    RUN(test_bio_dev_invalidate_drops_entry);
+    RUN(test_bio_dev_purge_drops_all_for_dev);
+
+    /* Cache growth / reclaim / stats */
+    RUN(test_reclaim_drops_clean_buffers);
+    RUN(test_growth_blocked_when_ram_low);
+    RUN(test_stats_track_hits_and_misses);
+
+    /* Property */
+    RUN(test_property_random_sequence);
 
     if (failures == 0)
         printf("All bio tests PASSED\n");

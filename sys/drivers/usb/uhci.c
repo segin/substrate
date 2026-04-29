@@ -75,6 +75,13 @@ typedef struct uhci_hc {
     struct uhci_qh *async_qh;
     dma_addr_t      async_qh_dma;
 
+    /* Pre-allocated 8-byte DMA buffer for control SETUP packets.
+     * Reused across every control transfer so we don't pay
+     * dma_alloc_coherent (which rounds up to a full 4KB page) per request.
+     * Safe under submit_lock since we serialize all transfers anyway. */
+    uint8_t        *setup_buf;
+    dma_addr_t      setup_buf_dma;
+
     /* Serializes access to the shared async schedule and TD/QH pools. */
     mutex_t submit_lock;
 
@@ -213,6 +220,15 @@ static int uhci_alloc_structures(uhci_hc_t *hc)
         return -1;
     }
     memset(hc->qh_used, 0, sizeof(hc->qh_used));
+
+    /* Single 8-byte DMA buffer for control SETUP packets (reused). */
+    hc->setup_buf = dma_alloc_coherent(8, &hc->setup_buf_dma);
+    if (!hc->setup_buf) {
+        dma_free_coherent(hc->qh_pool, UHCI_MAX_QHS * sizeof(struct uhci_qh));
+        dma_free_coherent(hc->td_pool, UHCI_MAX_TDS * sizeof(struct uhci_td));
+        dma_free_coherent(hc->frame_list, UHCI_FRAME_LIST_SIZE * sizeof(uint32_t));
+        return -1;
+    }
 
     return 0;
 }
@@ -445,8 +461,7 @@ static int uhci_control_transfer(uhci_hc_t *hc, usb_transfer_t *xfer)
     struct uhci_td *setup_td, *data_td, *status_td;
     struct uhci_td *first_td, *prev_td;
     dma_addr_t setup_phys, status_phys;
-    dma_addr_t setup_buf_dma, data_buf_dma;
-    uint8_t *setup_buf;
+    dma_addr_t data_buf_dma;
     uint8_t addr, ep_num;
     uint8_t toggle;
     int is_in;
@@ -457,24 +472,19 @@ static int uhci_control_transfer(uhci_hc_t *hc, usb_transfer_t *xfer)
     ep_num = xfer->ep->address & USB_EP_NUM_MASK;
     is_in = (xfer->setup.bmRequestType & USB_DIR_IN) ? 1 : 0;
 
-    /* Allocate DMA buffer for setup packet (8 bytes) */
-    setup_buf = dma_alloc_coherent(8, &setup_buf_dma);
-    if (!setup_buf)
-        return USB_XFER_ERROR;
-    memcpy(setup_buf, &xfer->setup, 8);
+    /* Use the pre-allocated per-HC setup buffer (covered by submit_lock). */
+    memcpy(hc->setup_buf, &xfer->setup, 8);
 
     /* Setup TD: always DATA0 */
     setup_td = uhci_alloc_td(hc, &setup_phys);
-    if (!setup_td) {
-        dma_free_coherent(setup_buf, 8);
+    if (!setup_td)
         return USB_XFER_ERROR;
-    }
 
     setup_td->ctrl_status = UHCI_TD_CTRL_ACTIVE |
                             (3U << UHCI_TD_CTRL_CERR_SHIFT) |
                             ((xfer->dev->speed == USB_SPEED_LOW) ? UHCI_TD_CTRL_LS : 0);
     setup_td->token = UHCI_TD_TOKEN(UHCI_TD_PID_SETUP, addr, ep_num, 0, 8);
-    setup_td->buffer = (uint32_t)setup_buf_dma;
+    setup_td->buffer = (uint32_t)hc->setup_buf_dma;
 
     first_td = setup_td;
     prev_td = setup_td;
@@ -570,7 +580,6 @@ cleanup:
         }
     }
 
-    dma_free_coherent(setup_buf, 8);
     if (data_buf_dma)
         dma_unmap_single(data_buf_dma, xfer->length,
                          is_in ? DMA_FROM_DEVICE : DMA_TO_DEVICE);

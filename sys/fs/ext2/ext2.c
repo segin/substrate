@@ -1,5 +1,6 @@
 #include <fs/ext2/ext2.h>
 #include <vfs/vfs.h>
+#include <vfs/buf.h>
 #include <kern/console.h>
 #include <kern/time.h>
 #include <string.h>
@@ -8,6 +9,20 @@
 #include <sys/errno.h>
 #include <sys/stat.h>
 #include <sys/mount.h>
+
+#ifdef HOST_TEST
+/*
+ * Host-test stubs.  The buffer cache lives in bio.c which doesn't get
+ * linked into per-FS host tests; falling through to direct device I/O
+ * preserves the existing test contracts while leaving real cache
+ * coverage to host_test_bio.
+ */
+struct buf *bio_dev_get(void *d, int64_t b, size_t s)
+    { (void)d; (void)b; (void)s; return NULL; }
+void bio_dev_release(struct buf *bp)        { (void)bp; }
+void bio_dev_invalidate(void *d, int64_t b) { (void)d; (void)b; }
+void bio_dev_purge(void *d)                 { (void)d; }
+#endif
 
 // Cache for dynamically created nodes
 #define EXT2_NODE_CACHE_SIZE 64
@@ -99,16 +114,47 @@ int ext2_find_next_zero_bit(void *bitmap, uint32_t total_bits, uint32_t start, u
     return 0;
 }
 
-// Read a block from the device
+// Read a block from the device, going through the unified buffer cache.
+// On cache hit the data is served from RAM with no device I/O.  On miss
+// we fill the cache buffer once, then serve subsequent reads of the same
+// block from memory.  The cache is keyed by (device fs_node *, block_num,
+// block_size), so two callers reading the same block share one entry.
 uint32_t ext2_read_block(ext2_fs_t *fs, uint32_t block_num, void *buffer) {
     if (!fs || !fs->device || !fs->device->read) return 0;
+
+    struct buf *bp = bio_dev_get(fs->device, (int64_t)block_num, fs->block_size);
+    if (bp) {
+        if (!(bp->b_flags & B_CACHE)) {
+            off_t offset = (off_t)block_num * fs->block_size;
+            uint32_t got = fs->device->read(fs->device, offset, fs->block_size, bp->b_data);
+            if (got != fs->block_size) {
+                /* Don't cache short/failed reads. */
+                bp->b_flags |= B_INVAL;
+                bio_dev_release(bp);
+                return got;
+            }
+            bp->b_flags |= B_CACHE;
+        }
+        memcpy(buffer, bp->b_data, fs->block_size);
+        bio_dev_release(bp);
+        return fs->block_size;
+    }
+
+    /* Cache exhausted (e.g. low memory) — fall back to direct device read. */
     off_t offset = (off_t)block_num * fs->block_size;
     return fs->device->read(fs->device, offset, fs->block_size, buffer);
 }
 
-// Read multiple blocks from the device
+// Read multiple contiguous blocks.  This path stays out of the cache
+// because (a) callers use it for big sequential extents where one large
+// device transfer beats N cache lookups, and (b) the cache is keyed
+// per-block so a single multi-block buffer wouldn't hash usefully.
+// We still invalidate any per-block cache entries in the range so the
+// next single-block read sees fresh data.
 uint32_t ext2_read_blocks(ext2_fs_t *fs, uint32_t block_num, uint32_t count, void *buffer) {
     if (!fs || !fs->device || !fs->device->read) return 0;
+    for (uint32_t i = 0; i < count; i++)
+        bio_dev_invalidate(fs->device, (int64_t)(block_num + i));
     off_t offset = (off_t)block_num * fs->block_size;
     return fs->device->read(fs->device, offset, fs->block_size * count, buffer);
 }
@@ -145,11 +191,25 @@ int ext2_read_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
     return 0;
 }
 
-// Write a block to the device
+// Write a block to the device.  Write-through to keep the on-disk image
+// consistent with the cache; refresh the cache entry if one exists so a
+// subsequent read returns the just-written data instead of refetching.
 uint32_t ext2_write_block(ext2_fs_t *fs, uint32_t block_num, const void *buffer) {
     if (!fs || !fs->device || !fs->device->write) return 0;
     off_t offset = (off_t)block_num * fs->block_size;
-    return fs->device->write(fs->device, offset, fs->block_size, (uint8_t *)buffer);
+    uint32_t wrote = fs->device->write(fs->device, offset, fs->block_size, (uint8_t *)buffer);
+    if (wrote == fs->block_size) {
+        struct buf *bp = bio_dev_get(fs->device, (int64_t)block_num, fs->block_size);
+        if (bp) {
+            memcpy(bp->b_data, buffer, fs->block_size);
+            bp->b_flags |= B_CACHE;
+            bio_dev_release(bp);
+        }
+    } else {
+        /* Short write — drop any cached entry to avoid serving stale data. */
+        bio_dev_invalidate(fs->device, (int64_t)block_num);
+    }
+    return wrote;
 }
 
 static int is_sparse_backup(uint32_t group) {
@@ -2250,6 +2310,10 @@ int ext2_unmount(fs_node_t *node) {
     if (fs->active_bg_bitmap) kfree(fs->active_bg_bitmap, fs->block_size);
     if (fs->active_inode_bg_bitmap) kfree(fs->active_inode_bg_bitmap, fs->block_size);
     if (fs->bgd) kfree(fs->bgd, fs->group_count * sizeof(ext2_group_desc_t));
+
+    /* Drop every cached buffer for this device — the fs_node may be
+     * reused for a different filesystem after unmount. */
+    bio_dev_purge(fs->device);
 
     kfree(fs, sizeof(ext2_fs_t));
     return 0;

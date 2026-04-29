@@ -73,7 +73,16 @@ struct usb_msc_csw {
  */
 
 #define USB_MSC_MAX_DEVICES     4
-#define USB_MSC_BOUNCE_SIZE     32768
+/*
+ * Bounce buffer is only used when the caller supplies a buffer that is
+ * NOT in the kernel direct-mapped window (e.g. a user-mode buffer routed
+ * here without remapping).  The fast path skips it entirely for kernel
+ * pointers.  Sizing it at 64KB matches the direct-path chunk size so the
+ * fall-back doesn't double the round-trip count for very large I/Os.
+ */
+#define USB_MSC_BOUNCE_SIZE     65536
+#define USB_MSC_DIRECT_CHUNK    65536  /* limit per Bulk transfer to keep TD pool happy */
+#define USB_MSC_KERN_BASE       0xC0000000U
 
 typedef struct usb_msc_dev {
     usb_device_t    *udev;
@@ -161,42 +170,78 @@ static int usb_msc_bot_transfer(usb_msc_dev_t *msc, uint8_t lun,
         goto cleanup;
     }
 
-    /* Data phase (if any) */
+    /* Data phase (if any).
+     *
+     * Fast path: caller's buffer is in the kernel direct-mapped window
+     * (kmalloc / pmm_alloc_contiguous output), which is the case for all
+     * SCSI mid-layer requests originating from disk I/O.  Hand the buffer
+     * straight to the HCD; dma_map_single will return its physical address
+     * with no copy.  We still chunk at USB_MSC_DIRECT_CHUNK to bound TD
+     * pool usage in UHCI (each Bulk transfer allocates max_packet-sized
+     * TDs, e.g. 64KB / 64B = 1024 TDs out of UHCI_MAX_TDS=2048).
+     *
+     * Fall-back path: caller's buffer is outside the direct map.  Use the
+     * pre-allocated DMA bounce buffer with the original chunked memcpy.
+     * This keeps correctness for unusual callers without penalising the
+     * common case.
+     */
     if (data && data_len > 0) {
         usb_endpoint_t *data_ep = is_read ? msc->ep_in : msc->ep_out;
         uint32_t remaining = data_len;
         uint8_t *ptr = (uint8_t *)data;
+        int direct = ((uintptr_t)data >= USB_MSC_KERN_BASE);
 
-        while (remaining > 0) {
-            uint32_t chunk_size = (remaining > USB_MSC_BOUNCE_SIZE) ?
-                                  USB_MSC_BOUNCE_SIZE : remaining;
+        if (direct) {
+            while (remaining > 0) {
+                uint32_t chunk_size = (remaining > USB_MSC_DIRECT_CHUNK) ?
+                                      USB_MSC_DIRECT_CHUNK : remaining;
 
-            if (!is_read) {
-                memcpy(msc->bounce_buf, ptr, chunk_size);
+                ret = usb_bulk_transfer(msc->udev, data_ep,
+                                        ptr, chunk_size, &actual);
+
+                if (ret == USB_XFER_STALL) {
+                    usb_clear_halt(msc->udev, data_ep);
+                    break;
+                } else if (ret != USB_XFER_OK && ret != USB_XFER_SHORT) {
+                    kprintf("usb_msc: data phase failed (%d)\n", ret);
+                    usb_msc_reset_recovery(msc);
+                    goto cleanup;
+                }
+
+                ptr += actual;
+                remaining -= actual;
+
+                if (actual < chunk_size)
+                    break;  /* short packet ends transfer */
             }
+        } else {
+            while (remaining > 0) {
+                uint32_t chunk_size = (remaining > USB_MSC_BOUNCE_SIZE) ?
+                                      USB_MSC_BOUNCE_SIZE : remaining;
 
-            ret = usb_bulk_transfer(msc->udev, data_ep,
-                                    msc->bounce_buf, chunk_size, &actual);
+                if (!is_read)
+                    memcpy(msc->bounce_buf, ptr, chunk_size);
 
-            if (is_read && (ret == USB_XFER_OK || ret == USB_XFER_SHORT)) {
-                memcpy(ptr, msc->bounce_buf, actual);
-            }
+                ret = usb_bulk_transfer(msc->udev, data_ep,
+                                        msc->bounce_buf, chunk_size, &actual);
 
-            if (ret == USB_XFER_STALL) {
-                /* Stall on data endpoint — clear halt and proceed to CSW */
-                usb_clear_halt(msc->udev, data_ep);
-                break;
-            } else if (ret != USB_XFER_OK && ret != USB_XFER_SHORT) {
-                kprintf("usb_msc: data phase failed (%d)\n", ret);
-                usb_msc_reset_recovery(msc);
-                goto cleanup;
-            }
-            
-            ptr += actual;
-            remaining -= actual;
-            
-            if (actual < chunk_size) {
-                break; /* Short packet ends the transfer */
+                if (is_read && (ret == USB_XFER_OK || ret == USB_XFER_SHORT))
+                    memcpy(ptr, msc->bounce_buf, actual);
+
+                if (ret == USB_XFER_STALL) {
+                    usb_clear_halt(msc->udev, data_ep);
+                    break;
+                } else if (ret != USB_XFER_OK && ret != USB_XFER_SHORT) {
+                    kprintf("usb_msc: data phase failed (%d)\n", ret);
+                    usb_msc_reset_recovery(msc);
+                    goto cleanup;
+                }
+
+                ptr += actual;
+                remaining -= actual;
+
+                if (actual < chunk_size)
+                    break;
             }
         }
     }
