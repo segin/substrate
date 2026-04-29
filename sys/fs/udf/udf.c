@@ -628,16 +628,16 @@ static int udf_vfs_mkdir(fs_node_t *parent, const char *name, uint16_t permissio
     struct udf_fs *fs = pctx->fs;
     
     /* Allocate block for new directory */
-    uint32_t block = udf_alloc_block();
+    uint32_t block = udf_alloc_block(fs);
     if (block == 0) return -1; // No space
-    
+
     // Get current process credentials
     uint32_t uid = current_process ? current_process->uid : 0;
     uint32_t gid = current_process ? current_process->gid : 0;
-    
+
     /* Create new directory FE */
-    if (udf_create_fe(fs->device, block, UDF_FILETYPE_DIR, uid, gid, permission) != 0) {
-        udf_free_block(block);
+    if (udf_create_fe(fs, block, UDF_FILETYPE_DIR, uid, gid, permission) != 0) {
+        udf_free_block(fs, block);
         return -1;
     }
     
@@ -650,8 +650,8 @@ static int udf_vfs_mkdir(fs_node_t *parent, const char *name, uint16_t permissio
     
     /* Add entry to parent directory */
     struct udf_fe *pfe = (struct udf_fe *)pctx->fe_sector;
-    if (udf_add_fid(fs->device, pfe, pctx->icb.block, name, &new_icb, UDF_FID_DIRECTORY) != 0) {
-        udf_free_block(block);
+    if (udf_add_fid(fs, pfe, pctx->icb.block, name, &new_icb, UDF_FID_DIRECTORY) != 0) {
+        udf_free_block(fs, block);
         return -1;
     }
     
@@ -662,7 +662,7 @@ static int udf_vfs_mkdir(fs_node_t *parent, const char *name, uint16_t permissio
     if (udf_read_fe(fs, &fe_icb, &new_fe) != 0) return -1;
     
     // Add .. (parent)
-    if (udf_add_fid(fs->device, &new_fe, block, "..", &pctx->icb, UDF_FID_DIRECTORY | UDF_FID_PARENT) != 0) {
+    if (udf_add_fid(fs, &new_fe, block, "..", &pctx->icb, UDF_FID_DIRECTORY | UDF_FID_PARENT) != 0) {
         // Warning?
     }
     
@@ -772,8 +772,8 @@ static fs_node_t *udf_mount(const char *device, uint32_t flags, void *data) {
     struct udf_partition_header_desc *phd = (struct udf_partition_header_desc *)pd.contents_use;
     if (phd->unalloc_space_bitmap.length > 0) {
         // Bitmap exists
-        udf_read_space_bitmap(dev, pd.partition_start, 
-                              phd->unalloc_space_bitmap.position, 
+        udf_read_space_bitmap(fs,
+                              phd->unalloc_space_bitmap.position,
                               phd->unalloc_space_bitmap.length);
     } else {
         kprint("UDF: No space bitmap found (ReadOnly?)\n");
