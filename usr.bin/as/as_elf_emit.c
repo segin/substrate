@@ -10512,12 +10512,6 @@ static int stmt_range_size_in_section(emit_ctx_t *ctx, const char *section_name,
                 section_track_free(&track);
                 return -1;
             }
-            if (getenv("AS_DEBUG_RANGE") != NULL && st->line >= 26750 && st->line <= 26945) {
-                fprintf(stderr, "range %s:%u kind=%d sec=%s off=%llu n=%llu total=%llu\n",
-                        st->file != NULL ? st->file : "<input>", st->line, (int)st->kind,
-                        section_name, (unsigned long long)(sec_off + total),
-                        (unsigned long long)n, (unsigned long long)total);
-            }
             total += (uint64_t)n;
         }
     }
@@ -10688,8 +10682,6 @@ static int eval_direct_local_branch_target(emit_ctx_t *ctx, const char *section_
             strcmp(target_section, section_name) != 0) {
             return -1;
         }
-    }
-    if (rel_expr->kind == AS_EXPR_SYMBOL && expr_is_local_temp_symbol(rel_expr)) {
     }
     (void)i;
     if (target_idx > base_idx) {
