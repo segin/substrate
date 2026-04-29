@@ -394,22 +394,34 @@ static int uhci_poll_td(uhci_hc_t *hc, struct uhci_td *td,
         }
 
         /* Check for errors */
-        if (td->ctrl_status & UHCI_TD_CTRL_STALLED)
+        if (td->ctrl_status & UHCI_TD_CTRL_STALLED) {
+            // kprintf("uhci: TD stall (token=0x%08x)\n", td->token);
             return USB_XFER_STALL;
+        }
         if (td->ctrl_status & (UHCI_TD_CTRL_DBUFERR | UHCI_TD_CTRL_BABBLE |
-                                UHCI_TD_CTRL_CRCTMO | UHCI_TD_CTRL_BITSTUFF))
+                                UHCI_TD_CTRL_CRCTMO | UHCI_TD_CTRL_BITSTUFF)) {
+            kprintf("uhci: TD error 0x%08x (token=0x%08x)\n", 
+                    td->ctrl_status & UHCI_TD_CTRL_ERRMASK, td->token);
             return USB_XFER_ERROR;
+        }
 
-        /* Accumulate actual transfer length */
         uint32_t actlen = (td->ctrl_status & UHCI_TD_ACTLEN_MASK);
-        if (actlen != UHCI_TD_ACTLEN_NULL)
-            total += actlen + 1;
+
+        /* Accumulate actual transfer length (payload only, skip SETUP/STATUS overhead) */
+        uint8_t pid = td->token & 0xFF;
+        if (pid == UHCI_TD_PID_IN || pid == UHCI_TD_PID_OUT) {
+            if (actlen != UHCI_TD_ACTLEN_NULL)
+                total += actlen + 1;
+        }
 
         /* Check for short packet (less than max expected) */
         uint32_t maxlen = ((td->token >> 21) & 0x7FF);
-        if (actlen != UHCI_TD_ACTLEN_NULL && maxlen != 0x7FF &&
-            actlen < maxlen) {
+        uint32_t expected = (maxlen == 0x7FF) ? 0 : maxlen + 1;
+        uint32_t actual_bytes = (actlen == 0x7FF) ? 0 : actlen + 1;
+
+        if (actual_bytes < expected) {
             /* Short packet — stop here */
+            // kprintf("uhci: short packet (%u < %u)\n", actual_bytes, expected);
             break;
         }
 
@@ -595,6 +607,11 @@ static int uhci_bulk_transfer(uhci_hc_t *hc, usb_transfer_t *xfer)
     remaining = xfer->length;
     offset = 0;
 
+    uint8_t current_toggle = xfer->ep->toggle;
+
+    // kprintf("uhci: bulk %s addr=%u ep=%u len=%u maxp=%u toggle=%d\n",
+    //         is_in ? "IN" : "OUT", addr, ep_num, xfer->length, max_pkt, current_toggle);
+
     while (remaining > 0) {
         struct uhci_td *td;
         dma_addr_t td_phys;
@@ -608,15 +625,15 @@ static int uhci_bulk_transfer(uhci_hc_t *hc, usb_transfer_t *xfer)
 
         td->ctrl_status = UHCI_TD_CTRL_ACTIVE |
                           (3U << UHCI_TD_CTRL_CERR_SHIFT) |
-                          UHCI_TD_CTRL_SPD |
+                          (is_in ? UHCI_TD_CTRL_SPD : 0) |
                           ((xfer->dev->speed == USB_SPEED_LOW) ? UHCI_TD_CTRL_LS : 0);
         td->token = UHCI_TD_TOKEN(
             is_in ? UHCI_TD_PID_IN : UHCI_TD_PID_OUT,
-            addr, ep_num, xfer->ep->toggle, chunk);
+            addr, ep_num, current_toggle, chunk);
         td->buffer = (uint32_t)(data_dma + offset);
         td->link = UHCI_TD_LINK_T;
 
-        xfer->ep->toggle ^= 1;
+        current_toggle ^= 1;
 
         if (!first_td) {
             first_td = td;
@@ -645,6 +662,28 @@ static int uhci_bulk_transfer(uhci_hc_t *hc, usb_transfer_t *xfer)
 
     xfer->actual_length = actual;
     xfer->status = ret;
+
+    /* Update endpoint toggle based on actual packets transferred */
+    if (ret == USB_XFER_OK || ret == USB_XFER_SHORT || ret == USB_XFER_STALL) {
+        struct uhci_td *td = first_td;
+        while (td) {
+            /* If this TD completed (Active bit cleared), it consumed a toggle */
+            if (!(td->ctrl_status & UHCI_TD_CTRL_ACTIVE)) {
+                xfer->ep->toggle ^= 1;
+                
+                /* If it was a short packet, the hardware stopped here */
+                uint32_t actlen = (td->ctrl_status & UHCI_TD_ACTLEN_MASK);
+                uint32_t maxlen = ((td->token >> 21) & 0x7FF);
+                if (actlen != maxlen) break;
+            } else {
+                /* TD still active, hardware hasn't reached it */
+                break;
+            }
+
+            if (td->link & UHCI_TD_LINK_T) break;
+            td = (struct uhci_td *)((uintptr_t)(td->link & ~0xF) + 0xC0000000);
+        }
+    }
 
 cleanup:
     /* Free all TDs */

@@ -149,6 +149,9 @@ typedef struct {
 typedef struct {
     char *name;
     long value;
+    uint64_t bits;
+    cc_type_t type;
+    int struct_id;
 } enum_const_entry_t;
 
 typedef struct {
@@ -471,6 +474,8 @@ static int parse_c23_attribute_seq(parser_t *p, decl_attrs_t *out_attrs, int *ou
 static int skip_balanced_parens(parser_t *p);
 static int parse_gnu_attr_arguments(parser_t *p, long *out_num, int *out_has_num, long *out_num2, int *out_has_num2,
                                     char **out_str);
+static int parse_gnu_format_attr_arguments(parser_t *p, long *out_num, int *out_has_num, long *out_num2,
+                                           int *out_has_num2);
 static int skip_decl_gnu_suffix(parser_t *p, decl_attrs_t *out_attrs);
 static int parse_asm_stmt(parser_t *p, cc_stmt_t *s);
 static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id, long *out_array_len,
@@ -861,6 +866,9 @@ static int enum_const_push(parser_t *p, const char *name, size_t len, long value
     }
     p->enum_consts[p->enum_const_count].name = dup;
     p->enum_consts[p->enum_const_count].value = value;
+    p->enum_consts[p->enum_const_count].bits = (uint64_t)value;
+    p->enum_consts[p->enum_const_count].type = CC_TYPE_INT;
+    p->enum_consts[p->enum_const_count].struct_id = -1;
     p->enum_const_count++;
     return 0;
 }
@@ -1199,6 +1207,87 @@ static uint64_t parser_const_mask_bits(const parser_t *p, uint64_t bits, cc_type
 
 static uint64_t parser_const_unsigned_value(const parser_t *p, uint64_t bits, cc_type_t t, int struct_id) {
     return parser_const_mask_bits(p, bits, t, struct_id);
+}
+
+static int parser_builtin_integral_width(const parser_t *p, const char *name) {
+    (void)p;
+    if (name == NULL) {
+        return 0;
+    }
+    if (strcmp(name, "__builtin_clzll") == 0 || strcmp(name, "__builtin_ctzll") == 0 ||
+        strcmp(name, "__builtin_ffsll") == 0 || strcmp(name, "__builtin_popcountll") == 0) {
+        return 64;
+    }
+    if (strcmp(name, "__builtin_clzl") == 0 || strcmp(name, "__builtin_ctzl") == 0 ||
+        strcmp(name, "__builtin_ffsl") == 0 || strcmp(name, "__builtin_popcountl") == 0) {
+        return g_parser_pointer_size_bytes >= 8 ? 64 : 32;
+    }
+    if (strcmp(name, "__builtin_clz") == 0 || strcmp(name, "__builtin_ctz") == 0 ||
+        strcmp(name, "__builtin_ffs") == 0 || strcmp(name, "__builtin_popcount") == 0) {
+        return 32;
+    }
+    return 0;
+}
+
+static int parser_const_builtin_bitop(parser_t *p, const cc_expr_t *e, parser_const_value_t *out) {
+    parser_const_value_t arg;
+    uint64_t v;
+    int width;
+    int i;
+    int n = 0;
+
+    if (e == NULL || e->ident == NULL || out == NULL || e->arg_count != 1 || e->args == NULL || e->args[0] == NULL) {
+        return -1;
+    }
+    width = parser_builtin_integral_width(p, e->ident);
+    if (width <= 0 || width > 64) {
+        return -1;
+    }
+    if (eval_const_expr_value(p, e->args[0], &arg) != 0) {
+        return -1;
+    }
+    v = parser_const_unsigned_value(p, arg.bits, arg.type, arg.struct_id);
+    if (width < 64) {
+        v &= (1ULL << width) - 1ULL;
+    }
+
+    if (strncmp(e->ident, "__builtin_clz", 13) == 0) {
+        if (v == 0) {
+            return -1;
+        }
+        for (i = width - 1; i >= 0 && ((v & (1ULL << i)) == 0); --i) {
+            ++n;
+        }
+    } else if (strncmp(e->ident, "__builtin_ctz", 13) == 0) {
+        if (v == 0) {
+            return -1;
+        }
+        for (i = 0; i < width && ((v & (1ULL << i)) == 0); ++i) {
+            ++n;
+        }
+    } else if (strncmp(e->ident, "__builtin_ffs", 13) == 0) {
+        if (v == 0) {
+            n = 0;
+        } else {
+            for (i = 0; i < width && ((v & (1ULL << i)) == 0); ++i) {
+                ++n;
+            }
+            ++n;
+        }
+    } else if (strncmp(e->ident, "__builtin_popcount", 18) == 0) {
+        for (i = 0; i < width; ++i) {
+            if ((v & (1ULL << i)) != 0) {
+                ++n;
+            }
+        }
+    } else {
+        return -1;
+    }
+
+    out->type = CC_TYPE_INT;
+    out->struct_id = -1;
+    out->bits = parser_const_mask_bits(p, (uint64_t)n, out->type, out->struct_id);
+    return 0;
 }
 
 static int64_t parser_const_signed_value(const parser_t *p, uint64_t bits, cc_type_t t, int struct_id) {
@@ -1987,8 +2076,17 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
             }
             if (parser_is_gnu_mode() &&
                 (tok_is_ident(p, "__int128") || tok_is_ident(p, "__int128_t") || tok_is_ident(p, "__uint128_t"))) {
-                set_diag(p->diag, p->tok.line, p->tok.col, "__int128 is not supported");
-                return -1;
+                seen = 1;
+                seen_type = 1;
+                seen_bitint = 1;
+                bitint_width = 128;
+                if (tok_is_ident(p, "__uint128_t")) {
+                    seen_unsigned = 1;
+                }
+                if (next_tok(p) != 0) {
+                    return -1;
+                }
+                continue;
             }
             if (tok_is_ident(p, "_Thread_local") || (parser_is_c23_or_newer() && tok_is_ident(p, "thread_local"))) {
                 if (!parser_is_c11_or_newer()) {
@@ -2214,6 +2312,10 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                             type_array_dims[0] = bound;
                             type_array_len = bound;
                         }
+                    } else if (te->array_ndim > 0) {
+                        type_array_ndim = te->array_ndim;
+                        memcpy(type_array_dims, te->array_dims, sizeof(type_array_dims));
+                        type_array_len = type_array_dims[0];
                     } else if (te->kind == CC_EXPR_CAST && te->lhs != NULL && te->lhs->kind == CC_EXPR_INIT_LIST &&
                                te->array_ndim > 0) {
                         ty = te->value_type;
@@ -3042,6 +3144,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                     }
                     if (p->tok.kind == TOK_ASSIGN) {
                         cc_expr_t *enum_expr;
+                        parser_const_value_t ev;
                         long v = 0;
                         if (next_tok(p) != 0) {
                             return -1;
@@ -3050,16 +3153,32 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                         if (enum_expr == NULL) {
                             return -1;
                         }
-                        if (eval_const_array_bound_expr(p, enum_expr, &v) != 0) {
+                        if (eval_const_expr_value(p, enum_expr, &ev) != 0) {
                             free_expr(enum_expr);
                             set_diag(p->diag, p->tok.line, p->tok.col,
                                      "enum value must be an integer constant expression");
                             return -1;
                         }
                         free_expr(enum_expr);
+                        if (parser_is_unsigned_integral_type(ev.type) || is_pointer_type(ev.type)) {
+                            uint64_t u = parser_const_unsigned_value(p, ev.bits, ev.type, ev.struct_id);
+                            v = u > (uint64_t)LONG_MAX ? LONG_MAX : (long)u;
+                        } else {
+                            int64_t s = parser_const_signed_value(p, ev.bits, ev.type, ev.struct_id);
+                            if (s < (int64_t)LONG_MIN) {
+                                v = LONG_MIN;
+                            } else if (s > (int64_t)LONG_MAX) {
+                                v = LONG_MAX;
+                            } else {
+                                v = (long)s;
+                            }
+                        }
                         enum_cur = v;
                         enum_next = v;
                         p->enum_consts[p->enum_const_count - 1].value = enum_next;
+                        p->enum_consts[p->enum_const_count - 1].bits = ev.bits;
+                        p->enum_consts[p->enum_const_count - 1].type = ev.type;
+                        p->enum_consts[p->enum_const_count - 1].struct_id = ev.struct_id;
                     }
                     {
                         decl_attrs_t enum_attrs;
@@ -3082,7 +3201,9 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                             enum_max = enum_cur;
                         }
                     }
-                    enum_next++;
+                    if (enum_next < LONG_MAX) {
+                        enum_next++;
+                    }
                 }
                 if (p->tok.kind == TOK_COMMA) {
                     if (next_tok(p) != 0) {
@@ -3422,7 +3543,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                 *out_type = CC_TYPE_ENUM;
             }
             if (enum_defined && enum_tag_pending != NULL && enum_tag_pending_len > 0) {
-                if (enum_tag_set(p, enum_tag_pending, enum_tag_pending_len, CC_TYPE_ENUM, 1) != 0) {
+                if (enum_tag_set(p, enum_tag_pending, enum_tag_pending_len, *out_type, 1) != 0) {
                     set_diag(p->diag, p->tok.line, p->tok.col, "out of memory tracking enum tag");
                     return -1;
                 }
@@ -3547,6 +3668,17 @@ static int infer_expr_type(parser_t *p, const cc_expr_t *e, cc_type_t *out_type,
         *out_struct_id = e->aux_struct_id;
         return 0;
     case CC_EXPR_ADDR:
+        if (e->lhs != NULL && e->lhs->kind == CC_EXPR_IDENT && e->lhs->ident != NULL) {
+            const cc_function_t *f = parser_find_function_decl(p, e->lhs->ident);
+            if (f != NULL) {
+                lt = ptr_of_type(f->ret_type);
+                if (lt != CC_TYPE_VOID) {
+                    *out_type = lt;
+                    *out_struct_id = type_carries_struct_id(lt) ? f->ret_struct_id : -1;
+                    return 0;
+                }
+            }
+        }
         if (infer_expr_type(p, e->lhs, &lt, &lsid) != 0) {
             *out_type = e->value_type;
             *out_struct_id = e->struct_id;
@@ -3832,6 +3964,149 @@ static int parse_named_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
     return 0;
 }
 
+static int parser_expr_typeof_const_context(parser_t *p, const cc_expr_t *e, cc_type_t *out_type, int *out_struct_id) {
+    cc_type_t lt = CC_TYPE_VOID;
+    cc_type_t rt = CC_TYPE_VOID;
+    int ls = -1;
+    int rs = -1;
+
+    if (p == NULL || e == NULL || out_type == NULL || out_struct_id == NULL) {
+        return -1;
+    }
+    *out_type = CC_TYPE_VOID;
+    *out_struct_id = -1;
+
+    switch (e->kind) {
+    case CC_EXPR_INT:
+        *out_type = e->value_type != CC_TYPE_VOID ? e->value_type : CC_TYPE_INT;
+        *out_struct_id = e->struct_id;
+        return 0;
+    case CC_EXPR_STR:
+        *out_type = e->value_type != CC_TYPE_VOID ? e->value_type : CC_TYPE_PTR_CHAR;
+        *out_struct_id = e->struct_id;
+        return 0;
+    case CC_EXPR_IDENT: {
+        int vidx;
+        if (e->ident == NULL) {
+            return -1;
+        }
+        vidx = var_find_visible_n(p, e->ident, strlen(e->ident));
+        if (vidx >= 0) {
+            *out_type = p->vars[vidx].type;
+            *out_struct_id = p->vars[vidx].struct_id;
+            return 0;
+        }
+        if (p->tu != NULL) {
+            size_t gi;
+            for (gi = 0; gi < p->tu->global_count; ++gi) {
+                if (p->tu->globals[gi].name != NULL && strcmp(p->tu->globals[gi].name, e->ident) == 0) {
+                    *out_type = p->tu->globals[gi].type;
+                    *out_struct_id = p->tu->globals[gi].type_struct_id;
+                    return 0;
+                }
+            }
+        }
+        return -1;
+    }
+    case CC_EXPR_CAST:
+        *out_type = e->aux_type;
+        *out_struct_id = e->aux_struct_id;
+        return 0;
+    case CC_EXPR_SIZEOF:
+        *out_type = g_parser_pointer_size_bytes >= 8 ? CC_TYPE_ULONG : CC_TYPE_UINT;
+        *out_struct_id = -1;
+        return 0;
+    case CC_EXPR_ADDR:
+        if (parser_expr_typeof_const_context(p, e->lhs, &lt, &ls) != 0) {
+            return -1;
+        }
+        *out_type = ptr_of_type(lt);
+        *out_struct_id = type_carries_struct_id(*out_type) ? ls : -1;
+        return *out_type != CC_TYPE_VOID ? 0 : -1;
+    case CC_EXPR_DEREF:
+        if (parser_expr_typeof_const_context(p, e->lhs, &lt, &ls) != 0 || !is_pointer_type(lt)) {
+            return -1;
+        }
+        *out_type = ptr_deref_type(lt);
+        *out_struct_id = type_carries_struct_id(*out_type) ? ls : -1;
+        return 0;
+    case CC_EXPR_MEMBER:
+        if (e->value_type != CC_TYPE_VOID || e->struct_id >= 0) {
+            *out_type = e->value_type;
+            *out_struct_id = e->struct_id;
+            return 0;
+        }
+        return -1;
+    case CC_EXPR_BIN:
+        if (e->op == CC_BIN_COMMA) {
+            return parser_expr_typeof_const_context(p, e->rhs, out_type, out_struct_id);
+        }
+        if (e->op == CC_BIN_EQ || e->op == CC_BIN_NE || e->op == CC_BIN_LT || e->op == CC_BIN_LE ||
+            e->op == CC_BIN_GT || e->op == CC_BIN_GE || e->op == CC_BIN_LAND || e->op == CC_BIN_LOR) {
+            *out_type = CC_TYPE_INT;
+            *out_struct_id = -1;
+            return 0;
+        }
+        if (parser_expr_typeof_const_context(p, e->lhs, &lt, &ls) != 0 ||
+            parser_expr_typeof_const_context(p, e->rhs, &rt, &rs) != 0) {
+            return -1;
+        }
+        if (is_pointer_type(lt) && e->op == CC_BIN_ADD) {
+            *out_type = lt;
+            *out_struct_id = type_carries_struct_id(lt) ? ls : -1;
+            return 0;
+        }
+        if (is_pointer_type(rt) && e->op == CC_BIN_ADD) {
+            *out_type = rt;
+            *out_struct_id = type_carries_struct_id(rt) ? rs : -1;
+            return 0;
+        }
+        if (is_pointer_type(lt) && e->op == CC_BIN_SUB) {
+            *out_type = lt;
+            *out_struct_id = type_carries_struct_id(lt) ? ls : -1;
+            return 0;
+        }
+        *out_type = parser_common_arith_type(lt, rt);
+        *out_struct_id = -1;
+        return 0;
+    case CC_EXPR_TERNARY:
+        if (e->rhs == NULL) {
+            return parser_expr_typeof_const_context(p, e->lhs, out_type, out_struct_id);
+        }
+        if (parser_expr_typeof_const_context(p, e->rhs, &lt, &ls) != 0 ||
+            parser_expr_typeof_const_context(p, e->third, &rt, &rs) != 0) {
+            return -1;
+        }
+        if (is_pointer_type(lt) && is_pointer_type(rt)) {
+            if (cc_type_pointer_base(lt) == CC_TYPE_VOID || cc_type_pointer_base(rt) == CC_TYPE_VOID) {
+                *out_type = ptr_of_type(CC_TYPE_VOID);
+                *out_struct_id = -1;
+                return 0;
+            }
+            *out_type = lt;
+            *out_struct_id = type_carries_struct_id(lt) ? ls : -1;
+            return 0;
+        }
+        if (is_pointer_type(lt) && rt == CC_TYPE_INT && e->third != NULL && e->third->kind == CC_EXPR_INT &&
+            e->third->int_val == 0) {
+            *out_type = lt;
+            *out_struct_id = type_carries_struct_id(lt) ? ls : -1;
+            return 0;
+        }
+        if (is_pointer_type(rt) && lt == CC_TYPE_INT && e->rhs != NULL && e->rhs->kind == CC_EXPR_INT &&
+            e->rhs->int_val == 0) {
+            *out_type = rt;
+            *out_struct_id = type_carries_struct_id(rt) ? rs : -1;
+            return 0;
+        }
+        *out_type = parser_common_arith_type(lt, rt);
+        *out_struct_id = -1;
+        return 0;
+    default:
+        return -1;
+    }
+}
+
 static int eval_const_expr_value(parser_t *p, const cc_expr_t *e, parser_const_value_t *out) {
     parser_const_value_t lhs;
     parser_const_value_t rhs;
@@ -4005,15 +4280,23 @@ static int eval_const_expr_value(parser_t *p, const cc_expr_t *e, parser_const_v
         {
             cc_type_t st = e->aux_type;
             if (st == CC_TYPE_VOID && e->aux_struct_id < 0 && e->lhs != NULL) {
-                st = e->lhs->value_type;
-                sz = parser_type_size_bytes(p, st, e->lhs->struct_id);
-                if (sz > 0) {
+                int ssid = -1;
+                if (parser_expr_typeof_const_context(p, e->lhs, &st, &ssid) != 0) {
+                    st = e->lhs->value_type;
+                    ssid = e->lhs->struct_id;
+                }
+                sz = parser_type_size_bytes(p, st, ssid);
+                if (sz >= 0 && (sz > 0 || (st == CC_TYPE_VOID && ssid >= 0))) {
                     out->bits = parser_const_mask_bits(p, (uint64_t)sz, out->type, out->struct_id);
+                    return 0;
+                }
+                if (st == CC_TYPE_VOID && ssid < 0) {
+                    out->bits = parser_const_mask_bits(p, 1u, out->type, out->struct_id);
                     return 0;
                 }
             }
             sz = parser_type_size_bytes(p, st, e->aux_struct_id);
-            if (sz > 0) {
+            if (sz >= 0 && (sz > 0 || (st == CC_TYPE_VOID && e->aux_struct_id >= 0))) {
                 out->bits = parser_const_mask_bits(p, (uint64_t)sz, out->type, out->struct_id);
                 return 0;
             }
@@ -4031,6 +4314,38 @@ static int eval_const_expr_value(parser_t *p, const cc_expr_t *e, parser_const_v
     case CC_EXPR_BIN:
         if (e->op == CC_BIN_COMMA) {
             return eval_const_expr_value(p, e->rhs, out);
+        }
+        if (e->op == CC_BIN_LAND || e->op == CC_BIN_LOR) {
+            int lhs_true;
+            int rhs_true;
+            if (eval_const_expr_value(p, e->lhs, &lhs) != 0) {
+                return -1;
+            }
+            lhs_true = ((parser_is_unsigned_integral_type(lhs.type) || is_pointer_type(lhs.type))
+                            ? parser_const_unsigned_value(p, lhs.bits, lhs.type, lhs.struct_id)
+                            : (uint64_t)parser_const_signed_value(p, lhs.bits, lhs.type, lhs.struct_id)) != 0;
+            if (e->op == CC_BIN_LAND && !lhs_true) {
+                out->type = CC_TYPE_INT;
+                out->bits = 0;
+                out->struct_id = -1;
+                return 0;
+            }
+            if (e->op == CC_BIN_LOR && lhs_true) {
+                out->type = CC_TYPE_INT;
+                out->bits = 1;
+                out->struct_id = -1;
+                return 0;
+            }
+            if (eval_const_expr_value(p, e->rhs, &rhs) != 0) {
+                return -1;
+            }
+            rhs_true = ((parser_is_unsigned_integral_type(rhs.type) || is_pointer_type(rhs.type))
+                            ? parser_const_unsigned_value(p, rhs.bits, rhs.type, rhs.struct_id)
+                            : (uint64_t)parser_const_signed_value(p, rhs.bits, rhs.type, rhs.struct_id)) != 0;
+            out->type = CC_TYPE_INT;
+            out->bits = (e->op == CC_BIN_LAND) ? (rhs_true ? 1 : 0) : (rhs_true ? 1 : 0);
+            out->struct_id = -1;
+            return 0;
         }
         if (eval_const_expr_value(p, e->lhs, &lhs) != 0 || eval_const_expr_value(p, e->rhs, &rhs) != 0) {
             return -1;
@@ -4175,33 +4490,11 @@ static int eval_const_expr_value(parser_t *p, const cc_expr_t *e, parser_const_v
                 return -1;
             }
         }
-        case CC_BIN_LAND:
-            out->type = CC_TYPE_INT;
-            out->bits = (((parser_is_unsigned_integral_type(lhs.type) || is_pointer_type(lhs.type))
-                              ? parser_const_unsigned_value(p, lhs.bits, lhs.type, lhs.struct_id)
-                              : (uint64_t)parser_const_signed_value(p, lhs.bits, lhs.type, lhs.struct_id)) != 0 &&
-                         ((parser_is_unsigned_integral_type(rhs.type) || is_pointer_type(rhs.type))
-                              ? parser_const_unsigned_value(p, rhs.bits, rhs.type, rhs.struct_id)
-                              : (uint64_t)parser_const_signed_value(p, rhs.bits, rhs.type, rhs.struct_id)) != 0)
-                            ? 1
-                            : 0;
-            out->struct_id = -1;
-            return 0;
-        case CC_BIN_LOR:
-            out->type = CC_TYPE_INT;
-            out->bits = (((parser_is_unsigned_integral_type(lhs.type) || is_pointer_type(lhs.type))
-                              ? parser_const_unsigned_value(p, lhs.bits, lhs.type, lhs.struct_id)
-                              : (uint64_t)parser_const_signed_value(p, lhs.bits, lhs.type, lhs.struct_id)) != 0 ||
-                         ((parser_is_unsigned_integral_type(rhs.type) || is_pointer_type(rhs.type))
-                              ? parser_const_unsigned_value(p, rhs.bits, rhs.type, rhs.struct_id)
-                              : (uint64_t)parser_const_signed_value(p, rhs.bits, rhs.type, rhs.struct_id)) != 0)
-                            ? 1
-                            : 0;
-            out->struct_id = -1;
-            return 0;
         default:
             return -1;
         }
+    case CC_EXPR_CALL:
+        return parser_const_builtin_bitop(p, e, out);
     case CC_EXPR_TERNARY:
         if (eval_const_expr_value(p, e->lhs, &cond) != 0) {
             return -1;
@@ -5528,6 +5821,87 @@ static int parse_gnu_attr_arguments(parser_t *p, long *out_num, int *out_has_num
     return 0;
 }
 
+static int parse_gnu_format_attr_arguments(parser_t *p, long *out_num, int *out_has_num, long *out_num2,
+                                           int *out_has_num2) {
+    int depth = 0;
+    cc_expr_t *expr = NULL;
+
+    if (out_has_num != NULL) {
+        *out_has_num = 0;
+    }
+    if (out_has_num2 != NULL) {
+        *out_has_num2 = 0;
+    }
+    if (out_num != NULL) {
+        *out_num = 0;
+    }
+    if (out_num2 != NULL) {
+        *out_num2 = 0;
+    }
+    if (p->tok.kind != TOK_LPAREN) {
+        return 0;
+    }
+    if (next_tok(p) != 0) {
+        return -1;
+    }
+
+    while (p->tok.kind != TOK_EOF) {
+        if (p->tok.kind == TOK_LPAREN) {
+            depth++;
+        } else if (p->tok.kind == TOK_RPAREN) {
+            if (depth == 0) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "format attribute expects three arguments");
+                return -1;
+            }
+            depth--;
+        } else if (p->tok.kind == TOK_COMMA && depth == 0) {
+            break;
+        }
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+    }
+    if (p->tok.kind != TOK_COMMA) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "format attribute expects three arguments");
+        return -1;
+    }
+    if (next_tok(p) != 0) {
+        return -1;
+    }
+
+    expr = parse_cond(p);
+    if (expr == NULL) {
+        return -1;
+    }
+    if (out_num != NULL && out_has_num != NULL && eval_const_array_bound_expr(p, expr, out_num) == 0) {
+        *out_has_num = 1;
+    }
+    free_expr(expr);
+    expr = NULL;
+    if (p->tok.kind != TOK_COMMA) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "format attribute expects third argument");
+        return -1;
+    }
+    if (next_tok(p) != 0) {
+        return -1;
+    }
+
+    expr = parse_cond(p);
+    if (expr == NULL) {
+        return -1;
+    }
+    if (out_num2 != NULL && out_has_num2 != NULL && eval_const_array_bound_expr(p, expr, out_num2) == 0) {
+        *out_has_num2 = 1;
+    }
+    free_expr(expr);
+    expr = NULL;
+    if (p->tok.kind != TOK_RPAREN) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "expected ')' after format attribute arguments");
+        return -1;
+    }
+    return next_tok(p);
+}
+
 static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     int is_aligned;
     int is_section;
@@ -5618,7 +5992,9 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
         return -1;
     }
     if (p->tok.kind == TOK_LPAREN) {
-        if (parse_gnu_attr_arguments(p, &num, &has_num, &num2, &has_num2, &sec) != 0) {
+        int rc = is_format ? parse_gnu_format_attr_arguments(p, &num, &has_num, &num2, &has_num2)
+                           : parse_gnu_attr_arguments(p, &num, &has_num, &num2, &has_num2, &sec);
+        if (rc != 0) {
             free(sec);
             return -1;
         }
@@ -7334,8 +7710,9 @@ static cc_expr_t *parse_primary(parser_t *p) {
             if (e == NULL) {
                 return NULL;
             }
-            e->int_val = p->enum_consts[eidx].value;
-            e->value_type = CC_TYPE_INT;
+            e->int_val = (long long)p->enum_consts[eidx].bits;
+            e->value_type = p->enum_consts[eidx].type;
+            e->struct_id = p->enum_consts[eidx].struct_id;
             if (next_tok(p) != 0) {
                 free_expr(e);
                 return NULL;
@@ -7666,13 +8043,19 @@ static cc_expr_t *parse_primary(parser_t *p) {
                     return NULL;
                 }
                 if (eval_const_array_bound_expr(p, ce, &cv) != 0) {
-                    set_diag(p->diag, p->tok.line, p->tok.col,
-                             "__builtin_choose_expr condition must be an integer constant expression");
-                    free_expr(fe);
-                    free_expr(te);
-                    free_expr(ce);
-                    free_expr(e);
-                    return NULL;
+                    e->args = (cc_expr_t **)calloc(3, sizeof(*e->args));
+                    if (e->args == NULL) {
+                        free_expr(fe);
+                        free_expr(te);
+                        free_expr(ce);
+                        free_expr(e);
+                        return NULL;
+                    }
+                    e->args[0] = ce;
+                    e->args[1] = te;
+                    e->args[2] = fe;
+                    e->arg_count = 3;
+                    return e;
                 }
                 free_expr(e);
                 free_expr(ce);
@@ -8372,6 +8755,8 @@ static cc_expr_t *parse_postfix(parser_t *p) {
                     if (sm != NULL) {
                         m->value_type = sm->type;
                         m->struct_id = sm->type_struct_id;
+                        m->array_ndim = sm->array_ndim;
+                        memcpy(m->array_dims, sm->array_dims, sizeof(m->array_dims));
                         m->member_offset = sm->offset;
                     }
                 }
@@ -8644,6 +9029,17 @@ static cc_expr_t *parse_unary(parser_t *p) {
         if (e->lhs == NULL) {
             free_expr(e);
             return NULL;
+        }
+        if (e->lhs->kind == CC_EXPR_IDENT && e->lhs->ident != NULL) {
+            const cc_function_t *f = parser_find_function_decl(p, e->lhs->ident);
+            if (f != NULL) {
+                pty = ptr_of_type(f->ret_type);
+                if (pty != CC_TYPE_VOID) {
+                    e->value_type = pty;
+                    e->struct_id = type_carries_struct_id(pty) ? f->ret_struct_id : -1;
+                    return e;
+                }
+            }
         }
         pty = ptr_of_type(e->lhs->value_type);
         if (pty != CC_TYPE_VOID) {

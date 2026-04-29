@@ -190,7 +190,6 @@ int sys_utime(const char *path, void *times) {
     /* Permission: owner or root, or times==NULL and write permission */
     if (current_process->euid != 0 && current_process->euid != node->uid) {
         if (times != NULL) {
-            close_fs(node);
             return -EPERM;
         }
     }
@@ -199,7 +198,6 @@ int sys_utime(const char *path, void *times) {
         /* struct utimbuf { time_t actime; time_t modtime; } */
         struct { int64_t actime; int64_t modtime; } ktimes;
         if (copyin(times, &ktimes, sizeof(ktimes)) != 0) {
-            close_fs(node);
             return -EFAULT;
         }
         node->atime = ktimes.actime;
@@ -210,7 +208,6 @@ int sys_utime(const char *path, void *times) {
         node->mtime = now;
     }
     node->ctime = kern_time(NULL);
-    close_fs(node);
     return 0;
 }
 

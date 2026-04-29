@@ -54,6 +54,7 @@ int kern_link(const char *oldpath, const char *newpath);
 int kern_rename(const char *oldpath, const char *newpath);
 int kern_rmdir(const char *path);
 int kern_symlink(const char *target, const char *linkpath);
+int kern_chmodat(int dirfd, const char *path, int mode, int flags);
 int kern_readlink(const char *pathname, char *buf, size_t bufsiz);
 int kern_readlinkat(int dirfd, const char *pathname, char *buf, size_t bufsiz);
 int kern_access(const char *path, int mode);

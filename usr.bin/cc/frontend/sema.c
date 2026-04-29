@@ -412,7 +412,7 @@ static int asm_constraint_is_imm(const char *c) {
         return 0;
     for (i = 0; c[i] != '\0'; ++i) {
         int ch = (unsigned char)c[i];
-        if (ch == 'i' || ch == 'n')
+        if (ch == 'i' || ch == 'n' || ch == 'e')
             return 1;
         if (ch >= 'I' && ch <= 'P')
             return 1;
@@ -431,7 +431,7 @@ static int asm_constraint_letter_supported(int ch) {
     if (ch == 'm' || ch == 'o' || ch == 'V' || ch == 'g' || ch == 'X') {
         return 1;
     }
-    if (ch == 'i' || ch == 'n' || (ch >= 'I' && ch <= 'P')) {
+    if (ch == 'i' || ch == 'n' || ch == 'e' || (ch >= 'I' && ch <= 'P')) {
         return 1;
     }
     return 0;

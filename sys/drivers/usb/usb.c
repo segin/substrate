@@ -338,7 +338,10 @@ static void usb_match_driver(usb_device_t *dev)
 
     for (drv = usb_class_drivers; drv; drv = drv->next) {
         /* Check class/subclass/protocol match */
-        if (drv->if_class != dev->if_class)
+        uint8_t dev_class = dev->if_class;
+        if (dev_class == 0) dev_class = dev->dev_desc.bDeviceClass;
+
+        if (drv->if_class != dev_class)
             continue;
         if (drv->if_subclass != 0xFF &&
             drv->if_subclass != dev->if_subclass)

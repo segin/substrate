@@ -14,6 +14,7 @@ typedef struct {
     unsigned flags;
     unsigned type;
     unsigned align;
+    unsigned entsize;
     unsigned subsection;
     char *group;
     int comdat;

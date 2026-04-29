@@ -1730,20 +1730,22 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
     } else if (streq_ci(insn->mnemonic, "jmp")) {
         if (insn->op_count == 1 && a->kind == AS_X86_OP_REL) {
             unsigned rel_bits = effective_i386_operand_bits(insn);
-            if (insn->byte_op && !insn->force_rel32 && (insn->rel_is_disp || !insn->has_section_offset)) {
+            if (!insn->force_rel32 && (insn->byte_op || insn->has_section_offset || insn->rel_is_disp)) {
                 long long disp;
 
                 if (resolve_rel_target(&ctx, a->u.rel, 2u, &disp) != 0) {
                     return -1;
                 }
-                if (disp < -128 || disp > 127) {
+                if (disp >= -128 && disp <= 127) {
+                    if (emit8(&ctx, 0xeb) != 0 || emit8(&ctx, (uint8_t)((signed char)disp)) != 0) {
+                        return -1;
+                    }
+                    return 0;
+                }
+                if (insn->byte_op) {
                     set_err(&ctx, "jump target out of range");
                     return -1;
                 }
-                if (emit8(&ctx, 0xeb) != 0 || emit8(&ctx, (uint8_t)((signed char)disp)) != 0) {
-                    return -1;
-                }
-                return 0;
             }
             if (emit8(&ctx, 0xe9) != 0) {
                 return -1;
@@ -2353,6 +2355,11 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x06) != 0) {
             return -1;
         }
+    } else if (streq_ci(insn->mnemonic, "clac") || streq_ci(insn->mnemonic, "stac")) {
+        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x01) != 0 ||
+            emit8(&ctx, streq_ci(insn->mnemonic, "clac") ? 0xca : 0xcb) != 0) {
+            return -1;
+        }
     } else if (streq_ci(insn->mnemonic, "sysret")) {
         if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x07) != 0) {
             return -1;
@@ -2919,6 +2926,9 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         } else if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && b->kind == AS_X86_OP_IMM) {
             int use_imm64 = 0;
             rex_b |= reg_ext(a->u.reg);
+            if (operand_bits(a) == 64) {
+                rex_w = 1;
+            }
             if (rex_w) {
                 if (b->u.imm < (int64_t)INT32_MIN || b->u.imm > (int64_t)INT32_MAX) {
                     use_imm64 = 1;
@@ -3098,8 +3108,8 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         uint8_t op_rm_reg;
         uint8_t op_reg_rm;
         uint8_t ext;
+        int bits = 0;
 
-        rex_w = insn->byte_op ? 0 : 1;
         if (streq_ci(insn->mnemonic, "add")) {
             op_rm_reg = 0x01;
             op_reg_rm = 0x03;
@@ -3133,6 +3143,22 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             op_reg_rm = 0x3b;
             ext = 7;
         }
+        if (insn->op_count == 2) {
+            bits = operand_bits(a);
+            if (bits == 0) {
+                bits = operand_bits(b);
+            }
+        }
+        if (insn->byte_op || bits == 8) {
+            bits = 8;
+        } else if (bits == 16 || bits == 32 || bits == 64) {
+            /* keep inferred width */
+        } else if (insn->rex_w) {
+            bits = 64;
+        } else {
+            bits = 32;
+        }
+        rex_w = bits == 64 ? 1 : 0;
         if (insn->byte_op) {
             if (streq_ci(insn->mnemonic, "add")) {
                 op_rm_reg = 0x00;
@@ -3185,6 +3211,12 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             if (insn->byte_op) {
                 if (emit8(&ctx, 0x80) != 0 || modrm_sib_disp64(&ctx, (as_x86_reg_t)ext, a, &rex_r, &rex_x, &rex_b) != 0 ||
                     emit8(&ctx, (uint8_t)b->u.imm) != 0) {
+                    return -1;
+                }
+            } else if (b->u.imm >= -128 && b->u.imm <= 127) {
+                if (emit8(&ctx, 0x83) != 0 ||
+                    modrm_sib_disp64(&ctx, (as_x86_reg_t)ext, a, &rex_r, &rex_x, &rex_b) != 0 ||
+                    emit8(&ctx, (uint8_t)(int8_t)b->u.imm) != 0) {
                     return -1;
                 }
             } else if (emit8(&ctx, 0x81) != 0 || modrm_sib_disp64(&ctx, (as_x86_reg_t)ext, a, &rex_r, &rex_x, &rex_b) != 0 ||
@@ -4521,20 +4553,22 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         }
     } else if (streq_ci(insn->mnemonic, "jmp")) {
         if (insn->op_count == 1 && a->kind == AS_X86_OP_REL) {
-            if (insn->byte_op && !insn->force_rel32 && (insn->rel_is_disp || !insn->has_section_offset)) {
+            if (!insn->force_rel32 && (insn->byte_op || insn->has_section_offset || insn->rel_is_disp)) {
                 long long disp;
 
                 if (resolve_rel_target(&ctx, a->u.rel, 2u, &disp) != 0) {
                     return -1;
                 }
-                if (disp < -128 || disp > 127) {
+                if (disp >= -128 && disp <= 127) {
+                    if (emit8(&ctx, 0xeb) != 0 || emit8(&ctx, (uint8_t)((signed char)disp)) != 0) {
+                        return -1;
+                    }
+                    return 0;
+                }
+                if (insn->byte_op) {
                     set_err(&ctx, "x86_64 jump target out of range");
                     return -1;
                 }
-                if (emit8(&ctx, 0xeb) != 0 || emit8(&ctx, (uint8_t)((signed char)disp)) != 0) {
-                    return -1;
-                }
-                return 0;
             }
             {
                 long long disp;
@@ -4626,6 +4660,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "push")) {
+        rex_w = 0;
         if (insn->op_count == 1 && a->kind == AS_X86_OP_REG) {
             rex_b |= reg_ext(a->u.reg);
             if (emit8(&ctx, (uint8_t)(0x50 | reg_low3(a->u.reg))) != 0) {
@@ -4636,8 +4671,14 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
                 return -1;
             }
         } else if (insn->op_count == 1 && a->kind == AS_X86_OP_IMM) {
-            if (emit8(&ctx, 0x68) != 0 || emit32(&ctx, (uint32_t)a->u.imm) != 0) {
-                return -1;
+            if (a->u.imm >= -128 && a->u.imm <= 127) {
+                if (emit8(&ctx, 0x6a) != 0 || emit8(&ctx, (uint8_t)(int8_t)a->u.imm) != 0) {
+                    return -1;
+                }
+            } else {
+                if (emit8(&ctx, 0x68) != 0 || emit32(&ctx, (uint32_t)a->u.imm) != 0) {
+                    return -1;
+                }
             }
         } else {
             set_err(&ctx, "unsupported operand form for 'push' (op_count=%zu kind=%d)", insn->op_count,
@@ -4645,6 +4686,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "pop")) {
+        rex_w = 0;
         if (insn->op_count == 1 && a->kind == AS_X86_OP_REG) {
             rex_b |= reg_ext(a->u.reg);
             if (emit8(&ctx, (uint8_t)(0x58 | reg_low3(a->u.reg))) != 0) {
@@ -4750,6 +4792,11 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         if (insn->op_count != 2 || (a->kind != AS_X86_OP_REG && a->kind != AS_X86_OP_MEM)) {
             set_unsupported_form(&ctx, insn);
             return -1;
+        }
+        if ((a->kind == AS_X86_OP_REG && a->size_bits == 64) ||
+            (a->kind == AS_X86_OP_MEM && a->u.mem.size_bits == 64) ||
+            (b->kind == AS_X86_OP_REG && b->size_bits == 64)) {
+            rex_w = 1;
         }
         if (b->kind == AS_X86_OP_REG) {
             if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, op2) != 0 ||
@@ -5397,7 +5444,15 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x06) != 0) {
             return -1;
         }
+    } else if (streq_ci(insn->mnemonic, "clac") || streq_ci(insn->mnemonic, "stac")) {
+        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x01) != 0 ||
+            emit8(&ctx, streq_ci(insn->mnemonic, "clac") ? 0xca : 0xcb) != 0) {
+            return -1;
+        }
     } else if (streq_ci(insn->mnemonic, "sysret") || streq_ci(insn->mnemonic, "sysretl") || streq_ci(insn->mnemonic, "sysretq")) {
+        if (streq_ci(insn->mnemonic, "sysretq")) {
+            rex_w = 1;
+        }
         if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x07) != 0) {
             return -1;
         }
@@ -5407,6 +5462,29 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         }
     } else if (streq_ci(insn->mnemonic, "swapgs")) {
         if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x01) != 0 || emit8(&ctx, 0xf8) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "rdfsbase") || streq_ci(insn->mnemonic, "rdgsbase") ||
+               streq_ci(insn->mnemonic, "wrfsbase") || streq_ci(insn->mnemonic, "wrgsbase")) {
+        uint8_t subop;
+        uint8_t rex = 0x40;
+        if (insn->op_count != 1 || a == NULL || a->kind != AS_X86_OP_REG) {
+            return -1;
+        }
+        if (streq_ci(insn->mnemonic, "rdfsbase")) subop = 0;
+        else if (streq_ci(insn->mnemonic, "rdgsbase")) subop = 1;
+        else if (streq_ci(insn->mnemonic, "wrfsbase")) subop = 2;
+        else subop = 3;
+        if (a->size_bits == 64) {
+            rex |= 0x08;
+        }
+        if (a->u.reg >= 8) {
+            rex |= 0x01;
+        }
+        if (emit8(&ctx, 0xf3) != 0 ||
+            ((rex != 0x40 || a->size_bits == 64) && emit8(&ctx, rex) != 0) ||
+            emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xae) != 0 ||
+            emit8(&ctx, (uint8_t)(0xc0 | (subop << 3) | (a->u.reg & 7))) != 0) {
             return -1;
         }
     } else {

@@ -8,13 +8,14 @@
 #include <vfs/vfs.h>
 #include <kern/console.h>
 #include <sys/errno.h>
+#include <vm/vm_kmem.h>
 #include <sys/namei.h>
 #include <fs/udf/udf.h>
 #include <sys/proc.h>
 #include <string.h>
 
-/* UDF filesystem context (single mount for now) */
-struct udf_fs udf_ctx;
+/* UDF filesystem structure registration */
+static filesystem_t udf_filesystem;
 
 /* Forward declarations */
 static fs_node_t *udf_mount(const char *device, uint32_t flags, void *data);
@@ -108,13 +109,15 @@ int udf_read_tag(fs_node_t *dev, uint32_t sector, struct udf_tag *tag,
  * Tries sector 256, then last sector, then last-256
  */
 int udf_find_avdp(fs_node_t *dev, struct udf_avdp *avdp) {
-    static uint8_t sector_buf[UDF_SECTOR_SIZE];
+    uint8_t *sector_buf = kmalloc(UDF_SECTOR_SIZE);
+    if (!sector_buf) return -1;
     struct udf_tag tag;
     
     /* Try sector 256 first (most common) */
     if (udf_read_tag(dev, UDF_AVDP_SECTOR, &tag, sector_buf, UDF_SECTOR_SIZE) == 0) {
         if (tag.tag_id == UDF_TAG_ANCHOR_VDP) {
             memcpy(avdp, sector_buf, sizeof(struct udf_avdp));
+            kfree(sector_buf, UDF_SECTOR_SIZE);
             return 0;
         }
     }
@@ -128,6 +131,7 @@ int udf_find_avdp(fs_node_t *dev, struct udf_avdp *avdp) {
             if (udf_read_tag(dev, last_sector, &tag, sector_buf, UDF_SECTOR_SIZE) == 0) {
                 if (tag.tag_id == UDF_TAG_ANCHOR_VDP) {
                     memcpy(avdp, sector_buf, sizeof(struct udf_avdp));
+                    kfree(sector_buf, UDF_SECTOR_SIZE);
                     return 0;
                 }
             }
@@ -138,12 +142,14 @@ int udf_find_avdp(fs_node_t *dev, struct udf_avdp *avdp) {
             if (udf_read_tag(dev, last_sector - 256, &tag, sector_buf, UDF_SECTOR_SIZE) == 0) {
                 if (tag.tag_id == UDF_TAG_ANCHOR_VDP) {
                     memcpy(avdp, sector_buf, sizeof(struct udf_avdp));
+                    kfree(sector_buf, UDF_SECTOR_SIZE);
                     return 0;
                 }
             }
         }
     }
     
+    kfree(sector_buf, UDF_SECTOR_SIZE);
     kprint("UDF: AVDP not found\n");
     return -1;
 }
@@ -154,7 +160,8 @@ int udf_find_avdp(fs_node_t *dev, struct udf_avdp *avdp) {
  */
 int udf_read_vds(fs_node_t *dev, struct udf_extent_ad *vds_extent,
                  struct udf_pvd *pvd, struct udf_pd *pd, struct udf_lvd *lvd) {
-    static uint8_t sector_buf[UDF_SECTOR_SIZE];
+    uint8_t *sector_buf = kmalloc(UDF_SECTOR_SIZE);
+    if (!sector_buf) return -1;
     struct udf_tag tag;
     
     uint32_t start = vds_extent->location;
@@ -187,10 +194,12 @@ int udf_read_vds(fs_node_t *dev, struct udf_extent_ad *vds_extent,
     }
     
     if (!found_pvd || !found_pd || !found_lvd) {
+        kfree(sector_buf, UDF_SECTOR_SIZE);
         kprint("UDF: VDS incomplete\n");
         return -1;
     }
     
+    kfree(sector_buf, UDF_SECTOR_SIZE);
     return 0;
 }
 
@@ -199,7 +208,8 @@ int udf_read_vds(fs_node_t *dev, struct udf_extent_ad *vds_extent,
  */
 int udf_read_fsd(fs_node_t *dev, struct udf_fs *fs, struct udf_lvd *lvd, 
                  struct udf_fsd *fsd) {
-    static uint8_t sector_buf[UDF_SECTOR_SIZE];
+    uint8_t *sector_buf = kmalloc(UDF_SECTOR_SIZE);
+    if (!sector_buf) return -1;
     struct udf_tag tag;
     
     /* FSD location is relative to partition start */
@@ -207,16 +217,19 @@ int udf_read_fsd(fs_node_t *dev, struct udf_fs *fs, struct udf_lvd *lvd,
     uint32_t fsd_sector = fs->partition_start + fsd_block;
     
     if (udf_read_tag(dev, fsd_sector, &tag, sector_buf, UDF_SECTOR_SIZE) != 0) {
+        kfree(sector_buf, UDF_SECTOR_SIZE);
         kprint("UDF: Failed to read FSD\n");
         return -1;
     }
     
     if (tag.tag_id != UDF_TAG_FSD) {
+        kfree(sector_buf, UDF_SECTOR_SIZE);
         kprint("UDF: Invalid FSD tag\n");
         return -1;
     }
     
     memcpy(fsd, sector_buf, sizeof(struct udf_fsd));
+    kfree(sector_buf, UDF_SECTOR_SIZE);
     return 0;
 }
 
@@ -224,21 +237,25 @@ int udf_read_fsd(fs_node_t *dev, struct udf_fs *fs, struct udf_lvd *lvd,
  * Read File Entry (or Extended File Entry) from ICB location
  */
 int udf_read_fe(struct udf_fs *fs, struct udf_long_ad *icb, struct udf_fe *fe) {
-    static uint8_t sector_buf[UDF_SECTOR_SIZE];
+    uint8_t *sector_buf = kmalloc(UDF_SECTOR_SIZE);
+    if (!sector_buf) return -1;
     struct udf_tag tag;
     
     uint32_t sector = fs->partition_start + icb->block;
     
     if (udf_read_tag(fs->device, sector, &tag, sector_buf, UDF_SECTOR_SIZE) != 0) {
+        kfree(sector_buf, UDF_SECTOR_SIZE);
         return -1;
     }
     
     if (tag.tag_id != UDF_TAG_FE && tag.tag_id != UDF_TAG_EFE) {
+        kfree(sector_buf, UDF_SECTOR_SIZE);
         kprint("UDF: Invalid FE/EFE tag\n");
         return -1;
     }
     
     memcpy(fe, sector_buf, sizeof(struct udf_fe));
+    kfree(sector_buf, UDF_SECTOR_SIZE);
     return 0;
 }
 
@@ -268,15 +285,18 @@ static int udf_read_fe_sector(struct udf_fs *fs, struct udf_long_ad *icb, uint8_
  */
 uint32_t udf_read_file(struct udf_fs *fs, struct udf_fe *fe, 
                        uint32_t offset, uint32_t size, uint8_t *buffer) {
-    static uint8_t sector_buf[UDF_SECTOR_SIZE];
+    uint8_t *sector_buf = kmalloc(UDF_SECTOR_SIZE);
+    if (!sector_buf) return 0;
     
     uint8_t ad_type = fe->icb_tag.flags & 0x7;
 
     /* Validate ext_attr_length + alloc_desc_length fit within sector */
     if (sizeof(struct udf_fe) + fe->ext_attr_length > UDF_SECTOR_SIZE) {
+        kfree(sector_buf, UDF_SECTOR_SIZE);
         return 0;
     }
     if (sizeof(struct udf_fe) + fe->ext_attr_length + fe->alloc_desc_length > UDF_SECTOR_SIZE) {
+        kfree(sector_buf, UDF_SECTOR_SIZE);
         return 0;
     }
 
@@ -284,9 +304,9 @@ uint32_t udf_read_file(struct udf_fs *fs, struct udf_fe *fe,
     
     if (ad_type == UDF_ICB_FLAG_AD_INLINE) {
         /* Inline data - directly in the allocation area */
-        if (offset >= fe->info_length) return 0;
         if (offset + size > fe->info_length) size = fe->info_length - offset;
         memcpy(buffer, alloc_area + offset, size);
+        kfree(sector_buf, UDF_SECTOR_SIZE);
         return size;
     }
     
@@ -428,8 +448,6 @@ static udf_node_t udf_node_cache[UDF_NODE_CACHE_SIZE];
 static fs_node_t udf_fs_node_cache[UDF_NODE_CACHE_SIZE];
 static int udf_node_cache_idx = 0;
 static struct dirent udf_dirent;
-static fs_node_t udf_root;
-static udf_node_t udf_root_ctx;
 
 /* Forward declarations for VFS operations */
 /* Forward declarations for VFS operations */
@@ -489,7 +507,8 @@ static size_t udf_vfs_read(fs_node_t *node, off_t offset, size_t size, uint8_t *
  */
 static struct dirent *udf_vfs_readdir(fs_node_t *node, uint64_t index) {
     udf_node_t *ctx = (udf_node_t *)(uintptr_t)node->impl;
-    static uint8_t dir_buf[4096];
+    uint8_t *dir_buf = kmalloc(4096);
+    if (!dir_buf) return NULL;
     struct udf_fe *fe = (struct udf_fe *)ctx->fe_sector;
     
     /* Read directory data */
@@ -536,6 +555,7 @@ static struct dirent *udf_vfs_readdir(fs_node_t *node, uint64_t index) {
                     }
                 }
                 udf_dirent.d_ino = fid->icb.block;
+                kfree(dir_buf, 4096);
                 return &udf_dirent;
             }
             cur_idx++;
@@ -552,7 +572,8 @@ static struct dirent *udf_vfs_readdir(fs_node_t *node, uint64_t index) {
  */
 static fs_node_t *udf_vfs_finddir(fs_node_t *node, char *name) {
     udf_node_t *ctx = (udf_node_t *)(uintptr_t)node->impl;
-    static uint8_t dir_buf[4096];
+    uint8_t *dir_buf = kmalloc(4096);
+    if (!dir_buf) return NULL;
     struct udf_fe *fe = (struct udf_fe *)ctx->fe_sector;
     
     uint32_t dir_size = (uint32_t)fe->info_length;
@@ -588,6 +609,7 @@ static fs_node_t *udf_vfs_finddir(fs_node_t *node, char *name) {
                     /* Ensure null-termination and prevent buffer overflow by truncating if necessary */
                     strncpy(result->name, fname, sizeof(result->name) - 1);
                     result->name[sizeof(result->name) - 1] = '\0';
+                    kfree(dir_buf, 4096);
                     return result;
                 }
             }
@@ -681,6 +703,25 @@ static int udf_vop_mkdir(struct vnode *dvp, struct vnode **vpp, struct component
     return 0;
 }
 
+static int udf_unmount(fs_node_t *root) {
+    if (!root) return -1;
+    udf_node_t *ctx = (udf_node_t *)(uintptr_t)root->impl;
+    if (!ctx) return -1;
+    struct udf_fs *fs = ctx->fs;
+    if (!fs) return -1;
+
+    // Invalidate node cache for this filesystem
+    for (int i = 0; i < UDF_NODE_CACHE_SIZE; i++) {
+        if (udf_node_cache[i].fs == fs) {
+            memset(&udf_node_cache[i], 0, sizeof(udf_node_t));
+            memset(&udf_fs_node_cache[i], 0, sizeof(fs_node_t));
+        }
+    }
+
+    kfree(fs, sizeof(struct udf_fs));
+    return 0;
+}
+
 /* VFS filesystem structure */
 static filesystem_t udf_filesystem = {
     .name = "udf",
@@ -698,10 +739,16 @@ static fs_node_t *udf_mount(const char *device, uint32_t flags, void *data) {
         kprint("UDF: No device or read function\n");
         return NULL;
     }
+
+    struct udf_fs *fs = kmalloc(sizeof(struct udf_fs));
+    if (!fs) return NULL;
+    memset(fs, 0, sizeof(struct udf_fs));
+    fs->device = dev;
     
     /* Find AVDP */
     struct udf_avdp avdp;
     if (udf_find_avdp(dev, &avdp) != 0) {
+        kfree(fs, sizeof(struct udf_fs));
         return NULL;
     }
     
@@ -710,15 +757,16 @@ static fs_node_t *udf_mount(const char *device, uint32_t flags, void *data) {
     struct udf_pd pd;
     struct udf_lvd lvd;
     if (udf_read_vds(dev, &avdp.main_vds_extent, &pvd, &pd, &lvd) != 0) {
+        kfree(fs, sizeof(struct udf_fs));
         return NULL;
     }
     
     /* Set up filesystem context */
-    udf_ctx.device = dev;
-    udf_ctx.sector_size = UDF_SECTOR_SIZE;
-    udf_ctx.partition_start = pd.partition_start;
-    udf_ctx.partition_length = pd.partition_length;
-    udf_ctx.logical_block_size = lvd.logical_block_size;
+    fs->device = dev;
+    fs->sector_size = UDF_SECTOR_SIZE;
+    fs->partition_start = pd.partition_start;
+    fs->partition_length = pd.partition_length;
+    fs->logical_block_size = lvd.logical_block_size;
     
     /* Initialize Space Bitmap */
     struct udf_partition_header_desc *phd = (struct udf_partition_header_desc *)pd.contents_use;
@@ -733,38 +781,34 @@ static fs_node_t *udf_mount(const char *device, uint32_t flags, void *data) {
     
     /* Read File Set Descriptor */
     struct udf_fsd fsd;
-    if (udf_read_fsd(dev, &udf_ctx, &lvd, &fsd) != 0) {
+    if (udf_read_fsd(dev, fs, &lvd, &fsd) != 0) {
+        kfree(fs, sizeof(struct udf_fs));
         return NULL;
     }
     
     /* Save root ICB */
-    memcpy(&udf_ctx.root_icb, &fsd.root_dir_icb, sizeof(struct udf_long_ad));
+    memcpy(&fs->root_icb, &fsd.root_dir_icb, sizeof(struct udf_long_ad));
     
     /* Read root directory file entry (full sector) */
     uint8_t root_fe_sector[UDF_SECTOR_SIZE];
-    if (udf_read_fe_sector(&udf_ctx, &udf_ctx.root_icb, root_fe_sector) != 0) {
+    if (udf_read_fe_sector(fs, &fs->root_icb, root_fe_sector) != 0) {
         kprint("UDF: Failed to read root directory\n");
+        kfree(fs, sizeof(struct udf_fs));
         return NULL;
     }
-    struct udf_fe *root_fe = (struct udf_fe *)root_fe_sector;
-    
     /* Set up root node */
-    udf_root_ctx.fs = &udf_ctx;
-    memcpy(&udf_root_ctx.icb, &udf_ctx.root_icb, sizeof(struct udf_long_ad));
-    memcpy(udf_root_ctx.fe_sector, root_fe_sector, UDF_SECTOR_SIZE);
+    fs_node_t *root_node = udf_alloc_node(fs, &fs->root_icb, root_fe_sector);
+    if (!root_node) {
+        kfree(fs, sizeof(struct udf_fs));
+        return NULL;
+    }
     
-    memset(&udf_root, 0, sizeof(fs_node_t));
-    strncpy(udf_root.name, "/", sizeof(udf_root.name) - 1);
-    udf_root.name[sizeof(udf_root.name) - 1] = '\0';
-    udf_root.flags = FS_DIRECTORY;
-    udf_root.length = (uint32_t)root_fe->info_length;
-    udf_root.impl = (uintptr_t)&udf_root_ctx;
-    udf_root.readdir = udf_vfs_readdir;
-    udf_root.finddir = udf_vfs_finddir;
-    udf_root.mkdir = udf_vfs_mkdir;
+    strncpy(root_node->name, "/", sizeof(root_node->name) - 1);
+    root_node->name[sizeof(root_node->name) - 1] = '\0';
+    root_node->unmount = udf_unmount;
     
     kprint("UDF: Mounted successfully\n");
-    return &udf_root;
+    return root_node;
 }
 
 void udf_init(void) {

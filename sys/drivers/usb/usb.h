@@ -99,10 +99,19 @@
 /* Endpoint feature selectors */
 #define USB_FEATURE_HALT        0
 
-/* Hub features */
+/* Hub class-specific requests */
+#define USB_HUB_REQ_GET_STATUS      0x00
+#define USB_HUB_REQ_CLEAR_FEATURE   0x01
+#define USB_HUB_REQ_SET_FEATURE     0x03
+#define USB_HUB_REQ_GET_DESCRIPTOR  0x06
+
+/* Hub port feature selectors (wValue for SET/CLEAR_FEATURE) */
+#define USB_HUB_FEAT_PORT_ENABLE    1
+#define USB_HUB_FEAT_PORT_SUSPEND   2
 #define USB_HUB_FEAT_PORT_RESET     4
 #define USB_HUB_FEAT_PORT_POWER     8
 #define USB_HUB_FEAT_C_PORT_CONNECT 16
+#define USB_HUB_FEAT_C_PORT_ENABLE  17
 #define USB_HUB_FEAT_C_PORT_RESET   20
 
 /* Hub port status bits */
@@ -344,6 +353,7 @@ typedef struct usb_class_driver {
 void usb_init(void);
 void usb_msc_init(void);
 void usb_hid_init(void);
+void usb_hub_init(void);
 
 /* HCD Registration */
 int  usb_register_hcd(usb_hcd_t *hcd);

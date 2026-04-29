@@ -1847,15 +1847,32 @@ static fs_node_t *sys_lookup_path(const char *path, int follow_final_symlink) {
 
 int sys_chmod(const char *path, int mode) {
     char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    return kern_chmodat(AT_FDCWD, kpath, mode, 0);
+}
+
+int kern_chmodat(int dirfd, const char *path, int mode, int flags) {
+    fs_node_t *root;
+    fs_node_t *cwd;
     fs_node_t *node;
+    int nofollow;
     int ret;
 
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
-    node = sys_lookup_path(kpath, 1);
+    if (!path) return -EFAULT;
+    if ((flags & ~AT_SYMLINK_NOFOLLOW) != 0) return -EINVAL;
+
+    ret = kern_path_roots_from_dirfd(dirfd, path, &root, &cwd);
+    if (ret != 0) return ret;
+
+    nofollow = (flags & AT_SYMLINK_NOFOLLOW) != 0;
+    node = nofollow
+        ? vfs_lookup_lstat((path[0] == '/') ? root : cwd, path)
+        : vfs_lookup((path[0] == '/') ? root : cwd, path);
     if (!node) return -ENOENT;
 
-    if (current_process->euid != 0 && current_process->euid != node->uid)
+    if (current_process->euid != 0 && current_process->euid != node->uid) {
         return -EPERM;
+    }
 
     if (current_process->euid != 0)
         mode &= ~(04000 | 02000);

@@ -9,19 +9,11 @@
 #include <sys/stat.h>
 #include <sys/mount.h>
 
-// Static filesystem context (single mount for now)
-static ext2_fs_t ext2_fs;
-static ext2_group_desc_t ext2_bgd_table[64]; // Max 64 block groups
-static ext2_node_t ext2_root_ctx;
-static fs_node_t ext2_root;
-
 // Cache for dynamically created nodes
 #define EXT2_NODE_CACHE_SIZE 64
 static ext2_node_t ext2_node_cache[EXT2_NODE_CACHE_SIZE];
 static fs_node_t ext2_fs_node_cache[EXT2_NODE_CACHE_SIZE];
 static int ext2_node_cache_idx = 0;
-
-static uma_zone_t *ext2_block_cache;
 
 static void ext2_node_open(fs_node_t *node) {
     if (!node) return;
@@ -140,16 +132,16 @@ int ext2_read_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
     uint32_t inode_offset = (index % inodes_per_block) * fs->inode_size;
     
     // Read the block containing the inode
-    uint8_t *block_buf = uma_zalloc(ext2_block_cache, M_WAITOK);
+    uint8_t *block_buf = kmalloc(fs->block_size);
     if (!block_buf) return -1;
 
     if (ext2_read_block(fs, inode_table_block + block_offset, block_buf) != fs->block_size) {
-        uma_zfree(ext2_block_cache, block_buf);
+        kfree(block_buf, fs->block_size);
         return -1;
     }
     
     memcpy(inode, block_buf + inode_offset, sizeof(ext2_inode_t));
-    uma_zfree(ext2_block_cache, block_buf);
+    kfree(block_buf, fs->block_size);
     return 0;
 }
 
@@ -210,7 +202,7 @@ static int ext2_flush_group_desc(ext2_fs_t *fs, uint32_t group) {
     bgd_block = (fs->block_size == 1024) ? 2 : 1;
     desc_offset = group * sizeof(ext2_group_desc_t);
     block_offset = desc_offset % fs->block_size;
-    block_buf = uma_zalloc(ext2_block_cache, M_WAITOK);
+    block_buf = kmalloc(fs->block_size);
     if (!block_buf) return -ENOMEM;
 
     if (ext2_read_block(fs, bgd_block + (desc_offset / fs->block_size), block_buf) != fs->block_size) {
@@ -225,7 +217,7 @@ static int ext2_flush_group_desc(ext2_fs_t *fs, uint32_t group) {
     }
 
 out:
-    uma_zfree(ext2_block_cache, block_buf);
+    kfree(block_buf, fs->block_size);
     return ret;
 }
 
@@ -248,11 +240,11 @@ int ext2_write_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
     uint32_t inode_offset = (index % inodes_per_block) * fs->inode_size;
     
     // Read the block containing the inode
-    uint8_t *block_buf = uma_zalloc(ext2_block_cache, M_WAITOK);
+    uint8_t *block_buf = kmalloc(fs->block_size);
     if (!block_buf) return -1;
 
     if (ext2_read_block(fs, inode_table_block + block_offset, block_buf) != fs->block_size) {
-        uma_zfree(ext2_block_cache, block_buf);
+        kfree(block_buf, fs->block_size);
         return -1;
     }
 
@@ -261,11 +253,11 @@ int ext2_write_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
     
     // Write the block back to disk
     if (ext2_write_block(fs, inode_table_block + block_offset, block_buf) != fs->block_size) {
-        uma_zfree(ext2_block_cache, block_buf);
+        kfree(block_buf, fs->block_size);
         return -1;
     }
     
-    uma_zfree(ext2_block_cache, block_buf);
+    kfree(block_buf, fs->block_size);
     return 0;
 }
 
@@ -662,10 +654,19 @@ uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size, const 
 // Allocate a node from the cache
 fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
     int idx = -1;
+
+    // 1. Search for existing node in cache
+    for (int i = 0; i < EXT2_NODE_CACHE_SIZE; i++) {
+        if (ext2_node_cache[i].fs == fs && ext2_node_cache[i].inode_num == inode_num) {
+            return &ext2_fs_node_cache[i];
+        }
+    }
+
+    // 2. Allocate a new slot from the cache
     int start = ext2_node_cache_idx % EXT2_NODE_CACHE_SIZE;
     for (int i = 0; i < EXT2_NODE_CACHE_SIZE; i++) {
         int probe = (start + i) % EXT2_NODE_CACHE_SIZE;
-        if (ext2_node_cache[probe].pin_count == 0) {
+        if (ext2_node_cache[probe].pin_count == 0 && ext2_node_cache[probe].lock.locked == 0) {
             idx = probe;
             ext2_node_cache_idx = (probe + 1) % EXT2_NODE_CACHE_SIZE;
             break;
@@ -678,6 +679,16 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
     ext2_node_t *ctx = &ext2_node_cache[idx];
     fs_node_t *node = &ext2_fs_node_cache[idx];
     
+    // Clean up old context
+    if (ctx->fs) {
+        uint32_t old_block_size = ctx->fs->block_size;
+        if (ctx->block_buf) { kfree(ctx->block_buf, old_block_size); ctx->block_buf = NULL; }
+        if (ctx->indirect_buf) { kfree(ctx->indirect_buf, old_block_size); ctx->indirect_buf = NULL; }
+        if (ctx->dindirect_buf) { kfree(ctx->dindirect_buf, old_block_size); ctx->dindirect_buf = NULL; }
+        if (ctx->tindirect_buf) { kfree(ctx->tindirect_buf, old_block_size); ctx->tindirect_buf = NULL; }
+    }
+
+    memset(ctx, 0, sizeof(ext2_node_t));
     ctx->fs = fs;
     ctx->inode_num = inode_num;
     memcpy(&ctx->inode, inode, sizeof(ext2_inode_t));
@@ -693,13 +704,6 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
     ctx->dcache_idx = 0;
     memset(ctx->dcache, 0, sizeof(ctx->dcache));
 
-    uint32_t block_size = fs->block_size;
-
-    if (ctx->block_buf) { kfree(ctx->block_buf, block_size); ctx->block_buf = NULL; }
-    if (ctx->indirect_buf) { kfree(ctx->indirect_buf, block_size); ctx->indirect_buf = NULL; }
-    if (ctx->dindirect_buf) { kfree(ctx->dindirect_buf, block_size); ctx->dindirect_buf = NULL; }
-    if (ctx->tindirect_buf) { kfree(ctx->tindirect_buf, block_size); ctx->tindirect_buf = NULL; }
-
     memset(node, 0, sizeof(fs_node_t));
     node->inode = inode_num;
     node->length = inode->i_size;
@@ -710,6 +714,7 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
     node->mtime = inode->i_mtime;
     node->ctime = inode->i_ctime;
     node->impl = (uintptr_t)ctx;
+    node->mp = fs->mp; // Correctly associate with mount point!
     node->open = ext2_node_open;
     node->close = ext2_node_close;
     node->chmod = ext2_chmod;
@@ -814,6 +819,9 @@ size_t ext2_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t
 struct dirent *ext2_readdir(fs_node_t *node, uint64_t index) {
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     ext2_fs_t *fs = ctx->fs;
+
+    // Lazily set mount pointer in filesystem context
+    if (!fs->mp && node->mp) fs->mp = node->mp;
     
     // Read the directory data
     uint32_t dir_size = ctx->inode.i_size;
@@ -905,6 +913,9 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     ext2_fs_t *fs = ctx->fs;
     
+    // Lazily set mount pointer in filesystem context
+    if (!fs->mp && node->mp) fs->mp = node->mp;
+    
     size_t name_len = strlen(name);
     uint32_t dir_size = ctx->inode.i_size;
     uint32_t pos = 0;
@@ -922,6 +933,7 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
             ext2_inode_t inode;
             if (ext2_read_inode(fs, ctx->dcache[k].inode_num, &inode) == 0) {
                 result_node = ext2_alloc_node(fs, ctx->dcache[k].inode_num, &inode);
+                if (!result_node) goto cleanup;
                 // Copy name
                 size_t len = name_len;
                 if (len >= sizeof(result_node->name)) {
@@ -972,6 +984,7 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
                     ext2_inode_t inode;
                     if (ext2_read_inode(fs, de->inode, &inode) == 0) {
                         result_node = ext2_alloc_node(fs, de->inode, &inode);
+                        if (!result_node) goto cleanup;
                         // Copy name
                         uint32_t len = de->name_len;
                         if (len >= sizeof(result_node->name)) {
@@ -1015,132 +1028,126 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
         return NULL;
     }
     
+    ext2_fs_t *fs = kmalloc(sizeof(ext2_fs_t));
+    if (!fs) return NULL;
+    memset(fs, 0, sizeof(ext2_fs_t));
+
     // Read superblock (at offset 1024)
     uint8_t sb_buf[1024];
     uint32_t read = dev->read(dev, 1024, 1024, sb_buf);
     if (read != 1024) {
         kprint("EXT2: Failed to read superblock\n");
+        kfree(fs, sizeof(ext2_fs_t));
         return NULL;
     }
     
-    memcpy(&ext2_fs.sb, sb_buf, sizeof(ext2_superblock_t));
+    memcpy(&fs->sb, sb_buf, sizeof(ext2_superblock_t));
     
-    if (ext2_fs.sb.s_magic != EXT2_SUPER_MAGIC) {
+    if (fs->sb.s_magic != EXT2_SUPER_MAGIC) {
         kprint("EXT2: Invalid magic number\n");
+        kfree(fs, sizeof(ext2_fs_t));
         return NULL;
     }
     
-    ext2_fs.device = dev;
+    fs->device = dev;
 
     // Validate s_log_block_size before shifting (max 64KB blocks, i.e. log=6)
-    if (ext2_fs.sb.s_log_block_size > 6) {
+    if (fs->sb.s_log_block_size > 6) {
         kprint("EXT2: Invalid s_log_block_size\n");
+        kfree(fs, sizeof(ext2_fs_t));
         return NULL;
     }
-    ext2_fs.block_size = 1024 << ext2_fs.sb.s_log_block_size;
+    fs->block_size = 1024 << fs->sb.s_log_block_size;
 
-    ext2_fs.inodes_per_group = ext2_fs.sb.s_inodes_per_group;
-    ext2_fs.blocks_per_group = ext2_fs.sb.s_blocks_per_group;
-    if (ext2_fs.blocks_per_group == 0) {
+    fs->inodes_per_group = fs->sb.s_inodes_per_group;
+    fs->blocks_per_group = fs->sb.s_blocks_per_group;
+    if (fs->blocks_per_group == 0) {
         kprint("EXT2: Invalid blocks_per_group\n");
+        kfree(fs, sizeof(ext2_fs_t));
         return NULL;
     }
-    ext2_fs.group_count = (ext2_fs.sb.s_blocks_count + ext2_fs.blocks_per_group - 1) / ext2_fs.blocks_per_group;
-    if (ext2_fs.group_count > 64) {
-        kprint("EXT2: Too many block groups (> 64)\n");
-        return NULL;
-    }
-    ext2_fs.inode_size = (ext2_fs.sb.s_rev_level >= 1) ? ext2_fs.sb.s_inode_size : EXT2_GOOD_OLD_INODE_SIZE;
+    fs->group_count = (fs->sb.s_blocks_count + fs->blocks_per_group - 1) / fs->blocks_per_group;
+    
+    fs->inode_size = (fs->sb.s_rev_level >= 1) ? fs->sb.s_inode_size : EXT2_GOOD_OLD_INODE_SIZE;
 
     // Validate inode_size is non-zero and fits within a block
-    if (ext2_fs.inode_size == 0 || ext2_fs.inode_size > ext2_fs.block_size) {
+    if (fs->inode_size == 0 || fs->inode_size > fs->block_size) {
         kprint("EXT2: Invalid inode_size\n");
+        kfree(fs, sizeof(ext2_fs_t));
         return NULL;
     }
 
-    // Recreate block cache zone to match actual block_size (may differ from init default)
-    if (ext2_block_cache) {
-        uma_zdestroy(ext2_block_cache);
-    }
-    ext2_block_cache = uma_zcreate("ext2-block", ext2_fs.block_size, NULL, NULL, NULL, NULL, 0, 0);
+    uint32_t raw_bgd_size = fs->group_count * sizeof(ext2_group_desc_t);
+    uint32_t bgd_blocks = (raw_bgd_size + fs->block_size - 1) / fs->block_size;
+    uint32_t bgd_size = bgd_blocks * fs->block_size;
 
-    ext2_fs.bgd = ext2_bgd_table;
-    ext2_fs.last_alloc_group = 0;
-    ext2_fs.last_alloc_bit = 0;
-    
+    fs->bgd = kmalloc(bgd_size);
+    if (!fs->bgd) {
+        kfree(fs, sizeof(ext2_fs_t));
+        return NULL;
+    }
+    memset(fs->bgd, 0, bgd_size);
+
+    fs->last_alloc_group = 0;
+    fs->last_alloc_bit = 0;
+
     // Read block group descriptor table (starts at block 2 for 1K blocks, block 1 for larger)
-    uint32_t bgd_block = (ext2_fs.block_size == 1024) ? 2 : 1;
-    uint32_t bgd_size = ext2_fs.group_count * sizeof(ext2_group_desc_t);
-    
+    uint32_t bgd_block = (fs->block_size == 1024) ? 2 : 1;
+
     // Read enough blocks for the BGD table
-    uint32_t bgd_blocks = (bgd_size + ext2_fs.block_size - 1) / ext2_fs.block_size;
-    for (uint32_t i = 0; i < bgd_blocks && i < 2; i++) {
-        ext2_read_block(&ext2_fs, bgd_block + i, 
-                       ((uint8_t *)ext2_bgd_table) + i * ext2_fs.block_size);
+    for (uint32_t i = 0; i < bgd_blocks; i++) {        ext2_read_block(fs, bgd_block + i, 
+                       ((uint8_t *)fs->bgd) + i * fs->block_size);
     }
     
     // Read root inode (inode 2)
     ext2_inode_t root_inode;
-    if (ext2_read_inode(&ext2_fs, EXT2_ROOT_INO, &root_inode) != 0) {
+    if (ext2_read_inode(fs, EXT2_ROOT_INO, &root_inode) != 0) {
         kprint("EXT2: Failed to read root inode\n");
+        kfree(fs->bgd, bgd_size);
+        kfree(fs, sizeof(ext2_fs_t));
         return NULL;
     }
-    
-    // Initialize optimization hints
-    ext2_fs.last_alloc_group = 0;
-    ext2_fs.last_alloc_bit = 0;
 
     // Initialize active block bitmap cache
-    ext2_fs.active_bg_group = (uint32_t)-1;
-    if (!ext2_fs.active_bg_bitmap) {
-        ext2_fs.active_bg_bitmap = uma_zalloc(ext2_block_cache, M_WAITOK);
+    fs->active_bg_group = (uint32_t)-1;
+    fs->active_bg_bitmap = kmalloc(fs->block_size);
+    if (!fs->active_bg_bitmap) {
+        kfree(fs->bgd, bgd_size);
+        kfree(fs, sizeof(ext2_fs_t));
+        return NULL;
     }
+    memset(fs->active_bg_bitmap, 0, fs->block_size);
 
     // Initialize active inode bitmap cache
-    ext2_fs.active_inode_bg_group = (uint32_t)-1;
-    if (!ext2_fs.active_inode_bg_bitmap) {
-        ext2_fs.active_inode_bg_bitmap = uma_zalloc(ext2_block_cache, M_WAITOK);
+    fs->active_inode_bg_group = (uint32_t)-1;
+    fs->active_inode_bg_bitmap = kmalloc(fs->block_size);
+    if (!fs->active_inode_bg_bitmap) {
+        kfree(fs->active_bg_bitmap, fs->block_size);
+        kfree(fs->bgd, bgd_size);
+        kfree(fs, sizeof(ext2_fs_t));
+        return NULL;
     }
+    memset(fs->active_inode_bg_bitmap, 0, fs->block_size);
 
     // Setup root node
-    ext2_root_ctx.fs = &ext2_fs;
-    ext2_root_ctx.inode_num = EXT2_ROOT_INO;
-    memcpy(&ext2_root_ctx.inode, &root_inode, sizeof(ext2_inode_t));
-    ext2_root_ctx.cache_slot = 0xFFFF;
-    ext2_root_ctx.pin_count = 0;
+    fs_node_t *root_node = ext2_alloc_node(fs, EXT2_ROOT_INO, &root_inode);
+    if (!root_node) {
+        kprint("EXT2: Failed to allocate root node\n");
+        kfree(fs->active_inode_bg_bitmap, fs->block_size);
+        kfree(fs->active_bg_bitmap, fs->block_size);
+        kfree(fs->bgd, bgd_size);
+        kfree(fs, sizeof(ext2_fs_t));
+        return NULL;
+    }
+
+    strncpy(root_node->name, "/", sizeof(root_node->name) - 1);
+    root_node->name[sizeof(root_node->name) - 1] = '\0';
     
-    memset(&ext2_root, 0, sizeof(fs_node_t));
-    strncpy(ext2_root.name, "/", sizeof(ext2_root.name) - 1);
-    ext2_root.name[sizeof(ext2_root.name) - 1] = '\0';
-    ext2_root.flags = FS_DIRECTORY;
-    ext2_root.inode = EXT2_ROOT_INO;
-    ext2_root.length = root_inode.i_size;
-    ext2_root.mask = root_inode.i_mode & 0x0FFF;
-    ext2_root.uid = root_inode.i_uid;
-    ext2_root.gid = root_inode.i_gid;
-    ext2_root.atime = root_inode.i_atime;
-    ext2_root.mtime = root_inode.i_mtime;
-    ext2_root.ctime = root_inode.i_ctime;
-    ext2_root.impl = (uintptr_t)&ext2_root_ctx;
-    ext2_root.readdir = ext2_readdir;
-    ext2_root.finddir = ext2_finddir;
-    ext2_root.mkdir = ext2_mkdir;
-    ext2_root.mknod = ext2_mknod;
-    ext2_root.unlink = ext2_unlink;
-    ext2_root.rmdir = ext2_rmdir;
-    ext2_root.link = ext2_link;
-    ext2_root.rename = ext2_rename;
-    ext2_root.statfs = ext2_statfs;
-    ext2_root.symlink = ext2_symlink;
-    ext2_root.link = ext2_link;
-    ext2_root.rename = ext2_rename;
-    ext2_root.statfs = ext2_statfs;
-    ext2_root.unmount = ext2_unmount;
-    ext2_root.open = ext2_node_open;
-    ext2_root.close = ext2_node_close;
+    ext2_node_t *root_ctx = (ext2_node_t *)(uintptr_t)root_node->impl;
+    root_ctx->pin_count = 1; // Pin root node
     
     kprint("EXT2: Mounted successfully\n");
-    return &ext2_root;
+    return root_node;
 }
 
 static filesystem_t ext2_filesystem = {
@@ -1150,7 +1157,6 @@ static filesystem_t ext2_filesystem = {
 
 void ext2_init(void) {
     kprint("Initializing EXT2 Driver...\n");
-    ext2_block_cache = uma_zcreate("ext2-block", 4096, NULL, NULL, NULL, NULL, 0, 0);
     vfs_register_filesystem(&ext2_filesystem);
 }
 
@@ -1425,11 +1431,11 @@ static int ext2_free_indirect_tree(ext2_fs_t *fs, uint32_t block_num, uint32_t d
     }
 
     entries_per_block = fs->block_size / sizeof(uint32_t);
-    block_buf = uma_zalloc(ext2_block_cache, M_WAITOK);
+    block_buf = kmalloc(fs->block_size);
     if (!block_buf) return -ENOMEM;
 
     if (ext2_read_block(fs, block_num, block_buf) != fs->block_size) {
-        uma_zfree(ext2_block_cache, block_buf);
+        kfree(block_buf, fs->block_size);
         return -EIO;
     }
 
@@ -1437,13 +1443,13 @@ static int ext2_free_indirect_tree(ext2_fs_t *fs, uint32_t block_num, uint32_t d
         if (block_buf[i] != 0) {
             int ret = ext2_free_indirect_tree(fs, block_buf[i], depth - 1);
             if (ret != 0) {
-                uma_zfree(ext2_block_cache, block_buf);
+                kfree(block_buf, fs->block_size);
                 return ret;
             }
         }
     }
 
-    uma_zfree(ext2_block_cache, block_buf);
+    kfree(block_buf, fs->block_size);
     ext2_free_block(fs, block_num);
     return 0;
 }
@@ -2222,6 +2228,29 @@ int ext2_statfs(fs_node_t *node, struct statfs *buf) {
     return 0;
 }
 int ext2_unmount(fs_node_t *node) {
-    (void)node;
+    if (!node) return -EINVAL;
+    ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
+    if (!ctx) return -EINVAL;
+    ext2_fs_t *fs = ctx->fs;
+    if (!fs) return -EINVAL;
+
+    // Free all active cached nodes for this fs
+    for (int i = 0; i < EXT2_NODE_CACHE_SIZE; i++) {
+        if (ext2_node_cache[i].fs == fs) {
+            uint32_t old_block_size = fs->block_size;
+            if (ext2_node_cache[i].block_buf) kfree(ext2_node_cache[i].block_buf, old_block_size);
+            if (ext2_node_cache[i].indirect_buf) kfree(ext2_node_cache[i].indirect_buf, old_block_size);
+            if (ext2_node_cache[i].dindirect_buf) kfree(ext2_node_cache[i].dindirect_buf, old_block_size);
+            if (ext2_node_cache[i].tindirect_buf) kfree(ext2_node_cache[i].tindirect_buf, old_block_size);
+            memset(&ext2_node_cache[i], 0, sizeof(ext2_node_t));
+            memset(&ext2_fs_node_cache[i], 0, sizeof(fs_node_t));
+        }
+    }
+
+    if (fs->active_bg_bitmap) kfree(fs->active_bg_bitmap, fs->block_size);
+    if (fs->active_inode_bg_bitmap) kfree(fs->active_inode_bg_bitmap, fs->block_size);
+    if (fs->bgd) kfree(fs->bgd, fs->group_count * sizeof(ext2_group_desc_t));
+
+    kfree(fs, sizeof(ext2_fs_t));
     return 0;
 }

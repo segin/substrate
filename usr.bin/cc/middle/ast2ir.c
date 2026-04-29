@@ -9353,6 +9353,18 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
     if (s->kind == CC_STMT_DECL) {
         int v;
         int varv;
+        if ((s->storage & CC_STORAGE_EXTERN) != 0 && s->decl_name != NULL) {
+            if (s->expr != NULL) {
+                set_diag(diag, "extern local declaration cannot have an initializer");
+                return -1;
+            }
+            if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, s->array_len, s->array_ndim,
+                           s->array_dims, -1, depth, 1, 0, s->decl_name) != 0) {
+                set_diag(diag, "out of memory defining extern local declaration");
+                return -1;
+            }
+            return 0;
+        }
         if ((s->storage & CC_STORAGE_STATIC) != 0 && s->decl_name != NULL) {
             cc_ssa_global_t g;
             cc_ssa_instr_t in;
@@ -13183,7 +13195,10 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
 
         if (m->type == CC_TYPE_VOID && m->type_struct_id >= 0) {
             const cc_expr_t *nested = extract_struct_init_list_expr(item, m->type_struct_id);
-            nested = unwrap_self_designated_init_list(nested, m->name);
+            if (m->name == NULL || m->type_struct_id < 0 || (size_t)m->type_struct_id >= tu->struct_count ||
+                find_struct_member_index_by_name(&tu->structs[m->type_struct_id], m->name) < 0) {
+                nested = unwrap_self_designated_init_list(nested, m->name);
+            }
             if (nested != NULL) {
                 size_t sub = 0;
                 if (!consumed_item) {

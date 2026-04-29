@@ -284,6 +284,22 @@ void syscall_handler(registers_t *regs) {
 
     void *location = p->syscall_table[syscall_num];
     
+    // Check for special sigreturn handling
+    if (syscall_num == 119 && p->sigreturn) {
+        regs->eax = (uint32_t)p->sigreturn(regs);
+        goto syscall_done;
+    }
+    if (syscall_num == 173 && p->rt_sigreturn) {
+        regs->eax = (uint32_t)p->rt_sigreturn(regs);
+        goto syscall_done;
+    }
+    // Native Substrate sigreturn
+    if (p->id == 0 && syscall_num == SYS_SIGRETURN) {
+        extern int sys_sigreturn(void*);
+        regs->eax = (uint32_t)sys_sigreturn(regs);
+        goto syscall_done;
+    }
+
     if (!location) {
         if (syscall_trace_enabled) kprint("SYSCALL: Not Implemented\n");
         regs->eax = -38; // ENOSYS
@@ -325,6 +341,7 @@ void syscall_handler(registers_t *regs) {
         regs->edx = (uint32_t)((ret >> 32) & 0xFFFFFFFF);
     }
 
+syscall_done:
     if (syscall_trace_enabled) {
         char buf[64];
         snprintf(buf, sizeof(buf), " ret %d\n", (int)regs->eax);

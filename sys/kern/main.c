@@ -461,6 +461,7 @@ static void init_storage_and_vfs(multiboot_info_t *mboot_info) {
     uhci_init();
     usb_msc_init();
     usb_hid_init();
+    usb_hub_init();
     usb_init();
     virtio_init();
     register_boot_ramdisks(mboot_info);
@@ -685,7 +686,35 @@ void kinit_task(void *arg) {
             kprint(init_arg);
         }
         kprint("\n");
-        char *init_argv[] = { init_path, init_arg, NULL };
+        char *init_argv[32];
+        int argc = 0;
+        init_argv[argc++] = init_path;
+        
+        if (init_arg) {
+            char *p = init_arg;
+            while (*p && argc < 31) {
+                while (*p == ' ') p++;
+                if (!*p) break;
+                
+                if (*p == '\'') {
+                    p++;
+                    init_argv[argc++] = p;
+                    while (*p && *p != '\'') p++;
+                    if (*p) *p++ = '\0';
+                } else if (*p == '\"') {
+                    p++;
+                    init_argv[argc++] = p;
+                    while (*p && *p != '\"') p++;
+                    if (*p) *p++ = '\0';
+                } else {
+                    init_argv[argc++] = p;
+                    while (*p && *p != ' ') p++;
+                    if (*p) *p++ = '\0';
+                }
+            }
+        }
+        init_argv[argc] = NULL;
+        
         if (kern_execve(init_path, init_argv, init_envp) == 0) {
             goto exec_success;
         }

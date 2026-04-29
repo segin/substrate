@@ -370,6 +370,39 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
 // Lookup a path from a root node
 fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
     if (!path || !root) return NULL;
+    
+    /* 
+     * Implement personality shadowing:
+     * Non-native processes try /perso/<name>/<path> first.
+     */
+    if (current_process && current_process->perso_id != 0 && path[0] == '/') {
+        extern const char *perso_name(int id);
+        const char *pname = perso_name(current_process->perso_id);
+        if (pname) {
+            char ppath[512];
+            char lname[32];
+            size_t k, count = 0;
+            for (k = 0; pname[k] && count < 31; k++) {
+                char c = pname[k];
+                if ((c >= 'A' && c <= 'Z')) {
+                    lname[count++] = c + 32;
+                } else if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+                    lname[count++] = c;
+                }
+                // Skip everything else (slashes, dots, etc)
+            }
+            lname[count] = '\0';
+
+            if (count > 0) {
+                snprintf(ppath, sizeof(ppath), "/perso/%s%s", lname, path);
+                
+                // Internal direct lookup to avoid infinite recursion
+                fs_node_t *pnode = vfs_lookup(fs_root, ppath);
+                if (pnode) return pnode;
+            }
+        }
+    }
+
     if (path[0] == '/') path++; // Skip leading /
     if (path[0] == '\0') return root; // Root itself
     

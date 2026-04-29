@@ -213,7 +213,17 @@ static int asm_constraint_has(const char *c, char ch) {
 }
 
 static int asm_constraint_is_immediate(const char *c) {
-    return asm_constraint_has(c, 'i');
+    size_t i;
+    if (c == NULL) {
+        return 0;
+    }
+    for (i = 0; c[i] != '\0'; ++i) {
+        unsigned char ch = (unsigned char)c[i];
+        if (ch == 'i' || ch == 'n' || ch == 'e' || (ch >= 'I' && ch <= 'P')) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static int asm_constraint_allows_register(const char *c) {

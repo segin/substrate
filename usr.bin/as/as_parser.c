@@ -1,6 +1,7 @@
 #include "as_parser.h"
 
 #include <ctype.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -159,6 +160,10 @@ static void free_expr(as_expr_t *e) {
     free(e->symbol);
     free(e->src_file);
     free(e);
+}
+
+void as_expr_free(as_expr_t *e) {
+    free_expr(e);
 }
 
 static void free_operand(as_operand_t *op) {
@@ -654,7 +659,8 @@ static char *join_tokens(const as_token_t *tokv, size_t n, int for_expr) {
 
         if (i != 0) {
             const char *prev = tokv[i - 1].text;
-            char p = prev[strlen(prev) - 1];
+            size_t prev_len = strlen(prev);
+            char p = prev_len > 0 ? prev[prev_len - 1] : '\0';
             char c = t[0];
             if (!for_expr) {
                 add_space = 1;
@@ -781,6 +787,36 @@ static int expr_lex_next(expr_lex_t *lx) {
         lx->i = i + 2;
         return 0;
     }
+    if (s[i] == '=' && s[i + 1] == '=') {
+        lx->cur.kind = EXPR_TOK_OP;
+        lx->cur.op = AS_EXPR_OP_EQ;
+        lx->i = i + 2;
+        return 0;
+    }
+    if (s[i] == '!' && s[i + 1] == '=') {
+        lx->cur.kind = EXPR_TOK_OP;
+        lx->cur.op = AS_EXPR_OP_NE;
+        lx->i = i + 2;
+        return 0;
+    }
+    if (s[i] == '<' && s[i + 1] == '=') {
+        lx->cur.kind = EXPR_TOK_OP;
+        lx->cur.op = AS_EXPR_OP_LE;
+        lx->i = i + 2;
+        return 0;
+    }
+    if (s[i] == '>' && s[i + 1] == '=') {
+        lx->cur.kind = EXPR_TOK_OP;
+        lx->cur.op = AS_EXPR_OP_GE;
+        lx->i = i + 2;
+        return 0;
+    }
+    if (s[i] == '<' || s[i] == '>') {
+        lx->cur.kind = EXPR_TOK_OP;
+        lx->cur.op = (s[i] == '<') ? AS_EXPR_OP_LT : AS_EXPR_OP_GT;
+        lx->i = i + 1;
+        return 0;
+    }
 
     if (s[i] == '+' || s[i] == '-' || s[i] == '*' || s[i] == '/' || s[i] == '%' || s[i] == '|' || s[i] == '&' ||
         s[i] == '^' || s[i] == '~') {
@@ -823,13 +859,28 @@ static int expr_lex_next(expr_lex_t *lx) {
     if (isdigit((unsigned char)s[i])) {
         long long v = 0;
         size_t begin = i;
+        size_t end = i;
 
-        if (isdigit((unsigned char)s[i]) && s[i + 1] != '\0' && (s[i + 1] == 'f' || s[i + 1] == 'b') &&
-            !isalnum((unsigned char)s[i + 2]) && s[i + 2] != '_') {
+        while (isdigit((unsigned char)s[end])) {
+            end++;
+        }
+        if (end > begin && s[end] != '\0' && (s[end] == 'f' || s[end] == 'b') &&
+            !isalnum((unsigned char)s[end + 1]) && s[end + 1] != '_') {
+            long long local_id = 0;
+            size_t j;
+            for (j = begin; j < end; ++j) {
+                if (local_id > (long long)(INT_MAX / 10)) {
+                    return -1;
+                }
+                local_id = local_id * 10 + (long long)(s[j] - '0');
+                if (local_id > INT_MAX) {
+                    return -1;
+                }
+            }
             lx->cur.kind = EXPR_TOK_LOCAL;
-            lx->cur.local_digit = s[i] - '0';
-            lx->cur.local_forward = (s[i + 1] == 'f');
-            lx->i = i + 2;
+            lx->cur.local_digit = (int)local_id;
+            lx->cur.local_forward = (s[end] == 'f');
+            lx->i = end + 1;
             return 0;
         }
 
@@ -871,22 +922,29 @@ static int expr_lex_next(expr_lex_t *lx) {
 
 static int expr_precedence(as_expr_op_t op) {
     switch (op) {
-    case AS_EXPR_OP_OR:
+    case AS_EXPR_OP_EQ:
+    case AS_EXPR_OP_NE:
+    case AS_EXPR_OP_LT:
+    case AS_EXPR_OP_LE:
+    case AS_EXPR_OP_GT:
+    case AS_EXPR_OP_GE:
         return 1;
-    case AS_EXPR_OP_XOR:
+    case AS_EXPR_OP_OR:
         return 2;
-    case AS_EXPR_OP_AND:
+    case AS_EXPR_OP_XOR:
         return 3;
+    case AS_EXPR_OP_AND:
+        return 4;
     case AS_EXPR_OP_SHL:
     case AS_EXPR_OP_SHR:
-        return 4;
+        return 5;
     case AS_EXPR_OP_ADD:
     case AS_EXPR_OP_SUB:
-        return 5;
+        return 6;
     case AS_EXPR_OP_MUL:
     case AS_EXPR_OP_DIV:
     case AS_EXPR_OP_MOD:
-        return 6;
+        return 7;
     default:
         return -1;
     }
@@ -1063,6 +1121,36 @@ static as_expr_t *parse_expression_from_tokens(parse_ctx_t *ctx, const as_token_
     return e;
 }
 
+as_expr_t *as_parse_expr_string(const char *s, const char *file, unsigned line) {
+    as_token_t tok;
+    expr_lex_t lx;
+    as_expr_t *e;
+
+    if (s == NULL) {
+        return NULL;
+    }
+    memset(&tok, 0, sizeof(tok));
+    tok.kind = AS_TOK_IDENTIFIER;
+    tok.text = (char *)s;
+    tok.file = (char *)file;
+    tok.line = line;
+
+    memset(&lx, 0, sizeof(lx));
+    lx.s = s;
+    lx.src = &tok;
+    if (expr_lex_next(&lx) != 0) {
+        return NULL;
+    }
+    e = parse_expr_bp(&lx, 0, NULL);
+    if (e == NULL || lx.cur.kind != EXPR_TOK_EOF) {
+        free_expr(e);
+        expr_lex_free_cur(&lx);
+        return NULL;
+    }
+    expr_lex_free_cur(&lx);
+    return e;
+}
+
 static int expr_is_symbolic_leaf(const as_expr_t *e) {
     if (e == NULL) {
         return 0;
@@ -1112,10 +1200,50 @@ static int parse_att_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, 
     mem.scale = 1;
     disp_start = 0;
 
-    lparen = find_punct(tokv, n, "(");
-    rparen = find_punct(tokv, n, ")");
+    lparen = -1;
+    rparen = -1;
+    for (i = 0; i < (int)n; ++i) {
+        if (tokv[i].kind == AS_TOK_PUNCT && strcmp(tokv[i].text, "(") == 0) {
+            lparen = i;
+        }
+    }
+    if (lparen >= 0) {
+        for (i = lparen + 1; i < (int)n; ++i) {
+            if (tokv[i].kind == AS_TOK_PUNCT && strcmp(tokv[i].text, ")") == 0) {
+                rparen = i;
+                break;
+            }
+        }
+    }
     if (lparen < 0 || rparen < 0 || rparen <= lparen) {
         return -1;
+    }
+
+    /*
+     * GNU as accepts a parenthesized expression as the displacement before the
+     * address tuple, e.g. (2f)(%rip). Treat it as 2f(%rip).
+     */
+    if (lparen == 0 && rparen > lparen + 1 && (size_t)(rparen + 1) < n &&
+        tokv[rparen + 1].kind == AS_TOK_PUNCT && strcmp(tokv[rparen + 1].text, "(") == 0) {
+        int addr_lparen = rparen + 1;
+        int addr_rparen = -1;
+
+        for (i = addr_lparen + 1; i < (int)n; ++i) {
+            if (tokv[i].kind == AS_TOK_PUNCT && strcmp(tokv[i].text, ")") == 0) {
+                addr_rparen = i;
+                break;
+            }
+        }
+        if (addr_rparen <= addr_lparen) {
+            return -1;
+        }
+        mem.disp = parse_expression_from_tokens(ctx, tokv + 1, (size_t)(rparen - 1));
+        if (mem.disp == NULL) {
+            return -1;
+        }
+        lparen = addr_lparen;
+        rparen = addr_rparen;
+        disp_start = lparen;
     }
 
     /*
@@ -1198,12 +1326,18 @@ static int parse_att_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, 
     if (comp_count >= 1 && comp_ends[0] > comp_starts[0]) {
         if (tokv[comp_starts[0]].text != NULL && streq_ci(tokv[comp_starts[0]].text, "bad")) {
             mem.base_reg = xstrdup("eax");
+        } else if (strcmp(tokv[comp_starts[0]].text, "%") == 0 && comp_starts[0] + 1 < comp_ends[0]) {
+            mem.base_reg = strip_register_prefix(tokv[comp_starts[0] + 1].text);
         } else {
             mem.base_reg = strip_register_prefix(tokv[comp_starts[0]].text);
         }
     }
     if (comp_count >= 2 && comp_ends[1] > comp_starts[1]) {
-        mem.index_reg = strip_register_prefix(tokv[comp_starts[1]].text);
+        if (strcmp(tokv[comp_starts[1]].text, "%") == 0 && comp_starts[1] + 1 < comp_ends[1]) {
+            mem.index_reg = strip_register_prefix(tokv[comp_starts[1] + 1].text);
+        } else {
+            mem.index_reg = strip_register_prefix(tokv[comp_starts[1]].text);
+        }
     }
     if (comp_count >= 3 && comp_ends[2] > comp_starts[2]) {
         as_expr_t *sc = parse_expression_from_tokens(ctx, tokv + comp_starts[2], (size_t)(comp_ends[2] - comp_starts[2]));
@@ -1909,6 +2043,24 @@ static int parse_operand_slice(parse_ctx_t *ctx, const as_token_t *tokv, size_t 
         return op->u.coproc != NULL ? 0 : -1;
     }
 
+    explicit_immediate = (tokv[0].text[0] == '$' || tokv[0].text[0] == '#');
+    if (explicit_immediate) {
+        as_token_t *tmp = (as_token_t *)malloc(n * sizeof(*tmp));
+        if (tmp == NULL) {
+            return -1;
+        }
+        memcpy(tmp, tokv, n * sizeof(*tmp));
+        tmp[0].text = tokv[0].text + 1;
+        e = parse_expression_from_tokens(ctx, tmp, n);
+        free(tmp);
+        if (e == NULL) {
+            return -1;
+        }
+        op->kind = AS_OPERAND_IMMEDIATE;
+        op->u.expr = e;
+        return 0;
+    }
+
     has_lparen = find_punct(tokv, n, "(") >= 0;
     has_lbr = find_punct(tokv, n, "[") >= 0;
 
@@ -2007,26 +2159,12 @@ static int parse_operand_slice(parse_ctx_t *ctx, const as_token_t *tokv, size_t 
         }
     }
 
-    explicit_immediate = (tokv[0].text[0] == '$' || tokv[0].text[0] == '#');
-    if (explicit_immediate) {
-        as_token_t *tmp = (as_token_t *)malloc(n * sizeof(*tmp));
-        if (tmp == NULL) {
-            return -1;
-        }
-        memcpy(tmp, tokv, n * sizeof(*tmp));
-        tmp[0].text = tokv[0].text + 1;
-        e = parse_expression_from_tokens(ctx, tmp, n);
-        free(tmp);
-    } else {
-        e = parse_expression_from_tokens(ctx, tokv, n);
-    }
+    e = parse_expression_from_tokens(ctx, tokv, n);
     if (e == NULL) {
         return -1;
     }
 
-    if (explicit_immediate) {
-        op->kind = AS_OPERAND_IMMEDIATE;
-    } else if (expr_is_symbolic_leaf(e)) {
+    if (expr_is_symbolic_leaf(e)) {
         op->kind = AS_OPERAND_LABEL_REF;
     } else {
         op->kind = AS_OPERAND_IMMEDIATE;
@@ -2601,16 +2739,22 @@ static int parse_line_tokens(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
            (streq_ci(tokv[i + 1].text, "vex") || streq_ci(tokv[i + 1].text, "evex"))) {
         i += 3;
     }
-    while (i < n && tokv[i].kind == AS_TOK_LABEL) {
+    while (i < n &&
+           (tokv[i].kind == AS_TOK_LABEL ||
+            (i + 1 < n && tokv[i + 1].text != NULL && strcmp(tokv[i + 1].text, ":") == 0 &&
+             tokv[i].text != NULL && tokv[i].text[0] != '\0'))) {
         if (push_label(st, tokv[i].text, tokv[i].file, tokv[i].line) != 0) {
             return -1;
         }
-        if (tokv[i].text[0] >= '0' && tokv[i].text[0] <= '9' && tokv[i].text[1] == '\0') {
-            if (push_local_def(&ctx->local_defs, tokv[i].text[0] - '0', tokv[i].file, tokv[i].line) != 0) {
+        if (tokv[i].text[0] >= '0' && tokv[i].text[0] <= '9') {
+            char *endp = NULL;
+            long local_id = strtol(tokv[i].text, &endp, 10);
+            if (endp != tokv[i].text && endp != NULL && *endp == '\0' && local_id >= 0 && local_id <= INT_MAX &&
+                push_local_def(&ctx->local_defs, (int)local_id, tokv[i].file, tokv[i].line) != 0) {
                 return -1;
             }
         }
-        i++;
+        i += (i + 1 < n && tokv[i + 1].text != NULL && strcmp(tokv[i + 1].text, ":") == 0) ? 2 : 1;
     }
 
     if (i == n) {
@@ -2646,6 +2790,32 @@ static int parse_line_tokens(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
         }
         free(rhs);
         return 0;
+    }
+    if ((tokv[i].kind == AS_TOK_IDENTIFIER || tokv[i].kind == AS_TOK_MNEMONIC) && tokv[i].text != NULL) {
+        char *eq = strchr(tokv[i].text, '=');
+        if (eq != NULL && eq != tokv[i].text && eq[1] != '\0') {
+            size_t lhs_n = (size_t)(eq - tokv[i].text);
+            char *lhs = (char *)malloc(lhs_n + 1);
+            char *rhs = xstrdup(eq + 1);
+            if (lhs == NULL || rhs == NULL) {
+                free(lhs);
+                free(rhs);
+                return -1;
+            }
+            memcpy(lhs, tokv[i].text, lhs_n);
+            lhs[lhs_n] = '\0';
+            st->kind = AS_STMT_DIRECTIVE;
+            st->u.directive.name = xstrdup(".set");
+            if (st->u.directive.name == NULL || add_directive_arg(&st->u.directive, lhs) != 0 ||
+                add_directive_arg(&st->u.directive, rhs) != 0) {
+                free(lhs);
+                free(rhs);
+                return -1;
+            }
+            free(lhs);
+            free(rhs);
+            return 0;
+        }
     }
 
     if (tokv[i].kind == AS_TOK_DIRECTIVE) {
@@ -2689,7 +2859,7 @@ static void resolve_local_in_expr(parse_ctx_t *ctx, as_expr_t *e) {
                     found = 1;
                 }
             } else {
-                if (d->line < e->src_line && (!found || d->line > best_line)) {
+                if (d->line <= e->src_line && (!found || d->line > best_line)) {
                     best_line = d->line;
                     found = 1;
                 }

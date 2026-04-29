@@ -152,6 +152,7 @@ typedef enum {
 #define SHF_EXECINSTR 0x4
 #define SHF_MERGE 0x10
 #define SHF_STRINGS 0x20
+#define SHF_INFO_LINK 0x40
 #define SHF_GROUP 0x200
 #define SHF_TLS 0x400
 #endif
