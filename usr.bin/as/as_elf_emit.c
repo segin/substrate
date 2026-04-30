@@ -3318,6 +3318,13 @@ static int is_size_suffixable_base(const char *mn) {
         "inc", "dec", "not", "neg", "mul", "div", "idiv", "enter", "call", "jmp", "lcall", "ljmp",
         "sldt", "str", "lldt", "ltr", "verr", "verw", "sgdt", "sidt", "lgdt", "lidt", "smsw", "lmsw",
         "pop", "ret", "leave",
+        "cmovo", "cmovno", "cmovb", "cmovae", "cmovc", "cmovnc", "cmovnae", "cmovnb",
+        "cmove", "cmovne", "cmovz", "cmovnz",
+        "cmovbe", "cmova", "cmovna", "cmovnbe",
+        "cmovs", "cmovns",
+        "cmovp", "cmovnp", "cmovpe", "cmovpo",
+        "cmovl", "cmovge", "cmovnge", "cmovnl",
+        "cmovle", "cmovg", "cmovng", "cmovnle",
     };
     size_t i;
 
