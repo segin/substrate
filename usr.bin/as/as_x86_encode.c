@@ -2060,6 +2060,19 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
                        emit_i386_imm_or_rel(&ctx, (uint32_t)b->u.imm, effective_i386_operand_bits(insn)) != 0) {
                 return -1;
             }
+        } else if (insn->op_count == 2 && a->kind == AS_X86_OP_IMM && b->kind == AS_X86_OP_IMM) {
+            /* Linux's static_cpu_has emits `testb $0, $0` with a placeholder
+             * second operand into .altinstr_aux that the kernel patches at
+             * boot. Encode as `test $imm, %al/%eax` so the slot has the
+             * right size; the value is irrelevant pre-patch. */
+            if (insn->byte_op) {
+                if (emit8(&ctx, 0xa8) != 0 || emit8(&ctx, (uint8_t)a->u.imm) != 0) {
+                    return -1;
+                }
+            } else if (emit8(&ctx, 0xa9) != 0 ||
+                       emit_i386_imm_or_rel(&ctx, (uint32_t)a->u.imm, effective_i386_operand_bits(insn)) != 0) {
+                return -1;
+            }
         } else {
             set_unsupported_form_named(&ctx, "test");
             return -1;
