@@ -158,6 +158,9 @@ static int eval_direct_local_branch_target(emit_ctx_t *ctx, const char *section_
                                            uint64_t base_off, unsigned x86_code_bits, const as_expr_t *rel_expr,
                                            size_t branch_len, long long *abs_target_out);
 static int parse_x86_reg(const char *name, as_x86_reg_t *out);
+static int build_stmt_section_at(emit_ctx_t *ctx);
+static const uint64_t *get_section_prefix_sums(emit_ctx_t *ctx, const char *section_name,
+                                               unsigned x86_code_bits);
 static int parse_xmm_reg(const char *name, unsigned *out);
 static int parse_ymm_reg(const char *name, unsigned *out);
 static int parse_zmm_reg(const char *name, unsigned *out);
@@ -9838,6 +9841,15 @@ static int find_label_virtual_location(emit_ctx_t *ctx, const as_stmt_t *base_st
                 }
                 return 0;
             }
+        }
+        /* The label doesn't exist in this translation unit. Don't walk
+         * the entire parse just to confirm an external symbol can't be
+         * resolved virtually — return failure so the caller emits a
+         * relocation instead. This is critical for files with thousands
+         * of `.long external_sym` directives (Linux's syscall tables),
+         * each of which used to drive a full O(N) encoder walk. */
+        if (target_st == NULL) {
+            return -1;
         }
     }
     memset(&secbufs, 0, sizeof(secbufs));
