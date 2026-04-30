@@ -1922,7 +1922,7 @@ static int filter_gas_conditionals(const char *in_path, char **out_path) {
     char *line = NULL;
     size_t cap = 0;
     int fd = -1;
-    gas_cond_frame_t stack[128];
+    gas_cond_frame_t stack[1024];
     size_t depth = 0;
     int active = 1;
     int rc = -1;
@@ -1985,6 +1985,72 @@ static int filter_gas_conditionals(const char *in_path, char **out_path) {
             f->else_seen = 0;
             active = f->active;
             free(tmp);
+            fputc('\n', out);
+            continue;
+        }
+        if (line_starts_with_directive(d, ".ifc") || line_starts_with_directive(d, ".ifnc")) {
+            /* GAS string-equality conditional: .ifc str1, str2 */
+            int is_negated = line_starts_with_directive(d, ".ifnc");
+            gas_cond_frame_t *f;
+            const char *args = d + (is_negated ? 5 : 4);
+            char *tmp = xstrdup(args);
+            char *trimmed;
+            char *comma;
+            int eq = 0;
+            if (tmp == NULL || depth >= sizeof(stack) / sizeof(stack[0])) {
+                free(tmp);
+                goto out;
+            }
+            trimmed = trim_in_place(tmp);
+            comma = strchr(trimmed, ',');
+            if (comma != NULL) {
+                char *lhs;
+                char *rhs;
+                *comma = '\0';
+                lhs = trim_in_place(trimmed);
+                rhs = trim_in_place(comma + 1);
+                eq = strcmp(lhs != NULL ? lhs : "", rhs != NULL ? rhs : "") == 0;
+            }
+            f = &stack[depth++];
+            f->parent_active = active;
+            f->branch_taken = f->parent_active && (is_negated ? !eq : eq);
+            f->active = f->branch_taken;
+            f->else_seen = 0;
+            active = f->active;
+            free(tmp);
+            fputc('\n', out);
+            continue;
+        }
+        if (line_starts_with_directive(d, ".ifeq") || line_starts_with_directive(d, ".ifne") ||
+            line_starts_with_directive(d, ".ifgt") || line_starts_with_directive(d, ".iflt") ||
+            line_starts_with_directive(d, ".ifge") || line_starts_with_directive(d, ".ifle")) {
+            /* GAS arithmetic conditionals: .ifeq/.ifne/.ifgt/.iflt/.ifge/.ifle EXPR
+             * compare EXPR against zero. */
+            gas_cond_frame_t *f;
+            const char *args = d + 5;
+            long long v = 0;
+            int truth = 0;
+            if (depth >= sizeof(stack) / sizeof(stack[0])) {
+                goto out;
+            }
+            {
+                char *endp;
+                while (*args == ' ' || *args == '\t') args++;
+                v = strtoll(args, &endp, 0);
+                (void)endp;
+            }
+            if (line_starts_with_directive(d, ".ifeq")) truth = (v == 0);
+            else if (line_starts_with_directive(d, ".ifne")) truth = (v != 0);
+            else if (line_starts_with_directive(d, ".ifgt")) truth = (v > 0);
+            else if (line_starts_with_directive(d, ".iflt")) truth = (v < 0);
+            else if (line_starts_with_directive(d, ".ifge")) truth = (v >= 0);
+            else if (line_starts_with_directive(d, ".ifle")) truth = (v <= 0);
+            f = &stack[depth++];
+            f->parent_active = active;
+            f->branch_taken = f->parent_active && truth;
+            f->active = f->branch_taken;
+            f->else_seen = 0;
+            active = f->active;
             fputc('\n', out);
             continue;
         }
