@@ -93,6 +93,28 @@ typedef struct {
     size_t *stmt_size_cache;
     unsigned char *stmt_size_cached;
     size_t stmt_size_cache_count;
+    /* Per-section prefix-sum table for O(1) range-size queries during
+     * branch sizing. range_layout[s].prefix[i] is the sum of all
+     * conservative stmt sizes in section `name` for stmts j < i. The
+     * builder runs once per (section, code_bits) tuple and walks the
+     * full parse, so subsequent stmt_range_size_in_section calls reduce
+     * to prefix[end] - prefix[start]. Without this Linux's branch-heavy
+     * .s files (~13k stmts, ~1k branches) drive O(B*N) range walks. */
+    struct as_section_prefix_s {
+        char *name;
+        unsigned x86_code_bits;
+        uint64_t *prefix;
+        size_t prefix_count;
+    } *section_prefixes;
+    size_t section_prefix_count;
+    size_t section_prefix_cap;
+    int section_prefix_building;
+    /* Per-stmt effective section name. Computed once via the same
+     * section_track linear walk so stmt_declared_label_section is O(1)
+     * instead of O(N). Indexed by parsed-stmt index. NULL string means
+     * "no .text/.data found" (very rare). */
+    char **stmt_section_at;
+    size_t stmt_section_at_count;
     char *errbuf;
     size_t errbuf_sz;
 } emit_ctx_t;
@@ -9554,7 +9576,12 @@ static int virtual_label_cache_lookup(emit_ctx_t *ctx, const char *file, unsigne
     if (ctx == NULL || section_out == NULL || off_out == NULL) {
         return -1;
     }
-    if (sym_name == NULL && digit >= 0) {
+    /* sym_name == NULL && digit >= 0 used to short-circuit here, which
+     * forced every numbered local-label query (e.g. `1f`, `2b`) to redo
+     * the full virtual-layout walk even after the first call had already
+     * populated the cache. The push path stores (file, line, digit) for
+     * numbered labels, so the loop below can find them. */
+    if (sym_name == NULL && digit < 0) {
         return -1;
     }
     for (i = 0; i < ctx->vlabel_count; ++i) {
@@ -9655,6 +9682,90 @@ static void virtual_label_cache_free(emit_ctx_t *ctx) {
     ctx->vlabel_cache = NULL;
     ctx->vlabel_count = 0;
     ctx->vlabel_cap = 0;
+}
+
+/* Lazy full-parse walk that populates vlabel_cache for every label in
+ * the file in one shot. Currently unused - retained as a starting point
+ * for future perf work on label resolution. */
+static int __attribute__((unused)) prebuild_virtual_label_cache(emit_ctx_t *ctx) {
+    size_t i;
+    sec_buf_vec_t secbufs;
+    section_track_t track;
+
+    if (ctx == NULL || ctx->parsed == NULL) {
+        return -1;
+    }
+    if (ctx->vlabel_count > 0) {
+        return 0; /* assume populated */
+    }
+    memset(&secbufs, 0, sizeof(secbufs));
+    if (section_track_init(&track, ctx->cfg != NULL && ctx->cfg->is_64 ? 64u :
+                                   (ctx->cfg != NULL && ctx->cfg->x86_code_bits == 16u ? 16u : 32u)) != 0) {
+        return -1;
+    }
+    for (i = 0; i < ctx->parsed->count; ++i) {
+        const as_stmt_t *st = &ctx->parsed->items[i];
+        sec_buf_t *sb;
+        size_t j;
+        sb = sec_buf_get_or_add(&secbufs, track.current);
+        if (sb == NULL) {
+            section_track_free(&track);
+            sec_buf_vec_free(&secbufs);
+            return -1;
+        }
+        for (j = 0; j < st->label_count; ++j) {
+            if (virtual_label_cache_push(ctx, st, &st->labels[j], track.current != NULL ? track.current : "",
+                                         (uint64_t)sb->buf.len) != 0) {
+                section_track_free(&track);
+                sec_buf_vec_free(&secbufs);
+                return -1;
+            }
+        }
+        if (st->kind == AS_STMT_DIRECTIVE) {
+            int trc = section_track_apply_directive(&track, &st->u.directive);
+            if (trc < 0) {
+                section_track_free(&track);
+                sec_buf_vec_free(&secbufs);
+                return -1;
+            }
+            if (trc > 0) {
+                continue;
+            }
+            {
+                unsigned scalar_width = directive_fixed_scalar_width(&st->u.directive);
+                if (scalar_width != 0) {
+                    if (bytebuf_append_zeros(&sb->buf, st->u.directive.arg_count * (size_t)scalar_width) != 0) {
+                        section_track_free(&track);
+                        sec_buf_vec_free(&secbufs);
+                        return -1;
+                    }
+                    continue;
+                }
+            }
+            ctx->virtual_scanning++;
+            {
+                int arc = append_directive_data_ctx(ctx, &sb->buf, track.current, st, (uint64_t)sb->buf.len,
+                                                    track.x86_code_bits, &st->u.directive);
+                ctx->virtual_scanning--;
+                if (arc < 0) {
+                    section_track_free(&track);
+                    sec_buf_vec_free(&secbufs);
+                    return -1;
+                }
+            }
+            continue;
+        }
+        if (st->kind == AS_STMT_INSTRUCTION && section_name_is_executable(ctx, track.current)) {
+            if (append_virtual_instruction_bytes(ctx, &sb->buf, track.current, st, track.x86_code_bits) != 0) {
+                section_track_free(&track);
+                sec_buf_vec_free(&secbufs);
+                return -1;
+            }
+        }
+    }
+    section_track_free(&track);
+    sec_buf_vec_free(&secbufs);
+    return 0;
 }
 
 static int find_label_virtual_location(emit_ctx_t *ctx, const as_stmt_t *base_st,
@@ -9871,7 +9982,15 @@ static int find_stmt_virtual_location(emit_ctx_t *ctx, const as_stmt_t *target_s
     section_out[0] = '\0';
     *off_out = 0;
     if (virtual_label_cache_lookup_stmt(ctx, target_st, section_out, section_out_sz, off_out) == 0) {
+        if (getenv("AS_PROFILE_LOC") != NULL) {
+            static unsigned long h = 0; h++;
+            if ((h & 0x3FFFF) == 0) fprintf(stderr, "find_stmt_loc HIT: %lu\n", h);
+        }
         return 0;
+    }
+    if (getenv("AS_PROFILE_LOC") != NULL) {
+        static unsigned long m = 0; m++;
+        if ((m & 0xFF) == 0) fprintf(stderr, "find_stmt_loc MISS: %lu (target %p)\n", m, (void*)target_st);
     }
     memset(&secbufs, 0, sizeof(secbufs));
     if (section_track_init(&track, ctx->cfg != NULL && ctx->cfg->is_64 ? 64u :
@@ -10741,15 +10860,125 @@ static int stmt_virtual_size_in_section(emit_ctx_t *ctx, const char *section_nam
     return 0;
 }
 
+/* Find or build the prefix-sum array for (section_name, x86_code_bits).
+ * Returns NULL on allocation failure. The returned array has parsed->count + 1
+ * entries; prefix[i] is the cumulative size of stmts j < i in the named
+ * section (under the conservative virtual sizing, i.e. with virtual_scanning
+ * incremented so branches degrade to a fixed length). */
+static const uint64_t *get_section_prefix_sums(emit_ctx_t *ctx, const char *section_name,
+                                               unsigned x86_code_bits) {
+    size_t i;
+    section_track_t track;
+    uint64_t *prefix;
+    uint64_t total;
+    if (ctx == NULL || ctx->parsed == NULL || section_name == NULL) {
+        return NULL;
+    }
+    for (i = 0; i < ctx->section_prefix_count; ++i) {
+        if (ctx->section_prefixes[i].name != NULL &&
+            ctx->section_prefixes[i].x86_code_bits == x86_code_bits &&
+            strcmp(ctx->section_prefixes[i].name, section_name) == 0) {
+            return ctx->section_prefixes[i].prefix;
+        }
+    }
+    /* Avoid re-entering during build: the size computation calls back into
+     * stmt_virtual_size_in_section which calls back here. The build pass
+     * sets section_prefix_building so the recursive call falls through to
+     * the per-stmt cache + linear walk and does not try to build another
+     * prefix table for a different section. */
+    if (ctx->section_prefix_building) {
+        return NULL;
+    }
+    if (ctx->section_prefix_count == ctx->section_prefix_cap) {
+        size_t ncap = ctx->section_prefix_cap == 0 ? 4 : ctx->section_prefix_cap * 2;
+        void *next = realloc(ctx->section_prefixes, ncap * sizeof(*ctx->section_prefixes));
+        if (next == NULL) {
+            return NULL;
+        }
+        ctx->section_prefixes = next;
+        ctx->section_prefix_cap = ncap;
+    }
+    prefix = (uint64_t *)calloc(ctx->parsed->count + 1, sizeof(*prefix));
+    if (prefix == NULL) {
+        return NULL;
+    }
+    if (section_track_init(&track, x86_code_bits) != 0) {
+        free(prefix);
+        return NULL;
+    }
+    free(track.current);
+    track.current = xstrdup(".text");
+    if (track.current == NULL) {
+        section_track_free(&track);
+        free(prefix);
+        return NULL;
+    }
+    total = 0;
+    ctx->virtual_scanning++;
+    ctx->section_prefix_building = 1;
+    prefix[0] = 0;
+    for (i = 0; i < ctx->parsed->count; ++i) {
+        const as_stmt_t *st = &ctx->parsed->items[i];
+        if (st->kind == AS_STMT_DIRECTIVE) {
+            int trc = section_track_apply_directive(&track, &st->u.directive);
+            if (trc < 0) {
+                ctx->section_prefix_building = 0;
+                ctx->virtual_scanning--;
+                section_track_free(&track);
+                free(prefix);
+                return NULL;
+            }
+            if (trc > 0) {
+                prefix[i + 1] = total;
+                continue;
+            }
+        }
+        if (track.current != NULL && strcmp(track.current, section_name) == 0) {
+            size_t n = 0;
+            if (stmt_virtual_size_in_section(ctx, section_name, st, total, x86_code_bits, &n) == 0) {
+                total += (uint64_t)n;
+            }
+        }
+        prefix[i + 1] = total;
+    }
+    ctx->section_prefix_building = 0;
+    ctx->virtual_scanning--;
+    section_track_free(&track);
+    {
+        struct as_section_prefix_s *slot = &ctx->section_prefixes[ctx->section_prefix_count];
+        slot->name = xstrdup(section_name);
+        slot->x86_code_bits = x86_code_bits;
+        slot->prefix = prefix;
+        slot->prefix_count = ctx->parsed->count + 1;
+        if (slot->name == NULL) {
+            free(prefix);
+            return NULL;
+        }
+        ctx->section_prefix_count++;
+        return prefix;
+    }
+}
+
 static int stmt_range_size_in_section(emit_ctx_t *ctx, const char *section_name, size_t start_idx, size_t end_idx,
                                       uint64_t sec_off, unsigned x86_code_bits, uint64_t *size_out) {
     section_track_t track;
     uint64_t total = 0;
     size_t i;
+    const uint64_t *prefix;
 
+    (void)sec_off;
     if (ctx == NULL || section_name == NULL || size_out == NULL || start_idx > end_idx ||
         end_idx > ctx->parsed->count) {
         return -1;
+    }
+    /* Fast path: prefix-sum O(1) lookup. Only safe when not currently
+     * building the table itself (which calls us recursively per stmt). */
+    if (!ctx->section_prefix_building) {
+        prefix = get_section_prefix_sums(ctx, section_name, x86_code_bits);
+        if (prefix != NULL) {
+            *size_out = prefix[end_idx] - prefix[start_idx];
+            return 0;
+        }
     }
     if (section_track_init(&track, x86_code_bits) != 0) {
         return -1;
@@ -10780,7 +11009,7 @@ static int stmt_range_size_in_section(emit_ctx_t *ctx, const char *section_name,
         }
         {
             size_t n = 0;
-            if (stmt_virtual_size_in_section(ctx, section_name, st, sec_off + total, x86_code_bits, &n) != 0) {
+            if (stmt_virtual_size_in_section(ctx, section_name, st, total, x86_code_bits, &n) != 0) {
                 ctx->virtual_scanning--;
                 section_track_free(&track);
                 return -1;
@@ -10877,37 +11106,75 @@ static int linux_alt_original_range_size(emit_ctx_t *ctx, const char *section_na
     return 0;
 }
 
-static int stmt_declared_label_section(emit_ctx_t *ctx, const as_stmt_t *target_st,
-                                       char *section_out, size_t section_out_sz) {
+/* Lazy build of the per-stmt section table. Walks parsed once and
+ * records track.current at each stmt position. Subsequent
+ * stmt_declared_label_section calls are O(1). */
+static int build_stmt_section_at(emit_ctx_t *ctx) {
     section_track_t track;
     size_t i;
-
-    if (ctx == NULL || target_st == NULL || section_out == NULL || section_out_sz == 0) {
+    char **table;
+    if (ctx == NULL || ctx->parsed == NULL) {
         return -1;
     }
-    section_out[0] = '\0';
+    if (ctx->stmt_section_at != NULL && ctx->stmt_section_at_count == ctx->parsed->count) {
+        return 0;
+    }
+    table = (char **)calloc(ctx->parsed->count, sizeof(*table));
+    if (table == NULL) {
+        return -1;
+    }
     if (section_track_init(&track, ctx->cfg != NULL && ctx->cfg->is_64 ? 64u :
                                    (ctx->cfg != NULL && ctx->cfg->x86_code_bits == 16u ? 16u : 32u)) != 0) {
+        free(table);
         return -1;
     }
     for (i = 0; i < ctx->parsed->count; ++i) {
         const as_stmt_t *st = &ctx->parsed->items[i];
-
-        if (st == target_st) {
-            snprintf(section_out, section_out_sz, "%s", track.current != NULL ? track.current : "");
+        table[i] = xstrdup(track.current != NULL ? track.current : "");
+        if (table[i] == NULL) {
             section_track_free(&track);
-            return 0;
+            for (i = 0; i < ctx->parsed->count; ++i) {
+                free(table[i]);
+            }
+            free(table);
+            return -1;
         }
         if (st->kind == AS_STMT_DIRECTIVE) {
             int trc = section_track_apply_directive(&track, &st->u.directive);
             if (trc < 0) {
                 section_track_free(&track);
+                for (i = 0; i < ctx->parsed->count; ++i) {
+                    free(table[i]);
+                }
+                free(table);
                 return -1;
             }
         }
     }
     section_track_free(&track);
-    return -1;
+    ctx->stmt_section_at = table;
+    ctx->stmt_section_at_count = ctx->parsed->count;
+    return 0;
+}
+
+static int stmt_declared_label_section(emit_ctx_t *ctx, const as_stmt_t *target_st,
+                                       char *section_out, size_t section_out_sz) {
+    size_t idx;
+
+    if (ctx == NULL || target_st == NULL || section_out == NULL || section_out_sz == 0) {
+        return -1;
+    }
+    section_out[0] = '\0';
+    if (build_stmt_section_at(ctx) != 0) {
+        return -1;
+    }
+    if (parsed_stmt_index(ctx, target_st, &idx) != 0 || idx >= ctx->stmt_section_at_count) {
+        return -1;
+    }
+    if (ctx->stmt_section_at[idx] != NULL) {
+        snprintf(section_out, section_out_sz, "%s", ctx->stmt_section_at[idx]);
+    }
+    return 0;
 }
 
 static int eval_direct_local_branch_target(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *base_st,
@@ -14547,6 +14814,18 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
     virtual_label_cache_free(&ctx);
     free(ctx.stmt_size_cache);
     free(ctx.stmt_size_cached);
+    {
+        size_t _i;
+        for (_i = 0; _i < ctx.section_prefix_count; ++_i) {
+            free(ctx.section_prefixes[_i].name);
+            free(ctx.section_prefixes[_i].prefix);
+        }
+        free(ctx.section_prefixes);
+        for (_i = 0; _i < ctx.stmt_section_at_count; ++_i) {
+            free(ctx.stmt_section_at[_i]);
+        }
+        free(ctx.stmt_section_at);
+    }
     elf_close(ctx.obj);
     return 0;
 
@@ -14560,6 +14839,18 @@ fail:
     virtual_label_cache_free(&ctx);
     free(ctx.stmt_size_cache);
     free(ctx.stmt_size_cached);
+    {
+        size_t _i;
+        for (_i = 0; _i < ctx.section_prefix_count; ++_i) {
+            free(ctx.section_prefixes[_i].name);
+            free(ctx.section_prefixes[_i].prefix);
+        }
+        free(ctx.section_prefixes);
+        for (_i = 0; _i < ctx.stmt_section_at_count; ++_i) {
+            free(ctx.stmt_section_at[_i]);
+        }
+        free(ctx.stmt_section_at);
+    }
     elf_close(ctx.obj);
     return -1;
 }
