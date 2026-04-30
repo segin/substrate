@@ -4927,7 +4927,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                     }
                     if (!init_checked && !can_convert(init_type, s->expr->value_type) &&
                         !(is_pointer_type(init_type) && is_integral_type(s->expr->value_type) &&
-                          is_null_ptr_constant(s->expr))) {
+                          is_null_ptr_constant(s->expr)) &&
+                        !(is_pointer_type(init_type) && is_pointer_type(s->expr->value_type)) &&
+                        !(is_integral_type(init_type) && is_integral_type(s->expr->value_type))) {
                         if (diag != NULL && diag->message[0] == '\0') {
                             snprintf(diag->message, sizeof(diag->message),
                                      "cannot initialize variable '%s' (type=%d) with expression type=%d",
