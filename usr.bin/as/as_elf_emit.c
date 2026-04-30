@@ -9784,6 +9784,62 @@ static int find_label_virtual_location(emit_ctx_t *ctx, const as_stmt_t *base_st
     if (virtual_label_cache_lookup(ctx, file, line, digit, sym_name, section_out, section_out_sz, off_out) == 0) {
         return 0;
     }
+    /* Fast path: look up the target stmt by label name (O(N) once via the
+     * parsed array, then re-used) and read its virtual offset from the
+     * per-section prefix-sum table that get_section_prefix_sums builds
+     * on demand. This avoids the expensive section_track + encoder walk
+     * below for the common case of resolving a named or numbered local
+     * label that exists in the parse. */
+    if (build_stmt_section_at(ctx) == 0 && ctx->parsed != NULL) {
+        const as_stmt_t *target_st = NULL;
+        size_t target_idx = 0;
+        for (i = 0; i < ctx->parsed->count; ++i) {
+            const as_stmt_t *st = &ctx->parsed->items[i];
+            size_t j;
+            for (j = 0; j < st->label_count; ++j) {
+                int matches;
+                if (sym_name != NULL) {
+                    matches = (st->labels[j].name != NULL && strcmp(st->labels[j].name, sym_name) == 0);
+                } else {
+                    int label_digit = -1;
+                    matches = (numeric_local_label_number(st->labels[j].name, &label_digit) == 0 &&
+                               label_digit == digit && st->labels[j].line == line &&
+                               st->labels[j].file != NULL && file != NULL &&
+                               strcmp(st->labels[j].file, file) == 0);
+                }
+                if (matches) {
+                    target_st = st;
+                    target_idx = i;
+                    break;
+                }
+            }
+            if (target_st != NULL) {
+                break;
+            }
+        }
+        if (target_st != NULL && target_idx < ctx->stmt_section_at_count &&
+            ctx->stmt_section_at[target_idx] != NULL) {
+            const char *target_section = ctx->stmt_section_at[target_idx];
+            const uint64_t *pfx;
+            unsigned bits = ctx->cfg != NULL && ctx->cfg->is_64 ? 64u :
+                            (ctx->cfg != NULL && ctx->cfg->x86_code_bits == 16u ? 16u : 32u);
+            pfx = get_section_prefix_sums(ctx, target_section, bits);
+            if (pfx != NULL && target_idx < ctx->section_prefix_count + ctx->parsed->count) {
+                snprintf(section_out, section_out_sz, "%s", target_section);
+                *off_out = pfx[target_idx];
+                /* Also push into vlabel_cache so future lookups hit the
+                 * existing fast path. */
+                {
+                    size_t k;
+                    for (k = 0; k < target_st->label_count; ++k) {
+                        (void)virtual_label_cache_push(ctx, target_st, &target_st->labels[k],
+                                                       target_section, pfx[target_idx]);
+                    }
+                }
+                return 0;
+            }
+        }
+    }
     memset(&secbufs, 0, sizeof(secbufs));
     if (section_track_init(&track, ctx->cfg != NULL && ctx->cfg->is_64 ? 64u :
                                    (ctx->cfg != NULL && ctx->cfg->x86_code_bits == 16u ? 16u : 32u)) != 0) {
