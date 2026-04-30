@@ -84,6 +84,15 @@ typedef struct {
     size_t asm_reg_alias_count;
     size_t asm_reg_alias_cap;
     int virtual_scanning;
+    /* Per-statement size cache for the conservative virtual-size path.
+     * Linux's syscall_32.s drove ~13k stmts × thousands of branch range
+     * queries, each redoing the full encode_x86_stmt for every entry —
+     * an O(N^2) blow-up that wedged the build for minutes. Sizes
+     * computed below the precise (top-level) sizing path are
+     * offset-independent, so we memoise them by parsed-stmt index. */
+    size_t *stmt_size_cache;
+    unsigned char *stmt_size_cached;
+    size_t stmt_size_cache_count;
     char *errbuf;
     size_t errbuf_sz;
 } emit_ctx_t;
@@ -10534,18 +10543,16 @@ static int emit_resolved_x86_branch(const as_elf_cfg_t *cfg, const as_stmt_t *st
 }
 
 static int parsed_stmt_index(emit_ctx_t *ctx, const as_stmt_t *needle, size_t *idx_out) {
-    size_t i;
-
-    if (ctx == NULL || needle == NULL || idx_out == NULL) {
+    if (ctx == NULL || needle == NULL || idx_out == NULL || ctx->parsed == NULL ||
+        ctx->parsed->items == NULL) {
         return -1;
     }
-    for (i = 0; i < ctx->parsed->count; ++i) {
-        if (&ctx->parsed->items[i] == needle) {
-            *idx_out = i;
-            return 0;
-        }
+    /* Stmts live in a contiguous array, so index is direct pointer math. */
+    if (needle < ctx->parsed->items || needle >= ctx->parsed->items + ctx->parsed->count) {
+        return -1;
     }
-    return -1;
+    *idx_out = (size_t)(needle - ctx->parsed->items);
+    return 0;
 }
 
 static int local_temp_branch_target_within(emit_ctx_t *ctx, const as_stmt_t *base_st,
@@ -10587,12 +10594,25 @@ static int local_temp_branch_target_within(emit_ctx_t *ctx, const as_stmt_t *bas
 static int stmt_virtual_size_in_section(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *st,
                                         uint64_t sec_off, unsigned x86_code_bits, size_t *size_out) {
     bytebuf_t tmp;
+    size_t cache_idx = (size_t)-1;
+    int cache_eligible = 0;
 
     if (ctx == NULL || section_name == NULL || st == NULL || size_out == NULL) {
         return -1;
     }
     *size_out = 0;
     memset(&tmp, 0, sizeof(tmp));
+    /* Cache hit path: when called below the top-level scan (virtual_scanning > 0),
+     * branches degrade to a conservative size that does not depend on `sec_off`,
+     * so the value is fully determined by the statement. Memoise. */
+    if (ctx->virtual_scanning > 0 && ctx->parsed != NULL && parsed_stmt_index(ctx, st, &cache_idx) == 0) {
+        cache_eligible = 1;
+        if (cache_idx < ctx->stmt_size_cache_count && ctx->stmt_size_cached != NULL &&
+            ctx->stmt_size_cached[cache_idx]) {
+            *size_out = ctx->stmt_size_cache[cache_idx];
+            return 0;
+        }
+    }
     if (st->kind == AS_STMT_INSTRUCTION) {
         /* Branch sizing is recursive: computing one branch's exact size may
          * require sizing a range that contains other branches. Two branches
@@ -10640,6 +10660,28 @@ static int stmt_virtual_size_in_section(emit_ctx_t *ctx, const char *section_nam
         }
         *size_out = tmp.len;
         free(tmp.data);
+        if (cache_eligible && ctx->parsed != NULL) {
+            if (ctx->stmt_size_cache_count < ctx->parsed->count) {
+                size_t want = ctx->parsed->count;
+                size_t *new_cache = (size_t *)realloc(ctx->stmt_size_cache, want * sizeof(*new_cache));
+                unsigned char *new_flags = (unsigned char *)realloc(ctx->stmt_size_cached, want * sizeof(*new_flags));
+                if (new_cache != NULL && new_flags != NULL) {
+                    if (ctx->stmt_size_cache_count < want) {
+                        memset(new_cache + ctx->stmt_size_cache_count, 0,
+                               (want - ctx->stmt_size_cache_count) * sizeof(*new_cache));
+                        memset(new_flags + ctx->stmt_size_cache_count, 0,
+                               (want - ctx->stmt_size_cache_count) * sizeof(*new_flags));
+                    }
+                    ctx->stmt_size_cache = new_cache;
+                    ctx->stmt_size_cached = new_flags;
+                    ctx->stmt_size_cache_count = want;
+                }
+            }
+            if (cache_idx < ctx->stmt_size_cache_count && ctx->stmt_size_cached != NULL) {
+                ctx->stmt_size_cache[cache_idx] = *size_out;
+                ctx->stmt_size_cached[cache_idx] = 1u;
+            }
+        }
         return 0;
     }
     if (st->kind == AS_STMT_DIRECTIVE) {
@@ -10672,6 +10714,28 @@ static int stmt_virtual_size_in_section(emit_ctx_t *ctx, const char *section_nam
         *size_out = tmp.len;
         free(tmp.data);
         section_track_free(&track);
+        if (cache_eligible && ctx->parsed != NULL) {
+            if (ctx->stmt_size_cache_count < ctx->parsed->count) {
+                size_t want = ctx->parsed->count;
+                size_t *new_cache = (size_t *)realloc(ctx->stmt_size_cache, want * sizeof(*new_cache));
+                unsigned char *new_flags = (unsigned char *)realloc(ctx->stmt_size_cached, want * sizeof(*new_flags));
+                if (new_cache != NULL && new_flags != NULL) {
+                    if (ctx->stmt_size_cache_count < want) {
+                        memset(new_cache + ctx->stmt_size_cache_count, 0,
+                               (want - ctx->stmt_size_cache_count) * sizeof(*new_cache));
+                        memset(new_flags + ctx->stmt_size_cache_count, 0,
+                               (want - ctx->stmt_size_cache_count) * sizeof(*new_flags));
+                    }
+                    ctx->stmt_size_cache = new_cache;
+                    ctx->stmt_size_cached = new_flags;
+                    ctx->stmt_size_cache_count = want;
+                }
+            }
+            if (cache_idx < ctx->stmt_size_cache_count && ctx->stmt_size_cached != NULL) {
+                ctx->stmt_size_cache[cache_idx] = *size_out;
+                ctx->stmt_size_cached[cache_idx] = 1u;
+            }
+        }
         return 0;
     }
     return 0;
@@ -14481,6 +14545,8 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
     free(ctx.sym_index);
     asm_var_reset(&ctx);
     virtual_label_cache_free(&ctx);
+    free(ctx.stmt_size_cache);
+    free(ctx.stmt_size_cached);
     elf_close(ctx.obj);
     return 0;
 
@@ -14492,6 +14558,8 @@ fail:
     free(ctx.sym_index);
     asm_var_reset(&ctx);
     virtual_label_cache_free(&ctx);
+    free(ctx.stmt_size_cache);
+    free(ctx.stmt_size_cached);
     elf_close(ctx.obj);
     return -1;
 }
