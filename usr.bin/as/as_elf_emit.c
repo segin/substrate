@@ -3314,7 +3314,7 @@ static int is_size_suffixable_base(const char *mn) {
     static const char *const names[] = {
         "add", "adc", "sbb", "sub", "and", "or", "xor", "cmp", "mov", "lea", "imul", "shl",
         "shr", "sar", "ror", "rol", "rcl", "rcr", "bt", "bts", "btr", "btc", "bsf", "bsr",
-        "movsx", "movzx", "test", "push", "pushf", "popf", "xadd", "cmpxchg",
+        "movsx", "movzx", "test", "push", "pushf", "popf", "xadd", "xchg", "cmpxchg",
         "inc", "dec", "not", "neg", "mul", "div", "idiv", "enter", "call", "jmp", "lcall", "ljmp",
         "sldt", "str", "lldt", "ltr", "verr", "verw", "sgdt", "sidt", "lgdt", "lidt", "smsw", "lmsw",
         "pop", "ret", "leave",
