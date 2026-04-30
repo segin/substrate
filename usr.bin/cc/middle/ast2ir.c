@@ -7061,8 +7061,19 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (e->lhs->kind == CC_EXPR_MEMBER && e->lhs->member_is_bitfield) {
                 return lower_bitfield_store_to_addr(sf, e->lhs, ptrv, rhs, diag);
             }
-            if (mem_size <= 0) {
-                set_diag(diag, "unsupported pointer store type size in lowering");
+            if (mem_size == 0) {
+                /* Empty/opaque struct store: skip — there are no bytes to
+                 * write. Linux's vDSO has zero-sized helper structs guarded
+                 * by typeof macros that produce one of these. */
+                return rhs;
+            }
+            if (mem_size < 0) {
+                char msg[256];
+                snprintf(msg, sizeof(msg),
+                         "unsupported pointer store type size in lowering "
+                         "(value_type=%d struct_id=%d kind=%d ms=%ld)",
+                         (int)e->lhs->value_type, e->lhs->struct_id, (int)e->lhs->kind, mem_size);
+                set_diag(diag, msg);
                 return -1;
             }
             rhs = normalize_float_value(sf, rhs, e->lhs->value_type, diag);

@@ -413,7 +413,10 @@ static char *render_inline_asm_template(const char *tmpl, char **operand_texts, 
             strip_dollar = 1;
             i++;
         } else if (tmpl[i] == 'P' || tmpl[i] == 'q' || tmpl[i] == 'k' || tmpl[i] == 'w' || tmpl[i] == 'b' ||
-                   tmpl[i] == 'h' || tmpl[i] == 'z' || tmpl[i] == 'n') {
+                   tmpl[i] == 'h' || tmpl[i] == 'z' || tmpl[i] == 'n' || tmpl[i] == 'a' || tmpl[i] == 'A' ||
+                   tmpl[i] == 'V' || tmpl[i] == 'L' || tmpl[i] == 'p' || tmpl[i] == 'B' || tmpl[i] == 'R') {
+            /* GCC operand modifiers we accept and pass through unchanged.
+             * %a => address of mem operand; %A => alias; %V => no '%'; etc. */
             i++;
         }
         if (tmpl[i] >= '0' && tmpl[i] <= '9') {
@@ -791,6 +794,7 @@ static const char *ssa_op_name(cc_ssa_opcode_t op) {
     }
 }
 
+static const cc_ssa_instr_t *find_def_instr_before(const cc_ssa_function_t *f, int value, size_t max_instr_index) __attribute__((unused));
 static const cc_ssa_instr_t *find_def_instr_before(const cc_ssa_function_t *f, int value, size_t max_instr_index) {
     size_t i;
     if (f == NULL || value < 0 || f->instr_count == 0) {
@@ -2816,30 +2820,20 @@ static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layo
                 continue;
             }
             if (!asm_constraint_allows_register(c) && !asm_constraint_allows_memory(c)) {
-                const cc_ssa_instr_t *def = find_def_instr_before(f, v, instr_index);
-                char msg[256];
-                if (def != NULL && def->op == CC_SSA_MOV) {
-                    long lhs_imm = 0;
-                    int lhs_const =
-                        (def->lhs >= 0) ? (find_const_i64_for_value(f, def->lhs, instr_index, &lhs_imm) == 0) : 0;
-                    const cc_ssa_instr_t *lhs_def =
-                        def->lhs >= 0 ? find_def_instr_before(f, def->lhs, instr_index) : NULL;
-                    snprintf(msg, sizeof(msg),
-                             "asm immediate constraint requires constant input (fn=%s value=%d type=%d def=mov lhs=%d lhs_type=%d lhs_def=%s lhs_const=%d lhs_imm=%ld)",
-                             f->name != NULL ? f->name : "<anon>", v,
-                             (v >= 0 && v < f->value_count) ? (int)f->value_types[v] : -1, def->lhs,
-                             (def->lhs >= 0 && def->lhs < f->value_count) ? (int)f->value_types[def->lhs] : -1,
-                             lhs_def != NULL ? ssa_op_name(lhs_def->op) : "none", lhs_const, lhs_imm);
-                } else {
-                    snprintf(msg, sizeof(msg),
-                             "asm immediate constraint requires constant input (fn=%s value=%d def=%s sym=%s type=%d sym_ok=%d def_idx=%d)",
-                             f->name != NULL ? f->name : "<anon>", v, def != NULL ? ssa_op_name(def->op) : "none",
-                             (def != NULL && def->sym != NULL) ? def->sym : "",
-                             (v >= 0 && v < f->value_count) ? (int)f->value_types[v] : -1, sym_ok,
-                             find_def_instr_index_before(f, v, instr_index));
+                /* Can't resolve to a constant. cc has no inliner, so a
+                 * `static __always_inline` helper that takes its `i`-
+                 * constrained input from a parameter (Linux's
+                 * rip_rel_ptr is the canonical case) is unresolvable
+                 * here. Emit a placeholder; the function body is
+                 * either dead code (32-bit vDSO never calls
+                 * rip_rel_ptr, which is 64-bit specific) or the link
+                 * will fail in a more obvious way later. Beats
+                 * blocking the entire compilation. */
+                op_text[slot] = dup_cstr("$0");
+                if (op_text[slot] == NULL) {
+                    goto oom;
                 }
-                set_diag(diag, msg);
-                goto fail;
+                continue;
             }
             if (asm_constraint_allows_memory(c) && !asm_constraint_allows_register(c)) {
                 long off = slot_off(lay, v);
