@@ -3326,6 +3326,7 @@ static int is_size_suffixable_base(const char *mn) {
         "cmovl", "cmovge", "cmovnge", "cmovnl",
         "cmovle", "cmovg", "cmovng", "cmovnle",
         "popcnt", "lzcnt", "tzcnt", "bswap",
+        "in", "out",
     };
     size_t i;
 
