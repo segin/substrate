@@ -13516,26 +13516,6 @@ static void free_global_relocs(global_reloc_t *relocs, size_t count) {
 
 static int expr_uses_va_arg_pack(const cc_expr_t *e);
 
-static int stmt_contains_inline_asm(const cc_stmt_t *s) {
-    size_t i;
-    if (s == NULL) {
-        return 0;
-    }
-    if (s->kind == CC_STMT_ASM) {
-        return 1;
-    }
-    if (stmt_contains_inline_asm(s->init_stmt) || stmt_contains_inline_asm(s->then_branch) ||
-        stmt_contains_inline_asm(s->else_branch)) {
-        return 1;
-    }
-    for (i = 0; i < s->block_count; ++i) {
-        if (stmt_contains_inline_asm(&s->block_stmts[i])) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
 static int stmt_uses_va_arg_pack(const cc_stmt_t *s) {
     size_t i;
 
@@ -13619,24 +13599,15 @@ static int should_skip_fn_body_for_codegen(const cc_translation_unit_t *tu, cons
     if ((f->storage & CC_STORAGE_INLINE) == 0) {
         return 0;
     }
-    /* Linux's `inline` macro pulls in __maybe_unused, which cc parses as
-     * __attribute__((__unused__)). Originally we skipped on that alone,
-     * which broke the vDSO link (out-of-line __cvdso_* references).
-     *
-     * Compromise: emit the body unless it contains inline asm. Inline-asm
-     * static helpers are typically arch-specific (`rip_rel_ptr` uses 64-bit
-     * leaq + an `i` constraint on a parameter that cc can't resolve) and
-     * gcc would have always inlined them at call sites. Emitting them
-     * out-of-line creates unbuildable dead code; skipping is correct since
-     * any actual call site already had to fold them inline. */
-    {
-        size_t i;
-        for (i = 0; i < f->stmt_count; ++i) {
-            if (stmt_contains_inline_asm(&f->stmts[i])) {
-                return 1;
-            }
-        }
-    }
+    /* Always emit static-inline bodies. Linux's `inline` macro pulls in
+     * __maybe_unused (which cc parses as __unused__), so without this we
+     * skipped the bodies of every static inline -- including referenced
+     * helpers like fls / __ffs / arch_*_bit / __arch_hweight* / etc. --
+     * leaving the vDSO link with a wall of undefined references. cc has
+     * no inliner, so these have to come out-of-line. Bad-form bodies
+     * from x86_64-only helpers like rip_rel_ptr produce dead-code asm
+     * that the assembler now tolerates (rip in 32-bit, oversized reloc,
+     * etc.); the linker drops them via section gc. */
     return 0;
 }
 
