@@ -1943,6 +1943,11 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x31) != 0) {
             return -1;
         }
+    } else if (streq_ci(insn->mnemonic, "rdtscp")) {
+        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x01) != 0 ||
+            emit8(&ctx, 0xf9) != 0) {
+            return -1;
+        }
     } else if (streq_ci(insn->mnemonic, "rdmsr")) {
         if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x32) != 0) {
             return -1;
@@ -2483,6 +2488,11 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         }
     } else if (streq_ci(insn->mnemonic, "rdtsc")) {
         if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x31) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "rdtscp")) {
+        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x01) != 0 ||
+            emit8(&ctx, 0xf9) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "rdmsr")) {
@@ -5391,6 +5401,11 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         }
     } else if (streq_ci(insn->mnemonic, "rdtsc")) {
         if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x31) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "rdtscp")) {
+        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x01) != 0 ||
+            emit8(&ctx, 0xf9) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "rdmsr")) {
