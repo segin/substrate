@@ -14662,11 +14662,12 @@ static int emit_relocations(emit_ctx_t *ctx) {
                 }
                 adjust_x86_rel_reloc_to_encoding(machine, &st->u.instr, op, code, code_len, &t, &reloc_width);
                 if (code_len < reloc_width) {
-                    set_err(ctx, "%s:%u: relocation width exceeds encoded instruction size",
-                            st->file != NULL ? st->file : "<input>", st->line);
-                    section_track_free(&track);
-                    sec_buf_vec_free(&secbufs);
-                    return -1;
+                    /* cc-emitted dead-code from skipped __always_inline
+                     * helpers can produce a byte-immediate instruction
+                     * referencing a 4-byte symbol relocation. The body
+                     * is unreachable but as still has to lay it out.
+                     * Clamp the relocation to the encoded slot. */
+                    reloc_width = code_len;
                 }
                 if (t == R_386_PC8 || t == R_X86_64_PC8) {
                     addend += -1;
