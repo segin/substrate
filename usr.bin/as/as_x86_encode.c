@@ -2504,6 +2504,35 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x77) != 0) {
             return -1;
         }
+    } else if (streq_ci(insn->mnemonic, "prefetchnta") || streq_ci(insn->mnemonic, "prefetcht0") ||
+               streq_ci(insn->mnemonic, "prefetcht1") || streq_ci(insn->mnemonic, "prefetcht2")) {
+        uint8_t ext;
+        if (insn->op_count != 1 || a->kind != AS_X86_OP_MEM) {
+            set_unsupported_form_named(&ctx, insn->mnemonic);
+            return -1;
+        }
+        if (streq_ci(insn->mnemonic, "prefetchnta")) ext = 0;
+        else if (streq_ci(insn->mnemonic, "prefetcht0")) ext = 1;
+        else if (streq_ci(insn->mnemonic, "prefetcht1")) ext = 2;
+        else ext = 3;
+        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x18) != 0 ||
+            modrm_sib_disp(&ctx, ext, a) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "prefetchw") || streq_ci(insn->mnemonic, "prefetchwt1") ||
+               streq_ci(insn->mnemonic, "prefetch")) {
+        uint8_t ext;
+        if (insn->op_count != 1 || a->kind != AS_X86_OP_MEM) {
+            set_unsupported_form_named(&ctx, insn->mnemonic);
+            return -1;
+        }
+        if (streq_ci(insn->mnemonic, "prefetch")) ext = 0;
+        else if (streq_ci(insn->mnemonic, "prefetchw")) ext = 1;
+        else ext = 2;
+        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x0d) != 0 ||
+            modrm_sib_disp(&ctx, ext, a) != 0) {
+            return -1;
+        }
     } else if (streq_ci(insn->mnemonic, "ud2") || streq_ci(insn->mnemonic, "ud2a") ||
                streq_ci(insn->mnemonic, "ud2b")) {
         /* ud2a/ud2b are GAS-historical aliases for ud2 (encoded the same). */
@@ -4769,6 +4798,22 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         else if (streq_ci(insn->mnemonic, "prefetcht1")) ext = 2;
         else ext = 3;
         if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x18) != 0 ||
+            modrm_sib_disp64(&ctx, (as_x86_reg_t)ext, a, &rex_r, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "prefetchw") || streq_ci(insn->mnemonic, "prefetchwt1") ||
+               streq_ci(insn->mnemonic, "prefetch")) {
+        /* AMD/Intel 3DNow! prefetch family: opcode 0x0f 0x0d /reg.
+         * /0=prefetch, /1=prefetchw, /2=prefetchwt1. */
+        uint8_t ext;
+        if (insn->op_count != 1 || a->kind != AS_X86_OP_MEM) {
+            set_unsupported_form(&ctx, insn);
+            return -1;
+        }
+        if (streq_ci(insn->mnemonic, "prefetch")) ext = 0;
+        else if (streq_ci(insn->mnemonic, "prefetchw")) ext = 1;
+        else ext = 2;
+        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x0d) != 0 ||
             modrm_sib_disp64(&ctx, (as_x86_reg_t)ext, a, &rex_r, &rex_x, &rex_b) != 0) {
             return -1;
         }
