@@ -13588,10 +13588,15 @@ static int should_skip_fn_body_for_codegen(const cc_translation_unit_t *tu, cons
     if ((f->storage & CC_STORAGE_INLINE) == 0) {
         return 0;
     }
-    if ((f->attr_flags & CC_ATTR_UNUSED) == 0) {
-        return 0;
-    }
-    return 1;
+    /* Don't skip on UNUSED alone: the Linux kernel decorates every
+     * static inline helper with __attribute__((__unused__)) to silence
+     * unused-function warnings even when the helper is referenced from
+     * elsewhere in the same TU. cc has no inliner, so suppressing these
+     * bodies leaves call sites with unresolved references at link time
+     * (vDSO link fails on __cvdso_clock_gettime_common, etc.). Always
+     * emit the body and let the linker's dead-code elimination drop
+     * truly unused ones. */
+    return 0;
 }
 
 int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag_t *diag) {

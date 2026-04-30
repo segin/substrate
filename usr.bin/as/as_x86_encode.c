@@ -2487,7 +2487,9 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x77) != 0) {
             return -1;
         }
-    } else if (streq_ci(insn->mnemonic, "ud2")) {
+    } else if (streq_ci(insn->mnemonic, "ud2") || streq_ci(insn->mnemonic, "ud2a") ||
+               streq_ci(insn->mnemonic, "ud2b")) {
+        /* ud2a/ud2b are GAS-historical aliases for ud2 (encoded the same). */
         if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x0b) != 0) {
             return -1;
         }
@@ -6053,7 +6055,9 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x77) != 0) {
             return -1;
         }
-    } else if (streq_ci(insn->mnemonic, "ud2")) {
+    } else if (streq_ci(insn->mnemonic, "ud2") || streq_ci(insn->mnemonic, "ud2a") ||
+               streq_ci(insn->mnemonic, "ud2b")) {
+        /* ud2a/ud2b are GAS-historical aliases for ud2 (encoded the same). */
         if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x0b) != 0) {
             return -1;
         }
