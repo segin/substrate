@@ -1,4 +1,5 @@
 #include "internal.h"
+#include "../os/substrate.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -587,17 +588,18 @@ libusb_open(libusb_device *dev, libusb_device_handle **dev_handle)
 {
 	libusb_device_handle *handle;
 	int fd;
+	int ret;
 
 	if (dev == NULL || dev_handle == NULL) {
 		return LIBUSB_ERROR_INVALID_PARAM;
 	}
-	fd = open(dev->path, O_RDWR);
-	if (fd < 0) {
-		return libusb__map_errno(errno);
+	ret = substrate_open(dev, &fd);
+	if (ret != LIBUSB_SUCCESS) {
+		return ret;
 	}
 	handle = calloc(1, sizeof(*handle));
 	if (handle == NULL) {
-		close(fd);
+		substrate_close(fd);
 		return LIBUSB_ERROR_NO_MEM;
 	}
 	handle->device = libusb_ref_device(dev);
@@ -618,14 +620,14 @@ libusb_close(libusb_device_handle *dev_handle)
 		return;
 	}
 	for (index = 0; index < dev_handle->claimed_interface_count; index++) {
-		unsigned int interface_number = (unsigned int)dev_handle->claimed_interfaces[index];
-		(void)ioctl(dev_handle->fd, USBDEVFS_RELEASEINTERFACE, &interface_number);
+		(void)substrate_release_interface(dev_handle->fd,
+			dev_handle->claimed_interfaces[index]);
 	}
 	if (dev_handle->device != NULL && dev_handle->device->ctx != NULL) {
 		libusb__unregister_handle(dev_handle->device->ctx, dev_handle);
 	}
 	if (dev_handle->owns_fd && dev_handle->fd >= 0) {
-		close(dev_handle->fd);
+		substrate_close(dev_handle->fd);
 	}
 	libusb_unref_device(dev_handle->device);
 	free(dev_handle);
@@ -673,14 +675,14 @@ libusb__untrack_claimed_interface(libusb_device_handle *dev_handle, int interfac
 int LIBUSB_CALL
 libusb_set_configuration(libusb_device_handle *dev_handle, int configuration)
 {
-	unsigned int request;
+	int ret;
 
-	if (dev_handle == NULL || configuration < 0) {
+	if (dev_handle == NULL) {
 		return LIBUSB_ERROR_INVALID_PARAM;
 	}
-	request = (unsigned int)configuration;
-	if (ioctl(dev_handle->fd, USBDEVFS_SETCONFIGURATION, &request) != 0) {
-		return libusb__map_errno(errno);
+	ret = substrate_set_configuration(dev_handle->fd, configuration);
+	if (ret != LIBUSB_SUCCESS) {
+		return ret;
 	}
 	dev_handle->active_configuration = configuration;
 	return LIBUSB_SUCCESS;
@@ -689,22 +691,21 @@ libusb_set_configuration(libusb_device_handle *dev_handle, int configuration)
 int LIBUSB_CALL
 libusb_claim_interface(libusb_device_handle *dev_handle, int interface_number)
 {
-	unsigned int request;
 	int ret;
 
 	if (dev_handle == NULL || interface_number < 0) {
 		return LIBUSB_ERROR_INVALID_PARAM;
 	}
-	request = (unsigned int)interface_number;
 	if (dev_handle->auto_detach) {
-		(void)ioctl(dev_handle->fd, USBDEVFS_DISCONNECT, NULL);
+		(void)substrate_detach_kernel_driver(dev_handle->fd, interface_number);
 	}
-	if (ioctl(dev_handle->fd, USBDEVFS_CLAIMINTERFACE, &request) != 0) {
-		return libusb__map_errno(errno);
+	ret = substrate_claim_interface(dev_handle->fd, interface_number);
+	if (ret != LIBUSB_SUCCESS) {
+		return ret;
 	}
 	ret = libusb__track_claimed_interface(dev_handle, interface_number);
 	if (ret != LIBUSB_SUCCESS) {
-		(void)ioctl(dev_handle->fd, USBDEVFS_RELEASEINTERFACE, &request);
+		(void)substrate_release_interface(dev_handle->fd, interface_number);
 	}
 	return ret;
 }
@@ -712,14 +713,14 @@ libusb_claim_interface(libusb_device_handle *dev_handle, int interface_number)
 int LIBUSB_CALL
 libusb_release_interface(libusb_device_handle *dev_handle, int interface_number)
 {
-	unsigned int request;
+	int ret;
 
 	if (dev_handle == NULL || interface_number < 0) {
 		return LIBUSB_ERROR_INVALID_PARAM;
 	}
-	request = (unsigned int)interface_number;
-	if (ioctl(dev_handle->fd, USBDEVFS_RELEASEINTERFACE, &request) != 0) {
-		return libusb__map_errno(errno);
+	ret = substrate_release_interface(dev_handle->fd, interface_number);
+	if (ret != LIBUSB_SUCCESS) {
+		return ret;
 	}
 	libusb__untrack_claimed_interface(dev_handle, interface_number);
 	return LIBUSB_SUCCESS;
@@ -754,42 +755,33 @@ int LIBUSB_CALL
 libusb_set_interface_alt_setting(libusb_device_handle *dev_handle,
 	int interface_number, int alternate_setting)
 {
-	struct usbdevfs_setinterface request;
-
-	if (dev_handle == NULL || interface_number < 0 || alternate_setting < 0) {
+	if (dev_handle == NULL) {
 		return LIBUSB_ERROR_INVALID_PARAM;
 	}
-	request.interface = (unsigned int)interface_number;
-	request.altsetting = (unsigned int)alternate_setting;
-	if (ioctl(dev_handle->fd, USBDEVFS_SETINTERFACE, &request) != 0) {
-		return libusb__map_errno(errno);
-	}
-	return LIBUSB_SUCCESS;
+	return substrate_set_interface_alt_setting(dev_handle->fd,
+		interface_number, alternate_setting);
 }
 
 int LIBUSB_CALL
 libusb_clear_halt(libusb_device_handle *dev_handle, unsigned char endpoint)
 {
-	unsigned int request;
-
 	if (dev_handle == NULL) {
 		return LIBUSB_ERROR_INVALID_PARAM;
 	}
-	request = endpoint;
-	if (ioctl(dev_handle->fd, USBDEVFS_CLEAR_HALT, &request) != 0) {
-		return libusb__map_errno(errno);
-	}
-	return LIBUSB_SUCCESS;
+	return substrate_clear_halt(dev_handle->fd, endpoint);
 }
 
 int LIBUSB_CALL
 libusb_reset_device(libusb_device_handle *dev_handle)
 {
+	int ret;
+
 	if (dev_handle == NULL) {
 		return LIBUSB_ERROR_INVALID_PARAM;
 	}
-	if (ioctl(dev_handle->fd, USBDEVFS_RESET, NULL) != 0) {
-		return libusb__map_errno(errno);
+	ret = substrate_reset_device(dev_handle->fd);
+	if (ret != LIBUSB_SUCCESS) {
+		return ret;
 	}
 	dev_handle->active_configuration = dev_handle->device != NULL ?
 		dev_handle->device->active_configuration : dev_handle->active_configuration;
@@ -799,43 +791,36 @@ libusb_reset_device(libusb_device_handle *dev_handle)
 int LIBUSB_CALL
 libusb_kernel_driver_active(libusb_device_handle *dev_handle, int interface_number)
 {
-	struct usbdevfs_getdriver request;
+	int active;
+	int ret;
 
-	if (dev_handle == NULL || interface_number < 0) {
+	if (dev_handle == NULL) {
 		return LIBUSB_ERROR_INVALID_PARAM;
 	}
-	memset(&request, 0, sizeof(request));
-	request.interface = (unsigned int)interface_number;
-	if (ioctl(dev_handle->fd, USBDEVFS_GET_DRIVER, &request) != 0) {
-		return libusb__map_errno(errno);
+	ret = substrate_kernel_driver_active(dev_handle->fd, interface_number,
+		&active);
+	if (ret != LIBUSB_SUCCESS) {
+		return ret;
 	}
-	return request.driver[0] != '\0';
+	return active;
 }
 
 int LIBUSB_CALL
 libusb_detach_kernel_driver(libusb_device_handle *dev_handle, int interface_number)
 {
-	(void)interface_number;
 	if (dev_handle == NULL) {
 		return LIBUSB_ERROR_INVALID_PARAM;
 	}
-	if (ioctl(dev_handle->fd, USBDEVFS_DISCONNECT, NULL) != 0) {
-		return libusb__map_errno(errno);
-	}
-	return LIBUSB_SUCCESS;
+	return substrate_detach_kernel_driver(dev_handle->fd, interface_number);
 }
 
 int LIBUSB_CALL
 libusb_attach_kernel_driver(libusb_device_handle *dev_handle, int interface_number)
 {
-	(void)interface_number;
 	if (dev_handle == NULL) {
 		return LIBUSB_ERROR_INVALID_PARAM;
 	}
-	if (ioctl(dev_handle->fd, USBDEVFS_CONNECT, NULL) != 0) {
-		return libusb__map_errno(errno);
-	}
-	return LIBUSB_SUCCESS;
+	return substrate_attach_kernel_driver(dev_handle->fd, interface_number);
 }
 
 int LIBUSB_CALL
