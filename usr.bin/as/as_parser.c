@@ -63,7 +63,15 @@ typedef struct {
     size_t i;
     expr_tok_t cur;
     const as_token_t *src;
+    /* Recursion guard for the precedence-climbing parser.  The grammar
+     * lets parse_expr_primary call parse_expr_bp (via parens) which
+     * calls parse_expr_primary again, etc.  Cap at 256 levels so a
+     * malicious .s with `((((...))))` thousands deep can't blow the
+     * stack. */
+    int depth;
 } expr_lex_t;
+
+#define EXPR_MAX_DEPTH 256
 
 static void set_err(parse_ctx_t *ctx, const char *fmt, ...) {
     va_list ap;
@@ -952,7 +960,21 @@ static int expr_precedence(as_expr_op_t op) {
 
 static as_expr_t *parse_expr_bp(expr_lex_t *lx, int min_bp, parse_ctx_t *ctx);
 
+static as_expr_t *parse_expr_primary_inner(expr_lex_t *lx, parse_ctx_t *ctx);
+
 static as_expr_t *parse_expr_primary(expr_lex_t *lx, parse_ctx_t *ctx) {
+    as_expr_t *e;
+
+    if (lx->depth >= EXPR_MAX_DEPTH) {
+        return NULL;
+    }
+    lx->depth++;
+    e = parse_expr_primary_inner(lx, ctx);
+    lx->depth--;
+    return e;
+}
+
+static as_expr_t *parse_expr_primary_inner(expr_lex_t *lx, parse_ctx_t *ctx) {
     as_expr_t *e;
 
     if (lx->cur.kind == EXPR_TOK_NUMBER) {

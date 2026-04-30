@@ -715,9 +715,66 @@ static int resolve_rel_target(const enc_ctx_t *ctx, int32_t target, unsigned ins
     return 0;
 }
 
+/* Mnemonic allow-lists for the LOCK and REP/REPNE prefixes — the CPU
+ * raises #UD if either is paired with the wrong instruction, so an
+ * accepted-but-malformed encoding here corrupts the .o silently and
+ * fails at runtime (or worse, decodes as something else).  Tables
+ * mirror the Intel SDM Vol 2 prefix-encoding sections. */
+static int mnemonic_lock_compatible(const char *mn) {
+    if (mn == NULL) return 0;
+    return streq_ci(mn, "add")  || streq_ci(mn, "adc")  ||
+           streq_ci(mn, "and")  || streq_ci(mn, "btc")  ||
+           streq_ci(mn, "btr")  || streq_ci(mn, "bts")  ||
+           streq_ci(mn, "cmpxchg") || streq_ci(mn, "cmpxchg8b") ||
+           streq_ci(mn, "cmpxchg16b") ||
+           streq_ci(mn, "dec")  || streq_ci(mn, "inc")  ||
+           streq_ci(mn, "neg")  || streq_ci(mn, "not")  ||
+           streq_ci(mn, "or")   || streq_ci(mn, "sbb")  ||
+           streq_ci(mn, "sub")  || streq_ci(mn, "xor")  ||
+           streq_ci(mn, "xadd") || streq_ci(mn, "xchg");
+}
+
+static int mnemonic_rep_compatible(const char *mn) {
+    if (mn == NULL) return 0;
+    /* REP / REPE / REPZ / REPNE / REPNZ all gate on the same set of
+     * string ops; we don't distinguish here because the prefix byte
+     * was already chosen by the caller. */
+    return streq_ci(mn, "movs")  || streq_ci(mn, "movsb") ||
+           streq_ci(mn, "movsw") || streq_ci(mn, "movsd") ||
+           streq_ci(mn, "movsq") ||
+           streq_ci(mn, "lods")  || streq_ci(mn, "lodsb") ||
+           streq_ci(mn, "lodsw") || streq_ci(mn, "lodsd") ||
+           streq_ci(mn, "lodsq") ||
+           streq_ci(mn, "stos")  || streq_ci(mn, "stosb") ||
+           streq_ci(mn, "stosw") || streq_ci(mn, "stosd") ||
+           streq_ci(mn, "stosq") ||
+           streq_ci(mn, "scas")  || streq_ci(mn, "scasb") ||
+           streq_ci(mn, "scasw") || streq_ci(mn, "scasd") ||
+           streq_ci(mn, "scasq") ||
+           streq_ci(mn, "cmps")  || streq_ci(mn, "cmpsb") ||
+           streq_ci(mn, "cmpsw") || streq_ci(mn, "cmpsd") ||
+           streq_ci(mn, "cmpsq") ||
+           streq_ci(mn, "ins")   || streq_ci(mn, "insb")  ||
+           streq_ci(mn, "insw")  || streq_ci(mn, "insd")  ||
+           streq_ci(mn, "outs")  || streq_ci(mn, "outsb") ||
+           streq_ci(mn, "outsw") || streq_ci(mn, "outsd");
+}
+
 static int emit_prefixes(enc_ctx_t *ctx, const as_x86_insn_t *insn) {
-    if (insn->lock_prefix && emit8(ctx, 0xf0) != 0) {
-        return -1;
+    if (insn->lock_prefix) {
+        if (!mnemonic_lock_compatible(insn->mnemonic)) {
+            set_err(ctx, "lock prefix not allowed on '%s'",
+                    insn->mnemonic ? insn->mnemonic : "(null)");
+            return -1;
+        }
+        if (emit8(ctx, 0xf0) != 0) return -1;
+    }
+    if (insn->rep_prefix != 0) {
+        if (!mnemonic_rep_compatible(insn->mnemonic)) {
+            set_err(ctx, "rep/repne prefix not allowed on '%s'",
+                    insn->mnemonic ? insn->mnemonic : "(null)");
+            return -1;
+        }
     }
     if (insn->rep_prefix == 1 && emit8(ctx, 0xf3) != 0) {
         return -1;

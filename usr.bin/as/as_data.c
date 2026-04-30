@@ -633,8 +633,15 @@ static int parse_fill(data_ctx_t *ctx, const as_stmt_t *st) {
     if (st->u.directive.arg_count < 1) {
         return -1;
     }
+    /* Don't silently substitute 0 on parse failure: a malformed
+     * `.fill foo, 1, 0` (with foo unresolved here) used to produce a
+     * zero-byte fill, which then drove later logic to ignore the
+     * directive entirely.  A negative literal also slipped through:
+     * parse_u64 rejects it, the assembler swallows the error, and
+     * any later expression-time evaluation that wraps to a huge
+     * unsigned drives a multi-gigabyte fill.  Propagate the error. */
     if (parse_u64(st->u.directive.args[0], &repeat) != 0) {
-        repeat = 0;
+        return -1;
     }
     if (st->u.directive.arg_count >= 2 && parse_u64(st->u.directive.args[1], &size) != 0) {
         return -1;

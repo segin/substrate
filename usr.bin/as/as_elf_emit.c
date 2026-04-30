@@ -281,6 +281,16 @@ static uint32_t section_group_ordinal(const as_section_state_t *sections, size_t
 static int bytebuf_reserve(bytebuf_t *b, size_t extra) {
     unsigned char *next;
 
+    /* Reject before either compare uses b->len + extra: if the sum
+     * wraps a small value, both the early-return below ("already
+     * fits") and the doubling loop ("ncap < need") silently succeed
+     * without growing the buffer, and the next memcpy writes past
+     * the allocation.  Reachable on 32-bit hosts via large .fill /
+     * .skip / sized data directives where the size came from a
+     * parsed expression. */
+    if (extra > SIZE_MAX - b->len) {
+        return -1;
+    }
     if (b->len + extra <= b->cap) {
         return 0;
     }
