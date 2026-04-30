@@ -2506,6 +2506,13 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             set_unsupported_form_named(&ctx, "int");
             return -1;
         }
+    } else if (insn->op_count == 0 && (streq_ci(insn->mnemonic, "ds") || streq_ci(insn->mnemonic, "es") ||
+                                        streq_ci(insn->mnemonic, "cs") || streq_ci(insn->mnemonic, "ss") ||
+                                        streq_ci(insn->mnemonic, "fs") || streq_ci(insn->mnemonic, "gs"))) {
+        /* Standalone segment-override prefix as a synthetic instruction.
+         * The prefix byte was already emitted via emit_prefixes since
+         * AS_PREFIX_SEG_OVERRIDE is set on the instruction; nothing
+         * more to do here. */
     } else {
         set_err(&ctx, "unsupported mnemonic: %s", insn->mnemonic != NULL ? insn->mnemonic : "<null>");
         return -1;

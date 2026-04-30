@@ -2560,6 +2560,22 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
             st->u.instr = in;
             return 0;
         }
+        /* Standalone segment-override prefix (`ds` / `es` / ...). GAS
+         * accepts these as prefix-only instructions that emit just the
+         * 1-byte prefix; Linux's __vsyscall_iret expansion drops three
+         * `ds` lines before `int $0x80` for branch hinting. Use the
+         * last prefix token as the synthetic mnemonic so the encoder
+         * dispatch finds it. */
+        if (n > 0 && (in.prefixes & AS_PREFIX_SEG_OVERRIDE) != 0) {
+            in.mnemonic = xstrdup(tokv[n - 1].text);
+            if (in.mnemonic == NULL) {
+                free(in.segment_override);
+                return -1;
+            }
+            st->kind = AS_STMT_INSTRUCTION;
+            st->u.instr = in;
+            return 0;
+        }
         free(in.segment_override);
         return -1;
     }
