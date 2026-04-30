@@ -586,6 +586,82 @@ static char *render_inline_asm_template(const char *tmpl, char **operand_texts, 
     return out;
 }
 
+/* Returns a freshly-allocated copy of `src` where control characters
+ * (newline, tab, carriage return) appearing *inside* a double-quoted
+ * string literal are replaced with their backslash-escaped form. This
+ * keeps multi-line .ascii / .string contents emitted by inline asm
+ * templates on a single physical line so the assembler's line-oriented
+ * lexer can tokenize them. Returns NULL on allocation failure. */
+static char *escape_strings_in_asm_template(const char *src) {
+    size_t cap;
+    size_t len = 0;
+    char *out;
+    int in_string = 0;
+    int prev_was_backslash = 0;
+    size_t i;
+    if (src == NULL) {
+        return NULL;
+    }
+    cap = strlen(src) + 16;
+    out = (char *)malloc(cap);
+    if (out == NULL) {
+        return NULL;
+    }
+    for (i = 0; src[i] != '\0'; ++i) {
+        char ch = src[i];
+        const char *replacement = NULL;
+        if (in_string && !prev_was_backslash) {
+            if (ch == '\n') {
+                replacement = "\\n";
+            } else if (ch == '\t') {
+                replacement = "\\t";
+            } else if (ch == '\r') {
+                replacement = "\\r";
+            }
+        }
+        if (replacement != NULL) {
+            size_t rl = strlen(replacement);
+            if (len + rl + 1 >= cap) {
+                cap = cap * 2 + rl + 1;
+                {
+                    char *grown = (char *)realloc(out, cap);
+                    if (grown == NULL) {
+                        free(out);
+                        return NULL;
+                    }
+                    out = grown;
+                }
+            }
+            memcpy(out + len, replacement, rl);
+            len += rl;
+            prev_was_backslash = 0;
+            continue;
+        }
+        if (len + 2 >= cap) {
+            cap = cap * 2 + 2;
+            {
+                char *grown = (char *)realloc(out, cap);
+                if (grown == NULL) {
+                    free(out);
+                    return NULL;
+                }
+                out = grown;
+            }
+        }
+        out[len++] = ch;
+        if (ch == '"' && !prev_was_backslash) {
+            in_string = !in_string;
+            prev_was_backslash = 0;
+        } else if (ch == '\\' && in_string && !prev_was_backslash) {
+            prev_was_backslash = 1;
+        } else {
+            prev_was_backslash = 0;
+        }
+    }
+    out[len] = '\0';
+    return out;
+}
+
 static int emit_asm_lines(FILE *fp, const char *text) {
     static const char *const x86_prefixes[] = {
         "lock",
@@ -795,8 +871,17 @@ static int eval_const_i64_for_value(const cc_ssa_function_t *f, const int *def_i
     case CC_SSA_XOR:
     case CC_SSA_SHL:
     case CC_SSA_SHR:
-        if (eval_const_i64_for_value(f, def_index, in->lhs, visiting, &a) != 0 ||
-            eval_const_i64_for_value(f, def_index, in->rhs, visiting, &b) != 0) {
+        if (eval_const_i64_for_value(f, def_index, in->lhs, visiting, &a) != 0) {
+            break;
+        }
+        /* Sign-/zero-extension lowering emits SHL/SHR with rhs == -1 and the
+         * count in `in->imm`. Honour that immediate form when folding. */
+        if (in->rhs < 0) {
+            if (in->op != CC_SSA_SHL && in->op != CC_SSA_SHR) {
+                break;
+            }
+            b = in->imm;
+        } else if (eval_const_i64_for_value(f, def_index, in->rhs, visiting, &b) != 0) {
             break;
         }
         if (in->op == CC_SSA_ADD) {
@@ -2819,7 +2904,15 @@ static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layo
             fprintf(fp, "\t# asm clobber %s\n", in->asm_clobbers[i]);
         }
     }
-    emit_asm_lines(fp, rendered);
+    {
+        char *escaped = escape_strings_in_asm_template(rendered);
+        if (escaped != NULL) {
+            emit_asm_lines(fp, escaped);
+            free(escaped);
+        } else {
+            emit_asm_lines(fp, rendered);
+        }
+    }
 
     for (i = 0; i < out_n; ++i) {
         if (out_write_back[i] && out_regs[i] != NULL && in->asm_out_values != NULL) {

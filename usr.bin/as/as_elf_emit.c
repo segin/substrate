@@ -10594,7 +10594,16 @@ static int stmt_virtual_size_in_section(emit_ctx_t *ctx, const char *section_nam
     *size_out = 0;
     memset(&tmp, 0, sizeof(tmp));
     if (st->kind == AS_STMT_INSTRUCTION) {
-        if (st->u.instr.operand_count == 1 && is_rel_mnemonic(st->u.instr.mnemonic)) {
+        /* Branch sizing is recursive: computing one branch's exact size may
+         * require sizing a range that contains other branches. Two branches
+         * straddling each other can drive the recursion to stack overflow on
+         * large inputs (the Linux kernel hits >25k frames). Past the top
+         * level we fall back to the conservative virtual-byte path, which
+         * produces a safe upper bound (rel32) and never recurses further.
+         * The top-level call still gets the precise size; only nested
+         * sizing of *other* branches is conservatized. */
+        if (st->u.instr.operand_count == 1 && is_rel_mnemonic(st->u.instr.mnemonic) &&
+            ctx->virtual_scanning == 0) {
             const as_operand_t *op = &st->u.instr.operands[0];
             const as_expr_t *e = op->u.expr;
             if ((ctx->virtual_scanning == 0 ||
@@ -10949,9 +10958,12 @@ static int append_virtual_instruction_bytes(emit_ctx_t *ctx, bytebuf_t *buf, con
     if (ctx == NULL || ctx->cfg == NULL || buf == NULL || st == NULL) {
         return -1;
     }
+    /* See note in stmt_virtual_size_in_section: precise branch sizing recurses
+     * through this function, so cap recursion at the top level. */
     if (st->kind == AS_STMT_INSTRUCTION &&
         st->u.instr.operand_count == 1 &&
-        is_rel_mnemonic(st->u.instr.mnemonic)) {
+        is_rel_mnemonic(st->u.instr.mnemonic) &&
+        ctx->virtual_scanning == 0) {
         const as_operand_t *op = &st->u.instr.operands[0];
         const as_expr_t *e = op->u.expr;
         if ((ctx->virtual_scanning == 0 ||

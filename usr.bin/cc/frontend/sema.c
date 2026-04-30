@@ -403,7 +403,9 @@ static int asm_constraint_allows_register(const char *c) {
     }
     return strchr(c, 'r') != NULL || strchr(c, 'q') != NULL || strchr(c, 'a') != NULL || strchr(c, 'b') != NULL ||
            strchr(c, 'c') != NULL || strchr(c, 'd') != NULL || strchr(c, 'S') != NULL || strchr(c, 'D') != NULL ||
-           strchr(c, 'g') != NULL || strchr(c, 'X') != NULL;
+           strchr(c, 'g') != NULL || strchr(c, 'X') != NULL || strchr(c, 'A') != NULL || strchr(c, 'l') != NULL ||
+           strchr(c, 'R') != NULL || strchr(c, 'Q') != NULL || strchr(c, 'U') != NULL || strchr(c, 'f') != NULL ||
+           strchr(c, 't') != NULL || strchr(c, 'u') != NULL || strchr(c, 'y') != NULL || strchr(c, 'x') != NULL;
 }
 
 static int asm_constraint_is_imm(const char *c) {
@@ -432,6 +434,15 @@ static int asm_constraint_letter_supported(int ch) {
         return 1;
     }
     if (ch == 'i' || ch == 'n' || ch == 'e' || (ch >= 'I' && ch <= 'P')) {
+        return 1;
+    }
+    /* GCC x86-specific register-class letters Linux makes heavy use of:
+     *   A = EAX:EDX pair, B = EBX, R = legacy regs, Q = a/b/c/d byte-addr,
+     *   U = call-clobbered, l = index regs, f/t/u = x87, y = MMX, x = SSE. */
+    if (ch == 'A' || ch == 'B' || ch == 'R' || ch == 'Q' || ch == 'U') {
+        return 1;
+    }
+    if (ch == 'l' || ch == 'f' || ch == 't' || ch == 'u' || ch == 'y' || ch == 'x') {
         return 1;
     }
     return 0;
@@ -4012,7 +4023,13 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             }
             if (e->stmt_expr_count > 0) {
                 const cc_stmt_t *last = &e->stmt_expr_stmts[e->stmt_expr_count - 1];
-                if (last->kind == CC_STMT_EXPR && last->expr != NULL) {
+                /* Labels chain through `then_branch`; the value of the
+                 * statement expression is whatever inner statement they
+                 * eventually wrap. */
+                while (last != NULL && last->kind == CC_STMT_LABEL) {
+                    last = last->then_branch;
+                }
+                if (last != NULL && last->kind == CC_STMT_EXPR && last->expr != NULL) {
                     e->value_type = last->expr->value_type;
                     e->struct_id = last->expr->struct_id;
                 } else {

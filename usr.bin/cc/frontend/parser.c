@@ -6306,13 +6306,18 @@ static int skip_decl_gnu_suffix(parser_t *p, decl_attrs_t *out_attrs) {
         if (!(tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm") || tok_is_ident(p, "asm"))) {
             break;
         }
+        /* Only treat __asm__ as a declarator suffix when it has the form
+         * __asm__("string"). Bare __asm__ followed by anything else is the
+         * start of an asm statement (e.g. after a label) and must be left
+         * for the statement parser. */
+        if (peek_kind(p) != TOK_LPAREN) {
+            break;
+        }
         if (next_tok(p) != 0) {
             return -1;
         }
-        if (p->tok.kind == TOK_LPAREN) {
-            if (skip_balanced_parens(p) != 0) {
-                return -1;
-            }
+        if (skip_balanced_parens(p) != 0) {
+            return -1;
         }
     }
     return 0;
