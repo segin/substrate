@@ -6,13 +6,16 @@ LIBDEMANGLE = ../../../usr.lib/demangle/libdemangle.a
 
 .PHONY: all clean run fuzz-rand fuzz-libfuzzer afl-harness corpus-libstdcxx corpus-llvm libdemangle
 
-all: test_demangle
+all: test_demangle test_audit_regressions
 
 libdemangle:
 	$(MAKE) -C ../../../usr.lib/demangle NATIVE_BUILD=1
 
 test_demangle: test_main.o libdemangle
 	$(CC) $(CFLAGS) $(INCLUDES) -o $@ test_main.o $(LIBDEMANGLE)
+
+test_audit_regressions: test_audit_regressions.o libdemangle
+	$(CC) $(CFLAGS) $(INCLUDES) -o $@ test_audit_regressions.o $(LIBDEMANGLE)
 
 tools/demangle_cli: tools/demangle_cli.o libdemangle
 	$(CC) $(CFLAGS) $(INCLUDES) -o $@ tools/demangle_cli.o $(LIBDEMANGLE)
@@ -29,8 +32,9 @@ fuzz/fuzz_demangle_libfuzzer: fuzz/fuzz_demangle_libfuzzer.c libdemangle
 %.o: %.c
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
-run: test_demangle
+run: test_demangle test_audit_regressions
 	./test_demangle
+	./test_audit_regressions
 
 fuzz-rand: fuzz/fuzz_random
 	./fuzz/fuzz_random
@@ -49,6 +53,7 @@ corpus-llvm: tools/demangle_cli
 
 clean:
 	rm -f test_demangle test_main.o
+	rm -f test_audit_regressions test_audit_regressions.o
 	rm -f tools/demangle_cli tools/demangle_cli.o
 	rm -f fuzz/fuzz_random fuzz/fuzz_random.o
 	rm -f fuzz/cxxfilt_stdin_harness fuzz/cxxfilt_stdin_harness.o
