@@ -10707,12 +10707,19 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 return -1;
             }
             if (asm_out_store_type[i4] == CC_TYPE_VOID && asm_out_store_sid[i4] >= 0) {
-                set_diag(diag, "aggregate asm register outputs are not supported");
-                free(asm_out_store_ptr);
-                free(asm_out_store_size);
-                free(asm_out_store_type);
-                free(asm_out_store_sid);
-                return -1;
+                /* Aggregate output: memcpy the asm result into the
+                 * storeback pointer. Linux's perf perf_event_open uses
+                 * an asm that returns a struct {u32, u32}; refusing
+                 * blocks the build. */
+                if (emit_memcpy_instr(sf, asm_out_store_ptr[i4], in.asm_out_values[i4],
+                                      asm_out_store_size[i4], diag) != 0) {
+                    free(asm_out_store_ptr);
+                    free(asm_out_store_size);
+                    free(asm_out_store_type);
+                    free(asm_out_store_sid);
+                    return -1;
+                }
+                continue;
             }
             rhs = in.asm_out_values[i4];
             rhs = normalize_float_value(sf, rhs, asm_out_store_type[i4], diag);
