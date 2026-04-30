@@ -1251,10 +1251,21 @@ static int split_named_macro_arg_piece(const char *s, strvec_t *out) {
             depth++;
         } else if ((ch == ')' || ch == ']' || ch == '}') && depth > 0) {
             depth--;
+        } else if (depth == 0 && ch == '#') {
+            /* GAS treats '#' as a line comment on x86. Stop here so
+             * trailing comments do not become spurious positional macro
+             * arguments and overwrite earlier named values. */
+            return push_macro_arg_slice(out, start, s + i);
         } else if (depth == 0 && isspace((unsigned char)ch)) {
             const char *next = s + i + 1;
             while (isspace((unsigned char)*next)) {
                 next++;
+            }
+            if (*next == '#') {
+                if (push_macro_arg_slice(out, start, s + i) != 0) {
+                    return -1;
+                }
+                return 0;
             }
             if (*next != '\0' && *next != '\n') {
                 if (push_macro_arg_slice(out, start, s + i) != 0) {
@@ -1832,7 +1843,6 @@ static int eval_gas_cond_expr(const char *expr) {
     char *tmp;
     char *p;
     char *op;
-    int neq = 0;
     long long ln = 0;
     long long rn = 0;
     char lb[128];
@@ -1840,6 +1850,8 @@ static int eval_gas_cond_expr(const char *expr) {
     int lt;
     int rt;
     int result;
+    int op_kind = -1; /* 0:==, 1:!=, 2:<, 3:>, 4:<=, 5:>= */
+    size_t op_len = 0;
 
     if (expr == NULL) {
         return 0;
@@ -1849,22 +1861,51 @@ static int eval_gas_cond_expr(const char *expr) {
         return 0;
     }
     p = trim_in_place(tmp);
-    op = strstr(p, "==");
-    if (op == NULL) {
-        op = strstr(p, "!=");
-        neq = 1;
+    /* Order matters: check 2-char operators before single-char ones so
+     * `<=` is not classified as `<` followed by `=`. */
+    if ((op = strstr(p, "==")) != NULL) {
+        op_kind = 0; op_len = 2;
+    } else if ((op = strstr(p, "!=")) != NULL) {
+        op_kind = 1; op_len = 2;
+    } else if ((op = strstr(p, "<=")) != NULL) {
+        op_kind = 4; op_len = 2;
+    } else if ((op = strstr(p, ">=")) != NULL) {
+        op_kind = 5; op_len = 2;
+    } else if ((op = strchr(p, '<')) != NULL && op[1] != '<') {
+        op_kind = 2; op_len = 1;
+    } else if ((op = strchr(p, '>')) != NULL && op[1] != '>') {
+        op_kind = 3; op_len = 1;
+    } else {
+        op = NULL;
     }
     if (op != NULL) {
         *op = '\0';
         lt = parse_cond_operand(p, &ln, lb, sizeof(lb));
-        rt = parse_cond_operand(op + 2, &rn, rb, sizeof(rb));
+        rt = parse_cond_operand(op + op_len, &rn, rb, sizeof(rb));
         if (lt == 1 && rt == 1) {
-            result = (ln == rn);
+            switch (op_kind) {
+            case 0: result = (ln == rn); break;
+            case 1: result = (ln != rn); break;
+            case 2: result = (ln < rn); break;
+            case 3: result = (ln > rn); break;
+            case 4: result = (ln <= rn); break;
+            case 5: result = (ln >= rn); break;
+            default: result = 0; break;
+            }
         } else {
-            result = (strcmp(trim_in_place(lb), trim_in_place(rb)) == 0);
+            int cmp = strcmp(trim_in_place(lb), trim_in_place(rb));
+            switch (op_kind) {
+            case 0: result = (cmp == 0); break;
+            case 1: result = (cmp != 0); break;
+            case 2: result = (cmp < 0); break;
+            case 3: result = (cmp > 0); break;
+            case 4: result = (cmp <= 0); break;
+            case 5: result = (cmp >= 0); break;
+            default: result = 0; break;
+            }
         }
         free(tmp);
-        return neq ? !result : result;
+        return result;
     }
     lt = parse_cond_operand(p, &ln, lb, sizeof(lb));
     free(tmp);

@@ -741,23 +741,25 @@ static int mnemonic_rep_compatible(const char *mn) {
      * was already chosen by the caller. */
     return streq_ci(mn, "movs")  || streq_ci(mn, "movsb") ||
            streq_ci(mn, "movsw") || streq_ci(mn, "movsd") ||
-           streq_ci(mn, "movsq") ||
+           streq_ci(mn, "movsl") || streq_ci(mn, "movsq") ||
            streq_ci(mn, "lods")  || streq_ci(mn, "lodsb") ||
            streq_ci(mn, "lodsw") || streq_ci(mn, "lodsd") ||
-           streq_ci(mn, "lodsq") ||
+           streq_ci(mn, "lodsl") || streq_ci(mn, "lodsq") ||
            streq_ci(mn, "stos")  || streq_ci(mn, "stosb") ||
            streq_ci(mn, "stosw") || streq_ci(mn, "stosd") ||
-           streq_ci(mn, "stosq") ||
+           streq_ci(mn, "stosl") || streq_ci(mn, "stosq") ||
            streq_ci(mn, "scas")  || streq_ci(mn, "scasb") ||
            streq_ci(mn, "scasw") || streq_ci(mn, "scasd") ||
-           streq_ci(mn, "scasq") ||
+           streq_ci(mn, "scasl") || streq_ci(mn, "scasq") ||
            streq_ci(mn, "cmps")  || streq_ci(mn, "cmpsb") ||
            streq_ci(mn, "cmpsw") || streq_ci(mn, "cmpsd") ||
-           streq_ci(mn, "cmpsq") ||
+           streq_ci(mn, "cmpsl") || streq_ci(mn, "cmpsq") ||
            streq_ci(mn, "ins")   || streq_ci(mn, "insb")  ||
            streq_ci(mn, "insw")  || streq_ci(mn, "insd")  ||
+           streq_ci(mn, "insl")  ||
            streq_ci(mn, "outs")  || streq_ci(mn, "outsb") ||
-           streq_ci(mn, "outsw") || streq_ci(mn, "outsd");
+           streq_ci(mn, "outsw") || streq_ci(mn, "outsd") ||
+           streq_ci(mn, "outsl");
 }
 
 static int emit_prefixes(enc_ctx_t *ctx, const as_x86_insn_t *insn) {

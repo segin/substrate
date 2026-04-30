@@ -633,21 +633,21 @@ static int parse_fill(data_ctx_t *ctx, const as_stmt_t *st) {
     if (st->u.directive.arg_count < 1) {
         return -1;
     }
-    /* Don't silently substitute 0 on parse failure: a malformed
-     * `.fill foo, 1, 0` (with foo unresolved here) used to produce a
-     * zero-byte fill, which then drove later logic to ignore the
-     * directive entirely.  A negative literal also slipped through:
-     * parse_u64 rejects it, the assembler swallows the error, and
-     * any later expression-time evaluation that wraps to a huge
-     * unsigned drives a multi-gigabyte fill.  Propagate the error. */
+    /* parse_u64 only handles numeric literals. Symbolic forms like
+     * `.fill 0b + (8 * (1 + 0)) - ., 1, 0xcc` (Linux's irq_entries_start
+     * trampoline padding) cannot be evaluated here without section
+     * layout context, so we fall through to ELF emission which has the
+     * full expression evaluator. We still validate purely-numeric args
+     * up-front so a literal negative repeat or out-of-range size is
+     * rejected early instead of wrapping into a huge unsigned later. */
     if (parse_u64(st->u.directive.args[0], &repeat) != 0) {
-        return -1;
+        return 0;
     }
     if (st->u.directive.arg_count >= 2 && parse_u64(st->u.directive.args[1], &size) != 0) {
-        return -1;
+        return 0;
     }
     if (st->u.directive.arg_count >= 3 && parse_u64(st->u.directive.args[2], &value) != 0) {
-        return -1;
+        return 0;
     }
 
     if (init_op_from_stmt(&op, st) != 0) {

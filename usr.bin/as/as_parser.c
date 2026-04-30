@@ -1350,6 +1350,22 @@ static int parse_att_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, 
             mem.base_reg = xstrdup("eax");
         } else if (strcmp(tokv[comp_starts[0]].text, "%") == 0 && comp_starts[0] + 1 < comp_ends[0]) {
             mem.base_reg = strip_register_prefix(tokv[comp_starts[0] + 1].text);
+        } else if (tokv[comp_starts[0]].kind == AS_TOK_REGISTER ||
+                   is_x86_register_text(tokv[comp_starts[0]].text) ||
+                   is_arm_register_text(tokv[comp_starts[0]].text)) {
+            mem.base_reg = strip_register_prefix(tokv[comp_starts[0]].text);
+        } else if (comp_count == 1 && mem.disp == NULL) {
+            /* GAS accepts `(symbol)` as a memory operand whose absolute
+             * address is `symbol` (no base register). It is equivalent
+             * to writing the symbol directly. Fold the parenthesised
+             * expression into the displacement so we don't try to use
+             * the symbol as an x86 base register at emit time. */
+            mem.disp = parse_expression_from_tokens(ctx, tokv + comp_starts[0],
+                                                   (size_t)(comp_ends[0] - comp_starts[0]));
+            if (mem.disp == NULL) {
+                free(mem.segment_reg);
+                return -1;
+            }
         } else {
             mem.base_reg = strip_register_prefix(tokv[comp_starts[0]].text);
         }
@@ -2067,14 +2083,24 @@ static int parse_operand_slice(parse_ctx_t *ctx, const as_token_t *tokv, size_t 
 
     explicit_immediate = (tokv[0].text[0] == '$' || tokv[0].text[0] == '#');
     if (explicit_immediate) {
-        as_token_t *tmp = (as_token_t *)malloc(n * sizeof(*tmp));
-        if (tmp == NULL) {
-            return -1;
+        /* The lexer treats `$(` as the bare token "$" followed by "(",
+         * because '(' is a punctuation delimiter. Skip the lone marker
+         * token so the rest is parsed as a normal parenthesized expr;
+         * otherwise fall back to the slice form `$<text>` where the
+         * marker is glued onto the first token (e.g. `$5`, `$0x10`,
+         * `$sym`). */
+        if (tokv[0].text[1] == '\0' && n > 1) {
+            e = parse_expression_from_tokens(ctx, tokv + 1, n - 1);
+        } else {
+            as_token_t *tmp = (as_token_t *)malloc(n * sizeof(*tmp));
+            if (tmp == NULL) {
+                return -1;
+            }
+            memcpy(tmp, tokv, n * sizeof(*tmp));
+            tmp[0].text = tokv[0].text + 1;
+            e = parse_expression_from_tokens(ctx, tmp, n);
+            free(tmp);
         }
-        memcpy(tmp, tokv, n * sizeof(*tmp));
-        tmp[0].text = tokv[0].text + 1;
-        e = parse_expression_from_tokens(ctx, tmp, n);
-        free(tmp);
         if (e == NULL) {
             return -1;
         }
