@@ -9141,7 +9141,32 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
         if (raw != NULL && raw->kind == CC_EXPR_MEMBER && raw->lhs == NULL && raw->rhs != NULL && raw->ident != NULL) {
             int didx = find_struct_member_index_by_name(sd, raw->ident);
             if (didx < 0) {
-                set_diag(diag, "unknown designated struct member in local initializer");
+                /* Anonymous nested struct/union: try matching the
+                 * designator against members of any anonymous member's
+                 * struct definition. Linux uses this pattern in
+                 * `struct hw_perf_event` and several other places. */
+                size_t mi;
+                for (mi = 0; mi < sd->member_count && didx < 0; ++mi) {
+                    const cc_struct_member_t *am = &sd->members[mi];
+                    const cc_struct_def_t *asd;
+                    if (am->name != NULL && am->name[0] != '\0') continue;
+                    if (am->type != CC_TYPE_VOID || am->type_struct_id < 0) continue;
+                    asd = (am->type_struct_id < (int)tu->struct_count) ?
+                          &tu->structs[am->type_struct_id] : NULL;
+                    if (asd != NULL) {
+                        int sub = find_struct_member_index_by_name(asd, raw->ident);
+                        if (sub >= 0) {
+                            didx = (int)mi;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (didx < 0) {
+                char msg[160];
+                snprintf(msg, sizeof(msg), "unknown designated struct member '%s' in local initializer",
+                         raw->ident);
+                set_diag(diag, msg);
                 return -1;
             }
             member_idx = (size_t)didx;
