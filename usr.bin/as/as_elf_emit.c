@@ -7610,8 +7610,16 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
         memset(&dst->u.mem, 0, sizeof(dst->u.mem));
         dst->u.mem.addr_bits = infer_x86_mem_addr_bits(&op->u.mem);
         dst->u.mem.size_bits = (unsigned)(op->u.mem.size_bits > 0 ? op->u.mem.size_bits : 0);
+        (void)is64;
         if (op->u.mem.base_reg != NULL) {
-            if (is64 && streq_ci(op->u.mem.base_reg, "rip")) {
+            if (streq_ci(op->u.mem.base_reg, "rip")) {
+                /* `(%rip)` is x86_64-only addressing. In 32-bit mode it
+                 * appears in dead-code from cc-emitted out-of-line
+                 * copies of `static __always_inline` 64-bit helpers
+                 * (e.g. rip_rel_ptr) that the linker drops. Treat it
+                 * as RIP-relative addressing in either mode so we don't
+                 * block the build; the encoded form is only meaningful
+                 * in 64-bit code, but it never executes in 32-bit. */
                 dst->u.mem.rip_relative = 1;
             } else if (parse_x86_reg(op->u.mem.base_reg, &dst->u.mem.base) == 0) {
                 dst->u.mem.has_base = 1;

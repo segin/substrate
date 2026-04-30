@@ -1050,6 +1050,18 @@ static int expand_rept_file(const char *in_path, char **out_path) {
             }
             continue;
         }
+        if (line_starts_with_directive(d, ".irpc")) {
+            if (expand_irp_block(in, out, d + 5, 1) != 0) {
+                goto out;
+            }
+            continue;
+        }
+        if (line_starts_with_directive(d, ".irp")) {
+            if (expand_irp_block(in, out, d + 4, 0) != 0) {
+                goto out;
+            }
+            continue;
+        }
         fputs(line, out);
     }
     if (fflush(out) != 0) {
