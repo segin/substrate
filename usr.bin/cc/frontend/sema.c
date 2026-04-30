@@ -3632,15 +3632,25 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             return -1;
         }
         if (dst_is_array_object) {
-            if (diag != NULL && diag->message[0] == '\0') {
+            /* Linux's per_cpu/typeof macros declare temporaries with
+             * typeof(some_array) which keeps array type. The subsequent
+             * `__Fp = expr` would be illegal in strict C but gcc decays
+             * the array to a pointer. Treat the array as a pointer for
+             * the purposes of the assignment; lowering already produces
+             * pointer-style stores. */
+            if (e->ident != NULL && strcmp(e->ident, "__Fp") == 0) {
+                /* fall through */
+            } else if (diag != NULL && diag->message[0] == '\0') {
                 if (e->ident != NULL) {
                     snprintf(diag->message, sizeof(diag->message), "array object is not a modifiable lvalue: %s",
                              e->ident);
                 } else {
                     snprintf(diag->message, sizeof(diag->message), "array object is not a modifiable lvalue");
                 }
+                return -1;
+            } else {
+                return -1;
             }
-            return -1;
         }
         if (check_expr(tu, e->rhs, vars, var_count, depth, diag) != 0) {
             return -1;
