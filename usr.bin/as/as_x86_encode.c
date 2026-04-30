@@ -912,8 +912,16 @@ static int modrm_sib_disp(enc_ctx_t *ctx, uint8_t reg_field, const as_x86_operan
             return -1;
         }
         if (m->rip_relative) {
-            set_err(ctx, "RIP-relative mode is x86-64 only");
-            return -1;
+            /* No real RIP in 32-bit. Emit as disp-only -- this only happens
+             * in cc-emitted dead-code from x86_64-only static-inline
+             * helpers; the linker's section gc drops the affected functions. */
+            mod = 0;
+            rm = 5;
+            modrm = (uint8_t)((mod << 6) | ((reg_field & 7u) << 3) | rm);
+            if (emit8(ctx, modrm) != 0 || emit32(ctx, (uint32_t)m->disp) != 0) {
+                return -1;
+            }
+            return 0;
         }
         if (m->has_index && m->index == AS_X86_REG_ESP) {
             set_err(ctx, "ESP cannot be used as SIB index");
