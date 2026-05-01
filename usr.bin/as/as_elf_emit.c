@@ -59,6 +59,11 @@ typedef struct {
 } asm_var_t;
 
 typedef struct {
+    char *name;
+    char *reg;
+} asm_reg_alias_t;
+
+typedef struct {
     const as_elf_cfg_t *cfg;
     const as_parse_result_t *parsed;
     elfobj_t *obj;
@@ -75,6 +80,9 @@ typedef struct {
     asm_var_t *asm_vars;
     size_t asm_var_count;
     size_t asm_var_cap;
+    asm_reg_alias_t *asm_reg_aliases;
+    size_t asm_reg_alias_count;
+    size_t asm_reg_alias_cap;
     int virtual_scanning;
     char *errbuf;
     size_t errbuf_sz;
@@ -118,7 +126,9 @@ static int stmt_declared_label_section(emit_ctx_t *ctx, const as_stmt_t *target_
 static int eval_direct_local_branch_target(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *base_st,
                                            uint64_t base_off, unsigned x86_code_bits, const as_expr_t *rel_expr,
                                            size_t branch_len, long long *abs_target_out);
+static int parse_x86_reg(const char *name, as_x86_reg_t *out);
 static int parse_xmm_reg(const char *name, unsigned *out);
+static int parse_ymm_reg(const char *name, unsigned *out);
 static int parse_zmm_reg(const char *name, unsigned *out);
 static int parse_mmx_reg(const char *name, unsigned *out);
 static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_x86_operand_t *dst, int is64,
@@ -162,6 +172,14 @@ static void asm_var_reset(emit_ctx_t *ctx) {
     ctx->asm_vars = NULL;
     ctx->asm_var_count = 0;
     ctx->asm_var_cap = 0;
+    for (i = 0; i < ctx->asm_reg_alias_count; ++i) {
+        free(ctx->asm_reg_aliases[i].name);
+        free(ctx->asm_reg_aliases[i].reg);
+    }
+    free(ctx->asm_reg_aliases);
+    ctx->asm_reg_aliases = NULL;
+    ctx->asm_reg_alias_count = 0;
+    ctx->asm_reg_alias_cap = 0;
 }
 
 static int asm_var_lookup(const emit_ctx_t *ctx, const char *name, long long *out) {
@@ -209,6 +227,102 @@ static int asm_var_set(emit_ctx_t *ctx, const char *name, long long value) {
     ctx->asm_vars[ctx->asm_var_count].value = value;
     ctx->asm_var_count++;
     return 0;
+}
+
+static const char *asm_reg_alias_lookup(const emit_ctx_t *ctx, const char *name) {
+    size_t i;
+
+    if (ctx == NULL || name == NULL) {
+        return NULL;
+    }
+    for (i = ctx->asm_reg_alias_count; i > 0; --i) {
+        const asm_reg_alias_t *a = &ctx->asm_reg_aliases[i - 1];
+        if (a->name != NULL && strcmp(a->name, name) == 0) {
+            return a->reg;
+        }
+    }
+    return NULL;
+}
+
+static int asm_reg_alias_set(emit_ctx_t *ctx, const char *name, const char *reg) {
+    size_t i;
+    asm_reg_alias_t *next;
+
+    if (ctx == NULL || name == NULL || name[0] == '\0' || reg == NULL || reg[0] == '\0') {
+        return -1;
+    }
+    for (i = 0; i < ctx->asm_reg_alias_count; ++i) {
+        if (ctx->asm_reg_aliases[i].name != NULL && strcmp(ctx->asm_reg_aliases[i].name, name) == 0) {
+            char *r = xstrdup(reg);
+            if (r == NULL) {
+                return -1;
+            }
+            free(ctx->asm_reg_aliases[i].reg);
+            ctx->asm_reg_aliases[i].reg = r;
+            return 0;
+        }
+    }
+    if (ctx->asm_reg_alias_count == ctx->asm_reg_alias_cap) {
+        size_t ncap = ctx->asm_reg_alias_cap == 0 ? 32 : ctx->asm_reg_alias_cap * 2;
+        next = (asm_reg_alias_t *)realloc(ctx->asm_reg_aliases, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        ctx->asm_reg_aliases = next;
+        ctx->asm_reg_alias_cap = ncap;
+    }
+    ctx->asm_reg_aliases[ctx->asm_reg_alias_count].name = xstrdup(name);
+    ctx->asm_reg_aliases[ctx->asm_reg_alias_count].reg = xstrdup(reg);
+    if (ctx->asm_reg_aliases[ctx->asm_reg_alias_count].name == NULL ||
+        ctx->asm_reg_aliases[ctx->asm_reg_alias_count].reg == NULL) {
+        return -1;
+    }
+    ctx->asm_reg_alias_count++;
+    return 0;
+}
+
+static const char *asm_reg_alias_for_operand(const emit_ctx_t *ctx, const as_operand_t *op) {
+    if (ctx == NULL || op == NULL) {
+        return NULL;
+    }
+    if ((op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) &&
+        op->u.expr != NULL && op->u.expr->kind == AS_EXPR_SYMBOL) {
+        return asm_reg_alias_lookup(ctx, op->u.expr->symbol);
+    }
+    if (op->raw != NULL) {
+        return asm_reg_alias_lookup(ctx, op->raw);
+    }
+    return NULL;
+}
+
+static const as_operand_t *x86_operand_with_reg_alias(const emit_ctx_t *ctx, const as_operand_t *op, as_operand_t *tmp) {
+    const char *reg = asm_reg_alias_for_operand(ctx, op);
+    const char *base_reg;
+    const char *index_reg;
+
+    if (reg == NULL || tmp == NULL) {
+        if (op == NULL || op->kind != AS_OPERAND_MEMORY || tmp == NULL) {
+            return op;
+        }
+        base_reg = asm_reg_alias_lookup(ctx, op->u.mem.base_reg);
+        index_reg = asm_reg_alias_lookup(ctx, op->u.mem.index_reg);
+        if (base_reg == NULL && index_reg == NULL) {
+            return op;
+        }
+        *tmp = *op;
+        tmp->u.mem = op->u.mem;
+        if (base_reg != NULL) {
+            tmp->u.mem.base_reg = (char *)base_reg;
+        }
+        if (index_reg != NULL) {
+            tmp->u.mem.index_reg = (char *)index_reg;
+        }
+        return tmp;
+    }
+    *tmp = *op;
+    tmp->kind = AS_OPERAND_REGISTER;
+    tmp->u.reg = (char *)reg;
+    return tmp;
 }
 
 static char *xstrdup(const char *s) {
@@ -399,6 +513,32 @@ static int startswith_ci(const char *s, const char *prefix) {
         }
     }
     return 1;
+}
+
+static int x86_mnemonic_keeps_trailing_size_letter(const char *mnemonic) {
+    static const char *const exact[] = {
+        "movaps", "movups", "movapd", "movupd", "movdqa", "movdqu",
+        "paddb", "paddw", "paddd", "paddq",
+        "psubb", "psubw", "psubd", "psubq",
+        "psllw", "pslld", "psllq", "psrlw", "psrld", "psrlq",
+        "psraw", "psrad", "pxor", "por", "pand", "pandn",
+        "pshufd", "pmullw", "pmulhw", "pmulhuw", "pmuludq",
+        "paddsb", "paddsw", "paddusb", "paddusw",
+        "psubsb", "psubsw", "psubusb", "psubusw",
+        "pminub", "pminsw", "pmaxub", "pmaxsw",
+        "pavgb", "pavgw", "pmaddwd", "psadbw"
+    };
+    size_t i;
+
+    if (mnemonic == NULL) {
+        return 0;
+    }
+    for (i = 0; i < sizeof(exact) / sizeof(exact[0]); ++i) {
+        if (strcmp(mnemonic, exact[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static int parse_int64(const char *s, long long *out) {
@@ -841,11 +981,20 @@ static int eval_arg_asm_vars(emit_ctx_t *ctx, const as_stmt_t *st, const char *a
 
 static int apply_asm_var_directive(emit_ctx_t *ctx, const as_stmt_t *st, const as_directive_t *d) {
     long long value;
+    as_x86_reg_t gr;
+    unsigned vr;
 
     if (ctx == NULL || d == NULL || d->name == NULL ||
         (strcmp(d->name, ".set") != 0 && strcmp(d->name, ".equ") != 0) ||
         d->arg_count < 2 || d->args[0] == NULL || d->args[1] == NULL) {
         return 0;
+    }
+    if (parse_x86_reg(d->args[1], &gr) == 0 ||
+        parse_xmm_reg(d->args[1], &vr) == 0 ||
+        parse_ymm_reg(d->args[1], &vr) == 0 ||
+        parse_zmm_reg(d->args[1], &vr) == 0 ||
+        parse_mmx_reg(d->args[1], &vr) == 0) {
+        return asm_reg_alias_set(ctx, d->args[0], d->args[1]);
     }
     if (eval_arg_asm_vars(ctx, st, d->args[1], &value) != 0) {
         return 0;
@@ -3399,6 +3548,12 @@ static int normalize_x86_mnemonic(const char *src, char *dst, size_t dst_sz, cha
         suffix = src[n - 1];
         if (suffix_out != NULL) {
             *suffix_out = suffix;
+        }
+        return 0;
+    }
+    if (x86_mnemonic_keeps_trailing_size_letter(dst)) {
+        if (suffix_out != NULL) {
+            *suffix_out = '\0';
         }
         return 0;
     }
@@ -8939,7 +9094,7 @@ static int x86_stmt_requires_v3(const as_instruction_t *insn, int intel_syntax, 
                                      sizeof(probe_err)) == 0;
 }
 
-static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code, size_t code_cap,
+static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code, size_t code_cap,
                            size_t *code_len, char *encerr, size_t encerr_sz) {
     as_x86_insn_t in;
     size_t j;
@@ -9179,8 +9334,9 @@ static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigne
     }
 
     for (j = 0; j < in.op_count; ++j) {
-        if (convert_operand_x86(&st->u.instr.operands[op_index[j]], in.mnemonic, &in.ops[j], cfg->is_64, intel_syntax, encerr,
-                                encerr_sz) != 0) {
+        as_operand_t alias_op;
+        const as_operand_t *src_op = x86_operand_with_reg_alias(ctx, &st->u.instr.operands[op_index[j]], &alias_op);
+        if (convert_operand_x86(src_op, in.mnemonic, &in.ops[j], cfg->is_64, intel_syntax, encerr, encerr_sz) != 0) {
             return -1;
         }
     }
@@ -10259,9 +10415,9 @@ static int x86_cond_code(const char *mnemonic, unsigned *cc_out) {
     return -1;
 }
 
-static int emit_resolved_x86_branch(const as_elf_cfg_t *cfg, const as_stmt_t *st, uint64_t sec_off,
-                                    long long abs_target, unsigned char *code, size_t code_cap,
-                                    size_t *code_len, char *encerr, size_t encerr_sz) {
+static int emit_resolved_x86_branch_ex(const as_elf_cfg_t *cfg, const as_stmt_t *st, uint64_t sec_off,
+                                       long long abs_target, int allow_short, unsigned char *code, size_t code_cap,
+                                       size_t *code_len, char *encerr, size_t encerr_sz) {
     char mnbuf[32];
     char suffix = '\0';
     unsigned cc;
@@ -10288,7 +10444,7 @@ static int emit_resolved_x86_branch(const as_elf_cfg_t *cfg, const as_stmt_t *st
     }
     if (streq_ci(mnbuf, "jmp")) {
         disp8 = abs_target - ((long long)sec_off + 2);
-        if (disp8 >= -128 && disp8 <= 127) {
+        if (allow_short && disp8 >= -128 && disp8 <= 127) {
             if (code_cap < 2) {
                 return -1;
             }
@@ -10330,7 +10486,7 @@ static int emit_resolved_x86_branch(const as_elf_cfg_t *cfg, const as_stmt_t *st
     }
     if (x86_cond_code(mnbuf, &cc) == 0) {
         disp8 = abs_target - ((long long)sec_off + 2);
-        if (disp8 >= -128 && disp8 <= 127) {
+        if (allow_short && disp8 >= -128 && disp8 <= 127) {
             if (code_cap < 2) {
                 return -1;
             }
@@ -10371,6 +10527,12 @@ static int emit_resolved_x86_branch(const as_elf_cfg_t *cfg, const as_stmt_t *st
     return -1;
 }
 
+static int emit_resolved_x86_branch(const as_elf_cfg_t *cfg, const as_stmt_t *st, uint64_t sec_off,
+                                    long long abs_target, unsigned char *code, size_t code_cap,
+                                    size_t *code_len, char *encerr, size_t encerr_sz) {
+    return emit_resolved_x86_branch_ex(cfg, st, sec_off, abs_target, 1, code, code_cap, code_len, encerr, encerr_sz);
+}
+
 static int parsed_stmt_index(emit_ctx_t *ctx, const as_stmt_t *needle, size_t *idx_out) {
     size_t i;
 
@@ -10386,6 +10548,42 @@ static int parsed_stmt_index(emit_ctx_t *ctx, const as_stmt_t *needle, size_t *i
     return -1;
 }
 
+static int local_temp_branch_target_within(emit_ctx_t *ctx, const as_stmt_t *base_st,
+                                           const as_expr_t *rel_expr, size_t max_stmt_distance) {
+    const as_stmt_t *target_st = NULL;
+    size_t base_idx;
+    size_t target_idx;
+    size_t i;
+
+    if (ctx == NULL || base_st == NULL || rel_expr == NULL ||
+        rel_expr->kind != AS_EXPR_SYMBOL ||
+        !expr_is_local_temp_symbol(rel_expr) ||
+        parsed_stmt_index(ctx, base_st, &base_idx) != 0) {
+        return 0;
+    }
+    for (i = 0; i < ctx->parsed->count; ++i) {
+        const as_stmt_t *st = &ctx->parsed->items[i];
+        size_t j;
+
+        for (j = 0; j < st->label_count; ++j) {
+            if (st->labels[j].name != NULL && strcmp(st->labels[j].name, rel_expr->symbol) == 0) {
+                target_st = st;
+                break;
+            }
+        }
+        if (target_st != NULL) {
+            break;
+        }
+    }
+    if (target_st == NULL || parsed_stmt_index(ctx, target_st, &target_idx) != 0) {
+        return 0;
+    }
+    if (target_idx > base_idx) {
+        return target_idx - base_idx <= max_stmt_distance;
+    }
+    return base_idx - target_idx <= max_stmt_distance;
+}
+
 static int stmt_virtual_size_in_section(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *st,
                                         uint64_t sec_off, unsigned x86_code_bits, size_t *size_out) {
     bytebuf_t tmp;
@@ -10399,7 +10597,9 @@ static int stmt_virtual_size_in_section(emit_ctx_t *ctx, const char *section_nam
         if (st->u.instr.operand_count == 1 && is_rel_mnemonic(st->u.instr.mnemonic)) {
             const as_operand_t *op = &st->u.instr.operands[0];
             const as_expr_t *e = op->u.expr;
-            if ((op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) &&
+            if ((ctx->virtual_scanning == 0 ||
+                 (ctx->virtual_scanning == 1 && local_temp_branch_target_within(ctx, st, e, 64))) &&
+                (op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) &&
                 e != NULL && e->kind == AS_EXPR_SYMBOL && expr_is_local_temp_symbol(e)) {
                 as_elf_cfg_t local_cfg = *ctx->cfg;
                 long long abs_target;
@@ -10700,7 +10900,7 @@ static int eval_direct_local_branch_target(emit_ctx_t *ctx, const char *section_
     return 0;
 }
 
-static unsigned stmt_local_rel_virtual_len(const as_stmt_t *st) {
+static unsigned stmt_local_rel_virtual_len(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *st) {
     const as_operand_t *op;
     const as_expr_t *e;
     char mnbuf[32];
@@ -10720,6 +10920,9 @@ static unsigned stmt_local_rel_virtual_len(const as_stmt_t *st) {
     }
     e = op->u.expr;
     is_local = ((e != NULL && expr_has_local_ref(e)) ||
+                (section_name != NULL && strcmp(section_name, ".altinstr_replacement") != 0 &&
+                 e != NULL && expr_is_local_temp_symbol(e) &&
+                 local_temp_branch_target_within(ctx, st, e, 64)) ||
                 raw_is_numeric_local_ref(op->raw));
     if (is_call_mnemonic(st->u.instr.mnemonic)) {
         return 5u;
@@ -10751,7 +10954,9 @@ static int append_virtual_instruction_bytes(emit_ctx_t *ctx, bytebuf_t *buf, con
         is_rel_mnemonic(st->u.instr.mnemonic)) {
         const as_operand_t *op = &st->u.instr.operands[0];
         const as_expr_t *e = op->u.expr;
-        if ((op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) &&
+        if ((ctx->virtual_scanning == 0 ||
+             (ctx->virtual_scanning == 1 && local_temp_branch_target_within(ctx, st, e, 64))) &&
+            (op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) &&
             e != NULL && e->kind == AS_EXPR_SYMBOL && expr_is_local_temp_symbol(e)) {
             as_elf_cfg_t local_cfg = *ctx->cfg;
             long long abs_target;
@@ -10773,7 +10978,7 @@ static int append_virtual_instruction_bytes(emit_ctx_t *ctx, bytebuf_t *buf, con
         }
     }
     {
-        unsigned local_rel_len = stmt_local_rel_virtual_len(st);
+        unsigned local_rel_len = stmt_local_rel_virtual_len(ctx, section_name, st);
         if (local_rel_len != 0) {
             return bytebuf_append_zeros(buf, local_rel_len);
         }
@@ -10782,7 +10987,7 @@ static int append_virtual_instruction_bytes(emit_ctx_t *ctx, bytebuf_t *buf, con
     stmt_cfg.x86_code_bits = x86_code_bits;
     stmt_cfg.have_current_text_offset = 1u;
     stmt_cfg.current_text_offset = (uint64_t)buf->len;
-    if (encode_x86_stmt(&stmt_cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
+    if (encode_x86_stmt(ctx, &stmt_cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
         return -1;
     }
     return bytebuf_append(buf, code, code_len);
@@ -11195,7 +11400,7 @@ unresolved_rel_target:
                 if (st->u.instr.operand_count > sizeof(tops) / sizeof(tops[0])) {
                     return -1;
                 }
-                if (encode_x86_stmt(&stmt_cfg, st, code, code_cap, &probe_len, encerr, encerr_sz) != 0) {
+                if (encode_x86_stmt(ctx, &stmt_cfg, st, code, code_cap, &probe_len, encerr, encerr_sz) != 0) {
                     return -1;
                 }
                 memcpy(tops, st->u.instr.operands, st->u.instr.operand_count * sizeof(*tops));
@@ -11206,12 +11411,12 @@ unresolved_rel_target:
                 tops[oi].u.mem.disp = &texpr;
                 tin.operands = tops;
                 tmp.u.instr = tin;
-                return encode_x86_stmt(&stmt_cfg, &tmp, code, code_cap, code_len, encerr, encerr_sz);
+                return encode_x86_stmt(ctx, &stmt_cfg, &tmp, code, code_cap, code_len, encerr, encerr_sz);
             }
         }
     }
 
-    return encode_x86_stmt(&stmt_cfg, st, code, code_cap, code_len, encerr, encerr_sz);
+    return encode_x86_stmt(ctx, &stmt_cfg, st, code, code_cap, code_len, encerr, encerr_sz);
 }
 
 static int emit_text_program(emit_ctx_t *ctx) {
@@ -13974,6 +14179,9 @@ static int emit_relocations(emit_ctx_t *ctx) {
                 uint64_t reloc_width = 4;
                 int64_t addend = 0;
 
+                if (asm_reg_alias_for_operand(ctx, op) != NULL) {
+                    continue;
+                }
                 if (op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) {
                     e = op->u.expr;
                 } else if (op->kind == AS_OPERAND_MEMORY) {

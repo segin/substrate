@@ -480,6 +480,19 @@ static int parse_size_arg(const char *expr, const char *sym_name, as_symbol_t *s
                 free(tmp);
                 return -1;
             }
+            if (strcmp(lhs, ".") == 0) {
+                sym->size = 0;
+                sym->size_target_symbol = rhs;
+                sym->size_base_from_dot = 1;
+                sym->size_anchor_file = xstrdup(file);
+                sym->size_anchor_line = line;
+                free(lhs);
+                free(tmp);
+                if (sym->size_anchor_file == NULL) {
+                    return -1;
+                }
+                return 0;
+            }
             if (strcmp(rhs, sym_name) == 0) {
                 sym->size = 0;
                 sym->size_base_symbol = lhs;

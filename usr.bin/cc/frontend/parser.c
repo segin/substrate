@@ -160,6 +160,12 @@ typedef struct {
     int complete;
 } enum_tag_entry_t;
 
+typedef struct {
+    char *name;
+    char *unique_name;
+    int depth;
+} local_label_entry_t;
+
 int cc_lexer_init(cc_lexer_t *lx, const char *src, size_t len, const char *path);
 void cc_lexer_deinit(cc_lexer_t *lx);
 int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out);
@@ -286,6 +292,10 @@ typedef struct {
     enum_tag_entry_t *enum_tags;
     size_t enum_tag_count;
     size_t enum_tag_cap;
+    local_label_entry_t *local_labels;
+    size_t local_label_count;
+    size_t local_label_cap;
+    size_t local_label_unique;
     cc_function_t *hoisted_funcs;
     size_t hoisted_func_count;
     size_t hoisted_func_cap;
@@ -509,6 +519,11 @@ static void free_func(cc_function_t *f);
 static int enum_tag_find_n(const parser_t *p, const char *tag, size_t len);
 static int enum_tag_set(parser_t *p, const char *tag, size_t len, cc_type_t type, int complete);
 static void parser_free_enum_tags(parser_t *p);
+static const char *local_label_lookup_n(const parser_t *p, const char *name, size_t len);
+static char *local_label_dup_mapped_n(const parser_t *p, const char *name, size_t len);
+static int local_label_push(parser_t *p, const char *name, size_t len);
+static void local_label_pop_to_depth(parser_t *p, int depth);
+static void parser_free_local_labels(parser_t *p);
 
 static cc_type_t parser_const_result_type(parser_t *p, const cc_expr_t *e);
 static int parser_const_type_bits(const parser_t *p, cc_type_t t, int struct_id);
@@ -945,6 +960,87 @@ static void parser_free_enum_tags(parser_t *p) {
     p->enum_tags = NULL;
     p->enum_tag_count = 0;
     p->enum_tag_cap = 0;
+}
+
+static const char *local_label_lookup_n(const parser_t *p, const char *name, size_t len) {
+    size_t i;
+
+    if (p == NULL || name == NULL || len == 0) {
+        return NULL;
+    }
+    i = p->local_label_count;
+    while (i > 0) {
+        i--;
+        if (p->local_labels[i].name != NULL &&
+            strlen(p->local_labels[i].name) == len &&
+            strncmp(p->local_labels[i].name, name, len) == 0) {
+            return p->local_labels[i].unique_name;
+        }
+    }
+    return NULL;
+}
+
+static char *local_label_dup_mapped_n(const parser_t *p, const char *name, size_t len) {
+    const char *mapped = local_label_lookup_n(p, name, len);
+
+    if (mapped != NULL) {
+        return xstrdup_n(mapped, strlen(mapped));
+    }
+    return xstrdup_n(name, len);
+}
+
+static int local_label_push(parser_t *p, const char *name, size_t len) {
+    local_label_entry_t *next;
+    char unique[256];
+    char *dup_name;
+    char *dup_unique;
+    int n;
+
+    if (p == NULL || name == NULL || len == 0) {
+        return -1;
+    }
+    if (p->local_label_count == p->local_label_cap) {
+        size_t ncap = p->local_label_cap == 0 ? 16 : p->local_label_cap * 2;
+        next = (local_label_entry_t *)realloc(p->local_labels, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        p->local_labels = next;
+        p->local_label_cap = ncap;
+    }
+    n = snprintf(unique, sizeof(unique), "__cc_local_label_%zu_%.*s",
+                 p->local_label_unique++, (int)len, name);
+    if (n <= 0 || (size_t)n >= sizeof(unique)) {
+        return -1;
+    }
+    dup_name = xstrdup_n(name, len);
+    dup_unique = xstrdup_n(unique, strlen(unique));
+    if (dup_name == NULL || dup_unique == NULL) {
+        free(dup_name);
+        free(dup_unique);
+        return -1;
+    }
+    p->local_labels[p->local_label_count].name = dup_name;
+    p->local_labels[p->local_label_count].unique_name = dup_unique;
+    p->local_labels[p->local_label_count].depth = p->scope_depth;
+    p->local_label_count++;
+    return 0;
+}
+
+static void local_label_pop_to_depth(parser_t *p, int depth) {
+    while (p->local_label_count > 0 && p->local_labels[p->local_label_count - 1].depth > depth) {
+        free(p->local_labels[p->local_label_count - 1].name);
+        free(p->local_labels[p->local_label_count - 1].unique_name);
+        p->local_label_count--;
+    }
+}
+
+static void parser_free_local_labels(parser_t *p) {
+    local_label_pop_to_depth(p, -1);
+    free(p->local_labels);
+    p->local_labels = NULL;
+    p->local_label_count = 0;
+    p->local_label_cap = 0;
 }
 
 static int is_pointer_type(cc_type_t t) {
@@ -2312,7 +2408,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                             type_array_dims[0] = bound;
                             type_array_len = bound;
                         }
-                    } else if (te->array_ndim > 0) {
+                    } else if (te->kind != CC_EXPR_ADDR && te->array_ndim > 0) {
                         type_array_ndim = te->array_ndim;
                         memcpy(type_array_dims, te->array_dims, sizeof(type_array_dims));
                         type_array_len = type_array_dims[0];
@@ -5514,7 +5610,7 @@ static int parse_asm_label_list(parser_t *p, char ***items, size_t *count) {
             set_diag(p->diag, p->tok.line, p->tok.col, "expected asm goto label");
             return -1;
         }
-        name = xstrdup_n(p->tok.start, p->tok.len);
+        name = local_label_dup_mapped_n(p, p->tok.start, p->tok.len);
         if (name == NULL) {
             return -1;
         }
@@ -9065,7 +9161,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
             free_expr(e);
             return NULL;
         }
-        e->ident = xstrdup_n(p->tok.start, p->tok.len);
+        e->ident = local_label_dup_mapped_n(p, p->tok.start, p->tok.len);
         if (e->ident == NULL) {
             free_expr(e);
             return NULL;
@@ -10454,11 +10550,13 @@ static int parse_block_stmt(parser_t *p, cc_stmt_t *s) {
     if (expect(p, TOK_RBRACE, "expected '}' after block") != 0) {
         typedef_pop_to_depth(p, saved_depth);
         var_pop_to_depth(p, saved_depth);
+        local_label_pop_to_depth(p, saved_depth);
         p->scope_depth = saved_depth;
         return -1;
     }
     typedef_pop_to_depth(p, saved_depth);
     var_pop_to_depth(p, saved_depth);
+    local_label_pop_to_depth(p, saved_depth);
     p->scope_depth = saved_depth;
     return 0;
 }
@@ -10575,6 +10673,10 @@ static int parse_stmt_impl(parser_t *p, cc_stmt_t *s) {
             return -1;
         }
         for (;;) {
+            if (local_label_push(p, p->tok.start, p->tok.len) != 0) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "out of memory recording local label");
+                return -1;
+            }
             if (next_tok(p) != 0) {
                 return -1;
             }
@@ -10607,7 +10709,7 @@ static int parse_stmt_impl(parser_t *p, cc_stmt_t *s) {
     if (p->tok.kind == TOK_IDENT && peek_kind(p) == TOK_COLON) {
         decl_attrs_t label_attrs;
         s->kind = CC_STMT_LABEL;
-        s->label_name = xstrdup_n(p->tok.start, p->tok.len);
+        s->label_name = local_label_dup_mapped_n(p, p->tok.start, p->tok.len);
         if (s->label_name == NULL) {
             return -1;
         }
@@ -10885,7 +10987,7 @@ static int parse_stmt_impl(parser_t *p, cc_stmt_t *s) {
             set_diag(p->diag, p->tok.line, p->tok.col, "expected label identifier after goto");
             return -1;
         }
-        s->label_name = xstrdup_n(p->tok.start, p->tok.len);
+        s->label_name = local_label_dup_mapped_n(p, p->tok.start, p->tok.len);
         if (s->label_name == NULL) {
             return -1;
         }
@@ -11542,6 +11644,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     }
     typedef_pop_to_depth(p, saved_depth);
     var_pop_to_depth(p, saved_depth);
+    local_label_pop_to_depth(p, saved_depth);
     struct_hide_to_depth(p, saved_depth);
     p->scope_depth = saved_depth;
     return 0;
@@ -12012,6 +12115,7 @@ int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag)
     parser_free_vars(&p);
     parser_free_enum_consts(&p);
     parser_free_enum_tags(&p);
+    parser_free_local_labels(&p);
     if (diag != NULL && diag->error_count > 0) {
         parser_free_structs(&p);
         free(buf);

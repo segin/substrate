@@ -615,7 +615,8 @@ static int asm_validate_template_refs(const cc_stmt_t *s, cc_diag_t *diag) {
                     n = n * 10 + (long)(t[i] - '0');
                     i++;
                 }
-                if (n < 0 || (size_t)n >= s->asm_goto_label_count) {
+                if (n < 0 || (size_t)n < total ||
+                    (size_t)(n - (long)total) >= s->asm_goto_label_count) {
                     set_diag(diag, "asm template goto-label index is out of range");
                     return -1;
                 }
@@ -1118,6 +1119,13 @@ static long type_size_bytes(cc_type_t t);
 
 static int pointer_depth(cc_type_t t) {
     return (int)cc_type_pointer_depth(t);
+}
+
+static cc_type_t pointer_ultimate_base_type(cc_type_t t) {
+    while (is_pointer_type(t)) {
+        t = ptr_base_type(t);
+    }
+    return t;
 }
 
 static int is_unsigned_integral_type(cc_type_t t) {
@@ -3634,6 +3642,12 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         }
         if (!assign_ok && dst_type == CC_TYPE_VOID && dst_struct_id >= 0 && is_integral_type(e->rhs->value_type) &&
             e->rhs->kind == CC_EXPR_STMT) {
+            assign_ok = 1;
+        }
+        if (!assign_ok && is_pointer_type(dst_type) && is_pointer_type(e->rhs->value_type) &&
+            e->rhs->kind == CC_EXPR_ADDR && e->rhs->lhs != NULL && e->rhs->lhs->array_ndim > 0 &&
+            pointer_ultimate_base_type(dst_type) == pointer_ultimate_base_type(e->rhs->value_type) &&
+            pointer_depth(dst_type) > pointer_depth(e->rhs->value_type)) {
             assign_ok = 1;
         }
         if (!assign_ok) {

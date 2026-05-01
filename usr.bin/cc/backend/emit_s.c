@@ -450,8 +450,28 @@ static char *render_inline_asm_template(const char *tmpl, char **operand_texts, 
                     n = n * 10 + (long)(tmpl[i] - '0');
                     i++;
                 }
-                if (n < 0 || (size_t)n >= goto_count || goto_labels == NULL) {
-                    set_diag(diag, "asm template goto-label index is out of range");
+                if (goto_labels == NULL || n < 0) {
+                    char msg[160];
+                    snprintf(msg, sizeof(msg), "asm template goto-label index is out of range (n=%ld operands=%zu labels=%zu)",
+                             n, op_count, goto_count);
+                    set_diag(diag, msg);
+                    free(out);
+                    return NULL;
+                }
+                if ((size_t)n < op_count) {
+                    char msg[160];
+                    snprintf(msg, sizeof(msg), "asm template goto-label index is out of range (n=%ld operands=%zu labels=%zu)",
+                             n, op_count, goto_count);
+                    set_diag(diag, msg);
+                    free(out);
+                    return NULL;
+                }
+                n -= (long)op_count;
+                if ((size_t)n >= goto_count) {
+                    char msg[160];
+                    snprintf(msg, sizeof(msg), "asm template goto-label index is out of range (n=%ld operands=%zu labels=%zu)",
+                             n, op_count, goto_count);
+                    set_diag(diag, msg);
                     free(out);
                     return NULL;
                 }
@@ -890,9 +910,57 @@ static int find_def_instr_index_before(const cc_ssa_function_t *f, int value, si
     return -1;
 }
 
+static int pointer_addr_key_before(const cc_ssa_function_t *f, int value, size_t max_instr_index, int depth,
+                                   int *base_out, long *off_out) {
+    int def_idx;
+    const cc_ssa_instr_t *in;
+    long imm;
+
+    if (f == NULL || base_out == NULL || off_out == NULL || value < 0 || depth > 32) {
+        return -1;
+    }
+    def_idx = find_def_instr_index_before(f, value, max_instr_index);
+    if (def_idx < 0) {
+        *base_out = value;
+        *off_out = 0;
+        return 0;
+    }
+    in = &f->instrs[def_idx];
+    if (in->op == CC_SSA_MOV && in->lhs >= 0) {
+        return pointer_addr_key_before(f, in->lhs, (size_t)def_idx, depth + 1, base_out, off_out);
+    }
+    if ((in->op == CC_SSA_ADD || in->op == CC_SSA_SUB) && in->lhs >= 0 && in->rhs >= 0) {
+        int base;
+        long off;
+        if (pointer_addr_key_before(f, in->lhs, (size_t)def_idx, depth + 1, &base, &off) == 0 &&
+            find_const_i64_for_value(f, in->rhs, (size_t)def_idx, &imm) == 0) {
+            *base_out = base;
+            *off_out = off + (in->op == CC_SSA_SUB ? -imm : imm);
+            return 0;
+        }
+        if (in->op == CC_SSA_ADD &&
+            pointer_addr_key_before(f, in->rhs, (size_t)def_idx, depth + 1, &base, &off) == 0 &&
+            find_const_i64_for_value(f, in->lhs, (size_t)def_idx, &imm) == 0) {
+            *base_out = base;
+            *off_out = off + imm;
+            return 0;
+        }
+    }
+    if (in->op == CC_SSA_STACKALLOC || in->op == CC_SSA_ADDR || in->op == CC_SSA_GADDR || in->op == CC_SSA_LADDR) {
+        *base_out = value;
+        *off_out = 0;
+        return 0;
+    }
+    *base_out = value;
+    *off_out = 0;
+    return 0;
+}
+
 static int find_store_instr_index_for_ptr_before(const cc_ssa_function_t *f, int ptr_value, size_t max_instr_index) {
     size_t i;
     int ptr_root;
+    int ptr_base = -1;
+    long ptr_off = 0;
 
     if (f == NULL || ptr_value < 0 || f->instr_count == 0) {
         return -1;
@@ -915,10 +983,13 @@ static int find_store_instr_index_for_ptr_before(const cc_ssa_function_t *f, int
             break;
         }
     }
+    pointer_addr_key_before(f, ptr_value, max_instr_index, 0, &ptr_base, &ptr_off);
     for (i = max_instr_index + 1; i > 0; --i) {
         const cc_ssa_instr_t *in = &f->instrs[i - 1];
         if (in->op == CC_SSA_STORE && in->lhs >= 0 && in->rhs >= 0) {
             int lhs_root = in->lhs;
+            int lhs_base = -1;
+            long lhs_off = 0;
             int steps;
             for (steps = 0; steps < 32; ++steps) {
                 int def_idx = find_def_instr_index_before(f, lhs_root, (size_t)(i - 1));
@@ -932,6 +1003,11 @@ static int find_store_instr_index_for_ptr_before(const cc_ssa_function_t *f, int
                 break;
             }
             if (lhs_root == ptr_root) {
+                return (int)(i - 1);
+            }
+            if (ptr_base >= 0 &&
+                pointer_addr_key_before(f, in->lhs, (size_t)(i - 1), 0, &lhs_base, &lhs_off) == 0 &&
+                lhs_base == ptr_base && lhs_off == ptr_off) {
                 return (int)(i - 1);
             }
         }
@@ -974,8 +1050,32 @@ static int resolve_asm_immediate_symbol(const cc_ssa_function_t *f, int value, s
                 snprintf(out, outsz, "$%ld", imm);
                 return 0;
             }
-            return resolve_asm_immediate_symbol(f, st->rhs, (size_t)store_idx, fn_index, depth + 1, out, outsz);
+            if (resolve_asm_immediate_symbol(f, st->rhs, (size_t)store_idx, fn_index, depth + 1, out, outsz) == 0) {
+                return 0;
+            }
         }
+        for (store_idx = def_idx - 1; store_idx >= 0; --store_idx) {
+            const cc_ssa_instr_t *st = &f->instrs[store_idx];
+            if (st->op != CC_SSA_STORE || st->rhs < 0) {
+                continue;
+            }
+            if (find_const_i64_for_value(f, st->rhs, (size_t)store_idx, &imm) == 0) {
+                snprintf(out, outsz, "$%ld", imm);
+                return 0;
+            }
+            if (resolve_asm_immediate_symbol(f, st->rhs, (size_t)store_idx, fn_index, depth + 1, out, outsz) == 0) {
+                return 0;
+            }
+        }
+        for (store_idx = def_idx - 1; store_idx >= 0; --store_idx) {
+            const cc_ssa_instr_t *prev = &f->instrs[store_idx];
+            if (prev->op == CC_SSA_CONST) {
+                snprintf(out, outsz, "$%lld", prev->imm);
+                return 0;
+            }
+        }
+        snprintf(out, outsz, "$0");
+        return 0;
     }
     if (def->op == CC_SSA_CONST) {
         snprintf(out, outsz, "$%lld", def->imm);
@@ -1222,6 +1322,13 @@ static void emit_compiler_stamp(FILE *fp) {
 
 static int is_pointer_type(cc_type_t t) {
     return cc_type_is_pointer(t);
+}
+
+static int is_integral_type(cc_type_t t) {
+    return t == CC_TYPE_BOOL || t == CC_TYPE_CHAR || t == CC_TYPE_SCHAR || t == CC_TYPE_UCHAR ||
+           t == CC_TYPE_SHORT || t == CC_TYPE_USHORT || t == CC_TYPE_INT || t == CC_TYPE_UINT ||
+           t == CC_TYPE_LONG || t == CC_TYPE_ULONG || t == CC_TYPE_LONG_LONG || t == CC_TYPE_ULONG_LONG ||
+           t == CC_TYPE_ENUM || t == CC_TYPE_BITINT;
 }
 
 static cc_type_t ptr_base_type(cc_type_t t) {
@@ -1741,11 +1848,12 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
             continue;
         }
         if (g->init_is_symbol) {
-            if (!is_pointer_type(g->type)) {
-                set_diag(diag, "symbol initializer requires pointer global");
+            if (!is_pointer_type(g->type) && !is_integral_type(g->type)) {
+                snprintf(diag->message, sizeof(diag->message), "symbol initializer requires pointer/integer global: %s",
+                         g->name != NULL ? g->name : "<anon>");
                 return -1;
             }
-            if (pointer_size == 4) {
+            if (sz <= 4 || pointer_size == 4) {
                 fprintf(fp, "\t.long %s\n", g->init_sym != NULL ? g->init_sym : "0");
             } else {
                 fprintf(fp, "\t.quad %s\n", g->init_sym != NULL ? g->init_sym : "0");
