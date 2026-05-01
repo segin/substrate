@@ -521,6 +521,8 @@ void audio_unregister_device(audio_dev_t *dev)
 }
 
 extern void null_audio_init(void);
+extern void ac97_init(void);
+extern void sb16_init(void);
 
 void audio_init(void)
 {
@@ -529,4 +531,6 @@ void audio_init(void)
 	audio_devices_head = NULL;
 
 	null_audio_init();
+	ac97_init();
+	sb16_init();
 }
