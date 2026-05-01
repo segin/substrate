@@ -89,4 +89,12 @@ void pool_extract_bytes(struct entropy_pool *pool, void *out, size_t len);
 void random_detect_hwrng(void);
 int random_harvest_hwrng(void);
 
+/* ioctl helpers (used by random_dev_ioctl and host tests) */
+uint32_t random_get_entropy_count(void);
+void random_set_entropy_count(uint32_t bits);
+void random_add_to_entropy_count(int delta);
+void random_zap_entropy_count(void);
+void random_clear_pool(void);
+void random_force_reseed(void);
+
 #endif /* _KERN_RANDOM_INTERNAL_H */

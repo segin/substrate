@@ -13,6 +13,7 @@
 #include <sys/random.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
+#include <sys/proc.h>
 #include <arch/i386/cpu.h>
 #include <kern/random.h>
 #include <kern/console.h>
@@ -540,6 +541,167 @@ static size_t random_dev_write(fs_node_t *node, off_t offset, size_t size, const
     return size;
 }
 
+/*
+ * Public helpers used by both the ioctl dispatcher and host tests.
+ * These deliberately operate on rng_state under entropy_lock so callers
+ * stay agnostic of the locking discipline.
+ */
+uint32_t random_get_entropy_count(void) {
+    uint32_t v;
+    spinlock_acquire(&entropy_lock);
+    v = rng_state.input_pool.entropy_count;
+    spinlock_release(&entropy_lock);
+    return v;
+}
+
+void random_set_entropy_count(uint32_t bits) {
+    if (bits > ENTROPY_POOL_SIZE * 8) {
+        bits = ENTROPY_POOL_SIZE * 8;
+    }
+    spinlock_acquire(&entropy_lock);
+    rng_state.input_pool.entropy_count = bits;
+    spinlock_release(&entropy_lock);
+}
+
+void random_add_to_entropy_count(int delta) {
+    spinlock_acquire(&entropy_lock);
+    {
+        int64_t cur = (int64_t)rng_state.input_pool.entropy_count;
+        cur += (int64_t)delta;
+        if (cur < 0) {
+            cur = 0;
+        }
+        if (cur > (int64_t)(ENTROPY_POOL_SIZE * 8)) {
+            cur = (int64_t)(ENTROPY_POOL_SIZE * 8);
+        }
+        rng_state.input_pool.entropy_count = (uint32_t)cur;
+    }
+    spinlock_release(&entropy_lock);
+}
+
+void random_zap_entropy_count(void) {
+    spinlock_acquire(&entropy_lock);
+    rng_state.input_pool.entropy_count = 0;
+    spinlock_release(&entropy_lock);
+}
+
+void random_clear_pool(void) {
+    spinlock_acquire(&entropy_lock);
+    memset(rng_state.input_pool.pool, 0, ENTROPY_POOL_SIZE);
+    rng_state.input_pool.mix_ptr = 0;
+    rng_state.input_pool.entropy_count = 0;
+    spinlock_release(&entropy_lock);
+}
+
+void random_force_reseed(void) {
+    random_reseed();
+}
+
+/*
+ * /dev/random and /dev/urandom ioctl dispatcher.
+ * Returns 0 on success, negative -errno on failure.
+ */
+static int random_dev_ioctl(fs_node_t *node, uint32_t request, void *arg) {
+    (void)node;
+
+    switch (request) {
+    case RNDGETENTCNT: {
+        int bits;
+
+        if (arg == NULL) {
+            return -EINVAL;
+        }
+        bits = (int)random_get_entropy_count();
+        if (copyout(&bits, arg, sizeof(bits)) != 0) {
+            return -EFAULT;
+        }
+        return 0;
+    }
+
+    case RNDADDTOENTCNT: {
+        int delta;
+
+        if (current_process && current_process->euid != 0) {
+            return -EPERM;
+        }
+        if (arg == NULL) {
+            return -EINVAL;
+        }
+        if (copyin(arg, &delta, sizeof(delta)) != 0) {
+            return -EFAULT;
+        }
+        random_add_to_entropy_count(delta);
+        return 0;
+    }
+
+    case RNDADDENTROPY: {
+        struct rand_pool_info hdr;
+        uint8_t buf[256];
+        size_t total;
+        size_t off;
+        const uint8_t *src;
+
+        if (current_process && current_process->euid != 0) {
+            return -EPERM;
+        }
+        if (arg == NULL) {
+            return -EINVAL;
+        }
+        if (copyin(arg, &hdr, sizeof(hdr)) != 0) {
+            return -EFAULT;
+        }
+        if (hdr.buf_size < 0 || hdr.entropy_count < 0) {
+            return -EINVAL;
+        }
+        total = (size_t)hdr.buf_size;
+        if (total > 65536U) {
+            return -EINVAL;
+        }
+        src = (const uint8_t *)arg + sizeof(hdr);
+        for (off = 0; off < total; off += sizeof(buf)) {
+            size_t chunk = total - off;
+            if (chunk > sizeof(buf)) {
+                chunk = sizeof(buf);
+            }
+            if (copyin(src + off, buf, chunk) != 0) {
+                memset(buf, 0, sizeof(buf));
+                return -EFAULT;
+            }
+            random_harvest(buf, chunk, 0, ENTROPY_SOFTWARE);
+        }
+        memset(buf, 0, sizeof(buf));
+        if (hdr.entropy_count > 0) {
+            random_add_to_entropy_count(hdr.entropy_count);
+        }
+        return 0;
+    }
+
+    case RNDZAPENTCNT:
+        if (current_process && current_process->euid != 0) {
+            return -EPERM;
+        }
+        random_zap_entropy_count();
+        return 0;
+
+    case RNDCLEARPOOL:
+        if (current_process && current_process->euid != 0) {
+            return -EPERM;
+        }
+        random_clear_pool();
+        return 0;
+
+    case RNDRESEEDCRNG:
+        if (current_process && current_process->euid != 0) {
+            return -EPERM;
+        }
+        random_force_reseed();
+        return 0;
+
+    default:
+        return -ENOTTY;
+    }
+}
+
 /* Device nodes */
 static fs_node_t random_node;
 static fs_node_t urandom_node;
@@ -585,15 +747,17 @@ void random_init(void) {
     random_node.flags = FS_CHARDEVICE;
     random_node.read = random_dev_read;
     random_node.write = random_dev_write;
+    random_node.ioctl = random_dev_ioctl;
     random_node.rdev = (1 << 8) | 8;
     devfs_register_device(&random_node);
-    
+
     /* Register /dev/urandom */
     memset(&urandom_node, 0, sizeof(fs_node_t));
     strcpy(urandom_node.name, "urandom");
     urandom_node.flags = FS_CHARDEVICE;
     urandom_node.read = urandom_dev_read;
     urandom_node.write = random_dev_write;
+    urandom_node.ioctl = random_dev_ioctl;
     urandom_node.rdev = (1 << 8) | 9;
     devfs_register_device(&urandom_node);
     

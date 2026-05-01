@@ -19,6 +19,30 @@
 #define GRND_INSECURE   0x0004  /* Allow non-cryptographic random (boot-time) */
 
 /*
+ * /dev/random and /dev/urandom ioctl commands.
+ *
+ * Numbers follow the same encoding the rest of Substrate uses for character
+ * device ioctls: a 'R' magic in the high byte, command number in the low
+ * bits.  All entropy-modifying commands require root (euid == 0).
+ */
+#define RNDGETENTCNT     0x52000001U   /* int *: get entropy estimate (bits)   */
+#define RNDADDTOENTCNT   0x52000002U   /* int *: add to entropy count          */
+#define RNDADDENTROPY    0x52000003U   /* struct rand_pool_info *: add entropy */
+#define RNDZAPENTCNT     0x52000004U   /* (no arg): zero the entropy count     */
+#define RNDCLEARPOOL     0x52000005U   /* (no arg): wipe the entropy pool      */
+#define RNDRESEEDCRNG    0x52000006U   /* (no arg): force CSPRNG reseed        */
+
+/*
+ * Buffer passed with RNDADDENTROPY.  entropy_count is the number of credit
+ * bits to associate with buf_size bytes of data in buf[].
+ */
+struct rand_pool_info {
+    int entropy_count;
+    int buf_size;
+    uint32_t buf[];
+};
+
+/*
  * Entropy source identifiers for random_harvest()
  */
 enum entropy_source {
