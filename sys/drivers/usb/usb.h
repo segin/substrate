@@ -353,6 +353,7 @@ typedef struct usb_class_driver {
 void usb_init(void);
 void usb_msc_init(void);
 void usb_hid_init(void);
+void usb_hid_mouse_init(void);
 void usb_hub_init(void);
 
 /* HCD Registration */

@@ -461,6 +461,7 @@ static void init_storage_and_vfs(multiboot_info_t *mboot_info) {
     uhci_init();
     usb_msc_init();
     usb_hid_init();
+    usb_hid_mouse_init();
     usb_hub_init();
     usb_init();
     virtio_init();
