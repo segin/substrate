@@ -38,6 +38,7 @@ int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
  * host equivalent; stub them so audio_init() can call through. */
 void ac97_init(void) {}
 void sb16_init(void) {}
+void hda_init(void) {}
 
 /*
  * audio.c includes "audio.h" with a relative path; we point the include
