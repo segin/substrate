@@ -24,6 +24,7 @@
 #include <drivers/virtio/virtio.h>
 #include <drivers/storage/ramdisk.h>
 #include <drivers/storage/floppy/floppy.h>
+#include <drivers/audio/audio.h>
 
 #include <arch/i386/idt.h>
 #include <arch/i386/cpu.h>
@@ -463,6 +464,7 @@ static void init_storage_and_vfs(multiboot_info_t *mboot_info) {
     usb_hid_init();
     usb_hid_mouse_init();
     usb_hub_init();
+    audio_init();
     usb_init();
     virtio_init();
     register_boot_ramdisks(mboot_info);
