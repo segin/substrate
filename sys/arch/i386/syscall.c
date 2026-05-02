@@ -102,6 +102,7 @@ int sys_set_thread_area(struct user_desc *u_info) {
 extern int syscall_trace_enabled;
 
 void syscall_handler(registers_t *regs) {
+    __asm__ volatile("sti");
     thread_t *cpu_thread = CURRENT_THREAD();
     current_thread = cpu_thread;
     current_process = cpu_thread ? cpu_thread->proc : NULL;

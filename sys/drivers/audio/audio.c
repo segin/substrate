@@ -30,14 +30,9 @@ static fs_node_t audioctl_nodes[AUDIO_MAX_DEVICES];
 
 static audio_dev_t *audio_dev_for_node(fs_node_t *node)
 {
-	int i;
-
-	for (i = 0; i < AUDIO_MAX_DEVICES; i++) {
-		if (&audio_nodes[i] == node || &audioctl_nodes[i] == node) {
-			return (audio_dev_t *)audio_nodes[i].impl;
-		}
-	}
-	return NULL;
+	if (node == NULL)
+		return NULL;
+	return (audio_dev_t *)node->impl;
 }
 
 /* ----------------------------------------------------------------- */
