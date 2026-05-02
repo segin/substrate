@@ -97,6 +97,13 @@ int  audio_register_device(audio_dev_t *dev);
 void audio_unregister_device(audio_dev_t *dev);
 
 /*
+ * Returns non-zero if at least one backend has registered through
+ * audio_register_device().  null_audio uses this to skip registration
+ * when a real backend already grabbed unit 0.
+ */
+int  audio_have_device(void);
+
+/*
  * Apply a SETINFO payload onto a base audio_info_t, copying only fields
  * whose value differs from the AUDIO_NOTSET_* sentinel.  Exposed so
  * tests and ioctls share the same merge semantics.

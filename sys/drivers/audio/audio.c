@@ -500,6 +500,11 @@ int audio_register_device(audio_dev_t *dev)
 	return 0;
 }
 
+int audio_have_device(void)
+{
+	return audio_devices_head != NULL;
+}
+
 void audio_unregister_device(audio_dev_t *dev)
 {
 	audio_dev_t **cursor;
@@ -531,8 +536,8 @@ void audio_init(void)
 	memset(audioctl_nodes, 0, sizeof(audioctl_nodes));
 	audio_devices_head = NULL;
 
-	null_audio_init();
 	hda_init();
 	ac97_init();
 	sb16_init();
+	null_audio_init();
 }

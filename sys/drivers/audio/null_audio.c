@@ -99,6 +99,9 @@ static audio_dev_ops_t null_audio_ops = {
 
 void null_audio_init(void)
 {
+	if (audio_have_device()) {
+		return;
+	}
 	memset(&null_audio_dev, 0, sizeof(null_audio_dev));
 	snprintf(null_audio_dev.name, sizeof(null_audio_dev.name),
 	         "null audio");
