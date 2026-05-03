@@ -403,7 +403,10 @@ double cosh(double x) {
 }
 
 double tanh(double x) {
-    if (x > 20.0) return 1.0;
+    if (isnan(x)) return x;
+    if (isinf(x)) return x > 0 ? 1.0 : -1.0;  /* tanh(+/-inf)=+/-1 */
+    if (x == 0.0) return x;                    /* preserves +0.0/-0.0 (tanh is odd) */
+    if (x > 20.0) return 1.0;                  /* asymptote; avoids exp() overflow */
     if (x < -20.0) return -1.0;
     double e2x = exp(2.0 * x);
     return (e2x - 1.0) / (e2x + 1.0);
