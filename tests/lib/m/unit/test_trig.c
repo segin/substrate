@@ -114,6 +114,28 @@ static void test_atan(void) {
     if (!isnan(atan(NAN))) FAIL("atan(NaN)");
 }
 
+static void test_atan2(void) {
+    /* Spec: atan2(0,1)==0, atan2(1,0)~pi/2, atan2(0,-1)~pi, atan2(-1,0)~-pi/2 */
+    if (atan2(0.0, 1.0) != 0.0) FAIL("atan2(0,1)");
+    if (!isclose(atan2(1.0, 0.0), M_PI / 2.0, 1e-15)) FAIL("atan2(1,0)");
+    if (!isclose(atan2(0.0, -1.0), M_PI, 1e-14)) FAIL("atan2(0,-1)");
+    if (!isclose(atan2(-1.0, 0.0), -M_PI / 2.0, 1e-15)) FAIL("atan2(-1,0)");
+
+    /* Diagonal */
+    if (!isclose(atan2(1.0, 1.0), M_PI / 4.0, 1e-15)) FAIL("atan2(1,1)");
+
+    /* NaN propagation */
+    if (!isnan(atan2(NAN, 1.0))) FAIL("atan2(NaN,1)");
+    if (!isnan(atan2(1.0, NAN))) FAIL("atan2(1,NaN)");
+
+    /* C99 Annex F infinity corners */
+    if (!isclose(atan2(INFINITY, INFINITY), M_PI / 4.0, 1e-15)) FAIL("atan2(+inf,+inf)");
+    if (!isclose(atan2(-INFINITY, -INFINITY), -3.0 * M_PI / 4.0, 1e-15)) FAIL("atan2(-inf,-inf)");
+    if (!isclose(atan2(INFINITY, 0.0), M_PI / 2.0, 1e-15)) FAIL("atan2(+inf,0)");
+    if (atan2(1.0, INFINITY) != 0.0) FAIL("atan2(1,+inf)");
+    if (!isclose(atan2(1.0, -INFINITY), M_PI, 1e-14)) FAIL("atan2(1,-inf)");
+}
+
 static void test_sinpi(void) {
     /* sinpi(n/2) should give +-1 or 0 for integer n */
     double expected[] = { 0.0, 1.0, 0.0, -1.0, 0.0, 1.0, 0.0, -1.0 };
@@ -272,6 +294,7 @@ int main(void) {
     test_asin();
     test_acos();
     test_atan();
+    test_atan2();
     test_sinpi();
     test_cospi();
     test_tanpi();

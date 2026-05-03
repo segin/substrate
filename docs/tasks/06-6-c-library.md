@@ -691,7 +691,7 @@ they are not mandatory.
                 - [x] Test `asin(0)==0`, `asin(1)≈π/2`, `asin(2)==NaN` (domain error). <!-- tests/lib/m/unit/test_trig.c:test_asin --> (REQ: REQ-06-0653)
                 - [x] Test `acos(1)==0`, `acos(0)≈π/2`, `acos(-1)≈π`. <!-- tests/lib/m/unit/test_trig.c:test_acos --> (REQ: REQ-06-0654)
                 - [x] Test `atan(0)==0`, `atan(1)≈π/4`, `atan(+∞)≈π/2`. <!-- tests/lib/m/unit/test_trig.c:test_atan --> (REQ: REQ-06-0655)
-                - [ ] Test `atan2(0,1)==0`, `atan2(1,0)≈π/2`, `atan2(0,-1)≈π`, `atan2(-1,0)≈-π/2`. (REQ: REQ-06-0656)
+                - [x] Test `atan2(0,1)==0`, `atan2(1,0)≈π/2`, `atan2(0,-1)≈π`, `atan2(-1,0)≈-π/2`. <!-- tests/lib/m/unit/test_trig.c:test_atan2 --> (REQ: REQ-06-0656)
                 - [ ] Test `sinpi(0.5)==1`, `sinpi(1)==0`, `sinpi(0)==0` (exact). (REQ: REQ-06-0657)
                 - [ ] Test `cospi(0)==1`, `cospi(0.5)==0`, `cospi(1)==-1` (exact). (REQ: REQ-06-0658)
                 - [ ] Test large argument accuracy: `sin(1e15)` — verify range reduction correctness. (REQ: REQ-06-0659)
