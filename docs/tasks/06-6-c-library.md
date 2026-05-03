@@ -725,7 +725,7 @@ they are not mandatory.
                 - [x] Property: `cosh(x)² - sinh(x)² ≈ 1` (hyperbolic Pythagorean identity). <!-- tests/lib/m/property/prop_hyper.c:prop_cosh_sinh_pythagorean --> (REQ: REQ-06-0687)
                 - [x] Property: `sinh(-x) == -sinh(x)` (odd). <!-- tests/lib/m/property/prop_hyper.c:prop_sinh_odd --> (REQ: REQ-06-0688)
                 - [x] Property: `cosh(-x) == cosh(x)` (even). <!-- tests/lib/m/property/prop_hyper.c:prop_cosh_even --> (REQ: REQ-06-0689)
-                - [ ] Property: `tanh(x) == sinh(x)/cosh(x)` for moderate `x`. (REQ: REQ-06-0690)
+                - [x] Property: `tanh(x) == sinh(x)/cosh(x)` for moderate `x`. <!-- tests/lib/m/property/prop_hyper.c:prop_tanh_definition --> (REQ: REQ-06-0690)
                 - [ ] Property: `asinh(sinh(x)) ≈ x` for all `x`. (REQ: REQ-06-0691)
                 - [ ] Property: `|tanh(x)| < 1` for all finite `x`. (REQ: REQ-06-0692)
             - [ ] **Man Pages:** (REQ: REQ-06-0250, REQ-06-0404, REQ-06-0452, REQ-06-0488, REQ-06-0527, REQ-06-0573, REQ-06-0629, REQ-06-0668, REQ-06-0693, REQ-06-0734, REQ-06-0769, REQ-06-0793, REQ-06-0839)

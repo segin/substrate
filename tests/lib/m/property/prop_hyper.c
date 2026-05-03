@@ -203,10 +203,62 @@ static void prop_cosh_even(void) {
     }
 }
 
+/*
+ * tanh(x) == sinh(x) / cosh(x)  (definitional identity, REQ-06-0690)
+ *
+ * Holds for moderate |x| where neither sinh nor cosh has lost meaningful
+ * precision.  Outside ~|x| > 5, both sinh and cosh approach e^|x|/2 and
+ * the ratio degrades relative to a direct tanh implementation that
+ * computes (e^{2x} - 1)/(e^{2x} + 1) or similar.  Restrict the sweep to
+ * x in [-5, 5] (500 uniformly spaced samples) where the residual stays
+ * comfortably within 1e-14, with a tighter 1e-15 bound for the requested
+ * boundary points.
+ */
+static void prop_tanh_definition(void) {
+    const double lo = -5.0;
+    const double hi =  5.0;
+    const int n = 500;
+    const double step = (hi - lo) / (double)(n - 1);
+
+    for (int i = 0; i < n; i++) {
+        double x = lo + (double)i * step;
+        if (!isfinite(x)) continue;
+        double t = tanh(x);
+        double s = sinh(x);
+        double c = cosh(x);
+        if (!isfinite(s) || !isfinite(c) || c == 0.0) continue;
+        double ratio = s / c;
+        if (fabs(t - ratio) >= 1e-14) {
+            FAIL("tanh(x) != sinh(x)/cosh(x) on uniform sweep");
+            return;
+        }
+    }
+
+    static const double boundary[] = {
+        0.0,
+        1.0, -1.0,
+    };
+    const int nb = (int)(sizeof(boundary) / sizeof(boundary[0]));
+    for (int i = 0; i < nb; i++) {
+        double x = boundary[i];
+        if (!isfinite(x)) continue;
+        double t = tanh(x);
+        double s = sinh(x);
+        double c = cosh(x);
+        if (c == 0.0) continue;
+        double ratio = s / c;
+        if (fabs(t - ratio) >= 1e-15) {
+            FAIL("tanh(x) != sinh(x)/cosh(x) at boundary");
+            return;
+        }
+    }
+}
+
 int main(void) {
     prop_cosh_sinh_pythagorean();
     prop_sinh_odd();
     prop_cosh_even();
+    prop_tanh_definition();
 
     if (failures == 0) {
         printf("All property tests passed.\n");
