@@ -7,6 +7,7 @@
 
 #include <errno.h>
 #include <fenv.h>
+#include <limits.h>
 #include <math.h>
 #include <stdint.h>
 
@@ -670,6 +671,16 @@ double scalbn(double x, int n) {
         errno = ERANGE;
     }
     return res;
+}
+
+/* scalbln: x * 2^n with long exponent.
+ * Conformance: C99 7.12.6.13. Behaviour matches scalbn() once the
+ * exponent has been clamped into int range.
+ */
+double scalbln(double x, long n) {
+    if (n > INT_MAX) n = INT_MAX;
+    else if (n < INT_MIN) n = INT_MIN;
+    return scalbn(x, (int)n);
 }
 
 /* nextafter: next representable value after x towards y */

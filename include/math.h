@@ -93,6 +93,7 @@ double frexp(double x, int *exp);
 double ldexp(double x, int exp);
 double modf(double x, double *iptr);
 double scalbn(double x, int n);
+double scalbln(double x, long n);
 double nextafter(double x, double y);
 double copysign(double x, double y);
 
@@ -192,5 +193,27 @@ long double floorl(long double x);
 long double truncl(long double x);
 long double roundl(long double x);
 void sincosl(long double x, long double *s, long double *c);
+
+/* C23: pi-argument trigonometric functions */
+double sinpi(double x);
+double cospi(double x);
+double tanpi(double x);
+double asinpi(double x);
+double acospi(double x);
+double atanpi(double x);
+
+/* Float variants */
+float sinpif(float x);
+float cospif(float x);
+float tanpif(float x);
+float asinpif(float x);
+float atanpif(float x);
+
+/* Long double variants */
+long double sinpil(long double x);
+long double cospil(long double x);
+long double tanpil(long double x);
+long double asinpil(long double x);
+long double atanpil(long double x);
 
 #endif /* _MATH_H */
