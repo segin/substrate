@@ -162,6 +162,23 @@ static void test_sinpi(void) {
         printf("DEBUG sinpi(1) = %f, sin(pi) = %f\n", sinpi(1), sin(3.14159265358979323846));
         FAIL("sinpi(1)");
     }
+
+    /*
+     * REQ-06-0657: exact-value tests.
+     * sinpi() must return bit-exact values at integers and half-integers
+     * via integer/half-integer special-case dispatch (mod-2 reduction).
+     * These compare with == (not isclose).
+     */
+    if (sinpi(0.0) != 0.0) FAIL("sinpi(0.0) != 0.0 (exact)");
+    if (sinpi(1.0) != 0.0) FAIL("sinpi(1.0) != 0.0 (exact)");
+    if (sinpi(2.0) != 0.0) FAIL("sinpi(2.0) != 0.0 (exact)");
+    if (sinpi(-1.0) != 0.0) FAIL("sinpi(-1.0) != 0.0 (exact)");
+    if (sinpi(0.5) != 1.0) FAIL("sinpi(0.5) != 1.0 (exact)");
+    if (sinpi(-0.5) != -1.0) FAIL("sinpi(-0.5) != -1.0 (exact)");
+    if (sinpi(1.5) != -1.0) FAIL("sinpi(1.5) != -1.0 (exact)");
+    if (!isnan(sinpi(NAN))) FAIL("sinpi(NaN) is not NaN");
+    if (!isnan(sinpi(INFINITY))) FAIL("sinpi(+inf) is not NaN");
+    if (!isnan(sinpi(-INFINITY))) FAIL("sinpi(-inf) is not NaN");
 }
 
 static void test_cospi(void) {
