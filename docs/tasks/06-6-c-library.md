@@ -735,7 +735,7 @@ they are not mandatory.
             - [x] `frexp()` <!-- lib/m/src/math.c:frexp --> (REQ: REQ-06-0696)
             - [x] `ldexp()` <!-- lib/m/src/math.c:ldexp --> (REQ: REQ-06-0697)
             - [x] `modf()` <!-- lib/m/src/math.c:modf --> (REQ: REQ-06-0698)
-            - [ ] `scalbn()` (REQ: REQ-06-0699)
+            - [x] `scalbn()` <!-- lib/m/src/math.c:scalbn --> (REQ: REQ-06-0699)
             - [ ] `scalbln()`: (REQ: REQ-06-0700)
                 - [ ] Same as `scalbn()` but exponent is `long` instead of `int`. (REQ: REQ-06-0701)
             - [ ] `ilogb()`, `logb()`: (REQ: REQ-06-0702)

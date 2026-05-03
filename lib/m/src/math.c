@@ -645,11 +645,30 @@ double modf(double x, double *iptr) {
     return x - iu.d;
 }
 
-/* scalbn: x * 2^n (FLT_RADIX = 2) */
+/* scalbn: x * 2^n (FLT_RADIX = 2 for IEEE-754).
+ * Conformance: C99 7.12.6.13.
+ *  - x == 0.0 (including -0.0): return x (sign preserved).
+ *  - x == NaN: return NaN.
+ *  - x == +/-inf: return x.
+ *  - Overflow: return +/-HUGE_VAL with errno = ERANGE.
+ *  - Underflow: return +/-0 with errno = ERANGE.
+ * Equivalent to ldexp() on IEEE-754 platforms.
+ */
 double scalbn(double x, int n) {
+    if (isnan(x)) return x;
+    if (x == 0.0 || isinf(x)) return x;
+
     double res;
-    __asm__ __volatile__("fildl %2; fldl %1; fscale; fstp %%st(1); fstpl %0" 
+    __asm__ __volatile__("fildl %2; fldl %1; fscale; fstp %%st(1); fstpl %0"
                          : "=m"(res) : "m"(x), "m"(n));
+
+    if (isinf(res) && !isinf(x)) {
+        errno = ERANGE;
+        return (x < 0.0) ? -HUGE_VAL : HUGE_VAL;
+    }
+    if (res == 0.0 && x != 0.0) {
+        errno = ERANGE;
+    }
     return res;
 }
 
