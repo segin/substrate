@@ -414,7 +414,10 @@ double tanh(double x) {
 
 /* asinh(x) = log(x + sqrt(x^2 + 1)) */
 double asinh(double x) {
-    if (fabs(x) < 1e-9) return x;
+    if (isnan(x)) return x;
+    if (isinf(x)) return x;  /* asinh(+/-inf)=+/-inf (asinh is odd, full real line) */
+    if (x == 0.0) return x;  /* preserves +0.0/-0.0 (asinh is odd) */
+    if (fabs(x) < 1e-9) return x;  /* Taylor for small x */
     return log(x + sqrt(x * x + 1.0));
 }
 
