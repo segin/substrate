@@ -415,6 +415,39 @@ static void test_logb(void) {
     }
 }
 
+/*
+ * REQ-06-0723: nextafter() steps to the next representable double.
+ *   nextafter(x, y) returns the next representable value after x in the
+ *   direction of y. For x == 1.0 toward 2.0, the next representable double
+ *   is exactly 1.0 + DBL_EPSILON (DBL_EPSILON is the gap between 1.0 and
+ *   the next double above it). Stepping below 1.0 gives 1.0 - DBL_EPSILON/2
+ *   because the binade [0.5, 1.0) has half the spacing of [1.0, 2.0).
+ *   Across the binade boundary at 2.0, the spacing doubles, so the step
+ *   from 2.0 toward 3.0 is 2 * DBL_EPSILON.
+ */
+static void test_nextafter_basic(void) {
+    double up = nextafter(1.0, 2.0);
+    if (!(up > 1.0)) {
+        FAIL("nextafter(1.0, 2.0) is not greater than 1.0");
+    }
+    if (up - 1.0 != DBL_EPSILON) {
+        FAIL("nextafter(1.0, 2.0) - 1.0 != DBL_EPSILON");
+    }
+
+    double down = nextafter(1.0, 0.0);
+    if (!(down < 1.0)) {
+        FAIL("nextafter(1.0, 0.0) is not less than 1.0");
+    }
+    if (1.0 - down != DBL_EPSILON / 2.0) {
+        FAIL("1.0 - nextafter(1.0, 0.0) != DBL_EPSILON/2");
+    }
+
+    double up2 = nextafter(2.0, 3.0);
+    if (up2 - 2.0 != 2.0 * DBL_EPSILON) {
+        FAIL("nextafter(2.0, 3.0) - 2.0 != 2*DBL_EPSILON");
+    }
+}
+
 int main(void) {
     test_frexp_ldexp_roundtrip();
     test_frexp_range();
@@ -424,6 +457,7 @@ int main(void) {
     test_ilogb_basic();
     test_ilogb_special();
     test_logb();
+    test_nextafter_basic();
 
     if (failures != 0) {
         printf("FAILURES: %d\n", failures);
