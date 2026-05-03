@@ -760,7 +760,7 @@ they are not mandatory.
                 - [x] Test `ilogb(0)` returns `FP_ILOGB0`, `ilogb(NaN)` returns `FP_ILOGBNAN`. (REQ: REQ-06-0721)
                 - [x] Test `logb()`: `logb(1.0)==0`, `logb(0)==-∞`. <!-- tests/lib/m/unit/test_manip.c:test_logb --> (REQ: REQ-06-0722)
                 - [x] Test `nextafter(1.0, 2.0)` returns next representable above 1.0. <!-- tests/lib/m/unit/test_manip.c:test_nextafter_basic --> (REQ: REQ-06-0723)
-                - [ ] Test `nextafter(0.0, 1.0)` returns smallest denormal. (REQ: REQ-06-0724)
+                - [x] Test `nextafter(0.0, 1.0)` returns smallest denormal. <!-- tests/lib/m/unit/test_manip.c:test_nextafter_denormal --> (REQ: REQ-06-0724)
                 - [ ] Test `nextafter(x, x) == x` for all `x`. (REQ: REQ-06-0725)
                 - [ ] Test `copysign(1.0, -1.0) == -1.0`. (REQ: REQ-06-0726)
                 - [ ] Test `nan("")` returns NaN, `isnan(nan("tag"))` is true. (REQ: REQ-06-0727)

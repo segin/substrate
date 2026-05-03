@@ -448,6 +448,35 @@ static void test_nextafter_basic(void) {
     }
 }
 
+/*
+ * REQ-06-0724: nextafter(0.0, 1.0) returns the smallest positive denormal.
+ *   Stepping from zero toward a positive value yields the smallest positive
+ *   subnormal double, which is 2^-1074 (0x1p-1074). This is strictly less
+ *   than DBL_MIN, the smallest positive *normal* double (2^-1022). The sign
+ *   of the zero argument does not affect the result: nextafter(-0.0, 1.0)
+ *   also yields +0x1p-1074 because the direction is determined by the second
+ *   argument. Stepping from 0 toward a negative value gives -0x1p-1074.
+ */
+static void test_nextafter_denormal(void) {
+    double n = nextafter(0.0, 1.0);
+    if (!(n > 0.0 && n < DBL_MIN)) {
+        FAIL("nextafter(0.0, 1.0) not in (0, DBL_MIN)");
+    }
+    if (n != 0x1p-1074) {
+        FAIL("nextafter(0.0, 1.0) != 0x1p-1074");
+    }
+
+    double neg = nextafter(0.0, -1.0);
+    if (neg != -0x1p-1074) {
+        FAIL("nextafter(0.0, -1.0) != -0x1p-1074");
+    }
+
+    double from_negzero = nextafter(-0.0, 1.0);
+    if (from_negzero != 0x1p-1074) {
+        FAIL("nextafter(-0.0, 1.0) != 0x1p-1074");
+    }
+}
+
 int main(void) {
     test_frexp_ldexp_roundtrip();
     test_frexp_range();
@@ -458,6 +487,7 @@ int main(void) {
     test_ilogb_special();
     test_logb();
     test_nextafter_basic();
+    test_nextafter_denormal();
 
     if (failures != 0) {
         printf("FAILURES: %d\n", failures);
