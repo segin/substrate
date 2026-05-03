@@ -49,8 +49,25 @@ static void test_hyper_zero(void) {
     (void)isclosef;
 }
 
+/*
+ * REQ-06-0680: hyperbolic functions at x = 1.0 (and -1.0 for parity).
+ *   sinh(1) ≈ 1.1752011936438014  (odd: sinh(-x) = -sinh(x))
+ *   cosh(1) ≈ 1.5430806348152437  (even: cosh(-x) =  cosh(x))
+ *   tanh(1) ≈ 0.7615941559557649  (odd: tanh(-x) = -tanh(x))
+ */
+static void test_hyper_one(void) {
+    if (!isclose(sinh(1.0), 1.1752011936438014, 1e-14)) FAIL("sinh(1.0)");
+    if (!isclose(cosh(1.0), 1.5430806348152437, 1e-14)) FAIL("cosh(1.0)");
+    if (!isclose(tanh(1.0), 0.7615941559557649, 1e-14)) FAIL("tanh(1.0)");
+
+    if (!isclose(sinh(-1.0), -1.1752011936438014, 1e-14)) FAIL("sinh(-1.0)");
+    if (!isclose(cosh(-1.0),  1.5430806348152437, 1e-14)) FAIL("cosh(-1.0)");
+    if (!isclose(tanh(-1.0), -0.7615941559557649, 1e-14)) FAIL("tanh(-1.0)");
+}
+
 int main(void) {
     test_hyper_zero();
+    test_hyper_one();
 
     if (failures != 0) {
         printf("FAILURES: %d\n", failures);
