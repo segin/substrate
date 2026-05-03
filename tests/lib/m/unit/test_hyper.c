@@ -143,6 +143,21 @@ static void test_atanh_poles(void) {
     if (!isnan(atanh(2.0)))  FAIL("atanh(2.0)");
 }
 
+/*
+ * REQ-06-0685: NaN propagation across all hyperbolic functions.
+ *   Per IEEE 754 / ISO C, every direct (sinh/cosh/tanh) and inverse
+ *   (asinh/acosh/atanh) hyperbolic function must propagate a quiet NaN
+ *   input as a quiet NaN output (no spurious finite/infinite result).
+ */
+static void test_hyper_nan(void) {
+    if (!isnan(sinh(NAN)))  FAIL("sinh(NaN)");
+    if (!isnan(cosh(NAN)))  FAIL("cosh(NaN)");
+    if (!isnan(tanh(NAN)))  FAIL("tanh(NaN)");
+    if (!isnan(asinh(NAN))) FAIL("asinh(NaN)");
+    if (!isnan(acosh(NAN))) FAIL("acosh(NaN)");
+    if (!isnan(atanh(NAN))) FAIL("atanh(NaN)");
+}
+
 int main(void) {
     test_hyper_zero();
     test_hyper_one();
@@ -150,6 +165,7 @@ int main(void) {
     test_inv_hyper_zero();
     test_acosh_domain();
     test_atanh_poles();
+    test_hyper_nan();
 
     if (failures != 0) {
         printf("FAILURES: %d\n", failures);
