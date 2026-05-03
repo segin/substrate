@@ -719,7 +719,7 @@ they are not mandatory.
                 - [x] Test `sinh(+∞)==+∞`, `cosh(+∞)==+∞`, `tanh(+∞)==1`. <!-- tests/lib/m/unit/test_hyper.c:test_hyper_inf --> (REQ: REQ-06-0681)
                 - [x] Test `asinh(0)==0`, `acosh(1)==0`, `atanh(0)==0`. <!-- tests/lib/m/unit/test_hyper.c:test_inv_hyper_zero --> (REQ: REQ-06-0682)
                 - [x] Test `acosh(x)` domain: `acosh(0.5)` → NaN/domain error. <!-- tests/lib/m/unit/test_hyper.c:test_acosh_domain --> (REQ: REQ-06-0683)
-                - [ ] Test `atanh(±1)` → ±∞ (pole error). (REQ: REQ-06-0684)
+                - [x] Test `atanh(±1)` → ±∞ (pole error). <!-- tests/lib/m/unit/test_hyper.c:test_atanh_poles --> (REQ: REQ-06-0684)
                 - [ ] Test NaN propagation for all hyperbolic functions. (REQ: REQ-06-0685)
             - [ ] **Property Tests (`tests/lib/m/property/prop_hyper.c`):** (REQ: REQ-06-0686)
                 - [ ] Property: `cosh(x)² - sinh(x)² ≈ 1` (hyperbolic Pythagorean identity). (REQ: REQ-06-0687)

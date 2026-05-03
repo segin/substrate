@@ -124,12 +124,32 @@ static void test_acosh_domain(void) {
     if (!isnan(acosh(-INFINITY))) FAIL("acosh(-inf)");
 }
 
+/*
+ * REQ-06-0684: atanh(x) poles at x = +-1 and domain for |x| > 1.
+ *   atanh has domain (-1, +1); the boundaries are poles where the
+ *   function diverges to +-infinity. Outside the open interval the
+ *   result must be NaN. Do not assert errno or fenv state since host
+ *   libc behaviour varies; just validate the return value.
+ */
+static void test_atanh_poles(void) {
+    double ap1 = atanh(1.0);
+    if (!isinf(ap1) || !(ap1 > 0.0)) FAIL("atanh(+1.0)");
+
+    double an1 = atanh(-1.0);
+    if (!isinf(an1) || !(an1 < 0.0)) FAIL("atanh(-1.0)");
+
+    if (!isnan(atanh(1.5)))  FAIL("atanh(1.5)");
+    if (!isnan(atanh(-1.5))) FAIL("atanh(-1.5)");
+    if (!isnan(atanh(2.0)))  FAIL("atanh(2.0)");
+}
+
 int main(void) {
     test_hyper_zero();
     test_hyper_one();
     test_hyper_inf();
     test_inv_hyper_zero();
     test_acosh_domain();
+    test_atanh_poles();
 
     if (failures != 0) {
         printf("FAILURES: %d\n", failures);
