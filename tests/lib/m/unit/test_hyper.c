@@ -110,11 +110,26 @@ static void test_inv_hyper_zero(void) {
     if (tn0 != 0.0 || !signbit(tn0)) FAIL("atanh(-0.0)");
 }
 
+/*
+ * REQ-06-0683: acosh(x) domain error for x < 1.
+ *   acosh has domain [1, +inf); any x < 1 must return NaN.
+ *   Probe interior (0.5), boundary-adjacent (0.0), negative (-1.0),
+ *   and -infinity. Do not assert errno or fenv state since host libc
+ *   behaviour varies; just validate the NaN return value.
+ */
+static void test_acosh_domain(void) {
+    if (!isnan(acosh(0.5)))       FAIL("acosh(0.5)");
+    if (!isnan(acosh(0.0)))       FAIL("acosh(0.0)");
+    if (!isnan(acosh(-1.0)))      FAIL("acosh(-1.0)");
+    if (!isnan(acosh(-INFINITY))) FAIL("acosh(-inf)");
+}
+
 int main(void) {
     test_hyper_zero();
     test_hyper_one();
     test_hyper_inf();
     test_inv_hyper_zero();
+    test_acosh_domain();
 
     if (failures != 0) {
         printf("FAILURES: %d\n", failures);
