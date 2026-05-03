@@ -668,7 +668,7 @@ they are not mandatory.
                 - [ ] `man/man3/log.3` — Logarithmic functions. Covers `log()`, `log2()`, `log10()`, `log1p()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0631)
                 - [ ] `man/man3/pow.3` — Power functions. Covers `pow()`, `sqrt()`, `cbrt()`, `hypot()`. Document special value semantics extensively (C99 Annex F). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0632)
         - [/] **Trigonometric:**
-            - [ ] `sin()` (REQ: REQ-06-0633)
+            - [x] `sin()` <!-- lib/m/src/math.c:sin --> (REQ: REQ-06-0633)
             - [ ] `cos()` (REQ: REQ-06-0634)
             - [ ] `tan()` (REQ: REQ-06-0635)
             - [ ] `asin()` (REQ: REQ-06-0636)

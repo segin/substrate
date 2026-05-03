@@ -196,6 +196,9 @@ double hypot(double x, double y) {
  * sin(x) = x - x^3/3! + x^5/5! - ...
  */
 double sin(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return NAN;
+
     double res;
     __asm__ __volatile__(
         "fldl %1\n\t"
