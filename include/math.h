@@ -103,6 +103,7 @@ double logb(double x);
 double nextafter(double x, double y);
 double nexttoward(double x, long double y);
 double nextup(double x);
+double nextdown(double x);
 double copysign(double x, double y);
 
 /* Exponential and logarithmic functions */

@@ -811,6 +811,21 @@ double nextup(double x) {
     return nextafter(x, INFINITY);
 }
 
+/* nextdown: next representable value toward -INFINITY (C23 7.12.11.6).
+ *  - NaN: return NaN.
+ *  - -INFINITY: return -INFINITY (already at minimum; no further "down" step).
+ *  - +INFINITY: return DBL_MAX.
+ *  - +0.0: returns largest negative subnormal (per IEEE 754-2019 nextDown(+0)).
+ *  - Otherwise: next representable double < x.
+ * Trivially implemented via nextafter(x, -INFINITY); the x == y case of
+ * nextafter() handles -INFINITY by returning -INFINITY without raising
+ * any exceptions.
+ */
+double nextdown(double x) {
+    if (isnan(x)) return x;
+    return nextafter(x, -INFINITY);
+}
+
 /* copysign: magnitude of x with sign of y */
 double copysign(double x, double y) {
     union { double d; uint64_t u; } ux = { .d = x }, uy = { .d = y };
