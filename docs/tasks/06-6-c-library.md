@@ -702,7 +702,7 @@ they are not mandatory.
                 - [x] Property: `cos(-x) == cos(x)` (even function). <!-- tests/lib/m/property/prop_trig.c:prop_cos_even --> (REQ: REQ-06-0664)
                 - [x] Property: `asin(sin(x)) ≈ x` for `x ∈ [-π/2, π/2]`. <!-- tests/lib/m/property/prop_trig.c:prop_asin_sin_inverse --> (REQ: REQ-06-0665)
                 - [x] Property: `|sin(x)| <= 1` and `|cos(x)| <= 1` for all finite `x`. <!-- tests/lib/m/property/prop_trig.c:prop_sin_cos_bounded --> (REQ: REQ-06-0666)
-                - [ ] Property: `atan2(sin(x), cos(x)) ≈ x` for `x ∈ (-π, π]`. (REQ: REQ-06-0667)
+                - [x] Property: `atan2(sin(x), cos(x)) ≈ x` for `x ∈ (-π, π]`. <!-- tests/lib/m/property/prop_trig.c:prop_atan2_sincos_inverse --> (REQ: REQ-06-0667)
             - [ ] **Man Pages:** (REQ: REQ-06-0250, REQ-06-0404, REQ-06-0452, REQ-06-0488, REQ-06-0527, REQ-06-0573, REQ-06-0629, REQ-06-0668, REQ-06-0693, REQ-06-0734, REQ-06-0769, REQ-06-0793, REQ-06-0839)
                 - [ ] `man/man3/sin.3` — Trigonometric functions. Covers `sin()`, `cos()`, `tan()`, `sincos()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0669)
                 - [ ] `man/man3/asin.3` — Inverse trigonometric functions. Covers `asin()`, `acos()`, `atan()`, `atan2()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0670)

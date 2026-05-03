@@ -342,6 +342,71 @@ static void prop_asin_sin_inverse(void) {
 }
 
 /*
+ * atan2(sin(x), cos(x)) == x  for x in (-pi, pi]  (REQ-06-0667)
+ * Verified across a uniform sweep plus boundary cases.
+ */
+static void prop_atan2_sincos_inverse(void) {
+    const double lo = -M_PI;
+    const double hi =  M_PI;
+    const int n = 1000;
+    /*
+     * Uniformly spaced values in (-M_PI, M_PI].  Use a half-open
+     * sweep that excludes the left endpoint and includes the right.
+     */
+    const double step = (hi - lo) / (double)n;
+
+    for (int i = 1; i <= n; i++) {
+        double x = lo + (double)i * step;
+        if (!isfinite(x)) continue;
+        double s = sin(x);
+        double c = cos(x);
+        double a = atan2(s, c);
+        if (fabs(a - x) >= 1e-13) {
+            FAIL("atan2(sin(x), cos(x)) != x on uniform sweep");
+            return;
+        }
+    }
+
+    /* Boundary case: x == 0.0 should return exactly 0.0. */
+    {
+        double a = atan2(sin(0.0), cos(0.0));
+        if (a != 0.0) {
+            FAIL("atan2(sin(0), cos(0)) != 0.0");
+            return;
+        }
+    }
+
+    /*
+     * Boundary case: x == M_PI.  atan2 is left-closed at +pi, so
+     * atan2(sin(pi), cos(pi)) ~= atan2(+0, -1) returns +pi.
+     */
+    {
+        double x = M_PI;
+        double a = atan2(sin(x), cos(x));
+        if (fabs(a - M_PI) >= 1e-13) {
+            FAIL("atan2(sin(pi), cos(pi)) != +pi");
+            return;
+        }
+    }
+
+    /*
+     * Boundary case: x just above -M_PI.  Result should be near
+     * -M_PI, but wraparound to +M_PI is acceptable at the boundary.
+     */
+    {
+        double x = nextafter(-M_PI, 0.0);
+        double a = atan2(sin(x), cos(x));
+        double d_neg = fabs(a - x);
+        double d_pos = fabs(a - (x + 2.0 * M_PI));
+        double d = d_neg < d_pos ? d_neg : d_pos;
+        if (d >= 1e-12) {
+            FAIL("atan2(sin(x), cos(x)) != x just above -pi");
+            return;
+        }
+    }
+}
+
+/*
  * |sin(x)| <= 1 and |cos(x)| <= 1 for all finite x  (REQ-06-0666)
  * Hard mathematical bound; verified across a uniform sweep plus boundary cases.
  */
@@ -395,6 +460,7 @@ int main(void) {
     prop_sin_odd();
     prop_cos_even();
     prop_asin_sin_inverse();
+    prop_atan2_sincos_inverse();
     prop_sin_cos_bounded();
     prop_sinpi_cospi_identity();
     prop_sinpi_odd();
