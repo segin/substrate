@@ -733,7 +733,7 @@ they are not mandatory.
                 - [x] `man/man3/asinh.3` — Inverse hyperbolic functions. Covers `asinh()`, `acosh()`, `atanh()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO. <!-- usr.man/man3/asinh.3 --> (REQ: REQ-06-0695)
         - [/] **Manipulation:**
             - [x] `frexp()` <!-- lib/m/src/math.c:frexp --> (REQ: REQ-06-0696)
-            - [ ] `ldexp()` (REQ: REQ-06-0697)
+            - [x] `ldexp()` <!-- lib/m/src/math.c:ldexp --> (REQ: REQ-06-0697)
             - [ ] `modf()` (REQ: REQ-06-0698)
             - [ ] `scalbn()` (REQ: REQ-06-0699)
             - [ ] `scalbln()`: (REQ: REQ-06-0700)

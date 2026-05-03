@@ -5,6 +5,7 @@
  * using Taylor series approximations and mathematical identities.
  */
 
+#include <errno.h>
 #include <fenv.h>
 #include <math.h>
 #include <stdint.h>
@@ -573,12 +574,31 @@ double frexp(double x, int *exp) {
     return neg ? -x : x;
 }
 
-/* ldexp: x * 2^exp */
+/* ldexp: x * 2^exp.
+ * Conformance: C99 7.12.6.6.
+ *  - x == 0.0 (including -0.0): return x (sign preserved).
+ *  - x == NaN: return NaN.
+ *  - x == +/-inf: return x.
+ *  - Overflow: return +/-HUGE_VAL with errno = ERANGE.
+ *  - Underflow: return +/-0 (or subnormal) with errno = ERANGE.
+ * Uses the x87 fscale instruction (matches scalbn's strategy).
+ */
 double ldexp(double x, int exp) {
-    if (x == 0.0 || isinf(x) || isnan(x)) return x;
-    while (exp > 0) { x *= 2.0; exp--; }
-    while (exp < 0) { x *= 0.5; exp++; }
-    return x;
+    if (isnan(x)) return x;
+    if (x == 0.0 || isinf(x)) return x;
+
+    double res;
+    __asm__ __volatile__("fildl %2; fldl %1; fscale; fstp %%st(1); fstpl %0"
+                         : "=m"(res) : "m"(x), "m"(exp));
+
+    if (isinf(res) && !isinf(x)) {
+        errno = ERANGE;
+        return (x < 0.0) ? -HUGE_VAL : HUGE_VAL;
+    }
+    if (res == 0.0 && x != 0.0) {
+        errno = ERANGE;
+    }
+    return res;
 }
 
 /* modf: split into integer and fractional parts */
