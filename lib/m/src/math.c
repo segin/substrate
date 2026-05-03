@@ -15,6 +15,9 @@
 #ifndef M_PI_2
 #define M_PI_2    1.57079632679489661923
 #endif
+#ifndef M_PI_4
+#define M_PI_4    0.78539816339744830962
+#endif
 #ifndef M_E
 #define M_E       2.71828182845904523536
 #endif
@@ -295,13 +298,17 @@ double atan(double x) {
     int neg = (x < 0);
     if (neg) x = -x;
     
+    /* Special cases for better precision */
+    if (x == 0.0) return 0.0;
+    if (x == 1.0) return (neg) ? -M_PI_4 : M_PI_4;
+    
     int inv = (x > 1.0);
     if (inv) x = 1.0 / x;
     
     /* Taylor series for |x| <= 1 */
     double x2 = x * x;
     double term = x, sum = x;
-    for (int i = 1; i < 50 && fabs(term) > 1e-15; i++) {
+    for (int i = 1; i < 100 && fabs(term) > 1e-15; i++) {
         term *= -x2;
         sum += term / (2 * i + 1);
     }
@@ -374,6 +381,29 @@ double acosh(double x) {
 double atanh(double x) {
     if (x <= -1.0 || x >= 1.0) return (x == 1.0) ? INFINITY : (x == -1.0) ? -INFINITY : NAN;
     return 0.5 * log((1.0 + x) / (1.0 - x));
+}
+
+/*
+ * C23 pi-argument trigonometric functions
+ */
+double sinpi(double x) {
+    return sin(M_PI * x);
+}
+
+double cospi(double x) {
+    return cos(M_PI * x);
+}
+
+double tanpi(double x) {
+    return tan(M_PI * x);
+}
+
+double asinpi(double x) {
+    return asin(x) / M_PI;
+}
+
+double atanpi(double x) {
+    return atan(x) / M_PI;
 }
 
 /*
@@ -730,3 +760,17 @@ long double fmaximum_numl(long double x, long double y) { return fmaximum_num(x,
 long double fminimum_numl(long double x, long double y) { return fminimum_num(x, y); }
 long double fmaximum_magl(long double x, long double y) { return fmaximum_mag(x, y); }
 long double fminimum_magl(long double x, long double y) { return fminimum_mag(x, y); }
+
+/* C23 pi-argument trig float wrappers */
+float sinpif(float x) { return (float)sinpi(x); }
+float cospif(float x) { return (float)cospi(x); }
+float tanpif(float x) { return (float)tanpi(x); }
+float asinpif(float x) { return (float)asinpi(x); }
+float atanpif(float x) { return (float)atanpi(x); }
+
+/* C23 pi-argument trig long double wrappers */
+long double sinpil(long double x) { return sinpi(x); }
+long double cospil(long double x) { return cospi(x); }
+long double tanpil(long double x) { return tanpi(x); }
+long double asinpil(long double x) { return asinpi(x); }
+long double atanpil(long double x) { return atanpi(x); }
