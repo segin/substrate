@@ -755,7 +755,7 @@ they are not mandatory.
                 - [x] Test `frexp()` result ∈ [0.5, 1.0) for positive normals. <!-- tests/lib/m/unit/test_manip.c:test_frexp_range --> (REQ: REQ-06-0716)
                 - [x] Test `frexp(0.0)` returns 0.0 with exponent 0. <!-- tests/lib/m/unit/test_manip.c:test_frexp_zero --> (REQ: REQ-06-0717)
                 - [x] Test `modf()`: integer + fractional parts sum to original. <!-- tests/lib/m/unit/test_manip.c:test_modf --> (REQ: REQ-06-0718)
-                - [ ] Test `scalbn(x, n) == x * 2^n` for moderate `n`. (REQ: REQ-06-0719)
+                - [x] Test `scalbn(x, n) == x * 2^n` for moderate `n`. <!-- tests/lib/m/unit/test_manip.c:test_scalbn --> (REQ: REQ-06-0719)
                 - [ ] Test `ilogb()`: `ilogb(1.0)==0`, `ilogb(2.0)==1`, `ilogb(0.5)==-1`. (REQ: REQ-06-0720)
                 - [ ] Test `ilogb(0)` returns `FP_ILOGB0`, `ilogb(NaN)` returns `FP_ILOGBNAN`. (REQ: REQ-06-0721)
                 - [ ] Test `logb()`: `logb(1.0)==0`, `logb(0)==-∞`. (REQ: REQ-06-0722)

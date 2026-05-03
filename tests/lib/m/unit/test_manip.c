@@ -242,11 +242,78 @@ static void test_modf(void) {
     }
 }
 
+/*
+ * REQ-06-0719: scalbn(x, n) == x * 2^n for moderate n.
+ *   scalbn() scales x by 2^n via direct exponent manipulation. For finite x
+ *   and moderate n (no overflow/underflow), the result must equal x * 2^n
+ *   bit-exactly. Special cases: zeros preserve sign, NaN propagates, and
+ *   infinities are returned unchanged.
+ */
+static void test_scalbn(void) {
+    if (scalbn(1.0, 0) != 1.0) {
+        FAIL("scalbn(1.0, 0) != 1.0");
+    }
+    if (scalbn(1.0, 10) != 1024.0) {
+        FAIL("scalbn(1.0, 10) != 1024.0");
+    }
+    if (scalbn(1.0, -10) != 1.0 / 1024.0) {
+        FAIL("scalbn(1.0, -10) != 1.0/1024.0");
+    }
+    if (scalbn(3.14159, 0) != 3.14159) {
+        FAIL("scalbn(3.14159, 0) != 3.14159");
+    }
+    if (scalbn(2.5, 4) != 40.0) {
+        FAIL("scalbn(2.5, 4) != 40.0");
+    }
+    if (scalbn(-1.0, 5) != -32.0) {
+        FAIL("scalbn(-1.0, 5) != -32.0");
+    }
+    if (scalbn(0.5, 1) != 1.0) {
+        FAIL("scalbn(0.5, 1) != 1.0");
+    }
+
+    /* scalbn(0.0, 100): zero preserved with positive sign. */
+    {
+        double r = scalbn(0.0, 100);
+        if (r != 0.0) {
+            FAIL("scalbn(0.0, 100) != 0.0");
+        }
+        if (signbit(r)) {
+            FAIL("scalbn(0.0, 100) lost positive sign");
+        }
+    }
+
+    /* scalbn(-0.0, 100): zero preserved with negative sign. */
+    {
+        double r = scalbn(-0.0, 100);
+        if (r != 0.0) {
+            FAIL("scalbn(-0.0, 100) != 0.0");
+        }
+        if (!signbit(r)) {
+            FAIL("scalbn(-0.0, 100) did not preserve negative sign");
+        }
+    }
+
+    /* scalbn(NAN, 5) is NaN. */
+    if (!isnan(scalbn(NAN, 5))) {
+        FAIL("scalbn(NAN, 5) is not NaN");
+    }
+
+    /* scalbn(INFINITY, -5) -> INFINITY. */
+    {
+        double r = scalbn(INFINITY, -5);
+        if (!isinf(r) || signbit(r)) {
+            FAIL("scalbn(INFINITY, -5) != +INFINITY");
+        }
+    }
+}
+
 int main(void) {
     test_frexp_ldexp_roundtrip();
     test_frexp_range();
     test_frexp_zero();
     test_modf();
+    test_scalbn();
 
     if (failures != 0) {
         printf("FAILURES: %d\n", failures);
