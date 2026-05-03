@@ -40,6 +40,20 @@ static void test_sin(void) {
     if (!isnan(sin(-INFINITY))) FAIL("sin(-inf)");
 }
 
+static void test_cos(void) {
+    if (cos(+0.0) != 1.0) FAIL("cos(+0.0)");
+
+    if (cos(-0.0) != 1.0) FAIL("cos(-0.0)");
+
+    if (!isclose(cos(M_PI), -1.0, 1e-14)) FAIL("cos(pi)");
+
+    if (!isclose(cos(M_PI / 2.0), 0.0, 1e-15)) FAIL("cos(pi/2)");
+
+    if (!isnan(cos(NAN))) FAIL("cos(NaN)");
+    if (!isnan(cos(INFINITY))) FAIL("cos(+inf)");
+    if (!isnan(cos(-INFINITY))) FAIL("cos(-inf)");
+}
+
 static void test_sinpi(void) {
     /* sinpi(n/2) should give +-1 or 0 for integer n */
     double expected[] = { 0.0, 1.0, 0.0, -1.0, 0.0, 1.0, 0.0, -1.0 };
@@ -193,6 +207,7 @@ static void test_identity(void) {
 
 int main(void) {
     test_sin();
+    test_cos();
     test_sinpi();
     test_cospi();
     test_tanpi();

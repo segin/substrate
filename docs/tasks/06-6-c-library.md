@@ -686,7 +686,7 @@ they are not mandatory.
                 - [x] `atan2pi(y, x)` ∈ [-1, 1]. <!-- atan2pi quadrant + ±inf corners exact --> (REQ: REQ-06-0648)
             - [ ] **Testing (`tests/lib/m/unit/test_trig.c`):** (REQ: REQ-06-0649)
                 - [x] Test `sin(0)==0`, `sin(π/2)≈1`, `sin(π)≈0`, `sin(NaN)==NaN`. <!-- tests/lib/m/unit/test_trig.c:test_sin --> (REQ: REQ-06-0650)
-                - [ ] Test `cos(0)==1`, `cos(π)≈-1`, `cos(π/2)≈0`. (REQ: REQ-06-0651)
+                - [x] Test `cos(0)==1`, `cos(π)≈-1`, `cos(π/2)≈0`. <!-- tests/lib/m/unit/test_trig.c:test_cos --> (REQ: REQ-06-0651)
                 - [ ] Test `tan(0)==0`, `tan(π/4)≈1`. (REQ: REQ-06-0652)
                 - [ ] Test `asin(0)==0`, `asin(1)≈π/2`, `asin(2)==NaN` (domain error). (REQ: REQ-06-0653)
                 - [ ] Test `acos(1)==0`, `acos(0)≈π/2`, `acos(-1)≈π`. (REQ: REQ-06-0654)
