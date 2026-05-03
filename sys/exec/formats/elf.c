@@ -321,7 +321,8 @@ static int is_linux_ldso_path(const char *interp_path) {
            strcmp(interp_path, "/lib/ld-linux-x86-64.so.2") == 0;
 }
 
-static fs_node_t *elf_lookup_interpreter(fs_node_t *root, const char *interp_path) {
+static fs_node_t *elf_lookup_interpreter(fs_node_t *root, const char *interp_path,
+                                          const char *prefix) {
     static const struct {
         const char *requested;
         const char *fallback;
@@ -336,6 +337,14 @@ static fs_node_t *elf_lookup_interpreter(fs_node_t *root, const char *interp_pat
         return NULL;
     }
 
+    /* Try personality prefix first: e.g. /perso/freebsd/libexec/ld-elf.so.1 */
+    if (prefix && prefix[0]) {
+        char prefixed[320];
+        snprintf(prefixed, sizeof(prefixed), "%s%s", prefix, interp_path);
+        node = vfs_lookup(root, prefixed);
+        if (node) return node;
+    }
+
     node = vfs_lookup(root, interp_path);
     if (node) {
         return node;
@@ -343,7 +352,8 @@ static fs_node_t *elf_lookup_interpreter(fs_node_t *root, const char *interp_pat
 
     for (size_t i = 0; i < sizeof(aliases) / sizeof(aliases[0]); i++) {
         if (strcmp(interp_path, aliases[i].requested) == 0) {
-            return vfs_lookup(root, aliases[i].fallback);
+            node = vfs_lookup(root, aliases[i].fallback);
+            if (node) return node;
         }
     }
 
@@ -916,7 +926,7 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
             k_envp[i] = (char*)(uintptr_t)user_ptr;
         }
     }
-    
+
     if (k_argv) {
         for (int i = argc - 1; i >= 0; i--) {
             uint32_t user_ptr;
@@ -924,7 +934,33 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
             k_argv[i] = (char*)(uintptr_t)user_ptr;
         }
     }
-    
+
+    /* Place data blobs at the top of the stack, above the auxv array.
+     * FreeBSD (and Linux) rtld walks auxv as a contiguous Elf_Auxinfo[]
+     * array starting right after the envp NULL terminator.  Any raw bytes
+     * embedded inside the array corrupt that walk and cause assertion
+     * failures (e.g. rtld.c:565 assert(aux_info[AT_BASE] != NULL)).
+     * Strategy: push all string/data blobs here first (highest addresses),
+     * record their user-space pointers, then emit a clean auxv below. */
+    uint32_t platform_ptr;
+    PUSH_STRING("i686", platform_ptr);
+
+    uint8_t rand_buf[16];
+    int rand_rc = random_get_bytes_flags(rand_buf, sizeof(rand_buf), GRND_NONBLOCK);
+    if (rand_rc != (int)sizeof(rand_buf)) {
+        /* Avoid stalling exec during early boot when entropy is still low. */
+        random_get_bytes_flags(rand_buf, sizeof(rand_buf), GRND_INSECURE);
+    }
+    sp -= 16;
+    sp &= ~15;
+    uint32_t rand_ptr = sp;
+    for (int i = 0; i < 4; i++) {
+        uint32_t val;
+        memcpy(&val, &rand_buf[i * 4], 4);
+        STACK_WRITE32(sp + i * 4, val);
+    }
+
+    /* Align to 16 before the auxv array. */
     sp &= ~15;
 
     if (!image) {
@@ -932,27 +968,31 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
         return -1;
     }
 
+    /* Emit a clean, contiguous Elf_Auxinfo[] array.
+     * AT_NULL is pushed first so it lands at the highest address;
+     * subsequent entries are pushed below it.  The rtld walks from
+     * the lowest entry (last pushed) up to AT_NULL. */
     sp -= 4; STACK_WRITE32(sp, 0);
     sp -= 4; STACK_WRITE32(sp, AT_NULL);
-    
+
     sp -= 4; STACK_WRITE32(sp, at_entry);
     sp -= 4; STACK_WRITE32(sp, AT_ENTRY);
-    
+
     sp -= 4; STACK_WRITE32(sp, image->ehdr.e_phnum);
     sp -= 4; STACK_WRITE32(sp, AT_PHNUM);
-    
+
     sp -= 4; STACK_WRITE32(sp, image->ehdr.e_phentsize);
     sp -= 4; STACK_WRITE32(sp, AT_PHENT);
 
     sp -= 4; STACK_WRITE32(sp, at_phdr);
     sp -= 4; STACK_WRITE32(sp, AT_PHDR);
-    
+
     sp -= 4; STACK_WRITE32(sp, 4096);
     sp -= 4; STACK_WRITE32(sp, AT_PAGESZ);
 
     sp -= 4; STACK_WRITE32(sp, 0);
     sp -= 4; STACK_WRITE32(sp, AT_FLAGS);
-    
+
     sp -= 4; STACK_WRITE32(sp, at_base);
     sp -= 4; STACK_WRITE32(sp, AT_BASE);
 
@@ -964,23 +1004,6 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
         sp -= 4; STACK_WRITE32(sp, AT_HWCAP);
     }
 
-    uint32_t rand_ptr;
-    sp -= 16;
-    rand_ptr = sp;
-
-    uint8_t rand_buf[16];
-    int rand_rc = random_get_bytes_flags(rand_buf, sizeof(rand_buf), GRND_NONBLOCK);
-    if (rand_rc != (int)sizeof(rand_buf)) {
-        /* Avoid stalling exec during early boot when entropy is still low. */
-        random_get_bytes_flags(rand_buf, sizeof(rand_buf), GRND_INSECURE);
-    }
-
-    for (int i = 0; i < 4; i++) {
-        uint32_t val;
-        memcpy(&val, &rand_buf[i * 4], 4);
-        STACK_WRITE32(sp + i * 4, val);
-    }
-    
     sp -= 4; STACK_WRITE32(sp, rand_ptr);
     sp -= 4; STACK_WRITE32(sp, AT_RANDOM);
 
@@ -996,30 +1019,15 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
     sp -= 4; STACK_WRITE32(sp, current_process->egid);
     sp -= 4; STACK_WRITE32(sp, AT_EGID);
 
-    const char *platform_str = "i686";
-    size_t platform_len = 5;
-    sp -= platform_len;
-    sp &= ~3;
-    uint32_t platform_ptr = sp;
-    for (size_t i = 0; i < platform_len; i++) {
-        uint32_t addr = platform_ptr + i;
-        uint32_t page_idx = (addr - user_stack_base) / 0x1000;
-        uint32_t offset = (addr - user_stack_base) % 0x1000;
-        if (page_idx < user_stack_size) {
-            uint8_t *kptr = (uint8_t*)stack_pages[page_idx].pa + offset;
-            *kptr = platform_str[i];
-        }
-    }
-    
     sp -= 4; STACK_WRITE32(sp, platform_ptr);
     sp -= 4; STACK_WRITE32(sp, AT_PLATFORM);
-    
+
     uint32_t execfn_ptr = 0;
     if (k_argv && argc > 0) execfn_ptr = (uint32_t)(uintptr_t)k_argv[0];
-
     sp -= 4; STACK_WRITE32(sp, execfn_ptr);
     sp -= 4; STACK_WRITE32(sp, AT_EXECFN);
-    
+
+    /* envp pointer array (NULL-terminated), then argv, then argc. */
     sp -= 4; STACK_WRITE32(sp, 0);
     if (k_envp) {
         for (int i = envc - 1; i >= 0; i--) {
@@ -1027,7 +1035,7 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
             STACK_WRITE32(sp, (uint32_t)(uintptr_t)k_envp[i]);
         }
     }
-    
+
     sp -= 4; STACK_WRITE32(sp, 0);
     if (k_argv) {
         for (int i = argc - 1; i >= 0; i--) {
@@ -1035,9 +1043,9 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
             STACK_WRITE32(sp, (uint32_t)(uintptr_t)k_argv[i]);
         }
     }
-    
+
     sp -= 4; STACK_WRITE32(sp, argc);
-    
+
     #undef STACK_WRITE32
     #undef PUSH_STRING
 
@@ -1198,7 +1206,12 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
             current_process->perso_id = PERS_LINUX;
         }
 
-        fs_node_t *interp_file = elf_lookup_interpreter(root, interp_path);
+        const char *perso_prefix = NULL;
+        if (current_process) {
+            struct personality *p = perso_lookup(current_process->perso_id);
+            if (p) perso_prefix = p->path_prefix;
+        }
+        fs_node_t *interp_file = elf_lookup_interpreter(root, interp_path, perso_prefix);
         if (!interp_file) {
             kprint("execve: Interpreter not found\n");
             goto cleanup;

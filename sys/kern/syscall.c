@@ -140,6 +140,31 @@ static void file_build_path(char *out, size_t out_sz, const char *path, const ch
     out[out_sz - 1] = '\0';
 }
 
+/*
+ * vfs_perso_lookup - personality-aware VFS path lookup.
+ *
+ * For absolute paths, if the current process's personality has a path_prefix,
+ * try <prefix><path> first (e.g. /perso/freebsd/lib/libc.so.7), then fall
+ * back to <path> directly.  This mirrors NetBSD's TRYEMULROOT mechanism.
+ * Relative paths are always resolved against cwd without prefix.
+ */
+fs_node_t *vfs_perso_lookup(fs_node_t *root, fs_node_t *cwd, const char *path) {
+    if (!path) return NULL;
+
+    if (path[0] == '/' && current_process) {
+        struct personality *p = perso_lookup(current_process->perso_id);
+        if (p && p->path_prefix && p->path_prefix[0]) {
+            char prefixed[320];
+            snprintf(prefixed, sizeof(prefixed), "%s%s", p->path_prefix, path);
+            fs_node_t *node = vfs_lookup(root, prefixed);
+            if (node) return node;
+        }
+        return vfs_lookup(root, path);
+    }
+
+    return vfs_lookup(cwd ? cwd : root, path);
+}
+
 static int kern_resolve_parent_at(const char *path, fs_node_t *root, fs_node_t *cwd,
                                   fs_node_t **parent_out, const char **name_out) {
     const char *last_slash;
@@ -389,11 +414,7 @@ static int kern_open_from(const char *path, int flags, int mode, fs_node_t *root
     // Lookup file
     fs_node_t *node = 0;
 
-    if (path[0] == '/') {
-        node = vfs_lookup(root, path);
-    } else {
-        node = vfs_lookup(cwd, path);
-    }
+    node = vfs_perso_lookup(root, cwd, path);
 
     if (!node) {
         fs_node_t *parent = NULL;
@@ -417,11 +438,7 @@ static int kern_open_from(const char *path, int flags, int mode, fs_node_t *root
             return error;
         }
 
-        if (path[0] == '/') {
-            node = vfs_lookup(root, path);
-        } else {
-            node = vfs_lookup(cwd, path);
-        }
+        node = vfs_perso_lookup(root, cwd, path);
         if (!node) {
             proc_clear_fd(current_process, fd);
             return -ENOENT;
@@ -1185,7 +1202,7 @@ int kern_stat(const char *path, struct stat *buf) {
     if (!path || !buf) return -EFAULT;
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
     fs_node_t *cwd  = current_process->cwd_node  ? current_process->cwd_node  : root;
-    fs_node_t *node = vfs_lookup((path[0] == '/') ? root : cwd, path);
+    fs_node_t *node = vfs_perso_lookup(root, cwd, path);
     if (!node) return -ENOENT;
     fill_stat(buf, node);
     close_fs(node);
@@ -1207,7 +1224,17 @@ int kern_lstat(const char *path, struct stat *buf) {
     if (!path || !buf) return -EFAULT;
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
     fs_node_t *cwd  = current_process->cwd_node  ? current_process->cwd_node  : root;
-    fs_node_t *node = vfs_lookup_lstat((path[0] == '/') ? root : cwd, path);
+    /* For lstat, try prefix with lstat semantics, then plain lstat */
+    fs_node_t *node = NULL;
+    if (path[0] == '/' && current_process) {
+        struct personality *pp = perso_lookup(current_process->perso_id);
+        if (pp && pp->path_prefix && pp->path_prefix[0]) {
+            char prefixed[320];
+            snprintf(prefixed, sizeof(prefixed), "%s%s", pp->path_prefix, path);
+            node = vfs_lookup_lstat(root, prefixed);
+        }
+    }
+    if (!node) node = vfs_lookup_lstat((path[0] == '/') ? root : cwd, path);
     if (!node) return -ENOENT;
     fill_stat(buf, node);
     close_fs(node);
@@ -1683,15 +1710,9 @@ int kern_access(const char *path, int mode) {
 
     if (!path) return -EFAULT;
 
-    fs_node_t *node = 0;
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
     fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
-
-    if (path[0] == '/') {
-        node = vfs_lookup(root, path);
-    } else {
-        node = vfs_lookup(cwd, path);
-    }
+    fs_node_t *node = vfs_perso_lookup(root, cwd, path);
 
     if (!node) return -ENOENT;
 

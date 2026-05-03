@@ -325,6 +325,24 @@ void syscall_handler(registers_t *regs) {
     int64_t ret = func(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
     if (p->id == PERS_ELKS) {
         regs->eax = (uint16_t)ret;
+    } else if (p->id == PERS_FREEBSD || p->id == PERS_NETBSD || p->id == PERS_OPENBSD) {
+        /*
+         * BSD int $0x80 ABI: CF=1 means error (EAX = positive errno value);
+         * CF=0 means success (EAX = return value).  Our internal functions
+         * return negative errno on error (Linux convention), so translate.
+         * Pointer-returning calls (mmap) return (void*)-1 = 0xFFFFFFFF on
+         * failure; that is also negative as int32, so CF gets set and EAX=1.
+         * The BSD libc mmap stub then calls cerror and returns MAP_FAILED,
+         * which the caller detects via the MAP_FAILED pointer check anyway.
+         */
+        uint32_t low = (uint32_t)(ret & 0xFFFFFFFF);
+        if ((int32_t)low < 0) {
+            regs->eax = (uint32_t)(-(int32_t)low); /* positive errno */
+            regs->eflags |= 1;  /* set CF */
+        } else {
+            regs->eax = low;
+            regs->eflags &= ~1U; /* clear CF */
+        }
     } else {
         regs->eax = (uint32_t)(ret & 0xFFFFFFFF);
     }

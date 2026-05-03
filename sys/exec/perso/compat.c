@@ -7,6 +7,7 @@
 #include <sys/mount.h>
 #include <sys/file.h>
 #include <sys/kern_syscalls.h>
+#include <sys/copy.h>
 #include <exec/perso/compat.h>
 #include <exec/perso/freebsd/freebsd_user.h>
 #include <exec/perso/freebsd/freebsd_syscalls.h>
@@ -70,13 +71,26 @@ int64_t sys_freebsd_lseek(int fd, int pad, uint32_t off_lo, uint32_t off_hi, int
 }
 
 
-/* FreeBSD mmap translation 
+/* FreeBSD mmap translation
  * FreeBSD i386: mmap(addr, len, prot, flags, fd, pad, offset_lo, offset_hi)
+ * FreeBSD MAP_ANON=0x1000 differs from our MAP_ANONYMOUS=0x020; translate.
+ * All other FreeBSD-specific flags (NOSYNC=0x800, STACK=0x400, GUARD=0x2000,
+ * HASSEMAPHORE=0x200, EXCL=0x4000, NOCORE=0x20000, etc.) are stripped.
+ * MAP_SHARED=0x001, MAP_PRIVATE=0x002, MAP_FIXED=0x010 have the same values.
  */
+#define FREEBSD_MAP_ANON    0x1000
+#define KERN_MAP_SHARED     0x001
+#define KERN_MAP_PRIVATE    0x002
+#define KERN_MAP_FIXED      0x010
+#define KERN_MAP_ANONYMOUS  0x020
+
 void *sys_freebsd_mmap(void *addr, size_t len, int prot, int flags, int fd, int pad, uint32_t off_lo, uint32_t off_hi) {
     (void)pad;
     uint64_t offset = ((uint64_t)off_hi << 32) | off_lo;
-    return sys_mmap(addr, len, prot, flags, fd, offset);
+    int kflags = flags & (KERN_MAP_SHARED | KERN_MAP_PRIVATE | KERN_MAP_FIXED);
+    if (flags & FREEBSD_MAP_ANON)
+        kflags |= KERN_MAP_ANONYMOUS;
+    return sys_mmap(addr, len, prot, kflags, fd, offset);
 }
 
 /* Generic syscall stubs - returning -ENOSYS */
@@ -224,10 +238,245 @@ int sys_semsys(int a, int b, int c, int d, int e) { (void)a; (void)b; (void)c; (
 int sys_uadmin(int a, int b, int c) { (void)a; (void)b; (void)c; return -ENOSYS; }
 int sys_utssys(void *a, int b, int c) { (void)a; (void)b; (void)c; return -ENOSYS; }
 
-/* execv wrapper for ancient NetBSD/SunOS binaries that use obs_execv 
+/* execv wrapper for ancient NetBSD/SunOS binaries that use obs_execv
  * Note: Passes NULL for environ - binaries using this won't inherit environment.
  * This is intentional for compatibility with the obsolete execv() API.
  */
 int sys_compat_execv(const char *path, char **argv) {
     return sys_execve(path, argv, NULL);
 }
+
+/* FreeBSD compatibility stubs */
+
+int sys_profil(void *samples, unsigned int size, unsigned int offset, unsigned int scale) {
+    (void)samples; (void)size; (void)offset; (void)scale;
+    return 0;
+}
+
+int sys_madvise(void *addr, size_t len, int behav) {
+    (void)addr; (void)len; (void)behav;
+    return 0;
+}
+
+/*
+ * sys_getrlimit / sys_setrlimit - resource limit stubs
+ * Return RLIM_INFINITY for all limits; setrlimit is a no-op.
+ */
+struct freebsd_rlimit {
+    uint64_t rlim_cur;
+    uint64_t rlim_max;
+};
+#define FREEBSD_RLIM_INFINITY (~0ULL)
+
+int sys_getrlimit(int resource, void *rlp) {
+    (void)resource;
+    if (!rlp) return -EFAULT;
+    struct freebsd_rlimit krl;
+    krl.rlim_cur = FREEBSD_RLIM_INFINITY;
+    krl.rlim_max = FREEBSD_RLIM_INFINITY;
+    return copyout(&krl, rlp, sizeof(krl));
+}
+
+int sys_setrlimit(int resource, const void *rlp) {
+    (void)resource; (void)rlp;
+    return 0;
+}
+
+int sys_issetugid(void) {
+    return 0;
+}
+
+int sys_cap_getmode(unsigned int *modep) {
+    unsigned int zero = 0;
+    return copyout(&zero, modep, sizeof(zero));
+}
+
+ssize_t sys_readv(int fd, const void *iov_user, int iovcnt) {
+    if (iovcnt < 0 || iovcnt > 1024) return -EINVAL;
+    struct freebsd_iovec kiov[iovcnt];
+    if (copyin(iov_user, kiov, (size_t)iovcnt * sizeof(struct freebsd_iovec)) != 0)
+        return -EFAULT;
+    ssize_t total = 0;
+    for (int i = 0; i < iovcnt; i++) {
+        if (kiov[i].iov_len == 0) continue;
+        ssize_t r = sys_read(fd, kiov[i].iov_base, kiov[i].iov_len);
+        if (r < 0) return total > 0 ? total : r;
+        total += r;
+        if ((size_t)r < kiov[i].iov_len) break;
+    }
+    return total;
+}
+
+ssize_t sys_writev(int fd, const void *iov_user, int iovcnt) {
+    if (iovcnt < 0 || iovcnt > 1024) return -EINVAL;
+    struct freebsd_iovec kiov[iovcnt];
+    if (copyin(iov_user, kiov, (size_t)iovcnt * sizeof(struct freebsd_iovec)) != 0)
+        return -EFAULT;
+    ssize_t total = 0;
+    for (int i = 0; i < iovcnt; i++) {
+        if (kiov[i].iov_len == 0) continue;
+        ssize_t r = sys_write(fd, kiov[i].iov_base, kiov[i].iov_len);
+        if (r < 0) return total > 0 ? total : r;
+        total += r;
+        if ((size_t)r < kiov[i].iov_len) break;
+    }
+    return total;
+}
+
+int sys_getgroups(int gidsetsize, void *gidset) {
+    if (gidsetsize == 0) return 1;
+    if (gidsetsize < 1) return -EINVAL;
+    gid_t kg = current_process->gid;
+    return copyout(&kg, gidset, sizeof(gid_t));
+}
+
+int sys_setgroups(int gidsetsize, const void *gidset) {
+    (void)gidsetsize; (void)gidset;
+    if (current_process->euid != 0) return -EPERM;
+    return 0;
+}
+
+int sys_getlogin(char *namebuf, unsigned int namelen) {
+    const char *login = "root";
+    size_t len = strlen(login) + 1;
+    if (namelen < len) return -ERANGE;
+    return copyout(login, namebuf, len);
+}
+
+int sys_thr_kill(long tid, int sig) {
+    return sys_kill((int)tid, sig);
+}
+
+int sys_umtx_op(void *obj, int op, unsigned long val, void *uaddr, void *uaddr2) {
+    (void)obj; (void)op; (void)val; (void)uaddr; (void)uaddr2;
+    return -ENOSYS;
+}
+
+int sys_clock_nanosleep(int clockid, int flags, const void *rqtp, void *rmtp) {
+    (void)clockid; (void)flags;
+    return sys_nanosleep((void *)rqtp, rmtp);
+}
+
+int sys_pselect(int nfds, void *rfds, void *wfds, void *efds, const void *timeout, const void *sigmask) {
+    (void)wfds; (void)efds; (void)sigmask;
+    return sys_poll(rfds, (unsigned int)nfds, timeout ? 0 : -1);
+}
+
+int sys_ppoll(void *fds, unsigned int nfds, const void *timeout, const void *sigmask) {
+    (void)sigmask;
+    return sys_poll(fds, nfds, timeout ? 0 : -1);
+}
+
+int sys_wait6(int idtype, int id, int *status, int options, void *wrusage, void *info) {
+    (void)idtype; (void)wrusage; (void)info;
+    return sys_waitpid(id, status, options);
+}
+
+int sys_fdatasync(int fd) {
+    return sys_fsync(fd);
+}
+
+/* Networking stubs - Substrate has no network stack */
+int sys_accept(int s, void *name, int *namelen) { (void)s; (void)name; (void)namelen; return -ENOSYS; }
+int sys_accept4(int s, void *name, int *namelen, int flags) { (void)s; (void)name; (void)namelen; (void)flags; return -ENOSYS; }
+int sys_bind(int s, const void *name, int namelen) { (void)s; (void)name; (void)namelen; return -ENOSYS; }
+int sys_listen(int s, int backlog) { (void)s; (void)backlog; return -ENOSYS; }
+int sys_socket(int domain, int type, int protocol) { (void)domain; (void)type; (void)protocol; return -ENOSYS; }
+int sys_connect(int s, const void *name, int namelen) { (void)s; (void)name; (void)namelen; return -ENOSYS; }
+ssize_t sys_sendto(int s, const void *buf, size_t len, int flags, const void *to, int tolen) { (void)s; (void)buf; (void)len; (void)flags; (void)to; (void)tolen; return -ENOSYS; }
+ssize_t sys_recvfrom(int s, void *buf, size_t len, int flags, void *from, int *fromlen) { (void)s; (void)buf; (void)len; (void)flags; (void)from; (void)fromlen; return -ENOSYS; }
+int sys_getsockname(int s, void *name, int *namelen) { (void)s; (void)name; (void)namelen; return -ENOSYS; }
+int sys_getpeername(int s, void *name, int *namelen) { (void)s; (void)name; (void)namelen; return -ENOSYS; }
+int sys_getsockopt(int s, int level, int optname, void *optval, int *optlen) { (void)s; (void)level; (void)optname; (void)optval; (void)optlen; return -ENOSYS; }
+int sys_setsockopt(int s, int level, int optname, const void *optval, int optlen) { (void)s; (void)level; (void)optname; (void)optval; (void)optlen; return -ENOSYS; }
+ssize_t sys_recvmsg(int s, void *msg, int flags) { (void)s; (void)msg; (void)flags; return -ENOSYS; }
+ssize_t sys_sendmsg(int s, const void *msg, int flags) { (void)s; (void)msg; (void)flags; return -ENOSYS; }
+int sys_shutdown(int s, int how) { (void)s; (void)how; return -ENOSYS; }
+int sys_socketpair(int domain, int type, int protocol, int *sv) { (void)domain; (void)type; (void)protocol; (void)sv; return -ENOSYS; }
+
+int sys_pdfork(int *fdp, int flags) { (void)fdp; (void)flags; return -ENOSYS; }
+
+int sys_sigwaitinfo(const void *set, void *info) {
+    (void)set; (void)info;
+    return -ENOSYS;
+}
+
+int sys_getdtablesize(void) {
+    return 1024;
+}
+
+int sys_pathconf(const char *path, int name) {
+    (void)path; (void)name;
+    return -EINVAL;
+}
+
+/*
+ * sys_sysctlbyname - FreeBSD sysctlbyname(2) stub
+ * Handles key queries needed by jemalloc and libc startup.
+ */
+int sys_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
+    (void)newp; (void)newlen;
+    char kname[128];
+    if (copyinstr(name, kname, sizeof(kname), NULL) != 0) return -EFAULT;
+
+    if (strcmp(kname, "hw.ncpu") == 0 || strcmp(kname, "hw.logicalcpu") == 0) {
+        int val = sys_cpu_count();
+        if (val < 1) val = 1;
+        if (oldlenp) { size_t want = sizeof(int); copyout(&want, oldlenp, sizeof(size_t)); }
+        if (oldp) return copyout(&val, oldp, sizeof(int));
+        return 0;
+    }
+    if (strcmp(kname, "vm.pagesize") == 0 || strcmp(kname, "hw.pagesize") == 0) {
+        int val = 4096;
+        if (oldlenp) { size_t want = sizeof(int); copyout(&want, oldlenp, sizeof(size_t)); }
+        if (oldp) return copyout(&val, oldp, sizeof(int));
+        return 0;
+    }
+    if (strcmp(kname, "kern.osreldate") == 0) {
+        int val = 1403000; /* FreeBSD 14.3 */
+        if (oldlenp) { size_t want = sizeof(int); copyout(&want, oldlenp, sizeof(size_t)); }
+        if (oldp) return copyout(&val, oldp, sizeof(int));
+        return 0;
+    }
+    return -ENOENT;
+}
+
+/*
+ * sys_freebsd_sysctl - FreeBSD sysctl(2) via MIB
+ * Translates a subset of FreeBSD MIB numbers to Substrate information.
+ */
+int sys_freebsd_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
+    (void)newp; (void)newlen;
+    if (!name || namelen < 1) return -EINVAL;
+
+    int kname[8];
+    unsigned int klen = namelen < 8 ? namelen : 8;
+    if (copyin(name, kname, klen * sizeof(int)) != 0) return -EFAULT;
+
+    /* CTL_KERN=1, CTL_HW=6 */
+    if (kname[0] == 6 && namelen >= 2) { /* CTL_HW */
+        if (kname[1] == 3) { /* HW_NCPU */
+            int val = sys_cpu_count();
+            if (val < 1) val = 1;
+            if (oldlenp) { size_t want = sizeof(int); copyout(&want, oldlenp, sizeof(size_t)); }
+            if (oldp) return copyout(&val, oldp, sizeof(int));
+            return 0;
+        }
+        if (kname[1] == 7) { /* HW_PAGESIZE */
+            int val = 4096;
+            if (oldlenp) { size_t want = sizeof(int); copyout(&want, oldlenp, sizeof(size_t)); }
+            if (oldp) return copyout(&val, oldp, sizeof(int));
+            return 0;
+        }
+    }
+    if (kname[0] == 1 && namelen >= 2) { /* CTL_KERN */
+        if (kname[1] == 4) { /* KERN_OSRELDATE */
+            int val = 1403000;
+            if (oldlenp) { size_t want = sizeof(int); copyout(&want, oldlenp, sizeof(size_t)); }
+            if (oldp) return copyout(&val, oldp, sizeof(int));
+            return 0;
+        }
+    }
+    return -ENOENT;
+}
+

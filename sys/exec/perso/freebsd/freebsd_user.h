@@ -2,6 +2,8 @@
 #define _FREEBSD_USER_H
 
 #include <stdint.h>
+#include <stddef.h>
+#include <sys/types.h>
 
 /*
  * FreeBSD 14.3 kinfo_proc layout for i386 stability.
@@ -38,6 +40,14 @@ struct freebsd_timeval {
 struct freebsd_timespec {
     int32_t tv_sec;
     int32_t tv_nsec;
+};
+
+/*
+ * FreeBSD iovec (for readv/writev)
+ */
+struct freebsd_iovec {
+    void   *iov_base;
+    size_t  iov_len;
 };
 
 /*
@@ -121,6 +131,62 @@ struct freebsd11_stat {
     struct freebsd_timespec st_birthtim;
 };
 
+
+/*
+ * FreeBSD 13+ stat structure (i386 ABI, FreeBSD 14.x layout)
+ * Verified against FreeBSD 14.3/i386 /usr/include/sys/stat.h offsets:
+ *   dev=0 ino=8 nlink=16 mode=24 bsdflags=26 uid=28 gid=32
+ *   rdev=40 atim=48 size=96 blocks=104 total=208
+ * dev_t, ino_t, nlink_t are all uint64_t on FreeBSD 14.
+ * struct timespec on FreeBSD 14 i386: time_t (int64_t, 8B) + long (4B) = 12B.
+ * Used by fstat_freebsd13 (551), lstat_freebsd13, stat_freebsd13 syscalls.
+ */
+struct freebsd13_timespec {
+    int64_t  tv_sec;   /* 8 bytes (time_t is 64-bit even on i386 FreeBSD 14) */
+    int32_t  tv_nsec;  /* 4 bytes */
+};
+
+#if defined(__i386__) || defined(__x86_64__)
+struct freebsd13_stat {
+    uint64_t st_dev;          /* offset   0 */
+    uint64_t st_ino;          /* offset   8 */
+    uint64_t st_nlink;        /* offset  16 */
+    uint16_t st_mode;         /* offset  24 */
+    int16_t  st_bsdflags;     /* offset  26 */
+    uint32_t st_uid;          /* offset  28 */
+    uint32_t st_gid;          /* offset  32 */
+    int32_t  st_padding1;     /* offset  36 */
+    uint64_t st_rdev;         /* offset  40 */
+    struct freebsd13_timespec st_atim;     /* offset  48  (12 bytes) */
+    struct freebsd13_timespec st_mtim;     /* offset  60 */
+    struct freebsd13_timespec st_ctim;     /* offset  72 */
+    struct freebsd13_timespec st_birthtim; /* offset  84 */
+    int64_t  st_size;         /* offset  96 */
+    int64_t  st_blocks;       /* offset 104 */
+    int32_t  st_blksize;      /* offset 112 */
+    uint32_t st_flags;        /* offset 116 */
+    uint64_t st_gen;          /* offset 120 */
+    uint64_t st_filerev;      /* offset 128 */
+    uint64_t st_spare[9];     /* offset 136 */
+    /* total: 208 bytes */
+};
+#endif
+
+/*
+ * FreeBSD 14 dirent (64-bit ino_t/off_t).
+ * Header is 24 bytes; record is padded to 8-byte alignment.
+ * Used by getdirentries (syscall 554).
+ */
+struct freebsd_dirent {
+    uint64_t  d_fileno;
+    int64_t   d_off;
+    uint16_t  d_reclen;
+    uint8_t   d_type;
+    uint8_t   d_pad0;
+    uint16_t  d_namlen;
+    uint16_t  d_pad1;
+    char      d_name[256];
+};
 
 struct freebsd_utsname {
     char sysname[256];
@@ -280,11 +346,15 @@ void freebsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void
 int  freebsd_sys_sigreturn(void *regs);
 
 
+int sys_freebsd_open(const char *path, int flags, int mode);
+int sys_freebsd_openat(int dirfd, const char *path, int flags, int mode);
 int sys_freebsd_stat(const char *path, struct freebsd_stat *buf);
 int sys_freebsd_lstat(const char *path, struct freebsd_stat *buf);
 int sys_freebsd_fstat(int fd, struct freebsd_stat *buf);
 int sys_freebsd11_stat(const char *path, struct freebsd11_stat *buf);
 int sys_freebsd11_lstat(const char *path, struct freebsd11_stat *buf);
 int sys_freebsd11_fstat(int fd, struct freebsd11_stat *buf);
+int sys_freebsd13_fstatat(int dirfd, const char *path, struct freebsd13_stat *buf, int flags);
+ssize_t sys_freebsd_getdirentries(int fd, char *buf, size_t nbytes, int64_t *basep);
 
 #endif /* _FREEBSD_USER_H */
