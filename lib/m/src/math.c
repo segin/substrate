@@ -442,7 +442,19 @@ double sinpi(double x) {
 }
 
 double cospi(double x) {
-    return cos(M_PI * x);
+    if (isnan(x)) return x;
+    if (isinf(x)) return NAN;
+
+    double r = x - 2.0 * floor(x * 0.5 + 0.5);
+
+    if (r == 0.0) return 1.0;
+    if (r == 1.0 || r == -1.0) return -1.0;
+    if (r == 0.5 || r == -0.5) return 0.0;
+
+    if (r > 0.5) return -cos(M_PI * (1.0 - r));
+    if (r < -0.5) return -cos(M_PI * (1.0 + r));
+
+    return cos(M_PI * r);
 }
 
 double tanpi(double x) {
