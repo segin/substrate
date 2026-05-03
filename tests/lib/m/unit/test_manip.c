@@ -105,9 +105,41 @@ static void test_frexp_range(void) {
     }
 }
 
+/*
+ * REQ-06-0717: frexp(0.0) returns 0.0 with exponent 0.
+ *   For zero input, frexp() must set the exponent to 0 and return zero
+ *   with the sign of the input preserved (frexp(-0.0) returns -0.0).
+ */
+static void test_frexp_zero(void) {
+    int e = 12345;
+    double f = frexp(0.0, &e);
+    if (f != 0.0 || e != 0) {
+        char msg[128];
+        snprintf(msg, sizeof(msg),
+                 "frexp(0.0) returned f=%.17g e=%d; expected 0.0, 0", f, e);
+        FAIL(msg);
+    }
+    if (signbit(f)) {
+        FAIL("frexp(0.0) result has negative sign bit");
+    }
+
+    e = 12345;
+    f = frexp(-0.0, &e);
+    if (f != 0.0 || e != 0) {
+        char msg[128];
+        snprintf(msg, sizeof(msg),
+                 "frexp(-0.0) returned f=%.17g e=%d; expected -0.0, 0", f, e);
+        FAIL(msg);
+    }
+    if (!signbit(f)) {
+        FAIL("frexp(-0.0) did not preserve negative sign bit");
+    }
+}
+
 int main(void) {
     test_frexp_ldexp_roundtrip();
     test_frexp_range();
+    test_frexp_zero();
 
     if (failures != 0) {
         printf("FAILURES: %d\n", failures);
