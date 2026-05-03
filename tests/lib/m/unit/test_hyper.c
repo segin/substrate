@@ -65,9 +65,33 @@ static void test_hyper_one(void) {
     if (!isclose(tanh(-1.0), -0.7615941559557649, 1e-14)) FAIL("tanh(-1.0)");
 }
 
+/*
+ * REQ-06-0681: hyperbolic functions at +-infinity.
+ *   sinh(+inf) = +inf, sinh(-inf) = -inf  (odd)
+ *   cosh(+-inf) = +inf                    (even)
+ *   tanh(+inf) =  1.0, tanh(-inf) = -1.0  (saturating, exact)
+ */
+static void test_hyper_inf(void) {
+    double sp = sinh(INFINITY);
+    if (!isinf(sp) || !(sp > 0.0)) FAIL("sinh(+inf)");
+
+    double sn = sinh(-INFINITY);
+    if (!isinf(sn) || !(sn < 0.0)) FAIL("sinh(-inf)");
+
+    double cp = cosh(INFINITY);
+    if (!isinf(cp) || !(cp > 0.0)) FAIL("cosh(+inf)");
+
+    double cn = cosh(-INFINITY);
+    if (!isinf(cn) || !(cn > 0.0)) FAIL("cosh(-inf)");
+
+    if (tanh(INFINITY)  !=  1.0) FAIL("tanh(+inf)");
+    if (tanh(-INFINITY) != -1.0) FAIL("tanh(-inf)");
+}
+
 int main(void) {
     test_hyper_zero();
     test_hyper_one();
+    test_hyper_inf();
 
     if (failures != 0) {
         printf("FAILURES: %d\n", failures);

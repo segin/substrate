@@ -716,7 +716,7 @@ they are not mandatory.
             - [ ] **Testing (`tests/lib/m/unit/test_hyper.c`):** (REQ: REQ-06-0678)
                 - [x] Test `sinh(0)==0`, `cosh(0)==1`, `tanh(0)==0`. <!-- tests/lib/m/unit/test_hyper.c:test_hyper_zero --> (REQ: REQ-06-0679)
                 - [x] Test `sinh(1)≈1.1752`, `cosh(1)≈1.5431`, `tanh(1)≈0.7616`. <!-- tests/lib/m/unit/test_hyper.c:test_hyper_one --> (REQ: REQ-06-0680)
-                - [ ] Test `sinh(+∞)==+∞`, `cosh(+∞)==+∞`, `tanh(+∞)==1`. (REQ: REQ-06-0681)
+                - [x] Test `sinh(+∞)==+∞`, `cosh(+∞)==+∞`, `tanh(+∞)==1`. <!-- tests/lib/m/unit/test_hyper.c:test_hyper_inf --> (REQ: REQ-06-0681)
                 - [ ] Test `asinh(0)==0`, `acosh(1)==0`, `atanh(0)==0`. (REQ: REQ-06-0682)
                 - [ ] Test `acosh(x)` domain: `acosh(0.5)` → NaN/domain error. (REQ: REQ-06-0683)
                 - [ ] Test `atanh(±1)` → ±∞ (pole error). (REQ: REQ-06-0684)
