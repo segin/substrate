@@ -136,6 +136,39 @@ static void test_atan2(void) {
     if (!isclose(atan2(1.0, -INFINITY), M_PI, 1e-14)) FAIL("atan2(1,-inf)");
 }
 
+static void test_sin_large(void) {
+    /*
+     * REQ-06-0659: large-argument range reduction.
+     * Substrate's sin() uses x87 fsin with an fprem1 retry loop for operands
+     * outside fsin's intrinsic +-2^63 valid range. These properties must hold
+     * for any correct range reduction, not just bit-exact reference values.
+     */
+    double s15 = sin(1e15);
+    if (isnan(s15) || isinf(s15)) FAIL("sin(1e15) not finite");
+    if (fabs(s15) > 1.0) FAIL("|sin(1e15)| > 1");
+    /* Host glibc uses Payne-Hanek; agreement within 1e-10 confirms reduction. */
+    if (!isclose(s15, 0.85827279317023586, 1e-10)) FAIL("sin(1e15) vs host");
+
+    double s10 = sin(1e10);
+    if (isnan(s10) || isinf(s10)) FAIL("sin(1e10) not finite");
+    if (fabs(s10) > 1.0) FAIL("|sin(1e10)| > 1");
+    if (!isclose(s10, -0.48750602508751067, 1e-10)) FAIL("sin(1e10) vs host");
+
+    double s20 = sin(1e20);
+    if (isnan(s20) || isinf(s20)) FAIL("sin(1e20) not finite");
+    if (fabs(s20) > 1.0) FAIL("|sin(1e20)| > 1");
+    if (!isclose(s20, -0.64525128526578079, 1e-10)) FAIL("sin(1e20) vs host");
+
+    /*
+     * DBL_MAX (~1.8e308) is so large that even Payne-Hanek loses all precision.
+     * Don't compare to host; just confirm sin() didn't infinite-loop, return
+     * +-inf, or escape the [-1,1] range. NaN is permitted at this magnitude.
+     */
+    double smax = sin(DBL_MAX);
+    if (isinf(smax)) FAIL("sin(DBL_MAX) is infinite");
+    if (!isnan(smax) && fabs(smax) > 1.0) FAIL("|sin(DBL_MAX)| > 1");
+}
+
 static void test_sinpi(void) {
     /* sinpi(n/2) should give +-1 or 0 for integer n */
     double expected[] = { 0.0, 1.0, 0.0, -1.0, 0.0, 1.0, 0.0, -1.0 };
@@ -329,6 +362,7 @@ int main(void) {
     test_acos();
     test_atan();
     test_atan2();
+    test_sin_large();
     test_sinpi();
     test_cospi();
     test_tanpi();

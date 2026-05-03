@@ -694,7 +694,7 @@ they are not mandatory.
                 - [x] Test `atan2(0,1)==0`, `atan2(1,0)≈π/2`, `atan2(0,-1)≈π`, `atan2(-1,0)≈-π/2`. <!-- tests/lib/m/unit/test_trig.c:test_atan2 --> (REQ: REQ-06-0656)
                 - [x] Test `sinpi(0.5)==1`, `sinpi(1)==0`, `sinpi(0)==0` (exact). <!-- tests/lib/m/unit/test_trig.c:test_sinpi --> (REQ: REQ-06-0657)
                 - [x] Test `cospi(0)==1`, `cospi(0.5)==0`, `cospi(1)==-1` (exact). <!-- tests/lib/m/unit/test_trig.c:test_cospi --> (REQ: REQ-06-0658)
-                - [ ] Test large argument accuracy: `sin(1e15)` — verify range reduction correctness. (REQ: REQ-06-0659)
+                - [x] Test large argument accuracy: `sin(1e15)` — verify range reduction correctness. <!-- tests/lib/m/unit/test_trig.c:test_sin_large --> (REQ: REQ-06-0659)
                 - [ ] Test `sincos()` agrees with individual `sin()` and `cos()` calls. (REQ: REQ-06-0660)
             - [ ] **Property Tests (`tests/lib/m/property/prop_trig.c`):** (REQ: REQ-06-0661)
                 - [ ] Property: `sin(x)² + cos(x)² ≈ 1` (Pythagorean identity) for all finite `x`. (REQ: REQ-06-0662)
