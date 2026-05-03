@@ -82,8 +82,75 @@ static void prop_cosh_sinh_pythagorean(void) {
     (void)isclose;
 }
 
+/*
+ * sinh(-x) == -sinh(x)  (odd-function symmetry, REQ-06-0688)
+ *
+ * sinh is exactly odd by construction in any reasonable implementation
+ * (sinh(x) = (e^x - e^-x)/2, which negates cleanly under x -> -x), so
+ * the identity should hold bit-exactly.  We assert exact equality on
+ * a uniform sweep of [-10, 10] plus the requested boundary set, and
+ * additionally verify signbit preservation at +/-0.0.
+ */
+static void prop_sinh_odd(void) {
+    const double lo = -10.0;
+    const double hi =  10.0;
+    const int n = 1000;
+    const double step = (hi - lo) / (double)(n - 1);
+
+    for (int i = 0; i < n; i++) {
+        double x = lo + (double)i * step;
+        if (!isfinite(x)) continue;
+        double a = sinh(-x);
+        double b = -sinh(x);
+        /*
+         * Bit-exact equality is the contract: sinh is implemented as an
+         * odd function and host glibc preserves this exactly.  Fall back
+         * to a tight tolerance (1e-15) only if equality fails, in case
+         * an alternate libm rounds the negation differently.
+         */
+        if (a != b && fabs(a - b) >= 1e-15) {
+            FAIL("sinh(-x) != -sinh(x) on uniform sweep");
+            return;
+        }
+    }
+
+    static const double boundary[] = {
+        0.0,
+        1.0, -1.0,
+        5.0, -5.0,
+    };
+    const int nb = (int)(sizeof(boundary) / sizeof(boundary[0]));
+    for (int i = 0; i < nb; i++) {
+        double x = boundary[i];
+        if (!isfinite(x)) continue;
+        double a = sinh(-x);
+        double b = -sinh(x);
+        if (a != b && fabs(a - b) >= 1e-15) {
+            FAIL("sinh(-x) != -sinh(x) at boundary");
+            return;
+        }
+    }
+
+    /*
+     * Signed-zero handling: sinh(+0.0) must be +0.0 and sinh(-0.0) must
+     * be -0.0.  Distinguishing them requires signbit() since +0.0 == -0.0
+     * compares equal under IEEE 754.
+     */
+    double sp = sinh(0.0);
+    double sn = sinh(-0.0);
+    if (sp != 0.0 || signbit(sp)) {
+        FAIL("sinh(+0.0) is not +0.0");
+        return;
+    }
+    if (sn != 0.0 || !signbit(sn)) {
+        FAIL("sinh(-0.0) is not -0.0");
+        return;
+    }
+}
+
 int main(void) {
     prop_cosh_sinh_pythagorean();
+    prop_sinh_odd();
 
     if (failures == 0) {
         printf("All property tests passed.\n");
