@@ -530,6 +530,66 @@ static void test_nextafter_idempotent(void) {
     }
 }
 
+/*
+ * REQ-06-0726: copysign() composes a value from |x| and the sign of y.
+ *   copysign(x, y) returns a value with the magnitude of x and the sign of y.
+ *   The operation is purely on the sign bit and ignores the magnitude of y,
+ *   so copysign(0.0, -1.0) yields -0.0 and copysign(INFINITY, -1.0) yields
+ *   -INFINITY. Sign of zero must be verifiable via signbit() because
+ *   -0.0 == 0.0 is true under IEEE-754 comparison.
+ */
+static void test_copysign(void) {
+    if (copysign(1.0, -1.0) != -1.0) {
+        FAIL("copysign(1.0, -1.0) != -1.0");
+    }
+    if (copysign(1.0, 1.0) != 1.0) {
+        FAIL("copysign(1.0, 1.0) != 1.0");
+    }
+    if (copysign(-1.0, -1.0) != -1.0) {
+        FAIL("copysign(-1.0, -1.0) != -1.0");
+    }
+    if (copysign(-1.0, 1.0) != 1.0) {
+        FAIL("copysign(-1.0, 1.0) != 1.0");
+    }
+
+    /* copysign(0.0, -1.0) -> -0.0: value compares equal to 0 but signbit set. */
+    {
+        double r = copysign(0.0, -1.0);
+        if (r != 0.0) {
+            FAIL("copysign(0.0, -1.0) != 0.0 (numerically)");
+        }
+        if (!signbit(r)) {
+            FAIL("copysign(0.0, -1.0) signbit not set");
+        }
+    }
+
+    /* copysign(0.0, 1.0) -> +0.0: signbit clear. */
+    {
+        double r = copysign(0.0, 1.0);
+        if (r != 0.0) {
+            FAIL("copysign(0.0, 1.0) != 0.0");
+        }
+        if (signbit(r)) {
+            FAIL("copysign(0.0, 1.0) signbit set");
+        }
+    }
+
+    if (copysign(3.14, -2.0) != -3.14) {
+        FAIL("copysign(3.14, -2.0) != -3.14");
+    }
+
+    /* copysign(INFINITY, -1.0) -> -INFINITY. */
+    {
+        double r = copysign(INFINITY, -1.0);
+        if (signbit(r) == 0) {
+            FAIL("copysign(INFINITY, -1.0) signbit not set");
+        }
+        if (r != -INFINITY) {
+            FAIL("copysign(INFINITY, -1.0) != -INFINITY");
+        }
+    }
+}
+
 int main(void) {
     test_frexp_ldexp_roundtrip();
     test_frexp_range();
@@ -542,6 +602,7 @@ int main(void) {
     test_nextafter_basic();
     test_nextafter_denormal();
     test_nextafter_idempotent();
+    test_copysign();
 
     if (failures != 0) {
         printf("FAILURES: %d\n", failures);
