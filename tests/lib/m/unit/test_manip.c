@@ -308,12 +308,48 @@ static void test_scalbn(void) {
     }
 }
 
+/*
+ * REQ-06-0720: ilogb() returns the unbiased exponent for powers of 2.
+ *   ilogb(x) returns floor(log2(|x|)) as an int. For an exact power of 2,
+ *   the result is the integer exponent. Sign is ignored: ilogb(-x)==ilogb(x).
+ */
+static void test_ilogb_basic(void) {
+    if (ilogb(1.0) != 0) {
+        FAIL("ilogb(1.0) != 0");
+    }
+    if (ilogb(2.0) != 1) {
+        FAIL("ilogb(2.0) != 1");
+    }
+    if (ilogb(0.5) != -1) {
+        FAIL("ilogb(0.5) != -1");
+    }
+    if (ilogb(4.0) != 2) {
+        FAIL("ilogb(4.0) != 2");
+    }
+    if (ilogb(0.25) != -2) {
+        FAIL("ilogb(0.25) != -2");
+    }
+    if (ilogb(1024.0) != 10) {
+        FAIL("ilogb(1024.0) != 10");
+    }
+    if (ilogb(0.0009765625) != -10) {
+        FAIL("ilogb(1.0/1024.0) != -10");
+    }
+    if (ilogb(-1.0) != 0) {
+        FAIL("ilogb(-1.0) != 0");
+    }
+    if (ilogb(-2.0) != 1) {
+        FAIL("ilogb(-2.0) != 1");
+    }
+}
+
 int main(void) {
     test_frexp_ldexp_roundtrip();
     test_frexp_range();
     test_frexp_zero();
     test_modf();
     test_scalbn();
+    test_ilogb_basic();
 
     if (failures != 0) {
         printf("FAILURES: %d\n", failures);
