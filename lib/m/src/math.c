@@ -272,6 +272,9 @@ void sincos(double x, double *s, double *c) {
 
 /* tan(x) = sin(x) / cos(x) */
 double tan(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return NAN;
+
     double res;
     __asm__ __volatile__(
         "fldl %1\n\t"
