@@ -5,6 +5,7 @@
  * using Taylor series approximations and mathematical identities.
  */
 
+#include <fenv.h>
 #include <math.h>
 #include <stdint.h>
 
@@ -423,7 +424,13 @@ double asinh(double x) {
 
 /* acosh(x) = log(x + sqrt(x^2 - 1)), x >= 1 */
 double acosh(double x) {
-    if (x < 1.0) return NAN;
+    if (isnan(x)) return x;                 /* acosh(NaN)=NaN */
+    if (x == 1.0) return 0.0;               /* acosh(1)=+0 exactly */
+    if (x < 1.0) {                          /* domain error (incl. -inf) */
+        feraiseexcept(FE_INVALID);
+        return NAN;
+    }
+    if (isinf(x)) return x;                 /* acosh(+inf)=+inf */
     return log(x + sqrt(x * x - 1.0));
 }
 
