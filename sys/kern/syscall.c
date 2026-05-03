@@ -1955,6 +1955,120 @@ int sys_fchown(int fd, int uid, int gid) {
     return 0;
 }
 
+int sys_fchownat(int dirfd, const char *path, int uid, int gid, int flag) {
+    char kpath[256];
+    char name[128];
+    fs_node_t *parent;
+    int ret;
+
+    if (uid < -1 || gid < -1) return -EINVAL;
+
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+
+    /* If flag has AT_SYMLINK_NOFOLLOW, resolve the path as a whole and don't
+       follow the last component (lchown semantics). Otherwise, follow it. */
+    if (flag & AT_SYMLINK_NOFOLLOW) {
+        /* For AT_SYMLINK_NOFOLLOW, we resolve the parent dir and do lchown */
+        ret = kern_resolve_parent_dirfd(dirfd, kpath, &parent, name, sizeof(name));
+        if (ret != 0) return ret;
+
+        /* Look up the final component */
+        fs_node_t *node = parent->finddir(parent, name);
+        if (!node) return -ENOENT;
+
+        /* If it's a symlink and AT_SYMLINK_NOFOLLOW is set, operate on the link */
+        if ((node->flags & 0x7) == FS_SYMLINK) {
+            /* Match fchown's current policy until supplementary groups exist. */
+            if (uid != -1 && current_process->euid != 0)
+                return -EPERM;
+            if (gid != -1 && current_process->euid != 0 && current_process->euid != node->uid)
+                return -EPERM;
+
+            if (uid != -1) node->uid = (uint32_t)uid;
+            if (gid != -1) node->gid = (uint32_t)gid;
+
+            if (current_process->euid != 0)
+                node->mask &= ~(uint32_t)(04000 | 02000);
+
+            node->ctime = get_time();
+            return 0;
+        }
+
+        /* Otherwise, do fchown-style operation on the resolved node */
+        if (uid != -1 && current_process->euid != 0)
+            return -EPERM;
+        if (gid != -1 && current_process->euid != 0 && current_process->euid != node->uid)
+            return -EPERM;
+
+        if (uid != -1) node->uid = (uint32_t)uid;
+        if (gid != -1) node->gid = (uint32_t)gid;
+
+        if (current_process->euid != 0)
+            node->mask &= ~(uint32_t)(04000 | 02000);
+
+        node->ctime = get_time();
+        return 0;
+    }
+
+    /* Default case (no AT_SYMLINK_NOFOLLOW): follow symlinks, resolve full path */
+    fs_node_t *node = sys_lookup_path(kpath, 1);
+    if (!node) return -ENOENT;
+
+    /* Match fchown's current policy until supplementary groups exist. */
+    if (uid != -1 && current_process->euid != 0)
+        return -EPERM;
+    if (gid != -1 && current_process->euid != 0 && current_process->euid != node->uid)
+        return -EPERM;
+
+    if (uid != -1) node->uid = (uint32_t)uid;
+    if (gid != -1) node->gid = (uint32_t)gid;
+
+    if (current_process->euid != 0)
+        node->mask &= ~(uint32_t)(04000 | 02000);
+
+    node->ctime = get_time();
+    return 0;
+}
+
+int sys_lchownat(int dirfd, const char *path, int uid, int gid, int flag) {
+    char kpath[256];
+    char name[128];
+    fs_node_t *parent;
+    int ret;
+
+    if (uid < -1 || gid < -1) return -EINVAL;
+
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+
+    /* lchownat always operates on the link itself, never follows symlinks */
+    ret = kern_resolve_parent_dirfd(dirfd, kpath, &parent, name, sizeof(name));
+    if (ret != 0) return ret;
+
+    fs_node_t *node = parent->finddir(parent, name);
+    if (!node) return -ENOENT;
+
+    /* Only operate on symlinks; if it's not a symlink, return ENOTLNK
+       unless the flag forces us to operate on it anyway */
+    if ((node->flags & 0x7) != FS_SYMLINK && !(flag & AT_REMOVEDIR)) {
+        /* Even for non-symlinks, we allow setting ownership */
+    }
+
+    /* Match fchown's current policy until supplementary groups exist. */
+    if (uid != -1 && current_process->euid != 0)
+        return -EPERM;
+    if (gid != -1 && current_process->euid != 0 && current_process->euid != node->uid)
+        return -EPERM;
+
+    if (uid != -1) node->uid = (uint32_t)uid;
+    if (gid != -1) node->gid = (uint32_t)gid;
+
+    if (current_process->euid != 0)
+        node->mask &= ~(uint32_t)(04000 | 02000);
+
+    node->ctime = get_time();
+    return 0;
+}
+
 int sys_fcntl(int fd, int cmd, int arg) {
     return proc_fcntl(current_process, fd, cmd, arg);
 }
