@@ -78,6 +78,7 @@ void sincos(double x, double *s, double *c);
 
 /* C23 inverse trigonometric pi-argument variants */
 double acospi(double x);
+double atan2pi(double y, double x);
 
 /* Hyperbolic functions */
 double sinh(double x);

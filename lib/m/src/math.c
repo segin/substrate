@@ -498,6 +498,25 @@ double atanpi(double x) {
     return atan(x) / M_PI;
 }
 
+double atan2pi(double y, double x) {
+    if (isnan(y) || isnan(x)) return NAN;
+    if (isinf(y) && isinf(x)) {
+        if (!signbit(x)) return signbit(y) ? -0.25 : 0.25;
+        return signbit(y) ? -0.75 : 0.75;
+    }
+    if (isinf(y)) return signbit(y) ? -0.5 : 0.5;
+    if (isinf(x)) {
+        if (!signbit(x)) return signbit(y) ? -0.0 : 0.0;
+        return signbit(y) ? -1.0 : 1.0;
+    }
+    if (y == 0.0) {
+        if (!signbit(x)) return y;
+        return signbit(y) ? -1.0 : 1.0;
+    }
+    if (x == 0.0) return signbit(y) ? -0.5 : 0.5;
+    return atan2(y, x) / M_PI;
+}
+
 /*
  * Floating-point manipulation functions
  */
