@@ -197,6 +197,23 @@ static void test_cospi(void) {
     
     /* cospi(1) == -1 */
     if (!isclose(cospi(1), -1.0, 1e-13)) FAIL("cospi(1)");
+
+    /*
+     * REQ-06-0658: exact-value tests.
+     * cospi() must return bit-exact values at integers and half-integers
+     * via integer/half-integer special-case dispatch.
+     * These compare with == (not isclose).
+     */
+    if (cospi(0.0) != 1.0) FAIL("cospi(0.0) != 1.0 (exact)");
+    if (cospi(1.0) != -1.0) FAIL("cospi(1.0) != -1.0 (exact)");
+    if (cospi(2.0) != 1.0) FAIL("cospi(2.0) != 1.0 (exact)");
+    if (cospi(-1.0) != -1.0) FAIL("cospi(-1.0) != -1.0 (exact)");
+    if (cospi(0.5) != 0.0) FAIL("cospi(0.5) != 0.0 (exact)");
+    if (cospi(-0.5) != 0.0) FAIL("cospi(-0.5) != 0.0 (exact)");
+    if (cospi(1.5) != 0.0) FAIL("cospi(1.5) != 0.0 (exact)");
+    if (!isnan(cospi(NAN))) FAIL("cospi(NaN) is not NaN");
+    if (!isnan(cospi(INFINITY))) FAIL("cospi(+inf) is not NaN");
+    if (!isnan(cospi(-INFINITY))) FAIL("cospi(-inf) is not NaN");
 }
 
 static void test_tanpi(void) {
