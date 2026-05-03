@@ -254,11 +254,58 @@ static void prop_tanh_definition(void) {
     }
 }
 
+/*
+ * asinh(sinh(x)) == x  (inverse-function identity, REQ-06-0691)
+ *
+ * sinh is monotonic and asinh is its true inverse over the reals, so the
+ * round-trip should be the identity to within a few ULPs.  sinh(x)
+ * overflows for |x| beyond ~ 710 (double); restrict the sweep well inside
+ * that bound.  Use 500 uniformly spaced samples in [-10, 10] with a 1e-13
+ * tolerance, plus the requested boundary set at a tighter 1e-14.
+ */
+static void prop_asinh_sinh_inverse(void) {
+    const double lo = -10.0;
+    const double hi =  10.0;
+    const int n = 500;
+    const double step = (hi - lo) / (double)(n - 1);
+
+    for (int i = 0; i < n; i++) {
+        double x = lo + (double)i * step;
+        if (!isfinite(x)) continue;
+        double s = sinh(x);
+        if (!isfinite(s)) continue;
+        double r = asinh(s);
+        if (fabs(r - x) >= 1e-13) {
+            FAIL("asinh(sinh(x)) != x on uniform sweep");
+            return;
+        }
+    }
+
+    static const double boundary[] = {
+        0.0,
+        1.0, -1.0,
+        5.0, -5.0,
+    };
+    const int nb = (int)(sizeof(boundary) / sizeof(boundary[0]));
+    for (int i = 0; i < nb; i++) {
+        double x = boundary[i];
+        if (!isfinite(x)) continue;
+        double s = sinh(x);
+        if (!isfinite(s)) continue;
+        double r = asinh(s);
+        if (fabs(r - x) >= 1e-14) {
+            FAIL("asinh(sinh(x)) != x at boundary");
+            return;
+        }
+    }
+}
+
 int main(void) {
     prop_cosh_sinh_pythagorean();
     prop_sinh_odd();
     prop_cosh_even();
     prop_tanh_definition();
+    prop_asinh_sinh_inverse();
 
     if (failures == 0) {
         printf("All property tests passed.\n");
