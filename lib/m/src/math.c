@@ -395,7 +395,10 @@ double sinh(double x) {
 }
 
 double cosh(double x) {
-    double ex = exp(x);
+    if (isnan(x)) return x;
+    if (isinf(x)) return INFINITY;  /* cosh(+/-inf)=+inf (even function) */
+    if (x == 0.0) return 1.0;        /* cosh(+/-0)=1 */
+    double ex = exp(fabs(x));        /* even function; use |x| for symmetry */
     return (ex + 1.0 / ex) * 0.5;
 }
 

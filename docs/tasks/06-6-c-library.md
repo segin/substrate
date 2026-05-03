@@ -708,7 +708,7 @@ they are not mandatory.
                 - [x] `man/man3/asin.3` — Inverse trigonometric functions. Covers `asin()`, `acos()`, `atan()`, `atan2()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. <!-- usr.man/man3/asin.3 --> (REQ: REQ-06-0670)
         - [ ] **Hyperbolic:** (REQ: REQ-06-0671)
             - [x] `sinh()` <!-- lib/m/src/math.c:sinh --> (REQ: REQ-06-0672)
-            - [ ] `cosh()` (REQ: REQ-06-0673)
+            - [x] `cosh()` <!-- lib/m/src/math.c:cosh --> (REQ: REQ-06-0673)
             - [ ] `tanh()` (REQ: REQ-06-0674)
             - [ ] `asinh()` (REQ: REQ-06-0675)
             - [ ] `acosh()` (REQ: REQ-06-0676)
