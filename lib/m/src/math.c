@@ -601,11 +601,48 @@ double ldexp(double x, int exp) {
     return res;
 }
 
-/* modf: split into integer and fractional parts */
+/* modf: split into integer and fractional parts (C99 7.12.6.12) */
 double modf(double x, double *iptr) {
-    double i = trunc(x);
-    *iptr = i;
-    return x - i;
+    /* NaN: *iptr = NaN, return NaN */
+    if (isnan(x)) {
+        *iptr = x;
+        return x;
+    }
+    /* +/-Inf: *iptr = +/-Inf, return +/-0.0 (sign of x) */
+    if (isinf(x)) {
+        *iptr = x;
+        return copysign(0.0, x);
+    }
+    /* +/-0.0: *iptr = +/-0.0, return +/-0.0 (sign preserved on both) */
+    if (x == 0.0) {
+        *iptr = x;
+        return x;
+    }
+    /* Normal case: truncate via bit manipulation to preserve sign of zero
+     * (the local trunc() converts via int and loses -0.0 / overflows on huge x). */
+    union { double d; uint64_t u; } u = { .d = x };
+    int exp = (int)((u.u >> 52) & 0x7FF) - 1023;
+
+    if (exp < 0) {
+        /* |x| < 1: integer part is +/-0.0 with sign of x, fraction is x */
+        *iptr = copysign(0.0, x);
+        return x;
+    }
+    if (exp >= 52) {
+        /* |x| is so large it has no fractional bits */
+        *iptr = x;
+        return copysign(0.0, x);
+    }
+    /* Mask off the fractional mantissa bits */
+    uint64_t mask = ((uint64_t)1 << (52 - exp)) - 1;
+    if ((u.u & mask) == 0) {
+        /* Already an integer */
+        *iptr = x;
+        return copysign(0.0, x);
+    }
+    union { double d; uint64_t u; } iu = { .u = u.u & ~mask };
+    *iptr = iu.d;
+    return x - iu.d;
 }
 
 /* scalbn: x * 2^n (FLT_RADIX = 2) */
