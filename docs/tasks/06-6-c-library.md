@@ -671,7 +671,7 @@ they are not mandatory.
             - [x] `sin()` <!-- lib/m/src/math.c:sin --> (REQ: REQ-06-0633)
             - [x] `cos()` <!-- lib/m/src/math.c:cos --> (REQ: REQ-06-0634)
             - [x] `tan()` <!-- lib/m/src/math.c:tan --> (REQ: REQ-06-0635)
-            - [ ] `asin()` (REQ: REQ-06-0636)
+            - [x] `asin()` <!-- lib/m/src/math.c:asin --> (REQ: REQ-06-0636)
             - [ ] `acos()` (REQ: REQ-06-0637)
             - [ ] `atan()` (REQ: REQ-06-0638)
             - [ ] `atan2()` (REQ: REQ-06-0639)

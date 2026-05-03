@@ -335,7 +335,10 @@ double atan2(double y, double x) {
  * asin(x) = atan(x / sqrt(1 - x^2))
  */
 double asin(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return NAN;
     if (x < -1.0 || x > 1.0) return NAN;
+    if (x == 0.0) return x;
     if (x == 1.0) return M_PI_2;
     if (x == -1.0) return -M_PI_2;
     return atan(x / sqrt(1.0 - x * x));
