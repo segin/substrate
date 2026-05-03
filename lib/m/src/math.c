@@ -833,6 +833,16 @@ double copysign(double x, double y) {
     return ux.d;
 }
 
+/*
+ * nan: return a quiet NaN. Per C99 7.12.11.2, the tagp string selects an
+ * implementation-defined NaN payload; we ignore tagp and return NAN, which
+ * is standards-compliant since most code cannot observe the payload.
+ */
+double nan(const char *tagp) {
+    (void)tagp;
+    return NAN;
+}
+
 /* Absolute value - actual implementation */
 double fabs(double x) {
     double res;

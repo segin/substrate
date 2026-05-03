@@ -105,6 +105,7 @@ double nexttoward(double x, long double y);
 double nextup(double x);
 double nextdown(double x);
 double copysign(double x, double y);
+double nan(const char *tagp);
 
 /* Exponential and logarithmic functions */
 double exp(double x);
