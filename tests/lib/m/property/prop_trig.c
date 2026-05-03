@@ -258,9 +258,59 @@ static void prop_sin_odd(void) {
     }
 }
 
+/*
+ * cos(-x) == cos(x)  (even function, REQ-06-0664)
+ * Verified across a uniform sweep plus boundary cases.
+ */
+static void prop_cos_even(void) {
+    const double pi = 3.14159265358979323846;
+    const double lo = -10.0 * pi;
+    const double hi =  10.0 * pi;
+    const int n = 1000;
+    const double step = (hi - lo) / (double)(n - 1);
+
+    for (int i = 0; i < n; i++) {
+        double x = lo + (double)i * step;
+        if (!isfinite(x)) continue;
+        double c_pos = cos(x);
+        double c_neg = cos(-x);
+        if (c_neg == c_pos) continue;
+        if (fabs(c_neg - c_pos) >= 1e-15) {
+            FAIL("cos(-x) != cos(x) on uniform sweep");
+            return;
+        }
+    }
+
+    static const double boundary[] = {
+        0.0,
+        M_PI_2, -M_PI_2,
+        M_PI,   -M_PI,
+        100.0, -100.0,
+    };
+    const int nb = (int)(sizeof(boundary) / sizeof(boundary[0]));
+    for (int i = 0; i < nb; i++) {
+        double x = boundary[i];
+        if (!isfinite(x)) continue;
+        double c_pos = cos(x);
+        double c_neg = cos(-x);
+        if (c_neg == c_pos) continue;
+        if (fabs(c_neg - c_pos) >= 1e-15) {
+            FAIL("cos(-x) != cos(x) at boundary");
+            return;
+        }
+    }
+
+    /* cos(0.0) == 1.0 exactly. */
+    if (cos(0.0) != 1.0) {
+        FAIL("cos(0.0) != 1.0");
+        return;
+    }
+}
+
 int main(void) {
     prop_sin_cos_pythagorean();
     prop_sin_odd();
+    prop_cos_even();
     prop_sinpi_cospi_identity();
     prop_sinpi_odd();
     prop_cospi_even();

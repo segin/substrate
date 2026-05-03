@@ -699,7 +699,7 @@ they are not mandatory.
             - [ ] **Property Tests (`tests/lib/m/property/prop_trig.c`):** (REQ: REQ-06-0661)
                 - [x] Property: `sin(x)² + cos(x)² ≈ 1` (Pythagorean identity) for all finite `x`. <!-- tests/lib/m/property/prop_trig.c:prop_sin_cos_pythagorean --> (REQ: REQ-06-0662)
                 - [x] Property: `sin(-x) == -sin(x)` (odd function). <!-- tests/lib/m/property/prop_trig.c:prop_sin_odd --> (REQ: REQ-06-0663)
-                - [ ] Property: `cos(-x) == cos(x)` (even function). (REQ: REQ-06-0664)
+                - [x] Property: `cos(-x) == cos(x)` (even function). <!-- tests/lib/m/property/prop_trig.c:prop_cos_even --> (REQ: REQ-06-0664)
                 - [ ] Property: `asin(sin(x)) ≈ x` for `x ∈ [-π/2, π/2]`. (REQ: REQ-06-0665)
                 - [ ] Property: `|sin(x)| <= 1` and `|cos(x)| <= 1` for all finite `x`. (REQ: REQ-06-0666)
                 - [ ] Property: `atan2(sin(x), cos(x)) ≈ x` for `x ∈ (-π, π]`. (REQ: REQ-06-0667)
