@@ -364,8 +364,9 @@ void isr_handler(registers_t *regs) {
             // Should not return, but if it does...
             for(;;) { __asm__ volatile("hlt"); }
         } else {
-            // Kernel-mode crash - panic
-            panic("Unhandled Kernel Exception");
+            // Kernel-mode crash - panic with the trap frame so the user
+            // sees regs/code/stack at the fault, not just at the panic().
+            panic_with_regs("Unhandled Kernel Exception", regs);
         }
     }
 
