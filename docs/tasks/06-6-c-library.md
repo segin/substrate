@@ -722,7 +722,7 @@ they are not mandatory.
                 - [x] Test `atanh(±1)` → ±∞ (pole error). <!-- tests/lib/m/unit/test_hyper.c:test_atanh_poles --> (REQ: REQ-06-0684)
                 - [x] Test NaN propagation for all hyperbolic functions. <!-- tests/lib/m/unit/test_hyper.c:test_hyper_nan --> (REQ: REQ-06-0685)
             - [ ] **Property Tests (`tests/lib/m/property/prop_hyper.c`):** (REQ: REQ-06-0686)
-                - [ ] Property: `cosh(x)² - sinh(x)² ≈ 1` (hyperbolic Pythagorean identity). (REQ: REQ-06-0687)
+                - [x] Property: `cosh(x)² - sinh(x)² ≈ 1` (hyperbolic Pythagorean identity). <!-- tests/lib/m/property/prop_hyper.c:prop_cosh_sinh_pythagorean --> (REQ: REQ-06-0687)
                 - [ ] Property: `sinh(-x) == -sinh(x)` (odd). (REQ: REQ-06-0688)
                 - [ ] Property: `cosh(-x) == cosh(x)` (even). (REQ: REQ-06-0689)
                 - [ ] Property: `tanh(x) == sinh(x)/cosh(x)` for moderate `x`. (REQ: REQ-06-0690)
