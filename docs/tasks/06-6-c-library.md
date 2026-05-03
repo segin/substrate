@@ -747,7 +747,7 @@ they are not mandatory.
             - [x] `nextup()`, `nextdown()` (C23): <!-- lib/m/src/math.c --> (REQ: REQ-06-0708)
                 - [x] `nextup(x)`: next representable value toward +∞. <!-- lib/m/src/math.c:nextup --> (REQ: REQ-06-0709)
                 - [x] `nextdown(x)`: next representable value toward -∞. <!-- lib/m/src/math.c:nextdown --> (REQ: REQ-06-0710)
-            - [ ] `copysign()` (REQ: REQ-06-0711)
+            - [x] `copysign()` <!-- lib/m/src/math.c:copysign --> (REQ: REQ-06-0711)
             - [ ] `nan()`: (REQ: REQ-06-0712)
                 - [ ] `nan(tagp)`: convert string tag to quiet NaN. `nan("") == NAN`, `nan("123")` → NaN with tag payload. (REQ: REQ-06-0713)
             - [ ] **Testing (`tests/lib/m/unit/test_manip.c`):** (REQ: REQ-06-0714)
