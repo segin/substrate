@@ -35,9 +35,7 @@ int coff_load_file(void *file, uint32_t size) {
     if (filehdr->f_opthdr > 0) {
         coff_aouthdr_t *aouthdr = (coff_aouthdr_t *)((uintptr_t)file + sizeof(coff_filehdr_t));
         // Entry point is aouthdr->entry
-        char buf[64];
-        sprintf(buf, "COFF: Entry point at 0x%08x\n", aouthdr->entry);
-        kprint(buf);
+        kprintf("COFF: Entry point at 0x%08x\n", aouthdr->entry);
     }
 
     // Identify and map sections
@@ -46,9 +44,7 @@ int coff_load_file(void *file, uint32_t size) {
         char name[9];
         strncpy(name, scnhdr[i].s_name, 8);
         name[8] = '\0';
-        char buf[64];
-        sprintf(buf, "COFF: Mapping section %s\n", name);
-        kprint(buf);
+        kprintf("COFF: Mapping section %s\n", name);
         
         // Use vm_map_insert to map section raw data
         uint32_t va_start = scnhdr[i].s_vaddr;
