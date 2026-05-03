@@ -386,6 +386,9 @@ double acos(double x) {
  * tanh(x) = sinh(x) / cosh(x)
  */
 double sinh(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return x;  /* sinh(+inf)=+inf, sinh(-inf)=-inf */
+    if (x == 0.0) return x;  /* preserves +0.0/-0.0 (sinh is odd) */
     if (fabs(x) < 1e-9) return x;  /* Taylor for small x */
     double ex = exp(x);
     return (ex - 1.0 / ex) * 0.5;
