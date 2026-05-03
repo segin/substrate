@@ -4,6 +4,10 @@
  * Tests sinpi, cospi, tanpi, asinpi, atanpi and their float/ldouble variants.
  */
 
+/* sincos() is a GNU extension on host glibc; substrate's math.h declares it
+ * unconditionally. Define _GNU_SOURCE so host validation builds compile. */
+#define _GNU_SOURCE
+
 #include <stdio.h>
 #include <math.h>
 #include <stdint.h>
@@ -167,6 +171,42 @@ static void test_sin_large(void) {
     double smax = sin(DBL_MAX);
     if (isinf(smax)) FAIL("sin(DBL_MAX) is infinite");
     if (!isnan(smax) && fabs(smax) > 1.0) FAIL("|sin(DBL_MAX)| > 1");
+}
+
+static void test_sincos(void) {
+    /*
+     * REQ-06-0660: sincos(x, &s, &c) must agree with separate sin(x)/cos(x).
+     * Substrate's sincos() uses a single x87 fsincos with the same fprem1
+     * range-reduction loop as sin()/cos(), so results are bit-exact on target.
+     * On host glibc the implementations diverge, so we relax to a 1e-15
+     * tolerance via isclose() to allow this test to validate logic on host.
+     */
+    const double xs[] = { 0.0, M_PI / 4.0, M_PI / 2.0, M_PI, 1.0, -1.0, 100.0, 1e10 };
+    for (size_t i = 0; i < sizeof(xs) / sizeof(xs[0]); i++) {
+        double x = xs[i];
+        double s, c;
+        sincos(x, &s, &c);
+        if (!isclose(s, sin(x), 1e-15)) {
+            printf("DEBUG sincos(%g).s = %.17g, sin = %.17g\n", x, s, sin(x));
+            FAIL("sincos sin component");
+        }
+        if (!isclose(c, cos(x), 1e-15)) {
+            printf("DEBUG sincos(%g).c = %.17g, cos = %.17g\n", x, c, cos(x));
+            FAIL("sincos cos component");
+        }
+    }
+
+    /* sincos(0.0): s == 0.0, c == 1.0 (exact) */
+    double s0, c0;
+    sincos(0.0, &s0, &c0);
+    if (s0 != 0.0) FAIL("sincos(0.0).s != 0.0");
+    if (c0 != 1.0) FAIL("sincos(0.0).c != 1.0");
+
+    /* sincos(NaN): both NaN */
+    double sn, cn;
+    sincos(NAN, &sn, &cn);
+    if (!isnan(sn)) FAIL("sincos(NaN).s not NaN");
+    if (!isnan(cn)) FAIL("sincos(NaN).c not NaN");
 }
 
 static void test_sinpi(void) {
@@ -363,6 +403,7 @@ int main(void) {
     test_atan();
     test_atan2();
     test_sin_large();
+    test_sincos();
     test_sinpi();
     test_cospi();
     test_tanpi();
