@@ -676,7 +676,7 @@ they are not mandatory.
             - [x] `atan()` <!-- lib/m/src/math.c:atan --> (REQ: REQ-06-0638)
             - [x] `atan2()` <!-- lib/m/src/math.c:atan2 --> (REQ: REQ-06-0639)
             - [ ] `sinpi()`, `cospi()`, `tanpi()` (C23): (REQ: REQ-06-0640)
-                - [ ] `sinpi(x)`: compute `sin(π·x)` exactly at integer and half-integer points. (REQ: REQ-06-0641)
+                - [x] `sinpi(x)`: compute `sin(π·x)` exactly at integer and half-integer points. <!-- lib/m/src/math.c:sinpi --> (REQ: REQ-06-0641)
                 - [ ] `cospi(x)`: compute `cos(π·x)` exactly at integer and half-integer points. (REQ: REQ-06-0642)
                 - [ ] `tanpi(x)`: compute `tan(π·x)` exactly, including singularity at half-integers. (REQ: REQ-06-0643)
                 - [ ] Key benefit: exact values without `M_PI` multiplication error. (REQ: REQ-06-0644)

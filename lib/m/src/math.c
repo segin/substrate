@@ -425,7 +425,20 @@ double atanh(double x) {
  * C23 pi-argument trigonometric functions
  */
 double sinpi(double x) {
-    return sin(M_PI * x);
+    if (isnan(x)) return x;
+    if (isinf(x)) return NAN;
+
+    double r = x - 2.0 * floor(x * 0.5 + 0.5);
+
+    if (r == 0.0) return 0.0;
+    if (r == 1.0 || r == -1.0) return 0.0;
+    if (r == 0.5) return 1.0;
+    if (r == -0.5) return -1.0;
+
+    if (r > 0.5) r = 1.0 - r;
+    else if (r < -0.5) r = -1.0 - r;
+
+    return sin(M_PI * r);
 }
 
 double cospi(double x) {
