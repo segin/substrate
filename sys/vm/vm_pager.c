@@ -247,19 +247,36 @@ bool vm_pager_device_phys(vm_pager_t *pager, uint64_t pindex, uintptr_t *phys_ou
 
 static struct vm_pager *vnode_alloc(void *handle, size_t size, uint8_t prot, uint64_t offset) {
     (void)prot;
+    (void)size;
     vm_vnode_pager_t *pager = kmalloc(sizeof(vm_vnode_pager_t));
     if (!pager) {
         return NULL;
     }
 
+    fs_node_t *node = (fs_node_t *)handle;
     pager->base.priv = handle;
-    pager->node = (fs_node_t *)handle;
+    pager->node = node;
     pager->base_offset = offset;
-    pager->page_limit = (size + 4095) / 4096;
+    /* Derive page_limit from actual file size, not mmap size. This ensures that
+     * all mmaps of the same file share a single backing object without stale
+     * page_limit from the first (possibly smaller) mmap truncating later accesses. */
+    pager->page_limit = node ? (node->length + 4095) / 4096 : 0;
+    /* Pin the node in the filesystem node cache so the slot cannot be evicted
+     * and reused for a different inode while this pager holds a reference to
+     * the fs_node_t pointer.  Without this, closing the fd after mmap() drops
+     * pin_count to zero, allowing ext2 to silently recycle the cache slot for
+     * another inode — subsequent page-ins then read the wrong file. */
+    if (node) {
+        open_fs(node, 0, 0);
+    }
     return &pager->base;
 }
 
 static void vnode_dealloc(struct vm_pager *pager) {
+    vm_vnode_pager_t *vpager = (vm_vnode_pager_t *)pager;
+    if (vpager && vpager->node) {
+        close_fs(vpager->node);
+    }
     kfree(pager, sizeof(vm_vnode_pager_t));
 }
 

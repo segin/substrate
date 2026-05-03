@@ -126,6 +126,7 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS__umtx_op] = &sys_umtx_op,
     [FREEBSD_SYS_thr_new]  = &sys_thr_new,
     [FREEBSD_SYS_mmap_freebsd13] = (void *)&sys_freebsd_mmap,
+    [FREEBSD_SYS_lseek_freebsd13] = (void *)&sys_freebsd_lseek13,
     [FREEBSD_SYS_cap_getmode] = &sys_cap_getmode,
     [FREEBSD_SYS_pdfork]   = &sys_pdfork,
     [FREEBSD_SYS_pselect]  = &sys_pselect,

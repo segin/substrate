@@ -20,7 +20,8 @@ struct freebsd11_stat;
 int sys_freebsd_uname(void *buf);
 int sys_freebsd4_uname(void *buf);
 int64_t sys_freebsd_lseek(int fd, int pad, uint32_t off_lo, uint32_t off_hi, int whence);
-void *sys_freebsd_mmap(void *addr, size_t len, int prot, int flags, int fd, int pad, uint32_t off_lo, uint32_t off_hi);
+int64_t sys_freebsd_lseek13(int fd, uint32_t off_lo, uint32_t off_hi, int whence);
+void *sys_freebsd_mmap(void *addr, size_t len, int prot, int flags, int fd, uint32_t off_lo, uint32_t off_hi);
 
 /* execv wrapper for ancient NetBSD/SunOS binaries */
 int sys_compat_execv(const char *path, char **argv);

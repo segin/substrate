@@ -65,8 +65,14 @@ int32_t compat_time32(int32_t *tloc) {
 #include <sys/kern_syscalls.h>
 #include <string.h>
 
+/* Old lseek (syscall 19): (fd, pad, off_lo, off_hi, whence) with alignment pad */
 int64_t sys_freebsd_lseek(int fd, int pad, uint32_t off_lo, uint32_t off_hi, int whence) {
     (void)pad;
+    return sys_lseek(fd, off_lo, off_hi, whence);
+}
+
+/* lseek_freebsd13 (syscall 478): pad-less ABI - (fd, off_lo, off_hi, whence) */
+int64_t sys_freebsd_lseek13(int fd, uint32_t off_lo, uint32_t off_hi, int whence) {
     return sys_lseek(fd, off_lo, off_hi, whence);
 }
 
@@ -84,8 +90,12 @@ int64_t sys_freebsd_lseek(int fd, int pad, uint32_t off_lo, uint32_t off_hi, int
 #define KERN_MAP_FIXED      0x010
 #define KERN_MAP_ANONYMOUS  0x020
 
-void *sys_freebsd_mmap(void *addr, size_t len, int prot, int flags, int fd, int pad, uint32_t off_lo, uint32_t off_hi) {
-    (void)pad;
+/*
+ * mmap_freebsd13 (syscall 477): pad-less mmap ABI introduced in FreeBSD 13+.
+ * Unlike the old mmap (197), there is no alignment dummy between fd and off_t.
+ * Stack layout: addr, len, prot, flags, fd, off_lo, off_hi (7 args, no pad).
+ */
+void *sys_freebsd_mmap(void *addr, size_t len, int prot, int flags, int fd, uint32_t off_lo, uint32_t off_hi) {
     uint64_t offset = ((uint64_t)off_hi << 32) | off_lo;
     int kflags = flags & (KERN_MAP_SHARED | KERN_MAP_PRIVATE | KERN_MAP_FIXED);
     if (flags & FREEBSD_MAP_ANON)

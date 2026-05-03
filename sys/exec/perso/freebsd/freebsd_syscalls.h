@@ -238,7 +238,8 @@ ssize_t sys_freebsd_getdirentries(int fd, char *buf, size_t nbytes, int64_t *bas
 int sys_freebsd_uname(void *buf);
 int sys_freebsd4_uname(void *buf);
 int64_t sys_freebsd_lseek(int fd, int pad, uint32_t off_lo, uint32_t off_hi, int whence);
-void *sys_freebsd_mmap(void *addr, size_t len, int prot, int flags, int fd, int pad, uint32_t off_lo, uint32_t off_hi);
+int64_t sys_freebsd_lseek13(int fd, uint32_t off_lo, uint32_t off_hi, int whence);
+void *sys_freebsd_mmap(void *addr, size_t len, int prot, int flags, int fd, uint32_t off_lo, uint32_t off_hi);
 
 /* New stubs for missing syscalls */
 int sys_profil(void *samples, unsigned int size, unsigned int offset, unsigned int scale);
