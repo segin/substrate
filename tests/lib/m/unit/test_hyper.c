@@ -88,10 +88,33 @@ static void test_hyper_inf(void) {
     if (tanh(-INFINITY) != -1.0) FAIL("tanh(-inf)");
 }
 
+/*
+ * REQ-06-0682: inverse hyperbolic functions at the identity points.
+ *   asinh(+-0) == +-0 (sign preserved; odd function)
+ *   acosh(1)   == 0.0 exact (left endpoint of domain)
+ *   atanh(+-0) == +-0 (sign preserved; odd function)
+ */
+static void test_inv_hyper_zero(void) {
+    double ap0 = asinh(+0.0);
+    if (ap0 != 0.0 || signbit(ap0)) FAIL("asinh(+0.0)");
+
+    double an0 = asinh(-0.0);
+    if (an0 != 0.0 || !signbit(an0)) FAIL("asinh(-0.0)");
+
+    if (acosh(1.0) != 0.0) FAIL("acosh(1.0)");
+
+    double tp0 = atanh(+0.0);
+    if (tp0 != 0.0 || signbit(tp0)) FAIL("atanh(+0.0)");
+
+    double tn0 = atanh(-0.0);
+    if (tn0 != 0.0 || !signbit(tn0)) FAIL("atanh(-0.0)");
+}
+
 int main(void) {
     test_hyper_zero();
     test_hyper_one();
     test_hyper_inf();
+    test_inv_hyper_zero();
 
     if (failures != 0) {
         printf("FAILURES: %d\n", failures);
