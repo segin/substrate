@@ -492,6 +492,9 @@ double acospi(double x) {
 }
 
 double atanpi(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return x > 0.0 ? 0.5 : -0.5;
+    if (x == 0.0) return x;
     return atan(x) / M_PI;
 }
 
