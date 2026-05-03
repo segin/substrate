@@ -745,7 +745,7 @@ they are not mandatory.
             - [x] `nexttoward()`: <!-- lib/m/src/math.c:nexttoward --> (REQ: REQ-06-0706)
                 - [x] Like `nextafter()` but second argument is `long double` for direction. <!-- lib/m/src/math.c:nexttoward --> (REQ: REQ-06-0707)
             - [ ] `nextup()`, `nextdown()` (C23): (REQ: REQ-06-0708)
-                - [ ] `nextup(x)`: next representable value toward +∞. (REQ: REQ-06-0709)
+                - [x] `nextup(x)`: next representable value toward +∞. <!-- lib/m/src/math.c:nextup --> (REQ: REQ-06-0709)
                 - [ ] `nextdown(x)`: next representable value toward -∞. (REQ: REQ-06-0710)
             - [ ] `copysign()` (REQ: REQ-06-0711)
             - [ ] `nan()`: (REQ: REQ-06-0712)
