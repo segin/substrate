@@ -307,10 +307,45 @@ static void prop_cos_even(void) {
     }
 }
 
+/*
+ * asin(sin(x)) == x  for x in [-pi/2, pi/2]  (REQ-06-0665)
+ * Verified across a uniform sweep plus boundary cases at the endpoints.
+ */
+static void prop_asin_sin_inverse(void) {
+    const double lo = -M_PI_2;
+    const double hi =  M_PI_2;
+    const int n = 500;
+    const double step = (hi - lo) / (double)(n - 1);
+
+    for (int i = 0; i < n; i++) {
+        double x = lo + (double)i * step;
+        if (!isfinite(x)) continue;
+        double s = sin(x);
+        double a = asin(s);
+        if (fabs(a - x) >= 1e-13) {
+            FAIL("asin(sin(x)) != x on uniform sweep");
+            return;
+        }
+    }
+
+    /* Boundary cases: asin(sin(+/- pi/2)) == asin(+/-1) == +/- pi/2. */
+    static const double boundary[] = { M_PI_2, -M_PI_2 };
+    const int nb = (int)(sizeof(boundary) / sizeof(boundary[0]));
+    for (int i = 0; i < nb; i++) {
+        double x = boundary[i];
+        double a = asin(sin(x));
+        if (fabs(a - x) >= 1e-15) {
+            FAIL("asin(sin(x)) != x at +/- pi/2 boundary");
+            return;
+        }
+    }
+}
+
 int main(void) {
     prop_sin_cos_pythagorean();
     prop_sin_odd();
     prop_cos_even();
+    prop_asin_sin_inverse();
     prop_sinpi_cospi_identity();
     prop_sinpi_odd();
     prop_cospi_even();
