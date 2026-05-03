@@ -75,6 +75,16 @@ int random_get_bytes_flags(void *buf, size_t len, unsigned int flags);
 int random_is_seeded(void);
 
 /*
+ * Process lifecycle hooks - called from pm/process.c and kern/syscall.c
+ */
+
+/* Called after fork() to diverge parent and child CSPRNG state */
+void random_reseed_on_fork(int child_pid);
+
+/* Called on execve() to prevent entropy leakage across exec boundary */
+void random_on_exec(void);
+
+/*
  * Kernel API - Entropy harvesting (called from drivers/ISRs)
  */
 

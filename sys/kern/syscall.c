@@ -38,6 +38,7 @@
 #include <sys/stat.h>
 #include <sys/errno.h>
 #include <sys/fcntl.h>
+#include <sys/random.h>
 #include <sys/reboot.h>
 #include <sys/exec.h>
 #include <sys/namei.h>
@@ -2138,6 +2139,8 @@ int kern_execve(const char *f, char *const a[], char *const e[]) {
     int ret = exec_dispatch(f, a, e);
     if (ret == 0) {
         proc_vfork_done(current_process);
+        /* Wipe CSPRNG state at exec boundary to prevent entropy leakage */
+        random_on_exec();
     }
     exec_unpin_current_thread();
     return ret;

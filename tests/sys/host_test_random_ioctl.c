@@ -36,6 +36,8 @@ bool spinlock_is_held(spinlock_t *lock) { return lock->locked != 0; }
 int i386_cpu_has_cpuid(void) { return 0; }
 int i386_cpu_has_rdrand(void) { return 0; }
 int i386_cpu_has_rdseed(void) { return 0; }
+uint64_t i386_cpu_cycle_counter(void) { return 0; }
+int percpu_get_cpu_id(void) { return 0; }
 void *kmalloc(size_t size) { return malloc(size); }
 void kfree(void *p, size_t size) { (void)size; free(p); }
 
