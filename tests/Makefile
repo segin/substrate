@@ -243,6 +243,7 @@ test_libc_fuzz_scanf: lib/c/fuzz/fuzz_scanf.c libc_stdio_prefixed.o
 	$(CC) $(CFLAGS_KERN) -c $< -o $@
 %.o: ../sys/kern/%.c
 	$(CC) $(CFLAGS_KERN) -c $< -o $@
+
 %.o: ../sys/lib/%.c
 	$(CC) $(CFLAGS_KERN) -c $< -o $@
 %.o: ../sys/exec/perso/%.c

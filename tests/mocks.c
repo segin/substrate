@@ -376,7 +376,6 @@ void *percpu_get(void) { return &mock_percpu_data; }
 int percpu_get_cpu_id(void) { return 0; }
 int sched_can_run_on_cpu(void) { return 1; }
 void host_wait_for_interrupt(void) {}
-void vm_map_destroy(vm_map_t *map) { (void)map; }
 void cmdline_get_full(char *buf, size_t buf_len) { if(buf && buf_len > 0) buf[0] = '\0'; }
 
 void wait_for_interrupt() {}
