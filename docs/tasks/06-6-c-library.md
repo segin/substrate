@@ -673,7 +673,7 @@ they are not mandatory.
             - [x] `tan()` <!-- lib/m/src/math.c:tan --> (REQ: REQ-06-0635)
             - [x] `asin()` <!-- lib/m/src/math.c:asin --> (REQ: REQ-06-0636)
             - [x] `acos()` <!-- lib/m/src/math.c:acos --> (REQ: REQ-06-0637)
-            - [ ] `atan()` (REQ: REQ-06-0638)
+            - [x] `atan()` <!-- lib/m/src/math.c:atan --> (REQ: REQ-06-0638)
             - [ ] `atan2()` (REQ: REQ-06-0639)
             - [ ] `sinpi()`, `cospi()`, `tanpi()` (C23): (REQ: REQ-06-0640)
                 - [ ] `sinpi(x)`: compute `sin(π·x)` exactly at integer and half-integer points. (REQ: REQ-06-0641)

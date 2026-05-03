@@ -301,11 +301,13 @@ double tan(double x) {
  * atan(x) = x - x^3/3 + x^5/5 - ... for |x| <= 1
  */
 double atan(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return (x < 0) ? -M_PI_2 : M_PI_2;
+    if (x == 0.0) return x;
+
     int neg = (x < 0);
     if (neg) x = -x;
-    
-    /* Special cases for better precision */
-    if (x == 0.0) return 0.0;
+
     if (x == 1.0) return (neg) ? -M_PI_4 : M_PI_4;
     
     int inv = (x > 1.0);
