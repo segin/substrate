@@ -697,7 +697,7 @@ they are not mandatory.
                 - [x] Test large argument accuracy: `sin(1e15)` — verify range reduction correctness. <!-- tests/lib/m/unit/test_trig.c:test_sin_large --> (REQ: REQ-06-0659)
                 - [x] Test `sincos()` agrees with individual `sin()` and `cos()` calls. <!-- tests/lib/m/unit/test_trig.c:test_sincos --> (REQ: REQ-06-0660)
             - [ ] **Property Tests (`tests/lib/m/property/prop_trig.c`):** (REQ: REQ-06-0661)
-                - [ ] Property: `sin(x)² + cos(x)² ≈ 1` (Pythagorean identity) for all finite `x`. (REQ: REQ-06-0662)
+                - [x] Property: `sin(x)² + cos(x)² ≈ 1` (Pythagorean identity) for all finite `x`. <!-- tests/lib/m/property/prop_trig.c:prop_sin_cos_pythagorean --> (REQ: REQ-06-0662)
                 - [ ] Property: `sin(-x) == -sin(x)` (odd function). (REQ: REQ-06-0663)
                 - [ ] Property: `cos(-x) == cos(x)` (even function). (REQ: REQ-06-0664)
                 - [ ] Property: `asin(sin(x)) ≈ x` for `x ∈ [-π/2, π/2]`. (REQ: REQ-06-0665)
