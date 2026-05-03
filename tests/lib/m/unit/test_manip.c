@@ -477,6 +477,59 @@ static void test_nextafter_denormal(void) {
     }
 }
 
+/*
+ * REQ-06-0725: nextafter(x, x) == x for all x.
+ *   When the two arguments are equal, the standard requires nextafter to
+ *   return the second argument unchanged (no step is taken). This must hold
+ *   for every finite value, both signed zeros, the subnormals at the edges
+ *   of representability (DBL_MIN is the smallest normal), the largest finite
+ *   double (DBL_MAX), and the infinities. NaN is excluded because NaN != NaN
+ *   makes "x == x" meaningless and nextafter(NaN, NaN) returns NaN by spec.
+ *   For +/-0 the C standard returns the second argument as-is, so the sign
+ *   bit must match y's signbit, not x's.
+ */
+static void test_nextafter_idempotent(void) {
+    static const double xs[] = {
+        0.0, -0.0, 1.0, -1.0, 3.14, -3.14,
+        DBL_MIN, DBL_MAX, INFINITY, -INFINITY
+    };
+    static const char *names[] = {
+        "0.0", "-0.0", "1.0", "-1.0", "3.14", "-3.14",
+        "DBL_MIN", "DBL_MAX", "INFINITY", "-INFINITY"
+    };
+    size_t n = sizeof(xs) / sizeof(xs[0]);
+
+    for (size_t i = 0; i < n; i++) {
+        double r = nextafter(xs[i], xs[i]);
+
+        /* For zeros, signbit of result must match the second argument. */
+        if (xs[i] == 0.0) {
+            if (r != 0.0) {
+                char msg[128];
+                snprintf(msg, sizeof(msg),
+                         "nextafter(%s, %s) != 0.0", names[i], names[i]);
+                FAIL(msg);
+            }
+            if (signbit(r) != signbit(xs[i])) {
+                char msg[128];
+                snprintf(msg, sizeof(msg),
+                         "nextafter(%s, %s) signbit mismatch",
+                         names[i], names[i]);
+                FAIL(msg);
+            }
+            continue;
+        }
+
+        /* Bit-exact comparison via memcmp on the IEEE-754 representation. */
+        if (r != xs[i]) {
+            char msg[128];
+            snprintf(msg, sizeof(msg),
+                     "nextafter(%s, %s) != %s", names[i], names[i], names[i]);
+            FAIL(msg);
+        }
+    }
+}
+
 int main(void) {
     test_frexp_ldexp_roundtrip();
     test_frexp_range();
@@ -488,6 +541,7 @@ int main(void) {
     test_logb();
     test_nextafter_basic();
     test_nextafter_denormal();
+    test_nextafter_idempotent();
 
     if (failures != 0) {
         printf("FAILURES: %d\n", failures);
