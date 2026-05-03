@@ -7,6 +7,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <float.h>
+#include <limits.h>
 
 #define FAIL(msg) do { \
     printf("FAIL: %s\n", msg); \
@@ -343,6 +344,31 @@ static void test_ilogb_basic(void) {
     }
 }
 
+/*
+ * REQ-06-0721: ilogb() special values.
+ *   ilogb(0) is undefined as a real exponent, so the standard requires it
+ *   to return the implementation-defined sentinel FP_ILOGB0 (typically
+ *   INT_MIN). ilogb(NaN) returns FP_ILOGBNAN (typically INT_MAX or INT_MIN).
+ *   ilogb(+/-INFINITY) returns INT_MAX. Sign is ignored throughout.
+ */
+static void test_ilogb_special(void) {
+    if (ilogb(0.0) != FP_ILOGB0) {
+        FAIL("ilogb(0.0) != FP_ILOGB0");
+    }
+    if (ilogb(-0.0) != FP_ILOGB0) {
+        FAIL("ilogb(-0.0) != FP_ILOGB0");
+    }
+    if (ilogb(NAN) != FP_ILOGBNAN) {
+        FAIL("ilogb(NAN) != FP_ILOGBNAN");
+    }
+    if (ilogb(INFINITY) != INT_MAX) {
+        FAIL("ilogb(INFINITY) != INT_MAX");
+    }
+    if (ilogb(-INFINITY) != INT_MAX) {
+        FAIL("ilogb(-INFINITY) != INT_MAX");
+    }
+}
+
 int main(void) {
     test_frexp_ldexp_roundtrip();
     test_frexp_range();
@@ -350,6 +376,7 @@ int main(void) {
     test_modf();
     test_scalbn();
     test_ilogb_basic();
+    test_ilogb_special();
 
     if (failures != 0) {
         printf("FAILURES: %d\n", failures);
