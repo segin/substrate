@@ -685,7 +685,7 @@ they are not mandatory.
                 - [x] `asinpi(x)` ∈ [-0.5, 0.5], `acospi(x)` ∈ [0, 1], `atanpi(x)` ∈ [-0.5, 0.5]. <!-- asinpi exact at ±1, acospi exact at -1/0/1, atanpi exact at ±inf --> (REQ: REQ-06-0647)
                 - [x] `atan2pi(y, x)` ∈ [-1, 1]. <!-- atan2pi quadrant + ±inf corners exact --> (REQ: REQ-06-0648)
             - [ ] **Testing (`tests/lib/m/unit/test_trig.c`):** (REQ: REQ-06-0649)
-                - [ ] Test `sin(0)==0`, `sin(π/2)≈1`, `sin(π)≈0`, `sin(NaN)==NaN`. (REQ: REQ-06-0650)
+                - [x] Test `sin(0)==0`, `sin(π/2)≈1`, `sin(π)≈0`, `sin(NaN)==NaN`. <!-- tests/lib/m/unit/test_trig.c:test_sin --> (REQ: REQ-06-0650)
                 - [ ] Test `cos(0)==1`, `cos(π)≈-1`, `cos(π/2)≈0`. (REQ: REQ-06-0651)
                 - [ ] Test `tan(0)==0`, `tan(π/4)≈1`. (REQ: REQ-06-0652)
                 - [ ] Test `asin(0)==0`, `asin(1)≈π/2`, `asin(2)==NaN` (domain error). (REQ: REQ-06-0653)
