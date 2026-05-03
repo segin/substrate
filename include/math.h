@@ -88,12 +88,17 @@ double asinh(double x);
 double acosh(double x);
 double atanh(double x);
 
+/* ilogb special-value return codes (C99 7.12.6.5) */
+#define FP_ILOGB0   (-2147483647 - 1)   /* INT_MIN */
+#define FP_ILOGBNAN (-2147483647 - 1)   /* INT_MIN */
+
 /* Floating-point manipulation */
 double frexp(double x, int *exp);
 double ldexp(double x, int exp);
 double modf(double x, double *iptr);
 double scalbn(double x, int n);
 double scalbln(double x, long n);
+int    ilogb(double x);
 double nextafter(double x, double y);
 double copysign(double x, double y);
 

@@ -683,6 +683,32 @@ double scalbln(double x, long n) {
     return scalbn(x, (int)n);
 }
 
+/* ilogb: extract the unbiased exponent of x as an int.
+ * Conformance: C99 7.12.6.5. For finite non-zero x the result is
+ * floor(log2(|x|)). The special inputs 0, +/-Inf and NaN raise
+ * FE_INVALID and return FP_ILOGB0, INT_MAX, FP_ILOGBNAN respectively.
+ * Implementation strategy: frexp() returns frac in [0.5, 1) such that
+ * x == frac * 2^e, hence log2(|x|) == e - 1. This naturally handles
+ * subnormals because frexp() normalises them.
+ */
+int ilogb(double x) {
+    if (isnan(x)) {
+        feraiseexcept(FE_INVALID);
+        return FP_ILOGBNAN;
+    }
+    if (x == 0.0) {
+        feraiseexcept(FE_INVALID);
+        return FP_ILOGB0;
+    }
+    if (isinf(x)) {
+        feraiseexcept(FE_INVALID);
+        return INT_MAX;
+    }
+    int e;
+    (void)frexp(x, &e);
+    return e - 1;
+}
+
 /* nextafter: next representable value after x towards y */
 double nextafter(double x, double y) {
     if (isnan(x) || isnan(y)) return NAN;
