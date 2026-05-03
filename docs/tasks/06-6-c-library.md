@@ -689,7 +689,7 @@ they are not mandatory.
                 - [x] Test `cos(0)==1`, `cos(π)≈-1`, `cos(π/2)≈0`. <!-- tests/lib/m/unit/test_trig.c:test_cos --> (REQ: REQ-06-0651)
                 - [x] Test `tan(0)==0`, `tan(π/4)≈1`. <!-- tests/lib/m/unit/test_trig.c:test_tan --> (REQ: REQ-06-0652)
                 - [x] Test `asin(0)==0`, `asin(1)≈π/2`, `asin(2)==NaN` (domain error). <!-- tests/lib/m/unit/test_trig.c:test_asin --> (REQ: REQ-06-0653)
-                - [ ] Test `acos(1)==0`, `acos(0)≈π/2`, `acos(-1)≈π`. (REQ: REQ-06-0654)
+                - [x] Test `acos(1)==0`, `acos(0)≈π/2`, `acos(-1)≈π`. <!-- tests/lib/m/unit/test_trig.c:test_acos --> (REQ: REQ-06-0654)
                 - [ ] Test `atan(0)==0`, `atan(1)≈π/4`, `atan(+∞)≈π/2`. (REQ: REQ-06-0655)
                 - [ ] Test `atan2(0,1)==0`, `atan2(1,0)≈π/2`, `atan2(0,-1)≈π`, `atan2(-1,0)≈-π/2`. (REQ: REQ-06-0656)
                 - [ ] Test `sinpi(0.5)==1`, `sinpi(1)==0`, `sinpi(0)==0` (exact). (REQ: REQ-06-0657)

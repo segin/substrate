@@ -85,6 +85,19 @@ static void test_asin(void) {
     if (!isnan(asin(-INFINITY))) FAIL("asin(-inf)");
 }
 
+static void test_acos(void) {
+    if (acos(1.0) != 0.0) FAIL("acos(1)");
+
+    if (!isclose(acos(0.0), M_PI / 2.0, 1e-15)) FAIL("acos(0)");
+    if (!isclose(acos(-1.0), M_PI, 1e-14)) FAIL("acos(-1)");
+
+    if (!isnan(acos(2.0))) FAIL("acos(2) domain");
+    if (!isnan(acos(-2.0))) FAIL("acos(-2) domain");
+    if (!isnan(acos(NAN))) FAIL("acos(NaN)");
+    if (!isnan(acos(INFINITY))) FAIL("acos(+inf)");
+    if (!isnan(acos(-INFINITY))) FAIL("acos(-inf)");
+}
+
 static void test_sinpi(void) {
     /* sinpi(n/2) should give +-1 or 0 for integer n */
     double expected[] = { 0.0, 1.0, 0.0, -1.0, 0.0, 1.0, 0.0, -1.0 };
@@ -241,6 +254,7 @@ int main(void) {
     test_cos();
     test_tan();
     test_asin();
+    test_acos();
     test_sinpi();
     test_cospi();
     test_tanpi();
