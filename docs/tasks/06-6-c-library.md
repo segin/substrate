@@ -678,7 +678,7 @@ they are not mandatory.
             - [ ] `sinpi()`, `cospi()`, `tanpi()` (C23): (REQ: REQ-06-0640)
                 - [x] `sinpi(x)`: compute `sin(π·x)` exactly at integer and half-integer points. <!-- lib/m/src/math.c:sinpi --> (REQ: REQ-06-0641)
                 - [x] `cospi(x)`: compute `cos(π·x)` exactly at integer and half-integer points. <!-- lib/m/src/math.c:cospi --> (REQ: REQ-06-0642)
-                - [ ] `tanpi(x)`: compute `tan(π·x)` exactly, including singularity at half-integers. (REQ: REQ-06-0643)
+                - [x] `tanpi(x)`: compute `tan(π·x)` exactly, including singularity at half-integers. <!-- lib/m/src/math.c:tanpi --> (REQ: REQ-06-0643)
                 - [ ] Key benefit: exact values without `M_PI` multiplication error. (REQ: REQ-06-0644)
             - [ ] `asinpi()`, `acospi()`, `atanpi()`, `atan2pi()` (C23): (REQ: REQ-06-0645)
                 - [ ] Inverse functions returning result in units of π (i.e., divided by π). (REQ: REQ-06-0646)

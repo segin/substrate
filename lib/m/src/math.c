@@ -458,7 +458,17 @@ double cospi(double x) {
 }
 
 double tanpi(double x) {
-    return tan(M_PI * x);
+    if (isnan(x)) return x;
+    if (isinf(x)) return NAN;
+
+    double r = x - 2.0 * floor(x * 0.5 + 0.5);
+
+    if (r == 0.0) return 0.0;
+    if (r == 1.0 || r == -1.0) return 0.0;
+    if (r == 0.5) return INFINITY;
+    if (r == -0.5) return -INFINITY;
+
+    return sinpi(x) / cospi(x);
 }
 
 double asinpi(double x) {
