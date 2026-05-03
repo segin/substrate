@@ -684,7 +684,7 @@ they are not mandatory.
                 - [x] Inverse functions returning result in units of π (i.e., divided by π). <!-- asinpi/acospi/atanpi/atan2pi all return atan*(x)/M_PI with exact endpoints --> (REQ: REQ-06-0646)
                 - [x] `asinpi(x)` ∈ [-0.5, 0.5], `acospi(x)` ∈ [0, 1], `atanpi(x)` ∈ [-0.5, 0.5]. <!-- asinpi exact at ±1, acospi exact at -1/0/1, atanpi exact at ±inf --> (REQ: REQ-06-0647)
                 - [x] `atan2pi(y, x)` ∈ [-1, 1]. <!-- atan2pi quadrant + ±inf corners exact --> (REQ: REQ-06-0648)
-            - [ ] **Testing (`tests/lib/m/unit/test_trig.c`):** (REQ: REQ-06-0649)
+            - [x] **Testing (`tests/lib/m/unit/test_trig.c`):** <!-- tests/lib/m/unit/test_trig.c --> (REQ: REQ-06-0649)
                 - [x] Test `sin(0)==0`, `sin(π/2)≈1`, `sin(π)≈0`, `sin(NaN)==NaN`. <!-- tests/lib/m/unit/test_trig.c:test_sin --> (REQ: REQ-06-0650)
                 - [x] Test `cos(0)==1`, `cos(π)≈-1`, `cos(π/2)≈0`. <!-- tests/lib/m/unit/test_trig.c:test_cos --> (REQ: REQ-06-0651)
                 - [x] Test `tan(0)==0`, `tan(π/4)≈1`. <!-- tests/lib/m/unit/test_trig.c:test_tan --> (REQ: REQ-06-0652)
