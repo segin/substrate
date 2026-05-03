@@ -68,6 +68,23 @@ static void test_tan(void) {
     if (!isnan(tan(-INFINITY))) FAIL("tan(-inf)");
 }
 
+static void test_asin(void) {
+    double ap0 = asin(+0.0);
+    if (ap0 != 0.0 || signbit(ap0)) FAIL("asin(+0.0)");
+
+    double an0 = asin(-0.0);
+    if (an0 != 0.0 || !signbit(an0)) FAIL("asin(-0.0)");
+
+    if (!isclose(asin(1.0), M_PI / 2.0, 1e-15)) FAIL("asin(1)");
+    if (!isclose(asin(-1.0), -M_PI / 2.0, 1e-15)) FAIL("asin(-1)");
+
+    if (!isnan(asin(2.0))) FAIL("asin(2) domain");
+    if (!isnan(asin(-2.0))) FAIL("asin(-2) domain");
+    if (!isnan(asin(NAN))) FAIL("asin(NaN)");
+    if (!isnan(asin(INFINITY))) FAIL("asin(+inf)");
+    if (!isnan(asin(-INFINITY))) FAIL("asin(-inf)");
+}
+
 static void test_sinpi(void) {
     /* sinpi(n/2) should give +-1 or 0 for integer n */
     double expected[] = { 0.0, 1.0, 0.0, -1.0, 0.0, 1.0, 0.0, -1.0 };
@@ -223,6 +240,7 @@ int main(void) {
     test_sin();
     test_cos();
     test_tan();
+    test_asin();
     test_sinpi();
     test_cospi();
     test_tanpi();
