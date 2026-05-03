@@ -300,12 +300,91 @@ static void prop_asinh_sinh_inverse(void) {
     }
 }
 
+/*
+ * |tanh(x)| <= 1 for all finite x  (saturation bound, REQ-06-0692)
+ *
+ * tanh maps the real line into (-1, 1) mathematically, with the limits
+ * +/-1 attained only as |x| -> infinity.  The REQ-06-0692 spec phrases
+ * the bound as |tanh(x)| < 1 for all finite x; in IEEE 754 double this
+ * cannot hold strictly above the saturation threshold, since the closest
+ * representable double to the true value rounds to 1.0 exactly once
+ * |x| crosses roughly 19.06 (glibc and any standards-conforming libm
+ * saturate at the same bit pattern under round-to-nearest).  The
+ * pragmatic contract enforced here is therefore:
+ *
+ *   - |tanh(x)| <= 1.0 for all finite x (always, no exceptions);
+ *   - |tanh(x)| <  1.0 strictly for |x| < 50.0 in the range where the
+ *     IEEE-754 representation has not yet saturated.  The empirical
+ *     saturation threshold for round-to-nearest doubles sits at
+ *     ~19.06155, so we apply the strict bound only for |x| < 19.0 and
+ *     accept equality with +/-1.0 in [19.0, 50.0] where the saturated
+ *     value is the IEEE-correct rounding;
+ *   - For |x| >= 50.0 equality with +/-1.0 is likewise accepted.
+ *
+ * Verified across a uniform sweep of [-100, 100] (1000 samples) plus the
+ * requested boundary set including +/-DBL_MAX/2.  NaN inputs are skipped
+ * per the spec ("all finite x").
+ */
+static void prop_tanh_bounded(void) {
+    const double lo = -100.0;
+    const double hi =  100.0;
+    const int n = 1000;
+    const double step = (hi - lo) / (double)(n - 1);
+    /*
+     * IEEE-754 double tanh saturates to +/-1.0 above ~19.06155 under
+     * round-to-nearest.  Use 19.0 as a conservative pre-saturation
+     * threshold for the strict |tanh| < 1 check.
+     */
+    const double strict_thresh = 19.0;
+
+    for (int i = 0; i < n; i++) {
+        double x = lo + (double)i * step;
+        if (!isfinite(x)) continue;
+        double t = tanh(x);
+        if (!(fabs(t) <= 1.0)) {
+            FAIL("|tanh(x)| > 1 on uniform sweep");
+            return;
+        }
+        if (fabs(x) < strict_thresh) {
+            if (!(fabs(t) < 1.0)) {
+                FAIL("|tanh(x)| not strictly < 1 below saturation");
+                return;
+            }
+        }
+    }
+
+    static const double boundary[] = {
+        0.0,
+        1.0, -1.0,
+        10.0, -10.0,
+        50.0, -50.0,
+        DBL_MAX / 2.0, -DBL_MAX / 2.0,
+    };
+    const int nb = (int)(sizeof(boundary) / sizeof(boundary[0]));
+    for (int i = 0; i < nb; i++) {
+        double x = boundary[i];
+        if (!isfinite(x)) continue;
+        double t = tanh(x);
+        if (!(fabs(t) <= 1.0)) {
+            FAIL("|tanh(x)| > 1 at boundary");
+            return;
+        }
+        if (fabs(x) < strict_thresh) {
+            if (!(fabs(t) < 1.0)) {
+                FAIL("|tanh(x)| not strictly < 1 at boundary below saturation");
+                return;
+            }
+        }
+    }
+}
+
 int main(void) {
     prop_cosh_sinh_pythagorean();
     prop_sinh_odd();
     prop_cosh_even();
     prop_tanh_definition();
     prop_asinh_sinh_inverse();
+    prop_tanh_bounded();
 
     if (failures == 0) {
         printf("All property tests passed.\n");
