@@ -98,6 +98,22 @@ static void test_acos(void) {
     if (!isnan(acos(-INFINITY))) FAIL("acos(-inf)");
 }
 
+static void test_atan(void) {
+    double ap0 = atan(+0.0);
+    if (ap0 != 0.0 || signbit(ap0)) FAIL("atan(+0.0)");
+
+    double an0 = atan(-0.0);
+    if (an0 != 0.0 || !signbit(an0)) FAIL("atan(-0.0)");
+
+    if (!isclose(atan(1.0), M_PI / 4.0, 1e-15)) FAIL("atan(1)");
+    if (!isclose(atan(-1.0), -M_PI / 4.0, 1e-15)) FAIL("atan(-1)");
+
+    if (!isclose(atan(INFINITY), M_PI / 2.0, 1e-15)) FAIL("atan(+inf)");
+    if (!isclose(atan(-INFINITY), -M_PI / 2.0, 1e-15)) FAIL("atan(-inf)");
+
+    if (!isnan(atan(NAN))) FAIL("atan(NaN)");
+}
+
 static void test_sinpi(void) {
     /* sinpi(n/2) should give +-1 or 0 for integer n */
     double expected[] = { 0.0, 1.0, 0.0, -1.0, 0.0, 1.0, 0.0, -1.0 };
@@ -255,6 +271,7 @@ int main(void) {
     test_tan();
     test_asin();
     test_acos();
+    test_atan();
     test_sinpi();
     test_cospi();
     test_tanpi();
