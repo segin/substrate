@@ -752,7 +752,7 @@ they are not mandatory.
                 - [x] `nan(tagp)`: convert string tag to quiet NaN. `nan("") == NAN`, `nan("123")` → NaN with tag payload. <!-- lib/m/src/math.c:nan --> (REQ: REQ-06-0713)
             - [ ] **Testing (`tests/lib/m/unit/test_manip.c`):** (REQ: REQ-06-0714)
                 - [x] Test `frexp()` / `ldexp()` round-trip: `ldexp(frexp(x, &e), e) == x`. <!-- tests/lib/m/unit/test_manip.c:test_frexp_ldexp_roundtrip --> (REQ: REQ-06-0715)
-                - [ ] Test `frexp()` result ∈ [0.5, 1.0) for positive normals. (REQ: REQ-06-0716)
+                - [x] Test `frexp()` result ∈ [0.5, 1.0) for positive normals. <!-- tests/lib/m/unit/test_manip.c:test_frexp_range --> (REQ: REQ-06-0716)
                 - [ ] Test `frexp(0.0)` returns 0.0 with exponent 0. (REQ: REQ-06-0717)
                 - [ ] Test `modf()`: integer + fractional parts sum to original. (REQ: REQ-06-0718)
                 - [ ] Test `scalbn(x, n) == x * 2^n` for moderate `n`. (REQ: REQ-06-0719)
