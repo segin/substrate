@@ -727,23 +727,55 @@ double logb(double x) {
     return (double)(e - 1);
 }
 
-/* nextafter: next representable value after x towards y */
+/* nextafter: next representable value after x towards y.
+ * Conformance: C99 7.12.11.3, Annex F.10.8.3.
+ *  - x or y NaN: return NaN.
+ *  - x == y: return y (preserves sign of zero per F.10.8.3).
+ *  - x == +/-0 moving outward: smallest +/-subnormal; range error
+ *    (errno = ERANGE, FE_UNDERFLOW raised).
+ *  - x finite, magnitude becomes infinite: return +/-HUGE_VAL; range error
+ *    (errno = ERANGE, FE_OVERFLOW raised).
+ *  - x finite, result is subnormal (loss of precision): range error
+ *    (errno = ERANGE, FE_UNDERFLOW raised).
+ *  - x == +/-INF moving toward finite y: return +/-DBL_MAX (no range error).
+ * Operates by incrementing/decrementing the IEEE-754 bit pattern.
+ */
 double nextafter(double x, double y) {
     if (isnan(x) || isnan(y)) return NAN;
     if (x == y) return y;
-    
+
     union { double d; uint64_t u; } u = { .d = x };
-    
+
     if (x == 0.0) {
-        /* Smallest subnormal */
+        /* Smallest subnormal in direction of y; sign comes from y. */
         u.u = 1;
-        return (y > 0) ? u.d : -u.d;
+        if (signbit(y)) u.u |= ((uint64_t)1 << 63);
+        errno = ERANGE;
+        feraiseexcept(FE_UNDERFLOW);
+        return u.d;
     }
-    
-    if ((x > 0) == (y > x)) {
+
+    /* x > 0 and y > x  -> increase magnitude (u.u++)
+     * x > 0 and y < x  -> decrease magnitude (u.u--)
+     * x < 0 and y > x  -> decrease magnitude (u.u--)
+     * x < 0 and y < x  -> increase magnitude (u.u++)
+     * Equivalent: (x > 0) == (y > x) selects increment. */
+    if ((x > 0.0) == (y > x)) {
         u.u++;
     } else {
         u.u--;
+    }
+
+    /* Range checks per Annex F.10.8.3. */
+    if (isinf(u.d)) {
+        errno = ERANGE;
+        feraiseexcept(FE_OVERFLOW | FE_INEXACT);
+        return signbit(x) ? -HUGE_VAL : HUGE_VAL;
+    }
+    /* Subnormal result from a previously normal operation: underflow. */
+    if ((u.u & 0x7FF0000000000000ULL) == 0) {
+        errno = ERANGE;
+        feraiseexcept(FE_UNDERFLOW | FE_INEXACT);
     }
     return u.d;
 }

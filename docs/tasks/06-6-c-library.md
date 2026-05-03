@@ -741,7 +741,7 @@ they are not mandatory.
             - [x] `ilogb()`, `logb()`: <!-- lib/m/src/math.c --> (REQ: REQ-06-0702)
                 - [x] `ilogb(x)`: extract unbiased exponent as `int`. `ilogb(0)` → `FP_ILOGB0`, `ilogb(∞)` → `INT_MAX`, `ilogb(NaN)` → `FP_ILOGBNAN`. <!-- lib/m/src/math.c:ilogb --> (REQ: REQ-06-0703)
                 - [x] `logb(x)`: extract unbiased exponent as `double`. `logb(0)` → `-∞` (pole), `logb(±∞)` → `+∞`. <!-- lib/m/src/math.c:logb --> (REQ: REQ-06-0704)
-            - [ ] `nextafter()` (REQ: REQ-06-0705)
+            - [x] `nextafter()` <!-- lib/m/src/math.c:nextafter --> (REQ: REQ-06-0705)
             - [ ] `nexttoward()`: (REQ: REQ-06-0706)
                 - [ ] Like `nextafter()` but second argument is `long double` for direction. (REQ: REQ-06-0707)
             - [ ] `nextup()`, `nextdown()` (C23): (REQ: REQ-06-0708)
