@@ -325,8 +325,35 @@ double atan(double x) {
     return neg ? -sum : sum;
 }
 
-/* atan2(y, x) - Two-argument arctangent */
+/* atan2(y, x) - Two-argument arctangent (C99 Annex F.10.1.4) */
 double atan2(double y, double x) {
+    if (isnan(y) || isnan(x)) return NAN;
+
+    int y_neg = signbit(y);
+    int x_neg = signbit(x);
+    int y_inf = isinf(y);
+    int x_inf = isinf(x);
+
+    if (y == 0.0) {
+        if (!x_neg) return y;       /* preserves sign of zero in y */
+        return y_neg ? -M_PI : M_PI;
+    }
+    if (x == 0.0) {
+        return y_neg ? -M_PI_2 : M_PI_2;
+    }
+
+    if (y_inf) {
+        if (x_inf) {
+            double base = x_neg ? (3.0 * M_PI / 4.0) : M_PI_4;
+            return y_neg ? -base : base;
+        }
+        return y_neg ? -M_PI_2 : M_PI_2;
+    }
+    if (x_inf) {
+        if (!x_neg) return y_neg ? -0.0 : 0.0;
+        return y_neg ? -M_PI : M_PI;
+    }
+
     double res;
     __asm__ __volatile__("fldl %1; fldl %2; fpatan; fstpl %0" : "=m"(res) : "m"(y), "m"(x));
     return res;
