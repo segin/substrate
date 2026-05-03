@@ -436,7 +436,20 @@ double acosh(double x) {
 
 /* atanh(x) = 0.5 * log((1+x)/(1-x)), |x| < 1 */
 double atanh(double x) {
-    if (x <= -1.0 || x >= 1.0) return (x == 1.0) ? INFINITY : (x == -1.0) ? -INFINITY : NAN;
+    if (isnan(x)) return x;                 /* atanh(NaN)=NaN */
+    if (x == 0.0) return x;                 /* preserves +0.0/-0.0 (atanh is odd) */
+    if (x == 1.0) {                         /* +pole */
+        feraiseexcept(FE_DIVBYZERO);
+        return INFINITY;
+    }
+    if (x == -1.0) {                        /* -pole */
+        feraiseexcept(FE_DIVBYZERO);
+        return -INFINITY;
+    }
+    if (x < -1.0 || x > 1.0 || isinf(x)) {  /* domain error (incl. +/-inf) */
+        feraiseexcept(FE_INVALID);
+        return NAN;
+    }
     return 0.5 * log((1.0 + x) / (1.0 - x));
 }
 

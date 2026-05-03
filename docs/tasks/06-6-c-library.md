@@ -712,7 +712,7 @@ they are not mandatory.
             - [x] `tanh()` <!-- lib/m/src/math.c:tanh --> (REQ: REQ-06-0674)
             - [x] `asinh()` <!-- lib/m/src/math.c:asinh --> (REQ: REQ-06-0675)
             - [x] `acosh()` <!-- lib/m/src/math.c:acosh --> (REQ: REQ-06-0676)
-            - [ ] `atanh()` (REQ: REQ-06-0677)
+            - [x] `atanh()` <!-- lib/m/src/math.c:atanh --> (REQ: REQ-06-0677)
             - [ ] **Testing (`tests/lib/m/unit/test_hyper.c`):** (REQ: REQ-06-0678)
                 - [ ] Test `sinh(0)==0`, `cosh(0)==1`, `tanh(0)==0`. (REQ: REQ-06-0679)
                 - [ ] Test `sinh(1)≈1.1752`, `cosh(1)≈1.5431`, `tanh(1)≈0.7616`. (REQ: REQ-06-0680)
