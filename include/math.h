@@ -99,6 +99,7 @@ double modf(double x, double *iptr);
 double scalbn(double x, int n);
 double scalbln(double x, long n);
 int    ilogb(double x);
+double logb(double x);
 double nextafter(double x, double y);
 double copysign(double x, double y);
 

@@ -709,6 +709,24 @@ int ilogb(double x) {
     return e - 1;
 }
 
+/* logb: extract the unbiased exponent of x as a double.
+ * Conformance: C99 7.12.6.11. For finite non-zero x the result is
+ * floor(log2(|x|)) returned as a double (same value as ilogb()).
+ * logb(0) is a pole error: returns -INFINITY and raises FE_DIVBYZERO.
+ * logb(+/-Inf) returns +INFINITY (no exception). logb(NaN) returns NaN.
+ */
+double logb(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return INFINITY;
+    if (x == 0.0) {
+        feraiseexcept(FE_DIVBYZERO);
+        return -INFINITY;
+    }
+    int e;
+    (void)frexp(x, &e);
+    return (double)(e - 1);
+}
+
 /* nextafter: next representable value after x towards y */
 double nextafter(double x, double y) {
     if (isnan(x) || isnan(y)) return NAN;
