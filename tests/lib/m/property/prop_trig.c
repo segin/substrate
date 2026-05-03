@@ -341,11 +341,61 @@ static void prop_asin_sin_inverse(void) {
     }
 }
 
+/*
+ * |sin(x)| <= 1 and |cos(x)| <= 1 for all finite x  (REQ-06-0666)
+ * Hard mathematical bound; verified across a uniform sweep plus boundary cases.
+ */
+static void prop_sin_cos_bounded(void) {
+    const double lo = -100.0;
+    const double hi =  100.0;
+    const int n = 1000;
+    const double step = (hi - lo) / (double)(n - 1);
+
+    for (int i = 0; i < n; i++) {
+        double x = lo + (double)i * step;
+        if (!isfinite(x) || isnan(x)) continue;
+        double s = sin(x);
+        double c = cos(x);
+        if (!(fabs(s) <= 1.0)) {
+            FAIL("|sin(x)| > 1 on uniform sweep");
+            return;
+        }
+        if (!(fabs(c) <= 1.0)) {
+            FAIL("|cos(x)| > 1 on uniform sweep");
+            return;
+        }
+    }
+
+    static const double boundary[] = {
+        0.0,
+        1e-15, -1e-15,
+        1e10,  -1e10,
+        1e15,  -1e15,
+        DBL_MAX / 2.0, -DBL_MAX / 2.0,
+    };
+    const int nb = (int)(sizeof(boundary) / sizeof(boundary[0]));
+    for (int i = 0; i < nb; i++) {
+        double x = boundary[i];
+        if (!isfinite(x) || isnan(x)) continue;
+        double s = sin(x);
+        double c = cos(x);
+        if (!(fabs(s) <= 1.0)) {
+            FAIL("|sin(x)| > 1 at boundary");
+            return;
+        }
+        if (!(fabs(c) <= 1.0)) {
+            FAIL("|cos(x)| > 1 at boundary");
+            return;
+        }
+    }
+}
+
 int main(void) {
     prop_sin_cos_pythagorean();
     prop_sin_odd();
     prop_cos_even();
     prop_asin_sin_inverse();
+    prop_sin_cos_bounded();
     prop_sinpi_cospi_identity();
     prop_sinpi_odd();
     prop_cospi_even();
