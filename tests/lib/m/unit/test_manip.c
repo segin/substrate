@@ -369,6 +369,52 @@ static void test_ilogb_special(void) {
     }
 }
 
+/*
+ * REQ-06-0722: logb() basic and special values.
+ *   logb(x) returns the unbiased exponent of x as a double: logb(1.0)==0,
+ *   logb(2.0)==1, logb(0.5)==-1. Special cases: logb(+/-0) returns -INFINITY
+ *   (and raises FE_DIVBYZERO), logb(+/-INFINITY) returns +INFINITY, and
+ *   logb(NaN) returns NaN. Sign of x is ignored.
+ */
+static void test_logb(void) {
+    if (logb(1.0) != 0.0) {
+        FAIL("logb(1.0) != 0.0");
+    }
+    if (logb(2.0) != 1.0) {
+        FAIL("logb(2.0) != 1.0");
+    }
+    if (logb(0.5) != -1.0) {
+        FAIL("logb(0.5) != -1.0");
+    }
+
+    /* logb(+/-0) -> -INFINITY. */
+    {
+        double r = logb(0.0);
+        if (!isinf(r) || !(r < 0)) {
+            FAIL("logb(0.0) is not -INFINITY");
+        }
+    }
+    {
+        double r = logb(-0.0);
+        if (!isinf(r) || !(r < 0)) {
+            FAIL("logb(-0.0) is not -INFINITY");
+        }
+    }
+
+    /* logb(+/-INFINITY) -> +INFINITY. */
+    if (logb(INFINITY) != INFINITY) {
+        FAIL("logb(INFINITY) != INFINITY");
+    }
+    if (logb(-INFINITY) != INFINITY) {
+        FAIL("logb(-INFINITY) != INFINITY");
+    }
+
+    /* logb(NaN) -> NaN. */
+    if (!isnan(logb(NAN))) {
+        FAIL("logb(NAN) is not NaN");
+    }
+}
+
 int main(void) {
     test_frexp_ldexp_roundtrip();
     test_frexp_range();
@@ -377,6 +423,7 @@ int main(void) {
     test_scalbn();
     test_ilogb_basic();
     test_ilogb_special();
+    test_logb();
 
     if (failures != 0) {
         printf("FAILURES: %d\n", failures);
