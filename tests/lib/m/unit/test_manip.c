@@ -136,10 +136,117 @@ static void test_frexp_zero(void) {
     }
 }
 
+/*
+ * REQ-06-0718: modf() decomposes x into integer and fractional parts.
+ *   modf(x, &i) stores the integer part of x (truncated toward zero) in *i
+ *   and returns the fractional part. Both have the same sign as x. Their
+ *   sum must reproduce x (bit-exactly for small x; within rounding for
+ *   larger magnitudes where the integer part loses precision in the sum).
+ */
+static void test_modf(void) {
+    static const double xs[] = {
+        0.0, 1.0, 1.5, 3.14159, -2.7, -0.5, 100.5, 1e10
+    };
+    static const char *names[] = {
+        "0.0", "1.0", "1.5", "3.14159", "-2.7", "-0.5", "100.5", "1e10"
+    };
+    size_t n = sizeof(xs) / sizeof(xs[0]);
+
+    for (size_t k = 0; k < n; k++) {
+        double i;
+        double f = modf(xs[k], &i);
+        double sum = i + f;
+
+        /* Bit-exact for moderate magnitudes; otherwise close. */
+        if (fabs(xs[k]) < 1.0e9) {
+            if (sum != xs[k]) {
+                char msg[160];
+                snprintf(msg, sizeof(msg),
+                         "modf(%s): i=%.17g + f=%.17g = %.17g != %s",
+                         names[k], i, f, sum, names[k]);
+                FAIL(msg);
+            }
+        } else {
+            if (!isclose(sum, xs[k], 1e-15 * fabs(xs[k]))) {
+                char msg[160];
+                snprintf(msg, sizeof(msg),
+                         "modf(%s): i=%.17g + f=%.17g not close to %s",
+                         names[k], i, f, names[k]);
+                FAIL(msg);
+            }
+        }
+
+        /* Integer part must be integer-valued. */
+        if (i != trunc(i)) {
+            char msg[160];
+            snprintf(msg, sizeof(msg),
+                     "modf(%s): integer part %.17g is not integer-valued",
+                     names[k], i);
+            FAIL(msg);
+        }
+
+        /* Fractional part must share sign of x and have |f| < 1. */
+        if (xs[k] >= 0.0) {
+            if (!(f >= 0.0 && f < 1.0)) {
+                char msg[160];
+                snprintf(msg, sizeof(msg),
+                         "modf(%s): fraction %.17g not in [0, 1)",
+                         names[k], f);
+                FAIL(msg);
+            }
+        } else {
+            if (!(f <= 0.0 && f > -1.0)) {
+                char msg[160];
+                snprintf(msg, sizeof(msg),
+                         "modf(%s): fraction %.17g not in (-1, 0]",
+                         names[k], f);
+                FAIL(msg);
+            }
+        }
+    }
+
+    /* modf(0.0): f==0, i==0, both with positive sign. */
+    {
+        double i = 99.0;
+        double f = modf(0.0, &i);
+        if (f != 0.0 || i != 0.0) {
+            FAIL("modf(0.0) did not return zeros");
+        }
+        if (signbit(f) || signbit(i)) {
+            FAIL("modf(0.0) did not preserve positive sign");
+        }
+    }
+
+    /* modf(-0.0): f==-0, i==-0, both with negative sign. */
+    {
+        double i = 99.0;
+        double f = modf(-0.0, &i);
+        if (f != 0.0 || i != 0.0) {
+            FAIL("modf(-0.0) did not return zeros");
+        }
+        if (!signbit(f) || !signbit(i)) {
+            FAIL("modf(-0.0) did not preserve negative sign");
+        }
+    }
+
+    /* modf(INFINITY): f==0 (with sign of x), i==INFINITY. */
+    {
+        double i = 0.0;
+        double f = modf(INFINITY, &i);
+        if (!isinf(i) || signbit(i)) {
+            FAIL("modf(INFINITY) integer part is not +INFINITY");
+        }
+        if (f != 0.0) {
+            FAIL("modf(INFINITY) fractional part is not 0");
+        }
+    }
+}
+
 int main(void) {
     test_frexp_ldexp_roundtrip();
     test_frexp_range();
     test_frexp_zero();
+    test_modf();
 
     if (failures != 0) {
         printf("FAILURES: %d\n", failures);
