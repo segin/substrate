@@ -1444,9 +1444,6 @@ void pmap_shootdown_wait(int expected_cpus) {
     }
 }
 
-// Include vm_page.h for vm_page_t
-#include <vm/vm_page.h>
-
 static int pmap_lookup_active_pte(pmap_t pmap, uint32_t va, uint32_t **pt_out, uint32_t *pti_out) {
     if (!pmap || !pt_out || !pti_out) {
         return 0;
