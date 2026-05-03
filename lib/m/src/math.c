@@ -227,6 +227,9 @@ double sin(double x) {
  * cos(x) = 1 - x^2/2! + x^4/4! - ...
  */
 double cos(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return NAN;
+
     double res;
     __asm__ __volatile__(
         "fldl %1\n\t"
