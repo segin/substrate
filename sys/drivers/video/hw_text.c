@@ -37,7 +37,6 @@ int hw_text_active = 0;
 static uint16_t *vga_buffer = (uint16_t *)0xC00B8000;
 static spinlock_t hw_text_lock = SPINLOCK_INIT("hw_text");
 static vt_state_t *current_vt_ctx = NULL;
-static volatile uint32_t hw_text_status_epoch = 0;
 static int hw_text_cols = VT_DEFAULT_WIDTH;
 static int hw_text_rows = VT_DEFAULT_HEIGHT;
 
