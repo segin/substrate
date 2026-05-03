@@ -481,6 +481,16 @@ double asinpi(double x) {
     return asin(x) / M_PI;
 }
 
+double acospi(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return NAN;
+    if (x < -1.0 || x > 1.0) return NAN;
+    if (x == 1.0) return 0.0;
+    if (x == 0.0) return 0.5;
+    if (x == -1.0) return 1.0;
+    return acos(x) / M_PI;
+}
+
 double atanpi(double x) {
     return atan(x) / M_PI;
 }
