@@ -780,6 +780,22 @@ double nextafter(double x, double y) {
     return u.d;
 }
 
+/* nexttoward: like nextafter() but with long double direction argument.
+ * Conformance: C99 7.12.11.4.
+ *  - x or y NaN: return NaN.
+ *  - (long double)x == y: return (double)y (preserves sign of zero).
+ *  - Otherwise: step x one ULP toward y using nextafter() with the
+ *    appropriate +/-INFINITY direction sentinel. The extra precision of
+ *    long double y matters precisely when (double)y == x but y differs
+ *    from x as a long double, in which case we must still step away.
+ */
+double nexttoward(double x, long double y) {
+    if (isnan(x) || isnan((double)y)) return NAN;
+    long double xl = (long double)x;
+    if (xl == y) return (double)y;
+    return nextafter(x, (xl < y) ? INFINITY : -INFINITY);
+}
+
 /* copysign: magnitude of x with sign of y */
 double copysign(double x, double y) {
     union { double d; uint64_t u; } ux = { .d = x }, uy = { .d = y };

@@ -101,6 +101,7 @@ double scalbln(double x, long n);
 int    ilogb(double x);
 double logb(double x);
 double nextafter(double x, double y);
+double nexttoward(double x, long double y);
 double copysign(double x, double y);
 
 /* Exponential and logarithmic functions */
