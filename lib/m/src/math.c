@@ -472,6 +472,12 @@ double tanpi(double x) {
 }
 
 double asinpi(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return NAN;
+    if (x < -1.0 || x > 1.0) return NAN;
+    if (x == 0.0) return x;
+    if (x == 1.0) return 0.5;
+    if (x == -1.0) return -0.5;
     return asin(x) / M_PI;
 }
 
