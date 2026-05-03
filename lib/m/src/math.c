@@ -553,18 +553,23 @@ double atan2pi(double y, double x) {
  * Floating-point manipulation functions
  */
 
-/* frexp: x = mantissa * 2^exp, where 0.5 <= |mantissa| < 1 */
+/* frexp: x = mantissa * 2^exp, where 0.5 <= |mantissa| < 1.
+ * Conformance: C99 7.12.6.4.
+ *  - x == 0.0 (including -0.0): *exp = 0, return x (preserves sign of zero).
+ *  - x == +/-inf or NaN: *exp = 0, return x (do not crash).
+ *  - Subnormal x: still normalized via the doubling loop.
+ */
 double frexp(double x, int *exp) {
-    if (x == 0.0) { *exp = 0; return 0.0; }
+    if (x == 0.0) { *exp = 0; return x; }
     if (isinf(x) || isnan(x)) { *exp = 0; return x; }
-    
+
     int neg = (x < 0);
     if (neg) x = -x;
-    
+
     *exp = 0;
     while (x >= 1.0) { x *= 0.5; (*exp)++; }
     while (x < 0.5) { x *= 2.0; (*exp)--; }
-    
+
     return neg ? -x : x;
 }
 
