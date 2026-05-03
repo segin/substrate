@@ -148,9 +148,65 @@ static void prop_sinh_odd(void) {
     }
 }
 
+/*
+ * cosh(-x) == cosh(x)  (even-function symmetry, REQ-06-0689)
+ *
+ * cosh is exactly even by construction (cosh(x) = (e^x + e^-x)/2 is
+ * symmetric under x -> -x), so the identity should hold bit-exactly.
+ * Assert exact equality on a uniform sweep of [-10, 10] plus the
+ * requested boundary set, and additionally verify cosh(0.0) == 1.0.
+ */
+static void prop_cosh_even(void) {
+    const double lo = -10.0;
+    const double hi =  10.0;
+    const int n = 1000;
+    const double step = (hi - lo) / (double)(n - 1);
+
+    for (int i = 0; i < n; i++) {
+        double x = lo + (double)i * step;
+        if (!isfinite(x)) continue;
+        double a = cosh(-x);
+        double b = cosh(x);
+        /*
+         * Bit-exact equality is the contract: cosh is implemented as an
+         * even function and host glibc preserves this exactly.  Fall back
+         * to a tight tolerance (1e-15) only if equality fails, in case
+         * an alternate libm rounds the negation differently.
+         */
+        if (a != b && fabs(a - b) >= 1e-15) {
+            FAIL("cosh(-x) != cosh(x) on uniform sweep");
+            return;
+        }
+    }
+
+    static const double boundary[] = {
+        0.0,
+        1.0, -1.0,
+        5.0, -5.0,
+    };
+    const int nb = (int)(sizeof(boundary) / sizeof(boundary[0]));
+    for (int i = 0; i < nb; i++) {
+        double x = boundary[i];
+        if (!isfinite(x)) continue;
+        double a = cosh(-x);
+        double b = cosh(x);
+        if (a != b && fabs(a - b) >= 1e-15) {
+            FAIL("cosh(-x) != cosh(x) at boundary");
+            return;
+        }
+    }
+
+    /* cosh(0) == 1 exactly under IEEE 754. */
+    if (cosh(0.0) != 1.0) {
+        FAIL("cosh(0.0) is not 1.0");
+        return;
+    }
+}
+
 int main(void) {
     prop_cosh_sinh_pythagorean();
     prop_sinh_odd();
+    prop_cosh_even();
 
     if (failures == 0) {
         printf("All property tests passed.\n");
