@@ -56,7 +56,7 @@ they are not mandatory.
         - [x] Add `man/man3/sysctl.3` documenting libc contract and thread-safety. (REQ: REQ-06-0025)
         - [x] Add `man/man3/sysctlbyname.3` with buffer sizing examples. (REQ: REQ-06-0026)
         - [x] Add `man/man3/sysctlnametomib.3` with name/MIB conversion examples. (REQ: REQ-06-0027)
-        - [ ] Update `man/man2/sysctl.2` to align kernel syscall semantics with libc helper behavior. (REQ: REQ-06-0028)
+        - [x] Update `man/man2/sysctl.2` to align kernel syscall semantics with libc helper behavior. <!-- usr.man/man2/sysctl.2 --> (REQ: REQ-06-0028)
         - [x] Add `SEE ALSO` cross-links between `sysctl(2)` and `sysctl(3)` pages. (REQ: REQ-06-0029)
 - [x] **Stdio:** (REQ: REQ-06-0030)
     - [x] **`FILE` Structure & Buffer Management (`lib/c/src/stdio/`):** (REQ: REQ-06-0031)
@@ -296,9 +296,9 @@ they are not mandatory.
     - [ ] Optimize `memcpy`, `memset`, `memmove`. (REQ: REQ-06-0265)
     - [/] **Math Library (`lib/m/`):**
         - [/] **Architecture & Environment:**
-            - [ ] `math.h` header definition. (REQ: REQ-06-0266)
-            - [ ] `math_errhandling` (errno support). (REQ: REQ-06-0267)
-            - [ ] `__fpclassify` internal helper. (REQ: REQ-06-0268)
+            - [x] `math.h` header definition. <!-- include/math.h --> (REQ: REQ-06-0266)
+            - [x] `math_errhandling` (errno support). <!-- include/math.h: #define math_errhandling MATH_ERRNO --> (REQ: REQ-06-0267)
+            - [x] `__fpclassify` internal helper. <!-- lib/m/src/fpclassify.c: __fpclassifyf/__fpclassify/__fpclassifyl + signbit/isnan/isinf variants --> (REQ: REQ-06-0268)
             - [ ] **FENV (Floating-Point Environment):** (REQ: REQ-06-0269)
                 - [ ] **Header (`include/fenv.h`) Definition (C99/POSIX):** (REQ: REQ-06-0270)
                     - [ ] Define `fenv_t` type (full x87 environment: CW, SW, TW, FIP, FCS, FDP, FDS, MXCSR on SSE-capable). (REQ: REQ-06-0271)
