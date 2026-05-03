@@ -730,7 +730,7 @@ they are not mandatory.
                 - [x] Property: `|tanh(x)| < 1` for all finite `x`. <!-- tests/lib/m/property/prop_hyper.c:prop_tanh_bounded --> (REQ: REQ-06-0692)
             - [ ] **Man Pages:** (REQ: REQ-06-0250, REQ-06-0404, REQ-06-0452, REQ-06-0488, REQ-06-0527, REQ-06-0573, REQ-06-0629, REQ-06-0668, REQ-06-0693, REQ-06-0734, REQ-06-0769, REQ-06-0793, REQ-06-0839)
                 - [x] `man/man3/sinh.3` — Hyperbolic functions. Covers `sinh()`, `cosh()`, `tanh()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO. <!-- usr.man/man3/sinh.3 --> (REQ: REQ-06-0694)
-                - [ ] `man/man3/asinh.3` — Inverse hyperbolic functions. Covers `asinh()`, `acosh()`, `atanh()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO. (REQ: REQ-06-0695)
+                - [x] `man/man3/asinh.3` — Inverse hyperbolic functions. Covers `asinh()`, `acosh()`, `atanh()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO. <!-- usr.man/man3/asinh.3 --> (REQ: REQ-06-0695)
         - [/] **Manipulation:**
             - [ ] `frexp()` (REQ: REQ-06-0696)
             - [ ] `ldexp()` (REQ: REQ-06-0697)
