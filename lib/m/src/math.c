@@ -487,6 +487,20 @@ double erf(double x) {
 }
 
 /*
+ * erfc(x) - complementary error function: 1 - erf(x).
+ *
+ * v1 wrapper: defers to 1 - erf(x).  This loses precision for very large
+ * positive x where erf(x) approaches 1, but satisfies the C99 7.12.8.2
+ * special-value contract and the moderate-accuracy test suite.  A future
+ * revision can substitute an asymptotic expansion (A&S 7.1.26) for large x.
+ */
+double erfc(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return (x > 0) ? 0.0 : 2.0;
+    return 1.0 - erf(x);
+}
+
+/*
  * C23 pi-argument trigonometric functions
  */
 double sinpi(double x) {

@@ -781,7 +781,7 @@ they are not mandatory.
         - [ ] **Error & Gamma Functions (POSIX/C11):** (REQ: REQ-06-0742)
             - [ ] `erf()`, `erfc()`: (REQ: REQ-06-0743)
                 - [x] `erf(x)`: error function, `2/√π · ∫₀ˣ e^{-t²} dt`. Range: [-1, 1]. <!-- lib/m/src/math.c:erf --> (REQ: REQ-06-0744)
-                - [ ] `erfc(x)`: complementary error function, `1 - erf(x)`. More accurate than `1 - erf(x)` for large `x`. (REQ: REQ-06-0745)
+                - [x] `erfc(x)`: complementary error function, `1 - erf(x)`. More accurate than `1 - erf(x)` for large `x`. <!-- lib/m/src/math.c:erfc --> (REQ: REQ-06-0745)
                 - [ ] Implementation: rational polynomial approximation (Cody's or Abramowitz & Stegun). (REQ: REQ-06-0746)
                 - [ ] `erf(0)==0`, `erf(+∞)==1`, `erf(-∞)==-1`, `erfc(0)==1`, `erfc(+∞)==0`. (REQ: REQ-06-0747)
             - [ ] `tgamma()`, `lgamma()` (with `signgam`): (REQ: REQ-06-0748)

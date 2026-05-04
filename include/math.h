@@ -168,6 +168,7 @@ long long llrint(double x);
 
 /* Error and gamma functions */
 double erf(double x);
+double erfc(double x);
 
 /* Float versions (f suffix) */
 float sinf(float x);
