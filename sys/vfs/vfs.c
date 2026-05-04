@@ -301,8 +301,17 @@ fs_node_t *finddir_fs(fs_node_t *node, char *name) {
     return finddir_fs_internal(node, name, 0, 1);
 }
 
-// Maximum symlink recursion depth to prevent infinite loops
-#define MAX_SYMLINK_DEPTH 8
+/*
+ * Maximum symlink recursion depth.  Linux uses 8, but our stack frames
+ * are larger (vfs_lookup's local 512-byte ppath buffer dominates) and
+ * each "absolute symlink" cycle creates 4–6 nested frames between
+ * finddir_fs_internal's absolute branch, vfs_lookup's prefix recursion,
+ * and the directory walk loop.  Six full cycles already overflow the
+ * 8 KB kernel stack — deeper here means an unrecoverable PF in kernel
+ * mode rather than a clean ELOOP.  Drop to 4 until we shrink the
+ * frame sizes (or move ppath to kmalloc).
+ */
+#define MAX_SYMLINK_DEPTH 4
 
 static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, int follow_symlinks) {
     if (!node) return 0; // Safety
