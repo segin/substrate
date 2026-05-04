@@ -16,9 +16,19 @@ extern thread_t *current_thread;
 /*
  * Set up a GDT data segment with the given base for use as a GS TLS descriptor.
  * Uses GDT_TLS_START slot (one past the standard user segments).
- * The selector is loaded into GS and saved into the thread's trap frame so
- * it survives the iret back to user space.
+ *
+ * The slot is shared across all threads, so we also stash the per-thread base
+ * in current_thread->gs_base.  arch_switch_to() reloads the slot from the
+ * incoming thread's gs_base on every context switch — without that, the
+ * second process to set its TLS clobbers everyone else's, and on resume the
+ * %gs selector still loads but reads from the wrong (or zeroed) base.
  */
+void i386_load_gs_for_thread(thread_t *t) {
+    if (!t) return;
+    uint32_t base = t->gs_base;
+    gdt_set_gate(GDT_TLS_START, base, 0xFFFFF, 0xF2, 0xC0);
+}
+
 static int set_gsbase(uint32_t base) {
     /* Ring-3 32-bit data segment: present, DPL=3, writable, 4GB limit */
     gdt_set_gate(GDT_TLS_START, base, 0xFFFFF, 0xF2, 0xC0);
@@ -27,17 +37,19 @@ static int set_gsbase(uint32_t base) {
     __asm__ volatile("mov %0, %%gs" : : "r"(selector));
 
     /* Persist into the saved trap frame so iret reloads the descriptor. */
-    if (current_thread && current_thread->syscall_regs)
-        ((registers_t *)current_thread->syscall_regs)->gs = selector;
+    if (current_thread) {
+        current_thread->gs_base = base;
+        if (current_thread->syscall_regs)
+            ((registers_t *)current_thread->syscall_regs)->gs = selector;
+    }
 
     return 0;
 }
 
 static int get_gsbase(uint32_t *out) {
-    gdt_entry_t *e = &THIS_CPU()->gdt[GDT_TLS_START];
-    uint32_t base = (uint32_t)e->base_low
-                  | ((uint32_t)e->base_middle << 16)
-                  | ((uint32_t)e->base_high   << 24);
+    /* Use the per-thread base, not the (potentially stale) GDT slot, since
+     * the slot belongs to whichever thread last touched it. */
+    uint32_t base = current_thread ? current_thread->gs_base : 0;
     return copyout(&base, out, sizeof(base));
 }
 

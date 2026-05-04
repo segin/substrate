@@ -172,6 +172,14 @@ typedef struct thread {
     uint32_t  kstack_units; // Pages for PMM stacks, bytes for kmalloc stacks
     uint8_t   kstack_type; // thread_kstack_type_t
     uint8_t   kstack_owned; // Nonzero if the scheduler owns the kernel stack
+
+    /* Per-thread %gs TLS base (FreeBSD/Linux i386).  Stored here because the
+     * GDT_TLS_START slot is shared across all threads — without per-context
+     * reload on switch, the most recent thread's TCB would be visible to all
+     * others, and stale TCBs would have user-mode TLS reads return garbage
+     * (manifesting as SEGV in libc's TLS-relative loads — e.g. jemalloc
+     * __free reads %gs:0 which becomes 0 when the slot is empty). */
+    uint32_t  gs_base;
     
     // Scheduling - Basic
     int           priority;

@@ -22,18 +22,25 @@ extern void sched_init_generic(void);
 
 #include <sys/ldt.h>
 
+extern void i386_load_gs_for_thread(thread_t *t);
+
 // Exposed to Generic Scheduler
 void arch_switch_to(thread_t *prev, thread_t *next) {
     // Switch Address Space if needed
     if (next->proc && next->proc->pmap) {
         pmap_activate(next->proc->pmap);
     }
-    
+
     // Switch LDT if needed
     if (next->proc != prev->proc) {
         ldt_activate(next->proc);
     }
-    
+
+    /* Reload per-thread %gs TLS base into the shared GDT_TLS_START slot.
+     * Without this, a thread that set its TCB via sysarch(I386_SET_GSBASE)
+     * would lose its TLS the moment any other thread set its own. */
+    i386_load_gs_for_thread(next);
+
     switch_to(prev, next);
 }
 
