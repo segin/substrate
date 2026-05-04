@@ -803,7 +803,7 @@ they are not mandatory.
             - [ ] **Property Tests (`tests/lib/m/property/prop_gamma.c`):** (REQ: REQ-06-0764)
                 - [x] Property: `erfc(x) + erf(x) ≈ 1.0` for all finite `x`. <!-- tests/lib/m/property/prop_gamma.c:prop_erf_erfc_complement --> (REQ: REQ-06-0765)
                 - [x] Property: `erf(-x) == -erf(x)` (odd function). <!-- tests/lib/m/property/prop_gamma.c:prop_erf_odd --> (REQ: REQ-06-0766)
-                - [ ] Property: `exp(lgamma(x)) ≈ |tgamma(x)|` for `x` where `tgamma(x)` is finite. (REQ: REQ-06-0767)
+                - [x] Property: `exp(lgamma(x)) ≈ |tgamma(x)|` for `x` where `tgamma(x)` is finite. <!-- tests/lib/m/property/prop_gamma.c:prop_lgamma_tgamma_link --> (REQ: REQ-06-0767)
                 - [ ] Property: `tgamma(x+1) ≈ x * tgamma(x)` for positive `x` (recurrence relation). (REQ: REQ-06-0768)
             - [ ] **Man Pages:** (REQ: REQ-06-0250, REQ-06-0404, REQ-06-0452, REQ-06-0488, REQ-06-0527, REQ-06-0573, REQ-06-0629, REQ-06-0668, REQ-06-0693, REQ-06-0734, REQ-06-0769, REQ-06-0793, REQ-06-0839)
                 - [ ] `man/man3/erf.3` — Error functions. Covers `erf()` and `erfc()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0770)

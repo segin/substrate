@@ -193,9 +193,60 @@ static void prop_erf_odd(void) {
      * implementations; we do not strictly require it here. */
 }
 
+/*
+ * exp(lgamma(x)) approximately equals |tgamma(x)| for x where tgamma is
+ * finite.  (REQ-06-0767)
+ *
+ * lgamma returns the natural log of the absolute value of the gamma
+ * function, so exp(lgamma(x)) reconstructs |tgamma(x)|.  The sign of
+ * tgamma at negative non-integer arguments is encoded separately
+ * (signgam global on POSIX libm); we therefore compare against the
+ * absolute value of tgamma.  We sweep a chosen set of points covering
+ * half-integer, small positive integer, and a handful of negative
+ * non-integer arguments.  Large positive x (e.g. 100.0) push tgamma to
+ * very large finite values; we apply a relative tolerance scaled to
+ * |tgamma(x)| to remain robust against floating-point cancellation in
+ * the exp/log round-trip.  Integer arguments at zero or below are
+ * skipped because tgamma diverges there.
+ */
+static void prop_lgamma_tgamma_link(void) {
+    static const double pos[] = {
+        0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 10.0, 50.0, 100.0,
+    };
+    const int npos = (int)(sizeof(pos) / sizeof(pos[0]));
+    for (int i = 0; i < npos; i++) {
+        double x = pos[i];
+        double t = tgamma(x);
+        double l = lgamma(x);
+        if (!isfinite(t)) continue;
+        double tol = 1e-10 * fabs(t);
+        if (!isclose(exp(l), fabs(t), tol)) {
+            FAIL("exp(lgamma(x)) != |tgamma(x)| at positive x");
+            return;
+        }
+    }
+
+    static const double neg[] = {
+        -0.5, -1.5, -2.5,
+    };
+    const int nneg = (int)(sizeof(neg) / sizeof(neg[0]));
+    for (int i = 0; i < nneg; i++) {
+        double x = neg[i];
+        double t = tgamma(x);
+        double l = lgamma(x);
+        if (!isfinite(t)) continue;
+        double tol = 1e-10 * fabs(t);
+        if (!isclose(exp(l), fabs(t), tol)) {
+            FAIL("exp(lgamma(x)) != |tgamma(x)| at negative non-integer x");
+            return;
+        }
+    }
+}
+
 int main(void) {
     prop_erf_erfc_complement();
     prop_erf_odd();
+    prop_lgamma_tgamma_link();
 
     if (failures == 0) {
         printf("All property tests passed.\n");
