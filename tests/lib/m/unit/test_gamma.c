@@ -154,6 +154,22 @@ static void test_signgam(void) {
     if (signgam != -1) FAIL("signgam after lgamma(-2.5) != -1");
 }
 
+/*
+ * REQ-06-0763: NaN propagation for all error/gamma functions.
+ *   Per IEEE 754, any function receiving a NaN input should propagate
+ *   NaN to its output (quiet NaN, no exception). Verify for each of
+ *   erf, erfc, tgamma, lgamma, and lgamma_r.
+ */
+static void test_gamma_nan(void) {
+    if (!isnan(erf(NAN)))    FAIL("erf(NAN) != NaN");
+    if (!isnan(erfc(NAN)))   FAIL("erfc(NAN) != NaN");
+    if (!isnan(tgamma(NAN))) FAIL("tgamma(NAN) != NaN");
+    if (!isnan(lgamma(NAN))) FAIL("lgamma(NAN) != NaN");
+
+    int sign;
+    if (!isnan(lgamma_r(NAN, &sign))) FAIL("lgamma_r(NAN) != NaN");
+}
+
 int main(void) {
     test_erf_basic();
     test_erfc();
@@ -161,6 +177,7 @@ int main(void) {
     test_tgamma_poles();
     test_lgamma();
     test_signgam();
+    test_gamma_nan();
 
     if (failures != 0) {
         printf("FAILURES: %d\n", failures);
