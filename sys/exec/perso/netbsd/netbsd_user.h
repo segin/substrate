@@ -95,4 +95,13 @@ int netbsd_sys_fstat(int fd, struct netbsd_stat *buf);
 int netbsd_sys_compat_stat(const char *path, struct netbsd_stat43 *buf);
 int netbsd_sys_compat_lstat(const char *path, struct netbsd_stat43 *buf);
 int netbsd_sys_compat_fstat(int fd, struct netbsd_stat43 *buf);
+
+/* chown/chmod family.  NetBSD's at-flag bit values match FreeBSD's
+ * (AT_SYMLINK_NOFOLLOW=0x200, AT_REMOVEDIR=0x800 — same upstream
+ * POSIX numbering), so flag translation is identical. */
+int netbsd_sys_chown(const char *path, int uid, int gid);
+int netbsd_sys_lchmod(const char *path, int mode);
+int netbsd_sys_fchmodat(int dirfd, const char *path, int mode, int flag);
+int netbsd_sys_fchownat(int dirfd, const char *path, int uid, int gid, int flag);
+
 #endif /* _NETBSD_USER_H */

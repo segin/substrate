@@ -62,8 +62,8 @@ static void *netbsd_syscalls[MAX_SYSCALLS] = {
     [NETBSD_SYS_chdir]          = &sys_chdir,
     [NETBSD_SYS_fchdir]         = &sys_fchdir,
     [NETBSD_SYS_mknod]          = &sys_mknod,
-    [NETBSD_SYS_chmod]          = &sys_chmod,
-    [NETBSD_SYS_chown]          = NULL,            /* chown - not implemented */
+    [NETBSD_SYS_chmod]          = &sys_chmod,                       /* 15 */
+    [NETBSD_SYS_chown]          = (void *)&netbsd_sys_chown,         /* 16  follows symlinks */
     [NETBSD_SYS_break]          = NULL,            /* break */
     [NETBSD_SYS_getfsstat]      = NULL,            /* getfsstat */
     [NETBSD_SYS_lseek]          = &sys_lseek,
@@ -178,6 +178,20 @@ static void *netbsd_syscalls[MAX_SYSCALLS] = {
     [NETBSD_SYS_poll]           = &sys_poll,
     [NETBSD_SYS_getcwd]         = &sys_getcwd,
     [NETBSD_SYS_getdents]       = &sys_getdents,  /* __getdents30 */
+    [NETBSD_SYS_fchown]         = (void *)&sys_fchown,                /* 123 */
+    [NETBSD_SYS_fchmod]         = (void *)&sys_fchmod,                /* 124 */
+    [NETBSD_SYS_lchmod]         = (void *)&netbsd_sys_lchmod,         /* 274  no follow */
+    [NETBSD_SYS_lchown]         = (void *)&sys_lchown,                /* 275  no follow */
+    /* __posix_chown / __posix_fchown / __posix_lchown (283/284/285)
+     * have identical signatures and identical behaviour to their
+     * non-prefixed counterparts on Substrate (we always clear setuid
+     * /setgid for unprivileged callers in the chmodat path).  Wire
+     * them at the same handlers. */
+    [NETBSD_SYS_posix_chown]    = (void *)&netbsd_sys_chown,          /* 283 */
+    [NETBSD_SYS_posix_fchown]   = (void *)&sys_fchown,                /* 284 */
+    [NETBSD_SYS_posix_lchown]   = (void *)&sys_lchown,                /* 285 */
+    [NETBSD_SYS_fchmodat]       = (void *)&netbsd_sys_fchmodat,       /* 463 */
+    [NETBSD_SYS_fchownat]       = (void *)&netbsd_sys_fchownat,       /* 464 */
 };
 
 static const char *netbsd_names[MAX_SYSCALLS] = {
@@ -312,6 +326,15 @@ static const char *netbsd_names[MAX_SYSCALLS] = {
     [NETBSD_SYS_poll]           = "poll",
     [NETBSD_SYS_getcwd]         = "getcwd",
     [NETBSD_SYS_getdents]       = "getdents",
+    [NETBSD_SYS_fchown]         = "fchown",
+    [NETBSD_SYS_fchmod]         = "fchmod",
+    [NETBSD_SYS_lchmod]         = "lchmod",
+    [NETBSD_SYS_lchown]         = "lchown",
+    [NETBSD_SYS_posix_chown]    = "__posix_chown",
+    [NETBSD_SYS_posix_fchown]   = "__posix_fchown",
+    [NETBSD_SYS_posix_lchown]   = "__posix_lchown",
+    [NETBSD_SYS_fchmodat]       = "fchmodat",
+    [NETBSD_SYS_fchownat]       = "fchownat",
 };
 
 static struct syscall_fmt netbsd_fmts[MAX_SYSCALLS] = {
@@ -357,6 +380,15 @@ static struct syscall_fmt netbsd_fmts[MAX_SYSCALLS] = {
     [NETBSD_SYS_poll]           = { 3, { ARG_PTR, ARG_INT, ARG_INT } },
     [NETBSD_SYS_getcwd]         = { 2, { ARG_PTR, ARG_INT } },
     [NETBSD_SYS_getdents]       = { 3, { ARG_INT, ARG_PTR, ARG_INT } },
+    [NETBSD_SYS_fchown]         = { 3, { ARG_INT, ARG_INT, ARG_INT } },
+    [NETBSD_SYS_fchmod]         = { 2, { ARG_INT, ARG_INT } },
+    [NETBSD_SYS_lchmod]         = { 2, { ARG_STR, ARG_INT } },
+    [NETBSD_SYS_lchown]         = { 3, { ARG_STR, ARG_INT, ARG_INT } },
+    [NETBSD_SYS_posix_chown]    = { 3, { ARG_STR, ARG_INT, ARG_INT } },
+    [NETBSD_SYS_posix_fchown]   = { 3, { ARG_INT, ARG_INT, ARG_INT } },
+    [NETBSD_SYS_posix_lchown]   = { 3, { ARG_STR, ARG_INT, ARG_INT } },
+    [NETBSD_SYS_fchmodat]       = { 4, { ARG_INT, ARG_STR, ARG_HEX, ARG_HEX } },
+    [NETBSD_SYS_fchownat]       = { 5, { ARG_INT, ARG_STR, ARG_INT, ARG_INT, ARG_HEX } },
 };
 
 extern void netbsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);

@@ -132,4 +132,20 @@
 #define NETBSD_SYS_getcwd         326
 #define NETBSD_SYS_getdents       340
 
+/* chown/chmod family.  NetBSD numbers fchown/fchmod identically to FreeBSD
+ * (123/124) but lchmod=274 / lchown=275 (NetBSD swaps lchown into 275 vs
+ * FreeBSD's 254).  The __posix_*chown variants (283/284/285) implement
+ * POSIX-correct behavior: when called by an unprivileged owner, the
+ * setuid/setgid bits are cleared from the new mode after the change.
+ * fchmodat/fchownat are NetBSD-numbered 463/464. */
+#define NETBSD_SYS_fchown         123
+#define NETBSD_SYS_fchmod         124
+#define NETBSD_SYS_lchmod         274
+#define NETBSD_SYS_lchown         275
+#define NETBSD_SYS_posix_chown    283
+#define NETBSD_SYS_posix_fchown   284
+#define NETBSD_SYS_posix_lchown   285
+#define NETBSD_SYS_fchmodat       463
+#define NETBSD_SYS_fchownat       464
+
 #endif /* _NETBSD_SYSCALLS_H */
