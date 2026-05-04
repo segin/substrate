@@ -235,18 +235,19 @@ they are not mandatory.
             - [x] Test `setvbuf()` with `_IOFBF` accumulates until buffer full. (REQ: REQ-06-0204) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_setvbuf_fbf -->
             - [x] Test `tmpfile()` returns valid `FILE` that is auto-deleted. (REQ: REQ-06-0205) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_tmpfile -->
             - [x] Test `perror()` output format. (REQ: REQ-06-0206) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_perror -->
-        - [ ] **Unit Tests (`tests/lib/c/unit/test_printf.c`):** (REQ: REQ-06-0207)
-            - [ ] Test `sprintf()` all integer conversions with all length modifiers. (REQ: REQ-06-0208)
-            - [ ] Test `sprintf()` all floating-point conversions: `%f`, `%e`, `%g`, `%a`. (REQ: REQ-06-0209)
-            - [ ] Test `snprintf()` truncation: verify NUL-termination and returned count. (REQ: REQ-06-0210)
-            - [ ] Test `snprintf()` with `size == 0` returns required length without writing. (REQ: REQ-06-0211)
-            - [ ] Test `fprintf()` to file, then read back and compare. (REQ: REQ-06-0212)
-            - [ ] Test `dprintf()` to pipe fd. (REQ: REQ-06-0213)
-            - [ ] Test `asprintf()` allocates correct buffer size. (REQ: REQ-06-0214)
-            - [ ] Test `%n` conversion stores correct count. (REQ: REQ-06-0215)
-            - [ ] Test width, precision, flag combinations exhaustively. (REQ: REQ-06-0216)
-            - [ ] Test `%%` literal output. (REQ: REQ-06-0217)
-            - [ ] Test `NULL` string argument to `%s` (implementation-defined, should not crash). (REQ: REQ-06-0218)
+        - [x] **Unit Tests (`tests/lib/c/unit/test_printf.c`):** (REQ: REQ-06-0207) <!-- tests/lib/c/unit/test_printf.c:main -->
+            - [x] Test `sprintf()` all integer conversions with all length modifiers. (REQ: REQ-06-0208) <!-- tests/lib/c/unit/test_printf.c:test_printf_int_conversions -->
+            - [x] Test `sprintf()` all floating-point conversions: `%f`, `%e`, `%g`, `%a`. (REQ: REQ-06-0209) <!-- tests/lib/c/unit/test_printf.c:test_printf_float_conversions -->
+            - [x] Test `snprintf()` truncation: verify NUL-termination and returned count. (REQ: REQ-06-0210) <!-- tests/lib/c/unit/test_printf.c:test_printf_snprintf_truncation -->
+            - [x] Test `snprintf()` with `size == 0` returns required length without writing. (REQ: REQ-06-0211) <!-- tests/lib/c/unit/test_printf.c:test_printf_snprintf_size_zero -->
+            - [x] Test `fprintf()` to file, then read back and compare. (REQ: REQ-06-0212) <!-- tests/lib/c/unit/test_printf.c:test_printf_fprintf_tmpfile -->
+            - [x] Test `dprintf()` to pipe fd. (REQ: REQ-06-0213) <!-- tests/lib/c/unit/test_printf.c:test_printf_dprintf_pipe -->
+            - [x] Test `asprintf()` allocates correct buffer size. (REQ: REQ-06-0214) <!-- tests/lib/c/unit/test_printf.c:test_printf_asprintf_alloc -->
+            - [x] Test `%n` conversion stores correct count. (REQ: REQ-06-0215) <!-- tests/lib/c/unit/test_printf.c:test_printf_n_conversion -->
+            - [x] Test width, precision, flag combinations exhaustively. (REQ: REQ-06-0216) <!-- tests/lib/c/unit/test_printf.c:test_printf_width_precision_flags -->
+            - [x] Test `%%` literal output. (REQ: REQ-06-0217) <!-- tests/lib/c/unit/test_printf.c:test_printf_percent_literal -->
+            - [x] Test `NULL` string argument to `%s` (implementation-defined, should not crash). (REQ: REQ-06-0218) <!-- tests/lib/c/unit/test_printf.c:test_printf_null_string -->
+
         - [ ] **Unit Tests (`tests/lib/c/unit/test_scanf.c`):** (REQ: REQ-06-0219)
             - [ ] Test `sscanf()` integer conversions: `%d`, `%i`, `%u`, `%o`, `%x`. (REQ: REQ-06-0220)
             - [ ] Test `sscanf()` `%i` auto-base detection: `0x` (hex), `0` (octal), decimal. (REQ: REQ-06-0221)
