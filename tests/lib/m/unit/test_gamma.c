@@ -68,9 +68,25 @@ static void test_erfc(void) {
     }
 }
 
+/*
+ * REQ-06-0759: tgamma() basic values.
+ *   tgamma(n+1) == n! for small non-negative integers (1, 2, 6, 24, 362880).
+ *   tgamma(0.5) == sqrt(pi) (Euler reflection / well-known half-integer value).
+ */
+static void test_tgamma(void) {
+    if (!isclose(tgamma(1.0),  1.0,                1e-15)) FAIL("tgamma(1.0)");
+    if (!isclose(tgamma(2.0),  1.0,                1e-15)) FAIL("tgamma(2.0)");
+    if (!isclose(tgamma(3.0),  2.0,                1e-15)) FAIL("tgamma(3.0)");
+    if (!isclose(tgamma(4.0),  6.0,                1e-15)) FAIL("tgamma(4.0)");
+    if (!isclose(tgamma(5.0),  24.0,               1e-13)) FAIL("tgamma(5.0)");
+    if (!isclose(tgamma(0.5),  1.7724538509055159, 1e-12)) FAIL("tgamma(0.5)");
+    if (!isclose(tgamma(10.0), 362880.0,           1e-9))  FAIL("tgamma(10.0)");
+}
+
 int main(void) {
     test_erf_basic();
     test_erfc();
+    test_tgamma();
 
     if (failures != 0) {
         printf("FAILURES: %d\n", failures);
