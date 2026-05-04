@@ -446,7 +446,7 @@ int fstatat(int dirfd, const char *pathname, struct stat *buf, int flags) {
 }
 
 int chown(const char *pathname, uid_t owner, gid_t group) {
-    return __set_errno((int)_syscall3(SYS_LCHOWN, (uintptr_t)pathname, owner, group));
+    return __set_errno((int)_syscall3(SYS_CHOWN, (uintptr_t)pathname, owner, group));
 }
 
 ssize_t readlink(const char *pathname, char *buf, size_t bufsiz) {
@@ -707,6 +707,14 @@ int fchown(int fd, uid_t owner, gid_t group) {
 
 int fchownat(int dirfd, const char *pathname, uid_t owner, gid_t group, int flag) {
     return __set_errno((int)_syscall5(SYS_FCHOWNAT, dirfd, (uintptr_t)pathname, (int)owner, (int)group, (int)flag));
+}
+
+int lchmod(const char *pathname, mode_t mode) {
+    return __set_errno((int)_syscall2(SYS_LCHMOD, (uintptr_t)pathname, (int)mode));
+}
+
+int fchmodat(int dirfd, const char *pathname, mode_t mode, int flag) {
+    return __set_errno((int)_syscall4(SYS_FCHMODAT, dirfd, (uintptr_t)pathname, (int)mode, (int)flag));
 }
 
 pid_t wait4(pid_t pid, int *wstatus, int options, struct rusage *rusage) {
