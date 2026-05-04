@@ -12,113 +12,20 @@ typedef struct vm_vnode_pager {
     uint64_t page_limit;
 } vm_vnode_pager_t;
 
-typedef struct vnode_cache_entry {
-    fs_node_t *node;
-    uint64_t file_pindex;
-    vm_page_t *page;
-    struct vnode_cache_entry *next;
-} vnode_cache_entry_t;
-
-#define VNODE_CACHE_BUCKETS 256
-static vnode_cache_entry_t *vnode_cache[VNODE_CACHE_BUCKETS];
-static spinlock_t vnode_cache_lock = SPINLOCK_INIT("vnode_cache");
-static uint64_t vnode_cache_page_count;
-
-static inline uint32_t vnode_cache_hash(fs_node_t *node, uint64_t file_pindex) {
-    return (((uintptr_t)node >> 4) ^ (uintptr_t)file_pindex) & (VNODE_CACHE_BUCKETS - 1);
-}
-
-static vm_page_t *vnode_cache_lookup_locked(fs_node_t *node, uint64_t file_pindex) {
-    uint32_t bucket = vnode_cache_hash(node, file_pindex);
-    vnode_cache_entry_t *entry = vnode_cache[bucket];
-
-    while (entry) {
-        if (entry->node == node && entry->file_pindex == file_pindex) {
-            return entry->page;
-        }
-        entry = entry->next;
-    }
-    return NULL;
-}
-
-static int vnode_cache_insert(fs_node_t *node, uint64_t file_pindex, vm_page_t *page) {
-    uint32_t bucket = vnode_cache_hash(node, file_pindex);
-    vnode_cache_entry_t *entry = kmalloc(sizeof(vnode_cache_entry_t));
-    if (!entry) {
-        return -1;
-    }
-
-    entry->node = node;
-    entry->file_pindex = file_pindex;
-    entry->page = page;
-
-    spinlock_acquire(&vnode_cache_lock);
-    if (vnode_cache_lookup_locked(node, file_pindex) != NULL) {
-        spinlock_release(&vnode_cache_lock);
-        kfree(entry, sizeof(vnode_cache_entry_t));
-        return 1;
-    }
-
-    entry->next = vnode_cache[bucket];
-    vnode_cache[bucket] = entry;
-    vnode_cache_page_count++;
-    spinlock_release(&vnode_cache_lock);
-    return 0;
-}
-
-static vm_page_t *vnode_cache_get_or_load(fs_node_t *node, uint64_t file_pindex) {
-    vm_page_t *page;
-
-    spinlock_acquire(&vnode_cache_lock);
-    page = vnode_cache_lookup_locked(node, file_pindex);
-    spinlock_release(&vnode_cache_lock);
-
-    if (page) {
-        vm_page_activate(page);
-        return page;
-    }
-
-    page = vm_page_alloc(NULL, file_pindex, 0);
-    if (!page) {
-        return NULL;
-    }
-
-    uint8_t *buf = (uint8_t *)P2V(page->phys_addr);
-    uint64_t offset = file_pindex * 4096;
-    uint32_t bytes = read_fs(node, (int64_t)offset, 4096, buf);
-    if (bytes < 4096) {
-        for (uint32_t i = bytes; i < 4096; i++) {
-            buf[i] = 0;
-        }
-    }
-
-    page->flags |= PG_VALID;
-    page->flags &= ~PG_DIRTY;
-    vm_page_activate(page);
-
-    int insert_result = vnode_cache_insert(node, file_pindex, page);
-    if (insert_result == 1) {
-        vm_page_t *winner;
-        spinlock_acquire(&vnode_cache_lock);
-        winner = vnode_cache_lookup_locked(node, file_pindex);
-        spinlock_release(&vnode_cache_lock);
-        vm_page_free(page);
-        return winner;
-    }
-    if (insert_result != 0) {
-        vm_page_free(page);
-        return NULL;
-    }
-
-    return page;
-}
+/* The vnode pager no longer maintains a private (node, file_pindex) page
+ * cache.  Cached file pages live directly in the shared backing vm_object's
+ * pages list (created once per (node, page_offset) by mmap_create_file_object
+ * via shared_file_objects), so all processes that map the same file region
+ * share the same physical pages: the second process's fault hits
+ * vm_object_lookup_page() in vm_fault_resolve_source() and pmap_enter() maps
+ * the same phys_addr into the second pmap.  The pv_list +
+ * vm_page_hold/unhold infrastructure handles N-mapping refcounting. */
 
 uint64_t vnode_pager_cached_pages(void) {
-    uint64_t count;
-    spinlock_acquire(&vnode_cache_lock);
-    count = vnode_cache_page_count;
-    spinlock_release(&vnode_cache_lock);
-    return count;
+    /* Cached pages now live in per-(node,offset) backing vm_objects; this
+     * stat reporter has no single canonical source to walk.  Kept as a stub
+     * for ABI compatibility with the kernel symbol table. */
+    return 0;
 }
 
 typedef struct vm_device_pager {
@@ -295,25 +202,23 @@ int vnode_pager_getpages(vm_pager_t *base, vm_page_t **pages, int count, bool sy
             return -1;
         }
 
-        uint64_t file_pindex = base_page + dst->pindex;
+        uint8_t *dst_buf = (uint8_t *)P2V(dst->phys_addr);
+
         if (pager->page_limit && dst->pindex >= pager->page_limit) {
-            uint8_t *dst_buf = (uint8_t *)P2V(dst->phys_addr);
             for (uint32_t j = 0; j < 4096; j++) {
                 dst_buf[j] = 0;
             }
-            dst->flags |= PG_VALID;
-            dst->flags &= ~PG_DIRTY;
-            continue;
+        } else {
+            uint64_t file_pindex = base_page + dst->pindex;
+            uint64_t offset = file_pindex * 4096;
+            uint32_t bytes = read_fs(pager->node, (int64_t)offset, 4096, dst_buf);
+            if (bytes < 4096) {
+                for (uint32_t j = bytes; j < 4096; j++) {
+                    dst_buf[j] = 0;
+                }
+            }
         }
 
-        vm_page_t *src = vnode_cache_get_or_load(pager->node, file_pindex);
-        if (!src) {
-            return -1;
-        }
-
-        if (src != dst) {
-            pmap_copy_page(src->phys_addr, dst->phys_addr);
-        }
         dst->flags |= PG_VALID;
         dst->flags &= ~PG_DIRTY;
     }
@@ -333,32 +238,21 @@ int vnode_pager_putpages(vm_pager_t *base, vm_page_t **pages, int count, bool sy
         if (!src) {
             return -1;
         }
-
-        uint64_t file_pindex = base_page + src->pindex;
         if (pager->page_limit && src->pindex >= pager->page_limit) {
             continue;
         }
+        if (!sync) {
+            continue;
+        }
 
-        vm_page_t *cache_page = vnode_cache_get_or_load(pager->node, file_pindex);
-        if (!cache_page) {
+        uint64_t file_pindex = base_page + src->pindex;
+        uint8_t *buf = (uint8_t *)P2V(src->phys_addr);
+        uint64_t file_offset = file_pindex * 4096;
+        uint32_t bytes = write_fs(pager->node, (int64_t)file_offset, 4096, buf);
+        if (bytes != 4096) {
             return -1;
         }
-
-        if (cache_page != src) {
-            pmap_copy_page(src->phys_addr, cache_page->phys_addr);
-        }
-        cache_page->flags |= (PG_VALID | PG_DIRTY);
-
-        if (sync) {
-            uint8_t *buf = (uint8_t *)P2V(cache_page->phys_addr);
-            uint64_t file_offset = file_pindex * 4096;
-            uint32_t bytes = write_fs(pager->node, (int64_t)file_offset, 4096, buf);
-            if (bytes != 4096) {
-                return -1;
-            }
-            cache_page->flags &= ~PG_DIRTY;
-            src->flags &= ~PG_DIRTY;
-        }
+        src->flags &= ~PG_DIRTY;
     }
     return 0;
 }
