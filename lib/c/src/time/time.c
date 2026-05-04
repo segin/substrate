@@ -162,7 +162,7 @@ static const char *parse_rule(const char *p, struct tz_rule *rule) {
 static void parse_tz(const char *tz, struct tz_info *info) {
     if (!tz || !*tz) {
         // Default to UTC
-        strcpy(info->std_name, "UTC");
+        strlcpy(info->std_name, "UTC", sizeof(info->std_name));
         info->std_off = 0;
         info->has_dst = 0;
         return;
@@ -423,8 +423,8 @@ struct tm *localtime_r(const time_t *__restrict timer, struct tm *__restrict res
     // This is necessary because struct tm needs char* to valid memory.
     static char zone_names[2][16];
     // We copy to these buffers.
-    strcpy(zone_names[0], info.std_name);
-    if (info.has_dst) strcpy(zone_names[1], info.dst_name);
+    strlcpy(zone_names[0], info.std_name, sizeof(zone_names[0]));
+    if (info.has_dst) strlcpy(zone_names[1], info.dst_name, sizeof(zone_names[1]));
 
     result->tm_zone = is_dst ? zone_names[1] : zone_names[0];
     result->tm_isdst = is_dst;
@@ -555,13 +555,13 @@ size_t strftime(char *__restrict s, size_t maxsize, const char *__restrict forma
             case 'H': snprintf(tmp, sizeof(tmp), "%.2d", tp->tm_hour); break;
             case 'M': snprintf(tmp, sizeof(tmp), "%.2d", tp->tm_min); break;
             case 'S': snprintf(tmp, sizeof(tmp), "%.2d", tp->tm_sec); break;
-            case '%': strcpy(tmp, "%"); break;
+            case '%': strlcpy(tmp, "%", sizeof(tmp)); break;
             default: tmp[0] = 0; break;
         }
         
         size_t len = strlen(tmp);
         if (count + len < maxsize - 1) {
-            strcpy(s + count, tmp);
+            strlcpy(s + count, tmp, maxsize - count);
             count += len;
         }
     }
