@@ -797,7 +797,7 @@ they are not mandatory.
                 - [x] Test `erfc(0)==1`, `erfc(+∞)==0`, `erfc(x) + erf(x) ≈ 1`. <!-- tests/lib/m/unit/test_gamma.c:test_erfc --> (REQ: REQ-06-0758)
                 - [x] Test `tgamma(1)==1`, `tgamma(2)==1`, `tgamma(5)==24`, `tgamma(0.5)≈√π`. (REQ: REQ-06-0759)
                 - [x] Test `tgamma(0)` → ±∞ (pole), `tgamma(-1)` → NaN. (REQ: REQ-06-0760)
-                - [ ] Test `lgamma(1)==0`, `lgamma(2)==0`, `lgamma(5)≈ln(24)`. (REQ: REQ-06-0761)
+                - [x] Test `lgamma(1)==0`, `lgamma(2)==0`, `lgamma(5)≈ln(24)`. <!-- tests/lib/m/unit/test_gamma.c:test_lgamma --> (REQ: REQ-06-0761)
                 - [ ] Test `signgam` is set correctly after `lgamma()` calls. (REQ: REQ-06-0762)
                 - [ ] Test NaN propagation for all error/gamma functions. (REQ: REQ-06-0763)
             - [ ] **Property Tests (`tests/lib/m/property/prop_gamma.c`):** (REQ: REQ-06-0764)

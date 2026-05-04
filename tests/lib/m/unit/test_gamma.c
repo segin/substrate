@@ -104,11 +104,30 @@ static void test_tgamma_poles(void) {
     if (!isnan(tgamma(-INFINITY))) FAIL("tgamma(-inf) != NaN");
 }
 
+/*
+ * REQ-06-0761: lgamma() basic values.
+ *   lgamma(1) == log(0!)  == log(1)  == 0 (Gamma(1) = 1).
+ *   lgamma(2) == log(1!)  == log(1)  == 0 (Gamma(2) = 1).
+ *   lgamma(3) == log(2!)  == log(2)      (Gamma(3) = 2).
+ *   lgamma(5) == log(4!)  == log(24)     (Gamma(5) = 24).
+ *   lgamma(0) == +inf (pole; |Gamma| diverges, so log|Gamma| -> +inf).
+ */
+static void test_lgamma(void) {
+    if (!isclose(lgamma(1.0), 0.0,         1e-15)) FAIL("lgamma(1.0)");
+    if (!isclose(lgamma(2.0), 0.0,         1e-15)) FAIL("lgamma(2.0)");
+    if (!isclose(lgamma(3.0), log(2.0),    1e-13)) FAIL("lgamma(3.0)");
+    if (!isclose(lgamma(5.0), log(24.0),   1e-12)) FAIL("lgamma(5.0)");
+
+    double p0 = lgamma(0.0);
+    if (!isinf(p0) || p0 < 0) FAIL("lgamma(0.0) != +inf");
+}
+
 int main(void) {
     test_erf_basic();
     test_erfc();
     test_tgamma();
     test_tgamma_poles();
+    test_lgamma();
 
     if (failures != 0) {
         printf("FAILURES: %d\n", failures);
