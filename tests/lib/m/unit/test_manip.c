@@ -4,6 +4,11 @@
  */
 
 #include <stdio.h>
+#if defined(__has_include)
+#  if __has_include(<features.h>)
+#    include <features.h> /* exposes __GLIBC__ on host glibc builds */
+#  endif
+#endif
 #include <math.h>
 #include <stdint.h>
 #include <float.h>
@@ -590,6 +595,37 @@ static void test_copysign(void) {
     }
 }
 
+/*
+ * REQ-06-0727: nan() factory produces a NaN regardless of tag string.
+ *   nan(tagp) returns a quiet NaN; the tag string (when non-NULL) is an
+ *   implementation-defined payload encoding hint and does not affect the
+ *   NaN-ness of the result. nan("") is the canonical quiet NaN. nan("tag")
+ *   and nan("123") must likewise be NaN. Passing NULL is outside C's strict
+ *   wording, but a reasonable implementation tolerates it and still returns
+ *   a NaN; we assert that here as a portability check.
+ */
+static void test_nan(void) {
+    if (!isnan(nan(""))) {
+        FAIL("isnan(nan(\"\")) is not true");
+    }
+    if (!isnan(nan("tag"))) {
+        FAIL("isnan(nan(\"tag\")) is not true");
+    }
+    if (!isnan(nan("123"))) {
+        FAIL("isnan(nan(\"123\")) is not true");
+    }
+    /*
+     * Substrate libm tolerates nan(NULL) and returns a quiet NaN. Some host
+     * libcs (notably glibc) hand the tag straight to strtod() and segfault
+     * on NULL, so the host-build verify path must skip this assertion.
+     */
+#ifndef __GLIBC__
+    if (!isnan(nan(NULL))) {
+        FAIL("isnan(nan(NULL)) is not true");
+    }
+#endif
+}
+
 int main(void) {
     test_frexp_ldexp_roundtrip();
     test_frexp_range();
@@ -603,6 +639,7 @@ int main(void) {
     test_nextafter_denormal();
     test_nextafter_idempotent();
     test_copysign();
+    test_nan();
 
     if (failures != 0) {
         printf("FAILURES: %d\n", failures);
