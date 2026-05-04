@@ -83,10 +83,32 @@ static void test_tgamma(void) {
     if (!isclose(tgamma(10.0), 362880.0,           1e-9))  FAIL("tgamma(10.0)");
 }
 
+/*
+ * REQ-06-0760: tgamma() poles and invalid inputs.
+ *   tgamma(+0)  == +inf (pole; Gamma diverges to +inf approaching from positive side).
+ *   tgamma(-0)  == -inf (pole; sign flips approaching from negative side, if impl distinguishes).
+ *   tgamma(-n) for n in N+ is undefined (pole) -> NaN (negative-integer poles).
+ *   tgamma(-inf) is invalid -> NaN.
+ */
+static void test_tgamma_poles(void) {
+    double p0 = tgamma(0.0);
+    if (!isinf(p0) || p0 < 0) FAIL("tgamma(+0.0) != +inf");
+
+    /* -0 may yield -inf if impl checks signbit; otherwise +inf is acceptable. */
+    double n0 = tgamma(-0.0);
+    if (!isinf(n0)) FAIL("tgamma(-0.0) not infinite");
+
+    if (!isnan(tgamma(-1.0))) FAIL("tgamma(-1.0) != NaN");
+    if (!isnan(tgamma(-2.0))) FAIL("tgamma(-2.0) != NaN");
+    if (!isnan(tgamma(-3.0))) FAIL("tgamma(-3.0) != NaN");
+    if (!isnan(tgamma(-INFINITY))) FAIL("tgamma(-inf) != NaN");
+}
+
 int main(void) {
     test_erf_basic();
     test_erfc();
     test_tgamma();
+    test_tgamma_poles();
 
     if (failures != 0) {
         printf("FAILURES: %d\n", failures);
