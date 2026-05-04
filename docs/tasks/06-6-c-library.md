@@ -262,14 +262,14 @@ they are not mandatory.
             - [x] Test `sscanf()` returns `EOF` on immediate input failure. (REQ: REQ-06-0230) <!-- tests/lib/c/unit/test_scanf.c:test_scanf_eof_immediate_failure -->
             - [x] Test `fscanf()` from file. (REQ: REQ-06-0231) <!-- tests/lib/c/unit/test_scanf.c:test_scanf_fscanf_wrapper -->
             - [x] Test `scanf()` length modifiers: `%hhd`, `%hd`, `%ld`, `%lld`, `%jd`, `%zd`, `%td`. (REQ: REQ-06-0232) <!-- tests/lib/c/unit/test_scanf.c:test_scanf_length_modifiers -->
-        - [ ] **Property Tests (`tests/lib/c/property/prop_stdio.c`):** (REQ: REQ-06-0233)
-            - [ ] Property: `sprintf(buf, "%d", x); sscanf(buf, "%d", &y)` ⇒ `x == y` for all `int x`. (REQ: REQ-06-0234)
-            - [ ] Property: `sprintf(buf, "%u", x); sscanf(buf, "%u", &y)` ⇒ `x == y` for all `unsigned x`. (REQ: REQ-06-0235)
-            - [ ] Property: `snprintf(buf, n, fmt, ...)` return value ≥ 0 and ≤ what `sprintf` would produce. (REQ: REQ-06-0236)
-            - [ ] Property: `snprintf(buf, n, ...)` always NUL-terminates if `n > 0`. (REQ: REQ-06-0237)
-            - [ ] Property: `fwrite(data, 1, n, f); rewind(f); fread(out, 1, n, f)` ⇒ `memcmp(data, out, n) == 0`. (REQ: REQ-06-0238)
-            - [ ] Property: `ftell()` after `fseek(f, off, SEEK_SET)` returns `off`. (REQ: REQ-06-0239)
-            - [ ] Property: `ungetc(c, f); fgetc(f)` returns `c` for any valid `c` ≠ `EOF`. (REQ: REQ-06-0240)
+        - [x] **Property Tests (`tests/lib/c/property/prop_stdio.c`):** (REQ: REQ-06-0233) <!-- tests/lib/c/property/prop_stdio.c -->
+            - [x] Property: `sprintf(buf, "%d", x); sscanf(buf, "%d", &y)` ⇒ `x == y` for all `int x`. (REQ: REQ-06-0234) <!-- tests/lib/c/property/prop_stdio.c:test_prop_int_roundtrip -->
+            - [x] Property: `sprintf(buf, "%u", x); sscanf(buf, "%u", &y)` ⇒ `x == y` for all `unsigned x`. (REQ: REQ-06-0235) <!-- tests/lib/c/property/prop_stdio.c:test_prop_uint_roundtrip -->
+            - [x] Property: `snprintf(buf, n, fmt, ...)` return value ≥ 0 and ≤ what `sprintf` would produce. (REQ: REQ-06-0236) <!-- tests/lib/c/property/prop_stdio.c:test_prop_snprintf_return_bound -->
+            - [x] Property: `snprintf(buf, n, ...)` always NUL-terminates if `n > 0`. (REQ: REQ-06-0237) <!-- tests/lib/c/property/prop_stdio.c:test_prop_snprintf_nul_terminates -->
+            - [x] Property: `fwrite(data, 1, n, f); rewind(f); fread(out, 1, n, f)` ⇒ `memcmp(data, out, n) == 0`. (REQ: REQ-06-0238) <!-- tests/lib/c/property/prop_stdio.c:test_prop_fwrite_fread_roundtrip -->
+            - [x] Property: `ftell()` after `fseek(f, off, SEEK_SET)` returns `off`. (REQ: REQ-06-0239) <!-- tests/lib/c/property/prop_stdio.c:test_prop_ftell_after_fseek -->
+            - [x] Property: `ungetc(c, f); fgetc(f)` returns `c` for any valid `c` ≠ `EOF`. (REQ: REQ-06-0240) <!-- tests/lib/c/property/prop_stdio.c:test_prop_ungetc_fgetc -->
         - [ ] **Fuzz Tests (`tests/lib/c/fuzz/fuzz_printf.c`):** (REQ: REQ-06-0241)
             - [ ] Fuzz `snprintf()` with random format strings and random arguments. (REQ: REQ-06-0242)
             - [ ] Verify no buffer overflows (write to bounded buffer, check sentinel bytes). (REQ: REQ-06-0243)
