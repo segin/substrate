@@ -971,7 +971,22 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
     /* Emit a clean, contiguous Elf_Auxinfo[] array.
      * AT_NULL is pushed first so it lands at the highest address;
      * subsequent entries are pushed below it.  The rtld walks from
-     * the lowest entry (last pushed) up to AT_NULL. */
+     * the lowest entry (last pushed) up to AT_NULL.
+     *
+     * Indices 0..14 are POSIX-aligned and identical between Linux and
+     * FreeBSD.  Indices >=15 diverge — Linux has AT_PLATFORM/AT_HWCAP/
+     * AT_CLKTCK/AT_SECURE/AT_RANDOM/AT_EXECFN at 15/16/17/23/25/31, while
+     * FreeBSD assigns those slots to AT_EXECPATH/AT_CANARY/AT_CANARYLEN/
+     * AT_STACKPROT/AT_HWCAP/AT_ENVV.  Sending Linux entries to a FreeBSD
+     * process therefore makes libc read garbage — most visibly, FreeBSD
+     * libc reads our AT_EXECFN (argv[0] string pointer) as AT_ENVV (the
+     * environ array), and the next getenv() walks off into the weeds. */
+
+    int is_freebsd = current_process && current_process->perso_id == PERS_FREEBSD;
+
+    uint32_t execfn_ptr = 0;
+    if (k_argv && argc > 0) execfn_ptr = (uint32_t)(uintptr_t)k_argv[0];
+
     sp -= 4; STACK_WRITE32(sp, 0);
     sp -= 4; STACK_WRITE32(sp, AT_NULL);
 
@@ -996,20 +1011,6 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
     sp -= 4; STACK_WRITE32(sp, at_base);
     sp -= 4; STACK_WRITE32(sp, AT_BASE);
 
-    if (current_process && current_process->perso_id == PERS_LINUX) {
-        sp -= 4; STACK_WRITE32(sp, HZ);
-        sp -= 4; STACK_WRITE32(sp, AT_CLKTCK);
-
-        sp -= 4; STACK_WRITE32(sp, 0);
-        sp -= 4; STACK_WRITE32(sp, AT_HWCAP);
-    }
-
-    sp -= 4; STACK_WRITE32(sp, rand_ptr);
-    sp -= 4; STACK_WRITE32(sp, AT_RANDOM);
-
-    sp -= 4; STACK_WRITE32(sp, 0);
-    sp -= 4; STACK_WRITE32(sp, AT_SECURE);
-
     sp -= 4; STACK_WRITE32(sp, current_process->uid);
     sp -= 4; STACK_WRITE32(sp, AT_UID);
     sp -= 4; STACK_WRITE32(sp, current_process->gid);
@@ -1019,13 +1020,60 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
     sp -= 4; STACK_WRITE32(sp, current_process->egid);
     sp -= 4; STACK_WRITE32(sp, AT_EGID);
 
-    sp -= 4; STACK_WRITE32(sp, platform_ptr);
-    sp -= 4; STACK_WRITE32(sp, AT_PLATFORM);
+    if (is_freebsd) {
+        /* FreeBSD-specific entries.  Order doesn't matter (rtld walks
+         * the array indexing by a_type), but use BSD a_type values. */
+        sp -= 4; STACK_WRITE32(sp, execfn_ptr);
+        sp -= 4; STACK_WRITE32(sp, AT_FBSD_EXECPATH);
 
-    uint32_t execfn_ptr = 0;
-    if (k_argv && argc > 0) execfn_ptr = (uint32_t)(uintptr_t)k_argv[0];
-    sp -= 4; STACK_WRITE32(sp, execfn_ptr);
-    sp -= 4; STACK_WRITE32(sp, AT_EXECFN);
+        sp -= 4; STACK_WRITE32(sp, 0);
+        sp -= 4; STACK_WRITE32(sp, AT_FBSD_CANARY);
+        sp -= 4; STACK_WRITE32(sp, 0);
+        sp -= 4; STACK_WRITE32(sp, AT_FBSD_CANARYLEN);
+
+        sp -= 4; STACK_WRITE32(sp, 1403000);
+        sp -= 4; STACK_WRITE32(sp, AT_FBSD_OSRELDATE);
+
+        sp -= 4; STACK_WRITE32(sp, 1);
+        sp -= 4; STACK_WRITE32(sp, AT_FBSD_NCPUS);
+
+        /* PROT_READ|PROT_WRITE = 0x3 — stack protection FreeBSD libc
+         * uses to refrain from setting PROT_EXEC on returns. */
+        sp -= 4; STACK_WRITE32(sp, 0x3);
+        sp -= 4; STACK_WRITE32(sp, AT_FBSD_STACKPROT);
+
+        sp -= 4; STACK_WRITE32(sp, 0);
+        sp -= 4; STACK_WRITE32(sp, AT_FBSD_HWCAP);
+
+        sp -= 4; STACK_WRITE32(sp, 0);
+        sp -= 4; STACK_WRITE32(sp, AT_FBSD_BSDFLAGS);
+
+        sp -= 4; STACK_WRITE32(sp, (uint32_t)argc);
+        sp -= 4; STACK_WRITE32(sp, AT_FBSD_ARGC);
+
+        sp -= 4; STACK_WRITE32(sp, (uint32_t)envc);
+        sp -= 4; STACK_WRITE32(sp, AT_FBSD_ENVC);
+    } else {
+        if (current_process && current_process->perso_id == PERS_LINUX) {
+            sp -= 4; STACK_WRITE32(sp, HZ);
+            sp -= 4; STACK_WRITE32(sp, AT_CLKTCK);
+
+            sp -= 4; STACK_WRITE32(sp, 0);
+            sp -= 4; STACK_WRITE32(sp, AT_HWCAP);
+        }
+
+        sp -= 4; STACK_WRITE32(sp, rand_ptr);
+        sp -= 4; STACK_WRITE32(sp, AT_RANDOM);
+
+        sp -= 4; STACK_WRITE32(sp, 0);
+        sp -= 4; STACK_WRITE32(sp, AT_SECURE);
+
+        sp -= 4; STACK_WRITE32(sp, platform_ptr);
+        sp -= 4; STACK_WRITE32(sp, AT_PLATFORM);
+
+        sp -= 4; STACK_WRITE32(sp, execfn_ptr);
+        sp -= 4; STACK_WRITE32(sp, AT_EXECFN);
+    }
 
     /* envp pointer array (NULL-terminated), then argv, then argc. */
     sp -= 4; STACK_WRITE32(sp, 0);
