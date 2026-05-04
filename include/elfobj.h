@@ -156,6 +156,12 @@ typedef enum {
 #define SHF_GROUP 0x200
 #define SHF_TLS 0x400
 #endif
+#ifndef SHF_OS_NONCONFORMING
+#define SHF_OS_NONCONFORMING 0x100
+#endif
+#ifndef SHF_EXCLUDE
+#define SHF_EXCLUDE 0x80000000
+#endif
 #ifndef SHF_GNU_RETAIN
 #define SHF_GNU_RETAIN 0x200000
 #endif
