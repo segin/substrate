@@ -270,11 +270,11 @@ they are not mandatory.
             - [x] Property: `fwrite(data, 1, n, f); rewind(f); fread(out, 1, n, f)` ⇒ `memcmp(data, out, n) == 0`. (REQ: REQ-06-0238) <!-- tests/lib/c/property/prop_stdio.c:test_prop_fwrite_fread_roundtrip -->
             - [x] Property: `ftell()` after `fseek(f, off, SEEK_SET)` returns `off`. (REQ: REQ-06-0239) <!-- tests/lib/c/property/prop_stdio.c:test_prop_ftell_after_fseek -->
             - [x] Property: `ungetc(c, f); fgetc(f)` returns `c` for any valid `c` ≠ `EOF`. (REQ: REQ-06-0240) <!-- tests/lib/c/property/prop_stdio.c:test_prop_ungetc_fgetc -->
-        - [ ] **Fuzz Tests (`tests/lib/c/fuzz/fuzz_printf.c`):** (REQ: REQ-06-0241)
-            - [ ] Fuzz `snprintf()` with random format strings and random arguments. (REQ: REQ-06-0242)
-            - [ ] Verify no buffer overflows (write to bounded buffer, check sentinel bytes). (REQ: REQ-06-0243)
-            - [ ] Verify return value consistency (re-call with larger buffer, compare output). (REQ: REQ-06-0244)
-            - [ ] Fuzz `vsnprintf()` with extreme widths/precisions. (REQ: REQ-06-0245)
+        - [x] **Fuzz Tests (`tests/lib/c/fuzz/fuzz_printf.c`):** (REQ: REQ-06-0241) <!-- tests/lib/c/fuzz/fuzz_printf.c -->
+            - [x] Fuzz `snprintf()` with random format strings and random arguments. (REQ: REQ-06-0242) <!-- tests/lib/c/fuzz/fuzz_printf.c:fuzz_snprintf_random -->
+            - [x] Verify no buffer overflows (write to bounded buffer, check sentinel bytes). (REQ: REQ-06-0243) <!-- tests/lib/c/fuzz/fuzz_printf.c:fuzz_snprintf_sentinels -->
+            - [x] Verify return value consistency (re-call with larger buffer, compare output). (REQ: REQ-06-0244) <!-- tests/lib/c/fuzz/fuzz_printf.c:fuzz_snprintf_return_consistency -->
+            - [x] Fuzz `vsnprintf()` with extreme widths/precisions. (REQ: REQ-06-0245) <!-- tests/lib/c/fuzz/fuzz_printf.c:fuzz_vsnprintf_extremes -->
         - [ ] **Fuzz Tests (`tests/lib/c/fuzz/fuzz_scanf.c`):** (REQ: REQ-06-0246)
             - [ ] Fuzz `sscanf()` with random format strings and random input strings. (REQ: REQ-06-0247)
             - [ ] Verify no crashes, no buffer overflows, return value ≥ 0 or `EOF`. (REQ: REQ-06-0248)
