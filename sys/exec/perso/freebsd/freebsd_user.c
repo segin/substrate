@@ -365,6 +365,31 @@ int sys_freebsd_unlinkat(int dirfd, const char *path, int flag) {
     return kern_unlinkat(dirfd, kpath, freebsd_atflags(flag));
 }
 
+/* ------------------------------------------------------------------
+ * chown/chmod family — wire each FreeBSD syscall number to a handler
+ * with the right symlink-follow semantics.  Substrate has:
+ *   sys_chmod(path, mode)              — follows symlinks
+ *   sys_fchmod(fd, mode)               — by fd
+ *   sys_lchown(path, uid, gid)         — does NOT follow symlinks
+ *   sys_fchown(fd, uid, gid)           — by fd
+ *   sys_fchownat(dirfd, path, uid, gid, flag) — handles both modes
+ *   kern_chmodat(dirfd, path, mode, flag)     — handles both modes
+ * Missing in native: a chown(path) that DOES follow, and an lchmod
+ * that does NOT.  We synthesize them here using the at-variants.
+ * ------------------------------------------------------------------ */
+
+int sys_freebsd_chown(const char *path, int uid, int gid) {
+    /* FreeBSD chown(2) follows symlinks.  sys_fchownat with flag=0
+     * gives that semantic and already does its own copyinstr. */
+    return sys_fchownat(AT_FDCWD, path, uid, gid, 0);
+}
+
+int sys_freebsd_lchmod(const char *path, int mode) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    return kern_chmodat(AT_FDCWD, kpath, mode, AT_SYMLINK_NOFOLLOW);
+}
+
 int sys_freebsd13_fstatat(int dirfd, const char *path, struct freebsd13_stat *buf, int flags) {
     char kpath[256];
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;

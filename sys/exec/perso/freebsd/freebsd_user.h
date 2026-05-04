@@ -419,4 +419,9 @@ int sys_freebsd_renameat(int olddir, const char *oldpath, int newdir, const char
 int sys_freebsd_symlinkat(const char *target, int newdir, const char *newpath);
 int sys_freebsd_unlinkat(int dirfd, const char *path, int flag);
 
+/* chown/chmod family.  Substrate native chown does not follow symlinks
+ * but FreeBSD's chown does; lchmod has no native equivalent. */
+int sys_freebsd_chown(const char *path, int uid, int gid);
+int sys_freebsd_lchmod(const char *path, int mode);
+
 #endif /* _FREEBSD_USER_H */

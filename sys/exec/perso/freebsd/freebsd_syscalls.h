@@ -93,6 +93,10 @@ struct freebsd13_stat;
 #define FREEBSD_SYS_socketpair 135
 #define FREEBSD_SYS_mkdir      136
 #define FREEBSD_SYS_rmdir      137
+#define FREEBSD_SYS_fchown     123
+#define FREEBSD_SYS_fchmod     124
+#define FREEBSD_SYS_lchown     254
+#define FREEBSD_SYS_lchmod     274
 #define FREEBSD_SYS_getrlimit_old  144  /* compat_43 getrlimit */
 #define FREEBSD_SYS_setrlimit_old  145  /* compat_43 setrlimit */
 #define FREEBSD_SYS_freebsd4_uname   164
