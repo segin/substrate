@@ -8,6 +8,7 @@
 #include <sys/file.h>
 #include <sys/kern_syscalls.h>
 #include <sys/copy.h>
+#include <sys/fcntl.h>
 #include <exec/perso/compat.h>
 #include <exec/perso/freebsd/freebsd_user.h>
 #include <exec/perso/freebsd/freebsd_syscalls.h>
@@ -15,6 +16,9 @@
 #include <vfs/vfs.h>
 #include <string.h>
 #include <termios.h>
+
+extern file_t *file_alloc(void);
+extern void file_free(file_t *f);
 
 
 
@@ -397,23 +401,181 @@ int sys_fdatasync(int fd) {
     return sys_fsync(fd);
 }
 
-/* Networking stubs - Substrate has no network stack */
-int sys_accept(int s, void *name, int *namelen) { (void)s; (void)name; (void)namelen; return -ENOSYS; }
-int sys_accept4(int s, void *name, int *namelen, int flags) { (void)s; (void)name; (void)namelen; (void)flags; return -ENOSYS; }
-int sys_bind(int s, const void *name, int namelen) { (void)s; (void)name; (void)namelen; return -ENOSYS; }
-int sys_listen(int s, int backlog) { (void)s; (void)backlog; return -ENOSYS; }
-int sys_socket(int domain, int type, int protocol) { (void)domain; (void)type; (void)protocol; return -ENOSYS; }
-int sys_connect(int s, const void *name, int namelen) { (void)s; (void)name; (void)namelen; return -ENOSYS; }
-ssize_t sys_sendto(int s, const void *buf, size_t len, int flags, const void *to, int tolen) { (void)s; (void)buf; (void)len; (void)flags; (void)to; (void)tolen; return -ENOSYS; }
-ssize_t sys_recvfrom(int s, void *buf, size_t len, int flags, void *from, int *fromlen) { (void)s; (void)buf; (void)len; (void)flags; (void)from; (void)fromlen; return -ENOSYS; }
-int sys_getsockname(int s, void *name, int *namelen) { (void)s; (void)name; (void)namelen; return -ENOSYS; }
-int sys_getpeername(int s, void *name, int *namelen) { (void)s; (void)name; (void)namelen; return -ENOSYS; }
-int sys_getsockopt(int s, int level, int optname, void *optval, int *optlen) { (void)s; (void)level; (void)optname; (void)optval; (void)optlen; return -ENOSYS; }
-int sys_setsockopt(int s, int level, int optname, const void *optval, int optlen) { (void)s; (void)level; (void)optname; (void)optval; (void)optlen; return -ENOSYS; }
-ssize_t sys_recvmsg(int s, void *msg, int flags) { (void)s; (void)msg; (void)flags; return -ENOSYS; }
-ssize_t sys_sendmsg(int s, const void *msg, int flags) { (void)s; (void)msg; (void)flags; return -ENOSYS; }
-int sys_shutdown(int s, int how) { (void)s; (void)how; return -ENOSYS; }
-int sys_socketpair(int domain, int type, int protocol, int *sv) { (void)domain; (void)type; (void)protocol; (void)sv; return -ENOSYS; }
+/* ============================================================
+ * Sockets — stub implementation
+ *
+ * Substrate has no network stack.  Without these, FreeBSD libc's
+ * __stack_chk_fail attempts to syslog the smash via PF_LOCAL,
+ * gets ENOSYS on socket(), then deliberately abort()s — visible
+ * as sh exiting with code 127 after libedit init.
+ *
+ * Strategy: give every socket() a real fd backed by a no-op
+ * file_t (f_data = NULL, f_type = DTYPE_SOCKET).  Writes are
+ * silently consumed (data discarded — like /dev/null), reads
+ * return 0 (EOF), connect/bind/listen succeed without effect.
+ * accept blocks forever effectively (returns ENOSYS for now;
+ * no caller in the trace exercised it).
+ *
+ * This is enough for any code that just wants to log to syslog,
+ * test for socket support, or open then immediately close.
+ * ============================================================ */
+
+static int sock_alloc_fd(void) {
+    file_t *f = file_alloc();
+    if (!f) return -ENFILE;
+    f->f_type = DTYPE_SOCKET;
+    f->f_flag = FREAD | FWRITE;
+    f->f_data = NULL;
+    /* file_set_path is file-static in kern/syscall.c; inline the copy here. */
+    strncpy(f->f_path, "socket:[stub]", sizeof(f->f_path) - 1);
+    f->f_path[sizeof(f->f_path) - 1] = '\0';
+    int fd = proc_alloc_fd(current_process);
+    if (fd < 0) { file_free(f); return -EMFILE; }
+    proc_set_fd(current_process, fd, f);
+    return fd;
+}
+
+static int sock_check_fd(int s) {
+    if (s < 0 || s >= MAX_FD) return -EBADF;
+    file_t *f = current_process->fds[s];
+    if (!f) return -EBADF;
+    if (f->f_type != DTYPE_SOCKET) return -EINVAL;  /* Substrate has no ENOTSOCK */
+    return 0;
+}
+
+int sys_socket(int domain, int type, int protocol) {
+    (void)domain; (void)type; (void)protocol;
+    return sock_alloc_fd();
+}
+
+int sys_socketpair(int domain, int type, int protocol, int *sv) {
+    (void)domain; (void)type; (void)protocol;
+    if (!sv) return -EFAULT;
+    int s0 = sock_alloc_fd();
+    if (s0 < 0) return s0;
+    int s1 = sock_alloc_fd();
+    if (s1 < 0) {
+        sys_close(s0);
+        return s1;
+    }
+    int kfds[2] = { s0, s1 };
+    if (copyout(kfds, sv, sizeof(kfds)) != 0) {
+        sys_close(s0); sys_close(s1);
+        return -EFAULT;
+    }
+    return 0;
+}
+
+int sys_bind(int s, const void *name, int namelen) {
+    (void)name; (void)namelen;
+    int rc = sock_check_fd(s);
+    return rc < 0 ? rc : 0;
+}
+
+int sys_connect(int s, const void *name, int namelen) {
+    (void)name; (void)namelen;
+    int rc = sock_check_fd(s);
+    return rc < 0 ? rc : 0;
+}
+
+int sys_listen(int s, int backlog) {
+    (void)backlog;
+    int rc = sock_check_fd(s);
+    return rc < 0 ? rc : 0;
+}
+
+int sys_accept(int s, void *name, int *namelen) {
+    (void)name; (void)namelen;
+    int rc = sock_check_fd(s);
+    if (rc < 0) return rc;
+    /* No incoming connections will ever arrive on a stub socket;
+     * surface that via EAGAIN so callers in non-blocking mode treat
+     * it as a transient and back off. */
+    return -EAGAIN;
+}
+
+int sys_accept4(int s, void *name, int *namelen, int flags) {
+    (void)flags;
+    return sys_accept(s, name, namelen);
+}
+
+ssize_t sys_sendto(int s, const void *buf, size_t len, int flags,
+                   const void *to, int tolen) {
+    (void)buf; (void)flags; (void)to; (void)tolen;
+    int rc = sock_check_fd(s);
+    if (rc < 0) return rc;
+    /* Discard the data — no network, no syslog daemon, nothing to
+     * write to.  Reporting full-byte success keeps callers (e.g.
+     * libc's syslog client) satisfied. */
+    return (ssize_t)len;
+}
+
+ssize_t sys_recvfrom(int s, void *buf, size_t len, int flags,
+                     void *from, int *fromlen) {
+    (void)buf; (void)len; (void)flags; (void)from; (void)fromlen;
+    int rc = sock_check_fd(s);
+    if (rc < 0) return rc;
+    return 0;  /* EOF on stub socket */
+}
+
+ssize_t sys_sendmsg(int s, const void *msg, int flags) {
+    (void)msg; (void)flags;
+    int rc = sock_check_fd(s);
+    if (rc < 0) return rc;
+    /* We don't parse struct msghdr here.  Pretend we sent zero
+     * bytes — most syslog-style users only check for a non-negative
+     * return.  If a caller actually relies on the byte count we
+     * can revisit. */
+    return 0;
+}
+
+ssize_t sys_recvmsg(int s, void *msg, int flags) {
+    (void)msg; (void)flags;
+    int rc = sock_check_fd(s);
+    if (rc < 0) return rc;
+    return 0;
+}
+
+int sys_getsockname(int s, void *name, int *namelen) {
+    (void)name;
+    int rc = sock_check_fd(s);
+    if (rc < 0) return rc;
+    if (namelen) {
+        int zero = 0;
+        copyout(&zero, namelen, sizeof(int));
+    }
+    return 0;
+}
+
+int sys_getpeername(int s, void *name, int *namelen) {
+    (void)name; (void)namelen;
+    int rc = sock_check_fd(s);
+    if (rc < 0) return rc;
+    return -EINVAL;  /* "not connected" — Substrate has no ENOTCONN */
+}
+
+int sys_getsockopt(int s, int level, int optname, void *optval, int *optlen) {
+    (void)level; (void)optname; (void)optval;
+    int rc = sock_check_fd(s);
+    if (rc < 0) return rc;
+    if (optlen) {
+        int zero = 0;
+        copyout(&zero, optlen, sizeof(int));
+    }
+    return 0;
+}
+
+int sys_setsockopt(int s, int level, int optname, const void *optval, int optlen) {
+    (void)level; (void)optname; (void)optval; (void)optlen;
+    int rc = sock_check_fd(s);
+    return rc < 0 ? rc : 0;
+}
+
+int sys_shutdown(int s, int how) {
+    (void)how;
+    int rc = sock_check_fd(s);
+    return rc < 0 ? rc : 0;
+}
 
 int sys_pdfork(int *fdp, int flags) { (void)fdp; (void)flags; return -ENOSYS; }
 
