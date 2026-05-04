@@ -1190,6 +1190,18 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     }
 
     uint32_t entry = main_entry;
+    if (interp_len == 0 && image && image->ehdr.e_type == 3) {
+        /* No PT_INTERP and the main image is ET_DYN.  Two cases:
+         *   1. The dynamic linker is being run directly (e.g. ldd execs
+         *      /libexec/ld-elf.so.1 with the target binary as argv[1]).
+         *   2. A PIE executable that links itself.
+         * In both cases AT_BASE must equal the load base of the program
+         * the auxv describes — for FreeBSD rtld that's how _rtld_start
+         * recovers its own mapbase before any relocation has happened.
+         * Without this, init_rtld() reads aux_info[AT_BASE]=0, computes
+         * dynamic = 0 + p_vaddr (e.g. 0x1c1d0), and faults. */
+        at_base = main_load_base;
+    }
     if (interp_len > 0) {
         if (elf_debug_enabled() || cmdline_debug_enabled("perso:linux")) {
             kprint("execve: Loading interpreter: ");
