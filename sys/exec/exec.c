@@ -100,23 +100,19 @@ void exec_maybe_unpin_current_thread(int from_user) {
  * Reads the first chunk of the file to determine the format, then calls the
  * appropriate loader.
  */
-/*
- * NOTE(2026-05): Removing the [edis]/[exve] kprints below causes init exec
- * to hang on first invocation under single-CPU configs.  The prints are
- * inadvertently providing memory/serialization barriers that paper over a
- * timing race somewhere between exec_pin_current_thread() and the new
- * program actually running.  Keeping them in for now until the underlying
- * race is identified — they are cheap enough relative to a full process
- * exec, and the kernel already prints during exec under syscall_trace.
- */
 int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
-    kprint("[edis] enter\n");
+    /* Diagnostic: removing this barrier reliably hangs init exec on the
+     * first invocation under single-CPU configs (kprint here in development
+     * accidentally provided the same effect via UART-write serialization).
+     * The race is somewhere between exec_pin_current_thread()'s writes to
+     * thread flags and the first user-visible action of exec_dispatch,
+     * likely an interrupt-context reader of needs_resched or bound_cpu
+     * seeing a stale value.  Keep until we identify the real source. */
+    __sync_synchronize();
     if (!path) return -ENOENT;
 
-    kprint("[edis] open\n");
     int fd = kern_open(path, O_RDONLY, 0);
     if (fd < 0) return fd;
-    kprint("[edis] open ok\n");
 
     file_t *f = current_process->fds[fd];
     if (!f || !f->f_data) {
@@ -130,21 +126,17 @@ int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
         return -EACCES;
     }
 
-    kprint("[edis] read\n");
     char header_buf[256];
     int len = kern_read(fd, header_buf, sizeof(header_buf));
     if (len < 0) {
         kern_close(fd);
         return len;
     }
-    kprint("[edis] read ok\n");
 
     // Iterate through handlers
     struct exec_binary_handler *h = exec_handlers;
     while (h) {
-        kprint("[edis] try handler\n");
         if (h->check && h->check(path, header_buf, len) == 0) {
-            kprint("[edis] match\n");
             if (h->load) {
                 int ret = h->load(fd, path, argv, envp);
                 if (ret != 0) {
@@ -169,7 +161,6 @@ int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
         header_buf[1] == 'E' &&
         header_buf[2] == 'L' &&
         header_buf[3] == 'F') {
-        kprint("[edis] fallback elf_execve\n");
         return elf_execve(fd, path, argv, envp);
     }
 

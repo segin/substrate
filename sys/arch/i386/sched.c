@@ -22,6 +22,8 @@ extern void sched_init_generic(void);
 
 #include <sys/ldt.h>
 
+extern void i386_load_gs_for_thread(thread_t *t);
+
 // Exposed to Generic Scheduler
 void arch_switch_to(thread_t *prev, thread_t *next) {
     // Switch Address Space if needed
@@ -34,9 +36,12 @@ void arch_switch_to(thread_t *prev, thread_t *next) {
         ldt_activate(next->proc);
     }
 
-    /* TODO(gsbase): per-thread %gs TLS reload disabled — caused sh to hang
-     * during early init.  See git blame.  Single-threaded user processes
-     * work because each is the last to set the GDT slot before resuming. */
+    /* Reload per-thread %gs TLS base into the shared GDT_TLS_START slot.
+     * No-op when next->gs_base == 0 (kernel-only threads and user threads
+     * pre-rtld).  Required for multi-threaded user processes — without
+     * this, every thread sees whichever thread set its TCB last, and the
+     * resulting jemalloc/__free crashes look like fixed-address SEGVs. */
+    i386_load_gs_for_thread(next);
 
     switch_to(prev, next);
 }
