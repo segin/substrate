@@ -501,6 +501,75 @@ double erfc(double x) {
 }
 
 /*
+ * tgamma(x) - true Gamma function, Gamma(x).
+ *
+ * C99 7.12.8.4 special-value contract:
+ *   tgamma(NaN)        -> NaN
+ *   tgamma(+0)         -> +Inf, FE_DIVBYZERO
+ *   tgamma(-0)         -> -Inf, FE_DIVBYZERO
+ *   tgamma(neg int)    -> NaN, FE_INVALID (poles)
+ *   tgamma(+Inf)       -> +Inf
+ *   tgamma(-Inf)       -> NaN, FE_INVALID
+ *   tgamma(n+1) == n!  for non-negative integer n
+ *   tgamma(0.5)        == sqrt(pi)
+ *   overflow at large x -> +HUGE_VAL, FE_OVERFLOW
+ *
+ * Implementation: Lanczos approximation (g=7, n=9), with the reflection
+ * formula Gamma(x) = pi / (sin(pi*x) * Gamma(1-x)) used for x < 0.5.
+ * Coefficients per Wikipedia "Lanczos approximation"; gives ~15 digits.
+ */
+double tgamma(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) {
+        if (x > 0) return x;
+        feraiseexcept(FE_INVALID);
+        return NAN;
+    }
+    if (x == 0.0) {
+        feraiseexcept(FE_DIVBYZERO);
+        return signbit(x) ? -INFINITY : INFINITY;
+    }
+
+    /* Negative integer poles */
+    if (x < 0.0 && x == floor(x)) {
+        feraiseexcept(FE_INVALID);
+        return NAN;
+    }
+
+    /* Reflection formula for x < 0.5 */
+    if (x < 0.5) {
+        return M_PI / (sin(M_PI * x) * tgamma(1.0 - x));
+    }
+
+    /* Overflow guard: tgamma(171.624...) overflows double */
+    if (x > 171.624) {
+        feraiseexcept(FE_OVERFLOW);
+        return HUGE_VAL;
+    }
+
+    static const double g = 7.0;
+    static const double p[9] = {
+        0.99999999999980993,
+        676.5203681218851,
+       -1259.1392167224028,
+        771.32342877765313,
+       -176.61502916214059,
+        12.507343278686905,
+       -0.13857109526572012,
+        9.9843695780195716e-6,
+        1.5056327351493116e-7
+    };
+
+    x -= 1.0;
+    double a = p[0];
+    double t = x + g + 0.5;
+    for (int i = 1; i < 9; i++) {
+        a += p[i] / (x + i);
+    }
+    return sqrt(2.0 * M_PI) * pow(t, x + 0.5) * exp(-t) * a;
+}
+
+/*
  * C23 pi-argument trigonometric functions
  */
 double sinpi(double x) {

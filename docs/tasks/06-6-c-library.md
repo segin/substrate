@@ -785,7 +785,7 @@ they are not mandatory.
                 - [x] Implementation: rational polynomial approximation (Cody's or Abramowitz & Stegun). <!-- lib/m/src/math.c:erf uses A&S 7.1.26 --> (REQ: REQ-06-0746)
                 - [x] `erf(0)==0`, `erf(+∞)==1`, `erf(-∞)==-1`, `erfc(0)==1`, `erfc(+∞)==0`. <!-- lib/m/src/math.c:erf,erfc handle these special values --> (REQ: REQ-06-0747)
             - [ ] `tgamma()`, `lgamma()` (with `signgam`): (REQ: REQ-06-0748)
-                - [ ] `tgamma(x)`: true Gamma function, `Γ(x)`. (REQ: REQ-06-0749)
+                - [x] `tgamma(x)`: true Gamma function, `Γ(x)`. <!-- lib/m/src/math.c:tgamma --> (REQ: REQ-06-0749)
                 - [ ] `tgamma(n) == (n-1)!` for positive integers. (REQ: REQ-06-0750)
                 - [ ] Poles at non-positive integers: `tgamma(0)` → ±∞, `tgamma(-1)` → NaN + `FE_INVALID`. (REQ: REQ-06-0751)
                 - [ ] `lgamma(x)`: natural log of absolute value of Gamma: `ln|Γ(x)|`. (REQ: REQ-06-0752)
