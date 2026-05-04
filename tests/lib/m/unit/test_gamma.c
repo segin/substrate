@@ -49,8 +49,28 @@ static void test_erf_basic(void) {
     (void)isclosef;
 }
 
+/*
+ * REQ-06-0758: erfc() basic values and complementarity.
+ *   erfc(0)    == 1.0 exact (since erf(0)=0).
+ *   erfc(+inf) == 0.0 exact (saturating limit).
+ *   erfc(-inf) == 2.0 exact (since erf(-inf)=-1).
+ *   erfc(x) + erf(x) ~= 1.0 for all finite x (definitional identity).
+ */
+static void test_erfc(void) {
+    if (erfc(0.0)       != 1.0) FAIL("erfc(0.0)");
+    if (erfc(INFINITY)  != 0.0) FAIL("erfc(+inf)");
+    if (erfc(-INFINITY) != 2.0) FAIL("erfc(-inf)");
+
+    static const double xs[] = { -1.0, -0.5, 0.5, 1.0, 2.0 };
+    for (size_t i = 0; i < sizeof(xs) / sizeof(xs[0]); i++) {
+        double x = xs[i];
+        if (!isclose(erf(x) + erfc(x), 1.0, 1e-6)) FAIL("erf(x) + erfc(x) != 1");
+    }
+}
+
 int main(void) {
     test_erf_basic();
+    test_erfc();
 
     if (failures != 0) {
         printf("FAILURES: %d\n", failures);
