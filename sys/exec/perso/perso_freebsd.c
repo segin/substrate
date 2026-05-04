@@ -47,9 +47,9 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_access]   = &sys_access,
     [FREEBSD_SYS_sync]     = &sys_sync,
     [FREEBSD_SYS_kill]     = &sys_kill,
-    [FREEBSD_SYS_stat]     = (void *)&sys_freebsd11_stat,
+    [FREEBSD_SYS_stat]     = (void *)&sys_freebsd_ostat,    /* 38: pre-FreeBSD-5 ostat */
     [FREEBSD_SYS_getppid]  = &sys_getppid,
-    [FREEBSD_SYS_lstat]    = (void *)&sys_freebsd11_lstat,
+    [FREEBSD_SYS_lstat]    = (void *)&sys_freebsd_olstat,   /* 40: pre-FreeBSD-5 ostat */
     [FREEBSD_SYS_dup]      = &sys_dup,
     [FREEBSD_SYS_pipe]     = (void *)&sys_pipe,
     [FREEBSD_SYS_getegid]  = &sys_getegid,
@@ -62,7 +62,7 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_readlink] = &sys_readlink,
     [FREEBSD_SYS_execve]   = &sys_execve,
     [FREEBSD_SYS_umask]    = &sys_umask,
-    [FREEBSD_SYS_fstat]    = (void *)&sys_freebsd11_fstat,
+    [FREEBSD_SYS_fstat]    = (void *)&sys_freebsd_ofstat,   /* 62: pre-FreeBSD-5 ostat */
     [FREEBSD_SYS_msync]    = &sys_msync,
     [FREEBSD_SYS_vfork]    = &sys_vfork,
     [FREEBSD_SYS_munmap]   = &sys_munmap,
@@ -137,8 +137,9 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_fstat_freebsd13] = (void *)&sys_freebsd13_fstat,
     [FREEBSD_SYS_getrandom] = &sys_getrandom,
     [FREEBSD_SYS_sysctlbyname] = &sys_sysctlbyname,
-    [FREEBSD_SYS_fstatat]   = (void *)&sys_freebsd13_fstatat,
+    [FREEBSD_SYS_fstatat]   = (void *)&sys_freebsd11_fstatat,  /* 493: COMPAT11 freebsd11_stat */
     [FREEBSD_SYS_fstatat_modern] = (void *)&sys_freebsd_fstatat,
+    [FREEBSD_SYS_freebsd11_getdirentries] = (void *)&sys_freebsd11_getdirentries,
     [FREEBSD_SYS_openat]    = (void *)&sys_freebsd_openat,
     [FREEBSD_SYS_getdirentries_freebsd13] = (void *)&sys_freebsd_getdirentries,
     /* at-family wrappers (FreeBSD flag/path translation). */
@@ -283,6 +284,7 @@ static const char *freebsd_names[MAX_SYSCALLS] = {
     [FREEBSD_SYS_unlinkat]   = "unlinkat",
     [FREEBSD_SYS_openat]    = "openat",
     [FREEBSD_SYS_getdirentries_freebsd13] = "getdirentries",
+    [FREEBSD_SYS_freebsd11_getdirentries] = "getdirentries",
 };
 
 
@@ -404,6 +406,7 @@ static struct syscall_fmt freebsd_fmts[MAX_SYSCALLS] = {
     [FREEBSD_SYS_unlinkat]   = { 3, { ARG_INT, ARG_STR, ARG_HEX } },
     [FREEBSD_SYS_openat]    = { 4, { ARG_INT, ARG_STR, ARG_HEX, ARG_HEX } },
     [FREEBSD_SYS_getdirentries_freebsd13] = { 4, { ARG_INT, ARG_PTR, ARG_INT, ARG_PTR } },
+    [FREEBSD_SYS_freebsd11_getdirentries] = { 4, { ARG_INT, ARG_PTR, ARG_INT, ARG_PTR } },
 };
 
 extern char *strncpy(char *dest, const char *src, size_t n);

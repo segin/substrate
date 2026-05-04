@@ -103,6 +103,7 @@ struct freebsd13_stat;
 #define FREEBSD_SYS_freebsd11_lstat  190
 #define FREEBSD_SYS_getrlimit  194
 #define FREEBSD_SYS_setrlimit  195
+#define FREEBSD_SYS_freebsd11_getdirentries 196  /* COMPAT11 narrow dirent */
 #define FREEBSD_SYS_poll       209
 #define FREEBSD_SYS_semget     221
 #define FREEBSD_SYS_semop      222

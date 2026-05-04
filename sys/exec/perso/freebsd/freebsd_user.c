@@ -74,20 +74,29 @@ int sys_freebsd_fstat(int fd, struct freebsd_stat *buf) {
 
 /* freebsd_atflags forward decl — defined further down with the other oflag/atflag helpers. */
 static int freebsd_atflags(int f);
+static void translate_stat_to_freebsd13(struct stat *native, struct freebsd13_stat *fbsd);
 
-/* FreeBSD 12+ fstatat (syscall 552): uses the wide struct freebsd_stat
- * (64-bit ino/time).  ls(1) drives directory traversal through fts(3),
- * which calls fstatat() for every entry — the COMPAT11 syscall 493
- * remains for legacy binaries but modern userland uses 552. */
-int sys_freebsd_fstatat(int dirfd, const char *path, struct freebsd_stat *buf, int flags) {
+/* FreeBSD 12+ fstatat (syscall 552).  Uses the wide stat layout — the
+ * one Substrate types as `struct freebsd13_stat` after offset-by-offset
+ * verification against FreeBSD 14.3/i386 /usr/include/sys/stat.h.
+ * (The other "struct freebsd_stat" in our headers has a 4-byte
+ * tv_sec in struct freebsd_timespec; FreeBSD 14 i386 has int64_t
+ * time_t and 12-byte timespec, which silently shifts every field
+ * after st_atim.  Userland reads garbage, fts(3) sees st_size=0 on
+ * directories and gives up before ever calling getdirentries — this
+ * was the visible "ls only prints `.`" symptom.)
+ *
+ * Wire both COMPAT11 syscall 493 and modern 552 at the same handler
+ * since FreeBSD-13/14 binaries don't issue 493 anyway. */
+int sys_freebsd_fstatat(int dirfd, const char *path, struct freebsd13_stat *buf, int flags) {
     char kpath[256];
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
     struct stat native;
     int ret = kern_fstatat(dirfd, kpath, &native, freebsd_atflags(flags));
     if (ret == 0) {
-        struct freebsd_stat kfbsd;
-        translate_stat_to_freebsd(&native, &kfbsd);
-        if (copyout(&kfbsd, buf, sizeof(struct freebsd_stat)) != 0) return -14;
+        struct freebsd13_stat kfbsd;
+        translate_stat_to_freebsd13(&native, &kfbsd);
+        if (copyout(&kfbsd, buf, sizeof(struct freebsd13_stat)) != 0) return -14;
     }
     return ret;
 }
@@ -367,6 +376,139 @@ int sys_freebsd13_fstatat(int dirfd, const char *path, struct freebsd13_stat *bu
         if (copyout(&kfbsd, buf, sizeof(struct freebsd13_stat)) != 0) return -EFAULT;
     }
     return ret;
+}
+
+/* COMPAT11 fstatat (syscall 493) — narrow ino_t/time_t.  Same dirfd
+ * semantics as the modern variant; only the output struct differs. */
+int sys_freebsd11_fstatat(int dirfd, const char *path, struct freebsd11_stat *buf, int flags) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    struct stat native;
+    int ret = kern_fstatat(dirfd, kpath, &native, freebsd_atflags(flags));
+    if (ret == 0) {
+        struct freebsd11_stat kfbsd;
+        translate_stat_to_freebsd11(&native, &kfbsd);
+        if (copyout(&kfbsd, buf, sizeof(struct freebsd11_stat)) != 0) return -EFAULT;
+    }
+    return ret;
+}
+
+/* Pre-FreeBSD-5 ostat translator + the three syscall handlers (38/40/62).
+ * No native equivalent for st_flags or st_gen; zero them.  16-bit fields
+ * silently truncate values that would overflow on a modern filesystem. */
+static void translate_stat_to_ostat(struct stat *native, struct freebsd_ostat *o) {
+    memset(o, 0, sizeof(*o));
+    o->st_dev = (uint16_t)native->st_dev;
+    o->st_ino = (uint32_t)native->st_ino;
+    o->st_mode = (uint16_t)native->st_mode;
+    o->st_nlink = (uint16_t)native->st_nlink;
+    o->st_uid = (uint16_t)native->st_uid;
+    o->st_gid = (uint16_t)native->st_gid;
+    o->st_rdev = (uint16_t)native->st_rdev;
+    o->st_size = (int32_t)native->st_size;
+    o->st_atim_sec = (int32_t)native->st_atime;
+    o->st_atim_nsec = (int32_t)native->st_atime_nsec;
+    o->st_mtim_sec = (int32_t)native->st_mtime;
+    o->st_mtim_nsec = (int32_t)native->st_mtime_nsec;
+    o->st_ctim_sec = (int32_t)native->st_ctime;
+    o->st_ctim_nsec = (int32_t)native->st_ctime_nsec;
+    o->st_blksize = (int32_t)native->st_blksize;
+    o->st_blocks = (int32_t)native->st_blocks;
+}
+
+int sys_freebsd_ostat(const char *path, struct freebsd_ostat *buf) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    struct stat native;
+    int ret = kern_stat(kpath, &native);
+    if (ret == 0) {
+        struct freebsd_ostat ko;
+        translate_stat_to_ostat(&native, &ko);
+        if (copyout(&ko, buf, sizeof(ko)) != 0) return -EFAULT;
+    }
+    return ret;
+}
+
+int sys_freebsd_olstat(const char *path, struct freebsd_ostat *buf) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    struct stat native;
+    int ret = kern_lstat(kpath, &native);
+    if (ret == 0) {
+        struct freebsd_ostat ko;
+        translate_stat_to_ostat(&native, &ko);
+        if (copyout(&ko, buf, sizeof(ko)) != 0) return -EFAULT;
+    }
+    return ret;
+}
+
+int sys_freebsd_ofstat(int fd, struct freebsd_ostat *buf) {
+    struct stat native;
+    int ret = kern_fstat(fd, &native);
+    if (ret == 0) {
+        struct freebsd_ostat ko;
+        translate_stat_to_ostat(&native, &ko);
+        if (copyout(&ko, buf, sizeof(ko)) != 0) return -EFAULT;
+    }
+    return ret;
+}
+
+/* COMPAT11 getdirentries (syscall 196).  Same shape as the modern
+ * variant but emits the narrow freebsd11_dirent layout (32-bit ino,
+ * no record-level alignment padding).  basep is `long *` (32-bit on
+ * i386). */
+ssize_t sys_freebsd11_getdirentries(int fd, char *buf, unsigned int nbytes, int32_t *basep) {
+    if (fd < 0 || fd >= MAX_FD) return -EBADF;
+    if (!current_process) return -EINVAL;
+    file_t *f = current_process->fds[fd];
+    if (!f || !f->f_data) return -EBADF;
+
+    if (basep) {
+        int32_t start_off = (int32_t)f->f_offset;
+        if (copyout(&start_off, basep, sizeof(int32_t)) != 0) return -EFAULT;
+    }
+
+    if (nbytes > 65536) nbytes = 65536;
+    char *kbuf = kmalloc(nbytes);
+    if (!kbuf) return -ENOMEM;
+
+    unsigned int bpos = 0;
+    struct freebsd11_dirent kfbd;
+
+    for (;;) {
+        struct dirent *d = readdir_fs((fs_node_t *)f->f_data, f->f_offset);
+        if (!d) break;
+
+        uint8_t namlen = (uint8_t)strnlen(d->d_name, 255);
+        /* header=8 bytes + name + NUL, aligned to 4 bytes. */
+        uint16_t reclen = (uint16_t)(((size_t)8 + namlen + 1 + 3) & ~(size_t)3);
+
+        if (bpos + reclen > nbytes) {
+            if (bpos == 0) { kfree(kbuf, nbytes); return -EINVAL; }
+            break;
+        }
+
+        memset(&kfbd, 0, reclen);
+        kfbd.d_fileno = (uint32_t)d->d_ino;
+        kfbd.d_reclen = reclen;
+        kfbd.d_type   = d->d_type;
+        kfbd.d_namlen = namlen;
+        memcpy(kfbd.d_name, d->d_name, namlen);
+        kfbd.d_name[namlen] = '\0';
+
+        memcpy(kbuf + bpos, &kfbd, reclen);
+        bpos += reclen;
+        f->f_offset++;
+    }
+
+    if (bpos == 0) { kfree(kbuf, nbytes); return 0; }
+
+    if (copyout(kbuf, buf, bpos) != 0) {
+        kfree(kbuf, nbytes);
+        return -EFAULT;
+    }
+    kfree(kbuf, nbytes);
+    return (ssize_t)bpos;
 }
 
 /*

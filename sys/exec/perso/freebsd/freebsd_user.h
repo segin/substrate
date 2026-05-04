@@ -188,6 +188,49 @@ struct freebsd_dirent {
     char      d_name[256];
 };
 
+/*
+ * FreeBSD 11 and earlier dirent (32-bit ino_t).  Used by COMPAT11
+ * getdirentries (syscall 196).  Records are NOT 8-byte padded — the
+ * old layout aligns each record only to the natural alignment of the
+ * fields (record start matches a 4-byte boundary).
+ */
+struct freebsd11_dirent {
+    uint32_t  d_fileno;
+    uint16_t  d_reclen;
+    uint8_t   d_type;
+    uint8_t   d_namlen;
+    char      d_name[256];
+};
+
+/*
+ * FreeBSD 4.x and earlier ostat — used by syscalls 38 (stat),
+ * 40 (lstat), 62 (fstat).  Almost no extant binary issues these,
+ * but we declare the layout for completeness.  Note tightly-packed
+ * mix of 16- and 32-bit fields; FreeBSD's ABI here matches GCC's
+ * default layout on i386 (4-byte alignment for uint32, 2-byte for
+ * uint16).
+ */
+struct freebsd_ostat {
+    uint16_t st_dev;
+    uint32_t st_ino;
+    uint16_t st_mode;
+    uint16_t st_nlink;
+    uint16_t st_uid;
+    uint16_t st_gid;
+    uint16_t st_rdev;
+    int32_t  st_size;
+    int32_t  st_atim_sec;
+    int32_t  st_atim_nsec;
+    int32_t  st_mtim_sec;
+    int32_t  st_mtim_nsec;
+    int32_t  st_ctim_sec;
+    int32_t  st_ctim_nsec;
+    int32_t  st_blksize;
+    int32_t  st_blocks;
+    uint32_t st_flags;
+    uint32_t st_gen;
+};
+
 struct freebsd_utsname {
     char sysname[256];
     char nodename[256];
@@ -355,8 +398,15 @@ int sys_freebsd11_stat(const char *path, struct freebsd11_stat *buf);
 int sys_freebsd11_lstat(const char *path, struct freebsd11_stat *buf);
 int sys_freebsd11_fstat(int fd, struct freebsd11_stat *buf);
 int sys_freebsd13_fstatat(int dirfd, const char *path, struct freebsd13_stat *buf, int flags);
-int sys_freebsd_fstatat(int dirfd, const char *path, struct freebsd_stat *buf, int flags);
+int sys_freebsd_fstatat(int dirfd, const char *path, struct freebsd13_stat *buf, int flags);
+int sys_freebsd11_fstatat(int dirfd, const char *path, struct freebsd11_stat *buf, int flags);
 ssize_t sys_freebsd_getdirentries(int fd, char *buf, size_t nbytes, int64_t *basep);
+ssize_t sys_freebsd11_getdirentries(int fd, char *buf, unsigned int nbytes, int32_t *basep);
+
+/* Pre-FreeBSD-5 ostat family.  Almost no extant binary uses these. */
+int sys_freebsd_ostat(const char *path, struct freebsd_ostat *buf);
+int sys_freebsd_olstat(const char *path, struct freebsd_ostat *buf);
+int sys_freebsd_ofstat(int fd, struct freebsd_ostat *buf);
 
 /* FreeBSD at-family wrappers (translate at-flag bits + path copyin). */
 int sys_freebsd_faccessat(int dirfd, const char *path, int amode, int flag);
