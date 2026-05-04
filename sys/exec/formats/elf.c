@@ -1147,18 +1147,21 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
         return -1;
     }
 
+    kprint("[exve] entering elf_execve\n");
     image = elf_image_alloc();
     if (!image) {
         if (fd >= 0) kern_close(fd);
         return -12;
     }
 
+    kprint("[exve] elf_get_image_info\n");
     if (elf_get_image_info(file, image) != 0) {
         kprint("execve: Failed to load executable metadata\n");
         kfree(image, sizeof(*image));
         if (fd >= 0) kern_close(fd);
         return -ENOEXEC;
     }
+    kprint("[exve] image info OK\n");
 
     // Capture arguments and environment
     ret = exec_count_args(argv, &argc, "execve: Too many arguments\n");
@@ -1222,8 +1225,10 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     }
 
     // Switch to new address space NOW so pmap_enter works (uses recursive mapping of active PD)
+    kprint("[exve] pmap_activate\n");
     pmap_activate(new_pmap);
     switched_pmap = 1;
+    kprint("[exve] pmap activated\n");
 
     // Load the ELF
     char interp_path[256];
@@ -1231,7 +1236,9 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     uint32_t at_base = 0;
     uint32_t main_load_base = elf_exec_main_load_base(image);
     uint32_t at_phdr = elf_runtime_phdr_addr(image, main_load_base);
+    kprint("[exve] elf_load main\n");
     uint32_t main_entry = elf_load(file, main_load_base, 1, interp_path, &interp_len);
+    kprint("[exve] elf_load main returned\n");
     if (main_entry == 0) {
         kprint("execve: Failed to load ELF\n");
         goto cleanup;
@@ -1336,6 +1343,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     set_kernel_stack((uint32_t)current_thread->kstack_top);
 
     uint32_t sp;
+    kprint("[exve] exec_setup_stack\n");
     if (exec_setup_stack(new_pmap, &sp, k_argv, argc, k_envp, envc,
                          main_entry, at_base, at_phdr, image) < 0) {
         goto cleanup;

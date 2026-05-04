@@ -100,12 +100,23 @@ void exec_maybe_unpin_current_thread(int from_user) {
  * Reads the first chunk of the file to determine the format, then calls the
  * appropriate loader.
  */
+/*
+ * NOTE(2026-05): Removing the [edis]/[exve] kprints below causes init exec
+ * to hang on first invocation under single-CPU configs.  The prints are
+ * inadvertently providing memory/serialization barriers that paper over a
+ * timing race somewhere between exec_pin_current_thread() and the new
+ * program actually running.  Keeping them in for now until the underlying
+ * race is identified — they are cheap enough relative to a full process
+ * exec, and the kernel already prints during exec under syscall_trace.
+ */
 int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
+    kprint("[edis] enter\n");
     if (!path) return -ENOENT;
 
-    // 1. Open the file to read the header
+    kprint("[edis] open\n");
     int fd = kern_open(path, O_RDONLY, 0);
-    if (fd < 0) return fd; // Propagate error (ENOENT, EACCES)
+    if (fd < 0) return fd;
+    kprint("[edis] open ok\n");
 
     file_t *f = current_process->fds[fd];
     if (!f || !f->f_data) {
@@ -119,20 +130,21 @@ int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
         return -EACCES;
     }
 
-    // 3. Read the header (magic bytes)
+    kprint("[edis] read\n");
     char header_buf[256];
     int len = kern_read(fd, header_buf, sizeof(header_buf));
-    
     if (len < 0) {
         kern_close(fd);
         return len;
     }
-    
-    // 4. Iterate through handlers
+    kprint("[edis] read ok\n");
+
+    // Iterate through handlers
     struct exec_binary_handler *h = exec_handlers;
     while (h) {
+        kprint("[edis] try handler\n");
         if (h->check && h->check(path, header_buf, len) == 0) {
-            // Match found!
+            kprint("[edis] match\n");
             if (h->load) {
                 int ret = h->load(fd, path, argv, envp);
                 if (ret != 0) {
@@ -157,6 +169,7 @@ int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
         header_buf[1] == 'E' &&
         header_buf[2] == 'L' &&
         header_buf[3] == 'F') {
+        kprint("[edis] fallback elf_execve\n");
         return elf_execve(fd, path, argv, envp);
     }
 

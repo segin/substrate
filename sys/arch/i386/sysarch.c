@@ -24,9 +24,14 @@ extern thread_t *current_thread;
  * %gs selector still loads but reads from the wrong (or zeroed) base.
  */
 void i386_load_gs_for_thread(thread_t *t) {
-    if (!t) return;
-    uint32_t base = t->gs_base;
-    gdt_set_gate(GDT_TLS_START, base, 0xFFFFF, 0xF2, 0xC0);
+    /* Only touch the GDT TLS slot if this thread actually established a
+     * gs base via sysarch(I386_SET_GSBASE).  Kernel-only threads (swapper,
+     * syncer, USB poll, vm_pagedaemon, kinit before exec) never set one;
+     * unconditionally rewriting the slot to 0 on every context switch
+     * gains nothing and risks confusing whatever userspace thread held
+     * the slot's contents previously. */
+    if (!t || t->gs_base == 0) return;
+    gdt_set_gate(GDT_TLS_START, t->gs_base, 0xFFFFF, 0xF2, 0xC0);
 }
 
 static int set_gsbase(uint32_t base) {

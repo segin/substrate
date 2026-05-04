@@ -717,7 +717,7 @@ void kinit_task(void *arg) {
             }
         }
         init_argv[argc] = NULL;
-        
+
         if (kern_execve(init_path, init_argv, init_envp) == 0) {
             goto exec_success;
         }
