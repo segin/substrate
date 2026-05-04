@@ -1,64 +1,111 @@
-.TH fegetenv 3 "2026-05-03" "Substrate" "Library Functions Manual"
+.TH FEGETENV 3 "2026-05-03" "Substrate" "Library Functions Manual"
 .SH NAME
-fegetenv, fesetenv \- get and set floating-point environment
+fegetenv, fesetenv \- get and set the floating-point environment
 .SH LIBRARY
 Math Library (libm, \-lm)
 .SH SYNOPSIS
 .nf
 .B #include <fenv.h>
 .PP
-.B "int fegetenv( " fenv_t * envp " );"
-.PP
-.B "int fesetenv( " const fenv_t * envp " );"
+.BI "int fegetenv(fenv_t *" envp );
+.BI "int fesetenv(const fenv_t *" envp );
+.fi
 .SH DESCRIPTION
-The \fBfegetenv()\fR function stores the current floating-point environment
-(rounding mode, exception flags, and exception state) into the object pointed
-to by
-.BR envp .
-
-The \fBfesetenv()\fR function sets the floating-point environment from the
-object pointed to by
-.BR envp .
-This restores both the rounding mode and exception flags.
-
-The default environment is provided by the macro
-.B FE_DFL_ENV,
-which is pre\-initialized for the default rounding mode (round to nearest)
-and no pending exceptions.
-
-On x86, \fBfegetenv()\fR captures the x87 control word/status word or the
-SSE MXCSR register (depending on the target). \fBfesetenv()\fR restores
-the full environment state.
-
+The
+.BR fegetenv ()
+and
+.BR fesetenv ()
+functions save and restore the complete floating-point environment, which
+includes the rounding mode, exception sticky flags, and (on x87) the
+exception masks.
+.SS fegetenv
+.BR fegetenv ()
+stores a snapshot of the current floating-point environment into the object
+pointed to by
+.IR envp .
+.PP
+On x87, this is implemented with the
+.B fnstenv
+instruction, which also has the side effect of masking all x87 exceptions in
+the hardware control word.
+.BR fegetenv ()
+corrects this by immediately reloading the saved control word so that the
+calling program's exception masks are left unchanged.
+.PP
+The value stored in
+.IR *envp
+is opaque; it must not be modified directly.
+It may only be passed to
+.BR fesetenv ()
+or
+.BR feupdateenv (3).
+.SS fesetenv
+.BR fesetenv ()
+installs the floating-point environment from the object pointed to by
+.IR envp .
+This restores the rounding mode, exception flags, and exception masks to the
+saved values.
+.PP
+.BR fesetenv ()
+does
+.I not
+raise any floating-point exceptions (even if the restored sticky flags
+include set exception bits).
+Use
+.BR feupdateenv (3)
+if the saved exceptions should be re-raised.
+.PP
+The special constant
+.B FE_DFL_ENV
+may be passed as
+.IR envp
+to install the default floating-point environment: round-to-nearest, all
+exception flags cleared, all exception traps masked.
 .SH RETURN VALUE
-The \fBfegetenv()\fR and \fBfesetenv()\fR functions return zero on success.
+Both functions return zero on success.
+A non-zero return value indicates failure.
 .SH ERRORS
-The \fBfesetenv()\fR function may fail if
-.B envp
-is not a valid environment object.
-.TP
-.B EINVAL
-The environment object is invalid or corrupted.
+No errors are defined.
+Neither function sets
+.IR errno .
 .SH EXAMPLES
+The following example saves the full environment, modifies the rounding mode
+and clears the exception flags, performs a computation, and then restores the
+original environment:
+.PP
 .nf
+#pragma STDC FENV_ACCESS ON
 #include <fenv.h>
 #include <stdio.h>
 
-int main(void) {
-    fenv_t saved_env;
+int main(void)
+{
+    fenv_t saved;
 
-    /* Save current environment */
-    fegetenv(&saved_env);
+    /* Save the full floating-point environment. */
+    fegetenv(&saved);
 
-    /* Change rounding mode */
-    fesetround(FE_DOWNWARD);
+    /* Modify: switch to round-toward-zero and clear all exceptions. */
+    fesetround(FE_TOWARDZERO);
+    feclearexcept(FE_ALL_EXCEPT);
 
-    /* Perform operations... */
+    volatile double x = 7.0 / 2.0;   /* 3.0 under FE_TOWARDZERO */
+    printf("7.0 / 2.0 (FE_TOWARDZERO) = %g\\n", x);
 
-    /* Restore original environment */
-    fesetenv(&saved_env);
+    /* Restore original environment (does NOT re-raise any exceptions). */
+    fesetenv(&saved);
+
     return 0;
 }
 .fi
+.PP
+To restore to the default environment:
+.PP
+.nf
+fesetenv(FE_DFL_ENV);
+.fi
 .SH SEE ALSO
-\fBfenv\fR(7), \fBfeholdexcept\fR(3), \fBfeupdateenv\fR(3), \fBfegetround\fR(3)
+.BR fenv (7),
+.BR feholdexcept (3),
+.BR feupdateenv (3),
+.BR fegetround (3)

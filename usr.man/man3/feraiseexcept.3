@@ -1,4 +1,4 @@
-.TH Feraiseexcept 3 "2026-05-03" "Substrate" "Library Functions Manual"
+.TH FERAISEEXCEPT 3 "2026-05-03" "Substrate" "Library Functions Manual"
 .SH NAME
 feraiseexcept \- raise floating-point exception flags
 .SH LIBRARY
@@ -7,62 +7,110 @@ Math Library (libm, \-lm)
 .nf
 .B #include <fenv.h>
 .PP
-.B "int feraiseexcept( " int excepts " );"
+.BI "int feraiseexcept(int " excepts );
+.fi
 .SH DESCRIPTION
-The \fBferaiseexcept()\fR function raises the floating\-point exception
-flags specified by the bitwise\-OR of
-.BR excepts .
-This simulates the occurrence of floating-point exceptions without performing
-the actual operation.
-
-The following exceptions may be raised:
-.TP
-.B FE_DIVBY_ERR
-Division by zero.
+The
+.BR feraiseexcept ()
+function raises the floating-point exception flags specified by the bitwise-OR
+expression
+.IR excepts ,
+as if the corresponding exceptional floating-point operations had been
+performed.
+Unlike
+.BR fesetexceptflag (3),
+which only sets the sticky bits,
+.BR feraiseexcept ()
+may trigger a floating-point trap (SIGFPE) if the corresponding exception is
+unmasked.
+.PP
+The argument
+.I excepts
+is a bitwise OR of zero or more of the following macros:
 .TP
 .B FE_INVALID
-Invalid operation (e.g., \fBsqrt(\-1)\fR).
+Raise the invalid-operation exception (for example, 0/0 or
+.BR sqrt (\-1)).
 .TP
-.B FE_INEXACT
-Result is not equal to the mathematical result.
+.B FE_DIVBYZERO
+Raise the division-by-zero exception.
 .TP
 .B FE_OVERFLOW
-Result too large to be represented.
+Raise the overflow exception.
+In accordance with C99 \(sc7.6.2.3, raising
+.B FE_OVERFLOW
+also raises
+.BR FE_INEXACT .
 .TP
 .B FE_UNDERFLOW
-Result is small (subnormal or loss of precision).
+Raise the underflow exception.
+In accordance with C99 \(sc7.6.2.3, raising
+.B FE_UNDERFLOW
+also raises
+.BR FE_INEXACT .
+.TP
+.B FE_INEXACT
+Raise the inexact-result exception.
+.TP
+.B FE_ALL_EXCEPT
+Raise all exception flags.
 .PP
-When \fIFE_OVERFLOW\fR or \fIFE_UNDERFLOW\fR is raised, \fIFE_INEXACT\fR
-is also raised automatically, as overflow and underflow are always accompanied
-by a loss of precision.
-
+When both
+.B FE_INVALID
+and
+.B FE_DIVBYZERO
+are specified together, the implementation may raise them in any order.
+.PP
+Passing zero for
+.I excepts
+is valid and is a no-op.
 .SH RETURN VALUE
-The \fBferaiseexcept()\fR function returns zero on success.
+.BR feraiseexcept ()
+returns zero on success.
+A non-zero return value indicates that the implementation was unable to raise
+one or more of the requested exceptions.
 .SH ERRORS
-No errors are defined. The function does not set
-.BR errno .
+No errors are defined.
+The function does not set
+.IR errno .
 .SH EXAMPLES
+The following example raises
+.B FE_INVALID
+and
+.BR FE_OVERFLOW ,
+then tests the resulting flags.
+Note that raising
+.B FE_OVERFLOW
+also sets
+.BR FE_INEXACT .
+.PP
 .nf
+#pragma STDC FENV_ACCESS ON
 #include <fenv.h>
 #include <stdio.h>
-#include <math.h>
 
-int main(void) {
-    /* Simulate raising an invalid operation exception */
+int main(void)
+{
+    feclearexcept(FE_ALL_EXCEPT);
+
     feraiseexcept(FE_INVALID);
+    if (fetestexcept(FE_INVALID))
+        printf("FE_INVALID is set.\\n");
 
-    if (fetestexcept(FE_INVALID)) {
-        printf("Invalid operation flag is set\\n");
-    }
+    feclearexcept(FE_ALL_EXCEPT);
 
-    /* Simulate overflow (which also implies inexact) */
+    /* Raising FE_OVERFLOW implicitly also sets FE_INEXACT (C99 s7.6.2.3). */
     feraiseexcept(FE_OVERFLOW);
+    if (fetestexcept(FE_OVERFLOW))
+        printf("FE_OVERFLOW is set.\\n");
+    if (fetestexcept(FE_INEXACT))
+        printf("FE_INEXACT is implicitly set by FE_OVERFLOW.\\n");
 
-    if (fetestexcept(FE_INEXACT)) {
-        printf("Inexact flag is implicitly set by overflow\\n");
-    }
     return 0;
 }
 .fi
 .SH SEE ALSO
-\fBfenv\fR(7), \fBfeclearexcept\fR(3), \fBfegetexceptflag\fR(3), \fBfetestexcept\fR(3)
+.BR fenv (7),
+.BR feclearexcept (3),
+.BR fetestexcept (3),
+.BR fesetexceptflag (3)
