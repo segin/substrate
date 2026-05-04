@@ -334,11 +334,77 @@ static void prop_nextafter_distinct(void) {
     }
 }
 
+/*
+ * scalbn(x, 0) == x  bit-exactly for every input.
+ * (REQ-06-0733)
+ *
+ * scalbn(x, n) computes x * FLT_RADIX^n; with n == 0 the multiplier is 1
+ * and the result must be x with no rounding, no flag activity, and no
+ * change to the bit pattern (signed zeros and infinities preserved).  We
+ * compare bit patterns via memcpy to side-step the NaN-not-equal-self rule
+ * and to catch silent sign-bit changes on zero or infinity inputs.
+ *
+ * We assert on 1000 deterministic random samples from the xorshift
+ * generator (skipping NaN, since memcpy bit-equality on NaN is the right
+ * thing here and we want the property to hold on every non-NaN input
+ * actually drawn).  Boundary cases follow the requested set: signed zeros,
+ * unit magnitudes, the smallest and largest finite normals, and the
+ * infinities.
+ */
+static void prop_scalbn_zero_exp(void) {
+    int generated = 0;
+    int attempts = 0;
+    const int target = 1000;
+    const int attempt_cap = 100000;
+
+    while (generated < target && attempts < attempt_cap) {
+        attempts++;
+        double x = xs_next_double();
+        if (isnan(x)) continue;
+
+        double r = scalbn(x, 0);
+        uint64_t xb, rb;
+        memcpy(&xb, &x, sizeof(xb));
+        memcpy(&rb, &r, sizeof(rb));
+        if (xb != rb) {
+            FAIL("scalbn(x, 0) != x bit-exact on random sample");
+            return;
+        }
+        generated++;
+    }
+
+    if (generated < target) {
+        FAIL("xorshift generator failed to produce enough non-NaN samples for scalbn");
+        return;
+    }
+
+    static const double boundary[] = {
+        0.0, -0.0,
+        1.0, -1.0,
+        DBL_MIN, -DBL_MIN,
+        DBL_MAX, -DBL_MAX,
+        INFINITY, -INFINITY,
+    };
+    const int nb = (int)(sizeof(boundary) / sizeof(boundary[0]));
+    for (int i = 0; i < nb; i++) {
+        double x = boundary[i];
+        double r = scalbn(x, 0);
+        uint64_t xb, rb;
+        memcpy(&xb, &x, sizeof(xb));
+        memcpy(&rb, &r, sizeof(rb));
+        if (xb != rb) {
+            FAIL("scalbn(x, 0) != x bit-exact at boundary");
+            return;
+        }
+    }
+}
+
 int main(void) {
     prop_frexp_ldexp_roundtrip();
     prop_modf_sum();
     prop_copysign_sign();
     prop_nextafter_distinct();
+    prop_scalbn_zero_exp();
 
     if (failures == 0) {
         printf("All property tests passed.\n");
