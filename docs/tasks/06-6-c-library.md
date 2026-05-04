@@ -275,10 +275,10 @@ they are not mandatory.
             - [x] Verify no buffer overflows (write to bounded buffer, check sentinel bytes). (REQ: REQ-06-0243) <!-- tests/lib/c/fuzz/fuzz_printf.c:fuzz_snprintf_sentinels -->
             - [x] Verify return value consistency (re-call with larger buffer, compare output). (REQ: REQ-06-0244) <!-- tests/lib/c/fuzz/fuzz_printf.c:fuzz_snprintf_return_consistency -->
             - [x] Fuzz `vsnprintf()` with extreme widths/precisions. (REQ: REQ-06-0245) <!-- tests/lib/c/fuzz/fuzz_printf.c:fuzz_vsnprintf_extremes -->
-        - [ ] **Fuzz Tests (`tests/lib/c/fuzz/fuzz_scanf.c`):** (REQ: REQ-06-0246)
-            - [ ] Fuzz `sscanf()` with random format strings and random input strings. (REQ: REQ-06-0247)
-            - [ ] Verify no crashes, no buffer overflows, return value ≥ 0 or `EOF`. (REQ: REQ-06-0248)
-            - [ ] Fuzz scanset patterns (`%[...]`) with adversarial character classes. (REQ: REQ-06-0249)
+        - [x] **Fuzz Tests (`tests/lib/c/fuzz/fuzz_scanf.c`):** <!-- tests/lib/c/fuzz/fuzz_scanf.c --> (REQ: REQ-06-0246)
+            - [x] Fuzz `sscanf()` with random format strings and random input strings. <!-- tests/lib/c/fuzz/fuzz_scanf.c:fuzz_sscanf_random --> (REQ: REQ-06-0247)
+            - [x] Verify no crashes, no buffer overflows, return value ≥ 0 or `EOF`. <!-- tests/lib/c/fuzz/fuzz_scanf.c:fuzz_sscanf_sentinels --> (REQ: REQ-06-0248)
+            - [x] Fuzz scanset patterns (`%[...]`) with adversarial character classes. <!-- tests/lib/c/fuzz/fuzz_scanf.c:fuzz_scanset_adversarial --> (REQ: REQ-06-0249)
     - [ ] **Man Pages:** (REQ: REQ-06-0250, REQ-06-0404, REQ-06-0452, REQ-06-0488, REQ-06-0527, REQ-06-0573, REQ-06-0629, REQ-06-0668, REQ-06-0693, REQ-06-0734, REQ-06-0769, REQ-06-0793, REQ-06-0839)
         - [ ] `man/man3/fopen.3` — File open. Covers `fopen()`, `fdopen()`, `freopen()`. Mode string parsing, `"x"` flag. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0251)
         - [ ] `man/man3/fclose.3` — File close. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO. (REQ: REQ-06-0252)
