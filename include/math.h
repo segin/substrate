@@ -19,8 +19,12 @@
 #define HUGE_VAL     __builtin_huge_val()
 #define HUGE_VALF    __builtin_huge_valf()
 #define HUGE_VALL    __builtin_huge_vall()
+#ifndef INFINITY
 #define INFINITY     __builtin_inff()
+#endif
+#ifndef NAN
 #define NAN          __builtin_nanf("")
+#endif
 
 /* Math error handling */
 #define MATH_ERRNO       1
