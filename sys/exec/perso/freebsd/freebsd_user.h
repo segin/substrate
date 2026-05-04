@@ -355,6 +355,7 @@ int sys_freebsd11_stat(const char *path, struct freebsd11_stat *buf);
 int sys_freebsd11_lstat(const char *path, struct freebsd11_stat *buf);
 int sys_freebsd11_fstat(int fd, struct freebsd11_stat *buf);
 int sys_freebsd13_fstatat(int dirfd, const char *path, struct freebsd13_stat *buf, int flags);
+int sys_freebsd_fstatat(int dirfd, const char *path, struct freebsd_stat *buf, int flags);
 ssize_t sys_freebsd_getdirentries(int fd, char *buf, size_t nbytes, int64_t *basep);
 
 #endif /* _FREEBSD_USER_H */

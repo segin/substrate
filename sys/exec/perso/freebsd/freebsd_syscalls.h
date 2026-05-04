@@ -205,7 +205,7 @@ struct freebsd13_stat;
 #define FREEBSD_SYS_ppoll      545
 #define FREEBSD_SYS_fdatasync  550
 #define FREEBSD_SYS_fstat_freebsd13      551
-#define FREEBSD_SYS_unknown_552          552
+#define FREEBSD_SYS_fstatat_modern       552  /* FreeBSD 12+ wide fstatat (struct freebsd_stat) */
 #define FREEBSD_SYS_fhstat_freebsd13     553
 #define FREEBSD_SYS_getdirentries_freebsd13 554
 #define FREEBSD_SYS_statfs_freebsd13     555

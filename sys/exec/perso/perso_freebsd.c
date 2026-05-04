@@ -138,6 +138,7 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_getrandom] = &sys_getrandom,
     [FREEBSD_SYS_sysctlbyname] = &sys_sysctlbyname,
     [FREEBSD_SYS_fstatat]   = (void *)&sys_freebsd13_fstatat,
+    [FREEBSD_SYS_fstatat_modern] = (void *)&sys_freebsd_fstatat,
     [FREEBSD_SYS_openat]    = (void *)&sys_freebsd_openat,
     [FREEBSD_SYS_getdirentries_freebsd13] = (void *)&sys_freebsd_getdirentries,
 };
@@ -260,6 +261,7 @@ static const char *freebsd_names[MAX_SYSCALLS] = {
     [FREEBSD_SYS_getrandom] = "getrandom",
     [FREEBSD_SYS_sysctlbyname] = "sysctlbyname",
     [FREEBSD_SYS_fstatat]   = "fstatat",
+    [FREEBSD_SYS_fstatat_modern] = "fstatat",
     [FREEBSD_SYS_openat]    = "openat",
     [FREEBSD_SYS_getdirentries_freebsd13] = "getdirentries",
 };
@@ -371,6 +373,7 @@ static struct syscall_fmt freebsd_fmts[MAX_SYSCALLS] = {
     [FREEBSD_SYS_getrandom] = { 3, { ARG_PTR, ARG_INT, ARG_HEX } },
     [FREEBSD_SYS_sysctlbyname] = { 5, { ARG_STR, ARG_PTR, ARG_PTR, ARG_PTR, ARG_INT } },
     [FREEBSD_SYS_fstatat]   = { 4, { ARG_INT, ARG_STR, ARG_PTR, ARG_HEX } },
+    [FREEBSD_SYS_fstatat_modern] = { 4, { ARG_INT, ARG_STR, ARG_PTR, ARG_HEX } },
     [FREEBSD_SYS_openat]    = { 4, { ARG_INT, ARG_STR, ARG_HEX, ARG_HEX } },
     [FREEBSD_SYS_getdirentries_freebsd13] = { 4, { ARG_INT, ARG_PTR, ARG_INT, ARG_PTR } },
 };

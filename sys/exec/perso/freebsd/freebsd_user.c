@@ -71,6 +71,26 @@ int sys_freebsd_fstat(int fd, struct freebsd_stat *buf) {
     return ret;
 }
 
+/* freebsd_atflags forward decl — defined further down with the other oflag/atflag helpers. */
+static int freebsd_atflags(int f);
+
+/* FreeBSD 12+ fstatat (syscall 552): uses the wide struct freebsd_stat
+ * (64-bit ino/time).  ls(1) drives directory traversal through fts(3),
+ * which calls fstatat() for every entry — the COMPAT11 syscall 493
+ * remains for legacy binaries but modern userland uses 552. */
+int sys_freebsd_fstatat(int dirfd, const char *path, struct freebsd_stat *buf, int flags) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    struct stat native;
+    int ret = kern_fstatat(dirfd, kpath, &native, freebsd_atflags(flags));
+    if (ret == 0) {
+        struct freebsd_stat kfbsd;
+        translate_stat_to_freebsd(&native, &kfbsd);
+        if (copyout(&kfbsd, buf, sizeof(struct freebsd_stat)) != 0) return -14;
+    }
+    return ret;
+}
+
 /* FreeBSD 11 Stat Translation */
 static void translate_stat_to_freebsd11(struct stat *native, struct freebsd11_stat *fbsd) {
     memset(fbsd, 0, sizeof(struct freebsd11_stat));
