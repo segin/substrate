@@ -1,7 +1,7 @@
 CC = gcc
 CFLAGS = -m32 -Wall -Wextra -g -I../../../include -O2
 
-all: test_trig prop_trig test_fenv prop_fenv fuzz_fenv
+all: test_trig prop_trig test_fenv prop_fenv fuzz_fenv test_tgmath
 
 test_trig: unit/test_trig.c ../../../lib/m/src/math.c ../../../lib/m/src/fpclassify.c
 	$(CC) $(CFLAGS) -fno-builtin $^ -o $@ -lm
@@ -18,12 +18,16 @@ prop_fenv: property/prop_fenv.c ../../../lib/m/src/fenv.c
 fuzz_fenv: fuzz/fuzz_fenv.c ../../../lib/m/src/fenv.c
 	$(CC) $(CFLAGS) -fno-builtin $^ -o $@ -lm
 
+test_tgmath: unit/test_tgmath.c ../../../lib/m/src/math.c ../../../lib/m/src/mathf.c ../../../lib/m/src/mathl.c ../../../lib/m/src/fpclassify.c ../../../lib/m/src/fenv.c
+	$(CC) $(CFLAGS) -fno-builtin $^ -o $@ -lm
+
 test: all
 	./test_trig
 	./prop_trig
 	./test_fenv
 	./prop_fenv
 	./fuzz_fenv
+	./test_tgmath
 
 clean:
-	rm -f test_trig prop_trig test_fenv prop_fenv fuzz_fenv
+	rm -f test_trig prop_trig test_fenv prop_fenv fuzz_fenv test_tgmath
