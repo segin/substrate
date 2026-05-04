@@ -945,16 +945,22 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
     uint32_t platform_ptr;
     PUSH_STRING("i686", platform_ptr);
 
-    uint8_t rand_buf[16];
+    /* Random buffer used for both AT_RANDOM (Linux, first 16 bytes) and
+     * AT_FBSD_CANARY (FreeBSD, all 64 bytes).  FreeBSD libc's __guard_setup
+     * calls _elf_aux_info(AT_CANARY, &__stack_chk_guard, sizeof(...)) where
+     * __stack_chk_guard is `long[8]` = 32 bytes on i386.  _elf_aux_info
+     * requires AT_CANARYLEN >= buflen, so we must publish at least 32 bytes;
+     * 64 leaves headroom for future LP64 ports (long[8] = 64 bytes). */
+    uint8_t rand_buf[64];
     int rand_rc = random_get_bytes_flags(rand_buf, sizeof(rand_buf), GRND_NONBLOCK);
     if (rand_rc != (int)sizeof(rand_buf)) {
         /* Avoid stalling exec during early boot when entropy is still low. */
         random_get_bytes_flags(rand_buf, sizeof(rand_buf), GRND_INSECURE);
     }
-    sp -= 16;
+    sp -= sizeof(rand_buf);
     sp &= ~15;
     uint32_t rand_ptr = sp;
-    for (int i = 0; i < 4; i++) {
+    for (unsigned i = 0; i < sizeof(rand_buf) / 4; i++) {
         uint32_t val;
         memcpy(&val, &rand_buf[i * 4], 4);
         STACK_WRITE32(sp + i * 4, val);
@@ -1026,16 +1032,17 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
         sp -= 4; STACK_WRITE32(sp, execfn_ptr);
         sp -= 4; STACK_WRITE32(sp, AT_FBSD_EXECPATH);
 
-        /* Stack canary: point at the same 16 random bytes we already pushed
-         * for AT_RANDOM/AT_FBSD_CANARY consumers.  FreeBSD libc copies the
-         * first sizeof(long) bytes into __stack_chk_guard.  Passing a NULL
-         * pointer here leaves __stack_chk_guard at zero, and any non-zero
-         * stack write near the canary slot then trips __stack_chk_fail on
-         * function return — observed as sh aborting after libedit init via
-         * the "syslog then abort()" sequence in __stack_chk_fail. */
+        /* Stack canary: point at the 64 random bytes we already pushed.
+         * FreeBSD libc's __guard_setup requests sizeof(__stack_chk_guard) =
+         * 32 bytes (long[8] on i386), and _elf_aux_info requires
+         * AT_CANARYLEN >= the request.  Publishing 16 here used to fall
+         * through to a sysctl(KERN_ARND) we don't implement, leaving the
+         * guard at the {0,0,'\\n',0xff} terminator canary while compiled
+         * code wrote real (non-terminator) bytes — every function return
+         * tripped __stack_chk_fail and aborted via the syslog/abort path. */
         sp -= 4; STACK_WRITE32(sp, rand_ptr);
         sp -= 4; STACK_WRITE32(sp, AT_FBSD_CANARY);
-        sp -= 4; STACK_WRITE32(sp, 16);
+        sp -= 4; STACK_WRITE32(sp, 64);
         sp -= 4; STACK_WRITE32(sp, AT_FBSD_CANARYLEN);
 
         sp -= 4; STACK_WRITE32(sp, 1403000);
