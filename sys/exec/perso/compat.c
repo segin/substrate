@@ -86,6 +86,8 @@ int64_t sys_freebsd_lseek13(int fd, uint32_t off_lo, uint32_t off_hi, int whence
  * MAP_SHARED=0x001, MAP_PRIVATE=0x002, MAP_FIXED=0x010 have the same values.
  */
 #define FREEBSD_MAP_ANON    0x1000
+#define FREEBSD_MAP_GUARD   0x2000   /* PROT_NONE reservation; rtld uses since
+                                      * osreldate 1200035 (FreeBSD 12.0) */
 #define KERN_MAP_SHARED     0x001
 #define KERN_MAP_PRIVATE    0x002
 #define KERN_MAP_FIXED      0x010
@@ -101,6 +103,14 @@ void *sys_freebsd_mmap(void *addr, size_t len, int prot, int flags, int fd, uint
     int kflags = flags & (KERN_MAP_SHARED | KERN_MAP_PRIVATE | KERN_MAP_FIXED);
     if (flags & FREEBSD_MAP_ANON)
         kflags |= KERN_MAP_ANONYMOUS;
+    /*
+     * MAP_GUARD: an anonymous private reservation, fd ignored.  rtld uses it
+     * (PROT_NONE) to stake out address ranges before overlaying file-backed
+     * segments with MAP_FIXED.  Translate to MAP_PRIVATE|MAP_ANONYMOUS — the
+     * caller's PROT_NONE survives unchanged.
+     */
+    if (flags & FREEBSD_MAP_GUARD)
+        kflags |= KERN_MAP_PRIVATE | KERN_MAP_ANONYMOUS;
     return sys_mmap(addr, len, prot, kflags, fd, offset);
 }
 
