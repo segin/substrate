@@ -1,99 +1,765 @@
 .\" scanf.3 - scanf library function family
-.TH SCANF 3 "March 2026" "Substrate" "Library Functions Manual"
+.TH SCANF 3 "May 2026" "Substrate" "Library Functions Manual"
 .SH NAME
 scanf, fscanf, sscanf, vscanf, vfscanf, vsscanf \- input format conversion
 .SH LIBRARY
-.B libc
+Standard C library (libc, \-lc)
 .SH SYNOPSIS
 .B #include <stdio.h>
+.PP
+.BI "int scanf(const char *restrict " format ", ...);"
+.br
+.BI "int fscanf(FILE *restrict " stream ", const char *restrict " format ", ...);"
+.br
+.BI "int sscanf(const char *restrict " str ", const char *restrict " format ", ...);"
+.PP
 .B #include <stdarg.h>
+.B #include <stdio.h>
 .PP
-.BI "int scanf(const char *" format ", ...);"
-.PP
-.BI "int fscanf(FILE *" stream ", const char *" format ", ...);"
-.PP
-.BI "int sscanf(const char *" str ", const char *" format ", ...);"
-.PP
-.BI "int vscanf(const char *" format ", va_list " ap ");"
-.PP
-.BI "int vfscanf(FILE *" stream ", const char *" format ", va_list " ap ");"
-.PP
-.BI "int vsscanf(const char *" str ", const char *" format ", va_list " ap ");"
+.BI "int vscanf(const char *restrict " format ", va_list " ap );
+.br
+.BI "int vfscanf(FILE *restrict " stream ", const char *restrict " format ", va_list " ap );
+.br
+.BI "int vsscanf(const char *restrict " str ", const char *restrict " format ", va_list " ap );
 .SH DESCRIPTION
 The
 .BR scanf ()
-family of functions scans input according to a
-.I format
+family of functions scans formatted input according to
+.IR format
 as described below.
 This format may contain
-.I "conversion specifiers" ;
-the results from such conversions, if any, are stored in the locations pointed to by the
-.I "pointer arguments"
+.IR "conversion specifications" ;
+the results from such conversions, if any, are stored in the locations
+pointed to by the
+.I pointer arguments
 that follow
-.I format .
+.IR format .
+Each pointer argument must be of a type appropriate for the value
+returned by the corresponding conversion specification.
 .PP
+.BR scanf ()
+reads input from the standard input stream
+.IR stdin .
 .BR fscanf ()
 reads input from the stream pointer
 .IR stream .
-.PP
 .BR sscanf ()
-reads its input from the character string pointed to by
-.IR str .
+reads its input from the null-terminated character string pointed to
+by
+.IR str ;
+reaching the terminating
+.B \(aq\e0\(aq
+is treated as end-of-input.
 .PP
+The
 .BR vscanf (),
 .BR vfscanf (),
 and
 .BR vsscanf ()
-are equivalent to
+functions are analogous to
 .BR scanf (),
 .BR fscanf (),
 and
 .BR sscanf ()
-respectively, except that they are called with a
+respectively, except that they take a
 .I va_list
-instead of a variable number of arguments.
-.SH CONVERSIONS
-The format string consists of a sequence of directives which describe how to process the sequence of input characters.
-If a directive fails, no further input is read, and
-.BR scanf ()
-returns.
-A directive is one of the following:
+in place of a variable number of arguments.  The caller is responsible
+for invoking
+.BR va_start (3)
+before the call and
+.BR va_end (3)
+afterwards.  None of these routines invokes
+.BR va_end (3)
+itself.
+.SS Format of the format string
+The format string is a sequence of
+.I directives
+which are interpreted in order.  A directive is one of the following:
 .IP \(bu 3
 A sequence of white-space characters (space, tab, newline, etc.; see
 .BR isspace (3)).
-This directive matches any amount of white space, including none, in the input.
+This directive matches any amount of white space, including none, in the
+input.  It never causes a matching failure.
 .IP \(bu 3
-An ordinary character (i.e., one other than white space or '%').
-This character must exactly match the next character of input.
+An ordinary character (i.e., one other than white space or
+.BR \(aq%\(aq ).
+This character must exactly match the next character of input; if it
+does not, the directive fails and the differing input character is left
+unread.
 .IP \(bu 3
-A conversion specification, which commences with a '%' (percent) character.
-A sequence of characters from the input is converted according to this specification, and the result is placed in the corresponding pointer argument.
-.PP
-Conversion specifications follow this format:
+A
+.IR "conversion specification" ,
+which commences with a
+.B \(aq%\(aq
+(percent) character.  A sequence of characters from the input is
+converted according to this specification, and (unless assignment was
+suppressed) the result is placed in the corresponding pointer argument.
+If the input does not match the specification, the directive fails:
+this is a
+.IR "matching failure" .
+If input is exhausted before a directive can match, the directive fails:
+this is an
+.IR "input failure" .
+.SS Conversion specifications
+Each conversion specification in
+.I format
+has the following form:
 .PP
 .RS 4
-%[*] [width] [length] type
+.B %[*][\fIwidth\fR][\fIlength\fR]\fIspecifier\fR
 .RE
 .PP
-The optional '*' character indicates assignment suppression: the input is consumed but not stored.
-The optional decimal integer
+A conversion specification is composed of the following components, in
+order:
+.TP
+.B *
+An optional
+.IR "assignment-suppression character" .
+.BR scanf ()
+reads input as directed by the conversion specification but discards
+the input.  No corresponding pointer argument is consumed, and the
+successful conversion is not added to the assignment count returned by
+.BR scanf ().
+.TP
 .I width
-specifies the maximum number of characters to be read for this conversion.
-The
+An optional decimal integer greater than zero that specifies the
+.IR "maximum field width" .
+At most
+.I width
+characters are read from the input when performing the conversion;
+fewer may be read if a matching failure or input failure terminates
+scanning earlier (or if a white-space character is encountered for
+conversions that stop at white space).  The width count includes
+characters that the conversion would otherwise discard, such as a
+leading sign or a
+.B 0x
+prefix.  For
+.B %c
+the field width specifies the exact number of characters to read; if
+no width is given,
+.B 1
+is used.  A field width of zero is invalid.
+.TP
 .I length
-modifiers (e.g.,
-.BR l ,
-.BR ll ,
-.BR h ,
-.BR hh )
-specify the size of the destination.
+An optional length modifier that specifies the size of the destination
+object.  See
+.B "Length modifiers"
+below.
+.TP
+.I specifier
+A single conversion specifier character that selects the conversion to
+be performed.  See
+.B "Conversion specifiers"
+below.
+.PP
+Except for
+.BR %c ,
+.BR %[ ,
+.BR %n ,
+and the literal
+.B %%
+directive, every conversion first skips leading white-space
+characters in the input (as if by
+.BR isspace (3)).
+The skipped white space does not count toward the field width and is
+never an input or matching failure on its own.
+.SS Length modifiers
+The following
+.I length
+modifiers may appear between the field width and the conversion
+specifier; they alter the type of the corresponding pointer argument
+for the integer, floating-point, and
+.B %n
+conversions.
+.TP
+.B hh
+For
+.BR d ,
+.BR i ,
+.BR o ,
+.BR u ,
+.BR x ,
+.BR X ,
+or
+.BR n ,
+the argument is a pointer to
+.I signed char
+or
+.IR "unsigned char" .
+.TP
+.B h
+For
+.BR d ,
+.BR i ,
+.BR o ,
+.BR u ,
+.BR x ,
+.BR X ,
+or
+.BR n ,
+the argument is a pointer to
+.I short
+or
+.IR "unsigned short" .
+.TP
+.B l
+For integer conversions, the argument is a pointer to
+.I long
+or
+.IR "unsigned long" .
+For floating-point conversions
+.RB ( e ,
+.BR E ,
+.BR f ,
+.BR F ,
+.BR g ,
+.BR G ,
+.BR a ,
+.BR A ),
+the argument is a pointer to
+.IR double .
+.TP
+.B ll
+For
+.BR d ,
+.BR i ,
+.BR o ,
+.BR u ,
+.BR x ,
+.BR X ,
+or
+.BR n ,
+the argument is a pointer to
+.I "long long"
+or
+.IR "unsigned long long" .
+.TP
+.B j
+The argument is a pointer to
+.I intmax_t
+or
+.IR uintmax_t .
+.TP
+.B z
+The argument is a pointer to
+.I size_t
+(or, for signed conversions, the corresponding signed type
+.IR ssize_t ).
+.TP
+.B t
+The argument is a pointer to
+.IR ptrdiff_t .
+.TP
+.B L
+For floating-point conversions, the argument is a pointer to
+.IR "long double" .
+.PP
+If a length modifier is supplied that does not match the conversion
+specifier (for example,
+.B %Ld
+or
+.BR %hf ),
+the result is undefined; the Substrate implementation silently uses
+.I int
+or
+.I float
+(as appropriate) for the unrecognized combination.
+.SS Conversion specifiers
+The following conversion specifiers are supported:
+.TP
+.B d
+Matches an optionally signed decimal integer; the next pointer must
+be a pointer to
+.I int
+(or, with a length modifier, the corresponding integer type).
+.TP
+.B i
+Matches an optionally signed integer; the next pointer must be a
+pointer to
+.I int
+(or, with a length modifier, the corresponding integer type).
+The integer is read in base 16 if it begins with
+.B 0x
+or
+.BR 0X ,
+in base 8 if it begins with
+.BR 0 ,
+and in base 10 otherwise.  Only digits valid for the chosen base are
+consumed.
+.TP
+.B o
+Matches an unsigned octal integer; the next pointer must be a pointer
+to
+.I unsigned int
+(or, with a length modifier, the corresponding unsigned type).  The
+input is interpreted in base 8 regardless of any leading
+.BR 0 .
+.TP
+.B u
+Matches an unsigned decimal integer; the next pointer must be a pointer
+to
+.I unsigned int
+(or, with a length modifier, the corresponding unsigned type).
+A leading sign is permitted and is interpreted by the underlying
+.BR strtoull (3)
+conversion.
+.TP
+.BR x ", " X
+Matches an unsigned hexadecimal integer; the next pointer must be a
+pointer to
+.I unsigned int
+(or, with a length modifier, the corresponding unsigned type).  The
+optional prefix
+.B 0x
+or
+.B 0X
+is recognized and consumed.  Both
+.B %x
+and
+.B %X
+behave identically on input.
+.TP
+.B p
+Matches an implementation-defined pointer representation, in the same
+form produced by
+.BR printf (3)
+.BR %p ;
+the next pointer must be a pointer to
+.IR "void *" .
+On Substrate the input is parsed as an unsigned hexadecimal integer
+with an optional
+.B 0x
+prefix.  No sign is accepted.
+.TP
+.BR f ", " F ", " e ", " E ", " g ", " G
+Matches an optionally signed floating-point number, optionally
+followed by an exponent (introduced by
+.B e
+or
+.BR E ).
+The next pointer must be a pointer to
+.I float
+(default), to
+.I double
+(if the
+.B l
+length modifier is supplied), or to
+.I long double
+(if the
+.B L
+modifier is supplied).
+The conversions
+.BR f / F ,
+.BR e / E ,
+and
+.BR g / G
+are equivalent on input.
+.TP
+.BR a ", " A
+Matches an optionally signed hexadecimal floating-point number of the
+form
+.B [\(+-]0x\fIh\fR.\fIh\fRp[\(+-]\fId\fR
+(see
+.BR strtod (3)).
+If the input does not parse as a hexadecimal floating-point number the
+implementation falls back to a decimal floating-point parse, matching
+the behaviour of C99
+.BR strtod (3).
+The pointer type follows the same rules as for the other floating-point
+conversions.
+.TP
+.B c
+Matches a sequence of characters whose length is specified by the
+.IR width
+field
+.RB ( 1
+if no width is supplied).  The next pointer must be a pointer to
+.I char
+large enough to receive the bytes; no terminating null byte is added.
+The usual leading white-space skip is
+.IR "not"
+performed.
+.TP
+.B s
+Matches a sequence of non-white-space characters.  The next pointer
+must be a pointer to
+.I char
+with enough room for the matched sequence
+.I and
+a terminating null byte, which is added automatically.  Leading
+white space is skipped before scanning begins, and scanning stops at
+the first white-space character (which is left in the input) or when
+the field width is exhausted.
+.TP
+.BI [ scanset ]
+Matches a non-empty sequence of characters from the
+.IR scanset .
+The next pointer must be a pointer to
+.I char
+with enough room for the matched sequence
+.I and
+a terminating null byte, which is added automatically.  The usual
+leading white-space skip is
+.IR "not"
+performed.  See
+.B "Scanset specifiers"
+below for the syntax of
+.IR scanset .
+.TP
+.B n
+Stores the number of characters consumed from the input so far through
+the pointer argument; the next pointer must be a pointer to
+.I int
+(or to the type implied by the length modifier).  No input is read,
+no input failure can occur, and the assignment is
+.IR "not"
+counted in the return value.  When combined with
+.B *
+the assignment is suppressed (and is therefore a no-op).
+.TP
+.B %
+Matches a single
+.B \(aq%\(aq
+character in the input.  No conversion or assignment occurs; the
+specification is
+.B %%
+in the format string.
+.SS Scanset specifiers
+A
+.BI [ scanset ]
+conversion matches characters drawn from
+.IR scanset ,
+a list of characters bracketed between
+.B \(aq[\(aq
+and
+.BR \(aq]\(aq .
+The list defines a set of characters; matching stops at the first
+input character not in the set.  At least one character must be matched
+or the conversion fails.
+.PP
+The following syntactic rules apply to
+.IR scanset :
+.IP \(bu 3
+If the first character of
+.I scanset
+is
+.BR \(aq^\(aq ,
+the sense of the set is inverted: the conversion matches characters
+.IR "not"
+in the set.
+.IP \(bu 3
+If
+.B \(aq]\(aq
+appears as the first character of the set (or as the first character
+after a leading
+.BR \(aq^\(aq ),
+it is treated as a literal
+.B \(aq]\(aq
+character in the set, not as the closing bracket.  The set is then
+terminated by the next
+.BR \(aq]\(aq .
+.IP \(bu 3
+A range of characters of the form
+.IB a - b
+specifies all characters between
+.I a
+and
+.I b
+inclusive, in ASCII collating order.  The set
+.B [a-z]
+matches every lowercase letter; the set
+.B [^0-9]
+matches every character that is not a decimal digit.  If
+.I a
+is greater than
+.IR b ,
+the range is interpreted in the reverse order so that the same set is
+constructed; this differs from C99, which leaves such a range
+unspecified.
+.IP \(bu 3
+A
+.B \(aq-\(aq
+appearing as the first or last character of the set (or immediately
+after a leading
+.BR \(aq^\(aq )
+matches a literal hyphen.
+.PP
+The
+.B %[
+conversion does
+.I not
+skip leading white space; if the first input character is not in the
+set, the conversion fails immediately and the offending character is
+left unread.
+.SS Whitespace handling
+A white-space directive in
+.I format
+matches zero or more white-space characters in the input and never
+fails.  Conversions
+.BR d ,
+.BR i ,
+.BR o ,
+.BR u ,
+.BR x ,
+.BR X ,
+.BR e ,
+.BR E ,
+.BR f ,
+.BR F ,
+.BR g ,
+.BR G ,
+.BR a ,
+.BR A ,
+.BR p ,
+and
+.BR s
+each consume any leading white space before parsing.  The conversions
+.BR c ,
+.BR [ ,
+and
+.B n
+do
+.I not
+skip leading white space.  Once a conversion begins, white space is
+treated as a normal character and is recognized only as the terminator
+of conversions that explicitly stop at it (currently only
+.BR s ).
 .SH RETURN VALUE
-These functions return the number of input items successfully matched and assigned, which can be fewer than provided for, or even zero in the event of an early matching failure.
+On success, these functions return the number of input items
+successfully matched and assigned, which can be fewer than provided
+for, or even zero in the event of an early matching failure.  The
+.B %n
+conversion and the
+.B %%
+directive do not contribute to the count, and a conversion suppressed
+with
+.B *
+is not counted even though it consumed input.
+.PP
 The value
 .B EOF
-is returned if the end of input is reached before the first conversion or matching failure occurred.
+is returned if an input failure occurs before the first conversion
+(if any) has completed; in particular, if end-of-file is reached
+before any input could be matched, the return value is
+.BR EOF .
+.PP
+The macro
+.B EOF
+is defined in
+.IR <stdio.h> .
+.SH ERRORS
+The
+.BR scanf ()
+family does not define a fixed set of errors of its own, but it can
+fail because of any error returned by the underlying I/O routines:
+.TP
+.B EAGAIN
+The file descriptor underlying
+.I stream
+has been marked non-blocking
+.RB ( O_NONBLOCK )
+and the read would block.
+.TP
+.B EBADF
+The file descriptor underlying
+.I stream
+is not a valid descriptor open for reading.
+.TP
+.B EILSEQ
+The input contains an invalid character sequence.
+.TP
+.B EINTR
+The read operation was interrupted by a signal before any data was
+read; see
+.BR signal (7).
+.TP
+.B EINVAL
+The conversion specification is invalid (for example, a width of zero
+or an unrecognized specifier).
+.TP
+.B ENOMEM
+Insufficient memory to perform an internal allocation.
+.PP
+.BR sscanf ()
+operates on a memory buffer and never sets
+.IR errno
+itself; only the format-string parser can fail, and that failure is
+reported by returning a value less than the expected number of
+conversions (or
+.B EOF
+if input is empty).
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR scanf (),
+.BR fscanf (),
+.BR sscanf (),
+.BR vscanf (),
+.BR vfscanf (),
+.BR vsscanf ()
+T}	Thread safety	MT-Safe locale
+.TE
+.SH EXAMPLES
+.SS Parsing several integers from one line
+The following program reads three space-separated integers from
+.I stdin
+and reports how many it actually managed to assign:
+.PP
+.RS 4
+.EX
+#include <stdio.h>
+
+int
+main(void)
+{
+    int a, b, c;
+    int n;
+
+    n = scanf("%d %d %d", &a, &b, &c);
+    if (n == EOF) {
+        fprintf(stderr, "input failure before any conversion\en");
+        return 1;
+    }
+
+    printf("matched %d value(s)\en", n);
+    if (n >= 1) printf("a = %d\en", a);
+    if (n >= 2) printf("b = %d\en", b);
+    if (n >= 3) printf("c = %d\en", c);
+    return 0;
+}
+.EE
+.RE
+.PP
+With the input
+.B "12 0x1A 077"
+the program prints
+.BR "matched 3 value(s)" ,
+.BR "a = 12" ,
+.BR "b = 26" ,
+.BR "c = 77" :
+.B %d
+parses
+.B 12
+in base 10,
+.B %d
+on
+.B 0x1A
+matches only the leading
+.B 0
+(the
+.B x
+is not a decimal digit and is left in the input), and parsing of
+.B b
+stops there.  Replacing
+.B %d
+with
+.B %i
+makes the second field parse as hexadecimal and the third as octal:
+.PP
+.RS 4
+.EX
+n = scanf("%i %i %i", &a, &b, &c);   /* "12 0x1A 077" -> 12, 26, 63 */
+.EE
+.RE
+.SS Extracting a substring with a scanset
+A common idiom is to read everything up to (but not including) some
+delimiter.  The following program reads a
+.IR "key=value"
+line and stores the key and the value as separate strings:
+.PP
+.RS 4
+.EX
+#include <stdio.h>
+
+int
+main(void)
+{
+    char key[64];
+    char value[256];
+    int n;
+
+    /*
+     * %63[^=]   key:    up to 63 chars, anything but '='
+     *  =        literal: the '=' separator
+     *  %255[^\en] value:  up to 255 chars, anything but newline
+     */
+    n = scanf("%63[^=]=%255[^\en]", key, value);
+
+    if (n == 2)
+        printf("key=<%s> value=<%s>\en", key, value);
+    else
+        fprintf(stderr, "parse failed (matched %d)\en", n);
+
+    return 0;
+}
+.EE
+.RE
+.PP
+For the input
+.B "PATH=/bin:/usr/bin"
+the program prints
+.BR "key=<PATH> value=</bin:/usr/bin>" .
+The negated scansets stop at the appropriate delimiter without
+consuming it; because
+.B %[
+does not skip leading white space, this idiom also handles keys that
+contain spaces.
+.PP
+To match a literal
+.B \(aq]\(aq
+inside a scanset, place it first:
+.B "%[]abc]"
+matches any of
+.BR \(aq]\(aq ,
+.BR \(aq a\(aq ,
+.BR \(aq b\(aq ,
+or
+.BR \(aq c\(aq .
+To match a literal
+.BR \(aq-\(aq ,
+place it first or last:
+.B "%[-+0-9]"
+matches sign characters and digits.
+.SH STANDARDS
+The
+.BR scanf (),
+.BR fscanf (),
+.BR sscanf (),
+.BR vscanf (),
+.BR vfscanf (),
+and
+.BR vsscanf ()
+functions conform to ISO C99 and POSIX.1-2008.  The
+.B hh ,
+.B ll ,
+.B j ,
+.B z ,
+and
+.B t
+length modifiers, the
+.B a / A
+hexadecimal floating-point conversions, and the
+.B v
+forms were added in C99.  The treatment of an inverted range
+.RB ( a-b
+with
+.IR a " > " b )
+is a Substrate extension; portable code should not rely on it.
 .SH SEE ALSO
+.BR getc (3),
 .BR printf (3),
-.BR strtol (3),
+.BR setlocale (3),
 .BR strtod (3),
-.BR isspace (3)
+.BR strtol (3),
+.BR strtoul (3),
+.BR isspace (3),
+.BR stdarg (3),
+.BR stdio (3)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.
