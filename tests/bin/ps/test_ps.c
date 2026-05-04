@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../ps_impl.h"
+#include "ps_impl.h"
 
 static void test_parse(void) {
     ps_options_t opts;
