@@ -774,7 +774,7 @@ they are not mandatory.
                 - [x] `man/man3/frexp.3` — Extract mantissa and exponent. Covers `frexp()` and `ldexp()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO. <!-- usr.man/man3/frexp.3 --> (REQ: REQ-06-0735)
                 - [x] `man/man3/modf.3` — Decompose to integer and fractional parts. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO. <!-- usr.man/man3/modf.3 --> (REQ: REQ-06-0736)
                 - [x] `man/man3/scalbn.3` — Scale by power of radix. Covers `scalbn()` and `scalbln()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO. <!-- usr.man/man3/scalbn.3 --> (REQ: REQ-06-0737)
-                - [ ] `man/man3/ilogb.3` — Extract exponent. Covers `ilogb()` and `logb()`. Document special return values. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO. (REQ: REQ-06-0738)
+                - [x] `man/man3/ilogb.3` — Extract exponent. Covers `ilogb()` and `logb()`. Document special return values. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO. <!-- usr.man/man3/ilogb.3 --> (REQ: REQ-06-0738)
                 - [ ] `man/man3/nextafter.3` — Next representable value. Covers `nextafter()`, `nexttoward()`, `nextup()`, `nextdown()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO. (REQ: REQ-06-0739)
                 - [ ] `man/man3/copysign.3` — Copy sign of a number. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO. (REQ: REQ-06-0740)
                 - [ ] `man/man3/nan.3` — Generate quiet NaN. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO. (REQ: REQ-06-0741)
