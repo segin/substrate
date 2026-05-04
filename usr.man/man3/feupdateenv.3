@@ -1,65 +1,129 @@
-.TH feupdateenv 3 "2026-05-03" "Substrate" "Library Functions Manual"
+.TH FEUPDATEENV 3 "2026-05-03" "Substrate" "Library Functions Manual"
 .SH NAME
-feupdateenv \- restore environment and re-raise saved exceptions
+feupdateenv \- restore floating-point environment and re-raise saved exceptions
 .SH LIBRARY
 Math Library (libm, \-lm)
 .SH SYNOPSIS
 .nf
 .B #include <fenv.h>
 .PP
-.B "int feupdateenv( " const fenv_t * envp " );"
+.BI "int feupdateenv(const fenv_t *" envp );
+.fi
 .SH DESCRIPTION
-The \fBfeupdateenv()\fR function updates the current floating-point
-environment using the object pointed to by
-.BR envp .
-This object must have been saved by a previous call to
-\fBfeholdexcept()\fR.
-
-The function:
-.TP
-1. Saves any currently set exception flags.
-.TP
-2. Restores the rounding mode and exception state from
-   .B envp.
-.TP
-3. Or\-s the saved exception flags back (re\-raising them).
-
-This allows exception flags that were set during the computation to be
-preserved and raised after restoring the original rounding mode and
-environment. It avoids losing exception information that was raised after
-\fBfeholdexcept()\fR cleared them.
-
-On x86, this corresponds to saving MXCSR/x87 status flags, restoring the
-x87 control word or MXCSR from the saved state, and then re-ORing the
-previously captured flags.
-
+The
+.BR feupdateenv ()
+function performs the following three steps in order:
+.IP 1. 4
+Saves the set of currently raised floating-point exception flags.
+.IP 2. 4
+Restores the floating-point environment (rounding mode, exception masks, and
+exception flags) from the object pointed to by
+.IR envp ,
+as if by calling
+.BR fesetenv (3).
+.IP 3. 4
+Re-raises the exceptions saved in step 1 by calling
+.BR feraiseexcept (3)
+with those flags.
+.PP
+This makes
+.BR feupdateenv ()
+the counterpart of
+.BR feholdexcept (3)
+in the standard save-compute-restore pattern.
+Any exceptions raised during the isolated computation are not lost; they are
+merged back into the restored environment.
+If the restored environment has the corresponding exception traps enabled, the
+re-raised exceptions may generate a signal (SIGFPE).
+.PP
+The argument
+.I envp
+must point to an object previously filled by
+.BR fegetenv (3)
+or
+.BR feholdexcept (3).
+Passing
+.B FE_DFL_ENV
+as
+.I envp
+is also valid; it restores the default environment and then re-raises the saved
+exceptions in that environment.
+.PP
+Use
+.BR fesetenv (3)
+instead of
+.BR feupdateenv ()
+if the exceptions raised during the computation should be silently discarded
+rather than propagated.
 .SH RETURN VALUE
-The \fBfeupdateenv()\fR function returns zero on success.
+.BR feupdateenv ()
+returns zero on success.
+A non-zero return value indicates failure (for example, if
+.I envp
+is invalid).
 .SH ERRORS
-.TP
-.B EINVAL
-The environment object was not saved by a previous
-\fBfeholdexcept()\fR call, or is otherwise invalid.
+No errors are defined.
+The function does not set
+.IR errno .
 .SH EXAMPLES
+The following example shows the complete
+.BR feholdexcept ()
+\(em compute \(em
+.BR feupdateenv ()
+pattern for performing a block of floating-point operations in isolation:
+.PP
 .nf
+#pragma STDC FENV_ACCESS ON
 #include <fenv.h>
-#include <stdio.h>
 #include <math.h>
+#include <stdio.h>
 
-double safe_sqrt(double x) {
+/*
+ * Compute log(x) in an isolated FP environment.
+ * Any exceptions raised are merged back into the caller's environment.
+ */
+double isolated_log(double x)
+{
     fenv_t saved_env;
 
-    /* Save env, clear flags, set default rounding */
+    /* Save current environment; clear all flags; mask all traps. */
     feholdexcept(&saved_env);
 
-    double result = sqrt(x);
-    /* Any exceptions raised during sqrt() are captured */
+    double result = log(x);
 
-    /* Restore saved rounding mode and re-raise any new exceptions */
+    /*
+     * Optionally inspect which exceptions occurred before restoring.
+     * (These are the flags raised only within this block.)
+     */
+    if (fetestexcept(FE_DIVBYZERO))
+        fprintf(stderr, "isolated_log: log(0) -> -Inf\\n");
+    if (fetestexcept(FE_INVALID))
+        fprintf(stderr, "isolated_log: log of negative number\\n");
+
+    /*
+     * Restore the caller's environment and re-raise any new exceptions
+     * via feraiseexcept(), so the caller sees them.
+     */
     feupdateenv(&saved_env);
 
     return result;
 }
+
+int main(void)
+{
+    feclearexcept(FE_ALL_EXCEPT);
+
+    double r = isolated_log(0.0);   /* raises FE_DIVBYZERO */
+    printf("log(0.0) = %g\\n", r);
+
+    /* FE_DIVBYZERO has been propagated back to the caller. */
+    if (fetestexcept(FE_DIVBYZERO))
+        printf("FE_DIVBYZERO is set in the caller.\\n");
+
+    return 0;
+}
 .fi
 .SH SEE ALSO
-\fBfenv\fR(7), \fBfeholdexcept\fR(3), \fBfegetenv\fR(3), \fBfetestexcept\fR(3)
+.BR fenv (7),
+.BR feholdexcept (3),
+.BR fegetenv (3)

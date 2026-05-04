@@ -1,76 +1,203 @@
-.TH FENV 7 "2026-05-03" "Substrate" "Library Functions Manual"
+.TH FENV 7 "2026-05-03" "Substrate" "Programmer's Manual"
 .SH NAME
-fenv \- floating-point environment and exception handling
+fenv \- floating-point environment overview
 .SH LIBRARY
 Math Library (libm, \-lm)
+.SH SYNOPSIS
+.nf
+.B #include <fenv.h>
+.fi
 .SH DESCRIPTION
-The floating-point environment (fenv) provides functions and macros for
-querying and controlling the state and exceptions of floating-point arithmetic.
-It is defined by the C99 standard (7.12) and POSIX.1\-2001.
-
-The fenv subsystem consists of:
+The floating-point environment provides functions and macros for querying and
+controlling the state of floating-point arithmetic, including exception flags
+and rounding modes.
+It is specified by ISO C99 (section 7.6) and POSIX.1\-2001.
+.PP
+The floating-point environment consists of:
 .TP
 .B fenv_t
-A type representing the entire floating-point environment (rounding mode,
-exception flags, and exception state).
+An opaque type representing the entire floating-point environment: rounding
+mode, exception sticky flags, and (on x87) exception mask bits.
+Instances of this type must not be modified directly; use the fenv(3) family
+of functions.
 .TP
-.B feexcept_t
-A type representing the floating-point exception flags.
+.B fexcept_t
+An opaque type representing a snapshot of the floating-point exception flags
+(the sticky bits only, not the exception masks).
 .TP
 .B FE_DFL_ENV
-The default floating-point environment, pre\-initialized for the default
-rounding mode (round to nearest) and no pending exceptions.
-
-.SS Floating-Point Exceptions
-
-The following macros represent individual floating-point exception flags.
-They are bitwise\-representable; \fBfegetexceptflag\fR(3) and
-\fBfesetexceptflag\fR(3) operate on the intersection of masks.
-
-.TS
-l l
-c c
-\fBMacro\fR\fB\t\fBCondition
-\l\fBFE_DIVBY_ERR\tDivision by zero
-\fBFE_INEXACT\tResult is not equal to the mathematical result
-\fBFE_INVALID\tInvalid operation (NaN, undefined domain)
-\fBFE_OVERFLOW\tResult too large to be represented
-\fBFE_UNDERFLOW\tResult is small (subnormal or loss of precision)
-\fBFE_OVERFLOW and FE_UNDERFLOW imply FE_INEXACT
-.TE
-
+A pointer-typed constant that refers to the default floating-point environment,
+which corresponds to round-to-nearest, no exceptions pending, and all exception
+traps masked (non-stop mode).
+Passing
+.B FE_DFL_ENV
+to
+.BR fesetenv (3)
+or
+.BR feupdateenv (3)
+restores this default state.
+.SS Floating-Point Exception Flags
+The following macros represent individual floating-point exception flags
+(sticky bits).
+Each is a distinct power-of-two integer constant suitable for bitwise OR.
+.TP
+.B FE_INVALID
+An invalid operation was performed (for example,
+.BR sqrt (\-1)
+or
+.BR 0.0 / 0.0 ).
+The result is a NaN.
+.TP
+.B FE_DIVBYZERO
+A division by zero occurred (for example,
+.B 1.0 / 0.0 ).
+The result is an infinity.
+.TP
+.B FE_OVERFLOW
+The magnitude of the result exceeds the largest finite representable value.
+The result is rounded to an infinity or the largest finite value depending on
+the rounding mode.
+Raising
+.B FE_OVERFLOW
+also raises
+.BR FE_INEXACT .
+.TP
+.B FE_UNDERFLOW
+The magnitude of the result is smaller than the smallest normalized value and
+precision was lost.
+Raising
+.B FE_UNDERFLOW
+also raises
+.BR FE_INEXACT .
+.TP
+.B FE_INEXACT
+The result cannot be represented exactly; it was rounded.
+.TP
+.B FE_ALL_EXCEPT
+The bitwise OR of all exception flags listed above.
+Passing
+.B FE_ALL_EXCEPT
+to
+.BR feclearexcept (3)
+clears every exception flag at once.
+.PP
+The non-standard extension macro
+.B FE_DENORMAL
+(Intel x86 Denormal Operand exception) may be available on x86 targets.
+It is guarded with:
+.PP
+.nf
+#ifndef __STRICT_ANSI__
+#  define FE_DENORMAL  ...
+#endif
+.fi
+.PP
+Code that must be strictly portable should not use
+.BR FE_DENORMAL .
 .SS Rounding Modes
+The following macros represent the four rounding directions defined by IEEE 754
+and C99.
+They are suitable for use with
+.BR fegetround (3)
+and
+.BR fesetround (3).
+.TP
+.B FE_TONEAREST
+Round to the nearest representable value; ties round to even (the default).
+.TP
+.B FE_DOWNWARD
+Round toward negative infinity (floor).
+.TP
+.B FE_UPWARD
+Round toward positive infinity (ceiling).
+.TP
+.B FE_TOWARDZERO
+Round toward zero (truncation).
+.SS FENV_ACCESS Pragma
+By default, compilers may assume that floating-point flags and rounding modes
+are not observed, allowing them to reorder or eliminate floating-point
+operations.
+To suppress such optimizations when the program inspects or modifies the
+floating-point environment, use:
+.PP
+.nf
+#pragma STDC FENV_ACCESS ON
+.fi
+.PP
+With GCC, the equivalent approach is to compile with
+.B \-frounding\-math
+or to disable fast-math for a translation unit via:
+.PP
+.nf
+#pragma GCC optimize ("no-fast-math")
+.fi
+.PP
+Failing to enable one of these guards may cause the compiler to produce
+incorrect code when the program modifies rounding modes or reads exception
+flags.
+.SS x87 FPU and SSE/MXCSR
+On x86, the floating-point environment resides in two places:
+.TP
+.B x87 (80-bit extended precision)
+The control word (CW, default 0x037F) holds the exception mask and rounding
+bits.
+The status word (SW) holds the sticky exception flags.
+.TP
+.B SSE2 MXCSR (32-bit and 64-bit float/double)
+The MXCSR register (default 0x1F80) combines both the exception mask and
+sticky flags into a single 32-bit register.
+.PP
+On Substrate x86-32, the fenv functions operate on both the x87 CW/SW and the
+MXCSR when SSE is available.
+For strict IEEE 754 compliance in 32-bit mode, code should use
+.I double
+or
+.I float
+operations (which GCC may route through SSE) rather than relying on 80-bit
+x87 extended precision.
+.SS Save, Compute, and Restore Pattern
+The standard pattern for performing a computation in a clean floating-point
+environment without disturbing the caller's environment is:
+.PP
+.nf
+#pragma STDC FENV_ACCESS ON
+#include <fenv.h>
 
-.TS
-l l
-c c
-\fBMacro\fR\fB\t\fBDestination
-\fBFE_TONEAREST\tRound to nearest (default)
-\fBFE_DOWNWARD\tRound toward negative infinity
-\fBFE_UPWARD\tRound toward positive infinity
-\fBFE_TOWARDZERO\tRound toward zero
-.TE
+fenv_t saved;
+feholdexcept(&saved);    /* save env, clear flags, mask traps */
 
-.SS x87/FPU vs SSE/MXCSR
+/* ... perform floating-point computation ... */
 
-On x87 (80-bit extended precision), the environment maps to the x87 control
-word (0x37F default) and status word. On SSE2+, it maps to the MXCSR register
-(0x1F80 default) and FPU status flags. The \fBFENV_ACCESS\fR pragma (if
-supported) tells the compiler that the program inspects fenv state, preventing
-optimizations that assume floating-point side effects are ignored.
-
-.SS Usage Pattern
-
-The typical usage pattern is:
-
-1. Save the current environment with \fBfeholdexcept\fR(3) or
-   \fBfegetenv\fR(3).
-2. Perform floating-point operations.
-3. Test for exceptions with \fBfetestexcept\fR(3).
-4. Restore the saved state with \fBfeupdateenv\fR(3) or \fBfesetenv\fR(3).
-
-.SS SEE ALSO
-
-\fBfeclearexcept\fR(3), \fBfegetexceptflag\fR(3), \fBferaiseexcept\fR(3),
-\fBfetestexcept\fR(3), \fBfegetround\fR(3), \fBfegetenv\fR(3),
-\fBfeholdexcept\fR(3), \fBfeupdateenv\fR(3), \fBmath\fR(7)
+/* optionally inspect new exceptions */
+if (fetestexcept(FE_OVERFLOW))
+    handle_overflow();
+feupdateenv(&saved);     /* restore env, re-raise new exceptions */
+.fi
+.PP
+.BR feholdexcept (3)
+enters "non-stop mode" (all traps masked), allowing exceptions to accumulate
+as sticky flags without generating signals.
+.BR feupdateenv (3)
+merges any exceptions raised during the computation back into the restored
+environment by calling
+.BR feraiseexcept (3).
+.PP
+If the caller does not want to propagate any exceptions raised in the
+computation, use
+.BR fesetenv (3)
+instead of
+.BR feupdateenv (3):
+.PP
+.nf
+fesetenv(&saved);        /* restore env, discard new exceptions */
+.fi
+.SH SEE ALSO
+.BR feclearexcept (3),
+.BR fegetexceptflag (3),
+.BR feraiseexcept (3),
+.BR fetestexcept (3),
+.BR fegetround (3),
+.BR fegetenv (3),
+.BR feholdexcept (3),
+.BR feupdateenv (3),
+.BR math (7)

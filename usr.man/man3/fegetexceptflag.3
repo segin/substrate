@@ -1,4 +1,4 @@
-.TH fegetexceptflag 3 "2026-05-03" "Substrate" "Library Functions Manual"
+.TH FEGETEXCEPTFLAG 3 "2026-05-03" "Substrate" "Library Functions Manual"
 .SH NAME
 fegetexceptflag, fesetexceptflag \- get and set floating-point exception flags
 .SH LIBRARY
@@ -7,55 +7,108 @@ Math Library (libm, \-lm)
 .nf
 .B #include <fenv.h>
 .PP
-.B "int fegetexceptflag( " fe_except_t * exceptflag, " int excepts " );"
-.PP
-.B "int fesetexceptflag( " const fe_except_t * exceptflag, " int excepts " );"
+.BI "int fegetexceptflag(fexcept_t *" flagp ", int " excepts );
+.BI "int fesetexceptflag(const fexcept_t *" flagp ", int " excepts );
+.fi
 .SH DESCRIPTION
-The \fBfegetexceptflag()\fR function stores the current values of the
-exception flags indicated by
-.B excepts
-into the object pointed to by
-.BR exceptflag .
-The stored value may be retrieved later by \fBfesetexceptflag()\fR.
-
-The \fBfesetexceptflag()\fR function sets the exception flags indicated by
-.B excepts
-to the values stored in the object pointed to by
-.BR exceptflag .
-Only the flag bits are affected; the rounding mode is not modified.
-
-The object pointed to by
-.B exceptflag
-must be the same type
-.B fe_except_t
-and must have been previously set by \fBfegetexceptflag()\fR.
-
+The
+.BR fegetexceptflag ()
+and
+.BR fesetexceptflag ()
+functions form a paired save/restore API for floating-point exception sticky
+flags.
+They allow a program to snapshot a subset of the exception flags and restore
+them later without affecting the rounding mode or exception masks.
+.SS fegetexceptflag
+.BR fegetexceptflag ()
+reads the current floating-point exception flags indicated by
+.I excepts
+and stores them in the object pointed to by
+.IR flagp .
+The stored value is an implementation-defined representation of those flags;
+it must be treated as opaque and may only be passed to
+.BR fesetexceptflag ().
+.SS fesetexceptflag
+.BR fesetexceptflag ()
+restores the exception flags indicated by
+.I excepts
+from the object pointed to by
+.IR flagp ,
+which must have been previously set by a call to
+.BR fegetexceptflag ()
+with the same or a superset of
+.IR excepts .
+Only the bits named in
+.I excepts
+are modified; flags not included in
+.I excepts
+are left unchanged.
+.PP
+.BR fesetexceptflag ()
+sets the sticky bits directly in the FPU status word or MXCSR.
+It does
+.I not
+raise floating-point traps, even if the corresponding exception is unmasked.
+This distinguishes it from
+.BR feraiseexcept (3),
+which does trigger traps.
+.PP
+The
+.I excepts
+argument is a bitwise OR of zero or more of the following macros:
+.BR FE_INVALID ,
+.BR FE_DIVBYZERO ,
+.BR FE_OVERFLOW ,
+.BR FE_UNDERFLOW ,
+.BR FE_INEXACT ,
+or
+.BR FE_ALL_EXCEPT .
 .SH RETURN VALUE
-The \fBfegetexceptflag()\fR and \fBfesetexceptflag()\fR functions return
-non\-zero on success, zero on failure.
+Both functions return zero on success.
+A non-zero return value indicates failure (for example, an unsupported flag
+bit was specified in
+.IR excepts ).
 .SH ERRORS
-No errors are defined. These functions do not set
-.BR errno .
+No errors are defined.
+Neither function sets
+.IR errno .
 .SH EXAMPLES
+The following example demonstrates saving the exception flags before a
+computation, clearing them, performing the computation, testing for new
+exceptions, and then restoring the original flags:
+.PP
 .nf
+#pragma STDC FENV_ACCESS ON
 #include <fenv.h>
 #include <stdio.h>
+#include <math.h>
 
-int main(void) {
-    fe_except_t flags;
+int main(void)
+{
+    fexcept_t saved;
 
-    /* Save current exception flags */
-    fegetexceptflag(&flags, FE_DIVBY_ERR | FE_INVALID);
+    /* Snapshot the current flags for FE_INVALID and FE_DIVBYZERO. */
+    fegetexceptflag(&saved, FE_INVALID | FE_DIVBYZERO);
 
-    /* Clear them */
-    feclearexcept(FE_DIVBY_ERR | FE_INVALID);
+    /* Clear those flags before the computation. */
+    feclearexcept(FE_INVALID | FE_DIVBYZERO);
 
-    /* Simulate some operations... */
+    /* Computation that might raise FE_INVALID (sqrt of negative). */
+    volatile double v = -1.0;
+    volatile double r = sqrt(v);
+    (void)r;
 
-    /* Restore original flags */
-    fesetexceptflag(&flags, FE_DIVBY_ERR | FE_INVALID);
+    if (fetestexcept(FE_INVALID))
+        printf("FE_INVALID raised during computation.\\n");
+
+    /* Restore original flags (does NOT trigger traps). */
+    fesetexceptflag(&saved, FE_INVALID | FE_DIVBYZERO);
+
     return 0;
 }
 .fi
 .SH SEE ALSO
-\fBfenv\fR(7), \fBfeclearexcept\fR(3), \fBferaiseexcept\fR(3), \fBfetestexcept\fR(3)
+.BR fenv (7),
+.BR feclearexcept (3),
+.BR feraiseexcept (3),
+.BR fetestexcept (3)

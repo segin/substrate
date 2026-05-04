@@ -1,4 +1,4 @@
-.TH Feclearexcept 3 "2026-05-03" "Substrate" "Library Functions Manual"
+.TH FECLEAREXCEPT 3 "2026-05-03" "Substrate" "Library Functions Manual"
 .SH NAME
 feclearexcept \- clear floating-point exception flags
 .SH LIBRARY
@@ -7,35 +7,90 @@ Math Library (libm, \-lm)
 .nf
 .B #include <fenv.h>
 .PP
-.B "int feclearexcept( " int excepts " );"
+.BI "int feclearexcept(int " excepts );
+.fi
 .SH DESCRIPTION
-The \fBfeclearexcept()\fR function clears the floating-point exception flags
-specified by the bitwise\-OR of
-.B excepts
-(\fIFE_DIVBY_ERR\fR, \fIFE_INVALID\fR, \fFE_INEXACT\fR, etc.).
-
-It corresponds to the x87/FPU status word clearing or the SSE MXCSR flag
-clearing on x86 architectures.
-
+The
+.BR feclearexcept ()
+function clears the floating-point exception sticky flags specified by the
+bitwise-OR expression
+.IR excepts .
+.PP
+The argument
+.I excepts
+is a bitwise OR of zero or more of the following macros:
+.TP
+.B FE_INVALID
+Clear the invalid-operation flag.
+.TP
+.B FE_DIVBYZERO
+Clear the division-by-zero flag.
+.TP
+.B FE_OVERFLOW
+Clear the overflow flag.
+.TP
+.B FE_UNDERFLOW
+Clear the underflow flag.
+.TP
+.B FE_INEXACT
+Clear the inexact-result flag.
+.TP
+.B FE_ALL_EXCEPT
+Clear all exception flags (bitwise OR of all the above).
+.PP
+Passing zero for
+.I excepts
+is valid and is a no-op.
+.PP
+On x86, this function clears the corresponding bits in the x87 FPU status word
+and, when SSE is available, in the MXCSR register.
+.PP
+Unlike
+.BR feraiseexcept (3),
+this function never causes a floating-point trap.
 .SH RETURN VALUE
-The \fBfeclearexcept()\fR function returns zero on success.
+.BR feclearexcept ()
+returns zero on success.
+A non-zero return value indicates that one or more of the requested flags
+could not be cleared (for example, because
+.I excepts
+contains bits not supported by the implementation).
 .SH ERRORS
-No errors are defined. The function does not set
-.B errno.
+No errors are defined.
+The function does not set
+.IR errno .
 .SH EXAMPLES
+The following example raises a division-by-zero exception, tests for it, and
+then clears it:
+.PP
 .nf
+#pragma STDC FENV_ACCESS ON
 #include <fenv.h>
 #include <stdio.h>
 
-int main(void) {
-    feclearexcept(FE_DIVBY_ERR | FE_INVALID);
-    /* Perform operations that might raise exceptions */
-    double result = 1.0 / 0.0;
-    if (fetestexcept(FE_DIVBY_ERR)) {
-        printf("Division by zero detected\\n");
-    }
+int main(void)
+{
+    /* Clear all exception flags before the computation. */
+    feclearexcept(FE_ALL_EXCEPT);
+
+    volatile double zero = 0.0;
+    volatile double result = 1.0 / zero;   /* raises FE_DIVBYZERO */
+    (void)result;
+
+    if (fetestexcept(FE_DIVBYZERO))
+        printf("Division by zero detected.\\n");
+
+    /* Clear only the division-by-zero flag. */
+    feclearexcept(FE_DIVBYZERO);
+
+    if (!fetestexcept(FE_DIVBYZERO))
+        printf("Division-by-zero flag cleared.\\n");
+
     return 0;
 }
 .fi
 .SH SEE ALSO
-\fBfenv\fR(7), \fBfegetexceptflag\fR(3), \fBferaiseexcept\fR(3), \fBfetestexcept\fR(3)
+.BR fenv (7),
+.BR fegetexceptflag (3),
+.BR feraiseexcept (3),
+.BR fetestexcept (3)
