@@ -456,6 +456,37 @@ double atanh(double x) {
 }
 
 /*
+ * erf(x) - error function: 2/sqrt(pi) * integral_0^x e^(-t^2) dt
+ *
+ * Uses Abramowitz & Stegun 7.1.26 rational approximation
+ * (max error ~1.5e-7).  Range: [-1, 1].  Odd function.
+ */
+double erf(double x) {
+    if (isnan(x)) return x;
+    if (x == 0.0) return x;                 /* preserves +0.0/-0.0 (erf is odd) */
+    if (isinf(x)) return (x > 0) ? 1.0 : -1.0;
+
+    double sign = (x < 0) ? -1.0 : 1.0;
+    double absx = fabs(x);
+
+    /* For |x| > 6.0, erf is essentially +/-1 to double precision. */
+    if (absx > 6.0) return sign;
+
+    const double a1 =  0.254829592;
+    const double a2 = -0.284496736;
+    const double a3 =  1.421413741;
+    const double a4 = -1.453152027;
+    const double a5 =  1.061405429;
+    const double p  =  0.3275911;
+
+    double t = 1.0 / (1.0 + p * absx);
+    double y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1)
+                     * t * exp(-absx * absx);
+
+    return sign * y;
+}
+
+/*
  * C23 pi-argument trigonometric functions
  */
 double sinpi(double x) {

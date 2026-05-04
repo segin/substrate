@@ -166,6 +166,9 @@ double nearbyint(double x);
 long lrint(double x);
 long long llrint(double x);
 
+/* Error and gamma functions */
+double erf(double x);
+
 /* Float versions (f suffix) */
 float sinf(float x);
 float cosf(float x);
