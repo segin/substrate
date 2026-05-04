@@ -141,6 +141,16 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_fstatat_modern] = (void *)&sys_freebsd_fstatat,
     [FREEBSD_SYS_openat]    = (void *)&sys_freebsd_openat,
     [FREEBSD_SYS_getdirentries_freebsd13] = (void *)&sys_freebsd_getdirentries,
+    /* at-family wrappers (FreeBSD flag/path translation). */
+    [FREEBSD_SYS_faccessat]  = (void *)&sys_freebsd_faccessat,
+    [FREEBSD_SYS_fchmodat]   = (void *)&sys_freebsd_fchmodat,
+    [FREEBSD_SYS_fchownat]   = (void *)&sys_freebsd_fchownat,
+    [FREEBSD_SYS_linkat]     = (void *)&sys_freebsd_linkat,
+    [FREEBSD_SYS_mkdirat]    = (void *)&sys_freebsd_mkdirat,
+    [FREEBSD_SYS_readlinkat] = (void *)&sys_freebsd_readlinkat,
+    [FREEBSD_SYS_renameat]   = (void *)&sys_freebsd_renameat,
+    [FREEBSD_SYS_symlinkat]  = (void *)&sys_freebsd_symlinkat,
+    [FREEBSD_SYS_unlinkat]   = (void *)&sys_freebsd_unlinkat,
 };
 
 static const char *freebsd_names[MAX_SYSCALLS] = {
@@ -262,6 +272,15 @@ static const char *freebsd_names[MAX_SYSCALLS] = {
     [FREEBSD_SYS_sysctlbyname] = "sysctlbyname",
     [FREEBSD_SYS_fstatat]   = "fstatat",
     [FREEBSD_SYS_fstatat_modern] = "fstatat",
+    [FREEBSD_SYS_faccessat]  = "faccessat",
+    [FREEBSD_SYS_fchmodat]   = "fchmodat",
+    [FREEBSD_SYS_fchownat]   = "fchownat",
+    [FREEBSD_SYS_linkat]     = "linkat",
+    [FREEBSD_SYS_mkdirat]    = "mkdirat",
+    [FREEBSD_SYS_readlinkat] = "readlinkat",
+    [FREEBSD_SYS_renameat]   = "renameat",
+    [FREEBSD_SYS_symlinkat]  = "symlinkat",
+    [FREEBSD_SYS_unlinkat]   = "unlinkat",
     [FREEBSD_SYS_openat]    = "openat",
     [FREEBSD_SYS_getdirentries_freebsd13] = "getdirentries",
 };
@@ -374,6 +393,15 @@ static struct syscall_fmt freebsd_fmts[MAX_SYSCALLS] = {
     [FREEBSD_SYS_sysctlbyname] = { 5, { ARG_STR, ARG_PTR, ARG_PTR, ARG_PTR, ARG_INT } },
     [FREEBSD_SYS_fstatat]   = { 4, { ARG_INT, ARG_STR, ARG_PTR, ARG_HEX } },
     [FREEBSD_SYS_fstatat_modern] = { 4, { ARG_INT, ARG_STR, ARG_PTR, ARG_HEX } },
+    [FREEBSD_SYS_faccessat]  = { 4, { ARG_INT, ARG_STR, ARG_INT, ARG_HEX } },
+    [FREEBSD_SYS_fchmodat]   = { 4, { ARG_INT, ARG_STR, ARG_HEX, ARG_HEX } },
+    [FREEBSD_SYS_fchownat]   = { 5, { ARG_INT, ARG_STR, ARG_INT, ARG_INT, ARG_HEX } },
+    [FREEBSD_SYS_linkat]     = { 5, { ARG_INT, ARG_STR, ARG_INT, ARG_STR, ARG_HEX } },
+    [FREEBSD_SYS_mkdirat]    = { 3, { ARG_INT, ARG_STR, ARG_HEX } },
+    [FREEBSD_SYS_readlinkat] = { 4, { ARG_INT, ARG_STR, ARG_PTR, ARG_INT } },
+    [FREEBSD_SYS_renameat]   = { 4, { ARG_INT, ARG_STR, ARG_INT, ARG_STR } },
+    [FREEBSD_SYS_symlinkat]  = { 3, { ARG_STR, ARG_INT, ARG_STR } },
+    [FREEBSD_SYS_unlinkat]   = { 3, { ARG_INT, ARG_STR, ARG_HEX } },
     [FREEBSD_SYS_openat]    = { 4, { ARG_INT, ARG_STR, ARG_HEX, ARG_HEX } },
     [FREEBSD_SYS_getdirentries_freebsd13] = { 4, { ARG_INT, ARG_PTR, ARG_INT, ARG_PTR } },
 };

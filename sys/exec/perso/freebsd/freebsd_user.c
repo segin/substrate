@@ -1,5 +1,6 @@
 #include "freebsd_user.h"
 #include <sys/kern_syscalls.h>
+#include <sys/syscall_impl.h>
 #include <sys/copy.h>
 #include <sys/stat.h>
 #include <sys/file.h>
@@ -244,9 +245,29 @@ static int freebsd_oflags(int f) {
     return k;
 }
 
-/* FreeBSD AT_SYMLINK_NOFOLLOW=0x200 → kernel AT_SYMLINK_NOFOLLOW=0x100 */
+/*
+ * Translate FreeBSD at-flags (sys/sys/fcntl.h) to Substrate's:
+ *   FreeBSD                       Substrate (Linux-style)
+ *   AT_EACCESS         0x0100  →  (no equivalent; check using ruid)
+ *   AT_SYMLINK_NOFOLLOW 0x0200 →  AT_SYMLINK_NOFOLLOW 0x100
+ *   AT_SYMLINK_FOLLOW   0x0400 →  (default for linkat target)
+ *   AT_REMOVEDIR        0x0800 →  AT_REMOVEDIR        0x200
+ */
+#ifndef AT_REMOVEDIR
+#define AT_REMOVEDIR 0x200
+#endif
+#define FBSD_AT_EACCESS          0x0100
+#define FBSD_AT_SYMLINK_NOFOLLOW 0x0200
+#define FBSD_AT_SYMLINK_FOLLOW   0x0400
+#define FBSD_AT_REMOVEDIR        0x0800
 static int freebsd_atflags(int f) {
-    return (f & 0x200) ? AT_SYMLINK_NOFOLLOW : 0;
+    int k = 0;
+    if (f & FBSD_AT_SYMLINK_NOFOLLOW) k |= AT_SYMLINK_NOFOLLOW;
+    if (f & FBSD_AT_REMOVEDIR)        k |= AT_REMOVEDIR;
+    /* AT_EACCESS not modeled separately by Substrate — checks proceed using
+     * effective creds anyway, so callers see the same answer for the common
+     * case where ruid == euid. */
+    return k;
 }
 
 int sys_freebsd_open(const char *path, int flags, int mode) {
@@ -259,6 +280,80 @@ int sys_freebsd_openat(int dirfd, const char *path, int flags, int mode) {
     char kpath[256];
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
     return kern_openat(dirfd, kpath, freebsd_oflags(flags), mode);
+}
+
+/* ----------------------------------------------------------------------
+ * FreeBSD at-family wrappers
+ *
+ * Where Substrate has a kern_<X>at helper, the wrapper just translates
+ * FreeBSD at-flags and forwards.  Where it doesn't (linkat, renameat,
+ * symlinkat, faccessat, fchownat for the wide-arg case), we fall back
+ * to the non-at variant when the dirfd is AT_FDCWD — that covers the
+ * vast majority of userland paths (sh, coreutils, build systems).
+ * Non-AT_FDCWD dirfds fall through with -ENOSYS until proper kernel
+ * helpers grow for them.
+ * ---------------------------------------------------------------------- */
+
+int sys_freebsd_faccessat(int dirfd, const char *path, int amode, int flag) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    (void)flag;  /* AT_EACCESS handled implicitly */
+    if (dirfd == AT_FDCWD) return kern_access(kpath, amode);
+    return -ENOSYS;
+}
+
+int sys_freebsd_fchmodat(int dirfd, const char *path, int mode, int flag) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    return kern_chmodat(dirfd, kpath, mode, freebsd_atflags(flag));
+}
+
+int sys_freebsd_fchownat(int dirfd, const char *path, int uid, int gid, int flag) {
+    /* sys_fchownat does its own copyinstr and supports arbitrary dirfd.
+     * Just translate the flag bits and forward. */
+    return sys_fchownat(dirfd, path, uid, gid, freebsd_atflags(flag));
+}
+
+int sys_freebsd_linkat(int olddir, const char *oldpath, int newdir, const char *newpath, int flag) {
+    char kold[256], knew[256];
+    if (copyinstr(oldpath, kold, sizeof(kold), NULL) != 0) return -EFAULT;
+    if (copyinstr(newpath, knew, sizeof(knew), NULL) != 0) return -EFAULT;
+    (void)flag;  /* AT_SYMLINK_FOLLOW currently default */
+    if (olddir == AT_FDCWD && newdir == AT_FDCWD) return kern_link(kold, knew);
+    return -ENOSYS;
+}
+
+int sys_freebsd_mkdirat(int dirfd, const char *path, int mode) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    return kern_mkdirat(dirfd, kpath, mode);
+}
+
+int sys_freebsd_readlinkat(int dirfd, const char *path, char *buf, size_t bufsiz) {
+    /* sys_readlinkat does its own copyinstr/copyout. */
+    return sys_readlinkat(dirfd, path, buf, bufsiz);
+}
+
+int sys_freebsd_renameat(int olddir, const char *oldpath, int newdir, const char *newpath) {
+    char kold[256], knew[256];
+    if (copyinstr(oldpath, kold, sizeof(kold), NULL) != 0) return -EFAULT;
+    if (copyinstr(newpath, knew, sizeof(knew), NULL) != 0) return -EFAULT;
+    if (olddir == AT_FDCWD && newdir == AT_FDCWD) return kern_rename(kold, knew);
+    return -ENOSYS;
+}
+
+int sys_freebsd_symlinkat(const char *target, int newdir, const char *newpath) {
+    char ktgt[256], knew[256];
+    if (copyinstr(target,  ktgt, sizeof(ktgt), NULL) != 0) return -EFAULT;
+    if (copyinstr(newpath, knew, sizeof(knew), NULL) != 0) return -EFAULT;
+    if (newdir == AT_FDCWD) return kern_symlink(ktgt, knew);
+    return -ENOSYS;
+}
+
+int sys_freebsd_unlinkat(int dirfd, const char *path, int flag) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    return kern_unlinkat(dirfd, kpath, freebsd_atflags(flag));
 }
 
 int sys_freebsd13_fstatat(int dirfd, const char *path, struct freebsd13_stat *buf, int flags) {
