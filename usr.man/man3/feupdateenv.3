@@ -1,0 +1,65 @@
+.TH feupdateenv 3 "2026-05-03" "Substrate" "Library Functions Manual"
+.SH NAME
+feupdateenv \- restore environment and re-raise saved exceptions
+.SH LIBRARY
+Math Library (libm, \-lm)
+.SH SYNOPSIS
+.nf
+.B #include <fenv.h>
+.PP
+.B "int feupdateenv( " const fenv_t * envp " );"
+.SH DESCRIPTION
+The \fBfeupdateenv()\fR function updates the current floating-point
+environment using the object pointed to by
+.BR envp .
+This object must have been saved by a previous call to
+\fBfeholdexcept()\fR.
+
+The function:
+.TP
+1. Saves any currently set exception flags.
+.TP
+2. Restores the rounding mode and exception state from
+   .B envp.
+.TP
+3. Or\-s the saved exception flags back (re\-raising them).
+
+This allows exception flags that were set during the computation to be
+preserved and raised after restoring the original rounding mode and
+environment. It avoids losing exception information that was raised after
+\fBfeholdexcept()\fR cleared them.
+
+On x86, this corresponds to saving MXCSR/x87 status flags, restoring the
+x87 control word or MXCSR from the saved state, and then re-ORing the
+previously captured flags.
+
+.SH RETURN VALUE
+The \fBfeupdateenv()\fR function returns zero on success.
+.SH ERRORS
+.TP
+.B EINVAL
+The environment object was not saved by a previous
+\fBfeholdexcept()\fR call, or is otherwise invalid.
+.SH EXAMPLES
+.nf
+#include <fenv.h>
+#include <stdio.h>
+#include <math.h>
+
+double safe_sqrt(double x) {
+    fenv_t saved_env;
+
+    /* Save env, clear flags, set default rounding */
+    feholdexcept(&saved_env);
+
+    double result = sqrt(x);
+    /* Any exceptions raised during sqrt() are captured */
+
+    /* Restore saved rounding mode and re-raise any new exceptions */
+    feupdateenv(&saved_env);
+
+    return result;
+}
+.fi
+.SH SEE ALSO
+\fBfenv\fR(7), \fBfeholdexcept\fR(3), \fBfegetenv\fR(3), \fBfetestexcept\fR(3)

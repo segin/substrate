@@ -1,0 +1,58 @@
+.TH Fetestexcept 3 "2026-05-03" "Substrate" "Library Functions Manual"
+.SH NAME
+fetestexcept \- test floating-point exception flags
+.SH LIBRARY
+Math Library (libm, \-lm)
+.SH SYNOPSIS
+.nf
+.B #include <fenv.h>
+.PP
+.B "int fetestexcept( " int excepts " );"
+.SH DESCRIPTION
+The \fBfetestexcept()\fR function tests whether any of the floating-point
+exception flags specified by the bitwise\-OR of
+.B excepts
+are currently set.
+
+The following macros may be tested:
+.TP
+.B FE_DIVBY_ERR
+Division by zero flag.
+.TP
+.B FE_INVALID
+Invalid operation flag.
+.TP
+.B FE_INEXACT
+Inexact result flag.
+.TP
+.B FE_OVERFLOW
+Overflow flag.
+.TP
+.B FE_UNDERFLOW
+Underflow flag.
+
+.SH RETURN VALUE
+The \fBfetestexcept()\fR function returns a non\-zero value (bitwise\-OR of
+the requested flags that are set) if any of the requested exception flags
+are currently set. It returns zero if none of the requested flags are set.
+.SH ERRORS
+No errors are defined. The function does not set
+.BR errno .
+.SH EXAMPLES
+.nf
+#include <fenv.h>
+#include <stdio.h>
+
+int main(void) {
+    double x = 1.0 / 0.0;
+
+    if (fetestexcept(FE_DIVBY_ERR)) {
+        printf("Division by zero occurred\\n");
+    }
+
+    feclearexcept(FE_DIVBY_ERR);
+    return 0;
+}
+.fi
+.SH SEE ALSO
+\fBfenv\fR(7), \fBfeclearexcept\fR(3), \fBfegetexceptflag\fR(3), \fBferaiseexcept\fR(3)

@@ -1,0 +1,59 @@
+.TH feholdexcept 3 "2026-05-03" "Substrate" "Library Functions Manual"
+.SH NAME
+feholdexcept \- save environment and enter non-stop mode
+.SH LIBRARY
+Math Library (libm, \-lm)
+.SH SYNOPSIS
+.nf
+.B #include <fenv.h>
+.PP
+.B "int feholdexcept( " fenv_t * envp " );"
+.SH DESCRIPTION
+The \fBfeholdexcept()\fR function saves the current floating-point
+environment (rounding mode, exception flags, and exception state) into the
+object pointed to by
+.BR envp .
+It then clears all exception flags and installs the default rounding mode.
+
+This establishes a clean environment for a sequence of operations. The
+typical usage pattern is:
+.TP
+1. Call \fBfeholdexcept()\fR to save the state and clear exceptions.
+.TP
+2. Perform a sequence of floating-point operations.
+.TP
+3. Test for exceptions with \fBfetestexcept()\fR.
+.TP
+4. Restore the saved state (and re-raise any new exceptions) with
+   \fBfeupdateenv()\fR.
+
+On x86, this corresponds to saving the x87 control word/MXCSR and then
+resetting them to the default state (FE_DFL_ENV).
+
+.SH RETURN VALUE
+The \fBfeholdexcept()\fR function returns zero on success.
+.SH ERRORS
+No errors are defined. The function does not set
+.BR errno .
+.SH EXAMPLES
+.nf
+#include <fenv.h>
+#include <stdio.h>
+#include <math.h>
+
+double safe_sqrt(double x) {
+    fenv_t saved_env;
+
+    /* Save env, clear flags, set default rounding */
+    feholdexcept(&saved_env);
+
+    double result = sqrt(x);
+
+    /* Restore saved env and re-raise any new exceptions */
+    feupdateenv(&saved_env);
+
+    return result;
+}
+.fi
+.SH SEE ALSO
+\fBfenv\fR(7), \fBfegetenv\fR(3), \fBfeupdateenv\fR(3), \fBfetestexcept\fR(3), \fBfeclearexcept\fR(3)

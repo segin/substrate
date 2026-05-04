@@ -1,0 +1,75 @@
+.TH fegetround 3 "2026-05-03" "Substrate" "Library Functions Manual"
+.SH NAME
+fegetround, fesetround \- get and set floating-point rounding mode
+.SH LIBRARY
+Math Library (libm, \-lm)
+.SH SYNOPSIS
+.nf
+.B #include <fenv.h>
+.PP
+.B "int fegetround( void );"
+.PP
+.B "int fesetround( " int roundingMode " );"
+.SH DESCRIPTION
+The \fBfegetround()\fR function returns the current rounding direction
+macro representing the floating-point rounding mode. The default rounding
+mode is \fIFE_TONEAREST\fR (round to nearest, ties to even).
+
+The \fBfesetround()\fR function sets the floating-point rounding mode to
+the value specified by
+.BR roundingMode .
+
+The following rounding mode macros are defined:
+.TS
+l l
+c c
+\fBMacro\fR\fB\t\fBDestination
+\fBFE_TONEAREST\tRound to nearest (default)
+\fBFE_DOWNWARD\tRound toward negative infinity (truncate)
+\fBFE_UPWARD\tRound toward positive infinity
+\fBFE_TOWARDZERO\tRound toward zero (truncate)
+.TE
+
+.SH RETURN VALUE
+The \fBfegetround()\fR function returns the current rounding mode.
+The \fBfesetround()\fR function returns zero on success.
+.SH ERRORS
+The \fBfesetround()\fR function may fail if
+.B roundingMode
+is not a valid rounding mode macro.
+.TP
+.B EINVAL
+The rounding mode is not supported.
+.SH EXAMPLES
+.nf
+#include <fenv.h>
+#include <stdio.h>
+
+int main(void) {
+    /* Query and display the current rounding mode */
+    int round = fegetround();
+    switch (round) {
+    case FE_TONEAREST:
+        printf("Rounding: round to nearest\\n");
+        break;
+    case FE_DOWNWARD:
+        printf("Rounding: round toward negative infinity\\n");
+        break;
+    case FE_UPWARD:
+        printf("Rounding: round toward positive infinity\\n");
+        break;
+    case FE_TOWARDZERO:
+        printf("Rounding: round toward zero\\n");
+        break;
+    default:
+        printf("Unknown rounding mode\\n");
+    }
+
+    /* Change to round toward zero */
+    fesetround(FE_TOWARDZERO);
+
+    return 0;
+}
+.fi
+.SH SEE ALSO
+\fBfenv\fR(7), \fBfegetexceptflag\fR(3), \fBfeclearexcept\fR(3), \fBmath\fR(7)

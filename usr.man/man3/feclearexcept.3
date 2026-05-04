@@ -1,0 +1,41 @@
+.TH Feclearexcept 3 "2026-05-03" "Substrate" "Library Functions Manual"
+.SH NAME
+feclearexcept \- clear floating-point exception flags
+.SH LIBRARY
+Math Library (libm, \-lm)
+.SH SYNOPSIS
+.nf
+.B #include <fenv.h>
+.PP
+.B "int feclearexcept( " int excepts " );"
+.SH DESCRIPTION
+The \fBfeclearexcept()\fR function clears the floating-point exception flags
+specified by the bitwise\-OR of
+.B excepts
+(\fIFE_DIVBY_ERR\fR, \fIFE_INVALID\fR, \fFE_INEXACT\fR, etc.).
+
+It corresponds to the x87/FPU status word clearing or the SSE MXCSR flag
+clearing on x86 architectures.
+
+.SH RETURN VALUE
+The \fBfeclearexcept()\fR function returns zero on success.
+.SH ERRORS
+No errors are defined. The function does not set
+.B errno.
+.SH EXAMPLES
+.nf
+#include <fenv.h>
+#include <stdio.h>
+
+int main(void) {
+    feclearexcept(FE_DIVBY_ERR | FE_INVALID);
+    /* Perform operations that might raise exceptions */
+    double result = 1.0 / 0.0;
+    if (fetestexcept(FE_DIVBY_ERR)) {
+        printf("Division by zero detected\\n");
+    }
+    return 0;
+}
+.fi
+.SH SEE ALSO
+\fBfenv\fR(7), \fBfegetexceptflag\fR(3), \fBferaiseexcept\fR(3), \fBfetestexcept\fR(3)

@@ -1,0 +1,76 @@
+.TH FENV 7 "2026-05-03" "Substrate" "Library Functions Manual"
+.SH NAME
+fenv \- floating-point environment and exception handling
+.SH LIBRARY
+Math Library (libm, \-lm)
+.SH DESCRIPTION
+The floating-point environment (fenv) provides functions and macros for
+querying and controlling the state and exceptions of floating-point arithmetic.
+It is defined by the C99 standard (7.12) and POSIX.1\-2001.
+
+The fenv subsystem consists of:
+.TP
+.B fenv_t
+A type representing the entire floating-point environment (rounding mode,
+exception flags, and exception state).
+.TP
+.B feexcept_t
+A type representing the floating-point exception flags.
+.TP
+.B FE_DFL_ENV
+The default floating-point environment, pre\-initialized for the default
+rounding mode (round to nearest) and no pending exceptions.
+
+.SS Floating-Point Exceptions
+
+The following macros represent individual floating-point exception flags.
+They are bitwise\-representable; \fBfegetexceptflag\fR(3) and
+\fBfesetexceptflag\fR(3) operate on the intersection of masks.
+
+.TS
+l l
+c c
+\fBMacro\fR\fB\t\fBCondition
+\l\fBFE_DIVBY_ERR\tDivision by zero
+\fBFE_INEXACT\tResult is not equal to the mathematical result
+\fBFE_INVALID\tInvalid operation (NaN, undefined domain)
+\fBFE_OVERFLOW\tResult too large to be represented
+\fBFE_UNDERFLOW\tResult is small (subnormal or loss of precision)
+\fBFE_OVERFLOW and FE_UNDERFLOW imply FE_INEXACT
+.TE
+
+.SS Rounding Modes
+
+.TS
+l l
+c c
+\fBMacro\fR\fB\t\fBDestination
+\fBFE_TONEAREST\tRound to nearest (default)
+\fBFE_DOWNWARD\tRound toward negative infinity
+\fBFE_UPWARD\tRound toward positive infinity
+\fBFE_TOWARDZERO\tRound toward zero
+.TE
+
+.SS x87/FPU vs SSE/MXCSR
+
+On x87 (80-bit extended precision), the environment maps to the x87 control
+word (0x37F default) and status word. On SSE2+, it maps to the MXCSR register
+(0x1F80 default) and FPU status flags. The \fBFENV_ACCESS\fR pragma (if
+supported) tells the compiler that the program inspects fenv state, preventing
+optimizations that assume floating-point side effects are ignored.
+
+.SS Usage Pattern
+
+The typical usage pattern is:
+
+1. Save the current environment with \fBfeholdexcept\fR(3) or
+   \fBfegetenv\fR(3).
+2. Perform floating-point operations.
+3. Test for exceptions with \fBfetestexcept\fR(3).
+4. Restore the saved state with \fBfeupdateenv\fR(3) or \fBfesetenv\fR(3).
+
+.SS SEE ALSO
+
+\fBfeclearexcept\fR(3), \fBfegetexceptflag\fR(3), \fBferaiseexcept\fR(3),
+\fBfetestexcept\fR(3), \fBfegetround\fR(3), \fBfegetenv\fR(3),
+\fBfeholdexcept\fR(3), \fBfeupdateenv\fR(3), \fBmath\fR(7)

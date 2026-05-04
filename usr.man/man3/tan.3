@@ -1,0 +1,39 @@
+.TH TAN 3 "2026-05-03" "Substrate" "Library Functions Manual"
+.SH NAME
+tan, tanf, tanl \- tangent function
+.SH LIBRARY
+Math Library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.B double tan(double x);
+.B float tanf(float x);
+.B long double tanl(long double x);
+.SH DESCRIPTION
+The
+.B tan()
+function computes the tangent of
+.IR x ,
+where
+.I x
+is expressed in radians.
+.PP
+The
+.B tanf()
+and
+.B tanl()
+functions are float and long double variants respectively.
+.SH RETURN VALUE
+The function returns the tangent of
+.IR x .
+.PP
+If x is infinity, +infinity is returned.
+.PP
+If x is NaN, NaN is returned.
+.SH STANDARDS
+C99, POSIX.1-2001.
+.SH SEE ALSO
+.sin(3),
+.cos(3),
+.trig(3),
+.math(7)
