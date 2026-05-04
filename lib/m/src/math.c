@@ -570,6 +570,55 @@ double tgamma(double x) {
 }
 
 /*
+ * lgamma_r(x, signp) - natural log of |Gamma(x)|, reentrant (BSD extension).
+ *
+ * Stores the sign of Gamma(x) in *signp (+1 or -1).
+ *
+ * Special values (C99 7.12.8.3 + POSIX):
+ *   lgamma_r(NaN)        -> NaN, *signp = 1
+ *   lgamma_r(+/-0)       -> +Inf, FE_DIVBYZERO, *signp = 1
+ *   lgamma_r(neg int)    -> +Inf, FE_DIVBYZERO, *signp = 1 (poles)
+ *   lgamma_r(+/-Inf)     -> +Inf, *signp = 1
+ *   lgamma_r(1) == 0,  lgamma_r(2) == 0,  lgamma_r(n+1) == log(n!)
+ *
+ * Implementation: For |x| where tgamma() does not overflow, defer to the
+ * existing Lanczos-based tgamma() and take log of the absolute value.
+ * For large x (x >= 170) where tgamma overflows, fall back to Stirling's
+ * series:  ln Gamma(x) ~ (x-0.5) ln x - x + 0.5 ln(2pi) + 1/(12x).
+ */
+int signgam = 1;
+
+double lgamma_r(double x, int *signp) {
+    if (isnan(x)) { *signp = 1; return x; }
+    if (isinf(x)) { *signp = 1; return INFINITY; }
+    if (x == 0.0 || (x < 0.0 && x == floor(x))) {
+        feraiseexcept(FE_DIVBYZERO);
+        *signp = 1;
+        return INFINITY;
+    }
+
+    /* Moderate range: use Lanczos-backed tgamma directly. */
+    if (x < 170.0) {
+        double g = tgamma(x);
+        if (g < 0.0) { *signp = -1; g = -g; }
+        else { *signp = 1; }
+        return log(g);
+    }
+
+    /* Large positive x: Stirling's approximation (Gamma(x) > 0 here). */
+    *signp = 1;
+    return (x - 0.5) * log(x) - x + 0.5 * log(2.0 * M_PI) + 1.0 / (12.0 * x);
+}
+
+/*
+ * lgamma(x) - natural log of |Gamma(x)|; sets the global signgam to the
+ * sign of Gamma(x) (XSI/POSIX). Not thread-safe; use lgamma_r() for that.
+ */
+double lgamma(double x) {
+    return lgamma_r(x, &signgam);
+}
+
+/*
  * C23 pi-argument trigonometric functions
  */
 double sinpi(double x) {

@@ -170,6 +170,11 @@ long long llrint(double x);
 double erf(double x);
 double erfc(double x);
 double tgamma(double x);
+double lgamma(double x);
+double lgamma_r(double x, int *signp);
+
+/* Sign of Gamma(x) set by lgamma() (XSI/POSIX) */
+extern int signgam;
 
 /* Float versions (f suffix) */
 float sinf(float x);
