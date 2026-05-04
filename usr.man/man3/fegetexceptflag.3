@@ -1,0 +1,61 @@
+.TH fegetexceptflag 3 "2026-05-03" "Substrate" "Library Functions Manual"
+.SH NAME
+fegetexceptflag, fesetexceptflag \- get and set floating-point exception flags
+.SH LIBRARY
+Math Library (libm, \-lm)
+.SH SYNOPSIS
+.nf
+.B #include <fenv.h>
+.PP
+.B "int fegetexceptflag( " fe_except_t * exceptflag, " int excepts " );"
+.PP
+.B "int fesetexceptflag( " const fe_except_t * exceptflag, " int excepts " );"
+.SH DESCRIPTION
+The \fBfegetexceptflag()\fR function stores the current values of the
+exception flags indicated by
+.B excepts
+into the object pointed to by
+.BR exceptflag .
+The stored value may be retrieved later by \fBfesetexceptflag()\fR.
+
+The \fBfesetexceptflag()\fR function sets the exception flags indicated by
+.B excepts
+to the values stored in the object pointed to by
+.BR exceptflag .
+Only the flag bits are affected; the rounding mode is not modified.
+
+The object pointed to by
+.B exceptflag
+must be the same type
+.B fe_except_t
+and must have been previously set by \fBfegetexceptflag()\fR.
+
+.SH RETURN VALUE
+The \fBfegetexceptflag()\fR and \fBfesetexceptflag()\fR functions return
+non\-zero on success, zero on failure.
+.SH ERRORS
+No errors are defined. These functions do not set
+.BR errno .
+.SH EXAMPLES
+.nf
+#include <fenv.h>
+#include <stdio.h>
+
+int main(void) {
+    fe_except_t flags;
+
+    /* Save current exception flags */
+    fegetexceptflag(&flags, FE_DIVBY_ERR | FE_INVALID);
+
+    /* Clear them */
+    feclearexcept(FE_DIVBY_ERR | FE_INVALID);
+
+    /* Simulate some operations... */
+
+    /* Restore original flags */
+    fesetexceptflag(&flags, FE_DIVBY_ERR | FE_INVALID);
+    return 0;
+}
+.fi
+.SH SEE ALSO
+\fBfenv\fR(7), \fBfeclearexcept\fR(3), \fBferaiseexcept\fR(3), \fBfetestexcept\fR(3)

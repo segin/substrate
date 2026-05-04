@@ -1,0 +1,68 @@
+.TH Feraiseexcept 3 "2026-05-03" "Substrate" "Library Functions Manual"
+.SH NAME
+feraiseexcept \- raise floating-point exception flags
+.SH LIBRARY
+Math Library (libm, \-lm)
+.SH SYNOPSIS
+.nf
+.B #include <fenv.h>
+.PP
+.B "int feraiseexcept( " int excepts " );"
+.SH DESCRIPTION
+The \fBferaiseexcept()\fR function raises the floating\-point exception
+flags specified by the bitwise\-OR of
+.BR excepts .
+This simulates the occurrence of floating-point exceptions without performing
+the actual operation.
+
+The following exceptions may be raised:
+.TP
+.B FE_DIVBY_ERR
+Division by zero.
+.TP
+.B FE_INVALID
+Invalid operation (e.g., \fBsqrt(\-1)\fR).
+.TP
+.B FE_INEXACT
+Result is not equal to the mathematical result.
+.TP
+.B FE_OVERFLOW
+Result too large to be represented.
+.TP
+.B FE_UNDERFLOW
+Result is small (subnormal or loss of precision).
+.PP
+When \fIFE_OVERFLOW\fR or \fIFE_UNDERFLOW\fR is raised, \fIFE_INEXACT\fR
+is also raised automatically, as overflow and underflow are always accompanied
+by a loss of precision.
+
+.SH RETURN VALUE
+The \fBferaiseexcept()\fR function returns zero on success.
+.SH ERRORS
+No errors are defined. The function does not set
+.BR errno .
+.SH EXAMPLES
+.nf
+#include <fenv.h>
+#include <stdio.h>
+#include <math.h>
+
+int main(void) {
+    /* Simulate raising an invalid operation exception */
+    feraiseexcept(FE_INVALID);
+
+    if (fetestexcept(FE_INVALID)) {
+        printf("Invalid operation flag is set\\n");
+    }
+
+    /* Simulate overflow (which also implies inexact) */
+    feraiseexcept(FE_OVERFLOW);
+
+    if (fetestexcept(FE_INEXACT)) {
+        printf("Inexact flag is implicitly set by overflow\\n");
+    }
+    return 0;
+}
+.fi
+.SH SEE ALSO
+\fBfenv\fR(7), \fBfeclearexcept\fR(3), \fBfegetexceptflag\fR(3), \fBfetestexcept\fR(3)

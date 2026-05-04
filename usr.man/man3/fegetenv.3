@@ -1,0 +1,64 @@
+.TH fegetenv 3 "2026-05-03" "Substrate" "Library Functions Manual"
+.SH NAME
+fegetenv, fesetenv \- get and set floating-point environment
+.SH LIBRARY
+Math Library (libm, \-lm)
+.SH SYNOPSIS
+.nf
+.B #include <fenv.h>
+.PP
+.B "int fegetenv( " fenv_t * envp " );"
+.PP
+.B "int fesetenv( " const fenv_t * envp " );"
+.SH DESCRIPTION
+The \fBfegetenv()\fR function stores the current floating-point environment
+(rounding mode, exception flags, and exception state) into the object pointed
+to by
+.BR envp .
+
+The \fBfesetenv()\fR function sets the floating-point environment from the
+object pointed to by
+.BR envp .
+This restores both the rounding mode and exception flags.
+
+The default environment is provided by the macro
+.B FE_DFL_ENV,
+which is pre\-initialized for the default rounding mode (round to nearest)
+and no pending exceptions.
+
+On x86, \fBfegetenv()\fR captures the x87 control word/status word or the
+SSE MXCSR register (depending on the target). \fBfesetenv()\fR restores
+the full environment state.
+
+.SH RETURN VALUE
+The \fBfegetenv()\fR and \fBfesetenv()\fR functions return zero on success.
+.SH ERRORS
+The \fBfesetenv()\fR function may fail if
+.B envp
+is not a valid environment object.
+.TP
+.B EINVAL
+The environment object is invalid or corrupted.
+.SH EXAMPLES
+.nf
+#include <fenv.h>
+#include <stdio.h>
+
+int main(void) {
+    fenv_t saved_env;
+
+    /* Save current environment */
+    fegetenv(&saved_env);
+
+    /* Change rounding mode */
+    fesetround(FE_DOWNWARD);
+
+    /* Perform operations... */
+
+    /* Restore original environment */
+    fesetenv(&saved_env);
+    return 0;
+}
+.fi
+.SH SEE ALSO
+\fBfenv\fR(7), \fBfeholdexcept\fR(3), \fBfeupdateenv\fR(3), \fBfegetround\fR(3)
