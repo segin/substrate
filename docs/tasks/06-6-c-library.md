@@ -483,8 +483,8 @@ they are not mandatory.
                     - [ ] Test type dispatch: `sin((float)x)` calls `sinf()`, `sin((double)x)` calls `sin()`, `sin((long double)x)` calls `sinl()`. (REQ: REQ-06-0449)
                     - [ ] Test all covered function families dispatch correctly. (REQ: REQ-06-0450)
                     - [ ] Test no double-evaluation of arguments with side effects. (REQ: REQ-06-0451)
-                - [ ] **Man Pages:** (REQ: REQ-06-0250, REQ-06-0404, REQ-06-0452, REQ-06-0488, REQ-06-0527, REQ-06-0573, REQ-06-0629, REQ-06-0668, REQ-06-0693, REQ-06-0734, REQ-06-0769, REQ-06-0793, REQ-06-0839)
-                    - [ ] `man/man7/tgmath.7` — Type-generic math macros overview, dispatch rules, C11 `_Generic` usage. SYNOPSIS, DESCRIPTION, EXAMPLES, SEE ALSO. (REQ: REQ-06-0453)
+                - [x] **Man Pages:** (REQ: REQ-06-0250, REQ-06-0404, REQ-06-0452, REQ-06-0488, REQ-06-0527, REQ-06-0573, REQ-06-0629, REQ-06-0668, REQ-06-0693, REQ-06-0734, REQ-06-0769, REQ-06-0793, REQ-06-0839)
+                    - [x] `man/man7/tgmath.7` — Type-generic math macros overview, dispatch rules, C11 `_Generic` usage. SYNOPSIS, DESCRIPTION, EXAMPLES, SEE ALSO. (REQ: REQ-06-0453)
         - [/] **Classification & Comparison (C99/C23/POSIX):**
             - [ ] `fpclassify()` (REQ: REQ-06-0454)
             - [ ] `isfinite()` (REQ: REQ-06-0455)
