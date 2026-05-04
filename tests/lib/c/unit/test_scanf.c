@@ -32,12 +32,52 @@ void test_scanf_hex(void) {
 	printf("test_scanf_hex passed\n");
 }
 
+/* REQ-06-0220: %d, %i, %u, %o, %x integer conversions in one pass. */
+void test_scanf_int_conversions(void) {
+	int d = 0;
+	int i = 0;
+	unsigned int u = 0;
+	unsigned int o = 0;
+	unsigned int x = 0;
+	int n = mys_sscanf("-42 0x10 4294967295 17 ff",
+	                   "%d %i %u %o %x", &d, &i, &u, &o, &x);
+	assert(n == 5);
+	assert(d == -42);
+	assert(i == 0x10);            /* %i parses 0x prefix as hex */
+	assert(u == 4294967295U);     /* %u accepts full unsigned range */
+	assert(o == 017);             /* %o parses octal: 17 octal == 15 dec */
+	assert(x == 0xff);            /* %x parses hex without 0x prefix */
+	printf("test_scanf_int_conversions passed\n");
+}
+
 void test_scanf_float(void) {
 	float f;
 	int n = mys_sscanf("3.14159", "%f", &f);
 	assert(n == 1);
 	assert(f > 3.14 && f < 3.15);
 	printf("test_scanf_float passed\n");
+}
+
+/* REQ-06-0222: %f, %e, %g floating-point conversions. */
+void test_scanf_float_eg(void) {
+	float f = 0.0f;
+	float e = 0.0f;
+	float g = 0.0f;
+	int n = mys_sscanf("3.14159 2.5e3 -1.25E-2",
+	                   "%f %e %e", &f, &e, &g);
+	assert(n == 3);
+	assert(f > 3.14f && f < 3.15f);
+	assert(e > 2499.9f && e < 2500.1f);    /* 2.5e3 == 2500 */
+	assert(g > -0.0126f && g < -0.0124f);  /* -1.25E-2 == -0.0125 */
+
+	/* %g should accept both fixed and scientific notation. */
+	float g1 = 0.0f;
+	float g2 = 0.0f;
+	int n2 = mys_sscanf("0.5 1.5e2", "%g %g", &g1, &g2);
+	assert(n2 == 2);
+	assert(g1 > 0.49f && g1 < 0.51f);
+	assert(g2 > 149.9f && g2 < 150.1f);
+	printf("test_scanf_float_eg passed\n");
 }
 
 void test_scanf_string(void) {
@@ -103,6 +143,44 @@ void test_scanf_n_and_return(void) {
 	printf("test_scanf_n_and_return passed\n");
 }
 
+/* REQ-06-0228: field width limits applied to multiple conversions. */
+void test_scanf_field_width(void) {
+	int a = 0;
+	int b = 0;
+	char s[8] = {0};
+	char c[4] = {0};
+	int n = mys_sscanf("12345678 abcdefgh", "%3d%5d %5s %2c",
+	                   &a, &b, s, c);
+	assert(n == 4);
+	assert(a == 123);              /* first 3 digits */
+	assert(b == 45678);            /* next 5 digits */
+	assert(strcmp(s, "abcde") == 0); /* %5s caps token at 5 chars */
+	assert(c[0] == 'f' && c[1] == 'g'); /* %2c reads exactly 2 chars */
+	printf("test_scanf_field_width passed\n");
+}
+
+/* REQ-06-0229: return value equals count of successful assignments. */
+void test_scanf_return_value(void) {
+	int a = 0, b = 0, c = 0;
+	int n;
+
+	n = mys_sscanf("1 2 3", "%d %d %d", &a, &b, &c);
+	assert(n == 3);
+
+	/* Partial match: first conversion succeeds, second fails. */
+	a = b = 0;
+	n = mys_sscanf("42 oops", "%d %d", &a, &b);
+	assert(n == 1);
+	assert(a == 42);
+
+	/* %*d suppression does not contribute to the count. */
+	a = 0;
+	n = mys_sscanf("10 20", "%*d %d", &a);
+	assert(n == 1);
+	assert(a == 20);
+	printf("test_scanf_return_value passed\n");
+}
+
 void test_scanf_assignment_suppression_and_width(void) {
 	int y = 0;
 	char s[8] = {0};
@@ -161,13 +239,17 @@ int main(void) {
 	printf("Running Substrate scanf tests...\n");
 	test_scanf_int();
 	test_scanf_hex();
+	test_scanf_int_conversions();
 	test_scanf_float();
+	test_scanf_float_eg();
 	test_scanf_string();
 	test_scanf_scanset();
 	test_scanf_i_autobase();
 	test_scanf_char_width();
 	test_scanf_scanset_variants();
 	test_scanf_n_and_return();
+	test_scanf_field_width();
+	test_scanf_return_value();
 	test_scanf_assignment_suppression_and_width();
 	test_scanf_eof_immediate_failure();
 	test_scanf_fscanf_wrapper();

@@ -248,20 +248,20 @@ they are not mandatory.
             - [x] Test `%%` literal output. (REQ: REQ-06-0217) <!-- tests/lib/c/unit/test_printf.c:test_printf_percent_literal -->
             - [x] Test `NULL` string argument to `%s` (implementation-defined, should not crash). (REQ: REQ-06-0218) <!-- tests/lib/c/unit/test_printf.c:test_printf_null_string -->
 
-        - [ ] **Unit Tests (`tests/lib/c/unit/test_scanf.c`):** (REQ: REQ-06-0219)
-            - [ ] Test `sscanf()` integer conversions: `%d`, `%i`, `%u`, `%o`, `%x`. (REQ: REQ-06-0220)
-            - [ ] Test `sscanf()` `%i` auto-base detection: `0x` (hex), `0` (octal), decimal. (REQ: REQ-06-0221)
-            - [ ] Test `sscanf()` floating-point: `%f`, `%e`, `%g`. (REQ: REQ-06-0222)
-            - [ ] Test `sscanf()` `%c` reads exact count (no whitespace skip). (REQ: REQ-06-0223)
-            - [ ] Test `sscanf()` `%s` reads whitespace-delimited token. (REQ: REQ-06-0224)
-            - [ ] Test `sscanf()` `%[` scanset: `%[a-z]`, `%[^0-9]`, `%[]abc]`. (REQ: REQ-06-0225)
-            - [ ] Test `sscanf()` `%n` stores chars consumed. (REQ: REQ-06-0226)
-            - [ ] Test `sscanf()` assignment suppression: `%*d` skips but doesn't assign. (REQ: REQ-06-0227)
-            - [ ] Test `sscanf()` field width limits. (REQ: REQ-06-0228)
-            - [ ] Test `sscanf()` return value: count of successful assignments. (REQ: REQ-06-0229)
-            - [ ] Test `sscanf()` returns `EOF` on immediate input failure. (REQ: REQ-06-0230)
-            - [ ] Test `fscanf()` from file. (REQ: REQ-06-0231)
-            - [ ] Test `scanf()` length modifiers: `%hhd`, `%hd`, `%ld`, `%lld`, `%jd`, `%zd`, `%td`. (REQ: REQ-06-0232)
+        - [x] **Unit Tests (`tests/lib/c/unit/test_scanf.c`):** (REQ: REQ-06-0219) <!-- tests/lib/c/unit/test_scanf.c -->
+            - [x] Test `sscanf()` integer conversions: `%d`, `%i`, `%u`, `%o`, `%x`. (REQ: REQ-06-0220) <!-- tests/lib/c/unit/test_scanf.c:test_scanf_int_conversions -->
+            - [x] Test `sscanf()` `%i` auto-base detection: `0x` (hex), `0` (octal), decimal. (REQ: REQ-06-0221) <!-- tests/lib/c/unit/test_scanf.c:test_scanf_i_autobase -->
+            - [x] Test `sscanf()` floating-point: `%f`, `%e`, `%g`. (REQ: REQ-06-0222) <!-- tests/lib/c/unit/test_scanf.c:test_scanf_float_eg -->
+            - [x] Test `sscanf()` `%c` reads exact count (no whitespace skip). (REQ: REQ-06-0223) <!-- tests/lib/c/unit/test_scanf.c:test_scanf_char_width -->
+            - [x] Test `sscanf()` `%s` reads whitespace-delimited token. (REQ: REQ-06-0224) <!-- tests/lib/c/unit/test_scanf.c:test_scanf_string -->
+            - [x] Test `sscanf()` `%[` scanset: `%[a-z]`, `%[^0-9]`, `%[]abc]`. (REQ: REQ-06-0225) <!-- tests/lib/c/unit/test_scanf.c:test_scanf_scanset_variants -->
+            - [x] Test `sscanf()` `%n` stores chars consumed. (REQ: REQ-06-0226) <!-- tests/lib/c/unit/test_scanf.c:test_scanf_n_and_return -->
+            - [x] Test `sscanf()` assignment suppression: `%*d` skips but doesn't assign. (REQ: REQ-06-0227) <!-- tests/lib/c/unit/test_scanf.c:test_scanf_assignment_suppression_and_width -->
+            - [x] Test `sscanf()` field width limits. (REQ: REQ-06-0228) <!-- tests/lib/c/unit/test_scanf.c:test_scanf_field_width -->
+            - [x] Test `sscanf()` return value: count of successful assignments. (REQ: REQ-06-0229) <!-- tests/lib/c/unit/test_scanf.c:test_scanf_return_value -->
+            - [x] Test `sscanf()` returns `EOF` on immediate input failure. (REQ: REQ-06-0230) <!-- tests/lib/c/unit/test_scanf.c:test_scanf_eof_immediate_failure -->
+            - [x] Test `fscanf()` from file. (REQ: REQ-06-0231) <!-- tests/lib/c/unit/test_scanf.c:test_scanf_fscanf_wrapper -->
+            - [x] Test `scanf()` length modifiers: `%hhd`, `%hd`, `%ld`, `%lld`, `%jd`, `%zd`, `%td`. (REQ: REQ-06-0232) <!-- tests/lib/c/unit/test_scanf.c:test_scanf_length_modifiers -->
         - [ ] **Property Tests (`tests/lib/c/property/prop_stdio.c`):** (REQ: REQ-06-0233)
             - [ ] Property: `sprintf(buf, "%d", x); sscanf(buf, "%d", &y)` ⇒ `x == y` for all `int x`. (REQ: REQ-06-0234)
             - [ ] Property: `sprintf(buf, "%u", x); sscanf(buf, "%u", &y)` ⇒ `x == y` for all `unsigned x`. (REQ: REQ-06-0235)
