@@ -209,32 +209,32 @@ they are not mandatory.
             - [x] `sscanf(const char *str, const char *fmt, ...)`: scan from string. <!-- lib/c/stdio/scanf.c:sscanf --> (REQ: REQ-06-0178)
             - [x] `vfscanf()`, `vscanf()`, `vsscanf()`: `va_list` variants. <!-- lib/c/stdio/scanf.c:vfscanf, vscanf, vsscanf --> (REQ: REQ-06-0179)
     - [ ] **Testing:** (REQ: REQ-06-0180, REQ-06-0364, REQ-06-1123, REQ-06-1219)
-        - [ ] **Unit Tests (`tests/lib/c/unit/test_stdio.c`):** (REQ: REQ-06-0181)
-            - [ ] Test `fopen()`/`fclose()` for all mode strings (`"r"`, `"w"`, `"a"`, `"r+"`, `"w+"`, `"a+"`, `"wx"`). (REQ: REQ-06-0182)
-            - [ ] Test `fopen()` returns `NULL` for non-existent file in `"r"` mode. (REQ: REQ-06-0183)
-            - [ ] Test `fdopen()` wraps existing fd correctly. (REQ: REQ-06-0184)
-            - [ ] Test `freopen()` changes mode and reuses `FILE`. (REQ: REQ-06-0185)
-            - [ ] Test `fread()`/`fwrite()` round-trip: write data, rewind, read back, compare. (REQ: REQ-06-0186)
-            - [ ] Test `fread()` partial read at EOF returns correct element count. (REQ: REQ-06-0187)
-            - [ ] Test `fwrite()` returns correct element count on success. (REQ: REQ-06-0188)
-            - [ ] Test `fgetc()`/`fputc()` byte-by-byte I/O. (REQ: REQ-06-0189)
-            - [ ] Test `ungetc()`: push back one char, re-read it. (REQ: REQ-06-0190)
-            - [ ] Test `ungetc(EOF)` is a no-op. (REQ: REQ-06-0191)
-            - [ ] Test `fgets()` reads up to newline, NUL-terminates. (REQ: REQ-06-0192)
-            - [ ] Test `fgets()` with buffer smaller than line. (REQ: REQ-06-0193)
-            - [ ] Test `fputs()`/`puts()` output correctness. (REQ: REQ-06-0194)
-            - [ ] Test `fseek()`/`ftell()` positioning in all `SEEK_*` modes. (REQ: REQ-06-0195)
-            - [ ] Test `rewind()` resets position and clears error. (REQ: REQ-06-0196)
-            - [ ] Test `fgetpos()`/`fsetpos()` round-trip. (REQ: REQ-06-0197)
-            - [ ] Test `feof()` returns non-zero only after read past end. (REQ: REQ-06-0198)
-            - [ ] Test `ferror()`/`clearerr()` flag management. (REQ: REQ-06-0199)
-            - [ ] Test `fflush(stdout)` forces write. (REQ: REQ-06-0200)
-            - [ ] Test `fflush(NULL)` flushes all streams. (REQ: REQ-06-0201)
-            - [ ] Test `setvbuf()` with `_IONBF` causes immediate writes. (REQ: REQ-06-0202)
-            - [ ] Test `setvbuf()` with `_IOLBF` flushes on newline. (REQ: REQ-06-0203)
-            - [ ] Test `setvbuf()` with `_IOFBF` accumulates until buffer full. (REQ: REQ-06-0204)
-            - [ ] Test `tmpfile()` returns valid `FILE` that is auto-deleted. (REQ: REQ-06-0205)
-            - [ ] Test `perror()` output format. (REQ: REQ-06-0206)
+        - [x] **Unit Tests (`tests/lib/c/unit/test_stdio.c`):** (REQ: REQ-06-0181) <!-- tests/lib/c/unit/test_stdio.c -->
+            - [x] Test `fopen()`/`fclose()` for all mode strings (`"r"`, `"w"`, `"a"`, `"r+"`, `"w+"`, `"a+"`, `"wx"`). (REQ: REQ-06-0182) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_fopen_modes -->
+            - [x] Test `fopen()` returns `NULL` for non-existent file in `"r"` mode. (REQ: REQ-06-0183) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_fopen_missing -->
+            - [x] Test `fdopen()` wraps existing fd correctly. (REQ: REQ-06-0184) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_fdopen -->
+            - [x] Test `freopen()` changes mode and reuses `FILE`. (REQ: REQ-06-0185) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_freopen -->
+            - [x] Test `fread()`/`fwrite()` round-trip: write data, rewind, read back, compare. (REQ: REQ-06-0186) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_fread_fwrite_roundtrip -->
+            - [x] Test `fread()` partial read at EOF returns correct element count. (REQ: REQ-06-0187) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_fread_partial_at_eof -->
+            - [x] Test `fwrite()` returns correct element count on success. (REQ: REQ-06-0188) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_fwrite_count -->
+            - [x] Test `fgetc()`/`fputc()` byte-by-byte I/O. (REQ: REQ-06-0189) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_fgetc_fputc -->
+            - [x] Test `ungetc()`: push back one char, re-read it. (REQ: REQ-06-0190) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_ungetc_roundtrip -->
+            - [x] Test `ungetc(EOF)` is a no-op. (REQ: REQ-06-0191) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_ungetc_eof -->
+            - [x] Test `fgets()` reads up to newline, NUL-terminates. (REQ: REQ-06-0192) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_fgets_newline -->
+            - [x] Test `fgets()` with buffer smaller than line. (REQ: REQ-06-0193) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_fgets_truncate -->
+            - [x] Test `fputs()`/`puts()` output correctness. (REQ: REQ-06-0194) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_fputs_puts -->
+            - [x] Test `fseek()`/`ftell()` positioning in all `SEEK_*` modes. (REQ: REQ-06-0195) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_fseek_ftell -->
+            - [x] Test `rewind()` resets position and clears error. (REQ: REQ-06-0196) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_rewind -->
+            - [x] Test `fgetpos()`/`fsetpos()` round-trip. (REQ: REQ-06-0197) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_fgetpos_fsetpos -->
+            - [x] Test `feof()` returns non-zero only after read past end. (REQ: REQ-06-0198) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_feof -->
+            - [x] Test `ferror()`/`clearerr()` flag management. (REQ: REQ-06-0199) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_ferror_clearerr -->
+            - [x] Test `fflush(stdout)` forces write. (REQ: REQ-06-0200) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_fflush_stream -->
+            - [x] Test `fflush(NULL)` flushes all streams. (REQ: REQ-06-0201) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_fflush_all -->
+            - [x] Test `setvbuf()` with `_IONBF` causes immediate writes. (REQ: REQ-06-0202) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_setvbuf_nbf -->
+            - [x] Test `setvbuf()` with `_IOLBF` flushes on newline. (REQ: REQ-06-0203) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_setvbuf_lbf -->
+            - [x] Test `setvbuf()` with `_IOFBF` accumulates until buffer full. (REQ: REQ-06-0204) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_setvbuf_fbf -->
+            - [x] Test `tmpfile()` returns valid `FILE` that is auto-deleted. (REQ: REQ-06-0205) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_tmpfile -->
+            - [x] Test `perror()` output format. (REQ: REQ-06-0206) <!-- tests/lib/c/unit/test_stdio.c:test_stdio_perror -->
         - [ ] **Unit Tests (`tests/lib/c/unit/test_printf.c`):** (REQ: REQ-06-0207)
             - [ ] Test `sprintf()` all integer conversions with all length modifiers. (REQ: REQ-06-0208)
             - [ ] Test `sprintf()` all floating-point conversions: `%f`, `%e`, `%g`, `%a`. (REQ: REQ-06-0209)
