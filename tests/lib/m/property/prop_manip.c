@@ -173,9 +173,89 @@ static void prop_modf_sum(void) {
     }
 }
 
+/*
+ * copysign(fabs(x), y) yields a value whose magnitude equals |x| and whose
+ * sign equals the sign of y.  This is the defining behaviour of copysign
+ * combined with fabs's sign-stripping: fabs(x) is non-negative (sign bit
+ * cleared), and copysign overrides that sign bit with y's.  The property
+ * therefore holds bit-exactly for any pair where the magnitudes are
+ * well-defined and y carries a meaningful sign.
+ * (REQ-06-0731)
+ *
+ * We assert on 500 deterministic random (x, y) pairs from the xorshift
+ * generator, skipping any pair containing NaN (signbit on NaN is
+ * implementation-defined and fabs/copysign on NaN don't satisfy a clean
+ * "magnitude" relation).  We then check the requested boundary cases:
+ * (1.0,-1.0) -> -1.0, (-1.0,1.0) -> 1.0, (0.0,-1.0) -> -0.0 with signbit
+ * set, and (-0.0,1.0) -> 0.0 with signbit clear.
+ */
+static void prop_copysign_sign(void) {
+    int generated = 0;
+    int attempts = 0;
+    const int target = 500;
+    const int attempt_cap = 100000;
+
+    while (generated < target && attempts < attempt_cap) {
+        attempts++;
+        double x = xs_next_double();
+        double y = xs_next_double();
+        if (isnan(x) || isnan(y)) continue;
+
+        double r = copysign(fabs(x), y);
+        if (fabs(r) != fabs(x)) {
+            FAIL("copysign(fabs(x), y): magnitude not preserved on random sample");
+            return;
+        }
+        if (signbit(r) != signbit(y)) {
+            FAIL("copysign(fabs(x), y): sign does not match y on random sample");
+            return;
+        }
+        generated++;
+    }
+
+    if (generated < target) {
+        FAIL("xorshift generator failed to produce enough non-NaN samples for copysign");
+        return;
+    }
+
+    /* Boundary case: (1.0, -1.0) -> -1.0 */
+    {
+        double r = copysign(fabs(1.0), -1.0);
+        if (r != -1.0 || !signbit(r)) {
+            FAIL("copysign(fabs(1.0), -1.0) != -1.0");
+            return;
+        }
+    }
+    /* Boundary case: (-1.0, 1.0) -> 1.0 */
+    {
+        double r = copysign(fabs(-1.0), 1.0);
+        if (r != 1.0 || signbit(r)) {
+            FAIL("copysign(fabs(-1.0), 1.0) != 1.0");
+            return;
+        }
+    }
+    /* Boundary case: (0.0, -1.0) -> -0.0 (signbit set) */
+    {
+        double r = copysign(fabs(0.0), -1.0);
+        if (r != 0.0 || !signbit(r)) {
+            FAIL("copysign(fabs(0.0), -1.0) != -0.0");
+            return;
+        }
+    }
+    /* Boundary case: (-0.0, 1.0) -> 0.0 (no signbit) */
+    {
+        double r = copysign(fabs(-0.0), 1.0);
+        if (r != 0.0 || signbit(r)) {
+            FAIL("copysign(fabs(-0.0), 1.0) != +0.0");
+            return;
+        }
+    }
+}
+
 int main(void) {
     prop_frexp_ldexp_roundtrip();
     prop_modf_sum();
+    prop_copysign_sign();
 
     if (failures == 0) {
         printf("All property tests passed.\n");

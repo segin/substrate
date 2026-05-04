@@ -767,7 +767,7 @@ they are not mandatory.
             - [ ] **Property Tests (`tests/lib/m/property/prop_manip.c`):** (REQ: REQ-06-0728)
                 - [x] Property: `ldexp(frexp(x, &e), e) == x` for all finite non-zero `x`. <!-- tests/lib/m/property/prop_manip.c:prop_frexp_ldexp_roundtrip --> (REQ: REQ-06-0729)
                 - [x] Property: `modf(x, &i); (i + frac) == x` for finite `x`. <!-- tests/lib/m/property/prop_manip.c:prop_modf_sum --> (REQ: REQ-06-0730)
-                - [ ] Property: `copysign(fabs(x), y)` has sign of `y` and magnitude of `x`. (REQ: REQ-06-0731)
+                - [x] Property: `copysign(fabs(x), y)` has sign of `y` and magnitude of `x`. <!-- tests/lib/m/property/prop_manip.c:prop_copysign_sign --> (REQ: REQ-06-0731)
                 - [ ] Property: `nextafter(x, y) != x` when `x != y` (for finite `x`, `y`). (REQ: REQ-06-0732)
                 - [ ] Property: `scalbn(x, 0) == x`. (REQ: REQ-06-0733)
             - [ ] **Man Pages:** (REQ: REQ-06-0250, REQ-06-0404, REQ-06-0452, REQ-06-0488, REQ-06-0527, REQ-06-0573, REQ-06-0629, REQ-06-0668, REQ-06-0693, REQ-06-0734, REQ-06-0769, REQ-06-0793, REQ-06-0839)
