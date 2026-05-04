@@ -1026,9 +1026,16 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
         sp -= 4; STACK_WRITE32(sp, execfn_ptr);
         sp -= 4; STACK_WRITE32(sp, AT_FBSD_EXECPATH);
 
-        sp -= 4; STACK_WRITE32(sp, 0);
+        /* Stack canary: point at the same 16 random bytes we already pushed
+         * for AT_RANDOM/AT_FBSD_CANARY consumers.  FreeBSD libc copies the
+         * first sizeof(long) bytes into __stack_chk_guard.  Passing a NULL
+         * pointer here leaves __stack_chk_guard at zero, and any non-zero
+         * stack write near the canary slot then trips __stack_chk_fail on
+         * function return — observed as sh aborting after libedit init via
+         * the "syslog then abort()" sequence in __stack_chk_fail. */
+        sp -= 4; STACK_WRITE32(sp, rand_ptr);
         sp -= 4; STACK_WRITE32(sp, AT_FBSD_CANARY);
-        sp -= 4; STACK_WRITE32(sp, 0);
+        sp -= 4; STACK_WRITE32(sp, 16);
         sp -= 4; STACK_WRITE32(sp, AT_FBSD_CANARYLEN);
 
         sp -= 4; STACK_WRITE32(sp, 1403000);
