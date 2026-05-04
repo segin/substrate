@@ -14,6 +14,7 @@
 #include <kern/sched.h>
 #include <vfs/vfs.h>
 #include <string.h>
+#include <termios.h>
 
 
 
@@ -488,5 +489,225 @@ int sys_freebsd_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldl
         }
     }
     return -ENOENT;
+}
+
+/* ====================================================================
+ * FreeBSD ioctl translation
+ *
+ * FreeBSD encodes ioctl numbers as _IOC(direction, group, num, sizeof(t))
+ * — e.g. TIOCGETA = _IOR('t', 19, struct termios) = 0x402c7413.  Substrate
+ * (and Linux) use flat constants like TCGETS=0x5401.  Until this translator
+ * existed FREEBSD_SYS_ioctl was wired straight to native sys_ioctl, so every
+ * tcgetattr() returned ENOTTY, isatty() returned 0, and FreeBSD libc switched
+ * stdout from line- to fully-buffered — the visible symptom being `sh`'s
+ * prompt never appearing and `ls` producing no listing.
+ *
+ * Both struct termios layouts and c_cc indices differ between FreeBSD and
+ * Substrate.  We translate the request number, the struct, the c_cc index
+ * map, and the most-used flag bits.
+ * ==================================================================== */
+
+#define FBSD_NCCS               20
+
+struct freebsd_termios {
+    uint32_t c_iflag;
+    uint32_t c_oflag;
+    uint32_t c_cflag;
+    uint32_t c_lflag;
+    uint8_t  c_cc[FBSD_NCCS];
+    uint32_t c_ispeed;
+    uint32_t c_ospeed;
+};
+
+#define FBSD_TIOCGETA           0x402c7413U  /* _IOR('t', 19, freebsd_termios) */
+#define FBSD_TIOCSETA           0x802c7414U  /* _IOW('t', 20, freebsd_termios) */
+#define FBSD_TIOCSETAW          0x802c7415U  /* _IOW('t', 21, ...) drain output */
+#define FBSD_TIOCSETAF          0x802c7416U  /* _IOW('t', 22, ...) drain+flush */
+#define FBSD_TIOCGWINSZ         0x40087468U  /* _IOR('t', 104, struct winsize) */
+#define FBSD_TIOCSWINSZ         0x80087467U  /* _IOW('t', 103, struct winsize) */
+#define FBSD_TIOCGPGRP          0x40047477U  /* _IOR('t', 119, int) */
+#define FBSD_TIOCSPGRP          0x80047476U  /* _IOW('t', 118, int) */
+#define FBSD_TIOCSCTTY          0x20007461U  /* _IO('t', 97) */
+#define FBSD_TIOCNOTTY          0x20007471U  /* _IO('t', 113) */
+#define FBSD_TIOCEXCL           0x2000740dU  /* _IO('t', 13) */
+#define FBSD_TIOCNXCL           0x2000740eU  /* _IO('t', 14) */
+#define FBSD_FIONREAD           0x4004667fU  /* _IOR('f', 127, int) */
+#define FBSD_FIONBIO            0x8004667eU  /* _IOW('f', 126, int) */
+#define FBSD_FIOASYNC           0x8004667dU  /* _IOW('f', 125, int) */
+
+/* c_cc index translation: FreeBSD index -> Substrate index, 0xFF if no
+ * equivalent on the native side. */
+static const uint8_t fbsd_cc_to_native[FBSD_NCCS] = {
+    [0]  = VEOF,
+    [1]  = VEOL,
+    [2]  = VEOL2,
+    [3]  = VERASE,
+    [4]  = VWERASE,
+    [5]  = VKILL,
+    [6]  = VREPRINT,
+    [7]  = 0xFF,        /* ex-spare */
+    [8]  = VINTR,
+    [9]  = VQUIT,
+    [10] = VSUSP,
+    [11] = 0xFF,        /* VDSUSP — no native equivalent */
+    [12] = VSTART,
+    [13] = VSTOP,
+    [14] = VLNEXT,
+    [15] = VDISCARD,
+    [16] = VMIN,
+    [17] = VTIME,
+    [18] = 0xFF,        /* VSTATUS — no native equivalent */
+    [19] = 0xFF,        /* spare */
+};
+
+struct flag_pair { uint32_t fbsd; uint32_t native; };
+
+static const struct flag_pair fbsd_iflag[] = {
+    { 0x00000001, 0000001 },  /* IGNBRK */
+    { 0x00000002, 0000002 },  /* BRKINT */
+    { 0x00000004, 0000004 },  /* IGNPAR */
+    { 0x00000008, 0000010 },  /* PARMRK */
+    { 0x00000010, 0000020 },  /* INPCK */
+    { 0x00000020, 0000040 },  /* ISTRIP */
+    { 0x00000040, 0000100 },  /* INLCR */
+    { 0x00000080, 0000200 },  /* IGNCR */
+    { 0x00000100, 0000400 },  /* ICRNL */
+    { 0x00000200, 0002000 },  /* IXON */
+    { 0x00000400, 0010000 },  /* IXOFF */
+    { 0x00000800, 0004000 },  /* IXANY */
+    { 0x00002000, 0020000 },  /* IMAXBEL */
+};
+
+static const struct flag_pair fbsd_oflag[] = {
+    { 0x00000001, 0000001 },  /* OPOST */
+    { 0x00000002, 0000004 },  /* ONLCR */
+    { 0x00000004, 0000010 },  /* OXTABS / TAB3 */
+    { 0x00000010, 0000040 },  /* OCRNL */
+    { 0x00000020, 0000100 },  /* ONOCR */
+    { 0x00000040, 0000200 },  /* ONLRET */
+};
+
+static const struct flag_pair fbsd_cflag[] = {
+    { 0x00000300, 0000060 },  /* CS8 (CSIZE field) */
+    { 0x00000400, 0000100 },  /* CSTOPB */
+    { 0x00000800, 0000200 },  /* CREAD */
+    { 0x00001000, 0000400 },  /* PARENB */
+    { 0x00002000, 0001000 },  /* PARODD */
+    { 0x00004000, 0002000 },  /* HUPCL */
+    { 0x00008000, 0004000 },  /* CLOCAL */
+};
+
+static const struct flag_pair fbsd_lflag[] = {
+    { 0x00000001, 0010000 },  /* ECHOKE */
+    { 0x00000002, 0004000 },  /* ECHOE */
+    { 0x00000004, 0000040 },  /* ECHOK */
+    { 0x00000008, 0000010 },  /* ECHO */
+    { 0x00000010, 0000100 },  /* ECHONL */
+    { 0x00000020, 0001000 },  /* ECHOPRT */
+    { 0x00000040, 0000200 },  /* ECHOCTL */
+    { 0x00000080, 0000001 },  /* ISIG */
+    { 0x00000100, 0000002 },  /* ICANON */
+    { 0x00000400, 0100000 },  /* IEXTEN */
+    { 0x00000800, 0040000 },  /* EXTPROC */
+    { 0x00008000, 0000400 },  /* TOSTOP */
+    { 0x00010000, 0000020 },  /* FLUSHO */
+};
+
+static uint32_t translate_flags(uint32_t in, const struct flag_pair *table, size_t n,
+                                int fbsd_to_native) {
+    uint32_t out = 0;
+    for (size_t i = 0; i < n; i++) {
+        uint32_t src = fbsd_to_native ? table[i].fbsd : table[i].native;
+        uint32_t dst = fbsd_to_native ? table[i].native : table[i].fbsd;
+        if (in & src) out |= dst;
+    }
+    return out;
+}
+
+#define ARRAYLEN(a) (sizeof(a) / sizeof((a)[0]))
+
+static void freebsd_termios_to_native(const struct freebsd_termios *fb,
+                                      struct termios *nv) {
+    memset(nv, 0, sizeof(*nv));
+    nv->c_iflag = translate_flags(fb->c_iflag, fbsd_iflag, ARRAYLEN(fbsd_iflag), 1);
+    nv->c_oflag = translate_flags(fb->c_oflag, fbsd_oflag, ARRAYLEN(fbsd_oflag), 1);
+    nv->c_cflag = translate_flags(fb->c_cflag, fbsd_cflag, ARRAYLEN(fbsd_cflag), 1);
+    nv->c_lflag = translate_flags(fb->c_lflag, fbsd_lflag, ARRAYLEN(fbsd_lflag), 1);
+    for (int i = 0; i < FBSD_NCCS; i++) {
+        uint8_t native_idx = fbsd_cc_to_native[i];
+        if (native_idx < NCCS) nv->c_cc[native_idx] = fb->c_cc[i];
+    }
+    nv->c_ispeed = fb->c_ispeed;
+    nv->c_ospeed = fb->c_ospeed;
+}
+
+static void native_to_freebsd_termios(const struct termios *nv,
+                                      struct freebsd_termios *fb) {
+    memset(fb, 0, sizeof(*fb));
+    fb->c_iflag = translate_flags(nv->c_iflag, fbsd_iflag, ARRAYLEN(fbsd_iflag), 0);
+    fb->c_oflag = translate_flags(nv->c_oflag, fbsd_oflag, ARRAYLEN(fbsd_oflag), 0);
+    fb->c_cflag = translate_flags(nv->c_cflag, fbsd_cflag, ARRAYLEN(fbsd_cflag), 0);
+    fb->c_lflag = translate_flags(nv->c_lflag, fbsd_lflag, ARRAYLEN(fbsd_lflag), 0);
+    /* Walk the native->fbsd direction by inverting fbsd_cc_to_native. */
+    for (int i = 0; i < FBSD_NCCS; i++) {
+        uint8_t native_idx = fbsd_cc_to_native[i];
+        if (native_idx < NCCS) fb->c_cc[i] = nv->c_cc[native_idx];
+    }
+    fb->c_ispeed = nv->c_ispeed;
+    fb->c_ospeed = nv->c_ospeed;
+}
+
+int sys_freebsd_ioctl(int fd, uint32_t request, void *arg) {
+    switch (request) {
+    case FBSD_TIOCGETA: {
+        struct termios native;
+        memset(&native, 0, sizeof(native));
+        int ret = kern_ioctl(fd, TCGETS, &native);
+        if (ret == 0 && arg) {
+            struct freebsd_termios fb;
+            native_to_freebsd_termios(&native, &fb);
+            if (copyout(&fb, arg, sizeof(fb)) != 0) return -EFAULT;
+        }
+        return ret;
+    }
+    case FBSD_TIOCSETA:
+    case FBSD_TIOCSETAW:
+    case FBSD_TIOCSETAF: {
+        if (!arg) return -EFAULT;
+        struct freebsd_termios fb;
+        if (copyin(arg, &fb, sizeof(fb)) != 0) return -EFAULT;
+        struct termios native;
+        freebsd_termios_to_native(&fb, &native);
+        /* Native TCSETS=0x5402, TCSETSW=0x5403, TCSETSF=0x5404. */
+        uint32_t native_req = TCSETS + (request - FBSD_TIOCSETA);
+        return kern_ioctl(fd, native_req, &native);
+    }
+    case FBSD_TIOCGWINSZ:
+    case FBSD_TIOCSWINSZ:
+        /* struct winsize layout (4 uint16) is identical between FreeBSD and
+         * Substrate; only the request number differs. */
+        return kern_ioctl(fd,
+                          (request == FBSD_TIOCGWINSZ) ? 0x5413 : 0x5414,
+                          arg);
+    case FBSD_TIOCGPGRP:
+        return kern_ioctl(fd, 0x540F, arg);
+    case FBSD_TIOCSPGRP:
+        return kern_ioctl(fd, 0x5410, arg);
+    case FBSD_TIOCSCTTY:
+        return kern_ioctl(fd, 0x540E, NULL);
+    case FBSD_TIOCNOTTY:
+        return kern_ioctl(fd, 0x5422, NULL);
+    case FBSD_FIONREAD:
+        return kern_ioctl(fd, 0x541B, arg);
+    case FBSD_FIONBIO:
+        return kern_ioctl(fd, 0x5421, arg);
+    case FBSD_FIOASYNC:
+        return kern_ioctl(fd, 0x5452, arg);
+    default:
+        /* Unknown ioctl: return ENOTTY rather than passing the BSD-encoded
+         * request through to native sys_ioctl, which would only confuse
+         * the underlying driver. */
+        return -ENOTTY;
+    }
 }
 
