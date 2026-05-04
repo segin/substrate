@@ -1688,7 +1688,8 @@ struct personality personality_linux = {
     .syscall_count = MAX_SYSCALLS,
     .sendsig = linux_sendsig,
     .sigreturn = linux_sys_sigreturn,
-    .rt_sigreturn = linux_sys_rt_sigreturn
+    .rt_sigreturn = linux_sys_rt_sigreturn,
+    .path_prefix = "/perso/linux"
 };
 
 #endif /* HOST_TEST */

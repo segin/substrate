@@ -371,7 +371,8 @@ struct personality personality_netbsd = {
     .syscall_count = MAX_SYSCALLS,
     .sendsig = netbsd_sendsig,
     .sigreturn = netbsd_sys_sigreturn,
-    .rt_sigreturn = NULL
+    .rt_sigreturn = NULL,
+    .path_prefix = "/perso/netbsd"
 };
 
 #endif /* HOST_TEST */
