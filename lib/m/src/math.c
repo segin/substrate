@@ -1239,6 +1239,14 @@ long long llrint(double x) {
     return res;
 }
 
+long lround(double x) {
+    return (long)round(x);
+}
+
+long long llround(double x) {
+    return (long long)round(x);
+}
+
 /* Float versions */
 float sinf(float x) { return(float)sin(x); }
 float cosf(float x) { return(float)cos(x); }
