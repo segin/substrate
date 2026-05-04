@@ -243,10 +243,45 @@ static void prop_lgamma_tgamma_link(void) {
     }
 }
 
+/*
+ * tgamma(x + 1) approximately equals x * tgamma(x) for positive x: this
+ * is the fundamental recurrence relation of the gamma function, the
+ * direct continuous analogue of the factorial recurrence n! = n * (n-1)!.
+ * (REQ-06-0768)
+ *
+ * We test on a chosen set of positive arguments covering half-integer
+ * values (where tgamma involves sqrt(pi) factors), small integers
+ * (matching factorial values exactly), and larger arguments approaching
+ * the overflow threshold for tgamma in IEEE-754 double precision
+ * (tgamma(171.0) is the last finite value).  Either tgamma(x) or
+ * tgamma(x + 1) may overflow at the upper end of our sweep; we skip any
+ * sample where either side is non-finite rather than treating it as a
+ * failure, since the identity is undefined on infinities.  The relative
+ * tolerance is scaled to |b| because tgamma(100) is ~9.3e155 -- absolute
+ * tolerances are meaningless across this dynamic range.
+ */
+static void prop_tgamma_recurrence(void) {
+    static const double pos[] = {
+        0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 7.0, 10.0, 50.0, 100.0,
+    };
+    const int npos = (int)(sizeof(pos) / sizeof(pos[0]));
+    for (int i = 0; i < npos; i++) {
+        double x = pos[i];
+        double a = tgamma(x + 1.0);
+        double b = x * tgamma(x);
+        if (!isfinite(a) || !isfinite(b)) continue;
+        if (!isclose(a, b, 1e-10 * fabs(b))) {
+            FAIL("tgamma(x+1) != x * tgamma(x) at positive x");
+            return;
+        }
+    }
+}
+
 int main(void) {
     prop_erf_erfc_complement();
     prop_erf_odd();
     prop_lgamma_tgamma_link();
+    prop_tgamma_recurrence();
 
     if (failures == 0) {
         printf("All property tests passed.\n");
