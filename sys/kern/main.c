@@ -663,7 +663,7 @@ void kinit_task(void *arg) {
         "TERM=linux",
         NULL
     };
-    
+
     kprint("kinit: Starting init process...\n");
     
     // Create new session for init (PID 1)
@@ -789,7 +789,11 @@ void kmain(unsigned long magic, unsigned long addr) {
     init_core_subsystems(mboot_info);
     print_boot_diagnostics();
     init_storage_and_vfs(mboot_info);
-    sched_spawn_kernel_process(init_task, cmdline);
+    /* Surface kinit-spawn failure: with the return value discarded, a
+     * spawn failure was indistinguishable from an idle-loop hang. */
+    if (sched_spawn_kernel_process(init_task, cmdline) < 0) {
+        kprint("kmain: FATAL: failed to spawn kinit thread\n");
+    }
     vm_page_late_init();
     reclaim_bootloader_state();
     enter_kernel_idle_loop();
