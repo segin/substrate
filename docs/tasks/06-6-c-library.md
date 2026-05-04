@@ -806,7 +806,7 @@ they are not mandatory.
                 - [x] Property: `exp(lgamma(x)) ≈ |tgamma(x)|` for `x` where `tgamma(x)` is finite. <!-- tests/lib/m/property/prop_gamma.c:prop_lgamma_tgamma_link --> (REQ: REQ-06-0767)
                 - [x] Property: `tgamma(x+1) ≈ x * tgamma(x)` for positive `x` (recurrence relation). <!-- tests/lib/m/property/prop_gamma.c:prop_tgamma_recurrence --> (REQ: REQ-06-0768)
             - [ ] **Man Pages:** (REQ: REQ-06-0250, REQ-06-0404, REQ-06-0452, REQ-06-0488, REQ-06-0527, REQ-06-0573, REQ-06-0629, REQ-06-0668, REQ-06-0693, REQ-06-0734, REQ-06-0769, REQ-06-0793, REQ-06-0839)
-                - [ ] `man/man3/erf.3` — Error functions. Covers `erf()` and `erfc()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0770)
+                - [x] `man/man3/erf.3` — Error functions. Covers `erf()` and `erfc()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0770)
                 - [ ] `man/man3/tgamma.3` — Gamma functions. Covers `tgamma()`, `lgamma()`, `lgamma_r()`, `signgam`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0771)
         - [ ] **Bessel Functions (POSIX/XSI):** (REQ: REQ-06-0772)
             - [ ] `j0()`, `j1()`, `jn()`: (REQ: REQ-06-0773)
