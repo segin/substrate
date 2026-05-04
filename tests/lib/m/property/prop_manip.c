@@ -252,10 +252,93 @@ static void prop_copysign_sign(void) {
     }
 }
 
+/*
+ * nextafter(x, y) != x whenever x != y and both are finite.
+ * (REQ-06-0732)
+ *
+ * nextafter returns the next representable double from x in the direction
+ * of y.  When x != y and both are finite, the spec requires the result to
+ * advance by exactly one ulp toward y; in particular it must not equal x.
+ * We further assert that the returned value is closer to y than x was,
+ * which is the directional-advance guarantee that makes nextafter useful.
+ *
+ * We assert on 500 deterministic random (x, y) pairs from the xorshift
+ * generator, skipping pairs containing NaN/inf or where x == y.  We also
+ * skip the rare case where x and y are distinct bit patterns that nonetheless
+ * compare equal as doubles (e.g. -0.0 vs +0.0); nextafter in that situation
+ * is documented to return y per IEEE-754, leaving result == x trivially.
+ * Boundary cases follow the requested set.
+ */
+static void prop_nextafter_distinct(void) {
+    int generated = 0;
+    int attempts = 0;
+    const int target = 500;
+    const int attempt_cap = 100000;
+
+    while (generated < target && attempts < attempt_cap) {
+        attempts++;
+        double x = xs_next_double();
+        double y = xs_next_double();
+        if (!isfinite(x) || !isfinite(y)) continue;
+        if (x == y) continue;
+
+        double n = nextafter(x, y);
+        if (n == x) {
+            FAIL("nextafter(x, y) == x for distinct finite x, y");
+            return;
+        }
+        /* "One ulp closer to y" is verified two ways: nextafter(n, x) == x
+         * proves n is exactly one representable step from x in the direction
+         * away from x (i.e., toward y), and the subtraction-distance check
+         * is monotone (<=).  Strict "<" can fail to register when x and y
+         * differ by enough orders of magnitude that one ulp at x's scale
+         * rounds off in the subtraction, so the ulp-step check above is the
+         * precise statement of the property. */
+        if (nextafter(n, x) != x) {
+            FAIL("nextafter(x, y) did not step exactly one ulp toward y");
+            return;
+        }
+        if (!(fabs(n - y) <= fabs(x - y))) {
+            FAIL("nextafter(x, y) did not advance toward y");
+            return;
+        }
+        generated++;
+    }
+
+    if (generated < target) {
+        FAIL("xorshift generator failed to produce enough distinct finite pairs");
+        return;
+    }
+
+    static const double bx[] = { 1.0,  1.0, -1.0,  DBL_MIN, -DBL_MIN };
+    static const double by[] = { 2.0,  0.5, -2.0,  1.0,     -1.0     };
+    const int nb = (int)(sizeof(bx) / sizeof(bx[0]));
+    for (int i = 0; i < nb; i++) {
+        double x = bx[i];
+        double y = by[i];
+        if (!isfinite(x) || !isfinite(y)) continue;
+        if (x == y) continue;
+        double n = nextafter(x, y);
+        if (n == x) {
+            FAIL("nextafter(x, y) == x at boundary");
+            return;
+        }
+        if (nextafter(n, x) != x) {
+            FAIL("nextafter(x, y) did not step exactly one ulp toward y at boundary");
+            return;
+        }
+        if (!(fabs(n - y) <= fabs(x - y))) {
+            FAIL("nextafter(x, y) did not advance toward y at boundary");
+            return;
+        }
+    }
+}
+
 int main(void) {
     prop_frexp_ldexp_roundtrip();
     prop_modf_sum();
     prop_copysign_sign();
+    prop_nextafter_distinct();
 
     if (failures == 0) {
         printf("All property tests passed.\n");
