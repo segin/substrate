@@ -122,12 +122,45 @@ static void test_lgamma(void) {
     if (!isinf(p0) || p0 < 0) FAIL("lgamma(0.0) != +inf");
 }
 
+/*
+ * REQ-06-0762: signgam set correctly after lgamma() calls.
+ *   lgamma() returns log|Gamma(x)|; the sign of Gamma(x) is conveyed via
+ *   the global int signgam (+1 if Gamma(x) > 0, -1 if Gamma(x) < 0).
+ *   Gamma is positive for x in (0, +inf) and alternates in sign on the
+ *   negative real axis between successive negative-integer poles:
+ *     ( 0,  +inf): + (e.g. Gamma(1)=1, Gamma(2)=1, Gamma(0.5)=sqrt(pi))
+ *     (-1,    0): - (e.g. Gamma(-0.5) = -2*sqrt(pi))
+ *     (-2,   -1): + (e.g. Gamma(-1.5) =  4*sqrt(pi)/3)
+ *     (-3,   -2): - (e.g. Gamma(-2.5) = -8*sqrt(pi)/15)
+ */
+extern int signgam;
+static void test_signgam(void) {
+    (void)lgamma(1.0);
+    if (signgam != 1)  FAIL("signgam after lgamma(1.0) != +1");
+
+    (void)lgamma(2.0);
+    if (signgam != 1)  FAIL("signgam after lgamma(2.0) != +1");
+
+    (void)lgamma(0.5);
+    if (signgam != 1)  FAIL("signgam after lgamma(0.5) != +1");
+
+    (void)lgamma(-0.5);
+    if (signgam != -1) FAIL("signgam after lgamma(-0.5) != -1");
+
+    (void)lgamma(-1.5);
+    if (signgam != 1)  FAIL("signgam after lgamma(-1.5) != +1");
+
+    (void)lgamma(-2.5);
+    if (signgam != -1) FAIL("signgam after lgamma(-2.5) != -1");
+}
+
 int main(void) {
     test_erf_basic();
     test_erfc();
     test_tgamma();
     test_tgamma_poles();
     test_lgamma();
+    test_signgam();
 
     if (failures != 0) {
         printf("FAILURES: %d\n", failures);
