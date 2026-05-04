@@ -1873,6 +1873,34 @@ int sys_chmod(const char *path, int mode) {
     return kern_chmodat(AT_FDCWD, kpath, mode, 0);
 }
 
+/* sys_fchownat is defined further down; the forward declaration lets
+ * sys_chown() forward to it without restructuring the file. */
+extern int sys_fchownat(int dirfd, const char *path, int uid, int gid, int flag);
+
+/* POSIX chown(2) — follows symlinks.  Substrate previously only had
+ * lchown (no-follow); add the canonical behaviour here for personalities
+ * that issue the standard syscall. */
+int sys_chown(const char *path, int uid, int gid) {
+    return sys_fchownat(AT_FDCWD, path, uid, gid, 0);
+}
+
+/* POSIX lchmod(2) — does NOT follow symlinks.  No native Substrate
+ * equivalent; route through kern_chmodat with AT_SYMLINK_NOFOLLOW. */
+int sys_lchmod(const char *path, int mode) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    return kern_chmodat(AT_FDCWD, kpath, mode, AT_SYMLINK_NOFOLLOW);
+}
+
+/* fchmodat(2) — flag-driven follow / no-follow.  flag values are
+ * Substrate-native (Linux-shape: AT_SYMLINK_NOFOLLOW=0x100).  BSD
+ * personalities translate at their wrapper layer before reaching here. */
+int sys_fchmodat(int dirfd, const char *path, int mode, int flag) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    return kern_chmodat(dirfd, kpath, mode, flag);
+}
+
 int kern_chmodat(int dirfd, const char *path, int mode, int flags) {
     fs_node_t *root;
     fs_node_t *cwd;

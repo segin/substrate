@@ -67,6 +67,10 @@
 #define SYS_SETPRIORITY 96
 #define SYS_FCHOWNAT  260
 #define SYS_LCHOWNAT  261
+#define SYS_CHOWN     262  /* chown, follows symlinks (POSIX); 182 in Linux,
+                            * but native picks a free slot to avoid colliding
+                            * with SYS_GETPGID which already lives at 182. */
+#define SYS_FCHMODAT  297
 #define SYS_GETGROUPS 80
 #define SYS_SETGROUPS 81
 #define SYS_WAIT4   114
