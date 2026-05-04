@@ -766,7 +766,7 @@ they are not mandatory.
                 - [x] Test `nan("")` returns NaN, `isnan(nan("tag"))` is true. <!-- tests/lib/m/unit/test_manip.c:test_nan --> (REQ: REQ-06-0727)
             - [ ] **Property Tests (`tests/lib/m/property/prop_manip.c`):** (REQ: REQ-06-0728)
                 - [x] Property: `ldexp(frexp(x, &e), e) == x` for all finite non-zero `x`. <!-- tests/lib/m/property/prop_manip.c:prop_frexp_ldexp_roundtrip --> (REQ: REQ-06-0729)
-                - [ ] Property: `modf(x, &i); (i + frac) == x` for finite `x`. (REQ: REQ-06-0730)
+                - [x] Property: `modf(x, &i); (i + frac) == x` for finite `x`. <!-- tests/lib/m/property/prop_manip.c:prop_modf_sum --> (REQ: REQ-06-0730)
                 - [ ] Property: `copysign(fabs(x), y)` has sign of `y` and magnitude of `x`. (REQ: REQ-06-0731)
                 - [ ] Property: `nextafter(x, y) != x` when `x != y` (for finite `x`, `y`). (REQ: REQ-06-0732)
                 - [ ] Property: `scalbn(x, 0) == x`. (REQ: REQ-06-0733)

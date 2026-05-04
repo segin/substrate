@@ -115,8 +115,67 @@ static void prop_frexp_ldexp_roundtrip(void) {
     (void)isclose;
 }
 
+/*
+ * modf(x, &i) splits finite x into integer part i and fractional part f
+ * such that i + f == x exactly.  Both pieces are exact slices of x's
+ * significand, so the reconstruction is bit-exact for every finite input.
+ * (REQ-06-0730)
+ *
+ * We assert bit-exact equality across 500 deterministic random samples
+ * plus the requested boundary set.  Non-finite inputs (NaN, +/-inf) are
+ * skipped: NaN never compares equal to itself, and modf on +/-inf returns
+ * +/-inf for the integer part with a zero fraction, making the i + f
+ * arithmetic well-defined but outside the finite-x property under test.
+ */
+static void prop_modf_sum(void) {
+    int generated = 0;
+    int attempts = 0;
+    const int target = 500;
+    const int attempt_cap = 100000;
+
+    while (generated < target && attempts < attempt_cap) {
+        attempts++;
+        double x = xs_next_double();
+        if (!isfinite(x)) continue;
+
+        double i = 0.0;
+        double f = modf(x, &i);
+        if ((i + f) != x) {
+            FAIL("modf(x, &i); (i + f) != x on random sample");
+            return;
+        }
+        generated++;
+    }
+
+    if (generated < target) {
+        FAIL("xorshift generator failed to produce enough finite samples for modf");
+        return;
+    }
+
+    static const double boundary[] = {
+        0.0,
+        1.0, -1.0,
+        0.5, -0.5,
+        100.5, -100.5,
+        1e10, -1e10,
+        DBL_MAX / 2.0, -DBL_MAX / 2.0,
+    };
+    const int nb = (int)(sizeof(boundary) / sizeof(boundary[0]));
+    for (int k = 0; k < nb; k++) {
+        double x = boundary[k];
+        if (!isfinite(x)) continue;
+        double i = 0.0;
+        double f = modf(x, &i);
+        if ((i + f) != x) {
+            FAIL("modf(x, &i); (i + f) != x at boundary");
+            return;
+        }
+    }
+}
+
 int main(void) {
     prop_frexp_ldexp_roundtrip();
+    prop_modf_sum();
 
     if (failures == 0) {
         printf("All property tests passed.\n");
