@@ -872,7 +872,8 @@ static int exec_copy_args(char *const array[], int count, char **k_array, char *
 // Helper to set up the user stack
 static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int argc, char **k_envp, int envc,
                             uint32_t at_entry, uint32_t at_base, uint32_t at_phdr,
-                            const elf_image_info_t *image) {
+                            const elf_image_info_t *image,
+                            uint32_t *ps_strings_out) {
     uint32_t user_stack_top = 0xC0000000;
     uint32_t user_stack_size = 256; // 1MB initial user stack
     uint32_t user_stack_base = user_stack_top - (user_stack_size * 0x1000);
@@ -909,7 +910,20 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
         memset(pa, 0, 0x1000);
     }
     
-    uint32_t sp = user_stack_top - 4; // Start at top of user stack region
+    /*
+     * Reserve 16 bytes at the very top for `struct ps_strings` (NetBSD
+     * convention).  NetBSD's _start (lib/csu/arch/i386/crt0.S) reads
+     * its argv/envp from this struct via %ebx, not from argc-on-stack,
+     * so the kernel must construct it and pass its address.
+     *
+     * Layout:
+     *   ps_strings.ps_argvstr  (uint32 user ptr to argv array)
+     *   ps_strings.ps_nargvstr (int32 argc)
+     *   ps_strings.ps_envstr   (uint32 user ptr to envp array)
+     *   ps_strings.ps_nenvstr  (int32 envc)
+     */
+    uint32_t ps_strings_addr = user_stack_top - 16;
+    uint32_t sp = ps_strings_addr - 4; // Start below the ps_strings region
     
     // Helper to write to user stack via kernel mapping
     #define STACK_WRITE32(user_va, val) do { \
@@ -1108,29 +1122,42 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
         sp -= 4; STACK_WRITE32(sp, AT_EXECFN);
     }
 
-    /* envp pointer array (NULL-terminated), then argv, then argc. */
+    /* envp pointer array (NULL-terminated), then argv, then argc.
+     * Capture the user-space addresses of the argv and envp ARRAYS
+     * (i.e. address of argv[0], address of envp[0]) for ps_strings. */
     sp -= 4; STACK_WRITE32(sp, 0);
+    uint32_t envp_arr_user = sp;  /* tentative: NULL-only case */
     if (k_envp) {
         for (int i = envc - 1; i >= 0; i--) {
             sp -= 4;
             STACK_WRITE32(sp, (uint32_t)(uintptr_t)k_envp[i]);
         }
+        envp_arr_user = sp;  /* address of envp[0] */
     }
 
     sp -= 4; STACK_WRITE32(sp, 0);
+    uint32_t argv_arr_user = sp;
     if (k_argv) {
         for (int i = argc - 1; i >= 0; i--) {
             sp -= 4;
             STACK_WRITE32(sp, (uint32_t)(uintptr_t)k_argv[i]);
         }
+        argv_arr_user = sp;
     }
 
     sp -= 4; STACK_WRITE32(sp, argc);
+
+    /* Populate the ps_strings struct at the reserved top slot. */
+    STACK_WRITE32(ps_strings_addr +  0, argv_arr_user);
+    STACK_WRITE32(ps_strings_addr +  4, (uint32_t)argc);
+    STACK_WRITE32(ps_strings_addr +  8, envp_arr_user);
+    STACK_WRITE32(ps_strings_addr + 12, (uint32_t)envc);
 
     #undef STACK_WRITE32
     #undef PUSH_STRING
 
     *sp_out = sp;
+    if (ps_strings_out) *ps_strings_out = ps_strings_addr;
     return 0;
 }
 
@@ -1369,8 +1396,10 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     set_kernel_stack((uint32_t)current_thread->kstack_top);
 
     uint32_t sp;
+    uint32_t ps_strings_user = 0;
     if (exec_setup_stack(new_pmap, &sp, k_argv, argc, k_envp, envc,
-                         main_entry, at_base, at_phdr, image) < 0) {
+                         main_entry, at_base, at_phdr, image,
+                         &ps_strings_user) < 0) {
         goto cleanup;
     }
 
@@ -1426,9 +1455,18 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     if (image) kfree(image, sizeof(*image));
     if (fd >= 0) kern_close(fd);
 
-    // Jump to userspace - does not return
-    extern void jump_to_userspace(uint32_t entry, uint32_t stack);
-    jump_to_userspace(entry, sp);
+    // Jump to userspace - does not return.
+    // For NetBSD/OpenBSD, _start reads ps_strings from %ebx
+    // (lib/csu/arch/i386/crt0.S); other personalities ignore the
+    // third arg.  jump_to_userspace zeros %ebx unless we override.
+    extern void jump_to_userspace(uint32_t entry, uint32_t stack, uint32_t ebx);
+    uint32_t entry_ebx = 0;
+    if (current_process &&
+        (current_process->perso_id == PERS_NETBSD ||
+         current_process->perso_id == PERS_OPENBSD)) {
+        entry_ebx = ps_strings_user;
+    }
+    jump_to_userspace(entry, sp, entry_ebx);
     
     // Should never reach here
     panic("jump_to_userspace returned!");
