@@ -62,9 +62,6 @@ int bga_is_available(void) {
 // QEMU: -vga std puts it at 0xFD000000 often. 
 // Using PCI is safer.
 
-// #include "../../arch/i386/pci.h"
-extern uint32_t pci_read_config(uint32_t device, int offset);
-
 static uint32_t bga_lfb_addr = 0;
 static int bga_use_lfb = 1;
 static uint16_t bga_current_bank = 0xFFFFU;
@@ -138,22 +135,6 @@ static void bga_banked_putpixel(int x, int y, uint32_t color) {
     }
 }
 
-
-/*
-static void find_bga_pci(uint32_t device, uint16_t vendor_id, uint16_t device_id, void *extra) {
-    (void)extra;
-    if (vendor_id == 0x1234 && device_id == 0x1111) {
-        // Found Bochs VGA
-        // BAR0 is usually LFB
-        bga_lfb_addr = pci_read_config(device, 0x10) & 0xFFFFFFF0;
-        kprint("BGA: Found PCI device at 0x");
-        extern void kprint_hex(uint32_t n);
-        kprint_hex(bga_lfb_addr);
-        kprint("\n");
-    }
-}
-*/
-
 int bga_init(fb_info_t *fb_out) {
     uint16_t enable_flags;
     uint16_t virt_height;
@@ -164,7 +145,6 @@ int bga_init(fb_info_t *fb_out) {
     }
 
     // Try to find via PCI to get accurate LFB address
-    extern void pci_scan_bus(void (*callback)(uint32_t, uint16_t, uint16_t, void*), void *extra);
     // pci_init checks buses, but we need to scan callbacks. 
     // Assuming pci_scan_bus is available or similar from pci.c
     // Let's check pci.h/c definitions... wait, I can't check now inside write.
@@ -173,9 +153,6 @@ int bga_init(fb_info_t *fb_out) {
     bga_lfb_addr = 0xE0000000;
     bga_use_lfb = bga_force_banked_mode() ? 0 : 1;
     
-    // Attempt scan (commented out until verified PCI API)
-    // pci_scan_bus(find_bga_pci, 0);
-
     // Set resolution: 1024x768x32
     uint16_t width = 1024;
     uint16_t height = 768;
