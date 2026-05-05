@@ -467,6 +467,19 @@ int audio_register_device(audio_dev_t *dev)
 
 	audio_default_info(&dev->current);
 
+	/*
+	 * Push the advertised defaults to the hardware now.  Without this,
+	 * the codec keeps its own boot-time rate (48 kHz on AC'97/HDA,
+	 * something else on SB16), and userspace `cat data.pcm > /dev/audio0`
+	 * with the kernel's "current" 44.1 kHz expectation plays too fast.
+	 * Failures here are non-fatal — driver may not need set_params or
+	 * may apply on first start; current/audio_info still reflects the
+	 * kernel-side defaults.
+	 */
+	if (dev->ops != NULL && dev->ops->set_params != NULL) {
+		(void)dev->ops->set_params(dev, &dev->current);
+	}
+
 	audio_n = &audio_nodes[unit];
 	memset(audio_n, 0, sizeof(*audio_n));
 	snprintf(audio_n->name, sizeof(audio_n->name), "audio%d", unit);
