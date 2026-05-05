@@ -7,7 +7,6 @@
 
 // Mock kprint
 void kprint(const char *str) {
-
 }
 
 // Mock kmalloc/free

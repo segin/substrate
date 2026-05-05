@@ -6,7 +6,6 @@
 
 // Mocks for kernel functions
 void kprint(const char *s) {
-
 }
 
 void *kmalloc(size_t size) {

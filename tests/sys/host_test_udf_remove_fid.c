@@ -27,7 +27,6 @@ uint8_t udf_tag_checksum(struct udf_tag *tag) {
 }
 
 void kprint(const char *fmt) {
-
 }
 
 void *kmalloc(size_t size) {

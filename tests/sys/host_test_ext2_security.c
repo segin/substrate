@@ -12,7 +12,6 @@
 typedef long off_t;
 
 void kprint(const char *str) {
-
     (void)str;
 }
 

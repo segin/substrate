@@ -47,7 +47,6 @@ size_t mock_device_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buf
     device_bytes_read += size;
 
 
-
     memset(buffer, 0xAA, size); // Fill with dummy data
 
     // If reading the indirect block (Address 1000 * 1024 = 1024000)

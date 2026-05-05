@@ -646,7 +646,6 @@ int main() {
     }
 
 
-
     if (!is_user_ptr(low_mem)) {
         printf("ERROR: Even mmap'd low memory is not considered user ptr! Check is_user_ptr logic.\n");
         return 1;
