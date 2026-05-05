@@ -87,10 +87,24 @@ typedef struct ac97_dev {
 	size_t          chunk_count;
 	uint8_t         next_idx;     /* next BDL slot to fill */
 	uint8_t         lvi;          /* most recently programmed Last Valid */
-	int             play_wait;    /* sched_sleep channel: write blocks here
-	                               * when the BDL ring is full; IRQ handler
-	                               * wakes us when the controller advances
-	                               * CIV (a slot has finished playing). */
+
+	/*
+	 * Back-pressure counters maintained by the kernel — independent
+	 * of the controller's CIV register, which under QEMU runs ahead
+	 * of LVI in ways that broke our previous CIV-based ring math.
+	 *
+	 *   writes_queued = total slots we've programmed (monotonic)
+	 *   slots_played  = total BCIS interrupts seen   (monotonic)
+	 *
+	 * "In flight" = writes_queued - slots_played.  Cap at
+	 * BDL_ENTRIES - 1 to leave one slot of breathing room for the
+	 * controller's PIV prefetch.
+	 */
+	volatile uint32_t writes_queued;
+	volatile uint32_t slots_played;
+
+	int             running;      /* RPBM has been asserted; don't keep
+	                               * rewriting CR every queue */
 
 	audio_dev_t     audio;
 } ac97_dev_t;
@@ -118,11 +132,6 @@ static void ac97_bm_write8(ac97_dev_t *d, uint16_t reg, uint8_t val)
 	outb((uint16_t)(d->nabmbar + reg), val);
 }
 
-static uint8_t ac97_bm_read8(ac97_dev_t *d, uint16_t reg)
-{
-	return inb((uint16_t)(d->nabmbar + reg));
-}
-
 static uint16_t ac97_bm_read16(ac97_dev_t *d, uint16_t reg)
 {
 	return inw((uint16_t)(d->nabmbar + reg));
@@ -146,6 +155,7 @@ static int ac97_irq_handler(unsigned int irq, void *dev_id, void *frame)
 {
 	ac97_dev_t *d = dev_id;
 	uint16_t sr;
+	static int ac97_irq_seen = 0;
 
 	(void)irq;
 	(void)frame;
@@ -153,14 +163,21 @@ static int ac97_irq_handler(unsigned int irq, void *dev_id, void *frame)
 		return 0;
 	}
 	sr = ac97_bm_read16(d, AC97_BM_PO_BASE + AC97_BM_SR);
+	if (!ac97_irq_seen) {
+		extern int kprintf(const char *fmt, ...);
+		kprintf("[AC97-IRQ] first interrupt fired sr=0x%04x\n", sr);
+		ac97_irq_seen = 1;
+	}
 	if (sr & (AC97_SR_BCIS | AC97_SR_LVBCI | AC97_SR_FIFOE)) {
-		/* Ack the latched status bits.  BCIS = buffer-completion;
-		 * controller has finished a BDL slot and CIV has advanced,
-		 * so a write() blocked on a full ring can now proceed. */
+		/* Ack the latched status bits.  BCIS fires once per BDL slot
+		 * with IOC=1; track it as our "slot drained" event so the
+		 * write path's back-pressure can release. */
+		if (sr & AC97_SR_BCIS) {
+			__atomic_add_fetch(&d->slots_played, 1, __ATOMIC_ACQ_REL);
+		}
 		ac97_bm_write16(d, AC97_BM_PO_BASE + AC97_BM_SR,
 		                sr & (AC97_SR_BCIS | AC97_SR_LVBCI |
 		                      AC97_SR_FIFOE));
-		sched_wakeup(&d->play_wait);
 	}
 	return 1;
 }
@@ -188,9 +205,32 @@ static int ac97_close(audio_dev_t *adev)
 static int ac97_set_params(audio_dev_t *adev, audio_info_t *info)
 {
 	ac97_dev_t *d = adev->driver_data;
+	extern int kprintf(const char *fmt, ...);
+	uint16_t enc = ac97_encode_rate(info->play.sample_rate, d->has_vra);
+	uint16_t back;
 
-	ac97_mixer_write(d, AC97_PCM_FRONT_DAC_RATE,
-	                 ac97_encode_rate(info->play.sample_rate, d->has_vra));
+	/* Re-assert VRA before each rate change — some codecs only
+	 * accept rate writes while the VRA bit is freshly asserted. */
+	if (d->has_vra) {
+		ac97_mixer_write(d, AC97_EXT_AUDIO_CTRL, AC97_EXT_VRA);
+	}
+
+	ac97_mixer_write(d, AC97_PCM_FRONT_DAC_RATE, enc);
+	back = ac97_mixer_read(d, AC97_PCM_FRONT_DAC_RATE);
+	if (back != enc) {
+		kprintf("[AC97] WARN: rate %u Hz rejected (wrote 0x%04x, "
+		        "readback 0x%04x); codec will play at its current "
+		        "rate (likely 48 kHz) — userspace data will sound "
+		        "fast/slow accordingly\n",
+		        info->play.sample_rate, enc, back);
+		/* Fall back to whatever the codec accepted so the audio_info
+		 * we report back matches reality. */
+		info->play.sample_rate = back;
+	} else {
+		kprintf("[AC97] set_params: rate=%u Hz (vra=%d enc=0x%04x ok)\n",
+		        info->play.sample_rate, d->has_vra, enc);
+	}
+
 	ac97_mixer_write(d, AC97_PCM_LR_ADC_RATE,
 	                 ac97_encode_rate(info->record.sample_rate, d->has_vra));
 	/*
@@ -220,41 +260,27 @@ static int ac97_write(audio_dev_t *adev, const void *buf, size_t len)
 	}
 	copy_len = (len > AC97_CHUNK_BYTES) ? AC97_CHUNK_BYTES : len;
 
-	slot = d->next_idx;
-
 	/*
-	 * Back-pressure: keep at most BDL_ENTRIES-1 slots in flight.
-	 *
-	 * "In flight" = count of slots the controller hasn't drained yet,
-	 * computed as (LVI - CIV) % BDL_ENTRIES.  When that reaches the
-	 * ring capacity minus one, the next write would either:
-	 *   (a) overwrite the slot being played (CIV), or
-	 *   (b) require setting LVI to a value the controller has
-	 *       already passed (would be interpreted as "we're done"
-	 *       and halt the DMA).
-	 * Both produce the 99x-fast-forward symptom: cat returns
-	 * instantly while only ~32 slots actually play.
-	 *
-	 * Spin (with `pause`) on CIV until enough in-flight slots have
-	 * drained — at 44.1 kHz / 16-bit stereo / 4 KiB chunks each slot
-	 * is ~23 ms, so the wait is bounded.  Skip the wait entirely if
-	 * the controller hasn't been started yet (DCH set, no in-flight
-	 * playback to collide with).
+	 * Back-pressure based on our own counters, not the controller's
+	 * CIV.  CIV under QEMU runs ahead of LVI in ways the spec doesn't
+	 * describe, breaking ring math; but BCIS interrupts (one per IOC
+	 * BDL entry completed) are reliable.  We track:
+	 *   writes_queued = total slots we've programmed (this fn ++s it)
+	 *   slots_played  = total BCIS the IRQ handler has counted
+	 * In-flight = writes_queued - slots_played.  Cap at BDL-1 so the
+	 * controller's PIV prefetch always has a slot to grab.
 	 */
 	for (;;) {
-		uint16_t sr = ac97_bm_read16(d, AC97_BM_PO_BASE + AC97_BM_SR);
-		if (sr & AC97_SR_DCH) {
-			break;  /* halted — nothing in flight */
-		}
-		uint8_t civ = ac97_bm_read8(d, AC97_BM_PO_BASE + AC97_BM_CIV);
-		uint8_t in_flight =
-		    (uint8_t)((d->lvi + AC97_BDL_ENTRIES - civ) % AC97_BDL_ENTRIES);
+		uint32_t played = __atomic_load_n(&d->slots_played,
+		                                  __ATOMIC_ACQUIRE);
+		uint32_t in_flight = d->writes_queued - played;
 		if (in_flight < (AC97_BDL_ENTRIES - 1)) {
 			break;
 		}
 		__asm__ volatile("pause");
 	}
 
+	slot = d->next_idx;
 	memcpy((uint8_t *)d->chunk_buf + (size_t)slot * AC97_CHUNK_BYTES,
 	       buf, copy_len);
 
@@ -263,12 +289,28 @@ static int ac97_write(audio_dev_t *adev, const void *buf, size_t len)
 	                     (uint32_t)d->chunk_phys +
 	                     (uint32_t)slot * AC97_CHUNK_BYTES,
 	                     samples, 1 /* IOC */);
+	/* Set BUP (Buffer Underrun Policy): if the controller drains
+	 * faster than we refill, it emits silence past the buffer
+	 * instead of hard-halting and forcing a CR restart. */
+	d->bdl[slot].flags |= AC97_BDL_F_BUP;
+
+	/* Make the BDL store globally visible BEFORE bumping LVI — the
+	 * BM may fetch this entry the instant LVI changes. */
+	__sync_synchronize();
 
 	d->lvi = slot;
 	ac97_bm_write8(d, AC97_BM_PO_BASE + AC97_BM_LVI, d->lvi);
-	ac97_bm_write8(d, AC97_BM_PO_BASE + AC97_BM_CR,
-	               AC97_CR_RPBM | AC97_CR_IOCE);
 
+	/* Start the bus master once.  Re-writing CR while RPBM=1 may
+	 * perturb the engine on real silicon and was definitely
+	 * mis-interacting with QEMU's CIV reporting. */
+	if (!d->running) {
+		ac97_bm_write8(d, AC97_BM_PO_BASE + AC97_BM_CR,
+		               AC97_CR_RPBM | AC97_CR_IOCE);
+		d->running = 1;
+	}
+
+	d->writes_queued++;
 	d->next_idx = (uint8_t)((slot + 1U) % AC97_BDL_ENTRIES);
 	return (int)copy_len;
 }
@@ -401,8 +443,26 @@ static int ac97_attach(pci_device_t *pdev)
 		return -ENOMEM;
 	}
 
-	/* Reset the PCM-out engine, then point it at the BDL. */
+	/*
+	 * Reset the PCM-out engine, then point it at the BDL.  RR
+	 * (Reset Registers) clears CIV, LVI, PIV, PICB, SR.  Wait briefly
+	 * for the bit to self-clear, then explicitly ack any latched SR
+	 * status bits before pointing BDBAR at our table — otherwise a
+	 * stale BCIS from a previous boot can fire as soon as IRQs are
+	 * unmasked, prematurely bumping our slots_played counter and
+	 * desyncing back-pressure.
+	 */
 	ac97_bm_write8(d, AC97_BM_PO_BASE + AC97_BM_CR, AC97_CR_RR);
+	for (int spin = 0; spin < 100000; spin++) {
+		uint8_t cr = inb((uint16_t)(d->nabmbar + AC97_BM_PO_BASE + AC97_BM_CR));
+		if ((cr & AC97_CR_RR) == 0) break;
+	}
+	ac97_bm_write16(d, AC97_BM_PO_BASE + AC97_BM_SR,
+	                AC97_SR_BCIS | AC97_SR_LVBCI | AC97_SR_FIFOE);
+	ac97_bm_write8(d, AC97_BM_PO_BASE + AC97_BM_LVI, 0);
+
+	/* BDL must be written before BDBAR points at it. */
+	__sync_synchronize();
 	ac97_bm_write32(d, AC97_BM_PO_BASE + AC97_BM_BDBAR,
 	                (uint32_t)d->bdl_phys);
 
