@@ -355,23 +355,31 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
 
                 // Resolve the target path.
                 //
-                // Both branches must enforce a symlink-depth cap.  The
-                // relative branch carries `depth` directly; the absolute
-                // branch hands off to vfs_lookup() which discards it,
-                // so we use a per-thread counter to bound the chain
-                // across re-entry.
+                // Both branches walk a full path (which may have
+                // multiple '/'-separated components, ".." entries,
+                // etc.), so both must call vfs_lookup() — the
+                // relative branch used to call finddir_fs_internal
+                // with the whole "../../libexec/ld.elf_so" string as
+                // a single entry name, asking the FS for a child
+                // literally named that, which obviously failed.
+                //
+                // Resolution base for relative targets is the
+                // symlink's parent directory (`node`), not fs_root.
+                //
+                // Use the per-thread counter to bound the chain
+                // across the re-entry into vfs_lookup().
                 fs_node_t *target;
-                if (link_target[0] == '/') {
-                    if (current_thread &&
-                        current_thread->vfs_symlink_depth >= MAX_SYMLINK_DEPTH) {
-                        return NULL;
-                    }
-                    if (current_thread) current_thread->vfs_symlink_depth++;
-                    target = vfs_lookup(fs_root, link_target);
-                    if (current_thread) current_thread->vfs_symlink_depth--;
-                } else {
-                    target = finddir_fs_internal(node, link_target, depth + 1, 1);
+                if (current_thread &&
+                    current_thread->vfs_symlink_depth >= MAX_SYMLINK_DEPTH) {
+                    return NULL;
                 }
+                if (current_thread) current_thread->vfs_symlink_depth++;
+                if (link_target[0] == '/') {
+                    target = vfs_lookup(fs_root, link_target);
+                } else {
+                    target = vfs_lookup(node, link_target);
+                }
+                if (current_thread) current_thread->vfs_symlink_depth--;
                 
                 if (target) {
                     return target;
