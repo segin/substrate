@@ -525,8 +525,8 @@ static int cp_copy_sparse_seek_hole(int src_fd, int dst_fd, off_t size)
         while (data < hole) {
             char buf[65536];
             off_t remain = hole - data;
-            size_t todo = (size_t)(remain > (off_t)sizeof(buf) ? (off_t)sizeof(buf) : remain);
-            ssize_t n = cp_read_retry(src_fd, buf, todo);
+            size_t bytes_to_read = (size_t)(remain > (off_t)sizeof(buf) ? (off_t)sizeof(buf) : remain);
+            ssize_t n = cp_read_retry(src_fd, buf, bytes_to_read);
             if (n < 0) {
                 return -1;
             }
