@@ -93,6 +93,17 @@ static int elf_note_detect_os(const uint8_t *buf, uint32_t len) {
             return ELFOSABI_FREEBSD;
         }
 
+        /* NetBSD/OpenBSD ship with EI_OSABI = SYSV (0) and announce
+         * the OS via PT_NOTE with owner "NetBSD\0" / "OpenBSD\0".
+         * NetBSD uses .note.netbsd.ident (n_type = NT_NETBSD_IDENT,
+         * n_namesz = 7); OpenBSD uses .note.openbsd.ident similarly. */
+        if (namesz >= 7 && memcmp(buf + name_off, "NetBSD", 7) == 0) {
+            return ELFOSABI_NETBSD;
+        }
+        if (namesz >= 8 && memcmp(buf + name_off, "OpenBSD", 8) == 0) {
+            return ELFOSABI_OPENBSD;
+        }
+
         off = next_off;
     }
 
@@ -733,6 +744,8 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
         kprint("ELF: Personality: ");
         if (detected_os == ELFOSABI_LINUX) kprint("Linux\n");
         else if (detected_os == ELFOSABI_FREEBSD) kprint("FreeBSD\n");
+        else if (detected_os == ELFOSABI_NETBSD) kprint("NetBSD\n");
+        else if (detected_os == ELFOSABI_OPENBSD) kprint("OpenBSD\n");
         else kprint("Native\n");
     }
     
@@ -743,6 +756,12 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
                 break;
             case ELFOSABI_LINUX:
                 current_process->perso_id = PERS_LINUX;
+                break;
+            case ELFOSABI_NETBSD:
+                current_process->perso_id = PERS_NETBSD;
+                break;
+            case ELFOSABI_OPENBSD:
+                current_process->perso_id = PERS_OPENBSD;
                 break;
             default:
                 current_process->perso_id = PERS_NATIVE;
