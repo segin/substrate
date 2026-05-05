@@ -16,13 +16,21 @@ extern thread_t *current_thread;
 extern process_t *current_process;
 
 /*
- * LDT slot reserved for the *BSD %gs TLS descriptor.  Each process owns
- * its own LDT (loaded via lldt on context switch in arch_switch_to), so
- * placing the TLS descriptor here gives full per-process isolation —
- * unlike the legacy GDT_TLS_START approach where every personality
- * shared one slot and the most-recent setter clobbered everyone else.
+ * LDT slot reserved for the *BSD %gs TLS descriptor.
+ *
+ * Placed at the very top of the LDT (8191) to keep the low/mid range
+ * free for future native-Wine-on-Substrate, whose own LDT allocator
+ * historically claims slots starting around index 17 and works upward.
+ * Slots [LDT_ENTRIES-2 .. LDT_ENTRIES-1] are kernel-reserved; future
+ * per-thread / per-personality TLS additions go here.
+ *
+ * Each process owns its own LDT (loaded via lldt on context switch in
+ * arch_switch_to), so placing the TLS descriptor anywhere in the LDT
+ * gives full per-process isolation — unlike the legacy GDT_TLS_START
+ * approach where every personality shared one slot and the
+ * most-recent setter clobbered everyone else.
  */
-#define BSD_LDT_TLS_SLOT 0
+#define BSD_LDT_TLS_SLOT (LDT_ENTRIES - 1)
 #define BSD_LDT_TLS_SEL  ((BSD_LDT_TLS_SLOT << 3) | 0x4 | 3)
 
 /*
