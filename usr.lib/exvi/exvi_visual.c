@@ -8246,12 +8246,20 @@ process_normal_key:
         case 'u':
             vis.pending_g = 0;
             vis.pending_count = 0;
+            /* Undo replaces the entire buffer, invalidating any line_t*
+               pointers stored in the replace-mode edit stack. */
+            if (vis.replace_mode) {
+                vi_clear_replace_edits(&vis);
+            }
             handle_undo_command(b);
             vi_clamp_cursor(b, &vis);
             break;
         case 0x12:
             vis.pending_g = 0;
             vis.pending_count = 0;
+            if (vis.replace_mode) {
+                vi_clear_replace_edits(&vis);
+            }
             handle_redo_command(b);
             vi_clamp_cursor(b, &vis);
             break;

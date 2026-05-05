@@ -8,6 +8,7 @@
 #include <stdarg.h>
 #include <regex.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 
 int secure_mode = 0;
@@ -560,24 +561,56 @@ void
 handle_sigint(int sig)
 {
     (void)sig;
-    printf("\nInterrupt\n");
+    write(STDOUT_FILENO, "\nInterrupt\n", 11);
     longjmp(main_loop_jmp, 1);
+}
+
+/*
+ * Async-signal-safe recovery write: uses only open/write/close and avoids
+ * malloc/fopen which are not safe to call from a signal handler.
+ */
+static void
+recover_signal_save(buffer_t *b)
+{
+    const char *suffix = ".recover";
+    char path[4096];
+    size_t flen;
+    size_t slen;
+    int fd;
+    line_t *l;
+
+    if (!b || !b->modified || !b->filename || !b->head) {
+        return;
+    }
+    flen = strlen(b->filename);
+    slen = strlen(suffix);
+    if (flen + slen >= sizeof(path)) {
+        return;
+    }
+    memcpy(path, b->filename, flen);
+    memcpy(path + flen, suffix, slen + 1);
+
+    fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) {
+        return;
+    }
+    for (l = b->head; l; l = l->next) {
+        if (l->len > 0) {
+            write(fd, l->text, l->len);
+        }
+        if (l->next || b->trailing_newline) {
+            write(fd, "\n", 1);
+        }
+    }
+    close(fd);
 }
 
 void
 handle_sigterm(int sig)
 {
     (void)sig;
-    if (global_buf_for_sighandler && global_buf_for_sighandler->modified
-        && global_buf_for_sighandler->filename && global_buf_for_sighandler->head) {
-        char *path = recover_path_for(global_buf_for_sighandler->filename);
-
-        if (path) {
-            exvi_write_recover_snapshot(global_buf_for_sighandler, path);
-            free(path);
-        }
-    }
-    exit(1);
+    recover_signal_save(global_buf_for_sighandler);
+    _exit(1);
 }
 
 void
@@ -619,13 +652,21 @@ exvi_reset_runtime(exvi_frontend_t frontend)
 void
 exvi_cleanup_runtime(void)
 {
+    secure_mode = 0;
     restricted_mode = 0;
-    option_wrapscan = 1;
+    batch_mode = 0;
+    visual_mode = 0;
+    recover_mode = 0;
+    option_number = 0;
+    option_list = 0;
     option_ignorecase = 0;
+    option_readonly = 0;
+    option_tabstop = EXVI_DEFAULT_TABSTOP;
     option_autoindent = 0;
     option_showmode = 1;
     option_scroll = EXVI_DEFAULT_SCROLL;
     option_scroll_explicit = 0;
+    option_wrapscan = 1;
     free(option_tags);
     option_tags = NULL;
     free(last_search_pattern);
@@ -641,6 +682,8 @@ exvi_cleanup_runtime(void)
     free_startup_commands();
     global_buf_for_sighandler = NULL;
     exvi_set_pending_status(NULL);
+    input_mode = 0;
+    input_insert_pos = NULL;
 }
 
 void
