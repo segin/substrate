@@ -223,32 +223,33 @@ static int ac97_write(audio_dev_t *adev, const void *buf, size_t len)
 	slot = d->next_idx;
 
 	/*
-	 * Wait until the BDL ring has a free slot.  The controller's CIV
-	 * (Current Index Value) is the slot it's playing right now; we
-	 * can fill any other slot.  Ring is "full" — for our purpose —
-	 * when the slot we're about to write IS the one being played.
-	 * Without this back-pressure, `cat data.pcm > /dev/audio0`
-	 * overwrites BDL slots before they're played and only the last
-	 * few survive (sounded like ~100x fast-forward).
+	 * Back-pressure: keep at most BDL_ENTRIES-1 slots in flight.
 	 *
-	 * If the controller isn't running (DCH = DMA Controller Halted —
-	 * set at boot before the first write, and again on underrun),
-	 * there's nothing to wait for — just queue the slot.  Without
-	 * this guard the very first write spun forever (CIV = 0 = slot
-	 * 0 = the slot we want to fill, but controller hasn't been
-	 * started yet so CIV will never move).
+	 * "In flight" = count of slots the controller hasn't drained yet,
+	 * computed as (LVI - CIV) % BDL_ENTRIES.  When that reaches the
+	 * ring capacity minus one, the next write would either:
+	 *   (a) overwrite the slot being played (CIV), or
+	 *   (b) require setting LVI to a value the controller has
+	 *       already passed (would be interpreted as "we're done"
+	 *       and halt the DMA).
+	 * Both produce the 99x-fast-forward symptom: cat returns
+	 * instantly while only ~32 slots actually play.
 	 *
-	 * Poll instead of sched_sleep to avoid the sleep-race.  At
-	 * 44.1 kHz / 16-bit stereo / 4 KiB chunks each slot drains in
-	 * ~23 ms, so the spin is bounded.
+	 * Spin (with `pause`) on CIV until enough in-flight slots have
+	 * drained — at 44.1 kHz / 16-bit stereo / 4 KiB chunks each slot
+	 * is ~23 ms, so the wait is bounded.  Skip the wait entirely if
+	 * the controller hasn't been started yet (DCH set, no in-flight
+	 * playback to collide with).
 	 */
 	for (;;) {
 		uint16_t sr = ac97_bm_read16(d, AC97_BM_PO_BASE + AC97_BM_SR);
 		if (sr & AC97_SR_DCH) {
-			break;  /* halted — no in-flight playback to collide with */
+			break;  /* halted — nothing in flight */
 		}
 		uint8_t civ = ac97_bm_read8(d, AC97_BM_PO_BASE + AC97_BM_CIV);
-		if (slot != civ) {
+		uint8_t in_flight =
+		    (uint8_t)((d->lvi + AC97_BDL_ENTRIES - civ) % AC97_BDL_ENTRIES);
+		if (in_flight < (AC97_BDL_ENTRIES - 1)) {
 			break;
 		}
 		__asm__ volatile("pause");
