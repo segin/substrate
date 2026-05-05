@@ -290,9 +290,22 @@ static int ac97_write(audio_dev_t *adev, const void *buf, size_t len)
 	d->lvi = slot;
 	ac97_bm_write8(d, AC97_BM_PO_BASE + AC97_BM_LVI, d->lvi);
 
-	/* Start the bus master once.  Re-writing CR while RPBM=1 may
-	 * perturb the engine on real silicon and was definitely
-	 * mis-interacting with QEMU's CIV reporting. */
+	/* Start the bus master.  Avoid re-writing CR while RPBM=1
+	 * (perturbs the engine and broke QEMU CIV reporting in earlier
+	 * iterations) — but DO restart if the controller has halted
+	 * (DCH=1).  That happens after a previous cat finished: the BM
+	 * drains through LVI, fires LVBCI, and clears RPBM.  Without a
+	 * re-arm here the second cat queues bytes that never play. */
+	if (d->running) {
+		uint16_t sr = ac97_bm_read16(d, AC97_BM_PO_BASE + AC97_BM_SR);
+		if (sr & AC97_SR_DCH) {
+			/* Ack any latched terminal-reach bits before restart. */
+			ac97_bm_write16(d, AC97_BM_PO_BASE + AC97_BM_SR,
+			                AC97_SR_BCIS | AC97_SR_LVBCI |
+			                AC97_SR_FIFOE);
+			d->running = 0;
+		}
+	}
 	if (!d->running) {
 		ac97_bm_write8(d, AC97_BM_PO_BASE + AC97_BM_CR,
 		               AC97_CR_RPBM | AC97_CR_IOCE);

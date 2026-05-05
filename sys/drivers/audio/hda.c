@@ -489,6 +489,16 @@ static int hda_write(audio_dev_t *adev, const void *buf, size_t len)
 	hda_write32(d, HDA_SD_BASE + HDA_SD_CBL,
 	            (uint32_t)(HDA_BDL_ENTRIES * HDA_CHUNK_BYTES));
 
+	/* Re-arm if a previous run finished and the stream halted —
+	 * SDCTL.RUN clears when the controller hits LVI without more
+	 * data.  Without this, a second cat queues bytes that never
+	 * play. */
+	if (d->running) {
+		ctl = hda_read32(d, HDA_SD_BASE + HDA_SD_CTL);
+		if ((ctl & HDA_SDCTL_RUN) == 0) {
+			d->running = 0;
+		}
+	}
 	if (!d->running) {
 		ctl = HDA_SDCTL_RUN | HDA_SDCTL_IOCE |
 		      ((uint32_t)d->stream_tag << HDA_SDCTL_STREAM_SHIFT);
