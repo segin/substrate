@@ -95,7 +95,21 @@ int sys_set_thread_area(struct user_desc *u_info) {
     if (current_thread && current_thread->syscall_regs) {
         ((registers_t *)current_thread->syscall_regs)->gs = selector;
     }
-    
+
+    /*
+     * Persist the TLS base so arch_switch_to -> i386_load_gs_for_thread
+     * re-installs it into GDT_TLS_START on every context switch.
+     * Without this, any other personality (or another Linux process)
+     * that sets its own TLS overwrites our slot, and on resume our
+     * %gs:offset reads return that other thread's TCB — symptom is
+     * a SIGSEGV at `mov %gs:0xc, %eax` in glibc/libc-style TLS loads
+     * the moment we get scheduled back in after running an FreeBSD or
+     * NetBSD child.
+     */
+    if (current_thread && info.entry_number == GDT_TLS_START) {
+        current_thread->gs_base = info.base_addr;
+    }
+
     return 0;
 }
 
