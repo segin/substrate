@@ -1,4 +1,4 @@
-#include "personality.h"
+#include <exec/perso/personality.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -10,12 +10,12 @@
 #include <sys/errno.h>
 #include <sys/file.h>
 #include <sys/uio.h>
-#include "compat.h"
-#include "linux/linux_syscalls.h"
-#include "linux_user.h"
-#include "linux/linux_blkio.h"
-#include "linux/linux_errno.h"
-#include "linux/linux_exec.h"
+#include <exec/perso/compat.h>
+#include <exec/perso/linux/linux_syscalls.h>
+#include <exec/perso/linux_user.h>
+#include <exec/perso/linux/linux_blkio.h>
+#include <exec/perso/linux/linux_errno.h>
+#include <exec/perso/linux/linux_exec.h>
 #include <sys/signal.h>
 #include <sys/proc.h>
 #include <string.h>

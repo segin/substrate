@@ -81,7 +81,7 @@ static void panic_dump_bytes_at(uintptr_t va, int is_user) {
         return;
     }
 
-    sprintf(line,
+    snprintf(line, sizeof(line),
             "CODE @eip: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
             buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7],
             buf[8], buf[9], buf[10], buf[11], buf[12], buf[13], buf[14], buf[15]);
@@ -106,10 +106,10 @@ static void panic_dump_stack_words(uintptr_t esp, int is_user) {
         return;
     }
 
-    sprintf(line, "STK: +00=%08x +04=%08x +08=%08x +0c=%08x\n",
+    snprintf(line, sizeof(line), "STK: +00=%08x +04=%08x +08=%08x +0c=%08x\n",
             buf[0], buf[1], buf[2], buf[3]);
     kprint(line);
-    sprintf(line, "STK: +10=%08x +14=%08x +18=%08x +1c=%08x\n",
+    snprintf(line, sizeof(line), "STK: +10=%08x +14=%08x +18=%08x +1c=%08x\n",
             buf[4], buf[5], buf[6], buf[7]);
     kprint(line);
 }
@@ -126,16 +126,16 @@ static void panic_dump_regs(const registers_t *regs) {
      * traps the saved esp is the kernel stack pointer (regs->esp from pusha). */
     fault_esp = is_user ? regs->useresp : regs->esp;
 
-    sprintf(line,
+    snprintf(line, sizeof(line),
             "REGS eip=%08x cs=%04x eflags=%08x esp=%08x ss=%04x int=%u err=%08x\n",
             regs->eip, (unsigned)(regs->cs & 0xFFFF), regs->eflags,
             fault_esp, (unsigned)(regs->ss & 0xFFFF),
             (unsigned)regs->int_no, regs->err_code);
     kprint(line);
-    sprintf(line, "REGS eax=%08x ebx=%08x ecx=%08x edx=%08x\n",
+    snprintf(line, sizeof(line), "REGS eax=%08x ebx=%08x ecx=%08x edx=%08x\n",
             regs->eax, regs->ebx, regs->ecx, regs->edx);
     kprint(line);
-    sprintf(line, "REGS esi=%08x edi=%08x ebp=%08x ds=%04x es=%04x fs=%04x gs=%04x\n",
+    snprintf(line, sizeof(line), "REGS esi=%08x edi=%08x ebp=%08x ds=%04x es=%04x fs=%04x gs=%04x\n",
             regs->esi, regs->edi, regs->ebp,
             (unsigned)(regs->ds & 0xFFFF), (unsigned)(regs->es & 0xFFFF),
             (unsigned)(regs->fs & 0xFFFF), (unsigned)(regs->gs & 0xFFFF));

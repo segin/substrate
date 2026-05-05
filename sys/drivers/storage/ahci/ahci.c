@@ -413,6 +413,9 @@ static int ahci_ata_dma_cmd(ahci_port_t *ap, uint8_t command,
     dma_addr_t data_dma;
     uint32_t byte_count;
 
+    if (ap->sector_size != 0 && sector_count > SIZE_MAX / ap->sector_size) {
+        return -1;
+    }
     byte_count = sector_count * ap->sector_size;
 
     /* Clear command table */

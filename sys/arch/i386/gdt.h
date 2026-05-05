@@ -68,4 +68,7 @@ void tss_set_iomap_range(uint16_t start, uint16_t end, int allow); /* Allow/deny
 void gdt_flush(uint32_t gdt_ptr);
 void tss_flush();
 
+/* Userspace entry */
+void jump_to_userspace(uint32_t entry, uint32_t stack, uint32_t ebx);
+
 #endif

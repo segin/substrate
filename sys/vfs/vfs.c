@@ -124,6 +124,7 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
                     
                     if (i > 0 && current->finddir) {
                         current = current->finddir(current, component);
+                        if (!current) break;
                     }
                 }
                 dev_node = current;
@@ -354,10 +355,13 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
             
             char link_target[256];
             int len = result->readlink(result, link_target, sizeof(link_target) - 1);
-            if (len > 0) {
-                if ((size_t)len >= sizeof(link_target)) return NULL;
-                link_target[len] = '\0';
+            if (len <= 0) {
+                return NULL;
+            }
+            if ((size_t)len >= sizeof(link_target)) return NULL;
+            link_target[len] = '\0';
 
+            {
                 // Resolve the target path.
                 //
                 // Both branches walk a full path (which may have
@@ -385,7 +389,7 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
                     target = vfs_lookup(node, link_target);
                 }
                 if (current_thread) current_thread->vfs_symlink_depth--;
-                
+
                 if (target) {
                     return target;
                 }

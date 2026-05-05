@@ -102,8 +102,7 @@ int coff_load_file(void *file, uint32_t size) {
 
         // Copy Data to Pages if not BSS and data pointer is valid
         if (scnhdr[i].s_scnptr != 0 && !(scnhdr[i].s_flags & STYP_BSS)) {
-             if (scnhdr[i].s_scnptr < 0 || scnhdr[i].s_size < 0 ||
-                 (uint32_t)scnhdr[i].s_scnptr + (uint32_t)scnhdr[i].s_size > size) {
+             if ((uint32_t)scnhdr[i].s_scnptr + (uint32_t)scnhdr[i].s_size > size) {
                  kprint("COFF: Section data out of bounds\n");
                  // Cleanup allocated map/object ideally, but process load failure cleans up whole address space usually.
                  return -1;

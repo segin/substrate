@@ -254,6 +254,10 @@ int getnewvnode(const char *tag, struct mount *mp,
  */
 void vref(struct vnode *vp)
 {
+    if (!vp) {
+        panic("vref: NULL vnode");
+        return;
+    }
     spinlock_acquire(&vp->v_interlock);
     
     /* Increment usecount first so the vnode cannot be reclaimed
@@ -277,6 +281,10 @@ void vref(struct vnode *vp)
  */
 void vrele(struct vnode *vp)
 {
+    if (!vp) {
+        panic("vrele: NULL vnode");
+        return;
+    }
     spinlock_acquire(&vp->v_interlock);
     
     if (vp->v_usecount == 0) {

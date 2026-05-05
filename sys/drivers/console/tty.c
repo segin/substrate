@@ -177,7 +177,16 @@ void tty_free(struct tty *tty) {
     kfree(tty, sizeof(struct tty));
 }
 
-// Minimal ring buffer ops
+/*
+ * Minimal ring buffer ops.
+ *
+ * Locking: tty->lock MUST be held (with interrupts disabled) by the caller
+ * before invoking tty_buf_put() or tty_buf_get().  All callers in this file
+ * acquire the lock via TTY_LOCK() or the equivalent intr_disable() +
+ * spinlock_acquire() sequence, which prevents concurrent access from both
+ * process context and interrupt (keyboard IRQ) context.  Do not call these
+ * helpers without holding the lock.
+ */
 static int tty_buf_put(tty_buffer_t *tb, char c) {
     int next = (tb->head + 1) % TTY_BUF_SIZE;
     if (next != tb->tail) {

@@ -4,6 +4,7 @@
 #include <kern/geom/geom.h>
 #include <kern/console.h>
 #include <arch/i386/pmm.h>
+#include <arch/i386/pmap.h>
 #include <kern/panic.h>
 #include <string.h>
 #include <stdio.h>
@@ -140,17 +141,17 @@ static int virtio_blk_read_sectors(geom_disk_t *disk, uint64_t lba, size_t count
     int id1 = 1;
     int id2 = 2;
     
-    vblk.desc[id0].addr = (uint64_t)((uint32_t)(uintptr_t)&hdr - 0xC0000000);
+    vblk.desc[id0].addr = (uint64_t)pmap_extract(pmap_kernel(), (uintptr_t)&hdr);
     vblk.desc[id0].len = sizeof(hdr);
     vblk.desc[id0].flags = VRING_DESC_F_NEXT;
     vblk.desc[id0].next = id1;
     
-    vblk.desc[id1].addr = (uint64_t)((uint32_t)(uintptr_t)buf - 0xC0000000);
+    vblk.desc[id1].addr = (uint64_t)pmap_extract(pmap_kernel(), (uintptr_t)buf);
     vblk.desc[id1].len = 512 * count;
     vblk.desc[id1].flags = VRING_DESC_F_NEXT | VRING_DESC_F_WRITE;
     vblk.desc[id1].next = id2;
     
-    vblk.desc[id2].addr = (uint64_t)((uint32_t)(uintptr_t)&status - 0xC0000000);
+    vblk.desc[id2].addr = (uint64_t)pmap_extract(pmap_kernel(), (uintptr_t)&status);
     vblk.desc[id2].len = 1;
     vblk.desc[id2].flags = VRING_DESC_F_WRITE;
     vblk.desc[id2].next = 0;
