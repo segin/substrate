@@ -256,6 +256,11 @@ void open_fs(fs_node_t *node, uint8_t read, uint8_t write) {
 }
 
 void close_fs(fs_node_t *node) {
+    /* Tolerate NULL: callers like file_close_ptr pass f->f_data, which
+     * is intentionally NULL for stub-only file types (e.g. socket
+     * fds from compat.c sock_alloc_fd) — without this guard, exiting
+     * a process that opened such an fd panics in fd_close_all. */
+    if (!node) return;
     if (node->close != 0)
         node->close(node);
 }
