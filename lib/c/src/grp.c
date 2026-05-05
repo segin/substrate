@@ -14,6 +14,7 @@ struct group *getgrgid(gid_t gid) {
 }
 
 struct group *getgrnam(const char *name) {
+    if (name == NULL) return NULL;
     (void)name;
     return &mock_group; // Always root
 }

@@ -101,10 +101,15 @@ void unquote_word(char *word) {
 }
 
 void buffer_append(char **buf, size_t *cap, size_t *len, char c) {
-    // Guard against exponential expansion - max 64KB
-    #define BUFFER_MAX_SIZE (64 * 1024)
+    #define BUFFER_MAX_SIZE (1024 * 1024)
     if (*len >= BUFFER_MAX_SIZE) {
-        return; // Silently stop appending beyond limit
+        static int warned;
+        if (!warned) {
+            const char *msg = "sh: warning: expansion truncated at 1MB\n";
+            if (write(2, msg, strlen(msg)) < 0) {}
+            warned = 1;
+        }
+        return;
     }
     
     if (*len + 1 >= *cap) {

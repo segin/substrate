@@ -67,11 +67,20 @@ static uint64_t timeval_to_ticks(const struct timeval *tv) {
         return 0;
     }
 
+    /* Clamp to prevent overflow: UINT64_MAX / HZ is the max safe tv_sec */
+    if ((uint64_t)tv->tv_sec > UINT64_MAX / HZ) {
+        return UINT64_MAX;
+    }
+
     sec_ticks = (uint64_t)tv->tv_sec * HZ;
     usec_ticks = ((uint64_t)tv->tv_usec * HZ + 999999ULL) / 1000000ULL;
 
     if (sec_ticks == 0 && usec_ticks == 0) {
         return 1;
+    }
+    /* Saturate on overflow */
+    if (sec_ticks > UINT64_MAX - usec_ticks) {
+        return UINT64_MAX;
     }
     return sec_ticks + usec_ticks;
 }

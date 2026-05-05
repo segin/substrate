@@ -22,6 +22,10 @@ dma_addr_t dma_map_single(void *cpu_addr, size_t size, enum dma_data_direction d
         return (dma_addr_t)0;
     }
 #ifndef HOST_TEST
+    /* All kernel memory is direct-mapped at KERNEL_BASE; validate range */
+    if ((uintptr_t)cpu_addr < KERNEL_BASE) {
+        return (dma_addr_t)0;
+    }
     return (dma_addr_t)((uintptr_t)cpu_addr - KERNEL_BASE);
 #else
     return (dma_addr_t)(uintptr_t)cpu_addr;

@@ -1,4 +1,5 @@
 #include "expand.h"
+#include "exec.h"
 #include "shell_var.h"
 #include "util.h"
 #include <stdio.h>
@@ -7,10 +8,8 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <pwd.h>
 #include <sys/wait.h>
-
-extern long strtol(const char *nptr, char **endptr, int base);
-extern int execute_line(char *line);
 
 static void expand_state_note_cmdsub(expand_state_t *state, int status) {
     if (!state) {
@@ -29,6 +28,8 @@ static void expand_state_fail(expand_state_t *state, int status) {
 }
 
 static char *capture_command_output(const char *cmd_str, expand_state_t *state) {
+    #define CMDSUB_MAX_OUTPUT_SIZE (256 * 1024)
+
     int pfd[2];
     if (pipe(pfd) < 0) return strdup("");
     
@@ -42,15 +43,33 @@ static char *capture_command_output(const char *cmd_str, expand_state_t *state) 
         close(pfd[1]);
         size_t cap = 1024, len = 0;
         char *buf = malloc(cap);
+        int overflow = 0;
         char read_buf[256];
         ssize_t n;
         while ((n = read(pfd[0], read_buf, sizeof(read_buf))) > 0) {
-            if (len + n >= cap) {
-                cap *= 2;
-                buf = realloc(buf, cap);
+            if (len >= CMDSUB_MAX_OUTPUT_SIZE) {
+                overflow = 1;
+                continue;
             }
-            memcpy(buf + len, read_buf, n);
-            len += n;
+
+            size_t avail = CMDSUB_MAX_OUTPUT_SIZE - len;
+            size_t chunk = (size_t)n > avail ? avail : (size_t)n;
+            if ((size_t)n > avail) {
+                overflow = 1;
+            }
+
+            if (len + chunk + 1 >= cap) {
+                while (len + chunk + 1 >= cap) {
+                    cap *= 2;
+                }
+                buf = realloc(buf, cap);
+                if (!buf) {
+                    close(pfd[0]);
+                    return strdup("");
+                }
+            }
+            memcpy(buf + len, read_buf, chunk);
+            len += chunk;
         }
         buf[len] = '\0';
         close(pfd[0]);
@@ -67,6 +86,13 @@ static char *capture_command_output(const char *cmd_str, expand_state_t *state) 
         while (len > 0 && buf[len - 1] == '\n') {
             buf[--len] = '\0';
         }
+
+        if (overflow) {
+            fprintf(stderr, "%s: command substitution output exceeds %d bytes\n",
+                shell_var_get_name(), CMDSUB_MAX_OUTPUT_SIZE);
+            expand_state_fail(state, 1);
+        }
+
         return buf;
     } else {
         close(pfd[0]); close(pfd[1]);
@@ -94,7 +120,7 @@ static void finalize_word(char **cw, size_t *cw_cap, size_t *cw_len, char ***lis
 
 static char *get_ifs() {
     char *ifs = shell_var_get("IFS");
-    if (!ifs) return " \t\n";
+    if (!ifs) return strdup(" \t\n");
     return ifs;
 }
 
@@ -108,7 +134,7 @@ static void expand_str_split(const char *val, int split, char ***list, size_t *c
         return;
     }
 
-    const char *ifs = get_ifs();
+    char *ifs = get_ifs();
     const char *p = val;
     // Skip initial IFS whitespace if splitting
     while (*p && isspace(*p) && strchr(ifs, *p)) p++;
@@ -125,6 +151,7 @@ static void expand_str_split(const char *val, int split, char ***list, size_t *c
         }
         if (*p) p++;
     }
+    free(ifs);
 }
 
 
@@ -135,6 +162,7 @@ static char *lookup_variable(const char *name) {
 
 // Full recursive descent parser for POSIX arithmetic
 static const char *arith_ptr;
+static int arith_error;
 
 static long parse_assign(void);
 static long parse_log_or(void);
@@ -197,10 +225,14 @@ static long parse_mul(void) {
         while (isspace(*arith_ptr)) arith_ptr++;
         if (*arith_ptr == '*' && *(arith_ptr+1) != '=') { arith_ptr++; left *= parse_unary(); }
         else if (*arith_ptr == '/' && *(arith_ptr+1) != '=') { 
-            arith_ptr++; long r = parse_unary(); if (r) left /= r; 
+            arith_ptr++; long r = parse_unary();
+            if (r) { left /= r; }
+            else { fprintf(stderr, "sh: arithmetic: division by zero\n"); arith_error = 1; return 0; }
         }
         else if (*arith_ptr == '%' && *(arith_ptr+1) != '=') { 
-            arith_ptr++; long r = parse_unary(); if (r) left %= r; 
+            arith_ptr++; long r = parse_unary();
+            if (r) { left %= r; }
+            else { fprintf(stderr, "sh: arithmetic: division by zero\n"); arith_error = 1; return 0; }
         }
         else break;
     }
@@ -542,10 +574,30 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
     int in_sq = 0, in_dq = 0, escape = 0, quoted_any = 0;
     const char *p = word;
     if (*p == '~' && !in_sq && !in_dq) {
-        char *home = lookup_variable("HOME");
-        if (home) {
-            expand_str_split(home, 0, list, cap, len, &cw, &cw_cap, &cw_len);
-            p++;
+        p++;
+        const char *start = p;
+        while (*p && *p != '/') p++;
+        size_t ulen = p - start;
+        if (ulen == 0) {
+            /* bare ~ -> $HOME */
+            char *home = lookup_variable("HOME");
+            if (home) {
+                expand_str_split(home, 0, list, cap, len, &cw, &cw_cap, &cw_len);
+                free(home);
+            }
+        } else {
+            /* ~user -> getpwnam */
+            char *user = sh_strndup(start, ulen);
+            struct passwd *pw = getpwnam(user);
+            if (pw) {
+                expand_str_split(pw->pw_dir, 0, list, cap, len, &cw, &cw_cap, &cw_len);
+            } else {
+                /* Not found: emit literal ~user */
+                buffer_append(&cw, &cw_cap, &cw_len, '~');
+                for (size_t i = 0; i < ulen; i++)
+                    buffer_append(&cw, &cw_cap, &cw_len, start[i]);
+            }
+            free(user);
         }
     }
     while (*p) {
@@ -585,12 +637,23 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
                 }
                 if (depth == 0) {
                     char *expr = sh_strndup(start, p - start - 1);
+                    const char *saved_arith_ptr = arith_ptr;
+                    int saved_arith_error = arith_error;
                     arith_ptr = expr;
+                    arith_error = 0;
                     long val = parse_assign();
-                    char buf[32];
-                    snprintf(buf, sizeof(buf), "%ld", val);
-                    expand_str_split(buf, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
-                    free(expr);
+                    int had_error = arith_error;
+                    arith_ptr = saved_arith_ptr;
+                    arith_error = saved_arith_error;
+                    if (had_error) {
+                        expand_state_fail(state, 1);
+                        free(expr);
+                    } else {
+                        char buf[32];
+                        snprintf(buf, sizeof(buf), "%ld", val);
+                        expand_str_split(buf, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                        free(expr);
+                    }
                 }
             } else if (*p == '(') {
                 p++;
@@ -668,6 +731,7 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
                                 // Recursively expand the word
                                 char *expanded = NULL;
                                 if (expand_word_ex(word, &expanded, state) != 0) {
+                                    free(val);
                                     free(content);
                                     free(varname);
                                     free(cw);
@@ -683,6 +747,7 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
                             if (is_nonnull) {
                                 char *expanded = NULL;
                                 if (expand_word_ex(word, &expanded, state) != 0) {
+                                    free(val);
                                     free(content);
                                     free(varname);
                                     free(cw);
@@ -696,6 +761,7 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
                             if (!is_nonnull && varname) {
                                 char *expanded = NULL;
                                 if (expand_word_ex(word, &expanded, state) != 0) {
+                                    free(val);
                                     free(content);
                                     free(varname);
                                     free(cw);
@@ -712,6 +778,7 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
                             if (!is_nonnull) {
                                 char *expanded = NULL;
                                 if (expand_word_ex(word, &expanded, state) != 0) {
+                                    free(val);
                                     free(content);
                                     free(varname);
                                     free(cw);
@@ -720,6 +787,7 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
                                 fprintf(stderr, "%s: %s: %s\n", shell_var_get_name(), varname ? varname : "", expanded);
                                 free(expanded);
                                 expand_state_fail(state, 1);
+                                free(val);
                                 free(content);
                                 free(varname);
                                 free(cw);
@@ -732,11 +800,12 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
                         // - + = ? operators (only check unset)
                         char op = *c;
                         const char *word = c + 1;
-                        
+
                         if (op == '-') {
                             if (!is_set) {
                                 char *expanded = NULL;
                                 if (expand_word_ex(word, &expanded, state) != 0) {
+                                    free(val);
                                     free(content);
                                     free(varname);
                                     free(cw);
@@ -751,6 +820,7 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
                             if (is_set) {
                                 char *expanded = NULL;
                                 if (expand_word_ex(word, &expanded, state) != 0) {
+                                    free(val);
                                     free(content);
                                     free(varname);
                                     free(cw);
@@ -763,6 +833,7 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
                             if (!is_set && varname) {
                                 char *expanded = NULL;
                                 if (expand_word_ex(word, &expanded, state) != 0) {
+                                    free(val);
                                     free(content);
                                     free(varname);
                                     free(cw);
@@ -778,6 +849,7 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
                             if (!is_set) {
                                 char *expanded = NULL;
                                 if (expand_word_ex(word, &expanded, state) != 0) {
+                                    free(val);
                                     free(content);
                                     free(varname);
                                     free(cw);
@@ -786,6 +858,7 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
                                 fprintf(stderr, "%s: %s: %s\n", shell_var_get_name(), varname ? varname : "", expanded);
                                 free(expanded);
                                 expand_state_fail(state, 1);
+                                free(val);
                                 free(content);
                                 free(varname);
                                 free(cw);
@@ -804,6 +877,7 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
                             char buf[32];
                             snprintf(buf, sizeof(buf), "%zu", length_val ? strlen(length_val) : 0);
                             expand_str_split(buf, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                            free(length_val);
                             free(length_var);
                         } else {
                             // ${var#pattern} or ${var##pattern}
@@ -847,7 +921,8 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
                         // No operator, just expand the variable
                         expand_str_split(val, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                     }
-                    
+
+                    free(val);
                     free(varname);
                     free(content);
                 }
@@ -858,6 +933,7 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
                 char *name = sh_strndup(start, p - start);
                 char *val = lookup_variable(name);
                 expand_str_split(val, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                free(val);
                 free(name); p--;
             } else {
                 buffer_append(&cw, &cw_cap, &cw_len, '$');
@@ -1030,11 +1106,21 @@ int expand_heredoc_ex(const char *content, int quoted, char **out,
                  }
                  if (depth == 0) {
                      char *expr = sh_strndup(start, p - start - 1);
+                     const char *saved_arith_ptr = arith_ptr;
+                     int saved_arith_error = arith_error;
                      arith_ptr = expr;
+                     arith_error = 0;
                      long val = parse_assign();
-                     char val_buf[32];
-                     snprintf(val_buf, sizeof(val_buf), "%ld", val);
-                     buffer_append_str(&buf, &cap, &len, val_buf);
+                     int had_error = arith_error;
+                     arith_ptr = saved_arith_ptr;
+                     arith_error = saved_arith_error;
+                     if (had_error) {
+                         expand_state_fail(state, 1);
+                     } else {
+                         char val_buf[32];
+                         snprintf(val_buf, sizeof(val_buf), "%ld", val);
+                         buffer_append_str(&buf, &cap, &len, val_buf);
+                     }
                      free(expr);
                  }
             } else if (*p == '(') {
@@ -1061,6 +1147,7 @@ int expand_heredoc_ex(const char *content, int quoted, char **out,
                     char *name = sh_strndup(start, p - start);
                     char *val = lookup_variable(name);
                     if (val) buffer_append_str(&buf, &cap, &len, val);
+                    free(val);
                     free(name);
                 }
             } else if (isalpha(*p) || *p == '_' || isdigit(*p) || *p == '?' || *p == '$' || *p == '#' || *p == '@' || *p == '*' || *p == '-' || *p == '!') {
@@ -1070,6 +1157,7 @@ int expand_heredoc_ex(const char *content, int quoted, char **out,
                 char *name = sh_strndup(start, p - start);
                 char *val = lookup_variable(name);
                 if (val) buffer_append_str(&buf, &cap, &len, val);
+                free(val);
                 free(name); p--;
             } else {
                 buffer_append(&buf, &cap, &len, '$');

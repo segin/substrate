@@ -130,19 +130,13 @@ static int is_ifs(const char *ifs, char ch)
 	return strchr(ifs, ch) != NULL;
 }
 
-int tok_str(Tokenizer *tok, const LineInfo *li, int *argc,
-	    const char ***argv)
+static int tok_tokenize_range(Tokenizer *tok, const char *p, const char *end,
+			      int *argc, const char ***argv)
 {
-	const char *p;
-	const char *end;
-
-	if (!tok || !li || !argc || !argv)
+	if (!tok || !p || !end || !argc || !argv)
 		return -1;
 
 	tok_reset(tok);
-
-	p = li->buffer;
-	end = li->lastchar;
 
 	while (p < end) {
 		unsigned char ch = (unsigned char)*p++;
@@ -215,4 +209,27 @@ int tok_str(Tokenizer *tok, const LineInfo *li, int *argc,
 	*argc = tok->argc;
 	*argv = (const char **)tok->argv;
 	return 0;
+}
+
+int tok_line(Tokenizer *tok, const LineInfo *li, int *argc,
+	     const char ***argv, int *cursorc, int *cursoro)
+{
+	int ret;
+
+	if (!li)
+		return -1;
+
+	ret = tok_tokenize_range(tok, li->buffer, li->lastchar, argc, argv);
+	if (ret >= 0) {
+		if (cursorc) *cursorc = argc ? *argc : 0;
+		if (cursoro) *cursoro = 0;
+	}
+	return ret;
+}
+
+int tok_str(Tokenizer *tok, const char *str, int *argc, const char ***argv)
+{
+	if (!str)
+		return -1;
+	return tok_tokenize_range(tok, str, str + strlen(str), argc, argv);
 }

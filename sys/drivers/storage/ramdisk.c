@@ -16,10 +16,11 @@ static int ramdisk_read(blkdev_t *dev, uint64_t sector, uint32_t count, void *bu
     if (!addr) return -1;
     
     uint64_t offset = sector * 512;
-    uint64_t size = count * 512;
+    uint64_t size = (uint64_t)count * 512;
     
-    // Bounds check
-    if (offset + size > dev->total_sectors * 512) {
+    // Bounds check (overflow-safe: check components separately)
+    if (sector > dev->total_sectors || count > dev->total_sectors ||
+        offset + size > dev->total_sectors * 512) {
         return -1;
     }
     
@@ -33,9 +34,11 @@ static int ramdisk_write(blkdev_t *dev, uint64_t sector, uint32_t count, const v
     if (!addr) return -1;
     
     uint64_t offset = sector * 512;
-    uint64_t size = count * 512;
+    uint64_t size = (uint64_t)count * 512;
     
-    if (offset + size > dev->total_sectors * 512) {
+    // Bounds check (overflow-safe: check components separately)
+    if (sector > dev->total_sectors || count > dev->total_sectors ||
+        offset + size > dev->total_sectors * 512) {
         return -1;
     }
     

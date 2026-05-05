@@ -1,5 +1,5 @@
 EDIT_DIR = ../../../lib/edit
-CFLAGS_HOST = -g -Wall -DHOST_TEST -I../../sys -I../../include -I$(EDIT_DIR)
+CFLAGS_HOST = -g -Wall -DHOST_TEST -I../../../sys -I../../../include -I$(EDIT_DIR)
 
 EDIT_SRCS = $(EDIT_DIR)/editline.c $(EDIT_DIR)/readline.c $(EDIT_DIR)/terminal.c \
             $(EDIT_DIR)/history.c $(EDIT_DIR)/signal.c $(EDIT_DIR)/keymap.c \

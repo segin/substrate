@@ -12,6 +12,7 @@
 #include <vm/vm_kmem.h>
 #include <kern/cmdline.h>
 #include <sys/lock.h>
+#include <sys/param.h>
 
 // mman.h flag definitions (duplicated here for kernel use)
 #define PROT_NONE  0x0
@@ -27,6 +28,48 @@
 static int mmap_validate_flags(int flags) {
     int sharing = flags & (MAP_SHARED | MAP_PRIVATE);
     return sharing == MAP_SHARED || sharing == MAP_PRIVATE;
+}
+
+static int vm_round_page_size(size_t length, size_t *aligned_out) {
+    size_t aligned_length;
+
+    if (!aligned_out || length == 0) {
+        return -1;
+    }
+    if (length > (size_t)-1 - 0xFFF) {
+        return -1;
+    }
+
+    aligned_length = (length + 0xFFF) & ~(size_t)0xFFF;
+    if (aligned_length == 0) {
+        return -1;
+    }
+
+    *aligned_out = aligned_length;
+    return 0;
+}
+
+static int vm_user_range_valid(uintptr_t start, size_t length) {
+    if (length == 0) {
+        return -1;
+    }
+    if (start < USER_STACK_MIN || start >= KERN_BASE) {
+        return -1;
+    }
+    if (length > (size_t)(KERN_BASE - start)) {
+        return -1;
+    }
+    return 0;
+}
+
+static void brk_unmap_free_pages(pmap_t pmap, uintptr_t start, uintptr_t end) {
+    for (uintptr_t va = start; va < end; va += 0x1000) {
+        uintptr_t pa = pmap_extract(pmap, va);
+        if (pa != 0) {
+            pmap_remove(pmap, va);
+            pmm_free_block((void *)((pa & ~0xFFFU) + KERN_BASE));
+        }
+    }
 }
 
 typedef struct shared_file_object_entry {
@@ -127,23 +170,26 @@ static vm_object_t *mmap_create_file_object(fs_node_t *node, size_t length, uint
 void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t offset) {
     process_t *p = current_process;
     if (!p || !p->vm_map) return (void *)-1;
-    if (length == 0) return (void *)-1;
     if (!mmap_validate_flags(flags)) return (void *)-1;
 
     vm_map_t *map = p->vm_map;
     uintptr_t v_addr = (uintptr_t)addr;
-    size_t aligned_length = (length + 0xFFF) & ~0xFFF;
+    size_t aligned_length;
+
+    if (vm_round_page_size(length, &aligned_length) != 0) return (void *)-1;
 
     // Find virtual address space
     if (v_addr == 0 || !(flags & MAP_FIXED)) {
         if (vm_map_find_space(map, &v_addr, aligned_length) != 0) return (void *)-1;
     } else {
         if (v_addr & 0xFFF) return (void *)-1;
+        if (vm_user_range_valid(v_addr, aligned_length) != 0) return (void *)-1;
         // MAP_FIXED: Unmap existing mappings in the range
         if (vm_map_remove(map, v_addr, v_addr + aligned_length) != 0) {
             return (void *)-1;
         }
     }
+    if (vm_user_range_valid(v_addr, aligned_length) != 0) return (void *)-1;
 
     // Translate prot to VM_PROT_* flags
     uint32_t vm_prot = 0;
@@ -167,7 +213,8 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
     // Create VM object for tracking
     vm_object_t *obj;
     if (file) {
-        obj = mmap_create_file_object((fs_node_t *)file->f_data, aligned_length, vm_prot, flags, offset);
+        fs_node_t *fnode = (fs_node_t *)file->f_data;
+        obj = mmap_create_file_object(fnode, aligned_length, vm_prot, flags, offset);
     } else {
         obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, aligned_length);
     }
@@ -186,13 +233,12 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
 
 int sys_munmap(void *addr, size_t length) {
     if (!current_process || !current_process->vm_map) return -1;
-    if (length == 0) return -1;
+    size_t aligned_len;
+    if (vm_round_page_size(length, &aligned_len) != 0) return -1;
 
     uintptr_t start = (uintptr_t)addr;
-    // Align length to page size
-    size_t aligned_len = (length + 0xFFF) & ~0xFFF;
 
-    if (start + aligned_len < start) return -1;
+    if (vm_user_range_valid(start, aligned_len) != 0) return -1;
 
     if (vm_map_remove(current_process->vm_map, start, start + aligned_len) != 0) {
         return -1;
@@ -239,6 +285,13 @@ void *sys_brk(void *addr) {
     if (new_brk < current_process->brk_start) 
         return (void *)(uintptr_t)old_brk;
 
+    // Don't allow mapping into kernel address space
+    if (new_brk >= 0xC0000000)
+        return (void *)(uintptr_t)old_brk;
+
+    if (old_brk + 0xFFF < old_brk || new_brk + 0xFFF < new_brk)
+        return (void *)(uintptr_t)old_brk;
+
     // Align to page boundaries
     uintptr_t old_page_end = (old_brk + 0xFFF) & ~0xFFFULL;
     uintptr_t new_page_end = (new_brk + 0xFFF) & ~0xFFFULL;
@@ -249,6 +302,7 @@ void *sys_brk(void *addr) {
         #define BRK_BATCH_SIZE 256
         uintptr_t pa_batch[BRK_BATCH_SIZE];
         uintptr_t va = old_page_end;
+        pmap_t brk_pmap = current_process->pmap ? (pmap_t)current_process->pmap : pmap_kernel();
 
         while (va < new_page_end) {
             int batch_count = 0;
@@ -262,6 +316,7 @@ void *sys_brk(void *addr) {
                      for (int k = 0; k < batch_count; k++) {
                          pmm_free_block((void*)(pa_batch[k] + 0xC0000000));
                      }
+                     brk_unmap_free_pages(brk_pmap, old_page_end, batch_va_start);
                      extern int syscall_trace_enabled;
                      if (syscall_trace_enabled || cmdline_debug_enabled("vm:brk")) {
                          extern void kprint(const char*);
@@ -278,9 +333,17 @@ void *sys_brk(void *addr) {
             }
             
             // Map batch
-            if (pmap_enter_batch(current_process->pmap ? (pmap_t)current_process->pmap : pmap_kernel(),
-                                 batch_va_start, batch_count, pa_batch,
+            if (pmap_enter_batch(brk_pmap, batch_va_start, batch_count, pa_batch,
                                  VM_PROT_READ | VM_PROT_WRITE, 0) < 0) {
+                 for (int k = 0; k < batch_count; k++) {
+                     uintptr_t page_va = batch_va_start + ((uintptr_t)k * 0x1000);
+                     uintptr_t mapped_pa = pmap_extract(brk_pmap, page_va) & ~0xFFFU;
+                     if (mapped_pa == pa_batch[k]) {
+                         pmap_remove(brk_pmap, page_va);
+                     }
+                     pmm_free_block((void *)(pa_batch[k] + KERN_BASE));
+                 }
+                 brk_unmap_free_pages(brk_pmap, old_page_end, batch_va_start);
                  extern int syscall_trace_enabled;
                  if (syscall_trace_enabled || cmdline_debug_enabled("vm:brk")) {
                      extern void kprint(const char*);

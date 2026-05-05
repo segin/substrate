@@ -1275,7 +1275,7 @@ static void ntsync_open_callback(fs_node_t *node) {
     
     /* Setup fs_node for this instance */
     memset(&inst->node, 0, sizeof(fs_node_t));
-    strcpy(inst->node.name, "ntsync_inst");
+    strlcpy(inst->node.name, "ntsync_inst", sizeof(inst->node.name));
     inst->node.flags = FS_CHARDEVICE;
     inst->node.impl = (uintptr_t)inst;
     inst->node.ioctl = ntsync_ioctl;
@@ -1300,7 +1300,7 @@ static void ntsync_close(fs_node_t *node) {
 
 void ntsync_init(void) {
     memset(&ntsync_device, 0, sizeof(fs_node_t));
-    strcpy(ntsync_device.name, "ntsync");
+    strlcpy(ntsync_device.name, "ntsync", sizeof(ntsync_device.name));
     ntsync_device.flags = FS_CHARDEVICE;
     ntsync_device.open = ntsync_open_callback;
     ntsync_device.close = ntsync_close;

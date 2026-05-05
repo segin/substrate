@@ -88,12 +88,12 @@ int virtio_9p_send(void *out_buf, uint32_t out_len, void *in_buf, uint32_t in_le
     int id0 = 0;
     int id1 = 1;
     
-    v9p.desc[id0].addr = (uint64_t)(uint32_t)out_buf;
+    v9p.desc[id0].addr = (uint64_t)((uint32_t)(uintptr_t)out_buf - 0xC0000000);
     v9p.desc[id0].len = out_len;
     v9p.desc[id0].flags = VRING_DESC_F_NEXT;
     v9p.desc[id0].next = id1;
     
-    v9p.desc[id1].addr = (uint64_t)(uint32_t)in_buf;
+    v9p.desc[id1].addr = (uint64_t)((uint32_t)(uintptr_t)in_buf - 0xC0000000);
     v9p.desc[id1].len = in_len;
     v9p.desc[id1].flags = VRING_DESC_F_WRITE;
     v9p.desc[id1].next = 0;

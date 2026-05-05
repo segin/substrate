@@ -3,7 +3,7 @@
 .\"
 .TH TOK_INIT 3 "February 2026" "Substrate" "Library Functions Manual"
 .SH NAME
-tok_init, tok_end, tok_reset, tok_str \- editline tokenizer interface
+tok_init, tok_end, tok_reset, tok_line, tok_str \- editline tokenizer interface
 .SH LIBRARY
 Editline library (libedit, \-ledit)
 .SH SYNOPSIS
@@ -15,7 +15,9 @@ Editline library (libedit, \-ledit)
 .br
 .BI "void tok_reset(Tokenizer *tok);"
 .br
-.BI "int tok_str(Tokenizer *tok, const LineInfo *li, int *argc, const char ***argv);"
+.BI "int tok_line(Tokenizer *tok, const LineInfo *li, int *argc, const char ***argv, int *cursorc, int *cursoro);"
+.br
+.BI "int tok_str(Tokenizer *tok, const char *str, int *argc, const char ***argv);"
 .SH DESCRIPTION
 The editline tokenizer splits an input line into words, handling quoting,
 backslash escaping, and line continuation.
@@ -36,6 +38,9 @@ state.
 This allows a single tokenizer to be reused across multiple input lines.
 .PP
 .BR tok_str ()
+tokenizes the NUL-terminated string
+.IR str .
+.BR tok_line ()
 tokenizes the line described by
 .IR li .
 On return,
@@ -48,6 +53,7 @@ The storage for
 and the token strings is owned by
 .I tok
 and remains valid until the next call to
+.BR tok_line (),
 .BR tok_str (),
 .BR tok_reset (),
 or
@@ -105,14 +111,9 @@ EditLine *el = el_init("myapp", stdin, stdout, stderr);
 int count;
 const char *line = el_gets(el, &count);
 if (line) {
-    LineInfo li;
-    li.buffer = line;
-    li.cursor = line + count;
-    li.lastchar = line + count;
-
     int argc;
     const char **argv;
-    if (tok_str(tok, &li, &argc, &argv) == 0) {
+    if (tok_str(tok, line, &argc, &argv) == 0) {
         for (int i = 0; i < argc; i++)
             printf("argv[%d] = \\"%s\\"\\n", i, argv[i]);
     }

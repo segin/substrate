@@ -1,0 +1,7 @@
+# Substrate default shell profile
+
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
+
+prompt='%n@%m[%T]:{%~}%% '
+

@@ -14,16 +14,10 @@
 #define EL_MAX_USER_ACTIONS 64
 
 /* ------------------------------------------------------------------ */
-/* Action function type and return codes                              */
+/* Action function type                                               */
 /* ------------------------------------------------------------------ */
 
-typedef unsigned char (*el_action_t)(EditLine *, int);
-
-#define CC_NORM     0   /* Normal: continue editing */
-#define CC_NEWLINE  1   /* Accept line (newline entered) */
-#define CC_EOF      2   /* End-of-file (^D on empty) */
-#define CC_REFRESH  4   /* Refresh display */
-#define CC_ERROR    5   /* Error */
+typedef el_func_t el_action_t;
 
 /* ------------------------------------------------------------------ */
 /* Keymap types                                                       */
@@ -156,6 +150,7 @@ struct line {
 
 struct editline {
     char *prog;
+    char *terminal_name;
     FILE *fin;
     FILE *fout;
     FILE *ferr;
@@ -167,6 +162,7 @@ struct editline {
     enum editor_mode editor_mode;
     struct signal_state signal_state;
     unsigned char (*completion)(EditLine *, int);
+    el_rfunc_t read_func;
     void *completion_data;
     void *client_data;
     int overwrite_mode;
@@ -187,6 +183,9 @@ struct editline {
     size_t render_cache_cursor;
     char *saved_input;
     size_t saved_input_cap;
+    char *push_buf;
+    size_t push_len;
+    size_t push_pos;
     int history_browsing;
     /* Vi mode state */
     enum vi_mode vi_mode;
@@ -204,12 +203,14 @@ struct editline {
     int n_user_actions;
     int last_action_was_complete;  /* for second-tab display */
     /* Prompt escape support */
-    const char *(*prompt_func)(EditLine *);
+    el_pfunc_t prompt_func;
     char prompt_esc_char;         /* escape char for non-printing sequences */
-    const char *(*rprompt_func)(EditLine *);
+    el_pfunc_t rprompt_func;
     char rprompt_esc_char;
     /* Editing mode toggle */
     int editing_enabled;          /* 0 = passthrough, 1 = full editing */
+    int unbuffered;
+    int saferead;
     /* UTF-8 state */
     int utf8_enabled;             /* 1 if locale is UTF-8, 0 for ASCII */
 };
@@ -236,6 +237,8 @@ void terminal_puts(EditLine *el, const char *s);
 void terminal_putc(EditLine *el, char c);
 void terminal_printf(EditLine *el, const char *fmt, ...);
 void terminal_flush(EditLine *el);
+const char *el_current_prompt(EditLine *el);
+const char *el_current_rprompt(EditLine *el);
 
 /* Signal handling */
 void el_signals_install(EditLine *el);

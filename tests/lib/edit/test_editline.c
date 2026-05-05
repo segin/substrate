@@ -13,6 +13,16 @@ void run_test(void (*test_func)(void), const char* test_name) {
     printf("%s passed\n", test_name);
 }
 
+static const char *test_prompt(EditLine *el) {
+    (void)el;
+    return "test> ";
+}
+
+static const char *test_rprompt(EditLine *el) {
+    (void)el;
+    return "<test";
+}
+
 // Tests for el_init
 void test_el_init_valid_args() {
     EditLine *el = el_init("myprog", stdin, stdout, stderr);
@@ -45,15 +55,57 @@ void test_el_init_null_prog() {
     el_end(el);
 }
 
+void test_bsd_operation_numbers() {
+    assert(EL_PROMPT == 0);
+    assert(EL_TERMINAL == 1);
+    assert(EL_EDITOR == 2);
+    assert(EL_SIGNAL == 3);
+    assert(EL_BIND == 4);
+    assert(EL_TELLTC == 5);
+    assert(EL_SETTC == 6);
+    assert(EL_ECHOTC == 7);
+    assert(EL_SETTY == 8);
+    assert(EL_ADDFN == 9);
+    assert(EL_HIST == 10);
+    assert(EL_EDITMODE == 11);
+    assert(EL_RPROMPT == 12);
+    assert(EL_GETCFN == 13);
+    assert(EL_CLIENTDATA == 14);
+    assert(EL_UNBUFFERED == 15);
+    assert(EL_PREP_TERM == 16);
+    assert(EL_GETTC == 17);
+    assert(EL_GETFP == 18);
+    assert(EL_SETFP == 19);
+    assert(EL_REFRESH == 20);
+    assert(EL_PROMPT_ESC == 21);
+    assert(EL_RPROMPT_ESC == 22);
+}
+
 // Tests for el_set and el_get
 void test_el_set_get_prompt() {
     EditLine *el = el_init("testprog", stdin, stdout, stderr);
     assert(el != NULL);
 
-    assert(el_set(el, EL_PROMPT, "test> ") == 0);
-    const char *prompt = NULL;
+    assert(el_set(el, EL_PROMPT, test_prompt) == 0);
+    el_pfunc_t prompt = NULL;
     assert(el_get(el, EL_PROMPT, &prompt) == 0);
-    assert(strcmp(prompt, "test> ") == 0);
+    assert(prompt == test_prompt);
+    assert(strcmp(el_current_prompt(el), "test> ") == 0);
+
+    el_end(el);
+}
+
+void test_el_set_get_prompt_esc() {
+    EditLine *el = el_init("testprog", stdin, stdout, stderr);
+    assert(el != NULL);
+
+    assert(el_set(el, EL_PROMPT_ESC, test_prompt, '\001') == 0);
+    el_pfunc_t prompt = NULL;
+    char esc = '\0';
+    assert(el_get(el, EL_PROMPT_ESC, &prompt, &esc) == 0);
+    assert(prompt == test_prompt);
+    assert(esc == '\001');
+    assert(strcmp(el_current_prompt(el), "test> ") == 0);
 
     el_end(el);
 }
@@ -62,10 +114,26 @@ void test_el_set_get_rprompt() {
     EditLine *el = el_init("testprog", stdin, stdout, stderr);
     assert(el != NULL);
 
-    assert(el_set(el, EL_RPROMPT, "<test") == 0);
-    const char *rprompt = NULL;
+    assert(el_set(el, EL_RPROMPT, test_rprompt) == 0);
+    el_pfunc_t rprompt = NULL;
     assert(el_get(el, EL_RPROMPT, &rprompt) == 0);
-    assert(strcmp(rprompt, "<test") == 0);
+    assert(rprompt == test_rprompt);
+    assert(strcmp(el_current_rprompt(el), "<test") == 0);
+
+    el_end(el);
+}
+
+void test_el_set_get_rprompt_esc() {
+    EditLine *el = el_init("testprog", stdin, stdout, stderr);
+    assert(el != NULL);
+
+    assert(el_set(el, EL_RPROMPT_ESC, test_rprompt, '\002') == 0);
+    el_pfunc_t rprompt = NULL;
+    char esc = '\0';
+    assert(el_get(el, EL_RPROMPT_ESC, &rprompt, &esc) == 0);
+    assert(rprompt == test_rprompt);
+    assert(esc == '\002');
+    assert(strcmp(el_current_rprompt(el), "<test") == 0);
 
     el_end(el);
 }
@@ -204,6 +272,34 @@ void test_el_line_info() {
     el_end(el);
 }
 
+void test_el_insert_delete_replace() {
+    EditLine *el = el_init("test", stdin, stdout, stderr);
+    assert(el != NULL);
+
+    assert(el_insertstr(el, "hello") == 0);
+    assert(strcmp(el->line.buffer, "hello") == 0);
+    assert(el->line.cursor == 5);
+    assert(el->line.len == 5);
+
+    el->line.cursor = 2;
+    assert(el_insertstr(el, "XX") == 0);
+    assert(strcmp(el->line.buffer, "heXXllo") == 0);
+    assert(el->line.cursor == 4);
+    assert(el->line.len == 7);
+
+    el_deletestr(el, 2);
+    assert(strcmp(el->line.buffer, "hello") == 0);
+    assert(el->line.cursor == 2);
+    assert(el->line.len == 5);
+
+    assert(el_replacestr(el, "replacement") == 0);
+    assert(strcmp(el->line.buffer, "replacement") == 0);
+    assert(el->line.cursor == strlen("replacement"));
+    assert(el->line.len == strlen("replacement"));
+
+    el_end(el);
+}
+
 // Test el_resize
 void test_el_resize_updates_dims() {
     EditLine *el = el_init("test", stdin, stdout, stderr);
@@ -212,7 +308,7 @@ void test_el_resize_updates_dims() {
     // Mock sets 80x24; verify el_resize refreshes them
     el->term.cols = 0;
     el->term.rows = 0;
-    assert(el_resize(el) == 0);
+    el_resize(el);
     assert(el->term.cols > 0);
     assert(el->term.rows > 0);
 
@@ -220,15 +316,18 @@ void test_el_resize_updates_dims() {
 }
 
 void test_el_resize_null() {
-    assert(el_resize(NULL) == -1);
+    el_resize(NULL);
 }
 
 int main() {
     printf("Running editline tests...\n");
     run_test(test_el_init_valid_args, "test_el_init_valid_args");
     run_test(test_el_init_null_prog, "test_el_init_null_prog");
+    run_test(test_bsd_operation_numbers, "test_bsd_operation_numbers");
     run_test(test_el_set_get_prompt, "test_el_set_get_prompt");
+    run_test(test_el_set_get_prompt_esc, "test_el_set_get_prompt_esc");
     run_test(test_el_set_get_rprompt, "test_el_set_get_rprompt");
+    run_test(test_el_set_get_rprompt_esc, "test_el_set_get_rprompt_esc");
     run_test(test_el_set_get_editor, "test_el_set_get_editor");
     run_test(test_el_set_get_signal, "test_el_set_get_signal");
     run_test(test_el_set_get_clientdata, "test_el_set_get_clientdata");
@@ -239,6 +338,7 @@ int main() {
     run_test(test_line_ensure_capacity_max, "test_line_ensure_capacity_max");
     run_test(test_line_ensure_capacity_null, "test_line_ensure_capacity_null");
     run_test(test_el_line_info, "test_el_line_info");
+    run_test(test_el_insert_delete_replace, "test_el_insert_delete_replace");
     run_test(test_el_resize_updates_dims, "test_el_resize_updates_dims");
     run_test(test_el_resize_null, "test_el_resize_null");
     printf("All editline tests passed!\n");

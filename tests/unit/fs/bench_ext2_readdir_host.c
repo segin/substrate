@@ -166,6 +166,13 @@ void run_ext2_readdir_bench(void) {
     bgd_table[0] = *bgd_disk;
     fs.bgd = bgd_table;
 
+    // Allocate buffer for active bg bitmap
+    fs.active_bg_bitmap = calloc(1, 1024);
+    fs.active_bg_group = (uint32_t)-1;
+
+    fs.active_inode_bg_bitmap = calloc(1, 1024);
+    fs.active_inode_bg_group = (uint32_t)-1;
+
     // Initialize allocator cache
     ext2_block_cache = uma_zcreate("ext2-block", 4096, NULL, NULL, NULL, NULL, 0, 0);
 
@@ -185,7 +192,7 @@ void run_ext2_readdir_bench(void) {
     for (int i = 0; i < entry_count; i++) {
         sprintf(name, "file_%d", i);
         // We use dummy inode 100+i for entries
-        ext2_add_entry(dir, name, 100 + i);
+        ext2_add_entry(dir, name, 100 + i, 1); // 1 = EXT2_FT_REG_FILE
     }
 
     printf("Created %d entries in directory.\n", entry_count);
@@ -203,8 +210,6 @@ void run_ext2_readdir_bench(void) {
             printf("Error: failed to read entry %d\n", i);
             break;
         }
-        // Verify (optional)
-        // printf("Entry %d: %s\n", i, d->d_name);
     }
 
     end_tsc = rdtsc_host();

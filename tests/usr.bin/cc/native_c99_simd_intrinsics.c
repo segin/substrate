@@ -8,14 +8,17 @@ int main(void) {
 	__m256i va = _mm256_setr_epi32(1, 2, 3, 4, 5, 6, 7, 8);
 	__m256i vb = _mm256_set1_epi32(7);
 	__m256i vc = _mm256_cmpeq_epi32(va, vb);
+	__m256i vd = _mm256_set1_epi8((char)0x80);
 	uint32_t out32[8];
-	int m;
+	int m, m256;
 
 	m = _mm_movemask_epi8(c);
 	if(m != 65535) return(1);
 	_mm256_storeu_si256((__m256i *)out32, vc);
 	if(out32[6] != 0xffffffffu) return(2);
 	if(out32[0] != 0u) return(3);
+	m256 = _mm256_movemask_epi8(vd);
+	if(m256 != -1) return(4);
 
 	return(0);
 }

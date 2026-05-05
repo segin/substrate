@@ -146,7 +146,8 @@ typedef enum {
     CC_TYPE_DECIMAL64,
     CC_TYPE_DECIMAL128,
     CC_TYPE_ATOMIC,
-    CC_TYPE_FUNC
+    CC_TYPE_FUNC,
+    CC_TYPE_FLOAT16
 } cc_type_t;
 
 #define CC_LEGACY_BASE_MIN CC_TYPE_VOID
@@ -298,6 +299,7 @@ struct cc_expr {
     long array_dims[CC_MAX_ARRAY_DIMS];
     long long int_val;
     double float_val;
+    long double float_val_ld;
     char *ident;
     cc_binop_t op;
     int member_is_arrow;

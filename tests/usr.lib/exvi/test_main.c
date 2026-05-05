@@ -12,9 +12,7 @@ reset_shared_state(void)
 {
     exvi_reset_runtime(EXVI_FRONTEND_EX);
     exvi_cleanup_session_state();
-    buf_free(&undo_buf);
-    buf_init(&undo_buf);
-    undo_valid = 0;
+    exvi_reset_undo_state();
     exvi_free_registers();
     exvi_init_registers();
 }
@@ -23,8 +21,7 @@ static void
 cleanup_shared_state(void)
 {
     exvi_free_registers();
-    buf_free(&undo_buf);
-    buf_init(&undo_buf);
+    exvi_reset_undo_state();
     exvi_cleanup_runtime();
     exvi_cleanup_session_state();
 }
@@ -328,6 +325,98 @@ test_substitute_and_undo(void)
 }
 
 static void
+test_multi_undo_stack(void)
+{
+    static const char *lines[] = {"one", "two", "three"};
+    buffer_t b;
+
+    reset_shared_state();
+    fill_buffer(&b, lines, 3);
+    b.cur = buf_get_line(&b, 2);
+
+    assert(handle_delete_command(&b, 0, -1, -1) == 1);
+    assert(b.line_count == 2);
+    assert(strcmp(buf_get_line(&b, 1)->text, "one") == 0);
+    assert(strcmp(buf_get_line(&b, 2)->text, "three") == 0);
+
+    assert(handle_put_command(&b, "", 1) == 1);
+    assert(b.line_count == 3);
+    assert(strcmp(buf_get_line(&b, 2)->text, "two") == 0);
+
+    b.cur = buf_get_line(&b, 3);
+    assert(handle_substitute_command(&b, "/three/THREE/", 3, 3) == 1);
+    assert(strcmp(buf_get_line(&b, 3)->text, "THREE") == 0);
+
+    assert(handle_undo_command(&b) == 1);
+    assert(strcmp(buf_get_line(&b, 3)->text, "three") == 0);
+
+    assert(handle_undo_command(&b) == 1);
+    assert(b.line_count == 2);
+    assert(strcmp(buf_get_line(&b, 1)->text, "one") == 0);
+    assert(strcmp(buf_get_line(&b, 2)->text, "three") == 0);
+
+    assert(handle_undo_command(&b) == 1);
+    assert(b.line_count == 3);
+    assert(strcmp(buf_get_line(&b, 1)->text, "one") == 0);
+    assert(strcmp(buf_get_line(&b, 2)->text, "two") == 0);
+    assert(strcmp(buf_get_line(&b, 3)->text, "three") == 0);
+
+    free_buffer(&b);
+    cleanup_shared_state();
+}
+
+static void
+test_ex_command_undo_boundary(void)
+{
+    static const char *lines[] = {"one", "two", "three"};
+    buffer_t b;
+
+    reset_shared_state();
+    fill_buffer(&b, lines, 3);
+    b.cur = buf_get_line(&b, 1);
+
+    assert(handle_substitute_command(&b, "/o/O/g", 1, 2) == 1);
+    assert(strcmp(buf_get_line(&b, 1)->text, "One") == 0);
+    assert(strcmp(buf_get_line(&b, 2)->text, "twO") == 0);
+    assert(strcmp(buf_get_line(&b, 3)->text, "three") == 0);
+
+    assert(handle_undo_command(&b) == 1);
+    assert(strcmp(buf_get_line(&b, 1)->text, "one") == 0);
+    assert(strcmp(buf_get_line(&b, 2)->text, "two") == 0);
+    assert(strcmp(buf_get_line(&b, 3)->text, "three") == 0);
+
+    free_buffer(&b);
+    cleanup_shared_state();
+}
+
+static void
+test_redo_invalidation(void)
+{
+    static const char *lines[] = {"one", "two", "three"};
+    buffer_t b;
+
+    reset_shared_state();
+    fill_buffer(&b, lines, 3);
+    b.cur = buf_get_line(&b, 2);
+
+    assert(handle_delete_command(&b, 0, -1, -1) == 1);
+    assert(handle_put_command(&b, "", 1) == 1);
+    assert(handle_undo_command(&b) == 1);
+
+    b.cur = buf_get_line(&b, 2);
+    assert(handle_delete_command(&b, 0, -1, -1) == 1);
+    assert(b.line_count == 1);
+    assert(strcmp(buf_get_line(&b, 1)->text, "one") == 0);
+
+    assert(handle_redo_command(&b) == 1);
+    assert(b.line_count == 1);
+    assert(strcmp(buf_get_line(&b, 1)->text, "one") == 0);
+
+    free_buffer(&b);
+    cleanup_shared_state();
+}
+
+static void
 test_filename_refs_and_write_permissions(void)
 {
     buffer_t b;
@@ -567,6 +656,221 @@ test_set_extended_options(void)
     cleanup_shared_state();
 }
 
+static void
+test_quit_modified_sets_pending_status(void)
+{
+    static const char *lines[] = {"hello", "world"};
+    buffer_t b;
+    char status[256];
+    char cmd_q[] = "q";
+
+    reset_shared_state();
+    fill_buffer(&b, lines, 2);
+    b.modified = 1;
+    visual_mode = 1;
+
+    /* :q on a modified buffer must set pending status with error message */
+    exvi_execute_command(&b, cmd_q);
+    assert(exvi_pending_status_once == 1);
+    assert(exvi_take_pending_status(status, sizeof(status)) == 1);
+    assert(strstr(status, "No write since last change") != NULL);
+
+    /* After taking it, pending status should be cleared */
+    assert(exvi_pending_status_once == 0);
+
+    free_buffer(&b);
+    cleanup_shared_state();
+}
+
+static void
+test_successful_command_no_pending_status(void)
+{
+    static const char *lines[] = {"hello", "world"};
+    buffer_t b;
+
+    reset_shared_state();
+    fill_buffer(&b, lines, 2);
+    visual_mode = 1;
+
+    /* :set number should NOT set pending error status */
+    {
+        char cmd_set[] = "set number";
+
+        exvi_execute_command(&b, cmd_set);
+    }
+    assert(exvi_pending_status_once == 0);
+
+    free_buffer(&b);
+    cleanup_shared_state();
+}
+
+static void
+test_pop_empty_tag_stack_sets_status(void)
+{
+    static const char *lines[] = {"hello", "world"};
+    buffer_t b;
+    char status[256];
+
+    reset_shared_state();
+    fill_buffer(&b, lines, 2);
+    visual_mode = 1;
+
+    /* :pop with empty tag stack should set pending status */
+    handle_pop_command(&b, 0);
+    assert(exvi_pending_status_once == 1);
+    assert(exvi_take_pending_status(status, sizeof(status)) == 1);
+    assert(strstr(status, "Tag stack empty") != NULL);
+
+    free_buffer(&b);
+    cleanup_shared_state();
+}
+
+static void
+test_pop_modified_buffer_sets_status(void)
+{
+    static const char *lines[] = {"hello", "world"};
+    buffer_t b;
+    char status[256];
+
+    reset_shared_state();
+    fill_buffer(&b, lines, 2);
+    b.modified = 1;
+    visual_mode = 1;
+
+    /* :pop with modified buffer should set pending status */
+    handle_pop_command(&b, 0);
+    assert(exvi_pending_status_once == 1);
+    assert(exvi_take_pending_status(status, sizeof(status)) == 1);
+    assert(strstr(status, "No write since last change") != NULL);
+
+    free_buffer(&b);
+    cleanup_shared_state();
+}
+
+static void
+test_utf8_prev_offset(void)
+{
+    /* ASCII: each backspace removes exactly one byte */
+    assert(vi_utf8_prev_offset("abc", 3) == 2);
+    assert(vi_utf8_prev_offset("abc", 2) == 1);
+    assert(vi_utf8_prev_offset("abc", 1) == 0);
+    assert(vi_utf8_prev_offset("abc", 0) == 0);
+
+    /* 2-byte UTF-8: U+00E9 "é" = 0xC3 0xA9 */
+    {
+        const char s[] = "caf\xc3\xa9";  /* "café" */
+
+        assert(vi_utf8_prev_offset(s, 5) == 3);  /* back over é */
+        assert(vi_utf8_prev_offset(s, 3) == 2);  /* back over f */
+    }
+
+    /* 3-byte UTF-8: U+4E16 "世" = 0xE4 0xB8 0x96 */
+    {
+        const char s[] = "a\xe4\xb8\x96";  /* "a世" */
+
+        assert(vi_utf8_prev_offset(s, 4) == 1);  /* back over 世 */
+        assert(vi_utf8_prev_offset(s, 1) == 0);  /* back over a */
+    }
+
+    /* 4-byte UTF-8: U+1F600 "😀" = 0xF0 0x9F 0x98 0x80 */
+    {
+        const char s[] = "x\xf0\x9f\x98\x80";  /* "x😀" */
+
+        assert(vi_utf8_prev_offset(s, 5) == 1);  /* back over 😀 */
+        assert(vi_utf8_prev_offset(s, 1) == 0);  /* back over x */
+    }
+}
+
+static void
+test_quit_sets_exit_flag(void)
+{
+    static const char *lines[] = {"hello", "world"};
+    buffer_t b;
+
+    reset_shared_state();
+    fill_buffer(&b, lines, 2);
+    visual_mode = 0;
+
+    /* :q on unmodified buffer should set exit flag instead of exit(0) */
+    exvi_exit_requested = 0;
+    exvi_execute_command(&b, "q");
+    assert(exvi_exit_requested == 1);
+
+    /* :q on modified buffer should NOT set exit flag */
+    exvi_exit_requested = 0;
+    b.modified = 1;
+    exvi_execute_command(&b, "q");
+    assert(exvi_exit_requested == 0);
+
+    /* :q! on modified buffer should set exit flag */
+    exvi_exit_requested = 0;
+    exvi_execute_command(&b, "q!");
+    assert(exvi_exit_requested == 1);
+
+    exvi_exit_requested = 0;
+    free_buffer(&b);
+    cleanup_shared_state();
+}
+
+static void
+test_line_array_random_access(void)
+{
+    buffer_t b;
+
+    reset_shared_state();
+    buf_init(&b);
+
+    /* Build a 100-line buffer */
+    {
+        line_t *pos = NULL;
+        char text[32];
+
+        for (int i = 0; i < 100; i++) {
+            snprintf(text, sizeof(text), "line %d", i + 1);
+            pos = buf_insert_after(&b, pos, text);
+        }
+    }
+    assert(b.line_count == 100);
+
+    /* buf_get_line O(1) correctness for every line */
+    for (int i = 1; i <= 100; i++) {
+        char expected[32];
+        line_t *l = buf_get_line(&b, i);
+
+        snprintf(expected, sizeof(expected), "line %d", i);
+        assert(l != NULL);
+        assert(strcmp(l->text, expected) == 0);
+    }
+
+    /* buf_current_line matches for random positions */
+    b.cur = buf_get_line(&b, 50);
+    assert(buf_current_line(&b) == 50);
+    b.cur = buf_get_line(&b, 1);
+    assert(buf_current_line(&b) == 1);
+    b.cur = buf_get_line(&b, 100);
+    assert(buf_current_line(&b) == 100);
+
+    /* Delete line 50, verify array consistency */
+    {
+        line_t *l50 = buf_get_line(&b, 50);
+
+        b.cur = b.head;
+        buf_delete(&b, l50);
+    }
+    assert(b.line_count == 99);
+    assert(strcmp(buf_get_line(&b, 50)->text, "line 51") == 0);
+    assert(strcmp(buf_get_line(&b, 49)->text, "line 49") == 0);
+
+    /* Insert after line 49, verify array consistency */
+    buf_insert_after(&b, buf_get_line(&b, 49), "inserted");
+    assert(b.line_count == 100);
+    assert(strcmp(buf_get_line(&b, 50)->text, "inserted") == 0);
+    assert(strcmp(buf_get_line(&b, 51)->text, "line 51") == 0);
+
+    buf_free(&b);
+    cleanup_shared_state();
+}
+
 int
 main(void)
 {
@@ -581,11 +885,21 @@ main(void)
     test_join_and_undo();
     test_bad_mark_preserves_current_line();
     test_substitute_and_undo();
+    test_multi_undo_stack();
+    test_ex_command_undo_boundary();
+    test_redo_invalidation();
     test_filename_refs_and_write_permissions();
     test_recover_roundtrip_preserves_missing_newline();
     test_substitute_repeat_behavior();
     test_arglist_navigation_and_replacement();
     test_read_command_replaces_empty_origin_placeholder();
+    test_quit_modified_sets_pending_status();
+    test_successful_command_no_pending_status();
+    test_pop_empty_tag_stack_sets_status();
+    test_pop_modified_buffer_sets_status();
+    test_utf8_prev_offset();
+    test_quit_sets_exit_flag();
+    test_line_array_random_access();
     puts("exvi core tests: ok");
     return 0;
 }

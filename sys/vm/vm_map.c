@@ -281,6 +281,7 @@ static vm_map_hole_t *rb_minimum(vm_map_hole_t *x) {
 static void rb_delete_fixup(vm_map_t *map, vm_map_hole_t *x, vm_map_hole_t *x_parent) {
     while (x != map->holes_root && (!x || !x->is_red)) {
         vm_map_hole_t *p = x ? x->parent : x_parent;
+        if (!p) break;
         if (x == p->left) {
             vm_map_hole_t *w = p->right;
             if (w->is_red) {
@@ -617,8 +618,7 @@ void vm_map_init(vm_map_t *map, pmap_t pmap, uintptr_t min, uintptr_t max) {
         initial_hole->is_red = false; // Root is black
         map->holes_root = initial_hole;
     } else {
-        map->holes_root = NULL; // Should probably fail init?
-        // But vm_map_init is void.
+        map->holes_root = NULL;
     }
 }
 
@@ -626,7 +626,10 @@ vm_map_t *vm_map_create(pmap_t pmap, uintptr_t min, uintptr_t max) {
     vm_map_t *map = kmalloc(sizeof(vm_map_t));
     if (!map) return NULL;
     vm_map_init(map, pmap, min, max);
-    if (!map->header) {
+    /* Fail if sentinel or hole allocation failed (finding #25) */
+    if (!map->header || !map->holes_root) {
+        if (map->header) free_entry(map->header);
+        if (map->holes_root) free_hole(map->holes_root);
         kfree(map, sizeof(vm_map_t));
         return NULL;
     }

@@ -1,0 +1,215 @@
+.TH COPYSIGN 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+copysign, copysignf, copysignl \- copy sign of a floating-point number
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double copysign(double " x ", double " y );
+.br
+.BI "float copysignf(float " x ", float " y );
+.br
+.BI "long double copysignl(long double " x ", long double " y );
+.SH DESCRIPTION
+The
+.BR copysign ()
+family of functions returns a value whose magnitude is taken from the
+first argument
+.I x
+and whose sign (sign bit) is taken from the second argument
+.IR y .
+.PP
+The functions are defined for every value of
+.I x
+and
+.IR y :
+no input is rejected, no domain restriction applies, and no
+floating-point exception is raised.  In IEC 60559 (IEEE\ 754) terms
+.BR copysign ()
+is a
+.I non-arithmetic
+operation: it rearranges the sign bit of an existing representation
+rather than performing a numeric computation.
+.PP
+The sign of zero is significant.
+.B +0.0
+and
+.B \-0.0
+are distinct floating-point values that compare equal under the usual
+relational operators but have different sign bits.  Because
+.BR copysign ()
+inspects the sign bit (not the algebraic sign), it is the canonical
+portable way to fabricate a negative zero from a positive zero, or to
+distinguish the two when used together with
+.BR signbit (3).
+.PP
+For a NaN argument, the magnitude returned is a NaN of the same format
+as
+.IR x ;
+the sign bit applied is taken from
+.IR y .
+The Substrate libm follows the common implementation choice of
+returning a NaN whose payload is preserved from
+.I x
+and whose sign bit is that of
+.IR y ,
+so
+.BI copysign(NaN, " +y" )
+yields
+.B +NaN
+and
+.BI copysign(NaN, " \-y" )
+yields
+.BR \-NaN .
+The C standard leaves the sign of a NaN unspecified for arithmetic
+operations, but
+.BR copysign ()
+is defined by both C99 Annex F and IEC 60559 to copy the sign bit of
+.I y
+unconditionally, including when either argument is NaN.
+.PP
+The
+.BR copysignf ()
+variant operates on
+.B float
+values; the
+.BR copysignl ()
+variant operates on
+.B "long double"
+values.
+.SH RETURN VALUE
+The
+.BR copysign ()
+family returns a value with the magnitude (absolute value) of
+.I x
+and the sign bit of
+.IR y .
+.PP
+In particular:
+.TP
+.IR x " is finite, " y " is non-negative"
+The result is
+.BR fabs( x ) .
+.TP
+.IR x " is finite, " y " is negative (including \-0.0)"
+The result is
+.BR \-fabs( x ) .
+.TP
+.IR x " is \(+-infinity"
+The result is
+.B +infinity
+if
+.I y
+is non-negative,
+.B \-infinity
+otherwise.
+.TP
+.IR x " is NaN"
+The result is a NaN with the sign bit of
+.IR y .
+.PP
+No errors are defined for these functions.  They never set
+.I errno
+and never raise a floating-point exception, even when an argument is
+NaN, infinity, or signed zero.
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR copysign (),
+.BR copysignf (),
+.BR copysignl ()
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+.BR copysign (),
+.BR copysignf (),
+and
+.BR copysignl ()
+conform to C99 and POSIX.1-2008.  The semantics, including the
+treatment of signed zero, infinity, and NaN, follow C99 Annex F.10.8.1
+and the IEC 60559:1989 (IEEE\ 754) "copySign" operation.
+.SH EXAMPLES
+The following program shows two common uses of
+.BR copysign ():
+clamping the magnitude of one value to the sign of another (a sign
+transfer that does not branch on
+.IR y ),
+and fabricating a signed zero from an unsigned literal:
+.PP
+.RS 4
+.EX
+#include <math.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    double mag  = 3.5;
+    double sign = \-2.0;
+    double signed_mag, neg_zero, pos_zero;
+
+    /* Magnitude of |mag|, sign of sign. */
+    signed_mag = copysign(mag, sign);
+    printf("copysign(%.1f, %.1f) = %.1f\en", mag, sign, signed_mag);
+
+    /* Fabricate \-0.0 from a positive literal. */
+    neg_zero = copysign(0.0, \-1.0);
+    pos_zero = copysign(0.0,  1.0);
+    printf("copysign(0.0, \-1.0) = %g (signbit = %d)\en",
+           neg_zero, signbit(neg_zero));
+    printf("copysign(0.0,  1.0) = %g (signbit = %d)\en",
+           pos_zero, signbit(pos_zero));
+
+    /* Sign bit of \-0.0 is meaningful. */
+    printf("copysign(1.0, \-0.0) = %.1f\en", copysign(1.0, \-0.0));
+    printf("copysign(1.0, +0.0) = %.1f\en", copysign(1.0,  0.0));
+
+    /* Infinity and NaN propagate the magnitude. */
+    printf("copysign(INF, \-1) = %g\en", copysign(INFINITY, \-1.0));
+    printf("copysign(NAN, \-1) signbit = %d\en",
+           signbit(copysign(NAN, \-1.0)));
+
+    return 0;
+}
+.EE
+.RE
+.PP
+A representative output is:
+.PP
+.RS 4
+.EX
+copysign(3.5, \-2.0) = \-3.5
+copysign(0.0, \-1.0) = \-0 (signbit = 1)
+copysign(0.0,  1.0) = 0 (signbit = 0)
+copysign(1.0, \-0.0) = \-1.0
+copysign(1.0, +0.0) = 1.0
+copysign(INF, \-1) = \-inf
+copysign(NAN, \-1) signbit = 1
+.EE
+.RE
+.PP
+Note that
+.BI copysign(1.0, " \-0.0" )
+returns
+.B \-1.0
+even though
+.B \-0.0
+compares equal to
+.BR +0.0 :
+.BR copysign ()
+inspects the sign bit, not the numeric value.
+.SH SEE ALSO
+.BR signbit (3),
+.BR fabs (3),
+.BR fpclassify (3),
+.BR nextafter (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

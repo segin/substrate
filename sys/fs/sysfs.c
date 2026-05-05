@@ -20,16 +20,24 @@ static void sysfs_refresh_timestamps(fs_node_t *node) {
     node->ctime = get_boot_time();
 }
 
+/* strncpy doesn't null-terminate when src length == dst size; the
+ * d_name buffers are zero-initialized today so it works, but make it
+ * explicit so a future memset removal doesn't silently break things. */
+#define SYSFS_NAME_SET(dst, src) do {                           \
+    strncpy((dst), (src), sizeof(dst) - 1);                     \
+    (dst)[sizeof(dst) - 1] = '\0';                              \
+} while (0)
+
 static struct dirent *sysfs_readdir(fs_node_t *node, uint64_t index) {
     (void)node;
-    if (index == 0) { strncpy(sys_dirent.d_name, ".", sizeof(sys_dirent.d_name)); return &sys_dirent; }
-    if (index == 1) { strncpy(sys_dirent.d_name, "..", sizeof(sys_dirent.d_name)); return &sys_dirent; }
-    
+    if (index == 0) { SYSFS_NAME_SET(sys_dirent.d_name, "."); return &sys_dirent; }
+    if (index == 1) { SYSFS_NAME_SET(sys_dirent.d_name, ".."); return &sys_dirent; }
+
     // Static list for prototype
-    if (index == 2) { strncpy(sys_dirent.d_name, "bus", sizeof(sys_dirent.d_name)); return &sys_dirent; }
-    if (index == 3) { strncpy(sys_dirent.d_name, "class", sizeof(sys_dirent.d_name)); return &sys_dirent; }
-    if (index == 4) { strncpy(sys_dirent.d_name, "devices", sizeof(sys_dirent.d_name)); return &sys_dirent; }
-    
+    if (index == 2) { SYSFS_NAME_SET(sys_dirent.d_name, "bus"); return &sys_dirent; }
+    if (index == 3) { SYSFS_NAME_SET(sys_dirent.d_name, "class"); return &sys_dirent; }
+    if (index == 4) { SYSFS_NAME_SET(sys_dirent.d_name, "devices"); return &sys_dirent; }
+
     return NULL;
 }
 
@@ -64,7 +72,7 @@ static filesystem_t sysfs_fs = {
 
 void sysfs_init(void) {
     memset(&sysfs_root_node, 0, sizeof(fs_node_t));
-    strncpy(sysfs_root_node.name, "sys", sizeof(sysfs_root_node.name));
+    SYSFS_NAME_SET(sysfs_root_node.name, "sys");
     sysfs_root_node.flags = FS_DIRECTORY;
     sysfs_root_node.mask = 0555;
     sysfs_root_node.uid = 0;

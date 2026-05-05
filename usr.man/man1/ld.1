@@ -1,4 +1,4 @@
-.Dd March 3, 2026
+.Dd April 22, 2026
 .Dt LD 1
 .Os Substrate
 .Sh NAME
@@ -49,6 +49,14 @@ It does not forward to external linker backends.
 When no target mode is forced,
 .Nm
 auto-selects i386 or x86-64 mode from the first compatible input.
+.Pp
+When installed through the host toolchain workflow described in
+.Xr host_toolchain 7 ,
+the installed
+.Xr cc 1
+driver resolves the sibling linker from the same prefix before falling back to
+other tools on
+.Ev PATH .
 .Pp
 For
 .Fl l
@@ -129,6 +137,8 @@ Write a reproducible link bundle containing object snapshots, manifest, and repl
 .It Fl -compat Ns = Ns Ar gnu|lld
 Set unsupported-option policy for compatibility behavior.
 .El
+.Sh EXIT STATUS
+.Ex -std
 .Sh DIAGNOSTICS
 Diagnostics are emitted in parser-friendly one-line forms such as
 .Dq ld: error: ...
@@ -151,10 +161,9 @@ Behavior for unsupported options differs by
 .Fl -compat
 mode.
 .El
-.Sh EXIT STATUS
-.Ex -std
 .Sh SEE ALSO
 .Xr as 1 ,
 .Xr cc 1 ,
 .Xr readelf 1 ,
-.Xr elfobj 3
+.Xr elfobj 3 ,
+.Xr host_toolchain 7

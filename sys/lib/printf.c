@@ -30,7 +30,7 @@ static void itoa(char *buf, size_t size, int64_t val, int force_sign, int space_
         uval = (uint64_t)val;
     }
     
-    while (uval > 0) {
+    while (uval > 0 && i < (int)(sizeof(tmp) - 1)) {
         tmp[i++] = (uval % 10) + '0';
         uval /= 10;
     }
@@ -61,7 +61,7 @@ static void utoa_hex(char *buf, uint64_t val, int uppercase) {
     if (val == 0) {
         tmp[i++] = '0';
     } else {
-        while (val > 0) {
+        while (val > 0 && i < (int)(sizeof(tmp) - 1)) {
             tmp[i++] = digits[val & 0xF];
             val >>= 4;
         }
@@ -82,7 +82,7 @@ static void utoa_oct(char *buf, uint64_t val) {
     if (val == 0) {
         tmp[i++] = '0';
     } else {
-        while (val > 0) {
+        while (val > 0 && i < (int)(sizeof(tmp) - 1)) {
             tmp[i++] = '0' + (val & 7);
             val >>= 3;
         }

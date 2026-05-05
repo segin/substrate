@@ -12,6 +12,12 @@
 #undef strpbrk
 #endif
 
+static int
+string_ptr_is_null(const void *ptr)
+{
+    return ptr == NULL;
+}
+
 char *strfry(char *string) {
     if (!string) return NULL;
     size_t len = strlen(string);
@@ -189,6 +195,13 @@ size_t strlcpy(char *dst, const char *src, size_t size) {
     return src_len;
 }
 
+size_t strlcat(char *dst, const char *src, size_t size) {
+    size_t dst_len = strnlen(dst, size);
+    if (dst_len == size)
+        return size + strlen(src);
+    return dst_len + strlcpy(dst + dst_len, src, size - dst_len);
+}
+
 char *strcat(char *dest, const char *src) {
     char *ret = dest;
     while (*dest) dest++;
@@ -289,6 +302,11 @@ size_t strnlen(const char *s, size_t maxlen) {
 }
 
 char *strdup(const char *s) {
+    if (string_ptr_is_null(s)) {
+        errno = EINVAL;
+        return NULL;
+    }
+
     size_t len = strlen(s) + 1;
     char *new_s = malloc(len);
     if (new_s) {
@@ -298,6 +316,11 @@ char *strdup(const char *s) {
 }
 
 char *strndup(const char *s, size_t n) {
+    if (string_ptr_is_null(s)) {
+        errno = EINVAL;
+        return NULL;
+    }
+
     size_t len = strnlen(s, n);
     char *new_s = malloc(len + 1);
     if (!new_s) return NULL;
@@ -332,6 +355,10 @@ size_t strcspn(const char *s, const char *reject) {
 }
 
 char *strtok(char *str, const char *delim) {
+    /*
+     * Match the current native libc reality: there is no target TLS bootstrap
+     * yet, so keep strtok's legacy internal state process-global for now.
+     */
     static char *saveptr;
     if (str) saveptr = str;
     else if (!saveptr) return NULL;

@@ -6,6 +6,10 @@
 // Simple glob-style pattern matching implementation
 // Supports: * (any chars), ? (single char), [abc] (character class)
 int fnmatch(const char *pattern, const char *string, int flags) {
+    if (pattern == NULL || string == NULL) {
+        return FNM_NOMATCH;
+    }
+
     while (*pattern) {
         if (*pattern == '*') {
             pattern++;
@@ -104,7 +108,9 @@ int fnmatch(const char *pattern, const char *string, int flags) {
                     if (end == '\\' && !(flags & FNM_NOESCAPE)) {
                          if (*pattern) end = *pattern++;
                     }
-                    if (*string >= c && *string <= end) match = 1;
+                    if ((unsigned char)*string >= (unsigned char)c &&
+                        (unsigned char)*string <= (unsigned char)end)
+                        match = 1;
                 } else {
                     if (*string == c) match = 1;
                 }
