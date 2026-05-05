@@ -175,3 +175,19 @@ int netbsd_sys_fchmodat(int dirfd, const char *path, int mode, int flag) {
 int netbsd_sys_fchownat(int dirfd, const char *path, int uid, int gid, int flag) {
     return sys_fchownat(dirfd, path, uid, gid, netbsd_atflags(flag));
 }
+
+/*
+ * NetBSD i386 mmap shim — slot 197 takes a `long PAD` argument
+ * between fd and pos so off_t lands 8-byte aligned on the user
+ * stack.  Substrate's native sys_mmap signature has no pad; drop
+ * the pad and forward the rest.
+ *
+ * Signature per NetBSD's syscalls.master line 438:
+ *   void *mmap(void *addr, size_t len, int prot, int flags,
+ *              int fd, long pad, off_t pos);
+ */
+void *netbsd_sys_mmap(void *addr, size_t len, int prot, int flags,
+                      int fd, long pad, uint64_t pos) {
+    (void)pad;
+    return sys_mmap(addr, len, prot, flags, fd, pos);
+}
