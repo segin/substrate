@@ -137,7 +137,7 @@ static int atapi_reset_device(scsi_link_t *link, scsi_device_t *dev) {
     }
     
     char log_buf[64];
-    sprintf(log_buf, "atapi_scsi: reset device %d:%d\n", dev->target, dev->lun);
+    snprintf(log_buf, sizeof(log_buf), "atapi_scsi: reset device %d:%d\n", dev->target, dev->lun);
     kprint(log_buf);
     return 0;
 }
@@ -215,7 +215,7 @@ static int atapi_probe_devices(atapi_link_t *alink) {
             }
             
             char log_buf[96];
-            sprintf(log_buf, "atapi_scsi: %s %s: %s (type 0x%02x)\n",
+            snprintf(log_buf, sizeof(log_buf), "atapi_scsi: %s %s: %s (type 0x%02x)\n",
                     bus_names[ch], drive_names[d], model, target->type);
             kprint(log_buf);
             

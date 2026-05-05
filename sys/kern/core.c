@@ -117,14 +117,17 @@ int coredump(process_t *p) {
     core_fill_process_metadata(&last_core_record, p);
     core_fill_elks_segments(&last_core_record, p);
 
-    kprintf("CORE: captured crash state for pid=%d perso=%d signal=%d\n",
+    char msg[256];
+    snprintf(msg, sizeof(msg), "CORE: captured crash state for pid=%d perso=%d signal=%d\n",
             p->pid, p->perso_id, last_core_record.signal);
+    kprint(msg);
 
-    kprintf("CORE: exec='%s' comm='%s' trap_addr=0x%08x trap_code=0x%08x\n",
+    snprintf(msg, sizeof(msg), "CORE: exec='%s' comm='%s' trap_addr=0x%08x trap_code=0x%08x\n",
             last_core_record.exec_path,
             last_core_record.comm,
             last_core_record.trap_addr,
             last_core_record.trap_code);
+    kprint(msg);
 
     if (last_core_record.has_regs) {
         kprintf("CORE: regs eip=0x%08x cs=0x%04x esp=0x%08x ss=0x%04x eflags=0x%08x\n",

@@ -40,7 +40,7 @@ static void dump_thread_callback(thread_t *t, void *arg) {
         if (t->proc->comm[0]) {
             // Wrap kernel task names in parentheses
             if (t->proc->is_kernel_task) {
-                sprintf(name_buf, "(%s)", t->proc->comm);
+                snprintf(name_buf, sizeof(name_buf), "(%s)", t->proc->comm);
                 name = name_buf;
             } else {
                 name = t->proc->comm;
@@ -60,7 +60,7 @@ static void dump_thread_callback(thread_t *t, void *arg) {
     
     const char *reason = t->wait_reason ? t->wait_reason : "";
 
-    sprintf(buf, " %5d | %5d | %-8.8s | %-16.16s | %-9.9s | %-4.4s | %s\n",
+    snprintf(buf, sizeof(buf), " %5d | %5d | %-8.8s | %-16.16s | %-9.9s | %-4.4s | %s\n",
             t->tid, pid, state, name, pers, bits, reason);
     kprint(buf);
 }
@@ -72,11 +72,11 @@ void debug_dump_processes(void) {
     
     // Current thread info
     if (current_thread) {
-        sprintf(buf, "Current Thread: TID=%d\n", current_thread->tid);
+        snprintf(buf, sizeof(buf), "Current Thread: TID=%d\n", current_thread->tid);
         kprint(buf);
     }
     if (current_process) {
-        sprintf(buf, "Current Process: PID=%d (%s)\n", 
+        snprintf(buf, sizeof(buf), "Current Process: PID=%d (%s)\n",
                 current_process->pid, current_process->comm);
         kprint(buf);
     }
