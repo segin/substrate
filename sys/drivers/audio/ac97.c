@@ -231,13 +231,22 @@ static int ac97_write(audio_dev_t *adev, const void *buf, size_t len)
 	 * overwrites BDL slots before they're played and only the last
 	 * few survive (sounded like ~100x fast-forward).
 	 *
-	 * Poll instead of sched_sleep to avoid the sleep-race: with sleep
-	 * we'd need atomic intr-disable + queue + drop, which the
-	 * scheduler API doesn't expose cleanly here.  At 44.1 kHz / 16-bit
-	 * stereo / 4 KiB chunks each slot drains in ~23 ms, so the spin
-	 * is bounded.
+	 * If the controller isn't running (DCH = DMA Controller Halted —
+	 * set at boot before the first write, and again on underrun),
+	 * there's nothing to wait for — just queue the slot.  Without
+	 * this guard the very first write spun forever (CIV = 0 = slot
+	 * 0 = the slot we want to fill, but controller hasn't been
+	 * started yet so CIV will never move).
+	 *
+	 * Poll instead of sched_sleep to avoid the sleep-race.  At
+	 * 44.1 kHz / 16-bit stereo / 4 KiB chunks each slot drains in
+	 * ~23 ms, so the spin is bounded.
 	 */
 	for (;;) {
+		uint16_t sr = ac97_bm_read16(d, AC97_BM_PO_BASE + AC97_BM_SR);
+		if (sr & AC97_SR_DCH) {
+			break;  /* halted — no in-flight playback to collide with */
+		}
 		uint8_t civ = ac97_bm_read8(d, AC97_BM_PO_BASE + AC97_BM_CIV);
 		if (slot != civ) {
 			break;
