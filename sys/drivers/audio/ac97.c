@@ -224,25 +224,25 @@ static int ac97_write(audio_dev_t *adev, const void *buf, size_t len)
 
 	/*
 	 * Wait until the BDL ring has a free slot.  The controller's CIV
-	 * register tracks the slot it's currently playing; we may queue up
-	 * to BDL_ENTRIES-1 ahead before catching up with CIV.  Without
-	 * this, a userspace `cat data.pcm > /dev/audio0` overwrites BDL
-	 * slots before they're played, and only the last few survive —
-	 * sounded like ~100x fast-forward.
+	 * (Current Index Value) is the slot it's playing right now; we
+	 * can fill any other slot.  Ring is "full" — for our purpose —
+	 * when the slot we're about to write IS the one being played.
+	 * Without this back-pressure, `cat data.pcm > /dev/audio0`
+	 * overwrites BDL slots before they're played and only the last
+	 * few survive (sounded like ~100x fast-forward).
 	 *
-	 * IRQ handler wakes &d->play_wait on each BDL completion (BCIS).
-	 * intr_disable around the check + sleep avoids a wake-up race.
+	 * Poll instead of sched_sleep to avoid the sleep-race: with sleep
+	 * we'd need atomic intr-disable + queue + drop, which the
+	 * scheduler API doesn't expose cleanly here.  At 44.1 kHz / 16-bit
+	 * stereo / 4 KiB chunks each slot drains in ~23 ms, so the spin
+	 * is bounded.
 	 */
 	for (;;) {
-		uint32_t flags = intr_disable();
 		uint8_t civ = ac97_bm_read8(d, AC97_BM_PO_BASE + AC97_BM_CIV);
-		uint8_t next = (uint8_t)((slot + 1U) % AC97_BDL_ENTRIES);
-		if (next != civ) {
-			intr_restore(flags);
+		if (slot != civ) {
 			break;
 		}
-		intr_restore(flags);
-		sched_sleep(&d->play_wait);
+		__asm__ volatile("pause");
 	}
 
 	memcpy((uint8_t *)d->chunk_buf + (size_t)slot * AC97_CHUNK_BYTES,
