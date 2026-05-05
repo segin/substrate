@@ -784,6 +784,7 @@ static void usage(const char *prog) {
           "  -o <file>          output file\n"
           "  -I/-D/-U           preprocessor options\n"
           "  -include/-imacros  forced preprocessor include inputs\n"
+          "  -idirafter         late include search path\n"
           "  -P -dM             preprocess formatting/macro dump modes\n"
           "  -fpp-max-*         preprocessor hard limits (depth/size/token "
           "growth)\n"
@@ -1303,7 +1304,8 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
     }
 
     if (strcmp(a, "-I") == 0 || strcmp(a, "-D") == 0 || strcmp(a, "-U") == 0 ||
-        strcmp(a, "-iquote") == 0 || strcmp(a, "-isystem") == 0) {
+        strcmp(a, "-iquote") == 0 || strcmp(a, "-isystem") == 0 ||
+        strcmp(a, "-idirafter") == 0) {
       if (i + 1 >= argc) {
         return -1;
       }
@@ -1318,8 +1320,8 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
     }
 
     if (strncmp(a, "-I", 2) == 0 || strncmp(a, "-D", 2) == 0 ||
-        strncmp(a, "-U", 2) == 0 || strncmp(a, "-iquote", 7) == 0 ||
-        strncmp(a, "-isystem", 8) == 0) {
+      strncmp(a, "-U", 2) == 0 || strncmp(a, "-iquote", 7) == 0 ||
+      strncmp(a, "-isystem", 8) == 0 || strncmp(a, "-idirafter", 10) == 0) {
       if (strvec_push(&o->cpp_flags, a) != 0 ||
           strvec_push(&o->c_flags, a) != 0) {
         return -1;
@@ -1945,6 +1947,11 @@ static int run_ld(const cc_opts_t *o, const strvec_t *objs, const char *out) {
   }
   if (want_default_runtime) {
     argv[at++] = libc_path;
+#ifndef CC_SUBSTRATE_BUILD
+    if (access(libc_nonshared, R_OK) == 0) {
+      argv[at++] = libc_nonshared;
+    }
+#endif
     argv[at++] = libm_path;
     if (access(libgcc, R_OK) == 0) {
       argv[at++] = libgcc;

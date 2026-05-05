@@ -1056,7 +1056,7 @@ static size_t vi_motion_target(EditLine *el, int motion, int count) {
         el->vi_find.ch = fc;
         el->vi_find.forward = (motion == 'f' || motion == 't');
         el->vi_find.till = (motion == 't' || motion == 'T');
-        size_t target;
+        size_t target = pos;
         for (i = 0; i < count; i++) {
             if (el->vi_find.forward)
                 target = vi_find_char_fwd(el, fc, i == 0 ? pos : target);
@@ -1752,6 +1752,7 @@ static unsigned char vi_to_command_mode(EditLine *el, int c) {
 
 static unsigned char vi_arg_digit(EditLine *el, int c) {
     el->vi_count = el->vi_count * 10 + (c - '0');
+    if (el->vi_count > 9999) el->vi_count = 9999;
     return CC_NORM;
 }
 

@@ -1,9 +1,30 @@
 #include "netbsd_user.h"
 #include <sys/kern_syscalls.h>
+#include <sys/syscall_impl.h>
 #include <sys/stat.h>
+#include <sys/copy.h>
+#include <sys/fcntl.h>
+#include <sys/namei.h>
 #include <string.h>
 #include <sys/errno.h>
 #include <stddef.h>
+
+/* NetBSD at-flags identical to FreeBSD/POSIX (NOFOLLOW=0x200,
+ * REMOVEDIR=0x800).  Substrate native at-flags differ (NOFOLLOW=0x100,
+ * REMOVEDIR=0x200), so translate. */
+#ifndef AT_REMOVEDIR
+#define AT_REMOVEDIR 0x200
+#endif
+#define NBSD_AT_EACCESS          0x0100
+#define NBSD_AT_SYMLINK_NOFOLLOW 0x0200
+#define NBSD_AT_SYMLINK_FOLLOW   0x0400
+#define NBSD_AT_REMOVEDIR        0x0800
+static int netbsd_atflags(int f) {
+    int k = 0;
+    if (f & NBSD_AT_SYMLINK_NOFOLLOW) k |= AT_SYMLINK_NOFOLLOW;
+    if (f & NBSD_AT_REMOVEDIR)        k |= AT_REMOVEDIR;
+    return k;
+}
 
 /* Helper to translate native stat to NetBSD stat */
 static void translate_stat_to_netbsd(const struct stat *native, struct netbsd_stat *nbsd) {
@@ -124,4 +145,49 @@ int netbsd_sys_compat_fstat(int fd, struct netbsd_stat43 *buf) {
         if (copyout(&knbsd43, buf, sizeof(knbsd43)) != 0) return -14; // EFAULT
     }
     return ret;
+}
+
+/* ------------------------------------------------------------------
+ * NetBSD chown/chmod family
+ *
+ * NetBSD chown(2) follows symlinks, lchown does not (POSIX semantics).
+ * Substrate's native sys_chown doesn't exist; sys_lchown is no-follow,
+ * so route through sys_fchownat with flag=0 for follow.  lchmod has no
+ * native equivalent — wrap kern_chmodat with AT_SYMLINK_NOFOLLOW.
+ * ------------------------------------------------------------------ */
+
+int netbsd_sys_chown(const char *path, int uid, int gid) {
+    return sys_fchownat(AT_FDCWD, path, uid, gid, 0);
+}
+
+int netbsd_sys_lchmod(const char *path, int mode) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    return kern_chmodat(AT_FDCWD, kpath, mode, AT_SYMLINK_NOFOLLOW);
+}
+
+int netbsd_sys_fchmodat(int dirfd, const char *path, int mode, int flag) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    return kern_chmodat(dirfd, kpath, mode, netbsd_atflags(flag));
+}
+
+int netbsd_sys_fchownat(int dirfd, const char *path, int uid, int gid, int flag) {
+    return sys_fchownat(dirfd, path, uid, gid, netbsd_atflags(flag));
+}
+
+/*
+ * NetBSD i386 mmap shim — slot 197 takes a `long PAD` argument
+ * between fd and pos so off_t lands 8-byte aligned on the user
+ * stack.  Substrate's native sys_mmap signature has no pad; drop
+ * the pad and forward the rest.
+ *
+ * Signature per NetBSD's syscalls.master line 438:
+ *   void *mmap(void *addr, size_t len, int prot, int flags,
+ *              int fd, long pad, off_t pos);
+ */
+void *netbsd_sys_mmap(void *addr, size_t len, int prot, int flags,
+                      int fd, long pad, uint64_t pos) {
+    (void)pad;
+    return sys_mmap(addr, len, prot, flags, fd, pos);
 }

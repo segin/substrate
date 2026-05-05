@@ -8,6 +8,22 @@ MODE_STAMP = .build-mode
 
 CFLAGS += -I../../include
 
+# Hardened build flags for the host (NATIVE_BUILD=1).  The cross-target
+# build is already restricted to -nostdlib / -ffreestanding so most of
+# these are inapplicable there; on the host they cost nothing and shrink
+# the blast radius if the parser ever does encounter a regression past
+# our test coverage.
+ifeq ($(BUILD_MODE),native)
+CFLAGS += -fstack-protector-strong
+CFLAGS += -fstack-clash-protection
+CFLAGS += -fno-strict-aliasing
+CFLAGS += -Wformat -Wformat-security -Werror=format-security
+# _FORTIFY_SOURCE needs an optimisation level; only enable when the
+# caller didn't explicitly turn it off (-O0 disables fortify with a
+# warning on glibc).
+CFLAGS += -D_FORTIFY_SOURCE=2
+endif
+
 .PHONY: all clean install FORCE
 
 all: $(LIBNAME)

@@ -155,19 +155,26 @@ static int virtio_blk_read_sectors(geom_disk_t *disk, uint64_t lba, size_t count
     vblk.desc[id2].flags = VRING_DESC_F_WRITE;
     vblk.desc[id2].next = 0;
     
-    // 2. Put in Avail Ring
+    // 2. Put in Avail Ring.
+    //
+    // Store-release between the descriptor writes above and the avail
+    // index bump: on a weakly-ordered host (or with compiler reordering)
+    // the device could otherwise observe a bumped idx pointing at a
+    // half-written descriptor chain.
     vblk.avail->ring[vblk.avail->idx % vblk.q_size] = id0;
-    __asm__ volatile("lock addw $1, %0" : "+m"(vblk.avail->idx)); // Memory Barrier implicit
-    
-    // 3. Notify (memory barrier before device notification)
+    __asm__ volatile("sfence" ::: "memory");
+    __asm__ volatile("lock addw $1, %0" : "+m"(vblk.avail->idx));
+
+    // 3. Notify (mfence so the bumped idx is observed before the IO write)
     __asm__ volatile("mfence" ::: "memory");
     outw(vblk.io_base + VIRTIO_REG_QUEUE_NOTIFY, 0); // Queue 0
-    
-    // 4. Poll Used Ring
+
+    // 4. Poll Used Ring with an acquire barrier so the load of used->idx
+    //    isn't hoisted above the ring-reads we're about to do.
     while (vblk.last_used_idx == vblk.used->idx) {
-        // Spin
         __asm__ volatile("pause");
     }
+    __asm__ volatile("lfence" ::: "memory");
     
     vblk.last_used_idx++;
     

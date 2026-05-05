@@ -213,7 +213,8 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
     // Create VM object for tracking
     vm_object_t *obj;
     if (file) {
-        obj = mmap_create_file_object((fs_node_t *)file->f_data, aligned_length, vm_prot, flags, offset);
+        fs_node_t *fnode = (fs_node_t *)file->f_data;
+        obj = mmap_create_file_object(fnode, aligned_length, vm_prot, flags, offset);
     } else {
         obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, aligned_length);
     }

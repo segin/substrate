@@ -231,8 +231,10 @@ int main(int argc, char **argv, char **envp) {
         shell_var_set_name((argv[0] && argv[0][0]) ? argv[0] : "sh");
     }
     
-    // Set positional parameters from remaining args
-    shell_var_set_args(argc - optind, argv + optind);
+    /* argv[optind-1] is the last consumed argument (program name, script name,
+     * or command string). Pass it as the pseudo-argv[0] so shell_var_set_args
+     * (which always skips argv[0]) correctly maps argv[optind] → $1. */
+    shell_var_set_args(argc - optind + 1, argv + optind - 1);
     
     // Initialize Job Control for interactive shells
     int is_interactive = ((input == stdin && isatty(STDIN_FILENO)) || opt_i) && !opt_c;

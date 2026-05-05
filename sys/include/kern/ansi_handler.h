@@ -21,6 +21,14 @@ enum ansi_charset {
     ANSI_CHARSET_DEC_SPECIAL = 1,
 };
 
+/*
+ * Maximum bytes consumed in OSC / DCS / SOS / PM / APC modes before
+ * the parser gives up and returns to ANSI_NORMAL.  Without a cap, an
+ * unterminated sequence (random bytes, malicious input) would silently
+ * swallow arbitrary input until a BEL or ESC\ happens to appear.
+ */
+#define ANSI_OSC_MAX 4096
+
 struct ansi_ctx {
     enum ansi_state state;
     int params[ANSI_PARAMS_MAX];
@@ -31,6 +39,7 @@ struct ansi_ctx {
     uint8_t charset_target;
     uint32_t utf8_codepoint;
     uint8_t utf8_remaining;
+    uint32_t osc_len;  /* bytes consumed in OSC/DCS state */
 };
 
 /* Callbacks for the driver */

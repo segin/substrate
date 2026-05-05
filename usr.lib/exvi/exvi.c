@@ -229,8 +229,6 @@ handle_global_command(buffer_t *b, const char *cmd, const char *args,
 
     curr = b->head;
     while (curr) {
-        line_t *next = curr->next;
-
         if (curr->global_mark) {
             char *cmd_cpy;
 
@@ -245,8 +243,15 @@ handle_global_command(buffer_t *b, const char *cmd, const char *args,
             if (exvi_exit_requested) {
                 break;
             }
+            /*
+             * The executed command may have freed curr->next (e.g. a delete
+             * touching lines past curr).  Restart from the top to avoid
+             * dereferencing a dangling pointer; unexecuted marks are still set.
+             */
+            curr = b->head;
+            continue;
         }
-        curr = next;
+        curr = curr->next;
     }
 
     free(re_str);
@@ -391,7 +396,7 @@ handle_buffer_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
     return 0;
 }
 
-void do_command(buffer_t *b, char *cmd) {
+static void do_command(buffer_t *b, char *cmd) {
     exvi_command_break_t break_kind;
     char *break_pos;
     int parse_error = 0;
@@ -616,7 +621,7 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
 
 enter_visual:
     if (visual_mode) {
-        int ret;
+        int vret;
 
         if (frontend == EXVI_FRONTEND_EX) {
             set_visual_handoff_file(buf.filename);
@@ -628,11 +633,11 @@ enter_visual:
             status = 1;
             goto out;
         }
-        ret = exvi_visual_main(&buf);
-        if (ret == EXVI_EXIT_EX_HANDOFF) {
+        vret = exvi_visual_main(&buf);
+        if (vret == EXVI_EXIT_EX_HANDOFF) {
             visual_mode = 0;
         } else {
-            status = ret;
+            status = vret;
             goto out;
         }
     }
@@ -674,7 +679,7 @@ enter_visual:
             continue;
         }
 
-        // Strip optional `:` prefix
+        /* strip optional ':' prefix */
         char *cmd_line = line;
         while (*cmd_line && isspace((unsigned char)*cmd_line)) cmd_line++;
         if (*cmd_line == ':') cmd_line++;

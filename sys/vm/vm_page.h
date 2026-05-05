@@ -14,9 +14,17 @@ typedef struct vm_page {
     uint32_t magic_head;
     #define VM_PAGE_MAGIC 0x50414745  /* "PAGE" in ASCII */
 
-    // Linked list pointers for various queues (free, active, inactive)
+    // Linked list pointers for various queues (free, active, inactive).
+    // These are used EXCLUSIVELY for queue membership (one queue at a time).
+    // For object membership use obj_next / obj_prev so that placing a page
+    // on the inactive queue (e.g. via vm_page_deactivate after a prefault
+    // add_page) cannot corrupt the owning object's pages list.
     struct vm_page *next;
     struct vm_page *prev;
+
+    // Linked list pointers for the owning vm_object's pages list.
+    struct vm_page *obj_next;
+    struct vm_page *obj_prev;
 
     // Physical address of this page
     uintptr_t phys_addr;

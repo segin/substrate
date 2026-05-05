@@ -813,7 +813,7 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
             memset(&out, 0, sizeof(out));
             out.name = name;
             out.type = with_addend ? SHT_RELA : SHT_REL;
-            out.flags = 0;
+            out.flags = SHF_INFO_LINK;
             out.addralign = obj->cls == ELFOBJ_CLASS_64 ? 8 : 4;
             out.entsize = rel_ent;
             out.data = rel_data;

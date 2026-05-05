@@ -1,0 +1,151 @@
+." mkdir(1)
+.TH MKDIR 1 "April 2026" "Substrate" "User Commands"
+.SH NAME
+mkdir \- create directories
+.SH SYNOPSIS
+.B mkdir
+.RI [ OPTION ]... DIRECTORY ...
+.SH DESCRIPTION
+.B mkdir
+creates each named
+.IR DIRECTORY .
+By default, each operand names a single directory that must not already exist.
+With
+.BR -p ,
+missing parent directories are created as needed and an existing directory does not cause failure.
+.SH OPTIONS
+.TP
+.BR -m , " --mode=" MODE
+Set the final mode of each created directory.
+.I MODE
+may be an octal value such as
+.B 755
+or a symbolic mode such as
+.BR u=rwx,go= .
+The mode is applied after creation so the final directory mode does not depend on the process umask.
+.TP
+.BR -p , " --parents"
+Create parent directories as needed.
+Existing directories are accepted.
+Intermediate directories are created with the default directory mode and the process umask still applies to those intermediate components.
+.TP
+.BR -v , " --verbose"
+Print one line for each directory that is actually created.
+.TP
+.BR -Z , " --context" [ =CTX ]
+Request SELinux context handling.
+Current Substrate builds accept the option as a stub and print a warning that SELinux contexts are ignored.
+.TP
+.B --help
+Display usage information and exit.
+.TP
+.B --version
+Display version information and exit.
+.SH MODE SEMANTICS
+Without
+.BR -m ,
+directories are created with mode
+.B 0777
+subject to the process umask.
+.PP
+With
+.BR -m ,
+the supplied mode is interpreted relative to a directory base mode of
+.BR 0777 .
+Numeric modes replace the permission bits directly.
+Symbolic modes support:
+.TP
+- WHO classes:
+.BR u , g , o , a
+.TP
+- operations:
+.BR + , - , =
+.TP
+- permissions:
+.BR r , w , x , X , s , t
+.PP
+Multiple symbolic clauses separated by commas are applied from left to right.
+.SH UMASK AND PARENTS
+When
+.B mkdir
+creates a directory without
+.BR -m ,
+the kernel applies the process umask during the
+.BR mkdir (2)
+operation.
+.PP
+When
+.BR -m
+is present, the final target directory is created first and then adjusted with
+.BR fchmod (2)
+so the resulting mode matches the requested value even if the umask would otherwise mask bits.
+.PP
+With
+.BR -p ,
+intermediate directories are created with default permissions and are not post-adjusted by
+.BR -m .
+If the final operand already exists as a directory, the command succeeds and leaves its current mode unchanged.
+.SH PATH HANDLING
+Path processing is component-based and does not rely on fixed-size path buffers.
+Repeated slashes are ignored.
+Absolute paths, relative paths, trailing slashes, and
+.B .
+or
+.B ..
+components are handled according to normal pathname resolution rules.
+.PP
+If any component in a
+.B -p
+path exists but is not a directory, the operation fails for that operand.
+.SH RACE SAFETY
+For
+.BR -p ,
+Substrate
+.B mkdir
+creates components with
+.BR mkdirat (2)
+and validates pre-existing components with
+.BR fstatat (2)
+before descending with
+.BR openat (2).
+This keeps pathname traversal relative to directory file descriptors and allows concurrent
+.B mkdir -p
+operations on the same path to converge successfully when all conflicting components are directories.
+.SH OWNERSHIP
+Created directories are owned by the effective user and group IDs selected by the kernel and filesystem.
+If a parent directory has the setgid bit set, child group inheritance follows the underlying filesystem semantics.
+.SH EXIT STATUS
+.TP
+0
+All requested directories were created successfully, or already existed when
+.B -p
+was used.
+.TP
+1
+At least one operand failed.
+The command continues processing later operands after per-path errors.
+.SH EXAMPLES
+.TP
+mkdir project
+Create a single directory.
+.TP
+mkdir -p src/lib/tests
+Create a nested directory hierarchy.
+.TP
+mkdir -m 700 private
+Create a directory accessible only to its owner.
+.TP
+mkdir -m u=rwx,go= secure
+Create a directory using a symbolic mode expression.
+.TP
+mkdir -pv build/output
+Create a nested directory and print each component that was created.
+.SH SEE ALSO
+.BR chmod (1),
+.BR rmdir (1),
+.BR stat (2),
+.BR mkdir (2),
+.BR mkdirat (2),
+.BR fstatat (2),
+.BR openat (2),
+.BR umask (2)

@@ -65,6 +65,15 @@ void minix_init(void) {
 }
 
 /* Zone conversion helper */
+/* Bounds-check a zone number that came from disk before using it as a
+ * device offset.  s_nzones (v1) / s_zones (v2) gives the filesystem's
+ * extent; anything outside that window is corrupt or hostile. */
+static inline uint32_t minix_zone_ok(minix_fs_t *fs, uint32_t z) {
+    uint32_t max = fs->sb.s_zones ? fs->sb.s_zones : fs->sb.s_nzones;
+    if (max == 0) return 0;        /* unknown size — be conservative */
+    return (z != 0 && z < max);
+}
+
 static uint32_t minix_get_zone_v1(minix_fs_t *fs, struct minix_inode_v1 *inode, uint32_t zone_index) {
     // Direct zones (0-6)
     if (zone_index < 7) {
@@ -77,7 +86,7 @@ static uint32_t minix_get_zone_v1(minix_fs_t *fs, struct minix_inode_v1 *inode, 
     // Indirect zone (7)
     if (indirect_index < entries_per_block) {
         uint16_t z = inode->i_zone[7];
-        if (z == 0) return 0;
+        if (!minix_zone_ok(fs, z)) return 0;
 
         uint16_t buf[MINIX_BLOCK_SIZE / 2];
         if (read_fs(fs->block_device, z * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
@@ -90,20 +99,20 @@ static uint32_t minix_get_zone_v1(minix_fs_t *fs, struct minix_inode_v1 *inode, 
     uint32_t double_indirect_index = indirect_index - entries_per_block;
     if (double_indirect_index < entries_per_block * entries_per_block) {
         uint16_t z = inode->i_zone[8];
-        if (z == 0) return 0;
+        if (!minix_zone_ok(fs, z)) return 0;
 
         uint16_t buf[MINIX_BLOCK_SIZE / 2];
         if (read_fs(fs->block_device, z * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
             return 0;
         }
-        
+
         uint16_t indirect_block = buf[double_indirect_index / entries_per_block];
-        if (indirect_block == 0) return 0;
+        if (!minix_zone_ok(fs, indirect_block)) return 0;
 
         if (read_fs(fs->block_device, indirect_block * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
             return 0;
         }
-        
+
         return buf[double_indirect_index % entries_per_block];
     }
 
@@ -123,7 +132,7 @@ static uint32_t minix_get_zone_v2(minix_fs_t *fs, struct minix_inode_v2 *inode, 
     // Indirect zone (7)
     if (indirect_index < entries_per_block) {
         uint32_t z = inode->i_zone[7];
-        if (z == 0) return 0;
+        if (!minix_zone_ok(fs, z)) return 0;
 
         uint32_t buf[MINIX_BLOCK_SIZE / 4];
         if (read_fs(fs->block_device, z * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
@@ -136,7 +145,7 @@ static uint32_t minix_get_zone_v2(minix_fs_t *fs, struct minix_inode_v2 *inode, 
     uint32_t double_indirect_index = indirect_index - entries_per_block;
     if (double_indirect_index < entries_per_block * entries_per_block) {
         uint32_t z = inode->i_zone[8];
-        if (z == 0) return 0;
+        if (!minix_zone_ok(fs, z)) return 0;
 
         uint32_t buf[MINIX_BLOCK_SIZE / 4];
         if (read_fs(fs->block_device, z * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
@@ -144,7 +153,7 @@ static uint32_t minix_get_zone_v2(minix_fs_t *fs, struct minix_inode_v2 *inode, 
         }
 
         uint32_t indirect_block = buf[double_indirect_index / entries_per_block];
-        if (indirect_block == 0) return 0;
+        if (!minix_zone_ok(fs, indirect_block)) return 0;
 
         if (read_fs(fs->block_device, indirect_block * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
             return 0;

@@ -190,41 +190,48 @@ isr_exit:
     iret
 
 # Jump to user mode
-# void jump_to_userspace(uint32_t entry_point, uint32_t user_stack)
+# void jump_to_userspace(uint32_t entry_point, uint32_t user_stack,
+#                        uint32_t entry_ebx)
 # User code selector: 0x1B (0x18 | 3)
 # User data selector: 0x23 (0x20 | 3)
+#
+# entry_ebx is the value to load into %ebx at process entry.  Most
+# personalities pass 0; NetBSD/OpenBSD pass &ps_strings here because
+# their crt0 reads ps_strings from %ebx (lib/csu/arch/i386/crt0.S).
 .global jump_to_userspace
 jump_to_userspace:
     # Load cdecl parameters:
     #   [esp+4]  = entry_point
     #   [esp+8]  = user_stack
-    mov 4(%esp), %ecx
-    mov 8(%esp), %ebx
-    
+    #   [esp+12] = entry_ebx
+    mov 4(%esp),  %ecx          # %ecx = entry
+    mov 8(%esp),  %edx          # %edx = user_stack (temp; restored to 0 below)
+    mov 12(%esp), %ebx          # %ebx = ps_strings (or 0)
+
     # NOW turn off interrupts
     cli
-    
+
     # A freshly exec'd image must not inherit stale TLS selectors from the
     # previous process image. i386 Linux starts with DS/ES flat, but FS/GS
     # cleared until userland installs TLS explicitly via set_thread_area.
     mov $0x23, %ax
     mov %ax, %ds
-    mov %ax, %es  
+    mov %ax, %es
     xor %ax, %ax
     mov %ax, %fs
     mov %ax, %gs
-    
+
     # Build IRET stack frame (in order pushed):
     # SS, ESP, EFLAGS, CS, EIP
     push $0x23          # User SS
-    push %ebx           # User ESP (loaded earlier)
+    push %edx           # User ESP (the user_stack arg)
     pushf               # EFLAGS
     pop %eax
-    
+
     # or $0x200, %eax     # Enable interrupts in user mode
     # and $~0x200, %eax   # Force Disable
     or $0x200, %eax       # Enable Interrupts
-    
+
     push %eax
     push $0x1B          # User CS
     push %ecx           # User EIP (loaded earlier)
@@ -233,14 +240,14 @@ jump_to_userspace:
     # register contents from the previous process image.
     # Linux i386 only defines %edx = rtld_fini on entry; kernel-launched
     # processes provide NULL there unless a dynamic linker arranged otherwise.
+    # %ebx is preserved (set above) so NetBSD's crt0 sees ps_strings.
     xor %eax, %eax
-    xor %ebx, %ebx
     xor %ecx, %ecx
     xor %edx, %edx
     xor %esi, %esi
     xor %edi, %edi
     xor %ebp, %ebp
-    
+
     # Jump to user mode
     iret
 

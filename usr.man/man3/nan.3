@@ -1,0 +1,199 @@
+.TH NAN 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+nan, nanf, nanl \- generate a quiet NaN
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double nan(const char *" tagp );
+.br
+.BI "float nanf(const char *" tagp );
+.br
+.BI "long double nanl(const char *" tagp );
+.SH DESCRIPTION
+The
+.BR nan ()
+family of functions returns a quiet NaN
+.RB ( "Not a Number" )
+of the appropriate floating-point type.  These functions provide a
+portable, expression-context way to obtain a NaN value without relying
+on the
+.B NAN
+macro or on any particular bit pattern.
+.PP
+The argument
+.I tagp
+is a pointer to a null-terminated string interpreted as an
+n-char-sequence whose contents
+.I may
+be used to select an implementation-defined NaN payload (the
+significand bits below the quiet-NaN indicator).  Per ISO C99
+\(sc7.12.11.2 the call
+.BI nan( tagp )
+is equivalent to
+.PP
+.RS 4
+.EX
+strtod("NAN(\fItagp\fP)", (char **)NULL);
+.EE
+.RE
+.PP
+when
+.I tagp
+points to a valid n-char-sequence, and equivalent to
+.B strtod("NAN()", NULL)
+when
+.I tagp
+points to an empty string.  The mapping from
+.I tagp
+to payload bits is implementation-defined; if the implementation does
+not support NaNs of that form, the function returns zero.
+.PP
+The Substrate libm currently
+.I ignores
+.I tagp
+and unconditionally returns the same generic quiet NaN as the
+.B NAN
+macro.  This is conforming \(em the standard requires only that the
+returned value be a quiet NaN of the correct type, and that the
+payload be implementation-defined \(em but it does mean that distinct
+.I tagp
+arguments produce indistinguishable results.  Code that needs to
+discriminate NaN payloads must not depend on these functions to encode
+information.
+.PP
+The
+.BR nanf ()
+variant returns a quiet
+.B float
+NaN; the
+.BR nanl ()
+variant returns a quiet
+.B "long double"
+NaN.  All three functions are total: they are defined for every
+argument value, including
+.I "tagp == NULL"
+(treated as if the empty string were supplied).  No floating-point
+exception is raised; in particular
+.B FE_INVALID
+is never raised, because the result is a
+.I quiet
+NaN, not a signaling NaN.
+.SH RETURN VALUE
+.BR nan (),
+.BR nanf (),
+and
+.BR nanl ()
+return a quiet NaN of type
+.BR double ,
+.BR float ,
+and
+.BR "long double"
+respectively.  The returned value satisfies
+.BI isnan( x )
+and
+.B "fpclassify(x) == FP_NAN"
+for any
+.I x
+holding the result.
+.PP
+No errors are defined for these functions.  They never set
+.I errno
+and never raise a floating-point exception.  In Substrate the result
+is always a quiet NaN with a generic (zero) payload, regardless of
+.IR tagp .
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR nan (),
+.BR nanf (),
+.BR nanl ()
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+.BR nan (),
+.BR nanf (),
+and
+.BR nanl ()
+conform to C99 and POSIX.1-2008.  The interpretation of
+.I tagp
+follows ISO C99 \(sc7.12.11.2 and IEC 60559:1989 (IEEE\ 754); the
+specific payload bits selected are implementation-defined.  Substrate
+treats the
+.I tagp
+mapping as a no-op and always returns the canonical quiet NaN of the
+target format.
+.SH EXAMPLES
+The following program obtains a quiet NaN from
+.BR nan (),
+verifies that it classifies as a NaN, and shows that arithmetic on a
+NaN propagates without raising an exception:
+.PP
+.RS 4
+.EX
+#include <math.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    double x = nan("");
+    double y;
+
+    if (isnan(x))
+        printf("nan(\e"\e") produced a NaN\en");
+
+    /* Arithmetic with a NaN propagates the NaN. */
+    y = x + 1.0;
+    printf("nan(\e"\e") + 1.0 isnan = %d\en", isnan(y));
+
+    /* All comparisons against NaN are false (except !=). */
+    printf("(x == x) = %d   (x != x) = %d\en",
+           x == x, x != x);
+
+    /* The tag string is ignored on Substrate; both calls
+       yield indistinguishable quiet NaNs. */
+    printf("isnan(nan(\e"foo\e")) = %d\en", isnan(nan("foo")));
+    printf("isnan(nanf(\e"\e"))   = %d\en", isnan(nanf("")));
+
+    return 0;
+}
+.EE
+.RE
+.PP
+A representative output is:
+.PP
+.RS 4
+.EX
+nan("") produced a NaN
+nan("") + 1.0 isnan = 1
+(x == x) = 0   (x != x) = 1
+isnan(nan("foo")) = 1
+isnan(nanf(""))   = 1
+.EE
+.RE
+.PP
+Note that
+.B "x == x"
+is false when
+.I x
+is a NaN: this is the canonical idiom for detecting NaN in code that
+predates
+.BR isnan (3),
+and it remains correct under IEC 60559 ordered comparison rules.
+.SH SEE ALSO
+.BR isnan (3),
+.BR nextafter (3),
+.BR strtod (3),
+.BR fpclassify (3),
+.BR copysign (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

@@ -91,6 +91,7 @@ typedef struct fat_fs {
     uint32_t cluster_size;          // Bytes per cluster
     uint8_t *fat_table;             // Cached FAT table
     uint32_t fat_table_size;        // Size of cached FAT in bytes
+    fs_node_t *root_node;           // Root node of the filesystem
 } fat_fs_t;
 
 // FAT File/Directory Node Context

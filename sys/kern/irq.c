@@ -3,6 +3,7 @@
 #include <sys/errno.h>
 #include <string.h>
 #include <vm/vm_kmem.h>
+#include <arch/i386/intr.h>
 
 #define IRQ_LINE_COUNT 256
 #define IRQ_VECTOR_COUNT (IRQ_VECTOR_LAST - IRQ_VECTOR_FIRST + 1)
@@ -40,17 +41,22 @@ int request_irq(unsigned int irq, irq_handler_t handler, unsigned long flags,
         strncpy(action->name, name, sizeof(action->name) - 1);
     }
 
-    /* Perform conflict checks and insertion under one lock hold. */
+    /* irq_lock is also taken from interrupt context by irq_dispatch().
+     * Disable interrupts on the process-side acquire so a hardware IRQ
+     * arriving mid-critical-section can't recurse into the same lock. */
+    uint32_t flags_saved = intr_disable();
     spinlock_acquire(&irq_lock);
     curr = irq_lines[irq];
     while (curr != NULL) {
         if (!(curr->flags & IRQF_SHARED) || !(flags & IRQF_SHARED)) {
             spinlock_release(&irq_lock);
+            intr_restore(flags_saved);
             kfree(action, sizeof(*action));
             return -EBUSY;
         }
         if (curr->dev_id == dev_id && dev_id != NULL) {
             spinlock_release(&irq_lock);
+            intr_restore(flags_saved);
             kfree(action, sizeof(*action));
             return -EEXIST;
         }
@@ -60,6 +66,7 @@ int request_irq(unsigned int irq, irq_handler_t handler, unsigned long flags,
     action->next = irq_lines[irq];
     irq_lines[irq] = action;
     spinlock_release(&irq_lock);
+    intr_restore(flags_saved);
     return 0;
 }
 
@@ -71,6 +78,7 @@ void free_irq(unsigned int irq, void *dev_id) {
         return;
     }
 
+    uint32_t flags_saved = intr_disable();
     spinlock_acquire(&irq_lock);
     curr = irq_lines[irq];
     while (curr != NULL) {
@@ -81,6 +89,7 @@ void free_irq(unsigned int irq, void *dev_id) {
                 irq_lines[irq] = curr->next;
             }
             spinlock_release(&irq_lock);
+            intr_restore(flags_saved);
             kfree(curr, sizeof(*curr));
             return;
         }
@@ -88,6 +97,7 @@ void free_irq(unsigned int irq, void *dev_id) {
         curr = curr->next;
     }
     spinlock_release(&irq_lock);
+    intr_restore(flags_saved);
 }
 
 int irq_dispatch(unsigned int irq, void *frame) {
@@ -110,16 +120,19 @@ int irq_dispatch(unsigned int irq, void *frame) {
 
 int irq_alloc_vector(void) {
     int i;
+    uint32_t flags_saved = intr_disable();
 
     spinlock_acquire(&irq_lock);
     for (i = 0; i < IRQ_VECTOR_COUNT; i++) {
         if (!irq_vector_used[i]) {
             irq_vector_used[i] = 1;
             spinlock_release(&irq_lock);
+            intr_restore(flags_saved);
             return IRQ_VECTOR_FIRST + i;
         }
     }
     spinlock_release(&irq_lock);
+    intr_restore(flags_saved);
     return -ENOSPC;
 }
 
@@ -130,7 +143,9 @@ void irq_free_vector(int vector) {
         return;
     }
 
+    uint32_t flags_saved = intr_disable();
     spinlock_acquire(&irq_lock);
     irq_vector_used[idx] = 0;
     spinlock_release(&irq_lock);
+    intr_restore(flags_saved);
 }

@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
-
-extern int umount(const char *target);
+#include <sys/mount.h>
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {

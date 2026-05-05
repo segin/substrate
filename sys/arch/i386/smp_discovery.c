@@ -47,7 +47,7 @@ static uint32_t smp_mp_config_phys = 0;
 
 static void smp_emit_u32(void (*emit)(const char *), uint32_t value) {
     char buf[16];
-    sprintf(buf, "%u", value);
+    snprintf(buf, sizeof(buf), "%u", value);
     emit(buf);
 }
 

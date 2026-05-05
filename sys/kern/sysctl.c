@@ -118,6 +118,16 @@ int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, voi
     error = copyin(name, name_buf, namelen * sizeof(int));
     if (error) return error;
 
+    /* DEBUG: spot KERN_ARND fallback from FreeBSD libc __guard_setup —
+     * if __guard_setup gets a valid AT_CANARY, this should never fire.
+     * KERN_ARND mib is {1, 37}. */
+    {
+        extern int kprintf(const char *fmt, ...);
+        if (namelen == 2 && name_buf[0] == 1 && name_buf[1] == 37) {
+            kprintf("[GUARD] KERN_ARND sysctl fallback hit (AT_CANARY path failed)\n");
+        }
+    }
+
     /* 2. Setup request */
     memset(&req, 0, sizeof(req));
     if (current_process) {

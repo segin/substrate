@@ -8,7 +8,8 @@ CC ?= cc
 LD ?= ld
 AR ?= ar
 AS ?= as
-HOSTCC ?= cc
+HOSTCC_DEFAULT := $(shell if [ -x /usr/bin/cc ]; then printf '%s' /usr/bin/cc; elif command -v cc >/dev/null 2>&1; then command -v cc; else printf '%s' cc; fi)
+HOSTCC ?= $(HOSTCC_DEFAULT)
 
 # Warning policy
 WARNFLAGS ?= -Wall -Wextra

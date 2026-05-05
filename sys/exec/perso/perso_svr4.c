@@ -164,5 +164,6 @@ struct personality personality_svr4 = {
     .syscall_table = svr4_syscalls,
     .syscall_names = svr4_names,
     .syscall_fmts = svr4_fmts,
-    .syscall_count = MAX_SYSCALLS
+    .syscall_count = MAX_SYSCALLS,
+    .path_prefix = "/perso/svr4"
 };

@@ -1,7 +1,7 @@
 HOST_TESTS = host_test_libusb test_core test_descriptor test_device test_io test_async test_hotplug
 
-USB_SRCS = ../../../lib/usb/src/core.c ../../../lib/usb/src/device.c ../../../lib/usb/src/sync.c ../../../lib/usb/src/descriptor.c ../../../lib/usb/src/async.c ../../../lib/usb/src/poll.c
-USB_INCLUDES = -DNATIVE_BUILD=1 -I../../../lib/usb/include -idirafter ../../../sys/include -I../../../sys
+USB_SRCS = ../../../lib/usb/src/core.c ../../../lib/usb/src/device.c ../../../lib/usb/src/sync.c ../../../lib/usb/src/descriptor.c ../../../lib/usb/src/async.c ../../../lib/usb/src/poll.c ../../../lib/usb/os/substrate.c
+USB_INCLUDES = -DNATIVE_BUILD=1 -I../../../lib/usb/include -I../../../lib/usb/os -idirafter ../../../sys/include -I../../../sys
 CFLAGS_TEST = -g -Wall -Wextra -Werror -I.
 
 .PHONY: all clean test
