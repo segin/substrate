@@ -652,8 +652,7 @@ static void init_root_fs(void) {
 
 // kinit - kernel init task (becomes PID 1 after exec)
 // This is forked from kernel task 0 and execs the init binary
-void kinit_task(void *arg) {
-    (void)arg;  // Unused now that we use cmdline_get
+void kinit_task(void) {
     char *init_path = NULL;
     char init_arg_buf[256];
     char *init_arg = NULL;
@@ -752,7 +751,8 @@ exec_success:
 
 // Legacy init_task - redirects to kinit_task
 void init_task(void *arg) {
-    kinit_task(arg);
+    (void)arg;
+    kinit_task();
 }
 
 
