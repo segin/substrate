@@ -155,7 +155,6 @@ static int ac97_irq_handler(unsigned int irq, void *dev_id, void *frame)
 {
 	ac97_dev_t *d = dev_id;
 	uint16_t sr;
-	static int ac97_irq_seen = 0;
 
 	(void)irq;
 	(void)frame;
@@ -163,11 +162,6 @@ static int ac97_irq_handler(unsigned int irq, void *dev_id, void *frame)
 		return 0;
 	}
 	sr = ac97_bm_read16(d, AC97_BM_PO_BASE + AC97_BM_SR);
-	if (!ac97_irq_seen) {
-		extern int kprintf(const char *fmt, ...);
-		kprintf("[AC97-IRQ] first interrupt fired sr=0x%04x\n", sr);
-		ac97_irq_seen = 1;
-	}
 	if (sr & (AC97_SR_BCIS | AC97_SR_LVBCI | AC97_SR_FIFOE)) {
 		/* Ack the latched status bits.  BCIS fires once per BDL slot
 		 * with IOC=1; track it as our "slot drained" event so the
@@ -218,17 +212,12 @@ static int ac97_set_params(audio_dev_t *adev, audio_info_t *info)
 	ac97_mixer_write(d, AC97_PCM_FRONT_DAC_RATE, enc);
 	back = ac97_mixer_read(d, AC97_PCM_FRONT_DAC_RATE);
 	if (back != enc) {
-		kprintf("[AC97] WARN: rate %u Hz rejected (wrote 0x%04x, "
-		        "readback 0x%04x); codec will play at its current "
-		        "rate (likely 48 kHz) — userspace data will sound "
-		        "fast/slow accordingly\n",
+		kprintf("ac97: WARN: rate %u Hz rejected (wrote 0x%04x, "
+		        "readback 0x%04x); falling back to codec rate\n",
 		        info->play.sample_rate, enc, back);
-		/* Fall back to whatever the codec accepted so the audio_info
-		 * we report back matches reality. */
+		/* Report back what the codec accepted so audio_info matches
+		 * reality. */
 		info->play.sample_rate = back;
-	} else {
-		kprintf("[AC97] set_params: rate=%u Hz (vra=%d enc=0x%04x ok)\n",
-		        info->play.sample_rate, d->has_vra, enc);
 	}
 
 	ac97_mixer_write(d, AC97_PCM_LR_ADC_RATE,
