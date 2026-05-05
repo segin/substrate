@@ -101,11 +101,18 @@ void exec_maybe_unpin_current_thread(int from_user) {
  * appropriate loader.
  */
 int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
+    /* Diagnostic: removing this barrier reliably hangs init exec on the
+     * first invocation under single-CPU configs (kprint here in development
+     * accidentally provided the same effect via UART-write serialization).
+     * The race is somewhere between exec_pin_current_thread()'s writes to
+     * thread flags and the first user-visible action of exec_dispatch,
+     * likely an interrupt-context reader of needs_resched or bound_cpu
+     * seeing a stale value.  Keep until we identify the real source. */
+    __sync_synchronize();
     if (!path) return -ENOENT;
 
-    // 1. Open the file to read the header
     int fd = kern_open(path, O_RDONLY, 0);
-    if (fd < 0) return fd; // Propagate error (ENOENT, EACCES)
+    if (fd < 0) return fd;
 
     file_t *f = current_process->fds[fd];
     if (!f || !f->f_data) {
@@ -114,25 +121,22 @@ int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
     }
 
     fs_node_t *node = (fs_node_t *)f->f_data;
-    if (vfs_check_permissions(node, current_process->uid, current_process->gid, X_OK) != 0) {
+    if (vfs_check_permissions(node, current_process->euid, current_process->egid, X_OK) != 0) {
         kern_close(fd);
         return -EACCES;
     }
 
-    // 3. Read the header (magic bytes)
     char header_buf[256];
     int len = kern_read(fd, header_buf, sizeof(header_buf));
-    
     if (len < 0) {
         kern_close(fd);
         return len;
     }
-    
-    // 4. Iterate through handlers
+
+    // Iterate through handlers
     struct exec_binary_handler *h = exec_handlers;
     while (h) {
         if (h->check && h->check(path, header_buf, len) == 0) {
-            // Match found!
             if (h->load) {
                 int ret = h->load(fd, path, argv, envp);
                 if (ret != 0) {

@@ -90,6 +90,7 @@ typedef struct {
     as_x86_seg_t seg_override;
     unsigned default_bits;
     unsigned rel_is_disp;
+    unsigned force_rel32;
     unsigned has_section_offset;
     uint64_t section_offset;
     int lock_prefix;

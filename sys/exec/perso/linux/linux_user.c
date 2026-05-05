@@ -5,6 +5,57 @@
 #include <sys/errno.h>
 #include <vm/vm_kmem.h>
 
+static void linux_fill_stat64(struct linux_stat64 *kbuf, const struct stat *native) {
+    memset(kbuf, 0, sizeof(*kbuf));
+    kbuf->st_dev = native->st_dev;
+    kbuf->__st_ino = native->st_ino;
+    kbuf->st_mode = native->st_mode;
+    kbuf->st_nlink = native->st_nlink;
+    kbuf->st_uid = native->st_uid;
+    kbuf->st_gid = native->st_gid;
+    kbuf->st_rdev = native->st_rdev;
+    kbuf->st_size = native->st_size;
+    kbuf->st_blksize = native->st_blksize;
+    kbuf->st_blocks = native->st_blocks;
+    kbuf->st_atime = (uint32_t)(native->st_atime & 0xFFFFFFFF);
+    kbuf->st_atime_nsec = native->st_atime_nsec;
+    kbuf->st_mtime = (uint32_t)(native->st_mtime & 0xFFFFFFFF);
+    kbuf->st_mtime_nsec = native->st_mtime_nsec;
+    kbuf->st_ctime = (uint32_t)(native->st_ctime & 0xFFFFFFFF);
+    kbuf->st_ctime_nsec = native->st_ctime_nsec;
+    kbuf->st_ino = native->st_ino;
+}
+
+static void linux_fill_statx_timestamp(struct linux_statx_timestamp *dst, int64_t sec, uint32_t nsec) {
+    dst->tv_sec = sec;
+    dst->tv_nsec = nsec;
+    dst->__reserved = 0;
+}
+
+static void linux_fill_statx(struct linux_statx *kbuf, const struct stat *native, unsigned int mask) {
+    memset(kbuf, 0, sizeof(*kbuf));
+    kbuf->stx_mask = LINUX_STATX_BASIC_STATS;
+    if (mask & LINUX_STATX_BTIME) {
+        kbuf->stx_mask |= LINUX_STATX_BTIME;
+    }
+    kbuf->stx_blksize = native->st_blksize;
+    kbuf->stx_nlink = native->st_nlink;
+    kbuf->stx_uid = native->st_uid;
+    kbuf->stx_gid = native->st_gid;
+    kbuf->stx_mode = native->st_mode;
+    kbuf->stx_ino = native->st_ino;
+    kbuf->stx_size = native->st_size;
+    kbuf->stx_blocks = native->st_blocks;
+    linux_fill_statx_timestamp(&kbuf->stx_atime, native->st_atime, native->st_atime_nsec);
+    linux_fill_statx_timestamp(&kbuf->stx_btime, native->st_ctime, native->st_ctime_nsec);
+    linux_fill_statx_timestamp(&kbuf->stx_ctime, native->st_ctime, native->st_ctime_nsec);
+    linux_fill_statx_timestamp(&kbuf->stx_mtime, native->st_mtime, native->st_mtime_nsec);
+    kbuf->stx_rdev_major = native->st_rdev >> 8;
+    kbuf->stx_rdev_minor = native->st_rdev & 0xff;
+    kbuf->stx_dev_major = native->st_dev >> 8;
+    kbuf->stx_dev_minor = native->st_dev & 0xff;
+}
+
 /* Linux stat translation: native -> linux_stat */
 int linux_sys_stat(const char *path, struct linux_stat *buf) {
     char kpath[256];
@@ -106,25 +157,7 @@ int linux_sys_stat64(const char *path, struct linux_stat64 *buf) {
     if (ret < 0) return ret;
     
     struct linux_stat64 kbuf;
-    memset(&kbuf, 0, sizeof(kbuf));
-    kbuf.st_dev = native.st_dev;
-    kbuf.__st_ino = native.st_ino;
-    kbuf.st_mode = native.st_mode;
-    kbuf.st_nlink = native.st_nlink;
-    kbuf.st_uid = native.st_uid;
-    kbuf.st_gid = native.st_gid;
-    kbuf.st_rdev = native.st_rdev;
-    kbuf.st_size = native.st_size;
-    kbuf.st_blksize = native.st_blksize;
-    kbuf.st_blocks = native.st_blocks;
-    kbuf.st_atime = (uint32_t)(native.st_atime & 0xFFFFFFFF);
-    kbuf.st_atime_nsec = native.st_atime_nsec;
-    kbuf.st_mtime = (uint32_t)(native.st_mtime & 0xFFFFFFFF);
-    kbuf.st_mtime_nsec = native.st_mtime_nsec;
-    kbuf.st_ctime = (uint32_t)(native.st_ctime & 0xFFFFFFFF);
-    kbuf.st_ctime_nsec = native.st_ctime_nsec;
-    kbuf.st_ino = native.st_ino;
-    
+    linux_fill_stat64(&kbuf, &native);
     if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -14;
     return 0;
 }
@@ -138,25 +171,7 @@ int linux_sys_lstat64(const char *path, struct linux_stat64 *buf) {
     if (ret < 0) return ret;
     
     struct linux_stat64 kbuf;
-    memset(&kbuf, 0, sizeof(kbuf));
-    kbuf.st_dev = native.st_dev;
-    kbuf.__st_ino = native.st_ino;
-    kbuf.st_mode = native.st_mode;
-    kbuf.st_nlink = native.st_nlink;
-    kbuf.st_uid = native.st_uid;
-    kbuf.st_gid = native.st_gid;
-    kbuf.st_rdev = native.st_rdev;
-    kbuf.st_size = native.st_size;
-    kbuf.st_blksize = native.st_blksize;
-    kbuf.st_blocks = native.st_blocks;
-    kbuf.st_atime = (uint32_t)(native.st_atime & 0xFFFFFFFF);
-    kbuf.st_atime_nsec = native.st_atime_nsec;
-    kbuf.st_mtime = (uint32_t)(native.st_mtime & 0xFFFFFFFF);
-    kbuf.st_mtime_nsec = native.st_mtime_nsec;
-    kbuf.st_ctime = (uint32_t)(native.st_ctime & 0xFFFFFFFF);
-    kbuf.st_ctime_nsec = native.st_ctime_nsec;
-    kbuf.st_ino = native.st_ino;
-    
+    linux_fill_stat64(&kbuf, &native);
     if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -14;
     return 0;
 }
@@ -167,25 +182,39 @@ int linux_sys_fstat64(int fd, struct linux_stat64 *buf) {
     if (ret < 0) return ret;
     
     struct linux_stat64 kbuf;
-    memset(&kbuf, 0, sizeof(kbuf));
-    kbuf.st_dev = native.st_dev;
-    kbuf.__st_ino = native.st_ino;
-    kbuf.st_mode = native.st_mode;
-    kbuf.st_nlink = native.st_nlink;
-    kbuf.st_uid = native.st_uid;
-    kbuf.st_gid = native.st_gid;
-    kbuf.st_rdev = native.st_rdev;
-    kbuf.st_size = native.st_size;
-    kbuf.st_blksize = native.st_blksize;
-    kbuf.st_blocks = native.st_blocks;
-    kbuf.st_atime = (uint32_t)(native.st_atime & 0xFFFFFFFF);
-    kbuf.st_atime_nsec = native.st_atime_nsec;
-    kbuf.st_mtime = (uint32_t)(native.st_mtime & 0xFFFFFFFF);
-    kbuf.st_mtime_nsec = native.st_mtime_nsec;
-    kbuf.st_ctime = (uint32_t)(native.st_ctime & 0xFFFFFFFF);
-    kbuf.st_ctime_nsec = native.st_ctime_nsec;
-    kbuf.st_ino = native.st_ino;
-    
+    linux_fill_stat64(&kbuf, &native);
+    if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -14;
+    return 0;
+}
+
+int linux_sys_fstatat64(int dirfd, const char *path, struct linux_stat64 *buf, int flags) {
+    char kpath[256];
+    struct stat native;
+    struct linux_stat64 kbuf;
+    int ret;
+
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+
+    ret = kern_fstatat(dirfd, kpath, &native, flags);
+    if (ret < 0) return ret;
+
+    linux_fill_stat64(&kbuf, &native);
+    if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -14;
+    return 0;
+}
+
+int linux_sys_statx(int dirfd, const char *path, int flags, unsigned int mask, struct linux_statx *buf) {
+    char kpath[256];
+    struct stat native;
+    struct linux_statx kbuf;
+    int ret;
+
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+
+    ret = kern_fstatat(dirfd, kpath, &native, flags & LINUX_AT_SYMLINK_NOFOLLOW);
+    if (ret < 0) return ret;
+
+    linux_fill_statx(&kbuf, &native, mask);
     if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -14;
     return 0;
 }

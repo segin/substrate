@@ -20,8 +20,12 @@ int regcomp(regex_t *restrict preg, const char *restrict pattern, int cflags)
     if (!preg || !pattern)
         return REG_BADPAT;
 
+    if (cflags & REG_EXTENDED)
+        sub_flags |= REGEX_FLAG_EXTENDED;
     if (cflags & REG_ICASE)
         sub_flags |= REGEX_FLAG_ICASE;
+    if (cflags & REG_NEWLINE)
+        sub_flags |= REGEX_FLAG_MULTILINE;
 
     tmp = regex_compile(pattern, sub_flags, &err);
     if (!tmp) {

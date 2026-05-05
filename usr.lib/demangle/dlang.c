@@ -269,6 +269,8 @@ static int
 dlang_parser_append_name_ref(dlang_parser_t *p, size_t idx)
 {
     dlang_name_ref_t *ref;
+    char *tmp;
+    int ret;
 
     if (p == NULL || idx >= p->name_ref_count) {
         return -1;
@@ -279,7 +281,22 @@ dlang_parser_append_name_ref(dlang_parser_t *p, size_t idx)
         return -1;
     }
 
-    return dlang_buf_append(&p->out, p->out.data + ref->off, ref->len);
+    /* dlang_buf_append calls demangle_buf_reserve which may realloc
+     * p->out.data.  We can't pass `p->out.data + ref->off` directly:
+     * the source pointer is captured before the reserve, so after
+     * realloc it points into freed memory.  Stage the slice in a
+     * scratch buffer first. */
+    if (ref->len == 0u) {
+        return 0;
+    }
+    tmp = (char *)malloc(ref->len);
+    if (tmp == NULL) {
+        return -1;
+    }
+    memcpy(tmp, p->out.data + ref->off, ref->len);
+    ret = dlang_buf_append(&p->out, tmp, ref->len);
+    free(tmp);
+    return ret;
 }
 
 static int
@@ -293,11 +310,12 @@ dlang_parse_number(dlang_parser_t *p, size_t *out)
 
     v = 0u;
     while (isdigit((unsigned char)p->cur[0])) {
-        size_t nv = v * 10u + (size_t)(p->cur[0] - '0');
-        if (nv < v) {
+        unsigned d = (unsigned)(p->cur[0] - '0');
+        /* Pre-multiply saturation; see itanium parse_number. */
+        if (v > ((size_t)-1 - d) / 10u) {
             return -1;
         }
-        v = nv;
+        v = v * 10u + d;
         p->cur++;
     }
 
@@ -1029,7 +1047,16 @@ dlang_parse_type_core(dlang_parser_t *p)
         {
             char numbuf[32];
             int numlen = snprintf(numbuf, sizeof(numbuf), "%zu", n);
-            if (numlen < 0 || dlang_buf_append(&p->out, numbuf, (size_t)numlen) != 0 ||
+            size_t app_len;
+            if (numlen < 0) {
+                free(inner);
+                return -1;
+            }
+            app_len = (size_t)numlen;
+            if (app_len >= sizeof(numbuf)) {
+                app_len = sizeof(numbuf) - 1u;
+            }
+            if (dlang_buf_append(&p->out, numbuf, app_len) != 0 ||
                 dlang_buf_appendc(&p->out, ']') != 0) {
                 free(inner);
                 return -1;

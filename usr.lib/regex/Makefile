@@ -24,10 +24,6 @@ ifeq ($(USE_ICU),1)
 CFLAGS += -DREGEX_USE_ICU
 endif
 
-ifdef NATIVE_BUILD
-CFLAGS += -DREGEX_USE_HOST_POSIX
-endif
-
 .PHONY: all clean install FORCE
 
 all: $(LIBNAME)

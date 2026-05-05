@@ -21,6 +21,14 @@ int coff_load_file(void *file, uint32_t size) {
         return -1;
     }
 
+    // Validate section header offset and count against file size
+    uint32_t scn_offset = sizeof(coff_filehdr_t) + filehdr->f_opthdr;
+    if (scn_offset > size || filehdr->f_nscns > 256 ||
+        scn_offset + (uint32_t)filehdr->f_nscns * sizeof(coff_scnhdr_t) > size) {
+        kprint("COFF: Header exceeds file size\n");
+        return -1;
+    }
+
     kprint("Loading COFF file...\n");
 
     // If it has an optional header, parse it for entry point
@@ -28,7 +36,7 @@ int coff_load_file(void *file, uint32_t size) {
         coff_aouthdr_t *aouthdr = (coff_aouthdr_t *)((uintptr_t)file + sizeof(coff_filehdr_t));
         // Entry point is aouthdr->entry
         char buf[64];
-        sprintf(buf, "COFF: Entry point at 0x%08x\n", aouthdr->entry);
+        snprintf(buf, sizeof(buf), "COFF: Entry point at 0x%08x\n", aouthdr->entry);
         kprint(buf);
     }
 
@@ -39,7 +47,7 @@ int coff_load_file(void *file, uint32_t size) {
         strncpy(name, scnhdr[i].s_name, 8);
         name[8] = '\0';
         char buf[64];
-        sprintf(buf, "COFF: Mapping section %s\n", name);
+        snprintf(buf, sizeof(buf), "COFF: Mapping section %s\n", name);
         kprint(buf);
         
         // Use vm_map_insert to map section raw data
@@ -48,6 +56,12 @@ int coff_load_file(void *file, uint32_t size) {
 
         // Skip empty sections
         if (scnhdr[i].s_size == 0) continue;
+
+        // Check for overflow and reject sections mapping into kernel space
+        if (va_end < va_start || va_start >= 0xC0000000 || va_end > 0xC0000000) {
+            kprint("COFF: Section maps into kernel space\n");
+            return -1;
+        }
 
         // Align to page boundaries
         uint32_t map_start = va_start & ~0xFFF;

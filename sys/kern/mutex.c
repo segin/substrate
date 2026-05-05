@@ -69,14 +69,10 @@ void mutex_lock(mutex_t *m) {
 
         // Defensive check: only dereference owner if lock is still held
         // and owner is not NULL.
-        thread_t *owner = (thread_t *)m->owner;
+        thread_t *owner = __atomic_load_n(&m->owner, __ATOMIC_ACQUIRE);
         if (owner) {
-            // Verify owner is still the owner and lock is held before dereferencing state
-            if (m->locked && m->owner == owner) {
-                if (owner->state != THREAD_RUNNING) {
-                    break;
-                }
-            } else {
+            // Verify owner is still the owner and lock is held
+            if (!m->locked || __atomic_load_n(&m->owner, __ATOMIC_RELAXED) != owner) {
                 // Lock was released or owner changed
                 if (mutex_trylock(m)) return;
                 break;

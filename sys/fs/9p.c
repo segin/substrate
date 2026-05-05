@@ -7,13 +7,17 @@
 #include <drivers/virtio/virtio.h>
 #include <sys/errno.h>
 
-uint32_t p9_next_fid = 0;
+struct p9_fs {
+    uint32_t next_fid;
+    uint32_t root_fid;
+    uint32_t msize;
+};
 
-static uint32_t p9_alloc_fid(void) {
-    return p9_next_fid++;
+static uint32_t p9_alloc_fid(struct p9_fs *fs) {
+    return fs->next_fid++;
 }
 
-static int p9_version(void) {
+static int p9_version(struct p9_fs *fs) {
     // Tversion: size[4] Tversion[1] tag[2] msize[4] version[s]
     // version = "9P2000.L" or "9P2000"
     const char *version_str = "9P2000.L";
@@ -27,7 +31,7 @@ static int p9_version(void) {
     *(uint32_t*)p = msize; p += 4;
     *p = P9_TVERSION; p += 1;
     *(uint16_t*)p = P9_NOTAG; p += 2; // Version uses NOTAG
-    *(uint32_t*)p = 8192; p += 4; // Proposed msize
+    *(uint32_t*)p = fs->msize; p += 4; // Proposed msize
     *(uint16_t*)p = version_len; p += 2;
     memcpy(p, version_str, version_len);
 
@@ -54,9 +58,9 @@ static int p9_version(void) {
     return success;
 }
 
-static uint32_t p9_attach(void) {
+static uint32_t p9_attach(struct p9_fs *fs) {
     // Tattach: size[4] Tattach[1] tag[2] fid[4] afid[4] uname[s] aname[s]
-    uint32_t fid = p9_alloc_fid();
+    uint32_t fid = p9_alloc_fid(fs);
     const char *uname = "root";
     const char *aname = ""; // Empty for root
     uint16_t uname_len = strlen(uname);
@@ -117,7 +121,8 @@ static uint32_t p9_vfs_read(fs_node_t *node, off_t offset, uint32_t size, uint8_
     // Tag (0 for now)
     *(uint16_t*)p = 0; p += 2;
     // FID
-    *(uint32_t*)p = (uint32_t)node->impl; p += 4;
+    struct p9_fs *fs = (struct p9_fs *)node->impl;
+    *(uint32_t*)p = fs->root_fid; p += 4;
     // Offset
     *(uint64_t*)p = offset; p += 8;
     // Count
@@ -171,26 +176,64 @@ cleanup:
     return ret_count;
 }
 
+static int p9_unmount(fs_node_t *root) {
+    if (!root) return -1;
+    struct p9_fs *fs = (struct p9_fs *)root->impl;
+    if (!fs) return -1;
+
+    // Tclunk: size[4] Tclunk[1] tag[2] fid[4]
+    uint32_t msize = 4 + 1 + 2 + 4;
+    uint8_t msg[11];
+    uint8_t *p = msg;
+    *(uint32_t*)p = msize; p += 4;
+    *p = P9_TCLUNK; p += 1;
+    *(uint16_t*)p = 0; p += 2;
+    *(uint32_t*)p = fs->root_fid;
+    
+    uint8_t rmsg[7]; // Rclunk: size[4] RCLUNK[1] tag[2]
+    virtio_9p_send(msg, msize, rmsg, 7);
+
+    kfree(fs, sizeof(struct p9_fs));
+    return 0;
+}
+
 static fs_node_t *p9_mount(const char *device, uint32_t flags, void *data) {
     (void)device; (void)flags; (void)data;
-    static fs_node_t p9_root;
-    memset(&p9_root, 0, sizeof(fs_node_t));
+    struct p9_fs *fs = kmalloc(sizeof(struct p9_fs));
+    if (!fs) return NULL;
+    memset(fs, 0, sizeof(struct p9_fs));
+    fs->msize = 8192;
+    fs->next_fid = 1;
+
+    fs_node_t *p9_root = kmalloc(sizeof(fs_node_t));
+    if (!p9_root) {
+        kfree(fs, sizeof(struct p9_fs));
+        return NULL;
+    }
+    memset(p9_root, 0, sizeof(fs_node_t));
 
     // Perform handshake
-    if (!p9_version()) {
+    if (!p9_version(fs)) {
+        kfree(p9_root, sizeof(fs_node_t));
+        kfree(fs, sizeof(struct p9_fs));
         return NULL;
     }
 
-    uint32_t root_fid = p9_attach();
+    uint32_t root_fid = p9_attach(fs);
     if (root_fid == P9_NOFID) {
+        kfree(p9_root, sizeof(fs_node_t));
+        kfree(fs, sizeof(struct p9_fs));
         return NULL;
     }
 
-    p9_root.flags = FS_DIRECTORY;
-    p9_root.read = &p9_vfs_read;
-    p9_root.impl = (uintptr_t)root_fid;
+    fs->root_fid = root_fid;
 
-    return &p9_root;
+    p9_root->flags = FS_DIRECTORY;
+    p9_root->read = &p9_vfs_read;
+    p9_root->unmount = &p9_unmount;
+    p9_root->impl = (uintptr_t)fs;
+
+    return p9_root;
 }
 
 static filesystem_t p9_fs = {

@@ -79,12 +79,32 @@ static __inline__ __m128i _mm_set1_epi64x(long long x) {
 	return(r.v);
 }
 
+static __inline__ __m128i _mm_set_epi64x(long long e1, long long e0) {
+	__m128i_u r;
+	r.i64[0] = e0;
+	r.i64[1] = e1;
+	return(r.v);
+}
+
 static __inline__ __m128i _mm_set_epi32(int e3, int e2, int e1, int e0) {
 	__m128i_u r;
 	r.i32[0] = e0;
 	r.i32[1] = e1;
 	r.i32[2] = e2;
 	r.i32[3] = e3;
+	return(r.v);
+}
+
+static __inline__ __m128i _mm_set_epi8(
+	signed char e15, signed char e14, signed char e13, signed char e12,
+	signed char e11, signed char e10, signed char e09, signed char e08,
+	signed char e07, signed char e06, signed char e05, signed char e04,
+	signed char e03, signed char e02, signed char e01, signed char e00) {
+	__m128i_u r;
+	r.i8[0] = e00; r.i8[1] = e01; r.i8[2] = e02; r.i8[3] = e03;
+	r.i8[4] = e04; r.i8[5] = e05; r.i8[6] = e06; r.i8[7] = e07;
+	r.i8[8] = e08; r.i8[9] = e09; r.i8[10] = e10; r.i8[11] = e11;
+	r.i8[12] = e12; r.i8[13] = e13; r.i8[14] = e14; r.i8[15] = e15;
 	return(r.v);
 }
 
@@ -229,6 +249,28 @@ static __inline__ __m128i _mm_xor_si128(__m128i a, __m128i b) {
 	ub.v = b;
 	r.u64[0] = ua.u64[0] ^ ub.u64[0];
 	r.u64[1] = ua.u64[1] ^ ub.u64[1];
+	return(r.v);
+}
+
+static __inline__ __m128i _mm_slli_si128(__m128i a, int count) {
+	__m128i_u ua, r;
+	int i;
+	ua.v = a;
+	for(i=0;i<16;i++) {
+		int src = i - count;
+		r.u8[i] = (src >= 0 && src < 16) ? ua.u8[src] : 0;
+	}
+	return(r.v);
+}
+
+static __inline__ __m128i _mm_srli_si128(__m128i a, int count) {
+	__m128i_u ua, r;
+	int i;
+	ua.v = a;
+	for(i=0;i<16;i++) {
+		int src = i + count;
+		r.u8[i] = (src >= 0 && src < 16) ? ua.u8[src] : 0;
+	}
 	return(r.v);
 }
 

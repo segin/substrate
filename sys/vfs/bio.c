@@ -9,13 +9,42 @@
 #include <vm/vm_kmem.h>
 #include <string.h>
 
-#define BIO_HASH_SIZE   256
-#define BIO_NBUF_MAX    512
+#ifndef HOST_TEST
+#include <arch/i386/pmm.h>
+#else
+/* Host harness supplies a stub. */
+uint32_t pmm_get_free_memory(void);
+#endif
+
+/*
+ * Buffer cache.  Traditional UNIX-style: a single hash + LRU pool that
+ * grows dynamically into unused RAM and is reclaimed under pressure.
+ *
+ * Sizing policy:
+ *   - Always allow growth up to BIO_NBUF_FLOOR buffers regardless of free
+ *     RAM (so the cache works even when memory is tight).
+ *   - Above the floor, only allocate a new buffer if pmm_get_free_memory()
+ *     leaves at least BIO_RESERVE_BYTES available after the allocation.
+ *   - Hard ceiling of BIO_NBUF_CEILING buffers to bound metadata overhead
+ *     even on giant systems.
+ *
+ * Reclaim path: bio_reclaim(target_bytes) drains BQ_EMPTY, then BQ_CLEAN
+ * (LRU first), freeing buf metadata and data pages until the target is
+ * met.  Callers (vm pressure handlers, unmount, etc.) drive the policy.
+ */
+#define BIO_HASH_SIZE       256
+#define BIO_NBUF_FLOOR      64
+#define BIO_NBUF_CEILING    8192
+#define BIO_RESERVE_BYTES   (8U * 1024U * 1024U)
 
 static struct bufhashhead bio_hashtbl[BIO_HASH_SIZE];
 static struct bufqueue bio_queues[BQ_COUNT];
 static spinlock_t bio_lock;
 static uint32_t bio_nbuf;
+static uint64_t bio_resident_bytes;
+static uint64_t bio_hits;
+static uint64_t bio_misses;
+static uint64_t bio_reclaims;
 
 static inline uint32_t
 bio_hash(struct vnode *vp, int64_t blkno)
@@ -77,6 +106,8 @@ bio_ensure_size(struct buf *bp, size_t size)
     }
 
     if (bp->b_data) {
+        if (bio_resident_bytes >= bp->b_bcount)
+            bio_resident_bytes -= bp->b_bcount;
         kfree(bp->b_data, bp->b_bcount);
         bp->b_data = NULL;
         bp->b_bcount = 0;
@@ -93,6 +124,7 @@ bio_ensure_size(struct buf *bp, size_t size)
     memset(bp->b_data, 0, size);
     bp->b_bcount = size;
     bp->b_resid = 0;
+    bio_resident_bytes += size;
     return 0;
 }
 
@@ -112,6 +144,33 @@ bio_reuse_candidate_locked(void)
     return NULL;
 }
 
+/*
+ * Should we allow growing the pool by one more buffer of `size` bytes?
+ *
+ * Below the floor: always.
+ * Above the ceiling: never.
+ * In between: only if doing so leaves >= BIO_RESERVE_BYTES of free RAM.
+ *
+ * pmm_get_free_memory() is conservative (counts only direct-mapped pool)
+ * which is exactly the pool kmalloc() pulls from.  Using it here avoids
+ * over-committing the cache and starving the rest of the kernel.
+ */
+static int
+bio_can_grow_locked(size_t size)
+{
+    uint32_t free_ram;
+
+    if (bio_nbuf < BIO_NBUF_FLOOR)
+        return 1;
+    if (bio_nbuf >= BIO_NBUF_CEILING)
+        return 0;
+
+    free_ram = pmm_get_free_memory();
+    if ((uint64_t)free_ram < (uint64_t)size + BIO_RESERVE_BYTES)
+        return 0;
+    return 1;
+}
+
 void
 bio_init(void)
 {
@@ -127,6 +186,10 @@ bio_init(void)
 
     spinlock_init(&bio_lock, "bio");
     bio_nbuf = 0;
+    bio_resident_bytes = 0;
+    bio_hits = 0;
+    bio_misses = 0;
+    bio_reclaims = 0;
 
     syncer_td = NULL;
     (void)kthread_create(syncer_daemon, NULL, &syncer_td, "syncer");
@@ -159,9 +222,15 @@ retry_lookup:
     bp = bio_lookup_locked(vp, blkno);
     if (bp) {
         while (bp->b_flags & B_BUSY) {
+            /* Block on the buffer's sleep channel.  Plain sched_yield()
+             * would just reorder the runqueue (yield clears RUNNING→
+             * READY but leaves us schedulable), giving us a busy-yield
+             * loop on UP.  sched_sleep() sets THREAD_BLOCKED so we are
+             * not reconsidered until sleepq_wake_all(bp) flips us
+             * back to READY. */
             sleepq_add(bp, current_thread);
             spinlock_release(&bio_lock);
-            sched_yield();
+            sched_sleep(bp);
             spinlock_acquire(&bio_lock);
             bp = bio_lookup_locked(vp, blkno);
             if (!bp) {
@@ -183,11 +252,14 @@ retry_lookup:
             bp->b_flags |= B_ERROR;
         }
 
+        bio_hits++;
         spinlock_release(&bio_lock);
         return bp;
     }
 
-    if (bio_nbuf < BIO_NBUF_MAX) {
+    bio_misses++;
+
+    if (bio_can_grow_locked(size)) {
         bp = kmalloc(sizeof(*bp));
         if (!bp) {
             spinlock_release(&bio_lock);
@@ -420,7 +492,18 @@ brelse(struct buf *bp)
     bp->b_flags &= ~B_BUSY;
 
     if (bp->b_flags & (B_INVAL | B_NOCACHE)) {
+        /* Detach from hash + vnode key so the next lookup misses,
+         * matching the semantics callers expect of B_INVAL. */
+        if (bp->b_vp) {
+            bio_hash_remove(bp);
+            bp->b_vp = NULL;
+        }
+        bp->b_blkno = 0;
+        bp->b_lblkno = 0;
+        bp->b_flags &= ~B_CACHE;
         if (bp->b_data) {
+            if (bio_resident_bytes >= bp->b_bcount)
+                bio_resident_bytes -= bp->b_bcount;
             kfree(bp->b_data, bp->b_bcount);
             bp->b_data = NULL;
             bp->b_bcount = 0;
@@ -534,4 +617,201 @@ syncer_daemon(void *arg)
         deadline = get_ticks() + period;
         (void)sched_sleep_until(&bio_lock, deadline);
     }
+}
+
+/*
+ * ============================================================
+ * Device-keyed manual-fill API
+ * ============================================================
+ *
+ * Used by raw-device readers (fs/ext2, fs/udf) that don't have a
+ * struct vnode for their backing device but want to share the cache.
+ * The opaque dev pointer is treated identically to a struct vnode *
+ * for hashing purposes; bio.c never dereferences it.
+ *
+ * Caller flow on miss:
+ *   bp = bio_dev_get(dev, blkno, size);
+ *   if (!(bp->b_flags & B_CACHE)) {
+ *       device_read_into(bp->b_data);
+ *       bp->b_flags |= B_CACHE;
+ *   }
+ *   memcpy(out, bp->b_data, size);
+ *   bio_dev_release(bp);
+ */
+
+struct buf *
+bio_dev_get(void *dev, int64_t blkno, size_t size)
+{
+    return getblk((struct vnode *)dev, blkno, size, 0, 0);
+}
+
+void
+bio_dev_release(struct buf *bp)
+{
+    brelse(bp);
+}
+
+void
+bio_dev_mark_dirty(struct buf *bp)
+{
+    if (!bp)
+        return;
+    bp->b_flags |= B_DELWRI;
+}
+
+void
+bio_dev_invalidate(void *dev, int64_t blkno)
+{
+    struct buf *bp;
+
+retry:
+    spinlock_acquire(&bio_lock);
+    bp = bio_lookup_locked((struct vnode *)dev, blkno);
+    if (!bp) {
+        spinlock_release(&bio_lock);
+        return;
+    }
+    if (bp->b_flags & B_BUSY) {
+        sleepq_add(bp, current_thread);
+        spinlock_release(&bio_lock);
+        sched_yield();
+        goto retry;
+    }
+    if (bp->b_qindex != -1)
+        bio_remove_from_queue(bp);
+    bp->b_flags |= B_BUSY | B_INVAL;
+    bp->b_flags &= ~(B_DELWRI | B_CACHE);
+    bio_insert_queue(bp, BQ_LOCKED);
+    spinlock_release(&bio_lock);
+    brelse(bp);
+}
+
+void
+bio_dev_purge(void *dev)
+{
+    struct buf *bp;
+    struct buf *next;
+    uint32_t i;
+
+    for (i = 0; i < BIO_HASH_SIZE; i++) {
+retry_bucket:
+        spinlock_acquire(&bio_lock);
+        LIST_FOREACH_SAFE(bp, &bio_hashtbl[i], b_hash, next) {
+            if (bp->b_vp != (struct vnode *)dev)
+                continue;
+            if (bp->b_flags & B_BUSY) {
+                sleepq_add(bp, current_thread);
+                spinlock_release(&bio_lock);
+                sched_yield();
+                goto retry_bucket;
+            }
+            if (bp->b_qindex != -1)
+                bio_remove_from_queue(bp);
+            bp->b_flags |= B_BUSY | B_INVAL;
+            bp->b_flags &= ~(B_DELWRI | B_CACHE);
+            bio_insert_queue(bp, BQ_LOCKED);
+            spinlock_release(&bio_lock);
+            brelse(bp);
+            goto retry_bucket;
+        }
+        spinlock_release(&bio_lock);
+    }
+}
+
+/*
+ * ============================================================
+ * Reclaim
+ * ============================================================
+ */
+
+size_t
+bio_reclaim(size_t target_bytes)
+{
+    struct buf *bp;
+    struct buf *next;
+    size_t freed;
+    size_t bsize;
+
+    freed = 0;
+    spinlock_acquire(&bio_lock);
+
+    /* Drain BQ_EMPTY first — these have no data so we mainly recover bp
+     * metadata and slot count. */
+    TAILQ_FOREACH_SAFE(bp, &bio_queues[BQ_EMPTY], b_freelist, next) {
+        if (bp->b_flags & B_BUSY)
+            continue;
+        bio_remove_from_queue(bp);
+        if (bp->b_vp)
+            bio_hash_remove(bp);
+        if (bp->b_data) {
+            bsize = bp->b_bcount;
+            if (bio_resident_bytes >= bsize)
+                bio_resident_bytes -= bsize;
+            kfree(bp->b_data, bsize);
+            freed += bsize;
+        }
+        kfree(bp, sizeof(*bp));
+        if (bio_nbuf > 0)
+            bio_nbuf--;
+        if (target_bytes && freed >= target_bytes)
+            goto done;
+    }
+
+    /* Then BQ_CLEAN in LRU order (head = oldest). */
+    TAILQ_FOREACH_SAFE(bp, &bio_queues[BQ_CLEAN], b_freelist, next) {
+        if (bp->b_flags & B_BUSY)
+            continue;
+        bio_remove_from_queue(bp);
+        if (bp->b_vp)
+            bio_hash_remove(bp);
+        if (bp->b_data) {
+            bsize = bp->b_bcount;
+            if (bio_resident_bytes >= bsize)
+                bio_resident_bytes -= bsize;
+            kfree(bp->b_data, bsize);
+            freed += bsize;
+        }
+        kfree(bp, sizeof(*bp));
+        if (bio_nbuf > 0)
+            bio_nbuf--;
+        if (target_bytes && freed >= target_bytes)
+            goto done;
+    }
+
+done:
+    bio_reclaims++;
+    spinlock_release(&bio_lock);
+    return freed;
+}
+
+void
+bio_get_stats(struct bio_stats *out)
+{
+    struct buf *bp;
+
+    if (!out)
+        return;
+
+    memset(out, 0, sizeof(*out));
+
+    spinlock_acquire(&bio_lock);
+    out->nbuf = bio_nbuf;
+    out->resident_bytes = bio_resident_bytes;
+    out->hits = bio_hits;
+    out->misses = bio_misses;
+    out->reclaims = bio_reclaims;
+
+    TAILQ_FOREACH(bp, &bio_queues[BQ_LOCKED], b_freelist)
+        out->q_locked++;
+    TAILQ_FOREACH(bp, &bio_queues[BQ_CLEAN], b_freelist)
+        out->q_clean++;
+    TAILQ_FOREACH(bp, &bio_queues[BQ_DIRTY], b_freelist)
+        out->q_dirty++;
+    TAILQ_FOREACH(bp, &bio_queues[BQ_EMPTY], b_freelist)
+        out->q_empty++;
+    spinlock_release(&bio_lock);
+
+    out->free_ram_bytes = pmm_get_free_memory();
+    out->nbuf_target = (out->free_ram_bytes > BIO_RESERVE_BYTES) ?
+        BIO_NBUF_CEILING : BIO_NBUF_FLOOR;
 }

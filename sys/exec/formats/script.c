@@ -13,13 +13,12 @@
 #include <sys/exec.h>
 #include <sys/errno.h>
 #include <sys/kern_syscalls.h>
+#include <kern/sched.h>
 #include <string.h>
 
 #define SCRIPT_MAX_RECURSION 4
 #define SCRIPT_MAX_ARGV      256
 #define SCRIPT_LINE_MAX      256
-
-static int script_recursion_depth = 0;
 
 static int script_check(const char *path, const char *header_buf, size_t len) {
     (void)path;
@@ -36,7 +35,7 @@ static int script_load(int fd, const char *path, char *const argv[],
     char *new_argv[SCRIPT_MAX_ARGV];
     int argc, i, ret;
 
-    if (script_recursion_depth >= SCRIPT_MAX_RECURSION) {
+    if (current_thread->script_depth >= SCRIPT_MAX_RECURSION) {
         kern_close(fd);
         return -ELOOP;
     }
@@ -103,14 +102,23 @@ static int script_load(int fd, const char *path, char *const argv[],
 
     /* Copy remaining original argv (skip argv[0]) */
     if (argv) {
-        for (i = 1; argv[i] && argc < SCRIPT_MAX_ARGV - 1; i++)
-            new_argv[argc++] = argv[i];
+        int is_user = (uintptr_t)argv < 0xC0000000;
+        for (i = 1; argc < SCRIPT_MAX_ARGV - 1; i++) {
+            char *uarg;
+            if (is_user) {
+                if (copyin(&argv[i], &uarg, sizeof(char*)) != 0) break;
+            } else {
+                uarg = argv[i];
+            }
+            if (!uarg) break;
+            new_argv[argc++] = uarg;
+        }
     }
     new_argv[argc] = NULL;
 
-    script_recursion_depth++;
+    current_thread->script_depth++;
     ret = exec_dispatch(interp, new_argv, envp);
-    script_recursion_depth--;
+    current_thread->script_depth--;
 
     return ret;
 }

@@ -1,0 +1,207 @@
+.TH SCALBN 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+scalbn, scalbnf, scalbnl, scalbln, scalblnf, scalblnl \- scale floating-point number by integer power of radix
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double scalbn(double " x ", int " n );
+.br
+.BI "float scalbnf(float " x ", int " n );
+.br
+.BI "long double scalbnl(long double " x ", int " n );
+.PP
+.BI "double scalbln(double " x ", long " n );
+.br
+.BI "float scalblnf(float " x ", long " n );
+.br
+.BI "long double scalblnl(long double " x ", long " n );
+.SH DESCRIPTION
+The
+.BR scalbn ()
+function computes the value of
+.I x
+multiplied by
+.B FLT_RADIX
+raised to the power
+.IR n :
+.PP
+.RS 4
+.IR x " * FLT_RADIX^" n .
+.RE
+.PP
+On Substrate and other implementations where
+.B FLT_RADIX
+is 2 (as required by IEC 60559 / IEEE\ 754 binary floating point), the
+result is identical to that of
+.PP
+.RS 4
+.BI "ldexp(" x ", " n ) .
+.RE
+.PP
+The
+.BR scalbln ()
+function is identical to
+.BR scalbn (),
+except that the exponent argument
+.I n
+has type
+.B long
+instead of
+.BR int .
+This variant is provided for systems where the magnitude of a useful
+exponent might exceed the range of an
+.BR int .
+.PP
+The
+.B f
+suffixed variants
+.RB ( scalbnf (),
+.BR scalblnf ())
+take and return
+.B float
+values; the
+.B l
+suffixed variants
+.RB ( scalbnl (),
+.BR scalblnl ())
+take and return
+.B "long double"
+values.
+.PP
+These functions perform efficient scaling by manipulating the exponent
+field of the floating-point representation directly and do not, in
+general, suffer the rounding error inherent in computing
+.BI pow( FLT_RADIX ", " n )
+followed by a multiplication.
+.SH RETURN VALUE
+On success,
+.BR scalbn ()
+and
+.BR scalbln ()
+return
+.IR x " * FLT_RADIX^" n .
+.PP
+If the result overflows the range of the return type, a range
+(overflow) error occurs and the function returns
+.B \(+-HUGE_VAL
+(or
+.B \(+-HUGE_VALF
+or
+.BR \(+-HUGE_VALL )
+with the same sign as
+.IR x .
+.PP
+If the result underflows the range of the return type, a range
+(underflow) error occurs and the function returns 0 with the same sign
+as
+.IR x .
+.PP
+If
+.I x
+is \(+-0, \(+-infinity, or
+.IR n " is 0,"
+.I x
+is returned unchanged.
+.PP
+If
+.I x
+is a NaN, a NaN is returned.
+.SH ERRORS
+See
+.BR math_error (7)
+for information on how to determine whether an error has occurred when
+calling these functions.
+.PP
+The following errors can occur:
+.TP
+Range error: result overflow
+An overflow floating-point exception
+.RB ( FE_OVERFLOW )
+is raised.  If
+.I "math_errhandling & MATH_ERRNO"
+is non-zero,
+.I errno
+is set to
+.BR ERANGE .
+.TP
+Range error: result underflow
+An underflow floating-point exception
+.RB ( FE_UNDERFLOW )
+is raised.  If
+.I "math_errhandling & MATH_ERRNO"
+is non-zero,
+.I errno
+is set to
+.BR ERANGE .
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR scalbn (),
+.BR scalbnf (),
+.BR scalbnl (),
+.BR scalbln (),
+.BR scalblnf (),
+.BR scalblnl ()
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+.BR scalbn (),
+.BR scalbln (),
+and their
+.BR f / l
+variants conform to C99 and POSIX.1-2008.  The handling of special
+arguments follows C99 Annex F.10.3.2 (IEC 60559).
+.SH EXAMPLES
+The following program demonstrates basic scaling and the underflow
+behaviour at the extreme end of the exponent range:
+.PP
+.RS 4
+.EX
+#include <errno.h>
+#include <limits.h>
+#include <math.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    double y;
+
+    /* Ordinary scaling: 1.5 * 2^3 == 12.0 */
+    y = scalbn(1.5, 3);
+    printf("scalbn(1.5, 3)        = %.6f\en", y);
+
+    /* Underflow to +0 with errno set to ERANGE. */
+    errno = 0;
+    y = scalbn(1.0, INT_MIN);
+    printf("scalbn(1.0, INT_MIN)  = %.6f (errno=%d)\en", y, errno);
+
+    return 0;
+}
+.EE
+.RE
+.PP
+The output is:
+.PP
+.RS 4
+.EX
+scalbn(1.5, 3)        = 12.000000
+scalbn(1.0, INT_MIN)  = 0.000000 (errno=34)
+.EE
+.RE
+.SH SEE ALSO
+.BR frexp (3),
+.BR ilogb (3),
+.BR ldexp (3),
+.BR logb (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

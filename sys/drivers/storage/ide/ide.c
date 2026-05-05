@@ -1245,10 +1245,10 @@ int ide_read_sectors(uint16_t bus, uint8_t drive, uint32_t lba,
 
     uint16_t *buf = (uint16_t *)buffer;
     for (int i = 0; i < count; i++) {
-        if (ide_wait_bsy(channel, IDE_TIMEOUT_DATA_MS, "pio-read-ext") < 0) {
+        if (ide_wait_bsy(channel, IDE_TIMEOUT_DATA_MS, "pio-read") < 0) {
             return -1;
         }
-        if (ide_wait_drq(channel, IDE_TIMEOUT_DATA_MS, "pio-read-ext") < 0) {
+        if (ide_wait_drq(channel, IDE_TIMEOUT_DATA_MS, "pio-read") < 0) {
             return -1;
         }
         insw(bus + ATA_REG_DATA, buf, 256);
@@ -1278,10 +1278,10 @@ int ide_read_sectors_ext(uint16_t bus, uint8_t drive, uint64_t lba,
 
     uint16_t *buf = (uint16_t *)buffer;
     for (int i = 0; i < count; i++) {
-        if (ide_wait_bsy(channel, IDE_TIMEOUT_DATA_MS, "pio-read") < 0) {
+        if (ide_wait_bsy(channel, IDE_TIMEOUT_DATA_MS, "pio-read-ext") < 0) {
             return -1;
         }
-        if (ide_wait_drq(channel, IDE_TIMEOUT_DATA_MS, "pio-read") < 0) {
+        if (ide_wait_drq(channel, IDE_TIMEOUT_DATA_MS, "pio-read-ext") < 0) {
             return -1;
         }
         insw(bus + ATA_REG_DATA, buf, 256);
@@ -1308,10 +1308,10 @@ int ide_write_sectors(uint16_t bus, uint8_t drive, uint32_t lba,
 
     const uint16_t *buf = (const uint16_t *)buffer;
     for (int i = 0; i < count; i++) {
-        if (ide_wait_bsy(channel, IDE_TIMEOUT_DATA_MS, "pio-write-ext") < 0) {
+        if (ide_wait_bsy(channel, IDE_TIMEOUT_DATA_MS, "pio-write") < 0) {
             return -1;
         }
-        if (ide_wait_drq(channel, IDE_TIMEOUT_DATA_MS, "pio-write-ext") < 0) {
+        if (ide_wait_drq(channel, IDE_TIMEOUT_DATA_MS, "pio-write") < 0) {
             return -1;
         }
         outsw(bus + ATA_REG_DATA, buf, 256);
@@ -1341,10 +1341,10 @@ int ide_write_sectors_ext(uint16_t bus, uint8_t drive, uint64_t lba,
 
     const uint16_t *buf = (const uint16_t *)buffer;
     for (int i = 0; i < count; i++) {
-        if (ide_wait_bsy(channel, IDE_TIMEOUT_DATA_MS, "pio-write") < 0) {
+        if (ide_wait_bsy(channel, IDE_TIMEOUT_DATA_MS, "pio-write-ext") < 0) {
             return -1;
         }
-        if (ide_wait_drq(channel, IDE_TIMEOUT_DATA_MS, "pio-write") < 0) {
+        if (ide_wait_drq(channel, IDE_TIMEOUT_DATA_MS, "pio-write-ext") < 0) {
             return -1;
         }
         outsw(bus + ATA_REG_DATA, buf, 256);

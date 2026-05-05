@@ -405,6 +405,11 @@ typedef struct procfs_pid_nodes {
 static procfs_pid_nodes_t **procfs_pid_nodes = NULL;
 static size_t procfs_pid_nodes_count = 0;
 static size_t procfs_pid_nodes_capacity = 0;
+/* Serializes the (procfs_pid_nodes, count, capacity) triple — without
+ * it concurrent procfs_get_pid_nodes() from two threads can both grow
+ * the array, both kfree the old pointer, double-free or use-after-free. */
+static spinlock_t procfs_pid_nodes_lock = { 0 };
+static int procfs_pid_nodes_lock_init = 0;
 
 static struct procfs_runtime_entry *procfs_find_driver_entry(const char *name) {
     if (!name) return NULL;
@@ -452,14 +457,24 @@ static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
     size_t new_capacity;
     size_t old_bytes;
     size_t new_bytes;
+    process_t *target;
 
-    if (pid <= 0 || !proc_find(pid)) {
+    target = (pid > 0) ? proc_find(pid) : NULL;
+    if (!target) {
         return NULL;
     }
 
+    if (!procfs_pid_nodes_lock_init) {
+        spinlock_init(&procfs_pid_nodes_lock, "procfs_pid");
+        procfs_pid_nodes_lock_init = 1;
+    }
+    spinlock_acquire(&procfs_pid_nodes_lock);
+
     for (size_t i = 0; i < procfs_pid_nodes_count; i++) {
         if (procfs_pid_nodes[i] && procfs_pid_nodes[i]->pid == pid) {
-            return procfs_pid_nodes[i];
+            procfs_pid_nodes_t *r = procfs_pid_nodes[i];
+            spinlock_release(&procfs_pid_nodes_lock);
+            return r;
         }
     }
 
@@ -471,6 +486,7 @@ static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
 
         new_nodes = kmalloc(new_bytes);
         if (!new_nodes) {
+            spinlock_release(&procfs_pid_nodes_lock);
             return NULL;
         }
         if (procfs_pid_nodes && old_bytes != 0) {
@@ -484,6 +500,7 @@ static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
 
     nodes = kmalloc(sizeof(*nodes));
     if (!nodes) {
+        spinlock_release(&procfs_pid_nodes_lock);
         return NULL;
     }
     memset(nodes, 0, sizeof(*nodes));
@@ -492,8 +509,8 @@ static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
 
     nodes->dir.flags = FS_DIRECTORY;
     nodes->dir.mask = 0555;
-    nodes->dir.uid = 0;
-    nodes->dir.gid = 0;
+    nodes->dir.uid = target->uid;
+    nodes->dir.gid = target->gid;
     nodes->dir.readdir = &proc_pid_readdir;
     nodes->dir.finddir = &proc_pid_finddir;
     procfs_refresh_timestamps(&nodes->dir);
@@ -501,48 +518,48 @@ static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
     strncpy(nodes->status.name, "status", sizeof(nodes->status.name) - 1);
     nodes->status.flags = FS_FILE;
     nodes->status.mask = 0444;
-    nodes->status.uid = 0;
-    nodes->status.gid = 0;
+    nodes->status.uid = target->uid;
+    nodes->status.gid = target->gid;
     nodes->status.read = &proc_pid_status_read;
     procfs_refresh_timestamps(&nodes->status);
 
     strncpy(nodes->cmdline.name, "cmdline", sizeof(nodes->cmdline.name) - 1);
     nodes->cmdline.flags = FS_FILE;
     nodes->cmdline.mask = 0444;
-    nodes->cmdline.uid = 0;
-    nodes->cmdline.gid = 0;
+    nodes->cmdline.uid = target->uid;
+    nodes->cmdline.gid = target->gid;
     nodes->cmdline.read = &proc_pid_cmdline_read;
     procfs_refresh_timestamps(&nodes->cmdline);
 
     strncpy(nodes->stat.name, "stat", sizeof(nodes->stat.name) - 1);
     nodes->stat.flags = FS_FILE;
     nodes->stat.mask = 0444;
-    nodes->stat.uid = 0;
-    nodes->stat.gid = 0;
+    nodes->stat.uid = target->uid;
+    nodes->stat.gid = target->gid;
     nodes->stat.read = &proc_pid_stat_read;
     procfs_refresh_timestamps(&nodes->stat);
 
     strncpy(nodes->exe.name, "exe", sizeof(nodes->exe.name) - 1);
     nodes->exe.flags = FS_SYMLINK;
     nodes->exe.mask = 0777;
-    nodes->exe.uid = 0;
-    nodes->exe.gid = 0;
+    nodes->exe.uid = target->uid;
+    nodes->exe.gid = target->gid;
     nodes->exe.readlink = &proc_pid_exe_readlink;
     procfs_refresh_timestamps(&nodes->exe);
 
     strncpy(nodes->cwd.name, "cwd", sizeof(nodes->cwd.name) - 1);
     nodes->cwd.flags = FS_SYMLINK;
     nodes->cwd.mask = 0777;
-    nodes->cwd.uid = 0;
-    nodes->cwd.gid = 0;
+    nodes->cwd.uid = target->uid;
+    nodes->cwd.gid = target->gid;
     nodes->cwd.readlink = &proc_pid_cwd_readlink;
     procfs_refresh_timestamps(&nodes->cwd);
 
     strncpy(nodes->fd_dir.name, "fd", sizeof(nodes->fd_dir.name) - 1);
     nodes->fd_dir.flags = FS_DIRECTORY;
-    nodes->fd_dir.mask = 0555;
-    nodes->fd_dir.uid = 0;
-    nodes->fd_dir.gid = 0;
+    nodes->fd_dir.mask = 0500;
+    nodes->fd_dir.uid = target->uid;
+    nodes->fd_dir.gid = target->gid;
     nodes->fd_dir.readdir = &proc_pid_fd_readdir;
     nodes->fd_dir.finddir = &proc_pid_fd_finddir;
     procfs_refresh_timestamps(&nodes->fd_dir);
@@ -553,15 +570,16 @@ static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
         memset(link, 0, sizeof(*link));
         snprintf(link->name, sizeof(link->name), "%d", fd);
         link->flags = FS_SYMLINK;
-        link->mask = 0777;
-        link->uid = 0;
-        link->gid = 0;
+        link->mask = 0700;
+        link->uid = target->uid;
+        link->gid = target->gid;
         link->inode = pid;
         link->impl = (uintptr_t)fd;
         link->readlink = &proc_pid_fd_readlink;
         procfs_refresh_timestamps(link);
     }
 
+    spinlock_release(&procfs_pid_nodes_lock);
     return nodes;
 }
 
@@ -676,13 +694,21 @@ static size_t procfs_generic_read(fs_node_t *node, off_t offset, size_t size, ui
     char *alloc_buf = NULL;
     size_t alloc_size = 0;
 
-    /* Check for truncation and retry with larger buffer if needed */
+    /* Check for truncation and retry with larger buffer if needed.
+     * Cap at 1 MiB so a buggy or hostile generator can't DoS the
+     * kernel by claiming it needs hundreds of MB. */
     if (len >= sizeof(tmp)) {
-        alloc_size = len + 1;
-        alloc_buf = kmalloc(alloc_size);
-        if (alloc_buf) {
-            len = entry->generator(alloc_buf, alloc_size, entry->opaque);
-            buf = alloc_buf;
+        if (len > (1U << 20)) {
+            len = sizeof(tmp) - 1;
+        } else {
+            alloc_size = len + 1;
+            alloc_buf = kmalloc(alloc_size);
+            if (alloc_buf) {
+                len = entry->generator(alloc_buf, alloc_size, entry->opaque);
+                buf = alloc_buf;
+            } else {
+                len = sizeof(tmp) - 1;
+            }
         }
     }
     
@@ -719,8 +745,7 @@ static int proc_generate_status(char *b, size_t s, process_t *proc) {
         }
     }
 
-    struct personality *pers = perso_lookup(current_process->perso_id);
-    if (pers && strcmp(pers->name, "Linux") == 0) {
+    if (proc->perso_id == PERS_LINUX) {
         return snprintf(b, s,
             "Name:\t%s\n"
             "State:\tR (running)\n"

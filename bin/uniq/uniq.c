@@ -7,7 +7,7 @@ int main() {
     while (fgets(buf, sizeof(buf), stdin)) {
         if (first || strcmp(buf, prev) != 0) {
             printf("%s", buf);
-            strlcpy(prev, buf, sizeof(prev));
+            strcpy(prev, buf);
             first = 0;
         }
     }

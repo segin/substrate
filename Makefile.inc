@@ -4,11 +4,12 @@
 ARCH ?= i386
 
 # Toolchain definitions
-CC ?= gcc
+CC ?= cc
 LD ?= ld
 AR ?= ar
 AS ?= as
-HOSTCC ?= cc
+HOSTCC_DEFAULT := $(shell if [ -x /usr/bin/cc ]; then printf '%s' /usr/bin/cc; elif command -v cc >/dev/null 2>&1; then command -v cc; else printf '%s' cc; fi)
+HOSTCC ?= $(HOSTCC_DEFAULT)
 
 # Warning policy
 WARNFLAGS ?= -Wall -Wextra
@@ -64,7 +65,7 @@ ifdef NATIVE_BUILD
     LIBGCC :=
 else
     # Target build configuration (Substrate i386)
-    USER_CFLAGS := $(COMMON_FLAGS) -std=c2x -nostdinc -I$(USR_INCLUDE) -I$(SYS_INCLUDE) -I$(TOP)/sys
+    USER_CFLAGS := $(COMMON_FLAGS) -std=c2x -nostdinc -fno-pie -I$(USR_INCLUDE) -I$(SYS_INCLUDE) -I$(TOP)/sys
 ifneq ($(strip $(GCC_INCLUDE)),)
 ifneq ($(wildcard $(GCC_INCLUDE)),)
     USER_CFLAGS += -I$(GCC_INCLUDE)
@@ -72,7 +73,8 @@ endif
 endif
     USER_CFLAGS += $(EXTRA_USER_CFLAGS)
     USER_LDFLAGS := -m32 -nostdlib -fno-pie -no-pie $(EXTRA_USER_LDFLAGS)
-    LIBGCC = $(shell $(CC) -m32 -print-libgcc-file-name)
+    _LIBGCC_PATH := $(shell $(CC) -m32 -print-libgcc-file-name 2>/dev/null)
+    LIBGCC = $(if $(wildcard $(_LIBGCC_PATH)),$(_LIBGCC_PATH),)
 endif
 
 # Macro to brand a binary as Substrate native (OSABI=64)

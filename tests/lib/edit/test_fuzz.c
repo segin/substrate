@@ -55,7 +55,7 @@ void test_fuzz_tokenizer_random_bytes(void) {
         const char **argv = NULL;
 
         /* Should not crash - return value doesn't matter */
-        tok_str(tok, &li, &argc, &argv);
+        tok_line(tok, &li, &argc, &argv, NULL, NULL);
         tok_reset(tok);
     }
 
@@ -72,31 +72,31 @@ void test_fuzz_tokenizer_pathological(void) {
     LineInfo li = { sq, sq + sizeof(sq), sq + sizeof(sq) };
     int argc = 0;
     const char **argv = NULL;
-    tok_str(tok, &li, &argc, &argv);
+    tok_line(tok, &li, &argc, &argv, NULL, NULL);
     tok_reset(tok);
 
     /* All double quotes */
     memset(sq, '"', sizeof(sq));
     li.buffer = sq; li.cursor = sq + sizeof(sq); li.lastchar = sq + sizeof(sq);
-    tok_str(tok, &li, &argc, &argv);
+    tok_line(tok, &li, &argc, &argv, NULL, NULL);
     tok_reset(tok);
 
     /* All backslashes */
     memset(sq, '\\', sizeof(sq));
     li.buffer = sq; li.cursor = sq + sizeof(sq); li.lastchar = sq + sizeof(sq);
-    tok_str(tok, &li, &argc, &argv);
+    tok_line(tok, &li, &argc, &argv, NULL, NULL);
     tok_reset(tok);
 
     /* All spaces */
     memset(sq, ' ', sizeof(sq));
     li.buffer = sq; li.cursor = sq + sizeof(sq); li.lastchar = sq + sizeof(sq);
-    tok_str(tok, &li, &argc, &argv);
+    tok_line(tok, &li, &argc, &argv, NULL, NULL);
     tok_reset(tok);
 
     /* All NUL bytes */
     memset(sq, 0, sizeof(sq));
     li.buffer = sq; li.cursor = sq + sizeof(sq); li.lastchar = sq + sizeof(sq);
-    tok_str(tok, &li, &argc, &argv);
+    tok_line(tok, &li, &argc, &argv, NULL, NULL);
     tok_reset(tok);
 
     /* High bytes (0x80-0xFF) */
@@ -104,7 +104,7 @@ void test_fuzz_tokenizer_pathological(void) {
     for (k = 0; k < sizeof(sq); k++)
         sq[k] = (char)(0x80 + (k % 128));
     li.buffer = sq; li.cursor = sq + sizeof(sq); li.lastchar = sq + sizeof(sq);
-    tok_str(tok, &li, &argc, &argv);
+    tok_line(tok, &li, &argc, &argv, NULL, NULL);
     tok_reset(tok);
 
     tok_end(tok);

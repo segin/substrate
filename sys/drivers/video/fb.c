@@ -338,6 +338,13 @@ static video_driver_t *video_drivers = NULL;
  * Examples: "1024x768@32", "640x480", "320x200@8"
  * Returns 0 on success, -1 on parse error.
  */
+/* Sane upper bounds — any real display mode is well under these.
+ * Keeping the cap small means a malicious cmdline can't drive
+ * width*pitch arithmetic into wraparound territory. */
+#define FB_MODE_MAX_WIDTH   16384
+#define FB_MODE_MAX_HEIGHT  16384
+#define FB_MODE_MAX_BPP     64
+
 int fb_parse_vga_mode(const char *arg, uint32_t *width, uint32_t *height, uint32_t *bpp) {
     uint32_t w = 0, h = 0, b = 0;
     const char *p = arg;
@@ -347,6 +354,7 @@ int fb_parse_vga_mode(const char *arg, uint32_t *width, uint32_t *height, uint32
     /* Parse width */
     while (*p >= '0' && *p <= '9') {
         w = w * 10 + (*p - '0');
+        if (w > FB_MODE_MAX_WIDTH) return -1;
         p++;
     }
     if (w == 0 || (*p != 'x' && *p != 'X')) return -1;
@@ -355,6 +363,7 @@ int fb_parse_vga_mode(const char *arg, uint32_t *width, uint32_t *height, uint32
     /* Parse height */
     while (*p >= '0' && *p <= '9') {
         h = h * 10 + (*p - '0');
+        if (h > FB_MODE_MAX_HEIGHT) return -1;
         p++;
     }
     if (h == 0) return -1;
@@ -364,6 +373,7 @@ int fb_parse_vga_mode(const char *arg, uint32_t *width, uint32_t *height, uint32
         p++;
         while (*p >= '0' && *p <= '9') {
             b = b * 10 + (*p - '0');
+            if (b > FB_MODE_MAX_BPP) return -1;
             p++;
         }
         if (b == 0) return -1;
@@ -538,8 +548,16 @@ static void *fb_fs_mmap(fs_node_t *node, void *addr, size_t length, int prot, in
     size_t aligned_length;
     uint32_t vm_prot = 0;
 
-    uint32_t fb_size = fb.pitch * fb.height;
-    if (offset + length > fb_size) return (void *)-1;
+    /*
+     * Use 64-bit math for the size and the bounds compare; otherwise a
+     * crafted mode (e.g. via `vga=` cmdline) where pitch * height wraps
+     * a uint32_t lets `offset + length > fb_size` admit any window into
+     * physical RAM via /dev/fb0 mmap.
+     */
+    uint64_t fb_size = (uint64_t)fb.pitch * (uint64_t)fb.height;
+    if (offset < 0 || length == 0) return (void *)-1;
+    if ((uint64_t)offset > fb_size) return (void *)-1;
+    if ((uint64_t)length > fb_size - (uint64_t)offset) return (void *)-1;
     if ((offset & 0xFFF) != 0) return (void *)-1;
 
     aligned_length = (length + 0xFFF) & ~0xFFFU;
@@ -587,7 +605,6 @@ void video_register_driver(video_driver_t *drv) {
     if (!drv) return;
     drv->next = video_drivers;
     video_drivers = drv;
-    // kprint("Video: Registered driver: "); kprint(drv->name); kprint("\n");
 }
 
 /* External install functions for drivers (Since we lack constructors) */

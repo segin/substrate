@@ -29,6 +29,12 @@ static EditLine *rl_el;
 static History  *rl_hist;
 static const char *rl_cur_prompt;
 
+static const char *rl_prompt_callback(EditLine *el)
+{
+	(void)el;
+	return rl_cur_prompt ? rl_cur_prompt : "";
+}
+
 static void rl_cleanup(void)
 {
 	if (rl_hist) { history_end(rl_hist); rl_hist = NULL; }
@@ -69,7 +75,7 @@ char *readline(const char *prompt)
 		return NULL;
 
 	rl_cur_prompt = prompt;
-	el_set(rl_el, EL_PROMPT, prompt ? prompt : "");
+	el_set(rl_el, EL_PROMPT, rl_prompt_callback);
 
 	line = el_gets(rl_el, &count);
 	if (!line || count <= 0)
@@ -125,8 +131,9 @@ int rl_bind_key(int key, void (*func)(void))
 void rl_set_prompt(const char *prompt)
 {
 	rl_init();
+	rl_cur_prompt = prompt;
 	if (rl_el)
-		el_set(rl_el, EL_PROMPT, prompt ? prompt : "");
+		el_set(rl_el, EL_PROMPT, rl_prompt_callback);
 }
 
 void rl_on_new_line(void)
