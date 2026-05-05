@@ -394,39 +394,6 @@ void ldt_free_process(process_t *proc) {
     }
 }
 
-static void ldt_set_entry_locked(gdt_entry_t *ldt, const struct user_desc *info);
-
-int ldt_set_tls_base(process_t *proc, unsigned int slot, uint32_t base) {
-    if (!proc || slot >= LDT_ENTRIES) return -EINVAL;
-
-    /* Lazy-allocate enough LDT entries to cover this slot.  Ask for the
-     * full LDT_ENTRIES table so the modify_ldt path and TLS path don't
-     * race on grow attempts. */
-    int rc = ldt_ensure_process(proc, LDT_ENTRIES);
-    if (rc != 0) return rc;
-
-    struct user_desc info;
-    memset(&info, 0, sizeof(info));
-    info.entry_number   = slot;
-    info.base_addr      = base;
-    info.limit          = 0xFFFFF;
-    info.seg_32bit      = 1;
-    info.limit_in_pages = 1;
-    info.contents       = 0;        /* data */
-    info.useable        = 1;
-
-    spinlock_acquire(&proc->ldt_lock);
-    gdt_entry_t *ldt = (gdt_entry_t *)proc->ldt;
-    if (ldt && slot < (unsigned int)proc->ldt_entry_count) {
-        ldt_set_entry_locked(ldt, &info);
-        ldt_activate_locked(proc);
-        spinlock_release(&proc->ldt_lock);
-        return 0;
-    }
-    spinlock_release(&proc->ldt_lock);
-    return -EINVAL;
-}
-
 /* Helper to convert user_desc to gdt_entry_t */
 void fill_ldt_entry(void *entry_ptr, struct user_desc *info) {
     gdt_entry_t *entry = (gdt_entry_t *)entry_ptr;
