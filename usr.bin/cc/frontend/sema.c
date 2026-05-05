@@ -4210,35 +4210,6 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
     }
 }
 
-static int __attribute__((unused)) is_zero_initializer_expr(const cc_expr_t *e) {
-    size_t i;
-    if (e == NULL) {
-        return 1;
-    }
-    switch (e->kind) {
-    case CC_EXPR_INT:
-        return e->int_val == 0;
-    case CC_EXPR_FLOAT:
-        return e->float_val == 0.0;
-    case CC_EXPR_CAST:
-        return is_zero_initializer_expr(e->lhs);
-    case CC_EXPR_MEMBER:
-        if (e->lhs == NULL && e->rhs != NULL) {
-            return is_zero_initializer_expr(e->rhs);
-        }
-        return 0;
-    case CC_EXPR_INIT_LIST:
-        for (i = 0; i < e->arg_count; ++i) {
-            if (!is_zero_initializer_expr(e->args[i])) {
-                return 0;
-            }
-        }
-        return 1;
-    default:
-        return 0;
-    }
-}
-
 static cc_expr_t *unwrap_scalar_initializer_expr(cc_expr_t *init, cc_diag_t *diag) {
     cc_expr_t *item;
     if (init == NULL) {
