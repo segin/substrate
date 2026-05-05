@@ -119,8 +119,14 @@ vfs_unmount(struct mount *mp, int mntflags, struct thread *td)
      */
     if ((mntflags & MNT_FORCE) == 0) {
         struct vnode *vp;
+        /* mnt_lock pins the vnode-list spine, but per-vnode v_usecount
+         * is owned by v_interlock — read it under that lock so we
+         * don't race with a concurrent vref() bumping it from 0. */
         TAILQ_FOREACH(vp, &mp->mnt_vnodelist, v_mntlist) {
-            if (vp->v_usecount > 0) {
+            spinlock_acquire(&vp->v_interlock);
+            int busy = (vp->v_usecount > 0);
+            spinlock_release(&vp->v_interlock);
+            if (busy) {
                 rw_wunlock(&mp->mnt_lock);
                 return EBUSY;
             }

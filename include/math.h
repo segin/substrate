@@ -19,8 +19,12 @@
 #define HUGE_VAL     __builtin_huge_val()
 #define HUGE_VALF    __builtin_huge_valf()
 #define HUGE_VALL    __builtin_huge_vall()
+#ifndef INFINITY
 #define INFINITY     __builtin_inff()
+#endif
+#ifndef NAN
 #define NAN          __builtin_nanf("")
+#endif
 
 /* Math error handling */
 #define MATH_ERRNO       1
@@ -40,6 +44,17 @@ int __isnanl(long double x);
 int __isinff(float x);
 int __isinf(double x);
 int __isinfl(long double x);
+/* C23 — signaling-NaN bit-pattern detection (IEEE 754-2008 §6.2.1:
+ * the most-significant mantissa bit of a NaN is 0 for sNaN, 1 for qNaN).
+ * Any non-NaN returns 0. */
+int __issignalingf(float x);
+int __issignaling(double x);
+int __issignalingl(long double x);
+/* C23 — equality that DOES raise FE_INVALID on a NaN operand
+ * (unlike == which on x87 with FUCOM only raises for sNaN). */
+int __iseqsigf(float x, float y);
+int __iseqsig(double x, double y);
+int __iseqsigl(long double x, long double y);
 
 /* Type-generic classification macros */
 #define fpclassify(x) \
@@ -66,6 +81,64 @@ int __isinfl(long double x);
      (sizeof(x) == sizeof(double)) ? __signbit(x) : \
      __signbitl(x))
 
+/*
+ * C99 §7.12.14 — Quiet (non-FE_INVALID-raising) comparison macros.
+ *
+ * Plain </<=/>/>= raise FE_INVALID when either operand is NaN; these
+ * macros must NOT.  GCC/clang provide __builtin_is{less,greater,...}
+ * which lower to the FUCOM / UCOMISS family of instructions on x86 —
+ * those signal "unordered" without raising the IEEE invalid flag.
+ *
+ * Fallbacks are constructed so that a NaN operand short-circuits to
+ * the desired "unordered" answer before any signalling comparison
+ * happens (the bare `<` etc. are only evaluated once we've ruled out
+ * NaN with isunordered).
+ */
+#ifdef __GNUC__
+#define isgreater(x, y)      __builtin_isgreater((x), (y))
+#define isgreaterequal(x, y) __builtin_isgreaterequal((x), (y))
+#define isless(x, y)         __builtin_isless((x), (y))
+#define islessequal(x, y)    __builtin_islessequal((x), (y))
+#define islessgreater(x, y)  __builtin_islessgreater((x), (y))
+#define isunordered(x, y)    __builtin_isunordered((x), (y))
+#else
+#define isunordered(x, y)    (isnan(x) || isnan(y))
+#define isgreater(x, y)      (!isunordered((x), (y)) && (x) >  (y))
+#define isgreaterequal(x, y) (!isunordered((x), (y)) && (x) >= (y))
+#define isless(x, y)         (!isunordered((x), (y)) && (x) <  (y))
+#define islessequal(x, y)    (!isunordered((x), (y)) && (x) <= (y))
+#define islessgreater(x, y)  (!isunordered((x), (y)) && \
+                              ((x) < (y) || (x) > (y)))
+#endif
+
+/*
+ * C23 §7.12.4 additions.
+ *
+ * iseqsig : equality that DOES raise FE_INVALID on a NaN operand.
+ *           Implemented as a real call so the FE_INVALID raise is
+ *           explicit and not dependent on which flavour of x87 compare
+ *           the compiler picks.
+ * issignaling : true iff x is a signaling NaN.
+ * iscanonical : per IEEE 754 binary formats every value is canonical,
+ *               so this is the constant 1 for any non-NaN finite/inf.
+ *               We still evaluate x to provoke any side effects.
+ * issubnormal : convenience for fpclassify(x) == FP_SUBNORMAL.
+ * iszero      : convenience for fpclassify(x) == FP_ZERO.
+ */
+#define issignaling(x) \
+    ((sizeof(x) == sizeof(float)) ? __issignalingf(x) : \
+     (sizeof(x) == sizeof(double)) ? __issignaling(x) : \
+     __issignalingl(x))
+
+#define iseqsig(x, y) \
+    ((sizeof((x) + (y)) == sizeof(float))  ? __iseqsigf((x), (y))  : \
+     (sizeof((x) + (y)) == sizeof(double)) ? __iseqsig((x), (y))   : \
+     __iseqsigl((x), (y)))
+
+#define iscanonical(x) ((void)(x), 1)
+#define issubnormal(x) (fpclassify(x) == FP_SUBNORMAL)
+#define iszero(x)      (fpclassify(x) == FP_ZERO)
+
 /* Basic trigonometric functions */
 double sin(double x);
 double cos(double x);
@@ -76,6 +149,10 @@ double atan(double x);
 double atan2(double y, double x);
 void sincos(double x, double *s, double *c);
 
+/* C23 inverse trigonometric pi-argument variants */
+double acospi(double x);
+double atan2pi(double y, double x);
+
 /* Hyperbolic functions */
 double sinh(double x);
 double cosh(double x);
@@ -84,13 +161,24 @@ double asinh(double x);
 double acosh(double x);
 double atanh(double x);
 
+/* ilogb special-value return codes (C99 7.12.6.5) */
+#define FP_ILOGB0   (-2147483647 - 1)   /* INT_MIN */
+#define FP_ILOGBNAN (-2147483647 - 1)   /* INT_MIN */
+
 /* Floating-point manipulation */
 double frexp(double x, int *exp);
 double ldexp(double x, int exp);
 double modf(double x, double *iptr);
 double scalbn(double x, int n);
+double scalbln(double x, long n);
+int    ilogb(double x);
+double logb(double x);
 double nextafter(double x, double y);
+double nexttoward(double x, long double y);
+double nextup(double x);
+double nextdown(double x);
 double copysign(double x, double y);
+double nan(const char *tagp);
 
 /* Exponential and logarithmic functions */
 double exp(double x);
@@ -150,13 +238,45 @@ double rint(double x);
 double nearbyint(double x);
 long lrint(double x);
 long long llrint(double x);
+long lround(double x);
+long long llround(double x);
+
+/* Error and gamma functions */
+double erf(double x);
+double erfc(double x);
+double tgamma(double x);
+double lgamma(double x);
+double lgamma_r(double x, int *signp);
+
+/* Sign of Gamma(x) set by lgamma() (XSI/POSIX) */
+extern int signgam;
 
 /* Float versions (f suffix) */
 float sinf(float x);
 float cosf(float x);
 float tanf(float x);
-float sqrtf(float x);
+float asinf(float x);
+float acosf(float x);
+float atanf(float x);
+float atan2f(float y, float x);
+void  sincosf(float x, float *s, float *c);
+float sinhf(float x);
+float coshf(float x);
+float tanhf(float x);
+float asinhf(float x);
+float acoshf(float x);
+float atanhf(float x);
+float expf(float x);
+float exp2f(float x);
+float expm1f(float x);
+float logf(float x);
+float log2f(float x);
+float log10f(float x);
+float log1pf(float x);
 float powf(float x, float y);
+float sqrtf(float x);
+float cbrtf(float x);
+float hypotf(float x, float y);
 float fabsf(float x);
 float fmodf(float x, float y);
 float remainderf(float x, float y);
@@ -168,14 +288,54 @@ float ceilf(float x);
 float floorf(float x);
 float truncf(float x);
 float roundf(float x);
-void sincosf(float x, float *s, float *c);
+float rintf(float x);
+float nearbyintf(float x);
+long      lroundf(float x);
+long long llroundf(float x);
+long      lrintf(float x);
+long long llrintf(float x);
+float frexpf(float x, int *exp);
+float ldexpf(float x, int exp);
+float modff(float x, float *iptr);
+float scalbnf(float x, int n);
+float scalblnf(float x, long n);
+int   ilogbf(float x);
+float logbf(float x);
+float nextafterf(float x, float y);
+float nexttowardf(float x, long double y);
+float copysignf(float x, float y);
+float nanf(const char *tagp);
+float erff(float x);
+float erfcf(float x);
+float tgammaf(float x);
+float lgammaf(float x);
 
 /* Long double versions (l suffix) */
 long double sinl(long double x);
 long double cosl(long double x);
 long double tanl(long double x);
-long double sqrtl(long double x);
+long double asinl(long double x);
+long double acosl(long double x);
+long double atanl(long double x);
+long double atan2l(long double y, long double x);
+void        sincosl(long double x, long double *s, long double *c);
+long double sinhl(long double x);
+long double coshl(long double x);
+long double tanhl(long double x);
+long double asinhl(long double x);
+long double acoshl(long double x);
+long double atanhl(long double x);
+long double expl(long double x);
+long double exp2l(long double x);
+long double expm1l(long double x);
+long double logl(long double x);
+long double log2l(long double x);
+long double log10l(long double x);
+long double log1pl(long double x);
 long double powl(long double x, long double y);
+long double sqrtl(long double x);
+long double cbrtl(long double x);
+long double hypotl(long double x, long double y);
 long double fabsl(long double x);
 long double fmodl(long double x, long double y);
 long double remainderl(long double x, long double y);
@@ -187,6 +347,48 @@ long double ceill(long double x);
 long double floorl(long double x);
 long double truncl(long double x);
 long double roundl(long double x);
-void sincosl(long double x, long double *s, long double *c);
+long double rintl(long double x);
+long double nearbyintl(long double x);
+long      lroundl(long double x);
+long long llroundl(long double x);
+long      lrintl(long double x);
+long long llrintl(long double x);
+long double frexpl(long double x, int *exp);
+long double ldexpl(long double x, int exp);
+long double modfl(long double x, long double *iptr);
+long double scalbnl(long double x, int n);
+long double scalblnl(long double x, long n);
+int         ilogbl(long double x);
+long double logbl(long double x);
+long double nextafterl(long double x, long double y);
+long double nexttowardl(long double x, long double y);
+long double copysignl(long double x, long double y);
+long double nanl(const char *tagp);
+long double erfl(long double x);
+long double erfcl(long double x);
+long double tgammal(long double x);
+long double lgammal(long double x);
+
+/* C23: pi-argument trigonometric functions */
+double sinpi(double x);
+double cospi(double x);
+double tanpi(double x);
+double asinpi(double x);
+double acospi(double x);
+double atanpi(double x);
+
+/* Float variants */
+float sinpif(float x);
+float cospif(float x);
+float tanpif(float x);
+float asinpif(float x);
+float atanpif(float x);
+
+/* Long double variants */
+long double sinpil(long double x);
+long double cospil(long double x);
+long double tanpil(long double x);
+long double asinpil(long double x);
+long double atanpil(long double x);
 
 #endif /* _MATH_H */

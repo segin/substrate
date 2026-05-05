@@ -1,9 +1,12 @@
 #include <kern/console.h>
+#include <kern/device.h>
 #include <kern/sysrq.h>
 #include <drivers/console/uart/uart.h>
 #include <arch/x86-common/io.h>
 #include <arch/i386/idt.h>
 #include <kern/isa.h>
+#include <kern/isapnp.h>
+#include <kern/resource.h>
 #include <sys/termios.h>
 #include <sys/errno.h>
 #include <sys/poll.h>
@@ -77,6 +80,9 @@ static const uint16_t uart_ports[UART_PORT_COUNT] = {
     UART_COM1, UART_COM2, UART_COM3, UART_COM4
 };
 
+static uint16_t uart_detected_ports[UART_PORT_COUNT];
+static int uart_ports_scanned;
+
 static uint16_t uart_base_port = UART_COM1;
 static uint32_t uart_base_index;
 static fs_node_t uart_nodes[UART_PORT_COUNT];
@@ -93,19 +99,81 @@ static int uart_probe_port(uint16_t port) {
     return probe == 0x5A;
 }
 
-static int uart_port_present(uint32_t serial_index) {
-    char name[16];
+static int uart_port_already_assigned(uint16_t port) {
+    for (uint32_t i = 0; i < UART_PORT_COUNT; i++) {
+        if (uart_detected_ports[i] == port) {
+            return 1;
+        }
+    }
+    return 0;
+}
 
+static void uart_assign_detected_port(uint16_t port) {
+    if (!port || uart_port_already_assigned(port)) {
+        return;
+    }
+
+    for (uint32_t i = 0; i < UART_PORT_COUNT; i++) {
+        if (uart_ports[i] == port) {
+            uart_detected_ports[i] = port;
+            return;
+        }
+    }
+
+    for (uint32_t i = 0; i < UART_PORT_COUNT; i++) {
+        if (uart_detected_ports[i] == 0) {
+            uart_detected_ports[i] = port;
+            return;
+        }
+    }
+}
+
+static int uart_is_pnp_serial(const struct device *dev) {
+    if (dev == NULL) {
+        return 0;
+    }
+    if (dev->vendor_id != ISAPNP_VENDOR('P', 'N', 'P')) {
+        return 0;
+    }
+    return dev->device_id == 0x0500 || dev->device_id == 0x0501;
+}
+
+static void uart_scan_ports(void) {
+    if (uart_ports_scanned) {
+        return;
+    }
+
+    memset(uart_detected_ports, 0, sizeof(uart_detected_ports));
+    for (uint32_t i = 0; i < UART_PORT_COUNT; i++) {
+        char name[16];
+
+        snprintf(name, sizeof(name), "serial%u", i);
+        if (isa_device_present(name) || uart_probe_port(uart_ports[i])) {
+            uart_detected_ports[i] = uart_ports[i];
+        }
+    }
+
+    for (struct device *dev = isa_first_device(); dev != NULL; dev = isa_next_device(dev)) {
+        struct resource *io;
+
+        if (!uart_is_pnp_serial(dev)) {
+            continue;
+        }
+        io = isa_device_resource(dev, RES_IO, 0);
+        if (io != NULL) {
+            uart_assign_detected_port((uint16_t)io->start);
+        }
+    }
+
+    uart_ports_scanned = 1;
+}
+
+static int uart_port_present(uint32_t serial_index) {
+    uart_scan_ports();
     if (serial_index >= UART_PORT_COUNT) {
         return 0;
     }
-
-    snprintf(name, sizeof(name), "serial%u", serial_index);
-    if (isa_device_present(name)) {
-        return 1;
-    }
-
-    return uart_probe_port(uart_ports[serial_index]);
+    return uart_detected_ports[serial_index] != 0;
 }
 
 static void uart_program_port(uint16_t port, int enable_rx_irq) {
@@ -269,10 +337,14 @@ static void uart_node_close(fs_node_t *node) {
 }
 
 int uart_select_port(uint32_t serial_index) {
+    uart_scan_ports();
     if (serial_index >= UART_PORT_COUNT) {
         return -1;
     }
-    uart_base_port = uart_ports[serial_index];
+    if (uart_detected_ports[serial_index] == 0) {
+        return -1;
+    }
+    uart_base_port = uart_detected_ports[serial_index];
     uart_base_index = serial_index;
     return 0;
 }
@@ -360,11 +432,13 @@ console_backend_t *uart_get_console(void) {
 void uart_devfs_init(void) {
     if (uart_nodes_registered) return;
 
+    uart_scan_ports();
+
     for (uint32_t i = 0; i < UART_PORT_COUNT; i++) {
         fs_node_t *node = &uart_nodes[i];
-        uint16_t port = uart_ports[i];
+        uint16_t port = uart_detected_ports[i];
 
-        if (!uart_port_present(i)) {
+        if (!port) {
             continue;
         }
 
@@ -394,9 +468,11 @@ void uart_devfs_init(void) {
 }
 
 int uart_init(void) {
+    uart_scan_ports();
     if (!uart_port_present(uart_base_index)) {
         return -1;
     }
+    uart_base_port = uart_detected_ports[uart_base_index];
     uart_tx.head = 0;
     uart_tx.tail = 0;
     uart_tx.count = 0;
@@ -570,5 +646,18 @@ void uart_putc(char c) {
 void uart_write(const char* data, size_t size) {
     for (size_t i = 0; i < size; i++) {
         uart_putc(data[i]);
+    }
+}
+
+void uart_panic_write(const char *data, size_t size) {
+    /* Polled, lock-free, bypass-everything path for panic().  Caller
+     * may hold any spinlock or have interrupts disabled; we must not
+     * re-enter the IRQ tx queue or any console infrastructure. */
+    if (!data) return;
+    for (size_t i = 0; i < size; i++) {
+        if (data[i] == '\n') {
+            uart_poll_putc(uart_base_port, '\r', 1000000);
+        }
+        uart_poll_putc(uart_base_port, (uint8_t)data[i], 1000000);
     }
 }

@@ -398,6 +398,14 @@ handle_tag_command(buffer_t *b, const char *args, void (*command_fn)(buffer_t *,
             buf_free(b);
             buf_init(b);
             b->filename = strdup(tfile);
+            if (!b->filename) {
+                exvi_report_error("Out of memory");
+                free(old_filename);
+                free(line);
+                fclose(f);
+                free(tags_path);
+                return 1;
+            }
             buf_read_file(b, b->filename);
             replace_saved_string(&alternate_filename, old_filename);
             free(old_filename);

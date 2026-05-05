@@ -3,7 +3,7 @@ include ../../Makefile.inc
 CFLAGS := $(USER_CFLAGS) -fno-builtin
 ASFLAGS := $(USER_CFLAGS)
 
-OBJS = syscall.o vm86.o proc.o sysctl.o sysinfo.o getpagesize.o mlock.o getpid.o getuid.o pgrp.o getrusage.o times.o ioctl.o stime.o ptrace.o reboot.o modify_ldt.o stat.o select.o
+OBJS = syscall.o vm86.o proc.o sysctl.o sysinfo.o getpagesize.o mlock.o getpid.o getuid.o pgrp.o getrusage.o getrandom.o times.o ioctl.o stime.o ptrace.o reboot.o modify_ldt.o stat.o select.o chown.o
 
 all: libsys.a
 
@@ -30,4 +30,7 @@ install: libsys.a
 	cp libsys.a $(DESTDIR)/usr/lib/
 
 modify_ldt.o: modify_ldt.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+getrandom.o: getrandom.c
 	$(CC) $(CFLAGS) -c -o $@ $<

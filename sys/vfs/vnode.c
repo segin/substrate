@@ -287,21 +287,31 @@ void vrele(struct vnode *vp)
     
     if (vp->v_usecount == 0) {
         /* Vnode is no longer in active use */
-        
-        /* Call VOP_INACTIVE if defined */
+
+        /* Call VOP_INACTIVE if defined.  We must drop v_interlock
+         * across the call because vop_inactive may sleep, so other
+         * threads can race and re-vref() this vnode in the window. */
         if (vp->v_op && vp->v_op->vop_inactive) {
             spinlock_release(&vp->v_interlock);
             vp->v_op->vop_inactive(vp, NULL);
             spinlock_acquire(&vp->v_interlock);
+
+            /* Re-check usecount: someone may have re-grabbed the
+             * vnode while we were inactive — in which case it now
+             * belongs to that caller, not the freelist. */
+            if (vp->v_usecount > 0) {
+                spinlock_release(&vp->v_interlock);
+                return;
+            }
         }
-        
+
         /* If doomed, reclaim immediately */
         if (vp->v_flag & VDOOMED) {
             spinlock_release(&vp->v_interlock);
             vnode_reclaim(vp);
-            return; /* vp is freed by vnode_reclaim, do not touch (finding #18) */
+            return; /* vp is freed by vnode_reclaim, do not touch */
         }
-        
+
         /* Add to free list for potential recycling */
         spinlock_release(&vp->v_interlock);
         vnode_freelist_add(vp);

@@ -11,15 +11,23 @@
  */
 
 #include <sys/random.h>
+#include <sys/copy.h>
+#include <sys/errno.h>
+#include <sys/proc.h>
 #include <arch/i386/cpu.h>
+#include <arch/i386/percpu.h>
 #include <kern/random.h>
 #include <kern/console.h>
 #include <kern/sched.h>
 #include <vfs/vfs.h>
+#include <vm/vm_kmem.h>
 #include <string.h>
 
 /* Global RNG state */
 struct rng_state rng_state;
+
+/* Per-CPU CSPRNG state (fast-path, lockless between CPUs) */
+struct percpu_rng_state percpu_rng[RANDOM_MAX_CPUS];
 
 /* Locks */
 static spinlock_t entropy_lock;
@@ -27,6 +35,8 @@ static spinlock_t output_lock;
 
 /* Wait Channel */
 static int random_wait_channel = 0;
+
+#define RANDOM_SYSCALL_CHUNK 4096
 
 /*
  * ChaCha20 Implementation
@@ -154,14 +164,14 @@ void chacha20_rekey(struct chacha20_ctx *ctx) {
     /* Reinitialize with new key material */
     chacha20_init(ctx, new_key, new_nonce);
     
-    /* Secure erasure */
-    memset(new_key, 0, sizeof(new_key));
-    memset(new_nonce, 0, sizeof(new_nonce));
+    /* Secure erasure: use explicit_bzero to prevent compiler optimization */
+    explicit_bzero(new_key, sizeof(new_key));
+    explicit_bzero(new_nonce, sizeof(new_nonce));
 }
 
 /* Securely wipe context */
 void chacha20_wipe(struct chacha20_ctx *ctx) {
-    memset(ctx, 0, sizeof(*ctx));
+    explicit_bzero(ctx, sizeof(*ctx));
 }
 
 /*
@@ -352,9 +362,10 @@ void random_harvest(const void *data, size_t len, unsigned int bits,
     }
     rng_state.input_pool.entropy_count = new_bits;
     
-    rng_state.harvest_count[source]++;
-    
     spinlock_release(&entropy_lock);
+
+    /* Lockless counter update - no need to hold entropy_lock for this */
+    __sync_fetch_and_add(&rng_state.harvest_count[source], 1);
 }
 
 void random_harvest_fast(const void *data, size_t len) {
@@ -387,6 +398,71 @@ int random_is_seeded(void) {
     return rng_state.seeded;
 }
 
+/*
+ * Initialise per-CPU CSPRNG slots.  Called from random_init() after the
+ * global CSPRNG has been seeded for the first time.  Each slot starts
+ * unseeded; the first call to random_percpu_get_bytes() on a CPU seeds it
+ * lazily from the global CSPRNG.
+ */
+void random_percpu_init(void) {
+    for (int i = 0; i < RANDOM_MAX_CPUS; i++) {
+        memset(&percpu_rng[i], 0, sizeof(percpu_rng[i]));
+        spinlock_init(&percpu_rng[i].lock, "percpu_rng");
+        percpu_rng[i].seeded = 0;
+    }
+}
+
+/*
+ * Fast-path random byte generation using the per-CPU CSPRNG.
+ *
+ * Output is produced in full 64-byte ChaCha20 blocks (batch generation).
+ * The per-CPU spinlock is the only lock taken; the global output_lock is
+ * not needed, eliminating contention between CPUs.
+ *
+ * Caller must have already verified that the global CSPRNG is seeded.
+ */
+static int random_percpu_get_bytes(void *buf, size_t len) {
+    int cpu = CPU_ID();
+    if (cpu < 0 || cpu >= RANDOM_MAX_CPUS)
+        cpu = 0;
+
+    struct percpu_rng_state *state = &percpu_rng[cpu];
+
+    spinlock_acquire(&state->lock);
+
+    /* Lazy seed from global CSPRNG */
+    if (!state->seeded) {
+        uint8_t seed[CHACHA20_KEY_SIZE + CHACHA20_NONCE_SIZE];
+        spinlock_acquire(&output_lock);
+        chacha20_extract(&rng_state.csprng, seed, sizeof(seed));
+        spinlock_release(&output_lock);
+        chacha20_init(&state->csprng, seed, seed + CHACHA20_KEY_SIZE);
+        explicit_bzero(seed, sizeof(seed));
+        state->seeded = 1;
+    }
+
+    /* Periodic re-seed: pull fresh key material from global CSPRNG */
+    if (state->csprng.bytes_generated >= RESEED_INTERVAL) {
+        uint8_t seed[CHACHA20_KEY_SIZE + CHACHA20_NONCE_SIZE];
+        spinlock_acquire(&output_lock);
+        chacha20_extract(&rng_state.csprng, seed, sizeof(seed));
+        spinlock_release(&output_lock);
+        chacha20_init(&state->csprng, seed, seed + CHACHA20_KEY_SIZE);
+        explicit_bzero(seed, sizeof(seed));
+    }
+
+    /*
+     * Batch output: chacha20_extract generates full 64-byte blocks
+     * internally, consuming from the cached block buffer before calling
+     * chacha20_block() for the next batch.  Lock hold time is therefore
+     * proportional to the amount of output requested.
+     */
+    chacha20_extract(&state->csprng, buf, len);
+
+    spinlock_release(&state->lock);
+    return (int)len;
+}
+
 /* Reseed CSPRNG from entropy pool */
 static void random_reseed(void) {
     uint8_t seed[CHACHA20_KEY_SIZE + CHACHA20_NONCE_SIZE];
@@ -406,7 +482,8 @@ static void random_reseed(void) {
     /* Wake up any blocked readers */
     sched_wakeup(&random_wait_channel);
 
-    memset(seed, 0, sizeof(seed));
+    /* Clear key material immediately after use */
+    explicit_bzero(seed, sizeof(seed));
 }
 
 int random_get_bytes(void *buf, size_t len) {
@@ -438,7 +515,18 @@ int random_get_bytes_flags(void *buf, size_t len, unsigned int flags) {
             }
         }
     }
-    
+
+    /*
+     * Fast path: use the per-CPU CSPRNG to avoid contention on the global
+     * output_lock.  Each CPU operates on its own ChaCha20 context, seeded
+     * lazily from the global CSPRNG.  Bytes are generated in 64-byte
+     * (CHACHA20_BLOCK_SIZE) batches, minimising lock hold time.
+     */
+    if (rng_state.seeded) {
+        return random_percpu_get_bytes(buf, len);
+    }
+
+    /* Fallback (GRND_INSECURE before seeded): use global CSPRNG directly */
     spinlock_acquire(&output_lock);
     
     /* Check if reseeding is needed */
@@ -454,6 +542,55 @@ int random_get_bytes_flags(void *buf, size_t len, unsigned int flags) {
     
     return len;
 }
+
+int sys_getrandom(void *buf, size_t len, unsigned int flags) {
+    uint8_t *kbuf;
+    size_t remaining;
+    size_t total;
+
+    if (!buf || len == 0) {
+        return 0;
+    }
+
+    if ((flags & ~(GRND_NONBLOCK | GRND_RANDOM | GRND_INSECURE)) != 0) {
+        return -EINVAL;
+    }
+
+    kbuf = kmalloc(RANDOM_SYSCALL_CHUNK);
+    if (!kbuf) {
+        return -ENOMEM;
+    }
+
+    remaining = len;
+    total = 0;
+
+    while (remaining > 0) {
+        size_t chunk = remaining > RANDOM_SYSCALL_CHUNK ? RANDOM_SYSCALL_CHUNK : remaining;
+        int ret = random_get_bytes_flags(kbuf, chunk, flags);
+
+        if (ret < 0) {
+            explicit_bzero(kbuf, RANDOM_SYSCALL_CHUNK);
+            kfree(kbuf, RANDOM_SYSCALL_CHUNK);
+            return total > 0 ? (int)total : ret;
+        }
+
+        if (copyout(kbuf, (uint8_t *)buf + total, (size_t)ret) != 0) {
+            explicit_bzero(kbuf, RANDOM_SYSCALL_CHUNK);
+            kfree(kbuf, RANDOM_SYSCALL_CHUNK);
+            return total > 0 ? (int)total : -EFAULT;
+        }
+
+        total += (size_t)ret;
+        remaining -= (size_t)ret;
+        if ((size_t)ret < chunk) {
+            break;
+        }
+    }
+
+    explicit_bzero(kbuf, RANDOM_SYSCALL_CHUNK);
+    kfree(kbuf, RANDOM_SYSCALL_CHUNK);
+    return (int)total;
+ }
 
 /*
  * Device Node Callbacks (fs_node_t compatible)
@@ -484,6 +621,207 @@ static size_t random_dev_write(fs_node_t *node, off_t offset, size_t size, const
     
     random_harvest(buffer, size, size / 8, ENTROPY_SOFTWARE);
     return size;
+}
+
+/*
+ * Public helpers used by both the ioctl dispatcher and host tests.
+ * These deliberately operate on rng_state under entropy_lock so callers
+ * stay agnostic of the locking discipline.
+ */
+uint32_t random_get_entropy_count(void) {
+    uint32_t v;
+    spinlock_acquire(&entropy_lock);
+    v = rng_state.input_pool.entropy_count;
+    spinlock_release(&entropy_lock);
+    return v;
+}
+
+void random_set_entropy_count(uint32_t bits) {
+    if (bits > ENTROPY_POOL_SIZE * 8) {
+        bits = ENTROPY_POOL_SIZE * 8;
+    }
+    spinlock_acquire(&entropy_lock);
+    rng_state.input_pool.entropy_count = bits;
+    spinlock_release(&entropy_lock);
+}
+
+void random_add_to_entropy_count(int delta) {
+    spinlock_acquire(&entropy_lock);
+    {
+        int64_t cur = (int64_t)rng_state.input_pool.entropy_count;
+        cur += (int64_t)delta;
+        if (cur < 0) {
+            cur = 0;
+        }
+        if (cur > (int64_t)(ENTROPY_POOL_SIZE * 8)) {
+            cur = (int64_t)(ENTROPY_POOL_SIZE * 8);
+        }
+        rng_state.input_pool.entropy_count = (uint32_t)cur;
+    }
+    spinlock_release(&entropy_lock);
+}
+
+void random_zap_entropy_count(void) {
+    spinlock_acquire(&entropy_lock);
+    rng_state.input_pool.entropy_count = 0;
+    spinlock_release(&entropy_lock);
+}
+
+void random_clear_pool(void) {
+    spinlock_acquire(&entropy_lock);
+    memset(rng_state.input_pool.pool, 0, ENTROPY_POOL_SIZE);
+    rng_state.input_pool.mix_ptr = 0;
+    rng_state.input_pool.entropy_count = 0;
+    spinlock_release(&entropy_lock);
+}
+
+void random_force_reseed(void) {
+    random_reseed();
+}
+
+/*
+ * Fork safety: stir child PID + TSC into the entropy pool so that
+ * parent and child CSPRNG output immediately diverges after fork(2).
+ * Called from proc_fork_common() after the child is fully created.
+ */
+void random_reseed_on_fork(int child_pid) {
+    struct {
+        int   pid;
+        uint64_t tsc;
+    } seed_data;
+
+    seed_data.pid = child_pid;
+    seed_data.tsc = i386_cpu_cycle_counter();
+
+    /* Mix PID + timestamp into the entropy pool */
+    random_harvest(&seed_data, sizeof(seed_data), 0, ENTROPY_SOFTWARE);
+
+    /* Force an immediate reseed so subsequent reads diverge */
+    random_reseed();
+
+    explicit_bzero(&seed_data, sizeof(seed_data));
+}
+
+/*
+ * Exec safety: force a reseed on execve so that the new program
+ * image cannot observe any CSPRNG state from before the exec boundary.
+ * Called from kern_execve() after a successful exec.
+ */
+void random_on_exec(void) {
+    uint64_t tsc = i386_cpu_cycle_counter();
+
+    /* Stir TSC to add exec-boundary entropy */
+    random_harvest(&tsc, sizeof(tsc), 0, ENTROPY_SOFTWARE);
+
+    /* Force reseed — wipes previous CSPRNG key material */
+    random_reseed();
+
+    explicit_bzero(&tsc, sizeof(tsc));
+}
+
+/*
+ * /dev/random and /dev/urandom ioctl dispatcher.
+ * Returns 0 on success, negative -errno on failure.
+ */
+static int random_dev_ioctl(fs_node_t *node, uint32_t request, void *arg) {
+    (void)node;
+
+    switch (request) {
+    case RNDGETENTCNT: {
+        int bits;
+
+        if (arg == NULL) {
+            return -EINVAL;
+        }
+        bits = (int)random_get_entropy_count();
+        if (copyout(&bits, arg, sizeof(bits)) != 0) {
+            return -EFAULT;
+        }
+        return 0;
+    }
+
+    case RNDADDTOENTCNT: {
+        int delta;
+
+        if (current_process && current_process->euid != 0) {
+            return -EPERM;
+        }
+        if (arg == NULL) {
+            return -EINVAL;
+        }
+        if (copyin(arg, &delta, sizeof(delta)) != 0) {
+            return -EFAULT;
+        }
+        random_add_to_entropy_count(delta);
+        return 0;
+    }
+
+    case RNDADDENTROPY: {
+        struct rand_pool_info hdr;
+        uint8_t buf[256];
+        size_t total;
+        size_t off;
+        const uint8_t *src;
+
+        if (current_process && current_process->euid != 0) {
+            return -EPERM;
+        }
+        if (arg == NULL) {
+            return -EINVAL;
+        }
+        if (copyin(arg, &hdr, sizeof(hdr)) != 0) {
+            return -EFAULT;
+        }
+        if (hdr.buf_size < 0 || hdr.entropy_count < 0) {
+            return -EINVAL;
+        }
+        total = (size_t)hdr.buf_size;
+        if (total > 65536U) {
+            return -EINVAL;
+        }
+        src = (const uint8_t *)arg + sizeof(hdr);
+        for (off = 0; off < total; off += sizeof(buf)) {
+            size_t chunk = total - off;
+            if (chunk > sizeof(buf)) {
+                chunk = sizeof(buf);
+            }
+            if (copyin(src + off, buf, chunk) != 0) {
+                memset(buf, 0, sizeof(buf));
+                return -EFAULT;
+            }
+            random_harvest(buf, chunk, 0, ENTROPY_SOFTWARE);
+        }
+        memset(buf, 0, sizeof(buf));
+        if (hdr.entropy_count > 0) {
+            random_add_to_entropy_count(hdr.entropy_count);
+        }
+        return 0;
+    }
+
+    case RNDZAPENTCNT:
+        if (current_process && current_process->euid != 0) {
+            return -EPERM;
+        }
+        random_zap_entropy_count();
+        return 0;
+
+    case RNDCLEARPOOL:
+        if (current_process && current_process->euid != 0) {
+            return -EPERM;
+        }
+        random_clear_pool();
+        return 0;
+
+    case RNDRESEEDCRNG:
+        if (current_process && current_process->euid != 0) {
+            return -EPERM;
+        }
+        random_force_reseed();
+        return 0;
+
+    default:
+        return -ENOTTY;
+    }
 }
 
 /* Device nodes */
@@ -522,6 +860,9 @@ void random_init(void) {
     } else {
         kprint("RNG: Waiting for entropy\n");
     }
+
+    /* Initialise per-CPU CSPRNG slots for the fast-path generator */
+    random_percpu_init();
     
     /* Register /dev/random */
     extern void devfs_register_device(fs_node_t *node);
@@ -531,15 +872,17 @@ void random_init(void) {
     random_node.flags = FS_CHARDEVICE;
     random_node.read = random_dev_read;
     random_node.write = random_dev_write;
+    random_node.ioctl = random_dev_ioctl;
     random_node.rdev = (1 << 8) | 8;
     devfs_register_device(&random_node);
-    
+
     /* Register /dev/urandom */
     memset(&urandom_node, 0, sizeof(fs_node_t));
     strcpy(urandom_node.name, "urandom");
     urandom_node.flags = FS_CHARDEVICE;
     urandom_node.read = urandom_dev_read;
     urandom_node.write = random_dev_write;
+    urandom_node.ioctl = random_dev_ioctl;
     urandom_node.rdev = (1 << 8) | 9;
     devfs_register_device(&urandom_node);
     

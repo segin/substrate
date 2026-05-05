@@ -208,9 +208,36 @@ void isr_handler(registers_t *regs) {
     } else if (regs->int_no == 36) {
         uart_handler(regs);
     } else if (regs->int_no < 32) {
-        // Exception - check if from user mode or kernel mode
+        // Exception handling
+
+        // Page fault (14): try demand-paging BEFORE on_fault recovery so that
+        // copyout/copyin on mmap'd anonymous pages (not yet faulted in) can
+        // succeed via vm_fault instead of being short-circuited to EFAULT.
+        uint32_t cr2 = 0;
+        if (regs->int_no == 14) {
+            cr2 = idt_read_cr2();
+            // COW and lazy fault handling are expected for normal process execution.
+            if (pmap_fault(regs->err_code, cr2)) {
+                return;
+            }
+            // Demand paging: try vm_fault for vm_map-backed regions.
+            // This must work for BOTH usermode AND kernel mode (copyout/copyin)
+            // so that syscalls like read/write can copy to/from demand-paged
+            // user buffers backed by mmap(MAP_ANONYMOUS).
+            if (current_process && current_process->vm_map) {
+                uint8_t fault_prot = VM_PROT_READ;
+                if (regs->err_code & 0x02) fault_prot |= VM_PROT_WRITE;
+                if (regs->err_code & 0x10) fault_prot |= VM_PROT_EXEC;
+                if (vm_fault(current_process->vm_map, cr2, fault_prot) == VM_FAULT_SUCCESS) {
+                    return;
+                }
+            }
+        }
+
         // Fault Recovery (copyin/copyout safe handlers)
         // If a fault occurs in kernel mode while on_fault is set, resume there.
+        // This is checked AFTER page fault handling so demand-paging can service
+        // the fault first; on_fault is the fallback for truly invalid accesses.
         if (!is_usermode && current_thread && current_thread->on_fault) {
              regs->eip = (uint32_t)current_thread->on_fault;
              current_thread->on_fault = 0; // Reset to avoid loop if handler faults
@@ -232,24 +259,6 @@ void isr_handler(registers_t *regs) {
             }
         }
 
-        uint32_t cr2 = 0;
-        if (regs->int_no == 14) {
-            cr2 = idt_read_cr2();
-            // COW and lazy fault handling are expected for normal process execution.
-            if (pmap_fault(regs->err_code, cr2)) {
-                return;
-            }
-            // Demand paging: try vm_fault for vm_map-backed regions
-            if (is_usermode && current_process && current_process->vm_map) {
-                uint8_t fault_prot = VM_PROT_READ;
-                if (regs->err_code & 0x02) fault_prot |= VM_PROT_WRITE;
-                if (regs->err_code & 0x10) fault_prot |= VM_PROT_EXEC;
-                if (vm_fault(current_process->vm_map, cr2, fault_prot) == VM_FAULT_SUCCESS) {
-                    return;
-                }
-            }
-        }
-
         if (is_usermode) {
             int sig = 0;
             int code = 0;
@@ -262,7 +271,7 @@ void isr_handler(registers_t *regs) {
                 }
                 if (current_process->perso_id == PERS_ELKS) {
                     char elks_trapbuf[256];
-                    sprintf(elks_trapbuf,
+                    snprintf(elks_trapbuf, sizeof(elks_trapbuf),
                             "TRAP[ELKS]: int=%u sig=%d code=%d addr=0x%08X eip=0x%08X cs=0x%04X ss=0x%04X esp=0x%08X ds=0x%04X\n",
                             (unsigned int)regs->int_no,
                             sig,
@@ -277,7 +286,7 @@ void isr_handler(registers_t *regs) {
                 }
                 if (cmdline_debug_enabled("trap")) {
                     char trapbuf[256];
-                    sprintf(trapbuf,
+                    snprintf(trapbuf, sizeof(trapbuf),
                             "TRAP: user exception %u -> signal %d code %d addr 0x%08X eip=0x%08X cs=0x%04X ss=0x%04X esp=0x%08X ds=0x%04X\n",
                             (unsigned int)regs->int_no,
                             sig,
@@ -304,11 +313,11 @@ void isr_handler(registers_t *regs) {
         } else {
             kprint(" (in kernel)\n");
         }
-        sprintf(buf, "EIP: 0x%08X  CS: 0x%04X  ERR: 0x%08X\n", (unsigned int)regs->eip, (unsigned int)regs->cs, (unsigned int)regs->err_code);
+        snprintf(buf, sizeof(buf), "EIP: 0x%08X  CS: 0x%04X  ERR: 0x%08X\n", (unsigned int)regs->eip, (unsigned int)regs->cs, (unsigned int)regs->err_code);
         kprint(buf);
-        sprintf(buf, "EAX: 0x%08X  EBX: 0x%08X  ECX: 0x%08X  EDX: 0x%08X\n", (unsigned int)regs->eax, (unsigned int)regs->ebx, (unsigned int)regs->ecx, (unsigned int)regs->edx);
+        snprintf(buf, sizeof(buf), "EAX: 0x%08X  EBX: 0x%08X  ECX: 0x%08X  EDX: 0x%08X\n", (unsigned int)regs->eax, (unsigned int)regs->ebx, (unsigned int)regs->ecx, (unsigned int)regs->edx);
         kprint(buf);
-        sprintf(buf, "ESI: 0x%08X  EDI: 0x%08X  EBP: 0x%08X  ESP: 0x%08X\n", (unsigned int)regs->esi, (unsigned int)regs->edi, (unsigned int)regs->ebp, (unsigned int)regs->esp);
+        snprintf(buf, sizeof(buf), "ESI: 0x%08X  EDI: 0x%08X  EBP: 0x%08X  ESP: 0x%08X\n", (unsigned int)regs->esi, (unsigned int)regs->edi, (unsigned int)regs->ebp, (unsigned int)regs->esp);
         kprint(buf);
         
         /* TASKS.md L566: Invalid Opcode Decoding - dump instruction bytes at EIP */
@@ -318,7 +327,7 @@ void isr_handler(registers_t *regs) {
             /* Dump up to 16 bytes if address is valid */
             if (regs->eip >= 0xC0000000 || !is_usermode) {
                 for (int i = 0; i < 16; i++) {
-                    sprintf(buf, "%02X ", (unsigned int)eip_ptr[i]);
+                    snprintf(buf, sizeof(buf), "%02X ", (unsigned int)eip_ptr[i]);
                     kprint(buf);
                 }
             } else {
@@ -327,7 +336,7 @@ void isr_handler(registers_t *regs) {
             kprint("\n");
         }
         if (regs->int_no == 14) {
-            sprintf(buf, "CR2: 0x%08X\n", (unsigned int)cr2);
+            snprintf(buf, sizeof(buf), "CR2: 0x%08X\n", (unsigned int)cr2);
             kprint(buf);
         }
         
@@ -355,8 +364,9 @@ void isr_handler(registers_t *regs) {
             // Should not return, but if it does...
             for(;;) { __asm__ volatile("hlt"); }
         } else {
-            // Kernel-mode crash - panic
-            panic("Unhandled Kernel Exception");
+            // Kernel-mode crash - panic with the trap frame so the user
+            // sees regs/code/stack at the fault, not just at the panic().
+            panic_with_regs("Unhandled Kernel Exception", regs);
         }
     }
 

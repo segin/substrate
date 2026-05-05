@@ -1,0 +1,103 @@
+.TH FEHOLDEXCEPT 3 "2026-05-03" "Substrate" "Library Functions Manual"
+.SH NAME
+feholdexcept \- save floating-point environment and enter non-stop mode
+.SH LIBRARY
+Math Library (libm, \-lm)
+.SH SYNOPSIS
+.nf
+.B #include <fenv.h>
+.PP
+.BI "int feholdexcept(fenv_t *" envp );
+.fi
+.SH DESCRIPTION
+The
+.BR feholdexcept ()
+function atomically performs the following three actions:
+.IP 1. 4
+Saves the current floating-point environment (rounding mode, exception sticky
+flags, and exception trap masks) into the object pointed to by
+.IR envp .
+.IP 2. 4
+Clears all floating-point exception sticky flags.
+.IP 3. 4
+Masks (disables traps for) all floating-point exceptions, entering
+.I non-stop mode.
+.PP
+In non-stop mode, floating-point exceptions do not cause signals (SIGFPE);
+instead, the exception sticky flags accumulate silently and can be inspected
+afterward with
+.BR fetestexcept (3).
+.PP
+The typical use of
+.BR feholdexcept ()
+is to isolate a block of floating-point code so that exceptions it raises do
+not disturb the calling context.
+After the block completes, call
+.BR feupdateenv (3)
+to restore the original environment and re-raise any exceptions that occurred
+during the computation.
+.PP
+The value stored in
+.IR *envp
+is opaque and must only be passed to
+.BR feupdateenv (3)
+or
+.BR fesetenv (3).
+.SH RETURN VALUE
+.BR feholdexcept ()
+returns zero on success.
+A non-zero return value indicates that non-stop mode could not be established
+(this is rare on conforming implementations).
+.SH ERRORS
+No errors are defined.
+The function does not set
+.IR errno .
+.SH EXAMPLES
+The following example uses
+.BR feholdexcept ()
+and
+.BR feupdateenv (3)
+to perform a
+.BR sqrt ()
+call in an isolated floating-point environment.
+Any exceptions raised inside the block are merged back into the caller's
+environment by
+.BR feupdateenv (3).
+.PP
+.nf
+#pragma STDC FENV_ACCESS ON
+#include <fenv.h>
+#include <math.h>
+#include <stdio.h>
+
+double safe_sqrt(double x)
+{
+    fenv_t env;
+
+    /* 1. Save environment, clear flags, mask all traps. */
+    feholdexcept(&env);
+
+    /* 2. Perform computation. Exceptions accumulate silently. */
+    double result = sqrt(x);
+
+    /* 3. Optionally inspect exceptions before restoring. */
+    if (fetestexcept(FE_INVALID))
+        printf("safe_sqrt: FE_INVALID raised (x=%g).\\n", x);
+
+    /* 4. Restore original environment and re-raise new exceptions. */
+    feupdateenv(&env);
+
+    return result;
+}
+
+int main(void)
+{
+    double r = safe_sqrt(-1.0);
+    printf("safe_sqrt(-1.0) = %g\\n", r);
+    return 0;
+}
+.fi
+.SH SEE ALSO
+.BR fenv (7),
+.BR fegetenv (3),
+.BR feupdateenv (3)

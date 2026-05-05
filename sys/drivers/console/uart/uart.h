@@ -16,6 +16,11 @@ struct console_backend; // Forward declaration
 struct console_backend *uart_get_console(void);
 void uart_putc(char c);
 void uart_write(const char* data, size_t size);
+/* Emergency-output path used by panic().  Writes directly to the
+ * configured COM port via polled THR-empty, bypassing the IRQ-driven
+ * tx queue and any locks.  Safe to call from a held-spinlock /
+ * interrupts-disabled / panic context. */
+void uart_panic_write(const char *data, size_t size);
 void uart_send_break(void);
 struct registers;
 void uart_handler(struct registers *regs);

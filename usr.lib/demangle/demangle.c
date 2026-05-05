@@ -55,14 +55,17 @@ demangle_auto(const char *mangled, unsigned options)
 {
     char *out;
 
+    /* `_R` is a Rust v0 prefix exclusively.  Don't fall back to
+     * itanium: it would happily render a malformed Rust v0 name as
+     * something nonsensical. */
     if (starts_with(mangled, "_R")) {
-        out = demangle_rust(mangled, (int)options);
-        if (out != NULL) {
-            return out;
-        }
-        return demangle_itanium(mangled, (int)options);
+        return demangle_rust(mangled, (int)options);
     }
 
+    /* `_ZN…E` is shared between Rust legacy and Itanium.  Try Rust
+     * first (it has stricter format rules so a false-positive on a
+     * pure-Itanium name is unlikely); on failure fall through to the
+     * `_Z` itanium dispatch below. */
     if (starts_with(mangled, "_ZN")) {
         out = demangle_rust(mangled, (int)options);
         if (out != NULL) {
@@ -70,12 +73,10 @@ demangle_auto(const char *mangled, unsigned options)
         }
     }
 
+    /* `_D` is a D-language prefix exclusively (itanium uses `_Z`).
+     * No fallback. */
     if (starts_with(mangled, "_D")) {
-        out = demangle_dlang(mangled, (int)options);
-        if (out != NULL) {
-            return out;
-        }
-        return demangle_itanium(mangled, (int)options);
+        return demangle_dlang(mangled, (int)options);
     }
 
     if (starts_with(mangled, "_d_")) {

@@ -742,6 +742,1416 @@ static void print_phase_stat(const as_ctx_t *ctx, const char *phase, unsigned lo
 #define AS_PHASE_BEGIN() unsigned long long phase_start_us = wallclock_us()
 #define AS_PHASE_END(ctx_, name_) print_phase_stat((ctx_), (name_), phase_start_us)
 
+static int line_starts_with_directive(const char *line, const char *name) {
+    size_t n;
+
+    while (line != NULL && isspace((unsigned char)*line)) {
+        line++;
+    }
+    if (line == NULL) {
+        return 0;
+    }
+    n = strlen(name);
+    return strncmp(line, name, n) == 0 && (line[n] == '\0' || isspace((unsigned char)line[n]) ||
+                                           line[n] == ',' || line[n] == ';');
+}
+
+static char *trim_in_place(char *s) {
+    char *end;
+
+    while (s != NULL && isspace((unsigned char)*s)) {
+        s++;
+    }
+    if (s == NULL || *s == '\0') {
+        return s;
+    }
+    end = s + strlen(s);
+    while (end > s && isspace((unsigned char)end[-1])) {
+        *--end = '\0';
+    }
+    return s;
+}
+
+static int write_substituted_line(FILE *out, const char *line, const char *var, const char *value) {
+    size_t vlen;
+    const char *p;
+    int quote = 0;
+    int escaped = 0;
+
+    if (out == NULL || line == NULL || var == NULL || value == NULL) {
+        return -1;
+    }
+    vlen = strlen(var);
+    for (p = line; *p != '\0'; ++p) {
+        if (quote != 0) {
+            if (!escaped && *p == quote) {
+                quote = 0;
+            }
+            escaped = (!escaped && *p == '\\') ? 1 : 0;
+        } else if (*p == '"' || *p == '\'') {
+            quote = *p;
+        } else if (*p == ';') {
+            fputc('\n', out);
+            continue;
+        }
+        if (*p == '\\' && vlen > 0 && strncmp(p + 1, var, vlen) == 0) {
+            fputs(value, out);
+            p += vlen;
+            continue;
+        }
+        fputc((unsigned char)*p, out);
+    }
+    if (p == line || p[-1] != '\n') {
+        fputc('\n', out);
+    }
+    return ferror(out) ? -1 : 0;
+}
+
+static int write_split_asm_line(FILE *out, const char *line) {
+    return write_substituted_line(out, line, "", "");
+}
+
+static int expand_irp_block(FILE *in, FILE *out, const char *header, int chars_mode) {
+    char *spec = NULL;
+    char *var;
+    char *vals;
+    char *comma;
+    char *line = NULL;
+    size_t cap = 0;
+    strvec_t body = {0};
+    int rc = -1;
+
+    spec = xstrdup(header);
+    if (spec == NULL) {
+        return -1;
+    }
+    var = spec;
+    while (*var != '\0' && !isspace((unsigned char)*var)) {
+        var++;
+    }
+    var = trim_in_place(var);
+    comma = strchr(var, ',');
+    if (comma == NULL) {
+        goto out;
+    }
+    *comma = '\0';
+    vals = trim_in_place(comma + 1);
+    var = trim_in_place(var);
+    if (var == NULL || *var == '\0' || vals == NULL) {
+        goto out;
+    }
+    if (*vals == '"' || *vals == '\'') {
+        char quote = *vals++;
+        char *end = strrchr(vals, quote);
+        if (end != NULL) {
+            *end = '\0';
+        }
+    }
+
+    while (getline(&line, &cap, in) >= 0) {
+        if (line_starts_with_directive(line, ".endr")) {
+            break;
+        }
+        if (strvec_push(&body, line) != 0) {
+            goto out;
+        }
+    }
+
+    if (chars_mode) {
+        char value[2];
+        const char *p;
+        value[1] = '\0';
+        for (p = vals; *p != '\0'; ++p) {
+            size_t i;
+            if (isspace((unsigned char)*p) || *p == ',') {
+                continue;
+            }
+            value[0] = *p;
+            for (i = 0; i < body.count; ++i) {
+                if (write_substituted_line(out, body.items[i], var, value) != 0) {
+                    goto out;
+                }
+            }
+        }
+    } else {
+        char *save = NULL;
+        char *tok;
+        for (tok = strtok_r(vals, ",", &save); tok != NULL; tok = strtok_r(NULL, ",", &save)) {
+            size_t i;
+            tok = trim_in_place(tok);
+            for (i = 0; i < body.count; ++i) {
+                if (write_substituted_line(out, body.items[i], var, tok) != 0) {
+                    goto out;
+                }
+            }
+        }
+    }
+    rc = 0;
+
+out:
+    free(line);
+    strvec_free(&body);
+    free(spec);
+    return rc;
+}
+
+static int eval_rept_count(const char *s, long *out) {
+    char *tmp;
+    char *p;
+    long acc = 0;
+    long cur = 0;
+    int have = 0;
+    int sign = 1;
+
+    if (s == NULL || out == NULL) {
+        return -1;
+    }
+    tmp = xstrdup(s);
+    if (tmp == NULL) {
+        return -1;
+    }
+    for (p = tmp; *p != '\0'; ++p) {
+        if (*p == '(' || *p == ')') {
+            *p = ' ';
+        }
+    }
+    p = trim_in_place(tmp);
+    while (*p != '\0') {
+        char *endp;
+        long v;
+        while (isspace((unsigned char)*p)) {
+            p++;
+        }
+        if (*p == '+') {
+            sign = 1;
+            p++;
+            continue;
+        }
+        if (*p == '-') {
+            sign = -1;
+            p++;
+            continue;
+        }
+        v = strtol(p, &endp, 0);
+        if (endp == p) {
+            free(tmp);
+            return -1;
+        }
+        cur = sign * v;
+        p = endp;
+        while (isspace((unsigned char)*p)) {
+            p++;
+        }
+        while (*p == '*') {
+            long rhs;
+            p++;
+            while (isspace((unsigned char)*p)) {
+                p++;
+            }
+            rhs = strtol(p, &endp, 0);
+            if (endp == p) {
+                free(tmp);
+                return -1;
+            }
+            cur *= rhs;
+            p = endp;
+            while (isspace((unsigned char)*p)) {
+                p++;
+            }
+        }
+        acc += cur;
+        have = 1;
+        sign = 1;
+    }
+    free(tmp);
+    if (!have || acc < 0) {
+        return -1;
+    }
+    *out = acc;
+    return 0;
+}
+
+static int expand_rept_block(FILE *in, FILE *out, const char *header) {
+    char *line = NULL;
+    size_t cap = 0;
+    strvec_t body = {0};
+    long count;
+    long iter;
+    int nested = 0;
+    int rc = -1;
+
+    if (eval_rept_count(header, &count) != 0) {
+        return -1;
+    }
+    while (getline(&line, &cap, in) >= 0) {
+        const char *d = line_start_directive(line);
+        if (line_starts_with_directive(d, ".rept")) {
+            nested++;
+        } else if (line_starts_with_directive(d, ".endr")) {
+            if (nested == 0) {
+                break;
+            }
+            nested--;
+        }
+        if (strvec_push(&body, line) != 0) {
+            goto out;
+        }
+    }
+    for (iter = 0; iter < count; ++iter) {
+        size_t i;
+        for (i = 0; i < body.count; ++i) {
+            if (write_split_asm_line(out, body.items[i]) != 0) {
+                goto out;
+            }
+        }
+    }
+    rc = 0;
+
+out:
+    free(line);
+    strvec_free(&body);
+    return rc;
+}
+
+static int expand_rept_file(const char *in_path, char **out_path) {
+    FILE *in = NULL;
+    FILE *out = NULL;
+    char tmp_template[] = "/tmp/asrept_XXXXXX";
+    char *line = NULL;
+    size_t cap = 0;
+    int fd = -1;
+    int rc = -1;
+
+    if (in_path == NULL || out_path == NULL) {
+        return -1;
+    }
+    *out_path = NULL;
+    in = fopen(in_path, "rb");
+    if (in == NULL) {
+        return -1;
+    }
+    fd = mkstemp(tmp_template);
+    if (fd < 0) {
+        goto out;
+    }
+    out = fdopen(fd, "wb");
+    if (out == NULL) {
+        close(fd);
+        fd = -1;
+        goto out;
+    }
+    fd = -1;
+
+    while (getline(&line, &cap, in) >= 0) {
+        const char *d = line_start_directive(line);
+        if (line_starts_with_directive(d, ".rept")) {
+            if (expand_rept_block(in, out, d + 5) != 0) {
+                goto out;
+            }
+            continue;
+        }
+        if (line_starts_with_directive(d, ".irpc")) {
+            if (expand_irp_block(in, out, d + 5, 1) != 0) {
+                goto out;
+            }
+            continue;
+        }
+        if (line_starts_with_directive(d, ".irp")) {
+            if (expand_irp_block(in, out, d + 4, 0) != 0) {
+                goto out;
+            }
+            continue;
+        }
+        fputs(line, out);
+    }
+    if (fflush(out) != 0) {
+        goto out;
+    }
+    *out_path = xstrdup(tmp_template);
+    if (*out_path == NULL) {
+        goto out;
+    }
+    rc = 0;
+
+out:
+    free(line);
+    if (fd >= 0) {
+        close(fd);
+    }
+    if (out != NULL) {
+        fclose(out);
+    }
+    if (in != NULL) {
+        fclose(in);
+    }
+    if (rc != 0) {
+        unlink(tmp_template);
+    }
+    return rc;
+}
+
+typedef struct {
+    char *name;
+    strvec_t params;
+    strvec_t defaults;
+    strvec_t body;
+} gas_macro_t;
+
+typedef struct {
+    gas_macro_t *items;
+    size_t count;
+    size_t cap;
+    unsigned long serial;
+} gas_macro_vec_t;
+
+static void gas_macro_free(gas_macro_t *m) {
+    if (m == NULL) {
+        return;
+    }
+    free(m->name);
+    strvec_free(&m->params);
+    strvec_free(&m->defaults);
+    strvec_free(&m->body);
+    memset(m, 0, sizeof(*m));
+}
+
+static void gas_macro_vec_free(gas_macro_vec_t *v) {
+    size_t i;
+
+    if (v == NULL) {
+        return;
+    }
+    for (i = 0; i < v->count; ++i) {
+        gas_macro_free(&v->items[i]);
+    }
+    free(v->items);
+    memset(v, 0, sizeof(*v));
+}
+
+static gas_macro_t *find_gas_macro(gas_macro_vec_t *v, const char *name) {
+    size_t i;
+
+    if (v == NULL || name == NULL) {
+        return NULL;
+    }
+    for (i = 0; i < v->count; ++i) {
+        if (v->items[i].name != NULL && strcmp(v->items[i].name, name) == 0) {
+            return &v->items[i];
+        }
+    }
+    return NULL;
+}
+
+static int gas_macro_vec_push(gas_macro_vec_t *v, gas_macro_t *m) {
+    gas_macro_t *next;
+
+    if (v == NULL || m == NULL || m->name == NULL) {
+        return -1;
+    }
+    if (v->count == v->cap) {
+        size_t ncap = v->cap == 0 ? 32 : v->cap * 2;
+        next = (gas_macro_t *)realloc(v->items, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        v->items = next;
+        v->cap = ncap;
+    }
+    v->items[v->count++] = *m;
+    memset(m, 0, sizeof(*m));
+    return 0;
+}
+
+static int split_macro_list(const char *s, strvec_t *out, int split_ws) {
+    const char *start;
+    size_t i;
+    int quote = 0;
+    int depth = 0;
+
+    if (s == NULL || out == NULL) {
+        return -1;
+    }
+    start = s;
+    for (i = 0;; ++i) {
+        char ch = s[i];
+        int sep = 0;
+
+        if (quote != 0) {
+            if (ch == quote) {
+                quote = 0;
+            }
+        } else if (ch == '"' || ch == '\'') {
+            quote = ch;
+        } else if (ch == '(' || ch == '[' || ch == '{') {
+            depth++;
+        } else if ((ch == ')' || ch == ']' || ch == '}') && depth > 0) {
+            depth--;
+        } else if ((ch == ',' || ch == '\0' || ch == '\n' ||
+                    (split_ws && isspace((unsigned char)ch))) &&
+                   depth == 0) {
+            sep = 1;
+        }
+
+        if (sep) {
+            size_t n = (size_t)(s + i - start);
+            char *tmp = (char *)malloc(n + 1);
+            char *trimmed;
+            if (tmp == NULL) {
+                return -1;
+            }
+            memcpy(tmp, start, n);
+            tmp[n] = '\0';
+            trimmed = trim_in_place(tmp);
+            if (trimmed != NULL && *trimmed != '\0' && strvec_push(out, trimmed) != 0) {
+                free(tmp);
+                return -1;
+            }
+            free(tmp);
+            if (ch == '\0' || ch == '\n') {
+                break;
+            }
+            start = s + i + 1;
+        }
+    }
+    return 0;
+}
+
+static int push_macro_arg_slice(strvec_t *out, const char *start, const char *end) {
+    size_t n;
+    char *tmp;
+    char *trimmed;
+
+    if (out == NULL || start == NULL || end == NULL || end < start) {
+        return -1;
+    }
+    n = (size_t)(end - start);
+    tmp = (char *)malloc(n + 1);
+    if (tmp == NULL) {
+        return -1;
+    }
+    memcpy(tmp, start, n);
+    tmp[n] = '\0';
+    trimmed = trim_in_place(tmp);
+    if (trimmed != NULL && *trimmed != '\0' && strvec_push(out, trimmed) != 0) {
+        free(tmp);
+        return -1;
+    }
+    free(tmp);
+    return 0;
+}
+
+static int split_named_macro_arg_piece(const char *s, strvec_t *out) {
+    const char *start;
+    size_t i;
+    int quote = 0;
+    int depth = 0;
+
+    if (s == NULL || out == NULL) {
+        return -1;
+    }
+    start = s;
+    for (i = 0;; ++i) {
+        char ch = s[i];
+
+        if (quote != 0) {
+            if (ch == quote) {
+                quote = 0;
+            }
+        } else if (ch == '"' || ch == '\'') {
+            quote = ch;
+        } else if (ch == '(' || ch == '[' || ch == '{') {
+            depth++;
+        } else if ((ch == ')' || ch == ']' || ch == '}') && depth > 0) {
+            depth--;
+        } else if (depth == 0 && ch == '#') {
+            /* GAS treats '#' as a line comment on x86. Stop here so
+             * trailing comments do not become spurious positional macro
+             * arguments and overwrite earlier named values. */
+            return push_macro_arg_slice(out, start, s + i);
+        } else if (depth == 0 && isspace((unsigned char)ch)) {
+            const char *next = s + i + 1;
+            while (isspace((unsigned char)*next)) {
+                next++;
+            }
+            if (*next == '#') {
+                if (push_macro_arg_slice(out, start, s + i) != 0) {
+                    return -1;
+                }
+                return 0;
+            }
+            if (*next != '\0' && *next != '\n') {
+                if (push_macro_arg_slice(out, start, s + i) != 0) {
+                    return -1;
+                }
+                start = next;
+                i = (size_t)(next - s) - 1;
+            }
+        }
+        if (ch == '\0' || ch == '\n') {
+            return push_macro_arg_slice(out, start, s + i);
+        }
+    }
+}
+
+static int split_macro_arglist(const char *s, strvec_t *out) {
+    strvec_t comma_args = {0};
+    size_t i;
+    int rc = -1;
+
+    if (split_macro_list(s, &comma_args, 0) != 0) {
+        return -1;
+    }
+    for (i = 0; i < comma_args.count; ++i) {
+        if (split_named_macro_arg_piece(comma_args.items[i], out) != 0) {
+            goto out;
+        }
+    }
+    rc = 0;
+
+out:
+    strvec_free(&comma_args);
+    return rc;
+}
+
+static int split_macro_param_specs(const char *s, strvec_t *out) {
+    return split_macro_list(s, out, 1);
+}
+
+static int parse_gas_macro_header(const char *header, gas_macro_t *m) {
+    char *tmp;
+    char *p;
+    char *rest;
+    strvec_t specs = {0};
+    size_t i;
+
+    if (header == NULL || m == NULL) {
+        return -1;
+    }
+    memset(m, 0, sizeof(*m));
+    tmp = xstrdup(header);
+    if (tmp == NULL) {
+        return -1;
+    }
+    p = trim_in_place(tmp);
+    while (*p != '\0' && !isspace((unsigned char)*p) && *p != ',') {
+        p++;
+    }
+    if (*p != '\0') {
+        *p++ = '\0';
+    }
+    m->name = xstrdup(trim_in_place(tmp));
+    rest = trim_in_place(p);
+    if (m->name == NULL || m->name[0] == '\0') {
+        free(tmp);
+        gas_macro_free(m);
+        return -1;
+    }
+    if (rest != NULL && *rest != '\0' && split_macro_param_specs(rest, &specs) != 0) {
+        free(tmp);
+        gas_macro_free(m);
+        return -1;
+    }
+    for (i = 0; i < specs.count; ++i) {
+        char *spec = specs.items[i];
+        char *eq = strchr(spec, '=');
+        char *colon;
+        char *def = "";
+        if (eq != NULL) {
+            *eq = '\0';
+            def = trim_in_place(eq + 1);
+        }
+        colon = strchr(spec, ':');
+        if (colon != NULL) {
+            *colon = '\0';
+        }
+        spec = trim_in_place(spec);
+        if (spec != NULL && *spec != '\0') {
+            if (strvec_push(&m->params, spec) != 0 || strvec_push(&m->defaults, def) != 0) {
+                free(tmp);
+                strvec_free(&specs);
+                gas_macro_free(m);
+                return -1;
+            }
+        }
+    }
+    strvec_free(&specs);
+    free(tmp);
+    return 0;
+}
+
+static char *expand_gas_macro_line_text(const char *line, const gas_macro_t *m, char **values, unsigned long serial) {
+    size_t cap = 0;
+    size_t len = 0;
+    char *out = NULL;
+    const char *p;
+
+    if (line == NULL || m == NULL) {
+        return NULL;
+    }
+    cap = strlen(line) + 64;
+    out = (char *)malloc(cap);
+    if (out == NULL) {
+        return NULL;
+    }
+    out[0] = '\0';
+    for (p = line; *p != '\0'; ++p) {
+        const char *subst = NULL;
+        char serial_buf[32];
+        size_t subst_len = 0;
+        size_t i;
+
+        if (*p == '\\') {
+            if (p[1] == '@') {
+                snprintf(serial_buf, sizeof(serial_buf), "%lu", serial);
+                subst = serial_buf;
+                subst_len = strlen(subst);
+                p++;
+            } else if (p[1] == '(' && p[2] == ')') {
+                p += 2;
+                continue;
+            } else {
+                for (i = 0; i < m->params.count; ++i) {
+                    size_t n = strlen(m->params.items[i]);
+                    if (n > 0 && strncmp(p + 1, m->params.items[i], n) == 0 &&
+                        !(isalnum((unsigned char)p[1 + n]) || p[1 + n] == '_')) {
+                        subst = values[i] != NULL ? values[i] : "";
+                        subst_len = strlen(subst);
+                        p += n;
+                        break;
+                    }
+                }
+            }
+        }
+        if (subst == NULL) {
+            subst = p;
+            subst_len = 1;
+        }
+        if (len + subst_len + 1 > cap) {
+            size_t ncap = (len + subst_len + 1) * 2;
+            char *next = (char *)realloc(out, ncap);
+            if (next == NULL) {
+                free(out);
+                return NULL;
+            }
+            out = next;
+            cap = ncap;
+        }
+        memcpy(out + len, subst, subst_len);
+        len += subst_len;
+        out[len] = '\0';
+    }
+    return out;
+}
+
+static char *macro_arg_value_copy(const char *raw) {
+    char *tmp;
+    char *s;
+    size_t n;
+
+    tmp = xstrdup(raw != NULL ? raw : "");
+    if (tmp == NULL) {
+        return NULL;
+    }
+    s = trim_in_place(tmp);
+    n = strlen(s);
+    if (n >= 2 && ((s[0] == '"' && s[n - 1] == '"') || (s[0] == '\'' && s[n - 1] == '\''))) {
+        s[n - 1] = '\0';
+        s++;
+    }
+    if (s != tmp) {
+        char *out = xstrdup(s);
+        free(tmp);
+        return out;
+    }
+    return tmp;
+}
+
+static int macro_arg_assign(char **slot, const char *raw) {
+    char *copy = macro_arg_value_copy(raw);
+    if (copy == NULL) {
+        return -1;
+    }
+    free(*slot);
+    *slot = copy;
+    return 0;
+}
+
+static char *macro_named_arg_eq(char *arg) {
+    char *p;
+
+    if (arg == NULL) {
+        return NULL;
+    }
+    p = trim_in_place(arg);
+    if (!(isalpha((unsigned char)*p) || *p == '_')) {
+        return NULL;
+    }
+    while (isalnum((unsigned char)*p) || *p == '_') {
+        p++;
+    }
+    return *p == '=' ? p : NULL;
+}
+
+static int expand_gas_macro_statement(FILE *out, gas_macro_vec_t *macros, const char *line, unsigned depth);
+
+static int expand_split_statement(FILE *out, gas_macro_vec_t *macros, const char *line, unsigned depth) {
+    size_t i;
+    const char *start = line;
+    int quote = 0;
+    int split = 0;
+
+    for (i = 0; line != NULL && line[i] != '\0'; ++i) {
+        char ch = line[i];
+        if (quote != 0) {
+            if (ch == quote) {
+                quote = 0;
+            }
+        } else if (ch == '"' || ch == '\'') {
+            quote = ch;
+        } else if (ch == ';') {
+            size_t n = (size_t)(line + i - start);
+            char *part = (char *)malloc(n + 2);
+            if (part == NULL) {
+                return -1;
+            }
+            memcpy(part, start, n);
+            part[n] = '\n';
+            part[n + 1] = '\0';
+            if (expand_gas_macro_statement(out, macros, part, depth) != 0) {
+                free(part);
+                return -1;
+            }
+            free(part);
+            start = line + i + 1;
+            split = 1;
+        }
+    }
+    if (split) {
+        if (start != NULL && *trim_in_place((char *)start) != '\0') {
+            char *tail = xstrdup(start);
+            int rc;
+            if (tail == NULL) {
+                return -1;
+            }
+            rc = expand_gas_macro_statement(out, macros, tail, depth);
+            free(tail);
+            return rc;
+        }
+        return 0;
+    }
+    return -2;
+}
+
+static int expand_gas_macro_statement(FILE *out, gas_macro_vec_t *macros, const char *line, unsigned depth) {
+    const char *p;
+    const char *name_start;
+    char name[128];
+    size_t n = 0;
+    gas_macro_t *m;
+    char **values = NULL;
+    strvec_t args = {0};
+    size_t i;
+    int rc = -1;
+
+    if (depth > 64) {
+        return -1;
+    }
+    {
+        int split_rc = expand_split_statement(out, macros, line, depth);
+        if (split_rc != -2) {
+            return split_rc;
+        }
+    }
+    p = line;
+    while (*p != '\0' && isspace((unsigned char)*p)) {
+        p++;
+    }
+    {
+        const char *label_start = p;
+        const char *q = p;
+        while (*q != '\0' && (isalnum((unsigned char)*q) || *q == '_' || *q == '.')) {
+            q++;
+        }
+        if (q > label_start && *q == ':') {
+            const char *rest = q + 1;
+            const char *rp;
+            char rname[128];
+            size_t rn = 0;
+
+            while (*rest != '\0' && isspace((unsigned char)*rest)) {
+                rest++;
+            }
+            rp = rest;
+            while (*rp != '\0' && (isalnum((unsigned char)*rp) || *rp == '_' || *rp == '.')) {
+                if (rn + 1 < sizeof(rname)) {
+                    rname[rn++] = *rp;
+                }
+                rp++;
+            }
+            rname[rn] = '\0';
+            if (rn > 0 && find_gas_macro(macros, rname) != NULL) {
+                if (fprintf(out, "%.*s:\n", (int)(q - label_start), label_start) < 0) {
+                    return -1;
+                }
+                return expand_gas_macro_statement(out, macros, rest, depth + 1);
+            }
+        }
+    }
+    name_start = p;
+    while (*p != '\0' && (isalnum((unsigned char)*p) || *p == '_' || *p == '.')) {
+        if (n + 1 < sizeof(name)) {
+            name[n++] = *p;
+        }
+        p++;
+    }
+    name[n] = '\0';
+    if (n == 0 || (m = find_gas_macro(macros, name)) == NULL) {
+        return write_split_asm_line(out, line);
+    }
+    values = (char **)calloc(m->params.count, sizeof(*values));
+    if (values == NULL) {
+        return -1;
+    }
+    for (i = 0; i < m->params.count; ++i) {
+        values[i] = xstrdup(i < m->defaults.count ? m->defaults.items[i] : "");
+        if (values[i] == NULL) {
+            goto out;
+        }
+    }
+    if (split_macro_arglist(p, &args) != 0) {
+        goto out;
+    }
+    {
+        size_t pos = 0;
+        for (i = 0; i < args.count; ++i) {
+            char *eq = macro_named_arg_eq(args.items[i]);
+            if (eq != NULL) {
+                size_t k;
+                *eq = '\0';
+                for (k = 0; k < m->params.count; ++k) {
+                    if (strcmp(trim_in_place(args.items[i]), m->params.items[k]) == 0) {
+                        if (macro_arg_assign(&values[k], trim_in_place(eq + 1)) != 0) {
+                            goto out;
+                        }
+                        break;
+                    }
+                }
+            } else if (pos < m->params.count) {
+                if (macro_arg_assign(&values[pos], trim_in_place(args.items[i])) != 0) {
+                    goto out;
+                }
+                pos++;
+            }
+        }
+    }
+    {
+        unsigned long macro_serial = ++macros->serial;
+        for (i = 0; i < m->body.count; ++i) {
+            char *expanded = expand_gas_macro_line_text(m->body.items[i], m, values, macro_serial);
+        if (expanded == NULL) {
+            goto out;
+        }
+        if (expand_gas_macro_statement(out, macros, expanded, depth + 1) != 0) {
+            free(expanded);
+            goto out;
+        }
+        free(expanded);
+        }
+    }
+    rc = 0;
+
+out:
+    if (values != NULL) {
+        for (i = 0; i < m->params.count; ++i) {
+            free(values[i]);
+        }
+    }
+    free(values);
+    strvec_free(&args);
+    (void)name_start;
+    return rc;
+}
+
+static int expand_rept_block_with_macros(FILE *in, FILE *out, gas_macro_vec_t *macros, const char *header) {
+    char *line = NULL;
+    size_t cap = 0;
+    strvec_t body = {0};
+    long count;
+    long iter;
+    int nested = 0;
+    int rc = -1;
+
+    if (eval_rept_count(header, &count) != 0) {
+        return -1;
+    }
+    while (getline(&line, &cap, in) >= 0) {
+        const char *d = line_start_directive(line);
+        if (line_starts_with_directive(d, ".rept")) {
+            nested++;
+        } else if (line_starts_with_directive(d, ".endr")) {
+            if (nested == 0) {
+                break;
+            }
+            nested--;
+        }
+        if (strvec_push(&body, line) != 0) {
+            goto out;
+        }
+    }
+    for (iter = 0; iter < count; ++iter) {
+        size_t i;
+        for (i = 0; i < body.count; ++i) {
+            if (expand_gas_macro_statement(out, macros, body.items[i], 0) != 0) {
+                goto out;
+            }
+        }
+    }
+    rc = 0;
+
+out:
+    free(line);
+    strvec_free(&body);
+    return rc;
+}
+
+static int expand_gas_source_controls(const char *in_path, char **out_path) {
+    FILE *in = NULL;
+    FILE *out = NULL;
+    char tmp_template[] = "/tmp/asexp_XXXXXX";
+    char *line = NULL;
+    size_t cap = 0;
+    int fd = -1;
+    gas_macro_vec_t macros = {0};
+    int rc = -1;
+
+    if (in_path == NULL || out_path == NULL) {
+        return -1;
+    }
+    *out_path = NULL;
+    in = fopen(in_path, "rb");
+    if (in == NULL) {
+        return -1;
+    }
+    fd = mkstemp(tmp_template);
+    if (fd < 0) {
+        goto out;
+    }
+    out = fdopen(fd, "wb");
+    if (out == NULL) {
+        close(fd);
+        fd = -1;
+        goto out;
+    }
+    fd = -1;
+
+    while (getline(&line, &cap, in) >= 0) {
+        const char *d = line_start_directive(line);
+
+        if (line_starts_with_directive(d, ".macro")) {
+            gas_macro_t m;
+            if (parse_gas_macro_header(d + 6, &m) != 0) {
+                goto out;
+            }
+            while (getline(&line, &cap, in) >= 0) {
+                if (line_starts_with_directive(line_start_directive(line), ".endm")) {
+                    break;
+                }
+                if (strvec_push(&m.body, line) != 0) {
+                    gas_macro_free(&m);
+                    goto out;
+                }
+            }
+            if (gas_macro_vec_push(&macros, &m) != 0) {
+                gas_macro_free(&m);
+                goto out;
+            }
+            continue;
+        }
+        if (line_starts_with_directive(d, ".rept")) {
+            if (expand_rept_block_with_macros(in, out, &macros, d + 5) != 0) {
+                goto out;
+            }
+            continue;
+        }
+        if (line_starts_with_directive(d, ".irpc")) {
+            if (expand_irp_block(in, out, d + 5, 1) != 0) {
+                goto out;
+            }
+            continue;
+        }
+        if (line_starts_with_directive(d, ".irp")) {
+            if (expand_irp_block(in, out, d + 4, 0) != 0) {
+                goto out;
+            }
+            continue;
+        }
+        if (expand_gas_macro_statement(out, &macros, line, 0) != 0) {
+            goto out;
+        }
+    }
+
+    if (fflush(out) != 0) {
+        goto out;
+    }
+    *out_path = xstrdup(tmp_template);
+    if (*out_path == NULL) {
+        goto out;
+    }
+    rc = 0;
+
+out:
+    free(line);
+    gas_macro_vec_free(&macros);
+    if (fd >= 0) {
+        close(fd);
+    }
+    if (out != NULL) {
+        fclose(out);
+    }
+    if (in != NULL) {
+        fclose(in);
+    }
+    if (rc != 0) {
+        unlink(tmp_template);
+    }
+    return rc;
+}
+
+typedef struct {
+    int parent_active;
+    int branch_taken;
+    int active;
+    int else_seen;
+} gas_cond_frame_t;
+
+static int parse_cond_operand(const char *s, long long *num, char *buf, size_t bufsz) {
+    char *tmp;
+    char *p;
+    char *endp;
+
+    if (s == NULL || num == NULL || buf == NULL || bufsz == 0) {
+        return -1;
+    }
+    tmp = xstrdup(s);
+    if (tmp == NULL) {
+        return -1;
+    }
+    p = trim_in_place(tmp);
+    if (*p == '$') {
+        p++;
+    }
+    *num = strtoll(p, &endp, 0);
+    if (endp != p && *trim_in_place(endp) == '\0') {
+        free(tmp);
+        buf[0] = '\0';
+        return 1;
+    }
+    snprintf(buf, bufsz, "%s", p);
+    free(tmp);
+    return 0;
+}
+
+static int eval_gas_cond_expr(const char *expr) {
+    char *tmp;
+    char *p;
+    char *op;
+    long long ln = 0;
+    long long rn = 0;
+    char lb[128];
+    char rb[128];
+    int lt;
+    int rt;
+    int result;
+    int op_kind = -1; /* 0:==, 1:!=, 2:<, 3:>, 4:<=, 5:>= */
+    size_t op_len = 0;
+
+    if (expr == NULL) {
+        return 0;
+    }
+    tmp = xstrdup(expr);
+    if (tmp == NULL) {
+        return 0;
+    }
+    p = trim_in_place(tmp);
+    /* Order matters: check 2-char operators before single-char ones so
+     * `<=` is not classified as `<` followed by `=`. */
+    if ((op = strstr(p, "==")) != NULL) {
+        op_kind = 0; op_len = 2;
+    } else if ((op = strstr(p, "!=")) != NULL) {
+        op_kind = 1; op_len = 2;
+    } else if ((op = strstr(p, "<=")) != NULL) {
+        op_kind = 4; op_len = 2;
+    } else if ((op = strstr(p, ">=")) != NULL) {
+        op_kind = 5; op_len = 2;
+    } else if ((op = strchr(p, '<')) != NULL && op[1] != '<') {
+        op_kind = 2; op_len = 1;
+    } else if ((op = strchr(p, '>')) != NULL && op[1] != '>') {
+        op_kind = 3; op_len = 1;
+    } else {
+        op = NULL;
+    }
+    if (op != NULL) {
+        *op = '\0';
+        lt = parse_cond_operand(p, &ln, lb, sizeof(lb));
+        rt = parse_cond_operand(op + op_len, &rn, rb, sizeof(rb));
+        if (lt == 1 && rt == 1) {
+            switch (op_kind) {
+            case 0: result = (ln == rn); break;
+            case 1: result = (ln != rn); break;
+            case 2: result = (ln < rn); break;
+            case 3: result = (ln > rn); break;
+            case 4: result = (ln <= rn); break;
+            case 5: result = (ln >= rn); break;
+            default: result = 0; break;
+            }
+        } else {
+            int cmp = strcmp(trim_in_place(lb), trim_in_place(rb));
+            switch (op_kind) {
+            case 0: result = (cmp == 0); break;
+            case 1: result = (cmp != 0); break;
+            case 2: result = (cmp < 0); break;
+            case 3: result = (cmp > 0); break;
+            case 4: result = (cmp <= 0); break;
+            case 5: result = (cmp >= 0); break;
+            default: result = 0; break;
+            }
+        }
+        free(tmp);
+        return result;
+    }
+    lt = parse_cond_operand(p, &ln, lb, sizeof(lb));
+    free(tmp);
+    if (lt == 1) {
+        return ln != 0;
+    }
+    return lb[0] != '\0';
+}
+
+static int filter_gas_conditionals(const char *in_path, char **out_path) {
+    FILE *in = NULL;
+    FILE *out = NULL;
+    char tmp_template[] = "/tmp/ascond_XXXXXX";
+    char *line = NULL;
+    size_t cap = 0;
+    int fd = -1;
+    gas_cond_frame_t stack[1024];
+    size_t depth = 0;
+    int active = 1;
+    int rc = -1;
+
+    if (in_path == NULL || out_path == NULL) {
+        return -1;
+    }
+    *out_path = NULL;
+    in = fopen(in_path, "rb");
+    if (in == NULL) {
+        return -1;
+    }
+    fd = mkstemp(tmp_template);
+    if (fd < 0) {
+        goto out;
+    }
+    out = fdopen(fd, "wb");
+    if (out == NULL) {
+        close(fd);
+        fd = -1;
+        goto out;
+    }
+    fd = -1;
+
+    while (getline(&line, &cap, in) >= 0) {
+        const char *d = line_start_directive(line);
+
+        if (line_starts_with_directive(d, ".ifdef") || line_starts_with_directive(d, ".ifndef")) {
+            gas_cond_frame_t *f;
+            int is_ifndef = line_starts_with_directive(d, ".ifndef");
+            if (depth >= sizeof(stack) / sizeof(stack[0])) {
+                goto out;
+            }
+            f = &stack[depth++];
+            f->parent_active = active;
+            f->branch_taken = f->parent_active && is_ifndef;
+            f->active = f->branch_taken;
+            f->else_seen = 0;
+            active = f->active;
+            fputc('\n', out);
+            continue;
+        }
+        if (line_starts_with_directive(d, ".ifb") || line_starts_with_directive(d, ".ifnb")) {
+            gas_cond_frame_t *f;
+            int is_ifnb = line_starts_with_directive(d, ".ifnb");
+            const char *arg = d + (is_ifnb ? 5 : 4);
+            char *tmp = xstrdup(arg);
+            char *trimmed;
+            int nonblank;
+            if (tmp == NULL || depth >= sizeof(stack) / sizeof(stack[0])) {
+                free(tmp);
+                goto out;
+            }
+            trimmed = trim_in_place(tmp);
+            nonblank = trimmed != NULL && *trimmed != '\0';
+            f = &stack[depth++];
+            f->parent_active = active;
+            f->branch_taken = f->parent_active && (is_ifnb ? nonblank : !nonblank);
+            f->active = f->branch_taken;
+            f->else_seen = 0;
+            active = f->active;
+            free(tmp);
+            fputc('\n', out);
+            continue;
+        }
+        if (line_starts_with_directive(d, ".ifc") || line_starts_with_directive(d, ".ifnc")) {
+            /* GAS string-equality conditional: .ifc str1, str2 */
+            int is_negated = line_starts_with_directive(d, ".ifnc");
+            gas_cond_frame_t *f;
+            const char *args = d + (is_negated ? 5 : 4);
+            char *tmp = xstrdup(args);
+            char *trimmed;
+            char *comma;
+            int eq = 0;
+            if (tmp == NULL || depth >= sizeof(stack) / sizeof(stack[0])) {
+                free(tmp);
+                goto out;
+            }
+            trimmed = trim_in_place(tmp);
+            comma = strchr(trimmed, ',');
+            if (comma != NULL) {
+                char *lhs;
+                char *rhs;
+                *comma = '\0';
+                lhs = trim_in_place(trimmed);
+                rhs = trim_in_place(comma + 1);
+                eq = strcmp(lhs != NULL ? lhs : "", rhs != NULL ? rhs : "") == 0;
+            }
+            f = &stack[depth++];
+            f->parent_active = active;
+            f->branch_taken = f->parent_active && (is_negated ? !eq : eq);
+            f->active = f->branch_taken;
+            f->else_seen = 0;
+            active = f->active;
+            free(tmp);
+            fputc('\n', out);
+            continue;
+        }
+        if (line_starts_with_directive(d, ".ifeq") || line_starts_with_directive(d, ".ifne") ||
+            line_starts_with_directive(d, ".ifgt") || line_starts_with_directive(d, ".iflt") ||
+            line_starts_with_directive(d, ".ifge") || line_starts_with_directive(d, ".ifle")) {
+            /* GAS arithmetic conditionals: .ifeq/.ifne/.ifgt/.iflt/.ifge/.ifle EXPR
+             * compare EXPR against zero. */
+            gas_cond_frame_t *f;
+            const char *args = d + 5;
+            long long v = 0;
+            int truth = 0;
+            if (depth >= sizeof(stack) / sizeof(stack[0])) {
+                goto out;
+            }
+            {
+                char *endp;
+                while (*args == ' ' || *args == '\t') args++;
+                v = strtoll(args, &endp, 0);
+                (void)endp;
+            }
+            if (line_starts_with_directive(d, ".ifeq")) truth = (v == 0);
+            else if (line_starts_with_directive(d, ".ifne")) truth = (v != 0);
+            else if (line_starts_with_directive(d, ".ifgt")) truth = (v > 0);
+            else if (line_starts_with_directive(d, ".iflt")) truth = (v < 0);
+            else if (line_starts_with_directive(d, ".ifge")) truth = (v >= 0);
+            else if (line_starts_with_directive(d, ".ifle")) truth = (v <= 0);
+            f = &stack[depth++];
+            f->parent_active = active;
+            f->branch_taken = f->parent_active && truth;
+            f->active = f->branch_taken;
+            f->else_seen = 0;
+            active = f->active;
+            fputc('\n', out);
+            continue;
+        }
+        if (line_starts_with_directive(d, ".if")) {
+            gas_cond_frame_t *f;
+            if (depth >= sizeof(stack) / sizeof(stack[0])) {
+                goto out;
+            }
+            f = &stack[depth++];
+            f->parent_active = active;
+            f->branch_taken = f->parent_active && eval_gas_cond_expr(d + 3);
+            f->active = f->branch_taken;
+            f->else_seen = 0;
+            active = f->active;
+            fputc('\n', out);
+            continue;
+        }
+        if (line_starts_with_directive(d, ".elseif")) {
+            gas_cond_frame_t *f;
+            if (depth == 0) {
+                goto out;
+            }
+            f = &stack[depth - 1];
+            if (f->else_seen || f->branch_taken || !f->parent_active) {
+                f->active = 0;
+            } else {
+                f->active = eval_gas_cond_expr(d + 7);
+                if (f->active) {
+                    f->branch_taken = 1;
+                }
+            }
+            active = f->active;
+            fputc('\n', out);
+            continue;
+        }
+        if (line_starts_with_directive(d, ".else")) {
+            gas_cond_frame_t *f;
+            if (depth == 0) {
+                goto out;
+            }
+            f = &stack[depth - 1];
+            f->active = f->parent_active && !f->branch_taken && !f->else_seen;
+            f->branch_taken = f->branch_taken || f->active;
+            f->else_seen = 1;
+            active = f->active;
+            fputc('\n', out);
+            continue;
+        }
+        if (line_starts_with_directive(d, ".endif")) {
+            if (depth == 0) {
+                goto out;
+            }
+            depth--;
+            active = depth == 0 ? 1 : stack[depth - 1].active;
+            fputc('\n', out);
+            continue;
+        }
+        if (active) {
+            fputs(line, out);
+        } else {
+            fputc('\n', out);
+        }
+    }
+    if (depth != 0 || fflush(out) != 0) {
+        goto out;
+    }
+    *out_path = xstrdup(tmp_template);
+    if (*out_path == NULL) {
+        goto out;
+    }
+    rc = 0;
+
+out:
+    free(line);
+    if (fd >= 0) {
+        close(fd);
+    }
+    if (out != NULL) {
+        fclose(out);
+    }
+    if (in != NULL) {
+        fclose(in);
+    }
+    if (rc != 0) {
+        unlink(tmp_template);
+    }
+    return rc;
+}
+
 static int run_native_backend(const as_ctx_t *ctx) {
     as_token_vec_t toks;
     as_parse_result_t parsed;
@@ -755,6 +2165,9 @@ static int run_native_backend(const as_ctx_t *ctx) {
     size_t include_dir_count = 0;
     char errbuf[512];
     char *temp_pp = NULL;
+    char *temp_expanded = NULL;
+    char *temp_rept = NULL;
+    char *temp_cond = NULL;
     const char *src_path = NULL;
     int rc = -1;
 
@@ -788,6 +2201,22 @@ static int run_native_backend(const as_ctx_t *ctx) {
     } else {
         src_path = ctx->in_path;
     }
+
+    if (expand_gas_source_controls(src_path, &temp_expanded) != 0) {
+        as_diag(AS_E_BACKEND, "macro/control expansion stage failed");
+        goto out;
+    }
+    src_path = temp_expanded;
+    if (expand_rept_file(src_path, &temp_rept) != 0) {
+        as_diag(AS_E_BACKEND, "repeat expansion stage failed");
+        goto out;
+    }
+    src_path = temp_rept;
+    if (filter_gas_conditionals(src_path, &temp_cond) != 0) {
+        as_diag(AS_E_BACKEND, "conditional assembly stage failed");
+        goto out;
+    }
+    src_path = temp_cond;
 
     if (collect_include_dirs(ctx, &include_dirs, &include_dir_count) != 0) {
         as_diag(AS_E_INTERNAL, "failed to build include dir list");
@@ -876,10 +2305,22 @@ static int run_native_backend(const as_ctx_t *ctx) {
     rc = 0;
 
 out:
-    if (temp_pp != NULL) {
+    if (temp_pp != NULL && getenv("AS_KEEP_TEMPS") == NULL) {
         unlink(temp_pp);
     }
+    if (temp_expanded != NULL && getenv("AS_KEEP_TEMPS") == NULL) {
+        unlink(temp_expanded);
+    }
+    if (temp_rept != NULL && getenv("AS_KEEP_TEMPS") == NULL) {
+        unlink(temp_rept);
+    }
+    if (temp_cond != NULL && getenv("AS_KEEP_TEMPS") == NULL) {
+        unlink(temp_cond);
+    }
     free(temp_pp);
+    free(temp_expanded);
+    free(temp_rept);
+    free(temp_cond);
     free(include_dirs);
     as_data_program_free(&data);
     as_section_state_free(&secs);

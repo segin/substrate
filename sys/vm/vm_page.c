@@ -487,11 +487,17 @@ vm_page_t *vm_page_alloc(struct vm_object *object, uint64_t pindex, int req) {
 	vm_page_t *page = vm_phys_alloc_page();
 	if(!page) return(NULL); // OOM
 
-	// Initialize page
+	// Initialize page (clear list pointers to detached state so we can
+	// safely free the page even if it was never linked into an object,
+	// without corrupting that object's pages list).
 	page->object = object;
 	page->pindex = pindex;
 	page->ref_count = 1;
 	page->flags |= PG_BUSY;
+	page->next = NULL;
+	page->prev = NULL;
+	page->obj_next = NULL;
+	page->obj_prev = NULL;
 
 	return(page);
 }

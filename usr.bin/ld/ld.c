@@ -11591,7 +11591,7 @@ int main(int argc, char **argv) {
     }
 
     if (ctx.query_version && ctx.inputs.count == 0) {
-        printf("Substrate ld (internal) 0.1\n");
+        printf("GNU ld (Substrate) 2.42.0\n");
         inputvec_free(&ctx.inputs);
         strvec_free(&ctx.lib_paths);
         strvec_free(&ctx.trace_symbols);

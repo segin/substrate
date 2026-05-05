@@ -3,6 +3,7 @@
 #include <sys/fcntl.h>
 #include <sys/file.h>
 #include <sys/lock.h>
+#include <sys/random.h>
 #include <sys/session.h>
 #include <kern/console.h>
 #include <kern/file.h>
@@ -620,7 +621,10 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
         child_proc->pid = -1;
         return fork_result;
     }
-    
+
+    /* Diverge parent/child CSPRNG state immediately after fork */
+    random_reseed_on_fork(fork_result);
+
     return fork_result;
 }
 

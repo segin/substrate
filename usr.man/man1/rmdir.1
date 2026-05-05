@@ -1,0 +1,109 @@
+." rmdir(1)
+.TH RMDIR 1 "April 2026" "Substrate" "User Commands"
+.SH NAME
+rmdir \- remove empty directories
+.SH SYNOPSIS
+.B rmdir
+.RI [ OPTION ]... " DIRECTORY" ...
+.SH DESCRIPTION
+.B rmdir
+removes each named empty
+.IR DIRECTORY .
+Unlike
+.BR rm (1) ,
+it does not remove non-directory operands and does not recurse through directory contents.
+.PP
+Substrate
+.B rmdir
+validates the target with
+.BR fstatat (2)
+using
+.BR AT_SYMLINK_NOFOLLOW ,
+opens parent directories with
+.BR openat (2) ,
+and performs removal with
+.BR unlinkat (2)
+and
+.BR AT_REMOVEDIR .
+Symbolic links are therefore never followed.
+.SH OPTIONS
+.TP
+.BR -p , " --parents"
+After removing each operand, attempt to remove its ancestors while they remain empty.
+.TP
+.BR -v , " --verbose"
+Output a diagnostic for each directory removed:
+.PP
+.RS
+rmdir: removing directory, 'path'
+.RE
+.TP
+.B --ignore-fail-on-non-empty
+Treat failures caused by non-empty directories as a stop condition instead of an error.
+This affects both the target operand and ancestor removal under
+.BR -p .
+.TP
+.B --help
+Display usage information and exit.
+.TP
+.B --version
+Display version information and exit.
+.SH SAFETY
+.B rmdir
+refuses to remove
+.BR / ,
+.B .
+and
+.BR .. .
+.PP
+Targets are validated with
+.B AT_SYMLINK_NOFOLLOW
+before removal, so a symbolic link to a directory is rejected with an error instead of being followed.
+.SH ANCESTOR REMOVAL
+With
+.BR -p ,
+.B rmdir
+removes the named directory first and then walks upward through its textual path, stopping before
+.BR / ,
+.B .
+or
+.BR .. .
+Removal stops at the first ancestor that cannot be removed.
+.PP
+Without
+.BR --ignore-fail-on-non-empty ,
+that failure is reported and the command exits nonzero.
+With
+.BR --ignore-fail-on-non-empty ,
+non-empty ancestors stop the walk quietly while earlier removals remain successful.
+.SH EXIT STATUS
+.TP
+0
+All requested removals succeeded, or stopped only because
+.B --ignore-fail-on-non-empty
+suppressed a non-empty directory failure.
+.TP
+1
+At least one removal failed.
+.SH EXAMPLES
+.TP
+rmdir emptydir
+Remove one empty directory.
+.TP
+rmdir -p a/b/c
+Remove
+.B c
+and then remove
+.B b
+and
+.B a
+if they also become empty.
+.TP
+rmdir --ignore-fail-on-non-empty -p a/b/c
+Remove the deepest directory and stop quietly when an ancestor is still populated.
+.SH SEE ALSO
+.BR rm (1),
+.BR openat (2),
+.BR fstatat (2),
+.BR unlinkat (2),
+.BR rmdir (2)

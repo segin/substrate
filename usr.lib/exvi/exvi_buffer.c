@@ -205,6 +205,11 @@ buf_insert_after(buffer_t *b, line_t *pos, const char *text)
                 sizeof(*b->line_array) * (size_t)(b->line_count - idx));
         }
         b->line_array[idx] = l;
+    } else {
+        /* OOM: discard the array so buf_get_line falls back to linked list. */
+        free(b->line_array);
+        b->line_array = NULL;
+        b->line_array_cap = 0;
     }
 
     b->line_count++;

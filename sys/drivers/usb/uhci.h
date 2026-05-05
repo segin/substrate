@@ -164,8 +164,8 @@ struct uhci_qh {
  * ============================================================
  */
 #define UHCI_FRAME_LIST_SIZE    1024    /* Frame list entries */
-#define UHCI_MAX_TDS            64      /* TD pool size */
-#define UHCI_MAX_QHS            8       /* QH pool size */
+#define UHCI_MAX_TDS            2048    /* TD pool size */
+#define UHCI_MAX_QHS            32      /* QH pool size */
 #define UHCI_NUM_PORTS          2       /* Root hub ports */
 
 /*

@@ -25,6 +25,7 @@ ssize_t write(int fd, const void *buf, size_t count);
 int close(int fd);
 int mkstemp(char *template);
 int unlink(const char *pathname);
+int unlinkat(int dirfd, const char *pathname, int flags);
 int rmdir(const char *pathname);
 int link(const char *oldpath, const char *newpath);
 int symlink(const char *target, const char *linkpath);
@@ -73,8 +74,10 @@ int sethostname(const char *name, size_t len);
 
 int chmod(const char *pathname, mode_t mode);
 int chown(const char *pathname, uid_t owner, gid_t group);
+int lchown(const char *pathname, uid_t owner, gid_t group);
 int fchmod(int fd, mode_t mode);
 int fchown(int fd, uid_t owner, gid_t group);
+int fchownat(int dirfd, const char *pathname, uid_t owner, gid_t group, int flag);
 char *getlogin(void);
 int getgroups(int size, gid_t list[]);
 int setgroups(int size, const gid_t *list);

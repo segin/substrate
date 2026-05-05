@@ -21,7 +21,9 @@ EXTRA_CLEAN += ln_host
 ln_host: $(SRCS) ln.h
 	$(CC) $(TEST_CFLAGS) -o $@ $(SRCS)
 
+TESTS = ../../tests/bin/ln
+
 integration: ln_host
-	sh tests/test_integration.sh ./ln_host
+	sh $(TESTS)/test_integration.sh ./ln_host
 
 test: integration

@@ -237,19 +237,12 @@ scan_substitute_break(const char *args, exvi_command_break_t *kind)
 static char *
 scan_global_break(buffer_t *b, const char *args, exvi_command_break_t *kind)
 {
-    char *p = skip_ws((char *)args);
-    char delim;
-
+    /* The global command's subcommand consumes the rest of the line, so
+       no pipe separator is ever valid here. */
     (void)b;
+    (void)args;
     (void)kind;
-
-    if (*p == '\0') {
-        return NULL;
-    }
-
-    delim = *p++;
-    p = skip_delimited_syntax(p, delim);
-    return (*p == '\0') ? NULL : NULL;
+    return NULL;
 }
 
 static int
@@ -302,41 +295,28 @@ buf_search_forward(buffer_t *b, const char *pattern)
     regex_t re;
     line_t *start;
     line_t *l;
+    int line_num;
 
     if (regcomp(&re, pattern, exvi_regex_flags()) != 0) {
         return -1;
     }
 
     start = b->cur ? b->cur->next : b->head;
+    line_num = b->cur ? buf_current_line(b) + 1 : 1;
 
-    l = start;
-    while (l) {
+    for (l = start; l; l = l->next, line_num++) {
         if (regexec(&re, l->text, 0, NULL, 0) == 0) {
-            int line_num = 1;
-            line_t *scan = b->head;
-
-            while (scan && scan != l) {
-                line_num++;
-                scan = scan->next;
-            }
             regfree(&re);
-            return scan ? line_num : -1;
+            return line_num;
         }
-        l = l->next;
     }
 
     if (option_wrapscan) {
-        for (l = b->head; l && l != start; l = l->next) {
+        line_num = 1;
+        for (l = b->head; l && l != start; l = l->next, line_num++) {
             if (regexec(&re, l->text, 0, NULL, 0) == 0) {
-                int line_num = 1;
-                line_t *scan = b->head;
-
-                while (scan && scan != l) {
-                    line_num++;
-                    scan = scan->next;
-                }
                 regfree(&re);
-                return scan ? line_num : -1;
+                return line_num;
             }
         }
     }
@@ -351,39 +331,28 @@ buf_search_backward(buffer_t *b, const char *pattern)
     regex_t re;
     line_t *start;
     line_t *l;
+    int line_num;
 
     if (regcomp(&re, pattern, exvi_regex_flags()) != 0) {
         return -1;
     }
 
     start = b->cur ? b->cur->prev : b->tail;
+    line_num = b->cur ? buf_current_line(b) - 1 : b->line_count;
 
-    for (l = start; l; l = l->prev) {
+    for (l = start; l; l = l->prev, line_num--) {
         if (regexec(&re, l->text, 0, NULL, 0) == 0) {
-            int line_num = 1;
-            line_t *scan = b->head;
-
-            while (scan && scan != l) {
-                line_num++;
-                scan = scan->next;
-            }
             regfree(&re);
-            return scan ? line_num : -1;
+            return line_num;
         }
     }
 
     if (option_wrapscan) {
-        for (l = b->tail; l && l != start; l = l->prev) {
+        line_num = b->line_count;
+        for (l = b->tail; l && l != start; l = l->prev, line_num--) {
             if (regexec(&re, l->text, 0, NULL, 0) == 0) {
-                int line_num = 1;
-                line_t *scan = b->head;
-
-                while (scan && scan != l) {
-                    line_num++;
-                    scan = scan->next;
-                }
                 regfree(&re);
-                return scan ? line_num : -1;
+                return line_num;
             }
         }
     }

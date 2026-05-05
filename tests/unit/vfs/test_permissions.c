@@ -23,13 +23,19 @@ static int mock_chmod(fs_node_t *node, uint32_t mode) {
 
 bool test_vfs_permissions_root(void) {
     fs_node_t node;
+
+    memset(&node, 0, sizeof(node));
     node.uid = 1000;
     node.gid = 1000;
-    node.mask = 0; // No permissions for anyone
-    
-    // Root should still have access
-    if (vfs_check_permissions(&node, 0, 0, 7) != 0) return false;
-    
+    node.mask = 0; /* No permissions for anyone */
+
+    if (vfs_check_permissions(&node, 0, 0, 4) != 0) return false;
+    if (vfs_check_permissions(&node, 0, 0, 2) != 0) return false;
+    if (vfs_check_permissions(&node, 0, 0, 1) == 0) return false;
+
+    node.mask = 0100;
+    if (vfs_check_permissions(&node, 0, 0, 1) != 0) return false;
+
     return true;
 }
 

@@ -8,5 +8,6 @@ $(BC_LIB):
 
 $(PROG): $(BC_LIB)
 
-include ../../Makefile.inc
 include ../../Makefile.bin.inc
+
+USER_CFLAGS += -I$(TOP)/usr.lib/bc

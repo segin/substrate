@@ -45,6 +45,8 @@ sys/boot/    Substrate BIOS bootloader (stage1 asm + stage2 C)
 bin/         base Unix userland
 sbin/        system utilities
 usr.bin/     compiler/toolchain and extended user tools
+             per-tool architecture docs live beside the native toolchain entry points:
+             usr.bin/as/ARCHITECTURE.md, usr.bin/cc/ARCHITECTURE.md, usr.bin/ld/ARCHITECTURE.md
 lib/         target runtime libraries (libc/libsys/libm/libpthread/libedit/libusb...)
 usr.lib/     shared libraries for tooling/runtime support (elfobj, demangle, ...)
 include/     userspace public headers
@@ -80,6 +82,7 @@ Detailed subsystem behavior belongs in `docs/specs/`, including:
 - process model: `docs/specs/kern_process_exit.md`, `docs/specs/kern_pid1.md`
 - VFS and filesystems: `docs/specs/vm_subsystem.md`, `docs/specs/fs_devfs.md`, `docs/specs/vfs_bio.md`
 - device and terminal subsystems: `docs/specs/driver_model.md`, `docs/specs/driver_tty.md`, `docs/specs/driver_vt.md`, `docs/specs/driver_fb_console.md`, `docs/specs/driver_virtio_gpu.md`
+- the ISA discovery path now includes both fixed-resource legacy probes and ISA Plug-and-Play isolation; activated ISA-PnP logical devices are registered on the ISA bus with cloned IO/IRQ/DMA/MEM resources so UART/LPT/IDE can bind through the driver model rather than ad hoc attachment.
 - virtual terminals derive their physical geometry from the active console backend and reserve the last hardware row for kernel status UI; tty-visible geometry excludes that row.
 - execution personalities: `docs/specs/personality_targets.md`, `docs/specs/personality_elks.md`
 
@@ -92,7 +95,7 @@ Userland is split by role (essential, admin, extended) and supported by a suite 
 - **`ex`/`vi` Editor Stack:** The base editors remain first-class userland programs in `bin/`, with a shared implementation in `usr.lib/exvi/`, thin frontends in `bin/ex` and `bin/vi`, and an in-tree full-screen `vi` engine backed by PTY regression tests. Detailed editor design notes and backlog tracking live in `docs/specs/exvi.md`; the current standards/compatibility record lives in `docs/specs/exvi_conformance.md`; user-facing manuals are in `usr.man/man1/ex.1`, `usr.man/man1/vi.1`, and `usr.man/man1/view.1`.
 - **`lib/edit`:** Command-line editing and history library for shells and prompts. Reusable low-level pieces for the editor stack are documented in `docs/specs/exvi.md`.
 - **`find(1)`:** A multi-dialect file hierarchy walker. See `docs/find/architecture.md`.
-- **Native Toolchain:** Integrated compiler, assembler, and linker. See `docs/specs/as_spec.md`.
+- **Native Toolchain:** Integrated compiler, assembler, linker, and shared ELF support library. Language and behavior specs live in `docs/specs/as_spec.md`, `usr.bin/cc/SPEC.md`, and `usr.bin/ld/SPEC.md`; structural docs live in `usr.bin/as/ARCHITECTURE.md`, `usr.bin/cc/ARCHITECTURE.md`, and `usr.bin/ld/ARCHITECTURE.md`. The shared ELF substrate for all three tools lives in `usr.lib/elfobj/` with API and ABI guidance in `usr.lib/elfobj/README.md` and `usr.lib/elfobj/ABI_POLICY.md`.
 
 ## 7. ABI and Interface Boundaries
 
@@ -104,10 +107,13 @@ Testing is a first-class citizen, utilizing a multi-layer approach:
 - **Isolated Unit Tests:** Validating individual modules.
 - **System Integration Tests:** Verifying toolchain and kernel interoperability.
 - **Host-Based Validation:** Using `NATIVE_BUILD=1` for rapid feedback.
+- **Toolchain Conformance Inputs:** Native toolchain validation is expected to include out-of-tree package builds such as GNU coreutils and GNU Bash so `cc -> as -> ld` is exercised against large, real-world sources instead of only in-tree fixtures.
 - **Linux Compatibility Harnesses:** Linux-host execution bridges live under
   `linux/`; `linux/runner/` provides the binfmt_misc-oriented Substrate i386
   ELF runner used for host-side ABI experiments.
 - **Property and Fuzz Testing:** Ensuring robustness of parsers and ABI handlers.
+
+Native toolchain regression surfaces are split by tool under `tests/usr.bin/as/`, `tests/usr.bin/cc/`, `tests/usr.bin/ld/`, and `usr.lib/elfobj/tests/`. Userland program tests live under `tests/bin/<program>/` — all `bin/*/tests/` directories have been consolidated there; each `bin/*/Makefile` references its test sources via `$(TESTS) = ../../tests/bin/<program>`.
 
 For detailed testing policies, see `docs/specs/vm_page.md` (as a template) and the `tests/` directory.
 

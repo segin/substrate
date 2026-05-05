@@ -58,6 +58,12 @@ static int scsi_dev_refresh_capacity(scsi_device_t *scsi_dev) {
         return -1;
     }
 
+    /*
+    kprintf("scsi: %d:%d:%d capacity %u sectors, sector_size %u\n",
+            scsi_dev->bus, scsi_dev->target, scsi_dev->lun,
+            (uint32_t)sectors, sector_size);
+    */
+
     scsi_dev->capacity = sectors;
     scsi_dev->sector_size = sector_size;
     return 0;
@@ -107,7 +113,7 @@ retry:
         }
     }
     
-    return (ret >= 0) ? (int)count : -1;
+    return (ret >= 0) ? 0 : -1;
 }
 
 static int scsi_blk_write(blkdev_t *dev, uint64_t sector, uint32_t count, const void *buffer) {

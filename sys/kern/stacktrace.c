@@ -39,21 +39,21 @@ void stack_trace(void) {
     while (frame && depth < MAX_STACK_FRAMES) {
         /* Validate frame pointer is in kernel space (0xC0000000+) to prevent crashes */
         if ((uint32_t)frame < 0xC0000000 || (uint32_t)frame > 0xFFFFFFFF - sizeof(*frame)) {
-            sprintf(buf, "  #%d: [Invalid frame pointer 0x%08x]\n", depth, (uint32_t)frame);
+            snprintf(buf, sizeof(buf), "  #%d: [Invalid frame pointer 0x%08x]\n", depth, (uint32_t)frame);
             kprint(buf);
             break;
         }
         
         /* Check alignment (EBP should be 4-byte aligned) */
         if ((uint32_t)frame & 0x3) {
-            sprintf(buf, "  #%d: [Misaligned frame 0x%08x]\n", depth, (uint32_t)frame);
+            snprintf(buf, sizeof(buf), "  #%d: [Misaligned frame 0x%08x]\n", depth, (uint32_t)frame);
             kprint(buf);
             break;
         }
         
         /* Resolve symbol for EIP */
         ksym_resolve(frame->eip, sym_buf, sizeof(sym_buf));
-        sprintf(buf, "  #%d: %s\n", depth, sym_buf);
+        snprintf(buf, sizeof(buf), "  #%d: %s\n", depth, sym_buf);
         kprint(buf);
         
         /* Move to previous frame */
@@ -85,27 +85,27 @@ void stack_trace_from(uint32_t ebp, uint32_t eip) {
     
     /* Print the faulting address first with symbol */
     ksym_resolve(eip, sym_buf, sizeof(sym_buf));
-    sprintf(buf, "  #%d: %s (faulting address)\n", depth, sym_buf);
+    snprintf(buf, sizeof(buf), "  #%d: %s (faulting address)\n", depth, sym_buf);
     kprint(buf);
     depth++;
     
     while (frame && depth < MAX_STACK_FRAMES) {
         /* Validate frame pointer */
         if ((uint32_t)frame < 0xC0000000 || (uint32_t)frame > 0xFFFFFFFF - sizeof(*frame)) {
-            sprintf(buf, "  #%d: [Invalid frame 0x%08x]\n", depth, (uint32_t)frame);
+            snprintf(buf, sizeof(buf), "  #%d: [Invalid frame 0x%08x]\n", depth, (uint32_t)frame);
             kprint(buf);
             break;
         }
         
         if ((uint32_t)frame & 0x3) {
-            sprintf(buf, "  #%d: [Misaligned frame 0x%08x]\n", depth, (uint32_t)frame);
+            snprintf(buf, sizeof(buf), "  #%d: [Misaligned frame 0x%08x]\n", depth, (uint32_t)frame);
             kprint(buf);
             break;
         }
         
         /* Resolve symbol */
         ksym_resolve(frame->eip, sym_buf, sizeof(sym_buf));
-        sprintf(buf, "  #%d: %s\n", depth, sym_buf);
+        snprintf(buf, sizeof(buf), "  #%d: %s\n", depth, sym_buf);
         kprint(buf);
         
         frame = frame->ebp;

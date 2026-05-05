@@ -1,0 +1,91 @@
+.\" fflush.3 - flush a stream
+.TH FFLUSH 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+fflush \- flush a stream
+.SH LIBRARY
+.B libc
+.SH SYNOPSIS
+.B #include <stdio.h>
+.PP
+.BI "int fflush(FILE *" stream ");"
+.SH DESCRIPTION
+For output streams,
+.BR fflush ()
+forces a write of all user-space buffered data for the given output or update
+.I stream
+via the stream's underlying write function.
+The buffered bytes are passed to
+.BR write (2);
+no data remains in the stream's user-space buffer on successful return.
+.PP
+For input streams associated with a seekable file,
+.BR fflush ()
+discards any buffered data that has been fetched from the underlying file
+but not yet consumed by the application.
+The stream's read position and read limit are reset so that subsequent reads
+refetch from the underlying file descriptor.
+.PP
+The open status of the stream is unaffected.
+.PP
+If the
+.I stream
+argument is
+.BR NULL ,
+.BR fflush ()
+walks the global list of open
+.B FILE
+streams maintained by the library and flushes every one of them, applying the
+rules above to each stream individually according to its mode.
+This is the behavior required by C99 \[char167]7.19.5.2.
+If any of the per-stream flushes fails, the call returns
+.B EOF
+but processing of the remaining streams continues so that as many streams as
+possible are drained.
+.SH RETURN VALUE
+Upon successful completion,
+.BR fflush ()
+returns 0.
+Otherwise,
+.B EOF
+is returned and
+.I errno
+is set to indicate the error.
+When
+.I stream
+is
+.BR NULL ,
+.B EOF
+is returned if any of the open streams could not be flushed; the remaining
+streams are still processed.
+.SH ERRORS
+.TP
+.B EBADF
+The file descriptor underlying
+.I stream
+is not valid or not open for writing.
+.TP
+.B EINVAL
+.I stream
+is not an open stream, or, when
+.I stream
+is an output stream, the buffered data could not be written.
+.PP
+The function may also fail and set
+.I errno
+for any of the errors specified for the routine
+.BR write (2).
+.SH SEE ALSO
+.BR close (2),
+.BR write (2),
+.BR fclose (3),
+.BR fopen (3),
+.BR fpurge (3),
+.BR setvbuf (3)
+.SH STANDARDS
+The
+.BR fflush ()
+function conforms to ISO/IEC 9899:1999 (\[lq]ISO C99\[rq]) and IEEE Std
+1003.1-2008 (\[lq]POSIX.1-2008\[rq]).
+The behavior of
+.BR fflush ()
+on input streams is an extension to the ISO C standard, specified by POSIX.

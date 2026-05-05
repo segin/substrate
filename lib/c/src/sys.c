@@ -95,6 +95,19 @@ int open(const char *pathname, int flags, ...) {
     return __set_errno((int)_syscall3(SYS_OPEN, (uintptr_t)pathname, flags, mode));
 }
 
+int openat(int dirfd, const char *pathname, int flags, ...) {
+    int mode = 0;
+
+    if (flags & O_CREAT) {
+        va_list ap;
+
+        va_start(ap, flags);
+        mode = va_arg(ap, int);
+        va_end(ap);
+    }
+    return __set_errno((int)_syscall4(SYS_OPENAT, dirfd, (uintptr_t)pathname, flags, mode));
+}
+
 int fcntl(int fd, int cmd, ...) {
     long arg = 0;
     va_list ap;
@@ -106,6 +119,10 @@ int fcntl(int fd, int cmd, ...) {
 
 int unlink(const char *pathname) {
     return __set_errno((int)_syscall1(SYS_UNLINK, (uintptr_t)pathname));
+}
+
+int unlinkat(int dirfd, const char *pathname, int flags) {
+    return __set_errno((int)_syscall3(SYS_UNLINKAT, dirfd, (uintptr_t)pathname, flags));
 }
 
 int link(const char *oldpath, const char *newpath) {
@@ -424,8 +441,12 @@ int fstat(int fd, struct stat *buf) {
     return __set_errno((int)_syscall2(SYS_FSTAT, fd, (uintptr_t)buf));
 }
 
+int fstatat(int dirfd, const char *pathname, struct stat *buf, int flags) {
+    return __set_errno((int)_syscall4(SYS_FSTATAT, dirfd, (uintptr_t)pathname, (uintptr_t)buf, flags));
+}
+
 int chown(const char *pathname, uid_t owner, gid_t group) {
-    return __set_errno((int)_syscall3(SYS_LCHOWN, (uintptr_t)pathname, owner, group));
+    return __set_errno((int)_syscall3(SYS_CHOWN, (uintptr_t)pathname, owner, group));
 }
 
 ssize_t readlink(const char *pathname, char *buf, size_t bufsiz) {
@@ -456,6 +477,10 @@ clock_t times(struct tms *buf) {
 
 int mkdir(const char *pathname, mode_t mode) {
     return __set_errno((int)_syscall2(SYS_MKDIR, (uintptr_t)pathname, mode));
+}
+
+int mkdirat(int dirfd, const char *pathname, mode_t mode) {
+    return __set_errno((int)_syscall3(SYS_MKDIRAT, dirfd, (uintptr_t)pathname, mode));
 }
 
 int rmdir(const char *pathname) {
@@ -672,8 +697,24 @@ int fchmod(int fd, mode_t mode) {
     return __set_errno((int)_syscall2(SYS_FCHMOD, fd, (int)mode));
 }
 
+int lchown(const char *pathname, uid_t owner, gid_t group) {
+    return __set_errno((int)_syscall3(SYS_LCHOWN, (uintptr_t)pathname, (int)owner, (int)group));
+}
+
 int fchown(int fd, uid_t owner, gid_t group) {
     return __set_errno((int)_syscall3(SYS_FCHOWN, fd, (int)owner, (int)group));
+}
+
+int fchownat(int dirfd, const char *pathname, uid_t owner, gid_t group, int flag) {
+    return __set_errno((int)_syscall5(SYS_FCHOWNAT, dirfd, (uintptr_t)pathname, (int)owner, (int)group, (int)flag));
+}
+
+int lchmod(const char *pathname, mode_t mode) {
+    return __set_errno((int)_syscall2(SYS_LCHMOD, (uintptr_t)pathname, (int)mode));
+}
+
+int fchmodat(int dirfd, const char *pathname, mode_t mode, int flag) {
+    return __set_errno((int)_syscall4(SYS_FCHMODAT, dirfd, (uintptr_t)pathname, (int)mode, (int)flag));
 }
 
 pid_t wait4(pid_t pid, int *wstatus, int options, struct rusage *rusage) {

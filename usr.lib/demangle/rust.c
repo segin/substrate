@@ -4,6 +4,7 @@
 #include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -352,11 +353,12 @@ rust_parse_decimal(rust_parser_t *p, size_t *out)
 
     v = 0u;
     while (isdigit((unsigned char)p->cur[0])) {
-        size_t nv = v * 10u + (size_t)(p->cur[0] - '0');
-        if (nv < v) {
+        unsigned d = (unsigned)(p->cur[0] - '0');
+        /* Pre-multiply saturation; see rust_parse_base62 / itanium. */
+        if (v > ((size_t)-1 - d) / 10u) {
             return -1;
         }
-        v = nv;
+        v = v * 10u + d;
         p->cur++;
     }
 
@@ -382,7 +384,6 @@ rust_parse_base62(rust_parser_t *p, size_t *out)
     v = 0u;
     while (p->cur[0] != '\0' && p->cur[0] != '_') {
         unsigned d;
-        size_t nv;
 
         if (p->cur[0] >= '0' && p->cur[0] <= '9') {
             d = (unsigned)(p->cur[0] - '0');
@@ -394,11 +395,13 @@ rust_parse_base62(rust_parser_t *p, size_t *out)
             return -1;
         }
 
-        nv = v * 62u + d;
-        if (nv < v) {
+        /* Pre-multiply saturation.  The post-multiply (nv < v) test
+         * misses overflows where v lands in [SIZE_MAX/62, SIZE_MAX/61): * v*62 wraps but the wrapped sum still exceeds v.  Reject
+         * before the wrap. */
+        if (v > ((size_t)-1 - d) / 62u) {
             return -1;
         }
-        v = nv;
+        v = v * 62u + d;
         p->cur++;
     }
 
@@ -407,6 +410,12 @@ rust_parse_base62(rust_parser_t *p, size_t *out)
     }
 
     p->cur++;
+    /* Reject final-step overflow on `v + 1u`.  Combined with the
+     * pre-multiply check above this means a hostile mangled name
+     * can no longer roll v over to 0 here. */
+    if (v == (size_t)-1) {
+        return -1;
+    }
     *out = v + 1u;
     return 0;
 }
@@ -814,12 +823,22 @@ rust_parse_v0_lifetime(rust_parser_t *p, int display)
         return rust_buf_appendc(&p->out, '_');
     }
 
+    /* For idx in 1..=26, render as 'a..'z.  For idx > 26, modular
+     * remapping made every 26th lifetime alias to the same letter
+     * with "..." appended, losing distinguishability between e.g.
+     * the 27th and 53rd lifetimes.  Append the bucket index instead
+     * so distinct lifetimes get distinct names. */
     letter = (char)('a' + (idx - 1u) % 26u);
     if (rust_buf_appendc(&p->out, letter) != 0) {
         return -1;
     }
     if (idx > 26u) {
-        return rust_buf_append(&p->out, "...", 3u);
+        char buf[24];
+        int n = snprintf(buf, sizeof(buf), "%zu", (size_t)((idx - 1u) / 26u));
+        if (n < 0 || (size_t)n >= sizeof(buf)) {
+            return -1;
+        }
+        return rust_buf_append(&p->out, buf, (size_t)n);
     }
 
     return 0;
@@ -977,8 +996,28 @@ rust_parse_v0_dyn_trait(rust_parser_t *p)
     return 0;
 }
 
+static int rust_parse_v0_type_inner(rust_parser_t *p);
+
 static int
 rust_parse_v0_type(rust_parser_t *p)
+{
+    int rc;
+
+    /* parse_v0_type recurses heavily — pointers, references, slices,
+     * arrays, tuples, function pointers, dyn-traits, named types
+     * all eventually call back here.  Path productions also re-enter
+     * via rust_parse_v0_generic_arg → rust_parse_v0_type.  Bound the
+     * descent so deeply-nested generic args can't blow the stack. */
+    if (rust_parser_enter(p) != 0) {
+        return -1;
+    }
+    rc = rust_parse_v0_type_inner(p);
+    rust_parser_leave(p);
+    return rc;
+}
+
+static int
+rust_parse_v0_type_inner(rust_parser_t *p)
 {
     static const struct {
         char code;
@@ -1651,10 +1690,17 @@ rust_legacy_decode_component(const char *s, size_t len, rust_buf_t *out)
 
     for (i = 0u; i < len; ) {
         if (s[i] != '$') {
-            if (rust_buf_appendc(out, s[i]) != 0) {
-                return -1;
+            if (s[i] == '.' && i + 1u < len && s[i + 1u] == '.') {
+                if (rust_buf_append(out, "::", 2u) != 0) {
+                    return -1;
+                }
+                i += 2u;
+            } else {
+                if (rust_buf_appendc(out, s[i]) != 0) {
+                    return -1;
+                }
+                i++;
             }
-            i++;
             continue;
         }
 
@@ -1686,11 +1732,20 @@ rust_legacy_decode_component(const char *s, size_t len, rust_buf_t *out)
 static int
 rust_legacy_process_component(const char *part, size_t len, int is_first, rust_buf_t *out)
 {
+    size_t start_off;
+
     if (!is_first && rust_buf_append(out, "::", 2u) != 0) {
         return -1;
     }
+    start_off = out->len;
     if (rust_legacy_decode_component(part, len, out) != 0) {
         return -1;
+    }
+    if (out->len > start_off + 1u && out->data[start_off] == '_' &&
+        (out->data[start_off + 1u] == '<' || out->data[start_off + 1u] == '(')) {
+        memmove(out->data + start_off, out->data + start_off + 1u,
+                out->len - start_off);
+        out->len--;
     }
     return 0;
 }

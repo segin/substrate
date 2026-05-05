@@ -1,4 +1,5 @@
 #include "job.h"
+#include "exec.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -243,8 +244,6 @@ int builtin_jobs(int argc, char **argv) {
 
 
 int builtin_fg(int argc, char **argv) {
-    extern pid_t shell_pgid;
-    extern struct termios shell_tmodes;
     job_t *j = NULL;
 
     if (argc > 1) {

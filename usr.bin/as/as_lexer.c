@@ -840,6 +840,23 @@ static int tokenize_line(const char *file, unsigned line_no, const char *line, i
             if (n > 0 && tok[n - 1] == ':' && (token_looks_like_segment_prefix(tok) == 0 || !saw_mnemonic)) {
                 tok[n - 1] = '\0';
                 kind = AS_TOK_LABEL;
+            } else if (!saw_mnemonic) {
+                size_t j = i;
+                while (line[j] != '\0' && isspace((unsigned char)line[j])) {
+                    j++;
+                }
+                if (line[j] == ':') {
+                    kind = AS_TOK_LABEL;
+                    i = j + 1;
+                } else {
+                    kind = classify_token(tok, intel_syntax);
+                    if (kind == AS_TOK_IDENTIFIER && !saw_mnemonic) {
+                        kind = AS_TOK_MNEMONIC;
+                        saw_mnemonic = 1;
+                    } else if (kind != AS_TOK_DIRECTIVE && kind != AS_TOK_LABEL) {
+                        saw_mnemonic = 1;
+                    }
+                }
             } else {
                 kind = classify_token(tok, intel_syntax);
                 if (kind == AS_TOK_IDENTIFIER && !saw_mnemonic) {

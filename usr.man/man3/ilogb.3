@@ -1,0 +1,308 @@
+.TH ILOGB 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+ilogb, ilogbf, ilogbl, logb, logbf, logbl \- extract unbiased exponent of a floating-point number
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "int ilogb(double " x );
+.br
+.BI "int ilogbf(float " x );
+.br
+.BI "int ilogbl(long double " x );
+.PP
+.BI "double logb(double " x );
+.br
+.BI "float logbf(float " x );
+.br
+.BI "long double logbl(long double " x );
+.SH DESCRIPTION
+The
+.BR ilogb ()
+and
+.BR logb ()
+families return the exponent part of their argument
+.IR x ,
+that is, the unbiased integer power of
+.B FLT_RADIX
+(2 on Substrate and other IEC 60559 / IEEE\ 754 binary platforms) such
+that
+.PP
+.RS 4
+.IR FLT_RADIX ^ result
+" <= |" x "| < " FLT_RADIX ^( result +1)
+.RE
+.PP
+for finite, non-zero
+.IR x .
+The result is the value
+.IR k
+that
+.BR frexp (3)
+would compute as its exponent output, minus 1; equivalently, it is the
+floor of the base-2 logarithm of the absolute value of
+.IR x .
+For example,
+.BR ilogb (1.0)
+is 0,
+.BR ilogb (2.0)
+is 1,
+.BR ilogb (0.5)
+is \-1, and
+.BR ilogb (1024.0)
+is 10.
+.PP
+The
+.BR ilogb ()
+function returns the exponent as an
+.B int
+suitable for passing to
+.BR scalbn (3).
+The
+.BR logb ()
+function returns the same exponent value, but typed as a floating-point
+number.  The two interfaces are intended to be paired with
+.BR scalbn (3)
+and
+.BR scalb (3)
+(or
+.BR ldexp (3))
+respectively to perform efficient multiplication and division by powers
+of the floating-point radix.
+.PP
+The
+.B f
+suffixed variants
+.RB ( ilogbf (),
+.BR logbf ())
+take
+.B float
+arguments; the
+.B l
+suffixed variants
+.RB ( ilogbl (),
+.BR logbl ())
+take
+.B "long double"
+arguments.
+.PP
+For a subnormal argument,
+.BR logb ()
+and
+.BR ilogb ()
+return the exponent that
+.I x
+would have if it were normalized; the value is therefore less than
+.B \-1022
+on platforms where
+.B double
+is IEEE\ 754 binary64.
+.SH RETURN VALUE
+On success,
+.BR ilogb ()
+and
+.BR logb ()
+return the unbiased exponent of
+.IR x .
+.PP
+The following special cases apply to
+.BR ilogb ():
+.TP
+.B "ilogb(0.0)"
+returns
+.B FP_ILOGB0
+and a domain error occurs.
+.TP
+.B "ilogb(\(+-Inf)"
+returns
+.B INT_MAX
+and a domain error occurs.
+.TP
+.B "ilogb(NaN)"
+returns
+.B FP_ILOGBNAN
+and a domain error occurs.
+.PP
+The following special cases apply to
+.BR logb ():
+.TP
+.B "logb(\(+-0)"
+returns
+.B \-HUGE_VAL
+(that is, negative infinity), and a pole error occurs.
+.TP
+.B "logb(\(+-Inf)"
+returns
+.BR +HUGE_VAL .
+.TP
+.B "logb(NaN)"
+returns a NaN.
+.PP
+The
+.B <math.h>
+header defines the integer constants
+.B FP_ILOGB0
+and
+.BR FP_ILOGBNAN ,
+which are the values returned by
+.BR ilogb ()
+for an argument of zero and NaN, respectively.  On Substrate these
+expand to
+.B INT_MIN
+and
+.BR INT_MAX ;
+portable code must not assume specific values and should instead test
+the argument for zero or NaN before calling
+.BR ilogb ().
+.SH ERRORS
+See
+.BR math_error (7)
+for information on how to determine whether an error has occurred when
+calling these functions.
+.PP
+The following errors can occur for
+.BR ilogb ():
+.TP
+Domain error: \fIx\fP is 0, \(+-infinity, or NaN
+An invalid floating-point exception
+.RB ( FE_INVALID )
+is raised.  If
+.I "math_errhandling & MATH_ERRNO"
+is non-zero,
+.I errno
+is set to
+.B EDOM
+(the C standard permits implementations to use
+.B ERANGE
+instead for the zero case; Substrate uses
+.BR EDOM ).
+.PP
+The following errors can occur for
+.BR logb ():
+.TP
+Pole error: \fIx\fP is 0
+A divide-by-zero floating-point exception
+.RB ( FE_DIVBYZERO )
+is raised.  If
+.I "math_errhandling & MATH_ERRNO"
+is non-zero,
+.I errno
+is set to
+.BR ERANGE .
+.PP
+.BR logb ()
+does not raise a domain error or set
+.I errno
+for
+.B \(+-Inf
+or NaN arguments; their handling follows ordinary IEC\ 60559 propagation
+rules.
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR ilogb (),
+.BR ilogbf (),
+.BR ilogbl (),
+.BR logb (),
+.BR logbf (),
+.BR logbl ()
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+.BR ilogb (),
+.BR logb (),
+and their
+.BR f / l
+variants conform to C99 and POSIX.1-2008.  The handling of zero,
+infinity, and NaN follows C99 Annex F.10.3.6 and F.10.3.10
+(IEC 60559).
+.SH EXAMPLES
+The following program extracts the unbiased exponent of
+.B 1024.0
+with both
+.BR ilogb ()
+and
+.BR logb ()
+to illustrate the difference in return type, and shows the special
+return values for zero, infinity, and NaN:
+.PP
+.RS 4
+.EX
+#include <errno.h>
+#include <fenv.h>
+#include <math.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    int    e_i;
+    double e_d;
+
+    /* Ordinary case: 1024.0 == 2^10. */
+    e_i = ilogb(1024.0);
+    e_d = logb(1024.0);
+    printf("ilogb(1024.0) = %d (int)\en",    e_i);
+    printf("logb (1024.0) = %.1f (double)\en", e_d);
+
+    /* Half: 0.5 == 2^-1. */
+    printf("ilogb(0.5)    = %d\en", ilogb(0.5));
+
+    /* Zero: ilogb returns FP_ILOGB0; logb returns -inf. */
+    feclearexcept(FE_ALL_EXCEPT);
+    errno = 0;
+    e_i = ilogb(0.0);
+    printf("ilogb(0.0)    = %d (FP_ILOGB0=%d, errno=%d)\en",
+           e_i, FP_ILOGB0, errno);
+
+    feclearexcept(FE_ALL_EXCEPT);
+    errno = 0;
+    e_d = logb(0.0);
+    printf("logb (0.0)    = %.1f (errno=%d)\en", e_d, errno);
+
+    /* NaN: ilogb returns FP_ILOGBNAN; logb returns NaN. */
+    printf("ilogb(NaN)    = %d (FP_ILOGBNAN=%d)\en",
+           ilogb(NAN), FP_ILOGBNAN);
+
+    return 0;
+}
+.EE
+.RE
+.PP
+A representative output is:
+.PP
+.RS 4
+.EX
+ilogb(1024.0) = 10 (int)
+logb (1024.0) = 10.0 (double)
+ilogb(0.5)    = -1
+ilogb(0.0)    = -2147483648 (FP_ILOGB0=-2147483648, errno=33)
+logb (0.0)    = -inf (errno=34)
+ilogb(NaN)    = 2147483647 (FP_ILOGBNAN=2147483647)
+.EE
+.RE
+.PP
+The exponent returned by
+.BR ilogb ()
+is the value
+.I n
+that satisfies
+.BI scalbn(x ", \-" n )
+in
+.BR [1.0,\ 2.0) ,
+making the pair the natural building blocks for radix-2 normalization.
+.SH SEE ALSO
+.BR fenv (3),
+.BR frexp (3),
+.BR log (3),
+.BR scalbn (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

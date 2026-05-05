@@ -95,13 +95,28 @@ int sys_set_thread_area(struct user_desc *u_info) {
     if (current_thread && current_thread->syscall_regs) {
         ((registers_t *)current_thread->syscall_regs)->gs = selector;
     }
-    
+
+    /*
+     * Persist the TLS base so arch_switch_to -> i386_load_gs_for_thread
+     * re-installs it into GDT_TLS_START on every context switch.
+     * Without this, any other personality (or another Linux process)
+     * that sets its own TLS overwrites our slot, and on resume our
+     * %gs:offset reads return that other thread's TCB — symptom is
+     * a SIGSEGV at `mov %gs:0xc, %eax` in glibc/libc-style TLS loads
+     * the moment we get scheduled back in after running an FreeBSD or
+     * NetBSD child.
+     */
+    if (current_thread && info.entry_number == GDT_TLS_START) {
+        current_thread->gs_base = info.base_addr;
+    }
+
     return 0;
 }
 
 extern int syscall_trace_enabled;
 
 void syscall_handler(registers_t *regs) {
+    __asm__ volatile("sti");
     thread_t *cpu_thread = CURRENT_THREAD();
     current_thread = cpu_thread;
     current_process = cpu_thread ? cpu_thread->proc : NULL;
@@ -135,6 +150,20 @@ void syscall_handler(registers_t *regs) {
 
     uint32_t args[8];
     i386_extract_syscall_args(p, regs, args);
+
+    /* DEBUG: track ls's __stack_chk_guard transitions for FreeBSD ls.
+     * Dumps the guard value when it first becomes non-zero. */
+    if (p->id == PERS_FREEBSD) {
+        static uint32_t last_guard = 0xDEADBEEF;
+        uint32_t *guard_ptr = (uint32_t *)0x409e28u;
+        uint32_t cur = *guard_ptr;
+        if (cur != last_guard) {
+            extern int kprintf(const char *fmt, ...);
+            kprintf("[GUARD-CHG] sysno=%u guard@0x409e28: 0x%08x -> 0x%08x eip=0x%08x\n",
+                    syscall_num, last_guard, cur, regs->eip);
+            last_guard = cur;
+        }
+    }
 
     if (syscall_trace_enabled) {
         char buf[512];
@@ -284,6 +313,22 @@ void syscall_handler(registers_t *regs) {
 
     void *location = p->syscall_table[syscall_num];
     
+    // Check for special sigreturn handling
+    if (syscall_num == 119 && p->sigreturn) {
+        regs->eax = (uint32_t)p->sigreturn(regs);
+        goto syscall_done;
+    }
+    if (syscall_num == 173 && p->rt_sigreturn) {
+        regs->eax = (uint32_t)p->rt_sigreturn(regs);
+        goto syscall_done;
+    }
+    // Native Substrate sigreturn
+    if (p->id == 0 && syscall_num == SYS_SIGRETURN) {
+        extern int sys_sigreturn(void*);
+        regs->eax = (uint32_t)sys_sigreturn(regs);
+        goto syscall_done;
+    }
+
     if (!location) {
         if (syscall_trace_enabled) kprint("SYSCALL: Not Implemented\n");
         regs->eax = -38; // ENOSYS
@@ -303,11 +348,29 @@ void syscall_handler(registers_t *regs) {
     
     typedef int64_t (*sys_func_t)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
     sys_func_t func = (sys_func_t)location;
-    
+
     // Dispatch
     int64_t ret = func(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
     if (p->id == PERS_ELKS) {
         regs->eax = (uint16_t)ret;
+    } else if (p->id == PERS_FREEBSD || p->id == PERS_NETBSD || p->id == PERS_OPENBSD) {
+        /*
+         * BSD int $0x80 ABI: CF=1 means error (EAX = positive errno value);
+         * CF=0 means success (EAX = return value).  Our internal functions
+         * return negative errno on error (Linux convention), so translate.
+         * Pointer-returning calls (mmap) return (void*)-1 = 0xFFFFFFFF on
+         * failure; that is also negative as int32, so CF gets set and EAX=1.
+         * The BSD libc mmap stub then calls cerror and returns MAP_FAILED,
+         * which the caller detects via the MAP_FAILED pointer check anyway.
+         */
+        uint32_t low = (uint32_t)(ret & 0xFFFFFFFF);
+        if ((int32_t)low < 0) {
+            regs->eax = (uint32_t)(-(int32_t)low); /* positive errno */
+            regs->eflags |= 1;  /* set CF */
+        } else {
+            regs->eax = low;
+            regs->eflags &= ~1U; /* clear CF */
+        }
     } else {
         regs->eax = (uint32_t)(ret & 0xFFFFFFFF);
     }
@@ -325,6 +388,7 @@ void syscall_handler(registers_t *regs) {
         regs->edx = (uint32_t)((ret >> 32) & 0xFFFFFFFF);
     }
 
+syscall_done:
     if (syscall_trace_enabled) {
         char buf[64];
         snprintf(buf, sizeof(buf), " ret %d\n", (int)regs->eax);

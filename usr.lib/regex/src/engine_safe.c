@@ -1689,6 +1689,9 @@ static ssize_t nfa_capture_match(nfa_prog *prog, const regex_t *re, const char *
     int list_id = 1;
     thread_list clist;
     thread_list nlist;
+    /* Greedy tracking: record the last (longest) match found */
+    size_t best_match_pos = (size_t)-1;
+    size_t *best_match_caps = NULL;
 
     if (!thread_list_init(&clist, 64) || !thread_list_init(&nlist, 64)) {
         if (out_err) {
@@ -1728,16 +1731,14 @@ static ssize_t nfa_capture_match(nfa_prog *prog, const regex_t *re, const char *
         for (idx = 0; idx < clist.count; ++idx) {
             nfa_state *s = clist.threads[idx].s;
             if (s->type == NFA_MATCH) {
-                if (capture_offsets && max_captures >= cap_count) {
-                    memcpy(capture_offsets, clist.threads[idx].caps, cap_count * sizeof(*capture_offsets));
-                    capture_offsets[1] = local_pos;
+                /* Greedy: record this match but continue to find a longer one */
+                size_t *clone = caps_clone(clist.threads[idx].caps, cap_count);
+                if (clone) {
+                    free(best_match_caps);
+                    best_match_caps = clone;
+                    best_match_pos  = local_pos;
                 }
-                if (out_err) {
-                    *out_err = REGEX_OK;
-                }
-                thread_list_free(&clist);
-                thread_list_free(&nlist);
-                return (ssize_t)prog->capture_count;
+                /* Fall through: let char-processing phase free this thread's caps */
             }
         }
 
@@ -1749,6 +1750,7 @@ static ssize_t nfa_capture_match(nfa_prog *prog, const regex_t *re, const char *
             if (out_err) {
                 *out_err = REGEX_ERR_MATCH_TIMEOUT;
             }
+            free(best_match_caps);
             thread_list_free(&clist);
             thread_list_free(&nlist);
             return -REGEX_ERR_MATCH_TIMEOUT;
@@ -1763,6 +1765,7 @@ static ssize_t nfa_capture_match(nfa_prog *prog, const regex_t *re, const char *
                     if (out_err) {
                         *out_err = REGEX_ERR_SYNTAX;
                     }
+                    free(best_match_caps);
                     thread_list_free(&clist);
                     thread_list_free(&nlist);
                     return -REGEX_ERR_SYNTAX;
@@ -1784,6 +1787,7 @@ static ssize_t nfa_capture_match(nfa_prog *prog, const regex_t *re, const char *
                     if (match_char(s->ch, cp, re->flags)) {
                         if (!add_state(&nlist, s->out, caps, cap_count, list_id, local_pos + advance,
                                        text, text_len, re->flags, out_err)) {
+                            free(best_match_caps);
                             thread_list_free(&clist);
                             thread_list_free(&nlist);
                             return -REGEX_ERR_NOMEM;
@@ -1796,6 +1800,7 @@ static ssize_t nfa_capture_match(nfa_prog *prog, const regex_t *re, const char *
                     if ((re->flags & REGEX_FLAG_DOTALL) || !regex_is_newline(cp)) {
                         if (!add_state(&nlist, s->out, caps, cap_count, list_id, local_pos + advance,
                                        text, text_len, re->flags, out_err)) {
+                            free(best_match_caps);
                             thread_list_free(&clist);
                             thread_list_free(&nlist);
                             return -REGEX_ERR_NOMEM;
@@ -1808,6 +1813,7 @@ static ssize_t nfa_capture_match(nfa_prog *prog, const regex_t *re, const char *
                     if (match_class_char(s->charclass, cp, re->flags)) {
                         if (!add_state(&nlist, s->out, caps, cap_count, list_id, local_pos + advance,
                                        text, text_len, re->flags, out_err)) {
+                            free(best_match_caps);
                             thread_list_free(&clist);
                             thread_list_free(&nlist);
                             return -REGEX_ERR_NOMEM;
@@ -1831,11 +1837,25 @@ static ssize_t nfa_capture_match(nfa_prog *prog, const regex_t *re, const char *
         }
     }
 
+    thread_list_free(&clist);
+    thread_list_free(&nlist);
+
+    if (best_match_pos != (size_t)-1) {
+        if (capture_offsets && max_captures >= cap_count && best_match_caps) {
+            memcpy(capture_offsets, best_match_caps, cap_count * sizeof(*capture_offsets));
+            capture_offsets[1] = best_match_pos;
+        }
+        free(best_match_caps);
+        if (out_err) {
+            *out_err = REGEX_OK;
+        }
+        return (ssize_t)prog->capture_count;
+    }
+
+    free(best_match_caps);
     if (out_err) {
         *out_err = REGEX_OK;
     }
-    thread_list_free(&clist);
-    thread_list_free(&nlist);
     return -1;
 }
 
