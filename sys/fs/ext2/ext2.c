@@ -2285,20 +2285,19 @@ int ext2_statfs(fs_node_t *node, struct statfs *buf) {
     if (!ctx) return -EINVAL;
     ext2_fs_t *fs = ctx->fs;
 
-    buf->f_type = EXT2_SUPER_MAGIC;
-    buf->f_bsize = fs->block_size;
-    buf->f_iosize = fs->block_size;
-    buf->f_blocks = fs->sb.s_blocks_count;
-    buf->f_bfree = fs->sb.s_free_blocks_count;
-    buf->f_bavail = fs->sb.s_free_blocks_count;
-    buf->f_files = fs->sb.s_inodes_count;
-    buf->f_ffree = fs->sb.s_free_inodes_count;
-    buf->f_fsid = 0;
-    buf->f_owner = 0;
-    buf->f_flags = 0;
-    buf->f_syncwrites = 0;
-    buf->f_asyncwrites = 0;
-    
+    buf->f_type         = EXT2_SUPER_MAGIC;
+    buf->f_bsize        = fs->block_size;
+    buf->f_iosize       = fs->block_size;
+    buf->f_blocks       = fs->sb.s_blocks_count;
+    buf->f_bfree        = fs->sb.s_free_blocks_count;
+    buf->f_bavail       = fs->sb.s_free_blocks_count;
+    buf->f_files        = fs->sb.s_inodes_count;
+    buf->f_ffree        = fs->sb.s_free_inodes_count;
+    buf->f_fsid         = 0;
+    buf->f_owner        = 0;
+    buf->f_flags        = 0;
+    buf->f_syncwrites   = 0;
+    buf->f_asyncwrites  = 0;
     strncpy(buf->f_fstypename, "ext2", sizeof(buf->f_fstypename));
     memset(buf->f_mntonname, 0, sizeof(buf->f_mntonname));
     memset(buf->f_mntfromname, 0, sizeof(buf->f_mntfromname));
