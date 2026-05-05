@@ -330,7 +330,6 @@ char *expand_prompt_escapes(const char *ps1, int command_count, int extended, in
                     break;
                 }
                 case 'j': { // %j = number of background jobs
-                    extern job_t *first_job;
                     int job_count = 0;
                     job_t *j = first_job;
                     while (j) {
@@ -405,13 +404,13 @@ char *evaluate_prompt(const char *ps1, int command_count, int extended) {
     sigaddset(&blocked, SIGINT);
     sigaddset(&blocked, SIGTERM);
     sigaddset(&blocked, SIGCHLD);
+    sigaddset(&blocked, SIGPIPE);
     sigprocmask(SIG_BLOCK, &blocked, &old_mask);
     
     // Save state
     int saved_xtrace = shell_xtrace;
     int saved_errexit = shell_errexit;
-    char *saved_status_str = shell_var_get("?");
-    char *saved_status = saved_status_str ? strdup(saved_status_str) : NULL;
+    char *saved_status = shell_var_get("?");
     
     // Disable tracing and error exit for prompt evaluation
     shell_xtrace = 0;

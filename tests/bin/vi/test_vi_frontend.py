@@ -211,6 +211,99 @@ def main():
     require("[Readonly]" in decoded, "view vi missing readonly status")
     require(saved == "one\n", f"view vi unexpectedly modified file: {saved!r}")
 
+    env_path = shutil.which("env") or "/usr/bin/env"
+    for label, locale_args in (
+        ("c", ["LC_ALL=C", "LC_CTYPE=C", "LANG=C"]),
+        ("posix", ["LC_ALL=POSIX", "LC_CTYPE=POSIX", "LANG=POSIX"]),
+        ("latin1", ["LC_ALL=en_US.ISO-8859-1", "LC_CTYPE=en_US.ISO-8859-1",
+            "LANG=en_US.ISO-8859-1"]),
+    ):
+        exit_code, decoded, saved = helpers.run_vi_session(
+            env_path,
+            "one\ntwo\n",
+            [b"/", b"two\r", b"A", b"Z", b"\x1b"],
+            extra_args=locale_args + [vi_path],
+            argv0="env",
+        )
+        require(exit_code == 0, f"locale-fallback-{label} vi exited with status {exit_code}")
+        require("line 2/2" in decoded,
+                f"locale-fallback-{label} missing search status under fallback locale")
+        require(saved == "one\ntwoZ\n",
+                f"locale-fallback-{label} buffer mismatch: {saved!r}")
+
+    for name, initial_text, key_steps, expected in (
+        ("utf8-motion-0ll", "aéb\n", [b"0", b"l", b"l", b"r", b"X"], "aéX\n"),
+        ("utf8-motion-dollar-hh", "aéb\n", [b"$", b"h", b"h", b"r", b"X"], "Xéb\n"),
+        ("utf8-motion-caret-ll", "  aéb\n", [b"^", b"l", b"l", b"r", b"X"], "  aéX\n"),
+        ("utf8-motion-bar", "aéb\n", [b"3|", b"r", b"X"], "aéX\n"),
+        ("utf8-motion-till-forward", "aébc\n",
+            [b"0", b"t", b"b", b"i", b"X", b"\x1b"], "aXébc\n"),
+        ("utf8-motion-till-backward", "abécd\n",
+            [b"$", b"T", b"b", b"i", b"X", b"\x1b"], "abXécd\n"),
+        ("utf8-motion-find-forward", "aébcd\n",
+            [b"0", b"f", b"c", b"r", b"X"], "aébXd\n"),
+        ("utf8-motion-find-backward", "abécd\n",
+            [b"$", b"F", b"b", b"r", b"X"], "aXécd\n"),
+        ("utf8-motion-repeat-find", "aébcdebc\n",
+            [b"0", b"f", b"b", b";", b"r", b"X"], "aébcdeXc\n"),
+        ("utf8-motion-repeat-reverse", "abécdbfg\n",
+            [b"$", b"F", b"b", b",", b"r", b"X"], "abécdXfg\n"),
+        ("utf8-motion-percent", "(é)\n", [b"%", b"r", b"X"], "(éX\n"),
+    ):
+        exit_code, decoded, saved = helpers.run_vi_session(vi_path, initial_text, key_steps)
+        require(exit_code == 0, f"{name} vi exited with status {exit_code}")
+        require(saved == expected, f"{name} buffer mismatch: {saved!r}")
+
+    for name, initial_text, key_steps, expected in (
+        ("utf8-word-motion-w", "aé bc\n", [b"0", b"w", b"r", b"X"], "aé Xc\n"),
+        ("utf8-word-motion-b", "a bcé\n", [b"$", b"b", b"r", b"X"], "a Xcé\n"),
+        ("utf8-word-motion-e", "aébc de\n", [b"0", b"e", b"r", b"X"], "aébX de\n"),
+        ("utf8-word-motion-ge", "ab cé\n",
+            [b"$", b"g", b"e", b"i", b"X", b"\x1b"], "aXb cé\n"),
+        ("utf8-bigword-motion-W", "aé bc\n", [b"0", b"W", b"r", b"X"], "aé Xc\n"),
+        ("utf8-bigword-motion-B", "a bcé\n", [b"$", b"B", b"r", b"X"], "a Xcé\n"),
+        ("utf8-bigword-motion-E", "aébc de\n", [b"0", b"E", b"r", b"X"], "aébX de\n"),
+        ("utf8-bigword-motion-gE", "ab cé\n",
+            [b"$", b"g", b"E", b"i", b"X", b"\x1b"], "aXb cé\n"),
+        ("utf8-sentence-motion", "Hi é. Bye.\n",
+            [b"0", b")", b"r", b"X"], "Hi é. Xye.\n"),
+        ("utf8-paragraph-motion", "aa\n\néé\n\nbb\n",
+            [b"0", b"}", b"r", b"X"], "aa\n\néé\n\nbb\n"),
+    ):
+        exit_code, decoded, saved = helpers.run_vi_session(vi_path, initial_text, key_steps)
+        require(exit_code == 0, f"{name} vi exited with status {exit_code}")
+        require(saved == expected, f"{name} buffer mismatch: {saved!r}")
+
+    for name, initial_text, key_steps, expected in (
+        ("display-tab-inside", "\tb\n", [b"2|", b"i", b"X", b"\x1b"], "X\tb\n"),
+        ("display-tab-after", "\tb\n", [b"9|", b"i", b"X", b"\x1b"], "\tXb\n"),
+        ("display-doublewidth-fallback", "漢b\n",
+            [b"2|", b"i", b"X", b"\x1b"], "漢Xb\n"),
+        ("display-combining-fallback", "a\u0301b\n",
+            [b"3|", b"i", b"X", b"\x1b"], "a\u0301Xb\n"),
+        ("display-zero-width-fallback", "a\u200bb\n",
+            [b"3|", b"i", b"X", b"\x1b"], "a\u200bXb\n"),
+    ):
+        exit_code, decoded, saved = helpers.run_vi_session(vi_path, initial_text, key_steps)
+        require(exit_code == 0, f"{name} vi exited with status {exit_code}")
+        require(saved == expected, f"{name} buffer mismatch: {saved!r}")
+
+    for name, initial_bytes, key_steps, expected in (
+        ("display-invalid-byte-inside", b"a\xffb\n",
+            [b"3|", b"i", b"X", b"\x1b"], b"aX\xffb\n"),
+        ("display-invalid-byte-after", b"a\xffb\n",
+            [b"4|", b"i", b"X", b"\x1b"], b"a\xffXb\n"),
+    ):
+        exit_code, decoded, saved = helpers.run_vi_session(
+            vi_path,
+            "",
+            key_steps,
+            initial_bytes=initial_bytes,
+            return_saved_bytes=True,
+        )
+        require(exit_code == 0, f"{name} vi exited with status {exit_code}")
+        require(saved == expected, f"{name} buffer mismatch: {saved!r}")
+
     exit_code, decoded, saved = helpers.run_vi_session(
         vi_path,
         "",

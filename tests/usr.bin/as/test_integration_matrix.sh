@@ -16,6 +16,7 @@ if [ -x "$SUB_LD" ]; then
 else
     echo "ok: main/ld integration skipped due to missing sub ld"
 fi
+"$ROOT/tests/usr.bin/as/test_x86_64_short_local_temp_branch.sh"
 
 # 8b.3: cross-arch rejection (x86 source under ARM/AArch64 mode).
 cat > "$TMP/x86_only.s" <<'SRC'

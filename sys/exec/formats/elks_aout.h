@@ -116,7 +116,7 @@ static inline uint32_t elks_data_segment_limit(const struct elks_load_plan *plan
 static inline size_t elks_string_vector_count(char *const vec[]) {
     size_t count = 0;
 
-    if (!vec) {
+    if (!vec || (uintptr_t)vec < 0xC0000000) {
         return 0;
     }
     while (vec[count]) {
@@ -129,7 +129,7 @@ static inline size_t elks_string_vector_bytes(char *const vec[]) {
     size_t bytes = 0;
     size_t i;
 
-    if (!vec) {
+    if (!vec || (uintptr_t)vec < 0xC0000000) {
         return 0;
     }
     for (i = 0; vec[i]; i++) {

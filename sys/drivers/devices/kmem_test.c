@@ -41,11 +41,12 @@ void kmem_test_init(void) {
     const char *end_msg = "KMEM_TEST_END: End of buffer.";
 
     if (kmem_test_size > 0) {
-        strlcpy((char*)kmem_test_buffer, start_msg, kmem_test_size);
+        snprintf((char*)kmem_test_buffer, kmem_test_size, "%s", start_msg);
     }
 
     if (kmem_test_size > (int)strlen(end_msg) + 1) {
-        strlcpy((char*)kmem_test_buffer + kmem_test_size - strlen(end_msg) - 1, end_msg, strlen(end_msg) + 1);
+        int offset = kmem_test_size - strlen(end_msg) - 1;
+        snprintf((char*)kmem_test_buffer + offset, kmem_test_size - offset, "%s", end_msg);
     }
 
     char buf[128];

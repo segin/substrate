@@ -1,0 +1,57 @@
+.\" Copyright (c) 2026
+.\" All rights reserved.
+.\"
+.Dd April 9, 2026
+.Dt TTY 1
+.Os
+.Sh NAME
+.Nm tty
+.Nd print the file name of the terminal connected to standard input
+.Sh SYNOPSIS
+.Nm
+.Op Fl s
+.Sh DESCRIPTION
+The
+.Nm
+utility writes the file name of the terminal connected to standard input.
+It first verifies that
+.Dv STDIN_FILENO
+refers to a terminal and then resolves the terminal name with
+.Fn ttyname .
+.Pp
+If standard input is not a terminal,
+.Nm
+writes
+.Dq not a tty
+and exits with status 1.
+.Pp
+The options are as follows:
+.Bl -tag -width Ds
+.It Fl s
+Suppress all output.
+Only the exit status is significant.
+.El
+.Sh EXIT STATUS
+.Ex -std tty
+.Pp
+The
+.Nm
+utility exits with one of the following values:
+.Bl -tag -width Ds
+.It 0
+Standard input is a terminal.
+.It 1
+Standard input is not a terminal.
+.It 2
+Usage error or terminal-name lookup failure.
+.El
+.Sh SEE ALSO
+.Xr stty 1 ,
+.Xr isatty 3 ,
+.Xr ttyname 3
+.Sh STANDARDS
+The
+.Nm
+utility is expected to be IEEE Std 1003.1-2017
+.Pq Dq POSIX.1
+compatible.

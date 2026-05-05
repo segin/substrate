@@ -8,6 +8,9 @@ ELFOBJ_SRCS = $(wildcard $(ELFOBJ_DIR)/src/*.c) $(wildcard $(ELFOBJ_DIR)/src/*.h
 
 LDADD += $(ELFOBJ_AR)
 USER_CFLAGS += -iquote ../../include
+ifndef NATIVE_BUILD
+USER_CFLAGS += -DLD_SUBSTRATE_BUILD=1
+endif
 
 include ../../Makefile.bin.inc
 

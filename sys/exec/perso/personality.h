@@ -42,6 +42,11 @@ struct personality {
     struct syscall_fmt *syscall_fmts;
     uint32_t syscall_count;
 
+    /* Filesystem prefix under which this personality's binaries/libs live.
+     * The ELF loader prepends this to PT_INTERP paths and library lookups.
+     * NULL means use the root filesystem directly (native personality). */
+    const char *path_prefix;
+
     /* Signal hooks */
     void (*sendsig)(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
     int (*sigreturn)(void *regs);

@@ -19,6 +19,7 @@
 #include <drivers/storage/scsi/scsi.h>
 #include <kern/console.h>
 #include <sys/dma.h>
+#include <sys/lock.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -72,12 +73,29 @@ struct usb_msc_csw {
  */
 
 #define USB_MSC_MAX_DEVICES     4
+/*
+ * Bounce buffer is only used when the caller supplies a buffer that is
+ * NOT in the kernel direct-mapped window (e.g. a user-mode buffer routed
+ * here without remapping).  The fast path skips it entirely for kernel
+ * pointers.  Sizing it at 64KB matches the direct-path chunk size so the
+ * fall-back doesn't double the round-trip count for very large I/Os.
+ */
+#define USB_MSC_BOUNCE_SIZE     65536
+/* Max bytes per Bulk transfer.  At max_packet=64 (USB 1.1 bulk) one
+ * TD covers 64 bytes, so 128 KB needs 2048 TDs — exactly the UHCI
+ * pool size.  Submit_lock serializes everything, so concurrent control
+ * transfers can't race for TDs.  Doubling from 64 KB halves the
+ * per-chunk software overhead (lock acquire, descriptor wiring,
+ * schedule insert/remove). */
+#define USB_MSC_DIRECT_CHUNK    131072
+#define USB_MSC_KERN_BASE       0xC0000000U
 
 typedef struct usb_msc_dev {
     usb_device_t    *udev;
     usb_endpoint_t  *ep_in;         /* Bulk-IN endpoint */
     usb_endpoint_t  *ep_out;        /* Bulk-OUT endpoint */
     scsi_link_t      scsi_link;
+    mutex_t          lock;          /* Transfer serialization lock */
     uint32_t         tag;           /* Incrementing CBW tag */
     uint8_t          max_lun;
     uint8_t          active;
@@ -85,8 +103,10 @@ typedef struct usb_msc_dev {
     /* DMA-safe buffers for BOT protocol (avoid stack DMA) */
     struct usb_msc_cbw *cbw;        /* DMA-coherent CBW buffer */
     struct usb_msc_csw *csw;        /* DMA-coherent CSW buffer */
+    void               *bounce_buf; /* DMA-coherent bounce buffer */
     dma_addr_t          cbw_dma;
     dma_addr_t          csw_dma;
+    dma_addr_t          bounce_dma;
 } usb_msc_dev_t;
 
 static usb_msc_dev_t msc_devices[USB_MSC_MAX_DEVICES];
@@ -122,7 +142,7 @@ static int usb_msc_reset_recovery(usb_msc_dev_t *msc)
  * ============================================================
  */
 
-static int usb_msc_bot_transfer(usb_msc_dev_t *msc,
+static int usb_msc_bot_transfer(usb_msc_dev_t *msc, uint8_t lun,
                                 uint8_t *cdb, uint8_t cdb_len,
                                 void *data, uint32_t data_len,
                                 int is_read, uint32_t *residue)
@@ -131,6 +151,9 @@ static int usb_msc_bot_transfer(usb_msc_dev_t *msc,
     struct usb_msc_csw *csw = msc->csw;
     uint32_t actual;
     int ret;
+    int status = -1;
+
+    mutex_lock(&msc->lock);
 
     /* Build CBW in DMA-coherent buffer */
     memset(cbw, 0, sizeof(*cbw));
@@ -138,7 +161,7 @@ static int usb_msc_bot_transfer(usb_msc_dev_t *msc,
     cbw->dCBWTag = ++msc->tag;
     cbw->dCBWDataTransferLength = data_len;
     cbw->bmCBWFlags = is_read ? 0x80 : 0x00;
-    cbw->bCBWLUN = 0;
+    cbw->bCBWLUN = lun;
     cbw->bCBWCBLength = cdb_len;
     if (cdb_len > 16)
         cdb_len = 16;
@@ -148,24 +171,84 @@ static int usb_msc_bot_transfer(usb_msc_dev_t *msc,
     ret = usb_bulk_transfer(msc->udev, msc->ep_out,
                             cbw, CBW_SIZE, &actual);
     if (ret != USB_XFER_OK) {
-        kprintf("usb_msc: CBW send failed (%d)\n", ret);
+        kprintf("usb_msc: CBW phase failed (ret=%d)\n", ret);
         usb_msc_reset_recovery(msc);
-        return -1;
+        goto cleanup;
     }
 
-    /* Data phase (if any) */
+    /* Data phase (if any).
+     *
+     * Fast path: caller's buffer is in the kernel direct-mapped window
+     * (kmalloc / pmm_alloc_contiguous output), which is the case for all
+     * SCSI mid-layer requests originating from disk I/O.  Hand the buffer
+     * straight to the HCD; dma_map_single will return its physical address
+     * with no copy.  We still chunk at USB_MSC_DIRECT_CHUNK to bound TD
+     * pool usage in UHCI (each Bulk transfer allocates max_packet-sized
+     * TDs, e.g. 64KB / 64B = 1024 TDs out of UHCI_MAX_TDS=2048).
+     *
+     * Fall-back path: caller's buffer is outside the direct map.  Use the
+     * pre-allocated DMA bounce buffer with the original chunked memcpy.
+     * This keeps correctness for unusual callers without penalising the
+     * common case.
+     */
     if (data && data_len > 0) {
         usb_endpoint_t *data_ep = is_read ? msc->ep_in : msc->ep_out;
+        uint32_t remaining = data_len;
+        uint8_t *ptr = (uint8_t *)data;
+        int direct = ((uintptr_t)data >= USB_MSC_KERN_BASE);
 
-        ret = usb_bulk_transfer(msc->udev, data_ep,
-                                data, data_len, &actual);
-        if (ret == USB_XFER_STALL) {
-            /* Stall on data endpoint — clear halt and read CSW */
-            usb_clear_halt(msc->udev, data_ep);
-        } else if (ret != USB_XFER_OK && ret != USB_XFER_SHORT) {
-            kprintf("usb_msc: data transfer failed (%d)\n", ret);
-            usb_msc_reset_recovery(msc);
-            return -1;
+        if (direct) {
+            while (remaining > 0) {
+                uint32_t chunk_size = (remaining > USB_MSC_DIRECT_CHUNK) ?
+                                      USB_MSC_DIRECT_CHUNK : remaining;
+
+                ret = usb_bulk_transfer(msc->udev, data_ep,
+                                        ptr, chunk_size, &actual);
+
+                if (ret == USB_XFER_STALL) {
+                    usb_clear_halt(msc->udev, data_ep);
+                    break;
+                } else if (ret != USB_XFER_OK && ret != USB_XFER_SHORT) {
+                    kprintf("usb_msc: data phase failed (%d)\n", ret);
+                    usb_msc_reset_recovery(msc);
+                    goto cleanup;
+                }
+
+                ptr += actual;
+                remaining -= actual;
+
+                if (actual < chunk_size)
+                    break;  /* short packet ends transfer */
+            }
+        } else {
+            while (remaining > 0) {
+                uint32_t chunk_size = (remaining > USB_MSC_BOUNCE_SIZE) ?
+                                      USB_MSC_BOUNCE_SIZE : remaining;
+
+                if (!is_read)
+                    memcpy(msc->bounce_buf, ptr, chunk_size);
+
+                ret = usb_bulk_transfer(msc->udev, data_ep,
+                                        msc->bounce_buf, chunk_size, &actual);
+
+                if (is_read && (ret == USB_XFER_OK || ret == USB_XFER_SHORT))
+                    memcpy(ptr, msc->bounce_buf, actual);
+
+                if (ret == USB_XFER_STALL) {
+                    usb_clear_halt(msc->udev, data_ep);
+                    break;
+                } else if (ret != USB_XFER_OK && ret != USB_XFER_SHORT) {
+                    kprintf("usb_msc: data phase failed (%d)\n", ret);
+                    usb_msc_reset_recovery(msc);
+                    goto cleanup;
+                }
+
+                ptr += actual;
+                remaining -= actual;
+
+                if (actual < chunk_size)
+                    break;
+            }
         }
     }
 
@@ -180,46 +263,60 @@ static int usb_msc_bot_transfer(usb_msc_dev_t *msc,
     }
 
     if (ret != USB_XFER_OK || actual < CSW_SIZE) {
-        kprintf("usb_msc: CSW receive failed (%d, %u bytes)\n", ret, actual);
+        kprintf("usb_msc: CSW phase failed (%d, actual=%u)\n", ret, actual);
         usb_msc_reset_recovery(msc);
-        return -1;
+        goto cleanup;
     }
 
     /* Validate CSW */
     if (csw->dCSWSignature != CSW_SIGNATURE) {
         kprintf("usb_msc: invalid CSW signature 0x%08x\n", csw->dCSWSignature);
         usb_msc_reset_recovery(msc);
-        return -1;
+        goto cleanup;
     }
 
     if (csw->dCSWTag != cbw->dCBWTag) {
         kprintf("usb_msc: CSW tag mismatch (expected %u, got %u)\n",
                 cbw->dCBWTag, csw->dCSWTag);
         usb_msc_reset_recovery(msc);
-        return -1;
+        goto cleanup;
     }
 
     if (residue)
         *residue = csw->dCSWDataResidue;
 
+    if (csw->bCSWStatus != CSW_STATUS_PASSED || csw->dCSWDataResidue > 0) {
+        kprintf("usb_msc: BOT xfer: op=0x%02x, len=%u, status=%u, residue=%u\n",
+                cbw->CBWCB[0], cbw->dCBWDataTransferLength, 
+                csw->bCSWStatus, csw->dCSWDataResidue);
+    }
+
     switch (csw->bCSWStatus) {
     case CSW_STATUS_PASSED:
-        return 0;
+        status = 0;
+        break;
 
     case CSW_STATUS_FAILED:
         /* Command failed — caller should issue REQUEST SENSE */
-        return 1;
+        status = 1;
+        break;
 
     case CSW_STATUS_PHASE_ERROR:
         /* Phase error — perform reset recovery */
         usb_msc_reset_recovery(msc);
-        return -1;
+        status = -1;
+        break;
 
     default:
         kprintf("usb_msc: unknown CSW status %u\n", csw->bCSWStatus);
         usb_msc_reset_recovery(msc);
-        return -1;
+        status = -1;
+        break;
     }
+
+cleanup:
+    mutex_unlock(&msc->lock);
+    return status;
 }
 
 /*
@@ -240,7 +337,7 @@ static int usb_msc_scsi_execute(scsi_link_t *link, scsi_request_t *req)
 
     is_read = (req->flags & SCSI_REQ_READ) ? 1 : 0;
 
-    ret = usb_msc_bot_transfer(msc,
+    ret = usb_msc_bot_transfer(msc, (uint8_t)req->device->lun,
                                req->cdb, req->cdb_len,
                                req->data, req->data_len,
                                is_read, &residue);
@@ -261,7 +358,8 @@ static int usb_msc_scsi_execute(scsi_link_t *link, scsi_request_t *req)
             uint8_t sense_buf[18];
             uint32_t sr;
 
-            if (usb_msc_bot_transfer(msc, sense_cdb, 6,
+            if (usb_msc_bot_transfer(msc, (uint8_t)req->device->lun,
+                                     sense_cdb, 6,
                                      sense_buf, 18, 1, &sr) == 0) {
                 uint8_t copy_len = 18;
                 if (copy_len > SCSI_MAX_SENSE_LEN)
@@ -369,16 +467,28 @@ static int usb_msc_attach(usb_device_t *dev)
     msc->ep_in = ep_in;
     msc->ep_out = ep_out;
     msc->tag = 0;
+    mutex_init(&msc->lock, "usb_msc");
 
     /* Allocate DMA-coherent buffers for CBW/CSW (avoid stack DMA) */
     msc->cbw = dma_alloc_coherent(sizeof(struct usb_msc_cbw), &msc->cbw_dma);
     msc->csw = dma_alloc_coherent(sizeof(struct usb_msc_csw), &msc->csw_dma);
-    if (!msc->cbw || !msc->csw) {
+    msc->bounce_buf = dma_alloc_coherent(USB_MSC_BOUNCE_SIZE, &msc->bounce_dma);
+    if (!msc->cbw || !msc->csw || !msc->bounce_buf) {
         kprintf("usb_msc: failed to allocate DMA buffers\n");
-        if (msc->cbw)
+        /* Free what we got and zero the pointers so a future attach on
+         * the same slot can't double-free a stale value. */
+        if (msc->cbw) {
             dma_free_coherent(msc->cbw, sizeof(struct usb_msc_cbw));
-        if (msc->csw)
+            msc->cbw = NULL;
+        }
+        if (msc->csw) {
             dma_free_coherent(msc->csw, sizeof(struct usb_msc_csw));
+            msc->csw = NULL;
+        }
+        if (msc->bounce_buf) {
+            dma_free_coherent(msc->bounce_buf, USB_MSC_BOUNCE_SIZE);
+            msc->bounce_buf = NULL;
+        }
         return -1;
     }
 
@@ -407,9 +517,11 @@ static int usb_msc_attach(usb_device_t *dev)
 
     dev->driver_data = msc;
 
+    /*
     kprintf("usb_msc: attached %04x:%04x (max_lun=%u) -> scsi bus %u\n",
             dev->vendor_id, dev->product_id,
             msc->max_lun, msc->scsi_link.bus_id);
+    */
 
     /* Scan for SCSI devices on this link */
     scsi_scan_bus(&msc->scsi_link, msc->scsi_link.bus_id);
@@ -431,8 +543,11 @@ static void usb_msc_detach(usb_device_t *dev)
         dma_free_coherent(msc->cbw, sizeof(struct usb_msc_cbw));
     if (msc->csw)
         dma_free_coherent(msc->csw, sizeof(struct usb_msc_csw));
+    if (msc->bounce_buf)
+        dma_free_coherent(msc->bounce_buf, USB_MSC_BOUNCE_SIZE);
     msc->cbw = NULL;
     msc->csw = NULL;
+    msc->bounce_buf = NULL;
 
     msc->active = 0;
     msc->udev = NULL;

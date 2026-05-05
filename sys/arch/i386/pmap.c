@@ -11,6 +11,7 @@
 #include <sys/smp.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
+#include <sys/lock.h>
 #include <sys/param.h>
 #include <vm/vm_kmem.h>
 #include <string.h>
@@ -550,6 +551,11 @@ pmap_t pmap_fork(pmap_t src_pmap) {
         
         // Get source page table
         uint32_t src_pt_phys = src_pd[pdi] & ~0xFFF;
+        /* Bounds check: ensure physical address is in direct-map range (finding #14) */
+        if (src_pt_phys >= 0x40000000) {
+            pmap_destroy(dst_pmap);
+            return 0;
+        }
         uint32_t *src_pt = (uint32_t *)(src_pt_phys + 0xC0000000);
         
         // Allocate page table for child (checkbox 141)
@@ -602,14 +608,13 @@ pmap_t pmap_fork(pmap_t src_pmap) {
 
     /*
      * Parent mappings were rewritten read-only for COW.
-     * If parent's pmap is currently active, flush stale writable TLB entries
-     * so subsequent parent writes fault and trigger COW instead of corrupting
-     * shared child pages.
+     * Flush stale writable TLB entries on ALL CPUs so subsequent parent
+     * writes fault and trigger COW instead of corrupting shared child pages.
      */
     uint32_t cr3;
     __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
     if (cr3 == src_pmap->pdir_phys) {
-        pmap_invalidate_all();
+        pmap_shootdown_all();
     }
     
     return dst_pmap;
@@ -704,6 +709,9 @@ int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t 
     uint32_t pte_flags = PTE_P;
     if (prot & VM_PROT_WRITE) {
         pte_flags |= PTE_W;
+        /* Note: PTE_D (dirty bit) is NOT pre-set here. We rely on the
+         * x86 hardware to set PTE_D automatically on the first write.
+         * This is the standard approach and avoids unnecessary TLB shootdowns. */
     }
     if ((va < 0xC0000000) || (prot & VM_PROT_USER)) {
         pte_flags |= PTE_U;  // User accessible if in user space or requested
@@ -744,12 +752,62 @@ int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t 
 
 int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_list, uint32_t prot, uint32_t flags) {
     struct pmap_activation_state activation;
+    typedef struct {
+        uint32_t pdi;
+        void *pt_virt;
+    } batch_pt_alloc_t;
+    batch_pt_alloc_t *new_pts;
+    int new_pt_count = 0;
+    size_t new_pts_size;
 
-    if (!pmap) {
+    if (!pmap || count < 0 || !pa_list) {
+        return -1;
+    }
+    if (count == 0) {
+        return 0;
+    }
+    if ((uintptr_t)count > (((uintptr_t)-1 - va_start) / 0x1000)) {
+        return -1;
+    }
+
+    new_pts_size = (size_t)count * sizeof(*new_pts);
+    new_pts = kmalloc(new_pts_size);
+    if (!new_pts) {
         return -1;
     }
 
     activation = pmap_activate_for_update(pmap);
+
+    /*
+     * Allocate all missing page tables before installing any PTEs.  This keeps
+     * allocation failure from leaving a partially populated batch.
+     */
+    for (int i = 0; i < count; i++) {
+        uintptr_t va = va_start + i * 0x1000;
+        uint32_t pdi = PD_INDEX(va);
+
+        if (!(V_PD[pdi] & PTE_P)) {
+            void *pt_virt = pmm_alloc_block();
+            if (!pt_virt) {
+                for (int j = 0; j < new_pt_count; j++) {
+                    V_PD[new_pts[j].pdi] = 0;
+                    pmap_invalidate_page((uint32_t)V_PT(new_pts[j].pdi));
+                    pmm_free_block(new_pts[j].pt_virt);
+                }
+                kfree(new_pts, new_pts_size);
+                pmap_restore_after_update(&activation);
+                return -1;
+            }
+            uint32_t pt_phys = (uint32_t)(uintptr_t)pt_virt - 0xC0000000;
+            uint32_t *new_pt = (uint32_t *)pt_virt;
+            for (int j = 0; j < 1024; j++) new_pt[j] = 0;
+            V_PD[pdi] = pt_phys | PTE_P | PTE_W | PTE_U;
+            pmap_invalidate_page((uint32_t)V_PT(pdi));
+            new_pts[new_pt_count].pdi = pdi;
+            new_pts[new_pt_count].pt_virt = pt_virt;
+            new_pt_count++;
+        }
+    }
 
     uint32_t last_pdi = (uint32_t)-1;
     uint32_t *pt = NULL;
@@ -761,24 +819,7 @@ int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_l
         uint32_t pdi = PD_INDEX(va);
         uint32_t pti = PT_INDEX(va);
 
-        // Check if we switched to a new Page Table (or first iteration)
         if (pdi != last_pdi) {
-            // Allocate page table on demand if not present
-            if (!(V_PD[pdi] & PTE_P)) {
-                void *pt_virt = pmm_alloc_block();
-                if (!pt_virt) {
-                    pmap_restore_after_update(&activation);
-                    return -1;
-                }
-                // Convert virtual to physical for PDE (pmm_alloc_block returns virtual)
-                uint32_t pt_phys = (uint32_t)(uintptr_t)pt_virt - 0xC0000000;
-                // PDE always gets W and U so PT can control actual permissions
-                V_PD[pdi] = pt_phys | PTE_P | PTE_W | PTE_U;
-                pmap_invalidate_page((uint32_t)V_PT(pdi));
-                // Zero the page table using virtual address
-                uint32_t *new_pt = (uint32_t *)pt_virt;
-                for (int j = 0; j < 1024; j++) new_pt[j] = 0;
-            }
             last_pdi = pdi;
             pt = V_PT(pdi);
         }
@@ -830,6 +871,7 @@ int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_l
     }
 
     pmap_restore_after_update(&activation);
+    kfree(new_pts, new_pts_size);
     return 0;
 }
 
@@ -1175,6 +1217,8 @@ int pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, uintptr_t sva, uintptr_t eva, in
     if (src_pmap->pdir_phys != cr3) return -1;
     
     // Map dst page directory temporarily
+    /* Bounds check: ensure physical address is in direct-map range (finding #15) */
+    if (dst_pmap->pdir_phys >= 0x40000000) return -1;
     uint32_t *dst_pd = (uint32_t *)(dst_pmap->pdir_phys + 0xC0000000);
     
     // Walk range page by page
@@ -1407,29 +1451,43 @@ void pmap_shootdown_all(void) {
 // Deferred shootdown: accumulate pages for batch invalidation
 static uint32_t deferred_pages[16];
 static int deferred_count = 0;
+static spinlock_t deferred_lock = SPINLOCK_INIT("pmap_deferred");
 
 void pmap_shootdown_defer(uintptr_t va) {
+    spinlock_acquire(&deferred_lock);
     if (deferred_count < 16) {
         deferred_pages[deferred_count++] = va;
+        spinlock_release(&deferred_lock);
     } else {
         // Overflow: flush all instead
-        pmap_shootdown_all();
         deferred_count = 0;
+        spinlock_release(&deferred_lock);
+        pmap_shootdown_all();
     }
 }
 
 void pmap_shootdown_commit(void) {
-    if (deferred_count == 0) return;
+    spinlock_acquire(&deferred_lock);
+    if (deferred_count == 0) {
+        spinlock_release(&deferred_lock);
+        return;
+    }
     
-    if (deferred_count > 4) {
+    int count = deferred_count;
+    uint32_t pages[16];
+    for (int i = 0; i < count; i++)
+        pages[i] = deferred_pages[i];
+    deferred_count = 0;
+    spinlock_release(&deferred_lock);
+
+    if (count > 4) {
         // Too many: full flush is cheaper
         pmap_shootdown_all();
     } else {
-        for (int i = 0; i < deferred_count; i++) {
-            pmap_shootdown_page(deferred_pages[i]);
+        for (int i = 0; i < count; i++) {
+            pmap_shootdown_page(pages[i]);
         }
     }
-    deferred_count = 0;
 }
 
 // Wait for all shootdown acknowledgments

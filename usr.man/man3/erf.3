@@ -1,0 +1,299 @@
+.TH ERF 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+erf, erff, erfl, erfc, erfcf, erfcl \- error and complementary error functions
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double erf(double " x );
+.br
+.BI "float erff(float " x );
+.br
+.BI "long double erfl(long double " x );
+.PP
+.BI "double erfc(double " x );
+.br
+.BI "float erfcf(float " x );
+.br
+.BI "long double erfcl(long double " x );
+.SH DESCRIPTION
+The
+.BR erf ()
+function returns the error function of
+.IR x ,
+defined mathematically as
+.PP
+.RS 4
+.EX
+            2     /x       2
+erf(x) = ------ * |  exp(-t ) dt
+         sqrt(pi) /0
+.EE
+.RE
+.PP
+.BR erf ()
+is an odd function \(em
+.BI erf(\- x ") = \-erf(" x )
+\(em with domain the entire real line and range
+.BR [\-1,\ +1] .
+It satisfies
+.B erf(0) = 0,
+.B erf(+\[if]) = +1,
+and
+.BR "erf(\-\[if]) = \-1" .
+.PP
+The
+.BR erfc ()
+function returns the complementary error function of
+.IR x ,
+defined as
+.PP
+.RS 4
+.EX
+erfc(x) = 1 \- erf(x)
+.EE
+.RE
+.PP
+The range of
+.BR erfc ()
+is
+.BR [0,\ 2] ,
+with
+.B erfc(0) = 1,
+.B erfc(+\[if]) = 0,
+and
+.BR "erfc(\-\[if]) = 2" .
+.BR erfc ()
+exists as a separate function because, for large positive
+.IR x ,
+.I erf(x)
+approaches 1 and the naive expression
+.I "1.0 \- erf(x)"
+loses all significant digits to catastrophic cancellation;
+.BR erfc ()
+should always be preferred when the quantity of interest is the small
+tail probability rather than the bulk integral.
+.PP
+The
+.BR erff ()
+and
+.BR erfcf ()
+variants take and return
+.B float
+values; the
+.BR erfl ()
+and
+.BR erfcl ()
+variants take and return
+.B "long double"
+values.
+.PP
+.SS Substrate Implementation
+The Substrate libm implements
+.BR erf ()
+using the Abramowitz & Stegun 7.1.26 rational approximation, with a
+maximum absolute error of approximately
+.BR 1.5e\-7 .
+This is significantly less accurate than the IEEE\ 754
+correctly-rounded result and is sufficient only for moderate-precision
+use; it will not pass an
+.B "ulp \[<=] 1"
+conformance test against a reference implementation.  For arguments
+with magnitude greater than 6.0 the result is clamped to
+.BR \(+-1 ,
+which is exact to double precision because the true value differs from
+.B \(+-1
+by less than
+.BR 2^\-53 .
+.PP
+.BR erfc ()
+in the current revision is implemented as
+.B "1.0 \- erf(x)"
+with explicit special-value handling for
+.B \(+-\[if]
+and NaN.  This inherits the precision of
+.BR erf ()
+and additionally suffers cancellation for large positive
+.IR x ,
+where it should be replaced by an asymptotic expansion in a future
+revision; callers requiring accurate small-tail values for
+.I "x \[>=] 4"
+should treat the result as indicative only.
+.SH RETURN VALUE
+On success,
+.BR erf ()
+returns the error function of
+.I x
+in the closed interval
+.BR [\-1,\ +1] ,
+and
+.BR erfc ()
+returns the complementary error function of
+.I x
+in the closed interval
+.BR [0,\ +2] .
+.PP
+If
+.I x
+is +0 (\-0),
+.BR erf ()
+returns +0 (\-0); the sign of zero is preserved because
+.BR erf ()
+is odd.
+.PP
+If
+.I x
+is +0 or \-0,
+.BR erfc ()
+returns +1.
+.PP
+If
+.I x
+is positive infinity,
+.BR erf ()
+returns +1 and
+.BR erfc ()
+returns +0.  If
+.I x
+is negative infinity,
+.BR erf ()
+returns \-1 and
+.BR erfc ()
+returns +2.
+.PP
+If
+.I x
+is a NaN, both functions return a NaN.
+.PP
+Neither function ever produces an overflow, underflow, or domain error
+for any finite or infinite argument: the mathematical range of
+.BR erf ()
+is bounded by 1 and that of
+.BR erfc ()
+is bounded by 2, both of which are exactly representable in every
+supported floating-point format.
+.SH ERRORS
+See
+.BR math_error (7)
+for information on how to determine whether an error has occurred when
+calling these functions.
+.PP
+No errors are defined for
+.BR erf ()
+or
+.BR erfc ().
+They never set
+.I errno
+and never raise a floating-point exception, even when the argument is
+a NaN, an infinity, or a signed zero.  In particular,
+.B FE_INVALID
+is not raised for a NaN argument because NaN propagation is the only
+defined behaviour, and
+.B FE_OVERFLOW
+cannot occur because the mathematical range of both functions is
+bounded.
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR erf (),
+.BR erff (),
+.BR erfl (),
+.BR erfc (),
+.BR erfcf (),
+.BR erfcl ()
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+.BR erf (),
+.BR erfc (),
+and their
+.BR f / l
+variants conform to C99 and POSIX.1-2008.  The handling of special
+arguments follows C99 Annex F.10.5 (IEC 60559).  The accuracy of the
+result is implementation-defined; the Substrate implementation
+explicitly does not meet IEEE\ 754 correct rounding (see
+.B "Substrate Implementation"
+above).
+.SH EXAMPLES
+The following program computes
+.B erf(1.0)
+and
+.B erfc(1.0)
+and verifies the identity
+.BI erf( x ") + erfc(" x ") = 1"
+to the accuracy of the implementation:
+.PP
+.RS 4
+.EX
+#include <math.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    double x = 1.0;
+    double e  = erf(x);
+    double ec = erfc(x);
+
+    printf("erf(%.1f)  = %.10f\en", x, e);   /* ~ 0.8427007929 */
+    printf("erfc(%.1f) = %.10f\en", x, ec);  /* ~ 0.1572992071 */
+    printf("erf + erfc = %.10f\en", e + ec); /* ~ 1.0          */
+
+    /* erf is odd: erf(-x) == -erf(x). */
+    printf("erf(\-%.1f) = %.10f\en", x, erf(\-x));
+
+    /* Special values. */
+    printf("erf(0)        = %g\en",  erf(0.0));
+    printf("erfc(0)       = %g\en",  erfc(0.0));
+    printf("erf(+INF)     = %g\en",  erf(INFINITY));
+    printf("erfc(+INF)    = %g\en",  erfc(INFINITY));
+    printf("erfc(\-INF)    = %g\en", erfc(\-INFINITY));
+    printf("isnan(erf(NAN)) = %d\en", isnan(erf(NAN)));
+
+    return 0;
+}
+.EE
+.RE
+.PP
+A representative output is:
+.PP
+.RS 4
+.EX
+erf(1.0)  = 0.8427007929
+erfc(1.0) = 0.1572992071
+erf + erfc = 1.0000000000
+erf(\-1.0) = \-0.8427007929
+erf(0)        = 0
+erfc(0)       = 1
+erf(+INF)     = 1
+erfc(+INF)    = 0
+erfc(\-INF)    = 2
+isnan(erf(NAN)) = 1
+.EE
+.RE
+.PP
+The least-significant digits of
+.B erf(1.0)
+may differ from a reference value by up to
+.B 1.5e\-7
+on Substrate; the identity
+.BI erf( x ") + erfc(" x ") = 1"
+holds exactly only because
+.BR erfc ()
+is currently computed as
+.IR "1.0 \- erf(x)" .
+.SH SEE ALSO
+.BR exp (3),
+.BR fenv (3),
+.BR sinh (3),
+.BR tgamma (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

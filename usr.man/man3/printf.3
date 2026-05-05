@@ -1,0 +1,589 @@
+.\" printf.3 - formatted output conversion
+.TH PRINTF 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+printf, fprintf, sprintf, snprintf, dprintf, asprintf,
+vprintf, vfprintf, vsprintf, vsnprintf, vdprintf, vasprintf \-
+formatted output conversion
+.SH LIBRARY
+.B libc
+.SH SYNOPSIS
+.B #include <stdio.h>
+.B #include <stdarg.h>
+.PP
+.BI "int printf(const char *" format ", ...);"
+.PP
+.BI "int fprintf(FILE *" stream ", const char *" format ", ...);"
+.PP
+.BI "int sprintf(char *" str ", const char *" format ", ...);"
+.PP
+.BI "int snprintf(char *" str ", size_t " size ", const char *" format ", ...);"
+.PP
+.BI "int dprintf(int " fd ", const char *" format ", ...);"
+.PP
+.BI "int asprintf(char **" strp ", const char *" format ", ...);"
+.PP
+.BI "int vprintf(const char *" format ", va_list " ap ");"
+.PP
+.BI "int vfprintf(FILE *" stream ", const char *" format ", va_list " ap ");"
+.PP
+.BI "int vsprintf(char *" str ", const char *" format ", va_list " ap ");"
+.PP
+.BI "int vsnprintf(char *" str ", size_t " size ", const char *" format ", va_list " ap ");"
+.PP
+.BI "int vdprintf(int " fd ", const char *" format ", va_list " ap ");"
+.PP
+.BI "int vasprintf(char **" strp ", const char *" format ", va_list " ap ");"
+.SH DESCRIPTION
+The
+.BR printf ()
+family of functions produces output according to a
+.IR format
+as described below.
+The functions
+.BR printf ()
+and
+.BR vprintf ()
+write output to
+.IR stdout ,
+the standard output stream;
+.BR fprintf ()
+and
+.BR vfprintf ()
+write output to the given output
+.IR stream ;
+.BR sprintf (),
+.BR snprintf (),
+.BR vsprintf (),
+and
+.BR vsnprintf ()
+write to the character string
+.IR str .
+.PP
+The functions
+.BR dprintf ()
+and
+.BR vdprintf ()
+write to the file descriptor
+.I fd
+directly using
+.BR write (2),
+bypassing any buffered I/O layer associated with that descriptor.
+.PP
+The functions
+.BR asprintf ()
+and
+.BR vasprintf ()
+allocate a string of sufficient size to hold the formatted output
+(including the terminating NUL byte) using
+.BR malloc (3),
+and store a pointer to that string in
+.IR *strp .
+The caller is responsible for releasing the buffer with
+.BR free (3).
+.PP
+The
+.BR v
+prefixed variants
+.RB ( vprintf (),
+.BR vfprintf (),
+.BR vsprintf (),
+.BR vsnprintf (),
+.BR vdprintf (),
+and
+.BR vasprintf ())
+are equivalent to the corresponding functions without the prefix, except
+that they accept a
+.I va_list
+argument
+.I ap
+in place of a variable number of arguments. They do not invoke
+.BR va_end (3)
+on
+.IR ap ;
+the caller must do so.
+.SS Format of the format string
+The format string is composed of zero or more directives: ordinary
+characters (not
+.BR % ),
+which are copied unchanged to the output stream; and conversion
+specifications, each of which results in fetching zero or more subsequent
+arguments. Each conversion specification is introduced by the character
+.BR % ,
+and ends with a
+.IR "conversion specifier" .
+In between there may be (in order) zero or more
+.IR flags ,
+an optional minimum
+.IR "field width" ,
+an optional
+.IR precision ,
+and an optional
+.IR "length modifier" .
+.SS Flag characters
+The character
+.B %
+is followed by zero or more of the following flags:
+.TP
+.B \-
+The converted value is left-adjusted on the field boundary.
+(The default is right-justification.)
+The converted value is padded on the right with blanks, rather than on the
+left with blanks or zeros.
+A
+.B \-
+overrides a
+.B 0
+if both are given.
+.TP
+.B +
+A sign (+ or \-) shall always be placed before a number produced by a signed
+conversion. By default a sign is used only for negative numbers.
+A
+.B +
+overrides a space if both are used.
+.TP
+.B " "
+(a space) A blank shall be left before a positive number (or empty string)
+produced by a signed conversion.
+.TP
+.B #
+The value is to be converted to an "alternate form".
+For
+.B o
+conversions, the precision of the number is increased to force the first
+character of the output string to be a zero (except when converting zero
+with an explicit precision of zero, in which case nothing is produced).
+For
+.B x
+and
+.B X
+conversions, a non-zero result has the string "0x" (or "0X") prepended.
+.TP
+.B 0
+The value should be zero padded.
+For
+.BR d ", " i ", " o ", " u ", " x ", " X ", " e ", " E ", " f ", " F ", " g ", and " G
+conversions, the converted value is padded on the left with zeros rather
+than blanks.
+If the
+.B 0
+and
+.B \-
+flags both appear, the
+.B 0
+flag is ignored.
+For
+.BR d ", " i ", " o ", " u ", " x ", and " X
+conversions, if a precision is specified, the
+.B 0
+flag is ignored.
+.SS Field width
+An optional decimal digit string (with non-zero first digit) specifying a
+minimum field width. If the converted value has fewer characters than the
+field width, it is padded on the left (or right, if the left-adjustment
+flag is given) to fill out the field width.
+Instead of a decimal digit string the field width may be specified as
+.BR * ,
+in which case the value is taken from the next argument, which must be of
+type
+.BR int .
+A negative field width is interpreted as a left-adjustment flag followed by
+a positive field width.
+.SS Precision
+An optional precision, in the form of a period
+.RB ( . )
+followed by an optional decimal digit string. The precision may also be
+specified as
+.BR * ,
+in which case it is taken from the next argument of type
+.BR int .
+If the precision is given as just
+.B .
+or as a negative value (via
+.BR * ),
+no precision is specified.
+Precision gives the minimum number of digits to appear for
+.BR d ", " i ", " o ", " u ", " x ", and " X
+conversions; the number of digits to appear after the radix character for
+.BR e ", " E ", " f ", and " F
+conversions; the maximum number of significant digits for
+.B g
+and
+.B G
+conversions; or the maximum number of characters to be printed from a
+string for
+.B s
+conversions.
+.SS Length modifier
+The optional length modifier specifies the type of the corresponding
+argument.
+.TP
+.B hh
+A following
+.BR d ", " i ", " o ", " u ", " x ", or " X
+conversion corresponds to a
+.B "signed char"
+or
+.B "unsigned char"
+argument (the argument will have been promoted to
+.B int
+according to the integer promotions, but its value is converted back before
+formatting).
+A following
+.B n
+conversion corresponds to a pointer to a
+.B "signed char"
+argument.
+.TP
+.B h
+A following integer conversion corresponds to a
+.B short
+or
+.B "unsigned short"
+argument.
+.TP
+.B l
+A following integer conversion corresponds to a
+.B long
+or
+.B "unsigned long"
+argument; for
+.B s
+the argument is treated as a pointer (length modifier is otherwise
+ignored).
+.TP
+.B ll
+A following integer conversion corresponds to a
+.B "long long"
+or
+.B "unsigned long long"
+argument.
+.TP
+.B j
+A following integer conversion corresponds to an
+.B intmax_t
+or
+.B uintmax_t
+argument (currently treated identically to
+.BR ll ).
+.TP
+.B z
+A following integer conversion corresponds to a
+.B size_t
+or
+.B ssize_t
+argument.
+.TP
+.B t
+A following integer conversion corresponds to a
+.B ptrdiff_t
+argument.
+.TP
+.B L
+A following floating-point conversion corresponds to a
+.B "long double"
+argument (the value is narrowed to
+.B double
+before being formatted).
+.SS Conversion specifiers
+A character that specifies the type of conversion to be applied. The
+conversion specifiers and their meanings are:
+.TP
+.BR d ", " i
+The
+.B int
+argument is converted to signed decimal notation.
+The precision, if any, gives the minimum number of digits that must
+appear; if the converted value requires fewer digits, it is padded on the
+left with zeros.
+The default precision is 1.
+When zero is printed with an explicit precision of 0, the output is empty.
+.TP
+.B u
+The
+.B "unsigned int"
+argument is converted to unsigned decimal notation.
+.TP
+.B o
+The
+.B "unsigned int"
+argument is converted to unsigned octal notation.
+.TP
+.BR x ", " X
+The
+.B "unsigned int"
+argument is converted to unsigned hexadecimal notation.
+The letters
+.B abcdef
+are used for
+.B x
+conversions; the letters
+.B ABCDEF
+are used for
+.B X
+conversions.
+.TP
+.BR f ", " F
+The
+.B double
+argument is rounded and converted to decimal notation in the style
+.RB [\-]ddd.ddd ,
+where the number of digits after the decimal point is equal to the
+precision specification.
+If the precision is missing it is taken as 6; if the precision is
+explicitly zero, no decimal point appears.
+.TP
+.BR e ", " E
+The
+.B double
+argument is rounded and converted in the style
+.RB [\-]d.ddd e \(+-dd
+where there is one digit before the decimal point and the number of digits
+after it equals the precision; if the precision is missing it is taken as
+6.
+The
+.B E
+conversion uses the letter
+.B E
+(rather than
+.BR e )
+to introduce the exponent.
+The exponent always contains at least two digits.
+.TP
+.BR g ", " G
+The
+.B double
+argument is converted in style
+.B f
+or
+.BR e .
+The precision specifies the number of significant digits.
+If the precision is missing, 6 digits are given; if the precision is zero,
+it is treated as 1.
+Style
+.B e
+is used if the exponent from its conversion is less than \-4 or greater
+than or equal to the precision.
+Trailing zeros are removed from the fractional part of the result;
+a decimal point appears only if it is followed by at least one digit, or if
+the
+.B #
+flag is used.
+.TP
+.BR a ", " A
+The
+.B double
+argument is intended to be converted to hexadecimal floating-point notation.
+.B
+This implementation is currently a stub
+and always emits the literal text
+.B "0x1.0p+0"
+(or
+.B "0X1.0P+0"
+for
+.BR A ),
+discarding the supplied argument value.
+.TP
+.B c
+The
+.B int
+argument is converted to an
+.BR "unsigned char" ,
+and the resulting character is written.
+.TP
+.B s
+The
+.B "const char *"
+argument is taken to be a pointer to a string. Characters from the string
+are written up to (but not including) the terminating NUL byte. If a
+precision is specified, no more than that many bytes are written.
+A NULL pointer is rendered as the literal text
+.BR (null) .
+.TP
+.B p
+The
+.B "void *"
+pointer argument is printed in lowercase hexadecimal preceded by
+.BR 0x ,
+zero-padded to at least eight hexadecimal digits.
+.TP
+.B n
+The number of characters written so far is stored into the integer pointed
+to by the corresponding argument. The
+.BR l " and " ll
+length modifiers select
+.B "long *"
+and
+.B "long long *"
+respectively; otherwise the argument is taken as
+.BR "int *" .
+No output is produced.
+.TP
+.B %
+A literal
+.B %
+is written. No argument is converted. The complete conversion specification
+is
+.BR %% .
+.PP
+Unknown conversion specifiers are output as the literal
+.B %
+followed by the unknown character.
+.SH RETURN VALUE
+Upon successful completion, the
+.BR printf (),
+.BR fprintf (),
+.BR sprintf (),
+.BR dprintf (),
+.BR vprintf (),
+.BR vfprintf (),
+.BR vsprintf (),
+and
+.BR vdprintf ()
+functions return the number of characters transmitted (excluding the
+terminating NUL byte for string outputs).
+.PP
+The
+.BR snprintf ()
+and
+.BR vsnprintf ()
+functions follow C99 semantics: they return the number of characters that
+.I would
+have been written had
+.I size
+been sufficiently large, excluding the terminating NUL byte.
+Thus, a non-negative return value of
+.I size
+or more indicates that the output was truncated.
+If
+.I size
+is greater than zero, the output is always NUL terminated.
+If
+.I size
+is zero, nothing is written and
+.I str
+may be NULL; the would-have-written length is still returned.
+.PP
+The
+.BR asprintf ()
+and
+.BR vasprintf ()
+functions return the number of bytes that were allocated for the string
+(excluding the terminating NUL byte) on success, and \-1 on allocation
+failure; on failure
+.I *strp
+is left in an unspecified state and should not be used.
+.SH ERRORS
+.TP
+.B ENOMEM
+The
+.BR asprintf ()
+or
+.BR vasprintf ()
+function could not allocate sufficient memory for the result string.
+The internal heap-fallback path used by
+.BR printf (),
+.BR fprintf (),
+.BR vprintf (),
+.BR vfprintf (),
+.BR dprintf (),
+and
+.BR vdprintf ()
+when the formatted output exceeds the internal 4096-byte stack buffer may
+also fail to allocate memory; in that case the output is truncated to the
+size of the internal buffer and the would-have-written length is still
+returned.
+.PP
+The functions that write to a
+.B FILE
+stream or file descriptor may also fail with any of the errors specified
+for
+.BR fwrite (3)
+or
+.BR write (2).
+.SH EXAMPLES
+The following example demonstrates the C99 truncation semantics of
+.BR snprintf ():
+.PP
+.nf
+.RS
+#include <stdio.h>
+
+int main(void) {
+    char buf[8];
+    int n = snprintf(buf, sizeof(buf), "value=%d", 12345);
+    /* n == 12, the length that *would* have been written. */
+    /* buf contains "value=1\\0" - truncated, but NUL terminated. */
+    printf("wrote %d bytes (would-be %d): \\"%s\\"\\n",
+           (int)sizeof(buf) - 1, n, buf);
+    if (n >= (int)sizeof(buf))
+        printf("output was truncated\\n");
+    return 0;
+}
+.RE
+.fi
+.PP
+The following example uses
+.BR asprintf ()
+to format a string of unknown length without preallocating a buffer:
+.PP
+.nf
+.RS
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(int argc, char **argv) {
+    char *msg;
+    int n = asprintf(&msg, "argv[0]=%s argc=%d", argv[0], argc);
+    if (n < 0) {
+        fprintf(stderr, "asprintf: out of memory\\n");
+        return 1;
+    }
+    fputs(msg, stdout);
+    fputc('\\n', stdout);
+    free(msg);
+    return 0;
+}
+.RE
+.fi
+.SH SEE ALSO
+.BR write (2),
+.BR fwrite (3),
+.BR malloc (3),
+.BR free (3),
+.BR scanf (3),
+.BR puts (3),
+.BR setvbuf (3),
+.BR stdarg (3)
+.SH STANDARDS
+The
+.BR printf (),
+.BR fprintf (),
+.BR sprintf (),
+.BR snprintf (),
+.BR vprintf (),
+.BR vfprintf (),
+.BR vsprintf (),
+and
+.BR vsnprintf ()
+functions conform to ISO C99.
+.PP
+The
+.BR dprintf ()
+and
+.BR vdprintf ()
+functions conform to POSIX.1\-2008.
+.PP
+The
+.BR asprintf ()
+and
+.BR vasprintf ()
+functions are GNU/BSD extensions, also implemented by Substrate libc.
+.PP
+The
+.B a
+and
+.B A
+conversion specifiers (hexadecimal floating-point) are required by ISO
+C99 but are presently implemented as a stub in Substrate libc; do not rely
+on the value they produce.

@@ -7,6 +7,8 @@
 
 #include <kern/device.h>
 #include <kern/bus.h>
+#include <kern/isapnp.h>
+#include <kern/resource.h>
 
 static uint8_t io_space[65536];
 static uint8_t uart_scratch[4];
@@ -89,7 +91,37 @@ void isa_test_outb(uint16_t port, uint8_t value) {
     else io_space[port] = value;
 }
 
+#include "../../sys/kern/resource.c"
+#include "../../sys/kern/isapnp.c"
 #include "../../sys/kern/isa.c"
+
+static size_t build_pnp_uart_resources(uint8_t *buf, size_t cap) {
+    size_t off = 0;
+    uint32_t uart_id = ISAPNP_EISA_ID('P', 'N', 'P', 0x0501);
+
+    (void)cap;
+    buf[off++] = 0x15;
+    buf[off++] = (uint8_t)(uart_id & 0xFFU);
+    buf[off++] = (uint8_t)((uart_id >> 8) & 0xFFU);
+    buf[off++] = (uint8_t)((uart_id >> 16) & 0xFFU);
+    buf[off++] = (uint8_t)((uart_id >> 24) & 0xFFU);
+    buf[off++] = 0x00;
+    buf[off++] = 0x47;
+    buf[off++] = 0x00;
+    buf[off++] = 0xA0;
+    buf[off++] = 0x02;
+    buf[off++] = 0xA0;
+    buf[off++] = 0x02;
+    buf[off++] = 0x08;
+    buf[off++] = 0x08;
+    buf[off++] = 0x23;
+    buf[off++] = 0x08;
+    buf[off++] = 0x00;
+    buf[off++] = 0x00;
+    buf[off++] = 0x79;
+    buf[off++] = 0x00;
+    return off;
+}
 
 static void reset_fixture(void) {
     memset(io_space, 0xFF, sizeof(io_space));
@@ -97,11 +129,16 @@ static void reset_fixture(void) {
     registered_buses = NULL;
     isa_bus_type.devices_list = NULL;
     isa_bus_initialized = 0;
+    isa_pnp_probed = 0;
+    resource_init();
+    isapnp_test_reset();
 }
 
 int main(void) {
     struct device *dev;
     char buf[256];
+    uint8_t raw[32];
+    isapnp_test_card_t pnp_card;
 
     reset_fixture();
     io_space[0x378] = 0x00;
@@ -138,6 +175,23 @@ int main(void) {
     assert(isa_dump_devices(buf, sizeof(buf)) > 0);
     assert(strstr(buf, "serial0") != NULL);
     assert(strstr(buf, "parallel0") != NULL);
+
+    memset(raw, 0, sizeof(raw));
+    pnp_card.card_id = ISAPNP_EISA_ID('P', 'N', 'P', 0x0A03);
+    pnp_card.serial = 0x01020304U;
+    pnp_card.resource_data = raw;
+    pnp_card.resource_len = build_pnp_uart_resources(raw, sizeof(raw));
+    assert(isapnp_test_add_card(&pnp_card) == 0);
+
+    isa_probe_pnp();
+    dev = isa_find_device_by_name("pnp-PNP0501-1-0");
+    assert(dev != NULL);
+    assert(dev->vendor_id == ISAPNP_VENDOR('P', 'N', 'P'));
+    assert(dev->device_id == 0x0501);
+    assert(isa_device_resource(dev, RES_IO, 0) != NULL);
+    assert(isa_device_resource(dev, RES_IO, 0)->start == 0x2A0);
+    assert(isa_device_resource(dev, RES_IRQ, 0) != NULL);
+    assert(isa_device_resource(dev, RES_IRQ, 0)->start == 3);
 
     puts("host_test_isa: PASS");
     return 0;

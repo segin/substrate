@@ -1,0 +1,219 @@
+.TH ASINH 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+asinh, asinhf, asinhl, acosh, acoshf, acoshl, atanh, atanhf, atanhl \- inverse hyperbolic functions
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double asinh(double " x );
+.br
+.BI "float asinhf(float " x );
+.br
+.BI "long double asinhl(long double " x );
+.PP
+.BI "double acosh(double " x );
+.br
+.BI "float acoshf(float " x );
+.br
+.BI "long double acoshl(long double " x );
+.PP
+.BI "double atanh(double " x );
+.br
+.BI "float atanhf(float " x );
+.br
+.BI "long double atanhl(long double " x );
+.SH DESCRIPTION
+The
+.BR asinh ()
+function returns the inverse hyperbolic sine of
+.IR x ,
+defined mathematically as
+.RI log( x \ +\ \[sr]( x^2 \ +\ 1)).
+It is an odd function whose domain is the entire real line and whose
+range is also the entire real line.
+.PP
+The
+.BR acosh ()
+function returns the inverse hyperbolic cosine of
+.IR x ,
+defined mathematically as
+.RI log( x \ +\ \[sr]( x^2 \ \-\ 1)).
+Its domain is the half-open interval
+.BR [1,\ +\[if]) ,
+and its range is the half-open interval
+.BR [0,\ +\[if]) .
+.PP
+The
+.BR atanh ()
+function returns the inverse hyperbolic tangent of
+.IR x ,
+defined mathematically as
+.RI (1/2)\ log((1\ +\ x )/(1\ \-\ x )).
+It is an odd function whose domain is the open interval
+.BR (\-1,\ +1)
+and whose range is the entire real line, with vertical asymptotes
+at \(+-1.
+.PP
+The
+.BR asinhf (),
+.BR acoshf (),
+and
+.BR atanhf ()
+variants take and return
+.B float
+values.  The
+.BR asinhl (),
+.BR acoshl (),
+and
+.BR atanhl ()
+variants take and return
+.B "long double"
+values.
+.SH RETURN VALUE
+On success, these functions return the inverse hyperbolic value of
+.I x
+as described above.
+.PP
+If
+.I x
+is +0 (\-0),
+.BR asinh ()
+and
+.BR atanh ()
+return +0 (\-0).
+.BR acosh (1)
+returns +0.
+.PP
+If
+.I x
+is positive infinity,
+.BR asinh ()
+returns positive infinity and
+.BR acosh ()
+returns positive infinity.  If
+.I x
+is negative infinity,
+.BR asinh ()
+returns negative infinity.
+.PP
+If
+.I x
+is a NaN, all three functions return a NaN.
+.PP
+For
+.BR acosh (),
+if
+.I x
+is less than 1, a domain error occurs and the function returns a NaN.
+.PP
+For
+.BR atanh (),
+if
+.I x
+is \(+-1, a pole error occurs and the function returns
+.B \(+-HUGE_VAL
+(or
+.B \(+-HUGE_VALF
+or
+.BR \(+-HUGE_VALL )
+with the appropriate sign.  If the magnitude of
+.I x
+is greater than 1, a domain error occurs and the function returns a
+NaN.
+.SH ERRORS
+See
+.BR math_error (7)
+for information on how to determine whether an error has occurred when
+calling these functions.
+.PP
+The following errors can occur:
+.TP
+Domain error: \fIx\fR < 1 (\fBacosh\fR)
+An invalid floating-point exception
+.RB ( FE_INVALID )
+is raised.  If
+.I "math_errhandling & MATH_ERRNO"
+is non-zero,
+.I errno
+is set to
+.BR EDOM .
+.TP
+Domain error: |\fIx\fR| > 1 (\fBatanh\fR)
+An invalid floating-point exception
+.RB ( FE_INVALID )
+is raised.  If
+.I "math_errhandling & MATH_ERRNO"
+is non-zero,
+.I errno
+is set to
+.BR EDOM .
+.TP
+Pole error: \fIx\fR is \(+-1 (\fBatanh\fR)
+A divide-by-zero floating-point exception
+.RB ( FE_DIVBYZERO )
+is raised.  If
+.I "math_errhandling & MATH_ERRNO"
+is non-zero,
+.I errno
+is set to
+.BR ERANGE .
+.PP
+.BR asinh ()
+does not raise errors for any finite or infinite argument.
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR asinh (),
+.BR asinhf (),
+.BR asinhl (),
+.BR acosh (),
+.BR acoshf (),
+.BR acoshl (),
+.BR atanh (),
+.BR atanhf (),
+.BR atanhl ()
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+.BR asinh (),
+.BR acosh (),
+.BR atanh (),
+and their
+.BR f / l
+variants conform to C99 and POSIX.1-2008.  The handling of special
+arguments follows C99 Annex F.10.3 (IEC 60559).
+.SH EXAMPLES
+The following program computes the inverse hyperbolic sine, cosine,
+and tangent for representative arguments:
+.PP
+.RS 4
+.EX
+#include <math.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    printf("asinh(%.6f) = %.6f\en", 1.0, asinh(1.0));
+    printf("acosh(%.6f) = %.6f\en", 1.0, acosh(1.0));
+    printf("atanh(%.6f) = %.6f\en", 0.5, atanh(0.5));
+    return 0;
+}
+.EE
+.RE
+.SH SEE ALSO
+.BR cosh (3),
+.BR fenv (3),
+.BR log (3),
+.BR sinh (3),
+.BR tanh (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

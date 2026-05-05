@@ -6,6 +6,7 @@
 #include <string.h>
 #include <regex.h>
 #include <ctype.h>
+#include <locale.h>
 #include <unistd.h>
 #include <getopt.h>
 #include <sys/stat.h>
@@ -15,8 +16,12 @@
 #include <sys/wait.h>
 #include <errno.h>
 
-buffer_t undo_buf;
-int undo_valid = 0;
+exvi_history_t undo_history = {0};
+exvi_history_t redo_history = {0};
+buffer_t pending_undo_buf;
+int pending_undo_valid = 0;
+int exvi_history_suspended = 0;
+int exvi_exit_requested = 0;
 
 static void do_command(buffer_t *b, char *cmd);
 void replace_saved_string(char **dst, const char *src);
@@ -224,8 +229,6 @@ handle_global_command(buffer_t *b, const char *cmd, const char *args,
 
     curr = b->head;
     while (curr) {
-        line_t *next = curr->next;
-
         if (curr->global_mark) {
             char *cmd_cpy;
 
@@ -237,8 +240,18 @@ handle_global_command(buffer_t *b, const char *cmd, const char *args,
             }
             do_command(b, cmd_cpy);
             free(cmd_cpy);
+            if (exvi_exit_requested) {
+                break;
+            }
+            /*
+             * The executed command may have freed curr->next (e.g. a delete
+             * touching lines past curr).  Restart from the top to avoid
+             * dereferencing a dangling pointer; unexecuted marks are still set.
+             */
+            curr = b->head;
+            continue;
         }
-        curr = next;
+        curr = curr->next;
     }
 
     free(re_str);
@@ -304,7 +317,8 @@ handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
             exvi_report_error("No write since last change (add ! to override)");
             return 1;
         }
-        exit(0);
+        exvi_exit_requested = 1;
+        return 1;
     } else if (match_command(cmd, "xit", "x", &args, &force)
         || match_command(cmd, "wq", NULL, &args, &force)) {
         if (!b->filename) {
@@ -316,7 +330,8 @@ handle_session_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
         }
         buf_write_file(b, b->filename, 0);
         if (!b->modified || force) {
-            exit(0);
+            exvi_exit_requested = 1;
+            return 1;
         }
         return 1;
     } else if (match_command(cmd, "write", "w", &args, &force)) {
@@ -381,7 +396,7 @@ handle_buffer_command(buffer_t *b, char *cmd, int explicit_range, int addr1,
     return 0;
 }
 
-void do_command(buffer_t *b, char *cmd) {
+static void do_command(buffer_t *b, char *cmd) {
     exvi_command_break_t break_kind;
     char *break_pos;
     int parse_error = 0;
@@ -420,7 +435,7 @@ void do_command(buffer_t *b, char *cmd) {
             set_default_current_range(b, &addr1, &addr2);
         }
         if (addr1 < 1 || addr2 < 1) {
-            fprintf(stderr, "No current line\n");
+            exvi_report_error("No current line");
             return;
         }
         if (addr2 > 0) {
@@ -465,6 +480,7 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
 
     exvi_reset_runtime(frontend);
     exvi_cleanup_session_state();
+    exvi_exit_requested = 0;
     if (invoked_as(argv[0], "rex") || invoked_as(argv[0], "rvi")) {
         restricted_mode = 1;
         secure_mode = 1;
@@ -542,16 +558,22 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
     }
 
     buffer_t buf;
+
+    /*
+     * Until the section-6 multibyte work lands, keep editor classification
+     * and rendering in the byte-oriented C locale regardless of host env.
+     */
+    (void)setlocale(LC_CTYPE, "C");
+
     buf_init(&buf);
-    undo_valid = 0;
-    buf_init(&undo_buf);
+    exvi_reset_undo_state();
     exvi_init_registers();
 
     if (recover_mode && file_argc == 0) {
         fprintf(stderr, "%s: -r requires a file operand\n", exvi_progname);
         free(file_args);
         buf_free(&buf);
-        buf_free(&undo_buf);
+        exvi_reset_undo_state();
         exvi_free_registers();
         exvi_cleanup_runtime();
         return 1;
@@ -565,7 +587,7 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
             if (!recover_target) {
                 fprintf(stderr, "%s: out of memory\n", exvi_progname);
                 buf_free(&buf);
-                buf_free(&undo_buf);
+                exvi_reset_undo_state();
                 exvi_free_registers();
                 exvi_cleanup_runtime();
                 return 1;
@@ -575,7 +597,7 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
                 fprintf(stderr, "%s: no recover file for %s\n", exvi_progname, recover_target);
                 free(recover_target);
                 buf_free(&buf);
-                buf_free(&undo_buf);
+                exvi_reset_undo_state();
                 exvi_free_registers();
                 exvi_cleanup_runtime();
                 return 1;
@@ -599,7 +621,7 @@ exvi_main(int argc, char **argv, exvi_frontend_t frontend)
 
 enter_visual:
     if (visual_mode) {
-        int ret;
+        int vret;
 
         if (frontend == EXVI_FRONTEND_EX) {
             set_visual_handoff_file(buf.filename);
@@ -611,11 +633,11 @@ enter_visual:
             status = 1;
             goto out;
         }
-        ret = exvi_visual_main(&buf);
-        if (ret == EXVI_EXIT_EX_HANDOFF) {
+        vret = exvi_visual_main(&buf);
+        if (vret == EXVI_EXIT_EX_HANDOFF) {
             visual_mode = 0;
         } else {
-            status = ret;
+            status = vret;
             goto out;
         }
     }
@@ -657,18 +679,21 @@ enter_visual:
             continue;
         }
 
-        // Strip optional `:` prefix
+        /* strip optional ':' prefix */
         char *cmd_line = line;
         while (*cmd_line && isspace((unsigned char)*cmd_line)) cmd_line++;
         if (*cmd_line == ':') cmd_line++;
         
         do_command(&buf, cmd_line);
+        if (exvi_exit_requested) {
+            break;
+        }
     }
     free(line);
 
 out:
     buf_free(&buf);
-    buf_free(&undo_buf);
+    exvi_reset_undo_state();
     exvi_free_registers();
     exvi_cleanup_runtime();
     exvi_cleanup_session_state();

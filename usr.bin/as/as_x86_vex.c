@@ -205,6 +205,12 @@ int as_x86_encode_vex_3op(const as_x86_vex_insn_t *insn, uint8_t *out, size_t ou
 
         vex2 = (uint8_t)((r_inv << 7) | (vvvv << 3) | ((insn->vex_l ? 1 : 0) << 2) | (insn->pp & 0x3));
 
+        /* emit8 lets ctx.at reach ctx.out_cap; without this re-check
+         * the memmove below shifts 2 bytes past the caller's buffer. */
+        if (ctx.at + 2u > ctx.out_cap) {
+            set_err(&ctx, "encoding overflow");
+            return -1;
+        }
         memmove(ctx.out + 2, ctx.out, ctx.at);
         ctx.out[0] = 0xc5;
         ctx.out[1] = vex2;
@@ -220,6 +226,10 @@ int as_x86_encode_vex_3op(const as_x86_vex_insn_t *insn, uint8_t *out, size_t ou
         vex2 = (uint8_t)((r_inv << 7) | (x_inv << 6) | (b_inv << 5) | (insn->map & 0x1f));
         vex3 = (uint8_t)(((insn->vex_w ? 1 : 0) << 7) | (vvvv << 3) | ((insn->vex_l ? 1 : 0) << 2) | (insn->pp & 0x3));
 
+        if (ctx.at + 3u > ctx.out_cap) {
+            set_err(&ctx, "encoding overflow");
+            return -1;
+        }
         memmove(ctx.out + 3, ctx.out, ctx.at);
         ctx.out[0] = 0xc4;
         ctx.out[1] = vex2;

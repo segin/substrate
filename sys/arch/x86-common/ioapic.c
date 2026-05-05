@@ -77,10 +77,10 @@ void ioapic_register_isa_override(uint8_t bus, uint8_t source_irq, uint32_t gsi,
 
     char buf[16];
     kprint("IO-APIC: ISA override IRQ ");
-    sprintf(buf, "%u", source_irq);
+    snprintf(buf, sizeof(buf), "%u", source_irq);
     kprint(buf);
     kprint(" -> GSI ");
-    sprintf(buf, "%u", gsi);
+    snprintf(buf, sizeof(buf), "%u", gsi);
     kprint(buf);
     kprint("\n");
 }

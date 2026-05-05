@@ -24,6 +24,7 @@
 #include <drivers/virtio/virtio.h>
 #include <drivers/storage/ramdisk.h>
 #include <drivers/storage/floppy/floppy.h>
+#include <drivers/audio/audio.h>
 
 #include <arch/i386/idt.h>
 #include <arch/i386/cpu.h>
@@ -351,6 +352,8 @@ static void init_runtime_console(int serial_console) {
 
     console_init();
     hw_text_init();
+    isa_init();
+    isa_probe_pnp();
 
     if (serial_console >= 0) {
         (void)uart_select_port((uint32_t)serial_console);
@@ -451,6 +454,7 @@ static void init_storage_and_vfs(multiboot_info_t *mboot_info) {
     pci_init();
     isa_init();
     isa_probe_legacy();
+    isa_probe_pnp();
     scsi_init();
     floppy_init();
     ide_init();
@@ -458,6 +462,9 @@ static void init_storage_and_vfs(multiboot_info_t *mboot_info) {
     uhci_init();
     usb_msc_init();
     usb_hid_init();
+    usb_hid_mouse_init();
+    usb_hub_init();
+    audio_init();
     usb_init();
     virtio_init();
     register_boot_ramdisks(mboot_info);
@@ -656,7 +663,7 @@ void kinit_task(void *arg) {
         "TERM=linux",
         NULL
     };
-    
+
     kprint("kinit: Starting init process...\n");
     
     // Create new session for init (PID 1)
@@ -682,7 +689,35 @@ void kinit_task(void *arg) {
             kprint(init_arg);
         }
         kprint("\n");
-        char *init_argv[] = { init_path, init_arg, NULL };
+        char *init_argv[32];
+        int argc = 0;
+        init_argv[argc++] = init_path;
+        
+        if (init_arg) {
+            char *p = init_arg;
+            while (*p && argc < 31) {
+                while (*p == ' ') p++;
+                if (!*p) break;
+                
+                if (*p == '\'') {
+                    p++;
+                    init_argv[argc++] = p;
+                    while (*p && *p != '\'') p++;
+                    if (*p) *p++ = '\0';
+                } else if (*p == '\"') {
+                    p++;
+                    init_argv[argc++] = p;
+                    while (*p && *p != '\"') p++;
+                    if (*p) *p++ = '\0';
+                } else {
+                    init_argv[argc++] = p;
+                    while (*p && *p != ' ') p++;
+                    if (*p) *p++ = '\0';
+                }
+            }
+        }
+        init_argv[argc] = NULL;
+
         if (kern_execve(init_path, init_argv, init_envp) == 0) {
             goto exec_success;
         }
@@ -754,7 +789,11 @@ void kmain(unsigned long magic, unsigned long addr) {
     init_core_subsystems(mboot_info);
     print_boot_diagnostics();
     init_storage_and_vfs(mboot_info);
-    sched_spawn_kernel_process(init_task, cmdline);
+    /* Surface kinit-spawn failure: with the return value discarded, a
+     * spawn failure was indistinguishable from an idle-loop hang. */
+    if (sched_spawn_kernel_process(init_task, cmdline) < 0) {
+        kprint("kmain: FATAL: failed to spawn kinit thread\n");
+    }
     vm_page_late_init();
     reclaim_bootloader_state();
     enter_kernel_idle_loop();

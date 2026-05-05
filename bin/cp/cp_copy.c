@@ -771,11 +771,13 @@ static int cp_copy_symlink_obj(struct cp_context *ctx,
             break;
         }
         cap *= 2;
-        target = (char *)realloc(target, cap);
-        if (!target) {
+        char *tmp = (char *)realloc(target, cap);
+        if (!tmp) {
+            free(target);
             cp_diag(ctx, src, dst, "grow symlink buffer", ENOMEM);
             return -1;
         }
+        target = tmp;
     }
     target[n] = '\0';
 
@@ -946,7 +948,7 @@ static int cp_copy_regular(struct cp_context *ctx,
         }
         using_atomic = 1;
     } else {
-        dst_fd = open(dst, O_WRONLY | O_CREAT | O_TRUNC, (int)create_mode);
+        dst_fd = open(dst, O_WRONLY | O_CREAT | O_TRUNC, create_mode);
         if (dst_fd < 0) {
             cp_diag(ctx, src, dst, "open destination", errno);
             goto out;
@@ -1046,7 +1048,9 @@ out:
             dst_fd = -1;
         } else if (dst_fd >= 0) {
             close(dst_fd);
-            unlink(dst);
+            int saved_errno = errno;
+            (void)unlink(dst);
+            errno = saved_errno;
             dst_fd = -1;
         }
     }

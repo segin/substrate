@@ -2,6 +2,8 @@
 #define _FREEBSD_USER_H
 
 #include <stdint.h>
+#include <stddef.h>
+#include <sys/types.h>
 
 /*
  * FreeBSD 14.3 kinfo_proc layout for i386 stability.
@@ -38,6 +40,14 @@ struct freebsd_timeval {
 struct freebsd_timespec {
     int32_t tv_sec;
     int32_t tv_nsec;
+};
+
+/*
+ * FreeBSD iovec (for readv/writev)
+ */
+struct freebsd_iovec {
+    void   *iov_base;
+    size_t  iov_len;
 };
 
 /*
@@ -121,6 +131,113 @@ struct freebsd11_stat {
     struct freebsd_timespec st_birthtim;
 };
 
+
+/*
+ * FreeBSD 13+ stat structure (i386 ABI, FreeBSD 14.x layout)
+ * Verified against FreeBSD 14.3/i386 /usr/include/sys/stat.h offsets:
+ *   dev=0 ino=8 nlink=16 mode=24 bsdflags=26 uid=28 gid=32
+ *   rdev=40 atim=48 size=96 blocks=104 total=208
+ * dev_t, ino_t, nlink_t are all uint64_t on FreeBSD 14.
+ * struct timespec on FreeBSD 14 i386: time_t (int64_t, 8B) + long (4B) = 12B.
+ * Used by fstat_freebsd13 (551), lstat_freebsd13, stat_freebsd13 syscalls.
+ */
+struct freebsd13_timespec {
+    int64_t  tv_sec;   /* 8 bytes (time_t is 64-bit even on i386 FreeBSD 14) */
+    int32_t  tv_nsec;  /* 4 bytes */
+};
+
+#if defined(__i386__) || defined(__x86_64__)
+struct freebsd13_stat {
+    uint64_t st_dev;          /* offset   0 */
+    uint64_t st_ino;          /* offset   8 */
+    uint64_t st_nlink;        /* offset  16 */
+    uint16_t st_mode;         /* offset  24 */
+    int16_t  st_bsdflags;     /* offset  26 */
+    uint32_t st_uid;          /* offset  28 */
+    uint32_t st_gid;          /* offset  32 */
+    int32_t  st_padding1;     /* offset  36 */
+    uint64_t st_rdev;         /* offset  40 */
+    /* FreeBSD 14 i386 defines __STAT_TIME_T_EXT and inserts a 4-byte
+     * _ext field before every timespec in struct stat.  Userland reads
+     * time at offset (timespec_offset + 4); without these fields,
+     * tv_sec values land at the wrong offsets and decode to 1970. */
+    int32_t  st_atim_ext;     /* offset  48 */
+    struct freebsd13_timespec st_atim;     /* offset  52  (12 bytes) */
+    int32_t  st_mtim_ext;     /* offset  64 */
+    struct freebsd13_timespec st_mtim;     /* offset  68 */
+    int32_t  st_ctim_ext;     /* offset  80 */
+    struct freebsd13_timespec st_ctim;     /* offset  84 */
+    int32_t  st_btim_ext;     /* offset  96 */
+    struct freebsd13_timespec st_birthtim; /* offset 100 */
+    int64_t  st_size;         /* offset 112 */
+    int64_t  st_blocks;       /* offset 120 */
+    int32_t  st_blksize;      /* offset 128 */
+    uint32_t st_flags;        /* offset 132 */
+    uint64_t st_gen;          /* offset 136 */
+    uint64_t st_filerev;      /* offset 144 */
+    uint64_t st_spare[9];     /* offset 152 */
+    /* total: 224 bytes */
+};
+#endif
+
+/*
+ * FreeBSD 14 dirent (64-bit ino_t/off_t).
+ * Header is 24 bytes; record is padded to 8-byte alignment.
+ * Used by getdirentries (syscall 554).
+ */
+struct freebsd_dirent {
+    uint64_t  d_fileno;
+    int64_t   d_off;
+    uint16_t  d_reclen;
+    uint8_t   d_type;
+    uint8_t   d_pad0;
+    uint16_t  d_namlen;
+    uint16_t  d_pad1;
+    char      d_name[256];
+};
+
+/*
+ * FreeBSD 11 and earlier dirent (32-bit ino_t).  Used by COMPAT11
+ * getdirentries (syscall 196).  Records are NOT 8-byte padded — the
+ * old layout aligns each record only to the natural alignment of the
+ * fields (record start matches a 4-byte boundary).
+ */
+struct freebsd11_dirent {
+    uint32_t  d_fileno;
+    uint16_t  d_reclen;
+    uint8_t   d_type;
+    uint8_t   d_namlen;
+    char      d_name[256];
+};
+
+/*
+ * FreeBSD 4.x and earlier ostat — used by syscalls 38 (stat),
+ * 40 (lstat), 62 (fstat).  Almost no extant binary issues these,
+ * but we declare the layout for completeness.  Note tightly-packed
+ * mix of 16- and 32-bit fields; FreeBSD's ABI here matches GCC's
+ * default layout on i386 (4-byte alignment for uint32, 2-byte for
+ * uint16).
+ */
+struct freebsd_ostat {
+    uint16_t st_dev;
+    uint32_t st_ino;
+    uint16_t st_mode;
+    uint16_t st_nlink;
+    uint16_t st_uid;
+    uint16_t st_gid;
+    uint16_t st_rdev;
+    int32_t  st_size;
+    int32_t  st_atim_sec;
+    int32_t  st_atim_nsec;
+    int32_t  st_mtim_sec;
+    int32_t  st_mtim_nsec;
+    int32_t  st_ctim_sec;
+    int32_t  st_ctim_nsec;
+    int32_t  st_blksize;
+    int32_t  st_blocks;
+    uint32_t st_flags;
+    uint32_t st_gen;
+};
 
 struct freebsd_utsname {
     char sysname[256];
@@ -280,11 +397,39 @@ void freebsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void
 int  freebsd_sys_sigreturn(void *regs);
 
 
+int sys_freebsd_open(const char *path, int flags, int mode);
+int sys_freebsd_openat(int dirfd, const char *path, int flags, int mode);
 int sys_freebsd_stat(const char *path, struct freebsd_stat *buf);
 int sys_freebsd_lstat(const char *path, struct freebsd_stat *buf);
 int sys_freebsd_fstat(int fd, struct freebsd_stat *buf);
 int sys_freebsd11_stat(const char *path, struct freebsd11_stat *buf);
 int sys_freebsd11_lstat(const char *path, struct freebsd11_stat *buf);
 int sys_freebsd11_fstat(int fd, struct freebsd11_stat *buf);
+int sys_freebsd13_fstatat(int dirfd, const char *path, struct freebsd13_stat *buf, int flags);
+int sys_freebsd_fstatat(int dirfd, const char *path, struct freebsd13_stat *buf, int flags);
+int sys_freebsd11_fstatat(int dirfd, const char *path, struct freebsd11_stat *buf, int flags);
+ssize_t sys_freebsd_getdirentries(int fd, char *buf, size_t nbytes, int64_t *basep);
+ssize_t sys_freebsd11_getdirentries(int fd, char *buf, unsigned int nbytes, int32_t *basep);
+
+/* Pre-FreeBSD-5 ostat family.  Almost no extant binary uses these. */
+int sys_freebsd_ostat(const char *path, struct freebsd_ostat *buf);
+int sys_freebsd_olstat(const char *path, struct freebsd_ostat *buf);
+int sys_freebsd_ofstat(int fd, struct freebsd_ostat *buf);
+
+/* FreeBSD at-family wrappers (translate at-flag bits + path copyin). */
+int sys_freebsd_faccessat(int dirfd, const char *path, int amode, int flag);
+int sys_freebsd_fchmodat(int dirfd, const char *path, int mode, int flag);
+int sys_freebsd_fchownat(int dirfd, const char *path, int uid, int gid, int flag);
+int sys_freebsd_linkat(int olddir, const char *oldpath, int newdir, const char *newpath, int flag);
+int sys_freebsd_mkdirat(int dirfd, const char *path, int mode);
+int sys_freebsd_readlinkat(int dirfd, const char *path, char *buf, size_t bufsiz);
+int sys_freebsd_renameat(int olddir, const char *oldpath, int newdir, const char *newpath);
+int sys_freebsd_symlinkat(const char *target, int newdir, const char *newpath);
+int sys_freebsd_unlinkat(int dirfd, const char *path, int flag);
+
+/* chown/chmod family.  Substrate native chown does not follow symlinks
+ * but FreeBSD's chown does; lchmod has no native equivalent. */
+int sys_freebsd_chown(const char *path, int uid, int gid);
+int sys_freebsd_lchmod(const char *path, int mode);
 
 #endif /* _FREEBSD_USER_H */

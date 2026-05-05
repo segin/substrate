@@ -346,5 +346,7 @@
 #define LINUX_SYS_process_vm_writev 348
 #define LINUX_SYS_kcmp           349
 #define LINUX_SYS_finit_module   350
+#define LINUX_SYS_getrandom      355
+#define LINUX_SYS_statx          383
 
 #endif /* _LINUX_SYSCALLS_H */

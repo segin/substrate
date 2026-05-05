@@ -285,5 +285,6 @@ struct personality personality_openbsd = {
     .syscall_count = MAX_SYSCALLS,
     .sendsig = openbsd_sendsig,
     .sigreturn = openbsd_sys_sigreturn,
-    .rt_sigreturn = NULL
+    .rt_sigreturn = NULL,
+    .path_prefix = "/perso/openbsd"
 };

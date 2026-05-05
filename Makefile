@@ -94,6 +94,7 @@ install:
 	@mkdir -p $(DESTDIR)/usr/local
 	@mkdir -p $(DESTDIR)/usr/man
 	@mkdir -p $(DESTDIR)/var
+	@cp -a $(TOP)/include/. $(DESTDIR)/usr/include/
 	@set -e; for dir in $(SUBDIRS); do \
 		echo ">>> Installing $$dir"; \
 		if [ -f "$$dir/Makefile" ]; then $(MAKE) -C $$dir DESTDIR="$(DESTDIR)" NATIVE_BUILD="$(NATIVE_BUILD)" install; fi; \

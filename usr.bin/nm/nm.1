@@ -1,0 +1,184 @@
+.\" nm.1 - list symbols from object files
+.Dd April 19, 2026
+.Dt NM 1
+.Os Substrate
+.Sh NAME
+.Nm nm
+.Nd list symbols from object files
+.Sh SYNOPSIS
+.Nm
+.Op Fl aABCDglnoPprSsuVv
+.Op Fl t Ar radix
+.Op Fl -format Ns = Ns Ar format
+.Op Fl -radix Ns = Ns Ar radix
+.Op Fl -demangle
+.Op Fl -defined-only
+.Op Fl -no-weak
+.Op Fl -extern-only
+.Op Fl -undefined-only
+.Op Fl -debug-syms
+.Op Fl -numeric-sort
+.Op Fl -no-sort
+.Op Fl -reverse-sort
+.Op Fl -size-sort
+.Op Fl -print-file-name
+.Op Fl -print-size
+.Op Fl -dynamic
+.Op Fl -print-armap
+.Op Fl -special-syms
+.Op Ar
+.Sh DESCRIPTION
+The
+.Nm
+utility displays the symbol table of each ELF object file named on the
+command line.
+If no file is given,
+.Pa a.out
+is used.
+.Pp
+For each symbol, the output includes its value (address), type letter,
+and name.
+The exact format depends on the selected output mode.
+.Sh OPTIONS
+.Bl -tag -width indent
+.It Fl a , Fl -debug-syms
+Display all symbols, including debugger-only symbols that are not
+normally listed (e.g.,
+.Dv STT_FILE
+and
+.Dv STT_SECTION
+symbols).
+.It Fl A , Fl o , Fl -print-file-name
+Prepend the file name to each output line.
+.It Fl B
+Use BSD output format (default).
+.It Fl C , Fl -demangle
+Demangle C++, Rust, and D symbol names into their original form.
+.It Fl D , Fl -dynamic
+Display the dynamic symbol table
+.Pq Dv .dynsym
+instead of the normal symbol table
+.Pq Dv .symtab .
+.It Fl g , Fl -extern-only
+Display only external (global and weak) symbols.
+.It Fl l
+Display source file name and line number from DWARF debugging
+information (not yet implemented).
+.It Fl n , Fl v , Fl -numeric-sort
+Sort symbols numerically by their value (address) instead of
+alphabetically by name.
+.It Fl p , Fl -no-sort
+Do not sort; display symbols in symbol table order.
+.It Fl P , Fl -portability
+Use POSIX.2 output format:
+.Dq name type value size .
+.It Fl r , Fl -reverse-sort
+Reverse the sort order.
+.It Fl S , Fl -print-size
+Print the size of defined symbols in BSD format.
+.It Fl s , Fl -print-armap
+Print the archive index (symbol map) when processing archives.
+.It Fl t Ar radix
+Use
+.Ar radix
+for printing symbol values.
+.Ar radix
+may be
+.Sq d
+for decimal,
+.Sq o
+for octal, or
+.Sq x
+for hexadecimal (default).
+.It Fl u , Fl -undefined-only
+Display only undefined symbols.
+.It Fl V , Fl -version
+Print version information and exit.
+.It Fl -format Ns = Ns Ar fmt
+Select output format:
+.Sq bsd
+(default),
+.Sq posix ,
+or
+.Sq sysv .
+.It Fl -radix Ns = Ns Ar r
+Equivalent to
+.Fl t ;
+.Ar r
+may be
+.Sq d ,
+.Sq o ,
+or
+.Sq x .
+.It Fl -defined-only
+Display only defined symbols.
+.It Fl -no-weak
+Exclude weak symbols from the output.
+.It Fl -size-sort
+Sort symbols by size (largest first), with ties broken by name.
+.It Fl -special-syms
+Include target-specific special symbols in the output.
+.El
+.Sh "SYMBOL TYPE LETTERS"
+Each symbol is classified with a single letter indicating its type.
+Uppercase letters denote global (external) symbols; lowercase letters
+denote local symbols.
+.Pp
+.Bl -tag -width "X" -compact
+.It T
+Text (code) section symbol.
+.It D
+Initialized data section symbol.
+.It B
+BSS (uninitialized data) section symbol.
+.It R
+Read-only data section symbol.
+.It A
+Absolute symbol (not associated with a section).
+.It C
+Common symbol.
+.It U
+Undefined symbol.
+.It W
+Weak symbol (not specifically tagged as a data object).
+.It V
+Weak object symbol.
+.It N
+Debug symbol.
+.It n
+Read-only data in a non-allocated section.
+.It ?
+Unknown symbol type.
+.El
+.Sh EXIT STATUS
+.Nm
+exits 0 on success, or 1 if any input file could not be processed or
+recognized.
+.Sh EXAMPLES
+List symbols from an object file:
+.Dl $ nm main.o
+.Pp
+List only undefined symbols:
+.Dl $ nm -u libfoo.a
+.Pp
+List symbols sorted by address with demangling:
+.Dl $ nm -Cn myprogram
+.Pp
+Use POSIX output format with decimal values:
+.Dl $ nm -P -td myprogram
+.Sh SEE ALSO
+.Xr ar 1 ,
+.Xr ld 1 ,
+.Xr objdump 1 ,
+.Xr readelf 1 ,
+.Xr size 1 ,
+.Xr strip 1 ,
+.Xr elf 5
+.Sh STANDARDS
+The
+.Nm
+utility is broadly compatible with the POSIX.1-2008 specification and
+GNU
+.Nm .
+.Sh AUTHORS
+Substrate contributors.

@@ -1,4 +1,4 @@
-.Dd February 27, 2026
+.Dd April 22, 2026
 .Dt CC 1
 .Os Substrate
 .Sh NAME
@@ -19,6 +19,21 @@ and
 When invoked as
 .Nm cpp ,
 preprocessor-only mode is selected.
+.Pp
+Installed host-runnable copies of
+.Nm ,
+.Xr as 1 ,
+and
+.Xr ld 1
+are typically staged with
+.Dq Li make host_dist
+and installed with
+.Dq Li sudo make HOST_DIST_PREFIX=/opt/substrate host_install .
+See
+.Xr host_toolchain 7
+for the full install and
+.Ev PATH
+workflow.
 .Sh OPTIONS
 .Bl -tag -width "-pedantic-errors"
 .It Fl E
@@ -31,6 +46,8 @@ Compile and/or assemble only, do not link.
 Set output path.
 .It Fl I Ar dir , Fl D Ar name Ns Op =value , Fl U Ar name
 Preprocessor include/macro controls.
+.It Fl idirafter Ar dir
+Add a late include search path.
 .It Fl include Ar file , Fl imacros Ar file
 Forced include/macro inputs.
 .It Fl P
@@ -74,9 +91,10 @@ Temporary C-to-assembly fallback via host gcc.
 .Sh EXIT STATUS
 .Ex -std
 .Sh SEE ALSO
-.Xr cpp 1 ,
 .Xr as 1 ,
-.Xr ld 1 ,
-.Xr ir-verifier 1 ,
+.Xr cpp 1 ,
+.Xr ir-diff 1 ,
 .Xr ir-normalize 1 ,
-.Xr ir-diff 1
+.Xr ir-verifier 1 ,
+.Xr ld 1 ,
+.Xr host_toolchain 7

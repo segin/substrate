@@ -68,11 +68,17 @@ static inline void cpuid_leaf(uint32_t leaf, uint32_t subleaf,
 }
 
 static size_t cpuid_appendf(char *buf, size_t size, size_t off, const char *fmt, ...) {
-    if (off >= size) return off;
+    char sink[1];
+    char *dst;
+    size_t avail;
+    if (!buf && size != 0) return off;
+
+    avail = (off < size) ? (size - off) : 0;
+    dst = (avail > 0) ? (buf + off) : sink;
 
     va_list ap;
     va_start(ap, fmt);
-    int ret = vsnprintf(buf + off, size - off, fmt, ap);
+    int ret = vsnprintf(dst, avail, fmt, ap);
     va_end(ap);
 
     if (ret <= 0) return off;
@@ -190,8 +196,8 @@ static uint32_t cpuid_proc_cpuinfo(char *buf, size_t size, void *opaque) {
         off = cpuid_appendf(buf, size, off, "\n\n");
     }
 
-    if (off >= size) {
-        return (uint32_t)size;
+    if (size > 0 && off >= size) {
+        buf[size - 1] = '\0';
     }
     return (uint32_t)off;
 }

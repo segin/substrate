@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <sys/lock.h>
 
 /*
  * ATA/IDE Driver Header
@@ -190,6 +191,7 @@ typedef struct {
     uint8_t  irq;          /* IRQ number (14 or 15) */
     uint8_t  no_intr;      /* Interrupt disable flag */
     uint8_t  dma_capable;  /* Bus Master DMA detected */
+    mutex_t  lock;          /* Per-channel transfer lock */
 } ide_channel_t;
 
 /*

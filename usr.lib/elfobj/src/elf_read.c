@@ -10,6 +10,12 @@ typedef struct {
     size_t count;
 } symtab_index_t;
 
+#define ELFOBJ_MAX_SECTION_ALIGN (1ULL << 20)
+
+static int debug_open_enabled(void) {
+    return getenv("ELFOBJ_DEBUG_OPEN") != NULL;
+}
+
 static int is_elf_magic(const uint8_t *buf, size_t size) {
     if (size < EI_NIDENT) {
         return 0;
@@ -41,6 +47,16 @@ static int ranges_overlap_u64(uint64_t a_off, uint64_t a_sz, uint64_t b_off, uin
         return 1;
     }
     return a_off < b_end && b_off < a_end;
+}
+
+static int valid_section_align(uint64_t align) {
+    if (align == 0) {
+        return 0;
+    }
+    if ((align & (align - 1)) != 0) {
+        return 0;
+    }
+    return align <= ELFOBJ_MAX_SECTION_ALIGN;
 }
 
 static struct elf_section *parse_shdr32(elfobj_t *obj, const uint8_t *p) {
@@ -85,13 +101,47 @@ static struct elf_section *parse_shdr64(elfobj_t *obj, const uint8_t *p) {
     return sec;
 }
 
+static void parse_section_compression_hint(elfobj_t *obj, struct elf_section *sec) {
+    const uint8_t *p;
+
+    if (obj == NULL || sec == NULL || sec->data == NULL || (sec->flags & SHF_COMPRESSED) == 0) {
+        return;
+    }
+    p = sec->data;
+    if (obj->cls == ELFOBJ_CLASS_64) {
+        if (sec->data_size < 24) {
+            return;
+        }
+        sec->has_compression_hint = 1;
+        sec->compression_type = elf__rd32(p + 0, obj->endian);
+        sec->compression_size = elf__rd64(p + 8, obj->endian);
+        sec->compression_addralign = elf__rd64(p + 16, obj->endian);
+        return;
+    }
+    if (sec->data_size < 12) {
+        return;
+    }
+    sec->has_compression_hint = 1;
+    sec->compression_type = elf__rd32(p + 0, obj->endian);
+    sec->compression_size = elf__rd32(p + 4, obj->endian);
+    sec->compression_addralign = elf__rd32(p + 8, obj->endian);
+}
+
 static elf_err_t parse_sections(elfobj_t *obj, uint64_t shoff, uint16_t entsize, uint16_t shnum) {
     size_t i;
     uint64_t table_size;
+    uint64_t table_end;
+    uint64_t image_size_u64 = (uint64_t)obj->image_size;
     if (shnum == 0) {
         return ELF_OK;
     }
     if (!elf__u64_mul((uint64_t)entsize, (uint64_t)shnum, &table_size)) {
+        return ELF_ERR_BOUNDS;
+    }
+    if (!elf__u64_add(shoff, table_size, &table_end)) {
+        return ELF_ERR_BOUNDS;
+    }
+    if (table_end > image_size_u64) {
         return ELF_ERR_BOUNDS;
     }
     if (shoff > SIZE_MAX || table_size > SIZE_MAX) {
@@ -102,7 +152,11 @@ static elf_err_t parse_sections(elfobj_t *obj, uint64_t shoff, uint16_t entsize,
     }
 
     for (i = 0; i < shnum; ++i) {
-        const uint8_t *p = obj->image + shoff + ((size_t)entsize * i);
+        uint64_t row_off;
+        if (!elf__u64_add(shoff, (uint64_t)entsize * i, &row_off) || row_off > SIZE_MAX) {
+            return ELF_ERR_BOUNDS;
+        }
+        const uint8_t *p = obj->image + (size_t)row_off;
         struct elf_section *sec;
 
         if (obj->cls == ELFOBJ_CLASS_32) {
@@ -120,10 +174,24 @@ static elf_err_t parse_sections(elfobj_t *obj, uint64_t shoff, uint16_t entsize,
         if (sec == NULL) {
             return ELF_ERR_OOM;
         }
+        if (!valid_section_align(sec->addralign)) {
+            if (debug_open_enabled()) {
+                fprintf(stderr, "elfobj: invalid section align idx=%zu align=0x%llx type=%u off=0x%llx size=0x%llx\n",
+                        i, (unsigned long long)sec->addralign, sec->type,
+                        (unsigned long long)sec->offset, (unsigned long long)sec->size);
+            }
+            free(sec->name);
+            free(sec);
+            return ELF_ERR_FORMAT;
+        }
 
         if (sec->type != SHT_NOBITS && sec->size > 0) {
             size_t j;
             if (!elf__bounds_ok((size_t)sec->offset, (size_t)sec->size, obj->image_size)) {
+                if (debug_open_enabled()) {
+                    fprintf(stderr, "elfobj: section bounds idx=%zu off=0x%llx size=0x%llx image=0x%zx\n",
+                            i, (unsigned long long)sec->offset, (unsigned long long)sec->size, obj->image_size);
+                }
                 free(sec->name);
                 free(sec);
                 return ELF_ERR_BOUNDS;
@@ -134,6 +202,12 @@ static elf_err_t parse_sections(elfobj_t *obj, uint64_t shoff, uint16_t entsize,
                     continue;
                 }
                 if (ranges_overlap_u64(prev->offset, prev->size, sec->offset, sec->size)) {
+                    if (debug_open_enabled()) {
+                        fprintf(stderr,
+                                "elfobj: file-overlap idx=%zu prev=%zu off=0x%llx size=0x%llx prev_off=0x%llx prev_size=0x%llx\n",
+                                i, j, (unsigned long long)sec->offset, (unsigned long long)sec->size,
+                                (unsigned long long)prev->offset, (unsigned long long)prev->size);
+                    }
                     free(sec->name);
                     free(sec);
                     return ELF_ERR_FORMAT;
@@ -142,6 +216,47 @@ static elf_err_t parse_sections(elfobj_t *obj, uint64_t shoff, uint16_t entsize,
             sec->data = obj->image + sec->offset;
             sec->data_size = (size_t)sec->size;
             sec->owns_data = 0;
+            parse_section_compression_hint(obj, sec);
+
+            if (sec->type == SHT_STRTAB && sec->data_size > 0 &&
+                sec->data[sec->data_size - 1] != '\0') {
+                if (debug_open_enabled()) {
+                    fprintf(stderr, "elfobj: unterminated strtab idx=%zu off=0x%llx size=0x%zx\n",
+                            i, (unsigned long long)sec->offset, sec->data_size);
+                }
+                free(sec->name);
+                free(sec);
+                return ELF_ERR_FORMAT;
+            }
+        }
+
+        if (obj->type != ET_REL && (sec->flags & SHF_ALLOC) != 0 && sec->size > 0) {
+            size_t j;
+            for (j = 0; j < obj->section_count; ++j) {
+                struct elf_section *prev = obj->sections[j];
+                if (prev == NULL || prev->size == 0 || (prev->flags & SHF_ALLOC) == 0) {
+                    continue;
+                }
+                if (prev->type == SHT_NOBITS || sec->type == SHT_NOBITS) {
+                    continue;
+                }
+                if (((prev->flags ^ sec->flags) & SHF_TLS) != 0) {
+                    continue;
+                }
+                if (ranges_overlap_u64(prev->addr, prev->size, sec->addr, sec->size)) {
+                    if (debug_open_enabled()) {
+                        fprintf(stderr,
+                                "elfobj: vaddr-overlap idx=%zu prev=%zu addr=0x%llx size=0x%llx prev_addr=0x%llx prev_size=0x%llx flags=0x%llx prev_flags=0x%llx type=%u prev_type=%u\n",
+                                i, j, (unsigned long long)sec->addr, (unsigned long long)sec->size,
+                                (unsigned long long)prev->addr, (unsigned long long)prev->size,
+                                (unsigned long long)sec->flags, (unsigned long long)prev->flags,
+                                sec->type, prev->type);
+                    }
+                    free(sec->name);
+                    free(sec);
+                    return ELF_ERR_FORMAT;
+                }
+            }
         }
 
         if (elf__push_section(obj, sec) != ELF_OK) {
@@ -272,6 +387,181 @@ static symtab_index_t *find_symtab(symtab_index_t *maps, size_t n, size_t sec_in
     return NULL;
 }
 
+static void free_symtab_maps(symtab_index_t *maps, size_t count) {
+    size_t i;
+
+    if (maps == NULL) {
+        return;
+    }
+    for (i = 0; i < count; ++i) {
+        free(maps[i].symbols);
+    }
+    free(maps);
+}
+
+static void rollback_symbols(elfobj_t *obj, size_t base_count) {
+    if (obj == NULL) {
+        return;
+    }
+    while (obj->symbol_count > base_count) {
+        struct elf_symbol *sym;
+        size_t index = obj->symbol_count - 1;
+
+        sym = obj->symbols[index];
+        obj->symbols[index] = NULL;
+        obj->symbol_count = index;
+        if (sym == NULL) {
+            continue;
+        }
+        free(sym->version_name);
+        free(sym->name);
+        free(sym);
+    }
+}
+
+static void rollback_relocs(elfobj_t *obj, size_t base_count) {
+    if (obj == NULL) {
+        return;
+    }
+    while (obj->reloc_count > base_count) {
+        struct elf_reloc *rel;
+        size_t index = obj->reloc_count - 1;
+
+        rel = obj->relocs[index];
+        obj->relocs[index] = NULL;
+        obj->reloc_count = index;
+        if (rel == NULL) {
+            continue;
+        }
+        if (rel->section != NULL && rel->section->reloc_count != 0 &&
+            rel->section->relocs[rel->section->reloc_count - 1] == rel) {
+            rel->section->relocs[rel->section->reloc_count - 1] = NULL;
+            rel->section->reloc_count--;
+        }
+        free(rel);
+    }
+}
+
+static struct elf_section *find_runtime_reloc_target(elfobj_t *obj, uint64_t r_offset, uint64_t *out_rel_off) {
+    size_t i;
+
+    if (obj == NULL) {
+        return NULL;
+    }
+    for (i = 0; i < obj->section_count; ++i) {
+        struct elf_section *sec = obj->sections[i];
+        uint64_t sec_end;
+
+        if (sec == NULL || sec->size == 0 || (sec->flags & SHF_ALLOC) == 0) {
+            continue;
+        }
+        if (!elf__u64_add(sec->addr, sec->size, &sec_end)) {
+            continue;
+        }
+        if (r_offset >= sec->addr && r_offset < sec_end) {
+            if (out_rel_off != NULL) {
+                *out_rel_off = r_offset - sec->addr;
+            }
+            return sec;
+        }
+    }
+    return NULL;
+}
+
+static uint32_t count_gnu_verdef_entries(const struct elf_section *sec, elfobj_endian_t endian) {
+    size_t off = 0;
+    uint32_t count = 0;
+
+    if (sec == NULL || sec->data == NULL || sec->data_size < 20) {
+        return 0;
+    }
+    while (off + 20 <= sec->data_size) {
+        uint32_t next = elf__rd32(sec->data + off + 16, endian);
+        count++;
+        if (next == 0) {
+            break;
+        }
+        if (next < 20 || next > sec->data_size - off) {
+            break;
+        }
+        off += next;
+    }
+    return count;
+}
+
+static uint32_t count_gnu_verneed_entries(const struct elf_section *sec, elfobj_endian_t endian) {
+    size_t off = 0;
+    uint32_t count = 0;
+
+    if (sec == NULL || sec->data == NULL || sec->data_size < 16) {
+        return 0;
+    }
+    while (off + 16 <= sec->data_size) {
+        uint16_t vn_cnt = elf__rd16(sec->data + off + 2, endian);
+        uint32_t aux = elf__rd32(sec->data + off + 8, endian);
+        uint32_t next = elf__rd32(sec->data + off + 12, endian);
+        size_t aux_off = off;
+        uint16_t i;
+
+        if (vn_cnt == 0) {
+            return count;
+        }
+        if (aux < 16 || aux > sec->data_size - off) {
+            break;
+        }
+        aux_off += aux;
+        for (i = 0; i < vn_cnt; ++i) {
+            uint32_t vna_next;
+            if (aux_off + 16 > sec->data_size) {
+                return count;
+            }
+            count++;
+            vna_next = elf__rd32(sec->data + aux_off + 12, endian);
+            if (i + 1 == vn_cnt) {
+                break;
+            }
+            if (vna_next < 16 || vna_next > sec->data_size - aux_off) {
+                return count;
+            }
+            aux_off += vna_next;
+        }
+        if (next == 0) {
+            break;
+        }
+        if (next < 16 || next > sec->data_size - off) {
+            break;
+        }
+        off += next;
+    }
+    return count;
+}
+
+static uint16_t max_known_version_index(elfobj_t *obj) {
+    size_t i;
+    uint32_t verdef_count = 0;
+    uint32_t verneed_count = 0;
+    uint32_t max_u32;
+
+    for (i = 0; i < obj->section_count; ++i) {
+        struct elf_section *sec = obj->sections[i];
+
+        if (sec == NULL || sec->data == NULL) {
+            continue;
+        }
+        if (sec->type == SHT_GNU_verdef) {
+            verdef_count += count_gnu_verdef_entries(sec, obj->endian);
+        } else if (sec->type == SHT_GNU_verneed) {
+            verneed_count += count_gnu_verneed_entries(sec, obj->endian);
+        }
+    }
+
+    max_u32 = 1u + verdef_count + verneed_count;
+    if (max_u32 > 0x7fffu) {
+        max_u32 = 0x7fffu;
+    }
+    return (uint16_t)max_u32;
+}
+
 static elf_err_t parse_symbols(elfobj_t *obj, symtab_index_t **out_maps, size_t *out_count) {
     size_t i;
     size_t map_count = 0;
@@ -280,9 +570,37 @@ static elf_err_t parse_symbols(elfobj_t *obj, symtab_index_t **out_maps, size_t 
 
     for (i = 0; i < obj->section_count; ++i) {
         struct elf_section *sec = obj->sections[i];
+        size_t entsz;
+        size_t min_entsz;
+        struct elf_section *strsec;
+
+        if (sec->type != SHT_SYMTAB && sec->type != SHT_DYNSYM) {
+            continue;
+        }
+        if (sec->data == NULL) {
+            continue;
+        }
+
+        min_entsz = obj->cls == ELFOBJ_CLASS_32 ? 16u : 24u;
+        entsz = (size_t)(sec->entsize ? sec->entsize : min_entsz);
+        if (entsz < min_entsz || sec->data_size % entsz != 0) {
+            return ELF_ERR_FORMAT;
+        }
+        if (sec->link >= obj->section_count) {
+            return ELF_ERR_FORMAT;
+        }
+        strsec = obj->sections[sec->link];
+        if (strsec->type != SHT_STRTAB || strsec->data == NULL) {
+            return ELF_ERR_FORMAT;
+        }
+    }
+
+    for (i = 0; i < obj->section_count; ++i) {
+        struct elf_section *sec = obj->sections[i];
         size_t nsyms;
         size_t j;
         size_t entsz;
+        size_t min_entsz;
         struct elf_section *strsec;
         symtab_index_t map;
 
@@ -293,22 +611,15 @@ static elf_err_t parse_symbols(elfobj_t *obj, symtab_index_t **out_maps, size_t 
             continue;
         }
 
-        entsz = (size_t)(sec->entsize ? sec->entsize : (obj->cls == ELFOBJ_CLASS_32 ? 16 : 24));
-        if (entsz == 0 || sec->data_size % entsz != 0) {
+        min_entsz = obj->cls == ELFOBJ_CLASS_32 ? 16u : 24u;
+        entsz = (size_t)(sec->entsize ? sec->entsize : min_entsz);
+        if (entsz < min_entsz || sec->data_size % entsz != 0) {
             free(maps);
             return ELF_ERR_FORMAT;
         }
         nsyms = sec->data_size / entsz;
 
-        if (sec->link >= obj->section_count) {
-            free(maps);
-            return ELF_ERR_FORMAT;
-        }
         strsec = obj->sections[sec->link];
-        if (strsec->type != SHT_STRTAB || strsec->data == NULL) {
-            free(maps);
-            return ELF_ERR_FORMAT;
-        }
 
         map.sec_index = i;
         map.count = nsyms;
@@ -405,6 +716,8 @@ static elf_err_t parse_symbols(elfobj_t *obj, symtab_index_t **out_maps, size_t 
 
 static elf_err_t parse_symbol_versions(elfobj_t *obj, symtab_index_t *maps, size_t map_count) {
     size_t i;
+    uint16_t max_ver_index = max_known_version_index(obj);
+    int debug = debug_open_enabled();
 
     for (i = 0; i < obj->section_count; ++i) {
         struct elf_section *sec = obj->sections[i];
@@ -422,19 +735,42 @@ static elf_err_t parse_symbol_versions(elfobj_t *obj, symtab_index_t *maps, size
         }
         map = find_symtab(maps, map_count, sec->link);
         if (map == NULL) {
+            if (debug) {
+                fprintf(stderr, "elfobj: versym missing symtab map sec=%s link=%u\n",
+                        sec->name != NULL ? sec->name : "<unnamed>", sec->link);
+            }
             return ELF_ERR_FORMAT;
         }
         entsz = sec->entsize != 0 ? (size_t)sec->entsize : 2u;
         if (entsz < 2u || sec->data_size % entsz != 0) {
+            if (debug) {
+                fprintf(stderr, "elfobj: versym bad entsize sec=%s data=%zu entsz=%zu\n",
+                        sec->name != NULL ? sec->name : "<unnamed>", sec->data_size, entsz);
+            }
             return ELF_ERR_FORMAT;
         }
         nvers = sec->data_size / entsz;
         if (nvers < map->count) {
+            if (debug) {
+                fprintf(stderr, "elfobj: versym too short sec=%s nvers=%zu symcount=%zu\n",
+                        sec->name != NULL ? sec->name : "<unnamed>", nvers, map->count);
+            }
             return ELF_ERR_FORMAT;
         }
         limit = map->count;
         for (j = 0; j < limit; ++j) {
-            map->symbols[j]->ver_index = elf__rd16(sec->data + (j * entsz), obj->endian);
+            uint16_t raw = elf__rd16(sec->data + (j * entsz), obj->endian);
+            uint16_t base = (uint16_t)(raw & 0x7fffu);
+
+            if (base > max_ver_index) {
+                if (debug) {
+                    fprintf(stderr,
+                            "elfobj: versym index out of range sec=%s sym=%zu raw=0x%x base=%u max=%u\n",
+                            sec->name != NULL ? sec->name : "<unnamed>", j, raw, base, max_ver_index);
+                }
+                return ELF_ERR_FORMAT;
+            }
+            map->symbols[j]->ver_index = raw;
         }
         obj->has_versioning = 1;
     }
@@ -443,6 +779,7 @@ static elf_err_t parse_symbol_versions(elfobj_t *obj, symtab_index_t *maps, size
 
 static elf_err_t parse_relocations(elfobj_t *obj, symtab_index_t *maps, size_t map_count) {
     size_t i;
+    int trace = getenv("ELFOBJ_DEBUG_RELOCS") != NULL;
 
     for (i = 0; i < obj->section_count; ++i) {
         struct elf_section *sec = obj->sections[i];
@@ -495,11 +832,18 @@ static elf_err_t parse_relocations(elfobj_t *obj, symtab_index_t *maps, size_t m
         }
 
         if (sec->link >= obj->section_count || sec->info >= obj->section_count) {
+            if (trace) {
+                fprintf(stderr, "elfobj: bad reloc links section=%s link=%u info=%u count=%zu\n",
+                        sec->name != NULL ? sec->name : "<unnamed>", sec->link, sec->info, obj->section_count);
+            }
             return ELF_ERR_FORMAT;
         }
-        target = obj->sections[sec->info];
         map = find_symtab(maps, map_count, sec->link);
         if (map == NULL) {
+            if (trace) {
+                fprintf(stderr, "elfobj: missing symtab map for reloc section=%s link=%u\n",
+                        sec->name != NULL ? sec->name : "<unnamed>", sec->link);
+            }
             return ELF_ERR_FORMAT;
         }
 
@@ -512,6 +856,10 @@ static elf_err_t parse_relocations(elfobj_t *obj, symtab_index_t *maps, size_t m
             entsz = (size_t)sec->entsize;
         }
         if (entsz == 0 || sec->data_size % entsz != 0) {
+            if (trace) {
+                fprintf(stderr, "elfobj: bad reloc entsize section=%s data_size=%zu entsize=%zu\n",
+                        sec->name != NULL ? sec->name : "<unnamed>", sec->data_size, entsz);
+            }
             return ELF_ERR_FORMAT;
         }
         nrel = sec->data_size / entsz;
@@ -524,6 +872,8 @@ static elf_err_t parse_relocations(elfobj_t *obj, symtab_index_t *maps, size_t m
             uint64_t sym_index;
             uint32_t r_type;
             struct elf_reloc *rel;
+            uint64_t target_size;
+            uint64_t rel_offset = 0;
 
             if (obj->cls == ELFOBJ_CLASS_32) {
                 r_offset = elf__rd32(p + 0, obj->endian);
@@ -543,18 +893,59 @@ static elf_err_t parse_relocations(elfobj_t *obj, symtab_index_t *maps, size_t m
                 r_type = (uint32_t)ELF64_R_TYPE(r_info);
             }
 
+            if (obj->type != ET_REL && (sec->flags & SHF_ALLOC) != 0) {
+                target = find_runtime_reloc_target(obj, r_offset, &rel_offset);
+                if (target == NULL) {
+                    if (trace) {
+                        fprintf(stderr, "elfobj: runtime reloc target not found reloc=%s off=0x%llx\n",
+                                sec->name != NULL ? sec->name : "<unnamed>",
+                                (unsigned long long)r_offset);
+                    }
+                    return ELF_ERR_FORMAT;
+                }
+            } else {
+                target = obj->sections[sec->info];
+                rel_offset = r_offset;
+            }
+            target_size = target->size;
+            if (target->has_compression_hint && target->compression_size > target_size) {
+                target_size = target->compression_size;
+            }
+            if (rel_offset >= target_size) {
+                if (trace) {
+                    fprintf(stderr,
+                            "elfobj: reloc offset out of range reloc=%s target=%s off=0x%llx target_size=0x%llx raw_size=0x%llx compressed=%u unc_size=0x%llx\n",
+                            sec->name != NULL ? sec->name : "<unnamed>",
+                            target->name != NULL ? target->name : "<unnamed>",
+                            (unsigned long long)rel_offset,
+                            (unsigned long long)target_size,
+                            (unsigned long long)target->size,
+                            target->has_compression_hint ? 1u : 0u,
+                            (unsigned long long)target->compression_size);
+                }
+                return ELF_ERR_FORMAT;
+            }
+
             rel = (struct elf_reloc *)elf__calloc(1, sizeof(*rel));
             if (rel == NULL) {
                 return ELF_ERR_OOM;
             }
             rel->section = target;
-            rel->offset = r_offset;
+            rel->offset = rel_offset;
             rel->type = r_type;
             rel->addend = addend;
             rel->has_addend = sec->type == SHT_RELA;
-            if (sym_index < map->count) {
-                rel->symbol = map->symbols[sym_index];
+            rel->symbol = NULL;
+            if (sym_index >= map->count) {
+                if (trace) {
+                    fprintf(stderr, "elfobj: reloc sym index out of range reloc=%s sym=%llu map_count=%zu\n",
+                            sec->name != NULL ? sec->name : "<unnamed>",
+                            (unsigned long long)sym_index, map->count);
+                }
+                free(rel);
+                return ELF_ERR_FORMAT;
             }
+            rel->symbol = map->symbols[sym_index];
 
             if (elf__push_reloc(obj, rel) != ELF_OK) {
                 free(rel);
@@ -574,7 +965,9 @@ static elf_err_t parse_relocations(elfobj_t *obj, symtab_index_t *maps, size_t m
 static elf_err_t materialize_symbols_relocs(elfobj_t *obj) {
     symtab_index_t *maps = NULL;
     size_t map_count = 0;
-    size_t i;
+    size_t symbol_base;
+    size_t reloc_base;
+    uint8_t has_versioning_base;
     elf_err_t err;
 
     if (obj == NULL) {
@@ -584,24 +977,37 @@ static elf_err_t materialize_symbols_relocs(elfobj_t *obj) {
         return ELF_OK;
     }
 
+    symbol_base = obj->symbol_count;
+    reloc_base = obj->reloc_count;
+    has_versioning_base = obj->has_versioning;
+
     err = parse_symbols(obj, &maps, &map_count);
     if (err != ELF_OK) {
+        if (debug_open_enabled()) {
+            fprintf(stderr, "elfobj: parse_symbols err=%d\n", (int)err);
+        }
+        rollback_symbols(obj, symbol_base);
         return err;
     }
     err = parse_symbol_versions(obj, maps, map_count);
     if (err != ELF_OK) {
-        for (i = 0; i < map_count; ++i) {
-            free(maps[i].symbols);
+        if (debug_open_enabled()) {
+            fprintf(stderr, "elfobj: parse_symbol_versions err=%d\n", (int)err);
         }
-        free(maps);
+        free_symtab_maps(maps, map_count);
+        rollback_symbols(obj, symbol_base);
+        obj->has_versioning = has_versioning_base;
         return err;
     }
     err = parse_relocations(obj, maps, map_count);
-    for (i = 0; i < map_count; ++i) {
-        free(maps[i].symbols);
+    if (err != ELF_OK && debug_open_enabled()) {
+        fprintf(stderr, "elfobj: parse_relocations err=%d\n", (int)err);
     }
-    free(maps);
+    free_symtab_maps(maps, map_count);
     if (err != ELF_OK) {
+        rollback_relocs(obj, reloc_base);
+        rollback_symbols(obj, symbol_base);
+        obj->has_versioning = has_versioning_base;
         return err;
     }
 
@@ -676,22 +1082,34 @@ static elf_err_t parse_object(elfobj_t *obj) {
         obj->machine != EM_VAX && obj->machine != EM_PPC &&
         obj->machine != EM_PPC64 && obj->machine != EM_ALPHA &&
         obj->machine != EM_IA_64) {
+        if (debug_open_enabled()) {
+            fprintf(stderr, "elfobj: unsupported machine=%u\n", obj->machine);
+        }
         return ELF_ERR_UNSUPPORTED;
     }
 
     err = parse_program_headers(obj, phoff, phentsize, phnum);
     if (err != ELF_OK) {
+        if (debug_open_enabled()) {
+            fprintf(stderr, "elfobj: parse_program_headers err=%d\n", (int)err);
+        }
         return err;
     }
 
     err = parse_sections(obj, shoff, shentsize, shnum);
     if (err != ELF_OK) {
+        if (debug_open_enabled()) {
+            fprintf(stderr, "elfobj: parse_sections err=%d\n", (int)err);
+        }
         return err;
     }
 
     if (shnum > 0) {
         err = resolve_section_names(obj);
         if (err != ELF_OK) {
+            if (debug_open_enabled()) {
+                fprintf(stderr, "elfobj: resolve_section_names err=%d\n", (int)err);
+            }
             return err;
         }
         if (obj->machine == EM_ARM) {
@@ -710,6 +1128,9 @@ static elf_err_t parse_object(elfobj_t *obj) {
     if (!obj->lazy_parse) {
         err = materialize_symbols_relocs(obj);
         if (err != ELF_OK) {
+            if (debug_open_enabled()) {
+                fprintf(stderr, "elfobj: materialize_symbols_relocs err=%d\n", (int)err);
+            }
             return err;
         }
     }
@@ -830,14 +1251,14 @@ elf_err_t elf_open_memory_with_options(const void *buf, size_t size, uint32_t fl
 }
 
 elf_err_t elf_open_with_options(const char *path, uint32_t flags, elfobj_t **out) {
-    FILE *fp;
     uint8_t *buf;
-    long end;
-    size_t got;
     int fd;
     struct stat st;
     void *map = MAP_FAILED;
     elf_err_t err;
+    size_t cap;
+    size_t used;
+    ssize_t nr;
 
     if (path == NULL || out == NULL) {
         return ELF_ERR_STATE;
@@ -874,38 +1295,67 @@ elf_err_t elf_open_with_options(const char *path, uint32_t flags, elfobj_t **out
         }
     }
 
-    fp = fopen(path, "rb");
-    if (fp == NULL) {
+    fd = open(path, O_RDONLY);
+    if (fd < 0) {
         return ELF_ERR_IO;
     }
-    if (fseek(fp, 0, SEEK_END) != 0) {
-        fclose(fp);
-        return ELF_ERR_IO;
-    }
-    end = ftell(fp);
-    if (end < 0) {
-        fclose(fp);
-        return ELF_ERR_IO;
-    }
-    if (fseek(fp, 0, SEEK_SET) != 0) {
-        fclose(fp);
-        return ELF_ERR_IO;
-    }
+    if (fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_size >= 0) {
+        size_t total = (size_t)st.st_size;
+        size_t off = 0;
 
-    buf = (uint8_t *)malloc((size_t)end);
-    if (buf == NULL && end != 0) {
-        fclose(fp);
+        buf = (uint8_t *)malloc(total);
+        if (buf == NULL && total != 0) {
+            close(fd);
+            return ELF_ERR_OOM;
+        }
+        while (off < total) {
+            nr = read(fd, buf + off, total - off);
+            if (nr <= 0) {
+                free(buf);
+                close(fd);
+                return ELF_ERR_IO;
+            }
+            off += (size_t)nr;
+        }
+        close(fd);
+        err = open_memory_common(buf, total, flags, out);
+        free(buf);
+        return err;
+    }
+    cap = 4096;
+    used = 0;
+    buf = (uint8_t *)malloc(cap);
+    if (buf == NULL) {
+        close(fd);
         return ELF_ERR_OOM;
     }
-
-    got = fread(buf, 1, (size_t)end, fp);
-    fclose(fp);
-    if (got != (size_t)end) {
+    while ((nr = read(fd, buf + used, cap - used)) > 0) {
+        used += (size_t)nr;
+        if (used == cap) {
+            size_t new_cap;
+            uint8_t *next;
+            if (cap > ((size_t)-1) / 2) {
+                free(buf);
+                close(fd);
+                return ELF_ERR_BOUNDS;
+            }
+            new_cap = cap * 2;
+            next = (uint8_t *)realloc(buf, new_cap);
+            if (next == NULL) {
+                free(buf);
+                close(fd);
+                return ELF_ERR_OOM;
+            }
+            buf = next;
+            cap = new_cap;
+        }
+    }
+    close(fd);
+    if (nr < 0) {
         free(buf);
         return ELF_ERR_IO;
     }
-
-    err = open_memory_common(buf, (size_t)end, flags, out);
+    err = open_memory_common(buf, used, flags, out);
     free(buf);
     return err;
 }

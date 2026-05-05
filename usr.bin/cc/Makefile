@@ -22,13 +22,13 @@ CC_HEADERS = include/cc_driver.h include/cc_frontend.h include/cc_ssa.h \
 	     include/cc_middle.h include/cc_target.h ir.h
 
 ifeq ($(NATIVE_BUILD),1)
-    TOOL_CFLAGS = $(CFLAGS)
+    TOOL_CFLAGS = $(CFLAGS) -DCC_NATIVE_BUILD=1
     TOOL_LDFLAGS =
     TOOL_CRT0 =
     TOOL_LIBS =
     TOOL_BRAND = @true
 else
-    TOOL_CFLAGS = $(USER_CFLAGS) -fno-builtin
+    TOOL_CFLAGS = $(USER_CFLAGS) -fno-builtin -DCC_SUBSTRATE_BUILD=1
     TOOL_LDFLAGS = $(USER_LDFLAGS)
     TOOL_CRT0 = $(TOP)/lib/c/crt0.o
     TOOL_LIBC = $(TOP)/lib/c/libc.a

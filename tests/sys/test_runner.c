@@ -23,7 +23,9 @@ void run_cow_stats_tests(void);
 extern void test_pte_user(void);
 extern void test_stacktrace(void);
 extern void test_ksyms(void);
+extern void test_native_personality(void);
 extern void test_linux_personality(void);
+extern void test_freebsd_personality(void);
 extern void test_mmap_parsing(void);
 extern void test_e820_parsing(void);
 extern void test_vm_phys(void);
@@ -127,8 +129,16 @@ void run_kernel_tests(void) {
         test_ksyms();
     }
 
+    if (all || strcmp(test_arg, "native_perso") == 0) {
+        test_native_personality();
+    }
+
     if (all || strcmp(test_arg, "linux_perso") == 0) {
         test_linux_personality();
+    }
+
+    if (all || strcmp(test_arg, "freebsd_perso") == 0) {
+        test_freebsd_personality();
     }
 
     if (all || strcmp(test_arg, "mmap_parsing") == 0) {
@@ -258,11 +268,6 @@ void run_kernel_tests(void) {
          extern void run_minix_readdir_tests(void);
          run_minix_readdir_tests();
     }
-
-    // Wait logic tests are run on host via verify_wait_host.sh
-    // if (all || strcmp(test_arg, "wait") == 0) {
-    //     test_wait_logic();
-    // }
 
     if (all || strcmp(test_arg, "mount") == 0) {
          extern void run_mount_tests(void);

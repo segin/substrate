@@ -188,5 +188,6 @@ struct personality personality_sunos = {
     .syscall_table = sunos_syscalls,
     .syscall_names = sunos_names,
     .syscall_fmts = sunos_fmts,
-    .syscall_count = MAX_SYSCALLS
+    .syscall_count = MAX_SYSCALLS,
+    .path_prefix = "/perso/sunos"
 };

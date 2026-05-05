@@ -16,14 +16,14 @@ chmod-bin:
 	$(MAKE) -C ../../bin/chmod clean
 	$(MAKE) -C ../../bin/chmod NATIVE_BUILD=1
 
-unit_mode_parser: unit_mode_parser.c ../../bin/chmod/mode_parser.c ../../bin/chmod/mode_parser.h
-	$(CC) $(CFLAGS) -I../../bin/chmod $< ../../bin/chmod/mode_parser.c -o $@ $(LDFLAGS)
+unit_mode_parser: unit_mode_parser.c ../../bin/chmod/mode_parser.c ../../bin/chmod/mode_parser.h ../../include/modeparse.h ../../lib/modeparse.c
+	$(CC) $(CFLAGS) -I../../bin/chmod -iquote ../../include $< ../../bin/chmod/mode_parser.c ../../lib/modeparse.c -o $@ $(LDFLAGS)
 
 unit_cli: unit_cli.c
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 
-fuzz_mode_parser: fuzz_mode_parser.c ../../bin/chmod/mode_parser.c ../../bin/chmod/mode_parser.h
-	$(CC) $(CFLAGS) -I../../bin/chmod $< ../../bin/chmod/mode_parser.c -o $@ $(LDFLAGS)
+fuzz_mode_parser: fuzz_mode_parser.c ../../bin/chmod/mode_parser.c ../../bin/chmod/mode_parser.h ../../include/modeparse.h ../../lib/modeparse.c
+	$(CC) $(CFLAGS) -I../../bin/chmod -iquote ../../include $< ../../bin/chmod/mode_parser.c ../../lib/modeparse.c -o $@ $(LDFLAGS)
 
 fuzz_traversal_paths: fuzz_traversal_paths.c
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)

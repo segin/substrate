@@ -8,7 +8,7 @@ int kmalloc_called = 0;
 int kmalloc_size = 0;
 int allow_allocation = 0;
 
-void *kmalloc(int size) {
+void *kmalloc(size_t size) {
     kmalloc_called = 1;
     kmalloc_size = size;
     if (allow_allocation) {
@@ -92,4 +92,10 @@ int main() {
 
     printf("\nTest Summary: %d passed, %d failed\n", passed, failed);
     return failed > 0 ? 1 : 0;
+}
+
+// Mock missing sysctl variables and functions to allow linking
+struct sysctl_oid_list sysctl_debug_children;
+int sysctl_handle_int(struct sysctl_oid *oidp, void *arg1, int arg2, struct sysctl_req *req) {
+    return 0;
 }

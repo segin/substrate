@@ -1,0 +1,143 @@
+.TH MODF 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+modf, modff, modfl \- decompose floating-point number into integer and fractional parts
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double modf(double " x ", double *" iptr );
+.br
+.BI "float modff(float " x ", float *" iptr );
+.br
+.BI "long double modfl(long double " x ", long double *" iptr );
+.SH DESCRIPTION
+The
+.BR modf ()
+function breaks the argument
+.I x
+into its integral and fractional parts, each of which has the same
+sign as
+.IR x .
+The integral part (truncated toward zero) is stored in the
+.B double
+pointed to by
+.IR iptr ,
+and the signed fractional part is returned.
+.PP
+The decomposition satisfies the identity
+.PP
+.RS 4
+.IR x " == *" iptr " + " frac
+.RE
+.PP
+where
+.I frac
+is the value returned by
+.BR modf ().
+The magnitude of the fractional part is strictly less than 1.
+.PP
+The
+.BR modff ()
+variant takes and returns
+.B float
+values; the
+.BR modfl ()
+variant takes and returns
+.B "long double"
+values.
+.SH RETURN VALUE
+On success,
+.BR modf ()
+returns the signed fractional part of
+.IR x ,
+with the same sign as
+.IR x ,
+and stores the signed integral part of
+.I x
+(truncated toward zero) in
+.RI * iptr .
+.PP
+If
+.I x
+is +0 (\-0),
+.BR modf ()
+returns +0 (\-0) and stores +0 (\-0) in
+.RI * iptr .
+.PP
+If
+.I x
+is positive infinity (negative infinity),
+.BR modf ()
+returns +0 (\-0) and stores positive infinity (negative infinity) in
+.RI * iptr .
+.PP
+If
+.I x
+is a NaN,
+.BR modf ()
+returns a NaN and stores a NaN in
+.RI * iptr .
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR modf (),
+.BR modff (),
+.BR modfl ()
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+.BR modf (),
+.BR modff (),
+and
+.BR modfl ()
+conform to C99 and POSIX.1-2008.  The handling of special arguments
+follows C99 Annex F.10.3 (IEC 60559).
+.SH EXAMPLES
+The following program decomposes 3.14 into its integer and fractional
+components and prints both:
+.PP
+.RS 4
+.EX
+#include <math.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    double x = 3.14;
+    double ipart, fpart;
+
+    fpart = modf(x, &ipart);
+
+    printf("x     = %.6f\en", x);
+    printf("ipart = %.6f\en", ipart);
+    printf("fpart = %.6f\en", fpart);
+    return 0;
+}
+.EE
+.RE
+.PP
+The output is:
+.PP
+.RS 4
+.EX
+x     = 3.140000
+ipart = 3.000000
+fpart = 0.140000
+.EE
+.RE
+.SH SEE ALSO
+.BR ceil (3),
+.BR floor (3),
+.BR frexp (3),
+.BR trunc (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.
