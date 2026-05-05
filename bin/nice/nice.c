@@ -1,8 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-
-extern int setpriority(int which, int who, int prio);
+#include <sys/resource.h>
 
 int main(int argc, char *argv[]) {
     int inc = 10;

@@ -195,10 +195,16 @@ static int geom_gpt_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
             continue;
         }
         
-        /* Calculate partition size (end_lba is inclusive) */
+        /* Calculate partition size (end_lba is inclusive).  Reject
+         * malformed entries where end < start; without the guard the
+         * subtraction underflows to ~UINT64_MAX and downstream sector
+         * arithmetic produces wild offsets. */
+        if (entry->end_lba < entry->start_lba) {
+            continue;
+        }
         uint64_t start = entry->start_lba;
         uint64_t size = entry->end_lba - entry->start_lba + 1;
-        
+
         /* Create partition name */
         char part_name[32];
         snprintf(part_name, sizeof(part_name), "%sp%d", prefix, part_num);

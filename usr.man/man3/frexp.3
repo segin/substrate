@@ -1,0 +1,235 @@
+.TH FREXP 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+frexp, frexpf, frexpl, ldexp, ldexpf, ldexpl \- convert floating-point number to fractional and integral components
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double frexp(double " x ", int *" exp );
+.br
+.BI "float frexpf(float " x ", int *" exp );
+.br
+.BI "long double frexpl(long double " x ", int *" exp );
+.PP
+.BI "double ldexp(double " x ", int " exp );
+.br
+.BI "float ldexpf(float " x ", int " exp );
+.br
+.BI "long double ldexpl(long double " x ", int " exp );
+.SH DESCRIPTION
+The
+.BR frexp ()
+function decomposes its first argument
+.I x
+into a normalized fraction and an integral power of two.  It returns
+the fraction
+.I frac
+such that the absolute value of
+.I frac
+lies in the half-open interval
+.BR [0.5,\ 1.0) ,
+and stores the exponent through the pointer
+.IR exp ,
+so that the original value satisfies
+.PP
+.RS 4
+.IR x " == " frac " * 2^" *exp .
+.RE
+.PP
+The
+.BR ldexp ()
+function performs the inverse operation: it returns
+.PP
+.RS 4
+.IR x " * 2^" exp ,
+.RE
+.PP
+that is, the value of
+.I x
+multiplied by 2 raised to the power
+.IR exp .
+.PP
+The
+.BR frexpf ()
+and
+.BR ldexpf ()
+variants take and return
+.B float
+values; the
+.BR frexpl ()
+and
+.BR ldexpl ()
+variants take and return
+.B "long double"
+values.
+.SH RETURN VALUE
+On success,
+.BR frexp ()
+returns the fractional part of
+.IR x ,
+with the magnitude in
+.BR [0.5,\ 1.0) ,
+and stores the corresponding exponent in
+.RI * exp .
+.PP
+If
+.I x
+is +0 (\-0),
+.BR frexp ()
+returns +0 (\-0) and stores 0 in
+.RI * exp .
+.PP
+If
+.I x
+is positive infinity (negative infinity),
+.BR frexp ()
+returns positive infinity (negative infinity); the value stored in
+.RI * exp
+is unspecified.
+.PP
+If
+.I x
+is a NaN,
+.BR frexp ()
+returns a NaN; the value stored in
+.RI * exp
+is unspecified.
+.PP
+On success,
+.BR ldexp ()
+returns the value
+.IR x " * 2^" exp .
+.PP
+If the result of
+.BR ldexp ()
+overflows the range of the return type, a range (overflow) error
+occurs and the function returns
+.B \(+-HUGE_VAL
+(or
+.B \(+-HUGE_VALF
+or
+.BR \(+-HUGE_VALL )
+with the sign of
+.IR x .
+.PP
+If the result of
+.BR ldexp ()
+underflows the range of the return type, a range (underflow) error
+occurs and the function returns 0 with the sign of
+.IR x .
+.PP
+If
+.I x
+is \(+-0, \(+-infinity, or NaN, or if
+.I exp
+is 0,
+.BR ldexp ()
+returns
+.I x
+unchanged.
+.SH ERRORS
+See
+.BR math_error (7)
+for information on how to determine whether an error has occurred when
+calling these functions.
+.PP
+The following errors can occur for
+.BR ldexp ()
+and its variants:
+.TP
+Range error: result overflow
+An overflow floating-point exception
+.RB ( FE_OVERFLOW )
+is raised.  If
+.I "math_errhandling & MATH_ERRNO"
+is non-zero,
+.I errno
+is set to
+.BR ERANGE .
+.TP
+Range error: result underflow
+An underflow floating-point exception
+.RB ( FE_UNDERFLOW )
+is raised.  If
+.I "math_errhandling & MATH_ERRNO"
+is non-zero,
+.I errno
+is set to
+.BR ERANGE .
+.PP
+.BR frexp ()
+and its variants do not raise floating-point exceptions and do not set
+.IR errno .
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR frexp (),
+.BR frexpf (),
+.BR frexpl (),
+.BR ldexp (),
+.BR ldexpf (),
+.BR ldexpl ()
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+.BR frexp (),
+.BR ldexp (),
+and their
+.BR f / l
+variants conform to C99 and POSIX.1-2008.  The handling of special
+arguments follows C99 Annex F.10.3 (IEC 60559).
+.SH EXAMPLES
+The following program demonstrates a
+.BR frexp ()
+followed by
+.BR ldexp ()
+roundtrip, recovering the original value from its fractional and
+exponent components:
+.PP
+.RS 4
+.EX
+#include <math.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    double x = 1234.5;
+    int exp;
+    double frac, y;
+
+    frac = frexp(x, &exp);
+    y = ldexp(frac, exp);
+
+    printf("x    = %.6f\en", x);
+    printf("frac = %.6f, exp = %d\en", frac, exp);
+    printf("y    = %.6f\en", y);
+    return 0;
+}
+.EE
+.RE
+.PP
+The output is:
+.PP
+.RS 4
+.EX
+x    = 1234.500000
+frac = 0.602783, exp = 11
+y    = 1234.500000
+.EE
+.RE
+.SH SEE ALSO
+.BR ilogb (3),
+.BR logb (3),
+.BR modf (3),
+.BR scalbn (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

@@ -1,5 +1,4 @@
 PROG = tail
-SRCS = tail.c
+SRCS = tail_main.c tail_parse.c tail_io.c tail_follow.c
 
-include ../../Makefile.inc
 include ../../Makefile.bin.inc

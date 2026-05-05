@@ -1,11 +1,19 @@
 include ../../Makefile.inc
 
-CC = gcc
 ifdef NATIVE_BUILD
 CFLAGS := -Wall -g
 CPPFLAGS := -include ../../include/histedit.h
 else
 CFLAGS += -I../../include -I../../sys/include -I../../sys
+endif
+
+.PHONY: all clean install
+
+ifneq ($(filter clean,$(MAKECMDGOALS)),)
+ifneq ($(filter all,$(MAKECMDGOALS)),)
+all: clean
+.NOTPARALLEL: clean all
+endif
 endif
 
 all: libedit.a

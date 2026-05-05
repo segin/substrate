@@ -37,29 +37,7 @@
 static uint8_t mock_secret_data[44]; // sizeof(process_secret) in stdlib.c is 11 * 4 = 44
 static int use_fixed_mock_secret = 0;
 
-// Use a different name for the mock to avoid macro recursion issues if any,
-// but we want to override the one used in stdlib.c.
-// Since we #define arc4random_buf tested_arc4random_buf AND then #include stdlib.c,
-// and stdlib.c defines arc4random_buf, we might have a conflict.
-
-// Actually, in stdlib.c:
-// void arc4random_buf(void *buf, size_t n) { ... }
-// If we #define it before, it becomes:
-// void tested_arc4random_buf(void *buf, size_t n) { ... }
-// This is what we want.
-
-// But we want to PROVIDE our own version of arc4random_buf to be used by srand.
-// Wait, srand calls arc4random_buf.
-// If we want to mock it, we should NOT let stdlib.c define it, or we should override it.
-
-// In test_stdlib.c, they don't seem to mock arc4random_buf.
-// In test_rand_security.c, they just test determinism within a run.
-
-// Let's try to override it by defining it AFTER including stdlib.c? No, that's multiple definition.
-// Maybe we can use a macro to skip the definition in stdlib.c? No such macro exists.
-
-// Alternative: mock the open/read calls? stdlib.c's arc4random_buf uses open("/dev/urandom").
-// We can mock 'open' and 'read'.
+// Mock the open/read calls for arc4random_buf to use /dev/urandom.
 
 #define open mock_open
 #define read mock_read

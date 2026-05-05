@@ -26,6 +26,9 @@
 #define O_NOFOLLOW  0x20000
 #define O_CLOEXEC   0x80000
 
+#define AT_SYMLINK_NOFOLLOW 0x100
+#define AT_REMOVEDIR        0x200
+
 /* Values for fcntl() */
 #define F_DUPFD     0
 #define F_GETFD     1

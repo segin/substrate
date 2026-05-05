@@ -40,7 +40,13 @@ static const char *cmdline_next_token(const char *p,
     }
 
     end = start;
-    while (*end != '\0' && *end != ' ') {
+    int in_quotes = 0;
+    while (*end != '\0') {
+        if (*end == '\"' || *end == '\'') {
+            in_quotes = !in_quotes;
+        } else if (*end == ' ' && !in_quotes) {
+            break;
+        }
         end++;
     }
 

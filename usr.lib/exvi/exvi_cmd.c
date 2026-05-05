@@ -186,6 +186,7 @@ apply_substitute_range(buffer_t *b, int addr1, int addr2, const char *pattern,
                 new_len += rem_len;
                 new_text[new_len] = '\0';
 
+                exvi_note_buffer_change();
                 free(l->text);
                 l->text = new_text;
                 l->len = new_len;
@@ -285,15 +286,41 @@ handle_delete_command(buffer_t *b, int explicit_range, int addr1, int addr2)
 int
 handle_undo_command(buffer_t *b)
 {
-    if (undo_valid) {
-        buffer_t tmp;
+    buffer_t snapshot;
 
-        buf_init(&tmp);
-        buf_copy(&tmp, b);
-        buf_copy(b, &undo_buf);
-        buf_copy(&undo_buf, &tmp);
-        buf_free(&tmp);
-        undo_valid = 1;
+    exvi_discard_pending_undo();
+    if (undo_history.len > 0) {
+        if (exvi_history_push_snapshot(&redo_history, b) != 0) {
+            exvi_report_error("out of memory");
+            return 1;
+        }
+        if (exvi_history_pop_snapshot(&undo_history, &snapshot) == 0) {
+            exvi_history_suspended++;
+            buf_free(b);
+            *b = snapshot;
+            exvi_history_suspended--;
+        }
+    }
+    return 1;
+}
+
+int
+handle_redo_command(buffer_t *b)
+{
+    buffer_t snapshot;
+
+    exvi_discard_pending_undo();
+    if (redo_history.len > 0) {
+        if (exvi_history_push_snapshot(&undo_history, b) != 0) {
+            exvi_report_error("out of memory");
+            return 1;
+        }
+        if (exvi_history_pop_snapshot(&redo_history, &snapshot) == 0) {
+            exvi_history_suspended++;
+            buf_free(b);
+            *b = snapshot;
+            exvi_history_suspended--;
+        }
     }
     return 1;
 }
@@ -586,6 +613,7 @@ handle_join_command(buffer_t *b, int explicit_range, int addr1, int addr2)
             joined[cur_len] = '\0';
             buf_delete(b, to_delete);
         }
+        exvi_note_buffer_change();
         free(first->text);
         first->text = joined;
         first->len = cur_len;
@@ -746,6 +774,9 @@ handle_shell_command(char *cmd)
     if (!shell || !*shell) {
         shell = "/bin/sh";
     }
+    if (visual_mode) {
+        exvi_visual_shell_suspend();
+    }
     pid = fork();
     if (pid < 0) {
         perror("fork");
@@ -773,6 +804,9 @@ handle_shell_command(char *cmd)
         }
         signal(SIGINT, old_int);
         signal(SIGQUIT, old_quit);
+    }
+    if (visual_mode) {
+        exvi_visual_shell_resume();
     }
     return 1;
 }

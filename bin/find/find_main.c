@@ -247,7 +247,9 @@ int main(int argc, char **argv)
 				if (bi > 0) {
 					if (path_count >= cap) {
 						cap = cap ? cap * 2 : 64;
-						dyn_paths = realloc(dyn_paths, sizeof(char *) * cap);
+						char **tmp = realloc(dyn_paths, sizeof(char *) * cap);
+						if (!tmp) { perror("realloc"); exit(1); }
+						dyn_paths = tmp;
 					}
 					dyn_paths[path_count++] = strdup(buf);
 				}
@@ -261,7 +263,9 @@ int main(int argc, char **argv)
 			buf[bi] = '\0';
 			if (path_count >= cap) {
 				cap = cap ? cap * 2 : 64;
-				dyn_paths = realloc(dyn_paths, sizeof(char *) * cap);
+				char **tmp = realloc(dyn_paths, sizeof(char *) * cap);
+				if (!tmp) { perror("realloc"); exit(1); }
+				dyn_paths = tmp;
 			}
 			dyn_paths[path_count++] = strdup(buf);
 		}

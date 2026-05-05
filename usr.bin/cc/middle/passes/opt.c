@@ -9,6 +9,7 @@ typedef struct {
     cc_value_type_t type;
     long long i;
     double f;
+    long double ld;
 } const_state_t;
 
 static void clear_known(const_state_t *st, int count) {
@@ -16,6 +17,10 @@ static void clear_known(const_state_t *st, int count) {
     for (i = 0; i < count; ++i) {
         st[i].known = 0;
     }
+}
+
+static int value_is_ldouble(const cc_ssa_function_t *f, int v) {
+    return f != NULL && f->value_sizes != NULL && v >= 0 && v < f->value_count && f->value_sizes[v] >= 16;
 }
 
 static int fold_function(cc_ssa_function_t *f) {
@@ -48,6 +53,7 @@ static int fold_function(cc_ssa_function_t *f) {
                 st[dst].type = vt;
                 st[dst].i = in->imm;
                 st[dst].f = in->fimm;
+                st[dst].ld = value_is_ldouble(f, dst) ? in->fimm_ld : (long double)in->fimm;
             }
             break;
 
@@ -95,9 +101,11 @@ static int fold_function(cc_ssa_function_t *f) {
                 in->lhs = -1;
                 in->rhs = -1;
                 in->fimm = in->is_unsigned ? (double)(unsigned long long)src : (double)src;
+                in->fimm_ld = in->is_unsigned ? (long double)(unsigned long long)src : (long double)src;
                 st[dst].known = 1;
                 st[dst].type = CC_VAL_F64;
                 st[dst].f = in->fimm;
+                st[dst].ld = in->fimm_ld;
                 changed = 1;
             } else if (dst >= 0) {
                 st[dst].known = 0;
@@ -106,7 +114,7 @@ static int fold_function(cc_ssa_function_t *f) {
 
         case CC_SSA_F2I:
             if (dst >= 0 && in->lhs >= 0 && st[in->lhs].known && st[in->lhs].type == CC_VAL_F64) {
-                double src = st[in->lhs].f;
+                long double src = value_is_ldouble(f, in->lhs) ? st[in->lhs].ld : (long double)st[in->lhs].f;
                 in->op = CC_SSA_CONST;
                 in->lhs = -1;
                 in->rhs = -1;
@@ -127,9 +135,11 @@ static int fold_function(cc_ssa_function_t *f) {
                 in->lhs = -1;
                 in->rhs = -1;
                 in->fimm = (double)srcf;
+                in->fimm_ld = (long double)srcf;
                 st[dst].known = 1;
                 st[dst].type = CC_VAL_F64;
                 st[dst].f = in->fimm;
+                st[dst].ld = in->fimm_ld;
                 changed = 1;
             } else if (dst >= 0) {
                 st[dst].known = 0;
@@ -196,7 +206,33 @@ static int fold_function(cc_ssa_function_t *f) {
             } else if (dst >= 0 && in->lhs >= 0 && in->rhs >= 0 &&
                        st[in->lhs].known && st[in->rhs].known &&
                        st[in->lhs].type == CC_VAL_F64 && st[in->rhs].type == CC_VAL_F64) {
-                {
+                if (value_is_ldouble(f, dst) || value_is_ldouble(f, in->lhs) || value_is_ldouble(f, in->rhs)) {
+                    long double a = value_is_ldouble(f, in->lhs) ? st[in->lhs].ld : (long double)st[in->lhs].f;
+                    long double b = value_is_ldouble(f, in->rhs) ? st[in->rhs].ld : (long double)st[in->rhs].f;
+                    long double out = 0.0L;
+                    if (in->op == CC_SSA_ADD) {
+                        out = a + b;
+                    } else if (in->op == CC_SSA_SUB) {
+                        out = a - b;
+                    } else if (in->op == CC_SSA_MUL) {
+                        out = a * b;
+                    } else if (in->op == CC_SSA_DIV) {
+                        out = a / b;
+                    } else {
+                        st[dst].known = 0;
+                        break;
+                    }
+                    in->op = CC_SSA_CONST;
+                    in->lhs = -1;
+                    in->rhs = -1;
+                    in->fimm = (double)out;
+                    in->fimm_ld = out;
+                    st[dst].known = 1;
+                    st[dst].type = CC_VAL_F64;
+                    st[dst].f = in->fimm;
+                    st[dst].ld = out;
+                    changed = 1;
+                } else {
                     double a = st[in->lhs].f;
                     double b = st[in->rhs].f;
                     double out = 0.0;
@@ -216,9 +252,11 @@ static int fold_function(cc_ssa_function_t *f) {
                     in->lhs = -1;
                     in->rhs = -1;
                     in->fimm = out;
+                    in->fimm_ld = (long double)out;
                     st[dst].known = 1;
                     st[dst].type = CC_VAL_F64;
                     st[dst].f = out;
+                    st[dst].ld = (long double)out;
                     changed = 1;
                 }
             } else if (dst >= 0) {

@@ -18,6 +18,7 @@ vfs_mount(struct mount *mp, const char *path, void *data, struct nameidata *ndp,
 {
     struct vnode *vp;
     int error;
+    int mp_allocated = 0;
 
     /*
      * Lookup the mount point
@@ -37,11 +38,6 @@ vfs_mount(struct mount *mp, const char *path, void *data, struct nameidata *ndp,
         return ENOTDIR;
     }
 
-    if (vp->v_mountedhere != NULL) {
-        vrele(vp);
-        return EBUSY; /* Already mounted */
-    }
-
     /*
      * Allocate and initialize the mount structure
      * (Normally mp serves as a template or is allocated here)
@@ -53,6 +49,7 @@ vfs_mount(struct mount *mp, const char *path, void *data, struct nameidata *ndp,
             return ENOMEM;
         }
         memset(mp, 0, sizeof(struct mount));
+        mp_allocated = 1;
     }
     
     /* 
@@ -61,6 +58,18 @@ vfs_mount(struct mount *mp, const char *path, void *data, struct nameidata *ndp,
     TAILQ_INIT(&mp->mnt_vnodelist);
     rwlock_init(&mp->mnt_lock, "mnt_lock");
     mp->mnt_vnodecovered = vp;
+
+    /* Atomically check-and-set mountpoint reservation under interlock. */
+    spinlock_acquire(&vp->v_interlock);
+    if (vp->v_mountedhere != NULL) {
+        spinlock_release(&vp->v_interlock);
+        vrele(vp);
+        if (mp_allocated)
+            kfree(mp, sizeof(struct mount));
+        return EBUSY; /* Already mounted */
+    }
+    vp->v_mountedhere = mp;
+    spinlock_release(&vp->v_interlock);
     
     /*
      * In a full implementation, we would look up the filesystem type
@@ -76,17 +85,17 @@ vfs_mount(struct mount *mp, const char *path, void *data, struct nameidata *ndp,
      if (mp->mnt_op && mp->mnt_op->vfs_mount) {
          error = mp->mnt_op->vfs_mount(mp, path, data, ndp, td);
          if (error) {
+             spinlock_acquire(&vp->v_interlock);
+             if (vp->v_mountedhere == mp)
+                 vp->v_mountedhere = NULL;
+             spinlock_release(&vp->v_interlock);
              vrele(vp);
-             kfree(mp, sizeof(struct mount));
+             if (mp_allocated)
+                 kfree(mp, sizeof(struct mount));
              return error;
          }
      }
 
-    /*
-     * Success: link into the directory tree
-     */
-    vp->v_mountedhere = mp;
-    
     /* Add to global mount list */
     TAILQ_INSERT_TAIL(&mountlist, mp, mnt_list);
 
@@ -110,8 +119,14 @@ vfs_unmount(struct mount *mp, int mntflags, struct thread *td)
      */
     if ((mntflags & MNT_FORCE) == 0) {
         struct vnode *vp;
+        /* mnt_lock pins the vnode-list spine, but per-vnode v_usecount
+         * is owned by v_interlock — read it under that lock so we
+         * don't race with a concurrent vref() bumping it from 0. */
         TAILQ_FOREACH(vp, &mp->mnt_vnodelist, v_mntlist) {
-            if (vp->v_usecount > 0) {
+            spinlock_acquire(&vp->v_interlock);
+            int busy = (vp->v_usecount > 0);
+            spinlock_release(&vp->v_interlock);
+            if (busy) {
                 rw_wunlock(&mp->mnt_lock);
                 return EBUSY;
             }

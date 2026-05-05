@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import argparse
 import importlib.util
 import os
 import shutil
@@ -73,26 +74,371 @@ def compare_case(helpers, vi_path, vim_path, name, initial_text, key_steps, rows
     require(vim_exit == 0, f"{name}: vim exited with status {vim_exit}")
     require(vi_saved == vim_saved,
             f"{name}: vi {vi_saved!r} != vim {vim_saved!r}")
-    print(f"PASS: {name}")
+    print(f"PASS: {name}", flush=True)
+
+
+def parse_args(argv):
+    parser = argparse.ArgumentParser(
+        description="Compare Substrate vi against sanitized vim overlap cases.",
+    )
+    parser.add_argument("vi_path", help="path to the Substrate vi binary")
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="list selected oracle case names and exit",
+    )
+    parser.add_argument(
+        "--match",
+        action="append",
+        default=[],
+        metavar="SUBSTR",
+        help="run only cases whose names contain SUBSTR; repeatable",
+    )
+    parser.add_argument(
+        "--start-at",
+        metavar="CASE",
+        help="start at CASE (inclusive) in oracle order",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        metavar="N",
+        help="run at most N selected cases",
+    )
+    args = parser.parse_args(argv[1:])
+    if args.limit is not None and args.limit < 0:
+        parser.error("--limit must be non-negative")
+    return args
 
 
 def main():
-    if len(sys.argv) != 2:
-        print(f"usage: {sys.argv[0]} /path/to/vi", file=sys.stderr)
-        return 2
-
-    vi_path = sys.argv[1]
-    vim_path = shutil.which("vim")
-    if not vim_path:
-        print("SKIP: vim not found")
-        return 0
-
-    helpers = load_pty_helpers()
+    args = parse_args(sys.argv)
+    vi_path = args.vi_path
     cases = [
         {
             "name": "search-column-repeat",
             "initial_text": "one two three\nalpha two beta\n",
             "key_steps": [b"/", b"two\r", b"r", b"Z", b"n", b"r", b"Y"],
+        },
+        {
+            "name": "utf8-motion-0ll",
+            "initial_text": "aéb\n",
+            "key_steps": [b"0", b"l", b"l", b"r", b"X"],
+        },
+        {
+            "name": "utf8-motion-dollar-hh",
+            "initial_text": "aéb\n",
+            "key_steps": [b"$", b"h", b"h", b"r", b"X"],
+        },
+        {
+            "name": "utf8-motion-caret-ll",
+            "initial_text": "  aéb\n",
+            "key_steps": [b"^", b"l", b"l", b"r", b"X"],
+        },
+        {
+            "name": "utf8-motion-bar",
+            "initial_text": "aéb\n",
+            "key_steps": [b"3|", b"r", b"X"],
+        },
+        {
+            "name": "utf8-motion-till-forward",
+            "initial_text": "aébc\n",
+            "key_steps": [b"0", b"t", b"b", b"i", b"X", b"\x1b"],
+        },
+        {
+            "name": "utf8-motion-till-backward",
+            "initial_text": "abécd\n",
+            "key_steps": [b"$", b"T", b"b", b"i", b"X", b"\x1b"],
+        },
+        {
+            "name": "utf8-motion-find-forward",
+            "initial_text": "aébcd\n",
+            "key_steps": [b"0", b"f", b"c", b"r", b"X"],
+        },
+        {
+            "name": "utf8-motion-find-backward",
+            "initial_text": "abécd\n",
+            "key_steps": [b"$", b"F", b"b", b"r", b"X"],
+        },
+        {
+            "name": "utf8-motion-repeat-find",
+            "initial_text": "aébcdebc\n",
+            "key_steps": [b"0", b"f", b"b", b";", b"r", b"X"],
+        },
+        {
+            "name": "utf8-motion-repeat-reverse",
+            "initial_text": "abécdbfg\n",
+            "key_steps": [b"$", b"F", b"b", b",", b"r", b"X"],
+        },
+        {
+            "name": "utf8-motion-percent",
+            "initial_text": "(é)\n",
+            "key_steps": [b"%", b"r", b"X"],
+        },
+        {
+            "name": "utf8-word-motion-w",
+            "initial_text": "aé bc\n",
+            "key_steps": [b"0", b"w", b"r", b"X"],
+        },
+        {
+            "name": "utf8-word-motion-b",
+            "initial_text": "a bcé\n",
+            "key_steps": [b"$", b"b", b"r", b"X"],
+        },
+        {
+            "name": "utf8-word-motion-e",
+            "initial_text": "aébc de\n",
+            "key_steps": [b"0", b"e", b"r", b"X"],
+        },
+        {
+            "name": "utf8-word-motion-ge",
+            "initial_text": "ab cé\n",
+            "key_steps": [b"$", b"g", b"e", b"i", b"X", b"\x1b"],
+        },
+        {
+            "name": "utf8-bigword-motion-W",
+            "initial_text": "aé bc\n",
+            "key_steps": [b"0", b"W", b"r", b"X"],
+        },
+        {
+            "name": "utf8-bigword-motion-B",
+            "initial_text": "a bcé\n",
+            "key_steps": [b"$", b"B", b"r", b"X"],
+        },
+        {
+            "name": "utf8-bigword-motion-E",
+            "initial_text": "aébc de\n",
+            "key_steps": [b"0", b"E", b"r", b"X"],
+        },
+        {
+            "name": "utf8-bigword-motion-gE",
+            "initial_text": "ab cé\n",
+            "key_steps": [b"$", b"g", b"E", b"i", b"X", b"\x1b"],
+        },
+        {
+            "name": "utf8-sentence-motion",
+            "initial_text": "Hi é. Bye.\n",
+            "key_steps": [b"0", b")", b"r", b"X"],
+        },
+        {
+            "name": "utf8-paragraph-motion",
+            "initial_text": "aa\n\néé\n\nbb\n",
+            "key_steps": [b"0", b"}", b"r", b"X"],
+        },
+        {
+            "name": "unshift-search-forward",
+            "initial_text": "\taa\n\tmatch\n\tbb\n\tmatch\n\tcc\n",
+            "key_steps": [b"<", b"/", b"match\r"],
+        },
+        {
+            "name": "shift-search-backward",
+            "initial_text": "\taa\n\tmatch\n\tbb\n\tmatch\n\tcc\n",
+            "key_steps": [b"G", b">", b"?", b"match\r"],
+        },
+        {
+            "name": "unshift-search-backward",
+            "initial_text": "\taa\n\tmatch\n\tbb\n\tmatch\n\tcc\n",
+            "key_steps": [b"G", b"<", b"?", b"match\r"],
+        },
+        {
+            "name": "change-repeat-search-forward",
+            "initial_text": "aa\nmatch\nbb\nmatch\ncc\n",
+            "key_steps": [b"/", b"match\r", b"g", b"g", b"c", b"n", b"X", b"\x1b"],
+        },
+        {
+            "name": "delete-repeat-search-backward",
+            "initial_text": "aa\nfoo\nbb\nfoo\ncc\n",
+            "key_steps": [b"G", b"?", b"foo\r", b"d", b"N"],
+        },
+        {
+            "name": "change-repeat-search-backward",
+            "initial_text": "aa\nfoo\nbb\nfoo\ncc\n",
+            "key_steps": [b"G", b"?", b"foo\r", b"c", b"N", b"X", b"\x1b"],
+        },
+        {
+            "name": "shift-repeat-search-backward",
+            "initial_text": "\taa\n\tfoo\n\tbb\n\tfoo\n\tcc\n",
+            "key_steps": [b"G", b"?", b"foo\r", b"g", b"g", b">", b"N"],
+        },
+        {
+            "name": "unshift-repeat-search-forward",
+            "initial_text": "\taa\n\tmatch\n\tbb\n\tmatch\n\tcc\n",
+            "key_steps": [b"/", b"match\r", b"g", b"g", b"<", b"n"],
+        },
+        {
+            "name": "unshift-repeat-search-backward",
+            "initial_text": "\taa\n\tfoo\n\tbb\n\tfoo\n\tcc\n",
+            "key_steps": [b"G", b"?", b"foo\r", b"g", b"g", b"<", b"N"],
+        },
+        {
+            "name": "shift-star-search",
+            "initial_text": "\tword\n\tmiddle\n\tword\n",
+            "key_steps": [b">", b"*"],
+        },
+        {
+            "name": "unshift-star-search",
+            "initial_text": "\tword\n\tmiddle\n\tword\n",
+            "key_steps": [b"<", b"*"],
+        },
+        {
+            "name": "shift-hash-search",
+            "initial_text": "\tword\n\tmiddle\n\tword\n",
+            "key_steps": [b"G", b">", b"#"],
+        },
+        {
+            "name": "unshift-hash-search",
+            "initial_text": "\tword\n\tmiddle\n\tword\n",
+            "key_steps": [b"G", b"<", b"#"],
+        },
+        {
+            "name": "change-find-forward",
+            "initial_text": "abczdef\n",
+            "key_steps": [b"0", b"c", b"f", b"z", b"X", b"\x1b"],
+        },
+        {
+            "name": "delete-till-forward",
+            "initial_text": "abczdef\n",
+            "key_steps": [b"0", b"d", b"t", b"z"],
+        },
+        {
+            "name": "yank-till-forward",
+            "initial_text": "abczdef\n",
+            "key_steps": [b"0", b"y", b"t", b"z", b"P"],
+        },
+        {
+            "name": "shift-find-forward",
+            "initial_text": "abczdef\n",
+            "key_steps": [b">", b"f", b"z"],
+        },
+        {
+            "name": "unshift-find-forward",
+            "initial_text": "\tabczdef\n",
+            "key_steps": [b"<", b"f", b"z"],
+        },
+        {
+            "name": "shift-till-forward",
+            "initial_text": "abczdef\n",
+            "key_steps": [b">", b"t", b"z"],
+        },
+        {
+            "name": "unshift-till-forward",
+            "initial_text": "\tabczdef\n",
+            "key_steps": [b"<", b"t", b"z"],
+        },
+        {
+            "name": "change-find-backward",
+            "initial_text": "abczdef\n",
+            "key_steps": [b"$", b"c", b"F", b"b", b"X", b"\x1b"],
+        },
+        {
+            "name": "yank-find-backward",
+            "initial_text": "abczdef\n",
+            "key_steps": [b"$", b"y", b"F", b"b", b"P"],
+        },
+        {
+            "name": "delete-till-backward",
+            "initial_text": "abczdef\n",
+            "key_steps": [b"$", b"d", b"T", b"b"],
+        },
+        {
+            "name": "yank-till-backward",
+            "initial_text": "abczdef\n",
+            "key_steps": [b"$", b"y", b"T", b"b", b"P"],
+        },
+        {
+            "name": "shift-find-backward",
+            "initial_text": "abczdef\n",
+            "key_steps": [b"$", b">", b"F", b"b"],
+        },
+        {
+            "name": "unshift-find-backward",
+            "initial_text": "\tabczdef\n",
+            "key_steps": [b"$", b"<", b"F", b"b"],
+        },
+        {
+            "name": "shift-till-backward",
+            "initial_text": "abczdef\n",
+            "key_steps": [b"$", b">", b"T", b"b"],
+        },
+        {
+            "name": "unshift-till-backward",
+            "initial_text": "\tabczdef\n",
+            "key_steps": [b"$", b"<", b"T", b"b"],
+        },
+        {
+            "name": "delete-repeat-find-forward",
+            "initial_text": "alpha beta gamma\n",
+            "key_steps": [b"0", b"f", b"a", b"d", b";"],
+        },
+        {
+            "name": "change-repeat-find-forward",
+            "initial_text": "alpha beta gamma\n",
+            "key_steps": [b"0", b"f", b"a", b"c", b";", b"X", b"\x1b"],
+        },
+        {
+            "name": "yank-repeat-find-forward",
+            "initial_text": "alpha beta gamma\n",
+            "key_steps": [b"0", b"f", b"a", b"y", b";", b"P"],
+        },
+        {
+            "name": "shift-repeat-find-forward",
+            "initial_text": "alpha beta gamma\n",
+            "key_steps": [b"0", b"f", b"a", b">", b";"],
+        },
+        {
+            "name": "unshift-repeat-find-forward",
+            "initial_text": "\talpha beta gamma\n",
+            "key_steps": [b"0", b"f", b"a", b"<", b";"],
+        },
+        {
+            "name": "delete-repeat-find-backward",
+            "initial_text": "alpha beta gamma\n",
+            "key_steps": [b"$", b"F", b"a", b"d", b","],
+        },
+        {
+            "name": "change-repeat-find-backward",
+            "initial_text": "alpha beta gamma\n",
+            "key_steps": [b"$", b"F", b"a", b"c", b",", b"X", b"\x1b"],
+        },
+        {
+            "name": "yank-repeat-find-backward",
+            "initial_text": "alpha beta gamma\n",
+            "key_steps": [b"$", b"F", b"a", b"y", b",", b"P"],
+        },
+        {
+            "name": "shift-repeat-find-backward",
+            "initial_text": "alpha beta gamma\n",
+            "key_steps": [b"$", b"F", b"a", b">", b","],
+        },
+        {
+            "name": "unshift-repeat-find-backward",
+            "initial_text": "\talpha beta gamma\n",
+            "key_steps": [b"$", b"F", b"a", b"<", b","],
+        },
+        {
+            "name": "delete-line-mark",
+            "initial_text": "one\ntwo\nthree\nfour\n",
+            "key_steps": [b"j", b"m", b"a", b"G", b"d", b"'", b"a"],
+        },
+        {
+            "name": "change-line-mark",
+            "initial_text": "one\ntwo\nthree\nfour\n",
+            "key_steps": [b"j", b"m", b"a", b"G", b"c", b"'", b"a", b"X", b"\x1b"],
+        },
+        {
+            "name": "yank-line-mark",
+            "initial_text": "one\ntwo\nthree\nfour\n",
+            "key_steps": [b"j", b"m", b"a", b"G", b"y", b"'", b"a", b"P"],
+        },
+        {
+            "name": "shift-line-mark",
+            "initial_text": "one\ntwo\nthree\nfour\n",
+            "key_steps": [b"j", b"m", b"a", b"G", b">", b"'", b"a"],
+        },
+        {
+            "name": "unshift-line-mark",
+            "initial_text": "\tone\n\ttwo\n\tthree\n\tfour\n",
+            "key_steps": [b"j", b"m", b"a", b"G", b"<", b"'", b"a"],
         },
         {
             "name": "counted-line-down-motion",
@@ -256,6 +602,106 @@ def main():
             "key_steps": [b"G", b"2", b"[", b"]", b"r", b"X"],
         },
         {
+            "name": "delete-section-start-forward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"d", b"]", b"]"],
+        },
+        {
+            "name": "change-section-start-forward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"c", b"]", b"]", b"X", b"\x1b"],
+        },
+        {
+            "name": "yank-section-start-forward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"y", b"]", b"]", b"P"],
+        },
+        {
+            "name": "shift-section-start-forward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b">", b"]", b"]"],
+        },
+        {
+            "name": "unshift-section-start-forward",
+            "initial_text": "\tone\n\t{\n\ttwo\n\t}\n\tthree\n\t{\n\tfour\n\t}\n",
+            "key_steps": [b"<", b"]", b"]"],
+        },
+        {
+            "name": "delete-section-start-backward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"G", b"d", b"[", b"["],
+        },
+        {
+            "name": "change-section-start-backward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"G", b"c", b"[", b"[", b"X", b"\x1b"],
+        },
+        {
+            "name": "yank-section-start-backward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"G", b"y", b"[", b"[", b"P"],
+        },
+        {
+            "name": "shift-section-start-backward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"G", b">", b"[", b"["],
+        },
+        {
+            "name": "unshift-section-start-backward",
+            "initial_text": "\tone\n\t{\n\ttwo\n\t}\n\tthree\n\t{\n\tfour\n\t}\n",
+            "key_steps": [b"G", b"<", b"[", b"["],
+        },
+        {
+            "name": "delete-section-end-forward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"d", b"]", b"["],
+        },
+        {
+            "name": "change-section-end-forward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"c", b"]", b"[", b"X", b"\x1b"],
+        },
+        {
+            "name": "yank-section-end-forward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"y", b"]", b"[", b"P"],
+        },
+        {
+            "name": "shift-section-end-forward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b">", b"]", b"["],
+        },
+        {
+            "name": "unshift-section-end-forward",
+            "initial_text": "\tone\n\t{\n\ttwo\n\t}\n\tthree\n\t{\n\tfour\n\t}\n",
+            "key_steps": [b"<", b"]", b"["],
+        },
+        {
+            "name": "delete-section-end-backward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"G", b"d", b"[", b"]"],
+        },
+        {
+            "name": "change-section-end-backward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"G", b"c", b"[", b"]", b"X", b"\x1b"],
+        },
+        {
+            "name": "yank-section-end-backward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"G", b"y", b"[", b"]", b"P"],
+        },
+        {
+            "name": "shift-section-end-backward",
+            "initial_text": "one\n{\ntwo\n}\nthree\n{\nfour\n}\n",
+            "key_steps": [b"G", b">", b"[", b"]"],
+        },
+        {
+            "name": "unshift-section-end-backward",
+            "initial_text": "\tone\n\t{\n\ttwo\n\t}\n\tthree\n\t{\n\tfour\n\t}\n",
+            "key_steps": [b"G", b"<", b"[", b"]"],
+        },
+        {
             "name": "counted-search-repeat-n-motion",
             "initial_text": "target one\ntarget two\ntarget three\ntarget four\n",
             "key_steps": [b"/", b"target\r", b"2", b"n", b"r", b"X"],
@@ -374,6 +820,21 @@ def main():
             "name": "blank-paragraph-delete-emptyline",
             "initial_text": "\nalpha beta gamma delta\n",
             "key_steps": [b"d", b"}"],
+        },
+        {
+            "name": "paragraph-motion-forward-tab-separator",
+            "initial_text": "\tone\n\t\n\ttwo\n\t\n\tthree\n",
+            "key_steps": [b"}", b"r", b"X"],
+        },
+        {
+            "name": "shift-paragraph-forward-tab-separator",
+            "initial_text": "\tone\n\t\n\ttwo\n\t\n\tthree\n",
+            "key_steps": [b">", b"}"],
+        },
+        {
+            "name": "unshift-paragraph-forward-tab-separator",
+            "initial_text": "\tone\n\t\n\ttwo\n\t\n\tthree\n",
+            "key_steps": [b"<", b"}"],
         },
         {
             "name": "short-file-screen-top-motion",
@@ -645,6 +1106,31 @@ def main():
             "key_steps": [b"j", b">", b")"],
         },
         {
+            "name": "change-sentence-backward",
+            "initial_text": "One.\nTwo.\nThree.\n",
+            "key_steps": [b"G", b"$", b"c", b"(", b"X", b"\x1b"],
+        },
+        {
+            "name": "shift-sentence-backward",
+            "initial_text": "One.\nTwo.\nThree.\n",
+            "key_steps": [b"G", b">", b"("],
+        },
+        {
+            "name": "unshift-sentence-backward",
+            "initial_text": "\tOne.\n\tTwo.\n\tThree.\n",
+            "key_steps": [b"G", b"<", b"("],
+        },
+        {
+            "name": "shift-sentence-forward",
+            "initial_text": "One.\nTwo.\nThree.\n",
+            "key_steps": [b">", b")"],
+        },
+        {
+            "name": "unshift-sentence-forward",
+            "initial_text": "\tOne.\n\tTwo.\n\tThree.\n",
+            "key_steps": [b"<", b")"],
+        },
+        {
             "name": "blank-separator-shift-sentence-indented",
             "initial_text": "\tone.\n\n\ttwo.\n\tthree.\n\n\tfour.\n",
             "key_steps": [b"j", b">", b")"],
@@ -670,6 +1156,51 @@ def main():
             "key_steps": [b"j", b"y", b"}", b"P"],
         },
         {
+            "name": "delete-paragraph-backward",
+            "initial_text": "one\n\ntwo\n\nthree\n",
+            "key_steps": [b"G", b"d", b"{"],
+        },
+        {
+            "name": "change-paragraph-backward",
+            "initial_text": "one\n\ntwo\n\nthree\n",
+            "key_steps": [b"G", b"c", b"{", b"X", b"\x1b"],
+        },
+        {
+            "name": "yank-paragraph-backward",
+            "initial_text": "one\n\ntwo\n\nthree\n",
+            "key_steps": [b"G", b"y", b"{", b"P"],
+        },
+        {
+            "name": "shift-paragraph-backward",
+            "initial_text": "one\n\ntwo\n\nthree\n",
+            "key_steps": [b"G", b">", b"{"],
+        },
+        {
+            "name": "unshift-paragraph-backward",
+            "initial_text": "\tone\n\t\n\ttwo\n\t\n\tthree\n",
+            "key_steps": [b"G", b"<", b"{"],
+        },
+        {
+            "name": "change-paragraph-forward",
+            "initial_text": "one\n\ntwo\n\nthree\n",
+            "key_steps": [b"c", b"}", b"X", b"\x1b"],
+        },
+        {
+            "name": "yank-paragraph-forward",
+            "initial_text": "one\n\ntwo\n\nthree\n",
+            "key_steps": [b"y", b"}", b"P"],
+        },
+        {
+            "name": "shift-paragraph-forward",
+            "initial_text": "one\n\ntwo\n\nthree\n",
+            "key_steps": [b">", b"}"],
+        },
+        {
+            "name": "unshift-paragraph-forward",
+            "initial_text": "\tone\n\t\n\ttwo\n\t\n\tthree\n",
+            "key_steps": [b"<", b"}"],
+        },
+        {
             "name": "change-caret-indent",
             "initial_text": "  one\n  two\n",
             "key_steps": [b"c", b"^", b"X", b"\x1b"],
@@ -685,9 +1216,275 @@ def main():
             "key_steps": [b"<", b"^"],
         },
         {
+            "name": "shift-zero",
+            "initial_text": "  one\n  two\n",
+            "key_steps": [b">", b"0"],
+        },
+        {
+            "name": "unshift-zero",
+            "initial_text": "\t  one\n\t  two\n",
+            "key_steps": [b"<", b"0"],
+        },
+        {
+            "name": "shift-pipe",
+            "initial_text": "  one\n  two\n",
+            "key_steps": [b">", b"1", b"|"],
+        },
+        {
+            "name": "unshift-pipe",
+            "initial_text": "\t  one\n\t  two\n",
+            "key_steps": [b"<", b"1", b"|"],
+        },
+        {
+            "name": "shift-gg",
+            "initial_text": "one\ntwo\nthree\n",
+            "key_steps": [b"3", b"G", b">", b"g", b"g"],
+        },
+        {
+            "name": "unshift-gg",
+            "initial_text": "\tone\n\ttwo\n\tthree\n",
+            "key_steps": [b"3", b"G", b"<", b"g", b"g"],
+        },
+        {
+            "name": "shift-G",
+            "initial_text": "one\ntwo\nthree\n",
+            "key_steps": [b">", b"G"],
+        },
+        {
+            "name": "unshift-G",
+            "initial_text": "\tone\n\ttwo\n\tthree\n",
+            "key_steps": [b"<", b"G"],
+        },
+        {
+            "name": "shift-plus-line",
+            "initial_text": "one\ntwo\nthree\n",
+            "key_steps": [b">", b"+"],
+        },
+        {
+            "name": "unshift-plus-line",
+            "initial_text": "\tone\n\ttwo\n\tthree\n",
+            "key_steps": [b"<", b"+"],
+        },
+        {
+            "name": "shift-enter-line",
+            "initial_text": "one\ntwo\nthree\n",
+            "key_steps": [b">", b"\r"],
+        },
+        {
+            "name": "unshift-enter-line",
+            "initial_text": "\tone\n\ttwo\n\tthree\n",
+            "key_steps": [b"<", b"\r"],
+        },
+        {
+            "name": "delete-plus-line",
+            "initial_text": "one\ntwo\nthree\n",
+            "key_steps": [b"d", b"+"],
+        },
+        {
+            "name": "change-enter-line",
+            "initial_text": "one\ntwo\nthree\n",
+            "key_steps": [b"c", b"\r", b"X", b"\x1b"],
+        },
+        {
+            "name": "yank-minus-line",
+            "initial_text": "one\ntwo\nthree\n",
+            "key_steps": [b"G", b"y", b"-", b"P"],
+        },
+        {
+            "name": "delete-enter-line",
+            "initial_text": "one\ntwo\nthree\n",
+            "key_steps": [b"d", b"\r"],
+        },
+        {
+            "name": "yank-enter-line",
+            "initial_text": "one\ntwo\nthree\n",
+            "key_steps": [b"y", b"\r", b"P"],
+        },
+        {
+            "name": "change-minus-line",
+            "initial_text": "one\ntwo\nthree\nfour\n",
+            "key_steps": [b"j", b"j", b"c", b"-", b"X", b"\x1b"],
+        },
+        {
+            "name": "shift-underscore-line",
+            "initial_text": "one\ntwo\nthree\n",
+            "key_steps": [b">", b"_"],
+        },
+        {
+            "name": "unshift-underscore-line",
+            "initial_text": "\tone\n\ttwo\n\tthree\n",
+            "key_steps": [b"<", b"_"],
+        },
+        {
+            "name": "shift-H",
+            "initial_text": "one\ntwo\nthree\nfour\nfive\n",
+            "key_steps": [b"4", b"G", b">", b"H"],
+            "rows": 5,
+            "cols": 20,
+        },
+        {
+            "name": "unshift-H",
+            "initial_text": "\tone\n\ttwo\n\tthree\n\tfour\n\tfive\n",
+            "key_steps": [b"4", b"G", b"<", b"H"],
+            "rows": 5,
+            "cols": 20,
+        },
+        {
+            "name": "shift-M",
+            "initial_text": "one\ntwo\nthree\nfour\nfive\n",
+            "key_steps": [b"2", b"G", b">", b"M"],
+            "rows": 5,
+            "cols": 20,
+        },
+        {
+            "name": "unshift-M",
+            "initial_text": "\tone\n\ttwo\n\tthree\n\tfour\n\tfive\n",
+            "key_steps": [b"2", b"G", b"<", b"M"],
+            "rows": 5,
+            "cols": 20,
+        },
+        {
+            "name": "shift-L",
+            "initial_text": "one\ntwo\nthree\nfour\nfive\n",
+            "key_steps": [b">", b"L"],
+            "rows": 5,
+            "cols": 20,
+        },
+        {
+            "name": "unshift-L",
+            "initial_text": "\tone\n\ttwo\n\tthree\n\tfour\n\tfive\n",
+            "key_steps": [b"<", b"L"],
+            "rows": 5,
+            "cols": 20,
+        },
+        {
+            "name": "delete-screen-middle",
+            "initial_text": "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n",
+            "key_steps": [b"j", b"j", b"d", b"M"],
+            "rows": 7,
+        },
+        {
+            "name": "change-screen-top",
+            "initial_text": "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n",
+            "key_steps": [b"j", b"j", b"j", b"c", b"H", b"X", b"\x1b"],
+            "rows": 6,
+        },
+        {
+            "name": "change-screen-bottom",
+            "initial_text": "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n",
+            "key_steps": [b"c", b"L", b"X", b"\x1b"],
+            "rows": 6,
+        },
+        {
+            "name": "delete-screen-bottom",
+            "initial_text": "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n",
+            "key_steps": [b"d", b"L"],
+            "rows": 6,
+        },
+        {
             "name": "line-plus-unshift-tab-indent",
             "initial_text": "\t  one\n\t  two\n\t  three\n",
             "key_steps": [b"<", b"+"],
+        },
+        {
+            "name": "shift-e",
+            "initial_text": "one two\nthree four\n",
+            "key_steps": [b">", b"e"],
+        },
+        {
+            "name": "unshift-w",
+            "initial_text": "\tone two\n\tthree four\n",
+            "key_steps": [b"<", b"w"],
+        },
+        {
+            "name": "unshift-W",
+            "initial_text": "\tone,two\n\tthree four\n",
+            "key_steps": [b"<", b"W"],
+        },
+        {
+            "name": "unshift-e",
+            "initial_text": "\tone two\n\tthree four\n",
+            "key_steps": [b"<", b"e"],
+        },
+        {
+            "name": "unshift-E",
+            "initial_text": "\tone,two\n\tthree four\n",
+            "key_steps": [b"<", b"E"],
+        },
+        {
+            "name": "shift-b",
+            "initial_text": "one two\nthree four\n",
+            "key_steps": [b"G", b">", b"b"],
+        },
+        {
+            "name": "shift-B",
+            "initial_text": "one,two\nthree,four\n",
+            "key_steps": [b"G", b">", b"B"],
+        },
+        {
+            "name": "shift-ge",
+            "initial_text": "one two\nthree four\n",
+            "key_steps": [b"G", b">", b"g", b"e"],
+        },
+        {
+            "name": "shift-gE",
+            "initial_text": "one,two\nthree,four\n",
+            "key_steps": [b"G", b">", b"g", b"E"],
+        },
+        {
+            "name": "unshift-ge",
+            "initial_text": "\tone two\n\tthree four\n",
+            "key_steps": [b"G", b"<", b"g", b"e"],
+        },
+        {
+            "name": "delete-word-forward",
+            "initial_text": "one two three\n",
+            "key_steps": [b"d", b"w"],
+        },
+        {
+            "name": "delete-bigword-forward",
+            "initial_text": "one,two   three\n",
+            "key_steps": [b"d", b"W"],
+        },
+        {
+            "name": "yank-word-forward",
+            "initial_text": "one two three\n",
+            "key_steps": [b"y", b"w", b"P"],
+        },
+        {
+            "name": "yank-bigword-forward",
+            "initial_text": "one,two   three\n",
+            "key_steps": [b"y", b"W", b"P"],
+        },
+        {
+            "name": "delete-word-end",
+            "initial_text": "one two three\n",
+            "key_steps": [b"d", b"e"],
+        },
+        {
+            "name": "change-word-end",
+            "initial_text": "one two three\n",
+            "key_steps": [b"c", b"e", b"X", b"\x1b"],
+        },
+        {
+            "name": "yank-word-end",
+            "initial_text": "one two three\n",
+            "key_steps": [b"y", b"e", b"P"],
+        },
+        {
+            "name": "delete-bigword-end",
+            "initial_text": "one,two   three\n",
+            "key_steps": [b"d", b"E"],
+        },
+        {
+            "name": "yank-bigword-end",
+            "initial_text": "one,two   three\n",
+            "key_steps": [b"y", b"E", b"P"],
+        },
+        {
+            "name": "change-bigword-end",
+            "initial_text": "one,two   three\n",
+            "key_steps": [b"c", b"E", b"X", b"\x1b"],
         },
         {
             "name": "word-search-repeat-change",
@@ -943,7 +1740,97 @@ def main():
             "initial_text": "alpha beta gamma\nalpha beta gamma\n",
             "key_steps": [b"$", b"c", b"T", b"b", b"X", b"\x1b", b"j", b",", b"."],
         },
+        {
+            "name": "multi-undo-redo-insert",
+            "initial_text": "abc\n",
+            "key_steps": [b"i", b"X", b"\x1b", b"A", b"Z", b"\x1b", b"u", b"u",
+                b"\x12", b"\x12"],
+        },
+        {
+            "name": "multi-undo-join",
+            "initial_text": "one\ntwo\nthree\n",
+            "key_steps": [b"J", b"J", b"u", b"u"],
+        },
+        {
+            "name": "multi-undo-change",
+            "initial_text": "alpha beta gamma\n",
+            "key_steps": [b"c", b"w", b"X", b"\x1b", b"0", b"w", b"c", b"w",
+                b"Y", b"\x1b", b"u", b"u"],
+        },
+        {
+            "name": "undo-boundary-insert-session",
+            "initial_text": "abc\n",
+            "key_steps": [b"i", b"X", b"Y", b"\x1b", b"u"],
+        },
+        {
+            "name": "undo-boundary-replace-session",
+            "initial_text": "abc\n",
+            "key_steps": [b"R", b"X", b"Y", b"\x1b", b"u"],
+        },
+        {
+            "name": "undo-boundary-open-line",
+            "initial_text": "one\n",
+            "key_steps": [b"o", b"A", b"B", b"\x1b", b"u"],
+        },
+        {
+            "name": "undo-boundary-dot-replay",
+            "initial_text": "one two\nthree four\n",
+            "key_steps": [b"c", b"w", b"X", b"\x1b", b"j", b".", b"u"],
+        },
+        {
+            "name": "undo-boundary-ex-command",
+            "initial_text": "one\ntwo\n",
+            "key_steps": [b":", b"1", b",", b"2", b"s", b"/o/O/g\r", b"u"],
+        },
+        {
+            "name": "redo-invalidation-after-edit",
+            "initial_text": "abc\n",
+            "key_steps": [b"i", b"X", b"\x1b", b"A", b"Y", b"\x1b", b"u", b"a",
+                b"Z", b"\x1b", b"\x12"],
+        },
+        {
+            "name": "redo-replays-transaction-boundaries",
+            "initial_text": "abc\n",
+            "key_steps": [b"i", b"X", b"\x1b", b"A", b"Y", b"\x1b", b"u", b"u",
+                b"\x12", b"\x12"],
+        },
     ]
+
+    if args.start_at:
+        start_index = next(
+            (index for index, case in enumerate(cases)
+             if case["name"] == args.start_at),
+            None,
+        )
+        if start_index is None:
+            print(f"unknown oracle case: {args.start_at}", file=sys.stderr)
+            return 2
+        cases = cases[start_index:]
+
+    if args.match:
+        cases = [
+            case for case in cases
+            if any(pattern in case["name"] for pattern in args.match)
+        ]
+
+    if args.limit is not None:
+        cases = cases[:args.limit]
+
+    if args.list:
+        for case in cases:
+            print(case["name"])
+        return 0
+
+    if not cases:
+        print("SKIP: no oracle cases selected")
+        return 0
+
+    vim_path = shutil.which("vim")
+    if not vim_path:
+        print("SKIP: vim not found")
+        return 0
+
+    helpers = load_pty_helpers()
 
     for case in cases:
         compare_case(

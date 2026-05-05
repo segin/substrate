@@ -1,0 +1,270 @@
+.TH ISGREATER 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+isgreater, isgreaterequal, isless, islessequal, islessgreater,
+isunordered, iseqsig \- quiet floating-point comparison macros
+.SH LIBRARY
+Standard C library (libc, \-lc)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "int isgreater(" x ", " y );
+.br
+.BI "int isgreaterequal(" x ", " y );
+.br
+.BI "int isless(" x ", " y );
+.br
+.BI "int islessequal(" x ", " y );
+.br
+.BI "int islessgreater(" x ", " y );
+.br
+.BI "int isunordered(" x ", " y );
+.PP
+.BI "int iseqsig(" x ", " y );
+.PP
+.I x
+and
+.I y
+must be of real floating type
+.RB ( float ,
+.BR double ,
+or
+.BR "long double" ).
+The macro selects the underlying implementation by usual arithmetic
+conversion of
+.I x
+and
+.IR y .
+.SH DESCRIPTION
+The
+.BR isgreater ()
+family of macros provides the six IEEE 754 ordered relational
+operations as
+.B quiet
+comparisons: when either operand is NaN the predicate evaluates as
+"false" (or, in the case of
+.BR isunordered (),
+"true") without raising the
+.B FE_INVALID
+floating-point exception.
+.PP
+The plain C operators
+.BR < ,
+.BR <= ,
+.BR > ,
+and
+.BR >=
+are
+.I signaling
+comparisons \(em they raise
+.B FE_INVALID
+on any NaN operand, including a quiet NaN.  Code that may legitimately
+encounter NaN inputs (statistics over data that contain missing values,
+graphics culling against degenerate triangles, etc.) should prefer
+these macros to the bare operators in order to avoid spurious
+exception flags.
+.PP
+The semantics are summarised below; in every row, the predicate is
+.B 0
+whenever
+.B "isunordered(x, y)"
+is true:
+.TS
+allbox;
+lb lb
+l l.
+Macro	Equivalent ordered relation
+.BR isgreater( x , " " y )	x > y
+.BR isgreaterequal( x , " " y )	x >= y
+.BR isless( x , " " y )	x < y
+.BR islessequal( x , " " y )	x <= y
+.BR islessgreater( x , " " y )	x < y || x > y
+.BR isunordered( x , " " y )	isnan(x) || isnan(y)
+.TE
+.PP
+.BR islessgreater ()
+is the strict-inequality test that, unlike
+.BR != ,
+returns
+.B 0
+when either operand is NaN.  This matches the IEEE 754
+.B "less or greater"
+predicate.
+.PP
+.BR isunordered ()
+is the only macro in the family that returns
+.B 1
+on a NaN operand.
+.SS C23: iseqsig
+.BR iseqsig ()
+is the
+.I signaling
+counterpart of
+.BR == :
+it returns
+.B 1
+iff
+.I x
+and
+.I y
+are numerically equal, and
+.B 0
+otherwise.  Unlike the bare
+.B ==
+operator (which on x86 with FUCOMI/UCOMISS only signals on a
+.I signaling
+NaN), and unlike the macros above (which never signal),
+.BR iseqsig ()
+raises
+.B FE_INVALID
+whenever either operand is NaN \(em including a quiet NaN.  This is the
+predicate to use when NaN must be reported as a domain error.  Added
+in C23 §7.12.14.7.
+.SH RETURN VALUE
+Each macro returns a non-zero
+.B int
+when its predicate is true, and zero otherwise.  The result has type
+.BR int ,
+not the floating type of the operands, and may be used directly in
+control-flow constructs.
+.PP
+.BR iseqsig ()
+returns
+.B 0
+on a NaN operand
+.I after
+raising
+.BR FE_INVALID .
+.SH ERRORS
+None of these macros set
+.IR errno .
+.PP
+The first six macros never raise a floating-point exception.
+.BR iseqsig ()
+raises
+.B FE_INVALID
+iff either operand is NaN.
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR isgreater (),
+.BR isgreaterequal (),
+.BR isless (),
+.BR islessequal (),
+.BR islessgreater (),
+.BR isunordered ()
+T}	Thread safety	MT-Safe
+T{
+.BR iseqsig ()
+T}	Thread safety	T{
+MT-Safe; raises
+.B FE_INVALID
+on NaN
+T}
+.TE
+.SH STANDARDS
+.BR isgreater (),
+.BR isgreaterequal (),
+.BR isless (),
+.BR islessequal (),
+.BR islessgreater (),
+and
+.BR isunordered ()
+are specified by C99 §7.12.14 and POSIX.1-2008.  Their non-signaling
+behaviour was made mandatory in C99 Annex F.3 (when
+.B __STDC_IEC_559__
+is defined).
+.PP
+.BR iseqsig ()
+was added in C23 §7.12.14.7 and corresponds to the IEEE 754-2008
+.B compareSignalingEqual
+operation.
+.SH EXAMPLES
+The standard idiom is to use the macro form whenever a NaN operand is
+possible and you do not want
+.B FE_INVALID
+recorded:
+.PP
+.RS 4
+.EX
+#include <math.h>
+#include <fenv.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    double a[] = { 1.0, 2.0, NAN, 3.0, NAN, 4.0 };
+    int n = sizeof(a) / sizeof(a[0]);
+    double max = a[0];
+
+    feclearexcept(FE_INVALID);
+    for (int i = 1; i < n; i++) {
+        /*
+         * The bare \(dq>\(dq operator would raise FE_INVALID on every
+         * NaN element of the array, even though we treat them as
+         * "skip this element".  isgreater() compares quietly.
+         */
+        if (isgreater(a[i], max))
+            max = a[i];
+    }
+    printf("max = %g  (FE_INVALID = %d)\en",
+           max, fetestexcept(FE_INVALID) != 0);
+    return 0;
+}
+.EE
+.RE
+.PP
+Output:
+.PP
+.RS 4
+.EX
+max = 4  (FE_INVALID = 0)
+.EE
+.RE
+.PP
+By contrast, replacing
+.BR isgreater ()
+with the bare
+.B >
+operator yields
+.B FE_INVALID = 1
+because the NaN comparisons signal.
+.PP
+When NaN
+.I should
+be reported as a domain error \(em e.g. validating user input that may
+have come from
+.BR strtod ()
+\(em use
+.BR iseqsig ():
+.PP
+.RS 4
+.EX
+#include <math.h>
+#include <fenv.h>
+
+int
+in_range(double x, double lo, double hi)
+{
+    feclearexcept(FE_INVALID);
+    /* iseqsig signals on NaN x; caller can detect via fetestexcept. */
+    if (iseqsig(x, x))
+        return x >= lo && x <= hi;
+    return 0;
+}
+.EE
+.RE
+.SH SEE ALSO
+.BR fpclassify (3),
+.BR isnan (3),
+.BR feclearexcept (3),
+.BR fetestexcept (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

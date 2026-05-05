@@ -28,8 +28,11 @@ size_t mbrtowc(wchar_t *restrict pwc, const char *restrict s, size_t n, mbstate_
         unsigned char c1 = (unsigned char)s[1];
         if ((c1 & 0xC0) != 0x80)
             return (size_t)-1;
+        wchar_t cp = (wchar_t)(((c0 & 0x1F) << 6) | (c1 & 0x3F));
+        if (cp < 0x80)
+            return (size_t)-1; /* reject overlong */
         if (pwc)
-            *pwc = (wchar_t)(((c0 & 0x1F) << 6) | (c1 & 0x3F));
+            *pwc = cp;
         return 2;
     }
 
@@ -40,8 +43,13 @@ size_t mbrtowc(wchar_t *restrict pwc, const char *restrict s, size_t n, mbstate_
         unsigned char c2 = (unsigned char)s[2];
         if ((c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80)
             return (size_t)-1;
+        wchar_t cp = (wchar_t)(((c0 & 0x0F) << 12) | ((c1 & 0x3F) << 6) | (c2 & 0x3F));
+        if (cp < 0x800)
+            return (size_t)-1; /* reject overlong */
+        if (cp >= 0xD800 && cp <= 0xDFFF)
+            return (size_t)-1; /* reject surrogates */
         if (pwc)
-            *pwc = (wchar_t)(((c0 & 0x0F) << 12) | ((c1 & 0x3F) << 6) | (c2 & 0x3F));
+            *pwc = cp;
         return 3;
     }
 
@@ -53,9 +61,14 @@ size_t mbrtowc(wchar_t *restrict pwc, const char *restrict s, size_t n, mbstate_
         unsigned char c3 = (unsigned char)s[3];
         if ((c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80 || (c3 & 0xC0) != 0x80)
             return (size_t)-1;
-        if (pwc)
-            *pwc = (wchar_t)(((c0 & 0x07) << 18) | ((c1 & 0x3F) << 12) |
+        wchar_t cp = (wchar_t)(((c0 & 0x07) << 18) | ((c1 & 0x3F) << 12) |
                              ((c2 & 0x3F) << 6) | (c3 & 0x3F));
+        if (cp < 0x10000)
+            return (size_t)-1; /* reject overlong */
+        if (cp > 0x10FFFF)
+            return (size_t)-1; /* reject beyond Unicode range */
+        if (pwc)
+            *pwc = cp;
         return 4;
     }
 

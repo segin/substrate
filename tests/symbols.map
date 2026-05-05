@@ -79,3 +79,4 @@ isalpha mys_isalpha
 isalnum mys_isalnum
 isupper mys_isupper
 islower mys_islower
+lseek lseek64

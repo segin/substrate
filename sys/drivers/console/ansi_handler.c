@@ -98,6 +98,7 @@ void ansi_init(struct ansi_ctx *ctx) {
     ctx->charset_target = 0;
     ctx->utf8_codepoint = 0;
     ctx->utf8_remaining = 0;
+    ctx->osc_len = 0;
 }
 
 /* ---- SGR (Select Graphic Rendition) ---- */
@@ -565,9 +566,11 @@ void ansi_process(struct ansi_ctx *ctx, char c, const struct ansi_callbacks *cb)
             break;
         case ']': /* OSC - ignore until ST */
             ctx->state = ANSI_OSC;
+            ctx->osc_len = 0;
             break;
         case 'P': /* DCS - ignore until ST */
             ctx->state = ANSI_DCS;
+            ctx->osc_len = 0;
             break;
         default:
             /* Unknown ESC sequence, return to normal */
@@ -599,9 +602,20 @@ void ansi_process(struct ansi_ctx *ctx, char c, const struct ansi_callbacks *cb)
 
     case ANSI_PARAM:
         if (c >= '0' && c <= '9') {
-            if (ctx->param_count > 0)
-                ctx->params[ctx->param_count - 1] =
-                    ctx->params[ctx->param_count - 1] * 10 + (c - '0');
+            if (ctx->param_count > 0) {
+                /* Saturate at 99999 — well beyond any reasonable cursor
+                 * coordinate or SGR code.  Without this an attacker with
+                 * /dev/tty write access feeds e.g. \x1b[99999999999...m
+                 * and wraps the int32_t accumulator, then downstream
+                 * cursor/scroll math operates on negative-as-unsigned
+                 * indices. */
+                int32_t cur = ctx->params[ctx->param_count - 1];
+                if (cur < 99999) {
+                    cur = cur * 10 + (c - '0');
+                    if (cur > 99999) cur = 99999;
+                    ctx->params[ctx->param_count - 1] = cur;
+                }
+            }
         } else if (c == ';') {
             if (ctx->param_count < ANSI_PARAMS_MAX) {
                 ctx->params[ctx->param_count] = 0;
@@ -626,9 +640,21 @@ void ansi_process(struct ansi_ctx *ctx, char c, const struct ansi_callbacks *cb)
 
     case ANSI_OSC:
     case ANSI_DCS:
-        /* Consume until ST (ESC \ or BEL) */
+        /* Consume until ST (ESC \ or BEL) — but bail out after
+         * ANSI_OSC_MAX bytes or on any C0 control byte besides BEL.
+         * Without this, an unterminated OSC (random bytes, malicious
+         * input) silently swallows arbitrary input until a BEL or
+         * backslash happens to appear. */
+        ctx->osc_len++;
         if (c == '\x07' || c == '\\') {
             ctx->state = ANSI_NORMAL;
+            ctx->osc_len = 0;
+        } else if (ctx->osc_len >= ANSI_OSC_MAX ||
+                   ((unsigned char)c < 0x20 && c != '\x1b')) {
+            /* Treat overflow or stray control bytes as an aborted
+             * sequence; drop the partial OSC and resume normal. */
+            ctx->state = ANSI_NORMAL;
+            ctx->osc_len = 0;
         }
         break;
     }

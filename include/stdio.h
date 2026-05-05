@@ -47,10 +47,18 @@ extern FILE *stderr;
 
 int printf(const char *format, ...);
 int fprintf(FILE *stream, const char *format, ...);
+#if defined(__GNUC__) && defined(_SUBSTRATE_FORTIFY)
+#define _STDIO_DEPRECATED(msg) __attribute__((deprecated(msg)))
+#else
+#define _STDIO_DEPRECATED(msg)
+#endif
+
+_STDIO_DEPRECATED("use snprintf()")
 int sprintf(char *str, const char *format, ...);
 int snprintf(char *str, size_t size, const char *format, ...);
 int vprintf(const char *format, va_list ap);
 int vfprintf(FILE *stream, const char *format, va_list ap);
+_STDIO_DEPRECATED("use vsnprintf()")
 int vsprintf(char *str, const char *format, va_list ap);
 int vsnprintf(char *str, size_t size, const char *format, va_list ap);
 int vasprintf(char **strp, const char *format, va_list ap);

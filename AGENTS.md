@@ -132,7 +132,7 @@ pmm_free_block(virt);  // CORRECT - convert first
     - `kern/`: Kernel core subsystems (Scheduler, Time, Acct).
     - `exec/perso/`: Personality implementations.
     - `sys/`: System headers (`proc.h`).
-- `bin/`: User-space utilities (`ls`, `sh`, `vi`, etc.).
+- `bin/`: User-space utilities (`ls`, `sh`, `vi`, etc.). Test sources live in `tests/bin/<program>/`; each program's `Makefile` references them via `TESTS = ../../tests/bin/<program>`.
 - `include/`: Userspace C library headers (shared by all libraries).
 - `lib/`:
     - `c/`: LibC implementation **(Substrate target ONLY, never for Linux/host)**.
@@ -140,6 +140,7 @@ pmm_free_block(virt);  // CORRECT - convert first
     - `pthreads/`: Threading support.
     - `dbm/`: Database library.
 - `sbin/`: System binaries.
+- `tests/bin/`: Per-program test suites for `bin/` utilities (unit, integration, property, fuzz).
 
 ### Kernel Debugging
 When debugging kernel crashes (including triple faults):

@@ -70,6 +70,31 @@ struct rng_state {
 extern struct rng_state rng_state;
 
 /*
+ * Per-CPU CSPRNG state for lockless fast-path output.
+ *
+ * Each CPU maintains its own ChaCha20 context seeded from the global
+ * CSPRNG.  Because only the owning CPU accesses its slot (under a
+ * per-slot spinlock that serialises preemption), the global output_lock
+ * is not needed during normal generation.  This eliminates the main
+ * bottleneck on multi-core systems and allows batch output (one full
+ * 64-byte ChaCha20 block per call to chacha20_block) with minimal
+ * overhead.
+ */
+struct percpu_rng_state {
+    struct chacha20_ctx csprng;          /* Per-CPU ChaCha20 context */
+    int                 seeded;          /* Non-zero when context is valid */
+    spinlock_t          lock;            /* Serialise preemption on this CPU */
+    uint8_t             _pad[4];         /* Align to cache line */
+} __attribute__((aligned(64)));
+
+/* One slot per possible CPU (MAX_CPUS from sys/smp.h) */
+#define RANDOM_MAX_CPUS 96
+extern struct percpu_rng_state percpu_rng[RANDOM_MAX_CPUS];
+
+/* Initialise per-CPU CSPRNG slots (called from random_init) */
+void random_percpu_init(void);
+
+/*
  * Internal functions
  */
 
@@ -88,5 +113,22 @@ void pool_extract_bytes(struct entropy_pool *pool, void *out, size_t len);
 /* Hardware RNG support */
 void random_detect_hwrng(void);
 int random_harvest_hwrng(void);
+
+/* ioctl helpers (used by random_dev_ioctl and host tests) */
+uint32_t random_get_entropy_count(void);
+void random_set_entropy_count(uint32_t bits);
+void random_add_to_entropy_count(int delta);
+void random_zap_entropy_count(void);
+void random_clear_pool(void);
+void random_force_reseed(void);
+
+/*
+ * Secure memory clearing - uses a compiler barrier to prevent optimization
+ * from eliding the zeroing of sensitive key material.
+ */
+static inline void explicit_bzero(void *buf, size_t len) {
+    volatile uint8_t *p = (volatile uint8_t *)buf;
+    while (len--) *p++ = 0;
+}
 
 #endif /* _KERN_RANDOM_INTERNAL_H */

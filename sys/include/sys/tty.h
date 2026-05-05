@@ -106,6 +106,18 @@ int tty_check_change(struct tty *tty);
 void tty_flip_buffer_push(struct tty *tty, char c);
 void tty_flip_buffer_push_status(struct tty *tty, char c, uint32_t status);
 
+/*
+ * tty_inject_input_locked - push 'len' bytes into tty->raw_buf and wake
+ * any read/poll waiters.  CALLER MUST ALREADY HOLD tty->lock.
+ *
+ * Used by ANSI-handler `respond` callbacks (e.g. CSI Device Status
+ * Report, Device Attributes), which fire from inside the write path
+ * with tty->lock already held — re-acquiring the lock there triggers
+ * the spinlock_acquire deadlock check.  Returns the number of bytes
+ * actually accepted (may be less than len if raw_buf is full).
+ */
+size_t tty_inject_input_locked(struct tty *tty, const char *buf, size_t len);
+
 // Helper
 void tty_default_termios(struct termios *t);
 

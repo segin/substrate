@@ -35,6 +35,7 @@ job_t *find_job(pid_t pgid);
 job_t *job_find(const char *name);
 int job_is_stopped(job_t *j);
 int job_is_completed(job_t *j);
+int job_mark_process_status(pid_t pid, int status);
 void job_update_status(void);
 int job_wait(job_t *j);
 

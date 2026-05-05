@@ -1,11 +1,10 @@
 #include "shell_var.h"
+#include "exec.h"
 #include "util.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
-
-extern long strtol(const char *nptr, char **endptr, int base);
 
 typedef struct shell_var {
     char *name;
@@ -59,10 +58,6 @@ static void ensure_global_scope(void) {
 
 
 void shell_var_set_args(int argc, char **argv) {
-    if (shell_name) free(shell_name);
-    if (argc > 0) shell_name = strdup(argv[0]);
-    else shell_name = strdup("sh");
-
     if (shell_argv) {
         for (int i = 0; i < shell_argc; i++) free(shell_argv[i]);
         free(shell_argv);
@@ -79,6 +74,11 @@ void shell_var_set_args(int argc, char **argv) {
         shell_argc = 0;
         shell_argv = NULL;
     }
+}
+
+void shell_var_set_name(const char *name) {
+    if (shell_name) free(shell_name);
+    shell_name = strdup((name && *name) ? name : "sh");
 }
 
 void shell_var_shift(int n) {
@@ -115,7 +115,7 @@ char **shell_var_get_positional(int *count) {
     return shell_argv;
 }
 
-const char *shell_var_get_name(void) { return shell_name; }
+const char *shell_var_get_name(void) { return shell_name ? shell_name : "sh"; }
 
 void shell_var_destroy(void) {
     while (scope_stack) {
@@ -194,13 +194,26 @@ char *shell_var_get(const char *name) {
     
     // $- - current shell options
     if (strcmp(name, "-") == 0) {
-        // Return empty for now - we'd need to track set options
-        return strdup("");
+        char flags[16];
+        int n = 0;
+        if (shell_errexit) flags[n++] = 'e';
+        if (shell_is_interactive) flags[n++] = 'i';
+        if (shell_xtrace) flags[n++] = 'x';
+        flags[n] = '\0';
+        return strdup(flags);
     }
     
     // $* - all positional parameters as single word (IFS-joined)
     if (strcmp(name, "*") == 0) {
         if (shell_argc == 0) return strdup("");
+        char *ifs = shell_var_get("IFS");
+        char sep = ' ';        /* default when IFS unset */
+        int has_sep = 1;
+        if (ifs) {
+            if (ifs[0]) sep = ifs[0];  /* first char of IFS */
+            else has_sep = 0;          /* IFS="" -> no separator */
+            free(ifs);
+        }
         size_t total = 0;
         for (int i = 0; i < shell_argc; i++) {
             total += strlen(shell_argv[i]) + 1;
@@ -208,7 +221,7 @@ char *shell_var_get(const char *name) {
         char *buf = malloc(total + 1);
         char *ptr = buf;
         for (int i = 0; i < shell_argc; i++) {
-            if (i > 0) *ptr++ = ' ';
+            if (i > 0 && has_sep) *ptr++ = sep;
             size_t len = strlen(shell_argv[i]);
             memcpy(ptr, shell_argv[i], len);
             ptr += len;
@@ -438,6 +451,13 @@ char **shell_var_get_envp(void) {
     return envp;
 }
 
+void shell_var_free_envp(char **envp) {
+    if (!envp) return;
+    for (int i = 0; envp[i]; i++)
+        free(envp[i]);
+    free(envp);
+}
+
 void shell_var_unset(const char *name) {
     shell_scope_t *s = scope_stack;
     while (s) {
@@ -489,11 +509,9 @@ void shell_var_push_args(void) {
     arg_stack_frame_t *frame = malloc(sizeof(arg_stack_frame_t));
     frame->argc = shell_argc;
     frame->argv = shell_argv;
-    frame->name = shell_name; 
+    frame->name = shell_name ? strdup(shell_name) : NULL;
     frame->next = arg_stack;
     arg_stack = frame;
     shell_argc = 0;
     shell_argv = NULL;
-    shell_name = NULL;
 }
-

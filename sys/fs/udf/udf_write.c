@@ -12,21 +12,18 @@
 
 /* External context from udf.c */
 
-static uint8_t *space_bitmap = NULL;
-static uint32_t space_bitmap_size = 0;
-static uint32_t space_bitmap_sector = 0;
+/* Space bitmap state is now in struct udf_fs */
 
 /*
  * Write space bitmap back to disk
  */
-static void udf_write_space_bitmap(void) {
-    if (!space_bitmap || !udf_ctx.device) return;
+static void udf_write_space_bitmap(struct udf_fs *fs) {
+    if (!fs->space_bitmap || !fs->device) return;
+    
+    struct udf_space_bitmap *sbm = (struct udf_space_bitmap *)fs->space_bitmap;
 
-    struct udf_space_bitmap *sbm = (struct udf_space_bitmap *)(space_bitmap - sizeof(struct udf_space_bitmap));
-
-    /* Recalculate CRC of the bitmap data */
     if (sbm->tag.desc_crc_len > 0) {
-        sbm->tag.desc_crc = udf_crc(space_bitmap, sbm->tag.desc_crc_len);
+        sbm->tag.desc_crc = udf_crc(fs->space_bitmap, sbm->tag.desc_crc_len);
     }
 
     /* Recalculate tag checksum */
@@ -36,20 +33,29 @@ static void udf_write_space_bitmap(void) {
     uint32_t total_size = sizeof(struct udf_space_bitmap) + sbm->num_bytes;
     uint32_t sectors = (total_size + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
 
-    /* Write to disk */
+    /* Write to disk.  Don't drop write errors silently — a partial
+     * bitmap update leaves the on-disk state inconsistent with the
+     * in-memory state, and the next allocator call would either
+     * double-allocate or leak blocks. */
     for (uint32_t i = 0; i < sectors; i++) {
-        off_t offset = (off_t)(space_bitmap_sector + i) * UDF_SECTOR_SIZE;
+        off_t offset = (off_t)(fs->space_bitmap_sector + i) * UDF_SECTOR_SIZE;
         uint8_t *buf = (uint8_t *)sbm + (i * UDF_SECTOR_SIZE);
-        udf_ctx.device->write(udf_ctx.device, offset, UDF_SECTOR_SIZE, buf);
+        if (fs->device->write(fs->device, offset, UDF_SECTOR_SIZE, buf)
+                != UDF_SECTOR_SIZE) {
+            kprint("UDF: space bitmap write failed; on-disk state may be inconsistent\n");
+            return;
+        }
     }
 }
 
 /*
  * Read and parse space bitmap from partition header
  */
-int udf_read_space_bitmap(fs_node_t *dev, uint32_t partition_start, 
-                          uint32_t bitmap_loc, uint32_t bitmap_len) {
-    static uint8_t sector_buf[UDF_SECTOR_SIZE * 4];
+int udf_read_space_bitmap(struct udf_fs *fs, uint32_t bitmap_loc, uint32_t bitmap_len) {
+    struct fs_node *dev = fs->device;
+    uint32_t partition_start = fs->partition_start;
+    uint8_t *sector_buf = kmalloc(UDF_SECTOR_SIZE * 4);
+    if (!sector_buf) return -1;
     
     uint32_t sector = partition_start + bitmap_loc;
     uint32_t sectors = (bitmap_len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
@@ -68,12 +74,22 @@ int udf_read_space_bitmap(fs_node_t *dev, uint32_t partition_start,
     
     if (sbm->tag.tag_id != UDF_TAG_SBD) {
         kprint("UDF: Invalid space bitmap tag\n");
+        kfree(sector_buf, UDF_SECTOR_SIZE * 4);
         return -1;
     }
     
-    space_bitmap = sector_buf + sizeof(struct udf_space_bitmap);
-    space_bitmap_size = sbm->num_bits;
-    space_bitmap_sector = sector;
+    fs->space_bitmap = sector_buf + sizeof(struct udf_space_bitmap);
+    fs->space_bitmap_sector = sector;
+
+    /* Validate num_bits against actual buffer capacity */
+    uint32_t max_bitmap_bytes = (sectors * UDF_SECTOR_SIZE) - sizeof(struct udf_space_bitmap);
+    if (sbm->num_bits > max_bitmap_bytes * 8) {
+        kprint("UDF: Space bitmap num_bits exceeds buffer capacity\n");
+        fs->space_bitmap = NULL;
+        kfree(sector_buf, UDF_SECTOR_SIZE * 4);
+        return -1;
+    }
+    fs->space_bitmap_size = sbm->num_bits;
     
     return 0;
 }
@@ -82,18 +98,18 @@ int udf_read_space_bitmap(fs_node_t *dev, uint32_t partition_start,
  * Allocate a free block from the space bitmap
  * Returns block number (relative to partition) or 0 on failure
  */
-uint32_t udf_alloc_block(void) {
-    if (!space_bitmap) return 0;
+uint32_t udf_alloc_block(struct udf_fs *fs) {
+    if (!fs->space_bitmap) return 0;
     
     /* Find first zero bit in bitmap */
-    for (uint32_t byte = 0; byte < space_bitmap_size / 8; byte++) {
-        if (space_bitmap[byte] != 0xFF) {
+    for (uint32_t byte = 0; byte < fs->space_bitmap_size / 8; byte++) {
+        if (fs->space_bitmap[byte] != 0xFF) {
             /* Found byte with free bit */
             for (int bit = 0; bit < 8; bit++) {
-                if (!(space_bitmap[byte] & (1 << bit))) {
+                if (!(fs->space_bitmap[byte] & (1 << bit))) {
                     /* Mark as allocated */
-                    space_bitmap[byte] |= (1 << bit);
-                    udf_write_space_bitmap();
+                    fs->space_bitmap[byte] |= (1 << bit);
+                    udf_write_space_bitmap(fs);
                     return byte * 8 + bit;
                 }
             }
@@ -107,22 +123,23 @@ uint32_t udf_alloc_block(void) {
 /*
  * Free a block back to the space bitmap
  */
-void udf_free_block(uint32_t block) {
-    if (!space_bitmap || block >= space_bitmap_size) return;
+void udf_free_block(struct udf_fs *fs, uint32_t block) {
+    if (!fs->space_bitmap || block >= fs->space_bitmap_size) return;
     
     uint32_t byte = block / 8;
     uint8_t bit = block % 8;
     
-    space_bitmap[byte] &= ~(1 << bit);
-    udf_write_space_bitmap();
+    fs->space_bitmap[byte] &= ~(1 << bit);
+    udf_write_space_bitmap(fs);
 }
 
 /*
  * Create a new File Entry for a file
  */
-int udf_create_fe(fs_node_t *dev, uint32_t block, uint8_t file_type,
+int udf_create_fe(struct udf_fs *fs, uint32_t block, uint8_t file_type,
                   uint32_t uid, uint32_t gid, uint32_t permissions) {
-    static uint8_t sector_buf[UDF_SECTOR_SIZE];
+    uint8_t *sector_buf = kmalloc(UDF_SECTOR_SIZE);
+    if (!sector_buf) return -1;
     
     memset(sector_buf, 0, UDF_SECTOR_SIZE);
     
@@ -131,7 +148,7 @@ int udf_create_fe(fs_node_t *dev, uint32_t block, uint8_t file_type,
     /* Fill in tag */
     fe->tag.tag_id = UDF_TAG_FE;
     fe->tag.desc_version = 2;
-    fe->tag.tag_location = udf_ctx.partition_start + block;
+    fe->tag.tag_location = fs->partition_start + block;
     
     /* ICB tag */
     fe->icb_tag.file_type = file_type;
@@ -155,8 +172,9 @@ int udf_create_fe(fs_node_t *dev, uint32_t block, uint8_t file_type,
     fe->tag.tag_checksum = sum;
     
     /* Write to disk */
-    off_t offset = (off_t)(udf_ctx.partition_start + block) * UDF_SECTOR_SIZE;
-    uint32_t written = dev->write(dev, offset, UDF_SECTOR_SIZE, sector_buf);
+    off_t offset = (off_t)(fs->partition_start + block) * UDF_SECTOR_SIZE;
+    uint32_t written = fs->device->write(fs->device, offset, UDF_SECTOR_SIZE, sector_buf);
+    kfree(sector_buf, UDF_SECTOR_SIZE);
     
     return (written == UDF_SECTOR_SIZE) ? 0 : -1;
 }
@@ -164,20 +182,20 @@ int udf_create_fe(fs_node_t *dev, uint32_t block, uint8_t file_type,
 /*
  * Create a new Allocation Extended Descriptor
  */
-static uint32_t udf_ext_create_aed(uint32_t prev_aed_block, uint8_t **aed_buf_out) {
-    uint32_t block = udf_alloc_block();
+static uint32_t udf_ext_create_aed(struct udf_fs *fs, uint32_t prev_aed_block, uint8_t **aed_buf_out) {
+    uint32_t block = udf_alloc_block(fs);
     if (block == 0) return 0;
 
     uint8_t *buf = kmalloc(UDF_SECTOR_SIZE);
     if (!buf) {
-        udf_free_block(block);
+        udf_free_block(fs, block);
         return 0;
     }
     memset(buf, 0, UDF_SECTOR_SIZE);
 
     struct udf_aed *aed = (struct udf_aed *)buf;
     aed->tag.tag_id = UDF_TAG_AED;
-    aed->tag.tag_location = udf_ctx.partition_start + block;
+    aed->tag.tag_location = fs->partition_start + block;
     aed->tag.desc_version = 2;
     aed->prev_aed_loc = prev_aed_block;
     aed->alloc_desc_length = 0;
@@ -189,7 +207,7 @@ static uint32_t udf_ext_create_aed(uint32_t prev_aed_block, uint8_t **aed_buf_ou
 /*
  * Write AED to disk
  */
-static void udf_ext_write_aed(fs_node_t *dev, uint32_t block, uint8_t *buf, uint32_t len) {
+static void udf_ext_write_aed(struct udf_fs *fs, uint32_t block, uint8_t *buf, uint32_t len) {
     struct udf_aed *aed = (struct udf_aed *)buf;
     aed->alloc_desc_length = len;
 
@@ -202,25 +220,25 @@ static void udf_ext_write_aed(fs_node_t *dev, uint32_t block, uint8_t *buf, uint
 
     aed->tag.tag_checksum = udf_tag_checksum(&aed->tag);
 
-    off_t offset = (off_t)(udf_ctx.partition_start + block) * UDF_SECTOR_SIZE;
-    dev->write(dev, offset, UDF_SECTOR_SIZE, buf);
+    off_t offset = (off_t)(fs->partition_start + block) * UDF_SECTOR_SIZE;
+    fs->device->write(fs->device, offset, UDF_SECTOR_SIZE, buf);
 }
 
 /*
  * Convert inline data to Short Allocation Descriptor
  */
-static int udf_convert_inline_to_short_ad(fs_node_t *dev, struct udf_fe *fe) {
+static int udf_convert_inline_to_short_ad(struct udf_fs *fs, struct udf_fe *fe) {
     uint32_t len = (uint32_t)fe->info_length;
     uint8_t *inline_data = (uint8_t *)fe + sizeof(struct udf_fe) + fe->ext_attr_length;
 
     /* Allocate new block */
-    uint32_t block = udf_alloc_block();
+    uint32_t block = udf_alloc_block(fs);
     if (block == 0) return -1;
 
     /* Write inline data to new block */
     uint8_t *sector_buf = kmalloc(UDF_SECTOR_SIZE);
     if (!sector_buf) {
-        udf_free_block(block);
+        udf_free_block(fs, block);
         return -1;
     }
     memset(sector_buf, 0, UDF_SECTOR_SIZE);
@@ -229,8 +247,8 @@ static int udf_convert_inline_to_short_ad(fs_node_t *dev, struct udf_fe *fe) {
         memcpy(sector_buf, inline_data, len);
     }
 
-    off_t disk_off = (off_t)(udf_ctx.partition_start + block) * UDF_SECTOR_SIZE;
-    dev->write(dev, disk_off, UDF_SECTOR_SIZE, sector_buf);
+    off_t disk_off = (off_t)(fs->partition_start + block) * UDF_SECTOR_SIZE;
+    fs->device->write(fs->device, disk_off, UDF_SECTOR_SIZE, sector_buf);
     kfree(sector_buf, UDF_SECTOR_SIZE);
 
     /* Update FE to use Short AD */
@@ -250,7 +268,7 @@ static int udf_convert_inline_to_short_ad(fs_node_t *dev, struct udf_fe *fe) {
 /*
  * Write data to a file using Long Allocation Descriptors
  */
-static int udf_write_extent_data_long(fs_node_t *dev, struct udf_fe *fe,
+static int udf_write_extent_data_long(struct udf_fs *fs, struct udf_fe *fe,
                                       uint32_t offset, uint32_t size, const uint8_t *data) {
     uint8_t *ad_area = (uint8_t *)fe + sizeof(struct udf_fe) + fe->ext_attr_length;
     struct udf_long_ad *ads = (struct udf_long_ad *)ad_area;
@@ -272,21 +290,21 @@ static int udf_write_extent_data_long(fs_node_t *dev, struct udf_fe *fe,
 
         /* Check if we need to append a new extent */
         if (current_extent_idx >= num_ads) {
-            uint32_t new_block = udf_alloc_block();
+            uint32_t new_block = udf_alloc_block(fs);
             if (new_block == 0) {
                 kfree(data_buf, UDF_SECTOR_SIZE);
                 return -1;
             }
 
             /* Zero the new block to avoid info leak */
-            off_t new_off = (off_t)(udf_ctx.partition_start + new_block) * UDF_SECTOR_SIZE;
+            off_t new_off = (off_t)(fs->partition_start + new_block) * UDF_SECTOR_SIZE;
             memset(data_buf, 0, UDF_SECTOR_SIZE);
-            dev->write(dev, new_off, UDF_SECTOR_SIZE, data_buf);
+            fs->device->write(fs->device, new_off, UDF_SECTOR_SIZE, data_buf);
 
             /* Check if we can merge with previous extent */
             int merged = 0;
             uint32_t last_len = 0;
-            uint16_t partition = udf_ctx.root_icb.partition;
+            uint16_t partition = fs->root_icb.partition;
 
             if (num_ads > 0) {
                 struct udf_long_ad *last = &ads[num_ads - 1];
@@ -314,7 +332,7 @@ static int udf_write_extent_data_long(fs_node_t *dev, struct udf_fe *fe,
                 if (fe->alloc_desc_length + sizeof(struct udf_long_ad) >
                     UDF_SECTOR_SIZE - sizeof(struct udf_fe) - fe->ext_attr_length) {
                     kprint("UDF: File Entry full, AED not implemented\n");
-                    udf_free_block(new_block);
+                    udf_free_block(fs, new_block);
                     kfree(data_buf, UDF_SECTOR_SIZE);
                     return -1;
                 }
@@ -343,23 +361,23 @@ static int udf_write_extent_data_long(fs_node_t *dev, struct udf_fe *fe,
             uint32_t sec_off = rel_off % UDF_SECTOR_SIZE;
             uint32_t sector = cur_ad->block + sec_idx;
 
-            off_t disk_addr = (off_t)(udf_ctx.partition_start + sector) * UDF_SECTOR_SIZE;
+            off_t disk_addr = (off_t)(fs->partition_start + sector) * UDF_SECTOR_SIZE;
 
             /* Partial sector write: read-modify-write */
             if (sec_off != 0 || to_write < UDF_SECTOR_SIZE) {
                 uint32_t chunk = UDF_SECTOR_SIZE - sec_off;
                 if (chunk > to_write) chunk = to_write;
 
-                dev->read(dev, disk_addr, UDF_SECTOR_SIZE, data_buf);
+                fs->device->read(fs->device, disk_addr, UDF_SECTOR_SIZE, data_buf);
                 memcpy(data_buf + sec_off, data + written, chunk);
-                dev->write(dev, disk_addr, UDF_SECTOR_SIZE, data_buf);
+                fs->device->write(fs->device, disk_addr, UDF_SECTOR_SIZE, data_buf);
 
                 written += chunk;
                 rem_size -= chunk;
                 file_offset += chunk;
             } else {
                 /* Write full sectors */
-                dev->write(dev, disk_addr, UDF_SECTOR_SIZE, data + written);
+                fs->device->write(fs->device, disk_addr, UDF_SECTOR_SIZE, data + written);
                 written += UDF_SECTOR_SIZE;
                 rem_size -= UDF_SECTOR_SIZE;
                 file_offset += UDF_SECTOR_SIZE;
@@ -382,7 +400,7 @@ static int udf_write_extent_data_long(fs_node_t *dev, struct udf_fe *fe,
 /*
  * Write data to a file using Short Allocation Descriptors
  */
-static int udf_write_extent_data(fs_node_t *dev, struct udf_fe *fe,
+static int udf_write_extent_data(struct udf_fs *fs, struct udf_fe *fe,
                                  uint32_t offset, uint32_t size, const uint8_t *data) {
     /* Pointers to current AD container */
     uint8_t *cur_buf = NULL;     /* If NULL, using FE */
@@ -418,8 +436,8 @@ static int udf_write_extent_data(fs_node_t *dev, struct udf_fe *fe,
                 return -1;
             }
 
-            off_t disk_addr = (off_t)(udf_ctx.partition_start + next_block) * UDF_SECTOR_SIZE;
-            dev->read(dev, disk_addr, UDF_SECTOR_SIZE, next_buf);
+            off_t disk_addr = (off_t)(fs->partition_start + next_block) * UDF_SECTOR_SIZE;
+            fs->device->read(fs->device, disk_addr, UDF_SECTOR_SIZE, next_buf);
 
             if (cur_buf) kfree(cur_buf, UDF_SECTOR_SIZE);
             cur_buf = next_buf;
@@ -463,7 +481,7 @@ static int udf_write_extent_data(fs_node_t *dev, struct udf_fe *fe,
             if (cur_len + sizeof(struct udf_short_ad) > max_len) {
                 /* Container full. Need new AED. */
                 uint8_t *new_aed_buf = NULL;
-                uint32_t new_block = udf_ext_create_aed(cur_block, &new_aed_buf);
+                uint32_t new_block = udf_ext_create_aed(fs, cur_block, &new_aed_buf);
                 if (!new_block) {
                      kfree(data_buf, UDF_SECTOR_SIZE);
                      if (cur_buf) kfree(cur_buf, UDF_SECTOR_SIZE);
@@ -494,7 +512,7 @@ static int udf_write_extent_data(fs_node_t *dev, struct udf_fe *fe,
                 }
 
                 if (cur_buf) {
-                    udf_ext_write_aed(dev, cur_block, cur_buf, cur_len);
+                    udf_ext_write_aed(fs, cur_block, cur_buf, cur_len);
                     kfree(cur_buf, UDF_SECTOR_SIZE);
                 } else {
                     /* FE modification is in memory, saved by caller */
@@ -514,7 +532,7 @@ static int udf_write_extent_data(fs_node_t *dev, struct udf_fe *fe,
             }
 
             /* Append new extent */
-            uint32_t new_block = udf_alloc_block();
+            uint32_t new_block = udf_alloc_block(fs);
             if (new_block == 0) {
                  kfree(data_buf, UDF_SECTOR_SIZE);
                  if (cur_buf) kfree(cur_buf, UDF_SECTOR_SIZE);
@@ -522,9 +540,9 @@ static int udf_write_extent_data(fs_node_t *dev, struct udf_fe *fe,
             }
 
             /* Zero the new block to avoid info leak */
-            off_t new_off = (off_t)(udf_ctx.partition_start + new_block) * UDF_SECTOR_SIZE;
+            off_t new_off = (off_t)(fs->partition_start + new_block) * UDF_SECTOR_SIZE;
             memset(data_buf, 0, UDF_SECTOR_SIZE);
-            dev->write(dev, new_off, UDF_SECTOR_SIZE, data_buf);
+            fs->device->write(fs->device, new_off, UDF_SECTOR_SIZE, data_buf);
 
             /* Check if we can merge with previous extent */
             int merged = 0;
@@ -571,7 +589,7 @@ static int udf_write_extent_data(fs_node_t *dev, struct udf_fe *fe,
 
             /* Save current */
             if (cur_buf) {
-                udf_ext_write_aed(dev, cur_block, cur_buf, cur_len);
+                udf_ext_write_aed(fs, cur_block, cur_buf, cur_len);
                 kfree(cur_buf, UDF_SECTOR_SIZE);
             } else {
                 fe->alloc_desc_length = cur_len;
@@ -584,8 +602,8 @@ static int udf_write_extent_data(fs_node_t *dev, struct udf_fe *fe,
                 return -1;
             }
 
-            off_t disk_addr = (off_t)(udf_ctx.partition_start + next_block) * UDF_SECTOR_SIZE;
-            dev->read(dev, disk_addr, UDF_SECTOR_SIZE, next_buf);
+            off_t disk_addr = (off_t)(fs->partition_start + next_block) * UDF_SECTOR_SIZE;
+            fs->device->read(fs->device, disk_addr, UDF_SECTOR_SIZE, next_buf);
 
             cur_buf = next_buf;
             cur_block = next_block;
@@ -610,21 +628,21 @@ static int udf_write_extent_data(fs_node_t *dev, struct udf_fe *fe,
             uint32_t sec_off = rel_off % UDF_SECTOR_SIZE;
             uint32_t sector = cur_ad->position + sec_idx;
 
-            off_t disk_addr = (off_t)(udf_ctx.partition_start + sector) * UDF_SECTOR_SIZE;
+            off_t disk_addr = (off_t)(fs->partition_start + sector) * UDF_SECTOR_SIZE;
 
             if (sec_off != 0 || to_write < UDF_SECTOR_SIZE) {
                 uint32_t chunk = UDF_SECTOR_SIZE - sec_off;
                 if (chunk > to_write) chunk = to_write;
 
-                dev->read(dev, disk_addr, UDF_SECTOR_SIZE, data_buf);
+                fs->device->read(fs->device, disk_addr, UDF_SECTOR_SIZE, data_buf);
                 memcpy(data_buf + sec_off, data + written, chunk);
-                dev->write(dev, disk_addr, UDF_SECTOR_SIZE, data_buf);
+                fs->device->write(fs->device, disk_addr, UDF_SECTOR_SIZE, data_buf);
 
                 written += chunk;
                 rem_size -= chunk;
                 file_offset += chunk;
             } else {
-                dev->write(dev, disk_addr, UDF_SECTOR_SIZE, data + written);
+                fs->device->write(fs->device, disk_addr, UDF_SECTOR_SIZE, data + written);
                 written += UDF_SECTOR_SIZE;
                 rem_size -= UDF_SECTOR_SIZE;
                 file_offset += UDF_SECTOR_SIZE;
@@ -636,7 +654,7 @@ static int udf_write_extent_data(fs_node_t *dev, struct udf_fe *fe,
     }
 
     if (cur_buf) {
-        udf_ext_write_aed(dev, cur_block, cur_buf, cur_len);
+        udf_ext_write_aed(fs, cur_block, cur_buf, cur_len);
         kfree(cur_buf, UDF_SECTOR_SIZE);
     } else {
         fe->alloc_desc_length = cur_len;
@@ -653,14 +671,14 @@ static int udf_write_extent_data(fs_node_t *dev, struct udf_fe *fe,
 /*
  * Write data to a file
  */
-int udf_write_file(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
+int udf_write_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t fe_block,
                    uint32_t offset, uint32_t size, const uint8_t *data) {
     uint8_t *sector_buf = kmalloc(UDF_SECTOR_SIZE);
     if (!sector_buf) return -1;
     
     /* Read existing FE */
-    off_t disk_off = (off_t)(udf_ctx.partition_start + fe_block) * UDF_SECTOR_SIZE;
-    if (dev->read(dev, disk_off, UDF_SECTOR_SIZE, sector_buf) != UDF_SECTOR_SIZE) {
+    off_t disk_off = (off_t)(fs->partition_start + fe_block) * UDF_SECTOR_SIZE;
+    if (fs->device->read(fs->device, disk_off, UDF_SECTOR_SIZE, sector_buf) != UDF_SECTOR_SIZE) {
         kfree(sector_buf, UDF_SECTOR_SIZE);
         return -1;
     }
@@ -689,7 +707,7 @@ int udf_write_file(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
         disk_fe->tag.tag_checksum = sum;
         
         /* Write back */
-        dev->write(dev, disk_off, UDF_SECTOR_SIZE, sector_buf);
+        fs->device->write(fs->device, disk_off, UDF_SECTOR_SIZE, sector_buf);
         memcpy(fe, disk_fe, sizeof(struct udf_fe));
         kfree(sector_buf, UDF_SECTOR_SIZE);
         return 0;
@@ -697,7 +715,7 @@ int udf_write_file(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
     
     /* If still inline but doesn't fit, convert to Short AD */
     if (ad_type == UDF_ICB_FLAG_AD_INLINE) {
-        if (udf_convert_inline_to_short_ad(dev, disk_fe) != 0) {
+        if (udf_convert_inline_to_short_ad(fs, disk_fe) != 0) {
             kfree(sector_buf, UDF_SECTOR_SIZE);
             return -1;
         }
@@ -706,7 +724,7 @@ int udf_write_file(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
 
     /* Handle Short AD writes */
     if (ad_type == UDF_ICB_FLAG_AD_SHORT) {
-        if (udf_write_extent_data(dev, disk_fe, offset, size, data) != 0) {
+        if (udf_write_extent_data(fs, disk_fe, offset, size, data) != 0) {
             kfree(sector_buf, UDF_SECTOR_SIZE);
             return -1;
         }
@@ -719,7 +737,7 @@ int udf_write_file(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
         disk_fe->tag.tag_checksum = sum;
 
         /* Write back FE */
-        dev->write(dev, disk_off, UDF_SECTOR_SIZE, sector_buf);
+        fs->device->write(fs->device, disk_off, UDF_SECTOR_SIZE, sector_buf);
         memcpy(fe, disk_fe, sizeof(struct udf_fe));
         kfree(sector_buf, UDF_SECTOR_SIZE);
         return 0;
@@ -727,7 +745,7 @@ int udf_write_file(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
     
     /* Handle Long AD writes */
     if (ad_type == UDF_ICB_FLAG_AD_LONG) {
-        if (udf_write_extent_data_long(dev, disk_fe, offset, size, data) != 0) {
+        if (udf_write_extent_data_long(fs, disk_fe, offset, size, data) != 0) {
             kfree(sector_buf, UDF_SECTOR_SIZE);
             return -1;
         }
@@ -740,7 +758,7 @@ int udf_write_file(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
         disk_fe->tag.tag_checksum = sum;
 
         /* Write back FE */
-        dev->write(dev, disk_off, UDF_SECTOR_SIZE, sector_buf);
+        fs->device->write(fs->device, disk_off, UDF_SECTOR_SIZE, sector_buf);
         memcpy(fe, disk_fe, sizeof(struct udf_fe));
         kfree(sector_buf, UDF_SECTOR_SIZE);
         return 0;
@@ -754,13 +772,14 @@ int udf_write_file(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
 /*
  * Add a File Identifier Descriptor to a directory
  */
-int udf_add_fid(fs_node_t *dev, struct udf_fe *dir_fe, uint32_t dir_block,
+int udf_add_fid(struct udf_fs *fs, struct udf_fe *dir_fe, uint32_t dir_block,
                 const char *name, struct udf_long_ad *icb, uint8_t characteristics) {
-    static uint8_t dir_buf[4096];
+    uint8_t *dir_buf = kmalloc(4096);
+    if (!dir_buf) return -1;
     
     /* Read directory data */
-    off_t disk_off = (off_t)(udf_ctx.partition_start + dir_block) * UDF_SECTOR_SIZE;
-    dev->read(dev, disk_off, UDF_SECTOR_SIZE, dir_buf);
+    off_t disk_off = (off_t)(fs->partition_start + dir_block) * UDF_SECTOR_SIZE;
+    fs->device->read(fs->device, disk_off, UDF_SECTOR_SIZE, dir_buf);
     
     uint32_t dir_size = (uint32_t)dir_fe->info_length;
     
@@ -769,12 +788,19 @@ int udf_add_fid(fs_node_t *dev, struct udf_fe *dir_fe, uint32_t dir_block,
     uint32_t fid_size = 38 + 0 + (name_len + 1);  /* +1 for compression type */
     fid_size = (fid_size + 3) & ~3;  /* Pad to 4 bytes */
     
+    /* Bounds check: ensure FID fits in buffer */
+    if (dir_size + fid_size > 4096) {
+        kprint("UDF: Directory full, cannot add entry\n");
+        kfree(dir_buf, 4096);
+        return -1;
+    }
+    
     /* Create FID at end of directory */
     struct udf_fid *fid = (struct udf_fid *)(dir_buf + dir_size);
     memset(fid, 0, fid_size);
     
     fid->tag.tag_id = UDF_TAG_FID;
-    fid->tag.tag_location = udf_ctx.partition_start + dir_block;
+    fid->tag.tag_location = fs->partition_start + dir_block;
     fid->file_version = 1;
     fid->characteristics = characteristics;
     fid->file_id_length = name_len + 1;  /* Include compression byte */
@@ -796,7 +822,7 @@ int udf_add_fid(fs_node_t *dev, struct udf_fe *dir_fe, uint32_t dir_block,
     dir_fe->info_length = dir_size + fid_size;
     
     /* Write back */
-    dev->write(dev, disk_off, UDF_SECTOR_SIZE, dir_buf);
+    fs->device->write(fs->device, disk_off, UDF_SECTOR_SIZE, dir_buf);
     
     return 0;
 }
@@ -804,21 +830,26 @@ int udf_add_fid(fs_node_t *dev, struct udf_fe *dir_fe, uint32_t dir_block,
 /*
  * Remove a File Identifier Descriptor from a directory
  */
-int udf_remove_fid(fs_node_t *dev, struct udf_fe *dir_fe, uint32_t dir_block,
+int udf_remove_fid(struct udf_fs *fs, struct udf_fe *dir_fe, uint32_t dir_block,
                    const char *name) {
-    static uint8_t dir_buf[4096];
+    uint8_t *dir_buf = kmalloc(4096);
+    if (!dir_buf) return -1;
     
-    off_t disk_off = (off_t)(udf_ctx.partition_start + dir_block) * UDF_SECTOR_SIZE;
-    dev->read(dev, disk_off, UDF_SECTOR_SIZE, dir_buf);
+    off_t disk_off = (off_t)(fs->partition_start + dir_block) * UDF_SECTOR_SIZE;
+    fs->device->read(fs->device, disk_off, UDF_SECTOR_SIZE, dir_buf);
     
     uint32_t dir_size = (uint32_t)dir_fe->info_length;
+    if (dir_size > sizeof(dir_buf))
+        dir_size = sizeof(dir_buf);
     uint32_t pos = 0;
     
-    while (pos < dir_size) {
+    while (pos + 38 <= dir_size) {
         struct udf_fid *fid = (struct udf_fid *)(dir_buf + pos);
         
         uint32_t fid_size = 38 + fid->impl_use_length + fid->file_id_length;
         fid_size = (fid_size + 3) & ~3;
+        if (fid_size < 40 || pos + fid_size > dir_size)
+            break;
         
         /* Extract and compare name */
         char fname[256];
@@ -838,26 +869,28 @@ int udf_remove_fid(fs_node_t *dev, struct udf_fe *dir_fe, uint32_t dir_block,
             fid->characteristics |= UDF_FID_DELETED;
             
             /* Write back */
-            dev->write(dev, disk_off, UDF_SECTOR_SIZE, dir_buf);
+            fs->device->write(fs->device, disk_off, UDF_SECTOR_SIZE, dir_buf);
+            kfree(dir_buf, 4096);
             return 0;
         }
         
         pos += fid_size;
     }
     
+    kfree(dir_buf, 4096);
     return -1;  /* Not found */
 }
 
 /*
  * Free a chain of Allocation Extended Descriptors and their extents (Short AD)
  */
-static void udf_free_short_ad_chain(fs_node_t *dev, uint32_t aed_block) {
+static void udf_free_short_ad_chain(struct udf_fs *fs, uint32_t aed_block) {
     uint8_t *buf = kmalloc(UDF_SECTOR_SIZE);
     if (!buf) return;
 
     while (aed_block != 0) {
-        off_t offset = (off_t)(udf_ctx.partition_start + aed_block) * UDF_SECTOR_SIZE;
-        if (dev->read(dev, offset, UDF_SECTOR_SIZE, buf) != UDF_SECTOR_SIZE) {
+        off_t offset = (off_t)(fs->partition_start + aed_block) * UDF_SECTOR_SIZE;
+        if (fs->device->read(fs->device, offset, UDF_SECTOR_SIZE, buf) != UDF_SECTOR_SIZE) {
             break;
         }
 
@@ -880,12 +913,12 @@ static void udf_free_short_ad_chain(fs_node_t *dev, uint32_t aed_block) {
             } else if (type != 2) {
                 uint32_t blocks = (len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
                 for (uint32_t b = 0; b < blocks; b++) {
-                    udf_free_block(pos + b);
+                    udf_free_block(fs, pos + b);
                 }
             }
         }
 
-        udf_free_block(aed_block);
+        udf_free_block(fs, aed_block);
         aed_block = next_aed_block;
     }
 
@@ -896,7 +929,7 @@ static void udf_free_short_ad_chain(fs_node_t *dev, uint32_t aed_block) {
  * Process and truncate Short Allocation Descriptors recursively
  * Returns new length of ADs in bytes.
  */
-static uint32_t udf_process_short_ads(fs_node_t *dev, uint8_t *ad_buf, uint32_t ad_len,
+static uint32_t udf_process_short_ads(struct udf_fs *fs, uint8_t *ad_buf, uint32_t ad_len,
                                       uint64_t *current_offset, uint64_t new_size) {
     struct udf_short_ad *ads = (struct udf_short_ad *)ad_buf;
     uint32_t num_ads = ad_len / sizeof(struct udf_short_ad);
@@ -911,24 +944,24 @@ static uint32_t udf_process_short_ads(fs_node_t *dev, uint8_t *ad_buf, uint32_t 
             /* Link to AED */
             if (*current_offset >= new_size) {
                 /* Fully beyond new_size, free chain */
-                udf_free_short_ad_chain(dev, pos);
+                udf_free_short_ad_chain(fs, pos);
                 /* Drop link */
             } else {
                 /* Load AED */
                 uint8_t *aed_buf = kmalloc(UDF_SECTOR_SIZE);
                 if (aed_buf) {
-                     off_t offset = (off_t)(udf_ctx.partition_start + pos) * UDF_SECTOR_SIZE;
-                     if (dev->read(dev, offset, UDF_SECTOR_SIZE, aed_buf) == UDF_SECTOR_SIZE) {
+                     off_t offset = (off_t)(fs->partition_start + pos) * UDF_SECTOR_SIZE;
+                     if (fs->device->read(fs->device, offset, UDF_SECTOR_SIZE, aed_buf) == UDF_SECTOR_SIZE) {
                          struct udf_aed *aed = (struct udf_aed *)aed_buf;
                          if (aed->tag.tag_id == UDF_TAG_AED) {
-                             uint32_t new_aed_len = udf_process_short_ads(dev,
+                             uint32_t new_aed_len = udf_process_short_ads(fs,
                                             aed_buf + sizeof(struct udf_aed),
                                             aed->alloc_desc_length,
                                             current_offset, new_size);
 
                              if (new_aed_len == 0) {
                                  /* AED became empty */
-                                 udf_free_block(pos);
+                                 udf_free_block(fs, pos);
                                  /* Drop link */
                              } else {
                                  /* Update AED and write back */
@@ -940,7 +973,7 @@ static uint32_t udf_process_short_ads(fs_node_t *dev, uint8_t *ad_buf, uint32_t 
                                  aed->tag.desc_crc = udf_crc(data, aed->tag.desc_crc_len);
                                  aed->tag.tag_checksum = udf_tag_checksum(&aed->tag);
 
-                                 dev->write(dev, offset, UDF_SECTOR_SIZE, aed_buf);
+                                 fs->device->write(fs->device, offset, UDF_SECTOR_SIZE, aed_buf);
 
                                  /* Keep link */
                                  if (new_num_ads != i) ads[new_num_ads] = ads[i];
@@ -957,7 +990,7 @@ static uint32_t udf_process_short_ads(fs_node_t *dev, uint8_t *ad_buf, uint32_t 
                  /* Free extent */
                  if (type != 2) {
                      uint32_t blocks = (len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
-                     for (uint32_t b = 0; b < blocks; b++) udf_free_block(pos + b);
+                     for (uint32_t b = 0; b < blocks; b++) udf_free_block(fs, pos + b);
                  }
             } else if (*current_offset + len > new_size) {
                  /* Partial extent */
@@ -966,7 +999,7 @@ static uint32_t udf_process_short_ads(fs_node_t *dev, uint8_t *ad_buf, uint32_t 
                  uint32_t new_blocks = (new_len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
 
                  if (type != 2 && old_blocks > new_blocks) {
-                     for (uint32_t b = new_blocks; b < old_blocks; b++) udf_free_block(pos + b);
+                     for (uint32_t b = new_blocks; b < old_blocks; b++) udf_free_block(fs, pos + b);
                  }
 
                  /* Update AD */
@@ -990,13 +1023,13 @@ static uint32_t udf_process_short_ads(fs_node_t *dev, uint8_t *ad_buf, uint32_t 
 /*
  * Free a chain of Allocation Extended Descriptors and their extents (Long AD)
  */
-static void udf_free_long_ad_chain(fs_node_t *dev, uint32_t aed_block) {
+static void udf_free_long_ad_chain(struct udf_fs *fs, uint32_t aed_block) {
     uint8_t *buf = kmalloc(UDF_SECTOR_SIZE);
     if (!buf) return;
 
     while (aed_block != 0) {
-        off_t offset = (off_t)(udf_ctx.partition_start + aed_block) * UDF_SECTOR_SIZE;
-        if (dev->read(dev, offset, UDF_SECTOR_SIZE, buf) != UDF_SECTOR_SIZE) {
+        off_t offset = (off_t)(fs->partition_start + aed_block) * UDF_SECTOR_SIZE;
+        if (fs->device->read(fs->device, offset, UDF_SECTOR_SIZE, buf) != UDF_SECTOR_SIZE) {
             break;
         }
 
@@ -1019,12 +1052,12 @@ static void udf_free_long_ad_chain(fs_node_t *dev, uint32_t aed_block) {
             } else if (type != 2) {
                 uint32_t blocks = (len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
                 for (uint32_t b = 0; b < blocks; b++) {
-                    udf_free_block(block + b);
+                    udf_free_block(fs, block + b);
                 }
             }
         }
 
-        udf_free_block(aed_block);
+        udf_free_block(fs, aed_block);
         aed_block = next_aed_block;
     }
 
@@ -1035,7 +1068,7 @@ static void udf_free_long_ad_chain(fs_node_t *dev, uint32_t aed_block) {
  * Process and truncate Long Allocation Descriptors recursively
  * Returns new length of ADs in bytes.
  */
-static uint32_t udf_process_long_ads(fs_node_t *dev, uint8_t *ad_buf, uint32_t ad_len,
+static uint32_t udf_process_long_ads(struct udf_fs *fs, uint8_t *ad_buf, uint32_t ad_len,
                                      uint64_t *current_offset, uint64_t new_size) {
     struct udf_long_ad *ads = (struct udf_long_ad *)ad_buf;
     uint32_t num_ads = ad_len / sizeof(struct udf_long_ad);
@@ -1050,24 +1083,24 @@ static uint32_t udf_process_long_ads(fs_node_t *dev, uint8_t *ad_buf, uint32_t a
             /* Link to AED */
             if (*current_offset >= new_size) {
                 /* Fully beyond new_size, free chain */
-                udf_free_long_ad_chain(dev, block);
+                udf_free_long_ad_chain(fs, block);
                 /* Drop link */
             } else {
                 /* Load AED */
                 uint8_t *aed_buf = kmalloc(UDF_SECTOR_SIZE);
                 if (aed_buf) {
-                     off_t offset = (off_t)(udf_ctx.partition_start + block) * UDF_SECTOR_SIZE;
-                     if (dev->read(dev, offset, UDF_SECTOR_SIZE, aed_buf) == UDF_SECTOR_SIZE) {
+                     off_t offset = (off_t)(fs->partition_start + block) * UDF_SECTOR_SIZE;
+                     if (fs->device->read(fs->device, offset, UDF_SECTOR_SIZE, aed_buf) == UDF_SECTOR_SIZE) {
                          struct udf_aed *aed = (struct udf_aed *)aed_buf;
                          if (aed->tag.tag_id == UDF_TAG_AED) {
-                             uint32_t new_aed_len = udf_process_long_ads(dev,
+                             uint32_t new_aed_len = udf_process_long_ads(fs,
                                             aed_buf + sizeof(struct udf_aed),
                                             aed->alloc_desc_length,
                                             current_offset, new_size);
 
                              if (new_aed_len == 0) {
                                  /* AED became empty */
-                                 udf_free_block(block);
+                                 udf_free_block(fs, block);
                                  /* Drop link */
                              } else {
                                  /* Update AED and write back */
@@ -1079,7 +1112,7 @@ static uint32_t udf_process_long_ads(fs_node_t *dev, uint8_t *ad_buf, uint32_t a
                                  aed->tag.desc_crc = udf_crc(data, aed->tag.desc_crc_len);
                                  aed->tag.tag_checksum = udf_tag_checksum(&aed->tag);
 
-                                 dev->write(dev, offset, UDF_SECTOR_SIZE, aed_buf);
+                                 fs->device->write(fs->device, offset, UDF_SECTOR_SIZE, aed_buf);
 
                                  /* Keep link */
                                  if (new_num_ads != i) ads[new_num_ads] = ads[i];
@@ -1096,7 +1129,7 @@ static uint32_t udf_process_long_ads(fs_node_t *dev, uint8_t *ad_buf, uint32_t a
                  /* Free extent */
                  if (type != 2) {
                      uint32_t blocks = (len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
-                     for (uint32_t b = 0; b < blocks; b++) udf_free_block(block + b);
+                     for (uint32_t b = 0; b < blocks; b++) udf_free_block(fs, block + b);
                  }
             } else if (*current_offset + len > new_size) {
                  /* Partial extent */
@@ -1105,7 +1138,7 @@ static uint32_t udf_process_long_ads(fs_node_t *dev, uint8_t *ad_buf, uint32_t a
                  uint32_t new_blocks = (new_len + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
 
                  if (type != 2 && old_blocks > new_blocks) {
-                     for (uint32_t b = new_blocks; b < old_blocks; b++) udf_free_block(block + b);
+                     for (uint32_t b = new_blocks; b < old_blocks; b++) udf_free_block(fs, block + b);
                  }
 
                  /* Update AD */
@@ -1131,12 +1164,13 @@ static uint32_t udf_process_long_ads(fs_node_t *dev, uint8_t *ad_buf, uint32_t a
 /*
  * Truncate or extend a file
  */
-int udf_truncate(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
-                 uint64_t new_size) {
-    static uint8_t sector_buf[UDF_SECTOR_SIZE];
+int udf_truncate_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t fe_block,
+                     uint64_t new_size) {
+    uint8_t *sector_buf = kmalloc(UDF_SECTOR_SIZE);
+    if (!sector_buf) return -1;
     
-    off_t disk_off = (off_t)(udf_ctx.partition_start + fe_block) * UDF_SECTOR_SIZE;
-    dev->read(dev, disk_off, UDF_SECTOR_SIZE, sector_buf);
+    off_t disk_off = (off_t)(fs->partition_start + fe_block) * UDF_SECTOR_SIZE;
+    fs->device->read(fs->device, disk_off, UDF_SECTOR_SIZE, sector_buf);
     
     struct udf_fe *disk_fe = (struct udf_fe *)sector_buf;
     
@@ -1164,8 +1198,9 @@ int udf_truncate(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
         for (int i = 5; i < 16; i++) sum += p[i];
         disk_fe->tag.tag_checksum = sum;
         
-        dev->write(dev, disk_off, UDF_SECTOR_SIZE, sector_buf);
+        fs->device->write(fs->device, disk_off, UDF_SECTOR_SIZE, sector_buf);
         memcpy(fe, disk_fe, sizeof(struct udf_fe));
+        kfree(sector_buf, UDF_SECTOR_SIZE);
         return 0;
     }
     
@@ -1199,15 +1234,15 @@ int udf_truncate(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
 
                     /* Zero out the newly used part of the block */
                     if (add > 0) {
-                         off_t block_off = (off_t)(udf_ctx.partition_start + last->position + occupied_blocks - 1) * UDF_SECTOR_SIZE;
+                         off_t block_off = (off_t)(fs->partition_start + last->position + occupied_blocks - 1) * UDF_SECTOR_SIZE;
                          /* Read modify write */
                          uint8_t *tmp_buf = kmalloc(UDF_SECTOR_SIZE);
                          if (tmp_buf) {
-                             if (dev->read(dev, block_off, UDF_SECTOR_SIZE, tmp_buf) == UDF_SECTOR_SIZE) {
+                             if (fs->device->read(fs->device, block_off, UDF_SECTOR_SIZE, tmp_buf) == UDF_SECTOR_SIZE) {
                                  uint32_t offset_in_block = last_len % UDF_SECTOR_SIZE;
                                  if (offset_in_block == 0) offset_in_block = UDF_SECTOR_SIZE; /* Should not happen if available > 0 */
                                  memset(tmp_buf + offset_in_block, 0, add);
-                                 dev->write(dev, block_off, UDF_SECTOR_SIZE, tmp_buf);
+                                 fs->device->write(fs->device, block_off, UDF_SECTOR_SIZE, tmp_buf);
                              }
                              kfree(tmp_buf, UDF_SECTOR_SIZE);
                          }
@@ -1221,7 +1256,7 @@ int udf_truncate(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
 
             /* Allocate new blocks */
             while (needed > 0) {
-                uint32_t new_block = udf_alloc_block();
+                uint32_t new_block = udf_alloc_block(fs);
                 /* printf("DEBUG: Allocated block %u, needed %llu\n", new_block, (unsigned long long)needed); */
                 if (new_block == 0) {
                     kfree(zero_buf, UDF_SECTOR_SIZE);
@@ -1229,8 +1264,8 @@ int udf_truncate(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
                 }
 
                 /* Zero the new block */
-                off_t new_block_off = (off_t)(udf_ctx.partition_start + new_block) * UDF_SECTOR_SIZE;
-                dev->write(dev, new_block_off, UDF_SECTOR_SIZE, zero_buf);
+                off_t new_block_off = (off_t)(fs->partition_start + new_block) * UDF_SECTOR_SIZE;
+                fs->device->write(fs->device, new_block_off, UDF_SECTOR_SIZE, zero_buf);
 
                 int merged = 0;
                 ads = (struct udf_short_ad *)alloc_area; /* Reload pointer in case valid */
@@ -1254,8 +1289,9 @@ int udf_truncate(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
                     /* Add new extent */
                     if (disk_fe->alloc_desc_length + sizeof(struct udf_short_ad) > max_ad_len) {
                         kprint("UDF: File Entry full during extension\n");
-                        udf_free_block(new_block);
+                        udf_free_block(fs, new_block);
                         kfree(zero_buf, UDF_SECTOR_SIZE);
+                        kfree(sector_buf, UDF_SECTOR_SIZE);
                         return -1;
                     }
 
@@ -1280,14 +1316,15 @@ int udf_truncate(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
             for (int i = 5; i < 16; i++) sum += p[i];
             disk_fe->tag.tag_checksum = sum;
 
-            dev->write(dev, disk_off, UDF_SECTOR_SIZE, sector_buf);
+            fs->device->write(fs->device, disk_off, UDF_SECTOR_SIZE, sector_buf);
             memcpy(fe, disk_fe, sizeof(struct udf_fe));
+            kfree(sector_buf, UDF_SECTOR_SIZE);
             return 0;
         }
 
         uint64_t current_offset = 0;
 
-        disk_fe->alloc_desc_length = udf_process_short_ads(dev, alloc_area,
+        disk_fe->alloc_desc_length = udf_process_short_ads(fs, alloc_area,
                                         disk_fe->alloc_desc_length,
                                         &current_offset, new_size);
 
@@ -1300,8 +1337,9 @@ int udf_truncate(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
         for (int i = 5; i < 16; i++) sum += p[i];
         disk_fe->tag.tag_checksum = sum;
 
-        dev->write(dev, disk_off, UDF_SECTOR_SIZE, sector_buf);
+        fs->device->write(fs->device, disk_off, UDF_SECTOR_SIZE, sector_buf);
         memcpy(fe, disk_fe, sizeof(struct udf_fe));
+        kfree(sector_buf, UDF_SECTOR_SIZE);
         return 0;
     } else if ((disk_fe->icb_tag.flags & 0x7) == UDF_ICB_FLAG_AD_LONG) {
         uint8_t *alloc_area = sector_buf + sizeof(struct udf_fe) + disk_fe->ext_attr_length;
@@ -1329,14 +1367,14 @@ int udf_truncate(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
                     uint32_t add = (needed < available) ? (uint32_t)needed : available;
 
                     if (add > 0) {
-                         off_t block_off = (off_t)(udf_ctx.partition_start + last->block + occupied_blocks - 1) * UDF_SECTOR_SIZE;
+                         off_t block_off = (off_t)(fs->partition_start + last->block + occupied_blocks - 1) * UDF_SECTOR_SIZE;
                          uint8_t *tmp_buf = kmalloc(UDF_SECTOR_SIZE);
                          if (tmp_buf) {
-                             if (dev->read(dev, block_off, UDF_SECTOR_SIZE, tmp_buf) == UDF_SECTOR_SIZE) {
+                             if (fs->device->read(fs->device, block_off, UDF_SECTOR_SIZE, tmp_buf) == UDF_SECTOR_SIZE) {
                                  uint32_t offset_in_block = last_len % UDF_SECTOR_SIZE;
                                  if (offset_in_block == 0) offset_in_block = UDF_SECTOR_SIZE;
                                  memset(tmp_buf + offset_in_block, 0, add);
-                                 dev->write(dev, block_off, UDF_SECTOR_SIZE, tmp_buf);
+                                 fs->device->write(fs->device, block_off, UDF_SECTOR_SIZE, tmp_buf);
                              }
                              kfree(tmp_buf, UDF_SECTOR_SIZE);
                          }
@@ -1350,21 +1388,21 @@ int udf_truncate(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
 
             /* Allocate new blocks */
             while (needed > 0) {
-                uint32_t new_block = udf_alloc_block();
+                uint32_t new_block = udf_alloc_block(fs);
                 if (new_block == 0) {
                     kfree(zero_buf, UDF_SECTOR_SIZE);
                     return -1;
                 }
 
-                off_t new_block_off = (off_t)(udf_ctx.partition_start + new_block) * UDF_SECTOR_SIZE;
-                dev->write(dev, new_block_off, UDF_SECTOR_SIZE, zero_buf);
+                off_t new_block_off = (off_t)(fs->partition_start + new_block) * UDF_SECTOR_SIZE;
+                fs->device->write(fs->device, new_block_off, UDF_SECTOR_SIZE, zero_buf);
 
                 int merged = 0;
                 ads = (struct udf_long_ad *)alloc_area;
                 num_ads = disk_fe->alloc_desc_length / sizeof(struct udf_long_ad);
 
                 /* Default partition from root ICB if no ADs */
-                uint16_t partition = udf_ctx.root_icb.partition;
+                uint16_t partition = fs->root_icb.partition;
 
                 if (num_ads > 0) {
                     struct udf_long_ad *last = &ads[num_ads - 1];
@@ -1384,8 +1422,9 @@ int udf_truncate(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
                 if (!merged) {
                     if (disk_fe->alloc_desc_length + sizeof(struct udf_long_ad) > max_ad_len) {
                         kprint("UDF: File Entry full during extension\n");
-                        udf_free_block(new_block);
+                        udf_free_block(fs, new_block);
                         kfree(zero_buf, UDF_SECTOR_SIZE);
+                        kfree(sector_buf, UDF_SECTOR_SIZE);
                         return -1;
                     }
 
@@ -1413,15 +1452,17 @@ int udf_truncate(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
             for (int i = 5; i < 16; i++) sum += p[i];
             disk_fe->tag.tag_checksum = sum;
 
-            dev->write(dev, disk_off, UDF_SECTOR_SIZE, sector_buf);
+            fs->device->write(fs->device, disk_off, UDF_SECTOR_SIZE, sector_buf);
             memcpy(fe, disk_fe, sizeof(struct udf_fe));
+            kfree(zero_buf, UDF_SECTOR_SIZE);
+            kfree(sector_buf, UDF_SECTOR_SIZE);
             return 0;
         }
 
         /* Shrinking / Truncation */
         uint64_t current_offset = 0;
 
-        disk_fe->alloc_desc_length = udf_process_long_ads(dev, alloc_area,
+        disk_fe->alloc_desc_length = udf_process_long_ads(fs, alloc_area,
                                         disk_fe->alloc_desc_length,
                                         &current_offset, new_size);
 
@@ -1434,10 +1475,12 @@ int udf_truncate(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
         for (int i = 5; i < 16; i++) sum += p[i];
         disk_fe->tag.tag_checksum = sum;
 
-        dev->write(dev, disk_off, UDF_SECTOR_SIZE, sector_buf);
+        fs->device->write(fs->device, disk_off, UDF_SECTOR_SIZE, sector_buf);
         memcpy(fe, disk_fe, sizeof(struct udf_fe));
+        kfree(sector_buf, UDF_SECTOR_SIZE);
         return 0;
     }
 
+    kfree(sector_buf, UDF_SECTOR_SIZE);
     return -1;
 }

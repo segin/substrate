@@ -22,6 +22,7 @@ echo "libelfobj: PASS"
 echo
 
 echo "Building ld (NATIVE_BUILD=1)..."
+make -C "$ROOT/usr.bin/ld" clean >/dev/null
 make -C "$ROOT/usr.bin/ld" NATIVE_BUILD=1 -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)" >/dev/null
 echo "Build: PASS"
 echo

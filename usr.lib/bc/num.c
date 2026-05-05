@@ -84,19 +84,21 @@ bc_num *bc_from_long(long long v) {
         n->sign = 0;
         return n;
     }
-    
+
+    unsigned long long uv;
     if (v < 0) {
         n->sign = -1;
-        v = -v;
+        uv = (unsigned long long)0 - (unsigned long long)v;
     } else {
         n->sign = 1;
+        uv = (unsigned long long)v;
     }
 
     bc_expsize(n, 10);
     int i = 0;
-    while (v > 0) {
-        n->digits[i++] = v % 100;
-        v /= 100;
+    while (uv > 0) {
+        n->digits[i++] = (unsigned char)(uv % 100);
+        uv /= 100;
     }
     n->len = i;
     return n;

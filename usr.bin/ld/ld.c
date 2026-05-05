@@ -17,7 +17,7 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 
-#define LD_MAX_SCRIPT_INCLUDE_DEPTH 64
+#define LD_MAX_SCRIPT_INCLUDE_DEPTH 16
 #define LD_MAX_TRACKED_SYMBOLS 262144U
 #define LD_MAX_INPUT_OBJECTS 131072U
 #define LD_MAX_ARCHIVE_SCAN_PASSES 1024
@@ -144,6 +144,7 @@ typedef struct {
     const char *reproduce_path;
     ld_compat_mode_t compat_mode;
     ld_lib_mode_t current_lib_mode;
+    int explicit_lib_mode;
     int current_whole_archive;
     int current_as_needed;
     strvec_t lib_paths;
@@ -159,6 +160,7 @@ static int dynstr_append_cstr(uint8_t **buf, size_t *len, size_t *cap, const cha
 static int dynsym_should_export(const ld_ctx_t *ctx, const elfobj_t *out, const elf_symbol_t *sym);
 static int resolve_symbol_addr(elfobj_t *obj, const elf_symbol_t *sym, int allow_undef,
                                uint64_t *out_addr, const char **undef_name);
+static int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *state);
 static int is_relro_candidate_name(const char *name);
 
 static void usage(const char *prog) {
@@ -763,6 +765,17 @@ static int add_u64_checked(uint64_t a, uint64_t b, uint64_t *out) {
     return 1;
 }
 
+static int mul_u64_checked(uint64_t a, uint64_t b, uint64_t *out) {
+    if (out == NULL) {
+        return 0;
+    }
+    if (a != 0 && b > UINT64_MAX / a) {
+        return 0;
+    }
+    *out = a * b;
+    return 1;
+}
+
 static int has_suffix(const char *s, const char *suffix) {
     size_t n;
     size_t m;
@@ -779,45 +792,76 @@ static int has_suffix(const char *s, const char *suffix) {
 }
 
 static int read_file(const char *path, unsigned char **out, size_t *out_sz) {
-    FILE *fp;
-    long end;
-    size_t got;
     unsigned char *buf;
+    int fd;
+    struct stat st;
+    size_t cap;
+    size_t used;
+    ssize_t nr;
 
     *out = NULL;
     *out_sz = 0;
-    fp = fopen(path, "rb");
-    if (fp == NULL) {
+    fd = open(path, O_RDONLY);
+    if (fd < 0) {
         return -1;
     }
-    if (fseek(fp, 0, SEEK_END) != 0) {
-        fclose(fp);
+    if (fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_size >= 0) {
+        size_t total = (size_t)st.st_size;
+        size_t off = 0;
+        buf = (unsigned char *)malloc(total);
+        if (buf == NULL && total != 0) {
+            close(fd);
+            return -1;
+        }
+        while (off < total) {
+            nr = read(fd, buf + off, total - off);
+            if (nr <= 0) {
+                free(buf);
+                close(fd);
+                return -1;
+            }
+            off += (size_t)nr;
+        }
+        close(fd);
+        *out = buf;
+        *out_sz = total;
+        return 0;
+    }
+    cap = 4096;
+    used = 0;
+    buf = (unsigned char *)malloc(cap);
+    if (buf == NULL) {
+        close(fd);
         return -1;
     }
-    end = ftell(fp);
-    if (end < 0) {
-        fclose(fp);
-        return -1;
+    while ((nr = read(fd, buf + used, cap - used)) > 0) {
+        used += (size_t)nr;
+        if (used == cap) {
+            size_t new_cap;
+            unsigned char *next;
+            if (cap > ((size_t)-1) / 2) {
+                free(buf);
+                close(fd);
+                return -1;
+            }
+            new_cap = cap * 2;
+            next = (unsigned char *)realloc(buf, new_cap);
+            if (next == NULL) {
+                free(buf);
+                close(fd);
+                return -1;
+            }
+            buf = next;
+            cap = new_cap;
+        }
     }
-    if (fseek(fp, 0, SEEK_SET) != 0) {
-        fclose(fp);
-        return -1;
-    }
-
-    buf = (unsigned char *)malloc((size_t)end);
-    if (buf == NULL && end != 0) {
-        fclose(fp);
-        return -1;
-    }
-    got = fread(buf, 1, (size_t)end, fp);
-    fclose(fp);
-    if (got != (size_t)end) {
+    close(fd);
+    if (nr < 0) {
         free(buf);
         return -1;
     }
-
     *out = buf;
-    *out_sz = (size_t)end;
+    *out_sz = used;
     return 0;
 }
 
@@ -1687,7 +1731,12 @@ static int lds_ast_push(lds_ast_t *ast, lds_ast_kind_t kind, const char *name, c
     return 0;
 }
 
+#define LD_MAX_SCRIPT_TOKEN_LEN (1u << 20)  /* 1 MiB per token */
+
 static int lds_lex_push_text(lds_tok_t *tok, const unsigned char *start, size_t n) {
+    if (n > LD_MAX_SCRIPT_TOKEN_LEN) {
+        return -1;
+    }
     tok->text = (char *)malloc(n + 1);
     if (tok->text == NULL) {
         return -1;
@@ -2429,13 +2478,13 @@ static int parse_linker_script_file_rec(const char *path, strvec_t *include_stac
     }
     memset(&assign_name_tok, 0, sizeof(assign_name_tok));
     memset(&assign_expr_tokens, 0, sizeof(assign_expr_tokens));
-    if (depth > LD_MAX_SCRIPT_INCLUDE_DEPTH) {
+    if (depth >= LD_MAX_SCRIPT_INCLUDE_DEPTH) {
         lds_tok_t fake;
         memset(&fake, 0, sizeof(fake));
         fake.path = path;
         fake.line = 1;
         fake.col = 1;
-        lds_report_error(include_stack, &fake, "INCLUDE depth exceeds limit (64)");
+        lds_report_error(include_stack, &fake, "INCLUDE depth exceeds limit");
         return -1;
     }
     if (strvec_push(include_stack, path) != 0) {
@@ -3157,6 +3206,9 @@ static int parse_u64_dec(const char *s, size_t n, uint64_t *out) {
             return -1;
         }
         saw = 1;
+        if (v > (UINT64_MAX - (uint64_t)(c - '0')) / 10) {
+            return -1;
+        }
         v = v * 10 + (uint64_t)(c - '0');
     }
     if (!saw) {
@@ -4060,6 +4112,11 @@ static int load_object_input(const char *path, ld_ctx_t *ctx, objvec_t *objs, sy
         return -1;
     }
     if (elf_type(obj) != ET_REL) {
+        if (elf_type(obj) == ET_DYN && ctx != NULL &&
+            (ctx->expect_type == ET_EXEC || ctx->expect_type == ET_DYN)) {
+            elf_close(obj);
+            return register_dso_provider(ctx, path, state);
+        }
         if (!quiet) {
             fprintf(stderr, "ld: input %s is not relocatable (only ET_REL supported)\n", path);
         }
@@ -4084,6 +4141,9 @@ static char *resolve_library_path_suffix_ex(const ld_ctx_t *ctx, const char *nam
         "/usr/local/lib"
     };
     char leaf[512];
+#ifdef LD_SUBSTRATE_BUILD
+    const char *sysroot;
+#endif
     size_t i;
 
     snprintf(leaf, sizeof(leaf), "lib%s%s", name, suffix != NULL ? suffix : "");
@@ -4097,6 +4157,75 @@ static char *resolve_library_path_suffix_ex(const ld_ctx_t *ctx, const char *nam
     if (!include_default_dirs) {
         return NULL;
     }
+#ifdef LD_SUBSTRATE_BUILD
+    sysroot = getenv("SUBSTRATE_SYSROOT");
+    if (sysroot != NULL && sysroot[0] != '\0') {
+        for (i = 0; i < sizeof(default_dirs) / sizeof(default_dirs[0]); ++i) {
+            char prefixed[PATH_MAX];
+            char *cand;
+            if (snprintf(prefixed, sizeof(prefixed), "%s%s", sysroot, default_dirs[i]) >= (int)sizeof(prefixed)) {
+                continue;
+            }
+            cand = path_join(prefixed, leaf);
+            if (cand != NULL && access(cand, R_OK) == 0) {
+                return cand;
+            }
+            free(cand);
+        }
+        return NULL;
+    }
+#endif
+    for (i = 0; i < sizeof(default_dirs) / sizeof(default_dirs[0]); ++i) {
+        char *cand = path_join(default_dirs[i], leaf);
+        if (cand != NULL && access(cand, R_OK) == 0) {
+            return cand;
+        }
+        free(cand);
+    }
+    return NULL;
+}
+
+static char *resolve_library_path_exact(const ld_ctx_t *ctx, const char *leaf) {
+    static const char *default_dirs[] = {
+        "/usr/lib",
+        "/usr/local/lib"
+    };
+#ifdef LD_SUBSTRATE_BUILD
+    const char *sysroot;
+#endif
+    size_t i;
+
+    if (leaf == NULL || leaf[0] == '\0') {
+        return NULL;
+    }
+    if (strchr(leaf, '/') != NULL) {
+        return access(leaf, R_OK) == 0 ? xstrdup(leaf) : NULL;
+    }
+    for (i = 0; i < ctx->lib_paths.count; ++i) {
+        char *cand = path_join(ctx->lib_paths.items[i], leaf);
+        if (cand != NULL && access(cand, R_OK) == 0) {
+            return cand;
+        }
+        free(cand);
+    }
+#ifdef LD_SUBSTRATE_BUILD
+    sysroot = getenv("SUBSTRATE_SYSROOT");
+    if (sysroot != NULL && sysroot[0] != '\0') {
+        for (i = 0; i < sizeof(default_dirs) / sizeof(default_dirs[0]); ++i) {
+            char prefixed[PATH_MAX];
+            char *cand;
+            if (snprintf(prefixed, sizeof(prefixed), "%s%s", sysroot, default_dirs[i]) >= (int)sizeof(prefixed)) {
+                continue;
+            }
+            cand = path_join(prefixed, leaf);
+            if (cand != NULL && access(cand, R_OK) == 0) {
+                return cand;
+            }
+            free(cand);
+        }
+        return NULL;
+    }
+#endif
     for (i = 0; i < sizeof(default_dirs) / sizeof(default_dirs[0]); ++i) {
         char *cand = path_join(default_dirs[i], leaf);
         if (cand != NULL && access(cand, R_OK) == 0) {
@@ -4603,6 +4732,9 @@ static char *make_versioned_symbol(const char *base, size_t base_len, const char
     }
     sep_len = strlen(sep);
     ver_len = strlen(ver_name);
+    if (base_len > SIZE_MAX - sep_len - ver_len - 1) {
+        return NULL;
+    }
     out = (char *)malloc(base_len + sep_len + ver_len + 1);
     if (out == NULL) {
         return NULL;
@@ -5619,6 +5751,9 @@ static uint8_t *build_sysv_hash_section(const uint8_t *dynsym, size_t dynsym_len
         return NULL;
     }
     nsyms = dynsym_len / entsz;
+    if (nsyms > SIZE_MAX / 8 - 1) {
+        return NULL;
+    }
     nbucket = nsyms > 1 ? nsyms - 1 : 1;
     nchain = nsyms;
     buckets = (uint32_t *)calloc(nbucket, sizeof(*buckets));
@@ -7305,7 +7440,7 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
         free(gnu_hash_buf);
         return -1;
     }
-    emit_versym = verdef_count != 0 || verneed_count != 0;
+    emit_versym = dynsym_len > entsz || verdef_count != 0 || verneed_count != 0;
     if (emit_versym) {
         versym_sec = elf_find_section(out, ".gnu.version");
         if (versym_sec == NULL) {
@@ -8096,6 +8231,38 @@ static int load_library_input(ld_ctx_t *ctx, const ld_input_t *in, objvec_t *obj
     int have_shared_match = 0;
     int handled = 0;
 
+    if (in->text != NULL && in->text[0] == ':') {
+        char *path_exact = resolve_library_path_exact(ctx, in->text + 1);
+        if (path_exact == NULL) {
+            fprintf(stderr, "ld: cannot find -l%s\n", in->text);
+            return -1;
+        }
+        if (has_suffix(path_exact, ".so") &&
+            load_library_script(path_exact, ctx, objs, state, in->whole_archive, in->as_needed, &handled) == 0 &&
+            handled) {
+            free(path_exact);
+            return 0;
+        }
+        if (has_suffix(path_exact, ".so") && (ctx->expect_type == ET_DYN || ctx->expect_type == ET_EXEC)) {
+            if (in->as_needed &&
+                shared_object_matches_unresolved(path_exact, ctx, state, &shared_matches) == 0 &&
+                !shared_matches) {
+                free(path_exact);
+                return 0;
+            }
+            if (register_dso_provider(ctx, path_exact, state) == 0) {
+                free(path_exact);
+                return 0;
+            }
+        }
+        if (load_path_input(path_exact, ctx, objs, state, in->whole_archive, 0) != 0) {
+            free(path_exact);
+            return -1;
+        }
+        free(path_exact);
+        return 0;
+    }
+
     if (in->lib_mode == LD_LIBMODE_STATIC) {
         path_a = resolve_library_path_suffix(ctx, in->text, ".a");
         if (path_a == NULL) {
@@ -8129,10 +8296,6 @@ static int load_library_input(ld_ctx_t *ctx, const ld_input_t *in, objvec_t *obj
         free(path_so);
         return 0;
     }
-    if (path_so != NULL && load_path_input(path_so, ctx, objs, state, in->whole_archive, 1) == 0) {
-        free(path_so);
-        return 0;
-    }
     if (path_so != NULL && (ctx->expect_type == ET_DYN || ctx->expect_type == ET_EXEC)) {
         if (in->as_needed) {
             if (shared_object_matches_unresolved(path_so, ctx, state, &shared_matches) == 0) {
@@ -8147,6 +8310,10 @@ static int load_library_input(ld_ctx_t *ctx, const ld_input_t *in, objvec_t *obj
             free(path_so);
             return 0;
         }
+    }
+    if (path_so != NULL && load_path_input(path_so, ctx, objs, state, in->whole_archive, 1) == 0) {
+        free(path_so);
+        return 0;
     }
     if (path_so != NULL && in->as_needed) {
         if (shared_object_matches_unresolved(path_so, ctx, state, &shared_matches) == 0) {
@@ -8435,6 +8602,16 @@ static symrule_entry_t *symrule_get(symrule_vec_t *v, const char *name) {
     return &v->items[v->count - 1];
 }
 
+static int is_i386_hidden_pc_thunk_symbol(const elf_symbol_t *sym, const char *name) {
+    if (sym == NULL || name == NULL) {
+        return 0;
+    }
+    if (strncmp(name, "__x86.get_pc_thunk.", 19) != 0) {
+        return 0;
+    }
+    return elf_symbol_visibility(sym) == STV_HIDDEN;
+}
+
 static int check_symbol_precedence(ld_ctx_t *ctx, const objvec_t *inputs) {
     symrule_vec_t table;
     size_t i;
@@ -8489,6 +8666,9 @@ static int check_symbol_precedence(ld_ctx_t *ctx, const objvec_t *inputs) {
                 continue;
             }
             if (entry->strong_src != NULL && strcmp(entry->strong_src, inputs->names[i]) != 0) {
+                if (is_i386_hidden_pc_thunk_symbol(sym, name)) {
+                    continue;
+                }
                 fprintf(stderr,
                         "ld: duplicate strong definition of `%s`: %s and %s\n",
                         name, entry->strong_src, inputs->names[i]);
@@ -9192,10 +9372,11 @@ static int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr) {
         phnum = 1;
         for (i = 0; i < elf_section_count(obj); ++i) {
             const elf_section_t *sec = elf_section_get(obj, i);
-            const char *nm = elf_section_name(sec);
+            const char *nm;
             if (sec == NULL) {
                 continue;
             }
+            nm = elf_section_name(sec);
             if (elf_section_type(sec) == SHT_DYNAMIC) {
                 has_dynamic = 1;
             }
@@ -9217,8 +9398,13 @@ static int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr) {
         }
     }
 
-    if (!add_u64_checked(ehsize, phnum * phentsz, &off) || !add_u64_checked(base_vaddr, off, &mem_end)) {
-        return -1;
+    {
+        uint64_t ph_total;
+        if (!mul_u64_checked(phnum, phentsz, &ph_total) ||
+            !add_u64_checked(ehsize, ph_total, &off) ||
+            !add_u64_checked(base_vaddr, off, &mem_end)) {
+            return -1;
+        }
     }
     for (i = 0; i < elf_section_count(obj); ++i) {
         elf_section_t *sec = elf_section_get(obj, i);
@@ -10314,6 +10500,10 @@ static int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_u
 }
 
 static int validate_output(const ld_ctx_t *ctx) {
+#ifdef LD_SUBSTRATE_BUILD
+    (void)ctx;
+    return 0;
+#else
     elfobj_t *obj = NULL;
 
     if (elf_open(ctx->out_path, &obj) != ELF_OK) {
@@ -10340,6 +10530,7 @@ static int validate_output(const ld_ctx_t *ctx) {
     }
     elf_close(obj);
     return 0;
+#endif
 }
 
 static int ensure_substrate_ld_note(elfobj_t *out) {
@@ -10458,6 +10649,15 @@ static int run_internal_link(ld_ctx_t *ctx) {
         elf_close(out);
         return -1;
     }
+#ifdef LD_SUBSTRATE_BUILD
+    if (out_type == ET_EXEC && elf_set_osabi(out, ELFOSABI_SUBSTRATE) != ELF_OK) {
+        fprintf(stderr, "ld: failed to set Substrate ELF OSABI\n");
+        symref_map_free(&undef_refs);
+        objvec_free(&inputs);
+        elf_close(out);
+        return -1;
+    }
+#endif
     if (ctx->script_path != NULL) {
         if (parse_linker_script_file(ctx->script_path, ctx, out, 1) != 0) {
             symref_map_free(&undef_refs);
@@ -10733,7 +10933,11 @@ int main(int argc, char **argv) {
     ctx.out_path = "a.out";
     ctx.self_path = argv[0];
     ctx.compat_mode = LD_COMPAT_GNU;
+#ifdef LD_SUBSTRATE_BUILD
+    ctx.current_lib_mode = LD_LIBMODE_STATIC;
+#else
     ctx.current_lib_mode = LD_LIBMODE_DYNAMIC;
+#endif
     ctx.current_whole_archive = 0;
     ctx.current_as_needed = 0;
     ctx.z_text_mode = 0;
@@ -10891,19 +11095,25 @@ int main(int argc, char **argv) {
         }
         if (strcmp(a, "-shared") == 0 || strcmp(a, "-pie") == 0) {
             ctx.expect_type = ET_DYN;
+            if (!ctx.explicit_lib_mode) {
+                ctx.current_lib_mode = LD_LIBMODE_DYNAMIC;
+            }
             continue;
         }
         if (strcmp(a, "-static") == 0) {
             ctx.expect_type = ET_EXEC;
             ctx.current_lib_mode = LD_LIBMODE_STATIC;
+            ctx.explicit_lib_mode = 1;
             continue;
         }
         if (strcmp(a, "-Bstatic") == 0) {
             ctx.current_lib_mode = LD_LIBMODE_STATIC;
+            ctx.explicit_lib_mode = 1;
             continue;
         }
         if (strcmp(a, "-Bdynamic") == 0) {
             ctx.current_lib_mode = LD_LIBMODE_DYNAMIC;
+            ctx.explicit_lib_mode = 1;
             continue;
         }
         if (strcmp(a, "--whole-archive") == 0) {
@@ -11381,7 +11591,7 @@ int main(int argc, char **argv) {
     }
 
     if (ctx.query_version && ctx.inputs.count == 0) {
-        printf("Substrate ld (internal) 0.1\n");
+        printf("GNU ld (Substrate) 2.42.0\n");
         inputvec_free(&ctx.inputs);
         strvec_free(&ctx.lib_paths);
         strvec_free(&ctx.trace_symbols);

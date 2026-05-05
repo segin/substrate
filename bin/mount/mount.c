@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
-
-extern int mount(const char *source, const char *target, const char *filesystemtype, unsigned long mountflags, const void *data);
+#include <sys/mount.h>
 
 int main(int argc, char *argv[]) {
     if (argc < 4) {

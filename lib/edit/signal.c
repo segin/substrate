@@ -183,11 +183,14 @@ void el_signal_handle(EditLine *el) {
     if (!el) return;
 
     if (sig_int) {
+        const char *prompt;
+
         sig_int = 0;
         /* Discard current line, print ^C, reset buffer, reprint prompt */
         terminal_puts(el, "^C\r\n");
-        if (el->prompt)
-            terminal_puts(el, el->prompt);
+        prompt = el_current_prompt(el);
+        if (prompt && *prompt)
+            terminal_puts(el, prompt);
         terminal_flush(el);
         el->line.len = 0;
         el->line.cursor = 0;

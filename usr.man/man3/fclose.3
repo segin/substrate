@@ -1,0 +1,85 @@
+.\" fclose.3 - close a stream
+.TH FCLOSE 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+fclose \- close a stream
+.SH LIBRARY
+Standard C library (libc, \-lc)
+.SH SYNOPSIS
+.B #include <stdio.h>
+.PP
+.BI "int fclose(FILE *" stream );
+.SH DESCRIPTION
+The
+.BR fclose ()
+function flushes the stream pointed to by
+.I stream
+(writing any buffered output data using
+.BR fflush (3))
+and closes the underlying file descriptor.
+.PP
+Once a stream has been closed, it is removed from the global list of
+open streams maintained by the C library, the underlying file
+descriptor is released by means of
+.BR close (2),
+any buffer that was allocated by the library on behalf of the stream
+is freed, and the
+.B FILE
+object itself is deallocated.  Any further use of
+.I stream
+results in undefined behaviour.
+.PP
+The behaviour of
+.BR fclose ()
+is undefined if the
+.I stream
+parameter is an invalid pointer or has already been closed; the only
+input that is explicitly handled is a NULL pointer, which is rejected
+as described in RETURN VALUE.
+.SH RETURN VALUE
+Upon successful completion,
+.BR fclose ()
+returns 0.  Otherwise, it returns
+.B EOF
+and may set
+.I errno
+to indicate the error.
+.PP
+In particular,
+.BR fclose ()
+returns
+.B EOF
+without performing any action when
+.I stream
+is a NULL pointer.
+.SH ERRORS
+.TP
+.B EBADF
+The file descriptor underlying
+.I stream
+is not valid.
+.PP
+The
+.BR fclose ()
+function may also fail and set
+.I errno
+for any of the errors specified for the routines
+.BR close (2),
+.BR write (2),
+or
+.BR fflush (3).
+.PP
+Note that the Substrate implementation always returns 0 when a non-NULL
+.I stream
+is supplied, even when the underlying
+.BR close (2)
+or buffer flush fails; portable code should not rely on this and should
+treat any non-zero return as an error.
+.SH SEE ALSO
+.BR close (2),
+.BR fcloseall (3),
+.BR fflush (3),
+.BR fopen (3),
+.BR setbuf (3)
+.SH STANDARDS
+.BR fclose ()
+conforms to C89, C99, C11, and POSIX.1-2008.

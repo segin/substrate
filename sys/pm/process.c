@@ -3,6 +3,7 @@
 #include <sys/fcntl.h>
 #include <sys/file.h>
 #include <sys/lock.h>
+#include <sys/random.h>
 #include <sys/session.h>
 #include <kern/console.h>
 #include <kern/file.h>
@@ -552,11 +553,9 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     // Copy Process Group and Session (inherit from parent)
     mutex_lock(&proctree_lock);
     child_proc->p_pgrp = parent->p_pgrp;
-    child_proc->p_pgrp_link = parent->p_pgrp_link; // Wait, we need to link into the group list properly!
     
     /* 
      * Correctly adding to process group:
-     * We can't just copy the pointer 'p_pgrp_link' - that would corrupt the linked list.
      * We need to add 'child_proc' to the process group's member list.
      */
     if (child_proc->p_pgrp) {
@@ -579,27 +578,54 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     // Copy limits, etc. if implemented
     
     // Create Thread for child
-    // Implementation of this part relies on sched logic (threading).
-    // So PM depends on SCHED for thread creation.
-    
-    // sched_fork_thread logic?
-    // In sched.c it was inlined.
-    // We need sched_create_thread implementation to support "fork" style (copy regs).
-    // Or we just call sched_create_thread with a special entry point?
-    
-    // The previous implementation manually manipulated thread array to copy state.
-    // This implies sched.c should handle the thread part of fork.
-    // Maybe proc_fork should call `sched_fork_thread(child_proc, stack)`?
-    
-    // We'll declare `sched_fork_thread` in sched.h and assume it exists (we'll move it there).
-    extern int sched_fork_thread(process_t *proc, void *stack);
     
     /* 
-     * Link child into parent's list.
+     * Add child to parent's child list BEFORE making it schedulable.
+     * This ensures wait() sees a fully linked child and the child
+     * cannot run before it appears in the process tree.
      */
     proc_add_child(parent, child_proc);
-    
-    return sched_fork_thread(child_proc, stack);
+
+    extern int sched_fork_thread(process_t *proc, void *stack);
+    int fork_result = sched_fork_thread(child_proc, stack);
+    if (fork_result < 0) {
+        proc_remove_child(parent, child_proc);
+
+        if (child_proc->p_pgrp) {
+            pgrp_remove_proc(child_proc);
+        }
+
+        for (int j = 0; j < MAX_FD; j++) {
+            if (child_proc->fds[j]) {
+                child_proc->fds[j]->f_count--;
+                child_proc->fds[j] = NULL;
+            }
+        }
+
+        if (child_proc->cwd_node) {
+            close_fs(child_proc->cwd_node);
+            child_proc->cwd_node = NULL;
+        }
+
+        ldt_free_process(child_proc);
+
+        if (child_proc->vm_map) {
+            vm_map_destroy(child_proc->vm_map);
+            child_proc->vm_map = NULL;
+        }
+        if (child_proc->pmap) {
+            pmap_release(child_proc->pmap);
+            child_proc->pmap = NULL;
+        }
+
+        child_proc->pid = -1;
+        return fork_result;
+    }
+
+    /* Diverge parent/child CSPRNG state immediately after fork */
+    random_reseed_on_fork(fork_result);
+
+    return fork_result;
 }
 
 static void proc_sysvipc_exit(process_t *proc) {
@@ -1059,6 +1085,9 @@ void proc_exit(int code) {
     // 1. Set State
     current_process->state = SDYING;
     current_process->exit_code = code;
+    if ((current_process->p_flag & P_SIGEXIT) == 0) {
+        current_process->p_flag &= (uint16_t)~P_SIGEXIT;
+    }
     
     // 1b. Thread Cleanup (Robust Futexes & Pending Signals)
     extern void futex_thread_exit(thread_t *t);
