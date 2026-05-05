@@ -1,8 +1,10 @@
 #include "../sys/vm/vm_map.h"
+#include "../sys/vm/vm_object.h"
 #include <stdlib.h>
 #include <stddef.h>
 #include <stdbool.h>
 #include <string.h>
+#include <stdio.h>
 
 // Fixed host-side implementation of vm_map.c
 
@@ -28,6 +30,38 @@ void vm_map_init(vm_map_t *map, pmap_t pmap, uintptr_t min, uintptr_t max) {
     sentinel->prev = sentinel;
     sentinel->start = sentinel->end = min;
     map->header = sentinel;
+    map->hint = sentinel;
+    map->root = NULL;
+    map->holes_root = NULL;
+}
+
+vm_map_t *vm_map_create(pmap_t pmap, uintptr_t min, uintptr_t max) {
+    vm_map_t *map = malloc(sizeof(vm_map_t));
+    if (!map) {
+        perror("malloc");
+        abort();
+    }
+    vm_map_init(map, pmap, min, max);
+    return map;
+}
+
+void vm_map_destroy(vm_map_t *map) {
+    if (!map) return;
+
+    vm_map_entry_t *header = map->header;
+    if (header) {
+        vm_map_entry_t *cur = header->next;
+        while (cur != header) {
+            vm_map_entry_t *next = cur->next;
+            if (cur->object) {
+                vm_object_deallocate(cur->object);
+            }
+            free(cur);
+            cur = next;
+        }
+        free(header);
+    }
+    free(map);
 }
 
 void vm_map_destroy(vm_map_t *map) {
@@ -70,8 +104,6 @@ int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset, uintptr
     if (vm_map_lookup_entry(map, start, &prev_entry)) return -1;
     if (prev_entry->next != map->header && prev_entry->next->start < end) return -1;
     vm_map_entry_t *new_entry = alloc_entry();
-    if (!new_entry) return -1;
-    memset(new_entry, 0, sizeof(vm_map_entry_t));
     new_entry->start = start;
     new_entry->end = end;
     new_entry->object = obj;
