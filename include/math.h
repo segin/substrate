@@ -44,6 +44,17 @@ int __isnanl(long double x);
 int __isinff(float x);
 int __isinf(double x);
 int __isinfl(long double x);
+/* C23 — signaling-NaN bit-pattern detection (IEEE 754-2008 §6.2.1:
+ * the most-significant mantissa bit of a NaN is 0 for sNaN, 1 for qNaN).
+ * Any non-NaN returns 0. */
+int __issignalingf(float x);
+int __issignaling(double x);
+int __issignalingl(long double x);
+/* C23 — equality that DOES raise FE_INVALID on a NaN operand
+ * (unlike == which on x87 with FUCOM only raises for sNaN). */
+int __iseqsigf(float x, float y);
+int __iseqsig(double x, double y);
+int __iseqsigl(long double x, long double y);
 
 /* Type-generic classification macros */
 #define fpclassify(x) \
@@ -69,6 +80,64 @@ int __isinfl(long double x);
     ((sizeof(x) == sizeof(float)) ? __signbitf(x) : \
      (sizeof(x) == sizeof(double)) ? __signbit(x) : \
      __signbitl(x))
+
+/*
+ * C99 §7.12.14 — Quiet (non-FE_INVALID-raising) comparison macros.
+ *
+ * Plain </<=/>/>= raise FE_INVALID when either operand is NaN; these
+ * macros must NOT.  GCC/clang provide __builtin_is{less,greater,...}
+ * which lower to the FUCOM / UCOMISS family of instructions on x86 —
+ * those signal "unordered" without raising the IEEE invalid flag.
+ *
+ * Fallbacks are constructed so that a NaN operand short-circuits to
+ * the desired "unordered" answer before any signalling comparison
+ * happens (the bare `<` etc. are only evaluated once we've ruled out
+ * NaN with isunordered).
+ */
+#ifdef __GNUC__
+#define isgreater(x, y)      __builtin_isgreater((x), (y))
+#define isgreaterequal(x, y) __builtin_isgreaterequal((x), (y))
+#define isless(x, y)         __builtin_isless((x), (y))
+#define islessequal(x, y)    __builtin_islessequal((x), (y))
+#define islessgreater(x, y)  __builtin_islessgreater((x), (y))
+#define isunordered(x, y)    __builtin_isunordered((x), (y))
+#else
+#define isunordered(x, y)    (isnan(x) || isnan(y))
+#define isgreater(x, y)      (!isunordered((x), (y)) && (x) >  (y))
+#define isgreaterequal(x, y) (!isunordered((x), (y)) && (x) >= (y))
+#define isless(x, y)         (!isunordered((x), (y)) && (x) <  (y))
+#define islessequal(x, y)    (!isunordered((x), (y)) && (x) <= (y))
+#define islessgreater(x, y)  (!isunordered((x), (y)) && \
+                              ((x) < (y) || (x) > (y)))
+#endif
+
+/*
+ * C23 §7.12.4 additions.
+ *
+ * iseqsig : equality that DOES raise FE_INVALID on a NaN operand.
+ *           Implemented as a real call so the FE_INVALID raise is
+ *           explicit and not dependent on which flavour of x87 compare
+ *           the compiler picks.
+ * issignaling : true iff x is a signaling NaN.
+ * iscanonical : per IEEE 754 binary formats every value is canonical,
+ *               so this is the constant 1 for any non-NaN finite/inf.
+ *               We still evaluate x to provoke any side effects.
+ * issubnormal : convenience for fpclassify(x) == FP_SUBNORMAL.
+ * iszero      : convenience for fpclassify(x) == FP_ZERO.
+ */
+#define issignaling(x) \
+    ((sizeof(x) == sizeof(float)) ? __issignalingf(x) : \
+     (sizeof(x) == sizeof(double)) ? __issignaling(x) : \
+     __issignalingl(x))
+
+#define iseqsig(x, y) \
+    ((sizeof((x) + (y)) == sizeof(float))  ? __iseqsigf((x), (y))  : \
+     (sizeof((x) + (y)) == sizeof(double)) ? __iseqsig((x), (y))   : \
+     __iseqsigl((x), (y)))
+
+#define iscanonical(x) ((void)(x), 1)
+#define issubnormal(x) (fpclassify(x) == FP_SUBNORMAL)
+#define iszero(x)      (fpclassify(x) == FP_ZERO)
 
 /* Basic trigonometric functions */
 double sin(double x);
