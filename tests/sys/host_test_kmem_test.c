@@ -20,6 +20,7 @@ void *kmalloc(int size) {
 void kprint(const char *msg) {
     kprint_called = 1;
     // Don't clutter test output with mock messages
+
 }
 
 #include "../../sys/drivers/devices/kmem_test.c"

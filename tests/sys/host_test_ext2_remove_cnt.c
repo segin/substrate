@@ -55,6 +55,7 @@ bool mutex_is_held(mutex_t *m) { return m->locked != 0; }
 // Mock kprint
 void kprint(const char *str) {
     (void)str;
+
 }
 
 // Mock kmalloc

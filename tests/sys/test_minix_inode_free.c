@@ -65,6 +65,7 @@ int sprintf(char *str, const char *format, ...) {
 // Mock Kernel Functions
 extern int printf(const char *format, ...);
 void kprint(const char *s) {
+
     (void)s;
 }
 
