@@ -14,11 +14,13 @@
 #include <kern/console.h>
 #include <kern/device.h>
 #include <kern/pci.h>
+#include <kern/sched.h>
 #include <sys/audioio.h>
 #include <sys/dma.h>
 #include <sys/errno.h>
 #include <sys/irq.h>
 #include <arch/x86-common/io.h>
+#include <arch/i386/intr.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -85,6 +87,10 @@ typedef struct ac97_dev {
 	size_t          chunk_count;
 	uint8_t         next_idx;     /* next BDL slot to fill */
 	uint8_t         lvi;          /* most recently programmed Last Valid */
+	int             play_wait;    /* sched_sleep channel: write blocks here
+	                               * when the BDL ring is full; IRQ handler
+	                               * wakes us when the controller advances
+	                               * CIV (a slot has finished playing). */
 
 	audio_dev_t     audio;
 } ac97_dev_t;
@@ -110,6 +116,11 @@ static void ac97_mixer_write(ac97_dev_t *d, uint16_t reg, uint16_t val)
 static void ac97_bm_write8(ac97_dev_t *d, uint16_t reg, uint8_t val)
 {
 	outb((uint16_t)(d->nabmbar + reg), val);
+}
+
+static uint8_t ac97_bm_read8(ac97_dev_t *d, uint16_t reg)
+{
+	return inb((uint16_t)(d->nabmbar + reg));
 }
 
 static uint16_t ac97_bm_read16(ac97_dev_t *d, uint16_t reg)
@@ -143,15 +154,13 @@ static int ac97_irq_handler(unsigned int irq, void *dev_id, void *frame)
 	}
 	sr = ac97_bm_read16(d, AC97_BM_PO_BASE + AC97_BM_SR);
 	if (sr & (AC97_SR_BCIS | AC97_SR_LVBCI | AC97_SR_FIFOE)) {
-		/*
-		 * Ack everything by writing the same bits back.  Real
-		 * streaming would advance the BDL ring here; for the
-		 * one-shot path this is enough to keep the controller
-		 * responsive.
-		 */
+		/* Ack the latched status bits.  BCIS = buffer-completion;
+		 * controller has finished a BDL slot and CIV has advanced,
+		 * so a write() blocked on a full ring can now proceed. */
 		ac97_bm_write16(d, AC97_BM_PO_BASE + AC97_BM_SR,
 		                sr & (AC97_SR_BCIS | AC97_SR_LVBCI |
 		                      AC97_SR_FIFOE));
+		sched_wakeup(&d->play_wait);
 	}
 	return 1;
 }
@@ -212,6 +221,30 @@ static int ac97_write(audio_dev_t *adev, const void *buf, size_t len)
 	copy_len = (len > AC97_CHUNK_BYTES) ? AC97_CHUNK_BYTES : len;
 
 	slot = d->next_idx;
+
+	/*
+	 * Wait until the BDL ring has a free slot.  The controller's CIV
+	 * register tracks the slot it's currently playing; we may queue up
+	 * to BDL_ENTRIES-1 ahead before catching up with CIV.  Without
+	 * this, a userspace `cat data.pcm > /dev/audio0` overwrites BDL
+	 * slots before they're played, and only the last few survive —
+	 * sounded like ~100x fast-forward.
+	 *
+	 * IRQ handler wakes &d->play_wait on each BDL completion (BCIS).
+	 * intr_disable around the check + sleep avoids a wake-up race.
+	 */
+	for (;;) {
+		uint32_t flags = intr_disable();
+		uint8_t civ = ac97_bm_read8(d, AC97_BM_PO_BASE + AC97_BM_CIV);
+		uint8_t next = (uint8_t)((slot + 1U) % AC97_BDL_ENTRIES);
+		if (next != civ) {
+			intr_restore(flags);
+			break;
+		}
+		intr_restore(flags);
+		sched_sleep(&d->play_wait);
+	}
+
 	memcpy((uint8_t *)d->chunk_buf + (size_t)slot * AC97_CHUNK_BYTES,
 	       buf, copy_len);
 
