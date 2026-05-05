@@ -290,8 +290,10 @@ main(int argc, char **argv)
     if (fd < 0) die("open %s: %s", device, strerror(errno));
 
     audio_info_t info;
-    if (ioctl(fd, AUDIO_GETINFO, &info) < 0)
+    if (ioctl(fd, AUDIO_GETINFO, &info) < 0) {
+        close(fd);
         die("AUDIO_GETINFO: %s", strerror(errno));
+    }
 
     if (i >= argc) {
         /* no assignments: show current state */
@@ -361,13 +363,17 @@ main(int argc, char **argv)
 
         if (errors) { close(fd); return 1; }
 
-        if (ioctl(fd, AUDIO_SETINFO, &set) < 0)
+        if (ioctl(fd, AUDIO_SETINFO, &set) < 0) {
+            close(fd);
             die("AUDIO_SETINFO: %s", strerror(errno));
+        }
 
         if (!no_print) {
             /* re-read and show updated state */
-            if (ioctl(fd, AUDIO_GETINFO, &info) < 0)
+            if (ioctl(fd, AUDIO_GETINFO, &info) < 0) {
+                close(fd);
                 die("AUDIO_GETINFO: %s", strerror(errno));
+            }
             print_info(&info, all);
         }
     }

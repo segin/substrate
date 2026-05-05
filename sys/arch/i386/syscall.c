@@ -151,6 +151,20 @@ void syscall_handler(registers_t *regs) {
     uint32_t args[8];
     i386_extract_syscall_args(p, regs, args);
 
+    /* DEBUG: track ls's __stack_chk_guard transitions for FreeBSD ls.
+     * Dumps the guard value when it first becomes non-zero. */
+    if (p->id == PERS_FREEBSD) {
+        static uint32_t last_guard = 0xDEADBEEF;
+        uint32_t *guard_ptr = (uint32_t *)0x409e28u;
+        uint32_t cur = *guard_ptr;
+        if (cur != last_guard) {
+            extern int kprintf(const char *fmt, ...);
+            kprintf("[GUARD-CHG] sysno=%u guard@0x409e28: 0x%08x -> 0x%08x eip=0x%08x\n",
+                    syscall_num, last_guard, cur, regs->eip);
+            last_guard = cur;
+        }
+    }
+
     if (syscall_trace_enabled) {
         char buf[512];
         const char *name = (p->syscall_names && syscall_num < p->syscall_count) ? p->syscall_names[syscall_num] : NULL;

@@ -16,6 +16,7 @@
 #include <vfs/vfs.h>
 #include <string.h>
 #include <termios.h>
+#include <drivers/console/console.h>
 
 extern file_t *file_alloc(void);
 extern void file_free(file_t *f);
@@ -501,12 +502,33 @@ int sys_accept4(int s, void *name, int *namelen, int flags) {
 
 ssize_t sys_sendto(int s, const void *buf, size_t len, int flags,
                    const void *to, int tolen) {
-    (void)buf; (void)flags; (void)to; (void)tolen;
+    (void)flags; (void)to; (void)tolen;
     int rc = sock_check_fd(s);
     if (rc < 0) return rc;
     /* Discard the data — no network, no syslog daemon, nothing to
      * write to.  Reporting full-byte success keeps callers (e.g.
-     * libc's syslog client) satisfied. */
+     * libc's syslog client) satisfied.
+     *
+     * If the payload looks like an RFC 3164 syslog message ("<pri>...")
+     * dump it to the kernel log so we can see __stack_chk_fail /
+     * __chk_fail messages from compat libc instead of a silent abort. */
+    if (buf && len > 0 && len < 512) {
+        char first;
+        if (copyin(buf, &first, 1) == 0 && first == '<') {
+            char tmp[256];
+            size_t n = len < sizeof(tmp) - 1 ? len : sizeof(tmp) - 1;
+            if (copyin(buf, tmp, n) == 0) {
+                tmp[n] = '\0';
+                /* Sanitize control characters so the kernel printer
+                 * doesn't reinterpret embedded \r / \033 / etc. */
+                for (size_t i = 0; i < n; i++)
+                    if (tmp[i] < 0x20 || tmp[i] == 0x7f) tmp[i] = ' ';
+                kprint("syslog: ");
+                kprint(tmp);
+                kprint("\n");
+            }
+        }
+    }
     return (ssize_t)len;
 }
 

@@ -911,19 +911,24 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
     }
     
     /*
-     * Reserve 16 bytes at the very top for `struct ps_strings` (NetBSD
-     * convention).  NetBSD's _start (lib/csu/arch/i386/crt0.S) reads
-     * its argv/envp from this struct via %ebx, not from argc-on-stack,
-     * so the kernel must construct it and pass its address.
-     *
-     * Layout:
-     *   ps_strings.ps_argvstr  (uint32 user ptr to argv array)
-     *   ps_strings.ps_nargvstr (int32 argc)
-     *   ps_strings.ps_envstr   (uint32 user ptr to envp array)
-     *   ps_strings.ps_nenvstr  (int32 envc)
+     * Reserve 16 bytes at the very top for `struct ps_strings` —
+     * but ONLY for NetBSD/OpenBSD.  Their _start
+     * (lib/csu/arch/i386/crt0.S) reads its argv/envp from this struct
+     * via %ebx, not from argc-on-stack, so the kernel must construct
+     * it and pass its address.  Linux/FreeBSD don't read here, and
+     * shifting their sp by 16 bytes was triggering a regression in
+     * FreeBSD's __stack_chk_fail path — so leave their layout
+     * untouched (sp = user_stack_top - 4 as before).
      */
-    uint32_t ps_strings_addr = user_stack_top - 16;
-    uint32_t sp = ps_strings_addr - 4; // Start below the ps_strings region
+    int needs_ps_strings = current_process &&
+        (current_process->perso_id == PERS_NETBSD ||
+         current_process->perso_id == PERS_OPENBSD);
+    uint32_t ps_strings_addr = 0;
+    uint32_t sp = user_stack_top - 4;
+    if (needs_ps_strings) {
+        ps_strings_addr = user_stack_top - 16;
+        sp = ps_strings_addr - 4;
+    }
     
     // Helper to write to user stack via kernel mapping
     #define STACK_WRITE32(user_va, val) do { \
@@ -997,6 +1002,13 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
         uint32_t val;
         memcpy(&val, &rand_buf[i * 4], 4);
         STACK_WRITE32(sp + i * 4, val);
+    }
+    if (current_process && current_process->perso_id == PERS_FREEBSD) {
+        extern int kprintf(const char *fmt, ...);
+        kprintf("[AUXV] FBSD canary @0x%08x len=64 first8=%02x%02x%02x%02x%02x%02x%02x%02x\n",
+                rand_ptr,
+                rand_buf[0], rand_buf[1], rand_buf[2], rand_buf[3],
+                rand_buf[4], rand_buf[5], rand_buf[6], rand_buf[7]);
     }
 
     /* Align to 16 before the auxv array. */
@@ -1147,11 +1159,13 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
 
     sp -= 4; STACK_WRITE32(sp, argc);
 
-    /* Populate the ps_strings struct at the reserved top slot. */
-    STACK_WRITE32(ps_strings_addr +  0, argv_arr_user);
-    STACK_WRITE32(ps_strings_addr +  4, (uint32_t)argc);
-    STACK_WRITE32(ps_strings_addr +  8, envp_arr_user);
-    STACK_WRITE32(ps_strings_addr + 12, (uint32_t)envc);
+    /* Populate the ps_strings struct at the reserved top slot, if any. */
+    if (needs_ps_strings) {
+        STACK_WRITE32(ps_strings_addr +  0, argv_arr_user);
+        STACK_WRITE32(ps_strings_addr +  4, (uint32_t)argc);
+        STACK_WRITE32(ps_strings_addr +  8, envp_arr_user);
+        STACK_WRITE32(ps_strings_addr + 12, (uint32_t)envc);
+    }
 
     #undef STACK_WRITE32
     #undef PUSH_STRING

@@ -10,7 +10,7 @@
 
 static uint64_t cp_hash_devino(dev_t dev, ino_t ino)
 {
-    uint64_t x = ((uint64_t)(uint32_t)dev << 32) ^ (uint64_t)ino;
+    uint64_t x = ((uint64_t)dev << 32) ^ (uint64_t)ino;
 
     x ^= x >> 33;
     x *= 0xff51afd7ed558ccdULL;

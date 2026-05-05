@@ -10,7 +10,7 @@
 #include <ctype.h>
 #include <stdarg.h>
 #include <unistd.h>
-#include "../../usr.lib/bc/num.h"
+#include "num.h"
 
 // Configuration
 int opt_s = 0; // POSIX strict mode
@@ -231,14 +231,6 @@ typedef struct var_entry {
 var_entry_t *global_vars = NULL;
 
 var_entry_t *get_global(const char *name) {
-    if (strcmp(name, "scale") == 0) {
-        var_entry_t *v = malloc(sizeof(var_entry_t));
-        v->name = strdup(name);
-        v->val = bc_from_long(bc_scale);
-        v->array = NULL;
-        return v; // Fake variable representation
-        // Actually, we must bind these special vars during evaluation directly.
-    }
     for (var_entry_t *v = global_vars; v; v = v->next) {
         if (strcmp(v->name, name) == 0) return v;
     }
@@ -881,7 +873,9 @@ ast_node_t *parse_statement(void) {
         while (cur_tok != '}') {
             if (n->block.count >= cap) {
                 cap = cap < 8 ? 8 : cap * 2;
-                n->block.stmts = realloc(n->block.stmts, cap * sizeof(ast_node_t*));
+                ast_node_t **tmp = realloc(n->block.stmts, cap * sizeof(ast_node_t*));
+                if (!tmp) { perror("realloc"); exit(1); }
+                n->block.stmts = tmp;
             }
             ast_node_t *stmt = parse_statement();
             if (stmt) n->block.stmts[n->block.count++] = stmt;
@@ -974,7 +968,9 @@ ast_node_t *parse_top_level(void) {
         while (cur_tok != '}') {
             if (n->block.count >= cap) {
                 cap = cap < 8 ? 8 : cap * 2;
-                n->block.stmts = realloc(n->block.stmts, cap * sizeof(ast_node_t*));
+                ast_node_t **tmp = realloc(n->block.stmts, cap * sizeof(ast_node_t*));
+                if (!tmp) { perror("realloc"); exit(1); }
+                n->block.stmts = tmp;
             }
             ast_node_t *stmt = parse_statement();
             if (stmt) n->block.stmts[n->block.count++] = stmt;
@@ -1322,23 +1318,28 @@ bc_num *eval_expr(ast_node_t *n) {
             
             // Bind Params
             expr_list_t *fp = f->ast->func.params;
-            for (int i = 0; i < argc && fp; i++) {
+            int nparams = 0;
+            for (int i = 0; i < argc && fp; i++, nparams++) {
                 local_var_t *l = calloc(1, sizeof(local_var_t));
-                l->name = strdup(fp->expr->id);
+                const char *pname = (fp->expr->type == AST_ARRAY)
+                                    ? fp->expr->arr.name : fp->expr->id;
+                l->name = strdup(pname);
                 l->val = args[i]; // ownership transfer
                 l->next = fr->locals;
                 fr->locals = l;
                 fp = fp->next;
             }
-            // Free remaining args if any (unused)
-            for (int i = (f->ast->func.params ? argc : 0); i < argc; i++) bc_free(args[i]);
+            // Free excess args not consumed by params
+            for (int i = nparams; i < argc; i++) bc_free(args[i]);
             free(args);
             
             // Bind Autos
             expr_list_t *fa = f->ast->func.autos;
             while (fa) {
                 local_var_t *l = calloc(1, sizeof(local_var_t));
-                l->name = strdup(fa->expr->id);
+                const char *aname = (fa->expr->type == AST_ARRAY)
+                                    ? fa->expr->arr.name : fa->expr->id;
+                l->name = strdup(aname);
                 l->val = bc_from_long(0);
                 l->next = fr->locals;
                 fr->locals = l;
